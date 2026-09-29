@@ -53,15 +53,15 @@ if (AURORA_BUILD_TESTS)
     # 跨平台 Python 解释器探测；找不到则不注册（不阻断 C++ 测试）。
     find_program(PYTHON3_EXE NAMES python3 python)
     if (PYTHON3_EXE)
-        set(_check_dir "${CMAKE_SOURCE_DIR}/tools/check")
+        set(_check_dir "${AURORA_SOURCE_DIR}/tools/check")
         # 校验 codespec 模块映射文档中的文件引用是否仍存在于仓库。
         add_test(NAME check_arch_module_map
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_arch_module_map.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 校验 core/（基础层）公共头未反向依赖任何其他 aurora 模块（ARCHITECTURE.md §2）。
         add_test(NAME check_core_layer_boundary
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_core_layer_boundary.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 生成物依赖型门禁：须先构建生成器才能跑（CI 必须排在 build 之后）。
         # ⚠️ Emscripten 交叉构建下不注册：二者要调用**宿主可执行**的生成器，而 wasm 产物的
         #    gen_api_tools 是 .js（须 node 解释），gen_debug_api 同样不是原生 exe。让它们原生
@@ -71,67 +71,67 @@ if (AURORA_BUILD_TESTS)
             # 生成器 aurora_api.json 合并不截断回归（直接调用真实构建产物）。
             add_test(NAME check_gen_api_merge
                     COMMAND ${PYTHON3_EXE} "${_check_dir}/check_gen_api_merge.py" "${CMAKE_BINARY_DIR}"
-                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                    WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
             # aurora_api.json 与代码真实 API 的漂移守护（复用 gen_api_tools 提取，零三方漂移）。
             # 同 check_gen_api_merge 前提：须先构建 gen_api_tools，故 CI 必须排在 build 之后。
             add_test(NAME check_api_schema_sync
                     COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_schema_sync.py" "${CMAKE_BINARY_DIR}"
-                    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                    WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         endif ()
         # codespec 文档内部一致性守护（断链 / 失效锚点 / 章节号 / 反引号路径 / 特性表落点）。
         add_test(NAME check_codespec_xref
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_codespec_xref.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 代码注释 ↔ 文档一致性守护（架构/规格 § 引用 + 测试头部目标单元路径）。
         add_test(NAME check_code_doc_sync
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_code_doc_sync.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 人工测试用例（codespec/manual-test/*.md）解析契约守护：六字段名/顺序/取值域、
         # 编号升序、依赖拓扑可解、预期结果与步骤同号映射、执行记录表列格式与判定一致性。
         add_test(NAME check_manual_test_format
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_manual_test_format.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 版本一致性门禁（CHANGELOG.md 的 currentVersion 必须等于库版本；描述性口径不符仅告警）。
         add_test(NAME check_version_consistency
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_version_consistency.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 公共 API 命名一致性门禁（SPEC.API.NAMING-CONSISTENCY.001）：类型 PascalCase、属性/事件/函数 snake_case、事件 on_ 前缀。
         add_test(NAME check_naming_conventions
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_naming_conventions.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 零原生平台宏门禁（SPEC.PLATFORM.ZERO-IFDEF.001）：include/ src/ 预处理分支禁止 _WIN32/__linux__/__x86_64__ 等
         # 原生宏（platform.h 自身与 _WIN32_WINNT 等 SDK 旋钮豁免）；规范化宏密度仅报告。
         add_test(NAME check_platform_macros
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_platform_macros.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 测试临时文件纪律：tests/ 内禁止绕过 isolation::temp_dir() 的
         # temp_directory_path() / 裸 /tmp / 写 cwd；合法例外须带 TEST_TEMP_EXEMPT 注释。
         add_test(NAME check_test_temp_hygiene
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_test_temp_hygiene.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 公共 API 体量/token 预算门禁（SPEC.PERF.API.TOKEN-EFFICIENCY.001）：aurora_api.json 估算 token 数不得超预算上限。
         add_test(NAME check_api_budget
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_budget.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 禁止写死本机路径门禁（CODING_STANDARDS.md §10.5 第 10 条）：受版控文件不得出现
         # 非系统盘盘符路径 / 用户主目录 / 盘符下的本机特征目录段；外部工具与库的位置一律
         # 由使用者显式传入（-D<选项>=<目录> 或环境变量），自动探测兜底不得含盘符。
         add_test(NAME check_no_hardcoded_paths
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_hardcoded_paths.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # clang-tidy 豁免指令排版门禁（CODING_STANDARDS.md §5.2 规则 1/2）：紧邻式豁免与目标代码
         # 之间不得插入注释行或空行——clang-format 在 120 列折断指令后的理由，会让豁免静默失效；
         # 注释散文里也不得抄 NOLINT 令牌（它会被解析成对下一物理行的全量豁免）。
         add_test(NAME check_nolint_layout
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_nolint_layout.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 伞头（include/aurora/aurora.h）完整性门禁。两层检查：① 文件健康——include 被行尾
         # 注释吞并 / 一行多指令 / 重复 / 路径缺失 / 编码损坏（私用区字符）/ 行结束符混用；
         # ② 覆盖契约——直连集合不得相对基线缩减，且每个 public 头必须「直连 ∨ 从直连集合可达
         # ∨ 显式豁免」，否则强制作者做分类决策。基线见 tools/check/umbrella_manifest.txt。
         add_test(NAME check_umbrella_header
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_umbrella_header.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # Doxygen 注释规范门禁（CODING_STANDARDS.md §13，DOC-R1—DOC-R8）：标记形态（/// 与 ///< 唯一、@ 前缀）、
         # // 与 /// 的归属界限（含「文档块须挂在 template 头之上」）、include/ 公共与已注释 protected 符号的
         # @brief/@param/@return/@tparam 齐全度、@brief 首行与命令行后不得续写散文、 ///< 只挂真实成员且一声明一条、
@@ -139,7 +139,7 @@ if (AURORA_BUILD_TESTS)
         # @group/@binding 不误判。豁免写法 `DOC-EXEMPT: <规则> <原因>`（见 §13.7，当前基线为 0 条豁免）。
         add_test(NAME check_doc_comments
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_doc_comments.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 字面量中文门禁（CODING_STANDARDS.md §14，LIT-1/LIT-2）：include/ src/ examples/ tests/
         # tools/ 的 C++/Python **字符串字面量**、以及 cmake/ 与根 CMakeLists.txt 的引号 /
         # bracket 参数里不得出现中日韩字符——它们经 stdout/stderr、Inspector、CLI、LSP 与配置
@@ -149,7 +149,7 @@ if (AURORA_BUILD_TESTS)
         # 一旦不再命中任何诊断即由 LIT-2 判红灯。门禁自身输出全 ASCII（非 ASCII 转义成 \uXXXX）。
         add_test(NAME check_no_cjk_literals
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_cjk_literals.py"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
     endif ()
 
     # ---- 空源集 guard ----
@@ -187,9 +187,9 @@ if (AURORA_BUILD_TESTS)
                 "${CMAKE_CURRENT_SOURCE_DIR}/examples/app/google_play"
                 "${CMAKE_CURRENT_SOURCE_DIR}/examples/demos")
         target_include_directories(${tgt} PRIVATE
-                "${CMAKE_SOURCE_DIR}/tools/include"
-                "${CMAKE_SOURCE_DIR}/tools/servers"
-                "${CMAKE_SOURCE_DIR}/src"
+                "${AURORA_SOURCE_DIR}/tools/include"
+                "${AURORA_SOURCE_DIR}/tools/servers"
+                "${AURORA_SOURCE_DIR}/src"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/support")
         # 库侧差异，聚合后收敛到 runner 一处：
@@ -256,7 +256,7 @@ if (AURORA_BUILD_TESTS)
                     # out of bounds（栈溢出的 wasm 形态）。native 栈 8MB 无感，仅 wasm 需要显式放大；
                     # 4MB = 实测需求（200KB+）的 8 倍余量，ALLOW_MEMORY_GROWTH 下初始内存足够容纳。
                     -sSTACK_SIZE=4194304
-                    "--post-js=${CMAKE_SOURCE_DIR}/tests/support/wasm_noderawfs_cwd.js")
+                    "--post-js=${AURORA_SOURCE_DIR}/tests/support/wasm_noderawfs_cwd.js")
         endif ()
     endfunction()
 
@@ -325,7 +325,7 @@ if (AURORA_BUILD_TESTS)
     # tools/check/check_test_registry.py（无 python 时不注册，与其他 check_* 门禁一致）。
     # 分片时脚本对各 runner --list 取并集后比对（脚本 --runner 可重复传入）。
     if (PYTHON3_EXE)
-        set(_registry_cmd COMMAND ${PYTHON3_EXE} "${CMAKE_SOURCE_DIR}/tools/check/check_test_registry.py")
+        set(_registry_cmd COMMAND ${PYTHON3_EXE} "${AURORA_SOURCE_DIR}/tools/check/check_test_registry.py")
         # 交叉构建（Emscripten）下 runner 是 .js，不能直接 exec：把 CTest 同款模拟器
         # （Emscripten.cmake 设为 node）显式交给脚本前置到命令行。
         if (EMSCRIPTEN AND CMAKE_CROSSCOMPILING_EMULATOR)
@@ -343,6 +343,6 @@ if (AURORA_BUILD_TESTS)
             list(APPEND _registry_cmd --tests-dir "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e")
         endif ()
         add_test(NAME registry_integrity ${_registry_cmd}
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
     endif ()
 endif ()

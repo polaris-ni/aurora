@@ -22,7 +22,7 @@ function(aurora_add_tool _name _src)
     #（api_json_merge.h / api_schema.h / code_style.h / command_listing.h / json_file.h /
     #  known_enums.h / lsp_document.h / lsp_features.h / lsp_schema.h / toml_lines.h），
     # 统一注入避免逐个目标手写。
-    target_include_directories(${_name} PRIVATE "${CMAKE_SOURCE_DIR}/tools/include")
+    target_include_directories(${_name} PRIVATE "${AURORA_SOURCE_DIR}/tools/include")
 endfunction()
 
 # 自研 JSON 容器实现 + 其 UTF-8 依赖的独立静态库：供「不链接 aurora」的宿主生成器
@@ -35,7 +35,7 @@ add_library(aurora_json STATIC
         src/aurora/core/json/dump.cpp
         src/aurora/core/json/pointer.cpp
         src/aurora/core/utf8.cpp)
-target_include_directories(aurora_json PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(aurora_json PUBLIC ${AURORA_SOURCE_DIR}/include)
 set_target_properties(aurora_json PROPERTIES CXX_STANDARD 20)
 
 # 错误码生成器：解析 codespec/errors.toml -> error_codes.gen.h / ERROR_CATALOG.md /
@@ -45,7 +45,7 @@ add_executable(gen_error_codes tools/gen/gen_error_codes.cpp)
 target_link_libraries(gen_error_codes PRIVATE aurora_json)
 target_include_directories(gen_error_codes PRIVATE
         # toml_lines.h / api_json_merge.h 为「零 aurora 链接依赖」共享头，供本生成器复用。
-        ${CMAKE_SOURCE_DIR}/tools/include)
+        ${AURORA_SOURCE_DIR}/tools/include)
 set_target_properties(gen_error_codes PROPERTIES CXX_STANDARD 20)
 # 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。
 # 仅 MinGW 生效：clang-cl / MSVC 模式无 winpthread.lib，命中即链接失败。
@@ -89,7 +89,7 @@ if (EMSCRIPTEN)
     execute_process(
             COMMAND ${CMAKE_COMMAND} -E env CC= CXX=
                     ${CMAKE_COMMAND}
-                    -S "${CMAKE_SOURCE_DIR}"
+                    -S "${AURORA_SOURCE_DIR}"
                     -B "${AURORA_NATIVE_TOOLS_DIR}"
                     # ⚠️ 参数值内不得嵌字面引号：CMake 仅剥离「整体包裹」的引号，
                     # `-DVAR="v"` 会把引号原样写进子进程 cache（曾致导出文件名拼成
@@ -125,10 +125,8 @@ endif ()
 # 本仓 `.clang-format` 的枚举取值（`BinPackParameters: BinPack`；门槛是迁移后的较新 patch 构建，
 # 不是主版本号 ≥ 20，实测见 cmake/AuroraUtils.cmake 的探针注释），会
 # `error: invalid boolean` + 退出码 1，把**依赖该生成物的每一个作业**（native / wasm / 各 toggles /
-# install / coverage / asan）一起拖红——2026-09-23 CI run 35839746160 实测即是此形：Windows / macOS /
-# 装了 clang-format-22 的 format 作业全绿，其余 ubuntu 与 Emscripten 作业全红，且都红在这一条上。
-# 判不到可用版本时**告警跳过而不中断构建**：仓库内已提交的 gen.h 本就是格式化后的形态，
-# 缺工具只是「本次生成未折行」，format 门禁会抓到真漂移，不该由它决定编译成败。
+# install / coverage / asan）一起拖红。判不到可用版本时**告警跳过而不中断构建**：仓库内已提交的 gen.h
+# 本就是格式化后的形态，缺工具只是「本次生成未折行」，format 门禁会抓到真漂移，不该由它决定编译成败。
 aurora_find_clang_format(_gen_error_codes_cf)
 set(_gen_error_codes_fmt_cmds "")
 if (_gen_error_codes_cf)
@@ -158,23 +156,23 @@ add_custom_command(
         # 的依赖环而直接报 build.ninja: dependency cycle（任何令 gen_error_codes.exe 重链/重编的改动都会触发，
         # 例如改动 aurora_json 源）。故生成物先落 build 暂存区（见上方 copy_if_different 注释），源码树内的
         # gen.h 仅在内容真变时被更新。
-        OUTPUT ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
+        OUTPUT ${AURORA_SOURCE_DIR}/codespec/ERROR_CATALOG.md
         COMMAND "${_gen_error_codes_exe}"
-        "${CMAKE_SOURCE_DIR}/codespec/errors.toml"
+        "${AURORA_SOURCE_DIR}/codespec/errors.toml"
         "${_gen_error_codes_stage}/error_codes.gen.h"
-        "${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md"
-        "${CMAKE_SOURCE_DIR}/aurora_api.json"
+        "${AURORA_SOURCE_DIR}/codespec/ERROR_CATALOG.md"
+        "${AURORA_SOURCE_DIR}/aurora_api.json"
         ${_gen_error_codes_fmt_cmds}
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${_gen_error_codes_stage}/error_codes.gen.h"
-                "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
-        DEPENDS "${_gen_error_codes_exe}" ${CMAKE_SOURCE_DIR}/codespec/errors.toml
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                "${AURORA_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
+        DEPENDS "${_gen_error_codes_exe}" ${AURORA_SOURCE_DIR}/codespec/errors.toml
+        WORKING_DIRECTORY "${AURORA_SOURCE_DIR}"
         COMMENT "Regenerating error_codes.gen.h / ERROR_CATALOG.md / aurora_api.json from errors.toml"
         VERBATIM)
 add_custom_target(generate_error_codes DEPENDS
-        ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
-        ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md)
+        ${AURORA_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
+        ${AURORA_SOURCE_DIR}/codespec/ERROR_CATALOG.md)
 if (EMSCRIPTEN)
     # 生成命令依赖原生 exe：先于 custom command 构建子项目产物。
     add_dependencies(generate_error_codes native_gen_tools)
@@ -191,9 +189,9 @@ aurora_add_tool(gen_api_tools tools/gen/gen_api.cpp)
 # error_codes 段由 gen_api_tools 的链接依赖 aurora 触发 generate_error_codes 先行并入。
 # 运行：cmake --build build --target aurora_api_json
 add_custom_target(aurora_api_json
-        COMMAND gen_api_tools "${CMAKE_SOURCE_DIR}/aurora_api.json"
-        COMMAND gen_debug_api "${CMAKE_SOURCE_DIR}/codespec/debug_api.toml" "${CMAKE_SOURCE_DIR}/aurora_api.json"
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMAND gen_api_tools "${AURORA_SOURCE_DIR}/aurora_api.json"
+        COMMAND gen_debug_api "${AURORA_SOURCE_DIR}/codespec/debug_api.toml" "${AURORA_SOURCE_DIR}/aurora_api.json"
+        WORKING_DIRECTORY "${AURORA_SOURCE_DIR}"
         COMMENT "Regenerating aurora_api.json from current public API (gen_api_tools) and merging debug section (gen_debug_api)"
         VERBATIM)
 add_dependencies(aurora_api_json gen_api_tools gen_debug_api)
@@ -204,7 +202,7 @@ add_dependencies(aurora_api_json gen_api_tools gen_debug_api)
 add_executable(gen_debug_api tools/gen/gen_debug_api.cpp)
 target_link_libraries(gen_debug_api PRIVATE aurora_json)
 target_include_directories(gen_debug_api PRIVATE
-        ${CMAKE_SOURCE_DIR}/tools/include)
+        ${AURORA_SOURCE_DIR}/tools/include)
 set_target_properties(gen_debug_api PROPERTIES CXX_STANDARD 20)
 # 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。
 # 仅 MinGW 生效：clang-cl / MSVC 模式无 winpthread.lib，命中即链接失败。
@@ -214,8 +212,8 @@ if (MINGW)
             -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
 endif ()
 add_custom_target(gen_debug_api_json
-        COMMAND gen_debug_api "${CMAKE_SOURCE_DIR}/codespec/debug_api.toml" "${CMAKE_SOURCE_DIR}/aurora_api.json"
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMAND gen_debug_api "${AURORA_SOURCE_DIR}/codespec/debug_api.toml" "${AURORA_SOURCE_DIR}/aurora_api.json"
+        WORKING_DIRECTORY "${AURORA_SOURCE_DIR}"
         COMMENT "Regenerating aurora_api.json 'debug' section from debug_api.toml (gen_debug_api)"
         VERBATIM)
 add_dependencies(gen_debug_api_json gen_debug_api)
@@ -245,7 +243,7 @@ aurora_add_tool(aurora_lsp tools/servers/aurora_lsp.cpp)
 if (NOT EMSCRIPTEN)
     aurora_add_tool(aurora_e2e_client tools/e2e/e2e_client.cpp)
     # 能力层 include "inspector_client.h"（tools/servers/，aurora_add_tool 未注入该路径）。
-    target_include_directories(aurora_e2e_client PRIVATE "${CMAKE_SOURCE_DIR}/tools/servers")
+    target_include_directories(aurora_e2e_client PRIVATE "${AURORA_SOURCE_DIR}/tools/servers")
     # 传输层直调 Winsock（inspector_client.h），与 aurora_mcp 同款：客户端只需要 socket 库，
     # 不依赖 AURORA_BUILD_INSPECTOR_SERVER（应用侧是否起 InspectorServer 由应用自己 opt-in）。
     if (WIN32)
@@ -265,7 +263,7 @@ aurora_add_tool(bench_render tools/bench/bench_render.cpp)
 # 需要 examples/app/google_play 的头（google_play_ui.h）——基线口径规定打在真实业务树上而非合成树；
 # 该头 header-only 且随仓库分发，不引入额外构建依赖。
 aurora_add_tool(bench_scroll tools/bench/bench_scroll.cpp)
-target_include_directories(bench_scroll PRIVATE "${CMAKE_SOURCE_DIR}/examples/app/google_play")
+target_include_directories(bench_scroll PRIVATE "${AURORA_SOURCE_DIR}/examples/app/google_play")
 
 # Win32 上屏诊断基准：拆分拖选帧的 paint / GDI blit 成本（非 CTest；无 Win32 后端时直接跳过）。
 aurora_add_tool(bench_win32_present tools/bench/bench_win32_present.cpp)
@@ -278,7 +276,7 @@ aurora_add_tool(bench_idle_cpu tools/bench/bench_idle_cpu.cpp)
 # CPU/分配计数对比（非 CTest）。fake GL 驱动桩与 utest_gpu_gl_rhi 共用
 # tests/support/fake_gl.h（全量 GLFn 桩 + 确定性计数器），无需真实 GL 上下文。
 aurora_add_tool(bench_gpu tools/bench/bench_gpu.cpp)
-target_include_directories(bench_gpu PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+target_include_directories(bench_gpu PRIVATE "${AURORA_SOURCE_DIR}/tests")
 
 # 本机时间类门槛校验（check_perf_gates.ps1）：门槛已外置为 tools/check/perf_gates.json。
 # 仅 Windows 有 bench 上屏基准可执行；pwsh 缺失时跳过（不阻断构建/CI）。
@@ -288,8 +286,8 @@ if (WIN32)
     if (PWSH_EXE)
         add_custom_target(perf_gates
                 COMMAND ${PWSH_EXE}
-                        "${CMAKE_SOURCE_DIR}/tools/check/check_perf_gates.ps1"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                        "${AURORA_SOURCE_DIR}/tools/check/check_perf_gates.ps1"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}"
                 COMMENT "Local timing thresholds check (not in CI, local trend comparison only)"
                 VERBATIM)
     endif ()
@@ -333,10 +331,10 @@ if (AURORA_BUILD_DOCS)
     else ()
         find_program(_aurora_doxygen NAMES doxygen doxygen.exe)
     endif ()
-    if (_aurora_doxygen AND EXISTS "${CMAKE_SOURCE_DIR}/Doxyfile")
+    if (_aurora_doxygen AND EXISTS "${AURORA_SOURCE_DIR}/Doxyfile")
         add_custom_target(docs
-                COMMAND "${_aurora_doxygen}" -s "${CMAKE_SOURCE_DIR}/Doxyfile"
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                COMMAND "${_aurora_doxygen}" -s "${AURORA_SOURCE_DIR}/Doxyfile"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}"
                 COMMENT "Generate the API doc site (Doxygen; warnings fail, output in build/docs/)"
                 EXCLUDE_FROM_ALL
                 VERBATIM)

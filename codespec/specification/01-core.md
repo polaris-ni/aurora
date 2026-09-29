@@ -580,7 +580,7 @@ auto dump_into(const Value &v, std::string &out, DumpOptions opts = {}) -> Resul
 
 `widget/` 层的序列化接口（`to_json` / `from_json` / `diff` / `apply_patch` 等）以 `Json` 别名作为
 值类型，该别名即 `aurora::json::Value`（定义于 `widget/props_io.h` 与 `widget/yaml.h`，见
-[`08-tooling.md`](08-tooling.md) §2.1）。历史上由第三方单头 JSON 库承载，2026-09 已全量收敛至本
+[`08-tooling.md`](08-tooling.md) §2.1）。历史上由第三方单头 JSON 库承载，已全量收敛至本
 模块：库内、工具、测试改写完毕，第三方单头与迁移期对拍脚手架均已删除。
 
 本模块的覆盖用例分三处（套件名恒等于文件 stem）：`tests/unit/utest_json.cpp`——语法合规矩阵、

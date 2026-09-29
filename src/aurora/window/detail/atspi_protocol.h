@@ -5,7 +5,7 @@
 // `title_bar_painter` 同列「先纯后桥」纪律：全部折算逻辑无头可单测（Windows CI 亦覆盖），
 // D-Bus 编解码只剩机械粘合（`atspi_bridge.cpp`）。
 //
-// 协议事实来源（2026-09-20 逐字核对上游 at-spi2-core main @ 2.60 线，WSL 网络直取）：
+// 协议事实来源（逐字核对上游 at-spi2-core main @ 2.60 线，WSL 网络直取）：
 //  * 角色/状态**序号**：`atspi/atspi-constants.h` 两个枚举逐行数到（无显式赋值，唯二例外
 //    `ATSPI_ROLE_PUSH_BUTTON = ATSPI_ROLE_BUTTON(43)` 别名与 `ATSPI_STATE_DEFAULT` 别名）。
 //    数值只追加不改序（`*_LAST_DEFINED` + G_STATIC_ASSERT 守门），故 0..LAST 全段稳定。

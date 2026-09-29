@@ -13,10 +13,10 @@
 # ============================================================
 
 execute_process(
-        COMMAND "${PYTHON3_EXE}" "${CMAKE_SOURCE_DIR}/tools/check/check_test_registry.py"
+        COMMAND "${PYTHON3_EXE}" "${AURORA_SOURCE_DIR}/tools/check/check_test_registry.py"
         --runner "${RUNNER}"
-        --tests-dir "${CMAKE_SOURCE_DIR}/tests/unit"
-        --tests-dir "${CMAKE_SOURCE_DIR}/tests/integration"
+        --tests-dir "${AURORA_SOURCE_DIR}/tests/unit"
+        --tests-dir "${AURORA_SOURCE_DIR}/tests/integration"
         RESULT_VARIABLE _rc)
 if (NOT _rc EQUAL 0)
     message(FATAL_ERROR "test registry case-level mismatch: see [FAIL] lines above")

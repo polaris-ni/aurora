@@ -9,18 +9,13 @@
 #      The two were long kept in sync manually and sometimes CHANGELOG led or
 #      lagged the library version; if they mismatch, version numbers copied
 #      elsewhere at release (CLI/README/docs) would be based on the wrong baseline.
-#   2) [non-blocking] CHANGELOG.md body prose (e.g. the "NNN standalone executable
-#      tests" style wording in historical entries), if it disagrees with the count
-#      actually measured in the repo, only warns, does not error (descriptive text
-#      naturally goes stale with refactors and should not block CI).
 #
-# Exit code: 1 only when item 1 mismatches; otherwise 0.
+# Exit code: 1 only when the version mismatches; otherwise 0.
 #
 # Usage:
 #   python3 tools/check/check_version_consistency.py [--root <aurora_root>]
 # ============================================================================
 import argparse
-import glob
 import os
 import re
 import sys
@@ -30,8 +25,6 @@ import sys
 #   currentVersion: 1.0.0-alpha.9
 #   -->
 META_CURRENT_VERSION_RE = re.compile(r"^currentVersion:\s*(\S+)", re.MULTILINE)
-# Non-blocking descriptive check: wording like "188 standalone executable tests".
-PROSE_TESTS_RE = re.compile(r"(\d+)\s*个独立可执行测试")
 
 
 def repo_root_of(path):
@@ -81,10 +74,6 @@ def read_library_version(include_root):
     return ver
 
 
-def count_test_sources(root):
-    return len(glob.glob(os.path.join(root, "tests", "*.cpp")))
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=None, help="Aurora repo root (default: two levels above this script)")
@@ -94,7 +83,7 @@ def main():
     include_root = os.path.join(root, "include")
     changelog = os.path.join(root, "CHANGELOG.md")
 
-    # ---- Item 1: blocking version consistency ----
+    # ---- blocking version consistency ----
     lib_ver = read_library_version(include_root)
     if lib_ver is None:
         print(f"[ERR] cannot read library version: {include_root}/aurora/core/version.h", file=sys.stderr)
@@ -118,21 +107,7 @@ def main():
             f"[FAIL] version mismatch: CHANGELOG.currentVersion={current} but library AURORA_VERSION_STRING={lib_ver}")
         return 1
 
-    # ---- Item 2: non-blocking wording warning ----
-    warnings = []
-    for mm in PROSE_TESTS_RE.finditer(changelog_text):
-        stated = int(mm.group(1))
-        actual = count_test_sources(root)
-        if stated != actual:
-            warnings.append(
-                f"CHANGELOG.md states \"{stated} standalone executable tests\", but tests/*.cpp actually has {actual}"
-            )
-
     print(f"[PASS] versions match: currentVersion={current} == library {lib_ver}")
-    if warnings:
-        for w in warnings:
-            print(
-                f"[WARN] {w} (non-blocking: descriptive text naturally goes stale with refactors; sync when convenient)")
     return 0
 
 

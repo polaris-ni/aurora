@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # ============================================================================
-# check_test_temp_hygiene.py - test temp-file discipline gate (C4)
+# check_test_temp_hygiene.py - test temp-file discipline gate
 # ----------------------------------------------------------------------------
-# Spec: codespec/CODING_STANDARDS.md §3.4 (C4, 2026-09-11 定论)
+# Spec: codespec/CODING_STANDARDS.md §3.4
 #   "所有测试产生的临时文件一律走 aurora::testing::isolation::temp_dir()，
 #    禁止自行调用 temp_directory_path()、裸写 /tmp、或往 cwd 写文件。"
 #

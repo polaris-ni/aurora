@@ -233,7 +233,7 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 
 **系统重绘处理**：窗口类背景刷 `wc.hbrBackground` 用浅灰实心刷 `RGB(245,245,247)`（而非默认黑色擦除）；`wnd_proc` 处理 `WM_PAINT`，在系统要求重绘时立即 `present()` 当前已就绪帧缓冲。
 
-**最大化白闪处理**：`Surface` 提供 `set_present_request` 回调通道（默认空实现），`Window` 构造时把该回调接为「对当前缓存根再渲染一帧」；`Win32Surface` 的 `WM_SIZE` / `WM_PAINT` 在几何变化当下同步调用该回调，使离屏缓冲在 DWM 合成前已为新尺寸真实内容。浅灰刷保留作兜底。`present_count()` 观测器供测试验证「WM_SIZE 触发了同步重渲染」，**与 `Surface::frame_count()` 无关**：后者是「已呈现帧数」，`Win32Surface::present()` 每真正上屏一帧自增一次（帧循环出帧计入，几何未变也计入），由 `itest_win32_present` 锁死两个计数器的独立性（逐帧 `present()` 使 `frame_count()` +1 而 `present_count()` 不动）。此口径曾出错：`frame_count()` 一度直接转发宿主的同步重渲染计数，导致持续出帧的窗口恒报 0（2026-09-24 修复）。
+**最大化白闪处理**：`Surface` 提供 `set_present_request` 回调通道（默认空实现），`Window` 构造时把该回调接为「对当前缓存根再渲染一帧」；`Win32Surface` 的 `WM_SIZE` / `WM_PAINT` 在几何变化当下同步调用该回调，使离屏缓冲在 DWM 合成前已为新尺寸真实内容。浅灰刷保留作兜底。`present_count()` 观测器供测试验证「WM_SIZE 触发了同步重渲染」，**与 `Surface::frame_count()` 无关**：后者是「已呈现帧数」，`Win32Surface::present()` 每真正上屏一帧自增一次（帧循环出帧计入，几何未变也计入），由 `itest_win32_present` 锁死两个计数器的独立性（逐帧 `present()` 使 `frame_count()` +1 而 `present_count()` 不动）。此口径曾出错：`frame_count()` 一度直接转发宿主的同步重渲染计数，导致持续出帧的窗口恒报 0。
 
 **系统重绘 × GPU 帧路径**（`Window::evaluate_dirty_plan` 的 `system_redraw_` 分支）：该请求落在「无脏、无布局脏、尺寸未变」的 idle 判定时，软件后端只需全量 blit 兜底（`set_present_dirty({})` → `present()`，GPU 无关）；但 **GPU 栅格生效期间** `present()` 上屏的是 `Painter` 软件缓冲，而该缓冲在 GPU 模式下只铺底色、从不含控件像素——裸 `present()` 等于闪一屏空白（白闪缺陷的真因）。故此时改为 `dirty_.mark_all()` 落回正常渲染决策，走完整的「重录帧 DL → `replay` → `sink.end_frame`」；`is_full` 已保证无裁剪、全量上屏。已永久回退（`gpu_fallback_`）的后端维持裸 `present()` 兜底。观测签名：各 wgpu 宿主的 `software_present_count()` 在 GPU 生效期间恒 0（`utest_window` 两例分别锁「GPU 生效时重渲染而非裸 present」与「回退后维持裸 blit」）。
 
@@ -721,7 +721,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 **门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Host` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`（GLFW：Windows 经原生 HWND 走 PrintWindow 含非客户区；X11/Wayland/Mac 走 GL 帧缓冲读回——软件路径先重放上一帧再 `glReadPixels`，GPU 路径经 `GpuGlRhi::read_pixels`，得客户区 framebuffer 尺寸画面，须在某次 present 之后调用）；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
 
-`Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询），**基类默认返回 `nullptr`**；真实窗口后端必须覆写为宿主原生句柄——Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用同一 `Win32Host` 宿主）**均**覆写为 `hwnd()`。上表 `surface_state()` 的 `has_native_window` 即由它非空判定，漏覆写会让真实窗口后端**恒报 false**（`D3D11Surface` 曾如此，2026-09-13 补齐），故由 `utest_native_surfaces` 的 `windows_family_native_handle_contract` 类型级守门。
+`Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询），**基类默认返回 `nullptr`**；真实窗口后端必须覆写为宿主原生句柄——Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用同一 `Win32Host` 宿主）**均**覆写为 `hwnd()`。上表 `surface_state()` 的 `has_native_window` 即由它非空判定，漏覆写会让真实窗口后端**恒报 false**，故由 `utest_native_surfaces` 的 `windows_family_native_handle_contract` 类型级守门。
 
 ### 11.1 可视化调试叠层
 

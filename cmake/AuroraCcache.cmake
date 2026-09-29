@@ -70,7 +70,7 @@ if (AURORA_ENABLE_CCACHE)
             #   COMPRESS/LEVEL —— 缓存产物压缩存储；注意 hardlink 与压缩互斥，故不启用。
             set(_aurora_ccache_env
                     "CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime"
-                    "CCACHE_BASEDIR=${CMAKE_SOURCE_DIR}"
+                    "CCACHE_BASEDIR=${AURORA_SOURCE_DIR}"
                     "CCACHE_NOHASHDIR=1"
                     "CCACHE_COMPRESS=1"
                     "CCACHE_COMPRESSLEVEL=6")

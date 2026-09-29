@@ -6,7 +6,7 @@
 // `ime_composition` / `title_bar_painter` 同列「先纯后桥」纪律：全部折算逻辑无头可
 // 单测（Windows CI 亦覆盖），`wasm_aria.cpp` 只剩 JSON 落 DOM 的机械粘合。
 //
-// 规范事实来源（W3C WAI-ARIA 1.1/1.2，2026-09-21 逐名核对）：
+// 规范事实来源（W3C WAI-ARIA 1.1/1.2，逐名核对）：
 //  * role 名：ARIA 1.2「Roles Definition」列表名（小写连字符）——本文档用到的每个
 //    role 均为其成员：button / checkbox / switch / slider / textbox / img / list /
 //    listitem / heading / progressbar / dialog / generic / text。

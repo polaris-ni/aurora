@@ -88,9 +88,9 @@ if (AURORA_ENABLE_COVERAGE)
                 COMMAND ${CMAKE_COMMAND} -E env "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/profraw/aurora-%p.profraw"
                 ${CMAKE_CTEST_COMMAND} --output-on-failure -LE e2e
                 COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-                -File "${CMAKE_SOURCE_DIR}/tools/coverage/coverage_report_llvm.ps1"
+                -File "${AURORA_SOURCE_DIR}/tools/coverage/coverage_report_llvm.ps1"
                 -BuildDir "${CMAKE_BINARY_DIR}"
-                -SrcRoot "${CMAKE_SOURCE_DIR}"
+                -SrcRoot "${AURORA_SOURCE_DIR}"
                 -LlvmBin "${_aurora_llvm_bin}"
                 WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
                 COMMENT "Running ctest then aggregating llvm-cov line coverage (terminal summary, no HTML)")
@@ -99,15 +99,15 @@ if (AURORA_ENABLE_COVERAGE)
             add_custom_target(coverage
                     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -LE e2e
                     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-                    -File "${CMAKE_SOURCE_DIR}/tools/coverage/coverage_report.ps1"
+                    -File "${AURORA_SOURCE_DIR}/tools/coverage/coverage_report.ps1"
                     -BuildDir "${CMAKE_BINARY_DIR}"
-                    -SrcRoot "${CMAKE_SOURCE_DIR}"
+                    -SrcRoot "${AURORA_SOURCE_DIR}"
                     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
                     COMMENT "Running ctest then aggregating gcov line coverage (terminal summary, no HTML)")
         else ()
             add_custom_target(coverage
                     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -LE e2e
-                    COMMAND bash "${CMAKE_SOURCE_DIR}/tools/coverage/coverage_report.sh"
+                    COMMAND bash "${AURORA_SOURCE_DIR}/tools/coverage/coverage_report.sh"
                     "${CMAKE_BINARY_DIR}"
                     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
                     COMMENT "Running ctest then aggregating gcov line coverage via coverage_report.sh (terminal summary, no HTML)")

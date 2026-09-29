@@ -25,7 +25,7 @@ if (AURORA_ENABLE_IMAGE_JPEG)
     # PRIVATE 注入且不导出：编解码能力属库内部，消费者与安装后口径一致（无该宏）。
     aurora_define_feature(AURORA_ENABLE_IMAGE_JPEG SCOPE PRIVATE)
 
-    set(_JPEG_SRC ${CMAKE_SOURCE_DIR}/third_party/libjpeg-turbo)
+    set(_JPEG_SRC ${AURORA_SOURCE_DIR}/third_party/libjpeg-turbo)
     # jpeg_turbo_codec.cpp 以 <jpeglib.h> 引用 libjpeg-turbo 头，需要把其 src 目录
     # 加入 aurora 目标的私有 include 路径（jconfig.h/jconfigint.h/jversion.h 由上方
     # configure_file 生成到 gen/jpeg，同样需加入）。
@@ -125,7 +125,7 @@ endif ()
 if (AURORA_ENABLE_IMAGE_WEBP)
     # PRIVATE 注入且不导出：编解码能力属库内部，消费者与安装后口径一致（无该宏）。
     aurora_define_feature(AURORA_ENABLE_IMAGE_WEBP SCOPE PRIVATE)
-    set(_WEBP_SRC ${CMAKE_SOURCE_DIR}/third_party/libwebp)
+    set(_WEBP_SRC ${AURORA_SOURCE_DIR}/third_party/libwebp)
     file(GLOB_RECURSE _WEBP_C ${_WEBP_SRC}/src/*.c)
     # libwebp's enc layer references the SharpYUV RGB->YUV helpers unconditionally
     # (SharpYuvInit / SharpYuvConvert / SharpYuvGetConversionMatrix). Those live in
@@ -161,7 +161,7 @@ endif ()
 if (AURORA_ENABLE_IMAGE_PNG)
     # PRIVATE 注入且不导出：编解码能力属库内部，消费者与安装后口径一致（无该宏）。
     aurora_define_feature(AURORA_ENABLE_IMAGE_PNG SCOPE PRIVATE)
-    set(_WUFFS_C ${CMAKE_SOURCE_DIR}/third_party/wuffs/release/c/wuffs-v0.3.c)
+    set(_WUFFS_C ${AURORA_SOURCE_DIR}/third_party/wuffs/release/c/wuffs-v0.3.c)
     add_library(aurora_wuffs OBJECT ${_WUFFS_C})
     set_source_files_properties(${_WUFFS_C} PROPERTIES LANGUAGE C)
     target_compile_definitions(aurora_wuffs PRIVATE WUFFS_IMPLEMENTATION)
@@ -171,7 +171,7 @@ if (AURORA_ENABLE_IMAGE_PNG)
     else ()
         target_compile_options(aurora_wuffs PRIVATE -std=c99 -w)
     endif ()
-    target_include_directories(aurora_wuffs PRIVATE ${CMAKE_SOURCE_DIR}/third_party/wuffs/release/c)
-    target_include_directories(aurora PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
+    target_include_directories(aurora_wuffs PRIVATE ${AURORA_SOURCE_DIR}/third_party/wuffs/release/c)
+    target_include_directories(aurora PRIVATE ${AURORA_SOURCE_DIR}/third_party)
     target_link_libraries(aurora PRIVATE aurora_wuffs)
 endif ()

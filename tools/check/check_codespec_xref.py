@@ -15,8 +15,6 @@
 #   - 外链（http/https/mailto）、页内锚点（#xxx）、纯锚点不校验；
 #   - 明显占位符（含 < > * {} 或以 example/foo/placeholder 命名）不校验。
 #
-# 白名单：首版内置存量豁免（见 WHITELIST，逐项注明原因），**只拦增量**。
-#
 # Usage:
 #   python tools/check/check_codespec_xref.py [repo_root]
 # ============================================================================
@@ -38,43 +36,6 @@ except (AttributeError, ValueError, OSError):
 # ---- 需求 ID 结构：SPEC.<类目>.<域>[.<子域>…]<短名>.<数字尾> ----------------
 # 数字尾恒为三位序号（001 起，前缀完全相同时才递增）；至少 4 个点分段（SPEC + 两个中间段 + 数字尾）。
 SPEC_ID_FULL_RE = re.compile(r"^SPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{3}$")
-
-# ---- 白名单：存量豁免，逐项注明原因；新规则只拦增量 -------------------------
-WHITELIST = {
-    # (rule, file_rel, detail) -> reason
-    #
-    # ⚠️ 以下为「测试体系重写」期间豁免（2026-09-08 起）：「破旧」阶段删除了全部旧测试代码、
-    # 旧框架头（tests/aurora_test_harness.h、tests/aurora_test_main.cpp、
-    # tests/test_default_construct.h）并把 include/aurora/test_helpers.h 迁入 tests/support/，
-    # codespec 中对这些路径的引用随之失效。
-    # 相关章节（测试原语、测试框架用法）须随新框架一并重写——现在打补丁会留下半吊子描述，
-    # 故集中豁免；「守门」/「收束」阶段随文档同步逐项清理，届时本表应清空。
-    ("R4", "codespec\\ARCHITECTURE.md", "backticked path missing: tests/aurora_test_main.cpp"):
-        "Test suite rewrite: legacy runner entry removed",
-    ("R4", "codespec\\BUILD_OPTIONS.md", "backticked path missing: tests/integration/utest_dirty_clip_paint.cpp"):
-        "Test suite rewrite: legacy case deleted",
-    ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/aurora_test_main.cpp"):
-        "Test suite rewrite: legacy runner entry removed",
-    ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/aurora_test_harness.h"):
-        "Test suite rewrite: legacy framework header removed, new framework lives in tests/framework/",
-    ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/unit/utest_offscreen.cpp"):
-        "Test suite rewrite: legacy case deleted",
-    ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/test_default_construct.h"):
-        "Test suite rewrite: legacy shared fixture removed",
-    ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/integration/utest_default_construct.cpp"):
-        "Test suite rewrite: legacy case deleted",
-    ("R4", "codespec\\GUIDELINE.md", "backticked path missing: include/aurora/test_helpers.h"):
-        "Test suite rewrite: test_helpers.h moved into tests/support/",
-    ("R4", "codespec\\specification\\07-environment-modifier.md",
-     "backticked path missing: tests/unit/utest_clip_rounded_background.cpp"):
-        "Test suite rewrite: legacy case deleted",
-    ("R4", "codespec\\specification\\08-tooling.md", "backticked path missing: tests/unit/utest_serialization.cpp"):
-        "Test suite rewrite: legacy case deleted",
-    ("R4", "codespec\\specification\\08-tooling.md", "backticked path missing: include/aurora/test_helpers.h"):
-        "Test suite rewrite: test_helpers.h moved into tests/support/",
-    ("R4", "codespec\\specification\\08-tooling.md", "backticked path missing: tests/aurora_test_harness.h"):
-        "Test suite rewrite: legacy framework header removed, new framework lives in tests/framework/",
-}
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 PATH_RE = re.compile(r"`([^`\s]+)`")
@@ -312,29 +273,22 @@ def main() -> int:
         check_backtick_paths(rel, lines, repo, problems)
         check_spec_table(rel, lines, repo, problems)
 
-    # Apply whitelist: only block regressions (incremental).
-    remaining = []
-    for rule, rel, lineno, detail in problems:
-        if (rule, rel, detail) in WHITELIST or (rule, rel, "*") in WHITELIST:
-            continue
-        remaining.append((rule, rel, lineno, detail))
-
-    if not remaining:
+    if not problems:
         print(f"[OK] codespec xref clean: {len(docs)} docs, 0 problems.")
         return 0
 
-    print(f"[FAIL] codespec xref: {len(remaining)} problem(s) across {len(docs)} docs:")
+    print(f"[FAIL] codespec xref: {len(problems)} problem(s) across {len(docs)} docs:")
     by_rule = {}
-    for rule, _rel, _lineno, _detail in remaining:
+    for rule, _rel, _lineno, _detail in problems:
         by_rule[rule] = by_rule.get(rule, 0) + 1
     for rule in sorted(by_rule):
         print(f"  {rule}: {by_rule[rule]}")
     print("")
-    for rule, rel, lineno, detail in remaining[:60]:
+    for rule, rel, lineno, detail in problems[:60]:
         print(f"  {rule} {rel}:{lineno}  {detail}")
-    if len(remaining) > 60:
-        print(f"  ... and {len(remaining) - 60} more")
-    print("\n  Fix the above, or add a justified entry to WHITELIST (stock exemptions cover existing issues only).")
+    if len(problems) > 60:
+        print(f"  ... and {len(problems) - 60} more")
+    print("\n  Fix the above.")
     return 1
 
 
