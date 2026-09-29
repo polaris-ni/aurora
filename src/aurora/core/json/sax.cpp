@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -511,7 +512,7 @@ class SaxCore {
     ///        往返失真或域外一律落 RawNumber。
     [[nodiscard]] auto dispatch_number(std::string_view token, bool is_float) -> Result<bool> {
         const char *first = token.data();
-        const char *last = token.end();
+        const char *last = std::to_address(token.end());
         if (!is_float) {
             if (token == "-0") {
                 return handler_.on_int(0);  // JSON 无负零整数语义

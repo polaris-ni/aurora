@@ -6,6 +6,8 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -64,7 +66,7 @@ namespace {
         return false;
     }
     const char *first = token.data();
-    const char *last = token.end();
+    const char *last = std::to_address(token.end());
     const auto [ptr, ec] = std::from_chars(first, last, out);
     return ec == std::errc{} && ptr == last;
 }
