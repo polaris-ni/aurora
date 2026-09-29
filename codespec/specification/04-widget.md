@@ -337,7 +337,7 @@ au::Text("Welcome").font_size(24).bold();
 
 ### 3.8 图表控件
 
-图表控件族按「每图一个叶控件 + 纯值 Props」组织（切片 1–9 已全部落地）。五图共享公共数据层 `widget/chart_common.h`、事件三件套（`wants_click` / `on_hover_change` 标脏 / `on_pointer_event` 自处理 Move·Release）、`geom_` 缓存（绘制与命中同源）、十字准线 + 图例 hover 联动（切片 7）、grow-in 进入动画（`Animator::current()`，无 Animator 时降级到终态，切片 8）。
+图表控件族按「每图一个叶控件 + 纯值 Props」组织，现已全部落地。五图共享公共数据层 `widget/chart_common.h`、事件三件套（`wants_click` / `on_hover_change` 标脏 / `on_pointer_event` 自处理 Move·Release）、`geom_` 缓存（绘制与命中同源）、十字准线 + 图例 hover 联动、grow-in 进入动画（`Animator::current()`，无 Animator 时降级到终态）。
 
 | 控件 | 说明 |
 |:---|:---|
@@ -356,7 +356,7 @@ au::Text("Welcome").font_size(24).bold();
 3. **绘制不得越出控件 `bounds`**：`Widget::paint_bounds_` 决定脏区，越界像素不会被擦除（残影）。轴留白与图例带在控件内部以 `padding` 预留，悬浮值框按可用区夹取 / 翻转。
 4. **取色与取 Locale 一律带回退**：系列色 = 显式 `color` > `Theme` 命名令牌 `chart.palette.<i%8>` > 内置 8 色板；网格 / 标签色取自 `inherit_theme(ctx)`；刻度文本经 `format_number(v, locale, digits)`，Locale 用 `ctx.environment<Locale>()` 取值、**未注入回退 `Locale{}`**（`render_to_png` 传 `constexpr BuildContext`，`env_of<Locale>` 会断言失败）。
 
-健壮性降级（D15）：空数据只画轴；`range == 0` 时域退化为 `[v, v+1]`（全 0 即 `[0,1]`）；NaN / ±inf 数据点跳过；点数超限时截断。反序列化对畸形数组元素逐项跳过并 `Diagnostics::degraded`，绝不抛异常。
+健壮性降级：空数据只画轴；`range == 0` 时域退化为 `[v, v+1]`（全 0 即 `[0,1]`）；NaN / ±inf 数据点跳过；点数超限时截断。反序列化对畸形数组元素逐项跳过并 `Diagnostics::degraded`，绝不抛异常。
 
 ---
 

@@ -415,7 +415,7 @@ app.set_on_window_state([](au::WindowState s) {
 
 **镜像容器。** 每窗口一个隐藏 div `#aurora-a11y-<canvas_id>`（`position:absolute` + `clip-path:inset(50%)` 视觉隐藏但**保留在可访问性树中**——`display:none` 会整树出局），容器 `role=group`；镜像元素 DOM id = `aurora-a11y-<runtime_id>`（`aria-activedescendant` 的 IDREF 目标），`data-aurora-id` 属性供寻址与观测。焦点 = 容器 `aria-activedescendant` + 元素 `data-aurora-focused="1"`；播报 = 容器内懒建的 `[data-aurora-live]` 子元素（`aria-live=polite` + `aria-atomic`，同文本重播先清空再经 `setTimeout(0)` 回写）。**无几何面**（如实申报）：镜像元素不带画布坐标，读屏按 DOM 顺序导航，不支持「点按位置探测」。
 
-**激活（D14 惰性激活的既定例外）。** 浏览器没有 `WM_GETOBJECT`/总线订阅那样的「读屏在线」探测信号（navigator 无读屏 API），故**首个 `set_root` 注入即激活**并置 `screen_reader_active = true`（启发式申报）；D9 拉取式仍成立——只有 dirty（结构/字段事件、换根、动作回灌）才重投影并发载荷，静止页面零 DOM churn。多窗口下各桥独立镜像，`runtime_id` 进程内唯一 ⇒ 反向动作跨桥按 id 寻址。
+**激活（惰性激活的既定例外）。** 浏览器没有 `WM_GETOBJECT`/总线订阅那样的「读屏在线」探测信号（navigator 无读屏 API），故**首个 `set_root` 注入即激活**并置 `screen_reader_active = true`（启发式申报）；拉取式仍成立——只有 dirty（结构/字段事件、换根、动作回灌）才重投影并发载荷，静止页面零 DOM churn。多窗口下各桥独立镜像，`runtime_id` 进程内唯一 ⇒ 反向动作跨桥按 id 寻址。
 
 **载荷协议。** 首发全量 `{"els":[...],"focus":N,"rtl":b}`（els 先序表），续发增量 `{"ops":[remove|add|move|update...],"focus":N}`——段序固定 remove → add（新快照先序）→ move → update（去重、add 者不重发），`focus` 为**绝对值**（新快照获焦者 id，0 = 无）。元素属性确定序与 role 映射表由 `utest_aria_protocol` 逐位钉死。
 
