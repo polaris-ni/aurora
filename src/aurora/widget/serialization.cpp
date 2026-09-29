@@ -275,13 +275,16 @@ auto register_core_widgets() -> void {
 
     // ---- 已知类型但不可从静态 JSON 重建：给出友好错误（避免被当作未知类型静默失败）----
     // Canvas / Repeater 持运行时回调/State，无法从静态 JSON 重建：注册为已知类型。
-    reg_error("Canvas", ErrorCode::GeneralNotSupported, "Canvas 的绘制回调不可序列化，无法从 JSON 重建");
-    reg_error("Repeater", ErrorCode::GeneralNotSupported, "Repeater 的数据源为运行时 State，无法从 JSON 重建");
+    reg_error("Canvas", ErrorCode::GeneralNotSupported,
+              "Canvas draw callback is not serializable, cannot rebuild from JSON");
+    reg_error("Repeater", ErrorCode::GeneralNotSupported,
+              "Repeater data source is a runtime State, cannot rebuild from JSON");
     reg_error("ReorderableList", ErrorCode::GeneralNotSupported,
-              "ReorderableList 的数据源为运行时 State，无法从 JSON 重建");
+              "ReorderableList data source is a runtime State, cannot rebuild from JSON");
     // 兜底：其它未知 T 的 Provider 给出友好错误。
     reg_error("Provider", ErrorCode::GeneralNotSupported,
-              "Provider<T> 的 T 未注册具名工厂，无法从 JSON 重建（请为具体类型注册如 ThemeProvider 的工厂）");
+              "Provider<T> has no named factory registered for T, cannot rebuild from JSON "
+              "(register a factory for the concrete type, e.g. ThemeProvider)");
 }
 
 namespace {
@@ -295,7 +298,7 @@ namespace {
 auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<Widget>> {
     if (depth > AURORA_DEFAULT_MAX_WIDGET_DEPTH) {
         return make_error(ErrorCode::WidgetDepthExceeded, "serialization: widget tree nesting depth exceeds limit (" +
-                                                              std::to_string(AURORA_DEFAULT_MAX_WIDGET_DEPTH) + "）");
+                                                              std::to_string(AURORA_DEFAULT_MAX_WIDGET_DEPTH) + ")");
     }
     const auto *t = j.at("type");
     if (!j.is_object() || t == nullptr || !t->is_string()) {

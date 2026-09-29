@@ -187,7 +187,7 @@ class RichText : public LeafWidget {
                      .type = "string",
                      .default_value = "\"\"",
                      .required = false,
-                     .note = "纯文本内容（序列化用）",
+                     .note = "Plain text content (for serialization)",
                      .json_type = "string"},
                     {.name = "width",
                      .type = "Length",

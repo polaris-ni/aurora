@@ -1550,7 +1550,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "count",
-          "note": "徽章数字",
+          "note": "Badge number",
           "required": false,
           "type": "int"
         },
@@ -1558,7 +1558,7 @@
           "default": "Color(255,0,0)",
           "json_type": "array",
           "name": "badge_color",
-          "note": "徽章背景色",
+          "note": "Badge background color",
           "required": false,
           "type": "Color"
         },
@@ -1566,7 +1566,7 @@
           "default": "Color::white()",
           "json_type": "array",
           "name": "text_color",
-          "note": "徽章文字色",
+          "note": "Badge text color",
           "required": false,
           "type": "Color"
         },
@@ -1604,12 +1604,12 @@
       "props_schema": {
         "badge_color": {
           "default": "Color(255,0,0)",
-          "description": "徽章背景色",
+          "description": "Badge background color",
           "type": "array"
         },
         "count": {
           "default": "0",
-          "description": "徽章数字",
+          "description": "Badge number",
           "minimum": "0",
           "type": "integer"
         },
@@ -1623,7 +1623,7 @@
         },
         "text_color": {
           "default": "Color::white()",
-          "description": "徽章文字色",
+          "description": "Badge text color",
           "type": "array"
         },
         "width": {
@@ -1690,7 +1690,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "series",
-          "note": "数据系列数组：[{name, values:[double], color?}]",
+          "note": "Data series array: [{name, values:[double], color?}]",
           "required": false,
           "type": "vector<ChartSeries>"
         },
@@ -1698,7 +1698,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "categories",
-          "note": "x 轴类目标签；缺省为序号",
+          "note": "Category labels on the x axis; defaults to the index",
           "required": false,
           "type": "vector<string>"
         },
@@ -1706,7 +1706,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "stacked",
-          "note": "堆叠模式（同 x 多系列累加）",
+          "note": "Stacked mode (series at the same x accumulate)",
           "required": false,
           "type": "bool"
         },
@@ -1716,7 +1716,7 @@
           "maximum": "1",
           "minimum": "0.05",
           "name": "bar_width_ratio",
-          "note": "柱宽在带内占比，夹取 (0,1]",
+          "note": "Bar width as a share of the band, clamped to (0,1]",
           "required": false,
           "type": "float"
         },
@@ -1725,7 +1725,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "bar_corner_radius",
-          "note": "柱圆角(dp)，自动不超过柱宽/柱高一半",
+          "note": "Bar corner radius (dp), capped at half the bar width/height",
           "required": false,
           "type": "float"
         },
@@ -1733,7 +1733,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "show_crosshair",
-          "note": "悬停时绘制吸附最近类目的十字准线",
+          "note": "Draw a crosshair snapped to the nearest category on hover",
           "required": false,
           "type": "bool"
         },
@@ -1741,7 +1741,7 @@
           "default": "{}",
           "json_type": "object",
           "name": "axis_x",
-          "note": "类目轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "note": "Category axis spec: {visible,label,tick_count,min,max,show_grid_lines,include_zero}",
           "required": false,
           "type": "Json"
         },
@@ -1749,7 +1749,7 @@
           "default": "{}",
           "json_type": "object",
           "name": "axis_y",
-          "note": "数值轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "note": "Value axis spec: {visible,label,tick_count,min,max,show_grid_lines,include_zero}",
           "required": false,
           "type": "Json"
         },
@@ -1757,7 +1757,7 @@
           "default": "{\"visible\":true,\"position\":\"Top\"}",
           "json_type": "object",
           "name": "legend",
-          "note": "图例规格：{visible,position:Top|Bottom|Right}",
+          "note": "Legend spec: {visible,position:Top|Bottom|Right}",
           "required": false,
           "type": "Json"
         },
@@ -1765,7 +1765,7 @@
           "default": "{8,8,8,8}",
           "json_type": "object",
           "name": "padding",
-          "note": "图内留白(dp)，轴标签与值框避让区",
+          "note": "In-chart padding (dp), reserved for axis labels and value boxes",
           "required": false,
           "type": "EdgeInsets"
         },
@@ -1810,30 +1810,30 @@
       "props_schema": {
         "axis_x": {
           "default": "{}",
-          "description": "类目轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "description": "Category axis spec: {visible,label,tick_count,min,max,show_grid_lines,include_zero}",
           "type": "object"
         },
         "axis_y": {
           "default": "{}",
-          "description": "数值轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "description": "Value axis spec: {visible,label,tick_count,min,max,show_grid_lines,include_zero}",
           "type": "object"
         },
         "bar_corner_radius": {
           "default": "2.0",
-          "description": "柱圆角(dp)，自动不超过柱宽/柱高一半",
+          "description": "Bar corner radius (dp), capped at half the bar width/height",
           "minimum": "0",
           "type": "number"
         },
         "bar_width_ratio": {
           "default": "0.7",
-          "description": "柱宽在带内占比，夹取 (0,1]",
+          "description": "Bar width as a share of the band, clamped to (0,1]",
           "maximum": "1",
           "minimum": "0.05",
           "type": "number"
         },
         "categories": {
           "default": "[]",
-          "description": "x 轴类目标签；缺省为序号",
+          "description": "Category labels on the x axis; defaults to the index",
           "type": "array"
         },
         "height": {
@@ -1842,17 +1842,17 @@
         },
         "legend": {
           "default": "{\"visible\":true,\"position\":\"Top\"}",
-          "description": "图例规格：{visible,position:Top|Bottom|Right}",
+          "description": "Legend spec: {visible,position:Top|Bottom|Right}",
           "type": "object"
         },
         "padding": {
           "default": "{8,8,8,8}",
-          "description": "图内留白(dp)，轴标签与值框避让区",
+          "description": "In-chart padding (dp), reserved for axis labels and value boxes",
           "type": "object"
         },
         "series": {
           "default": "[]",
-          "description": "数据系列数组：[{name, values:[double], color?}]",
+          "description": "Data series array: [{name, values:[double], color?}]",
           "type": "array"
         },
         "show": {
@@ -1861,12 +1861,12 @@
         },
         "show_crosshair": {
           "default": "true",
-          "description": "悬停时绘制吸附最近类目的十字准线",
+          "description": "Draw a crosshair snapped to the nearest category on hover",
           "type": "boolean"
         },
         "stacked": {
           "default": "false",
-          "description": "堆叠模式（同 x 多系列累加）",
+          "description": "Stacked mode (series at the same x accumulate)",
           "type": "boolean"
         },
         "width": {
@@ -1892,7 +1892,7 @@
       "events": [
         "on_select",
         "void(int)",
-        "点击某项时回调（参数为下标）"
+        "Callback when an item is clicked (argument is the index)"
       ],
       "examples": [
         "au::BottomNavBar{ au::BottomNavBarProps{ .items = {...}, .on_select = [](int){} } }"
@@ -1904,14 +1904,14 @@
         {
           "default": "0",
           "name": "selected_index",
-          "note": "当前选中项下标",
+          "note": "Currently selected item index",
           "required": false,
           "type": "int"
         },
         {
           "default": "64.0",
           "name": "bar_height",
-          "note": "导航栏高度(px)",
+          "note": "Bar height (px)",
           "required": false,
           "type": "float"
         }
@@ -1927,11 +1927,11 @@
       "props_schema": {
         "bar_height": {
           "default": "64.0",
-          "description": "导航栏高度(px)"
+          "description": "Bar height (px)"
         },
         "selected_index": {
           "default": "0",
-          "description": "当前选中项下标"
+          "description": "Currently selected item index"
         }
       },
       "thread": "main",
@@ -1976,14 +1976,14 @@
         {
           "default": "600.0",
           "name": "medium_max_width",
-          "note": "Compact 上界(dp)",
+          "note": "Compact upper bound (dp)",
           "required": false,
           "type": "float"
         },
         {
           "default": "840.0",
           "name": "expanded_min_width",
-          "note": "Expanded 下界(dp)",
+          "note": "Expanded lower bound (dp)",
           "required": false,
           "type": "float"
         }
@@ -1997,14 +1997,14 @@
       "props_schema": {
         "expanded_min_width": {
           "default": "840.0",
-          "description": "Expanded 下界(dp)"
+          "description": "Expanded lower bound (dp)"
         },
         "height": {
           "default": "auto"
         },
         "medium_max_width": {
           "default": "600.0",
-          "description": "Compact 上界(dp)"
+          "description": "Compact upper bound (dp)"
         },
         "show": {
           "default": "true"
@@ -2062,7 +2062,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "label",
-          "note": "按钮文字",
+          "note": "Button text",
           "required": true,
           "type": "LocalizedString"
         },
@@ -2070,7 +2070,7 @@
           "default": "Color::blue()",
           "json_type": "array",
           "name": "color",
-          "note": "背景色",
+          "note": "Background color",
           "required": false,
           "type": "Color"
         },
@@ -2078,7 +2078,7 @@
           "default": "Color::white()",
           "json_type": "array",
           "name": "on_color",
-          "note": "文字色",
+          "note": "Text color",
           "required": false,
           "type": "Color"
         },
@@ -2087,7 +2087,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "font_size",
-          "note": "字号(pt)",
+          "note": "Font size (pt)",
           "required": false,
           "type": "float"
         },
@@ -2096,7 +2096,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "corner_radius",
-          "note": "圆角半径(dp)",
+          "note": "Corner radius (dp)",
           "required": false,
           "type": "float"
         },
@@ -2104,7 +2104,7 @@
           "default": "{12,6,12,6}",
           "json_type": "object",
           "name": "padding",
-          "note": "内边距",
+          "note": "Padding",
           "required": false,
           "type": "EdgeInsets"
         },
@@ -2112,7 +2112,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "enabled",
-          "note": "是否可点击",
+          "note": "Clickable",
           "required": false,
           "type": "bool"
         },
@@ -2120,7 +2120,7 @@
           "default": "auto",
           "json_type": "array",
           "name": "hover_color",
-          "note": "悬停背景色（缺省由背景色调暗）",
+          "note": "Hover background color (defaults to a darkened background)",
           "required": false,
           "type": "Color"
         },
@@ -2128,7 +2128,7 @@
           "default": "auto",
           "json_type": "array",
           "name": "pressed_color",
-          "note": "按下背景色（缺省由背景色调暗）",
+          "note": "Pressed background color (defaults to a darkened background)",
           "required": false,
           "type": "Color"
         },
@@ -2136,7 +2136,7 @@
           "default": "none",
           "json_type": "array",
           "name": "border_color",
-          "note": "边框色（缺省不描边）",
+          "note": "Border color (no border by default)",
           "required": false,
           "requires_props": [
             "border_width"
@@ -2148,7 +2148,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "border_width",
-          "note": "边框线宽(dp)；0=不描边",
+          "note": "Border width (dp); 0 = no border",
           "required": false,
           "type": "float"
         },
@@ -2156,7 +2156,7 @@
           "default": "{200,200,200}",
           "json_type": "array",
           "name": "disabled_color",
-          "note": "禁用态背景色",
+          "note": "Disabled background color",
           "required": false,
           "type": "Color"
         },
@@ -2164,7 +2164,7 @@
           "default": "{130,130,130}",
           "json_type": "array",
           "name": "disabled_text_color",
-          "note": "禁用态文字色",
+          "note": "Disabled text color",
           "required": false,
           "type": "Color"
         },
@@ -2173,7 +2173,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "min_width",
-          "note": "最小宽度(dp)",
+          "note": "Min width (dp)",
           "required": false,
           "type": "float"
         },
@@ -2182,7 +2182,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "min_height",
-          "note": "最小高度(dp)",
+          "note": "Min height (dp)",
           "required": false,
           "type": "float"
         },
@@ -2224,44 +2224,44 @@
       "props_schema": {
         "border_color": {
           "default": "none",
-          "description": "边框色（缺省不描边）",
+          "description": "Border color (no border by default)",
           "type": "array"
         },
         "border_width": {
           "default": "0.0",
-          "description": "边框线宽(dp)；0=不描边",
+          "description": "Border width (dp); 0 = no border",
           "minimum": "0",
           "type": "number"
         },
         "color": {
           "default": "Color::blue()",
-          "description": "背景色",
+          "description": "Background color",
           "type": "array"
         },
         "corner_radius": {
           "default": "6.0",
-          "description": "圆角半径(dp)",
+          "description": "Corner radius (dp)",
           "minimum": "0",
           "type": "number"
         },
         "disabled_color": {
           "default": "{200,200,200}",
-          "description": "禁用态背景色",
+          "description": "Disabled background color",
           "type": "array"
         },
         "disabled_text_color": {
           "default": "{130,130,130}",
-          "description": "禁用态文字色",
+          "description": "Disabled text color",
           "type": "array"
         },
         "enabled": {
           "default": "true",
-          "description": "是否可点击",
+          "description": "Clickable",
           "type": "boolean"
         },
         "font_size": {
           "default": "14.0",
-          "description": "字号(pt)",
+          "description": "Font size (pt)",
           "minimum": "0",
           "type": "number"
         },
@@ -2271,39 +2271,39 @@
         },
         "hover_color": {
           "default": "auto",
-          "description": "悬停背景色（缺省由背景色调暗）",
+          "description": "Hover background color (defaults to a darkened background)",
           "type": "array"
         },
         "label": {
           "default": "\"\"",
-          "description": "按钮文字",
+          "description": "Button text",
           "type": "string"
         },
         "min_height": {
           "default": "0.0",
-          "description": "最小高度(dp)",
+          "description": "Min height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "min_width": {
           "default": "0.0",
-          "description": "最小宽度(dp)",
+          "description": "Min width (dp)",
           "minimum": "0",
           "type": "number"
         },
         "on_color": {
           "default": "Color::white()",
-          "description": "文字色",
+          "description": "Text color",
           "type": "array"
         },
         "padding": {
           "default": "{12,6,12,6}",
-          "description": "内边距",
+          "description": "Padding",
           "type": "object"
         },
         "pressed_color": {
           "default": "auto",
-          "description": "按下背景色（缺省由背景色调暗）",
+          "description": "Pressed background color (defaults to a darkened background)",
           "type": "array"
         },
         "show": {
@@ -2374,7 +2374,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "checked",
-          "note": "勾选状态",
+          "note": "Checked state",
           "required": false,
           "type": "bool"
         },
@@ -2382,7 +2382,7 @@
           "default": "theme.primary",
           "json_type": "array",
           "name": "active_color",
-          "note": "勾选态填充色（缺省跟随主题 primary）",
+          "note": "Checked fill color (defaults to theme primary)",
           "required": false,
           "type": "Color"
         },
@@ -2390,7 +2390,7 @@
           "default": "{140,140,146,255}",
           "json_type": "array",
           "name": "border_color",
-          "note": "未勾选边框色",
+          "note": "Unchecked border color",
           "required": false,
           "type": "Color"
         },
@@ -2398,7 +2398,7 @@
           "default": "Color::white()",
           "json_type": "array",
           "name": "check_color",
-          "note": "勾号颜色",
+          "note": "Checkmark color",
           "required": false,
           "type": "Color"
         },
@@ -2407,7 +2407,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "size",
-          "note": "方框边长(dp)",
+          "note": "Box size (dp)",
           "required": false,
           "type": "float"
         },
@@ -2415,7 +2415,7 @@
           "default": "-1.0",
           "json_type": "number",
           "name": "corner_radius",
-          "note": "圆角半径(dp)；<0 自动=边长×0.2",
+          "note": "Corner radius (dp); <0 = 0.2x the box size",
           "required": false,
           "type": "float"
         },
@@ -2424,7 +2424,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "border_width",
-          "note": "未勾选描边宽(dp)",
+          "note": "Unchecked border width (dp)",
           "required": false,
           "type": "float"
         },
@@ -2432,7 +2432,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "enabled",
-          "note": "是否可交互（禁用灰化）",
+          "note": "Interactive (greyed out when disabled)",
           "required": false,
           "type": "bool"
         },
@@ -2474,38 +2474,38 @@
       "props_schema": {
         "active_color": {
           "default": "theme.primary",
-          "description": "勾选态填充色（缺省跟随主题 primary）",
+          "description": "Checked fill color (defaults to theme primary)",
           "type": "array"
         },
         "border_color": {
           "default": "{140,140,146,255}",
-          "description": "未勾选边框色",
+          "description": "Unchecked border color",
           "type": "array"
         },
         "border_width": {
           "default": "1.5",
-          "description": "未勾选描边宽(dp)",
+          "description": "Unchecked border width (dp)",
           "minimum": "0",
           "type": "number"
         },
         "check_color": {
           "default": "Color::white()",
-          "description": "勾号颜色",
+          "description": "Checkmark color",
           "type": "array"
         },
         "checked": {
           "default": "false",
-          "description": "勾选状态",
+          "description": "Checked state",
           "type": "boolean"
         },
         "corner_radius": {
           "default": "-1.0",
-          "description": "圆角半径(dp)；<0 自动=边长×0.2",
+          "description": "Corner radius (dp); <0 = 0.2x the box size",
           "type": "number"
         },
         "enabled": {
           "default": "true",
-          "description": "是否可交互（禁用灰化）",
+          "description": "Interactive (greyed out when disabled)",
           "type": "boolean"
         },
         "height": {
@@ -2518,7 +2518,7 @@
         },
         "size": {
           "default": "20.0",
-          "description": "方框边长(dp)",
+          "description": "Box size (dp)",
           "minimum": "0",
           "type": "number"
         },
@@ -2575,7 +2575,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "label",
-          "note": "标签文字",
+          "note": "Label text",
           "required": false,
           "type": "string"
         },
@@ -2583,7 +2583,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "avatar",
-          "note": "前导图标/文字",
+          "note": "Leading icon/text",
           "required": false,
           "type": "string"
         },
@@ -2591,7 +2591,7 @@
           "default": "Color(230,230,230)",
           "json_type": "array",
           "name": "background",
-          "note": "背景色",
+          "note": "Background color",
           "required": false,
           "type": "Color"
         },
@@ -2599,7 +2599,7 @@
           "default": "Color::black()",
           "json_type": "array",
           "name": "text_color",
-          "note": "文本色",
+          "note": "Text color",
           "required": false,
           "type": "Color"
         },
@@ -2607,7 +2607,7 @@
           "default": "{128,128,128,255}",
           "json_type": "array",
           "name": "delete_color",
-          "note": "删除钮颜色",
+          "note": "Delete button color",
           "required": false,
           "type": "Color"
         },
@@ -2616,7 +2616,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "font_size",
-          "note": "字号(pt)",
+          "note": "Font size (pt)",
           "required": false,
           "type": "float"
         },
@@ -2624,7 +2624,7 @@
           "default": "-1.0",
           "json_type": "number",
           "name": "corner_radius",
-          "note": "圆角半径(dp)；<0 自动=高度一半",
+          "note": "Corner radius (dp); <0 = half the height",
           "required": false,
           "type": "float"
         },
@@ -2665,27 +2665,27 @@
       "props_schema": {
         "avatar": {
           "default": "\"\"",
-          "description": "前导图标/文字",
+          "description": "Leading icon/text",
           "type": "string"
         },
         "background": {
           "default": "Color(230,230,230)",
-          "description": "背景色",
+          "description": "Background color",
           "type": "array"
         },
         "corner_radius": {
           "default": "-1.0",
-          "description": "圆角半径(dp)；<0 自动=高度一半",
+          "description": "Corner radius (dp); <0 = half the height",
           "type": "number"
         },
         "delete_color": {
           "default": "{128,128,128,255}",
-          "description": "删除钮颜色",
+          "description": "Delete button color",
           "type": "array"
         },
         "font_size": {
           "default": "13.0",
-          "description": "字号(pt)",
+          "description": "Font size (pt)",
           "minimum": "0",
           "type": "number"
         },
@@ -2695,7 +2695,7 @@
         },
         "label": {
           "default": "\"\"",
-          "description": "标签文字",
+          "description": "Label text",
           "type": "string"
         },
         "show": {
@@ -2704,7 +2704,7 @@
         },
         "text_color": {
           "default": "Color::black()",
-          "description": "文本色",
+          "description": "Text color",
           "type": "array"
         },
         "width": {
@@ -2745,7 +2745,7 @@
           "default": "black",
           "json_type": "array",
           "name": "color",
-          "note": "选中颜色",
+          "note": "Selection color",
           "required": false,
           "type": "Color"
         }
@@ -2760,7 +2760,7 @@
       "props_schema": {
         "color": {
           "default": "black",
-          "description": "选中颜色",
+          "description": "Selection color",
           "type": "array"
         }
       },
@@ -2804,7 +2804,7 @@
           ],
           "json_type": "string",
           "name": "main_axis_alignment",
-          "note": "主轴对齐",
+          "note": "Main axis alignment",
           "required": false,
           "type": "MainAxisAlignment"
         },
@@ -2819,7 +2819,7 @@
           ],
           "json_type": "string",
           "name": "cross_axis_alignment",
-          "note": "交叉轴对齐",
+          "note": "Cross axis alignment",
           "required": false,
           "type": "CrossAxisAlignment"
         },
@@ -2831,7 +2831,7 @@
           ],
           "json_type": "string",
           "name": "main_axis_size",
-          "note": "主轴尺寸策略",
+          "note": "Main axis size policy",
           "required": false,
           "type": "MainAxisSize"
         },
@@ -2840,7 +2840,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "gap",
-          "note": "子项间距(px)",
+          "note": "Child spacing (px)",
           "required": false,
           "type": "float"
         },
@@ -2879,7 +2879,7 @@
       "props_schema": {
         "cross_axis_alignment": {
           "default": "Start",
-          "description": "交叉轴对齐",
+          "description": "Cross axis alignment",
           "enum": [
             "Start",
             "Center",
@@ -2891,7 +2891,7 @@
         },
         "gap": {
           "default": "0.0",
-          "description": "子项间距(px)",
+          "description": "Child spacing (px)",
           "minimum": "0",
           "type": "number"
         },
@@ -2901,7 +2901,7 @@
         },
         "main_axis_alignment": {
           "default": "Start",
-          "description": "主轴对齐",
+          "description": "Main axis alignment",
           "enum": [
             "Start",
             "Center",
@@ -2914,7 +2914,7 @@
         },
         "main_axis_size": {
           "default": "Min",
-          "description": "主轴尺寸策略",
+          "description": "Main axis size policy",
           "enum": [
             "Min",
             "Max"
@@ -2965,7 +2965,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "columns",
-          "note": "列描述",
+          "note": "Column descriptions",
           "required": true,
           "type": "vector<DataColumn>"
         },
@@ -2974,7 +2974,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "row_count",
-          "note": "行数（只读）",
+          "note": "Row count (read-only)",
           "required": false,
           "type": "int"
         },
@@ -2982,7 +2982,7 @@
           "default": "-1",
           "json_type": "integer",
           "name": "selected_row",
-          "note": "选中行(-1=无)",
+          "note": "Selected row (-1 = none)",
           "required": false,
           "type": "int"
         },
@@ -2990,7 +2990,7 @@
           "default": "-1",
           "json_type": "integer",
           "name": "sort_column",
-          "note": "排序列(-1=无)",
+          "note": "Sort column (-1 = none)",
           "required": false,
           "type": "int"
         }
@@ -3008,23 +3008,23 @@
       "props_schema": {
         "columns": {
           "default": "[]",
-          "description": "列描述",
+          "description": "Column descriptions",
           "type": "array"
         },
         "row_count": {
           "default": "0",
-          "description": "行数（只读）",
+          "description": "Row count (read-only)",
           "minimum": "0",
           "type": "integer"
         },
         "selected_row": {
           "default": "-1",
-          "description": "选中行(-1=无)",
+          "description": "Selected row (-1 = none)",
           "type": "integer"
         },
         "sort_column": {
           "default": "-1",
-          "description": "排序列(-1=无)",
+          "description": "Sort column (-1 = none)",
           "type": "integer"
         }
       },
@@ -3062,7 +3062,7 @@
           "default": "2026",
           "json_type": "integer",
           "name": "year",
-          "note": "选中年",
+          "note": "Selected year",
           "required": false,
           "type": "int"
         },
@@ -3072,7 +3072,7 @@
           "maximum": "12",
           "minimum": "1",
           "name": "month",
-          "note": "选中月(1..12)",
+          "note": "Selected month (1..12)",
           "required": false,
           "type": "int"
         },
@@ -3082,7 +3082,7 @@
           "maximum": "31",
           "minimum": "1",
           "name": "day",
-          "note": "选中日",
+          "note": "Selected day",
           "required": false,
           "type": "int"
         }
@@ -3099,21 +3099,21 @@
       "props_schema": {
         "day": {
           "default": "1",
-          "description": "选中日",
+          "description": "Selected day",
           "maximum": "31",
           "minimum": "1",
           "type": "integer"
         },
         "month": {
           "default": "1",
-          "description": "选中月(1..12)",
+          "description": "Selected month (1..12)",
           "maximum": "12",
           "minimum": "1",
           "type": "integer"
         },
         "year": {
           "default": "2026",
-          "description": "选中年",
+          "description": "Selected year",
           "type": "integer"
         }
       },
@@ -3134,7 +3134,7 @@
         "on_dismissed"
       ],
       "examples": [
-        "au::Dismissible(card) /* 水平拖出消除 */"
+        "au::Dismissible(card) /* drag out horizontally to dismiss */"
       ],
       "is_clickable": false,
       "is_container": false,
@@ -3143,7 +3143,7 @@
         {
           "default": "Horizontal",
           "name": "axis",
-          "note": "拖动主轴（Horizontal/Vertical）",
+          "note": "Drag main axis (Horizontal/Vertical)",
           "required": false,
           "type": "DragAxis"
         }
@@ -3157,7 +3157,7 @@
       "props_schema": {
         "axis": {
           "default": "Horizontal",
-          "description": "拖动主轴（Horizontal/Vertical）"
+          "description": "Drag main axis (Horizontal/Vertical)"
         }
       },
       "thread": "main",
@@ -3200,7 +3200,7 @@
           ],
           "json_type": "string",
           "name": "orientation",
-          "note": "方向",
+          "note": "Direction",
           "required": false,
           "type": "Orientation"
         },
@@ -3209,7 +3209,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "thickness",
-          "note": "线粗(dp)",
+          "note": "Line thickness (dp)",
           "required": false,
           "type": "float"
         },
@@ -3217,7 +3217,7 @@
           "default": "{200,200,200,255}",
           "json_type": "array",
           "name": "color",
-          "note": "颜色",
+          "note": "Color",
           "required": false,
           "type": "Color"
         },
@@ -3226,7 +3226,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "indent",
-          "note": "起点缩进(dp)",
+          "note": "Start indent (dp)",
           "required": false,
           "type": "float"
         },
@@ -3235,7 +3235,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "end_indent",
-          "note": "终点缩进(dp)",
+          "note": "End indent (dp)",
           "required": false,
           "type": "float"
         },
@@ -3275,12 +3275,12 @@
       "props_schema": {
         "color": {
           "default": "{200,200,200,255}",
-          "description": "颜色",
+          "description": "Color",
           "type": "array"
         },
         "end_indent": {
           "default": "0.0",
-          "description": "终点缩进(dp)",
+          "description": "End indent (dp)",
           "minimum": "0",
           "type": "number"
         },
@@ -3290,13 +3290,13 @@
         },
         "indent": {
           "default": "0.0",
-          "description": "起点缩进(dp)",
+          "description": "Start indent (dp)",
           "minimum": "0",
           "type": "number"
         },
         "orientation": {
           "default": "horizontal",
-          "description": "方向",
+          "description": "Direction",
           "enum": [
             "Horizontal",
             "Vertical"
@@ -3309,7 +3309,7 @@
         },
         "thickness": {
           "default": "1.0",
-          "description": "线粗(dp)",
+          "description": "Line thickness (dp)",
           "minimum": "0",
           "type": "number"
         },
@@ -3349,7 +3349,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "open",
-          "note": "是否打开",
+          "note": "Open",
           "required": false,
           "type": "bool"
         },
@@ -3361,7 +3361,7 @@
           ],
           "json_type": "string",
           "name": "side",
-          "note": "停靠侧",
+          "note": "Dock side",
           "required": false,
           "type": "DrawerSide"
         },
@@ -3370,7 +3370,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "panel_width",
-          "note": "面板宽度(dp)",
+          "note": "Panel width (dp)",
           "required": false,
           "type": "float"
         },
@@ -3378,7 +3378,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "permanent",
-          "note": "永久模式（始终可见、无遮罩）",
+          "note": "Permanent mode (always visible, no scrim)",
           "required": false,
           "type": "bool"
         }
@@ -3396,23 +3396,23 @@
       "props_schema": {
         "open": {
           "default": "false",
-          "description": "是否打开",
+          "description": "Open",
           "type": "boolean"
         },
         "panel_width": {
           "default": "240.0",
-          "description": "面板宽度(dp)",
+          "description": "Panel width (dp)",
           "minimum": "0",
           "type": "number"
         },
         "permanent": {
           "default": "false",
-          "description": "永久模式（始终可见、无遮罩）",
+          "description": "Permanent mode (always visible, no scrim)",
           "type": "boolean"
         },
         "side": {
           "default": "Left",
-          "description": "停靠侧",
+          "description": "Dock side",
           "enum": [
             "Left",
             "Right"
@@ -3482,7 +3482,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "options",
-          "note": "选项列表",
+          "note": "Option list",
           "required": true,
           "type": "vector<string>"
         },
@@ -3491,7 +3491,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "selected_index",
-          "note": "当前选中序号",
+          "note": "Current selected index",
           "required": false,
           "type": "int"
         },
@@ -3499,7 +3499,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "placeholder",
-          "note": "空选项时的占位文本",
+          "note": "Placeholder text when nothing is selected",
           "required": false,
           "type": "string"
         },
@@ -3507,7 +3507,7 @@
           "default": "theme.primary",
           "json_type": "array",
           "name": "accent_color",
-          "note": "选中高亮色（缺省跟随主题 primary）",
+          "note": "Selection highlight color (defaults to theme primary)",
           "required": false,
           "type": "Color"
         },
@@ -3515,7 +3515,7 @@
           "default": "Color::white()",
           "json_type": "array",
           "name": "box_color",
-          "note": "主框背景色",
+          "note": "Main box background color",
           "required": false,
           "type": "Color"
         },
@@ -3523,7 +3523,7 @@
           "default": "{200,200,205,255}",
           "json_type": "array",
           "name": "border_color",
-          "note": "主框/面板边框色",
+          "note": "Main box / panel border color",
           "required": false,
           "type": "Color"
         },
@@ -3531,7 +3531,7 @@
           "default": "{30,30,30,255}",
           "json_type": "array",
           "name": "text_color",
-          "note": "选项文本色",
+          "note": "Option text color",
           "required": false,
           "type": "Color"
         },
@@ -3539,7 +3539,7 @@
           "default": "{120,120,125,255}",
           "json_type": "array",
           "name": "arrow_color",
-          "note": "箭头颜色",
+          "note": "Arrow color",
           "required": false,
           "type": "Color"
         },
@@ -3548,7 +3548,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "box_height",
-          "note": "主框高度(dp)",
+          "note": "Main box height (dp)",
           "required": false,
           "type": "float"
         },
@@ -3557,7 +3557,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "item_height",
-          "note": "选项行高(dp)",
+          "note": "Option row height (dp)",
           "required": false,
           "type": "float"
         },
@@ -3566,7 +3566,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "font_size",
-          "note": "字号(pt)",
+          "note": "Font size (pt)",
           "required": false,
           "type": "float"
         },
@@ -3575,7 +3575,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "corner_radius",
-          "note": "主框圆角半径(dp)",
+          "note": "Main box corner radius (dp)",
           "required": false,
           "type": "float"
         },
@@ -3583,7 +3583,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "enabled",
-          "note": "是否可交互（禁用灰化）",
+          "note": "Interactive (greyed out when disabled)",
           "required": false,
           "type": "bool"
         }
@@ -3608,72 +3608,72 @@
       "props_schema": {
         "accent_color": {
           "default": "theme.primary",
-          "description": "选中高亮色（缺省跟随主题 primary）",
+          "description": "Selection highlight color (defaults to theme primary)",
           "type": "array"
         },
         "arrow_color": {
           "default": "{120,120,125,255}",
-          "description": "箭头颜色",
+          "description": "Arrow color",
           "type": "array"
         },
         "border_color": {
           "default": "{200,200,205,255}",
-          "description": "主框/面板边框色",
+          "description": "Main box / panel border color",
           "type": "array"
         },
         "box_color": {
           "default": "Color::white()",
-          "description": "主框背景色",
+          "description": "Main box background color",
           "type": "array"
         },
         "box_height": {
           "default": "30.0",
-          "description": "主框高度(dp)",
+          "description": "Main box height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "corner_radius": {
           "default": "4.0",
-          "description": "主框圆角半径(dp)",
+          "description": "Main box corner radius (dp)",
           "minimum": "0",
           "type": "number"
         },
         "enabled": {
           "default": "true",
-          "description": "是否可交互（禁用灰化）",
+          "description": "Interactive (greyed out when disabled)",
           "type": "boolean"
         },
         "font_size": {
           "default": "13.0",
-          "description": "字号(pt)",
+          "description": "Font size (pt)",
           "minimum": "0",
           "type": "number"
         },
         "item_height": {
           "default": "26.0",
-          "description": "选项行高(dp)",
+          "description": "Option row height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "options": {
           "default": "[]",
-          "description": "选项列表",
+          "description": "Option list",
           "type": "array"
         },
         "placeholder": {
           "default": "\"\"",
-          "description": "空选项时的占位文本",
+          "description": "Placeholder text when nothing is selected",
           "type": "string"
         },
         "selected_index": {
           "default": "0",
-          "description": "当前选中序号",
+          "description": "Current selected index",
           "minimum": "0",
           "type": "integer"
         },
         "text_color": {
           "default": "{30,30,30,255}",
-          "description": "选项文本色",
+          "description": "Option text color",
           "type": "array"
         }
       },
@@ -3707,7 +3707,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "header",
-          "note": "标题文本",
+          "note": "Title text",
           "required": true,
           "type": "string"
         },
@@ -3715,7 +3715,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "expanded",
-          "note": "是否展开",
+          "note": "Expanded",
           "required": false,
           "type": "bool"
         },
@@ -3724,7 +3724,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "header_height",
-          "note": "标题头高度(dp)",
+          "note": "Header height (dp)",
           "required": false,
           "type": "float"
         }
@@ -3741,17 +3741,17 @@
       "props_schema": {
         "expanded": {
           "default": "false",
-          "description": "是否展开",
+          "description": "Expanded",
           "type": "boolean"
         },
         "header": {
           "default": "\"\"",
-          "description": "标题文本",
+          "description": "Title text",
           "type": "string"
         },
         "header_height": {
           "default": "36.0",
-          "description": "标题头高度(dp)",
+          "description": "Header height (dp)",
           "minimum": "0",
           "type": "number"
         }
@@ -3787,7 +3787,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "gap",
-          "note": "字段垂直间距",
+          "note": "Vertical spacing between fields",
           "required": false,
           "type": "float"
         }
@@ -3801,7 +3801,7 @@
       "props_schema": {
         "gap": {
           "default": "8.0",
-          "description": "字段垂直间距",
+          "description": "Vertical spacing between fields",
           "minimum": "0",
           "type": "number"
         }
@@ -3834,7 +3834,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "error_text",
-          "note": "当前错误消息（空=通过）",
+          "note": "Current error message (empty = passing)",
           "required": false,
           "type": "string"
         }
@@ -3849,7 +3849,7 @@
       "props_schema": {
         "error_text": {
           "default": "\"\"",
-          "description": "当前错误消息（空=通过）",
+          "description": "Current error message (empty = passing)",
           "type": "string"
         }
       },
@@ -3885,7 +3885,7 @@
           "json_type": "integer",
           "minimum": "1",
           "name": "columns",
-          "note": "列数",
+          "note": "Column count",
           "required": false,
           "type": "int"
         },
@@ -3894,7 +3894,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "gap",
-          "note": "单元格间距(px)",
+          "note": "Cell spacing (px)",
           "required": false,
           "type": "float"
         },
@@ -3931,13 +3931,13 @@
       "props_schema": {
         "columns": {
           "default": "1",
-          "description": "列数",
+          "description": "Column count",
           "minimum": "1",
           "type": "integer"
         },
         "gap": {
           "default": "4.0",
-          "description": "单元格间距(px)",
+          "description": "Cell spacing (px)",
           "minimum": "0",
           "type": "number"
         },
@@ -3994,7 +3994,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "count",
-          "note": "总项数",
+          "note": "Total item count",
           "required": true,
           "type": "int"
         },
@@ -4003,7 +4003,7 @@
           "json_type": "integer",
           "minimum": "1",
           "name": "columns",
-          "note": "列数",
+          "note": "Column count",
           "required": true,
           "type": "int"
         },
@@ -4012,7 +4012,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "cell_extent",
-          "note": "单元格高(dp)（宽=视口宽/列数）",
+          "note": "Cell height (dp), width = viewport width / column count",
           "required": false,
           "type": "float"
         },
@@ -4021,7 +4021,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "scroll_offset",
-          "note": "纵向滚动偏移(dp)",
+          "note": "Vertical scroll offset (dp)",
           "required": false,
           "type": "float"
         },
@@ -4030,7 +4030,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "cache_extent",
-          "note": "可见区外预取缓冲(dp)",
+          "note": "Prefetch buffer beyond the viewport (dp)",
           "required": false,
           "type": "float"
         },
@@ -4038,7 +4038,7 @@
           "default": "",
           "json_type": "string",
           "name": "restore_key",
-          "note": "滚动位置保存键（空=不参与恢复）",
+          "note": "Scroll position save key (empty = excluded from restore)",
           "required": false,
           "type": "string"
         },
@@ -4047,7 +4047,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "snap_extent",
-          "note": "吸附行周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "note": "Row snap period (dp); <=0 disables, ignored when snap_paging=true",
           "required": false,
           "type": "float"
         },
@@ -4055,7 +4055,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "snap_paging",
-          "note": "分页模式：以视口高为一页吸附",
+          "note": "Paging mode: snap one viewport height per page",
           "required": false,
           "type": "bool"
         },
@@ -4068,7 +4068,7 @@
           ],
           "json_type": "string",
           "name": "snap_alignment",
-          "note": "吸附对齐方位（Start/Center/End）",
+          "note": "Snap alignment (Start/Center/End)",
           "required": false,
           "type": "ScrollSnapAlignment"
         }
@@ -4091,41 +4091,41 @@
       "props_schema": {
         "cache_extent": {
           "default": "200.0",
-          "description": "可见区外预取缓冲(dp)",
+          "description": "Prefetch buffer beyond the viewport (dp)",
           "minimum": "0",
           "type": "number"
         },
         "cell_extent": {
           "default": "96.0",
-          "description": "单元格高(dp)（宽=视口宽/列数）",
+          "description": "Cell height (dp), width = viewport width / column count",
           "minimum": "0",
           "type": "number"
         },
         "columns": {
           "default": "1",
-          "description": "列数",
+          "description": "Column count",
           "minimum": "1",
           "type": "integer"
         },
         "count": {
           "default": "0",
-          "description": "总项数",
+          "description": "Total item count",
           "minimum": "0",
           "type": "integer"
         },
         "restore_key": {
-          "description": "滚动位置保存键（空=不参与恢复）",
+          "description": "Scroll position save key (empty = excluded from restore)",
           "type": "string"
         },
         "scroll_offset": {
           "default": "0.0",
-          "description": "纵向滚动偏移(dp)",
+          "description": "Vertical scroll offset (dp)",
           "minimum": "0",
           "type": "number"
         },
         "snap_alignment": {
           "default": "Start",
-          "description": "吸附对齐方位（Start/Center/End）",
+          "description": "Snap alignment (Start/Center/End)",
           "enum": [
             "Start",
             "Center",
@@ -4135,13 +4135,13 @@
         },
         "snap_extent": {
           "default": "0.0",
-          "description": "吸附行周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "description": "Row snap period (dp); <=0 disables, ignored when snap_paging=true",
           "minimum": "0",
           "type": "number"
         },
         "snap_paging": {
           "default": "false",
-          "description": "分页模式：以视口高为一页吸附",
+          "description": "Paging mode: snap one viewport height per page",
           "type": "boolean"
         }
       },
@@ -4170,7 +4170,7 @@
         {
           "default": "",
           "name": "tag",
-          "note": "共享元素配对键",
+          "note": "Shared element pairing key",
           "required": false,
           "type": "string"
         }
@@ -4184,7 +4184,7 @@
       ],
       "props_schema": {
         "tag": {
-          "description": "共享元素配对键"
+          "description": "Shared element pairing key"
         }
       },
       "thread": "main",
@@ -4214,7 +4214,7 @@
           "default": "nullopt",
           "json_type": "string",
           "name": "source",
-          "note": "源文件路径",
+          "note": "Source file path",
           "required": false,
           "type": "string"
         },
@@ -4223,7 +4223,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "image_width",
-          "note": "图像宽度(px)",
+          "note": "Image width (px)",
           "required": false,
           "type": "int"
         },
@@ -4232,7 +4232,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "image_height",
-          "note": "图像高度(px)",
+          "note": "Image height (px)",
           "required": false,
           "type": "int"
         },
@@ -4273,13 +4273,13 @@
         },
         "image_height": {
           "default": "0",
-          "description": "图像高度(px)",
+          "description": "Image height (px)",
           "minimum": "0",
           "type": "integer"
         },
         "image_width": {
           "default": "0",
-          "description": "图像宽度(px)",
+          "description": "Image width (px)",
           "minimum": "0",
           "type": "integer"
         },
@@ -4289,7 +4289,7 @@
         },
         "source": {
           "default": "nullopt",
-          "description": "源文件路径",
+          "description": "Source file path",
           "type": "string"
         },
         "width": {
@@ -4335,7 +4335,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "count",
-          "note": "总项数",
+          "note": "Total item count",
           "required": true,
           "type": "int"
         },
@@ -4344,7 +4344,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "item_extent",
-          "note": "固定行高(dp)",
+          "note": "Fixed row height (dp)",
           "required": false,
           "type": "float"
         },
@@ -4353,7 +4353,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "scroll_offset",
-          "note": "当前滚动偏移(dp)",
+          "note": "Current scroll offset (dp)",
           "required": false,
           "type": "float"
         },
@@ -4362,7 +4362,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "cache_extent",
-          "note": "可见区外预取缓冲(dp)",
+          "note": "Prefetch buffer beyond the viewport (dp)",
           "required": false,
           "type": "float"
         },
@@ -4370,7 +4370,7 @@
           "default": "",
           "json_type": "string",
           "name": "restore_key",
-          "note": "滚动位置保存键（空=不参与恢复）",
+          "note": "Scroll position save key (empty = excluded from restore)",
           "required": false,
           "type": "string"
         },
@@ -4379,7 +4379,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "snap_extent",
-          "note": "吸附周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "note": "Snap period (dp); <=0 disables, ignored when snap_paging=true",
           "required": false,
           "type": "float"
         },
@@ -4387,7 +4387,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "snap_paging",
-          "note": "分页模式：以视口高为一页吸附",
+          "note": "Paging mode: snap one viewport height per page",
           "required": false,
           "type": "bool"
         },
@@ -4400,7 +4400,7 @@
           ],
           "json_type": "string",
           "name": "snap_alignment",
-          "note": "吸附对齐方位（Start/Center/End）",
+          "note": "Snap alignment (Start/Center/End)",
           "required": false,
           "type": "ScrollSnapAlignment"
         }
@@ -4422,35 +4422,35 @@
       "props_schema": {
         "cache_extent": {
           "default": "200.0",
-          "description": "可见区外预取缓冲(dp)",
+          "description": "Prefetch buffer beyond the viewport (dp)",
           "minimum": "0",
           "type": "number"
         },
         "count": {
           "default": "0",
-          "description": "总项数",
+          "description": "Total item count",
           "minimum": "0",
           "type": "integer"
         },
         "item_extent": {
           "default": "48.0",
-          "description": "固定行高(dp)",
+          "description": "Fixed row height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "restore_key": {
-          "description": "滚动位置保存键（空=不参与恢复）",
+          "description": "Scroll position save key (empty = excluded from restore)",
           "type": "string"
         },
         "scroll_offset": {
           "default": "0.0",
-          "description": "当前滚动偏移(dp)",
+          "description": "Current scroll offset (dp)",
           "minimum": "0",
           "type": "number"
         },
         "snap_alignment": {
           "default": "Start",
-          "description": "吸附对齐方位（Start/Center/End）",
+          "description": "Snap alignment (Start/Center/End)",
           "enum": [
             "Start",
             "Center",
@@ -4460,13 +4460,13 @@
         },
         "snap_extent": {
           "default": "0.0",
-          "description": "吸附周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "description": "Snap period (dp); <=0 disables, ignored when snap_paging=true",
           "minimum": "0",
           "type": "number"
         },
         "snap_paging": {
           "default": "false",
-          "description": "分页模式：以视口高为一页吸附",
+          "description": "Paging mode: snap one viewport height per page",
           "type": "boolean"
         }
       },
@@ -4491,7 +4491,7 @@
       "events": [
         "on_item_click",
         "void(int)",
-        "子项被点击时回调（参数为索引）"
+        "Callback when a child is clicked (argument is the index)"
       ],
       "examples": [
         "au::LazyRow{ 10, [](int i){ return au::Text(std::to_string(i)); } }"
@@ -4503,28 +4503,28 @@
         {
           "default": "0",
           "name": "item_count",
-          "note": "子项总数",
+          "note": "Child count",
           "required": false,
           "type": "int"
         },
         {
           "default": "96.0",
           "name": "item_extent",
-          "note": "子项固定宽度(px)",
+          "note": "Fixed child width (px)",
           "required": false,
           "type": "float"
         },
         {
           "default": "0.0",
           "name": "cache_extent",
-          "note": "视口外预构建缓冲(px)",
+          "note": "Prebuild buffer beyond the viewport (px)",
           "required": false,
           "type": "float"
         },
         {
           "default": "",
           "name": "restore_key",
-          "note": "滚动位置保存键（空=不参与恢复）",
+          "note": "Scroll position save key (empty = excluded from restore)",
           "required": false,
           "type": "string"
         }
@@ -4543,18 +4543,18 @@
       "props_schema": {
         "cache_extent": {
           "default": "0.0",
-          "description": "视口外预构建缓冲(px)"
+          "description": "Prebuild buffer beyond the viewport (px)"
         },
         "item_count": {
           "default": "0",
-          "description": "子项总数"
+          "description": "Child count"
         },
         "item_extent": {
           "default": "96.0",
-          "description": "子项固定宽度(px)"
+          "description": "Fixed child width (px)"
         },
         "restore_key": {
-          "description": "滚动位置保存键（空=不参与恢复）"
+          "description": "Scroll position save key (empty = excluded from restore)"
         }
       },
       "thread": "main",
@@ -4616,7 +4616,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "series",
-          "note": "数据系列数组（values 等距，x = 索引）",
+          "note": "Data series array (values equally spaced, x = index)",
           "required": false,
           "type": "vector<ChartSeries>"
         },
@@ -4624,7 +4624,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "categories",
-          "note": "x 轴类目标签；缺省为序号",
+          "note": "x axis category labels; defaults to the index",
           "required": false,
           "type": "vector<string>"
         },
@@ -4632,7 +4632,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "show_dots",
-          "note": "是否绘制数据点圆点",
+          "note": "Draw dots at the data points",
           "required": false,
           "type": "bool"
         },
@@ -4641,7 +4641,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "line_width",
-          "note": "折线宽度(dp)",
+          "note": "Line width (dp)",
           "required": false,
           "type": "float"
         },
@@ -4650,7 +4650,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "dot_radius",
-          "note": "数据点半径(dp)",
+          "note": "Data point radius (dp)",
           "required": false,
           "type": "float"
         },
@@ -4658,7 +4658,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "show_crosshair",
-          "note": "悬停时绘制吸附最近数据点的十字准线",
+          "note": "Draw a crosshair snapped to the nearest data point on hover",
           "required": false,
           "type": "bool"
         },
@@ -4666,7 +4666,7 @@
           "default": "{}",
           "json_type": "object",
           "name": "axis_x",
-          "note": "类目轴规格：{visible,label,tick_count,show_grid_lines}",
+          "note": "Category axis spec: {visible,label,tick_count,show_grid_lines}",
           "required": false,
           "type": "Json"
         },
@@ -4674,7 +4674,7 @@
           "default": "{}",
           "json_type": "object",
           "name": "axis_y",
-          "note": "数值轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "note": "Value axis spec: {visible,label,tick_count,min,max,show_grid_lines,include_zero}",
           "required": false,
           "type": "Json"
         },
@@ -4682,7 +4682,7 @@
           "default": "{\"visible\":true,\"position\":\"Top\"}",
           "json_type": "object",
           "name": "legend",
-          "note": "图例规格：{visible,position:Top|Bottom|Right}",
+          "note": "Legend spec: {visible,position:Top|Bottom|Right}",
           "required": false,
           "type": "Json"
         },
@@ -4690,7 +4690,7 @@
           "default": "{8,8,8,8}",
           "json_type": "object",
           "name": "padding",
-          "note": "图内留白(dp)",
+          "note": "In-chart padding (dp)",
           "required": false,
           "type": "EdgeInsets"
         },
@@ -4735,22 +4735,22 @@
       "props_schema": {
         "axis_x": {
           "default": "{}",
-          "description": "类目轴规格：{visible,label,tick_count,show_grid_lines}",
+          "description": "Category axis spec: {visible,label,tick_count,show_grid_lines}",
           "type": "object"
         },
         "axis_y": {
           "default": "{}",
-          "description": "数值轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+          "description": "Value axis spec: {visible,label,tick_count,min,max,show_grid_lines,include_zero}",
           "type": "object"
         },
         "categories": {
           "default": "[]",
-          "description": "x 轴类目标签；缺省为序号",
+          "description": "x axis category labels; defaults to the index",
           "type": "array"
         },
         "dot_radius": {
           "default": "3.0",
-          "description": "数据点半径(dp)",
+          "description": "Data point radius (dp)",
           "minimum": "0",
           "type": "number"
         },
@@ -4760,23 +4760,23 @@
         },
         "legend": {
           "default": "{\"visible\":true,\"position\":\"Top\"}",
-          "description": "图例规格：{visible,position:Top|Bottom|Right}",
+          "description": "Legend spec: {visible,position:Top|Bottom|Right}",
           "type": "object"
         },
         "line_width": {
           "default": "2.0",
-          "description": "折线宽度(dp)",
+          "description": "Line width (dp)",
           "minimum": "0",
           "type": "number"
         },
         "padding": {
           "default": "{8,8,8,8}",
-          "description": "图内留白(dp)",
+          "description": "In-chart padding (dp)",
           "type": "object"
         },
         "series": {
           "default": "[]",
-          "description": "数据系列数组（values 等距，x = 索引）",
+          "description": "Data series array (values equally spaced, x = index)",
           "type": "array"
         },
         "show": {
@@ -4785,12 +4785,12 @@
         },
         "show_crosshair": {
           "default": "true",
-          "description": "悬停时绘制吸附最近数据点的十字准线",
+          "description": "Draw a crosshair snapped to the nearest data point on hover",
           "type": "boolean"
         },
         "show_dots": {
           "default": "true",
-          "description": "是否绘制数据点圆点",
+          "description": "Draw dots at the data points",
           "type": "boolean"
         },
         "width": {
@@ -4828,7 +4828,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "items",
-          "note": "行数据",
+          "note": "Row data",
           "required": true,
           "type": "vector<string>"
         },
@@ -4836,7 +4836,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "multi_select",
-          "note": "多选模式",
+          "note": "Multi-selection mode",
           "required": false,
           "type": "bool"
         }
@@ -4852,12 +4852,12 @@
       "props_schema": {
         "items": {
           "default": "[]",
-          "description": "行数据",
+          "description": "Row data",
           "type": "array"
         },
         "multi_select": {
           "default": "false",
-          "description": "多选模式",
+          "description": "Multi-selection mode",
           "type": "boolean"
         }
       },
@@ -5003,7 +5003,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "bar_height",
-          "note": "菜单栏高度(dp)",
+          "note": "Menu bar height (dp)",
           "required": false,
           "type": "float"
         },
@@ -5011,7 +5011,7 @@
           "default": "-1",
           "json_type": "integer",
           "name": "open_menu",
-          "note": "当前展开的菜单序号(-1=无)",
+          "note": "Currently open menu index (-1 = none)",
           "required": false,
           "type": "int"
         }
@@ -5027,13 +5027,13 @@
       "props_schema": {
         "bar_height": {
           "default": "28.0",
-          "description": "菜单栏高度(dp)",
+          "description": "Menu bar height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "open_menu": {
           "default": "-1",
-          "description": "当前展开的菜单序号(-1=无)",
+          "description": "Currently open menu index (-1 = none)",
           "type": "integer"
         }
       },
@@ -5098,7 +5098,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "current",
-          "note": "当前页码",
+          "note": "Current page",
           "required": false,
           "type": "int"
         },
@@ -5106,7 +5106,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "show_indicator",
-          "note": "是否显示圆点指示器",
+          "note": "Show dot indicator",
           "required": false,
           "type": "bool"
         }
@@ -5122,13 +5122,13 @@
       "props_schema": {
         "current": {
           "default": "0",
-          "description": "当前页码",
+          "description": "Current page",
           "minimum": "0",
           "type": "integer"
         },
         "show_indicator": {
           "default": "true",
-          "description": "是否显示圆点指示器",
+          "description": "Show dot indicator",
           "type": "boolean"
         }
       },
@@ -5157,7 +5157,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "visible",
-          "note": "是否显示统计",
+          "note": "Show statistics",
           "required": false,
           "type": "bool"
         },
@@ -5165,7 +5165,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "show_counters",
-          "note": "是否显示渲染计数器与长任务行",
+          "note": "Show the render counters and long-task rows",
           "required": false,
           "type": "bool"
         }
@@ -5179,12 +5179,12 @@
       "props_schema": {
         "show_counters": {
           "default": "true",
-          "description": "是否显示渲染计数器与长任务行",
+          "description": "Show the render counters and long-task rows",
           "type": "boolean"
         },
         "visible": {
           "default": "true",
-          "description": "是否显示统计",
+          "description": "Show statistics",
           "type": "boolean"
         }
       },
@@ -5233,7 +5233,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "sections",
-          "note": "扇区数组：[{name, value, color?}]，占比 = value / Σvalue",
+          "note": "Sector array: [{name, value, color?}], share = value / sum(value)",
           "required": false,
           "type": "vector<PieSection>"
         },
@@ -5243,7 +5243,7 @@
           "maximum": "0.95",
           "minimum": "0",
           "name": "center_space_ratio",
-          "note": "内径 / 外径比；> 0 即环图，夹取 [0,0.95]",
+          "note": "Inner / outer radius ratio; > 0 makes a donut, clamped to [0,0.95]",
           "required": false,
           "type": "float"
         },
@@ -5251,7 +5251,7 @@
           "default": "-90.0",
           "json_type": "number",
           "name": "start_angle",
-          "note": "起始角（度，0 = +x 方向；-90 = 12 点钟）",
+          "note": "Start angle (degrees, 0 = +x direction; -90 = 12 o'clock)",
           "required": false,
           "type": "float"
         },
@@ -5259,7 +5259,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "show_percentage_labels",
-          "note": "扇区内百分比文本",
+          "note": "Percentage text inside the sectors",
           "required": false,
           "type": "bool"
         },
@@ -5268,7 +5268,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "section_gap",
-          "note": "扇区间隙(dp)",
+          "note": "Gap between sectors (dp)",
           "required": false,
           "type": "float"
         },
@@ -5276,7 +5276,7 @@
           "default": "{\"visible\":true,\"position\":\"Top\"}",
           "json_type": "object",
           "name": "legend",
-          "note": "图例规格：{visible,position:Top|Bottom|Right}",
+          "note": "Legend spec: {visible,position:Top|Bottom|Right}",
           "required": false,
           "type": "Json"
         },
@@ -5284,7 +5284,7 @@
           "default": "{8,8,8,8}",
           "json_type": "object",
           "name": "padding",
-          "note": "图内留白(dp)",
+          "note": "In-chart padding (dp)",
           "required": false,
           "type": "EdgeInsets"
         },
@@ -5326,7 +5326,7 @@
       "props_schema": {
         "center_space_ratio": {
           "default": "0.0",
-          "description": "内径 / 外径比；> 0 即环图，夹取 [0,0.95]",
+          "description": "Inner / outer radius ratio; > 0 makes a donut, clamped to [0,0.95]",
           "maximum": "0.95",
           "minimum": "0",
           "type": "number"
@@ -5337,23 +5337,23 @@
         },
         "legend": {
           "default": "{\"visible\":true,\"position\":\"Top\"}",
-          "description": "图例规格：{visible,position:Top|Bottom|Right}",
+          "description": "Legend spec: {visible,position:Top|Bottom|Right}",
           "type": "object"
         },
         "padding": {
           "default": "{8,8,8,8}",
-          "description": "图内留白(dp)",
+          "description": "In-chart padding (dp)",
           "type": "object"
         },
         "section_gap": {
           "default": "2.0",
-          "description": "扇区间隙(dp)",
+          "description": "Gap between sectors (dp)",
           "minimum": "0",
           "type": "number"
         },
         "sections": {
           "default": "[]",
-          "description": "扇区数组：[{name, value, color?}]，占比 = value / Σvalue",
+          "description": "Sector array: [{name, value, color?}], share = value / sum(value)",
           "type": "array"
         },
         "show": {
@@ -5362,12 +5362,12 @@
         },
         "show_percentage_labels": {
           "default": "false",
-          "description": "扇区内百分比文本",
+          "description": "Percentage text inside the sectors",
           "type": "boolean"
         },
         "start_angle": {
           "default": "-90.0",
-          "description": "起始角（度，0 = +x 方向；-90 = 12 点钟）",
+          "description": "Start angle (degrees, 0 = +x direction; -90 = 12 o'clock)",
           "type": "number"
         },
         "width": {
@@ -5443,7 +5443,7 @@
           "default": "{85,85,85,255}",
           "json_type": "array",
           "name": "text_color",
-          "note": "文字色",
+          "note": "Text color",
           "required": false,
           "type": "Color"
         },
@@ -5505,7 +5505,7 @@
         },
         "text_color": {
           "default": "{85,85,85,255}",
-          "description": "文字色",
+          "description": "Text color",
           "type": "array"
         },
         "width": {
@@ -5544,7 +5544,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "open",
-          "note": "是否打开",
+          "note": "Open",
           "required": false,
           "type": "bool"
         },
@@ -5552,7 +5552,7 @@
           "default": "0",
           "json_type": "number",
           "name": "anchor_x",
-          "note": "锚点 X（全局坐标）",
+          "note": "Anchor X (global coordinates)",
           "required": false,
           "type": "float"
         },
@@ -5560,7 +5560,7 @@
           "default": "0",
           "json_type": "number",
           "name": "anchor_y",
-          "note": "锚点 Y（全局坐标）",
+          "note": "Anchor Y (global coordinates)",
           "required": false,
           "type": "float"
         },
@@ -5568,7 +5568,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "dismiss_on_outside_click",
-          "note": "点击外部自动关闭",
+          "note": "Close automatically when clicking outside",
           "required": false,
           "type": "bool"
         }
@@ -5586,22 +5586,22 @@
       "props_schema": {
         "anchor_x": {
           "default": "0",
-          "description": "锚点 X（全局坐标）",
+          "description": "Anchor X (global coordinates)",
           "type": "number"
         },
         "anchor_y": {
           "default": "0",
-          "description": "锚点 Y（全局坐标）",
+          "description": "Anchor Y (global coordinates)",
           "type": "number"
         },
         "dismiss_on_outside_click": {
           "default": "true",
-          "description": "点击外部自动关闭",
+          "description": "Close automatically when clicking outside",
           "type": "boolean"
         },
         "open": {
           "default": "false",
-          "description": "是否打开",
+          "description": "Open",
           "type": "boolean"
         }
       },
@@ -5665,7 +5665,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "cancellable",
-          "note": "是否可取消",
+          "note": "Cancellable",
           "required": false,
           "type": "bool"
         }
@@ -5683,7 +5683,7 @@
       "props_schema": {
         "cancellable": {
           "default": "true",
-          "description": "是否可取消",
+          "description": "Cancellable",
           "type": "boolean"
         },
         "message": {
@@ -5744,7 +5744,7 @@
           "maximum": "1",
           "minimum": "0",
           "name": "value",
-          "note": "进度值[0,1]",
+          "note": "Progress value [0,1]",
           "required": false,
           "type": "double"
         },
@@ -5752,7 +5752,7 @@
           "default": "theme.primary",
           "json_type": "array",
           "name": "color",
-          "note": "填充色（缺省跟随主题 primary）",
+          "note": "Fill color (defaults to theme primary)",
           "required": false,
           "type": "Color"
         },
@@ -5760,7 +5760,7 @@
           "default": "{220,220,220,255}",
           "json_type": "array",
           "name": "track_color",
-          "note": "轨道底色",
+          "note": "Track color",
           "required": false,
           "type": "Color"
         },
@@ -5769,7 +5769,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "thickness",
-          "note": "厚度(dp)，决定自然高度",
+          "note": "Thickness (dp), determines the natural height",
           "required": false,
           "type": "float"
         },
@@ -5777,7 +5777,7 @@
           "default": "-1.0",
           "json_type": "number",
           "name": "corner_radius",
-          "note": "圆角半径(dp)；<0 自动=厚度一半，0=直角",
+          "note": "Corner radius (dp); <0 = half the thickness, 0 = square corners",
           "required": false,
           "type": "float"
         },
@@ -5816,12 +5816,12 @@
       "props_schema": {
         "color": {
           "default": "theme.primary",
-          "description": "填充色（缺省跟随主题 primary）",
+          "description": "Fill color (defaults to theme primary)",
           "type": "array"
         },
         "corner_radius": {
           "default": "-1.0",
-          "description": "圆角半径(dp)；<0 自动=厚度一半，0=直角",
+          "description": "Corner radius (dp); <0 = half the thickness, 0 = square corners",
           "type": "number"
         },
         "height": {
@@ -5834,18 +5834,18 @@
         },
         "thickness": {
           "default": "6.0",
-          "description": "厚度(dp)，决定自然高度",
+          "description": "Thickness (dp), determines the natural height",
           "minimum": "0",
           "type": "number"
         },
         "track_color": {
           "default": "{220,220,220,255}",
-          "description": "轨道底色",
+          "description": "Track color",
           "type": "array"
         },
         "value": {
           "default": "0.0",
-          "description": "进度值[0,1]",
+          "description": "Progress value [0,1]",
           "maximum": "1",
           "minimum": "0",
           "type": "number"
@@ -5889,7 +5889,7 @@
         "on_refresh"
       ],
       "examples": [
-        "au::PullToRefresh(au::Scroll{...}) /* 顶部下拉触发刷新 */"
+        "au::PullToRefresh(au::Scroll{...}) /* pull down at the top to trigger a refresh */"
       ],
       "is_clickable": false,
       "is_container": true,
@@ -5898,14 +5898,14 @@
         {
           "default": "64.0",
           "name": "threshold",
-          "note": "触发刷新的下拉距离(dp)",
+          "note": "Pull distance that triggers a refresh (dp)",
           "required": false,
           "type": "float"
         },
         {
           "default": "128.0",
           "name": "max_pull",
-          "note": "橡皮筋下拉上限(dp)",
+          "note": "Rubber-band pull limit (dp)",
           "required": false,
           "type": "float"
         }
@@ -5921,11 +5921,11 @@
       "props_schema": {
         "max_pull": {
           "default": "128.0",
-          "description": "橡皮筋下拉上限(dp)"
+          "description": "Rubber-band pull limit (dp)"
         },
         "threshold": {
           "default": "64.0",
-          "description": "触发刷新的下拉距离(dp)"
+          "description": "Pull distance that triggers a refresh (dp)"
         }
       },
       "thread": "main",
@@ -5978,7 +5978,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "options",
-          "note": "选项列表",
+          "note": "Option list",
           "required": true,
           "type": "vector<string>"
         },
@@ -5987,7 +5987,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "selected_index",
-          "note": "选中序号",
+          "note": "Selected index",
           "required": false,
           "type": "int"
         },
@@ -5995,7 +5995,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "horizontal",
-          "note": "水平排列",
+          "note": "Horizontal layout",
           "required": false,
           "type": "bool"
         },
@@ -6003,7 +6003,7 @@
           "default": "theme.primary",
           "json_type": "array",
           "name": "active_color",
-          "note": "选中态圆环与圆点色（缺省跟随主题 primary）",
+          "note": "Selected ring and dot color (defaults to theme primary)",
           "required": false,
           "type": "Color"
         },
@@ -6011,7 +6011,7 @@
           "default": "{140,140,146,255}",
           "json_type": "array",
           "name": "border_color",
-          "note": "未选中圆环色",
+          "note": "Unselected ring color",
           "required": false,
           "type": "Color"
         },
@@ -6019,7 +6019,7 @@
           "default": "{30,30,30,255}",
           "json_type": "array",
           "name": "text_color",
-          "note": "选项文本色",
+          "note": "Option text color",
           "required": false,
           "type": "Color"
         },
@@ -6028,7 +6028,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "dot_size",
-          "note": "圆点外径(dp)",
+          "note": "Dot outer radius (dp)",
           "required": false,
           "type": "float"
         },
@@ -6037,7 +6037,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "row_height",
-          "note": "行高(dp)",
+          "note": "Row height (dp)",
           "required": false,
           "type": "float"
         },
@@ -6046,7 +6046,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "font_size",
-          "note": "选项字号(pt)",
+          "note": "Option font size (pt)",
           "required": false,
           "type": "float"
         },
@@ -6054,7 +6054,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "enabled",
-          "note": "是否可交互（禁用灰化）",
+          "note": "Interactive (greyed out when disabled)",
           "required": false,
           "type": "bool"
         }
@@ -6077,56 +6077,56 @@
       "props_schema": {
         "active_color": {
           "default": "theme.primary",
-          "description": "选中态圆环与圆点色（缺省跟随主题 primary）",
+          "description": "Selected ring and dot color (defaults to theme primary)",
           "type": "array"
         },
         "border_color": {
           "default": "{140,140,146,255}",
-          "description": "未选中圆环色",
+          "description": "Unselected ring color",
           "type": "array"
         },
         "dot_size": {
           "default": "16.0",
-          "description": "圆点外径(dp)",
+          "description": "Dot outer radius (dp)",
           "minimum": "0",
           "type": "number"
         },
         "enabled": {
           "default": "true",
-          "description": "是否可交互（禁用灰化）",
+          "description": "Interactive (greyed out when disabled)",
           "type": "boolean"
         },
         "font_size": {
           "default": "13.0",
-          "description": "选项字号(pt)",
+          "description": "Option font size (pt)",
           "minimum": "0",
           "type": "number"
         },
         "horizontal": {
           "default": "false",
-          "description": "水平排列",
+          "description": "Horizontal layout",
           "type": "boolean"
         },
         "options": {
           "default": "[]",
-          "description": "选项列表",
+          "description": "Option list",
           "type": "array"
         },
         "row_height": {
           "default": "28.0",
-          "description": "行高(dp)",
+          "description": "Row height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "selected_index": {
           "default": "0",
-          "description": "选中序号",
+          "description": "Selected index",
           "minimum": "0",
           "type": "integer"
         },
         "text_color": {
           "default": "{30,30,30,255}",
-          "description": "选项文本色",
+          "description": "Option text color",
           "type": "array"
         }
       },
@@ -6186,7 +6186,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "text",
-          "note": "纯文本内容（序列化用）",
+          "note": "Plain text content (for serialization)",
           "required": false,
           "type": "string"
         },
@@ -6230,7 +6230,7 @@
         },
         "text": {
           "default": "\"\"",
-          "description": "纯文本内容（序列化用）",
+          "description": "Plain text content (for serialization)",
           "type": "string"
         },
         "width": {
@@ -6267,7 +6267,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "text",
-          "note": "纯文本内容（序列化用）",
+          "note": "Plain text content (for serialization)",
           "required": false,
           "type": "string"
         },
@@ -6296,7 +6296,7 @@
           "default": "\"auto\"",
           "json_type": "string",
           "name": "direction",
-          "note": "书写方向(auto=继承环境)",
+          "note": "Text direction (auto = inherit from environment)",
           "required": false,
           "type": "TextDirection"
         }
@@ -6311,7 +6311,7 @@
       "props_schema": {
         "direction": {
           "default": "\"auto\"",
-          "description": "书写方向(auto=继承环境)",
+          "description": "Text direction (auto = inherit from environment)",
           "type": "string"
         },
         "height": {
@@ -6324,7 +6324,7 @@
         },
         "text": {
           "default": "\"\"",
-          "description": "纯文本内容（序列化用）",
+          "description": "Plain text content (for serialization)",
           "type": "string"
         },
         "width": {
@@ -6372,7 +6372,7 @@
           ],
           "json_type": "string",
           "name": "main_axis_alignment",
-          "note": "主轴对齐",
+          "note": "Main axis alignment",
           "required": false,
           "type": "MainAxisAlignment"
         },
@@ -6387,7 +6387,7 @@
           ],
           "json_type": "string",
           "name": "cross_axis_alignment",
-          "note": "交叉轴对齐",
+          "note": "Cross axis alignment",
           "required": false,
           "type": "CrossAxisAlignment"
         },
@@ -6399,7 +6399,7 @@
           ],
           "json_type": "string",
           "name": "main_axis_size",
-          "note": "主轴尺寸策略",
+          "note": "Main axis size policy",
           "required": false,
           "type": "MainAxisSize"
         },
@@ -6408,7 +6408,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "gap",
-          "note": "子项间距(px)",
+          "note": "Child spacing (px)",
           "required": false,
           "type": "float"
         },
@@ -6447,7 +6447,7 @@
       "props_schema": {
         "cross_axis_alignment": {
           "default": "Start",
-          "description": "交叉轴对齐",
+          "description": "Cross axis alignment",
           "enum": [
             "Start",
             "Center",
@@ -6459,7 +6459,7 @@
         },
         "gap": {
           "default": "0.0",
-          "description": "子项间距(px)",
+          "description": "Child spacing (px)",
           "minimum": "0",
           "type": "number"
         },
@@ -6469,7 +6469,7 @@
         },
         "main_axis_alignment": {
           "default": "Start",
-          "description": "主轴对齐",
+          "description": "Main axis alignment",
           "enum": [
             "Start",
             "Center",
@@ -6482,7 +6482,7 @@
         },
         "main_axis_size": {
           "default": "Min",
-          "description": "主轴尺寸策略",
+          "description": "Main axis size policy",
           "enum": [
             "Min",
             "Max"
@@ -6552,7 +6552,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "series",
-          "note": "散点系列数组：[{name, points:[[x,y],...], color?, dot_radius}]",
+          "note": "Scatter series array: [{name, points:[[x,y],...], color?, dot_radius}]",
           "required": false,
           "type": "vector<ScatterSeries>"
         },
@@ -6560,7 +6560,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "show_crosshair",
-          "note": "悬停时绘制吸附最近点的十字准线",
+          "note": "Draw a crosshair snapped to the nearest point on hover",
           "required": false,
           "type": "bool"
         },
@@ -6568,7 +6568,7 @@
           "default": "{}",
           "json_type": "object",
           "name": "axis_x",
-          "note": "x 轴规格：{visible,label,tick_count,min,max,show_grid_lines}",
+          "note": "x axis spec: {visible,label,tick_count,min,max,show_grid_lines}",
           "required": false,
           "type": "Json"
         },
@@ -6576,7 +6576,7 @@
           "default": "{}",
           "json_type": "object",
           "name": "axis_y",
-          "note": "y 轴规格：{visible,label,tick_count,min,max,show_grid_lines}",
+          "note": "y axis spec: {visible,label,tick_count,min,max,show_grid_lines}",
           "required": false,
           "type": "Json"
         },
@@ -6584,7 +6584,7 @@
           "default": "{\"visible\":true,\"position\":\"Top\"}",
           "json_type": "object",
           "name": "legend",
-          "note": "图例规格：{visible,position:Top|Bottom|Right}",
+          "note": "Legend spec: {visible,position:Top|Bottom|Right}",
           "required": false,
           "type": "Json"
         },
@@ -6592,7 +6592,7 @@
           "default": "{8,8,8,8}",
           "json_type": "object",
           "name": "padding",
-          "note": "图内留白(dp)",
+          "note": "In-chart padding (dp)",
           "required": false,
           "type": "EdgeInsets"
         },
@@ -6633,12 +6633,12 @@
       "props_schema": {
         "axis_x": {
           "default": "{}",
-          "description": "x 轴规格：{visible,label,tick_count,min,max,show_grid_lines}",
+          "description": "x axis spec: {visible,label,tick_count,min,max,show_grid_lines}",
           "type": "object"
         },
         "axis_y": {
           "default": "{}",
-          "description": "y 轴规格：{visible,label,tick_count,min,max,show_grid_lines}",
+          "description": "y axis spec: {visible,label,tick_count,min,max,show_grid_lines}",
           "type": "object"
         },
         "height": {
@@ -6647,17 +6647,17 @@
         },
         "legend": {
           "default": "{\"visible\":true,\"position\":\"Top\"}",
-          "description": "图例规格：{visible,position:Top|Bottom|Right}",
+          "description": "Legend spec: {visible,position:Top|Bottom|Right}",
           "type": "object"
         },
         "padding": {
           "default": "{8,8,8,8}",
-          "description": "图内留白(dp)",
+          "description": "In-chart padding (dp)",
           "type": "object"
         },
         "series": {
           "default": "[]",
-          "description": "散点系列数组：[{name, points:[[x,y],...], color?, dot_radius}]",
+          "description": "Scatter series array: [{name, points:[[x,y],...], color?, dot_radius}]",
           "type": "array"
         },
         "show": {
@@ -6666,7 +6666,7 @@
         },
         "show_crosshair": {
           "default": "true",
-          "description": "悬停时绘制吸附最近点的十字准线",
+          "description": "Draw a crosshair snapped to the nearest point on hover",
           "type": "boolean"
         },
         "width": {
@@ -6704,14 +6704,14 @@
         {
           "default": "16.0",
           "name": "step",
-          "note": "滚轮增量(px)",
+          "note": "Wheel scroll delta (px)",
           "required": false,
           "type": "float"
         },
         {
           "default": "",
           "name": "restore_key",
-          "note": "滚动位置保存键（空=不参与恢复）",
+          "note": "Scroll position save key (empty = excluded from restore)",
           "required": false,
           "type": "string"
         },
@@ -6720,7 +6720,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "snap_extent",
-          "note": "吸附周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "note": "Snap period (dp); <=0 disables, ignored when snap_paging=true",
           "required": false,
           "type": "float"
         },
@@ -6728,7 +6728,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "snap_paging",
-          "note": "分页模式：以视口高为一页吸附",
+          "note": "Paging mode: snap one viewport height per page",
           "required": false,
           "type": "bool"
         },
@@ -6741,7 +6741,7 @@
           ],
           "json_type": "string",
           "name": "snap_alignment",
-          "note": "吸附对齐方位（Start/Center/End）",
+          "note": "Snap alignment (Start/Center/End)",
           "required": false,
           "type": "ScrollSnapAlignment"
         },
@@ -6781,14 +6781,14 @@
           "default": "auto"
         },
         "restore_key": {
-          "description": "滚动位置保存键（空=不参与恢复）"
+          "description": "Scroll position save key (empty = excluded from restore)"
         },
         "show": {
           "default": "true"
         },
         "snap_alignment": {
           "default": "Start",
-          "description": "吸附对齐方位（Start/Center/End）",
+          "description": "Snap alignment (Start/Center/End)",
           "enum": [
             "Start",
             "Center",
@@ -6798,18 +6798,18 @@
         },
         "snap_extent": {
           "default": "0.0",
-          "description": "吸附周期dp（<=0=关闭；snap_paging=true 时忽略）",
+          "description": "Snap period (dp); <=0 disables, ignored when snap_paging=true",
           "minimum": "0",
           "type": "number"
         },
         "snap_paging": {
           "default": "false",
-          "description": "分页模式：以视口高为一页吸附",
+          "description": "Paging mode: snap one viewport height per page",
           "type": "boolean"
         },
         "step": {
           "default": "16.0",
-          "description": "滚轮增量(px)"
+          "description": "Wheel scroll delta (px)"
         },
         "width": {
           "default": "auto"
@@ -6866,7 +6866,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "selected",
-          "note": "选中序号",
+          "note": "Selected index",
           "required": false,
           "type": "int"
         },
@@ -6874,7 +6874,7 @@
           "default": "theme.primary",
           "json_type": "array",
           "name": "active_color",
-          "note": "选中段填充色（缺省跟随主题 primary）",
+          "note": "Selected segment fill color (defaults to theme primary)",
           "required": false,
           "type": "Color"
         },
@@ -6882,7 +6882,7 @@
           "default": "Color::black()",
           "json_type": "array",
           "name": "text_color",
-          "note": "未选中段文本色",
+          "note": "Unselected segment text color",
           "required": false,
           "type": "Color"
         },
@@ -6890,7 +6890,7 @@
           "default": "Color::white()",
           "json_type": "array",
           "name": "selected_text_color",
-          "note": "选中段文本色",
+          "note": "Selected segment text color",
           "required": false,
           "type": "Color"
         },
@@ -6898,7 +6898,7 @@
           "default": "{200,200,200,255}",
           "json_type": "array",
           "name": "border_color",
-          "note": "外框边框色",
+          "note": "Outer frame border color",
           "required": false,
           "type": "Color"
         },
@@ -6907,7 +6907,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "font_size",
-          "note": "字号(pt)",
+          "note": "Font size (pt)",
           "required": false,
           "type": "float"
         },
@@ -6916,7 +6916,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "corner_radius",
-          "note": "外框圆角半径(dp)",
+          "note": "Outer frame corner radius (dp)",
           "required": false,
           "type": "float"
         },
@@ -6924,7 +6924,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "enabled",
-          "note": "是否可交互（禁用灰化）",
+          "note": "Interactive (greyed out when disabled)",
           "required": false,
           "type": "bool"
         },
@@ -6967,28 +6967,28 @@
       "props_schema": {
         "active_color": {
           "default": "theme.primary",
-          "description": "选中段填充色（缺省跟随主题 primary）",
+          "description": "Selected segment fill color (defaults to theme primary)",
           "type": "array"
         },
         "border_color": {
           "default": "{200,200,200,255}",
-          "description": "外框边框色",
+          "description": "Outer frame border color",
           "type": "array"
         },
         "corner_radius": {
           "default": "6.0",
-          "description": "外框圆角半径(dp)",
+          "description": "Outer frame corner radius (dp)",
           "minimum": "0",
           "type": "number"
         },
         "enabled": {
           "default": "true",
-          "description": "是否可交互（禁用灰化）",
+          "description": "Interactive (greyed out when disabled)",
           "type": "boolean"
         },
         "font_size": {
           "default": "14.0",
-          "description": "字号(pt)",
+          "description": "Font size (pt)",
           "minimum": "0",
           "type": "number"
         },
@@ -6998,13 +6998,13 @@
         },
         "selected": {
           "default": "0",
-          "description": "选中序号",
+          "description": "Selected index",
           "minimum": "0",
           "type": "integer"
         },
         "selected_text_color": {
           "default": "Color::white()",
-          "description": "选中段文本色",
+          "description": "Selected segment text color",
           "type": "array"
         },
         "show": {
@@ -7013,7 +7013,7 @@
         },
         "text_color": {
           "default": "Color::black()",
-          "description": "未选中段文本色",
+          "description": "Unselected segment text color",
           "type": "array"
         },
         "width": {
@@ -7046,7 +7046,7 @@
         {
           "default": "true",
           "name": "visible",
-          "note": "是否可见",
+          "note": "Visible",
           "required": false,
           "type": "bool"
         },
@@ -7085,7 +7085,7 @@
         },
         "visible": {
           "default": "true",
-          "description": "是否可见"
+          "description": "Visible"
         },
         "width": {
           "default": "auto"
@@ -7128,35 +7128,35 @@
         {
           "default": "auto",
           "name": "width",
-          "note": "占位宽（0=占满）",
+          "note": "Placeholder width (0 = fill available)",
           "required": false,
           "type": "Length"
         },
         {
           "default": "16",
           "name": "height",
-          "note": "占位高",
+          "note": "Placeholder height",
           "required": false,
           "type": "Length"
         },
         {
           "default": "{220,220,220,255}",
           "name": "color",
-          "note": "底色",
+          "note": "Base color",
           "required": false,
           "type": "Color"
         },
         {
           "default": "{255,255,255,255}",
           "name": "highlight",
-          "note": "高亮带色",
+          "note": "Highlight band color",
           "required": false,
           "type": "Color"
         },
         {
           "default": "1.5",
           "name": "duration",
-          "note": "shimmer 周期(秒)",
+          "note": "Shimmer period (seconds)",
           "required": false,
           "type": "double"
         }
@@ -7173,23 +7173,23 @@
       "props_schema": {
         "color": {
           "default": "{220,220,220,255}",
-          "description": "底色"
+          "description": "Base color"
         },
         "duration": {
           "default": "1.5",
-          "description": "shimmer 周期(秒)"
+          "description": "Shimmer period (seconds)"
         },
         "height": {
           "default": "16",
-          "description": "占位高"
+          "description": "Placeholder height"
         },
         "highlight": {
           "default": "{255,255,255,255}",
-          "description": "高亮带色"
+          "description": "Highlight band color"
         },
         "width": {
           "default": "auto",
-          "description": "占位宽（0=占满）"
+          "description": "Placeholder width (0 = fill available)"
         }
       },
       "thread": "main",
@@ -7236,7 +7236,7 @@
           "default": "0.0",
           "json_type": "number",
           "name": "value",
-          "note": "当前值",
+          "note": "Current value",
           "required": false,
           "type": "double"
         },
@@ -7244,7 +7244,7 @@
           "default": "0.0",
           "json_type": "number",
           "name": "min",
-          "note": "最小值",
+          "note": "Min value",
           "required": false,
           "type": "double"
         },
@@ -7252,7 +7252,7 @@
           "default": "1.0",
           "json_type": "number",
           "name": "max",
-          "note": "最大值",
+          "note": "Max value",
           "required": false,
           "type": "double"
         },
@@ -7261,7 +7261,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "step",
-          "note": "步进；0=连续无级",
+          "note": "Step; 0 = continuous",
           "required": false,
           "type": "double"
         },
@@ -7269,7 +7269,7 @@
           "default": "theme.primary",
           "json_type": "array",
           "name": "active_color",
-          "note": "已填充轨道与滑块颜色（缺省跟随主题 primary）",
+          "note": "Filled track and thumb color (defaults to theme primary)",
           "required": false,
           "type": "Color"
         },
@@ -7277,7 +7277,7 @@
           "default": "{210,210,210,255}",
           "json_type": "array",
           "name": "inactive_color",
-          "note": "未填充轨道颜色",
+          "note": "Unfilled track color",
           "required": false,
           "type": "Color"
         },
@@ -7285,7 +7285,7 @@
           "default": "active_color",
           "json_type": "array",
           "name": "thumb_color",
-          "note": "滑块颜色（缺省与激活色一致）",
+          "note": "Thumb color (defaults to the active color)",
           "required": false,
           "type": "Color"
         },
@@ -7294,7 +7294,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "track_height",
-          "note": "轨道高度(dp)",
+          "note": "Track height (dp)",
           "required": false,
           "type": "float"
         },
@@ -7302,7 +7302,7 @@
           "default": "-1.0",
           "json_type": "number",
           "name": "thumb_size",
-          "note": "滑块直径(dp)；<0 自动=控件高−6",
+          "note": "Thumb diameter (dp); <0 = widget height - 6",
           "required": false,
           "type": "float"
         },
@@ -7310,7 +7310,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "enabled",
-          "note": "是否可交互（禁用灰化）",
+          "note": "Interactive (greyed out when disabled)",
           "required": false,
           "type": "bool"
         },
@@ -7352,12 +7352,12 @@
       "props_schema": {
         "active_color": {
           "default": "theme.primary",
-          "description": "已填充轨道与滑块颜色（缺省跟随主题 primary）",
+          "description": "Filled track and thumb color (defaults to theme primary)",
           "type": "array"
         },
         "enabled": {
           "default": "true",
-          "description": "是否可交互（禁用灰化）",
+          "description": "Interactive (greyed out when disabled)",
           "type": "boolean"
         },
         "height": {
@@ -7366,17 +7366,17 @@
         },
         "inactive_color": {
           "default": "{210,210,210,255}",
-          "description": "未填充轨道颜色",
+          "description": "Unfilled track color",
           "type": "array"
         },
         "max": {
           "default": "1.0",
-          "description": "最大值",
+          "description": "Max value",
           "type": "number"
         },
         "min": {
           "default": "0.0",
-          "description": "最小值",
+          "description": "Min value",
           "type": "number"
         },
         "show": {
@@ -7385,29 +7385,29 @@
         },
         "step": {
           "default": "0.0",
-          "description": "步进；0=连续无级",
+          "description": "Step; 0 = continuous",
           "minimum": "0",
           "type": "number"
         },
         "thumb_color": {
           "default": "active_color",
-          "description": "滑块颜色（缺省与激活色一致）",
+          "description": "Thumb color (defaults to the active color)",
           "type": "array"
         },
         "thumb_size": {
           "default": "-1.0",
-          "description": "滑块直径(dp)；<0 自动=控件高−6",
+          "description": "Thumb diameter (dp); <0 = widget height - 6",
           "type": "number"
         },
         "track_height": {
           "default": "6.0",
-          "description": "轨道高度(dp)",
+          "description": "Track height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "value": {
           "default": "0.0",
-          "description": "当前值",
+          "description": "Current value",
           "type": "number"
         },
         "width": {
@@ -7441,7 +7441,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "expand",
-          "note": "是否吸收剩余空间",
+          "note": "Absorb the remaining space",
           "required": false,
           "type": "bool"
         },
@@ -7477,7 +7477,7 @@
       "props_schema": {
         "expand": {
           "default": "true",
-          "description": "是否吸收剩余空间",
+          "description": "Absorb the remaining space",
           "type": "boolean"
         },
         "height": {
@@ -7531,7 +7531,7 @@
           "default": "[]",
           "json_type": "array",
           "name": "values",
-          "note": "单系列数据（等距）",
+          "note": "Single series data (evenly spaced)",
           "required": false,
           "type": "vector<double>"
         },
@@ -7539,7 +7539,7 @@
           "default": "palette[0]",
           "json_type": "array",
           "name": "color",
-          "note": "线条色；缺省取内置色板第 0 色",
+          "note": "Line color; defaults to the first color of the built-in palette",
           "required": false,
           "type": "Color"
         },
@@ -7548,7 +7548,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "line_width",
-          "note": "线宽(dp)",
+          "note": "Line width (dp)",
           "required": false,
           "type": "float"
         },
@@ -7556,7 +7556,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "show_end_dot",
-          "note": "末端数据点圆点",
+          "note": "Dot on the last data point",
           "required": false,
           "type": "bool"
         },
@@ -7565,7 +7565,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "dot_radius",
-          "note": "末端圆点半径(dp)",
+          "note": "End dot radius (dp)",
           "required": false,
           "type": "float"
         },
@@ -7573,7 +7573,7 @@
           "default": "{2,2,2,2}",
           "json_type": "object",
           "name": "padding",
-          "note": "图内留白(dp)",
+          "note": "In-chart padding (dp)",
           "required": false,
           "type": "EdgeInsets"
         },
@@ -7613,12 +7613,12 @@
       "props_schema": {
         "color": {
           "default": "palette[0]",
-          "description": "线条色；缺省取内置色板第 0 色",
+          "description": "Line color; defaults to the first color of the built-in palette",
           "type": "array"
         },
         "dot_radius": {
           "default": "2.0",
-          "description": "末端圆点半径(dp)",
+          "description": "End dot radius (dp)",
           "minimum": "0",
           "type": "number"
         },
@@ -7628,13 +7628,13 @@
         },
         "line_width": {
           "default": "1.5",
-          "description": "线宽(dp)",
+          "description": "Line width (dp)",
           "minimum": "0",
           "type": "number"
         },
         "padding": {
           "default": "{2,2,2,2}",
-          "description": "图内留白(dp)",
+          "description": "In-chart padding (dp)",
           "type": "object"
         },
         "show": {
@@ -7643,12 +7643,12 @@
         },
         "show_end_dot": {
           "default": "true",
-          "description": "末端数据点圆点",
+          "description": "Dot on the last data point",
           "type": "boolean"
         },
         "values": {
           "default": "[]",
-          "description": "单系列数据（等距）",
+          "description": "Single series data (evenly spaced)",
           "type": "array"
         },
         "width": {
@@ -7723,7 +7723,7 @@
           "default": "0",
           "json_type": "number",
           "name": "value",
-          "note": "当前值",
+          "note": "Current value",
           "required": false,
           "type": "double"
         },
@@ -7731,7 +7731,7 @@
           "default": "0",
           "json_type": "number",
           "name": "min",
-          "note": "最小值",
+          "note": "Min value",
           "required": false,
           "type": "double"
         },
@@ -7739,7 +7739,7 @@
           "default": "100",
           "json_type": "number",
           "name": "max",
-          "note": "最大值",
+          "note": "Max value",
           "required": false,
           "type": "double"
         },
@@ -7748,7 +7748,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "step",
-          "note": "步长",
+          "note": "Step",
           "required": false,
           "type": "double"
         },
@@ -7756,7 +7756,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "prefix",
-          "note": "前缀文本",
+          "note": "Prefix text",
           "required": false,
           "type": "string"
         },
@@ -7764,7 +7764,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "suffix",
-          "note": "后缀文本",
+          "note": "Suffix text",
           "required": false,
           "type": "string"
         },
@@ -7773,7 +7773,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "decimals",
-          "note": "显示小数位数",
+          "note": "Decimals shown",
           "required": false,
           "type": "int"
         },
@@ -7781,7 +7781,7 @@
           "default": "Color::white()",
           "json_type": "array",
           "name": "background",
-          "note": "背景色",
+          "note": "Background color",
           "required": false,
           "type": "Color"
         },
@@ -7789,7 +7789,7 @@
           "default": "{200,200,205,255}",
           "json_type": "array",
           "name": "border_color",
-          "note": "边框色",
+          "note": "Border color",
           "required": false,
           "type": "Color"
         },
@@ -7797,7 +7797,7 @@
           "default": "{30,30,30,255}",
           "json_type": "array",
           "name": "text_color",
-          "note": "数值文本色",
+          "note": "Value text color",
           "required": false,
           "type": "Color"
         },
@@ -7805,7 +7805,7 @@
           "default": "{100,100,105,255}",
           "json_type": "array",
           "name": "arrow_color",
-          "note": "箭头颜色",
+          "note": "Arrow color",
           "required": false,
           "type": "Color"
         },
@@ -7814,7 +7814,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "corner_radius",
-          "note": "圆角半径(dp)",
+          "note": "Corner radius (dp)",
           "required": false,
           "type": "float"
         },
@@ -7823,7 +7823,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "font_size",
-          "note": "数值字号(pt)",
+          "note": "Value font size (pt)",
           "required": false,
           "type": "float"
         },
@@ -7831,7 +7831,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "enabled",
-          "note": "是否可交互（禁用灰化）",
+          "note": "Interactive (greyed out when disabled)",
           "required": false,
           "type": "bool"
         }
@@ -7859,76 +7859,76 @@
       "props_schema": {
         "arrow_color": {
           "default": "{100,100,105,255}",
-          "description": "箭头颜色",
+          "description": "Arrow color",
           "type": "array"
         },
         "background": {
           "default": "Color::white()",
-          "description": "背景色",
+          "description": "Background color",
           "type": "array"
         },
         "border_color": {
           "default": "{200,200,205,255}",
-          "description": "边框色",
+          "description": "Border color",
           "type": "array"
         },
         "corner_radius": {
           "default": "4.0",
-          "description": "圆角半径(dp)",
+          "description": "Corner radius (dp)",
           "minimum": "0",
           "type": "number"
         },
         "decimals": {
           "default": "0",
-          "description": "显示小数位数",
+          "description": "Decimals shown",
           "minimum": "0",
           "type": "integer"
         },
         "enabled": {
           "default": "true",
-          "description": "是否可交互（禁用灰化）",
+          "description": "Interactive (greyed out when disabled)",
           "type": "boolean"
         },
         "font_size": {
           "default": "13.0",
-          "description": "数值字号(pt)",
+          "description": "Value font size (pt)",
           "minimum": "0",
           "type": "number"
         },
         "max": {
           "default": "100",
-          "description": "最大值",
+          "description": "Max value",
           "type": "number"
         },
         "min": {
           "default": "0",
-          "description": "最小值",
+          "description": "Min value",
           "type": "number"
         },
         "prefix": {
           "default": "\"\"",
-          "description": "前缀文本",
+          "description": "Prefix text",
           "type": "string"
         },
         "step": {
           "default": "1",
-          "description": "步长",
+          "description": "Step",
           "minimum": "0",
           "type": "number"
         },
         "suffix": {
           "default": "\"\"",
-          "description": "后缀文本",
+          "description": "Suffix text",
           "type": "string"
         },
         "text_color": {
           "default": "{30,30,30,255}",
-          "description": "数值文本色",
+          "description": "Value text color",
           "type": "array"
         },
         "value": {
           "default": "0",
-          "description": "当前值",
+          "description": "Current value",
           "type": "number"
         }
       },
@@ -7963,35 +7963,35 @@
         {
           "default": "Horizontal",
           "name": "orientation",
-          "note": "分割方向",
+          "note": "Split direction",
           "required": false,
           "type": "SplitterOrientation"
         },
         {
           "default": "0.5",
           "name": "ratio",
-          "note": "第一区域占比(0~1)",
+          "note": "First region share (0-1)",
           "required": false,
           "type": "float"
         },
         {
           "default": "50.0",
           "name": "min_first",
-          "note": "第一区域最小尺寸(dp)",
+          "note": "First region min size (dp)",
           "required": false,
           "type": "float"
         },
         {
           "default": "50.0",
           "name": "min_second",
-          "note": "第二区域最小尺寸(dp)",
+          "note": "Second region min size (dp)",
           "required": false,
           "type": "float"
         },
         {
           "default": "6.0",
           "name": "handle_size",
-          "note": "分隔条厚度(dp)",
+          "note": "Divider thickness (dp)",
           "required": false,
           "type": "float"
         }
@@ -8010,23 +8010,23 @@
       "props_schema": {
         "handle_size": {
           "default": "6.0",
-          "description": "分隔条厚度(dp)"
+          "description": "Divider thickness (dp)"
         },
         "min_first": {
           "default": "50.0",
-          "description": "第一区域最小尺寸(dp)"
+          "description": "First region min size (dp)"
         },
         "min_second": {
           "default": "50.0",
-          "description": "第二区域最小尺寸(dp)"
+          "description": "Second region min size (dp)"
         },
         "orientation": {
           "default": "Horizontal",
-          "description": "分割方向"
+          "description": "Split direction"
         },
         "ratio": {
           "default": "0.5",
-          "description": "第一区域占比(0~1)"
+          "description": "First region share (0-1)"
         }
       },
       "thread": "main",
@@ -8055,14 +8055,14 @@
         {
           "default": "TopLeft",
           "name": "alignment",
-          "note": "子节点对齐",
+          "note": "Child alignment",
           "required": false,
           "type": "Alignment"
         },
         {
           "default": "Passthrough",
           "name": "fit",
-          "note": "子节点适配策略",
+          "note": "Child fit policy",
           "required": false,
           "type": "StackFit"
         },
@@ -8096,11 +8096,11 @@
       "props_schema": {
         "alignment": {
           "default": "TopLeft",
-          "description": "子节点对齐"
+          "description": "Child alignment"
         },
         "fit": {
           "default": "Passthrough",
-          "description": "子节点适配策略"
+          "description": "Child fit policy"
         },
         "height": {
           "default": "auto"
@@ -8140,7 +8140,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "bar_height",
-          "note": "状态栏高度(dp)",
+          "note": "Status bar height (dp)",
           "required": false,
           "type": "float"
         },
@@ -8149,7 +8149,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "gap",
-          "note": "区域间距(dp)",
+          "note": "Region spacing (dp)",
           "required": false,
           "type": "float"
         }
@@ -8165,13 +8165,13 @@
       "props_schema": {
         "bar_height": {
           "default": "24.0",
-          "description": "状态栏高度(dp)",
+          "description": "Status bar height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "gap": {
           "default": "12.0",
-          "description": "区域间距(dp)",
+          "description": "Region spacing (dp)",
           "minimum": "0",
           "type": "number"
         }
@@ -8211,7 +8211,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "current",
-          "note": "当前步骤序号",
+          "note": "Current step index",
           "required": false,
           "type": "int"
         },
@@ -8220,7 +8220,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "step_count",
-          "note": "步骤总数（只读描述）",
+          "note": "Total step count (read-only description)",
           "required": false,
           "type": "int"
         },
@@ -8257,7 +8257,7 @@
       "props_schema": {
         "current": {
           "default": "0",
-          "description": "当前步骤序号",
+          "description": "Current step index",
           "minimum": "0",
           "type": "integer"
         },
@@ -8271,7 +8271,7 @@
         },
         "step_count": {
           "default": "0",
-          "description": "步骤总数（只读描述）",
+          "description": "Total step count (read-only description)",
           "minimum": "0",
           "type": "integer"
         },
@@ -8295,7 +8295,7 @@
       "dynamic_children": false,
       "events": [],
       "examples": [
-        "au::StickyHeader(au::Text(\"分组标题\")) /* Scroll 内容中滚动时钉驻顶部 */"
+        "au::StickyHeader(au::Text(\"Section title\")) /* pinned to the top while scrolling */"
       ],
       "is_clickable": false,
       "is_container": true,
@@ -8352,7 +8352,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "checked",
-          "note": "开关状态",
+          "note": "Switch state",
           "required": false,
           "type": "bool"
         },
@@ -8360,7 +8360,7 @@
           "default": "theme.primary",
           "json_type": "array",
           "name": "active_color",
-          "note": "开启态轨道色（缺省跟随主题 primary）",
+          "note": "Track color when on (defaults to theme primary)",
           "required": false,
           "type": "Color"
         },
@@ -8368,7 +8368,7 @@
           "default": "{180,180,180,255}",
           "json_type": "array",
           "name": "inactive_color",
-          "note": "关闭态轨道色",
+          "note": "Track color when off",
           "required": false,
           "type": "Color"
         },
@@ -8376,7 +8376,7 @@
           "default": "Color::white()",
           "json_type": "array",
           "name": "thumb_color",
-          "note": "滑块颜色",
+          "note": "Thumb color",
           "required": false,
           "type": "Color"
         },
@@ -8385,7 +8385,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "track_width",
-          "note": "轨道宽(dp)",
+          "note": "Track width (dp)",
           "required": false,
           "type": "float"
         },
@@ -8394,7 +8394,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "track_height",
-          "note": "轨道高(dp)",
+          "note": "Track height (dp)",
           "required": false,
           "type": "float"
         },
@@ -8403,7 +8403,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "thumb_inset",
-          "note": "滑块与轨道边缘间距(dp)",
+          "note": "Gap between the thumb and the track edge (dp)",
           "required": false,
           "type": "float"
         },
@@ -8411,7 +8411,7 @@
           "default": "none",
           "json_type": "array",
           "name": "border_color",
-          "note": "关闭态轨道描边色（缺省不描边）",
+          "note": "Track outline color when off (no outline by default)",
           "required": false,
           "requires_props": [
             "border_width"
@@ -8423,7 +8423,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "border_width",
-          "note": "关闭态描边宽(dp)；0=不描边",
+          "note": "Outline width when off (dp); 0 = no outline",
           "required": false,
           "type": "float"
         },
@@ -8431,7 +8431,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "enabled",
-          "note": "是否可交互（禁用灰化）",
+          "note": "Interactive (greyed out when disabled)",
           "required": false,
           "type": "bool"
         },
@@ -8473,28 +8473,28 @@
       "props_schema": {
         "active_color": {
           "default": "theme.primary",
-          "description": "开启态轨道色（缺省跟随主题 primary）",
+          "description": "Track color when on (defaults to theme primary)",
           "type": "array"
         },
         "border_color": {
           "default": "none",
-          "description": "关闭态轨道描边色（缺省不描边）",
+          "description": "Track outline color when off (no outline by default)",
           "type": "array"
         },
         "border_width": {
           "default": "0.0",
-          "description": "关闭态描边宽(dp)；0=不描边",
+          "description": "Outline width when off (dp); 0 = no outline",
           "minimum": "0",
           "type": "number"
         },
         "checked": {
           "default": "false",
-          "description": "开关状态",
+          "description": "Switch state",
           "type": "boolean"
         },
         "enabled": {
           "default": "true",
-          "description": "是否可交互（禁用灰化）",
+          "description": "Interactive (greyed out when disabled)",
           "type": "boolean"
         },
         "height": {
@@ -8503,7 +8503,7 @@
         },
         "inactive_color": {
           "default": "{180,180,180,255}",
-          "description": "关闭态轨道色",
+          "description": "Track color when off",
           "type": "array"
         },
         "show": {
@@ -8512,24 +8512,24 @@
         },
         "thumb_color": {
           "default": "Color::white()",
-          "description": "滑块颜色",
+          "description": "Thumb color",
           "type": "array"
         },
         "thumb_inset": {
           "default": "2.0",
-          "description": "滑块与轨道边缘间距(dp)",
+          "description": "Gap between the thumb and the track edge (dp)",
           "minimum": "0",
           "type": "number"
         },
         "track_height": {
           "default": "24.0",
-          "description": "轨道高(dp)",
+          "description": "Track height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "track_width": {
           "default": "44.0",
-          "description": "轨道宽(dp)",
+          "description": "Track width (dp)",
           "minimum": "0",
           "type": "number"
         },
@@ -8595,7 +8595,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "selected_index",
-          "note": "当前选中标签序号",
+          "note": "Current selected tab index",
           "required": false,
           "type": "int"
         },
@@ -8604,7 +8604,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "tab_height",
-          "note": "标签栏高度(dp)",
+          "note": "Tab bar height (dp)",
           "required": false,
           "type": "float"
         },
@@ -8612,7 +8612,7 @@
           "default": "theme.primary",
           "json_type": "array",
           "name": "active_color",
-          "note": "选中文本与指示器色（缺省跟随主题 primary）",
+          "note": "Selected text and indicator color (defaults to theme primary)",
           "required": false,
           "type": "Color"
         },
@@ -8620,7 +8620,7 @@
           "default": "{245,245,247,255}",
           "json_type": "array",
           "name": "bar_background",
-          "note": "标签栏背景色",
+          "note": "Tab bar background color",
           "required": false,
           "type": "Color"
         },
@@ -8628,7 +8628,7 @@
           "default": "Color::white()",
           "json_type": "array",
           "name": "tab_background",
-          "note": "选中标签背景色",
+          "note": "Selected tab background color",
           "required": false,
           "type": "Color"
         },
@@ -8636,7 +8636,7 @@
           "default": "{96,96,96,255}",
           "json_type": "array",
           "name": "text_color",
-          "note": "未选中标签文本色",
+          "note": "Unselected tab text color",
           "required": false,
           "type": "Color"
         },
@@ -8645,7 +8645,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "indicator_thickness",
-          "note": "选中指示器厚度(dp)；0=不画",
+          "note": "Selected indicator thickness (dp); 0 = not drawn",
           "required": false,
           "type": "float"
         },
@@ -8654,7 +8654,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "font_size",
-          "note": "标签字号(pt)",
+          "note": "Tab font size (pt)",
           "required": false,
           "type": "float"
         },
@@ -8663,7 +8663,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "tab_padding",
-          "note": "标签左右内边距(dp)",
+          "note": "Tab horizontal padding (dp)",
           "required": false,
           "type": "float"
         }
@@ -8686,52 +8686,52 @@
       "props_schema": {
         "active_color": {
           "default": "theme.primary",
-          "description": "选中文本与指示器色（缺省跟随主题 primary）",
+          "description": "Selected text and indicator color (defaults to theme primary)",
           "type": "array"
         },
         "bar_background": {
           "default": "{245,245,247,255}",
-          "description": "标签栏背景色",
+          "description": "Tab bar background color",
           "type": "array"
         },
         "font_size": {
           "default": "13.0",
-          "description": "标签字号(pt)",
+          "description": "Tab font size (pt)",
           "minimum": "0",
           "type": "number"
         },
         "indicator_thickness": {
           "default": "2.0",
-          "description": "选中指示器厚度(dp)；0=不画",
+          "description": "Selected indicator thickness (dp); 0 = not drawn",
           "minimum": "0",
           "type": "number"
         },
         "selected_index": {
           "default": "0",
-          "description": "当前选中标签序号",
+          "description": "Current selected tab index",
           "minimum": "0",
           "type": "integer"
         },
         "tab_background": {
           "default": "Color::white()",
-          "description": "选中标签背景色",
+          "description": "Selected tab background color",
           "type": "array"
         },
         "tab_height": {
           "default": "36.0",
-          "description": "标签栏高度(dp)",
+          "description": "Tab bar height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "tab_padding": {
           "default": "12.0",
-          "description": "标签左右内边距(dp)",
+          "description": "Tab horizontal padding (dp)",
           "minimum": "0",
           "type": "number"
         },
         "text_color": {
           "default": "{96,96,96,255}",
-          "description": "未选中标签文本色",
+          "description": "Unselected tab text color",
           "type": "array"
         }
       },
@@ -8792,7 +8792,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "content",
-          "note": "文本内容",
+          "note": "Text content",
           "required": true,
           "type": "LocalizedString"
         },
@@ -8801,7 +8801,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "font_size",
-          "note": "字号(pt)",
+          "note": "Font size (pt)",
           "required": false,
           "type": "float"
         },
@@ -8809,7 +8809,7 @@
           "default": "Color::black()",
           "json_type": "array",
           "name": "color",
-          "note": "文字色",
+          "note": "Text color",
           "required": false,
           "type": "Color"
         },
@@ -8825,7 +8825,7 @@
           ],
           "json_type": "string",
           "name": "text_align",
-          "note": "水平对齐",
+          "note": "Horizontal alignment",
           "required": false,
           "type": "TextAlign"
         },
@@ -8837,7 +8837,7 @@
           ],
           "json_type": "string",
           "name": "direction",
-          "note": "书写方向(auto=继承环境)",
+          "note": "Text direction (auto = inherit from environment)",
           "required": false,
           "type": "TextDirection"
         },
@@ -8846,7 +8846,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "max_lines",
-          "note": "最大行数(0=不限)",
+          "note": "Max line count (0 = unlimited)",
           "required": false,
           "type": "int"
         },
@@ -8859,7 +8859,7 @@
           ],
           "json_type": "string",
           "name": "overflow",
-          "note": "溢出处理",
+          "note": "Overflow handling",
           "required": false,
           "type": "TextOverflow"
         },
@@ -8867,7 +8867,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "soft_wrap",
-          "note": "自动换行",
+          "note": "Auto line wrap",
           "required": false,
           "type": "bool"
         },
@@ -8876,7 +8876,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "line_height",
-          "note": "行高倍数",
+          "note": "Line height multiplier",
           "required": false,
           "type": "float"
         },
@@ -8884,7 +8884,7 @@
           "default": "0.0",
           "json_type": "number",
           "name": "letter_spacing",
-          "note": "字形间距",
+          "note": "Letter spacing",
           "required": false,
           "type": "float"
         },
@@ -8892,7 +8892,7 @@
           "default": "0.0",
           "json_type": "number",
           "name": "word_spacing",
-          "note": "词间距",
+          "note": "Word spacing",
           "required": false,
           "type": "float"
         },
@@ -8911,7 +8911,7 @@
           ],
           "json_type": "string",
           "name": "font_weight",
-          "note": "字重",
+          "note": "Font weight",
           "required": false,
           "type": "FontWeight"
         },
@@ -8923,7 +8923,7 @@
           ],
           "json_type": "string",
           "name": "font_style",
-          "note": "字形风格",
+          "note": "Font style",
           "required": false,
           "type": "FontStyle"
         },
@@ -8937,7 +8937,7 @@
           ],
           "json_type": "string",
           "name": "decoration",
-          "note": "装饰线",
+          "note": "Text decoration",
           "required": false,
           "type": "TextDecoration"
         },
@@ -8945,7 +8945,7 @@
           "default": "Color::black()",
           "json_type": "array",
           "name": "decoration_color",
-          "note": "装饰线颜色",
+          "note": "Decoration color",
           "required": false,
           "type": "Color"
         },
@@ -8953,7 +8953,7 @@
           "default": "transparent",
           "json_type": "array",
           "name": "background_color",
-          "note": "文本底色",
+          "note": "Text background color",
           "required": false,
           "type": "Color"
         },
@@ -9002,22 +9002,22 @@
       "props_schema": {
         "background_color": {
           "default": "transparent",
-          "description": "文本底色",
+          "description": "Text background color",
           "type": "array"
         },
         "color": {
           "default": "Color::black()",
-          "description": "文字色",
+          "description": "Text color",
           "type": "array"
         },
         "content": {
           "default": "\"\"",
-          "description": "文本内容",
+          "description": "Text content",
           "type": "string"
         },
         "decoration": {
           "default": "None",
-          "description": "装饰线",
+          "description": "Text decoration",
           "enum": [
             "None",
             "Underline",
@@ -9028,12 +9028,12 @@
         },
         "decoration_color": {
           "default": "Color::black()",
-          "description": "装饰线颜色",
+          "description": "Decoration color",
           "type": "array"
         },
         "direction": {
           "default": "auto",
-          "description": "书写方向(auto=继承环境)",
+          "description": "Text direction (auto = inherit from environment)",
           "enum": [
             "LTR",
             "RTL"
@@ -9042,13 +9042,13 @@
         },
         "font_size": {
           "default": "14.0",
-          "description": "字号(pt)",
+          "description": "Font size (pt)",
           "minimum": "0",
           "type": "number"
         },
         "font_style": {
           "default": "Normal",
-          "description": "字形风格",
+          "description": "Font style",
           "enum": [
             "Normal",
             "Italic"
@@ -9057,7 +9057,7 @@
         },
         "font_weight": {
           "default": "Normal",
-          "description": "字重",
+          "description": "Font weight",
           "enum": [
             "Thin",
             "ExtraLight",
@@ -9077,24 +9077,24 @@
         },
         "letter_spacing": {
           "default": "0.0",
-          "description": "字形间距",
+          "description": "Letter spacing",
           "type": "number"
         },
         "line_height": {
           "default": "1.0",
-          "description": "行高倍数",
+          "description": "Line height multiplier",
           "minimum": "0",
           "type": "number"
         },
         "max_lines": {
           "default": "0",
-          "description": "最大行数(0=不限)",
+          "description": "Max line count (0 = unlimited)",
           "minimum": "0",
           "type": "integer"
         },
         "overflow": {
           "default": "Clip",
-          "description": "溢出处理",
+          "description": "Overflow handling",
           "enum": [
             "Clip",
             "Ellipsis",
@@ -9108,12 +9108,12 @@
         },
         "soft_wrap": {
           "default": "true",
-          "description": "自动换行",
+          "description": "Auto line wrap",
           "type": "boolean"
         },
         "text_align": {
           "default": "Left",
-          "description": "水平对齐",
+          "description": "Horizontal alignment",
           "enum": [
             "Left",
             "Right",
@@ -9130,7 +9130,7 @@
         },
         "word_spacing": {
           "default": "0.0",
-          "description": "词间距",
+          "description": "Word spacing",
           "type": "number"
         }
       },
@@ -9217,7 +9217,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "value",
-          "note": "初始文本",
+          "note": "Initial text",
           "required": false,
           "type": "string"
         },
@@ -9225,7 +9225,7 @@
           "default": "\"\"",
           "json_type": "string",
           "name": "placeholder",
-          "note": "空值占位提示",
+          "note": "Placeholder shown when empty",
           "required": false,
           "type": "string"
         },
@@ -9234,7 +9234,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "font_size",
-          "note": "字号(pt)",
+          "note": "Font size (pt)",
           "required": false,
           "type": "float"
         },
@@ -9243,7 +9243,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "corner_radius",
-          "note": "圆角半径(dp)",
+          "note": "Corner radius (dp)",
           "required": false,
           "type": "float"
         },
@@ -9251,7 +9251,7 @@
           "default": "{12,12,12,12}",
           "json_type": "object",
           "name": "padding",
-          "note": "内边距",
+          "note": "Padding",
           "required": false,
           "type": "EdgeInsets"
         },
@@ -9259,7 +9259,7 @@
           "default": "Color::black()",
           "json_type": "array",
           "name": "cursor_color",
-          "note": "光标颜色",
+          "note": "Cursor color",
           "required": false,
           "type": "Color"
         },
@@ -9267,7 +9267,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "enabled",
-          "note": "是否可编辑",
+          "note": "Editable",
           "required": false,
           "type": "bool"
         },
@@ -9275,7 +9275,7 @@
           "default": "{20,20,20,255}",
           "json_type": "array",
           "name": "text_color",
-          "note": "文本颜色",
+          "note": "Text color",
           "required": false,
           "type": "Color"
         },
@@ -9283,7 +9283,7 @@
           "default": "{150,150,150,255}",
           "json_type": "array",
           "name": "placeholder_color",
-          "note": "占位提示颜色",
+          "note": "Placeholder text color",
           "required": false,
           "type": "Color"
         },
@@ -9291,7 +9291,7 @@
           "default": "{240,240,240,255}",
           "json_type": "array",
           "name": "background",
-          "note": "背景色",
+          "note": "Background color",
           "required": false,
           "type": "Color"
         },
@@ -9299,7 +9299,7 @@
           "default": "{245,248,255,255}",
           "json_type": "array",
           "name": "focused_background",
-          "note": "聚焦态背景色",
+          "note": "Focused background color",
           "required": false,
           "type": "Color"
         },
@@ -9307,7 +9307,7 @@
           "default": "{120,120,120,255}",
           "json_type": "array",
           "name": "border_color",
-          "note": "边框色",
+          "note": "Border color",
           "required": false,
           "type": "Color"
         },
@@ -9315,7 +9315,7 @@
           "default": "theme.primary",
           "json_type": "array",
           "name": "focused_border_color",
-          "note": "聚焦态边框色（缺省跟随主题 primary）",
+          "note": "Focused border color (defaults to theme primary)",
           "required": false,
           "type": "Color"
         },
@@ -9324,7 +9324,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "border_width",
-          "note": "边框线宽(dp)；0=不描边",
+          "note": "Border width (dp); 0 = no border",
           "required": false,
           "type": "float"
         },
@@ -9332,7 +9332,7 @@
           "default": "{80,120,220,90}",
           "json_type": "array",
           "name": "selection_color",
-          "note": "选区高亮色",
+          "note": "Selection highlight color",
           "required": false,
           "type": "Color"
         },
@@ -9341,7 +9341,7 @@
           "json_type": "integer",
           "minimum": "0",
           "name": "max_length",
-          "note": "最大长度（码点）；0=不限",
+          "note": "Max length (code points); 0 = unlimited",
           "required": false,
           "type": "int"
         },
@@ -9349,7 +9349,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "read_only",
-          "note": "只读（可选择复制不可编辑）",
+          "note": "Read-only (selectable and copyable, not editable)",
           "required": false,
           "type": "bool"
         },
@@ -9357,7 +9357,7 @@
           "default": "false",
           "json_type": "boolean",
           "name": "obscure_text",
-          "note": "密码掩码显示",
+          "note": "Password masked display",
           "required": false,
           "type": "bool"
         },
@@ -9406,49 +9406,49 @@
       "props_schema": {
         "background": {
           "default": "{240,240,240,255}",
-          "description": "背景色",
+          "description": "Background color",
           "type": "array"
         },
         "border_color": {
           "default": "{120,120,120,255}",
-          "description": "边框色",
+          "description": "Border color",
           "type": "array"
         },
         "border_width": {
           "default": "1.0",
-          "description": "边框线宽(dp)；0=不描边",
+          "description": "Border width (dp); 0 = no border",
           "minimum": "0",
           "type": "number"
         },
         "corner_radius": {
           "default": "0.0",
-          "description": "圆角半径(dp)",
+          "description": "Corner radius (dp)",
           "minimum": "0",
           "type": "number"
         },
         "cursor_color": {
           "default": "Color::black()",
-          "description": "光标颜色",
+          "description": "Cursor color",
           "type": "array"
         },
         "enabled": {
           "default": "true",
-          "description": "是否可编辑",
+          "description": "Editable",
           "type": "boolean"
         },
         "focused_background": {
           "default": "{245,248,255,255}",
-          "description": "聚焦态背景色",
+          "description": "Focused background color",
           "type": "array"
         },
         "focused_border_color": {
           "default": "theme.primary",
-          "description": "聚焦态边框色（缺省跟随主题 primary）",
+          "description": "Focused border color (defaults to theme primary)",
           "type": "array"
         },
         "font_size": {
           "default": "14.0",
-          "description": "字号(pt)",
+          "description": "Font size (pt)",
           "minimum": "0",
           "type": "number"
         },
@@ -9458,38 +9458,38 @@
         },
         "max_length": {
           "default": "0",
-          "description": "最大长度（码点）；0=不限",
+          "description": "Max length (code points); 0 = unlimited",
           "minimum": "0",
           "type": "integer"
         },
         "obscure_text": {
           "default": "false",
-          "description": "密码掩码显示",
+          "description": "Password masked display",
           "type": "boolean"
         },
         "padding": {
           "default": "{12,12,12,12}",
-          "description": "内边距",
+          "description": "Padding",
           "type": "object"
         },
         "placeholder": {
           "default": "\"\"",
-          "description": "空值占位提示",
+          "description": "Placeholder shown when empty",
           "type": "string"
         },
         "placeholder_color": {
           "default": "{150,150,150,255}",
-          "description": "占位提示颜色",
+          "description": "Placeholder text color",
           "type": "array"
         },
         "read_only": {
           "default": "false",
-          "description": "只读（可选择复制不可编辑）",
+          "description": "Read-only (selectable and copyable, not editable)",
           "type": "boolean"
         },
         "selection_color": {
           "default": "{80,120,220,90}",
-          "description": "选区高亮色",
+          "description": "Selection highlight color",
           "type": "array"
         },
         "show": {
@@ -9498,12 +9498,12 @@
         },
         "text_color": {
           "default": "{20,20,20,255}",
-          "description": "文本颜色",
+          "description": "Text color",
           "type": "array"
         },
         "value": {
           "default": "\"\"",
-          "description": "初始文本",
+          "description": "Initial text",
           "type": "string"
         },
         "width": {
@@ -9603,7 +9603,7 @@
           "maximum": "23",
           "minimum": "0",
           "name": "hour",
-          "note": "时(0..23)",
+          "note": "Hour (0..23)",
           "required": false,
           "type": "int"
         },
@@ -9613,7 +9613,7 @@
           "maximum": "59",
           "minimum": "0",
           "name": "minute",
-          "note": "分(0..59)",
+          "note": "Minute (0..59)",
           "required": false,
           "type": "int"
         }
@@ -9629,14 +9629,14 @@
       "props_schema": {
         "hour": {
           "default": "0",
-          "description": "时(0..23)",
+          "description": "Hour (0..23)",
           "maximum": "23",
           "minimum": "0",
           "type": "integer"
         },
         "minute": {
           "default": "0",
-          "description": "分(0..59)",
+          "description": "Minute (0..59)",
           "maximum": "59",
           "minimum": "0",
           "type": "integer"
@@ -9667,14 +9667,14 @@
         {
           "default": "—",
           "name": "period",
-          "note": "tick 周期（按 steady_clock）",
+          "note": "Tick period (steady_clock based)",
           "required": true,
           "type": "std::chrono::steady_clock::duration"
         },
         {
           "default": "nullptr",
           "name": "on_tick",
-          "note": "可选命令式回调，每次 tick 携带计数（从 1 起）",
+          "note": "Optional imperative callback carrying the tick count (starting at 1)",
           "required": false,
           "type": "std::function<void(int)>"
         }
@@ -9688,11 +9688,11 @@
       "props_schema": {
         "on_tick": {
           "default": "nullptr",
-          "description": "可选命令式回调，每次 tick 携带计数（从 1 起）"
+          "description": "Optional imperative callback carrying the tick count (starting at 1)"
         },
         "period": {
           "default": "—",
-          "description": "tick 周期（按 steady_clock）"
+          "description": "Tick period (steady_clock based)"
         }
       },
       "thread": "main",
@@ -9714,7 +9714,7 @@
       "dynamic_children": false,
       "events": [],
       "examples": [
-        "au::TitleBar{}.set_title(\"文档\").add_action({\"菜单\", fn})"
+        "au::TitleBar{}.set_title(\"Document\").add_action({\"Menu\", fn})"
       ],
       "is_clickable": false,
       "is_container": false,
@@ -9725,7 +9725,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "height",
-          "note": "标题栏高度(dp)",
+          "note": "Title bar height (dp)",
           "required": false,
           "type": "float"
         },
@@ -9733,7 +9733,7 @@
           "default": "",
           "json_type": "string",
           "name": "title",
-          "note": "标题文本",
+          "note": "Title text",
           "required": false,
           "type": "string"
         },
@@ -9741,7 +9741,7 @@
           "default": "",
           "json_type": "string",
           "name": "subtitle",
-          "note": "副标题文本(可选)",
+          "note": "Subtitle text (optional)",
           "required": false,
           "type": "string"
         },
@@ -9749,7 +9749,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "window_controls",
-          "note": "是否渲染内置 最小化/最大化/关闭 钮",
+          "note": "Render the built-in minimize/maximize/close buttons",
           "required": false,
           "type": "bool"
         }
@@ -9767,21 +9767,21 @@
       "props_schema": {
         "height": {
           "default": "36.0",
-          "description": "标题栏高度(dp)",
+          "description": "Title bar height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "subtitle": {
-          "description": "副标题文本(可选)",
+          "description": "Subtitle text (optional)",
           "type": "string"
         },
         "title": {
-          "description": "标题文本",
+          "description": "Title text",
           "type": "string"
         },
         "window_controls": {
           "default": "true",
-          "description": "是否渲染内置 最小化/最大化/关闭 钮",
+          "description": "Render the built-in minimize/maximize/close buttons",
           "type": "boolean"
         }
       },
@@ -9810,7 +9810,7 @@
         {
           "default": "Bottom",
           "name": "position",
-          "note": "通知显示位置",
+          "note": "Notification display position",
           "required": false,
           "type": "ToastPosition"
         }
@@ -9825,7 +9825,7 @@
       "props_schema": {
         "position": {
           "default": "Bottom",
-          "description": "通知显示位置"
+          "description": "Notification display position"
         }
       },
       "thread": "main",
@@ -9857,7 +9857,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "bar_height",
-          "note": "工具栏高度(dp)",
+          "note": "Toolbar height (dp)",
           "required": false,
           "type": "float"
         },
@@ -9866,7 +9866,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "gap",
-          "note": "子项间距(dp)",
+          "note": "Child spacing (dp)",
           "required": false,
           "type": "float"
         },
@@ -9875,7 +9875,7 @@
           "json_type": "number",
           "minimum": "0",
           "name": "padding",
-          "note": "左右内边距(dp)",
+          "note": "Horizontal padding (dp)",
           "required": false,
           "type": "float"
         }
@@ -9892,19 +9892,19 @@
       "props_schema": {
         "bar_height": {
           "default": "40.0",
-          "description": "工具栏高度(dp)",
+          "description": "Toolbar height (dp)",
           "minimum": "0",
           "type": "number"
         },
         "gap": {
           "default": "4.0",
-          "description": "子项间距(dp)",
+          "description": "Child spacing (dp)",
           "minimum": "0",
           "type": "number"
         },
         "padding": {
           "default": "6.0",
-          "description": "左右内边距(dp)",
+          "description": "Horizontal padding (dp)",
           "minimum": "0",
           "type": "number"
         }
@@ -9939,7 +9939,7 @@
           "default": "-1",
           "json_type": "integer",
           "name": "selected_row",
-          "note": "选中可见行(-1=无)",
+          "note": "Selected visible row (-1 = none)",
           "required": false,
           "type": "int"
         }
@@ -9955,7 +9955,7 @@
       "props_schema": {
         "selected_row": {
           "default": "-1",
-          "description": "选中可见行(-1=无)",
+          "description": "Selected visible row (-1 = none)",
           "type": "integer"
         }
       },
@@ -10061,7 +10061,7 @@
           ],
           "json_type": "string",
           "name": "fit",
-          "note": "缩放适配（Contain/Fill/Cover）",
+          "note": "Scale fit (Contain/Fill/Cover)",
           "required": false,
           "type": "BoxFit"
         },
@@ -10069,7 +10069,7 @@
           "default": "true",
           "json_type": "boolean",
           "name": "show_controls",
-          "note": "是否显示控件叠层",
+          "note": "Show controls overlay",
           "required": false,
           "type": "bool"
         },
@@ -10106,7 +10106,7 @@
       "props_schema": {
         "fit": {
           "default": "Contain",
-          "description": "缩放适配（Contain/Fill/Cover）",
+          "description": "Scale fit (Contain/Fill/Cover)",
           "enum": [
             "Fill",
             "Contain",
@@ -10128,7 +10128,7 @@
         },
         "show_controls": {
           "default": "true",
-          "description": "是否显示控件叠层",
+          "description": "Show controls overlay",
           "type": "boolean"
         },
         "width": {

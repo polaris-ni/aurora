@@ -58,11 +58,11 @@ class Dismissible : public SingleChild {
                      .type = "DragAxis",
                      .default_value = "Horizontal",
                      .required = false,
-                     .note = "拖动主轴（Horizontal/Vertical）"},
+                     .note = "Drag main axis (Horizontal/Vertical)"},
                 },
             .events = {"on_dismissed"},
             .children_policy = "single",
-            .examples = {"au::Dismissible(card) /* 水平拖出消除 */"},
+            .examples = {"au::Dismissible(card) /* drag out horizontally to dismiss */"},
         };
     }
     /// @brief 运行时自描述：返回本控件的静态描述符（axis 属性、on_dismissed 事件、single 子策略）。

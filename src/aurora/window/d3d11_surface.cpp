@@ -27,6 +27,7 @@ auto safe_release(T *&p) -> void {
 }
 
 // 全屏三角形：无顶点缓冲，经 SV_VertexID 生成；纹理采样做任意比例 GPU 缩放。
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr auto AURORA_VS = R"HLSL(
 struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 VSOut VSMain(uint id : SV_VertexID) {

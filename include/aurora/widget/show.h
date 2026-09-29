@@ -45,7 +45,7 @@ class Show : public SingleChild {
             .name = "Show",
             .properties =
                 {
-                    {.name = "visible", .type = "bool", .default_value = "true", .required = false, .note = "是否可见"},
+                    {.name = "visible", .type = "bool", .default_value = "true", .required = false, .note = "Visible"},
                     {.name = "width", .type = "Length", .default_value = "auto", .required = false},
                     {.name = "height", .type = "Length", .default_value = "auto", .required = false},
                     {.name = "show", .type = "bool", .default_value = "true", .required = false},

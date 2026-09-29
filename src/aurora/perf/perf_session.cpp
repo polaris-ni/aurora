@@ -104,7 +104,7 @@ auto PerfReport::to_markdown() const -> std::string {
 
     out += internal::string_format("### PerfReport · %s\n\n", name.c_str());
 
-    out += "| 指标 | 值 |\n|------|----|\n";
+    out += "| Metric | Value |\n|------|----|\n";
 
     const auto row_f = [&](const char *k, double v, const char *unit) -> void {
         out += internal::string_format("| %s | %.3f %s |\n", k, v, unit);
@@ -127,7 +127,7 @@ auto PerfReport::to_markdown() const -> std::string {
     row_f("avg dirty area", avg_dirty_area_ratio() * 100.0, "%");
 
     // 计数器峰值：跨帧汇总读数
-    out += "\n| 计数器（峰值 / 累计） | 峰值 | 累计 |\n|------|------|------|\n";
+    out += "\n| Counter (peak / total) | Peak | Total |\n|------|------|------|\n";
     const auto row_c = [&](const char *k, unsigned long long mx, unsigned long long sum) -> void {
         out += internal::string_format("| %s | %llu | %llu |\n", k, mx, sum);
     };

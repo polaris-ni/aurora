@@ -1250,8 +1250,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
         // 本次脏标记被静默丢弃（表现为自驱动动画冻结 / 白屏）。属编程错误，严格模式下硬失败。
         if (strict_mode() == StrictMode::On && layout_parent_ != nullptr && !top->on_subtree_dirty && !on_dirty) {
             AURORA_ASSERT(false,
-                          "脏标记未上达渲染根：布局父链断裂——某容器未经 Widget::layout() 入口"
-                          "重排其子节点（或就地重排时未 set_layout_parent），后代标脏将被丢弃");
+                          "Dirty flag never reached the render root: the layout parent chain is broken - a container "
+                          "relaid out its children without entering Widget::layout() (or relaid out in place without "
+                          "set_layout_parent), so descendant dirty marks are dropped");
         }
     }
 };

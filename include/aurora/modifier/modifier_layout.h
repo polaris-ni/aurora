@@ -51,7 +51,7 @@ class PaddingEdges : public ModifierNode {
     explicit PaddingEdges(const EdgeInsets &insets) : insets_(insets) {
         // 负值降级为 0
         if (insets_.left < 0.0F || insets_.top < 0.0F || insets_.right < 0.0F || insets_.bottom < 0.0F) {
-            Diagnostics::degraded("layout", "PaddingEdges 负值已降级为 0");
+            Diagnostics::degraded("layout", "PaddingEdges negative value degraded to 0");
             insets_.left = std::max(0.0F, insets_.left);
             insets_.top = std::max(0.0F, insets_.top);
             insets_.right = std::max(0.0F, insets_.right);

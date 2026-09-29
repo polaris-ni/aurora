@@ -236,8 +236,10 @@ inline auto report_label_ref_once(const std::string &reason) -> void {
 inline auto collect_label_refs(AccessibilityNode &n, LabelRefIndex &idx) -> void {
     if (!n.stable_key.empty()) {
         if (const auto [at, inserted] = idx.by_key.emplace(n.stable_key, &n); !inserted) {
-            report_label_ref_once("同一棵语义树里有多个控件声明了相同 stable_key，引用式标签取先序第一个：" +
-                                  n.stable_key);
+            report_label_ref_once(
+                "Multiple widgets in the same semantic tree declare the same stable_key, "
+                "labelled-by references take the first in preorder: " +
+                n.stable_key);
         }
     }
     if (!n.labelled_by.empty()) {
@@ -269,14 +271,20 @@ inline auto resolve_label_ref(AccessibilityNode *n, const LabelRefIndex &idx,
     if (it == idx.by_key.end()) {
         // 未命中（键不存在 / 在子树外 / 该控件 `show == false` 未入树）：保留自身名字，关系不投影。
         stack.pop_back();
-        report_label_ref_once("labelled_by 指向的 stable_key 不在本棵语义树内，已保留自身名字：" + n->labelled_by);
+        report_label_ref_once(
+            "The stable_key targeted by labelled_by is not in this semantic tree, "
+            "keeping the widget's own name: " +
+            n->labelled_by);
         n->labelled_by_id = 0;
         return;
     }
     AccessibilityNode *target = it->second;  // 引用键命中的目标节点（可能自身也是引用者）
     if (std::find(stack.begin(), stack.end(), target->id) != stack.end()) {
         stack.pop_back();
-        report_label_ref_once("labelled_by 引用链成环，已保留自身名字：" + n->labelled_by);
+        report_label_ref_once(
+            "The labelled_by reference chain forms a cycle, "
+            "keeping the widget's own name: " +
+            n->labelled_by);
         n->labelled_by_id = 0;
         return;  // 环：目标已在本链上（含自引用），断环——保留自身名字，关系不投影
     }
@@ -286,7 +294,10 @@ inline auto resolve_label_ref(AccessibilityNode *n, const LabelRefIndex &idx,
     // （ARIA 的 `aria-labelledby` 会压制 `aria-label`），目标名为空却投影等于把读屏的名字
     // 换成空串。此时宁保留自身名字、不申报关系。
     if (target->name.empty()) {
-        report_label_ref_once("labelled_by 指向的控件自身无可读名字，已保留自身名字：" + n->labelled_by);
+        report_label_ref_once(
+            "The widget targeted by labelled_by has no readable name of its own, "
+            "keeping the widget's own name: " +
+            n->labelled_by);
         n->labelled_by_id = 0;
         return;
     }

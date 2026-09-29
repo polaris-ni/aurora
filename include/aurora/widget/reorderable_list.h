@@ -76,7 +76,8 @@ class ReorderableList : public Container {
     /// @param gap 项间距（dp，负值降级为 0 并记录 degraded 诊断）。
     ReorderableList(std::shared_ptr<State<std::vector<T>>> items, ItemBuilder builder, float gap = 0.0F)
         : items_(std::move(items)), builder_(std::move(builder)),
-          gap_(gap < 0.0F ? (Diagnostics::degraded("layout", "ReorderableList gap 负值已降级为 0"), 0.0F) : gap) {
+          gap_(gap < 0.0F ? (Diagnostics::degraded("layout", "ReorderableList gap is negative, degraded to 0"), 0.0F)
+                          : gap) {
         // 落位动画与近边缘 auto-scroll 均由每帧 tick 驱动（同 Dismissible/ToastHost 模式）。
         needs_gesture_tick_ = true;
         rebuild_if_needed();  // 构造即按当前数据量实例化子项
@@ -97,7 +98,7 @@ class ReorderableList : public Container {
                      .type = "float",
                      .default_value = "0.0",
                      .required = false,
-                     .note = "项间距(dp)",
+                     .note = "Item spacing (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -105,7 +106,7 @@ class ReorderableList : public Container {
                      .type = "float",
                      .default_value = "0.0",
                      .required = false,
-                     .note = "当前滚动偏移(dp)",
+                     .note = "Current scroll offset (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -113,7 +114,7 @@ class ReorderableList : public Container {
                      .type = "string",
                      .default_value = "",
                      .required = false,
-                     .note = "滚动位置保存键（空=不参与恢复）",
+                     .note = "Scroll position save key (empty = excluded from restore)",
                      .json_type = "string",
                      .enum_values = {},
                      .min_value = ""},
@@ -121,7 +122,8 @@ class ReorderableList : public Container {
                      .type = "bool",
                      .default_value = "false",
                      .required = false,
-                     .note = "是否限定右侧手柄区域起拖（false=整项可拖）",
+                     .note = "Restrict drag start to the handle area on the right "
+                             "(false = the whole item is draggable)",
                      .json_type = "boolean",
                      .enum_values = {},
                      .min_value = ""},
@@ -129,7 +131,7 @@ class ReorderableList : public Container {
                      .type = "float",
                      .default_value = "48.0",
                      .required = false,
-                     .note = "拖拽近边缘自动滚动的触发带高(dp)",
+                     .note = "Trigger band height (dp) for auto-scroll near the edges while dragging",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -137,7 +139,8 @@ class ReorderableList : public Container {
                      .type = "bool",
                      .default_value = "true",
                      .required = false,
-                     .note = "键盘重排替代路径开关（方向键移光标 + 空格抓取/落位 + Esc 取消）",
+                     .note = "Keyboard reorder fallback toggle "
+                             "(arrow keys move the cursor, space grabs/drops, Esc cancels)",
                      .json_type = "boolean",
                      .enum_values = {},
                      .min_value = ""},

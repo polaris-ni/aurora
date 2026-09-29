@@ -188,6 +188,7 @@ struct CurrencyInfo {
         return p2(day) + "/" + p2(month) + "/" + std::to_string(year);
     }
     if (lang == "zh" || lang == "ja") {
+        // CJK-LITERAL: locale-output - zh/ja 年/月/日 date units are the feature of this branch
         return std::to_string(year) + "年" + std::to_string(month) + "月" + std::to_string(day) + "日";
     }
     // en / 默认：ISO 8601

@@ -1060,7 +1060,8 @@ class Window {
                 std::fabs(before.width - after.width) < 1e-3F && std::fabs(before.height - after.height) < 1e-3F;
             AURORA_ASSERT(
                 size_unchanged,
-                "relayout boundary 误判：boundary 尺寸随重排变化，说明其依赖子节点，不能作为 relayout boundary");
+                "relayout boundary misjudged: the boundary size changes across relayouts, so it depends on its "
+                "children and cannot serve as a relayout boundary");
         }
     }
 

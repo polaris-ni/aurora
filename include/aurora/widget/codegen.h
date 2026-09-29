@@ -158,8 +158,9 @@ struct PropTarget {
         return false;
     }
     AURORA_LOG_WARN("codegen", type,
-                    " 没有可生成的构造形式（需模板实参/位置参数，或不在 au:: 下），产物中的 au::", type,
-                    "{} 须手工改写才可编译");
+                    " has no constructible form to emit (needs template/positional arguments, or is not under au::); "
+                    "the au::",
+                    type, "{} in the output must be rewritten by hand before it compiles");
     return true;
 }
 
@@ -345,7 +346,8 @@ struct PropTarget {
         return true;
     }
     AURORA_LOG_WARN("codegen", type, ".", key,
-                    " 没有已登记的公开写入路径（该类型的字段为 protected + 访问器），已省略");
+                    " has no registered public write path (this type keeps its fields protected behind accessors), "
+                    "omitted");
     return false;
 }
 
@@ -686,8 +688,8 @@ struct PropDescriptor {
         // 枚举属性遇数字取值（`fit: 2`）：自描述没给取值名，按序号猜枚举项等于臆造 API，
         // 只能告警省略——数字既不是该类型的字面量，也没有名可发。
         if (!cpp_type.empty() && !is_numeric_declared_type(cpp_type)) {
-            AURORA_LOG_WARN("codegen", type, ".", key, " 是枚举属性（", cpp_type,
-                            "）却给了数字取值，无法还原为枚举表达式，已省略");
+            AURORA_LOG_WARN("codegen", type, ".", key, " is an enum property (", cpp_type,
+                            ") but was given a numeric value; it cannot be restored to an enum expression, omitted");
             return "/* unknown */";
         }
         if (value.is_double()) {
@@ -703,13 +705,15 @@ struct PropDescriptor {
                 return std::string{"au::px("} + emit_float_literal(value.at(1)->as_or<float>(0.0F)) + std::string{")"};
             }
             if (unit == "percent") {
-                return std::string{"au::percent("} + emit_float_literal(value.at(1)->as_or<float>(0.0F)) + std::string{")"};
+                return std::string{"au::percent("} + emit_float_literal(value.at(1)->as_or<float>(0.0F)) +
+                       std::string{")"};
             }
         }
         if (value.size() >= 4 && value.at(0)->is_number()) {
             return std::string{"au::Color{"} + std::to_string(value.at(0)->as_or<std::int32_t>(0)) + std::string{","} +
-                   std::to_string(value.at(1)->as_or<std::int32_t>(0)) + std::string{","} + std::to_string(value.at(2)->as_or<std::int32_t>(0)) +
-                   std::string{","} + std::to_string(value.at(3)->as_or<std::int32_t>(0)) + std::string{"}"};
+                   std::to_string(value.at(1)->as_or<std::int32_t>(0)) + std::string{","} +
+                   std::to_string(value.at(2)->as_or<std::int32_t>(0)) + std::string{","} +
+                   std::to_string(value.at(3)->as_or<std::int32_t>(0)) + std::string{"}"};
         }
         if (key == "text_decoration" || key == "decoration") {
             return emit_text_decoration(value);
@@ -718,8 +722,8 @@ struct PropDescriptor {
     // --- object: EdgeInsets {top,right,bottom,left} | legacy Length {value,unit} ---
     if (value.is_object()) {
         if (value.contains("top") && value.contains("left") && value.contains("right") && value.contains("bottom")) {
-            return std::string{"au::EdgeInsets{"} + emit_float_literal(value.at("top")->as_or<float>(0.0F)) + std::string{","} +
-                   emit_float_literal(value.at("right")->as_or<float>(0.0F)) + std::string{","} +
+            return std::string{"au::EdgeInsets{"} + emit_float_literal(value.at("top")->as_or<float>(0.0F)) +
+                   std::string{","} + emit_float_literal(value.at("right")->as_or<float>(0.0F)) + std::string{","} +
                    emit_float_literal(value.at("bottom")->as_or<float>(0.0F)) + std::string{","} +
                    emit_float_literal(value.at("left")->as_or<float>(0.0F)) + std::string{"}"};
         }
@@ -734,7 +738,8 @@ struct PropDescriptor {
     }
     // --- fallback ---
     // 静默丢属性是「生成的树看着完整、实际少一项」的故障，必须在 stderr 留话（调用方据此跳过发射）。
-    AURORA_LOG_WARN("codegen", type, ".", key, " 的取值形态无法还原为 C++ 表达式，已省略: ", json::dump(value).unwrap());
+    AURORA_LOG_WARN("codegen", type, ".", key,
+                    " value form cannot be restored to a C++ expression, omitted: ", json::dump(value).unwrap());
     return "/* unknown */";
 }
 
@@ -835,8 +840,10 @@ struct PropEmit {
     if (kids.empty() || !is_bespoke_ctor(type)) {
         return kids;
     }
-    AURORA_LOG_WARN("codegen", type, " 没有通用构造入口（位置参数构造或需模板实参），已省略 ", kids.size(),
-                    " 个子节点");
+    AURORA_LOG_WARN("codegen", type,
+                    " has no generic construction entry (positional constructor or template arguments required), "
+                    "omitted ",
+                    kids.size(), " child node(s)");
     return {};
 }
 

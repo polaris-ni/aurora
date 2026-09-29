@@ -65,7 +65,7 @@ class TitleBar : public Widget {
                      .type = "float",
                      .default_value = "36.0",
                      .required = false,
-                     .note = "标题栏高度(dp)",
+                     .note = "Title bar height (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -73,24 +73,24 @@ class TitleBar : public Widget {
                      .type = "string",
                      .default_value = "",
                      .required = false,
-                     .note = "标题文本",
+                     .note = "Title text",
                      .json_type = "string"},
                     {.name = "subtitle",
                      .type = "string",
                      .default_value = "",
                      .required = false,
-                     .note = "副标题文本(可选)",
+                     .note = "Subtitle text (optional)",
                      .json_type = "string"},
                     {.name = "window_controls",
                      .type = "bool",
                      .default_value = "true",
                      .required = false,
-                     .note = "是否渲染内置 最小化/最大化/关闭 钮",
+                     .note = "Render the built-in minimize/maximize/close buttons",
                      .json_type = "boolean"},
                 },
             .events = {},
             .children_policy = "none",
-            .examples = {R"(au::TitleBar{}.set_title("文档").add_action({"菜单", fn}))"},
+            .examples = {R"(au::TitleBar{}.set_title("Document").add_action({"Menu", fn}))"},
         };
     }
     /// @brief 实例侧自描述，直接转调 describe_static()。
@@ -438,6 +438,7 @@ class TitleBar : public Widget {
         const bool is_max = mode != nullptr && *mode == WindowMode::Maximized;
         const bool is_fs = mode != nullptr && *mode == WindowMode::FullScreen;
         const WindowChrome *chrome = env_ != nullptr ? env_->get<WindowChrome>() : nullptr;
+        // CJK-LITERAL: on-screen-demo - painted built-in button text, never printed
         // NOLINTNEXTLINE(*-use-trailing-return-type)
         out.push_back(TitleBarAction{.label = is_max ? "还原" : "最大化", .on_click = [this] {
                                          if (const WindowChrome *c =
@@ -446,6 +447,7 @@ class TitleBar : public Widget {
                                          }
                                      }});
         (void)chrome;
+        // CJK-LITERAL: on-screen-demo - painted built-in button text, never printed
         // NOLINTNEXTLINE(*-use-trailing-return-type)
         out.push_back(TitleBarAction{.label = "最小化", .on_click = [this] {
                                          if (const WindowChrome *c =
@@ -454,6 +456,7 @@ class TitleBar : public Widget {
                                          }
                                      }});
 
+        // CJK-LITERAL: on-screen-demo - painted built-in button text, never printed
         // NOLINTNEXTLINE(*-use-trailing-return-type)
         out.push_back(TitleBarAction{.label = is_fs ? "退出全屏" : "全屏", .on_click = [this] {
                                          if (const WindowChrome *c =
@@ -462,6 +465,7 @@ class TitleBar : public Widget {
                                              c->set_fullscreen(m == nullptr || *m != WindowMode::FullScreen);
                                          }
                                      }});
+        // CJK-LITERAL: on-screen-demo - painted built-in button text, never printed
         // NOLINTNEXTLINE(*-use-trailing-return-type)
         out.push_back(TitleBarAction{.label = "关闭", .on_click = [this] {
                                          if (const WindowChrome *c =

@@ -40,7 +40,7 @@ class Dialog : public Container {
                      .type = "bool",
                      .default_value = "false",
                      .required = false,
-                     .note = "是否显示",
+                     .note = "Visible",
                      .json_type = "boolean"},
                 },
             .events = {"on_close"},

@@ -97,7 +97,7 @@ class Placeholder : public Widget {
                      .type = "Color",
                      .default_value = "{85,85,85,255}",
                      .required = false,
-                     .note = "文字色",
+                     .note = "Text color",
                      .json_type = "array"},
                     {.name = "width",
                      .type = "Length",

@@ -41,7 +41,7 @@ class Spacer : public Widget {
                      .type = "bool",
                      .default_value = "true",
                      .required = false,
-                     .note = "是否吸收剩余空间",
+                     .note = "Absorb the remaining space",
                      .json_type = "boolean"},
                     {.name = "width",
                      .type = "Length",

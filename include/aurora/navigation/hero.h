@@ -92,7 +92,11 @@ class Hero : public SingleChild {
             .name = "Hero",
             .properties =
                 {
-                    {.name = "tag", .type = "string", .default_value = "", .required = false, .note = "共享元素配对键"},
+                    {.name = "tag",
+                     .type = "string",
+                     .default_value = "",
+                     .required = false,
+                     .note = "Shared element pairing key"},
                 },
             .events = {},
             .children_policy = "single",

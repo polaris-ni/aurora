@@ -53,9 +53,10 @@ class LazyList : public Widget {
     /// @param item_extent 固定行高(dp)，默认 48。
     LazyList(int count, ItemBuilder builder, float item_extent = 48.0F)
         : count_(count < 0 ? 0 : count), builder_(std::move(builder)),
-          item_extent_(item_extent > 0.0F
-                           ? item_extent
-                           : (Diagnostics::degraded("layout", "LazyList item_extent 非正值已降级为 48"), 48.0F)) {
+          item_extent_(
+              item_extent > 0.0F
+                  ? item_extent
+                  : (Diagnostics::degraded("layout", "LazyList item_extent is not positive, degraded to 48"), 48.0F)) {
         set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
 
@@ -74,7 +75,7 @@ class LazyList : public Widget {
                      .type = "int",
                      .default_value = "0",
                      .required = true,
-                     .note = "总项数",
+                     .note = "Total item count",
                      .json_type = "integer",
                      .enum_values = {},
                      .min_value = "0"},
@@ -82,7 +83,7 @@ class LazyList : public Widget {
                      .type = "float",
                      .default_value = "48.0",
                      .required = false,
-                     .note = "固定行高(dp)",
+                     .note = "Fixed row height (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -90,7 +91,7 @@ class LazyList : public Widget {
                      .type = "float",
                      .default_value = "0.0",
                      .required = false,
-                     .note = "当前滚动偏移(dp)",
+                     .note = "Current scroll offset (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -98,7 +99,7 @@ class LazyList : public Widget {
                      .type = "float",
                      .default_value = "200.0",
                      .required = false,
-                     .note = "可见区外预取缓冲(dp)",
+                     .note = "Prefetch buffer beyond the viewport (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -106,7 +107,7 @@ class LazyList : public Widget {
                      .type = "string",
                      .default_value = "",
                      .required = false,
-                     .note = "滚动位置保存键（空=不参与恢复）",
+                     .note = "Scroll position save key (empty = excluded from restore)",
                      .json_type = "string",
                      .enum_values = {},
                      .min_value = ""},
@@ -114,7 +115,7 @@ class LazyList : public Widget {
                      .type = "float",
                      .default_value = "0.0",
                      .required = false,
-                     .note = "吸附周期dp（<=0=关闭；snap_paging=true 时忽略）",
+                     .note = "Snap period (dp); <=0 disables, ignored when snap_paging=true",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -122,7 +123,7 @@ class LazyList : public Widget {
                      .type = "bool",
                      .default_value = "false",
                      .required = false,
-                     .note = "分页模式：以视口高为一页吸附",
+                     .note = "Paging mode: snap one viewport height per page",
                      .json_type = "boolean",
                      .enum_values = {},
                      .min_value = ""},
@@ -130,7 +131,7 @@ class LazyList : public Widget {
                      .type = "ScrollSnapAlignment",
                      .default_value = "Start",
                      .required = false,
-                     .note = "吸附对齐方位（Start/Center/End）",
+                     .note = "Snap alignment (Start/Center/End)",
                      .json_type = "string",
                      .enum_values = {"Start", "Center", "End"},
                      .min_value = ""},
@@ -329,9 +330,10 @@ class LazyList : public Widget {
         }
         if (props.contains("item_extent")) {
             const float declared = props.at("item_extent")->as_or<float>(0.0F);
-            item_extent_ = declared > 0.0F
-                               ? declared
-                               : (Diagnostics::degraded("layout", "LazyList item_extent 非正值已降级为 48"), 48.0F);
+            item_extent_ =
+                declared > 0.0F
+                    ? declared
+                    : (Diagnostics::degraded("layout", "LazyList item_extent is not positive, degraded to 48"), 48.0F);
         }
         if (props.contains("cache_extent")) {
             set_cache_extent(props.at("cache_extent")->as_or<float>(0.0F));

@@ -92,7 +92,8 @@ struct Matrix2D {
     [[nodiscard]] auto inverse() const -> Matrix2D {
         const float det = (m11 * m22) - (m12 * m21);
         if (std::fabs(det) < 1e-6F) {
-            Diagnostics::degraded("Matrix2D 行列式≈0，已降级为单位矩阵", "Matrix2D::inverse", "matrix2d-degenerate");
+            Diagnostics::degraded("Matrix2D determinant is near 0, degraded to identity matrix", "Matrix2D::inverse",
+                                  "matrix2d-degenerate");
             return Matrix2D{};
         }
         const float ia = m22 / det;

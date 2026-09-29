@@ -198,7 +198,8 @@ auto TestController::pump_and_settle(int max_frames) -> int {
 auto TestController::set_viewport(int width, int height) -> Result<void> {
     if (width <= 0 || height <= 0) {
         return Result<void>{make_error(ErrorCode::GeneralInvalidArgument,
-                                       "set_viewport: viewport size must be positive (width 与 height 均须 > 0)")};
+                                       "set_viewport: viewport size must be positive "
+                                       "(both width and height must be > 0)")};
     }
     impl_->cfg.width = width;
     impl_->cfg.height = height;
@@ -279,7 +280,8 @@ auto TestController::tap(Widget &w) -> Result<void> {
 auto TestController::tap(const Node &n) -> Result<void> {
     if (!n) {
         return Result<void>{make_error(ErrorCode::GeneralInvalidArgument,
-                                       "tap: target node is empty（查找失败时应检查 finder 语义与节点是否已在树中）")};
+                                       "tap: target node is empty (on lookup failure, check the finder semantics "
+                                       "and whether the node is already in the tree)")};
     }
     Node target = n;  // 拷贝即共享：仍是同一 widget 实例
     return tap(target.widget());
@@ -296,7 +298,8 @@ auto TestController::drag(Widget &w, const Point &delta) -> Result<void> {
 auto TestController::drag(const Node &n, const Point &delta) -> Result<void> {
     if (!n) {
         return Result<void>{make_error(ErrorCode::GeneralInvalidArgument,
-                                       "drag: target node is empty（查找失败时应检查 finder 语义与节点是否已在树中）")};
+                                       "drag: target node is empty (on lookup failure, check the finder semantics "
+                                       "and whether the node is already in the tree)")};
     }
     Node target = n;  // 拷贝即共享：仍是同一 widget 实例
     return drag(target.widget(), delta);
@@ -314,7 +317,8 @@ auto TestController::enter_text(const Node &n, std::string_view text) -> Result<
     if (!n) {
         return Result<void>{
             make_error(ErrorCode::GeneralInvalidArgument,
-                       "enter_text: target node is empty（查找失败时应检查 finder 语义与节点是否已在树中）")};
+                       "enter_text: target node is empty (on lookup failure, check the finder semantics "
+                       "and whether the node is already in the tree)")};
     }
     Node target = n;  // 拷贝即共享：仍是同一 widget 实例
     return enter_text(target.widget(), text);
@@ -327,23 +331,25 @@ auto TestController::enter_text(const Node &n, std::string_view text) -> Result<
 auto TestController::expect_visible(const Node &n) -> Result<void> {
     if (!n) {
         return Result<void>{make_error(ErrorCode::ValidationFailed,
-                                       "expect_visible: target node is empty（先经 find_by_* 取到非空节点再断言）")};
+                                       "expect_visible: target node is empty "
+                                       "(find_by_* must return a non-null node before asserting)")};
     }
     const Json show = prop_of(n.widget(), "show");
     if (show.is_bool() && !show.as_or<bool>(false)) {
-        return Result<void>{make_error(
-            ErrorCode::ValidationFailed,
-            "expect_visible: " + describe(n) + " has show=false（隐藏节点不入绘制；断言前确认控件未被置为隐藏）")};
+        return Result<void>{
+            make_error(ErrorCode::ValidationFailed, "expect_visible: " + describe(n) +
+                                                        " has show=false (hidden nodes are not painted; confirm the "
+                                                        "widget was not set hidden before asserting)")};
     }
     // 几何非空：参与过布局（Node 几何权威）或绘制（paint_bounds）二者取其一即可判定「可见」。
     const Size node_size = n.bounds().size;
     const Rect painted = n.widget().paint_bounds();
     if (node_size.width <= 0.0F && node_size.height <= 0.0F && painted.size.width <= 0.0F &&
         painted.size.height <= 0.0F) {
-        return Result<void>{
-            make_error(ErrorCode::ValidationFailed,
-                       "expect_visible: " + describe(n) +
-                           " has empty geometry（先 pump 至少一帧让整树完成挂载与布局，再断言可见性）")};
+        return Result<void>{make_error(ErrorCode::ValidationFailed,
+                                       "expect_visible: " + describe(n) +
+                                           " has empty geometry (pump at least one frame so the tree finishes "
+                                           "mounting and layout, then assert visibility)")};
     }
     return Result<void>{};
 }
@@ -354,7 +360,8 @@ auto TestController::expect_prop(const Widget &w, std::string_view key, const Js
         return Result<void>{make_error(ErrorCode::WidgetInvalidProp,
                                        "expect_prop: " + std::string{key} + " expected " + json_dump(expected) +
                                            " but got " + json_dump(actual) +
-                                           "（属性名取自控件自描述；Reactive/Localized 属性读的是当前解析值）")};
+                                           " (property names come from the widget self-description; "
+                                           "Reactive/Localized properties read the current resolved value)")};
     }
     return Result<void>{};
 }
@@ -362,7 +369,8 @@ auto TestController::expect_prop(const Widget &w, std::string_view key, const Js
 auto TestController::expect_prop(const Node &n, std::string_view key, const Json &expected) -> Result<void> {
     if (!n) {
         return Result<void>{make_error(ErrorCode::ValidationFailed,
-                                       "expect_prop: target node is empty（先经 find_by_* 取到非空节点再断言）")};
+                                       "expect_prop: target node is empty "
+                                       "(find_by_* must return a non-null node before asserting)")};
     }
     return expect_prop(n.widget(), key, expected);
 }

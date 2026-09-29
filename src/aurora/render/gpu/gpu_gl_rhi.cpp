@@ -27,6 +27,7 @@ namespace {
 
 // ---- GLSL 3.3 core 着色器源（顶点共享；逻辑 dp 坐标系 → NDC y 翻转） ----
 
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr const char *AURORA_GLSL_VERT = R"(#version 330 core
 layout(location=0) in vec2 a_pos;
 layout(location=1) in vec2 a_uv;
@@ -48,6 +49,7 @@ void main() {
 // 实心 quad（FillRect/ClearRect/DrawRect/DrawLine）+ shader 内 SDF 裁剪。
 // 裁剪不用 scissor：矩形/圆角统一 SDF alpha（float 精度、与软件路径逐像素交叠语义同源）；
 // 不 discard——alpha=0 经 blend 写 dst=dst，语义等价且保留 early-z 之外的路径简单性。
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr const char *AURORA_GLSL_SOLID = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
@@ -73,6 +75,7 @@ void main() {
 
 // 圆角描边带（RoundedBorder）：外缘 d=0、内缘 d=-thickness（向内描边）、两侧 0.5px 羽化，
 // 与软件 painter::draw_rounded_border 的覆盖度语义逐项对齐。
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr const char *AURORA_GLSL_BORDER = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
@@ -106,6 +109,7 @@ void main() {
 // t 由几何参数在片元内计算：linear = dot(P-a,d)/dot(d,d)（退化方向回落首色，镜像软件
 // sample_gradient 的 front 回退）；radial = |P-c|/r。1D 采样做半像素对齐（t*255+0.5)/256，
 // 保证 t=0/1 精确落在端点 texel。全局 alpha 经 v_color.a 烘焙进片元，与实心管线同源。
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr const char *AURORA_GLSL_GRAD = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
@@ -212,6 +216,7 @@ void main() {
 // （外部；内部恒 1 由 fill_rect 快路径承担）。片元内 length(max(q, 0)) 与软件逐像素
 // 的 sqrt(dx²+dy²) 逐项同构（内部 = 0 → 因子 1 = fill），blur 半径逻辑/物理换算后
 // scale 相消，直接用逻辑 dp 计算。硬阴影（blur ≤ 0）不走本管线，翻译期退化为实心 quad。
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr const char *AURORA_GLSL_SHADOW = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
@@ -244,6 +249,7 @@ void main() {
 // blur_region_scalar 逐项同构：n = 2r+1 恒权、tap 索引钳制在区域内（毛玻璃不漏采区外）、
 // 整数和除 n 截断。texel 值经 unorm 往返需先 ×255 取整还原成整数域再做整数平均（截断
 // floor），写回时 /255 由 GL unorm 转换逐字节精确复原。区域坐标全部为设备像素。
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr const char *AURORA_GLSL_BLUR = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
@@ -276,6 +282,7 @@ void main() {
 // 区域混合（BlendRegion）：把已绘内容与 tint 按 BlendMode 逐像素回写（CSS mix-blend-mode
 // 子集）。软件 blend_region 全程整数运算（乘除 255 截断、强度回插向零截断），GPU 在浮点域
 // 近似（归一化乘法 / mix），逐通道偏差 ≤ 1 LSB——设计容差内。alpha 通道不参与（软件只写 RGB）。
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr const char *AURORA_GLSL_BLEND = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
@@ -317,6 +324,7 @@ void main() {
 // 区域遮罩（MaskRegion）：把区域像素 RGB 乘以渐变因子（LinearFade/LinearRise/RadialFade），
 // 与软件 mask_region 同构：因子基于区域内像素索引（整数域），radial 中心/最大半径按区域
 // 设备像素尺寸计算，factor = 1 - strength*(1-base)，alpha 通道不变。
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr const char *AURORA_GLSL_MASK = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
@@ -1498,7 +1506,7 @@ struct GpuGlRhi::Impl {
         gl.bind_framebuffer(FRAMEBUFFER, *fbo);
         gl.framebuffer_texture_2d(FRAMEBUFFER, COLOR_ATTACHMENT0, TEXTURE_2D, *tex, 0);
         if (gl.check_framebuffer_status(FRAMEBUFFER) != FRAMEBUFFER_COMPLETE) {
-            AURORA_LOG_ERROR("gpu-gl", "层帧缓冲不完整（layer attachment incomplete）");
+            AURORA_LOG_ERROR("gpu-gl", "Layer framebuffer incomplete (layer attachment incomplete)");
             failed = true;
             return false;
         }
@@ -2045,7 +2053,9 @@ struct GpuGlRhi::Impl {
                 if (it == layer_cache.end() || it->second.fbo == 0) {
                     // 冷存储未命中（后端重建等）：本帧跳过并整体失效层代际，下帧重录自愈。
                     if (!layer_miss_warned) {
-                        AURORA_LOG_WARN("gpu-gl", "DrawLayer 未命中常驻层纹理，本帧跳过（下帧重录）");
+                        AURORA_LOG_WARN("gpu-gl",
+                                        "DrawLayer missed the resident layer texture, this frame is skipped "
+                                        "(re-recorded next frame)");
                         layer_miss_warned = true;
                     }
                     render::detail::bump_gpu_layer_epoch();

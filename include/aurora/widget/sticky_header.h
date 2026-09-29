@@ -40,7 +40,7 @@ class StickyHeader : public SingleChild {
             .properties = {},
             .events = {},
             .children_policy = "single",
-            .examples = {"au::StickyHeader(au::Text(\"分组标题\")) /* Scroll 内容中滚动时钉驻顶部 */"},
+            .examples = {"au::StickyHeader(au::Text(\"Section title\")) /* pinned to the top while scrolling */"},
         };
     }
     /// @brief 运行时自描述：转发静态描述符。

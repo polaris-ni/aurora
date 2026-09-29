@@ -49,11 +49,14 @@ class GridView : public Widget {
     /// @param cell_extent 单元格基准边长（像素），非正数降级为 96。
     GridView(int count, int columns, ItemBuilder builder, float cell_extent = 96.0F)
         : count_(count < 0 ? 0 : count),
-          columns_(columns > 0 ? columns : (Diagnostics::degraded("layout", "GridView columns 非正已降级为 1"), 1)),
+          columns_(columns > 0
+                       ? columns
+                       : (Diagnostics::degraded("layout", "GridView columns is not positive, degraded to 1"), 1)),
           builder_(std::move(builder)),
-          cell_extent_(cell_extent > 0.0F
-                           ? cell_extent
-                           : (Diagnostics::degraded("layout", "GridView cell_extent 非正已降级为 96"), 96.0F)) {
+          cell_extent_(
+              cell_extent > 0.0F
+                  ? cell_extent
+                  : (Diagnostics::degraded("layout", "GridView cell_extent is not positive, degraded to 96"), 96.0F)) {
         set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
 
@@ -72,7 +75,7 @@ class GridView : public Widget {
                      .type = "int",
                      .default_value = "0",
                      .required = true,
-                     .note = "总项数",
+                     .note = "Total item count",
                      .json_type = "integer",
                      .enum_values = {},
                      .min_value = "0"},
@@ -80,7 +83,7 @@ class GridView : public Widget {
                      .type = "int",
                      .default_value = "1",
                      .required = true,
-                     .note = "列数",
+                     .note = "Column count",
                      .json_type = "integer",
                      .enum_values = {},
                      .min_value = "1"},
@@ -88,7 +91,7 @@ class GridView : public Widget {
                      .type = "float",
                      .default_value = "96.0",
                      .required = false,
-                     .note = "单元格高(dp)（宽=视口宽/列数）",
+                     .note = "Cell height (dp), width = viewport width / column count",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -96,7 +99,7 @@ class GridView : public Widget {
                      .type = "float",
                      .default_value = "0.0",
                      .required = false,
-                     .note = "纵向滚动偏移(dp)",
+                     .note = "Vertical scroll offset (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -104,7 +107,7 @@ class GridView : public Widget {
                      .type = "float",
                      .default_value = "200.0",
                      .required = false,
-                     .note = "可见区外预取缓冲(dp)",
+                     .note = "Prefetch buffer beyond the viewport (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -112,7 +115,7 @@ class GridView : public Widget {
                      .type = "string",
                      .default_value = "",
                      .required = false,
-                     .note = "滚动位置保存键（空=不参与恢复）",
+                     .note = "Scroll position save key (empty = excluded from restore)",
                      .json_type = "string",
                      .enum_values = {},
                      .min_value = ""},
@@ -120,7 +123,7 @@ class GridView : public Widget {
                      .type = "float",
                      .default_value = "0.0",
                      .required = false,
-                     .note = "吸附行周期dp（<=0=关闭；snap_paging=true 时忽略）",
+                     .note = "Row snap period (dp); <=0 disables, ignored when snap_paging=true",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -128,7 +131,7 @@ class GridView : public Widget {
                      .type = "bool",
                      .default_value = "false",
                      .required = false,
-                     .note = "分页模式：以视口高为一页吸附",
+                     .note = "Paging mode: snap one viewport height per page",
                      .json_type = "boolean",
                      .enum_values = {},
                      .min_value = ""},
@@ -136,7 +139,7 @@ class GridView : public Widget {
                      .type = "ScrollSnapAlignment",
                      .default_value = "Start",
                      .required = false,
-                     .note = "吸附对齐方位（Start/Center/End）",
+                     .note = "Snap alignment (Start/Center/End)",
                      .json_type = "string",
                      .enum_values = {"Start", "Center", "End"},
                      .min_value = ""},
@@ -325,14 +328,16 @@ class GridView : public Widget {
         }
         if (props.contains("columns")) {
             const int declared = props.at("columns")->as_or<std::int32_t>(0);
-            columns_ =
-                declared > 0 ? declared : (Diagnostics::degraded("layout", "GridView columns 非正已降级为 1"), 1);
+            columns_ = declared > 0
+                           ? declared
+                           : (Diagnostics::degraded("layout", "GridView columns is not positive, degraded to 1"), 1);
         }
         if (props.contains("cell_extent")) {
             const float declared = props.at("cell_extent")->as_or<float>(0.0F);
-            cell_extent_ = declared > 0.0F
-                               ? declared
-                               : (Diagnostics::degraded("layout", "GridView cell_extent 非正已降级为 96"), 96.0F);
+            cell_extent_ =
+                declared > 0.0F
+                    ? declared
+                    : (Diagnostics::degraded("layout", "GridView cell_extent is not positive, degraded to 96"), 96.0F);
         }
         if (props.contains("cache_extent")) {
             set_cache_extent(props.at("cache_extent")->as_or<float>(0.0F));

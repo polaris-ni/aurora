@@ -87,16 +87,16 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
                      .type = "float",
                      .default_value = "64.0",
                      .required = false,
-                     .note = "触发刷新的下拉距离(dp)"},
+                     .note = "Pull distance that triggers a refresh (dp)"},
                     {.name = "max_pull",
                      .type = "float",
                      .default_value = "128.0",
                      .required = false,
-                     .note = "橡皮筋下拉上限(dp)"},
+                     .note = "Rubber-band pull limit (dp)"},
                 },
             .events = {"on_refresh"},
             .children_policy = "single",
-            .examples = {"au::PullToRefresh(au::Scroll{...}) /* 顶部下拉触发刷新 */"},
+            .examples = {"au::PullToRefresh(au::Scroll{...}) /* pull down at the top to trigger a refresh */"},
         };
     }
     /// @brief 运行时自描述（规格附录 B）。
@@ -274,6 +274,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
             2.5F, angle, angle + (4.712389F * std::clamp(progress(), 0.25F, 1.0F)), accent);
         if (state_ == PullToRefreshState::Refreshing) {
             const float th = render::FontEngine::measure_height(Font{.size_pt = 11.0F});
+            // CJK-LITERAL: on-screen-demo - 刷新中 提示绘制在下拉带上，属上屏文案，不经控制台输出
             p.draw_text(Rect{.origin = Point{.x = band.origin.x, .y = band.origin.y + pull_ - th - 4.0F},
                              .size = Size{.width = band.size.width, .height = th}},
                         "刷新中…", Font{.size_pt = 11.0F}, Color{120, 120, 120, 255});

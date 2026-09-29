@@ -76,7 +76,7 @@ auto InspectorPanel::describe_static() -> WidgetDescriptor {
                  .type = "float",
                  .default_value = "0.35",
                  .required = false,
-                 .note = "左侧树占比(0~1)",
+                 .note = "Left tree ratio (0-1)",
                  .json_type = "number",
                  .enum_values = {},
                  .min_value = "0",
@@ -224,7 +224,7 @@ auto InspectorPanel::on_paint(Painter &p, const Rect &bounds, const BuildContext
                             .size = Size{.width = props_w, .height = AURORA_HEADER_HEIGHT}};
     p.fill_rect(props_header, Color{235, 237, 242});
 
-    const std::string title_text = (selected_widget_ != nullptr) ? selected_widget_->type_name() : "(未选中)";
+    const std::string title_text = (selected_widget_ != nullptr) ? selected_widget_->type_name() : "(none selected)";
     p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + props_x + 8.0F, .y = bounds.origin.y + 6.0F},
                      .size = Size{.width = props_w - 16.0F, .height = AURORA_HEADER_HEIGHT - 8.0F}},
                 title_text, Font{.size_pt = 11.0F}, Color{80, 80, 100});

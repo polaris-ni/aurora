@@ -139,7 +139,7 @@ auto ScrollBenchHarness::Result::trustworthy() const -> bool {
 auto ScrollBenchHarness::Result::to_markdown() const -> std::string {
     std::string out = report.to_markdown();
 
-    out += "\n| 滚动自证 | 值 | 判定 |\n|------|----|----|\n";
+    out += "\n| Scroll self-check | Value | Verdict |\n|------|----|----|\n";
     out += aurora::internal::string_format("| scrollable found | %s | %s |\n", scrollable_found ? "yes" : "no",
                                            scrollable_found ? "ok" : "**FAIL**");
     out += aurora::internal::string_format(
@@ -147,28 +147,30 @@ auto ScrollBenchHarness::Result::to_markdown() const -> std::string {
         (report.frame_count > 0 && moved_frames == report.frame_count) ? "ok" : "**FAIL**");
     out += aurora::internal::string_format("| idle (skipped) frames | %zu | %s |\n", idle_frames,
                                            idle_frames == 0 ? "ok" : "**FAIL**");
-    out += aurora::internal::string_format("| reversals | %zu（%.1f%%） | %s |\n", reversals, reversal_ratio() * 100.0,
-                                           reversal_ratio() <= AURORA_MAX_REVERSAL_RATIO ? "ok" : "**FAIL 内容太短**");
     out += aurora::internal::string_format(
-        "| scrolled | %.1f dp（%.1f dp/帧） | — |\n", scrolled_px,
+        "| reversals | %zu (%.1f%%) | %s |\n", reversals, reversal_ratio() * 100.0,
+        reversal_ratio() <= AURORA_MAX_REVERSAL_RATIO ? "ok" : "**FAIL content too short**");
+    out += aurora::internal::string_format(
+        "| scrolled | %.1f dp (%.1f dp/frame) | - |\n", scrolled_px,
         report.frame_count > 0 ? scrolled_px / static_cast<double>(report.frame_count) : 0.0);
     out +=
         aurora::internal::string_format("| step calibration | %.2f dp/unit | %s |\n", static_cast<double>(dp_per_unit),
-                                        dp_per_unit > 0.0F ? "ok" : "**FAIL 未标定**");
+                                        dp_per_unit > 0.0F ? "ok" : "**FAIL not calibrated**");
     out += aurora::internal::string_format("| scroll extent | %.1f dp | %s |\n", static_cast<double>(max_offset),
-                                           max_offset > 0.5F ? "ok" : "**FAIL 不可滚**");
-    out += aurora::internal::string_format("| scroll viewport | %.1f dp（窗口 %.0f dp） | 内容 %.2f 屏%s |\n",
+                                           max_offset > 0.5F ? "ok" : "**FAIL not scrollable**");
+    out += aurora::internal::string_format("| scroll viewport | %.1f dp (window %.0f dp) | content %.2f screens%s |\n",
                                            static_cast<double>(scroll_viewport_h), static_cast<double>(viewport.height),
                                            static_cast<double>(content_screens()),
-                                           content_screens() < 2.0F ? "（偏短）" : "");
-    out += aurora::internal::string_format("| geometry stable | %.1f → %.1f dp | %s |\n",
+                                           content_screens() < 2.0F ? " (short)" : "");
+    out += aurora::internal::string_format("| geometry stable | %.1f -> %.1f dp | %s |\n",
                                            static_cast<double>(max_offset), static_cast<double>(max_offset_end),
-                                           geometry_stable() ? "ok" : "**FAIL 采样期内容仍在变**");
-    out += aurora::internal::string_format("| final offset | %.1f dp | — |\n", static_cast<double>(final_offset));
-    out += aurora::internal::string_format("| settle | %zu frames / %.0f ms（%s） | %s |\n", settle_frames, settle_ms,
-                                           settle_reason_name(settle_reason), settled ? "ok" : "**FAIL 撞帧数上限**");
+                                           geometry_stable() ? "ok" : "**FAIL content changing during sampling**");
+    out += aurora::internal::string_format("| final offset | %.1f dp | - |\n", static_cast<double>(final_offset));
+    out +=
+        aurora::internal::string_format("| settle | %zu frames / %.0f ms (%s) | %s |\n", settle_frames, settle_ms,
+                                        settle_reason_name(settle_reason), settled ? "ok" : "**FAIL frame limit hit**");
     out += aurora::internal::string_format("| **trustworthy** | %s | |\n",
-                                           trustworthy() ? "**yes**" : "**NO — 读数不可信**");
+                                           trustworthy() ? "**yes**" : "**NO - readings not trustworthy**");
     return out;
 }
 

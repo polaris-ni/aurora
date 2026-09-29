@@ -86,12 +86,12 @@ class Timer : public SingleChild {
                      .type = "std::chrono::steady_clock::duration",
                      .default_value = "—",
                      .required = true,
-                     .note = "tick 周期（按 steady_clock）"},
+                     .note = "Tick period (steady_clock based)"},
                     {.name = "on_tick",
                      .type = "std::function<void(int)>",
                      .default_value = "nullptr",
                      .required = false,
-                     .note = "可选命令式回调，每次 tick 携带计数（从 1 起）"},
+                     .note = "Optional imperative callback carrying the tick count (starting at 1)"},
                 },
             .examples =
                 {

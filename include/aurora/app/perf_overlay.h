@@ -412,13 +412,13 @@ class PerfOverlay : public SingleChild {
                      .type = "bool",
                      .default_value = "true",
                      .required = false,
-                     .note = "是否显示统计",
+                     .note = "Show statistics",
                      .json_type = "boolean"},
                     {.name = "show_counters",
                      .type = "bool",
                      .default_value = "true",
                      .required = false,
-                     .note = "是否显示渲染计数器与长任务行",
+                     .note = "Show the render counters and long-task rows",
                      .json_type = "boolean"},
                 },
             .events = {},
@@ -480,7 +480,7 @@ class PerfOverlay : public SingleChild {
     [[nodiscard]] static auto stats_line1(const FrameStats &s) -> std::string {
         // 样本不足（<2 帧）时除零会得到 9765.6 这类假 FPS，直接显示 — 而非误导数字。
         if (s.window_size() < 2) {
-            return "FPS — (采样中) | P99 — | jitter —";
+            return "FPS - (sampling) | P99 - | jitter -";
         }
         std::string line = aurora::internal::string_format("FPS %.1f (avg %.1f) | P99 %.1fms | jitter %.1fms", s.fps(),
                                                            s.avg_frame_ms(), s.percentile_ms(0.99), s.jitter_ms());

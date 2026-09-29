@@ -61,7 +61,7 @@ class ToastHost : public SingleChild {
                      .type = "ToastPosition",
                      .default_value = "Bottom",
                      .required = false,
-                     .note = "通知显示位置"},
+                     .note = "Notification display position"},
                 },
             .events = {},
             .children_policy = "single",
