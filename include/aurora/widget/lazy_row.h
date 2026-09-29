@@ -13,6 +13,7 @@
 #include "aurora/event/event.h"
 #include "aurora/widget/widget.h"
 
+/// @brief 横向虚拟列表控件：LazyRow 属性聚合与按需构建可见窗口内子项的叶式滚动控件。
 namespace aurora {
 
 /// @brief 横向虚拟列表属性（聚合）：主轴为水平的按需虚拟化列表。
@@ -26,23 +27,26 @@ struct LazyRowProps {
     std::string restore_key;
 };
 
-/**
- * @brief 横向虚拟列表（镜像 `LazyList`，主轴改为水平）。
- *
- * 仅构建可见窗口（含 `cache_extent` 缓冲）内的子项，复杂度为 O(可见单元数)。
- * 横向滚轮（或拖拽）调整 `offset_`；`on_paint` 内 `push_clip` 防止父级圆角裁剪
- * 下的慢路径越界。命中测试返回自身（作为横向滚动叶），其内部子项点击通过
- * `on_item_click` 回调（按按下位置计算索引）上报，避免虚拟化子项不可作为稳定控件。
- *
- * 采用继承式双模 API：`LazyRowProps` 字段即本控件公有字段，可直接赋值或以配置块构造。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 横向虚拟列表（镜像 `LazyList`，主轴改为水平）。
+///
+/// 仅构建可见窗口（含 `cache_extent` 缓冲）内的子项，复杂度为 O(可见单元数)。
+/// 横向滚轮（或拖拽）调整 `offset_`；`on_paint` 内 `push_clip` 防止父级圆角裁剪
+/// 下的慢路径越界。命中测试返回自身（作为横向滚动叶），其内部子项点击通过
+/// `on_item_click` 回调（按按下位置计算索引）上报，避免虚拟化子项不可作为稳定控件。
+///
+/// 采用继承式双模 API：`LazyRowProps` 字段即本控件公有字段，可直接赋值或以配置块构造。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+///
 class LazyRow : public Widget, public LazyRowProps {
   public:
+    /// @brief 子项构造器类型：按索引惰性产出子项 Node。
     using ItemBuilder = std::function<Node(int)>;
 
+    /// @brief 默认构造：0 个子项、无构造器，各字段取 LazyRowProps 默认值。
     LazyRow() = default;
+    /// @brief 以属性配置块构造（继承式双模 API 的「配置块」入口）。
+    /// @param props 属性聚合，逐字段移入本控件。
     explicit LazyRow(LazyRowProps props) {
         item_count = props.item_count;
         item_extent = props.item_extent;
@@ -52,6 +56,10 @@ class LazyRow : public Widget, public LazyRowProps {
         restore_key = std::move(props.restore_key);
         set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
+    /// @brief 便捷构造：指定数量 + 构造器 + 统一子项宽度（同时填置公有字段与内部副本）。
+    /// @param count 子项总数（负值按原样存内部副本，绘制按窗口索引自然截断）。
+    /// @param builder 子项构造器（按索引惰性产出）。
+    /// @param item_extent 每个子项的固定宽度（dp，默认 96）。
     LazyRow(int count, ItemBuilder builder, float item_extent = 96.0F)
         : item_count_(count), item_builder_(std::move(builder)), item_extent_(item_extent) {
         item_count = count;
@@ -59,71 +67,89 @@ class LazyRow : public Widget, public LazyRowProps {
         set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
 
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 无信号依赖：滚动偏移与子项窗口均为运行时内部状态，不接响应式信号。
+    /// @param out 信号输出向量；本控件不向其写入任何信号。
+    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @brief 类型名字符串 "LazyRow"。
+    /// @return 静态字符串常量，指向类型名。
     [[nodiscard]] auto type_name() const -> const char * override { return "LazyRow"; }
 
     /// @brief 运行时自描述（规格附录 B）。
+    /// @return 名为 "LazyRow" 的静态描述符（item_count / item_extent / cache_extent / restore_key 四属性，
+    ///         事件 on_item_click，子节点策略 virtual）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "LazyRow",
             .properties =
                 {
-                    {.name = "item_count", .type = "int", .default_value = "0", .required = false, .note = "子项总数"},
+                    {.name = "item_count",
+                     .type = "int",
+                     .default_value = "0",
+                     .required = false,
+                     .note = "Child count"},
                     {.name = "item_extent",
                      .type = "float",
                      .default_value = "96.0",
                      .required = false,
-                     .note = "子项固定宽度(px)"},
+                     .note = "Fixed child width (px)"},
                     {.name = "cache_extent",
                      .type = "float",
                      .default_value = "0.0",
                      .required = false,
-                     .note = "视口外预构建缓冲(px)"},
+                     .note = "Prebuild buffer beyond the viewport (px)"},
                     {.name = "restore_key",
                      .type = "string",
                      .default_value = "",
                      .required = false,
-                     .note = "滚动位置保存键（空=不参与恢复）"},
+                     .note = "Scroll position save key (empty = excluded from restore)"},
                 },
-            .events = {{"on_item_click", "void(int)", "子项被点击时回调（参数为索引）"}},
+            .events = {{"on_item_click", "void(int)", "Callback when a child is clicked (argument is the index)"}},
             .children_policy = "virtual",
             .examples = {"au::LazyRow{ 10, [](int i){ return au::Text(std::to_string(i)); } }"},
         };
     }
+    /// @brief 实例自描述：转发到 describe_static()。
+    /// @return 本控件类型的 WidgetDescriptor（属性/事件/子策略元数据）。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 序列化标量属性（含运行时 offset，供 AI-first 可观测）。
+    /// @param props 写入目标 JSON 对象（基类属性先行）。
     auto serialize_props(Json &props) const -> void override {
-        Widget::serialize_props(props);
-        props["item_count"] = item_count;
-        props["item_extent"] = item_extent_;
-        props["cache_extent"] = cache_extent;
-        props["offset"] = offset_;  // 运行时滚动位置（AI-first 可观测）
-        props["restore_key"] = restore_key;
+        Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
+        props.set("item_count", item_count);
+        props.set("item_extent", item_extent_);
+        props.set("cache_extent", cache_extent);
+        props.set("offset", offset_);  // 运行时滚动位置（AI-first 可观测）
+        props.set("restore_key", restore_key);
     }
+    /// @brief 从静态 JSON 回填标量属性；缺失键保持当前值。
+    /// @param props 属性 JSON 对象（item_count/item_extent/cache_extent/restore_key/offset）。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("item_count")) {
-            item_count = props["item_count"].get<int>();
+            item_count = props.at("item_count")->as_or<std::int32_t>(0);
             item_count_ = item_count;
         }
         if (props.contains("item_extent")) {
-            item_extent_ = props["item_extent"].get<float>();
+            item_extent_ = props.at("item_extent")->as_or<float>(0.0F);
             item_extent = item_extent_;
         }
         if (props.contains("cache_extent")) {
-            cache_extent = props["cache_extent"].get<float>();
+            cache_extent = props.at("cache_extent")->as_or<float>(0.0F);
         }
         if (props.contains("restore_key")) {
-            restore_key = props["restore_key"].get<std::string>();
+            restore_key = props.at("restore_key")->as_or<std::string>("");
         }
         if (props.contains("offset")) {
             // 显式偏移优先于 restore_key 恢复：记入 pending，首次可滚动布局时应用。
-            pending_offset_ = props["offset"].get<float>();
+            pending_offset_ = props.at("offset")->as_or<float>(0.0F);
             scroll_restored_ = false;
         }
     }
 
-    // ---- 双模 setter ----
+    /// @brief 设置子项总数（链式 setter）：清空已构建窗口并标布局脏。
+    /// @param c 新的子项总数。
+    /// @return 自身引用，便于链式调用。
     auto set_item_count(int c) -> LazyRow & {
         item_count = c;
         item_count_ = c;
@@ -131,6 +157,9 @@ class LazyRow : public Widget, public LazyRowProps {
         mark_needs_layout();
         return *this;
     }
+    /// @brief 设置子项构造器（链式；清空已构建窗口并标布局脏）。
+    /// @param b 新的子项构造器（按索引惰性产出）。
+    /// @return 自身引用，便于链式调用。
     auto set_item_builder(ItemBuilder b) -> LazyRow & {
         item_builder_ = std::move(b);
         item_builder = item_builder_;
@@ -138,32 +167,45 @@ class LazyRow : public Widget, public LazyRowProps {
         mark_needs_layout();
         return *this;
     }
+    /// @brief 设置子项固定宽度（链式；标布局脏）。
+    /// @param e 子项宽度（dp）。
+    /// @return 自身引用，便于链式调用。
     auto set_item_extent(float e) -> LazyRow & {
         item_extent_ = e;
         item_extent = e;
         mark_needs_layout();
         return *this;
     }
+    /// @brief 设置内边距（链式；标布局脏）。
+    /// @param e 四周内边距（dp）。
+    /// @return 自身引用，便于链式调用。
     auto set_padding(const EdgeInsets &e) -> LazyRow & {
         padding = e;
         mark_needs_layout();
         return *this;
     }
+    /// @brief 设置视口外预构建缓冲（链式；标布局脏）。
+    /// @param e 缓冲长度（主轴 dp）。
+    /// @return 自身引用，便于链式调用。
     auto set_cache_extent(float e) -> LazyRow & {
         cache_extent = e;
         mark_needs_layout();
         return *this;
     }
     /// @brief 设置子项点击回调（参数为子项索引）。
+    /// @param cb 回调：松开未拖拽且命中有效子项时以该索引调用。
+    /// @return 自身引用，便于链式调用。
     auto set_on_item_click(std::function<void(int)> cb) -> LazyRow & {
         on_item_click_ = std::move(cb);
         return *this;
     }
 
     /// @brief 当前滚动偏移（dp，内容左移为正）。
+    /// @return 内部偏移量 offset_。
     [[nodiscard]] auto scroll_offset() const -> float { return offset_; }
 
     /// @brief 最大滚动偏移（内容宽 - 视口宽，不小于 0）。
+    /// @return 可滚动范围上限；内容不足以滚动时为 0。
     [[nodiscard]] auto max_scroll_offset() const -> float {
         // 视口宽度优先取最近一次布局的约束结果（`size()` 在 on_layout 返回后才更新，恢复路径依赖此值）。
         const float viewport_w =
@@ -176,6 +218,7 @@ class LazyRow : public Widget, public LazyRowProps {
     /// 与 `LazyList::set_scroll_offset` 的契约差异：本控件的可见窗口是在 `on_paint` 里按
     /// `offset_` 现场计算的（`on_layout` 只算内容总宽），故偏移变化**不需要**重布局；而
     /// `LazyList` 的子项在布局期排布，其 setter 须一并标布局脏。
+    /// @param offset 期望偏移（dp）；越界部分被夹取，与当前值相等时为 no-op。
     auto set_scroll_offset(float offset) -> void {
         const float clamped = std::clamp(offset, 0.0F, max_scroll_offset());
         if (clamped == offset_) {
@@ -187,6 +230,8 @@ class LazyRow : public Widget, public LazyRowProps {
         mark_needs_paint();
     }
 
+    /// @brief 滚轮滚动：按 `delta_y × item_extent × 0.5` 换算为横向偏移并夹取，余量回传外层。
+    /// @param e 滚动事件；置 `is_handled`，`remaining_y` 为端点夹掉后未消费的余量。
     auto on_scroll(ScrollEvent &e) -> void override {
         const float vw = std::max(1.0F, size().width - padding.left - padding.right);
         const float max_off = std::max(0.0F, full_content_ - vw);
@@ -202,8 +247,11 @@ class LazyRow : public Widget, public LazyRowProps {
     }
 
     /// @brief 真实滚动控件：滚轮派发时本控件是可滚动目标（最深优先）。
+    /// @return 恒为 true（覆盖基类按 `overflow_` 的默认判定，使嵌套时滚轮归本控件）。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
+    /// @brief 指针事件入口：按下记录命中子项，横向拖拽推进滚动偏移，抬起未拖拽则回调子项点击。
+    /// @param e 鼠标事件（就地读写：拖拽消费其 `local_position.x` 增量，消费后把 `is_handled` 置 true）。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (e.action == MouseAction::Press) {
             pressed_ = true;

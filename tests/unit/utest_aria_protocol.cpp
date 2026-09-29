@@ -146,6 +146,7 @@ AURORA_TEST_CASE(element_button_attrs_exact_order) {
 
 AURORA_TEST_CASE(text_content_suppresses_redundant_label) {
     // Text 以正文承载 value/name；正文 == name 时不再标 aria-label（防读屏双读）。
+    // CJK-LITERAL: cjk-fixture - Han name/content is the text projected into ARIA attributes
     NodeSnapshot n = node(3, 0, AccessibilityRole::Text, "你好");
     AriaElement el = aria_element_of(n);
     AURORA_TEST_CHECK(el.content == "你好");
@@ -154,20 +155,24 @@ AURORA_TEST_CASE(text_content_suppresses_redundant_label) {
     n.node.value = "world";  // value 优先于 name 做正文；name 仍在，label 保留
     el = aria_element_of(n);
     AURORA_TEST_CHECK(el.content == "world");
+    // CJK-LITERAL: cjk-fixture - the Han name must survive as aria-label once content differs
     AURORA_TEST_CHECK(attr_of(el, "aria-label") == "你好");
 
     // TextInput：name = label，value = 正文，二者各归其位。
+    // CJK-LITERAL: cjk-fixture - Han label text asserted through the textbox projection
     n = node(4, 0, AccessibilityRole::TextInput, "邮箱");
     n.node.value = "a@b.c";
     el = aria_element_of(n);
     AURORA_TEST_CHECK(el.role == "textbox");
     AURORA_TEST_CHECK(el.content == "a@b.c");
+    // CJK-LITERAL: cjk-fixture - same Han label echoed back from aria-label
     AURORA_TEST_CHECK(attr_of(el, "aria-label") == "邮箱");
 }
 
 AURORA_TEST_CASE(labelled_by_ref_projects_idref_and_suppresses_label) {
     // 引用式标签关联（`set_labelled_by`）：投 `aria-labelledby` IDREF，且**不再**发 `aria-label`
     // ——ARIA 里 labelledby 压制 label，两处同发等于把选择权丢给读屏实现。
+    // CJK-LITERAL: cjk-fixture - Han checkbox name is the label data under projection
     NodeSnapshot n = node(11, 0, AccessibilityRole::Checkbox, "音量");
     n.node.labelled_by = "vol-label";
     n.node.labelled_by_id = 5;
@@ -180,10 +185,12 @@ AURORA_TEST_CASE(labelled_by_ref_projects_idref_and_suppresses_label) {
     n.node.labelled_by_id = 0;
     el = aria_element_of(n);
     AURORA_TEST_CHECK(attr_of(el, "aria-labelledby").empty());
+    // CJK-LITERAL: cjk-fixture - unresolved reference must fall back to the node's own Han name
     AURORA_TEST_CHECK(attr_of(el, "aria-label") == "音量");
 }
 
 AURORA_TEST_CASE(state_attrs_map_exactly) {
+    // CJK-LITERAL: cjk-fixture - Han checkbox name carried as aria-label alongside state attrs
     NodeSnapshot n = node(9, 0, AccessibilityRole::Checkbox, "同意");
     n.node.state.checkable = true;
     n.node.state.checked = true;
@@ -209,26 +216,32 @@ AURORA_TEST_CASE(state_attrs_map_exactly) {
     AURORA_TEST_CHECK(attr_of(el, "aria-hidden") == "true");
 
     // multiline 只在 textbox 上成立（其他角色无此属性语义）。
+    // CJK-LITERAL: cjk-fixture - Han name used as the node label while probing aria-multiline
     NodeSnapshot t = node(10, 0, AccessibilityRole::TextInput, "备注");
     t.node.state.multiline = true;
     AURORA_TEST_CHECK(attr_of(aria_element_of(t), "aria-multiline") == "true");
+    // CJK-LITERAL: cjk-fixture - same Han name on a button, aria-multiline must not appear
     NodeSnapshot b = node(11, 0, AccessibilityRole::Button, "备注");
     b.node.state.multiline = true;
     AURORA_TEST_CHECK(attr_of(aria_element_of(b), "aria-multiline").empty());
 
     // heading 才发 aria-level；hint → aria-description 通用。
+    // CJK-LITERAL: cjk-fixture - Han heading text asserted through the header projection
     NodeSnapshot h = node(12, 0, AccessibilityRole::Header, "标题");
     h.node.level = 2;
     AURORA_TEST_CHECK(attr_of(aria_element_of(h), "aria-level") == "2");
     NodeSnapshot x = node(13, 0, AccessibilityRole::Generic, "g");
     x.node.level = 3;
+    // CJK-LITERAL: cjk-fixture - Han hint text is the description data under test
     x.node.hint = "帮助";
     AriaElement xe = aria_element_of(x);
     AURORA_TEST_CHECK(attr_of(xe, "aria-level").empty());
+    // CJK-LITERAL: cjk-fixture - the same Han hint echoed back as aria-description
     AURORA_TEST_CHECK(attr_of(xe, "aria-description") == "帮助");
 }
 
 AURORA_TEST_CASE(range_number_formatting) {
+    // CJK-LITERAL: cjk-fixture - Han slider name is label data while formatting range values
     NodeSnapshot n = node(20, 0, AccessibilityRole::Slider, "音量");
     n.node.range = AccessibilityRange{.min = 0.0, .max = 100.0, .step = 1.0, .value = 42.0};
     AriaElement el = aria_element_of(n);
@@ -248,6 +261,7 @@ AURORA_TEST_CASE(json_escape_minimal_set) {
     AURORA_TEST_CHECK(aria_json_escape(R"(he said "hi" c:\dir)") == R"(he said \"hi\" c:\\dir)");
     AURORA_TEST_CHECK(aria_json_escape("a\nb\tc\rd") == R"(a\nb\tc\rd)");
     AURORA_TEST_CHECK(aria_json_escape(std::string{"\x01\x1f\x7f", 3}) == R"(\u0001\u001f\u007f)");  // 控制字符与 DEL
+    // CJK-LITERAL: cjk-fixture - verifies the escaper passes UTF-8 Han text through unescaped
     AURORA_TEST_CHECK(aria_json_escape("中文 ✅") == "中文 ✅");  // UTF-8 原样透传（JSON 允许）
 }
 
@@ -324,6 +338,7 @@ AURORA_TEST_CASE(ops_json_move_update_can_coexist) {
 
 AURORA_TEST_CASE(announce_json_payload) {
     AURORA_TEST_CHECK(aria_announce_json(R"(it's "fine")", 0) == R"({"text":"it's \"fine\"","target":0})");
+    // CJK-LITERAL: cjk-fixture - Han announcement text must be embedded verbatim in the JSON payload
     AURORA_TEST_CHECK(aria_announce_json("已保存", 77) == R"({"text":"已保存","target":77})");
 }
 

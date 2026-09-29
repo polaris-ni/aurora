@@ -1,0 +1,114 @@
+# ---------------------------------------------------------------------------
+# E2E 能力探针（手动触发）
+#
+# 实测三类 GitHub Actions runner 上的「真实建窗 + 像素读回」能力，为 E2E 测试
+# 的 CI 口径（期望集 AURORA_E2E_EXPECT 与默认执行范围）提供事实依据。现有 backends
+# 作业在 ctest 下无显示环境（create_native_window 回退 HeadlessSurface），从未验证过
+# 真实建窗路径；本工作流用 etest_smoke_render（真实窗口 + 上屏链路 + Surface::data()
+# 读回）逐平台探明「可建窗 / 可读回 / 失败原因」。
+#
+# 已实测结论（已收进 codespec/specification/08-tooling.md §8.2「CI 能力边界」）：
+#   windows-latest : Win32 ✓（64ms）、D3D11 ✓（14ms）；GLFW ✗——VM 无 OpenGL 3.3，
+#                    WGL 通用驱动无法建 GPU 上下文
+#   ubuntu-latest  : X11 ✓（35ms）、GLFW ✓（1245ms，llvmpipe 软件 GL；GLFW 源码构建
+#                    需补 wayland-scanner 等 Wayland 依赖）
+#   macos-latest   : GLFW ✗——无人值守会话无窗口系统
+#
+# 平台 × 后端矩阵（沿用实测口径）：
+#   windows-latest : Win32（GDI）+ D3D11 + GLFW，Hidden 档
+#   ubuntu-latest  : X11 + GLFW（xvfb-run 虚拟显示）
+#   macos-latest   : GLFW（macOS runner 无人值守会话，验证结果供回归对照）
+#
+# 构建配置显式 -DAURORA_ENABLE_DEBUG=ON：Surface::data() 读回在 Win32 家族 / X11 /
+# Wayland / wgpu 回退帧 / GLFW-GPU 上受该宏门控（Release AUTO 不注入即不可读回，
+# 本地已实测），探针验证的是「环境能力」而非门控极性，故强制开启。
+#
+# 触发：仅 workflow_dispatch 手动触发（能力结论有漂移怀疑时复测），不作为常驻门禁。
+# ---------------------------------------------------------------------------
+
+name: e2e-probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe-windows:
+    name: probe-windows (win32 + d3d11 + glfw)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      # windows-latest 自带 MSYS2 mingw-w64 工具链（与 ci.yml core 矩阵 mingw 同款探测）
+      - name: Setup MinGW toolchain
+        shell: bash
+        run: |
+          for d in /c/msys64/mingw64/bin "/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin"; do
+            if [ -x "$d/gcc.exe" ]; then echo "$d" >> "$GITHUB_PATH"; break; fi
+          done
+          gcc --version
+
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_ENABLE_DEBUG=ON -DAURORA_BACKEND_D3D11=ON -DAURORA_BACKEND_GLFW=ON
+
+      - name: Build runner
+        shell: bash
+        run: cmake --build build --target aurora_test_runner
+
+      - name: Probe real-window render + readback (Hidden)
+        shell: bash
+        env:
+          # GLFW 在 windows runner 实测无法建上下文（VM 无 OpenGL 3.3），不入期望集：
+          # 期望集只声明「应兑现」的后端，实测不可用者留在集外走 skip 分支供对照。
+          AURORA_E2E_EXPECT: win32,d3d11
+        run: ./build/aurora_test_runner.exe --run=etest_smoke_render --verbose
+
+  probe-linux:
+    name: probe-linux (ubuntu-xvfb, x11 + glfw)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      # 编译依赖与 backends 矩阵 linux 项同口径：GLFW 源码构建会探测 Wayland 头
+      # （runner 预装环境已含），缺 wayland-scanner 会在 configure 期报错，故一并装
+      - name: Install deps
+        run: sudo apt-get update -y && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DAURORA_ENABLE_DEBUG=ON -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_GLFW=ON
+
+      - name: Build runner
+        run: cmake --build build --target aurora_test_runner
+
+      # xvfb-run 提供虚拟 X display：X11 建窗与 GLFW（X11 平台层）的真实窗口路径在此验证
+      - name: Probe real-window render + readback (Hidden, under xvfb)
+        env:
+          AURORA_E2E_EXPECT: x11,glfw
+        run: xvfb-run -a ./build/aurora_test_runner --run=etest_smoke_render --verbose
+
+  probe-macos:
+    name: probe-macos (glfw)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DAURORA_ENABLE_DEBUG=ON -DAURORA_BACKEND_GLFW=ON
+
+      - name: Build runner
+        run: cmake --build build --target aurora_test_runner
+
+      # macOS runner 自带 GUI 会话，但 GLFW 无人值守建窗实测不可用（无窗口系统会话）——
+      # 期望集置空（不声明 AURORA_E2E_EXPECT）：全部用例走 skip 分支，本 job 只作回归对照。
+      - name: Probe real-window render + readback (Hidden)
+        run: ./build/aurora_test_runner --run=etest_smoke_render --verbose

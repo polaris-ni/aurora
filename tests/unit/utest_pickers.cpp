@@ -15,8 +15,11 @@
 #include "aurora/state/state.h"
 #include "aurora/widget/pickers.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_pickers {
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -221,11 +224,11 @@ AURORA_TEST_CASE(date_picker_pointer_navigation_and_pick) {
 
 AURORA_TEST_CASE(date_picker_json_roundtrip_and_invalid_guard) {
     DatePicker src{Date{.year = 2025, .month = 3, .day = 9}};
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["year"].get<int>(), 2025);
-    AURORA_TEST_CHECK_EQ(props["month"].get<int>(), 3);
-    AURORA_TEST_CHECK_EQ(props["day"].get<int>(), 9);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "year"), 2025);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "month"), 3);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "day"), 9);
 
     DatePicker dst;
     dst.deserialize_props(props);
@@ -234,7 +237,7 @@ AURORA_TEST_CASE(date_picker_json_roundtrip_and_invalid_guard) {
     AURORA_TEST_CHECK_EQ(dst.view_month(), 3);
 
     // 反序列化非法日期（month=13）：保持原选中不变。
-    props["month"] = 13;
+    props.set("month", 13);
     DatePicker guard;
     guard.deserialize_props(props);
     AURORA_TEST_CHECK_EQ(guard.selected_date(), Date{2026, 1, 1});
@@ -322,10 +325,10 @@ AURORA_TEST_CASE(time_picker_describe_and_json_roundtrip) {
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
 
     TimePicker src{TimeOfDay{.hour = 8, .minute = 15}};
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["hour"].get<int>(), 8);
-    AURORA_TEST_CHECK_EQ(props["minute"].get<int>(), 15);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "hour"), 8);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "minute"), 15);
 
     TimePicker dst;
     dst.deserialize_props(props);
@@ -399,9 +402,9 @@ AURORA_TEST_CASE(color_picker_describe_and_json_roundtrip) {
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
 
     ColorPicker src{Color(0, 122, 255, 255)};
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_TRUE(props["color"].is_array());  // color 以 [r,g,b,a] 数组落盘
+    AURORA_TEST_CHECK_TRUE(require_child(props, "color")->is_array());  // color 以 [r,g,b,a] 数组落盘
 
     ColorPicker dst;
     dst.deserialize_props(props);

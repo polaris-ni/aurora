@@ -21,6 +21,11 @@ struct TitleBarGeometry {
 /// 决定最大化/还原图标字形（不影响按钮盒尺寸，由绘制层消费）；resizable=false 时
 /// maximize 盒为空。Mac 布局按钮在左侧，其余在右侧。
 /// 尺寸规则唯一权威来源见实现文件顶部注释块。
+/// @param width     窗口宽（逻辑 dp）；<= 0 视为退化输入，返回全空几何。
+/// @param style     标题栏样式：提供高度、按钮视觉语言与各按钮显隐开关。
+/// @param maximized 是否最大化——仅决定最大化/还原图标字形，不影响任何按钮盒尺寸。
+/// @param resizable 窗口能否调整大小——false 时 maximize 盒为空（自动隐藏）。
+/// @return 各分区矩形（close/maximize/minimize/icon/title），隐藏分区以空盒 Size{0,0} 表示。
 [[nodiscard]] auto title_bar_geometry(float width, const TitleBarStyle &style, bool maximized, bool resizable)
     -> TitleBarGeometry;
 

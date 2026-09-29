@@ -13,8 +13,10 @@
 #include "aurora/widget/text.h"
 #include "aurora/widget/toast.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_toast {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -122,15 +124,15 @@ AURORA_TEST_CASE(toast_clear_and_chained_position) {
 
 AURORA_TEST_CASE(toast_serialize_position_and_base_props) {
     ToastHost host{Text{"base"}};
-    Json props;
+    Json props = Json::object();
     host.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["position"].get<std::string>(), std::string{"bottom"});  // 默认 Bottom
-    AURORA_TEST_CHECK_EQ(props["show"].get<bool>(), true);  // 基类通用属性保留
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "position"), std::string{"bottom"});  // 默认 Bottom
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "show"), true);  // 基类通用属性保留
 
     host.set_position(ToastPosition::Top);
-    Json top_props;
+    Json top_props = Json::object();
     host.serialize_props(top_props);
-    AURORA_TEST_CHECK_EQ(top_props["position"].get<std::string>(), std::string{"top"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(top_props, "position"), std::string{"top"});
 }
 
 AURORA_TEST_CASE(toast_layout_and_offscreen_paint_smoke) {

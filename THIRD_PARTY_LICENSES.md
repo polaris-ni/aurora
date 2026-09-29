@@ -131,16 +131,7 @@ PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 
 ---
 
-## 5. nlohmann/json — JSON 解析
-
-- **版本**：单头文件（vendored）
-- **来源**：`third_party/nlohmann/json.hpp`
-- **用途**：`aurora_api.json` / preferences 等 JSON 读写
-- **许可**：MIT License
-
----
-
-## 6. Noto Sans — 内置默认字体
+## 5. Noto Sans — 内置默认字体
 
 - **来源**：`src/aurora/text/noto_font_data.cpp` 中的字节数组（由 Noto Sans 字体文件导出）
 - **用途**：默认字体 `"sans-serif"` / `"Noto Sans"` / `"default"`，全平台确定性渲染
@@ -148,7 +139,7 @@ PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 
 ---
 
-## 7. GLFW — 跨平台窗口与输入（可选后端依赖）
+## 6. GLFW — 跨平台窗口与输入（可选后端依赖）
 
 - **版本**：3.5.1（`third_party/glfw/include/GLFW/glfw3.h`：`GLFW_VERSION_MAJOR=3` / `MINOR=5` / `REVISION=1`）
 - **来源**：vendored 于 `third_party/glfw/`
@@ -188,7 +179,7 @@ freely, subject to the following restrictions:
 
 ---
 
-## 8. wgpu-native — GPU 栅格后端（可选后端依赖）
+## 7. wgpu-native — GPU 栅格后端（可选后端依赖）
 
 - **版本**：gfx-rs/wgpu-native v29 系列（依赖锁 wgpu-core 29.0.3，以 `third_party/wgpu-native/Cargo.lock` 为准）
 - **来源**：vendored 于 `third_party/wgpu-native/`（源码保持上游原样、不做本地修改）；
@@ -206,7 +197,7 @@ freely, subject to the following restrictions:
 
 ---
 
-## 9. SQLite — 存储后端（可选依赖）
+## 8. SQLite — 存储后端（可选依赖）
 
 - **版本**：3.53.4（sqlite-amalgamation-3530400.zip，官方发布页校验 SHA3-256
   `628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e`）
@@ -224,5 +215,5 @@ freely, subject to the following restrictions:
 ## 合规说明
 
 - 上述组件均以源码形式 vendored 于仓库内，版本锁定、可审计；除 wgpu-native 的 Rust 依赖树（首次构建需 cargo 在线拉取，见第 8 节）外均可无网络构建。
-- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、nlohmann/json（MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
+- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
 - 许可全文以各组件目录内原始 `LICENSE.TXT` / `COPYING` / 头注释为权威来源；本文件仅作索引与归档。

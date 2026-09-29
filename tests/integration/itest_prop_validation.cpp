@@ -13,6 +13,8 @@
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::itest_prop_validation {
 
@@ -32,21 +34,21 @@ AURORA_TEST_CASE(validate_prop_color_specialization) {
 
     // 合法：4 元素数组，值在 0-255。
     {
-        const Json j = Json::array({255, 128, 0, 255});
+        const Json j = testing::json_arr({255, 128, 0, 255});
         const auto r = au::validate_prop<Color>(j, desc);
         AURORA_TEST_CHECK_MSG(r.ok(), "validate_prop<Color>: valid [255,128,0,255]");
         AURORA_TEST_CHECK(r.ok() && r.value().r == 255 && r.value().g == 128);
     }
     // 非法：数组太短。
     {
-        const Json j = Json::array({255, 128});
+        const Json j = testing::json_arr({255, 128});
         const auto r = au::validate_prop<Color>(j, desc);
         AURORA_TEST_CHECK_MSG(!r.ok(), "validate_prop<Color>: short array rejected");
         AURORA_TEST_CHECK(!r.ok() && r.error().code_enum == ErrorCode::WidgetInvalidProp);
     }
     // 非法：值超出范围。
     {
-        const Json j = Json::array({256, 0, 0, 255});
+        const Json j = testing::json_arr({256, 0, 0, 255});
         const auto r = au::validate_prop<Color>(j, desc);
         AURORA_TEST_CHECK_MSG(!r.ok(), "validate_prop<Color>: out-of-range value rejected");
     }
@@ -111,9 +113,9 @@ AURORA_TEST_CASE(validate_prop_length_and_edge_insets_specializations) {
             const auto r = au::validate_prop<Length>(Json("fill"), desc);
             AURORA_TEST_CHECK(r.ok() && r.value().kind == LengthKind::Expand);
         }
-        AURORA_TEST_CHECK(au::validate_prop<Length>(Json::array({"px", 10.0F}), desc).ok());
+        AURORA_TEST_CHECK(au::validate_prop<Length>(testing::json_arr({"px", 10.0F}), desc).ok());
         {
-            const auto r = au::validate_prop<Length>(Json::array({"px", -5.0F}), desc);
+            const auto r = au::validate_prop<Length>(testing::json_arr({"px", -5.0F}), desc);
             AURORA_TEST_CHECK_MSG(!r.ok(), "Length: negative px rejected");
             AURORA_TEST_CHECK(!r.ok() && r.error().code_enum == ErrorCode::WidgetPropConstraintViolated);
         }
@@ -122,9 +124,9 @@ AURORA_TEST_CASE(validate_prop_length_and_edge_insets_specializations) {
     // EdgeInsets：对象各字段 >= 0。
     {
         const PropDescriptor desc{.name = "padding"};
-        const Json good = Json::object({{"left", 10.0F}, {"top", 5.0F}, {"right", 10.0F}, {"bottom", 5.0F}});
+        const Json good = testing::json_obj({{"left", 10.0F}, {"top", 5.0F}, {"right", 10.0F}, {"bottom", 5.0F}});
         AURORA_TEST_CHECK(au::validate_prop<EdgeInsets>(good, desc).ok());
-        AURORA_TEST_CHECK(!au::validate_prop<EdgeInsets>(Json::object({{"left", -1.0F}}), desc).ok());
+        AURORA_TEST_CHECK(!au::validate_prop<EdgeInsets>(testing::json_obj({{"left", -1.0F}}), desc).ok());
         AURORA_TEST_CHECK(!au::validate_prop<EdgeInsets>(Json("not-object"), desc).ok());
     }
 }
@@ -147,9 +149,9 @@ AURORA_TEST_CASE(text_deserialize_reports_degraded_diagnostics) {
 
     Text t;
     Json bad_props = Json::object();
-    bad_props["font_size"] = "not-a-number";  // 类型错误
-    bad_props["color"] = "not-a-color";  // 类型错误
-    bad_props["soft_wrap"] = 42;  // 类型错误
+    bad_props.set("font_size", "not-a-number");  // 类型错误
+    bad_props.set("color", "not-a-color");  // 类型错误
+    bad_props.set("soft_wrap", 42);  // 类型错误
 
     t.deserialize_props(bad_props);
 
@@ -169,9 +171,9 @@ AURORA_TEST_CASE(text_deserialize_valid_props_no_diagnostics) {
 
     Text t;
     Json good_props = Json::object();
-    good_props["font_size"] = 14.0F;
-    good_props["color"] = Json::array({255, 0, 0, 255});
-    good_props["soft_wrap"] = true;
+    good_props.set("font_size", 14.0F);
+    good_props.set("color", testing::json_arr({255, 0, 0, 255}));
+    good_props.set("soft_wrap", Json{true});
 
     t.deserialize_props(good_props);
 

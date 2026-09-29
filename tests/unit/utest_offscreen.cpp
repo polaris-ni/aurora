@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -20,8 +21,13 @@
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_offscreen {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace golden = aurora::testing::golden;
 
@@ -169,22 +175,27 @@ AURORA_TEST_CASE(render_to_logical_snapshot_describes_tree) {
     }};
     const Json snapshot = render_to_logical_snapshot(root, 100, 60);
 
-    AURORA_TEST_CHECK_EQ(snapshot["type"].get<std::string>(), std::string{"Column"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(snapshot, "type"), std::string{"Column"});
     AURORA_TEST_REQUIRE_TRUE(snapshot.contains("box"));
-    AURORA_TEST_CHECK_TRUE(snapshot["box"].contains("x"));
-    AURORA_TEST_CHECK_TRUE(snapshot["box"].contains("y"));
-    AURORA_TEST_CHECK_TRUE(snapshot["box"].contains("w"));
-    AURORA_TEST_CHECK_TRUE(snapshot["box"].contains("h"));
-    AURORA_TEST_CHECK_EQ(snapshot["children"].size(), 2U);
-    AURORA_TEST_CHECK_EQ(snapshot["children"][0]["type"].get<std::string>(), std::string{"Text"});
+    const auto &root_box = *require_child(snapshot, "box");
+    AURORA_TEST_CHECK_TRUE(root_box.contains("x"));
+    AURORA_TEST_CHECK_TRUE(root_box.contains("y"));
+    AURORA_TEST_CHECK_TRUE(root_box.contains("w"));
+    AURORA_TEST_CHECK_TRUE(root_box.contains("h"));
+    AURORA_TEST_CHECK_EQ(require_child(snapshot, "children")->size(), 2U);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*require_child(snapshot, "children"), 0), "type"),
+                         std::string{"Text"});
 }
 
 AURORA_TEST_CASE(logical_snapshot_is_deterministic) {
     // 布局是纯函数（mount → layout）：同输入必得同输出，是 golden 比对成立的前提。
     Node first{Column{Text{LocalizedString{"x"}}}};
     Node second{Column{Text{LocalizedString{"x"}}}};
-    AURORA_TEST_CHECK_EQ(render_to_logical_snapshot(first, 100, 60).dump(),
-                         render_to_logical_snapshot(second, 100, 60).dump());
+    const auto first_dump = json::dump(render_to_logical_snapshot(first, 100, 60));
+    const auto second_dump = json::dump(render_to_logical_snapshot(second, 100, 60));
+    AURORA_TEST_REQUIRE_TRUE(first_dump.ok());
+    AURORA_TEST_REQUIRE_TRUE(second_dump.ok());
+    AURORA_TEST_CHECK_EQ(first_dump.value(), second_dump.value());
 }
 
 AURORA_TEST_CASE(logical_snapshot_children_stay_within_parent) {
@@ -194,12 +205,15 @@ AURORA_TEST_CASE(logical_snapshot_children_stay_within_parent) {
     }};
     const Json snapshot = render_to_logical_snapshot(root, 100, 60);
 
-    const float parent_w = snapshot["box"]["w"].get<float>();
-    const float parent_h = snapshot["box"]["h"].get<float>();
-    for (const Json &child : snapshot["children"]) {
-        AURORA_TEST_TRACE(std::string{"child "} + child["type"].get<std::string>());
-        AURORA_TEST_CHECK_LE(child["box"]["w"].get<float>(), parent_w + 0.001F);
-        AURORA_TEST_CHECK_LE(child["box"]["h"].get<float>(), parent_h + 0.001F);
+    const auto &root_box = *require_child(snapshot, "box");
+    const auto parent_w = require_field<float>(root_box, "w");
+    const auto parent_h = require_field<float>(root_box, "h");
+    const auto &children = *require_child(snapshot, "children");
+    for (const auto &child : children) {
+        AURORA_TEST_TRACE(std::string{"child "} + require_field<std::string>(child, "type"));
+        const auto &child_box = *require_child(child, "box");
+        AURORA_TEST_CHECK_LE(require_field<float>(child_box, "w"), parent_w + 0.001F);
+        AURORA_TEST_CHECK_LE(require_field<float>(child_box, "h"), parent_h + 0.001F);
     }
 }
 
@@ -215,12 +229,15 @@ AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
         AURORA_TEST_REQUIRE_MSG(in.good(),
                                 "golden baseline logical_snapshots.json must exist "
                                 "(run with AURORA_UPDATE_GOLDEN=1 to create)");
-        in >> baseline;
+        const std::string text{(std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()};
+        const auto parsed = json::parse(text);
+        AURORA_TEST_REQUIRE_TRUE(parsed.ok());
+        baseline = parsed.value();
         AURORA_TEST_REQUIRE_TRUE(baseline.contains("scenarios"));
         // 色彩管理注记：golden 基准唯一色彩空间为 sRGB（软件参考路径 SSOT，逐位确定性红线）。
         // 基线尚无此字段时跳过（向后兼容）；再生成路径会写入。
         if (baseline.contains("colorspace")) {
-            AURORA_TEST_CHECK_MSG(baseline["colorspace"].get<std::string>() == std::string{"sRGB"},
+            AURORA_TEST_CHECK_MSG(baseline.as_or<std::string>("colorspace", "") == std::string{"sRGB"},
                                   "golden baseline colorspace must be sRGB");
         }
     }
@@ -230,28 +247,32 @@ AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
         AURORA_TEST_TRACE(std::string{"scenario "} + sc.name);
         Node root = sc.build();
         Json snap = render_to_logical_snapshot(root, view_w, view_h);
-        out[sc.name] = snap;
+        out.set(sc.name, snap);
 
         if (regen) {
             continue;
         }
-        AURORA_TEST_REQUIRE_TRUE(baseline["scenarios"].contains(sc.name));
-        AURORA_TEST_CHECK_MSG(baseline["scenarios"][sc.name] == snap,
+        const auto *scenarios = require_child(baseline, "scenarios");
+        AURORA_TEST_REQUIRE_TRUE(scenarios->contains(sc.name));
+        AURORA_TEST_CHECK_MSG(*require_child(*scenarios, sc.name) == snap,
                               std::string{"logical snapshot drift: "} + sc.name);
     }
 
     if (regen) {
         Json doc = Json::object();
-        doc["_about"] =
-            "Aurora logical-snapshot golden baseline (requirement #15). Do not hand-edit; regenerate with "
-            "AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_offscreen.";
-        doc["colorspace"] = "sRGB";  // 注记：golden 基准唯一色彩空间（软件参考路径 SSOT）
-        doc["viewport"] = Json{{"w", view_w}, {"h", view_h}};
-        doc["scenarios"] = out;
+        doc.set("_about",
+                "Aurora logical-snapshot golden baseline (requirement SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001). Do not "
+                "hand-edit; regenerate with "
+                "AURORA_UPDATE_GOLDEN=1 via aurora_test_runner --run=utest_offscreen.");
+        doc.set("colorspace", "sRGB");  // 注记：golden 基准唯一色彩空间（软件参考路径 SSOT）
+        doc.set("viewport", testing::json_obj({{"w", view_w}, {"h", view_h}}));
+        doc.set("scenarios", out);
         std::error_code ec;
         std::filesystem::create_directories(path.parent_path(), ec);
         std::ofstream f(path);
-        f << doc.dump(2) << "\n";
+        const auto text = json::dump(doc, {.indent = 2});
+        AURORA_TEST_REQUIRE_TRUE(text.ok());
+        f << text.value() << "\n";
         AURORA_TEST_CHECK_TRUE(f.good());
     }
 }

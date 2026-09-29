@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/spacer.h
 /// 测试说明: 覆盖 Spacer——默认吸收全部可用空间、expand=false 退化为 0、
-/// 自描述与序列化往返、在 Row 中吸收剩余空间把相邻子项推向两端
+/// 自描述与序列化往返、在 Row 中吸收剩余空间把相邻子项推向两端、
+/// 三段式（兄弟夹 Spacer）布局中不把末位兄弟推出容器
 
 #include <memory>
 
@@ -10,8 +11,11 @@
 #include "aurora/widget/spacer.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_spacer {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -60,10 +64,7 @@ AURORA_TEST_CASE(spacer_in_row_pushes_sibling_to_far_end) {
 }
 
 AURORA_TEST_CASE(spacer_degenerates_without_free_space) {
-    // expand=true 的 Spacer 在 Min 主轴容器会占据测到它时的剩余 max（不扣除其后兄弟），
-    // 真正「不占空间」需 expand=false；expand=true 的推挤行为由
-    // spacer_in_row_pushes_sibling_to_far_end（MainAxisSize::Max 场景）覆盖。
-    // 此处用 Spacer(false) 验证退化语义：行宽 = 80 + 0 + 120 = 200（Min 主轴），
+    // expand=false 退化为 0 尺寸：行宽 = 80 + 0 + 120 = 200（Min 主轴），
     // spacer bounds 宽 0，第三个盒子紧跟第一个盒子。
     Row row;
     row.add(box(80.0F, 20.0F));
@@ -74,6 +75,22 @@ AURORA_TEST_CASE(spacer_degenerates_without_free_space) {
     AURORA_TEST_CHECK_NEAR(row.size().width, 200.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().size.width, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(row.child_nodes()[2].bounds().origin.x, 80.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(spacer_between_two_siblings_keeps_both_inside) {
+    // 「Top / Spacer / Bottom」三段：Spacer 只吃两个兄弟之外的剩余空间，末位兄弟不得被推出容器。
+    // 回归口径：Spacer 早先按基线测量占据「测到它时的剩余 max」，Bottom 会落到容器下边界之外。
+    Column col;
+    col.add(box(320.0F, 28.0F));
+    col.add(Node{std::make_shared<Spacer>()});
+    col.add(box(320.0F, 28.0F));
+
+    LayoutEngine::layout(col, bounded(320.0F, 200.0F));
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[0].bounds().origin.y, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().size.height, 144.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[2].bounds().origin.y, 172.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[2].bounds().origin.y + col.child_nodes()[2].bounds().size.height, 200.0F,
+                           1e-4F);
 }
 
 AURORA_TEST_CASE(spacer_describe_and_serialize_roundtrip) {
@@ -89,17 +106,23 @@ AURORA_TEST_CASE(spacer_describe_and_serialize_roundtrip) {
     AURORA_TEST_CHECK_TRUE(has_expand);
 
     // 默认 expand=true 落盘；false 反序列化生效。
-    Json props;
+    Json props = Json::object();
     Spacer().serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["expand"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "expand"), true);
     Spacer off(false);
     off.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["expand"].get<bool>(), false);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "expand"), false);
 
     Spacer restored;
     restored.deserialize_props(props);
     LayoutEngine::layout(restored, bounded(100.0F, 50.0F));
     AURORA_TEST_CHECK_NEAR(restored.size().width, 0.0F, 1e-4F);
+    // 权重挂在修饰链上（不进 props 序列化），故 expand 变更必须同步撤除/挂上。
+    AURORA_TEST_CHECK_NEAR(restored.modifier.get().flex_weight(), 0.0F, 0.0F);
+    Spacer re_on;
+    const Json expand_on = testing::json_obj({{"expand", Json{true}}});
+    re_on.deserialize_props(expand_on);
+    AURORA_TEST_CHECK_TRUE(re_on.modifier.get().flex_weight() > 0.0F);
 }
 
 }  // namespace aurora::test_cases::utest_spacer

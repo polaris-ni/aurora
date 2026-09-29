@@ -3,13 +3,15 @@
 /// 测试说明: 命中测试最深目标、鼠标冒泡与 stop-on-handled、本地坐标写入与 Press
 /// 焦点转移/空白清焦、指针捕获越界续发、悬停进出 diff、悬停光标解析
 /// （修饰链 > 虚钩子 > Clickable 缺省，变化才下发）、键盘
-/// Tab/激活快捷键与焦点路由（含激活键 / 方向键优先投递 on_key_event 的控件级 opt-in）、滚轮/文本/文件拖放路由、
+/// Tab/激活快捷键与焦点路由（含激活键 / 方向键优先投递 on_key_event 的控件级 opt-in，
+/// 以及真实 TextInput 的方向键归光标、不夺焦点）、滚轮/文本/文件拖放路由、
 /// 滚轮余量自最深可滚动者上冒给更浅祖先（嵌套滚动协调：内层到顶后外层下拉刷新接手）、
 /// TouchDispatcher 按指针 id 捕获与合成鼠标事件
 
 #include <algorithm>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -18,6 +20,7 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/pull_to_refresh.h"
 #include "aurora/widget/scroll.h"
+#include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_dispatcher {
@@ -210,6 +213,29 @@ auto make_nested_scroll_tree() -> NestedScrollTree {
     auto outer = std::make_shared<PullToRefresh>(Node{inner});
     LayoutEngine::layout(*outer, Constraints{.min = Size{}, .max = Size{.width = 300.0F, .height = 300.0F}});
     return NestedScrollTree{.outer = outer, .inner = inner};
+}
+
+/// 真实文本框与一个兄弟并排：兄弟画在输入框的左上方 (0,-40,40,40)，输入框占 (40,0,40,40)。
+/// 于是 ← 的几何目标存在（若方向键被焦点导航吃掉，焦点就会移过去），而 ↑ 才是该用的导航键。
+/// 焦点导航取的是「最近一次绘制的绝对盒」，本夹具不走绘制，故经 seam 手工给出。
+struct FieldTree {
+    std::shared_ptr<TestRow> row;
+    std::shared_ptr<TestBox> left;
+    std::shared_ptr<TextInput> field;
+};
+
+auto make_field_tree() -> FieldTree {
+    auto row = std::make_shared<TestRow>();
+    row->set_focusable(false);
+    auto left = std::make_shared<TestBox>();
+    auto field = std::make_shared<TextInput>();
+    row->add(Node{left});
+    row->add(Node{field});
+    left->set_focus_bounds(
+        Rect{.origin = Point{.x = 0.0F, .y = -40.0F}, .size = Size{.width = 40.0F, .height = 40.0F}});
+    field->set_focus_bounds(
+        Rect{.origin = Point{.x = 40.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 40.0F}});
+    return FieldTree{.row = row, .left = left, .field = field};
 }
 
 }  // namespace
@@ -503,6 +529,67 @@ AURORA_TEST_CASE(arrow_keys_honour_the_navigation_keys_opt_in) {
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, unclaimed, fm));
     AURORA_TEST_CHECK_EQ(tree.box1->key_count, 2);
     AURORA_TEST_CHECK(fm.focused() == tree.box2.get());
+}
+
+// 方向键在真实文本框上的路由：←/→ 归光标，未被认领的 ↑/↓ 才回落几何焦点导航。
+// 这一条守住的正是「opt-in 谓词默认 false 时，文本框方向键被焦点导航吃掉」的缺陷：
+// 焦点会移到左侧兄弟，此后所有按键（含退格）都落到别的控件上，输入框失能。
+AURORA_TEST_CASE(direction_keys_reach_a_focused_text_input_before_focus_navigation) {
+    auto tree = make_field_tree();
+    FocusManager fm;
+    fm.set_root(tree.row.get());
+    const BuildContext ctx;
+    tree.field->mount(ctx);
+    tree.field->layout(Constraints{.min = Size{}, .max = Size{.width = 40.0F, .height = 40.0F}}, ctx);
+    fm.set_focus(tree.field.get());
+
+    auto key = [](int code, ModifierKey mods) -> KeyEvent {
+        KeyEvent e;
+        e.key = code;
+        e.action = KeyAction::Down;
+        e.modifiers = mods;
+        return e;
+    };
+    auto type = [](const std::string &t) -> TextInputEvent {
+        TextInputEvent e;
+        e.text = t;
+        return e;
+    };
+
+    // 种子输入：caret 在末尾。
+    TextInputEvent seed = type("abc");
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, seed, fm));
+    AURORA_TEST_CHECK_EQ(tree.field->value(), std::string{"abc"});
+
+    // ←：焦点必须留在输入框，兄弟控件观察不到按键（缺陷形态是焦点被移走）。
+    KeyEvent left = key(static_cast<int>(KeyCode::ArrowLeft), ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, left, fm));
+    AURORA_TEST_CHECK(fm.focused() == tree.field.get());
+    AURORA_TEST_CHECK_EQ(tree.left->key_count, 0);
+
+    // 光标真的左移了一位：新字符插在光标处，而非追加末尾。
+    TextInputEvent ins = type("X");
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, ins, fm));
+    AURORA_TEST_CHECK_EQ(tree.field->value(), std::string{"abXc"});
+
+    // Shift+→：选区落在光标右侧那个字符上，焦点仍不动。
+    KeyEvent shift_right = key(static_cast<int>(KeyCode::ArrowRight), ModifierKey::Shift);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, shift_right, fm));
+    AURORA_TEST_CHECK(fm.focused() == tree.field.get());
+    AURORA_TEST_CHECK_TRUE(tree.field->has_selection());
+    AURORA_TEST_CHECK_EQ(tree.field->selected_text(), std::string{"c"});
+
+    // 退格：一次删除整个选区（而非仅左删一个字符）。
+    KeyEvent backspace = key(static_cast<int>(KeyCode::Backspace), ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, backspace, fm));
+    AURORA_TEST_CHECK_EQ(tree.field->value(), std::string{"abX"});
+    AURORA_TEST_CHECK_FALSE(tree.field->has_selection());
+
+    // ↑ 不在文本框的按键表里：照旧回落几何焦点导航，焦点移到上方候选。
+    // （兄弟摆在左上方，正是为了让 ↑ 既有几何目标、又能检验 ← 未被导航吃掉。）
+    KeyEvent up = key(static_cast<int>(KeyCode::ArrowUp), ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, up, fm));
+    AURORA_TEST_CHECK(fm.focused() == tree.left.get());
 }
 
 AURORA_TEST_CASE(activation_keys_route_to_key_event_for_opt_in_widgets) {

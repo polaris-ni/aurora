@@ -57,6 +57,9 @@ auto VideoPlayer::play() -> void {
     if (source_) {
         source_->play();
     }
+    // 起播自带一次重绘请求：帧循环靠「本帧有渲染」维持节拍，而静止画面在起播前是空闲深睡的——
+    // 不踢这一帧则 `on_playback_tick` 要等到下一次无关失效（点击/resize）才第一次跑。
+    mark_needs_paint();
 }
 
 auto VideoPlayer::pause() -> void {
@@ -386,25 +389,17 @@ auto VideoPlayer::paint_frame(Painter &p, const Rect &bounds) const -> void { dr
 
 auto VideoPlayer::serialize_props(Json &props) const -> void {
     Container::serialize_props(props);
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["fit"] = box_fit_to_json(fit_);
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["show_controls"] = show_controls_;
+    props.set("fit", box_fit_to_json(fit_));
+    props.set("show_controls", Json{show_controls_});
 }
 
 auto VideoPlayer::deserialize_props(const Json &props) -> void {
     Container::deserialize_props(props);
     if (props.contains("fit")) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        fit_ = json_to_box_fit(props["fit"]);
+        fit_ = json_to_box_fit(*props.at("fit"));
     }
     if (props.contains("show_controls")) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        show_controls_ = props["show_controls"].get<bool>();
+        show_controls_ = props.at("show_controls")->as_or<bool>(false);
         if (!children_.empty()) {
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
@@ -422,14 +417,14 @@ auto VideoPlayer::describe_static() -> WidgetDescriptor {
                  .type = "BoxFit",
                  .default_value = "Contain",
                  .required = false,
-                 .note = "缩放适配（Contain/Fill/Cover）",
+                 .note = "Scale fit (Contain/Fill/Cover)",
                  .json_type = "string",
                  .enum_values = {"Fill", "Contain", "Cover", "FitWidth", "FitHeight", "None", "ScaleDown"}},
                 {.name = "show_controls",
                  .type = "bool",
                  .default_value = "true",
                  .required = false,
-                 .note = "是否显示控件叠层",
+                 .note = "Show controls overlay",
                  .json_type = "boolean"},
                 {.name = "width",
                  .type = "Length",

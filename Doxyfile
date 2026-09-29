@@ -1,0 +1,90 @@
+# Doxyfile — Aurora 文档站配置（唯一配置源，口径见 codespec/CODING_STANDARDS.md §13.7）
+#
+# 生成入口：cmake -DAURORA_BUILD_DOCS=ON（且本机 doxygen 可用）后
+#   cmake --build <build_dir> --target docs
+# doxygen 不在 PATH 时由使用者显式传入：-DAURORA_DOXYGEN_EXECUTABLE=<可执行文件路径>
+# （仓库内不写死任何本机路径，见 CODING_STANDARDS.md §10.5 第 10 条）。
+#
+# 本配置刻意把告警升级为错误：注释形态合规由 tools/check/check_doc_comments.py 负责，
+# Doxygen 这边只兜「语法真的解析不动」的部分（未文档化成员、悬空 @param、断链的 @ref 等）。
+
+PROJECT_NAME           = "Aurora"
+PROJECT_BRIEF          = "C++20 跨平台 AI-first GUI 库"
+PROJECT_NUMBER         = 0.0.0
+OUTPUT_DIRECTORY       = build/docs
+
+# ---- 输入范围：文档站只覆盖公共 API 面与文档，src/ 与 third_party 不进站 ----
+# 理由：Doxygen 的未文档化告警面（WARN_IF_UNDOCUMENTED）比 §13.5 的齐全度下限更宽——
+# 它会把 src/ 的内部实现一并算进来。把 INPUT 限定在 include/ 才与门禁口径一致：
+# （codespec/ 的 Markdown 不进 INPUT：Doxygen 的 Markdown 解析器会在散文里不成对的反引号上
+#   报「未闭合 verb」，那与注释规范无关，文档站只承担 API 参考。）
+# 红灯只可能来自「公共 API 缺文档」，而不是「内部实现没写注释」。
+INPUT                  = include
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.hpp *.hh *.hxx *.inl *.cpp *.cc *.cxx
+EXCLUDE_PATTERNS       = */third_party/* */build*/* */.git/*
+EXCLUDE_SYMBOLS        = aurora::test_cases aurora::detail
+
+# ---- 注释形态假设：仓库统一 /// 与 @ 前缀（§13.1 / §13.2），不开 Javadoc 兼容 ----
+MARKDOWN_SUPPORT       = YES
+JAVADOC_AUTOBRIEF      = NO
+QT_AUTOBRIEF           = NO
+MULTILINE_CPP_IS_BRIEF = NO
+DISTRIBUTE_GROUP_DOC   = NO
+TAB_SIZE               = 4
+ALIASES                = "test={1}【测试 \1】"
+
+# ---- 告警即错误：让「注释写了但 Doxygen 读不出」在 CI 上红灯 ----
+# WARN_IF_UNDOCUMENTED 显式关闭：它把「凡被抽取的成员就必须有文档块」当成下限，比 §13.5.1 的
+# 必写面（public 必写；protected / private / detail 可留白，但写了就必须齐全）宽得多，也与
+# `= default` 特殊成员的豁免冲突。开着它只会诱导「为消警而补零信息套话」——§13.4 明令禁止的形态。
+# 必写面由 tools/check/check_doc_comments.py（DOC-R4 / DOC-R5）守；本文件只守「写了但读不出」：
+# WARN_NO_PARAMDOC（写则写全）+ WARN_IF_DOC_ERROR / WARN_IF_INCOMPLETE_DOC（标记与命令解析）。
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_IF_INCOMPLETE_DOC = YES
+WARN_NO_PARAMDOC       = YES
+WARN_AS_ERROR          = YES
+WARN_FORMAT            = "$file:$line: $text"
+WARN_LOGFILE           = build/docs/doxygen_warnings.log
+
+# ---- 输出：只要 HTML + 机器可读 XML，不产 LaTeX/PDF ----
+GENERATE_HTML          = YES
+GENERATE_XML           = YES
+GENERATE_LATEX         = NO
+GENERATE_RTF           = NO
+GENERATE_MAN           = NO
+GENERATE_DOCSET        = NO
+HTML_OUTPUT            = html
+XML_OUTPUT             = xml
+GENERATE_TAGFILE       = build/docs/aurora.tagxml
+
+# ---- 代码结构解析：C++20、模板与概念需要完整预处理器视图 ----
+PREDEFINED             = "AURORA_FEATURE(X)=1" "__cplusplus=202002L"
+EXPAND_AS_DEFINED      =
+SKIP_FUNCTION_MACROS   = YES
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+SEARCH_INCLUDES        = YES
+INCLUDE_PATH           = include
+INCLUDE_FILE_PATTERNS  = *.h *.hpp
+
+# ---- 索引与交叉引用：@ref 断链要能报出来 ----
+REFERENCES_LINK_SOURCE = YES
+GENERATE_TESTLIST      = YES
+ENABLED_SECTIONS       =
+ALPHABETICAL_INDEX     = YES
+SORT_GROUP_NAMES       = NO
+
+# ---- 关闭与库无关的面 ----
+# protected 成员由 Doxygen 默认抽取（本版本无 `EXTRACT_PROTECTED` 开关，写了只会得到
+# 「ignoring unsupported tag」），private 成员在 EXTRACT_PRIVATE=NO 下不抽取——两者均经真 Doxygen
+# 最小 fixture 实测，正是 §13.5.1「写则写全」把 protected 与 public 同级、把 private 排除在外的依据。
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_ANON_NSPACES   = NO
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = .

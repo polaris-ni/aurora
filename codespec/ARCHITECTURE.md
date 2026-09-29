@@ -29,7 +29,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 ├───────────────────────────────────────────┤
 │  Platform Abstraction (include/aurora/window/) │  平台抽象：Surface 家族
 ├───────────────────────────────────────────┤
-│  Foundation (include/aurora/core/)        │  基础层：types / Result / Error / Log
+│  Foundation (include/aurora/core/)        │  基础层：types / Result / Error / Log / JSON 值容器
 └───────────────────────────────────────────┘
 ```
 
@@ -85,7 +85,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 | 模块 | 路径 | 主要头文件 |
 |:---|:---|:---|
-| 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `expected.h` `strict_mode.h` `event_stream.h` `accessibility.h` `a11y_types.h` `a11y_provider.h` `a11y_text.h` |
+| 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `strict_mode.h` `event_stream.h` `accessibility.h` `a11y_types.h` `a11y_provider.h` `a11y_text.h` `json.h`（JSON 值容器，见 `specification/01-core.md` §9） |
 | 响应式核心 | `state/` | `state.h` `computed.h` `effect.h` `binding.h` `immutable.h`（`Immutable<T>` / `Mutable<T>` 作用域权限包装） `store.h` `reactive.h` `signal_view.h` `async.h` `coroutine.h` `state_graph.h` `state_registry.h` |
 
 ### 4.2 布局与渲染
@@ -146,6 +146,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 检查器 | `inspector/` | `inspector_server.h` `inspector_api.h` |
 | 工厂语法糖 | `ui/` | 声明式工厂函数（见 [`specification/04-widget.md`](specification/04-widget.md) §5） |
 | 入口 | `aurora.h` | 聚合 include + `namespace au` 别名提示 |
+| 命令行解析 | `cli/` | `args.h`（`ValueKind` `Arity` `Value` `Arguments` `EarlyView` `Invocation` `parse`） `command.h`（`CommandSpec` `Builtins` `OptionSchema` `PositionalSchema` `validate` `usage_line` `help_text` `version_text` `schema_json`）；`--help` / `--version` 为惰性注入的内建，与调用方自标的 `early_view` 旗标共用一条展示通道；契约见 [`specification/09-cli.md`](specification/09-cli.md) |
 
 ### 4.8 数据存储抽象层（Storage）
 
@@ -222,7 +223,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 - **冒泡**：`EventDispatcher::dispatch(MouseEvent&)` 自最深向根调用 `on_pointer_event`；某节点写 `e.handled = true` 即停止向上传递。
 - **纯展示控件**（如 `Text`）不置位 `wants_click()`，以便事件冒泡给父级 `Clickable`；可点击控件（如 `Button`）覆写 `wants_click()` 为「有 `on_click`」。
 - **指针点击语义**：`Press` 置 `pressed`；`Release` 且 `pressed` 触发一次；点击与长按互斥（`click_pending_` 在 Press 置位，Release 时若未触发长按且未拖拽才触发 click）。
-- **焦点**：`FocusManager`（root + focused）按 `tab_index()` 排序移动（`move_focus(FocusDirection)` 循环取前 / 后）；`Widget::request_focus()` 读取派发期线程局部「当前焦点管理器」（`current_focus_manager()`），控件自身不持有 `FocusManager*`。
+- **焦点**：`FocusManager`（root + focused）按 `tab_index()` 排序移动（`move_focus(FocusDirection)` 循环取前 / 后），候选集谓词为 `focusable() && wants_focus()`——前者是宿主侧否决位，后者是控件类型侧的 Tab 停点意愿（基类默认 `true`，纯布局容器与纯展示件覆写为「有输入语义才入序」，见 `specification/05-event-navigation.md` §4.2）；`Widget::request_focus()` 读取派发期线程局部「当前焦点管理器」（`current_focus_manager()`），控件自身不持有 `FocusManager*`。焦点态经两条通道外显可观测：树快照里持焦节点带 `focused: true`（见 `specification/08-tooling.md` §3），以及基类在持焦控件盒外统一绘制主题色焦点环（`wants_focus_ring()`，见 `specification/05-event-navigation.md` §4.4）。
 - **多点触控并发（按指针分发）**：`TouchDispatcher`（实例级，由 `Application` 持有）对 `TouchEvent` 按 pointer id 做命中缓存与独立路由——某 pointer id 首按做命中测试并缓存链，活跃期复用缓存链，抬起即清缓存。因此 `draggable` / `long_press` / `pinch` / `rotate` 各自绑定具体指针，支持单指持发 + 多指并发。每次 `TouchEvent` 同时 (1) 向缓存链广播完整 `TouchEvent`（原始流，供 `TouchListener` 修饰回调）、(2) 合成带 `pointer_id` 的 `MouseEvent` 驱动既有点击 / 拖拽手势。
 - **输入法组合只到焦点控件**：`TextCompositionEvent` 与 `TextInputEvent` 同径——不经命中链、不冒泡，仅交给 `FocusManager` 当前焦点控件的 `on_text_composition`（容器误吞即丢字）。组合串由平台桥折算后同步投出，preedit 不进 `value()`（详见 §8.6）。
 - **悬停态基础设施**：`EventDispatcher` 在无捕获 Move 时把新命中链与上次悬停链 diff，对离开 / 进入控件回调 `Widget::on_hover_change(bool)`（默认仅记录 `hover_` 不标脏；需要视觉反馈的控件覆写并追加 `mark_needs_paint`）；`Widget::hovered()` 供 `on_paint` 读取。Win32 宿主经 `TrackMouseEvent(TME_LEAVE)` 在光标离窗时合成远离 Move 清除悬停，否则高亮残留。
@@ -304,11 +305,11 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 2. 窗口销毁时 `disconnect_all()` 会先立**单向拆除门闩**再调 `UiaDisconnectProvider`：该 API 会**同步重入** provider 取属性（UIA 需为被丢弃的侦听者补发属性变更事件），门闩保证重入路径只读旧快照、绝不重建。
 
 `deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从 `ProviderRegistry` 注销** —— 缺这一步，进程级事件广播会在已析构的桥上调用 `is_active()`（use-after-free）。
-**线程与降级。** 全 main-thread（in-proc provider 由 UIA core 在 UI 线程回调，桥激活时把套间初始化为 STA）；`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
+**线程与降级（provider 回调一律回投主人线程）。** 语义树与桥**没有**额外的 UI 线程：但 in-proc provider 的回调由 `UIAutomationCore.dll` 投递在其 **COM/RPC 线程**上（激活时初始化 STA 套间只保证公寓模型，不等于「回调落在 UI 线程」），故桥对 provider 只暴露「回投主人线程 + 按值副本」的访问口（`eval_on_main` 家族），`sync_if_dirty` / `rebuild` / `find_node` 等裸口保持主人线程专用；主人线程自己调回投口时就地执行、零等待，无 `main_poster` 时同样就地执行。回投按预算限时等待（读 250ms / 动作 500ms），超时返回零值并映射 `UIA_E_ELEMENTNOTAVAILABLE`，且以 `abandoned`（调用方已放弃 ⇒ 晚到项不补做动作）与 `alive_`（桥已析构 ⇒ 闭包不碰树）两道闸封死两条迟到路径 —— 访问面劈分、超时降级与不变量详见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.3。`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
 
 **Linux 桥差异（AT-SPI2）。** 无 `WM_GETOBJECT` 式「读屏在线才出现」的查询信号，故构造时机改为**首次语义树根注入时一次性尝试**（失败 = 永久降级，不再重试）；建树同步点由「入站查询」与「帧循环 dirty」双侧驱动——`pump()` 每轮开头 `sync_point()`（若脏），事件推送不依赖客户端恰好在做查询。D-Bus 传输 fd 经 `Provider` 侧 `poll_watches()` 并入 X11/Wayland 事件等待的 `poll`，fd 就绪由 `pump()` 读入并派发（单线程、无额外线程）。事件通道 = 快照 diff 的另一种消费：`sync_point()` 产 `TreeDiff` 后按上游 `atk-adaptor` 线格式发 D-Bus 信号广播（added/removed → Cache Add/RemoveAccessible + children-changed；Name/Value/Hint/State → property-/state-changed；焦点 → Event.Focus；播报 → Announcement 直发），与 Win32 UIA 桥 `queue_*` 系列同一「diff → 平台事件」消费范式。降级面 = 无会话总线 / `org.a11y.Bus` 不可达 / libdbus 缺失 / `NO_AT_BRIDGE=1`；线格式契约与申报空位见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.4。
 
-**Wasm 桥差异（ARIA 镜像）。** 第三个平台实现（`include/aurora/window/wasm_aria.h` + `src/aurora/window/wasm_aria.cpp`，门控 `AURORA_PLATFORM_WASM ∧ AURORA_BACKEND_WASM`，折算层同样是零平台头的 `detail/aria_protocol.{h,cpp}` + 无头单测 `utest_aria_protocol`），消费端不是 IPC 协议而是**浏览器原生 ARIA 支持**：快照折算成页面隐藏 DOM 镜像（clip 隐藏保进树、`role`/`aria-*`/`aria-activedescendant`/`aria-live`），读屏经无障碍引擎直接消费，故无 `sync_point` 应答面、也**无几何面**（申报）。激活为 D14 惰性激活的既定例外（浏览器无读屏探测信号，首根注入即激活）；同步与反向动作排水由桥**自持 rAF 蹦床**每拍执行（`live_bridges()` 成员性做悬垂守卫），不挂 `present()` 帧尾——静止页面没有脏帧就没有 present，读屏动作会被饿死。反向动作走 JS 写队列 + 帧尾轮询（刻意避开 `-sEXPORTED_FUNCTIONS`，保消费者零链接配置）。契约、载荷协议与 CDP 真机验收见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.5。
+**Wasm 桥差异（ARIA 镜像）。** 第三个平台实现（`include/aurora/window/wasm_aria.h` + `src/aurora/window/wasm_aria.cpp`，门控 `AURORA_PLATFORM_WASM ∧ AURORA_BACKEND_WASM`，折算层同样是零平台头的 `detail/aria_protocol.{h,cpp}` + 无头单测 `utest_aria_protocol`），消费端不是 IPC 协议而是**浏览器原生 ARIA 支持**：快照折算成页面隐藏 DOM 镜像（clip 隐藏保进树、`role`/`aria-*`/`aria-activedescendant`/`aria-live`），读屏经无障碍引擎直接消费，故无 `sync_point` 应答面、也**无几何面**（申报）。激活为惰性激活的既定例外（浏览器无读屏探测信号，首根注入即激活）；同步与反向动作排水由桥**自持 rAF 蹦床**每拍执行（`live_bridges()` 成员性做悬垂守卫），不挂 `present()` 帧尾——静止页面没有脏帧就没有 present，读屏动作会被饿死。反向动作走 JS 写队列 + 帧尾轮询（刻意避开 `-sEXPORTED_FUNCTIONS`，保消费者零链接配置）。契约、载荷协议与 CDP 真机验收见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.5。
 
 ### 8.6 输入法桥接（platform IME bridge）
 
@@ -331,6 +332,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 ## 9 序列化与元信息
 
+- **JSON 值容器**：`au::json::Value`（`core/json.h`）是序列化层的底层值载体，自带解析 / 构造 / 序列化与三族读出口（宽容 / 指针 / 严格），不依赖任何第三方 JSON 库；契约见 [`specification/01-core.md`](specification/01-core.md) §9。
 - **树 ⇄ JSON**：`serialization::to_json` / `from_json` / `diff` / `diff_into` / `apply_patch`，结合 `WidgetRegistry`（工厂注册）。`from_json` 流程：`make` → `deserialize_props` → `adopt_children`。
 - **树 → YAML**：`serialization::to_yaml(const Widget&)` / `to_yaml(const Json&)`，内部经 `yaml.h` 的递归下降发射器把 JSON 转为 YAML（仅输出方向，无 `from_yaml`）。
 - **树 ⇄ 源码**：`serialization::to_code` 反向生成等效构造代码。
@@ -351,19 +353,23 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 **指标**：FPS（滑动窗口平均）、平均帧时间、P50 / P95 / P99 百分位帧时间、帧时间标准差（jitter）、掉帧计数与掉帧率、hitch 计数（帧耗时超过帧预算 2 倍）、idle 帧计数。
 
+**停帧陈旧语义**：`fps()` 是滑动窗口内已记录帧的均值、**不做时间衰减**——渲染一停环形缓冲不再有新样本，返回值便冻结在最后一次活跃 burst 上（HUD 显示「421.0 FPS」而实际已停帧数秒，是误导而非信息）。`WindowHost` 在 idle 帧上以本帧墙钟间隔调用 `record_idle(dt)` 累计空闲时长（任何一次 `record(dt)` 都将其清零），累计达 `AURORA_FPS_STALE_MS`（500ms）后 `is_stale()` 为真，`stale_duration_ms()` 给出空闲时长。**取值保持末值、不归零**：归零会丢掉「上次活跃帧率」这一排障信息。判据基于空闲**时长**而非帧数——空闲段里帧循环仍可能被事件 / 定时器 / HUD 刷新唤醒，用帧数衡量会把「一帧都没有」误判成「刚过了几帧」。
+
 **分阶段计时**：`record_phases(layout_ms, paint_ms, present_ms)` 独立记录三阶段耗时，64 帧环形缓冲，提供 `avg_layout_ms` / `avg_paint_ms` / `avg_present_ms`。
 
 **帧预算**：`set_frame_budget_ms(ms)`（默认 16.67ms ≈ 60 FPS），超出即计为掉帧。`reset()` 清空状态用于基准隔离。
 
 ### 10.2 PerfOverlay
 
-右上角叠加面板，实时显示多行统计文本（FPS / avg / P99 / jitter / 掉帧数 / hitch 数 / idle 帧数）、FPS 颜色告警（绿 ≥ 55、黄 ≥ 30、红 < 30）与帧时间条形图（最多绘制最近 64 根柱，超预算帧标红；底层环形缓冲为 128 帧）。经 `PerfOverlay::set_visible(false)` 关闭显示。
+右上角叠加面板，实时显示多行统计文本（FPS / avg / P99 / jitter / 掉帧数 / hitch 数 / idle 帧数）、FPS 颜色告警（绿 ≥ 55、黄 ≥ 30、红 < 30）与帧时间条形图（最多绘制最近 64 根柱，超预算帧标红；底层环形缓冲为 128 帧）。读数陈旧时（`FrameStats::is_stale()`）第一行由绿/黄/红**转为灰色**并在末尾追加 `stale <空闲秒数>`，避免把冻结值当成本刻帧率；统计行一律显式传入本面板绑定的统计实例（无参重载读进程级单例，多窗口下不一致）。经 `PerfOverlay::set_visible(false)` 关闭显示。
 
 **分层 HUD 叠加层（推荐用法）**：`PerfOverlay` 既可作普通 `SingleChild` 包裹内容，也推荐作为**独立 HUD 叠加层**使用——经 `Application::set_overlay(...)` / `Window::set_overlay(...)` / `App::overlay(...)` 注入后，它**脱离 widget 树**，由 `Window::present_root` 在 tree paint 之后、present 之前合成到主缓冲：
 
-- 叠加层渲染到独立离屏 `Painter` 缓冲，仅以约 **2Hz** 重绘自身（面板背景不透明，确保叠在保留自上一帧的主缓冲之上不产生重影）；
+- 叠加层渲染到独立离屏 `Painter` 缓冲，仅按 `Window::AURORA_HUD_REFRESH_MS`（500ms）重绘自身（面板背景不透明，确保叠在保留自上一帧的主缓冲之上不产生重影）；
 - 每帧把缓存的 HUD 缓冲 `composite` 到主缓冲；app 树仅在**其自身脏**时重绘，叠加层刷新开销被隔离在离屏缓冲内，不再触发整树重绘；
-- 叠加层内容发生 2Hz 重绘的帧强制全量上屏（HUD 像素可能落在 app 脏区之外，避免滞后 1 帧）；
+- 叠加层内容发生重绘的帧强制全量上屏（HUD 像素可能落在 app 脏区之外，避免滞后 1 帧）；
+- **空闲期不会深睡**：整树无脏但叠加层到期时，脏决策仍放行一帧——软件路径下只把新 HUD 合成到保留的主缓冲再全量上屏（不重排、不重绘树），且该帧仍记 idle（避免 HUD 用自己的刷新抬高它自己显示的帧率）；GPU 路径因软件缓冲只有底色而标全脏、退回完整重渲染。同时 `WindowHost::decide_wait` 把 `hud_refresh_due_ms()` 并入「非渲染唤醒」截止时间，否则空闲分支会睡到下一个定时器（无定时器即无限等待）。缺少这两处，脏决策会在 HUD 合成段之前直接 `return`，读数永久停在最后活跃帧上；
+- 空闲期唤醒频率由此固定为约 2Hz（叠加层可见时）；卸下叠加层后本窗口恢复正常的事件驱动深睡；
 - 与「把 `PerfOverlay` 作为根控件包裹内容」的旧用法**互斥**：启用叠加层后，`Scene` 根即为真实内容树，`PerfOverlay` 不应再出现在树内。
 
 ### 10.3 PerfLog
@@ -372,7 +378,17 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ### 10.4 Idle 帧区分
 
-`Window::is_idle_frame()` 判定当前帧是否为脏区跳帧；`FrameStats::record_idle()` 单独计数。无脏且尺寸未变时整帧跳过——这类 idle 帧不应污染 FPS / 帧时间 / 掉帧等渲染指标。
+`Window::is_idle_frame()` 判定当前帧是否为脏区跳帧；`FrameStats::record_idle(dt)` 单独计数并累计空闲时长。无脏且尺寸未变时整帧跳过——这类 idle 帧不应污染 FPS / 帧时间 / 掉帧等渲染指标。
+
+脏决策有三种落点，**后两种都记 idle（未渲染树）**：
+
+| 落点 | 触发 | 是否上屏 | `is_idle_frame()` |
+|:---|:---|:---|:---|
+| 整帧跳过 | 无脏、尺寸未变、叠加层未到期、无系统重绘请求 | 否 | true |
+| HUD-only 帧 | 无脏、尺寸未变，但叠加层到期且软件缓冲可复用 | 是（仅合成新 HUD） | true |
+| 完整渲染 | 有脏 / 布局脏 / 尺寸变化 / 根变化 / 系统重绘 / GPU 路径下叠加层到期 | 是 | false |
+
+空闲期两种场景（无叠加层的事件驱动深睡、叠加层可见的每 500 ms 一帧）的实测基线与复现步骤见 [`specification/08-tooling.md`](specification/08-tooling.md) §7.4.1（口径、基线与复现）与人工用例 [`manual-test/17-perf.md`](manual-test/17-perf.md)（TC-PERF-006 覆盖无叠加层、TC-PERF-008 覆盖叠加层可见）。
 
 ### 10.5 硬约束
 
@@ -497,11 +513,13 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 
 **Golden 测试（渲染像素级）**：以 `utest_offscreen` 为主，把 widget 树渲染到 `HeadlessSurface` 内存缓冲，与 golden 基准图逐像素比对。依赖相对路径，须从**仓库根**运行（`ctest` 已为其把 CWD 设为仓库根），可用 `AURORA_GOLDEN_DIR` 覆盖解析基准。逐位红线唯一属软件路径；GPU 侧为**容差 golden 双层**——`itest_wgpu_golden`（wgpu）与 `itest_gl_golden`（GL，需 GLFW + GPU_GL 配置）把同一场景 DisplayList 经离屏后端重放读回，与同一张软件基线按**场景级申报**的容差带比对（场景与帧装配单一来源 `tests/support/gpu_golden_scenes.h`；`golden::compare_gpu_tolerance`，不读全局放松旋钮、不回写基线），见 `specification/03-layout-render.md` §8.4.2 / §8.8。
 
+**真实后端 E2E（`tests/e2e/etest_*.cpp`）**：在真实 OS 窗口 + 真实上屏链路上验证（受 `AURORA_BUILD_E2E` 门控，Emscripten 下排除；CTest 侧打 `LABELS e2e` 供 `ctest -L e2e` 分层编排）。架构三层：**场景层**（`examples/demos/scenes/` header-only 场景头，与 demo 同源单一来源，禁止复制 demo UI）→ **进程内驱动内核**（`tools/include/e2e/harness.h`：建窗 / 帧推进 / 像素读回 / 事件派发，系既有真实后端测试代码的抽取与统一）→ **进程外客户端**（`tools/e2e/e2e_client.cpp` 经 `InspectorServer` REST 驱动任意 demo）。可用后端面按编译面逐环境声明（`AURORA_E2E_EXPECT`，CI 逐作业口径见 `specification/08-tooling.md` §8.2）。**真机增强层**（OS 级输入注入，`AURORA_E2E_OS_INPUT` opt-in）必须独占执行：注入劫持的是 OS 全局输入与前台焦点，与一切并发 UI 测试互斥——独占由真机会话人工保证、不进 CI，也不为此恢复 `RUN_SERIAL`（进程隔离 + 用例边界资源虚拟化的并行模型不回退，见 §14.3）。契约、判据与逐作业期望集表见 `specification/08-tooling.md` §8.2。
+
 **性能基准**：见 §10 与 [`specification/06-app-platform.md`](specification/06-app-platform.md) §10。
 
 ### 14.3 组织约定
 
-- **命名**：测试文件以 `utest`（单元，`tests/unit/`）/ `itest`（集成，`tests/integration/`）为**前缀**（非 `_test` 后缀），与源文件同名主体；每个测试 TU 包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。
+- **命名**：测试文件以 `utest`（单元，`tests/unit/`）/ `itest`（集成，`tests/integration/`）/ `etest`（真实后端端到端，`tests/e2e/`）为**前缀**（非 `_test` 后缀），与源文件同名主体；每个测试 TU 包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`，端到端用例为 `etest_<名>`）内。
 - **运行**：`ctest -R <名>` 逐条拉起 `aurora_test_runner --run=<stem>`；从仓库根运行以保证相对路径解析；本地全量复跑推荐 `ctest --preset ninja-test`（`CMakePresets.json` testPresets，等价固定 `ctest -j 16`）。并行模型为「CTest 进程隔离 + 框架用例边界资源虚拟化」（tmpdir / cwd / 单例 / 剪贴板注入，见 `tests/framework/isolation.h`），不使用 `RUN_SERIAL` 串行白名单。
 - **耗时观测**：`tools/check/build_baseline.py`（手动跑、非门禁）解析构建目录的 `.ninja_log` 与 ctest `LastTest.log`，输出编译边耗时分布 / top-N 慢边与测试串行耗时合计 / top-N 慢测（并行关键路径），`--json` 落基线供跨次对照。
 - **新增约束**：新增公共 API / widget / 核心逻辑须配套单测并接入 CTest。
@@ -512,7 +530,7 @@ CI 配置位于 `.github/workflows/`：
 
 | 工作流 | 作用 |
 |:---|:---|
-| `ci.yml` | 宏矩阵全量覆盖，每推送 / PR 触发，`concurrency` 取消旧运行以提速。共 10 组 job：**core**（linux/gcc + linux/clang + windows/msvc + windows/mingw + windows/llvm（clang-cl）+ macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支，Debug 覆盖 linux/gcc、windows/msvc 与 windows/llvm；linux-gcc-release 与 windows-llvm 额外构建 `demos` 聚合目标）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关，均 ubuntu/gcc）；**asan**（ASan+UBSan 全量 ctest）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON`，构建库与测试 runner 并全量 ctest，能力缺失用例走 SKIP 路径）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方；默认配置与 Release 下强制 `AURORA_ENABLE_DEBUG=ON` 的「非默认宏一致性」各一组）；**lint**（clang-tidy 门禁，矩阵 = DEBUG OFF/ON 两份编译数据库 × TU 分片 4 片 = 8 个作业，去重后 0 finding 才过）；**lint-wasm**（同一门禁的浏览器口径，`--emscripten` 重写后的 wasm 编译库分 4 片，只 configure 不构建）；**fmt**（`format-check` 全量排版校验）。三道 lint 与排版均为**必过**位，各自清单逐片入 artifact；静态检查为什么按 TU 分片、分片改了判据没有，见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §4.5 |
+| `ci.yml` | 宏矩阵全量覆盖，每推送 / PR 触发，`concurrency` 取消旧运行以提速。共 10 组 job：**core**（linux/gcc + linux/clang + windows/msvc + windows/mingw + windows/llvm（clang-cl）+ macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支，Debug 覆盖 linux/gcc、windows/msvc 与 windows/llvm；linux-gcc-release 与 windows-llvm 额外构建 `demos` 聚合目标）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关，均 ubuntu/gcc，另 HEADLESS 关分支仅验库与工具构建绿、跳过 Test 步骤）；**asan**（ASan+UBSan 全量 ctest，`-LE e2e` 排除真实后端 E2E）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact，`-LE e2e` 同上）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON`，构建库与测试 runner 并全量 ctest，能力缺失用例走 SKIP 路径）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方；默认配置与 Release 下强制 `AURORA_ENABLE_DEBUG=ON` 的「非默认宏一致性」各一组）；**lint**（clang-tidy 门禁，矩阵 = DEBUG OFF/ON 两份编译数据库 × TU 分片 4 片 = 8 个作业，去重后 0 finding 才过）；**lint-wasm**（同一门禁的浏览器口径，`--emscripten` 重写后的 wasm 编译库分 4 片，只 configure 不构建）；**fmt**（`format-check` 全量排版校验）。三道 lint 与排版均为**必过**位，各自清单逐片入 artifact；静态检查为什么按 TU 分片、分片改了判据没有，见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §4.5。core 与 backends 的 Test 步骤按实际编译的后端面逐作业声明 E2E 期望集（`AURORA_E2E_EXPECT`；asan / coverage 以 `-LE e2e` 排除，wasm 在 CMake 层即无 E2E 面），逐作业期望集表与边界结论见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2「CI 作业口径」 |
 | `release.yml` | 发布流程（构建产物 / 版本标签） |
 
 矩阵按「每个 feature 宏分支至少被一个 job 编译一次」设计；选项语义见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md)。CI 只负责「拉起构建 + 跑 CTest」，不承载测试设计。

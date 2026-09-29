@@ -619,7 +619,9 @@ auto selftest_tracing() -> bool {
     // 唯一 id 生成依赖该内建，属刻意使用，定向压制。
 #ifdef __clang__
 #pragma clang diagnostic push
+#if __has_warning("-Wc2y-extensions")
 #pragma clang diagnostic ignored "-Wc2y-extensions"
+#endif
 #endif
     const auto traced = probe(AURORA_TEST_PROBE(AURORA_TEST_TRACE("outer context"); {
         AURORA_TEST_TRACE("inner context");

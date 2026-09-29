@@ -58,22 +58,26 @@
 #error "AURORA_BACKEND_X11 must be enabled"
 #endif
 
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
+// 本块包含顺序不可交给 clang-format 排序：默认 IncludeBlocks: Merge 会把 <X11/…>（C 系统头类别）
+// 提到 aurora 头之前，而 Xlib 的 `#define None 0L` 会污染 aurora 侧以 None 为枚举成员的声明。
+// clang-format off
 #include <dlfcn.h>
-
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
 #include <string>
 
-#include "aurora/window/x11_surface.h"  // aurora 澶村繀椤诲厛浜?Xlib锛圢one/Bool/Status 瀹忔薄鏌擄級
+#include "aurora/window/x11_surface.h"  // aurora 头必须先于 Xlib（None/Bool/Status 宏污染）：Xlib 的 `#define None 0L` 会炸掉 aurora 侧以 None 为枚举成员的声明。
+#include "aurora/window/cursor_map.h"
+#include "verify_args.h"
+#include "verify_print.h"
+
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
 
 // <X11/X.h>（经 Xlib.h 引入）无条件 `#define CursorShape 0`，与 aurora::CursorShape 硬碰撞。
 #undef CursorShape
-
-#include "aurora/window/cursor_map.h"
-#include "verify_print.h"
+// clang-format on
 
 namespace {
 
@@ -290,8 +294,20 @@ auto x_error_handler(Display *dpy, XErrorEvent *ev) -> int {
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    if (argc > 1) {
-        ::setenv("DISPLAY", argv[1], 1);
+    // 命令行面即声明表：位置参数 [DISPLAY] 给定即覆盖环境变量（多 X 会话机器上定点验收）。
+    const auto spec = aurora::cli::CommandSpec{
+        .name = "aurora_verify_x11_cursor",
+        .about = "X11/XFIXES cursor shape live probe",
+        .positionals = {aurora::cli::PositionalSchema{.name = "display",
+                                                      .kind = aurora::cli::ValueKind::String,
+                                                      .help = "X display to use instead of $DISPLAY"}}};
+    const auto cli = aurora_verify::parse_command_line(spec, argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
+    }
+    const auto display = cli.arguments->positional(0);
+    if (display.ok()) {
+        ::setenv("DISPLAY", display.value().raw_text().c_str(), 1);
     }
 
     aurora::X11Surface surface(240, 160, "aurora-verify-i1-cursor-x11");

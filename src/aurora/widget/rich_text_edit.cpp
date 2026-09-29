@@ -37,7 +37,7 @@ auto RichTextEdit::describe_static() -> WidgetDescriptor {
                  .type = "string",
                  .default_value = "\"\"",
                  .required = false,
-                 .note = "纯文本内容（序列化用）",
+                 .note = "Plain text content (for serialization)",
                  .json_type = "string"},
                 {.name = "width",
                  .type = "Length",
@@ -61,7 +61,7 @@ auto RichTextEdit::describe_static() -> WidgetDescriptor {
                  .type = "TextDirection",
                  .default_value = "\"auto\"",
                  .required = false,
-                 .note = "书写方向(auto=继承环境)",
+                 .note = "Text direction (auto = inherit from environment)",
                  .json_type = "string"},
             },
         .events = {"on_text_input", "on_text_composition"},
@@ -274,21 +274,38 @@ auto RichTextEdit::handle_control_shortcut(KeyEvent &e, bool shift, std::size_t 
         case KeyCode::C: {
             const std::string t = selected_text();
             if (!t.empty()) {
-                Clipboard::set_text(t);
+                if (const auto copied = Clipboard::set_text(t); !copied) {
+                    Diagnostics::warn("RichTextEdit Ctrl+C copy failed: " + copied.error().message,
+                                      "RichTextEdit::on_key_event", copied.error().code);
+                }
             }
             return true;
         }
         case KeyCode::X: {
             const std::string t = selected_text();
             if (!t.empty()) {
-                Clipboard::set_text(t);
-                do_delete_selection();
-                mark_needs_paint();
+                const auto copied = Clipboard::set_text(t);
+                if (!copied) {
+                    Diagnostics::warn("RichTextEdit Ctrl+X copy failed: " + copied.error().message,
+                                      "RichTextEdit::on_key_event", copied.error().code);
+                }
+                // 复制没成就不删：剪切删了便无处可粘，宁可让选区留在原地等用户重试。
+                if (copied) {
+                    do_delete_selection();
+                    mark_needs_paint();
+                }
             }
             return true;
         }
         case KeyCode::V: {
-            const std::string clip = Clipboard::get_text();
+            // 可读但无文本 = Ok("")（静默不插入）；读不出来 = Err（记诊断），两者从此可分。
+            std::string clip;
+            if (const auto fetched = Clipboard::get_text(); fetched) {
+                clip = fetched.value();
+            } else {
+                Diagnostics::warn("RichTextEdit Ctrl+V read failed: " + fetched.error().message,
+                                  "RichTextEdit::on_key_event", fetched.error().code);
+            }
             if (!clip.empty()) {
                 do_insert(clip);
                 mark_needs_paint();
@@ -393,24 +410,18 @@ auto RichTextEdit::handle_text_key(KeyEvent &e, std::size_t n) -> bool {
 
 auto RichTextEdit::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    props["text"] = plain_text();
+    props.set("text", plain_text());
     // 仅显式设置时序列化方向（继承环境语义不落盘）。
     if (direction_.has_value()) {
-        props["direction"] = (*direction_ == TextDirection::RTL) ? "RTL" : "LTR";
+        props.set("direction", (*direction_ == TextDirection::RTL) ? "RTL" : "LTR");
     }
 }
 
 auto RichTextEdit::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("text")) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        if (props["text"].is_string()) {
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            const std::string t = props["text"].get<std::string>();
+        if (props.at("text")->is_string()) {
+            const auto t = props.at("text")->as_or<std::string>("");
             doc_.clear();
             for (const char ch : t) {
                 doc_.push_back(StyledChar{.ch = ch, .font = cur_font_, .color = cur_color_, .underline = false});
@@ -422,8 +433,8 @@ auto RichTextEdit::deserialize_props(const Json &props) -> void {
         }
     }
     // 书写方向反序列化（仅当显式提供）。auto/继承环境由运行期 Directionality 注入决定。
-    if (props.contains("direction") && props["direction"].is_string()) {
-        direction_ = props["direction"].get<std::string>() == "RTL" ? TextDirection::RTL : TextDirection::LTR;
+    if (props.contains("direction") && props.at("direction")->is_string()) {
+        direction_ = props.at("direction")->as_or<std::string>("") == "RTL" ? TextDirection::RTL : TextDirection::LTR;
     }
 }
 

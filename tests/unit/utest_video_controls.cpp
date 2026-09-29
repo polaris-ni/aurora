@@ -2,7 +2,7 @@
 /// 目标单元: include/aurora/media/video_controls.h
 /// 测试说明: 覆盖 VideoControls 控件叠层——构造建立 Row 子控件结构（播放/进度/时间/静音/音量）、
 /// 按钮点击经 VideoController 操纵播放器、tick_gestures 刷新时间文本与按钮文案、
-/// 无控制器降级构造、自描述与属性序列化
+/// 公开 tick 入口对叠层读数的驱动、无控制器降级构造、自描述与属性序列化
 
 #include <chrono>
 #include <memory>
@@ -16,8 +16,10 @@
 #include "aurora/widget/slider.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_video_controls {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -135,21 +137,33 @@ AURORA_TEST_CASE(tick_updates_time_text_from_controller) {
     AURORA_TEST_CHECK_EQ(c.time_text()->content.get().text, "0:00 / 1:00");
 }
 
+AURORA_TEST_CASE(public_tick_entry_refreshes_readouts) {
+    VideoPlayer player(make_long_source());  // 60s
+    ControlsHook c(&player);
+    player.seek_fraction(0.5);  // 30s
+    player.toggle_play();
+    c.tick(t_ms(0));
+    // 回归点：`Widget::tick` 在 `needs_gesture_tick_` 为假时直接早退，叠层便永远停在初始
+    // 「Play / 0:00 / 0:00」读数上——既有用例直调受保护 `tick_gestures`，掩盖了这个门。
+    AURORA_TEST_CHECK_TRUE(c.play_button()->label.get() == LocalizedString{"Pause"});
+    AURORA_TEST_CHECK_EQ(c.time_text()->content.get().text, "0:30 / 1:00");
+}
+
 AURORA_TEST_CASE(constructs_without_controller_no_crash) {
     // 默认构造不建子控件（build_children 仅在控制器构造时执行）；
     // 独立反序列化场景下序列化仍可用。
     VideoControls c;
     AURORA_TEST_CHECK_EQ(c.child_nodes().size(), 0U);
-    aurora::Json props;
+    aurora::Json props = aurora::Json::object();
     AURORA_TEST_CHECK_NO_THROW(c.serialize_props(props));
 }
 
 AURORA_TEST_CASE(props_roundtrip_generic_fields) {
     VideoControls c;
-    aurora::Json props;
+    aurora::Json props = aurora::Json::object();
     c.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["show"].get<bool>(), true);
-    props["show"] = false;
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "show"), true);
+    props.set("show", Json{false});
     VideoControls d;
     d.deserialize_props(props);
     AURORA_TEST_CHECK_FALSE(d.show.get());

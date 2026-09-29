@@ -1,6 +1,7 @@
 #include "aurora/window/win32_host.h"
 
 #include "aurora/window/detail/win32_ime.h"
+#include "aurora/window/detail/win32_modifiers.h"
 #include "aurora/window/detail/win32_ua.h"
 
 #ifdef AURORA_BACKEND_WIN32
@@ -32,13 +33,17 @@
 namespace aurora {
 
 // ---- 自由函数：修饰键 / 键码映射 / UTF-8 转换（不依赖实例，纯函数）----
+// 派发期的修饰态一律读 `Impl::mods`（随消息流推进的跟踪器），**不再**逐事件异步采样——
+// 那会让命中与否取决于「消息被泵到之前修饰键是否仍按着」，见 `detail/win32_modifiers.h`。
+// 这里只剩一处合法的异步读数：窗口**获得激活**时取一次物理态基线，用于播种跟踪器
+// （覆盖「用户 Alt+Tab 切进来、Alt 在激活之前就已按下」这种跟踪器无从得知的前置态）。
 [[nodiscard]] static auto is_async_key_down(int vk) -> bool {
     // GetAsyncKeyState 返回有符号 SHORT；对最高位做位与时应先转无符号，
     // 避免 signed-bitwise 静态检查告警。
     return (static_cast<std::uint16_t>(GetAsyncKeyState(vk)) & 0x8000U) != 0U;
 }
 
-[[nodiscard]] static auto current_modifiers() -> ModifierKey {
+[[nodiscard]] static auto async_modifiers() -> ModifierKey {
     auto m = ModifierKey::None;
     if (is_async_key_down(VK_SHIFT)) {
         m = m | ModifierKey::Shift;
@@ -183,7 +188,7 @@ struct Win32Host::Impl {
     WindowModeHandler window_mode_handler;
     PresentRequest present_request;
     std::function<void(float)> scale_handler;  ///< DPI 缩放变化上报（`WM_DPICHANGED` 后触发）。
-    /// @brief 无障碍桥（G14：由窗口宿主持有，GDI / D3D11 两个 Surface 共用同一实例）。
+    /// @brief 无障碍桥（由窗口宿主持有，GDI / D3D11 两个 Surface 共用同一实例）。
     std::unique_ptr<detail::Win32UiaBridge> a11y;
     /// @brief 宿主接管 `WM_GETOBJECT` 的钩子（默认空 → 走内置桥）。
     std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> a11y_hook;
@@ -192,6 +197,8 @@ struct Win32Host::Impl {
 
     /// @brief IMM32 组合输入桥（与窗口同生命周期；无输入法激活时零消息、零成本）。
     std::unique_ptr<detail::Win32ImeBridge> ime;
+    /// @brief 修饰键跟踪器：随 `WM_KEY*` / `WM_SYSKEY*` 推进，失焦清空、重新激活播种。
+    detail::ModifierKeyTracker mods;
     /// @brief 焦点控件的候选窗定位盒查询（由 `WindowHost` 注入；空 = 无定位，走系统默认）。
     std::function<Rect()> composition_caret_provider;
 
@@ -199,7 +206,8 @@ struct Win32Host::Impl {
     inline static HBRUSH bg_brush = nullptr;  ///< 浅色背景擦除刷（消除最大化黑屏），注册时创建一次。
     static constexpr auto AURORA_CLASS_NAME = "AuroraWin32Surface";
 
-    Impl(int w, int h, const std::string &title, const WindowStyleOptions &style);
+    Impl(int w, int h, const std::string &title, const WindowStyleOptions &style,
+         WindowVisibility visibility = WindowVisibility::Normal);
     ~Impl();
     Impl(const Impl &) = delete;
     auto operator=(const Impl &) -> Impl & = delete;
@@ -219,7 +227,8 @@ struct Win32Host::Impl {
     static auto handle_create() -> LRESULT;
     auto handle_mouse(HWND hwnd_in, UINT msg, LPARAM lp) -> LRESULT;
     auto handle_wheel(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> LRESULT;
-    [[nodiscard]] auto handle_key(UINT msg, WPARAM wp) const -> LRESULT;
+    [[nodiscard]] auto handle_key(UINT msg, WPARAM wp) -> LRESULT;
+    [[nodiscard]] auto handle_syskey(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT;
     [[nodiscard]] auto handle_char(WPARAM wp) const -> LRESULT;
     auto handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT;
     auto handle_paint(HWND hwnd_in) -> LRESULT;
@@ -249,7 +258,8 @@ struct Win32Host::Impl {
 };
 
 // ---- Impl 构造：窗口创建 + DPI 适配 + 类注册 + 显示 ----
-Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style)
+Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                      WindowVisibility visibility)
     : scale(dpi_scale()),  // 创建时主显示器 DPI
       style(style) {
     enable_dpi_awareness();
@@ -301,7 +311,19 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
         if (style.always_on_top) {
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         }
-        ShowWindow(hwnd, SW_SHOW);
+        // 可见性策略：构造期一次定档，避免「先可见后隐藏」造成的一帧闪烁。
+        // 窗口本就以无 WS_VISIBLE 的 WS_OVERLAPPEDWINDOW 创建，Hidden 档显式隐藏以固化语义。
+        switch (visibility) {
+            case WindowVisibility::NoActivate:
+                ShowWindow(hwnd, SW_SHOWNA);  // 显示但不激活：不抢焦点
+                break;
+            case WindowVisibility::Hidden:
+                ShowWindow(hwnd, SW_HIDE);  // 不显示：窗口不进入用户视野
+                break;
+            case WindowVisibility::Normal:
+                ShowWindow(hwnd, SW_SHOW);
+                break;
+        }
         UpdateWindow(hwnd);
         DragAcceptFiles(hwnd, TRUE);  // 启用操作系统文件拖放（WM_DROPFILES）
         // IMM32 组合桥：桥自身只吃 WM_IME_*，无输入法时一条也不来，故随窗口直接构造。
@@ -378,7 +400,7 @@ auto Win32Host::Impl::on_key(KeyAction action, int vk) const -> void {
     KeyEvent e;
     e.action = action;
     e.key = static_cast<int>(from_win32_vk(vk));
-    e.modifiers = current_modifiers();
+    e.modifiers = mods.get();
     handler(e);
 }
 
@@ -454,9 +476,23 @@ auto Win32Host::Impl::handle_wheel(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> 
     return 0;
 }
 
-auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp) const -> LRESULT {
-    on_key((msg == WM_KEYUP) ? KeyAction::Up : KeyAction::Down, static_cast<int>(wp));
+auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp) -> LRESULT {
+    const auto action = (msg == WM_KEYUP) ? KeyAction::Up : KeyAction::Down;
+    // 先推进修饰态再派发：本条消息若正是修饰键自身，它应当计入本事件的 `modifiers`
+    // （Windows 的常规语义是「Ctrl 按下的那条 KeyEvent 就带 Control」，热键匹配依赖它）。
+    mods.apply(static_cast<int>(wp), action == KeyAction::Down);
+    on_key(action, static_cast<int>(wp));
     return 0;
+}
+
+// `WM_SYSKEY*` = 按住 Alt 期间的按键（Alt 自身也算）。这里只借它推进修饰态，按键本身仍交
+// `DefWindowProcA`：`Alt+F4` 关闭、`Alt+Tab` 切换与菜单助记键都由系统实现，在此吞掉即掐死系统
+// 热键。代价是 Alt 组合在 Aurora 侧依旧不派发（既有边界，见
+// `specification/05-event-navigation.md` §2.2），但 Alt 的按下/抬起不再
+// 变成跟踪器里的幻影位——不推进它，`Alt` 之后的普通按键会一直错报带 Alt。
+auto Win32Host::Impl::handle_syskey(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
+    mods.apply(static_cast<int>(wp), msg != WM_SYSKEYUP);
+    return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
 auto Win32Host::Impl::handle_char(WPARAM wp) const -> LRESULT {
@@ -520,6 +556,14 @@ auto Win32Host::Impl::handle_activate(WPARAM wp) -> LRESULT {
     const bool new_active = (LOWORD(wp) != WA_INACTIVE);
     if (new_active != active) {
         active = new_active;
+        // 修饰态与前台状态同步：拿到前台时用物理读数播种一次（「Alt+Tab 切进来」的那条 Alt
+        // 按下属于别的窗口，跟踪器无从得知）；交出前台时整体清空（未送达的抬起消息不可追，
+        // 留着就是幻影位）。二者都只在状态真翻转时做一次，不是逐事件采样。
+        if (new_active) {
+            mods.seed(async_modifiers());
+        } else {
+            mods.clear();
+        }
         update_window_state();
     }
     return 0;
@@ -591,7 +635,7 @@ auto Win32Host::Impl::handle_destroy() -> LRESULT {
     return 0;
 }
 
-// ---- 无障碍分族（WM_GETOBJECT → UIA 桥，D14）----
+// ---- 无障碍分族（WM_GETOBJECT → UIA 桥）----
 auto Win32Host::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT> {
     if (a11y_hook) {
         // 公共签名用指针宽度整数（避免公共头引入 <windows.h>），此处还原为原生类型。
@@ -601,14 +645,17 @@ auto Win32Host::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<L
         }
     }
     constexpr LONG uia_root_object_id = -25;
-    if (std::cmp_not_equal(static_cast<DWORD>(lp), uia_root_object_id)) {
+    // UIA 根请求的 lParam = UiaRootObjectId(-25)：按 Win32 惯例两侧都截断到 DWORD 比较。
+    // 不可用混合符号的安全比较（cmp_not_equal 按数学值判等，0xFFFFFFE7 与 -25 永不命中，
+    // 曾致内置桥无法经 WM_GETOBJECT 激活）；UIA 协议本身就是 (DWORD)lParam == (DWORD)id。
+    if (static_cast<DWORD>(lp) != static_cast<DWORD>(uia_root_object_id)) {
         return std::nullopt;  // 非 UIA 根请求：交 DefWindowProc（MSAA 兜底）
     }
     if (hwnd == nullptr) {
         return std::nullopt;
     }
     if (a11y == nullptr) {
-        // 惰性构造（D14）：无读屏在线时连桥对象都不存在 ⇒ 零开销。
+        // 惰性构造：无读屏在线时连桥对象都不存在 ⇒ 零开销。
         a11y = std::make_unique<detail::Win32UiaBridge>(hwnd);
         a11y->set_root(a11y_root);  // 补喂：宿主在桥存在前已记下的根
     }
@@ -738,13 +785,19 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case WM_KEYDOWN:
         case WM_KEYUP:
             return self->handle_key(msg, wp);
+        case WM_SYSKEYDOWN:
+        case WM_SYSKEYUP:
+            return self->handle_syskey(msg, wp, lp);
         case WM_CHAR:
             return self->handle_char(wp);
         case WM_IME_STARTCOMPOSITION:
         case WM_IME_COMPOSITION:
         case WM_IME_ENDCOMPOSITION:
         case WM_IME_CHAR:
+            return self->handle_ime(msg, wp, lp);
         case WM_KILLFOCUS:
+            // 焦点交出即清空修饰态：抬起消息可能落到新获得焦点的窗口，本窗口的跟踪器再也收不到
+            self->mods.clear();
             return self->handle_ime(msg, wp, lp);
         case WM_SIZE:
             return self->handle_size(hwnd, wp, lp);
@@ -772,8 +825,9 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 }
 
 // ===== Win32Host 公共 API：全部委托给 pimpl_ =====
-Win32Host::Win32Host(int w, int h, const std::string &title, const WindowStyleOptions &style)
-    : pimpl_(std::make_unique<Impl>(w, h, title, style)) {}
+Win32Host::Win32Host(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                     WindowVisibility visibility)
+    : pimpl_(std::make_unique<Impl>(w, h, title, style, visibility)) {}
 
 Win32Host::~Win32Host() = default;
 
@@ -910,8 +964,18 @@ auto Win32Host::set_size(Size s) const -> void {
     if (pimpl_->hwnd == nullptr) {
         return;
     }
-    SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, static_cast<int>(std::lround(s.width)),
-                 static_cast<int>(std::lround(s.height)), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    // 逻辑 dp → 物理客户区 → 物理外框：× scale 换算后做非客户区补偿（与构造路径同一
+    // 口径），保证 set_size 后客户区尺寸 == 请求的逻辑尺寸。若把逻辑值直接当外框尺寸
+    // 传 SetWindowPos，客户区会被 chrome 挤占（标题栏随 DPI 放大时尤甚），几何漂移。
+    const auto win_style = static_cast<DWORD>(GetWindowLongPtrA(pimpl_->hwnd, GWL_STYLE));
+    const auto ex_style = static_cast<DWORD>(GetWindowLongPtrA(pimpl_->hwnd, GWL_EXSTYLE));
+    RECT rect{.left = 0,
+              .top = 0,
+              .right = static_cast<int>(std::lround(s.width * pimpl_->scale)),
+              .bottom = static_cast<int>(std::lround(s.height * pimpl_->scale))};
+    AdjustWindowRectEx(&rect, win_style, GetMenu(pimpl_->hwnd) != nullptr ? TRUE : FALSE, ex_style);
+    SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 }  // namespace aurora

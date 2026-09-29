@@ -10,8 +10,10 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/stepper.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_stepper {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -135,10 +137,10 @@ AURORA_TEST_CASE(pointer_regions_trigger_cancel_and_next) {
 
 AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
     Stepper src{three_steps(), 2};
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["current"].get<int>(), 2);
-    AURORA_TEST_CHECK_EQ(props["step_count"].get<int>(), 3);  // 只读描述字段
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "current"), 2);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "step_count"), 3);  // 只读描述字段
 
     Stepper dst;
     dst.deserialize_props(props);

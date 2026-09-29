@@ -2,7 +2,7 @@
 /// 目标单元: src/aurora/widget/serialization.cpp
 /// 测试说明: WidgetRegistry 工厂注册——Skeleton 属性往返（从静态 JSON 完整重建）、
 ///           虚拟化/回调控件（GridView / LazyList / BottomNavBar）登记即回填标量属性、
-///           重建后经 set_item_builder 挂条目即出内容、
+///           重建后经 set_item_builder 挂条目即出内容、TextInput 声明属性随 from_json 回填、
 ///           to_json/from_json 基本往返与未知类型拒绝
 
 #include <memory>
@@ -16,9 +16,15 @@
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/serialization.h"
 #include "aurora/widget/skeleton.h"
+#include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_serialization {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 using serialization::from_json;
 using serialization::to_json;
@@ -46,9 +52,7 @@ AURORA_TEST_CASE(skeleton_factory_rebuilds_props_from_json) {
 AURORA_TEST_CASE(gridview_registered_as_known_type_with_placeholder_rebuild) {
     // GridView 注册为已知类型——条目持运行时 ItemBuilder 不可从静态 JSON 重建，故空 props 的
     // 节点重建出「默认几何、无条目」的占位实例（标量属性齐备时由工厂回填，见下一用例）。
-    Json j;
-    j["type"] = "GridView";
-    j["props"] = Json::object();
+    const Json j = testing::json_obj({{"type", "GridView"}, {"props", Json::object()}});
     const auto w = from_json(j);
     AURORA_TEST_REQUIRE_MSG(w.ok(), "GridView from_json succeeds (known type)");
     AURORA_TEST_CHECK_EQ(w.value()->type_name(), std::string{"GridView"});
@@ -98,9 +102,10 @@ AURORA_TEST_CASE(virtualized_widgets_rebuild_with_their_props) {
 
 AURORA_TEST_CASE(rebuilt_grid_renders_after_host_attaches_builder) {
     // 「属性齐备、条目待挂」不是一句空话：set_item_builder 即那句「由宿主回填」的落点。
-    Json j;
-    j["type"] = "GridView";
-    j["props"] = Json{{"count", 12}, {"columns", 4}, {"cell_extent", 40.0F}, {"cache_extent", 0.0F}};
+    const Json j = testing::json_obj(
+        {{"type", "GridView"},
+         {"props",
+          testing::json_obj({{"count", 12}, {"columns", 4}, {"cell_extent", 40.0F}, {"cache_extent", 0.0F}})}});
     const auto rebuilt = from_json(j);
     AURORA_TEST_REQUIRE_MSG(rebuilt.ok(), "GridView from_json succeeds");
     auto *gv = dynamic_cast<GridView *>(rebuilt.value().get());
@@ -115,16 +120,14 @@ AURORA_TEST_CASE(rebuilt_grid_renders_after_host_attaches_builder) {
 }
 
 AURORA_TEST_CASE(unknown_type_still_rejected) {
-    Json j;
-    j["type"] = "NoSuchWidget";
-    j["props"] = Json::object();
+    const Json j = testing::json_obj({{"type", "NoSuchWidget"}, {"props", Json::object()}});
     const auto w = from_json(j);
     AURORA_TEST_REQUIRE_MSG(!w.ok(), "unknown type rejected");
     AURORA_TEST_CHECK_EQ(w.error().code_enum, ErrorCode::WidgetUnknownType);
 }
 
 AURORA_TEST_CASE(barchart_rebuilds_nested_series_array) {
-    // 图表数据进序列化面（D5）：series 是对象数组（首个「数组属性」先例），
+    // 图表数据进序列化面：series 是对象数组（首个「数组属性」先例），
     // 嵌套的 name / values / color 必须逐字段往返，且未设色的系列不输出 color 键。
     auto src = std::make_shared<BarChart>(BarChartProps{
         .series = {ChartSeries{.name = "A", .values = {1.0, 2.0, 3.0}, .color = Color{1, 2, 3, 255}},
@@ -136,9 +139,11 @@ AURORA_TEST_CASE(barchart_rebuilds_nested_series_array) {
 
     const Json j = to_json(*src);
     AURORA_TEST_REQUIRE_TRUE(j.contains("props"));
-    AURORA_TEST_REQUIRE_TRUE(j["props"].contains("series"));
-    AURORA_TEST_CHECK_EQ(j["props"]["series"].size(), 2U);
-    AURORA_TEST_CHECK_FALSE(j["props"]["series"][1].contains("color"));
+    const auto &props = *require_child(j, "props");
+    AURORA_TEST_REQUIRE_TRUE(props.contains("series"));
+    const auto &series = *require_child(props, "series");
+    AURORA_TEST_CHECK_EQ(series.size(), 2U);
+    AURORA_TEST_CHECK_FALSE(require_child_at(series, 1)->contains("color"));
 
     const auto rebuilt = from_json(j);
     AURORA_TEST_REQUIRE_MSG(rebuilt.ok(), "BarChart from_json succeeds");
@@ -150,6 +155,27 @@ AURORA_TEST_CASE(barchart_rebuilds_nested_series_array) {
     AURORA_TEST_CHECK_TRUE(chart->categories == std::vector<std::string>{"Mon", "Tue", "Wed"});
     AURORA_TEST_CHECK_TRUE(chart->stacked);
     AURORA_TEST_CHECK_TRUE(chart->legend.position == LegendPosition::Right);
+}
+
+AURORA_TEST_CASE(textinput_rebuilds_declared_props_from_json) {
+    // TextInput 曾因登记在「无属性反序列化」组里，JSON 声明的 placeholder / value 到不了实例
+    // （热重载载体 ui.json 写了占位符却整段丢弃），to_json → from_json 也不再是自反。
+    auto src = std::make_shared<TextInput>();
+    src->set_placeholder("Type here first, then edit ui.json").set_value("Aurora");
+
+    const Json j = to_json(*src);
+    AURORA_TEST_REQUIRE_TRUE(require_child(j, "props")->contains("placeholder"));
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(j, "props"), "placeholder"),
+                         "Type here first, then edit ui.json");
+
+    const auto rebuilt = from_json(j);
+    AURORA_TEST_REQUIRE_MSG(rebuilt.ok(), "TextInput from_json succeeds");
+    const auto *input = dynamic_cast<const TextInput *>(rebuilt.value().get());
+    AURORA_TEST_REQUIRE_MSG(input != nullptr, "rebuilt widget is a TextInput");
+    AURORA_TEST_CHECK_EQ(input->value(), "Aurora");
+    // 占位符无公开 getter，以重建实例再序列化出的属性面为判据（与 /api/tree 同源）。
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(to_json(*rebuilt.value()), "props"), "placeholder"),
+                         "Type here first, then edit ui.json");
 }
 
 }  // namespace aurora::test_cases::utest_serialization

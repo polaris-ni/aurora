@@ -210,12 +210,14 @@ def main():
     sec_lines = list(iter_section4_lines(lines))
     # 空扫必须失败（而非恒真通过）：§4 标题写错格式曾让本门禁静默失效整段历史。
     if not sec_lines:
-        print(f"[ERR] {DOC_REL} 中未找到 §4 模块映射章节（期望形如 '## 4 模块映射' 的二级标题）；"
-              f"拒绝以「扫描 0 条」的方式假通过。", file=sys.stderr)
+        print(f"[ERR] section 4 (module map) not found in {DOC_REL}; expected a level-2 heading "
+              f"of the form '## 4 <title>' (see SEC4_RE). Refusing to pass vacuously with 0 references scanned.",
+              file=sys.stderr)
         return 2
     refs = collect_refs(sec_lines)
     if not refs:
-        print(f"[ERR] {DOC_REL} §4 未解析出任何文件引用；请检查模块表格式。", file=sys.stderr)
+        print(f"[ERR] {DOC_REL} section 4 yielded no file reference; check the module table format.",
+              file=sys.stderr)
         return 2
 
     # Dedupe (same token + same anchor reported once)
@@ -230,7 +232,7 @@ def main():
         rows.append((r, status, resolved))
 
     # Print report
-    print(f"Module-map consistency check — {DOC_REL}")
+    print(f"Module-map consistency check - {DOC_REL}")
     print(f"Scanned {len(rows)} file references (after dedup of fallback/ambiguous)\n")
     print(f"{'STATUS':<10} {'SEC':<6} {'TOKEN':<34} RESOLVED")
     print("-" * 90)

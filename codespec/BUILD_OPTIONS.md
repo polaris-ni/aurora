@@ -30,10 +30,10 @@
 | `cmake/AuroraImageCodecs.cmake` | `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG`（编译期能力开关） |
 | `cmake/AuroraSimd.cmake` | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播） |
 | `cmake/AuroraCcache.cmake` | `AURORA_ENABLE_CCACHE`（ccache 编译缓存启动器） |
-| `cmake/AuroraTools.cmake` | 工具 / 基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER` |
+| `cmake/AuroraTools.cmake` | 工具 / 基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER` + `AURORA_BUILD_DOCS`（Doxygen `docs` 聚合目标，见 §2） |
 | `cmake/AuroraVerify.cmake` | `AURORA_BUILD_VERIFY_TOOLS`：真机验收探针（`tools/verify/` 下按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**） |
 | `cmake/AuroraDemos.cmake` | 示例 demo 定义块（须在 `AuroraTools` 与 `AuroraTests` 之后 include，因其依赖 `aurora_inspector_server` 目标） |
-| `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/*.cpp`、`tests/unit/*.cpp` 与 `tests/integration/*.cpp` → 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
+| `cmake/AuroraTests.cmake` | `AURORA_BUILD_TESTS` 注册式 runner（GLOB `tests/*.cpp`、`tests/unit/*.cpp`、`tests/integration/*.cpp` 与 `tests/e2e/*.cpp`（受 `AURORA_BUILD_E2E` 门控，Emscripten 下排除）→ 单一 `aurora_test_runner`，`AURORA_TEST()` 自注册） |
 | `cmake/AuroraInstrumentation.cmake` | `AURORA_ENABLE_COVERAGE` / `AURORA_ENABLE_ASAN` / `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING` / `AURORA_ENABLE_DEBUG` / `AURORA_ENABLE_TEST_HOOKS`（须在全部目标定义之后 include） |
 | `cmake/AuroraInstall.cmake` | 安装 + `find_package(Aurora)` 导出（须在后端开关之后 include） |
 | `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元，另可按 `AURORA_LINT_SHARD` 分片；须在全部目标定义之后 include） |
@@ -51,15 +51,19 @@
 | `AURORA_BUILD_DEMOS` | `ON` | **定义**（非默认构建）`examples/demos/` 下每组件一个的可运行窗口 demo 目标；均 `EXCLUDE_FROM_ALL`，按需构建 | 各 `demo_<组件>` 可执行文件 + 聚合目标 `demos` |
 | `AURORA_BUILD_TESTS` | `ON` | 编译 `tests/` 下全部用例并接入 CTest：`AURORA_TEST()` 注册、单一 runner 一次链接，逐条 `--run=<stem>` 隔离 | `aurora_test_runner` 可执行 + `enable_testing()` + `registry_integrity` 守护 |
 | `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`，其中 `k` 从 `0` 起取 `0..N-1`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>`（`k` 取 `0..N-1`）可执行；是否默认开启待收束期链接耗时数据 |
+| `AURORA_BUILD_E2E` | `ON` | 编译 `tests/e2e/`（`etest_` 前缀）下的**真实后端端到端**用例：建真实窗口 + 走上屏链路 + 读回像素断言。Emscripten 交叉构建下强制不纳入（wasm 产物无宿主窗口 / 显示），且须与 `registry_integrity` 的 `--tests-dir` 保持同口径 | `tests/e2e/*.cpp` 并入 `aurora_test_runner`；CTest 侧对 `etest_` 用例额外打 `LABELS e2e`（供 `ctest -L e2e` 分层编排） |
+| `AURORA_E2E_TIMEOUT_MS` | `60000` | E2E 用例的看门狗超时（非开关、为正整数字符串缓存变量）：按 stem 前缀 `etest_` 以 `--timeout=<ms>` 注入。runner 默认不设限，而真实窗口事件循环一旦挂起没有兜底，故须显式设限——到点先写报告再以退出码 3 结束 | 无（仅改变 `etest_` 用例的 CTest 命令行） |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
 | `AURORA_BUILD_VERIFY_TOOLS` | `OFF` | **定义**（非默认构建）`tools/verify/` 下的真机验收探针：按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**（会创建真实窗口、读取屏幕光标，非确定且干扰用户桌面） | 各 `aurora_verify_<平台>_cursor` 可执行文件 + 聚合目标 `aurora_verify` |
+| `AURORA_BUILD_DOCS` | `ON` | 是否**提供** Doxygen API 文档站目标：配置期 `find_program(doxygen)` 探测，未找到则跳过定义（不 FATAL——doxygen 属可选外部工具），也可显式传入可执行路径。目标本身 `EXCLUDE_FROM_ALL`，`cmake --build build` 不触发；配置单一来源是仓库根 `Doxyfile`（`WARN_AS_ERROR=YES`，告警即失败），口径见 `CODING_STANDARDS.md` §13.7 | `docs` 聚合目标（产物 `build/docs/`，告警日志 `build/docs/doxygen_warnings.log`） |
+| `AURORA_DOXYGEN_EXECUTABLE` | 空（= 在 PATH 上找） | doxygen 可执行路径（非开关、FILEPATH 缓存变量）：PATH 上没有 doxygen 的机器用它显式接入，仓库内不写死任何本机路径 | 仅改变 `docs` 目标调用的可执行 |
 ### 2.1 demo 构建方式
 
 demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` 只建库 / 工具 / 测试；单个 demo 按名构建（`cmake --build build --target demo_lazy_list`），全部 demo 用聚合目标（`cmake --build build --target demos`）。关闭 `AURORA_BUILD_DEMOS` 则连目标都不定义。
 
 ### 2.2 预编译头（PCH）
 
-- **库自身**：`include/aurora/aurora_pch.h` 收录标准库 + `nlohmann/json.hpp`（不含 aurora 自有头，保证库开发时命中率），`aurora` 库 PRIVATE 编译一份。**GCC（MinGW）下同样强制关闭**：实测 122MB 的库 gch 每库 TU 全量加载 + ccache 全文 hash，且 gch 字节参与缓存 key（头文件一变全部库 TU 失效）；关闭后全量重编 155.4s → 68s（库侧），冷构建省约 1 分钟。MSVC/Clang 不变。
+- **库自身**：`include/aurora/aurora_pch.h` 收录标准库（不含 aurora 自有头，保证库开发时命中率），`aurora` 库 PRIVATE 编译一份。**GCC（MinGW）下同样强制关闭**：实测 122MB 的库 gch 每库 TU 全量加载 + ccache 全文 hash，且 gch 字节参与缓存 key（头文件一变全部库 TU 失效）；关闭后全量重编 155.4s → 68s（库侧），冷构建省约 1 分钟。MSVC/Clang 不变。（原收录的第三方 JSON 单头已移除：自研 JSON 值容器 `au::json::Value` 已收敛并承担其角色；见 [`specification/01-core.md`](specification/01-core.md) §9。）
 - **消费者**：MSVC/Clang 下 `aurora_consumer_pch` 锚定目标把 `aurora.h` 伞头整体预编译一份，全部 demo / 测试 / 工具经 `target_precompile_headers(REUSE_FROM aurora_consumer_pch)` 复用（aurora 头变更本就触发消费者重编，不增加失效面）。**GCC（MinGW）下消费者 PCH 强制关闭**：实测 296MB 的 .gch 从未被消费者命中（生成/消费侧编译器设置失配，`-Winvalid-pch` 拒用），却仍要每 TU 全量探测加载（GCC）+ 全文 hash（ccache），每 TU ≈ 600MB 纯亏损 I/O，净收益为负；消费者改走伞头文本编译 + ccache 缓存。
 - 覆盖率 / ASan 开启时 PCH 全部自动关闭（与 GCC 判定共用同一门控变量）。
 
@@ -116,7 +120,7 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 
 | 选项 | 默认值 | 含义 | 传播宏 | 额外链接 |
 |:---|:---|:---|:---|:---|
-| `AURORA_BACKEND_HEADLESS` | `ON` | 无头内存 / PNG 后端（`HeadlessSurface`，离线渲染 / 测试） | `AURORA_BACKEND_HEADLESS` | — |
+| `AURORA_BACKEND_HEADLESS` | `ON` | 无头内存 / PNG 后端（`HeadlessSurface`，离线渲染 / 测试）。⚠️ 关掉它只保证**库与工具**可构建（`AURORA_BUILD_TESTS=OFF`）：测试套件以无头后端为默认绘制目标，18 个测试 TU 直接引用 `HeadlessSurface`，故 `AURORA_BUILD_TESTS=ON` × `AURORA_BACKEND_HEADLESS=OFF` 不是受支持的组合（既存缺口） | `AURORA_BACKEND_HEADLESS` | — |
 | `AURORA_BACKEND_WIN32` | Windows `ON`，否则 `OFF` | Win32/GDI 后端（`Win32Surface` + `Win32Host` 共享宿主） | `AURORA_BACKEND_WIN32` | `user32` `gdi32` `shell32` `ole32` `uuid` `imm32`（仅 `_WIN32`；`imm32` 供输入法组合桥） |
 | `AURORA_BACKEND_D3D11` | `OFF` | D3D11 GPU 增量上屏后端（`D3D11Surface`） | `AURORA_BACKEND_D3D11` | `d3d11` `dxgi` `d3dcompiler`（仅 `_WIN32`） |
 | `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；真窗口帧路径 `WgpuWin32Surface` / `WgpuX11Surface` / `WgpuWaylandSurface` 另与宿主 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread` `m`(Linux) |
@@ -283,7 +287,7 @@ cmake --build build
 | `AURORA_ENABLE_WASM_PTHREADS` | `OFF` | WASM 真并行（`-pthread`）：`__EMSCRIPTEN_PTHREADS__` 与 `AURORA_CAP_THREADS` 同翻 1，`ThreadPool` 从「任务只入队、帧尾 `pump()` 排空」回到普通 worker 池。**代价在宿主页面**：产物要求 SharedArrayBuffer，须跨源隔离（`COOP: same-origin` + `COEP: require-corp`）方可实例化（裸 Node 无此约束），非 Emscripten 开启 FATAL。故默认关闭——无隔离头的站点宁用单线程 deferred 排空也不换回打不开的产物 | 全局追加 `-pthread` 到 `CMAKE_C_FLAGS` / `CMAKE_CXX_FLAGS` / `CMAKE_EXE_LINKER_FLAGS`（**编译 + 链接同参，且须先于 `add_subdirectory(third_party/*)` 的标志快照**——`-pthread` 是整个链接闭包的约束，漏掉 freetype/harfbuzz 的 `.o` 时链接报 `wasm-ld: --shared-memory is disallowed by harfbuzz.cc.o`，实测；故本体位于根 `CMakeLists.txt` 而非 `AuroraBackends.cmake`）。**不注入 feature 宏**，不出现在 `debug::feature_flags` 镜像，运行期查询用 `ThreadPool::default_pool().is_deferred()` |
 | `AURORA_ENABLE_CLANG_TIDY` | `ON` | Clang-Tidy 门禁（`lint` / `lint-fix` 聚合目标） | 需 `clang-tidy` 与 python 在 PATH；未开启时自动打开 `CMAKE_EXPORT_COMPILE_COMMANDS`。经 `tools/check/run_clang_tidy.py` 并行 lint **非 third_party** 翻译单元并按 `(file, line, check)` 去重；详见 §4.5 |
 | `AURORA_LINT_SHARD` | 空（= 一遍跑全量） | Clang-Tidy 门禁的 TU 分片（非开关、形如 `<i>/<n>` 的字符串缓存变量，与 `AURORA_TEST_SHARDS` 同族）：`lint` / `lint-fix` 只跑已排序 TU 清单的第 i 片（`tus[i::n]`），供 CI 把一遍摊成多个作业并跑 | 校验在 configure 期：格式非法或 `i >= n` 直接 `FATAL_ERROR`；片内选中 0 个 TU 由 runner 以退出码 2 拒跑。只改排布不改覆盖面，也不改「任一片红即整门红」的判据；详见 §4.5「墙钟与分片」 |
-| `AURORA_ENABLE_CLANG_FORMAT` | `ON` | clang-format 门禁（`format` / `format-check` 聚合目标） | 需读得懂本仓 `.clang-format` 的 clang-format（≥ v20，由 `AURORA_CLANG_FORMAT_CANDIDATES` 试跑探测）与 python 在 PATH。经 `tools/check/run_clang_format.py` 并行处理 **非 third_party** 源文件（配置源为仓库根 `.clang-format`）；`--fix` 即 `format`，默认只读校验即 `format-check`；详见 §4.7 |
+| `AURORA_ENABLE_CLANG_FORMAT` | `ON` | clang-format 门禁（`format` / `format-check` 聚合目标） | 需读得懂本仓 `.clang-format` 的 clang-format（门槛是**较新 patch 构建**而非主版本 ≥ 20，见 §4.7；由 `AURORA_CLANG_FORMAT_CANDIDATES` 试跑探测）与 python 在 PATH。经 `tools/check/run_clang_format.py` 并行处理 **非 third_party** 源文件（配置源为仓库根 `.clang-format`）；`--fix` 即 `format`，默认只读校验即 `format-check`；详见 §4.7 |
 | `AURORA_ENABLE_IMAGE_JPEG` | `OFF` | JPEG 图像解码能力（libjpeg-turbo 源码构建） | 注入 `AURORA_ENABLE_IMAGE_JPEG`（仅库内部，不 PUBLIC 传播）；详见 §4.6 |
 | `AURORA_ENABLE_IMAGE_WEBP` | `OFF` | WebP 图像解码能力（libwebp 源码构建） | 注入 `AURORA_ENABLE_IMAGE_WEBP`（同上） |
 | `AURORA_ENABLE_IMAGE_PNG` | `OFF` | PNG/GIF 图像解码能力（wuffs 源码构建） | 注入 `AURORA_ENABLE_IMAGE_PNG`（同上） |
@@ -349,7 +353,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_PROFILING=OFF
 cmake -S . -B build-trace -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_TRACING=ON
 ```
 
-> **门槛配置约定**：**时间类**硬门槛（帧时间、P99、长任务）在 `Release + PROFILING=OFF` 下测量，避免插桩污染读数；**计数类**硬门槛（`RenderCounters` 各字段、脏区面积比、full-redraw 帧数）在 `Release + PROFILING=ON` 下测量——计数器在宏关闭时恒为 0，无法作为门槛。
+> **门槛配置约定**：**时间类**硬门槛（帧时间、P99、长任务）在 `Release + PROFILING=OFF` 下测量，避免插桩污染读数；**计数类**硬门槛（`RenderCounters` 各字段、脏区面积比、full-redraw 帧数）在 `Release + PROFILING=ON` 下测量——计数器在宏关闭时恒为 0，无法作为门槛。计数类门槛现由 `tests/unit/utest_scroll.cpp` 的用例 `scroll_regression_counter_gates` 实断言：阈值只登记在 `tools/check/perf_gates.json`（G-5 至 G-8），用例按 `id` 读取，`PROFILING=ON` 时逐项对照、否则注册 skip 桩。
 > 两者互不冲突：计数是确定性的（与机器无关），可作为 CI 回归锚点；时间是环境相关的，只做趋势对比。测量配方见 [`GUIDELINE.md`](GUIDELINE.md) §14。
 
 ### 4.2 `AURORA_ENABLE_SIMD`
@@ -479,7 +483,7 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 为何要有这道门禁：门禁的作用是让排版漂移在**引入的那一刻**暴露，而不是攒到需要一次性大改。
 
 **版本口径：调 clang-format 之前必须先证明它读得懂本仓配置。** `.clang-format` 里有新于发行版包的
-枚举取值——`BinPackParameters: BinPack`（v20+ 才认，旧版该字段是布尔）。旧版读到它即
+枚举取值——`BinPackParameters: BinPack`（把它当布尔的构建不认）。这些构建读到它即
 `.clang-format:46:20: error: invalid boolean` / `Error reading …: Invalid argument` 并以退出码 1 结束，
 **且这不是「排版判红」而是「命令失败」**：任何把 clang-format 排进构建链的地方都会因此炸掉。
 实测代价（2026-09-23 CI run `35839746160`）：`generate_error_codes` 的生成后折行一步用了
@@ -487,13 +491,27 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 （core linux / 各 toggles / install / coverage / asan / wasm）**全红**，Windows、macOS 与装了
 clang-format-22 的 `clang-format` 作业全绿——同一份配置、两种命运，差别只在 PATH 上那个二进制的版本。
 
+**门槛是 patch 构建，不是主版本号**（2026-09-28 对 run `36348853231` 逐作业取日志实测）：GitHub
+ubuntu-latest 镜像预装的 `clang-format`（发行版 18）与候选表里的 `clang-format-20 / -21 / -22`
+**四个全拒**，而同一条 run 里 apt.llvm.org 的 `1:22.1.8~++20260714` 快照接受；本机 git 构建 `22.1.2`
+与 WSL 的 Ubuntu `21.1.8` 也都接受。所以 `>= 20` 这类按 major 的劝告会把人直接引到坑里，两侧同一
+主版本都可能一侧能跑一侧不能——判据只能是**试跑**，这也正是探针存在的原因。另测得 `true` 与
+`BinPack` 在本机门禁**同判**（把 `.clang-format:46` 临时改成 `true` 复跑全仓：875/875 合规、差异 0 行），
+仓库保留枚举形态只为与该构建自身 `--dump-config` 的打印一致；`Break` 两侧都不是合法取值。
+
 处置是把「存在」与「可用」分开判：`aurora_find_clang_format` 以 `--dump-config --style=file` 真跑一遍
 （cwd 钉在仓库根，`--style=file` 才从那里上溯找配置），探针判别力本机实测（v22.1.2）——仓库根返回
 `0`，换一份含非法取值的配置（`IndentWidth: abc`）即返回 `1` 并打印 `error: invalid number`。
 生成链（`cmake/AuroraTools.cmake` 的 `generate_error_codes`）与排版门禁共用该函数，两处必然落在同一个
 二进制上；生成链在判不到可用版本时**告警跳过而不中断构建**（仓库内已提交的 `error_codes.gen.h` 本就是
 格式化后的形态，缺工具只意味着「本次生成未折行」，真漂移仍由 format 门禁判，不该由它决定编译成败）。
-CI 因此无需在每个作业里装 clang-format-22；只有 `clang-format` 作业需要（它跑的才是门禁本身）。
+「告警跳过」的代价在 2026-09-28 被证实是真的：tidy / toggles / wasm 等作业的 configure 日志里
+`no clang-format on PATH can parse the repo .clang-format` 一路静默通过，`format` / `format-check`
+聚合目标在这些作业里压根没生成。故 CI 改为**每个跑 configure 的 Linux 作业**都装一个读得懂配置的
+clang-format——命令收在 `.github/actions/setup-clang-format`（apt.llvm.org 的 llvm-22 快照 +
+`/usr/local/bin/clang-format` 软链 + 装完立刻用与探针同形态的 `--dump-config --style=file` 自证），
+`clang-format` 门禁作业与两道 `clang-tidy` 作业共用同一口径（后者在同一次 apt 里多带一个包，不重复
+`apt-get update`）。Windows / macOS 作业未纳入：那里没有 apt，且这两侧此前从未因该探测红过。
 
 为何要有独立 runner（而非直接 `clang-format --dry-run --Werror`）：
 
@@ -575,9 +593,12 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `AURORA_REPO_ROOT` | 目录路径 | 测试框架仓库根定位的显式锚点（`tests/framework/isolation.cpp`）。缺省先按可执行文件位置、再按 cwd 逐级上溯找 `codespec/`+`CMakeLists.txt`；runner 构建 / 安装于仓库外（如 WSL home 目录构建 `/mnt/c` 源码仓）时上溯必然落空，用本变量指向仓库根即可，值须形如仓库根，否则忽略回落自动查找 |
 | `AURORA_LIVE_X11` / `AURORA_LIVE_WAYLAND` | 非空（如 `1`） | 后端**真机**单测用例的显式选择加入开关（`utest_x11_surface` / `utest_wayland_surface`）：未置时该用例走 `AURORA_TEST_SKIP` 桩，置了才连接真实 X server / 合成器并创建真实窗口断言端到端接线。默认关闭的原因与探针同源——需要桌面会话、非确定且会动用户屏幕，不进无头 CTest |
 | `AURORA_LIVE_ATSPI` | 非空（如 `1`） | Linux AT-SPI2 桥**真机**单测用例（`utest_atspi_bridge.live_embed_handshake_and_teardown`）的选择加入开关：置了才连真实会话总线走完整 dlopen + `Socket.Embed` 握手；未置走 `AURORA_TEST_SKIP` 桩。外部客户端视角（libatspi 逐检查项比对）由探针 `aurora_verify_atspi` 把关，见 `specification/08-tooling.md` §7.5 |
+| `AURORA_E2E_EXPECT` | 逗号分隔的后端短名（如 `win32,glfw`） | E2E（`etest_`）用例的**期望后端集**：由编排方声明「在本运行环境里这些后端**必须**可用」。声明了却在建窗或读回时不可用 → 判**失败**（环境或构建配置漂移，必须修）；未声明而不可用 → 走 `AURORA_TEST_SKIP`。未设置即空集，本地开发一律跳过、行为与普通 skip 桩无异。短名取自 `e2e::backend_name()`（`auto` / `headless` / `win32` / `d3d11` / `glfw` / `x11` / `wayland` / `wgpu`），大小写与首尾空白不敏感。注意期望集的语义是「期望**可读回**」而非「期望能建窗」：建窗成功但 `Surface::data()` 为 `nullptr`（如该后端的读回受 `AURORA_ENABLE_DEBUG` 门控而本构建未生效）同样计入不可用。CI 各作业按**实际编译的后端面**逐作业声明（工作流矩阵字段注入本变量），纯 Headless 编译面的作业刻意留空——零覆盖是声明的事实而非疏漏，逐作业口径见 `specification/08-tooling.md` §8.2「CI 作业口径」 |
+| `AURORA_E2E_METRICS_FILE` | 文件路径 | E2E golden 容差层的度量 artifact 通道：置定时逐用例追加一行 JSONL（差异像素数 / 最大单通道差 / 帧与基线尺寸 / 容差与预算及判定 / 失败帧 PNG 路径），供 CI 上传与容差预算校准；未置不写，写失败不影响用例结果。见 `specification/08-tooling.md` §8.2 |
+| `AURORA_E2E_OS_INPUT` | `1`/`on`/`yes`/`true`（大小写不敏感） | OS 级输入注入通道（真机增强层 `tests/e2e/etest_os_input.cpp`）的选择加入开关：未置时该用例组为 skip 桩；置了才执行真实注入（Windows SendInput / PostMessage、Linux XTest）。SendInput 是全局注入无法定向，置位后须以**独立 ctest 调用**独占执行（`ctest -L e2e -R etest_os_input`），不与默认并行混跑；锁定 / 非交互桌面下以 `no_interactive_desktop` 明确原因 skip。见 `specification/08-tooling.md` §8.2 |
 | `NO_AT_BRIDGE` | 非 `0` 即生效 | GNOME 惯例的显式免提开关：置位后 Linux AT-SPI2 桥 `create()` 恒返回 `nullptr`，不碰 libdbus / 总线，无障碍路径整体退出 |
 | `AT_SPI_BUS_ADDRESS` | D-Bus 地址串 | 无障碍总线地址显式直给（跳过 `org.a11y.Bus.GetAddress` 查询），用于非常规桌面 / 测试注入；置了但地址无效仍按降级处理 |
-| `AURORA_INSPECTOR_PORT` | 1–65535 | `aurora_mcp` 的 `live_*` 工具连接运行中应用的默认端口；缺省 `6280`（与 `InspectorServer::start()` 默认值一致）。单个工具调用可用 `session` 入参（`"6280"` 或 `"127.0.0.1:6280"`）覆盖。主机恒为回环，见 `specification/08-tooling.md` §5.4 |
+| `AURORA_INSPECTOR_PORT` | 1–65535 | `aurora_mcp` 的 `live_*` 工具与 E2E 客户端 `aurora_e2e_client` 连接运行中应用的默认端口；缺省 `6280`（与 `InspectorServer::start()` 默认值一致）。`aurora_mcp` 单个工具调用可用 `session` 入参（`"6280"` 或 `"127.0.0.1:6280"`）覆盖；`aurora_e2e_client` 可用 `--port` 覆盖。**同为 demo 侧的启动开关**：`demo_common.h` 的 `run_demo` 检测到该变量（值非空）即随 demo 启动 `InspectorServer`，未设置不启动；值非法按未声明回落默认（脏值不截断）。两侧各自独立解析同一变量，天然对齐。主机恒为回环，见 `specification/08-tooling.md` §5.4–5.5 |
 
 > CTest 默认 CWD = `build/`，故依赖相对路径的 golden / fixture 测试以仓库根为基准：测试框架启动时统一把 cwd 切换到仓库根（`tests/framework/test_main.cpp` 的 `isolation::setup()`），故 `ctest` 下直接可跑，无需为各用例单独设置 `WORKING_DIRECTORY`（原 14 条 `WORKING_DIRECTORY` 白名单已移除）。
 
@@ -597,7 +618,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `--report=<path>` | 结果报告落盘：扩展名 `.xml` → JUnit XML，其余 → JSON；超时同样写入（已完成的部分结果） |
 | `--shuffle[=<seed>]` | 打乱用例顺序（暴露顺序依赖）；带种子可复现 |
 | `--repeat=<n>` | 把选中集合跑 n 轮（暴露状态泄漏；报告里用例名带 `#轮次`） |
-| `--timeout=<ms>` | 本轮总时限。看门狗到点先写报告、再以退出码 `3` 结束（协作式：进程内无法强杀死循环线程，进程级强杀由 CTest 的 `TIMEOUT` 属性承担） |
+| `--timeout=<ms>` | 本轮总时限。看门狗到点先写报告、再以退出码 `3` 结束（协作式：进程内无法强杀死循环线程）；CTest 侧不设 `TIMEOUT` 属性，etest_ 用例的进程级兜底即由 `AURORA_E2E_TIMEOUT_MS` 注入的本参数承担 |
 | `--selftest` | 执行框架内建自检（synthetic 用例，不消费注册表） |
 | `-h` / `--help` | 显示帮助 |
 
@@ -632,7 +653,6 @@ Aurora 以静态库交付，并提供 `find_package(Aurora)` 消费端集成。�
 
 ```text
 <PREFIX>/include/aurora/...        # 公共 API 头（aurora.h 入口）
-<PREFIX>/include/nlohmann/...      # 随附的 nlohmann/json 头（aurora.h 传递包含）
 <PREFIX>/include/freetype2/...     # FreeType 头
 <PREFIX>/include/harfbuzz/...      # HarfBuzz 头
 <PREFIX>/lib/libaurora.a           # 主静态库
@@ -703,8 +723,12 @@ cmake --build build
 -D AURORA_BUILD_DEMOS=ON|OFF                  # demos（默认 ON）
 -D AURORA_BUILD_TESTS=ON|OFF                  # CTest（默认 ON）
 -D AURORA_TEST_SHARDS=<N>                     # 测试 runner 分片数（默认 1 = 单 runner）
+-D AURORA_BUILD_E2E=ON|OFF                    # 真实后端 E2E 用例 tests/e2e/（默认 ON；Emscripten 强制排除）
+-D AURORA_E2E_TIMEOUT_MS=<ms>                 # etest_ 用例看门狗超时（默认 60000）
 -D AURORA_BUILD_INSPECTOR_SERVER=ON|OFF       # Inspector HTTP 服务器（默认 OFF）
 -D AURORA_BUILD_VERIFY_TOOLS=ON|OFF           # 真机验收探针 tools/verify/（默认 OFF，EXCLUDE_FROM_ALL）
+-D AURORA_BUILD_DOCS=ON|OFF                   # Doxygen docs 目标（默认 ON 提供，EXCLUDE_FROM_ALL；缺 doxygen 自动跳过）
+-D AURORA_DOXYGEN_EXECUTABLE=<路径>           # PATH 上没有 doxygen 时显式指定
 
 # 后端开关（= feature 宏，PUBLIC 传播）
 -D AURORA_BACKEND_HEADLESS=ON|OFF   # 无头 PNG（默认 ON）
@@ -752,4 +776,5 @@ cmake -S app -B app/build -DAurora_DIR="<PREFIX>/lib/cmake/Aurora"
 
 # 运行时（测试）
 AURORA_GOLDEN_DIR=<dir> AURORA_UPDATE_GOLDEN=1 ./build/aurora_test_runner --run=utest_offscreen
+AURORA_E2E_EXPECT=win32,glfw ./build/aurora_test_runner --run=etest_smoke_render   # 声明本环境期望可用的后端
 ```

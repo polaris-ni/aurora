@@ -21,22 +21,22 @@
 
 namespace aurora {
 
-/**
- * @brief 导航宿主（specification/05-event-navigation.md §7.4）：包裹 `Navigator` 并在切换路由时驱动 `TransitionLayer`
- * 做淡入淡出/滑动转场。自身不拥有动画驱动，复用 `Application::animator()` 的帧循环。
- *
- * 用法：把 `NavigatorHost` 作为渲染根（present_root 的目标），调用 `push/pop` 切换页面。
- * `push` 带 `RouteTransition{ .animated = true }` 时自动合成转场；`progress` 由绑定的
- * `AnimationController` 经 `Animator` 每帧推进，到 1 后丢弃旧页。
- *
- * deep linking：通过 `Navigator::path()` / `restore()` 导出与恢复栈名序列。
- */
+/// @brief 导航宿主（specification/05-event-navigation.md §7.4）：包裹 `Navigator` 并在切换路由时驱动 `TransitionLayer`
+/// 做淡入淡出/滑动转场。自身不拥有动画驱动，复用 `Application::animator()` 的帧循环。
+///
+/// 用法：把 `NavigatorHost` 作为渲染根（present_root 的目标），调用 `push/pop` 切换页面。
+/// `push` 带 `RouteTransition{ .animated = true }` 时自动合成转场；`progress` 由绑定的
+/// `AnimationController` 经 `Animator` 每帧推进，到 1 后丢弃旧页。
+///
+/// deep linking：通过 `Navigator::path()` / `restore()` 导出与恢复栈名序列。
 class NavigatorHost : public Widget {
   public:
+    /// @brief 以外部动画驱动构造宿主（仅借引用，不拥有 `Animator`）。
+    /// @param anim 帧循环来源：`begin_transition` 把控制器与进度信号绑定到它上（通常传 `Application::animator()`，
+    ///             其寿命须覆盖本 host，否则析构时的摘除会悬空）。
     explicit NavigatorHost(Animator &anim) : anim_(anim) {}
 
     /// @brief 从 `Animator` 摘除本host注册的控制器与绑定。
-    ///
     /// `begin_transition` 会把成员 `ctrl_` / `progress_` 注册进 `anim_`（通常是
     /// `Application` 的长生命周期 Animator）。本 host 是 shared_ptr 持有的 widget，
     /// 可能因 `present_root` 换根或父子树重建而先于 Animator 销毁；若不摘除，
@@ -53,6 +53,7 @@ class NavigatorHost : public Widget {
     auto operator=(NavigatorHost &&) -> NavigatorHost & = delete;
 
     /// @brief 压入新页面（成为当前页）。animated 时启动转场。
+    /// @param route 待压入的路由（转场形态与时长取自其 `transition()`）；栈空时同样入栈但无转场。
     auto push(Route route) -> void {
         const RouteTransition &tr = route.transition();
         if (tr.animated && nav_.current_root()) {
@@ -68,6 +69,7 @@ class NavigatorHost : public Widget {
     }
 
     /// @brief 替换栈顶（原地换页）。animated 时启动转场。
+    /// @param route 替换后的路由（转场配置同 `push`）；栈空时等价于压入且不起转场。
     auto push_replacement(Route route) -> void {
         const RouteTransition &tr = route.transition();
         if (tr.animated && nav_.current_root()) {
@@ -83,6 +85,7 @@ class NavigatorHost : public Widget {
     }
 
     /// @brief 弹栈；仅剩根路由时拒绝（返回 false）。转场默认淡出。
+    /// @return 弹出成功返回 true（此时以 0.3 秒淡出转场切到上一层）；栈深 ≤1 返回 false 且不改栈、不起转场。
     [[nodiscard]] auto pop() -> bool {
         if (!nav_.can_pop()) {
             return false;
@@ -109,6 +112,8 @@ class NavigatorHost : public Widget {
     }
 
     /// @brief 按 URI 字符串重建路由栈（deep linking）：直接替换整栈，无转场动画。
+    /// @param uri 以 '/' 分隔的路由名序列（空段丢弃），委托 `Navigator::open_uri` 解析。
+    /// @param build 名称到 `Route` 的构造回调。
     auto open_uri(const std::string &uri, const std::function<Route(const std::string &)> &build) -> void {
         nav_.open_uri(uri, build);
         transitioning_ = false;
@@ -118,6 +123,8 @@ class NavigatorHost : public Widget {
     }
 
     /// @brief 按 URI 字符串 + 路由表重建路由栈；表中缺失的名称段被跳过。
+    /// @param uri 以 '/' 分隔的路由名序列（空段丢弃）。
+    /// @param registry 名称 → 路由构造器的查表（`RouteRegistry`），委托给 `Navigator::open_uri`。
     auto open_uri(const std::string &uri, const RouteRegistry &registry) -> void {
         nav_.open_uri(uri, registry);
         transitioning_ = false;
@@ -126,27 +133,44 @@ class NavigatorHost : public Widget {
         rebuild_display();
     }
 
+    /// @brief 取出内部导航器（调用方可直接读栈快照或调栈深上限）。
+    /// @return 内部 `Navigator` 的可写引用（生命周期随本 host）。
     [[nodiscard]] auto navigator() -> Navigator & { return nav_; }
+
+    /// @brief 取出内部导航器（只读重载，语义同可写版）。
+    /// @return 内部 `Navigator` 的常量引用。
     [[nodiscard]] auto navigator() const -> const Navigator & { return nav_; }
 
     /// @brief 读取 Hero 注册表（测试 / 调试用；常态由内部持有）。
+    /// @return 注入到页面环境的那份注册表 shared_ptr 的常量引用（恒非空）。
     [[nodiscard]] auto hero_registry() const -> const std::shared_ptr<HeroRegistry> & { return hero_reg_; }
 
     /// @brief 栈变化回调（请求下一帧重绘，ARCHITECTURE.md §5.2）。
+    /// @param cb 每次栈内容变化后由 `Navigator` 同步调用的闭包；传空即解除挂接。
     auto set_on_route_changed(std::function<void()> cb) -> void { nav_.set_on_route_changed(std::move(cb)); }
 
+    /// @brief 控件类型名（结构快照 JSON 用）。
+    /// @return 字面量 `"NavigatorHost"`。
     [[nodiscard]] auto type_name() const -> const char * override { return "NavigatorHost"; }
 
-    // 转场宿主：每帧写入 morphing 标记并驱动 TransitionLayer 按 progress 合成，绘制含副作用且
-    // 内容每帧变化；嵌套时亦须阻止祖先缓存其易变输出，故整体不可缓存 Display List。
+    /// @brief 转场宿主整体不可缓存 Display List。
+    /// 每帧写入 morphing 标记并驱动 `TransitionLayer` 按 `progress` 合成，绘制含副作用且内容每帧
+    /// 变化；嵌套时亦须阻止祖先缓存其易变输出。
+    /// @return 恒为 false。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return false; }
 
+    /// @brief 运行时自描述（规格附录 B）。
+    /// @return 名为 "NavigatorHost"、子节点策略 "single" 的描述表（无自有属性）。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
         return WidgetDescriptor{.name = "NavigatorHost", .children_policy = "single"};
     }
 
+    /// @brief 登记需订阅的信号视图：转场进度 `progress_`。
+    /// @param out 输出向量：追加 `&progress_`（裸指针，非拥有），基类据此订阅转场进度变化并重绘。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&progress_); }
 
+    /// @brief 遍历展示子树（换页/转场期间为 `TransitionLayer`，否则为当前页的 Provider 包装）。
+    /// @param fn 对每个可见子控件调用一次；展示节点为空（未挂载或空栈）时不调用。
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
         if (display_) {
             fn(display_.widget());
@@ -186,6 +210,20 @@ class NavigatorHost : public Widget {
             return display_.widget().hit_test(local, bounds, ctx);
         }
         return nullptr;
+    }
+
+    /// @brief 命中链同样委派给展示子树（同 `SingleChild` 的写法）。
+    /// 事件派发走的是**命中链**而非 `on_hit_test`：`EventDispatcher::dispatch_mouse`
+    /// 取 `Widget::hit_test_chain`，而链的后代部分只经 `on_hit_test_chain` 收集，基类默认
+    /// 返回空。若只覆写 `on_hit_test`（那不是这条路径的入口），链恒为空 ⇒ 每次按下都被判为
+    /// 「点击空白」（清焦点并 return false），页面内的点击/悬停/拖拽/滚轮全部到不了，导航点击失效。
+    /// @param local 命中点（宿主局部坐标）。
+    /// @param bounds 本控件绘制区域。
+    /// @param ctx 构建上下文。
+    /// @return 展示子树的命中链；无展示节点时为空向量。
+    auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
+        -> std::vector<HitNode> override {
+        return display_ ? display_.widget().hit_test_chain(local, bounds, ctx) : std::vector<HitNode>{};
     }
 
     auto on_mount(const BuildContext &ctx) -> void override {
@@ -237,6 +275,9 @@ class NavigatorHost : public Widget {
         if (host_mounted_ && display_) {
             display_.widget().mount(host_ctx_);  // 幂等：已挂载的页不会重复订阅信号
         }
+        // 换页自带布局级失效：动画路径由 begin_transition 标脏，而 open_uri 与未开转场的 push 只走到
+        // 这里——不标脏则新页要等下一次无关失效（窗口 resize、别的控件标脏）才上屏，表现为「点了没反应」。
+        mark_needs_layout();
     }
 
     Animator &anim_;
@@ -250,7 +291,8 @@ class NavigatorHost : public Widget {
     bool bound_ = false;
     bool host_mounted_ = false;
     BuildContext host_ctx_;
-    std::shared_ptr<HeroRegistry> hero_reg_ = std::make_shared<HeroRegistry>();  ///< Hero 注册表（注入子树环境）。
+    // Hero 注册表（注入子树环境）。
+    std::shared_ptr<HeroRegistry> hero_reg_ = std::make_shared<HeroRegistry>();
     std::unordered_set<std::string> morphing_tags_;  ///< 上一帧计算出的 morphing tag 集合（覆盖层填充）。
 };
 

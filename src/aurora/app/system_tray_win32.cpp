@@ -25,13 +25,26 @@
 #include <shellapi.h>
 // clang-format on
 #endif
+#include <cstdint>
 #include <string>
 
+#include "aurora/app/detail/tray_events.h"
 #include "aurora/app/system_tray.h"
 #include "aurora/core/log.h"
 #include "aurora/core/utf8.h"
 
 namespace aurora {
+
+#ifdef AURORA_PLATFORM_WINDOWS
+// 内部头里的常量副本必须与 SDK 取值一致，漂移即编译失败（`tray_events.h` 不引 windows.h，无法自证）。
+static_assert(internal::AURORA_TRAY_WM_CONTEXTMENU == static_cast<std::uint32_t>(WM_CONTEXTMENU));
+static_assert(internal::AURORA_TRAY_WM_LBUTTONUP == static_cast<std::uint32_t>(WM_LBUTTONUP));
+static_assert(internal::AURORA_TRAY_WM_LBUTTONDBLCLK == static_cast<std::uint32_t>(WM_LBUTTONDBLCLK));
+static_assert(internal::AURORA_TRAY_WM_RBUTTONUP == static_cast<std::uint32_t>(WM_RBUTTONUP));
+static_assert(internal::AURORA_TRAY_NIN_SELECT == static_cast<std::uint32_t>(NIN_SELECT));
+static_assert(internal::AURORA_TRAY_NIN_KEYSELECT == static_cast<std::uint32_t>(NIN_KEYSELECT));
+static_assert(internal::AURORA_TRAY_NIN_BALLOONUSERCLICK == static_cast<std::uint32_t>(NIN_BALLOONUSERCLICK));
+#endif
 
 struct SystemTray::Impl {
     SystemTray *owner = nullptr;
@@ -40,6 +53,7 @@ struct SystemTray::Impl {
     NOTIFYICONDATAW nid{};
     HICON hicon = nullptr;
     bool visible = false;
+    bool version4 = false;  ///< NIM_SETVERSION 是否生效：决定回调 lParam 按版本 4 打包值还是旧版整值解读
     UINT taskbar_created = 0;
 
     static constexpr UINT AURORA_CALLBACK_MAG = WM_APP + 1;
@@ -209,7 +223,7 @@ auto SystemTray::Impl::add_icon() -> bool {
     }
     nid.cbSize = sizeof(NOTIFYICONDATAW);
     nid.hWnd = hwnd;
-    nid.uID = 1;
+    nid.uID = internal::AURORA_TRAY_ICON_ID;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = AURORA_CALLBACK_MAG;
     nid.hIcon = (hicon != nullptr) ? hicon : LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
@@ -217,7 +231,7 @@ auto SystemTray::Impl::add_icon() -> bool {
     update_tip();
     const BOOL ok = Shell_NotifyIconW(NIM_ADD, &nid);
     if (ok != 0) {
-        Shell_NotifyIconW(NIM_SETVERSION, &nid);
+        version4 = Shell_NotifyIconW(NIM_SETVERSION, &nid) != FALSE;
         visible = true;
     } else {
         AURORA_LOG_WARN("system_tray", "Shell_NotifyIconW(NIM_ADD) failed (possibly no shell session)");
@@ -303,19 +317,13 @@ LRESULT CALLBACK SystemTray::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPAR
     auto *impl = reinterpret_cast<SystemTray::Impl *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (msg == SystemTray::Impl::AURORA_CALLBACK_MAG) {
         if (impl != nullptr) {
-            switch (lp) {
-                case WM_LBUTTONUP:
-                case NIN_SELECT:
-                case NIN_BALLOONUSERCLICK:
-                case NIN_KEYSELECT:
-                    impl->owner->fire_activate();
-                    break;
-                case WM_RBUTTONUP:
-                case WM_CONTEXTMENU:
-                    impl->show_context_menu();
-                    break;
-                default:
-                    break;
+            // lParam 有两种编码（版本 4 打包 / 旧版整值），见 `detail/tray_events.h`。
+            const auto ev = internal::classify_tray_callback(static_cast<std::uint32_t>(LOWORD(lp)),
+                                                             static_cast<std::uint32_t>(HIWORD(lp)), impl->version4);
+            if (ev.context_menu) {
+                impl->show_context_menu();
+            } else if (ev.activate) {
+                impl->owner->fire_activate();
             }
         }
         return 0;

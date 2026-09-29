@@ -13,32 +13,40 @@
 
 namespace aurora {
 
-/**
- * @brief Inspector 面板（树形浏览器 + 属性编辑器）。
- *
- * 左右分栏布局：左侧 TreeView 展示 Widget 层级树，右侧属性面板展示选中 Widget
- * 的类型名、属性描述与当前值。支持运行时属性回写（经 set_widget_prop）。
- *
- * 构造时接受 `std::function<Node()>` 以获取目标 Widget 树根节点（支持动态树）。
- * 调用 `refresh()` 重建树映射；选中 TreeView 行时自动更新右侧属性面板。
- *
- * 对标 Flutter Inspector / Chrome DevTools Elements 面板。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief Inspector 面板（树形浏览器 + 属性编辑器）。
+///
+/// 左右分栏布局：左侧 TreeView 展示 Widget 层级树，右侧属性面板展示选中 Widget
+/// 的类型名、属性描述与当前值。支持运行时属性回写（经 set_widget_prop）。
+///
+/// 构造时接受 `std::function<Node()>` 以获取目标 Widget 树根节点（支持动态树）。
+/// 调用 `refresh()` 重建树映射；选中 TreeView 行时自动更新右侧属性面板。
+///
+/// 对标 Flutter Inspector / Chrome DevTools Elements 面板。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+///
 class InspectorPanel : public Container {
   public:
     InspectorPanel() = default;
 
     /// @brief 构造：接受目标树获取函数 + 可选初始比例。
+    /// @param root_getter 目标 Widget 树根节点的获取函数（可为空；每次刷新时调用以支持动态树）。
+    /// @param tree_ratio 初始左侧树宽度占比，构造时夹入 [0.1, 0.9]。
     explicit InspectorPanel(std::function<Node()> root_getter, float tree_ratio = 0.35F);
 
+    /// @brief 返回控件类型名。
+    /// @return 静态字符串 "InspectorPanel"。
     [[nodiscard]] auto type_name() const -> const char * override { return "InspectorPanel"; }
 
+    /// @brief 自描述：类型名、ratio 属性（含默认值与合法域）、选中事件与不变量。
+    /// @return 本控件的静态描述符（不依赖实例状态）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
+    /// @brief 实例自描述：内容等价 describe_static()。
+    /// @return 本控件的 descriptor。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 设置/更新目标树获取函数并刷新。
+    /// @param getter 新的根节点获取函数（立即调用一次以缓存目标树，并标记重建）。
     auto set_root(std::function<Node()> getter) -> void;
 
     /// @brief 刷新树映射与属性面板。
@@ -48,21 +56,28 @@ class InspectorPanel : public Container {
     std::function<void(Widget *)> on_select_widget;  // NOLINT(*-non-private-member-variables-in-classes)
 
     /// @brief 当前选中的 Widget 指针（nullptr 表示未选中）。
+    /// @return 最近一次在树区选中的控件（非拥有）；未选中或从未点击时为 nullptr。
     [[nodiscard]] auto selected_widget() const -> Widget * { return selected_widget_; }
 
-    /// @brief Export the current widget tree as C++ source code.
+    /// @brief 把当前目标 Widget 树导出为 C++ 源码文本。
+    /// @return 由整棵目标树的树 JSON 生成的 C++ 源码；目标树为空时返回空串。
     auto export_code() const -> std::string;
 
     /// @brief Callback invoked when the "Export Code" button is clicked.
     std::function<void(const std::string &code)> on_export_code;  // NOLINT(*-non-private-member-variables-in-classes)
 
     /// @brief 当前属性面板内容（属性名值对列表，供自定义渲染/测试读取）。
+    /// @return 面板内部的属性行列表（本控件持有；随选中行变化于重绘前更新）。
     [[nodiscard]] auto current_props() const -> const std::vector<std::pair<std::string, std::string>> & {
         return prop_rows_;
     }
 
+    /// @brief 序列化本控件属性：基类属性之外追加 ratio。
+    /// @param props 输出目标 JSON 对象（就地写入 ratio 键，值为当前左侧树占比）。
     auto serialize_props(Json &props) const -> void override;
 
+    /// @brief 处理指针事件：分隔条拖拽调比例、树区点击选中行、属性区点击（导出按钮/属性编辑）。
+    /// @param e 鼠标事件（Press/Move/Release；命中的分支会置 e.is_handled 并更新布局）。
     auto on_pointer_event(MouseEvent &e) -> void override;
 
   protected:

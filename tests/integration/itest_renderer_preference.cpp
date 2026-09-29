@@ -86,7 +86,7 @@ AURORA_TEST_CASE(renderer_preference_selects_backend) {
 #else  // !AURORA_BACKEND_WIN32
 
 AURORA_TEST_CASE(renderer_preference_selects_backend) {
-    AURORA_TEST_SKIP("无 Win32 后端（非 Windows 构建）：renderer preference 不适用");
+    AURORA_TEST_SKIP("no Win32 backend (non-Windows build): renderer preference does not apply");
 }
 
 #endif  // AURORA_BACKEND_WIN32

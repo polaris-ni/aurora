@@ -255,7 +255,10 @@ auto FocusManager::collect_focusable_impl(const Widget &w, std::vector<Widget *>
     if (!w.show.get()) {
         return;  // 不可见控件不参与焦点序
     }
-    if (w.focusable()) {
+    if (w.focusable() && w.wants_focus()) {
+        // 停点谓词 = 宿主未否决（`focusable()`）且控件自身愿意入序（`wants_focus()`，基类默认
+        // true，仅纯布局容器与纯展示件覆写为「有输入语义才入序」）：宿主因此无需逐个关闭
+        // （见 §4.2）。
         // 子控件遍历（`for_each_child` / `child_nodes`）只暴露 const 视图，但焦点候选必须存为
         // 可写 `Widget*`（`move_focus` 后续的 `set_focus` 要调用 `on_focus_change` 改控件焦点态）。
         // 控件本身并非 const 对象（根来自 `FocusManager::set_root(Widget*)`），此处去 const 不改变

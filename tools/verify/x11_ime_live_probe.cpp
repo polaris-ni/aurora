@@ -61,9 +61,10 @@
 #error "AURORA_BACKEND_X11 must be enabled"
 #endif
 
-#include <X11/Xlib.h>
+// 本块包含顺序不可交给 clang-format 排序：默认 IncludeBlocks: Merge 会把 <X11/…>（C 系统头类别）
+// 提到 aurora 头之前，而 Xlib 的 `#define None 0L` 会污染 aurora 侧以 None 为枚举成员的声明。
+// clang-format off
 #include <dlfcn.h>
-
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -72,11 +73,15 @@
 
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
-#include "aurora/window/x11_surface.h"  // aurora 澶村繀椤诲厛浜?Xlib锛圢one/Bool/Status 瀹忔薄鏌擄級
+#include "aurora/window/x11_surface.h"  // aurora 头必须先于 Xlib（None/Bool/Status 宏污染）：Xlib 的 `#define None 0L` 会炸掉 aurora 侧以 None 为枚举成员的声明。
+#include "verify_args.h"
 #include "verify_print.h"
+
+#include <X11/Xlib.h>
 
 // <X11/X.h>（经 Xlib.h 引入）无条件 `#define CursorShape 0`，与 aurora::CursorShape 硬碰撞。
 #undef CursorShape
+// clang-format on
 
 namespace {
 
@@ -116,22 +121,21 @@ void pump(aurora::X11Surface &surface, int iterations) {
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    bool interactive = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--interactive") {
-            interactive = true;
-        }
+    const auto cli = aurora_verify::parse_interactive("X11 XIM/IC input method bridge live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
     }
-    emit("==== X11 XIM（PreeditCallbacks）输入法桥 真机验收 ====");
+    const bool interactive = cli.arguments->flag("interactive");
+    emit("==== X11 XIM (PreeditCallbacks) IME bridge live acceptance ====");
     emit(std::string("XMODIFIERS=") + (std::getenv("XMODIFIERS") != nullptr ? std::getenv("XMODIFIERS") : "(unset)"));
     if (const char *d = std::getenv("DISPLAY"); d == nullptr || *d == '\0') {
-        emit("[ENV] 无 DISPLAY 环境变量（无 X 会话），探针无从运行");
+        emit("[ENV] DISPLAY is not set (no X session), the probe cannot run");
         return 2;
     }
 
     aurora::X11Surface surface(520, 360, "aurora-verify-x11-ime");
     if (!surface.is_available()) {
-        AURORA_LOG_ERROR("verify", "X11Surface unavailable（X 连接失败或无可用 X server）");
+        AURORA_LOG_ERROR("verify", "X11Surface unavailable (X connect failed or no usable X server)");
         return 2;
     }
     (void)surface.begin_frame(520, 360);
@@ -164,19 +168,20 @@ auto main(int argc, char **argv) -> int {
     if (!st.im_open) {
         // ① 降级路径（无 XIM 服务器）：本机合法结局，深水区交人工段。
         skip(
-            "XOpenIM 失败 ⇒ 本机无 XIM 服务器（XMODIFIERS 未指向在跑的 IM）：整桥缺席、纯 keysym 输入，"
-            "属合法降级（与 Win32 无 IME 环境同口径）");
+            "XOpenIM failed -> this machine has no XIM server (XMODIFIERS does not point at a running IM): the whole "
+            "bridge is absent and input falls back to plain keysym, a legal degradation (same terms as Win32 without "
+            "an IME)");
         check(st.ic_created == false && st.draw_callbacks == 0 && st.spot_updates == 0,
-              "无 XIM 时桥完全静默（无 IC、无回调、无锚点请求）");
+              "with no XIM the bridge stays completely silent (no IC, no callbacks, no anchor requests)");
     } else {
-        check(true, "XOpenIM 成功（im_open）：本机有可达 XIM 服务器");
+        check(true, "XOpenIM succeeded (im_open): a reachable XIM server exists on this machine");
         if (!st.ic_created) {
-            check(false, "im_open 却未建 IC（XCreateIC 失败）—— 异常，请核对 IM 服务器状态");
+            check(false, "im_open but no IC created (XCreateIC failed) - abnormal, check the IM server status");
         } else {
-            check(true, "XCreateIC 成功（ic_created）");
-            emit(std::string("       协商风格：") + (st.preedit_callbacks
-                                                         ? "XIMPreeditCallbacks（组合事件回推全接线）"
-                                                         : "XIMPreeditNothing（回退：仅 commit 通道）"));
+            check(true, "XCreateIC succeeded (ic_created)");
+            emit(std::string("       negotiated style: ") +
+                 (st.preedit_callbacks ? "XIMPreeditCallbacks (composition pushback fully wired)"
+                                       : "XIMPreeditNothing (fallback: commit channel only)"));
 
             // ---- ② 焦点宣告接线（不依赖输入法配合） ----
             // 用独立观测连接对被测窗口 XSetInputFocus 拉起/切走焦点，驱动被测 surface 自身事件
@@ -195,13 +200,15 @@ auto main(int argc, char **argv) -> int {
                 XSync(obs, False);
                 pump(surface, 12);
                 check(surface.ime_state().focused,
-                      "XSetInputFocus(win) → FocusIn → XSetICFocus（focused 翻 y：补齐的焦点宣告真接进派发栈）");
+                      "XSetInputFocus(win) -> FocusIn -> XSetICFocus (focused flips y: the added focus announcement "
+                      "really reaches the dispatch stack)");
 
                 // 切走焦点（此刻 X 焦点确在被测窗 ⇒ 必产 FocusOut）。
                 XSetInputFocus(obs, DefaultRootWindow(obs), RevertToParent, CurrentTime);
                 XSync(obs, False);
                 pump(surface, 12);
-                check(!surface.ime_state().focused, "焦点切走 → FocusOut → XUnsetICFocus（focused 归 n）");
+                check(!surface.ime_state().focused,
+                      "focus moved away -> FocusOut -> XUnsetICFocus (focused back to n)");
 
                 // 恢复焦点给 XTEST 段（假键须落入被测窗）。
                 XSetInputFocus(obs, win, RevertToParent, CurrentTime);
@@ -220,7 +227,9 @@ auto main(int argc, char **argv) -> int {
                                     : nullptr;
                 const int keycode_a = XKeysymToKeycode(obs, 0x61 /*XK_a*/);
                 if (fake_key == nullptr || keycode_a == 0) {
-                    skip("libXtst/XTEST 不可用 ⇒ 假键合成无从执行，commit 通道交 --interactive");
+                    skip(
+                        "libXtst/XTEST unavailable -> fake key synthesis cannot run, the commit channel is left to "
+                        "--interactive");
                 } else {
                     const int before = text_inputs;
                     fake_key(obs, static_cast<unsigned>(keycode_a), 1 /*press*/, 0);
@@ -228,26 +237,34 @@ auto main(int argc, char **argv) -> int {
                     XFlush(obs);
                     pump(surface, 12);
                     if (text_inputs == before || last_text != "a") {
-                        emit("[INFO] 现场：TextInputEvent 计数 " + std::to_string(before) + " → " +
-                             std::to_string(text_inputs) + " 末条=\"" + last_text +
-                             "\" keycode=" + std::to_string(keycode_a) + "（供区分假键未达/被 IM 截走/取字为空）");
+                        emit("[INFO] scene: TextInputEvent count " + std::to_string(before) + " → " +
+                             std::to_string(text_inputs) + " last=\"" + last_text +
+                             "\" keycode=" + std::to_string(keycode_a) +
+                             " (tells apart fake key not delivered / taken by the IM / empty lookup)");
                     }
                     check(text_inputs > before && last_text == "a",
-                          "XTEST 假键 'a' ⇒ TextInputEvent(\"a\") 上屏（IC/XIM 接线不吞普通字符）");
+                          "XTEST fake key 'a' -> TextInputEvent(\"a\") committed (the IC/XIM wiring does not swallow "
+                          "plain characters)");
                 }
                 XCloseDisplay(obs);
             } else {
-                skip("观测连接打不开（无法 XSetInputFocus 驱动焦点）⇒ 焦点宣告接线交 --interactive 目视");
+                skip(
+                    "the observation connection will not open (cannot drive focus via XSetInputFocus) -> the focus "
+                    "announcement wiring is left to the --interactive visual check");
             }
 
             // ---- ③/④ 组合期内容：draw/caret/commit/preedit 需真实 IM 驱动组合 ----
-            skip("preedit/上屏/锚点跟随需真实 XIM 输入法进程组合驱动 ⇒ 自动段不判负，交 --interactive");
+            skip(
+                "preedit/commit/anchor following need a real XIM input method driving composition -> the automated "
+                "section does not fail on it, left to --interactive");
         }
     }
 
     if (interactive) {
         emit("");
-        emit("---- 人工段：用真实 XIM 输入法（配 XMODIFIERS）在窗口内输入拼音；状态逐行打印（关窗退出） ----");
+        emit(
+            "---- Manual: type pinyin in the window with a real XIM input method (XMODIFIERS configured); state "
+            "prints line by line (close the window to exit) ----");
         std::string last;
         while (!surface.should_close()) {
             surface.poll_platform_events();

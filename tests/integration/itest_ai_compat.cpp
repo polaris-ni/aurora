@@ -1,3 +1,4 @@
+/// @file itest_ai_compat.cpp
 /// 测试类型: integration
 /// 目标单元: include/aurora/app/validate_ui.h
 /// 测试说明: AI 兼容性管线——JSON fixture 目录遍历（valid_*.json 必须通过
@@ -23,9 +24,14 @@
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/serialization.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 #include "paths.h"
 
 namespace aurora::test_cases::itest_ai_compat {
+
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 namespace fs = std::filesystem;
 
@@ -63,11 +69,8 @@ auto load_fixture(const fs::path &path) -> au::Json {
     }
     std::ostringstream ss;
     ss << in.rdbuf();
-    try {
-        return au::Json::parse(ss.str());
-    } catch (...) {
-        return au::Json{};
-    }
+    const auto parsed = au::json::parse(ss.str());
+    return parsed.ok() ? parsed.value() : au::Json{};
 }
 
 }  // namespace
@@ -114,9 +117,9 @@ AURORA_TEST_CASE(error_fixtures_rejected_by_pipeline) {
 AURORA_TEST_CASE(from_json_unknown_type_fails_with_code) {
     register_core_widgets();
 
-    au::Json j;
-    j["type"] = "BogusWidget";
-    j["props"] = au::Json::object();
+    au::Json j = au::Json::object();
+    j.set("type", "BogusWidget");
+    j.set("props", au::Json::object());
 
     const auto result = from_json(j);
     AURORA_TEST_CHECK_MSG(!result.ok(), "from_json unknown type: fails");
@@ -127,33 +130,33 @@ AURORA_TEST_CASE(from_json_unknown_type_fails_with_code) {
 AURORA_TEST_CASE(validate_report_json_format) {
     register_core_widgets();
 
-    au::Json good;
-    good["type"] = "Text";
-    good["props"]["content"] = "Hello";
+    au::Json good = au::Json::object();
+    good.set("type", "Text");
+    good.set("props", testing::json_obj({{"content", "Hello"}}));
 
     const au::Json report = au::validate_ui_tree_json(good);
-    AURORA_TEST_CHECK(report["valid"].get<bool>());
-    AURORA_TEST_CHECK(report["errors"].is_array());
-    AURORA_TEST_CHECK(report["errors"].empty());
+    AURORA_TEST_CHECK(require_field<bool>(report, "valid"));
+    AURORA_TEST_CHECK(require_child(report, "errors")->is_array());
+    AURORA_TEST_CHECK(require_child(report, "errors")->empty());
 
-    au::Json bad;
-    bad["type"] = "NoSuchWidget";
+    au::Json bad = au::Json::object();
+    bad.set("type", "NoSuchWidget");
     const au::Json report2 = au::validate_ui_tree_json(bad);
-    AURORA_TEST_CHECK(!report2["valid"].get<bool>());
-    AURORA_TEST_CHECK(!report2["errors"].empty());
+    AURORA_TEST_CHECK(!require_field<bool>(report2, "valid"));
+    AURORA_TEST_CHECK(!require_child(report2, "errors")->empty());
 }
 
 AURORA_TEST_CASE(full_pipeline_roundtrip_to_code) {
     register_core_widgets();
 
     // 构造一棵简单树：Column > Text
-    au::Json j;
-    j["type"] = "Column";
-    j["props"] = au::Json::object();
-    au::Json child;
-    child["type"] = "Text";
-    child["props"]["content"] = "Pipeline Test";
-    j["children"] = au::Json::array({child});
+    au::Json j = au::Json::object();
+    j.set("type", "Column");
+    j.set("props", au::Json::object());
+    au::Json child = au::Json::object();
+    child.set("type", "Text");
+    child.set("props", testing::json_obj({{"content", "Pipeline Test"}}));
+    j.set("children", testing::json_arr({child}));
 
     // 1. validate
     const auto errors = au::validate_ui_tree(j);
@@ -165,7 +168,7 @@ AURORA_TEST_CASE(full_pipeline_roundtrip_to_code) {
 
     // 3. to_json（往返保持类型）
     const au::Json j2 = to_json(*w.value());
-    AURORA_TEST_CHECK(j2["type"] == "Column");
+    AURORA_TEST_CHECK(require_field<std::string>(j2, "type") == "Column");
 
     // 4. to_code（生成代码提及 Column 且非空）
     const std::string code = to_code(j2);
@@ -207,15 +210,20 @@ using ScriptError = std::string;
 /// @brief 目标定位：类型（+同类型序号）或文本命中。找不到返回空 Node。
 [[nodiscard]] auto script_target(const au::TestController &tc, const au::Json &sel) -> au::Node {
     std::vector<au::Node> hits;
-    if (sel.contains("type") && sel["type"].is_string()) {
-        hits = tc.find_by_type(sel["type"].get<std::string>());
-    } else if (sel.contains("text") && sel["text"].is_string()) {
-        hits = tc.find_by_text(sel["text"].get<std::string>());
+    if (sel.contains("type") && sel.at("type")->is_string()) {
+        hits = tc.find_by_type(sel.at("type")->as_or<std::string>(""));
+    } else if (sel.contains("text") && sel.at("text")->is_string()) {
+        hits = tc.find_by_text(sel.at("text")->as_or<std::string>(""));
     } else {
         return au::Node{};
     }
-    const std::size_t index =
-        sel.contains("index") && sel["index"].is_number_unsigned() ? sel["index"].get<std::size_t>() : 0U;
+    // 注：解析出的非负整数一律落 Type::Int（0 也如此），故这里以整数族判别取代原 is_number_unsigned。
+    std::size_t index = 0U;
+    if (const auto *idx = sel.find("index"); idx != nullptr) {
+        if (const auto v = idx->as_int(); v.has_value() && v.value() >= 0) {
+            index = static_cast<std::size_t>(v.value());
+        }
+    }
     return index < hits.size() ? hits[index] : au::Node{};
 }
 
@@ -223,33 +231,50 @@ using ScriptError = std::string;
 [[nodiscard]] auto script_prop(const au::Node &n, const std::string &key) -> au::Json {
     au::Json props = au::Json::object();
     n.widget().serialize_props(props);
-    return props.contains(key) ? props.at(key) : au::Json{};
+    const auto *v = props.find(key);
+    return v != nullptr ? *v : au::Json{};
 }
 
 /// @brief `changed` 断言的基线键（同一 props 组合唯一定位一条断言）。
 [[nodiscard]] auto baseline_key(const au::Json &expectation) -> std::string {
-    return expectation.value("target", au::Json::object()).dump() + "|" + expectation.value("prop", std::string{});
+    std::string key;
+    if (const auto *t = expectation.find("target"); t != nullptr) {
+        if (auto d = au::json::dump(*t); d.ok()) {
+            key += d.value();
+        }
+    }
+    key += '|';
+    if (const auto *p = expectation.find("prop"); p != nullptr) {
+        key += std::string{p->as_string().value_or(std::string_view{})};
+    }
+    return key;
+}
+
+/// @brief 取步骤/断言里的 target 选择器（缺失返回空对象）。
+[[nodiscard]] auto step_or_target(const au::Json &item) -> au::Json {
+    const auto *t = item.find("target");
+    return t != nullptr ? *t : au::Json::object();
 }
 
 /// @brief 执行单个步骤。
 [[nodiscard]] auto run_step(au::TestController &tc, const au::Json &step) -> ScriptError {
-    const au::Json action_json = step.value("action", au::Json{});
-    if (!action_json.is_string()) {
+    const auto *action_json = step.find("action");
+    if (action_json == nullptr || !action_json->is_string()) {
         return "step missing string 'action'";
     }
-    const std::string action = action_json.get<std::string>();
+    const std::string action{action_json->as_string().value_or(std::string_view{})};
 
     if (action == "settle") {
         // 脚本 settle 动作只要求驱动到稳定，返回帧数无消费方
-        static_cast<void>(tc.pump_and_settle(step.value("max_frames", 60)));
+        static_cast<void>(tc.pump_and_settle(step.as_or<int>("max_frames", 60)));
         return ScriptError{};
     }
     if (action == "pump") {
-        const au::Result<void> r = tc.pump(step.value("frames", 1));
+        const au::Result<void> r = tc.pump(step.as_or<int>("frames", 1));
         return r.ok() ? ScriptError{} : ScriptError{"pump: " + r.error().message};
     }
 
-    const au::Node target = script_target(tc, step.value("target", au::Json::object()));
+    const au::Node target = script_target(tc, step_or_target(step));
     if (!target) {
         return action + ": target not found";
     }
@@ -258,12 +283,12 @@ using ScriptError = std::string;
         return r.ok() ? ScriptError{} : ScriptError{"tap: " + r.error().message};
     }
     if (action == "drag") {
-        const au::Point delta{.x = step.value("dx", 0.0F), .y = step.value("dy", 0.0F)};
+        const au::Point delta{.x = step.as_or<float>("dx", 0.0F), .y = step.as_or<float>("dy", 0.0F)};
         const au::Result<void> r = tc.drag(target, delta);
         return r.ok() ? ScriptError{} : ScriptError{"drag: " + r.error().message};
     }
     if (action == "enter_text") {
-        const std::string text = step.value("text", std::string{});
+        const auto text = step.as_or<std::string>("text", std::string{});
         const au::Result<void> r = tc.enter_text(target, text);
         return r.ok() ? ScriptError{} : ScriptError{"enter_text: " + r.error().message};
     }
@@ -272,7 +297,8 @@ using ScriptError = std::string;
 
 /// @brief 建树 → 跑脚本 → 验断言；返回首个失败原因（空串表示全部通过）。
 [[nodiscard]] auto run_interact_fixture(const au::Json &fx) -> ScriptError {
-    const au::Json tree = fx.value("tree", au::Json{});
+    const auto *tree_p = fx.find("tree");
+    const au::Json tree = tree_p != nullptr ? *tree_p : au::Json{};
     if (!tree.is_object()) {
         return "fixture missing 'tree' object";
     }
@@ -282,9 +308,9 @@ using ScriptError = std::string;
     }
 
     au::TestControllerConfig cfg{};
-    if (fx.contains("viewport")) {
-        cfg.width = fx["viewport"].value("width", cfg.width);
-        cfg.height = fx["viewport"].value("height", cfg.height);
+    if (const auto *vp = fx.find("viewport"); vp != nullptr) {
+        cfg.width = vp->as_or<int>("width", cfg.width);
+        cfg.height = vp->as_or<int>("height", cfg.height);
     }
     au::TestController tc{au::Node{std::move(built.value())}, cfg};
 
@@ -293,26 +319,30 @@ using ScriptError = std::string;
         return "first frame: " + r.error().message;
     }
 
-    const au::Json expectations = fx.value("expect", au::Json::array());
+    const auto *expect_p = fx.find("expect");
+    const au::Json expectations = expect_p != nullptr ? *expect_p : au::Json::array();
     if (!expectations.is_array() || expectations.empty()) {
         return "fixture must declare a non-empty 'expect' array";
     }
 
     // `changed` 断言的基线：脚本起点（首帧之后、任何交互之前）的属性快照。
     std::map<std::string, au::Json> baseline;
-    for (const au::Json &e : expectations) {
-        if (!e.value("changed", false)) {
+    for (const auto &expectation : expectations) {
+        if (!expectation.as_or<bool>("changed", false)) {
             continue;
         }
-        const au::Node target = script_target(tc, e.value("target", au::Json::object()));
+        const au::Node target = script_target(tc, step_or_target(expectation));
         if (!target) {
             return "expect target not found";
         }
-        baseline[baseline_key(e)] = script_prop(target, e.value("prop", std::string{}));
+        baseline[baseline_key(expectation)] =
+            script_prop(target, expectation.as_or<std::string>("prop", std::string{}));
     }
 
     int step_index = 0;
-    for (const au::Json &step : fx.value("steps", au::Json::array())) {
+    const auto *steps_p = fx.find("steps");
+    const au::Json steps = steps_p != nullptr ? *steps_p : au::Json::array();
+    for (const auto &step : steps) {
         const ScriptError err = run_step(tc, step);
         if (!err.empty()) {
             return "step[" + std::to_string(step_index) + "]: " + err;
@@ -321,29 +351,30 @@ using ScriptError = std::string;
     }
 
     int expect_index = 0;
-    for (const au::Json &e : expectations) {
-        const au::Node target = script_target(tc, e.value("target", au::Json::object()));
+    for (const auto &expectation : expectations) {
+        const au::Node target = script_target(tc, step_or_target(expectation));
         if (!target) {
             return "expect[" + std::to_string(expect_index) + "]: target not found";
         }
-        if (e.contains("visible")) {
+        if (expectation.contains("visible")) {
             const au::Result<void> r = aurora::TestController::expect_visible(target);
             if (!r.ok()) {
                 return "expect[" + std::to_string(expect_index) + "]: " + r.error().message;
             }
-        } else if (e.contains("prop")) {
-            const std::string prop = e["prop"].get<std::string>();
-            if (e.contains("value")) {
-                const au::Result<void> r = aurora::TestController::expect_prop(target, prop, e["value"]);
+        } else if (expectation.contains("prop")) {
+            const auto prop = expectation.at("prop")->as_or<std::string>("");
+            if (expectation.contains("value")) {
+                const au::Result<void> r = aurora::TestController::expect_prop(target, prop, *expectation.at("value"));
                 if (!r.ok()) {
                     return "expect[" + std::to_string(expect_index) + "]: " + r.error().message;
                 }
-            } else if (e.value("changed", false)) {
-                const au::Json before = baseline.at(baseline_key(e));
+            } else if (expectation.as_or<bool>("changed", false)) {
+                const au::Json before = baseline.at(baseline_key(expectation));
                 const au::Json after = script_prop(target, prop);
                 if (before == after) {
+                    auto dumped = au::json::dump(after);
                     return "expect[" + std::to_string(expect_index) + "]: prop '" + prop + "' unchanged (both " +
-                           after.dump() + ")";
+                           (dumped.ok() ? dumped.value() : dumped.error().message) + ")";
                 }
             } else {
                 return "expect[" + std::to_string(expect_index) + "]: needs 'value' or 'changed'";
@@ -386,11 +417,13 @@ AURORA_TEST_CASE(interact_script_reports_missing_target) {
     register_core_widgets();
 
     // 反面用例：目标选不到时脚本必须报错，而不是「零断言通过」地静默变绿。
-    au::Json fx;
-    fx["tree"] = au::Json{{"type", "Column"}, {"props", au::Json::object()}};
-    fx["steps"] = au::Json::array({au::Json{{"action", "tap"}, {"target", au::Json{{"type", "NoSuchWidget"}}}}});
-    fx["expect"] =
-        au::Json::array({au::Json{{"target", au::Json{{"type", "NoSuchWidget"}}}, {"prop", "show"}, {"value", true}}});
+    au::Json fx = au::Json::object();
+    fx.set("tree", testing::json_obj({{"type", "Column"}, {"props", au::Json::object()}}));
+    fx.set("steps", testing::json_arr({testing::json_obj(
+                        {{"action", "tap"}, {"target", testing::json_obj({{"type", "NoSuchWidget"}})}})}));
+    fx.set("expect", testing::json_arr({testing::json_obj({{"target", testing::json_obj({{"type", "NoSuchWidget"}})},
+                                                           {"prop", "show"},
+                                                           {"value", au::Json{true}}})}));
 
     const ScriptError err = run_interact_fixture(fx);
     AURORA_TEST_CHECK_MSG(!err.empty(), "missing target must be reported");

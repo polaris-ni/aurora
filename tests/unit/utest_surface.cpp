@@ -146,7 +146,7 @@ AURORA_TEST_CASE(headless_surface_frame_lifecycle) {
     const double elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     AURORA_TEST_CHECK_LT(elapsed_ms, 900.0);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
 #endif
 }
 
@@ -163,7 +163,7 @@ AURORA_TEST_CASE(headless_surface_png_present_writes_file) {
     AURORA_TEST_CHECK_TRUE(std::filesystem::exists(path));
     AURORA_TEST_CHECK_EQ(surface.frame_count(), 1);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
 #endif
 }
 
@@ -203,7 +203,7 @@ AURORA_TEST_CASE(headless_surface_state_seams_dispatch_handlers) {
     bare.simulate_present_request();
     AURORA_TEST_CHECK_TRUE(true);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
 #endif
 }
 
@@ -235,7 +235,7 @@ AURORA_TEST_CASE(headless_surface_records_cursor_sequence) {
     AURORA_TEST_CHECK_TRUE(surface.cursor_log().empty());
     AURORA_TEST_CHECK_FALSE(surface.last_cursor().has_value());
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
 #endif
 }
 

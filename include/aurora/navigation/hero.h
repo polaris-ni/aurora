@@ -11,21 +11,17 @@
 
 namespace aurora {
 
-/**
- * @brief Hero 配对条目：转场期间由页内 Hero 在 paint 阶段记录其绝对包围盒与子节点，
- * 供 `TransitionLayer` 覆盖层做几何插值绘制。
- */
+/// @brief Hero 配对条目：转场期间由页内 Hero 在 paint 阶段记录其绝对包围盒与子节点，
+/// 供 `TransitionLayer` 覆盖层做几何插值绘制。
 struct HeroEntry {
     Rect bounds{};  ///< 该 Hero 在所属页面内的绝对包围盒（paint 阶段捕获）。
     Node child;  ///< 共享元素内容（用于覆盖层插值绘制）。
 };
 
-/**
- * @brief 转场期间由 `NavigatorHost` 注入到子树环境的值，供页内 Hero 上报几何与读取 morphing 标记。
- *
- * 宿主每帧在绘制前把上一帧计算出的 `morphing` 集合写入，Hero 据以跳过自绘；
- * 绘制旧页/新页时分别把当前 Hero 几何记录到 `source`/`target`，供覆盖层配对。
- */
+/// @brief 转场期间由 `NavigatorHost` 注入到子树环境的值，供页内 Hero 上报几何与读取 morphing 标记。
+///
+/// 宿主每帧在绘制前把上一帧计算出的 `morphing` 集合写入，Hero 据以跳过自绘；
+/// 绘制旧页/新页时分别把当前 Hero 几何记录到 `source`/`target`，供覆盖层配对。
 struct HeroRegistry {
     enum class CaptureMode : std::uint8_t { None, Source, Target };
 
@@ -35,52 +31,72 @@ struct HeroRegistry {
     std::unordered_set<std::string> morphing;  ///< 本帧处于 morphing 的 tag 集合（Hero 据以跳过自绘）。
 };
 
-/**
- * @brief 共享元素转场控件（对照 Flutter Hero）。
- *
- * 持有一个 `tag` 与一个 `child`。同 `tag` 的源/目标 Hero 在 `Navigator` 转场期间被
- * `NavigatorHost` 配对，于 `TransitionLayer` 覆盖层上做矩形 `lerp` + 交叉淡变「形变飞入」。
- * 常态零开销：仅当所属 `NavigatorHost` 注入 `HeroRegistry` 且本 tag 处于 morphing 时跳过自绘。
- */
+/// @brief 共享元素转场控件（对照 Flutter Hero）。
+///
+/// 持有一个 `tag` 与一个 `child`。同 `tag` 的源/目标 Hero 在 `Navigator` 转场期间被
+/// `NavigatorHost` 配对，于 `TransitionLayer` 覆盖层上做矩形 `lerp` + 交叉淡变「形变飞入」。
+/// 常态零开销：仅当所属 `NavigatorHost` 注入 `HeroRegistry` 且本 tag 处于 morphing 时跳过自绘。
 class Hero : public SingleChild {
   public:
+    /// @brief 构造共享元素：绑定配对标签与内容子节点。
+    /// @param tag 配对标签，同 tag 的源/目标 Hero 在转场期间配对。
+    /// @param child 内容子节点（移入单子）。
     Hero(std::string tag, Node child) : SingleChild(std::move(child)), tag_(std::move(tag)) {}
 
+    /// @brief 读取共享元素标签。
+    /// @return 当前 tag 的 const 引用。
     [[nodiscard]] auto tag() const -> const std::string & { return tag_; }
 
     /// @brief 设置共享元素标签（序列化/运行时均可改；转场期按 tag 配对）。
+    /// @param t 新标签（移入）。
     auto set_tag(std::string t) -> void { tag_ = std::move(t); }
 
+    /// @brief 序列化：先输出基类公共属性，再写入 tag 字段。
+    /// @param props 待填充的属性 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["tag"] = tag_;
+        props.set("tag", tag_);
     }
+    /// @brief 反序列化：读取基类公共属性；props 含 tag 字段时更新标签。
+    /// @param props 来源属性 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("tag")) {
-            tag_ = props["tag"].get<std::string>();
+            tag_ = props.at("tag")->as_or<std::string>("");
         }
     }
     /// @brief 单子控件：序列化重建时取首个子节点作为 child。
-    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
+    /// @param kids 重建出的子节点列表；仅取首个移入 child_，其余丢弃。
+    /// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     auto adopt_children(std::vector<Node> &&kids) -> void override {
         if (!kids.empty()) {
             child_ = std::move(kids.front());
         }
     }
 
+    /// @brief 控件类型名（自描述/序列化标识）。
+    /// @return 字符串字面量 "Hero"。
     [[nodiscard]] auto type_name() const -> const char * override { return "Hero"; }
 
-    // 绘制阶段向 HeroRegistry 上报几何（副作用）且转场期按 morphing 跳过自绘：
-    // 缓存回放会跳过 on_paint，导致注册丢失 / 形变飞入缺失，故不可缓存 Display List。
+    /// @brief 不可缓存 Display List。
+    /// 绘制阶段向 HeroRegistry 上报几何（副作用）且转场期按 morphing 跳过自绘：
+    /// 缓存回放会跳过 on_paint，导致注册丢失 / 形变飞入缺失，故不可缓存 Display List。
+    ///
+    /// @return 恒为 false。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return false; }
 
+    /// @brief 自描述：名称 Hero，属性 tag（string，共享元素配对键，非必填），无事件，单子策略，附用法示例。
+    /// @return 该控件的 WidgetDescriptor 快照。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
         return WidgetDescriptor{
             .name = "Hero",
             .properties =
                 {
-                    {.name = "tag", .type = "string", .default_value = "", .required = false, .note = "共享元素配对键"},
+                    {.name = "tag",
+                     .type = "string",
+                     .default_value = "",
+                     .required = false,
+                     .note = "Shared element pairing key"},
                 },
             .events = {},
             .children_policy = "single",
@@ -88,6 +104,7 @@ class Hero : public SingleChild {
         };
     }
 
+    /// @brief Hero 自身无响应式信号，不上报任何订阅（空实现）。
     void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
 
   protected:

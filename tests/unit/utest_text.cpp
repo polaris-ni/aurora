@@ -10,8 +10,12 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_text {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 using aurora::testing::require_value;
 
@@ -30,16 +34,17 @@ AURORA_TEST_CASE(default_text_state_and_type_name) {
     const Text t;
     AURORA_TEST_CHECK_EQ(std::string{t.type_name()}, "Text");
 
-    Json props;
+    Json props = Json::object();
     t.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["content"].get<std::string>(), "");
-    AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 14.0F, 1e-4F);  // 默认 14pt
-    AURORA_TEST_CHECK_EQ(props["max_lines"].get<int>(), 0);  // 0 = 不限
-    AURORA_TEST_CHECK_EQ(props["soft_wrap"].get<bool>(), true);
-    AURORA_TEST_CHECK_NEAR(props["line_height"].get<float>(), 1.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "content"), "");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "font_size"), 14.0F, 1e-4F);  // 默认 14pt
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "max_lines"), 0);  // 0 = 不限
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "soft_wrap"), true);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "line_height"), 1.0F, 1e-4F);
     // 默认文字色 = 黑 {0,0,0,255}。
-    AURORA_TEST_CHECK_EQ(props["color"][0].get<int>(), 0);
-    AURORA_TEST_CHECK_EQ(props["color"][3].get<int>(), 255);
+    const auto &color = *require_child(props, "color");
+    AURORA_TEST_CHECK_EQ(require_child_at(color, 0)->as_or<int>(-1), 0);
+    AURORA_TEST_CHECK_EQ(require_child_at(color, 3)->as_or<int>(-1), 255);
 }
 
 AURORA_TEST_CASE(chain_setters_update_serialized_props) {
@@ -53,27 +58,28 @@ AURORA_TEST_CASE(chain_setters_update_serialized_props) {
         .set_soft_wrap(false)
         .set_line_height(1.5F);
 
-    Json props;
+    Json props = Json::object();
     t.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["content"].get<std::string>(), "hello");
-    AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 18.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(props["color"][0].get<int>(), 10);
-    AURORA_TEST_CHECK_EQ(props["color"][3].get<int>(), 40);
-    AURORA_TEST_CHECK_EQ(props["max_lines"].get<int>(), 3);
-    AURORA_TEST_CHECK_EQ(props["soft_wrap"].get<bool>(), false);
-    AURORA_TEST_CHECK_NEAR(props["line_height"].get<float>(), 1.5F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "content"), "hello");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "font_size"), 18.0F, 1e-4F);
+    const auto &color = *require_child(props, "color");
+    AURORA_TEST_CHECK_EQ(require_child_at(color, 0)->as_or<int>(-1), 10);
+    AURORA_TEST_CHECK_EQ(require_child_at(color, 3)->as_or<int>(-1), 40);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "max_lines"), 3);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "soft_wrap"), false);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "line_height"), 1.5F, 1e-4F);
 }
 
 AURORA_TEST_CASE(font_size_degrade_and_validate_props) {
-    // font_size() 的降级路径：非正字号回落 14pt（需求 #21），降级后属性合法。
+    // font_size() 的降级路径：非正字号回落 14pt（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001），降级后属性合法。
     Text zero;
     zero.font_size(0.0F);
     Text neg;
     neg.font_size(-2.5F);
     for (const Text *t : {&zero, &neg}) {
-        Json props;
+        Json props = Json::object();
         t->serialize_props(props);
-        AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 14.0F, 1e-4F);
+        AURORA_TEST_CHECK_NEAR(require_field<float>(props, "font_size"), 14.0F, 1e-4F);
         AURORA_TEST_CHECK_TRUE(t->validate_props().ok());
     }
 
@@ -155,7 +161,7 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
         .set_decoration(TextDecoration::Underline)
         .set_background_color(Color(9, 8, 7, 6));
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
 
     Text dst;
@@ -168,14 +174,14 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
     AURORA_TEST_CHECK_EQ(static_cast<int>(dst.font.weight), 700);  // bold() 经 JSON 往返
 
     // 再序列化比对枚举/颜色字段（不硬编码枚举拼写）。
-    Json out;
+    Json out = Json::object();
     dst.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(out["content"].get<std::string>(), "source");
-    AURORA_TEST_CHECK_EQ(out["color"][2].get<int>(), 3);
-    AURORA_TEST_CHECK_EQ(out["background_color"][0].get<int>(), 9);
-    AURORA_TEST_CHECK_EQ(out["overflow"].get<std::string>(), props["overflow"].get<std::string>());
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "content"), "source");
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "color"), 2)->as_or<int>(-1), 3);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "background_color"), 0)->as_or<int>(-1), 9);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "overflow"), require_field<std::string>(props, "overflow"));
     // decoration 按位组合序列化为字符串数组（props_io.h text_decoration_to_json），非字符串。
-    AURORA_TEST_CHECK_TRUE(out["decoration"] == props["decoration"]);
+    AURORA_TEST_CHECK_TRUE(*require_child(out, "decoration") == *require_child(props, "decoration"));
 }
 
 AURORA_TEST_CASE(describe_metadata_signals_and_resolved_text) {
@@ -205,9 +211,9 @@ AURORA_TEST_CASE(text_direction_serialize_and_unset_omitted) {
     // 显式 direction 序列化为 "RTL"/"LTR"；未设置（继承环境）时不输出键。
     Text rtl("مرحبا");
     rtl.set_direction(TextDirection::RTL);
-    Json props;
+    Json props = Json::object();
     rtl.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["direction"].get<std::string>(), std::string{"RTL"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "direction"), std::string{"RTL"});
 
     Text back;
     back.deserialize_props(props);
@@ -215,7 +221,7 @@ AURORA_TEST_CASE(text_direction_serialize_and_unset_omitted) {
     AURORA_TEST_CHECK_TRUE(require_value(back.direction) == TextDirection::RTL);
 
     Text inherit("inherit");
-    Json plain;
+    Json plain = Json::object();
     inherit.serialize_props(plain);
     AURORA_TEST_CHECK_TRUE(!plain.contains("direction"));  // 继承语义不落盘
 }

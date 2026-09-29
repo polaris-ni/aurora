@@ -10,8 +10,11 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/segmented_control.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_segmented_control {
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -135,10 +138,10 @@ AURORA_TEST_CASE(segmented_describe_and_roundtrip) {
 
     SegmentedControl src({"A", "B", "C"}, 2);
     src.set_enabled(false);
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["selected"].get<int>(), 2);
-    AURORA_TEST_REQUIRE_EQ(props["segments"].size(), 3U);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "selected"), 2);
+    AURORA_TEST_REQUIRE_EQ(require_child(props, "segments")->size(), 3U);
 
     SegmentedControl dst;
     dst.deserialize_props(props);

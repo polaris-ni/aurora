@@ -3,9 +3,12 @@
 // 每个窗口是一个 `WindowHost`：拥有自己的 Scene（UI 树）、FocusManager 与帧统计，
 // 由 `Application` 的单一帧循环统一驱动——关掉一个窗口不影响其他窗口继续渲染。
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 #include "aurora/app/application.h"
 #include "aurora/app/display.h"
@@ -197,13 +200,41 @@ auto main() -> int {
         [last_ping](const PingMessage &e, au::WindowId) -> void { last_ping->set(au::LocalizedString{e.text}); });
 
     // 每帧同步窗口计数：窗口被关闭且帧末回收后，主窗计数随之更新。
-    app.set_on_frame([&app, count, label]() -> void {
+    // 同时把窗口 id 快照进互斥保护的小容器，供 InspectorServer 的 `/api/windows` 端点在
+    // HTTP 工作线程读取（枚举宿主本身是主线程操作，故只在主线程帧回调里刷新快照）。
+    std::mutex ids_mtx;
+    std::vector<std::uint32_t> ids_snapshot;
+    app.set_on_frame([&app, count, label, &ids_mtx, &ids_snapshot]() -> void {
         const int n = static_cast<int>(app.window_count());
         if (n != count->get()) {
             count->set(n);
             label->set(count_label(n));
         }
+        std::vector<std::uint32_t> snapshot;
+        for (const auto *h : app.windows()) {
+            snapshot.push_back(h->id());
+        }
+        const std::scoped_lock lock{ids_mtx};
+        ids_snapshot = std::move(snapshot);
     });
+
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+    // 无人值守取证通道：主窗树 + 按窗口 id 取各窗树（`?window=<id>`，服务端已在主线程 marshal）
+    // + id 快照（上面每帧刷新）。本载体不经 run_demo，故自行接线同一口径。
+    auto inspector = start_demo_inspector(
+        [&app]() -> au::Node { return au::Node{app.scene().root_node()}; },
+        [&app]() -> au::Surface * { return app.window() != nullptr ? &app.window()->surface() : nullptr; },
+        [&ids_mtx, &ids_snapshot]() -> std::vector<std::uint32_t> {
+            const std::scoped_lock lock{ids_mtx};
+            return ids_snapshot;
+        },
+        [&app](std::uint32_t id) -> au::Node {
+            if (auto *h = app.window_host(id)) {
+                return au::Node{h->scene().root_node()};
+            }
+            return au::Node{};  // 无效 id → 空 Node，路由层据此回 404
+        });
+#endif
 
     AURORA_LOG_INFO("demo", "[multi_window] main window shown (close it to exit)");
     app.run();

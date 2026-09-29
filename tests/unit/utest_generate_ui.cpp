@@ -12,8 +12,13 @@
 #include "aurora/app/generate_ui.h"
 #include "aurora/widget/serialization.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_generate_ui {
+
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -29,7 +34,9 @@ namespace {
 }
 
 /// 生成的树恒为 Stack 包裹，取子节点数组便于断言。
-[[nodiscard]] auto children_of(const Json &tree) -> const Json & { return tree["node"]["children"]; }
+[[nodiscard]] auto children_of(const Json &tree) -> const Json & {
+    return *require_child(*require_child(tree, "node"), "children");
+}
 
 }  // namespace
 
@@ -46,11 +53,11 @@ AURORA_TEST_CASE(text_uses_the_prop_key_widgets_actually_read) {
     const auto r = generate_ui("text");
     AURORA_TEST_REQUIRE_TRUE(r.ok());
 
-    const Json &node = children_of(r.value())[0];
-    AURORA_TEST_CHECK_EQ(node["type"].get<std::string>(), std::string{"Text"});
-    AURORA_TEST_CHECK_TRUE(node["props"].contains("content"));
-    AURORA_TEST_CHECK_FALSE(node["props"].contains("text"));
-    AURORA_TEST_CHECK_EQ(node["props"]["content"].get<std::string>(), std::string{"Text"});
+    const Json &node = *require_child_at(children_of(r.value()), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(node, "type"), std::string{"Text"});
+    AURORA_TEST_CHECK_TRUE(require_child(node, "props")->contains("content"));
+    AURORA_TEST_CHECK_FALSE(require_child(node, "props")->contains("text"));
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(node, "props"), "content"), std::string{"Text"});
 }
 
 AURORA_TEST_CASE(button_text_prop_is_label_not_text) {
@@ -58,21 +65,21 @@ AURORA_TEST_CASE(button_text_prop_is_label_not_text) {
     const auto r = generate_ui("button");
     AURORA_TEST_REQUIRE_TRUE(r.ok());
 
-    const Json &node = children_of(r.value())[0];
-    AURORA_TEST_CHECK_EQ(node["type"].get<std::string>(), std::string{"Button"});
-    AURORA_TEST_CHECK_FALSE(node["props"].contains("text"));
-    AURORA_TEST_CHECK_TRUE(node["props"].contains("label"));
-    AURORA_TEST_CHECK_EQ(node["props"]["label"].get<std::string>(), std::string{"Button"});
+    const Json &node = *require_child_at(children_of(r.value()), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(node, "type"), std::string{"Button"});
+    AURORA_TEST_CHECK_FALSE(require_child(node, "props")->contains("text"));
+    AURORA_TEST_CHECK_TRUE(require_child(node, "props")->contains("label"));
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(node, "props"), "label"), std::string{"Button"});
 }
 
 AURORA_TEST_CASE(tree_is_wrapped_in_stack_with_object_props) {
     const auto r = generate_ui("button");
     AURORA_TEST_REQUIRE_TRUE(r.ok());
 
-    const Json &node = r.value()["node"];
-    AURORA_TEST_CHECK_EQ(node["type"].get<std::string>(), std::string{"Stack"});
-    AURORA_TEST_CHECK_TRUE(node["props"].is_object());
-    AURORA_TEST_CHECK_TRUE(node["children"].is_array());
+    const Json &node = *require_child(r.value(), "node");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(node, "type"), std::string{"Stack"});
+    AURORA_TEST_CHECK_TRUE(require_child(node, "props")->is_object());
+    AURORA_TEST_CHECK_TRUE(require_child(node, "children")->is_array());
 }
 
 AURORA_TEST_CASE(coverage_is_derived_from_the_component_registry) {
@@ -89,7 +96,7 @@ AURORA_TEST_CASE(coverage_is_derived_from_the_component_registry) {
         AURORA_TEST_REQUIRE_TRUE(r.ok());
         const Json &kids = children_of(r.value());
         AURORA_TEST_REQUIRE_GE(kids.size(), std::size_t{1});
-        AURORA_TEST_CHECK_EQ(kids[0]["type"].get<std::string>(), type);
+        AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(kids, 0), "type"), type);
         ++checked;
     }
     // 注册表若为空则说明核心控件未注册，这条覆盖断言本身失焦。
@@ -103,22 +110,23 @@ AURORA_TEST_CASE(multiple_keywords_produce_one_node_each_without_duplicates) {
 
     const Json &kids = children_of(r.value());
     AURORA_TEST_CHECK_EQ(kids.size(), std::size_t{1});
-    AURORA_TEST_CHECK_EQ(kids[0]["type"].get<std::string>(), std::string{"Text"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(kids, 0), "type"), std::string{"Text"});
 }
 
 AURORA_TEST_CASE(unmatched_description_falls_back_to_text) {
     // 无关键词 → 回退 Text，文案为 "?" + 描述前 20 字符。
     const auto r = generate_ui("zzz");
     AURORA_TEST_REQUIRE_TRUE(r.ok());
-    const Json &fallback = children_of(r.value())[0];
-    AURORA_TEST_CHECK_EQ(fallback["type"].get<std::string>(), std::string{"Text"});
-    AURORA_TEST_CHECK_EQ(fallback["props"]["content"].get<std::string>(), std::string{"?zzz"});
+    const Json &fallback = *require_child_at(children_of(r.value()), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(fallback, "type"), std::string{"Text"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(fallback, "props"), "content"), std::string{"?zzz"});
 
     // 超长描述截断到 20 字符。
     const auto long_r = generate_ui(std::string(25, 'x'));
     AURORA_TEST_REQUIRE_TRUE(long_r.ok());
-    const Json &long_fallback = children_of(long_r.value())[0];
-    AURORA_TEST_CHECK_EQ(long_fallback["props"]["content"].get<std::string>(), "?" + std::string(20, 'x'));
+    const Json &long_fallback = *require_child_at(children_of(long_r.value()), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(long_fallback, "props"), "content"),
+                         "?" + std::string(20, 'x'));
 }
 
 AURORA_TEST_CASE(validate_generate_ui_roundtrip) {

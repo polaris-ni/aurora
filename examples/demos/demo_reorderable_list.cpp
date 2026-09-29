@@ -40,6 +40,7 @@ auto task_row(const std::string &label, int index, au::Color accent) -> au::Node
 
 // NOLINTNEXTLINE(bugprone-exception-escape) 入口函数允许库异常逃逸到 main（terminate 即失败路径）
 auto main() -> int {
+    // CJK-LITERAL: on-screen-demo - painted window text, not console output
     const std::vector<std::string> labels{"需求评审", "接口联调",     "写回归用例", "性能采样",
                                           "文档回写", "发布 alpha.5", "收集反馈",   "排下轮计划"};
     auto items = std::make_shared<au::State<std::vector<std::string>>>(labels);
@@ -58,7 +59,7 @@ auto main() -> int {
     list->set_auto_scroll_threshold(56.0F);
     list->set_on_reorder([items, order](int from, int to) -> void {
         const std::vector<std::string> &data = items->get();
-        std::string text = "moved #" + std::to_string(from) + " → #" + std::to_string(to) + "：";
+        std::string text = "moved #" + std::to_string(from) + " → #" + std::to_string(to) + ": ";
         for (std::size_t i = 0; i < data.size(); ++i) {
             text += (i == 0 ? "" : " / ");
             text += data[i];
@@ -74,6 +75,7 @@ auto main() -> int {
 
     au::Node root = au::Column{
         GradientTitle{"Reorderable list"},
+        // CJK-LITERAL: on-screen-demo - painted window text, not console output
         au::Text{au::LocalizedString{"按住卡片上下拖动（右侧 ≡ 手柄带起拖）；松手后数据顺序即改写。"}},
         gap(8),
         au::Node{std::move(viewport_ptr)},

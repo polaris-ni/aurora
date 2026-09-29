@@ -20,7 +20,7 @@ namespace m = aurora::testing::matchers;  // 匹配器工厂别名（禁止 usin
            std::ranges::all_of(text, [](char c) -> bool { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
 }
 
-/// @brief 两级字符串化宏把数字分量展开为十进制串（CMake 注入值同样适用）。
+// 两级字符串化宏把数字分量展开为十进制串（CMake 注入值同样适用）。
 AURORA_TEST_CASE(stringification_macros_expand_components) {
     AURORA_TEST_CHECK_STREQ(AURORA_VERSION_STR(AURORA_VERSION_MAJOR), std::to_string(AURORA_VERSION_MAJOR));
     AURORA_TEST_CHECK_STREQ(AURORA_VERSION_STR(AURORA_VERSION_MINOR), std::to_string(AURORA_VERSION_MINOR));
@@ -28,7 +28,7 @@ AURORA_TEST_CASE(stringification_macros_expand_components) {
     AURORA_TEST_CHECK_STREQ(AURORA_VERSION_STR2(7), "7");
 }
 
-/// @brief 数字段为「MAJOR.MINOR.PATCH」三元组：两个分隔点、逐段纯数字、与分量宏组合一致。
+// 数字段为「MAJOR.MINOR.PATCH」三元组：两个分隔点、逐段纯数字、与分量宏组合一致。
 AURORA_TEST_CASE(numeric_version_is_triplet_of_digits) {
     const std::string numeric = AURORA_VERSION_NUMERIC;
     const auto first_dot = numeric.find('.');
@@ -45,7 +45,7 @@ AURORA_TEST_CASE(numeric_version_is_triplet_of_digits) {
     AURORA_TEST_CHECK_EQ(numeric, composed);
 }
 
-/// @brief 完整版本串 = 数字段 [- 后缀]，按 AURORA_HAS_VERSION_SUFFIX 组合。
+// 完整版本串 = 数字段 [- 后缀]，按 AURORA_HAS_VERSION_SUFFIX 组合。
 AURORA_TEST_CASE(full_version_string_composes_with_suffix_flag) {
     static_assert(AURORA_HAS_VERSION_SUFFIX == 0 || AURORA_HAS_VERSION_SUFFIX == 1);
     const std::string numeric = AURORA_VERSION_NUMERIC;
@@ -58,7 +58,7 @@ AURORA_TEST_CASE(full_version_string_composes_with_suffix_flag) {
     AURORA_TEST_CHECK_THAT(std::string{AURORA_VERSION_STRING}, m::starts_with(numeric));
 }
 
-/// @brief 后缀串符合 semver 预发布段形态：非空、无前导 '-'、不含空白；稳定版回退为纯数字段。
+// 后缀串符合 semver 预发布段形态：非空、无前导 '-'、不含空白；稳定版回退为纯数字段。
 AURORA_TEST_CASE(suffix_string_is_semver_prerelease_token) {
 #if AURORA_HAS_VERSION_SUFFIX
     const std::string suffix = AURORA_VERSION_SUFFIX_STR;
@@ -66,7 +66,7 @@ AURORA_TEST_CASE(suffix_string_is_semver_prerelease_token) {
     AURORA_TEST_CHECK_NE(suffix.front(), '-');
     AURORA_TEST_CHECK_MSG(
         std::ranges::none_of(suffix, [](char c) -> bool { return std::isspace(static_cast<unsigned char>(c)) != 0; }),
-        "semver 预发布段不允许空白字符");
+        "semver prerelease identifiers must not contain whitespace");
 #else
     // 稳定版：完整串必须与数字段完全一致（后缀缺失路径）。
     AURORA_TEST_CHECK_EQ(AURORA_VERSION_STRING, AURORA_VERSION_NUMERIC);

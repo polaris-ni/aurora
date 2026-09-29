@@ -2,7 +2,8 @@
 //
 // 支持子集（图标级 SVG）：
 // - 形状：<rect>(含 rx 圆角近似)、<circle>、<ellipse>、<line>、<polygon>、<polyline>
-// - 颜色：#rgb / #rrggbb / 常用命名色 / none；fill 与 stroke(+stroke-width)
+// - 颜色：#rgb / #rrggbb / 常用命名色 / none；fill 与 stroke(+stroke-width) 分层绘制（描边盖填充）
+// - 描边：line/polygon/polyline 逐边距离精确；rect/circle 居中带精确；ellipse 沿射线近似
 // - 画布：viewBox 或 width/height 推导固有尺寸（缺省 64x64）；目标尺寸缩放光栅化
 // - 不支持：<path>、渐变、变换、分组样式继承（遇到未知元素跳过，降级不失败）
 //
@@ -143,7 +144,8 @@ auto apply_named_color(SvgColor &c, const std::string &s) -> void {
 
 /// @brief 单个已解析形状（统一以点内测试光栅化）。
 struct Shape {
-    enum class Kind : std::uint8_t { Rect, Circle, Ellipse, Line, Polygon } kind = Kind::Rect;
+    /// @brief Polyline 与 Polygon 的差别只在**描边**是否闭合；填充按 SVG 规范一律按闭合区域算。
+    enum class Kind : std::uint8_t { Rect, Circle, Ellipse, Line, Polygon, Polyline } kind = Kind::Rect;
     float x = 0;  // rect
     float y = 0;
     float w = 0;
@@ -209,17 +211,20 @@ struct Shape {
     return ((dx * dx) + (dy * dy)) <= 1.0F;
 }
 
+/// @brief 点到线段 [a,b] 的距离（len2==0 时退化为到端点 a 的距离）。
+[[nodiscard]] auto distance_to_segment(float px, float py, float ax, float ay, float bx, float by) -> float {
+    const float vx = bx - ax;
+    const float vy = by - ay;
+    const float len2 = (vx * vx) + (vy * vy);
+    const float t = len2 > 0.0F ? std::clamp((((px - ax) * vx) + ((py - ay) * vy)) / len2, 0.0F, 1.0F) : 0.0F;
+    const float dx = px - (ax + (t * vx));
+    const float dy = py - (ay + (t * vy));
+    return std::sqrt((dx * dx) + (dy * dy));
+}
+
 /// @brief 点内测试：<line>（距线段的距离 <= stroke-width/2）。
 [[nodiscard]] auto hit_line(const Shape &s, float px, float py) -> bool {
-    const float vx = s.x2 - s.x1;
-    const float vy = s.y2 - s.y1;
-    const float len2 = (vx * vx) + (vy * vy);
-    float t = len2 > 0.0F ? (((px - s.x1) * vx) + ((py - s.y1) * vy)) / len2 : 0.0F;
-    t = std::clamp(t, 0.0F, 1.0F);
-    const float dx = px - (s.x1 + (t * vx));
-    const float dy = py - (s.y1 + (t * vy));
-    const float half = std::max(0.5F, s.sw * 0.5F);
-    return ((dx * dx) + (dy * dy)) <= (half * half);
+    return distance_to_segment(px, py, s.x1, s.y1, s.x2, s.y2) <= std::max(0.5F, s.sw * 0.5F);
 }
 
 /// @brief 点内测试：<polygon>（射线法）。
@@ -241,6 +246,54 @@ struct Shape {
     return inside;
 }
 
+/// @brief 描边命中：SVG 描边以轮廓**为中心**、法向厚度 = stroke-width。
+/// polygon/polyline 按逐边距离精确判定（polyline 不闭合）；rect 用带符号的边界距离（圆角处的
+/// 角区误差 ≤ stroke-width/2）；ellipse 用「射线方向上到边界的距离」近似（忽略法向与射线的夹角）。
+[[nodiscard]] auto hit_stroke(const Shape &s, float px, float py) -> bool {
+    const float half = std::max(0.5F, s.sw * 0.5F);
+    switch (s.kind) {
+        case Shape::Kind::Line:
+            return distance_to_segment(px, py, s.x1, s.y1, s.x2, s.y2) <= half;
+        case Shape::Kind::Polygon:
+        case Shape::Kind::Polyline: {
+            const std::size_t n = s.pts.size() / 2;
+            if (n < 2) {
+                return false;
+            }
+            const std::size_t edges = s.kind == Shape::Kind::Polygon ? n : n - 1;  // polyline 不收口
+            for (std::size_t i = 0; i < edges; ++i) {
+                const std::size_t j = (i + 1) % n;
+                if (distance_to_segment(px, py, s.pts.at(i * 2), s.pts.at((i * 2) + 1), s.pts.at(j * 2),
+                                        s.pts.at((j * 2) + 1)) <= half) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        case Shape::Kind::Rect: {
+            const float inward = std::min({px - s.x, s.x + s.w - px, py - s.y, s.y + s.h - py});  // 内为正、外为负
+            return std::abs(inward) <= half;
+        }
+        case Shape::Kind::Circle:
+            return std::abs(std::hypot(px - s.cx, py - s.cy) - s.r) <= half;
+        case Shape::Kind::Ellipse: {
+            if (s.r <= 0.0F || s.ry <= 0.0F) {
+                return false;
+            }
+            const float dx = px - s.cx;
+            const float dy = py - s.cy;
+            const float t = std::hypot(dx, dy);
+            if (t <= 0.0F) {
+                return false;
+            }
+            // n = t / 该射线方向上的边界半径，故 t*|n-1|/n 就是沿射线量到的边界距离。
+            const float n = std::hypot(dx / s.r, dy / s.ry);
+            return std::abs(t * (n - 1.0F) / n) <= half;
+        }
+    }
+    return false;
+}
+
 /// @brief 点内测试（SVG 用户坐标空间）。
 [[nodiscard]] auto hit(const Shape &s, float px, float py) -> bool {
     switch (s.kind) {
@@ -253,6 +306,7 @@ struct Shape {
         case Shape::Kind::Line:
             return hit_line(s, px, py);
         case Shape::Kind::Polygon:
+        case Shape::Kind::Polyline:
             return hit_polygon(s, px, py);
     }
     return false;
@@ -328,13 +382,16 @@ struct Shape {
         s.y1 = attr_f(tag, "y1");
         s.x2 = attr_f(tag, "x2");
         s.y2 = attr_f(tag, "y2");
-        s.sw = attr_f(tag, "stroke-width", 1.0F);
-    } else if (tag.starts_with("<polygon") || tag.starts_with("<polyline")) {
+    } else if (tag.starts_with("<polyline")) {
+        s.kind = Shape::Kind::Polyline;
+        s.pts = parse_points(attr_of(tag, "points"));
+    } else if (tag.starts_with("<polygon")) {
         s.kind = Shape::Kind::Polygon;
         s.pts = parse_points(attr_of(tag, "points"));
     } else {
         return std::nullopt;  // 未知/不支持标签（含 <path>）：跳过降级
     }
+    s.sw = attr_f(tag, "stroke-width", 1.0F);
     s.fill = parse_color(attr_of(tag, "fill"));
     // SVG 缺省 fill=black（除 line 外）
     if (attr_of(tag, "fill").empty() && s.kind != Shape::Kind::Line) {
@@ -362,17 +419,18 @@ struct Shape {
             const float ux = vb_x + ((static_cast<float>(px) + 0.5F) * sx);
             const float uy = vb_y + ((static_cast<float>(py) + 0.5F) * sy);
             for (const Shape &s : shapes) {
-                const SvgColor &c = s.kind == Shape::Kind::Line ? s.stroke : s.fill;
-                if (c.none) {
+                // 描边压在填充之上（SVG 的绘制顺序）；line 没有内部，只由描边承载。
+                const bool stroked = !s.stroke.none && hit_stroke(s, ux, uy);
+                const bool filled = s.kind != Shape::Kind::Line && !s.fill.none && hit(s, ux, uy);
+                if (!stroked && !filled) {
                     continue;
                 }
-                if (hit(s, ux, uy)) {
-                    const std::size_t off = ((static_cast<std::size_t>(py) * out_w) + px) * 4;
-                    img.pixels.at(off) = c.r;
-                    img.pixels.at(off + 1) = c.g;
-                    img.pixels.at(off + 2) = c.b;
-                    img.pixels.at(off + 3) = c.a;
-                }
+                const SvgColor &c = stroked ? s.stroke : s.fill;
+                const std::size_t off = ((static_cast<std::size_t>(py) * out_w) + px) * 4;
+                img.pixels.at(off) = c.r;
+                img.pixels.at(off + 1) = c.g;
+                img.pixels.at(off + 2) = c.b;
+                img.pixels.at(off + 3) = c.a;
             }
         }
     }

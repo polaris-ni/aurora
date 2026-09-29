@@ -37,10 +37,16 @@ else ()
     aurora_log("Aurora demos disabled (set AURORA_BUILD_DEMOS=ON to define them)")
 endif ()
 
-# demo_google_play 接入 InspectorServer 远程检视：主文件已保证本模块在 include(AuroraTools) 之后引入，
+# 接入 InspectorServer 远程检视的 demo：主文件已保证本模块在 include(AuroraTools) 之后引入，
 # 此时 aurora_inspector_server 目标（AURORA_BUILD_INSPECTOR_SERVER=ON 时定义，跨平台）已存在。
 # 其 PUBLIC 导出的 AURORA_BUILD_INSPECTOR_SERVER 宏随链接注入 demo，启用 demo 内 HTTP 远程检视代码；
 # Release / 未开选项时该目标不存在 → 跳过，demo 内 InspectorServer 分支整编译剔除，零链接依赖。
-if (AURORA_BUILD_DEMOS AND TARGET demo_google_play AND TARGET aurora_inspector_server)
-    target_link_libraries(demo_google_play PRIVATE aurora_inspector_server)
+# hook 覆盖**全部** demo（E2E 驱动任意 demo 的前提）：run_demo 为所有 demo 共用的启动器，
+# 其 opt-in 启动块要求同一宏口径——只给个别 demo 链接会让共享头在不同 demo 下编译出不同形态。
+# 运行期是否启动由环境变量 AURORA_INSPECTOR_PORT 决定（demo_common.h run_demo），未设置不启动。
+if (AURORA_BUILD_DEMOS AND TARGET aurora_inspector_server)
+    foreach (inspector_demo_src ${AURORA_DEMO_SOURCES})
+        get_filename_component(inspector_demo ${inspector_demo_src} NAME_WE)
+        target_link_libraries(${inspector_demo} PRIVATE aurora_inspector_server)
+    endforeach ()
 endif ()

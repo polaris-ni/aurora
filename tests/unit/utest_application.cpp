@@ -227,7 +227,7 @@ AURORA_TEST_CASE(application_wires_hover_cursor_to_surface) {
     AURORA_TEST_REQUIRE_EQ(probe->cursor_log().size(), std::size_t{3});
     AURORA_TEST_CHECK_EQ(require_value(probe->last_cursor()), CursorShape::Arrow);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
 #endif
 }
 

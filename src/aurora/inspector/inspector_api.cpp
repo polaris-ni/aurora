@@ -37,6 +37,8 @@ auto Inspector::get_state(std::string_view path, const Node &root) -> Json { ret
 
 auto Inspector::find_node(const Node &root, std::string_view path) -> Node { return find_node_by_path(root, path); }
 
+auto Inspector::find_widget(Widget &root, std::string_view path) -> Widget * { return find_widget_by_path(root, path); }
+
 // ---------------------------------------------------------------------------
 // 属性读写
 // ---------------------------------------------------------------------------
@@ -47,7 +49,7 @@ auto Inspector::get_prop_value(const Widget &w, std::string_view key) -> Json {
     Json props = Json::object();
     w.serialize_props(props);
     if (props.contains(std::string(key))) {
-        return props[std::string(key)];  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        return *props.at(std::string(key));
     }
     return Json{};
 }
@@ -65,10 +67,8 @@ auto Inspector::apply_patch(Node &root, const Json &patch) -> Result<void> {
         if (!op.is_object() || !op.contains("path") || !op.contains("value")) {
             continue;
         }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        const std::string path_str = op["path"].get<std::string>();
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        const Json &value = op["value"];
+        const auto path_str = op.at("path")->as_or<std::string>("");
+        const Json &value = *op.at("value");
         // path 格式: "/widget_path/prop_name" — 最后一段为属性名
         const auto last_slash = path_str.rfind('/');
         if (last_slash == std::string::npos) {
@@ -199,6 +199,31 @@ auto Inspector::simulate_drag(Widget &w, float dx, float dy) -> Result<void> {
     MouseEvent release = move;
     release.action = MouseAction::Release;
     EventDispatcher::dispatch(w, release, fm);
+    return Result<void>{};
+}
+
+auto Inspector::simulate_pointer(Widget &w, const Point &position, MouseAction action) -> Result<void> {
+    if (action != MouseAction::Press && action != MouseAction::Move && action != MouseAction::Release) {
+        return make_error(ErrorCode::GeneralNotSupported,
+                          "simulate_pointer: only Press / Move / Release are supported");
+    }
+    SimFocusContext focus;
+    FocusManager *fm = focus.resolve(w);
+
+    // 只有 Press 需要前置命中：与 simulate_click 同口径，避免「按下落空却已改掉焦点/捕获」。
+    // Move / Release 不校验——真实指针的拖拽正是靠派发器的指针捕获把事件持续送给按下时的目标，
+    // 光标越出分隔条/轨道仍是有效拖拽，此处若按实时命中筛掉就合成不出连续拖拽。
+    const Rect root_rect{.origin = Point{}, .size = w.size()};
+    if (action == MouseAction::Press && w.hit_test_chain(position, root_rect, BuildContext{}).empty()) {
+        return make_error(ErrorCode::GeneralNotSupported,
+                          "simulate_pointer: no hit-testable area at the given position");
+    }
+
+    MouseEvent e;
+    e.action = action;
+    e.button = MouseButton::Left;
+    e.position = position;
+    EventDispatcher::dispatch(w, e, fm);
     return Result<void>{};
 }
 

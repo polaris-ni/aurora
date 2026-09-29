@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ============================================================================
-# check_platform_macros.py - zero-raw-platform-macro gate (requirement #14)
+# check_platform_macros.py - zero-raw-platform-macro gate (requirement SPEC.PLATFORM.ZERO-IFDEF.001)
 # ----------------------------------------------------------------------------
 # Spec: codespec/specification/06-app-platform.md §12.1
 #   "平台 / 架构 / 位宽 / 编译器 / 能力分支一律使用 core/platform.h 的规范化目标宏

@@ -14,9 +14,11 @@
 #include "aurora/widget/text.h"
 #include "aurora/window/surface.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_window_geometry {
 
+using aurora::testing::json_obj;
 using aurora::testing::require_value;
 
 namespace {
@@ -48,28 +50,28 @@ AURORA_TEST_CASE(geometry_json_round_trip) {
 
 AURORA_TEST_CASE(malformed_json_is_rejected) {
     // 非对象。
-    AURORA_TEST_CHECK_FALSE(window_geometry_from_json(Json{42}).has_value());
+    AURORA_TEST_CHECK_FALSE(window_geometry_from_json(json::Value{42}).has_value());
     // 缺字段（只有部分键）。
-    AURORA_TEST_CHECK_FALSE(window_geometry_from_json(Json{{"origin_x", 0.0}}).has_value());
+    AURORA_TEST_CHECK_FALSE(window_geometry_from_json(json_obj({{"origin_x", 0.0}})).has_value());
     // 类型不符（字符串代替数值）。
-    AURORA_TEST_CHECK_FALSE(window_geometry_from_json(Json{
+    AURORA_TEST_CHECK_FALSE(window_geometry_from_json(json_obj({
                                                           {"origin_x", "x"},
                                                           {"origin_y", 0.0},
                                                           {"width", 10.0},
                                                           {"height", 10.0},
                                                           {"mode", 0},
                                                           {"display_id", -1},
-                                                      })
+                                                      }))
                                 .has_value());
     // 枚举越界（mode=99）。
-    AURORA_TEST_CHECK_FALSE(window_geometry_from_json(Json{
+    AURORA_TEST_CHECK_FALSE(window_geometry_from_json(json_obj({
                                                           {"origin_x", 0.0},
                                                           {"origin_y", 0.0},
                                                           {"width", 10.0},
                                                           {"height", 10.0},
                                                           {"mode", 99},
                                                           {"display_id", -1},
-                                                      })
+                                                      }))
                                 .has_value());
 }
 

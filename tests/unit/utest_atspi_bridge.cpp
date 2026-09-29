@@ -1,3 +1,4 @@
+/// @file utest_atspi_bridge.cpp
 /// 测试类型: unit
 /// 目标单元: src/aurora/window/detail/atspi_bridge.cpp
 /// 测试说明: AT-SPI2 桥的宿主侧生命周期面 —— `NO_AT_BRIDGE=1` 显式免提（全平台可跑）；
@@ -80,7 +81,7 @@ AURORA_TEST_CASE(no_at_bridge_env_forces_degradation) {
 AURORA_TEST_CASE(live_embed_handshake_and_teardown) {
     const char *opt_in = std::getenv("AURORA_LIVE_ATSPI");
     if (opt_in == nullptr || opt_in[0] == '\0' || std::string_view{opt_in} == "0") {
-        AURORA_TEST_SKIP("需显式置 AURORA_LIVE_ATSPI=1：本用例连接真实 a11y 总线并完成 Embed");
+        AURORA_TEST_SKIP("set AURORA_LIVE_ATSPI=1 explicitly: connects to the real a11y bus and completes Embed");
         return;
     }
     auto bridge = detail::AtspiBridge::create(probe_env());
@@ -110,11 +111,11 @@ AURORA_TEST_CASE(live_embed_handshake_and_teardown) {
 #else
 
 AURORA_TEST_CASE(no_at_bridge_env_forces_degradation) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_X11/WAYLAND 未开启（非 Linux 平台），桥 TU 整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_X11/WAYLAND is not enabled (non-Linux); the bridge TU is compiled out");
 }
 
 AURORA_TEST_CASE(live_embed_handshake_and_teardown) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_X11/WAYLAND 未开启（非 Linux 平台），桥 TU 整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_X11/WAYLAND is not enabled (non-Linux); the bridge TU is compiled out");
 }
 
 #endif

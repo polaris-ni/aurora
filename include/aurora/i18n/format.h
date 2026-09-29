@@ -9,18 +9,16 @@
 
 namespace aurora {
 
-/**
- * @brief 货币代码（覆盖 Locale 完成判据所需：USD / JPY / EUR / CNY 等）。
- *
- * 符号与默认小数位取自 CLDR 轻量自研表（守零依赖）；后续可随需求扩展更多代码。
- *
- * @note Thread: thread-safe (value type)
- * @note Side-effects: none
- * @note Rebuildable: no
- */
-// 公共 API 枚举：仅作 format_currency 的按值形参，不落在任何结构体/容器字段里。
-// 底层类型是公共 API 形态的一部分，本库按语义选型而非体积取向，改窄仅省 3 字节。
-// NOLINTNEXTLINE(performance-enum-size)
+/// @brief 货币代码（覆盖 Locale 完成判据所需：USD / JPY / EUR / CNY 等）。
+///
+/// 符号与默认小数位取自 CLDR 轻量自研表（守零依赖）；后续可随需求扩展更多代码。
+///
+/// @note Thread: thread-safe (value type)
+/// @note Side-effects: none
+/// @note Rebuildable: no
+/// @note 豁免 performance-enum-size：公共 API 枚举，仅作 format_currency 的按值形参，不落在任何
+/// 结构体/容器字段里；底层类型是公共 API 形态的一部分，本库按语义选型而非体积取向，改窄仅省 3 字节。
+/// NOLINTNEXTLINE(performance-enum-size)
 enum class Currency {
     USD,  ///< 美元（符号 $，默认 2 位小数）
     EUR,  ///< 欧元（符号 €，默认 2 位小数）
@@ -38,6 +36,9 @@ struct NumberSymbols {
     int group_size;  ///< 从右起的分组位数
 };
 
+/// @brief 按基础语言子标签取数字分组/小数点符号表（自研轻量表，CLDR 简化版）。
+/// @param lang 基础语言子标签（如 "en"/"de"/"fr"）。
+/// @return de/ru 点分组、逗号小数；fr 空格分组、逗号小数；其余（en/zh/ja 等）逗号分组、点小数；组宽均为 3。
 [[nodiscard]] inline auto number_symbols(const std::string &lang) -> NumberSymbols {
     if (lang == "de" || lang == "ru") {
         return NumberSymbols{.group = '.', .decimal = ',', .group_size = 3};  // 德语 / 俄语：点分组、逗号小数
@@ -49,11 +50,15 @@ struct NumberSymbols {
     return NumberSymbols{.group = ',', .decimal = '.', .group_size = 3};  // en / zh / ja / 其它：逗号分组、点小数
 }
 
+/// @brief 货币的符号与默认小数位（CLDR 轻量自研表项）。
 struct CurrencyInfo {
-    const char *symbol;
-    int default_fraction_digits;
+    const char *symbol;  ///< 货币符号串（UTF-8，如 "$"/"€"/"¥"/"£"）
+    int default_fraction_digits;  ///< 默认小数位数（JPY=0，其余=2）
 };
 
+/// @brief 查货币代码对应的符号表项。
+/// @param c 货币代码。
+/// @return 对应表项；switch 未覆盖的取值（越界枚举）回退 USD（$，2 位小数）。
 [[nodiscard]] inline auto currency_info(Currency c) -> CurrencyInfo {
     switch (c) {
         case Currency::USD:
@@ -71,24 +76,24 @@ struct CurrencyInfo {
 }
 
 /// @brief 货币符号位：en/zh/ja/ko 前置，其余（de/fr/ru…）后置（带前导空格）。
+/// @param lang 基础语言子标签。
+/// @return true 表示符号应置于数字之前。
 [[nodiscard]] inline auto currency_is_prefix(const std::string &lang) -> bool {
     return lang == "en" || lang == "zh" || lang == "ja" || lang == "ko";
 }
 
 }  // namespace detail
 
-/**
- * @brief 按 Locale 格式化数字（分组 + 小数点）。
- *
- * @param value           数值。
- * @param loc             区域设置（决定分隔符与小数点）。
- * @param fraction_digits 小数位数；默认 2。传 0 则只输出整数分组（如 "1,234"）。
- * @return 本地化数字串，如 en `1,234.56`、de `1.234,56`、zh `1,234.56`。
- *
- * @note Thread: thread-safe (pure function)
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 按 Locale 格式化数字（分组 + 小数点）。
+///
+/// @param value           数值。
+/// @param loc             区域设置（决定分隔符与小数点）。
+/// @param fraction_digits 小数位数；默认 2。传 0 则只输出整数分组（如 "1,234"）。
+/// @return 本地化数字串，如 en `1,234.56`、de `1.234,56`、zh `1,234.56`。
+///
+/// @note Thread: thread-safe (pure function)
+/// @note Side-effects: none
+/// @note Rebuildable: no
 [[nodiscard]] inline auto format_number(double value, const Locale &loc, int fraction_digits = 2) -> std::string {
     const detail::NumberSymbols sym = detail::number_symbols(loc.language);
     const bool negative = value < 0.0;
@@ -137,19 +142,17 @@ struct CurrencyInfo {
     return out;
 }
 
-/**
- * @brief 按 Locale 格式化货币金额。
- *
- * @param value           金额数值。
- * @param cur             货币代码（决定符号与默认小数位）。
- * @param loc             区域设置（决定符号位与数字分隔符）。
- * @param fraction_digits 小数位数；默认 -1 表示沿用货币默认（JPY=0、其余=2）。
- * @return 本地化货币串，如 en+USD `$1,234.56`、de+EUR `1.234,56 €`、ja+JPY `¥1,234`。
- *
- * @note Thread: thread-safe (pure function)
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 按 Locale 格式化货币金额。
+///
+/// @param value           金额数值。
+/// @param cur             货币代码（决定符号与默认小数位）。
+/// @param loc             区域设置（决定符号位与数字分隔符）。
+/// @param fraction_digits 小数位数；默认 -1 表示沿用货币默认（JPY=0、其余=2）。
+/// @return 本地化货币串，如 en+USD `$1,234.56`、de+EUR `1.234,56 €`、ja+JPY `¥1,234`。
+///
+/// @note Thread: thread-safe (pure function)
+/// @note Side-effects: none
+/// @note Rebuildable: no
 [[nodiscard]] inline auto format_currency(double value, Currency cur, const Locale &loc, int fraction_digits = -1)
     -> std::string {
     const detail::CurrencyInfo info = detail::currency_info(cur);
@@ -161,17 +164,17 @@ struct CurrencyInfo {
     return num + " " + std::string(info.symbol);
 }
 
-/**
- * @brief 按 Locale 格式化日期。
- *
- * @param year/month/day 公历年月日。
- * @param loc            区域设置（决定日期模式）。
- * @return 本地化日期串：en `2025-10-25`(ISO)、de `25.10.2025`、zh/ja `2025年10月25日`、fr `25/10/2025`。
- *
- * @note Thread: thread-safe (pure function)
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 按 Locale 格式化日期。
+///
+/// @param year  公历年（不补零，原样输出）。
+/// @param month 公历月（de/fr 补零到 2 位；zh/ja 不补零；实现不校验范围）。
+/// @param day   公历日（de/fr 补零到 2 位；zh/ja 不补零；实现不校验范围）。
+/// @param loc            区域设置（决定日期模式）。
+/// @return 本地化日期串：en `2025-10-25`(ISO)、de `25.10.2025`、zh/ja `2025年10月25日`、fr `25/10/2025`。
+///
+/// @note Thread: thread-safe (pure function)
+/// @note Side-effects: none
+/// @note Rebuildable: no
 [[nodiscard]] inline auto format_date(int year, int month, int day, const Locale &loc) -> std::string {
     const std::string &lang = loc.language;
     auto p2 = [](int v) -> std::string {
@@ -185,6 +188,7 @@ struct CurrencyInfo {
         return p2(day) + "/" + p2(month) + "/" + std::to_string(year);
     }
     if (lang == "zh" || lang == "ja") {
+        // CJK-LITERAL: locale-output - zh/ja 年/月/日 date units are the feature of this branch
         return std::to_string(year) + "年" + std::to_string(month) + "月" + std::to_string(day) + "日";
     }
     // en / 默认：ISO 8601

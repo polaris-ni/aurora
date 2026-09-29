@@ -13,20 +13,22 @@
 namespace aurora {
 
 /// @brief 「文案类属性」的候选键（按优先级）。
-///
 /// 各控件的文本属性名并不统一（`Text` 用 `content`、`Button` 用 `label`），生成时按下表挑第一个
 /// **在该类型 schema 里真实存在**的键。⚠️ 早期版本硬编码写 `props.text`，而没有任何控件读 `text`
 /// —— 生成的树看着有文案，实际反序列化后是空的。这是本函数改为查 schema 的直接原因。
 inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES = {"content", "label", "text"};
 
 /// @brief NL→UI 生成（specification/08-tooling.md §2.6）：由自然语言描述生成 Widget JSON 树。
-///
 /// 当前为关键词匹配简版（**不依赖 LLM**）：把描述切成词，逐个词与已注册控件类型名（小写）比对，
 /// 命中即生成一个该类型的节点，全部平铺在一个 `Stack` 下。完整 NL→UI 需外部 LLM，
 /// 见 `ui_prompt.h`（prompt 投影 + 自修复环）。
 ///
 /// 覆盖面由 `serialization::list_all_components()` 派生 —— 新增控件无需改本函数即可被识别。
 /// 额外的口语别名见 `AURORA_UI_KEYWORD_ALIASES`（如 `label`→`Text`、`btn`→`Button`）。
+///
+/// @param description 自然语言描述（非空；按非字母数字切词后与已注册类型名/别名比对）。
+/// @return 成功为 Widget JSON 树（顶层 "node" 包装一个 Stack，children 平铺命中的控件；
+/// 全部未命中时回退为含原描述前缀 "?" 片段的 Text）；空描述为 `GenerateUiEmpty` 错误。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: none
@@ -110,15 +112,18 @@ inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES 
     Json children = Json::array();
     for (const std::string &type : hits) {
         Json node = Json::object();
-        node["type"] = type;
+        node.set("type", type);
 
         // 该类型若有文案类属性，填入类型名作为占位文案（与旧行为一致：Button→"Button"）。
         const Json schema = aurora::describe_component(type);
         if (schema.contains("default_props")) {
-            const Json &defaults = schema["default_props"];
+            const Json &defaults = *schema.at("default_props");
             for (const std::string_view key : AURORA_UI_TEXT_PROP_CANDIDATES) {
                 if (defaults.contains(std::string(key))) {
-                    node["props"][std::string(key)] = type;
+                    if (node.at("props") == nullptr) {
+                        node.set("props", Json::object());
+                    }
+                    node.at("props")->set(std::string(key), type);
                     break;
                 }
             }
@@ -129,27 +134,33 @@ inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES 
     // ── 回退：一个都没命中时产出带原描述片段的 Text（截断 20 字符）──
     if (children.empty()) {
         Json node = Json::object();
-        node["type"] = "Text";
-        node["props"]["content"] = "?" + description.substr(0, std::min<std::size_t>(description.size(), 20));
+        node.set("type", "Text");
+        Json props = Json::object();
+        props.set("content", "?" + description.substr(0, std::min<std::size_t>(description.size(), 20)));
+        node.set("props", std::move(props));
         children.push_back(node);
     }
 
+    Json node = Json::object();
+    node.set("type", "Stack");
+    node.set("props", Json::object());
+    node.set("children", children);
     Json tree = Json::object();
-    tree["node"] = Json::object();
-    tree["node"]["type"] = "Stack";
-    tree["node"]["props"] = Json::object();
-    tree["node"]["children"] = children;
+    tree.set("node", std::move(node));
     return tree;
 }
 
 /// @brief 快速验证：描述 → JSON → from_json 往返成功即表示 schema 匹配。
+/// @param desc 自然语言描述（原样传给 generate_ui）。
+/// @return generate_ui 成功且其 "node" 包装能被 serialization::from_json 重建时为 `true`。
 [[nodiscard]] inline auto validate_generate_ui(const std::string &desc) -> bool {
     const auto r = generate_ui(desc);
     if (!r.ok()) {
         return false;
     }
     // generate_ui 返回带 "node" 包装的树，from_json 需要顶层 "type" 的节点对象。
-    const Json &node = r.value().value("node", Json::object());
+    const auto *node_ptr = r.value().at("node");
+    const Json node = node_ptr != nullptr ? *node_ptr : Json::object();
     return aurora::serialization::from_json(node).ok();
 }
 

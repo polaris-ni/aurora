@@ -312,9 +312,9 @@ template <typename Range>
     }                                                                                                          \
     auto aurora_test_param_##fixture_class##_##case_name::case_body() -> void
 
-/// @brief 实例化一个值参数化 fixture（对标 `INSTANTIATE_TEST_SUITE_P`）。
-///
-/// 第三实参须是单一表达式（`values_of(...)` / `values_in(container)` / 具名容器）。
+// @brief 实例化一个值参数化 fixture（对标 `INSTANTIATE_TEST_SUITE_P`）。
+//
+// 第三实参须是单一表达式（`values_of(...)` / `values_in(container)` / 具名容器）。
 //
 // 豁免口径（区间式：紧邻式豁免罩不住下面带理由的说明与跨行 `#define`）：
 // 这里的可变参数不是「参数太多」的偷懒，而是**可选实参补默认值**——第三实参省略时须填入
@@ -344,11 +344,11 @@ template <typename Range>
 #define AURORA_TYPED_TEST_SUITE(suite_name, ...) \
     using aurora_typed_list_##suite_name = ::aurora::testing::TypeList<__VA_ARGS__>
 
-/// @brief 注册一个类型参数化用例（对标 `TYPED_TEST`）：体内 `TestType` 即当前类型。
-///
-/// `suite_name` 须是「以单个类型为模板参数、派生自 `aurora::testing::Fixture`」的类模板；
-/// 生成的用例体是该 fixture 派生类的成员函数，故其 protected 成员直接可见。
-/// ⚠️ fixture 是本类的**依赖基**，故体内引用其成员须写 `this->member_`。
+// @brief 注册一个类型参数化用例（对标 `TYPED_TEST`）：体内 `TestType` 即当前类型。
+//
+// `suite_name` 须是「以单个类型为模板参数、派生自 `aurora::testing::Fixture`」的类模板；
+// 生成的用例体是该 fixture 派生类的成员函数，故其 protected 成员直接可见。
+// ⚠️ fixture 是本类的**依赖基**，故体内引用其成员须写 `this->member_`。
 //
 // 豁免口径：`suite_name` 是**模板名**，只能以 `suite_name<...>` 形态出现——加了括号就成了
 // 括号表达式而非 template-name（[temp.names]/1），`CaseBase<(suite_name)<TestType>>` 直接编译失败。

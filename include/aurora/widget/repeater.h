@@ -10,32 +10,39 @@
 
 namespace aurora {
 
-/**
- * @brief 动态列表：把 `State<std::vector<T>>` 的每一项
- * 经 `itemBuilder` 展开为一个子 widget。容器尺寸随数据项变化，依赖变化时触发定点刷新。
- *
- * @code
- *   auto items = std::make_shared<State<std::vector<std::string>>>(std::vector<std::string>{"A","B","C"});
- *   Repeater<std::string>{items, [](const std::string& s, int i){
- *       return Node{ au::Text(s) };
- *   }};
- * @endcode
- *
- * @tparam T 列表项类型（须可拷贝）。
- */
+/// @brief 动态列表：把 `State<std::vector<T>>` 的每一项
+/// 经 `itemBuilder` 展开为一个子 widget。容器尺寸随数据项变化，依赖变化时触发定点刷新。
+///
+/// @code
+/// auto items = std::make_shared<State<std::vector<std::string>>>(std::vector<std::string>{"A","B","C"});
+/// Repeater<std::string>{items, [](const std::string& s, int i){
+/// return Node{ au::Text(s) };
+/// }};
+/// @endcode
+///
+/// @tparam T 列表项类型（须可拷贝）。
+/// @param T 列表项类型（模板形参，与 @tparam 同值）。
 template <typename T>
 class Repeater : public Container {
   public:
+    /// @brief 条目构建回调类型：给定条目值与下标返回一个子节点。
+    /// @param T 回调入参类型：条目值（const T &）。
     using ItemBuilder = std::function<Node(const T &, int)>;
 
+    /// @brief 构造动态列表：接管数据源信号与条目构建回调，并立即首轮展开。
+    /// @param items 列表数据源信号（State<std::vector<T>>），共享持有。
+    /// @param builder 条目构建回调，移动存入 builder_。
     Repeater(std::shared_ptr<State<std::vector<T>>> items, ItemBuilder builder)
         : items_(std::move(items)), builder_(std::move(builder)) {
-        rebuild_if_needed();
+        rebuild_if_needed();  // 首轮展开子树（built_ 此时必为 false）。
     }
 
+    /// @brief 类型名，供序列化与运行时自描述使用。
+    /// @return C 字符串 "Repeater"。
     [[nodiscard]] auto type_name() const -> const char * override { return "Repeater"; }
 
     /// @brief 运行时自描述（规格附录 B）。
+    /// @return Repeater 的控件描述符（尺寸属性、multiple 子策略与示例）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Repeater",
@@ -51,21 +58,29 @@ class Repeater : public Container {
                 {"au::Repeater<std::string>{items, [](const std::string& s, int i){ return Node{ au::Text(s) }; }}"},
         };
     }
+    /// @brief 运行时自描述：转发静态描述符。
+    /// @return Repeater 的控件描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 当前允许的子树最大深度（默认 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`）。
+    /// @return max_depth_ 当前值。
     [[nodiscard]] auto max_depth() const -> std::size_t { return max_depth_; }
     /// @brief 设置子树最大深度；超限展开经 `Diagnostics` 截断（specification/01-core.md §4.4）。
+    /// @param d 新的最大深度。
     auto set_max_depth(std::size_t d) -> void { max_depth_ = d; }
 
+    /// @brief 收集本控件的可订阅信号视图：items_ 存在时收录数据源信号。
+    /// @param out 输出参数，收录本控件持有的 SignalViewBase 指针。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
         if (items_) {
             out.push_back(static_cast<SignalViewBase *>(items_.get()));
         }
     }
+    /// @brief 序列化属性：数据源为运行时态不可序列化，仅附加说明 note。
+    /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["note"] = "Repeater items are runtime-state driven, not serialized";
+        props.set("note", "Repeater items are runtime-state driven, not serialized");
     }
 
   protected:

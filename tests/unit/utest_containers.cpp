@@ -3,7 +3,8 @@
 /// 测试说明: 覆盖 Column/Row 容器级行为——初始化列表构造与所有权、gap 落位、
 /// MainAxisSize::Max 撑满、MainAxisAlignment::End 收尾对齐、CrossAxisAlignment::Stretch
 /// 拉伸子项交叉轴、CrossAxisAlignment::Baseline 基线对齐（Text/Button 混排、Modifier 内边距换算、
-/// Column 回退 Start 并一次性降级提示）、负 gap 校验、属性序列化往返，以及容器子树绘制缓存
+/// Column 回退 Start 并一次性降级提示）、部分指定 Flex 字面量不翻转容器主轴、负 gap 校验、
+/// 属性序列化往返，以及容器子树绘制缓存
 /// （Display List / cache_layer）随全局光栅状态（AA 模式）世代失效
 
 #include <algorithm>
@@ -22,8 +23,11 @@
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_containers {
+
+using aurora::testing::require_field;
 
 namespace {
 
@@ -145,6 +149,34 @@ AURORA_TEST_CASE(row_gap_places_children_horizontally) {
     AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.x, 48.0F, 1e-4F);
 }
 
+AURORA_TEST_CASE(partial_flex_literal_cannot_flip_container_axis) {
+    // `Flex{.main_axis = X}` 这类部分指定初始化会把未写出的成员打回默认值 direction=Row，
+    // 曾让 Column 走横向布局（demo_column 面板内 "AB" 并排）。主轴归属控件类型，不随传入 Flex 漂移。
+    Column col{
+        ColumnProps{.children = {box(100.0F, 20.0F), box(100.0F, 20.0F)},
+                    .flex = Flex{.main_axis = MainAxisAlignment::Center, .cross_axis = CrossAxisAlignment::Center}}};
+    LayoutEngine::layout(col, bounded(200.0F, 200.0F));
+    AURORA_TEST_CHECK_TRUE(col.flex.direction == FlexDirection::Column);
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().origin.y, 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().origin.x, 0.0F, 1e-4F);
+
+    Row row{RowProps{.children = {box(40.0F, 20.0F), box(60.0F, 20.0F)},
+                     .flex = Flex{.direction = FlexDirection::Column, .main_axis = MainAxisAlignment::Center}}};
+    LayoutEngine::layout(row, bounded(300.0F, 100.0F));
+    AURORA_TEST_CHECK_TRUE(row.flex.direction == FlexDirection::Row);
+    AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.x, 40.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.y, 0.0F, 1e-4F);
+
+    // 纠轴向只针对「异轴」取值：本轴家族的 Reverse 是有效配置，必须原样保留。
+    Column rev_col{ColumnProps{.children = {box(100.0F, 20.0F), box(100.0F, 20.0F)},
+                               .flex = Flex{.direction = FlexDirection::RowReverse}}};
+    LayoutEngine::layout(rev_col, bounded(200.0F, 200.0F));
+    AURORA_TEST_CHECK_TRUE(rev_col.flex.direction == FlexDirection::ColumnReverse);
+    // 纵向反序：首项落底（容器高 40 - 子项高 20）。
+    AURORA_TEST_CHECK_NEAR(rev_col.child_nodes()[0].bounds().origin.y, 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rev_col.child_nodes()[1].bounds().origin.y, 0.0F, 1e-4F);
+}
+
 AURORA_TEST_CASE(column_main_axis_size_max_fills_height) {
     Column col;
     col.add(box(100.0F, 20.0F));
@@ -191,10 +223,11 @@ AURORA_TEST_CASE(cross_axis_stretch_expands_child) {
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[0].bounds().size.width, 200.0F, 1e-4F);
 }
 
-/// @brief 判定诊断列表中是否含「Column + Baseline」降级提示（消息以 Column 开头、where 为 layout）。
+/// @brief 判定诊断列表中是否含「Column + Baseline」降级提示
+///        （消息取自 Column::on_layout 的英文提示开头、where 为 layout）。
 auto has_column_baseline_notice(const std::vector<Diagnostic> &diags) -> bool {
     return std::ranges::any_of(diags, [](const auto &d) {
-        return std::string{d.where} == "layout" && std::string{d.message}.starts_with("Column");
+        return std::string{d.where} == "layout" && std::string{d.message}.starts_with("The cross axis of Column");
     });
 }
 
@@ -290,11 +323,13 @@ AURORA_TEST_CASE(column_baseline_falls_back_to_start_and_warns_once) {
     // Column 交叉轴是水平的：按 Start（x 均为 0），不崩。
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[0].bounds().origin.x, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().origin.x, 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_MSG(has_column_baseline_notice(Diagnostics::take()), "Column + Baseline 须发一次降级提示");
+    AURORA_TEST_CHECK_MSG(has_column_baseline_notice(Diagnostics::take()),
+                          "Column + Baseline must emit one degraded notice");
 
     // 重复布局不再提示（每实例一次，避免逐帧刷屏）。
     LayoutEngine::layout(col, bounded(200.0F, 200.0F));
-    AURORA_TEST_CHECK_MSG(!has_column_baseline_notice(Diagnostics::take()), "降级提示不得每帧重复");
+    AURORA_TEST_CHECK_MSG(!has_column_baseline_notice(Diagnostics::take()),
+                          "the degraded notice must not repeat per frame");
 }
 
 AURORA_TEST_CASE(validate_props_rejects_negative_gap) {
@@ -314,10 +349,10 @@ AURORA_TEST_CASE(props_serialize_deserialize_roundtrip) {
     src.set_main_axis_size(MainAxisSize::Max);
     src.set_gap(12.0F);
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["main_axis_alignment"].get<std::string>(), "SpaceBetween");
-    AURORA_TEST_CHECK_EQ(props["gap"].get<float>(), 12.0F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "main_axis_alignment"), "SpaceBetween");
+    AURORA_TEST_CHECK_EQ(require_field<float>(props, "gap"), 12.0F);
 
     Column dst;
     dst.deserialize_props(props);

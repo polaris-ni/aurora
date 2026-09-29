@@ -46,8 +46,8 @@ AURORA_TEST_CASE(filter_and_options_struct_defaults) {
     AURORA_TEST_CHECK_TRUE(def.filters.empty());
 
     // Options 聚合构造携带过滤器。
-    const aurora::file_dialog::Options opts{.title = "打开文件", .initial_dir = "C:/", .filters = {f}};
-    AURORA_TEST_CHECK_STREQ(opts.title, "打开文件");
+    const aurora::file_dialog::Options opts{.title = "Open file", .initial_dir = "C:/", .filters = {f}};
+    AURORA_TEST_CHECK_STREQ(opts.title, "Open file");
     AURORA_TEST_CHECK_STREQ(opts.initial_dir, "C:/");
     AURORA_TEST_REQUIRE_EQ(opts.filters.size(), 1U);
     AURORA_TEST_CHECK_STREQ(opts.filters[0].name, "Images");

@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstdint>
 #include <vector>
 
@@ -31,7 +32,8 @@ auto make_frames(int n) -> std::vector<Image> {
     return frames;
 }
 
-/// @brief 演示「可子类化播放器本体」：覆写 on_frame 给画面叠加一层半透明色调。
+/// @brief 演示「可子类化播放器本体」：覆写 `on_frame` 给画面叠加一层半透明色调，
+///        覆写 `on_playback_tick` 在播完时回到起点（源仅 2 秒，单次播放看不出循环）。
 class TintedVideoPlayer : public aurora::VideoPlayer {
   protected:
     auto on_frame(const Image &frame) -> void override {
@@ -43,6 +45,16 @@ class TintedVideoPlayer : public aurora::VideoPlayer {
             tinted.pixels.at(p + 2U) = static_cast<std::uint8_t>(static_cast<float>(tinted.pixels.at(p + 2U)) * 0.9F);
         }
         VideoPlayer::on_frame(tinted);
+    }
+
+    auto on_playback_tick(std::chrono::steady_clock::time_point now) -> void override {
+        const bool was_playing = is_playing();
+        VideoPlayer::on_playback_tick(now);
+        // 只在「播到末尾自停」这一跳上重开；手动暂停于末帧不会触发（was_playing 为假）。
+        if (was_playing && !is_playing() && position_fraction() >= 1.0) {
+            seek(std::chrono::microseconds{0});
+            play();
+        }
     }
 };
 
@@ -57,6 +69,8 @@ auto main() -> int {
     player->set_source(src);
     player->width(aurora::px(640));
     player->height(aurora::px(360));
+    // 演示「装好源即播」：不显式 play() 时播放器会停在第 0 帧（该帧是全黑），画面看不出推进。
+    player->play();
 
     // 提示：要自定义控件 UI，可继承 VideoControls 或调用 player->set_controls(...)。
     return run_demo(aurora::Node{std::move(player)}, "Video Player", 640.0F, 360.0F);

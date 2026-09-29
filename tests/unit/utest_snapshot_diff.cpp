@@ -12,8 +12,13 @@
 #include "aurora/core/image.h"
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_snapshot_diff {
+
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 /// @brief 构造 w×h 的 RGBA8 图，逐像素按回调填充。
@@ -347,7 +352,9 @@ AURORA_TEST_CASE(attribute_root_widget_has_empty_path_but_counts_as_attributed) 
     AURORA_TEST_CHECK_EQ(got[0].widget_type, std::string("Column"));
     // JSON 里此时必须是真字符串而非 null，否则下游读不到「是根控件画的」。
     const SnapshotDiffReport report = SnapshotDiffReport{.attributed = got};
-    AURORA_TEST_CHECK_EQ(report.to_json()["attributed"][0]["widget_path"].get<std::string>(), std::string(""));
+    const auto envelope = report.to_json();
+    const auto *const attributed = require_child_at(*require_child(envelope, "attributed"), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*attributed, "widget_path"), std::string(""));
 }
 
 AURORA_TEST_CASE(attribute_unattributed_when_no_widget_covers_region) {
@@ -440,9 +447,10 @@ AURORA_TEST_CASE(report_without_boxes_still_reports_regions_as_unattributed) {
     AURORA_TEST_CHECK_NEAR(report.attributed_ratio, 0.0, 1e-12);
 
     // JSON 里未归因用 null（而非空串），避免下游把「背景上的差异」误读成根控件。
-    const Json j = report.to_json();
-    AURORA_TEST_CHECK_TRUE(j["attributed"][0]["widget_path"].is_null());
-    AURORA_TEST_CHECK_TRUE(j["attributed"][0]["widget_type"].is_null());
+    const auto j = report.to_json();
+    const auto *const attributed = require_child_at(*require_child(j, "attributed"), 0);
+    AURORA_TEST_CHECK_TRUE(require_child(*attributed, "widget_path")->is_null());
+    AURORA_TEST_CHECK_TRUE(require_child(*attributed, "widget_type")->is_null());
 }
 
 AURORA_TEST_CASE(report_json_carries_global_and_per_region_facts) {
@@ -452,15 +460,15 @@ AURORA_TEST_CASE(report_json_carries_global_and_per_region_facts) {
     set_px(current, 24, 24, 255);
 
     const SnapshotDiffReport report = build_snapshot_diff_report(baseline, current, sample_boxes());
-    const Json j = report.to_json();
-    AURORA_TEST_CHECK_FALSE(j["size_mismatch"].get<bool>());
-    AURORA_TEST_CHECK_EQ(j["pixel_diff_count"].get<std::size_t>(), 2U);
-    AURORA_TEST_CHECK_EQ(j["max_color_delta"].get<int>(), 255);
-    AURORA_TEST_CHECK_EQ(j["regions"].size(), 2U);
-    AURORA_TEST_CHECK_EQ(j["attributed"].size(), 2U);
+    const auto j = report.to_json();
+    AURORA_TEST_CHECK_FALSE(require_field<bool>(j, "size_mismatch"));
+    AURORA_TEST_CHECK_EQ(require_field<std::uint64_t>(j, "pixel_diff_count"), 2U);
+    AURORA_TEST_CHECK_EQ(require_field<int>(j, "max_color_delta"), 255);
+    AURORA_TEST_CHECK_EQ(require_child(j, "regions")->size(), 2U);
+    AURORA_TEST_CHECK_EQ(require_child(j, "attributed")->size(), 2U);
     // 逐条区域必须有几何，否则 AI 无从定位。
-    AURORA_TEST_CHECK_TRUE(j["regions"][0].contains("x"));
-    AURORA_TEST_CHECK_TRUE(j["attributed"][0].contains("region"));
+    AURORA_TEST_CHECK_TRUE(require_child_at(*require_child(j, "regions"), 0)->contains("x"));
+    AURORA_TEST_CHECK_TRUE(require_child_at(*require_child(j, "attributed"), 0)->contains("region"));
     AURORA_TEST_CHECK_GT(report.attributed_ratio, 0.0);
 }
 

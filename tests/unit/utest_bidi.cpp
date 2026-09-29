@@ -336,14 +336,14 @@ AURORA_TEST_CASE(uba_visual_order_rli_chars_reverse_inside) {
 AURORA_TEST_CASE(mixed_rtl_reorders_runs_by_paragraph_direction) {
     const auto &root = aurora::testing::isolation::repo_root();
     if (root.empty()) {
-        AURORA_TEST_SKIP("repo_root 不可用，跳过真实字体集成测试");
+        AURORA_TEST_SKIP("repo_root unavailable, skipping the real-font integration test");
     }
     const std::filesystem::path roboto =
         std::filesystem::path{root} / "third_party/harfbuzz/perf/fonts/Roboto-Regular.ttf";
     const std::filesystem::path amiri =
         std::filesystem::path{root} / "third_party/harfbuzz/perf/fonts/Amiri-Regular.ttf";
     if (!std::filesystem::exists(roboto) || !std::filesystem::exists(amiri)) {
-        AURORA_TEST_SKIP("Roboto/Amiri TTF 不在仓库内，跳过真实字体集成测试");
+        AURORA_TEST_SKIP("Roboto/Amiri TTF not present in the repo, skipping the real-font integration test");
     }
 
     // 同一 family 注册两种面：find_glyph 缺字时跨面回退 → 自然形成两个 face-run。
@@ -411,7 +411,7 @@ AURORA_TEST_CASE(mixed_rtl_reorders_runs_by_paragraph_direction) {
 AURORA_TEST_CASE(arabic_real_font_shapes_into_ink_and_reasonable_metrics) {
     const std::string amiri_path = arabic_ttf_path();
     if (amiri_path.empty()) {
-        AURORA_TEST_SKIP("Amiri TTF 不可用（CI/headless 无 Arabic 字体），跳过真实字体集成");
+        AURORA_TEST_SKIP("Amiri TTF unavailable (CI/headless has no Arabic font), skipping the real-font integration");
     }
     aurora::render::FontEngine::register_font("__bidi_arabic", amiri_path);
 
@@ -438,7 +438,7 @@ AURORA_TEST_CASE(arabic_real_font_shapes_into_ink_and_reasonable_metrics) {
 AURORA_TEST_CASE(arabic_rtl_caret_x_mirrors_logical_order) {
     const std::string amiri_path = arabic_ttf_path();
     if (amiri_path.empty()) {
-        AURORA_TEST_SKIP("Amiri TTF 不可用（CI/headless 无 Arabic 字体），跳过真实字体集成");
+        AURORA_TEST_SKIP("Amiri TTF unavailable (CI/headless has no Arabic font), skipping the real-font integration");
     }
     aurora::render::FontEngine::register_font("__bidi_arabic", amiri_path);
 
@@ -467,7 +467,7 @@ AURORA_TEST_CASE(arabic_rtl_caret_x_mirrors_logical_order) {
 AURORA_TEST_CASE(arabic_real_shaping_ligature_and_joining) {
     const std::string amiri_path = arabic_ttf_path();
     if (amiri_path.empty()) {
-        AURORA_TEST_SKIP("Amiri TTF 不可用（CI/headless 无 Arabic 字体），跳过真实字体集成");
+        AURORA_TEST_SKIP("Amiri TTF unavailable (CI/headless has no Arabic font), skipping the real-font integration");
     }
     aurora::render::FontEngine::register_font("__bidi_arabic", amiri_path);
 
@@ -503,7 +503,7 @@ AURORA_TEST_CASE(arabic_real_shaping_ligature_and_joining) {
 AURORA_TEST_CASE(arabic_richtextedit_rtl_right_aligns) {
     const std::string amiri_path = arabic_ttf_path();
     if (amiri_path.empty()) {
-        AURORA_TEST_SKIP("Amiri TTF 不可用（CI/headless 无 Arabic 字体），跳过真实字体集成");
+        AURORA_TEST_SKIP("Amiri TTF unavailable (CI/headless has no Arabic font), skipping the real-font integration");
     }
     aurora::render::FontEngine::register_font("__bidi_arabic", amiri_path);
 
@@ -543,7 +543,7 @@ AURORA_TEST_CASE(arabic_richtextedit_rtl_pointer_hit_no_overflow) {
     // 另回归 FontEngine::hit_test_char_inclusive 入口 x≤0 的 RTL 语义（曾无条件返回 0）。
     const std::string amiri_path = arabic_ttf_path();
     if (amiri_path.empty()) {
-        AURORA_TEST_SKIP("Amiri TTF 不可用（CI/headless 无 Arabic 字体），跳过真实字体集成");
+        AURORA_TEST_SKIP("Amiri TTF unavailable (CI/headless has no Arabic font), skipping the real-font integration");
     }
     aurora::render::FontEngine::register_font("__bidi_arabic", amiri_path);
 
@@ -585,7 +585,8 @@ AURORA_TEST_CASE(arabic_richtextedit_cross_level_runs_reorder) {
     const std::filesystem::path roboto =
         std::filesystem::path{root} / "third_party/harfbuzz/perf/fonts/Roboto-Regular.ttf";
     if (root.empty() || !std::filesystem::exists(amiri) || !std::filesystem::exists(roboto)) {
-        AURORA_TEST_SKIP("Amiri/Roboto TTF 不可用（CI/headless 无 Arabic 字体），跳过跨层集成");
+        AURORA_TEST_SKIP(
+            "Amiri/Roboto TTF unavailable (CI/headless has no Arabic font), skipping the cross-layer integration");
     }
     aurora::render::FontEngine::register_font("__bidi_arabic", amiri.string());
     aurora::render::FontEngine::register_font("__bidi_latin", roboto.string());

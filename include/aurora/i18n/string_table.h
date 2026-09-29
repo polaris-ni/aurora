@@ -12,38 +12,44 @@
 
 namespace aurora {
 
-/**
- * @brief i18n 字符串表（运行时，specification/07-environment-modifier.md §6 国际化）：按 Locale 查 key →
- * 模板，并格式化。
- *
- * 模板语法：
- * - 位置占位：`{0}` `{1}` … 用 args[i] 替换。
- * - CLDR 六类复数：`{0, plural, zero=… one=… two=… few=… many=… other=…}`，按 `plural_category(args[0], loc)`
- * 选分支（详见 plural.h）。
- *
- * 用法：
- * @code
- *   auto& t = default_string_table();
- *   t.add(Locale{"en"}, "greeting", "Hello {0}");
- *   t.add(Locale{"zh"}, "greeting", "你好 {0}");
- *   Text{ .content = LocalizedString::tr("greeting", {LocalizedString{"Aurora"}}) };
- * @endcode
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief i18n 字符串表（运行时，specification/07-environment-modifier.md §6 国际化）：按 Locale 查 key →
+/// 模板，并格式化。
+///
+/// 模板语法：
+/// - 位置占位：`{0}` `{1}` … 用 args[i] 替换。
+/// - CLDR 六类复数：`{0, plural, zero=… one=… two=… few=… many=… other=…}`，按 `plural_category(args[0], loc)`
+/// 选分支（详见 plural.h）。
+///
+/// 用法：
+/// @code
+/// auto& t = default_string_table();
+/// t.add(Locale{"en"}, "greeting", "Hello {0}");
+/// t.add(Locale{"zh"}, "greeting", "你好 {0}");
+/// Text{ .content = LocalizedString::tr("greeting", {LocalizedString{"Aurora"}}) };
+/// @endcode
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
 class StringTable {
   public:
     /// @brief 为某区域设置 key → 模板。
+    /// @param loc 区域设置（仅取其 tag 作为分组键）。
+    /// @param key 本地化键。
+    /// @param tmpl 模板串（`{0}` 占位与复数块语法见类注释）；同 locale 同 key 重复注册时覆盖旧值。
     auto add(const Locale &loc, const std::string &key, const std::string &tmpl) -> void {
         data_[loc.tag()][key] = tmpl;
     }
 
     /// @brief 设置默认区域（查表缺省回退）。
+    /// @param loc 默认区域设置；lookup 在目标 locale 未命中时回退到它的 tag 再查。
     auto set_default_locale(const Locale &loc) -> void { default_ = loc; }
 
     /// @brief 查找某 Locale 下 key 的模板；缺失则回退默认 Locale；再缺失返回 nullopt。
+    ///
+    /// @param key 本地化键。
+    /// @param loc 优先查找的区域设置。
+    /// @return 命中的模板串；loc 与默认 locale 两级均未命中该 key 时返回 std::nullopt。
     [[nodiscard]] auto lookup(const std::string &key, const Locale &loc) const -> std::optional<std::string> {
         if (const auto lit = data_.find(loc.tag()); lit != data_.end()) {
             if (const auto kit = lit->second.find(key); kit != lit->second.end()) {
@@ -59,6 +65,9 @@ class StringTable {
     }
 
     /// @brief 解析一个本地化字符串（查表 + 递归格式化参数）。
+    /// @param ls 待解析的字符串：localize 为 false 时直接返回其 text。
+    /// @param loc 查表与复数判定使用的区域设置。
+    /// @return 模板格式化后的显示串；查表失败时回退 ls.text。
     [[nodiscard]] auto resolve(const LocalizedString &ls, const Locale &loc) const -> std::string {
         if (!ls.localize) {
             return ls.text;
@@ -76,6 +85,9 @@ class StringTable {
     }
 
     /// @brief 从 open 位置的 '{' 起，找到与之配平（考虑嵌套 {}）的 '}' 下标。
+    /// @param s 待扫描的串。
+    /// @param open 起始 '{' 的下标（从该处开始计深度）。
+    /// @return 配平的 '}' 下标；到串尾仍未配平返回 std::string::npos。
     [[nodiscard]] static auto find_closing_brace(const std::string &s, std::size_t open) -> std::size_t {
         int depth = 0;
         for (std::size_t k = open; k < s.size(); ++k) {
@@ -92,6 +104,13 @@ class StringTable {
     }
 
     /// @brief 格式化模板：替换 `{i}` 占位与 `{n, plural, one=… other=…}` 复数块。
+    /// `{i}` 越界或非数字（按索引 0 处理后再越界）时替换为空串；复数块按 args[n] 数值经
+    /// plural_category 选分支并递归格式化分支内容。
+    ///
+    /// @param tmpl 模板串。
+    /// @param args 位置参数（字符串形式，按索引取用）。
+    /// @param loc 复数分支判定使用的区域设置，默认临时量 Locale{}（即英语回退规则）。
+    /// @return 替换完成的显示串。
     [[nodiscard]] static auto format(const std::string &tmpl, const std::vector<std::string> &args,
                                      const Locale &loc = Locale{}) -> std::string {
         std::string out;
@@ -233,6 +252,7 @@ class StringTable {
 };
 
 /// @brief 进程级默认字符串表（供 widget 渲染时就地查表）。
+/// @return 函数内 static StringTable 的引用（首次调用惰性构造，生命周期至进程结束）。
 [[nodiscard]] inline auto default_string_table() -> StringTable & {
     // 惰性构造的函数内 static：首次调用才建，跨 TU 初始化顺序问题在此不存在（本检查的担心面）。
     // 仅浏览器口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。

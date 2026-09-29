@@ -71,7 +71,7 @@ AURORA_TEST_CASE(present_frames_dirty_upload_and_device_lost_recovery) {
 namespace aurora::test_cases::itest_d3d11_present {
 
 AURORA_TEST_CASE(present_frames_dirty_upload_and_device_lost_recovery) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_D3D11 未开启（默认 OFF），头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_D3D11 not enabled (default OFF), the whole header is compiled out by the macro");
 }
 
 }  // namespace aurora::test_cases::itest_d3d11_present

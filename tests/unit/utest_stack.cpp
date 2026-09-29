@@ -11,8 +11,10 @@
 #include "aurora/widget/stack.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_stack {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -102,7 +104,7 @@ AURORA_TEST_CASE(stack_respects_min_constraint_floor) {
 }
 
 AURORA_TEST_CASE(overlay_alias_is_stack) {
-    static_assert(std::is_same_v<Overlay, Stack>, "Overlay 必须是 Stack 的便捷别名");
+    static_assert(std::is_same_v<Overlay, Stack>, "Overlay must be a convenience alias of Stack");
     Overlay st{box(10.0F, 10.0F)};
     AURORA_TEST_CHECK_EQ(std::string{st.type_name()}, "Stack");
 }
@@ -111,10 +113,10 @@ AURORA_TEST_CASE(props_serialize_deserialize_roundtrip) {
     Stack src({box(10.0F, 10.0F)}, Alignment::BottomRight);
     src.set_fit(StackFit::Expand);
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["alignment"].get<int>(), static_cast<int>(Alignment::BottomRight));
-    AURORA_TEST_CHECK_EQ(props["fit"].get<int>(), static_cast<int>(StackFit::Expand));
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "alignment"), static_cast<int>(Alignment::BottomRight));
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "fit"), static_cast<int>(StackFit::Expand));
 
     Stack dst;
     dst.deserialize_props(props);

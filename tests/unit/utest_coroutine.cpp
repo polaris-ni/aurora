@@ -22,7 +22,7 @@ namespace m = aurora::testing::matchers;
 
 namespace {
 
-/// @brief 有界轮询：每 1ms 轮询一次 pred，超时返回最后一次判定（禁止无界阻塞）。
+// @brief 有界轮询：每 1ms 轮询一次 pred，超时返回最后一次判定（禁止无界阻塞）。
 template <typename Pred>
 // pred 在轮询循环中被多次调用，转发（std::move/forward）会导致后续迭代使用已移动对象，故有意不转发。
 // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)

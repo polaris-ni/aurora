@@ -1,38 +1,39 @@
 #pragma once
 #include "aurora/core/platform.h"  // NOLINT
 
-// WASM/Canvas Surface（ARCHITECTURE.md §8.4）：仅在 defined(AURORA_PLATFORM_WASM) 时提供。
-// 渲染到 HTML5 Canvas 的 ImageData。其他平台降级为 HeadlessSurface。
-//
-// 设计要点：
-// - 上屏路径：软件 Painter RGBA 帧缓冲 → EM_ASM 拷贝到 Canvas 2D ImageData → putImageData。
-//   无需 WebGL；Canvas 2D 在浏览器中由 GPU 加速合成，性能足够 UI 场景。
-// - 事件翻译：Emscripten HTML5 API（emscripten_set_*_callback）翻译鼠标/键盘/触摸/resize。
-// - 线程模型：无 pthreads 构建下 ThreadPool 为 deferred 排空模式（见 thread_pool.h 类头），
-//   排空点是 `Application::step_frame()` 的帧尾（步骤 7）而非本 Surface 的 `present()`——
-//   空闲帧被脏区决策跳过就没有 present，挂在这儿会饿死 `au::async` / 协程续体（同下方 ARIA 条）。
-//   以 `-pthread` 构建（`AURORA_ENABLE_WASM_PTHREADS`）则回到普通 worker 池真并行，但浏览器要求
-//   宿主页面先跨源隔离（`crossOriginIsolated`），故该构建选项默认关闭、服务器头由宿主自担。
-// - 帧循环：浏览器主线程不可阻塞，`Application::run()` 经 `emscripten_request_animation_frame_loop`
-//   把统一帧循环挂到 rAF/vsync（蹦床 `Application::raf_tick`，见 application.h）；本 Surface 的
-//   `wait_events` 因此无需实现（保持空体，rAF 模式下帧循环根本不调用它）。
-// - 关闭语义：window 级 beforeunload 回调（全局注册一次）置位页面级关闭请求，所有
-//   Surface 的 `should_close()` 同时为真——浏览器整页卸载即全部窗口关闭，语义天然一致。
-// - 多窗口路由（specification/06-app-platform.md §2.4 已知限制收口）：新建窗口即接管键盘
-//   焦点（同桌面「新建即激活」）；`focus_window()` 切路由指针；`raise()` 经「把本 canvas 移到
-//   其父节点末子」实现——浏览器无 z 序 API，**DOM 顺序即层叠顺序**（末位在上）。
-// - 页面标题（同 §2.4）：`document.title` 是**页面单值**，而每窗口各有一份标题，故按桌面
-//   口径折算——「焦点窗口的标题即页面标题」：`set_title` 先落本窗口缓存，仅当自己是焦点
-//   窗口时才写 DOM；焦点易主（构造接管 / `focus_window()` / 鼠标按下 / 焦点窗口析构回落）
-//   即把新焦点窗口的缓存重播到 `document.title`。从未声明过标题的窗口不动页面标题
-//   （宿主自己的 `<title>` 不归库管），声明过空串则如实写空——「声明」与否才分水岭。
-//   ⚠️ 一处**如实申报的契约偏差**：基类 `focus_window()` 的桌面语义是「置顶 + 取键盘焦点」，
-//   WASM 只做后者。因为「置顶」在此只能靠改写宿主 DOM 顺序实现，隐式重排别人家的节点是
-//   越权行为（正常流下会让画布换位跳动），故层序变更只在宿主**显式**调 `raise()` 时发生。
-// - 无障碍（ARIA 镜像桥）：首帧 `set_accessibility_root` 即构造并激活 `WasmAriaBridge`
-//   （浏览器无读屏探测面，D14 惰性激活的既定例外，见 wasm_aria.h 申报）；镜像同步
-//   （D9 拉取式重投影）与读屏反向动作排水由桥**自持的 rAF 自驱拍**每帧执行——不经
-//   `present()` 帧尾，因静止页面没有脏帧就没有 present，反向通道会被饿死（见 wasm_aria.h）。
+/// @file wasm_surface.h
+/// @brief WASM/Canvas Surface（ARCHITECTURE.md §8.4）：仅在 defined(AURORA_PLATFORM_WASM) 时提供。
+/// 渲染到 HTML5 Canvas 的 ImageData。其他平台降级为 HeadlessSurface。
+///
+/// 设计要点：
+/// - 上屏路径：软件 Painter RGBA 帧缓冲 → EM_ASM 拷贝到 Canvas 2D ImageData → putImageData。
+///   无需 WebGL；Canvas 2D 在浏览器中由 GPU 加速合成，性能足够 UI 场景。
+/// - 事件翻译：Emscripten HTML5 API（emscripten_set_*_callback）翻译鼠标/键盘/触摸/resize。
+/// - 线程模型：无 pthreads 构建下 ThreadPool 为 deferred 排空模式（见 thread_pool.h 类头），
+///   排空点是 `Application::step_frame()` 的帧尾（步骤 7）而非本 Surface 的 `present()`——
+///   空闲帧被脏区决策跳过就没有 present，挂在这儿会饿死 `au::async` / 协程续体（同下方 ARIA 条）。
+///   以 `-pthread` 构建（`AURORA_ENABLE_WASM_PTHREADS`）则回到普通 worker 池真并行，但浏览器要求
+///   宿主页面先跨源隔离（`crossOriginIsolated`），故该构建选项默认关闭、服务器头由宿主自担。
+/// - 帧循环：浏览器主线程不可阻塞，`Application::run()` 经 `emscripten_request_animation_frame_loop`
+///   把统一帧循环挂到 rAF/vsync（蹦床 `Application::raf_tick`，见 application.h）；本 Surface 的
+///   `wait_events` 因此无需实现（保持空体，rAF 模式下帧循环根本不调用它）。
+/// - 关闭语义：window 级 beforeunload 回调（全局注册一次）置位页面级关闭请求，所有
+///   Surface 的 `should_close()` 同时为真——浏览器整页卸载即全部窗口关闭，语义天然一致。
+/// - 多窗口路由（specification/06-app-platform.md §2.4 已知限制收口）：新建窗口即接管键盘
+///   焦点（同桌面「新建即激活」）；`focus_window()` 切路由指针；`raise()` 经「把本 canvas 移到
+///   其父节点末子」实现——浏览器无 z 序 API，**DOM 顺序即层叠顺序**（末位在上）。
+/// - 页面标题（同 §2.4）：`document.title` 是**页面单值**，而每窗口各有一份标题，故按桌面
+///   口径折算——「焦点窗口的标题即页面标题」：`set_title` 先落本窗口缓存，仅当自己是焦点
+///   窗口时才写 DOM；焦点易主（构造接管 / `focus_window()` / 鼠标按下 / 焦点窗口析构回落）
+///   即把新焦点窗口的缓存重播到 `document.title`。从未声明过标题的窗口不动页面标题
+///   （宿主自己的 `<title>` 不归库管），声明过空串则如实写空——「声明」与否才分水岭。
+///   ⚠️ 一处**如实申报的契约偏差**：基类 `focus_window()` 的桌面语义是「置顶 + 取键盘焦点」，
+///   WASM 只做后者。因为「置顶」在此只能靠改写宿主 DOM 顺序实现，隐式重排别人家的节点是
+///   越权行为（正常流下会让画布换位跳动），故层序变更只在宿主**显式**调 `raise()` 时发生。
+/// - 无障碍（ARIA 镜像桥）：首帧 `set_accessibility_root` 即构造并激活 `WasmAriaBridge`
+///   （浏览器无读屏探测面，惰性激活的既定例外，见 wasm_aria.h 申报）；镜像同步
+///   （拉取式重投影）与读屏反向动作排水由桥**自持的 rAF 自驱拍**每帧执行——不经
+///   `present()` 帧尾，因静止页面没有脏帧就没有 present，反向通道会被饿死（见 wasm_aria.h）。
 
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
 
@@ -60,8 +61,17 @@
 
 namespace aurora {
 
+/// @brief WASM/Canvas Surface（ARCHITECTURE.md §8.4）：仅在 defined(AURORA_PLATFORM_WASM) 时提供。
+/// 渲染到 HTML5 Canvas 的 ImageData。其他平台降级为 HeadlessSurface。
+/// 窗口可见性策略（WindowVisibility）不在此落地：浏览器 canvas 无窗口可见性概念。
 class WasmSurface : public Surface {
   public:
+    /// @brief 以画布尺寸与 canvas 元素 id 构造：注册本 canvas 的鼠标回调，接管键盘焦点，
+    ///        并在全局首次建窗时挂上 document/window 级键盘、resize 与 beforeunload 分发器。
+    /// @param w 初始画布宽（设备像素，随后由 CSS 尺寸查询刷新）。
+    /// @param h 初始画布高（设备像素）。
+    /// @param canvas_id DOM id（可带 '#' 前缀，两种写法等价）：上屏走 getElementById，
+    ///        事件注册/尺寸查询走 CSS 选择器，内部派生两种形态分别使用。
     WasmSurface(int w, int h, const char *canvas_id = "#canvas") : w_(w), h_(h) {
         // 入参统一按 DOM id 理解（可带 '#' 前缀，两种写法等价）。派生两种形态分开使用：
         // `present()` 上屏走 getElementById（须裸 id），事件注册/尺寸查询走 Emscripten 的
@@ -96,6 +106,8 @@ class WasmSurface : public Surface {
         }
     }
 
+    /// @brief 析构：注销本 canvas 的鼠标回调、清算 ARIA 桥与实例表；焦点窗口销毁时把路由
+    ///        指针回落到最早创建的存活实例并重播其页面标题。
     ~WasmSurface() override {
         // 仅注销本 canvas 的鼠标回调；document/window 级全局分发器常驻（进程生命周期内
         // 有效，实例清空后遍历自然跳过，无副作用）。
@@ -122,14 +134,23 @@ class WasmSurface : public Surface {
     auto operator=(const WasmSurface &) -> WasmSurface & = delete;
     auto operator=(WasmSurface &&) -> WasmSurface & = delete;
 
+    /// @brief 重置一帧画布：按给定尺寸重建 Painter 缓冲并更新逻辑尺寸。
+    /// @param w 画布宽（设备像素）。
+    /// @param h 画布高（设备像素）。
+    /// @return 恒为成功（软件缓冲分配，无失败路径）。
     [[nodiscard]] auto begin_frame(int w, int h) -> Result<bool> override {
         painter_.begin(w, h);
         w_ = w;
         h_ = h;
         return true;
     }
+    /// @brief 取当前帧绘制器（绘制目标）。
+    /// @return Painter 引用，生命周期同本 Surface。
     [[nodiscard]] auto painter() -> Painter & override { return painter_; }
 
+    /// @brief 呈现当前帧：经 EM_ASM 把 Painter 的 RGBA 帧缓冲拷入 Canvas 2D ImageData 并
+    ///        putImageData 上屏（尺寸不符时先对齐 canvas 宽高；无 WebGL 依赖）。
+    /// @return 恒为成功；尺寸非正时跳过拷贝直接返回。
     [[nodiscard]] auto present() -> Result<bool> override {
         const int w = painter_.width();
         const int h = painter_.height();
@@ -173,9 +194,13 @@ class WasmSurface : public Surface {
         return true;
     }
 
+    /// @brief 当前表面尺寸（设备像素）。
+    /// @return 最近 begin_frame/resize 确定的 Size。
     [[nodiscard]] auto size() const -> Size override {
         return Size{.width = static_cast<float>(w_), .height = static_cast<float>(h_)};
     }
+    /// @brief 平台是否已请求关闭（页面 beforeunload 置位，整页卸载即全部窗口关闭）。
+    /// @return 收到关闭请求时 true。
     [[nodiscard]] auto should_close() const -> bool override { return close_requested_; }
 
     /// @brief 把键盘事件路由指针切到本窗口并重播页面标题（页面级焦点无法用 JS 之外的方式
@@ -208,17 +233,27 @@ class WasmSurface : public Surface {
 
     /// @brief 当前键盘路由目标的 canvas id（无焦点窗口时为空串）——多窗口路由的只读观测口，
     ///        供真机探针/自动化断言「点击/ focus_window 后路由确实切换」。
+    /// @return 当前持有键盘路由的窗口的 canvas id；无焦点窗口时为空串。
     [[nodiscard]] static auto focused_canvas_id() -> std::string {
         return focused_surface_ != nullptr ? focused_surface_->canvas_id_ : std::string{};
     }
+    /// @brief 当前帧像素（仅供测试/抓帧）。
+    /// @return Painter RGBA8 帧缓冲首像素只读指针。
     [[nodiscard]] auto data() const -> const std::uint8_t * override { return painter_.data(); }
+    /// @brief 已呈现帧数（诊断/测试用）。
+    /// @return present() 成功计数。
     [[nodiscard]] auto frame_count() const -> int override { return frame_; }
+    /// @brief 脏区裁剪重绘时 begin_frame 所铺的底色（浅灰白，与窗口后端视觉一致）。
+    /// @return 底色 Color{245,245,247,255}。
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
 
+    /// @brief 注册事件处理器：后端把原生事件翻译为 aurora::Event 后经此回调上抛。
+    /// @param h 事件接收器；document/window 级分发器路由到本窗口后同步调用。
     auto set_event_handler(const EventHandler &h) -> void override { event_handler_ = h; }
 
     /// @brief 声明本窗口标题：**先落每窗口缓存**，仅当本窗口是焦点窗口时才写 `document.title`
     ///        （页面标题是单值，多窗口下由焦点窗口代表——同桌面「活动窗口标题在标题栏」）。
+    /// @param title 新标题串；空串也是显式声明，会如实写空。
     /// @note 非焦点窗口改标题只更新缓存，等它下次成为焦点窗口时自动重播，无需宿主协调。
     auto set_title(const std::string &title) -> void override {
         title_ = title;
@@ -229,16 +264,19 @@ class WasmSurface : public Surface {
     }
 
     /// @brief 本窗口缓存的标题（多窗口观测口：非焦点窗口的标题只活在这里，不上页面）。
+    /// @return 标题缓存的常量引用。
     [[nodiscard]] auto title() const -> const std::string & { return title_; }
 
     /// @brief WASM 下 no-op：浏览器 rAF 驱动帧循环，无需阻塞等待。
     auto wait_events(double /*timeout_ms*/) -> void override {}
 
     /// @brief 本窗口的 ARIA 镜像桥（首帧根注入前为 nullptr —— 桥随 `present_root` 诞生）。
+    /// @return 桥实例裸指针（所有权归本 Surface）；未构造时 nullptr。
     [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override { return aria_bridge_.get(); }
 
     /// @brief 语义树根注入（`Window::present_root` 每帧调用）：首次构造桥（容器 id 按
     ///        canvas id 隔离，多窗口各挂各的镜像树），随后交由桥做幂等判定。
+    /// @param root 语义树根 widget 指针（非拥有）。
     auto set_accessibility_root(Widget *root) -> void override {
         if (aria_bridge_ == nullptr) {
             aria_bridge_ = std::make_unique<WasmAriaBridge>("aurora-a11y-" + canvas_id_);

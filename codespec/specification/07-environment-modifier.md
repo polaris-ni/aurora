@@ -232,6 +232,8 @@ save_btn.modifier = au::Modifier{}
     .fill_max_width();
 ```
 
+**链序：先压入者靠外**。`Widget::layout` 以 `nodes()` 的逆序包裹测量，故 `Modifier{}.a().b()` 里 a 是 b 的**外层**。 「固定尺寸 + 在父容器内居中」须写成 `.align(Center).size(120,40)`；反过来写 `.size(120,40).align(Center)` 时 Align 只定位色块**内部**的内容，色块本身仍贴父容器起始边。
+
 ### 7.2 工厂清单
 
 除 `.then()` 外全部返回 `Modifier`，可链式（`.then()` 为就地可变追加并返回 `Modifier&`）：
@@ -246,7 +248,7 @@ save_btn.modifier = au::Modifier{}
 | `.fill_max_width()` / `.fill_max_height()` / `.fill_max_size()` | 撑满父约束 |
 | `.border(float, Color)` | 边框 |
 | `.clip()` / `.clip_rounded(float)` | 矩形 / 圆角裁剪 |
-| `.align(Alignment)` | 在父约束内的对齐 |
+| `.align(Alignment)` | 在父级让出的额外空间内**逐轴**定位子项（对标 Flutter `Align`/`RenderPositionedBox`）：某轴上限是父级既定槽位时该轴展开到上限并按 `Alignment` 摆放子盒；某轴只是「按需剩余空间」（Flex 主轴给非加权子项，`Constraints::loose_width/loose_height` 为真）或无界时该轴退化为内容尺寸——否则居中会吞掉同轴兄弟的空间。命中盒随子盒一同收缩（见 §7.4） |
 | `.offset(float dx, float dy)` | 绘制期平移（Transform 切片） |
 | `.rotate(float degrees)` | 绕内容中心旋转（Transform 切片，仿射矩阵） |
 | `.scale(float sx, float sy)` / `.scale(float s)` | 绕内容中心缩放（Transform 切片） |
@@ -284,9 +286,11 @@ save_btn.modifier = au::Modifier{}
 2. **再压栈裁剪**（Clip / ClipRounded，与既有裁剪栈取交集）。
 3. **随后绘背景 / 渐变背景**——因圆角裁剪已生效，背景随 `clip_rounded` 呈圆角（对齐 Flutter `ClipRRect` 语义：圆角裁剪作用于控件绘制的一切内容，含自身背景）。
 
-**作用范围**：Paint 切片（背景、边框、阴影、裁剪、后效）统一作用于控件完整视觉盒子 `visual_box`；子节点 `on_paint` 与内容后效则限定在 `content_box`（已扣除 Padding / Align 等布局内边距）。内容后弹栈并绘制边框。
+**作用范围**：Paint 切片（背景、边框、阴影、裁剪、后效）的作用盒由 `Modifier::paint_boxes(visual_box)` **逐节点**给出——链上没有改变盒形的 Transform 节点时，各 Paint 节点统一作用于完整视觉盒 `visual_box`（历史行为，逐位一致）；含外侧 `AlignNode` / `OffsetNode` 时，其**内侧**的 Paint 节点依次收缩到对齐后的子盒、平移到偏移后的盒。`Padding` / `PaddingEdges` **不**参与收缩：背景、边框、裁剪连内边距一起覆盖。子节点 `on_paint` 与内容后效则限定在 `content_box`（已扣除 Padding / Align 等布局内边距）。内容后弹栈并绘制边框。
 
-> 两种历史错误形态：把背景先于裁剪当作直角矩形填色；把 Paint 修饰限制在 `content_box` 导致 padding 区域露白。圆角裁剪与背景修饰项的语义由 `tests/unit/utest_modifier_paint.cpp` 覆盖（含 `clip_rounded` 与背景半径 / 颜色）。
+**命中盒与绘制盒同源**：`Widget::hit_test` / `hit_test_chain` 以 `Modifier::TransformInfo::hit_size` 判定自身盒，该尺寸**只**被 `AlignNode` 收缩（Padding 不收缩，与上面的内边距豁免同源）；链上无 Align 时 `hit_size` 等于布局盒，行为与历史逐位一致。于是外侧 Align 展开出的那段空间既不承载绘制，也不接收点击。
+
+> 三种历史错误形态：把背景先于裁剪当作直角矩形填色；把 Paint 修饰限制在 `content_box` 导致 padding 区域露白；外侧 Align 展开后 Paint/命中仍按整盒走，导致居中的小色块由 492dp 宽的展开行「顺带」涂满并吞掉展开区的点击。圆角裁剪与背景修饰项的语义由 `tests/unit/utest_modifier_paint.cpp` 覆盖（含 `clip_rounded` 与背景半径 / 颜色）；分段绘制盒与同源命中盒由 `tests/unit/utest_modifier.cpp`（`paint_boxes_*`）、`tests/unit/utest_modifier_transform.cpp`、`tests/unit/utest_flex_layouter.cpp`（主轴供给打标）与 `tests/integration/itest_widget_components.cpp`（`align_in_column_centers_*` / `align_hit_box_shrinks_*`）覆盖。
 
 ### 7.5 与固有属性的关系
 
@@ -296,7 +300,7 @@ save_btn.modifier = au::Modifier{}
 
 ## 8 需求规格
 
-### 8.1 #12 机器可读 API Schema
+### 8.1 SPEC.FEAT.TOOLING.API-SCHEMA.001 机器可读 API Schema
 
 **控件自描述侧的契约**：各控件提供**静态** `describe_static()`；虚 `describe()` 在基类 `Widget` 已有默认实现（返回 `{ .name = type_name() }`，`widget.h`），无需富描述的控件可省略 override，仅在需要补充 properties / events / `children_policy` 等元数据时覆写（与 [`04-widget.md`](04-widget.md) §2.1 的表述一致）。`component_schema()` / `list_all_schemas()` 消费 `describe()` 输出；`aurora_api.json` 自动包含增强字段。
 

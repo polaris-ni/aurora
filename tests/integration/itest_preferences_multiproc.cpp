@@ -203,7 +203,9 @@ AURORA_TEST_CASE(child_entry) {
     const char *mode = std::getenv("AURORA_ITEST_MP_MODE");
     const char *file_s = std::getenv("AURORA_ITEST_MP_FILE");
     if (mode == nullptr || file_s == nullptr) {
-        AURORA_TEST_SKIP("父进程编排用例的子进程入口：直接运行（无注入环境）时无意义");
+        AURORA_TEST_SKIP(
+            "child entry of the parent-orchestrated case: "
+            "running it directly (no injected environment) is meaningless");
     }
     const std::filesystem::path file{file_s};
     const std::string m{mode};

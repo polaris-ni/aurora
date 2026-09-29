@@ -1,30 +1,32 @@
 #pragma once
 
+/// @brief 内置位图字体（零依赖、跨平台）：用于软件栅格后端的真实文字绘制。
+/// @file
+/// @details 设计网格 8x8，'#' 表示前景像素。覆盖 ASCII 大写、数字与常用标点；
+/// 小写字母在查询时自动映射为大写（保证可读性，且无需额外字形数据）。
+/// 未覆盖的字符（如 CJK）降级为空格字形，由调用方已有的降级机制处理。
+/// 这是无字体文件依赖的最小可行方案，让 headless 渲染也能输出可读文本。
+/// 真实后端（如接入系统字体 / FreeType）可替换本实现而无需改动 widget 层。
+
 #include <array>
 #include <cmath>
 #include <string>
 
 namespace aurora::render {
 
-/**
- * @brief 内置位图字体（零依赖、跨平台）：用于软件栅格后端的真实文字绘制。
- *
- * 设计网格 8x8，'#' 表示前景像素。覆盖 ASCII 大写、数字与常用标点；
- * 小写字母在查询时自动映射为大写（保证可读性，且无需额外字形数据）。
- * 未覆盖的字符（如 CJK）降级为空格字形，由调用方已有的降级机制处理。
- *
- * 这是无字体文件依赖的最小可行方案，让 headless 渲染也能输出可读文本。
- * 真实后端（如接入系统字体 / FreeType）可替换本实现而无需改动 widget 层。
- */
+/// @brief 单个字形：8 行字符串数组，每行 8 字符（'#' 前景、' ' 背景）。
 struct Glyph {
-    std::array<const char *, 8> rows;
+    std::array<const char *, 8> rows;  ///< 8 行字形点阵数据；下标 = 行号（0 = 顶行），每行指向 8 字符的静态字面量
 };
 
+/// @brief 位图字体门面：提供字形查询与按 pt 字号测量（宽度/高度/基线上沿）。
 class BitmapFont {
   public:
     static constexpr int AURORA_CELL = 8;  ///< 设计网格边长（像素，scale=1 时）
 
     /// @brief 返回字符对应的字形（小写自动转大写，未知字符降级为空格）。
+    /// @param c 待查询的 ASCII 字符。
+    /// @return 常驻静态 `Glyph` 引用；未覆盖字符返回 `AURORA_SPACE`（零宽显示为空格）。
     static auto glyph(char c) -> const Glyph & {
         if (c >= 'a' && c <= 'z') {
             c = static_cast<char>(c - 'a' + 'A');
@@ -170,26 +172,34 @@ class BitmapFont {
     }
 
     /// @brief 单个设计像素在给定字号下的设备像素边长。
+    /// @param size_pt 字号（point）；映射公式 `size_pt / 12.0F`，最小取 1。
+    /// @return 每设计像素对应的设备像素边长（整数，>= 1）。
     static auto pixel_size(float size_pt) -> int {
         return static_cast<int>(std::max(1.0F, std::round(size_pt / 12.0F)));
     }
 
     /// @brief 测量字符串宽度（设备像素）。
+    /// @param s 待测字符串（每个字符按同宽 8 设计像素计算；小写/大写等价）。
+    /// @param size_pt 字号（point）。
+    /// @return 字符串整体宽度（设备像素，float）；等于 `s.size() * AURORA_CELL * pixel_size(size_pt)`。
     static auto measure_width(const std::string &s, float size_pt) -> float {
         return static_cast<float>(s.size()) * static_cast<float>(AURORA_CELL) * static_cast<float>(pixel_size(size_pt));
     }
 
     /// @brief 测量单行高度（设备像素）。
+    /// @param size_pt 字号（point）。
+    /// @return 单行行盒高度（设备像素）：`AURORA_CELL * pixel_size(size_pt)`；不随字符串内容变化。
     static auto measure_height(float size_pt) -> float {
         return static_cast<float>(AURORA_CELL) * static_cast<float>(pixel_size(size_pt));
     }
 
     /// @brief 测量单行基线上沿（设备像素）：行盒顶 → 基线。
-    ///
-    /// 位图字形实际占 8 格中的第 0..6 格（第 7 格恒为空白底衬，见各字形数据），故基线落在
+    /// @param size_pt 字号（point）。
+    /// @return 基线上沿（设备像素）：`(AURORA_CELL - 1) * pixel_size(size_pt)`；满足
+    ///         `0 <= measure_ascent <= measure_height`。
+    /// @details 位图字形实际占 8 格中的第 0..6 格（第 7 格恒为空白底衬，见各字形数据），故基线落在
     /// 第 7 格下沿 = `(AURORA_CELL - 1) * pixel_size`，与 `draw_text_bitmap_fallback`
-    /// 「行盒顶起笔逐格下绘」的绘制口径同源。
-    /// 恒满足 `0 <= measure_ascent <= measure_height`（基线对齐的合成基线依赖该不变量）。
+    /// 「行盒顶起笔逐格下绘」的绘制口径同源（基线对齐的合成基线依赖该不变量）。
     static auto measure_ascent(float size_pt) -> float {
         return static_cast<float>(AURORA_CELL - 1) * static_cast<float>(pixel_size(size_pt));
     }

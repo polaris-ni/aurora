@@ -79,12 +79,14 @@ if (AURORA_ENABLE_COVERAGE)
     # 用法：cmake -S . -B build -DAURORA_ENABLE_COVERAGE=ON ... && cmake --build build --target coverage
     # coverage target 必须先构建被测对象（runner + 静态校验所需的生成器/JSON 聚合），
     # 否则全新构建目录下 ctest 全部 Not Run（runner 不存在）、registry/校验类用例假红。
+    # ctest 带 -LE e2e：覆盖率作业的默认后端面无真实后端（E2E 全部 skipped by policy），
+    # 排除以省时；需要覆盖 E2E 时单独跑 ctest（不排除）再执行聚合脚本即可。
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         # LLVM_PROFILE_FILE 用 %p（pid）模板：ctest 并行多进程各写独立 .profraw，不互相覆盖。
         get_filename_component(_aurora_llvm_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
         add_custom_target(coverage
                 COMMAND ${CMAKE_COMMAND} -E env "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/profraw/aurora-%p.profraw"
-                ${CMAKE_CTEST_COMMAND} --output-on-failure
+                ${CMAKE_CTEST_COMMAND} --output-on-failure -LE e2e
                 COMMAND powershell -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_SOURCE_DIR}/tools/coverage/coverage_report_llvm.ps1"
                 -BuildDir "${CMAKE_BINARY_DIR}"
@@ -95,7 +97,7 @@ if (AURORA_ENABLE_COVERAGE)
     else ()
         if (WIN32)
             add_custom_target(coverage
-                    COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+                    COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -LE e2e
                     COMMAND powershell -NoProfile -ExecutionPolicy Bypass
                     -File "${CMAKE_SOURCE_DIR}/tools/coverage/coverage_report.ps1"
                     -BuildDir "${CMAKE_BINARY_DIR}"
@@ -104,7 +106,7 @@ if (AURORA_ENABLE_COVERAGE)
                     COMMENT "Running ctest then aggregating gcov line coverage (terminal summary, no HTML)")
         else ()
             add_custom_target(coverage
-                    COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+                    COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -LE e2e
                     COMMAND bash "${CMAKE_SOURCE_DIR}/tools/coverage/coverage_report.sh"
                     "${CMAKE_BINARY_DIR}"
                     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"

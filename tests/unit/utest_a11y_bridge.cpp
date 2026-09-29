@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/a11y_provider.h, include/aurora/core/a11y_types.h
-/// 测试说明: 平台桥抽象的注册表语义（注册/去重/注销/计数）、事件广播与宿主处理器并存（G12）、
-///           播报直投（G4）、惰性激活与 screen_reader_active 回填（D14/R9）、
+/// 测试说明: 平台桥抽象的注册表语义（注册/去重/注销/计数）、事件广播与宿主处理器并存、
+///           播报直投、惰性激活与 screen_reader_active 回填、
 ///           runtime_id 身份分配与状态位默认取值
 
 #include <cstdint>
@@ -25,7 +25,7 @@ class RecordingProvider final : public a11y::Provider {
     auto activate() -> void override {
         active = true;
         ++activate_calls;
-        // D14/R9：激活即回填「读屏在线」（heuristic，见设计 §5.1）。
+        // 激活即回填「读屏在线」（heuristic，见设计 §5.1）。
         current_accessibility_settings().screen_reader_active = true;
         a11y::register_provider(*this);
     }
@@ -123,7 +123,7 @@ AURORA_TEST_CASE(broadcast_marks_dirty_and_forwards_event) {
 }
 
 AURORA_TEST_CASE(broadcast_coexists_with_host_handler) {
-    // G12：桥广播走独立钩子，宿主处理器不被覆盖、也不与桥链式耦合（安装顺序无关）。
+    // 桥广播走独立钩子，宿主处理器不被覆盖、也不与桥链式耦合（安装顺序无关）。
     const AccessibilitySettings saved = save_settings();
     int host_calls = 0;
     const auto saved_handler = current_accessibility_event_handler();
@@ -149,9 +149,11 @@ AURORA_TEST_CASE(announcement_bypasses_diff_and_reaches_provider) {
     p.activate();
 
     const auto widget = std::make_shared<ProbeLeaf>();
+    // CJK-LITERAL: cjk-fixture - Han announcement text must reach the provider byte-identical
     announce_accessibility("保存成功", widget.get());
 
     AURORA_TEST_REQUIRE_EQ(p.announcements.size(), std::size_t{1});
+    // CJK-LITERAL: cjk-fixture - asserts the same Han announcement string echoed by the provider
     AURORA_TEST_CHECK_STREQ(p.announcements.front().first.c_str(), "保存成功");
     AURORA_TEST_CHECK_EQ(p.announcements.front().second, widget.get());
     AURORA_TEST_CHECK_TRUE(p.events.empty());  // 播报不经 on_event
@@ -201,10 +203,10 @@ AURORA_TEST_CASE(range_defaults_are_unit_interval) {
     AURORA_TEST_CHECK_NEAR(r.value, 0.0, 1e-9);
 }
 
-/// @brief 语义根销毁必须被桥感知：桥缓存的根是裸指针，宿主「先拆 UI 树、后拆窗口」是常规顺序，
-///        若根没了而桥不知情，窗口存活期间的平台查询会拿悬垂根重建语义树（实机 SIGSEGV）。
-///        通道出自 `Node::~Node()` 的单源上报，与结构事件同源但**独立**（结构事件只能给出宿主
-///        容器，无法承载「是不是我的根没了」这一判定）。本用例锁死该通知的到达与载荷正确性。
+// @brief 语义根销毁必须被桥感知：桥缓存的根是裸指针，宿主「先拆 UI 树、后拆窗口」是常规顺序，
+//        若根没了而桥不知情，窗口存活期间的平台查询会拿悬垂根重建语义树（实机 SIGSEGV）。
+//        通道出自 `Node::~Node()` 的单源上报，与结构事件同源但**独立**（结构事件只能给出宿主
+//        容器，无法承载「是不是我的根没了」这一判定）。本用例锁死该通知的到达与载荷正确性。
 AURORA_TEST_CASE(root_widget_destruction_is_broadcast_to_providers) {
     const AccessibilitySettings saved = save_settings();
     RecordingProvider provider;

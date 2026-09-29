@@ -76,10 +76,10 @@ AURORA_TEST_CASE(clipped_column_culls_children_outside_clip) {
     AURORA_TEST_CHECK_MSG(p2->paint_calls == 0, "p2 outside viewport is culled (skipped)");
     AURORA_TEST_CHECK_MSG(p3->paint_calls == 0, "p3 outside viewport is culled (skipped)");
 #else
-    AURORA_TEST_SKIP("AURORA_ENABLE_OCCLUSION_CULLING 未开启，剔除逻辑未编译");
+    AURORA_TEST_SKIP("AURORA_ENABLE_OCCLUSION_CULLING not enabled, the culling logic is not compiled");
 #endif
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
 #endif
 }
 
@@ -100,7 +100,7 @@ AURORA_TEST_CASE(scroll_offscreen_buffer_paints_offscreen_children) {
     AURORA_TEST_CHECK_MSG(s2->paint_calls > 0, "Scroll: off-viewport child is also painted (offscreen buffer)");
     AURORA_TEST_CHECK_MSG(s3->paint_calls > 0, "Scroll: far off-viewport child is also painted (offscreen buffer)");
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
 #endif
 }
 

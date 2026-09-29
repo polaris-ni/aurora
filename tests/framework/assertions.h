@@ -26,6 +26,7 @@
 #include <utility>
 
 #include "aurora/core/platform.h"
+#include "json_value_printer.h"
 #include "value_print.h"
 
 namespace aurora::testing {
@@ -282,21 +283,26 @@ class TraceScope {
 // 宏层
 // ---------------------------------------------------------------------------
 
-/// @brief 标识符拼接（两级间接：`##` 会阻止操作数先展开，`__COUNTER__` 需先取值得到真实计数）。
+// @brief 标识符拼接（两级间接：`##` 会阻止操作数先展开，`__COUNTER__` 需先取值得到真实计数）。
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 拼接与 __COUNTER__ 唯一名只能由预处理器完成，无函数等价物
 #define AURORA_TEST_CAT_(a, b) AURORA_TEST_CAT_I_(a, b)  // NOLINT(*-identifier-naming)
 #define AURORA_TEST_CAT_I_(a, b) a##b  // NOLINT(*-identifier-naming)
 #define AURORA_TEST_UNIQUE_(prefix) AURORA_TEST_CAT_(aurora_test_##prefix, __COUNTER__)  // NOLINT(*-identifier-naming)
 
 /// clang 把 `__COUNTER__` 归为 C2y 扩展并逐点告警（GCC / MSVC 不报），就地把该告警关掉；
-/// 非 clang 编译器下展开为空。
+/// `-Wc2y-extensions` 仅在新版 clang 提供，旧版 clang 不识别该告警组会自报 "unknown warning group"，
+/// 且旧版 clang 本就不会对 `__COUNTER__` 告警，故仅在告警组存在时展开，否则展开为空。
 #ifdef AURORA_COMPILER_CLANG
+#if __has_warning("-Wc2y-extensions")
 #define AURORA_TEST_NO_C2Y _Pragma("clang diagnostic ignored \"-Wc2y-extensions\"")
 #else
 #define AURORA_TEST_NO_C2Y
 #endif
+#else
+#define AURORA_TEST_NO_C2Y
+#endif
 
-/// @brief 记账原语：`diagnostic` 非空即为失败，严重级别由外层宏决定。
+// @brief 记账原语：`diagnostic` 非空即为失败，严重级别由外层宏决定。
 // NOLINTNEXTLINE(*-identifier-naming,cppcoreguidelines-macro-usage) 需就地取 __FILE__/__LINE__，函数拿不到调用点位置
 #define AURORA_TEST_REPORT_(severity, diagnostic)                                                                 \
     do {                                                                                                          \
@@ -311,8 +317,8 @@ class TraceScope {
 // NOLINTNEXTLINE(*-identifier-naming,cppcoreguidelines-macro-usage) 同上：致命分支同样需要调用点位置
 #define AURORA_TEST_REQUIRE_REPORT_(diagnostic) AURORA_TEST_REPORT_(::aurora::testing::Severity::Fatal, diagnostic)
 
-/// @brief 语句包装：把「语句」包成可调用体交给异常判定内核执行（内核需亲自捕获抛出），
-/// 内层 `if (always_true())` 既保证语句只执行一次，也吞掉不可达代码等告警。
+// @brief 语句包装：把「语句」包成可调用体交给异常判定内核执行（内核需亲自捕获抛出），
+// 内层 `if (always_true())` 既保证语句只执行一次，也吞掉不可达代码等告警。
 // NOLINTNEXTLINE(*-identifier-naming,cppcoreguidelines-macro-usage) 把任意「语句」原地包成体，只有宏能做到
 #define AURORA_TEST_STATEMENT_(stmt)                    \
     [&]() -> void {                                     \
@@ -476,17 +482,17 @@ template <typename T>
 
 // ---- 无条件失败 / 跳过 / 追踪 ----
 
-/// @brief 无条件记一次非致命失败（用于断言族无法表达的复杂判定）。
+// @brief 无条件记一次非致命失败（用于断言族无法表达的复杂判定）。
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 须就地取 __FILE__/__LINE__，与断言族同为宏入口
 #define AURORA_TEST_FAIL(message) \
     ::aurora::testing::detail::report(::aurora::testing::Severity::NonFatal, __FILE__, __LINE__, (message))
 
-/// @brief 无条件终止本用例并记为失败。
+// @brief 无条件终止本用例并记为失败。
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 同上：调用点位置是失败记录的一部分
 #define AURORA_TEST_FAIL_FATAL(message) \
     ::aurora::testing::detail::report(::aurora::testing::Severity::Fatal, __FILE__, __LINE__, (message))
 
-/// @brief 无条件跳过本用例。用于后端 / 平台 feature 宏未开启的 `#else` 分支。
+// @brief 无条件跳过本用例。用于后端 / 平台 feature 宏未开启的 `#else` 分支。
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 用例侧书写面统一为 AURORA_TEST_* 宏入口，不因个别可降级为函数而破例
 #define AURORA_TEST_SKIP(reason) ::aurora::testing::detail::skip_case((reason))
 
@@ -521,18 +527,20 @@ template <typename T>
 #if AURORA_TEST_HAS_THREADS
 #define AURORA_TEST_REQUIRE_THREADS() static_cast<void>(0)
 #else
-#define AURORA_TEST_REQUIRE_THREADS() AURORA_TEST_SKIP("std::thread 需 Emscripten 的 -pthread，本 wasm 构建未开启")
+#define AURORA_TEST_REQUIRE_THREADS() \
+    AURORA_TEST_SKIP("std::thread needs Emscripten's -pthread, not enabled in this wasm build")
 #endif
 
 /// @brief 用例依赖派发子进程（fork/exec 或 CreateProcess）：无子进程能力时跳过本用例。
 #if AURORA_TEST_HAS_SUBPROCESS
 #define AURORA_TEST_REQUIRE_SUBPROCESS() static_cast<void>(0)
 #else
-#define AURORA_TEST_REQUIRE_SUBPROCESS() AURORA_TEST_SKIP("跨进程用例需 fork/exec 派发子进程，Emscripten 运行时不可用")
+#define AURORA_TEST_REQUIRE_SUBPROCESS() \
+    AURORA_TEST_SKIP("cross-process cases need fork/exec to spawn children, unavailable on the Emscripten runtime")
 #endif
 // NOLINTEND(*-macro-usage)
 
-/// @brief 作用域追踪：本作用域内的所有失败都附带这条上下文（对标 SCOPED_TRACE）。
+// @brief 作用域追踪：本作用域内的所有失败都附带这条上下文（对标 SCOPED_TRACE）。
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 需就地声明带 __COUNTER__ 唯一名的局部对象，函数无法给出声明位置
 #define AURORA_TEST_TRACE(message) \
     AURORA_TEST_NO_C2Y const ::aurora::testing::detail::TraceScope AURORA_TEST_UNIQUE_(trace_scope_) { (message) }

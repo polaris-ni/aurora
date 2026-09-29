@@ -16,6 +16,7 @@
 #include "aurora/debug/debug_backend.h"
 #include "aurora/debug/feature_flags.h"  // 运行时探测 AURORA_ENABLE_DEBUG 的归一化镜像
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_debug_backend {
 
@@ -26,6 +27,9 @@ using aurora::debug::output_directory;
 using aurora::debug::resolve_output_path;
 using aurora::debug::set_output_directory;
 using aurora::debug::surface_state;
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -124,7 +128,7 @@ AURORA_TEST_CASE(output_directory_roundtrip_and_default_reset) {
 
 AURORA_TEST_CASE(capture_disabled_returns_structured_error) {
     if (probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 已启用：关闭态 disabled 错误语义不适用");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is enabled: the disabled-state error semantics do not apply");
     }
     StubSurface surface;
     const std::string path = temp_png_path("aurora_utest_capture_disabled.png");
@@ -139,7 +143,8 @@ AURORA_TEST_CASE(capture_disabled_returns_structured_error) {
 
 AURORA_TEST_CASE(capture_framebuffer_writes_png_file) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：帧缓冲截图按宏裁切返回 disabled 错误");
+        AURORA_TEST_SKIP(
+            "AURORA_ENABLE_DEBUG is not enabled: framebuffer capture is compiled out and returns a disabled error");
     }
     StubSurface surface;
     AURORA_TEST_REQUIRE_TRUE(surface.begin_frame(4, 4).ok());
@@ -178,33 +183,34 @@ AURORA_TEST_CASE(capture_onscreen_window_unsupported_or_disabled) {
 
 AURORA_TEST_CASE(surface_state_reflects_surface_when_enabled) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：surface_state 按宏裁切返回 unavailable");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: surface_state is compiled out and returns unavailable");
     }
     StubSurface surface;
     const Json j = surface_state(surface);
-    AURORA_TEST_CHECK_EQ(j["available"], true);
-    AURORA_TEST_CHECK_EQ(j["width"], 4);
-    AURORA_TEST_CHECK_EQ(j["height"], 4);
-    AURORA_TEST_CHECK_NEAR(j["scale_factor"].get<double>(), 2.0, 1e-6);
-    AURORA_TEST_CHECK_EQ(j["frame_count"], 7);
-    AURORA_TEST_CHECK_TRUE(j["clear_color"].is_array());
-    AURORA_TEST_CHECK_EQ(j["clear_color"].size(), 4U);
-    AURORA_TEST_CHECK_EQ(j["clear_color"][0], 64);
-    AURORA_TEST_CHECK_EQ(j["clear_color"][1], 128);
-    AURORA_TEST_CHECK_EQ(j["clear_color"][2], 192);
-    AURORA_TEST_CHECK_EQ(j["clear_color"][3], 255);
-    AURORA_TEST_CHECK_EQ(j["should_close"], true);
-    AURORA_TEST_CHECK_EQ(j["has_native_window"], false);  // 桩无原生窗口句柄
+    AURORA_TEST_CHECK_EQ(require_field<bool>(j, "available"), true);
+    AURORA_TEST_CHECK_EQ(require_field<int>(j, "width"), 4);
+    AURORA_TEST_CHECK_EQ(require_field<int>(j, "height"), 4);
+    AURORA_TEST_CHECK_NEAR(require_field<double>(j, "scale_factor"), 2.0, 1e-6);
+    AURORA_TEST_CHECK_EQ(require_field<int>(j, "frame_count"), 7);
+    const auto *const clear_color = require_child(j, "clear_color");
+    AURORA_TEST_CHECK_TRUE(clear_color->is_array());
+    AURORA_TEST_CHECK_EQ(clear_color->size(), 4U);
+    AURORA_TEST_CHECK_EQ(*require_child_at(*clear_color, 0), 64);
+    AURORA_TEST_CHECK_EQ(*require_child_at(*clear_color, 1), 128);
+    AURORA_TEST_CHECK_EQ(*require_child_at(*clear_color, 2), 192);
+    AURORA_TEST_CHECK_EQ(*require_child_at(*clear_color, 3), 255);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(j, "should_close"), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(j, "has_native_window"), false);  // 桩无原生窗口句柄
 }
 
 AURORA_TEST_CASE(surface_state_unavailable_when_disabled) {
     if (probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 已启用：关闭态 unavailable 语义不适用");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is enabled: the disabled-state unavailable semantics do not apply");
     }
     StubSurface surface;
     const Json j = surface_state(surface);
-    AURORA_TEST_CHECK_EQ(j["available"], false);
-    AURORA_TEST_CHECK_TRUE(j["reason"].get<std::string>().find("AURORA_ENABLE_DEBUG") != std::string::npos);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(j, "available"), false);
+    AURORA_TEST_CHECK_TRUE(require_field<std::string>(j, "reason").find("AURORA_ENABLE_DEBUG") != std::string::npos);
 }
 
 }  // namespace aurora::test_cases::utest_debug_backend

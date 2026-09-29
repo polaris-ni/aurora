@@ -8,7 +8,7 @@
 #      禁止中英文序号（第一章 / 一、/ Section One 等）；
 #   R3 章节号在单文件内同层级不重复、不跳号；
 #   R4 反引号包裹的路径必须真实存在（就近解析：同目录 → codespec/ → 仓库根）；
-#   R5 SPECIFICATIONS.md 特性表（#1–#29）「规格落点」列中的链接逐行可达。
+#   R5 SPECIFICATIONS.md 特性表（首列为 `SPEC.<类目>.<域>.<短名>.<数字尾>`）「规格落点」列中的链接逐行可达。
 #
 # 排除范围（防误报）：
 #   - fenced code block（``` / ~~~）内的链接与路径不校验（多为示例占位）；
@@ -35,6 +35,10 @@ try:
 except (AttributeError, ValueError, OSError):
     pass
 
+# ---- 需求 ID 结构：SPEC.<类目>.<域>[.<子域>…]<短名>.<数字尾> ----------------
+# 数字尾恒为三位序号（001 起，前缀完全相同时才递增）；至少 4 个点分段（SPEC + 两个中间段 + 数字尾）。
+SPEC_ID_FULL_RE = re.compile(r"^SPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{3}$")
+
 # ---- 白名单：存量豁免，逐项注明原因；新规则只拦增量 -------------------------
 WHITELIST = {
     # (rule, file_rel, detail) -> reason
@@ -46,37 +50,39 @@ WHITELIST = {
     # 相关章节（测试原语、测试框架用法）须随新框架一并重写——现在打补丁会留下半吊子描述，
     # 故集中豁免；「守门」/「收束」阶段随文档同步逐项清理，届时本表应清空。
     ("R4", "codespec\\ARCHITECTURE.md", "backticked path missing: tests/aurora_test_main.cpp"):
-        "测试体系重写：旧 runner 入口已删",
+        "Test suite rewrite: legacy runner entry removed",
     ("R4", "codespec\\BUILD_OPTIONS.md", "backticked path missing: tests/integration/utest_dirty_clip_paint.cpp"):
-        "测试体系重写：旧用例已删",
+        "Test suite rewrite: legacy case deleted",
     ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/aurora_test_main.cpp"):
-        "测试体系重写：旧 runner 入口已删",
+        "Test suite rewrite: legacy runner entry removed",
     ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/aurora_test_harness.h"):
-        "测试体系重写：旧框架头已删，新框架位于 tests/framework/",
+        "Test suite rewrite: legacy framework header removed, new framework lives in tests/framework/",
     ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/unit/utest_offscreen.cpp"):
-        "测试体系重写：旧用例已删",
+        "Test suite rewrite: legacy case deleted",
     ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/test_default_construct.h"):
-        "测试体系重写：旧公共 fixture 已删",
+        "Test suite rewrite: legacy shared fixture removed",
     ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/integration/utest_default_construct.cpp"):
-        "测试体系重写：旧用例已删",
+        "Test suite rewrite: legacy case deleted",
     ("R4", "codespec\\GUIDELINE.md", "backticked path missing: include/aurora/test_helpers.h"):
-        "测试体系重写：test_helpers.h 已迁入 tests/support/",
+        "Test suite rewrite: test_helpers.h moved into tests/support/",
     ("R4", "codespec\\specification\\07-environment-modifier.md",
      "backticked path missing: tests/unit/utest_clip_rounded_background.cpp"):
-        "测试体系重写：旧用例已删",
+        "Test suite rewrite: legacy case deleted",
     ("R4", "codespec\\specification\\08-tooling.md", "backticked path missing: tests/unit/utest_serialization.cpp"):
-        "测试体系重写：旧用例已删",
+        "Test suite rewrite: legacy case deleted",
     ("R4", "codespec\\specification\\08-tooling.md", "backticked path missing: include/aurora/test_helpers.h"):
-        "测试体系重写：test_helpers.h 已迁入 tests/support/",
+        "Test suite rewrite: test_helpers.h moved into tests/support/",
     ("R4", "codespec\\specification\\08-tooling.md", "backticked path missing: tests/aurora_test_harness.h"):
-        "测试体系重写：旧框架头已删，新框架位于 tests/framework/",
+        "Test suite rewrite: legacy framework header removed, new framework lives in tests/framework/",
 }
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 PATH_RE = re.compile(r"`([^`\s]+)`")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# CJK-LITERAL: regex-semantic - the fullwidth enumeration comma is a heading separator in repo docs
 NUM_PREFIX_RE = re.compile(r"^(\d+(?:\.\d+)*)[\s、.]+")
+# CJK-LITERAL: regex-semantic - matches CJK numeral ordinals (first/chapter words) so they get rejected
 CJK_NUM_RE = re.compile(r"^[第卷][一二三四五六七八九十百千]+[章節节]|^[一二三四五六七八九十]+[、.]")
 PLACEHOLDER_RE = re.compile(r"[<>*{}]|\b(example|foo|bar|placeholder|your_|xxx)\b", re.IGNORECASE)
 
@@ -236,28 +242,31 @@ def check_backtick_paths(rel, lines, repo, problems):
 
 
 def check_spec_table(rel, lines, repo, problems):
-    """R5: SPECIFICATIONS.md feature table rows (#1-#25) must have a reachable spec link."""
+    """R5: SPECIFICATIONS.md feature table rows (first cell = `SPEC.<类目>.<域>.<短名>.<数字尾>`) must have a reachable spec link."""
     if os.path.basename(rel) != "SPECIFICATIONS.md":
         return
     base_dir = os.path.dirname(os.path.join(repo, rel))
     headings = headings_of(lines)
     for lineno, line in strip_fences(lines):
-        if not re.match(r"^\s*\|\s*\d{1,2}\s*\|", line):
+        if not re.match(r"^\s*\|\s*SPEC\.[A-Z0-9-]+\.[A-Z0-9-]+", line):
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if len(cells) < 4:
             continue
-        try:
-            number = int(cells[0])
-        except ValueError:
+        feature = cells[0].strip("`")
+        if not feature.startswith("SPEC."):
             continue
-        # 上界刻意不写死：SPECIFICATIONS.md 中唯一「数字首列」的表就是特性清单表（R5 已按 basename
-        # 限定本文件），硬编码上界（曾为 24）会让新增需求的落点链接静默逃过校验。
-        if number < 1:
+        if not SPEC_ID_FULL_RE.fullmatch(feature):
+            problems.append(("R5", rel, lineno,
+                             f"malformed requirement ID in feature table: {feature} "
+                             f"(tail must be 3 digits, e.g. 001)"))
             continue
+        # 上界刻意不写死：SPECIFICATIONS.md 中唯一「需求 ID 首列」的表就是特性清单表（R5 已按 basename
+        # 限定本文件），硬编码数字上界会让新增需求的落点链接静默逃过校验。
         if not LINK_RE.search(cells[-1]):
             # 「本文 §N」is a legitimate in-document reference (the landing point lives in this
             # very file); accept it when the cited section actually exists here.
+            # CJK-LITERAL: regex-semantic - matches the in-document reference idiom written in Chinese
             self_ref = re.search(r"本文\s*§\s*([\d.]+)", cells[-1])
             if self_ref:
                 wanted = self_ref.group(1)
@@ -265,10 +274,10 @@ def check_spec_table(rel, lines, repo, problems):
                 if wanted in existing:
                     continue
                 problems.append(
-                    ("R5", rel, lineno, f"feature #{number} cites missing local section §{wanted}")
+                    ("R5", rel, lineno, f"feature {feature} cites missing local section §{wanted}")
                 )
                 continue
-            problems.append(("R5", rel, lineno, f"feature #{number} has no spec link"))
+            problems.append(("R5", rel, lineno, f"feature {feature} has no spec link"))
             continue
         for target in LINK_RE.findall(cells[-1]):
             if target.startswith(("http://", "https://")):
@@ -276,7 +285,7 @@ def check_spec_table(rel, lines, repo, problems):
             path_part = target.partition("#")[0]
             if path_part and resolve_path(base_dir, path_part, repo) is None:
                 problems.append(
-                    ("R5", rel, lineno, f"feature #{number} spec link missing: {target}")
+                    ("R5", rel, lineno, f"feature {feature} spec link missing: {target}")
                 )
 
 
@@ -325,7 +334,7 @@ def main() -> int:
         print(f"  {rule} {rel}:{lineno}  {detail}")
     if len(remaining) > 60:
         print(f"  ... and {len(remaining) - 60} more")
-    print("\n  Fix the above, or add a justified entry to WHITELIST (存量豁免只用于既有问题).")
+    print("\n  Fix the above, or add a justified entry to WHITELIST (stock exemptions cover existing issues only).")
     return 1
 
 

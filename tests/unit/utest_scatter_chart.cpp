@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/scatter_chart.h
-/// 测试说明: 覆盖 ScatterChart（切片 6）——defaults / describe_static / 序列化往返（points 为 [[x,y]] 数组）/
+/// 测试说明: 覆盖 ScatterChart——defaults / describe_static / 序列化往返（points 为 [[x,y]] 数组）/
 /// 工厂 from_json 重建、最近点欧氏距离命中（阈值 = dot_radius + 4dp）、on_point_tapped、
 /// 空数据与 NaN 点跳过，以及像素 golden 基线（chart_scatter.png，受 AURORA_UPDATE_GOLDEN 控制）
 
@@ -20,8 +20,12 @@
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_scatter_chart {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
 
 using aurora::testing::require_value;
 
@@ -108,8 +112,9 @@ AURORA_TEST_CASE(props_roundtrip_and_factory) {
     ScatterChart src{p};
     Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_REQUIRE_TRUE(props["series"].is_array());
-    AURORA_TEST_CHECK_EQ(props["series"][0]["points"].size(), 2U);
+    const auto &series = *require_child(props, "series");
+    AURORA_TEST_REQUIRE_TRUE(series.is_array());
+    AURORA_TEST_CHECK_EQ(require_child_at(series, 0)->at("points")->size(), 2U);
 
     ScatterChart dst{};
     dst.deserialize_props(props);
@@ -119,8 +124,8 @@ AURORA_TEST_CASE(props_roundtrip_and_factory) {
 
     serialization::register_core_widgets();
     Json node = Json::object();
-    node["type"] = "ScatterChart";
-    node["props"] = props;
+    node.set("type", "ScatterChart");
+    node.set("props", props);
     const auto built = serialization::from_json(node);
     AURORA_TEST_REQUIRE_TRUE(built.ok());
     AURORA_TEST_REQUIRE_NOT_NULL(dynamic_cast<const ScatterChart *>(built.value().get()));

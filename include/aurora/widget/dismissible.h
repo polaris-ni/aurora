@@ -14,25 +14,28 @@
 
 namespace aurora {
 
-/**
- * @brief 拖动消除容器：child 沿主轴拖出（位移 + 透明度联动），飞出后从树上摘除。
- *
- * 内部持有 `DragToDismiss`（跟手 1:1 + 松手 spring 裁决）；`progress` 映射为
- * 主轴位移（`progress × travel`，travel 默认取布局主轴向尺寸）与透明度
- * （`1 − 0.5 × progress`，飞出途中渐隐；完全消失由位移出屏承担）。
- *
- * 摘除策略：spring 飞出完成后默认从最近 `Container` 祖先的 children 移除自身
- * （触发重排）；`on_dismissed(cb)` 注册自定义回调时可覆盖默认摘除（如列表数据删除
- * 后由数据层重建子树）。位移经 paint 平移实现，**不动布局盒**（动画不改布局，
- * spec §6.5 约束；摘除是离散操作，发生在动画完成后的下一帧）。
- *
- * 对标 Flutter `Dismissible`。
- *
- * @note Thread: main-thread only
- * @note Rebuildable: no（手势进度与消除回调为运行时态，工厂注册仅收录自描述元数据）
- */
+/// @brief 拖动消除容器：child 沿主轴拖出（位移 + 透明度联动），飞出后从树上摘除。
+///
+/// 内部持有 `DragToDismiss`（跟手 1:1 + 松手 spring 裁决）；`progress` 映射为
+/// 主轴位移（`progress × travel`，travel 默认取布局主轴向尺寸）与透明度
+/// （`1 − 0.5 × progress`，飞出途中渐隐；完全消失由位移出屏承担）。
+///
+/// 摘除策略：spring 飞出完成后默认从最近 `Container` 祖先的 children 移除自身
+/// （触发重排）；`on_dismissed(cb)` 注册自定义回调时可覆盖默认摘除（如列表数据删除
+/// 后由数据层重建子树）。位移经 paint 平移实现，**不动布局盒**（动画不改布局，
+/// spec §6.5 约束；摘除是离散操作，发生在动画完成后的下一帧）。
+///
+/// 对标 Flutter `Dismissible`。
+///
+/// @note Thread: main-thread only
+/// @note Rebuildable: no（手势进度与消除回调为运行时态，工厂注册仅收录自描述元数据）
+///
 class Dismissible : public SingleChild {
   public:
+    /// @brief 构造拖动消除容器：内部以行程 200 建立 DragToDismiss，并开启 gesture-tick 驱动 spring。
+    /// @param child 被拖出的子节点，移动接管。
+    /// @param axis 拖动主轴（Horizontal/Vertical），默认水平。
+    /// @param spring 松手裁决后的飞出/回位弹簧参数，默认 SpringDescription{}。
     explicit Dismissible(Node child, DragAxis axis = DragAxis::Horizontal,
                          SpringDescription spring = SpringDescription{})
         : SingleChild(std::move(child)), dtd_(axis, 200.0, spring) {
@@ -40,8 +43,12 @@ class Dismissible : public SingleChild {
         needs_gesture_tick_ = true;
     }
 
+    /// @brief 类型名，供序列化与运行时自描述使用。
+    /// @return C 字符串 "Dismissible"。
     [[nodiscard]] auto type_name() const -> const char * override { return "Dismissible"; }
 
+    /// @brief 静态运行时自描述（规格附录 B）。
+    /// @return Dismissible 的控件描述符（axis 属性、on_dismissed 事件、single 子策略）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Dismissible",
@@ -51,24 +58,31 @@ class Dismissible : public SingleChild {
                      .type = "DragAxis",
                      .default_value = "Horizontal",
                      .required = false,
-                     .note = "拖动主轴（Horizontal/Vertical）"},
+                     .note = "Drag main axis (Horizontal/Vertical)"},
                 },
             .events = {"on_dismissed"},
             .children_policy = "single",
-            .examples = {"au::Dismissible(card) /* 水平拖出消除 */"},
+            .examples = {"au::Dismissible(card) /* drag out horizontally to dismiss */"},
         };
     }
+    /// @brief 运行时自描述：返回本控件的静态描述符（axis 属性、on_dismissed 事件、single 子策略）。
+    /// @return 静态描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 收集本控件的可订阅信号视图。
+    /// @param out 输出参数，收集 SignalViewBase 指针；Dismissible 无信号，恒不写入。
+    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
     /// @brief 注册消除回调（替代默认摘除：回调存在时不再自动从父容器移除）。
+    /// @param cb 消除完成回调，无入参；移动存入 on_dismissed_。
     auto on_dismissed(std::function<void()> cb) -> void { on_dismissed_ = std::move(cb); }
 
     /// @brief 跟手进度（0..1，诊断/联动绑定用）。
+    /// @return DragToDismiss 当前进度值。
     [[nodiscard]] auto progress() const -> double { return dtd_.progress().get(); }
 
     /// @brief spring 阶段是否仍在推进（跟手不算动画）。
+    /// @return spring 动画进行中为 true。
     [[nodiscard]] auto is_animating() const -> bool { return dtd_.is_animating(); }
 
     /// @brief 消除行程（逻辑 dp；默认 200，构造后可调）。

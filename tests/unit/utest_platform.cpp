@@ -63,7 +63,7 @@ AURORA_TEST_CASE(bit_width_matches_pointer_size_and_arch) {
 #elif defined(AURORA_BIT_32)
     AURORA_TEST_CHECK_EQ(sizeof(void *), 4U);
 #else
-    AURORA_TEST_FAIL("AURORA_BIT_64 / AURORA_BIT_32 必须恰好定义一个");
+    AURORA_TEST_FAIL("exactly one of AURORA_BIT_64 / AURORA_BIT_32 must be defined");
 #endif
 
 #if defined(AURORA_ARCH_X64) || defined(AURORA_ARCH_AARCH64) || defined(AURORA_ARCH_RISCV64)
@@ -103,12 +103,12 @@ AURORA_TEST_CASE(windows_platform_excludes_unix_aggregate) {
     // Windows 目标：平台宏取值 1U，且 UNIX 聚合宏必须保持未定义。
     static_assert(AURORA_PLATFORM_WINDOWS == 1U);
 #ifdef AURORA_PLATFORM_UNIX
-    AURORA_TEST_FAIL("Windows 平台不应定义 AURORA_PLATFORM_UNIX");
+    AURORA_TEST_FAIL("the Windows platform must not define AURORA_PLATFORM_UNIX");
 #else
     AURORA_TEST_CHECK(true);
 #endif
 #else
-    AURORA_TEST_SKIP("Windows 专属互斥契约，仅 Windows 目标可验");
+    AURORA_TEST_SKIP("Windows-only mutual-exclusion contract, verifiable only on Windows targets");
 #endif
 }
 
@@ -147,13 +147,13 @@ AURORA_TEST_CASE(compiler_refinement_macros_implied_by_base) {
 AURORA_TEST_CASE(compiler_macros_match_native_builtins) {
     // 契约：base 宏必须与原生内建宏方向一致，避免误判（如 clang-cl 归为 CLANG 而非 MSVC）。
 #ifdef AURORA_COMPILER_CLANG
-    static_assert(__clang__, "AURORA_COMPILER_CLANG 必须对应 __clang__");
+    static_assert(__clang__, "AURORA_COMPILER_CLANG must match the __clang__ builtin");
 #endif
 #ifdef AURORA_COMPILER_MSVC
-    static_assert(_MSC_VER, "AURORA_COMPILER_MSVC 必须对应 _MSC_VER");
+    static_assert(_MSC_VER, "AURORA_COMPILER_MSVC must match the _MSC_VER builtin");
 #endif
 #ifdef AURORA_COMPILER_GCC
-    static_assert(__GNUC__, "AURORA_COMPILER_GCC 必须对应 __GNUC__");
+    static_assert(__GNUC__, "AURORA_COMPILER_GCC must match the __GNUC__ builtin");
 #endif
     AURORA_TEST_CHECK(true);
 }
@@ -162,7 +162,7 @@ AURORA_TEST_CASE(capability_threads_absent_only_on_wasm) {
     // 契约：AURORA_CAP_THREADS 恒定义、取值域为 {0,1}；且取 0 只允许发生在 WASM 目标——
     // Emscripten 未开 `-pthread` 时 std::thread 构造即抛 "Not supported"（反向不成立：
     // wasm 开 `-pthread` 后该宏同样取 1，故契约只约束「无能力 ⇒ WASM」这一方向）。
-    static_assert(AURORA_CAP_THREADS == 0 || AURORA_CAP_THREADS == 1, "AURORA_CAP_THREADS 必须为 0 或 1");
+    static_assert(AURORA_CAP_THREADS == 0 || AURORA_CAP_THREADS == 1, "AURORA_CAP_THREADS must be 0 or 1");
     constexpr bool threads_absent = (AURORA_CAP_THREADS == 0);
 #ifdef AURORA_PLATFORM_WASM
     constexpr bool on_wasm = true;

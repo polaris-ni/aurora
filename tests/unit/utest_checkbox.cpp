@@ -11,8 +11,11 @@
 #include "aurora/state/state.h"
 #include "aurora/widget/checkbox.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_checkbox {
+
+using aurora::testing::require_field;
 
 namespace {
 
@@ -161,10 +164,10 @@ AURORA_TEST_CASE(checkbox_serialize_deserialize_roundtrip) {
     src.set_enabled(false);
     AURORA_TEST_CHECK_EQ(calls, 1);  // 序列化前回调已随 set_value 触发
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["checked"].get<bool>(), true);
-    AURORA_TEST_CHECK_EQ(props["enabled"].get<bool>(), false);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "checked"), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "enabled"), false);
 
     Checkbox dst;
     dst.deserialize_props(props);

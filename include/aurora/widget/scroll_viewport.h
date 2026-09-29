@@ -20,6 +20,8 @@ enum class ScrollSnapAlignment : std::uint8_t {
 /// 等价于 CSS `scroll-snap-type: y mandatory` 的分页语义。
 struct ScrollSnap {
     /// @brief 分页工厂：以视口高为周期的吸附（常配 Start 或 Center 对齐）。
+    /// @param align 条目边沿与视口边沿的贴合方位，默认 Start。
+    /// @return paging=true、extent=0 的 ScrollSnap，对齐方式取 align。
     [[nodiscard]] static auto page(ScrollSnapAlignment align = ScrollSnapAlignment::Start) -> ScrollSnap {
         return {.paging = true, .extent = 0.0F, .alignment = align};
     }
@@ -29,6 +31,8 @@ struct ScrollSnap {
     ScrollSnapAlignment alignment = ScrollSnapAlignment::Start;  ///< 对齐方位
 
     /// @brief 本配置是否生效（分页恒生效；否则须有正周期）。
+    /// @param viewport_h 当前视口高度（分页模式下为生效判据）。
+    /// @return 分页时视口高 > 0 才为 true；非分页时 extent > 0 即为 true。
     [[nodiscard]] auto enabled(float viewport_h) const -> bool { return paging ? viewport_h > 0.0F : extent > 0.0F; }
 };
 
@@ -38,6 +42,8 @@ struct ScrollSnap {
 /// （Dismissible/ReorderableList 自驱动先例，不占 `Animator`）。reduce-motion 的短路
 /// 属宿主职责（对齐 `AnimationController::tick` 语义：直落端点、不产生中间帧）。
 struct ScrollGlide {
+    /// @brief 默认滑动总时长：150ms easeOutCubic 收敛。
+    /// @return 0.15 秒。
     [[nodiscard]] static constexpr auto default_duration_s() -> double { return 0.15; }
 
     float from = 0.0F;  ///< 起点偏移
@@ -47,6 +53,8 @@ struct ScrollGlide {
     bool active = false;  ///< 是否滑动中
 
     /// @brief 启动/重定向：起点取当前值；目标等于当前值则不启动（保持既有态）。
+    /// @param current 启动时的当前偏移，作为滑动起点。
+    /// @param target 滑动目标偏移。
     auto start(float current, float target) -> void {
         if (current == target) {
             return;  // 已在目标：不重置进行中的滑动，也不新起
@@ -58,6 +66,8 @@ struct ScrollGlide {
     }
 
     /// @brief 推进 dt 秒，返回本帧偏移；到达终点时置 active=false 并返回精确 `to`。
+    /// @param dt_s 本帧时长（秒），累计进 elapsed_s。
+    /// @return 本帧 easeOutCubic 插值偏移；未激活或已收位时返回终点 `to`。
     auto tick(double dt_s) -> float {
         if (!active) {
             return to;
@@ -91,9 +101,12 @@ struct ScrollViewport {
     float step = 16.0F;  ///< 每单位滚轮增量的滚动像素（与 ScrollProps::step 默认一致）
 
     /// @brief 最大可滚动偏移：内容超出视口的部分，不足时为 0（不可滚）。
+    /// @return max(0, content_h - viewport_h)。
     [[nodiscard]] auto max_offset() const -> float { return std::max(0.0F, content_h - viewport_h); }
 
     /// @brief 滚轮增量驱动滚动：夹取到 [0, max_offset]，offset 变化时返回 true。
+    /// @param delta_y 滚轮增量；正方向为向上滚动（offset 减小）。
+    /// @return 实际发生滚动（新目标与当前 offset 不同）时为 true。
     auto apply_scroll(float delta_y) -> bool {
         const float target = clamp_offset(offset_y, delta_y, step, content_h, viewport_h);
         if (target == offset_y) {
@@ -105,6 +118,12 @@ struct ScrollViewport {
 
     /// @brief 共享夹取数学：由 (offset, delta_y, step, content_h, viewport_h) 算出新 offset。
     ///        无状态静态形式，供真实滚动控件在自有状态上复用同一约定。
+    /// @param offset 当前偏移。
+    /// @param delta_y 滚轮增量；正方向为向上滚动（offset 减小）。
+    /// @param step 每单位增量的滚动像素。
+    /// @param content_h 内容自然高度。
+    /// @param viewport_h 视口高度。
+    /// @return 夹取到 [0, max(0, content_h-viewport_h)] 的新 offset。
     static auto clamp_offset(float offset, float delta_y, float step, float content_h, float viewport_h) -> float {
         const float max_off = std::max(0.0F, content_h - viewport_h);
         return std::clamp(offset - (delta_y * step), 0.0F, max_off);
@@ -113,6 +132,11 @@ struct ScrollViewport {
     /// @brief 垂直滚动 clamp 后的未消费余量（供消费方回传 `ScrollEvent::remaining_y`）：
     ///        `delta_y - 已吃掉量`。到顶/到底被夹掉的部分即余量（保留符号）；
     ///        `step <= 0` 视为不可滚，全量退为余量。
+    /// @param before 消费前的偏移。
+    /// @param after 消费后被夹取的偏移。
+    /// @param delta_y 原始滚轮增量。
+    /// @param step 每单位增量的滚动像素；<= 0 视为不可滚。
+    /// @return 未被消费的余量（保留原增量符号）。
     static auto remaining_offset(float before, float after, float delta_y, float step) -> float {
         if (step <= 0.0F) {
             return delta_y;
@@ -122,6 +146,11 @@ struct ScrollViewport {
 
     /// @brief 吸附收位目标：当前 offset 在 `snap` 下最近的条目对齐点（夹到 [0, max_offset]）。
     ///        吸附关闭（非分页且 extent<=0，或分页但视口未定）时退化为普通夹取。
+    /// @param offset 待收位的当前偏移。
+    /// @param content_h 内容自然高度。
+    /// @param viewport_h 视口高度（分页模式下作为周期）。
+    /// @param snap 吸附配置：周期取 extent（分页时取视口高），对齐方式决定目标公式。
+    /// @return 最近对齐点偏移，越界条目夹到 max_offset。
     static auto snap_target(float offset, float content_h, float viewport_h, const ScrollSnap &snap) -> float {
         const float max_off = std::max(0.0F, content_h - viewport_h);
         const float plain = std::clamp(offset, 0.0F, max_off);

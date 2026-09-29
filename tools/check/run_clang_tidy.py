@@ -357,16 +357,18 @@ def main() -> int:
     ap.add_argument("--build-dir", required=True,
                     help="CMake build directory containing compile_commands.json")
     ap.add_argument("--emscripten", action="store_true",
-                    help="build-dir 是 Emscripten 构建目录：先把其编译库重写成 native "
-                         "clang-tidy 可消费的形态（wasm 三元组 + sysroot，弃 PCH），"
-                         "使浏览器专属 TU 与 #ifdef AURORA_BACKEND_WASM 分支进入覆盖面")
+                    help="the build-dir is an Emscripten build directory: first rewrite its compile "
+                         "database into a form native clang-tidy can consume (wasm triple + sysroot, drop PCH), "
+                         "so browser-only TUs and #ifdef AURORA_BACKEND_WASM branches enter the coverage")
     ap.add_argument("--jobs", type=int, default=0,
                     help="parallel clang-tidy processes (0 = CPU count)")
     ap.add_argument("--shard", type=parse_shard, default=None, metavar="I/N",
-                    help="只跑第 I 片（共 N 片）：对已排序的 TU 清单取 [I::N]。"
-                         "CI 门禁用它把一遍的全量 TU 并到多个 job 上，缩短墙钟而不减覆盖面")
+                    help="run only shard I of N: take [I::N] of the sorted TU list. "
+                         "The CI gate uses it to spread one pass's full TU set across jobs, "
+                         "shortening wall-clock without cutting coverage")
     ap.add_argument("--print-tus", action="store_true",
-                    help="打印本片选中的 TU 清单后退出 0（核验分片互斥性与并集完整性，不跑 tidy）")
+                    help="print the TUs selected for this shard, then exit 0 "
+                         "(verify shard disjointness and union completeness; does not run tidy)")
     ap.add_argument("--checks", default=None,
                     help="override the Checks: list from .clang-tidy")
     ap.add_argument("--config", default=None,
@@ -493,11 +495,11 @@ def main() -> int:
     print(f"[lint] unique findings: {len(findings)}   blocking(>={a.fail_on}): {blocking}")
     if broken:
         print(f"\n[lint] FATAL: {len(broken)}/{len(tus)} translation units failed to compile "
-              f"— 它们的告警不在统计内，本轮覆盖面不完整（勿当作「已清零」）")
+              f"- their warnings are not tallied; this run's coverage is incomplete (do not treat as 'already clean')")
         for tu_, msg in list(broken.items())[:10]:
             print(f"    {norm(tu_)}: {msg}")
         if len(broken) > 10:
-            print(f"    ... 另有 {len(broken) - 10} 个 TU")
+            print(f"    ... {len(broken) - 10} more TUs")
     if timeouts:
         print(f"[lint] problems: {len(timeouts)}")
         for t in timeouts[:10]:

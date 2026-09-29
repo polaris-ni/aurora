@@ -11,15 +11,24 @@
 
 #include "aurora/app/ui_prompt.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_ui_prompt {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
 /// 构造一个已知能通过校验的最小树（直接取自 generate_ui 的产出，避免与 Text 的必填属性漂移耦合）。
 [[nodiscard]] auto known_good_tree() -> Json {
     const auto r = aurora::generate_ui("text");
-    return r.ok() ? r.value()["node"] : Json::object();
+    if (!r.ok()) {
+        return Json::object();
+    }
+    const auto *node = r.value().at("node");
+    return node != nullptr ? *node : Json::object();
 }
 
 }  // namespace
@@ -73,40 +82,41 @@ AURORA_TEST_CASE(prompt_for_description_narrows_types_and_includes_layout) {
 AURORA_TEST_CASE(repair_fixes_case_and_spelling_of_type_name) {
     // 类型名大小写写错是 LLM 最常见的错误，属于可确定性修好的一类。
     Json node = Json::object();
-    node["type"] = "text";
+    node.set("type", "text");
     const Json fixed = aurora::repair_ui_tree(node);
-    AURORA_TEST_CHECK_EQ(fixed["type"].get<std::string>(), std::string{"Text"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(fixed, "type"), std::string{"Text"});
 }
 
 AURORA_TEST_CASE(repair_adds_required_props_only_and_keeps_explicit_values) {
     Json node = Json::object();
-    node["type"] = "Text";
-    node["props"] = Json::object();
-    node["props"]["content"] = "hi";
+    node.set("type", "Text");
+    node.set("props", testing::json_obj({{"content", "hi"}}));
     const Json fixed = aurora::repair_ui_tree(node);
 
     // 显式给的值不得被覆盖。
-    AURORA_TEST_CHECK_EQ(fixed["props"]["content"].get<std::string>(), std::string{"hi"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(fixed, "props"), "content"), std::string{"hi"});
 
     // 只允许补**必填**项：无脑补全部缺省属性会把 `color`（数组形态）这类与 validator 声明类型
     // 不兼容的值塞进树里，反而把原本合法的树改坏（实测踩到的坑）。
     const Json schema = aurora::describe_component("Text");
     std::set<std::string> required;
-    for (const Json &pd : schema["prop_descriptors"]) {
-        if (pd.value("required", false)) {
-            required.insert(pd.value("name", std::string{}));
+    const auto *descriptors = require_child(schema, "prop_descriptors");
+    for (const auto &descriptor : *descriptors) {
+        if (descriptor.as_or<bool>("required", false)) {
+            required.insert(std::string{descriptor.as_or<std::string>("name", "")});
         }
     }
     AURORA_TEST_CHECK_GT(required.size(), std::size_t{0});  // 否则下面的循环是空转
-    for (auto kv = fixed["props"].begin(); kv != fixed["props"].end(); ++kv) {
-        AURORA_TEST_CHECK_TRUE(required.contains(kv.key()));
+    const auto *fixed_props = require_child(fixed, "props");
+    for (const auto &entry : fixed_props->entries()) {
+        AURORA_TEST_CHECK_TRUE(required.contains(std::string{entry.key}));
     }
 }
 
 AURORA_TEST_CASE(repair_result_of_a_bare_node_passes_validation) {
     // 机修的唯一目的就是让校验通过 —— 直接断言这个终态，比断言中间补了哪些键更稳。
     Json node = Json::object();
-    node["type"] = "Text";
+    node.set("type", "Text");
     const Json fixed = aurora::repair_ui_tree(node);
     const std::vector<aurora::ValidationError> errors = aurora::validate_ui_tree(fixed);
     AURORA_TEST_CHECK_MSG(errors.empty(), errors.empty() ? "" : errors[0].message);
@@ -114,13 +124,10 @@ AURORA_TEST_CASE(repair_result_of_a_bare_node_passes_validation) {
 
 AURORA_TEST_CASE(repair_drops_children_when_policy_is_none) {
     // 叶子控件带了子节点 → 树非法；留着只会继续报错，故直接丢弃。
-    Json child = Json::object();
-    child["type"] = "Text";
     Json node = Json::object();
-    node["type"] = "Text";
-    node["props"] = Json::object();
-    node["props"]["content"] = "hi";
-    node["children"] = Json::array({child});
+    node.set("type", "Text");
+    node.set("props", testing::json_obj({{"content", "hi"}}));
+    node.set("children", testing::json_arr({testing::json_obj({{"type", "Text"}})}));
 
     const Json fixed = aurora::repair_ui_tree(node);
     AURORA_TEST_CHECK_FALSE(fixed.contains("children"));
@@ -129,9 +136,9 @@ AURORA_TEST_CASE(repair_drops_children_when_policy_is_none) {
 AURORA_TEST_CASE(repair_leaves_unresolvable_types_alone) {
     // 无法辨认的类型**不猜**：宁可留给 LLM 重来，也不静默换成一个不相干的控件。
     Json node = Json::object();
-    node["type"] = "ZzzNotAWidget";
+    node.set("type", "ZzzNotAWidget");
     const Json fixed = aurora::repair_ui_tree(node);
-    AURORA_TEST_CHECK_EQ(fixed["type"].get<std::string>(), std::string{"ZzzNotAWidget"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(fixed, "type"), std::string{"ZzzNotAWidget"});
 }
 
 // ─────────────────────────── 自修复环 ───────────────────────────
@@ -153,7 +160,7 @@ AURORA_TEST_CASE(repair_loop_retries_with_errors_when_llm_is_injected) {
         ++calls;
         AURORA_TEST_CHECK_FALSE(prompt.empty());
         if (calls == 1) {
-            return Json{{"type", "ZzzNotAWidget"}};  // 第一轮故意给一棵修不好的树
+            return testing::json_obj({{"type", "ZzzNotAWidget"}});  // 第一轮故意给一棵修不好的树
         }
         errors_seen_on_second_call = errors.size();
         return known_good_tree();
@@ -174,9 +181,8 @@ AURORA_TEST_CASE(repair_loop_machine_fix_avoids_a_second_llm_round_trip) {
     const aurora::GenerateUiFn llm = [&](const std::string &, const std::vector<aurora::ValidationError> &) -> Json {
         ++calls;
         Json node = Json::object();
-        node["type"] = "text";  // 大小写写错 —— 机修可确定性修好
-        node["props"] = Json::object();
-        node["props"]["content"] = "hello";
+        node.set("type", "text");  // 大小写写错 —— 机修可确定性修好
+        node.set("props", testing::json_obj({{"content", "hello"}}));
         return node;
     };
 
@@ -191,11 +197,12 @@ AURORA_TEST_CASE(repair_result_serializes_for_inspection) {
     const Json j = r.to_json();
     AURORA_TEST_CHECK_TRUE(j.contains("ok"));
     AURORA_TEST_CHECK_TRUE(j.contains("tree"));
-    AURORA_TEST_CHECK_TRUE(j["history"].is_array());
-    AURORA_TEST_REQUIRE_FALSE(j["history"].empty());
+    AURORA_TEST_CHECK_TRUE(require_child(j, "history")->is_array());
+    AURORA_TEST_REQUIRE_FALSE(require_child(j, "history")->empty());
     // 逐轮记录是给人/AI 自省「为什么没修好」用的，故必须带错误明细。
-    AURORA_TEST_CHECK_TRUE(j["history"][0].contains("errors"));
-    AURORA_TEST_CHECK_TRUE(j["history"][0].contains("machine_fixed"));
+    const auto &first_round = *require_child_at(*require_child(j, "history"), 0);
+    AURORA_TEST_CHECK_TRUE(first_round.contains("errors"));
+    AURORA_TEST_CHECK_TRUE(first_round.contains("machine_fixed"));
 }
 
 }  // namespace aurora::test_cases::utest_ui_prompt

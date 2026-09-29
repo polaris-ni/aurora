@@ -37,7 +37,7 @@ struct WgpuRhiOptions {
         GLES,  ///< 显式 OpenGL ES（兼容兜底，能力受限：无 compute）
     };
 
-    Backend backend = Backend::Auto;
+    Backend backend = Backend::Auto;  ///< 底层图形 API 选择，默认 Auto 按平台偏好链
 
     /// @brief Linux 原生窗口协议：两个 void* 句柄无法自述归属，须显式判别
     /// （Xlib 与 Wayland 的 surface 创建走不同 `WGPUSurfaceSource*` 链）。Win32 忽略。
@@ -46,7 +46,7 @@ struct WgpuRhiOptions {
         Wayland,  ///< Wayland：native_display = `wl_display*`，native_window = `wl_surface*`
     };
 
-    LinuxHost linux_host = LinuxHost::X11;
+    LinuxHost linux_host = LinuxHost::X11;  ///< Linux 原生窗口协议判别（Win32 忽略），默认 X11
 
     /// @brief 原生窗口句柄（`Surface::native_handle()` 口径：Win32 为 HWND，X11 为
     /// XID `Window`，Wayland 为 `wl_surface*`——Linux 下须同时给 `native_display`，
@@ -60,7 +60,7 @@ struct WgpuRhiOptions {
 
     /// @brief 离屏模式初始尺寸（设备像素；非离屏模式忽略，`begin_frame` 可再重设）。
     int offscreen_width = 0;
-    int offscreen_height = 0;
+    int offscreen_height = 0;  ///< 离屏模式初始高度（设备像素；口径同 `offscreen_width`）。
 
     /// @brief 垂直同步（FIFO）。离屏模式无意义。
     bool vsync = true;
@@ -95,7 +95,9 @@ class WgpuRhi final : public RhiBackend, public RhiFrameSink {
     WgpuRhi();
     /// @brief 装载构造：创建 instance/adapter/device（+ 离屏目标或 swapchain surface）。
     /// 失败时 `valid()` 为 false，不抛异常。
+    /// @param options 装配选项：后端选择、原生窗口句柄、vsync 与离屏初始尺寸。
     explicit WgpuRhi(const WgpuRhiOptions &options);
+    /// @brief 析构：经 pimpl 释放全部 wgpu 资源（批、目标纹理、读回缓冲、device/instance）。
     ~WgpuRhi() override;
     WgpuRhi(const WgpuRhi &) = delete;
     auto operator=(const WgpuRhi &) -> WgpuRhi & = delete;
@@ -103,25 +105,40 @@ class WgpuRhi final : public RhiBackend, public RhiFrameSink {
     auto operator=(WgpuRhi &&) -> WgpuRhi & = delete;
 
     /// @brief wgpu 资源是否就绪（构造成功且未发生设备丢失级失败）。
+    /// @return `true` = device 就绪可用；`false` = 初始化失败或设备丢失（永久回退）。
     [[nodiscard]] auto valid() const -> bool;
 
+    /// @brief 后端名标识（供选择逻辑与诊断日志的稳定字符串）。
+    /// @return 恒为 `"gpu-wgpu"`。
     [[nodiscard]] auto name() const -> std::string_view override { return "gpu-wgpu"; }
 
     /// @brief 命令消费面视图（`DisplayList::replay` 入口）；帧调度与命令消费同对象。
+    /// @return 本对象自身引用（`*this`）。
     [[nodiscard]] auto backend() -> RhiBackend & override { return *this; }
 
-    /// @brief 消费一条命令（翻译进当前批；提交延迟到批切换/帧尾）。
+    /// @brief 消费一条命令（翻译进当前批；提交延迟到批切换/帧尾）；帧外提交的命令不消费。
+    /// @param cmd 命令类型（`DrawCmd` 枚举项）。
+    /// @param data 与该命令对应的载荷参数。
     auto submit(const DrawCmd &cmd, const CmdData &data) -> void override;
 
-    // ---- RhiFrameSink ----
+    /// @brief RhiFrameSink 帧起点：结清上帧未消费读回、复位帧状态并获取本帧渲染目标
+    ///        （swapchain 尺寸变化时重配；离屏目标按需重建）。
+    /// @param device_width 帧缓冲宽（设备像素，须为正）。
+    /// @param device_height 帧缓冲高（设备像素，须为正）。
+    /// @param scale 系统缩放系数（非正值按 1.0 处理）。
+    /// @return `false` = 本帧不可绘（设备未就绪、取帧/重配/建目标失败；设备丢失级失败为永久回退）。
     [[nodiscard]] auto begin_frame(int device_width, int device_height, float scale) -> bool override;
+    /// @brief RhiFrameSink 帧尾：落地挂起批、关 pass、提交命令缓冲；swapchain 模式上屏，
+    ///        离屏模式按需登记读回拷贝与映射。
     auto end_frame() -> void override;
 
     /// @brief 本帧（自 `begin_frame` 起）累计诊断计数。
+    /// @return 帧内统计快照（未初始化时返回零值）。
     [[nodiscard]] auto stats() const -> FrameStats;
 
     /// @brief 字形图集页边长（默认 1024；须在 `begin_frame` 前设置，非正值忽略）。
     /// 常规消费者无须调用；测试用小页覆盖「满页开新页 / 页数封顶 LRU 淘汰」路径。
+    /// @param side 图集页边长（像素，非正值为无效输入、不改状态）。
     auto set_glyph_page_size(int side) -> void;
 
     /// @brief 离屏读回通道开关（默认 `true`，即每帧 `end_frame` 录一次目标纹理 → MAP_READ
@@ -133,6 +150,7 @@ class WgpuRhi final : public RhiBackend, public RhiFrameSink {
     /// unwind）。关闭期间 `read_pixels` 返回 false；重新打开后的**下一帧**起才有读回数据。
     ///
     /// 真窗口（swapchain）模式不登记读回，本开关无作用。
+    /// @param on `true` = 帧尾登记读回拷贝与映射；`false` = 跳过（期间 `read_pixels` 返回 false）。
     auto set_readback_enabled(bool on) -> void;
 
     /// @brief 区域效果 compute 路开关（默认 `true`）：置 false 后 `BlurRegion`/`BlendRegion`/
@@ -141,31 +159,50 @@ class WgpuRhi final : public RhiBackend, public RhiFrameSink {
     /// 仅供基准对比（`bench_gpu` 场景六「compute vs 片元帧成本」）与两路行为差异诊断；
     /// `cs_mip` 大图重采样不受本开关影响。两路语义同源（`blur_tap`/`blend_rgb`/`mask_base`
     /// 单一来源），像素差异仅 quantization 顺序级别（见规格 §8.8）。
+    /// @param on `true` = compute 管线就绪时走 compute 路；`false` = 三效果族整体强制片元兜底路。
     auto set_compute_effects_enabled(bool on) -> void;
 
     /// @brief 当前帧内容读回（RGBA8，行序自上而下）。仅供诊断/快照/容差 golden。
     /// 调用窗口：`end_frame` 之后、下一次 `begin_frame` 之前。返回 false = 不可用或失败。
+    /// @param out 输出参数：成功时被整帧像素字节覆写。
+    /// @return `true` = 读回成功；`false` = 读回关闭、非离屏模式或映射失败。
     [[nodiscard]] auto read_pixels(std::vector<std::uint8_t> &out) -> bool;
 
-    // ---- RhiBackend 能力位与流式纹理契约（specification/03 §8.7）----
-
+    /// @brief RhiBackend 能力位（specification/03 §8.7）：device 就绪时 gpu=true，compute 随
+    ///        所选后端（GLES=false）；native_surface_import 恒 false。
+    /// @return 能力位快照（device 未就绪时为全默认值，gpu=false）。
     [[nodiscard]] auto capabilities() const -> RhiCapabilities override;
 
     /// @brief 取常驻流式纹理槽（键寻址，槽复用、尺寸变化就地重定义；与 `DrawImage`
     /// 流式分支共享同一存储）。@return 句柄（非零）；`0` = 后端不可用。
+    /// @param key 常驻槽键（句柄即此键）。
+    /// @param width 纹理宽（像素）。
+    /// @param height 纹理高（像素）。
     [[nodiscard]] auto acquire_stream_image(std::uint64_t key, int width, int height) -> StreamImageId override;
 
     /// @brief 流式图像增量更新：`pixels` 为整图像素基址（RGBA8 直色非预乘），
     /// `stride_bytes` 行跨距字节数（`0` = 紧凑行），脏矩形 (x,y,w,h) sub-upload
     /// （wgpu `queueWriteTexture` + bytes_per_row/rows_per_image 布局参数）。
+    /// 越界脏矩形与非正宽高按契约忽略；上传前先落地挂起批，避免帧内读到半新内容。
+    /// @param id acquire_stream_image 返回的槽句柄（`0` 或未知槽忽略）。
+    /// @param pixels 整图像素基址（RGBA8 直色非预乘；空指针忽略）。
+    /// @param stride_bytes 行跨距字节数；`0` 表示紧凑行（宽 × 4）。
+    /// @param x 脏矩形左上角 x（像素）。
+    /// @param y 脏矩形左上角 y（像素）。
+    /// @param w 脏矩形宽（像素，非正值忽略）。
+    /// @param h 脏矩形高（像素，非正值忽略）。
     auto update_stream_image(StreamImageId id, const std::uint8_t *pixels, std::size_t stride_bytes, int x, int y,
                              int w, int h) -> void override;
 
-    /// @brief 释放流式图像槽（先落地待提交批再销毁；句柄此后无效，重复释放无害）。
+    /// @brief 释放流式图像槽（纹理由已录制 bind group 引用保活，无须先落地待提交批；
+    /// 句柄此后无效，未知句柄与重复释放无害）。
+    /// @param id 要释放的槽句柄。
     auto release_stream_image(StreamImageId id) -> void override;
 
     /// @brief 原生表面导入：wgpu-native v29 C API 无外部共享纹理导入入口 → 单次告警并
     /// 返回 `0`，调用方回退 CPU 上传路径（契约行为与 GL 后端一致，能力位恒 false）。
+    /// @param frame 待导入的原生帧（本实现不消费）。
+    /// @return 恒 `0`（导入不可用）。
     [[nodiscard]] auto import_native_surface(const NativeSurfaceFrame &frame) -> StreamImageId override;
 
   private:

@@ -1,7 +1,8 @@
 # ============================================================
 # AuroraTests.cmake — 注册式测试 runner（CTest）
 # ------------------------------------------------------------
-# tests/unit 与 tests/integration 下全部用例 TU 链入单一可执行 aurora_test_runner：
+# tests/unit、tests/integration 与 tests/e2e（真实后端端到端，受 AURORA_BUILD_E2E 门控）
+# 下全部用例 TU 链入单一可执行 aurora_test_runner：
 #   - 全量构建从「每文件一个 exe、各自链接 libaurora」降为一次链接（极速构建的核心）；
 #   - 用例由框架静态注册，main 由框架唯一提供（tests/framework/test_main.cpp 的 main()）；
 #     测试文件禁止自定义 main()。
@@ -23,6 +24,9 @@
 # ============================================================
 
 option(AURORA_BUILD_TESTS "Build Aurora tests" ON)
+# 真实后端端到端用例（tests/e2e/，etest_ 前缀）：建真实窗口 + 走上屏链路，需要显示环境，
+# 故独立开关便于无显示环境整体退避；Emscripten 交叉构建下另行强制不纳入（见下方 GLOB）。
+option(AURORA_BUILD_E2E "Build Aurora end-to-end (real backend) tests" ON)
 if (AURORA_BUILD_TESTS)
     enable_testing()
     # 框架源（registry / runner / main）恒参与构建；用例源可为空（重写中间态）。
@@ -32,6 +36,16 @@ if (AURORA_BUILD_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/*.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/*.cpp")
+    # 真实后端端到端用例（tests/e2e/）。Emscripten 交叉构建下不纳入：wasm 产物没有宿主
+    # 窗口与显示（WASM E2E 走 opt-in 的真实浏览器 + CDP 通道）。此处口径必须与下方
+    # registry_integrity 的 --tests-dir 完全一致，否则该配置会扫到未注册的 stem 而误红。
+    if (AURORA_BUILD_E2E AND NOT EMSCRIPTEN)
+        file(GLOB AURORA_TEST_E2E_SOURCES CONFIGURE_DEPENDS
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e/*.cpp")
+    else ()
+        set(AURORA_TEST_E2E_SOURCES "")
+    endif ()
+    list(APPEND AURORA_TEST_CASE_SOURCES ${AURORA_TEST_E2E_SOURCES})
     set(AURORA_TEST_SOURCES ${AURORA_TEST_FRAMEWORK_SOURCES} ${AURORA_TEST_CASE_SOURCES})
 
     # ---- 静态校验 / 门禁脚本（tools/check/*.py）注册为 CTest 用例 ----
@@ -72,15 +86,20 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_code_doc_sync
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_code_doc_sync.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 人工测试用例（codespec/manual-test/*.md）解析契约守护：六字段名/顺序/取值域、
+        # 编号升序、依赖拓扑可解、预期结果与步骤同号映射、执行记录表列格式与判定一致性。
+        add_test(NAME check_manual_test_format
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_manual_test_format.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
         # 版本一致性门禁（CHANGELOG.currentVersion 必须等于库版本；描述性口径不符仅告警）。
         add_test(NAME check_version_consistency
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_version_consistency.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-        # 公共 API 命名一致性门禁（#2）：类型 PascalCase、属性/事件/函数 snake_case、事件 on_ 前缀。
+        # 公共 API 命名一致性门禁（SPEC.API.NAMING-CONSISTENCY.001）：类型 PascalCase、属性/事件/函数 snake_case、事件 on_ 前缀。
         add_test(NAME check_naming_conventions
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_naming_conventions.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-        # 零原生平台宏门禁（#14）：include/ src/ 预处理分支禁止 _WIN32/__linux__/__x86_64__ 等
+        # 零原生平台宏门禁（SPEC.PLATFORM.ZERO-IFDEF.001）：include/ src/ 预处理分支禁止 _WIN32/__linux__/__x86_64__ 等
         # 原生宏（platform.h 自身与 _WIN32_WINNT 等 SDK 旋钮豁免）；规范化宏密度仅报告。
         add_test(NAME check_platform_macros
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_platform_macros.py"
@@ -90,7 +109,7 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_test_temp_hygiene
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_test_temp_hygiene.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-        # 公共 API 体量/token 预算门禁（#24）：aurora_api.json 估算 token 数不得超预算上限。
+        # 公共 API 体量/token 预算门禁（SPEC.PERF.API.TOKEN-EFFICIENCY.001）：aurora_api.json 估算 token 数不得超预算上限。
         add_test(NAME check_api_budget
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_budget.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -105,6 +124,31 @@ if (AURORA_BUILD_TESTS)
         # 注释散文里也不得抄 NOLINT 令牌（它会被解析成对下一物理行的全量豁免）。
         add_test(NAME check_nolint_layout
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_nolint_layout.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 伞头（include/aurora/aurora.h）完整性门禁。两层检查：① 文件健康——include 被行尾
+        # 注释吞并 / 一行多指令 / 重复 / 路径缺失 / 编码损坏（私用区字符）/ 行结束符混用；
+        # ② 覆盖契约——直连集合不得相对基线缩减，且每个 public 头必须「直连 ∨ 从直连集合可达
+        # ∨ 显式豁免」，否则强制作者做分类决策。基线见 tools/check/umbrella_manifest.txt。
+        add_test(NAME check_umbrella_header
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_umbrella_header.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # Doxygen 注释规范门禁（CODING_STANDARDS.md §13，DOC-R1—DOC-R8）：标记形态（/// 与 ///< 唯一、@ 前缀）、
+        # // 与 /// 的归属界限（含「文档块须挂在 template 头之上」）、include/ 公共与已注释 protected 符号的
+        # @brief/@param/@return/@tparam 齐全度、@brief 首行与命令行后不得续写散文、 ///< 只挂真实成员且一声明一条、
+        # @param/@tparam 名必须与签名具名形参逐字对应。字符串与原始串在扫描前被掩掉，故着色器源码里的
+        # @group/@binding 不误判。豁免写法 `DOC-EXEMPT: <规则> <原因>`（见 §13.7，当前基线为 0 条豁免）。
+        add_test(NAME check_doc_comments
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_doc_comments.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 字面量中文门禁（CODING_STANDARDS.md §14，LIT-1/LIT-2）：include/ src/ examples/ tests/
+        # tools/ 的 C++/Python **字符串字面量**、以及 cmake/ 与根 CMakeLists.txt 的引号 /
+        # bracket 参数里不得出现中日韩字符——它们经 stdout/stderr、Inspector、CLI、LSP 与配置
+        # 控制台抵达终端，在 GBK 等窄代码页上必成乱码。注释、Doxygen 文档块与 Python docstring
+        # 不受限。功能必需的中文数据（CJK 断言素材、locale 输出、上屏 demo 文案、
+        # 着色器源码注释、正则语义片段）就地用 `CJK-LITERAL: <reason>` 标记豁免；文件级白名单条目
+        # 一旦不再命中任何诊断即由 LIT-2 判红灯。门禁自身输出全 ASCII（非 ASCII 转义成 \uXXXX）。
+        add_test(NAME check_no_cjk_literals
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_cjk_literals.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif ()
 
@@ -123,8 +167,15 @@ if (AURORA_BUILD_TESTS)
         message(FATAL_ERROR "AURORA_TEST_SHARDS must be a positive integer (got '${AURORA_TEST_SHARDS}')")
     endif ()
 
+    # E2E 用例的看门狗超时（ms）。runner 默认 timeout_ms=0 即不设限，而真实窗口事件循环
+    # 一旦挂起就没有兜底（不设 CTest TIMEOUT 属性先例），故由下方两条 add_test 注册循环
+    # 按 stem 前缀 etest_ 显式注入 --timeout；到点 runner 先写报告再以退出码 3 结束。
+    set(AURORA_E2E_TIMEOUT_MS "60000" CACHE STRING
+            "Watchdog timeout (ms) injected via --timeout for etest_ (real backend) cases")
+
     # runner 目标统一配置（分片共享）：链接 aurora + C++20 + 消费者 PCH + 告警；
-    # tests/ 供框架头解析，examples/app/google_play 供 google_play_data/ui 数据层测试；
+    # tests/ 供框架头解析，examples/app/google_play 供 google_play_data/ui 数据层测试，
+    # examples/demos 供 E2E 用例包含与 demo 同源的场景头（scenes/*.h）；
     # tools/include 复用 known_enums.h 等 SSOT，tests/support 为测试公共设施；
     # tools/servers 供 header-only 的工具侧客户端（inspector_client.h）被真代码单测——
     # 复制一份最小客户端只会测到副本，测不到那个「超时选项按平台不同形」的回归位。
@@ -133,7 +184,8 @@ if (AURORA_BUILD_TESTS)
     function(_aurora_configure_runner tgt)
         aurora_setup_consumer_target(${tgt}
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-                "${CMAKE_CURRENT_SOURCE_DIR}/examples/app/google_play")
+                "${CMAKE_CURRENT_SOURCE_DIR}/examples/app/google_play"
+                "${CMAKE_CURRENT_SOURCE_DIR}/examples/demos")
         target_include_directories(${tgt} PRIVATE
                 "${CMAKE_SOURCE_DIR}/tools/include"
                 "${CMAKE_SOURCE_DIR}/tools/servers"
@@ -148,7 +200,9 @@ if (AURORA_BUILD_TESTS)
         # tools/servers/inspector_client.h——它直接调 Winsock（socket/bind/accept/select…），与那个开关无关。
         # 开关默认 OFF（CI 的 core 各作业即是），届时链接面上没有任何地方引入 ws2_32。
         if (WIN32)
-            target_link_libraries(${tgt} PRIVATE shcore ws2_32)
+            # oleacc —— E2E 平台语义通道（tools/include/e2e/uia_client.h）与探针
+            # aurora_verify_win32_ua 同一依赖口径（IID_IUIAutomation 等 COM 符号面）。
+            target_link_libraries(${tgt} PRIVATE shcore ws2_32 oleacc)
         endif ()
         if (TARGET aurora_inspector_server)
             target_link_libraries(${tgt} PRIVATE aurora_inspector_server)
@@ -158,6 +212,22 @@ if (AURORA_BUILD_TESTS)
                 target_compile_options(${tgt} PRIVATE -ffp-contract=off)
             elseif (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
                 target_compile_options(${tgt} PRIVATE /fp:precise)
+            endif ()
+        endif ()
+        if (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+            # /STACK：MSVC 系链接器（link.exe / lld-link）默认栈保留仅 1MB，而 JSON 解析器是
+            # 递归下降（parse_value → parse_object/parse_array → parse_value），max_depth=512
+            # 且深度检查在递归入口——拒绝深嵌套语料时会先扎满 512 层才折返；Debug + ASan 下
+            # 每层帧肥大（红区 + 零内联），1MB 不够 ⇒ utest_json_conformance 的 must-reject /
+            # implementation-defined 用例 SEGFAULT（windows-llvm 实测；本地 clang++ Debug+ASan
+            # 复现，llvm build 的链接器是 lld-link）。MinGW(ld)/POSIX 默认栈更大且帧更瘦，
+            # 实测无感，不动。16MB ≈ 实测溢出点的 16 倍余量，栈保留只是虚拟地址空间，提交按需。
+            # 前端差异：clang-cl / MSVC 直接吃 /STACK:；GNU 前端（clang++ 驱动 lld-link）须经
+            # -Wl, 透传，否则被当成本地文件名报 no such file or directory。
+            if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+                target_link_options(${tgt} PRIVATE /STACK:16777216)
+            else ()
+                target_link_options(${tgt} PRIVATE "-Wl,/STACK:16777216")
             endif ()
         endif ()
         if (EMSCRIPTEN)
@@ -178,6 +248,14 @@ if (AURORA_BUILD_TESTS)
             target_link_options(${tgt} PRIVATE
                     -sNODERAWFS=1
                     -sALLOW_MEMORY_GROWTH=1
+                    # STACK_SIZE：Emscripten 3.1.27+ 默认栈仅 64KB，而 JSON 解析器是递归下降
+                    # （sax.cpp emit_value → emit_object/emit_array → emit_value(depth+1)），
+                    # max_depth 默认 512 且深度检查在递归入口——会先扎满 512 层才折返；每层帧携带
+                    # Result<bool>（variant 里的 Error 含 7 个 std::string，单帧 200+ 字节），
+                    # 512 层双帧 ≈ 200KB+，远超 64KB ⇒ wasm 下表现为 RuntimeError: memory access
+                    # out of bounds（栈溢出的 wasm 形态）。native 栈 8MB 无感，仅 wasm 需要显式放大；
+                    # 4MB = 实测需求（200KB+）的 8 倍余量，ALLOW_MEMORY_GROWTH 下初始内存足够容纳。
+                    -sSTACK_SIZE=4194304
                     "--post-js=${CMAKE_SOURCE_DIR}/tests/support/wasm_noderawfs_cwd.js")
         endif ()
     endfunction()
@@ -189,9 +267,17 @@ if (AURORA_BUILD_TESTS)
         list(APPEND _runner_targets aurora_test_runner)
 
         # CTest 注册：每条用例 = runner --run=<stem>（进程隔离，文件级粒度）。
+        # E2E（etest_）用例额外注入看门狗超时与 LABELS e2e：真实窗口事件循环挂起时 runner
+        # 默认不设限，须显式设限；标签供 `ctest -L e2e` 按层独立编排。
         foreach (tst ${AURORA_TEST_CASE_SOURCES})
             get_filename_component(tname ${tst} NAME_WE)
-            add_test(NAME ${tname} COMMAND aurora_test_runner --run=${tname})
+            if (tname MATCHES "^etest_")
+                add_test(NAME ${tname} COMMAND aurora_test_runner --run=${tname}
+                        --timeout=${AURORA_E2E_TIMEOUT_MS})
+                set_tests_properties(${tname} PROPERTIES LABELS "e2e")
+            else ()
+                add_test(NAME ${tname} COMMAND aurora_test_runner --run=${tname})
+            endif ()
         endforeach ()
     else ()
         # 桶分配：stem → MD5 前 8 位 % N（稳定散列，与 GLOB 顺序无关）。
@@ -214,8 +300,16 @@ if (AURORA_BUILD_TESTS)
             _aurora_configure_runner(${_tgt})
             list(APPEND _runner_targets ${_tgt})
             # CTest 用例名带分片号（<stem>_s<k>）：文件级粒度下 stem 全局唯一，编号仅为可读性。
+            # etest_ 的超时与 LABELS 注入与单 runner 分支同口径（分片下 etest_ 会被散列到
+            # 不同 runner，故按层编排须用 `ctest -L e2e`，不能按 runner 挑）。
             foreach (tname ${_shard_stems_${k}})
-                add_test(NAME ${tname}_s${k} COMMAND ${_tgt} --run=${tname})
+                if (tname MATCHES "^etest_")
+                    add_test(NAME ${tname}_s${k} COMMAND ${_tgt} --run=${tname}
+                            --timeout=${AURORA_E2E_TIMEOUT_MS})
+                    set_tests_properties(${tname}_s${k} PROPERTIES LABELS "e2e")
+                else ()
+                    add_test(NAME ${tname}_s${k} COMMAND ${_tgt} --run=${tname})
+                endif ()
             endforeach ()
         endforeach ()
         aurora_log("Tests: sharded runners = ${AURORA_TEST_SHARDS}")
@@ -243,6 +337,11 @@ if (AURORA_BUILD_TESTS)
         list(APPEND _registry_cmd
                 --tests-dir "${CMAKE_CURRENT_SOURCE_DIR}/tests/unit"
                 --tests-dir "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration")
+        # tests/e2e 与上方 GLOB 同口径：Emscripten / AURORA_BUILD_E2E=OFF 下不纳入，
+        # 否则脚本会扫到未进 runner 的 stem 而误报「suite contributes zero cases」。
+        if (AURORA_BUILD_E2E AND NOT EMSCRIPTEN)
+            list(APPEND _registry_cmd --tests-dir "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e")
+        endif ()
         add_test(NAME registry_integrity ${_registry_cmd}
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif ()

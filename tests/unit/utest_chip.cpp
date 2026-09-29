@@ -13,8 +13,13 @@
 #include "aurora/widget/chip.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_chip {
+
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -40,12 +45,12 @@ AURORA_TEST_CASE(default_and_labeled_construction) {
 
     const Chip tagged("Tag");
     AURORA_TEST_CHECK_EQ(tagged.label(), "Tag");
-    Json props;
+    Json props = Json::object();
     tagged.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["label"].get<std::string>(), "Tag");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "label"), "Tag");
     AURORA_TEST_CHECK_FALSE(props.contains("avatar"));  // 空头像不落盘
-    AURORA_TEST_CHECK_EQ(props["background"][0].get<int>(), 230);
-    AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 13.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "background"), 0)->as<int>().value(), 230);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "font_size"), 13.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(chain_setters_update_serialized_props) {
@@ -58,24 +63,24 @@ AURORA_TEST_CASE(chain_setters_update_serialized_props) {
         .set_font_size(15.0F)
         .set_corner_radius(6.0F);
 
-    Json props;
+    Json props = Json::object();
     c.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["label"].get<std::string>(), "renamed");
-    AURORA_TEST_CHECK_EQ(props["avatar"].get<std::string>(), "★");
-    AURORA_TEST_CHECK_EQ(props["background"][3].get<int>(), 4);
-    AURORA_TEST_CHECK_EQ(props["text_color"][0].get<int>(), 5);
-    AURORA_TEST_CHECK_EQ(props["delete_color"][1].get<int>(), 10);
-    AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 15.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["corner_radius"].get<float>(), 6.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "label"), "renamed");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "avatar"), "★");
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "background"), 3)->as<int>().value(), 4);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "text_color"), 0)->as<int>().value(), 5);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "delete_color"), 1)->as<int>().value(), 10);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "font_size"), 15.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "corner_radius"), 6.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(font_size_non_positive_degrades_to_13) {
     Chip c;
     c.set_font_size(0.0F);  // 非正字号回落默认 13pt
 
-    Json props;
+    Json props = Json::object();
     c.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["font_size"].get<float>(), 13.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "font_size"), 13.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(layout_sizes_from_text_metrics) {
@@ -143,7 +148,7 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
         .set_font_size(14.0F)
         .set_corner_radius(3.0F);
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
 
     Chip dst;
@@ -151,13 +156,13 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
     AURORA_TEST_CHECK_EQ(dst.label(), "seed");
     AURORA_TEST_CHECK_EQ(dst.avatar(), "A");
 
-    Json out;
+    Json out = Json::object();
     dst.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(out["background"][2].get<int>(), 3);
-    AURORA_TEST_CHECK_EQ(out["text_color"][1].get<int>(), 6);
-    AURORA_TEST_CHECK_EQ(out["delete_color"][3].get<int>(), 12);
-    AURORA_TEST_CHECK_NEAR(out["font_size"].get<float>(), 14.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(out["corner_radius"].get<float>(), 3.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "background"), 2)->as<int>().value(), 3);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "text_color"), 1)->as<int>().value(), 6);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "delete_color"), 3)->as<int>().value(), 12);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "font_size"), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "corner_radius"), 3.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(describe_reports_metadata) {
@@ -197,11 +202,11 @@ AURORA_TEST_CASE(badge_setters_serialize_and_describe) {
     AURORA_TEST_CHECK_EQ(b.count(), 7);
     AURORA_TEST_CHECK_EQ(std::string{b.type_name()}, "Badge");
 
-    Json props;
+    Json props = Json::object();
     b.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["count"].get<int>(), 7);
-    AURORA_TEST_CHECK_EQ(props["badge_color"][0].get<int>(), 1);
-    AURORA_TEST_CHECK_EQ(props["text_color"][1].get<int>(), 6);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "count"), 7);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "badge_color"), 0)->as<int>().value(), 1);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "text_color"), 1)->as<int>().value(), 6);
 
     Badge dst;
     dst.deserialize_props(props);

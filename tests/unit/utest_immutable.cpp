@@ -63,8 +63,8 @@ AURORA_TEST_CASE(write_path_shape_is_compile_time_enforced) {
     // 类型层面契约：Immutable 不暴露任何写入口（set 不存在）；
     // Mutable 暴露 set(T)。用 concept 探测在编译期锁定该形状
     // （concept 体内表达式依赖模板参数 T，对具体类型的不存在成员判 false 而非硬错误）。
-    static_assert(!writable_via_set<aurora::Immutable<int>>, "Immutable 不得暴露写路径");
-    static_assert(writable_via_set<aurora::Mutable<int>>, "Mutable 必须暴露写路径");
+    static_assert(!writable_via_set<aurora::Immutable<int>>, "Immutable must not expose a write path");
+    static_assert(writable_via_set<aurora::Mutable<int>>, "Mutable must expose a write path");
     // 读路径两侧都返回 const 引用（get 对 const 对象可用）。
     static_assert(std::is_same_v<decltype(std::declval<const aurora::Immutable<int> &>().get()), const int &>);
     static_assert(std::is_same_v<decltype(std::declval<const aurora::Mutable<int> &>().get()), const int &>);

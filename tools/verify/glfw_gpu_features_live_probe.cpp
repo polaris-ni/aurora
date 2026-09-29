@@ -6,6 +6,7 @@
 // 自动段（无需人工）：
 //   1. 能力位核对：gpu 通道存在且 name == "gpu-gl"；capabilities().gpu == true；
 //      native_surface_import == false（GL 3.3 契约口径：仅契约位，不兑现）。
+//      建窗经 E2E 内核 `e2e::open(Backend::Glfw, gpu=true)`（RAII 会话持有）。
 //   2. 契约核对：import_native_surface 空帧恒返回 0（warn-once，不崩溃）。
 //   3. 流式纹理逐版本像素：同一 stream_key 连续两版本（红→蓝）经 DrawImage 命令回放，
 //      read_pixels 读回中心像素应逐版本变化——证明真实 glTexSubImage2D 上传 + 采样生效。
@@ -25,6 +26,8 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/rhi/gpu_gl_rhi.h"
+#include "e2e/harness.h"  // E2E 驱动内核：建窗统一经 e2e::open（RAII + 失败翻译），本探针只留平台判据
+#include "verify_args.h"
 
 namespace {
 
@@ -106,46 +109,50 @@ class GridBox final : public aurora::LeafWidget {
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    bool interactive = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--interactive") {
-            interactive = true;
-        }
+    const auto cli = aurora_verify::parse_interactive("GLFW GPU feature live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
     }
+    const bool interactive = cli.arguments->flag("interactive");
 
     emit("== aurora verify: GLFW GPU features (stream texture + layer cache) ==");
 
-    // ---- 窗口与 GPU 通道 ----
-    aurora::GlfwOptions opts;
-    opts.size = aurora::Size{.width = 560.0F, .height = 420.0F};
-    opts.title = "aurora-verify-glfw-gpu-features";
-    opts.resizable = false;
-    opts.gpu = true;
-    opts.max_fps = 0;
-    auto created = aurora::create_window(opts);
-    if (!created.ok()) {
-        AURORA_LOG_ERROR("verify", "create_window failed (no display / GLFW init failed)");
+    // ---- 窗口与 GPU 通道（建窗经 E2E 内核 e2e::open）----
+    // WindowSpec 与旧手写 GlfwOptions 的差异：resizable=false 由内核对 GLFW 统一设置；
+    // max_fps=0 不再显式设置（内核 WindowSpec 无该字段）——max_fps 只作用于 Application::run
+    // 的帧预算统计，不影响本探针的直驱 present_root 循环与 RHI 离屏段。visibility 显式
+    // Normal 保持既有可见行为（内核 E2E 用例默认 Hidden）。
+    aurora::e2e::WindowSpec spec;
+    spec.backend = aurora::e2e::Backend::Glfw;
+    spec.width = 560;
+    spec.height = 420;
+    spec.title = "aurora-verify-glfw-gpu-features";
+    spec.gpu = true;
+    spec.visibility = aurora::WindowVisibility::Normal;
+    auto session = aurora::e2e::open(spec);
+    if (!session.ok()) {
+        AURORA_LOG_ERROR("verify", "open(Glfw, gpu) failed: " + session.reason() + " (no display / GLFW init failed)");
         return 2;
     }
-    auto &win = *created.value();
+    auto &win = session.window();
 
     auto *sink = win.surface().gpu_backend();
     if (sink == nullptr) {
-        emit("[SKIP] 此构建未启用 GLFW GPU 通道（AURORA_ENABLE_GLFW_GPU_GL=OFF 或回退软件路径）");
+        emit("[SKIP] this build has no GLFW GPU channel (AURORA_ENABLE_GLFW_GPU_GL=OFF or it fell back to software)");
         return 2;
     }
     auto &backend = sink->backend();
-    check(backend.name() == "gpu-gl", "GPU 通道 name == gpu-gl");
+    check(backend.name() == "gpu-gl", "GPU channel name == gpu-gl");
     auto *gpu = dynamic_cast<aurora::rhi::GpuGlRhi *>(&backend);
 
     const auto caps = gpu->capabilities();
     check(caps.gpu, "capabilities().gpu == true");
-    check(!caps.native_surface_import, "capabilities().native_surface_import == false（GL 3.3 仅契约位）");
+    check(!caps.native_surface_import, "capabilities().native_surface_import == false (GL 3.3: contract bit only)");
 
     // ---- 契约位：导入空帧恒 0（warn-once，不崩溃）----
     aurora::NativeSurfaceFrame empty_frame;
     const auto imported = gpu->import_native_surface(empty_frame);
-    check(imported == 0, "import_native_surface(空帧) == 0（契约不兑现口径）");
+    check(imported == 0, "import_native_surface(empty frame) == 0 (contract not fulfilled)");
 
     // ---- 流式纹理逐版本像素（真实 GL 上传 + 采样）----
     // 同一 stream_key：v1 红（建槽 + 首传）→ v1 重绘（同版本命中常驻槽，无新上传）→
@@ -191,9 +198,9 @@ auto main(int argc, char **argv) -> int {
     const auto c_red1 = center_of(red1);
     const auto c_red2 = center_of(red2);
     const auto c_blue = center_of(blue);
-    check(c_red1[0] > 180 && c_red1[1] < 80 && c_red1[2] < 80, "流式帧 v1 中心为红（建槽 + 首传上屏）");
-    check(c_red2[0] > 180 && c_red2[1] < 80 && c_red2[2] < 80, "流式帧同版本重绘仍为红（槽复用）");
-    check(c_blue[2] > 180 && c_blue[0] < 80 && c_blue[1] < 80, "流式帧 v2 中心为蓝（同槽增量重传生效）");
+    check(c_red1[0] > 180 && c_red1[1] < 80 && c_red1[2] < 80, "stream v1 center is red (new slot + first upload)");
+    check(c_red2[0] > 180 && c_red2[1] < 80 && c_red2[2] < 80, "stream same-version redraw stays red (slot reused)");
+    check(c_blue[2] > 180 && c_blue[0] < 80 && c_blue[1] < 80, "stream v2 center is blue (incremental reupload works)");
 
     // ---- 层缓存持久性（FBO 常驻层 + DrawLayer）----
     // 冷帧：BeginLayer + 内容 + EndLayer + DrawLayer；稳态帧：仅 DrawLayer（命中 FBO）。
@@ -235,9 +242,9 @@ auto main(int argc, char **argv) -> int {
     // 层矩形在画布内居中（20..100 x 20..80 于 120x100），取样点与行序无关。
     const auto s_cold_in = sample(layer_cold, 40, 40);
     const auto s_warm_in = sample(layer_warm, 40, 40);
-    check(s_cold_in[1] > 140 && s_cold_in[0] < 90, "层缓存冷帧层内为绿（BeginLayer+内容+DrawLayer）");
-    check(s_warm_in[1] > 140 && s_warm_in[0] < 90, "层缓存稳态帧层内仍为绿（仅 DrawLayer 命中 FBO）");
-    check(s_cold_in == s_warm_in, "冷帧与稳态帧层内像素一致（跨帧持久性）");
+    check(s_cold_in[1] > 140 && s_cold_in[0] < 90, "cold frame green inside the layer (BeginLayer+content+DrawLayer)");
+    check(s_warm_in[1] > 140 && s_warm_in[0] < 90, "steady frame green inside the layer (DrawLayer hits the FBO)");
+    check(s_cold_in == s_warm_in, "cold and steady layer pixels match (persists across frames)");
 
     // ---- 平台 present 链路（真实窗口多帧上屏）----
     // 控件用独立 stream key（与上面直驱段的 key 7 互不干扰）。
@@ -271,12 +278,13 @@ auto main(int argc, char **argv) -> int {
             present_ok = false;
         }
     }
-    check(present_ok, "present_root 连续 " + std::to_string(AUTO_FRAMES) + " 帧成功（平台上屏链路）");
+    check(present_ok,
+          "present_root succeeded for " + std::to_string(AUTO_FRAMES) + " consecutive frames (platform present path)");
 
     // ---- 人工段 ----
     if (interactive) {
-        emit("\n[人工段] 窗口常驻：上半为流式「视频」（逐帧重传），整体挂 cache_layer 并旋转。");
-        emit("预期：画面连续旋转、无花屏/错位；关闭窗口退出。");
+        emit("\n[Manual] The window stays open: a streaming 'video' (reuploaded each frame) on top, the whole tree");
+        emit("carries cache_layer and rotates. Expect smooth rotation, no corruption; close the window to exit.");
         float angle = 0.0F;
         while (!win.should_close()) {
             angle += 1.5F;
@@ -285,9 +293,9 @@ auto main(int argc, char **argv) -> int {
             (void)win.present_root(root_node);
         }
     } else {
-        emit("\n提示：加 --interactive 进入常驻窗口人工目视段。");
+        emit("\nHint: pass --interactive to enter the resident-window visual check.");
     }
 
-    emit(std::string("\n结果：") + (failures == 0 ? "ALL PASS" : std::to_string(failures) + " FAILURES"));
+    emit(std::string("\nResult: ") + (failures == 0 ? "ALL PASS" : std::to_string(failures) + " FAILURES"));
     return failures == 0 ? 0 : 1;
 }

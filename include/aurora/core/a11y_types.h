@@ -10,7 +10,6 @@
 namespace aurora {
 
 /// @brief 无障碍状态位集（平台中立；三桥共用的语义来源）。
-///
 /// 对标 Qt `QAccessible::State` / Chromium `AXNodeData` 的状态位裁剪到 Aurora 现有语义：
 /// 六位基础位（focused/checkable/checked/selected/read_only/disabled）+ 第二轮评审补齐的
 /// visible/focusable/offscreen/expandable/expanded/multiline/password。
@@ -39,8 +38,7 @@ struct AccessibilityState {
     bool password = false;  ///< 密码框：读屏不得逐字朗出
 };
 
-/// @brief 无障碍取值域：可量化控件的 min/max/step/value（D7）。
-///
+/// @brief 无障碍取值域：可量化控件的 min/max/step/value。
 /// 供 Slider / ProgressIndicator 等覆写 `Widget::accessibility_range()`；
 /// UIA 侧有值即暴露 `IRangeValueProvider`，AT-SPI2 侧暴露 `org.a11y.atspi.Value`。
 /// @note Side-effects: reads state
@@ -52,7 +50,6 @@ struct AccessibilityRange {
 };
 
 /// @brief 无障碍文本选区：**UTF-8 字节偏移**的半开区间 `[start, end)`（§4.5）。
-///
 /// 偏移单位一律 UTF-8 字节（与控件内部字符串同构、零转换成本）；UTF-16 换算
 /// （UIA `ITextRangeProvider` 要求）只在 Win32 桥边界做一次。
 /// @note Side-effects: pure
@@ -61,8 +58,7 @@ struct AccessibilityTextSelection {
     std::size_t end = 0;  ///< 选区终点（字节偏移，不含）
 };
 
-/// @brief 无障碍滚动量：滚动容器的 {min, max, position} 三分量（G32）。
-///
+/// @brief 无障碍滚动量：滚动容器的 {min, max, position} 三分量。
 /// 由 `Scroll` 等滚动控件覆写 `Widget::accessibility_scroll()` 提供；UIA 侧据此暴露
 /// `IScrollProvider`（可滚动量换算为百分比），AT-SPI2 / macOS 侧映射
 /// `Component.ScrollTo` / `accessibilityPerformScrollToVisible`。

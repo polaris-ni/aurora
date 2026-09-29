@@ -36,8 +36,10 @@
 - **API 描述可机读**：`gen_api_tools` 输出 `aurora_api.json`，含类型 / 属性键 / 枚举，供 LSP 与文档生成器消费。
 - **零平台魔法**：示例不依赖特定平台 GUI 事件循环；`HeadlessSurface` 可离线渲染 PNG，便于测试与 AI 复现。
 - **源—示例—测试 1:1 映射**：每个公共源文件（widget / 子系统头）原则上对应一个 `demo_*.cpp`（`examples/demos/`）与一个 `utest_*.cpp`（`tests/unit/`）。允许少量「复杂场景」demo / test（跨控件集成、端到端流程）作为例外，但须明确标注其跨源性质（跨控件集成用例放 `tests/integration/`，以 `itest_` 前缀命名）。所有 demo 收敛到 `examples/demos/`（CMake 仅 GLOB 该目录，新增组件 demo 放到此处即自动纳入构建，无需改 CMake）。测试头部「目标单元」与单元头之间的严格 1:1 声明约束由 §3.2 `TEST-R3` 界定。
-- **文件夹区分**：demo 与 test 以目录区分——示例在 `examples/`，测试在 `tests/`（单元 `tests/unit/`、集成 `tests/integration/`）；二者不混放。
-- **test 文件前缀**：测试文件统一以 `utest`（单元）/ `itest`（集成）为前缀（`utest_xxx.cpp` / `itest_xxx.cpp`），与示例的 `demo` 前缀风格一致；每个测试 TU 的用例包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`）内。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `utest_<控件>.cpp`（正式编号见 §3.2 `TEST-R10`）。
+- **文件夹区分**：demo 与 test 以目录区分——示例在 `examples/`，测试在 `tests/`（单元 `tests/unit/`、集成 `tests/integration/`、真实后端端到端 `tests/e2e/`）；二者不混放。
+- **test 文件前缀**：测试文件统一以 `utest`（单元）/ `itest`（集成）/ `etest`（真实后端端到端）为前缀（`utest_xxx.cpp` / `itest_xxx.cpp` / `etest_xxx.cpp`），与示例的 `demo` 前缀风格一致；每个测试 TU 的用例包裹在 `namespace aurora::test_cases::utest_<名>`（集成用例为 `itest_<名>`，端到端用例为 `etest_<名>`）内。聚合多个不相关控件的「catch-all」测试文件视为反模式，应拆为各 `utest_<控件>.cpp`（正式编号见 §3.2 `TEST-R10`）。
+- **`itest_` 与 `etest_` 的归属判据**：需要真实 OS 窗口 + 真实上屏链路（真实建窗 / 帧推进 / 像素读回）的用例放 `tests/e2e/`（`etest_`，受 `AURORA_BUILD_E2E` 门控）；其余跨控件 / 子系统集成——含经离屏后端（`HeadlessSurface`、`WgpuRhi` 离屏模式）验证渲染的——一律放 `tests/integration/`（`itest_`）。判据是**是否依赖真实窗口系统**，不是「测试是否重要」。
+- **E2E 场景纪律**：被 E2E 引用的组件 UI 在 `examples/demos/scenes/` 下建 header-only 场景头，与 `demo_<组件>.cpp` **同源**（单一来源），**禁止**在测试里复制 demo 布局代码（复制品会随 demo 演进静默漂移）；进入 golden 用例集的场景须满足确定性渲染契约：不依赖墙钟时间、不依赖随机数（或固定种子）、动画在捕获前推进到静止态（契约细节见 `specification/08-tooling.md` §8.2）。
 
 ### 3.1 注册式测试 runner
 
@@ -138,7 +140,7 @@
 | `TEST-R5` | 公共头覆盖 | 每个公共单元头须被某测试显式声明为目标单元，或在该测试中直接 `#include`、其符号在 `tests/` 全树被引用 | 是 |
 | `TEST-R6` | 注册完整性 | `runner --list` 输出的**用例级**集合必须与测试源中注册的用例集合一致；含「`TEST_P` 漏 `INSTANTIATE` → 用例静默不运行」检测 | 是（CTest `registry_integrity`，由 `tools/check/check_test_registry.py` 承担） |
 | `TEST-R7` | 并行安全 | 测试体系禁止新增 `RUN_SERIAL`（CMake 编排与测试源一并扫描）；并行模型为 CTest 进程隔离 + 框架用例边界资源虚拟化，申请串行须登记脚本内 `TEST_R7_WHITELIST` 并注明根因 | 是 |
-| `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`，测试 TU 不得放在两目录之外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |
+| `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`、`tests/e2e/` 一律 `etest_`；`tests/` 下的子目录须落在已知类型目录（`unit` / `integration` / `e2e`）或设施目录（`framework` / `support` / `fixtures` / `golden`）白名单内，测试 TU 不得游离在外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |
 | `TEST-R9` | 禁止 using-directive | 测试代码禁止 `using namespace`（函数体内亦然）；using 声明 / 命名空间别名须置于使用点之前的作用域内 | 是（脚本） |
 | `TEST-R10` | 禁止 catch-all（跨域） | 单个测试跨 ≥3 个模块域视为 catch-all；因被测主模块自身依赖面广（如测 `Widget` 必带 layout/render/event/navigation）的跨域**不视为违规、不强行拆分**，基线 **20**、只看增量，趋势由守门脚本输出、不在本文档硬编码以免随重构漂移 | 否（趋势指标） |
 
@@ -545,7 +547,7 @@ BREAKING CHANGE: 自定义 Widget 的 on_paint 实现须改用全局坐标，
 
 ## 11 需求规格
 
-### 11.1 #1 声明式双模 API（链式 / 分步 / 配置块等价）
+### 11.1 SPEC.API.DECLARATIVE-DUAL-API.001 声明式双模 API（链式 / 分步 / 配置块等价）
 
 **核心目标：** AI 易生成。
 
@@ -578,7 +580,7 @@ btn3.on_click = fn;
 
 **验收标准：** 同一界面用三种形态各写一遍，编译产物与运行时行为一致；AI 只需记住「属性名 + `*Props`」即可生成整棵嵌套树，无需记忆顺序位置参数。
 
-### 11.2 #2 极致命名一致性 + 扁平命名空间
+### 11.2 SPEC.API.NAMING-CONSISTENCY.001 极致命名一致性 + 扁平命名空间
 
 **核心目标：** AI 易补全。
 
@@ -593,7 +595,7 @@ btn3.on_click = fn;
 
 **自动化守护**：`tools/check/check_naming_conventions.py`（CTest 用例 `check_naming_conventions`）以 `aurora_api.json`（API SSOT）为数据源校验：控件/枚举类型 PascalCase、属性键 snake_case、事件名 snake_case 且 `on_` 前缀、`aurora::debug` 自由函数 snake_case；枚举值 PascalCase，`colors` 命名空间的 `AURORA_*` 常量（`core/color.h` 的 `constexpr Color`）按「常量前缀」惯例豁免。
 
-### 11.3 #3 正交可组合的最小核心 API
+### 11.3 SPEC.API.MINIMAL-COMPOSITION.001 正交可组合的最小核心 API
 
 **核心目标：** AI 少幻觉。
 
@@ -615,7 +617,7 @@ btn3.on_click = fn;
 
 **验收标准：** 任一常见界面（表单、工具栏、抽屉、Tab 页、菜单条）都有具名配方；不存在「只有某个控件才有、别处需要自行虚构」的孤立能力。
 
-### 11.4 #4 强类型 + 单位标注 + 编译期校验
+### 11.4 SPEC.API.STRONG-TYPES.001 强类型 + 单位标注 + 编译期校验
 
 **核心目标：** AI 生成的代码编译即验证。
 
@@ -637,7 +639,7 @@ button.alignment(au::Alignment::Cenetr);   // 编译错误：拼写错误立刻�
 
 **验收标准：** 典型误用（错枚举值、裸整数当尺寸、忘写单位）全部在编译期失败并给出可读修复建议。
 
-### 11.5 #5 合理默认值（声明处可见）
+### 11.5 SPEC.API.SENSIBLE-DEFAULTS.001 合理默认值（声明处可见）
 
 **核心目标：** AI 少写少错。
 
@@ -666,4 +668,206 @@ au::Button(au::ButtonProps{ .label = "OK" });
 - 线程安全边界：`State::set` 与控件树操作只在主线程；异步结果经 `au::async` 回投主线程后再写状态。
 - 强类型几何：尺寸 / 颜色 / 长度使用强类型，禁止裸整数隐式转换。
 - 输出纪律：禁止直接使用标准输出，一律走 `Logger` 双通道（§4.1）。
-- 更多设计原则见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §13（AI-first 设计原则）；「显式优于隐式（含样式继承）」的需求规格见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §8.1（#8）。
+- 更多设计原则见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §13（AI-first 设计原则）；「显式优于隐式（含样式继承）」的需求规格见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §8.1（SPEC.API.EXPLICIT-FIRST.001）。
+- 注释形态与文档注释齐全度：一律遵守 §13（Doxygen 注释规范），由 `tools/check/check_doc_comments.py` 门禁把关。
+- 字符串字面量的语言：注释之外不得出现中日韩字符，一律遵守 §14（字面量语言规范），由 `tools/check/check_no_cjk_literals.py` 门禁把关。
+
+---
+
+## 13 注释规范（Doxygen）
+
+本节是**硬规则**：注释的标记形态、命令前缀、注释与声明的归属关系、齐全度下限在此钉死，不接受「同义写法都行」。理由写在每条的「为什么」里——这些约束都是工具链（clang-format / clang-tidy / Doxygen / `gen_api_tools` / LSP）**不会**替你拦住的漂移，只有门禁能拦。
+
+**适用范围**：受版控的 C/C++ 源文件 `include/`、`src/`、`tools/`、`tests/`、`examples/`（扩展名 `.h/.hpp/.hh/.hxx/.inl/.cpp/.cc/.cxx`）。`third_party/` 是外部代码，一律不改、不判。
+
+**规则编号**：`DOC-R1`—`DOC-R8`，与门禁脚本 `tools/check/check_doc_comments.py` 的输出编号一一对应；注释里引用本节须写 `§13.x` 或 `DOC-Rn`，不得写行号（§AGENTS 硬规则 11）。
+
+### 13.1 标记形态唯一（DOC-R1）
+
+- **文档注释只有一种形态**：紧邻声明上方的 `///` 行块。
+- **成员尾注只有一种形态**：同行行尾的 `///< 简述`（用于数据成员 / 枚举项的短说明，见 §13.4）。
+- **禁止**下列 Doxygen 同样接受、但本项目一律拒绝的等价写法：
+  - `/** ... */` 与 `/*! ... */` 块文档注释；
+  - `//!` 行文档注释；
+  - 尾注 `/**< ... */` 与 `/*!< ... */`。
+- 非文档的块注释 `/* ... */`（如整段被注释掉的代码、许可证头、临时屏蔽块）不在此列，允许保留。
+- **为什么**：块注释的 ` * ` 续行缩进由作者与 clang-format 两边争夺（`ReflowComments` 会重排），跨目录得到不同形态；检索「本项目有多少文档注释」的自动化只能认一种标记，混用会让文档生成、AI 面投影与注释体检各得不同结果。
+
+**改写口径**：`/** @brief X */` → `/// @brief X`，原块内每行的前导 ` * ` 改为 `/// `，原本 `///` 之后的空行须保留为 `///`（空文档行），不得删成代码与注释之间的空行（那会断开归属关系，触发 DOC-R3）。
+
+### 13.2 命令前缀与命令集（DOC-R2）
+
+- 命令前缀一律 `@`，禁止 `\`（`@brief` ✅、`\brief` ❌）。
+- **允许的命令子集**（超出子集须先在本节登记，再使用）：
+  `@brief`、`@param`、`@return`、`@retval`、`@note`、`@warning`、`@tparam`、`@see`、`@deprecated`、`@todo`、`@code`/`@endcode`、`@file`、`@details`、`@example`。
+- 契约标注沿用 §5 的三种 `@note`（`Thread` / `Side-effects` / `Rebuildable`），形态与取值基值以 §5 为准，本节不重复定义。
+- **为什么**：`\` 与 `@` 在 Doxygen 里等价，但混用会让「按 `@` 前缀 grep 注释」的脚本（含本门禁与文档生成器）漏项；命令子集是防止把 `@verbatim`/`@par`/`@cond` 之类冷命令当习惯用法，导致 AI 与人工阅读都需要查手册。
+
+### 13.3 文档注释的结构模板
+
+紧邻声明的 `///` 块按此顺序书写：
+
+```cpp
+/// @brief 一句话职责（必填，祈使句，不超过一行语义单元；结尾不加句号）。
+/// 可选：紧接着的续行仍属于 brief。
+///
+/// 可选：空 /// 行之后是详述（细节、约束、算法、与其他 API 的关系）。
+///
+/// @param key 键名（UTF-8，非空；含 '.' 时按 §x.x 的分层规则切段）。
+/// @param value 待写入的值。
+/// @return 写入是否成功。
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: yes, via from_json
+```
+
+- `@param` 每个**具名形参**一条，顺序与签名一致；unnamed 形参（如 `const BuildContext & /*ctx*/`）不写。
+- `@param` 支持 Doxygen 的方括号缺省形态 `@param[in] x ...` / `@param[out] y ...`，一旦某函数用了方向标注，则该函数的全部 `@param` 都须带方向。
+- 返回 `void` 的函数不写 `@return`；非 `void` 必须写（构造函数 / 析构函数除外）。「必写」侧由 `DOC-R5` 执法，「禁写」侧由 `DOC-R7` 执法（§13.5.3）。
+- 代码示例一律 `/// @code` … `/// @endcode`，不用缩进块、不用三反引号（三反引号只在 `codespec/` 的 Markdown 里用）。
+- **为什么**：顺序钉死后，`@brief` 首行成为文档生成器与 LSP 悬浮提示的稳定第一行；把 `@param`/`@return` 钉在散文之后，才能机械判断「散文书在命令之后」这类排版错误。
+
+### 13.4 `//`、`///`、`///<` 的界限（DOC-R3 / DOC-R4 / DOC-R8）
+
+判据是**位置**，不是内容，因而可机械判定：
+
+- **DOC-R3（正向）**：`///` 块必须紧邻一个可文档化声明——类型（`class`/`struct`/`union`/`enum`）、命名空间、变量 / 数据成员、函数 / 方法、`#define` 宏，或带 `@file` 的文件级注释。「紧邻」= 中间无空行、同缩进；声明与注释块之间允许只隔条件编译行（`#ifdef`/`#endif`/`#else`/`#elif`），且至多两跳。不满足就**不是**任何声明的文档，而是实现叙述，必须降级为 `//`。
+- **文档块挂在 `template` 头之上，不挂在模板头与声明之间**：`template <class T>` 与它修饰的声明视为**同一个可文档化声明**，`///` 块写在模板头**之前**。实测依据：把块写在模板头之后，Doxygen 在被检文件单独抽取时确实能绑定，但一旦与同命名空间下的其它头文件一起抽取就会**静默失去归属**——既不当作文档、也不报未文档化，注释内容不进文档站，等于白写（`include/aurora/animation/timeline.h` 的 `lerp` 家族是最初的现场）。静默失效比报错危险，因为 `docs` 目标全绿也证明不了文档存在。执法：`DOC-R3` 把「模板头与声明之间」的块判成未紧邻可文档化声明。函数体的花括号内同理：写在体内的 `///` 块不是任何成员的文档（DOC-R8）。
+- **DOC-R4（反向）**：`include/` 里以 `//` 写成、且按上面的判据紧邻公共声明的散文注释，**就是**该声明的文档，必须升级为 `///`。分节装饰线（只含 `-`/`=`/`#`/空白）与字面量不算；§13.5.1 的豁免面（`detail` 等内部实现命名空间、`private` / `protected` 域、平凡 `= default` 特殊成员、类外限定定义）也不算——把它们升级成 `///` 等于把内部细节投影进文档站。
+- **尾注 `///<`**：只用于数据成员与枚举项的一行短说明，视为该成员的文档（满足 §13.5 的覆盖要求）；函数、类型不得用尾注代替上方文档块。两条实测边界：
+  - **函数 / 运算符一律禁止尾注**（DOC-R8）：只有 `@brief` 的尾注在 Doxygen 里不算完整文档，带具名形参或非 `void` 返回的函数用尾注必报 `parameters ... are not documented` / `return type of ... is not documented`——即 §13.5.2 的矩阵对尾注同样生效，而尾注一行放不下 `@param`/`@return`，所以这类声明必须用上方的 `///` 块。
+  - **一行一声明一尾注**（DOC-R8）：`float f0 = 0, f1 = 0, f2 = 0, f3 = 0;  ///< …` 这类多声明符行，Doxygen 只把尾注给其中**一个**成员，其余三个静默未文档化。要么逐行展开各自加尾注，要么改由类型级文档说明，禁止共用一条尾注。
+- **DOC-R8（尾注只挂真实成员）**：函数体内的语句与局部声明**不是**成员，一律不得加 `///<`——它们是 `//` 的正当用途（上一条）。这条专门拦住「为了让门禁闭嘴给语句补尾注」的写法：语句进了 `///<` 既误导读者以为它是 API 的一部分，又把真成员的文档缺口埋进噪音里。判据同为位置：该行若落在某个函数体的花括号内，就不是成员。
+- **`//` 的正当用途**：实现步骤说明、为什么这样写、workaround 与不变量提醒、被屏蔽的代码、分节装饰线。这类内容**不得**升格为 `///`——它们不进文档站，也不该进。
+- **工具指令行的唯一合法位置（`NOLINT` / `NOLINTNEXTLINE` / `clang-format off` 等）**：这类指令必须紧贴其作用对象，而文档块又必须紧贴同一声明——两者抢同一行位置。裁决：**并入上方的 `///` 块**，作为该块的续行写（`/// @note 原因说明…` 换 `/// NOLINTNEXTLINE(check-name)`，指令行留在块尾、紧邻声明），不得另起 `//` 段夹在文档块与声明之间。为什么这样定而非「让 `//` 段算透明」：Doxygen 认不出隔了一行其它注释的文档块，`///` 块会静默失去归属，`docs` 目标（`WARN_AS_ERROR=YES`）随即报未文档化；而 `///` 前缀对 clang-tidy 仍是普通注释，抑制语义一字不损。仓库先例：`include/aurora/widget/codegen.h`、`include/aurora/widget/dropdown.h`、`include/aurora/core/thread_pool.h`。
+  - **指令行必须是块内最后一行**：它下面再跟任何注释行（含同块的续写散文），clang-tidy 的「下一物理行」就落在注释上，豁免静默落空——代码照报。理由散文放在指令行**之上**（作为块内续写）或整体移到文档块上方用 `//` 写。执法：`tools/check/check_nolint_layout.py` 规则 1。
+  - **散文不得复述令牌**：`NOLINT` / `NOLINTNEXTLINE` / `NOLINTBEGIN` / `NOLINTEND` 这些字面词一旦出现在解释性注释正文里，clang-tidy 会把它们再解析成一条真指令并对下一行施加全量豁免（等于悄悄关掉本不打算关的检查）。指代豁免一律写语义：「紧邻式豁免」「区间式豁免」。执法：同脚本规则 2。
+- **测试文件头部的三行块是 `///`，且首行写 `@file`**：`tests/**` 每个用例文件顶部那块「测试类型 / 目标单元 / 测试说明」按 §13.4 属文件级文档，必须以 `///` 写并带 `@file <文件名>`（样板：`tests/unit/utest_json.cpp`）。两个门禁在此同向：`tools/check/check_code_doc_sync.py` 的 TEST-R1 要求该块存在且为 `///`，DOC-R3 要求孤立的 `///` 块要么紧邻可文档化声明、要么带 `@file`——把整块降成 `//` 会让前者红灯，保留 `///` 而不写 `@file` 会让后者红灯。
+- **为什么**：Doxygen 把 `///` 与 `//` 的差别解释成「进不进文档」。写反的代价是双向的：实现叙述混进公共 API 文档（噪声、误导消费者），或 API 契约只存在于源码而不见于文档站与 LSP。
+
+### 13.5 命令必选矩阵与覆盖范围（DOC-R5 / DOC-R7）
+
+本节回答两个问题：**哪些符号必须有文档**、**每类符号必须有哪几条命令**。「必选」= 缺失即门禁红灯；「可选」= 出现时须符合 §13.2 子集与 §13.3 顺序，缺失不算违规。
+
+#### 13.5.1 覆盖范围（哪些符号必须有文档）
+
+- **必须有**：`include/` 中处于 **public 访问域**的类 / 结构体 / 联合体 / 枚举 / 类型别名 / 命名空间级函数 / 成员函数 / 数据成员 / 枚举项，`#define` 函数宏与有语义的常量宏，以及每个 `include/` 头文件的**文件级注释块**。
+- **明确豁免**（不需要文档注释，也不得为此补文档）：
+  - **类型**前向声明（`class Widget;`、`template <class T> struct X;`）——契约在其定义处。注意**函数**声明没有这层豁免：`include/` 里的函数声明就是契约本体（实现在 `src/`，那边只写 `//` 实现叙述，即本节的「类外限定定义」豁免），必须带完整 `///` 块；类外**定义**不重复索要。
+  - `friend` 声明；
+  - `private:` / `protected:` 访问域下的成员（内部实现；其注释按 §13.4 用 `//`，或自愿写 `///`）。注意「豁免」只免「必须写」，不免「写了要齐全」——见下条「写则写全」；
+  - 按编译器语义平凡的 `= default` / `= delete` 特殊成员（见 §5.1；确有非平凡行为时用 `//` 说明原因，不升格为文档）；
+  - **类外限定定义**（`auto Foo::bar(...) -> T { … }`、`template <class T> void Foo<T>::reset() {}`）——文档契约只挂在其**类内声明**处，类外重复索要 `@tparam`/`@param` 只会产出一份会漂移的副本；实现思路用 `//` 写在此处（§13.4）；
+  - **内部实现命名空间**（`namespace detail {` / `internal` / `impl`，含 `aurora::detail` 这类末段命中者）里的声明——不是消费者可见的 API 面，热路径取舍与实现理由按 §13.4 用 `//` 写在此处即可；命名空间名只在末段匹配，`namespace aurora::visible {` 不享有本豁免。
+  - `tests/`、`examples/`、`tools/` 里的用例体、示例主体与脚本内部（这些目录只受 §13.1—§13.4 约束，不受本节齐全度约束）。
+- **写则写全（必写面 ≠ 齐全面）**：上面的必写面限定在 public，但**一旦某个 public / protected 成员挂了 `///` 块，§13.5.2 矩阵的齐全度就全额适用**（`@brief` + 每个具名形参的 `@param` + 非 `void` 的 `@return` + 每个具名模板形参的 `@tparam`）。理由是 Doxygen 的 `WARN_NO_PARAMDOC` 对**所有被抽取的成员**（含 protected）一视同仁，只写 `@brief` 不写 `@param`/`@return` 会在 `docs` 目标上红灯；而文档站里半截签名对消费者同样是误导。执法：`DOC-R5` 把 protected 的已注释成员与 public 同级判定。`private` 成员不在此列——它们不被抽取，写了也只作源码内注记。抽取面本身经最小 fixture 实测：protected 成员是 Doxygen 的**默认行为**，无需（也无从）配置——当前 Doxygen 版本已不认识 `EXTRACT_PROTECTED`，写了只得到 `ignoring unsupported tag`，故 `Doxyfile` 内不设该标签；同一 fixture 里 public / protected 的缺 `@param` 都进了 `WARN_LOGFILE`，private 的没有，正是本条与 `EXTRACT_PRIVATE = NO` 配合的依据。
+- **访问域判据**：按最近的 `public:` / `private:` / `protected:` 标签；无标签时 `class` 默认 `private`、`struct` / `union` / `enum` 默认 `public`。作用域按**嵌套栈**跟踪：进入类型 / 命名空间体时压栈，花括号深度回落到该体之下时出栈并**恢复外层作用域记录的访问域**——类内嵌套的 `enum class` / `struct` 收尾（其自身的 `};`）不改变外层类的 `private` / `protected` 判定，`friend class` 定义体同理。**外层访问域是内层成员可见性的上界**：`private:` 下的嵌套 `struct OpenZone` 即便自身按 `struct` 默认 `public`，其成员对外仍不可达，故一并豁免（给它们补文档只会把内部细节投影进文档站）。
+
+#### 13.5.2 命令必选矩阵（每类符号必须有哪几条命令）
+
+| 符号种类 | 必选命令 | 可选命令 | 不适用（写了反而违规） |
+|:---|:---|:---|:---|
+| 头文件文件级块 | `@brief` | `@file`、`@details`、`@code` | `tests/` `examples/` `tools/` |
+| 命名空间包装（`namespace aurora {`） | —（不强制：同一命名空间在数十个头里重复开启，逐处补写只增噪音） | `@brief`（写了即合法，`///` 块紧邻命名空间声明不算悬挂） | — |
+| 类 / 结构体 / 联合体 / 枚举 | `@brief`；§5 的三条契约 `@note`（`Thread` / `Side-effects` / `Rebuildable`） | `@see`、`@example`、`@deprecated`、`@details` | 前向声明 |
+| 模板形参（类型 / 函数模板） | 每个具名模板形参一条 `@tparam` | — | 未具名模板形参 |
+| 函数 / 方法 / 函数宏 | `@brief`；每个**具名形参**一条 `@param`；非 `void` 返回一条 `@return` | `@retval`、`@note`、`@warning`、`@see`、`@code`、`@deprecated` | 无参函数不写 `@param`；`void` 不写 `@return`；构造 / 析构不写 `@return`；签名里**无名**的形参不写 `@param`（见 §13.5.3） |
+| 数据成员 / Props 字段 | 一行说明：`///<` 尾注，或紧邻 `///` 块（含 `@brief` 时按 §13.3） | `@note`（单位、合法域、线程约束等） | `private` / `protected` 成员；一行多个声明符时不得共用一条尾注（§13.4） |
+| 枚举项 | 一行说明：`///<` 尾注，或紧邻 `///` | `@note` | 写在同一物理行上的枚举项（`enum class Type : std::uint8_t { Linear, Radial };`）——该行容不下逐项尾注，改由枚举自身的 `@brief` / 详述承担取值含义；要把某项语义写细，就先把它逐行展开 |
+| 类型别名（`using` / `typedef`） | `@brief` | `@see`、`@note` | — |
+| 常量宏 | 一行说明：尾注或紧邻 `///` 块 | `@note` | — |
+
+- **`@param` 方向标注的一致性**：一旦某函数用了 `@param[in]` / `@param[out]` / `@param[in,out]`，该函数的**全部** `@param` 都须带方向——半标注比不标注更误导，读者会把未标注的那条默认读成 `in`。
+- **形参包也要写 `@param`**：`template <typename... Args> auto f(Args &&...args)` 里 Doxygen 认的形参名是 `args`（不是 `Args`，也不是包声明本身），故须写 `@param args`；只补 `@tparam Args` 会让 `args` 报未文档化。C 可变参（`printf` 风格包装，`void f(const char *fmt, ...)`）写 `@param ...`：真 Doxygen 实测认这一形态（`@param ... args` 同样不告警），省略号本身不算须逐个文档化的形参，而形参名写错（`@param nope`）照样报 `argument ... is not found in the argument list`。
+- **`@deprecated` 的附加义务**：一旦出现 `@deprecated`，同一行必须给出替代路径（`改用 Xxx::yyy`）与生效版本；只写「已废弃」不构成文档。
+- **`@retval` 与 `@return` 的分工**：`@return` 说整体语义，`@retval` 只在「按值分支解释更有用」时补（枚举返回、`Result` 的错误码等），不得替代 `@return`。
+- **一行说明的门槛**：数据成员与枚举项的一行说明必须带**信息量**——所有权（`非拥有` / `拥有`）、单位、合法域、哨兵值语义至少占其一；`///< 值` 这类复述标识符的写法不算达标（门禁不判语义，评审判）。
+- **为什么钉死矩阵**：齐全度的漏洞从来不是「完全没写注释」，而是「写了 `@brief` 就以为文档已完成」。缺 `@param` 让调用方只能猜顺序与单位，缺 `@return` 让 `nullptr` / 空串 / `-1` 这类哨兵语义失踪，缺 `@tparam` 让模板约束退化成编译期报错。这三类正是 AI 生成代码最容易踩、编译器又完全不会报的坑；`aurora_api.json` 与文档站的可信面全靠它们撑着。
+
+#### 13.5.3 命令下限的反面：禁写项（DOC-R7）
+
+上表「不适用」列不是风格建议，而是与 `DOC-R5` 对等的硬约束，由 `DOC-R7` 单独执法。四种形态即红灯：
+
+- **`@param` 的名字不在签名形参表里**：拼错、改名后忘同步、给匿名形参（`const BuildContext & /*ctx*/`）补 `@param ctx`，都算。Doxygen 拿文档名去匹配签名，对不上就报 `document parameter ... is not in the list`，并把**真实**形参留成未文档化——写错名字比不写更坏，读者以为已有文档。
+- **签名把形参写成无名时，整张形参表没有可匹配的名字**：`Application(const Application &);` 这类声明上写出的任何 `@param` 都是悬空项，Doxygen 报 `argument 'X' of command @param is not found in the argument list`，**必然红灯、没有侥幸**（实测：与是否 `[[maybe_unused]]`、参数个数无关）。两条出路，按该参数要不要被读者感知来选：
+  - **补上形参名**：签名里写 `explicit Application(const Application &other)`，文档再写 `@param other`；未使用的形参用 `[[maybe_unused]]` 标注以避开 clang-tidy 的 `unused-parameter`，而不是靠注释掉名字来消警告（注释掉名字等于对消费者隐瞒这个参数）。
+  - **删掉该 `@param` 行**：`= default` / `= delete` 特殊成员、以及按 §13.5.1 本就可留白的内部签名走这条——签名无名就不索要文档，二者必须一致。
+- **`@tparam` 的名字不在模板形参表里**：同上，且模板形参改名后旧文档不会有任何编译期信号。
+- **同一个成员挂两处 `///` 块**（类内声明一份、类外限定定义又一份）：Doxygen 会把两份合并，报 `argument X ... has multiple @param documentation sections` + `too many @param commands ... Found 6 while function has 3 parameters`。契约只挂类内声明（§13.5.1），类外那份删掉或降级成 `//` 实现叙述——留白不告警，重复必告警。
+- **同名重载组内形参名互异**：`create(FilesystemOptions opts)` 写 `@param opts`、`create(std::unique_ptr<StorageBackend> backend)` 写 `@param backend`，Doxygen 按**整组**校验文档名，于是每个签名都读到别的重载的形参名，报 `argument 'opts' of command @param is not found in the argument list of ... create(...)` + `too many @param commands`。同组重载要么统一形参名，要么该组一律不写 `@param`、把参数说明并入 `@brief` 散文。连带后果：**文档块必须整体落在 `#ifdef` 门内**——块写在门外而声明被裁掉时，这块文档会漏挂到下一个同名重载上，凭空产生上述冲突（`Storage::create` 组实测）。
+- **`void` 函数写 `@return`**：Doxygen 仍会渲染出 Returns 段，读者据此以为存在返回通道。
+- **构造函数 / 析构函数写 `@return`**：二者无返回类型，返回值语义由 `@brief` 与 `@note Side-effects` 承担。
+- **`@example` / `@code` 缺内容**：`@example` 后面必须有示例源文件名（`examples/demos/` 下的 `<stem>.cpp` 之一），空命令或指向不存在的文件都算——示例链接是文档站的入口，断链等于没有示例。
+
+判据只看**挂注释的那一个成员**：门禁会先把声明串截到该成员的结束处，再取形参表与返回类型。`{` 出现在注释正文里（如「花括号」这类措辞）、行尾块注释 `int /*n*/`、`std::function<void(int)>` 这类把括号写在 `<…>` 内的**数据成员**，都不构成函数签名，不得向其索要 `@param` / `@return`。
+
+- **为什么单列一条**：补文档的动作天然是「单向加东西」——写作者朝必选项补齐，却不会主动删掉多余的。没有反向执法，`@return` 会像装饰一样扩散到 `void` 函数上，`@param` 会残留成改名后的化石。门禁的正反两条合起来才把矩阵钉成双射：必选项不得缺，禁写项不得有。
+
+### 13.6 排版（DOC-R6）
+
+- `@brief` 必须在 `///` 块**首行**。
+- 一旦出现命令行（`@param`/`@return`/`@note`/`@warning`/`@tparam`/`@see`/`@deprecated`），其后**不得另起散文段落**：即「空 `///` 行 + 散文」这一形态。命令行描述的**跨行续写**（紧随命令行的 `///` 行，无空行分隔）属合法形态——clang-format 的 `ColumnLimit: 120` 折行正是这一形态，判它违规等于与格式化工具对打。确需补充的段落级信息要么前移到详述，要么并入 `@note`。
+- 段落之间用空 `///` 行分隔，禁止把 `///` 之后的内容写在这一行的下一物理行而不带 `///`（那是 DOC-R3 的悬挂形态）。
+- **散文里的尖括号必须转义或改写**（`docs` 目标执法）：Doxygen 开着 `MARKDOWN_SUPPORT`，注释正文里的裸尖括号会被当作 HTML 标签解析——`<T>`、`<tt>…` 这类写法报 `unknown command` / `Found unknown HTML parameter` / 未闭合标签，而断掉的标签会让整段详述渲染成空白。四种合法写法任选（均经真 Doxygen 实测消警）：改用反引号（`` `std::vector<T>` ``）、用 HTML 实体（`&lt;T&gt;`）、用反斜杠转义（`\<T\>`）、或换成中文表述（「模板实参 T」）。代码片段一律走 `/// @code` … `/// @endcode`（§13.3），不要在散文里内联尖括号。
+- **`#` 开头的字面串必须加反引号或转义**（`docs` 目标执法）：Doxygen 把 `#Word` 读成**显式链接请求**，于是 `#include`、`#ifdef`、色值 `#E01B24` 这类写法报 `explicit link request to 'include' could not be resolved`（色值还会把后面的中文一并吸进链接名）。写 `` `#include` `` 或 `\#include` 即消。
+- **反斜杠字面串要写双份**：散文里出现 `\uXXXX` 会被当命令解析，报 `Found unknown command '\uXXXX'`；要表达 JSON 转义序列本身，写 `\\uXXXX`。
+- **`@file` 只出现在文件级块**：成员 / 函数注释里提一句「见本头的 `@file` 级注释」会被当真命令读取，报 `the name '…' supplied as the argument in the \file statement is not an input file`。指代文件级说明一律改写成文字（「本头顶部的文件级注释」）。
+- **反引号跨度的内容不要以 `.` 开头且紧贴前文**：`` （`.surface()`） ``、`` ：`.background` `` 这类形态会让 Doxygen 的 Markdown 转换产出不成对的 `<tt>`，报 `found </tt> tag without matching <tt>`（实测：去掉跨度起始的点、或让开引号前留一个空格，均可消除）。成员名写作 `Type.field` 或 `field()` 比 `.field` 更明确。
+- **散文里不得出现裸的命令行令牌**：`@param`、`@brief`、`@note` 这类字面串写进描述正文时，Doxygen 照样把它解析成**真命令**，于是该行之后的内容被归进这条命令的参数，文档结构错位。指代命令一律加反引号（`` `@param` ``）或写中文（「形参说明行」）。
+- **装饰线不要用 `====` / `----` 纯符号行**：Markdown 解析会把它们读成 setext 标题或分隔线，把上一行正文吸进标题层；分节请写 `/// @name 分节名` 或直接用文字。
+- **`@ref` / 链接目标必须可达**：指向头文件、类或函数的显式链接写法要能在文档站内解析，断链即 `docs` 目标红灯（`Referenced ... not existing`）。宁可不写链接、只留仓库相对路径文字，也不要留悬空 `@ref`。
+- 注释行长受 `.clang-format` 的 `ColumnLimit: 120` 约束，与代码同宽；禁止为了对齐而手工补空格（clang-format 会重排）。
+
+### 13.7 工具链与门禁
+
+- **文档生成**：仓库根 `Doxyfile` 是文档站的唯一配置，`INPUT` **只覆盖 `include/`**（公共 API 面）——`src/` 的实现注释不进文档站，`codespec/` 的 Markdown 也不进（Doxygen 的 Markdown 解析器会在散文里不成对的反引号上报「未闭合 verb」，那与注释规范无关，文档站只承担 API 参考），`third_party/`、`build*/`、`.git/` 在 `EXCLUDE_PATTERNS` 里，`aurora::test_cases` / `aurora::detail` 在 `EXCLUDE_SYMBOLS` 里。生成入口：CMake 选项 `AURORA_BUILD_DOCS=ON` 且本机 `doxygen` 可用时提供 `docs` 目标（doxygen 不在 `PATH` 时由使用者显式传 `AURORA_DOXYGEN_EXECUTABLE=<路径>`，仓库内不写死本机路径，见 §10.5 第 10 条）；两个条件任一不满足则该目标不注册（CI 与无 doxygen 的机器不因此变红，但也不得据此声称文档已验证，见 §13.8）。配置项口径见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md)。
+- **告警口径：只兜「写了但 Doxygen 读不出」，不兜「必须写」**（`Doxyfile` 的关键取舍）：
+  - `WARN_IF_UNDOCUMENTED = NO`——它把「凡被抽取的成员就必须有文档块」当下限，比 §13.5.1 的必写面（public 必写；protected / private / `detail` 可留白，但写了就按 §13.5.1「写则写全」补齐全）宽得多，也与平凡 `= default` 特殊成员的豁免直接冲突。开着它只会诱导「为消警而补零信息套话」，那正是 §13.4 明令禁止的形态。必写面由 `check_doc_comments` 的 `DOC-R4` / `DOC-R5` 守。
+  - `WARN_IF_DOC_ERROR = YES`、`WARN_IF_INCOMPLETE_DOC = YES`、`WARN_NO_PARAMDOC = YES`、`WARN_AS_ERROR = YES`——这四项是 `check_doc_comments` 判不了的语义层（命令令牌错位、块未闭合、文档名与签名对不上），只能在真 Doxygen 上暴露，故一律升级为错误。
+  - **`WARN_NO_PARAMDOC` 的实测边界（别把它当齐全度门禁）**：最小 fixture 里「只有 `@brief`、一条 `@param` 都没有」的成员在 `WARN_IF_UNDOCUMENTED = NO` 下**不告警**，而「写了 `@param` 但名字对不上签名」必告警。也就是说 Doxygen 只兜「写了但读不出 / 写歪」，兜不住「整条形参说明没写」——后者是 §13.5.2 的齐全度下限，只能由 `check_doc_comments`（`DOC-R5`）执法。据此不得用 `docs` 目标 0 告警来论证齐全度合规。
+  - **两套门禁互补、不重叠**：`check_doc_comments` 管形态与齐全度（本机无 doxygen 也能跑，常驻 CTest）；`docs` 目标管 Doxygen 实际解析结果（复验要求见 §13.8，本机无 doxygen 时不得声称已验证）。任一侧单独通过都不构成「注释合规」的结论。
+- **形态门禁**：`tools/check/check_doc_comments.py`（CTest `check_doc_comments`）判 §13.1—§13.6 全部规则（`DOC-R1`—`DOC-R8`），退出码 `0` 无违规 / `1` 有违规 / `2` 读取或 CLI 错误。字符串与原始串内容在扫描前被掩掉，故 WGSL/GLSL 源码里的 `@group`、`@binding`、`//` 不会被误判为注释或命令。
+- **当前基线**：全仓 `check_doc_comments` 输出 `总计 0 条`、`include/` 与 `src/` 内 `DOC-EXEMPT` 计数为 `0`，真 Doxygen 的 `docs` 目标退 `0` 且告警日志 `build/docs/doxygen_warnings.log` 为空、进程 stderr 亦无任何 `warning:`（含 `ignoring unsupported tag`——`Doxyfile` 里不留当前 Doxygen 版本不认识的标签，此类标签被静默忽略，留着只会让配置与实效漂移）。这三项是「注释规范已落地」的判据，任何新增违规都必须在提交前清零，不得以豁免放行存量之外的新违规。
+- **局部自查**：`python tools/check/check_doc_comments.py --rules DOC-R1,DOC-R5 --files include/aurora/state`，改动某个模块时按目录自查，无需跑全仓。
+- **豁免写法**：确有不合理判定需要放行时，在被放行行本身或其上 2 行内写 `DOC-EXEMPT: <规则> <原因>`（如 `DOC-EXEMPT: DOC-R5 生成体逐字镜像 08-tooling.md`）；放行整行全部规则用 `DOC-EXEMPT: * <原因>`。豁免必须**逐条**给出、写明原因，不得写空泛措辞，也不得成段批发。
+- **为什么需要独立门禁**：clang-format 只管列宽与折行、clang-tidy 只管诊断，两者都不判标记形态与齐全度；Doxygen 只在跑起来时报少量语法告警，且本机常无 doxygen。因此 §13.1—§13.6 的任何一条都可能无声漂移，必须由 `check_doc_comments` 常驻红灯。
+
+### 13.8 整改与复验纪律
+
+- 存量整改按「先形态、后归属、再内容」的顺序推进：先做 §13.1/§13.2 的机械统一（单独一次提交，type 取 §10.3 的 `style`、scope 取 §10.4 的 `docs`），再做 §13.4 的 `//`/`///` 界限重划，最后补 §13.5 的内容缺口。禁止三者混在同一提交里——混提会让 review 无法区分「纯排版」与「语义新增」。
+- 补内容缺口时，`@brief`/`@param`/`@return` 的文字**必须来自对实现与调用点的阅读**，不得凭签名猜语义（同 `AGENTS.md` 硬规则 4：不得凭训练记忆假设接口行为）。补不进来的，写 `DOC-EXEMPT` 并在评审里说明，比编造一句废话更有价值。
+- **告警根因用最小 fixture 实测，不得凭猜改标记**：Doxygen 的 Markdown/命令解析对形态高度敏感，同一写法在不同上下文（`///<` 尾注 vs `///` 块、跨度前是否紧贴标点）结论可能相反。定位办法：把可疑行原样复制进 `build/` 下一个一次性头（`#include <…>` 缺失不影响抽取），用 `sed` 从 `Doxyfile` 派生一份把 `INPUT` 指向该目录、`OUTPUT_DIRECTORY` / `WARN_LOGFILE` 落在 `build/` 内、`WARN_AS_ERROR = NO` 且 `EXCLUDE_PATTERNS` 清空的配置，跑一次真 Doxygen 读告警。据此写成的规则才可信，fixture 不入库。
+- 每轮整改后须依次复验：`check_doc_comments` → `format-check` → 全量构建 → `ctest` 全绿。注释改动同样会破坏编译（把 `///` 写成未闭合、或在 `@code` 块里误触标记），因此「只改注释」不豁免构建验证。
+- Doxygen 告警的复验需要真机 `doxygen`：本机缺 `doxygen` 时，只可声明「形态门禁通过」，不可声明「Doxygen 语法已验证」。
+
+---
+
+## 14 字面量语言规范（控制台可读性）
+
+### 14.1 规则
+
+- **LIT-1（阻断）**：**注释之外不得出现中日韩字符**。`include/` `src/` `examples/` `tests/` `tools/` 内 C++/Python 的字符串字面量、字符字面量与 raw string，以及 `cmake/` 与根 `CMakeLists.txt` 的引号参数 / bracket 参数，一律用英文书写；`//`、`///`、`/* */`、Python/CMake `#`、`#[[ ]]` 与 docstring 属文档散文，保持中文不受此限。判定对象是「会离开源码的东西」——字面量经 `Logger`/`AURORA_LOG_RAW`/`Diagnostics`/`AURORA_CHECK`/Inspector/CLI/LSP/CTest 输出抵达控制台，而控制台代码页不受本库控制：GBK（cp936）等窄代码页下 UTF-8 中文串会呈现为问号与方块，同一份文案在不同代码页上结果不同（本仓整改的直接起因是跑门禁脚本时 `UnicodeEncodeError: 'gbk' codec can't encode character`）。注释不会离开源码，故不受限。
+- **LIT-2（阻断）**：脚本内 `EXEMPT_FILES` 的文件级白名单条目一旦不再命中任何诊断即判红灯。白名单机制常设、列表默认留空，防止清单腐烂。
+- 规则编号 `LIT-1`/`LIT-2` 与 `tools/check/check_no_cjk_literals.py` 的输出编号一一对应；引用本节写 `§14.x` 或 `LIT-n`，不得写行号（`AGENTS.md` 硬规则 11）。
+
+### 14.2 例外：功能必需的中文数据
+
+换成英文会让「被测事实」本身消失的场合，保留原文并就地标记。合法类别只有下表六个标识（门禁只认 `CJK-LITERAL` 令牌、不校验类别名，取错名字靠评审兜底）：
+
+| 标记理由 | 适用 | 典型 |
+|:---|:---|:---|
+| `cjk-fixture` | 必须为汉字/假名才能成立的断言素材 | 无障碍语义树 Name 断言、IME 组合（preedit/commit）串、CJK 字体排版与 BiDi 用例、UTF-8↔UTF-16 映射、喂给 golden 图像比对的绘制文本 |
+| `locale-output` | 中文输出即功能本身 | zh/ja 日期格式化的「年/月/日」 |
+| `on-screen-demo` | 只绘进窗口、从不打印的 demo 文案 | `LocalizedString{"拖拽或滚轮…"}` 之类的上屏提示 |
+| `shader-source` | 交给 GPU 的着色器源码里的注释 | WGSL/GLSL raw string 内的中文注释 |
+| `regex-semantic` / `doc-schema` | Python 工具里充当匹配模式或文档字段名的中文片段 | 识别 `架构 §N` 引用、全角 `（）`、manual-test 中文字段名 |
+
+标记形态：`// CJK-LITERAL: <类别> - <一句话原因>`（Python 用 `# CJK-LITERAL: …`），写在命中行本身或其上 3 行内；跨行拼接的句子要整句改写，不得留下孤立的 `）`、` 个` 之类残片。**诊断文案不属例外**——那正是控制台输出，一律翻译。
+
+### 14.3 门禁与自查
+
+- **实现**：`tools/check/check_no_cjk_literals.py`（CTest `check_no_cjk_literals`）。注释在扫描前剥离，字符串 / 字符 / raw string、Python docstring 与 CMake 引号 / bracket 参数由各语言词法器区分（C++ 数字分隔符 `60'000` 不误判为字符字面量；CMake 引号内的 `#` 不当注释起点，故 900 余行中文注释零误报）；`--json <path>` 输出机器可读工单，`--files-with-cjk` 给出按文件计数的整改清单。
+- **门禁输出必须 ASCII**：违规字面量里的非 ASCII 一律转义成 `\uXXXX` 再打印。门禁日志若乱码，等于门禁不可读。
+- **不在扫描面**：`codespec/` 文档正文（中文是本仓文档语言）与 `third_party/`。`cmake/` 与根 `CMakeLists.txt` **在**扫描面内：`aurora_log()` / `add_custom_target(COMMENT)` 的文案进配置与构建控制台，`CACHE` 描述进 cmake-gui 面板，与库内诊断是同一类「会离开源码的文本」（该目录下的中文注释同样放行）。
+- **自查**：`python tools/check/check_no_cjk_literals.py --limit 0` 跑全量；整改过程中反复跑并只看自己的文件。新增或修改公共控件的 `.note`/`.description` 时直接写英文，避免先写中文再翻译的往返。
+

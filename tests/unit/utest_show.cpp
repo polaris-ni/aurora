@@ -10,8 +10,10 @@
 #include "aurora/widget/show.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_show {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -80,13 +82,13 @@ AURORA_TEST_CASE(show_collects_state_signal) {
 
 AURORA_TEST_CASE(show_serializes_visibility) {
     Show on(true, box(1.0F, 1.0F));
-    Json props;
+    Json props = Json::object();
     on.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["visible"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "visible"), true);
 
     Show off(false, box(1.0F, 1.0F));
     off.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["visible"].get<bool>(), false);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "visible"), false);
 }
 
 AURORA_TEST_CASE(show_adopt_children_takes_first) {

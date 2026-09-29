@@ -25,34 +25,37 @@ struct TitleBarAction {
     std::function<void()> on_click;  ///< 点击回调（可空）
 };
 
-/**
- * @brief 声明式标题栏控件（对标 libadwaita HeaderBar / WinUI TitleBar / Flutter AppBar）。
- *
- * 与 Surface 内置 CSD 栏互补：内置栏服务 DecorationPolicy::ClientSide/Auto 的兜底绘制；
- * 本控件供 Frameless/Borderless 策略下应用自绘完整标题栏（可组合图标/标题/副标题/
- * 动作区 + 内置窗口控制钮），窗口动作经 Environment 注入的 WindowChrome 服务下发
- * （headless 下 chrome 缺失，交互安全 no-op）。
- *
- * 交互：空白区单击拖拽移动（Surface 缓存按键 serial）、双击切换最大化、
- * 控制钮 最小化/最大化还原/关闭；失焦自动变暗。
- * Snap 弹窗（降级版）：悬停最大化钮 ≥400ms 弹出动作菜单——内置
- * 最大化还原/最小化/全屏/关闭 + add_snap_action 追加的自定义项
- * （⚠️ xdg-shell 客户端无法自我定位，真半屏平铺在原生 Wayland 不可实现，
- * 自定义项供应用自行实现可行动作，如经 D-Bus/合成器扩展）。
- *
- * v1 范围决策：leading 为图标位图（非任意 Node）；动作为文本 chip（非任意 Node）——
- * 任意子树槽位留待 v2。视觉仅 Adwaita 单色符号形态（Mac/Windows 三分支由内置栏承担）。
- * 自定义 Snap 动作含回调，不参与 serialize_props 往返。
- *
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json（自定义 Snap 动作除外）
- */
+/// @brief 声明式标题栏控件（对标 libadwaita HeaderBar / WinUI TitleBar / Flutter AppBar）。
+///
+/// 与 Surface 内置 CSD 栏互补：内置栏服务 DecorationPolicy::ClientSide/Auto 的兜底绘制；
+/// 本控件供 Frameless/Borderless 策略下应用自绘完整标题栏（可组合图标/标题/副标题/
+/// 动作区 + 内置窗口控制钮），窗口动作经 Environment 注入的 WindowChrome 服务下发
+/// （headless 下 chrome 缺失，交互安全 no-op）。
+///
+/// 交互：空白区单击拖拽移动（Surface 缓存按键 serial）、双击切换最大化、
+/// 控制钮 最小化/最大化还原/关闭；失焦自动变暗。
+/// Snap 弹窗（降级版）：悬停最大化钮 ≥400ms 弹出动作菜单——内置
+/// 最大化还原/最小化/全屏/关闭 + add_snap_action 追加的自定义项
+/// （⚠️ xdg-shell 客户端无法自我定位，真半屏平铺在原生 Wayland 不可实现，
+/// 自定义项供应用自行实现可行动作，如经 D-Bus/合成器扩展）。
+///
+/// v1 范围决策：leading 为图标位图（非任意 Node）；动作为文本 chip（非任意 Node）——
+/// 任意子树槽位留待 v2。视觉仅 Adwaita 单色符号形态（Mac/Windows 三分支由内置栏承担）。
+/// 自定义 Snap 动作含回调，不参与 serialize_props 往返。
+///
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json（自定义 Snap 动作除外）
+///
 class TitleBar : public Widget {
   public:
     TitleBar() = default;
 
+    /// @brief 控件类型名（自描述标识，控件树/序列化用）。
+    /// @return 常量字符串 "TitleBar"。
     [[nodiscard]] auto type_name() const -> const char * override { return "TitleBar"; }
 
+    /// @brief 静态自描述：属性表（height/title/subtitle/window_controls）+ 事件 + 子策略 + 示例。
+    /// @return TitleBar 的 WidgetDescriptor（与实例侧 describe() 同构）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "TitleBar",
@@ -62,7 +65,7 @@ class TitleBar : public Widget {
                      .type = "float",
                      .default_value = "36.0",
                      .required = false,
-                     .note = "标题栏高度(dp)",
+                     .note = "Title bar height (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -70,111 +73,149 @@ class TitleBar : public Widget {
                      .type = "string",
                      .default_value = "",
                      .required = false,
-                     .note = "标题文本",
+                     .note = "Title text",
                      .json_type = "string"},
                     {.name = "subtitle",
                      .type = "string",
                      .default_value = "",
                      .required = false,
-                     .note = "副标题文本(可选)",
+                     .note = "Subtitle text (optional)",
                      .json_type = "string"},
                     {.name = "window_controls",
                      .type = "bool",
                      .default_value = "true",
                      .required = false,
-                     .note = "是否渲染内置 最小化/最大化/关闭 钮",
+                     .note = "Render the built-in minimize/maximize/close buttons",
                      .json_type = "boolean"},
                 },
             .events = {},
             .children_policy = "none",
-            .examples = {R"(au::TitleBar{}.set_title("文档").add_action({"菜单", fn}))"},
+            .examples = {R"(au::TitleBar{}.set_title("Document").add_action({"Menu", fn}))"},
         };
     }
+    /// @brief 实例侧自描述，直接转调 describe_static()。
+    /// @return 与 describe_static() 相同的 WidgetDescriptor。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 本控件无绑定的响应式信号，空实现（不参与信号订阅收集）。
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
-    // ---- 链式 setter ----
     /// @brief 设置应用图标（左上角槽位；空指针不占位）。
+    /// @param icon 图标位图（共享所有权；nullptr = 不渲染图标槽）
+    /// @return 自身引用（链式调用）
     auto set_icon(std::shared_ptr<Image> icon) -> TitleBar & {
         icon_ = std::move(icon);
         mark_needs_paint();
         return *this;
     }
+    /// @brief 设置标题文本（主标题行，字号 13pt、weight 500）。
+    /// @param t 标题字符串（空串 = 不渲染标题文本）
+    /// @return 自身引用（链式调用）
     auto set_title(std::string t) -> TitleBar & {
         title_ = std::move(t);
         mark_needs_paint();
         return *this;
     }
+    /// @brief 设置副标题文本（标题下方第二行，字号 11pt）。
+    /// @param s 副标题字符串（空串 = 标题单行垂直居中）
+    /// @return 自身引用（链式调用）
     auto set_subtitle(std::string s) -> TitleBar & {
         subtitle_ = std::move(s);
         mark_needs_paint();
         return *this;
     }
     /// @brief 追加动作 chip（渲染于控制钮左侧，按追加序从右往左排）。
+    /// @param action 动作项（label 显示文本 + on_click 回调，回调可空）
+    /// @return 自身引用（链式调用）
     auto add_action(TitleBarAction action) -> TitleBar & {
         actions_.push_back(std::move(action));
         mark_needs_layout();
         return *this;
     }
     /// @brief 追加 Snap 弹窗自定义项（排在四个内置项之后；悬停最大化钮触发弹窗）。
+    /// @param action 自定义项（label + on_click 回调；不参与 serialize_props 往返）
+    /// @return 自身引用（链式调用）
     auto add_snap_action(TitleBarAction action) -> TitleBar & {
         snap_actions_.push_back(std::move(action));
         return *this;
     }
+    /// @brief 开关内置 最小化/最大化/关闭 钮的渲染。
+    /// @param on true = 渲染三枚控制钮；false = 隐藏（几何置空盒，点击不生效）
+    /// @return 自身引用（链式调用）
     auto set_window_controls(bool on) -> TitleBar & {
         window_controls_ = on;
         mark_needs_layout();
         return *this;
     }
+    /// @brief 设置标题栏高度。
+    /// @param h 高度（dp；非正值回退默认 36）
+    /// @return 自身引用（链式调用）
     auto set_height(float h) -> TitleBar & {
         style_.height = h > 0.0F ? h : 36.0F;
         mark_needs_layout();
         return *this;
     }
+    /// @brief 整体替换配色/尺寸风格。
+    /// @param s 标题栏风格（TitleBarStyle，默认 adwaita_dark）
+    /// @return 自身引用（链式调用）
     auto set_style(const TitleBarStyle &s) -> TitleBar & {
         style_ = s;
         mark_needs_paint();
         return *this;
     }
 
+    /// @brief 当前标题文本。
+    /// @return 标题字符串的只读引用。
     [[nodiscard]] auto title() const -> const std::string & { return title_; }
+    /// @brief 当前副标题文本。
+    /// @return 副标题字符串的只读引用。
     [[nodiscard]] auto subtitle() const -> const std::string & { return subtitle_; }
+    /// @brief 是否渲染内置窗口控制钮。
+    /// @return true = 渲染 最小化/最大化/关闭 钮。
     [[nodiscard]] auto window_controls() const -> bool { return window_controls_; }
+    /// @brief 已追加的动作 chip 数。
+    /// @return add_action 累计的条目数。
     [[nodiscard]] auto action_count() const -> std::size_t { return actions_.size(); }
     /// @brief Snap 弹窗是否展开（测试观测点）。
+    /// @return true = 弹窗当前展开。
     [[nodiscard]] auto snap_open() const -> bool { return snap_open_; }
     /// @brief 当前 Snap 弹窗条目数（内置 4 + 自定义；未展开时亦反映将弹出数）。
+    /// @return 弹窗条目总数（snap_actions_.size() + 4）。
     [[nodiscard]] auto snap_entry_count() const -> std::size_t { return snap_actions_.size() + 4; }
 
+    /// @brief 序列化标题栏属性到控件树 props（height/title/subtitle/window_controls/snap_action_count）。
+    /// @param props 目标 JSON 对象；先写基类公共字段，Snap 自定义动作仅写计数（回调不可序列化）
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["height"] = style_.height;
-        props["title"] = title_;
-        props["subtitle"] = subtitle_;
-        props["window_controls"] = window_controls_;
-        props["snap_action_count"] = snap_actions_.size();  // 仅计数：回调不可序列化
+        props.set("height", style_.height);
+        props.set("title", title_);
+        props.set("subtitle", subtitle_);
+        props.set("window_controls", Json{window_controls_});
+        props.set("snap_action_count", snap_actions_.size());  // 仅计数：回调不可序列化
     }
 
+    /// @brief 反序列化标题栏属性（height/title/subtitle/window_controls 逐字段还原，缺字段保持现值）。
+    /// @param props 来源 JSON 对象；snap_action_count 只读不还原（自定义动作含回调，不参与往返）
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("height")) {
-            style_.height = props["height"].get<float>();
+            style_.height = props.at("height")->as_or<float>(0.0F);
         }
         if (props.contains("title")) {
-            title_ = props["title"].get<std::string>();
+            title_ = props.at("title")->as_or<std::string>("");
         }
         if (props.contains("subtitle")) {
-            subtitle_ = props["subtitle"].get<std::string>();
+            subtitle_ = props.at("subtitle")->as_or<std::string>("");
         }
         if (props.contains("window_controls")) {
-            window_controls_ = props["window_controls"].get<bool>();
+            window_controls_ = props.at("window_controls")->as_or<bool>(false);
         }
         mark_needs_layout();
     }
 
     /// @brief 指针交互：控制钮/动作 chip 命中 → chrome 动作；空白 → 双击最大化或拖拽移动；
     /// Move 驱动最大化钮悬停计时（≥400ms 开 Snap 弹窗）；弹窗展开时点击项执行并收起。
+    /// @param e 鼠标事件（局部坐标；命中即置 is_handled，未命中转基类冒泡）
     auto on_pointer_event(MouseEvent &e) -> void override {
         const WindowChrome *chrome = nullptr;
         if (env_ != nullptr) {
@@ -255,6 +296,8 @@ class TitleBar : public Widget {
         e.is_handled = true;
     }
 
+    /// @brief 声明参与点击派发（控制钮/动作 chip 的 Press 命中需要点击语义）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
   protected:
@@ -395,6 +438,7 @@ class TitleBar : public Widget {
         const bool is_max = mode != nullptr && *mode == WindowMode::Maximized;
         const bool is_fs = mode != nullptr && *mode == WindowMode::FullScreen;
         const WindowChrome *chrome = env_ != nullptr ? env_->get<WindowChrome>() : nullptr;
+        // CJK-LITERAL: on-screen-demo - painted built-in button text, never printed
         // NOLINTNEXTLINE(*-use-trailing-return-type)
         out.push_back(TitleBarAction{.label = is_max ? "还原" : "最大化", .on_click = [this] {
                                          if (const WindowChrome *c =
@@ -403,6 +447,7 @@ class TitleBar : public Widget {
                                          }
                                      }});
         (void)chrome;
+        // CJK-LITERAL: on-screen-demo - painted built-in button text, never printed
         // NOLINTNEXTLINE(*-use-trailing-return-type)
         out.push_back(TitleBarAction{.label = "最小化", .on_click = [this] {
                                          if (const WindowChrome *c =
@@ -411,6 +456,7 @@ class TitleBar : public Widget {
                                          }
                                      }});
 
+        // CJK-LITERAL: on-screen-demo - painted built-in button text, never printed
         // NOLINTNEXTLINE(*-use-trailing-return-type)
         out.push_back(TitleBarAction{.label = is_fs ? "退出全屏" : "全屏", .on_click = [this] {
                                          if (const WindowChrome *c =
@@ -419,6 +465,7 @@ class TitleBar : public Widget {
                                              c->set_fullscreen(m == nullptr || *m != WindowMode::FullScreen);
                                          }
                                      }});
+        // CJK-LITERAL: on-screen-demo - painted built-in button text, never printed
         // NOLINTNEXTLINE(*-use-trailing-return-type)
         out.push_back(TitleBarAction{.label = "关闭", .on_click = [this] {
                                          if (const WindowChrome *c =

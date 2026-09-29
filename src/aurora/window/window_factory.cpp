@@ -99,8 +99,9 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
     if (opts.renderer == RendererPreference::GpuWgpu) {
         // wgpu GPU 栅格路径（DisplayList 直接在 GPU 端光栅化，非 CPU 像素上传）。
         // Auto 不隐式选择本路径（保持既有 D3D11 优先序），仅显式强制时启用。
-        auto gpu = std::make_unique<WgpuWin32Surface>(static_cast<int>(opts.size.width),
-                                                      static_cast<int>(opts.size.height), opts.title, opts.style);
+        auto gpu =
+            std::make_unique<WgpuWin32Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
+                                               opts.title, opts.style, true, opts.visibility);
         if (!gpu->is_available()) {
             // 强制 GPU 栅格：设备创建失败不静默降级，错误归属调用方（对齐 GpuD3D11 口径）。
             return make_error(ErrorCode::RendererUnavailable,
@@ -124,7 +125,7 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
 #ifdef AURORA_BACKEND_D3D11
     if (opts.renderer == RendererPreference::Auto || opts.renderer == RendererPreference::GpuD3D11) {
         auto gpu = std::make_unique<D3D11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
-                                                  opts.title, opts.style);
+                                                  opts.title, opts.style, opts.visibility);
         if (gpu->is_available()) {
             return make_window(std::move(gpu), opts);
         }
@@ -147,7 +148,7 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
     }
 #endif
     auto surf = std::make_unique<Win32Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
-                                               opts.title, opts.style);
+                                               opts.title, opts.style, opts.visibility);
     return make_window(std::move(surf), opts);
 }
 #endif
@@ -155,7 +156,7 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
 #ifdef AURORA_BACKEND_D3D11
 auto create_window(const D3D11Options &opts) -> Result<std::unique_ptr<Window>> {
     auto surf = std::make_unique<D3D11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
-                                               opts.title, opts.style);
+                                               opts.title, opts.style, opts.visibility);
     surf->set_vsync(opts.vsync);  // vsync 可选（false 交还 CPU 端帧预算节流）
     return make_window(std::move(surf), opts);
 }
@@ -168,14 +169,16 @@ auto create_window(const WgpuOptions &opts) -> Result<std::unique_ptr<Window>> {
     // 直达 Wayland 宿主走 create_window(WaylandOptions)+GpuWgpu 或本函数下方的运行期口径——
     // WindowOptions 侧由 create_native_window 按会话选择）。
 #ifdef AURORA_BACKEND_WIN32
-    auto surf = std::make_unique<WgpuWin32Surface>(
-        static_cast<int>(opts.size.width), static_cast<int>(opts.size.height), opts.title, opts.style, opts.vsync);
+    auto surf =
+        std::make_unique<WgpuWin32Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
+                                           opts.title, opts.style, opts.vsync, opts.visibility);
 #elif defined(AURORA_BACKEND_X11)
     auto surf = std::make_unique<WgpuX11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
-                                                 opts.title, opts.style, opts.vsync);
+                                                 opts.title, opts.style, opts.vsync, opts.visibility);
 #else
-    auto surf = std::make_unique<WgpuWaylandSurface>(
-        static_cast<int>(opts.size.width), static_cast<int>(opts.size.height), opts.title, opts.style, opts.vsync);
+    auto surf =
+        std::make_unique<WgpuWaylandSurface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
+                                             opts.title, opts.style, opts.vsync, opts.visibility);
 #endif
     if (!surf->is_available()) {
         // 专属工厂不静默降级为软件路径：初始化失败（无 DISPLAY/adapter/device/swapchain）归属调用方。
@@ -198,6 +201,7 @@ auto create_window(const GlfwOptions &opts) -> Result<std::unique_ptr<Window>> {
     cfg.gl_minor = opts.gl_minor;
     cfg.resizable = opts.resizable;
     cfg.render_mode = opts.gpu ? GlfwSurface::RenderMode::HardwareGL : GlfwSurface::RenderMode::SoftwareTexture;
+    cfg.visibility = opts.visibility;
     // 无显示环境 / GL 上下文不可用（无头 CI、Basic Render 仅 GL 1.1 等）：构造抛
     // std::runtime_error，转为 PlatformUnavailable 错误，对齐 X11/Wayland 工厂的 Result 契约，
     // 异常不跨公共 API 边界。
@@ -220,8 +224,9 @@ auto create_window(const X11Options &opts) -> Result<std::unique_ptr<Window>> {
 #if defined(AURORA_BACKEND_GPU_WGPU)
     if (opts.renderer == RendererPreference::GpuWgpu) {
         // wgpu GPU 栅格路径（X11 宿主）：Auto 不隐式选择本路径，仅显式强制时启用（Win32 同口径）。
-        auto gpu = std::make_unique<WgpuX11Surface>(static_cast<int>(opts.size.width),
-                                                    static_cast<int>(opts.size.height), opts.title, opts.style);
+        auto gpu =
+            std::make_unique<WgpuX11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
+                                             opts.title, opts.style, true, opts.visibility);
         if (!gpu->is_available()) {
             // 强制 GPU 栅格：init 失败不静默降级，错误归属调用方。
             return make_error(ErrorCode::RendererUnavailable,
@@ -242,7 +247,7 @@ auto create_window(const X11Options &opts) -> Result<std::unique_ptr<Window>> {
     }
 #endif
     auto surf = std::make_unique<X11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
-                                             opts.title, opts.style);
+                                             opts.title, opts.style, opts.visibility);
     if (!surf->is_available()) {
         // 无 DISPLAY（纯 TTY/CI）或连接失败：不崩溃，错误归属调用方（AI 可枚举）。
         return make_error(ErrorCode::PlatformUnavailable, "create_window(X11): cannot open X display (DISPLAY unset?).",
@@ -259,8 +264,9 @@ auto create_window(const WaylandOptions &opts) -> Result<std::unique_ptr<Window>
 #if defined(AURORA_BACKEND_GPU_WGPU)
     if (opts.renderer == RendererPreference::GpuWgpu) {
         // wgpu GPU 栅格路径（Wayland 宿主）：Auto 不隐式选择本路径，仅显式强制时启用（Win32/X11 同口径）。
-        auto gpu = std::make_unique<WgpuWaylandSurface>(static_cast<int>(opts.size.width),
-                                                        static_cast<int>(opts.size.height), opts.title, opts.style);
+        auto gpu =
+            std::make_unique<WgpuWaylandSurface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
+                                                 opts.title, opts.style, true, opts.visibility);
         if (!gpu->is_available()) {
             // 强制 GPU 栅格：init 失败不静默降级，错误归属调用方。
             return make_error(
@@ -282,7 +288,7 @@ auto create_window(const WaylandOptions &opts) -> Result<std::unique_ptr<Window>
     }
 #endif
     auto surf = std::make_unique<WaylandSurface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
-                                                 opts.title, opts.style);
+                                                 opts.title, opts.style, opts.visibility);
     if (!surf->is_available()) {
         // 无 WAYLAND_DISPLAY（纯 TTY/X11 会话/CI）或连接失败：不崩溃，错误归属调用方（AI 可枚举）。
         return make_error(ErrorCode::PlatformUnavailable,

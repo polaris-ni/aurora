@@ -13,11 +13,15 @@
 #include "aurora/debug/debug_trace.h"
 #include "aurora/debug/feature_flags.h"  // 运行时探测 AURORA_ENABLE_DEBUG 的归一化镜像
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_debug_trace {
 
 using aurora::debug::feature_flags;
 using aurora::debug::why_trace;
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 /// @brief 运行时探测 AURORA_ENABLE_DEBUG 是否生效（feature_flags 为始终可用的编译期快照）。
 [[nodiscard]] static auto probe_debug_enabled() -> bool { return feature_flags().debug; }
@@ -32,10 +36,10 @@ AURORA_TEST_CASE(dirty_kind_enumerates_layout_and_paint) {
 
 AURORA_TEST_CASE(why_trace_reports_unavailable_when_debug_off) {
     if (probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 已启用：关闭态 unavailable 语义不适用");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is enabled: the unavailable semantics of the off state do not apply");
     }
     const Json j = why_trace();
-    AURORA_TEST_CHECK_EQ(j["available"], false);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(j, "available"), false);
     AURORA_TEST_CHECK_TRUE(j.contains("reason"));
     // 关闭态热路径未记录：查询仍安全返回结构化 JSON（始终声明、ODR 安全契约）。
     AURORA_TEST_CHECK_TRUE(j.is_object());
@@ -48,46 +52,49 @@ AURORA_TEST_CASE(record_dirty_never_throws_in_any_build) {
 
 AURORA_TEST_CASE(record_and_query_roundtrip) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：采集缓冲按宏裁切，无记录可查");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: the capture buffer is compiled out, nothing to query");
     }
     const Json before = why_trace();
-    const auto base_count = before["count"].get<std::size_t>();
-    const auto base_total = before["total_recorded"].get<std::uint64_t>();
+    const auto base_count = require_field<std::size_t>(before, "count");
+    const auto base_total = require_field<std::uint64_t>(before, "total_recorded");
     // 同进程内前一个用例（record_dirty_never_throws_in_any_build）已记过条目，
     // 故 entries 条数只能作相对断言——写死 3 会随用例执行顺序而假失败。
-    const auto base_entries = before["entries"].size();
+    const auto base_entries = require_child(before, "entries")->size();
 
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Layout, "Text", 101, false);
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Paint, "Button", 102, true);
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Layout, "Column", 103, false);
 
     const Json after = why_trace();
-    AURORA_TEST_CHECK_EQ(after["count"], base_count + 3);
-    AURORA_TEST_CHECK_EQ(after["total_recorded"], base_total + 3);
+    AURORA_TEST_CHECK_EQ(require_field<std::size_t>(after, "count"), base_count + 3);
+    AURORA_TEST_CHECK_EQ(require_field<std::uint64_t>(after, "total_recorded"), base_total + 3);
 
     // entries 最新在前：最后记录的 Column 排首位；字段逐项核对。
-    const Json &entries = after["entries"];
-    AURORA_TEST_REQUIRE_EQ(entries.size(), base_entries + 3U);
-    AURORA_TEST_CHECK_EQ(entries[0]["kind"], "layout");
-    AURORA_TEST_CHECK_EQ(entries[0]["type"], "Column");
-    AURORA_TEST_CHECK_EQ(entries[0]["frame"], 103);
-    AURORA_TEST_CHECK_EQ(entries[0]["propagated"], false);
-    AURORA_TEST_CHECK_EQ(entries[1]["kind"], "paint");
-    AURORA_TEST_CHECK_EQ(entries[1]["type"], "Button");
-    AURORA_TEST_CHECK_EQ(entries[1]["frame"], 102);
-    AURORA_TEST_CHECK_EQ(entries[1]["propagated"], true);
-    AURORA_TEST_CHECK_EQ(entries[2]["kind"], "layout");
-    AURORA_TEST_CHECK_EQ(entries[2]["type"], "Text");
-    AURORA_TEST_CHECK_EQ(entries[2]["frame"], 101);
-    AURORA_TEST_CHECK_EQ(entries[2]["propagated"], false);
+    const auto *const entries = require_child(after, "entries");
+    AURORA_TEST_REQUIRE_EQ(entries->size(), base_entries + 3U);
+    const auto *const entry0 = require_child_at(*entries, 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry0, "kind"), "layout");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry0, "type"), "Column");
+    AURORA_TEST_CHECK_EQ(require_field<int>(*entry0, "frame"), 103);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(*entry0, "propagated"), false);
+    const auto *const entry1 = require_child_at(*entries, 1);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry1, "kind"), "paint");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry1, "type"), "Button");
+    AURORA_TEST_CHECK_EQ(require_field<int>(*entry1, "frame"), 102);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(*entry1, "propagated"), true);
+    const auto *const entry2 = require_child_at(*entries, 2);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry2, "kind"), "layout");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry2, "type"), "Text");
+    AURORA_TEST_CHECK_EQ(require_field<int>(*entry2, "frame"), 101);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(*entry2, "propagated"), false);
 }
 
 AURORA_TEST_CASE(why_trace_limit_keeps_newest_first) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：limit 截断语义仅开启态可观测");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: limit truncation is observable only when enabled");
     }
     const Json before = why_trace();
-    const auto base_count = before["count"].get<std::size_t>();
+    const auto base_count = require_field<std::size_t>(before, "count");
 
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Layout, "A", 201, false);
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Paint, "B", 202, false);
@@ -95,27 +102,29 @@ AURORA_TEST_CASE(why_trace_limit_keeps_newest_first) {
 
     // limit=2：只取最近 2 条，仍最新在前。
     const Json limited = why_trace(2);
-    AURORA_TEST_CHECK_EQ(limited["count"], base_count + 3);  // count 不受 limit 影响
-    const Json &entries = limited["entries"];
-    AURORA_TEST_REQUIRE_EQ(entries.size(), 2U);
-    AURORA_TEST_CHECK_EQ(entries[0]["type"], "C");
-    AURORA_TEST_CHECK_EQ(entries[0]["frame"], 203);
-    AURORA_TEST_CHECK_EQ(entries[1]["type"], "B");
-    AURORA_TEST_CHECK_EQ(entries[1]["frame"], 202);
+    AURORA_TEST_CHECK_EQ(require_field<std::size_t>(limited, "count"), base_count + 3);  // count 不受 limit 影响
+    const auto *const entries = require_child(limited, "entries");
+    AURORA_TEST_REQUIRE_EQ(entries->size(), 2U);
+    const auto *const entry0 = require_child_at(*entries, 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry0, "type"), "C");
+    AURORA_TEST_CHECK_EQ(require_field<int>(*entry0, "frame"), 203);
+    const auto *const entry1 = require_child_at(*entries, 1);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry1, "type"), "B");
+    AURORA_TEST_CHECK_EQ(require_field<int>(*entry1, "frame"), 202);
 
     // limit=0：entries 为空，缓冲本身不受影响。
     const Json zero = why_trace(0);
-    AURORA_TEST_CHECK_EQ(zero["entries"].size(), 0U);
-    AURORA_TEST_CHECK_EQ(zero["count"], base_count + 3);
+    AURORA_TEST_CHECK_EQ(require_child(zero, "entries")->size(), 0U);
+    AURORA_TEST_CHECK_EQ(require_field<std::size_t>(zero, "count"), base_count + 3);
 }
 
 AURORA_TEST_CASE(total_recorded_is_monotonic) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：累计计数按宏裁切");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: the cumulative counter is compiled out");
     }
-    const auto base_total = why_trace()["total_recorded"].get<std::uint64_t>();
+    const auto base_total = require_field<std::uint64_t>(why_trace(), "total_recorded");
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Paint, "Text", 301, true);
-    const auto after_total = why_trace()["total_recorded"].get<std::uint64_t>();
+    const auto after_total = require_field<std::uint64_t>(why_trace(), "total_recorded");
     AURORA_TEST_CHECK_GE(after_total, base_total + 1);
 }
 

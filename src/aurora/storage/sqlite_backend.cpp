@@ -136,7 +136,14 @@ auto SqliteBackend::put_record(const std::string &id, const StorageRecord &rec) 
     if (!open_) {
         return Result<void>{make_error(ErrorCode::StorageBackendUnavailable, "SQLite backend not opened: " + id)};
     }
-    const std::string json_text = rec.encoding == StorageEncoding::Json ? std::get<Json>(rec.payload).dump() : "";
+    std::string json_text;
+    if (rec.encoding == StorageEncoding::Json) {
+        auto dumped = json::dump(std::get<json::Value>(rec.payload));
+        if (!dumped) {
+            return Result<void>{dumped.error()};
+        }
+        json_text = std::move(dumped).value();
+    }
     static const std::vector<std::byte> AURORA_EMPTY_BYTES;
     const std::vector<std::byte> &bytes =
         rec.encoding == StorageEncoding::Binary ? std::get<StorageBytes>(rec.payload) : AURORA_EMPTY_BYTES;
@@ -225,13 +232,13 @@ auto SqliteBackend::get_record(const std::string &id) -> Result<StorageRecord> {
         out.value().payload = std::move(bytes);
     } else {
         const std::string json_text = text_at(5);
-        try {
-            out.value().payload = Json::parse(json_text);
-        } catch (...) {
+        auto parsed = json::parse(json_text);
+        if (!parsed) {
             sqlite3_finalize(stmt);
             return Result<StorageRecord>{
                 make_error(ErrorCode::StorageRecordCorrupt, "Record JSON parse failed: " + id)};
         }
+        out.value().payload = std::move(parsed).value();
     }
     sqlite3_finalize(stmt);
     return out;

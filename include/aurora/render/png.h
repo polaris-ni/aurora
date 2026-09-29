@@ -13,6 +13,9 @@ namespace aurora {
 namespace detail {
 
 /// @brief 将原始像素数据打包为 zlib stored-block IDAT 负载。
+/// @param raw 待打包的字节缓冲（每扫描线为 1 个 filter 字节 + RGBA 像素，调用方已排好行）。
+/// @param raw_len `raw` 的有效字节数，须满足 `raw_len == (width * 4 + 1) * height`。
+/// @return 完整的 zlib 流字节（2 字节头 + 逐个 ≤65535 字节的 stored block）；不含 adler32 尾，由调用方追加。
 [[nodiscard]] inline auto build_idat(const std::uint8_t *raw, std::size_t raw_len) -> std::vector<std::uint8_t> {
     std::vector<std::uint8_t> idat;
     idat.push_back(0x78);  // CMF (deflate, 32K window)
@@ -41,6 +44,9 @@ namespace detail {
 }
 
 /// @brief 将 RGBA8 像素编码为 PNG 字节流（不写文件）。
+/// @param rgba 像素缓冲，行主序、自上而下、无行末填充，长度为 `width * height * 4` 字节。
+/// @param width 图像宽（像素），须 > 0。
+/// @param height 图像高（像素），须 > 0。
 /// @return 成功返回字节向量；失败返回带信息的 Error。
 [[nodiscard]] inline auto write_png_to_memory(const std::uint8_t *rgba, int width, int height)
     -> Result<std::vector<std::uint8_t>> {
@@ -165,7 +171,11 @@ namespace detail {
 }  // namespace detail
 
 /// @brief 将 RGBA8 像素编码并写入 PNG 文件（内置最小化编码器，零三方依赖）。
-/// @return 成功返回空值；失败返回带信息的 Error。
+/// @param path 目标文件路径（C 字符串，二进制覆写打开；已存在内容被替换）。
+/// @param width 图像宽（像素），须 > 0。
+/// @param height 图像高（像素），须 > 0。
+/// @param rgba 像素缓冲，行主序、无行末填充，长度为 `width * height * 4` 字节。
+/// @return 成功返回 `true`（PNG 字节已落盘）；失败返回带信息的 Error（尺寸非法、文件打不开或写入不完整）。
 [[nodiscard]] inline auto write_png(const char *path, int width, int height, const std::uint8_t *rgba) -> Result<bool> {
     auto bytes = detail::write_png_to_memory(rgba, width, height);
     if (!bytes) {

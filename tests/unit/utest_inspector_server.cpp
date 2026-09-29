@@ -3,16 +3,23 @@
 /// 测试说明: 覆盖 InspectorServer 生命周期与 HTTP 基本路径——初始停机态、start(0) 随机端口
 /// 启停、重复 start 失败、stop 幂等、析构收编 worker、/api/tree 与 /api/components 的
 /// 请求-响应、404/405/400/403 错误请求、/api/debug/state 的 surface getter 装配错误路径，
-/// 以及 /api/input/{click,scroll,text} 交互模拟（派发到目标控件、请求体校验、目标定位失败与
-/// 派发失败的错误映射）。
+/// 以及 /api/input/{click,scroll,drag,text} 交互模拟（派发到目标控件、请求体校验、目标定位
+/// 失败与派发失败的错误映射）和 /api/find 的 key/type/text 定位（路径与寻址端点同口径）。
+/// 树端点的线程落点同样在此覆盖：装上传递器后必须换到主线程下树，无传递器时回退内联执行。
 /// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端为本 TU 内最小
 /// 回环 socket 实现，随用例关闭清理。
 /// AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩。
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
@@ -21,6 +28,8 @@
 
 #include "aurora/event/event.h"  // ScrollEvent
 #include "aurora/inspector/inspector_server.h"
+#include "aurora/state/async.h"  // detail::main_poster（跨线程投递器，marshal 的落点）
+#include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
@@ -35,6 +44,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>  // SO_RCVTIMEO 的 timeval
 #include <unistd.h>
 #endif
 
@@ -57,6 +67,64 @@ auto shared_tree() -> std::shared_ptr<Column> & {
 
 /// @brief root_getter：每次请求返回共享树的 Node 副本。
 auto tree_getter() -> Node { return Node{shared_tree()}; }
+
+/// @brief `recording_tree_getter` 的调用线程流水。
+auto getter_threads() -> std::vector<std::thread::id> & {
+    static std::vector<std::thread::id> threads;
+    return threads;
+}
+
+/// @brief 记录每次调用线程的 root_getter（配合 `QueuedPoster` 证明树访问确实换了线程）。
+auto recording_tree_getter() -> Node {
+    getter_threads().push_back(std::this_thread::get_id());
+    return tree_getter();
+}
+
+/// @brief 「只入队、由用例主线程排水」的跨线程投递器：装上它，`marshal_get` 才真的换线程执行。
+/// 析构时复原原投递器，避免污染同进程内的其它用例。
+struct QueuedPoster {
+    QueuedPoster() {
+        std::scoped_lock lock(aurora::detail::main_poster_mutex());
+        // 刻意在持锁后才读：早读会拿到随后被别的安装者换掉的投递器（初始化列表在加锁前求值）。
+        previous = aurora::detail::main_poster();  // NOLINT(cppcoreguidelines-prefer-member-initializer)
+        aurora::detail::main_poster() = [this](std::function<void()> fn) -> void {
+            {
+                std::scoped_lock task_lock(mutex);
+                tasks.push_back(std::move(fn));
+            }
+            cv.notify_all();
+        };
+    }
+    ~QueuedPoster() {
+        std::scoped_lock lock(aurora::detail::main_poster_mutex());
+        aurora::detail::main_poster() = previous;
+    }
+    QueuedPoster(const QueuedPoster &) = delete;
+    auto operator=(const QueuedPoster &) -> QueuedPoster & = delete;
+    // 移动同样禁止：析构时按 `previous` 复原安装点，移动后的壳对象会留下悬空的安装/复原配对。
+    QueuedPoster(QueuedPoster &&) = delete;
+    auto operator=(QueuedPoster &&) -> QueuedPoster & = delete;
+
+    /// @brief 在当前线程执行一个排队任务；`timeout_ms` 内无任务返回 false（调用方据此判失败）。
+    auto drain_one(int timeout_ms = 5000) -> bool {
+        std::function<void()> task;
+        {
+            std::unique_lock lock(mutex);
+            if (!cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return !tasks.empty(); })) {
+                return false;
+            }
+            task = std::move(tasks.front());
+            tasks.pop_front();
+        }
+        task();
+        return true;
+    }
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::deque<std::function<void()>> tasks;
+    std::function<void(std::function<void()>)> previous;
+};
 
 #ifdef AURORA_PLATFORM_WINDOWS
 /// @brief Winsock 会话（引用计数式启停，随作用域清理）。
@@ -101,8 +169,9 @@ auto send_all(int sock, const std::string &data) -> bool {
 }
 
 /// @brief 对 127.0.0.1:port 发送原始 HTTP 请求并回收完整响应（服务端 Connection: close，
-/// 读到对端关闭即完整）。
-[[nodiscard]] auto http_roundtrip(std::uint16_t port, const std::string &request) -> std::string {
+/// 读到对端关闭即完整）。`recv_timeout_ms > 0` 时给接收加超时，超时按空响应失败。
+[[nodiscard]] auto http_roundtrip(std::uint16_t port, const std::string &request, int recv_timeout_ms = 0)
+    -> std::string {
 #ifdef AURORA_PLATFORM_WINDOWS
     const WinsockSession wsa;
 #endif
@@ -121,6 +190,19 @@ auto send_all(int sock, const std::string &data) -> bool {
     // connect() 的 socket API 契约要求将 sockaddr_in 擦除为通用 sockaddr 指针，无类型安全替代。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     AURORA_TEST_REQUIRE_EQ(::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
+
+    if (recv_timeout_ms > 0) {
+#ifdef AURORA_PLATFORM_WINDOWS
+        const auto timeout = static_cast<DWORD>(recv_timeout_ms);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        static_cast<void>(::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout),
+                                       static_cast<int>(sizeof(timeout))));
+#else
+        const timeval timeout{.tv_sec = recv_timeout_ms / 1000, .tv_usec = (recv_timeout_ms % 1000) * 1000};
+        static_cast<void>(
+            ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout), sizeof(timeout)));
+#endif
+    }
     AURORA_TEST_REQUIRE_TRUE(send_all(sock, request));
 
     std::string response;
@@ -153,6 +235,11 @@ auto send_all(int sock, const std::string &data) -> bool {
     return http_roundtrip(port, "GET " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
 }
 
+/// @brief 带接收超时的 GET：供非用例主线程调用 —— 服务端不回响应时自行退出，不把 runner 挂死。
+[[nodiscard]] auto http_get_timed(std::uint16_t port, const std::string &target, int timeout_ms) -> std::string {
+    return http_roundtrip(port, "GET " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", timeout_ms);
+}
+
 /// @brief 带 Host 头与 JSON body 的 POST 便捷封装。
 [[nodiscard]] auto http_post(std::uint16_t port, const std::string &target, const std::string &body) -> std::string {
     return http_roundtrip(port, "POST " + target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n" +
@@ -183,8 +270,8 @@ class ScrollProbe : public LeafWidget {
     }
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["scroll_hits"] = scroll_hits_;
-        props["last_delta_y"] = last_delta_y_;
+        props.set("scroll_hits", scroll_hits_);
+        props.set("last_delta_y", last_delta_y_);
     }
 
   private:
@@ -192,7 +279,56 @@ class ScrollProbe : public LeafWidget {
     float last_delta_y_ = 0.0F;
 };
 
-/// @brief 交互模拟用例的树：Column[ Checkbox(0) / TextInput(1) / ScrollProbe(2) ]。
+/// @brief 拖拽探针：把 `on_pointer_event` 的 Press/Move/Release 命中次数与 Move 相对 Press
+/// 的位移经序列化属性外显。
+///
+/// `Inspector::simulate_drag` 派发 Press（中心）→ Move（中心+delta）→ Release（终点），
+/// 据此确认合成拖拽的三段事件确实落到目标控件且位移与请求一致。
+class DragProbe : public LeafWidget {
+  public:
+    [[nodiscard]] auto type_name() const -> const char * override { return "DragProbe"; }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+        return c.constrain(Size{.width = 40.0F, .height = 40.0F});
+    }
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+        p.fill_rect(bounds, Color{120, 120, 120, 255});
+    }
+    auto on_pointer_event(MouseEvent &e) -> void override {
+        if (e.action == MouseAction::Press) {
+            ++press_hits_;
+            press_x_ = e.position.x;
+            press_y_ = e.position.y;
+        } else if (e.action == MouseAction::Move) {
+            ++move_hits_;
+            move_dx_ = e.position.x - press_x_;
+            move_dy_ = e.position.y - press_y_;
+        } else if (e.action == MouseAction::Release) {
+            ++release_hits_;
+        }
+        e.is_handled = true;
+    }
+    auto serialize_props(Json &props) const -> void override {
+        Widget::serialize_props(props);
+        props.set("press_hits", press_hits_);
+        props.set("move_hits", move_hits_);
+        props.set("release_hits", release_hits_);
+        props.set("move_dx", move_dx_);
+        props.set("move_dy", move_dy_);
+    }
+
+  private:
+    int press_hits_ = 0;
+    int move_hits_ = 0;
+    int release_hits_ = 0;
+    float press_x_ = 0.0F;
+    float press_y_ = 0.0F;
+    float move_dx_ = 0.0F;
+    float move_dy_ = 0.0F;
+};
+
+/// @brief 交互模拟用例的树：Column[ Checkbox(0) / TextInput(1) / ScrollProbe(2) / DragProbe(3) ]。
 ///
 /// 逐用例自建而非复用静态共享树：模拟会改控件状态，静态树会让状态在用例间泄漏
 /// （`--repeat` 下尤其明显）。`root` 由 shared_ptr 持有，供 HTTP 工作线程经
@@ -202,6 +338,7 @@ struct InputTree {
     std::shared_ptr<Checkbox> checkbox;
     std::shared_ptr<TextInput> input;
     std::shared_ptr<ScrollProbe> scroller;
+    std::shared_ptr<DragProbe> dragger;
 
     /// @brief 供 InspectorServer 使用的取值函数（按值返回 Node 副本即共享底层控件）。
     [[nodiscard]] auto getter() const -> std::function<Node()> {
@@ -219,15 +356,61 @@ struct InputTree {
     auto checkbox = std::make_shared<Checkbox>();
     auto input = std::make_shared<TextInput>();
     auto scroller = std::make_shared<ScrollProbe>();
+    auto dragger = std::make_shared<DragProbe>();
     auto col = std::make_shared<Column>();
     col->add(Node{checkbox});
     col->add(Node{input});
     col->add(Node{scroller});
+    col->add(Node{dragger});
     return InputTree{
         .root = std::make_shared<Node>(Node{col}),
         .checkbox = checkbox,
         .input = input,
         .scroller = scroller,
+        .dragger = dragger,
+    };
+}
+// NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+/// @brief /api/find 用例的树：Column[ Button"确定"(0, id=ok) / TextInput(1) /
+///         Column[ Button"取消"(0, id=cancel) ] (2) ]——覆盖嵌套路径与多命中。
+///
+/// 逐用例自建（find 虽只读，但保持「每用例一棵树」的套件约定）。id 经外层 Node
+/// `set_id` 后再入列，容器存储的 Node 副本携带该标识。
+struct FindTree {
+    std::shared_ptr<Node> root;
+    std::shared_ptr<Button> ok;
+    std::shared_ptr<TextInput> input;
+    std::shared_ptr<Button> cancel;
+
+    [[nodiscard]] auto getter() const -> std::function<Node()> {
+        const std::shared_ptr<Node> held = root;
+        return [held]() -> Node { return *held; };
+    }
+};
+
+// 分析器同 make_input_tree 的误报与豁免理由（共享控件 + 聚合返回），就地豁免。
+// NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
+[[nodiscard]] auto make_find_tree() -> FindTree {
+    // CJK-LITERAL: cjk-fixture - Han button labels let /api/find exercise UTF-8 query matching
+    auto ok_button = std::make_shared<Button>("确定");
+    auto input = std::make_shared<TextInput>();
+    auto cancel_button = std::make_shared<Button>("取消");
+    auto inner = std::make_shared<Column>();
+    Node cancel_node{cancel_button};
+    cancel_node.set_id("cancel");
+    inner->add(cancel_node);  // add 只收 const 引用（拷贝入列），std::move 无效
+    auto col = std::make_shared<Column>();
+    Node ok_node{ok_button};
+    ok_node.set_id("ok");
+    col->add(ok_node);
+    col->add(Node{input});
+    col->add(Node{inner});
+    return FindTree{
+        .root = std::make_shared<Node>(Node{col}),
+        .ok = ok_button,
+        .input = input,
+        .cancel = cancel_button,
     };
 }
 // NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -237,7 +420,7 @@ struct InputTree {
 
 AURORA_TEST_CASE(initial_state_is_stopped) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_CHECK_EQ(server.is_running(), false);
@@ -247,7 +430,7 @@ AURORA_TEST_CASE(initial_state_is_stopped) {
 
 AURORA_TEST_CASE(start_and_stop_lifecycle) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     // 端口传 0：由系统分配临时端口，规避并行用例间的端口冲突。
@@ -263,7 +446,7 @@ AURORA_TEST_CASE(start_and_stop_lifecycle) {
 
 AURORA_TEST_CASE(start_twice_while_running_fails) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -276,7 +459,7 @@ AURORA_TEST_CASE(start_twice_while_running_fails) {
 
 AURORA_TEST_CASE(stop_is_idempotent_and_restartable) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_CHECK_NO_THROW(server.stop());  // 未启动时 stop 直接返回
@@ -294,7 +477,7 @@ AURORA_TEST_CASE(stop_is_idempotent_and_restartable) {
 
 AURORA_TEST_CASE(destructor_joins_worker_and_releases_state) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     {
         InspectorServer scoped(tree_getter);
@@ -312,7 +495,7 @@ AURORA_TEST_CASE(destructor_joins_worker_and_releases_state) {
 
 AURORA_TEST_CASE(tree_endpoint_serves_widget_tree_json) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -329,7 +512,7 @@ AURORA_TEST_CASE(tree_endpoint_serves_widget_tree_json) {
 
 AURORA_TEST_CASE(components_endpoint_returns_json_array) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -345,7 +528,7 @@ AURORA_TEST_CASE(components_endpoint_returns_json_array) {
 
 AURORA_TEST_CASE(unknown_endpoint_returns_404) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -359,7 +542,7 @@ AURORA_TEST_CASE(unknown_endpoint_returns_404) {
 
 AURORA_TEST_CASE(wrong_method_returns_405) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -373,7 +556,7 @@ AURORA_TEST_CASE(wrong_method_returns_405) {
 
 AURORA_TEST_CASE(bad_pick_params_return_400) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -387,7 +570,7 @@ AURORA_TEST_CASE(bad_pick_params_return_400) {
 
 AURORA_TEST_CASE(missing_host_header_returns_403) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -401,7 +584,7 @@ AURORA_TEST_CASE(missing_host_header_returns_403) {
 
 AURORA_TEST_CASE(debug_state_requires_surface_getter) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -420,7 +603,7 @@ AURORA_TEST_CASE(debug_state_requires_surface_getter) {
 
 AURORA_TEST_CASE(input_click_dispatches_to_target_and_toggles_state) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     AURORA_TEST_REQUIRE_FALSE(tree.checkbox->value());  // 起始未勾选，翻转可观测
@@ -444,7 +627,7 @@ AURORA_TEST_CASE(input_click_dispatches_to_target_and_toggles_state) {
 
 AURORA_TEST_CASE(input_scroll_dispatches_to_target_and_reaches_on_scroll) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -465,7 +648,7 @@ AURORA_TEST_CASE(input_scroll_dispatches_to_target_and_reaches_on_scroll) {
 
 AURORA_TEST_CASE(input_text_dispatches_to_target_and_inserts_text) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -484,7 +667,7 @@ AURORA_TEST_CASE(input_text_dispatches_to_target_and_inserts_text) {
 
 AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -516,7 +699,7 @@ AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
 
 AURORA_TEST_CASE(input_endpoint_accepts_empty_path_as_tree_root) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     // 空串路径即树根本身（与 find_node_by_path 的空路径语义一致），使根控件无需再包一层容器
     // 就能被驱动；这里直接把 TextInput 作根来验证。
@@ -536,7 +719,7 @@ AURORA_TEST_CASE(input_endpoint_accepts_empty_path_as_tree_root) {
 
 AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -557,9 +740,153 @@ AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
 #endif
 }
 
+AURORA_TEST_CASE(input_drag_dispatches_press_move_release_to_target) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#else
+    InputTree tree = make_input_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    const std::string resp = http_post(server.port(), "/api/input/drag", R"({"path":"3","dx":30,"dy":-10})");
+    AURORA_TEST_CHECK_TRUE(resp.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"action\":\"drag\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(resp.find("\"widget_path\":\"3\"") != std::string::npos);
+
+    // 探针把三段事件的命中次数与 Move 相对 Press 的位移序列化外显，据此确认合成拖拽
+    // （Press → Move → Release）确实落到目标控件且位移与请求一致。
+    const std::string props = http_get(server.port(), "/api/widget/3");
+    AURORA_TEST_CHECK_MSG(props.find("\"press_hits\":1") != std::string::npos, "drag press reached the target widget");
+    AURORA_TEST_CHECK_MSG(props.find("\"move_hits\":1") != std::string::npos, "drag move reached the target widget");
+    AURORA_TEST_CHECK_MSG(props.find("\"release_hits\":1") != std::string::npos,
+                          "drag release reached the target widget");
+    AURORA_TEST_CHECK_TRUE(props.find("\"move_dx\":30.0") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(props.find("\"move_dy\":-10.0") != std::string::npos);
+
+    // 拖拽增量类型不符 → 400（与 scroll 同一校验口径）。
+    AURORA_TEST_CHECK_TRUE(http_post(server.port(), "/api/input/drag", R"({"path":"3","dx":"abc"})").find("400") !=
+                           std::string::npos);
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#else
+    FindTree tree = make_find_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::uint16_t port = server.port();
+
+    // 按 type：两个 Button（先序：根下 0 在嵌套 2/0 之前），返回索引路径数组。
+    const std::string by_type = http_get(port, "/api/find?type=Button");
+    AURORA_TEST_CHECK_TRUE(by_type.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(by_type.find("\"count\":2") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(by_type.find("\"path\":\"0\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(by_type.find("\"path\":\"2/0\"") != std::string::npos);
+
+    // 按 key（Node::set_id 标识）。
+    const std::string by_key = http_get(port, "/api/find?key=cancel");
+    AURORA_TEST_CHECK_TRUE(by_key.find("\"count\":1") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(by_key.find("\"path\":\"2/0\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(by_key.find("\"id\":\"cancel\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?key=nope").find("\"count\":0") != std::string::npos);
+
+    // 按 text（文本类属性启发式：Button 序列化 label）。
+    // CJK-LITERAL: cjk-fixture - find by Han text must return the addressable tree paths
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=确定").find("\"path\":\"0\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=取消").find("\"path\":\"2/0\"") != std::string::npos);
+
+    // 多参数 AND 语义。
+    // CJK-LITERAL: cjk-fixture - AND-combined Han text query against the fixture labels
+    const std::string combined = http_get(port, "/api/find?type=Button&text=取消");
+    AURORA_TEST_CHECK_TRUE(combined.find("\"count\":1") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(combined.find("\"path\":\"2/0\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?type=Button&key=ok").find("\"path\":\"0\"") != std::string::npos);
+    // CJK-LITERAL: cjk-fixture - a Han text query on the wrong type must find nothing
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?type=TextInput&text=确定").find("\"count\":0") !=
+                           std::string::npos);
+
+    // 根自身可命中（路径空串）；嵌套 Column 同样命中（路径 "2"）。
+    const std::string root_hit = http_get(port, "/api/find?type=Column");
+    AURORA_TEST_CHECK_TRUE(root_hit.find("\"count\":2") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(root_hit.find("\"path\":\"\"") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(root_hit.find("\"path\":\"2\"") != std::string::npos);
+
+    // 返回路径与寻址端点同口径：拿 find 给出的路径可直接读属性。
+    const std::string props = http_get(port, "/api/widget/2/0");
+    // CJK-LITERAL: cjk-fixture - the serialized label of the Han-named button comes back unchanged
+    AURORA_TEST_CHECK_MSG(props.find("\"label\":\"取消\"") != std::string::npos,
+                          "find's index path must be addressable by /api/widget/{path}");
+    server.stop();
+#endif
+}
+
+// query 值的百分号解码：HTTP 客户端对空格 / 非 ASCII 一律按 `%XX` 编码，服务端不解码就永远
+// 匹配不上这些值（真实场景：`/api/find?text=New%20auxiliary%20window` 定位多窗口载体的按钮）。
+AURORA_TEST_CASE(find_endpoint_percent_decodes_query_values) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#else
+    FindTree tree = make_find_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::uint16_t port = server.port();
+
+    // 中文标签的 UTF-8 逐字节编码形态（"确定" / "取消"）。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=%E7%A1%AE%E5%AE%9A").find("\"path\":\"0\"") !=
+                           std::string::npos);
+    // 十六进制大小写等价。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=%e7%a1%ae%e5%ae%9a").find("\"count\":1") !=
+                           std::string::npos);
+    // key 走同一取值通道，同样解码（"ok" = %6F%6B）。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?key=%6F%6B").find("\"path\":\"0\"") != std::string::npos);
+    // 编码值与 tree 里的字面量不等价时不得命中（解码把 %20 还原成空格，匹配的是 "确定" 而非 "确定 "）。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=%E7%A1%AE%E5%AE%9A%21").find("\"count\":0") !=
+                           std::string::npos);
+    // 宽松解码：畸形百分号按字面量保留，不升级成 500。
+    const std::string malformed = http_get(port, "/api/find?text=%zz");
+    AURORA_TEST_CHECK_TRUE(malformed.find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(malformed.find("\"count\":0") != std::string::npos);
+    server.stop();
+
+    // 含空格的 label：未解码时 "%20" 是字面量，任何带空格标签都定位不到。
+    auto save = std::make_shared<Button>("Save all files");
+    auto row = std::make_shared<Column>();
+    row->add(Node{save});
+    auto space_root = std::make_shared<Node>(Node{row});
+    InspectorServer space_server([held = space_root]() -> Node { return *held; });
+    AURORA_TEST_REQUIRE_TRUE(space_server.start(0));
+    const std::uint16_t space_port = space_server.port();
+    AURORA_TEST_CHECK_TRUE(http_get(space_port, "/api/find?text=Save%20all%20files").find("\"count\":1") !=
+                           std::string::npos);
+    space_server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(find_endpoint_rejects_malformed_requests) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#else
+    FindTree tree = make_find_tree();
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::uint16_t port = server.port();
+
+    // 无任何参数 → 400。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find").find("400") != std::string::npos);
+    // 空值参数视同未提供 → 400。
+    AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?key=").find("400") != std::string::npos);
+    // 方法不符 → 405。
+    AURORA_TEST_CHECK_TRUE(http_post(port, "/api/find?type=Button", "{}").find("405") != std::string::npos);
+    server.stop();
+#endif
+}
+
 AURORA_TEST_CASE(tree_endpoint_by_window_returns_target_window_tree) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     // 主窗用共享树（Column[Text "hello"]）；window=1 → Column[Text "window-one"]，
     // window=2 → Checkbox 根；其它 id → 空 Node（路由层 404）。
@@ -603,7 +930,7 @@ AURORA_TEST_CASE(tree_endpoint_by_window_returns_target_window_tree) {
 
 AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     // 未注册 window_tree_getter 时，带 window 参数的请求必须回 400（明确告知需配置），
     // 而非静默回退主窗或 404。
@@ -617,7 +944,7 @@ AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
 
 AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -630,7 +957,9 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
     // 关键：值必须真的落到活控件上，而不只是回了个 200。
     Json props = Json::object();
     shared_tree()->child_nodes().at(0).widget().serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props.value("content", std::string{}), std::string{"patched"});
+    const auto *__p = props.at("content");
+    const Json v = __p != nullptr ? *__p : Json{std::string{}};
+    AURORA_TEST_CHECK_EQ(v, std::string{"patched"});
 
     // 非数组请求体必须被拒 —— 否则调用方无从知道补丁没生效。
     const std::string bad = http_post(server.port(), "/api/patch", R"({"path":"/0/content","value":"x"})");
@@ -638,6 +967,68 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
 
     // 复原共享树，避免污染同进程内的其它用例。
     static_cast<void>(http_post(server.port(), "/api/patch", R"([{"path":"/0/content","value":"hello"}])"));
+    server.stop();
+#endif
+}
+
+// 目标：触碰活动树的端点必须经 `main_poster` 换到主线程执行，不得在 accept worker 线程下树。
+// 回归的缺陷：真机拖拽 ReorderableList 时轮询 `/api/tree`，宿主在 0xC0000005 崩溃
+// （栈：`route_request → Inspector::tree_json_full → dump_tree_json_full`，无 marshal 帧）——
+// 帧内在增删节点，worker 线程读到已释放节点。用例靠「线程流水」判定：`root_getter` 记录的调用
+// 线程必须全等于排水线程，且排水线程就是用例主线程；修复前这些调用发生在 worker 线程，必红。
+AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_poster_thread) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#else
+    QueuedPoster poster;
+    getter_threads().clear();
+    InspectorServer server(recording_tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::uint16_t port = server.port();
+
+    // 客户端另起线程：主线程若不排水，服务端就永远等不到树读取落点，客户端只会超时返回。
+    std::vector<std::string> responses;
+    std::exception_ptr client_error;
+    std::thread client([&]() -> void {
+        try {
+            responses.push_back(http_get_timed(port, "/api/tree", 8000));
+            responses.push_back(http_get_timed(port, "/api/widget/0", 8000));
+            responses.push_back(http_get_timed(port, "/api/yaml", 8000));
+        } catch (...) {
+            client_error = std::current_exception();
+        }
+    });
+    // 三个端点各一次树访问 → 各一次 marshal。任一次排水超时即说明该端点没走投递器。
+    bool drained = true;
+    for (int i = 0; i < 3; ++i) {
+        drained = poster.drain_one(8000) && drained;
+    }
+    client.join();
+    server.stop();
+
+    AURORA_TEST_REQUIRE_TRUE(drained);
+    AURORA_TEST_REQUIRE_TRUE(client_error == nullptr);
+    AURORA_TEST_REQUIRE_EQ(responses.size(), 3U);
+    for (const auto &resp : responses) {
+        AURORA_TEST_CHECK_TRUE(resp.find("200") != std::string::npos);
+    }
+    AURORA_TEST_REQUIRE_EQ(getter_threads().size(), 3U);
+    for (const auto &id : getter_threads()) {
+        AURORA_TEST_CHECK_TRUE(id == std::this_thread::get_id());
+    }
+#endif
+}
+
+// 目标：无投递器（无事件循环）时树端点仍可同步服务——marshal 的回退分支不得变成硬依赖。
+AURORA_TEST_CASE(tree_routes_work_without_a_poster_inline) {
+#ifndef AURORA_BUILD_INSPECTOR_SERVER
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#else
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/tree").find("Column") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/widget/0").find("200") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/yaml").find("200") != std::string::npos);
     server.stop();
 #endif
 }

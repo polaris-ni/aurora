@@ -92,19 +92,19 @@ def report_ninja_log(path, top_n):
     ordered = sorted(edges, key=lambda e: e[1], reverse=True)
 
     print(f"[ninja] {path}")
-    print(f"  编译边数        : {len(edges)}")
-    print(f"  边耗时合计      : {total:.1f}s (≈编译 CPU 量)")
+    print(f"  compile edges    : {len(edges)}")
+    print(f"  edge time total  : {total:.1f}s (approx. compile CPU work)")
     p95 = sorted(durations)[int(len(durations) * 0.95) - 1 if len(durations) >= 20 else len(durations) - 1]
-    print(f"  p95 单边        : {p95:.2f}s   最慢单边: {ordered[0][1]:.2f}s")
-    print(f"  wall clock      : 需构建命令计时（.ninja_log 不含全局起止），用 time cmake --build 记录")
+    print(f"  p95 single edge  : {p95:.2f}s   slowest edge: {ordered[0][1]:.2f}s")
+    print(f"  wall clock       : .ninja_log has no global span; time the cmake --build run yourself")
 
     labels, counts = histogram(durations)
-    print("  耗时分布        :")
+    print("  duration spread  :")
     for label, count in zip(labels, counts):
         if count:
             print(f"    {label:>10s} : {count}")
 
-    print(f"  top-{top_n} 慢边:")
+    print(f"  top-{top_n} slowest edges:")
     for out, d in ordered[:top_n]:
         print(f"    {d:8.2f}s  {out}")
     return {
@@ -151,9 +151,9 @@ def report_ctest_log(path, top_n):
     total = sum(t for _, t in tests)
     ordered = sorted(tests, key=lambda e: e[1], reverse=True)
     print(f"[ctest] {path}")
-    print(f"  测试数          : {len(tests)}")
-    print(f"  串行耗时合计    : {total:.1f}s（并行后的关键路径 ≈ 最慢单测）")
-    print(f"  top-{top_n} 慢测:")
+    print(f"  test count       : {len(tests)}")
+    print(f"  serial time total: {total:.1f}s (critical path after parallelising ~= the slowest test)")
+    print(f"  top-{top_n} slowest tests:")
     for name, t in ordered[:top_n]:
         print(f"    {t:8.2f}s  {name}")
     return {
@@ -193,7 +193,7 @@ def main():
     if args.json and result:
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
-        print(f"\nJSON 基线已写入: {args.json}")
+        print(f"\nJSON baseline written: {args.json}")
     return 0
 
 

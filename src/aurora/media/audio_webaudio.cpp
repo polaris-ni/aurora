@@ -72,10 +72,13 @@ namespace aurora {
 // 环水位与拍频——延迟与抗饿之间的折中，取值理由见各常量注释与头文件第 4 条。
 namespace {
 
+#ifdef AURORA_ENABLE_AUDIO_WEBAUDIO
 constexpr double AURORA_WA_PUMP_INTERVAL_MS = 20.0;  // 排空定时器周期（浏览器主线程）
-constexpr int AURORA_WA_PROCESSOR_BLOCK = 2048;  // ScriptProcessorNode 块长（浏览器固定取值）
 constexpr int AURORA_WA_MAX_CATCH_UP_FRAMES = 4096;  // 单拍至多渲染这么多帧（UI 长任务后不过补）
 constexpr int AURORA_WA_RESUME_RETRY_TICKS = 50;  // 20ms × 50 ⇒ 自动播放闸门每秒至多重试一次
+#endif
+
+constexpr int AURORA_WA_PROCESSOR_BLOCK = 2048;  // ScriptProcessorNode 块长（浏览器固定取值）
 constexpr int AURORA_WA_GRAPH_CHANNELS = 2;  // 图侧声道契约恒定（多声道由浏览器上混，见 wa_open 注）
 
 [[maybe_unused]] auto wa_target_frames(int rate) -> int {
@@ -136,8 +139,8 @@ EM_JS(int, wa_open, (intptr_t out_rate), {
 });
 // clang-format on
 
-/// 建 ScriptProcessor 消费链：JS 回调按 head/tail 两个 int32 地址从 wasm 环取帧；
-/// 环空则补零并累加欠载计数。**不导出 wasm 函数**——这是本后端零链接标志的关键。
+// 建 ScriptProcessor 消费链：JS 回调按 head/tail 两个 int32 地址从 wasm 环取帧；
+// 环空则补零并累加欠载计数。**不导出 wasm 函数**——这是本后端零链接标志的关键。
 // EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
 // clang-format off
 EM_JS(int, wa_attach_processor,
@@ -375,6 +378,11 @@ auto WebAudioDeviceBackend::format() const -> AudioDeviceFormat {
 auto WebAudioDeviceBackend::start(RenderFn /*render_block*/) -> bool { return false; }
 
 auto WebAudioDeviceBackend::stop() -> void {}
+
+auto WebAudioDeviceBackend::pump(void * /*user_data*/) -> void {
+    // 桩构建：start() 恒 false，永不注册 emscripten_set_interval，本回调不会被调用；
+    // 仅补齐声明以满足 ODR（非内联静态成员须有定义，否则 LTO / whole-program 链接报未实现）。
+}
 
 auto WebAudioDeviceBackend::context_state() -> int {
     return -1;  // 无上下文（更无闸门可言）

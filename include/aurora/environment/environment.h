@@ -7,28 +7,30 @@
 
 namespace aurora {
 
-/**
- * @brief 环境：沿树向下传播的类型化键值表（参考 Flutter InheritedWidget /
- * SwiftUI Environment / Compose CompositionLocal）。
- *
- * 采用「父指针 + 覆盖映射」链式结构：对外继承链不可变（`with<T>()` 生成子环境只覆盖键 T，子级读取不改写父级）；根
- * `Environment` 提供显式原地写入 API（`set_local<T>()` / `set<T>()` 直接改写 `map_`）： 只覆盖键
- * T，读取时沿父链向上查找最近的定义。从而 Provider 注入的值对 其子树可见，且天然实现「最近祖先优先」。
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: no
- */
-// 豁免 bugprone-exception-escape：.clang-tidy 已记录本检查的系统性假告警面——任何转入 std::function
-// 的可调用对象一律判「不应抛出」（std::function::operator() 无 noexcept 规格，分析器无法证明其不抛），
-// 本类沿控件回调拷贝/转发链被误判到隐式特殊成员上。其拷贝仅可能因 map_/any/共享父链分配抛 bad_alloc，
-// 属进程级内存耗尽异常，由顶层统一兜底，非本类需就地吞掉的抛出面。
-// NOLINTNEXTLINE(bugprone-exception-escape)
+/// @brief 环境：沿树向下传播的类型化键值表（参考 Flutter InheritedWidget / SwiftUI Environment / Compose
+///        CompositionLocal）。
+///
+/// 采用「父指针 + 覆盖映射」链式结构：对外继承链不可变（`with<T>()` 生成子环境只覆盖键 T，子级读取不改写父级）；根
+/// `Environment` 提供显式原地写入 API（`set_local<T>()` / `set<T>()` 直接改写 `map_`）： 只覆盖键
+/// T，读取时沿父链向上查找最近的定义。从而 Provider 注入的值对 其子树可见，且天然实现「最近祖先优先」。
+///
+/// 豁免 bugprone-exception-escape：.clang-tidy 已记录本检查的系统性假告警面——任何转入 std::function
+/// 的可调用对象一律判「不应抛出」（std::function::operator() 无 noexcept 规格，分析器无法证明其不抛），
+/// 本类沿控件回调拷贝/转发链被误判到隐式特殊成员上。其拷贝仅可能因 map_/any/共享父链分配抛 bad_alloc，
+/// 属进程级内存耗尽异常，由顶层统一兜底，非本类需就地吞掉的抛出面。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
+/// NOLINTNEXTLINE(bugprone-exception-escape)
 class Environment {
   public:
     Environment() = default;
 
     /// @brief 生成子环境，覆盖类型 T 的值为 `value`。原环境不被修改。
+    /// @tparam T 被覆盖的值类型（以 typeid(T) 为键）。
+    /// @param value 待写入子环境的值（按值移入）。
+    /// @return 新的子环境：仅覆盖键 T，其余读取沿父链回查原环境。
     template <typename T>
     [[nodiscard]] auto with(T value) const -> Environment {
         Environment child;
@@ -43,6 +45,8 @@ class Environment {
     }
 
     /// @brief 读取类型 T 的环境值；不存在则返回 nullptr。
+    /// @tparam T 待读取的值类型（以 typeid(T) 为键）。
+    /// @return 指向环境链上最近定义的 T 值的内部指针（由环境持有）；无任何祖先定义 T 时为 nullptr。
     template <typename T>
     [[nodiscard]] auto get() const -> const T * {
         const auto it = map_.find(typeid(T));
@@ -56,6 +60,8 @@ class Environment {
     }
 
     /// @brief 在当前环境本地设置键 T（无父指针，供根 Provider 使用，避免悬空父）。
+    /// @tparam T 待写入的值类型（以 typeid(T) 为键）。
+    /// @param value 待写入的值（按值移入 `map_`）。
     template <typename T>
     auto set_local(T value) -> void {
         map_.emplace(typeid(T), std::any(std::move(value)));
@@ -63,6 +69,8 @@ class Environment {
 
     /// @brief 在当前环境本地设置/覆盖键 T（覆盖既有值，供根级每帧更新复用）。
     /// 仅改写 `map_`，保留 `parent_` 指针，地址恒定，子树持有的父指针不失效。
+    /// @tparam T 待写入的值类型（以 typeid(T) 为键）。
+    /// @param value 待写入的值（按值移入，替换同键旧值）。
     template <typename T>
     auto set(T value) -> void {
         map_[typeid(T)] = std::any(std::move(value));

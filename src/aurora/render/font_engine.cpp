@@ -914,7 +914,7 @@ auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f, 
         return 0;
     }
     // RTL：x≤0（视觉左缘之外）= 逻辑末尾——视觉最左即逻辑最后，caret 语义落逻辑尾边界；
-    // 与 hit_test_single_pass 的 x≤0 分支（L519-521）及 display_hit_test_char 语义一致。
+    // 与 `hit_test_single_pass` 的 x≤0 分支及 `display_hit_test_char` 语义一致。
     // （此前入口无条件返回 0，导致 RTL 段点击行左缘 caret 恒落逻辑首——验收发现。）
     if (x <= 0.0F) {
         return opts.direction == TextDirection::RTL ? total : 0;

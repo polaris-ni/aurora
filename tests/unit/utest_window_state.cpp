@@ -72,7 +72,7 @@ AURORA_TEST_CASE(state_and_mode_are_orthogonal_dimensions) {
     // 两维是不同类型（一个枚举放不下对方取值域）；同一窗口可同时「可见 + 最大化」，
     // 最小化则同时落在两维（Hidden + Minimized）——推导函数互不约束。
     static_assert(!std::is_same_v<WindowState, WindowMode>,
-                  "WindowState 与 WindowMode 必须保持独立枚举类型（正交维度）");
+                  "WindowState and WindowMode must stay independent enum types (orthogonal dimensions)");
     AURORA_TEST_CHECK_EQ(compute_window_state(false, true), WindowState::Visible);
     AURORA_TEST_CHECK_EQ(compute_window_mode(false, true, false), WindowMode::Maximized);
     AURORA_TEST_CHECK_EQ(compute_window_state(true, false), WindowState::Hidden);

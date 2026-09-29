@@ -67,7 +67,7 @@ AURORA_TEST_CASE(registry_add_assigns_ids_and_enumerates) {
     ShortcutRegistry reg;
     AURORA_TEST_CHECK_EQ(reg.count(), 0U);
 
-    const int id1 = reg.add(KeyCombo{ModifierKey::Control, KeyCode::O}, []() -> void {}, ShortcutScope::Global, "打开");
+    const int id1 = reg.add(KeyCombo{ModifierKey::Control, KeyCode::O}, []() -> void {}, ShortcutScope::Global, "Open");
     const int id2 = reg.add(KeyCombo{ModifierKey::Control, KeyCode::S}, []() -> void {});
     // ID 自 1 起单调递增。
     AURORA_TEST_CHECK_EQ(id1, 1);
@@ -77,7 +77,7 @@ AURORA_TEST_CASE(registry_add_assigns_ids_and_enumerates) {
     // bindings() 枚举全部绑定（含描述元数据）。
     const auto bindings = reg.bindings();
     AURORA_TEST_REQUIRE_EQ(bindings.size(), 2U);
-    AURORA_TEST_CHECK_EQ(bindings[0].description, std::string{"打开"});
+    AURORA_TEST_CHECK_EQ(bindings[0].description, std::string{"Open"});
     AURORA_TEST_CHECK_EQ(bindings[0].scope, ShortcutScope::Global);
     AURORA_TEST_CHECK_TRUE(bindings[0].enabled);
     AURORA_TEST_CHECK_EQ(bindings[1].combo.key, KeyCode::S);

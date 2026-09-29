@@ -5,7 +5,7 @@
 >
 > **片段约定**：本文所有片段统一使用 `au::` 前缀。复制任意单段时，请确保该别名（或 `using namespace aurora;`）已在所处编译单元声明，否则 `au::Xxx` 编译失败。
 >
-> API 契约见 `specification/` 八份子系统文档；架构见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；状态选择见 [`CONCEPTS.md`](CONCEPTS.md) §2；常见坑见本文 §26；运行时调试见本文 §27。
+> API 契约见 `specification/` 九份子系统文档；架构见 [`ARCHITECTURE.md`](ARCHITECTURE.md)；状态选择见 [`CONCEPTS.md`](CONCEPTS.md) §2；常见坑见本文 §26；运行时调试见本文 §27；JSON 读写见本文 §42。
 
 ---
 
@@ -91,6 +91,8 @@ au::Node row = au::Node{ au::Row(au::RowProps{ .children = {
 ```
 
 > 对齐语义：主轴对齐（`Center` / `SpaceBetween` 等）只有在父约束强制容器更大时才可见。若想让 `SpaceBetween` 生效，给父容器一个固定尺寸或 `Expand`（见 §9）。
+
+> 「固定尺寸 + 居中」要写 `Modifier{}.align(Alignment::Center).size(120.0F, 40.0F)`：链上**先压入者靠外**，Align 在 `size` 之外才把色块本身摆到父容器交叉轴中央；反过来写只定位色块内部的内容。Align 逐轴展开，Flex 主轴那轴（只是「剩余空间」）不展开，故居中不会挤走同列兄弟——详见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §7.1 与 §7.4。
 
 ---
 
@@ -949,7 +951,7 @@ python tools/check/check_gen_api_merge.py build         # 回归：损坏现有�
 
 ### 27.7 运行时 feature 宏查询
 
-编译期 feature 宏（后端 / 优化 / SIMD / 插桩 / 编解码）的取值已单点收口为运行时查询，**应用代码零 `#ifdef`**（需求 #14）：
+编译期 feature 宏（后端 / 优化 / SIMD / 插桩 / 编解码）的取值已单点收口为运行时查询，**应用代码零 `#ifdef`**（需求 SPEC.PLATFORM.ZERO-IFDEF.001）：
 
 ```cpp
 au::debug::FeatureFlags flags = au::debug::feature_flags();
@@ -1632,6 +1634,8 @@ field.on_changed([](const std::string &s) -> void { /* 只收到已上屏文本 
 
 `TextInput` / `RichTextEdit` 已内置：preedit 下划线 + 待转换选区高亮、组合光标落在候选插入点、preedit 参与宽度测量（组合中的中文会撑开输入框，不被裁切）、失焦自动取消未上屏的组合。**应用侧一行都不用写。**
 
+⚠️ 「零接线」的前提是事件已抵达控件：`Application`（`WindowHost::dispatch`）与 `run_demo` 两个内置载体都转发了 `TextCompositionEvent`，**自行手写 `set_event_handler` 分发的载体必须补上这一支**——只认 `MouseEvent` / `KeyEvent` / `TextInputEvent` 的派发链会把组合事件静默丢掉，外在表现与「输入法失效」无异（真机排查见 `manual-test/11-widget.md` TC-WIDGET-013）。
+
 ### 39.2 自定义文本控件：两个钩子
 
 ```cpp
@@ -1748,3 +1752,324 @@ auto sub = store.on_change([](const StorageChange &ch) { /* ch.op / ch.id */ });
 - **异步**：`async_put` / `async_get` / `async_list` 等经 worker 线程卸载，返回 `Task<T>`。
 
 ---
+
+## 41 命令行参数解析（cli）
+
+`au::cli` 是声明表驱动的 argv 解析器：唯一的输入是一棵 `CommandSpec`，解析产出强类型取值，`--help` / `usage` /
+`schema_json` 全部从同一份声明派生。零异常——一切失败经 `Result` + `cli-*` 错误码返回。
+
+```cpp
+#include <string>
+#include "aurora/aurora.h"
+
+namespace au = aurora;
+
+auto build_spec() -> const au::cli::CommandSpec & {
+    static const au::cli::CommandSpec ROOT = [] {
+        au::cli::CommandSpec root;
+        root.name = "gallery";
+        root.about = "Aurora gallery tool";
+        root.version = "1.0.0";  // 非空 -> 该层自动支持 --version
+        root.options = {
+            au::cli::OptionSchema{
+                .long_name = "width", .short_name = 'w', .kind = au::cli::ValueKind::Int,
+                .help = "Canvas width in px", .default_text = "800", .minimum = 1, .maximum = 8192,
+            },
+            au::cli::OptionSchema{
+                .long_name = "tint", .kind = au::cli::ValueKind::Color,
+                .help = "Overlay tint", .default_text = "#fff",
+            },
+            au::cli::OptionSchema{
+                .long_name = "dry-run", .kind = au::cli::ValueKind::Bool, .arity = au::cli::Arity::flag(),
+                .help = "Print only",
+            },
+        };
+        root.positionals = {
+            au::cli::PositionalSchema{
+                .name = "SCENE", .kind = au::cli::ValueKind::String,
+                .arity = au::cli::Arity::zero_or_more(), .help = "Scenes to render",
+            },
+        };
+        return root;
+    }();
+    return ROOT;
+}
+
+auto main(int argc, char **argv) -> int {
+    const au::cli::CommandSpec &root = build_spec();
+    if (const auto checked = au::cli::validate(root); !checked) {
+        AURORA_LOG_ERROR("gallery", "spec: ", checked.error().message);
+        return 1;  // 声明表自身的错误，先于任何 argv 解析
+    }
+    const auto parsed = au::cli::parse(root, argc, argv);  // 程序名取 argv[0] 的 basename
+    if (!parsed) {
+        std::string detail = parsed.error().message;  // 用法错误：回显 token + 命令名
+        if (!parsed.error().suggestion.empty()) {
+            detail += " — " + parsed.error().suggestion;  // 如 "Did you mean --width?"
+        }
+        AURORA_LOG_ERROR("gallery", detail);
+        return 2;  // 用法错误
+    }
+    const au::cli::Invocation &invocation = parsed.value();
+    if (invocation.shows_display()) {
+        AURORA_LOG_RAW("gallery", invocation.display_text);  // --help / --version / 自标通道已预渲染
+        return 0;
+    }
+    const au::cli::Arguments &args = invocation.arguments;
+    const auto width = args.get<int>("width");
+    if (!width) {
+        AURORA_LOG_ERROR("gallery", width.error().message);
+        return 1;
+    }
+    const std::string tint_text = args.values("tint").front().raw_text();  // 原文回显，默认值同样带原文
+    AURORA_LOG_RAW("gallery", "scenes=", std::to_string(args.positionals().size()),
+                   " width=", std::to_string(width.value()), " tint=", tint_text,
+                   " dry=", args.flag("dry-run") ? "1" : "0", "\n");
+    return 0;
+}
+```
+
+同一份声明直接取项目强类型，不必先取字符串再手工 parse：
+
+```cpp
+const auto margin = args.get<au::Length>("margin");      // "25%"  -> Length{Fraction, 0.25}
+const auto level  = args.get<au::LogLevel>("level");     // "wrn"  -> LogLevel::Warn
+const auto ms     = args.get<std::int64_t>("timeout");   // "2s"   -> 2000（Duration 以毫秒计）
+const auto tint   = args.get<au::Color>("tint");         // "#f00" -> Color
+if (tint) paint(tint.value());                           // 失败只可能是跨类读取，错误在 Result 上可见
+```
+
+取值处有三个易混出口，语义各不重叠：
+
+```cpp
+args.count("verbose");            // -vv -> 2；默认值不计
+args.explicitly_given("width");   // 区分「用户真写过」与「回落 default_text」
+args.values("tag");               // 可重复选项的全部值——此处勿用 get<T>()，多值即 cli-arity-violated
+args.rest();                      // `--` 之后的原始 token，未经任何转换
+```
+
+要点：
+- **生命周期**：`Invocation` / `Arguments` 以指针借用声明表，不拷贝 `CommandSpec`，故声明表必须活得更久（全局 /
+  `static` / 同作用域栈对象）。
+- **展示请求是一等结果**：`Invocation::view` 取 `EarlyView::Help` / `Version` / `Schema`，文本已在 `display_text`
+  预渲染，`shows_display()` 为真即打印后返回、不进业务。自己加一类出口只需给 `OptionSchema` 标 `early_view`
+  （须是 `Arity::flag()` 的 `Bool`），不必改库。
+- **`--help` 优先于报错**：必填项缺失时用户仍拿到说明书，不会被 `cli-missing-required` 顶回去。
+- **短名可让位**：内建 `-h` / `-V` 是惰性注入，本层把短名用作它途时内建自动降级为仅长名（无需改名避让），
+  `CommandSpec::builtins` 还能逐层关掉它们。
+- **语法边界可枚举**：`--name=v` / `-w80` / `-w 80` / `-vf` 集群 / `--` 终止符成立；**前缀缩写不支持**，未知形态一律
+  `cli-unknown-option`（`suggestion` 给 `Did you mean --width?`）。
+- **变长选项是贪心 span**（`--tag a b c` 吞到下一个 `-` 为止），所以位置参数要写在它前面，或放到 `--` 之后。
+- **退出码约定**属调用方：`0` 成功或说明书、`2` 用法错误、`1` 应用自身失败。
+
+完整载体（含子命令树、互斥、`--dump-schema`）见 `examples/demos/demo_cli.cpp`；契约见
+[`specification/09-cli.md`](specification/09-cli.md)。
+
+---
+
+## 42 JSON 值容器（`au::json`）
+
+> 头文件**不随伞头导出**，用前须显式 `#include "aurora/core/json.h"`。`widget/` 层收敛到本类型后，
+> 伞头用户将经 `widget/props_io.h` 传递获得；在此之前这行不能省。
+
+### 42.1 值容器读写（DOM）
+
+```cpp
+#include "aurora/core/json.h"
+namespace au = aurora;
+
+// ---- 解析：唯一出口是 Result，无抛出式重载、无 discarded 双模式 ----
+auto doc = au::json::parse(R"({"name":"aurora","count":3,"tags":["a","b"]})");
+if (!doc.ok()) {
+    // doc.error() 持 code / message / hint；语法失败已含 line / column / offset
+    return;
+}
+const au::json::Value &root = doc.value();
+
+// ---- 宽容读：缺键 / 类型不符 / 容器不符一律回退默认值（空安全，无解引用风险）----
+const auto name  = root.as_or<std::string_view>("name", "");
+const auto count = root.as_or<std::int64_t>("count", 0);
+const auto first = root.as_or_at<std::string_view>(0, "");   // 索引族用 as_or_at
+
+// ---- 指针读：需要区分「缺失」与「类型不符」时才用；at 不抛，缺失返回 nullptr ----
+if (const auto *tags = root.at("tags"); tags != nullptr && tags->is_array()) {
+    for (const auto &tag : *tags) {          // Array 迭代直接用 begin() / end()
+        (void)tag.as_or<std::string_view>("");
+    }
+}
+
+// ---- 严格读：必须成功、且需要结构化错误 ----
+if (auto n = root.get<std::int64_t>("count"); n.ok()) {
+    (void)n.value();
+}
+
+// ---- 构造与写入 ----
+au::json::Value res = au::json::Value::object();
+res.set("total", 3);                          // 算术值隐式入向构造（按类型精确落域）
+res.set("label", "ready");                    // 字符串隐式入向
+
+au::json::Value list = au::json::Value::array();
+list.reserve(2);                              // 批量构造先预留，避免反复扩容
+list.push_back("first");
+list.push_back("second");
+res.set("items", std::move(list));            // 移动入容器
+
+// ---- 对象迭代：entries() 产出 {key, value} 只读视图 ----
+for (auto entry : res.entries()) {
+    (void)entry.key;
+    (void)entry.value;
+}
+
+// ---- 序列化：返回 Result；dump_into 复用缓冲，适合响应帧热路径 ----
+const auto compact = au::json::dump(res);                            // 紧凑单行
+const auto pretty  = au::json::dump(res, {.indent = 2});             // 缩进
+
+std::string out;
+au::json::dump_into(res, out, {.indent = 2});                        // 追加式，避免每帧分配
+```
+
+要点：
+
+- **读写分离，读不变更 DOM**：读只有 `as_or` / `as_or_at` / `at` / `find` / `as<T>` / `get`，写只有
+  `set` / `push_back` / `erase` / `clear`。**没有 `operator[]`**——读缺失键绝不会静默插入 `null`。
+- **`at` 不抛异常**：键缺失、索引越界、容器类型不符一律返回 `nullptr`（`noexcept`），刻意区别于
+  STL `at` 的 `std::out_of_range`；`find(key)` / `contains(key)` 是 `at(key)` 的等价入口。
+- **优先用宽容族**：语义是「取不到就用默认」时一律 `as_or` / `as_or_at`，不要先判空再解引用。
+- **写操作使引用与指针失效**：`set` / `push_back` / `erase` / `clear` 之后，先前取得的 `Value&`
+  与指针都不可再用（容器由 `std::vector` 承载）；嵌套写入须重新取指针。
+- **视图别名内部存储**：`as<string_view>()` / `as_string()` / `as_raw_number()` 与 `Entry::key` 都
+  别名容器内部数据，仅在该 `Value` 存活且未被修改期间有效；对临时 `Value` 取视图立即悬垂。
+- **严格相等**：同 `Type` 才相等（`Int(1) != Double(1.0)`）；`RawNumber` 按文本比较。
+- **`RawNumber` 不参与数值转换**：超 int64/uint64 域、或与 double 最短往返不一致的字面量原样保真
+  存储，唯一读出口是 `as_raw_number()`。
+- **非有限值不可序列化**：`dump` 遇 `NaN` / `Inf` 返回失败（`json-value-not-serializable`），
+  不宽容转 `null`。
+
+### 42.2 JSON Pointer（路径寻址）
+
+键路径需要跨层寻址、或要按一条路径同时读写 / 删除时用 Pointer 族，不要手写逐层 `at` 链。
+
+```cpp
+#include "aurora/core/json.h"
+namespace au = aurora;
+
+auto parsed = au::json::parse(R"({"a":{"b":[10,20,30]},"c":{"d":1}})");
+au::json::Value root = std::move(parsed.value());  // 写路径需要非 const root
+
+// ---- 只读：命中返回指针，未命中 / 语法非法一律 nullptr（不抛异常）----
+if (const auto *v = au::json::find_pointer(root, "/a/b/1"); v != nullptr) {
+    (void)v->as_or<std::int64_t>(0);               // 20
+}
+(void)au::json::find_pointer(root, "");            // 空串 = 文档自身
+(void)au::json::find_pointer(root, "/a/missing");  // nullptr
+(void)au::json::find_pointer(root, "a/b");         // nullptr（非空且不以 '/' 开头 = 语法非法）
+
+// ---- 写路径：自动补齐缺失的中间容器；取指针后立即写，别跨写持有 ----
+auto slot = au::json::resolve_for_write(root, "/c/e/0");
+if (slot.ok()) {
+    *slot.value() = "created";                     // 若无 c.e 则已按段形态建为 Array
+}
+
+// ---- 路径删除：成功时 bool = 是否命中（未命中不是错误）----
+auto removed = au::json::erase_pointer(root, "/c/d");
+if (removed.ok() && removed.value()) { /* 命中并已删除 */ }
+```
+
+要点：
+
+- **段语法**：`~1` 还原为 `/`、`~0` 还原为 `~`；**空串指根**；**非空且不以 `/` 开头即语法非法**
+  （无相对路径宽容形式）。
+- **错误归属二分**：语法非法 → `json-parse-error`；段类型不符 / 对非容器取子项 / 索引越界 →
+  `json-type-mismatch`。只读族把两者统一压成 `nullptr`，需要区分时才用写路径族。
+- **写路径补齐**：中间遇 `null` 占位时按本段形态建容器（本段像下标或为 `-` → Array，否则 Object）；
+  已存在的成员不覆盖。末段落数组时 `-` 或「等于长度的索引」按追加处理；**两者都只能出现在末段**。
+- **根不可删**：`erase_pointer(root, "")` 恒失败。
+- **补齐也触发引用失效**：`resolve_for_write` 会调 `set` / `push_back`，返回的指针在后续任何写操作
+  后失效——「取指针 → 立即写」成对使用。
+
+### 42.3 SAX 流式解析（`parse_sax`）
+
+只关心文档中的少数片段、或文档大到不值得建整棵 DOM 时，用 SAX 出口：自己实现 `SaxHandler`，
+逐事件消费，命中目标后返回 `false` 提前收工。
+
+```cpp
+#include "aurora/core/json.h"
+namespace au = aurora;
+
+/// @brief 只取顶层 "id" 字段，其余事件一律忽略。
+class IdOnly : public au::json::SaxHandler {
+  public:
+    auto on_null() -> bool override { return true; }
+    auto on_bool(bool) -> bool override { return true; }
+    auto on_int(std::int64_t) -> bool override { return true; }
+    auto on_uint(std::uint64_t) -> bool override { return true; }
+    auto on_double(double) -> bool override { return true; }
+    auto on_raw_number(std::string_view) -> bool override { return true; }
+    auto on_string(std::string_view decoded) -> bool override {
+        if (pending_) {
+            id_.assign(decoded);      // 视图仅在本次回调期间有效，必须拷贝留存
+            return false;             // 提前终止：parse_sax 随即停止并返回「成功」
+        }
+        return true;
+    }
+    auto on_array_start() -> bool override { return true; }
+    auto on_array_end(std::size_t) -> bool override { return true; }
+    auto on_object_start() -> bool override { return true; }
+    auto on_object_key(std::string_view key) -> bool override {
+        pending_ = key == "id";
+        return true;
+    }
+    auto on_object_end(std::size_t) -> bool override { return true; }
+
+    [[nodiscard]] auto id() const -> const std::string & { return id_; }
+
+  private:
+    std::string id_;
+    bool pending_ = false;
+};
+
+IdOnly sink;
+const auto r = au::json::parse_sax(text, sink);   // 与 parse 同一引擎，失败口径逐字一致
+if (r.ok()) {
+    (void)sink.id();                              // 已拷贝，可安全使用
+}
+```
+
+要点：
+
+- **提前终止即成功**：回调返回 `false` 表示消费者主动停止，`parse_sax` 立即停止解析并返回**成功**
+  ——不是错误，不要按失败分支处理。
+- **视图只在回调期间有效**：`on_string` / `on_object_key` / `on_raw_number` 收到的 `string_view`
+  别名引擎内部复用缓冲，下一次回调即被覆写；**需要留存必须当场拷贝**。
+- **字符串事件已解码**：转义与 `\uXXXX`（含代理对）在派发前已还原成 UTF-8，不需要二次解码。
+- **数字按域分派**：`on_int` / `on_uint` / `on_double` 按三判别落域回调，超域或往返失真落
+  `on_raw_number`（载荷为原字面量文本）。
+- **闭合事件带计数**：`on_array_end(count)` / `on_object_end(count)` 的载荷是该层元素 / 成员个数。
+- **失败口径与 DOM 完全一致**：非法文档的 `Error`（code / message）与 `parse` 逐字相同；DOM 出口
+  本身就是「同一引擎 + 内置装配器」。
+- **`ParseOptions` 同样生效**：`max_depth` / `validate_utf8` 与 `parse` 共用。
+
+契约见 [`specification/01-core.md`](specification/01-core.md) §9。
+
+### 42.4 合规验收（改动 `core/json` 必跑）
+
+解析与序列化的正确性由**外部权威语料**背书，快照位于 `tests/fixtures/json_test_suite/`（MIT，
+来源与 commit 锚点见该目录 `README.md`）。任何触及 `core/json` 的改动都应当跑：
+
+```powershell
+ctest --test-dir build -R "^utest_json" --output-on-failure
+```
+
+该正则一次覆盖三个套件：`utest_json`（模块自产用例）、`utest_json_sax`（SAX 出口）、
+`utest_json_conformance`（外部语料合规验收）。
+
+合规套件分三层口径，理解它才知道失败时该改哪一边：
+
+| 语料 | 失败含义 | 处置 |
+|:---|:---|:---|
+| `y_` / `n_` | 实现偏离 RFC 8259 | 改实现——这是缺陷，不是期望值问题 |
+| `i_` | 实现策略变了（规范对此不作要求） | 先确认变更是否**有意**：有意则改测试内的处置表，否则改实现 |
+| `test_transform` | 往返丢信息或 `dump` 不幂等 | 改实现 |
+
+处置表与语料清单双向比对：同步语料时漏改表一定失败；反过来表也不会自动跟随实现漂移——这正是它
+要拦住的事。契约见 [`specification/01-core.md`](specification/01-core.md) §9.12。

@@ -9,12 +9,14 @@
 
 #include "aurora/debug/feature_flags.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_feature_flags {
 
 using aurora::debug::feature_flags;
 using aurora::debug::feature_flags_json;
 using aurora::debug::FeatureFlags;
+using aurora::testing::require_child;
 
 namespace {
 
@@ -88,8 +90,8 @@ AURORA_TEST_CASE(snapshot_matches_json_per_macro_key) {
     const Json j = f.to_json();
     AURORA_TEST_CHECK_TRUE(j.is_object());
     for (const FlagKeyPair &pair : flag_key_table()) {
-        AURORA_TEST_CHECK_MSG(j.contains(pair.key), std::string("to_json 缺少宏键: ") + pair.key);
-        AURORA_TEST_CHECK_EQ(j[pair.key], f.*(pair.field));
+        AURORA_TEST_CHECK_MSG(j.contains(pair.key), std::string("to_json missing macro key: ") + pair.key);
+        AURORA_TEST_CHECK_EQ(*require_child(j, pair.key), Json{f.*(pair.field)});
     }
 }
 
@@ -98,8 +100,9 @@ AURORA_TEST_CASE(json_contains_exactly_the_documented_macro_keys) {
     const Json j = feature_flags().to_json();
     AURORA_TEST_CHECK_EQ(j.size(), flag_key_table().size());
     // 全部值必须是布尔（工具直读依赖）。
-    for (auto it = j.begin(); it != j.end(); ++it) {
-        AURORA_TEST_CHECK_MSG(it.value().is_boolean(), "宏键 " + it.key() + " 的 JSON 值应为 boolean");
+    for (const auto &entry : j.entries()) {
+        AURORA_TEST_CHECK_MSG(entry.value.is_bool(),
+                              "macro key " + std::string(entry.key) + " must map to a JSON boolean");
     }
 }
 
@@ -107,7 +110,7 @@ AURORA_TEST_CASE(convenience_json_matches_to_json) {
     // feature_flags_json() 是 feature_flags().to_json() 的便捷封装，二者必须等价。
     const Json via_convenience = feature_flags_json();
     const Json via_direct = feature_flags().to_json();
-    AURORA_TEST_CHECK_EQ(via_convenience.dump(), via_direct.dump());
+    AURORA_TEST_CHECK_EQ(via_convenience, via_direct);
 }
 
 AURORA_TEST_CASE(snapshot_is_stable_across_calls) {

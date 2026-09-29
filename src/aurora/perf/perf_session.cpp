@@ -21,11 +21,11 @@ namespace {
     return std::strcmp(a, b) == 0;
 }
 
-/**
- * @brief 线性插值分位数。
- * @param sorted 升序样本（非空）
- * @param p 分位 [0,1]
- */
+///
+/// @brief 线性插值分位数。
+/// @param sorted 升序样本（非空）
+/// @param p 分位 [0,1]
+///
 [[nodiscard]] auto percentile(const std::vector<double> &sorted, double p) -> double {
     if (sorted.empty()) {
         return 0.0;
@@ -104,7 +104,7 @@ auto PerfReport::to_markdown() const -> std::string {
 
     out += internal::string_format("### PerfReport · %s\n\n", name.c_str());
 
-    out += "| 指标 | 值 |\n|------|----|\n";
+    out += "| Metric | Value |\n|------|----|\n";
 
     const auto row_f = [&](const char *k, double v, const char *unit) -> void {
         out += internal::string_format("| %s | %.3f %s |\n", k, v, unit);
@@ -127,7 +127,7 @@ auto PerfReport::to_markdown() const -> std::string {
     row_f("avg dirty area", avg_dirty_area_ratio() * 100.0, "%");
 
     // 计数器峰值：跨帧汇总读数
-    out += "\n| 计数器（峰值 / 累计） | 峰值 | 累计 |\n|------|------|------|\n";
+    out += "\n| Counter (peak / total) | Peak | Total |\n|------|------|------|\n";
     const auto row_c = [&](const char *k, unsigned long long mx, unsigned long long sum) -> void {
         out += internal::string_format("| %s | %llu | %llu |\n", k, mx, sum);
     };

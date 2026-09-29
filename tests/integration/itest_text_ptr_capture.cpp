@@ -44,6 +44,7 @@ constexpr float AURORA_W = 520.0F;
 constexpr float AURORA_H = 800.0F;
 
 auto make_left_aligned_text() -> std::shared_ptr<Text> {
+    // CJK-LITERAL: cjk-fixture - Han content keyed into hitbox scan and codepoint-count selection asserts
     return std::make_shared<Text>(
         TextProps{.content = LocalizedString{"默认14pt文本"}, .text_align = TextAlign::Left, .soft_wrap = true});
 }
@@ -101,6 +102,7 @@ AURORA_TEST_CASE(rtl_drag_select_reaches_leftmost_char) {
     paint_root(col, AURORA_W, AURORA_H);
 
     const auto boxes = scan_texts(col);
+    // CJK-LITERAL: cjk-fixture - hitbox lookup keyed by the Han display text
     const auto it = boxes.find("默认14pt文本");
     AURORA_TEST_REQUIRE_MSG(it != boxes.end(), "text hit box found by scanning");
     const Rect &r = it->second;
@@ -131,12 +133,14 @@ AURORA_TEST_CASE(rtl_drag_select_reaches_leftmost_char) {
 AURORA_TEST_CASE(release_outside_window_retains_selection) {
     // 2) 窗口外释放：拖选时光标移出根/窗口，释放事件仍须送达并按捕获路径结束选择；
     //    释放后的 Move 不得再改变选区（selecting_ 已结束）。
+    // CJK-LITERAL: cjk-fixture - Han content asserted via hitbox scan and post-release selection state
     auto a = std::make_shared<Text>(TextProps{.content = LocalizedString{"默认14pt文本"}, .soft_wrap = true});
     Column col{ColumnProps{.children = {Node{a}}}};
     layout_root(col, AURORA_W, AURORA_H);
     paint_root(col, AURORA_W, AURORA_H);
 
     const auto boxes = scan_texts(col);
+    // CJK-LITERAL: cjk-fixture - hitbox lookup keyed by the Han display text
     const auto it = boxes.find("默认14pt文本");
     AURORA_TEST_REQUIRE_MSG(it != boxes.end(), "text hit box found by scanning");
     const Rect &r = it->second;
@@ -167,6 +171,7 @@ AURORA_TEST_CASE(adjacent_soft_wrap_texts_do_not_overlap) {
     // 3) 相邻两 soft_wrap 文本不应重叠：默认 soft_wrap=true 时 Text 仅当确需换行才填满，
     //    短文本按内容宽度上报，兄弟控件可并排且各自可选中。
     auto a = make_left_aligned_text();
+    // CJK-LITERAL: cjk-fixture - second Han text keyed into the non-overlap hitbox assert
     auto b = std::make_shared<Text>(
         TextProps{.content = LocalizedString{"Text控件"}, .text_align = TextAlign::Left, .soft_wrap = true});
     Row row{RowProps{.children = {Node{a}, Node{b}}}};
@@ -174,6 +179,7 @@ AURORA_TEST_CASE(adjacent_soft_wrap_texts_do_not_overlap) {
     paint_root(row, AURORA_W, AURORA_H);
 
     const auto boxes = scan_texts(row);
+    // CJK-LITERAL: cjk-fixture - both Han display texts keyed into the non-overlap hitbox assert
     const auto it_a = boxes.find("默认14pt文本");
     const auto it_b = boxes.find("Text控件");
     AURORA_TEST_REQUIRE_MSG(it_a != boxes.end() && it_b != boxes.end(), "both Text widgets are hittable");
@@ -192,6 +198,7 @@ AURORA_TEST_CASE(static_dispatch_path_rtl_drag_reaches_leftmost_char) {
     paint_root(col, AURORA_W, AURORA_H);
 
     const auto boxes = scan_texts(col);
+    // CJK-LITERAL: cjk-fixture - hitbox lookup keyed by the Han display text
     const auto it = boxes.find("默认14pt文本");
     AURORA_TEST_REQUIRE_MSG(it != boxes.end(), "text hit box found by scanning");
     const Rect &r = it->second;

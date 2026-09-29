@@ -25,60 +25,70 @@
 #include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/widget.h"
 
+/// @brief Aurora 根命名空间：控件、渲染、状态与主题等全部公共 API。
 namespace aurora {
 
-/**
- * @brief 可拖拽重排列表（specification/04-widget.md §3.4）：全量实例化子项 + 内建垂直滚动 +
- *        拖拽换位（跟手 / 让位 / 落位动画）。
- *
- * 对标 Flutter `ReorderableListView`、Qt `QListView::InternalMove`。
- *
- * **数据契约（控件直接改写数据）**：构造注入 `State<std::vector<T>>` + `ItemBuilder`；松手落位后
- * 控件**自己**改写该 vector（`std::rotate` 语义）并 `set()` 触发重建，`on_reorder(old, new)` 回调
- * 供宿主持久化（在数据已改写之后触发）。这样「UI 动了数据没动」的错误不会发生。
- *
- * **与 `LazyList` 的分工**：本控件**不虚拟化**（全量实例化，适合 <500 项），换取可变行高与拖拽
- * 换位的直接几何；长列表请用 `LazyList`（虚拟化重排不做，见 `LAYOUT_PLAN`【裁决 15】）。
- *
- * 滚动位置可经 `set_restore_key()` 接入 `app::ScrollStorage`（与四个滚动控件同一契约）。
- *
- * **键盘替代路径（可访问性，specification/04-widget.md §3.4）**：指针拖拽不是唯一入口，本控件
- * 默认可用键盘完成同样的换位——获焦即把光标落在**首个可见项**（不改滚动位置），`↑`/`↓`
- * （及 `Home`/`End`）移动**光标**，`Space`/`Enter` 抓取 / 落位，`Esc` 取消并回到原位。两步式
- * 「先抓取后移动」与 ARIA 拖放网格的读屏操作习惯一致（Google Sheets / Gmail 的 `Alt+↑↓`
- * 换位同构），抓取期间光标项按抬升态绘制。每一步都经 `Widget::announce()` 向读屏播报位置与
- * 结果（「位置 3 / 共 8 项」等）。
- *
- * 方向键能到达控件内部，依赖 `Widget::wants_navigation_keys()`：派发器默认把方向键用作几何
- * 焦点导航，覆写该钩子后本控件先观察按键、未认领的按键仍回落焦点导航。整体开关是
- * `set_keyboard_reorder(false)`（关闭后方向键 / 空格完全交回默认语义）。
- *
- * 播报文案走 i18n：键为 `aurora.reorder.position` / `.grabbed` / `.dropped` /
- * `.dropped_in_place` / `.cancelled`（宿主可经 `default_string_table()` 登记译文模板，占位符
- * 为 `{0}` 起的位置数字）；未登记时回退英文字面量，不会播报空串。
- *
- * @tparam T 列表项类型（须可拷贝）。
- * @note Thread: main-thread only
- * @note Rebuildable: no（数据源为运行时 State，工厂注册仅收录自描述元数据）
- */
+/// @brief 可拖拽重排列表（specification/04-widget.md §3.4）：全量实例化子项 + 内建垂直滚动 +
+/// 拖拽换位（跟手 / 让位 / 落位动画）。
+///
+/// 对标 Flutter `ReorderableListView`、Qt `QListView::InternalMove`。
+///
+/// **数据契约（控件直接改写数据）**：构造注入 `State<std::vector<T>>` + `ItemBuilder`；松手落位后
+/// 控件**自己**改写该 vector（`std::rotate` 语义）并 `set()` 触发重建，`on_reorder(old, new)` 回调
+/// 供宿主持久化（在数据已改写之后触发）。这样「UI 动了数据没动」的错误不会发生。
+///
+/// **与 `LazyList` 的分工**：本控件**不虚拟化**（全量实例化，适合 <500 项），换取可变行高与拖拽
+/// 换位的直接几何；长列表请用 `LazyList`（虚拟化重排不做，见 `LAYOUT_PLAN`【裁决 15】）。
+///
+/// 滚动位置可经 `set_restore_key()` 接入 `app::ScrollStorage`（与四个滚动控件同一契约）。
+///
+/// **键盘替代路径（可访问性，specification/04-widget.md §3.4）**：指针拖拽不是唯一入口，本控件
+/// 默认可用键盘完成同样的换位——获焦即把光标落在**首个可见项**（不改滚动位置），`↑`/`↓`
+/// （及 `Home`/`End`）移动**光标**，`Space`/`Enter` 抓取 / 落位，`Esc` 取消并回到原位。两步式
+/// 「先抓取后移动」与 ARIA 拖放网格的读屏操作习惯一致（Google Sheets / Gmail 的 `Alt+↑↓`
+/// 换位同构），抓取期间光标项按抬升态绘制。每一步都经 `Widget::announce()` 向读屏播报位置与
+/// 结果（「位置 3 / 共 8 项」等）。
+///
+/// 方向键能到达控件内部，依赖 `Widget::wants_navigation_keys()`：派发器默认把方向键用作几何
+/// 焦点导航，覆写该钩子后本控件先观察按键、未认领的按键仍回落焦点导航。整体开关是
+/// `set_keyboard_reorder(false)`（关闭后方向键 / 空格完全交回默认语义）。
+///
+/// 播报文案走 i18n：键为 `aurora.reorder.position` / `.grabbed` / `.dropped` /
+/// `.dropped_in_place` / `.cancelled`（宿主可经 `default_string_table()` 登记译文模板，占位符
+/// 为 `{0}` 起的位置数字）；未登记时回退英文字面量，不会播报空串。
+///
+/// @tparam T 列表项类型（须可拷贝）。
+/// @note Thread: main-thread only
+/// @note Rebuildable: no（数据源为运行时 State，工厂注册仅收录自描述元数据）
+///
 template <typename T>
 class ReorderableList : public Container {
   public:
+    /// @brief 条目构造器签名：由数据项与其下标产出子控件节点。
     using ItemBuilder = std::function<Node(const T &, int)>;
 
+    /// @brief 默认构造：无数据源与构造器，接入 items/builder 前渲染为空列表。
     ReorderableList() = default;
 
+    /// @brief 注入数据源与条目构造器并立即实例化首批子项。
+    /// @param items 列表项数据源（共享 State，控件落位后直接改写其 vector）。
+    /// @param builder 条目构造器，逐项产出子控件节点。
+    /// @param gap 项间距（dp，负值降级为 0 并记录 degraded 诊断）。
     ReorderableList(std::shared_ptr<State<std::vector<T>>> items, ItemBuilder builder, float gap = 0.0F)
         : items_(std::move(items)), builder_(std::move(builder)),
-          gap_(gap < 0.0F ? (Diagnostics::degraded("layout", "ReorderableList gap 负值已降级为 0"), 0.0F) : gap) {
+          gap_(gap < 0.0F ? (Diagnostics::degraded("layout", "ReorderableList gap is negative, degraded to 0"), 0.0F)
+                          : gap) {
         // 落位动画与近边缘 auto-scroll 均由每帧 tick 驱动（同 Dismissible/ToastHost 模式）。
         needs_gesture_tick_ = true;
-        rebuild_if_needed();
+        rebuild_if_needed();  // 构造即按当前数据量实例化子项
     }
 
+    /// @brief 类型名。
+    /// @return 固定串 "ReorderableList"。
     [[nodiscard]] auto type_name() const -> const char * override { return "ReorderableList"; }
 
     /// @brief 运行时自描述（规格附录 B）。
+    /// @return 本控件的属性/事件/不变量描述表。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "ReorderableList",
@@ -88,7 +98,7 @@ class ReorderableList : public Container {
                      .type = "float",
                      .default_value = "0.0",
                      .required = false,
-                     .note = "项间距(dp)",
+                     .note = "Item spacing (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -96,7 +106,7 @@ class ReorderableList : public Container {
                      .type = "float",
                      .default_value = "0.0",
                      .required = false,
-                     .note = "当前滚动偏移(dp)",
+                     .note = "Current scroll offset (dp)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -104,7 +114,7 @@ class ReorderableList : public Container {
                      .type = "string",
                      .default_value = "",
                      .required = false,
-                     .note = "滚动位置保存键（空=不参与恢复）",
+                     .note = "Scroll position save key (empty = excluded from restore)",
                      .json_type = "string",
                      .enum_values = {},
                      .min_value = ""},
@@ -112,7 +122,8 @@ class ReorderableList : public Container {
                      .type = "bool",
                      .default_value = "false",
                      .required = false,
-                     .note = "是否限定右侧手柄区域起拖（false=整项可拖）",
+                     .note = "Restrict drag start to the handle area on the right "
+                             "(false = the whole item is draggable)",
                      .json_type = "boolean",
                      .enum_values = {},
                      .min_value = ""},
@@ -120,7 +131,7 @@ class ReorderableList : public Container {
                      .type = "float",
                      .default_value = "48.0",
                      .required = false,
-                     .note = "拖拽近边缘自动滚动的触发带高(dp)",
+                     .note = "Trigger band height (dp) for auto-scroll near the edges while dragging",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -128,7 +139,8 @@ class ReorderableList : public Container {
                      .type = "bool",
                      .default_value = "true",
                      .required = false,
-                     .note = "键盘重排替代路径开关（方向键移光标 + 空格抓取/落位 + Esc 取消）",
+                     .note = "Keyboard reorder fallback toggle "
+                             "(arrow keys move the cursor, space grabs/drops, Esc cancels)",
                      .json_type = "boolean",
                      .enum_values = {},
                      .min_value = ""},
@@ -140,8 +152,12 @@ class ReorderableList : public Container {
                          "au::Node{au::Text(s)}; }, 8.0F}"},
         };
     }
+    /// @brief 实例侧自描述：直接转发静态描述表。
+    /// @return 本控件的属性/事件/不变量描述表。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 登记数据源信号：仅 `items_` 存在时暴露其值信号。
+    /// @param out 信号视图累加容器。
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
         if (items_) {
             out.push_back(static_cast<SignalViewBase *>(items_.get()));
@@ -149,48 +165,61 @@ class ReorderableList : public Container {
     }
 
     /// @brief 运行时态不可序列化：与 `Repeater` 同一处理（数据源是 `State`，条目由宿主回填）。
+    /// @param props 待写入的 JSON 属性对象（在基类结果上追加几何与开关字段）。
     auto serialize_props(Json &props) const -> void override {
         Container::serialize_props(props);
-        props["gap"] = gap_;
-        props["scroll_offset"] = offset_;
-        props["restore_key"] = restore_key_;
-        props["drag_handle"] = drag_handle_;
-        props["auto_scroll_threshold"] = auto_scroll_threshold_;
-        props["keyboard_reorder"] = keyboard_reorder_;
-        props["note"] = "ReorderableList items are runtime-state driven, not serialized";
+        props.set("gap", gap_);
+        props.set("scroll_offset", offset_);
+        props.set("restore_key", restore_key_);
+        props.set("drag_handle", Json{drag_handle_});
+        props.set("auto_scroll_threshold", auto_scroll_threshold_);
+        props.set("keyboard_reorder", Json{keyboard_reorder_});
+        props.set("note", "ReorderableList items are runtime-state driven, not serialized");
     }
 
     // ---- 数据 ----
 
     /// @brief 项数（= 已实例化子项数，二者同源）。
+    /// @return 当前子项数量。
     [[nodiscard]] auto item_count() const -> std::size_t { return children_.size(); }
 
     /// @brief 数据快照副本（观测 / 测试用；热路径请走 `item_count()`）。
+    /// @return 数据源当前 vector 的副本；无数据源时为空。
     [[nodiscard]] auto data() const -> std::vector<T> { return items_ ? items_->get() : std::vector<T>{}; }
 
     /// @brief 当前数据源（可为空）。
+    /// @return 指向 `State<std::vector<T>>` 的共享指针引用。
     [[nodiscard]] auto items() const -> const std::shared_ptr<State<std::vector<T>>> & { return items_; }
 
     /// @brief 换数据源（标脏重建）。
+    /// @param items 新的列表项数据源。
+    /// @return 自身引用（链式）。
     auto set_items(std::shared_ptr<State<std::vector<T>>> items) -> ReorderableList & {
         items_ = std::move(items);
-        invalidate();
+        invalidate();  // 数据源更换后强制下次布局全量重建
         return *this;
     }
 
     /// @brief 换条目构造器（标脏重建）。
+    /// @param builder 新的条目构造器。
+    /// @return 自身引用（链式）。
     auto set_item_builder(ItemBuilder builder) -> ReorderableList & {
         builder_ = std::move(builder);
-        invalidate();
+        invalidate();  // 构造器更换后强制下次布局全量重建
         return *this;
     }
 
     /// @brief 项间距（dp，链式）。
+    /// @param gap 目标间距，负值钳为 0。
+    /// @return 自身引用（链式）。
     auto set_gap(float gap) -> ReorderableList & {
         gap_ = gap < 0.0F ? 0.0F : gap;
-        mark_needs_layout();
+        mark_needs_layout();  // 间距影响几何，标脏待重排
         return *this;
     }
+
+    /// @brief 项间距（dp）。
+    /// @return 当前生效的 gap 值。
     [[nodiscard]] auto gap() const -> float { return gap_; }
 
     /// @brief 强制下次布局重建全部子项（数据**同长度**但内容 / 顺序变化时使用；长度变化自动检测）。
@@ -200,6 +229,8 @@ class ReorderableList : public Container {
     }
 
     /// @brief 重排回调 `(old_index, new_index)`：在数据**已改写之后**触发（供宿主持久化）。
+    /// @param cb 回调对象，参数为换位前后的下标。
+    /// @return 自身引用（链式）。
     auto set_on_reorder(std::function<void(int, int)> cb) -> ReorderableList & {
         on_reorder_ = std::move(cb);
         return *this;
@@ -209,6 +240,8 @@ class ReorderableList : public Container {
     ///        直接改写数据源并重建（`std::rotate` 语义，`to == from` 即无变化）。
     ///
     /// 与拖拽共用同一插入位语义：`drop_slot()` / `slot_for_center()` 的返回值可直接传入。
+    /// @param from 被移动项的当前下标。
+    /// @param to 落位后的最终下标（0..count-1，越界钳制）。
     /// @return 数据是否实际变化。
     auto reorder(int from, int to) -> bool {
         if (!items_) {
@@ -272,9 +305,11 @@ class ReorderableList : public Container {
     // ---- 滚动 ----
 
     /// @brief 当前滚动偏移（dp，向下为正）。
+    /// @return 最近一次生效的 offset_ 值。
     [[nodiscard]] auto scroll_offset() const -> float { return offset_; }
 
     /// @brief 设置滚动偏移（夹取到内容范围；变化时标脏并按 `restore_key` 写回）。
+    /// @param offset 目标滚动偏移（dp），越界钳制。
     /// @return 偏移是否实际变化。
     auto set_scroll_offset(float offset) -> bool {
         const float clamped = std::clamp(offset, 0.0F, max_scroll_offset());
@@ -283,25 +318,33 @@ class ReorderableList : public Container {
         }
         offset_ = clamped;
         scroll_restored_ = true;  // 外部程序化设置 / 用户滚动：视为已就位，不再被键恢复覆盖
-        write_back_offset();
-        mark_needs_paint();
+        write_back_offset();  // 按 restore_key 把新偏移写回 ScrollStorage
+        mark_needs_paint();  // 偏移变化需要重绘
         return true;
     }
 
     /// @brief 内容总高（y 表末项底边）。
+    /// @return 全部子项累计高度（dp）。
     [[nodiscard]] auto content_height() const -> float { return content_h_; }
 
     /// @brief 最大滚动偏移（内容高 - 视口高，不小于 0）。
+    /// @return 可滚动的上限偏移（dp）。
     [[nodiscard]] auto max_scroll_offset() const -> float { return std::max(0.0F, content_h_ - viewport_h_); }
 
     /// @brief 滚动位置保存键（空 = 不参与恢复）。
+    /// @return 当前 restore_key 引用。
     [[nodiscard]] auto restore_key() const -> const std::string & { return restore_key_; }
+
+    /// @brief 设置滚动位置保存键（接入 app::ScrollStorage）。
+    /// @param key 保存键，空串表示不参与恢复。
+    /// @return 自身引用（链式）。
     auto set_restore_key(std::string key) -> ReorderableList & {
         restore_key_ = std::move(key);
         return *this;
     }
 
     /// @brief 滚轮滚动。
+    /// @param e 滚轮事件（写入 is_handled / remaining_y 供派发器协调）。
     auto on_scroll(ScrollEvent &e) -> void override {
         e.is_handled = true;
         // 拖拽期间吞掉滚轮（本控件内建滚动只由 auto-scroll 驱动，避免跟手位移与滚动叠加）。
@@ -322,22 +365,28 @@ class ReorderableList : public Container {
     }
 
     /// @brief 真实滚动控件：滚轮派发时本控件是可滚动目标（最深优先）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
     // ---- 几何观测（验收锚点）----
 
     /// @brief 第 `index` 项的**内容坐标**顶端（未叠加滚动偏移）；越界返回 0。
+    /// @param index 目标项下标。
+    /// @return 该项内容坐标顶端（dp），越界为 0。
     [[nodiscard]] auto item_top(int index) const -> float {
         return (index >= 0 && static_cast<std::size_t>(index) < tops_.size()) ? tops_[static_cast<std::size_t>(index)]
                                                                               : 0.0F;
     }
     /// @brief 第 `index` 项的实测高度；越界返回 0。
+    /// @param index 目标项下标。
+    /// @return 该项高度（dp），越界为 0。
     [[nodiscard]] auto item_height(int index) const -> float {
         return (index >= 0 && static_cast<std::size_t>(index) < heights_.size())
                    ? heights_[static_cast<std::size_t>(index)]
                    : 0.0F;
     }
     /// @brief 当前视口可见项范围 `[first, last)`（不含预取缓冲；本控件不虚拟化，全部项均已实例化）。
+    /// @return 可见区间 [first, last)，空内容为 {0, 0}。
     [[nodiscard]] auto visible_range() const -> std::pair<int, int> {
         const int n = static_cast<int>(children_.size());
         if (n == 0 || viewport_h_ <= 0.0F) {
@@ -348,6 +397,8 @@ class ReorderableList : public Container {
         return {first, last};
     }
     /// @brief 内容坐标 `y` 落在第几项（间隙 / 越界取最近项；空表返回 -1）。
+    /// @param y 内容坐标纵坐标（dp）。
+    /// @return 命中项下标，空表为 -1。
     [[nodiscard]] auto index_at_content_y(float y) const -> int {
         if (tops_.empty()) {
             return -1;
@@ -358,42 +409,63 @@ class ReorderableList : public Container {
     }
 
     /// @brief 视口局部 y（相对本控件原点）落在第几项；越界返回 -1（间隙 / 已滚出）。
+    /// @param local_y 视口局部纵坐标（dp）。
+    /// @return 命中项下标，越界为 -1。
     [[nodiscard]] auto index_at_viewport_y(float local_y) const -> int { return index_at_content_y(local_y + offset_); }
 
     // ---- 拖拽（C2 / C3）----
 
     /// @brief 是否正在跟手拖动。
+    /// @return 当前相位是否为 Dragging。
     [[nodiscard]] auto is_dragging() const -> bool { return drag_state_ == DragState::Dragging; }
     /// @brief 是否正在落位动画（松手后到数据提交前）。
+    /// @return 当前相位是否为 Settling。
     [[nodiscard]] auto is_settling() const -> bool { return drag_state_ == DragState::Settling; }
     /// @brief 被拖项 index（-1 = 无）。
+    /// @return 当前被拖项下标。
     [[nodiscard]] auto drag_index() const -> int { return drag_index_; }
     /// @brief 目标插入位（0..count-1；-1 = 无拖拽）。语义同 `reorder` 的 `to`。
+    /// @return 当前落位槽 index。
     [[nodiscard]] auto drop_slot() const -> int { return drop_slot_; }
     /// @brief 被拖项当前跟手位移（内容坐标 dp；落位动画期间为动画值）。测试观测点。
+    /// @return 跟手位移量。
     [[nodiscard]] auto drag_follow() const -> float { return drag_follow_; }
 
     /// @brief 是否限定「右侧手柄区域」起拖（false = 整项可拖）。
+    /// @param handle_only 是否启用手柄限定。
+    /// @return 自身引用（链式）。
     auto set_drag_handle(bool handle_only) -> ReorderableList & {
         drag_handle_ = handle_only;
         return *this;
     }
+
+    /// @brief 当前是否限定手柄区域起拖。
+    /// @return 手柄限定开关值。
     [[nodiscard]] auto drag_handle() const -> bool { return drag_handle_; }
 
     /// @brief 起拖识别阈值（dp；默认 8，测试用注入）。
+    /// @param slop_dp 起拖识别阈值（dp）。
+    /// @return 自身引用（链式）。
     auto set_drag_slop(double slop_dp) -> ReorderableList & {
         drag_.slop = slop_dp;
         return *this;
     }
 
     /// @brief 拖拽近边缘自动滚动的触发带高（dp，0 = 关闭）。
+    /// @param px 触发带高度（dp），负值钳为 0。
+    /// @return 自身引用（链式）。
     auto set_auto_scroll_threshold(float px) -> ReorderableList & {
         auto_scroll_threshold_ = px < 0.0F ? 0.0F : px;
         return *this;
     }
+
+    /// @brief 近边缘自动滚动触发带高（dp）。
+    /// @return 当前阈值，0 表示关闭。
     [[nodiscard]] auto auto_scroll_threshold() const -> float { return auto_scroll_threshold_; }
 
     /// @brief 落位动画的弹簧参数（默认 `SpringDescription{}`）。
+    /// @param spring 新的弹簧参数。
+    /// @return 自身引用（链式）。
     auto set_spring(SpringDescription spring) -> ReorderableList & {
         spring_ = spring;
         return *this;
@@ -401,15 +473,19 @@ class ReorderableList : public Container {
 
     /// @brief 键盘重排开启时认领方向键：派发器先把 ↑/↓/←/→ 投递给 `on_key_event`，
     ///        本控件未认领的按键仍回落几何焦点导航（见 `Widget::wants_navigation_keys()`）。
+    /// @return 是否认领方向键（= keyboard_reorder_）。
     [[nodiscard]] auto wants_navigation_keys() const -> bool override { return keyboard_reorder_; }
 
     /// @brief 键盘重排开启时认领 Space / Enter（抓取 / 落位）；未认领则回落 `activate()`。
+    /// @return 是否认领激活键（= keyboard_reorder_）。
     [[nodiscard]] auto wants_activation_keys() const -> bool override { return keyboard_reorder_; }
 
     // ---- 键盘重排（可访问性替代路径）----
 
     /// @brief 键盘重排路径总开关（默认开启）。关闭后方向键 / 空格 / Enter 交回派发器默认语义
     ///        （几何焦点导航与 `activate()`），光标与抓取态一并清除。
+    /// @param enabled 是否启用键盘重排路径。
+    /// @return 自身引用（链式）。
     auto set_keyboard_reorder(bool enabled) -> ReorderableList & {
         keyboard_reorder_ = enabled;
         if (!enabled) {
@@ -420,17 +496,24 @@ class ReorderableList : public Container {
         }
         return *this;
     }
+
+    /// @brief 键盘重排路径是否启用。
+    /// @return 当前开关值（默认 true）。
     [[nodiscard]] auto keyboard_reorder() const -> bool { return keyboard_reorder_; }
 
     /// @brief 键盘光标所在项 index（-1 = 尚未定位；首次按方向键即落到首 / 末项）。
+    /// @return 当前光标项下标。
     [[nodiscard]] auto keyboard_index() const -> int { return keyboard_index_; }
     /// @brief 光标项是否处于「已抓取、未落位」态。
+    /// @return 是否处于键盘抓取态。
     [[nodiscard]] auto is_keyboard_grabbed() const -> bool { return keyboard_grabbed_; }
     /// @brief 抓取时的原始 index（-1 = 未抓取）。取消抓取即回到该位。
+    /// @return 抓取前原始下标。
     [[nodiscard]] auto keyboard_grab_index() const -> int { return keyboard_grab_from_; }
 
     /// @brief 程序化移动键盘光标到第 `index` 项（夹取到 `[0, count-1)`，滚入视口并播报位置）。
     ///        抓取态下即等价「把被拾起项挪到目标位」，提交仍由 `drop_keyboard_item()` 完成。
+    /// @param index 目标光标下标（越界钳制）。
     /// @return 光标是否实际变化。
     auto set_keyboard_index(int index) -> bool {
         const int n = static_cast<int>(children_.size());
@@ -520,6 +603,7 @@ class ReorderableList : public Container {
     /// @param from_index   被拖项 index
     /// @param center_y     被拖项中心的内容坐标 y
     /// @param current_slot 当前插入位（< 0 = 从 `from_index` 起算）
+    /// @return 目标插入位（0..count-1）。
     [[nodiscard]] auto slot_for_center(int from_index, float center_y, int current_slot = -1) const -> int {
         const CompactGeometry g = build_compact_geometry(from_index);
         const int start = current_slot >= 0 ? current_slot : std::min(from_index, static_cast<int>(g.mids.size()));
@@ -527,6 +611,8 @@ class ReorderableList : public Container {
     }
 
     /// @brief 插入位 `slot` 对应的目标顶端（内容坐标）。测试 / 落位动画共用。
+    /// @param slot 目标插入位。
+    /// @return 该插入位对应的内容坐标顶端（dp）。
     [[nodiscard]] auto target_top_for_slot(int slot) const -> float {
         const int from = drag_index_ >= 0 ? drag_index_ : 0;
         const CompactGeometry g = build_compact_geometry(from);
@@ -534,7 +620,8 @@ class ReorderableList : public Container {
         return s < g.tops.size() ? g.tops[s] : g.tail_top;
     }
 
-    /// @brief 自描述中登记的属性表（供测试 / Inspector 读取）。
+    /// @brief 遍历子项控件（可访问性 / 调试用；顺序即数据序）。
+    /// @param fn 对每个子项控件调用一次的回调。
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
         for (const Node &child : children_) {
             fn(child.widget());
@@ -542,15 +629,17 @@ class ReorderableList : public Container {
     }
 
     /// @brief 本控件自绘滚动 + 拖拽位移（每帧可变），禁自身 DL 缓存（同 Scroll）。
+    /// @return 恒为 false。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return false; }
 
     /// @brief `on_layout` 依赖运行时数据（State 驱动重建）与拖拽落位，非纯函数 ⇒ 禁布局缓存。
+    /// @return 恒为 false。
     [[nodiscard]] auto can_cache_layout() const -> bool override { return false; }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        rebuild_if_needed();
-        Size self = c.max;
+        rebuild_if_needed();  // 布局前按当前数据量补实例化
+        Size self = c.max;  // 默认吃满最大约束，有限性待检
         if (!c.max.is_finite()) {
             self = Size{.width = 320.0F, .height = 480.0F};
         }
@@ -559,11 +648,11 @@ class ReorderableList : public Container {
 
         // 逐项测量并建 y 累计表（可变行高）：表是换位几何 / 命中 / 可见范围的唯一输入。
         const std::size_t n = children_.size();
-        tops_.assign(n, 0.0F);
-        heights_.assign(n, 0.0F);
+        tops_.assign(n, 0.0F);  // 内容坐标 y 累计表复位
+        heights_.assign(n, 0.0F);  // 实测行高表复位
         const Constraints item_c{.min = Size{.width = self.width, .height = 0.0F},
                                  .max = Size{.width = self.width, .height = Size::infinity().height}};
-        float y = 0.0F;
+        float y = 0.0F;  // 内容坐标游标（逐项累加高度与间距）
         for (std::size_t i = 0; i < n; ++i) {
             Node &child = children_[i];
             child.widget().set_layout_parent(this);
@@ -580,7 +669,7 @@ class ReorderableList : public Container {
         }
         content_h_ = y;
 
-        // 滚动位置恢复（首次可滚动布局时生效；须在夹取之前，使恢复在本帧即生效）。
+        // 滚动位置恢复（首次可滚动布局时生效）；须排在夹取之前，使恢复在本帧即生效。
         maybe_restore_scroll();
         // 内容高变化后偏移可能越界：夹取并重绘（不标布局脏，避免与本次布局互相触发）。
         const float clamped = std::clamp(offset_, 0.0F, max_scroll_offset());
@@ -591,6 +680,10 @@ class ReorderableList : public Container {
         return c.constrain(self);
     }
 
+    /// @brief 绘制全部子项：普通项在前，键盘抬升项与拖拽项最后绘制（视觉顶层），另叠加光标框。
+    /// @param p 绘制器。
+    /// @param bounds 本控件视口全局矩形。
+    /// @param ctx 构建上下文（主题 / 信号采集）。
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // 裁剪到视口：子项在内容坐标下的局部 y 可能为负或越界，软件 Painter 直写内存缓冲，
         // 溢出坐标会越界访问（同 LazyList / Scroll 的 push_clip 约定）。
@@ -613,12 +706,21 @@ class ReorderableList : public Container {
         p.pop_clip();
     }
 
-    // 滚轮命中：整视口优先返回自身（同 LazyList——若子项优先，落在 Text 上的滚轮会被叶子吞掉，
-    // 列表永不滚动）。指针事件仍走 on_hit_test_chain（保留子项点击命中与拖拽起拖）。
+    /// @brief 滚轮命中：整视口优先返回自身（同 LazyList——若子项优先，落在 Text 上的滚轮会被叶子吞掉，
+    ///        列表永不滚动）。指针事件仍走 `on_hit_test_chain`（保留子项点击命中与拖拽起拖）。
+    /// @param local 命中点（本控件局部坐标）。
+    /// @param bounds 本控件全局矩形。
+    /// @return 视口内命中时返回自身，否则 nullptr。
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override {
         return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
     }
 
+    /// @brief 指针命中链：拖拽中命中被拖项时止于本控件（裁决 18），其余按绘制逆序下降给子项；
+    ///        手柄限定模式下手柄带以外不响应。
+    /// @param local 命中点（本控件局部坐标）。
+    /// @param bounds 本控件全局矩形。
+    /// @param ctx 构建上下文。
+    /// @return 命中链（最深优先）；无命中为空表。
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
         // 手柄带由列表**自留**（不下降给子项）：条目自带 Clickable/Button 时会消费 Press，
@@ -652,6 +754,8 @@ class ReorderableList : public Container {
         return {};
     }
 
+    /// @brief 每帧驱动手势：先走容器修饰链，再推进本控件的跟手 / 让位 / 落位动画与自动滚动。
+    /// @param now 当前时间戳（steady_clock）。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Container::tick_gestures(now);  // 修饰链 + 子项 tick
         on_tick(now);
@@ -663,6 +767,7 @@ class ReorderableList : public Container {
     /// 与基类默认实现的关键差别：**未认领的按键不置 `is_handled`**，以便派发器把方向键回落给
     /// 几何焦点导航、把 Enter/Space 回落给 `activate()`、把「未抓取时的 Esc」留给页面级返回。
     /// 指针拖拽 / 落位动画期间整条键盘路径让路（两套换位通道不并存，避免数据被双写）。
+    /// @param e 键盘事件（认领时置 is_handled）。
     auto on_key_event(KeyEvent &e) -> void override {
         if (!keyboard_reorder_ || e.action != KeyAction::Down || children_.empty() || drag_state_ != DragState::Idle) {
             return;
@@ -709,6 +814,7 @@ class ReorderableList : public Container {
     ///
     /// 故意不落到 index 0：获焦不是滚动请求。若在此 `ensure_index_visible(0)`，一个已由
     /// `restore_key` 恢复到中段的列表会在获焦瞬间被拽回顶部（`itest_reorder` 曾以此抓到回归）。
+    /// @param focused 是否刚获得焦点（false = 失焦）。
     auto on_focus_change(bool focused) -> void override {
         Container::on_focus_change(focused);
         if (!focused) {
@@ -724,6 +830,8 @@ class ReorderableList : public Container {
         announce_position();
     }
 
+    /// @brief 指针事件入口：先驱动本控件拖拽状态机，拖拽 / 落位期间消费事件，否则交回容器修饰链。
+    /// @param e 鼠标事件。
     auto on_pointer_event(MouseEvent &e) -> void override {
         handle_pointer(e);
         // 拖拽 / 落位中消费事件（父级与子项都不再响应点击）。
@@ -734,6 +842,8 @@ class ReorderableList : public Container {
         }
     }
 
+    /// @brief 触摸事件入口：原始触点只走容器修饰链；拖拽由派发器按每个触点合成的 MouseEvent 驱动。
+    /// @param e 触摸事件。
     auto on_pointer_event(TouchEvent &e) -> void override {
         // 原始触点只走修饰链：拖拽由派发器按每个触点**合成的 MouseEvent** 驱动（与
         // Draggable / LongPress 的既有语义一致）。若在此再喂同一个识别器，两条通道会互相
@@ -749,6 +859,9 @@ class ReorderableList : public Container {
     // ---- 绘制辅助 ----
 
     /// @brief 第 `index` 项在本控件局部坐标系下的矩形（含滚动偏移与让位 / 跟手位移）。
+    /// @param bounds 本控件全局矩形（取宽 / 原点用）。
+    /// @param index 项下标。
+    /// @return 该项的局部矩形（y 已叠加滚动与位移）。
     [[nodiscard]] auto item_rect(const Rect &bounds, int index) const -> Rect {
         const auto i = static_cast<std::size_t>(index);
         const float top = tops_[i] - offset_ + shuffle_offset(index) + drag_follow_offset(index);
@@ -756,6 +869,11 @@ class ReorderableList : public Container {
                     .size = Size{.width = bounds.size.width, .height = heights_[i]}};
     }
 
+    /// @brief 绘制单项：视口外整项跳过，可见项按局部矩形平移出全局矩形后交子控件自绘。
+    /// @param p 绘制器。
+    /// @param bounds 本控件全局矩形。
+    /// @param ctx 构建上下文。
+    /// @param index 项下标。
     auto paint_item(Painter &p, const Rect &bounds, const BuildContext &ctx, int index) -> void {
         const Rect local = item_rect(bounds, index);
         if (local.origin.y + local.size.height <= 0.0F || local.origin.y >= bounds.size.height) {
@@ -766,6 +884,10 @@ class ReorderableList : public Container {
     }
 
     /// @brief 被拖项：抬升（自绘阴影）+ 跟手位移绘制在顶层（裁决 16）。
+    /// @param p 绘制器。
+    /// @param bounds 本控件全局矩形。
+    /// @param ctx 构建上下文。
+    /// @param index 被拖项下标。
     auto paint_dragged_item(Painter &p, const Rect &bounds, const BuildContext &ctx, int index) -> void {
         const Rect local = item_rect(bounds, index);
         const Rect global{.origin = bounds.origin + local.origin, .size = local.size};
@@ -773,8 +895,8 @@ class ReorderableList : public Container {
         children_[static_cast<std::size_t>(index)].widget().paint(p, global, ctx);
     }
 
-    // ---- 滚动恢复 ----
-
+    /// @brief 滚动位置恢复辅助：把恢复值夹取生效后落位，首次可滚动布局时按保存键恢复一次。
+    /// @param raw 从存储读回的原始偏移（dp）。
     auto apply_restored_offset(float raw) -> void {
         const float clamped = std::clamp(raw, 0.0F, max_scroll_offset());
         if (clamped == offset_) {
@@ -784,6 +906,7 @@ class ReorderableList : public Container {
         mark_needs_paint();
     }
 
+    /// @brief 首次可滚动布局时按 restore_key 读取存储偏移并应用（仅一次；已就位则跳过）。
     auto maybe_restore_scroll() -> void {
         if (scroll_restored_ || restore_key_.empty() || max_scroll_offset() <= 0.0F) {
             return;
@@ -795,6 +918,7 @@ class ReorderableList : public Container {
         }
     }
 
+    /// @brief 按 restore_key 把当前偏移写回 ScrollStorage（无键则 no-op）。
     auto write_back_offset() -> void {
         if (restore_key_.empty()) {
             return;
@@ -811,6 +935,9 @@ class ReorderableList : public Container {
         float tail_top = 0.0F;  ///< 末尾插入位（slot = count-1）对应的顶端
     };
 
+    /// @brief 构建压缩序几何：剔除被拖项后的各项顶端 / 中点表与末尾插入位顶端。
+    /// @param excluded_index 被拖项下标（越界或项数不足时返回空表）。
+    /// @return 压缩序几何表 CompactGeometry。
     [[nodiscard]] auto build_compact_geometry(int excluded_index) const -> CompactGeometry {
         CompactGeometry g;
         const int n = static_cast<int>(heights_.size());
@@ -838,10 +965,15 @@ class ReorderableList : public Container {
     }
 
     /// @brief 由「被拖项中心 y」与压缩序中点表求插入位；跨中点须超出 ±eps 才切换（滞回防抖）。
+    /// @param g 压缩序几何表（顶端 / 中点）。
+    /// @param current_slot 当前插入位（起点，越界钳制）。
+    /// @param center 被拖项中心的内容坐标 y。
+    /// @param eps 滞回阈值（dp）。
+    /// @return 稳定后的插入位（0..mids.size()）。
     [[nodiscard]] static auto slot_from_center(const CompactGeometry &g, int current_slot, float center, float eps)
         -> int {
         const int last_slot = static_cast<int>(g.mids.size());  // == count-1（插到末尾）
-        int slot = std::clamp(current_slot, 0, last_slot);
+        int slot = std::clamp(current_slot, 0, last_slot);  // 插入位游标（滞回步进起点）
         while (slot < last_slot && center > g.mids[static_cast<std::size_t>(slot)] + eps) {
             ++slot;
         }
@@ -852,6 +984,8 @@ class ReorderableList : public Container {
     }
 
     /// @brief 让位位移（绘制期偏移，裁决 17）：其余项按「移除被拖项后的目标序」直接位移。
+    /// @param index 被询问项下标。
+    /// @return 该项当前让位位移（dp，被拖项与空闲态为 0）。
     [[nodiscard]] auto shuffle_offset(int index) const -> float {
         if (drag_index_ < 0 || index == drag_index_ || drag_state_ == DragState::Idle) {
             return 0.0F;
@@ -867,23 +1001,32 @@ class ReorderableList : public Container {
     }
 
     /// @brief 被拖项的跟手 / 落位位移（内容坐标）。
+    /// @param index 被询问项下标。
+    /// @return 被拖项的当前位移（dp），非被拖项或空闲态为 0。
     [[nodiscard]] auto drag_follow_offset(int index) const -> float {
         return (index == drag_index_ && drag_state_ != DragState::Idle) ? drag_follow_ : 0.0F;
     }
 
     /// @brief 被拖项抬升（自绘阴影；不污染子项修饰链，裁决 16）。
+    /// @param p 绘制器。
+    /// @param global 被拖项全局矩形。
     auto paint_drag_shadow(Painter &p, const Rect &global, const Rect & /*local*/) -> void {
-        p.draw_shadow(global, 0.0F, 6.0F, 12.0F, Color(0, 0, 0, 70));
+        p.draw_shadow(global, 0.0F, 6.0F, 12.0F, Color(0, 0, 0, 70));  // 抬升阴影参数：海拔/模糊/半透明黑
     }
 
     // ---- 键盘重排辅助 ----
 
     /// @brief 键盘抓取项（抬升态绘制）；无抓取返回 -1。
+    /// @return 处于抓取态的光标下标，否则 -1。
     [[nodiscard]] auto keyboard_lifted_index() const -> int {
         return (keyboard_reorder_ && keyboard_grabbed_) ? keyboard_index_ : -1;
     }
 
     /// @brief 键盘抓取项：与拖拽项同一「阴影 + 顶层」抬升表达，让「已拾起」可被看见。
+    /// @param p 绘制器。
+    /// @param bounds 本控件全局矩形。
+    /// @param ctx 构建上下文。
+    /// @param index 被抬升项下标。
     auto paint_lifted_item(Painter &p, const Rect &bounds, const BuildContext &ctx, int index) -> void {
         const Rect local = item_rect(bounds, index);
         const Rect global{.origin = bounds.origin + local.origin, .size = local.size};
@@ -892,6 +1035,9 @@ class ReorderableList : public Container {
     }
 
     /// @brief 键盘光标环：焦点在本控件（或仍持有抓取）时才画，主题主色描边。
+    /// @param p 绘制器。
+    /// @param bounds 本控件全局矩形。
+    /// @param ctx 构建上下文（取主题色）。
     auto paint_keyboard_cursor(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
         if (!keyboard_reorder_ || keyboard_index_ < 0 || (!is_focused() && !keyboard_grabbed_)) {
             return;
@@ -907,6 +1053,7 @@ class ReorderableList : public Container {
     }
 
     /// @brief 相对移动光标；未定位时 `+1` 落到首项、`-1` 落到末项（与列表类控件的键盘习惯一致）。
+    /// @param delta 光标增量（±1 为主，Home/End 走 set_keyboard_index）。
     auto move_keyboard_cursor(int delta) -> void {
         const int n = static_cast<int>(children_.size());
         if (n == 0) {
@@ -916,6 +1063,7 @@ class ReorderableList : public Container {
     }
 
     /// @brief 把第 `index` 项滚入视口（贴边时各留一点余量由 clamp 处理）。
+    /// @param index 需要滚入视口的项下标（越界为 no-op）。
     auto ensure_index_visible(int index) -> void {
         if (index < 0 || static_cast<std::size_t>(index) >= tops_.size() || viewport_h_ <= 0.0F) {
             return;
@@ -942,9 +1090,13 @@ class ReorderableList : public Container {
 
     /// @brief 播报文案解析：按 key 查 `default_string_table()`（宿主可登记译文模板），
     ///        未登记时回退 `fallback` 英文字面量——绝不播报空串。
+    /// @param key i18n 键（aurora.reorder.*）。
+    /// @param args 占位符实参（{0} 起的位置数字等）。
+    /// @param fallback 查表失败时的英文字面量兜底。
+    /// @return 解析后的最终播报文本。
     [[nodiscard]] static auto announce_text(const std::string &key, std::vector<LocalizedString> args,
                                             const std::string &fallback) -> std::string {
-        LocalizedString s;
+        LocalizedString s;  // 待解析的本地化串（键 + 实参 + 兜底文本）
         s.key = key;
         s.args = std::move(args);
         s.localize = true;
@@ -972,6 +1124,7 @@ class ReorderableList : public Container {
     // ---- 拖拽状态机 ----
 
     /// @brief 按下：记录候选被拖项（含手柄判定）与项内抓取偏移。
+    /// @param e 鼠标事件（读取 local_position 定位候选项）。
     auto hint_press(const MouseEvent &e) -> void {
         press_index_ = -1;
         const float local_y = e.local_position.y;
@@ -1009,6 +1162,7 @@ class ReorderableList : public Container {
     }
 
     /// @brief 跟手推进：位移 1:1、夹在内容范围内，并按中心 y 重算插入位。
+    /// @param delta_y 本帧指针纵向增量（dp）。
     auto update_drag(float delta_y) -> void {
         const auto i = static_cast<std::size_t>(drag_index_);
         const float min_follow = -tops_[i];
@@ -1050,6 +1204,7 @@ class ReorderableList : public Container {
 
     /// @brief 落位动画推进：spring 值直接作为被拖项位移；静止即提交数据。
     ///        提交后该项的自然位置正好等于动画终点 ⇒ 无跳变（落位几何与换位几何同源）。
+    /// @param dt 距上一帧的时间增量（秒）。
     auto tick_settle(double dt) -> void {
         if (!spring_active_.has_value()) {
             commit_drop();
@@ -1073,6 +1228,7 @@ class ReorderableList : public Container {
     /// 跟手位移以**内容坐标**计，故滚动 Δ 后须给 `drag_follow_` 补同样的 Δ，被拖项才会停在
     /// 手指下方（屏幕上不动、列表从下面穿过去）。滚动只走内部程序化路径；滚轮在同轴冲突下已被
     /// 吞掉（裁决 18）。
+    /// @param dt 距上一帧的时间增量（秒）。
     auto tick_auto_scroll(double dt) -> void {
         if (auto_scroll_threshold_ <= 0.0F || max_scroll_offset() <= 0.0F || drag_index_ < 0) {
             return;
@@ -1111,6 +1267,7 @@ class ReorderableList : public Container {
         mark_needs_paint();
     }
 
+    /// @brief 清空拖拽 / 落位全部瞬态字段，回到 Idle（提交或取消后统一调用）。
     auto clear_drag_state() -> void {
         drag_state_ = DragState::Idle;
         drag_index_ = -1;
@@ -1124,6 +1281,8 @@ class ReorderableList : public Container {
         settle_t_ = 0.0;
     }
 
+    /// @brief 指针事件状态机：Press 记候选并喂识别器，Move 越 slop 起拖后跟手，Release 落位或取消。
+    /// @param e 鼠标事件（已由 on_pointer_event 入口转发）。
     auto handle_pointer(MouseEvent &e) -> void {
         if (e.action == MouseAction::Press) {
             if (drag_state_ == DragState::Settling) {
@@ -1155,6 +1314,7 @@ class ReorderableList : public Container {
     }
 
     /// @brief 每帧推进：拖拽中走 auto-scroll、落位中走 spring；空闲零开销。
+    /// @param now 当前时间戳（steady_clock，用于求帧间隔 dt）。
     auto on_tick(std::chrono::steady_clock::time_point now) -> void {
         const double dt =
             last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : (1.0 / 60.0);
@@ -1166,30 +1326,31 @@ class ReorderableList : public Container {
         }
     }
 
+    /// @brief 拖拽 / 落位状态机相位。
     enum class DragState : std::uint8_t { Idle, Dragging, Settling };
 
-    std::shared_ptr<State<std::vector<T>>> items_;
-    ItemBuilder builder_;
-    std::function<void(int, int)> on_reorder_;
-    float gap_ = 0.0F;
-    std::size_t built_count_ = 0;
-    bool built_ = false;
+    std::shared_ptr<State<std::vector<T>>> items_;  ///< 列表项数据源（共享 State，可空）
+    ItemBuilder builder_;  ///< 条目构造器（可空）
+    std::function<void(int, int)> on_reorder_;  ///< 落位后的换位回调（旧, 新下标）
+    float gap_ = 0.0F;  ///< 项间距（dp，非负）
+    std::size_t built_count_ = 0;  ///< 上次实例化的数据长度（长度变化触发重建）
+    bool built_ = false;  ///< 是否已实例化子项（invalidate 置回 false）
 
     std::vector<float> tops_;  ///< 内容坐标：每项顶端 y（布局期建立）
     std::vector<float> heights_;  ///< 每项实测高度
-    float content_h_ = 0.0F;
-    float viewport_w_ = 0.0F;
-    float viewport_h_ = 0.0F;
-    float offset_ = 0.0F;
+    float content_h_ = 0.0F;  ///< 内容总高（dp，y 表末项底边）
+    float viewport_w_ = 0.0F;  ///< 视口宽（dp，最近一次布局）
+    float viewport_h_ = 0.0F;  ///< 视口高（dp，最近一次布局）
+    float offset_ = 0.0F;  ///< 滚动偏移（dp，向下为正）
     float step_ = 40.0F;  ///< 每单位滚轮增量对应的 dp
-    std::string restore_key_;
-    bool scroll_restored_ = false;
-    bool drag_handle_ = false;
-    float auto_scroll_threshold_ = 48.0F;
+    std::string restore_key_;  ///< 滚动位置保存键（空 = 不参与恢复）
+    bool scroll_restored_ = false;  ///< 是否已执行过恢复 / 已被程序化设置就位
+    bool drag_handle_ = false;  ///< 是否限定右侧手柄区域起拖
+    float auto_scroll_threshold_ = 48.0F;  ///< 近边缘自动滚动触发带高（dp，0 = 关闭）
 
-    // ---- 拖拽 / 落位态 ----
+    /// @brief 拖拽 / 落位态字段。
     DragState drag_state_ = DragState::Idle;
-    DragRecognizer drag_;
+    DragRecognizer drag_;  ///< 拖拽识别器（slop 阈值与轴锁定状态）
     int drag_index_ = -1;  ///< 被拖项 index（-1 = 无）
     int drop_slot_ = -1;  ///< 目标插入位（0..count-1）
     int press_index_ = -1;  ///< 按下点命中的候选被拖项（-1 = 未命中项）
@@ -1202,7 +1363,7 @@ class ReorderableList : public Container {
     double settle_t_ = 0.0;  ///< 落位动画已推进时间（秒）
     std::optional<std::chrono::steady_clock::time_point> last_tick_;  ///< 上一帧时间（求 dt）
 
-    // ---- 键盘重排态 ----
+    /// @brief 键盘重排态字段。
     bool keyboard_reorder_ = true;  ///< 键盘替代路径开关（默认开启）
     int keyboard_index_ = -1;  ///< 键盘光标项 index（-1 = 未定位）
     bool keyboard_grabbed_ = false;  ///< 光标项是否已被键盘拾起

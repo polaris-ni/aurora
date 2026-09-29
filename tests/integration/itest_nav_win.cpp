@@ -89,7 +89,9 @@ AURORA_TEST_CASE(window_run_frame_loop_counts_max_frames) {
 #else
 
 AURORA_TEST_CASE(headless_surface_frame_lifecycle) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：HeadlessSurface/create_window(HeadlessOptions) 未编译");
+    AURORA_TEST_SKIP(
+        "AURORA_BACKEND_HEADLESS not enabled: "
+        "HeadlessSurface/create_window(HeadlessOptions) is not compiled");
 }
 
 #endif
@@ -186,7 +188,9 @@ AURORA_TEST_CASE(navigator_page_switch_presented_via_window) {
 #else
 
 AURORA_TEST_CASE(navigator_page_switch_presented_via_window) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：HeadlessSurface/create_window(HeadlessOptions) 未编译");
+    AURORA_TEST_SKIP(
+        "AURORA_BACKEND_HEADLESS not enabled: "
+        "HeadlessSurface/create_window(HeadlessOptions) is not compiled");
 }
 
 #endif

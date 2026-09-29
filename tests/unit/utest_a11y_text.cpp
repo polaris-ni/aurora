@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/a11y_text.h
-/// 测试说明: UTF-8↔UTF-16 偏移映射（含非 BMP 代理对的向下夹紧 G9）、双向转换往返、
+/// 测试说明: UTF-8↔UTF-16 偏移映射（含非 BMP 代理对的向下夹紧）、双向转换往返、
 ///           按码点/UTF-16 单元前后移动、Word/Line/Character/Document 单位展开
 
 #include <cstddef>
@@ -23,6 +23,7 @@ using aurora::a11y::UtfOffsetMap;
 /// @brief ASCII 文本：UTF-8 偏移与 UTF-16 偏移逐位相等（映射退化为恒等）。
 constexpr std::string_view AURORA_ASCII = "hello";
 
+// CJK-LITERAL: cjk-fixture - Han text is required to exercise the 3-byte UTF-8 / 1-unit UTF-16 mapping
 /// @brief 3 字节字符（CJK「中」）：1 个 UTF-16 单元、3 个 UTF-8 字节。
 constexpr std::string_view AURORA_CJK = "中文";
 
@@ -53,7 +54,7 @@ AURORA_TEST_CASE(cjk_maps_bytes_to_single_utf16_unit) {
 }
 
 AURORA_TEST_CASE(emoji_low_surrogate_index_clamps_to_codepoint_start) {
-    // G9：UIA MoveEndpointByUnit(Character) 会把端点落到代理对第二单元（utf16==1），
+    // UIA MoveEndpointByUnit(Character) 会把端点落到代理对第二单元（utf16==1），
     // 该索引在 UTF-8 侧无码点起点 —— 必须夹紧回 0，绝不产生指向码点中部的偏移。
     const UtfOffsetMap map{AURORA_EMOJI};
     AURORA_TEST_CHECK_EQ(map.utf8_length(), std::size_t{4});

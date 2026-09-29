@@ -20,6 +20,7 @@
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     auto status = std::make_shared<au::State<au::LocalizedString>>(
+        // CJK-LITERAL: on-screen-demo - painted window text, not console output
         au::LocalizedString{"拖拽或滚轮上滚到列表顶部继续下拉 → 松手刷新"});
 
     std::vector<au::Node> rows;
@@ -37,11 +38,13 @@ auto main() -> int {
 
     std::weak_ptr<au::PullToRefresh> weak_pull = pull;
     pull->on_refresh([status, weak_pull]() -> void {
+        // CJK-LITERAL: on-screen-demo - painted window text, not console output
         status->set(au::LocalizedString{"刷新中…（异步取数）"});
         auto finish = [status, weak_pull]() -> void {
             if (auto p = weak_pull.lock()) {
                 p->finish_refresh();  // 指示器收拢回弹
             }
+            // CJK-LITERAL: on-screen-demo - painted window text, not console output
             status->set(au::LocalizedString{"刷新完成，可再次下拉"});
         };
         if (auto *sch = au::Scheduler::current()) {

@@ -38,6 +38,7 @@
 
 #include "aurora/aurora.h"
 #include "aurora/media/audio_alsa.h"
+#include "verify_args.h"
 
 namespace {
 
@@ -87,7 +88,11 @@ auto sleep_ms(int ms) -> void { std::this_thread::sleep_for(std::chrono::millise
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    const bool interactive = argc > 1 && std::string(argv[1]) == "--interactive";
+    const auto cli = aurora_verify::parse_interactive("ALSA audio live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
+    }
+    const bool interactive = cli.arguments->flag("interactive");
 
     emit("== Aurora ALSA audio live probe ==");
     emit("auto segment: activation / format / clock / buffer source / stream / suspend-resume / capture port");

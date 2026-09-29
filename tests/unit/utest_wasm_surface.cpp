@@ -28,7 +28,7 @@ AURORA_TEST_CASE(wasm_surface_type_contract) {
     static_assert(!std::is_copy_constructible_v<aurora::WasmAriaBridge>);
     AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::a11y::Provider, aurora::WasmAriaBridge>);
 #else
-    AURORA_TEST_SKIP("WASM 后端仅在 AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM（Emscripten 工具链）下编译");
+    AURORA_TEST_SKIP("the WASM backend builds only under AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM (Emscripten)");
 #endif
 }
 
@@ -36,9 +36,9 @@ AURORA_TEST_CASE(wasm_surface_os_dependent_paths_skipped) {
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)
     // 构造即在浏览器环境注册 Emscripten 事件回调，present 走 EM_ASM 上屏 Canvas，
     // 离开浏览器 rAF/宿主环境无从验证，属集成层覆盖范围。
-    AURORA_TEST_SKIP("WasmSurface 依赖浏览器宿主（Canvas/rAF/Emscripten 回调），单测不触碰宿主环境");
+    AURORA_TEST_SKIP("WasmSurface depends on the browser host (Canvas/rAF/Emscripten callbacks); unit tests avoid it");
 #else
-    AURORA_TEST_SKIP("WASM 后端仅在 AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM（Emscripten 工具链）下编译");
+    AURORA_TEST_SKIP("the WASM backend builds only under AURORA_PLATFORM_WASM && AURORA_BACKEND_WASM (Emscripten)");
 #endif
 }
 

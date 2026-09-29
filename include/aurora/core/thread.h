@@ -5,33 +5,36 @@
 
 namespace aurora {
 
-/**
- * @brief 单线程 UI 的编译期/运行期守卫（ARCHITECTURE.md §3.1）。
- *
- * Aurora 是单线程 UI：事件、布局、绘制、状态变更均须在同一线程（通常是主线程）完成。
- * `MainThreadOnly<T>` 包装一个值，并在 debug 下断言访问发生在构造它的同一线程；
- * 配合 `AURORA_MAIN_THREAD` 标注的入口（`Application::run` / `Window::present_root` / `Window::run`），
- * 静态分析 / 文档工具可识别「必须在主线程调用」的契约。
- *
- * @tparam T 被包装的值类型。
- * @tparam Check 是否启用线程检查。设为 false 时**零开销**（不存储 owner 线程、不断言），
- *               用于性能敏感路径关闭检查（与 `AURORA_ASSERT` 的 debug-only 语义一致）。
- */
+/// @brief 单线程 UI 的编译期/运行期守卫（ARCHITECTURE.md §3.1）。
+/// Aurora 是单线程 UI：事件、布局、绘制、状态变更均须在同一线程（通常是主线程）完成。
+/// `MainThreadOnly<T>` 包装一个值，并在 debug 下断言访问发生在构造它的同一线程；
+/// 配合 `AURORA_MAIN_THREAD` 标注的入口（`Application::run` / `Window::present_root` / `Window::run`），
+/// 静态分析 / 文档工具可识别「必须在主线程调用」的契约。
+/// @tparam T 被包装的值类型。
+/// @tparam Check 是否启用线程检查。设为 false 时**零开销**（不存储 owner 线程、不断言），
+/// 用于性能敏感路径关闭检查（与 `AURORA_ASSERT` 的 debug-only 语义一致）。
 template <typename T, bool Check = true>
 class MainThreadOnly {
   public:
+    /// @brief 构造并捕获当前线程为 owner（Check=true 时后续访问都比对 owner_）。
+    /// @param value 初始值（move 进 value_）。
     explicit MainThreadOnly(T value) : value_(std::move(value)), owner_(std::this_thread::get_id()) {}
 
+    /// @brief 读取值（可变视图）；先断言 owner 线程。
+    /// @return value_ 的可变引用；debug 下非 owner 线程访问触发 assert。
     [[nodiscard]] auto get() & -> T & {
         assert_owner();
         return value_;
     }
+    /// @brief 读取值（常量视图）；先断言 owner 线程。
+    /// @return value_ 的 const 引用；debug 下非 owner 线程访问触发 assert。
     [[nodiscard]] auto get() const & -> const T & {
         assert_owner();
         return value_;
     }
 
     /// @brief 仅在主线程可写。
+    /// @param value 新值（move 覆盖 value_；写前断言 owner 线程）。
     auto set(T value) -> void {
         assert_owner();
         value_ = std::move(value);
@@ -50,12 +53,21 @@ class MainThreadOnly {
 };
 
 /// @brief 零开销特化：Check=false 时不存储 owner、不断言。
+/// @tparam T 被包装的值类型（主模板的 `T`，本特化不改变其语义）。
 template <typename T>
 class MainThreadOnly<T, false> {
   public:
+    /// @brief 构造（无 owner 捕获，纯值包装）。
+    /// @param value 初始值（move 进 value_）。
     explicit MainThreadOnly(T value) : value_(std::move(value)) {}
+    /// @brief 读取值（可变视图），无检查开销。
+    /// @return value_ 的可变引用。
     [[nodiscard]] auto get() & -> T & { return value_; }
+    /// @brief 读取值（常量视图），无检查开销。
+    /// @return value_ 的 const 引用。
     [[nodiscard]] auto get() const & -> const T & { return value_; }
+    /// @brief 写入值，无检查开销。
+    /// @param value 新值（move 覆盖 value_）。
     auto set(T value) -> void { value_ = std::move(value); }
 
   private:
@@ -65,12 +77,12 @@ class MainThreadOnly<T, false> {
 }  // namespace aurora
 
 /// @brief 标注函数「必须在主线程调用」（ARCHITECTURE.md §3.1）。
-///
 /// clang 用 `annotate` 属性（可被静态分析 / 文档工具读取）；GCC 不支持 `annotate`
 /// 属性（会触发 `-Wattributes`），故 GCC 与其它编译器均为 no-op；运行期契约仍由
 /// `MainThreadOnly` 守卫。
 #ifdef AURORA_COMPILER_CLANG
 #define AURORA_MAIN_THREAD [[clang::annotate("au::main_thread")]]
 #else
+/// @brief 非 Clang 兜底：定义为空标记（no-op），主线程契约仅由 `MainThreadOnly` 运行期守卫承担。
 #define AURORA_MAIN_THREAD /* no-op: main-thread contract enforced at runtime via MainThreadOnly */
 #endif

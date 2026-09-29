@@ -1,26 +1,26 @@
 #pragma once
 
-/**
- * @file aurora.h
- * @brief 单一包含入口（需求 #2/#24：one import / one namespace）。
- *
- * 包含全部抽象层公共模块；任何翻译单元只需 `#include "aurora/aurora.h"` 即可使用
- * Surface/Window/Painter/FontEngine/事件 等整套抽象 API。
- * **真实平台窗口 Surface**（GLFW/Win32）需另行 `#include "aurora/window/native_surfaces.h"`，
- * 并经 `create_window`（window/window.h）统一构造。无头渲染工具见 render/offscreen.h。
- *
- * 推荐别名（需求 #2）：
- * @code
- *   #include "aurora/aurora.h"
- *   using namespace aurora;   // 或只用 au:: 前缀
- *   // au::Text("Hi").font_size(14);
- * @endcode
- */
+/// @brief 单一包含入口（需求 SPEC.API.NAMING-CONSISTENCY.001 / SPEC.PERF.API.TOKEN-EFFICIENCY.001：one import / one
+/// namespace）。
+/// @file aurora.h
+///
+/// 包含全部抽象层公共模块；任何翻译单元只需 `#include "aurora/aurora.h"` 即可使用
+/// Surface/Window/Painter/FontEngine/事件 等整套抽象 API。
+/// **真实平台窗口 Surface**（GLFW/Win32）需另行 `#include "aurora/window/native_surfaces.h"`，
+/// 并经 `create_window`（window/window.h）统一构造。无头渲染工具见 render/offscreen.h。
+///
+/// 推荐别名（需求 SPEC.API.NAMING-CONSISTENCY.001）：
+/// @code
+/// #include "aurora/aurora.h"
+/// using namespace aurora;   // 或只用 au:: 前缀
+/// // au::Text("Hi").font_size(14);
+/// @endcode
 #include "aurora/animation/animator.h"
 #include "aurora/animation/easing.h"
 #include "aurora/animation/spring.h"
 #include "aurora/animation/timeline.h"
 #include "aurora/app/application.h"
+#include "aurora/app/display.h"
 #include "aurora/app/file_dialog.h"
 #include "aurora/app/generate_ui.h"
 #include "aurora/app/hot_reload.h"
@@ -35,10 +35,16 @@
 #include "aurora/app/ui_prompt.h"
 #include "aurora/app/validate.h"
 #include "aurora/app/validate_ui.h"
+#include "aurora/app/window_geometry.h"
+#include "aurora/cli/args.h"
+#include "aurora/cli/command.h"
 #include "aurora/commands.h"
-#include "aurora/core/a11y_provider.h"  // 鍏叡鏃犻殰纰嶆ˉ鎶借薄 + 鍏叡閽╁瓙锛坰et_accessibility_*_hook锛?9锛?#10;#include "aurora/core/accessibility.h"
+#include "aurora/core/a11y_provider.h"  // 公共无障碍桥抽象 + 公共钩子（set_accessibility_*_hook）
+#include "aurora/core/a11y_text.h"
+#include "aurora/core/accessibility.h"
 #include "aurora/core/aurora_assert.h"
 #include "aurora/core/color.h"
+#include "aurora/core/color_space.h"
 #include "aurora/core/debug.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/duration.h"
@@ -65,6 +71,7 @@
 #include "aurora/environment/environment.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/event/dispatcher.h"
+#include "aurora/event/drag_drop.h"
 #include "aurora/event/event.h"
 #include "aurora/event/focus.h"
 #include "aurora/event/gesture.h"
@@ -86,8 +93,10 @@
 #include "aurora/modifier/modifier.h"
 #include "aurora/navigation/hero.h"
 #include "aurora/navigation/navigator.h"
+#include "aurora/navigation/navigator_host.h"
 #include "aurora/navigation/route.h"
 #include "aurora/navigation/router.h"
+#include "aurora/navigation/transition_layer.h"
 #include "aurora/perf/counters.h"
 #include "aurora/perf/perf_log.h"
 #include "aurora/perf/perf_session.h"
@@ -123,16 +132,20 @@
 #include "aurora/theming/theme_scope.h"
 #include "aurora/todo.h"
 #include "aurora/ui/factories.h"
+#include "aurora/widget/a11y_diff.h"
 #include "aurora/widget/a11y_tree.h"
 #include "aurora/widget/bar_chart.h"
+#include "aurora/widget/breakpoint_builder.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/canvas.h"
 #include "aurora/widget/chart_common.h"
 #include "aurora/widget/checkbox.h"
 #include "aurora/widget/chip.h"
+#include "aurora/widget/codegen.h"
 #include "aurora/widget/command_palette.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/data_widgets.h"
+#include "aurora/widget/dialog.h"
 #include "aurora/widget/dismissible.h"
 #include "aurora/widget/divider.h"
 #include "aurora/widget/drawer.h"
@@ -192,4 +205,4 @@
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
 
-namespace au = aurora;  ///< 推荐短别名（需求 #2）。`au::colors::Red` 经别名直接可用。
+namespace au = aurora;  ///< 推荐短别名（需求 SPEC.API.NAMING-CONSISTENCY.001）。`au::colors::Red` 经别名直接可用。

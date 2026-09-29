@@ -186,7 +186,7 @@ class ScopedServer {
 
 AURORA_TEST_CASE(debug_flags_type_mismatch_returns_400) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
 #else
     const ScopedServer server;
 
@@ -216,7 +216,7 @@ AURORA_TEST_CASE(debug_flags_type_mismatch_returns_400) {
 
 AURORA_TEST_CASE(to_code_style_type_mismatch_and_out_of_range_fallback) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
 #else
     const ScopedServer server;
 
@@ -244,7 +244,7 @@ AURORA_TEST_CASE(to_code_style_type_mismatch_and_out_of_range_fallback) {
 
 AURORA_TEST_CASE(widget_put_invalid_font_weight_does_not_terminate) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
 #else
     const ScopedServer server;
 
@@ -258,7 +258,7 @@ AURORA_TEST_CASE(widget_put_invalid_font_weight_does_not_terminate) {
 
 AURORA_TEST_CASE(query_string_and_mixed_case_content_length) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
 #else
     const ScopedServer server;
 
@@ -291,7 +291,7 @@ AURORA_TEST_CASE(query_string_and_mixed_case_content_length) {
 
 AURORA_TEST_CASE(body_length_trap_and_liveness_probe) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
 #else
     const ScopedServer server;
 

@@ -1,0 +1,221 @@
+# Umbrella header baseline - include/aurora/aurora.h
+# Read by tools/check/check_umbrella_header.py. Format: `pattern -> reason`;
+#   `# ` starts a comment; blank lines are ignored; `*` in a pattern matches any run.
+#
+# [direct]        headers the umbrella must include directly (R7 fails on any removal).
+# [exempt]        headers deliberately kept out of the umbrella, with the design reason.
+# [exempt-review] unreachable public-looking headers awaiting a maintainer decision.
+
+[direct]
+aurora/animation/animator.h
+aurora/animation/easing.h
+aurora/animation/spring.h
+aurora/animation/timeline.h
+aurora/app/application.h
+aurora/app/display.h
+aurora/app/file_dialog.h
+aurora/app/generate_ui.h
+aurora/app/hot_reload.h
+aurora/app/menu.h
+aurora/app/perf_overlay.h
+aurora/app/scene.h
+aurora/app/scheduler.h
+aurora/app/scroll_storage.h
+aurora/app/shortcuts.h
+aurora/app/system_tray.h
+aurora/app/test_controller.h
+aurora/app/ui_prompt.h
+aurora/app/validate.h
+aurora/app/validate_ui.h
+aurora/app/window_geometry.h
+aurora/cli/args.h
+aurora/cli/command.h
+aurora/commands.h
+aurora/core/a11y_provider.h
+aurora/core/a11y_text.h
+aurora/core/accessibility.h
+aurora/core/aurora_assert.h
+aurora/core/color.h
+aurora/core/color_space.h
+aurora/core/debug.h
+aurora/core/diagnostics.h
+aurora/core/duration.h
+aurora/core/event_stream.h
+aurora/core/file_watcher.h
+aurora/core/font.h
+aurora/core/image.h
+aurora/core/literals.h
+aurora/core/log.h
+aurora/core/platform.h
+aurora/core/result.h
+aurora/core/strict_mode.h
+aurora/core/thread.h
+aurora/core/thread_pool.h
+aurora/core/time.h
+aurora/core/types.h
+aurora/core/version.h
+aurora/debug/debug_backend.h
+aurora/debug/debug_paint.h
+aurora/debug/debug_runtime.h
+aurora/debug/debug_trace.h
+aurora/debug/feature_flags.h
+aurora/environment/build_context.h
+aurora/environment/environment.h
+aurora/environment/media_query.h
+aurora/event/dispatcher.h
+aurora/event/drag_drop.h
+aurora/event/event.h
+aurora/event/focus.h
+aurora/event/gesture.h
+aurora/event/keycode.h
+aurora/i18n/format.h
+aurora/i18n/localized_string.h
+aurora/i18n/plural.h
+aurora/i18n/string_table.h
+aurora/imperative.h
+aurora/layout/flex.h
+aurora/layout/flex_layouter.h
+aurora/layout/layout_box.h
+aurora/layout/layout_engine.h
+aurora/media/audio.h
+aurora/media/image_sequence_source.h
+aurora/media/video_controls.h
+aurora/media/video_player.h
+aurora/media/video_source.h
+aurora/modifier/modifier.h
+aurora/navigation/hero.h
+aurora/navigation/navigator.h
+aurora/navigation/navigator_host.h
+aurora/navigation/route.h
+aurora/navigation/router.h
+aurora/navigation/transition_layer.h
+aurora/perf/counters.h
+aurora/perf/perf_log.h
+aurora/perf/perf_session.h
+aurora/perf/profiler.h
+aurora/perf/scroll_bench.h
+aurora/perf/stopwatch.h
+aurora/perf/trace_writer.h
+aurora/preferences/preferences.h
+aurora/render/dirty_region.h
+aurora/render/font_engine.h
+aurora/render/image_cache.h
+aurora/render/offscreen.h
+aurora/render/painter.h
+aurora/render/png.h
+aurora/render/snapshot_diff.h
+aurora/state/async.h
+aurora/state/binding.h
+aurora/state/computed.h
+aurora/state/coroutine.h
+aurora/state/effect.h
+aurora/state/immutable.h
+aurora/state/reactive.h
+aurora/state/signal_view.h
+aurora/state/state.h
+aurora/state/state_graph.h
+aurora/state/store.h
+aurora/state/subscription.h
+aurora/state/undo_stack.h
+aurora/storage/storage.h
+aurora/theming/style_props.h
+aurora/theming/theme.h
+aurora/theming/theme_query.h
+aurora/theming/theme_scope.h
+aurora/todo.h
+aurora/ui/factories.h
+aurora/widget/a11y_diff.h
+aurora/widget/a11y_tree.h
+aurora/widget/bar_chart.h
+aurora/widget/breakpoint_builder.h
+aurora/widget/button.h
+aurora/widget/canvas.h
+aurora/widget/chart_common.h
+aurora/widget/checkbox.h
+aurora/widget/chip.h
+aurora/widget/codegen.h
+aurora/widget/command_palette.h
+aurora/widget/containers.h
+aurora/widget/data_widgets.h
+aurora/widget/dialog.h
+aurora/widget/dismissible.h
+aurora/widget/divider.h
+aurora/widget/drawer.h
+aurora/widget/dropdown.h
+aurora/widget/expansion_panel.h
+aurora/widget/form.h
+aurora/widget/grid.h
+aurora/widget/grid_view.h
+aurora/widget/image_widget.h
+aurora/widget/inspect.h
+aurora/widget/inspector_panel.h
+aurora/widget/layout_builder.h
+aurora/widget/layout_query.h
+aurora/widget/lazy_list.h
+aurora/widget/lifecycle.h
+aurora/widget/line_chart.h
+aurora/widget/menu_bar.h
+aurora/widget/pickers.h
+aurora/widget/pie_chart.h
+aurora/widget/placeholder.h
+aurora/widget/popup.h
+aurora/widget/progress.h
+aurora/widget/provider.h
+aurora/widget/pull_to_refresh.h
+aurora/widget/radio_spin.h
+aurora/widget/recipes.h
+aurora/widget/reorderable_list.h
+aurora/widget/repeater.h
+aurora/widget/rich_text.h
+aurora/widget/rich_text_edit.h
+aurora/widget/scatter_chart.h
+aurora/widget/scroll.h
+aurora/widget/segmented_control.h
+aurora/widget/serialization.h
+aurora/widget/show.h
+aurora/widget/skeleton.h
+aurora/widget/slider.h
+aurora/widget/spacer.h
+aurora/widget/sparkline.h
+aurora/widget/splitter.h
+aurora/widget/stack.h
+aurora/widget/stepper.h
+aurora/widget/sticky_header.h
+aurora/widget/switch.h
+aurora/widget/tab_bar.h
+aurora/widget/text.h
+aurora/widget/text_input.h
+aurora/widget/text_span.h
+aurora/widget/timer.h
+aurora/widget/title_bar.h
+aurora/widget/toast.h
+aurora/widget/toolbar.h
+aurora/widget/widget.h
+aurora/window/cursor_map.h
+aurora/window/frame_pacing.h
+aurora/window/platform.h
+aurora/window/surface.h
+aurora/window/window.h
+
+[exempt]
+aurora/aurora_fwd.h -> 可选前向声明头，刻意不进伞头（AGENTS.md §1 定位）
+aurora/aurora_pch.h -> 预编译聚合头，仅库内 PRIVATE 编译使用，消费者不直接包含
+aurora/window/native_surfaces.h -> 平台后端聚合入口，伞头文档要求按平台单独包含
+aurora/window/*_surface.h -> 平台窗口后端，经 native_surfaces.h 按平台条件引入
+aurora/window/win32_host.h -> Win32 共享窗口宿主，平台后端内部设施
+aurora/window/wasm_aria.h -> Wasm ARIA 桥，平台后端内部设施
+aurora/render/detail/* -> 渲染内部实现细节（SIMD 表 / GPU 层缓存 / 计时）
+aurora/render/rhi/* -> RHI 后端内部契约（软件 / GL / wgpu）
+aurora/render/bidi.h -> 段落基准方向推断，渲染内部机制
+aurora/render/bitmap_font.h -> 内置位图字体，软件栅格后端内部资产
+aurora/render/font_discovery.h -> 系统字体面发现，字体引擎内部
+aurora/render/freetype_library.h -> 进程级 FT_Library 单例访问器，字体引擎内部
+aurora/render/glyph_atlas.h -> CPU 字形图集，字体引擎内部缓存
+aurora/render/noto_font_data.h -> 内置字体字节数据，字体引擎内部资产
+aurora/storage/*_backend.h -> 持久化后端实现，经 storage.h 抽象引入
+aurora/inspector/inspector_server.h -> localhost HTTP 服务，工具侧远程调试能力
+aurora/media/audio_sink_bridge.h -> AudioSink 桥接内部实现
+aurora/core/json.h -> 公共轻头，但有意不经伞头导出：消费者须显式包含，配方见 codespec/GUIDELINE.md §42，契约见 codespec/specification/01-core.md §9
+aurora/core/math.h -> 渲染热路径内部收敛助手（saturate / saturate_u8），头内自注「不进入 aurora.h 公共导出」
+
+[exempt-review]

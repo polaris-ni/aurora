@@ -32,10 +32,10 @@
 |---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `include/`          | 公共 API 头（`include/aurora/aurora.h` 为唯一入口），声明与少量 header-only 控件                                                                                                |
 | `src/`              | 实现（`src/aurora/*.cpp`），非模板纯逻辑类实现放此，头只留声明                                                                                                                  |
-| `examples/`         | 示例：每个组件一个 `demo_<组件>.cpp` 位于 `examples/demos/`（1:1，CMake 自动 GLOB）；`examples/demos/demo_common.h` 含 `Card`/`BrandBadge`/`GradientTitle` 等demo使用的全局控件 |
-| `tests/`            | 测试 + CTest：单元测试 `tests/unit/utest_*.cpp`、集成测试 `tests/integration/itest_*.cpp`、公共 fixture `tests/support/`（含 `paths.h` / `test_helpers.h`）与 `tests/fixtures/`（如 `ai_compat/` 基准）、golden 基准 `tests/golden/`                          |
+| `examples/`         | 示例：每个组件一个 `demo_<组件>.cpp` 位于 `examples/demos/`（1:1，CMake 自动 GLOB）；`examples/demos/demo_common.h` 含 `Card`/`BrandBadge`/`GradientTitle` 等demo使用的全局控件；`examples/demos/scenes/` 为被 E2E 引用组件的 header-only 场景头（与 demo 同源，契约见 `specification/08-tooling.md` §8.2）+ 注册表头，`examples/demos/scene_tool.cpp` 为场景枚举/渲染小工具 |
+| `tests/`            | 测试 + CTest：单元测试 `tests/unit/utest_*.cpp`、集成测试 `tests/integration/itest_*.cpp`、真实后端端到端 `tests/e2e/etest_*.cpp`（受 `AURORA_BUILD_E2E` 门控，Emscripten 下排除）、公共 fixture `tests/support/`（含 `paths.h` / `test_helpers.h`）与 `tests/fixtures/`（`ai_compat/` 基准、`json_test_suite/` 外部合规语料）、golden 基准 `tests/golden/`                          |
 | `third_party/`      | 三方库文件                                                                                                                                                                      |
-| `tools/`            | 工具链，按职责分子目录：`gen/`（三生成器 `gen_api`/`gen_error_codes`/`gen_debug_api`）、`servers/`（mcp / lsp / cli）、`bench/`（4 基准 + `bench_common.h`）、`check/`（校验与门禁脚本 + `perf_gates.json` + 观测脚本 `build_baseline.py`：解析 `.ninja_log` / ctest 日志输出构建与测试耗时基线，非门禁）、`verify/`（真机验收探针：证明无头 CI 无法证明的平台接线，按「平台 + 后端」条件构建且不进 CTest，见 `cmake/AuroraVerify.cmake`）、`coverage/`（GCC/Clang/LLVM 覆盖率聚合）、`include/`（共享头，含枚举 SSOT `known_enums.h` 与 LSP 三层 `lsp_*.h`）。API 生成落盘 `aurora_api.json`，CMake 聚合目标 `aurora_api_json`；详见 `cmake/AuroraTools.cmake` 与 `cmake/AuroraInstrumentation.cmake` |
+| `tools/`            | 工具链，按职责分子目录：`gen/`（三生成器 `gen_api`/`gen_error_codes`/`gen_debug_api`）、`servers/`（mcp / lsp / cli）、`bench/`（4 基准 + `bench_common.h`）、`check/`（校验与门禁脚本 + `perf_gates.json` + 观测脚本 `build_baseline.py`：解析 `.ninja_log` / ctest 日志输出构建与测试耗时基线，非门禁）、`verify/`（真机验收探针：证明无头 CI 无法证明的平台接线，按「平台 + 后端」条件构建且不进 CTest，见 `cmake/AuroraVerify.cmake`）、`coverage/`（GCC/Clang/LLVM 覆盖率聚合）、`e2e/`（进程外 E2E 客户端 `e2e_client.cpp`）、`include/`（共享头，含枚举 SSOT `known_enums.h`、LSP 三层 `lsp_*.h` 与 E2E 驱动内核 `e2e/`（`harness.h` / `os_input.h` / `inspector_driver.h`））。API 生成落盘 `aurora_api.json`，CMake 聚合目标 `aurora_api_json`；详见 `cmake/AuroraTools.cmake` 与 `cmake/AuroraInstrumentation.cmake` |
 | `cmake/`            | CMake 模块（顶层 `CMakeLists.txt` 只做编排）：`AuroraFeatures`（feature 宏单一入口 `aurora_define_feature`）/`AuroraThirdParty`（三方构建）/`AuroraImageCodecs`（图片编解码）/`AuroraCcache`（编译缓存）/`AuroraSimd`（SIMD）/`AuroraBackends`（后端开关）/`AuroraTools`（工具）/`AuroraVerify`（真机验收探针）/`AuroraDemos`（示例）/`AuroraTests`（测试）/`AuroraInstrumentation`（插桩）/`AuroraInstall`（安装）/`AuroraLint`（Clang-Tidy 门禁：`lint` / `lint-fix` 聚合目标）/`AuroraFormat`（clang-format 门禁：`format` / `format-check` 聚合目标）/`AuroraUtils`（公共辅助函数：消费者目标统一配置）/`AuroraCheckTestRegistry`（测试注册表一致性校验），共 16 个；布局与职责详见 `codespec/BUILD_OPTIONS.md` §1.1 |
 | `codespec/`         | **全部项目文档**（需求/架构/规范/指南/概念），见下方导航表                                                                                                                      |
 | `build/`            | 构建产物，CMake 生成，不纳入版本管理                                                                                                                                            |
@@ -77,7 +77,7 @@
   ctest --preset ninja-test   # 等价 ctest --test-dir build --output-on-failure -j 16
   ```
 - **测试/示例组织约定**（详见 `CODING_STANDARDS.md` §3 与 §6.2 默认参数章节）：每个公共源文件对应一个 `demo_*.cpp`（`examples/demos/`
-  ）与一个 `utest_*.cpp`（`tests/unit/`），二者用文件夹区分；测试文件以 `utest`（单元）/ `itest`（集成）为前缀（非 `_test` 后缀），
+  ）与一个 `utest_*.cpp`（`tests/unit/`），二者用文件夹区分；测试文件以 `utest`（单元）/ `itest`（集成）/ `etest`（真实后端端到端，`tests/e2e/`）为前缀（非 `_test` 后缀），
   每个测试 TU 包裹在 `namespace aurora::test_cases::utest_<名>` 内。框架位于 `tests/framework/`，入口头
   `tests/framework/aurora_test.h`（仓库私有设施，不进 `include/`、不进 `aurora_api.json`）。
   用例经 `AURORA_TEST_CASE(<Case>)` 宏静态注册，全名 `<文件 stem>.<Case>` —— **套件名恒等于测试文件 stem、不可自定义**，
@@ -100,36 +100,38 @@
 
 ## 4. 文档导航表（codespec/）
 
-`codespec/` 共 **14 份手写文档 + 1 份生成物**（`ERROR_CATALOG.md`），外加 2 份生成源数据（`errors.toml` / `debug_api.toml`）。
-各文档的章节号统一为纯数字点分层级（`1` / `1.1` / `1.1.1`）；需求编号 `#1–#29` 是独立的需求标识体系，与章节号并存。
+`codespec/` 共 **15 份手写文档 + 1 份生成物**（`ERROR_CATALOG.md`），外加 2 份生成源数据（`errors.toml` / `debug_api.toml`）。
+各文档的章节号统一为纯数字点分层级（`1` / `1.1` / `1.1.1`）；需求 ID（`SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`，共 30 条）是独立的需求标识体系，与章节号并存——数字尾是三位序号，只有前面的前缀完全相同时才递增（`001` → `002`），前缀不同一律从 `001` 起。
 
 **顶层文档（6 份，均为自包含正文，非外链索引）**
 
 | 你想了解                                              | 读这个文件                     | 权威性说明                                                                                                 |
 |-------------------------------------------------------|--------------------------------|-------------------------------------------------------------------------------------------------------------|
-| **项目定位 / 设计原则 / 需求清单 / 文档导航 / 版本门禁** | `codespec/SPECIFICATIONS.md`   | 总纲与索引：29 条特性清单（`#1–#29`）逐条指向其规格落点；分层蓝图、命名速查、API 兼容策略；版本与稳定性门禁（§12） |
+| **项目定位 / 设计原则 / 需求清单 / 文档导航 / 版本门禁** | `codespec/SPECIFICATIONS.md`   | 总纲与索引：30 条特性清单（需求 ID `SPEC.<类目>.<域>.<短名>.<数字尾>`）逐条指向其规格落点；分层蓝图、命名速查、API 兼容策略；版本与稳定性门禁（§12） |
 | **架构 / 运行时 / 分层 / 模块映射 / 设计不变量**      | `codespec/ARCHITECTURE.md`     | 🥇 架构与设计以它为准：分层、运行时、模块映射、核心数据流、组件树、事件、渲染、性能、11 条设计不变量、错误处理架构、AI-first 原则、测试与 CI |
 | **核心概念 / 跨框架映射 / 概念可枚举性**              | `codespec/CONCEPTS.md`         | 可枚举 UI 原语审计、状态作用域决策树、React / Flutter / Qt 概念映射、迁移要点                              |
-| **编码规范 / 命名 / 错误 / AI 友好性 / 版本管理**     | `codespec/CODING_STANDARDS.md` | 🥇 编码规则以它为准：错误处理、命名、文档与示例、日志纪律、契约标注、AI 友好性、SemVer、函数签名、内部工具层、提交信息规范 |
-| **使用指南 / 复制即用配方**                           | `codespec/GUIDELINE.md`        | 40 组最小可编译片段：界面 / 布局 / 状态 / 异步 / 持久化 / 媒体 / 字体 / Inspector / 工厂 / 测试 / 样式 / 输入法 / 坑 / 调试 |
+| **编码规范 / 命名 / 错误 / 注释 / 字面量语言 / AI 友好性 / 版本管理**     | `codespec/CODING_STANDARDS.md` | 🥇 编码规则以它为准：错误处理、命名、文档与示例、日志纪律、契约标注、Doxygen 注释规范（§13）、字符串字面量语言（§14）、AI 友好性、SemVer、函数签名、内部工具层、提交信息规范 |
+| **使用指南 / 复制即用配方**                           | `codespec/GUIDELINE.md`        | 42 组最小可编译片段：界面 / 布局 / 状态 / 异步 / 持久化 / 媒体 / 字体 / Inspector / 工厂 / 测试 / 样式 / 输入法 / JSON / 坑 / 调试 |
 | **编译选项 / 宏 / 环境变量（统一参考）**              | `codespec/BUILD_OPTIONS.md`    | 🥇 所有 CMake 开关、缓存变量、feature 宏、运行时环境变量与 find_package 集成以它为准                       |
 
 > 导航表与文档内部引用由 CTest `check_codespec_xref` 守护（断链 / 失效锚点 / 章节号重复跳号 / 反引号路径 / 特性表落点可达），
-> 代码注释中的 `架构 §N` / `规格 §N` 引用与测试头部「目标单元」路径由 CTest `check_code_doc_sync` 守护。
+> 代码注释中的 `架构 §N` / `规格 §N` 章节引用、`SPEC.<类目>.` 需求 ID 引用、旧 `#N` 需求编号的防回流
+> （DOC3 关键词形态 / DOC4 体系文档裸编号）与测试头部「目标单元」路径由 CTest `check_code_doc_sync` 守护。
 > 两套守护只拦增量，存量豁免以白名单形式内置于脚本并注明原因。
 
-**子系统规格（8 份，按 `include/aurora/` 模块域切分）**
+**子系统规格（9 份，按 `include/aurora/` 模块域切分）**
 
 | 文件 | 覆盖 | 需求 |
 |:---|:---|:---|
-| `specification/01-core.md` | `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池 | #18 #19 #21 #23 |
-| `specification/02-state.md` | `state/`：信号原语、订阅生命周期、`Store`、异步与协程 | #6 #19 |
-| `specification/03-layout-render.md` | `layout/` `render/` `image/` `media/`：布局协议、Flex/Grid 算法、Painter、字体引擎、Surface 与后端 | #11 #20 |
-| `specification/04-widget.md` | `widget/` `ui/`：控件基类契约、自描述、控件清单、可定制性契约 | #7 #22 |
-| `specification/05-event-navigation.md` | `event/` `animation/` `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈 | #8 |
-| `specification/06-app-platform.md` | `app/` `window/` `preferences/` `storage/` `perf/` `debug/`：应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面 | #14 #15 |
-| `specification/07-environment-modifier.md` | `environment/` `theming/` `i18n/` `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier | #12 |
-| `specification/08-tooling.md` | 序列化 / 代码生成 / YAML、控件树检查、Inspector、自描述发现、MCP / CLI / LSP、测试原语、日志通道 | #9 #10 #12 #13 #16 #17 #22 |
+| `specification/01-core.md` | `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池 | SPEC.QUALITY.CORE.MEMORY-SAFETY.001 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.001 |
+| `specification/02-state.md` | `state/`：信号原语、订阅生命周期、`Store`、异步与协程 | SPEC.FEAT.STATE.SIGNAL-STATE.001 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 |
+| `specification/03-layout-render.md` | `layout/` `render/` `image/` `media/`：布局协议、Flex/Grid 算法、Painter、字体引擎、Surface 与后端 | SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001 SPEC.QUALITY.LAYOUT.ALGEBRA.001 |
+| `specification/04-widget.md` | `widget/` `ui/`：控件基类契约、自描述、控件清单、可定制性契约 | SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 SPEC.FEAT.TOOLING.UI-TO-CODE.001 |
+| `specification/05-event-navigation.md` | `event/` `animation/` `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈 | SPEC.API.EXPLICIT-FIRST.001 |
+| `specification/06-app-platform.md` | `app/` `window/` `preferences/` `storage/` `perf/` `debug/`：应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面 | SPEC.PLATFORM.ZERO-IFDEF.001 SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 |
+| `specification/07-environment-modifier.md` | `environment/` `theming/` `i18n/` `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier | SPEC.FEAT.TOOLING.API-SCHEMA.001 |
+| `specification/08-tooling.md` | 序列化 / 代码生成 / YAML、控件树检查、Inspector、自描述发现、MCP / CLI / LSP、测试原语、日志通道 | SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 SPEC.FEAT.TOOLING.UI-INSPECTOR.001 SPEC.FEAT.TOOLING.API-SCHEMA.001 SPEC.FEAT.TOOLING.UI-SERIALIZATION.001 SPEC.FEAT.TOOLING.RECIPE-DOCS.001 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 SPEC.FEAT.TOOLING.UI-TO-CODE.001 |
+| `specification/09-cli.md` | `cli/`：argv 语法、声明表与静态校验、字面量强类型、`cli-*` 错误码、usage / help / schema 派生视图 | SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 |
 
 > **模块存在性提醒**：`a11y`（无障碍）与 `audio`（音频）是真实存在的模块，`a11y` 横跨 `core/`（类型 / 事件 / 桥抽象）与 `widget/`（语义树构建与快照，因需 `Widget` 完整定义；见 `ARCHITECTURE.md` §8.5），`audio` 归属 `media/`（音频图 API 恒编译，设备后端经 `AURORA_ENABLE_AUDIO` 编入，见 `BUILD_OPTIONS.md` §4）。本表按 `include/aurora/` 顶层模块域切分 spec 文档，二者未单列独立文件，但不可误认为不存在。
 
@@ -150,7 +152,7 @@
 - **编码规范 & 提交规范** → `CODING_STANDARDS.md`
 - **使用指南** → `GUIDELINE.md`
 - **编译选项/宏/环境变量** → `BUILD_OPTIONS.md`
-- **各子系统 API 契约** → `specification/01`–`08`
+- **各子系统 API 契约** → `specification/01`–`09`
 - **数据存储抽象层** → `specification/06-app-platform.md` §9.2 + `ARCHITECTURE.md` §4.8
 - **总入口** → 根 `AGENTS.md`
 
@@ -166,10 +168,11 @@
     - **架构 / 运行时 / 分层 / 模块边界 / 设计原则** → `ARCHITECTURE.md`
     - **核心概念 / 跨框架映射 / 控件语义**（如新增或删除 widget 的对照）→ `CONCEPTS.md`
     - **编码规范 / 命名 / 错误 / AI 友好性**（强类型、命名序、默认参数等）→ `CODING_STANDARDS.md`
+    - **注释形态** → `CODING_STANDARDS.md` §13；**字符串字面量的语言（注释外禁中文）** → 同文 §14
     - **编译期开关 / feature 宏 / 环境变量** → `BUILD_OPTIONS.md`
     - **新增可复现用法 / 最小可编译配方** → `GUIDELINE.md`
     - **提交信息写法** → `CODING_STANDARDS.md` §10
-    - **文档章节号与需求编号写法**：章节号一律纯数字点分层级（`1` / `1.1` / `1.1.1`），禁止中英文序号；需求编号用 `#N`，与章节号并存
+    - **文档章节号与需求编号写法**：章节号一律纯数字点分层级（`1` / `1.1` / `1.1.1`），禁止中英文序号；需求 ID 用 `SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`，与章节号并存
     - 新增 / 删除 widget 或类型时，除 `aurora_api.json`（运行 `gen_api_tools`）外，还应在 `CONCEPTS.md`的控件映射中体现（如适用）。
     - **冲突回写原则**：当文档与代码运行时行为冲突时，以 **代码运行时**为准，并 **回填文档**
       消除冲突，杜绝「文档有、代码无」或「文档缺、代码有」的漂移；不得为迁就旧文档而保留错误实现。
@@ -199,3 +202,32 @@
    却会破坏封装不变量或改变派生类契约。 **规则**：保持被改文件/类改动前的可见性划分不变；仅当本次改动本身在语义上
    确实要求调整可见性（如新增的公开 API、需要被子类覆盖的钩子）时才改，且须显式说明原因。改动前先确认目标符号
    原本所处访问区，改动后不要把它移到别的访问区。
+10. **禁止任务与优先级编号标记**：代码（标识符、注释、字符串字面量）、提交信息、`codespec/` 文档与本文件，
+    一律不得出现任务、优先级与阶段编号——`P0`/`P1`/`D1`/`Q5`/`Phase 1`/`Phase A`/`T1`/`Step 3` 之类。
+    这类标记只是撰写当时的临时脚手架（源自某份评审草案、任务清单或对话轮次），脱离那份列表便不再指代任何东西；
+    一旦编号重排或阶段改名，留在代码与文档中的旧编号会从「无信息」退化为**反向错误**——外部读者（人与 AI）
+    据此既定位不到目标，还可能理解成相反含义。**规则**：一律改写为语义化表述（如「算术隐式入向」
+    「同 Type 严格比较」「先立骨」「断言阶段」）。**唯一例外**是需求 ID `SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`：
+    它是体系化的稳定标识，与章节号并存（见 §4 与硬规则 2）；ID 自身不含 `#`，旧的纯数字形态由
+    `tools/check/check_code_doc_sync.py` 的 DOC3 / DOC4 防回流规则拦下（`KeyCode D0`–`D9` / `D65` / `A8`、
+    `Bidi`、`TEST-R*` 等同形合法名不属需求编号，匹配口径已排除）。仅存在于本地、不进入版本控制的临时草稿（`*.draft.md`）可自用编号，
+    但其内容在提升进代码或 `codespec/` 之前必须完成改写。本条目为说明禁止形态而列举的字符串是唯一例外。
+11. **引用必须可达，且目标必须随仓库分发**：不得引用不存在的文档、章节、符号与路径，也不得引用只存在于本机、
+    未纳入版本控制的文件。**理由**：注释与文档中的引用是外部读者唯一的定位手段——指向不存在的目标等于制造死链，
+    指向不可分发的目标（本机绝对路径、临时草稿、本地工具目录）则等于对读者完全不可见，两种情形都会让人按图索骥而落空。
+    **具体要求**：
+    - 引用 `codespec/` 文档时写仓库相对路径 + 章节号（如 `ARCHITECTURE.md` §8.5），锚点须真实存在；
+    - 引用代码时写仓库相对路径（如 `include/aurora/core/json.h`），必要时附符号名，**不写行号**（会随改动漂移）；
+    - **不得**引用 `*.draft.md`、`.workbuddy/`、`.codebuddy/`、构建目录（`build*/`）、本机绝对路径与个人目录；
+    - 提及尚未落地的规划时，须显式标注为「计划 / 待建」，不得写成既存事实。
+    - 增量由 `tools/check/check_codespec_xref.py`（文档交叉引用）与 `tools/check/check_code_doc_sync.py`
+      （代码注释引用）守护；本条目是这两道门禁的语义前提。
+12. **公共 API 的文档注释按 `CODING_STANDARDS.md` §13 写，且必须写全**：标记一律 `///`（成员尾注 `///<`，禁 `/** */`、`/*! */`、`//!`、`/**< */`），命令一律 `@` 前缀（禁 `\cmd`），`@brief` 居块首；
+    `include/` 下公共类型的每个函数 / 方法 / 数据成员都要有文档注释，并按「命令必选矩阵」补齐 `@param`（含 `[in]`/`[out]` 方向）、`@return`（非 void）、`@tparam`（每个具名模板形参）、枚举项说明、常量宏说明——**不得只留标记而缺某一规定说明项**（矩阵见 §13.5.2）。
+    纯实现叙述 / TODO / 内部说明用 `//` 且不得紧贴可文档化声明；`include/` 里紧贴公共声明的 `//` 须升级为 `///`。
+    描述内容以代码实际行为为准，禁止编造语义或零信息套话。增量由 CTest `check_doc_comments`（`tools/check/check_doc_comments.py`，DOC-R1–DOC-R8）守护，
+    「写了注释但 Doxygen 读不出」由 `docs` 目标（`Doxyfile`，`WARN_AS_ERROR=YES`）另查；两者互补、不重叠。豁免须逐条写 `DOC-EXEMPT: <规则> <原因>` 并注明理由。
+13. **字符串字面量里不得写中文**（`CODING_STANDARDS.md` §14，LIT-1）：注释可用中文，但字面量会经 stdout/stderr、`Logger`/`AURORA_LOG_RAW`、`Diagnostics`、Inspector、CLI、LSP 与 ctest 输出抵达控制台，
+    控制台代码页不受本库控制——GBK 等窄代码页下 UTF-8 中文串即乱码（本仓实测撞到 `UnicodeEncodeError: 'gbk' codec can't encode character`）。新增或修改字面量时直接写英文，并把该字面量内的全角标点换成 ASCII。
+    唯一例外是「换成英文就让被测事实消失」的功能必需中文（CJK 断言素材、locale 输出、上屏 demo 文案、着色器源码内注释、Python 正则语义片段），须就地写 `CJK-LITERAL: <类别> - <原因>` 标记（见 §14.2 的类别词表，六个标识），
+    **诊断文案不属例外**。增量由 CTest `check_no_cjk_literals`（`tools/check/check_no_cjk_literals.py`，LIT-1/LIT-2）守护；门禁自身输出必须全 ASCII（违规串转义成 `\uXXXX`），否则门禁日志本身就读不清。

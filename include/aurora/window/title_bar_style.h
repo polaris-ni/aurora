@@ -16,16 +16,16 @@ enum class TitleBarButtonLayout : std::uint8_t {
 /// @brief CSD 自绘标题栏样式值类型（纯数据聚合，可直接 `TitleBarStyle{...}` 指定成员初始化）。
 /// 颜色按激活/失焦成对提供，由绘制层依据窗口焦点状态切换（失焦自动变暗）。
 /// 默认成员值 = `adwaita_dark()` 预设：`TitleBarStyle{}` 即得一套可直接使用的 GNOME 暗色 header bar。
-/// 数值出处：libadwaita/GNOME 暗色 header bar（bg #303030/#242424、close_hover red3 #E01B24）、
-/// WinUI/Windows 11 暗色标题栏（bg ≈#202020、close_hover #C42B1C），个别 alpha 为取整微调。
+/// 数值出处：libadwaita/GNOME 暗色 header bar（bg `#303030`/`#242424`、close_hover red3 `#E01B24`）、
+/// WinUI/Windows 11 暗色标题栏（bg ≈`#202020`、close_hover `#C42B1C`），个别 alpha 为取整微调。
 struct TitleBarStyle {
     float height = 36.0F;  ///< 标题栏高度（逻辑 dp）
-    Color bg_active{0x30, 0x30, 0x30};  ///< 激活态背景（GNOME 暗色 header bar #303030）
-    Color bg_inactive{0x24, 0x24, 0x24};  ///< 失焦背景（自动变暗用；GNOME 暗色 #242424）
+    Color bg_active{0x30, 0x30, 0x30};  ///< 激活态背景（GNOME 暗色 header bar `#303030`）
+    Color bg_inactive{0x24, 0x24, 0x24};  ///< 失焦背景（自动变暗用；GNOME 暗色 `#242424`）
     Color fg_active{255, 255, 255};  ///< 标题文字/符号前景色（激活）
     Color fg_inactive{0x9A, 0x99, 0x96};  ///< 失焦前景（GTK 暗色 insensitive 前景近似值）
     Color hover_tint{255, 255, 255, 32};  ///< 按钮（非关闭）悬停底色（白色 α≈0.125）
-    Color close_hover{0xE0, 0x1B, 0x24};  ///< 关闭钮悬停底色（Adwaita 特征红；GNOME red3 #E01B24）
+    Color close_hover{0xE0, 0x1B, 0x24};  ///< 关闭钮悬停底色（Adwaita 特征红；GNOME red3 `#E01B24`）
     TitleBarButtonLayout button_layout = TitleBarButtonLayout::Adwaita;  ///< 按钮视觉语言
     bool show_minimize = true;  ///< 是否绘制/命中最小化按钮（false 时几何层返回空盒）
     bool show_maximize = true;  ///< 显式开关；resizable=false 时绘制/命中层仍会自动隐藏
@@ -33,10 +33,13 @@ struct TitleBarStyle {
     bool show_title = true;  ///< 是否绘制标题文字（不影响几何分区划分）
     bool center_title = false;  ///< true=标题居中（Adwaita/WinUI 风格）；false=左对齐（现状兼容）
 
-    /// @brief GNOME/libadwaita 暗色 header bar 预设（bg≈#303030/#242424、fg=白、close_hover=#E01B24）。
+    /// @brief GNOME/libadwaita 暗色 header bar 预设（bg≈`#303030`/`#242424`、fg=白、close_hover=`#E01B24`）。
+    /// @return 默认构造的 TitleBarStyle——其默认成员值即本暗色预设。
     [[nodiscard]] static constexpr auto adwaita_dark() noexcept -> TitleBarStyle { return TitleBarStyle{}; }
-    /// @brief GNOME/libadwaita 亮色 header bar 预设（bg≈#EBEBEB/#E0E0E0、fg=黑、close_hover=#E01B24）。
+    /// @brief GNOME/libadwaita 亮色 header bar 预设（bg≈`#EBEBEB`/`#E0E0E0`、fg=黑、close_hover=`#E01B24`）。
+    /// @return 亮色配色覆盖后的 TitleBarStyle（按钮布局仍为 Adwaita）。
     [[nodiscard]] static constexpr auto adwaita_light() noexcept -> TitleBarStyle {
+        // 亮色预设的可变暂存对象：自默认成员值（暗色预设）起步，下方逐字段覆盖为亮色配色。
         TitleBarStyle s;
         s.bg_active = Color{0xEB, 0xEB, 0xEB};
         s.bg_inactive = Color{0xE0, 0xE0, 0xE0};
@@ -46,7 +49,8 @@ struct TitleBarStyle {
         s.close_hover = Color{0xE0, 0x1B, 0x24};
         return s;
     }
-    /// @brief WinUI/Windows 11 暗色标题栏预设（bg≈#202020、close_hover=#C42B1C、Windows 按钮布局）。
+    /// @brief WinUI/Windows 11 暗色标题栏预设（bg≈`#202020`、close_hover=`#C42B1C`、Windows 按钮布局）。
+    /// @return 覆盖 bg/hover/close_hover 并切换 button_layout 为 Windows 的 TitleBarStyle。
     [[nodiscard]] static constexpr auto windows_dark() noexcept -> TitleBarStyle {
         TitleBarStyle s;
         s.bg_active = Color{0x20, 0x20, 0x20};

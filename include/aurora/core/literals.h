@@ -1,8 +1,11 @@
 #pragma once
 
+/// @brief 用户定义字面量统一入口（需求 SPEC.API.STRONG-TYPES.001）：聚合各领域头中 `aurora::literals` 命名空间下的
+/// UDL。
+/// @file
 // core/literals.h
 //
-// 用户定义字面量（需求 #4）统一收敛入口。
+// 用户定义字面量（需求 SPEC.API.STRONG-TYPES.001）统一收敛入口。
 //
 // 字面量实际声明于各自领域头文件内、归属于 `aurora::literals` 命名空间：
 //   - core/dimension.h  ：`_dp` / `_px`  （长度）

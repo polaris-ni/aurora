@@ -19,7 +19,15 @@ auto main() -> int {
                                                        gap(12.0F),
                                                        std::move(line2),
                                                    }}};
+    aurora::Node tree{std::move(root)};  // 单一宿主：inspector 与 App 各持一份共享句柄
 
-    aurora::App().title("au::App() fluent wrapper").size(420, 300).view(std::move(root)).run();
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+    // 无人值守取证通道（opt-in：未设 AURORA_INSPECTOR_PORT 时完全静默，不影响本载体
+    // 「stdout/stderr 均空」的基线差异）——本载体不经 run_demo，故自行接线同一口径。
+    // Surface getter 不可得（窗口由 `App::run` 内部构造），故只提供 `/api/tree` 侧读数。
+    auto inspector = start_demo_inspector([node = tree]() -> aurora::Node { return node; });
+#endif
+
+    aurora::App().title("au::App() fluent wrapper").size(420, 300).view(aurora::Node{tree}).run();
     return 0;
 }

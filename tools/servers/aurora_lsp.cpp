@@ -25,7 +25,6 @@
 #include "aurora/widget/serialization.h"
 #include "known_enums.h"
 #include "lsp_features.h"
-#include "nlohmann/json.hpp"
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
@@ -51,46 +50,51 @@ static auto schema() -> const au::tools::Schema & {
                     continue;
                 }
                 au::tools::ComponentSchema c;
-                c.type = j.value("type", t);
-                if (j.contains("category") && j["category"].is_string()) {
-                    c.category = j["category"].get<std::string>();
+                c.type = j.as_or<std::string>("type", t);
+                if (const auto *v = j.at("category"); v != nullptr && v->is_string()) {
+                    c.category = v->as_or<std::string>("");
                 }
-                if (j.contains("children_policy") && j["children_policy"].is_string()) {
-                    c.children_policy = j["children_policy"].get<std::string>();
-                } else if (j.contains("container") && j["container"].is_string()) {
-                    c.children_policy = j["container"].get<std::string>();
+                if (const auto *v = j.at("children_policy"); v != nullptr && v->is_string()) {
+                    c.children_policy = v->as_or<std::string>("");
+                } else if (const auto *v = j.at("container"); v != nullptr && v->is_string()) {
+                    c.children_policy = v->as_or<std::string>("");
                 }
-                if (j.contains("prop_descriptors") && j["prop_descriptors"].is_array()) {
-                    for (const auto &p : j["prop_descriptors"]) {
+                if (const auto *descriptors = j.at("prop_descriptors");
+                    descriptors != nullptr && descriptors->is_array()) {
+                    for (const auto &descriptor : *descriptors) {
                         au::tools::PropSchema ps;
-                        if (p.contains("name") && p["name"].is_string()) {
-                            ps.name = p["name"].get<std::string>();
+                        if (const auto *v = descriptor.at("name"); v != nullptr && v->is_string()) {
+                            ps.name = v->as_or<std::string>("");
                         }
-                        if (p.contains("type") && p["type"].is_string()) {
-                            ps.type = p["type"].get<std::string>();
+                        if (const auto *v = descriptor.at("type"); v != nullptr && v->is_string()) {
+                            ps.type = v->as_or<std::string>("");
                         }
-                        if (p.contains("default")) {
-                            const au::Json &d = p["default"];
-                            ps.default_value = d.is_string() ? d.get<std::string>() : d.dump();
+                        if (const auto *d = descriptor.at("default"); d != nullptr) {
+                            if (d->is_string()) {
+                                ps.default_value = d->as_or<std::string>("");
+                            } else {
+                                const auto dumped = au::json::dump(*d);
+                                ps.default_value = dumped.ok() ? dumped.value() : std::string{};
+                            }
                         }
-                        ps.required = p.value("required", false);
-                        if (p.contains("note") && p["note"].is_string()) {
-                            ps.note = p["note"].get<std::string>();
+                        ps.required = descriptor.as_or<bool>("required", false);
+                        if (const auto *v = descriptor.at("note"); v != nullptr && v->is_string()) {
+                            ps.note = v->as_or<std::string>("");
                         }
                         c.props.push_back(std::move(ps));
                     }
                 }
-                if (j.contains("events") && j["events"].is_array()) {
-                    for (const auto &e : j["events"]) {
-                        if (e.is_string()) {
-                            c.events.push_back(e.get<std::string>());
+                if (const auto *events = j.at("events"); events != nullptr && events->is_array()) {
+                    for (const auto &event : *events) {
+                        if (event.is_string()) {
+                            c.events.push_back(event.as_or<std::string>(""));
                         }
                     }
                 }
-                if (j.contains("examples") && j["examples"].is_array()) {
-                    for (const auto &ex : j["examples"]) {
-                        if (ex.is_string()) {
-                            c.examples.push_back(ex.get<std::string>());
+                if (const auto *examples = j.at("examples"); examples != nullptr && examples->is_array()) {
+                    for (const auto &example : *examples) {
+                        if (example.is_string()) {
+                            c.examples.push_back(example.as_or<std::string>(""));
                         }
                     }
                 }
@@ -150,36 +154,37 @@ static auto read_message(std::string &out) -> bool {
 }
 
 static auto send_message(const au::Json &j) -> void {
-    const std::string s = j.dump();
+    const auto dumped = au::json::dump(j);
+    const std::string s = dumped.ok() ? dumped.value() : std::string{};
     AURORA_LOG_RAW("lsp", "Content-Length: ", s.size(), "\r\n\r\n", s);
 }
 
 static auto send_response(const au::Json &id, const au::Json &result) -> void {
     au::Json r = au::Json::object();
-    r["jsonrpc"] = "2.0";
-    r["id"] = id;
-    r["result"] = result;
+    r.set("jsonrpc", "2.0");
+    r.set("id", id);
+    r.set("result", result);
     send_message(r);
 }
 
 static auto send_notification(const std::string &method, const au::Json &params) -> void {
     au::Json r = au::Json::object();
-    r["jsonrpc"] = "2.0";
-    r["method"] = method;
-    r["params"] = params;
+    r.set("jsonrpc", "2.0");
+    r.set("method", method);
+    r.set("params", params);
     send_message(r);
 }
 
 static auto range_json(size_t line, size_t col, size_t end_line, size_t end_col) -> au::Json {
     au::Json r = au::Json::object();
     au::Json s = au::Json::object();
-    s["line"] = line;
-    s["character"] = col;
+    s.set("line", line);
+    s.set("character", col);
     au::Json e = au::Json::object();
-    e["line"] = end_line;
-    e["character"] = end_col;
-    r["start"] = s;
-    r["end"] = e;
+    e.set("line", end_line);
+    e.set("character", end_col);
+    r.set("start", s);
+    r.set("end", e);
     return r;
 }
 
@@ -199,25 +204,43 @@ static auto kind_to_int(const std::string &k) -> int {
     return 1;
 }
 
+/// @brief 读取 params.textDocument.<key>（宽容：缺键 / 非对象 / 类型不符回空串，不抛异常）。
+static auto text_document_field(const au::Json &params, const char *key) -> std::string {
+    const auto *td = params.at("textDocument");
+    return td != nullptr ? td->as_or<std::string>(key, std::string{}) : std::string{};
+}
+
+/// @brief 读取 params.position 的行/列（宽容：缺键回 0）。
+static auto position_line_col(const au::Json &params, size_t &line, size_t &col) -> void {
+    line = 0;
+    col = 0;
+    const auto *pos = params.at("position");
+    if (pos == nullptr) {
+        return;
+    }
+    line = pos->as_or<std::size_t>("line", std::size_t{0});
+    col = pos->as_or<std::size_t>("character", std::size_t{0});
+}
+
 // ----------------------------- capability handling ---------------------------
 static auto on_initialize(const au::Json & /*params*/) -> au::Json {
     au::Json caps = au::Json::object();
-    caps["textDocumentSync"] = 1;  // full sync
+    caps.set("textDocumentSync", 1);  // full sync
     au::Json comp = au::Json::object();
     au::Json trig = au::Json::array();
     trig.push_back(".");
     trig.push_back(":");
-    comp["triggerCharacters"] = trig;
-    caps["completionProvider"] = comp;
-    caps["hoverProvider"] = true;
-    caps["codeActionProvider"] = true;
+    comp.set("triggerCharacters", trig);
+    caps.set("completionProvider", comp);
+    caps.set("hoverProvider", au::Json{true});
+    caps.set("codeActionProvider", au::Json{true});
 
     au::Json result = au::Json::object();
-    result["capabilities"] = caps;
+    result.set("capabilities", caps);
     au::Json info = au::Json::object();
-    info["name"] = "aurora-lsp";
-    info["version"] = AURORA_VERSION_STRING;
-    result["serverInfo"] = info;
+    info.set("name", "aurora-lsp");
+    info.set("version", AURORA_VERSION_STRING);
+    result.set("serverInfo", info);
     return result;
 }
 
@@ -228,59 +251,59 @@ static auto publish_diagnostics(const std::string &uri, const std::string &text)
     diags.insert(diags.end(), ev.begin(), ev.end());
 
     au::Json params = au::Json::object();
-    params["uri"] = uri;
+    params.set("uri", uri);
     au::Json arr = au::Json::array();
     for (const auto &d : diags) {
         au::Json dd = au::Json::object();
-        dd["range"] = range_json(d.line, d.col, d.end_line, d.end_col);
+        dd.set("range", range_json(d.line, d.col, d.end_line, d.end_col));
         // LSP diagnostic severity: 1=Error, 2=Warning, 3=Info, 4=Hint.
-        dd["severity"] = (d.severity == au::tools::Diagnostic::Severity::Error) ? 1 : 2;
-        dd["message"] = d.message;
-        dd["source"] = "aurora-lsp";
+        dd.set("severity", (d.severity == au::tools::Diagnostic::Severity::Error) ? 1 : 2);
+        dd.set("message", d.message);
+        dd.set("source", "aurora-lsp");
         arr.push_back(dd);
     }
-    params["diagnostics"] = arr;
+    params.set("diagnostics", arr);
     send_notification("textDocument/publishDiagnostics", params);
 }
 
 static auto doc_text(const au::Json &params) -> std::string {
-    const std::string uri = params["textDocument"].value("uri", "");
+    const std::string uri = text_document_field(params, "uri");
     const auto it = docs().find(uri);
     return it == docs().end() ? std::string{} : it->second;
 }
 
 static auto on_completion(const au::Json &params) -> au::Json {
-    const std::string uri = params["textDocument"].value("uri", "");
+    const std::string uri = text_document_field(params, "uri");
     const std::string text = doc_text(params);
     if (text.empty() && !docs().contains(uri)) {
         return au::Json::object();
     }
-    const au::Json &pos = params["position"];
-    const size_t line = pos["line"].get<size_t>();
-    const size_t col = pos["character"].get<size_t>();
+    size_t line = 0;
+    size_t col = 0;
+    position_line_col(params, line, col);
 
     const au::tools::Document doc = au::tools::analyze(text);
     const std::vector<au::tools::CompletionItem> items = completions(text, doc, schema(), line, col);
 
     au::Json result = au::Json::object();
-    result["isIncomplete"] = false;
+    result.set("isIncomplete", au::Json{false});
     au::Json arr = au::Json::array();
     for (const auto &it : items) {
         au::Json ci = au::Json::object();
-        ci["label"] = it.label;
-        ci["kind"] = kind_to_int(it.kind);
+        ci.set("label", it.label);
+        ci.set("kind", kind_to_int(it.kind));
         if (!it.detail.empty()) {
-            ci["detail"] = it.detail;
+            ci.set("detail", it.detail);
         }
         if (!it.documentation.empty()) {
             au::Json doc_json = au::Json::object();
-            doc_json["kind"] = "markdown";
-            doc_json["value"] = it.documentation;
-            ci["documentation"] = doc_json;
+            doc_json.set("kind", "markdown");
+            doc_json.set("value", it.documentation);
+            ci.set("documentation", doc_json);
         }
         arr.push_back(ci);
     }
-    result["items"] = arr;
+    result.set("items", arr);
     return result;
 }
 
@@ -289,9 +312,9 @@ static auto on_hover(const au::Json &params) -> au::Json {
     if (text.empty()) {
         return {};  // null
     }
-    const au::Json &pos = params["position"];
-    const size_t line = pos["line"].get<size_t>();
-    const size_t col = pos["character"].get<size_t>();
+    size_t line = 0;
+    size_t col = 0;
+    position_line_col(params, line, col);
 
     const au::tools::Document doc = au::tools::analyze(text);
     auto h = hover(doc, schema(), line, col);
@@ -301,14 +324,14 @@ static auto on_hover(const au::Json &params) -> au::Json {
 
     au::Json result = au::Json::object();
     au::Json contents = au::Json::object();
-    contents["kind"] = "markdown";
-    contents["value"] = h->content;
-    result["contents"] = contents;
+    contents.set("kind", "markdown");
+    contents.set("value", h->content);
+    result.set("contents", contents);
     return result;
 }
 
 static auto on_code_action(const au::Json &params) -> au::Json {
-    const std::string uri = params["textDocument"].value("uri", "");
+    const std::string uri = text_document_field(params, "uri");
     const std::string text = doc_text(params);
     if (text.empty()) {
         return au::Json::array();
@@ -320,20 +343,20 @@ static auto on_code_action(const au::Json &params) -> au::Json {
     au::Json arr = au::Json::array();
     for (const auto &a : actions) {
         au::Json ca = au::Json::object();
-        ca["title"] = a.title;
-        ca["kind"] = "quickfix";
+        ca.set("title", a.title);
+        ca.set("kind", "quickfix");
         au::Json edit = au::Json::object();
         au::Json changes = au::Json::object();
         au::Json edits = au::Json::array();
         for (const auto &e : a.edits) {
             au::Json te = au::Json::object();
-            te["range"] = range_json(e.line, e.col, e.line, e.col);
-            te["newText"] = e.new_text;
+            te.set("range", range_json(e.line, e.col, e.line, e.col));
+            te.set("newText", e.new_text);
             edits.push_back(te);
         }
-        changes[uri] = edits;
-        edit["changes"] = changes;
-        ca["edit"] = edit;
+        changes.set(uri, edits);
+        edit.set("changes", changes);
+        ca.set("edit", edit);
         arr.push_back(ca);
     }
     return arr;
@@ -349,18 +372,20 @@ auto main() -> int {  // NOLINT(*-exception-escape, *-function-cognitive-complex
     std::string msg;
     while (read_message(msg)) {
         au::Json req;
-        try {
-            req = au::Json::parse(msg);
-        } catch (...) {
+        if (auto parsed = au::json::parse(msg); parsed) {
+            req = std::move(parsed.value());
+        } else {
             continue;
         }
         if (!req.contains("method")) {
             continue;
         }
 
-        const std::string method = req.value("method", "");
-        const au::Json id = req.contains("id") ? req["id"] : au::Json();
-        const au::Json params = req.contains("params") ? req["params"] : au::Json::object();
+        const auto method = req.as_or<std::string>("method", "");
+        const auto *id_v = req.at("id");
+        const au::Json id = id_v != nullptr ? *id_v : au::Json{};
+        const auto *params_v = req.at("params");
+        const au::Json params = (params_v != nullptr && params_v->is_object()) ? *params_v : au::Json::object();
 
         try {
             if (method == "initialize") {
@@ -370,19 +395,20 @@ auto main() -> int {  // NOLINT(*-exception-escape, *-function-cognitive-complex
             } else if (method == "exit") {
                 break;
             } else if (method == "textDocument/didOpen") {
-                const std::string uri = params["textDocument"].value("uri", "");
-                const std::string text = params["textDocument"].value("text", "");
+                const std::string uri = text_document_field(params, "uri");
+                const std::string text = text_document_field(params, "text");
                 docs()[uri] = text;
                 publish_diagnostics(uri, text);
             } else if (method == "textDocument/didChange") {
-                const std::string uri = params["textDocument"].value("uri", "");
-                const au::Json &changes = params["contentChanges"];
-                if (changes.is_array() && !changes.empty() && changes[0].contains("text")) {
-                    docs()[uri] = changes[0]["text"].value("text", "");
+                const std::string uri = text_document_field(params, "uri");
+                const auto *changes = params.at("contentChanges");
+                if (changes != nullptr && changes->is_array() && !changes->empty() && changes->at(0) != nullptr &&
+                    changes->at(0)->contains("text")) {
+                    docs()[uri] = changes->at(0)->as_or<std::string>("text", std::string{});
                 }
                 publish_diagnostics(uri, docs()[uri]);
             } else if (method == "textDocument/didClose") {
-                docs().erase(params["textDocument"].value("uri", ""));
+                docs().erase(text_document_field(params, "uri"));
             } else if (method == "textDocument/completion") {
                 send_response(id, on_completion(params));
             } else if (method == "textDocument/hover") {
@@ -390,12 +416,12 @@ auto main() -> int {  // NOLINT(*-exception-escape, *-function-cognitive-complex
             } else if (method == "textDocument/codeAction") {
                 send_response(id, on_code_action(params));
             } else if (method == "shutdown" || !id.is_null()) {
-                send_response(id, au::Json());  // shutdown or unknown method
+                send_response(id, au::Json{});  // shutdown or unknown method
             }
         } catch (const std::exception &e) {
             AURORA_LOG_ERROR("lsp", "[aurora-lsp] error handling ", method, ": ", e.what());
             if (!id.is_null() && method != "exit") {
-                send_response(id, au::Json());
+                send_response(id, au::Json{});
             }
         }
     }

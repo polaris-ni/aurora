@@ -1,30 +1,11 @@
 // Column 控件 demo：纵向线性布局，演示主轴/交叉轴对齐。
+//
+// UI 构建与 E2E 场景**同源**：已抽取到 scenes/scene_column.h（inline 构建函数返回根
+// Node），本文件退化为薄 main()。窗口尺寸、标题与渲染结果与抽取前逐字节一致。
 #include "demo_common.h"
+#include "scenes/scene_column.h"
 
 // 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
-auto main() -> int {
-    au::Column start{
-        au::ColumnProps{.children = {au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
-                        .flex = au::Flex{.main_axis = au::MainAxisAlignment::Start}}};
-    start.modifier.set(
-        au::Modifier{}.size(240.0F, 160.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
-
-    au::Column center{au::ColumnProps{
-        .children = {au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
-        .flex = au::Flex{.main_axis = au::MainAxisAlignment::Center, .cross_axis = au::CrossAxisAlignment::Center}}};
-    center.modifier.set(
-        au::Modifier{}.size(240.0F, 160.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
-
-    au::Node root = au::Column{
-        GradientTitle{"Column widget"},
-        gap(12),
-        au::Text{au::LocalizedString{"Main axis Start (top aligned)"}},
-        std::move(start),
-        gap(12),
-        au::Text{au::LocalizedString{"Main axis + cross axis Center"}},
-        std::move(center),
-    };
-    return run_demo(Card{std::move(root)}, "Column · Aurora Demo", 560.0F, 560.0F);
-}
+auto main() -> int { return run_demo(aurora::demo_scenes::build_column(), "Column · Aurora Demo", 560.0F, 560.0F); }

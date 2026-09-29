@@ -23,9 +23,10 @@ using StreamImageId = std::uint64_t;
 struct RhiCapabilities {
     bool gpu = false;  ///< 硬件加速命令消费（GPU 后端为 true）
     bool native_surface_import = false;  ///< 可导入平台原生 GPU 表面（`import_native_surface` 可用）
-    bool compute = false;  ///< 支持 compute 内部加速（当前兑现：大图重采样 mip 链生成 + blur / blend / mask
-                           ///< 区域效果；层合成维持片元路——MSAA 批式累加目标上读-改-写需逐层整幅 resolve+load
-                           ///< 往返并断合批，非收益方向，见规格 §8.8）
+    /// @brief 支持 compute 内部加速。
+    /// @note 当前兑现：大图重采样 mip 链生成 + blur / blend / mask 区域效果；层合成维持片元路——MSAA 批式
+    /// 累加目标上读-改-写需逐层整幅 resolve+load 往返并断合批，非收益方向，见规格 §8.8。
+    bool compute = false;
 };
 
 /// @brief 一条绘制命令所需的**变长数据**，由 `DisplayList` 在回放时把池下标解析为只读指针。
@@ -64,6 +65,7 @@ class RhiBackend {
     auto operator=(RhiBackend &&) -> RhiBackend & = delete;
 
     /// @brief 后端标识（诊断与自检用；如 `"software"`）。
+    /// @return 后端名称的只读字符串视图（生命周期由实现内的静态字面量或常驻成员保证）。
     [[nodiscard]] virtual auto name() const -> std::string_view = 0;
 
     /// @brief 提交一条已录制的绘制命令。
@@ -74,10 +76,14 @@ class RhiBackend {
     // ---- 资源扩展面（可选能力；默认实现 = 不支持，调用方按返回值回退常规路径） ----
 
     /// @brief 能力位查询（构造时确定）。
+    /// @return 后端能力位值拷贝；默认实现返回全 false（软件后端 / 未升级的 GPU 后端）。
     [[nodiscard]] virtual auto capabilities() const -> RhiCapabilities { return {}; }
 
     /// @brief 取流式图像槽（固定纹理槽复用，不走 content_hash 缓存、不参与通用缓存淘汰）。
     /// 同 `key` 重复获取复用同槽；尺寸变化时后端就地重定义纹理存储。
+    /// @param key 调用方定义的稳定槽键（如图像 id / 视频帧序列号）；同 key 复用同槽。
+    /// @param width 纹理宽（像素）。
+    /// @param height 纹理高（像素）。
     /// @return 句柄；`0` = 后端不支持（调用方回退常规 `DrawImage` 上传路径）。
     [[nodiscard]] virtual auto acquire_stream_image(std::uint64_t key, int width, int height) -> StreamImageId {
         (void)key;
@@ -87,9 +93,13 @@ class RhiBackend {
     }
 
     /// @brief 流式图像增量更新：按行跨距 + 脏矩形 sub-upload（GL `glTexSubImage2D`）。
+    /// @param id 由 `acquire_stream_image` 或 `import_native_surface` 签发的槽句柄；`0` 视为无效，函数无副作用。
     /// @param pixels       像素基址（RGBA8 直色，非预乘；PMA 由后端在采样/上传阶段处理）
     /// @param stride_bytes 行跨距字节数；`0` = 紧凑行（width*4）
-    /// @param x,y,w,h      脏矩形（像素坐标，左上原点；全图更新传整图范围）
+    /// @param x 脏矩形左上角 x（像素坐标，原点左上）。
+    /// @param y 脏矩形左上角 y（像素坐标，原点左上）。
+    /// @param w 脏矩形宽（像素）。
+    /// @param h 脏矩形高（像素）。
     virtual auto update_stream_image(StreamImageId id, const std::uint8_t *pixels, std::size_t stride_bytes, int x,
                                      int y, int w, int h) -> void {
         (void)id;
@@ -102,9 +112,11 @@ class RhiBackend {
     }
 
     /// @brief 释放流式图像槽（句柄此后无效；重复释放无害）。
+    /// @param id 待释放的槽句柄；`0` 视为无效，函数无副作用。
     virtual auto release_stream_image(StreamImageId id) -> void { (void)id; }
 
     /// @brief 导入平台原生 GPU 表面（dmabuf / IOSurface / D3D11 共享纹理 / AHardwareBuffer）。
+    /// @param frame 平台原生表面帧描述（kind + 句柄 + 尺寸）。
     /// @return 流式图像句柄；`0` = 不支持或导入失败（调用方回退 CPU 上传路径，单帧警告不刷屏）。
     [[nodiscard]] virtual auto import_native_surface(const NativeSurfaceFrame &frame) -> StreamImageId {
         (void)frame;

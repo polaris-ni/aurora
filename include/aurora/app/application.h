@@ -43,37 +43,38 @@ class Preferences;  // 前置声明：几何持久化存储（仅作指针成员
 
 class AudioContext;  // 前置声明：应用级默认音频上下文（仅作 shared_ptr 成员，避免拉入 audio.h）
 
-/**
- * @brief 应用组合根：持有**一组窗口宿主**（`WindowHost`），以单一帧循环统一驱动它们。
- *
- * 对应 ARCHITECTURE.md §4.6 / §3.1：单线程 UI；事件同步派发，经 `EventDispatcher` + `FocusManager`
- * 统一处理指针/键盘/滚轮/文本输入，并维护焦点序（Tab 导航）。
- *
- * **多窗口模型（specification/06-app-platform.md §2.4）**：
- * - 每个窗口是一个 `WindowHost`：拥有自己的 `Scene`（UI 树）、`FocusManager`、指针/触控捕获表与
- *   帧统计。事件只在目标宿主的作用域内派发——**焦点与捕获不跨窗口**。
- * - `Application` 不拥有上述状态，只负责：统一 pump 事件 → 推进**共享**的 `Animator`/`Scheduler`
- *   → 逐宿主渲染 → 聚合等待时长后一次性阻塞等待 → 帧末回收已关闭窗口。
- * - `Animator` / `Scheduler` / `ShortcutRegistry` / `CommandRegistry` 是应用级共享的（`dt` 只推进
- *   一次、快捷键与命令语义跨窗口一致），不入宿主。
- * - `scene()` / `focus()` / `dispatch_*` / `window()` 等既有访问器作用于**主窗口**（默认首个登记的
- *   窗口）；单窗口用法的行为与历史完全一致。
- *
- * 后端组合（ARCHITECTURE.md §8.4 / specification/03-layout-render.md §8.5）：
- * - `Application(Scene, unique_ptr<Window>)` 接受由 `create_window(XxxOptions)` 工厂产出的预组装 `Window`；
- *   并以宿主为单位把原生事件经 `EventDispatcher` 集中派发；随后可 `run()` 进入帧循环。
- * - `Application(Scene, unique_ptr<Surface>)` 注入任意自定义 `Surface`（自定义后端稳定入口）。
- * - `Application(Scene, int, int)` 为无头便捷构造（登记一个「无 Window 的宿主」），仅用于
- *   `render_to_png` 与程序化派发（`dispatch_*`），向后兼容既有无头测试。
- * - 需要更多窗口时经 `open_window()` 追加宿主，返回 `WindowId`。
- *
- * @note Thread: main-thread only
- * @note Side-effects: paints (run loop renders frames)
- * @note Rebuildable: no
- */
+/// @brief 应用组合根：持有**一组窗口宿主**（`WindowHost`），以单一帧循环统一驱动它们。
+///
+/// 对应 ARCHITECTURE.md §4.6 / §3.1：单线程 UI；事件同步派发，经 `EventDispatcher` + `FocusManager`
+/// 统一处理指针/键盘/滚轮/文本输入，并维护焦点序（Tab 导航）。
+///
+/// **多窗口模型（specification/06-app-platform.md §2.4）**：
+/// - 每个窗口是一个 `WindowHost`：拥有自己的 `Scene`（UI 树）、`FocusManager`、指针/触控捕获表与
+/// 帧统计。事件只在目标宿主的作用域内派发——**焦点与捕获不跨窗口**。
+/// - `Application` 不拥有上述状态，只负责：统一 pump 事件 → 推进**共享**的 `Animator`/`Scheduler`
+/// → 逐宿主渲染 → 聚合等待时长后一次性阻塞等待 → 帧末回收已关闭窗口。
+/// - `Animator` / `Scheduler` / `ShortcutRegistry` / `CommandRegistry` 是应用级共享的（`dt` 只推进
+/// 一次、快捷键与命令语义跨窗口一致），不入宿主。
+/// - `scene()` / `focus()` / `dispatch_*` / `window()` 等既有访问器作用于**主窗口**（默认首个登记的
+/// 窗口）；单窗口用法的行为与历史完全一致。
+///
+/// 后端组合（ARCHITECTURE.md §8.4 / specification/03-layout-render.md §8.5）：
+/// - `Application(Scene, unique_ptr<Window>)` 接受由 `create_window(XxxOptions)` 工厂产出的预组装 `Window`；
+/// 并以宿主为单位把原生事件经 `EventDispatcher` 集中派发；随后可 `run()` 进入帧循环。
+/// - `Application(Scene, unique_ptr<Surface>)` 注入任意自定义 `Surface`（自定义后端稳定入口）。
+/// - `Application(Scene, int, int)` 为无头便捷构造（登记一个「无 Window 的宿主」），仅用于
+/// `render_to_png` 与程序化派发（`dispatch_*`），向后兼容既有无头测试。
+/// - 需要更多窗口时经 `open_window()` 追加宿主，返回 `WindowId`。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: paints (run loop renders frames)
+/// @note Rebuildable: no
 class Application {
   public:
     /// @brief 无头便捷构造：登记一个**无 OS 窗口的宿主**，仅用于 render_to_png / 程序化派发。
+    /// @param scene 初始 UI 树（作为主宿主的 Scene 登记）。
+    /// @param width 无头画布逻辑宽（`render_to_png` 的尺寸来源）。
+    /// @param height 无头画布逻辑高（同上）。
     Application(Scene scene, int width, int height) : width_(width), height_(height) {
         (void)register_host(std::move(scene), nullptr, {});
     }
@@ -82,15 +83,20 @@ class Application {
     /// 经 `create_window(move(surface), opts)` 组装 `Window` 并登记宿主。组装失败仅 WARN 降级
     /// （错误归属调用方，其持有 `create_window` 的 `Result`）；该路径在「仅自定义 backend」构建下
     /// 始终可用，不依赖任何内置后端是否编译进构建。
+    /// @param scene 初始 UI 树。
+    /// @param surface 已构造的自定义后端 `Surface`（所有权转移给内部 `Window`）。
+    /// @param opts 组装选项（size/title/max_frames 等）；缺省 `WindowOptions{}`。
     Application(Scene scene, std::unique_ptr<Surface> surface, const WindowOptions &opts = {})
         : width_(static_cast<int>(opts.size.width)), height_(static_cast<int>(opts.size.height)), opts_(opts) {
-        std::unique_ptr<Window> window;
+        std::unique_ptr<Window> window;  // 组装出的后端 Window（组装失败保持空，宿主退化为无头形态）。
+        // 经稳定入口把自定义 Surface 组装为 Window：后端所有权转移，失败只降级为 WARN 并把错误交调用方处理。
         auto res = create_window(std::move(surface), opts);
         if (res) {
             window = std::move(res.value());
         } else {
             AURORA_LOG_WARN("app", std::string("custom surface create_window failed: ") + res.error().message);
         }
+        // 以组装出的 Window 实值回填画布尺寸与标题：窗口为空则保持 opts 期望值，效果直接改写 width_/height_/opts_。
         adopt_window_metrics(window);
         (void)register_host(std::move(scene), std::move(window), opts);
     }
@@ -99,6 +105,9 @@ class Application {
     /// `opts` 透传运行期参数（尤其 `max_frames`，控制 `run()` 帧数）；其 `size`/`title` 以 `Window` 实值为准。
     /// 空 `Window` 仅 WARN 降级（错误归属调用方，其持有工厂的 `Result`）；`Application`/`App` 只认
     /// `unique_ptr<Window>`，不随 backend 增加而增加构造函数。
+    /// @param scene 初始 UI 树。
+    /// @param window 预组装的后端 `Window`（由 `create_window(XxxOptions)` 产出；可空则退化为无头宿主）。
+    /// @param opts 运行期参数透传（尤其 `max_frames`）；缺省 `WindowOptions{}`。
     Application(Scene scene, std::unique_ptr<Window> window, const WindowOptions &opts = {}) : opts_(opts) {
         adopt_window_metrics(window);
         (void)register_host(std::move(scene), std::move(window), opts);
@@ -115,12 +124,20 @@ class Application {
 #endif
     }
 
-    // 禁复制/移动**早已是既成事实**（成员含 `std::vector<std::unique_ptr<WindowHost>>` 故不可复制，
-    // 且用户声明析构会抑制隐式移动），本处只是把隐式结果写成显式契约，不改变任何可编译性。
-    // 实例持有原生窗口与 rAF 所有权，语义上也不该被搬走——「一个应用一个实例」。
+    /// @brief 禁复制/移动**早已是既成事实**（成员含 `std::vector<std::unique_ptr<WindowHost>>` 故不可复制，
+    ///        且用户声明析构会抑制隐式移动），本处只是把隐式结果写成显式契约，不改变任何可编译性。
+    ///        实例持有原生窗口与 rAF 所有权，语义上也不该被搬走——「一个应用一个实例」。
     Application(const Application &) = delete;
+
+    /// @brief 禁移动构造（显式契约，理由同拷贝构造注释）。
     Application(Application &&) = delete;
+
+    /// @brief 禁复制赋值（显式契约，理由同拷贝构造注释）。
+    /// @return 恒不返回（已 delete）。
     auto operator=(const Application &) -> Application & = delete;
+
+    /// @brief 禁移动赋值（显式契约，理由同拷贝构造注释）。
+    /// @return 恒不返回（已 delete）。
     auto operator=(Application &&) -> Application & = delete;
 
     // ---- 多窗口（specification/06-app-platform.md §2.4）----
@@ -138,62 +155,68 @@ class Application {
 
     /// @brief 追加一个窗口宿主并注入自定义 `Surface`（内部经 `create_window` 组装 `Window`）。
     /// 组装失败返回 Error（不吞错、不登记任何宿主），错误归属调用方。
+    /// @return 成功携带新登记的窗口 id；组装失败返回 `PlatformUnavailable` 错误且未登记任何宿主。
     /// @param surface 已构造的自定义后端 `Surface`（所有权转移给内部 `Window`）。
     /// @param scene 该窗口的 UI 树（`Scene` 持有根 `Node`）。
     /// @param opts 窗口选项；`role`/`owner`/`modal`/`persist_id` 不随 `Window` 反推，须显式传入。
     [[nodiscard]] auto open_window(std::unique_ptr<Surface> surface, Scene scene, const WindowOptions &opts = {})
         -> Result<WindowId> {
+        // 经稳定入口把自定义 Surface 组装为 Window：失败即返回错误、不吞错，成功值供下方接管。
         auto res = create_window(std::move(surface), opts);
         if (!res) {
             return make_error(
                 ErrorCode::PlatformUnavailable, std::string("open_window(Surface): ") + res.error().message,
                 "Pass a valid Surface, or use the Window-based open_window overload.", "aurora/app/application.h");
         }
+        // 以组装结果里的 Window 实值回填画布尺寸与标题（void，直接改写成员）。
         adopt_window_metrics(res.value());
         return Result<WindowId>{register_host(std::move(scene), std::move(res.value()), opts)};
     }
 
     /// @brief 请求关闭指定窗口：立即 `Window::close()`，`run()` 在下一次帧末回收宿主。
+    /// @param id 目标窗口 id（未知 id 为 no-op）。
     auto close_window(WindowId id) const -> void;
 
     // ---- 退出策略与生命周期（specification/06-app-platform.md §2.4）----
 
     /// @brief 设置退出策略（默认 `ExitPolicy::LastWindowClosed`：关掉最后一个窗口即退出）。
     /// 单窗口用法下三种策略行为一致（关掉唯一的窗口即退出），多窗口下才显现差异。
+    /// @param p 新退出策略。
     auto set_exit_policy(ExitPolicy p) -> void { exit_policy_ = p; }
     /// @brief 当前退出策略。
+    /// @return exit_policy_ 值。
     [[nodiscard]] auto exit_policy() const -> ExitPolicy { return exit_policy_; }
 
     /// @brief 主动退出帧循环（下一次循环判定生效；**任何**策略下均有效）。
-    ///
     /// 与「关闭窗口」解耦：`ExplicitOnly` 策略下这是唯一的退出方式；
     /// 其他策略下用于在窗口仍开着时提前结束 `run()`。
     auto quit() -> void { quit_requested_ = true; }
 
     /// @brief 指定主窗口（默认：首个登记的宿主）。
-    ///
     /// 主窗口决定 `scene()`/`focus()`/`window()` 的作用对象，并参与 `MainWindowClosed`
     /// 退出策略。指定不存在的 id 为 no-op（保持当前主窗口）。
+    /// @param id 新主窗口 id。
     auto set_main_window(WindowId id) -> void;
 
     /// @brief 当前主窗口 id（无宿主时为 `AURORA_INVALID_WINDOW_ID`）。
+    /// @return 主宿主的 id；main_host_ 为空时返回 `AURORA_INVALID_WINDOW_ID`。
     [[nodiscard]] auto main_window() const -> WindowId {
         return main_host_ != nullptr ? main_host_->id() : AURORA_INVALID_WINDOW_ID;
     }
 
     /// @brief 注册窗口关闭回调：宿主被帧末回收**之后**触发一次，参数为被关闭窗口 id。
     /// 供上层释放与该窗口绑定的外部资源（不要在此回调内再关闭其他窗口）。
+    /// @param cb 关闭回调（参数为被关闭窗口 id）；置空可注销。
     auto set_on_window_closed(std::function<void(WindowId)> cb) -> void { on_window_closed_ = std::move(cb); }
 
     // ---- 跨窗通信与几何持久化（specification/06-app-platform.md §2.4）----
 
     /// @brief 跨窗口事件总线：类型化广播 / 点对点通知，主线程同步扇出。
-    ///
     /// 共享状态请用既有 `Store<S>`（多窗口共享同一实例）；本总线只承载「一次性通知 / 命令」。
+    /// @return 总线引用（生命周期同 Application）。
     [[nodiscard]] auto bus() -> WindowEventBus & { return bus_; }
 
     /// @brief 指定窗口几何持久化存储（`Preferences`）。
-    ///
     /// 指定后，带 `WindowOptions::persist_id` 的窗口在**关闭时自动保存**几何、**打开时自动恢复**；
     /// 存储的几何不可用（显示器被拔除 / 完全落在屏幕外 / 尺寸非正）时回退默认布局并 WARN。
     ///
@@ -202,60 +225,76 @@ class Application {
     /// 这种常见写法同样能恢复主窗口几何。
     ///
     /// 落盘时机由调用方决定（`Preferences::flush()`），本类不做隐式 I/O。
+    /// @param prefs 偏好存储裸指针（nullptr = 取消持久化）；生命周期由调用方保证长于本应用。
     auto set_window_geometry_store(preferences::Preferences *prefs) -> void;
     /// @brief 当前几何持久化存储（未指定时为 nullptr）。
+    /// @return geometry_store_ 裸指针。
     [[nodiscard]] auto window_geometry_store() const -> preferences::Preferences * { return geometry_store_; }
 
     /// @brief 按 id 取窗口宿主（未找到返回 nullptr）。
+    /// @param id 目标窗口 id。
+    /// @return 对应宿主指针（生命周期随 Application）；未找到为 nullptr。
     [[nodiscard]] auto window_host(WindowId id) const -> WindowHost *;
     /// @brief 全部窗口宿主（按登记顺序，含主窗口）。
+    /// @return 宿主指针列表（顺序同登记序）。
     [[nodiscard]] auto windows() const -> std::vector<WindowHost *>;
     /// @brief 当前登记的窗口数。
+    /// @return 宿主数量（hosts_.size()）。
     [[nodiscard]] auto window_count() const -> std::size_t { return hosts_.size(); }
 
+    /// @brief 主窗口的 UI 场景（既有单窗口访问器语义的作用端）。
+    /// @return 主宿主的 Scene 引用；帧末回收恒保留最后一个宿主，主宿主不会失效。
     [[nodiscard]] auto scene() const -> Scene & { return main_host_->scene(); }
 
     /// @brief 焦点管理器（键盘导航 / 焦点派发）——**主窗口**的焦点序。
     /// 多窗口下焦点不跨窗口：其他窗口请用 `window_host(id)->focus()`。
+    /// @return 主宿主的 FocusManager 引用。
     [[nodiscard]] auto focus() const -> FocusManager & { return main_host_->focus(); }
 
     /// @brief 主窗口的后端 `Window`（可能为 nullptr，如后端创建失败或无头构造）。
+    /// @return 后端 Window 裸指针（可空）。
     [[nodiscard]] auto window() const -> Window * { return main_host_->window(); }
 
     /// @brief 帧动画管理器：每帧由 run() 按 dt 驱动，供上层注册 AnimationController。
+    /// @return 应用级共享 Animator 引用。
     [[nodiscard]] auto animator() -> Animator & { return anim_; }
 
     /// @brief 定时任务调度器：每帧由 run() 按 dt 驱动，供 `set_timeout`/`set_interval` 与组件级 `Timer` 使用。
+    /// @return 应用级共享 Scheduler 引用。
     [[nodiscard]] auto scheduler() -> Scheduler & { return sched_; }
 
     /// @brief 应用级默认音频上下文（**惰性创建**，首次调用时构造并启动内置设备后端）。
-    ///
     /// 内置后端未编译（`AURORA_ENABLE_AUDIO=OFF`）或设备启动失败时自动进入静默模式：
     /// 图照常运转、样本消费后丢弃（`AudioContext::device_state()==Silent`），调用方无需分支。
     /// 典型接线：`player.set_audio_context(app.audio_shared());`（见 `VideoPlayer`）。
     /// @note Thread: main-thread only（图变更走命令环，渲染在设备线程或 render_block）
+    /// @return 默认音频上下文引用（首次调用时惰性创建并持有）。
     auto audio() -> AudioContext &;
     /// @brief 默认音频上下文的 shared_ptr 形态（同源惰性创建；传给 `VideoPlayer::set_audio_context`）。
+    /// @return 与 `audio()` 同源的 shared_ptr 引用（调用时已确保非空）。
     auto audio_shared() -> const std::shared_ptr<AudioContext> &;
 
     /// @brief 快捷键注册表：在键盘事件派发到焦点控件前优先匹配（specification/06-app-platform.md §8.4）。
     /// 用法：`app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, []{ open(); })`。
+    /// @return 应用级快捷键注册表引用。
     [[nodiscard]] auto shortcuts() -> ShortcutRegistry & { return shortcuts_; }
 
     /// @brief 命令注册表：快捷键、菜单与命令面板的统一真源（specification/06-app-platform.md §8.4）。
     /// 用法：注册命令后经 `app.commands().bind_shortcuts(app.shortcuts())` 接入默认快捷键；
     /// 菜单与命令面板分别经 `to_menu_items()` / `CommandPalette` 消费同一份命令。
+    /// @return 应用级命令注册表引用。
     [[nodiscard]] auto commands() -> CommandRegistry & { return commands_; }
 
     /// @brief 设置每帧回调（在 present_root 之前调用），用于注入自定义每帧逻辑
     ///        （如把共享状态写入 Reactive 标签）。默认为空。
+    /// @param cb 每帧回调；置空恢复默认（每帧不执行回调）。
     auto set_on_frame(std::function<void()> cb) -> void { on_frame_ = std::move(cb); }
 
     /// @brief 设置 HUD 叠加层（分层 HUD），作用于**主窗口**。
     /// 转发给组合的后端 `Window`；叠加层独立于 widget 树渲染，详见 `Window::set_overlay`。
     /// `PerfOverlay` 会被自动绑定到主窗口的帧统计实例（多窗口下不读混合数据）。
-    ///
     /// 其他窗口请显式绑定：`app.window_host(id)->window()->set_overlay(std::make_shared<au::PerfOverlay>()->bind_frame_stats(&app.window_host(id)->frame_stats()))`。
+    /// @param overlay 叠加层控件（所有权交予主窗口 `Window` 的 HUD 层；无主窗口时为 no-op）。
     auto set_overlay(std::shared_ptr<Widget> overlay) const -> void {
         if (main_host_ == nullptr || main_host_->window() == nullptr) {
             return;  // 无头构造：无窗口可挂叠加层
@@ -269,26 +308,31 @@ class Application {
 
     /// @brief 当前窗口可见性状态（响应式：在 `Effect` 内读取可自动订阅刷新）。
     /// 取值见 `WindowState`：Visible（前台激活）/ Occluded（失焦被遮挡）/ Hidden（最小化）。
+    /// @return 响应式状态引用（读取当前可见性；Effect 内读自动订阅）。
     [[nodiscard]] auto window_state() -> State<WindowState> & { return window_state_; }
     /// @brief 当前窗口几何态（响应式：在 `Effect` 内读取可自动订阅刷新）。
     /// 取值见 `WindowMode`：Normal / Maximized / Minimized / FullScreen。
+    /// @return 响应式状态引用（读取当前几何态）。
     [[nodiscard]] auto window_mode() -> State<WindowMode> & { return window_mode_; }
 
     /// @brief 注册窗口可见性状态命令式回调（与 `window_state()` 响应式订阅并存）。
+    /// @param cb 可见性变化回调（仅在状态实际转移时触发）。
     auto set_on_window_state(std::function<void(WindowState)> cb) -> void { on_window_state_ = std::move(cb); }
     /// @brief 注册窗口几何态命令式回调（与 `window_mode()` 响应式订阅并存）。
+    /// @param cb 几何态变化回调（仅在状态实际转移时触发）。
     auto set_on_window_mode(std::function<void(WindowMode)> cb) -> void { on_window_mode_ = std::move(cb); }
 
     /// @brief 设置运行时严格模式（specification/01-core.md §4.3 / CI 门禁）。
     /// `run()` 期间套用到线程级开关；默认 Off。
+    /// @param m 严格模式值（run() / render_to_png() 期间生效）。
     auto set_strict_mode(StrictMode m) -> void { strict_ = m; }
 
     /// @brief 当前严格模式（App 上下文）。
+    /// @return strict_ 值。
     [[nodiscard]] auto strict_mode() const -> StrictMode { return strict_; }
 
     /// @brief 运行**统一帧循环**：每帧 pump 事件（→ 各宿主派发）→ 渲染全部窗口 → tick，
-    ///        直到所有窗口请求关闭或达到 `max_frames`（<0 表示无限）。
-    ///
+    /// 直到所有窗口请求关闭或达到 `max_frames`（<0 表示无限）。
     /// 多窗口下的每帧顺序（specification/06-app-platform.md §2.4）：
     ///   1. `drain_posted()` —— 先执行后台回投的主线程工作（可能标脏，当帧即可刷新）；
     ///   2. `pump_all_once()` —— 抽干平台事件（共享队列后端只 pump 一次，见 `Surface::pumps_thread_queue`）；
@@ -344,6 +388,8 @@ class Application {
 
     /// @brief 渲染当前场景到 PNG。运行期同样套用严格模式（specification/01-core.md §4.3 / CI 门禁），
     ///        使无窗口后端（HeadlessSurface）的离屏渲染也能触发严格失败。
+    /// @param path 输出 PNG 文件路径（C 字符串）。
+    /// @return 透传 Scene::render_to_png 的结果（尺寸取回填后的 width_/height_）。
     [[nodiscard]] auto render_to_png(const char *path) const -> Result<bool> {
         const StrictMode prev_strict = aurora::strict_mode();
         aurora::set_strict_mode(strict_);
@@ -354,28 +400,41 @@ class Application {
 
     /// @brief 在坐标 (x,y) 处命中测试并派发指针按下事件（同步回调，ARCHITECTURE.md §3.1）。
     /// 经 `EventDispatcher` 路径触发 `on_pointer_event`（Button::on_click 与 Clickable 回调）。
+    /// @param x 命中点的窗口逻辑坐标 X。
+    /// @param y 命中点的窗口逻辑坐标 Y。
     auto dispatch_click(float x, float y) const -> void;
 
     /// @brief 派发任意指针动作（Press/Release/Move），用于拖拽与长按手势。
     /// 例：拖拽 = 依次 `dispatchPointer(x,y,Press)` → 多次 `Move` → `Release`。
+    /// @param x 窗口逻辑坐标 X。
+    /// @param y 窗口逻辑坐标 Y。
+    /// @param action 指针动作（Press/Release/Move）。
     auto dispatch_pointer(float x, float y, MouseAction action) const -> void;
 
     /// @brief 驱动手势计时（长按阈值检测）；应在每帧或每次派发后调用一次。
     auto tick() const -> void;
 
     /// @brief 同步派发键盘事件（Tab/Shift+Tab 触发焦点移动，否则派发到焦点 widget）。
+    /// @param e 键盘事件。
+    /// @return 是否被消费：应用级快捷键命中即为 true，否则取焦点树派发结果；无主宿主时 false。
     auto dispatch_key(const KeyEvent &e) const -> bool;
 
     /// @brief 同步派发文本输入事件到焦点 widget。
+    /// @param e 文本输入事件。
+    /// @return 是否被焦点控件消费（无主宿主时 false）。
     auto dispatch_text(TextInputEvent e) const -> bool;
 
     /// @brief 同步派发多点触控事件（按 pointer id 做指针捕获与并发路由，ARCHITECTURE.md §3.1）。
     /// 派发器对每个触点：① 把完整 `TouchEvent` 交给命中链（`touch()` 原始流 / `PinchRecognizer`）；
     /// ② 合成对应 `MouseEvent`（携带 `pointer_id`）驱动 `Draggable`/`LongPress`/`Clickable`。
+    /// @param e 触控事件（含全部触点）。
     auto dispatch_touch(const TouchEvent &e) const -> void;
 
     /// @brief 同步派发操作系统文件拖放事件到命中控件（窗口逻辑坐标）。
     /// 经 `EventDispatcher` 路径触发 `on_file_drop`（specification/06-app-platform.md §8 平台 Shell）。
+    /// @param paths 拖放的文件路径列表。
+    /// @param x 投放点的窗口逻辑坐标 X。
+    /// @param y 投放点的窗口逻辑坐标 Y。
     auto dispatch_file_drop(const std::vector<std::string> &paths, float x, float y) const -> void {
         main_host_->dispatch_file_drop(paths, x, y);
     }
@@ -384,9 +443,9 @@ class Application {
     // ---- 宿主登记 ----
 
     /// @brief 以 `Window` 实值为准回填画布尺寸/标题（`Window` 为空则保持传入值）。
-    ///
     /// 与既有语义一致：调用方给的 `opts` 只是期望值，真实后端会按 DPI/窗口装饰调整实际尺寸，
     /// 故以 `Window::size()` 为准（无头宿主无 Window，保留调用方给定值）。
+    /// @param window 后端 Window 引用（可空）。
     auto adopt_window_metrics(const std::unique_ptr<Window> &window) -> void {
         if (!window) {
             return;
@@ -399,15 +458,21 @@ class Application {
 
     /// @brief 登记窗口宿主：创建 `WindowHost`、接线后端通道、安装应用级快捷键前置、指定主窗口。
     /// 所有构造与 `open_window` 共用，避免重复接线。
+    /// @param scene 该窗口的 UI 树（所有权移入宿主）。
+    /// @param window 预组装的后端 Window（可空 = 无头宿主）。
+    /// @param opts 窗口选项（role/persist_id/帧预算等）。
+    /// @return 新分配并登记的窗口 id。
     [[nodiscard]] auto register_host(Scene scene, std::unique_ptr<Window> window, const WindowOptions &opts)
         -> WindowId;
 
     // ---- 帧循环步骤 ----
 
     /// @brief 是否至少存在一个「有 Window 且未请求关闭」的宿主（`run()` 的启动判据）。
+    /// @return 有可渲染宿主为 true。
     [[nodiscard]] auto has_renderable_window() const -> bool;
 
     /// @brief 退出判据：所有有 Window 的宿主均已请求关闭（单窗口 ≡ 历史 `should_close` 语义）。
+    /// @return 满足退出条件为 true。
     [[nodiscard]] auto should_exit() const -> bool;
 
     /// @brief pump 全部窗口的原生事件；**共享队列后端只 pump 一次**（见 `Surface::pumps_thread_queue`）。
@@ -417,32 +482,38 @@ class Application {
     auto tick_all() const -> void;
 
     /// @brief 逐宿主渲染一帧（`Window::present_root` + 本窗口帧统计）。
+    /// @param dt 帧间隔（秒），供各宿主 `render_frame` 记录 FPS。
     auto render_all(double dt) const -> void;
 
     /// @brief 帧末回收已关闭窗口：**保留最后一个宿主**，使 `scene()`/`window()` 访问器始终有效。
-    ///
     /// 回收必须在帧末而非事件派发栈内：宿主析构会连带销毁 UI 树，而此时回调栈上可能仍持有控件引用。
     auto reap_closed() -> void;
 
     /// @brief 帧末统一阻塞等待一次（取各宿主等待时长的最小值）。
+    /// @param frame_start 本帧起始时刻（`step_frame` 返回值），用于帧预算扣除。
     auto wait_once(const std::chrono::steady_clock::time_point &frame_start) -> void;
 
     /// @brief 首个持有 Window 的宿主（无则 nullptr）。
+    /// @return 宿主指针或 nullptr。
     [[nodiscard]] auto first_window_host() const -> WindowHost *;
 
     /// @brief 持有 Window 的宿主数。
+    /// @return 有后端窗口的宿主数量（无头宿主不计）。
     [[nodiscard]] auto count_window_hosts() const -> std::size_t;
 
     /// @brief 跨线程唤醒：对每个持有 Window 的宿主请求唤醒（无论它是否是当前等待方）。
     auto request_wake_all() const -> void;
 
     /// @brief 对单个宿主尝试几何恢复（无存储/无持久化键/无窗口/几何不可用时为 no-op）。
+    /// @param host 目标宿主引用。
+    /// @param persist_id 该宿主的几何持久化键（`WindowOptions::persist_id`）。
     auto restore_geometry_for(WindowHost &host, const std::string &persist_id) const -> void;
 
     // ---- 窗口级状态聚合 ----
 
     /// @brief 窗口可见性状态变化时聚合为响应式 State 并触发回调。
     /// 仅在实际状态发生转移（与已知态不同）时更新，避免重复事件刷屏；宿主已同步其 `Window` 快照。
+    /// @param s 后端上报的新可见性状态。
     auto on_window_state_changed(WindowState s) -> void {
         if (s == window_state_.get()) {
             return;
@@ -454,6 +525,7 @@ class Application {
     }
 
     /// @brief 窗口几何态变化时聚合为响应式 State 并触发回调（语义同 `on_window_state_changed`）。
+    /// @param m 后端上报的新几何态。
     auto on_window_mode_changed(WindowMode m) -> void {
         if (m == window_mode_.get()) {
             return;
@@ -503,6 +575,7 @@ class Application {
     }
 
     /// @brief 推进恰好一帧（步骤 1–8），返回「帧起始时刻」供 `wait_once` 做帧预算核算。
+    /// @return 本帧起始时刻（steady_clock::now() 在帧首的取值）。
     auto step_frame() -> std::chrono::steady_clock::time_point {
         const auto now = std::chrono::steady_clock::now();
         const double dt = std::chrono::duration<double>(now - loop_last_).count();
@@ -523,7 +596,6 @@ class Application {
     }
 
     /// @brief 步骤 7：帧尾推进「无后台线程」的 deferred 工作——线程池排空 + 超时看守扫描。
-    ///
     /// 两步同处一个安全点，因为二者是同一约束的两半：deferred 池（无 pthreads 构建，或宿主显式
     /// `force_deferred`）下任务只在被泵时才跑，`with_timeout` 也因此不能是睡在任务里的看守。
     /// 排空在前、扫描在后：本帧来得及跑完的任务先出结果，看守只对确实没跑完的改道。
@@ -534,6 +606,7 @@ class Application {
     }
 
     /// @brief `max_frames` 帧预算是否仍有剩余（`<= 0` = 不限帧）。
+    /// @return 可继续跑帧为 true。
     [[nodiscard]] auto frame_budget_left() const -> bool {
         return opts_.max_frames <= 0 || loop_frames_ < opts_.max_frames;
     }
@@ -559,8 +632,10 @@ class Application {
     ///        `loop_end` 收尾并返回 `false` 终止循环。
     /// 先比对 `raf_owner_` 再解引用 `user_data`：对象析构（见 `~Application`）或循环已收尾时
     /// owner 即空，蹦床不再触碰可能已释放的实例——浏览器单线程，check-then-use 天然无竞态。
+    /// @param user_data 注册循环时传入的 `Application` 实例指针（经 raf_owner_ 校验后才解引用）。
+    /// @return true = 继续排下一拍；false = 终止 rAF 循环（退出条件已满足或实例已析构）。
     static auto raf_tick(double /*time*/, void *user_data) -> bool {
-        auto *self = static_cast<Application *>(user_data);
+        auto *self = static_cast<Application *>(user_data);  // 校验通过后的安全实例指针（本轮蹦床的操作对象）。
         if (raf_owner_ != self) {
             return false;  // 实例已析构/循环已收尾：不触碰 user_data，本拍即终止
         }
@@ -593,7 +668,6 @@ class Application {
     bool quit_requested_ = false;  ///< `quit()` 请求：任何策略下都使 `run()` 退出。
     std::function<void(WindowId)> on_window_closed_;  ///< 窗口关闭回调（宿主回收后触发）。
     /// @brief 多窗口下「无线程级等待通道」后端（X11/Wayland/Wasm）的等待上限（毫秒）。
-    ///
     /// 这些后端的 `wait_events` 只覆盖**自身**连接 fd 或事件目标，帧循环每帧只能等其中一个
     /// Surface；若按单窗口语义无限等待，其余窗口的输入会被饿到才有事件。封顶为轮询式短等，
     /// 牺牲至多该毫秒级的唤醒延迟换取多窗口响应性（`waits_thread_queue()==true` 的后端不受此限）。
@@ -615,7 +689,6 @@ class Application {
 
 /// @brief 流式应用构建器（specification/06-app-platform.md
 /// §4）：`au::App().title("X").size(800,600).view(root).run()`。
-///
 /// 与既有 `Application` 构造语义一致：`run()` 内部构造 `Application` 并进入帧循环，不破坏旧用法。
 /// 后端可由 `.window()`（预组装 Window）/ `.surface()`（自定义 Surface）指定，
 /// 优先级依次递增；不指定时 `run()` 经 `auto_detect_surface()` 自动选择可用后端。需要自定义每帧逻辑（如驱动外部
@@ -626,63 +699,86 @@ class Application {
 /// @note Rebuildable: no
 class App {
   public:
+    /// @brief 默认构造：各字段取声明处默认值（标题 Aurora、800x600、帧数不限、严格模式 Off）。
     App() = default;
+    /// @brief 以根节点快捷构造（等价 `.view(root)` 起步）。
+    /// @param view 根 widget 树。
     explicit App(Node view) : view_(std::move(view)) {}
 
     /// @brief 默认构造（供自由函数 `au::App()` 使用）。
+    /// @return 全新构建器实例（默认配置）。
     static auto make() -> App { return App{}; }
 
     /// @brief 设置窗口标题。
+    /// @param t 标题字符串（移动存储）。
+    /// @return 自身引用（链式调用）。
     auto title(std::string t) -> App & {
         title_ = std::move(t);
         return *this;
     }
     /// @brief 自定义后端（稳定入口）：注入已构造 `Surface`，`run()` 时经 `create_window` 组装 `Window`。
     /// 与 `window()` 互斥；`run()` 优先级：自定义 Surface > 预组装 Window。
+    /// @param surface 自定义后端 `Surface`（所有权转移）。
+    /// @return 自身引用（链式调用）。
     auto surface(std::unique_ptr<Surface> surface) -> App & {
         custom_surface_ = std::move(surface);
         return *this;
     }
     /// @brief 接受已组装 `Window`（由 `create_window(XxxOptions)` 工厂产出）。
+    /// @param win 预组装的后端 Window（所有权转移）。
+    /// @return 自身引用（链式调用）。
     auto window(std::unique_ptr<Window> win) -> App & {
         custom_window_ = std::move(win);
         return *this;
     }
     /// @brief 设置逻辑尺寸（设备无关像素）。
+    /// @param w 逻辑宽。
+    /// @param h 逻辑高。
+    /// @return 自身引用（链式调用）。
     auto size(int w, int h) -> App & {
         size_ = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
         return *this;
     }
     /// @brief 设置根 widget 树。
+    /// @param v 根节点（移动存储）。
+    /// @return 自身引用（链式调用）。
     auto view(Node v) -> App & {
         view_ = std::move(v);
         return *this;
     }
     /// @brief 设置每帧回调（在 present_root 之前调用）。
+    /// @param cb 每帧回调。
+    /// @return 自身引用（链式调用）。
     auto on_frame(std::function<void()> cb) -> App & {
         on_frame_ = std::move(cb);
         return *this;
     }
     /// @brief 设置 HUD 叠加层（分层 HUD）。
     /// 转发给组合的后端 `Window`；叠加层独立于 widget 树渲染（如 `PerfOverlay`）。
+    /// @param w 叠加层控件（所有权共享）。
+    /// @return 自身引用（链式调用）。
     auto overlay(std::shared_ptr<Widget> w) -> App & {
         overlay_ = std::move(w);
         return *this;
     }
     /// @brief 限制帧数（默认 -1 跑到 should_close）；测试/一次性运行可用。
+    /// @param n 帧数上限（<=0 = 不限）。
+    /// @return 自身引用（链式调用）。
     auto frames(int n) -> App & {
         max_frames_ = n;
         return *this;
     }
     /// @brief 设置运行时严格模式（specification/01-core.md §4.3 / CI 门禁）。
     /// `run()` 期间套用到 Application 上下文（严格模式下降级即致命失败）。
+    /// @param m 严格模式值。
+    /// @return 自身引用（链式调用）。
     auto strict_mode(StrictMode m) -> App & {
         strict_ = m;
         return *this;
     }
 
     /// @brief 构建 `Application` 并进入帧循环。后端选择优先级：
-    ///        自定义 Surface（`.surface()`）> 预组装 Window（`.window()`）> 自动检测（默认）。
+    ///        自定义 Surface（`surface()`）> 预组装 Window（`window()`）> 自动检测（默认）。
     auto run() -> void {
         Scene scene{std::move(view_)};
         WindowOptions opts;
@@ -754,15 +850,14 @@ class App {
     }
 
   private:
-    /**
-     * @brief 统一的「构造 → 接线 → 跑帧循环」出口（三个后端分支共用）。
-     *
-     * 浏览器（WASM）下 `Application::run()` 注册 rAF 回调后即返回：若 `Application` 是栈对象，
-     * `launch` 返回即析构，rAF 回调捕获的 `this` 随之悬空。故该路径把实例交给函数级
-     * `static std::unique_ptr` 持有**至页面生命周期结束**（Emscripten 程序的常规语义：
-     * main 返回后堆对象继续服务帧回调，进程即浏览器标签页，关闭即整体回收），不做释放。
-     * 非浏览器路径保持栈对象语义，零变化。
-     */
+    /// @brief 统一的「构造 → 接线 → 跑帧循环」出口（三个后端分支共用）。
+    ///
+    /// 浏览器（WASM）下 `Application::run()` 注册 rAF 回调后即返回：若 `Application` 是栈对象，
+    /// `launch` 返回即析构，rAF 回调捕获的 `this` 随之悬空。故该路径把实例交给函数级
+    /// `static std::unique_ptr` 持有**至页面生命周期结束**（Emscripten 程序的常规语义：
+    /// main 返回后堆对象继续服务帧回调，进程即浏览器标签页，关闭即整体回收），不做释放。
+    /// 非浏览器路径保持栈对象语义，零变化。
+    /// @tparam Args 转发给 `Application` 构造函数的参数包（Scene / Window 或 Surface / opts）。
     template <typename... Args>
     auto launch(Args &&...args) -> void {
 #ifdef AURORA_PLATFORM_WASM
@@ -789,13 +884,14 @@ class App {
     int max_frames_ = -1;
     StrictMode strict_ = StrictMode::Off;
     std::function<void()> on_frame_;
-    std::unique_ptr<Surface> custom_surface_;  ///< 自定义后端（`.surface()`）：注入后 `run()` 组装 Window。
-    std::unique_ptr<Window> custom_window_;  ///< 预组装 Window（`.window()`）：由 `create_window(XxxOptions)` 产出。
-    std::shared_ptr<Widget> overlay_;  ///< HUD 叠加层（`.overlay()`）：独立于 widget 树渲染。
+    std::unique_ptr<Surface> custom_surface_;  ///< 自定义后端（`surface()`）：注入后 `run()` 组装 Window。
+    std::unique_ptr<Window> custom_window_;  ///< 预组装 Window（`window()`）：由 `create_window(XxxOptions)` 产出。
+    std::shared_ptr<Widget> overlay_;  ///< HUD 叠加层（`overlay()`）：独立于 widget 树渲染。
 };
 
 /// @brief 便捷构造：返回流式构建器（specification/06-app-platform.md §4）。
-// NOLINTNEXTLINE(readability-identifier-naming): 工厂名 `App` 与类型同名，保持 CamelCase 以匹配流式 DSL
+/// @return 全新的 `App` 构建器（默认配置：标题 Aurora、800x600、帧数不限、严格模式 Off）。
+/// NOLINTNEXTLINE(readability-identifier-naming): 工厂名 `App` 与类型同名，保持 CamelCase 以匹配流式 DSL
 [[nodiscard]] inline auto App() -> App { return App::make(); }
 
 }  // namespace aurora

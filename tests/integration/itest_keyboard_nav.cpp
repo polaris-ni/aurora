@@ -180,7 +180,7 @@ AURORA_TEST_CASE(directional_nav_uses_geometry_written_by_paint) {
     AURORA_TEST_CHECK_FALSE(fm.move_focus(FocusDirection::Left));
     AURORA_TEST_CHECK_TRUE(fm.focused() == top.get());
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：无绘制路径可驱动 focus_bounds 写入");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled: no paint path to drive focus_bounds writes");
 #endif
 }
 

@@ -1,3 +1,4 @@
+/// @file utest_x11_surface.cpp
 /// 测试类型: unit
 /// 目标单元: include/aurora/window/x11_surface.h
 /// 测试说明: X11/Xlib 后端类型契约（Surface 派生、final、不可复制/移动/默认构造，#if 分支内
@@ -50,7 +51,7 @@ AURORA_TEST_CASE(x11_surface_type_contract) {
     static_assert(!std::is_default_constructible_v<aurora::X11Surface>);
     AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::Surface, aurora::X11Surface>);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_X11 未开启（非 Linux 平台），头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_X11 is not enabled (non-Linux platform); the header is compiled out");
 #endif
 }
 
@@ -58,9 +59,11 @@ AURORA_TEST_CASE(x11_surface_window_creation_skipped) {
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
     // 默认不触碰真实 X 资源（事件翻译 / XPutImage 上屏依赖真实 X server，属集成层范围）；
     // 需要在真机上验证窗口与光标时，改用 `x11_surface_live_real_window_and_cursor_sweep`。
-    AURORA_TEST_SKIP("X11Surface 构造依赖 X server 连接，默认不触碰 OS 资源（真机验证见 AURORA_LIVE_X11=1）");
+    AURORA_TEST_SKIP(
+        "X11Surface construction needs an X server connection; by default it touches no OS "
+        "resources (live check: AURORA_LIVE_X11=1)");
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_X11 未开启（非 Linux 平台），头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_X11 is not enabled (non-Linux platform); the header is compiled out");
 #endif
 }
 
@@ -88,7 +91,7 @@ AURORA_TEST_CASE(x11_surface_live_real_window_and_cursor_sweep) {
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
     const char *opt_in = std::getenv("AURORA_LIVE_X11");
     if (opt_in == nullptr || *opt_in == '\0') {
-        AURORA_TEST_SKIP("需显式置 AURORA_LIVE_X11=1：本用例会连接真实 X server 并创建真实窗口");
+        AURORA_TEST_SKIP("set AURORA_LIVE_X11=1 explicitly: connects to a real X server and creates a real window");
     }
 
     const XErrorHandler previous = XSetErrorHandler(count_x_error);
@@ -132,7 +135,7 @@ AURORA_TEST_CASE(x11_surface_live_real_window_and_cursor_sweep) {
 
     XSetErrorHandler(previous);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_X11 未开启（非 Linux 平台），头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_X11 is not enabled (non-Linux platform); the header is compiled out");
 #endif
 }
 
@@ -140,7 +143,7 @@ AURORA_TEST_CASE(x11_surface_live_ime_bridge_invariants) {
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
     const char *opt_in = std::getenv("AURORA_LIVE_X11");
     if (opt_in == nullptr || *opt_in == '\0') {
-        AURORA_TEST_SKIP("需显式置 AURORA_LIVE_X11=1：本用例会连接真实 X server 并创建真实窗口");
+        AURORA_TEST_SKIP("set AURORA_LIVE_X11=1 explicitly: connects to a real X server and creates a real window");
     }
 
     aurora::X11Surface surface(160, 120, "aurora-live-x11-ime");
@@ -164,8 +167,8 @@ AURORA_TEST_CASE(x11_surface_live_ime_bridge_invariants) {
         AURORA_TEST_CHECK(st.ic_created == false && st.draw_callbacks == 0 && st.spot_updates == 0 &&
                           st.preedit.empty());
         AURORA_TEST_SKIP(
-            "本机无 XIM 服务器（XOpenIM 失败）⇒ 焦点宣告/组合回调无从驱动，"
-            "完整验收见 aurora_verify_x11_ime 探针");
+            "no local XIM server (XOpenIM failed): focus announcements/composition callbacks cannot be driven; "
+            "full acceptance lives in the aurora_verify_x11_ime probe");
     } else {
         AURORA_TEST_CHECK_TRUE(st.ic_created);
         // 焦点宣告接线：独立连接拉起/切走输入焦点 → FocusIn/Out 经事件循环驱动 X{Set,Unset}ICFocus。
@@ -198,7 +201,7 @@ AURORA_TEST_CASE(x11_surface_live_ime_bridge_invariants) {
         AURORA_TEST_CHECK(idle.draw_callbacks == 0 && idle.preedit.empty());
     }
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_X11 未开启（非 Linux 平台），头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_X11 is not enabled (non-Linux platform); the header is compiled out");
 #endif
 }
 

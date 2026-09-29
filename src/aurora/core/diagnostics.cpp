@@ -1,31 +1,31 @@
 #include "aurora/core/diagnostics.h"
 
 #include <algorithm>
+#include <ranges>
 #include <unordered_map>
 
+#include "aurora/core/json.h"
 #include "aurora/core/strict_mode.h"
-#include "aurora/widget/props_io.h"
 
 namespace aurora {
 
 auto Diagnostic::to_json_line() const -> std::string {
-    Json j = Json::object();
-    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["severity"] = std::string(to_string(severity));
-    j["category"] = std::string(to_string(category));
-    j["message"] = message;
+    auto j = json::Value::object();
+    j.set("severity", std::string(to_string(severity)));
+    j.set("category", std::string(to_string(category)));
+    j.set("message", message);
     if (!where.empty()) {
-        j["where"] = where;
+        j.set("where", where);
     }
     if (!code.empty()) {
-        j["code"] = code;
+        j.set("code", code);
     }
     if (fix && fix->has_auto_fix()) {
-        j["fix_code"] = fix->code;
-        j["fix_desc"] = fix->description;
+        j.set("fix_code", fix->code);
+        j.set("fix_desc", fix->description);
     }
-    // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    return j.dump();
+    const auto text = json::dump(j);
+    return text ? std::move(text).value() : std::string{};
 }
 
 void Diagnostics::report(std::string_view message, std::string_view where, std::string_view code, bool is_degraded,
@@ -132,7 +132,7 @@ auto Diagnostics::apply_fix(std::string_view code) -> bool {
     return false;
 }
 
-// ---- 需求 #9：错误码 → 修复策略注册表 ----
+// ---- 需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001：错误码 → 修复策略注册表 ----
 
 namespace {
 /// @brief 全局错误码 → 修复策略注册表（main-thread only，同 Diagnostics 线程模型）。

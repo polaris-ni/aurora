@@ -53,7 +53,11 @@ cc.min.main  = 0                          // 主轴 min 归零（内容自适应
 cc.min.cross = parent.min.cross
 cc.max.main  = parent.max.main - used     // 父剩余主轴空间
 cc.max.cross = parent.max.cross
+cc.loose.main = true                      // 非加权子项：主轴上限是「按需剩余空间」
+cc.loose.cross = parent.loose.cross       // 交叉轴继承父级供给性质
 ```
+
+`Constraints::loose_width` / `loose_height` 标注各轴上限的**供给性质**（对标 Flutter `RenderFlex` 的 `asFlexChild`）：`true` = 只是剩余可用空间的上限，父级并不承诺这块空间，故「占满该轴」的填充类修饰（`Align` 展开）必须跳过它——否则一个居中请求就会吞掉同轴兄弟的空间；`false` = 父级既定槽位，可安全展开。`flex` 权重子项的主轴上限是按权重分配到的既定槽位，两轴均不标 loose。纯几何填充（`fill_max_*`）仍按 `max` 取值，不受该标记影响。嵌套容器沿**同一绝对轴**向下传递该标记。
 
 **阶段二 Place**：根据测量结果和对齐参数计算每个子节点的 `Rect{origin, size}` 并写入 `bounds`。容器自身尺寸 = `constrain(内容总尺寸)`，子节点位置 = 前导间距 + 累计偏移。
 
@@ -121,6 +125,12 @@ max_cross = max(max_cross, size_i.cross)
 
 `alloc_i` 是 flex 子项的 **`max` 约束**，子项可返回 `≤ alloc_i` 的值；若子项内容大于 `alloc_i`，则被 clamp 到 `alloc_i`。
 
+`Spacer` 即按本阶段分配：它把 `expand` 语义落成自身修饰链上的 `Modifier::expand(1.0)` 权重（权重不进 props 序列化，故由构造与 `deserialize_props` 同步维护），因此分配量是**扣除全部兄弟（含其后的）基准尺寸**后的剩余空间——`Top / Spacer / Bottom` 三段不会把末位子项挤出容器。父级主轴无限（如 `Scroll` 的内容轴）时本阶段不执行，`Spacer` 取 0。
+
+### 3.4.1 容器轴向归属
+
+`Flex::direction` 不在 `Column` / `Row` 的可配置面里：轴向由控件类型固定（`Column` 恒纵向、`Row` 恒横向），既不序列化也不进自描述。经 `ColumnProps{ .flex = Flex{...} }` 传入的字面量常是部分指定（如 `Flex{.main_axis = Center}`），未写出的 `direction` 会落到 `Flex` 的默认值 `Row`，构造时按容器自身轴向归一，避免 `Column` 被静默换成横向布局器；本轴家族的 `Reverse` 取值仍生效（`Column` 收 `RowReverse` 归一为 `ColumnReverse`）。反向排布的通用语义见 §3.7。
+
 ### 3.5 容器尺寸
 
 ```text
@@ -178,6 +188,8 @@ origin.main = container_main - (origin.main + size.main)
 | `Baseline` | `max_above - b_i` | `size_i.cross`（不拉伸） |
 
 > 注：上述 `cross_pos` 计算后还经 `std::max(cross_pos, 0.0F)` 下界钳制，结果为负时取 0（见 `FlexLayouter::cross_axis_align_pass`）。
+
+> **`Center` / `End` 的可达性（实测结论）**：§2.3 的约束传递把 `cc.min.cross = parent.min.cross`，故**显式定尺寸容器**（如 `Modifier::size(280, 80)` 的 `Row`）内的子项交叉轴尺寸被父 min 撑到 `container_cross`，此时 `cross_pos = (container_cross - size_i.cross) / 2 = 0`——公式仍成立，但 `Center` / `End` 与 `Start` 的**视觉结果相同**（内容在自身拉伸盒内按默认基线绘制）。要让交叉轴居中真正可见，须给子项自身显式交叉轴尺寸（`Modifier::size` / `height`）或改用 `Baseline`。该行为是设计使然，不是派发缺陷。
 
 **`Stretch` 语义**：子项交叉轴尺寸被强制设为 `container_cross`，无论其内容尺寸。若 `container_cross` 由 `P_min_cross` 撑大（如父 `min.width = 80`），子项也被拉伸到该值；子项同时受自身 `width` / `height` 等显式约束夹取。
 
@@ -253,7 +265,7 @@ for col in 0..cols:
 
 ### 5.1 缓存一致性不变量
 
-- **缓存键**：`Constraints` 逐字段相等（`min.w, min.h, max.w, max.h`）。
+- **缓存键**：`Constraints` 逐字段相等（`min.w, min.h, max.w, max.h`，含供给标记 `loose_width, loose_height`）。
 - **不变量**：若约束未变（`Constraints::operator==` 为真），布局结果不重算。
 - **意义**：避免无效 re-layout，保证帧循环复杂度与脏节点数成正比。
 
@@ -524,21 +536,39 @@ au::Column{}
 > 由 `--interactive` 人工目视段负责。各探针的验收范围与退出码语义见其源文件头注释；
 > 真机验收须在对应平台手工执行（探针不进 CTest）。
 
+> **窗口可见性策略（`WindowVisibility`）**：定义在 `include/aurora/window/surface.h`（与
+> `WindowStyleOptions` 同处，故四个轻量后端头不必反向包含 `window.h`），三档语义：
+>
+> | 档位 | 语义 | 各宿主落地 |
+> |:---|:---|:---|
+> | `Normal` | 正常显示并激活（默认，行为与既往一致） | Win32 `ShowWindow(SW_SHOW)`；GLFW 默认 hint；X11 / Wayland 映射（map）窗口 |
+> | `NoActivate` | 显示但不激活：不抢焦点、不打断用户当前前台窗口 | Win32 `ShowWindow(SW_SHOWNA)`；GLFW `GLFW_VISIBLE=TRUE` + `GLFW_FOCUS_ON_SHOW=FALSE`；**X11 / Wayland 无对应请求**（聚焦由 WM / 合成器策略决定，Aurora 从不主动 `XSetInputFocus`），故与 `Normal` 同路 |
+> | `Hidden` | 不显示：窗口不进入用户视野，但渲染与像素读回照常工作 | Win32 `ShowWindow(SW_HIDE)`（窗口本就以无 `WS_VISIBLE` 的 `WS_OVERLAPPEDWINDOW` 创建）；GLFW `GLFW_VISIBLE=FALSE`；X11 不调 `XMapWindow`；Wayland `present()` 不 attach / commit 缓冲（构造期那次「无缓冲 commit 宣告表面存在」必须保留——xdg-shell 要求先收 configure 才能 attach） |
+>
+> 枚举器显式赋值且**无条件出现**，不随 `AURORA_BACKEND_*` 宏裁剪（稳定性契约同 `SurfaceKind`）。
+> `MacOSSurface`（骨架）与 `WasmSurface`（无窗口可见性概念，浏览器自管）不落地。E2E 驱动内核
+> 的 `WindowSpec::visibility` 默认 `Hidden`（见 [`08-tooling.md`](08-tooling.md) §8.2），与公共
+> `WindowOptions::visibility` 的默认 `Normal` 刻意不同；各宿主参数由建窗时下发（而非「先可见后
+> 隐藏」），避免一帧闪烁。
+
 ### 8.4 离屏渲染与快照
 
 定义于 `render/offscreen.h`，与 `HeadlessSurface` 解耦。
 
 ```cpp
-[[nodiscard]] auto render_to_png(Node &root, int width, int height, const char *path) -> Result<bool>;
-[[nodiscard]] auto render_to_image(Node &root, int width, int height) -> Image;
+[[nodiscard]] auto render_to_png(Node &root, int width, int height, const char *path,
+                                 std::optional<Color> background = std::nullopt) -> Result<bool>;
+[[nodiscard]] auto render_to_image(Node &root, int width, int height,
+                                   std::optional<Color> background = std::nullopt) -> Image;
 [[nodiscard]] auto render_to_logical_snapshot(Node &root, int width, int height) -> Json;
 ```
 
 - `render_to_png`：`root` 为 `Node&`，内部自行 `mount`，调用方无需预挂载；`width` / `height` 为画布逻辑尺寸。
 - `render_to_image`：与 `render_to_png` 同源同结果，但不落盘，直接返回 RGBA8 内存图 —— 供需要在进程内二次消费像素的路径使用（如快照比对、MCP `compare_snapshot`）。`render_to_png` 现为其薄壳（渲染 + 写出）。
 - `render_to_logical_snapshot`：返回平台无关的**逻辑快照** JSON（结构树 + 盒模型），供 AI 在无头环境校验。
+- `background`（可选底色，默认不填 = 行为不变）：begin 后对全画布 `fill_rect` 铺底色，用于对齐真实后端的清屏口径——无头渲染的 Painter 画布零初始化为透明黑，而真实窗口 present 前由 `Surface::clear_color()` 清屏（默认 `{245,245,247,255}`），两条路径的像素比对必须同底色，否则控件未覆盖区域产生系统性假差异（E2E golden 基线即经此参数与窗口清屏对齐，见 [`specification/08-tooling.md`](08-tooling.md) §8.2）。
 
-`Scene::render_to_png(path, width, height)`（`app/scene.h`）与 `Application::render_to_png(path)`（`app/application.h`）是无头便捷封装。
+`Scene::render_to_png(path, width, height, background = std::nullopt)`（`app/scene.h`）与 `Application::render_to_png(path)`（`app/application.h`）是无头便捷封装，前者透传底色参数。
 
 **其余渲染支撑头**（`render/`，公开）：`dirty_region.h` 提供 `DirtyRegionTracker`——收集脏矩形并把重叠项合并为并集，条数超上限（默认 `16`，可经 `set_max_rects` 调整）即退化为整帧脏（`mark_all` / `is_full`），以 `rects()` / `merged_bounds()` 出结果，衔接 §8.3 `set_present_dirty` 的增量上屏；`snapshot_diff.h` 提供 `compare_snapshots(baseline, current, tolerance = 0) -> SnapshotDiff`——逐像素比对两张 RGBA8 快照，产出差异像素数、最大通道差、差异占比与差异可视化图，`SnapshotDiff::passed(max_ratio)` 按阈值判定通过，供 golden 回归与 `aurora-cli snapshot --compare` 使用；`image_cache.h` 提供 `ImageCache`——进程级单例（`instance()`）的按路径 LRU 解码缓存（`get` / `put` / `remove` / `clear`，字节上限 `set_max_bytes`，解码失败不缓存），`count()` / `hit_count()` 供诊断与性能覆盖层读取。
 
@@ -578,6 +608,8 @@ au::Column{}
 | `compare_gpu_tolerance(name, current_image, tolerance, max_diff_pixels, root = nullptr)` | GPU 容差层：离屏读回帧 vs 软件 SSOT 基线，容差/预算由调用方**逐场景显式申报**；不吃全局 env 旋钮、无 update 分支（GPU 输出永不回写基线）。wgpu 与 GL 两条实路径共用（`itest_wgpu_golden` / `itest_gl_golden`），场景与帧装配单一来源为 `tests/support/gpu_golden_scenes.h` |
 
 判据沿用历史语义（差异像素数 <= `AURORA_GOLDEN_MAX_PIXELS`、单通道差 > `AURORA_GOLDEN_MAX_DIFF` 才算差异像素），故本次收敛**不改变任何 golden 的通过结论**。`AURORA_GOLDEN_MAX_DIFF/PIXELS` 是软件逐位红线的**显式放松开关**，仅 `compare_or_update` 族读取——GPU 容差层的场景级容差带与之刻意隔离，防一视同仁设值连带静默放松软件侧判据（见 §8.8 测试段）。
+
+真实后端 E2E 的 golden 判据同源同构：**软件 SSOT 基线 + 场景级容差带**（基线为 `scene_tool --render` 生成的软件 PNG，判据词汇与 `compare_gpu_tolerance` 一致、互不共享常量），并加两条 E2E 特有约束：**尺寸一致性前置断言**——读回帧与基线尺寸不同（DPI 缩放等环境因素）即先失败、不进入像素比对；**度量与失败帧落盘**——逐用例经 `AURORA_E2E_METRICS_FILE` 追加 JSONL 度量行（差异像素数 / 最大单通道差 / 帧与基线尺寸 / 容差与预算及判定 / 失败帧 PNG 路径），失败帧落盘供人工复核。完整契约见 [`08-tooling.md`](08-tooling.md) §8.2。
 
 ### 8.5 后端与工厂
 
@@ -741,6 +773,17 @@ class RhiBackend {
 
 `image/image_codec.h` 提供图像编解码，能力由编译期开关 `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG` 控制（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md)）。
 
+**内置 SVG 子集**（注册名 `svg`，实现在 `src/aurora/core/image_svg.cpp`，零三方依赖；入口为经内容嗅探的 `Image::load` 与可指定目标尺寸的 `Image::load_svg(path, w, h)`）：
+
+| 维度 | 契约 |
+|:---|:---|
+| 固有尺寸 | `viewBox` 优先（不足 4 个非负可解析数则回退），否则取根标签 `width`/`height`，皆缺为 64×64；文档单位 1:1 映射输出像素，故共享 `viewBox` 时只改 `width`/`height` 不改变光栅尺寸 |
+| 形状 | `rect`（含 `rx` 圆角，半径夹到 `min(w,h)/2`）、`circle`、`ellipse`、`line`、`polygon`、`polyline`；其余标签（`path`、渐变、`transform`、`text`、外部引用）跳过而不报错，文档序即绘制序 |
+| 填充与描边 | 六种形状的 `fill` 与 `stroke` 均生效，**描边压在填充之上**；`stroke-width` 缺省 1，描边以轮廓为中心、法向半宽 `max(0.5, stroke-width/2)`；`fill` 缺省黑（`line` 除外，它只由描边承载，缺省黑）；颜色取 `#rgb` / `#rrggbb` / 命名色 / `none` |
+| 闭合语义 | `polygon` 的填充与描边都按闭合链；`polyline` 的填充按 SVG 规范视作闭合区域、描边只走**开链**（不绘首末点间的收口边） |
+| 防御上限 | 单边输出尺寸 ≤ 8192、形状数 ≤ 4096，越界返回结构化错误而非降级（SVG 属不可信输入） |
+| 边缘质量 | 光栅化为逐像素点内测试，本身不做抗锯齿；细描边的平滑来自显示链路（`Painter::draw_image` 双线性采样） |
+
 `Painter::draw_image(const Image&, const Rect&)` 采用双线性采样，在 **premultiplied-alpha 空间插值**，避免半透明边缘暗边与光晕。
 
 `Image::content_hash()`（`core/image.h`）提供像素内容的 FNV-1a 64 位惰性摘要：首次调用计算并缓存（const 访问经 mutable 落回本对象），拷贝携带缓存；GPU 纹理缓存等内容寻址消费方经此寻址，免除每帧全量哈希。**契约**：直接改写 `pixels` 后必须调用 `invalidate_content_hash()`，否则摘要过期、内容寻址消费方可能命中旧内容。
@@ -772,6 +815,19 @@ class RhiBackend {
 | `on_pointer_event(MouseEvent&)` / `wants_click()` | 输入处理（public override） |
 
 **信号**：`playing_signal()` / `progress_signal()` / `volume_signal()` / `muted_signal()` 返回对应 `Reactive<...>*`。
+
+**播放时钟接线（两处必备门，缺一即画面恒停）**：
+
+1. `VideoPlayer` 与 `VideoControls` 在构造期打开 `needs_gesture_tick_`——`Widget::tick` 在该门为假时
+   直接早退，不开则 `play()` 之后 `on_playback_tick` 永不运行（画面停在当前帧、控制条读数停在 `0:00`）。
+2. `play()` 自带一次重绘请求（`mark_needs_paint`）——事件驱动帧循环靠「本帧实际发生了渲染」维持节拍，
+   静止画面处于空闲深睡，不踢这一帧则起播要等下一次无关失效（点击 / resize）才第一次推进。
+
+逐帧链：`tick → tick_gestures → on_playback_tick → on_frame → mark_needs_paint →（下一帧）`；
+播完自停（`position_fraction()==1.0` 且不再 playing）后链自然断开，回到空闲等待。
+**循环播放不在库内**：`VideoPlayer` 无 `loop` 属性（音频侧 `Clip::set_loop` 才有），需要循环由消费者覆盖
+`on_playback_tick`，在「playing → 自停」这一跳上 `seek(0)` + `play()`（`examples/demos/demo_video_player.cpp`
+即该写法，故该载体可在 2 秒源上持续观察）。
 
 ### 9.3 VideoControls
 
@@ -824,7 +880,7 @@ class RhiBackend {
 
 ## 10 需求规格
 
-### 10.1 #11 确定性渲染 + 逻辑快照测试
+### 10.1 SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001 确定性渲染 + 逻辑快照测试
 
 **核心目标：** AI 可验证正确性。
 
@@ -858,7 +914,7 @@ AURORA_TEST_CHECK(std::abs(snap["box"]["w"].get<float>() - 100.0F) < 0.001f);
 
 **系统化 golden 套件：** `utest_offscreen` 以 `render_to_logical_snapshot` 为基础建立跨布局的 Level 1+2 黄金文件比对：11 个固定尺寸场景（Column/Row/Stack/Grid/Scroll/嵌套容器、gap、padding、横/纵向 fill 分配）逐场景与 `tests/golden/logical_snapshots.json` 基准深度比对，盒模型逐字段漂移即红灯。场景全部使用 `px()` / `fill()` 等显式尺寸意图、不依赖字体度量，保证跨平台逐值一致。基准有意更新时设 `AURORA_UPDATE_GOLDEN=1` 重跑用例重写基准（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) golden 环境变量）。
 
-### 10.2 #20 布局系统的代数一致性
+### 10.2 SPEC.QUALITY.LAYOUT.ALGEBRA.001 布局系统的代数一致性
 
 **核心目标：** AI 可推理尺寸和位置。
 

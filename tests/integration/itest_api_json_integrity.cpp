@@ -15,6 +15,8 @@
 
 #include "aurora/aurora.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 #include "known_enums.h"
 #include "paths.h"
 
@@ -32,25 +34,21 @@ auto load_api_json() -> au::Json {
     AURORA_TEST_REQUIRE_MSG(in.good(), "aurora_api.json must exist at repository root: " + path);
     std::ostringstream ss;
     ss << in.rdbuf();
-    au::Json api = au::Json{};
-    try {
-        api = au::Json::parse(ss.str());
-    } catch (...) {
-        api = au::Json{};
-    }
-    AURORA_TEST_REQUIRE_MSG(api.is_object(), "aurora_api.json must parse into a JSON object: " + path);
-    return api;
+    const auto parsed = au::json::parse(ss.str());
+    AURORA_TEST_REQUIRE_MSG(parsed.ok(), "aurora_api.json must parse into a JSON object: " + path);
+    return parsed.value();
 }
 
 // 把 JSON 段整理为 {widget类型集合} / {枚举名 -> 取值集合}。
 auto widget_types_in_json(const au::Json &api) -> std::set<std::string> {
     std::set<std::string> out;
-    if (!api.contains("widgets") || !api["widgets"].is_array()) {
+    const auto *widgets = api.find("widgets");
+    if (widgets == nullptr || !widgets->is_array()) {
         return out;
     }
-    for (const auto &w : api["widgets"]) {
-        if (w.contains("type") && w["type"].is_string()) {
-            out.insert(w["type"].get<std::string>());
+    for (const auto &widget : *widgets) {
+        if (widget.contains("type") && widget.at("type")->is_string()) {
+            out.insert(std::string{widget.at("type")->as_string().value_or(std::string_view{})});
         }
     }
     return out;
@@ -58,20 +56,23 @@ auto widget_types_in_json(const au::Json &api) -> std::set<std::string> {
 
 auto enums_in_json(const au::Json &api) -> std::map<std::string, std::set<std::string>> {
     std::map<std::string, std::set<std::string>> out;
-    if (!api.contains("enums") || !api["enums"].is_array()) {
+    const auto *enums = api.find("enums");
+    if (enums == nullptr || !enums->is_array()) {
         return out;
     }
-    for (const auto &e : api["enums"]) {
-        if (!e.contains("name") || !e["name"].is_string() || !e.contains("values") || !e["values"].is_array()) {
+    for (const auto &e : *enums) {
+        const auto *name = e.find("name");
+        const auto *values = e.find("values");
+        if (name == nullptr || !name->is_string() || values == nullptr || !values->is_array()) {
             continue;
         }
         std::set<std::string> vals;
-        for (const auto &v : e["values"]) {
-            if (v.is_string()) {
-                vals.insert(v.get<std::string>());
+        for (const auto &value : *values) {
+            if (value.is_string()) {
+                vals.insert(std::string{value.as_string().value_or(std::string_view{})});
             }
         }
-        out[e["name"].get<std::string>()] = std::move(vals);
+        out[std::string{name->as_string().value_or(std::string_view{})}] = std::move(vals);
     }
     return out;
 }
@@ -89,12 +90,12 @@ AURORA_TEST_CASE(api_json_contains_all_toolchain_sections) {
         if (!present) {
             continue;
         }
-        const au::Json &v = api[key];
+        const auto *v = api.find(key);
         // 标量段非空字符串；容器段非空。
-        if (v.is_string()) {
-            AURORA_TEST_CHECK_MSG(!v.get<std::string>().empty(), std::string("section non-empty: ") + key);
+        if (v != nullptr && v->is_string()) {
+            AURORA_TEST_CHECK_MSG(!v->as_string().value_or("").empty(), std::string("section non-empty: ") + key);
         } else {
-            AURORA_TEST_CHECK_MSG(!v.empty(), std::string("section non-empty: ") + key);
+            AURORA_TEST_CHECK_MSG(!v->empty(), std::string("section non-empty: ") + key);
         }
     }
 }
@@ -108,11 +109,12 @@ AURORA_TEST_CASE(api_json_scalar_sections_hold_expected_values) {
         {"alias", "au"},
     };
     for (const auto &p : pairs) {
-        if (!api.contains(p.first) || !api[p.first].is_string()) {
+        const auto *v = api.find(p.first);
+        if (v == nullptr || !v->is_string()) {
             AURORA_TEST_CHECK_MSG(false, std::string("scalar section readable: ") + p.first);
             continue;
         }
-        const auto got = api[p.first].get<std::string>();
+        const auto got = std::string{v->as_string().value_or(std::string_view{})};
         AURORA_TEST_CHECK_MSG(got == p.second,
                               std::string("scalar section value ") + p.first + " == " + p.second + ", got " + got);
     }

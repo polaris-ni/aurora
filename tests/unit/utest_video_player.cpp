@@ -2,10 +2,11 @@
 /// 目标单元: include/aurora/media/video_player.h
 /// 测试说明: 覆盖 VideoPlayer 默认不变量、源挂接、VideoController 接口语义（toggle/seek_fraction/
 /// volume/muted 及四个 Reactive 信号）、播放时钟推进与播完自停、控件叠层管理、
-/// 属性序列化往返、自描述、tap/double-tap 扩展点
+/// 属性序列化往返、自描述、tap/double-tap 扩展点、公开 tick 入口对播放时钟的驱动
 
 #include <chrono>
 #include <memory>
+#include <thread>
 
 #include "aurora/media/image_sequence_source.h"
 #include "aurora/media/video_player.h"
@@ -13,8 +14,10 @@
 #include "aurora/widget/text.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_video_player {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -193,6 +196,21 @@ AURORA_TEST_CASE(playback_tick_advances_progress_and_pauses_at_end) {
     AURORA_TEST_CHECK_EQ(p.frame().pixels[0], 2);
 }
 
+AURORA_TEST_CASE(public_tick_entry_drives_playback_progress) {
+    VideoPlayer p(make_source());  // 200ms
+
+    // 未播放时公开入口不推进进度。
+    p.tick(t_ms(1'000));
+    AURORA_TEST_CHECK_NEAR(p.position_fraction(), 0.0, 1e-9);
+
+    p.play();
+    std::this_thread::sleep_for(std::chrono::milliseconds{60});
+    p.tick(t_ms(1'100));
+    // 回归点：`Widget::tick` 在 `needs_gesture_tick_` 为假时直接早退，而 `progress_` 只由
+    // `on_playback_tick`（及 `seek`）写入 —— 早退则真实帧循环下画面与进度永不推进。
+    AURORA_TEST_CHECK_GT(p.position_fraction(), 0.0);
+}
+
 AURORA_TEST_CASE(show_controls_toggles_and_custom_controls) {
     VideoPlayer p(make_source());
     // 默认无 children（on_mount 时才 adopt 默认控件）。
@@ -228,10 +246,10 @@ AURORA_TEST_CASE(props_serialize_deserialize_roundtrip) {
     p.set_fit(BoxFit::Fill);
     p.set_show_controls(false);
 
-    aurora::Json props;
+    aurora::Json props = aurora::Json::object();
     p.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["fit"].get<std::string>(), "Fill");
-    AURORA_TEST_CHECK_EQ(props["show_controls"].get<bool>(), false);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "fit"), "Fill");
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "show_controls"), false);
 
     VideoPlayer q;
     q.deserialize_props(props);

@@ -18,6 +18,7 @@
 #include "aurora/widget/chart_common.h"
 #include "aurora/widget/widget.h"
 
+/// @brief Aurora 命名空间：柱状图控件 BarChart 与其 header-only 实现。
 namespace aurora {
 
 /// @brief BarChart 属性（聚合；所有字段均有默认值，支持指定初始化器）。
@@ -31,40 +32,48 @@ struct BarChartProps {
     ChartAxisSpec axis_x;  ///< 类目轴（Band）
     ChartAxisSpec axis_y;  ///< 数值轴（Linear）
     ChartLegendSpec legend;  ///< 图例
-    EdgeInsets padding{
-        .left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};  ///< 图内留白（轴标签 / 值框避让区，D12）
+    /// @brief 图内留白（dp）：轴标签 / 值框的避让区。
+    EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};
 };
 
-/**
- * @brief 柱状图控件（叶控件，切片 3；契约见 specification/04-widget.md §3.8）。
- *
- * 纯值属性驱动（`BarChartProps`），数据进序列化面（D5），绘制全部经软件 `Painter`：
- * 柱体 = `fill_rounded_rect`、网格 / 轴 = `draw_line` + `draw_text`、悬停值框自绘。
- * 轴域与命中反查同源于 `LinearScale` / `BandScale`（D6），故悬停命中的类目与渲染一致。
- *
- * 三种构造形态等价（`CODING_STANDARDS.md` §11.1）：
- * @code
- *   au::BarChart(au::BarChartProps{ .series = {{ .name = "A", .values = {1, 2, 3} }} });
- *   au::BarChart().set_series({{ .name = "A", .values = {1, 2, 3} }});
- *   auto c = au::BarChart(); c.series = {{ .name = "A", .values = {1, 2, 3} }};
- * @endcode
- *
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 柱状图控件（叶控件；契约见 specification/04-widget.md §3.8）。
+///
+/// 纯值属性驱动（`BarChartProps`），数据进序列化面，绘制全部经软件 `Painter`：
+/// 柱体 = `fill_rounded_rect`、网格 / 轴 = `draw_line` + `draw_text`、悬停值框自绘。
+/// 轴域与命中反查同源于 `LinearScale` / `BandScale`，故悬停命中的类目与渲染一致。
+///
+/// 三种构造形态等价（`CODING_STANDARDS.md` §11.1）：
+/// @code
+/// au::BarChart(au::BarChartProps{ .series = {{ .name = "A", .values = {1, 2, 3} }} });
+/// au::BarChart().set_series({{ .name = "A", .values = {1, 2, 3} }});
+/// auto c = au::BarChart(); c.series = {{ .name = "A", .values = {1, 2, 3} }};
+/// @endcode
+///
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+///
 class BarChart : public LeafWidget, public BarChartProps {
   public:
+    /// @brief 默认构造：各属性取 BarChartProps 缺省值。
     BarChart() = default;
+    /// @brief 以属性聚合构造（与链式 setter / 直接赋值等价）。
+    /// @param props 图表属性（数据系列 / 类目 / 轴 / 图例 / 留白）。
     explicit BarChart(BarChartProps props) : BarChartProps(std::move(props)) {}
 
     /// @brief 运行时可查询的默认属性值。
+    /// @return 全缺省的 BarChartProps。
     [[nodiscard]] static auto defaults() -> BarChartProps { return BarChartProps{}; }
 
     /// @brief 点击（抬起）命中数据柱时触发：`(系列索引, 类目索引)`。旁挂，不进序列化面。
-    // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
+    /// @param series_idx 回调形参：命中的数据系列索引。
+    /// @param point_idx 回调形参：命中的类目索引。
+    /// @return 回调对象本身；未挂载回调时为空 `std::function`。
+    /// NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::function<void(int series_idx, int point_idx)> on_point_tapped;
 
-    // ---- 链式 setter（与 Props 直接赋值等价）----
+    /// @brief 链式 setter（与 Props 直接赋值等价）：写入数据系列，标脏布局与绘制并重放入场动画。
+    /// @param s 数据系列（多系列分组并排；单系列即普通柱状）。
+    /// @return 自身引用（链式调用）。
     auto set_series(std::vector<ChartSeries> s) -> BarChart & {
         series = std::move(s);
         mark_needs_layout();
@@ -72,67 +81,110 @@ class BarChart : public LeafWidget, public BarChartProps {
         grow_.replay();  // 数据变更 → 重放入场动画（无 Animator 时为 no-op）
         return *this;
     }
+    /// @brief 链式 setter：写入 x 轴类目标签，标脏布局与绘制。
+    /// @param c 类目标签列表；不足类目数处以序号补齐。
+    /// @return 自身引用（链式调用）。
     auto set_categories(std::vector<std::string> c) -> BarChart & {
         categories = std::move(c);
         mark_needs_layout();
         mark_needs_paint();
         return *this;
     }
+    /// @brief 链式 setter：切换堆叠模式，标脏绘制。
+    /// @param v true 时同 x 位各系列沿 y 累加；false 时分组并排。
+    /// @return 自身引用（链式调用）。
     auto set_stacked(bool v) -> BarChart & {
         stacked = v;
         mark_needs_paint();
         return *this;
     }
+    /// @brief 链式 setter：设置柱宽占带比例，标脏绘制（几何计算时夹取 [0.05,1]）。
+    /// @param r 占比。
+    /// @return 自身引用（链式调用）。
     auto set_bar_width_ratio(float r) -> BarChart & {
         bar_width_ratio = r;
         mark_needs_paint();
         return *this;
     }
+    /// @brief 链式 setter：设置柱圆角（dp），标脏绘制；绘制时自动不超过柱宽 / 柱高的一半。
+    /// @param r 圆角半径。
+    /// @return 自身引用（链式调用）。
     auto set_bar_corner_radius(float r) -> BarChart & {
         bar_corner_radius = r;
         mark_needs_paint();
         return *this;
     }
+    /// @brief 链式 setter：悬停十字准线开关，标脏绘制。
+    /// @param v true 时悬停吸附最近类目绘制垂直准线。
+    /// @return 自身引用（链式调用）。
     auto set_show_crosshair(bool v) -> BarChart & {
         show_crosshair = v;
         mark_needs_paint();
         return *this;
     }
+    /// @brief 链式 setter：写入类目轴（Band）规格，标脏布局。
+    /// @param a 轴规格（可见性 / 标签 / 刻度数 / 显式域等）。
+    /// @return 自身引用（链式调用）。
     auto set_axis_x(ChartAxisSpec a) -> BarChart & {
         axis_x = std::move(a);
         mark_needs_layout();
         return *this;
     }
+    /// @brief 链式 setter：写入数值轴（Linear）规格，标脏布局。
+    /// @param a 轴规格（可见性 / 标签 / 刻度数 / 显式域 / include_zero 等）。
+    /// @return 自身引用（链式调用）。
     auto set_axis_y(ChartAxisSpec a) -> BarChart & {
         axis_y = std::move(a);
         mark_needs_layout();
         return *this;
     }
+    /// @brief 链式 setter：写入图例规格，标脏布局（图例带会占用绘图区空间）。
+    /// @param l 图例规格（可见性 / 位置）。
+    /// @return 自身引用（链式调用）。
     auto set_legend(ChartLegendSpec l) -> BarChart & {
         legend = l;
         mark_needs_layout();
         return *this;
     }
+    /// @brief 链式 setter：写入图内留白，标脏布局。
+    /// @param p 留白（dp）。
+    /// @return 自身引用（链式调用）。
     auto set_padding(const EdgeInsets &p) -> BarChart & {
         padding = p;
         mark_needs_layout();
         return *this;
     }
 
+    /// @brief 类型名。
+    /// @return 固定为 "BarChart"。
     [[nodiscard]] auto type_name() const -> const char * override { return "BarChart"; }
 
+    /// @brief 静态描述符入口：属性矩阵 / 事件 / 不变式（序列化契约）。
+    /// @return WidgetDescriptor（含 bar_width_ratio ∈ [0.05,1]、padding ≥ 0 等不变式）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
+    /// @brief 返回控件描述符（属性矩阵 / 事件 / 不变式），与 describe_static 同源。
+    /// @return 同 describe_static()。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 收集可观察信号视图：本控件无信号旁挂，空实现。
+    /// @param out 收集输出容器（不写入）。
+    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
+    /// @brief 写出序列化面属性（数据系列 / 类目 / 轴 / 图例 / 留白等）：先走基类
+    ///        （width/height/show），再补图表十个字段。
+    /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override;
+    /// @brief 从 JSON 读回序列化面属性：各键按类型校验后写入，数值键夹取（bar_width_ratio ∈
+    ///        [0.05,1]，圆角 ≥ 0），完成后标脏布局与绘制；字段集与 serialize_props 对称。
+    /// @param props 属性 JSON 对象。
     auto deserialize_props(const Json &props) -> void override;
 
-    /// @brief 消费指针事件：悬停高亮与命中回调（图表自带点击目标语义）。
+    /// @brief 图表自带点击目标语义：始终参与点击（数据柱命中即触发回调）。
+    /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
     /// @brief 悬停离开时清除高亮（基类默认只置 `hover_` 不标脏，必须覆写）。
+    /// @param entered true 进入悬停；false 离开（清数据点 / 图例高亮并标脏绘制）。
     auto on_hover_change(bool entered) -> void override {
         hover_ = entered;
         if (!entered && (hovered_point_.has_value() || legend_hover_.has_value())) {
@@ -142,55 +194,90 @@ class BarChart : public LeafWidget, public BarChartProps {
         }
     }
 
+    /// @brief 消费指针事件：Move 先查图例命中（优先于数据区）并更新图例 / 数据点悬停高亮，
+    ///        Release 命中柱体触发 on_point_tapped。
+    /// @param e 鼠标事件；Move / Release 被消费（置 `is_handled`），其余回落基类。
     auto on_pointer_event(MouseEvent &e) -> void override;
 
-    /// @brief 无障碍标签：图类型与规模（数据本身不进语义树，避免读屏念出一长串数字）。
-    /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `BarChart`，
+    /// @brief 无障碍角色：图表族统一为 `Image`—— 推断表不识 `BarChart`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
+    /// @return 统一为 `AccessibilityRole::Image`。
     /// @note Side-effects: pure
     [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override { return AccessibilityRole::Image; }
 
+    /// @brief 无障碍标签：图类型与规模（数据本身不进语义树，避免读屏念出一长串数字）。
+    /// @return 形如 "BarChart, N series, M categories"。
     [[nodiscard]] auto accessibility_label() const -> std::string override;
     /// @brief 无障碍值：当前悬停 / 选中的数据点（未悬停时为空）。
+    /// @return 悬停点的 "系列名: 数值" 文本；未悬停或索引越界为空串。
     [[nodiscard]] auto accessibility_value() const -> std::string override;
 
     /// @brief 当前悬停的数据点（系列索引, 类目索引）；无悬停为空。测试与调试用。
+    /// @return 悬停点 (系列索引, 类目索引)；未命中为 `std::nullopt`。
     [[nodiscard]] auto hovered_point() const -> std::optional<std::pair<int, int>> { return hovered_point_; }
     /// @brief 当前悬停的图例项索引；无悬停为空。
+    /// @return 图例项索引；未命中为 `std::nullopt`。
     [[nodiscard]] auto hovered_legend() const -> std::optional<std::size_t> { return legend_hover_; }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override;
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
-    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态，D11）。
-    auto on_mount(const BuildContext & /*ctx*/) -> void override { grow_.mount(); }
+    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态）。
+    /// @param ctx 构建上下文（当前实现未使用）。
+    auto on_mount([[maybe_unused]] const BuildContext &ctx) -> void override { grow_.mount(); }
 
   private:
-    /// @brief 布局期算定的绘图几何（局部坐标，原点 0）：渲染与命中反查共用同一份（D6）。
+    /// @brief 布局期算定的绘图几何（局部坐标，原点 0）：渲染与命中反查共用同一份。
     struct Geometry {
         Rect plot{};  ///< 柱体绘制区（不含轴留白）
         LinearScale y_scale;  ///< 数值轴
         BandScale x_band{0};  ///< 类目轴
-        std::vector<std::string> cats;
+        std::vector<std::string> cats;  ///< 解析后的类目标签（缺省以序号补齐）
         float band_w = 0.0F;  ///< 单类目带宽
         float group_w = 0.0F;  ///< 带内柱组总宽
         float bar_w = 0.0F;  ///< 单柱宽（堆叠时 = group_w）
         std::vector<Rect> legend_rects;  ///< 图例项命中区（局部坐标）
     };
 
+    /// @brief 解析生效类目标签：显式标签不足处以序号字符串 "1","2",… 补齐到类目数。
+    /// @return 与类目数等长的标签列表。
     [[nodiscard]] auto resolved_categories() const -> std::vector<std::string>;
+    /// @brief 类目数 = max(显式类目标签数, 各系列 values 的最大长度)。
+    /// @return 类目总数。
     [[nodiscard]] auto category_count() const -> std::size_t;
+    /// @brief 计算数值轴域：堆叠模式按类目求和取域，空数据退化 [0,1]，axis_y.min/max 显式覆盖，include_zero 并入 0。
+    /// @return 带刻度文本的 LinearScale。
     [[nodiscard]] auto compute_y_scale() const -> LinearScale;
+    /// @brief 由尺寸与字体算定绘图几何：扣除图例带与轴标签留白得绘图区，再算带宽 / 柱组宽
+    ///        （bar_width_ratio 夹取 [0.05,1]）/ 单柱宽与图例命中区。
+    /// @param size 控件尺寸。
+    /// @param font 继承主题的字体。
+    /// @return 渲染与命中反查共用的 Geometry（同源）。
     [[nodiscard]] auto compute_geometry(const Size &size, const Font &font) const -> Geometry;
+    /// @brief 反查局部坐标命中的数据点：先限绘图区内，堆叠按 y 分段、分组按柱宽切片定位系列。
+    /// @param local 控件局部坐标。
+    /// @return (系列索引, 类目索引)；未命中为 `std::nullopt`。
     [[nodiscard]] auto hit_test_point(const Point &local) const -> std::optional<std::pair<int, int>>;
+    /// @brief 反查命中的图例项（命中区与绘制同源于 geom_.legend_rects）。
+    /// @param g 布局期几何。
+    /// @param local 控件局部坐标。
+    /// @return 图例项索引；未命中为 `std::nullopt`。
     [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
+    /// @brief 安全取数据点值：系列 / 类目越界或非有限值（NaN / Inf）回退 0.0。
+    /// @param series_idx 系列索引。
+    /// @param cat_idx 类目索引。
+    /// @return 数据点值。
     [[nodiscard]] auto series_value(std::size_t series_idx, std::size_t cat_idx) const -> double;
+    /// @brief 类目带的中心 x 坐标（局部坐标）。
+    /// @param g 布局期几何。
+    /// @param cat_idx 类目索引。
+    /// @return 带中心像素位置。
     [[nodiscard]] auto category_center(const Geometry &g, std::size_t cat_idx) const -> float;
 
-    Geometry geom_;
-    ChartGrowIn grow_;
-    std::optional<std::pair<int, int>> hovered_point_;
-    std::optional<std::size_t> legend_hover_;
+    Geometry geom_;  ///< 布局期算定的绘图几何缓存（on_layout 写入，绘制 / 命中反查复用）
+    ChartGrowIn grow_;  ///< grow-in 入场动画状态（on_mount 接入帧循环；数据变更时重放）
+    std::optional<std::pair<int, int>> hovered_point_;  ///< 当前悬停的数据点（系列, 类目）；无悬停为空
+    std::optional<std::size_t> legend_hover_;  ///< 当前悬停的图例项索引；无悬停为空
 };
 
 // ---------------------------------------------------------------------------
@@ -226,6 +313,7 @@ inline auto BarChart::series_value(std::size_t series_idx, std::size_t cat_idx) 
     return std::isfinite(vals[cat_idx]) ? vals[cat_idx] : 0.0;
 }
 
+// min 与 max 同时显式时走 from_explicit，否则 from_domain 取整刻度；空数据退化 [0,1]。
 inline auto BarChart::compute_y_scale() const -> LinearScale {
     const std::size_t n_cat = category_count();
     double lo = 0.0;
@@ -256,7 +344,7 @@ inline auto BarChart::compute_y_scale() const -> LinearScale {
     }
     if (!have) {
         lo = 0.0;
-        hi = 1.0;  // 空数据：域退化为 [0,1]（D15），只画轴不画柱
+        hi = 1.0;  // 空数据：域退化为 [0,1]，只画轴不画柱
     }
     if (axis_y.min.has_value()) {
         lo = *axis_y.min;
@@ -274,6 +362,7 @@ inline auto BarChart::compute_y_scale() const -> LinearScale {
     return LinearScale::from_domain(lo, hi, axis_y.tick_count);
 }
 
+// 轴可见性与刻度文本宽度决定左右 / 底部预留；图例命中区按与绘制同一套游标规则生成。
 inline auto BarChart::compute_geometry(const Size &size, const Font &font) const -> Geometry {
     Geometry g;
     g.cats = resolved_categories();
@@ -365,10 +454,12 @@ inline auto BarChart::compute_geometry(const Size &size, const Font &font) const
     return g;
 }
 
+// 供十字准线吸附与类目标签居中使用。
 inline auto BarChart::category_center(const Geometry &g, std::size_t cat_idx) const -> float {
     return g.x_band.band_center_px(cat_idx, g.plot.origin.x, g.plot.right());
 }
 
+// 对 legend_rects 逐项做矩形包含判断。
 inline auto BarChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
         const Rect &r = g.legend_rects[i];
@@ -379,6 +470,10 @@ inline auto BarChart::legend_hit(const Geometry &g, const Point &local) const ->
     return std::nullopt;
 }
 
+/// @brief 布局：填充最大约束（无界时退化 300×200 缺省画布），非负化后按主题字体算定并缓存 geom_。
+/// @param c 来自父级的约束。
+/// @param ctx 构建上下文（继承字体参与几何预留）。
+/// @return 采用的控件尺寸。
 inline auto BarChart::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
     Size s = c.constrain(Size{.width = c.max.width, .height = c.max.height});
     // 无界约束（infinity）下给一个可用的缺省画布，避免绘制区退化为 0 而无法自证。
@@ -394,6 +489,7 @@ inline auto BarChart::on_layout(const Constraints &c, const BuildContext &ctx) -
     return s;
 }
 
+// 堆叠模式自上而下取第一个包含该 y 的累加分段定位系列。
 inline auto BarChart::hit_test_point(const Point &local) const -> std::optional<std::pair<int, int>> {
     const Rect &plot = geom_.plot;
     if (plot.size.width <= 0.0F || plot.size.height <= 0.0F || geom_.cats.empty() || series.empty()) {
@@ -473,6 +569,7 @@ inline auto BarChart::accessibility_value() const -> std::string {
            std::to_string(series_value(static_cast<std::size_t>(i), static_cast<std::size_t>(j)));
 }
 
+// 属性矩阵逐项给出名称 / 类型 / 默认值 / JSON 类型与约束。
 inline auto BarChart::describe_static() -> WidgetDescriptor {
     return WidgetDescriptor{
         .name = "BarChart",
@@ -482,25 +579,25 @@ inline auto BarChart::describe_static() -> WidgetDescriptor {
                  .type = "vector<ChartSeries>",
                  .default_value = "[]",
                  .required = false,
-                 .note = "数据系列数组：[{name, values:[double], color?}]",
+                 .note = "Data series array: [{name, values:[double], color?}]",
                  .json_type = "array"},
                 {.name = "categories",
                  .type = "vector<string>",
                  .default_value = "[]",
                  .required = false,
-                 .note = "x 轴类目标签；缺省为序号",
+                 .note = "Category labels on the x axis; defaults to the index",
                  .json_type = "array"},
                 {.name = "stacked",
                  .type = "bool",
                  .default_value = "false",
                  .required = false,
-                 .note = "堆叠模式（同 x 多系列累加）",
+                 .note = "Stacked mode (series at the same x accumulate)",
                  .json_type = "boolean"},
                 {.name = "bar_width_ratio",
                  .type = "float",
                  .default_value = "0.7",
                  .required = false,
-                 .note = "柱宽在带内占比，夹取 (0,1]",
+                 .note = "Bar width as a share of the band, clamped to (0,1]",
                  .json_type = "number",
                  .min_value = "0.05",
                  .max_value = "1"},
@@ -508,38 +605,38 @@ inline auto BarChart::describe_static() -> WidgetDescriptor {
                  .type = "float",
                  .default_value = "2.0",
                  .required = false,
-                 .note = "柱圆角(dp)，自动不超过柱宽/柱高一半",
+                 .note = "Bar corner radius (dp), capped at half the bar width/height",
                  .json_type = "number",
                  .min_value = "0"},
                 {.name = "show_crosshair",
                  .type = "bool",
                  .default_value = "true",
                  .required = false,
-                 .note = "悬停时绘制吸附最近类目的十字准线",
+                 .note = "Draw a crosshair snapped to the nearest category on hover",
                  .json_type = "boolean"},
                 {.name = "axis_x",
                  .type = "Json",
                  .default_value = "{}",
                  .required = false,
-                 .note = "类目轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+                 .note = "Category axis spec: {visible,label,tick_count,min,max,show_grid_lines,include_zero}",
                  .json_type = "object"},
                 {.name = "axis_y",
                  .type = "Json",
                  .default_value = "{}",
                  .required = false,
-                 .note = "数值轴规格：{visible,label,tick_count,min,max,show_grid_lines,include_zero}",
+                 .note = "Value axis spec: {visible,label,tick_count,min,max,show_grid_lines,include_zero}",
                  .json_type = "object"},
                 {.name = "legend",
                  .type = "Json",
                  .default_value = R"({"visible":true,"position":"Top"})",
                  .required = false,
-                 .note = "图例规格：{visible,position:Top|Bottom|Right}",
+                 .note = "Legend spec: {visible,position:Top|Bottom|Right}",
                  .json_type = "object"},
                 {.name = "padding",
                  .type = "EdgeInsets",
                  .default_value = "{8,8,8,8}",
                  .required = false,
-                 .note = "图内留白(dp)，轴标签与值框避让区",
+                 .note = "In-chart padding (dp), reserved for axis labels and value boxes",
                  .json_type = "object"},
                 {.name = "width",
                  .type = "Length",
@@ -569,54 +666,60 @@ inline auto BarChart::describe_static() -> WidgetDescriptor {
 
 inline auto BarChart::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    props["series"] = chart_series_vector_to_json(series);
-    props["categories"] = string_vector_to_json(categories);
-    props["stacked"] = stacked;
-    props["bar_width_ratio"] = bar_width_ratio;
-    props["bar_corner_radius"] = bar_corner_radius;
-    props["show_crosshair"] = show_crosshair;
-    props["axis_x"] = chart_axis_spec_to_json(axis_x);
-    props["axis_y"] = chart_axis_spec_to_json(axis_y);
-    props["legend"] = chart_legend_spec_to_json(legend);
-    props["padding"] = edge_insets_to_json(padding);
+    props.set("series", chart_series_vector_to_json(series));
+    props.set("categories", string_vector_to_json(categories));
+    props.set("stacked", Json{stacked});
+    props.set("bar_width_ratio", bar_width_ratio);
+    props.set("bar_corner_radius", bar_corner_radius);
+    props.set("show_crosshair", Json{show_crosshair});
+    props.set("axis_x", chart_axis_spec_to_json(axis_x));
+    props.set("axis_y", chart_axis_spec_to_json(axis_y));
+    props.set("legend", chart_legend_spec_to_json(legend));
+    props.set("padding", edge_insets_to_json(padding));
 }
 
+// 键名与 serialize_props 一一对称；类型不符的键跳过不写。
 inline auto BarChart::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("series")) {
-        series = json_to_chart_series_vector(props["series"]);
+        series = json_to_chart_series_vector(*props.at("series"));
     }
     if (props.contains("categories")) {
-        categories = json_to_string_vector(props["categories"]);
+        categories = json_to_string_vector(*props.at("categories"));
     }
-    if (props.contains("stacked") && props["stacked"].is_boolean()) {
-        stacked = props["stacked"].get<bool>();
+    if (props.contains("stacked") && props.at("stacked")->is_bool()) {
+        stacked = props.at("stacked")->as_or<bool>(false);
     }
-    if (props.contains("bar_width_ratio") && props["bar_width_ratio"].is_number()) {
-        bar_width_ratio = std::clamp(props["bar_width_ratio"].get<float>(), 0.05F, 1.0F);
+    if (props.contains("bar_width_ratio") && props.at("bar_width_ratio")->is_number()) {
+        bar_width_ratio = std::clamp(props.at("bar_width_ratio")->as_or<float>(0.0F), 0.05F, 1.0F);
     }
-    if (props.contains("bar_corner_radius") && props["bar_corner_radius"].is_number()) {
-        bar_corner_radius = std::max(0.0F, props["bar_corner_radius"].get<float>());
+    if (props.contains("bar_corner_radius") && props.at("bar_corner_radius")->is_number()) {
+        bar_corner_radius = std::max(0.0F, props.at("bar_corner_radius")->as_or<float>(0.0F));
     }
-    if (props.contains("show_crosshair") && props["show_crosshair"].is_boolean()) {
-        show_crosshair = props["show_crosshair"].get<bool>();
+    if (props.contains("show_crosshair") && props.at("show_crosshair")->is_bool()) {
+        show_crosshair = props.at("show_crosshair")->as_or<bool>(false);
     }
     if (props.contains("axis_x")) {
-        axis_x = json_to_chart_axis_spec(props["axis_x"]);
+        axis_x = json_to_chart_axis_spec(*props.at("axis_x"));
     }
     if (props.contains("axis_y")) {
-        axis_y = json_to_chart_axis_spec(props["axis_y"]);
+        axis_y = json_to_chart_axis_spec(*props.at("axis_y"));
     }
     if (props.contains("legend")) {
-        legend = json_to_chart_legend_spec(props["legend"]);
+        legend = json_to_chart_legend_spec(*props.at("legend"));
     }
     if (props.contains("padding")) {
-        padding = json_to_edge_insets(props["padding"]);
+        padding = json_to_edge_insets(*props.at("padding"));
     }
     mark_needs_layout();
     mark_needs_paint();
 }
 
+/// @brief 绘制：y 轴网格、柱体（grow-in 进度缩放、图例联动降透明、越界裁剪）、轴刻度与标签、
+///        图例（与 geom_.legend_rects 同源）、悬停高亮边框 / 十字准线 / 自绘值框（一律夹进 bounds）。
+/// @param p 软件绘制器。
+/// @param bounds 控件全局矩形（局部几何经偏移换算为全局坐标）。
+/// @param ctx 构建上下文（继承主题字体 / 配色）。
 inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     const Theme theme = inherit_theme(ctx);
     const Font &font = theme.font;
@@ -670,7 +773,7 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
             const float y_lo = g.y_scale.to_px(lo, plot.bottom(), plot.origin.y);
             const float top = std::min(y_lo, y_hi);
             const float bottom = std::max(y_lo, y_hi);
-            // 夹进绘图区：域外的值不得画到轴外（D12）
+            // 夹进绘图区：域外的值不得画到轴外
             const float clipped_top = std::max(top, plot.origin.y);
             const float clipped_bottom = std::min(bottom, plot.bottom());
             if (clipped_bottom - clipped_top <= 0.0F) {
@@ -784,7 +887,7 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
                     std::to_string(series_value(static_cast<std::size_t>(si), static_cast<std::size_t>(ci)));
                 const float w = render::FontEngine::measure_width(text, font) + 16.0F;
                 const float h = line_h + 8.0F;
-                // 值框一律夹在控件 bounds 内（越界像素不会被脏区擦除 → 残影，D12）
+                // 值框一律夹在控件 bounds 内（越界像素不会被脏区擦除 → 残影）
                 float bx = hovered_bar->origin.x + (hovered_bar->size.width * 0.5F) - (w * 0.5F);
                 float by = hovered_bar->origin.y - h - 4.0F;
                 bx = std::clamp(bx, 0.0F, std::max(0.0F, bounds.size.width - w));

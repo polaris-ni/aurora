@@ -24,12 +24,10 @@ auto ensure_schemas() -> void {
     }
     serialization::register_core_widgets();
     for (const auto &s : list_all_schemas()) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        if (s.contains("type") && s["type"].is_string()) {
+        if (s.contains("type") && s.at("type")->is_string()) {
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            schema_cache()[s["type"].get<std::string>()] = s;
+            schema_cache()[s.at("type")->as_or<std::string>("")] = s;
         }
     }
 }
@@ -49,7 +47,7 @@ auto json_type_name(const Json &v) -> std::string_view {
     if (v.is_number()) {
         return "number";
     }
-    if (v.is_boolean()) {
+    if (v.is_bool()) {
         return "bool";
     }
     if (v.is_object()) {
@@ -71,10 +69,10 @@ auto type_matches(const Json &value, const std::string &declared_type) -> bool {
         return value.is_string();
     }
     if (declared_type == "bool" || declared_type == "boolean") {
-        return value.is_boolean();
+        return value.is_bool();
     }
     if (declared_type == "int" || declared_type == "integer") {
-        return value.is_number_integer();
+        return value.is_int();
     }
     if (declared_type == "float" || declared_type == "double" || declared_type == "number") {
         return value.is_number();
@@ -119,18 +117,14 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
                           .suggestion = "wrap the value in an object with a \"type\" field"});
         return;
     }
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    if (!node.contains("type") || !node["type"].is_string()) {
+    if (!node.contains("type") || !node.at("type")->is_string()) {
         errors.push_back({.path = path,
                           .message = "missing or invalid \"type\" field",
                           .suggestion = R"(add "type": "WidgetName" (e.g. "Text", "Button", "Column"))"});
         return;
     }
 
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    const std::string type = node["type"].get<std::string>();
+    const auto type = node.at("type")->as_or<std::string>("");
     const std::string type_path = path + ".type";
 
     // 2. 类型必须在已注册列表中
@@ -152,23 +146,23 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
 
     // 3. 验证 props
     const std::string props_path = path + ".props";
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    if (node.contains("props") && !node["props"].is_object()) {
+    if (node.contains("props") && !node.at("props")->is_object()) {
         errors.push_back({.path = props_path,
                           .message = "\"props\" must be a JSON object",
                           .suggestion = R"(change to an object, e.g. {"text": "Hello"})"});
     }
 
     Json empty_props = Json::object();
-    const Json &props = node.value("props", empty_props);
+    const auto *props_ptr = node.at("props");
+    const Json &props = props_ptr != nullptr ? *props_ptr : empty_props;
 
     // 3a. 检查必填属性
-    if (schema->contains("prop_descriptors") && schema->at("prop_descriptors").is_array()) {
-        for (const auto &pd : schema->at("prop_descriptors")) {
-            const std::string p_name = pd.value("name", "");
-            const bool required = pd.value("required", false);
-            const std::string ptype = pd.value("type", "");
+    if (schema->contains("prop_descriptors") && schema->at("prop_descriptors")->is_array()) {
+        const Json &descriptors = *schema->at("prop_descriptors");
+        for (const auto &descriptor : descriptors) {
+            const auto p_name = descriptor.as_or<std::string>("name", "");
+            const bool required = descriptor.as_or<bool>("required", false);
+            const auto ptype = descriptor.as_or<std::string>("type", "");
 
             if (required && !props.contains(p_name)) {
                 std::string p_path;
@@ -189,9 +183,7 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
 
             // 3b. 检查类型匹配
             if (props.contains(p_name) && !ptype.empty()) {
-                // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                if (!type_matches(props[p_name], ptype)) {
+                if (!type_matches(*props.at(p_name), ptype)) {
                     std::string p_path;
                     p_path += props_path;
                     p_path += '.';
@@ -201,9 +193,7 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
                     msg += "\" expects ";
                     msg += ptype;
                     msg += " but got ";
-                    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    msg += json_type_name(props[p_name]);
+                    msg += json_type_name(*props.at(p_name));
                     std::string sug = "change the value to a ";
                     sug += ptype;
                     errors.push_back({.path = p_path, .message = msg, .suggestion = sug});
@@ -213,45 +203,31 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
     }
 
     // 4. 验证子节点策略
-    const std::string children_policy = schema->value("children_policy", "none");
+    const auto children_policy = schema->as_or<std::string>("children_policy", "none");
     const std::string children_path = path + ".children";
 
     if (node.contains("children")) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        if (!node["children"].is_array()) {
+        if (!node.at("children")->is_array()) {
             errors.push_back({.path = children_path,
                               .message = "\"children\" must be an array",
                               .suggestion = "change to an array of node objects"});
         } else {
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            if (children_policy == "none" && !node["children"].empty()) {
+            if (children_policy == "none" && !node.at("children")->empty()) {
                 errors.push_back(
                     {.path = children_path,
                      .message = "widget \"" + type + "\" does not accept children (children_policy=none)",
                      .suggestion = "remove the \"children\" field or use a container widget (Column/Row/Stack)"});
-                // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            } else if (children_policy == "single" && node["children"].size() > 1) {
-                errors.push_back(
-                    {.path = children_path,
-                     .message =
-                         "widget \"" + type + "\" accepts at most 1 child but got " +
-                         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-                         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                         std::to_string(node["children"].size()),
-                     .suggestion = "reduce children to a single element or use a multi-child container"});
+            } else if (children_policy == "single" && node.at("children")->size() > 1) {
+                errors.push_back({.path = children_path,
+                                  .message = "widget \"" + type + "\" accepts at most 1 child but got " +
+                                             std::to_string(node.at("children")->size()),
+                                  .suggestion = "reduce children to a single element or use a multi-child container"});
             }
 
             // 递归验证子节点（深度 +1）
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            for (size_t i = 0; i < node["children"].size(); ++i) {
-                // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                validate_node(node["children"][i], children_path + "[" + std::to_string(i) + "]", errors, depth + 1,
-                              max_depth);
+            for (size_t i = 0; i < node.at("children")->size(); ++i) {
+                validate_node(*node.at("children")->at(i), children_path + "[" + std::to_string(i) + "]", errors,
+                              depth + 1, max_depth);
             }
         }
     }
@@ -268,17 +244,13 @@ auto validate_ui_tree(const Json &tree) -> std::vector<ValidationError> {
 
 auto validate_ui_tree_json(const Json &tree) -> Json {
     const auto errors = validate_ui_tree(tree);
-    Json out;
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    out["valid"] = errors.empty();
+    Json out = Json::object();
+    out.set("valid", Json{errors.empty()});
     Json err_array = Json::array();
     for (const auto &e : errors) {
         err_array.push_back(e.to_json());
     }
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    out["errors"] = err_array;
+    out.set("errors", err_array);
     return out;
 }
 

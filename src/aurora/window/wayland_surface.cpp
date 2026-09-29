@@ -104,6 +104,7 @@ struct WaylandSurface::Impl {
 
     Painter painter;
     std::vector<Rect> present_dirty;  ///< 本帧增量 damage 脏区（设备坐标；空=全量）。
+    int presented = 0;  ///< 已上屏帧数（见 `WaylandSurface::frame_count()`）。
     /// @brief 本帧 attach 因 configure 打断而丢弃，需在下次事件泵补一帧（见 present() 内注释）。
     bool present_stale = false;
     Size size{0.0F, 0.0F};  ///< 逻辑 dp（Wayland 表面坐标即逻辑坐标）。
@@ -119,6 +120,7 @@ struct WaylandSurface::Impl {
     bool close_requested = false;
     bool active = true;
     bool minimized = false;
+    WindowVisibility visibility = WindowVisibility::Normal;  ///< 构造期定档的可见性策略。
     WindowState state = WindowState::Visible;
     WindowMode mode = WindowMode::Normal;
     Surface::EventHandler handler;
@@ -290,7 +292,8 @@ struct WaylandSurface::Impl {
             self->present_request_();
         }
     }
-    auto draw_decoration(Painter &p) const -> void;  ///< 自绘装饰：标题栏（csd_title）+ 边框（csd_border）
+    /// @brief 自绘装饰：标题栏（csd_title）+ 边框（csd_border）。
+    auto draw_decoration(Painter &p) const -> void;
     /// @brief 装配本帧装饰绘制状态（软件光栅与 GPU 录制两条路径共用的唯一装配点）。
     [[nodiscard]] auto decoration_state() const -> csd::TitleBarPaintState;
     /// @brief 装饰录制专用 Painter：不复用 `painter`——app 帧录制期间其录制栈非空，嵌套会污染帧 DL。
@@ -1187,10 +1190,12 @@ auto WaylandSurface::Impl::ti_on_delete(std::uint32_t before_length, std::uint32
 // WaylandSurface：构造/析构与 Surface 接口实现
 // =============================================================================
 
-WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const WindowStyleOptions &style)
+WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                               WindowVisibility visibility)
     : impl_(std::make_unique<Impl>()) {
     Impl &d = *impl_;
     d.self = this;
+    d.visibility = visibility;
     d.dpy = wl_display_connect(nullptr);
     if (d.dpy == nullptr) {
         AURORA_LOG_WARN("window",
@@ -1517,13 +1522,20 @@ auto WaylandSurface::present() -> Result<bool> {
                 wl_surface_damage_buffer(d.surface, x0, y0, x1 - x0, y1 - y0);
             }
         }
-        if (d.compositor_version >= 3U) {
-            wl_surface_set_buffer_scale(d.surface, d.scale);
+        // 可见性：Hidden 档跳过 attach + commit——表面永不进入合成器视野；帧缓冲仍照常
+        // swizzle/更新，data() 读回不受影响。构造期那次「无缓冲 commit 宣告表面存在」必须保留
+        // （xdg-shell 要求先收 configure 才能 attach），故只在此处拦截。
+        // NoActivate 在 xdg-shell 无对应请求，与 Normal 同路。
+        if (d.visibility != WindowVisibility::Hidden) {
+            if (d.compositor_version >= 3U) {
+                wl_surface_set_buffer_scale(d.surface, d.scale);
+            }
+            wl_surface_attach(d.surface, slot->buf, 0, 0);
+            slot->busy = true;
+            wl_surface_commit(d.surface);
+            ++d.presented;  // 只计真正提交给合成器的帧
+            wl_display_flush(d.dpy);
         }
-        wl_surface_attach(d.surface, slot->buf, 0, 0);
-        slot->busy = true;
-        wl_surface_commit(d.surface);
-        wl_display_flush(d.dpy);
     }
     // 脏区一次性消费：下一帧未重新设置则回到全量（安全兜底）。
     d.present_dirty.clear();
@@ -1531,6 +1543,8 @@ auto WaylandSurface::present() -> Result<bool> {
 }
 
 auto WaylandSurface::size() const -> Size { return impl_->size; }
+
+auto WaylandSurface::frame_count() const -> int { return impl_->presented; }
 
 auto WaylandSurface::scale_factor() const -> float { return static_cast<float>(impl_->scale); }
 

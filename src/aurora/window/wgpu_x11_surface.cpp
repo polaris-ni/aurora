@@ -34,9 +34,9 @@ auto WgpuX11Surface::Sink::begin_frame(int width, int height, float scale) -> bo
 // ---- 构造 / 析构 ----
 
 WgpuX11Surface::WgpuX11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
-                               bool vsync)
+                               bool vsync, WindowVisibility visibility)
     : vsync_(vsync) {
-    host_ = std::make_unique<X11Surface>(width, height, title, style);
+    host_ = std::make_unique<X11Surface>(width, height, title, style, visibility);
     if (!host_->is_available()) {
         AURORA_LOG_ERROR("wgpu-x11-surface", "X11Surface host creation failed");
         return;

@@ -73,7 +73,7 @@ AURORA_TEST_CASE(root_dirty_clip_matches_full_redraw) {
     AURORA_TEST_CHECK(count_diff(dirty, full) == 0);  // 脏区重绘 == 整帧重绘（逐位）
     AURORA_TEST_CHECK(count_diff(dirty, before) > 0);  // 颜色变更确实生效
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
 #endif
 }
 
@@ -136,7 +136,7 @@ AURORA_TEST_CASE(nested_partial_dirty_clip_matches_full_redraw) {
     // 脏区内确实重绘出了新颜色。
     AURORA_TEST_CHECK(count_diff(dirty, before) > 0);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
 #endif
 }
 

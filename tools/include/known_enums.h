@@ -13,13 +13,14 @@
 // which would make the LSP / MCP suggest names that do not compile.
 //
 // Maintenance rules:
-// 1. Key = the type name appearing in property descriptors (`prop_descriptors[].type`), not an
-//    arbitrary name; `Curve` is `class Curve` (easing.h:39), whose values come from the
+// 1. Key = the type name appearing in property descriptors (`prop_descriptors[].type`), or a
+//    public-module enum exposed for AI enumeration (e.g. `JsonType` from aurora/core/json.h),
+//    not an arbitrary name; `Curve` is `class Curve` (easing.h:39), whose values come from the
 //    discriminating enum `CurveKind`. `ColorPalette` is a set of named constants under
 //    `au::colors::` (color.h), not an enum.
 // 2. Values must match the real members in `include/aurora/**` verbatim; keep this in sync when
-//    adding or renaming enums. `tests/unit/utest_known_enums.cpp` guards both "value existence" and
-//    "property type coverage".
+//    adding or renaming enums. `tests/integration/itest_known_enums.cpp` guards both "value existence"
+//    and "property type coverage".
 // ============================================================================
 #pragma once
 
@@ -153,6 +154,9 @@ namespace aurora::tools {
     enums["ToastPosition"] = {"Bottom", "Top"};
     // ---- gesture ----
     enums["DragAxis"] = {"None", "Horizontal", "Vertical"};
+
+    // ---- json (au::json::Type: the public JSON module's value discriminator, AI-enumerable) ----
+    enums["JsonType"] = {"Null", "Bool", "Int", "UInt", "Double", "RawNumber", "String", "Array", "Object"};
 
     // ---- named colors (au::colors::AURORA_*, not an enum; provides value hints for the Color property) ----
     enums["ColorPalette"] = {"AURORA_WHITE", "AURORA_BLACK", "AURORA_BLUE",   "AURORA_RED",

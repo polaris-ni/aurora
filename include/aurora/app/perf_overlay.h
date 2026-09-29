@@ -19,31 +19,36 @@
 
 namespace aurora {
 
-/**
- * @brief 帧统计（ARCHITECTURE.md §10.1）：帧时间滑动窗口 + FPS 推导。
- *
- * `Application::run` 每帧调用 `record(dt)`；`PerfOverlay` / 工具读取。
- * 进程级单例（单线程 UI 模型下无需加锁）。
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 帧统计（ARCHITECTURE.md §10.1）：帧时间滑动窗口 + FPS 推导。
+///
+/// `Application::run` 每帧调用 `record(dt)`；`PerfOverlay` / 工具读取。
+/// 进程级单例（单线程 UI 模型下无需加锁）。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
 class FrameStats {
   public:
+    /// @brief 进程级单例（首次调用时构造；单线程 UI 模型下无需加锁）。
+    /// @return 全局 FrameStats 引用。
     [[nodiscard]] static auto instance() -> FrameStats & {
         static FrameStats stats;
         return stats;
     }
 
-    /// @brief 记录一帧耗时（秒）。
-    ///
+    /// @brief 记录一帧耗时（秒）。**调用方仅在「本帧确实渲染了」时调用**（见 `WindowHost::render_frame`）。
     /// 若 dt 对应的毫秒值超过 AURORA_IDLE_THRESHOLD_MS，视为 idle 段：
     /// 按帧预算折算跳过帧数，仅递增 idle/total 计数器，不记入环形缓冲区。
+    ///
+    /// 无论走哪个分支都清空空闲累计（`idle_ms_`）：本帧渲染过了，`fps()` 即恢复「新鲜」。
+    /// 注意 dt 偏大**不等于**应用空闲——它多半是「本帧本身很慢」（长任务、最小化后还原）：
+    /// 那是掉帧/hitch 的语义，不是停帧。
+    /// @param dt_seconds 本帧耗时（秒；<=0 直接忽略）。
     auto record(double dt_seconds) -> void {
         if (dt_seconds <= 0.0) {
             return;
         }
+        idle_ms_ = 0.0;
         const double dt_ms = dt_seconds * 1000.0;
         // Idle 检测：帧间隔远超阈值 → 视为 idle 段（仅计计数器，不记入帧时间窗口）
         if (dt_ms > AURORA_IDLE_THRESHOLD_MS) {
@@ -77,13 +82,23 @@ class FrameStats {
         }
     }
 
-    /// @brief 记录 idle 跳帧（仅递增计数器，不影响帧时间统计）。
-    auto record_idle() -> void {
+    /// @brief 记录一次 idle 跳帧（不影响帧时间窗口，只计计数器并累加空闲时长）。
+    /// @param dt_seconds 本帧的墙钟间隔（秒）。帧循环在 idle 帧上同样消耗了一段等待时间，
+    ///        这段时长就是「距上一次实际渲染已过去多久」的增量；不传则只计计数器，
+    ///        `stale_duration_ms()` 不增长（老调用点的零成本兼容路径）。
+    auto record_idle(double dt_seconds = 0.0) -> void {
         ++idle_frames_;
         ++total_frames_;
+        if (dt_seconds > 0.0) {
+            idle_ms_ += dt_seconds * 1000.0;
+        }
     }
 
     /// @brief 滑动窗口平均 FPS（无数据返回 0）。
+    /// 该值是**窗口内已记录帧**的均值，不做时间衰减：渲染一旦停止，环形缓冲不再有新样本，
+    /// 返回值便停留在最后一次活跃 burst 上。调用方须用 `is_stale()` 判断它是否还代表当前帧率
+    /// （HUD 显示「421.0 FPS」而实际已停帧数秒，是误导而非信息）。
+    /// @return 窗口均值 FPS；无样本返回 0。
     [[nodiscard]] auto fps() const -> double {
         if (count_ == 0) {
             return 0.0;
@@ -91,7 +106,28 @@ class FrameStats {
         return sum_ > 0.0 ? static_cast<double>(count_) / sum_ : 0.0;
     }
 
+    /// @brief 窗口内 FPS 是否已陈旧：距最近一次**实际渲染**的帧已累计空闲 ≥ AURORA_FPS_STALE_MS。
+    /// 判据基于空闲**时长**而非帧数——空闲段里帧循环可能以任意间隔被唤醒（事件、定时器、
+    /// HUD 刷新），用帧数衡量会把「一帧都没有」误判成「刚过了几帧」。
+    /// @return 累计空闲达到陈旧阈值为 true。
+    [[nodiscard]] auto is_stale() const -> bool { return idle_ms_ >= AURORA_FPS_STALE_MS; }
+
+    /// @brief 空闲累计时长（毫秒）：自最近一次实际渲染的帧起累计的无帧时长。
+    /// 供 HUD 展示「421.0 FPS（stale 3.2s）」这类带上下文的读数——归零会丢掉「上次活跃帧率」
+    /// 这一排障信息。
+    /// @return idle_ms_ 值。
+    [[nodiscard]] auto stale_duration_ms() const -> double { return idle_ms_; }
+
+    /// @brief FPS 陈旧判定阈值（毫秒）：累计空闲达到此值后 `is_stale()` 为 true。
+    /// 取值的两个约束：**下界**须明显大于一帧预算，否则动画中偶发跳过的单帧就会被判成停帧、
+    /// HUD 数字无谓地闪烁；**上界**须接近 HUD 刷新周期，否则明显停帧后还会继续报告「新鲜」的
+    /// 旧值。本值与 `Window::AURORA_HUD_REFRESH_MS`（HUD 叠加层刷新周期）同量级——两者是
+    /// **独立的策略**：前者是「多久算停帧」，后者是「多久重绘一次叠加层」，取值接近只是
+    /// 因为同一个开发者可感知的时间尺度约在 0.5 秒量级。
+    static constexpr double AURORA_FPS_STALE_MS = 500.0;
+
     /// @brief 滑动窗口平均帧时间（毫秒）。
+    /// @return 窗口均值毫秒（无样本 0）。
     [[nodiscard]] auto avg_frame_ms() const -> double {
         if (count_ == 0) {
             return 0.0;
@@ -100,6 +136,7 @@ class FrameStats {
     }
 
     /// @brief 窗口内最差帧时间（毫秒）。
+    /// @return 窗口最大样本毫秒（无样本 0）。
     [[nodiscard]] auto worst_frame_ms() const -> double {
         if (count_ == 0) {
             return 0.0;
@@ -113,6 +150,7 @@ class FrameStats {
     }
 
     /// @brief 帧时间标准差（毫秒）。
+    /// @return 样本均方差毫秒（样本 <2 时 0）。
     [[nodiscard]] auto jitter_ms() const -> double {
         if (count_ < 2) {
             return 0.0;
@@ -123,6 +161,8 @@ class FrameStats {
     }
 
     /// @brief 百分位帧时间（毫秒），p 范围 [0,1]。
+    /// @param p 百分位（如 0.99 = P99）。
+    /// @return 线性插值后的百分位毫秒（无样本 0）。
     [[nodiscard]] auto percentile_ms(double p) const -> double {
         if (count_ == 0) {
             return 0.0;
@@ -145,6 +185,8 @@ class FrameStats {
     }
 
     /// @brief 获取窗口内第 i 帧的帧时间（秒），i=0 为最新帧。
+    /// @param i 帧序号（0 = 最新帧）。
+    /// @return 对应样本秒数；越界返回 0。
     [[nodiscard]] auto frame_at(std::size_t i) const -> double {
         if (i >= count_) {
             return 0.0;
@@ -154,19 +196,35 @@ class FrameStats {
     }
 
     /// @brief 有效帧数。
+    /// @return 环形缓冲内当前样本数（<= AURORA_WINDOW_SIZE）。
     [[nodiscard]] auto window_size() const -> std::size_t { return count_; }
 
+    /// @brief 累计掉帧数（帧时长超过帧预算）。
+    /// @return dropped_ 计数。
     [[nodiscard]] auto dropped_frame_count() const -> std::size_t { return dropped_; }
+    /// @brief 掉帧占比。
+    /// @return dropped / total_frames（无帧时 0）。
     [[nodiscard]] auto dropped_frame_ratio() const -> double {
         return total_frames_ > 0 ? static_cast<double>(dropped_) / static_cast<double>(total_frames_) : 0.0;
     }
+    /// @brief 累计 hitch 数（帧时长超过两倍帧预算）。
+    /// @return hitch_ 计数。
     [[nodiscard]] auto hitch_count() const -> std::size_t { return hitch_; }
+    /// @brief 累计 idle 跳帧数。
+    /// @return idle_frames_ 计数（含 record 超阈值折算与 record_idle 两路）。
     [[nodiscard]] auto idle_frame_count() const -> std::size_t { return idle_frames_; }
 
+    /// @brief 设置帧预算目标（毫秒）：掉帧/hitch 判定与 idle 折算的基准。
+    /// @param ms 目标帧预算（默认 16.67 ≈ 60FPS）。
     auto set_frame_budget_ms(double ms) -> void { frame_budget_ms_ = ms; }
+    /// @brief 当前帧预算目标（毫秒）。
+    /// @return frame_budget_ms_ 值。
     [[nodiscard]] auto frame_budget_ms() const -> double { return frame_budget_ms_; }
 
     /// @brief 记录分阶段计时（毫秒）。
+    /// @param layout_ms 本帧布局阶段耗时。
+    /// @param paint_ms 本帧绘制阶段耗时。
+    /// @param present_ms 本帧上屏阶段耗时。
     auto record_phases(double layout_ms, double paint_ms, double present_ms) -> void {
         if (phase_count_ == AURORA_PHASE_WINDOW) {
             layout_sum_ -= layout_ms_.at(phase_head_);
@@ -192,22 +250,30 @@ class FrameStats {
         }
     }
 
+    /// @brief 布局阶段平均耗时（毫秒）。
+    /// @return 相位窗口均值（无样本 0）。
     [[nodiscard]] auto avg_layout_ms() const -> double {
         return phase_count_ > 0 ? layout_sum_ / static_cast<double>(phase_count_) : 0.0;
     }
+    /// @brief 绘制阶段平均耗时（毫秒）。
+    /// @return 相位窗口均值（无样本 0）。
     [[nodiscard]] auto avg_paint_ms() const -> double {
         return phase_count_ > 0 ? paint_sum_ / static_cast<double>(phase_count_) : 0.0;
     }
+    /// @brief 上屏阶段平均耗时（毫秒）。
+    /// @return 相位窗口均值（无样本 0）。
     [[nodiscard]] auto avg_present_ms() const -> double {
         return phase_count_ > 0 ? present_sum_ / static_cast<double>(phase_count_) : 0.0;
     }
 
     /// @brief 累计帧数。
+    /// @return total_frames_（含 idle 折算帧）。
     [[nodiscard]] auto total_frames() const -> std::size_t { return total_frames_; }
 
     // ---- 帧循环唤醒/睡眠观测 ----
 
     /// @brief 记录一次帧循环等待（`Window::run` 每次 `wait_events` 返回后调用）。
+    /// @param waited_ms 本次等待实际消耗的毫秒数。
     auto record_wait(double waited_ms) -> void {
         const auto now = std::chrono::steady_clock::now();
         if (!wait_epoch_set_) {
@@ -220,9 +286,11 @@ class FrameStats {
     }
 
     /// @brief 累计唤醒次数（wait_events 返回次数；忙轮询/未接等待时为 0）。
+    /// @return wakeups_ 计数。
     [[nodiscard]] auto wakeup_count() const -> std::size_t { return wakeups_; }
 
     /// @brief 每秒唤醒次数（自首次等待起的墙钟均值；无数据返回 0）。
+    /// @return 唤醒频率（次/秒）。
     [[nodiscard]] auto wakeups_per_sec() const -> double {
         if (!wait_epoch_set_) {
             return 0.0;
@@ -232,6 +300,7 @@ class FrameStats {
     }
 
     /// @brief 睡眠占比（等待总时长 / 墙钟总时长，[0,1]；靠近 1 = 几乎全程睡眠）。
+    /// @return 钳位到 1 的占比；从未等待返回 0。
     [[nodiscard]] auto sleep_ratio() const -> double {
         if (!wait_epoch_set_) {
             return 0.0;
@@ -252,6 +321,7 @@ class FrameStats {
         dropped_ = 0;
         hitch_ = 0;
         idle_frames_ = 0;
+        idle_ms_ = 0.0;
         frame_budget_ms_ = 16.67;
         layout_ms_.fill(0.0);
         paint_ms_.fill(0.0);
@@ -280,6 +350,7 @@ class FrameStats {
     std::size_t dropped_ = 0;  ///< 累计掉帧数
     std::size_t hitch_ = 0;  ///< 累计 hitch 数
     std::size_t idle_frames_ = 0;  ///< 累计 idle 跳过帧数
+    double idle_ms_ = 0.0;  ///< 距最近一次实际渲染帧的累计空闲时长（毫秒）；`record` 清零、`record_idle` 累加
     double frame_budget_ms_ = 16.67;  ///< 帧预算目标
 
     static constexpr double AURORA_IDLE_THRESHOLD_MS = 100.0;  ///< idle 检测阈值（毫秒）
@@ -302,21 +373,23 @@ class FrameStats {
     std::chrono::steady_clock::time_point last_wait_end_;  ///< 最近一次等待结束时刻。
 };
 
-/**
- * @brief 性能覆盖层（ARCHITECTURE.md §10.2）：包裹内容并在角落叠加 FPS/帧时间统计。
- *
- * `set_visible(false)` 关闭显示（内容不受影响）。数据源 `FrameStats::instance()`。
- * 对标 Flutter Performance Overlay。
- *
- * @note Thread: main-thread only
- * @note Side-effects: paints
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 性能覆盖层（ARCHITECTURE.md §10.2）：包裹内容并在角落叠加 FPS/帧时间统计。
+///
+/// `set_visible(false)` 关闭显示（内容不受影响）。数据源 `FrameStats::instance()`。
+/// 对标 Flutter Performance Overlay。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: paints
+/// @note Rebuildable: yes, via from_json
 class PerfOverlay : public SingleChild {
   public:
     PerfOverlay() = default;
+    /// @brief 以内容子节点构造覆盖层（面板叠加在其上绘制）。
+    /// @param content 被包裹的内容 widget。
     explicit PerfOverlay(Node content) : SingleChild(std::move(content)) {}
 
+    /// @brief 类型名：恒为 PerfOverlay（JSON 注册与诊断标识）。
+    /// @return 静态 C 字符串。
     [[nodiscard]] auto type_name() const -> const char * override { return "PerfOverlay"; }
 
     /// @brief 禁止 DisplayList 缓存：PerfOverlay 的文本（实时 FPS/P99/jitter/唤醒率等）
@@ -325,8 +398,11 @@ class PerfOverlay : public SingleChild {
     /// 在 bounds 不变时直接 replay 首帧缓存、再不调用 `on_paint`，导致 HUD 冻结在「采样中」、
     /// 永不刷新——这正是 demo 中 PerfOverlay 面板静止全零的根因。由 Window 的 HUD 层以 2Hz
     /// 重绘本控件的离屏缓冲并合成（见 window.h present_root 的 HUD 合成段）。
+    /// @return 恒 false（每帧须重读 FrameStats，禁止复用缓存）。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return false; }
 
+    /// @brief 静态描述符：JSON 可配属性 visible / show_counters，单子节点策略。
+    /// @return 描述符（注册表与 UI prompt 投影的数据源）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "PerfOverlay",
@@ -336,13 +412,13 @@ class PerfOverlay : public SingleChild {
                      .type = "bool",
                      .default_value = "true",
                      .required = false,
-                     .note = "是否显示统计",
+                     .note = "Show statistics",
                      .json_type = "boolean"},
                     {.name = "show_counters",
                      .type = "bool",
                      .default_value = "true",
                      .required = false,
-                     .note = "是否显示渲染计数器与长任务行",
+                     .note = "Show the render counters and long-task rows",
                      .json_type = "boolean"},
                 },
             .events = {},
@@ -350,71 +426,99 @@ class PerfOverlay : public SingleChild {
             .examples = {"au::PerfOverlay(root)"},
         };
     }
+    /// @brief 实例描述符：直接转发 `describe_static()`。
+    /// @return 同静态描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 无响应式信号可声明：统计文本每帧由 `on_paint` 直读 FrameStats。
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
+    /// @brief 显示/隐藏统计面板（内容子节点不受影响）。
+    /// @param v false = 仅绘制内容，不叠加统计。
+    /// @return 自身引用（链式调用）。
     auto set_visible(bool v) -> PerfOverlay & {
         visible_ = v;
         mark_needs_paint();
         return *this;
     }
+    /// @brief 是否显示统计面板。
+    /// @return visible_ 值。
     [[nodiscard]] auto visible() const -> bool { return visible_; }
 
     /// @brief 是否显示渲染计数器与长任务行。
+    /// @param v false = 面板收缩为三行基础统计。
+    /// @return 自身引用（链式调用）。
     auto set_show_counters(bool v) -> PerfOverlay & {
         show_counters_ = v;
         mark_needs_paint();
         return *this;
     }
+    /// @brief 是否显示计数器与长任务两行。
+    /// @return show_counters_ 值。
     [[nodiscard]] auto show_counters() const -> bool { return show_counters_; }
 
     /// @brief 绑定本面板读取的帧统计实例（多窗口：绑到宿主窗口自己的统计）。
-    ///
     /// 未绑定时回退 `FrameStats::instance()`（进程级单例）——历史行为，单窗口用法零变化。
     /// 多窗口下各 `WindowHost` 有独立统计，不绑定会读到混合/空数据。
+    /// @param s 宿主窗口的 FrameStats；nullptr = 回退进程级单例。
+    /// @return 自身引用（链式调用）。
     auto bind_frame_stats(const FrameStats *s) -> PerfOverlay & {
         bound_stats_ = s;
         mark_needs_paint();
         return *this;
     }
     /// @brief 当前绑定的帧统计实例（未绑定返回 nullptr，表示回退全局单例）。
+    /// @return bound_stats_ 裸指针（可空）。
     [[nodiscard]] auto bound_frame_stats() const -> const FrameStats * { return bound_stats_; }
 
     /// @brief 第一行统计文本：FPS + P99 + jitter（数据源：进程级单例 `FrameStats::instance()`）。
+    /// @return 格式化行文本；样本不足时显示采样中。
     [[nodiscard]] static auto stats_line1() -> std::string { return stats_line1(FrameStats::instance()); }
     /// @brief 同上，数据源显式给定（多窗口 / 离线统计场景）。
+    /// @param s 统计实例引用。
+    /// @return 格式化行文本（停帧时追加 stale 标注）。
     [[nodiscard]] static auto stats_line1(const FrameStats &s) -> std::string {
         // 样本不足（<2 帧）时除零会得到 9765.6 这类假 FPS，直接显示 — 而非误导数字。
         if (s.window_size() < 2) {
-            return "FPS — (采样中) | P99 — | jitter —";
+            return "FPS - (sampling) | P99 - | jitter -";
         }
-        return aurora::internal::string_format("FPS %.1f (avg %.1f) | P99 %.1fms | jitter %.1fms", s.fps(),
-                                               s.avg_frame_ms(), s.percentile_ms(0.99), s.jitter_ms());
+        std::string line = aurora::internal::string_format("FPS %.1f (avg %.1f) | P99 %.1fms | jitter %.1fms", s.fps(),
+                                                           s.avg_frame_ms(), s.percentile_ms(0.99), s.jitter_ms());
+        // 已停帧：数值仍取窗口内最后一次活跃 burst 的均值（不归零，保留排障信息），
+        // 但追加空闲时长标注，避免把冻结值当成本刻帧率读。
+        if (s.is_stale()) {
+            line += aurora::internal::string_format(" | stale %.1fs", s.stale_duration_ms() / 1000.0);
+        }
+        return line;
     }
 
     /// @brief 第二行统计文本：dropped + hitch + idle（数据源：进程级单例）。
+    /// @return 格式化行文本。
     [[nodiscard]] static auto stats_line2() -> std::string { return stats_line2(FrameStats::instance()); }
     /// @brief 同上，数据源显式给定。
+    /// @param s 统计实例引用。
+    /// @return 格式化行文本。
     [[nodiscard]] static auto stats_line2(const FrameStats &s) -> std::string {
         return aurora::internal::string_format("dropped: %zu | hitch: %zu | idle: %zu", s.dropped_frame_count(),
                                                s.hitch_count(), s.idle_frame_count());
     }
 
     /// @brief 第三行统计文本：唤醒频率 + 睡眠占比（数据源：进程级单例）。
+    /// @return 格式化行文本。
     [[nodiscard]] static auto stats_line3() -> std::string { return stats_line3(FrameStats::instance()); }
     /// @brief 同上，数据源显式给定。
+    /// @param s 统计实例引用。
+    /// @return 格式化行文本。
     [[nodiscard]] static auto stats_line3(const FrameStats &s) -> std::string {
         return aurora::internal::string_format("wakeups/s: %.1f | sleep: %.0F%%", s.wakeups_per_sec(),
                                                s.sleep_ratio() * 100.0);
     }
 
-    /**
-     * @brief 第四行统计文本：渲染计数器（树遍历规模 + DisplayList 复用率）。
-     *
-     * 数据源 `RenderCounters::current()`（当帧快照）。`AURORA_ENABLE_PROFILING`
-     * 关闭时计数恒为 0，此时直接显示状态提示而非一排误导性的零。
-     */
+    /// @brief 第四行统计文本：渲染计数器（树遍历规模 + DisplayList 复用率）。
+    ///
+    /// 数据源 `RenderCounters::current()`（当帧快照）。`AURORA_ENABLE_PROFILING`
+    /// 关闭时计数恒为 0，此时直接显示状态提示而非一排误导性的零。
+    /// @return 计数器行文本（profiling off 时为提示语）。
     [[nodiscard]] static auto stats_line4() -> std::string {
         if constexpr (!profiling_enabled()) {
             return "counters: profiling off";
@@ -426,6 +530,7 @@ class PerfOverlay : public SingleChild {
     }
 
     /// @brief 第五行统计文本：脏区效率 + 长任务累计（脏区效率的主验收指标）。
+    /// @return 脏区/长任务行文本（profiling off 时为提示语）。
     [[nodiscard]] static auto stats_line5() -> std::string {
         if constexpr (!profiling_enabled()) {
             return "dirty/long-task: profiling off";
@@ -439,6 +544,7 @@ class PerfOverlay : public SingleChild {
     }
 
     /// @brief 计数器行的告警颜色：发生整帧重绘时转红（需要避免的场景）。
+    /// @return 灰色（无 profiling）/ 红色（整帧重绘）/ 浅灰（正常）。
     [[nodiscard]] static auto counters_color() -> Color {
         if constexpr (!profiling_enabled()) {
             return {140, 140, 140, 255};  // 灰色 — 数据不可用
@@ -448,6 +554,8 @@ class PerfOverlay : public SingleChild {
     }
 
     /// @brief 根据 FPS 值返回告警颜色。
+    /// @param fps 当前帧率数值。
+    /// @return ≥55 绿（流畅）/ ≥30 黄（卡顿警告）/ 其余红（严重卡顿）。
     [[nodiscard]] static auto fps_color(double fps) -> Color {
         if (fps >= 55.0) {
             return {0, 255, 128, 255};  // 绿色 — 流畅
@@ -515,12 +623,14 @@ class PerfOverlay : public SingleChild {
                 text, f, color);
         };
 
-        // 第一行：FPS + P99 + jitter（颜色告警）
-        draw_line(stats_line1(), fps_color(s.fps()));
+        // 第一行：FPS + P99 + jitter（颜色告警；已停帧时灰化——冻结值不再代表当前帧率，
+        // 继续按「绿 = 流畅」上色会给出与事实相反的观感）。统计行一律显式传 `s`：
+        // 无参重载读的是进程级单例，多窗口下会与本面板 `bound_stats_` 不一致。
+        draw_line(stats_line1(s), s.is_stale() ? Color(140, 140, 140, 255) : fps_color(s.fps()));
         // 第二行：dropped + hitch + idle（浅灰文本）
-        draw_line(stats_line2(), Color(200, 200, 200, 255));
+        draw_line(stats_line2(s), Color(200, 200, 200, 255));
         // 第三行：唤醒频率 + 睡眠占比（事件驱动帧循环观测）
-        draw_line(stats_line3(), Color(200, 200, 200, 255));
+        draw_line(stats_line3(s), Color(200, 200, 200, 255));
         if (show_counters_) {
             // 第四 / 五行：渲染计数器与脏区效率
             draw_line(stats_line4(), counters_color());

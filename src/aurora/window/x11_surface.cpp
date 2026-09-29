@@ -172,11 +172,13 @@ struct X11Surface::Impl {
 
     Painter painter;
     std::vector<Rect> present_dirty;  ///< 本帧增量上屏脏区（设备坐标；空=全量）。
+    int presented = 0;  ///< 已上屏帧数（见 `X11Surface::frame_count()`）。
     Size size{.width = 0.0F, .height = 0.0F};  ///< 逻辑 dp（布局用）。
     float scale = 1.0F;
     bool close_requested = false;
     bool active = true;
     bool minimized = false;
+    WindowVisibility visibility = WindowVisibility::Normal;  ///< 构造期定档的可见性策略。
     WindowState state = WindowState::Visible;
     WindowMode mode = WindowMode::Normal;
     EventHandler handler;
@@ -477,9 +479,11 @@ auto X11Surface::Impl::ime_update_spot() -> void {
     }
 }
 
-X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyleOptions &style)
+X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                       WindowVisibility visibility)
     : impl_(std::make_unique<Impl>()) {
     Impl &d = *impl_;
+    d.visibility = visibility;
     // XIM 依赖进程 locale（一次性）：否则 Xutf8LookupString 退化为 latin1，CJK 输入失效。
     static bool locale_done = false;
     if (!locale_done) {
@@ -589,7 +593,11 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     d.gshift = mask_shift(vis->green_mask, 8);
     d.bshift = mask_shift(vis->blue_mask, 0);
     d.gc = XCreateGC(d.dpy, d.win, 0, nullptr);
-    XMapWindow(d.dpy, d.win);
+    // 可见性：Hidden 档不映射窗口——表面仍可渲染、data() 仍可读回，窗口不进入用户视野。
+    // NoActivate 在 X11 下无对应请求（聚焦由 WM 策略决定，Aurora 从不主动 XSetInputFocus），故与 Normal 同路。
+    if (visibility != WindowVisibility::Hidden) {
+        XMapWindow(d.dpy, d.win);
+    }
     XFlush(d.dpy);
     d.ime_setup();
     d.size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // NOLINT(*-narrowing-conversions)
@@ -824,6 +832,7 @@ auto X11Surface::present() -> Result<bool> {
         const int w = d.painter.width();
         const int h = d.painter.height();
         if (d.ensure_image(w, h)) {
+            ++d.presented;  // 只计缓冲就绪并走完 XPutImage 上屏的帧
             // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
             const auto *src = reinterpret_cast<const std::uint32_t *>(d.painter.data());
             if (d.present_dirty.empty()) {
@@ -861,6 +870,8 @@ auto X11Surface::present() -> Result<bool> {
 }
 
 auto X11Surface::size() const -> Size { return impl_->size; }
+
+auto X11Surface::frame_count() const -> int { return impl_->presented; }
 
 auto X11Surface::scale_factor() const -> float { return impl_->scale; }
 

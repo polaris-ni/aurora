@@ -6,16 +6,14 @@
 
 namespace aurora {
 
-/**
- * @brief 菜单项（声明式）：MenuBar / ContextMenu / SystemTray 共用的菜单数据模型。
- *
- * 支持：普通项、分隔符、子菜单、checkable 项、快捷键文本。
- * 对标 Qt `QAction`/`QMenu`、WPF `MenuItem`、SwiftUI `Button`/`Toggle` in `Menu`。
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 菜单项（声明式）：MenuBar / ContextMenu / SystemTray 共用的菜单数据模型。
+///
+/// 支持：普通项、分隔符、子菜单、checkable 项、快捷键文本。
+/// 对标 Qt `QAction`/`QMenu`、WPF `MenuItem`、SwiftUI `Button`/`Toggle` in `Menu`。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
 struct MenuItem {
     std::string label;  ///< 显示文本（分隔符时为空）
     std::function<void()> on_click;  ///< 点击回调
@@ -29,17 +27,22 @@ struct MenuItem {
 
     /// @brief 构造普通菜单项。
     MenuItem() = default;
+    /// @brief 按显示文本构造菜单项：action 为空时仅展示、不响应点击。
+    /// @param text 显示文本（label）。
+    /// @param action 点击回调（可空）。
     explicit MenuItem(std::string text, std::function<void()> action = {})
         : label(std::move(text)), on_click(std::move(action)) {}
 
     /// @brief 构造分隔符。
+    /// @return separator 标志已置位、label 与回调保持默认的菜单项。
     [[nodiscard]] static auto separator_item() -> MenuItem {
-        MenuItem item;
+        MenuItem item;  // 新建的裸菜单项，随后仅置 separator 标志返回
         item.separator = true;
         return item;
     }
 
     /// @brief 是否为子菜单（含 children）。
+    /// @return children 非空时为 `true`（渲染为带箭头的子菜单）。
     [[nodiscard]] auto is_submenu() const -> bool { return !children.empty(); }
 };
 

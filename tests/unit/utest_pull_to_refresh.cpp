@@ -16,8 +16,10 @@
 #include "aurora/widget/pull_to_refresh.h"
 #include "aurora/widget/scroll.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_pull_to_refresh {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -122,10 +124,10 @@ AURORA_TEST_CASE(threshold_and_max_pull_serialize_round_trip) {
     PullToRefresh src;
     src.threshold = 40.0F;
     src.max_pull = 90.0F;
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["threshold"].get<float>(), 40.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["max_pull"].get<float>(), 90.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "threshold"), 40.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "max_pull"), 90.0F, 1e-4F);
 
     PullToRefresh dst;
     dst.deserialize_props(props);

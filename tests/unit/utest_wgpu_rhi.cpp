@@ -137,7 +137,7 @@ AURORA_TEST_CASE(wgpu_default_constructed_invalid) {
 AURORA_TEST_CASE(wgpu_offscreen_frame_lifecycle_and_pixels) {
     rhi::WgpuRhi rhi_obj(offscreen());
     if (!rhi_obj.valid()) {
-        AURORA_TEST_SKIP("无可用 wgpu adapter/device（CI 或驱动缺失），真实 GPU 断言跳过");
+        AURORA_TEST_SKIP("no wgpu adapter/device available (CI or missing driver); real GPU assertions skipped");
     }
 
     // 非法尺寸拒绝（设备像素为正）。
@@ -209,7 +209,7 @@ AURORA_TEST_CASE(wgpu_offscreen_frame_lifecycle_and_pixels) {
 AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) {
     rhi::WgpuRhi rhi_obj(offscreen(32, 32));
     if (!rhi_obj.valid()) {
-        AURORA_TEST_SKIP("无可用 wgpu adapter/device，流式槽契约跳过");
+        AURORA_TEST_SKIP("no wgpu adapter/device available; stream-slot contract skipped");
     }
 
     // 占位（未 begin_frame）下的读回与 acquire 契约仍安全。
@@ -238,10 +238,10 @@ AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) {
 AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) {
     rhi::WgpuRhi rhi_obj(offscreen(64, 64));
     if (!rhi_obj.valid()) {
-        AURORA_TEST_SKIP("无可用 wgpu adapter/device，mip 采样断言跳过");
+        AURORA_TEST_SKIP("no wgpu adapter/device available; mip sampling assertions skipped");
     }
     if (!rhi_obj.backend().capabilities().compute) {
-        AURORA_TEST_SKIP("adapter 无 compute（GLES 兜底端），mip 链不生成，采样保持 lod0 行为");
+        AURORA_TEST_SKIP("adapter lacks compute (GLES fallback): no mip chain is built, sampling stays at lod0");
     }
     const Image board = make_checkerboard();
 
@@ -310,10 +310,10 @@ AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
     // golden 容差测试覆盖，此处锁定 compute 路，不做假通过）。
     rhi::WgpuRhi rhi_obj(offscreen(64, 64));
     if (!rhi_obj.valid()) {
-        AURORA_TEST_SKIP("无可用 wgpu adapter/device，compute 区域效果断言跳过");
+        AURORA_TEST_SKIP("no wgpu adapter/device available; compute region-effect assertions skipped");
     }
     if (!rhi_obj.backend().capabilities().compute) {
-        AURORA_TEST_SKIP("adapter 无 compute（GLES 兜底端），效果走片元路，本用例锁定 compute 实路径");
+        AURORA_TEST_SKIP("no compute on adapter (GLES fallback): effects take the fragment path, not compute");
     }
     auto content = [](DisplayList &dl) {
         dl.push_cmd(make_fill(mkrect(0, 0, 64, 64), Color{10, 20, 30, 255}));
@@ -440,7 +440,7 @@ AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
 AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) {
     rhi::WgpuRhi rhi_obj(offscreen());
     if (!rhi_obj.valid()) {
-        AURORA_TEST_SKIP("无可用 wgpu adapter/device，离屏读回通道契约跳过");
+        AURORA_TEST_SKIP("no wgpu adapter/device available; offscreen readback channel contract skipped");
     }
     auto fill_frame = [&](Color color) {
         AURORA_TEST_REQUIRE(rhi_obj.begin_frame(64, 48, 1.0F));
@@ -482,7 +482,7 @@ AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
     // 四类，`skipped_cmds` 恒零即「WgpuRhi 全族可消费、无静默丢命令」。
     rhi::WgpuRhi rhi_obj(offscreen(160, 80));
     if (!rhi_obj.valid()) {
-        AURORA_TEST_SKIP("无可用 wgpu adapter/device，装饰回放像素断言跳过");
+        AURORA_TEST_SKIP("no wgpu adapter/device available; decoration replay pixel assertions skipped");
     }
     constexpr Color AURORA_CONTENT{0, 160, 0, 255};
     csd::TitleBarPaintState s;
@@ -537,16 +537,18 @@ AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
 namespace aurora::test_cases::utest_wgpu_rhi {
 
 AURORA_TEST_CASE(wgpu_default_constructed_invalid) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启（需 Rust 工具链 + wgpu-native 源码构建），头与实现整体被宏剔除");
+    AURORA_TEST_SKIP(
+        "AURORA_BACKEND_GPU_WGPU is not enabled (needs a Rust toolchain + wgpu-native source build); "
+        "header and impl are compiled out");
 }
-AURORA_TEST_CASE(wgpu_offscreen_frame_lifecycle_and_pixels) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
-AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
-AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
+AURORA_TEST_CASE(wgpu_offscreen_frame_lifecycle_and_pixels) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU is off"); }
+AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU is off"); }
+AURORA_TEST_CASE(wgpu_compute_mip_downscale_sampling) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU is off"); }
 AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU is off");
 }
-AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
-AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
+AURORA_TEST_CASE(wgpu_readback_toggle_and_multi_frame_submit) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU is off"); }
+AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU is off"); }
 
 }  // namespace aurora::test_cases::utest_wgpu_rhi
 

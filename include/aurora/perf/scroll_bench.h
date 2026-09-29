@@ -1,21 +1,19 @@
 #pragma once
 
-/**
- * @file scroll_bench.h
- * @brief 滚动性能确定性基准。
- *
- * 为什么需要它：「手滚一下感觉卡」不是可回归的度量。本 harness 用
- * `HeadlessSurface` + **程序化滚轮事件序列**把滚动变成可重复、
- * 可比较、可进 CI 的实验：同一棵树 + 同一段事件序列 → 同一组计数器读数。
- *
- * 验收看 `p99_ms` / `jitter_ms` / `full_redraw_frames` 三项，**不看 `avg_frame_ms`**
- * ——均值会把偶发的 80ms 卡顿摊平成看不见。
- *
- * 自证机制（这类工具最大的风险是「测了个寂寞」）：harness 每帧读取被测滚动控件的
- * 真实偏移量，产出 `moved_frames` / `scrolled_px` / `idle_frames`。若树里根本没有可滚
- * 动控件、或事件没命中它，`scrollable_found = false` 与 `moved_frames = 0` 会直接暴露，
- * 而不是给出一组漂亮却无意义的读数。调用方（工具 / 单测）须先校验这些字段再看性能数。
- */
+/// @brief 滚动性能确定性基准。
+/// @file scroll_bench.h
+///
+/// 为什么需要它：「手滚一下感觉卡」不是可回归的度量。本 harness 用
+/// `HeadlessSurface` + **程序化滚轮事件序列**把滚动变成可重复、
+/// 可比较、可进 CI 的实验：同一棵树 + 同一段事件序列 → 同一组计数器读数。
+///
+/// 验收看 `p99_ms` / `jitter_ms` / `full_redraw_frames` 三项，**不看 `avg_frame_ms`**
+/// ——均值会把偶发的 80ms 卡顿摊平成看不见。
+///
+/// 自证机制（这类工具最大的风险是「测了个寂寞」）：harness 每帧读取被测滚动控件的
+/// 真实偏移量，产出 `moved_frames` / `scrolled_px` / `idle_frames`。若树里根本没有可滚
+/// 动控件、或事件没命中它，`scrollable_found = false` 与 `moved_frames = 0` 会直接暴露，
+/// 而不是给出一组漂亮却无意义的读数。调用方（工具 / 单测）须先校验这些字段再看性能数。
 
 #include <cstddef>
 #include <cstdint>
@@ -28,21 +26,20 @@
 
 namespace aurora {
 
-/**
- * @brief 滚动性能确定性基准：Headless + 程序化滚动事件序列。
- *
- * 用法：
- * @code
- *   ScrollBenchHarness::Config cfg;      // 默认 warmup 30 + 采样 300 帧，匀速
- *   auto r = ScrollBenchHarness::run(build_content_tree(), Size{ 1100, 760 }, cfg);
- *   if (!r.trustworthy()) { ... }        // 先验伪，再看数
- *   AURORA_LOG_RAW("bench", r.to_markdown(), "\n");
- * @endcode
- *
- * @note Thread: main-thread only（单线程 UI 模型）
- * @note Side-effects: 驱动一份独立的 `HeadlessSurface`；不写文件、不写日志。
- *       会读写进程级 `RenderCounters` / `Profiler` 单例（帧作用域由 `present_root` 管理）。
- */
+/// @brief 滚动性能确定性基准：Headless + 程序化滚动事件序列。
+///
+/// 用法：
+/// @code
+/// ScrollBenchHarness::Config cfg;      // 默认 warmup 30 + 采样 300 帧，匀速
+/// auto r = ScrollBenchHarness::run(build_content_tree(), Size{ 1100, 760 }, cfg);
+/// if (!r.trustworthy()) { ... }        // 先验伪，再看数
+/// AURORA_LOG_RAW("bench", r.to_markdown(), "\n");
+/// @endcode
+///
+/// @note Thread: main-thread only（单线程 UI 模型）
+/// @note Side-effects: 驱动一份独立的 `HeadlessSurface`；不写文件、不写日志。
+/// 会读写进程级 `RenderCounters` / `Profiler` 单例（帧作用域由 `present_root` 管理）。
+///
 class ScrollBenchHarness {
   public:
     /// @brief 采样配置。
@@ -64,35 +61,34 @@ class ScrollBenchHarness {
         double frame_budget_ms = 16.67;  ///< 帧预算，决定 `over_budget_frames`
         std::string name = "scroll";  ///< 会话名，写入报告标题
 
-        // ---- 落定（settle）阶段：warmup 之前，不滚动，只空转帧 ----
-        //
-        // 真实业务首屏常有骨架屏 / 入场动画 / 延迟出现的内容（`demo_google_play` 是
-        // 700ms 骨架屏 + 0.32s 卡片入场）。不等它落定就开滚，量到的是「骨架屏很短、
-        // 一滚就到底」的假象——上一版实测 30 帧里反向了 11 次，就是踩了这个坑。
-        //
-        // 退出条件二选一，**都算正常落定**：
-        //  - 连续 `settle_idle_frames` 帧无脏（静态树）；
-        //  - 墙钟达到 `settle_ms`（含永动动画的树，例如自动轮播 banner —— 这类树
-        //    原理上永远不会 idle，只能按时间给足首屏瞬态）。
-        // 只有帧数撞到 `settle_max_frames` 才判未落定。骨架屏是否真的退场，不靠这里
-        // 猜，而由采样前后两次行程复测（`Result::geometry_stable()`）事后证伪。
+        /// @brief 落定（settle）阶段：warmup 之前，不滚动，只空转帧。
+        ///
+        /// 真实业务首屏常有骨架屏 / 入场动画 / 延迟出现的内容（`demo_google_play` 是
+        /// 700ms 骨架屏 + 0.32s 卡片入场）。不等它落定就开滚，量到的是「骨架屏很短、
+        /// 一滚就到底」的假象——上一版实测 30 帧里反向了 11 次，就是踩了这个坑。
+        ///
+        /// 退出条件二选一，**都算正常落定**：
+        ///  - 连续 `settle_idle_frames` 帧无脏（静态树）；
+        ///  - 墙钟达到 `settle_ms`（含永动动画的树，例如自动轮播 banner —— 这类树
+        ///    原理上永远不会 idle，只能按时间给足首屏瞬态）。
+        /// 只有帧数撞到 `settle_max_frames` 才判未落定。骨架屏是否真的退场，不靠这里
+        /// 猜，而由采样前后两次行程复测（`Result::geometry_stable()`）事后证伪。
         double settle_ms = 1500.0;  ///< 落定阶段墙钟目标（达到即视为落定）；0 = 关闭
         int settle_idle_frames = 24;  ///< 连续这么多帧无脏即提前判定已落定
         int settle_max_frames = 4000;  ///< 落定阶段帧数硬上限（唯一的失败出口）
 
-        // ---- fling 模式参数（`fling = false` 时忽略）----
+        /// @brief fling 模式参数（`fling = false` 时忽略）。
         float fling_boost = 4.0F;  ///< 起始速度 = `delta_per_frame * fling_boost`（dp/帧）
         float fling_decay = 0.94F;  ///< 每帧速度衰减系数，(0,1)
         float fling_cutoff = 0.5F;  ///< 速度（dp/帧）低于此值判定为静止，随即发起下一次 fling
     };
 
-    /**
-     * @brief 采样结果。
-     *
-     * 帧统计全部收敛在 `report`（`PerfReport`）里，本结构只额外携带**滚动**相关的
-     * 自证字段；`p99_ms` 等读数以转发访问器给出，避免同一份数据在两处
-     * 各存一份而失同步。
-     */
+    /// @brief 采样结果。
+    ///
+    /// 帧统计全部收敛在 `report`（`PerfReport`）里，本结构只额外携带**滚动**相关的
+    /// 自证字段；`p99_ms` 等读数以转发访问器给出，避免同一份数据在两处
+    /// 各存一份而失同步。
+    ///
     struct Result {
         /// @brief 落定阶段的退出原因（写进报告，避免「落定成功」是怎么来的说不清）。
         enum class SettleReason : std::uint8_t {
@@ -105,7 +101,7 @@ class ScrollBenchHarness {
         PerfReport report{};  ///< 完整帧统计（markdown / json / csv 由它渲染）
         Size viewport{};  ///< 本次采样的视口逻辑尺寸（dp）
 
-        // ---- 自证字段：先验伪，再看性能数 ----
+        /// @brief 自证字段：先验伪，再看性能数。
         bool scrollable_found = false;  ///< 是否在树中定位到垂直可滚动控件
         std::size_t moved_frames = 0;  ///< 实际产生位移的采样帧数（应 == frames）
         std::size_t idle_frames = 0;  ///< 被 idle 跳帧优化跳过的采样帧数（应为 0）
@@ -128,61 +124,89 @@ class ScrollBenchHarness {
         ///
         /// 这是识别「骨架屏没退场就开测」的**事后**判据，比在落定阶段猜启发式规则可靠：
         /// 骨架屏与真实内容高度不同，只要采样中途发生切换，两次行程复测必然对不上。
+        /// @return 两次行程复测差值小于 0.5 dp 时为 true（采样期内容几何稳定）。
         [[nodiscard]] auto geometry_stable() const -> bool;
 
         /// @brief 内容有多少屏（滚动容器视口的倍数）。< 2.0 表示内容不足两屏。
+        /// @return (scroll_viewport_h + max_offset) / scroll_viewport_h；视口高 ≤0 时返回 0.0。
         [[nodiscard]] auto content_screens() const -> float;
 
         /// @brief 触边反向帧占比。
+        /// @return reversals / 采样帧数；帧数为 0 时返回 0.0。
         [[nodiscard]] auto reversal_ratio() const -> double;
 
         /// @brief 读数是否可信。全部满足才为 true：定位到滚动控件、落定阶段正常结束、
         /// 采样期每帧都真的在滚、无 idle 跳帧、树确实可滚、内容几何稳定、触边反向占比
         /// 不超过 `AURORA_MAX_REVERSAL_RATIO`。任一不满足都说明「测了个寂寞」，性能数不该采信。
+        /// @return 所有自证条件同时成立时为 true。
         [[nodiscard]] auto trustworthy() const -> bool;
 
-        // ---- 汇总读数（转发 `report`，单一数据源）----
+        /// @brief 汇总读数：全部转发 `report`（单一数据源，避免两处各存一份而失同步）。
+        /// @return 采样期每帧平均耗时（毫秒）。
         [[nodiscard]] auto avg_frame_ms() const -> double { return report.avg_frame_ms; }
+        /// @brief 帧耗时中位数。
+        /// @return 毫秒。
         [[nodiscard]] auto p50_ms() const -> double { return report.p50_ms; }
+        /// @brief 帧耗时 95 分位。
+        /// @return 毫秒。
         [[nodiscard]] auto p95_ms() const -> double { return report.p95_ms; }
+        /// @brief 帧耗时 99 分位（主验收指标之一）。
+        /// @return 毫秒。
         [[nodiscard]] auto p99_ms() const -> double { return report.p99_ms; }
+        /// @brief 采样期最差单帧耗时。
+        /// @return 毫秒。
         [[nodiscard]] auto worst_ms() const -> double { return report.worst_ms; }
+        /// @brief 帧耗时抖动（主验收指标之一）。
+        /// @return 毫秒。
         [[nodiscard]] auto jitter_ms() const -> double { return report.jitter_ms; }
         /// @brief **主验收指标**：滚动期间退化为整帧重绘的帧数。
+        /// @return 退化帧数。
         [[nodiscard]] auto full_redraw_frames() const -> std::size_t { return report.full_redraw_frames; }
+        /// @brief 长任务数。
+        /// @return 采样期 Profiler 判定的长任务累计次数（转发 `report.long_task_count`）。
         [[nodiscard]] auto long_task_count() const -> std::size_t { return report.long_task_count; }
+        /// @brief 渲染计数器累计和。
+        /// @return `report.counters_sum` 的只读引用。
         [[nodiscard]] auto counters_sum() const -> const RenderCounters & { return report.counters_sum; }
+        /// @brief 渲染计数器单帧峰值。
+        /// @return `report.counters_max` 的只读引用。
         [[nodiscard]] auto counters_max() const -> const RenderCounters & { return report.counters_max; }
 
         /// @brief Markdown 报告：`report` 的表格 + 滚动自证行。
+        /// @return 完整 Markdown 文本（含 trustworthy 判定行）。
         [[nodiscard]] auto to_markdown() const -> std::string;
         /// @brief JSON 对象：`report` 的字段 + 滚动自证字段。
+        /// @return JSON 文本（自证字段在前，`report` 嵌套于 `report` 键）。
         [[nodiscard]] auto to_json() const -> std::string;
         /// @brief CSV 数据行（字段顺序与 `csv_header()` 严格对应）。
+        /// @return 单行 CSV 文本。
         [[nodiscard]] auto to_csv_row() const -> std::string;
         /// @brief CSV 表头。
+        /// @return 与 `to_csv_row()` 字段一一对应的表头行。
         [[nodiscard]] static auto csv_header() -> std::string;
     };
 
-    /**
-     * @brief 跑一次滚动基准。
-     *
-     * 流程：建 Headless 窗口 → 首帧 present（触发布局，动态子树在此建成）→ **落定阶段**
-     * （空转到骨架屏/入场动画结束）→ 定位可滚动控件 → **行程复测**（拉到底读最大偏移再
-     * 拉回顶）→ warmup（照常滚动但不计入统计）→ 采样 `cfg.frames` 帧 → **行程再复测**。
-     * 每帧：派发一次滚轮事件（命中视口中心，与真实应用同一条 `EventDispatcher` 路径）
-     * → `Window::present_root` → 记录耗时与 `RenderCounters`。
-     *
-     * @param root     被测内容树（按值取，harness 独占驱动，避免与调用方共享挂载状态）
-     * @param viewport 视口逻辑尺寸（dp）
-     * @param cfg      采样配置
-     * @return 采样结果；先查 `Result::trustworthy()` 再读性能指标
-     */
+    /// @brief 跑一次滚动基准。
+    ///
+    /// 流程：建 Headless 窗口 → 首帧 present（触发布局，动态子树在此建成）→ **落定阶段**
+    /// （空转到骨架屏/入场动画结束）→ 定位可滚动控件 → **行程复测**（拉到底读最大偏移再
+    /// 拉回顶）→ warmup（照常滚动但不计入统计）→ 采样 `cfg.frames` 帧 → **行程再复测**。
+    /// 每帧：派发一次滚轮事件（命中视口中心，与真实应用同一条 `EventDispatcher` 路径）
+    /// → `Window::present_root` → 记录耗时与 `RenderCounters`。
+    ///
+    /// @param root     被测内容树（按值取，harness 独占驱动，避免与调用方共享挂载状态）
+    /// @param viewport 视口逻辑尺寸（dp）
+    /// @param cfg      采样配置
+    /// @return 采样结果；先查 `Result::trustworthy()` 再读性能指标
+    ///
     [[nodiscard]] static auto run(Node root, Size viewport, const Config &cfg) -> Result;
 
     /// @brief 以默认配置（warmup 30 + 采样 300 帧，匀速）跑一次。
     /// @note 独立重载而非默认实参：`Config` 是嵌套类型，在类体内其默认成员初始化器
     ///       尚未完成，`= Config{}` 会导致 "required before the end of its enclosing class"。
+    /// @param root 被测内容树（按值取，harness 独占驱动）
+    /// @param viewport 视口逻辑尺寸（dp）
+    /// @return 采样结果；先查 `Result::trustworthy()` 再读性能指标
     [[nodiscard]] static auto run(Node root, Size viewport) -> Result;
 };
 

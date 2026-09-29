@@ -26,7 +26,7 @@ namespace m = aurora::testing::matchers;
 
 namespace {
 
-/// @brief 有界轮询：每 1ms 轮询一次 pred，超时返回最后一次判定（禁止无界阻塞）。
+// @brief 有界轮询：每 1ms 轮询一次 pred，超时返回最后一次判定（禁止无界阻塞）。
 template <typename Pred>
 // pred 在轮询循环内可能被多次调用，不能按「一次性转发」用 std::forward（对带状态可调用体
 // 转成右值引用会误移动，破坏后续再次调用），刻意始终以左值形式反复调用，故抑制该告警。
@@ -307,8 +307,8 @@ AURORA_TEST_CASE(deferred_with_timeout_fires_at_frame_tail_sweep) {
     AURORA_TEST_CHECK_EQ(calls.load(std::memory_order_acquire), 1);
 #else
     AURORA_TEST_SKIP(
-        "deferred 超时路径仅在无 pthreads 构建成立（native 看守是 worker 任务，"
-        "见 async_with_timeout_delivers_timeout_error）");
+        "the deferred timeout path only holds in builds without pthreads "
+        "(the native watchdog is a worker task; see async_with_timeout_delivers_timeout_error)");
 #endif
 }
 

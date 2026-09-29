@@ -4,6 +4,7 @@
 /// flex 权重瓜分剩余空间、gap 插入与分配扣除、MainAxisSize::Max 下的主轴对齐
 /// （Center/End/SpaceBetween/SpaceAround/SpaceEvenly）、交叉轴对齐（Start/Center/End/Stretch/Baseline
 /// 含无基线子项的合成基线、全无基线退化为 End、Column 回退 Start、RTL 正交性、父约束夹取）
+/// 与子项约束的供给性质打标（非加权子项主轴 loose、flex 槽位不 loose、嵌套容器交叉轴继承）
 
 #include <optional>
 #include <vector>
@@ -441,6 +442,57 @@ AURORA_TEST_CASE(baseline_container_cross_clamps_into_parent_constraint) {
     AURORA_TEST_CHECK_NEAR(layout.children[0].origin.y, 0.0F, 1e-4F);  // 70 - 70
     AURORA_TEST_CHECK_NEAR(layout.children[1].origin.y, 70.0F, 1e-4F);  // 70 - 0
     AURORA_TEST_CHECK_GE(layout.children[1].origin.y, 0.0F);
+}
+
+namespace {
+
+/// 记录子项收到的约束，用于验证「供给性质」打标（loose = 按需剩余空间，非既定槽位）。
+struct RecordCtx : aurora::LayoutCtxBase {
+    float w = 0.0F;
+    float h = 0.0F;
+    Constraints seen{};
+};
+
+auto record_measure(void *ctx, const Constraints &c) -> Size {
+    auto *self = static_cast<RecordCtx *>(ctx);
+    self->seen = c;
+    return c.constrain(Size{.width = self->w, .height = self->h});
+}
+
+auto record_item(float w, float h, float weight, RecordCtx &ctx) -> FlexItem {
+    ctx.w = w;
+    ctx.h = h;
+    return FlexItem::make(weight, &ctx, &record_measure);
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(non_flex_children_get_loose_main_axis_supply) {
+    RecordCtx plain;
+    RecordCtx weighted;
+    Flex cfg;
+    cfg.direction = FlexDirection::Column;
+    FlexLayouter::layout(cfg, parent_constraints(),
+                         {record_item(30.0F, 10.0F, 0.0F, plain), record_item(30.0F, 10.0F, 1.0F, weighted)});
+
+    // Column 的非加权子项：主轴（高）上限只是剩余空间 ⇒ 标 loose；交叉轴（宽）是既定槽位 ⇒ 不标。
+    AURORA_TEST_CHECK_TRUE(plain.seen.loose_height);
+    AURORA_TEST_CHECK_FALSE(plain.seen.loose_width);
+    // flex 权重子项的主轴上限是按权重分配到的既定槽位 ⇒ 两轴都不 loose。
+    AURORA_TEST_CHECK_FALSE(weighted.seen.loose_height);
+    AURORA_TEST_CHECK_FALSE(weighted.seen.loose_width);
+}
+
+AURORA_TEST_CASE(loose_supply_propagates_across_nested_flex_axes) {
+    RecordCtx kid;
+    // Row 嵌在 Column 内：Row 收到的交叉轴（高）约束本就 loose，须原样传给它的子项。
+    const Constraints row_cc{.min = Size{.width = 0.0F, .height = 0.0F},
+                             .max = Size{.width = 300.0F, .height = 100.0F},
+                             .loose_height = true};
+    FlexLayouter::layout(Flex{}, row_cc, {record_item(30.0F, 10.0F, 0.0F, kid)});
+
+    AURORA_TEST_CHECK_TRUE(kid.seen.loose_width);  // Row 自己的主轴（宽）= 剩余空间
+    AURORA_TEST_CHECK_TRUE(kid.seen.loose_height);  // 交叉轴继承父级 loose
 }
 
 }  // namespace aurora::test_cases::utest_flex_layouter

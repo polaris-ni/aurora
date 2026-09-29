@@ -3,7 +3,8 @@
 /// 测试说明: 基础控件组装与交互集成——Divider/Checkbox/Switch/Slider/ProgressIndicator
 /// 渲染走通、Checkbox 完整点击切换、Slider 拖拽赋值、Stack 对齐/偏移/圆角裁剪渲染、
 /// draggable/long_press 手势回调、逻辑快照与像素栅格确定性、Column/Row 对齐属性
-/// 及序列化往返（低阶 FlexLayouter 语义由 utest_flex_layouter 覆盖）
+/// 及序列化往返、Align 在 Column 内的交叉轴展开与兄弟主轴空间守恒
+/// （低阶 FlexLayouter 语义由 utest_flex_layouter 覆盖）
 
 #include <chrono>
 #include <cmath>
@@ -29,8 +30,13 @@
 #include "aurora/widget/switch.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::itest_widget_components {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -114,6 +120,46 @@ AURORA_TEST_CASE(stack_align_offset_rounded_clip_render) {
     AURORA_TEST_CHECK_MSG(true, "Align/Offset/rounded-clip render without crash");
 }
 
+AURORA_TEST_CASE(align_in_column_centers_cross_axis_without_stealing_main_space) {
+    // TC-MODIFIER-005 的引擎侧不变量：`.align(Center)` 写在 `.size()` 之外时，
+    // Column 的交叉轴（宽）是既定槽位 → 展开成整行并把 120×40 内容盒居中；
+    // 主轴（高）只是「剩余空间」→ 不展开，否则同列后续兄弟会被挤出可视区。
+    Text centered{"Centered"};
+    centered.modifier.set(Modifier{}.align(Alignment::Center).size(120.0F, 40.0F).background(Color(9, 9, 9, 255)));
+    Text below{"Below"};
+    below.modifier.set(Modifier{}.size(100.0F, 20.0F));
+    Column col{Node{std::move(centered)}, Node{std::move(below)}};
+    render_tree(col, 400.0F, 300.0F);
+
+    AURORA_TEST_CHECK_NEAR(col.size().width, 400.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(col.size().height, 60.0F, 1e-3F);  // 40 + 20，剩余 240 未被吞
+
+    // 绘制盒与命中盒同源：居中的 120×40 子盒（x 140..260）内命中该 Text，
+    // 展开行两端（左 0..140、右 260..400）的空白命不中任何控件。
+    const BuildContext ctx;
+    const Rect root_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
+    Widget *on_block = col.hit_test(Point{.x = 200.0F, .y = 20.0F}, root_box, ctx);
+    Widget *on_left_gutter = col.hit_test(Point{.x = 20.0F, .y = 20.0F}, root_box, ctx);
+    Widget *on_right_gutter = col.hit_test(Point{.x = 380.0F, .y = 20.0F}, root_box, ctx);
+    AURORA_TEST_CHECK_TRUE(dynamic_cast<Text *>(on_block) != nullptr);
+    AURORA_TEST_CHECK_EQ(on_left_gutter, nullptr);
+    AURORA_TEST_CHECK_EQ(on_right_gutter, nullptr);
+}
+
+AURORA_TEST_CASE(align_hit_box_shrinks_for_clickable_widget) {
+    // 同一收缩规则对「自身可点击」分支同样成立：可点击块挂在展开行里时，
+    // 展开出的空白段不得抢走点击（否则回调会在什么都没画的地方触发）。
+    Text tappable{"Tap"};
+    tappable.modifier.set(Modifier{}.align(Alignment::Center).size(120.0F, 40.0F).clickable([]() -> void {}));
+    Column col{Node{std::move(tappable)}};
+    render_tree(col, 400.0F, 60.0F);
+
+    const BuildContext ctx;
+    const Rect root_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 60.0F}};
+    AURORA_TEST_CHECK_TRUE(col.hit_test(Point{.x = 200.0F, .y = 20.0F}, root_box, ctx) != nullptr);
+    AURORA_TEST_CHECK_EQ(col.hit_test(Point{.x = 380.0F, .y = 20.0F}, root_box, ctx), nullptr);
+}
+
 AURORA_TEST_CASE(drag_gesture_reports_delta) {
     bool dragged = false;
     Point last_delta{.x = 0.0F, .y = 0.0F};
@@ -167,16 +213,22 @@ AURORA_TEST_CASE(logical_snapshot_and_pixels_are_deterministic) {
 
     Node t1 = make_tree();
     const Json snap = render_to_logical_snapshot(t1, 200, 200);
-    AURORA_TEST_CHECK_STREQ(snap["type"].get<std::string>(), "Column");
-    AURORA_TEST_CHECK_EQ(snap["children"].size(), 2U);
-    AURORA_TEST_CHECK_STREQ(snap["children"][0]["type"].get<std::string>(), "Row");
-    AURORA_TEST_CHECK_NEAR(snap["box"]["w"].get<float>(), 200.0F, 1e-3F);
-    AURORA_TEST_CHECK_NEAR(snap["box"]["h"].get<float>(), 200.0F, 1e-3F);
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(snap, "type"), "Column");
+    AURORA_TEST_CHECK_EQ(require_child(snap, "children")->size(), 2U);
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(*require_child_at(*require_child(snap, "children"), 0), "type"),
+                            "Row");
+    const auto &box = *require_child(snap, "box");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(box, "w"), 200.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(box, "h"), 200.0F, 1e-3F);
 
     // 快照确定性：两棵同构树 dump 一致。
     Node t2 = make_tree();
     const Json snap2 = render_to_logical_snapshot(t2, 200, 200);
-    AURORA_TEST_CHECK_EQ(snap.dump(), snap2.dump());
+    auto d1 = aurora::json::dump(snap);
+    auto d2 = aurora::json::dump(snap2);
+    AURORA_TEST_REQUIRE_TRUE(d1.ok());
+    AURORA_TEST_REQUIRE_TRUE(d2.ok());
+    AURORA_TEST_CHECK_EQ(d1.value(), d2.value());
 
     // 像素确定性：同树两次栅格化结果一致。
     auto render_pixels = [](Widget &w, int ww, int hh) -> std::vector<std::uint8_t> {
@@ -227,21 +279,21 @@ AURORA_TEST_CASE(column_row_alignment_and_props_roundtrip) {
         .set_cross_axis_alignment(CrossAxisAlignment::Stretch)
         .set_main_axis_size(MainAxisSize::Max)
         .set_gap(8.0F);
-    Json j;
+    Json j = Json::object();
     col2.serialize_props(j);
-    AURORA_TEST_CHECK_STREQ(j["main_axis_alignment"].get<std::string>(), "Center");
-    AURORA_TEST_CHECK_STREQ(j["cross_axis_alignment"].get<std::string>(), "Stretch");
-    AURORA_TEST_CHECK_STREQ(j["main_axis_size"].get<std::string>(), "Max");
-    AURORA_TEST_CHECK_NEAR(j["gap"].get<float>(), 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(j, "main_axis_alignment"), "Center");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(j, "cross_axis_alignment"), "Stretch");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(j, "main_axis_size"), "Max");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(j, "gap"), 8.0F, 1e-4F);
 
     Column q{Node{Text{"b"}}};
     q.deserialize_props(j);
-    Json k;
+    Json k = Json::object();
     q.serialize_props(k);
-    AURORA_TEST_CHECK_STREQ(k["main_axis_alignment"].get<std::string>(), "Center");
-    AURORA_TEST_CHECK_STREQ(k["cross_axis_alignment"].get<std::string>(), "Stretch");
-    AURORA_TEST_CHECK_STREQ(k["main_axis_size"].get<std::string>(), "Max");
-    AURORA_TEST_CHECK_NEAR(k["gap"].get<float>(), 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(k, "main_axis_alignment"), "Center");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(k, "cross_axis_alignment"), "Stretch");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(k, "main_axis_size"), "Max");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(k, "gap"), 8.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::itest_widget_components

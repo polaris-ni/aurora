@@ -14,8 +14,11 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/lazy_row.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_lazy_row {
+
+using aurora::testing::require_field;
 
 namespace {
 
@@ -222,10 +225,10 @@ AURORA_TEST_CASE(restore_key_restores_offset_and_writes_back) {
     AURORA_TEST_CHECK_NEAR(storage.read("row.k").value_or(-1.0F), 240.0F, 1e-4F);
 
     // 序列化面：offset 与 restore_key 双向可见。
-    Json props;
+    Json props = Json::object();
     row.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["offset"].get<float>(), 240.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(props["restore_key"].get<std::string>(), std::string{"row.k"});
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "offset"), 240.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "restore_key"), std::string{"row.k"});
     storage.clear_all();
 }
 
@@ -303,11 +306,11 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
     // 让各字段真实生效后再做往返。
     LazyRow src{7, {}, 48.0F};
     src.set_cache_extent(32.0F);
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["item_count"].get<int>(), 7);
-    AURORA_TEST_CHECK_NEAR(props["item_extent"].get<float>(), 48.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["cache_extent"].get<float>(), 32.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "item_count"), 7);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "item_extent"), 48.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "cache_extent"), 32.0F, 1e-4F);
 
     LazyRow dst;
     dst.deserialize_props(props);

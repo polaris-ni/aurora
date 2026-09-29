@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/chart_common.h
-/// 测试说明: 覆盖图表公共纯值数据层——LinearScale（D3 nice 步长、to_px/invert 往返、退化域兜底）、
+/// 测试说明: 覆盖图表公共纯值数据层——LinearScale（nice 步长、to_px/invert 往返、退化域兜底）、
 /// BandScale（带中心/带宽/命中夹取/空带）、内置色板取模与 resolve_series_color 三级优先
 /// （显式 color > Theme 令牌 chart.palette.N > 内置色板）、以及进序列化面的数组编解码
 /// （vector<double> / ChartSeries / ScatterSeries / PieSection / 轴与图例规格）往返与畸形输入兜底
@@ -12,9 +12,13 @@
 
 #include "aurora/aurora.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_chart_common {
 
+using aurora::testing::json_arr;
+using aurora::testing::require_child_at;
 using aurora::testing::require_value;
 
 namespace {
@@ -28,7 +32,7 @@ AURORA_TEST_CASE(linear_scale_nice_domain_and_step) {
     const auto [d0, d1] = s.domain();
     AURORA_TEST_CHECK_TRUE(is_near(d0, 0.0));
     AURORA_TEST_CHECK_TRUE(is_near(d1, 100.0));
-    AURORA_TEST_CHECK_TRUE(is_near(s.step(), 20.0));  // D3 tickIncrement：0..100 分 5 档 → 20
+    AURORA_TEST_CHECK_TRUE(is_near(s.step(), 20.0));  // d3-scale tickIncrement：0..100 分 5 档 → 20
 }
 
 AURORA_TEST_CASE(linear_scale_ticks_cover_domain) {
@@ -51,7 +55,7 @@ AURORA_TEST_CASE(linear_scale_to_px_and_invert_roundtrip) {
 }
 
 AURORA_TEST_CASE(linear_scale_degenerate_domain_falls_back) {
-    // D15：range == 0 不得产生除零 / NaN；全 0 退化到 [0,1]，非零退化到 [v, v+1]。
+    // range == 0 不得产生除零 / NaN；全 0 退化到 [0,1]，非零退化到 [v, v+1]。
     const auto zero = LinearScale::from_domain(0.0, 0.0, 5);
     AURORA_TEST_CHECK_TRUE(is_near(zero.domain().first, 0.0));
     AURORA_TEST_CHECK_TRUE(is_near(zero.domain().second, 1.0));
@@ -119,7 +123,7 @@ AURORA_TEST_CASE(json_roundtrip_double_vector) {
     AURORA_TEST_CHECK_EQ(j.size(), 4U);
     AURORA_TEST_CHECK_TRUE(json_to_double_vector(j) == src);
     // NaN/inf 落盘为 0（JSON 无该字面量，且避免下游除零）
-    AURORA_TEST_CHECK_TRUE(is_near(double_vector_to_json({NAN})[0].get<double>(), 0.0));
+    AURORA_TEST_CHECK_TRUE(is_near(require_child_at(double_vector_to_json({NAN}), 0)->as<double>().value(), 0.0));
 }
 
 AURORA_TEST_CASE(json_roundtrip_series_array) {
@@ -131,7 +135,7 @@ AURORA_TEST_CASE(json_roundtrip_series_array) {
     AURORA_TEST_REQUIRE_TRUE(j.is_array());
     AURORA_TEST_CHECK_EQ(j.size(), 2U);
     // 未设色的系列不输出 color 键（保留「按索引取色板」语义）
-    AURORA_TEST_CHECK_FALSE(j[1].contains("color"));
+    AURORA_TEST_CHECK_FALSE(j.at(1)->contains("color"));
 
     const std::vector<ChartSeries> back = json_to_chart_series_vector(j);
     AURORA_TEST_REQUIRE_EQ(back.size(), 2U);
@@ -161,7 +165,7 @@ AURORA_TEST_CASE(json_roundtrip_scatter_and_pie) {
     AURORA_TEST_REQUIRE_EQ(ratios.size(), 2U);
     AURORA_TEST_CHECK_TRUE(is_near(ratios[0], 0.75));
     AURORA_TEST_CHECK_TRUE(is_near(ratios[1], 0.25));
-    // Σ ≤ 0：全 0（由调用方按 D15 降级，不产生 NaN）
+    // Σ ≤ 0：全 0（由调用方按降级口径处理，不产生 NaN）
     const std::vector<double> empty = pie_section_ratios({PieSection{.name = "z", .value = 0.0}});
     AURORA_TEST_REQUIRE_EQ(empty.size(), 1U);
     AURORA_TEST_CHECK_TRUE(is_near(empty[0], 0.0));
@@ -185,21 +189,21 @@ AURORA_TEST_CASE(json_roundtrip_axis_and_legend) {
     legend.position = LegendPosition::Right;
     const ChartLegendSpec legend_back = json_to_chart_legend_spec(chart_legend_spec_to_json(legend));
     AURORA_TEST_CHECK_TRUE(legend_back.position == LegendPosition::Right);
-    AURORA_TEST_CHECK_TRUE(legend_position_to_json(LegendPosition::Bottom).get<std::string>() == "Bottom");
+    AURORA_TEST_CHECK_TRUE(legend_position_to_json(LegendPosition::Bottom).as<std::string>().value() == "Bottom");
 }
 
 AURORA_TEST_CASE(json_malformed_input_degrades_without_throwing) {
     // Inspector PUT / JSON 文件加载是不可信通道：畸形元素一律跳过，绝不抛异常。
     AURORA_TEST_CHECK_TRUE(json_to_double_vector(Json::object()).empty());
-    AURORA_TEST_CHECK_TRUE(json_to_double_vector(Json{1.0, std::string{"x"}, 3.0}).size() == 2U);
-    AURORA_TEST_CHECK_TRUE(json_to_chart_series_vector(Json{1, 2, 3}).empty());
-    AURORA_TEST_CHECK_TRUE(json_to_chart_series(Json{Json::array()}).values.empty());
+    AURORA_TEST_CHECK_TRUE(json_to_double_vector(json_arr({1.0, std::string{"x"}, 3.0})).size() == 2U);
+    AURORA_TEST_CHECK_TRUE(json_to_chart_series_vector(json_arr({1, 2, 3})).empty());
+    AURORA_TEST_CHECK_TRUE(json_to_chart_series(json_arr({Json::array()})).values.empty());
     AURORA_TEST_CHECK_TRUE(json_to_scatter_series(Json::object()).points.empty());
     // 对象元素保留、非对象元素跳过（不是整包丢弃）
-    AURORA_TEST_CHECK_EQ(json_to_pie_section_vector(Json{Json::object(), 5}).size(), 1U);
-    AURORA_TEST_CHECK_TRUE(json_to_chart_axis_spec(Json{Json::array()}).tick_count == 5);
-    AURORA_TEST_CHECK_TRUE(json_to_chart_legend_spec(Json{Json::array()}).visible);
-    AURORA_TEST_CHECK_TRUE(json_to_legend_position(Json{"nope"}) == LegendPosition::Top);
+    AURORA_TEST_CHECK_EQ(json_to_pie_section_vector(json_arr({Json::object(), 5})).size(), 1U);
+    AURORA_TEST_CHECK_TRUE(json_to_chart_axis_spec(json_arr({Json::array()})).tick_count == 5);
+    AURORA_TEST_CHECK_TRUE(json_to_chart_legend_spec(json_arr({Json::array()})).visible);
+    AURORA_TEST_CHECK_TRUE(json_to_legend_position(Json{std::string{"nope"}}) == LegendPosition::Top);
     AURORA_TEST_CHECK_TRUE(json_to_string_vector(Json::object()).empty());
 }
 

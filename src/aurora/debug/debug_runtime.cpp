@@ -21,6 +21,14 @@ namespace {
 
 [[maybe_unused]] constexpr auto AURORA_UNAVAILABLE_REASON = "AURORA_ENABLE_DEBUG not enabled";
 
+/// @brief Release（未开 AURORA_ENABLE_DEBUG）统一返回的 unavailable 快照。
+[[maybe_unused]] [[nodiscard]] auto unavailable_state() -> Json {
+    Json j = Json::object();
+    j.set("available", Json{false});
+    j.set("reason", AURORA_UNAVAILABLE_REASON);
+    return j;
+}
+
 // ---- why_trace 采集缓冲（仅 DEBUG 下存在）----
 #ifdef AURORA_ENABLE_DEBUG
 struct DirtyTraceEntry {
@@ -69,7 +77,7 @@ auto widget_tree(const Node &root) -> Json {
     return Inspector::tree_json_full(root);
 #else
     (void)root;
-    return Json{{"available", false}, {"reason", AURORA_UNAVAILABLE_REASON}};
+    return unavailable_state();
 #endif
 }
 
@@ -77,56 +85,32 @@ auto widget_tree(const Node &root) -> Json {
 
 auto perf_snapshot() -> Json {
 #ifdef AURORA_ENABLE_DEBUG
-    Json j;
+    Json j = Json::object();
     const FrameStats &fs = FrameStats::instance();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["fps"] = fs.fps();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["avg_frame_ms"] = fs.avg_frame_ms();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["worst_frame_ms"] = fs.worst_frame_ms();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["jitter_ms"] = fs.jitter_ms();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["p50_ms"] = fs.percentile_ms(0.5);
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["p99_ms"] = fs.percentile_ms(0.99);
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["dropped_frames"] = fs.dropped_frame_count();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["dropped_ratio"] = fs.dropped_frame_ratio();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["hitches"] = fs.hitch_count();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["idle_frames"] = fs.idle_frame_count();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["total_frames"] = fs.total_frames();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["frame_budget_ms"] = fs.frame_budget_ms();
-    try {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        j["perf_log"] = Json::parse(PerfLog::snapshot_json());
-    } catch (...) {
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        j["perf_log"] = Json{};
+    j.set("fps", fs.fps());
+    j.set("avg_frame_ms", fs.avg_frame_ms());
+    j.set("worst_frame_ms", fs.worst_frame_ms());
+    j.set("jitter_ms", fs.jitter_ms());
+    j.set("p50_ms", fs.percentile_ms(0.5));
+    j.set("p99_ms", fs.percentile_ms(0.99));
+    j.set("dropped_frames", fs.dropped_frame_count());
+    j.set("dropped_ratio", fs.dropped_frame_ratio());
+    j.set("hitches", fs.hitch_count());
+    j.set("idle_frames", fs.idle_frame_count());
+    j.set("total_frames", fs.total_frames());
+    // 停帧陈旧标志 + 空闲时长：远程读取方（Inspector / MCP）据此判断 `fps` 是否还代表当前帧率。
+    // 没有这两个字段，消费方只能看到一个冻结但「看起来正常」的帧率（见 ARCHITECTURE.md §10.1）。
+    j.set("stale", Json{fs.is_stale()});
+    j.set("stale_ms", fs.stale_duration_ms());
+    j.set("frame_budget_ms", fs.frame_budget_ms());
+    if (auto r = json::parse(PerfLog::snapshot_json()); r) {
+        j.set("perf_log", std::move(r).value());
+    } else {
+        j.set("perf_log", Json{});
     }
     return j;
 #else
-    return Json{{"available", false}, {"reason", AURORA_UNAVAILABLE_REASON}};
+    return unavailable_state();
 #endif
 }
 
@@ -134,48 +118,28 @@ auto perf_snapshot() -> Json {
 
 auto frame_phase_timeline(std::size_t limit) -> Json {
 #ifdef AURORA_ENABLE_DEBUG
-    Json j;
+    Json j = Json::object();
     const FrameStats &fs = FrameStats::instance();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["avg_layout_ms"] = fs.avg_layout_ms();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["avg_paint_ms"] = fs.avg_paint_ms();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["avg_present_ms"] = fs.avg_present_ms();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["fps"] = fs.fps();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["avg_frame_ms"] = fs.avg_frame_ms();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["worst_frame_ms"] = fs.worst_frame_ms();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["dropped_frames"] = fs.dropped_frame_count();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["hitches"] = fs.hitch_count();
+    j.set("avg_layout_ms", fs.avg_layout_ms());
+    j.set("avg_paint_ms", fs.avg_paint_ms());
+    j.set("avg_present_ms", fs.avg_present_ms());
+    j.set("fps", fs.fps());
+    j.set("avg_frame_ms", fs.avg_frame_ms());
+    j.set("worst_frame_ms", fs.worst_frame_ms());
+    j.set("dropped_frames", fs.dropped_frame_count());
+    j.set("hitches", fs.hitch_count());
     Json frames = Json::array();
     const std::size_t n = fs.window_size();
     const std::size_t take = n < limit ? n : limit;
     for (std::size_t i = 0; i < take; ++i) {
         frames.push_back(fs.frame_at(i) * 1000.0);  // 秒→毫秒
     }
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["recent_frame_ms"] = frames;
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["flamegraph"] = build_flamegraph(fs.avg_layout_ms(), fs.avg_paint_ms(), fs.avg_present_ms());
+    j.set("recent_frame_ms", std::move(frames));
+    j.set("flamegraph", build_flamegraph(fs.avg_layout_ms(), fs.avg_paint_ms(), fs.avg_present_ms()));
     return j;
 #else
     (void)limit;
-    return Json{{"available", false}, {"reason", AURORA_UNAVAILABLE_REASON}};
+    return unavailable_state();
 #endif
 }
 
@@ -183,40 +147,26 @@ auto frame_phase_timeline(std::size_t limit) -> Json {
 
 auto why_trace(std::size_t limit) -> Json {
 #ifdef AURORA_ENABLE_DEBUG
-    Json j;
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["count"] = g_dirty_trace.size();
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["total_recorded"] = g_dirty_trace_total;
+    Json j = Json::object();
+    j.set("count", g_dirty_trace.size());
+    j.set("total_recorded", g_dirty_trace_total);
     Json entries = Json::array();
     const std::size_t n = g_dirty_trace.size();
     const std::size_t take = n < limit ? n : limit;
     for (std::size_t i = 0; i < take; ++i) {
         const DirtyTraceEntry &e = g_dirty_trace.at(n - 1 - i);  // 最新在前
-        Json o;
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        o["kind"] = e.kind == DirtyKind::Layout ? "layout" : "paint";
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        o["type"] = e.type_name;
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        o["frame"] = e.frame;
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        o["propagated"] = e.propagated;
-        entries.push_back(o);
+        Json o = Json::object();
+        o.set("kind", e.kind == DirtyKind::Layout ? "layout" : "paint");
+        o.set("type", e.type_name);
+        o.set("frame", e.frame);
+        o.set("propagated", Json{e.propagated});
+        entries.push_back(std::move(o));
     }
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["entries"] = entries;
+    j.set("entries", std::move(entries));
     return j;
 #else
     (void)limit;
-    return Json{{"available", false}, {"reason", AURORA_UNAVAILABLE_REASON}};
+    return unavailable_state();
 #endif
 }
 
@@ -225,48 +175,28 @@ auto why_trace(std::size_t limit) -> Json {
 auto diagnostics() -> Json {
 #ifdef AURORA_ENABLE_DEBUG
     const std::vector<Diagnostic> &ds = Diagnostics::get_last_diagnostics();
-    Json j;
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["count"] = ds.size();
+    Json j = Json::object();
+    j.set("count", ds.size());
     Json arr = Json::array();
     for (const Diagnostic &d : ds) {
-        Json e;
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        e["severity"] = std::string(d.severity_str());
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        e["category"] = std::string(d.category_str());
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        e["message"] = d.message;
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        e["where"] = d.where;
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        e["code"] = d.code;
+        Json e = Json::object();
+        e.set("severity", std::string(d.severity_str()));
+        e.set("category", std::string(d.category_str()));
+        e.set("message", d.message);
+        e.set("where", d.where);
+        e.set("code", d.code);
         if (d.fix) {
-            Json f;
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            f["code"] = d.fix->code;
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            f["description"] = d.fix->description;
-            // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            e["fix"] = f;
+            Json f = Json::object();
+            f.set("code", d.fix->code);
+            f.set("description", d.fix->description);
+            e.set("fix", std::move(f));
         }
-        arr.push_back(e);
+        arr.push_back(std::move(e));
     }
-    // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    j["diagnostics"] = arr;
+    j.set("diagnostics", std::move(arr));
     return j;
 #else
-    return Json{{"available", false}, {"reason", AURORA_UNAVAILABLE_REASON}};
+    return unavailable_state();
 #endif
 }
 

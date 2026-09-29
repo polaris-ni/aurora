@@ -2,7 +2,7 @@
 /// 目标单元: include/aurora/navigation/navigator_host.h
 /// 测试说明: 覆盖 NavigatorHost 与 Navigator 的挂接——页面栈透传、非动画 push 的直绘展示、
 /// 动画 push/pop/replace 的 TransitionLayer 合成与 Animator tick 进度推进、绘制完成丢弃旧页、
-/// open_uri 无转场重建、自描述/信号收集/Hero 注册表、命中代理与析构时从 Animator 摘除
+/// open_uri 无转场重建、非动画换页的布局级标脏、自描述/信号收集/Hero 注册表、命中代理与析构时从 Animator 摘除
 
 #include <functional>
 #include <memory>
@@ -213,6 +213,28 @@ AURORA_TEST_CASE(host_open_uri_replaces_stack_without_transition) {
     AURORA_TEST_CHECK_EQ(types[0], std::string{"Provider"});
 }
 
+AURORA_TEST_CASE(host_unanimated_page_swap_marks_layout_dirty) {
+    Animator anim;
+    NavigatorHost host(anim);
+    host.push(Route{solid_page(Color{255, 0, 0}), "home"});
+    BuildContext ctx;
+    host.mount(ctx);
+
+    std::vector<bool> flags;
+    host.on_dirty = [&flags](bool layout) -> void { flags.push_back(layout); };
+
+    const std::function<Route(const std::string &)> build = [](const std::string &name) -> Route {
+        return Route{solid_page(Color{0, 160, 0}), name};
+    };
+    host.open_uri("alpha", build);
+    host.push(Route{solid_page(Color{0, 0, 255}), "beta"});  // 未开转场
+
+    // 非动画换页须各自发出一次「含布局脏」的重绘请求：只标绘脏会命中布局缓存、留旧页几何。
+    AURORA_TEST_REQUIRE_EQ(flags.size(), 2U);
+    AURORA_TEST_CHECK_TRUE(flags[0]);
+    AURORA_TEST_CHECK_TRUE(flags[1]);
+}
+
 AURORA_TEST_CASE(host_self_description_and_signals) {
     Animator anim;
     NavigatorHost host(anim);
@@ -246,6 +268,26 @@ AURORA_TEST_CASE(host_hit_test_delegates_to_current_page) {
 
     const Widget *miss = host.hit_test(Point{.x = 150.0F, .y = 25.0F}, full_rect(100.0F, 50.0F), ctx);
     AURORA_TEST_CHECK_NULL(miss);
+}
+
+AURORA_TEST_CASE(host_hit_test_chain_delegates_to_current_page) {
+    Animator anim;
+    NavigatorHost host(anim);
+    auto page = std::make_shared<SolidBox>(Color{255, 0, 0});
+    host.push(Route{Node{page}, "home"});
+
+    BuildContext ctx;
+    const Rect box = full_rect(100.0F, 50.0F);
+
+    // 事件派发走命中链（EventDispatcher::dispatch_mouse → Widget::hit_test_chain）：链须自宿主
+    // 起、到页控件为止，否则按下会被判为「点击空白」，页面内交互全部失效。
+    const auto chain = host.hit_test_chain(Point{.x = 50.0F, .y = 25.0F}, box, ctx);
+    AURORA_TEST_CHECK_FALSE(chain.empty());
+    AURORA_TEST_CHECK_EQ(chain.front().ptr, static_cast<Widget *>(&host));
+    AURORA_TEST_CHECK_EQ(chain.back().ptr, page.get());
+
+    // 页外坐标（叶控件判定越界）：链为空，派发器据此走「点击空白」分支。
+    AURORA_TEST_CHECK_TRUE(host.hit_test_chain(Point{.x = 150.0F, .y = 25.0F}, box, ctx).empty());
 }
 
 AURORA_TEST_CASE(host_destructor_detaches_from_animator) {

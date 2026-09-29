@@ -25,6 +25,17 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/window/window.h"
 
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+// 远程检视 opt-in（随链接注入的 feature 宏裁切）：AURORA_BUILD_INSPECTOR_SERVER=ON 时
+// demo 目标链接 aurora_inspector_server，run_demo 可经环境变量选择启动 InspectorServer。
+#include <cstdint>
+#include <cstdlib>
+#include <functional>
+#include <memory>
+
+#include "aurora/inspector/inspector_server.h"
+#endif
+
 namespace au = aurora;
 
 // ---------------------------------------------------------------------------
@@ -114,7 +125,10 @@ class BrandBadge : public au::LeafWidget {
 // ---------------------------------------------------------------------------
 class GradientTitle : public au::LeafWidget {
   public:
-    explicit GradientTitle(std::string t, float size = 34.0F) : text_(std::move(t)), size_(size) {}
+    explicit GradientTitle(std::string t, float size = 34.0F) : text_(std::move(t)), size_(size) {
+        // 纯展示标题：自定义叶控件默认参与 Tab 序（Widget::wants_focus() 基类返回 true），故宿主侧显式让位。
+        set_focusable(false);
+    }
 
     void collect_signals(std::vector<au::SignalViewBase *> & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "GradientTitle"; }
@@ -167,6 +181,50 @@ class GradientTitle : public au::LeafWidget {
 };
 
 // ---------------------------------------------------------------------------
+// 远程检视 opt-in（同一口径供「不经 run_demo」的载体复用）
+// ---------------------------------------------------------------------------
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+/// @brief 设了 `AURORA_INSPECTOR_PORT` 即在回环端口起 InspectorServer，未设/起不来返回 nullptr。
+/// @param get_root   取当前 UI 树根（HTTP 工作线程内调用，实现方须自证安全——稳定根最安全）。
+/// @param get_surface 可选，取后端 Surface（`/api/debug/*` 与截图端点需要）。
+/// @param get_windows 可选，枚举窗口 id（多窗口载体用，注册后 `/api/windows` 与 `?window=` 可用）。
+/// @param get_window_root 可选，按窗口 id 取该窗树根（无效 id 返回空 Node）。
+/// @note 端口解析与客户端侧同口径：值须全串十进制 1..65535，脏值回落默认 6280（BUILD_OPTIONS.md §5）。
+inline auto start_demo_inspector(std::function<au::Node()> get_root,
+                                 std::function<au::Surface *()> get_surface = nullptr,
+                                 std::function<std::vector<std::uint32_t>()> get_windows = nullptr,
+                                 std::function<au::Node(std::uint32_t)> get_window_root = nullptr)
+    -> std::unique_ptr<au::InspectorServer> {
+    const char *port_env = std::getenv("AURORA_INSPECTOR_PORT");
+    if (port_env == nullptr || *port_env == '\0') {
+        return nullptr;  // 未 opt-in：demo 默认安静
+    }
+    std::uint16_t port = 6280;  // 与 InspectorServer::start() 默认值一致
+    char *end = nullptr;
+    const long long parsed = std::strtoll(port_env, &end, 10);
+    if (end != nullptr && *end == '\0' && parsed >= 1 && parsed <= 65535) {
+        port = static_cast<std::uint16_t>(parsed);
+    }
+    auto server = std::make_unique<au::InspectorServer>(std::move(get_root));
+    if (get_surface) {
+        server->set_surface_getter(std::move(get_surface));
+    }
+    if (get_windows) {
+        server->set_window_ids_getter(std::move(get_windows));
+    }
+    if (get_window_root) {
+        server->set_window_tree_getter(std::move(get_window_root));
+    }
+    if (!server->start(port)) {
+        AURORA_LOG_ERROR("demo", "[demo] inspector server failed to start on port ", port);
+        return nullptr;
+    }
+    AURORA_LOG_INFO("demo", "[demo] inspector server listening on 127.0.0.1:", port);
+    return server;
+}
+#endif
+
+// ---------------------------------------------------------------------------
 // 统一窗口启动器：构建 UI 树并打开真实平台窗口（事件经 EventDispatcher 派发）。
 // 后端由 create_native_window 按平台自动选择（Win32/X11/Cocoa/GLFW）；无真实后端或窗口
 // 创建失败则回退无头 PNG 渲染，保证各 demo 均可编译可验证。
@@ -200,6 +258,13 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
     }
 
     auto win = std::move(win_res.value());
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+    // 远程检视 opt-in：设置 AURORA_INSPECTOR_PORT 环境变量即随 demo 启动 InspectorServer，
+    // 供 aurora_e2e_client / aurora_mcp 经回环 REST 驱动本窗口；未设置则不启动（demo 默认安静）。
+    // 端口解析与回调接线统一走 `start_demo_inspector`（自建 Application 的载体同源复用）。
+    auto inspector = start_demo_inspector([&root]() -> au::Node { return au::Node{root}; },
+                                          [&win]() -> au::Surface * { return &win->surface(); });
+#endif
     win->surface().set_event_handler([&](au::Event &e) -> void {
         auto &wd = root.widget();
         // 鼠标派发必须携带 FocusManager：否则点击 Text/TextInput 时 request_focus() 静默 no-op，
@@ -212,6 +277,10 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
             au::EventDispatcher::dispatch(wd, *se);
         } else if (auto *te = dynamic_cast<au::TextInputEvent *>(&e)) {
             au::EventDispatcher::dispatch(wd, *te, fm);
+        } else if (auto *ce = dynamic_cast<au::TextCompositionEvent *>(&e)) {
+            // IME 组合事件（CJK）：缺这一支则中文输入法的 preedit 与上屏全被丢弃，
+            // 控件里既不下划线预编辑串也不落字（键被输入法吃掉，界面无任何反应）。
+            au::EventDispatcher::dispatch(wd, *ce, fm);
         }
     });
 
@@ -222,13 +291,19 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
     // 故决策只看 has_pending_dirty；输入事件随时打断等待，交互延迟不变。
     win->run([&]() -> void {
         const auto t0 = std::chrono::steady_clock::now();
+        // 每帧先驱动根的子树计时：长按阈值、甩动惯性、播放时钟等一切挂在 `Widget::tick` 上的
+        // 每帧逻辑都依赖这一跳（`Application` 路径由 `tick_all` 做同样的事；`Window::run` 不持有
+        // 根控件，故只能在帧回调里补）。缺这一跳则 demo 里的动画类控件恒停在首帧。
+        root.widget().tick(t0);
         // 注意：不可在此手调 begin_frame——present_root 内部按需 begin，
         // 部分脏区帧会刻意跳过 begin 以保留上帧像素；外层多调一次会把缓冲刷成底色，
         // 造成脏区外全白（如拖选文字时白屏）。
         (void)win->present_root(root);
         const double elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        win->set_next_wait(au::compute_wait_timeout(win->has_pending_dirty(), /*anim_active=*/false,
+        // `anim_active` 取「本帧实际发生了渲染」：自驱动控件（视频/甩动）在 tick 里标脏 → 下一帧
+        // 仍需按 60Fps 节拍续跑；真正空闲的静态 demo 仍走无限深睡，idle CPU 不因此上升。
+        win->set_next_wait(au::compute_wait_timeout(win->has_pending_dirty(), /*anim_active=*/!win->is_idle_frame(),
                                                     /*next_deadline_ms=*/-1.0, /*frame_budget_ms=*/1000.0 / 60.0,
                                                     elapsed_ms, win->surface().paces_frames()));
     });

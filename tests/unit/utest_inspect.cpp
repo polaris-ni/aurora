@@ -11,8 +11,12 @@
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/inspect.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_inspect {
+
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -43,11 +47,14 @@ auto layout_tree(Node &root, float width, float height) -> void {
 [[nodiscard]] auto flatten_snapshot(const Json &j) -> std::vector<WidgetBox> {
     std::vector<WidgetBox> out;
     WidgetBox box;
-    box.type = j["type"].get<std::string>();
-    box.bounds = Rect{.origin = Point{.x = j["box"]["x"].get<float>(), .y = j["box"]["y"].get<float>()},
-                      .size = Size{.width = j["box"]["w"].get<float>(), .height = j["box"]["h"].get<float>()}};
+    box.type = require_field<std::string>(j, "type");
+    const auto *const box_json = require_child(j, "box");
+    box.bounds = Rect{
+        .origin = Point{.x = require_field<float>(*box_json, "x"), .y = require_field<float>(*box_json, "y")},
+        .size = Size{.width = require_field<float>(*box_json, "w"), .height = require_field<float>(*box_json, "h")}};
     out.push_back(box);
-    for (const Json &child : j["children"]) {
+    const auto *const children = require_child(j, "children");
+    for (const auto &child : *children) {
         const std::vector<WidgetBox> sub = flatten_snapshot(child);
         out.insert(out.end(), sub.begin(), sub.end());
     }
@@ -148,7 +155,7 @@ AURORA_TEST_CASE(diff_trees_reports_changed_props_in_inspector_path_format) {
         AURORA_TEST_CHECK_EQ(op.path.front(), '/');
         if (op.path == "/0/content") {
             found_content = true;
-            AURORA_TEST_CHECK_EQ(op.value.get<std::string>(), std::string("after"));
+            AURORA_TEST_CHECK_EQ(op.value.as<std::string>().value(), std::string("after"));
         }
     }
     AURORA_TEST_CHECK_TRUE(found_content);

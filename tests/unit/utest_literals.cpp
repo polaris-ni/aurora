@@ -11,7 +11,7 @@ namespace aurora::test_cases::utest_literals {
 
 namespace au = aurora;
 
-/// @brief 单一入口头聚合全部字面量族：同一用例内五类 UDL 均可用（验证文档声明）。
+// 单一入口头聚合全部字面量族：同一用例内五类 UDL 均可用（验证文档声明）。
 AURORA_TEST_CASE(single_entry_header_aggregates_all_families) {
     using aurora::literals::operator""_rgb;  // using-declaration：仅引入具名字面量（库约定：TU 内显式引入）
     using aurora::literals::operator""_rgba;
@@ -26,7 +26,7 @@ AURORA_TEST_CASE(single_entry_header_aggregates_all_families) {
     AURORA_TEST_CHECK((250_ms) == aurora::Duration::from_ms(250.0));
 }
 
-/// @brief 颜色字面量与静态工厂一致，constexpr 可用于编译期断言。
+// 颜色字面量与静态工厂一致，constexpr 可用于编译期断言。
 AURORA_TEST_CASE(color_literals_agree_with_factories) {
     using aurora::literals::operator""_rgb;
     using aurora::literals::operator""_rgba;
@@ -38,7 +38,7 @@ AURORA_TEST_CASE(color_literals_agree_with_factories) {
     AURORA_TEST_CHECK((0x0000FFFF_rgba) == aurora::Color::blue());
 }
 
-/// @brief 尺寸字面量与 px/dp 工厂逐字段一致（整型与 long double 两种重载）。
+// 尺寸字面量与 px/dp 工厂逐字段一致（整型与 long double 两种重载）。
 AURORA_TEST_CASE(dimension_literals_agree_with_factories) {
     using aurora::literals::operator""_dp;
     using aurora::literals::operator""_px;
@@ -51,7 +51,7 @@ AURORA_TEST_CASE(dimension_literals_agree_with_factories) {
     AURORA_TEST_CHECK_NEAR((2.5_px).value, au::px(2.5F).value, 1e-6F);
 }
 
-/// @brief 时长字面量与 from_ms 一致，250ms 精确映射 0.25s。
+// 时长字面量与 from_ms 一致，250ms 精确映射 0.25s。
 AURORA_TEST_CASE(duration_literal_agrees_with_factory) {
     using aurora::literals::operator""_ms;
 
@@ -61,7 +61,7 @@ AURORA_TEST_CASE(duration_literal_agrees_with_factory) {
     AURORA_TEST_CHECK_NEAR((12.5_ms).seconds, aurora::Duration::from_ms(12.5).seconds, 1e-12);
 }
 
-/// @brief _rgba 高字节在前（RRGGBBAA）；_rgb 无 alpha 段时默认不透明。
+// _rgba 高字节在前（RRGGBBAA）；_rgb 无 alpha 段时默认不透明。
 AURORA_TEST_CASE(rgba_literal_byte_order_is_high_first) {
     using aurora::literals::operator""_rgb;
     using aurora::literals::operator""_rgba;
@@ -73,7 +73,7 @@ AURORA_TEST_CASE(rgba_literal_byte_order_is_high_first) {
     AURORA_TEST_CHECK_EQ((0x123456_rgb).a, 255);
 }
 
-/// @brief 编译期契约：三个类型族的隐式标量转换禁令在统一入口下依然成立。
+// 编译期契约：三个类型族的隐式标量转换禁令在统一入口下依然成立。
 AURORA_TEST_CASE(forbidden_implicit_conversions_still_hold) {
     static_assert(!std::is_convertible_v<int, aurora::Length>);
     static_assert(!std::is_convertible_v<float, aurora::Length>);

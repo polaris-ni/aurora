@@ -3,7 +3,8 @@
 /// 测试说明: 覆盖 LazyList——默认不变量、count/行高参数钳制与降级、按需构建仅可见窗口条目（实例复用）、
 /// cache_extent 窗口、滚动偏移钳制与 scroll_to_item、滚轮步进、滚出窗口回收重建、序列化与自描述、
 /// 反序列化回填标量属性（含非法值降级、显式偏移优先于 restore_key 恢复）、
-/// snap/paging 收位短滑动（逐帧推进至终点对齐）、reduce-motion 直落、offset_signal 发布、滚轮余量上冒
+/// snap/paging 收位短滑动（逐帧推进至终点对齐）、reduce-motion 直落、offset_signal 发布、滚轮余量上冒、
+/// 绘制盒与命中盒同源（对齐/非对齐滚动位下点中的条目==可见的条目）
 
 #include <chrono>
 #include <map>
@@ -17,8 +18,12 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/lazy_list.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_lazy_list {
+
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -53,6 +58,17 @@ struct BuildRecorder {
         return [this](int index) -> Node {
             built_order.push_back(index);
             auto box = std::make_shared<FixedBox>(300.0F, 48.0F);
+            items.emplace(index, std::move(box));
+            return Node{items.at(index)};
+        };
+    }
+
+    /// 可点击条目：仅让条目进入命中链，用于「绘制盒 == 命中盒」对账。
+    auto clickable_builder() -> LazyList::ItemBuilder {
+        return [this](int index) -> Node {
+            built_order.push_back(index);
+            auto box = std::make_shared<FixedBox>(300.0F, 48.0F);
+            box->modifier.set(Modifier{}.clickable([]() -> void {}));
             items.emplace(index, std::move(box));
             return Node{items.at(index)};
         };
@@ -221,16 +237,67 @@ AURORA_TEST_CASE(scrolling_recycles_and_rebuilds_window) {
     AURORA_TEST_CHECK_NEAR(rec.items.at(24)->paint_bounds().size.height, 48.0F, 1e-4F);
 }
 
+// 绘制盒与命中盒必须同源：虚拟化条目的可见位置与点击落点解析出的条目一致。
+// 对齐偏移（行高整数倍）与非对齐偏移（滚轮 40dp 步进的自然落点）都要成，
+// 否则「看得见的那一行」与「点中的那一行」会错开若干行（TC-WIDGET-008 的断言）。
+AURORA_TEST_CASE(hit_test_shares_paint_origin_across_offsets) {
+    BuildRecorder rec;
+    LazyList list{100, rec.clickable_builder(), 48.0F};
+    list.set_cache_extent(0.0F);
+    const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 300.0F, .height = 400.0F}};
+
+    int probed = 0;
+    int guarded = 0;
+    for (const float offset : {240.0F, 260.0F}) {
+        list.set_scroll_offset(offset);
+        LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+        Painter p;
+        p.begin(300, 400);
+        list.paint(p, viewport, BuildContext{});
+
+        const int first = static_cast<int>(offset / 48.0F);
+        for (int idx = first; (static_cast<float>(idx) * 48.0F) - offset < viewport.size.height; ++idx) {
+            const float top = (static_cast<float>(idx) * 48.0F) - offset;
+            const float probe = top + 24.0F;  // 盒中心
+            if (probe < 0.0F || probe >= viewport.size.height) {
+                continue;
+            }
+            ++probed;
+            const Rect pb = rec.items.at(idx)->paint_bounds();
+            AURORA_TEST_CHECK_NEAR(pb.origin.y, top, 1e-4F);
+            const auto chain = list.hit_test_chain(Point{.x = 150.0F, .y = probe}, viewport, BuildContext{});
+            AURORA_TEST_CHECK_FALSE(chain.empty());
+            if (chain.empty()) {
+                continue;
+            }
+            AURORA_TEST_CHECK_TRUE(chain.back().ptr == static_cast<Widget *>(rec.items.at(idx).get()));
+            // 命中链记录的全局 origin 即该条目的绘制盒 origin（同一原点，无行高/内缩错位）
+            AURORA_TEST_CHECK_NEAR(chain.back().origin.y, pb.origin.y, 1e-4F);
+            AURORA_TEST_CHECK_NEAR(chain.back().origin.x, pb.origin.x, 1e-4F);
+            if (idx > first) {
+                // 上沿外 1dp 属前一行，不得解析到本条目
+                ++guarded;
+                const auto above = list.hit_test_chain(Point{.x = 150.0F, .y = top - 1.0F}, viewport, BuildContext{});
+                auto *item = static_cast<Widget *>(rec.items.at(idx).get());
+                AURORA_TEST_CHECK_TRUE(above.empty() || above.back().ptr != item);
+            }
+        }
+    }
+    // 防空转：两处偏移都必须真正探到若干整行，且都做过「上一行边界」反证
+    AURORA_TEST_CHECK(probed >= 16);
+    AURORA_TEST_CHECK(guarded >= 14);
+}
+
 AURORA_TEST_CASE(serialize_props_and_describe_metadata) {
     LazyList src{7, {}, 24.0F};
     src.set_cache_extent(0.0F);
     src.set_scroll_offset(96.0F);
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["count"].get<int>(), 7);
-    AURORA_TEST_CHECK_NEAR(props["item_extent"].get<float>(), 24.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["scroll_offset"].get<float>(), 96.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["cache_extent"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "count"), 7);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "item_extent"), 24.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "scroll_offset"), 96.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "cache_extent"), 0.0F, 1e-4F);
 
     const auto d = LazyList::describe_static();
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "LazyList");
@@ -247,15 +314,15 @@ AURORA_TEST_CASE(serialize_props_and_describe_metadata) {
 
 AURORA_TEST_CASE(deserialize_props_restores_every_scalar) {
     // 静态 JSON 回填属性（工厂重建路径）：几何/缓存/吸附逐项还原，二次序列化幂等。
-    Json props;
-    props["count"] = 100;
-    props["item_extent"] = 48.0F;
-    props["cache_extent"] = 300.0F;
-    props["scroll_offset"] = 240.0F;
-    props["restore_key"] = "demo.feed";
-    props["snap_extent"] = 240.0F;
-    props["snap_paging"] = false;
-    props["snap_alignment"] = "Center";
+    Json props = Json::object();
+    props.set("count", 100);
+    props.set("item_extent", 48.0F);
+    props.set("cache_extent", 300.0F);
+    props.set("scroll_offset", 240.0F);
+    props.set("restore_key", "demo.feed");
+    props.set("snap_extent", 240.0F);
+    props.set("snap_paging", Json{false});
+    props.set("snap_alignment", "Center");
 
     LazyList list;
     list.deserialize_props(props);
@@ -265,29 +332,29 @@ AURORA_TEST_CASE(deserialize_props_restores_every_scalar) {
     AURORA_TEST_CHECK_TRUE(list.snap().alignment == ScrollSnapAlignment::Center);
     AURORA_TEST_CHECK_EQ(list.restore_key(), std::string{"demo.feed"});
 
-    Json again;
+    Json again = Json::object();
     list.serialize_props(again);
     for (const char *key : {"count", "item_extent", "cache_extent", "snap_extent", "restore_key"}) {
-        AURORA_TEST_CHECK_TRUE(again[key] == props[key]);
+        AURORA_TEST_CHECK_TRUE(*require_child(again, key) == *require_child(props, key));
     }
 }
 
 AURORA_TEST_CASE(deserialize_degrades_nonpositive_geometry) {
     // 反序列化路径与构造器同一降级判据：非正行高回落 48、负项数归零（不把非法值直写进控件）。
-    Json props;
-    props["count"] = -5;
-    props["item_extent"] = 0.0F;
-    props["cache_extent"] = -10.0F;
+    Json props = Json::object();
+    props.set("count", -5);
+    props.set("item_extent", 0.0F);
+    props.set("cache_extent", -10.0F);
 
     LazyList list;
     list.deserialize_props(props);
     AURORA_TEST_CHECK_EQ(list.count(), 0);
     AURORA_TEST_CHECK_NEAR(list.content_height(), 0.0F, 1e-4F);  // count 归零 → 无内容
 
-    Json out;
+    Json out = Json::object();
     list.serialize_props(out);
-    AURORA_TEST_CHECK_NEAR(out["item_extent"].get<float>(), 48.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(out["cache_extent"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "item_extent"), 48.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "cache_extent"), 0.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(deserialized_offset_wins_over_restore_key) {
@@ -297,11 +364,11 @@ AURORA_TEST_CASE(deserialized_offset_wins_over_restore_key) {
     storage.clear_all();
     storage.write("demo.list", 900.0F);
 
-    Json props;
-    props["count"] = 100;
-    props["item_extent"] = 48.0F;
-    props["restore_key"] = "demo.list";
-    props["scroll_offset"] = 240.0F;
+    Json props = Json::object();
+    props.set("count", 100);
+    props.set("item_extent", 48.0F);
+    props.set("restore_key", "demo.list");
+    props.set("scroll_offset", 240.0F);
 
     LazyList list;
     list.deserialize_props(props);
@@ -310,10 +377,10 @@ AURORA_TEST_CASE(deserialized_offset_wins_over_restore_key) {
     AURORA_TEST_CHECK_EQ(list.live_item_count(), static_cast<std::size_t>(0));  // 无 builder：属性齐备、暂无条目
 
     // 只声明 restore_key（无显式偏移）时，按键恢复照常生效。
-    Json keyed_only;
-    keyed_only["count"] = 100;
-    keyed_only["item_extent"] = 48.0F;
-    keyed_only["restore_key"] = "demo.list";
+    Json keyed_only = Json::object();
+    keyed_only.set("count", 100);
+    keyed_only.set("item_extent", 48.0F);
+    keyed_only.set("restore_key", "demo.list");
     LazyList restored;
     restored.deserialize_props(keyed_only);
     LayoutEngine::layout(restored, bounded(320.0F, 200.0F));

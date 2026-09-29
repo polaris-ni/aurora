@@ -126,7 +126,10 @@ auto ScrollStorage::claim(std::string_view key, const void *owner) -> void {
     owner_set.insert(owner);
     if (owner_set.size() > 1U && !warned_.contains(k)) {
         warned_.insert(k);  // 每键一次：不在滚动热路径上重复刷屏
-        Diagnostics::warn("同一个 restore_key 被多个滚动控件认领，恢复位置将以最后活跃者为准", "scroll_storage");
+        Diagnostics::warn(
+            "The same restore_key is claimed by multiple scroll widgets, "
+            "restore position follows the last active one",
+            "scroll_storage");
     }
 }
 

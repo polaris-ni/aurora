@@ -1,14 +1,21 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/event/focus.h
 /// 测试说明: FocusManager 的 set_focus/request_focus/clear 与获失焦通知、on_change 回调新旧对、Tab 序按 tabIndex
-/// 稳定排序前进后退循环、跳过隐藏与不可聚焦控件、无根/无候选失败、方向键几何导航与 current_focus_manager 槽位配对
+/// 稳定排序前进后退循环、跳过隐藏与不可聚焦控件、停点分级默认（容器/展示件让位、有输入语义者入序）、
+/// 无根/无候选失败、方向键几何导航与 current_focus_manager 槽位配对
 
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include "aurora/event/focus.h"
+#include "aurora/modifier/modifier.h"
+#include "aurora/widget/button.h"
+#include "aurora/widget/containers.h"
 #include "aurora/widget/dialog.h"
+#include "aurora/widget/divider.h"
+#include "aurora/widget/spacer.h"
+#include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_focus {
@@ -289,6 +296,62 @@ AURORA_TEST_CASE(nested_scopes_restore_in_reverse_order) {
     fm.pop_scope();
     AURORA_TEST_CHECK_TRUE(fm.has_focus(tree.second[0].get()));
     AURORA_TEST_CHECK_EQ(fm.scope_depth(), 0);
+}
+
+AURORA_TEST_CASE(layout_and_display_widgets_are_not_tab_stops_by_default) {
+    // 分级默认（§4.2）：基类默认可入序，纯布局容器与纯展示件覆写为「有输入语义才入序」。
+    auto label = std::make_shared<Text>("label");
+    auto inner = std::make_shared<Row>();
+    auto rule = std::make_shared<Divider>();
+    auto gapper = std::make_shared<Spacer>();
+    Column col{Node{label}, Node{inner}, Node{rule}, Node{gapper}};
+
+    AURORA_TEST_CHECK_FALSE(col.wants_focus());
+    AURORA_TEST_CHECK_FALSE(label->wants_focus());
+    AURORA_TEST_CHECK_FALSE(inner->wants_focus());
+    AURORA_TEST_CHECK_FALSE(rule->wants_focus());
+    AURORA_TEST_CHECK_FALSE(gapper->wants_focus());
+
+    // 基类默认仍是 true：自定义叶控件与交互控件不需任何声明即可 Tab 到。
+    FocusProbe probe;
+    Button btn{"Go"};
+    AURORA_TEST_CHECK_TRUE(probe.wants_focus());
+    AURORA_TEST_CHECK_TRUE(btn.wants_focus());
+}
+
+AURORA_TEST_CASE(input_semantics_on_a_container_put_it_back_in_the_order) {
+    Column col{};
+    AURORA_TEST_CHECK_FALSE(col.wants_focus());  // 裸容器不是停点
+
+    // 挂上点击即回到焦点序：谓词动态求值，不按类型一刀切。
+    col.modifier.set(Modifier{}.clickable([]() -> void {}));
+    AURORA_TEST_CHECK_TRUE(col.wants_focus());
+
+    // 宿主否决位一票否决，优先于输入语义。
+    col.set_focusable(false);
+    AURORA_TEST_CHECK_FALSE(col.focusable());
+}
+
+AURORA_TEST_CASE(tab_cycle_hits_only_interactive_controls) {
+    // 载体同形：Column{ Text, Row{ Button, Button }, Spacer }。默认停点集合恰为两个按钮，
+    // 无需宿主逐个 set_focusable(false)（改默认值前该树是 6 个停点）。
+    auto a = std::make_shared<Button>("A");
+    auto b = std::make_shared<Button>("B");
+    auto inner = std::make_shared<Row>(RowProps{.children = {Node{a}, Node{b}}});
+    auto label = std::make_shared<Text>("label");
+    Column root{ColumnProps{.children = {Node{label}, Node{inner}, Node{Spacer{}}}}};
+
+    FocusManager fm;
+    fm.set_root(&root);
+
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Forward));
+    AURORA_TEST_CHECK_TRUE(fm.focused() == a.get());
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Forward));
+    AURORA_TEST_CHECK_TRUE(fm.focused() == b.get());
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Forward));
+    AURORA_TEST_CHECK_TRUE(fm.focused() == a.get());  // 一轮两停点，无容器/文本混入
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Backward));
+    AURORA_TEST_CHECK_TRUE(fm.focused() == b.get());
 }
 
 AURORA_TEST_CASE(dialog_show_traps_focus_and_close_restores) {

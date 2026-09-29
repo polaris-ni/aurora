@@ -54,6 +54,7 @@ namespace {
 // Globals 布局 11×vec4f（176B）：逐管线取用相关分量，未用分量恒 0；uniform 与
 // bind group（binding 1..3 = 源纹理 + 两级采样器）跨管线统一，断批仅由 key 变化驱动。
 
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr const char *AURORA_WGSL = R"(
 struct Globals {
     cv4: vec4f,        // 当前附着目标逻辑尺寸 (w, h, _, _)：NDC 映射基准
@@ -2810,7 +2811,9 @@ struct WgpuRhi::Impl {
                 if (it == layer_cache.end() || it->second.tex.tex == nullptr) {
                     // 冷存储未命中（后端重建等）：本帧跳过并整体失效层代际，下帧重录自愈。
                     if (!layer_miss_warned) {
-                        AURORA_LOG_WARN("gpu-wgpu", "DrawLayer 未命中常驻层纹理，本帧跳过（下帧重录）");
+                        AURORA_LOG_WARN("gpu-wgpu",
+                                        "DrawLayer missed the resident layer texture, this frame is skipped "
+                                        "(re-recorded next frame)");
                         layer_miss_warned = true;
                     }
                     render::detail::bump_gpu_layer_epoch();

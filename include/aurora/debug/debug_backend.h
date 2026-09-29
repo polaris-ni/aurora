@@ -38,19 +38,25 @@ enum class CaptureSource : std::uint8_t {
 
 /// @brief 将「相对且无目录」的输出路径解析进缺省输出目录；含目录的路径原样返回。
 ///        绝对路径、或已含目录分隔的相对路径均视为显式路径，不改动。
+/// @param path 待解析的输出路径（PNG 文件名或显式路径）。
+/// @return 落盘用的最终路径：纯文件名拼接 output_directory()，显式路径原样返回。
 /// @note 空串返回 `output_directory()`（即仅目录，无文件名）。
 [[nodiscard]] auto resolve_output_path(const std::string &path) -> std::string;
 
 /// @brief 设置缺省输出目录（影响 `capture` / `save_snapshot` 的目录解析）。
 ///        传入空串恢复为「当前程序运行目录下的 ./aurora_debug/」缺省值。
+/// @param dir 新的缺省输出目录；空串 = 清除设置、回落缺省。
 auto set_output_directory(const std::string &dir) -> void;
 
 /// @brief 当前缺省输出目录（未显式设置时为 current_path()/aurora_debug，懒计算）。
+/// @return 生效中的缺省输出目录绝对路径。
 [[nodiscard]] auto output_directory() -> std::string;
 
 /// @brief Surface 运行时状态快照（JSON）：size / scale_factor / frame_count / clear_color /
 ///        should_close / has_native_window（全部来自 Surface 既有公共接口，无后端私有访问）。
 ///        Release（未开 DEBUG）返回 `{"available":false, "reason": ...}`。
+/// @param s 目标 Surface（只读其公共接口）。
+/// @return 状态快照 JSON，附 `available` 标志；Release 下仅有 available/reason 两键。
 [[nodiscard]] auto surface_state(const Surface &s) -> Json;
 
 }  // namespace aurora::debug

@@ -20,13 +20,13 @@ auto Text::describe_static() -> WidgetDescriptor {
                  .type = "LocalizedString",
                  .default_value = "\"\"",
                  .required = true,
-                 .note = "文本内容",
+                 .note = "Text content",
                  .json_type = "string"},
                 {.name = "font_size",
                  .type = "float",
                  .default_value = "14.0",
                  .required = false,
-                 .note = "字号(pt)",
+                 .note = "Font size (pt)",
                  .json_type = "number",
                  .enum_values = {},
                  .min_value = "0"},
@@ -34,27 +34,27 @@ auto Text::describe_static() -> WidgetDescriptor {
                  .type = "Color",
                  .default_value = "Color::black()",
                  .required = false,
-                 .note = "文字色",
+                 .note = "Text color",
                  .json_type = "array"},
                 {.name = "text_align",
                  .type = "TextAlign",
                  .default_value = "Left",
                  .required = false,
-                 .note = "水平对齐",
+                 .note = "Horizontal alignment",
                  .json_type = "string",
                  .enum_values = {"Left", "Right", "Center", "Start", "End", "Justify"}},
                 {.name = "direction",
                  .type = "TextDirection",
                  .default_value = "auto",
                  .required = false,
-                 .note = "书写方向(auto=继承环境)",
+                 .note = "Text direction (auto = inherit from environment)",
                  .json_type = "string",
                  .enum_values = {"LTR", "RTL"}},
                 {.name = "max_lines",
                  .type = "int",
                  .default_value = "0",
                  .required = false,
-                 .note = "最大行数(0=不限)",
+                 .note = "Max line count (0 = unlimited)",
                  .json_type = "integer",
                  .enum_values = {},
                  .min_value = "0"},
@@ -62,20 +62,20 @@ auto Text::describe_static() -> WidgetDescriptor {
                  .type = "TextOverflow",
                  .default_value = "Clip",
                  .required = false,
-                 .note = "溢出处理",
+                 .note = "Overflow handling",
                  .json_type = "string",
                  .enum_values = {"Clip", "Ellipsis", "Fade"}},
                 {.name = "soft_wrap",
                  .type = "bool",
                  .default_value = "true",
                  .required = false,
-                 .note = "自动换行",
+                 .note = "Auto line wrap",
                  .json_type = "boolean"},
                 {.name = "line_height",
                  .type = "float",
                  .default_value = "1.0",
                  .required = false,
-                 .note = "行高倍数",
+                 .note = "Line height multiplier",
                  .json_type = "number",
                  .enum_values = {},
                  .min_value = "0"},
@@ -83,19 +83,19 @@ auto Text::describe_static() -> WidgetDescriptor {
                  .type = "float",
                  .default_value = "0.0",
                  .required = false,
-                 .note = "字形间距",
+                 .note = "Letter spacing",
                  .json_type = "number"},
                 {.name = "word_spacing",
                  .type = "float",
                  .default_value = "0.0",
                  .required = false,
-                 .note = "词间距",
+                 .note = "Word spacing",
                  .json_type = "number"},
                 {.name = "font_weight",
                  .type = "FontWeight",
                  .default_value = "Normal",
                  .required = false,
-                 .note = "字重",
+                 .note = "Font weight",
                  .json_type = "string",
                  .enum_values = {"Thin", "ExtraLight", "Light", "Normal", "Medium", "SemiBold", "Bold", "ExtraBold",
                                  "Black"}},
@@ -103,27 +103,27 @@ auto Text::describe_static() -> WidgetDescriptor {
                  .type = "FontStyle",
                  .default_value = "Normal",
                  .required = false,
-                 .note = "字形风格",
+                 .note = "Font style",
                  .json_type = "string",
                  .enum_values = {"Normal", "Italic"}},
                 {.name = "decoration",
                  .type = "TextDecoration",
                  .default_value = "None",
                  .required = false,
-                 .note = "装饰线",
+                 .note = "Text decoration",
                  .json_type = "string",
                  .enum_values = {"None", "Underline", "Overline", "LineThrough"}},
                 {.name = "decoration_color",
                  .type = "Color",
                  .default_value = "Color::black()",
                  .required = false,
-                 .note = "装饰线颜色",
+                 .note = "Decoration color",
                  .json_type = "array"},
                 {.name = "background_color",
                  .type = "Color",
                  .default_value = "transparent",
                  .required = false,
-                 .note = "文本底色",
+                 .note = "Text background color",
                  .json_type = "array"},
                 {.name = "width",
                  .type = "Length",
@@ -154,79 +154,79 @@ auto Text::describe_static() -> WidgetDescriptor {
 
 auto Text::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    props["content"] = content.get().text;
-    props["font_size"] = font.size_pt;
-    props["color"] = color_to_json(text_color);
+    props.set("content", content.get().text);
+    props.set("font_size", font.size_pt);
+    props.set("color", color_to_json(text_color));
 
-    props["text_align"] = text_align_to_json(text_align);
+    props.set("text_align", text_align_to_json(text_align));
     if (direction.has_value()) {
-        props["direction"] = text_direction_to_json(*direction);
+        props.set("direction", text_direction_to_json(*direction));
     }
-    props["max_lines"] = max_lines;
-    props["overflow"] = text_overflow_to_json(overflow);
-    props["soft_wrap"] = soft_wrap;
-    props["line_height"] = line_height;
-    props["letter_spacing"] = letter_spacing;
-    props["word_spacing"] = word_spacing;
-    props["font_weight"] = font_weight_to_json(static_cast<FontWeight>(font.weight));
-    props["font_style"] = font_style_to_json(font_style);
-    props["decoration"] = text_decoration_to_json(decoration);
-    props["decoration_color"] = color_to_json(decoration_color);
-    props["background_color"] = color_to_json(background_color);
+    props.set("max_lines", max_lines);
+    props.set("overflow", text_overflow_to_json(overflow));
+    props.set("soft_wrap", Json{soft_wrap});
+    props.set("line_height", line_height);
+    props.set("letter_spacing", letter_spacing);
+    props.set("word_spacing", word_spacing);
+    props.set("font_weight", font_weight_to_json(static_cast<FontWeight>(font.weight)));
+    props.set("font_style", font_style_to_json(font_style));
+    props.set("decoration", text_decoration_to_json(decoration));
+    props.set("decoration_color", color_to_json(decoration_color));
+    props.set("background_color", color_to_json(background_color));
 }
 
 auto Text::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("content")) {
         static const PropDescriptor D_CONTENT{.name = "content", .json_type = "string"};
-        content.set(validate_or_default<LocalizedString>(props["content"], D_CONTENT, LocalizedString{}));
+        content.set(validate_or_default<LocalizedString>(*props.at("content"), D_CONTENT, LocalizedString{}));
     }
     if (props.contains("font_size")) {
         static const PropDescriptor D_FONT_SIZE{.name = "font_size", .json_type = "number", .min_value = "0"};
-        font.size_pt = validate_or_default<float>(props["font_size"], D_FONT_SIZE, 14.0F);
+        font.size_pt = validate_or_default<float>(*props.at("font_size"), D_FONT_SIZE, 14.0F);
     }
     if (props.contains("color")) {
         static const PropDescriptor D_COLOR{.name = "color", .json_type = "array"};
-        text_color = validate_or_default<Color>(props["color"], D_COLOR, Color::black());
+        text_color = validate_or_default<Color>(*props.at("color"), D_COLOR, Color::black());
     }
     if (props.contains("text_align")) {
-        if (props["text_align"].is_string()) {
-            text_align = json_to_text_align(props["text_align"]);
+        if (props.at("text_align")->is_string()) {
+            text_align = json_to_text_align(*props.at("text_align"));
         } else {
             Diagnostics::degraded("text_align expects string", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("direction")) {
-        if (props["direction"].is_string()) {
-            direction = json_to_text_direction(props["direction"]);
+        if (props.at("direction")->is_string()) {
+            direction = json_to_text_direction(*props.at("direction"));
         } else {
             Diagnostics::degraded("direction expects string", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("max_lines")) {
-        if (props["max_lines"].is_number()) {
-            max_lines = props["max_lines"].get<int>();
+        if (props.at("max_lines")->is_number()) {
+            max_lines = props.at("max_lines")->as_or<std::int32_t>(0);
         } else {
             Diagnostics::degraded("max_lines expects integer", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("overflow")) {
-        if (props["overflow"].is_string()) {
-            overflow = json_to_text_overflow(props["overflow"]);
+        if (props.at("overflow")->is_string()) {
+            overflow = json_to_text_overflow(*props.at("overflow"));
         } else {
             Diagnostics::degraded("overflow expects string", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("soft_wrap")) {
-        if (props["soft_wrap"].is_boolean()) {
-            soft_wrap = props["soft_wrap"].get<bool>();
+        if (props.at("soft_wrap")->is_bool()) {
+            soft_wrap = props.at("soft_wrap")->as_or<bool>(false);
         } else {
             Diagnostics::degraded("soft_wrap expects boolean", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("line_height")) {
-        if (props["line_height"].is_number()) {
-            const float v = props["line_height"].get<float>();
+        if (props.at("line_height")->is_number()) {
+            const auto v = props.at("line_height")->as_or<float>(0.0F);
             if (v > 0) {
                 line_height = v;
             } else {
@@ -238,46 +238,46 @@ auto Text::deserialize_props(const Json &props) -> void {
         }
     }
     if (props.contains("letter_spacing")) {
-        if (props["letter_spacing"].is_number()) {
-            letter_spacing = props["letter_spacing"].get<float>();
+        if (props.at("letter_spacing")->is_number()) {
+            letter_spacing = props.at("letter_spacing")->as_or<float>(0.0F);
         } else {
             Diagnostics::degraded("letter_spacing expects number", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("word_spacing")) {
-        if (props["word_spacing"].is_number()) {
-            word_spacing = props["word_spacing"].get<float>();
+        if (props.at("word_spacing")->is_number()) {
+            word_spacing = props.at("word_spacing")->as_or<float>(0.0F);
         } else {
             Diagnostics::degraded("word_spacing expects number", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("font_weight")) {
-        if (props["font_weight"].is_string() || props["font_weight"].is_number()) {
-            font.weight = static_cast<int>(json_to_font_weight(props["font_weight"]));
+        if (props.at("font_weight")->is_string() || props.at("font_weight")->is_number()) {
+            font.weight = static_cast<int>(json_to_font_weight(*props.at("font_weight")));
         } else {
             Diagnostics::degraded("font_weight expects string or number", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("font_style")) {
-        if (props["font_style"].is_string()) {
-            font_style = json_to_font_style(props["font_style"]);
+        if (props.at("font_style")->is_string()) {
+            font_style = json_to_font_style(*props.at("font_style"));
         } else {
             Diagnostics::degraded("font_style expects string", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("decoration")) {
-        decoration = json_to_text_decoration(props["decoration"]);
+        decoration = json_to_text_decoration(*props.at("decoration"));
     }
     if (props.contains("decoration_color")) {
-        if (props["decoration_color"].is_array() && props["decoration_color"].size() >= 4) {
-            decoration_color = json_to_color(props["decoration_color"]);
+        if (props.at("decoration_color")->is_array() && props.at("decoration_color")->size() >= 4) {
+            decoration_color = json_to_color(*props.at("decoration_color"));
         } else {
             Diagnostics::degraded("decoration_color expects [r,g,b,a] array", type_name(), "invalid-prop-value");
         }
     }
     if (props.contains("background_color")) {
-        if (props["background_color"].is_array() && props["background_color"].size() >= 4) {
-            background_color = json_to_color(props["background_color"]);
+        if (props.at("background_color")->is_array() && props.at("background_color")->size() >= 4) {
+            background_color = json_to_color(*props.at("background_color"));
         } else {
             Diagnostics::degraded("background_color expects [r,g,b,a] array", type_name(), "invalid-prop-value");
         }
@@ -422,7 +422,11 @@ auto Text::on_key_event(KeyEvent &e) -> void {
     if (ctrl && e.key == static_cast<int>(KeyCode::C)) {
         const std::string t = selected_text();
         if (!t.empty()) {
-            Clipboard::set_text(t);
+            // 控件层拿不到 Result 的下游消费者，失败只能就地记诊断留痕。
+            if (const auto copied = Clipboard::set_text(t); !copied) {
+                Diagnostics::warn("Text Ctrl+C copy failed: " + copied.error().message, "Text::on_key_event",
+                                  copied.error().code);
+            }
             e.is_handled = true;
         }
         return;
@@ -550,8 +554,8 @@ auto Text::wrap_lines(const std::string &text, const Font &f, float max_w, bool 
 
     std::vector<std::string> lines;
     std::vector<size_t> starts;
-    std::string line;  ///< 当前行已累积的可见内容
-    size_t line_start_off = words[0].start;  ///< 当前行首字符在 text 中的字节偏移
+    std::string line;  // 当前行已累积的可见内容
+    size_t line_start_off = words[0].start;  // 当前行首字符在 text 中的字节偏移
 
     const auto measure = [&](const std::string &s) -> float { return render::FontEngine::measure_width(s, f, opts); };
     // 把当前行压入结果，并依据其首字节偏移记录全局码点下标。

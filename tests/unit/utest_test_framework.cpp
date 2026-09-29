@@ -1,8 +1,8 @@
+/// @file utest_test_framework.cpp
 /// 测试类型: unit
 /// 目标单元: tests/framework/aurora_test.h
 /// 测试说明: 测试框架自身契约（用例注册、套件名推导、skip 桩、异常隔离、断言家族、fixture
 /// 与参数化组织、用例边界资源隔离）
-///
 
 // 框架自检（synthetic 用例）在 runner 的 --selftest 中，不进注册表；
 // 本文件验证「真实测试 TU 经宏注册后的可观测行为」，并充当迁移期复制粘贴的写法样板。
@@ -129,9 +129,9 @@ namespace {
 /// @brief fixture 用例样板：状态由 SetUp 复位，TearDown 恰好执行一次。
 ///
 /// fixture 类名按仓库命名规范取 PascalCase（ClassCase），用例名里会带上它。
-// fixture 的共享状态放 protected 区（生成的用例类要访问），故按仓库惯例
-// 豁免「非私有成员」告警——保护成员被派生用例使用是刻意设计。
-// NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes)
+/// fixture 的共享状态放 protected 区（生成的用例类要访问），故按仓库惯例
+/// 豁免「非私有成员」告警——保护成员被派生用例使用是刻意设计。
+/// NOLINTBEGIN(cppcoreguidelines-non-private-member-variables-in-classes)
 class CounterFixture : public testing::Fixture {
   protected:
     auto SetUp() -> void override { count_ = 0; }
@@ -221,10 +221,10 @@ AURORA_TEST_CASE(clipboard_test_backend_roundtrip) {
         AURORA_TEST_SKIP("test hooks disabled (AURORA_ENABLE_DEBUG / AURORA_ENABLE_TEST_HOOKS off)");
     }
     aurora::Clipboard::set_text("aurora-clipboard-roundtrip");
-    AURORA_TEST_CHECK_EQ(aurora::Clipboard::get_text(), "aurora-clipboard-roundtrip");
+    AURORA_TEST_CHECK_EQ(aurora::Clipboard::get_text().value(), "aurora-clipboard-roundtrip");
 
     aurora::Clipboard::reset_test_backend();
-    AURORA_TEST_CHECK(aurora::Clipboard::get_text().empty());
+    AURORA_TEST_CHECK(aurora::Clipboard::get_text().value().empty());
 
     aurora::Image image;
     image.width = 1;
@@ -232,9 +232,10 @@ AURORA_TEST_CASE(clipboard_test_backend_roundtrip) {
     image.pixels = {10U, 20U, 30U, 255U};
     aurora::Clipboard::set_image(image);
     const auto restored = aurora::Clipboard::get_image();
-    AURORA_TEST_CHECK_EQ(restored.width, 1);
-    AURORA_TEST_CHECK_EQ(restored.height, 1);
-    AURORA_TEST_CHECK(restored.pixels == image.pixels);
+    AURORA_TEST_REQUIRE(restored.ok());
+    AURORA_TEST_CHECK_EQ(restored.value().width, 1);
+    AURORA_TEST_CHECK_EQ(restored.value().height, 1);
+    AURORA_TEST_CHECK(restored.value().pixels == image.pixels);
 
     AURORA_TEST_REQUIRE(aurora::Clipboard::remove_test_backend());
     AURORA_TEST_CHECK(!aurora::Clipboard::remove_test_backend());  // 无后端可再卸

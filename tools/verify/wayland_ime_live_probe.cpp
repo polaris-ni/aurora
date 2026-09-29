@@ -67,6 +67,7 @@
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
 #include "aurora/window/wayland_surface.h"
+#include "verify_args.h"
 #include "verify_print.h"
 
 namespace {
@@ -112,26 +113,25 @@ auto pump_until(aurora::WaylandSurface &surface, const std::function<bool()> &do
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    bool interactive = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--interactive") {
-            interactive = true;
-        }
+    const auto cli = aurora_verify::parse_interactive("Wayland text-input-v3 IME bridge live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
     }
-    emit("==== Wayland text-input-unstable-v3 输入法桥 真机验收 ====");
+    const bool interactive = cli.arguments->flag("interactive");
+    emit("==== Wayland text-input-unstable-v3 IME bridge live acceptance ====");
     if (const char *wdpy = std::getenv("WAYLAND_DISPLAY"); wdpy == nullptr || *wdpy == '\0') {
-        emit("[ENV] 无 WAYLAND_DISPLAY（无 Wayland 会话），探针无从运行");
+        emit("[ENV] WAYLAND_DISPLAY is not set (no Wayland session), the probe cannot run");
         return 2;
     }
 
     aurora::WaylandSurface surface(520, 360, "aurora-verify-wayland-ime");
     if (!surface.is_available()) {
-        AURORA_LOG_ERROR("verify", "WaylandSurface unavailable（合成器连接失败或缺 compositor/shm/xdg_wm_base）");
+        AURORA_LOG_ERROR("verify", "WaylandSurface unavailable (compositor connect failed or shm/xdg_wm_base missing)");
         return 2;
     }
     // 先出帧：xdg_toplevel 带缓冲 commit 后才被合成器视为 mapped，才可能获得键盘焦点。
     if (!surface.begin_frame(520, 360)) {
-        AURORA_LOG_ERROR("verify", "begin_frame 失败，窗口进不了 mapped 态");
+        AURORA_LOG_ERROR("verify", "begin_frame failed, the window cannot reach the mapped state");
         return 2;
     }
     (void)surface.present();
@@ -153,11 +153,13 @@ auto main(int argc, char **argv) -> int {
     // ---- ① 代码生成门 ----
     if (st.protocol_disabled) {
         emit(
-            "[ENV] 本次构建缺 text-input-unstable-v3 XML（AURORA_HAVE_WL_TEXT_INPUT=0）⇒ 桥未编译，"
-            "装 wayland-protocols 后重配置构建再跑");
+            "[ENV] this build lacks the text-input-unstable-v3 XML (AURORA_HAVE_WL_TEXT_INPUT=0), the bridge is not "
+            "compiled; install wayland-protocols, reconfigure the build and run again");
         return 2;
     }
-    check(true, "协议代码生成在场（protocol_disabled=false，listener/请求静态合法已由编译证明）");
+    check(true,
+          "protocol code generation present (protocol_disabled=false; listener and request signatures are "
+          "statically valid, already proven by compilation)");
 
     // ---- ② 未发布 manager：优雅降级（WSLg Weston 即此路） ----
     if (!st.manager_bound) {
@@ -165,13 +167,15 @@ auto main(int argc, char **argv) -> int {
         st = surface.text_input_state();
         emit(std::string("after pump: ") + state_line(st));
         check(!st.manager_bound && !st.input_created && !st.enabled && st.commits == 0,
-              "合成器未发布 v3 ⇒ 桥零请求（无 enable/commit，provider 接线不产生协议流量）");
-        check(!surface.should_close(), "多帧泵送后连接仍健康（降级未触发协议错误/断连）");
-        emit("[INFO] WSLg Weston 长期不发布 v3：本段即降级路证明。enable 判据与 enter 链需");
-        emit("       提供 text-input 的合成器（KDE/mutter/weston 带输入法扩展）真机复核。");
+              "compositor does not advertise v3, so the bridge issues zero requests (no enable/commit; the provider "
+              "wiring creates no protocol traffic)");
+        check(!surface.should_close(),
+              "connection still healthy after pumping frames (degradation raised no protocol error or disconnect)");
+        emit("[INFO] WSLg Weston never advertises v3, so this section is the degraded-path proof; the enable and");
+        emit("       enter criteria need a live check on a compositor offering text-input (KDE/mutter/weston).");
         if (interactive) {
             emit("");
-            emit("---- 人工段：本合成器无 v3，输入法事件不会到达；仅观察帧循环无扰动 ----");
+            emit("---- Manual: this compositor has no v3, IME events will not arrive; watch the frame loop ----");
             while (!surface.should_close()) {
                 surface.poll_platform_events();
                 surface.wait_events(50.0);
@@ -182,10 +186,12 @@ auto main(int argc, char **argv) -> int {
     }
 
     // ---- ③ 绑定链 ----
-    check(true, "合成器发布 zwp_text_input_manager_v3（manager_bound），进入完整判据段");
-    check(st.input_created, "seat 键盘能力到达 ⇒ zwp_text_input_v3 已建（input_created）");
+    check(true, "compositor advertises zwp_text_input_manager_v3 (manager_bound), entering the full criteria section");
+    check(st.input_created, "seat keyboard capability arrived -> zwp_text_input_v3 created (input_created)");
     if (!st.input_created) {
-        emit("[INFO] input_created=false：本 seat 无键盘（平板会话？），后续 enter/enable 判据无从执行。");
+        emit(
+            "[INFO] input_created=false: this seat has no keyboard (tablet session?), so the later enter/enable "
+            "criteria cannot run");
     }
 
     // provider：非零插入点盒（=宿主判定「焦点在文本控件」）。真实应用里由 WindowHost 接线，
@@ -197,39 +203,41 @@ auto main(int argc, char **argv) -> int {
         st.input_created && pump_until(surface, [&surface] { return surface.text_input_state().entered; }, 2000);
     if (!entered) {
         skip(
-            "未收到 zwp_text_input_v3.enter（合成器未把键盘焦点给本表面）⇒ enable 判据交 --interactive "
-            "（点一下窗口即可）");
+            "no zwp_text_input_v3.enter received (the compositor gave this surface no keyboard focus) -> the enable "
+            "criterion is left to --interactive (one click on the window is enough)");
     } else {
-        check(true, "键盘焦点落入 ⇒ text_input.enter 到达（服务端 listener 表签名合法）");
+        check(true, "keyboard focus landed -> text_input.enter arrived (server listener signatures are valid)");
         // ---- ④ enable 判据双向 + 去重 ----
         // ti_on_enter 内即刻按 provider 刷新：entered 观察到时 enable 应已随 commit 下发。
         const auto en_st = surface.text_input_state();
         check(en_st.enabled && en_st.commits > 0,
-              "entered + 非零插入点盒 ⇒ enable+content_type+commit 已下发（enabled 翻真、commits>0）");
+              "entered + non-zero caret rectangle -> enable+content_type+commit sent (enabled true, commits>0)");
         const int commits_after_enable = surface.text_input_state().commits;
         (void)surface.begin_frame(520, 360);
         (void)surface.present();
         (void)surface.begin_frame(520, 360);
         (void)surface.present();
         check(surface.text_input_state().commits == commits_after_enable,
-              "同状态重复刷新去重（每帧 present 零协议开销）");
+              "repeated refresh in the same state deduplicates (zero protocol cost per presented frame)");
         caret_box = aurora::Rect{};  // 零盒 = 焦点离开文本控件
         const bool disabled = pump_until(surface, [&surface] { return !surface.text_input_state().enabled; }, 500);
         check(disabled && surface.text_input_state().commits > commits_after_enable,
-              "插入点盒归零 ⇒ disable+commit 下发（enabled 翻假）");
+              "caret rectangle zeroed -> disable+commit sent (enabled flips false)");
         caret_box = aurora::Rect{aurora::Point{64.0F, 96.0F}, aurora::Size{8.0F, 20.0F}};
         const bool re_enabled = pump_until(surface, [&surface] { return surface.text_input_state().enabled; }, 500);
-        check(re_enabled, "重新非零盒 ⇒ 再次 enable（判据可逆，无粘滞）");
+        check(re_enabled, "non-zero rectangle again -> enable sent once more (reversible, no stickiness)");
     }
 
     // ---- preedit/commit/delete：需真实输入法进程 ----
     skip(
-        "preedit/上屏/delete_surrounding 需合成器侧输入法进程配合 ⇒ 交 --interactive 人工段"
-        "（判据：preedit 更新 → 选字单通道上屏 → Esc 无残留）");
+        "preedit/commit/delete_surrounding need a compositor-side input method process -> left to the --interactive "
+        "manual section (preedit updates -> the candidate commits through one channel -> Esc leaves no residue)");
 
     if (interactive) {
         emit("");
-        emit("---- 人工段：请用真实输入法在窗口内键入拼音；状态/事件逐行打印（关窗退出） ----");
+        emit(
+            "---- Manual: type pinyin in the window with a real input method; state/events print line by line "
+            "(close the window to exit) ----");
         std::string last;
         while (!surface.should_close()) {
             surface.poll_platform_events();

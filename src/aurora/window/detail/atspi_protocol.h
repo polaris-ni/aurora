@@ -71,7 +71,7 @@ inline constexpr const char *k_a11y_bus_service = "org.a11y.Bus";
 inline constexpr const char *k_a11y_bus_path = "/org/a11y/bus";
 inline constexpr const char *k_a11y_bus_iface = "org.a11y.Bus";
 
-/// @brief AtspiRole 序号（本桥用到的子集；其余以序号注释回查 upstream 枚举）。
+// AtspiRole 序号（本桥用到的子集；其余以序号注释回查 upstream 枚举）。
 // 本枚举是上游 at-spi2-core `atspi-constants.h` AtspiRole C 常量与 D-Bus 线协议值域（签名 `u`）的
 // 逐字镜像：底层类型必须保持 std::uint32_t（对齐线协议 u32），且刻意保持 unscoped 以便与上游常量
 // 直接互转——属 CODING_STANDARDS.md §2 的官方名镜像豁免面，改 scoped/缩底层类型都会破坏协议对照。
@@ -102,7 +102,7 @@ enum Role : std::uint32_t {
     role_unknown = 67,
 };
 
-/// @brief AtspiStateType 序号（本桥用到的子集）。
+// AtspiStateType 序号（本桥用到的子集）。
 // 同 Role：上游 AtspiStateType 常量与 D-Bus 线协议值域（签名 `u`）的逐字镜像，底层类型须保持
 // std::uint32_t、刻意 unscoped 以便与上游常量直接互转——官方名镜像豁免（CODING_STANDARDS.md §2）。
 // NOLINTNEXTLINE(cppcoreguidelines-use-enum-class,performance-enum-size)
@@ -130,7 +130,7 @@ enum State : std::uint32_t {
     state_read_only = 43,
 };
 
-/// @brief AtspiCoordType（Component/Text 几何坐标系参数）。
+// AtspiCoordType（Component/Text 几何坐标系参数）。
 // 同 Role：上游 AtspiCoordType 常量与 D-Bus 线协议值域（签名 `u`）的逐字镜像，底层类型须保持
 // std::uint32_t、刻意 unscoped 以便与上游常量直接互转——官方名镜像豁免（CODING_STANDARDS.md §2）。
 // NOLINTNEXTLINE(cppcoreguidelines-use-enum-class,performance-enum-size)
@@ -220,7 +220,7 @@ struct AtspiEnv {
 
 /// @brief AT-SPI2 折算模型：快照 + 路径分配 + 方法面纯应答。
 ///
-/// 树裁剪口径：仅剔除 `!is_control && !is_content`（装饰节点，G23「完全忽略」档）并把其
+/// 树裁剪口径：仅剔除 `!is_control && !is_content`（装饰节点，「完全忽略」档）并把其
 /// 子节点上挂到最近的存活祖先 —— 与 UIA 桥「控制视图可见性」同源但按其语义放宽：AT-SPI2
 /// 没有 control/content 双视图概念，纯布局容器（is_control）照常入树（atk 应用同此形态）。
 /// @note Thread: main-thread only（与桥/快照同线程）
@@ -232,8 +232,10 @@ class AtspiModel {
     auto sync(const a11y::TreeSnapshot &snap) -> void;
 
     // ---- 寻址 ----
+    /// @brief 对象路径 → 节点 id；未命中返回空。
     [[nodiscard]] auto id_of_path(const std::string &path) const -> std::optional<std::uint64_t>;
-    [[nodiscard]] auto path_of_id(std::uint64_t id) const -> std::string;  ///< 未命中 ⇒ null 路径
+    /// @brief 节点 id → 对象路径；未命中返回 null 路径。
+    [[nodiscard]] auto path_of_id(std::uint64_t id) const -> std::string;
     /// @brief 快照里的活节点（App/Frame 合成节点返回 nullptr）。
     [[nodiscard]] auto node(std::uint64_t id) const -> const a11y::NodeSnapshot *;
     /// @brief 对象存活（false ⇒ 已移除，桥按规范回 `UnknownObject`）。
@@ -251,7 +253,8 @@ class AtspiModel {
     [[nodiscard]] auto child_count(std::uint64_t id) const -> std::int32_t;
     [[nodiscard]] auto children(std::uint64_t id) const -> std::vector<std::uint64_t>;
     [[nodiscard]] auto child_at(std::uint64_t id, std::int32_t index) const -> std::optional<std::uint64_t>;
-    [[nodiscard]] auto parent(std::uint64_t id) const -> std::uint64_t;  ///< 父节点 id；App 的父 = 0（无）
+    /// @brief 父节点 id；App 的父 = 0（无）。
+    [[nodiscard]] auto parent(std::uint64_t id) const -> std::uint64_t;
     [[nodiscard]] auto index_in_parent(std::uint64_t id) const -> std::int32_t;
     [[nodiscard]] auto application() const -> AtspiRef;
     [[nodiscard]] auto parent_ref(std::uint64_t id) const -> AtspiRef;

@@ -1,6 +1,6 @@
 # 序列化、检查器与工具链（serialization / inspector / tooling / log）
 
-> 覆盖 `widget/serialization.h`、`widget/codegen.h`、`widget/yaml.h`、`widget/inspect.h`、`inspector/`、`core/log.h`、`debug/`、仓库私有 `tests/support/test_helpers.h` 与 `tools/`。
+> 覆盖 `widget/serialization.h`、`widget/codegen.h`、`widget/yaml.h`、`widget/inspect.h`、`inspector/`、`core/log.h`、`core/json.h`（JSON 值容器，契约见 [`01-core.md`](01-core.md) §9）、`debug/`、仓库私有 `tests/support/test_helpers.h` 与 `tools/`。
 > 本文件是 UI 树线格式、差分补丁、代码生成、运行时检查、MCP / CLI / LSP 工具链与日志通道的**唯一权威**。
 > `WidgetDescriptor` / `PropDescriptor` 结构见 [`04-widget.md`](04-widget.md) §2.1；`Result` 与 `Error` 见 [`01-core.md`](01-core.md) §3。
 
@@ -10,6 +10,7 @@
 
 | 关注点 | 头文件 / 目标 |
 |:---|:---|
+| JSON 值容器 | `core/json.h`（自有 JSON 值与编解码器，契约见 [`01-core.md`](01-core.md) §9） |
 | 序列化与补丁 | `widget/serialization.h` |
 | 代码生成 | `widget/codegen.h` |
 | YAML 输出 | `widget/yaml.h` |
@@ -33,7 +34,34 @@
 
 `children` 为空时不输出。**属性一律位于 `props` 子对象下**，因此补丁 path 形如 `/children/0/props/show`。
 
-`Json` 类型是 `nlohmann::json` 的别名，定义于 `widget/props_io.h`。
+**值类型**：UI 树的 JSON 值由自研容器 `au::json::Value`（`core/json.h`）承载；`Json` 是它的别名，
+定义于 `widget/props_io.h` 与 `widget/yaml.h` 两处安装头。容器自身的类型系统、读写契约与错误码见
+[`01-core.md`](01-core.md) §9。
+
+迁移期曾以第三方单头库 `nlohmann/json` 承载该别名（2026-09 收敛完成）：历史惯用法到现 API 的
+机械对照如下，供阅读旧代码或写迁移类工具时参考。
+
+| 第三方单头用法 | 收敛后写法 |
+|:---|:---|
+| `Json::parse(s)` | `json::parse(s)` → `Result<Value>` |
+| `Json::parse(s, nullptr, false)` + `is_discarded()` | `if (auto r = json::parse(s)) { … }` |
+| `try { parse } catch (parse_error&)` | Result 解包（`r.ok()` / `r.error()`） |
+| `j["k"] = v;`（写） | `j.set("k", v);` |
+| `j["k"].get<T>()`（读，可缺失） | `j.as_or<T>("k", fallback)`（空安全，不隐式插入） |
+| `j.at("k").get<T>()`（读，保证存在） | 判空后 `j.at("k")->as<T>()`，或 `j.get<T>("k")` |
+| `j.contains("k")` | 同名保留 |
+| `j.erase("k")` | `j.erase("k")`；JSON Pointer 写路径用 `json::erase_pointer` |
+| `for (auto& [k, v] : j.items())` | `for (auto e : j.entries())`，取 `e.key` / `e.value` |
+| `j.push_back(v)` / `j.emplace_back(...)` | `push_back(v)`（不提供 `emplace_back`） |
+| `j.dump()` / `j.dump(2)` | `json::dump(j)` / `json::dump(j, {.indent = 2})`，返回 `Result` |
+| `a == b` | 同名；**语义收严为同类型比较**——跨数值类型不再相等（`1 != 1.0`） |
+| `is_boolean` / `is_number_integer` / `is_number_float` | `is_bool` / `is_integer` / `is_double` |
+| `json::json_pointer(p)` | `json::find_pointer(root, p)` / `resolve_for_write` / `erase_pointer` |
+
+⚠️ **ADL 命名冲突约束**：仓内已存在域级函数 `aurora::serialization::from_json` 与成员 / 域级
+`to_json`，故自有 JSON 模块**不得**定义可被 ADL 命中的同名自由函数模板。其转换入口一律为成员 /
+静态函数（`parse` / `dump` / `as<T>` / `as_or`），且 `aurora::json` 与 `aurora::serialization`
+之间不得 `using namespace` 互相引入。
 
 部分控件的序列化 `type` 名与 C++ 类名不同（`Image` → `ImageView` / `ImageViewProps`）。
 
@@ -53,6 +81,15 @@
 | `list_all_schemas` | `[[nodiscard]] auto list_all_schemas() -> std::vector<Json>` | `serialization.h` |
 
 `to_yaml` 有 `Widget` 与 `Json` 两个重载；**YAML 只有输出方向，无 `from_yaml`**。
+
+**发射契约**（`widget/yaml.h`，逐条由 `tests/unit/utest_yaml.cpp` 的 `yaml_block_form_exact_lines` 等用例锁定）：
+
+1. **缩进**：固定 2 空格一级，无 Tab、无行尾空格；顶层不缩进。
+2. **嵌套容器一律块形态**：对象/数组作为**键的值**时，先写 `key:` 再换行，子块整体下沉一级缩进。把嵌套映射内联在 `key:` 同一行（`props: {width: 100}`）抹掉了层级，产出的不是合法 YAML——这是曾经的缺陷形态，勿回归。
+3. **空容器只在值位置内联**：`key: {}` / `key: []`；标量与空容器之外不存在内联形态。非空容器任何时候都走块形态。
+4. **列表项**：每项 `- ` 起一行，行首缩进为父级 + 1。项本身是容器时，其块首行由 `- ` 前缀接管（`- ` 恰占两列，与一级缩进同宽），其余行天然对齐在同一列，故只需削掉子块首行的前导空格。嵌套数组因此形如 `- - 1`。
+5. **标量形态**：`null` / `true` / `false` 小写；整数原样；浮点数保证带小数点或指数位（`2` → `2.0`），NaN/无穷用 `.nan` / `.inf` / `-.inf`。
+6. **字符串按需加引号**：空串、YAML 保留字/布尔字面量（`yes`/`on`/`~` 等大小写变体）、可被整体解析为数字的串、含 YAML 特殊字符、首尾带空白的串，一律双引号包裹并转义 `" \ \n \r \t`；其余裸写。键名走同一判定。
 
 ```cpp
 au::Json json = au::serialization::to_json(my_tree);          // 返回 au::Json（非 std::string）
@@ -123,17 +160,39 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 |:---|:---|
 | `Fluent`（默认） | 扁平容器 + `au::Type(au::TypeProps{ … })` 叶形式（多子容器直接罗列子项） |
 | `StepByStep` | `auto w = au::Type(au::TypeProps{}); w.prop = val;` 分步赋值形式 |
-| `DesignatedInit` | 统一 `au::TypeProps{ .prop = val, .children = { … } }` 指定初始化器形式（仅 `*Props` 聚合支持） |
+| `DesignatedInit` | 统一 `au::Type(au::TypeProps{ .子节点槽, .prop = val })` 指定初始化器形式（仅 `*Props` 聚合支持） |
 
-`emit_props` 按 **JSON 值形态 + 键名**分派（`codegen.h` 的 `emit_prop_value` / `enum_type_for_key`），覆盖基础属性类型：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（以字符串形态命中 string 分支）/ `Color` / `Length` / `EdgeInsets` / 枚举（经 `enum_type_for_key` 登记表，另含 `font_weight`、`text_decoration` 专用分支）。
+**风格能力表**（三种风格共享同一条属性发射管线，差别只在「能否承载某一类落点」）：
 
-枚举登记表**同时覆盖 `to_json` 真实产出的属性名**（`alignment`、`overflow`、`side`、`position`、`decoration`、`text_align`、`font_style`、`main_axis_*`、`cross_axis_alignment` 等），因此真实 UI 树的这些属性可还原为 `Enum::Value` 表达式而非裸字符串。两点例外与一处现状：
+| 属性类别 | Fluent / DesignatedInit | StepByStep |
+|:---|:---|:---|
+| `*Props` 聚合的顶层同名成员（16 个公开继承的类型） | ✅ 进指定初始化器 | ✅ `w.key = 值` |
+| 基类属性（`width`/`height`/`show`/非 Text 的 `overflow`/a11y 三键） | ❌ 聚合无同名成员，一律省略 | ✅ 链式 setter / 公有成员 / `set_*()` |
+| 嵌套路径（`font.size_pt`、`flex.main_axis`） | ❌ GCC 的 C++ 指定初始化器不支持嵌套设计符 | ✅ `w.font.size_pt = 14.0f;` |
+| setter-only 落点（`TextInput` 样式组、`Stack.fit`、`TitleBar.height`…） | ❌ protected 字段不能在类外赋值 | ✅ `w.set_corner_radius(4.0f);` |
+| 改名成员（`Text` 的 `color` → `text_color`） | ✅ 按登记的落点发射 | ✅ 同左 |
 
-- `fit` 与 `orientation` **无法按键名消歧**（`fit` 在 `Stack` 上是 `StackFit`、在 `VideoPlayer` 上是 `BoxFit`；`orientation` 在 `Divider` 上是 `Orientation`、在 `Splitter` 上是 `SplitterOrientation`，取值集还完全同名）。登记表刻意不收录二者，它们仍输出字符串字面量；要正确还原须把 `prop_descriptors[].type` 透传进 `emit_prop_value` 按声明类型分派。
-- `Image` / `FlexWeight` / `Flex` / `Json` 这 4 类**暂无专用分派分支**：其序列化形态若未命中任何基础分支，`emit_prop_value` 产出 `/* unknown */`，`emit_props` 随即**静默跳过该属性**——既不报错也不告警，生成的代码中该属性直接缺失。
-- 登记表按「键名」而非「类型」工作，故新增枚举属性时必须同步登记真实键名，否则该属性静默退化为字符串（`tests/integration/itest_to_code.cpp` 的 `codegen_enum_keys_emit_enum_expressions` / `codegen_ambiguous_enum_keys_stay_as_strings` 两例守护此点）。
+### 2.5.1 发射管线：一切落点须可核对
+
+`emit_props` 的每个键都要先经 **「类型自描述 + 落点登记表」** 换算成真实写入路径，才决定发射还是省略：
+
+1. **取值形态分派**（`emit_prop_value`）：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（字符串形态命中 string 分支）/ `Color`（`[r,g,b,a]`）/ `Length`（`["px",N]`、`["percent",N]`、`{"value","unit"}` 旧格式、`"auto"`/`"fill"`，以及 `describe` 的 `default_props` 里那种**裸数字**——按 px 语义包成 `au::px(N)`，因为 `Length` 不可由 `float` 隐式转换）/ `EdgeInsets` / 枚举（含 `font_weight`、`text_decoration` 专用分支）。产物一律 `au::` 限定，使代码在任意命名空间可编译。
+2. **枚举还原优先走自描述**（`descriptor_enum_expression`）：`prop_descriptors[].type` 给 C++ 枚举类型名、`prop_descriptors[].enum` 给合法取值名，取值按列表**忽略大小写规范化**（`"center"` → `au::TextAlign::Center`）。这消掉了旧登记表的两类错误：同名键跨类型的歧义（`fit`/`orientation`）与大小写不符声明的取值（`au::Orientation::horizontal`）。列表里没有该取值时保留原样输出，交由产物编译体检暴露。取值名不是合法标识符时（`FontWeight` 的 `"400"`，落点 `Font::weight` 本就是 int）不拼枚举项名。自描述未给取值集的类型仍回落 `enum_type_for_key` 键名登记表。
+3. **声明序**：指定初始化器必须按 `*Props` 的成员**声明序**书写（乱序 GCC 直接报 `designator order … does not match declaration order`），而快照 JSON 的键是字典序，故发射前按 `prop_descriptors` 的下标稳定排序；子节点槽排最前。StepByStep 无此约束，但沿用同一顺序便于两风格逐行对照。
+4. **落点换算**：`prop_target` 登记表给出「键 → 成员路径 / 嵌套路径 / setter 名」，未登记时默认为同名成员；基类键走 `base_target`。`no_write_path` 显式登记「确认无写入通道」的键（`Scroll.offset`/`LazyRow.offset` 是运行态、`Image.image_width`/`image_height` 是解码派生值、`Skeleton.width`/`height` 需成对的 `set_size()`），`is_base_key` 则处理**同名遮蔽**：`Text` 的 `overflow`、`Skeleton` 的 `width`/`height`、`TitleBar` 的 `height` 都是控件自己的键（`serialize_props` 覆写了基类写入），不得按基类 `Length`/`OverflowStrategy` 发射。
+
+### 2.5.2 能力边界：宁缺不伪
+
+写不出合法 C++ 的属性/子节点**一律省略并在 stderr 告警**（`AURORA_LOG_WARN("codegen", …)`），既不产出编译不过的语句，也不静默丢语义：
+
+- **类型没有通用构造入口**（`is_bespoke_ctor`，21 项）：位置参数构造（`Badge(count, child)`、`Drawer(content, panel, side, width)`、`Splitter`、`TabBar`、`PageView`、`Show`、`Timer`、`VideoPlayer`…）、类模板需实参（`Provider`/`Repeater`/`ReorderableList` 及其三个 `*Provider` 别名）、不在 `aurora` 命名空间下（`BreakpointBuilder`）、或子项本就惰性构建（`LazyRow`，`children_policy = "virtual"`）。对它们只生成空构造，**告警丢弃子节点**——硬编位置参数实参等于臆造 API。
+- **连空构造都不存在**（`is_unconstructible`，8 项：`BreakpointBuilder`/`Hero`/`LocaleProvider`/`MediaQueryProvider`/`Provider`/`ReorderableList`/`Repeater`/`ThemeProvider`）：产物按真实类型名发射 `au::T{}` 并告警点名「须手工补构造实参」，不改写成别的控件（替换比报错更难发现）。
+- **字段为 protected 且未登记 setter** 的类型（`Slider`/`Checkbox`/`Chip`/`Popup`…）：StepByStep 省略该属性并告警。全量类型体检（73 类型 × `default_props` 的 550 条属性）中，StepByStep 发射 342 条、告警省略 208 条；把 208 条补齐需要逐类型登记真实 setter，属可选增强，不影响产物可编译性。
+- **取值形态无法还原**（如枚举属性给了数字、或命中 `Image`/`FlexWeight`/`Flex`/`Json` 这 4 类无专用分支的形态）：告警省略，不再静默。
 
 多子扁平容器（`Column` / `Row` / `Stack` / `Grid` / `Scroll` / `Card`）走免 `Props` 包裹的罗列形式。
+
+**产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（26 例）锁形态；「73 类型 × 3 风格」全量矩阵与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）逐条 `g++ -fsyntax-only` 体检锁可编译性——当前矩阵为 fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是上述 `is_unconstructible` 名单；真实 fixture 的 11 棵树 × 3 风格产物 33/33 全通过。矩阵须按**每类型一座独立 TU**编译：把 73 份产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
 
 ```cpp
 std::string code = au::serialization::to_code(json, au::serialization::CodeStyle::Fluent);
@@ -179,9 +238,10 @@ UI 树 dump 统一以 `widget/inspect.h` 内的**自由函数**提供，**不提
 |:---|:---|
 | `dump_tree(root)` | 人类可读缩进树 |
 | `dump_tree_rich(root, depth = 0, tree_chars = true)` | 富格式树，含 `#id` / bounds / visible / text / style / listeners，以 `├─ └─ │` 连接 |
-| `dump_tree_json*` / `dump_tree_json_full(root) -> Json` | JSON 快照；`dump_tree_json_full` 含属性（每节点 type / props / children） |
+| `dump_tree_json*` / `dump_tree_json_full(root) -> Json` | JSON 快照；`dump_tree_json_full` 含属性（每节点 type / props / children），持有焦点者另有 `focused: true`（只在为真时出现，无焦点节点不增键） |
 | `widget_tree_to_items(root) -> std::vector<TreeItem>` | Widget 树 → TreeItem 树（供 `TreeView` 消费） |
-| `find_node_by_path(root, path) -> Node` | 按索引路径定位节点（如 `"0/2/1"`） |
+| `find_node_by_path(root, path) -> Node` | 按索引路径定位节点（如 `"0/2/1"`）。只沿 `child_nodes()` 下降 ⇒ 到不了虚拟化容器的子树 |
+| `find_widget_by_path(root, path) -> Widget *` | 同上，但返回裸控件指针、下降全程走**统一子节点遍历** ⇒ 可跨越虚拟化容器；越界或非法路径段返回 `nullptr` |
 | `get_widget_props(w) -> Json` | 获取 Widget 属性快照（`describe` + `serialize_props`） |
 | `set_widget_prop(w, key, value)` | 单属性回写（经 `deserialize_props`） |
 | `collect_widget_boxes(root) -> std::vector<WidgetBox>` | 把控件树拍平成「布局盒表」（`{path, type, bounds}`）。**输出顺序即先序**，是差异归因 tie-break 依赖的契约 |
@@ -198,13 +258,17 @@ Column#root { bounds:[0,0,640,480]; visible:true; listeners:[on_click] }
 
 `Node` 标识由 `Widget::set_id(std::string_view)` / `id()` 提供，`dump_tree_rich` 经 `#id` 渲染。
 
+**子节点枚举与路径寻址必须同源。** 虚拟化容器（`NavigatorHost`、`LazyList`、`GridView`、`TransitionLayer` 等）把子节点存在 `Node` 之外的私有表中，按约定**不覆写** `child_nodes()` —— 它们没有可交出的 `Node`，只经 `for_each_child` 暴露子树（`widget/a11y_tree.h` 采用同款兜底）。因此树快照的枚举（`dump_tree_json_full`）与按路径的寻址统一走 `for_each_child_unified`：`child_nodes()` 非空则用其一，为空则回退 `for_each_child`。两处若取不同遍历源，同一路径在树快照与单控件查询下会指向不同控件 —— 这是本模块的核心不变量，新增遍历相关能力时须一并遵守。
+
+`find_node_by_path` 只沿 `child_nodes()` 下降，故**到不了**这类容器的子树；且它会把某一层的 `child_nodes()` 拷进临时容器，副本析构会清掉该层**兄弟节点**的 `layout_parent_`，脏标记传播随之断裂。需要跨越虚拟化容器、或不想引入该副作用（如 HTTP / MCP 这类按路径寻址的入口）时，用 `find_widget_by_path`。
+
 `aurora::Inspector`（`inspector/inspector_api.h`，实现 `src/aurora/inspector/inspector_api.cpp`）是操作 UI 树的统一编程门面：全静态方法、仅主线程，各方法委托上表自由函数或组件注册表，无新增运行时开销。除树导出（`tree_text` / `tree_rich` / `tree_json` / `tree_json_full`）外，还提供：
 
 | 能力 | 成员 | 说明 |
 |:---|:---|:---|
-| 节点查询 | `query(type, root)` / `get_state(path, root)` / `find_node(root, path)` / `widget_info(w)` | 按类型名检索、按路径取状态片段、按索引路径定位节点、Widget 完整信息 |
+| 节点查询 | `query(type, root)` / `get_state(path, root)` / `find_node(root, path)` / `find_widget(root, path)` / `widget_info(w)` | 按类型名检索、按路径取状态片段、按索引路径定位节点（`find_node` 返回 `Node` 副本、只走 `child_nodes()`；`find_widget` 返回裸指针、走统一遍历，可跨越虚拟化容器，两条路径的取舍见 §3）、Widget 完整信息 |
 | 属性读写 | `get_prop(w)` / `get_prop_value(w, key)` / `set_prop(w, key, val)` / `apply_patch(root, patch)` | 单属性回写返回 `Result<void>`；`apply_patch` 把 JSON Patch 逐条经 `set_prop` 应用到树 |
-| 交互模拟 | `simulate_click(w)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发；派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制，但目标须已布局——未布局时尺寸为零、中心退化为自身原点）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态 |
+| 交互模拟 | `simulate_click(w)` / `simulate_drag(w, dx, dy)` / `simulate_scroll(w, dx, dy)` / `simulate_text_input(w, text)` / `simulate_pointer(w, position, action)` | 合成事件经 `EventDispatcher` 走真实命中测试 + 冒泡派发。前四者为**目标式**：派发根与坐标原点均为 `w` 自身、指针取 `w` 中心，故不依赖控件在树中的绝对位置（无需先绘制，但目标须已布局——未布局时尺寸为零、中心退化为自身原点）。`drag` 派发 Press（中心）→ Move（中心+delta）→ Release（终点）。目标不可命中时返回 `GeneralNotSupported` 且不派发、不改状态。<br>`simulate_pointer` 为**坐标式单步**：在 `w` 本地坐标系给定点派发单个 `MouseEvent`（仅 `Press`/`Move`/`Release`，其余动作返回 `GeneralNotSupported`），且只对 `Press` 预先做命中校验——`Move`/`Release` 放行，因为真实拖拽正是靠派发器的 `pointer_capture_`（Press 时缓存的命中链）把后续 Move 继续投给按下的控件。用途：拖拽带不在控件中心时（`Splitter` 分隔条、滚动条滑块、Slider 轨道任意位）逐步合成连续拖拽 |
 | 组件发现 | `components()` / `component_schema(name)` | 已注册组件 schema 列表 / 单组件 schema |
 | 代码生成 | `to_code(root)` | UI 树 → 源码（转发 §2.5） |
 | 验证 | `validate(root) -> std::vector<Diagnostic>` | 整树验证（`inspector_api.h`） |
@@ -255,6 +319,8 @@ server.stop();        // 停止并 join 工作线程
 
 ### 5.1 REST 端点
 
+凡触碰活动 widget 树的端点（`/api/tree`、`/api/widget/*`、`/api/patch`、`/api/yaml`、`/api/find`、`/api/input/*`、`/api/debug/{tree,pick}`）一律经主线程 marshal 执行，树端点由 `InspectorServer::Impl::on_tree` 统一派发：树在帧内会被增删（重排、虚拟化行回收），accept worker 线程直接下树遍历即与改树并发并读到已释放节点（宿主表现为 `0xC0000005`）。`tree_mutex` 与遍历在同一闭包内持取，只负责串行化并发 inspector 请求；`root_getter` 本身复制根 `shared_ptr`，同样必须在主线程调用；根为空统一回 500。
+
 | 方法 | 路径 | 说明 |
 |:---|:---|:---|
 | GET | `/api/tree` | 完整 widget 树 JSON；`?window=<id>` 取指定窗口树（需 `set_window_tree_getter`），无效 id 回 404、未注册 getter 时带 `window` 参数回 400 |
@@ -264,9 +330,10 @@ server.stop();        // 停止并 join 工作线程
 | GET | `/api/components` | 全部已注册组件 schema 列表 |
 | GET | `/api/yaml` | 当前 widget 树的 YAML 格式字符串 |
 | POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit；`style` 存在但非整数返回 400，越界整数回退 Fluent |
-| POST | `/api/input/{click\|scroll\|text}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点（指针取该控件中心）合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll` 另取数值 `dx`/`dy`（缺省 0），`text` 另取字符串 `text`。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
+| POST | `/api/input/{click\|scroll\|drag\|text\|pointer}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll`/`drag` 另取数值 `dx`/`dy`（缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取字符串 `text`，`pointer` 另取字符串 `phase`（`press`\|`move`\|`release`，必填）与可选数值 `x`/`y`（控件本地 dp，缺省为该控件中心）——单步派发一个指针动作，供调用方自行合成跨子区域的连续拖拽。前四种为**目标式**（指针取控件中心），`pointer` 为**坐标式**。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
+| GET | `/api/find` | 按 key/type/text 定位控件：`?key=<Node::set_id 标识>&type=<type_name>&text=<文本>`，至少给一个参数（否则 400），多参数 AND。返回 `{matches:[{path, type, id}], count}`——`path` 为索引路径（根为空串），与 `/api/widget/{path}`、`/api/input/*` 同口径，可直接喂给寻址端点；`text` 比对文本类属性启发式（`content\|text\|label\|value\|hint\|placeholder`，与 `TestController::find_by_text` 同源）。遍历走 `child_nodes()` 原存储 const 引用（不构造 `Node` 副本，活树安全）；虚拟化容器（不覆写 `child_nodes()`）的子树不可见（与 `find_node_by_path` 同限：宁可少报、不可错报）。零命中回 200 + 空 `matches`（非错误，由调用方裁决）；方法非 GET 回 405。query 值一律先按 RFC 3986 百分号解码再比对（`%20` → 空格、UTF-8 字节序列 → 中文标签，`+` 保持字面量），故含空格/非 ASCII 的 `label` 可直接经 URL 编码定位；畸形百分号（`%zz`、尾部孤立 `%`）按字面量保留，不升级成错误响应 |
 
-> `/api/input/*` 为「目标式」语义：落点取目标控件中心，故目标须已布局（未布局时尺寸为零、中心退化为自身原点）。失败（路径不存在 / 不可派发 / 参数不符）一律在派发前返回，**不改变任何控件状态**。滚动只派发事件，偏移量不在响应里（控件虽各自序列化 `offset` / `scroll_offset`，但响应体不回传），需要读回偏移请读控件属性或写 C++ 测试。
+> `/api/input/*` 中 `click`/`scroll`/`drag`/`text` 为「目标式」语义：落点取目标控件中心，故目标须已布局（未布局时尺寸为零、中心退化为自身原点）。`pointer` 是唯一的「坐标式」通道：落点由请求体 `x`/`y` 给定（控件本地 dp），一次只派发一个指针动作，逐步调用即可合成跨子区域的连续拖拽——派发器在 Press 时缓存命中链为 `pointer_capture_`，故后续 `move` 仍会投给被按住的控件，与真实指针一致。失败（路径不存在 / 不可派发 / 参数不符）一律在派发前返回，**不改变任何控件状态**。滚动只派发事件，偏移量不在响应里（控件虽各自序列化 `offset` / `scroll_offset`，但响应体不回传），需要读回偏移请读控件属性或写 C++ 测试。
 
 ### 5.2 调试端点
 
@@ -302,10 +369,49 @@ server.stop();        // 停止并 join 工作线程
   主机**恒被 pin 到回环**：客户端不做 DNS，只认 `127.0.0.1` / `localhost` / `::1`，且一律连到 `127.0.0.1`。
 - HTTP 客户端只落在 `tools/servers/inspector_client.h`（**不进 `include/` / `src/`**），故不改变核心的零依赖承诺。
 - 前提：应用需自己 opt-in 启动 `InspectorServer`（CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`）；
-  未启动时 `live_*` 返回传输层错误（连不上）而非空结果。
+  未启动时 `live_*` 返回传输层错误（连不上）而非空结果。`demo_common.h` 的 `run_demo` 已内置
+  该 opt-in（见 §5.5）。
 
 `InspectorServer::start(0)` 可由系统分配临时端口（`port()` 读回实际值），但 MCP 侧不做端口扫描
 —— 需要临时端口时请自行经 `session` 入参或环境变量告知。
+
+### 5.5 进程外 E2E 客户端（aurora_e2e_client）
+
+CI 步骤、探针与人工终端共用的最小驱动入口：经本机 `InspectorServer` 的 §5.1 REST 面查树、
+定位、注入输入、抓帧。目标 `aurora_e2e_client`（`tools/e2e/e2e_client.cpp`）为
+**EXCLUDE_FROM_ALL**（按需 `cmake --build build --target aurora_e2e_client`），Emscripten 下不定义
+（浏览器运行时无 BSD socket 语义，与 §8.2 内核同口径）。
+
+三层分工（均不进 `include/` / `src/`，不改核心零依赖承诺）：
+
+| 层 | 位置 | 职责 |
+|:---|:---|:---|
+| 裸传输 | `tools/servers/inspector_client.h` | 一次 HTTP 请求（回环 pin、超时、4MiB 上限），§5.4 共用 |
+| 能力层 | `tools/include/e2e/inspector_driver.h` | header-only：按端点命名的调用 + 失败二分（见下）；**不解析 JSON**，body 原样上交 |
+| CLI | `tools/e2e/e2e_client.cpp` | argv 解析、输出与退出码（0 成功 / 1 请求失败 / 2 用法错误） |
+
+CLI 命令：`tree [window]`、`find key=<k> type=<t> text=<x>`（k=v 任意组合，AND）、
+`get <path>`、`tap <path>`、`drag <path> <dx> <dy>`、`scroll <path> <dx> <dy>`、
+`text <path> <string>`、`snapshot [fb|win] [-o <file.png>]`。树查询类成功时响应 JSON 原样透传
+stdout（`AURORA_LOG_RAW`，无前缀）；失败行以 `[transport-error]` / `[http-error]` / `[usage]`
+为前缀，供脚本按行分类。
+
+**失败二分**（§5.1 语义错误与「服务不在」的可区分判据）：`CallResult::Kind::TransportError`
+表示未获得 HTTP 响应（connect 拒绝 / 超时 / 非回环拒单），`status` 恒 0、无 body——调用方
+绝不该把它解释成空树；`Kind::HttpError` 表示服务端回了 4xx/5xx，详情在 body JSON 的
+`error` 字段。
+
+**端口解析（客户端侧约定）**：`--port` 入参 > 环境变量 `AURORA_INSPECTOR_PORT` > 默认 `6280`；
+环境变量值须全串十进制 1..65535，脏值按未声明回落默认。`InspectorServer` 本身不读环境变量，
+解析发生在客户端——外部驱动者不必与被测应用共享端口常量。参数字符串按原始 UTF-8 字节直通
+（服务端 query 解析无 URL 解码），含 `&` / `=` / 空格的定位值在当前协议下不可用。
+
+**demo 侧 opt-in**（驱动任意 demo 的路径）：`AURORA_BUILD_INSPECTOR_SERVER=ON` 时**全部** demo
+目标链接 `aurora_inspector_server`（构建期宏统一注入——`run_demo` 为所有 demo 共用启动器，
+只给个别 demo 链接会让共享头在不同 demo 下编译出不同形态）；运行期设置 `AURORA_INSPECTOR_PORT`
+即随 demo 启动 `InspectorServer`（root getter 捕 demo 树、surface getter 捕窗口 Surface），
+未设置不启动、demo 默认安静。注意 demo 目标是 EXCLUDE_FROM_ALL：驱动某个 demo 前须先按名
+或经聚合目标 `demos` 构建它。
 
 ---
 
@@ -361,6 +467,11 @@ stdio JSON-RPC 2.0。传输格式：`Content-Length: <N>\r\n\r\n<JSON-RPC 2.0 bo
 
 ### 7.2 CLI（`aurora_cli`）
 
+命令面是**一棵 `aurora::cli::CommandSpec` 声明表**（`tools/servers/aurora_cli.cpp` 的 `build_spec()`），由
+[`09-cli.md`](09-cli.md) 的 `aurora::cli::parse` 消费：解析、每层 `--help`、usage 行与 `schema_json` 全部由同一份声明派生。
+`-w W` / `-h H` / `-o out.png` / `--style` 是**按子命令声明**的局部选项（cobra 式「选项属于当前命令」），尺寸取值域
+`[1, 8192]`，越界即 `cli-range-violated`（退出码 `2`）。
+
 ```bash
 aurora_cli components                         # 列出所有已注册组件类型
 aurora_cli describe <name>                    # 输出单个组件的完整 schema（JSON）
@@ -371,12 +482,14 @@ aurora_cli render <tree.json> [-w W] [-h H] [-o out.png]  # 离屏渲染为 PNG
 aurora_cli preview <tree.json> [-w W] [-h H]  # 快速预览 UI（启动临时窗口；无显示后端回退无头渲染一帧退出）
 aurora_cli to-code <tree.json> [--style fluent|step|di]   # UI 树 → C++ 代码
 aurora_cli to-yaml <tree.json>                            # UI 树 → YAML 格式
-aurora_cli schema                             # 输出完整 aurora_api.json
-aurora_cli --help    (-h)                      # 显示用法帮助
+aurora_cli schema                             # 输出运行时重建的 API 骨架（非仓库内 aurora_api.json）
+aurora_cli --help    (-h 仅根层)               # 显示用法帮助（每一层都可用，如 `render --help`）
 aurora_cli --version (-V)                      # 显示版本号
 ```
 
-退出码：成功 `0`，校验失败 `1`，用法错误 `2`。所有输出默认 JSON（机器可读）。
+退出码：成功 `0`，校验失败 `1`，用法错误 `2`（含缺子命令、未知子命令、未知选项、取值越界）。所有输出默认 JSON（机器可读）。
+`snapshot` / `render` / `preview` 三层把 `-h` 声明给了 `--height`，故内建 help 在**该层**降级为仅 `--help`
+（短名让位，见 [`09-cli.md`](09-cli.md) §4.6）；根层无冲突，`-h` 仍是帮助。
 
 ### 7.3 LSP（`aurora_lsp`）
 
@@ -424,6 +537,63 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 > AI 兼容性批量验证**不是** cmake 目标，而是 CTest 集成用例 `itest_ai_compat`（`tests/integration/itest_ai_compat.cpp`）：遍历 `tests/fixtures/ai_compat/` 下的 JSON fixture，无 LLM 调用；`valid_*` 期望通过、`error_*` 期望报错、`interact_*` 为「静态树 → TestController 交互 → 状态断言」回归脚本（`itest_ai_compat.cpp` 中段消费）。运行：`ctest -R itest_ai_compat`。
 
+#### 7.4.1 空闲 / 叠加层刷新实测基线与复现
+
+空闲期分两种场景，必须分别度量：**无叠加层**（事件驱动深睡）与**叠加层可见**（每 500 ms 一帧）。所有 CPU 占比均为**占单核百分比**（进程 CPU 时间 ÷ 墙钟时间 × 100），非整机百分比；采样窗口跳过启动与首帧构图，只取稳态区间。两类场景的设计语义（停帧陈旧口径、脏决策三态、HUD 刷新周期）见 [`ARCHITECTURE.md`](../ARCHITECTURE.md) §10.1 / §10.2 / §10.4。
+
+载具与配置：
+
+| 项 | 无叠加层 | 叠加层可见 |
+|:---|:---|:---|
+| 载具 | `bench_idle_cpu` | `examples/app/google_play/demo_google_play.cpp` |
+| 后端 | Win32 软件渲染（`AURORA_BACKEND_WIN32`） | 同左 |
+| 构建 | `build/` | `build-inspector/`（调试开启 + Inspector 服务开启） |
+| 帧率上限 | 默认（60） | `opts.max_fps = 60` |
+| 观测窗口 | 3 s | 静止 6 s 采样窗口 |
+
+**无叠加层：事件驱动深睡**（基准自带判定，人工用例见 [`../manual-test/17-perf.md`](../manual-test/17-perf.md) TC-PERF-006）：
+
+| 观测 | 值 | 判定 |
+|:---|:---|:---|
+| 空闲 CPU 占比 | 0.5% | PASS（门槛 < 5%） |
+| 空闲「渲染帧率」 | 0.3 fps | 几乎不出帧，符合预期 |
+| 空闲唤醒频率 | 4.3 / 秒 | 事件驱动，非轮询 |
+
+- 门槛与判定由 `bench_idle_cpu` 自身给出（空闲 < 5%；旧实现忙轮询时该值会顶到约 100%）。活跃场景同次实测为 CPU 6.7%、帧率 35.8（被夹在 60 附近），PASS。
+- 该场景**未挂叠加层** ⇒ 不触发 HUD-only 帧（态 ②），因而空闲帧语义的改动对它无影响；改动后已实测复验通过。
+
+**叠加层可见：每 500 ms 一帧**（人工用例见 [`../manual-test/17-perf.md](../manual-test/17-perf.md) TC-PERF-008）：
+
+| 观测 | 值 |
+|:---|:---|
+| 稳态 CPU（静止 6 s 采样窗口） | **3.4%**（占单核） |
+| `idle` 计数逐秒增量 | `2, 2, 2, 16, 2, 2, 19, 2, 2, 2` |
+| `(stale)` 标记出现率 | 6 / 11 个打印秒 |
+| 静止期 FPS 取值 | 保持末值（如 39.499）而非归零 |
+| 空闲 1.2 s 的叠加层重绘像素差 | 18716 字节 |
+
+- 增量基线恒为 **+2 / 秒**，与 500 ms 叠加层刷新周期一致 ⇒ 空闲唤醒确实由叠加层驱动，且**没有**退化成「一帧都不出」。
+- 增量为 16 / 19 的两秒是轮播动画在推进（动画期内本就应出帧），不属于空闲异常。
+- 若叠加层唤醒退化成忙轮询，该 CPU 值会顶到约 100%；实测 3.4% 说明唤醒是按截止时间等待的。
+- 像素差来自集成用例 `tests/integration/itest_perf_overlay_refresh.cpp` 的空闲场景：1.2 s 内只推进帧循环、不强制全量重绘，断言叠加层像素确实发生变化。
+
+**复现步骤**
+
+无叠加层（基准自带判定，一条命令即可）：
+
+1. 构建基准：`cmake --build build --target bench_idle_cpu`。
+2. 直接运行该基准，读它打印的两行结果与 PASS / FAIL：空闲场景要求 CPU 占比 < 5%，活跃场景要求帧率被夹在 60 附近。
+
+叠加层可见（基准族未覆盖此场景，需自建观测）：
+
+1. 构建调试开启 + Inspector 服务开启的构建目录，得到载具 `demo_google_play`。
+2. 以分离进程方式启动载具，并把标准输出重定向到文件（载具的帧率摘要行经 `AURORA_LOG_RAW` 输出，即标准输出；标准错误恒为空）。
+3. 间隔数秒两次采样该进程的 CPU 时间，跳过启动阶段，按上方口径计算占比。
+4. 结束进程后读回输出文件：统计 `idle` 计数的逐秒增量与 `(stale)` 出现的行数。
+5. 确认该载具进程已退出，避免占用目标导致下一次重编报占用错误。
+
+> 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述。**尚未纳入 CI 门禁**：时间类门槛历史上只作本地趋势对照（见 `tools/check/perf_gates.json` 的 `source` 字段），若要新增门槛，需先固定载具、采样窗口与判定阈值。另：叠加层空闲场景此前只有自动化用例覆盖，人工用例 TC-PERF-008 已补齐。
+
 ### 7.5 真机验收探针（`tools/verify/`）
 
 探针证明的是**无头 CI 无法证明**的平台接线：单元测试只能断言到「平台中立层」（快照 / diff / 偏移映射 / 动作路由），而「平台回调是否真的到达、平台侧对象是否真的可查」只能建真实窗口、在真实桌面会话里验收。全部由 `cmake/AuroraVerify.cmake` 定义、`AURORA_BUILD_VERIFY_TOOLS` 门控、**不进 CTest**（会创建真实窗口 / 读取屏幕状态，非确定且干扰用户桌面）。
@@ -436,6 +606,8 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `aurora_verify_atspi` | Linux AT-SPI2 桥与真实 a11y 总线的接缝：`Socket.Embed` 握手、树可见性、状态集 / 动作 / 几何 / 文本读回、`DoAction` 回灌宿主（`on_click` 真实执行）、**事件推送段**（客户端注册 7 类精确事件监听，父进程按时间表做声明式变更：标题/输入值/ReorderableList 收缩再增长/播报，断言 `focus:`、`state-changed:focused`、`property-change:accessible-{value,name}`、`children-changed:{add,remove}`、`announcement` 全部被动收到） | **libatspi 客户端**（探针内起 `python3-gi` 子进程，与 Orca 同路径）从桌面树按 app/frame/button/entry/static 逐检查项断言并打印 `RES|pass/fail`；实测（2026-09-20，WSLg）Wayland 与 X11 两路 20/20 ALL PASS。运行需 `GI_TYPELIB_PATH`/`PYTHONPATH` 指向解包好的 gir 仓库（见源文件头注释） |
 
 各探针的验收范围、逐项期望与退出码语义写在对应源文件头注释内（`tools/verify/*.cpp|.mm`）；真机验收须在**对应平台**手工执行。
+
+**探针与 E2E 驱动内核（§8.2）的分工**：探针手写的「建窗 / 帧推进 / 像素读回」与内核能力**行为重叠**时，建窗升级为经内核 `e2e::open`（统一 RAII 与失败翻译），探针只保留平台专属判据、断言与退出码；手写段本身即判据本体的保持原样。已升级：`win32_wgpu` / `x11_wgpu`（建窗经 `e2e::open(Backend::Wgpu)`，`WindowSpec` 显式 `Normal` 可见性保持探针窗口可见；WgpuRhi 离屏直驱段是探针核心目的——验证 wgpu 光栅化路径本身，且其读回基底是 RHI 离屏 FBO 而非内核的 `Surface::data()`，保留手写）、`glfw_gpu_features`（建窗经 `open(Backend::Glfw, gpu=true)`；`max_fps=0` 不再显式设置——该字段只作用于 `Application::run` 帧预算，不影响直驱 `present_root` 循环）、`win32_cursor`（Win32/D3D11/Wgpu 三路宿主建窗统一经内核，设备不可用判定由 `open` 失败翻译 + 具体类型 `is_available()` 承担）。保持原样（逐项裁定）：`wayland_wgpu`——内核 `WindowSpec` 无法表达「`WaylandOptions` + `RendererPreference::GpuWgpu` 直达」宿主路由组合；`glfw_cursor`——窗口是裸 `GLFWwindow`，建窗方式与映射镜像同为判据本体（验证 GLFW 环境能力而非 aurora 接线）；`win32_ime`——走正规 `Application` 路径（真实消息泵与焦点序是判据前提），内核 `Session` 无 `Application` 语义；`win32_ua`——建窗带 `RendererPreference::GpuD3D11` 路由，内核无法表达；`wasm_*`——内核 `Backend` 枚举无 Wasm 后端；`wasapi_audio` / `alsa_audio` / `wasm_audio` 为纯音频设备探针、`macos_cursor` 无 aurora 建窗段，天然无重叠；`x11_cursor` / `wayland_cursor` / `x11_ime` / `wayland_ime` / `atspi` 的手写建窗仅为具体类型 `Surface` 的 2–3 行构造（探针自带的不可用判定与降级语义与之等价，平台判据——XFIXES 读回 / 提交事实读回 / IME 状态机 / DBus 协议面——才是本体），经内核建窗后仍须向下转型回具体类型，无行为收益。
 
 **由后台进程执行时的物理前提**（不是软件缺陷，探针按退出码如实申报而非假通过）：凡判据落在「屏幕上真实显示的指针/光标」上的探针（`aurora_verify_win32_cursor`，以及各探针的 `--interactive` 人工段），要求**已解锁且处于活动状态的交互桌面**——探针会把被测窗口置顶（`HWND_TOPMOST`）并依次试摆「屏幕中心 → 四角内侧」共 5 个落点（同处置顶带内他人窗口可长期压住中心点，`SetForegroundWindow` 又受前台锁约束），多次不中才以退出码 3 报出「期望落点 / 实际指针位置 / 该点上的窗口类名 / 试过的落点数」现场证据后终止（远程桌面会话隔离、锁屏时的 `LockScreenBackstopFrame` 同理）。纯逻辑/句柄类判据（如 GLFW 探针自动段：`glfwCreateStandardCursor` 句柄互异计数）不受此约束，可在任意会话内跑通。
 
@@ -498,6 +670,225 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 | `aurora::testing::write_report` | 结果报告：`.xml` → JUnit XML，其余 JSON；超时路径同样落盘已完成部分（`tests/framework/reporter.h`） |
 | `aurora_test_runner` | 唯一 `main`（`tests/framework/test_main.cpp`），测试 TU 禁止自定义 `main()`；起手执行 `TestRegistry::finalize()` 统一展开参数化用例，故 `--list` / `--run` 即展开后全集；`--report` / `--shuffle` / `--repeat` / `--timeout`（看门狗，退出码 3）见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §7.1 |
 
+### 8.2 真实后端 E2E 驱动内核（`tools/include/e2e/harness.h`）
+
+真实后端端到端测试（`tests/e2e/` 下 `etest_` 用例，受 `AURORA_BUILD_E2E` 门控）的**框架无关**驱动
+内核。它不是新增开发，而是**既有真实后端测试代码的抽取与统一**：建窗 / 帧推进 / 像素读回在仓库内
+只有这一份实现，不得出现第二套容差常量或第二套 skip 约定。
+
+| 项 | 约定 |
+|:---|:---|
+| 位置与依赖 | `tools/include/e2e/harness.h`，**只依赖 aurora 公共头**，不含任何 `AURORA_TEST_*` 宏——故 `tests/`（`etest_` 用例）与 `tools/verify/`（真机验收探针）可共用同一份实现 |
+| 分层 | 场景层（`examples/demos/scenes/` 下 header-only 场景头，与 demo 同源）→ 进程内驱动内核（本头）→ 进程外客户端（`InspectorServer` REST，见 §5） |
+| 后端标识 | `e2e::Backend` 枚举器**无条件出现**（不随 `AURORA_BACKEND_*` 裁剪）：未编译的后端请求得到明确的「不可用 + 原因」，而非编译失败。`backend_compiled()` 是纯编译期事实，`open()` 的运行期失败以 `ok()` / `reason()` 如实上报 |
+| 建窗 | `e2e::open(WindowSpec)` 经类型安全的 `create_window(XxxOptions)` 工厂；**不静默降级**——请求的后端未编译或初始化失败即失败。「跳过还是失败」是测试侧策略，落在 `tests/e2e/e2e_expect.h`（`AURORA_E2E_EXPECT` 期望集），内核不裁决 |
+| 窗口可见性 | `WindowSpec::visibility` 默认 `Hidden`（与公共 `WindowOptions::visibility` 的默认 `Normal` 刻意不同）：E2E 默认不把窗口推入用户视野；三档语义与各宿主落地见 [`specification/03-layout-render.md`](03-layout-render.md) §8.3 与 [`specification/06-app-platform.md`](06-app-platform.md) §3.3 |
+| 帧推进 | 帧序复用 `TestController` 已验证的既有序列（泵平台事件 → `Widget::tick` 手势计时 → `Animator::tick` → `Scheduler::tick` → `Window::present_root`）：内核自持 `Animator` / `Scheduler` 并经其 `set_current` 挂为进程内当前实例，使 mount 期注册的动画与定时任务可被逐帧推进。**不新增任何公共单帧 API**（`Application::step_frame()` 保持 `private`） |
+| 收敛与超时 | `pump_until_settled(max_frames)` 以「`Window::is_idle_frame()` 且无运行中动画」收敛；预算内未收敛返回 `RuntimeAsyncTimeout`，消息含已推进帧数、最后脏区状态、idle 帧状态与活跃动画数（可直接作为失败原因）。注意：**自驱动手势滑动**（`Scroll` 收位滑动等，不占 `Animator`）不在此判据覆盖内，其收敛协议见下文交互流往返层 |
+| 像素读回 | `capture_frame(const Surface &)` = `Surface::data()` + `Surface::framebuffer_size()` 组合，返回帧缓冲**物理像素**的 RGBA 帧；**未新增 `Surface` 公共读回虚方法**。`data()` 为 `nullptr`（后端未覆写读回，或该后端的读回受 `AURORA_ENABLE_DEBUG` 门控且未生效）时返回 `GeneralNotSupported`，消息沿用 `save_snapshot` 既有的 "framebuffer capture unavailable"；不返回空帧、不伪造内容 |
+| 查询面 | `collect_preorder` / `find_by_key` / `find_by_type` / `find_by_text` / `read_prop` 全部建立在**公共自描述通道**上（`Node::id()` / `Widget::type_name()` / `Widget::serialize_props` / `Widget::child_nodes()`），**不依赖 `TestController`**——后者整头受 `AURORA_BACKEND_HEADLESS` 门控，若查询面依赖它，「关掉无头后端但开真实后端」的构建里 E2E 恰好失去查询能力 |
+| 语义快照 | `Session::semantic_snapshot()` 返回统一语义快照（`a11y::TreeSnapshot`：先序扁平 + `parent_id` + `by_id`，形状与 `widget/a11y_diff.h` 一致），`find_semantic_node()` 按角色（可选名称）先序取首个命中、`semantic_role_name()` 供报告可读名。快照与平台桥**同源**（同一 `build_accessibility_tree`，含 Name 回退链与 labelled_by 解析）——对快照成立的断言，平台桥投影也应成立；未建窗 / 未挂根返回 `GeneralInvalidArgument`，与 `read_pixels` 漏检口径一致 |
+| 输入注入 | `tap` / `drag` / `scroll` / `enter_text` 经 `Inspector::simulate_*` 走真实命中测试与冒泡派发（目标式语义），而非直接改控件状态；注入成功后登记「下一帧全量重绘」，模拟真实平台输入事件唤醒帧循环 |
+| 生命周期 | `Session` 以 RAII 兜底窗口生命周期：用例中途断言失败、抛出异常或提前 return 时析构即关闭窗口并回收宿主，不残留幽灵窗口；该保证不依赖用例显式调用清理函数，也不依赖测试框架的断言宏 |
+
+内核自测在 `tests/unit/utest_e2e_harness.cpp`（以 `HeadlessSurface` 为后端运行，不依赖真实显示环境）。
+
+**CI 能力边界（GitHub Actions 三平台实测）**：真实建窗 + 像素读回的能力因 runner 环境而异，
+E2E 的 CI 期望集（`AURORA_E2E_EXPECT`）须按平台声明：`windows-latest` 上 Win32 与 D3D11 可用，
+GLFW 不可用（VM 无 OpenGL 3.3，WGL 通用驱动无法建 GPU 上下文）；`ubuntu-latest` + `xvfb-run` 上
+X11 与 GLFW 可用（llvmpipe 软件 GL 可建 3.3 上下文；GLFW 源码构建需 `wayland-scanner` 等
+Wayland 依赖）；`macos-latest` 无人值守会话无窗口系统，全部后端不可用（期望集留空 = 全部
+skipped by policy，编译与注册面仍被覆盖）。Wayland（CI 无 compositor）与 wgpu（默认不编译）不进
+CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI 的 E2E 步骤必须以
+`AURORA_ENABLE_DEBUG=ON` 或 Debug 配置构建（部分后端读回受该宏门控，宏未注入时读回一律按
+「能力不可用」记账）；期望集内环境不可用即 FAIL_FATAL 红灯，因此期望集声明的是「该环境必须
+可跑」的最小集，宁可留空也不声明未实测的后端。
+
+**CI 作业口径**：期望集在 [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) 中以
+矩阵字段 `e2e-expect` 逐作业声明并注入 `AURORA_E2E_EXPECT`，判据是「该作业**实际编译**出的真实
+后端 ∩ 该环境**实测可用**」的交集，逐作业如下：
+
+| 作业（ci.yml） | 后端编译面 | 期望集 | 理由 |
+|:---|:---|:---|:---|
+| core 的 linux ×3 与 windows Release ×2（`windows-msvc` / `windows-mingw`） | 纯 Headless（X11/GLFW/D3D11 等默认 OFF） | 空 | 无真实后端编译进来，E2E 全部 skipped by policy（编译与注册面由内核自测覆盖）；空集是声明的事实而非疏漏 |
+| core 的 windows Debug ×2（`windows-msvc-debug` / `windows-llvm`） | Win32 默认编译，Debug 下 DEBUG 宏生效 | `win32` | Win32 读回受 `AURORA_ENABLE_DEBUG` 门控——Release 型作业（DEBUG=AUTO→OFF）若声明期望必误红，win32 的 E2E 运行覆盖由 Debug 型作业承担 |
+| core / backends 的 macos | MacOS/GLFW 编译 | 空 | 无人值守会话无窗口系统（探针实测），全部 skipped by policy |
+| backends `linux-x11-wayland-glfw` | X11+GLFW+Wayland + 显式 `-DAURORA_ENABLE_DEBUG=ON` | `x11,glfw` | Release 作业须显式 DEBUG=ON 使 X11 读回可用；xvfb + llvmpipe 实测可建 GLX 3.3 上下文（GLFW 可跑）；Wayland 无 compositor 不期望 |
+| backends `windows-d3d11-glfw` | D3D11+GLFW + 显式 DEBUG=ON（Win32 随平台默认编译） | `win32,d3d11` | DEBUG=ON 使 Win32 读回可用；D3D11 读回无条件可用；GLFW 在该 runner 无 GL 环境实测不可建窗，不期望 |
+| toggles `headless-off` | `-DAURORA_BACKEND_HEADLESS=OFF -DAURORA_BUILD_TESTS=OFF` | —（跳过 Test 步骤） | 测试套件依赖 HeadlessSurface（内核自测基底与读回回退路径），该配置的验收口径 = 库与工具**构建绿**（bench / 工厂降级路径均有 `#ifdef` 门控回退） |
+| asan / coverage | 纯 Headless 默认面 | —（ctest 带 `-LE e2e` 排除） | 无真实后端可跑、全 skip 无信息量，排除以省 ctest 时间；coverage 聚合目标内置的 ctest 同口径排除 |
+
+另三条边界结论：wgpu（`AURORA_BACKEND_GPU_WGPU`，需 Rust 工具链与真机 GPU）不进任何 CI 默认作业，
+由真机探针（§7.5）与本地会话 opt-in；wasm 作业的 E2E 在 CMake 层即排除（`AURORA_BUILD_E2E` 在
+Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_package` / 静态链接 / feature 宏导出
+一致性，不构建 tests，故无 E2E 面。
+
+场景库与组件 demo **同源**：被 E2E 引用的组件在 `examples/demos/scenes/` 下建 header-only 场景头
+（`scene_<组件>.h`，inline 构建函数返回根 `Node`），对应 `demo_<组件>.cpp` 退化为「薄 `main()` +
+`run_demo(...)`」，人类可见的 demo 行为（尺寸 / 标题 / 渲染结果）逐字节不变；**未被引用的 demo 零改动**，
+全量抽取（所有 demo 薄 `main()` 化）留作后续增量。使用 `Application` 装配的 demo 只抽 UI 构建，
+装配留在其 `main()` 内，E2E 用例以同一构建函数取根节点经内核自行驱动。场景枚举由场景库自带：
+`examples/demos/scenes/scene_registry.h` 注册表头 + `examples/demos/scene_tool.cpp` 小工具（`--list` 列场景 /
+`--render` 以 HeadlessSurface 软件路径渲染 PNG——后者同时是 golden 基线的软件 SSOT 渲染器），
+**不占用 runner 的 `--list`**（用例/套件面与场景面是不同 CLI 面）。进入 golden 用例集的场景须满足
+确定性渲染契约：不依赖墙钟时间、不依赖随机数（或固定种子）、动画在捕获前推进到静止态；
+含文本场景（demo 房风含 GradientTitle 与标签）须按字体依赖单列更大的差异像素预算。
+
+**golden 容差层**（`tests/e2e/etest_smoke_render.cpp` 第二用例组，场景 × 后端矩阵展开）：
+
+- 基线：`scene_tool --render` 生成的软件 SSOT PNG（`tests/golden/e2e_<场景>.png`，scale=1）。软件读回
+  路径（Win32/GDI、GLFW-软件、X11）与基线同一条 Painter 链路，漂移恒 0；预算只为 GPU 路径的跨驱动
+  AA 差异买单。
+- 背景口径：基线渲染与真实窗口上屏必须同底色——`render_to_image` / `render_to_png` /
+  `Scene::render_to_png` 提供 `std::optional<Color> background` 默认参（默认不填 = 零初始化透明黑，
+  行为不变），`scene_tool --render` 传 `Surface::clear_color()` 同款 `{245,245,247,255}`。
+- 判据单源：`golden::compare_gpu_tolerance`（差异像素数 ≤ 场景预算 + 单通道容差 tol=48，失败消息含
+  差异区域与控件归因）。预算**按场景级申报**（`SceneGoldenBudget`：预算 + 覆盖形态 + `requires_scale_one`），
+  不读全局旋钮 `AURORA_GOLDEN_MAX_*`；预算为防御值——CI 探针实测默认矩阵全部后端（含 D3D11 增量上屏
+  偏置路径）与基线同一条 Painter 软件栅格链路、漂移恒 0，收紧或放宽须以新的实测证据为准。
+- DPI 口径分两层：**帧尺寸维度**——读回帧是帧缓冲物理像素，帧尺寸 ≠ 请求逻辑尺寸即环境缩放生效，
+  逐位比对不适用，记 SKIP；**内容域维度**——帧尺寸一致也可能不等：经物理域离屏缓冲的控件（如
+  Scroll 滑动窗口按 `ctx.scale_factor` 高清录制、composite 下采样回逻辑缓冲）在 scale ≠ 1 环境下
+  字形光栅与 scale=1 基线不同，此类场景以 `requires_scale_one` 申报，surface scale ≠ 1 时记 SKIP
+  （CI 100% DPI 环境全跑保证门禁有效性，本地高 DPI 环境诚实跳过）。
+- 度量 artifact：`AURORA_E2E_METRICS_FILE` 置定时逐用例追加 JSONL（差异像素数 / 最大单通道差 /
+  帧与基线尺寸 / 预算与判定 / 失败帧 PNG 路径），供 CI 上传与容差校准；未置不写、写失败不影响用例。
+- 失败落盘：比对超预算时把实际帧 PNG 写 `build/e2e-failures/`（预判用 `compare_snapshots`，判据仍以
+  `compare_gpu_tolerance` 单源）。
+
+**交互流往返层**（`tests/e2e/etest_interaction_flow.cpp`）：在像素冒烟与 golden 容差之上覆盖「交互经真实
+窗口往返」——点击 / 拖拽 / 滚动 / 文本输入经内核注入（`Inspector::simulate_*` 目标式语义）后，**控件状态与
+渲染像素双通道**断言，按序独立推进、独立记账（失败消息携带实测值 / 采样点 / 期望 RGBA，可分别诊断）。
+要点与实测约束：
+
+- 像素采样点一律取纯色区域内部（无 glyph、无 AA 边），按帧/逻辑尺寸比例映射——DPI 缩放环境仍可用，
+  容差只吸收跨后端上屏取整噪声；状态与像素断言相互独立，不互为推导。
+- 键盘路由另有**窗口事件路由面**覆盖：经 `Surface::set_event_handler` 接线 `FocusManager`（对齐 demo
+  `run_demo`「鼠标派发必须携带 FocusManager」纪律），以窗口坐标合成平台事件走 命中测试 → 焦点 →
+  键盘/文本路由 的完整链路，与目标式注入互补；目标式注入的焦点上下文由 `Inspector` 内部解析（无当前
+  `FocusManager` 时以目标为根就地构建），两条通道都依赖控件聚焦后的自身状态（`is_focused()`）成立。
+- 交互触发动画（点击回调启动 `Scroll` 收位滑动）以「注入后立即处于滑动中 + 滑动归假后偏移与像素
+  到位」双向断言。实测约束有二：滑动按**真实时钟**推进（dt 取 `steady_clock` 实测间隔），泵帧无节流，
+  帧数上界只防死循环（成功路径的泵帧数受滑动墙钟时长自然约束）；且滑动是**自驱动 tick 不占
+  `Animator`**（同 Dismissible/ReorderableList 模式），`pump_until_settled` 的「idle 帧 + 无 Animator
+  动画」判据会在缓动尾段的**浮点驻停区间**提前返回——eased 距端点不足 1 ulp 时偏移已停在 `to` 上而
+  `elapsed` 未走满 duration，偏移不再变化 → 不再标脏 → idle 帧被判收敛，而 `glide_.active` 仍为 true
+  （泵帧快于约 0.5 ms/帧的机器上尾段必落入驻停区间，曾致 CI win32/llvm 双红）。滑动收敛须以
+  `is_gliding()` 归假为主判据、`pump` 逐帧推进，收敛后再推帧 flush 终帧渲染。
+- 场景装配教训（写成对后续用例的约束）：行交叉轴默认拉伸会改变控件几何（`Switch` 被行撑高后滑块直径
+  随之变大、盖住按自然尺寸推算的采样点），采样点依赖的几何须用 `Modifier::size` 显式钉住；
+  `ScrollEvent::delta_y` 正方向为**向上**滚动（offset 减小），注入负值才是向下滚。
+- 后端矩阵与 skip/失败记账语义同冒烟层（`AURORA_E2E_EXPECT` 期望集）；后端矩阵套件的 fixture 类名在
+  注册表中按类名串合并，多个 `etest_` 文件不得共用同名 fixture 类，否则实例矩阵相互叠加导致用例双跑。
+
+**多窗口与生命周期层**（`tests/e2e/etest_multi_window.cpp`）：真实窗口语义中「多实例」侧的可观测
+行为——同进程多会话并存、程序化 resize、`present_root` 脏区裁剪语义、`WindowVisibility` 档位并存
+（与 `utest_multi_window` / `utest_window_lifecycle` 的抽象层断言互补，E2E 只断言真实窗口下可观测的
+行为）。要点与实测口径：
+
+- 双窗独立性：两窗各自 `present` 后帧尺寸等比且中心色独立命中；各自经 `Surface::set_event_handler`
+  接线独立 `FocusManager` 后合成窗口事件互不串台；应用内焦点互不干扰（获焦只改变本窗聚焦控件的
+  聚焦背景）。
+- 帧等比率口径：读回帧与逻辑尺寸的**等比率**（纵横比一致，容差 0.02）是跨后端不变量；「物理 =
+  逻辑 × scale」**不是**——GLFW 软件路径读回帧为逻辑尺寸，Win32 家族为物理尺寸。断言不得绑定绝对
+  物理像素，`scale_factor()` 逐窗动态读取（Win32 的 scale 成员在 DPI 感知启用前初始化——进程首窗
+  恒 1.0、后续窗口为系统真实缩放，属已知库层缺口，见下文 resize 条），DPI 缩放环境下的采样点按
+  帧/逻辑尺寸比例映射。
+- 生命周期：关闭一窗不影响另一窗继续渲染读回；RAII 兜底经异常路径验证（中途 throw 后 `Session`
+  析构关窗、不残留幽灵窗口）；同规格重建与连续开关循环成功（资源不泄漏的可移植运行时证据；OS 层
+  枚举窗口数不可移植，不做）。
+- resize：程序化 `Surface::set_size` 后整树重排重绘收敛、帧尺寸随动且保持等比，连续多轮 resize 每轮
+  收敛。**已知库层缺口**（skip 桩记录在案，修复后解除）：GLFW 路径 `set_size` 不传导——尺寸回调
+  空实现、尺寸缓存仅在 `begin_frame` 刷新，而 `set_size` 后无脏登记 → present 判 idle 跳帧 →
+  `begin_frame` 不执行，形成 idle 死锁（hidden 与 NoActivate 均复现）；X11/Wayland 未 override
+  `set_size`（虚默认空实现）。
+- resize 的 Win32 几何口径：`Win32Host::set_size` 已与构造路径同换算（逻辑 × scale → `AdjustWindowRectEx`
+  非客户区补偿 → `SetWindowPos`），保证客户区尺寸 == 请求逻辑尺寸——此前逻辑值被直接当外框尺寸传
+  下去，客户区被 chrome 挤占（标题栏随 DPI 放大尤甚，150% 显示器上客户区逻辑高度可比请求值缩水近半）。
+  遗留缺口（守卫 skip 记录在案）：`Win32Host` 的 scale 成员在成员初始化列表取值、早于构造体内的
+  `enable_dpi_awareness()`——进程首窗 scale 恒 1.0，而 `WM_SIZE` 的逻辑换算用实时 `dpi_scale()`（感知
+  生效后为系统真实缩放），≠100% DPI 显示器上帧/逻辑/scale 三方记账发散，resize 用例以三方一致性守卫
+  skip；100% DPI 环境（含 CI）三方恒 1.0 不受影响。修复须连带评估首窗 scale 语义变更对坐标换算面
+  （鼠标 / IME / a11y 投影矩形）的影响，独立成题。
+- 脏区语义（`present_root` partial-clip 路径）：树状态已变但无脏登记时 idle 跳帧（`frame_count` 不增、
+  `has_pending_dirty()` 为假）；手动 `mark_dirty` 局部矩形后仅裁剪区重绘、**裁剪外保留上帧像素**（与
+  「整屏刷底色」实现可区分——后者会画出已变的新色）；随后补标另一侧再验证增量覆盖。
+- 可见性档位：`NoActivate` 与 `Hidden` 四窗并存各自渲染读回正常、帧计数独立；NoActivate 的 OS 前台
+  行为已在内核探针验证（Windows 前台锁定策略下无人值守断言不可移植），此处只断言并存可用与渲染
+  正确。
+- 已知口径（多会话动画驱动器）：`Animator::set_current` 是进程级登记，每个会话首次 `ensure_drivers`
+  都会挂自己的驱动器（最近 open 者为当前实例），mount 期之后的运行期动画注册落当时的当前实例、
+  `pump` 只推进本会话自己的 `Animator`——多会话交错推进时跨会话动画推进无保证。多窗用例因此只用
+  静态场景，交互动画推进语义由交互流往返层覆盖。
+
+**无障碍语义通道层**（`tests/e2e/etest_a11y_semantics.cpp`）：像素冒烟证明「画得出」，本层证明
+「说得出」——控件树的无障碍语义经真实窗口上屏链路**到达平台**。六后端矩阵 × 两用例，与矩阵套件
+通用纪律（fixture 类名唯一、`AURORA_E2E_EXPECT` 记账）一致。要点与实测口径：
+
+- 统一期望表：进程内快照与平台通道投影**共用同一张期望表**（同源语义树，断言同词汇）。五类控件
+  覆盖三类动作面（Invoke / Toggle / Value）与两条名称回退链（显式 label、兄弟标签）。
+- 用例一 `semantic_snapshot_matches_widgets`（全矩阵）：像素通道与语义快照断言**并列独立记账**——
+  读回不可用按期望集口径记账，不推翻语义断言、也不被语义断言掩盖。语义面锁 角色 / 名称回退链 /
+  动作位（Invoke|Click|Focus、Toggle、Value）/ 几何非空 / 状态位（checked）/ 值域投影。
+- 用例二 `platform_bridge_projects_semantics`（按平台选通道）：真实平台查询端到端——Windows 经
+  UIA 客户端直连（`tools/include/e2e/uia_client.h`：`CoCreateInstance(CUIAutomation8)` →
+  `ElementFromHandle` 内部即 `WM_GETOBJECT` → 控件视图遍历器先序下钻，与读屏完全同径），只比对
+  `FrameworkId=="Aurora"` 的库自有投影（排除系统在同一层合成的非客户区元素）；Linux 经 AT-SPI
+  子进程客户端（`tools/include/e2e/atspi_client.h`：python3-gi 枚举桌面树找 FRAME==窗口标题，
+  输出 `NODE|role|name` 行；客户端可用性以 python3-gi 探测，无会话总线是合法永久降级）；
+  macOS AX 通道未实现（已知缺口，skip 桩）。通道内的角色/名称/pattern/几何断言与快照用例同表。
+- 库层修复回写（`WM_GETOBJECT` 激活回归）：`win32_host.cpp` 的根请求比较此前写作
+  `std::cmp_not_equal(static_cast<DWORD>(lParam), UiaRootObjectId)`——混合符号安全比较按**数学值**
+  判等，`0xFFFFFFE7` 与 `-25` 永不命中，内置桥无法经 `WM_GETOBJECT` 激活（真机探针时代的
+  「两侧都截断到 DWORD」惯例被后续类型安全改写静默破坏；当时无 etest 覆盖故未发现）。恢复两侧
+  截断比较（UIA 协议本身即 `(DWORD)lParam == (DWORD)id`）后，UIA 返回完整 Aurora 投影。
+- 平台客户端实现口径：`uia_client.h` / `atspi_client.h` 位于 `tools/include/e2e/`，与探针、etest
+  共用；UIA 侧属性读取走 `GetCurrentPropertyValueEx(..., TRUE)`（不因属性缺失抛错）、树遍历按
+  深度/总量封顶逐层 `Release`；MinGW 的 `uiautomation.h` 是 stub（常量为 `#define`、无
+  `UIA_PROPERTY_ID` 类型别名），接口形参按 int 收敛。
+
+**OS 级输入注入通道层**（`tests/e2e/etest_os_input.cpp`，真机增强层）：交互流往返层证明「框架内
+模拟输入走通命中与派发」，本层证明「**真实 OS 输入** → 窗口过程 → Aurora 事件管线」整段接线
+（前半段是模拟注入覆盖不到的）。内核通道在 `tools/include/e2e/os_input.h`，与 harness 同纪律
+（只依赖公共头、无测试框架宏）。要点与实测口径：
+
+- 平台通道三分：Windows `SendInput`（全局注入——移动真实光标后投递给光标所在窗口，最接近真人
+  操作的全链路）与 `PostMessage`（定向投递——不经光标/焦点系统直达窗口过程，管线接线可单独取证；
+  文本走逐字符 `WM_CHAR`，与 `aurora_verify_win32_ime_live` 探针同款）；Linux XTest（经 X 服务器
+  合成真实输入事件，`dlopen` libX11/libXtst 免构建依赖，与 `aurora_verify_x11_ime_live` 探针同款；
+  键盘焦点铺垫用 `XSetInputFocus`——无窗口管理器时点击不自动夺焦，等价 WM 的 click-to-focus）；
+  WASM 经 CDP `Input.dispatch*` 由浏览器外部驱动（`tools/verify/wasm_input_cdp_drive.mjs`，真实
+  浏览器 opt-in）。覆盖面与 a11y 通道同口径：win32/d3d11 共用 Win32Host 输入管线（以 win32 为
+  代表）、x11；GLFW 不暴露原生句柄（`native_handle()` 为基类空实现）、Wayland 无 XTest 等价物、
+  macOS 通道未实现，均为已知缺口。
+- **opt-in 门控**：环境变量 `AURORA_E2E_OS_INPUT`（置 `1`/`on`/`yes`/`true` 方启用，大小写不敏感）。
+  未置位时用例为 skip 桩，在默认 `ctest` 中天然不参与并行。SendInput 是全局注入、无法定向窗口，
+  多窗口并存必然串台——既有模型「进程隔离 + 资源虚拟化」隔离的是资源，全局输入是无法虚拟化的
+  **共享设备**，故该用例组须以独立 ctest 调用按 stem 独占执行（`ctest -L e2e -R etest_os_input`），
+  **不使用 `RUN_SERIAL` 属性**（TEST-R7 禁止）。
+- **no_interactive_desktop 拒绝语义**：锁定屏幕/安全桌面/服务会话等非交互桌面（Windows 侧
+  `OpenInputDesktop` 打不开输入桌面）与无 X 显示（`DISPLAY` 未设）环境下，注入通道以明确原因
+  skip，不静默失败、不挂起、不误判通过（`os_input.h` 的 `interactive_desktop()`）。实测该探测
+  覆盖不到全部锁屏形态，须与下条落点守卫两道门互补。
+- **SendInput 落点守卫**（`os_input.h` 的 `sendinput_landing_check`）：全局注入投给光标所在窗口，
+  故注入前先 best-effort 抬升目标（`BringWindowToTop` → `SetForegroundWindow`，仍被盖时升
+  `TOPMOST`），再用 `WindowFromPoint` 复核屏幕落点命中的**根窗口**仍是目标；不过即带原因拒绝，
+  用例侧记 skip 而非把环境竞争误判成管线故障。原因分两型：落点在目标矩形之内而被别的窗口盖住
+  （环境竞争，文案带盖住者的窗口类名）／落点落在目标矩形之外（坐标换算故障，须查库不得跳环境）。
+  实测本机锁屏态：`OpenInputDesktop` 仍放行（输入桌面名仍是 `Default`），而全屏
+  `LockScreenBackstopFrame` 盖住一切，`SendInput` 不报错而是被静默吞掉（旁路守卫的对照实验里
+  同坐标的 Checkbox 纹丝不动）——这类环境由落点守卫兜底；同坐标的 `post_click` 用例照常通过，
+  正是「坐标没错、投递没到」的判别对照。守卫的放行分支须在真实可交互桌面（未锁屏）上取证。
+- **窗口策略固定 `Normal`**：OS 输入投递到完全隐藏的窗口在 Win32 上语义不成立（SendInput 投给
+  光标所在窗口，隐藏窗口不在命中路径）——本层用例不得改用 `Hidden` 档。
+- 断言形态与交互流层一致：注入后断言**控件状态**（共享 `State` / 语义快照）与**渲染像素**
+  （注入前后帧在控件区域有差异）；坐标换算为「语义盒（窗口绝对 dp）中心 × `scale_factor` =
+  客户区物理像素」，与宿主 `on_mouse` 的 px/scale 换算互逆。
+- 库层接线修复（harness）：`Session` 由此改以 `WindowHost` 持有窗口并 `attach_surface()` 接上
+  派发通道——此前 harness 直接持有裸 `Window`，surface 的 event handler 无人设置，真实 OS 输入
+  经窗口过程上抛后**派发落空**（进程内模拟注入 `Inspector::simulate_*` 不经该通道，故既有测试
+  全部无感）。渲染仍走 `Session::present_root` 原路径，既有用例行为零变更。
+
 ---
 
 ## 9 日志通道
@@ -526,7 +917,7 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 
 ## 10 需求规格
 
-### 10.1 #9 结构化错误信息（JSON 可解析）
+### 10.1 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 结构化错误信息（JSON 可解析）
 
 **核心目标：** AI 易调试——错误必须可被 AI 直接解析，而不只是被人读懂。
 
@@ -538,13 +929,13 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 - 渲染前的整树静态检查走 `au::validate(const Node& root, int max_depth = 64) -> Result<bool>`；UI 树 JSON 校验走 `au::validate_ui_tree_json()`（MCP `validate_ui` 工具）。
 - **两条输出流分工**：诊断日志走 `AURORA_LOG_*`；CLI 的 JSON 诊断结果 / usage、LSP 线协议帧等「程序产品」输出走 `AURORA_LOG_RAW`，两者互不污染，保证下游管道可直接解析。
 - 编译期诊断用自定义 `static_assert` 消息（C++20/23），必须在第一个错误点给出、不级联。
-- 运行期降级（#21）必须同时产生结构化警告，让 AI 从渲染快照与日志两侧都能识别「此处被降级」。
+- 运行期降级（SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001）必须同时产生结构化警告，让 AI 从渲染快照与日志两侧都能识别「此处被降级」。
 
 **设计决策：** 不采用 SARIF。SARIF 面向静态分析工具，而 Aurora 的错误涵盖运行时场景（空子元素、非法属性值），故采用自定义 JSON 错误格式，同时覆盖编译期与运行时。
 
 **错误码权威：** 所有错误码的真实产生点与语义见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)（由代码 `make_error(...)` 调用逐项核对），本文不复述清单。
 
-### 10.2 #10 内置 UI Inspector
+### 10.2 SPEC.FEAT.TOOLING.UI-INSPECTOR.001 内置 UI Inspector
 
 **核心目标：** AI 可观测运行时。
 
@@ -568,7 +959,7 @@ std::string dump = au::dump_tree_json(root).dump();
 
 **验收标准：** 任一运行时 UI 树可经 `dump_tree_json*` 导出且能被 `from_json` 重建；`InspectorPanel` 可浏览与回写属性。
 
-### 10.3 #12 机器可读 API Schema
+### 10.3 SPEC.FEAT.TOOLING.API-SCHEMA.001 机器可读 API Schema
 
 **核心目标：** AI 工具链直接消费。
 
@@ -603,7 +994,7 @@ std::string dump = au::dump_tree_json(root).dump();
 
 **验收标准：** `aurora_api.json` 覆盖全部已注册控件；新增 / 删除 widget 或类型后重跑生成器即可同步，无手工维护项。
 
-### 10.4 #13 UI 树序列化 + 差分 Patch 协议
+### 10.4 SPEC.FEAT.TOOLING.UI-SERIALIZATION.001 UI 树序列化 + 差分 Patch 协议
 
 **核心目标：** AI 可增量修改 UI——整树可往返，局部改动不必重传全树。
 
@@ -620,9 +1011,9 @@ std::string yaml2 = au::serialization::to_yaml(json_value);     // Json → YAML
 
 - 任何 UI 树都可以双向转换（`to_json` ↔ `from_json`，形态与失败语义见 §2.2），并支持从结构化描述直接构建 UI 树。
 - 差分协议基于 JSON Pointer 定位 + `replace` / `add` / `remove` 三类操作，允许 AI 只发送部分 UI 树 patch 而不是整树（这是「AI 编辑现有界面」的成本下限：改动越小，token 越少）。
-- 反序列化失败必须是**值语义的失败**（`Result` + 结构化 `Error`），不得抛异常或产出一棵「半合法」树（与 #9 / #21 的错误与降级策略一致）。
+- 反序列化失败必须是**值语义的失败**（`Result` + 结构化 `Error`），不得抛异常或产出一棵「半合法」树（与 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 / SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 的错误与降级策略一致）。
 
-### 10.5 #16 示例驱动文档（Recipe 形式）
+### 10.5 SPEC.FEAT.TOOLING.RECIPE-DOCS.001 示例驱动文档（Recipe 形式）
 
 **核心目标：** AI 从示例高效学习。
 
@@ -652,7 +1043,7 @@ int main() {
 - 示例本身就是集成测试。
 - 示例被组织成配方形式（见 [`GUIDELINE.md`](../GUIDELINE.md)），AI 可以通过检索示例直接拼接出目标代码。
 
-### 10.6 #17 LSP / MCP Server / CLI 工具链
+### 10.6 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 LSP / MCP Server / CLI 工具链
 
 **核心目标：** AI Agent 直接集成。
 
@@ -664,7 +1055,7 @@ int main() {
 
 **验收标准：** AI Agent 可仅凭工具链完成「发现控件 → 校验树 → 渲染快照 → 生成代码」全链路，无需读取源码。
 
-### 10.7 #22 可逆性：UI → 代码的参考还原
+### 10.7 SPEC.FEAT.TOOLING.UI-TO-CODE.001 可逆性：UI → 代码的参考还原
 
 **核心目标：** AI 可分析现有界面并重构。定位是「结构化往返」而非「完全可逆」。
 
@@ -679,6 +1070,6 @@ int main() {
 **关键约束：**
 
 - 这是**工具层**功能（CLI / MCP / InspectorPanel），不是库核心 API。
-- 与 #10 Inspector 集成：`to_code(dump_tree_json_full(root))` 可直接获取当前 UI 的代码表示。
-- 与 #17 CLI 集成：`aurora_cli to-code tree.json --style fluent`。
+- 与 SPEC.FEAT.TOOLING.UI-INSPECTOR.001 Inspector 集成：`to_code(dump_tree_json_full(root))` 可直接获取当前 UI 的代码表示。
+- 与 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 CLI 集成：`aurora_cli to-code tree.json --style fluent`。
 - `InspectorPanel` 已支持导出代码：`export_code()` + 「Export Code」按钮 + `on_export_code` 回调，实现 Inspector → 代码闭环。

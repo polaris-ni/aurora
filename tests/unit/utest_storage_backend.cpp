@@ -13,6 +13,8 @@
 #include "aurora/storage/memory_backend.h"
 #include "aurora/storage/storage_backend.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_value_printer.h"
 
 namespace aurora::test_cases::utest_storage_backend {
 
@@ -66,7 +68,7 @@ class ProbeBackend final : public aus::StorageBackend {
 };
 
 /// @brief 构造一条 JSON 载荷的记录信封。
-[[nodiscard]] auto make_json_record(std::string id, aus::Json payload) -> aus::StorageRecord {
+[[nodiscard]] auto make_json_record(std::string id, aurora::json::Value payload) -> aus::StorageRecord {
     aus::StorageRecord rec;
     rec.id = std::move(id);
     rec.type = "__raw__";
@@ -87,13 +89,13 @@ AURORA_TEST_CASE(derived_backend_minimal_contract_roundtrip) {
     ProbeBackend be;
     aus::StorageBackend &base = be;
 
-    auto rec = make_json_record("k", aus::Json{{"v", 7}});
+    auto rec = make_json_record("k", testing::json_obj({{"v", 7}}));
     AURORA_TEST_REQUIRE(base.put_record("k", rec));
 
     const auto got = base.get_record("k");
     AURORA_TEST_REQUIRE(got.ok());
     AURORA_TEST_CHECK_EQ(got.value().id, std::string("k"));
-    AURORA_TEST_CHECK_EQ(std::get<aus::Json>(got.value().payload), aus::Json{{"v", 7}});
+    AURORA_TEST_CHECK_EQ(std::get<aurora::json::Value>(got.value().payload), testing::json_obj({{"v", 7}}));
 
     const auto ids = base.list();
     AURORA_TEST_REQUIRE(ids.ok());
@@ -107,7 +109,7 @@ AURORA_TEST_CASE(default_contains_maps_notfound_to_false) {
     // 默认 contains 契约：存在 → true；缺失（NotFound）归一为 false 且不视为错误。
     ProbeBackend be;
     aus::StorageBackend &base = be;
-    AURORA_TEST_REQUIRE(be.put_record("hit", make_json_record("hit", aus::Json{{"v", 1}})));
+    AURORA_TEST_REQUIRE(be.put_record("hit", make_json_record("hit", testing::json_obj({{"v", 1}}))));
 
     const auto hit = base.contains("hit");
     AURORA_TEST_REQUIRE(hit.ok());
@@ -132,14 +134,14 @@ AURORA_TEST_CASE(default_contains_propagates_other_errors) {
 AURORA_TEST_CASE(default_clear_removes_all_records) {
     // 默认 clear（transaction 内逐条 remove）：清空 Probe 与 Memory 两个具体后端。
     ProbeBackend probe;
-    AURORA_TEST_REQUIRE(probe.put_record("a", make_json_record("a", aus::Json{{"v", 1}})));
-    AURORA_TEST_REQUIRE(probe.put_record("b", make_json_record("b", aus::Json{{"v", 2}})));
+    AURORA_TEST_REQUIRE(probe.put_record("a", make_json_record("a", testing::json_obj({{"v", 1}}))));
+    AURORA_TEST_REQUIRE(probe.put_record("b", make_json_record("b", testing::json_obj({{"v", 2}}))));
     aus::StorageBackend &probe_base = probe;
     AURORA_TEST_REQUIRE(probe_base.clear());
     AURORA_TEST_CHECK(probe.store.empty());
 
     aus::MemoryBackend memory;  // Memory 未覆写 clear，同样走默认实现
-    AURORA_TEST_REQUIRE(memory.put_record("m", make_json_record("m", aus::Json{{"v", 3}})));
+    AURORA_TEST_REQUIRE(memory.put_record("m", make_json_record("m", testing::json_obj({{"v", 3}}))));
     aus::StorageBackend &memory_base = memory;
     AURORA_TEST_REQUIRE(memory_base.clear());
     const auto ids = memory_base.list();
@@ -161,7 +163,7 @@ AURORA_TEST_CASE(default_transaction_executes_body_and_propagates) {
     aus::StorageBackend &base = be;
 
     const auto ok = base.transaction([](aus::StorageBackend &b) -> Result<void> {
-        auto r = b.put_record("txn", make_json_record("txn", aus::Json{{"v", 1}}));
+        auto r = b.put_record("txn", make_json_record("txn", testing::json_obj({{"v", 1}})));
         if (!r) {
             return r;
         }
@@ -173,7 +175,7 @@ AURORA_TEST_CASE(default_transaction_executes_body_and_propagates) {
 
     // 失败透传；默认实现无回滚——体内已完成写入保留（接口注明的已知限制）。
     const auto failed = base.transaction([](aus::StorageBackend &b) -> Result<void> {
-        (void)b.put_record("kept", make_json_record("kept", aus::Json{{"v", 2}}));
+        (void)b.put_record("kept", make_json_record("kept", testing::json_obj({{"v", 2}})));
         return Result<void>{make_error(ErrorCode::GeneralUnknown, "abort")};
     });
     AURORA_TEST_CHECK(!failed.ok());
@@ -188,10 +190,10 @@ AURORA_TEST_CASE(derived_backend_polymorphic_through_base) {
     std::vector<aus::StorageBackend *> backends{&probe, &memory};
 
     for (aus::StorageBackend *be : backends) {
-        AURORA_TEST_REQUIRE(be->put_record("poly", make_json_record("poly", aus::Json{{"v", 9}})));
+        AURORA_TEST_REQUIRE(be->put_record("poly", make_json_record("poly", testing::json_obj({{"v", 9}}))));
         const auto got = be->get_record("poly");
         AURORA_TEST_REQUIRE(got.ok());
-        AURORA_TEST_CHECK_EQ(std::get<aus::Json>(got.value().payload), aus::Json{{"v", 9}});
+        AURORA_TEST_CHECK_EQ(std::get<aurora::json::Value>(got.value().payload), testing::json_obj({{"v", 9}}));
         AURORA_TEST_REQUIRE(be->remove("poly"));
         AURORA_TEST_CHECK_EQ(be->get_record("poly").error().code_enum, ErrorCode::StorageRecordNotFound);
     }

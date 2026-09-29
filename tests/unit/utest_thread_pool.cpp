@@ -235,8 +235,8 @@ AURORA_TEST_CASE(frame_loop_drains_deferred_default_pool) {
     AURORA_TEST_CHECK_GE(ran.load(std::memory_order_acquire), std::size_t{1});
 #else
     AURORA_TEST_SKIP(
-        "deferred 宿主泵仅在「无 pthreads 且 Headless 后端在位」的构建成立"
-        "（native 有 worker 线程，无需帧尾代泵）");
+        "the deferred host pump only holds when pthreads are absent and the Headless backend is in place "
+        "(native builds own worker threads and need no end-of-frame pump)");
 #endif
 }
 

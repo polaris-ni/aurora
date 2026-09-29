@@ -9,14 +9,14 @@
 // ② AURORA_CHECK 须经 AURORA_LOG_FATAL 就地取调用点 AURORA_FILE_NAME/__LINE__，
 // 函数拿不到调用位置；③ 常开 fail-fast（abort）语义见下方文档注释与 CODING_STANDARDS.md §1。
 // NOLINTBEGIN(cppcoreguidelines-macro-usage)
-/**
- * @brief 硬检查（常开，对标 Chromium `CHECK` / Rust `assert!`）：条件不满足时写 FATAL 日志
- *        并 `std::abort()`，**所有构建配置（含 Release/NDEBUG）均生效**。
- *
- * 用于「继续执行必然未定义行为 / 状态不可恢复」的硬不变量（如错误态访问 `expected::value()`、
- * 空指针解引用），fail-fast 优于带病续跑。可恢复的运行时错误不在此列
- * （见 CODING_STANDARDS.md §1 错误处理，应返回 aurora::Result<T>）。
- */
+/// @brief 硬检查（常开，对标 Chromium `CHECK` / Rust `assert!`）：条件不满足时写 FATAL 日志
+/// 并 `std::abort()`，**所有构建配置（含 Release/NDEBUG）均生效**。
+///
+/// 用于「继续执行必然未定义行为 / 状态不可恢复」的硬不变量（如错误态访问 `expected::value()`、
+/// 空指针解引用），fail-fast 优于带病续跑。可恢复的运行时错误不在此列
+/// （见 CODING_STANDARDS.md §1 错误处理，应返回 aurora::Result<T>）。
+/// @param cond 须恒成立的硬不变量；为假（`!(cond)`）即记 FATAL 日志并 `std::abort()`。
+/// @param msg 失败诊断消息，随 FATAL 日志一并写出。
 #define AURORA_CHECK(cond, msg)                                         \
     do {                                                                \
         if (!(cond)) {                                                  \
@@ -25,18 +25,21 @@
         }                                                               \
     } while (0)
 
-/**
- * @brief 前置条件断言（debug-only，对标 Chromium `DCHECK` / C 标准 `assert`）：
- *        debug 构建下等价于 `AURORA_CHECK`；`NDEBUG`（Release）下**整体裁切、零开销**
- *        （条件不求值）。
- *
- * 用于参数契约、诊断性影子校验与逐像素级热路径检查（如 sRGB LUT 索引复核）。
- * 不用于可恢复的运行时错误（后者见 CODING_STANDARDS.md §1 错误处理，应返回
- * aurora::Result<T>）。
- */
+/// @brief 前置条件断言（debug-only，对标 Chromium `DCHECK` / C 标准 `assert`）：
+/// debug 构建下等价于 `AURORA_CHECK`；`NDEBUG`（Release）下**整体裁切、零开销**
+/// （条件不求值）。
+///
+/// 用于参数契约、诊断性影子校验与逐像素级热路径检查（如 sRGB LUT 索引复核）。
+/// 不用于可恢复的运行时错误（后者见 CODING_STANDARDS.md §1 错误处理，应返回
+/// aurora::Result<T>）。
+/// @param cond 调试期须成立的前置条件；`NDEBUG` 下不求值。
+/// @param msg 失败诊断消息。
 #ifndef NDEBUG
 #define AURORA_ASSERT(cond, msg) AURORA_CHECK(cond, msg)
 #else
+/// @brief `NDEBUG`（Release）下的 AURORA_ASSERT 空实现：整体裁切为零语句、零开销。
+/// @param cond 断言条件（Release 下不求值、被丢弃）。
+/// @param msg 断言消息（Release 下被丢弃）。
 #define AURORA_ASSERT(cond, msg) ((void)0)
 #endif
 // NOLINTEND(cppcoreguidelines-macro-usage)

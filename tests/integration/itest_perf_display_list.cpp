@@ -3,8 +3,9 @@
 /// 测试说明: 把确定性控件树经完整 mount/layout/record-paint 流水线录制进 DisplayList，
 ///           断言命令数（计数类性能指标）为正、相同树两次独立录制可复现、随内容量严格增长
 ///           且次线性（无命令爆炸）。
-/// 覆盖说明: 全部为纯计数断言、无墙钟计时；G-5~G-8 滚动/缓冲类计数门槛由
-///           tests/unit/utest_scroll.cpp（scroll_regression 段）锁定，本文件不与之重复。
+/// 覆盖说明: 全部为纯计数断言、无墙钟计时；G-5~G-8 滚动计数门槛（阈值登记在
+///           tools/check/perf_gates.json）由 tests/unit/utest_scroll.cpp 的
+///           scroll_regression_counter_gates 用例锁定，本文件不与之重复。
 
 #include <cstddef>
 #include <memory>

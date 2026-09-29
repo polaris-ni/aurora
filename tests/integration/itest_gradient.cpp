@@ -8,6 +8,7 @@
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 using au::Color;
 using au::GradientBackground;
@@ -21,6 +22,8 @@ using au::Size;
 using au::Text;
 
 namespace aurora::test_cases::itest_gradient {
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 AURORA_TEST_CASE(linear_gradient_basic_left_to_right) {
     Painter p;
@@ -140,8 +143,8 @@ AURORA_TEST_CASE(gradient_modifier_widget_offscreen_snapshot) {
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 200, 50);
     AURORA_TEST_CHECK_TRUE(snap.contains("type"));
-    AURORA_TEST_CHECK_EQ(snap["type"].get<std::string>(), std::string{"Text"});
-    AURORA_TEST_CHECK_GT(snap["box"]["w"].get<float>(), 0.0F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(snap, "type"), std::string{"Text"});
+    AURORA_TEST_CHECK_GT(require_field<float>(*require_child(snap, "box"), "w"), 0.0F);
 }
 
 AURORA_TEST_CASE(gradient_degenerate_inputs_degrade_gracefully) {

@@ -98,7 +98,7 @@ AURORA_TEST_CASE(scrolling_boundary_does_not_relayout_ancestors) {
 #else
 
 AURORA_TEST_CASE(scrolling_boundary_does_not_relayout_ancestors) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：HeadlessSurface/Window 帧驱动未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled: HeadlessSurface/Window frame driver is not compiled");
 }
 
 #endif

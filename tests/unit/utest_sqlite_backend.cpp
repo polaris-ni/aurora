@@ -7,6 +7,8 @@
 /// （TEST-R6：--list 用例集须与源字面量一致），未开启时各用例体内 SKIP。
 
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_value_printer.h"
 
 #ifdef AURORA_ENABLE_STORAGE_SQLITE
 
@@ -41,7 +43,7 @@ namespace aus = aurora::storage;
 }
 
 /// @brief 构造一条 JSON 载荷的记录信封（与 fs 后端测试同形态）。
-[[nodiscard]] auto make_json_record(std::string id, aus::Json payload) -> aus::StorageRecord {
+[[nodiscard]] auto make_json_record(std::string id, aurora::json::Value payload) -> aus::StorageRecord {
     aus::StorageRecord rec;
     rec.id = std::move(id);
     rec.type = "__raw__";
@@ -82,7 +84,7 @@ AURORA_TEST_CASE(sqlite_backend_type_contract) {
 AURORA_TEST_CASE(in_memory_backend_opens_and_roundtrips_json) {
     auto be = memory_backend();
     AURORA_TEST_REQUIRE(be.is_open());
-    auto rec = make_json_record("user/profile", aus::Json{{"name", "ada"}, {"score", 42}});
+    auto rec = make_json_record("user/profile", testing::json_obj({{"name", "ada"}, {"score", 42}}));
     const auto want_ms = epoch_ms(rec.mtime);
     AURORA_TEST_REQUIRE(be.put_record("user/profile", rec));
 
@@ -94,7 +96,8 @@ AURORA_TEST_CASE(in_memory_backend_opens_and_roundtrips_json) {
     AURORA_TEST_CHECK(got.value().encoding == aus::StorageEncoding::Json);
     AURORA_TEST_CHECK_EQ(epoch_ms(got.value().mtime), want_ms);  // 毫秒精度保真
     AURORA_TEST_CHECK(got.value().blob_ref.empty());  // 无 sidecar 语义
-    AURORA_TEST_CHECK_EQ(std::get<aus::Json>(got.value().payload), aus::Json{{"name", "ada"}, {"score", 42}});
+    AURORA_TEST_CHECK_EQ(std::get<aurora::json::Value>(got.value().payload),
+                         testing::json_obj({{"name", "ada"}, {"score", 42}}));
 }
 
 AURORA_TEST_CASE(binary_payload_inline_blob_roundtrip) {
@@ -119,13 +122,13 @@ AURORA_TEST_CASE(binary_payload_inline_blob_roundtrip) {
 
 AURORA_TEST_CASE(overwrite_remove_list_contains_clear) {
     auto be = memory_backend();
-    AURORA_TEST_REQUIRE(be.put_record("a", make_json_record("a", aus::Json{{"v", 1}})));
-    AURORA_TEST_REQUIRE(be.put_record("a", make_json_record("a", aus::Json{{"v", 2}})));  // INSERT OR REPLACE
+    AURORA_TEST_REQUIRE(be.put_record("a", make_json_record("a", testing::json_obj({{"v", 1}}))));
+    AURORA_TEST_REQUIRE(be.put_record("a", make_json_record("a", testing::json_obj({{"v", 2}}))));  // INSERT OR REPLACE
     const auto got = be.get_record("a");
     AURORA_TEST_REQUIRE(got.ok());
-    AURORA_TEST_CHECK_EQ(std::get<aus::Json>(got.value().payload)["v"], 2);
+    AURORA_TEST_CHECK_EQ(std::get<aurora::json::Value>(got.value().payload).as_or<int>("v", 0), 2);
 
-    AURORA_TEST_REQUIRE(be.put_record("b", make_json_record("b", aus::Json{{"v", 1}})));
+    AURORA_TEST_REQUIRE(be.put_record("b", make_json_record("b", testing::json_obj({{"v", 1}}))));
     const auto ids = be.list();
     AURORA_TEST_REQUIRE(ids.ok());
     AURORA_TEST_CHECK_EQ(ids.value().size(), 2U);
@@ -158,7 +161,7 @@ AURORA_TEST_CASE(closed_backend_returns_unavailable) {
     aus::SqliteBackend be{aus::SqliteOptions{.path = blocker / "impossible.db"}};
     AURORA_TEST_CHECK(!be.is_open());
 
-    const auto put = be.put_record("x", make_json_record("x", aus::Json{{"v", 1}}));
+    const auto put = be.put_record("x", make_json_record("x", testing::json_obj({{"v", 1}})));
     AURORA_TEST_CHECK(!put.ok());
     AURORA_TEST_CHECK_EQ(put.error().code_enum, ErrorCode::StorageBackendUnavailable);
     const auto got = be.get_record("x");
@@ -172,10 +175,10 @@ AURORA_TEST_CASE(closed_backend_returns_unavailable) {
 AURORA_TEST_CASE(transaction_commits_body_writes) {
     auto be = memory_backend();
     const auto r = be.transaction([&](aus::StorageBackend &tx) -> aurora::Result<void> {
-        if (auto e = tx.put_record("t1", make_json_record("t1", aus::Json{{"v", 1}})); !e) {
+        if (auto e = tx.put_record("t1", make_json_record("t1", testing::json_obj({{"v", 1}}))); !e) {
             return e;
         }
-        return tx.put_record("t2", make_json_record("t2", aus::Json{{"v", 2}}));
+        return tx.put_record("t2", make_json_record("t2", testing::json_obj({{"v", 2}})));
     });
     AURORA_TEST_CHECK(r.ok());
     auto has1 = be.contains("t1");
@@ -188,11 +191,11 @@ AURORA_TEST_CASE(transaction_commits_body_writes) {
 
 AURORA_TEST_CASE(transaction_rolls_back_on_error) {
     auto be = memory_backend();
-    AURORA_TEST_REQUIRE(be.put_record("keep", make_json_record("keep", aus::Json{{"v", 0}})));
+    AURORA_TEST_REQUIRE(be.put_record("keep", make_json_record("keep", testing::json_obj({{"v", 0}}))));
 
     const aurora::Error boom = aurora::make_error(ErrorCode::StorageIoError, "boom");
     const auto r = be.transaction([&](aus::StorageBackend &tx) -> aurora::Result<void> {
-        if (auto e = tx.put_record("dirty", make_json_record("dirty", aus::Json{{"v", 1}})); !e) {
+        if (auto e = tx.put_record("dirty", make_json_record("dirty", testing::json_obj({{"v", 1}}))); !e) {
             return e;
         }
         if (auto e = tx.remove("keep"); !e) {
@@ -216,16 +219,16 @@ AURORA_TEST_CASE(nested_transaction_joins_outer) {
     auto be = memory_backend();
     // 内层体失败只由外层定生死：外层吞掉内层错误并提交 → 内外写入全部可见。
     const auto r = be.transaction([&](aus::StorageBackend &outer) -> aurora::Result<void> {
-        if (auto e = outer.put_record("outer1", make_json_record("outer1", aus::Json{{"v", 1}})); !e) {
+        if (auto e = outer.put_record("outer1", make_json_record("outer1", testing::json_obj({{"v", 1}}))); !e) {
             return e;
         }
         (void)outer.transaction([&](aus::StorageBackend &inner) -> aurora::Result<void> {
-            if (auto e = inner.put_record("inner1", make_json_record("inner1", aus::Json{{"v", 1}})); !e) {
+            if (auto e = inner.put_record("inner1", make_json_record("inner1", testing::json_obj({{"v", 1}}))); !e) {
                 return e;
             }
             return aurora::Result<void>{aurora::make_error(ErrorCode::StorageIoError, "inner abort")};
         });
-        return outer.put_record("outer2", make_json_record("outer2", aus::Json{{"v", 2}}));
+        return outer.put_record("outer2", make_json_record("outer2", testing::json_obj({{"v", 2}})));
     });
     AURORA_TEST_CHECK(r.ok());
     auto has_outer = be.contains("outer2");
@@ -241,14 +244,14 @@ AURORA_TEST_CASE(file_db_persists_across_reopen) {
     {
         aus::SqliteBackend be{aus::SqliteOptions{.path = db}};
         AURORA_TEST_REQUIRE(be.is_open());
-        AURORA_TEST_REQUIRE(be.put_record("persisted", make_json_record("persisted", aus::Json{{"n", 7}})));
+        AURORA_TEST_REQUIRE(be.put_record("persisted", make_json_record("persisted", testing::json_obj({{"n", 7}}))));
         AURORA_TEST_REQUIRE(be.flush().ok());  // WAL checkpoint 收缩 -wal
     }
     aus::SqliteBackend again{aus::SqliteOptions{.path = db}};
     AURORA_TEST_REQUIRE(again.is_open());
     const auto got = again.get_record("persisted");
     AURORA_TEST_REQUIRE(got.ok());
-    AURORA_TEST_CHECK_EQ(std::get<aus::Json>(got.value().payload)["n"], 7);
+    AURORA_TEST_CHECK_EQ(std::get<aurora::json::Value>(got.value().payload).as_or<int>("n", 0), 7);
     AURORA_TEST_CHECK(again.close().ok());
 
     std::error_code ec;
@@ -261,10 +264,10 @@ AURORA_TEST_CASE(storage_facade_create_sqlite_roundtrip) {
     const auto db = fresh_db("facade");
     auto st = aus::Storage::create(aus::SqliteOptions{.path = db});
     AURORA_TEST_REQUIRE(st.ok());
-    AURORA_TEST_CHECK(st.value().put("k", aus::Json{{"x", 1}}).ok());
+    AURORA_TEST_CHECK(st.value().put("k", testing::json_obj({{"x", 1}})).ok());
     const auto got = st.value().get("k");
     AURORA_TEST_REQUIRE(got.ok());
-    AURORA_TEST_CHECK_EQ(got.value()["x"], 1);
+    AURORA_TEST_CHECK_EQ(got.value().as_or<int>("x", 0), 1);
 
     aus::StorageBytes blob{std::byte{0xDE}, std::byte{0x00}, std::byte{0xAD}};
     AURORA_TEST_CHECK(st.value().put("bin", blob).ok());
@@ -284,33 +287,35 @@ AURORA_TEST_CASE(storage_facade_create_sqlite_roundtrip) {
 
 namespace aurora::test_cases::utest_sqlite_backend {
 
-AURORA_TEST_CASE(sqlite_backend_type_contract) { AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）"); }
+AURORA_TEST_CASE(sqlite_backend_type_contract) {
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
+}
 AURORA_TEST_CASE(in_memory_backend_opens_and_roundtrips_json) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(binary_payload_inline_blob_roundtrip) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(overwrite_remove_list_contains_clear) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(closed_backend_returns_unavailable) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(transaction_commits_body_writes) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(transaction_rolls_back_on_error) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(nested_transaction_joins_outer) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(file_db_persists_across_reopen) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(storage_facade_create_sqlite_roundtrip) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 
 }  // namespace aurora::test_cases::utest_sqlite_backend

@@ -22,36 +22,38 @@ struct NodeSnapshot {
     const Widget *widget = nullptr;  ///< 活指针（仅桥内使用，随快照刷新；不入序列化面）
 };
 
-/// @brief 一次语义树投影的完整快照（D9）。
+/// @brief 一次语义树投影的完整快照。
 /// @note Thread: main-thread only
-// 本行隐式生成的拷贝/移动构造逐成员复制 vector 与两张 unordered_map（容器拷贝即可能 bad_alloc），
-// 被本检查判「不应抛出」；该隐式特成员按 [except.spec] 本就是 potentially-throwing。快照按值
-// 返回/比对是本子系统的正常路径，抛出沿栈交给平台桥调用方 —— 与 std::function 同族的假告警面。
-// NOLINTNEXTLINE(bugprone-exception-escape)
+/// 本行隐式生成的拷贝/移动构造逐成员复制 vector 与两张 unordered_map（容器拷贝即可能 bad_alloc），
+/// 被本检查判「不应抛出」；该隐式特成员按 [except.spec] 本就是 potentially-throwing。快照按值
+/// 返回/比对是本子系统的正常路径，抛出沿栈交给平台桥调用方 —— 与 std::function 同族的假告警面。
+/// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TreeSnapshot {
     std::vector<NodeSnapshot> flat;  ///< 先序扁平表
     std::unordered_map<std::uint64_t, std::size_t> by_id;  ///< id → flat 下标
     std::unordered_map<std::uint64_t, std::vector<std::uint64_t>> children_of;  ///< parent_id → 子 id 序列（先序）
 
     /// @brief 按 id 查节点；未命中返回 nullptr（控件已销毁 ⇒ 平台侧应答「元素不可用」）。
+    /// @param id 目标节点的稳定身份。
+    /// @return 命中节点的常量指针；未命中为 nullptr。
     [[nodiscard]] auto find(std::uint64_t id) const -> const NodeSnapshot * {
         const auto it = by_id.find(id);
         return (it == by_id.end()) ? nullptr : &flat.at(it->second);
     }
 };
 
-/// @brief 字段级变化种类（D11 事件派生的输入）。
+/// @brief 字段级变化种类（事件派生的输入）。
 enum class FieldChange : std::uint8_t {
-    Name,
-    Value,
-    Hint,
-    Bounds,
-    State,
-    Range,
-    Actions,
+    Name,  ///< 名称（name）变化
+    Value,  ///< 值（value）变化
+    Hint,  ///< 提示（hint）变化
+    Bounds,  ///< 边界盒（bounds）变化
+    State,  ///< 状态位（state）任一标志变化
+    Range,  ///< 范围值（range）变化
+    Actions,  ///< 可用动作列表（actions）变化
 };
 
-/// @brief 两次快照的差异（D11）。
+/// @brief 两次快照的差异。
 ///
 /// 语义：只描述「应让平台感知的变化」，不追求最小编辑脚本——结构整段重排时宁多报
 /// `moved` 也不误报 remove+add（读屏焦点稳定性优先）。
@@ -62,6 +64,8 @@ struct TreeDiff {
     std::vector<std::pair<std::uint64_t, FieldChange>> updated;  ///< 字段变化
     std::optional<std::uint64_t> focused_id;  ///< 新获焦节点（旧快照未获焦者）；无焦点变化为 nullopt
 
+    /// @brief 是否无任何平台可感知变化。
+    /// @return added/removed/moved/updated 全空且无焦点变化时为 true。
     [[nodiscard]] auto empty() const -> bool {
         return added.empty() && removed.empty() && moved.empty() && updated.empty() && !focused_id.has_value();
     }
@@ -73,11 +77,17 @@ namespace detail {
 ///
 /// 二者同序的前提是 `build_accessibility_node` 的子节点枚举（`child_nodes()` 或
 /// `for_each_child`）与此处一致——任一处换遍历源都会让 widget 指针错位，故两处必须同时修改。
+/// @param w 与语义节点同步先序的控件（提供 runtime_id 与子控件枚举）。
+/// @param n 对应语义节点（其子序列决定遍历次序）。
+/// @param parent_id 父节点 id；根传 0。
+/// @param out 目标快照：追加扁平表、id→下标索引与父子序表。
 inline auto flatten_snapshot(const Widget &w, const AccessibilityNode &n, std::uint64_t parent_id, TreeSnapshot &out)
     -> void {
     const std::size_t index = out.flat.size();
+    // 当前节点以 designated-init 构造 NodeSnapshot 压入先序扁平表，身份取 n.id。
     out.flat.push_back(NodeSnapshot{.id = n.id, .parent_id = parent_id, .node = n, .widget = &w});
     out.by_id[n.id] = index;
+    // 在父节点的子 id 序列（先序）中登记当前节点。
     out.children_of[parent_id].push_back(n.id);
     if (n.children.size() != w.child_nodes().size()) {
         // 走 `for_each_child` 兜底路径的容器（LazyList 等）：按语义节点顺序重新枚举子控件。
@@ -104,19 +114,26 @@ inline auto flatten_snapshot(const Widget &w, const AccessibilityNode &n, std::u
 }
 
 /// @brief 最长公共子序列（同父子序比对，识别「换序」而非 remove+add）。
+/// @param a 第一个 id 序列（如旧快照某父节点的子序）。
+/// @param b 第二个 id 序列（如新快照同父节点的子序）。
+/// @return a 与 b 的最长公共子序列（正序）。
 [[nodiscard]] inline auto lcs_length(const std::vector<std::uint64_t> &a, const std::vector<std::uint64_t> &b)
     -> std::vector<std::uint64_t> {
     const std::size_t n = a.size();
     const std::size_t m = b.size();
-    // dp[i][j] = a[0..i) 与 b[0..j) 的 LCS 长度；树规模（百级）下 O(n·m) 毫秒级即可。
+    // DP 表：dp[i][j] = a[0..i) 与 b[0..j) 的 LCS 长度，规模 (n+1)×(m+1)，末项 dp[n][m] 即结果；
+    // 树规模（百级）下 O(n·m) 毫秒级即可。
     std::vector<std::vector<std::size_t>> dp(n + 1, std::vector<std::size_t>(m + 1, 0));
     for (std::size_t i = 1; i <= n; ++i) {
         for (std::size_t j = 1; j <= m; ++j) {
             dp[i][j] = (a[i - 1] == b[j - 1]) ? dp[i - 1][j - 1] + 1 : std::max(dp[i - 1][j], dp[i][j - 1]);
         }
     }
+    // LCS 回溯缓冲：自 DP 表尾反向收集公共元素（返回前翻正）。
     std::vector<std::uint64_t> seq;
+    // 回溯行指针（a 侧，自 n 起步递减）。
     std::size_t i = n;
+    // 回溯列指针（b 侧，自 m 起步递减）。
     std::size_t j = m;
     while (i > 0 && j > 0) {
         if (a[i - 1] == b[j - 1]) {
@@ -129,17 +146,21 @@ inline auto flatten_snapshot(const Widget &w, const AccessibilityNode &n, std::u
             --j;
         }
     }
+    // 回溯按逆序收集，此处就地翻正为 LCS 正序结果。
     std::reverse(seq.begin(), seq.end());
     return seq;
 }
 
 }  // namespace detail
 
-/// @brief 构建语义树快照（D9 拉取式重投影的产出）。
+/// @brief 构建语义树快照（拉取式重投影的产出）。
 ///
 /// 与 `build_accessibility_tree` 同参数语义：调用前应先完成一次布局以获得真实几何。
 /// @note Thread: main-thread only
 /// @note Side-effects: reads layout/state
+/// @param root 控件树根。
+/// @param root_box 根节点全局几何（子节点坐标基准）。
+/// @return 完整快照（先序扁平表 + id 索引 + 父子序）。
 [[nodiscard]] inline auto build_tree_snapshot(const Widget &root, const Rect &root_box) -> TreeSnapshot {
     TreeSnapshot snap;
     const AccessibilityNode tree = build_accessibility_tree(root, root_box);
@@ -148,20 +169,25 @@ inline auto flatten_snapshot(const Widget &w, const AccessibilityNode &n, std::u
 }
 
 /// @brief 构建语义树快照（根几何置于原点）。
+/// @param root 控件树根。
+/// @return 完整快照；根盒取 (0,0)+root.size()。
 [[nodiscard]] inline auto build_tree_snapshot(const Widget &root) -> TreeSnapshot {
     return build_tree_snapshot(root, Rect{.origin = Point{}, .size = root.size()});
 }
 
-/// @brief 比较两次快照，产出平台事件派生的输入（D11）。
+/// @brief 比较两次快照，产出平台事件派生的输入。
 ///
 /// 算法：按 parent 分组的子 id 序列做 LCS 识别 moved/added/removed；同 id 同父的节点
 /// 逐字段比较产出 updated；焦点位变化单独产出 `focused_id`（平台焦点事件优先级最高）。
 /// 纯函数、无平台依赖 —— 表驱动单测全覆盖。
 /// @note Thread: main-thread only
 /// @note Side-effects: pure
-// `new_` 与 `old_` 成对：`new` 是 C++ 关键字，无法照 lower_case 正名，故命名检查就地豁免
-// （同 aria_protocol.h 的 `diff_aria_snapshots`，两处的快照对比是同一条链）。
-// NOLINTNEXTLINE(readability-identifier-naming)
+/// `new_` 与 `old_` 成对：`new` 是 C++ 关键字，无法照 lower_case 正名，故命名检查就地豁免
+/// （同 aria_protocol.h 的 `diff_aria_snapshots`，两处的快照对比是同一条链）。
+/// @param old_ 上一轮快照（比对基准）。
+/// @param new_ 本轮快照（最新投影）。
+/// @return 平台事件派生输入；无变化时 TreeDiff::empty() 为 true。
+/// NOLINTNEXTLINE(readability-identifier-naming)
 [[nodiscard]] inline auto diff_snapshots(const TreeSnapshot &old_, const TreeSnapshot &new_) -> TreeDiff {
     TreeDiff diff;
 

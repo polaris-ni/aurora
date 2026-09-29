@@ -81,8 +81,9 @@ class WebAudioDeviceBackend final : public AudioDeviceBackend {
   private:
     struct Impl;
     /// @brief 主线程排空拍回调（`emscripten_set_interval` 的蹦床）：把图渲染成帧推入环，
-    ///        并在上下文 `suspended` 时限速重试 `resume()`。定义仅在
-    ///        AURORA_ENABLE_AUDIO_WEBAUDIO 分支的编译单元内（桩构建不引用它）。
+    ///        并在上下文 `suspended` 时限速重试 `resume()`。真实定义仅在
+    ///        AURORA_ENABLE_AUDIO_WEBAUDIO 分支的编译单元内；disabled 桩分支提供 no-op 定义
+    ///        （start 恒 false，永不注册定时器，故桩构建下不会被调用，仅用于满足 ODR）。
     static auto pump(void *user_data) -> void;
     std::unique_ptr<Impl> impl_;
 };

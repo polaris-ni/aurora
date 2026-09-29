@@ -11,6 +11,7 @@
 #include "aurora/widget/text.h"
 #include "aurora/widget/yaml.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_yaml {
 
@@ -89,28 +90,28 @@ AURORA_TEST_CASE(yaml_object_array_and_empty) {
 
     // 扁平对象。
     Json obj = Json::object();
-    obj["name"] = "Aurora";
-    obj["version"] = 1;
+    obj.set("name", "Aurora");
+    obj.set("version", 1);
     const std::string o = serialization::to_yaml(obj);
     AURORA_TEST_CHECK_MSG(o.find("name: Aurora") != std::string::npos, "object emits key: unquoted value");
     AURORA_TEST_CHECK_MSG(o.find("version: 1") != std::string::npos, "object emits key: integer value");
 
     // 标量数组：- item 直接跟在键后。
-    Json arr = Json::array({1, 2, 3});
+    const Json arr = testing::json_arr({1, 2, 3});
     const std::string a = serialization::to_yaml(arr);
     AURORA_TEST_CHECK_MSG(a.find("- 1") != std::string::npos, "array emits dash item");
     AURORA_TEST_CHECK_MSG(a.find("- 3") != std::string::npos, "array emits last dash item");
 
     Json with_items = Json::object();
-    with_items["items"] = Json::array({1, 2});
+    with_items.set("items", testing::json_arr({1, 2}));
     const std::string w = serialization::to_yaml(with_items);
     AURORA_TEST_CHECK_MSG(w.find("items:") != std::string::npos, "scalar array key on its own line");
     AURORA_TEST_CHECK_MSG(w.find("- 1") != std::string::npos, "scalar array items follow key");
 
     // 键名按值语义加引号（"123" 会被解析为整数，必须引号）。
     Json keyed = Json::object();
-    keyed["123"] = 1;
-    keyed["true"] = 2;
+    keyed.set("123", 1);
+    keyed.set("true", 2);
     const std::string k = serialization::to_yaml(keyed);
     AURORA_TEST_CHECK_MSG(k.find("\"123\": 1") != std::string::npos, "numeric key must be quoted");
     AURORA_TEST_CHECK_MSG(k.find("\"true\": 2") != std::string::npos, "boolean-like key must be quoted");
@@ -118,11 +119,11 @@ AURORA_TEST_CASE(yaml_object_array_and_empty) {
 
 AURORA_TEST_CASE(yaml_nested_structure_and_indent) {
     Json inner = Json::object();
-    inner["x"] = 10;
-    inner["y"] = 20;
+    inner.set("x", 10);
+    inner.set("y", 20);
     Json j = Json::object();
-    j["title"] = "Test";
-    j["pos"] = inner;
+    j.set("title", "Test");
+    j.set("pos", inner);
 
     const std::string s = serialization::to_yaml(j);
     AURORA_TEST_CHECK_MSG(s.find("title: Test") != std::string::npos, "top-level scalar key");
@@ -132,17 +133,17 @@ AURORA_TEST_CASE(yaml_nested_structure_and_indent) {
 
     // 值为空容器时内联输出。
     Json e = Json::object();
-    e["empty_arr"] = Json::array();
-    e["empty_obj"] = Json::object();
+    e.set("empty_arr", Json::array());
+    e.set("empty_obj", Json::object());
     const std::string es = serialization::to_yaml(e);
     AURORA_TEST_CHECK_MSG(es.find("empty_arr: []") != std::string::npos, "empty array inline");
     AURORA_TEST_CHECK_MSG(es.find("empty_obj: {}") != std::string::npos, "empty object inline");
 
     // 对象数组：首行 dash 缩进挂在键下。
     Json member = Json::object();
-    member["a"] = 1;
+    member.set("a", 1);
     Json list = Json::object();
-    list["list"] = Json::array({member});
+    list.set("list", testing::json_arr({member}));
     const std::string ls = serialization::to_yaml(list);
     AURORA_TEST_CHECK_MSG(ls.find("list:") != std::string::npos, "object array key on its own line");
     AURORA_TEST_CHECK_MSG(ls.find("- ") != std::string::npos, "object array emits dash");
@@ -150,9 +151,60 @@ AURORA_TEST_CASE(yaml_nested_structure_and_indent) {
 
     // indent 参数整体平移缩进（indent=1 → 顶层行前 2 空格）。
     Json one = Json::object();
-    one["name"] = "Aurora";
+    one.set("name", "Aurora");
     const std::string padded = serialization::to_yaml(one, 1);
     AURORA_TEST_CHECK_MSG(padded.find("  name: Aurora") == 0, "indent shifts top-level lines");
+}
+
+// 发射器的层级契约：非空容器一律另起块、空容器只在值位置内联。
+// 逐行整体比对（而非 `find` 子串）——子串断言对「缩进少一级」这类结构劣化是盲的，
+// 而那正是内联 flow 形态（`props: {content: a}`）抹掉层级的故障形态。
+AURORA_TEST_CASE(yaml_block_form_exact_lines) {
+    // 对象键保持插入序（aurora json::Value 不重排），故按字典序插入以锁定期望输出。
+    Json leaf = Json::object();
+    leaf.set("props", testing::json_obj({{"content", "a"}}));
+    leaf.set("type", "Text");
+
+    Json row = Json::object();
+    row.set("children", Json::array());
+    row.set("props", Json::object());
+    row.set("type", "Row");
+
+    Json doc = Json::object();
+    doc.set("children", testing::json_arr({leaf, row}));
+    Json props = Json::object();
+    props.set("show", Json{true});
+    props.set("width", 100.0);
+    doc.set("props", props);
+    doc.set("type", "Column");
+    const std::string expected = R"YAML(children:
+  - props:
+      content: a
+    type: Text
+  - children: []
+    props: {}
+    type: Row
+props:
+  show: true
+  width: 100.0
+type: Column)YAML";
+    AURORA_TEST_CHECK_EQ(serialization::to_yaml(doc), expected);
+
+    // indent=1 只整体平移：顶层行下沉一级，嵌套层级相对差不变。
+    const std::string padded = serialization::to_yaml(doc, 1);
+    AURORA_TEST_CHECK_MSG(padded.rfind("  children:\n", 0) == 0, "indent=1 shifts top-level key line");
+    AURORA_TEST_CHECK_MSG(padded.find("    - props:\n") != std::string::npos, "indent=1 shifts dash item line");
+    AURORA_TEST_CHECK_MSG(padded.find("        content: a\n") != std::string::npos, "indent=1 shifts nested key");
+    AURORA_TEST_CHECK_MSG(padded.find("\n  type: Column") != std::string::npos, "indent=1 shifts last top-level key");
+
+    // 标量数组同样下沉一级，且不与键同行。
+    Json counts = Json::object();
+    counts.set("items", testing::json_arr({1, 2}));
+    AURORA_TEST_CHECK_EQ(serialization::to_yaml(counts), "items:\n  - 1\n  - 2");
+
+    // 数组套数组：内层 dash 与外层 dash 同列起（`- ` 恰占一级缩进）。
+    const Json matrix = testing::json_arr({testing::json_arr({1, 2})});
+    AURORA_TEST_CHECK_EQ(serialization::to_yaml(matrix), "- - 1\n  - 2");
 }
 
 AURORA_TEST_CASE(yaml_widget_tree_smoke) {

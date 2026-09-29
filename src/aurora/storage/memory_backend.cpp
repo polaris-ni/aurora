@@ -7,6 +7,8 @@
 
 #include "aurora/storage/memory_backend.h"
 
+#include <ranges>
+
 #include "aurora/core/result.h"
 
 namespace aurora::storage {

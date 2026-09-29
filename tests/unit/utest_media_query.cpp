@@ -78,7 +78,7 @@ AURORA_TEST_CASE(of_ctx_falls_back_to_default_without_provider) {
 
 AURORA_TEST_CASE(from_surface_requires_surface_backend) {
     // from_surface(const Surface&) 需要 Surface 实例（窗口/渲染上下文边界），纯逻辑单测不覆盖。
-    AURORA_TEST_SKIP("from_surface 依赖 Surface/窗口上下文，属集成层覆盖范围");
+    AURORA_TEST_SKIP("from_surface depends on a Surface/window context, which the integration layer covers");
 }
 
 AURORA_TEST_CASE(resolve_breakpoint_boundaries_and_custom_thresholds) {

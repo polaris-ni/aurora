@@ -42,7 +42,7 @@ AURORA_TEST_CASE(headless_options_png_path_writes_on_present) {
 #else  // !AURORA_BACKEND_HEADLESS
 
 AURORA_TEST_CASE(headless_options_png_path_writes_on_present) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessOptions 工厂不可用");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, the HeadlessOptions factory is unavailable");
 }
 
 #endif  // AURORA_BACKEND_HEADLESS
@@ -63,7 +63,7 @@ AURORA_TEST_CASE(win32_options_title_applied) {
 #else
 
 AURORA_TEST_CASE(win32_options_title_applied) {
-    AURORA_TEST_SKIP("非 Windows 或 AURORA_BACKEND_WIN32 未开启，Win32Options 工厂不可用");
+    AURORA_TEST_SKIP("non-Windows or AURORA_BACKEND_WIN32 not enabled, the Win32Options factory is unavailable");
 }
 
 #endif  // AURORA_PLATFORM_WINDOWS && AURORA_BACKEND_WIN32
@@ -86,7 +86,7 @@ AURORA_TEST_CASE(glfw_options_factory_callable) {
 #else
 
 AURORA_TEST_CASE(glfw_options_factory_callable) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW 未开启，GlfwOptions 工厂不可用");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW not enabled, the GlfwOptions factory is unavailable");
 }
 
 #endif  // AURORA_BACKEND_GLFW

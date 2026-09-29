@@ -25,6 +25,8 @@ namespace aurora::render::detail {
 
 /// @brief 由整行文本推断段落基准方向（Unicode Bidi P2/P3：首个强方向字符决定；
 ///        数字/中性字符跳过；全无强方向字符时回退 LTR）。
+/// @param text 整行文本（UTF-8 视图；仅按码点首强方向字符判定）。
+/// @return 段落基准方向（`LTR` 或 `RTL`）。
 /// @note 这是简化分类器，覆盖阿拉伯/希伯来/拉丁/西里尔/希腊与数字；足以定段落基准方向。
 [[nodiscard]] auto guess_paragraph_direction(std::string_view text) -> TextDirection;
 
@@ -32,6 +34,7 @@ namespace aurora::render::detail {
 ///        在视觉序中的下标序列。RTL 段落整体右→左翻转 run 顺序；LTR 段落保持逻辑序。
 /// @param run_count 该行的 face-run 数量（必须 > 0，否则返回空）。
 /// @param base 段落基准方向（来自 `opts.direction` 或 `guess_paragraph_direction`）。
+/// @return 各 run 在视觉序中的下标序列（长度为 `run_count`；`run_count == 0` 时为空）。
 [[nodiscard]] auto bidi_visual_run_order(std::size_t run_count, TextDirection base) -> std::vector<std::size_t>;
 
 /// @brief 逐码点 UBA 嵌入层级（UAX #9：X1-X9 显式嵌入/隔离 + W1-W7 弱类型 +
@@ -46,11 +49,14 @@ namespace aurora::render::detail {
 ///        元素下标序列。同层级连续元素构成隐式 span；层叠反转自然保持 span 内部的
 ///        逻辑序（span 内部字形序由 hb 按 run 级方向负责）。LTR 全零层为恒等变换。
 /// @param levels 每元素的 UBA 嵌入层级（奇 = 该元素内容按 RTL 显示）。
+/// @return 视觉序（左→右）的元素下标序列；长度与 `levels` 相同。
 [[nodiscard]] auto uba_visual_order(const std::vector<std::uint8_t> &levels) -> std::vector<std::size_t>;
 
 /// @brief 双向格式控制符判定：显式方向格式化字符（LRE/RLE/PDF/LRO/RLO/LRI/RLI/FSI/PDI）
 ///        与方向标记（LRM/RLM，U+200E/U+200F）。这些字符在 UBA 解析中参与层级计算，
 ///        但视觉上为零宽不可见格式标记——渲染时应强制零推进且跳过绘制。
+/// @param cp 待判定的 Unicode 码点。
+/// @return 若 `cp` 属于 bidi 显式控制符或方向标记集合则返回 true；否则 false。
 /// @note 与 `bidi_class_of` 的分类保持一致：覆盖 U+202A–U+202E 与 U+2066–U+2069 及
 ///       U+200E/U+200F；不覆盖 ZWSP/ZWNJ/ZWJ 等 BN 类（其由 HarfBuzz 自行吞掉不影响连接）。
 [[nodiscard]] auto is_bidi_format_control(char32_t cp) -> bool;

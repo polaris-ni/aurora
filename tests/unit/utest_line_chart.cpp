@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/line_chart.h
-/// 测试说明: 覆盖 LineChart（切片 4）——defaults / describe_static / 序列化往返 / 工厂 from_json 重建、
+/// 测试说明: 覆盖 LineChart——defaults / describe_static / 序列化往返 / 工厂 from_json 重建、
 /// hover 最近点命中（等距 x = 索引，域与渲染同源）、on_point_tapped 触发、空数据与 NaN 降级、
 /// 以及像素 golden 基线（chart_line.png，受 AURORA_GOLDEN_DIR / MAX_DIFF / MAX_PIXELS / UPDATE_GOLDEN 控制）
 
@@ -124,8 +124,8 @@ AURORA_TEST_CASE(props_roundtrip_and_factory) {
 
     serialization::register_core_widgets();
     Json node = Json::object();
-    node["type"] = "LineChart";
-    node["props"] = props;
+    node.set("type", "LineChart");
+    node.set("props", props);
     const auto built = serialization::from_json(node);
     AURORA_TEST_REQUIRE_TRUE(built.ok());
     const auto *chart = dynamic_cast<const LineChart *>(built.value().get());

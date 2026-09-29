@@ -19,6 +19,11 @@
 //      `glfwSetCursor` 到窗口上，在控制台提示「此刻鼠标指针应是什么形状」，由人把鼠标移入
 //      窗口目视比对后按 y/n。全部确认为 y → 退出码 0；否则 7。
 //
+//   ⚠️ 建窗不经 E2E 内核（保持手写，有意为之）：本探针的窗口是裸 `GLFWwindow`（仅承载
+//      人工段 `glfwSetCursor` 的展示），建窗方式与 ①的映射镜像同为判据本体——探针验证的
+//      是「GLFW 环境能否按后端映射物化标准光标」这一平台事实，而非 aurora 窗口接线；经
+//      内核 `e2e::open` 建窗反而引入无关的 GL 上下文与 aurora 宿主语义，改变被测对象。
+//
 // 构建（方式 ① CMake 目标，推荐）：
 //   cmake -S . -B build-verify -DAURORA_BACKEND_GLFW=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 //   cmake --build build-verify --target aurora_verify_glfw_cursor
@@ -55,11 +60,11 @@
 
 #include <array>
 #include <iostream>
-#include <span>
 #include <string>
 #include <string_view>
 
 #include "aurora/window/cursor_map.h"
+#include "verify_args.h"
 #include "verify_print.h"
 
 namespace {
@@ -187,14 +192,11 @@ auto human_expectation(aurora::CursorShape shape) -> const char * {
 // （逐项判据与退出码约定见本文件头注释，捕获反而会把它压成 0）。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
-    bool interactive = false;
-    // 以 span 视图遍历命令行参数（argc 可为 0，故 subspan 起点取 0/1 二者之一，避免越界抛异常）
-    const std::span<char *const> args{argv, static_cast<std::size_t>(argc)};
-    for (const auto *raw : args.subspan(args.size() > 1U ? 1U : 0U)) {
-        if (std::string_view{raw} == "--interactive") {
-            interactive = true;
-        }
+    const auto cli = aurora_verify::parse_interactive("GLFW cursor shape live probe", argc, argv);
+    if (!cli.arguments) {
+        return cli.exit_code;
     }
+    const bool interactive = cli.arguments->flag("interactive");
 
     if (glfwInit() != GLFW_TRUE) {
         AURORA_LOG_ERROR("verify", "glfwInit failed (no display / no driver)");

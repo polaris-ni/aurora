@@ -27,7 +27,7 @@ project(aurora
 # 由 include/aurora/core/version.h 经 AURORA_VERSION_STRING 暴露给程序。
 # 带 FORCE：版本号以仓库声明为单一事实来源，既有 build 目录重新 configure 即同步升级；
 # 如需临时覆盖可改仓库源（发布 stable 时置空串）。
-set(AURORA_VERSION_SUFFIX "alpha.8" CACHE STRING
+set(AURORA_VERSION_SUFFIX "alpha.9" CACHE STRING
         "Pre-release suffix appended after PROJECT_VERSION (empty for stable releases)" FORCE)
 
 # ============================================================
@@ -188,7 +188,7 @@ add_compile_definitions(NOMINMAX)
 # 显式关闭用 -DAURORA_ENABLE_LLD=OFF，非 PATH 安装用 -DAURORA_LLD_DIR=<LLVM bin 目录> 提示。
 option(AURORA_ENABLE_LLD "Link with LLVM lld if available (much faster than GNU ld)" ON)
 if (AURORA_ENABLE_LLD AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set(AURORA_LLD_DIR "" CACHE PATH "ld.lld 所在目录提示（未在 PATH 时使用）")
+    set(AURORA_LLD_DIR "" CACHE PATH "Directory containing ld.lld (used when it is not on PATH)")
     # HINTS 须整体引用：目录含空格（如 C:/Program Files/LLVM/bin）时未引用会被拆成多个坏 hint。
     find_program(AURORA_LLD_EXECUTABLE NAMES ld.lld HINTS "${AURORA_LLD_DIR}")
     if (AURORA_LLD_EXECUTABLE)
@@ -239,9 +239,9 @@ target_compile_definitions(aurora PUBLIC
 target_include_directories(aurora
         PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        # vendored 第三方（nlohmann/json 由 aurora.h 传递包含，故需公开暴露）。
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
         PRIVATE
+        # vendored 三方仅库实现可见（stb_image.h 等散装单头），不暴露给消费者。
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
         # 仅库实现可见的内部共享头（swizzle/keysym 等），不暴露给消费者。
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(aurora PUBLIC cxx_std_20)
@@ -276,14 +276,14 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # 次脏构建，16 并发下每边膨胀至 10-39s（solo 0.9s）。即便修好失配，生效的 gch 仍要
     # 每 TU 全量加载 296MB + ccache 全量 hash，净收益为负——故 GCC 直接关闭消费者 PCH，
     # 消费者走伞头文本编译 + ccache 缓存（配置经 AuroraCcache 启动器注入）。
-    # 库自身 gch（122MB，标准库 + nlohmann/json）同病：每库 TU 全量加载 + ccache 全文
+    # 库自身 gch（122MB，标准库）同病：每库 TU 全量加载 + ccache 全文
     # hash，全量重编 155.4s（266 边）→ 关闭后库侧重编 68s（91 边），冷构建省约 1 分钟，
     # 且头文件变更不再使全部库 TU 的缓存键失效（gch 字节参与 key）。一并关闭。
     set(AURORA_PCH_ENABLED OFF)
 endif ()
 
 # ---- Precompiled header (规格 §3.5 增量编译) ----
-# 库自身 PCH：只聚合「稳定且不常变更」的重型头（标准库 + nlohmann/json），不纳入高频
+# 库自身 PCH：只聚合「稳定且不常变更」的重型头（标准库），不纳入高频
 # 变更的 aurora 自有头以保证库开发时的命中率（见 aurora_pch.h 收录原则）；PRIVATE 仅
 # aurora 库编译一份 .gch。消费者（demo/测试/工具）另有含 aurora.h 的共享 PCH，见下方
 # aurora_consumer_pch 目标（历史上 PUBLIC + 空 PCH：每目标一份空 .gch，纯开销零收益）。
@@ -350,7 +350,7 @@ include(AuroraSimd)
 # 锚定到一个空静态库目标编一份 .gch，全部消费者经 REUSE_FROM 复用。
 if (AURORA_PCH_ENABLED)
     file(WRITE "${CMAKE_BINARY_DIR}/aurora_consumer_pch.cpp"
-            "// 自动生成：消费者共享 PCH 的锚定 TU（无内容，仅承载 .gch 编译）。\n")
+            "// Auto-generated: anchor TU for the shared consumer PCH (no content, it only carries the .gch build).\n")
     add_library(aurora_consumer_pch STATIC "${CMAKE_BINARY_DIR}/aurora_consumer_pch.cpp")
     target_link_libraries(aurora_consumer_pch PUBLIC aurora)
     # 显式钉 C++20：消费者经 aurora_setup_consumer_target 统一设 CXX_STANDARD 20，此处须一致，

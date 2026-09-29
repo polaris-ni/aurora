@@ -9,9 +9,9 @@
 // `aurora/window/detail/aria_protocol.h`（先纯后桥），本头只剩生命周期与反向动作回灌。
 //
 // 与原生桥的两处**刻意差异**（如实申报）：
-//  - **无懒激活信号可用**（D14 例外）：浏览器没有 `WM_GETOBJECT`/D-Bus 查询那样的
+//  - **无懒激活信号可用**（例外）：浏览器没有 `WM_GETOBJECT`/D-Bus 查询那样的
 //    「读屏来了」事件（navigator 无读屏探测 API），故首个语义树根注入即激活 —— 拉取式
-//    （D9）仍成立：只有 dirty（结构/字段事件、换根）才重投影 + 发 ops，静止页面零 DOM  churn。
+//    仍成立：只有 dirty（结构/字段事件、换根）才重投影 + 发 ops，静止页面零 DOM  churn。
 //  - **无几何面**：镜像元素不带画布坐标，读屏按 DOM 顺序导航（不支持「点按位置探测」）。
 //
 // 反向动作（读屏 → 控件）：JS 侧在镜像元素上挂 click/focus 监听，把 (id, 动作位) 写入
@@ -39,41 +39,56 @@ class Widget;
 /// @brief Wasm ARIA 桥：每窗口一实例（镜像容器按 canvas id 隔离，多窗口互不串树）。
 class WasmAriaBridge final : public a11y::Provider {
   public:
+    /// @brief 构造桥并登记进存活桥表（跨窗口动作寻址入口；不动 DOM，镜像容器在 activate 时才建）。
     /// @param container_id 镜像容器 DOM id（惯例 `"aurora-a11y-" + canvas_id`，须全页唯一）
     explicit WasmAriaBridge(std::string container_id);
+    /// @brief 析构：先 deactivate（注销广播表、清空镜像容器），再从存活桥表摘除本实例。
     ~WasmAriaBridge() override;
 
-    // 禁复制/移动：桥自持镜像容器 DOM 与桥广播表的一条注册边，副本会形成「两处登记一棵树」的
-    // 孤儿镜像。实例由 `WasmSurface` 经 `unique_ptr` 独占持有，从不按值转移，故显式写出契约
-    // （补齐四件套即满足五法则自查项，CODING_STANDARDS.md §5.1）。
+    /// @brief 禁复制构造（下方三连与移动同理，见各自说明）。
     WasmAriaBridge(const WasmAriaBridge &) = delete;
+    /// @brief 禁移动构造：桥自持镜像容器 DOM 与广播表注册边，副本会形成「两处登记一棵树」的孤儿镜像。
     WasmAriaBridge(WasmAriaBridge &&) = delete;
+    /// @brief 禁复制赋值：实例由 `WasmSurface` 经 `unique_ptr` 独占持有，从不按值转移。
+    /// @return 已删除重载，不存在实际返回路径。
     auto operator=(const WasmAriaBridge &) -> WasmAriaBridge & = delete;
+    /// @brief 禁移动赋值：补齐删除四件套即满足五法则自查项（CODING_STANDARDS.md §5.1）。
+    /// @return 已删除重载，不存在实际返回路径。
     auto operator=(WasmAriaBridge &&) -> WasmAriaBridge & = delete;
 
     /// @brief 激活：注册进桥广播表、置 `screen_reader_active`、请求首帧全量应用。
     ///
-    /// WASM 无外部激活信号，本方法由**首个 `set_root`** 调用（见文件头 D14 例外申报）。
+    /// WASM 无外部激活信号，本方法由**首个 `set_root`** 调用（见文件头的惰性激活例外申报）。
     auto activate() -> void override;
     /// @brief 去激活：注销广播表、清空并移除镜像容器（窗口销毁必经，防残留孤儿树）。
     auto deactivate() -> void override;
     /// @brief dirty 时重投影 + diff，产出全量/ops JSON 经 EM_JS 应用；并排水反向动作队列。
     auto sync_if_dirty() -> void override;
+    /// @brief 置脏：下一次 `sync_if_dirty`（rAF 拍）才真正重投影 + 发 ops，静止页零 DOM churn。
     auto mark_dirty() -> void override { dirty_ = true; }
+    /// @brief 是否处于激活态（基类覆写）。
+    /// @return 已激活（注册进广播表、镜像容器在位）时为 true。
     [[nodiscard]] auto is_active() const -> bool override { return active_; }
 
     /// @brief 注入语义树根（`Window::present_root` 每帧调用）。
     ///
     /// 幂等：同根重复注入仅在**换根**时置脏。首个非空根到达即激活（本桥的激活信号）。
+    /// @param root 语义树根 widget；nullptr 或与当前根相同时为无操作。
     auto set_root(Widget *root) -> void override;
     /// @brief RTL 标志：随全量载荷写入容器 `dir` 属性；变化即强制下次全量。
+    /// @param rtl true=从右至左阅读序（dir="rtl"）；与当前值相同时为无操作。
     auto set_rtl(bool rtl) -> void override;
 
-    /// @brief 动态播报（G4）→ 容器内 `aria-live="polite"` 区的文本替换。
+    /// @brief 动态播报 → 容器内 `aria-live="polite"` 区的文本替换。
+    /// @param text   播报文本；空串或未激活时静默丢弃。
+    /// @param target 归属控件，可为 nullptr 或不在树内（解析为 id 0，退化为纯文本播报）。
     auto on_announcement(const std::string &text, const Widget *target) -> void override;
     /// @brief 根控件销毁：立即切断根并清空投影（子节点生死由下次重投影自然收敛）。
+    /// @param w 正在销毁的控件；仅当其为当前根时生效，其余指针被忽略。
     auto on_widget_destroying(const Widget *w) -> void override;
 
+    /// @brief 桥标识名（注册进广播表与 Inspector 观测时展示）。
+    /// @return 固定字符串 "wasm-aria"。
     [[nodiscard]] auto name() const -> std::string override { return "wasm-aria"; }
 
     /// @brief 排水页面级反向动作队列：(id, 动作位) → 活快照查控件 → perform 回灌。
@@ -84,6 +99,7 @@ class WasmAriaBridge final : public a11y::Provider {
 
     /// @brief 存活桥表（跨窗口动作寻址：id → 所属桥 → 活控件快照）。构造入表、析构出表。
     ///        兼作 rAF 蹦床的悬垂守卫：旧拍触发时先查本表，不在表者即已析构，不触碰 userData。
+    /// @return 进程级静态 vector 的可变引用（非拥有裸指针序列，生命周期与静态存储一致）。
     [[nodiscard]] static auto live_bridges() -> std::vector<WasmAriaBridge *> &;
 
   private:
@@ -102,7 +118,7 @@ class WasmAriaBridge final : public a11y::Provider {
     Widget *root_ = nullptr;  ///< 非拥有裸根（生命周期由宿主 `present_root` 喂入/切断）
     a11y::TreeSnapshot snapshot_;  ///< 活快照（DOM 镜像与之同构；widget 指针仅本帧内有效）
     bool has_snapshot_ = false;  ///< false = 下次同步走全量载荷
-    bool dirty_ = true;  ///< 拉取式脏位（D9）
+    bool dirty_ = true;  ///< 拉取式脏位
     bool active_ = false;  ///< 生命周期闩（activate/deactivate 幂等）
     bool raf_pending_ = false;  ///< 已排一拍未落（防双链；落拍/出局时复位）
     bool rtl_ = false;

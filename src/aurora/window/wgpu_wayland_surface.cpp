@@ -46,9 +46,9 @@ auto WgpuWaylandSurface::Sink::end_frame() -> void {
 // ---- 构造 / 析构 ----
 
 WgpuWaylandSurface::WgpuWaylandSurface(int width, int height, const std::string &title, const WindowStyleOptions &style,
-                                       bool vsync)
+                                       bool vsync, WindowVisibility visibility)
     : vsync_(vsync) {
-    host_ = std::make_unique<WaylandSurface>(width, height, title, style);
+    host_ = std::make_unique<WaylandSurface>(width, height, title, style, visibility);
     if (!host_->is_available()) {
         AURORA_LOG_ERROR("wgpu-wayland-surface", "WaylandSurface host creation failed");
         return;

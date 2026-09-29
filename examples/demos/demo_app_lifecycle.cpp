@@ -25,6 +25,10 @@ class LifecycleReadout : public au::LeafWidget {
         const auto *wm = ctx.environment<au::WindowMode>();
         const std::string s = (ws != nullptr) ? au::to_string(*ws) : "Visible";
         const std::string m = (wm != nullptr) ? au::to_string(*wm) : "Normal";
+        // 两行读数快照走「写入位置不变」协议：状态名均 ≤15 字符（落在 SSO 内联缓冲、永不
+        // 重分配），赋值前先清尾，故 HTTP 线程的并发读最多读到半更新的名字，不会触及堆指针。
+        last_state_.assign(s);
+        last_mode_.assign(m);
         p.fill_rect(b, pal::AURORA_SURFACE);
         p.draw_rect(b, pal::AURORA_BORDER);
         const float th = aurora::render::FontEngine::measure_height(au::Font{.size_pt = 16.0F});
@@ -35,6 +39,17 @@ class LifecycleReadout : public au::LeafWidget {
                              .size = au::Size{.width = b.size.width - 24.0F, .height = th}},
                     "WindowMode = " + m, au::Font{.size_pt = 16.0F}, pal::AURORA_TEXT);
     }
+
+    /// @brief 把最近一次绘出的两行读数一并序列化，使其可经 `/api/tree` 读取（无人值守取证用）。
+    auto serialize_props(au::Json &props) const -> void override {
+        au::LeafWidget::serialize_props(props);
+        props.set("window_state", last_state_);
+        props.set("window_mode", last_mode_);
+    }
+
+  private:
+    std::string last_state_ = "Visible";
+    std::string last_mode_ = "Normal";
 };
 }  // namespace
 
@@ -73,7 +88,7 @@ auto main() -> int {
             "Minimize or switch to another window -> animation pauses; return to foreground -> resumes"}},
     };
 
-    au::Scene scene{std::move(root)};
+    au::Scene scene{au::Node{root}};
     au::WindowOptions opts;
     opts.size = au::Size{.width = 520.0F, .height = 440.0F};
     opts.title = "App Lifecycle · Aurora Demo";
@@ -88,6 +103,13 @@ auto main() -> int {
     au::Application &app = *keep_alive;
 #else
     au::Application app{std::move(scene), win_res ? std::move(win_res.value()) : nullptr, opts};
+#endif
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+    // 无人值守取证通道：设 AURORA_INSPECTOR_PORT 即起 InspectorServer，读 `WindowState` /
+    // `WindowMode` / `ticks` 三行读数走 `/api/tree`，与本文件自建的 root 句柄同源。
+    auto inspector = start_demo_inspector(
+        [&root]() -> au::Node { return au::Node{root}; },
+        [&app]() -> au::Surface * { return app.window() != nullptr ? &app.window()->surface() : nullptr; });
 #endif
 
     // 窗口级生命周期：隐藏/被遮挡时暂停动画，可见时恢复。

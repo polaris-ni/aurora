@@ -9,8 +9,12 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/skeleton.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_skeleton {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -27,12 +31,12 @@ AURORA_TEST_CASE(default_state_and_type_name) {
     AURORA_TEST_CHECK_NEAR(hint.width, 0.0F, 1e-4F);  // 0 = 占满约束宽度
     AURORA_TEST_CHECK_NEAR(hint.height, 16.0F, 1e-4F);
 
-    Json props;
+    Json props = Json::object();
     s.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["color"][0].get<int>(), 220);
-    AURORA_TEST_CHECK_EQ(props["highlight"][0].get<int>(), 255);
-    AURORA_TEST_CHECK_NEAR(props["duration"].get<double>(), 1.5, 1e-4);
-    AURORA_TEST_CHECK_NEAR(props["height"].get<float>(), 16.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "color"), 0)->as_or<int>(-1), 220);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "highlight"), 0)->as_or<int>(-1), 255);
+    AURORA_TEST_CHECK_NEAR(require_field<double>(props, "duration"), 1.5, 1e-4);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "height"), 16.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(zero_width_fills_constraint) {
@@ -98,28 +102,28 @@ AURORA_TEST_CASE(set_duration_overrides_period) {
     fallback.tick(t0 + std::chrono::milliseconds(750));
     AURORA_TEST_CHECK_NEAR(fallback.phase(), 0.5, 1e-4);
 
-    Json props;
+    Json props = Json::object();
     fallback.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["duration"].get<double>(), 1.5, 1e-4);
+    AURORA_TEST_CHECK_NEAR(require_field<double>(props, "duration"), 1.5, 1e-4);
 }
 
 AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
     Skeleton src{Size{.width = 80.0F, .height = 22.0F}};
     src.set_color(Color(1, 2, 3, 4)).set_highlight(Color(5, 6, 7, 8)).set_duration(2.5);
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["width"].get<float>(), 80.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "width"), 80.0F, 1e-4F);
 
     Skeleton dst;
     dst.deserialize_props(props);
-    Json out;
+    Json out = Json::object();
     dst.serialize_props(out);
-    AURORA_TEST_CHECK_NEAR(out["width"].get<float>(), 80.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(out["height"].get<float>(), 22.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(out["color"][1].get<int>(), 2);
-    AURORA_TEST_CHECK_EQ(out["highlight"][3].get<int>(), 8);
-    AURORA_TEST_CHECK_NEAR(out["duration"].get<double>(), 2.5, 1e-4);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "width"), 80.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "height"), 22.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "color"), 1)->as_or<int>(-1), 2);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "highlight"), 3)->as_or<int>(-1), 8);
+    AURORA_TEST_CHECK_NEAR(require_field<double>(out, "duration"), 2.5, 1e-4);
 
     // 反序列化后的占位尺寸直接驱动布局。
     LayoutEngine::layout(dst, bounded(300.0F, 80.0F));

@@ -25,13 +25,26 @@ function(aurora_add_tool _name _src)
     target_include_directories(${_name} PRIVATE "${CMAKE_SOURCE_DIR}/tools/include")
 endfunction()
 
+# 自研 JSON 容器实现 + 其 UTF-8 依赖的独立静态库：供「不链接 aurora」的宿主生成器
+# （gen_error_codes / gen_debug_api）复用。仅含 core 层零依赖 TU（json + utf8）；
+# 与 aurora 库不会被同一目标同时链接，不存在符号重叠冲突场景。
+add_library(aurora_json STATIC
+        src/aurora/core/json/value.cpp
+        src/aurora/core/json/sax.cpp
+        src/aurora/core/json/parse.cpp
+        src/aurora/core/json/dump.cpp
+        src/aurora/core/json/pointer.cpp
+        src/aurora/core/utf8.cpp)
+target_include_directories(aurora_json PUBLIC ${CMAKE_SOURCE_DIR}/include)
+set_target_properties(aurora_json PROPERTIES CXX_STANDARD 20)
+
 # 错误码生成器：解析 codespec/errors.toml -> error_codes.gen.h / ERROR_CATALOG.md /
 # aurora_api.json 的 "error_codes" 段。独立可执行文件，**不链接 aurora**（避免鸡生蛋，
-# 因为 aurora 自身包含生成的头）；仅依赖 third_party 的 nlohmann/json。
+# 因为 aurora 自身包含生成的头）；JSON 容器用自研 aurora/core/json，经 aurora_json 静态库取符号。
 add_executable(gen_error_codes tools/gen/gen_error_codes.cpp)
+target_link_libraries(gen_error_codes PRIVATE aurora_json)
 target_include_directories(gen_error_codes PRIVATE
-        ${CMAKE_SOURCE_DIR}/third_party
-        # toml_lines.h / api_json_merge.h 为「零 aurora 依赖」共享头，供本生成器复用。
+        # toml_lines.h / api_json_merge.h 为「零 aurora 链接依赖」共享头，供本生成器复用。
         ${CMAKE_SOURCE_DIR}/tools/include)
 set_target_properties(gen_error_codes PROPERTIES CXX_STANDARD 20)
 # 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。
@@ -48,7 +61,7 @@ endif ()
 # 仓库真实文件（「cannot open input file」）。「node + .js」只解决执行、解决不了文件系统契约，
 # 故此处按工具链切换：Emscripten 时在父 configure 期完成原生子配置（清 CMAKE_TOOLCHAIN_FILE
 # 与 CC/CXX 环境以摆脱 emcc），构建期由 ALL 目标先行产出原生 exe 再触发生成命令。
-# gen_error_codes 零 aurora 依赖（纯标准 C++ + third_party 头），子配置成本仅一次 configure。
+# gen_error_codes 无 aurora 链接依赖（json 实现源文件直接编入），子配置成本仅一次 configure。
 if (EMSCRIPTEN)
     set(AURORA_NATIVE_TOOLS_DIR "${CMAKE_BINARY_DIR}/_native_tools")
     # 注意用 HOST 判定：Emscripten 交叉下 WIN32 恒假（系统名 Emscripten），
@@ -108,8 +121,9 @@ endif ()
 # 按 ColumnLimit 折成相邻字面量，生成器自己写出的是单行超长形态——于是「重新生成」这一步本身
 # 就把仓库弄红（实测：内容一字未改，仅重新生成即让 format-check 报 99 行 diff，而 HEAD 里的
 # 版本本就是「生成 + 格式化」的产物）。故生成命令后紧跟 -style=file -i，让生成与门禁同口径。
-# ⚠️ 这一步**必须**用 aurora_find_clang_format 而不是裸 find_program：发行版 clang-format 读不懂
-# 本仓 `.clang-format`（`BinPackParameters: BinPack` 是 v20+ 的枚举取值），会
+# ⚠️ 这一步**必须**用 aurora_find_clang_format 而不是裸 find_program：把该选项当布尔的构建读不懂
+# 本仓 `.clang-format` 的枚举取值（`BinPackParameters: BinPack`；门槛是迁移后的较新 patch 构建，
+# 不是主版本号 ≥ 20，实测见 cmake/AuroraUtils.cmake 的探针注释），会
 # `error: invalid boolean` + 退出码 1，把**依赖该生成物的每一个作业**（native / wasm / 各 toggles /
 # install / coverage / asan）一起拖红——2026-09-23 CI run 35839746160 实测即是此形：Windows / macOS /
 # 装了 clang-format-22 的 format 作业全绿，其余 ubuntu 与 Emscripten 作业全红，且都红在这一条上。
@@ -120,21 +134,40 @@ set(_gen_error_codes_fmt_cmds "")
 if (_gen_error_codes_cf)
     set(_gen_error_codes_fmt_cmds
             COMMAND "${_gen_error_codes_cf}" -style=file -i
-            "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h")
+            "${CMAKE_BINARY_DIR}/_gen_error_codes_stage/error_codes.gen.h")
 else ()
     aurora_warn("no clang-format on PATH can parse the repo .clang-format (candidates: "
                 "${AURORA_CLANG_FORMAT_CANDIDATES}): generate_error_codes will emit an unfolded "
-                "error_codes.gen.h. Install clang-format >= 20, or the format-check gate will flag it.")
+                "error_codes.gen.h. Install a clang-format build that parses this repo .clang-format "
+                "(apt.llvm.org llvm-22 snapshot; CI uses ./.github/actions/setup-clang-format) or the "
+                "format-check gate will flag it. Note >= 20 alone is not enough.")
 endif ()
+# 生成到 build 暂存区，再 copy_if_different 落源码树：CI 每次构建都会重跑本命令
+# （gen_error_codes.exe 新于 ERROR_CATALOG.md），若生成器直接改写源码树里的 error_codes.gen.h，
+# 即便内容一字不变 mtime 也会被抬——consumer PCH 先建、gen.h 后被重写，所有走 consumer PCH 的
+# TU 报「modified since the precompiled header was built」（run 36544883331 的 windows-llvm 实测）。
+# copy_if_different 在内容不变时零触碰（不抬 mtime、PCH 保持有效）；内容真变时落盘抬 mtime，
+# PCH 编译的 depfile 含该头自然触发重建。两条路径都不重新引入下方注释所述的 ninja 依赖环。
+set(_gen_error_codes_stage "${CMAKE_BINARY_DIR}/_gen_error_codes_stage")
+file(MAKE_DIRECTORY "${_gen_error_codes_stage}")
 add_custom_command(
-        OUTPUT ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
-        ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
+        # ⚠️ error_codes.gen.h 有意「不」列为 OUTPUT：它是随仓库分发的引导副本（与 aurora_api.json
+        # 同口径，见上方注释）。它同时是生成器 gen_error_codes 的「输入」——gen_error_codes.cpp 经
+        # props_io.h -> json.h -> result.h -> error_codes.h 传递包含它。若把它登记为 OUTPUT，ninja 会看到
+        # 「error_codes.gen.h(输出) -> gen_error_codes.exe(依赖) -> gen_error_codes.cpp.obj(包含 error_codes.gen.h)」
+        # 的依赖环而直接报 build.ninja: dependency cycle（任何令 gen_error_codes.exe 重链/重编的改动都会触发，
+        # 例如改动 aurora_json 源）。故生成物先落 build 暂存区（见上方 copy_if_different 注释），源码树内的
+        # gen.h 仅在内容真变时被更新。
+        OUTPUT ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
         COMMAND "${_gen_error_codes_exe}"
         "${CMAKE_SOURCE_DIR}/codespec/errors.toml"
-        "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
+        "${_gen_error_codes_stage}/error_codes.gen.h"
         "${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md"
         "${CMAKE_SOURCE_DIR}/aurora_api.json"
         ${_gen_error_codes_fmt_cmds}
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_gen_error_codes_stage}/error_codes.gen.h"
+                "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
         DEPENDS "${_gen_error_codes_exe}" ${CMAKE_SOURCE_DIR}/codespec/errors.toml
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Regenerating error_codes.gen.h / ERROR_CATALOG.md / aurora_api.json from errors.toml"
@@ -166,12 +199,11 @@ add_custom_target(aurora_api_json
 add_dependencies(aurora_api_json gen_api_tools gen_debug_api)
 
 # 配套：调试能力 API 生成器。解析 codespec/debug_api.toml -> aurora_api.json 的 "debug" 段。
-# 独立可执行文件，**不链接 aurora**（与 gen_error_codes 同构），仅依赖 third_party 的 nlohmann/json。
+# 独立可执行文件，**不链接 aurora**（与 gen_error_codes 同构），JSON 经 aurora_json 静态库取符号。
 # merge-only：保留其它段，只写 debug 段。运行：cmake --build build --target gen_debug_api_json
 add_executable(gen_debug_api tools/gen/gen_debug_api.cpp)
+target_link_libraries(gen_debug_api PRIVATE aurora_json)
 target_include_directories(gen_debug_api PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/third_party
         ${CMAKE_SOURCE_DIR}/tools/include)
 set_target_properties(gen_debug_api PROPERTIES CXX_STANDARD 20)
 # 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。
@@ -202,6 +234,25 @@ aurora_add_tool(aurora_cli tools/servers/aurora_cli.cpp)
 
 # LSP 语言服务：stdio JSON-RPC 2.0，提供 completion/hover/diagnostics/codeAction。
 aurora_add_tool(aurora_lsp tools/servers/aurora_lsp.cpp)
+
+# 进程外 E2E 客户端 CLI：经本机 InspectorServer REST 驱动运行中的应用
+# （查树 / 按 key-type-text 定位 / 注入输入含拖拽 / 抓帧 PNG）。
+# 能力层 tools/include/e2e/inspector_driver.h 为 header-only——与 aurora_mcp 的 live_* 工具族
+# 同款：只依赖裸 HTTP 客户端头（tools/servers/inspector_client.h），不依赖服务端实现
+# （应用侧是否起 InspectorServer 由应用自己 opt-in）。
+# EXCLUDE_FROM_ALL：按需构建（cmake --build build --target aurora_e2e_client），不进默认构建；
+# Emscripten 下无 BSD socket 语义（与 utest_inspector_client 同口径），不定义。
+if (NOT EMSCRIPTEN)
+    aurora_add_tool(aurora_e2e_client tools/e2e/e2e_client.cpp)
+    # 能力层 include "inspector_client.h"（tools/servers/，aurora_add_tool 未注入该路径）。
+    target_include_directories(aurora_e2e_client PRIVATE "${CMAKE_SOURCE_DIR}/tools/servers")
+    # 传输层直调 Winsock（inspector_client.h），与 aurora_mcp 同款：客户端只需要 socket 库，
+    # 不依赖 AURORA_BUILD_INSPECTOR_SERVER（应用侧是否起 InspectorServer 由应用自己 opt-in）。
+    if (WIN32)
+        target_link_libraries(aurora_e2e_client PRIVATE ws2_32)
+    endif ()
+    set_target_properties(aurora_e2e_client PROPERTIES EXCLUDE_FROM_ALL ON)
+endif ()
 
 # 注：原 tools/ai_compat_test（AI 兼容性批量验证可执行）已移除 —— 其 fixture 管线
 # （from_json → validate_ui → to_code）由 tests/integration/itest_ai_compat.cpp（:75 起的多个 AURORA_TEST_CASE）完整覆盖，且后者
@@ -239,7 +290,7 @@ if (WIN32)
                 COMMAND ${PWSH_EXE}
                         "${CMAKE_SOURCE_DIR}/tools/check/check_perf_gates.ps1"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-                COMMENT "本机时间类门槛校验（不进 CI，仅本机趋势对比）"
+                COMMENT "Local timing thresholds check (not in CI, local trend comparison only)"
                 VERBATIM)
     endif ()
 endif ()
@@ -265,4 +316,32 @@ if (AURORA_BUILD_INSPECTOR_SERVER)
     aurora_define_feature(AURORA_BUILD_INSPECTOR_SERVER TARGET aurora_inspector_server)
     set_target_properties(aurora_inspector_server PROPERTIES CXX_STANDARD 20)
     aurora_log("Inspector HTTP server enabled (aurora_inspector_server static lib)")
+endif ()
+
+# ---- 文档站（Doxygen）：可选 `docs` 目标 ----------------------------------
+# 注释规范口径见 codespec/CODING_STANDARDS.md §13.7：Doxyfile 是配置单一来源，
+# WARN_AS_ERROR=YES 让「注释写了但 Doxygen 读不出」在 CI 上红灯；标记形态与齐全度下限
+# 由 tools/check/check_doc_comments.py 独立守护（两者互补，不重叠）。
+# doxygen 属外部工具：不在 PATH 时由使用者显式传入 -DAURORA_DOXYGEN_EXECUTABLE=<路径>，
+# 仓库内不写死任何本机路径（CODING_STANDARDS.md §10.5 第 10 条）。
+option(AURORA_BUILD_DOCS "Provide the 'docs' target that renders the API reference with Doxygen" ON)
+if (AURORA_BUILD_DOCS)
+    set(AURORA_DOXYGEN_EXECUTABLE "" CACHE FILEPATH
+            "Path to the doxygen executable (empty = search PATH)")
+    if (AURORA_DOXYGEN_EXECUTABLE)
+        set(_aurora_doxygen "${AURORA_DOXYGEN_EXECUTABLE}")
+    else ()
+        find_program(_aurora_doxygen NAMES doxygen doxygen.exe)
+    endif ()
+    if (_aurora_doxygen AND EXISTS "${CMAKE_SOURCE_DIR}/Doxyfile")
+        add_custom_target(docs
+                COMMAND "${_aurora_doxygen}" -s "${CMAKE_SOURCE_DIR}/Doxyfile"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                COMMENT "Generate the API doc site (Doxygen; warnings fail, output in build/docs/)"
+                EXCLUDE_FROM_ALL
+                VERBATIM)
+        aurora_log("Doxygen docs: 'docs' target available (${_aurora_doxygen})")
+    else ()
+        aurora_log("Doxygen docs: 'docs' target skipped (doxygen not found; point at it with -DAURORA_DOXYGEN_EXECUTABLE=<path>)")
+    endif ()
 endif ()

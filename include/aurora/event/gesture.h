@@ -12,34 +12,31 @@
 
 namespace aurora {
 
-/**
- * @brief 拖动主轴（`DragRecognizer` 在超 slop 瞬间锁定，之后仅输出该轴分量）。
- *
- * 独立于 widget 层的 `Orientation`（event 层不依赖 widget 头）；语义为「位移主方向」
- * 而非「控件摆放方向」，二者不可互换。
- */
+/// @brief 拖动主轴（`DragRecognizer` 在超 slop 瞬间锁定，之后仅输出该轴分量）。
+///
+/// 独立于 widget 层的 `Orientation`（event 层不依赖 widget 头）；语义为「位移主方向」
+/// 而非「控件摆放方向」，二者不可互换。
 enum class DragAxis : std::uint8_t {
     None,  ///< 未起拖（未超 slop）
     Horizontal,
     Vertical,
 };
 
-/**
- * @brief 捏合（Pinch）手势识别器：追踪双指距离变化，输出缩放比例。
- *
- * 用法：
- * @code
- *   PinchRecognizer pinch;
- *   // 每帧触摸事件：
- *   pinch.on_touch(touch_event);
- *   float scale = pinch.scale();  // 相对初始距离的缩放比
- * @endcode
- */
+/// @brief 捏合（Pinch）手势识别器：追踪双指距离变化，输出缩放比例。
+///
+/// 用法：
+/// @code
+/// PinchRecognizer pinch;
+/// // 每帧触摸事件：
+/// pinch.on_touch(touch_event);
+/// float scale = pinch.scale();  // 相对初始距离的缩放比
+/// @endcode
 class PinchRecognizer {
   public:
     /// @brief 处理触摸事件，更新内部状态。
     /// 并发场景下锁定一对 pointer id（激活瞬间取前两个活跃点），后续始终追踪该对，
     /// 避免第三指插入导致距离跳变（仍回退到前两活跃点距离以保持稳健）。
+    /// @param e [in] 触摸事件；活跃点数 < 2 时重置识别器。
     auto on_touch(const TouchEvent &e) -> void {
         if (e.active_count() < 2) {
             reset();
@@ -74,6 +71,7 @@ class PinchRecognizer {
     }
 
     /// @brief 当前缩放比例（相对初始双指距离）。未激活时返回 1.0。
+    /// @return 当前双指距离 / 初始距离；未激活或初始距离 < 0.001 时为 1.0。
     [[nodiscard]] auto scale() const -> float {
         if (!active_ || initial_distance_ < 0.001F) {
             return 1.0F;
@@ -82,6 +80,7 @@ class PinchRecognizer {
     }
 
     /// @brief 是否正在识别中（双指活跃）。
+    /// @return 双指距离追踪激活时为 true。
     [[nodiscard]] auto is_active() const -> bool { return active_; }
 
     /// @brief 重置状态。
@@ -100,13 +99,12 @@ class PinchRecognizer {
     int id_b_ = -1;  ///< 锁定的第二指 pointer id
 };
 
-/**
- * @brief 旋转手势识别器：追踪双指角度变化，输出旋转增量（度）。
- */
+/// @brief 旋转手势识别器：追踪双指角度变化，输出旋转增量（度）。
 class RotationRecognizer {
   public:
     /// @brief 处理触摸事件，更新内部状态。
     /// 并发场景下锁定一对 pointer id（激活瞬间取前两个活跃点），后续始终追踪该对角度。
+    /// @param e [in] 触摸事件；活跃点数 < 2 时重置识别器。
     auto on_touch(const TouchEvent &e) -> void {
         if (e.active_count() < 2) {
             reset();
@@ -139,6 +137,7 @@ class RotationRecognizer {
     }
 
     /// @brief 旋转增量（弧度，归一化到 [-π, π]，相对初始角度）。未激活时返回 0。
+    /// @return 当前双指连线角度与初始角度之差，环绕归一化到 [-π, π]。
     [[nodiscard]] auto angle_delta() const -> float {
         if (!active_) {
             return 0.0F;
@@ -155,6 +154,7 @@ class RotationRecognizer {
     }
 
     /// @brief 是否正在识别中。
+    /// @return 双指角度追踪激活时为 true。
     [[nodiscard]] auto is_active() const -> bool { return active_; }
 
     /// @brief 重置状态。
@@ -173,30 +173,29 @@ class RotationRecognizer {
     int id_b_ = -1;  ///< 锁定的第二指 pointer id
 };
 
-/**
- * @brief 单指拖动识别器（pointer-agnostic）：超 slop 起拖，按 pointer_id 锁定首按点。
- *
- * 鼠标与触摸统一抽象：`on_mouse` / `on_touch` 双入口喂入（触摸取首个活跃点，单指语义；
- * 中途第二指插入不劫持已锁定的指针——锁定策略与 Pinch/Rotation 同源）。纯识别器：
- * 不接触动画、不持有 State，跟手映射由使用方定义（如 `DragToDismiss`）。
- *
- * 用法：
- * @code
- *   DragRecognizer drag;  // drag.slop = 8.0（逻辑 dp，可调）
- *   // 事件循环：drag.on_mouse(e)（或 on_touch）
- *   if (drag.is_dragging()) { auto d = drag.delta();  // 主轴分量映射
- *   if (松手) { drag.on_mouse(release); drag.reset(); }
- * @endcode
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 单指拖动识别器（pointer-agnostic）：超 slop 起拖，按 pointer_id 锁定首按点。
+///
+/// 鼠标与触摸统一抽象：`on_mouse` / `on_touch` 双入口喂入（触摸取首个活跃点，单指语义；
+/// 中途第二指插入不劫持已锁定的指针——锁定策略与 Pinch/Rotation 同源）。纯识别器：
+/// 不接触动画、不持有 State，跟手映射由使用方定义（如 `DragToDismiss`）。
+///
+/// 用法：
+/// @code
+/// DragRecognizer drag;  // drag.slop = 8.0（逻辑 dp，可调）
+/// // 事件循环：drag.on_mouse(e)（或 on_touch）
+/// if (drag.is_dragging()) { auto d = drag.delta();  // 主轴分量映射
+/// if (松手) { drag.on_mouse(release); drag.reset(); }
+/// @endcode
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
 class DragRecognizer {
   public:
     double slop = 8.0;  ///< 起拖阈值（逻辑 dp）：累计位移超过才激活（Android view configuration 量级）
 
     /// @brief 喂入鼠标事件：Press 记录按下点（并清残留状态），Move 推进，Release 结束本拖。
+    /// @param e [in] 鼠标事件；Release 仅停止追踪，delta/axis 保留至 reset 才清零。
     auto on_mouse(const MouseEvent &e) -> void {
         if (e.action == MouseAction::Press) {
             begin(0, e.position);  // 鼠标无 pointer_id：统一用 0
@@ -208,6 +207,7 @@ class DragRecognizer {
     }
 
     /// @brief 喂入触摸事件：按 pointer_id 锁定首个活跃点（单指语义；双指手势走 Pinch/Rotation）。
+    /// @param e [in] 触摸事件；无活跃点时停止追踪；已锁定的指针消失即结束本拖（delta 保留可读）。
     auto on_touch(const TouchEvent &e) -> void {
         if (e.active_count() == 0) {
             tracking_ = false;
@@ -231,9 +231,11 @@ class DragRecognizer {
     }
 
     /// @brief 是否拖动中（已超 slop 且未松手）。
+    /// @return 追踪中且主轴已锁定（起拖未松）时为 true；未起拖或已松手时为 false。
     [[nodiscard]] auto is_dragging() const -> bool { return tracking_ && axis_ != DragAxis::None; }
 
     /// @brief 相对按下点的累计位移（逻辑 dp）。起拖后仅含锁定主轴分量（未锁轴 = 原始位移）。
+    /// @return 位移向量：水平锁定时 y 归零、垂直锁定时 x 归零；未起拖为原始累计位移。
     [[nodiscard]] auto delta() const -> Point {
         if (!tracking_) {
             return current_delta_;
@@ -248,6 +250,7 @@ class DragRecognizer {
     }
 
     /// @brief 锁定的主轴（未起拖 = None；起拖瞬间按 |dx|>|dy| 锁定，此后不变）。
+    /// @return 主轴方向；两轴分量相等时取垂直（确定序）。
     [[nodiscard]] auto axis() const -> DragAxis { return axis_; }
 
     /// @brief 清零状态（松手消费 delta 后调用，开启下一次识别）。
@@ -288,44 +291,47 @@ class DragRecognizer {
     DragAxis axis_ = DragAxis::None;
 };
 
-/**
- * @brief 拖动消除驱动器：跟手（1:1 直接映射）+ 松手 spring 二选一（回位 / 飞出消除）。
- *
- * 值域 0..1：0 = 原位，1 = 消除阈值。跟手期间 `progress` 直接等于拖动距离 /
- * `travel_distance`（主轴分量、负方向夹取为 0）——**直接操作而非动画**，`reduce_motion`
- * 不干预（无障碍语义：直接操作保持 1:1 响应）。松手（`on_release`）依
- * `progress ≥ threshold` 裁决落点：飞出（spring 到 1，完成后触发 `on_dismissed`）或
- * 回位（spring 到 0，静默）。拖动速度（最近两次事件的位移 / dt，主轴分量）作为
- * spring 初速度，方向与裁决一致时自然加速、相反时自然衰减。
- *
- * `reduce_motion` 对 spring 阶段短路：直接落端点（落 1 触发 dismissed、落 0 静默），
- * 与 `AnimationController::tick` 的短路语义同源。
- *
- * 用法：
- * @code
- *   DragToDismiss dtd(DragAxis::Horizontal, 120.0, SpringDescription{});
- *   // 事件循环：dtd.on_mouse(e)（或 on_touch）；松手时 on_release()。
- *   // 帧循环：dtd.tick(dt)（spring 阶段推进；跟手阶段 no-op）。
- *   dtd.on_dismissed([](){});  // 例如从容器摘除
- *   double p = dtd.progress().get();  // 0..1，绑定位移/透明度
- * @endcode
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 拖动消除驱动器：跟手（1:1 直接映射）+ 松手 spring 二选一（回位 / 飞出消除）。
+///
+/// 值域 0..1：0 = 原位，1 = 消除阈值。跟手期间 `progress` 直接等于拖动距离 /
+/// `travel_distance`（主轴分量、负方向夹取为 0）——**直接操作而非动画**，`reduce_motion`
+/// 不干预（无障碍语义：直接操作保持 1:1 响应）。松手（`on_release`）依
+/// `progress ≥ threshold` 裁决落点：飞出（spring 到 1，完成后触发 `on_dismissed`）或
+/// 回位（spring 到 0，静默）。拖动速度（最近两次事件的位移 / dt，主轴分量）作为
+/// spring 初速度，方向与裁决一致时自然加速、相反时自然衰减。
+///
+/// `reduce_motion` 对 spring 阶段短路：直接落端点（落 1 触发 dismissed、落 0 静默），
+/// 与 `AnimationController::tick` 的短路语义同源。
+///
+/// 用法：
+/// @code
+/// DragToDismiss dtd(DragAxis::Horizontal, 120.0, SpringDescription{});
+/// // 事件循环：dtd.on_mouse(e)（或 on_touch）；松手时 on_release()。
+/// // 帧循环：dtd.tick(dt)（spring 阶段推进；跟手阶段 no-op）。
+/// dtd.on_dismissed([](){});  // 例如从容器摘除
+/// double p = dtd.progress().get();  // 0..1，绑定位移/透明度
+/// @endcode
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
 class DragToDismiss {
   public:
     /// @brief 构造：主轴、消除行程（逻辑 dp，拖满即 progress=1）、spring 参数。
+    /// @param axis [in] 消除主轴（水平或垂直）。
+    /// @param travel_distance_dp [in] 消除行程；非正值夹取为 1.0 防除零。
+    /// @param spring [in] 松手后 spring 模拟使用的参数。
     DragToDismiss(DragAxis axis, double travel_distance_dp, SpringDescription spring)
         : axis_(axis), travel_(travel_distance_dp > 0.0 ? travel_distance_dp : 1.0), spring_desc_(spring) {}
 
     /// @brief 更新消除行程（如布局后按主轴向尺寸校准；非正值夹取 1.0 防除零）。
+    /// @param travel_distance_dp [in] 新行程（逻辑 dp）。
     auto set_travel(double travel_distance_dp) -> void {
         travel_ = travel_distance_dp > 0.0 ? travel_distance_dp : 1.0;
     }
 
     /// @brief 喂鼠标事件（转发内部 DragRecognizer；松手不自动裁决——由 on_release 显式触发）。
+    /// @param e [in] 鼠标事件；Move 时采样主轴速度，随后同步跟手进度。
     auto on_mouse(const MouseEvent &e) -> void {
         const Point prev = recognizer_.delta();
         recognizer_.on_mouse(e);
@@ -336,6 +342,7 @@ class DragToDismiss {
     }
 
     /// @brief 喂触摸事件（同 on_mouse）。
+    /// @param e [in] 触摸事件；转发识别器后采样速度并同步跟手进度。
     auto on_touch(const TouchEvent &e) -> void {
         const Point prev = recognizer_.delta();
         recognizer_.on_touch(e);
@@ -344,6 +351,7 @@ class DragToDismiss {
     }
 
     /// @brief 进度值 State（0..1）：跟手与 spring 共用同一条，绑定到位移/透明度等。
+    /// @return 进度 State 的只读引用。
     [[nodiscard]] auto progress() const -> const State<double> & { return progress_; }
 
     /// @brief 裁决阈值（progress ≥ 此值判飞出；默认 0.5）。
@@ -367,9 +375,11 @@ class DragToDismiss {
     }
 
     /// @brief 飞出完成回调（progress 到 1 且 spring 静止后触发，一次性语义见实现）。
+    /// @param cb 飞出完成时执行的可调用体，移入存储并替换此前设置的回调；空函数即取消通知。
     auto on_dismissed(std::function<void()> cb) -> void { on_dismissed_ = std::move(cb); }
 
     /// @brief 帧推进（spring 阶段；跟手阶段 no-op）。到位触发 on_dismissed（仅飞出方向）。
+    /// @param dt_seconds [in] 帧间隔（秒），推进 spring 时间轴。
     auto tick(double dt_seconds) -> void {
         if (!animating_) {
             return;
@@ -399,12 +409,15 @@ class DragToDismiss {
     }
 
     /// @brief spring 阶段是否进行中。
+    /// @return 松手裁决后到 spring 静止（或 reduce_motion 短路落端点）前为 true。
     [[nodiscard]] auto is_animating() const -> bool { return animating_; }
 
     /// @brief 是否处于跟手阶段（可继续喂事件）。
+    /// @return 内部识别器拖动中时为 true。
     [[nodiscard]] auto is_dragging() const -> bool { return recognizer_.is_dragging(); }
 
     /// @brief 识别器 slop 注入（测试用；常规消费者直接用默认 8dp）。
+    /// @param slop_dp [in] 新的起拖阈值（逻辑 dp）。
     auto recognizer_slop_for_test(double slop_dp) -> void { recognizer_.slop = slop_dp; }
 
   private:

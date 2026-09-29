@@ -16,38 +16,51 @@
 
 namespace aurora {
 
-/**
- * @brief 转场合成层（specification/05-event-navigation.md §7.4）：在导航转场进行中叠加渲染「旧页」与「新页」两棵子树，
- * 按 `progress`（0→1）合成淡入淡出或水平滑动，进度到 1 后由 `NavigatorHost` 丢弃旧页。
- *
- * 自身不持有动画：外部 `Animator` 通过 `AnimationController` 绑定 `progress` 状态驱动本层。
- * 两页均按本层满尺寸布局；`Fade` 用 `Painter::set_alpha` 做交叉淡变，`Slide` 用水平偏移矩形
- * 并在本层范围内裁剪。绘制顺序：旧页在下、新页在上。
- */
+/// @brief 转场合成层（specification/05-event-navigation.md §7.4）：在导航转场进行中叠加渲染「旧页」与「新页」两棵子树，
+/// 按 `progress`（0→1）合成淡入淡出或水平滑动，进度到 1 后由 `NavigatorHost` 丢弃旧页。
+///
+/// 自身不持有动画：外部 `Animator` 通过 `AnimationController` 绑定 `progress` 状态驱动本层。
+/// 两页均按本层满尺寸布局；`Fade` 用 `Painter::set_alpha` 做交叉淡变，`Slide` 用水平偏移矩形
+/// 并在本层范围内裁剪。绘制顺序：旧页在下、新页在上。
+///
 class TransitionLayer : public Widget {
   public:
+    /// @brief 构造转场合成层：装载新旧两页并绑定进度源与转场类型。
+    /// @param old_root 旧页子树根（可空；转场结束由 `NavigatorHost` 丢弃）。
+    /// @param new_root 新页子树根（可空）。
+    /// @param progress 转场进度状态（0→1，外部 `Animator` 驱动；非空且生命周期须覆盖本层）。
+    /// @param kind 转场类型（Fade 交叉淡变 / Slide 水平滑动）。
     TransitionLayer(Node old_root, Node new_root, State<double> *progress, TransitionKind kind)
         : old_(std::move(old_root)), new_(std::move(new_root)), progress_(progress), kind_(kind) {}
 
     /// @brief 接入 `NavigatorHost` 的 Hero 注册表：捕获共享元素几何并在覆盖层做插值绘制。
+    /// @param reg Hero 注册表（持有捕获态，move 进本层）。
+    /// @param morphing 本帧 morphing tag 集合（宿主持有、覆盖层填充；可空 = 不记录）。
     auto set_hero_registry(std::shared_ptr<HeroRegistry> reg, std::unordered_set<std::string> *morphing) -> void {
         hero_reg_ = std::move(reg);
         morphing_ = morphing;
     }
 
+    /// @brief 运行时类型名。
+    /// @return 固定字符串 "TransitionLayer"。
     [[nodiscard]] auto type_name() const -> const char * override { return "TransitionLayer"; }
 
-    // 按 progress 每帧合成淡入淡出 / 滑动且绘制 Hero 覆盖层：内容每帧变化，缓存回放会冻结转场，
-    // 故不可缓存 Display List。
+    /// @brief 禁用 Display List 缓存：按 progress 每帧合成淡入淡出 / 滑动且绘制 Hero 覆盖层，
+    ///        内容每帧变化，缓存回放会冻结转场。
+    /// @return 恒为 false。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return false; }
 
+    /// @brief 运行时自描述。
+    /// @return 描述符：名称 TransitionLayer、多孩子策略。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
         return WidgetDescriptor{.name = "TransitionLayer", .children_policy = "multiple"};
     }
 
-    // 不自行订阅 progress_：由宿主（NavigatorHost）统一订阅，避免重复绑定同一信号。
+    /// @brief 不自行订阅 progress_：由宿主（NavigatorHost）统一订阅，避免重复绑定同一信号。
     auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
 
+    /// @brief 枚举两棵子页：旧页在前、新页在后（与绘制层序一致；空页跳过）。
+    /// @param fn 对每个在场子页以 const 引用回调一次。
     auto for_each_child(const std::function<void(const Widget &)> &fn) const -> void override {
         if (old_) {
             fn(old_.widget());

@@ -2,22 +2,32 @@
 /// 目标单元: include/aurora/widget/text_input.h
 /// 测试说明: 覆盖 TextInput——Props 构造与链式 setter、只读/限长/禁用状态、布局尺寸与字号关系、
 /// 经公开文本输入入口验证 on_changed 回调与截断/吞输入行为、IME 组合输入（preedit 显示 /
-/// 上屏落字 / 限长 / 失焦取消 / 参与测量）、序列化往返与默认键省略
+/// 上屏落字 / 限长 / 失焦取消 / 参与测量）、Shift+方向键扩选的字符数与退格删选区、
+/// Home/End 跳端点与扩选（含经派发器送达焦点控件）、序列化往返与默认键省略、
+/// Ctrl+X 在剪贴板写入失败时不删选区且留诊断
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <string>
 
+#include "aurora/app/clipboard.h"
+#include "aurora/core/diagnostics.h"
 #include "aurora/core/directionality.h"
 #include "aurora/core/log.h"
+#include "aurora/core/platform.h"
 #include "aurora/environment/environment.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_text_input {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 using aurora::testing::require_value;
 
@@ -70,11 +80,11 @@ AURORA_TEST_CASE(props_constructor_sets_initial_state) {
     TextInput ti{props};
     AURORA_TEST_CHECK_EQ(ti.value(), std::string{"init"});
 
-    Json out;
+    Json out = Json::object();
     ti.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(out["value"].get<std::string>(), "init");
-    AURORA_TEST_CHECK_EQ(out["placeholder"].get<std::string>(), "ph");
-    AURORA_TEST_CHECK_NEAR(out["font_size"].get<float>(), 16.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "value"), "init");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "placeholder"), "ph");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "font_size"), 16.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(chained_setters_update_serialized_props) {
@@ -82,11 +92,11 @@ AURORA_TEST_CASE(chained_setters_update_serialized_props) {
     ti.set_value("v").set_placeholder("p").font_size(20.0F);
     AURORA_TEST_CHECK_EQ(ti.value(), std::string{"v"});
 
-    Json out;
+    Json out = Json::object();
     ti.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(out["value"].get<std::string>(), "v");
-    AURORA_TEST_CHECK_EQ(out["placeholder"].get<std::string>(), "p");
-    AURORA_TEST_CHECK_NEAR(out["font_size"].get<float>(), 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "value"), "v");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "placeholder"), "p");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "font_size"), 20.0F, 1e-4F);
 
     // 再次 setter 覆盖旧值。
     ti.set_value("w");
@@ -99,13 +109,13 @@ AURORA_TEST_CASE(read_only_flag_state_and_serialization) {
     ti.set_read_only(true);
     AURORA_TEST_CHECK_TRUE(ti.read_only());
 
-    Json out;
+    Json out = Json::object();
     ti.serialize_props(out);
     AURORA_TEST_CHECK_TRUE(out.contains("read_only"));
-    AURORA_TEST_CHECK_EQ(out["read_only"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(out, "read_only"), true);
 
     // 默认只读=false 时不落盘（键省略语义）。
-    Json defaults;
+    Json defaults = Json::object();
     TextInput def;
     def.serialize_props(defaults);
     AURORA_TEST_CHECK_FALSE(defaults.contains("read_only"));
@@ -222,18 +232,19 @@ AURORA_TEST_CASE(composition_shows_preedit_without_touching_value) {
     AURORA_TEST_CHECK_EQ(ti.accessibility_value(), std::string{"nihao"});  // 读屏需播报组合态
 
     TextCompositionEvent candidate;
-    candidate.preedit = "你好";
+    candidate.preedit = "你好";  // CJK-LITERAL: cjk-fixture - IME preedit must be Han to exercise the path
     candidate.cursor_index = 2;
     ti.on_text_composition(candidate);
-    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{"你好"});
+    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{"你好"});  // CJK-LITERAL: cjk-fixture - same Han preedit read back
     AURORA_TEST_CHECK_EQ(ti.value(), std::string{""});
 
     TextCompositionEvent commit;
-    commit.committed = "你好";
+    commit.committed = "你好";  // CJK-LITERAL: cjk-fixture - IME commit text must be Han
     ti.on_text_composition(commit);
     AURORA_TEST_CHECK_FALSE(ti.is_composing());
     AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{""});
-    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"你好"});
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"你好"});  // CJK-LITERAL: cjk-fixture - Han commit stored as value
+    // CJK-LITERAL: cjk-fixture - the screen reader announces the Han commit verbatim
     AURORA_TEST_CHECK_EQ(ti.accessibility_value(), std::string{"你好"});
 }
 
@@ -299,6 +310,7 @@ AURORA_TEST_CASE(preedit_participates_in_layout_measurement) {
     composing.set_value("ab");
     composing.on_focus_change(true);
     TextCompositionEvent e;
+    // CJK-LITERAL: cjk-fixture - a Han preedit is what widens the field while composing
     e.preedit = "你好吗";
     composing.on_text_composition(e);
     LayoutEngine::layout(composing, loose);
@@ -318,35 +330,35 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {
         .set_obscure_text(true)
         .set_focused_border_color(Color(1, 2, 3, 4));
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["value"].get<std::string>(), "user");
-    AURORA_TEST_CHECK_EQ(props["max_length"].get<int>(), 5);
-    AURORA_TEST_CHECK_EQ(props["read_only"].get<bool>(), true);
-    AURORA_TEST_CHECK_EQ(props["obscure_text"].get<bool>(), true);
-    AURORA_TEST_CHECK_EQ(props["background"][0].get<int>(), 10);
-    AURORA_TEST_CHECK_EQ(props["focused_border_color"][2].get<int>(), 3);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "value"), "user");
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "max_length"), 5);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "read_only"), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "obscure_text"), true);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "background"), 0)->as_or<int>(-1), 10);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "focused_border_color"), 2)->as_or<int>(-1), 3);
 
     TextInput dst;
     dst.deserialize_props(props);
     AURORA_TEST_CHECK_EQ(dst.value(), std::string{"user"});
     AURORA_TEST_CHECK_TRUE(dst.read_only());
-    Json back;
+    Json back = Json::object();
     dst.serialize_props(back);
-    AURORA_TEST_CHECK_EQ(back["placeholder"].get<std::string>(), "type here");
-    AURORA_TEST_CHECK_NEAR(back["font_size"].get<float>(), 18.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(back["background"][3].get<int>(), 40);
-    AURORA_TEST_CHECK_EQ(back["focused_border_color"][0].get<int>(), 1);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(back, "placeholder"), "type here");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(back, "font_size"), 18.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(back, "background"), 3)->as_or<int>(-1), 40);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(back, "focused_border_color"), 0)->as_or<int>(-1), 1);
 
     // 负边框线宽被钳制为 1.0。
     TextInput clamped;
     clamped.set_border_width(-5.0F);
-    Json clamp_props;
+    Json clamp_props = Json::object();
     clamped.serialize_props(clamp_props);
-    AURORA_TEST_CHECK_NEAR(clamp_props["border_width"].get<float>(), 1.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(clamp_props, "border_width"), 1.0F, 1e-4F);
 
     // 默认值省略语义：未设置的键不落盘。
-    Json defaults;
+    Json defaults = Json::object();
     TextInput def;
     def.serialize_props(defaults);
     AURORA_TEST_CHECK_FALSE(defaults.contains("focused_border_color"));  // 保留「跟随主题」语义
@@ -394,6 +406,195 @@ AURORA_TEST_CASE(rtl_arrow_keys_invert_logical_direction) {
     ltr.on_key_event(right);
     ltr.on_text_input(ins);
     AURORA_TEST_CHECK_EQ(ltr.value(), std::string{"abX"});
+}
+
+// Shift+方向键扩选：每次恰纳入一个字符，退格一次删掉整段选区。
+// caret 是插入点而非字符下标，左扩锚点取 caret 前一个字符；曾因把 caret 本身当下标而当锚点，
+// 使「文本中部」的一次 Shift+← 高亮并删除两个字符（末尾态因下标越界被 clamp 掩盖，看不出问题）。
+AURORA_TEST_CASE(shift_arrow_selects_exactly_one_char_per_press) {
+    auto focused_field = [](const std::string &seed) -> TextInput {
+        TextInput ti;
+        ti.on_focus_change(true);
+        TextInputEvent e;
+        e.text = seed;
+        ti.on_text_input(e);
+        ti.mount(BuildContext{});
+        ti.layout(bounded(300.0F, 60.0F), BuildContext{});
+        return ti;
+    };
+    auto press = [](KeyCode code, ModifierKey mods) -> KeyEvent {
+        KeyEvent k;
+        k.key = static_cast<int>(code);
+        k.action = KeyAction::Down;
+        k.modifiers = mods;
+        return k;
+    };
+
+    // 末尾态：一次 Shift+← 选中最后一个字符（与修复前一致，守回归）。
+    TextInput tail = focused_field("abc");
+    KeyEvent one = press(KeyCode::ArrowLeft, ModifierKey::Shift);
+    tail.on_key_event(one);
+    AURORA_TEST_CHECK_EQ(tail.selected_text(), std::string{"c"});
+    KeyEvent two = press(KeyCode::ArrowLeft, ModifierKey::Shift);
+    tail.on_key_event(two);
+    AURORA_TEST_CHECK_EQ(tail.selected_text(), std::string{"bc"});
+
+    // 文本中部（caret=3，右邻 'd'）：一次 Shift+← 只应选中 'c'。
+    TextInput mid = focused_field("abcd");
+    KeyEvent left_mid = press(KeyCode::ArrowLeft, ModifierKey::None);
+    mid.on_key_event(left_mid);  // 先退到插入点 3（非选区态）
+    AURORA_TEST_CHECK_FALSE(mid.has_selection());
+    KeyEvent l1 = press(KeyCode::ArrowLeft, ModifierKey::Shift);
+    mid.on_key_event(l1);
+    AURORA_TEST_CHECK_TRUE(mid.has_selection());
+    AURORA_TEST_CHECK_EQ(mid.selected_text(), std::string{"c"});
+    KeyEvent l2 = press(KeyCode::ArrowLeft, ModifierKey::Shift);
+    mid.on_key_event(l2);
+    AURORA_TEST_CHECK_EQ(mid.selected_text(), std::string{"bc"});
+
+    // 退格一次删掉整段选区，光标停在删除位置。
+    KeyEvent back = press(KeyCode::Backspace, ModifierKey::None);
+    mid.on_key_event(back);
+    AURORA_TEST_CHECK_EQ(mid.value(), std::string{"ad"});
+    AURORA_TEST_CHECK_FALSE(mid.has_selection());
+    TextInputEvent ins;
+    ins.text = "X";
+    mid.on_text_input(ins);
+    AURORA_TEST_CHECK_EQ(mid.value(), std::string{"aXd"});  // caret=1
+
+    // 右扩同样一次一个字符。
+    TextInput right = focused_field("abcd");
+    KeyEvent rl = press(KeyCode::ArrowLeft, ModifierKey::None);
+    right.on_key_event(rl);  // caret=3
+    KeyEvent r1 = press(KeyCode::ArrowRight, ModifierKey::Shift);
+    right.on_key_event(r1);
+    AURORA_TEST_CHECK_EQ(right.selected_text(), std::string{"d"});
+}
+
+// Home/End 在单行框上即「文本两端」（无行首/行尾之别）：非 Shift 跳光标并清选区，
+// Shift 走与方向键同款的含头含尾扩选；光标本就在端点时扩选为空，不留 1 字符假选区。
+// 曾经的缺陷：`on_key_event` 无 Home/End 分支 → 按键被丢弃成 no-op（TC-WIDGET-012 记录残项）。
+AURORA_TEST_CASE(home_end_move_caret_and_extend_selection) {
+    auto focused_field = [](const std::string &seed) -> TextInput {
+        TextInput ti;
+        ti.on_focus_change(true);
+        TextInputEvent e;
+        e.text = seed;
+        ti.on_text_input(e);
+        return ti;
+    };
+    auto press = [](KeyCode code, ModifierKey mods) -> KeyEvent {
+        KeyEvent k;
+        k.key = static_cast<int>(code);
+        k.action = KeyAction::Down;
+        k.modifiers = mods;
+        return k;
+    };
+    auto type = [](TextInput &ti, const std::string &s) -> void {
+        TextInputEvent e;
+        e.text = s;
+        ti.on_text_input(e);
+    };
+
+    // 非 Shift：只挪光标、清选区——落点用「插入字符的位置」反证。
+    TextInput jump = focused_field("abc");  // 种子输入后 caret=3
+    KeyEvent home = press(KeyCode::Home, ModifierKey::None);
+    jump.on_key_event(home);
+    AURORA_TEST_CHECK_FALSE(jump.has_selection());
+    type(jump, "X");
+    AURORA_TEST_CHECK_EQ(jump.value(), std::string{"Xabc"});  // caret=0
+    KeyEvent end = press(KeyCode::End, ModifierKey::None);
+    jump.on_key_event(end);
+    type(jump, "!");
+    AURORA_TEST_CHECK_EQ(jump.value(), std::string{"Xabc!"});  // caret=n
+
+    // 文本中部：Shift+Home 纳入光标左侧全部（caret=2 → 字符 0..1）。
+    TextInput head = focused_field("abcd");
+    KeyEvent left = press(KeyCode::ArrowLeft, ModifierKey::None);
+    head.on_key_event(left);
+    head.on_key_event(left);  // caret=2
+    KeyEvent sh_home = press(KeyCode::Home, ModifierKey::Shift);
+    head.on_key_event(sh_home);
+    AURORA_TEST_CHECK_TRUE(head.has_selection());
+    AURORA_TEST_CHECK_EQ(head.selected_text(), std::string{"ab"});
+    // 退格一次删掉整段扩选，光标停在 0
+    KeyEvent back = press(KeyCode::Backspace, ModifierKey::None);
+    head.on_key_event(back);
+    AURORA_TEST_CHECK_EQ(head.value(), std::string{"cd"});
+    AURORA_TEST_CHECK_FALSE(head.has_selection());
+    type(head, "Z");
+    AURORA_TEST_CHECK_EQ(head.value(), std::string{"Zcd"});  // caret=0
+
+    // Shift+End 纳入光标右侧全部（caret=1 → 字符 1..3）。
+    TextInput tail = focused_field("abcd");
+    tail.on_key_event(home);  // caret=0
+    KeyEvent right1 = press(KeyCode::ArrowRight, ModifierKey::None);
+    tail.on_key_event(right1);  // caret=1
+    KeyEvent sh_end = press(KeyCode::End, ModifierKey::Shift);
+    tail.on_key_event(sh_end);
+    AURORA_TEST_CHECK_EQ(tail.selected_text(), std::string{"bcd"});
+
+    // 已在端点：扩选范围为空，不得伪造 1 字符选区。
+    TextInput at_head = focused_field("abc");
+    at_head.on_key_event(home);
+    at_head.on_key_event(sh_home);
+    AURORA_TEST_CHECK_FALSE(at_head.has_selection());
+    TextInput at_tail = focused_field("abc");  // 种子输入后 caret 已在尾
+    at_tail.on_key_event(sh_end);
+    AURORA_TEST_CHECK_FALSE(at_tail.has_selection());
+
+    // 空文本：两个端点重合，任何 Shift 组合都不越界取下标。
+    TextInput empty;
+    empty.on_focus_change(true);
+    empty.on_key_event(sh_home);
+    AURORA_TEST_CHECK_FALSE(empty.has_selection());
+    empty.on_key_event(sh_end);
+    AURORA_TEST_CHECK_FALSE(empty.has_selection());
+
+    // UTF-8 安全：按码点计数整段选中/删除。
+    TextInput utf = focused_field("中文测试");  // CJK-LITERAL: cjk-fixture - multibyte text for code-point counts
+    utf.on_key_event(home);
+    utf.on_key_event(sh_end);
+    AURORA_TEST_CHECK_EQ(utf.selected_text(), std::string{"中文测试"});  // CJK-LITERAL: cjk-fixture - same Han text
+    utf.on_key_event(back);
+    AURORA_TEST_CHECK_FALSE(utf.has_selection());
+    AURORA_TEST_CHECK_EQ(utf.value(), std::string{});
+}
+
+// Home/End 须经事件派发器交到焦点控件：既不能被全局快捷键（Tab/方向键/激活键）吞掉，
+// 也不得触发焦点导航——否则「光标不动」的表象与真实缺陷同源（TC-WIDGET-012 残项）。
+AURORA_TEST_CASE(home_end_reach_focused_widget_via_dispatcher) {
+    auto field = std::make_shared<TextInput>();
+    field->set_value("hello");
+    FocusManager fm;
+    fm.set_root(field.get());
+
+    KeyEvent tab;
+    tab.key = static_cast<int>(KeyCode::Tab);
+    tab.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*field, tab, fm));
+    AURORA_TEST_CHECK_TRUE(fm.focused() == field.get());
+
+    KeyEvent end;
+    end.key = static_cast<int>(KeyCode::End);
+    end.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*field, end, fm));
+    AURORA_TEST_CHECK_TRUE(fm.focused() == field.get());  // 焦点未被端点键挪走
+
+    TextInputEvent ins;
+    ins.text = "!";
+    field->on_text_input(ins);
+    AURORA_TEST_CHECK_EQ(field->value(), std::string{"hello!"});
+
+    KeyEvent home;
+    home.key = static_cast<int>(KeyCode::Home);
+    home.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*field, home, fm));
+
+    TextInputEvent pre;
+    pre.text = "»";
+    field->on_text_input(pre);
+    AURORA_TEST_CHECK_EQ(field->value(), std::string{"»hello!"});
 }
 
 AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
@@ -453,16 +654,16 @@ AURORA_TEST_CASE(direction_prop_serialization_roundtrip) {
     // 显式方向落盘；未设置不输出（保留「继承环境」语义）。
     TextInput rtl;
     rtl.set_direction(TextDirection::RTL);
-    Json props;
+    Json props = Json::object();
     rtl.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["direction"].get<std::string>(), "RTL");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "direction"), "RTL");
 
     TextInput dst;
     dst.deserialize_props(props);
     AURORA_TEST_REQUIRE_TRUE(dst.direction().has_value());
     AURORA_TEST_CHECK_TRUE(require_value(dst.direction()) == TextDirection::RTL);
 
-    Json defaults;
+    Json defaults = Json::object();
     TextInput def;
     def.serialize_props(defaults);
     AURORA_TEST_CHECK_FALSE(defaults.contains("direction"));  // 未设置不落盘
@@ -504,7 +705,7 @@ AURORA_TEST_CASE(bidi_control_chars_roundtrip_serialization) {
     ti.set_value(std::string{"a"} + "\u202B" + "bc" + "\u202C");  // RLE … PDF 包 bc
 
     const std::string before = ti.value();
-    Json props;
+    Json props = Json::object();
     ti.serialize_props(props);
     TextInput dst;
     dst.deserialize_props(props);
@@ -533,6 +734,55 @@ AURORA_TEST_CASE(bidi_control_chars_do_not_shift_visible_width) {
     for (const auto &[pi, ci] : pairs) {
         AURORA_TEST_CHECK_NEAR(FontEngine::caret_x(plain, pi, f), FontEngine::caret_x(with_ctrl, ci, f), 0.01F);
     }
+}
+
+AURORA_TEST_CASE(cut_keeps_text_when_clipboard_write_fails) {
+#ifdef AURORA_PLATFORM_WINDOWS
+    // 回归：Ctrl+X 的「删选区」必须以「复制成功」为前提。剪切 = 复制 + 删除，复制没成却照删，
+    // 用户既没把内容交出去又丢了原文，是净损失；改签名前这条路径静默返回，无从设防。
+    // 这里用「非法 UTF-8 在 EmptyClipboard 之前就被 MB_ERR_INVALID_CHARS 拒掉」做确定性失败入路，
+    // 故本用例全程不会改动真实系统剪贴板的内容（也不必装 memory 后端——装了反而永不失败）。
+    (void)Clipboard::remove_test_backend();
+
+    const std::string junk{"keep\xF0\x28\x8C\x28me"};
+    auto field = std::make_shared<TextInput>();
+    field->set_value(junk);
+
+    FocusManager fm;
+    fm.set_root(field.get());
+    KeyEvent tab;
+    tab.action = KeyAction::Down;
+    tab.key = static_cast<int>(KeyCode::Tab);
+    AURORA_TEST_REQUIRE_TRUE(EventDispatcher::dispatch(*field, tab, fm));
+
+    (void)Diagnostics::take();  // 排空他人在途诊断，下面的断言只看本用例产出
+
+    KeyEvent select_all;
+    select_all.action = KeyAction::Down;
+    select_all.key = static_cast<int>(KeyCode::A);
+    select_all.modifiers = ModifierKey::Control;
+    AURORA_TEST_REQUIRE_TRUE(EventDispatcher::dispatch(*field, select_all, fm));
+    AURORA_TEST_REQUIRE_MSG(field->has_selection(), "selection established (sanity)");
+
+    KeyEvent cut;
+    cut.action = KeyAction::Down;
+    cut.key = static_cast<int>(KeyCode::X);
+    cut.modifiers = ModifierKey::Control;
+    AURORA_TEST_REQUIRE_TRUE(EventDispatcher::dispatch(*field, cut, fm));
+
+    AURORA_TEST_CHECK_EQ(field->value(), junk);  // 原文一字未丢
+    AURORA_TEST_CHECK(field->has_selection());  // 选区留在原地等用户重试
+
+    const auto diags = Diagnostics::take();
+    const bool traced = std::ranges::any_of(diags, [](const Diagnostic &d) {
+        return d.code == "clipboard-write-failed" && d.where == "TextInput::on_key_event";
+    });
+    AURORA_TEST_CHECK_MSG(traced, "failed cut surfaced as a machine-readable diagnostic");
+#else
+    AURORA_TEST_SKIP(
+        "the deterministic clipboard-write failure (invalid UTF-8 rejected before OpenClipboard) is Windows-specific; "
+        "xsel/xclip/pbcopy accept arbitrary bytes, so this path cannot fail deterministically elsewhere");
+#endif
 }
 
 }  // namespace aurora::test_cases::utest_text_input

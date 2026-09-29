@@ -155,6 +155,7 @@ auto Win32Surface::present() -> Result<bool> {
                 } else {
                     present_dirty(hdc, w, h);
                 }
+                ++presented_frames_;  // 只计真正上屏的帧（与其他后端 present() 内自增同口径）
             }
             ReleaseDC(hwnd, hdc);
         }

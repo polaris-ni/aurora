@@ -1,3 +1,4 @@
+/// @file itest_reorder.cpp
 /// 测试类型: integration
 /// 目标单元: include/aurora/widget/reorderable_list.h
 /// 测试说明: 端到端验收拖拽重排——TestController 合成真实指针序列（Press→Move→Release）经命中
@@ -171,11 +172,15 @@ AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
 #else
 
 AURORA_TEST_CASE(drag_reorders_items_through_real_dispatch) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP(
+        "AURORA_BACKEND_HEADLESS not enabled: TestController depends on "
+        "HeadlessSurface, which is not compiled");
 }
 
 AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP(
+        "AURORA_BACKEND_HEADLESS not enabled: TestController depends on "
+        "HeadlessSurface, which is not compiled");
 }
 
 #endif  // AURORA_BACKEND_HEADLESS

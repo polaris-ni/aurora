@@ -138,16 +138,16 @@ auto check_death(const char *file, int line, std::string_view statement, const E
 
 }  // namespace aurora::testing::detail
 
-/// @brief 死亡测试断言：statement 必须使进程异常终止（可选：stderr 命中期望）。
-///
-/// `expectation` 可以是子串字面量，也可以是 `matchers::` 匹配器（如 `has_substr("...")`）。
-/// 传空串表示不校验输出。
-/// 子分支以 [[noreturn]] 的 death_child_survived() 收尾，控制流不会落入后续语句，故不写 else
-/// （readability-else-after-return）。
-///
-/// ⚠️ Emscripten（wasm）下整条断言退化为 AURORA_TEST_SKIP：死亡测试依赖「重跑自身子进程」，
-///    而 wasm 运行时没有 fork/exec（spawn_death_child 的 fork 直接失败），子进程无从派发，
-///    硬跑只会恒定报 SiteMissed。跨编译下如实跳过，交由原生 job 守护。
+// @brief 死亡测试断言：statement 必须使进程异常终止（可选：stderr 命中期望）。
+//
+// `expectation` 可以是子串字面量，也可以是 `matchers::` 匹配器（如 `has_substr("...")`）。
+// 传空串表示不校验输出。
+// 子分支以 [[noreturn]] 的 death_child_survived() 收尾，控制流不会落入后续语句，故不写 else
+// （readability-else-after-return）。
+//
+// ⚠️ Emscripten（wasm）下整条断言退化为 AURORA_TEST_SKIP：死亡测试依赖「重跑自身子进程」，
+//    而 wasm 运行时没有 fork/exec（spawn_death_child 的 fork 直接失败），子进程无从派发，
+//    硬跑只会恒定报 SiteMissed。跨编译下如实跳过，交由原生 job 守护。
 //
 // 豁免口径（区间式：紧邻式豁免罩不住下面两个跨行的 `#define`）：
 // `statement` 必须原样嵌入子进程分支的 lambda 调用位、`__FILE__/__LINE__` 必须在**调用点**
@@ -156,7 +156,7 @@ auto check_death(const char *file, int line, std::string_view statement, const E
 // NOLINTBEGIN(cppcoreguidelines-macro-usage)
 #ifdef AURORA_PLATFORM_WASM
 #define AURORA_TEST_CHECK_DEATH(statement, ...) \
-    AURORA_TEST_SKIP("死亡测试需 fork/exec 重跑自身进程，Emscripten 下不可用")
+    AURORA_TEST_SKIP("death tests need fork/exec to re-run this process, unavailable on Emscripten")
 #else
 #define AURORA_TEST_CHECK_DEATH(statement, ...)                                                  \
     do {                                                                                         \

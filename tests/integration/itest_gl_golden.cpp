@@ -9,6 +9,13 @@
 ///           取得：`GpuGlRhi` 的 MSAA/resolve 帧缓冲自持且不触默认帧缓冲，故窗口不参与渲染。
 ///           `AURORA_BACKEND_GLFW` / `AURORA_ENABLE_GLFW_GPU_GL` 未开启，或无显示环境 / GL 3.3
 ///           core 装载失败时按惯例落 skip 桩。
+///
+///           不经 E2E 内核（`e2e::Session`）的理由：本 TU 验的是 **RHI 离屏重放**，不建 aurora
+///           `Window`、不推进 `present_root`，读回走 `RhiFrameSink::read_pixels`（离屏 FBO），
+///           而内核的窗口面读回基底是 `Surface::data()`——两者是不同层的读回通道。此处的
+///           `HiddenGlContext` 只充当 `glfwGetProcAddress` 的 current 上下文提供者，不驱动任何
+///           帧；与 wgpu 侧共用 `support/gpu_golden_scenes.h` 的场景与帧装配、共用
+///           `golden::compare_gpu_tolerance` 判据，已是单源。
 
 #include <cstddef>
 
@@ -95,14 +102,14 @@ class HiddenGlContext {
 
 }  // namespace
 
-#define ITEST_GL_GPU_OR_SKIP(ctx, gpu)                                                          \
-    HiddenGlContext ctx;                                                                        \
-    if (!ctx.ok()) {                                                                            \
-        AURORA_TEST_SKIP("显示环境不可用（隐形开窗失败），GL 容差 golden 跳过");                \
-    }                                                                                           \
-    au::rhi::GpuGlRhi gpu = load_rhi();                                                         \
-    if (!gpu.valid()) {                                                                         \
-        AURORA_TEST_SKIP("GL 3.3 core 装载失败（驱动过老 / 函数表缺项），GL 容差 golden 跳过"); \
+#define ITEST_GL_GPU_OR_SKIP(ctx, gpu)                                                                    \
+    HiddenGlContext ctx;                                                                                  \
+    if (!ctx.ok()) {                                                                                      \
+        AURORA_TEST_SKIP("no display environment (hidden window open failed), skipping GL golden");       \
+    }                                                                                                     \
+    au::rhi::GpuGlRhi gpu = load_rhi();                                                                   \
+    if (!gpu.valid()) {                                                                                   \
+        AURORA_TEST_SKIP("GL 3.3 core load failed (old driver / missing functions), skipping GL golden"); \
     }
 
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
@@ -138,16 +145,16 @@ AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
 namespace aurora::test_cases::itest_gl_golden {
 
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL 未开启，GL 栅格通路不可用");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled, the GL raster path is unavailable");
 }
 AURORA_TEST_CASE(gpu_sector_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL 未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled");
 }
 AURORA_TEST_CASE(gpu_text_column_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL 未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled");
 }
 AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL 未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled");
 }
 
 }  // namespace aurora::test_cases::itest_gl_golden

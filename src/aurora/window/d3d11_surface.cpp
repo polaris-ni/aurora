@@ -27,6 +27,7 @@ auto safe_release(T *&p) -> void {
 }
 
 // 全屏三角形：无顶点缓冲，经 SV_VertexID 生成；纹理采样做任意比例 GPU 缩放。
+// CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
 constexpr auto AURORA_VS = R"HLSL(
 struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 VSOut VSMain(uint id : SV_VertexID) {
@@ -100,8 +101,9 @@ auto make_blend_desc() -> D3D11_BLEND_DESC {
 
 }  // namespace
 
-D3D11Surface::D3D11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style) {
-    win_ = std::make_unique<Win32Host>(width, height, title, style);
+D3D11Surface::D3D11Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
+                           WindowVisibility visibility) {
+    win_ = std::make_unique<Win32Host>(width, height, title, style, visibility);
     if (win_->hwnd() == nullptr) {
         AURORA_LOG_ERROR("d3d11", "Win32Host creation failed");
         return;

@@ -14,6 +14,7 @@
 
 #include "aurora/preferences/preferences.h"
 #include "framework/aurora_test.h"
+#include "framework/json_value_printer.h"
 
 namespace aurora::test_cases::utest_preferences {
 
@@ -40,9 +41,12 @@ AURORA_TEST_CASE(memory_mode_basic_get_set) {
     p.set("flag", std::string("on"));
     AURORA_TEST_CHECK_EQ(p.get<std::string>("flag", ""), std::string("on"));
     AURORA_TEST_CHECK_EQ(p.get<int>("flag", -1), -1);  // string 存储读 int → 回退
-    const std::vector<int> nums{1, 2, 3};
+    auto nums = json::Value::array();  // 整值直存直取：嵌套值不做通用容器转换
+    nums.push_back(1);
+    nums.push_back(2);
+    nums.push_back(3);
     p.set("nums", nums);
-    AURORA_TEST_CHECK(p.get<std::vector<int>>("nums", {}) == nums);
+    AURORA_TEST_CHECK_EQ(p.get<json::Value>("nums", json::Value{}), nums);
     AURORA_TEST_CHECK_THAT(p.keys(), m::contains(std::string{"count"}));
 
     AURORA_TEST_CHECK(!p.flush().ok());  // 内存模式不支持落盘
@@ -52,11 +56,11 @@ AURORA_TEST_CASE(memory_mode_basic_get_set) {
 
 AURORA_TEST_CASE(path_helpers_flatten_nested_keys) {
     // 公共点号路径助手：嵌套寻址写读删 + flatten 拍平（分组持久化的底层语义）。
-    aurora::Json root = aurora::Json::object();
-    prefs::resolve_set(root, "ui.theme", aurora::Json{"dark"});
+    json::Value root = json::Value::object();
+    prefs::resolve_set(root, "ui.theme", json::Value{"dark"});
     prefs::resolve_set(root, "ui.editor.font", 14);
-    AURORA_TEST_CHECK_EQ(prefs::resolve_get(root, "ui.theme"), aurora::Json{"dark"});
-    AURORA_TEST_CHECK_EQ(prefs::resolve_get(root, "ui.editor.font").get<int>(), 14);
+    AURORA_TEST_CHECK_EQ(prefs::resolve_get(root, "ui.theme"), json::Value{"dark"});
+    AURORA_TEST_CHECK_EQ(prefs::resolve_get(root, "ui.editor.font").as_or<int>(0), 14);
     AURORA_TEST_CHECK(prefs::resolve_get(root, "ui.missing").is_null());
     AURORA_TEST_CHECK(prefs::resolve_get(root, "a.b.c").is_null());  // 路径中断返回 null
     prefs::resolve_erase(root, "ui.theme");

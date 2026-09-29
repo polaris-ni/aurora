@@ -9,22 +9,22 @@
 #include "aurora/core/string_util.h"
 
 namespace aurora {
-/**
- * @brief 日志级别（规格：日志打印模块）。
- *
- * 级别自低向高：Trace < Debug < Info < Warn < Error < Fatal。
- * 全局 Logger 只输出 >= 当前阈值的日志（默认 Info）。
- */
+/// @brief 日志级别（规格：日志打印模块）。
+///
+/// 级别自低向高：Trace < Debug < Info < Warn < Error < Fatal。
+/// 全局 Logger 只输出 >= 当前阈值的日志（默认 Info）。
 enum class LogLevel : std::uint8_t {
-    Trace = 0U,
-    Debug,
-    Info,
-    Warn,
-    Error,
-    Fatal,
+    Trace = 0U,  ///< 最详细的执行轨迹
+    Debug,  ///< 开发调试信息
+    Info,  ///< 常规运行信息（默认阈值）
+    Warn,  ///< 可恢复的异常征兆
+    Error,  ///< 功能失败但进程可继续
+    Fatal,  ///< 不可恢复的致命错误
 };
 
 /// @brief 级别转短标签（TRC/DBG/INF/WRN/ERR/FTL）。
+/// @param level 日志级别。
+/// @return 三字母短标签；未知枚举值返回 "???"。
 [[nodiscard]] inline auto log_level_label(LogLevel level) noexcept -> std::string_view {
     switch (level) {
         case LogLevel::Trace:
@@ -43,10 +43,9 @@ enum class LogLevel : std::uint8_t {
     return "???";
 }
 
-/**
- * @brief 格式化时间戳为 `YYYY-MM-DD HH:MM:SS`（本地时间）。
- * @note 单线程 UI 假设；内部用 `std::chrono` + `std::localtime`，无锁。
- */
+/// @brief 格式化时间戳为 `YYYY-MM-DD HH:MM:SS`（本地时间）。
+/// @note 单线程 UI 假设；内部用 `std::chrono` + `std::localtime`，无锁。
+/// @return 形如 `2026-09-29 12:34:56` 的本地时间字符串。
 [[nodiscard]] inline auto log_timestamp() noexcept -> std::string {
     const auto now = std::chrono::system_clock::now();
     const auto t = std::chrono::system_clock::to_time_t(now);
@@ -61,70 +60,77 @@ enum class LogLevel : std::uint8_t {
                                            tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 }
 
-/**
- * @brief 日志输出目标（sink）签名。
- * @param line 已格式化的完整日志行（含换行符）。
- */
+/// @brief 日志输出目标（sink）签名。
+/// @param line 已格式化的完整日志行（含换行符）。
+/// @return sink 回调无返回值（签名为 `void(std::string_view)`）。
 using LogSink = std::function<void(std::string_view line)>;
 
-/**
- * @brief 初始化控制台为 UTF-8 代码页（仅 Windows 生效，其它平台为空实现）。
- *
- * 默认 Windows 控制台以 GBK(CP936) 解释 UTF-8 字节，导致源码中的中文输出乱码。
- * 调用一次 `SetConsoleOutputCP(CP_UTF8)` 即可让 `cout`/`cerr`/`fprintf` 等全部控制台
- * 输出按 UTF-8 正确渲染。建议在 `main()` 第一行调用；`Logger` 也会在首次使用时自动触发。
- */
+/// @brief 初始化控制台为 UTF-8 代码页（仅 Windows 生效，其它平台为空实现）。
+///
+/// 默认 Windows 控制台以 GBK(CP936) 解释 UTF-8 字节，导致源码中的中文输出乱码。
+/// 调用一次 `SetConsoleOutputCP(CP_UTF8)` 即可让 `cout`/`cerr`/`fprintf` 等全部控制台
+/// 输出按 UTF-8 正确渲染。建议在 `main()` 第一行调用；`Logger` 也会在首次使用时自动触发。
 auto init_console() noexcept -> void;
 
-/**
- * @brief 全局日志器（单例）。
- *
- * 特性：
- * - 级别阈值过滤（默认 Info）。
- * - 可重定向 sink（默认 stderr），便于测试捕获或文件落盘。
- * - 统一格式：`[YYYY-MM-DD HH:MM:SS][LEVEL][module@threadId filename:line] > content`。
- * - 单线程 UI 假设：内部状态无锁（仅 sink 调用为外部回调，由调用方保证线程安全）。
- * - 类型安全的可变参数消息：经 `AURORA_LOG_*` 宏传入任意数量参数，按 `operator<<` 折叠拼接。
- *
- * 推荐用法：通过 `AURORA_LOG_*` 宏记录，自动填入 file:line。
- * @note Thread: main-thread only
- * @note Side-effects: none
- */
+/// @brief 全局日志器（单例）。
+///
+/// 特性：
+/// - 级别阈值过滤（默认 Info）。
+/// - 可重定向 sink（默认 stderr），便于测试捕获或文件落盘。
+/// - 统一格式：`[YYYY-MM-DD HH:MM:SS][LEVEL][module@threadId filename:line] > content`。
+/// - 单线程 UI 假设：内部状态无锁（仅 sink 调用为外部回调，由调用方保证线程安全）。
+/// - 类型安全的可变参数消息：经 `AURORA_LOG_*` 宏传入任意数量参数，按 `operator<<` 折叠拼接。
+///
+/// 推荐用法：通过 `AURORA_LOG_*` 宏记录，自动填入 file:line。
+/// @note Thread: main-thread only
+/// @note Side-effects: none
 class Logger {
   public:
     /// @brief 取得全局唯一实例。
+    /// @return 进程级单例 Logger 引用（静态对象，首次调用时初始化）。
     static auto instance() -> Logger &;
 
     /// @brief 设置最低输出级别（低于此级别的日志被丢弃）。
+    /// @param level 新的级别阈值。
     auto set_level(LogLevel level) noexcept -> void;
 
     /// @brief 当前最低输出级别。
+    /// @return 现级别阈值。
     [[nodiscard]] auto level() const noexcept -> LogLevel;
 
     /// @brief 设置输出目标；传 nullptr 恢复默认 stderr。
+    /// @param sink 新的 sink；空 `std::function` 表示恢复默认。
     auto set_sink(LogSink sink) -> void;
 
     /// @brief 启用/禁用日志（禁用后所有日志静默丢弃）。
+    /// @param enabled true 启用，false 禁用。
     auto set_enabled(bool enabled) noexcept -> void;
 
     /// @brief 是否启用。
+    /// @return 日志开关状态。
     [[nodiscard]] auto is_enabled() const noexcept -> bool;
 
     /// @brief 记录一条日志（供宏调用，自动带 file:line）。
+    /// @param file 调用点文件名（由 AURORA_FILE_NAME 宏填入）。
+    /// @param line_no 调用点行号（__LINE__）。
+    /// @param level 本条日志级别；低于阈值或日志禁用时丢弃。
+    /// @param category 模块分类标签，渲染为前缀一段。
+    /// @param message 已拼接完成的日志正文。
     auto log(std::string_view file, int line_no, LogLevel level, std::string_view category,
              std::string_view message) const -> void;
 
-    /**
-     * @brief 无前缀纯文本输出通道（功能输出，非日志）。
-     *
-     * 直接写入 raw sink（默认 stdout），**不经过级别阈值过滤、不加时间戳/级别/分类前缀**，
-     * 调用方自负换行与协议格式。用于：CLI 的 JSON 结果 / usage 文本、benchmark 表格、
-     * LSP/MCP 等基于 stdio 的线协议帧（需精确字节，如 `\\r\\n\\r\\n`）。
-     * 与诊断日志区分：诊断/错误/警告请用 `AURORA_LOG_*` 系列。
-     */
+    /// @brief 无前缀纯文本输出通道（功能输出，非日志）。
+    ///
+    /// 直接写入 raw sink（默认 stdout），**不经过级别阈值过滤、不加时间戳/级别/分类前缀**，
+    /// 调用方自负换行与协议格式。用于：CLI 的 JSON 结果 / usage 文本、benchmark 表格、
+    /// LSP/MCP 等基于 stdio 的线协议帧（需精确字节，如 `\\r\\n\\r\\n`）。
+    /// 与诊断日志区分：诊断/错误/警告请用 `AURORA_LOG_*` 系列。
+    /// @param category 保留参数：raw 通道不使用，仅作调用点分类占位。
+    /// @param message 原样写出的正文（不做任何加工）。
     auto raw(std::string_view category, std::string_view message) const -> void;
 
     /// @brief 设置 raw 通道（功能输出）目标；传 nullptr 恢复默认 stdout。
+    /// @param sink 新的 raw sink；空 `std::function` 表示恢复默认。
     auto set_raw_sink(LogSink sink) -> void;
 
   private:
@@ -141,16 +147,15 @@ class Logger {
 
 namespace detail {
 /// @brief 无参数：返回空消息（允许 `AURORA_LOG_*(category)` 调用，向后兼容退化形式）。
+/// @return 拼接结果；无参数时为空串。
 [[nodiscard]] inline auto log_concat() -> std::string { return {}; }
 
-/**
- * @brief 把任意数量参数经 `operator<<` 折叠拼接为字符串（类型安全，无需格式化库）。
- *
- * 供 `AURORA_LOG_*` 宏的可变参数形态使用；单参数时退化为原样输出（与旧单 `msg` 行为一致）。
- */
+/// @brief 把任意数量参数经 `operator<<` 折叠拼接为字符串（类型安全，无需格式化库；供 `AURORA_LOG_*` 宏使用）。
+/// @param args 转发参数包；单参数时退化为原样输出（与旧单 `msg` 行为一致）。
+/// @return 拼接后的字符串。
 template <typename... Args>
 [[nodiscard]] auto log_concat(Args &&...args) -> std::string {
-    std::ostringstream oss;
+    std::ostringstream oss;  // 折叠拼接各转发参数的暂存流
     (oss << ... << std::forward<Args>(args));
     return std::move(oss).str();
 }
@@ -158,9 +163,9 @@ template <typename... Args>
 }  // namespace aurora
 
 #ifdef __FILE_NAME__
-#define AURORA_FILE_NAME __FILE_NAME__
+#define AURORA_FILE_NAME __FILE_NAME__  ///< 编译器支持时取当前文件名基名
 #else
-#define AURORA_FILE_NAME __FILE__
+#define AURORA_FILE_NAME __FILE__  ///< 退化取完整路径宏
 #endif
 
 // 日志宏族刻意保持宏形态：须经 __VA_ARGS__ 把任意数量参数零开销转发给 log_concat，并就地取
@@ -168,33 +173,40 @@ template <typename... Args>
 // 也无法承接 AURORA_LOG_RAW 直写 stdout（默认 sink 为 raw 通道）的线协议字节面。
 // NOLINTBEGIN(cppcoreguidelines-macro-usage)
 /// @brief 记录一条日志（自动附加 file:line）；消息支持任意数量的类型安全可变参数。
+/// @param level 日志级别，如 `::aurora::LogLevel::Info`。
+/// @param category 模块分类标签；其余参数经 `log_concat` 折叠为正文。
 #define AURORA_LOG(level, category, ...)                                              \
     ::aurora::Logger::instance().log(AURORA_FILE_NAME, __LINE__, (level), (category), \
                                      ::aurora::detail::log_concat(__VA_ARGS__))
 
 /// @brief 记录 TRACE 级日志（category 后接任意数量的类型安全可变参数）。
+/// @param category 模块分类标签。
 #define AURORA_LOG_TRACE(category, ...) AURORA_LOG(::aurora::LogLevel::Trace, (category), __VA_ARGS__)
 /// @brief 记录 DEBUG 级日志（category 后接任意数量的类型安全可变参数）。
+/// @param category 模块分类标签。
 #define AURORA_LOG_DEBUG(category, ...) AURORA_LOG(::aurora::LogLevel::Debug, (category), __VA_ARGS__)
 /// @brief 记录 INFO 级日志（category 后接任意数量的类型安全可变参数）。
+/// @param category 模块分类标签。
 #define AURORA_LOG_INFO(category, ...) AURORA_LOG(::aurora::LogLevel::Info, (category), __VA_ARGS__)
 /// @brief 记录 WARN 级日志（category 后接任意数量的类型安全可变参数）。
+/// @param category 模块分类标签。
 #define AURORA_LOG_WARN(category, ...) AURORA_LOG(::aurora::LogLevel::Warn, (category), __VA_ARGS__)
 /// @brief 记录 ERROR 级日志（category 后接任意数量的类型安全可变参数）。
+/// @param category 模块分类标签。
 #define AURORA_LOG_ERROR(category, ...) AURORA_LOG(::aurora::LogLevel::Error, (category), __VA_ARGS__)
 /// @brief 记录 FATAL 级日志（category 后接任意数量的类型安全可变参数）。
+/// @param category 模块分类标签。
 #define AURORA_LOG_FATAL(category, ...) AURORA_LOG(::aurora::LogLevel::Fatal, (category), __VA_ARGS__)
 
-/**
- * @brief 无前缀纯文本功能输出（经 `Logger::raw` 写入默认 stdout）。
- *
- * 不加时间戳/级别/分类前缀，调用方自负换行。用于 CLI 的 JSON 结果、usage 文本、
- * benchmark 表格、LSP/MCP 线协议帧等「程序产品」输出（区别于诊断日志 `AURORA_LOG_*`）。
- * @code
- *   AURORA_LOG_RAW("cli", json.dump(2), "\n");
- *   AURORA_LOG_RAW("mcp", "Content-Length: ", body.size(), "\r\n\r\n", body);
- * @endcode
- */
+/// @brief 无前缀纯文本功能输出（经 `Logger::raw` 写入默认 stdout）。
+///
+/// 不加时间戳/级别/分类前缀，调用方自负换行。用于 CLI 的 JSON 结果、usage 文本、
+/// benchmark 表格、LSP/MCP 线协议帧等「程序产品」输出（区别于诊断日志 `AURORA_LOG_*`）。
+/// @code
+/// AURORA_LOG_RAW("cli", json.dump(2), "\n");
+/// AURORA_LOG_RAW("mcp", "Content-Length: ", body.size(), "\r\n\r\n", body);
+/// @endcode
+/// @param category 分类标签：`Logger::raw` 不使用该参数，仅为调用点自文档化。
 #define AURORA_LOG_RAW(category, ...) \
     ::aurora::Logger::instance().raw((category), ::aurora::detail::log_concat(__VA_ARGS__))
 // NOLINTEND(cppcoreguidelines-macro-usage)
@@ -212,6 +224,8 @@ template <typename... Args>
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
 #endif
+/// @brief printf 风格诊断桥接为 INFO 日志：先 snprintf 进内存缓冲、去尾部换行，再走 AURORA_LOG_INFO("test", ...)。
+/// @param fmt printf 格式串，后续为对应的可变参实参。
 #define AURORA_TEST_PRINTF(fmt, ...)                                                            \
     do {                                                                                        \
         char _aurora_buf[2048];                                                                 \
@@ -222,6 +236,8 @@ template <typename... Args>
         AURORA_LOG_INFO("test", _aurora_sv);                                                    \
     } while (0)
 
+/// @brief printf 风格诊断桥接为 ERROR 日志：先 snprintf 进内存缓冲、去尾部换行，再走 AURORA_LOG_ERROR("test", ...)。
+/// @param fmt printf 格式串，后续为对应的可变参实参。
 #define AURORA_TEST_PRINTF_ERR(fmt, ...)                                                        \
     do {                                                                                        \
         char _aurora_buf[2048];                                                                 \

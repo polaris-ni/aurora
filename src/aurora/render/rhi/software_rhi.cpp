@@ -160,8 +160,8 @@ auto SoftwareRhi::submit(const DrawCmd &cmd, const CmdData &data) -> void {
                 // 冷存储未命中（首帧 / 消费端存储重建）：跳过本帧并整体失效层代际，
                 // 下一帧全部控件重录 BeginLayer 自愈——单帧缺口，不逐帧抖动。
                 if (layer_miss_warned_.insert(cmd.aux_key).second) {
-                    AURORA_LOG_WARN("rhi", "DrawLayer 未命中层键 ", cmd.aux_key,
-                                    "，本帧跳过（层代际已失效，下帧重录）");
+                    AURORA_LOG_WARN("rhi", "DrawLayer missed layer key ", cmd.aux_key,
+                                    ", this frame is skipped (layer epoch invalidated, re-recorded next frame)");
                 }
                 render::detail::bump_gpu_layer_epoch();
                 break;

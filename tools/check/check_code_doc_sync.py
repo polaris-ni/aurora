@@ -6,7 +6,14 @@
 #
 # 规则（测试头部，编号 TEST-R1–TEST-R10，定义见 codespec/CODING_STANDARDS.md §3.2）：
 #   DOC1    代码注释中的 `架构 §N` 引用 → codespec/ARCHITECTURE.md 必须存在该章节；
-#   DOC2    代码注释中的 `规格 §N` 引用 → 需求 #N 必须存在于 SPECIFICATIONS.md 特性表（#1–#29）；
+#   DOC2    代码注释中的需求 ID（`SPEC.<类目>.<域>.[<子域>…]<短名>.<数字尾>`）引用
+#           → 必须存在于 SPECIFICATIONS.md 特性表首列（`规格 §N` 是章节号、不再是需求号，
+#           故不再参与本规则）；
+#   DOC3    需求标识回流（关键词形态）：`需求` / `规格` / `requirement` / `spec` 之后紧跟
+#           `#<数字>` 的旧式纯数字编号一律红灯——需求编号已由需求 ID 取代，残留即两制混用；
+#   DOC4    需求标识回流（体系文档裸编号）：SPECIFICATIONS.md / CODING_STANDARDS.md /
+#           GUIDELINE.md / AGENTS.md 内裸 `#<数字>`（其前为非单词字符、后无数字）一律红灯——
+#           这四份是 ID 体系的口径文档，必须零旧形态；
 #   TEST-R1 测试头部必须含标准三行块：/// 测试类型 / /// 目标单元 / /// 测试说明
 #           （历史 // 目标源单元： 约定不计入标准块，视为 TEST-R1 违规，须归一）；
 #   TEST-R2 测试头部「目标单元 / 目标源单元」声明路径必须真实存在（防注释路径烂掉）；
@@ -16,8 +23,9 @@
 #   TEST-R7 并行安全：测试体系禁止新增 RUN_SERIAL（CMake 编排与测试源一并扫描），
 #           申请串行须列入 TEST_R7_WHITELIST 并注明根因（并行模型 = 进程隔离 + 资源虚拟化）；
 #   TEST-R8 命名纪律：目录定类型 + 前缀强制——tests/unit/ 一律 utest_、tests/integration/
-#           一律 itest_；测试 TU 不得放在两目录之外；禁止自定义套件宏（AURORA_TEST_NAMED 等，
-#           Suite 恒等于文件 stem，见 §3.1）；
+#           一律 itest_、tests/e2e/ 一律 etest_；tests/ 下的子目录必须落在已知类型目录或设施
+#           目录白名单内（否则测试 TU 会逃逸类型判定）；禁止自定义套件宏（AURORA_TEST_NAMED
+#           等，Suite 恒等于文件 stem，见 §3.1）；
 #   TEST-R9 测试 TU 禁止 using-directive（与 clang-tidy google-build-using-namespace 同口径）。
 #   （TEST-R3 一一对应 / TEST-R10 跨域 catch-all 趋势不纳入硬门禁：靠评审与审计，见 §3.2；
 #     TEST-R6 注册完整性由 tools/check/check_test_registry.py 的 registry_integrity 用例守门。）
@@ -55,25 +63,40 @@ WHITELIST = {}
 # 新增 RUN_SERIAL 属于违规；确因外部资源无法虚拟化而需要串行的，先在此登记根因。
 TEST_R7_WHITELIST = {}
 
+# ---- TEST-R8 目录白名单：目录定类型 + 强制前缀 -----------------------------
+# 类型目录：其中的 *.cpp 一律是测试 TU，且必须带对应前缀（Suite 恒等于文件 stem）。
+TEST_TYPE_DIRS = (("unit", "utest_"), ("integration", "itest_"), ("e2e", "etest_"))
+# 设施目录：框架 / 支撑 / 基准 / 夹具，非类型目录，不受前缀约束。
+TEST_FACILITY_DIRS = ("framework", "support", "fixtures", "golden")
+
 # TEST-R10 趋势基线：跨 ≥3 模块域的测试文件（catch-all 反模式）允许存量上限。
 CATCH_ALL_BASELINE = 20
 
-ARCH_REF_RE = re.compile(r"架构\s*§\s*([\d.]+)")
-SPEC_REF_RE = re.compile(r"规格\s*§\s*([\d.]+)")
+ARCH_REF_RE = re.compile(r"架构\s*§\s*([\d.]+)")  # CJK-LITERAL: regex-semantic
+# 需求 ID：SPEC.<类目>.<域>[.<子域>…]<短名>.<数字尾>（至少 4 个点分段，数字尾恒为三位、001 起）。
+# SPEC_ID_RE 是候选发现器，尾巴放宽到 1–3 位，使「尾巴位数不对」的写法也能被 DOC2 抓出；
+# SPEC_ID_SHAPE_RE 才是合法形态（恒为三位）。(?!\d) 防止把 `.0012` 截断成 `.001` 而误判通过。
+SPEC_ID_RE = re.compile(r"\bSPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{1,3}(?!\d)")
+SPEC_ID_SHAPE_RE = re.compile(r"^SPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{3}$")
+# 回流形态：关键词 + `#数字`（旧的纯数字需求编号）。数字尾巴同样做 (?!\d) 截断保护，
+# 故 `Ref #142`（PR 号）这类更长的数字串不会被 `#14` 前缀误伤。
+BACKFLOW_KEYWORD_RE = re.compile(
+    r"(?:需求|规格|requirement|spec)\s*#\s*\d{1,3}(?!\d)",  # CJK-LITERAL: regex-semantic
+    re.IGNORECASE)
 # 只校验「目标单元 / 目标源单元」（路径声明）；「目标组合」是语义描述，不是路径。
-TARGET_RE = re.compile(r"目标(?:单元|源单元)[:：]\s*([^\s`]+)")
-PLACEHOLDER_RE = re.compile(r"[（(<*]待补|TODO|TBD|xxx", re.IGNORECASE)
-HEADING_NUM_RE = re.compile(r"^(#{1,6})\s+(\d+(?:\.\d+)*)[\s、.]")
+TARGET_RE = re.compile(r"目标(?:单元|源单元)[:：]\s*([^\s`]+)")  # CJK-LITERAL: regex-semantic
+PLACEHOLDER_RE = re.compile(r"[（(<*]待补|TODO|TBD|xxx", re.IGNORECASE)  # CJK-LITERAL: regex-semantic
+HEADING_NUM_RE = re.compile(r"^(#{1,6})\s+(\d+(?:\.\d+)*)[\s、.]")  # CJK-LITERAL: regex-semantic
 
 # ---- 测试头部解析（与 TEST-R1–TEST-R6 同口径）------------------------------
-TYPE_RE = re.compile(r"///\s*测试类型\s*[:：]\s*(.+)")
-STD_TARGET_RE = re.compile(r"///\s*目标单元\s*[:：]\s*(.+)")
-ALT_TARGET_RE = re.compile(r"//\s*目标源单元\s*[:：]\s*(.+)")
-NOTE_RE = re.compile(r"///\s*测试说明\s*[:：]\s*(.+)")
+TYPE_RE = re.compile(r"///\s*测试类型\s*[:：]\s*(.+)")  # CJK-LITERAL: regex-semantic
+STD_TARGET_RE = re.compile(r"///\s*目标单元\s*[:：]\s*(.+)")  # CJK-LITERAL: regex-semantic
+ALT_TARGET_RE = re.compile(r"//\s*目标源单元\s*[:：]\s*(.+)")  # CJK-LITERAL: regex-semantic
+NOTE_RE = re.compile(r"///\s*测试说明\s*[:：]\s*(.+)")  # CJK-LITERAL: regex-semantic
 INCLUDE_RE = re.compile(r'#\s*include\s+"(aurora/([A-Za-z0-9_]+)/([A-Za-z0-9_.\-]+)\.h)"')
 MAP_TOKEN_RE = re.compile(r"(?:include/aurora/)?([a-z_]+)/([a-z0-9_.\-]+)\.(h|cpp)")
 MODULE_DOMAINS = {
-    "animation", "app", "core", "debug", "environment", "event", "i18n", "image",
+    "animation", "app", "cli", "core", "debug", "environment", "event", "i18n", "image",
     "inspector", "layout", "media", "modifier", "navigation", "perf", "preferences",
     "render", "state", "storage", "theming", "ui", "widget", "window",
 }
@@ -122,26 +145,26 @@ def section_numbers(md_path):
     return numbers
 
 
-def feature_numbers(spec_path):
+def feature_ids(spec_path):
+    """Requirement IDs (`SPEC.<类目>.<域>.…<短名>.<数字尾>`) listed in SPECIFICATIONS.md's feature table."""
     if not os.path.isfile(spec_path):
         return None
-    numbers = set()
+    ids = set()
     with open(spec_path, encoding="utf-8") as handle:
         for line in handle:
-            match = re.match(r"^\s*\|\s*(\d{1,2})\s*\|", line)
+            match = re.match(
+                r"^\s*\|\s*`?(SPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{1,3})(?!\d)`?\s*\|", line)
             if match:
-                value = int(match.group(1))
-                # 上界刻意不写死：SPECIFICATIONS.md 中唯一「数字首列」的表就是特性清单表，
-                # 硬编码上界（曾为 24）会让新增需求（如 #25 多窗口）静默逃过 DOC2 校验。
-                if value >= 1:
-                    numbers.add(value)
-    return numbers
+                # 上界刻意不写死：SPECIFICATIONS.md 中唯一「需求 ID 首列」的表就是特性清单表，
+                # 硬编码数字上界会让新增需求静默逃过 DOC2 校验。
+                ids.add(match.group(1))
+    return ids
 
 
 def check_doc_refs(repo, problems):
-    """DOC1/DOC2: `架构 §N` and `规格 §N` references in code comments must resolve."""
+    """DOC1: `架构 §N` references in code comments must resolve; DOC2: requirement IDs must exist."""
     arch_numbers = section_numbers(os.path.join(repo, "codespec", "ARCHITECTURE.md"))
-    spec_numbers = feature_numbers(os.path.join(repo, "codespec", "SPECIFICATIONS.md"))
+    known_ids = feature_ids(os.path.join(repo, "codespec", "SPECIFICATIONS.md"))
     for rel in iter_source_files(repo):
         with open(os.path.join(repo, rel), encoding="utf-8", errors="replace") as handle:
             for lineno, line in enumerate(handle, start=1):
@@ -149,14 +172,63 @@ def check_doc_refs(repo, problems):
                     continue
                 for number in ARCH_REF_RE.findall(line):
                     if arch_numbers is not None and number not in arch_numbers:
-                        problems.append(("DOC1", rel, lineno, f"架构 §{number} not found in ARCHITECTURE.md"))
-                for raw in SPEC_REF_RE.findall(line):
-                    try:
-                        number = int(float(raw))
-                    except ValueError:
-                        continue
-                    if spec_numbers is not None and number not in spec_numbers:
-                        problems.append(("DOC2", rel, lineno, f"规格 §{number} is not a known requirement #N"))
+                        problems.append(("DOC1", rel, lineno, f"ARCHITECTURE.md section {number} not found"))
+                for req_id in SPEC_ID_RE.findall(line):
+                    if not SPEC_ID_SHAPE_RE.match(req_id):
+                        problems.append(("DOC2", rel, lineno,
+                                         f"requirement ID {req_id} must end with a 3-digit tail (001, 002, ...)"))
+                    elif known_ids is not None and req_id not in known_ids:
+                        problems.append(("DOC2", rel, lineno,
+                                         f"requirement ID {req_id} is not in the SPECIFICATIONS.md feature table"))
+
+
+# ---- DOC3 / DOC4：需求标识回流（旧 `#N` 形态即红灯）-------------------------
+# 扫描范围对齐任务口径：codespec/ 全部文档 + 根 AGENTS.md + 代码/构建目录。
+BACKFLOW_DIRS = ("codespec", "include", "src", "tools", "tests", "cmake")
+BACKFLOW_FILES = ("AGENTS.md",)
+BACKFLOW_EXT = (".md", ".toml", ".h", ".hpp", ".cpp", ".cmake", ".py", ".txt")
+# 四份「ID 体系口径文档」：额外禁裸 `#N`（DOC4）。CHANGELOG.json 的历史 `#N` 有意保留，不进本名单。
+SPEC_SYSTEM_DOCS = ("codespec/SPECIFICATIONS.md", "codespec/CODING_STANDARDS.md",
+                    "codespec/GUIDELINE.md", "AGENTS.md")
+# 裸 `#N`：前为非单词字符、后无数字（`Ref #142` 这类长数字串不会被 `#14` 前缀截断命中）。
+BARE_HASH_RE = re.compile(r"(?<![\w])#\d{1,2}(?!\d)")
+# 注释分隔符与预处理指令：`#include` / `#define` / `# N` 之类不是需求编号。
+NOT_HASH_RE = re.compile(r"#\s*(include|define|pragma|if|ifdef|ifndef|else|endif|elif|undef|"
+                         r"line|error|warning|region|endregion)\b")
+
+
+def _backflow_targets(repo):
+    for rel in BACKFLOW_FILES:
+        if os.path.isfile(os.path.join(repo, rel)):
+            yield rel, True
+    for directory in BACKFLOW_DIRS:
+        base = os.path.join(repo, directory)
+        if not os.path.isdir(base):
+            continue
+        for current, dirs, files in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in ("build", ".git", "__pycache__", "third_party")]
+            for name in sorted(files):
+                if name.endswith(BACKFLOW_EXT) or name == "CMakeLists.txt":
+                    rel = os.path.relpath(os.path.join(current, name), repo).replace("\\", "/")
+                    yield rel, rel in SPEC_SYSTEM_DOCS
+
+
+def check_spec_id_backflow(repo, problems):
+    """DOC3 (keyword form, repo-wide) / DOC4 (bare `#N` in the ID-system docs)."""
+    for rel, strict in _backflow_targets(repo):
+        try:
+            with open(os.path.join(repo, rel), encoding="utf-8", errors="replace") as handle:
+                for lineno, line in enumerate(handle, start=1):
+                    if BACKFLOW_KEYWORD_RE.search(line):
+                        problems.append(("DOC3", rel, lineno,
+                                         "legacy numeric requirement reference; use the "
+                                         "SPEC.<CATEGORY>.<DOMAIN>.<SHORT-NAME>.<DIGIT-TAIL> ID instead"))
+                    if strict and not NOT_HASH_RE.search(line) and BARE_HASH_RE.search(line):
+                        problems.append(("DOC4", rel, lineno,
+                                         "bare numeric requirement number in an ID-system document; "
+                                         "write the SPEC.<CATEGORY>.<DOMAIN>.<SHORT-NAME>.<DIGIT-TAIL> ID instead"))
+        except OSError:
+            continue
 
 
 def resolve_target(repo, target):
@@ -189,7 +261,7 @@ PATH_TOKEN_RE = re.compile(r"[A-Za-z0-9_./-]+\.(?:h|cpp)")
 def split_targets(val):
     if not val:
         return []
-    parts = re.split(r"[+\s、,；;]+", val)
+    parts = re.split(r"[+\s、,；;]+", val)  # CJK-LITERAL: regex-semantic
     out = []
     for p in parts:
         p = p.strip().strip("`").strip('"').strip("'").strip()
@@ -308,16 +380,16 @@ def check_test_headers(repo, problems):
         rel = os.path.join("tests/unit", name).replace("\\", "/")
         info = parse_test_header(repo, rel)
         if info["format"] != "standard":
-            detail = "头部缺标准三行块 (/// 测试类型/目标单元/测试说明)" + \
-                     ("；使用历史 // 目标源单元： 约定" if info["format"] == "alt" else "；无任何目标声明")
+            detail = "Missing the standard 3-line header block (/// test type/target unit/test note)" + \
+                     ("; legacy // target-source-unit form" if info["format"] == "alt" else "; no target declaration")
             problems.append(("TEST-R1", rel, 1, detail))
         if info["is_placeholder"]:
             problems.append(("TEST-R2", rel, 1, info["target_raw"]))
             continue
         if info["target_raw"] and info["primary"] is None and not info["declared"]:
-            problems.append(("TEST-R2", rel, 1, "目标单元路径不存在: " + info["target_raw"]))
+            problems.append(("TEST-R2", rel, 1, "target path not found: " + info["target_raw"]))
         if info["target_is_agg"]:
-            problems.append(("TEST-R4", rel, 1, "目标单元指向聚合头: " + (info["target_raw"] or "")))
+            problems.append(("TEST-R4", rel, 1, "target points to an aggregate header: " + (info["target_raw"] or "")))
 
 
 def symbol_referenced(repo, stem):
@@ -363,7 +435,9 @@ def check_public_header_coverage(repo, problems):
     for h in sorted(unit_headers - declared_all - effective):
         stem = os.path.splitext(os.path.basename(h))[0]
         if not symbol_referenced(repo, stem):
-            problems.append(("R5", h, 1, "公共单元头无测试覆盖（未声明为目标、未被直接 include、符号零引用）"))
+            problems.append(("R5", h, 1,
+                             "public unit header has no test coverage "
+                             "(not declared as a target, not directly included, symbol never referenced)"))
 
 
 def _strip_line_and_block_comments(text):
@@ -401,14 +475,18 @@ def check_parallel_safety(repo, problems):
             text = re.sub(r"#[^\n]*", " ", handle.read())  # CMake 注释以 # 开头
         for lineno, line in enumerate(text.splitlines(), start=1):
             if "RUN_SERIAL" in line:
-                problems.append(("TEST-R7", rel, lineno, "测试体系禁止 RUN_SERIAL（并行=进程隔离+资源虚拟化）；"
-                                                         "确需串行先登记 TEST_R7_WHITELIST 并注明根因"))
+                problems.append(("TEST-R7", rel, lineno,
+                                 "the test system forbids RUN_SERIAL (parallel = process isolation + "
+                                 "resource virtualization); if serial execution is truly needed, "
+                                 "register it in TEST_R7_WHITELIST with the root cause first"))
     for rel in _iter_tests_tree(repo, (".cpp",)):
         with open(os.path.join(repo, rel), encoding="utf-8", errors="replace") as handle:
             text = _strip_line_and_block_comments(handle.read())
         for lineno, line in enumerate(text.splitlines(), start=1):
             if "RUN_SERIAL" in line and rel not in TEST_R7_WHITELIST:
-                problems.append(("TEST-R7", rel, lineno, "测试源中出现 RUN_SERIAL（应由资源虚拟化消除，而非串行）"))
+                problems.append(("TEST-R7", rel, lineno,
+                                 "RUN_SERIAL found in test source (should be removed via "
+                                 "resource virtualization, not serialization)"))
 
 
 def check_test_naming(repo, problems):
@@ -416,11 +494,11 @@ def check_test_naming(repo, problems):
 
     Suite == file stem is enforced by the framework (derived from __FILE__), so the
     static check targets the ways that contract used to be (or could be) broken:
-    wrongly named/prefaced files, test TUs outside tests/unit|integration, and
+    wrongly named/prefaced files, test TUs outside the known type directories, and
     custom-suite macros that would bypass the stem binding.
     """
     forbidden_macros = re.compile(r"\bAURORA_TEST_NAMED\b|\bAURORA_TEST_SUITE\b")
-    for kind, prefix in (("unit", "utest_"), ("integration", "itest_")):
+    for kind, prefix in TEST_TYPE_DIRS:
         base = os.path.join(repo, "tests", kind)
         if not os.path.isdir(base):
             continue
@@ -429,17 +507,32 @@ def check_test_naming(repo, problems):
                 continue
             rel = os.path.join("tests", kind, name).replace("\\", "/")
             if not name.startswith(prefix):
-                problems.append(("TEST-R8", rel, 1, f"tests/{kind}/ 测试文件须以 {prefix} 前缀命名"))
+                problems.append(("TEST-R8", rel, 1, f"tests/{kind}/ test files must use the {prefix} prefix"))
             with open(os.path.join(repo, rel), encoding="utf-8", errors="replace") as handle:
                 code = _strip_line_and_block_comments(handle.read())
             for lineno, line in enumerate(code.splitlines(), start=1):
                 if forbidden_macros.search(line):
-                    problems.append(("TEST-R8", rel, lineno, "自定义套件宏被禁止：Suite 恒等于文件 stem（__FILE__ 推导）"))
-    # 测试 TU 只能在 tests/unit 与 tests/integration（框架/支撑目录豁免）。
+                    problems.append(("TEST-R8", rel, lineno,
+                                      "custom suite macros are forbidden: Suite always equals the "
+                                      "file stem (derived from __FILE__)"))
+    # 目录纪律（反向判定）：tests/ 下只允许已知类型目录与设施目录。旧判定只认深度 2 的
+    # tests/<file>.cpp，未来任意 tests/<任意目录>/ 都会逃逸「目录定类型」约束。
+    type_dirs = [kind for kind, _ in TEST_TYPE_DIRS]
+    tests_root = os.path.join(repo, "tests")
+    if os.path.isdir(tests_root):
+        known = set(type_dirs) | set(TEST_FACILITY_DIRS)
+        for name in sorted(os.listdir(tests_root)):
+            if os.path.isdir(os.path.join(tests_root, name)) and name not in known:
+                problems.append(("TEST-R8", f"tests/{name}", 1,
+                                 "tests/ subdirectory must be a known type directory ("
+                                 + "/".join(type_dirs) + ") or a facility directory ("
+                                 + "/".join(TEST_FACILITY_DIRS) + ") (directory defines type)"))
+    # 类型目录之外的游离测试 TU（含 tests/ 根下的裸 .cpp）。
     for rel in _iter_tests_tree(repo, (".cpp",)):
         parts = rel.split("/")
         if len(parts) == 2 and parts[0] == "tests":  # tests/<file>.cpp —— 游离在类型目录之外
-            problems.append(("TEST-R8", rel, 1, "测试 TU 须位于 tests/unit/ 或 tests/integration/（目录定类型）"))
+            problems.append(("TEST-R8", rel, 1,
+                             "a test TU must live inside a known type directory (directory defines type)"))
 
 
 def check_using_directive(repo, problems):
@@ -454,7 +547,9 @@ def check_using_directive(repo, problems):
         for lineno, line in enumerate(code.splitlines(), start=1):
             if re.search(r"\busing\s+namespace\b", line):
                 problems.append(
-                    ("TEST-R9", rel, lineno, "测试代码禁止 using-directive；用 using 声明 / 命名空间别名 / 显式限定"))
+                    ("TEST-R9", rel, lineno,
+                     "test code forbids using-directive; use using-declarations / "
+                     "namespace aliases / explicit qualification"))
 
 
 def report_catch_all_trend(repo):
@@ -473,12 +568,13 @@ def report_catch_all_trend(repo):
             if len(domains) >= 3:
                 counts[rel] = len(domains)
     if len(counts) > CATCH_ALL_BASELINE:
-        print(f"[WARN] TEST-R10 趋势：跨 ≥3 模块域的测试文件 {len(counts)} 个，超出基线 {CATCH_ALL_BASELINE}"
-              f"（catch-all 反模式抬头）：")
+        print(f"[WARN] TEST-R10 trend: test files spanning >=3 module domains: "
+              f"{len(counts)}, above baseline {CATCH_ALL_BASELINE} (catch-all anti-pattern rising):")
         for rel, domain_count in sorted(counts.items()):
-            print(f"  {rel}: {domain_count} 域")
+            print(f"  {rel}: {domain_count} domains")
     else:
-        print(f"[INFO] TEST-R10 趋势：跨 ≥3 模块域测试文件 {len(counts)}/{CATCH_ALL_BASELINE}（基线内）。")
+        print(f"[INFO] TEST-R10 trend: test files spanning >=3 module domains "
+              f"{len(counts)}/{CATCH_ALL_BASELINE} (within baseline).")
 
 
 def main() -> int:
@@ -489,6 +585,7 @@ def main() -> int:
 
     problems = []
     check_doc_refs(repo, problems)
+    check_spec_id_backflow(repo, problems)
     check_test_headers(repo, problems)
     check_public_header_coverage(repo, problems)
     check_parallel_safety(repo, problems)

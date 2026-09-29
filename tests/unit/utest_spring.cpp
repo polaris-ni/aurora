@@ -10,7 +10,7 @@
 
 namespace aurora::test_cases::utest_spring {
 
-/// @brief 默认参数与自定义参数下的固有频率、阻尼比与公式一致（欠/临界/过阻尼取整值）。
+// 默认参数与自定义参数下的固有频率、阻尼比与公式一致（欠/临界/过阻尼取整值）。
 AURORA_TEST_CASE(spring_description_defaults_and_derived_quantities) {
     const aurora::SpringDescription defaults{};
     AURORA_TEST_CHECK_NEAR(defaults.natural_frequency(), 13.038404810405298, 1e-9);  // sqrt(170)
@@ -29,7 +29,7 @@ AURORA_TEST_CASE(spring_description_defaults_and_derived_quantities) {
     AURORA_TEST_CHECK_NEAR(over.damping_ratio(), 2.0, 1e-12);
 }
 
-/// @brief 三种阻尼 regimes 下：t≤0 返回起点，长时间后收敛到终点。
+// 三种阻尼 regimes 下：t≤0 返回起点，长时间后收敛到终点。
 AURORA_TEST_CASE(simulation_matches_endpoints_across_damping_regimes) {
     const aurora::SpringDescription under{.stiffness = 100.0, .damping = 2.0, .mass = 1.0};
     const aurora::SpringDescription crit{.stiffness = 100.0, .damping = 20.0, .mass = 1.0};
@@ -48,7 +48,7 @@ AURORA_TEST_CASE(simulation_matches_endpoints_across_damping_regimes) {
     }
 }
 
-/// @brief 临界阻尼从起点到终点无过冲、单调趋近，且 1s 内进入默认容差的 settled 态。
+// 临界阻尼从起点到终点无过冲、单调趋近，且 1s 内进入默认容差的 settled 态。
 AURORA_TEST_CASE(critical_damping_no_overshoot_and_settles) {
     const aurora::SpringDescription crit{.stiffness = 100.0, .damping = 20.0, .mass = 1.0};
     const aurora::SpringSimulation sim{crit, 0.0, 1.0};
@@ -62,7 +62,7 @@ AURORA_TEST_CASE(critical_damping_no_overshoot_and_settles) {
     AURORA_TEST_CHECK_TRUE(sim.is_settled(1.0));  // 位置与速度均进入 0.01 容差
 }
 
-/// @brief 欠阻尼出现一次过冲峰（≈1.73）后振荡衰减回落到终点。
+// 欠阻尼出现一次过冲峰（≈1.73）后振荡衰减回落到终点。
 AURORA_TEST_CASE(underdamped_overshoots_then_converges) {
     const aurora::SpringDescription under{.stiffness = 100.0, .damping = 2.0, .mass = 1.0};  // ζ=0.1, ω₀=10
     const aurora::SpringSimulation sim{under, 0.0, 1.0};
@@ -73,7 +73,7 @@ AURORA_TEST_CASE(underdamped_overshoots_then_converges) {
     AURORA_TEST_CHECK_NEAR(sim.value(5.0), 1.0, 0.02);  // 振荡衰减后回到目标附近
 }
 
-/// @brief 数值微分速度在过冲前后变号；初速度把「从目标出发」的轨迹推出正向位移。
+// 数值微分速度在过冲前后变号；初速度把「从目标出发」的轨迹推出正向位移。
 AURORA_TEST_CASE(velocity_derivative_and_initial_velocity_shape_trajectory) {
     const aurora::SpringDescription under{.stiffness = 100.0, .damping = 2.0, .mass = 1.0};
     const aurora::SpringSimulation sim{under, 0.0, 1.0};
@@ -88,7 +88,7 @@ AURORA_TEST_CASE(velocity_derivative_and_initial_velocity_shape_trajectory) {
     AURORA_TEST_CHECK_NEAR(pushed.value(quarter_t), 0.4291, 5e-3);  // 被初速推出 ≈0.43
 }
 
-/// @brief is_settled 要求位置与速度同时安静：位置已进容差但速度未静时不算 settled。
+// is_settled 要求位置与速度同时安静：位置已进容差但速度未静时不算 settled。
 AURORA_TEST_CASE(settled_requires_position_and_velocity_quiet) {
     const aurora::SpringDescription under{.stiffness = 100.0, .damping = 2.0, .mass = 1.0};
     const aurora::SpringSimulation sim{under, 0.0, 1.0};

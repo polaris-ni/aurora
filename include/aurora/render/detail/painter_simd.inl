@@ -7,23 +7,30 @@
 #include "aurora/core/platform.h"
 #include "aurora/render/detail/painter_simd.h"
 
+/// @brief 光栅内核 SIMD 双实现的内联定义：标量黄金参考、显式 SSE2/AVX2 实现与运行时探测初始化。
+/// @file
+
 #ifdef AURORA_COMPILER_MSVC
-// MSVC x64 基线已含 SSE2，_mm256_* 无需 /arch:AVX2 即可编译（指令照发，运行时经
-// g_simd_level 分发保证只在 AVX2 机器执行）；MSVC 不校验 intrinsic 的 target feature，
-// 故 target 属性留空即可。
+/// @brief MSVC 下 AVX2 target 属性留空：x64 基线已含 SSE2，_mm256_* 无需 /arch:AVX2 即可编译（指令照发，运行时经
+/// g_simd_level 分发保证只在 AVX2 机器执行）；MSVC 不校验 intrinsic 的 target feature。
 #define AURORA_AVX2_TARGET
+/// @brief MSVC 下 SSE4.1 target 属性同样留空：不校验 intrinsic 的 target feature，内置函数直接编译。
 #define AURORA_SSE41_TARGET
+/// @brief 标记函数不被编译器内联展开（MSVC 形态）。
 #define AURORA_NOINLINE __declspec(noinline)
 #else
-// GCC / Clang（含 clang-cl）：clang 强制校验「always_inline intrinsic 要求 target feature」，
-// 空 target 属性会让 _mm256_* 报 "requires target feature 'avx'"。须显式加 target 属性。
-// clang-cl 复用 MSVC 运行时但仍是 clang，同样需要该属性；noinline 与 MSVC 对齐用 __declspec。
+/// @brief GCC / Clang（含 clang-cl）：显式给函数加 target("avx2") 属性。
+/// clang 强制校验「always_inline intrinsic 要求 target feature」，
+/// 空 target 属性会让 _mm256_* 报 "requires target feature 'avx'"。
+/// clang-cl 复用 MSVC 运行时但仍是 clang，同样需要该属性；noinline 与 MSVC 对齐用 __declspec。
 #define AURORA_AVX2_TARGET __attribute__((target("avx2")))
-// SSE2 路径用到 SSE4.1 内置（cvtepu8_epi32 / min_epi32 / max_epi32），须显式开 target。
+/// @brief SSE2 路径用到 SSE4.1 内置（cvtepu8_epi32 / min_epi32 / max_epi32），须显式开 target("sse4.1")。
 #define AURORA_SSE41_TARGET __attribute__((target("sse4.1")))
 #ifdef AURORA_COMPILER_CLANG_CL
+/// @brief 标记函数不被编译器内联展开（clang-cl 对齐 MSVC，用 __declspec 形态）。
 #define AURORA_NOINLINE __declspec(noinline)
 #else
+/// @brief 标记函数不被编译器内联展开（GCC/Clang 属性形态）。
 #define AURORA_NOINLINE __attribute__((noinline))
 #endif
 #endif
@@ -54,6 +61,15 @@ namespace aurora::detail {
 // NOLINTBEGIN(*-pro-bounds-*, *-pro-type-*, *-narrowing-*, *-isolate-declaration, *-use-auto)
 
 // ---------------- 标量黄金参考 ----------------
+/// @brief 标量黄金参考：逐通道 alpha 的 sRGB 伽马混合，n 个连续像素逐像素调 blend_srgb_over，A 写 255。
+/// @param px 像素段首指针；每像素 4 字节，RGB 就地混合写回、A 写 255。
+/// @param sr 源 8 位 sRGB 红分量。
+/// @param sg 源 8 位 sRGB 绿分量。
+/// @param sb 源 8 位 sRGB 蓝分量。
+/// @param ar 红色通道覆盖率（[0,1]）。
+/// @param ag 绿色通道覆盖率（[0,1]）。
+/// @param ab 蓝色通道覆盖率（[0,1]）。
+/// @param n  像素个数。
 inline auto blend_srgb_over_region_scalar(std::uint8_t *px, std::uint8_t sr, std::uint8_t sg, std::uint8_t sb, float ar,
                                           float ag, float ab, int n) -> void {
     for (int i = 0; i < n; ++i) {
@@ -65,6 +81,14 @@ inline auto blend_srgb_over_region_scalar(std::uint8_t *px, std::uint8_t sr, std
     }
 }
 
+/// @brief 标量黄金参考：线性空间混合 n 个连续像素，结果 = px*finv + src*fa 向零截断，A 写 255。
+/// @param px 像素段首指针；每像素 4 字节。
+/// @param sr 源 8 位红分量。
+/// @param sg 源 8 位绿分量。
+/// @param sb 源 8 位蓝分量。
+/// @param fa 源色权重。
+/// @param finv 目标色权重（通常 1 - fa）。
+/// @param n  像素个数。
 inline auto blend_linear_region_scalar(std::uint8_t *px, std::uint8_t sr, std::uint8_t sg, std::uint8_t sb, float fa,
                                        float finv, int n) -> void {
     for (int i = 0; i < n; ++i) {
@@ -76,9 +100,17 @@ inline auto blend_linear_region_scalar(std::uint8_t *px, std::uint8_t sr, std::u
     }
 }
 
-// ---------------- 整数 box blur 标量黄金参考（WS-4：blur_region 栅格原语）----------------
-// 与 Painter::blur_region 逐位一致（实为同一算法：分离式两遍整数 box blur，n=2r+1 恒定，
-// 结果 = acc[c]/n 正整数截断）。SIMD 路径须与此逐位一致。
+// ---------------- 整数 box blur 标量黄金参考（blur_region 栅格原语）----------------
+/// @brief 整数 box blur 标量黄金参考（分离式两遍）：与 Painter::blur_region 逐位一致，
+/// 实为同一算法——窗口计数 n = 2r+1 恒定（clamp 仅改变采样源、不改计数），结果 = acc[c]/n 正整数截断；SIMD
+/// 路径须与此逐位一致。
+/// @param pixels 帧缓冲指针（步长 full_width*4 字节），就地输出。
+/// @param full_width 帧缓冲宽（像素）。
+/// @param x0 区域左上角 x。
+/// @param y0 区域左上角 y。
+/// @param rw 区域宽（像素）。
+/// @param rh 区域高（像素）。
+/// @param r 窗口半径。
 inline auto blur_region_scalar(std::uint8_t *pixels, int full_width, int x0, int y0, int rw, int rh, int r) -> void {
     std::vector<std::uint8_t> tmp(static_cast<std::size_t>(rw) * rh * 4);
     const int n = (2 * r) + 1;
@@ -122,11 +154,25 @@ inline auto blur_region_scalar(std::uint8_t *pixels, int full_width, int x0, int
     }
 }
 
-// ---------------- 渐变扫描线标量黄金参考（WS-4：gradient SIMD 双实现【D1】）----------------
-// 与 Painter 不透明快路径位级一致：双色标（stops[0..1]）、全不透明（a=255）时 sample_gradient
-// 退化为 c = c0 + (c1-c0)*frac，frac = clamp(t,0,1) 在 [stop0, stop0+range] 上的归一。
-// 浮点运算序列刻意与 SSE2/AVX2 版本 1:1 对应（-ffp-contract=off，无 FMA），保证逐位一致。
-// 不读取帧缓冲：输出仅取决于几何与端点色，直接写 RGB + A(=255)；整数截断用 cvtt 语义（向零截断 + 钳位）。
+// ---------------- 渐变扫描线标量黄金参考（gradient SIMD 双实现）----------------
+/// @brief 线性渐变扫描线标量黄金参考（单行，真·逐像素公式），与 Painter 不透明快路径位级一致。
+/// 双色标（stops[0..1]）、全不透明（a=255）时 sample_gradient 退化为 c = c0 + (c1-c0)*frac，
+/// frac = clamp(t,0,1) 在 [stop0, stop0+range] 上的归一。浮点运算序列刻意与 SSE2/AVX2 版本 1:1 对应
+/// （-ffp-contract=off，无 FMA），保证逐位一致。不读取帧缓冲：输出仅取决于几何与端点色，
+/// 直接写 RGB + A(=255)；整数截断用 cvtt 语义（向零截断 + 钳位）。
+/// @param row 该行 x0 处首字节指针；填充 [x0, x0+n) 共 n 个像素。
+/// @param x0 首像素的 x 坐标。
+/// @param n  像素个数。
+/// @param sx 渐变起点 x 坐标。
+/// @param py 逐行预折叠的投影常量（(y-sy)*dy，dy 已并入其中）。
+/// @param dx 渐变方向向量 x 分量。
+/// @param dy 渐变方向向量 y 分量；本函数不使用（已折叠进 py）。
+/// @param inv_len_sq 渐变向量长度平方的倒数。
+/// @param c0 起点色 RGB 三字节指针。
+/// @param c1 终点色 RGB 三字节指针。
+/// @param stop0 首色标的归一化停止位置。
+/// @param range 两色标间跨度（<=0 时插值系数取 0）。
+/// @return 已填充像素数（标量路径填完整行，恒为 n）。
 inline auto gradient_linear_scanline_scalar(std::uint8_t *row, int x0, int n, float sx, float py, float dx, float dy,
                                             float inv_len_sq, const std::uint8_t *c0, const std::uint8_t *c1,
                                             float stop0, float range) -> int {
@@ -153,6 +199,18 @@ inline auto gradient_linear_scanline_scalar(std::uint8_t *row, int x0, int n, fl
     return n;
 }
 
+/// @brief 径向渐变扫描线标量黄金参考（单行）：t = sqrt((x-cx)^2 + py) * inv_r 后钳位归一，其余与线性版同式逐位一致。
+/// @param row 该行 x0 处首字节指针；填充 [x0, x0+n) 共 n 个像素。
+/// @param x0 首像素的 x 坐标。
+/// @param n  像素个数。
+/// @param cx 径向圆心 x 坐标。
+/// @param py 逐行预计算的圆心纵向距离平方（(y-cy)^2）。
+/// @param inv_r 半径倒数。
+/// @param c0 起点色 RGB 三字节指针。
+/// @param c1 终点色 RGB 三字节指针。
+/// @param stop0 首色标的归一化停止位置。
+/// @param range 两色标间跨度（<=0 时插值系数取 0）。
+/// @return 已填充像素数（标量路径填完整行，恒为 n）。
 inline auto gradient_radial_scanline_scalar(std::uint8_t *row, int x0, int n, float cx, float py, float inv_r,
                                             const std::uint8_t *c0, const std::uint8_t *c1, float stop0, float range)
     -> int {
@@ -181,12 +239,19 @@ inline auto gradient_radial_scanline_scalar(std::uint8_t *row, int x0, int n, fl
 
 #ifdef AURORA_ENABLE_SIMD
 
-// 单像素伽马混合：v = dst_lin*inv + src_lin*alpha，结果转 sRGB。
-// 标量参考：blend_srgb_over(dst, src, alpha) = linear_to_srgb(srgb_to_linear(src)*alpha + srgb_to_linear(dst)*inv)
-// SIMD 逐通道 c：alpha = a[c]，src = s[c]；dv = g_gamma_tables.srgb_to_linear[d[c]]，
-// dsf = g_gamma_tables.srgb_to_linear[s[c]]。
-
 #ifdef AURORA_SIMD_X86
+/// @brief 单像素伽马混合的 SSE2 实现（4 像素一组）：v = dst_lin*inv + src_lin*alpha，结果转回 sRGB，逐位镜像标量黄金。
+/// 标量参考：blend_srgb_over(dst, src, alpha) = linear_to_srgb(srgb_to_linear(src)*alpha + srgb_to_linear(dst)*inv)；
+/// SIMD 逐通道 c：alpha = a[c]，src = s[c]；dv = srgb_to_linear[d[c]]，dsf = srgb_to_linear[s[c]]，
+/// LUT 索引由 cvtt 截断 + min/max 钳位后查 linear_to_srgb_lut。
+/// @param px 像素段首指针；每像素 4 字节，RGB 就地混合写回、A 写 255。
+/// @param sr 源 8 位 sRGB 红分量。
+/// @param sg 源 8 位 sRGB 绿分量。
+/// @param sb 源 8 位 sRGB 蓝分量。
+/// @param ar 红色通道覆盖率（[0,1]）。
+/// @param ag 绿色通道覆盖率（[0,1]）。
+/// @param ab 蓝色通道覆盖率（[0,1]）。
+/// @param n  像素个数；不足 4 个一组的尾部回落标量黄金。
 inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_srgb_over_region_sse2(std::uint8_t *px, std::uint8_t sr,
                                                                             std::uint8_t sg, std::uint8_t sb, float ar,
                                                                             float ag, float ab, int n) -> void {
@@ -234,6 +299,14 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_srgb_over_region_sse2(std:
     }
 }
 
+/// @brief 线性混合的 SSE2 实现（4 像素一组）：v = dst*finv + src*fa，cvtt 向零截断 + [0,255] 钳位，A 写 255。
+/// @param px 像素段首指针；每像素 4 字节。
+/// @param sr 源 8 位红分量。
+/// @param sg 源 8 位绿分量。
+/// @param sb 源 8 位蓝分量。
+/// @param fa 源色权重。
+/// @param finv 目标色权重（通常 1 - fa）。
+/// @param n  像素个数；不足 4 个一组的尾部回落标量黄金。
 inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_linear_region_sse2(std::uint8_t *px, std::uint8_t sr,
                                                                          std::uint8_t sg, std::uint8_t sb, float fa,
                                                                          float finv, int n) -> void {
@@ -273,8 +346,21 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blend_linear_region_sse2(std::ui
     }
 }
 
-// 渐变扫描线 SSE2 实现（WS-4）：镜像 gradient_*_scanline_scalar 浮点序列，4 像素一组。
-// 不读取帧缓冲（输出仅取决于几何与端点色），直接写入行内 RGB + A(=255)。
+/// @brief 线性渐变扫描线 SSE2 实现：镜像 gradient_linear_scanline_scalar 的浮点运算序列，4 像素一组。
+/// 不读取帧缓冲（输出仅取决于几何与端点色），直接写入行内 RGB + A(=255)；整数截断用 cvtt 语义。
+/// @param row 该行 x0 处首字节指针；填充 [x0, x0+n) 共 n 个像素。
+/// @param x0 首像素的 x 坐标。
+/// @param n  像素个数。
+/// @param sx 渐变起点 x 坐标。
+/// @param py 逐行预折叠的投影常量（(y-sy)*dy，dy 已并入其中）。
+/// @param dx 渐变方向向量 x 分量。
+/// @param dy 渐变方向向量 y 分量；本函数不使用（已折叠进 py）。
+/// @param inv_len_sq 渐变向量长度平方的倒数。
+/// @param c0 起点色 RGB 三字节指针。
+/// @param c1 终点色 RGB 三字节指针。
+/// @param stop0 首色标的归一化停止位置。
+/// @param range 两色标间跨度（<=0 时插值系数取 0）。
+/// @return SIMD 主循环已填充的像素数（4 的整数倍，可为 0）；不足一组的尾部已由内嵌标量调用补齐。
 inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_linear_scanline_sse2(std::uint8_t *row, int x0, int n,
                                                                               float sx, float py, float dx, float dy,
                                                                               float inv_len_sq, const std::uint8_t *c0,
@@ -329,6 +415,18 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_linear_scanline_sse2(st
     return i;
 }
 
+/// @brief 径向渐变扫描线 SSE2 实现：镜像 gradient_radial_scanline_scalar（_mm_sqrt_ps），4 像素一组，不读取帧缓冲。
+/// @param row 该行 x0 处首字节指针；填充 [x0, x0+n) 共 n 个像素。
+/// @param x0 首像素的 x 坐标。
+/// @param n  像素个数。
+/// @param cx 径向圆心 x 坐标。
+/// @param py 逐行预计算的圆心纵向距离平方（(y-cy)^2）。
+/// @param inv_r 半径倒数。
+/// @param c0 起点色 RGB 三字节指针。
+/// @param c1 终点色 RGB 三字节指针。
+/// @param stop0 首色标的归一化停止位置。
+/// @param range 两色标间跨度（<=0 时插值系数取 0）。
+/// @return SIMD 主循环已填充的像素数（4 的整数倍，可为 0）；不足一组的尾部已由内嵌标量调用补齐。
 inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_radial_scanline_sse2(std::uint8_t *row, int x0, int n,
                                                                               float cx, float py, float inv_r,
                                                                               const std::uint8_t *c0,
@@ -384,11 +482,21 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_radial_scanline_sse2(st
 
 #endif  // AURORA_SIMD_X86 (SSE2 implementations)
 
-// AVX2 实现：MSVC 下 AURORA_AVX2_TARGET 为空宏（x64 基线已含 SSE2，_mm256_* intrinsics
-// 无需 /arch:AVX2 即可编译，运行时经 g_simd_level 分发保证只在 AVX2 机器上执行）。
 #if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) || \
     defined(AURORA_COMPILER_CLANG_CL)
 #ifdef AURORA_SIMD_X86
+/// @brief sRGB 逐通道 alpha 混合的 AVX2 实现：8 像素一组，线性化后按覆盖率乘加、经 LUT 回写 sRGB，A 写 255。
+/// AVX2 混合实现组的编译入口条件：MSVC/clang-cl 下 AURORA_AVX2_TARGET 为空宏（x64 基线已含 SSE2，
+/// _mm256_* 内置函数无需 /arch:AVX2 即可编译），运行时经 g_simd_level 分发保证只在 AVX2 机器上执行。
+///
+/// @param px 像素段首指针；每像素 4 字节，RGB 写回混合结果、A 写 255。
+/// @param sr 源 8 位 sRGB 红分量。
+/// @param sg 源 8 位 sRGB 绿分量。
+/// @param sb 源 8 位 sRGB 蓝分量。
+/// @param ar 红色通道覆盖率（[0,1]）。
+/// @param ag 绿色通道覆盖率（[0,1]）。
+/// @param ab 蓝色通道覆盖率（[0,1]）。
+/// @param n  像素个数。
 AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_srgb_over_region_avx2(std::uint8_t *px, std::uint8_t sr,
                                                                            std::uint8_t sg, std::uint8_t sb, float ar,
                                                                            float ag, float ab, int n) -> void {
@@ -441,6 +549,14 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_srgb_over_region_avx2(std::
     }
 }
 
+/// @brief 线性混合的 AVX2 实现（8 像素一组）：v = dst*finv + src*fa，cvtt 向零截断 + [0,255] 钳位，A 写 255。
+/// @param px 像素段首指针；每像素 4 字节。
+/// @param sr 源 8 位红分量。
+/// @param sg 源 8 位绿分量。
+/// @param sb 源 8 位蓝分量。
+/// @param fa 源色权重。
+/// @param finv 目标色权重（通常 1 - fa）。
+/// @param n  像素个数；不足 8 个一组的尾部回落标量黄金。
 AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_linear_region_avx2(std::uint8_t *px, std::uint8_t sr,
                                                                         std::uint8_t sg, std::uint8_t sb, float fa,
                                                                         float finv, int n) -> void {
@@ -491,7 +607,20 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto blend_linear_region_avx2(std::uin
         blend_linear_region_scalar(px + (static_cast<std::size_t>(i) * 4U), sr, sg, sb, fa, finv, n - i);
     }
 }
-// 渐变扫描线 AVX2 实现（WS-4）：镜像标量浮点序列，8 像素一组。
+/// @brief 线性渐变扫描线 AVX2 实现：镜像标量浮点运算序列，8 像素一组，不读取帧缓冲，直接写入行内 RGB + A(=255)。
+/// @param row 该行 x0 处首字节指针；填充 [x0, x0+n) 共 n 个像素。
+/// @param x0 首像素的 x 坐标。
+/// @param n  像素个数。
+/// @param sx 渐变起点 x 坐标。
+/// @param py 逐行预折叠的投影常量（(y-sy)*dy，dy 已并入其中）。
+/// @param dx 渐变方向向量 x 分量。
+/// @param dy 渐变方向向量 y 分量；本函数不使用（已折叠进 py）。
+/// @param inv_len_sq 渐变向量长度平方的倒数。
+/// @param c0 起点色 RGB 三字节指针。
+/// @param c1 终点色 RGB 三字节指针。
+/// @param stop0 首色标的归一化停止位置。
+/// @param range 两色标间跨度（<=0 时插值系数取 0）。
+/// @return SIMD 主循环已填充的像素数（8 的整数倍，可为 0）；不足一组的尾部已由内嵌标量调用补齐。
 AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_linear_scanline_avx2(std::uint8_t *row, int x0, int n, float sx,
                                                                              float py, float dx, float dy,
                                                                              float inv_len_sq, const std::uint8_t *c0,
@@ -551,6 +680,18 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_linear_scanline_avx2(std
     return i;
 }
 
+/// @brief 径向渐变扫描线 AVX2 实现：镜像标量浮点运算序列（_mm256_sqrt_ps），8 像素一组，不读取帧缓冲。
+/// @param row 该行 x0 处首字节指针；填充 [x0, x0+n) 共 n 个像素。
+/// @param x0 首像素的 x 坐标。
+/// @param n  像素个数。
+/// @param cx 径向圆心 x 坐标。
+/// @param py 逐行预计算的圆心纵向距离平方（(y-cy)^2）。
+/// @param inv_r 半径倒数。
+/// @param c0 起点色 RGB 三字节指针。
+/// @param c1 终点色 RGB 三字节指针。
+/// @param stop0 首色标的归一化停止位置。
+/// @param range 两色标间跨度（<=0 时插值系数取 0）。
+/// @return SIMD 主循环已填充的像素数（8 的整数倍，可为 0）；不足一组的尾部已由内嵌标量调用补齐。
 AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_radial_scanline_avx2(std::uint8_t *row, int x0, int n, float cx,
                                                                              float py, float inv_r,
                                                                              const std::uint8_t *c0,
@@ -612,7 +753,7 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_radial_scanline_avx2(std
 #endif  // AURORA_SIMD_X86 (AVX2 implementations)
 #endif  // GNUC/Clang
 
-// ---------------- 整数 box blur SIMD 双实现（WS-4：blur_region 栅格原语）----------------
+// ---------------- 整数 box blur SIMD 双实现（blur_region 栅格原语）----------------
 // 分离式两遍整数 box blur，逐位一致镜像 blur_region_scalar。
 // 关键事实：窗口计数 n = 2r+1 恒定（k 循环恒跑 2r+1 次，clamp 仅改变采样源、不改计数）；
 // 结果 = acc[c] / n（正整数截断）。SIMD 路径改用滑动窗口
@@ -621,14 +762,23 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_radial_scanline_avx2(std
 // 累加器为每通道 4 路 int32（水平/垂直遍 stride 不同，故 src/dst 步长独立传入）。
 
 #ifdef AURORA_SIMD_X86
+/// @brief 装载单个 RGBA 像素为 4 路 int32 向量，供 blur 滑动窗口的加/减更新使用。
+/// @param p 指向 4 字节像素数据。
+/// @return __m128i：R/G/B/A 各占一路 int32（cvtepu8 按字节解包零扩展，与端序无关）。
 inline AURORA_SSE41_TARGET auto blur_load4(const std::uint8_t *p) -> __m128i {
     // 4 字节 RGBA → 4 路 int32（每通道一路）；cvtepu8 按字节解包，与端序无关。
     return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*reinterpret_cast<const int *>(p)));
 }
 
-// 单条线（n 个 RGBA 元组）整数 box blur 的滑动窗口实现。
-// src_step/dst_step = 线内相邻元素的字节步长：水平遍为 4（同行像素紧邻）；
-// 垂直遍为行步长（tmp 行宽 rw*4 / 帧缓冲行宽 full_width*4）。调用方已把 src/dst 定位到正确线基址。
+/// @brief 单条线（n 个 RGBA 元组）整数 box blur 的 SSE2 滑动窗口实现，与标量全窗求和逐位一致（整数加法结合律）。
+/// src_step/dst_step = 线内相邻元素的字节步长：水平遍为 4（同行像素紧邻）；
+/// 垂直遍为行步长（tmp 行宽 rw*4 / 帧缓冲行宽 full_width*4）。调用方已把 src/dst 定位到正确线基址。
+/// @param dst 输出线首字节指针；就地写入各像素模糊结果，A 通道同样参与。
+/// @param dst_step 输出线内相邻像素的字节步长。
+/// @param src 输入线首字节指针。
+/// @param src_step 输入线内相邻像素的字节步长。
+/// @param n  线上像素个数。
+/// @param r  窗口半径；计数 n_win = 2r+1 恒定，clamp 仅改变采样源不改计数；结果为 acc/2r+1 正整数截断。
 inline AURORA_SSE41_TARGET AURORA_NOINLINE auto box_blur_line_sse2(std::uint8_t *dst, int dst_step,
                                                                    const std::uint8_t *src, int src_step, int n, int r)
     -> void {
@@ -668,6 +818,14 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto box_blur_line_sse2(std::uint8_t 
     }
 }
 
+/// @brief 整数 box blur 区域处理的 SSE2 实现：分离式两遍（水平 → tmp 缓冲 → 垂直），逐位镜像 blur_region_scalar。
+/// @param pixels 帧缓冲指针（步长 full_width*4 字节），就地输出。
+/// @param full_width 帧缓冲宽（像素）。
+/// @param x0 区域左上角 x。
+/// @param y0 区域左上角 y。
+/// @param rw 区域宽（像素）。
+/// @param rh 区域高（像素）。
+/// @param r  窗口半径；计数 n = 2r+1 恒定，结果 = acc[c]/n 正整数截断。
 inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blur_region_sse2(std::uint8_t *pixels, int full_width, int x0, int y0,
                                                                  int rw, int rh, int r) -> void {
     std::vector<std::uint8_t> tmp(static_cast<std::size_t>(rw) * rh * 4);
@@ -688,15 +846,29 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto blur_region_sse2(std::uint8_t *p
 }
 #endif  // AURORA_SIMD_X86 (SSE2 blur)
 
+/// @brief 整数 box blur AVX2 实现组的编译入口条件：组内滑动窗口镜像标量求和、逐位一致，
+/// 累加器为 int32 lane（单线模式仅用低 4 路）；运行时经 g_simd_level 分发。
+/// @return 组内首个定义 blur_load4_avx2 的返回值：__m256i 低 128 位为 4 通道 int32，高 128 位零。
 #if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) || \
     defined(AURORA_COMPILER_CLANG_CL)
 #ifdef AURORA_SIMD_X86
+/// @brief 装载单个 RGBA 像素为 AVX2 向量的低 4 路 int32，供 blur 滑动窗口更新使用。
+/// @param p 指向 4 字节像素数据。
+/// @return __m256i：低 128 位为 R/G/B/A 四路 int32（cvtepu8 零扩展），高 128 位置零（单线模式仅用低 4 路）。
 inline AURORA_AVX2_TARGET auto blur_load4_avx2(const std::uint8_t *p) -> __m256i {
     // 低 128 位装 4 通道，高 128 位置零（单线模式，仅用低 4 路）。
     const __m128i lo = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*reinterpret_cast<const int *>(p)));
     return _mm256_castsi128_si256(lo);
 }
 
+/// @brief 单条线整数 box blur 的 AVX2 滑动窗口实现：与 SSE2 版同构，acc 用 __m256i 低 4 路
+/// int32（单线模式），逐位一致。
+/// @param dst 输出线首字节指针；就地写入各像素模糊结果。
+/// @param dst_step 输出线内相邻像素的字节步长。
+/// @param src 输入线首字节指针。
+/// @param src_step 输入线内相邻像素的字节步长。
+/// @param n  线上像素个数。
+/// @param r  窗口半径；计数 n_win = 2r+1 恒定，clamp 仅改变采样源不改计数。
 inline AURORA_AVX2_TARGET AURORA_NOINLINE auto box_blur_line_avx2(std::uint8_t *dst, int dst_step,
                                                                   const std::uint8_t *src, int src_step, int n, int r)
     -> void {
@@ -730,6 +902,14 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto box_blur_line_avx2(std::uint8_t *
     }
 }
 
+/// @brief 整数 box blur 区域处理的 AVX2 实现：分离式两遍（水平 → tmp 缓冲 → 垂直），逐位镜像 blur_region_scalar。
+/// @param pixels 帧缓冲指针（步长 full_width*4 字节），就地输出。
+/// @param full_width 帧缓冲宽（像素）。
+/// @param x0 区域左上角 x。
+/// @param y0 区域左上角 y。
+/// @param rw 区域宽（像素）。
+/// @param rh 区域高（像素）。
+/// @param r  窗口半径；计数 n = 2r+1 恒定，结果 = acc[c]/n 正整数截断。
 inline AURORA_AVX2_TARGET AURORA_NOINLINE auto blur_region_avx2(std::uint8_t *pixels, int full_width, int x0, int y0,
                                                                 int rw, int rh, int r) -> void {
     std::vector<std::uint8_t> tmp(static_cast<std::size_t>(rw) * rh * 4);
@@ -754,6 +934,9 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto blur_region_avx2(std::uint8_t *pi
 // ---------------- 运行时探测 / 分发初始化 ----------------
 // g_simd_level 定义在 painter_simd.h（inline 变量），此处仅实现探测/赋值。
 
+/// @brief 运行时 CPU 能力探测：GCC/Clang 用 __builtin_cpu_supports("avx2")；MSVC/clang-cl 用 CPUID leaf 7 EBX bit5，
+/// 另校验 OSXSAVE（leaf 1 ECX bit27）与 XCR0 低两位（XMM/YMM 状态由 OS 保存）；非 x86 架构直接判无 SIMD。
+/// @return 探测到的能力档位：有 AVX2 返回 AVX2，x86 其余返回 SSE2（x86-64 恒有），非 x86 返回 Scalar。
 inline auto detect_simd_level() noexcept -> SimdLevel {
 #if defined(AURORA_ARCH_X64) || defined(AURORA_ARCH_X86)
 #if defined(AURORA_COMPILER_GCC) || (defined(AURORA_COMPILER_CLANG) && !defined(AURORA_COMPILER_CLANG_CL))
@@ -784,6 +967,7 @@ inline auto detect_simd_level() noexcept -> SimdLevel {
 #endif
 }
 
+/// @brief 幂等初始化：首次调用执行 detect_simd_level 并写入 g_simd_level，其后为空操作（函数内 static 标志）。
 inline auto ensure_simd_init() noexcept -> void {
     static bool done = false;
     if (!done) {

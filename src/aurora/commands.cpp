@@ -187,25 +187,25 @@ auto CommandRegistry::to_json() const -> Json {
     Json items = Json::array();
     for (const Command &cmd : cmds_) {
         Json item = Json::object();
-        item["id"] = cmd.id;
-        item["title"] = cmd.title;
+        item.set("id", cmd.id);
+        item.set("title", cmd.title);
         if (!cmd.icon.empty()) {
-            item["icon"] = cmd.icon;
+            item.set("icon", cmd.icon);
         }
         if (!cmd.category.empty()) {
-            item["category"] = cmd.category;
+            item.set("category", cmd.category);
         }
         if (!cmd.when_label.empty()) {
-            item["when"] = cmd.when_label;
+            item.set("when", cmd.when_label);
         }
-        item["enabled"] = enabled_of(cmd);
-        item["invocable"] = static_cast<bool>(cmd.action);
+        item.set("enabled", Json{enabled_of(cmd)});
+        item.set("invocable", Json{static_cast<bool>(cmd.action)});
         if (cmd.default_binding.has_value()) {
-            item["default_binding"] = cmd.default_binding->to_string();
+            item.set("default_binding", cmd.default_binding->to_string());
         }
         items.push_back(std::move(item));
     }
-    envelope["commands"] = std::move(items);
+    envelope.set("commands", std::move(items));
     return envelope;
 }
 

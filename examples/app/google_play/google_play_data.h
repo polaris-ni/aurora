@@ -15,13 +15,11 @@
 #include "aurora/core/color.h"
 #include "aurora/core/image.h"
 #include "aurora/core/types.h"
-#include "nlohmann/json.hpp"
 
 namespace gp {
 
 using aurora::Color;
 using aurora::Image;
-using nlohmann::json;
 
 /// @brief 单条用户评价。
 struct Review {

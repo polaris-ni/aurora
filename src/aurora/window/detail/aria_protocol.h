@@ -92,9 +92,9 @@ struct AriaElement {
 /// 让 JS 侧「先腾空、再挂新、后复位、终改面」的单趟应用无位置歧义。
 /// `focus` 为**绝对值**（新快照中 `state.focused` 为真者 id，0 = 无）——焦点是
 /// 镜像面最需要保持正确的属性，宁每帧重设也不依赖增量的相对语义。
-// `new_` 与 `old_` 成对：`new` 是 C++ 关键字，无法照 lower_case 正名，故命名检查就地豁免
-// （定义侧同法，见 aria_protocol.cpp）。
-// NOLINTNEXTLINE(readability-identifier-naming)
+/// `new_` 与 `old_` 成对：`new` 是 C++ 关键字，无法照 lower_case 正名，故命名检查就地豁免
+/// （定义侧同法，见 aria_protocol.cpp）。
+/// NOLINTNEXTLINE(readability-identifier-naming)
 [[nodiscard]] auto aria_ops_json(const a11y::TreeSnapshot &old_, const a11y::TreeSnapshot &new_,
                                  const a11y::TreeDiff &diff) -> std::string;
 
@@ -104,7 +104,7 @@ struct AriaElement {
 /// 不依赖增量的相对语义（丢一帧 ops 也不会错位）。
 [[nodiscard]] auto focus_id_of(const a11y::TreeSnapshot &snap) -> std::uint64_t;
 
-/// @brief 播报载荷（G4 → aria-live）：`{"text":"…","target":N}`（target 0 = 无关联控件）。
+/// @brief 播报载荷（折算为 aria-live）：`{"text":"…","target":N}`（target 0 = 无关联控件）。
 [[nodiscard]] auto aria_announce_json(const std::string &text, std::uint64_t target) -> std::string;
 
 }  // namespace aurora::detail

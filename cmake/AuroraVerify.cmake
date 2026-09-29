@@ -40,6 +40,8 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         endif ()
         # tools/verify 下的共用头（verify_print.h）由本目录直接引入。
         target_include_directories(${_name} PRIVATE "${_aurora_verify_dir}")
+        # E2E 驱动内核（tools/include/e2e/harness.h）：探针的建窗 / 帧推进 / 像素读回统一经内核。
+        target_include_directories(${_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools/include")
         if (NOT MSVC)
             target_compile_options(${_name} PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
         endif ()

@@ -10,28 +10,27 @@
 
 namespace aurora {
 
-/**
- * @brief 渲染前校验整棵 UI 树（规格 #9）。
- *
- * 检查三类问题：
- *  - 空子节点（nullptr）：结构不完整，渲染会崩溃；
- *  - 深度超限：嵌套过深（默认上限 64），可能是递归 bug；
- *  - 未知控件类型：类型名拼写错误或尚未注册。
- *
- * 返回 `Result<bool>`：成功为 `true`；首个问题转为结构化 `Error`（含 code / message / suggestion）。
- *
- * @param root 待校验的根节点（必须非空；空根请先构造合法 widget）
- * @param max_depth 允许的最大嵌套深度（默认 64）
- *
- * @code
- *   auto ok = au::validate(root);
- *   if (!ok) { log_error(ok.error()); return; }
- * @endcode
- *
- * @note Thread: main-thread only
- * @note Side-effects: none
- * @note Rebuildable: no
- */
+/// @brief 渲染前校验整棵 UI 树（规格 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001）。
+///
+/// 检查三类问题：
+/// - 空子节点（nullptr）：结构不完整，渲染会崩溃；
+/// - 深度超限：嵌套过深（默认上限 64），可能是递归 bug；
+/// - 未知控件类型：类型名拼写错误或尚未注册。
+///
+/// 返回 `Result<bool>`：成功为 `true`；首个问题转为结构化 `Error`（含 code / message / suggestion）。
+///
+/// @code
+/// auto ok = au::validate(root);
+/// if (!ok) { log_error(ok.error()); return; }
+/// @endcode
+///
+/// @param root 待校验的根节点（必须非空；空根请先构造合法 widget）
+/// @param max_depth 允许的最大嵌套深度（默认 64）
+/// @return 全部检查通过为 `Ok(true)`；否则为首个问题对应的结构化 `Error`。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
 [[nodiscard]] inline auto validate(const Node &root, int max_depth = 64) -> Result<bool> {
     serialization::register_core_widgets();  // 确保核心控件类型已在注册表
 

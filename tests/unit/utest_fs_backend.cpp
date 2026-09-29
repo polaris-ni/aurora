@@ -17,6 +17,8 @@
 
 #include "aurora/storage/fs_backend.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_value_printer.h"
 
 namespace aurora::test_cases::utest_fs_backend {
 
@@ -40,7 +42,7 @@ namespace m = aurora::testing::matchers;
 }
 
 /// @brief 构造一条 JSON 载荷的记录信封。
-[[nodiscard]] auto make_json_record(std::string id, aus::Json payload) -> aus::StorageRecord {
+[[nodiscard]] auto make_json_record(std::string id, aurora::json::Value payload) -> aus::StorageRecord {
     aus::StorageRecord rec;
     rec.id = std::move(id);
     rec.type = "__raw__";
@@ -110,7 +112,7 @@ AURORA_TEST_CASE(closed_backend_when_root_missing_without_autocreate) {
     aus::FilesystemBackend be{aus::FilesystemOptions{.root = dir, .auto_create_dir = false}};
     AURORA_TEST_CHECK(!be.is_open());
 
-    const auto put = be.put_record("x", make_json_record("x", aus::Json{{"v", 1}}));
+    const auto put = be.put_record("x", make_json_record("x", testing::json_obj({{"v", 1}})));
     AURORA_TEST_CHECK(!put.ok());
     AURORA_TEST_CHECK_EQ(put.error().code_enum, ErrorCode::StorageBackendUnavailable);
 
@@ -134,7 +136,7 @@ AURORA_TEST_CASE(json_record_roundtrip_preserves_envelope) {
     aus::FilesystemBackend be{aus::FilesystemOptions{.root = dir}};
     AURORA_TEST_REQUIRE(be.is_open());
 
-    auto rec = make_json_record("user/profile", aus::Json{{"name", "ada"}, {"score", 42}});
+    auto rec = make_json_record("user/profile", testing::json_obj({{"name", "ada"}, {"score", 42}}));
     const auto mtime_ms = epoch_ms(rec.mtime);
     AURORA_TEST_REQUIRE(be.put_record("user/profile", rec));
 
@@ -145,7 +147,7 @@ AURORA_TEST_CASE(json_record_roundtrip_preserves_envelope) {
     AURORA_TEST_CHECK_EQ(got.value().version, 1U);
     AURORA_TEST_CHECK(got.value().encoding == aus::StorageEncoding::Json);
     AURORA_TEST_CHECK_EQ(epoch_ms(got.value().mtime), mtime_ms);
-    AURORA_TEST_CHECK(std::get<aus::Json>(got.value().payload) == std::get<aus::Json>(rec.payload));
+    AURORA_TEST_CHECK(std::get<aurora::json::Value>(got.value().payload) == std::get<aurora::json::Value>(rec.payload));
     AURORA_TEST_CHECK(got.value().blob_ref.empty());
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
@@ -178,7 +180,7 @@ AURORA_TEST_CASE(overwrite_switches_encoding_and_cleans_sidecar) {
     aus::FilesystemBackend be{aus::FilesystemOptions{.root = dir}};
     AURORA_TEST_REQUIRE(be.is_open());
 
-    AURORA_TEST_REQUIRE(be.put_record("swap", make_json_record("swap", aus::Json{{"v", 1}})));
+    AURORA_TEST_REQUIRE(be.put_record("swap", make_json_record("swap", testing::json_obj({{"v", 1}}))));
     AURORA_TEST_CHECK(files_with_suffix(dir, ".bin").empty());  // JSON 记录无 sidecar
 
     AURORA_TEST_REQUIRE(be.put_record("swap", make_binary_record("swap", aus::StorageBytes{std::byte{0x01}})));
@@ -187,11 +189,11 @@ AURORA_TEST_CASE(overwrite_switches_encoding_and_cleans_sidecar) {
     AURORA_TEST_REQUIRE(as_binary.ok());
     AURORA_TEST_CHECK(as_binary.value().encoding == aus::StorageEncoding::Binary);
 
-    AURORA_TEST_REQUIRE(be.put_record("swap", make_json_record("swap", aus::Json{{"v", 2}})));
+    AURORA_TEST_REQUIRE(be.put_record("swap", make_json_record("swap", testing::json_obj({{"v", 2}}))));
     AURORA_TEST_CHECK(files_with_suffix(dir, ".bin").empty());  // 改回 JSON 后 sidecar 被清理
     const auto as_json = be.get_record("swap");
     AURORA_TEST_REQUIRE(as_json.ok());
-    AURORA_TEST_CHECK_EQ(std::get<aus::Json>(as_json.value().payload), aus::Json{{"v", 2}});
+    AURORA_TEST_CHECK_EQ(std::get<aurora::json::Value>(as_json.value().payload), testing::json_obj({{"v", 2}}));
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
 }
@@ -202,9 +204,9 @@ AURORA_TEST_CASE(remove_record_and_sidecar_is_idempotent) {
     aus::FilesystemBackend be{aus::FilesystemOptions{.root = dir}};
     AURORA_TEST_REQUIRE(be.is_open());
 
-    AURORA_TEST_REQUIRE(be.put_record("gone", make_json_record("gone", aus::Json{{"v", 1}})));
+    AURORA_TEST_REQUIRE(be.put_record("gone", make_json_record("gone", testing::json_obj({{"v", 1}}))));
     AURORA_TEST_REQUIRE(be.put_record("gblob", make_binary_record("gblob", aus::StorageBytes{std::byte{0x09}})));
-    AURORA_TEST_REQUIRE(be.put_record("kept", make_json_record("kept", aus::Json{{"v", 2}})));
+    AURORA_TEST_REQUIRE(be.put_record("kept", make_json_record("kept", testing::json_obj({{"v", 2}}))));
 
     AURORA_TEST_REQUIRE(be.remove("gone"));
     AURORA_TEST_CHECK_EQ(be.get_record("gone").error().code_enum, ErrorCode::StorageRecordNotFound);
@@ -233,8 +235,8 @@ AURORA_TEST_CASE(list_semantics_empty_and_populated) {
     AURORA_TEST_REQUIRE(empty.ok());
     AURORA_TEST_CHECK_THAT(empty.value(), m::is_empty());
 
-    AURORA_TEST_REQUIRE(be.put_record("a/b", make_json_record("a/b", aus::Json{{"v", 1}})));
-    AURORA_TEST_REQUIRE(be.put_record("c d", make_json_record("c d", aus::Json{{"v", 2}})));
+    AURORA_TEST_REQUIRE(be.put_record("a/b", make_json_record("a/b", testing::json_obj({{"v", 1}}))));
+    AURORA_TEST_REQUIRE(be.put_record("c d", make_json_record("c d", testing::json_obj({{"v", 2}}))));
     const auto ids = be.list();
     AURORA_TEST_REQUIRE(ids.ok());
     AURORA_TEST_CHECK_THAT(ids.value(), m::size_is(2));
@@ -262,7 +264,7 @@ AURORA_TEST_CASE(corrupt_record_file_reports_corrupt) {
     const auto dir = fresh_dir("corrupt");
     aus::FilesystemBackend be{aus::FilesystemOptions{.root = dir}};
     AURORA_TEST_REQUIRE(be.is_open());
-    AURORA_TEST_REQUIRE(be.put_record("crash", make_json_record("crash", aus::Json{{"v", 1}})));
+    AURORA_TEST_REQUIRE(be.put_record("crash", make_json_record("crash", testing::json_obj({{"v", 1}}))));
 
     auto jsons = files_with_suffix(dir, ".json");
     AURORA_TEST_REQUIRE_THAT(jsons, m::size_is(1));

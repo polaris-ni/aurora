@@ -53,6 +53,7 @@ AURORA_TEST_CASE(format_date_by_locale) {
     // 英语：ISO 8601。
     AURORA_TEST_CHECK_EQ(format_date(2025, 10, 25, Locale{.language = "en"}), std::string("2025-10-25"));
     // 中文 / 日语：年月日汉字模式。
+    // CJK-LITERAL: locale-output - zh/ja 年月日 date units are the feature under test
     AURORA_TEST_CHECK_EQ(format_date(2025, 10, 25, Locale{.language = "zh"}), std::string("2025年10月25日"));
     AURORA_TEST_CHECK_EQ(format_date(2025, 1, 3, Locale{.language = "ja"}), std::string("2025年1月3日"));
 }

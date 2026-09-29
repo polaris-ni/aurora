@@ -42,42 +42,83 @@ namespace aurora {
 /// @note Thread: main-thread only（request_wake 除外，线程安全）
 class WaylandSurface final : public Surface {
   public:
+    /// @brief 便捷构造：默认窗口样式与 Normal 可见性，转调全参构造。
+    /// @param w 窗口宽（逻辑像素）。
+    /// @param h 窗口高（逻辑像素）。
+    /// @param title 窗口标题（UTF-8，xdg_toplevel_set_title）。
     WaylandSurface(int w, int h, const std::string &title) : WaylandSurface(w, h, title, WindowStyleOptions{}) {}
-    WaylandSurface(int w, int h, const std::string &title, const WindowStyleOptions &style);
+    /// @brief 创建 wl_surface + xdg_toplevel 窗口壳；连接失败不抛异常，见 is_available()。
+    /// @param w 窗口宽（逻辑像素）。
+    /// @param h 窗口高（逻辑像素）。
+    /// @param title 窗口标题（UTF-8）。
+    /// @param style 高级样式选项（最大化/全屏/装饰策略等）。
+    /// @param visibility 初始可见性策略；Hidden 档首帧不 commit（避免可见后隐藏闪烁）。
+    WaylandSurface(int w, int h, const std::string &title, const WindowStyleOptions &style,
+                   WindowVisibility visibility = WindowVisibility::Normal);
+    /// @brief 销毁 xdg 窗口壳与 Wayland 对象（seat/pointer/shm 缓冲等），不动他窗连接。
     ~WaylandSurface() override;
 
+    /// @brief 禁止拷贝：Wayland 对象与 event listener 所有权唯一。
     WaylandSurface(const WaylandSurface &) = delete;
+    /// @brief 禁止拷贝赋值：listener user-data 绑定本对象，任何使用均为编译期错误。
+    /// @return 删除声明无运行期返回值。
     WaylandSurface &operator=(const WaylandSurface &) = delete;
 
     /// @brief Wayland 连接与窗口壳是否创建成功（无 WAYLAND_DISPLAY/纯 TTY 环境为 false）。
     /// 工厂 `create_window(WaylandOptions)` 据此返回 `Result` 错误而非崩溃。
+    /// @return 连接与窗口壳可用时 true。
     [[nodiscard]] auto is_available() const -> bool;
 
+    /// @brief 开始新帧：清空脏区记录并按 configure 驱动的逻辑尺寸重建软件缓冲、铺底色。
+    /// @param width 期望帧宽；后端忽略，以 xdg configure 写入的尺寸为准（调用方入参可能滞后一帧）。
+    /// @param height 期望帧高；同上，以 configure 尺寸为准。
+    /// @return 缓冲就绪时 true；尺寸非法时 false 及错误信息。
     [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override;
+    /// @brief 当前帧的软件栅格化 Painter（写入 RGBA 帧缓冲，present 时 swizzle 上屏）。
+    /// @return Painter 引用，生命周期同本 Surface。
     [[nodiscard]] auto painter() -> Painter & override;
+    /// @brief 提交当前帧：RGBA → XRGB8888 swizzle 进 wl_shm 缓冲，attach+damage+commit
+    /// （双缓冲槽轮换，busy 时 roundtrip 等 release；脏区非空仅 damage 脏矩形）。
+    /// @return 提交成功 true；连接失效时 false 及错误信息。
     [[nodiscard]] auto present() -> Result<bool> override;
     /// @brief 当前帧像素（设备像素缓冲，RGBA）：DEBUG 下覆写返回 Painter 缓冲；
     /// Release（未开 `AURORA_ENABLE_DEBUG`）回落基类默认值 nullptr，使 `save_snapshot` 返回 disabled。
+    /// @return 帧像素只读指针；无缓冲或未开 DEBUG 时 nullptr。
     [[nodiscard]] auto data() const -> const std::uint8_t * override;
+    /// @brief 逻辑尺寸：xdg configure 事件驱动写入的当前窗口尺寸。
+    /// @return 最近一次 configure 生效的逻辑 Size。
     [[nodiscard]] auto size() const -> Size override;
+    /// @brief 已呈现帧数：每次 `present()` 真正 attach+commit 上屏自增（Hidden 档不 commit 故不计）。
+    /// @return 成功 commit 的帧计数。
+    [[nodiscard]] auto frame_count() const -> int override;
     /// @brief begin_frame 铺的浅色底色（与 begin_frame 内 fill_rect 同色）：供脏区裁剪重绘重铺底色。
+    /// @return RGB(245,245,247) 不透明浅色。
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
     /// @brief 像素密度：wl_output scale（整数缩放），多屏取窗口所在输出。
+    /// @return 窗口所在输出的缩放倍数；未连接/无输出时 1.0。
     [[nodiscard]] auto scale_factor() const -> float override;
+    /// @brief 用户是否请求关闭窗口（xdg_toplevel close 事件置位）。
+    /// @return close 事件或 close() 调用后 true。
     [[nodiscard]] auto should_close() const -> bool override;
+    /// @brief 处理 Wayland 事件队列（wl_display_dispatch_pending），翻译为 aurora `Event` 派发；
+    /// 兼作 IME 输入态声明的兜底驱动点（GPU 宿主帧必经此函数）。
     auto poll_platform_events() -> void override;
     /// @brief 阻塞等待 Wayland 事件/唤醒/超时：poll(2) 于 wl_display fd + 自唤醒管道。
+    /// @param timeout_ms 等待上限毫秒；0 或已请求关闭/未连接时立即返回，负值按无限分段等待。
     auto wait_events(double timeout_ms) -> void override;
     /// @brief 跨线程唤醒主循环（线程安全）：向自唤醒管道写 1 字节打断 wait_events。
     auto request_wake() -> void override;
 
     /// @brief 增量上屏脏区（设备坐标）：非空时 present() 仅 swizzle+damage_buffer 脏矩形，
     /// 而非整窗（对齐 Win32/X11 的增量 blit 策略）；脏区一次性消费。
+    /// @param device_rects 本帧脏矩形列表（设备像素坐标）；空 = 全量上屏。
     auto set_present_dirty(const std::vector<Rect> &device_rects) -> void override;
 
     /// @brief 事件处理器：Wayland 事件翻译为 aurora `Event` 后上抛，由 Application 统一派发。
+    /// @param h 事件接收器；为空时事件仅更新内部状态、不上抛。
     auto set_event_handler(const EventHandler &h) -> void override;
     /// @brief 运行时更新窗口标题（xdg_toplevel_set_title，UTF-8）。
+    /// @param title 新标题（UTF-8）。
     auto set_title(const std::string &title) -> void override;
 
     /// @brief 运行时更新悬停光标形状——**客户端主题光标真接线**（自绘位图经 cursor
@@ -103,6 +144,7 @@ class WaylandSurface final : public Surface {
     /// @note 读回口径：Wayland 客户端**无任何 API 可查询「屏幕上当前显示的光标」**（不同于
     /// Win32 `GetCursorInfo` / X11 XFIXES）。可机器判定的只有本端提交了什么，见 `cursor_state()`
     /// 与 `tools/verify/wayland_cursor_live_probe.cpp`；「屏幕像素确已改变」不在证明范围内。
+    /// @param shape 目标光标形状；映射为 freedesktop 主题名下发，缺失名回退 default→left_ptr。
     auto set_cursor(CursorShape shape) -> void override;
 
     /// @brief `set_cursor` 的本端提交状态（真机验收探针的观测面，见 `set_cursor` 的读回口径）。
@@ -118,7 +160,7 @@ class WaylandSurface final : public Surface {
         int image_height = 0;  ///< 命中图像高（设备像素）。
         int buffer_scale = 1;  ///< cursor 表面的 `set_buffer_scale`（图像非缩放整数倍时退化 1）。
         int hotspot_x = 0;  ///< 热点（表面逻辑坐标，已按 `buffer_scale` 折算）。
-        int hotspot_y = 0;
+        int hotspot_y = 0;  ///< 热点纵坐标（表面逻辑坐标，同 hotspot_x 口径）。
         std::uint64_t buffer_id = 0;  ///< 提交的 `wl_buffer` 身份（主题持有；不同形状通常不同）。
         int image_count = 0;  ///< 该光标的动画帧数（>1 即动画光标，本端只取首帧）。
         int theme_size = 0;  ///< 主题加载尺寸（设备像素 = 24 × scale）。
@@ -126,6 +168,7 @@ class WaylandSurface final : public Surface {
     };
 
     /// @brief 取 `set_cursor` 的本端提交状态（探针逐项断言用；无 Wayland 会话时全零）。
+    /// @return CursorState 快照（本端提交物证，非屏幕读回）。
     [[nodiscard]] auto cursor_state() const -> CursorState;
 
     // ---- 输入法（text-input-unstable-v3）----
@@ -137,6 +180,7 @@ class WaylandSurface final : public Surface {
     /// 声明」而非服务端拥有，不 enable 则合成器/输入法不会把组合事件送进来。返回盒的物理像素
     /// 几何另作 `set_cursor_rectangle`（表面本地物理 px，候选窗定位）；本后端不需要像素级
     /// ClientToScreen 换算，故零盒退化为「无文本焦点」而非「默认位置」。
+    /// @param provider 插入点查询（返回逻辑坐标零宽竖盒）；兼任 enable/disable 判据。
     auto set_composition_caret_provider(std::function<Rect()> provider) -> void override;
 
     /// @brief text-input 桥的本端状态（真机验收探针的观测面，与 `CursorState` 同口径的
@@ -153,6 +197,7 @@ class WaylandSurface final : public Surface {
     };
 
     /// @brief 取 text-input 桥的本端状态（探针断言用；协议缺席时仅 protocol 字段可辨）。
+    /// @return TextInputState 快照（本端提交物证口径）。
     [[nodiscard]] auto text_input_state() const -> TextInputState;
 
     /// @brief 刷新一次 IME 输入态声明（enable 判据 + 候选窗插入点盒）。
@@ -162,14 +207,18 @@ class WaylandSurface final : public Surface {
     auto refresh_ime_input_state() -> void;
 
     /// @brief 运行期更新 CSD 标题栏样式（存入 Impl 并触发重绘，下帧 draw_decoration 生效）。
+    /// @param style 新的标题栏样式（配色/高度/按钮布局）。
     auto set_title_bar_style(const TitleBarStyle &style) -> void override;
     /// @brief 控件发起窗口拖拽移动（Wayland：xdg_toplevel_move，须在 Press 派发栈内调用）。
     auto begin_window_move() -> void override;
     /// @brief 控件发起窗口边缘缩放（Wayland：xdg_toplevel_resize）。
+    /// @param edge 被拖拽的窗口边/角标识。
     auto begin_window_resize(WindowResizeEdge edge) -> void override;
     /// @brief 运行期更新 CSD 标题栏图标（shared_ptr 共享像素避免深拷贝）并触发重绘。
+    /// @param icon 图标图像（共享所有权）；nullptr 清除。
     auto set_title_bar_icon(const std::shared_ptr<Image> &icon) -> void override;
     /// @brief 客户端装饰安全区内边距：CSD 标题栏高度（顶）与可缩放边框厚度（四周）。
+    /// @return 各边内缩距离；SSD 或无装饰时全零。
     [[nodiscard]] auto content_inset() const -> EdgeInsets override;
     /// @brief 程序化关闭：置 close_requested，下帧退出主循环。
     auto close() -> void override;
@@ -178,6 +227,7 @@ class WaylandSurface final : public Surface {
     /// @brief 程序化切换最大化：按当前 mode 调 set/unset_maximized。
     auto toggle_maximize() -> void override;
     /// @brief 程序化全屏：xdg_toplevel_set/unset_fullscreen。
+    /// @param on true 进入全屏，false 退出全屏。
     auto set_fullscreen(bool on) -> void override;
     /// @brief 原生窗口句柄：`wl_surface*`。
     [[nodiscard]] auto native_handle() const -> void * override;
@@ -189,16 +239,19 @@ class WaylandSurface final : public Surface {
 
     /// @brief AT-SPI2 无障碍桥（`a11y::Provider`）：首次根注入前 / 降级（无 libdbus、
     /// 无会话总线、`NO_AT_BRIDGE=1`）时恒 nullptr。
+    /// @return 桥裸指针，所有权归本 Surface；降级或未激活时 nullptr。
     [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override;
 
-    /// @brief 语义树根注入（`Window::present_root` 每帧调用；D9 宿主通道）。
+    /// @brief 语义树根注入（`Window::present_root` 每帧调用；宿主通道）。
     /// 首次调用即尝试建桥（dlopen libdbus + 连 a11y 总线 + Socket.Embed）；失败永久降级。
+    /// @param root 当前语义树根 Widget；首次非空触发建桥。
     /// @note 申报偏差：xdg-shell 不暴露窗口屏幕原点 ⇒ 几何按窗口本地 px 申报。
     auto set_accessibility_root(Widget *root) -> void override;
 
     /// @brief 是否正在自绘 CSD 装饰（标题栏/边框，画进 Painter 帧缓冲）：合成器无
     /// xdg-decoration SSD 且装饰策略需要兜底时为 true。GPU 宿主（WgpuWaylandSurface）
     /// 据此决定是否需要把装饰录制进当帧。
+    /// @return 本窗口走客户端装饰自绘时 true。
     [[nodiscard]] auto uses_client_decorations() const -> bool;
 
     /// @brief 把本帧 CSD 自绘装饰**录制**为 `DisplayList`（不触帧缓冲），供 GPU 宿主追加
@@ -207,6 +260,8 @@ class WaylandSurface final : public Surface {
     ///
     /// 坐标为**逻辑 dp**（与帧级 DL 同口径，缩放在回放侧生效）。本帧无装饰可画（无 CSD
     /// 标题栏、或全屏且未揭示顶边条）时返回 false 且不清空/不改写 `dl`，调用方据此跳过回放。
+    /// @param dl 追加录制目标的帧级 DisplayList（无装饰时保持原样）。
+    /// @return 本帧有装饰被录制时 true。
     /// @note 用后端自带的独立录制 Painter，可在 app 帧 DL 录制期间安全调用（互不嵌套）。
     auto record_client_decoration(DisplayList &dl) -> bool;
 

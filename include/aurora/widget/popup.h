@@ -13,27 +13,33 @@
 
 namespace aurora {
 
-/**
- * @brief 锚定弹出层：非模态浮层，锚定在指定位置弹出。
- *
- * 与 `Dialog` 区分：`Dialog` 是模态阻塞（遮罩+居中），`Popup` 是非模态锚定浮层
- * （下拉菜单、自动补全、上下文菜单渲染的基础）。
- *
- * 布局语义：Popup 在常规流中占据零尺寸；打开时其内容以覆盖层形式绘制在锚点处，
- * 命中测试优先命中弹出内容；点击弹出内容之外时若 `dismiss_on_outside_click` 为
- * true 则自动关闭（经 OverlayHost 或外层派发逻辑调用 `handle_outside_click`）。
- *
- * 对标 Qt `QMenu` 弹出、WPF `Popup`、Flutter `showMenu`/`OverlayEntry`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 锚定弹出层：非模态浮层，锚定在指定位置弹出。
+///
+/// 与 `Dialog` 区分：`Dialog` 是模态阻塞（遮罩+居中），`Popup` 是非模态锚定浮层
+/// （下拉菜单、自动补全、上下文菜单渲染的基础）。
+///
+/// 布局语义：Popup 在常规流中占据零尺寸；打开时其内容以覆盖层形式绘制在锚点处，
+/// 命中测试优先命中弹出内容；点击弹出内容之外时若 `dismiss_on_outside_click` 为
+/// true 则自动关闭（经 OverlayHost 或外层派发逻辑调用 `handle_outside_click`）。
+///
+/// 对标 Qt `QMenu` 弹出、WPF `Popup`、Flutter `showMenu`/`OverlayEntry`。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+///
 class Popup : public SingleChild {
   public:
+    /// @brief 默认构造：内容为空、初始为关闭状态。
     Popup() = default;
+    /// @brief 以弹出内容构造（初始为关闭状态）。
+    /// @param content 弹出内容节点。
     explicit Popup(Node content) : SingleChild(std::move(content)) {}
 
+    /// @brief 类型标识。
+    /// @return 类型名字符串 "Popup"。
     [[nodiscard]] auto type_name() const -> const char * override { return "Popup"; }
 
+    /// @brief 静态描述符：open/anchor_x/anchor_y/dismiss_on_outside_click 属性与 on_close 事件。
+    /// @return Popup 的组件描述符。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "Popup",
@@ -43,25 +49,25 @@ class Popup : public SingleChild {
                      .type = "bool",
                      .default_value = "false",
                      .required = false,
-                     .note = "是否打开",
+                     .note = "Open",
                      .json_type = "boolean"},
                     {.name = "anchor_x",
                      .type = "float",
                      .default_value = "0",
                      .required = false,
-                     .note = "锚点 X（全局坐标）",
+                     .note = "Anchor X (global coordinates)",
                      .json_type = "number"},
                     {.name = "anchor_y",
                      .type = "float",
                      .default_value = "0",
                      .required = false,
-                     .note = "锚点 Y（全局坐标）",
+                     .note = "Anchor Y (global coordinates)",
                      .json_type = "number"},
                     {.name = "dismiss_on_outside_click",
                      .type = "bool",
                      .default_value = "true",
                      .required = false,
-                     .note = "点击外部自动关闭",
+                     .note = "Close automatically when clicking outside",
                      .json_type = "boolean"},
                 },
             .events = {"on_close"},
@@ -69,11 +75,17 @@ class Popup : public SingleChild {
             .examples = {"au::Popup(au::Text(\"menu\")).open_at(au::Point{100, 50})"},
         };
     }
+    /// @brief 实例描述符。
+    /// @return 转发 describe_static()。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 收集信号视图；Popup 无外露信号。
+    /// @param out 信号视图累加表（恒不写入）。
+    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
     /// @brief 在指定全局坐标打开弹出层（链式）：压入焦点作用域，Tab 焦点关在本层内。
+    /// @param anchor 弹出锚点（全局坐标）。
+    /// @return *this（链式调用）。
     auto open_at(Point anchor) -> Popup & {
         if (!open_ && current_focus_manager() != nullptr) {
             current_focus_manager()->push_scope(this);
@@ -99,27 +111,40 @@ class Popup : public SingleChild {
         }
     }
 
+    /// @brief 是否处于打开状态。
+    /// @return 打开为 true。
     [[nodiscard]] auto is_open() const -> bool { return open_; }
+    /// @brief 当前弹出锚点。
+    /// @return 最近一次 open_at 设置的全局坐标。
     [[nodiscard]] auto anchor() const -> Point { return anchor_; }
 
     /// @brief 设置关闭回调（链式）。
+    /// @param cb 关闭时触发的回调。
+    /// @return *this（链式调用）。
     auto set_on_close(std::function<void()> cb) -> Popup & {
         on_close_ = std::move(cb);
         return *this;
     }
 
     /// @brief 设置点击外部是否自动关闭（默认 true，链式）。
+    /// @param v 为 true 时点击弹出内容之外自动关闭。
+    /// @return *this（链式调用）。
     auto set_dismiss_on_outside_click(bool v) -> Popup & {
         dismiss_outside_ = v;
         return *this;
     }
+    /// @brief 是否启用点击外部自动关闭。
+    /// @return 启用为 true（默认）。
     [[nodiscard]] auto dismiss_on_outside_click() const -> bool { return dismiss_outside_; }
 
     /// @brief 设置弹出内容。
+    /// @param content 新的内容节点。
     auto set_content(Node content) -> void { child_ = std::move(content); }
 
     /// @brief 处理一次「全局点击」：命中弹出内容返回 false（不关闭）；
     /// 点击外部且允许 dismiss 则关闭并返回 true（已消费该点击）。
+    /// @param global_pos 点击位置（全局坐标）。
+    /// @return 已消费该点击（外部点击触发关闭）为 true。
     auto handle_outside_click(Point global_pos) -> bool {
         if (!open_) {
             return false;
@@ -136,29 +161,34 @@ class Popup : public SingleChild {
     }
 
     /// @brief 弹出内容的全局盒（打开时有效）。
+    /// @return 以 anchor_ 为原点、实测内容尺寸为大小的矩形。
     [[nodiscard]] auto content_bounds() const -> Rect { return Rect{.origin = anchor_, .size = content_size_}; }
 
+    /// @brief 序列化弹出属性（open/anchor_x/anchor_y/dismiss_on_outside_click），先链入基类通用属性。
+    /// @param props 输出 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["open"] = open_;
-        props["anchor_x"] = anchor_.x;
-        props["anchor_y"] = anchor_.y;
-        props["dismiss_on_outside_click"] = dismiss_outside_;
+        props.set("open", Json{open_});
+        props.set("anchor_x", anchor_.x);
+        props.set("anchor_y", anchor_.y);
+        props.set("dismiss_on_outside_click", Json{dismiss_outside_});
     }
 
+    /// @brief 从 JSON 恢复弹出属性，缺失键保持当前值；先链入基类。
+    /// @param props 输入 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("open")) {
-            open_ = props["open"].get<bool>();
+            open_ = props.at("open")->as_or<bool>(false);
         }
         if (props.contains("anchor_x")) {
-            anchor_.x = props["anchor_x"].get<float>();
+            anchor_.x = props.at("anchor_x")->as_or<float>(0.0F);
         }
         if (props.contains("anchor_y")) {
-            anchor_.y = props["anchor_y"].get<float>();
+            anchor_.y = props.at("anchor_y")->as_or<float>(0.0F);
         }
         if (props.contains("dismiss_on_outside_click")) {
-            dismiss_outside_ = props["dismiss_on_outside_click"].get<bool>();
+            dismiss_outside_ = props.at("dismiss_on_outside_click")->as_or<bool>(false);
         }
     }
 
@@ -226,24 +256,30 @@ class Popup : public SingleChild {
     std::function<void()> on_close_;
 };
 
-/**
- * @brief 覆盖层宿主：管理基础内容 + 多个浮层的 z-order。
- *
- * 子节点 [0] 为基础内容（占满可用空间）；[1..N] 为浮层（Popup 等），
- * 按序号从低到高绘制（后加的在上层）。命中测试自顶层向下：
- * 顶层浮层先命中；点击落空的浮层若允许 dismiss 则自动关闭。
- *
- * 对标 Flutter `Overlay`/`OverlayEntry`、WPF `AdornerLayer`。
- * @note Thread: main-thread only
- * @note Rebuildable: yes, via from_json
- */
+/// @brief 覆盖层宿主：管理基础内容 + 多个浮层的 z-order。
+///
+/// 子节点 [0] 为基础内容（占满可用空间）；[1..N] 为浮层（Popup 等），
+/// 按序号从低到高绘制（后加的在上层）。命中测试自顶层向下：
+/// 顶层浮层先命中；点击落空的浮层若允许 dismiss 则自动关闭。
+///
+/// 对标 Flutter `Overlay`/`OverlayEntry`、WPF `AdornerLayer`。
+/// @note Thread: main-thread only
+/// @note Rebuildable: yes, via from_json
+///
 class OverlayHost : public Container {
   public:
+    /// @brief 默认构造：无基础内容与浮层。
     OverlayHost() = default;
+    /// @brief 以基础内容构造覆盖层宿主。
+    /// @param base 基础内容节点（子节点 [0]）。
     explicit OverlayHost(Node base) { children_.push_back(std::move(base)); }
 
+    /// @brief 类型标识。
+    /// @return 类型名字符串 "OverlayHost"。
     [[nodiscard]] auto type_name() const -> const char * override { return "OverlayHost"; }
 
+    /// @brief 静态描述符：无属性与事件，子节点策略为 multiple。
+    /// @return OverlayHost 的组件描述符。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "OverlayHost",
@@ -254,11 +290,17 @@ class OverlayHost : public Container {
             .examples = {"au::OverlayHost(au::Column{...})"},
         };
     }
+    /// @brief 实例描述符。
+    /// @return 转发 describe_static()。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 收集信号视图；OverlayHost 无外露信号。
+    /// @param out 信号视图累加表（恒不写入）。
+    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
     /// @brief 追加一个浮层（返回浮层序号）。
+    /// @param overlay 浮层节点（如 Popup）。
+    /// @return 新浮层在子节点中的序号。
     auto add_overlay(Node overlay) -> std::size_t {
         children_.push_back(std::move(overlay));
         mark_needs_layout();
@@ -266,6 +308,7 @@ class OverlayHost : public Container {
     }
 
     /// @brief 移除指定序号的浮层（0 = 基础内容，不可移除）。
+    /// @param index 浮层序号；越界或为 0 时不做任何事。
     auto remove_overlay(std::size_t index) -> void {
         if (index >= 1 && index < children_.size()) {
             children_.erase(children_.begin() + static_cast<std::ptrdiff_t>(index));
@@ -274,10 +317,13 @@ class OverlayHost : public Container {
     }
 
     /// @brief 浮层数量（不含基础内容）。
+    /// @return 子节点数减一；无子节点时为 0。
     [[nodiscard]] auto overlay_count() const -> std::size_t { return children_.empty() ? 0 : children_.size() - 1; }
 
     /// @brief 处理一次全局点击：自顶层向下询问各 Popup 浮层是否因外部点击而关闭。
     /// 返回 true 表示有浮层因此关闭（已消费该点击）。
+    /// @param global_pos 点击位置（全局坐标）。
+    /// @return 有浮层因外部点击关闭为 true。
     auto handle_outside_click(Point global_pos) -> bool {
         for (std::size_t i = children_.size(); i > 1; --i) {
             if (auto *popup = dynamic_cast<Popup *>(&children_[i - 1].widget())) {

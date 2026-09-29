@@ -1,4 +1,4 @@
-// ScatterChart 控件 demo（图表控件族切片 6）：双系列散点 + 双数值轴 + 最近点命中与十字准线。
+// ScatterChart 控件 demo（图表控件）：双系列散点 + 双数值轴 + 最近点命中与十字准线。
 #include "demo_common.h"
 
 // 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做

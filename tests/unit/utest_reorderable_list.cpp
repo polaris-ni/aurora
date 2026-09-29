@@ -23,8 +23,10 @@
 #include "aurora/render/painter.h"
 #include "aurora/widget/reorderable_list.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_reorderable_list {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -386,14 +388,14 @@ AURORA_TEST_CASE(descriptor_and_serialization_surface) {
     list.set_restore_key("k");
     Json props = Json::object();
     list.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["restore_key"].get<std::string>(), std::string{"k"});
-    AURORA_TEST_CHECK_NEAR(props["gap"].get<float>(), 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_TRUE(props["keyboard_reorder"].get<bool>());  // 键盘路径默认开启
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "restore_key"), std::string{"k"});
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "gap"), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(require_field<bool>(props, "keyboard_reorder"));  // 键盘路径默认开启
     AURORA_TEST_CHECK_TRUE(props.contains("note"));  // 运行时数据不序列化，只留 note
     list.set_keyboard_reorder(false);
     Json disabled = Json::object();
     list.serialize_props(disabled);
-    AURORA_TEST_CHECK_FALSE(disabled["keyboard_reorder"].get<bool>());
+    AURORA_TEST_CHECK_FALSE(require_field<bool>(disabled, "keyboard_reorder"));
     AURORA_TEST_CHECK_EQ(std::string{list.type_name()}, std::string{"ReorderableList"});
 }
 
@@ -902,8 +904,10 @@ AURORA_TEST_CASE(keyboard_announcements_are_localizable_and_switch_off_mid_grab_
     ScopedStringTable table_guard;
     auto &table = default_string_table();
     // 控件在按键路径无 BuildContext，按「默认区域」解析；Locale{} 即该区域未设置时的槽位。
+    // CJK-LITERAL: cjk-fixture - Han locale templates registered by this case to prove announcements are localizable
     table.add(Locale{}, "aurora.reorder.position", "第 {0} 项 / 共 {1} 项");
     table.add(Locale{}, "aurora.reorder.grabbed", "已抓取第 {0} 项 / 共 {1} 项");
+    // CJK-LITERAL: cjk-fixture - Han locale templates with {N} placeholders, substituted by the announce path
     table.add(Locale{}, "aurora.reorder.dropped", "自第 {0} 项移至第 {1} 项 / 共 {2} 项");
     table.add(Locale{}, "aurora.reorder.cancelled", "已取消，回到第 {0} 项 / 共 {1} 项");
 
@@ -914,14 +918,17 @@ AURORA_TEST_CASE(keyboard_announcements_are_localizable_and_switch_off_mid_grab_
     FocusManager fm;
     focus_list(list, fm);
 
+    // CJK-LITERAL: cjk-fixture - formatted announcements come back with the Han templates substituted
     AURORA_TEST_CHECK_TRUE(ann.contains("第 1 项 / 共 3 项"));
     AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowDown));
     AURORA_TEST_CHECK_TRUE(ann.contains("第 2 项 / 共 3 项"));
     AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Space));
+    // CJK-LITERAL: cjk-fixture - grabbed announcement carries the substituted Han template
     AURORA_TEST_CHECK_TRUE(ann.contains("已抓取第 2 项 / 共 3 项"));
     AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowUp));
     AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Enter));
     AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{1, 0, 2});
+    // CJK-LITERAL: cjk-fixture - dropped announcement carries the substituted Han template
     AURORA_TEST_CHECK_TRUE(ann.contains("自第 2 项移至第 1 项 / 共 3 项"));
 
     // 抓取中途关掉开关：撤销抓取（数据不变），键盘态清零。

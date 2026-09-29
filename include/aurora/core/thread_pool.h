@@ -11,34 +11,33 @@
 
 namespace aurora {
 
-/**
- * @brief 有界 worker 线程池（需求 #19 / specification/01-core.md §6.1 异步层基础设施）。
- *
- * 取代「每次 `std::thread().detach()` 直接起 OS 线程」的旧实现：所有后台工作提交到
- * 任务队列，固定数量 worker 线程复用消费。线程数有界（`default_worker_count()`，
- * 默认 `hardware_concurrency()`，下限 2），避免突发 `async` 调用的线程爆炸；
- * 析构时 `stop()` + `join()` 全部 worker，**无 detached 悬挂线程**，进程退出安全。
- *
- * **Emscripten 无 pthreads 构建 = 延迟排空（deferred）模式**：浏览器默认单线程，
- * `std::thread` 不可用。此时不启动任何 worker，任务只入队；由宿主在安全点调用
- * `pump()` 在**当前线程**（即主线程）排空——`Application::step_frame()` 已在帧尾接好这一拍
- * （步骤 7，见 `app/application.h`），故 `au::async` / 协程续体在浏览器下随帧回写，不开线程
- * 也不丢任务。排空点刻意**不放在上屏路径**：空闲帧被脏区决策整段跳过就没有 `present()`，
- * 续体会被饿死。以 `-pthread`（`__EMSCRIPTEN_PTHREADS__`，构建开关
- * `AURORA_ENABLE_WASM_PTHREADS`）构建时回到普通 worker 池语义。
- * `force_deferred=true` 可在任意平台显式开延迟模式（供测试与单线程宿主复用）。
- * 注意：deferred 下 `submit()` 的 `future.get()` 不可与 `pump()` 同线程互等（会自锁），
- * 消费续体请用 `Task::then` / 协程或帧尾泵。
- *
- * 用法：
- * @code
- *   au::ThreadPool::default_pool().execute([] { background_work(); });
- *   auto fut = au::ThreadPool::default_pool().submit([] { return compute(); });
- *   // fut.get() 取结果（异常经 future 传播）
- * @endcode
- *
- * 线程安全：所有公开方法可并发调用（deferred 模式下 `pump()` 只应被单一宿主线程调用）。
- */
+/// @brief 有界 worker 线程池（需求 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 / specification/01-core.md §6.1
+/// 异步层基础设施）。
+///
+/// 取代「每次 `std::thread().detach()` 直接起 OS 线程」的旧实现：所有后台工作提交到
+/// 任务队列，固定数量 worker 线程复用消费。线程数有界（`default_worker_count()`，
+/// 默认 `hardware_concurrency()`，下限 2），避免突发 `async` 调用的线程爆炸；
+/// 析构时 `stop()` + `join()` 全部 worker，**无 detached 悬挂线程**，进程退出安全。
+///
+/// **Emscripten 无 pthreads 构建 = 延迟排空（deferred）模式**：浏览器默认单线程，
+/// `std::thread` 不可用。此时不启动任何 worker，任务只入队；由宿主在安全点调用
+/// `pump()` 在**当前线程**（即主线程）排空——`Application::step_frame()` 已在帧尾接好这一拍
+/// （步骤 7，见 `app/application.h`），故 `au::async` / 协程续体在浏览器下随帧回写，不开线程
+/// 也不丢任务。排空点刻意**不放在上屏路径**：空闲帧被脏区决策整段跳过就没有 `present()`，
+/// 续体会被饿死。以 `-pthread`（`__EMSCRIPTEN_PTHREADS__`，构建开关
+/// `AURORA_ENABLE_WASM_PTHREADS`）构建时回到普通 worker 池语义。
+/// `force_deferred=true` 可在任意平台显式开延迟模式（供测试与单线程宿主复用）。
+/// 注意：deferred 下 `submit()` 的 `future.get()` 不可与 `pump()` 同线程互等（会自锁），
+/// 消费续体请用 `Task::then` / 协程或帧尾泵。
+///
+/// 用法：
+/// @code
+/// au::ThreadPool::default_pool().execute([] { background_work(); });
+/// auto fut = au::ThreadPool::default_pool().submit([] { return compute(); });
+/// // fut.get() 取结果（异常经 future 传播）
+/// @endcode
+///
+/// 线程安全：所有公开方法可并发调用（deferred 模式下 `pump()` 只应被单一宿主线程调用）。
 class ThreadPool {
   public:
     /// @brief 编译期默认是否 deferred：仅「无 `std::thread` 能力」的构建为 true
@@ -46,6 +45,7 @@ class ThreadPool {
     static constexpr bool AURORA_COMPILE_TIME_DEFERRED = AURORA_CAP_THREADS == 0;
 
     /// @brief 默认 worker 数：`hardware_concurrency()`，下限 2（单核/查询失败时为 2）。
+    /// @return hardware_concurrency() 的原始值（不小于 2 时）；否则回退为 2。
     [[nodiscard]] static auto default_worker_count() -> std::size_t {
         const unsigned hc = std::thread::hardware_concurrency();
         if (hc < 2U) {
@@ -54,10 +54,10 @@ class ThreadPool {
         return hc;
     }
 
-    /**
-     * @brief 构造：默认启动 `worker_count` 个 worker 线程；
-     *        deferred 模式（`AURORA_COMPILE_TIME_DEFERRED` 或显式 `force_deferred`）不启动线程。
-     */
+    /// @brief 构造：默认启动 `worker_count` 个 worker 线程；
+    /// deferred 模式（`AURORA_COMPILE_TIME_DEFERRED` 或显式 `force_deferred`）不启动线程。
+    /// @param worker_count 期望的 worker 线程数（0 回退 `default_worker_count()`）。
+    /// @param force_deferred 任意平台强制延迟模式（任务只入队，宿主 pump 排空）。
     explicit ThreadPool(std::size_t worker_count = default_worker_count(), bool force_deferred = false)
         : deferred_(AURORA_COMPILE_TIME_DEFERRED || force_deferred) {
         if (deferred_) {
@@ -66,17 +66,17 @@ class ThreadPool {
         if (worker_count == 0) {
             worker_count = default_worker_count();
         }
-        workers_.reserve(worker_count);
+        workers_.reserve(worker_count);  // 预分配线程槽位，避免逐个 emplace_back 触发 vector 扩容搬移 std::thread。
         for (std::size_t i = 0; i < worker_count; ++i) {
             workers_.emplace_back([this]() -> void { worker_loop(); });
         }
     }
 
     /// @brief 停止并 join 全部 worker（RAII 安全，无悬挂线程）。deferred 模式排空剩余队列。
-    // 豁免 bugprone-exception-escape：析构会加锁 / notify / join 并销毁 std::function 任务，这些
-    // 皆无 noexcept 规格——即 .clang-tidy 记录在案的 std::function 假告警面。析构期无调用方可回报，
-    // 就地吞掉只会静默丢错；同一份代码在 native 口径不报（口径差异见 CODING_STANDARDS.md §5.2）。
-    // NOLINTNEXTLINE(bugprone-exception-escape)
+    /// @note 豁免 bugprone-exception-escape：析构会加锁 / notify / join 并销毁 std::function 任务，这些
+    /// 皆无 noexcept 规格——即 .clang-tidy 记录在案的 std::function 假告警面。析构期无调用方可回报，
+    /// 就地吞掉只会静默丢错；同一份代码在 native 口径不报（口径差异见 CODING_STANDARDS.md §5.2）。
+    /// NOLINTNEXTLINE(bugprone-exception-escape)
     ~ThreadPool() {
         {
             std::scoped_lock lock(mutex_);
@@ -96,22 +96,28 @@ class ThreadPool {
         }
     }
 
+    /// @brief 禁止拷贝构造：线程池持有 worker 线程与队列，身份不可复制。
     ThreadPool(const ThreadPool &) = delete;
+    /// @brief 禁止拷贝赋值（同拷贝构造）。
+    /// @return 无返回值语义（恒 delete）。
     auto operator=(const ThreadPool &) -> ThreadPool & = delete;
+    /// @brief 禁止移动构造：worker 线程句柄与 this 捕获（worker_loop 回调）不可转移。
     ThreadPool(ThreadPool &&) = delete;
+    /// @brief 禁止移动赋值（同移动构造）。
+    /// @return 无返回值语义（恒 delete）。
     auto operator=(ThreadPool &&) -> ThreadPool & = delete;
 
     /// @brief 是否处于「任务只入队、由宿主 `pump()` 排空」的延迟模式。
+    /// @return deferred_ 标记（构造期确定，运行期不变）。
     [[nodiscard]] auto is_deferred() const -> bool { return deferred_; }
 
     /// @brief 当前 worker 线程数（deferred 模式恒为 0）。
+    /// @return workers_ 容器大小。
     [[nodiscard]] auto worker_count() const -> std::size_t { return workers_.size(); }
 
-    /**
-     * @brief 延迟模式专用：在**当前线程**执行至多「进入时已入队」的任务（新入队任务
-     *        留待下一次 `pump()`，避免自我续命的任务饿死宿主帧）。
-     * @return 实际执行的任务数；非 deferred 模式恒返回 0。
-     */
+    /// @brief 延迟模式专用：在**当前线程**执行至多「进入时已入队」的任务（新入队任务
+    /// 留待下一次 `pump()`，避免自我续命的任务饿死宿主帧）。
+    /// @return 实际执行的任务数；非 deferred 模式恒返回 0。
     auto pump() -> std::size_t {
         if (!deferred_) {
             return 0;
@@ -132,17 +138,16 @@ class ThreadPool {
     }
 
     /// @brief 当前排队未执行的任务数（近似值，仅供诊断）。
+    /// @return 加锁瞬间 queue_ 的长度；出锁后可能立即变化，勿用于同步判断。
     [[nodiscard]] auto pending_count() const -> std::size_t {
         std::scoped_lock lock(mutex_);
         return queue_.size();
     }
 
-    /**
-     * @brief 提交一个 fire-and-forget 任务到队列。
-     * @param job 可执行体（被拷贝/移动到队列中）。异常会在 worker 内被吞掉并经由
-     *            `std::terminate` 之前的最后一道屏障——实际由 `execute` 包裹捕获，
-     *            不向外传播；若需传播请用 `submit`（返回 `std::future`）。
-     */
+    /// @brief 提交一个 fire-and-forget 任务到队列。
+    /// @param job 可执行体（被拷贝/移动到队列中）。异常会在 worker 内被吞掉并经由
+    /// `std::terminate` 之前的最后一道屏障——实际由 `execute` 包裹捕获，
+    /// 不向外传播；若需传播请用 `submit`（返回 `std::future`）。
     auto execute(std::function<void()> job) -> void {
         {
             std::scoped_lock lock(mutex_);
@@ -158,10 +163,10 @@ class ThreadPool {
         cv_.notify_one();
     }
 
-    /**
-     * @brief 提交一个任务并返回 `std::future<R>` 取结果/异常（异常经 future 传播）。
-     * @tparam F 可调用体，返回 `R`（`void` 亦可）。
-     */
+    /// @brief 提交一个任务并返回 `std::future<R>` 取结果/异常（异常经 future 传播）。
+    /// @tparam F 可调用体，返回 `R`（`void` 亦可）。
+    /// @param f 可调用体（完美转发进任务包装，异常在任务内捕获后存入 promise）。
+    /// @return 关联 promise 的 future；R 为 `std::invoke_result_t<F>`，`get()` 取结果或重抛异常。
     template <typename F>
     auto submit(F &&f) -> std::future<std::invoke_result_t<F>> {
         using R = std::invoke_result_t<F>;
@@ -182,10 +187,9 @@ class ThreadPool {
         return fut;
     }
 
-    /**
-     * @brief 进程级默认线程池（Meyers 单例）：`au::async` / 协程均经它调度。
-     * 跨 TU 单实例（C++17 inline 语义）；程序退出时静态析构 join 全部 worker。
-     */
+    /// @brief 进程级默认线程池（Meyers 单例）：`au::async` / 协程均经它调度。
+    /// 跨 TU 单实例（C++17 inline 语义）；程序退出时静态析构 join 全部 worker。
+    /// @return 进程级唯一 ThreadPool 实例的引用（首次调用时惰性构造）。
     [[nodiscard]] static auto default_pool() -> ThreadPool & {
         // 惰性构造的函数内 static：首次调用才建，跨 TU 初始化顺序问题在此不存在（本检查的担心面）。
         // 仅浏览器口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。

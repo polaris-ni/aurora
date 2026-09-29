@@ -18,16 +18,16 @@ namespace aurora {
 
 namespace {
 
-/**
- * @brief 垂直滚动控件探针：读取被测树中主滚动容器的真实偏移量。
- *
- * 存在的意义是**自证**：没有它，harness 可能在事件根本没命中滚动容器的情况下，
- * 照样输出一组「非常流畅」的读数（因为每帧都是 idle 跳帧）。有了偏移量对比，
- * 「没滚动」这件事会直接体现在 `moved_frames = 0` 上。
- *
- * 三类控件的偏移访问器命名历史不一致（`Scroll::offset_y` vs
- * `LazyList/GridView::scroll_offset`），此处统一收口，不改动既有公共 API。
- */
+///
+/// @brief 垂直滚动控件探针：读取被测树中主滚动容器的真实偏移量。
+///
+/// 存在的意义是**自证**：没有它，harness 可能在事件根本没命中滚动容器的情况下，
+/// 照样输出一组「非常流畅」的读数（因为每帧都是 idle 跳帧）。有了偏移量对比，
+/// 「没滚动」这件事会直接体现在 `moved_frames = 0` 上。
+///
+/// 三类控件的偏移访问器命名历史不一致（`Scroll::offset_y` vs
+/// `LazyList/GridView::scroll_offset`），此处统一收口，不改动既有公共 API。
+///
 class ScrollProbe {
   public:
     /// @brief 前序深度优先查找**最外层**垂直滚动容器（页面级滚动器优先于内部嵌套列表）。
@@ -139,7 +139,7 @@ auto ScrollBenchHarness::Result::trustworthy() const -> bool {
 auto ScrollBenchHarness::Result::to_markdown() const -> std::string {
     std::string out = report.to_markdown();
 
-    out += "\n| 滚动自证 | 值 | 判定 |\n|------|----|----|\n";
+    out += "\n| Scroll self-check | Value | Verdict |\n|------|----|----|\n";
     out += aurora::internal::string_format("| scrollable found | %s | %s |\n", scrollable_found ? "yes" : "no",
                                            scrollable_found ? "ok" : "**FAIL**");
     out += aurora::internal::string_format(
@@ -147,28 +147,30 @@ auto ScrollBenchHarness::Result::to_markdown() const -> std::string {
         (report.frame_count > 0 && moved_frames == report.frame_count) ? "ok" : "**FAIL**");
     out += aurora::internal::string_format("| idle (skipped) frames | %zu | %s |\n", idle_frames,
                                            idle_frames == 0 ? "ok" : "**FAIL**");
-    out += aurora::internal::string_format("| reversals | %zu（%.1f%%） | %s |\n", reversals, reversal_ratio() * 100.0,
-                                           reversal_ratio() <= AURORA_MAX_REVERSAL_RATIO ? "ok" : "**FAIL 内容太短**");
     out += aurora::internal::string_format(
-        "| scrolled | %.1f dp（%.1f dp/帧） | — |\n", scrolled_px,
+        "| reversals | %zu (%.1f%%) | %s |\n", reversals, reversal_ratio() * 100.0,
+        reversal_ratio() <= AURORA_MAX_REVERSAL_RATIO ? "ok" : "**FAIL content too short**");
+    out += aurora::internal::string_format(
+        "| scrolled | %.1f dp (%.1f dp/frame) | - |\n", scrolled_px,
         report.frame_count > 0 ? scrolled_px / static_cast<double>(report.frame_count) : 0.0);
     out +=
         aurora::internal::string_format("| step calibration | %.2f dp/unit | %s |\n", static_cast<double>(dp_per_unit),
-                                        dp_per_unit > 0.0F ? "ok" : "**FAIL 未标定**");
+                                        dp_per_unit > 0.0F ? "ok" : "**FAIL not calibrated**");
     out += aurora::internal::string_format("| scroll extent | %.1f dp | %s |\n", static_cast<double>(max_offset),
-                                           max_offset > 0.5F ? "ok" : "**FAIL 不可滚**");
-    out += aurora::internal::string_format("| scroll viewport | %.1f dp（窗口 %.0f dp） | 内容 %.2f 屏%s |\n",
+                                           max_offset > 0.5F ? "ok" : "**FAIL not scrollable**");
+    out += aurora::internal::string_format("| scroll viewport | %.1f dp (window %.0f dp) | content %.2f screens%s |\n",
                                            static_cast<double>(scroll_viewport_h), static_cast<double>(viewport.height),
                                            static_cast<double>(content_screens()),
-                                           content_screens() < 2.0F ? "（偏短）" : "");
-    out += aurora::internal::string_format("| geometry stable | %.1f → %.1f dp | %s |\n",
+                                           content_screens() < 2.0F ? " (short)" : "");
+    out += aurora::internal::string_format("| geometry stable | %.1f -> %.1f dp | %s |\n",
                                            static_cast<double>(max_offset), static_cast<double>(max_offset_end),
-                                           geometry_stable() ? "ok" : "**FAIL 采样期内容仍在变**");
-    out += aurora::internal::string_format("| final offset | %.1f dp | — |\n", static_cast<double>(final_offset));
-    out += aurora::internal::string_format("| settle | %zu frames / %.0f ms（%s） | %s |\n", settle_frames, settle_ms,
-                                           settle_reason_name(settle_reason), settled ? "ok" : "**FAIL 撞帧数上限**");
+                                           geometry_stable() ? "ok" : "**FAIL content changing during sampling**");
+    out += aurora::internal::string_format("| final offset | %.1f dp | - |\n", static_cast<double>(final_offset));
+    out +=
+        aurora::internal::string_format("| settle | %zu frames / %.0f ms (%s) | %s |\n", settle_frames, settle_ms,
+                                        settle_reason_name(settle_reason), settled ? "ok" : "**FAIL frame limit hit**");
     out += aurora::internal::string_format("| **trustworthy** | %s | |\n",
-                                           trustworthy() ? "**yes**" : "**NO — 读数不可信**");
+                                           trustworthy() ? "**yes**" : "**NO - readings not trustworthy**");
     return out;
 }
 
@@ -216,6 +218,11 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
         return res;  // 非法输入：scrollable_found = false，调用方经 trustworthy() 识别
     }
 
+#ifndef AURORA_BACKEND_HEADLESS
+    // 无头后端未编译：本 harness 唯一的绘制目标是 `HeadlessSurface`，无替代实现。
+    // 返回未采样结果（`scrollable_found = false`，调用方经 `trustworthy()` 识别），不编译失败。
+    return res;
+#else
     const float scale = cfg.scale > 0.0F ? cfg.scale : 1.0F;
     auto surface = std::make_unique<HeadlessSurface>(std::string{}, viewport);
     surface->painter().set_scale(scale);
@@ -262,7 +269,7 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
     res.scroll_viewport_h = probe.viewport_h();
 
     const Point center{.x = viewport.width * 0.5F, .y = viewport.height * 0.5F};
-    int dir = 1;  ///< +1 = 向下滚（内容上移）；触边由 auto_reverse 翻转
+    int dir = 1;  // +1 = 向下滚（内容上移）；触边由 auto_reverse 翻转
     float velocity = cfg.delta_per_frame * (cfg.fling ? cfg.fling_boost : 1.0F);
 
     // 滚轮约定（全库一致）：delta_y 正方向为「向上滚动」，故向下滚需取负号。
@@ -373,6 +380,7 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
     // 采样后复测行程：与采样前不一致说明内容几何在采样期间还在变（典型：骨架屏中途退场）。
     res.max_offset_end = measure_extent();
     return res;
+#endif  // AURORA_BACKEND_HEADLESS
 }
 
 }  // namespace aurora

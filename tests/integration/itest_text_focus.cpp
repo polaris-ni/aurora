@@ -50,7 +50,7 @@ struct Stage {
     FocusManager fm;
 
     Stage() {
-        txt = std::make_shared<Text>("点击按钮改变计数（运行日志可见）");
+        txt = std::make_shared<Text>("Click the button to change the count (visible in the run log)");
         btn = std::make_shared<Button>();
         col = std::make_shared<Column>(ColumnProps{.children = {Node{txt}, Node{btn}}});
         col->set_focusable(false);  // 容器不抢占焦点，焦点应落在叶控件上
@@ -162,7 +162,12 @@ AURORA_TEST_CASE(blur_clears_selection_highlight_pixels) {
     AURORA_TEST_REQUIRE_MSG(!st.txt->has_selection(), "precondition: text blurred by button press");
 
     st.repaint_on_white();
-    AURORA_TEST_CHECK_EQ(count_blue_in(st.p, st.text_bounds()), 0);
+    // 按钮此刻持有焦点：基类统一焦点环画在它盒外 2–4 dp，正压进文本行盒的底边几行。
+    // 本用例判的是「失焦后选区高亮消失」，与环无关，故底边内缩环的外包尺寸再扫描。
+    const Rect scan = st.text_bounds();
+    const Rect ring_free{.origin = scan.origin,
+                         .size = Size{.width = scan.size.width, .height = scan.size.height - 4.0F}};
+    AURORA_TEST_CHECK_EQ(count_blue_in(st.p, ring_free), 0);
 }
 
 AURORA_TEST_CASE(click_non_focusable_area_blurs_text) {

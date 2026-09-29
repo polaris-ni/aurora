@@ -25,6 +25,8 @@
 #include "aurora/render/font_engine.h"
 #include "bench_common.h"
 
+#ifdef AURORA_BACKEND_HEADLESS
+
 namespace {
 
 // Create a fixed-size Headless window (set scale before begin_frame; physical buffer = logical x scale).
@@ -62,6 +64,7 @@ auto build_tree(std::shared_ptr<aurora::Chip> *out_probe) -> aurora::Node {
 }
 
 // Representative text (Latin + digits + CJK) covering the fallback chain and atlas-cache paths.
+// CJK-LITERAL: cjk-fixture - Han/kana/hangul runs are the shaping input fed to the glyph atlas, never printed
 constexpr auto AURORA_BENCH_TEXT = "The quick brown fox jumps 0123456789 灰狐跳过懒狗 こんにちは世界 안녕하세요";
 
 // Scroll-scene content tree: `aurora::Scroll` wrapping a column of 200 aurora::Chip (with label
@@ -219,6 +222,7 @@ auto main() -> int {
                        aurora::bench::time_ms(
                            [&]() -> void {
                                ++flip;
+                               // NOLINTNEXTLINE(*-signed-bitwise)
                                probe->set_background((flip & 1) != 0 ? aurora::Color{220, 60, 60, 255}
                                                                      : aurora::Color{60, 60, 220, 255});
                                (void)win.present_root(root);
@@ -268,10 +272,11 @@ auto main() -> int {
     }
 
     // 14) scroll scene: reuse aurora::ScrollBenchHarness to run a deterministic scroll sequence,
-    // producing p99 / jitter / full_redraw_frames and RenderCounters baselines. Time-based gates are
-    // affected by environment jitter and excluded from CTest; local trend comparison is in
-    // tools/check/check_perf_gates.ps1. Counter-based gates are locked into CTest by
-    // tests/unit/utest_scroll.cpp (scroll_regression section) (build-prof).
+    // producing p99 / jitter / full_redraw_frames and RenderCounters baselines. Time-based gates
+    // (G-1~G-4, G-9~G-14) are affected by environment jitter and excluded from CTest; local trend
+    // comparison is in tools/check/check_perf_gates.ps1. Counter-based gates G-5~G-8 are locked
+    // into CTest by tests/unit/utest_scroll.cpp (scroll_regression_counter_gates), which reads the
+    // thresholds from tools/check/perf_gates.json (needs PROFILING=ON, else it registers a skip).
     {
         aurora::ScrollBenchHarness::Config cfg;
         cfg.name = "bench_render-scroll";
@@ -280,11 +285,22 @@ auto main() -> int {
         AURORA_LOG_RAW("bench", "\n## scroll scenario (aurora::ScrollBenchHarness, 1100x760 dp, 300 frames)\n\n");
         AURORA_LOG_RAW("bench", r.to_markdown(), "\n");
         AURORA_LOG_RAW("bench",
-                       "> time-based gates (G-1~G-14) are affected by environment jitter and excluded from "
+                       "> time-based gates (G-1~G-4, G-9~G-14) are affected by environment jitter and excluded from "
                        "CTest; local trend comparison see "
-                       "tools/check/check_perf_gates.ps1.\n");
+                       "tools/check/check_perf_gates.ps1. Counter-based gates G-5~G-8 are asserted in CTest.\n");
     }
 
     AURORA_LOG_RAW("bench", "\n", aurora::bench::AURORA_BENCH_DISCLAIMER, "\n");
     return 0;
 }
+
+#else  // !AURORA_BACKEND_HEADLESS
+
+// 无头后端未编译：本基准的唯一绘制目标是 `HeadlessSurface`，无替代实现——跳过并如实说明，
+// 不编译失败（基准的判据本身也无从成立）。
+auto main() -> int {
+    AURORA_LOG_RAW("bench", "bench_render: skipped (AURORA_BACKEND_HEADLESS not enabled, no paint target)\n");
+    return 0;
+}
+
+#endif  // AURORA_BACKEND_HEADLESS
