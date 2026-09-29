@@ -226,7 +226,7 @@ auto Text::deserialize_props(const Json &props) -> void {
     }
     if (props.contains("line_height")) {
         if (props.at("line_height")->is_number()) {
-            const float v = props.at("line_height")->as_or<float>(0.0F);
+            const auto v = props.at("line_height")->as_or<float>(0.0F);
             if (v > 0) {
                 line_height = v;
             } else {

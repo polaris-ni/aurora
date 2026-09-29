@@ -206,12 +206,12 @@ AURORA_TEST_CASE(logical_snapshot_children_stay_within_parent) {
     const Json snapshot = render_to_logical_snapshot(root, 100, 60);
 
     const auto &root_box = *require_child(snapshot, "box");
-    const float parent_w = require_field<float>(root_box, "w");
-    const float parent_h = require_field<float>(root_box, "h");
+    const auto parent_w = require_field<float>(root_box, "w");
+    const auto parent_h = require_field<float>(root_box, "h");
     const auto &children = *require_child(snapshot, "children");
-    for (const auto *child = children.begin(); child != children.end(); ++child) {
-        AURORA_TEST_TRACE(std::string{"child "} + require_field<std::string>(*child, "type"));
-        const auto &child_box = *require_child(*child, "box");
+    for (const auto &child : children) {
+        AURORA_TEST_TRACE(std::string{"child "} + require_field<std::string>(child, "type"));
+        const auto &child_box = *require_child(child, "box");
         AURORA_TEST_CHECK_LE(require_field<float>(child_box, "w"), parent_w + 0.001F);
         AURORA_TEST_CHECK_LE(require_field<float>(child_box, "h"), parent_h + 0.001F);
     }
@@ -232,7 +232,7 @@ AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
         const std::string text{(std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()};
         const auto parsed = json::parse(text);
         AURORA_TEST_REQUIRE_TRUE(parsed.ok());
-        baseline = std::move(parsed.value());
+        baseline = parsed.value();
         AURORA_TEST_REQUIRE_TRUE(baseline.contains("scenarios"));
         // 色彩管理注记：golden 基准唯一色彩空间为 sRGB（软件参考路径 SSOT，逐位确定性红线）。
         // 基线尚无此字段时跳过（向后兼容）；再生成路径会写入。

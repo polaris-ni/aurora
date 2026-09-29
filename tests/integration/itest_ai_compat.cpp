@@ -70,7 +70,7 @@ auto load_fixture(const fs::path &path) -> au::Json {
     std::ostringstream ss;
     ss << in.rdbuf();
     const auto parsed = au::json::parse(ss.str());
-    return parsed.ok() ? std::move(parsed.value()) : au::Json{};
+    return parsed.ok() ? parsed.value() : au::Json{};
 }
 
 }  // namespace
@@ -288,7 +288,7 @@ using ScriptError = std::string;
         return r.ok() ? ScriptError{} : ScriptError{"drag: " + r.error().message};
     }
     if (action == "enter_text") {
-        const std::string text = step.as_or<std::string>("text", std::string{});
+        const auto text = step.as_or<std::string>("text", std::string{});
         const au::Result<void> r = tc.enter_text(target, text);
         return r.ok() ? ScriptError{} : ScriptError{"enter_text: " + r.error().message};
     }
@@ -327,22 +327,23 @@ using ScriptError = std::string;
 
     // `changed` 断言的基线：脚本起点（首帧之后、任何交互之前）的属性快照。
     std::map<std::string, au::Json> baseline;
-    for (const auto *e = expectations.begin(); e != expectations.end(); ++e) {
-        if (!e->as_or<bool>("changed", false)) {
+    for (const auto &expectation : expectations) {
+        if (!expectation.as_or<bool>("changed", false)) {
             continue;
         }
-        const au::Node target = script_target(tc, step_or_target(*e));
+        const au::Node target = script_target(tc, step_or_target(expectation));
         if (!target) {
             return "expect target not found";
         }
-        baseline[baseline_key(*e)] = script_prop(target, e->as_or<std::string>("prop", std::string{}));
+        baseline[baseline_key(expectation)] =
+            script_prop(target, expectation.as_or<std::string>("prop", std::string{}));
     }
 
     int step_index = 0;
     const auto *steps_p = fx.find("steps");
     const au::Json steps = steps_p != nullptr ? *steps_p : au::Json::array();
-    for (const auto *step = steps.begin(); step != steps.end(); ++step) {
-        const ScriptError err = run_step(tc, *step);
+    for (const auto &step : steps) {
+        const ScriptError err = run_step(tc, step);
         if (!err.empty()) {
             return "step[" + std::to_string(step_index) + "]: " + err;
         }
@@ -350,30 +351,30 @@ using ScriptError = std::string;
     }
 
     int expect_index = 0;
-    for (const auto *e = expectations.begin(); e != expectations.end(); ++e) {
-        const au::Node target = script_target(tc, step_or_target(*e));
+    for (const auto &expectation : expectations) {
+        const au::Node target = script_target(tc, step_or_target(expectation));
         if (!target) {
             return "expect[" + std::to_string(expect_index) + "]: target not found";
         }
-        if (e->contains("visible")) {
+        if (expectation.contains("visible")) {
             const au::Result<void> r = aurora::TestController::expect_visible(target);
             if (!r.ok()) {
                 return "expect[" + std::to_string(expect_index) + "]: " + r.error().message;
             }
-        } else if (e->contains("prop")) {
-            const std::string prop = e->at("prop")->as_or<std::string>("");
-            if (e->contains("value")) {
-                const au::Result<void> r = aurora::TestController::expect_prop(target, prop, *e->at("value"));
+        } else if (expectation.contains("prop")) {
+            const auto prop = expectation.at("prop")->as_or<std::string>("");
+            if (expectation.contains("value")) {
+                const au::Result<void> r = aurora::TestController::expect_prop(target, prop, *expectation.at("value"));
                 if (!r.ok()) {
                     return "expect[" + std::to_string(expect_index) + "]: " + r.error().message;
                 }
-            } else if (e->as_or<bool>("changed", false)) {
-                const au::Json before = baseline.at(baseline_key(*e));
+            } else if (expectation.as_or<bool>("changed", false)) {
+                const au::Json before = baseline.at(baseline_key(expectation));
                 const au::Json after = script_prop(target, prop);
                 if (before == after) {
                     auto dumped = au::json::dump(after);
                     return "expect[" + std::to_string(expect_index) + "]: prop '" + prop + "' unchanged (both " +
-                           (dumped.ok() ? std::move(dumped.value()) : dumped.error().message) + ")";
+                           (dumped.ok() ? dumped.value() : dumped.error().message) + ")";
                 }
             } else {
                 return "expect[" + std::to_string(expect_index) + "]: needs 'value' or 'changed'";

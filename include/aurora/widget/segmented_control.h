@@ -276,8 +276,8 @@ class SegmentedControl : public LeafWidget {
             const auto *arr = props.at("segments");
             if (arr != nullptr && arr->is_array()) {
                 segments_.clear();
-                for (const auto *s = arr->begin(); s != arr->end(); ++s) {
-                    segments_.push_back(s->as_or<std::string>(""));
+                for (const auto &s : *arr) {
+                    segments_.push_back(s.as_or<std::string>(""));
                 }
             }
         }

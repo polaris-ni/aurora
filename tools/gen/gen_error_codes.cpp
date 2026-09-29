@@ -59,7 +59,7 @@ constexpr std::array<const char *, 4> AURORA_SEVERITIES = {"info", "warning", "e
 
 // Doc text emitted next to each enumerator (codespec/CODING_STANDARDS.md §13.5.2 requires one description per
 // enumerator). Kept parallel to the two arrays above: same order, same length, indexed by the same position.
-constexpr std::array<const char *, 11> CATEGORY_DOC = {
+constexpr std::array<const char *, 11> AURORA_CATEGORY_DOC = {
     "uncategorized error domain",
     "layout measurement and constraint errors",
     "widget contract and property errors",
@@ -72,7 +72,7 @@ constexpr std::array<const char *, 11> CATEGORY_DOC = {
     "UI generation (generate_ui) errors",
     "diagnostics, self-check and degradation errors",
 };
-constexpr std::array<const char *, 4> SEVERITY_DOC = {
+constexpr std::array<const char *, 4> AURORA_SEVERITY_DOC = {
     "reserved level; no codespec/errors.toml entry declares it",
     "degraded condition, logged as LogLevel::Warn",
     "failed operation, logged as LogLevel::Error",
@@ -227,7 +227,8 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
     o << "/// @brief error domain of a code; the declaration order is the underlying value order.\n"
          "enum class ErrorCategory : std::uint8_t {\n";
     for (size_t i = 0; i < std::size(AURORA_CATEGORIES); ++i) {
-        o << "    " << capitalize(AURORA_CATEGORIES.at(i)) << " = " << i << ",   ///< " << CATEGORY_DOC.at(i) << "\n";
+        o << "    " << capitalize(AURORA_CATEGORIES.at(i)) << " = " << i << ",   ///< " << AURORA_CATEGORY_DOC.at(i)
+          << "\n";
     }
     o << "};\n\n";
 
@@ -236,7 +237,8 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
          "else as Warn).\n"
          "enum class ErrorSeverity : std::uint8_t {\n";
     for (size_t i = 0; i < std::size(AURORA_SEVERITIES); ++i) {
-        o << "    " << capitalize(AURORA_SEVERITIES.at(i)) << " = " << i << ",    ///< " << SEVERITY_DOC.at(i) << "\n";
+        o << "    " << capitalize(AURORA_SEVERITIES.at(i)) << " = " << i << ",    ///< " << AURORA_SEVERITY_DOC.at(i)
+          << "\n";
     }
     o << "};\n\n";
 

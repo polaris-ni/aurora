@@ -110,7 +110,7 @@ class HotReload {
         }
         std::string content{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
         const auto parsed = json::parse(content);
-        return parsed.ok() ? std::move(parsed.value()) : Json{};
+        return parsed.ok() ? parsed.value() : Json{};
     }
 
     /// @brief 状态快照：清空并重扫上一棵树，把各路径节点序列化出的属性对象存入 saved_state_。

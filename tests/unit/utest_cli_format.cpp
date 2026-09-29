@@ -84,9 +84,9 @@ auto expect_valid(const CommandSpec &candidate) -> void {
     if (options == nullptr) {
         return nullptr;
     }
-    for (const auto *option = options->begin(); option != options->end(); ++option) {
-        if (option->as_or<std::string_view>("long", std::string_view{}) == long_name) {
-            return option;
+    for (const auto &option : *options) {
+        if (option.as_or<std::string_view>("long", std::string_view{}) == long_name) {
+            return &option;
         }
     }
     return nullptr;

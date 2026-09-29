@@ -305,7 +305,7 @@ auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<
         return make_error(ErrorCode::IOParseFailed,
                           "serialization: node JSON must be an object with a string 'type' field");
     }
-    const std::string type = t->as_or<std::string>("");
+    const auto type = t->as_or<std::string>("");
     const Json *pp = j.at("props");
     const Json props = pp != nullptr ? *pp : Json::object();
 
@@ -317,8 +317,8 @@ auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<
 
     if (const auto *c = j.at("children"); c != nullptr && c->is_array()) {
         std::vector<Node> kids;
-        for (const auto *cj = c->begin(); cj != c->end(); ++cj) {
-            auto cres = from_json_impl(*cj, depth + 1);
+        for (const auto &cj : *c) {
+            auto cres = from_json_impl(cj, depth + 1);
             if (!cres) {
                 return cres;
             }

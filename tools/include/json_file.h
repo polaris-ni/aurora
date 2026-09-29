@@ -28,7 +28,7 @@ inline auto read_json_file(const std::string &path) -> Json {
     std::ostringstream ss;
     ss << f.rdbuf();
     const auto parsed = json::parse(ss.str());
-    return parsed ? std::move(parsed.value()) : Json{};
+    return parsed ? parsed.value() : Json{};
 }
 
 // Read raw text from a file; on failure return an empty string.

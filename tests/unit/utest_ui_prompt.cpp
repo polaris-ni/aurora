@@ -101,9 +101,9 @@ AURORA_TEST_CASE(repair_adds_required_props_only_and_keeps_explicit_values) {
     const Json schema = aurora::describe_component("Text");
     std::set<std::string> required;
     const auto *descriptors = require_child(schema, "prop_descriptors");
-    for (const auto *pd = descriptors->begin(); pd != descriptors->end(); ++pd) {
-        if (pd->as_or<bool>("required", false)) {
-            required.insert(std::string{pd->as_or<std::string>("name", "")});
+    for (const auto &descriptor : *descriptors) {
+        if (descriptor.as_or<bool>("required", false)) {
+            required.insert(std::string{descriptor.as_or<std::string>("name", "")});
         }
     }
     AURORA_TEST_CHECK_GT(required.size(), std::size_t{0});  // 否则下面的循环是空转

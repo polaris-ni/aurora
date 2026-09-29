@@ -45,7 +45,7 @@ using Json = json::Value;
 /// @return 对应 Length；无法识别的字符串、数组形态一律回退 wrap（按内容自适应）。
 [[nodiscard]] inline auto json_to_length(const Json &j) -> Length {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "auto") {
             return Length::wrap();
         }
@@ -55,8 +55,8 @@ using Json = json::Value;
         return Length::wrap();
     }
     if (j.is_array() && j.size() == 2) {
-        const std::string kind = j.as_or_at<std::string>(0, "");
-        const float v = j.as_or_at<float>(1, 0.0F);
+        const auto kind = j.as_or_at<std::string>(0, "");
+        const auto v = j.as_or_at<float>(1, 0.0F);
         if (kind == "px") {
             return Length::fixed(v);
         }
@@ -146,7 +146,7 @@ using Json = json::Value;
 /// @return 匹配的 TextAlign，未知名返回 Left。
 [[nodiscard]] inline auto json_to_text_align(const Json &j) -> TextAlign {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "Left") {
             return TextAlign::Left;
         }
@@ -187,7 +187,7 @@ using Json = json::Value;
 /// @return 匹配的方向；未知名返回 LTR。
 [[nodiscard]] inline auto json_to_text_direction(const Json &j) -> TextDirection {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "RTL") {
             return TextDirection::RTL;
         }
@@ -215,7 +215,7 @@ using Json = json::Value;
 /// @return 匹配的策略；未知名返回 Clip。
 [[nodiscard]] inline auto json_to_text_overflow(const Json &j) -> TextOverflow {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "Clip") {
             return TextOverflow::Clip;
         }
@@ -242,7 +242,7 @@ using Json = json::Value;
 [[nodiscard]] inline auto json_to_font_weight(const Json &j) -> FontWeight {
     int w = 400;  // 字重数值，解析失败时保持默认 Normal(400)。
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (!s.empty()) {
             try {
                 w = std::stoi(s);
@@ -332,9 +332,9 @@ using Json = json::Value;
         }
     };
     if (j.is_array()) {
-        for (const auto *item = j.begin(); item != j.end(); ++item) {
-            if (item->is_string()) {
-                add(item->as_or<std::string>(""));
+        for (const auto &item : j) {
+            if (item.is_string()) {
+                add(item.as_or<std::string>(""));
             }
         }
     } else if (j.is_string()) {
@@ -370,7 +370,7 @@ using Json = json::Value;
 /// @return 匹配的方位；未知名返回 Start。
 [[nodiscard]] inline auto json_to_snap_alignment(const Json &j) -> ScrollSnapAlignment {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "Center") {
             return ScrollSnapAlignment::Center;
         }
@@ -417,7 +417,7 @@ using Json = json::Value;
 /// @return 匹配的对齐方式；未知名返回 Start。
 [[nodiscard]] inline auto json_to_main_axis_alignment(const Json &j) -> MainAxisAlignment {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "Center") {
             return MainAxisAlignment::Center;
         }
@@ -461,7 +461,7 @@ using Json = json::Value;
 /// @return 匹配的对齐方式；未知名返回 Start。
 [[nodiscard]] inline auto json_to_cross_axis_alignment(const Json &j) -> CrossAxisAlignment {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "Center") {
             return CrossAxisAlignment::Center;
         }
@@ -498,7 +498,7 @@ using Json = json::Value;
 /// @return 匹配的 StackFit；未知名返回 Loose。
 [[nodiscard]] inline auto json_to_stack_fit(const Json &j) -> StackFit {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "Loose") {
             return StackFit::Loose;
         }
@@ -540,7 +540,7 @@ using Json = json::Value;
 /// @return 匹配的 BoxFit；未知名返回 Fill。
 [[nodiscard]] inline auto json_to_box_fit(const Json &j) -> BoxFit {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "Fill") {
             return BoxFit::Fill;
         }
@@ -588,7 +588,7 @@ using Json = json::Value;
 /// @return 匹配的策略；未知名返回 Visible。
 [[nodiscard]] inline auto json_to_overflow_strategy(const Json &j) -> OverflowStrategy {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "Visible") {
             return OverflowStrategy::Visible;
         }

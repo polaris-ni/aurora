@@ -151,13 +151,15 @@ AURORA_TEST_CASE(keeps_embedded_nul_and_decodes_surrogate_pairs) {
     AURORA_TEST_REQUIRE(nul.ok());
     const auto nul_text = nul.value().as_string();
     AURORA_TEST_REQUIRE(nul_text.has_value());
-    AURORA_TEST_CHECK_EQ(nul_text->size(), 3U);
-    AURORA_TEST_CHECK_EQ(*nul_text, std::string_view{"a\0b", 3});
+    AURORA_TEST_CHECK_EQ(nul_text->size(), 3U);  // NOLINT(bugprone-unchecked-optional-access) 上一行宏已守卫 has_value
+    AURORA_TEST_CHECK_EQ(*nul_text, std::string_view{"a\0b", 3});  // NOLINT(bugprone-unchecked-optional-access) 同上
 
     const auto emoji = aj::parse(R"("\uD83D\uDE00")");
     AURORA_TEST_REQUIRE(emoji.ok());
     const auto emoji_text = emoji.value().as_string();
     AURORA_TEST_REQUIRE(emoji_text.has_value());
+    // "\uD83D\uDE00" 恒解码为 string，上一行宏已守卫 has_value。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_EQ(*emoji_text, std::string_view{"\xF0\x9F\x98\x80"});
 
     // 直接写入的 4 字节 UTF-8 与 \u 转义路径结果一致。
@@ -190,7 +192,7 @@ AURORA_TEST_CASE(validates_utf8_in_strings_and_honours_the_option) {
     AURORA_TEST_REQUIRE(permissive.ok());
     const auto bytes = permissive.value().as_string();
     AURORA_TEST_REQUIRE(bytes.has_value());
-    AURORA_TEST_CHECK_EQ(bytes->size(), 1U);
+    AURORA_TEST_CHECK_EQ(bytes->size(), 1U);  // NOLINT(bugprone-unchecked-optional-access) 宏已守卫 has_value
 }
 
 AURORA_TEST_CASE(dispatches_numbers_across_int_uint_double_and_raw) {
@@ -217,6 +219,8 @@ AURORA_TEST_CASE(dispatches_numbers_across_int_uint_double_and_raw) {
     AURORA_TEST_CHECK_EQ(aj::parse("1e999").value().type(), aj::Type::RawNumber);
     AURORA_TEST_CHECK_EQ(aj::parse("1e-999").value().type(), aj::Type::RawNumber);
     AURORA_TEST_CHECK_EQ(aj::parse("0.1000000000000000055511151231257827").value().type(), aj::Type::RawNumber);
+    // 字面量 1e999 恒为 RawNumber，as_raw_number 恒有值。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_EQ(aj::parse("1e999").value().as_raw_number().value(), "1e999");
 }
 
@@ -301,7 +305,7 @@ AURORA_TEST_CASE(enforces_depth_limit_with_all_placeholders_filled) {
     AURORA_TEST_CHECK_EQ(too_deep.error().code, "json-depth-exceeded");
     // {max} / {line} / {column} 三个占位符必须全部被填充，不留花括号字面残留。
     AURORA_TEST_CHECK_EQ(too_deep.error().message.find('{'), std::string::npos);
-    AURORA_TEST_CHECK(too_deep.error().message.find("2") != std::string::npos);
+    AURORA_TEST_CHECK(too_deep.error().message.find('2') != std::string::npos);
 
     // 默认上限 512：600 层数组触发同一错误码。
     std::string deep;
@@ -468,7 +472,7 @@ AURORA_TEST_CASE(keeps_raw_numbers_out_of_numeric_conversion) {
     // 保真数字只经 as_raw_number 暴露原字面量；size() 给文本字节数。
     const auto text = raw.as_raw_number();
     AURORA_TEST_REQUIRE(text.has_value());
-    AURORA_TEST_CHECK_EQ(*text, "1e999");
+    AURORA_TEST_CHECK_EQ(*text, "1e999");  // NOLINT(bugprone-unchecked-optional-access) 宏已守卫 has_value
     AURORA_TEST_CHECK_EQ(raw.size(), 5U);
 
     const auto strict = raw.as<double>();
@@ -479,7 +483,7 @@ AURORA_TEST_CASE(keeps_raw_numbers_out_of_numeric_conversion) {
 AURORA_TEST_CASE(compares_strictly_within_the_same_type) {
     AURORA_TEST_CHECK(aj::Value(1) == aj::Value(1));
     AURORA_TEST_CHECK(aj::Value(1) != aj::Value(2));
-    AURORA_TEST_CHECK(aj::Value() == aj::Value(nullptr));
+    AURORA_TEST_CHECK(aj::Value(nullptr).empty());
     AURORA_TEST_CHECK(aj::Value(true) == aj::Value(true));
     AURORA_TEST_CHECK(aj::Value("a") == aj::Value(std::string_view{"a"}));
     AURORA_TEST_CHECK(aj::Value(std::string{"a"}) == aj::Value("a"));

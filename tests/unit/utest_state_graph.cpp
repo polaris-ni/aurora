@@ -131,25 +131,25 @@ AURORA_TEST_CASE(to_json_reports_nodes_and_edges_shape) {
 
     bool saw_state_node = false;
     const auto *const nodes = require_child(j, "nodes");
-    for (const auto *item = nodes->begin(); item != nodes->end(); ++item) {
-        AURORA_TEST_REQUIRE(item->contains("id"));
-        AURORA_TEST_REQUIRE(item->contains("kind"));
-        if (require_field<std::string>(*item, "id") == state_id) {
+    for (const auto &item : *nodes) {
+        AURORA_TEST_REQUIRE(item.contains("id"));
+        AURORA_TEST_REQUIRE(item.contains("kind"));
+        if (require_field<std::string>(item, "id") == state_id) {
             saw_state_node = true;
-            AURORA_TEST_CHECK_EQ(require_field<std::string>(*item, "kind"), std::string("state"));
+            AURORA_TEST_CHECK_EQ(require_field<std::string>(item, "kind"), std::string("state"));
         }
     }
     AURORA_TEST_CHECK_TRUE(saw_state_node);
 
     bool saw_observes = false;
     const auto *const edges = require_child(j, "edges");
-    for (const auto *item = edges->begin(); item != edges->end(); ++item) {
-        AURORA_TEST_REQUIRE(item->contains("from"));
-        AURORA_TEST_REQUIRE(item->contains("to"));
-        AURORA_TEST_REQUIRE(item->contains("kind"));
-        if (require_field<std::string>(*item, "kind") == "observes" &&
-            require_field<std::string>(*item, "from") == state_id &&
-            require_field<std::string>(*item, "to") == effect_id) {
+    for (const auto &item : *edges) {
+        AURORA_TEST_REQUIRE(item.contains("from"));
+        AURORA_TEST_REQUIRE(item.contains("to"));
+        AURORA_TEST_REQUIRE(item.contains("kind"));
+        if (require_field<std::string>(item, "kind") == "observes" &&
+            require_field<std::string>(item, "from") == state_id &&
+            require_field<std::string>(item, "to") == effect_id) {
             saw_observes = true;
         }
     }

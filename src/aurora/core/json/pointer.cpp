@@ -64,7 +64,7 @@ namespace {
         return false;
     }
     const char *first = token.data();
-    const char *last = token.data() + token.size();
+    const char *last = token.end();
     const auto [ptr, ec] = std::from_chars(first, last, out);
     return ec == std::errc{} && ptr == last;
 }

@@ -477,7 +477,7 @@ template <typename T>
 auto Preferences::get_impl(const std::string &scope, const std::string &key, T fallback) const -> T {
     std::unique_lock lock(mutex_);
     const std::string composite = scope.empty() ? key : scope + "." + key;
-    const json::Value j = resolve_get(root_, composite);
+    json::Value j = resolve_get(root_, composite);  // 非 const：return j 才能走移动而非拷贝
     if (j.is_null()) {
         return fallback;
     }

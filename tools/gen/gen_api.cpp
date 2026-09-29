@@ -217,7 +217,7 @@ auto main(int argc, char **argv) -> int {
     }
 
     const auto dumped = au::json::dump(api, {.indent = 2});
-    const std::string text = dumped.ok() ? std::move(dumped.value()) : std::string{};
+    const std::string text = dumped.ok() ? dumped.value() : std::string{};
     // When a file path argument is given, write the file directly (cross-platform, for the CMake target
     // aurora_api_json); otherwise write to stdout, preserving the `gen_api_tools > aurora_api.json` manual
     // redirection usage.

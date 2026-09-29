@@ -143,13 +143,13 @@ struct WidgetPatchOp {
         // 并集遍历：新增与删除的属性都要体现（删了的属性在 new_props 里缺失，视为 null）。
         std::vector<std::string> keys;
         for (const auto &e : old_props.entries()) {
-            keys.push_back(std::string(e.key));
+            keys.emplace_back(e.key);
         }
         for (const auto &e : new_props.entries()) {
             if (old_props.contains(e.key)) {
                 continue;
             }
-            keys.push_back(std::string(e.key));
+            keys.emplace_back(e.key);
         }
         std::sort(keys.begin(), keys.end());  // 确定性：与 JSON 的对象序无关
 

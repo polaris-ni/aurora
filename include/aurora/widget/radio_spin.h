@@ -296,8 +296,8 @@ class RadioGroup : public Widget {
             const auto *arr = props.at("options");
             if (arr != nullptr && arr->is_array()) {
                 options_.clear();
-                for (const auto *o = arr->begin(); o != arr->end(); ++o) {
-                    options_.push_back(o->as_or<std::string>(""));
+                for (const auto &o : *arr) {
+                    options_.push_back(o.as_or<std::string>(""));
                 }
             }
         }

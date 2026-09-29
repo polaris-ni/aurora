@@ -62,7 +62,7 @@ class DomBuilder : public SaxHandler {
     }
 
     auto on_array_start() -> bool override {
-        stack_.push_back(Frame{Value::array(), {}});
+        stack_.push_back(Frame{.container = Value::array(), .key = {}});
         return true;
     }
 
@@ -72,7 +72,7 @@ class DomBuilder : public SaxHandler {
     }
 
     auto on_object_start() -> bool override {
-        stack_.push_back(Frame{Value::object(), {}});
+        stack_.push_back(Frame{.container = Value::object(), .key = {}});
         return true;
     }
 

@@ -39,7 +39,7 @@ inline auto merge_api_json_section(const std::string &path, const std::string &s
                 report("failed to parse " + path + " (suspected corrupt); aborting to avoid truncating other sections");
                 return false;
             }
-            doc = std::move(parsed.value());
+            doc = parsed.value();
         } else {
             // file missing: first generation, start from an empty object (no other sections to protect).
             doc = Json::object();

@@ -61,40 +61,40 @@ static auto schema() -> const au::tools::Schema & {
                 }
                 if (const auto *descriptors = j.at("prop_descriptors");
                     descriptors != nullptr && descriptors->is_array()) {
-                    for (const auto *p = descriptors->begin(); p != descriptors->end(); ++p) {
+                    for (const auto &descriptor : *descriptors) {
                         au::tools::PropSchema ps;
-                        if (const auto *v = p->at("name"); v != nullptr && v->is_string()) {
+                        if (const auto *v = descriptor.at("name"); v != nullptr && v->is_string()) {
                             ps.name = v->as_or<std::string>("");
                         }
-                        if (const auto *v = p->at("type"); v != nullptr && v->is_string()) {
+                        if (const auto *v = descriptor.at("type"); v != nullptr && v->is_string()) {
                             ps.type = v->as_or<std::string>("");
                         }
-                        if (const auto *d = p->at("default"); d != nullptr) {
+                        if (const auto *d = descriptor.at("default"); d != nullptr) {
                             if (d->is_string()) {
                                 ps.default_value = d->as_or<std::string>("");
                             } else {
                                 const auto dumped = au::json::dump(*d);
-                                ps.default_value = dumped.ok() ? std::move(dumped.value()) : std::string{};
+                                ps.default_value = dumped.ok() ? dumped.value() : std::string{};
                             }
                         }
-                        ps.required = p->as_or<bool>("required", false);
-                        if (const auto *v = p->at("note"); v != nullptr && v->is_string()) {
+                        ps.required = descriptor.as_or<bool>("required", false);
+                        if (const auto *v = descriptor.at("note"); v != nullptr && v->is_string()) {
                             ps.note = v->as_or<std::string>("");
                         }
                         c.props.push_back(std::move(ps));
                     }
                 }
                 if (const auto *events = j.at("events"); events != nullptr && events->is_array()) {
-                    for (const auto *e = events->begin(); e != events->end(); ++e) {
-                        if (e->is_string()) {
-                            c.events.push_back(e->as_or<std::string>(""));
+                    for (const auto &event : *events) {
+                        if (event.is_string()) {
+                            c.events.push_back(event.as_or<std::string>(""));
                         }
                     }
                 }
                 if (const auto *examples = j.at("examples"); examples != nullptr && examples->is_array()) {
-                    for (const auto *ex = examples->begin(); ex != examples->end(); ++ex) {
-                        if (ex->is_string()) {
-                            c.examples.push_back(ex->as_or<std::string>(""));
+                    for (const auto &example : *examples) {
+                        if (example.is_string()) {
+                            c.examples.push_back(example.as_or<std::string>(""));
                         }
                     }
                 }
@@ -155,7 +155,7 @@ static auto read_message(std::string &out) -> bool {
 
 static auto send_message(const au::Json &j) -> void {
     const auto dumped = au::json::dump(j);
-    const std::string s = dumped.ok() ? std::move(dumped.value()) : std::string{};
+    const std::string s = dumped.ok() ? dumped.value() : std::string{};
     AURORA_LOG_RAW("lsp", "Content-Length: ", s.size(), "\r\n\r\n", s);
 }
 
@@ -381,7 +381,7 @@ auto main() -> int {  // NOLINT(*-exception-escape, *-function-cognitive-complex
             continue;
         }
 
-        const std::string method = req.as_or<std::string>("method", "");
+        const auto method = req.as_or<std::string>("method", "");
         const auto *id_v = req.at("id");
         const au::Json id = id_v != nullptr ? *id_v : au::Json{};
         const auto *params_v = req.at("params");

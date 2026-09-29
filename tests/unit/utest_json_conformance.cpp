@@ -44,7 +44,7 @@ auto suite_root() -> fs::path {
 /// @brief 语料必须按字节读：其中含无效 UTF-8 序列与 NUL 字节，文本模式会破坏原貌。
 auto read_bytes(const fs::path &path) -> std::string {
     std::ifstream in(path, std::ios::binary);
-    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    return std::string{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
 /// @brief 某子目录下的 `.json` 文件名（按字节序升序，与策略表的书写顺序解耦）。
@@ -64,7 +64,7 @@ auto list_corpus(const fs::path &dir) -> std::vector<std::string> {
 auto with_prefix(const std::vector<std::string> &names, std::string_view prefix) -> std::vector<std::string> {
     std::vector<std::string> picked;
     std::copy_if(names.begin(), names.end(), std::back_inserter(picked),
-                 [prefix](const std::string &name) { return name.rfind(prefix, 0) == 0; });
+                 [prefix](const std::string &name) { return name.starts_with(prefix); });
     return picked;
 }
 
@@ -99,76 +99,76 @@ auto table_files(const PolicyRow (&rows)[N]) -> std::vector<std::string> {
 // ============================================================================
 
 /// @brief 语料清单规模，随 pin 的 commit 固定。
-constexpr std::size_t kMustAcceptCount = 95;
-constexpr std::size_t kMustRejectCount = 188;
-constexpr std::size_t kImplementationDefinedCount = 35;
-constexpr std::size_t kTransformCount = 22;
+constexpr std::size_t AURORA_MUST_ACCEPT_COUNT = 95;
+constexpr std::size_t AURORA_MUST_REJECT_COUNT = 188;
+constexpr std::size_t AURORA_IMPLEMENTATION_DEFINED_COUNT = 35;
+constexpr std::size_t AURORA_TRANSFORM_COUNT = 22;
 
 /// @brief 实现自定语料的处置策略：超大指数 / 超大整数走保真数字域接受且保留原文；
 ///        无效 UTF-8、孤立代理、非 UTF-8 编码文本与 BOM 一律拒绝。
-constexpr PolicyRow kImplementationDefinedPolicy[] = {
-    {"i_number_double_huge_neg_exp.json", true},
-    {"i_number_huge_exp.json", true},
-    {"i_number_neg_int_huge_exp.json", true},
-    {"i_number_pos_double_huge_exp.json", true},
-    {"i_number_real_neg_overflow.json", true},
-    {"i_number_real_pos_overflow.json", true},
-    {"i_number_real_underflow.json", true},
-    {"i_number_too_big_neg_int.json", true},
-    {"i_number_too_big_pos_int.json", true},
-    {"i_number_very_big_negative_int.json", true},
-    {"i_object_key_lone_2nd_surrogate.json", false},
-    {"i_string_1st_surrogate_but_2nd_missing.json", false},
-    {"i_string_1st_valid_surrogate_2nd_invalid.json", false},
-    {"i_string_UTF-16LE_with_BOM.json", false},
-    {"i_string_UTF-8_invalid_sequence.json", false},
-    {"i_string_UTF8_surrogate_U+D800.json", false},
-    {"i_string_incomplete_surrogate_and_escape_valid.json", false},
-    {"i_string_incomplete_surrogate_pair.json", false},
-    {"i_string_incomplete_surrogates_escape_valid.json", false},
-    {"i_string_invalid_lonely_surrogate.json", false},
-    {"i_string_invalid_surrogate.json", false},
-    {"i_string_invalid_utf-8.json", false},
-    {"i_string_inverted_surrogates_U+1D11E.json", false},
-    {"i_string_iso_latin_1.json", false},
-    {"i_string_lone_second_surrogate.json", false},
-    {"i_string_lone_utf8_continuation_byte.json", false},
-    {"i_string_not_in_unicode_range.json", false},
-    {"i_string_overlong_sequence_2_bytes.json", false},
-    {"i_string_overlong_sequence_6_bytes.json", false},
-    {"i_string_overlong_sequence_6_bytes_null.json", false},
-    {"i_string_truncated-utf-8.json", false},
-    {"i_string_utf16BE_no_BOM.json", false},
-    {"i_string_utf16LE_no_BOM.json", false},
-    {"i_structure_500_nested_arrays.json", true},
-    {"i_structure_UTF-8_BOM_empty_object.json", false},
+constexpr PolicyRow AURORA_IMPLEMENTATION_DEFINED_POLICY[] = {
+    {.file = "i_number_double_huge_neg_exp.json", .accepted = true},
+    {.file = "i_number_huge_exp.json", .accepted = true},
+    {.file = "i_number_neg_int_huge_exp.json", .accepted = true},
+    {.file = "i_number_pos_double_huge_exp.json", .accepted = true},
+    {.file = "i_number_real_neg_overflow.json", .accepted = true},
+    {.file = "i_number_real_pos_overflow.json", .accepted = true},
+    {.file = "i_number_real_underflow.json", .accepted = true},
+    {.file = "i_number_too_big_neg_int.json", .accepted = true},
+    {.file = "i_number_too_big_pos_int.json", .accepted = true},
+    {.file = "i_number_very_big_negative_int.json", .accepted = true},
+    {.file = "i_object_key_lone_2nd_surrogate.json", .accepted = false},
+    {.file = "i_string_1st_surrogate_but_2nd_missing.json", .accepted = false},
+    {.file = "i_string_1st_valid_surrogate_2nd_invalid.json", .accepted = false},
+    {.file = "i_string_UTF-16LE_with_BOM.json", .accepted = false},
+    {.file = "i_string_UTF-8_invalid_sequence.json", .accepted = false},
+    {.file = "i_string_UTF8_surrogate_U+D800.json", .accepted = false},
+    {.file = "i_string_incomplete_surrogate_and_escape_valid.json", .accepted = false},
+    {.file = "i_string_incomplete_surrogate_pair.json", .accepted = false},
+    {.file = "i_string_incomplete_surrogates_escape_valid.json", .accepted = false},
+    {.file = "i_string_invalid_lonely_surrogate.json", .accepted = false},
+    {.file = "i_string_invalid_surrogate.json", .accepted = false},
+    {.file = "i_string_invalid_utf-8.json", .accepted = false},
+    {.file = "i_string_inverted_surrogates_U+1D11E.json", .accepted = false},
+    {.file = "i_string_iso_latin_1.json", .accepted = false},
+    {.file = "i_string_lone_second_surrogate.json", .accepted = false},
+    {.file = "i_string_lone_utf8_continuation_byte.json", .accepted = false},
+    {.file = "i_string_not_in_unicode_range.json", .accepted = false},
+    {.file = "i_string_overlong_sequence_2_bytes.json", .accepted = false},
+    {.file = "i_string_overlong_sequence_6_bytes.json", .accepted = false},
+    {.file = "i_string_overlong_sequence_6_bytes_null.json", .accepted = false},
+    {.file = "i_string_truncated-utf-8.json", .accepted = false},
+    {.file = "i_string_utf16BE_no_BOM.json", .accepted = false},
+    {.file = "i_string_utf16LE_no_BOM.json", .accepted = false},
+    {.file = "i_structure_500_nested_arrays.json", .accepted = true},
+    {.file = "i_structure_UTF-8_BOM_empty_object.json", .accepted = false},
 };
 
 /// @brief `test_transform` 语料的处置快照：可解析者必须往返自洽，其余为正确拒绝
 ///        （含无效码点的字符串语料）。
-constexpr PolicyRow kTransformPolicy[] = {
-    {"number_-9223372036854775808.json", true},
-    {"number_-9223372036854775809.json", true},
-    {"number_1.0.json", true},
-    {"number_1.000000000000000005.json", true},
-    {"number_1000000000000000.json", true},
-    {"number_10000000000000000999.json", true},
-    {"number_1e-999.json", true},
-    {"number_1e6.json", true},
-    {"number_9223372036854775807.json", true},
-    {"number_9223372036854775808.json", true},
-    {"object_key_nfc_nfd.json", true},
-    {"object_key_nfd_nfc.json", true},
-    {"object_same_key_different_values.json", true},
-    {"object_same_key_same_value.json", true},
-    {"object_same_key_unclear_values.json", true},
-    {"string_1_escaped_invalid_codepoint.json", false},
-    {"string_1_invalid_codepoint.json", false},
-    {"string_2_escaped_invalid_codepoints.json", false},
-    {"string_2_invalid_codepoints.json", false},
-    {"string_3_escaped_invalid_codepoints.json", false},
-    {"string_3_invalid_codepoints.json", false},
-    {"string_with_escaped_NULL.json", true},
+constexpr PolicyRow AURORA_TRANSFORM_POLICY[] = {
+    {.file = "number_-9223372036854775808.json", .accepted = true},
+    {.file = "number_-9223372036854775809.json", .accepted = true},
+    {.file = "number_1.0.json", .accepted = true},
+    {.file = "number_1.000000000000000005.json", .accepted = true},
+    {.file = "number_1000000000000000.json", .accepted = true},
+    {.file = "number_10000000000000000999.json", .accepted = true},
+    {.file = "number_1e-999.json", .accepted = true},
+    {.file = "number_1e6.json", .accepted = true},
+    {.file = "number_9223372036854775807.json", .accepted = true},
+    {.file = "number_9223372036854775808.json", .accepted = true},
+    {.file = "object_key_nfc_nfd.json", .accepted = true},
+    {.file = "object_key_nfd_nfc.json", .accepted = true},
+    {.file = "object_same_key_different_values.json", .accepted = true},
+    {.file = "object_same_key_same_value.json", .accepted = true},
+    {.file = "object_same_key_unclear_values.json", .accepted = true},
+    {.file = "string_1_escaped_invalid_codepoint.json", .accepted = false},
+    {.file = "string_1_invalid_codepoint.json", .accepted = false},
+    {.file = "string_2_escaped_invalid_codepoints.json", .accepted = false},
+    {.file = "string_2_invalid_codepoints.json", .accepted = false},
+    {.file = "string_3_escaped_invalid_codepoints.json", .accepted = false},
+    {.file = "string_3_invalid_codepoints.json", .accepted = false},
+    {.file = "string_with_escaped_NULL.json", .accepted = true},
 };
 
 // ============================================================================
@@ -177,22 +177,22 @@ constexpr PolicyRow kTransformPolicy[] = {
 
 AURORA_TEST_CASE(matches_the_pinned_corpus_inventory) {
     const auto parsing = list_corpus(corpus_dir("test_parsing"));
-    AURORA_TEST_CHECK_EQ(with_prefix(parsing, "y_").size(), kMustAcceptCount);
-    AURORA_TEST_CHECK_EQ(with_prefix(parsing, "n_").size(), kMustRejectCount);
-    AURORA_TEST_CHECK_EQ(with_prefix(parsing, "i_").size(), kImplementationDefinedCount);
+    AURORA_TEST_CHECK_EQ(with_prefix(parsing, "y_").size(), AURORA_MUST_ACCEPT_COUNT);
+    AURORA_TEST_CHECK_EQ(with_prefix(parsing, "n_").size(), AURORA_MUST_REJECT_COUNT);
+    AURORA_TEST_CHECK_EQ(with_prefix(parsing, "i_").size(), AURORA_IMPLEMENTATION_DEFINED_COUNT);
     for (const auto &name : parsing) {
-        const bool known_prefix = name.rfind("y_", 0) == 0 || name.rfind("n_", 0) == 0 || name.rfind("i_", 0) == 0;
+        const bool known_prefix = name.starts_with("y_") || name.starts_with("n_") || name.starts_with("i_");
         if (!known_prefix) {
             AURORA_TEST_FAIL("unrecognised corpus entry (prefix must be y_ / n_ / i_): " + name);
         }
     }
-    AURORA_TEST_CHECK_EQ(list_corpus(corpus_dir("test_transform")).size(), kTransformCount);
+    AURORA_TEST_CHECK_EQ(list_corpus(corpus_dir("test_transform")).size(), AURORA_TRANSFORM_COUNT);
 }
 
 AURORA_TEST_CASE(accepts_the_whole_must_accept_corpus) {
     const fs::path dir = corpus_dir("test_parsing");
     const auto names = with_prefix(list_corpus(dir), "y_");
-    AURORA_TEST_REQUIRE_EQ(names.size(), kMustAcceptCount);
+    AURORA_TEST_REQUIRE_EQ(names.size(), AURORA_MUST_ACCEPT_COUNT);
     for (const auto &name : names) {
         const auto parsed = aj::parse(read_bytes(dir / name));
         if (!parsed.ok()) {
@@ -204,7 +204,7 @@ AURORA_TEST_CASE(accepts_the_whole_must_accept_corpus) {
 AURORA_TEST_CASE(rejects_the_whole_must_reject_corpus) {
     const fs::path dir = corpus_dir("test_parsing");
     const auto names = with_prefix(list_corpus(dir), "n_");
-    AURORA_TEST_REQUIRE_EQ(names.size(), kMustRejectCount);
+    AURORA_TEST_REQUIRE_EQ(names.size(), AURORA_MUST_REJECT_COUNT);
     for (const auto &name : names) {
         if (aj::parse(read_bytes(dir / name)).ok()) {
             AURORA_TEST_FAIL(name + " must be rejected, but was accepted");
@@ -215,11 +215,11 @@ AURORA_TEST_CASE(rejects_the_whole_must_reject_corpus) {
 AURORA_TEST_CASE(keeps_the_recorded_policy_for_implementation_defined_inputs) {
     const fs::path dir = corpus_dir("test_parsing");
     const auto names = with_prefix(list_corpus(dir), "i_");
-    AURORA_TEST_REQUIRE_EQ(names.size(), kImplementationDefinedCount);
-    AURORA_TEST_REQUIRE_EQ(std::size(kImplementationDefinedPolicy), kImplementationDefinedCount);
-    AURORA_TEST_CHECK_MSG(table_files(kImplementationDefinedPolicy) == names,
+    AURORA_TEST_REQUIRE_EQ(names.size(), AURORA_IMPLEMENTATION_DEFINED_COUNT);
+    AURORA_TEST_REQUIRE_EQ(std::size(AURORA_IMPLEMENTATION_DEFINED_POLICY), AURORA_IMPLEMENTATION_DEFINED_COUNT);
+    AURORA_TEST_CHECK_MSG(table_files(AURORA_IMPLEMENTATION_DEFINED_POLICY) == names,
                           "policy table does not match the corpus inventory (a corpus entry was added or removed)");
-    for (const auto &row : kImplementationDefinedPolicy) {
+    for (const auto &row : AURORA_IMPLEMENTATION_DEFINED_POLICY) {
         const bool accepted = aj::parse(read_bytes(dir / row.file)).ok();
         if (accepted != row.accepted) {
             AURORA_TEST_FAIL(std::string{row.file} + " changed policy: recorded=" +
@@ -232,11 +232,11 @@ AURORA_TEST_CASE(keeps_the_recorded_policy_for_implementation_defined_inputs) {
 AURORA_TEST_CASE(round_trips_the_transform_corpus_through_dump) {
     const fs::path dir = corpus_dir("test_transform");
     const auto names = list_corpus(dir);
-    AURORA_TEST_REQUIRE_EQ(names.size(), kTransformCount);
-    AURORA_TEST_REQUIRE_EQ(std::size(kTransformPolicy), kTransformCount);
-    AURORA_TEST_CHECK_MSG(table_files(kTransformPolicy) == names,
+    AURORA_TEST_REQUIRE_EQ(names.size(), AURORA_TRANSFORM_COUNT);
+    AURORA_TEST_REQUIRE_EQ(std::size(AURORA_TRANSFORM_POLICY), AURORA_TRANSFORM_COUNT);
+    AURORA_TEST_CHECK_MSG(table_files(AURORA_TRANSFORM_POLICY) == names,
                           "transform policy table does not match the corpus inventory");
-    for (const auto &row : kTransformPolicy) {
+    for (const auto &row : AURORA_TRANSFORM_POLICY) {
         const auto once = aj::parse(read_bytes(dir / row.file));
         if (once.ok() != row.accepted) {
             AURORA_TEST_FAIL(std::string{row.file} + " changed policy: recorded=" +

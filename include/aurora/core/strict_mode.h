@@ -21,8 +21,8 @@ enum class StrictMode : std::uint8_t { Off = 0, On = 1 };
 
 namespace detail {
 /// @brief 线程局部（thread_local）当前严格模式取值；各线程独立读写、无数据竞争（detail 内部实现）。
-inline thread_local auto tl_strict_mode =
-    StrictMode::Off;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+inline thread_local auto tl_strict_mode =  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    StrictMode::Off;
 
 /// @brief 严格模式失败处理器（可注入，便于测试拦截真实致命失败）。
 /// 生产默认（handler 为空）直接 `std::terminate()`；测试可注入抛异常或记录的处理器。

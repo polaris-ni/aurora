@@ -296,8 +296,8 @@ class Dropdown : public Widget {
         const auto *options_val = props.at("options");
         if (options_val != nullptr && options_val->is_array()) {
             options_.clear();
-            for (const auto *o = options_val->begin(); o != options_val->end(); ++o) {
-                options_.push_back(o->as_or<std::string>(""));
+            for (const auto &o : *options_val) {
+                options_.push_back(o.as_or<std::string>(""));
             }
         }
         if (props.contains("selected_index")) {

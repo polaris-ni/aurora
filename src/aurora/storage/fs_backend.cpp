@@ -336,7 +336,7 @@ auto FilesystemBackend::get_record(const std::string &id) -> Result<StorageRecor
     rec.id = env.as_or<std::string>("id", id);
     rec.type = env.as_or<std::string>("type", "");
     rec.version = static_cast<std::uint32_t>(env.as_or<std::int64_t>("version", 1));
-    const std::string enc_str = env.as_or<std::string>("encoding", "json");
+    const auto enc_str = env.as_or<std::string>("encoding", "json");
     rec.encoding = enc_str == "binary" ? StorageEncoding::Binary : StorageEncoding::Json;
     rec.mtime = ms_to_mtime(env.as_or<std::int64_t>("mtime", 0));
 

@@ -3,9 +3,11 @@
 // 本文件持有**唯一的字符级递归下降引擎**：DOM 出口（parse.cpp 的 DomBuilder）与 SAX 出口都经由它，
 // 两套出口因此共享同一份词法、转义解码、数字分派与错误定位逻辑，行为不可能分叉。
 
+#include <algorithm>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -43,9 +45,7 @@ namespace {
     std::string hint;
     if (offset < input.size()) {
         std::size_t len = input.size() - offset;
-        if (len > 24) {
-            len = 24;
-        }
+        len = std::min<std::size_t>(len, 24);
         hint = "Near: \"";
         for (std::size_t i = 0; i < len; ++i) {
             const char c = input[offset + i];
@@ -118,7 +118,7 @@ class SaxCore {
   private:
     std::string_view in_;
     ParseOptions opts_;
-    SaxHandler &handler_;
+    SaxHandler &handler_;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) 解析器持处理器引用
     std::size_t pos_ = 0;
     std::string scratch_;  ///< 字符串解码 / 对象键的复用缓冲（回调期间有效）
 
@@ -511,7 +511,7 @@ class SaxCore {
     ///        往返失真或域外一律落 RawNumber。
     [[nodiscard]] auto dispatch_number(std::string_view token, bool is_float) -> Result<bool> {
         const char *first = token.data();
-        const char *last = token.data() + token.size();
+        const char *last = token.end();
         if (!is_float) {
             if (token == "-0") {
                 return handler_.on_int(0);  // JSON 无负零整数语义
@@ -532,7 +532,7 @@ class SaxCore {
             return handler_.on_raw_number(token);  // 上溢 / 下溢 / 非法 → 保真
         }
         char buf[64];
-        const auto [tp, tec] = std::to_chars(buf, buf + sizeof(buf), d);
+        const auto [tp, tec] = std::to_chars(buf, std::end(buf), d);
         if (tec == std::errc{}) {
             const std::string_view shortest(buf, static_cast<std::size_t>(tp - buf));
             if (significant_digits(token) <= significant_digits(shortest)) {

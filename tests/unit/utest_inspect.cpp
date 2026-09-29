@@ -54,8 +54,8 @@ auto layout_tree(Node &root, float width, float height) -> void {
         .size = Size{.width = require_field<float>(*box_json, "w"), .height = require_field<float>(*box_json, "h")}};
     out.push_back(box);
     const auto *const children = require_child(j, "children");
-    for (const auto *child = children->begin(); child != children->end(); ++child) {
-        const std::vector<WidgetBox> sub = flatten_snapshot(*child);
+    for (const auto &child : *children) {
+        const std::vector<WidgetBox> sub = flatten_snapshot(child);
         out.insert(out.end(), sub.begin(), sub.end());
     }
     return out;

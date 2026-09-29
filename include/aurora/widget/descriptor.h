@@ -173,7 +173,7 @@ inline auto validate_prop<float>(const Json &j, const PropDescriptor &desc) -> R
         return make_error(ErrorCode::WidgetInvalidProp,
                           "Property '" + desc.name + "' expects number, got " + json_type_name(j));
     }
-    const float v = j.as_or<float>(0.0F);
+    const auto v = j.as_or<float>(0.0F);
     if (!desc.min_value.empty()) {
         float lo = 0.0F;
         if (parse_constraint_float(desc.min_value, lo) && v < lo) {
@@ -252,7 +252,7 @@ inline auto validate_prop<LocalizedString>(const Json &j, const PropDescriptor &
 template <>
 inline auto validate_prop<Length>(const Json &j, const PropDescriptor & /*desc*/) -> Result<Length> {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "auto" || s == "fill") {
             return json_to_length(j);
         }
@@ -262,7 +262,7 @@ inline auto validate_prop<Length>(const Json &j, const PropDescriptor & /*desc*/
         if (!j.at(1)->is_number()) {
             return make_error(ErrorCode::WidgetInvalidProp, "Length value must be a number");
         }
-        const float v = j.at(1)->as_or<float>(0.0F);
+        const auto v = j.at(1)->as_or<float>(0.0F);
         if (v < 0.0F) {
             return make_error(ErrorCode::WidgetPropConstraintViolated,
                               "Length value must be >= 0, got " + std::to_string(v));
@@ -326,7 +326,7 @@ inline auto validate_enum_string(const Json &j, const PropDescriptor &desc, Erro
         return false;
     }
     if (!desc.enum_values.empty()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         for (const auto &allowed : desc.enum_values) {
             if (s == allowed) {
                 return true;

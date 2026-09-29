@@ -36,7 +36,7 @@ auto load_api_json() -> au::Json {
     ss << in.rdbuf();
     const auto parsed = au::json::parse(ss.str());
     AURORA_TEST_REQUIRE_MSG(parsed.ok(), "aurora_api.json must parse into a JSON object: " + path);
-    return std::move(parsed.value());
+    return parsed.value();
 }
 
 // 把 JSON 段整理为 {widget类型集合} / {枚举名 -> 取值集合}。
@@ -46,9 +46,9 @@ auto widget_types_in_json(const au::Json &api) -> std::set<std::string> {
     if (widgets == nullptr || !widgets->is_array()) {
         return out;
     }
-    for (const auto *w = widgets->begin(); w != widgets->end(); ++w) {
-        if (w->contains("type") && w->at("type")->is_string()) {
-            out.insert(std::string{w->at("type")->as_string().value_or(std::string_view{})});
+    for (const auto &widget : *widgets) {
+        if (widget.contains("type") && widget.at("type")->is_string()) {
+            out.insert(std::string{widget.at("type")->as_string().value_or(std::string_view{})});
         }
     }
     return out;
@@ -60,16 +60,16 @@ auto enums_in_json(const au::Json &api) -> std::map<std::string, std::set<std::s
     if (enums == nullptr || !enums->is_array()) {
         return out;
     }
-    for (const auto *e = enums->begin(); e != enums->end(); ++e) {
-        const auto *name = e->find("name");
-        const auto *values = e->find("values");
+    for (const auto &e : *enums) {
+        const auto *name = e.find("name");
+        const auto *values = e.find("values");
         if (name == nullptr || !name->is_string() || values == nullptr || !values->is_array()) {
             continue;
         }
         std::set<std::string> vals;
-        for (const auto *v = values->begin(); v != values->end(); ++v) {
-            if (v->is_string()) {
-                vals.insert(std::string{v->as_string().value_or(std::string_view{})});
+        for (const auto &value : *values) {
+            if (value.is_string()) {
+                vals.insert(std::string{value.as_string().value_or(std::string_view{})});
             }
         }
         out[std::string{name->as_string().value_or(std::string_view{})}] = std::move(vals);

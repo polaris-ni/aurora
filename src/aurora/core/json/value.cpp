@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -77,6 +78,7 @@ Value::Value() noexcept : data_(std::monostate{}) {}
 
 Value::Value(std::nullptr_t) noexcept : data_(std::monostate{}) {}
 
+// NOLINTNEXTLINE(bugprone-exception-escape) variant::emplace 实际无抛，检查器无法建模
 Value::Value(bool b) noexcept : data_(std::monostate{}) { data_.emplace<bool>(b); }
 
 Value::Value(const char *s) : data_(std::monostate{}) {
@@ -87,6 +89,8 @@ Value::Value(const char *s) : data_(std::monostate{}) {
 
 Value::Value(std::string_view s) : data_(std::monostate{}) { data_.emplace<std::string>(std::string(s)); }
 
+// variant::emplace 无 noexcept 规格（可能置 valueless），但替代项构造均无抛；检查器无法建模。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 Value::Value(std::string s) noexcept : data_(std::monostate{}) { data_.emplace<std::string>(std::move(s)); }
 
 auto Value::raw_number(std::string_view digits) -> Value {
@@ -130,14 +134,14 @@ auto Value::is_integer() const noexcept -> bool { return is_int() || is_uint(); 
 // 读：无模板族
 // ============================================================================
 
-auto Value::as_bool() const noexcept -> std::optional<bool> {
+auto Value::as_bool() const noexcept -> std::optional<bool> {  // NOLINT(bugprone-exception-escape)
     if (std::holds_alternative<bool>(data_)) {
         return std::get<bool>(data_);
     }
     return std::nullopt;
 }
 
-auto Value::as_int() const noexcept -> std::optional<std::int64_t> {
+auto Value::as_int() const noexcept -> std::optional<std::int64_t> {  // NOLINT(bugprone-exception-escape)
     if (std::holds_alternative<std::int64_t>(data_)) {
         return std::get<std::int64_t>(data_);
     }
@@ -159,7 +163,7 @@ auto Value::as_int() const noexcept -> std::optional<std::int64_t> {
     return std::nullopt;
 }
 
-auto Value::as_double() const noexcept -> std::optional<double> {
+auto Value::as_double() const noexcept -> std::optional<double> {  // NOLINT(bugprone-exception-escape)
     if (std::holds_alternative<double>(data_)) {
         return std::get<double>(data_);
     }
@@ -172,14 +176,14 @@ auto Value::as_double() const noexcept -> std::optional<double> {
     return std::nullopt;
 }
 
-auto Value::as_string() const noexcept -> std::optional<std::string_view> {
+auto Value::as_string() const noexcept -> std::optional<std::string_view> {  // NOLINT(bugprone-exception-escape)
     if (std::holds_alternative<std::string>(data_)) {
         return std::string_view{std::get<std::string>(data_)};
     }
     return std::nullopt;
 }
 
-auto Value::as_raw_number() const noexcept -> std::optional<std::string_view> {
+auto Value::as_raw_number() const noexcept -> std::optional<std::string_view> {  // NOLINT(bugprone-exception-escape)
     if (std::holds_alternative<RawNumber>(data_)) {
         return std::string_view{std::get<RawNumber>(data_).text};
     }
@@ -191,7 +195,7 @@ auto Value::as_raw_number() const noexcept -> std::optional<std::string_view> {
 // ============================================================================
 
 template <json_readable T>
-auto Value::read_impl() const noexcept -> std::optional<T> {
+auto Value::read_impl() const noexcept -> std::optional<T> {  // NOLINT(bugprone-exception-escape)
     if constexpr (std::is_same_v<T, bool>) {
         if (std::holds_alternative<bool>(data_)) {
             return std::get<bool>(data_);
@@ -259,13 +263,13 @@ auto Value::as_or(T fallback) const noexcept -> T {
 }
 
 template <json_readable T>
-auto Value::as_or(std::string_view key, T fallback) const noexcept -> T {
+auto Value::as_or(std::string_view key, const T &fallback) const noexcept -> T {
     const Value *sub = find(key);
     return sub != nullptr ? sub->as_or<T>(fallback) : fallback;
 }
 
 template <json_readable T>
-auto Value::as_or_at(std::size_t index, T fallback) const noexcept -> T {
+auto Value::as_or_at(std::size_t index, const T &fallback) const noexcept -> T {
     const Value *sub = at(index);
     return sub != nullptr ? sub->as_or<T>(fallback) : fallback;
 }
@@ -297,7 +301,7 @@ auto Value::get(std::string_view key) const -> Result<T> {
 // 读：指针路径
 // ============================================================================
 
-auto Value::find(std::string_view key) noexcept -> Value * {
+auto Value::find(std::string_view key) noexcept -> Value * {  // NOLINT(bugprone-exception-escape)
     if (!std::holds_alternative<Object>(data_)) {
         return nullptr;
     }
@@ -310,7 +314,7 @@ auto Value::find(std::string_view key) noexcept -> Value * {
     return nullptr;
 }
 
-auto Value::find(std::string_view key) const noexcept -> const Value * {
+auto Value::find(std::string_view key) const noexcept -> const Value * {  // NOLINT(bugprone-exception-escape)
     if (!std::holds_alternative<Object>(data_)) {
         return nullptr;
     }
@@ -323,7 +327,7 @@ auto Value::find(std::string_view key) const noexcept -> const Value * {
     return nullptr;
 }
 
-auto Value::at(std::size_t index) noexcept -> Value * {
+auto Value::at(std::size_t index) noexcept -> Value * {  // NOLINT(bugprone-exception-escape)
     if (!std::holds_alternative<Array>(data_)) {
         return nullptr;
     }
@@ -331,7 +335,7 @@ auto Value::at(std::size_t index) noexcept -> Value * {
     return index < arr.size() ? &arr[index] : nullptr;
 }
 
-auto Value::at(std::size_t index) const noexcept -> const Value * {
+auto Value::at(std::size_t index) const noexcept -> const Value * {  // NOLINT(bugprone-exception-escape)
     if (!std::holds_alternative<Array>(data_)) {
         return nullptr;
     }
@@ -346,7 +350,7 @@ auto Value::at(std::string_view key) const noexcept -> const Value * { return fi
 
 auto Value::contains(std::string_view key) const noexcept -> bool { return find(key) != nullptr; }
 
-auto Value::size() const noexcept -> std::size_t {
+auto Value::size() const noexcept -> std::size_t {  // NOLINT(bugprone-exception-escape)
     if (std::holds_alternative<Array>(data_)) {
         return std::get<Array>(data_).size();
     }
@@ -404,7 +408,7 @@ auto Value::reserve(std::size_t n) -> void {
     }
 }
 
-auto Value::clear() noexcept -> void {
+auto Value::clear() noexcept -> void {  // NOLINT(bugprone-exception-escape)
     if (std::holds_alternative<Array>(data_)) {
         std::get<Array>(data_).clear();
         return;
@@ -444,24 +448,24 @@ auto Value::erase_at(std::size_t index) -> bool {
 // 迭代
 // ============================================================================
 
-auto Value::entries() const noexcept -> EntryRange {
+auto Value::entries() const noexcept -> EntryRange {  // NOLINT(bugprone-exception-escape)
     if (std::holds_alternative<Object>(data_)) {
         return EntryRange{&std::get<Object>(data_)};
     }
     return EntryRange{nullptr};
 }
 
-auto Value::begin() const noexcept -> const Value * {
+auto Value::begin() const noexcept -> const Value * {  // NOLINT(bugprone-exception-escape)
     if (std::holds_alternative<Array>(data_)) {
         return std::get<Array>(data_).data();
     }
     return nullptr;
 }
 
-auto Value::end() const noexcept -> const Value * {
+auto Value::end() const noexcept -> const Value * {  // NOLINT(bugprone-exception-escape)
     if (std::holds_alternative<Array>(data_)) {
         const auto &arr = std::get<Array>(data_);
-        return arr.data() + arr.size();
+        return std::to_address(arr.end());
     }
     return nullptr;
 }
@@ -477,14 +481,16 @@ auto Value::end() const noexcept -> const Value * {
 // 重复显式实例化错误。
 // ============================================================================
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 显式实例化清单无法用模板函数表达
 #define AURORA_JSON_INSTANTIATE_STRICT(T)    \
     template Result<T> Value::as<T>() const; \
     template Result<T> Value::get<T>(std::string_view key) const;
 
-#define AURORA_JSON_INSTANTIATE_READ(T)                                          \
-    template T Value::as_or<T>(T fallback) const noexcept;                       \
-    template T Value::as_or<T>(std::string_view key, T fallback) const noexcept; \
-    template T Value::as_or_at<T>(std::size_t index, T fallback) const noexcept; \
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) 同上
+#define AURORA_JSON_INSTANTIATE_READ(T)                                                 \
+    template T Value::as_or<T>(T fallback) const noexcept;                              \
+    template T Value::as_or<T>(std::string_view key, const T &fallback) const noexcept; \
+    template T Value::as_or_at<T>(std::size_t index, const T &fallback) const noexcept; \
     AURORA_JSON_INSTANTIATE_STRICT(T)
 
 AURORA_JSON_INSTANTIATE_READ(bool)

@@ -124,22 +124,22 @@ enum class CommandStatus : std::uint8_t {
 /// @return 命中的描述符；未命中返回 nullptr
 [[nodiscard]] inline auto resolve_command(const Json &items, const std::string &id, CommandStatus &status)
     -> const Json * {
-    for (const Json *item = items.begin(); item != items.end(); ++item) {
-        if (!item->is_object()) {
+    for (const Json &item : items) {
+        if (!item.is_object()) {
             continue;
         }
-        const auto *it = item->find("id");
+        const auto *it = item.find("id");
         if (it == nullptr || !it->is_string() || it->as_or<std::string>("") != id) {
             continue;
         }
-        if (!command_bool_field(*item, "enabled", true)) {
+        if (!command_bool_field(item, "enabled", true)) {
             status = CommandStatus::Disabled;
-        } else if (!command_bool_field(*item, "invocable", false)) {
+        } else if (!command_bool_field(item, "invocable", false)) {
             status = CommandStatus::NotInvocable;
         } else {
             status = CommandStatus::Invocable;
         }
-        return item;
+        return &item;
     }
     status = CommandStatus::NotFound;
     return nullptr;

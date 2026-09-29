@@ -66,7 +66,7 @@ auto collect_preorder(const Node &n, std::vector<Node> &out) -> void {
         return "<missing>";
     }
     const auto d = json::dump(j);
-    return d.ok() ? std::move(d.value()) : std::string{};
+    return d.ok() ? d.value() : std::string{};
 }
 
 /// @brief 节点描述（断言信息里定位是哪个节点）。

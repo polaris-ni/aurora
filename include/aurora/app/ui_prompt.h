@@ -91,7 +91,7 @@ struct UiPromptOptions {
                         out += "=" + v.as_or<std::string>("");
                     } else {
                         const auto d = json::dump(v);
-                        out += "=" + (d.ok() ? std::move(d.value()) : std::string{});
+                        out += "=" + (d.ok() ? d.value() : std::string{});
                     }
                 }
             }
@@ -99,12 +99,12 @@ struct UiPromptOptions {
         }
         if (opt.include_examples && schema.contains("examples")) {
             const Json &examples = *schema.at("examples");
-            for (const auto *ex = examples.begin(); ex != examples.end(); ++ex) {
-                if (ex->is_string()) {
-                    out += "- example: " + ex->as_or<std::string>("") + "\n";
+            for (const auto &example : examples) {
+                if (example.is_string()) {
+                    out += "- example: " + example.as_or<std::string>("") + "\n";
                 } else {
-                    const auto d = json::dump(*ex);
-                    out += "- example: " + (d.ok() ? std::move(d.value()) : std::string{}) + "\n";
+                    const auto d = json::dump(example);
+                    out += "- example: " + (d.ok() ? d.value() : std::string{}) + "\n";
                 }
             }
         }
@@ -134,9 +134,9 @@ struct UiPromptOptions {
         const Json node = node_ptr != nullptr ? *node_ptr : Json::object();
         const auto *children_ptr = node.at("children");
         const Json children = children_ptr != nullptr ? *children_ptr : Json::array();
-        for (const auto *child = children.begin(); child != children.end(); ++child) {
-            if (child->contains("type")) {
-                remember(child->at("type")->as_or<std::string>(""));
+        for (const auto &child : children) {
+            if (child.contains("type")) {
+                remember(child.at("type")->as_or<std::string>(""));
             }
         }
     }
@@ -270,7 +270,7 @@ namespace detail {
 
     // 1) 未知类型 → 尝试确定性修正
     if (out.contains("type") && out.at("type")->is_string()) {
-        const std::string type = out.at("type")->as_or<std::string>("");
+        const auto type = out.at("type")->as_or<std::string>("");
         bool known = false;
         for (const std::string &t : ui_registered_types()) {
             if (t == type) {
@@ -299,11 +299,11 @@ namespace detail {
         const Json defaults = defaults_ptr != nullptr ? *defaults_ptr : Json::object();
         const auto *descriptors_ptr = schema.at("prop_descriptors");
         const Json descriptors = descriptors_ptr != nullptr ? *descriptors_ptr : Json::array();
-        for (const auto *pd = descriptors.begin(); pd != descriptors.end(); ++pd) {
-            if (!pd->as_or<bool>("required", false)) {
+        for (const auto &descriptor : descriptors) {
+            if (!descriptor.as_or<bool>("required", false)) {
                 continue;
             }
-            const std::string name = pd->as_or<std::string>("name", "");
+            const auto name = descriptor.as_or<std::string>("name", "");
             if (name.empty()) {
                 continue;
             }
@@ -327,8 +327,8 @@ namespace detail {
     if (out.contains("children") && out.at("children")->is_array()) {
         const Json &src_children = *out.at("children");
         Json kids = Json::array();
-        for (const auto *child = src_children.begin(); child != src_children.end(); ++child) {
-            kids.push_back(ui_repair_node(*child));
+        for (const auto &child : src_children) {
+            kids.push_back(ui_repair_node(child));
         }
         out.set("children", std::move(kids));
     }

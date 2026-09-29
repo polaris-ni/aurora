@@ -333,7 +333,7 @@ class GridView : public Widget {
                            : (Diagnostics::degraded("layout", "GridView columns is not positive, degraded to 1"), 1);
         }
         if (props.contains("cell_extent")) {
-            const float declared = props.at("cell_extent")->as_or<float>(0.0F);
+            const auto declared = props.at("cell_extent")->as_or<float>(0.0F);
             cell_extent_ =
                 declared > 0.0F
                     ? declared

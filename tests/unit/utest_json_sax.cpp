@@ -209,7 +209,7 @@ AURORA_TEST_CASE(reports_the_same_failures_as_the_dom_outlet) {
     Recorder rec;
 
     // 同一批非法输入：SAX 与 DOM 出口都判 json-parse-error。
-    for (const std::string_view bad : {"", "   ", "{} {}", "\xEF\xBB\xBF{}", "[1,]", "\"\\uD800\""}) {
+    for (const std::string_view bad : {"", "   ", "{} {}", "\xEF\xBB\xBF{}", "[1,]", R"("\uD800")"}) {
         const auto via_sax = aj::parse_sax(bad, rec);
         const auto via_dom = aj::parse(bad);
         AURORA_TEST_REQUIRE_FALSE(via_sax.ok());

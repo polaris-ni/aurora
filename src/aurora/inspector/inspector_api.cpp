@@ -67,7 +67,7 @@ auto Inspector::apply_patch(Node &root, const Json &patch) -> Result<void> {
         if (!op.is_object() || !op.contains("path") || !op.contains("value")) {
             continue;
         }
-        const std::string path_str = op.at("path")->as_or<std::string>("");
+        const auto path_str = op.at("path")->as_or<std::string>("");
         const Json &value = *op.at("value");
         // path 格式: "/widget_path/prop_name" — 最后一段为属性名
         const auto last_slash = path_str.rfind('/');

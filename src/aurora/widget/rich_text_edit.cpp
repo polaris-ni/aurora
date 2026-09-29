@@ -421,7 +421,7 @@ auto RichTextEdit::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("text")) {
         if (props.at("text")->is_string()) {
-            const std::string t = props.at("text")->as_or<std::string>("");
+            const auto t = props.at("text")->as_or<std::string>("");
             doc_.clear();
             for (const char ch : t) {
                 doc_.push_back(StyledChar{.ch = ch, .font = cur_font_, .color = cur_color_, .underline = false});

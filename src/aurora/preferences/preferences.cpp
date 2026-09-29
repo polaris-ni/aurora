@@ -426,7 +426,7 @@ auto Preferences::keys_impl(const std::string &scope) const -> std::vector<std::
     if (scope.empty()) {
         for (const auto &entry : root_.entries()) {
             if (!entry.value.is_null()) {
-                out.push_back(std::string(entry.key));
+                out.emplace_back(entry.key);
             }
         }
         return out;
@@ -436,7 +436,7 @@ auto Preferences::keys_impl(const std::string &scope) const -> std::vector<std::
         return out;
     }
     for (const auto &entry : sub.entries()) {
-        out.push_back(std::string(entry.key));
+        out.emplace_back(entry.key);
     }
     return out;
 }
@@ -456,7 +456,7 @@ auto Preferences::clear_impl(const std::string &scope) -> void {
         // 全局清空（现有行为）：全局清空纪元 + 已知键墓碑。
         std::vector<std::string> held;
         for (const auto &entry : root_.entries()) {
-            held.push_back(std::string(entry.key));
+            held.emplace_back(entry.key);
         }
         cleared_at_ = std::max(cleared_at_, now_ts());  // 全局清空纪元
         for (const auto &k : held) {

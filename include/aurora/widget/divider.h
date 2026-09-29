@@ -152,7 +152,7 @@ class Divider : public LeafWidget, public DividerProps {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("orientation")) {
-            const std::string o = props.at("orientation")->as_or<std::string>("");
+            const auto o = props.at("orientation")->as_or<std::string>("");
             orientation = o == "vertical" ? Orientation::Vertical : Orientation::Horizontal;
         }
         if (props.contains("thickness")) {

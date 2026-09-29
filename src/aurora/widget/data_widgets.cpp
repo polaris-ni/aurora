@@ -304,9 +304,9 @@ auto ListView::deserialize_props(const Json &props) -> void {
             items_.clear();
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            for (const auto *s = items_val->begin(); s != items_val->end(); ++s) {
-                if (s->is_string()) {
-                    items_.push_back(s->as_or<std::string>(""));
+            for (const auto &s : *items_val) {
+                if (s.is_string()) {
+                    items_.push_back(s.as_or<std::string>(""));
                 } else {
                     Diagnostics::degraded("items array elements must be strings", type_name(), "invalid-prop-value");
                 }

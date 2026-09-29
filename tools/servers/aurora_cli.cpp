@@ -45,7 +45,7 @@ namespace {
 // json::dump returns a Result; CLI output falls back to an empty string on failure.
 [[nodiscard]] auto dump_pretty(const au::Json &v) -> std::string {
     const auto rendered = au::json::dump(v, {.indent = 2});
-    return rendered ? std::move(rendered.value()) : std::string{};
+    return rendered ? rendered.value() : std::string{};
 }
 
 /// @brief 渲染尺寸 / 输出路径 / 代码风格等按子命令复用的选项声明。

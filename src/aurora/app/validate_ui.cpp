@@ -124,7 +124,7 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
         return;
     }
 
-    const std::string type = node.at("type")->as_or<std::string>("");
+    const auto type = node.at("type")->as_or<std::string>("");
     const std::string type_path = path + ".type";
 
     // 2. 类型必须在已注册列表中
@@ -159,10 +159,10 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
     // 3a. 检查必填属性
     if (schema->contains("prop_descriptors") && schema->at("prop_descriptors")->is_array()) {
         const Json &descriptors = *schema->at("prop_descriptors");
-        for (const auto *pd = descriptors.begin(); pd != descriptors.end(); ++pd) {
-            const std::string p_name = pd->as_or<std::string>("name", "");
-            const bool required = pd->as_or<bool>("required", false);
-            const std::string ptype = pd->as_or<std::string>("type", "");
+        for (const auto &descriptor : descriptors) {
+            const auto p_name = descriptor.as_or<std::string>("name", "");
+            const bool required = descriptor.as_or<bool>("required", false);
+            const auto ptype = descriptor.as_or<std::string>("type", "");
 
             if (required && !props.contains(p_name)) {
                 std::string p_path;
@@ -203,7 +203,7 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
     }
 
     // 4. 验证子节点策略
-    const std::string children_policy = schema->as_or<std::string>("children_policy", "none");
+    const auto children_policy = schema->as_or<std::string>("children_policy", "none");
     const std::string children_path = path + ".children";
 
     if (node.contains("children")) {

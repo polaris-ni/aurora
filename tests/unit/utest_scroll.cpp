@@ -161,10 +161,10 @@ auto gate_threshold(const char *id) -> double {
     AURORA_TEST_REQUIRE_MSG(cfg.contains("gates") && cfg.at("gates")->is_array(),
                             std::string{"perf_gates.json must carry a gates array: "} + path);
     const auto &gates = *cfg.at("gates");
-    for (const auto *g = gates.begin(); g != gates.end(); ++g) {
-        if (g->contains("id") && g->at("id")->as_or<std::string>("") == id) {
-            AURORA_TEST_REQUIRE_MSG(g->contains("threshold"), std::string{"gate "} + id + " has no threshold");
-            return g->at("threshold")->as_or<double>(0.0);
+    for (const auto &g : gates) {
+        if (g.contains("id") && g.at("id")->as_or<std::string>("") == id) {
+            AURORA_TEST_REQUIRE_MSG(g.contains("threshold"), std::string{"gate "} + id + " has no threshold");
+            return g.at("threshold")->as_or<double>(0.0);
         }
     }
     AURORA_TEST_REQUIRE_MSG(false, std::string{"gate "} + id + " is not declared in perf_gates.json");

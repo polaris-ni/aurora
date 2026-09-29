@@ -326,9 +326,9 @@ class BandScale {
         return out;
     }
     out.reserve(j.size());
-    for (const auto *item = j.begin(); item != j.end(); ++item) {
-        if (item->is_number()) {
-            const double v = item->as_or<double>(0.0);
+    for (const auto &item : j) {
+        if (item.is_number()) {
+            const auto v = item.as_or<double>(0.0);
             out.push_back(std::isfinite(v) ? v : 0.0);
         }
     }
@@ -355,9 +355,9 @@ class BandScale {
         return out;
     }
     out.reserve(j.size());
-    for (const auto *item = j.begin(); item != j.end(); ++item) {
-        if (item->is_string()) {
-            out.push_back(item->as_or<std::string>(""));
+    for (const auto &item : j) {
+        if (item.is_string()) {
+            out.push_back(item.as_or<std::string>(""));
         }
     }
     return out;
@@ -416,9 +416,9 @@ class BandScale {
         return out;
     }
     out.reserve(j.size());
-    for (const auto *item = j.begin(); item != j.end(); ++item) {
-        if (item->is_object()) {
-            out.push_back(json_to_chart_series(*item));
+    for (const auto &item : j) {
+        if (item.is_object()) {
+            out.push_back(json_to_chart_series(item));
         }
     }
     return out;
@@ -465,10 +465,10 @@ class BandScale {
     }
     if (j.contains("points") && j.at("points")->is_array()) {
         const auto *points = j.at("points");
-        for (const auto *item = points->begin(); item != points->end(); ++item) {
-            if (item->is_array() && item->size() >= 2 && item->at(0)->is_number() && item->at(1)->is_number()) {
+        for (const auto &point : *points) {
+            if (point.is_array() && point.size() >= 2 && point.at(0)->is_number() && point.at(1)->is_number()) {
                 s.points.push_back(
-                    ChartPoint{.x = item->at(0)->as_or<double>(0.0), .y = item->at(1)->as_or<double>(0.0)});
+                    ChartPoint{.x = point.at(0)->as_or<double>(0.0), .y = point.at(1)->as_or<double>(0.0)});
             }
         }
     }
@@ -495,9 +495,9 @@ class BandScale {
         return out;
     }
     out.reserve(j.size());
-    for (const auto *item = j.begin(); item != j.end(); ++item) {
-        if (item->is_object()) {
-            out.push_back(json_to_scatter_series(*item));
+    for (const auto &item : j) {
+        if (item.is_object()) {
+            out.push_back(json_to_scatter_series(item));
         }
     }
     return out;
@@ -528,7 +528,7 @@ class BandScale {
         s.name = j.at("name")->as_or<std::string>("");
     }
     if (j.contains("value") && j.at("value")->is_number()) {
-        const double v = j.at("value")->as_or<double>(0.0);
+        const auto v = j.at("value")->as_or<double>(0.0);
         s.value = std::isfinite(v) ? v : 0.0;
     }
     if (j.contains("color") && j.at("color")->is_array()) {
@@ -557,9 +557,9 @@ class BandScale {
         return out;
     }
     out.reserve(j.size());
-    for (const auto *item = j.begin(); item != j.end(); ++item) {
-        if (item->is_object()) {
-            out.push_back(json_to_pie_section(*item));
+    for (const auto &item : j) {
+        if (item.is_object()) {
+            out.push_back(json_to_pie_section(item));
         }
     }
     return out;
@@ -587,7 +587,7 @@ class BandScale {
 /// @return 匹配 "Bottom" / "Right" 的对应枚举值；其余（含非字符串）一律为 Top。
 [[nodiscard]] inline auto json_to_legend_position(const Json &j) -> LegendPosition {
     if (j.is_string()) {
-        const std::string s = j.as_or<std::string>("");
+        const auto s = j.as_or<std::string>("");
         if (s == "Bottom") {
             return LegendPosition::Bottom;
         }

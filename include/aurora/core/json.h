@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -81,7 +82,8 @@ concept json_readable =
 /// @warning `key` 与 `value` 均**别名** Value 内部存储；该 Value 被移动 / 修改后即失效。
 struct Entry {
     std::string_view key;  ///< 键（别名 Object 内部存储）
-    const Value &value;  ///< 子值只读引用（别名该 Value 内部存储）
+    /// @brief 子值只读引用（别名该 Value 内部存储）；零拷贝视图为设计意图。
+    const Value &value;  // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
 };
 
 /// @brief `Value::entries()` 的只读 range（非拥有）。非 Object 上产出空 range。
@@ -102,18 +104,18 @@ class Value {
     explicit Value(bool b) noexcept;
 
     // ---- 构造：算术（隐式入向：只进不出；按 T 的精确类别落域，绝不跨类别）----
+    // 隐式入向为设计意图；variant::emplace 无 noexcept 规格（可能置 valueless）但各分支的
+    // 替代项构造均无抛，实际无异常路径——检查器无法建模。
     /// @brief 浮点 T → Double；有符号整型 T → Int；无符号整型 T → Int（值 ≤ INT64_MAX）
     ///        或 UInt。域外 T（指针 / 自定义类型）被概念约束拒绝。
     /// @tparam T 算术类型：浮点落 Double，有符号落 Int，无符号按值域落 Int / UInt。
     /// @param v 参与构造的算术值。
     template <json_arith T>
-    Value(T v) noexcept {  // NOLINT(google-explicit-constructor)：隐式入向是本类设计意图
+    Value(T v) noexcept {  // NOLINT(google-explicit-constructor,bugprone-exception-escape)
         if constexpr (std::is_floating_point_v<T>) {
             data_.emplace<double>(static_cast<double>(v));
-        } else if constexpr (std::is_signed_v<T>) {
-            data_.emplace<std::int64_t>(static_cast<std::int64_t>(v));
-        } else if (static_cast<std::uint64_t>(v) <=
-                   static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+        } else if (std::is_signed_v<T> || static_cast<std::uint64_t>(v) <=
+                                              static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
             data_.emplace<std::int64_t>(static_cast<std::int64_t>(v));
         } else {
             data_.emplace<std::uint64_t>(static_cast<std::uint64_t>(v));
@@ -192,14 +194,14 @@ class Value {
     /// @param fallback 读失败时的回退值。
     /// @return 命中时按 T 转换的子值，否则 fallback。
     template <json_readable T>
-    [[nodiscard]] auto as_or(std::string_view key, T fallback) const noexcept -> T;  // Object 子键
+    [[nodiscard]] auto as_or(std::string_view key, const T &fallback) const noexcept -> T;  // Object 子键
     /// @brief 宽容读 Array 元素：索引越界 / 自身非 Array / 元素类型不符 → 返回 fallback。
     /// @tparam T 读取目标类型（限于 json_readable 封闭集）。
     /// @param index 元素下标。
     /// @param fallback 读失败时的回退值。
     /// @return 命中时按 T 转换的元素值，否则 fallback。
     template <json_readable T>
-    [[nodiscard]] auto as_or_at(std::size_t index, T fallback) const noexcept -> T;  // Array 元素
+    [[nodiscard]] auto as_or_at(std::size_t index, const T &fallback) const noexcept -> T;  // Array 元素
 
     // ---- 读：指针路径（调用方自判空；可变重载供就地写）----
     /// @brief 指针路径读：命中返回指针，键缺失 / 索引越界 / 容器类型不符一律返回 `nullptr`，
@@ -372,12 +374,14 @@ class EntryRange {
 
 /// @brief 解引用当前条目。
 /// @return Entry 只读视图（键与子值均别名内部存储）。
-inline auto EntryRange::Iterator::operator*() const noexcept -> Entry { return Entry{p_->first, p_->second}; }
+inline auto EntryRange::Iterator::operator*() const noexcept -> Entry {
+    return Entry{.key = p_->first, .value = p_->second};
+}
 
 /// @brief 前置自增（类外定义）：前进到下一条目。
 /// @return 自引用。
 inline auto EntryRange::Iterator::operator++() noexcept -> Iterator & {
-    ++p_;
+    ++p_;  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) 裸指针步进是零开销视图迭代器的设计本体
     return *this;
 }
 
@@ -386,7 +390,7 @@ inline auto EntryRange::Iterator::operator++() noexcept -> Iterator & {
 /// @return 自增前的迭代器副本。
 inline auto EntryRange::Iterator::operator++([[maybe_unused]] int tag) noexcept -> Iterator {
     Iterator prev = *this;
-    ++p_;
+    ++p_;  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) 同前置自增
     return prev;
 }
 
@@ -399,7 +403,7 @@ inline auto EntryRange::begin() const noexcept -> Iterator {
 /// @brief 构造尾后迭代器（类外定义）。
 /// @return obj_ 为空时返回默认态迭代器，否则指向末元素之后。
 inline auto EntryRange::end() const noexcept -> Iterator {
-    return obj_ == nullptr ? Iterator{} : Iterator{obj_->data() + obj_->size()};
+    return obj_ == nullptr ? Iterator{} : Iterator{std::to_address(obj_->end())};
 }
 
 // ============================================================================

@@ -129,12 +129,12 @@ AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {
         if (descriptors == nullptr || !descriptors->is_array()) {
             continue;
         }
-        const std::string wtype = s.as_or<std::string>("type", "");
-        for (const auto *p = descriptors->begin(); p != descriptors->end(); ++p) {
-            if (!p->contains("type") || !p->at("type")->is_string()) {
+        const auto wtype = s.as_or<std::string>("type", "");
+        for (const auto &descriptor : *descriptors) {
+            if (!descriptor.contains("type") || !descriptor.at("type")->is_string()) {
                 continue;
             }
-            const std::string t = p->at("type")->as_or<std::string>("");
+            const auto t = descriptor.at("type")->as_or<std::string>("");
             if (t.empty() || is_primitive_type(t)) {
                 continue;
             }

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -24,12 +25,12 @@ auto write_indent(std::string &out, int indent, std::size_t depth) -> void {
 
 /// @brief 追加 `\uXXXX`（小写十六进制，4 位）。
 auto write_u_escape(std::string &out, std::uint32_t cp) -> void {
-    static constexpr char k_hex[] = "0123456789abcdef";
+    static constexpr std::string_view HEX_DIGITS{"0123456789abcdef"};
     out += "\\u";
-    out.push_back(k_hex[(cp >> 12U) & 0xFU]);
-    out.push_back(k_hex[(cp >> 8U) & 0xFU]);
-    out.push_back(k_hex[(cp >> 4U) & 0xFU]);
-    out.push_back(k_hex[cp & 0xFU]);
+    out.push_back(HEX_DIGITS[(cp >> 12U) & 0xFU]);
+    out.push_back(HEX_DIGITS[(cp >> 8U) & 0xFU]);
+    out.push_back(HEX_DIGITS[(cp >> 4U) & 0xFU]);
+    out.push_back(HEX_DIGITS[cp & 0xFU]);
 }
 
 /// @brief 解码 `s[i]` 起始的 UTF-8 序列；非法则按单字节返回（保底不崩）。
@@ -125,7 +126,7 @@ auto write_string(std::string_view s, std::string &out, bool ensure_ascii) -> vo
         return make_error(ErrorCode::JsonValueNotSerializable, params);
     }
     char buf[64];
-    const auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), d);
+    const auto [ptr, ec] = std::to_chars(buf, std::end(buf), d);
     if (ec != std::errc{}) {
         ErrorParams params;
         params["detail"] = "unrepresentable double";
@@ -150,14 +151,14 @@ auto write_string(std::string_view s, std::string &out, bool ensure_ascii) -> vo
             return {};
         case Type::Int: {
             char buf[32];
-            const auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), v.as_or<std::int64_t>(0));
+            const auto [ptr, ec] = std::to_chars(buf, std::end(buf), v.as_or<std::int64_t>(0));
             (void)ec;
             out.append(buf, static_cast<std::size_t>(ptr - buf));
             return {};
         }
         case Type::UInt: {
             char buf[32];
-            const auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), v.as_or<std::uint64_t>(0));
+            const auto [ptr, ec] = std::to_chars(buf, std::end(buf), v.as_or<std::uint64_t>(0));
             (void)ec;
             out.append(buf, static_cast<std::size_t>(ptr - buf));
             return {};
@@ -165,10 +166,13 @@ auto write_string(std::string_view s, std::string &out, bool ensure_ascii) -> vo
         case Type::Double:
             return write_double(out, v.as_or<double>(0.0));
         case Type::RawNumber:
-            out.append(v.as_raw_number().value());  // 保真：原样输出存储字面量
+            // 外层 switch 已按 Type 分派，该 optional 在本分支恒有值；检查器无法建模这一约束。
+            out.append(
+                v.as_raw_number().value());  // NOLINT(bugprone-unchecked-optional-access) 保真：原样输出存储字面量
             return {};
         case Type::String:
-            write_string(v.as_string().value(), out, opts.ensure_ascii);
+            // 同上：Type::String 分派保证 as_string() 恒有值。
+            write_string(v.as_string().value(), out, opts.ensure_ascii);  // NOLINT(bugprone-unchecked-optional-access)
             return {};
         case Type::Array: {
             if (v.empty()) {

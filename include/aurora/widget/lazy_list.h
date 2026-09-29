@@ -329,7 +329,7 @@ class LazyList : public Widget {
             count_ = declared < 0 ? 0 : declared;
         }
         if (props.contains("item_extent")) {
-            const float declared = props.at("item_extent")->as_or<float>(0.0F);
+            const auto declared = props.at("item_extent")->as_or<float>(0.0F);
             item_extent_ =
                 declared > 0.0F
                     ? declared

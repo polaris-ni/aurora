@@ -386,20 +386,20 @@ struct PropDescriptor {
     const auto *pd_val = schema.at("prop_descriptors");
     if (pd_val != nullptr && pd_val->is_array()) {
         std::size_t idx = 0;
-        for (const auto *d = pd_val->begin(); d != pd_val->end(); ++d) {
-            const auto *name_val = d->at("name");
-            if (name_val != nullptr && d->contains("name") && name_val->is_string()) {
+        for (const auto &d : *pd_val) {
+            const auto *name_val = d.at("name");
+            if (name_val != nullptr && d.contains("name") && name_val->is_string()) {
                 PropDescriptor pd{};
                 pd.order = idx;
-                const auto *type_val = d->at("type");
-                if (type_val != nullptr && d->contains("type") && type_val->is_string()) {
+                const auto *type_val = d.at("type");
+                if (type_val != nullptr && d.contains("type") && type_val->is_string()) {
                     pd.cpp_type = type_val->as_or<std::string>("");
                 }
-                const auto *enum_val = d->at("enum");
-                if (enum_val != nullptr && d->contains("enum") && enum_val->is_array()) {
-                    for (const auto *e = enum_val->begin(); e != enum_val->end(); ++e) {
-                        if (e->is_string()) {
-                            pd.enum_values.push_back(e->as_or<std::string>(""));
+                const auto *enum_val = d.at("enum");
+                if (enum_val != nullptr && d.contains("enum") && enum_val->is_array()) {
+                    for (const auto &e : *enum_val) {
+                        if (e.is_string()) {
+                            pd.enum_values.push_back(e.as_or<std::string>(""));
                         }
                     }
                 }
@@ -546,7 +546,7 @@ struct PropDescriptor {
 [[nodiscard]] inline auto emit_font_weight(const Json &value) -> std::string {
     int w = 400;
     if (value.is_string()) {
-        const std::string s = value.as_or<std::string>("");
+        const auto s = value.as_or<std::string>("");
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) std::from_chars 需要首尾指针
         std::from_chars(s.data(), s.data() + s.size(), w);
     } else if (value.is_number()) {
@@ -588,11 +588,11 @@ struct PropDescriptor {
     };
     if (value.is_array()) {
         std::string result{};
-        for (const auto *item = value.begin(); item != value.end(); ++item) {
-            if (!item->is_string()) {
+        for (const auto &item : value) {
+            if (!item.is_string()) {
                 continue;
             }
-            const std::string s = item->as_or<std::string>("");
+            const auto s = item.as_or<std::string>("");
             if (s == "None") {
                 return "au::TextDecoration::None";
             }
@@ -700,7 +700,7 @@ struct PropDescriptor {
     // --- array: Length ["px"/"percent", N] | Color [r,g,b,a] | TextDecoration [...] ---
     if (value.is_array()) {
         if (value.size() == 2 && value.at(0)->is_string()) {
-            const std::string unit = value.at(0)->as_or<std::string>("");
+            const auto unit = value.at(0)->as_or<std::string>("");
             if (unit == "px") {
                 return std::string{"au::px("} + emit_float_literal(value.at(1)->as_or<float>(0.0F)) + std::string{")"};
             }
@@ -928,9 +928,9 @@ struct PropEmit {
     std::vector<std::string> kids{};
     const auto *children_val = node.at("children");
     if (children_val != nullptr && children_val->is_array()) {
-        for (const auto *kid = children_val->begin(); kid != children_val->end(); ++kid) {
-            if (kid->is_object()) {
-                kids.push_back(to_code_expr(*kid, style, indent + 2));
+        for (const auto &kid : *children_val) {
+            if (kid.is_object()) {
+                kids.push_back(to_code_expr(kid, style, indent + 2));
             }
         }
     }
@@ -972,9 +972,9 @@ struct PropEmit {
     std::vector<std::string> all_kids{};  // 已递归生成的子节点移动表达式（交构造实参用）
     const auto *children_val = node.at("children");
     if (children_val != nullptr && children_val->is_array()) {
-        for (const auto *kid = children_val->begin(); kid != children_val->end(); ++kid) {
-            if (kid->is_object()) {
-                all_kids.push_back("au::Node{std::move(" + to_code_sb(*kid, indent, os, counter) + ")}");
+        for (const auto &kid : *children_val) {
+            if (kid.is_object()) {
+                all_kids.push_back("au::Node{std::move(" + to_code_sb(kid, indent, os, counter) + ")}");
             }
         }
     }
