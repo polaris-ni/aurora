@@ -193,7 +193,7 @@ if (AURORA_BACKEND_GPU_WGPU)
     #   3) PATH 上的 clang 可执行旁目录
     #   4) 平台通用默认位（相对量，不含盘符）：Windows 查 LLVM 安装器写入的注册表键与
     #      %ProgramFiles%；类 Unix 查 /usr/lib/llvm-*
-    set(AURORA_LIBCLANG_DIR "" CACHE PATH "libclang 所在目录提示（未在 PATH 上时显式指定）")
+    set(AURORA_LIBCLANG_DIR "" CACHE PATH "Directory containing libclang (set explicitly when it is not on PATH)")
     set(_wgpu_libclang_dir "")
     set(_wgpu_libclang_explicit FALSE)
     if (AURORA_LIBCLANG_DIR)
@@ -251,8 +251,8 @@ if (AURORA_BACKEND_GPU_WGPU)
     if (NOT _wgpu_libclang_dir)
         aurora_error("AURORA_BACKEND_GPU_WGPU=ON but no libclang shared library was found (required by"
                 " wgpu-native's bindgen build script). Pass its directory explicitly:"
-                " -DAURORA_LIBCLANG_DIR=<LLVM bin 目录>（或设环境变量 LIBCLANG_PATH）；"
-                " 也可把 clang 加入 PATH 由本模块自动探测。")
+                " -DAURORA_LIBCLANG_DIR=<LLVM bin directory>, or set the LIBCLANG_PATH"
+                " environment variable; putting clang on PATH lets this module probe for it.")
     endif ()
 
     # cargo 构建：--target 显式指定 host 三元组，产物路径确定为 target/<triple>/release，
@@ -365,10 +365,10 @@ if (AURORA_BACKEND_WAYLAND)
     if (EXISTS "${AURORA_WL_TEXT_INPUT_XML}")
         list(APPEND AURORA_WL_PROTOS "${AURORA_WL_TEXT_INPUT_XML}|text-input-unstable-v3")
         target_compile_definitions(aurora PUBLIC AURORA_HAVE_WL_TEXT_INPUT=1)
-        aurora_log("Wayland text-input-unstable-v3: 协议 XML 就绪，客户端输入法桥启用")
+        aurora_log("Wayland text-input-unstable-v3: protocol XML present, client IME bridge enabled")
     else ()
         target_compile_definitions(aurora PUBLIC AURORA_HAVE_WL_TEXT_INPUT=0)
-        aurora_log("Wayland text-input-unstable-v3: 协议 XML 缺失（wayland-protocols 过旧？），输入法桥降级 no-op")
+        aurora_log("Wayland text-input-unstable-v3: protocol XML missing (wayland-protocols too old?), IME bridge degrades to no-op")
     endif ()
     set(AURORA_WL_GEN_SRCS "")
     foreach (_entry IN LISTS AURORA_WL_PROTOS)

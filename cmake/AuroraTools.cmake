@@ -261,7 +261,7 @@ if (WIN32)
                 COMMAND ${PWSH_EXE}
                         "${CMAKE_SOURCE_DIR}/tools/check/check_perf_gates.ps1"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-                COMMENT "本机时间类门槛校验（不进 CI，仅本机趋势对比）"
+                COMMENT "Local timing thresholds check (not in CI, local trend comparison only)"
                 VERBATIM)
     endif ()
 endif ()
@@ -308,11 +308,11 @@ if (AURORA_BUILD_DOCS)
         add_custom_target(docs
                 COMMAND "${_aurora_doxygen}" -s "${CMAKE_SOURCE_DIR}/Doxyfile"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-                COMMENT "生成 API 文档站（Doxygen；告警即失败，产物在 build/docs/）"
+                COMMENT "Generate the API doc site (Doxygen; warnings fail, output in build/docs/)"
                 EXCLUDE_FROM_ALL
                 VERBATIM)
         aurora_log("Doxygen docs: 'docs' target available (${_aurora_doxygen})")
     else ()
-        aurora_log("Doxygen docs: 'docs' target skipped (未找到 doxygen；用 -DAURORA_DOXYGEN_EXECUTABLE=<路径> 指定)")
+        aurora_log("Doxygen docs: 'docs' target skipped (doxygen not found; point at it with -DAURORA_DOXYGEN_EXECUTABLE=<path>)")
     endif ()
 endif ()

@@ -188,7 +188,7 @@ add_compile_definitions(NOMINMAX)
 # 显式关闭用 -DAURORA_ENABLE_LLD=OFF，非 PATH 安装用 -DAURORA_LLD_DIR=<LLVM bin 目录> 提示。
 option(AURORA_ENABLE_LLD "Link with LLVM lld if available (much faster than GNU ld)" ON)
 if (AURORA_ENABLE_LLD AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set(AURORA_LLD_DIR "" CACHE PATH "ld.lld 所在目录提示（未在 PATH 时使用）")
+    set(AURORA_LLD_DIR "" CACHE PATH "Directory containing ld.lld (used when it is not on PATH)")
     # HINTS 须整体引用：目录含空格（如 C:/Program Files/LLVM/bin）时未引用会被拆成多个坏 hint。
     find_program(AURORA_LLD_EXECUTABLE NAMES ld.lld HINTS "${AURORA_LLD_DIR}")
     if (AURORA_LLD_EXECUTABLE)
@@ -350,7 +350,7 @@ include(AuroraSimd)
 # 锚定到一个空静态库目标编一份 .gch，全部消费者经 REUSE_FROM 复用。
 if (AURORA_PCH_ENABLED)
     file(WRITE "${CMAKE_BINARY_DIR}/aurora_consumer_pch.cpp"
-            "// 自动生成：消费者共享 PCH 的锚定 TU（无内容，仅承载 .gch 编译）。\n")
+            "// Auto-generated: anchor TU for the shared consumer PCH (no content, it only carries the .gch build).\n")
     add_library(aurora_consumer_pch STATIC "${CMAKE_BINARY_DIR}/aurora_consumer_pch.cpp")
     target_link_libraries(aurora_consumer_pch PUBLIC aurora)
     # 显式钉 C++20：消费者经 aurora_setup_consumer_target 统一设 CXX_STANDARD 20，此处须一致，
