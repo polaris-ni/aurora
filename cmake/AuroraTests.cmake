@@ -214,6 +214,22 @@ if (AURORA_BUILD_TESTS)
                 target_compile_options(${tgt} PRIVATE /fp:precise)
             endif ()
         endif ()
+        if (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+            # /STACK：MSVC 系链接器（link.exe / lld-link）默认栈保留仅 1MB，而 JSON 解析器是
+            # 递归下降（parse_value → parse_object/parse_array → parse_value），max_depth=512
+            # 且深度检查在递归入口——拒绝深嵌套语料时会先扎满 512 层才折返；Debug + ASan 下
+            # 每层帧肥大（红区 + 零内联），1MB 不够 ⇒ utest_json_conformance 的 must-reject /
+            # implementation-defined 用例 SEGFAULT（windows-llvm 实测；本地 clang++ Debug+ASan
+            # 复现，llvm build 的链接器是 lld-link）。MinGW(ld)/POSIX 默认栈更大且帧更瘦，
+            # 实测无感，不动。16MB ≈ 实测溢出点的 16 倍余量，栈保留只是虚拟地址空间，提交按需。
+            # 前端差异：clang-cl / MSVC 直接吃 /STACK:；GNU 前端（clang++ 驱动 lld-link）须经
+            # -Wl, 透传，否则被当成本地文件名报 no such file or directory。
+            if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+                target_link_options(${tgt} PRIVATE /STACK:16777216)
+            else ()
+                target_link_options(${tgt} PRIVATE "-Wl,/STACK:16777216")
+            endif ()
+        endif ()
         if (EMSCRIPTEN)
             # NODERAWFS：Emscripten 默认 MEMFS，golden 基准 / 存储 / 临时文件等用例的
             # ifstream/ofstream 全落在内存盘，读不到仓库里的真实文件（表现为「文件不存在」
