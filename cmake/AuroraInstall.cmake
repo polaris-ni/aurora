@@ -47,10 +47,9 @@ if (AURORA_DEBUG_FORCED_ON OR (_aurora_install_debug_mode STREQUAL "AUTO"
     list(APPEND AURORA_EXPORTED_DEFINES AURORA_ENABLE_DEBUG)
 endif ()
 
-# 2) 安装 aurora 静态库与公共头（aurora.h 传递包含 third_party/nlohmann/json.hpp）。
+# 2) 安装 aurora 静态库与公共头（自包含：无随附三方头）。
 install(TARGETS aurora ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(DIRECTORY include/aurora DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(DIRECTORY third_party/nlohmann DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # 3) 安装 harfbuzz 静态库与公共头（freetype 自带 install 规则已安装自身；二者均被 aurora PUBLIC 链接）。
 install(TARGETS harfbuzz ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})

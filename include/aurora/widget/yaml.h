@@ -106,7 +106,7 @@ namespace detail {
     return out;
 }
 
-/// @brief 递归下降 YAML 发射器，将 nlohmann::json 转为 YAML 字符串。
+/// @brief 递归下降 YAML 发射器，将 JSON 值（`aurora::json::Value`）转为 YAML 字符串。
 /// 顶层空容器内联为 `{}` / `[]`；非空容器一律走块形态，空容器只在「值位置」由调用方内联。
 /// 容器辅助函数 emit_object / emit_array 递归回调本主分发器，故在此先行声明，定义见下文。
 /// @param j 待发射的任意 JSON 值。

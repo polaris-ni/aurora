@@ -239,9 +239,9 @@ target_compile_definitions(aurora PUBLIC
 target_include_directories(aurora
         PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        # vendored 第三方（nlohmann/json 由 aurora.h 传递包含，故需公开暴露）。
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
         PRIVATE
+        # vendored 三方仅库实现可见（stb_image.h 等散装单头），不暴露给消费者。
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
         # 仅库实现可见的内部共享头（swizzle/keysym 等），不暴露给消费者。
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(aurora PUBLIC cxx_std_20)
@@ -276,14 +276,14 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # 次脏构建，16 并发下每边膨胀至 10-39s（solo 0.9s）。即便修好失配，生效的 gch 仍要
     # 每 TU 全量加载 296MB + ccache 全量 hash，净收益为负——故 GCC 直接关闭消费者 PCH，
     # 消费者走伞头文本编译 + ccache 缓存（配置经 AuroraCcache 启动器注入）。
-    # 库自身 gch（122MB，标准库 + nlohmann/json）同病：每库 TU 全量加载 + ccache 全文
+    # 库自身 gch（122MB，标准库）同病：每库 TU 全量加载 + ccache 全文
     # hash，全量重编 155.4s（266 边）→ 关闭后库侧重编 68s（91 边），冷构建省约 1 分钟，
     # 且头文件变更不再使全部库 TU 的缓存键失效（gch 字节参与 key）。一并关闭。
     set(AURORA_PCH_ENABLED OFF)
 endif ()
 
 # ---- Precompiled header (规格 §3.5 增量编译) ----
-# 库自身 PCH：只聚合「稳定且不常变更」的重型头（标准库 + nlohmann/json），不纳入高频
+# 库自身 PCH：只聚合「稳定且不常变更」的重型头（标准库），不纳入高频
 # 变更的 aurora 自有头以保证库开发时的命中率（见 aurora_pch.h 收录原则）；PRIVATE 仅
 # aurora 库编译一份 .gch。消费者（demo/测试/工具）另有含 aurora.h 的共享 PCH，见下方
 # aurora_consumer_pch 目标（历史上 PUBLIC + 空 PCH：每目标一份空 .gch，纯开销零收益）。

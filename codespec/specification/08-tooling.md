@@ -34,16 +34,12 @@
 
 `children` 为空时不输出。**属性一律位于 `props` 子对象下**，因此补丁 path 形如 `/children/0/props/show`。
 
-**值类型**：UI 树的 JSON 值当前由第三方单头库承载——`Json` 是 `nlohmann::json` 的别名，定义于
-`widget/props_io.h`；另有 `storage/storage_types.h`、`cli/command.h`、`widget/yaml.h` 三处安装头
-同样定义该别名。
-
-Aurora 自有 JSON 值容器 `au::json::Value`（`core/json.h`）已落地，是该别名的**收敛目标**。收敛顺序为
-「库内改写 → 工具与测试改写 → 删除四处别名与第三方单头」，属尚未执行的动作；在此之前两者并存，
-本节及 §2.2 的函数签名一律以现状（`Json`）为准。容器自身的类型系统、读写契约与错误码见
+**值类型**：UI 树的 JSON 值由自研容器 `au::json::Value`（`core/json.h`）承载；`Json` 是它的别名，
+定义于 `widget/props_io.h` 与 `widget/yaml.h` 两处安装头。容器自身的类型系统、读写契约与错误码见
 [`01-core.md`](01-core.md) §9。
 
-收敛时逐条应用的机械对照：
+迁移期曾以第三方单头库 `nlohmann/json` 承载该别名（2026-09 收敛完成）：历史惯用法到现 API 的
+机械对照如下，供阅读旧代码或写迁移类工具时参考。
 
 | 第三方单头用法 | 收敛后写法 |
 |:---|:---|

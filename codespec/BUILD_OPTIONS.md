@@ -63,7 +63,7 @@ demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` �
 
 ### 2.2 预编译头（PCH）
 
-- **库自身**：`include/aurora/aurora_pch.h` 收录标准库 + `nlohmann/json.hpp`（不含 aurora 自有头，保证库开发时命中率），`aurora` 库 PRIVATE 编译一份。**GCC（MinGW）下同样强制关闭**：实测 122MB 的库 gch 每库 TU 全量加载 + ccache 全文 hash，且 gch 字节参与缓存 key（头文件一变全部库 TU 失效）；关闭后全量重编 155.4s → 68s（库侧），冷构建省约 1 分钟。MSVC/Clang 不变。（其中 `nlohmann/json.hpp` 属计划移除项：自研 JSON 值容器 `au::json::Value` 已落地并承担其角色，收敛完成后该头不再进 PCH；见 [`specification/01-core.md`](specification/01-core.md) §9。）
+- **库自身**：`include/aurora/aurora_pch.h` 收录标准库（不含 aurora 自有头，保证库开发时命中率），`aurora` 库 PRIVATE 编译一份。**GCC（MinGW）下同样强制关闭**：实测 122MB 的库 gch 每库 TU 全量加载 + ccache 全文 hash，且 gch 字节参与缓存 key（头文件一变全部库 TU 失效）；关闭后全量重编 155.4s → 68s（库侧），冷构建省约 1 分钟。MSVC/Clang 不变。（原收录的第三方 JSON 单头已移除：自研 JSON 值容器 `au::json::Value` 已收敛并承担其角色；见 [`specification/01-core.md`](specification/01-core.md) §9。）
 - **消费者**：MSVC/Clang 下 `aurora_consumer_pch` 锚定目标把 `aurora.h` 伞头整体预编译一份，全部 demo / 测试 / 工具经 `target_precompile_headers(REUSE_FROM aurora_consumer_pch)` 复用（aurora 头变更本就触发消费者重编，不增加失效面）。**GCC（MinGW）下消费者 PCH 强制关闭**：实测 296MB 的 .gch 从未被消费者命中（生成/消费侧编译器设置失配，`-Winvalid-pch` 拒用），却仍要每 TU 全量探测加载（GCC）+ 全文 hash（ccache），每 TU ≈ 600MB 纯亏损 I/O，净收益为负；消费者改走伞头文本编译 + ccache 缓存。
 - 覆盖率 / ASan 开启时 PCH 全部自动关闭（与 GCC 判定共用同一门控变量）。
 
@@ -653,7 +653,6 @@ Aurora 以静态库交付，并提供 `find_package(Aurora)` 消费端集成。�
 
 ```text
 <PREFIX>/include/aurora/...        # 公共 API 头（aurora.h 入口）
-<PREFIX>/include/nlohmann/...      # 随附的 nlohmann/json 头（aurora.h 传递包含；随 JSON 值容器收敛而移除，见 §2.2）
 <PREFIX>/include/freetype2/...     # FreeType 头
 <PREFIX>/include/harfbuzz/...      # HarfBuzz 头
 <PREFIX>/lib/libaurora.a           # 主静态库

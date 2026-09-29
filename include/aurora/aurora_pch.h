@@ -1,8 +1,7 @@
-/// @brief 预编译头：只收录稳定、重型的标准库与 vendored 三方头（BUILD_OPTIONS.md §2.3 增量编译）。
+/// @brief 预编译头：只收录稳定、重型的标准库头（BUILD_OPTIONS.md §2.3 增量编译）。
 /// @file aurora_pch.h
 ///
-/// 收录原则：只纳入「稳定且不常变更」的重型头——标准库 + vendored 三方
-/// （nlohmann/json.hpp 单头 2.5 万行，是全库最大的单次解析成本）；
+/// 收录原则：只纳入「稳定且不常变更」的重型头——标准库；
 /// **不纳入任何 aurora 自有头**：widget/render 等头高频变更，纳入会使每次
 /// 库内头编辑都击穿 PCH（PCH 重建 + 全部 TU 重编），命中率归零。
 ///
@@ -40,8 +39,5 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
-// ---- vendored 三方（稳定不变更；json.hpp 为最大单头解析成本） ----
-#include <nlohmann/json.hpp>
 
 #endif  // __cplusplus
