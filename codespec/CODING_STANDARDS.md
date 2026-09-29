@@ -846,7 +846,7 @@ au::Button(au::ButtonProps{ .label = "OK" });
 
 ### 14.1 规则
 
-- **LIT-1（阻断）**：**注释之外不得出现中日韩字符**。`include/` `src/` `examples/` `tests/` `tools/` 内 C++/Python 的字符串字面量、字符字面量与 raw string 内容一律用英文书写；`//`、`///`、`/* */`、Python `#` 与 docstring 属文档散文，保持中文不受此限。判定对象是「会离开源码的东西」——字面量经 `Logger`/`AURORA_LOG_RAW`/`Diagnostics`/`AURORA_CHECK`/Inspector/CLI/LSP/CTest 输出抵达控制台，而控制台代码页不受本库控制：GBK（cp936）等窄代码页下 UTF-8 中文串会呈现为问号与方块，同一份文案在不同代码页上结果不同（本仓整改的直接起因是跑门禁脚本时 `UnicodeEncodeError: 'gbk' codec can't encode character`）。注释不会离开源码，故不受限。
+- **LIT-1（阻断）**：**注释之外不得出现中日韩字符**。`include/` `src/` `examples/` `tests/` `tools/` 内 C++/Python 的字符串字面量、字符字面量与 raw string，以及 `cmake/` 与根 `CMakeLists.txt` 的引号参数 / bracket 参数，一律用英文书写；`//`、`///`、`/* */`、Python/CMake `#`、`#[[ ]]` 与 docstring 属文档散文，保持中文不受此限。判定对象是「会离开源码的东西」——字面量经 `Logger`/`AURORA_LOG_RAW`/`Diagnostics`/`AURORA_CHECK`/Inspector/CLI/LSP/CTest 输出抵达控制台，而控制台代码页不受本库控制：GBK（cp936）等窄代码页下 UTF-8 中文串会呈现为问号与方块，同一份文案在不同代码页上结果不同（本仓整改的直接起因是跑门禁脚本时 `UnicodeEncodeError: 'gbk' codec can't encode character`）。注释不会离开源码，故不受限。
 - **LIT-2（阻断）**：脚本内 `EXEMPT_FILES` 的文件级白名单条目一旦不再命中任何诊断即判红灯。白名单机制常设、列表默认留空，防止清单腐烂。
 - 规则编号 `LIT-1`/`LIT-2` 与 `tools/check/check_no_cjk_literals.py` 的输出编号一一对应；引用本节写 `§14.x` 或 `LIT-n`，不得写行号（`AGENTS.md` 硬规则 11）。
 
@@ -866,8 +866,8 @@ au::Button(au::ButtonProps{ .label = "OK" });
 
 ### 14.3 门禁与自查
 
-- **实现**：`tools/check/check_no_cjk_literals.py`（CTest `check_no_cjk_literals`）。注释在扫描前剥离，字符串 / 字符 / raw string 与 Python docstring 由词法器区分（C++ 数字分隔符 `60'000` 不误判为字符字面量）；`--json <path>` 输出机器可读工单，`--files-with-cjk` 给出按文件计数的整改清单。
+- **实现**：`tools/check/check_no_cjk_literals.py`（CTest `check_no_cjk_literals`）。注释在扫描前剥离，字符串 / 字符 / raw string、Python docstring 与 CMake 引号 / bracket 参数由各语言词法器区分（C++ 数字分隔符 `60'000` 不误判为字符字面量；CMake 引号内的 `#` 不当注释起点，故 900 余行中文注释零误报）；`--json <path>` 输出机器可读工单，`--files-with-cjk` 给出按文件计数的整改清单。
 - **门禁输出必须 ASCII**：违规字面量里的非 ASCII 一律转义成 `\uXXXX` 再打印。门禁日志若乱码，等于门禁不可读。
-- **不在扫描面**：`cmake/*.cmake` 与 `CMakeLists.txt` 的配置期文案（不属库对消费者的控制台契约）、`codespec/` 文档正文（中文是本仓文档语言）、`third_party/`。
+- **不在扫描面**：`codespec/` 文档正文（中文是本仓文档语言）与 `third_party/`。`cmake/` 与根 `CMakeLists.txt` **在**扫描面内：`aurora_log()` / `add_custom_target(COMMENT)` 的文案进配置与构建控制台，`CACHE` 描述进 cmake-gui 面板，与库内诊断是同一类「会离开源码的文本」（该目录下的中文注释同样放行）。
 - **自查**：`python tools/check/check_no_cjk_literals.py --limit 0` 跑全量；整改过程中反复跑并只看自己的文件。新增或修改公共控件的 `.note`/`.description` 时直接写英文，避免先写中文再翻译的往返。
 

@@ -304,7 +304,7 @@ ctest -R itest_ai_compat
 | 代码-文档同步 | `ctest -R check_code_doc_sync` | `check_code_doc_sync` |
 | Doxygen 注释规范 | `ctest -R check_doc_comments`（`CODING_STANDARDS.md` §13 的 DOC-R1–DOC-R8：标记唯一 / `@` 前缀 / `///` 须挂声明 / `include/` 公共声明须 `///` / 覆盖与命令必选矩阵 / 排版次序 / 矩阵禁写侧（`@param` 名须真实、`void` 与构造析构不写 `@return`）/ `///<` 只挂真实成员） | `check_doc_comments` |
 | 人工用例格式契约 | `ctest -R check_manual_test_format`（`codespec/manual-test/*.md` 的六字段名/顺序/取值域、编号升序、依赖拓扑可解、步骤-预期同号映射、执行记录表列格式） | `check_manual_test_format` |
-| 字面量语言 | `ctest -R check_no_cjk_literals`（`CODING_STANDARDS.md` §14 的 LIT-1/LIT-2：注释外的 C++/Python 字符串字面量禁中日韩字符，功能必需的中文数据须 `CJK-LITERAL: <类别> - <原因>` 就地豁免，失效的文件级白名单即红灯） | `check_no_cjk_literals` |
+| 字面量语言 | `ctest -R check_no_cjk_literals`（`CODING_STANDARDS.md` §14 的 LIT-1/LIT-2：注释外的 C++/Python/CMake 字符串字面量禁中日韩字符，功能必需的中文数据须 `CJK-LITERAL: <类别> - <原因>` 就地豁免，失效的文件级白名单即红灯） | `check_no_cjk_literals` |
 | 黄金文件 | `ctest -R golden`（确定性渲染基准） | golden 基准图 |
 
 「一次通过」终极检验（§11）由 `itest_ai_compat`（`tests/integration/`，运行 `ctest -R itest_ai_compat`） 离线近似承担，不依赖在线 LLM。

@@ -2,18 +2,20 @@
 # ============================================================================
 # check_no_cjk_literals.py - no-CJK-in-string-literals gate (LIT)
 # ----------------------------------------------------------------------------
-# Spec: codespec/CODING_STANDARDS.md §CJK literal policy
+# Spec: codespec/CODING_STANDARDS.md §14
 #   注释可用中文书写，但**字符串字面量**里的中文会经 stdout / stderr / Inspector /
 #   CLI / LSP 抵达控制台，在 Windows GBK 等窄代码页控制台上必然乱码（同一份文案在
 #   不同代码页下呈现为问号或方块）。故：注释外不得出现中日韩字符，一律用英文表达。
 #
 # Rule LIT-1 (blocking): a CJK character (Han / kana / CJK punctuation /
-#   fullwidth forms) inside a C++ or Python string or character literal, or
-#   inside a C++ raw string R"(...)"; comments are stripped first, so Chinese
-#   prose in `//`, `/* */`, `///`, `#` never trips the rule.
+#   fullwidth forms) inside a C++ or Python string or character literal, inside a
+#   C++ raw string R"(...)", or inside a CMake quoted / bracket argument; comments
+#   are stripped first, so Chinese prose in `//`, `/* */`, `///`, `#` never trips
+#   the rule.
 #   Scanned areas: include/ src/ examples/ tests/ tools/ (*.h *.hpp *.hh *.cpp
-#   *.cc *.cxx *.c *.inl *.py). cmake/*.cmake and CMakeLists.txt are NOT scanned:
-#   configure-time prose is never part of the library's console contract.
+#   *.cc *.cxx *.c *.inl *.py) plus cmake/*.cmake and CMakeLists.txt (the latter's
+#   strings reach `cmake --configure` / build output, and its cache-entry
+#   descriptions reach cmake-gui).
 #
 # Rule LIT-2 (blocking): an EXEMPT_FILES entry that matches nothing (stale
 #   whitelist), so the list cannot rot after the code moves on.
@@ -63,6 +65,12 @@ CJK_RE = re.compile("[" + "".join("%s-%s" % (chr(lo), chr(hi)) for lo, hi in CJK
 SCAN_DIRS = ("include", "src", "examples", "tests", "tools")
 CPP_EXTS = (".h", ".hpp", ".hh", ".cpp", ".cc", ".cxx", ".c", ".inl")
 PY_EXTS = (".py",)
+CMAKE_EXTS = (".cmake",)
+# cmake 侧另扫两处：cmake/ 全部模块 + 根 CMakeLists.txt
+CMAKE_DIRS = ("cmake",)
+CMAKE_ROOT_FILES = ("CMakeLists.txt",)
+CMAKE_EXTS = (".cmake",)
+CMAKE_FILES = ("CMakeLists.txt",)  # repo root + any scanned dir
 
 EXEMPT_TOKEN = "CJK-LITERAL"
 INLINE_LOOKBACK = 3
@@ -84,7 +92,8 @@ def repo_root_of(path):
 
 
 def iter_files(root):
-    """Yield (relpath, abspath, lang) for scanned sources under SCAN_DIRS."""
+    """Yield (relpath, abspath, lang) for every scanned source file."""
+    seen = set()
     for sd in SCAN_DIRS:
         base = os.path.join(root, sd)
         if not os.path.isdir(base):
@@ -96,9 +105,27 @@ def iter_files(root):
                 if ext not in CPP_EXTS and ext not in PY_EXTS:
                     continue
                 full = os.path.join(dirpath, fn)
-                yield (os.path.relpath(full, root).replace(os.sep, "/"),
-                       full,
-                       "py" if ext in PY_EXTS else "cpp")
+                rel = os.path.relpath(full, root).replace(os.sep, "/")
+                seen.add(rel)
+                yield (rel, full, "py" if ext in PY_EXTS else "cpp")
+    for sd in CMAKE_DIRS:
+        base = os.path.join(root, sd)
+        if os.path.isdir(base):
+            for fn in sorted(os.listdir(base)):
+                full = os.path.join(base, fn)
+                if not os.path.isfile(full) or os.path.splitext(fn)[1] not in CMAKE_EXTS:
+                    continue
+                rel = os.path.relpath(full, root).replace(os.sep, "/")
+                if rel in seen:
+                    continue
+                seen.add(rel)
+                yield (rel, full, "cmake")
+    for fn in CMAKE_ROOT_FILES:
+        full = os.path.join(root, fn)
+        rel = fn
+        if os.path.isfile(full) and rel not in seen:
+            seen.add(rel)
+            yield (rel, full, "cmake")
 
 
 # --------------------------------------------------------------------------
@@ -258,6 +285,81 @@ def scan_py(text):
     return out
 
 
+_CMAKE_BRACKET_RE = re.compile(r"\[(=*)\[")
+
+
+def scan_cmake(text):
+    """Yield CMake quoted / bracket arguments, plus bare (unquoted) code text.
+
+    `#` starts a line comment and `#[[ ... ]]` a bracket comment, both only when
+    outside a quoted argument - so the 900+ Chinese comment lines in cmake/ stay
+    invisible here, while a Chinese `CACHE PATH "..."` description or
+    `aurora_log("...")` (both reach the configure console) is flagged.
+    """
+    out = []
+    i, n, line = 0, len(text), 1
+    buf = []
+
+    def flush():
+        if buf:
+            out.append((line, "bare", "".join(buf), False))
+            del buf[:]
+
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            flush()
+            line += 1
+            i += 1
+            continue
+        if c == "#":
+            if text[i + 1:i + 3] == "[[":
+                close = text.find("]]", i + 3)
+                close = n if close == -1 else close + 2
+                line += text.count("\n", i, close)
+                i = close
+                continue
+            flush()
+            j = text.find("\n", i)
+            i = n if j == -1 else j
+            continue
+        if c == "[":
+            m = _CMAKE_BRACKET_RE.match(text, i)
+            if m:
+                close = "]" + m.group(1) + "]"
+                start = m.end()
+                end = text.find(close, start)
+                end = n if end == -1 else end
+                flush()
+                content = text[start:end]
+                out.append((line, "bracket", content, False))
+                line += content.count("\n")
+                i = end + len(close)
+                continue
+        if c == '"':
+            flush()
+            j = i + 1
+            chars = []
+            while j < n:
+                if text[j] == "\\" and text[j + 1:j + 2] in ('"', "\\"):
+                    chars.append(text[j + 1])
+                    j += 2
+                    continue
+                if text[j] == '"':
+                    break
+                chars.append(text[j])
+                j += 1
+            content = "".join(chars)
+            out.append((line, "str", content, False))
+            line += content.count("\n")
+            i = j + 1
+            continue
+        buf.append(c)
+        i += 1
+    flush()
+    return out
+
+
 # --------------------------------------------------------------------------
 
 def escape_non_ascii(s):
@@ -273,9 +375,12 @@ def first_cjk_snippet(content, width=56):
     return escape_non_ascii(content[lo:m.end() + width].replace("\n", " "))
 
 
+_SCANNERS = {"cpp": scan_cpp, "py": scan_py, "cmake": scan_cmake}
+
+
 def collect(root):
     findings = []
-    stats = {"files": 0, "cpp": 0, "py": 0}
+    stats = {"files": 0, "cpp": 0, "py": 0, "cmake": 0}
     for rel, full, lang in iter_files(root):
         stats["files"] += 1
         stats[lang] += 1
@@ -286,7 +391,7 @@ def collect(root):
             print("[WARN] cannot read %s: %s" % (rel, exc))
             continue
         raw_lines = text.splitlines()
-        for ln, kind, content, prose in (scan_cpp(text) if lang == "cpp" else scan_py(text)):
+        for ln, kind, content, prose in _SCANNERS[lang](text):
             if prose or not CJK_RE.search(content):
                 continue
             lo = max(1, ln - INLINE_LOOKBACK)
@@ -357,8 +462,9 @@ def main():
                   (len(findings), len({f["file"] for f in findings})))
         return 1
 
-    print("[PASS] no CJK in string literals: %d files scanned (%d C++, %d Python), "
-          "%d whitelisted file(s)" % (stats["files"], stats["cpp"], stats["py"], exempt_hits))
+    print("[PASS] no CJK in string literals: %d files scanned (%d C++, %d Python, "
+          "%d CMake), %d whitelisted file(s)" %
+          (stats["files"], stats["cpp"], stats["py"], stats["cmake"], exempt_hits))
     return 0
 
 
