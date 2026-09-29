@@ -91,7 +91,7 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_manual_test_format
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_manual_test_format.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-        # 版本一致性门禁（CHANGELOG.currentVersion 必须等于库版本；描述性口径不符仅告警）。
+        # 版本一致性门禁（CHANGELOG.md 的 currentVersion 必须等于库版本；描述性口径不符仅告警）。
         add_test(NAME check_version_consistency
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_version_consistency.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

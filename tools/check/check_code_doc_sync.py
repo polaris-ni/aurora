@@ -187,7 +187,7 @@ def check_doc_refs(repo, problems):
 BACKFLOW_DIRS = ("codespec", "include", "src", "tools", "tests", "cmake")
 BACKFLOW_FILES = ("AGENTS.md",)
 BACKFLOW_EXT = (".md", ".toml", ".h", ".hpp", ".cpp", ".cmake", ".py", ".txt")
-# 四份「ID 体系口径文档」：额外禁裸 `#N`（DOC4）。CHANGELOG.json 的历史 `#N` 有意保留，不进本名单。
+# 四份「ID 体系口径文档」：额外禁裸 `#N`（DOC4）。CHANGELOG.md 的历史 `#N` 有意保留，不进本名单。
 SPEC_SYSTEM_DOCS = ("codespec/SPECIFICATIONS.md", "codespec/CODING_STANDARDS.md",
                     "codespec/GUIDELINE.md", "AGENTS.md")
 # 裸 `#N`：前为非单词字符、后无数字（`Ref #142` 这类长数字串不会被 `#14` 前缀截断命中）。

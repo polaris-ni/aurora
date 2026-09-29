@@ -509,7 +509,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - **空内容不是失败**：「可访问但当前没有文本/图像」是正常态，返回 `Ok`，不得与「读不到」混为一谈。
 - **空写入是契约内 no-op**：空文本 / 空图像不触碰剪贴板、**保留既有内容**，返回 `Ok`。
 - **Windows 写文本先转码后开剪贴板**：`MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, ...)` 在 `EmptyClipboard` **之前**校验，非法 UTF-8 那一笔被拒时不会把用户原本复制的内容清掉；同理 `SetClipboardData` 失败意味着所有权未转移，须 `GlobalFree` 归还，不泄漏句柄。
-- 声明与迁移：四函数由「`void` / `std::string` 静默返回」改为 `Result`，属预览期破坏性收敛（semver 记录随版本收口批量落 `CHANGELOG.json`）；消费端把原 `std::string` 返回值改 `.value()` 即可保持旧行为，但**建议检查 `error()`**，否则又回到静默吞失败。
+- 声明与迁移：四函数由「`void` / `std::string` 静默返回」改为 `Result`，属预览期破坏性收敛（semver 记录随版本收口批量落 `CHANGELOG.md`）；消费端把原 `std::string` 返回值改 `.value()` 即可保持旧行为，但**建议检查 `error()`**，否则又回到静默吞失败。
 
 **控件层（`TextInput` / `Text` / `RichTextEdit` 的 Ctrl+C/X/V）**：这些快捷键路径无 `Result` 出口（`on_key_event` 返回 `void`），故失败经 `Diagnostics::warn(msg, where, code)` 上报——桥接 Logger 且进 `Diagnostics::report()` 收集，机器可读，与 `widget.cpp` / `timer.h` 既有口径一致。同时快捷键语义随失败收紧：
 
@@ -781,7 +781,7 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 
 **自动化守护**：`tools/check/check_platform_macros.py`（CTest 用例 `check_platform_macros`）扫描 `include/` 与 `src/` 全部预处理条件（含续行），命中原生平台/架构/位宽宏即红灯；`core/platform.h` 自身按例外豁免，`_WIN32_WINNT` / `_WIN32_IE` 等 SDK 旋钮不在禁用集合。规范化宏（`AURORA_PLATFORM_*` / `AURORA_ARCH_*` / `AURORA_BIT_*` / `AURORA_BACKEND_*` / `AURORA_COMPILER_*` / `AURORA_CAP_*`）的分支密度仅打印报告、不设门槛，供平台抽象层演进时追踪趋势。编译器特性宏已收敛：`core/platform.h` 现提供 `AURORA_COMPILER_*`（GCC / CLANG / MSVC 三个 base 加 APPLE_CLANG / CLANG_CL / MINGW / EMSCRIPTEN 精化），库内原生 `__GNUC__` / `__clang__` / `_MSC_VER` / `__MINGW*` / `__apple_build_version__` 一律映射为后者，分支统一经 `AURORA_COMPILER_*`；原生编译器宏仅允许出现在 `core/platform.h` 自身（检查豁免）。**编译期能力宏已独立成族**：`core/platform.h` 提供**恒定义**的 `AURORA_CAP_*`（取值 0/1，回答「本 TU 可用什么能力」而非「目标是什么平台」），现仅 `AURORA_CAP_THREADS`——Emscripten 未开 `-pthread` 时为 0、其余目标为 1；原先散落的 `__EMSCRIPTEN_PTHREADS__` 直用一并归入该宏。
 
-**版本常量**（`core/version.h`）：`AURORA_VERSION_MAJOR` / `MINOR` / `PATCH`（数字分量，CMake `project(VERSION)` 注入）、`AURORA_VERSION_SUFFIX_STR` + `AURORA_HAS_VERSION_SUFFIX`（semver 预发布后缀，来自 CMake 缓存变量 `AURORA_VERSION_SUFFIX`）、合成宏 `AURORA_VERSION_STRING`（完整 semver 串）。**库发布版本的单一事实来源是根 `CHANGELOG.json` 的 `currentVersion`**。
+**版本常量**（`core/version.h`）：`AURORA_VERSION_MAJOR` / `MINOR` / `PATCH`（数字分量，CMake `project(VERSION)` 注入）、`AURORA_VERSION_SUFFIX_STR` + `AURORA_HAS_VERSION_SUFFIX`（semver 预发布后缀，来自 CMake 缓存变量 `AURORA_VERSION_SUFFIX`）、合成宏 `AURORA_VERSION_STRING`（完整 semver 串）。**库发布版本的单一事实来源是根 `CHANGELOG.md` 的 `currentVersion`**。
 
 **Web / WASM 平台适配：**
 

@@ -3,27 +3,35 @@
 # check_version_consistency.py - version-consistency gate
 # ----------------------------------------------------------------------------
 # Check points:
-#   1) [blocking] codespec/CHANGELOG.json's currentVersion must equal the library's true version
-#      (AURORA_VERSION_STRING in include/aurora/core/version.h).
-#      The two were long kept in sync manually and sometimes CHANGELOG led or lagged the library
-#      version; if they mismatch, version numbers copied elsewhere at release (CLI/README/docs) would
-#      be based on the wrong baseline.
-#   2) [non-blocking] CHANGELOG.json body prose (e.g. the "NNN standalone executable tests" style
-#      wording in historical entries), if it disagrees with the count actually measured in the repo,
-#      only warns, does not error (descriptive text naturally goes stale with refactors and should not
-#      block CI; e.g. an early "188 standalone executable tests" while tests/*.cpp had grown to 191).
+#   1) [blocking] CHANGELOG.md's currentVersion (in the `aurora-changelog-meta`
+#      HTML comment block near the top of the file) must equal the library's true
+#      version (AURORA_VERSION_STRING in include/aurora/core/version.h).
+#      The two were long kept in sync manually and sometimes CHANGELOG led or
+#      lagged the library version; if they mismatch, version numbers copied
+#      elsewhere at release (CLI/README/docs) would be based on the wrong baseline.
+#   2) [non-blocking] CHANGELOG.md body prose (e.g. the "NNN standalone executable
+#      tests" style wording in historical entries), if it disagrees with the count
+#      actually measured in the repo, only warns, does not error (descriptive text
+#      naturally goes stale with refactors and should not block CI).
 #
-# Exit code: 1 only when item 1 mismatches; otherwise 0 (item 2 always returns 0 whether or not it fires).
+# Exit code: 1 only when item 1 mismatches; otherwise 0.
 #
 # Usage:
 #   python3 tools/check/check_version_consistency.py [--root <aurora_root>]
 # ============================================================================
 import argparse
 import glob
-import json
 import os
 import re
 import sys
+
+# currentVersion lives in the machine-readable meta block at the top of CHANGELOG.md:
+#   <!-- aurora-changelog-meta
+#   currentVersion: 1.0.0-alpha.9
+#   -->
+META_CURRENT_VERSION_RE = re.compile(r"^currentVersion:\s*(\S+)", re.MULTILINE)
+# Non-blocking descriptive check: wording like "188 standalone executable tests".
+PROSE_TESTS_RE = re.compile(r"(\d+)\s*个独立可执行测试")
 
 
 def repo_root_of(path):
@@ -84,7 +92,7 @@ def main():
     root = args.root or repo_root_of(__file__)
 
     include_root = os.path.join(root, "include")
-    changelog = os.path.join(root, "CHANGELOG.json")
+    changelog = os.path.join(root, "CHANGELOG.md")
 
     # ---- Item 1: blocking version consistency ----
     lib_ver = read_library_version(include_root)
@@ -93,21 +101,18 @@ def main():
         return 2
 
     if not os.path.isfile(changelog):
-        print(f"[ERR] CHANGELOG.json not found: {changelog}", file=sys.stderr)
+        print(f"[ERR] CHANGELOG.md not found: {changelog}", file=sys.stderr)
         return 2
 
     with open(changelog, encoding="utf-8") as f:
         changelog_text = f.read()
-    try:
-        changelog_doc = json.loads(changelog_text)
-    except json.JSONDecodeError as e:
-        print(f"[ERR] CHANGELOG.json parse failed: {e}", file=sys.stderr)
-        return 2
 
-    current = changelog_doc.get("currentVersion")
-    if not current:
-        print("[FAIL] CHANGELOG.json is missing the currentVersion field")
+    m = META_CURRENT_VERSION_RE.search(changelog_text)
+    if not m:
+        print("[FAIL] CHANGELOG.md is missing the currentVersion field "
+              "(expected in the aurora-changelog-meta HTML comment block)")
         return 1
+    current = m.group(1)
     if current != lib_ver:
         print(
             f"[FAIL] version mismatch: CHANGELOG.currentVersion={current} but library AURORA_VERSION_STRING={lib_ver}")
@@ -115,16 +120,13 @@ def main():
 
     # ---- Item 2: non-blocking wording warning ----
     warnings = []
-    # Matches wording like "188 standalone executable tests" (digits + standalone executable tests).
-    # The pattern matches the Chinese phrase still used in CHANGELOG.json prose, e.g. "188 个独立可执行测试".
-    for m in re.finditer(r"(\d+)\s*个独立可执行测试", changelog_text):  # CJK-LITERAL: regex-semantic - matches Chinese prose in CHANGELOG.json wording
-        stated = int(m.group(1))
+    for mm in PROSE_TESTS_RE.finditer(changelog_text):
+        stated = int(mm.group(1))
         actual = count_test_sources(root)
         if stated != actual:
             warnings.append(
-                f"CHANGELOG.json states \"{stated} standalone executable tests\", but tests/*.cpp actually has {actual}"
+                f"CHANGELOG.md states \"{stated} standalone executable tests\", but tests/*.cpp actually has {actual}"
             )
-    # If other "N cases/tests"-style wording appears in docs later, add comparison rules here.
 
     print(f"[PASS] versions match: currentVersion={current} == library {lib_ver}")
     if warnings:

@@ -374,12 +374,12 @@
 - **次要版本只增不删**：新增 API / 类型 / 属性可在 MINOR 增加；不得删除或破坏既有公开 API（保持向后兼容）。
 - **主版本允许破坏性变更**：破坏性修改（删除 / 改语义）只能进 MAJOR，并附迁移指南。
 - **补丁版本**：缺陷修复、文档、性能，不引入 API 变更。
-- **变更追踪**：所有公开 API 变更写入 `CHANGELOG.json`（类型化，版本真相以 `currentVersion` 为准）；`aurora_api.json` 无顶层版本字段，仅按条目 `since` 标注引入版本。
+- **变更追踪**：所有公开 API 变更写入 `CHANGELOG.md`（类型化，版本真相以 `currentVersion` 为准）；`aurora_api.json` 无顶层版本字段，仅按条目 `since` 标注引入版本。
 - **AI 友好性影响**：API 删除会让依赖旧签名的生成代码失效，因此非 MAJOR 不删。
 
 ### 7.2 流程
 
-1. 改动公开 API → 更新 `CHANGELOG.json` 条目。
+1. 改动公开 API → 更新 `CHANGELOG.md` 条目。
 2. 运行 `cmake --build build --target aurora_api_json`（内部执行 `gen_api_tools aurora_api.json`）刷新 API 描述。
 3. 破坏性变更 → 写迁移说明并 bump MAJOR。
 
@@ -389,7 +389,7 @@
 
 - **强制同步**：新增、删除或修改 `third_party/` 下任何第三方组件（含版本升级、子模块增删、补丁改动）时，**必须同步更新** `THIRD_PARTY_LICENSES.md`，保持组件清单与其许可证类型、版权信息、上游来源一致，杜绝「代码有、清单无」或「清单有、已移除」的漂移。
 - **联动项**：若组件的引入 / 移除影响构建（新增 `AURORA_*` 开关、链接库或源码构建目标），一并核对 `BUILD_OPTIONS.md` 相应章节；引入新许可证时确认与项目 MIT 许可兼容。
-- **归类**：此类改动按 `CODING_STANDARDS.md` §10 记为 `build` 类型提交，并在需要时于 `CHANGELOG.json` 备注依赖变化。
+- **归类**：此类改动按 `CODING_STANDARDS.md` §10 记为 `build` 类型提交，并在需要时于 `CHANGELOG.md` 备注依赖变化。
 
 ---
 
@@ -445,7 +445,7 @@
 
 ## 10 提交信息规范
 
-本规范约定仓库提交信息的统一写法，确保 `git log` 可读、可自动归类，并与 §7 的 SemVer 版本策略和 `CHANGELOG.json` 变更追踪对齐。提交信息支持**简体中文或英文**（二选一，同一仓库内保持一致即可）。
+本规范约定仓库提交信息的统一写法，确保 `git log` 可读、可自动归类，并与 §7 的 SemVer 版本策略和 `CHANGELOG.md` 变更追踪对齐。提交信息支持**简体中文或英文**（二选一，同一仓库内保持一致即可）。
 
 ### 10.1 格式
 
@@ -463,7 +463,7 @@
 - `scope`：受影响的模块 / 子系统（中文或英文均可，见 §10.4）。可省略。
 - `subject`：一句话简述，**动词开头、不加句号、≤ 50 字 / 词**。
 - `body`：说明**为什么**做此改动、**做了什么**。每行 ≤ 72 字，可多段。
-- `footer`：破坏性变更、关联 Issue / PR、对应 `CHANGELOG.json` 条目等。
+- `footer`：破坏性变更、关联 Issue / PR、对应 `CHANGELOG.md` 条目等。
 
 ### 10.2 示例
 
@@ -474,7 +474,7 @@ feat(painter): 新增圆角矩形填充接口
 内部走 SDF 慢路径，与现有 fill_rect 共享裁剪逻辑。
 
 Ref #142
-对应 CHANGELOG.json: added Painter.fill_rounded_rect
+对应 CHANGELOG.md: added Painter.fill_rounded_rect
 ```
 
 破坏性变更：
@@ -526,7 +526,7 @@ BREAKING CHANGE: 自定义 Widget 的 on_paint 实现须改用全局坐标，
 2. **动词开头**：中文用「新增 / 修复 / 重构 / 优化 / 移除 / 调整」等祈使句；英文用祈使句。
 3. **不写句号**：中文 subject 末尾不加 `。`；英文 subject 末尾不加 `.`。
 4. **一行一个语义**：一次提交聚焦一件事；若含多类改动（如 feat + fix），拆成多次提交。
-5. **关联可追溯**：涉及 Issue / PR 时在 footer 写 `Ref #<id>` / `Close #<id>`；API 变更须注明对应 `CHANGELOG.json` 条目。
+5. **关联可追溯**：涉及 Issue / PR 时在 footer 写 `Ref #<id>` / `Close #<id>`；API 变更须注明对应 `CHANGELOG.md` 条目。
 6. **与版本策略对齐**：`feat` → 升 MINOR；`fix` / `perf` / `docs` 等 → 升 PATCH；带 `!` 或 `BREAKING CHANGE:` → 升 MAJOR，并写迁移说明。
 7. **不提交无关文件**：仅纳入本次实际改动的业务文件；构建产物（`build*/`）与本地 AI 工具目录（`.codebuddy/` 等）已由 `.gitignore` 忽略，勿 `git add -A` 强行纳入。
 8. **提交前必跑 LINT 且零告警**：**每次提交代码前**必须跑一遍静态检查并确保**零告警**——`cmake --build build --target lint`（配置源为仓库根 `.clang-tidy`，扫描 `compile_commands.json` 中全部非 `third_party` 翻译单元，按 `(file, line, check)` 去重后凡存在 warning 及以上即以退出码 1 失败）。有告警先修；确需抑制时按 §5.2 写明**具体检查名 + 为何不能按建议修复**，不得用裸 `NOLINT` 掩盖。仅做格式化可用 `cmake --build build --target lint-fix` 就地应用 fix-it，但**须人工审阅 diff**，且与逻辑改动分开提交（见 §10.6）。选项、目标与运行器说明见 `BUILD_OPTIONS.md` §4.5。

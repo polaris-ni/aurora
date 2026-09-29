@@ -4,7 +4,7 @@
 渲染，不依赖 GPU；以编译型静态库交付。
 
 - 单一入口头：`#include "aurora/aurora.h"`，命名空间 `namespace aurora;`（推荐别名 `namespace au = aurora;`）
-- 当前版本：`1.0.0-alpha.9`（早期预览开发版，**尚不构成 API 稳定性承诺**；事实源见 `CHANGELOG.json` 的 `currentVersion`）
+- 当前版本：`1.0.0-alpha.9`（早期预览开发版，**尚不构成 API 稳定性承诺**；事实源见 `CHANGELOG.md` 的 `currentVersion`）
 - 运行期版本常量：`AURORA_VERSION_STRING`（`include/aurora/core/version.h`）
 
 ## 特性总览
@@ -21,6 +21,16 @@
 | window | Headless / Win32(GDI) / GLFW / X11 / Wayland / WASM / macOS / D3D11 上屏偏置 / WGPU GPU 栅格（Vulkan·D3D12·Metal·GLES）；事件驱动帧循环（空闲 CPU 趋近 0） |
 | storage / preferences | 信封式记录仓储（内存/文件系统后端）；JSON 键值配置（多进程安全 LWW 合并） |
 | inspector / 工具链 | 本地回环 HTTP 检视服务、`aurora_lsp` 语言服务器、`aurora_mcp` MCP Server、`aurora_cli` |
+
+## AI-first 能力
+
+Aurora 以「AI 可直接操作界面」为设计内核：**核心库零网络依赖、不绑定任何云服务**；LLM 能力通过 `GenerateUiFn` 注入点接入，由消费者自行决定模型与后端。对外暴露三套机器可读接口，供 AI 编码助手与运行时工具深度集成：
+
+- **组件查询 API**：`component_schema()` / `list_all_schemas()` 枚举全部已注册组件的属性、事件与子节点策略，`aurora_api.json` 据此自动生成；
+- **运行时检视**：`InspectorServer` 把运行中的控件树暴露为可读写的结构化数据（localhost-only HTTP，REST 端点 `/api/debug/*`），是「AI 直接驱动界面」的落点；
+- **开发者工具**：`aurora_mcp`（MCP Server，供 AI 编辑器调用）、`aurora_lsp`（语言服务器）、`aurora_cli`（命令行）。
+
+> 检视与 MCP 的 `live_*` 能力需开启 CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`（默认 OFF），启用方式见下方「调试与检视」。
 
 ## 快速上手
 
@@ -74,12 +84,12 @@ au::App().title("Hello Aurora").size(800, 600).view(std::move(root)).run();
 
 ## 构建
 
-要求：CMake ≥ 3.20、C++20 编译器、Ninja（推荐）。
+要求：CMake ≥ 3.20、支持 C++20 的编译器（GCC / Clang / MSVC 任一）、Ninja（推荐）。WGPU 后端额外需要 Rust 工具链（cargo / rustc 在 `PATH`）。
 
 ```powershell
 cmake --preset ninja             # 已预置 Ninja + gcc/g++；如需自定义用 cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=…
 cmake --build build              # 库 + 工具 + 测试（demo 不进默认构建）
-ctest --test-dir build --output-on-failure   # 运行测试
+ctest --preset ninja-test         # 全量并行（进程隔离模型下安全；等价 --test-dir build --output-on-failure -j 16）
 ```
 
 全部 CMake 开关、编译宏与运行期环境变量统一见
@@ -87,6 +97,20 @@ ctest --test-dir build --output-on-failure   # 运行测试
 
 - `-DAURORA_BACKEND_WIN32=ON/OFF`（Windows 默认 ON）、`AURORA_BACKEND_GLFW/X11/WAYLAND/D3D11/GPU_WGPU/MACOS/WASM`（默认 OFF）
 - demo 目标按名构建：`cmake --build build --target demo_lazy_list`
+- 运行示例：构建后直接执行生成的 `build/demo_<组件>.exe`（如 `build/demo_lazy_list.exe`）；设置 `AURORA_INSPECTOR_PORT=6280` 可在示例内一并拉起检视服务。
+- 全量测试经 CTest 进程隔离并行执行（`ctest --preset ninja-test`）；仓库另维护多道文档/一致性门禁（version_consistency、code_doc_sync 等）保障代码与 `codespec/` 同步。
+
+## 调试与检视
+
+开启 `AURORA_BUILD_INSPECTOR_SERVER` 后，`InspectorServer` 随应用启动（默认仅监听本机回环，不暴露到网络）：
+
+```powershell
+cmake -S . -B build -G Ninja -DAURORA_BUILD_INSPECTOR_SERVER=ON
+cmake --build build
+```
+
+- 默认端口 `6280`，可用环境变量 `AURORA_INSPECTOR_PORT` 覆盖（如 `6280` 或 `127.0.0.1:6280`）；
+- 运行示例时设置该变量，`examples/demos/demo_common.h` 的 `run_demo` 会自动随 demo 拉起 InspectorServer，供 `aurora_mcp` 的 `live_*` 工具或进程外 E2E 客户端 `aurora_e2e_client` 连接。
 
 ## 作为第三方库消费（安装 + find_package）
 
@@ -127,7 +151,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 | [codespec/CODING_STANDARDS.md](codespec/CODING_STANDARDS.md) | 编码规范 / AI 友好性规则                |
 | [codespec/GUIDELINE.md](codespec/GUIDELINE.md)               | 复制即用配方（最小可编译片段）          |
 | [codespec/BUILD_OPTIONS.md](codespec/BUILD_OPTIONS.md)       | CMake 开关 / 编译宏 / 环境变量（权威）  |
-| [CHANGELOG.json](CHANGELOG.json)                             | 版本与变更记录                          |
+| [CHANGELOG.md](CHANGELOG.md)                             | 版本与变更记录                          |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)           | 第三方组件许可清单                      |
 
 ## 许可证

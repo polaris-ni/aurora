@@ -8,7 +8,7 @@
 #    （-D<选项>=<目录> 或环境变量），自动探测只作为兜底且不得含盘符。"
 #
 # Why a gate: 2026-09-22 found `D:/Development/Environment/LLVM/bin` hardcoded in  HARDPATH_EXEMPT: example cited in rationale, not a path present in the repo
-# cmake/AuroraBackends.cmake (plus the same本机 path in CHANGELOG.json and a doc
+# cmake/AuroraBackends.cmake (plus the same本机 path in CHANGELOG.md and a doc
 # example). A path that is not passed in is a path that only builds on one machine.
 #
 # Scan scope: every version-controlled text file (git ls-files), minus
