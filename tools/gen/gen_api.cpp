@@ -30,8 +30,14 @@ auto known_enums() -> std::map<std::string, std::vector<std::string>> { return a
 /// @brief enum value list -> Json array (json::Value has no implicit construction from std::vector).
 [[nodiscard]] auto enum_values_json(const std::string &name) -> au::Json {
     au::Json arr = au::Json::array();
-    for (const auto &v : known_enums()[name]) {
-        arr.push_back(v);
+    // 关键生命周期修正：known_enums() 返回的是临时 std::map，若直接 `known_enums()[name]` 取下标，
+    // 临时 map 会在 range 表达式求值结束时被析构，循环拿到的是悬垂引用（ASan 报告的
+    // heap-use-after-free）。先绑定到具名局部引用，把临时 map 的生命周期延长到本函数作用域。
+    const auto &enums = known_enums();
+    if (const auto it = enums.find(name); it != enums.end()) {
+        for (const auto &v : it->second) {
+            arr.push_back(v);
+        }
     }
     return arr;
 }
