@@ -201,7 +201,7 @@ auto report_option(const cli::Arguments &args, const cli::OptionSchema &option) 
         joined += '"' + value.raw_text() + '"';
     }
     emit("  --", option.long_name, " [", cli::to_string(option.kind), "] = ", joined, " (", std::to_string(many.size()),
-         " 次", args.explicitly_given(option.long_name) ? "" : ", 默认值", ')');
+         " occurrence(s)", args.explicitly_given(option.long_name) ? "" : ", default value", ')');
 }
 
 /// @brief 强类型出口：证明字面量真的变成了 Length / Color / LogLevel / Duration，而非字符串。
@@ -242,7 +242,7 @@ auto report_ok(const cli::Invocation &invocation, const cli::CommandSpec &root) 
     emit("command : ", args.command_display());
     emit("chain   : ", std::to_string(args.command_chain().size()), " level(s)");
     if (args.matched_command() != nullptr && args.matched_command() != &root) {
-        emit("leaf    : ", args.matched_command()->name, " (其声明遮蔽父级同名选项)");
+        emit("leaf    : ", args.matched_command()->name, " (shadows the parent option of the same name)");
     }
     emit("options :");
     for (const auto &option : args.matched_command()->options) {
@@ -251,16 +251,16 @@ auto report_ok(const cli::Invocation &invocation, const cli::CommandSpec &root) 
     if (args.matched_command() == &root) {
         report_strong_types(args);
     }
-    emit("positionals: ", std::to_string(args.positionals().size()), " 个");
+    emit("positionals: ", std::to_string(args.positionals().size()), " item(s)");
     for (const auto &value : args.positionals()) {
         emit("  ", value.raw_text());
     }
-    emit("rest (`--` 之后): ", std::to_string(args.rest().size()), " 个");
+    emit("rest (after `--`): ", std::to_string(args.rest().size()), " item(s)");
     for (const auto &token : args.rest()) {
         emit("  ", token);
     }
     if (args.flag("verbose")) {
-        emit("verbosity: ", std::to_string(args.count("verbose")), " 次 -v");
+        emit("verbosity: ", std::to_string(args.count("verbose")), " -v flag(s)");
     }
 }
 
@@ -286,7 +286,7 @@ auto main(int argc, char **argv) -> int {
         report_error(checked.error());
         return 1;
     }
-    emit("validate: 声明表通过，共 ", std::to_string(checked.value()), " 个命令");
+    emit("validate: spec table passed, ", std::to_string(checked.value()), " command(s) total");
 
     const auto parsed = cli::parse(root, argc, argv);
     if (!parsed) {

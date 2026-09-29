@@ -91,7 +91,7 @@ auto main() -> int {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    AURORA_LOG_INFO("demo", "[inspector] AURORA_BUILD_INSPECTOR_SERVER 未开启，跳过");
+    AURORA_LOG_INFO("demo", "[inspector] AURORA_BUILD_INSPECTOR_SERVER not enabled, skipped");
     return 0;
 }
 

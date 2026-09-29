@@ -87,7 +87,7 @@ auto main() -> int { return run(); }
 #else
 
 auto main() -> int {
-    std::printf("demo_test_controller: AURORA_BACKEND_HEADLESS 未开启，跳过\n");
+    std::printf("demo_test_controller: AURORA_BACKEND_HEADLESS not enabled, skipped\n");
     return 0;
 }
 

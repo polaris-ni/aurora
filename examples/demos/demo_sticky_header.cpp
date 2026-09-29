@@ -41,6 +41,7 @@ auto main() -> int {
     au::Node root = au::Column{
         GradientTitle{"StickyHeader"},
         gap(12),
+        // CJK-LITERAL: on-screen-demo - painted window text, not console output
         au::Text{au::LocalizedString{"滚动列表：分组标题钉驻顶部，下一个标题把上一个顶出"}},
         gap(8),
         Card{std::move(scroll)},

@@ -46,7 +46,7 @@ auto main() -> int {
             GradientTitle{"Preferences demo"},
             gap(12.0F),
             au::Show{show_switch, au::Row{std::move(sw), au::Text{"Dark mode (persisted in " +
-                                                                  prefs.file_path().filename().string() + "）"}}},
+                                                                  prefs.file_path().filename().string() + ")"}}},
             gap(8.0F),
             au::Row{std::move(appearance_sw), au::Text{"Dark mode (group appearance, nested persistence)"}},
             gap(8.0F),
