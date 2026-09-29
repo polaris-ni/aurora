@@ -670,6 +670,7 @@ au::Button(au::ButtonProps{ .label = "OK" });
 - 输出纪律：禁止直接使用标准输出，一律走 `Logger` 双通道（§4.1）。
 - 更多设计原则见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §13（AI-first 设计原则）；「显式优于隐式（含样式继承）」的需求规格见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §8.1（#8）。
 - 注释形态与文档注释齐全度：一律遵守 §13（Doxygen 注释规范），由 `tools/check/check_doc_comments.py` 门禁把关。
+- 字符串字面量的语言：注释之外不得出现中日韩字符，一律遵守 §14（字面量语言规范），由 `tools/check/check_no_cjk_literals.py` 门禁把关。
 
 ---
 
@@ -838,4 +839,35 @@ au::Button(au::ButtonProps{ .label = "OK" });
 - **告警根因用最小 fixture 实测，不得凭猜改标记**：Doxygen 的 Markdown/命令解析对形态高度敏感，同一写法在不同上下文（`///<` 尾注 vs `///` 块、跨度前是否紧贴标点）结论可能相反。定位办法：把可疑行原样复制进 `build/` 下一个一次性头（`#include <…>` 缺失不影响抽取），用 `sed` 从 `Doxyfile` 派生一份把 `INPUT` 指向该目录、`OUTPUT_DIRECTORY` / `WARN_LOGFILE` 落在 `build/` 内、`WARN_AS_ERROR = NO` 且 `EXCLUDE_PATTERNS` 清空的配置，跑一次真 Doxygen 读告警。据此写成的规则才可信，fixture 不入库。
 - 每轮整改后须依次复验：`check_doc_comments` → `format-check` → 全量构建 → `ctest` 全绿。注释改动同样会破坏编译（把 `///` 写成未闭合、或在 `@code` 块里误触标记），因此「只改注释」不豁免构建验证。
 - Doxygen 告警的复验需要真机 `doxygen`：本机缺 `doxygen` 时，只可声明「形态门禁通过」，不可声明「Doxygen 语法已验证」。
+
+---
+
+## 14 字面量语言规范（控制台可读性）
+
+### 14.1 规则
+
+- **LIT-1（阻断）**：**注释之外不得出现中日韩字符**。`include/` `src/` `examples/` `tests/` `tools/` 内 C++/Python 的字符串字面量、字符字面量与 raw string 内容一律用英文书写；`//`、`///`、`/* */`、Python `#` 与 docstring 属文档散文，保持中文不受此限。判定对象是「会离开源码的东西」——字面量经 `Logger`/`AURORA_LOG_RAW`/`Diagnostics`/`AURORA_CHECK`/Inspector/CLI/LSP/CTest 输出抵达控制台，而控制台代码页不受本库控制：GBK（cp936）等窄代码页下 UTF-8 中文串会呈现为问号与方块，同一份文案在不同代码页上结果不同（本仓整改的直接起因是跑门禁脚本时 `UnicodeEncodeError: 'gbk' codec can't encode character`）。注释不会离开源码，故不受限。
+- **LIT-2（阻断）**：脚本内 `EXEMPT_FILES` 的文件级白名单条目一旦不再命中任何诊断即判红灯。白名单机制常设、列表默认留空，防止清单腐烂。
+- 规则编号 `LIT-1`/`LIT-2` 与 `tools/check/check_no_cjk_literals.py` 的输出编号一一对应；引用本节写 `§14.x` 或 `LIT-n`，不得写行号（`AGENTS.md` 硬规则 11）。
+
+### 14.2 例外：功能必需的中文数据
+
+换成英文会让「被测事实」本身消失的场合，保留原文并就地标记。合法类别只有下表六个标识（门禁只认 `CJK-LITERAL` 令牌、不校验类别名，取错名字靠评审兜底）：
+
+| 标记理由 | 适用 | 典型 |
+|:---|:---|:---|
+| `cjk-fixture` | 必须为汉字/假名才能成立的断言素材 | 无障碍语义树 Name 断言、IME 组合（preedit/commit）串、CJK 字体排版与 BiDi 用例、UTF-8↔UTF-16 映射、喂给 golden 图像比对的绘制文本 |
+| `locale-output` | 中文输出即功能本身 | zh/ja 日期格式化的「年/月/日」 |
+| `on-screen-demo` | 只绘进窗口、从不打印的 demo 文案 | `LocalizedString{"拖拽或滚轮…"}` 之类的上屏提示 |
+| `shader-source` | 交给 GPU 的着色器源码里的注释 | WGSL/GLSL raw string 内的中文注释 |
+| `regex-semantic` / `doc-schema` | Python 工具里充当匹配模式或文档字段名的中文片段 | 识别 `架构 §N` 引用、全角 `（）`、manual-test 中文字段名 |
+
+标记形态：`// CJK-LITERAL: <类别> - <一句话原因>`（Python 用 `# CJK-LITERAL: …`），写在命中行本身或其上 3 行内；跨行拼接的句子要整句改写，不得留下孤立的 `）`、` 个` 之类残片。**诊断文案不属例外**——那正是控制台输出，一律翻译。
+
+### 14.3 门禁与自查
+
+- **实现**：`tools/check/check_no_cjk_literals.py`（CTest `check_no_cjk_literals`）。注释在扫描前剥离，字符串 / 字符 / raw string 与 Python docstring 由词法器区分（C++ 数字分隔符 `60'000` 不误判为字符字面量）；`--json <path>` 输出机器可读工单，`--files-with-cjk` 给出按文件计数的整改清单。
+- **门禁输出必须 ASCII**：违规字面量里的非 ASCII 一律转义成 `\uXXXX` 再打印。门禁日志若乱码，等于门禁不可读。
+- **不在扫描面**：`cmake/*.cmake` 与 `CMakeLists.txt` 的配置期文案（不属库对消费者的控制台契约）、`codespec/` 文档正文（中文是本仓文档语言）、`third_party/`。
+- **自查**：`python tools/check/check_no_cjk_literals.py --limit 0` 跑全量；整改过程中反复跑并只看自己的文件。新增或修改公共控件的 `.note`/`.description` 时直接写英文，避免先写中文再翻译的往返。
 

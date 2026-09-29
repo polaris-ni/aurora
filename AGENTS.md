@@ -110,7 +110,7 @@
 | **项目定位 / 设计原则 / 需求清单 / 文档导航 / 版本门禁** | `codespec/SPECIFICATIONS.md`   | 总纲与索引：30 条特性清单（`#1–#30`）逐条指向其规格落点；分层蓝图、命名速查、API 兼容策略；版本与稳定性门禁（§12） |
 | **架构 / 运行时 / 分层 / 模块映射 / 设计不变量**      | `codespec/ARCHITECTURE.md`     | 🥇 架构与设计以它为准：分层、运行时、模块映射、核心数据流、组件树、事件、渲染、性能、11 条设计不变量、错误处理架构、AI-first 原则、测试与 CI |
 | **核心概念 / 跨框架映射 / 概念可枚举性**              | `codespec/CONCEPTS.md`         | 可枚举 UI 原语审计、状态作用域决策树、React / Flutter / Qt 概念映射、迁移要点                              |
-| **编码规范 / 命名 / 错误 / 注释 / AI 友好性 / 版本管理**     | `codespec/CODING_STANDARDS.md` | 🥇 编码规则以它为准：错误处理、命名、文档与示例、日志纪律、契约标注、Doxygen 注释规范（§13）、AI 友好性、SemVer、函数签名、内部工具层、提交信息规范 |
+| **编码规范 / 命名 / 错误 / 注释 / 字面量语言 / AI 友好性 / 版本管理**     | `codespec/CODING_STANDARDS.md` | 🥇 编码规则以它为准：错误处理、命名、文档与示例、日志纪律、契约标注、Doxygen 注释规范（§13）、字符串字面量语言（§14）、AI 友好性、SemVer、函数签名、内部工具层、提交信息规范 |
 | **使用指南 / 复制即用配方**                           | `codespec/GUIDELINE.md`        | 42 组最小可编译片段：界面 / 布局 / 状态 / 异步 / 持久化 / 媒体 / 字体 / Inspector / 工厂 / 测试 / 样式 / 输入法 / JSON / 坑 / 调试 |
 | **编译选项 / 宏 / 环境变量（统一参考）**              | `codespec/BUILD_OPTIONS.md`    | 🥇 所有 CMake 开关、缓存变量、feature 宏、运行时环境变量与 find_package 集成以它为准                       |
 
@@ -167,6 +167,7 @@
     - **架构 / 运行时 / 分层 / 模块边界 / 设计原则** → `ARCHITECTURE.md`
     - **核心概念 / 跨框架映射 / 控件语义**（如新增或删除 widget 的对照）→ `CONCEPTS.md`
     - **编码规范 / 命名 / 错误 / AI 友好性**（强类型、命名序、默认参数等）→ `CODING_STANDARDS.md`
+    - **注释形态** → `CODING_STANDARDS.md` §13；**字符串字面量的语言（注释外禁中文）** → 同文 §14
     - **编译期开关 / feature 宏 / 环境变量** → `BUILD_OPTIONS.md`
     - **新增可复现用法 / 最小可编译配方** → `GUIDELINE.md`
     - **提交信息写法** → `CODING_STANDARDS.md` §10
@@ -223,3 +224,7 @@
     纯实现叙述 / TODO / 内部说明用 `//` 且不得紧贴可文档化声明；`include/` 里紧贴公共声明的 `//` 须升级为 `///`。
     描述内容以代码实际行为为准，禁止编造语义或零信息套话。增量由 CTest `check_doc_comments`（`tools/check/check_doc_comments.py`，DOC-R1–DOC-R8）守护，
     「写了注释但 Doxygen 读不出」由 `docs` 目标（`Doxyfile`，`WARN_AS_ERROR=YES`）另查；两者互补、不重叠。豁免须逐条写 `DOC-EXEMPT: <规则> <原因>` 并注明理由。
+13. **字符串字面量里不得写中文**（`CODING_STANDARDS.md` §14，LIT-1）：注释可用中文，但字面量会经 stdout/stderr、`Logger`/`AURORA_LOG_RAW`、`Diagnostics`、Inspector、CLI、LSP 与 ctest 输出抵达控制台，
+    控制台代码页不受本库控制——GBK 等窄代码页下 UTF-8 中文串即乱码（本仓实测撞到 `UnicodeEncodeError: 'gbk' codec can't encode character`）。新增或修改字面量时直接写英文，并把该字面量内的全角标点换成 ASCII。
+    唯一例外是「换成英文就让被测事实消失」的功能必需中文（CJK 断言素材、locale 输出、上屏 demo 文案、着色器源码内注释、Python 正则语义片段），须就地写 `CJK-LITERAL: <类别> - <原因>` 标记（见 §14.2 的类别词表，六个标识），
+    **诊断文案不属例外**。增量由 CTest `check_no_cjk_literals`（`tools/check/check_no_cjk_literals.py`，LIT-1/LIT-2）守护；门禁自身输出必须全 ASCII（违规串转义成 `\uXXXX`），否则门禁日志本身就读不清。
