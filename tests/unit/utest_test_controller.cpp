@@ -79,7 +79,7 @@ AURORA_TEST_CASE(pump_renders_first_frame_then_idle_frames_are_skipped) {
     AURORA_TEST_REQUIRE_TRUE(tc.pump(3).ok());
     AURORA_TEST_CHECK_EQ(tc.frame_count(), 1);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");
 #endif
 }
 
@@ -96,7 +96,7 @@ AURORA_TEST_CASE(pump_and_settle_stops_before_budget) {
     AURORA_TEST_CHECK_EQ(tc.pump_and_settle(20), 1);  // 已收敛：再 settle 只跑一帧即返回
     AURORA_TEST_CHECK_EQ(tc.frame_count(), before);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");
 #endif
 }
 
@@ -118,7 +118,7 @@ AURORA_TEST_CASE(set_viewport_relayouts_tree) {
     AURORA_TEST_REQUIRE_TRUE(tc.pump().ok());
     AURORA_TEST_CHECK_NEAR(tc.root_node().bounds().size.width, 640.0F, 0.5F);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");
 #endif
 }
 
@@ -147,7 +147,7 @@ AURORA_TEST_CASE(finders_locate_nodes_by_key_type_and_text) {
     AURORA_TEST_CHECK(by_ok.at(0).id() == std::string_view{"ok"});
     AURORA_TEST_CHECK(tc.find_by_text("missing").empty());
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");
 #endif
 }
 
@@ -171,7 +171,7 @@ AURORA_TEST_CASE(tap_fires_on_click_and_enter_text_writes_into_input) {
     // 交互引发标脏 → settle 帧应真实渲染（>1 帧 vs 静态树的 1 帧）。
     AURORA_TEST_CHECK_GE(tc.pump_and_settle(20), 2);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");
 #endif
 }
 
@@ -186,7 +186,7 @@ AURORA_TEST_CASE(drag_establishes_text_selection) {
     AURORA_TEST_REQUIRE_TRUE(tc.drag(msg.at(0), Point{.x = 60.0F, .y = 0.0F}).ok());
     AURORA_TEST_CHECK(fx.msg->has_selection());
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");
 #endif
 }
 
@@ -201,7 +201,7 @@ AURORA_TEST_CASE(interactions_reject_empty_node) {
     AURORA_TEST_CHECK_FALSE(tc.expect_visible(empty).ok());
     AURORA_TEST_CHECK_FALSE(tc.expect_prop(empty, "show", Json{true}).ok());
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");
 #endif
 }
 
@@ -221,7 +221,7 @@ AURORA_TEST_CASE(expect_visible_passes_after_frame_and_fails_when_hidden) {
     fx.msg->show.set(false);
     AURORA_TEST_CHECK_FALSE(tc.expect_visible(msg.at(0)).ok());
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");
 #endif
 }
 
@@ -246,7 +246,7 @@ AURORA_TEST_CASE(expect_prop_compares_resolved_value) {
     // 未知属性 → 缺失；与期望不等。
     AURORA_TEST_CHECK_FALSE(tc.expect_prop(msg.at(0), "no_such_prop", Json{1}).ok());
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");
 #endif
 }
 

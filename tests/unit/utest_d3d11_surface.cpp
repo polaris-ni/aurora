@@ -22,7 +22,7 @@ AURORA_TEST_CASE(d3d11_surface_type_contract) {
     static_assert(!std::is_default_constructible_v<aurora::D3D11Surface>);
     AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::Surface, aurora::D3D11Surface>);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_D3D11 未开启（默认 OFF），头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_D3D11 is not enabled (default OFF); the header is compiled out");
 #endif
 }
 
@@ -30,9 +30,11 @@ AURORA_TEST_CASE(d3d11_surface_os_dependent_paths_skipped) {
 #ifdef AURORA_BACKEND_D3D11
     // 构造函数会创建真实 HWND + D3D11Device/SwapChain；vsync/增量上屏/device-lost
     // 恢复均依赖真实设备与消息泵，属集成层覆盖范围，单元测试不触碰 OS 资源。
-    AURORA_TEST_SKIP("D3D11Surface 构造会创建真实 Win32 窗口与 D3D11 设备/交换链，单测不触碰 OS 资源");
+    AURORA_TEST_SKIP(
+        "D3D11Surface construction creates a real Win32 window and D3D11 device/swapchain, "
+        "so unit tests do not touch OS resources");
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_D3D11 未开启（默认 OFF），头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_D3D11 is not enabled (default OFF); the header is compiled out");
 #endif
 }
 

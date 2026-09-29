@@ -23,7 +23,7 @@ AURORA_TEST_CASE(frame_count_counts_every_presented_frame) {
     auto surf = std::make_unique<au::WaylandSurface>(320, 240, "wayland present itest");
     if (!surf->is_available()) {
         // 无 WAYLAND_DISPLAY（纯 TTY / 容器）：连不上合成器属环境问题，跳过而非失败。
-        AURORA_TEST_SKIP("无 WAYLAND_DISPLAY 或合成器连接失败");
+        AURORA_TEST_SKIP("no WAYLAND_DISPLAY or compositor connection failed");
     }
 
     const int base = surf->frame_count();
@@ -51,7 +51,7 @@ AURORA_TEST_CASE(frame_count_counts_every_presented_frame) {
 namespace aurora::test_cases::itest_wayland_present {
 
 AURORA_TEST_CASE(frame_count_counts_every_presented_frame) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_WAYLAND 未开启（非 Linux 或未编译该后端）");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WAYLAND not enabled (non-Linux or the backend was not compiled)");
 }
 
 }  // namespace aurora::test_cases::itest_wayland_present

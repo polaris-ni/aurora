@@ -119,7 +119,7 @@ AURORA_TEST_CASE(uncompiled_backends_fail_with_reason_not_crash) {
         const auto session = e2e::open(e2e::WindowSpec{.backend = backend});
         AURORA_TEST_CHECK_FALSE(session.ok());
         AURORA_TEST_CHECK_MSG(session.reason().find("not compiled") != std::string::npos,
-                              std::string{"未编译后端须给出 'not compiled' 原因，实际为："} + session.reason());
+                              std::string{"uncompiled backends must report 'not compiled', got: "} + session.reason());
         // 无窗口的会话调用读回不得崩溃，须给出可诊断错误（`ok()` 漏检的兜底）。
         AURORA_TEST_CHECK_EQ(code_of(session.read_pixels().error()), code_of(au::ErrorCode::GeneralInvalidArgument));
     }
@@ -158,7 +158,7 @@ AURORA_TEST_CASE(capture_frame_rejects_surface_without_pixel_buffer) {
     AURORA_TEST_REQUIRE_FALSE(frame.ok());
     AURORA_TEST_CHECK_EQ(code_of(frame.error()), code_of(au::ErrorCode::GeneralNotSupported));
     AURORA_TEST_CHECK_MSG(frame.error().message.find("framebuffer capture unavailable") != std::string::npos,
-                          "错误消息须沿用 save_snapshot 的既有措辞：" + frame.error().message);
+                          "the error message must reuse save_snapshot's existing wording: " + frame.error().message);
 }
 
 AURORA_TEST_CASE(headless_session_settles_and_reads_back_pixels) {
@@ -168,7 +168,7 @@ AURORA_TEST_CASE(headless_session_settles_and_reads_back_pixels) {
     spec.height = 200;
     auto session = e2e::open(spec);
     if (!session.ok()) {
-        AURORA_TEST_SKIP("Headless 后端未编译进本构建：" + session.reason());
+        AURORA_TEST_SKIP("the Headless backend is not compiled into this build: " + session.reason());
     }
 
     // 内存帧缓冲会话必然被判为 Headless 回退（判定方式是对实体做 dynamic_cast）。
@@ -182,13 +182,13 @@ AURORA_TEST_CASE(headless_session_settles_and_reads_back_pixels) {
     AURORA_TEST_REQUIRE_FALSE(tight.ok());
     AURORA_TEST_CHECK_EQ(code_of(tight.error()), code_of(au::ErrorCode::RuntimeAsyncTimeout));
     AURORA_TEST_CHECK_MSG(tight.error().message.find("not settled") != std::string::npos,
-                          "超时消息须说明未收敛：" + tight.error().message);
+                          "the timeout message must state that the session did not settle: " + tight.error().message);
     AURORA_TEST_CHECK_MSG(tight.error().message.find("pending_dirty=") != std::string::npos,
-                          "超时消息须含最后脏区状态：" + tight.error().message);
+                          "the timeout message must carry the last dirty-region state: " + tight.error().message);
     AURORA_TEST_CHECK_MSG(tight.error().message.find("idle_frame=") != std::string::npos,
-                          "超时消息须含 idle 帧状态：" + tight.error().message);
+                          "the timeout message must carry the idle-frame state: " + tight.error().message);
     AURORA_TEST_CHECK_MSG(tight.error().message.find("active_animations=") != std::string::npos,
-                          "超时消息须含活跃动画状态：" + tight.error().message);
+                          "the timeout message must carry the active-animation state: " + tight.error().message);
 
     // 正常预算：收敛并读回像素（场景契约见 scene_solid_rect.h：左红右蓝）。
     const auto settled = session.pump_until_settled(60);
@@ -223,7 +223,7 @@ AURORA_TEST_CASE(auto_session_fallback_judgment_matches_entity) {
     // catch 兜不住。内核的 `Backend` 枚举里本就没有浏览器画布成员（浏览器口径的驱动不属本内核
     // 范围），故这里按运行期探测如实跳过，而不是把该后端悄悄算作「回退」。
     if (au::auto_detect_surface() == au::SurfaceKind::Wasm) {
-        AURORA_TEST_SKIP("自动检测结果是浏览器画布后端：需 DOM 宿主，node 驱动下无从建窗");
+        AURORA_TEST_SKIP("auto-detect chose the browser-canvas backend: needs a DOM host, no window under node");
     }
 
     e2e::WindowSpec spec;
@@ -232,7 +232,7 @@ AURORA_TEST_CASE(auto_session_fallback_judgment_matches_entity) {
     spec.height = 48;
     auto session = e2e::open(spec);
     if (!session.ok()) {
-        AURORA_TEST_SKIP("无可用真实后端且未编译 Headless 兜底：" + session.reason());
+        AURORA_TEST_SKIP("no real backend available and no Headless fallback compiled in: " + session.reason());
     }
 
     if (session.fell_back_to_headless()) {

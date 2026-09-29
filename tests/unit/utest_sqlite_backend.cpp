@@ -287,33 +287,35 @@ AURORA_TEST_CASE(storage_facade_create_sqlite_roundtrip) {
 
 namespace aurora::test_cases::utest_sqlite_backend {
 
-AURORA_TEST_CASE(sqlite_backend_type_contract) { AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）"); }
+AURORA_TEST_CASE(sqlite_backend_type_contract) {
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
+}
 AURORA_TEST_CASE(in_memory_backend_opens_and_roundtrips_json) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(binary_payload_inline_blob_roundtrip) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(overwrite_remove_list_contains_clear) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(closed_backend_returns_unavailable) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(transaction_commits_body_writes) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(transaction_rolls_back_on_error) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(nested_transaction_joins_outer) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(file_db_persists_across_reopen) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(storage_facade_create_sqlite_roundtrip) {
-    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE 未开启（默认 OFF）");
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 
 }  // namespace aurora::test_cases::utest_sqlite_backend

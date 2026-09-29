@@ -521,14 +521,16 @@ template <typename T>
 #if AURORA_TEST_HAS_THREADS
 #define AURORA_TEST_REQUIRE_THREADS() static_cast<void>(0)
 #else
-#define AURORA_TEST_REQUIRE_THREADS() AURORA_TEST_SKIP("std::thread 需 Emscripten 的 -pthread，本 wasm 构建未开启")
+#define AURORA_TEST_REQUIRE_THREADS() \
+    AURORA_TEST_SKIP("std::thread needs Emscripten's -pthread, not enabled in this wasm build")
 #endif
 
 /// @brief 用例依赖派发子进程（fork/exec 或 CreateProcess）：无子进程能力时跳过本用例。
 #if AURORA_TEST_HAS_SUBPROCESS
 #define AURORA_TEST_REQUIRE_SUBPROCESS() static_cast<void>(0)
 #else
-#define AURORA_TEST_REQUIRE_SUBPROCESS() AURORA_TEST_SKIP("跨进程用例需 fork/exec 派发子进程，Emscripten 运行时不可用")
+#define AURORA_TEST_REQUIRE_SUBPROCESS() \
+    AURORA_TEST_SKIP("cross-process cases need fork/exec to spawn children, unavailable on the Emscripten runtime")
 #endif
 // NOLINTEND(*-macro-usage)
 

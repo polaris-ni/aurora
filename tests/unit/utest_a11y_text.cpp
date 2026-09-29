@@ -23,6 +23,7 @@ using aurora::a11y::UtfOffsetMap;
 /// @brief ASCII 文本：UTF-8 偏移与 UTF-16 偏移逐位相等（映射退化为恒等）。
 constexpr std::string_view AURORA_ASCII = "hello";
 
+// CJK-LITERAL: cjk-fixture - Han text is required to exercise the 3-byte UTF-8 / 1-unit UTF-16 mapping
 /// @brief 3 字节字符（CJK「中」）：1 个 UTF-16 单元、3 个 UTF-8 字节。
 constexpr std::string_view AURORA_CJK = "中文";
 

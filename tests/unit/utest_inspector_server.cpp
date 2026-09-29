@@ -392,6 +392,7 @@ struct FindTree {
 // 分析器同 make_input_tree 的误报与豁免理由（共享控件 + 聚合返回），就地豁免。
 // NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
 [[nodiscard]] auto make_find_tree() -> FindTree {
+    // CJK-LITERAL: cjk-fixture - Han button labels let /api/find exercise UTF-8 query matching
     auto ok_button = std::make_shared<Button>("确定");
     auto input = std::make_shared<TextInput>();
     auto cancel_button = std::make_shared<Button>("取消");
@@ -419,7 +420,7 @@ struct FindTree {
 
 AURORA_TEST_CASE(initial_state_is_stopped) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_CHECK_EQ(server.is_running(), false);
@@ -429,7 +430,7 @@ AURORA_TEST_CASE(initial_state_is_stopped) {
 
 AURORA_TEST_CASE(start_and_stop_lifecycle) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     // 端口传 0：由系统分配临时端口，规避并行用例间的端口冲突。
@@ -445,7 +446,7 @@ AURORA_TEST_CASE(start_and_stop_lifecycle) {
 
 AURORA_TEST_CASE(start_twice_while_running_fails) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -458,7 +459,7 @@ AURORA_TEST_CASE(start_twice_while_running_fails) {
 
 AURORA_TEST_CASE(stop_is_idempotent_and_restartable) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_CHECK_NO_THROW(server.stop());  // 未启动时 stop 直接返回
@@ -476,7 +477,7 @@ AURORA_TEST_CASE(stop_is_idempotent_and_restartable) {
 
 AURORA_TEST_CASE(destructor_joins_worker_and_releases_state) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     {
         InspectorServer scoped(tree_getter);
@@ -494,7 +495,7 @@ AURORA_TEST_CASE(destructor_joins_worker_and_releases_state) {
 
 AURORA_TEST_CASE(tree_endpoint_serves_widget_tree_json) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -511,7 +512,7 @@ AURORA_TEST_CASE(tree_endpoint_serves_widget_tree_json) {
 
 AURORA_TEST_CASE(components_endpoint_returns_json_array) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -527,7 +528,7 @@ AURORA_TEST_CASE(components_endpoint_returns_json_array) {
 
 AURORA_TEST_CASE(unknown_endpoint_returns_404) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -541,7 +542,7 @@ AURORA_TEST_CASE(unknown_endpoint_returns_404) {
 
 AURORA_TEST_CASE(wrong_method_returns_405) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -555,7 +556,7 @@ AURORA_TEST_CASE(wrong_method_returns_405) {
 
 AURORA_TEST_CASE(bad_pick_params_return_400) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -569,7 +570,7 @@ AURORA_TEST_CASE(bad_pick_params_return_400) {
 
 AURORA_TEST_CASE(missing_host_header_returns_403) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -583,7 +584,7 @@ AURORA_TEST_CASE(missing_host_header_returns_403) {
 
 AURORA_TEST_CASE(debug_state_requires_surface_getter) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -602,7 +603,7 @@ AURORA_TEST_CASE(debug_state_requires_surface_getter) {
 
 AURORA_TEST_CASE(input_click_dispatches_to_target_and_toggles_state) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     AURORA_TEST_REQUIRE_FALSE(tree.checkbox->value());  // 起始未勾选，翻转可观测
@@ -626,7 +627,7 @@ AURORA_TEST_CASE(input_click_dispatches_to_target_and_toggles_state) {
 
 AURORA_TEST_CASE(input_scroll_dispatches_to_target_and_reaches_on_scroll) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -647,7 +648,7 @@ AURORA_TEST_CASE(input_scroll_dispatches_to_target_and_reaches_on_scroll) {
 
 AURORA_TEST_CASE(input_text_dispatches_to_target_and_inserts_text) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -666,7 +667,7 @@ AURORA_TEST_CASE(input_text_dispatches_to_target_and_inserts_text) {
 
 AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -698,7 +699,7 @@ AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
 
 AURORA_TEST_CASE(input_endpoint_accepts_empty_path_as_tree_root) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     // 空串路径即树根本身（与 find_node_by_path 的空路径语义一致），使根控件无需再包一层容器
     // 就能被驱动；这里直接把 TextInput 作根来验证。
@@ -718,7 +719,7 @@ AURORA_TEST_CASE(input_endpoint_accepts_empty_path_as_tree_root) {
 
 AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -741,7 +742,7 @@ AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
 
 AURORA_TEST_CASE(input_drag_dispatches_press_move_release_to_target) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -771,7 +772,7 @@ AURORA_TEST_CASE(input_drag_dispatches_press_move_release_to_target) {
 
 AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     FindTree tree = make_find_tree();
     InspectorServer server(tree.getter());
@@ -793,14 +794,17 @@ AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
     AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?key=nope").find("\"count\":0") != std::string::npos);
 
     // 按 text（文本类属性启发式：Button 序列化 label）。
+    // CJK-LITERAL: cjk-fixture - find by Han text must return the addressable tree paths
     AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=确定").find("\"path\":\"0\"") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?text=取消").find("\"path\":\"2/0\"") != std::string::npos);
 
     // 多参数 AND 语义。
+    // CJK-LITERAL: cjk-fixture - AND-combined Han text query against the fixture labels
     const std::string combined = http_get(port, "/api/find?type=Button&text=取消");
     AURORA_TEST_CHECK_TRUE(combined.find("\"count\":1") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(combined.find("\"path\":\"2/0\"") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?type=Button&key=ok").find("\"path\":\"0\"") != std::string::npos);
+    // CJK-LITERAL: cjk-fixture - a Han text query on the wrong type must find nothing
     AURORA_TEST_CHECK_TRUE(http_get(port, "/api/find?type=TextInput&text=确定").find("\"count\":0") !=
                            std::string::npos);
 
@@ -812,6 +816,7 @@ AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
 
     // 返回路径与寻址端点同口径：拿 find 给出的路径可直接读属性。
     const std::string props = http_get(port, "/api/widget/2/0");
+    // CJK-LITERAL: cjk-fixture - the serialized label of the Han-named button comes back unchanged
     AURORA_TEST_CHECK_MSG(props.find("\"label\":\"取消\"") != std::string::npos,
                           "find's index path must be addressable by /api/widget/{path}");
     server.stop();
@@ -822,7 +827,7 @@ AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
 // 匹配不上这些值（真实场景：`/api/find?text=New%20auxiliary%20window` 定位多窗口载体的按钮）。
 AURORA_TEST_CASE(find_endpoint_percent_decodes_query_values) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     FindTree tree = make_find_tree();
     InspectorServer server(tree.getter());
@@ -862,7 +867,7 @@ AURORA_TEST_CASE(find_endpoint_percent_decodes_query_values) {
 
 AURORA_TEST_CASE(find_endpoint_rejects_malformed_requests) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     FindTree tree = make_find_tree();
     InspectorServer server(tree.getter());
@@ -881,7 +886,7 @@ AURORA_TEST_CASE(find_endpoint_rejects_malformed_requests) {
 
 AURORA_TEST_CASE(tree_endpoint_by_window_returns_target_window_tree) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     // 主窗用共享树（Column[Text "hello"]）；window=1 → Column[Text "window-one"]，
     // window=2 → Checkbox 根；其它 id → 空 Node（路由层 404）。
@@ -925,7 +930,7 @@ AURORA_TEST_CASE(tree_endpoint_by_window_returns_target_window_tree) {
 
 AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     // 未注册 window_tree_getter 时，带 window 参数的请求必须回 400（明确告知需配置），
     // 而非静默回退主窗或 404。
@@ -939,7 +944,7 @@ AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
 
 AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -971,7 +976,7 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
 // 线程必须全等于排水线程，且排水线程就是用例主线程；修复前这些调用发生在 worker 线程，必红。
 AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_poster_thread) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     QueuedPoster poster;
     getter_threads().clear();
@@ -1015,7 +1020,7 @@ AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_poster_thread) {
 // 目标：无投递器（无事件循环）时树端点仍可同步服务——marshal 的回退分支不得变成硬依赖。
 AURORA_TEST_CASE(tree_routes_work_without_a_poster_inline) {
 #ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER 未开启：Inspector HTTP server 未构建");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));

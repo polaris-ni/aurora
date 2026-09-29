@@ -23,7 +23,7 @@ constexpr std::array<CursorShape, AURORA_CURSOR_SHAPE_COUNT> AURORA_ALL_SHAPES =
     CursorShape::Crosshair, CursorShape::NotAllowed, CursorShape::Wait,
 };
 static_assert(std::size(AURORA_ALL_SHAPES) == AURORA_CURSOR_SHAPE_COUNT,
-              "ALL_SHAPES 漏填：新增 CursorShape 后须同步扩列");
+              "ALL_SHAPES is under-filled: extend the array whenever a CursorShape is added");
 
 }  // namespace
 

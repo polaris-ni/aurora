@@ -32,10 +32,11 @@ namespace {
 
 // 统一期望表：进程内快照与平台通道投影共用同一张表（同源语义树，断言同词汇）。
 // 名称回退链已由单测覆盖；此处锁的是「真实后端上桥投影与快照一致」这一端到端事实。
+// CJK-LITERAL: cjk-fixture - Han labels below are painted on screen and asserted through snapshot/UIA/AT-SPI
 constexpr std::string_view AURORA_A11Y_BUTTON_NAME = "确定";
 constexpr std::string_view AURORA_A11Y_CHECKBOX_LABEL = "启用自动更新";
 constexpr std::string_view AURORA_A11Y_SLIDER_LABEL = "音量";
-constexpr std::string_view AURORA_A11Y_TEXT_NAME = "订单总额";
+constexpr std::string_view AURORA_A11Y_TEXT_NAME = "订单总额";  // CJK-LITERAL: cjk-fixture - asserted a11y Name
 constexpr std::string_view AURORA_A11Y_FRAME_TITLE = "aurora_e2e_a11y";
 
 /// @brief 语义断言目标控件列：Button / Row{Text, Checkbox} / Row{Text, Slider} /
@@ -51,6 +52,7 @@ constexpr std::string_view AURORA_A11Y_FRAME_TITLE = "aurora_e2e_a11y";
         .set_range(0.0, 100.0)
         .set_step(1.0);
 
+    // CJK-LITERAL: cjk-fixture - Han placeholder painted and exercised through the a11y name fallback
     au::Node input_node{au::TextInput{au::TextInputProps{.value = "abc", .placeholder = "请输入"}}};
 
     return au::Node{au::Column{
@@ -190,7 +192,9 @@ AURORA_TEST_P(A11yBackends, platform_bridge_projects_semantics) {
     }
 #ifdef AURORA_PLATFORM_WINDOWS
     if (backend != e2e::Backend::Win32 && backend != e2e::Backend::D3D11) {
-        AURORA_TEST_SKIP("该后端未接 Win32Host 无障碍桥（UIA 通道覆盖面仅 win32/d3d11）");
+        AURORA_TEST_SKIP(
+            "this backend is not wired to the Win32Host accessibility bridge "
+            "(UIA channel covers win32/d3d11 only)");
     }
     if (!e2e::uia_channel_available()) {
         AURORA_TEST_SKIP("UIA client unavailable on this environment");
@@ -265,7 +269,7 @@ AURORA_TEST_P(A11yBackends, platform_bridge_projects_semantics) {
     AURORA_TEST_CHECK_TRUE(text->rect_ok);
 #elif defined(AURORA_PLATFORM_UNIX) && !defined(AURORA_PLATFORM_MACOS)
     if (backend != e2e::Backend::X11 && backend != e2e::Backend::Wayland) {
-        AURORA_TEST_SKIP("该后端未接 AtspiBridge（AT-SPI 通道覆盖面仅 x11/wayland）");
+        AURORA_TEST_SKIP("this backend is not wired to AtspiBridge (AT-SPI channel covers x11/wayland only)");
     }
     if (!e2e::atspi_client_available()) {
         AURORA_TEST_SKIP("python3-gi/Atspi client unavailable on this environment");
@@ -301,7 +305,9 @@ AURORA_TEST_P(A11yBackends, platform_bridge_projects_semantics) {
     AURORA_TEST_REQUIRE_TRUE(find_atspi(AccessibilityRole::Text, AURORA_A11Y_TEXT_NAME) != nullptr);
 #else
     static_cast<void>(backend);
-    AURORA_TEST_SKIP("本平台的语义通道未实现（macOS AX 为已知缺口，见 specification/08-tooling.md §8.2）");
+    AURORA_TEST_SKIP(
+        "semantics channel not implemented on this platform (macOS AX is a known gap, "
+        "see specification/08-tooling.md section 8.2)");
 #endif
 }
 

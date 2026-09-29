@@ -228,18 +228,19 @@ AURORA_TEST_CASE(composition_shows_preedit_without_touching_value) {
     AURORA_TEST_CHECK_EQ(ti.accessibility_value(), std::string{"nihao"});  // 读屏需播报组合态
 
     TextCompositionEvent candidate;
-    candidate.preedit = "你好";
+    candidate.preedit = "你好";  // CJK-LITERAL: cjk-fixture - IME preedit must be Han to exercise the path
     candidate.cursor_index = 2;
     ti.on_text_composition(candidate);
-    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{"你好"});
+    AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{"你好"});  // CJK-LITERAL: cjk-fixture - same Han preedit read back
     AURORA_TEST_CHECK_EQ(ti.value(), std::string{""});
 
     TextCompositionEvent commit;
-    commit.committed = "你好";
+    commit.committed = "你好";  // CJK-LITERAL: cjk-fixture - IME commit text must be Han
     ti.on_text_composition(commit);
     AURORA_TEST_CHECK_FALSE(ti.is_composing());
     AURORA_TEST_CHECK_EQ(ti.preedit(), std::string{""});
-    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"你好"});
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"你好"});  // CJK-LITERAL: cjk-fixture - Han commit stored as value
+    // CJK-LITERAL: cjk-fixture - the screen reader announces the Han commit verbatim
     AURORA_TEST_CHECK_EQ(ti.accessibility_value(), std::string{"你好"});
 }
 
@@ -305,6 +306,7 @@ AURORA_TEST_CASE(preedit_participates_in_layout_measurement) {
     composing.set_value("ab");
     composing.on_focus_change(true);
     TextCompositionEvent e;
+    // CJK-LITERAL: cjk-fixture - a Han preedit is what widens the field while composing
     e.preedit = "你好吗";
     composing.on_text_composition(e);
     LayoutEngine::layout(composing, loose);
@@ -546,10 +548,10 @@ AURORA_TEST_CASE(home_end_move_caret_and_extend_selection) {
     AURORA_TEST_CHECK_FALSE(empty.has_selection());
 
     // UTF-8 安全：按码点计数整段选中/删除。
-    TextInput utf = focused_field("中文测试");
+    TextInput utf = focused_field("中文测试");  // CJK-LITERAL: cjk-fixture - multibyte text for code-point counts
     utf.on_key_event(home);
     utf.on_key_event(sh_end);
-    AURORA_TEST_CHECK_EQ(utf.selected_text(), std::string{"中文测试"});
+    AURORA_TEST_CHECK_EQ(utf.selected_text(), std::string{"中文测试"});  // CJK-LITERAL: cjk-fixture - same Han text
     utf.on_key_event(back);
     AURORA_TEST_CHECK_FALSE(utf.has_selection());
     AURORA_TEST_CHECK_EQ(utf.value(), std::string{});

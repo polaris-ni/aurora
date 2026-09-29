@@ -88,7 +88,7 @@ AURORA_TEST_CASE(snapshot_matches_json_per_macro_key) {
     const Json j = f.to_json();
     AURORA_TEST_CHECK_TRUE(j.is_object());
     for (const FlagKeyPair &pair : flag_key_table()) {
-        AURORA_TEST_CHECK_MSG(j.contains(pair.key), std::string("to_json 缺少宏键: ") + pair.key);
+        AURORA_TEST_CHECK_MSG(j.contains(pair.key), std::string("to_json missing macro key: ") + pair.key);
         AURORA_TEST_CHECK_EQ(j[pair.key], f.*(pair.field));
     }
 }
@@ -99,7 +99,7 @@ AURORA_TEST_CASE(json_contains_exactly_the_documented_macro_keys) {
     AURORA_TEST_CHECK_EQ(j.size(), flag_key_table().size());
     // 全部值必须是布尔（工具直读依赖）。
     for (auto it = j.begin(); it != j.end(); ++it) {
-        AURORA_TEST_CHECK_MSG(it.value().is_boolean(), "宏键 " + it.key() + " 的 JSON 值应为 boolean");
+        AURORA_TEST_CHECK_MSG(it.value().is_boolean(), "macro key " + it.key() + " must map to a JSON boolean");
     }
 }
 

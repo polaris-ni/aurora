@@ -307,8 +307,8 @@ AURORA_TEST_CASE(deferred_with_timeout_fires_at_frame_tail_sweep) {
     AURORA_TEST_CHECK_EQ(calls.load(std::memory_order_acquire), 1);
 #else
     AURORA_TEST_SKIP(
-        "deferred 超时路径仅在无 pthreads 构建成立（native 看守是 worker 任务，"
-        "见 async_with_timeout_delivers_timeout_error）");
+        "the deferred timeout path only holds in builds without pthreads "
+        "(the native watchdog is a worker task; see async_with_timeout_delivers_timeout_error)");
 #endif
 }
 

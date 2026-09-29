@@ -98,10 +98,10 @@ auto expect_pixel(const e2e::Frame &frame, const e2e::WindowSpec &spec, float lo
     };
     const au::Color actual =
         e2e::pixel_at(frame, map(logical_x, frame.width, spec.width), map(logical_y, frame.height, spec.height));
-    const std::string detail = what + ": 采样(" + std::to_string(map(logical_x, frame.width, spec.width)) + "," +
-                               std::to_string(map(logical_y, frame.height, spec.height)) + ") 实际=(" +
+    const std::string detail = what + ": sample(" + std::to_string(map(logical_x, frame.width, spec.width)) + "," +
+                               std::to_string(map(logical_y, frame.height, spec.height)) + ") actual=(" +
                                std::to_string(actual.r) + "," + std::to_string(actual.g) + "," +
-                               std::to_string(actual.b) + "," + std::to_string(actual.a) + ") 期望=(" +
+                               std::to_string(actual.b) + "," + std::to_string(actual.a) + ") expected=(" +
                                std::to_string(expected.r) + "," + std::to_string(expected.g) + "," +
                                std::to_string(expected.b) + "," + std::to_string(expected.a) + ")";
     AURORA_TEST_CHECK_MSG(color_near(actual, expected, tol), detail);
@@ -246,12 +246,12 @@ AURORA_TEST_P(InteractionBackends, interaction_round_trip) {
     // ---- 交互前基准帧：各采样点取纯色内部，初始态即校验（同时防采样点选偏）----
     const e2e::Frame baseline = read_checked(session);
     expect_pixel(baseline, spec, tg.origin.x + 12.0F, tg.origin.y + (tg.size.height * 0.5F), AURORA_KNOB,
-                 "开关初始滑块(关态左端)");
+                 "switch thumb at rest (off state, left end)");
     expect_pixel(baseline, spec, sl.origin.x + (sl.size.width * 0.5F), sl.origin.y + (sl.size.height * 0.5F),
-                 AURORA_SLIDER_OFF, "滑杆初始轨道(值 0 无填充)");
+                 AURORA_SLIDER_OFF, "slider track at rest (value 0, no fill)");
     expect_pixel(baseline, spec, scb.origin.x + (scb.size.width * 0.5F), scb.origin.y + (scb.size.height * 0.5F),
-                 AURORA_BLOCK_0, "滚动视口初始内容(块 0)");
-    AURORA_TEST_CHECK_MSG(scene.input->value().empty(), "文本框初始值为空");
+                 AURORA_BLOCK_0, "scroll viewport initial content (block 0)");
+    AURORA_TEST_CHECK_MSG(scene.input->value().empty(), "text input initial value is empty");
 
     // ---- 点击：Button 回调翻转 Switch（状态通道：计数 + 开关值；像素通道：滑块移位 + 轨道色）----
     AURORA_TEST_REQUIRE(static_cast<bool>(session.tap(*scene.button)));
@@ -259,7 +259,7 @@ AURORA_TEST_P(InteractionBackends, interaction_round_trip) {
     AURORA_TEST_CHECK_TRUE(scene.toggle->value());
     AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(2)));
     expect_pixel(read_checked(session), spec, tg.origin.x + 12.0F, tg.origin.y + (tg.size.height * 0.5F),
-                 AURORA_SWITCH_ON, "点击后开关轨道(开态色，滑块已右移)");
+                 AURORA_SWITCH_ON, "switch track after click (on-state color, thumb moved right)");
 
     // ---- 拖拽：Slider 值随指针位移（状态通道：值解析式；像素通道：填充段扩张）----
     const float slider_w = sl.size.width;
@@ -271,9 +271,9 @@ AURORA_TEST_P(InteractionBackends, interaction_round_trip) {
     AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(2)));
     const e2e::Frame after_drag = read_checked(session);
     expect_pixel(after_drag, spec, sl.origin.x + (sl.size.width * 0.5F), sl.origin.y + (sl.size.height * 0.5F),
-                 AURORA_SLIDER_ON, "拖拽后填充段覆盖轨道中点");
+                 AURORA_SLIDER_ON, "filled segment covers the track midpoint after drag");
     expect_pixel(after_drag, spec, sl.origin.x + sl.size.width - 12.0F, sl.origin.y + (sl.size.height * 0.5F),
-                 AURORA_SLIDER_OFF, "拖拽后填充段未越过轨道尾部");
+                 AURORA_SLIDER_OFF, "filled segment has not passed the track tail after drag");
 
     // ---- 滚动：滚轮注入到底（状态通道：偏移 = 内容高 - 视口高；像素通道：视口内容换块）----
     // ScrollEvent 的 delta_y 正方向为向上滚动（offset 减小），注入负值即向下滚到内容底。
@@ -282,15 +282,17 @@ AURORA_TEST_P(InteractionBackends, interaction_round_trip) {
     AURORA_TEST_CHECK_NEAR(scene.scroller->offset_y(), 240.0F - viewport_h, 0.5F);
     AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(2)));
     expect_pixel(read_checked(session), spec, scb.origin.x + (scb.size.width * 0.5F),
-                 scb.origin.y + (scb.size.height * 0.5F), AURORA_BLOCK_2, "滚动到底后视口内容(块 2)");
+                 scb.origin.y + (scb.size.height * 0.5F), AURORA_BLOCK_2,
+                 "viewport content after scrolling to bottom (block 2)");
 
     // ---- 文本输入（最后执行：聚焦不被后续指针交互清除）----
     AURORA_TEST_REQUIRE(static_cast<bool>(session.enter_text(*scene.input, "hi")));
-    AURORA_TEST_CHECK_MSG(scene.input->value() == "hi",
-                          "文本输入落到目标控件 (value=\"" + scene.input->value() + "\", 期望 \"hi\")");
+    AURORA_TEST_CHECK_MSG(scene.input->value() == "hi", "text input landed on target widget (value=\"" +
+                                                            scene.input->value() + "\", expected \"hi\")");
     AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(2)));
     expect_pixel(read_checked(session), spec, inp.origin.x + inp.size.width - 8.0F,
-                 inp.origin.y + (inp.size.height * 0.5F), AURORA_INPUT_FOCUSED, "文本输入后聚焦背景(右侧无文本区)");
+                 inp.origin.y + (inp.size.height * 0.5F), AURORA_INPUT_FOCUSED,
+                 "focused background after text input (empty area on the right)");
 }
 
 // ============================================================
@@ -351,7 +353,8 @@ AURORA_TEST_P(InteractionBackends, focus_and_keyboard_routing_via_window_dispatc
     // 像素通道：聚焦背景生效（采样输入框右侧无文本区）。
     AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(2)));
     expect_pixel(read_checked(session), spec, inp.origin.x + inp.size.width - 8.0F,
-                 inp.origin.y + (inp.size.height * 0.5F), AURORA_INPUT_FOCUSED, "点击聚焦后背景切换");
+                 inp.origin.y + (inp.size.height * 0.5F), AURORA_INPUT_FOCUSED,
+                 "background switched after click focus");
 
     // ---- 键盘路由：Backspace 经焦点管理器到达输入框（"ab" → "a"）----
     au::KeyEvent back;
@@ -359,14 +362,15 @@ AURORA_TEST_P(InteractionBackends, focus_and_keyboard_routing_via_window_dispatc
     back.action = au::KeyAction::Down;
     route(back);
     AURORA_TEST_CHECK_MSG(scene.input->value() == "a",
-                          "退格键经焦点路由到达目标控件 (value=\"" + scene.input->value() + "\", 期望 \"a\")");
+                          "backspace reached the target widget through focus routing (value=\"" + scene.input->value() +
+                              "\", expected \"a\")");
 
     // ---- 文本路由：TextInputEvent 追加到焦点控件（"a" → "acd"）----
     au::TextInputEvent ti;
     ti.text = "cd";
     route(ti);
-    AURORA_TEST_CHECK_MSG(scene.input->value() == "acd",
-                          "文本片段追加到焦点控件 (value=\"" + scene.input->value() + "\", 期望 \"acd\")");
+    AURORA_TEST_CHECK_MSG(scene.input->value() == "acd", "text fragment appended to the focused widget (value=\"" +
+                                                             scene.input->value() + "\", expected \"acd\")");
 }
 
 // ============================================================
@@ -410,11 +414,12 @@ AURORA_TEST_P(InteractionBackends, animation_converges_after_interaction) {
         AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(1)));
         ++frames;
     }
-    AURORA_TEST_REQUIRE_MSG(!scene.scroller->is_gliding(), "收位滑动未在帧预算内收敛");
+    AURORA_TEST_REQUIRE_MSG(!scene.scroller->is_gliding(), "glide-to-rest did not converge within the frame budget");
     AURORA_TEST_REQUIRE(static_cast<bool>(session.pump(2)));
     AURORA_TEST_CHECK_NEAR(scene.scroller->offset_y(), target_offset, 0.5F);
     expect_pixel(read_checked(session), spec, scb.origin.x + (scb.size.width * 0.5F),
-                 scb.origin.y + (scb.size.height * 0.5F), AURORA_BLOCK_2, "动画收敛后视口内容(块 2)");
+                 scb.origin.y + (scb.size.height * 0.5F), AURORA_BLOCK_2,
+                 "viewport content after the animation settled (block 2)");
 }
 
 AURORA_INSTANTIATE_TEST_SUITE_P_GEN(flow_backends, InteractionBackends, flow_backend_values(), flow_backend_name);

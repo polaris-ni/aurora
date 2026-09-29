@@ -111,18 +111,21 @@ struct SceneGoldenBudget {
 };
 
 inline constexpr SceneGoldenBudget AURORA_SCENE_BUDGETS[] = {
-    {.id = "solid_rect", .budget = 64, .shape = "纯绘制叶控件（纯色轴对齐矩形，无文本）", .requires_scale_one = false},
+    {.id = "solid_rect",
+     .budget = 64,
+     .shape = "pure paint leaf widget (solid axis-aligned rect, no text)",
+     .requires_scale_one = false},
     {.id = "column",
      .budget = 4096,
-     .shape = "容器型（Column 布局 + 卡片 + 渐变标题 + 文本）",
+     .shape = "container (Column layout + card + gradient title + text)",
      .requires_scale_one = false},
     {.id = "scroll",
      .budget = 4096,
-     .shape = "滚动容器（列表视口裁剪 + 文本，物理域离屏缓冲）",
+     .shape = "scroll container (list viewport clip + text, physical-domain offscreen buffer)",
      .requires_scale_one = true},
     {.id = "dismissible",
      .budget = 4096,
-     .shape = "含 Application 手势链路（滑动关闭 + 文本）",
+     .shape = "Application gesture chain (swipe-to-dismiss + text)",
      .requires_scale_one = false},
 };
 
@@ -275,8 +278,9 @@ AURORA_TEST_P(GoldenBackends, golden_within_tolerance_of_software_baseline) {
     // 经物理域离屏缓冲的场景（requires_scale_one）在 scale != 1 环境下经 composite 下采样
     // 读回，字形光栅与 scale=1 基线不同（见文件头「内容域维度」）——诚实跳过，不烧预算。
     if (budget_entry.requires_scale_one && session.surface().scale_factor() != 1.0F) {
-        AURORA_TEST_SKIP("场景经物理域离屏缓冲，surface scale " + std::to_string(session.surface().scale_factor()) +
-                         " != 1 的内容域缩放环境下逐位 golden 口径不适用");
+        AURORA_TEST_SKIP("scene uses a physical-domain offscreen buffer, surface scale " +
+                         std::to_string(session.surface().scale_factor()) +
+                         " != 1: bitwise golden does not apply under content-domain scaling");
     }
 
     au::Node root = scene.build();
@@ -293,8 +297,8 @@ AURORA_TEST_P(GoldenBackends, golden_within_tolerance_of_software_baseline) {
 
     // 帧尺寸 != 请求逻辑尺寸 ⇒ DPI 缩放生效（环境口径，见文件头说明），逐位比对不适用，跳过。
     if (frame.width != spec.width || frame.height != spec.height) {
-        AURORA_TEST_SKIP("DPI 缩放环境下帧尺寸 (" + std::to_string(frame.width) + "x" + std::to_string(frame.height) +
-                         ") != 逻辑尺寸，逐位 golden 口径不适用");
+        AURORA_TEST_SKIP("frame size under DPI scaling (" + std::to_string(frame.width) + "x" +
+                         std::to_string(frame.height) + ") != logical size: bitwise golden does not apply");
     }
 
     // 比对前先断言帧尺寸 == 基线尺寸（3.2）：不一致直接尺寸错误失败，不进入像素 diff。

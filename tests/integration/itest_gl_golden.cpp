@@ -102,14 +102,14 @@ class HiddenGlContext {
 
 }  // namespace
 
-#define ITEST_GL_GPU_OR_SKIP(ctx, gpu)                                                          \
-    HiddenGlContext ctx;                                                                        \
-    if (!ctx.ok()) {                                                                            \
-        AURORA_TEST_SKIP("显示环境不可用（隐形开窗失败），GL 容差 golden 跳过");                \
-    }                                                                                           \
-    au::rhi::GpuGlRhi gpu = load_rhi();                                                         \
-    if (!gpu.valid()) {                                                                         \
-        AURORA_TEST_SKIP("GL 3.3 core 装载失败（驱动过老 / 函数表缺项），GL 容差 golden 跳过"); \
+#define ITEST_GL_GPU_OR_SKIP(ctx, gpu)                                                                    \
+    HiddenGlContext ctx;                                                                                  \
+    if (!ctx.ok()) {                                                                                      \
+        AURORA_TEST_SKIP("no display environment (hidden window open failed), skipping GL golden");       \
+    }                                                                                                     \
+    au::rhi::GpuGlRhi gpu = load_rhi();                                                                   \
+    if (!gpu.valid()) {                                                                                   \
+        AURORA_TEST_SKIP("GL 3.3 core load failed (old driver / missing functions), skipping GL golden"); \
     }
 
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
@@ -145,16 +145,16 @@ AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
 namespace aurora::test_cases::itest_gl_golden {
 
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL 未开启，GL 栅格通路不可用");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled, the GL raster path is unavailable");
 }
 AURORA_TEST_CASE(gpu_sector_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL 未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled");
 }
 AURORA_TEST_CASE(gpu_text_column_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL 未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled");
 }
 AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL 未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled");
 }
 
 }  // namespace aurora::test_cases::itest_gl_golden

@@ -36,7 +36,7 @@ auto check_mods(const ModifierKeyTracker &t, ModifierKey want) -> void {
 #endif
 
 #define AURORA_WIN32_MODIFIERS_SKIP \
-    AURORA_TEST_SKIP("非 Windows 或 Win32/D3D11 后端未开启，跟踪器依赖 <windows.h> 的 VK 码")
+    AURORA_TEST_SKIP("non-Windows or Win32/D3D11 backend off: tracker needs VK_* codes from <windows.h>")
 
 AURORA_TEST_CASE(down_sets_bit_and_up_clears_it) {
 #ifdef AURORA_WIN32_MODIFIERS_AVAILABLE

@@ -108,10 +108,10 @@ AURORA_TEST_CASE(drag_selection_paint_only_skips_relayout) {
     // （frame_count==2 已确认本帧重新上屏；layout_calls==1 确认未重排。）
     AURORA_TEST_CHECK_EQ(spy->paint_calls, 1);
 #else
-    AURORA_TEST_TRACE("AURORA_ENABLE_DISPLAY_LIST 未开启：无 DL 回放，跳过 paint 计数断言");
+    AURORA_TEST_TRACE("AURORA_ENABLE_DISPLAY_LIST not enabled: no DL replay, skipping the paint count assertion");
 #endif
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，HeadlessSurface 未编译");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
 #endif
 }
 

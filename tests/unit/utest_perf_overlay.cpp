@@ -231,7 +231,7 @@ AURORA_TEST_CASE(perf_overlay_stats_lines_and_fps_color) {
     s.reset();
 
     // 样本不足（<2 帧）→ 占位提示而非误导性数字。
-    AURORA_TEST_CHECK_STREQ(PerfOverlay::stats_line1(), "FPS — (采样中) | P99 — | jitter —");
+    AURORA_TEST_CHECK_STREQ(PerfOverlay::stats_line1(), "FPS - (sampling) | P99 - | jitter -");
     AURORA_TEST_CHECK_STREQ(PerfOverlay::stats_line2(), "dropped: 0 | hitch: 0 | idle: 0");
     AURORA_TEST_CHECK_TRUE(PerfOverlay::stats_line3().rfind("wakeups/s: 0.0", 0) == 0);
     AURORA_TEST_CHECK_FALSE(PerfOverlay::stats_line4().empty());

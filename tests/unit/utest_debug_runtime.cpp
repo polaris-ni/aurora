@@ -36,7 +36,7 @@ using aurora::debug::widget_tree;
 
 AURORA_TEST_CASE(facade_functions_return_unavailable_when_debug_off) {
     if (probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 已启用：关闭态 disabled 语义不适用");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is enabled: the disabled-state semantics do not apply");
     }
     // Release 契约：五项能力统一返回 {"available":false,"reason":...}，零调试代码可观测。
     const Json tree = widget_tree(make_tree());
@@ -51,7 +51,7 @@ AURORA_TEST_CASE(facade_functions_return_unavailable_when_debug_off) {
 
 AURORA_TEST_CASE(widget_tree_delegates_to_inspector_full_json) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：widget_tree 按宏裁切返回 unavailable");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: widget_tree is compiled out and returns unavailable");
     }
     // 门面收编原则：widget_tree 是 Inspector::tree_json_full 的薄封装，输出必须等价。
     Node root = make_tree();
@@ -62,7 +62,7 @@ AURORA_TEST_CASE(widget_tree_delegates_to_inspector_full_json) {
 
 AURORA_TEST_CASE(widget_tree_json_structure) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：widget_tree 按宏裁切返回 unavailable");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: widget_tree is compiled out and returns unavailable");
     }
     const Json j = widget_tree(make_tree());
     AURORA_TEST_CHECK_EQ(j["type"], "Column");
@@ -74,7 +74,7 @@ AURORA_TEST_CASE(widget_tree_json_structure) {
 
 AURORA_TEST_CASE(perf_snapshot_exposes_frame_stats_keys) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：perf_snapshot 按宏裁切返回 unavailable");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: perf_snapshot is compiled out and returns unavailable");
     }
     const Json j = perf_snapshot();
     // 关键读数键齐全（聚合 FrameStats + PerfLog::snapshot_json）。
@@ -95,7 +95,7 @@ AURORA_TEST_CASE(perf_snapshot_exposes_frame_stats_keys) {
 
 AURORA_TEST_CASE(frame_phase_timeline_respects_limit) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：timeline 按宏裁切返回 unavailable");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: timeline is compiled out and returns unavailable");
     }
     const Json j = frame_phase_timeline(4);
     AURORA_TEST_CHECK_TRUE(j.contains("avg_layout_ms"));
@@ -111,7 +111,7 @@ AURORA_TEST_CASE(frame_phase_timeline_respects_limit) {
 
 AURORA_TEST_CASE(diagnostics_snapshot_shape) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：diagnostics 按宏裁切返回 unavailable");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: diagnostics is compiled out and returns unavailable");
     }
     const Json j = diagnostics();
     AURORA_TEST_CHECK_TRUE(j["count"].is_number());
@@ -121,7 +121,7 @@ AURORA_TEST_CASE(diagnostics_snapshot_shape) {
 
 AURORA_TEST_CASE(why_trace_snapshot_shape) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：why_trace 按宏裁切返回 unavailable");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: why_trace is compiled out and returns unavailable");
     }
     const Json j = why_trace();
     AURORA_TEST_CHECK_TRUE(j.contains("count"));

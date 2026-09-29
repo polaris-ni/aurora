@@ -18,7 +18,8 @@ namespace {
 /// 安装 memory 后端（同时清空内容）；双宏未齐备的构建下跳过本用例。
 auto require_test_backend() -> void {
     if (!Clipboard::install_test_backend()) {
-        AURORA_TEST_SKIP("clipboard memory 测试后端不可用（AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS 未齐备）");
+        AURORA_TEST_SKIP(
+            "clipboard memory test backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
     }
 }
 
@@ -50,7 +51,7 @@ AURORA_TEST_CASE(install_test_backend_activates_memory_backend) {
 AURORA_TEST_CASE(text_roundtrip_through_memory_backend) {
     require_test_backend();
 
-    const std::string payload = "hello aurora 剪贴板 UTF-8";
+    const std::string payload = "hello aurora clipboard UTF-8";
     AURORA_TEST_REQUIRE(Clipboard::set_text(payload).ok());
     AURORA_TEST_CHECK_EQ(Clipboard::get_text().value(), payload);
 }
@@ -152,7 +153,8 @@ AURORA_TEST_CASE(invalid_utf8_payload_surfaces_write_error) {
             "sub-assertion needs a baseline, so only it was skipped; the write-failure assertions above ran");
     }
 #else
-    AURORA_TEST_SKIP("转码拒绝分支在 Win32 的 MultiByteToWideChar 上，非 Windows 走 xsel/xclip 字节直传");
+    AURORA_TEST_SKIP(
+        "the transcoding rejection branch lives in Win32 MultiByteToWideChar; non-Windows passes bytes to xsel/xclip");
 #endif
 }
 

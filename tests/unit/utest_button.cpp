@@ -37,8 +37,8 @@ AURORA_TEST_CASE(button_label_and_activate_fires_on_click) {
     int clicks = 0;
     Button b("OK");
     AURORA_TEST_CHECK_EQ(b.label.get().text, "OK");
-    b.set_label("确认");
-    AURORA_TEST_CHECK_EQ(b.label.get().text, "确认");
+    b.set_label("Confirm");
+    AURORA_TEST_CHECK_EQ(b.label.get().text, "Confirm");
 
     b.set_on_click([&clicks]() -> void { ++clicks; });
     AURORA_TEST_CHECK_TRUE(b.wants_click());
@@ -134,6 +134,7 @@ AURORA_TEST_CASE(button_describe_reports_metadata) {
 }
 
 AURORA_TEST_CASE(button_serialize_deserialize_roundtrip) {
+    // CJK-LITERAL: cjk-fixture - Han label must survive the JSON props round-trip byte-for-byte
     Button src("确认");
     src.set_enabled(false);
     src.set_corner_radius(10.0F);
@@ -141,11 +142,12 @@ AURORA_TEST_CASE(button_serialize_deserialize_roundtrip) {
 
     Json props;
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["label"].get<std::string>(), "确认");
+    AURORA_TEST_CHECK_EQ(props["label"].get<std::string>(), "确认");  // CJK-LITERAL: cjk-fixture - Han label in JSON
     AURORA_TEST_CHECK_EQ(props["enabled"].get<bool>(), false);
 
     Button dst;
     dst.deserialize_props(props);
+    // CJK-LITERAL: cjk-fixture - Han label restored unchanged after deserialization
     AURORA_TEST_CHECK_EQ(dst.label.get().text, "确认");
     AURORA_TEST_CHECK_FALSE(dst.enabled);
     AURORA_TEST_CHECK_NEAR(dst.corner_radius, 10.0F, 1e-4F);

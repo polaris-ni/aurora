@@ -113,17 +113,17 @@ inline auto from_storage_json(NoDefaultCtor &n, const aurora::json::Value &j) ->
 }
 
 // 概念判定：编译期即冻结「哪些类型能被门面接受」的契约。
-static_assert(aus::StorageSerializable<Note>, "Note 应满足 JSON 序列化概念");
-static_assert(!aus::StorageSerializable<Chunk>, "Chunk 未提供 JSON 定制点");
-static_assert(!aus::StorageSerializable<Plain>, "Plain 无任何定制点");
-static_assert(aus::StorageBinarySerializable<Chunk>, "Chunk 应满足二进制序列化概念");
-static_assert(!aus::StorageBinarySerializable<Note>, "Note 未提供二进制定制点");
-static_assert(aus::StorageStorable<Note>, "Note 应满足门面存储概念");
-static_assert(aus::StorageStorable<Chunk>, "Chunk 应满足门面存储概念");
-static_assert(!aus::StorageStorable<Plain>, "Plain 不可经门面存储");
-static_assert(!aus::StorageStorable<NoDefaultCtor>, "不可默认构造的类型不满足 StorageStorable");
-static_assert(aus::StorageSerializable<NoDefaultCtor>, "NoDefaultCtor 的 JSON 定制点仍成立");
-static_assert(aus::storage_version(static_cast<const Note *>(nullptr)) == 1, "默认版本号恒为 1");
+static_assert(aus::StorageSerializable<Note>, "Note must satisfy the JSON serialization concept");
+static_assert(!aus::StorageSerializable<Chunk>, "Chunk provides no JSON customization points");
+static_assert(!aus::StorageSerializable<Plain>, "Plain provides no customization points at all");
+static_assert(aus::StorageBinarySerializable<Chunk>, "Chunk must satisfy the binary serialization concept");
+static_assert(!aus::StorageBinarySerializable<Note>, "Note provides no binary customization points");
+static_assert(aus::StorageStorable<Note>, "Note must satisfy the facade storage concept");
+static_assert(aus::StorageStorable<Chunk>, "Chunk must satisfy the facade storage concept");
+static_assert(!aus::StorageStorable<Plain>, "Plain cannot be stored through the facade");
+static_assert(!aus::StorageStorable<NoDefaultCtor>, "types without a default ctor do not satisfy StorageStorable");
+static_assert(aus::StorageSerializable<NoDefaultCtor>, "NoDefaultCtor's JSON customization points still hold");
+static_assert(aus::storage_version(static_cast<const Note *>(nullptr)) == 1, "the default version number is always 1");
 
 // ============================================================================
 // 测试专用分发器（仅本 TU 可见，不进库头文件）：在库命名空间内复现

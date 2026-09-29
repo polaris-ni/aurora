@@ -36,11 +36,15 @@ auto make_schema() -> Schema {
     button.children_policy = "one";
     button.props = {
         PropSchema{
-            .name = "label", .type = "std::string", .default_value = "\"\"", .required = false, .note = "按钮文字"},
-        PropSchema{.name = "on_click", .type = "Callback", .default_value = "", .required = false, .note = "点击回调"},
+            .name = "label", .type = "std::string", .default_value = "\"\"", .required = false, .note = "Button text"},
         PropSchema{
-            .name = "align", .type = "Alignment", .default_value = "\"Center\"", .required = false, .note = "对齐方式"},
-        PropSchema{.name = "enabled", .type = "bool", .default_value = "true", .required = true, .note = "是否可用"},
+            .name = "on_click", .type = "Callback", .default_value = "", .required = false, .note = "Click callback"},
+        PropSchema{.name = "align",
+                   .type = "Alignment",
+                   .default_value = "\"Center\"",
+                   .required = false,
+                   .note = "Alignment"},
+        PropSchema{.name = "enabled", .type = "bool", .default_value = "true", .required = true, .note = "Enabled"},
     };
     s.components.push_back(std::move(button));
 

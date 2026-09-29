@@ -22,7 +22,7 @@ AURORA_TEST_CASE(win32_surface_type_contract) {
     static_assert(!std::is_default_constructible_v<aurora::Win32Surface>);
     AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::Surface, aurora::Win32Surface>);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32 未开启，头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32 is not enabled: the whole header is compiled out by the macro");
 #endif
 }
 
@@ -50,7 +50,7 @@ AURORA_TEST_CASE(win32_media_query_maps_headless_surface) {
         (mq.screen_size.width >= mq.screen_size.height) ? ScreenOrientation::Landscape : ScreenOrientation::Portrait;
     AURORA_TEST_CHECK(mq.orientation == expected);
 #else
-    AURORA_TEST_SKIP("需要 AURORA_BACKEND_WIN32 与 AURORA_BACKEND_HEADLESS 同时开启");
+    AURORA_TEST_SKIP("both AURORA_BACKEND_WIN32 and AURORA_BACKEND_HEADLESS must be enabled");
 #endif
 }
 
@@ -58,9 +58,9 @@ AURORA_TEST_CASE(win32_surface_window_creation_skipped) {
 #ifdef AURORA_BACKEND_WIN32
     // Win32Surface 构造即创建真实 HWND（RegisterClass/CreateWindow），present 走 GDI
     // BitBlt 上屏；WM_SIZE/WM_PAINT 同步重渲染与白闪修复依赖真实消息泵，属集成层覆盖范围。
-    AURORA_TEST_SKIP("Win32Surface 构造会创建真实 HWND 并依赖消息泵，单测不触碰 OS 资源");
+    AURORA_TEST_SKIP("Win32Surface needs a real HWND plus a message pump; unit tests do not touch OS resources");
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32 未开启，头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32 is not enabled: the whole header is compiled out by the macro");
 #endif
 }
 

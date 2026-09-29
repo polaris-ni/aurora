@@ -28,7 +28,7 @@ AURORA_TEST_CASE(wayland_surface_type_contract) {
     static_assert(!std::is_default_constructible_v<aurora::WaylandSurface>);
     AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::Surface, aurora::WaylandSurface>);
 #else
-    AURORA_TEST_SKIP("Wayland 后端仅在 Linux + AURORA_BACKEND_WAYLAND 下编译，当前平台未开启");
+    AURORA_TEST_SKIP("the Wayland backend builds only on Linux with AURORA_BACKEND_WAYLAND, not enabled here");
 #endif
 }
 
@@ -37,9 +37,11 @@ AURORA_TEST_CASE(wayland_surface_os_dependent_paths_skipped) {
     // 构造需要 WAYLAND_DISPLAY 连接（wl_display/registry/xdg-shell 握手）；
     // is_available()==false 分支由工厂返回 Result 错误，需真实合成器或 headless 组合器
     // （如 wlheadless）驱动，属集成层覆盖范围。
-    AURORA_TEST_SKIP("WaylandSurface 构造依赖真实合成器连接（wl_display/xdg-shell），单测不触碰 OS 资源");
+    AURORA_TEST_SKIP(
+        "WaylandSurface construction needs a live compositor connection (wl_display/xdg-shell); "
+        "unit tests do not touch OS resources");
 #else
-    AURORA_TEST_SKIP("Wayland 后端仅在 Linux + AURORA_BACKEND_WAYLAND 下编译，当前平台未开启");
+    AURORA_TEST_SKIP("the Wayland backend builds only on Linux with AURORA_BACKEND_WAYLAND, not enabled here");
 #endif
 }
 
@@ -47,7 +49,9 @@ AURORA_TEST_CASE(wayland_surface_live_cursor_commit_sweep) {
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_WAYLAND)
     const char *opt_in = std::getenv("AURORA_LIVE_WAYLAND");
     if (opt_in == nullptr || *opt_in == '\0') {
-        AURORA_TEST_SKIP("需显式置 AURORA_LIVE_WAYLAND=1：本用例会连接真实合成器并创建真实窗口");
+        AURORA_TEST_SKIP(
+            "set AURORA_LIVE_WAYLAND=1 explicitly: this case connects to a real compositor and "
+            "creates a real window");
     }
 
     aurora::WaylandSurface surface(320, 240, "aurora-live-wayland-cursor");
@@ -77,14 +81,18 @@ AURORA_TEST_CASE(wayland_surface_live_cursor_commit_sweep) {
         entered = wait_enter(80);
     }
     if (!entered) {
-        AURORA_TEST_SKIP("未取得 wl_pointer.enter（无指针设备或指针未落入窗口）：无合法 serial 可下发");
+        AURORA_TEST_SKIP(
+            "no wl_pointer.enter received (no pointer device, or the pointer never entered the "
+            "window): there is no valid serial to issue");
     }
     // 「桌面未装图标主题」是环境缺失、「主题位图没提交上去」才是接线缺陷，两者要分开申报：
     // 用一个不同于 enter 默认（Arrow）的形状逼一次真实提交，theme_size 仍为 0 即主题根本没加载成功。
     surface.set_cursor(aurora::CursorShape::Wait);
     surface.poll_platform_events();
     if (const auto probe = surface.cursor_state(); !probe.applied && probe.theme_size == 0) {
-        AURORA_TEST_SKIP("wl_cursor_theme_load 未成功（本机无可用图标主题）：形状提交无从验证");
+        AURORA_TEST_SKIP(
+            "wl_cursor_theme_load failed (no usable icon theme on this machine): shape commits "
+            "cannot be verified");
     }
 
     // 两轮全形状（形状逐一变化，故每轮每形状各提交一次）。命中名取**严格等值**断言：走 default/left_ptr
@@ -111,7 +119,7 @@ AURORA_TEST_CASE(wayland_surface_live_cursor_commit_sweep) {
     surface.set_title("aurora-live-wayland-cursor");
     AURORA_TEST_CHECK_FALSE(surface.should_close());
 #else
-    AURORA_TEST_SKIP("Wayland 后端仅在 Linux + AURORA_BACKEND_WAYLAND 下编译，当前平台未开启");
+    AURORA_TEST_SKIP("the Wayland backend builds only on Linux with AURORA_BACKEND_WAYLAND, not enabled here");
 #endif
 }
 
@@ -119,7 +127,9 @@ AURORA_TEST_CASE(wayland_surface_live_text_input_bridge_invariants) {
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_WAYLAND)
     const char *opt_in = std::getenv("AURORA_LIVE_WAYLAND");
     if (opt_in == nullptr || *opt_in == '\0') {
-        AURORA_TEST_SKIP("需显式置 AURORA_LIVE_WAYLAND=1：本用例会连接真实合成器并创建真实窗口");
+        AURORA_TEST_SKIP(
+            "set AURORA_LIVE_WAYLAND=1 explicitly: this case connects to a real compositor and "
+            "creates a real window");
     }
 
     aurora::WaylandSurface surface(320, 240, "aurora-live-wayland-ime");
@@ -134,7 +144,9 @@ AURORA_TEST_CASE(wayland_surface_live_text_input_bridge_invariants) {
 
     auto st = surface.text_input_state();
     if (st.protocol_disabled) {
-        AURORA_TEST_SKIP("本次构建缺 text-input-unstable-v3 XML（AURORA_HAVE_WL_TEXT_INPUT=0）⇒ 桥未编译");
+        AURORA_TEST_SKIP(
+            "this build lacks the text-input-unstable-v3 XML (AURORA_HAVE_WL_TEXT_INPUT=0), so the "
+            "bridge is not compiled");
     }
     // 一致性不变量：input 只能来自 manager 绑定，enable 只能发生在本端已建 input 之后。
     AURORA_TEST_CHECK(!(st.input_created && !st.manager_bound));
@@ -153,12 +165,14 @@ AURORA_TEST_CASE(wayland_surface_live_text_input_bridge_invariants) {
         AURORA_TEST_CHECK(!st.input_created && !st.enabled && st.commits == 0);
         AURORA_TEST_CHECK_FALSE(surface.should_close());
         AURORA_TEST_SKIP(
-            "合成器未发布 text-input-v3 ⇒ enable 判据段无从驱动（完整验收见 "
-            "aurora_verify_wayland_ime 探针）");
+            "the compositor never advertises text-input-v3, so the enable criteria stay undriven (full "
+            "acceptance lives in the aurora_verify_wayland_ime probe)");
     }
     AURORA_TEST_CHECK_TRUE(st.input_created);  // seat 键盘能力到达即建 input 对象
     if (!st.entered) {
-        AURORA_TEST_SKIP("未取得 text_input.enter（键盘焦点未落入本表面）⇒ enable 判据交探针/人工");
+        AURORA_TEST_SKIP(
+            "no text_input.enter received (keyboard focus never landed on this surface), the enable "
+            "criteria go to the probe/manual check");
     }
     // enable 判据：entered + 非零盒 ⇒ enabled；归零盒 ⇒ disable；再非零 ⇒ 可逆重启用。
     AURORA_TEST_CHECK_TRUE(surface.text_input_state().enabled);
@@ -171,7 +185,7 @@ AURORA_TEST_CASE(wayland_surface_live_text_input_bridge_invariants) {
     AURORA_TEST_CHECK_FALSE(surface.text_input_state().enabled);
     AURORA_TEST_CHECK_FALSE(surface.should_close());
 #else
-    AURORA_TEST_SKIP("Wayland 后端仅在 Linux + AURORA_BACKEND_WAYLAND 下编译，当前平台未开启");
+    AURORA_TEST_SKIP("the Wayland backend builds only on Linux with AURORA_BACKEND_WAYLAND, not enabled here");
 #endif
 }
 

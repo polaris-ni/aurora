@@ -383,7 +383,7 @@ AURORA_TEST_CASE(mcp_protocol_e2e_binary_smoke) {
     AURORA_TEST_REQUIRE_SUBPROCESS();
     const int ret = run_mcp_smoke();
     if (ret == -1) {
-        AURORA_TEST_SKIP("aurora_mcp 未构建");
+        AURORA_TEST_SKIP("aurora_mcp not built");
     }
     AURORA_TEST_CHECK(ret == 0 || ret == 1);  // stdin EOF 后正常退出
 }

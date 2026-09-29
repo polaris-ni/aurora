@@ -24,7 +24,7 @@ AURORA_TEST_CASE(win32_host_type_contract) {
     static_assert(!std::is_default_constructible_v<aurora::Win32Host>);
     AURORA_TEST_CHECK_TRUE(std::is_class_v<aurora::Win32Host>);
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32 未开启，头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32 is not enabled; the header is compiled out by the macro");
 #endif
 }
 
@@ -32,9 +32,9 @@ AURORA_TEST_CASE(win32_host_creation_skipped) {
 #ifdef AURORA_BACKEND_WIN32
     // 构造函数立即注册窗口类并 CreateWindowW 创建真实 HWND；wait_events/poll_platform_events
     // 依赖消息队列，事件翻译/DPI 属集成层覆盖范围，单元测试不触碰 OS 资源。
-    AURORA_TEST_SKIP("Win32Host 构造会注册窗口类并创建真实 HWND，单测不触碰 OS 资源");
+    AURORA_TEST_SKIP("Win32Host construction registers a window class and creates a real HWND; unit tests skip that");
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32 未开启，头文件整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32 is not enabled; the header is compiled out by the macro");
 #endif
 }
 

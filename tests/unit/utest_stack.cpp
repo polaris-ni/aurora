@@ -102,7 +102,7 @@ AURORA_TEST_CASE(stack_respects_min_constraint_floor) {
 }
 
 AURORA_TEST_CASE(overlay_alias_is_stack) {
-    static_assert(std::is_same_v<Overlay, Stack>, "Overlay 必须是 Stack 的便捷别名");
+    static_assert(std::is_same_v<Overlay, Stack>, "Overlay must be a convenience alias of Stack");
     Overlay st{box(10.0F, 10.0F)};
     AURORA_TEST_CHECK_EQ(std::string{st.type_name()}, "Stack");
 }

@@ -181,7 +181,9 @@ AURORA_TEST_CASE(sendinput_click_toggles_checkbox) {
     AURORA_TEST_REQUIRE_TRUE(after.ok());
     AURORA_TEST_CHECK_TRUE(region_differs(before.value(), after.value(), box->node.bounds, scale));
 #else
-    AURORA_TEST_SKIP("本平台无 SendInput 通道（Windows 专属；Linux 走 XTest，macOS 为已知缺口）");
+    AURORA_TEST_SKIP(
+        "this platform has no SendInput channel "
+        "(Windows only; Linux uses XTest, macOS is a known gap)");
 #endif
 }
 
@@ -225,7 +227,9 @@ AURORA_TEST_CASE(postmessage_reaches_window_procedure) {
     AURORA_TEST_REQUIRE_TRUE(session.pump_until_settled().ok());
     AURORA_TEST_CHECK_TRUE(*ui.typed == "a1");  // 字符通道：WM_CHAR → TextInputEvent → 控件状态
 #else
-    AURORA_TEST_SKIP("本平台无 PostMessage 通道（Windows 专属；Linux 走 XTest，macOS 为已知缺口）");
+    AURORA_TEST_SKIP(
+        "this platform has no PostMessage channel "
+        "(Windows only; Linux uses XTest, macOS is a known gap)");
 #endif
 }
 
@@ -280,7 +284,9 @@ AURORA_TEST_CASE(xtest_server_input_reaches_window) {
 #elif defined(AURORA_PLATFORM_UNIX) && !defined(AURORA_PLATFORM_MACOS)
     AURORA_TEST_SKIP("backend 'x11' not compiled into this build (AURORA_BACKEND_X11 off)");
 #else
-    AURORA_TEST_SKIP("本平台无 XTest 通道（Linux 专属；Windows 走 SendInput/PostMessage，macOS 为已知缺口）");
+    AURORA_TEST_SKIP(
+        "this platform has no XTest channel "
+        "(Linux only; Windows uses SendInput/PostMessage, macOS is a known gap)");
 #endif
 }
 

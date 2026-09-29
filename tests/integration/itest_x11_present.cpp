@@ -21,7 +21,7 @@ AURORA_TEST_CASE(frame_count_counts_every_presented_frame) {
     auto surf = std::make_unique<au::X11Surface>(320, 240, "x11 present itest");
     if (!surf->is_available()) {
         // 无 DISPLAY（纯 TTY / 容器）：建窗失败属环境问题，跳过而非失败。
-        AURORA_TEST_SKIP("无 DISPLAY 或 X 连接失败");
+        AURORA_TEST_SKIP("no DISPLAY or X connection failed");
     }
 
     const int base = surf->frame_count();
@@ -45,7 +45,7 @@ AURORA_TEST_CASE(frame_count_counts_every_presented_frame) {
 namespace aurora::test_cases::itest_x11_present {
 
 AURORA_TEST_CASE(frame_count_counts_every_presented_frame) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_X11 未开启（非 Linux 或未编译该后端）");
+    AURORA_TEST_SKIP("AURORA_BACKEND_X11 not enabled (non-Linux or the backend was not compiled)");
 }
 
 }  // namespace aurora::test_cases::itest_x11_present

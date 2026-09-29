@@ -32,7 +32,7 @@ AURORA_TEST_CASE(dirty_kind_enumerates_layout_and_paint) {
 
 AURORA_TEST_CASE(why_trace_reports_unavailable_when_debug_off) {
     if (probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 已启用：关闭态 unavailable 语义不适用");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is enabled: the unavailable semantics of the off state do not apply");
     }
     const Json j = why_trace();
     AURORA_TEST_CHECK_EQ(j["available"], false);
@@ -48,7 +48,7 @@ AURORA_TEST_CASE(record_dirty_never_throws_in_any_build) {
 
 AURORA_TEST_CASE(record_and_query_roundtrip) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：采集缓冲按宏裁切，无记录可查");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: the capture buffer is compiled out, nothing to query");
     }
     const Json before = why_trace();
     const auto base_count = before["count"].get<std::size_t>();
@@ -84,7 +84,7 @@ AURORA_TEST_CASE(record_and_query_roundtrip) {
 
 AURORA_TEST_CASE(why_trace_limit_keeps_newest_first) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：limit 截断语义仅开启态可观测");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: limit truncation is observable only when enabled");
     }
     const Json before = why_trace();
     const auto base_count = before["count"].get<std::size_t>();
@@ -111,7 +111,7 @@ AURORA_TEST_CASE(why_trace_limit_keeps_newest_first) {
 
 AURORA_TEST_CASE(total_recorded_is_monotonic) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：累计计数按宏裁切");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: the cumulative counter is compiled out");
     }
     const auto base_total = why_trace()["total_recorded"].get<std::uint64_t>();
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Paint, "Text", 301, true);

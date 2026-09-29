@@ -69,7 +69,9 @@ AURORA_TEST_CASE(menu_item_click_callback_counted) {
 
 AURORA_TEST_CASE(tray_context_menu_roundtrip) {
 #ifdef AURORA_PLATFORM_WINDOWS
-    AURORA_TEST_SKIP("Windows 实现下 SystemTray 构造即注册真实托盘图标（Shell_NotifyIcon），单元测试不触达真实托盘");
+    AURORA_TEST_SKIP(
+        "the Windows SystemTray registers a real tray icon (Shell_NotifyIcon) in its constructor; "
+        "unit tests do not touch it");
 #else
     SystemTray tray("utest-tray");
     AURORA_TEST_CHECK_TRUE(tray.context_menu_items().empty());
@@ -93,7 +95,9 @@ AURORA_TEST_CASE(tray_context_menu_roundtrip) {
 
 AURORA_TEST_CASE(tray_balloon_message_recorded) {
 #ifdef AURORA_PLATFORM_WINDOWS
-    AURORA_TEST_SKIP("Windows 实现下 SystemTray 构造即注册真实托盘图标（Shell_NotifyIcon），单元测试不触达真实托盘");
+    AURORA_TEST_SKIP(
+        "the Windows SystemTray registers a real tray icon (Shell_NotifyIcon) in its constructor; "
+        "unit tests do not touch it");
 #else
     SystemTray tray("utest-tray");
     AURORA_TEST_CHECK_TRUE(tray.last_balloon_message().empty());
@@ -110,7 +114,9 @@ AURORA_TEST_CASE(tray_balloon_message_recorded) {
 
 AURORA_TEST_CASE(tray_move_preserves_state) {
 #ifdef AURORA_PLATFORM_WINDOWS
-    AURORA_TEST_SKIP("Windows 实现下 SystemTray 构造即注册真实托盘图标（Shell_NotifyIcon），单元测试不触达真实托盘");
+    AURORA_TEST_SKIP(
+        "the Windows SystemTray registers a real tray icon (Shell_NotifyIcon) in its constructor; "
+        "unit tests do not touch it");
 #else
     SystemTray tray("utest-tray");
     tray.set_title("renamed");

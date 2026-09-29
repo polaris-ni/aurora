@@ -172,11 +172,15 @@ AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
 #else
 
 AURORA_TEST_CASE(drag_reorders_items_through_real_dispatch) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP(
+        "AURORA_BACKEND_HEADLESS not enabled: TestController depends on "
+        "HeadlessSurface, which is not compiled");
 }
 
 AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启：TestController 依赖 HeadlessSurface 未编译");
+    AURORA_TEST_SKIP(
+        "AURORA_BACKEND_HEADLESS not enabled: TestController depends on "
+        "HeadlessSurface, which is not compiled");
 }
 
 #endif  // AURORA_BACKEND_HEADLESS

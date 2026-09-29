@@ -131,6 +131,7 @@ class ProbeVirtualList final : public aurora::Widget {
 class ProbeAnnotatedLeaf final : public aurora::LeafWidget {
   public:
     [[nodiscard]] auto type_name() const -> const char * override { return "Button"; }
+    // CJK-LITERAL: cjk-fixture - Han a11y label/value/hint probe returns, asserted via tree projection below
     [[nodiscard]] auto accessibility_label() const -> std::string override { return "提交订单"; }
     [[nodiscard]] auto accessibility_value() const -> std::string override { return "已就绪"; }
     [[nodiscard]] auto accessibility_hint() const -> std::string override { return "回车提交"; }
@@ -378,10 +379,12 @@ AURORA_TEST_CASE(build_tree_honours_explicit_root_box) {
 
 AURORA_TEST_CASE(build_tree_self_fills_name_and_value_from_widgets) {
     // 控件自带语义：Button 取 label、Text 取文本、Progress 取数值（无需布局/绘制即可自填）。
-    aurora::Button button{std::string{"确定"}};
+    aurora::Button button{
+        std::string{"确定"}};  // CJK-LITERAL: cjk-fixture - Han button label under a11y name assertion
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(button).name, std::string{"确定"});
 
-    aurora::Text text{std::string{"订单总额"}};
+    aurora::Text text{
+        std::string{"订单总额"}};  // CJK-LITERAL: cjk-fixture - Han text widget label under a11y assertion
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(text).name, std::string{"订单总额"});
 
     aurora::Checkbox checked{aurora::Reactive<bool>{true}};
@@ -398,8 +401,8 @@ AURORA_TEST_CASE(build_tree_self_fills_name_and_value_from_widgets) {
 
     // 编辑框：name 取占位提示、value 取当前内容，两者互不相干。
     aurora::TextInput input;
-    input.set_placeholder("收货人");
-    input.set_value("张三");
+    input.set_placeholder("收货人");  // CJK-LITERAL: cjk-fixture - Han placeholder asserted as a11y name
+    input.set_value("张三");  // CJK-LITERAL: cjk-fixture - Han input value asserted as a11y value
     const auto input_tree = aurora::build_accessibility_tree(input);
     AURORA_TEST_CHECK_EQ(input_tree.name, std::string{"收货人"});
     AURORA_TEST_CHECK_EQ(input_tree.value, std::string{"张三"});
@@ -409,7 +412,7 @@ AURORA_TEST_CASE(build_tree_prefers_widget_hooks_and_exposes_hint) {
     ProbeAnnotatedLeaf annotated;
     const auto tree = aurora::build_accessibility_tree(annotated);
     AURORA_TEST_CHECK_EQ(tree.role, aurora::AccessibilityRole::Button);
-    AURORA_TEST_CHECK_EQ(tree.name, std::string{"提交订单"});
+    AURORA_TEST_CHECK_EQ(tree.name, std::string{"提交订单"});  // CJK-LITERAL: cjk-fixture - Han probe hook fields below
     AURORA_TEST_CHECK_EQ(tree.value, std::string{"已就绪"});
     AURORA_TEST_CHECK_EQ(tree.hint, std::string{"回车提交"});
 
@@ -582,16 +585,18 @@ AURORA_TEST_CASE(text_input_edits_raise_value_changed) {
 }
 
 AURORA_TEST_CASE(explicit_label_overrides_widget_builtin_name) {
-    aurora::Button button{std::string{"确定"}};
+    aurora::Button button{
+        std::string{"确定"}};  // CJK-LITERAL: cjk-fixture - Han button label under a11y name assertion
     AURORA_TEST_CHECK_EQ(button.explicit_accessibility_label(), std::string{});
 
-    button.set_accessibility_label("确认订单");
+    button.set_accessibility_label("确认订单");  // CJK-LITERAL: cjk-fixture - Han explicit label beats builtin below
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(button).name, std::string{"确认订单"});
     // 钩子本身不被改写：显式名在 Name 回退链第一级生效，控件自带文案保持原样。
     AURORA_TEST_CHECK_EQ(button.accessibility_label(), std::string{"确定"});
 
     // 空串 = 撤除声明 ⇒ 回落控件自带文案（不是「名字为空」）。
     button.set_accessibility_label({});
+    // CJK-LITERAL: cjk-fixture - Han builtin label restored after clearing the explicit one
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(button).name, std::string{"确定"});
 }
 
@@ -600,7 +605,7 @@ AURORA_TEST_CASE(explicit_label_names_leaf_without_builtin_label) {
     aurora::Checkbox cb;
     AURORA_TEST_CHECK_TRUE(aurora::build_accessibility_tree(cb).name.empty());
 
-    cb.set_accessibility_label("同意条款");
+    cb.set_accessibility_label("同意条款");  // CJK-LITERAL: cjk-fixture - Han label on nameless leaf, asserted below
     const auto tree = aurora::build_accessibility_tree(cb);
     AURORA_TEST_CHECK_EQ(tree.name, std::string{"同意条款"});
     // 名字不改角色/取值/状态：显式名只是 Name 一列。
@@ -612,7 +617,7 @@ AURORA_TEST_CASE(sibling_text_label_hits_adjacent_leaf) {
     // 兄弟标签关联的几何启发式此前只有真机探针覆盖，此处补无头断言：同行相邻的文本兄弟即叶子控件之名。
     // 标签兄弟自己得有可读文本：显式声明经 `declared_label` 同样充当标签来源（与钩子覆写同源）。
     auto label = ProbeLeaf{"Text"};
-    label.set_accessibility_label("启用通知");
+    label.set_accessibility_label("启用通知");  // CJK-LITERAL: cjk-fixture - Han declared sibling label source
     ProbeRow row;
     row.add(aurora::Node{std::move(label)});
     row.add(aurora::Node{ProbeLeaf{"Checkbox"}});
@@ -625,6 +630,7 @@ AURORA_TEST_CASE(sibling_text_label_hits_adjacent_leaf) {
 
     const auto tree = aurora::build_accessibility_tree(row);
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
+    // CJK-LITERAL: cjk-fixture - Han sibling label projected onto the adjacent leaf
     AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"启用通知"});
 }
 
@@ -634,7 +640,7 @@ AURORA_TEST_CASE(sibling_label_misses_stacked_leaf) {
     ProbeColumn column;
     column.add(aurora::Node{ProbeLeaf{"Slider"}});
     auto label = ProbeLeaf{"Text"};
-    label.set_accessibility_label("音量");
+    label.set_accessibility_label("音量");  // CJK-LITERAL: cjk-fixture - Han label probe
     column.add(aurora::Node{std::move(label)});
     aurora::LayoutEngine::layout(
         column, aurora::Constraints{.min = aurora::Size{}, .max = aurora::Size{.width = 400.0F, .height = 400.0F}});
@@ -652,20 +658,22 @@ AURORA_TEST_CASE(sibling_label_misses_stacked_leaf) {
 AURORA_TEST_CASE(unique_text_child_names_container_via_hook_override) {
     // 回退链最后一级：唯一文本子节点。子节点走 `Text` 的**钩子覆写**取文（非显式声明路）。
     ProbeRow box{"Slider"};
-    box.add(aurora::Node{aurora::Text{std::string{"音量"}}});
+    box.add(aurora::Node{aurora::Text{std::string{"音量"}}});  // CJK-LITERAL: cjk-fixture - unique Han text child
     const auto tree = aurora::build_accessibility_tree(box);
+    // CJK-LITERAL: cjk-fixture - Han container name from unique text child
     AURORA_TEST_CHECK_EQ(tree.name, std::string{"音量"});
 }
 
 AURORA_TEST_CASE(explicit_label_round_trips_through_props) {
     aurora::Checkbox src;
-    src.set_accessibility_label("静音");
+    src.set_accessibility_label("静音");  // CJK-LITERAL: cjk-fixture - Han label through props round-trip
     aurora::Json props;
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(props["accessibility_label"].get<std::string>(), std::string{"静音"});
 
     aurora::Checkbox dst;
     dst.deserialize_props(props);
+    // CJK-LITERAL: cjk-fixture - round-tripped Han label read back from props
     AURORA_TEST_CHECK_EQ(dst.explicit_accessibility_label(), std::string{"静音"});
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(dst).name, std::string{"静音"});
 
@@ -681,6 +689,7 @@ AURORA_TEST_CASE(explicit_label_change_raises_name_changed_once_per_diff) {
     const ScopedEventHandler listen{&events};
 
     aurora::Checkbox cb;
+    // CJK-LITERAL: cjk-fixture - Han label change sequence, one NameChanged per distinct name
     cb.set_accessibility_label("同意条款");
     cb.set_accessibility_label("同意条款");  // 同值幂等：不得重复上报（读屏重念是噪声）
     cb.set_accessibility_label("同意条款并继续");
@@ -702,7 +711,7 @@ AURORA_TEST_CASE(explicit_label_change_raises_name_changed_once_per_diff) {
 
 AURORA_TEST_CASE(labelled_by_names_leaf_from_referenced_text) {
     auto label = ProbeLeaf{"Text"};
-    label.set_accessibility_label("音量");
+    label.set_accessibility_label("音量");  // CJK-LITERAL: cjk-fixture - Han label probe
     label.set_stable_key("vol-label");
     auto leaf = ProbeLeaf{"Checkbox"};
     leaf.set_labelled_by("vol-label");
@@ -715,6 +724,7 @@ AURORA_TEST_CASE(labelled_by_names_leaf_from_referenced_text) {
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
     AURORA_TEST_CHECK_EQ(tree.children[0].stable_key, std::string{"vol-label"});
     AURORA_TEST_CHECK_EQ(tree.children[1].labelled_by, std::string{"vol-label"});
+    // CJK-LITERAL: cjk-fixture - Han name resolved through the labelled-by reference
     AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"音量"});
     // 关系以解析后的目标 id 投影（三桥共用），0 = 未解析。
     AURORA_TEST_CHECK_EQ(tree.children[1].labelled_by_id, tree.children[0].id);
@@ -727,7 +737,7 @@ AURORA_TEST_CASE(labelled_by_resolves_forward_and_backwards_references) {
     auto leaf = ProbeLeaf{"Checkbox"};
     leaf.set_labelled_by("vol-label");
     auto label = ProbeLeaf{"Text"};
-    label.set_accessibility_label("音量");
+    label.set_accessibility_label("音量");  // CJK-LITERAL: cjk-fixture - Han label probe
     label.set_stable_key("vol-label");
 
     ProbeColumn column;
@@ -736,6 +746,7 @@ AURORA_TEST_CASE(labelled_by_resolves_forward_and_backwards_references) {
 
     const auto tree = aurora::build_accessibility_tree(column);
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
+    // CJK-LITERAL: cjk-fixture - backwards reference resolves the Han name
     AURORA_TEST_CHECK_EQ(tree.children[0].name, std::string{"音量"});
     AURORA_TEST_CHECK_EQ(tree.children[0].labelled_by_id, tree.children[1].id);
 }
@@ -743,11 +754,11 @@ AURORA_TEST_CASE(labelled_by_resolves_forward_and_backwards_references) {
 AURORA_TEST_CASE(labelled_by_beats_explicit_and_builtin_label) {
     // 优先级：引用 > 宿主显式声明 > 控件自带文案（与 ARIA「labelledby 压制 label」一致）。
     auto label = std::make_shared<ProbeLeaf>("Text");
-    label->set_accessibility_label("外部标题");
+    label->set_accessibility_label("外部标题");  // CJK-LITERAL: cjk-fixture - Han referenced label wins
     label->set_stable_key("hdr");
 
     auto button = std::make_shared<aurora::Button>(std::string{"确定"});
-    button->set_accessibility_label("确认订单");
+    button->set_accessibility_label("确认订单");  // CJK-LITERAL: cjk-fixture - Han explicit label kept but suppressed
     button->set_labelled_by("hdr");
 
     ProbeColumn column;
@@ -756,19 +767,22 @@ AURORA_TEST_CASE(labelled_by_beats_explicit_and_builtin_label) {
 
     const auto tree = aurora::build_accessibility_tree(column);
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
+    // CJK-LITERAL: cjk-fixture - referenced Han name suppresses explicit/builtin labels
     AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"外部标题"});
     // 引用不改写控件自身：显式声明与自带文案原样保留，只在名字求值时被压制。
+    // CJK-LITERAL: cjk-fixture - explicit/builtin Han labels stay intact on the widget
     AURORA_TEST_CHECK_EQ(button->explicit_accessibility_label(), std::string{"确认订单"});
     AURORA_TEST_CHECK_EQ(button->accessibility_label(), std::string{"确定"});
     // 撤除显式声明后仍走引用（不被自带文案「确定」抢回）。
     button->set_accessibility_label({});
+    // CJK-LITERAL: cjk-fixture - Han name still resolved through the reference
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(column).children[1].name, std::string{"外部标题"});
 }
 
 AURORA_TEST_CASE(labelled_by_chain_resolves_transitively) {
     // A→B→C：中间节点自身也是引用者，其名字先解出，末节再跟随。
     auto src = ProbeLeaf{"Text"};
-    src.set_accessibility_label("季度报表");
+    src.set_accessibility_label("季度报表");  // CJK-LITERAL: cjk-fixture - Han chain label, resolved transitively
     src.set_stable_key("k1");
     auto mid = ProbeLeaf{"Image"};
     mid.set_stable_key("k2");
@@ -783,6 +797,7 @@ AURORA_TEST_CASE(labelled_by_chain_resolves_transitively) {
 
     const auto tree = aurora::build_accessibility_tree(column);
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 3U);
+    // CJK-LITERAL: cjk-fixture - Han name resolved along the labelled-by chain
     AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"季度报表"});
     AURORA_TEST_CHECK_EQ(tree.children[2].name, std::string{"季度报表"});
     // 关系投影指向**声明的那个目标**（非传递闭包终点）：读屏沿链一跳即得名字。
@@ -792,11 +807,11 @@ AURORA_TEST_CASE(labelled_by_chain_resolves_transitively) {
 AURORA_TEST_CASE(labelled_by_miss_keeps_own_name) {
     // 未命中（键不存在）⇒ 保留自身名字、关系不投影（宁念旧名也不念空）。
     auto label = ProbeLeaf{"Text"};
-    label.set_accessibility_label("自带名");
+    label.set_accessibility_label("自带名");  // CJK-LITERAL: cjk-fixture - Han own name after a miss
     label.set_labelled_by("ghost-key");
 
     const auto tree = aurora::build_accessibility_tree(label);
-    AURORA_TEST_CHECK_EQ(tree.name, std::string{"自带名"});
+    AURORA_TEST_CHECK_EQ(tree.name, std::string{"自带名"});  // CJK-LITERAL: cjk-fixture - retained Han name
     AURORA_TEST_CHECK_EQ(tree.labelled_by, std::string{"ghost-key"});
     AURORA_TEST_CHECK_TRUE(tree.labelled_by_id == 0);
 }
@@ -806,7 +821,7 @@ AURORA_TEST_CASE(labelled_by_empty_target_name_keeps_own) {
     auto src = ProbeLeaf{"Image"};
     src.set_stable_key("mute");
     auto sink = ProbeLeaf{"Checkbox"};
-    sink.set_accessibility_label("勾选协议");
+    sink.set_accessibility_label("勾选协议");  // CJK-LITERAL: cjk-fixture - Han name kept vs empty target
     sink.set_labelled_by("mute");
 
     ProbeColumn column;
@@ -816,6 +831,7 @@ AURORA_TEST_CASE(labelled_by_empty_target_name_keeps_own) {
     const auto tree = aurora::build_accessibility_tree(column);
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 2U);
     AURORA_TEST_CHECK_TRUE(tree.children[0].name.empty());
+    // CJK-LITERAL: cjk-fixture - own Han name kept when the target has none
     AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"勾选协议"});
     AURORA_TEST_CHECK_TRUE(tree.children[1].labelled_by_id == 0);
 }
@@ -823,15 +839,15 @@ AURORA_TEST_CASE(labelled_by_empty_target_name_keeps_own) {
 AURORA_TEST_CASE(labelled_by_cycle_and_self_reference_break_safely) {
     // 环（X⇄Y）与自引用：解析必须在有限步内收敛，断环者保留自身名且不投影关系。
     auto x = ProbeLeaf{"Text"};
-    x.set_accessibility_label("名字X");
+    x.set_accessibility_label("名字X");  // CJK-LITERAL: cjk-fixture - Han names in a reference cycle
     x.set_stable_key("kx");
     x.set_labelled_by("ky");
     auto y = ProbeLeaf{"Text"};
-    y.set_accessibility_label("名字Y");
+    y.set_accessibility_label("名字Y");  // CJK-LITERAL: cjk-fixture - cycle-closing node keeps own Han name
     y.set_stable_key("ky");
     y.set_labelled_by("kx");
     auto self = ProbeLeaf{"Text"};
-    self.set_accessibility_label("名字S");
+    self.set_accessibility_label("名字S");  // CJK-LITERAL: cjk-fixture - self-reference keeps own Han name
     self.set_stable_key("ks");
     self.set_labelled_by("ks");
 
@@ -843,19 +859,22 @@ AURORA_TEST_CASE(labelled_by_cycle_and_self_reference_break_safely) {
     const auto tree = aurora::build_accessibility_tree(column);
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 3U);
     // 先序者发起解析 ⇒ 闭合环的后一个（Y）被判为环上节点：保自身名、不投影。
+    // CJK-LITERAL: cjk-fixture - Han cycle resolution assertions below
     AURORA_TEST_CHECK_EQ(tree.children[1].name, std::string{"名字Y"});
     AURORA_TEST_CHECK_TRUE(tree.children[1].labelled_by_id == 0);
     // X 的名字取 Y 的终名（Y 已确定不再变），关系合法投影。
+    // CJK-LITERAL: cjk-fixture - X resolves to Y's final Han name once the cycle breaks
     AURORA_TEST_CHECK_EQ(tree.children[0].name, std::string{"名字Y"});
     AURORA_TEST_CHECK_EQ(tree.children[0].labelled_by_id, tree.children[1].id);
     // 自引用是同一条判据的退化情形。
+    // CJK-LITERAL: cjk-fixture - Han self-reference keeps own name
     AURORA_TEST_CHECK_EQ(tree.children[2].name, std::string{"名字S"});
     AURORA_TEST_CHECK_TRUE(tree.children[2].labelled_by_id == 0);
 }
 
 AURORA_TEST_CASE(duplicate_stable_key_resolves_to_first_in_preorder) {
     auto first = ProbeLeaf{"Text"};
-    first.set_accessibility_label("先声明者");
+    first.set_accessibility_label("先声明者");  // CJK-LITERAL: cjk-fixture - duplicate keys resolve to first
     first.set_stable_key("dup");
     auto second = ProbeLeaf{"Text"};
     second.set_accessibility_label("后声明者");
@@ -870,6 +889,7 @@ AURORA_TEST_CASE(duplicate_stable_key_resolves_to_first_in_preorder) {
 
     const auto tree = aurora::build_accessibility_tree(column);
     AURORA_TEST_REQUIRE_EQ(tree.children.size(), 3U);
+    // CJK-LITERAL: cjk-fixture - first-in-preorder Han name wins the duplicate key
     AURORA_TEST_CHECK_EQ(tree.children[2].name, std::string{"先声明者"});
     AURORA_TEST_CHECK_EQ(tree.children[2].labelled_by_id, tree.children[0].id);
 }
@@ -879,7 +899,7 @@ AURORA_TEST_CASE(labelled_by_survives_widget_tree_rebuild) {
     // （lambda 内只用非致命断言：致命断言的失败出口按 `void` 用例函数设计。）
     auto read = [] -> std::pair<std::string, std::uint64_t> {
         auto label = ProbeLeaf{"Text"};
-        label.set_accessibility_label("音量");
+        label.set_accessibility_label("音量");  // CJK-LITERAL: cjk-fixture - Han label probe
         label.set_stable_key("vol-label");
         auto leaf = ProbeLeaf{"Checkbox"};
         leaf.set_labelled_by("vol-label");
@@ -894,6 +914,7 @@ AURORA_TEST_CASE(labelled_by_survives_widget_tree_rebuild) {
     };
     const auto first = read();
     const auto second = read();  // 全新控件对象、全新 runtime_id
+    // CJK-LITERAL: cjk-fixture - Han name stable across widget-tree rebuilds
     AURORA_TEST_CHECK_EQ(first.first, std::string{"音量"});
     AURORA_TEST_CHECK_EQ(second.first, std::string{"音量"});
     AURORA_TEST_CHECK_TRUE(first.second != 0);

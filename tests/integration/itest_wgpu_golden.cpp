@@ -54,10 +54,10 @@ constexpr std::size_t AURORA_CHART_BUDGET = 12800;  // 320×200 网格细线 + �
 
 }  // namespace
 
-#define AURORA_ITEST_WGPU_GPU_OR_SKIP(gpu)                                                     \
-    au::rhi::WgpuRhi gpu(gpu_options());                                                       \
-    if (!gpu.valid()) {                                                                        \
-        AURORA_TEST_SKIP("无可用 wgpu adapter/device（CI 或驱动缺失），GPU 容差 golden 跳过"); \
+#define AURORA_ITEST_WGPU_GPU_OR_SKIP(gpu)                                                                       \
+    au::rhi::WgpuRhi gpu(gpu_options());                                                                         \
+    if (!gpu.valid()) {                                                                                          \
+        AURORA_TEST_SKIP("no usable wgpu adapter/device (CI or missing driver), skipping GPU tolerance golden"); \
     }
 
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
@@ -93,14 +93,16 @@ AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
 namespace aurora::test_cases::itest_wgpu_golden {
 
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启，WgpuRhi 离屏通路整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU not enabled, the WgpuRhi offscreen path is compiled out by the macro");
 }
-AURORA_TEST_CASE(gpu_sector_within_tolerance_of_software_golden) { AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启"); }
+AURORA_TEST_CASE(gpu_sector_within_tolerance_of_software_golden) {
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU not enabled");
+}
 AURORA_TEST_CASE(gpu_text_column_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU not enabled");
 }
 AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU not enabled");
 }
 
 }  // namespace aurora::test_cases::itest_wgpu_golden

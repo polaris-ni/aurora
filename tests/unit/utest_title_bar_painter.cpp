@@ -113,7 +113,7 @@ AURORA_TEST_CASE(direct_raster_and_record_replay_are_bit_identical) {
     // 画出同一份像素。状态刻意含齐四类原语：图标（DrawImage）、标题文字（DrawText）、悬停圆底
     // （RoundedRect）、按钮符号（DrawLine）——任一类在录制/回放口径上分叉，本用例即红灯。
     csd::TitleBarPaintState s = plain_state();
-    s.title = "Aa 01 窗口";
+    s.title = "Aa 01 窗口";  // CJK-LITERAL: cjk-fixture - mixed ASCII/CJK glyph run, painted not printed
     s.icon = solid_icon(16, Color{0x35, 0x84, 0xE4, 255});
     s.hovered_button = 2;
     check_paths_bit_identical(s);

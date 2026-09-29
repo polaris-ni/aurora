@@ -44,7 +44,7 @@ AURORA_TEST_CASE(probe_detects_debug_capability_and_restores_state) {
 AURORA_TEST_CASE(check_render_purity_is_noop_when_debug_disabled) {
     // 注入点类 API 语义：头文件始终声明，关闭时返回 disabled 值（no-op），可无守卫安全调用。
     if (probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 已启用：无守卫调用的硬失败行为由死亡测试用例覆盖");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is enabled: unguarded-call hard failure has a death test");
     }
     AURORA_TEST_CHECK_NO_THROW(aurora::debug::check_render_purity());
 }
@@ -53,7 +53,7 @@ AURORA_TEST_CASE(check_render_purity_hard_fails_outside_paint_context_when_enabl
     // 开启态契约：check_render_purity 必须在绘制上下文（g_paint_depth > 0）内调用；
     // 脱离渲染遍历直接调用属反模式，由 AURORA_CHECK 兜底（stderr 输出消息后 abort，常开）。
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：深度守卫符号按宏裁切，无硬失败行为");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: the depth-guard symbol is compiled out, no hard failure");
     }
     AURORA_TEST_CHECK_DEATH(aurora::debug::check_render_purity(), "check_render_purity");
 }

@@ -22,16 +22,16 @@ AURORA_TEST_CASE(macos_surface_type_contract) {
     static_assert(!std::is_default_constructible_v<aurora::MacOSSurface>);
     AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::Surface, aurora::MacOSSurface>);
 #else
-    AURORA_TEST_SKIP("macOS 后端仅在 AURORA_PLATFORM_MACOS && AURORA_BACKEND_MACOS 下编译，当前平台未开启");
+    AURORA_TEST_SKIP("macOS backend builds only under AURORA_PLATFORM_MACOS && AURORA_BACKEND_MACOS; not enabled");
 #endif
 }
 
 AURORA_TEST_CASE(macos_surface_os_dependent_paths_skipped) {
 #if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
     // 构造会创建真实 NSWindow/NSView 并依赖 AppKit 主线程运行循环，单元测试不触碰 OS 资源。
-    AURORA_TEST_SKIP("MacOSSurface 构造会创建真实 AppKit 窗口，单测不触碰 OS 资源");
+    AURORA_TEST_SKIP("MacOSSurface construction creates a real AppKit window; unit tests do not touch OS resources");
 #else
-    AURORA_TEST_SKIP("macOS 后端仅在 AURORA_PLATFORM_MACOS && AURORA_BACKEND_MACOS 下编译，当前平台未开启");
+    AURORA_TEST_SKIP("macOS backend builds only under AURORA_PLATFORM_MACOS && AURORA_BACKEND_MACOS; not enabled");
 #endif
 }
 

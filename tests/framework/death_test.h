@@ -156,7 +156,7 @@ auto check_death(const char *file, int line, std::string_view statement, const E
 // NOLINTBEGIN(cppcoreguidelines-macro-usage)
 #ifdef AURORA_PLATFORM_WASM
 #define AURORA_TEST_CHECK_DEATH(statement, ...) \
-    AURORA_TEST_SKIP("死亡测试需 fork/exec 重跑自身进程，Emscripten 下不可用")
+    AURORA_TEST_SKIP("death tests need fork/exec to re-run this process, unavailable on Emscripten")
 #else
 #define AURORA_TEST_CHECK_DEATH(statement, ...)                                                  \
     do {                                                                                         \

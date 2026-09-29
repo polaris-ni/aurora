@@ -207,7 +207,7 @@ AURORA_TEST_CASE(cli_e2e_binary_smoke) {
     AURORA_TEST_REQUIRE_SUBPROCESS();
     const std::string exe = probe_cli_exe();
     if (exe.empty()) {
-        AURORA_TEST_SKIP("aurora_cli 未构建");
+        AURORA_TEST_SKIP("aurora_cli not built");
     }
 
     // --help / components / schema / describe 正常退出。

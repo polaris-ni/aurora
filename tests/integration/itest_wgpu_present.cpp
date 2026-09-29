@@ -60,7 +60,9 @@ AURORA_TEST_CASE(wgpu_win32_surface_present_frames_and_no_fallback) {
     spec.title = "itest_wgpu_present";
     auto session = e2e::open(spec);
     if (!session.ok()) {
-        AURORA_TEST_SKIP("开窗失败（无桌面会话或无 wgpu adapter），GPU 上屏链路无实例可验");
+        AURORA_TEST_SKIP(
+            "window open failed (no desktop session or no wgpu adapter), "
+            "the GPU present path has no instance to verify");
     }
     auto &surface = session.surface();
 
@@ -103,7 +105,9 @@ AURORA_TEST_CASE(gpu_wgpu_preference_routing) {
     if (!created) {
         // 强制 GPU 栅格不可用：必须报 renderer-unavailable（不静默降级为软件/其他 GPU 路径）。
         AURORA_TEST_CHECK_EQ(created.error().code, std::string{"renderer-unavailable"});
-        AURORA_TEST_SKIP("无 wgpu adapter，强制路由的错误分支已由上方 code 断言覆盖");
+        AURORA_TEST_SKIP(
+            "no wgpu adapter: the forced-routing error branch "
+            "is already covered by the code assertion above");
     }
     auto win = std::move(created.value());
     AURORA_TEST_CHECK(dynamic_cast<HostWgpuSurface *>(&win->surface()) != nullptr);
@@ -130,7 +134,7 @@ AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
     auto created = au::create_window(opts);
     if (!created) {
         AURORA_TEST_CHECK_EQ(created.error().code, std::string{"renderer-unavailable"});
-        AURORA_TEST_SKIP("无 Wayland 会话或无 wgpu adapter，Wayland GPU 宿主无实例可验");
+        AURORA_TEST_SKIP("no Wayland session or no wgpu adapter, the Wayland GPU host has no instance to verify");
     }
     auto win = std::move(created.value());
     auto *ws = dynamic_cast<au::WgpuWaylandSurface *>(&win->surface());
@@ -178,7 +182,9 @@ AURORA_TEST_CASE(wayland_csd_decoration_replays_into_gpu_frame) {
     auto created = au::create_window(opts);
     if (!created) {
         AURORA_TEST_CHECK_EQ(created.error().code, std::string{"renderer-unavailable"});
-        AURORA_TEST_SKIP("无 Wayland 会话或无 wgpu adapter，CSD 装饰合成无实例可验");
+        AURORA_TEST_SKIP(
+            "no Wayland session or no wgpu adapter, "
+            "the CSD decoration composition has no instance to verify");
     }
     auto win = std::move(created.value());
     auto *ws = dynamic_cast<au::WgpuWaylandSurface *>(&win->surface());
@@ -206,10 +212,10 @@ AURORA_TEST_CASE(wayland_csd_decoration_replays_into_gpu_frame) {
 }
 #else
 AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_WAYLAND 未开启，Wayland GPU 宿主整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WAYLAND not enabled, the Wayland GPU host is compiled out by the macro");
 }
 AURORA_TEST_CASE(wayland_csd_decoration_replays_into_gpu_frame) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_WAYLAND 未开启，Wayland GPU 宿主整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WAYLAND not enabled, the Wayland GPU host is compiled out by the macro");
 }
 #endif
 
@@ -220,16 +226,18 @@ AURORA_TEST_CASE(wayland_csd_decoration_replays_into_gpu_frame) {
 namespace aurora::test_cases::itest_wgpu_present {
 
 AURORA_TEST_CASE(wgpu_win32_surface_present_frames_and_no_fallback) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11/WAYLAND）未开启，Wgpu*Surface 整体被宏剔除");
+    AURORA_TEST_SKIP(
+        "AURORA_BACKEND_GPU_WGPU or a host macro (WIN32/X11/WAYLAND) is not enabled, "
+        "Wgpu*Surface is compiled out by the macro");
 }
 AURORA_TEST_CASE(gpu_wgpu_preference_routing) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11/WAYLAND）未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU or a host macro (WIN32/X11/WAYLAND) is not enabled");
 }
 AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11/WAYLAND）未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU or a host macro (WIN32/X11/WAYLAND) is not enabled");
 }
 AURORA_TEST_CASE(wayland_csd_decoration_replays_into_gpu_frame) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU 或宿主宏（WIN32/X11/WAYLAND）未开启");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GPU_WGPU or a host macro (WIN32/X11/WAYLAND) is not enabled");
 }
 
 }  // namespace aurora::test_cases::itest_wgpu_present

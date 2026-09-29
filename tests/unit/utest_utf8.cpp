@@ -81,7 +81,7 @@ AURORA_TEST_CASE(cp_slice_extracts_codepoint_ranges) {
 
 AURORA_TEST_CASE(win32_wide_conversion_roundtrip) {
 #ifndef AURORA_PLATFORM_WINDOWS
-    AURORA_TEST_SKIP("utf8_to_wstr/wstr_to_utf8 仅在 AURORA_PLATFORM_WINDOWS 编译");
+    AURORA_TEST_SKIP("utf8_to_wstr/wstr_to_utf8 are only compiled on AURORA_PLATFORM_WINDOWS");
 #else
     // 空输入契约：空串 → 空 wstring；空指针 → 空 string。
     AURORA_TEST_CHECK(aurora::internal::utf8_to_wstr("").empty());

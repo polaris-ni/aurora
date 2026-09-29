@@ -224,7 +224,7 @@ AURORA_TEST_CASE(provider_reads_project_through_the_marshal) {
     detail::Win32UiaBridge bridge(nullptr);
     bridge.activate();
     if (!bridge.is_active()) {
-        AURORA_TEST_SKIP("COM 公寓或 UIAutomationCore.dll 不可用，桥未激活 ⇒ 快照不投影");
+        AURORA_TEST_SKIP("COM apartment or UIAutomationCore.dll unavailable: bridge inactive, no snapshot projection");
         return;
     }
     QueuedPoster poster;
@@ -274,32 +274,32 @@ AURORA_TEST_CASE(provider_reads_project_through_the_marshal) {
 
 // 目标：非主人线程的回投必须在主人线程执行，结果按值带回调用线程。
 AURORA_TEST_CASE(cross_thread_eval_runs_on_the_owner_thread) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 is not enabled (non-Windows); the UIA bridge TU is compiled out");
 }
 
 // 目标：主人线程自己调回投口时就地执行、零入队。
 AURORA_TEST_CASE(owner_thread_eval_runs_inline_without_queuing) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 is not enabled (non-Windows); the UIA bridge TU is compiled out");
 }
 
 // 目标：进程级回投器未安装 → 与 `post_to_main` 同语义，就地执行。
 AURORA_TEST_CASE(missing_poster_falls_back_to_inline_execution) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 is not enabled (non-Windows); the UIA bridge TU is compiled out");
 }
 
 // 目标：超时预算内没排空即降级为零值，且晚到的队列项不得补做。
 AURORA_TEST_CASE(timeout_returns_zero_value_and_drops_the_late_task) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 is not enabled (non-Windows); the UIA bridge TU is compiled out");
 }
 
 // 目标：桥先于在途队列项析构时，存活闸拦住闭包。
 AURORA_TEST_CASE(bridge_destruction_drops_a_still_queued_task) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 is not enabled (non-Windows); the UIA bridge TU is compiled out");
 }
 
 // 目标：provider 侧的快照副本读与导航读都经回投。
 AURORA_TEST_CASE(provider_reads_project_through_the_marshal) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 未开启（非 Windows 平台），UIA 桥 TU 整体被宏剔除");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 is not enabled (non-Windows); the UIA bridge TU is compiled out");
 }
 
 #endif

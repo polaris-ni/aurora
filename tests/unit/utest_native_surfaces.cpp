@@ -66,7 +66,7 @@ AURORA_TEST_CASE(aggregate_header_exposes_surface_contract) {
     AURORA_TEST_CHECK_NEAR(surface.size().height, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NULL(surface.data());
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS 未开启，聚合头不暴露 HeadlessSurface");
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: the aggregate header hides HeadlessSurface");
 #endif
 }
 
@@ -80,41 +80,42 @@ AURORA_TEST_CASE(backend_surface_set_cursor_contract) {
     defined(AURORA_BACKEND_WAYLAND) || defined(AURORA_BACKEND_MACOS) || defined(AURORA_BACKEND_D3D11)
 #ifdef AURORA_BACKEND_WIN32
     static_assert(!std::is_same_v<decltype(&Win32Surface::set_cursor), void (Surface::*)(CursorShape)>,
-                  "Win32Surface 必须覆写 set_cursor");
+                  "Win32Surface must override set_cursor");
 #endif
 #ifdef AURORA_BACKEND_D3D11
     static_assert(!std::is_same_v<decltype(&D3D11Surface::set_cursor), void (Surface::*)(CursorShape)>,
-                  "D3D11Surface 必须覆写 set_cursor（复用 detail::set_win32_cursor）");
+                  "D3D11Surface must override set_cursor (reuses detail::set_win32_cursor)");
 #endif
 #ifdef AURORA_BACKEND_GLFW
     static_assert(!std::is_same_v<decltype(&GlfwSurface::set_cursor), void (Surface::*)(CursorShape)>,
-                  "GlfwSurface 必须覆写 set_cursor");
+                  "GlfwSurface must override set_cursor");
 #endif
 #ifdef AURORA_BACKEND_X11
     static_assert(!std::is_same_v<decltype(&X11Surface::set_cursor), void (Surface::*)(CursorShape)>,
-                  "X11Surface 必须覆写 set_cursor");
+                  "X11Surface must override set_cursor");
 #endif
 #ifdef AURORA_BACKEND_WAYLAND
     static_assert(!std::is_same_v<decltype(&WaylandSurface::set_cursor), void (Surface::*)(CursorShape)>,
-                  "WaylandSurface 必须覆写 set_cursor");
+                  "WaylandSurface must override set_cursor");
 #endif
 #ifdef AURORA_BACKEND_MACOS
     static_assert(!std::is_same_v<decltype(&MacOSSurface::set_cursor), void (Surface::*)(CursorShape)>,
-                  "MacOSSurface 必须覆写 set_cursor");
+                  "MacOSSurface must override set_cursor");
 #endif
 #ifdef AURORA_BACKEND_GPU_WGPU
 #ifdef AURORA_BACKEND_WIN32
     static_assert(!std::is_same_v<decltype(&WgpuWin32Surface::set_cursor), void (Surface::*)(CursorShape)>,
-                  "WgpuWin32Surface 必须覆写 set_cursor（转发 Win32Host 宿主）");
+                  "WgpuWin32Surface must override set_cursor (forwards to the Win32Host host)");
 #endif
 #ifdef AURORA_BACKEND_X11
     static_assert(!std::is_same_v<decltype(&WgpuX11Surface::set_cursor), void (Surface::*)(CursorShape)>,
-                  "WgpuX11Surface 必须覆写 set_cursor（转发内嵌 X11Surface 宿主）");
+                  "WgpuX11Surface must override set_cursor (forwards to the embedded X11Surface host)");
 #endif
 #endif
     AURORA_TEST_CHECK_TRUE(true);
 #else
-    AURORA_TEST_SKIP("无任何真实窗口后端开启（默认无头构建），后端 set_cursor 覆写契约无法判定");
+    AURORA_TEST_SKIP(
+        "no real window backend is enabled (default headless build), the set_cursor override contract is undecided");
 #endif
 }
 
@@ -128,19 +129,21 @@ AURORA_TEST_CASE(windows_family_native_handle_contract) {
 #if defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_D3D11)
 #ifdef AURORA_BACKEND_WIN32
     static_assert(!std::is_same_v<decltype(&Win32Surface::native_handle), void *(Surface::*)() const>,
-                  "Win32Surface 必须覆写 native_handle()（返回宿主 HWND）");
+                  "Win32Surface must override native_handle() (returns the host HWND)");
     static_assert(std::is_same_v<decltype(&Win32Surface::hwnd), void *(Win32Surface::*)() const>,
-                  "Win32Surface::hwnd() 须为 const 且返回 void*");
+                  "Win32Surface::hwnd() must be const and return void*");
 #endif
 #ifdef AURORA_BACKEND_D3D11
     static_assert(!std::is_same_v<decltype(&D3D11Surface::native_handle), void *(Surface::*)() const>,
-                  "D3D11Surface 必须覆写 native_handle()（与 Win32Surface 同宿主）");
+                  "D3D11Surface must override native_handle() (same host as Win32Surface)");
     static_assert(std::is_same_v<decltype(&D3D11Surface::hwnd), void *(D3D11Surface::*)() const>,
-                  "D3D11Surface::hwnd() 须为 const 且返回 void*");
+                  "D3D11Surface::hwnd() must be const and return void*");
 #endif
     AURORA_TEST_CHECK_TRUE(true);
 #else
-    AURORA_TEST_SKIP("Win32/D3D11 均未开启（默认无头构建），Win32 家族 native_handle 契约无法判定");
+    AURORA_TEST_SKIP(
+        "neither Win32 nor D3D11 is enabled (default headless build), the Win32 family native_handle "
+        "contract is undecided");
 #endif
 }
 
@@ -154,16 +157,18 @@ AURORA_TEST_CASE(windows_family_capture_window_contract) {
 #ifdef AURORA_BACKEND_WIN32
     static_assert(
         !std::is_same_v<decltype(&Win32Surface::capture_window), Result<bool> (Surface::*)(const std::string &)>,
-        "Win32Surface 必须覆写 capture_window（走 detail::capture_window_by_hwnd）");
+        "Win32Surface must override capture_window (via detail::capture_window_by_hwnd)");
 #endif
 #ifdef AURORA_BACKEND_D3D11
     static_assert(
         !std::is_same_v<decltype(&D3D11Surface::capture_window), Result<bool> (Surface::*)(const std::string &)>,
-        "D3D11Surface 必须覆写 capture_window（与 Win32Surface 共用 Win32Host 宿主）");
+        "D3D11Surface must override capture_window (shares the Win32Host host with Win32Surface)");
 #endif
     AURORA_TEST_CHECK_TRUE(true);
 #else
-    AURORA_TEST_SKIP("Win32/D3D11 均未开启（默认无头构建），Win32 家族 capture_window 契约无法判定");
+    AURORA_TEST_SKIP(
+        "neither Win32 nor D3D11 is enabled (default headless build), the Win32 family capture_window "
+        "contract is undecided");
 #endif
 }
 

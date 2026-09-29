@@ -157,7 +157,7 @@ template <typename T>
 
 template <typename E>
 [[nodiscard]] auto enum_text(E value) -> std::string {
-    static_assert(std::is_enum_v<E>, "enum_text 仅用于枚举类型");
+    static_assert(std::is_enum_v<E>, "enum_text accepts enum types only");
     const auto numeric = static_cast<long long>(static_cast<std::underlying_type_t<E>>(value));
     const std::string qualified = type_name_str<E>();
     // 登记表的键是「属性描述符里的类型名」——限定名取最后一段。

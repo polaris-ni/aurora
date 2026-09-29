@@ -209,6 +209,7 @@ AURORA_TEST_CASE(referenced_label_rename_propagates_name_to_dependent) {
     // 此用例把这条隐式契约钉成显式断言。
     ProbeColumn root;
     auto label = std::make_shared<ProbeLeaf>("Text");
+    // CJK-LITERAL: cjk-fixture - Han text asserted through the a11y name projection (rename propagates to referrers)
     label->set_accessibility_label("音量");
     label->set_stable_key("vol-label");
     auto box = std::make_shared<ProbeLeaf>("Checkbox");
@@ -219,9 +220,11 @@ AURORA_TEST_CASE(referenced_label_rename_propagates_name_to_dependent) {
     const TreeSnapshot before = aurora::a11y::build_tree_snapshot(root);
     const NodeSnapshot *dep = before.find(box->runtime_id());
     AURORA_TEST_REQUIRE_NOT_NULL(dep);
+    // CJK-LITERAL: cjk-fixture - Han name resolved through the labelled-by reference
     AURORA_TEST_CHECK_EQ(dep->node.name, std::string{"音量"});
     AURORA_TEST_CHECK_EQ(dep->node.labelled_by_id, label->runtime_id());
 
+    // CJK-LITERAL: cjk-fixture - renamed Han label drives the NameChanged diff
     label->set_accessibility_label("音量（新）");
     const TreeSnapshot after = aurora::a11y::build_tree_snapshot(root);
 
@@ -230,6 +233,7 @@ AURORA_TEST_CASE(referenced_label_rename_propagates_name_to_dependent) {
     AURORA_TEST_CHECK_TRUE(has_field(d, box->runtime_id(), FieldChange::Name));
     const NodeSnapshot *after_dep = after.find(box->runtime_id());
     AURORA_TEST_REQUIRE_NOT_NULL(after_dep);
+    // CJK-LITERAL: cjk-fixture - renamed Han label re-resolved through the reference
     AURORA_TEST_CHECK_EQ(after_dep->node.name, std::string{"音量（新）"});
 }
 

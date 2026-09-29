@@ -66,7 +66,7 @@ AURORA_TEST_CASE(suffix_string_is_semver_prerelease_token) {
     AURORA_TEST_CHECK_NE(suffix.front(), '-');
     AURORA_TEST_CHECK_MSG(
         std::ranges::none_of(suffix, [](char c) -> bool { return std::isspace(static_cast<unsigned char>(c)) != 0; }),
-        "semver 预发布段不允许空白字符");
+        "semver prerelease identifiers must not contain whitespace");
 #else
     // 稳定版：完整串必须与数字段完全一致（后缀缺失路径）。
     AURORA_TEST_CHECK_EQ(AURORA_VERSION_STRING, AURORA_VERSION_NUMERIC);

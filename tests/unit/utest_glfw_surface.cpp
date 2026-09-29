@@ -57,9 +57,9 @@ AURORA_TEST_CASE(glfw_surface_window_creation_skipped) {
 #ifdef AURORA_BACKEND_GLFW
     // GlfwSurface 构造会 glfwInit + 创建真实窗口与 GL 上下文（无显示环境时抛
     // std::runtime_error）；帧管线/present 依赖真实窗口，属集成层覆盖范围。
-    AURORA_TEST_SKIP("GlfwSurface 构造会创建真实窗口与 OpenGL 上下文，单测不触碰 OS 资源");
+    AURORA_TEST_SKIP("GlfwSurface construction creates a real window and GL context; unit tests avoid OS resources");
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW 未开启（默认 OFF），后端实现未编译链接");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW is not enabled (default OFF): the backend is not compiled or linked");
 #endif
 }
 
@@ -67,10 +67,13 @@ AURORA_TEST_CASE(glfw_surface_live_capture_window) {
 #ifdef AURORA_BACKEND_GLFW
     const char *opt_in = std::getenv("AURORA_LIVE_GLFW");
     if (opt_in == nullptr || *opt_in == '\0') {
-        AURORA_TEST_SKIP("需显式置 AURORA_LIVE_GLFW=1：本用例会创建真实窗口与 GL 上下文并截帧");
+        AURORA_TEST_SKIP(
+            "set AURORA_LIVE_GLFW=1 explicitly: this case creates a real window and GL "
+            "context and captures a frame");
     }
     if (!feature_flags().debug) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用（Release/AUTO 裁切）：capture_window 恒返回 disabled");
+        AURORA_TEST_SKIP(
+            "AURORA_ENABLE_DEBUG is not enabled: capture_window is compiled out and always returns disabled");
     }
 
     GlfwSurface::Config cfg;
@@ -110,7 +113,7 @@ AURORA_TEST_CASE(glfw_surface_live_capture_window) {
     f.close();
     std::remove(path.c_str());
 #else
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW 未开启（默认 OFF），后端实现未编译链接");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW is not enabled (default OFF): the backend is not compiled or linked");
 #endif
 }
 

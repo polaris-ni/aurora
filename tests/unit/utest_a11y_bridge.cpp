@@ -149,9 +149,11 @@ AURORA_TEST_CASE(announcement_bypasses_diff_and_reaches_provider) {
     p.activate();
 
     const auto widget = std::make_shared<ProbeLeaf>();
+    // CJK-LITERAL: cjk-fixture - Han announcement text must reach the provider byte-identical
     announce_accessibility("保存成功", widget.get());
 
     AURORA_TEST_REQUIRE_EQ(p.announcements.size(), std::size_t{1});
+    // CJK-LITERAL: cjk-fixture - asserts the same Han announcement string echoed by the provider
     AURORA_TEST_CHECK_STREQ(p.announcements.front().first.c_str(), "保存成功");
     AURORA_TEST_CHECK_EQ(p.announcements.front().second, widget.get());
     AURORA_TEST_CHECK_TRUE(p.events.empty());  // 播报不经 on_event

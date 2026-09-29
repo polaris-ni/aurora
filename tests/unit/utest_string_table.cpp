@@ -20,9 +20,11 @@ AURORA_TEST_CASE(add_and_lookup_per_locale) {
     const aurora::Locale en{.language = "en"};
     const aurora::Locale zh_cn{.language = "zh", .region = "CN"};
     table.add(en, "greeting", "Hello");
+    // CJK-LITERAL: cjk-fixture - the zh locale entry holds the Han translated text
     table.add(zh_cn, "greeting", "你好");
     AURORA_TEST_REQUIRE(table.lookup("greeting", en).has_value());
     AURORA_TEST_CHECK_EQ(require_value(table.lookup("greeting", en)), std::string("Hello"));
+    // CJK-LITERAL: cjk-fixture - lookup must echo the Han zh translation back unchanged
     AURORA_TEST_REQUIRE(table.lookup("greeting", zh_cn).has_value());
     AURORA_TEST_CHECK_EQ(require_value(table.lookup("greeting", zh_cn)), std::string("你好"));
 }
@@ -36,9 +38,11 @@ AURORA_TEST_CASE(lookup_falls_back_to_default_locale) {
     AURORA_TEST_REQUIRE(table.lookup("hi", zh).has_value());
     AURORA_TEST_CHECK_EQ(require_value(table.lookup("hi", zh)), std::string("Hello"));  // 默认区域为 en
     table.set_default_locale(zh);
+    // CJK-LITERAL: cjk-fixture - the default-locale fallback must serve the Han zh translation
     table.add(zh, "hi", "你好");
     const aurora::Locale fr{.language = "fr"};
     AURORA_TEST_REQUIRE(table.lookup("hi", fr).has_value());
+    // CJK-LITERAL: cjk-fixture - the fr request falls back to the Han zh default entry
     AURORA_TEST_CHECK_EQ(require_value(table.lookup("hi", fr)), std::string("你好"));  // 默认区域改为 zh
     AURORA_TEST_CHECK_FALSE(table.lookup("absent", fr).has_value());
 }

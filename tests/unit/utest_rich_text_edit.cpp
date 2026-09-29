@@ -193,10 +193,10 @@ AURORA_TEST_CASE(composition_preedit_then_commit) {
     AURORA_TEST_CHECK_EQ(edit.accessibility_value(), std::string{"nihao"});
 
     TextCompositionEvent commit;
-    commit.committed = "你好";
+    commit.committed = "你好";  // CJK-LITERAL: cjk-fixture - the IME commit text must be Han
     edit.on_text_composition(commit);
     AURORA_TEST_CHECK_FALSE(edit.is_composing());
-    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"你好"});
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"你好"});  // CJK-LITERAL: cjk-fixture - same Han commit
 
     // 序列化只反映已上屏文本，不含 preedit
     TextCompositionEvent pending;
@@ -204,7 +204,7 @@ AURORA_TEST_CASE(composition_preedit_then_commit) {
     edit.on_text_composition(pending);
     Json out;
     edit.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(out["text"].get<std::string>(), "你好");
+    AURORA_TEST_CHECK_EQ(out["text"].get<std::string>(), "你好");  // CJK-LITERAL: cjk-fixture - Han text serialized
 }
 
 AURORA_TEST_CASE(blur_cancels_pending_composition) {

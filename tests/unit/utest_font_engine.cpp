@@ -280,6 +280,7 @@ AURORA_TEST_CASE(shape_cache_accumulates_hits) {
 AURORA_TEST_CASE(caret_x_is_codepoint_indexed_for_utf8) {
     // 码点索引（非字节索引）：中文串按码点推进，不产生越界/乱码。
     const Font font;
+    // CJK-LITERAL: cjk-fixture - Han text is required to exercise codepoint (not byte) caret indexing
     const std::string text = "中国";  // 6 字节 / 2 码点
     AURORA_TEST_CHECK_NEAR(render::FontEngine::caret_x(text, 0, font), 0.0, 1e-6);
     AURORA_TEST_CHECK_GT(render::FontEngine::caret_x(text, 1, font), 0.0);

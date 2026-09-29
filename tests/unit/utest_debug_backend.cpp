@@ -124,7 +124,7 @@ AURORA_TEST_CASE(output_directory_roundtrip_and_default_reset) {
 
 AURORA_TEST_CASE(capture_disabled_returns_structured_error) {
     if (probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 已启用：关闭态 disabled 错误语义不适用");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is enabled: the disabled-state error semantics do not apply");
     }
     StubSurface surface;
     const std::string path = temp_png_path("aurora_utest_capture_disabled.png");
@@ -139,7 +139,8 @@ AURORA_TEST_CASE(capture_disabled_returns_structured_error) {
 
 AURORA_TEST_CASE(capture_framebuffer_writes_png_file) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：帧缓冲截图按宏裁切返回 disabled 错误");
+        AURORA_TEST_SKIP(
+            "AURORA_ENABLE_DEBUG is not enabled: framebuffer capture is compiled out and returns a disabled error");
     }
     StubSurface surface;
     AURORA_TEST_REQUIRE_TRUE(surface.begin_frame(4, 4).ok());
@@ -178,7 +179,7 @@ AURORA_TEST_CASE(capture_onscreen_window_unsupported_or_disabled) {
 
 AURORA_TEST_CASE(surface_state_reflects_surface_when_enabled) {
     if (!probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 未启用：surface_state 按宏裁切返回 unavailable");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: surface_state is compiled out and returns unavailable");
     }
     StubSurface surface;
     const Json j = surface_state(surface);
@@ -199,7 +200,7 @@ AURORA_TEST_CASE(surface_state_reflects_surface_when_enabled) {
 
 AURORA_TEST_CASE(surface_state_unavailable_when_disabled) {
     if (probe_debug_enabled()) {
-        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG 已启用：关闭态 unavailable 语义不适用");
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is enabled: the disabled-state unavailable semantics do not apply");
     }
     StubSurface surface;
     const Json j = surface_state(surface);

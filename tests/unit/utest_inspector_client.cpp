@@ -163,7 +163,7 @@ namespace aurora::test_cases::utest_inspector_client {
 
 AURORA_TEST_CASE(refuses_before_touching_a_socket) {
 #ifdef AURORA_PLATFORM_WASM
-    AURORA_TEST_SKIP("浏览器运行时无 BSD socket 语义，本客户端不参与 wasm 构建");
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; this client is not built for wasm");
 #else
     // 三种入口校验都在建连之前拒单，`error` 非空即未发出任何字节。
     const auto non_loopback = aurora::tools::inspector::http_request("GET", "inspector.example", 6280, "/api/tree");
@@ -188,7 +188,7 @@ AURORA_TEST_CASE(refuses_before_touching_a_socket) {
 
 AURORA_TEST_CASE(io_timeout_survives_a_slow_response) {
 #ifdef AURORA_PLATFORM_WASM
-    AURORA_TEST_SKIP("浏览器运行时无 BSD socket 语义，本客户端不参与 wasm 构建");
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; this client is not built for wasm");
 #else
     AURORA_TEST_REQUIRE_THREADS();
 #ifdef AURORA_PLATFORM_WINDOWS
@@ -218,7 +218,7 @@ AURORA_TEST_CASE(io_timeout_survives_a_slow_response) {
 // 环境变量脏值（非数字 / 越界 / 尾随杂物 / 空串）一律按「未声明」回落默认。
 AURORA_TEST_CASE(resolve_port_prefers_argument_then_env_then_default) {
 #ifdef AURORA_PLATFORM_WASM
-    AURORA_TEST_SKIP("浏览器运行时无 BSD socket 语义，本客户端不参与 wasm 构建");
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; this client is not built for wasm");
 #else
     using aurora::tools::e2e::resolve_port;
     const char *env_name = aurora::tools::inspector::AURORA_PORT_ENV.data();
@@ -251,7 +251,7 @@ AURORA_TEST_CASE(resolve_port_prefers_argument_then_env_then_default) {
 // 不得伪装成空树或空结果——这是驱动方区分「环境未就绪」与「被测界面为空」的判据。
 AURORA_TEST_CASE(transport_error_distinguishable_when_server_down) {
 #ifdef AURORA_PLATFORM_WASM
-    AURORA_TEST_SKIP("浏览器运行时无 BSD socket 语义，本客户端不参与 wasm 构建");
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; this client is not built for wasm");
 #else
     // 先开监听拿一个系统分配的端口号再立刻关掉：同一时刻几乎不可能有人抢注，
     // 由此得到「肯定没人监听」的回环端口。
@@ -277,9 +277,9 @@ AURORA_TEST_CASE(transport_error_distinguishable_when_server_down) {
 // 经能力层走一遍 树查询 → 定位 → 注入 → 抓帧 → 停机后可区分 的完整链路。
 AURORA_TEST_CASE(end_to_end_handshake_headless_server) {
 #ifdef AURORA_PLATFORM_WASM
-    AURORA_TEST_SKIP("浏览器运行时无 BSD socket 语义，本客户端不参与 wasm 构建");
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; this client is not built for wasm");
 #elif !defined(AURORA_BUILD_INSPECTOR_SERVER)
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER=OFF：InspectorServer 未编入，端到端握手无从谈起");
+    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER=OFF: InspectorServer is not built, no end-to-end handshake");
 #else
     namespace e2e = aurora::tools::e2e;
 

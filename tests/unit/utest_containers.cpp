@@ -220,10 +220,11 @@ AURORA_TEST_CASE(cross_axis_stretch_expands_child) {
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[0].bounds().size.width, 200.0F, 1e-4F);
 }
 
-/// @brief 判定诊断列表中是否含「Column + Baseline」降级提示（消息以 Column 开头、where 为 layout）。
+/// @brief 判定诊断列表中是否含「Column + Baseline」降级提示
+///        （消息取自 Column::on_layout 的英文提示开头、where 为 layout）。
 auto has_column_baseline_notice(const std::vector<Diagnostic> &diags) -> bool {
     return std::ranges::any_of(diags, [](const auto &d) {
-        return std::string{d.where} == "layout" && std::string{d.message}.starts_with("Column");
+        return std::string{d.where} == "layout" && std::string{d.message}.starts_with("The cross axis of Column");
     });
 }
 
@@ -319,11 +320,13 @@ AURORA_TEST_CASE(column_baseline_falls_back_to_start_and_warns_once) {
     // Column 交叉轴是水平的：按 Start（x 均为 0），不崩。
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[0].bounds().origin.x, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().origin.x, 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_MSG(has_column_baseline_notice(Diagnostics::take()), "Column + Baseline 须发一次降级提示");
+    AURORA_TEST_CHECK_MSG(has_column_baseline_notice(Diagnostics::take()),
+                          "Column + Baseline must emit one degraded notice");
 
     // 重复布局不再提示（每实例一次，避免逐帧刷屏）。
     LayoutEngine::layout(col, bounded(200.0F, 200.0F));
-    AURORA_TEST_CHECK_MSG(!has_column_baseline_notice(Diagnostics::take()), "降级提示不得每帧重复");
+    AURORA_TEST_CHECK_MSG(!has_column_baseline_notice(Diagnostics::take()),
+                          "the degraded notice must not repeat per frame");
 }
 
 AURORA_TEST_CASE(validate_props_rejects_negative_gap) {

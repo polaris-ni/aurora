@@ -200,11 +200,14 @@ AURORA_TEST_CASE(codegen_key_without_public_write_path_is_dropped_not_invented) 
         to_code(make_node("Splitter", au::Json{{"orientation", "Vertical"}, {"ratio", 0.5F}}), CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(splitter.find("orientation") == std::string::npos,
                           "no write path: Splitter orientation dropped rather than invented");
-    AURORA_TEST_CHECK_MSG(splitter.find("SplitterOrientation") == std::string::npos, "no write path: 不臆造枚举落点");
+    AURORA_TEST_CHECK_MSG(splitter.find("SplitterOrientation") == std::string::npos,
+                          "no write path: does not invent an enum landing point");
     // 未注册类型同理：无从判定写入路径，就不产出 `au::Whatever` 之类的臆造形态。
     const std::string unknown = to_code(make_node("Whatever", au::Json{{"fit", "Cover"}}), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(unknown.find("Cover") == std::string::npos, "no write path: 未注册类型的属性省略");
-    AURORA_TEST_CHECK_MSG(unknown.find("WhateverProps") == std::string::npos, "no write path: 不臆造 Props 聚合");
+    AURORA_TEST_CHECK_MSG(unknown.find("Cover") == std::string::npos,
+                          "no write path: props of unregistered types are omitted");
+    AURORA_TEST_CHECK_MSG(unknown.find("WhateverProps") == std::string::npos,
+                          "no write path: does not invent a Props aggregate");
 }
 
 AURORA_TEST_CASE(codegen_font_weight_and_text_decoration) {
@@ -234,6 +237,7 @@ AURORA_TEST_CASE(codegen_base_props_only_reach_step_style) {
                                     {"width", au::Json::array({"px", 120.0F})},
                                     {"height", "fill"},
                                     {"show", false},
+                                    // CJK-LITERAL: cjk-fixture - Han generator payload, asserted below
                                     {"accessibility_label", "提交"},
                                     {"stable_key", "submit-btn"},
                                     {"labelled_by", "form-title"}};
@@ -249,6 +253,7 @@ AURORA_TEST_CASE(codegen_base_props_only_reach_step_style) {
     AURORA_TEST_CHECK_MSG(step.find("__w0.show = false;") != std::string::npos, "step assigns public show member");
     AURORA_TEST_CHECK_MSG(step.find("__w0.width(au::px(120.0f));") != std::string::npos, "step calls width() setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.height(au::fill());") != std::string::npos, "step calls height() setter");
+    // CJK-LITERAL: cjk-fixture - same Han label expected back from the generator verbatim
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_accessibility_label(\"提交\");") != std::string::npos,
                           "step calls set_accessibility_label");
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_stable_key(\"submit-btn\");") != std::string::npos,
@@ -304,6 +309,7 @@ AURORA_TEST_CASE(codegen_nested_and_setter_props_only_reach_step_style) {
     AURORA_TEST_CHECK_MSG(col_step.find("__w0.flex.main_axis_size = au::MainAxisSize::Max;") != std::string::npos,
                           "step writes flex.main_axis_size");
 
+    // CJK-LITERAL: cjk-fixture - Han placeholder fed to the generator as payload data
     const std::string input_step = to_code(
         make_node("TextInput", au::Json{{"placeholder", "姓名"}, {"corner_radius", 4.0F}}), CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(input_step.find("__w0.set_corner_radius(4.0f);") != std::string::npos,
@@ -451,7 +457,7 @@ AURORA_TEST_CASE(codegen_enum_values_canonicalized_from_self_description) {
     // 列表里没有的取值不猜：原样输出，交由产物编译体检暴露。
     const std::string odd = to_code(make_text(au::Json{{"content", "Hi"}, {"text_align", "Justified"}}));
     AURORA_TEST_CHECK_MSG(odd.find("au::TextAlign::Justified") != std::string::npos,
-                          "canonicalize: 未声明取值保留原样，不改成别的枚举项");
+                          "canonicalize: undeclared value kept as-is, not rewritten to another enum member");
 }
 
 AURORA_TEST_CASE(codegen_font_weight_and_enum_numeric_forms) {
@@ -460,14 +466,16 @@ AURORA_TEST_CASE(codegen_font_weight_and_enum_numeric_forms) {
     const std::string weight =
         to_code(make_text(au::Json{{"content", "Hi"}, {"font_weight", "400"}}), CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(weight.find("__w0.font.weight = 400;") != std::string::npos,
-                          "font_weight: CSS 数字串 → int 字面量");
-    AURORA_TEST_CHECK_MSG(weight.find("au::FontWeight::") == std::string::npos, "font_weight: 不拼枚举项名");
+                          "font_weight: CSS numeric string -> int literal");
+    AURORA_TEST_CHECK_MSG(weight.find("au::FontWeight::") == std::string::npos,
+                          "font_weight: does not assemble an enum member name");
 
     // 枚举属性（`Stack.fit` 是 `StackFit`）遇数字取值：自描述没给「序号 → 取值名」，
     // 按序号猜枚举项等于臆造 API，故省略整条属性。
     const std::string fit = to_code(make_node("Stack", au::Json{{"fit", 2}}), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(fit.find("fit") == std::string::npos, "enum 属性的数字取值省略而非猜枚举项");
-    AURORA_TEST_CHECK_MSG(fit.find("StackFit") == std::string::npos, "enum 属性的数字取值不臆造枚举");
+    AURORA_TEST_CHECK_MSG(fit.find("fit") == std::string::npos,
+                          "numeric value on an enum prop is omitted rather than guessed");
+    AURORA_TEST_CHECK_MSG(fit.find("StackFit") == std::string::npos, "numeric value on an enum prop invents no enum");
 }
 
 AURORA_TEST_CASE(codegen_bare_number_for_length_prop_becomes_px) {
@@ -476,10 +484,10 @@ AURORA_TEST_CASE(codegen_bare_number_for_length_prop_becomes_px) {
     const std::string step =
         to_code(make_node("Stack", au::Json{{"width", 240.0F}, {"height", 60.0F}}), CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(step.find("__w0.width(au::px(240.0f));") != std::string::npos,
-                          "Length 属性遇裸数字按 px 包装");
+                          "Length prop wraps a bare number as px");
     AURORA_TEST_CHECK_MSG(step.find("__w0.height(au::px(60.0f));") != std::string::npos,
-                          "Length 属性遇裸数字按 px 包装（高）");
-    AURORA_TEST_CHECK_MSG(step.find("width(240") == std::string::npos, "不发射不可转换的裸浮点");
+                          "Length prop wraps a bare number as px (height)");
+    AURORA_TEST_CHECK_MSG(step.find("width(240") == std::string::npos, "no unconvertible bare float is emitted");
 }
 
 AURORA_TEST_CASE(codegen_shadowed_size_keys_stay_with_their_own_widget) {
@@ -488,10 +496,11 @@ AURORA_TEST_CASE(codegen_shadowed_size_keys_stay_with_their_own_widget) {
     const std::string title =
         to_code(make_node("TitleBar", au::Json{{"height", 36.0F}, {"title", "Aurora"}}), CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(title.find("__w0.set_height(36.0f);") != std::string::npos,
-                          "TitleBar height 走自己的 set_height");
+                          "TitleBar height uses its own set_height");
     AURORA_TEST_CHECK_MSG(title.find("__w0.set_title(\"Aurora\");") != std::string::npos,
-                          "TitleBar title 走 set_title");
-    AURORA_TEST_CHECK_MSG(title.find("au::px(36.0f)") == std::string::npos, "TitleBar height 不当基类 Length");
+                          "TitleBar title uses set_title");
+    AURORA_TEST_CHECK_MSG(title.find("au::px(36.0f)") == std::string::npos,
+                          "TitleBar height is not treated as base-class Length");
 
     // `Skeleton` 的占位尺寸由成对的 `set_size(Size)` 一次给出，两键各自无写入口 → 省略，不冒充基类宽度。
     const std::string skeleton =
@@ -499,9 +508,9 @@ AURORA_TEST_CASE(codegen_shadowed_size_keys_stay_with_their_own_widget) {
                 CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(
         skeleton.find("__w0.width(") == std::string::npos && skeleton.find("__w0.height(") == std::string::npos,
-        "Skeleton 的 width/height 不写成基类 Length setter");
+        "Skeleton width/height are not written as base-class Length setters");
     AURORA_TEST_CHECK_MSG(skeleton.find("__w0.set_duration(1.5f);") != std::string::npos,
-                          "Skeleton duration 走自己的 set_duration");
+                          "Skeleton duration uses its own set_duration");
 }
 
 AURORA_TEST_CASE(codegen_bespoke_ctor_types_drop_children_rather_than_misconstruct) {
@@ -509,28 +518,34 @@ AURORA_TEST_CASE(codegen_bespoke_ctor_types_drop_children_rather_than_misconstru
     // 把子节点硬塞进初始化列表必然编译失败，故保留类型本身、省略子节点。
     const std::string badge =
         to_code(make_node("Badge", au::Json{{"count", 3}}, au::Json::array({make_text(au::Json{{"content", "new"}})})));
-    AURORA_TEST_CHECK_MSG(badge.find("au::Badge") != std::string::npos, "bespoke: Badge 类型仍出现在产物里");
-    AURORA_TEST_CHECK_MSG(badge.find("au::Node{") == std::string::npos, "bespoke: Badge 的子节点不进构造实参");
+    AURORA_TEST_CHECK_MSG(badge.find("au::Badge") != std::string::npos, "bespoke: Badge type still appears in output");
+    AURORA_TEST_CHECK_MSG(badge.find("au::Node{") == std::string::npos,
+                          "bespoke: Badge children are not fed into ctor args");
 
     const std::string lazy_row = to_code(
         make_node("LazyRow", au::Json{{"item_count", 8}}, au::Json::array({make_text(au::Json{{"content", "row"}})})),
         CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(lazy_row.find("au::LazyRow{}") != std::string::npos, "bespoke: LazyRow 落成空构造");
-    AURORA_TEST_CHECK_MSG(lazy_row.find("au::Node{") == std::string::npos, "bespoke: LazyRow 子项是惰性构建的，不物化");
+    AURORA_TEST_CHECK_MSG(lazy_row.find("au::LazyRow{}") != std::string::npos,
+                          "bespoke: LazyRow emits an empty construction");
+    AURORA_TEST_CHECK_MSG(lazy_row.find("au::Node{") == std::string::npos,
+                          "bespoke: LazyRow items build lazily and are not materialized");
 }
 
 AURORA_TEST_CASE(codegen_unconstructible_types_keep_their_real_type_name) {
     // `Provider`/`Repeater` 等类模板与 `Hero` 这类只有位置参数构造的类型，连 `au::T{}` 都编译不过。
     // 产物保留真实类型名（比替换成别的控件诚实），由告警点名「须手工补构造实参」。
     const std::string hero = to_code(make_node("Hero", au::Json{{"show", true}}));
-    AURORA_TEST_CHECK_MSG(hero.find("au::Hero") != std::string::npos, "unconstructible: 保留 Hero 类型名");
-    AURORA_TEST_CHECK_MSG(hero.find("HeroProps") == std::string::npos, "unconstructible: 不臆造 HeroProps 聚合");
-    AURORA_TEST_CHECK_MSG(hero.find("au::Spacer") == std::string::npos, "unconstructible: 不替换成别的控件");
+    AURORA_TEST_CHECK_MSG(hero.find("au::Hero") != std::string::npos, "unconstructible: keeps the Hero type name");
+    AURORA_TEST_CHECK_MSG(hero.find("HeroProps") == std::string::npos,
+                          "unconstructible: no invented HeroProps aggregate");
+    AURORA_TEST_CHECK_MSG(hero.find("au::Spacer") == std::string::npos,
+                          "unconstructible: not swapped for another widget");
 }
 
 AURORA_TEST_CASE(codegen_text_input_props_route_through_setters) {
     // `TextInput` 以 `TextInputProps` 作构造参数、把值拷进 protected 字段，对外只有 `set_*()`/链式 setter：
     // 同名赋值（`w.value = ...`）取到的是同名成员函数，必须走登记的 setter 落点。
+    // CJK-LITERAL: cjk-fixture - Han placeholder fed to the generator, asserted verbatim below
     const std::string step = to_code(make_node("TextInput", au::Json{{"value", "Ada"},
                                                                      {"placeholder", "姓名"},
                                                                      {"font_size", 16.0F},
@@ -539,15 +554,17 @@ AURORA_TEST_CASE(codegen_text_input_props_route_through_setters) {
                                                                      {"obscure_text", false}}),
                                      CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_value(\"Ada\");") != std::string::npos, "TextInput value → set_value");
+    // CJK-LITERAL: cjk-fixture - same Han placeholder expected back verbatim
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_placeholder(\"姓名\");") != std::string::npos,
-                          "TextInput placeholder → set_placeholder");
+                          "TextInput placeholder -> set_placeholder");
     AURORA_TEST_CHECK_MSG(step.find("__w0.font_size(16.0f);") != std::string::npos,
-                          "TextInput font_size → 链式 setter");
+                          "TextInput font_size -> chained setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_max_length(40);") != std::string::npos, "TextInput max_length → setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_read_only(true);") != std::string::npos, "TextInput read_only → setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_obscure_text(false);") != std::string::npos,
                           "TextInput obscure_text → setter");
-    AURORA_TEST_CHECK_MSG(step.find("__w0.value =") == std::string::npos, "TextInput 不写同名成员赋值");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.value =") == std::string::npos,
+                          "TextInput never assigns the same-named member");
 }
 
 }  // namespace aurora::test_cases::itest_to_code
