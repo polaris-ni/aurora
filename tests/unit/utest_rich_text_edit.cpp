@@ -206,7 +206,8 @@ AURORA_TEST_CASE(composition_preedit_then_commit) {
     edit.on_text_composition(pending);
     Json out = Json::object();
     edit.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "text"), "你好");  // CJK-LITERAL: cjk-fixture - Han text serialized
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "text"),
+                         "你好");  // CJK-LITERAL: cjk-fixture - Han text serialized
 }
 
 AURORA_TEST_CASE(blur_cancels_pending_composition) {

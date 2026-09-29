@@ -19,9 +19,9 @@
 #include "aurora/render/offscreen.h"
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
-#include "framework/json_literals.h"
-#include "framework/json_access.h"
 #include "framework/golden.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_scatter_chart {
 using aurora::testing::require_child;

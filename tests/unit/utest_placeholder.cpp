@@ -96,8 +96,7 @@ AURORA_TEST_CASE(props_deserialize_roundtrip) {
     Json out = Json::object();
     p.serialize_props(out);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "message"), "restored");
-    AURORA_TEST_CHECK_EQ(
-        require_child_at(*require_child(out, "background_color"), 0)->as_or<int>(0), 10);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "background_color"), 0)->as_or<int>(0), 10);
     AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "border_color"), 1)->as_or<int>(0), 60);
     AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "text_color"), 2)->as_or<int>(0), 110);
 }

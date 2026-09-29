@@ -277,8 +277,8 @@ struct InspectorSession {
         au::Json t = au::Json::object();
         t.set("name", "validate_ui");
         t.set("description",
-            "Statically validate the UI tree against aurora_api.json schema: unknown type / missing required "
-            "prop / type mismatch / children policy; errors include JSON path and fix suggestions (for AI auto-fix)");
+              "Statically validate the UI tree against aurora_api.json schema: unknown type / missing required "
+              "prop / type mismatch / children policy; errors include JSON path and fix suggestions (for AI auto-fix)");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"tree"})));
         tools.push_back(std::move(t));
     }
@@ -291,7 +291,7 @@ struct InspectorSession {
         au::Json t = au::Json::object();
         t.set("name", "render_snapshot");
         t.set("description",
-            "Run offscreen layout on the UI-tree JSON and return a logical snapshot (type + box + children)");
+              "Run offscreen layout on the UI-tree JSON and return a logical snapshot (type + box + children)");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"tree"})));
         tools.push_back(std::move(t));
     }
@@ -301,9 +301,8 @@ struct InspectorSession {
         props.set("tree", obj_prop("UI-tree JSON"));
         props.set("width", int_prop("Canvas width (default 800)"));
         props.set("height", int_prop("Canvas height (default 600)"));
-        props.set("path", str_prop(
-            "Output PNG path; must be a relative path inside the working directory without '..' "
-            "(default aurora_render.png)"));
+        props.set("path", str_prop("Output PNG path; must be a relative path inside the working directory without '..' "
+                                   "(default aurora_render.png)"));
         au::Json t = au::Json::object();
         t.set("name", "render_png");
         t.set("description", "Run offscreen rendering on the UI-tree JSON and output a PNG file");
@@ -314,19 +313,20 @@ struct InspectorSession {
     {
         au::Json props = au::Json::object();
         props.set("tree", obj_prop("UI-tree JSON"));
-        props.set("baseline_path", str_prop(
-            "Golden baseline PNG to compare against; must be a relative path inside the working directory "
-            "without '..'"));
+        props.set(
+            "baseline_path",
+            str_prop("Golden baseline PNG to compare against; must be a relative path inside the working directory "
+                     "without '..'"));
         props.set("width", int_prop("Canvas width (default 800)"));
         props.set("height", int_prop("Canvas height (default 600)"));
         props.set("tolerance", int_prop("Per-channel color tolerance 0..255 (default 0)"));
         au::Json t = au::Json::object();
         t.set("name", "compare_snapshot");
         t.set("description",
-            "Render the UI-tree JSON offscreen and compare it against a golden baseline PNG. Returns a "
-            "semantic report: per-pixel statistics plus spatially clustered diff regions, each attributed "
-            "to the widget that drew it (widget_path understood by GET/PUT /api/widget/{path}). Use this "
-            "instead of eyeballing raw pixel counts when a visual regression fails.");
+              "Render the UI-tree JSON offscreen and compare it against a golden baseline PNG. Returns a "
+              "semantic report: per-pixel statistics plus spatially clustered diff regions, each attributed "
+              "to the widget that drew it (widget_path understood by GET/PUT /api/widget/{path}). Use this "
+              "instead of eyeballing raw pixel counts when a visual regression fails.");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"tree", "baseline_path"})));
         tools.push_back(std::move(t));
     }
@@ -354,13 +354,14 @@ struct InspectorSession {
     // generate_ui（Track B）
     {
         au::Json props = au::Json::object();
-        props.set("description", str_prop("Natural-language description, e.g. \"a column with a button and a slider\""));
+        props.set("description",
+                  str_prop("Natural-language description, e.g. \"a column with a button and a slider\""));
         au::Json t = au::Json::object();
         t.set("name", "generate_ui");
         t.set("description",
-            "Keyword-match natural language to a UI-tree JSON (no LLM involved). Covers every registered "
-            "component type; unmatched input falls back to a Text node. For LLM-backed generation, use "
-            "build_ui_prompt instead.");
+              "Keyword-match natural language to a UI-tree JSON (no LLM involved). Covers every registered "
+              "component type; unmatched input falls back to a Text node. For LLM-backed generation, use "
+              "build_ui_prompt instead.");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"description"})));
         tools.push_back(std::move(t));
     }
@@ -371,8 +372,8 @@ struct InspectorSession {
         au::Json t = au::Json::object();
         t.set("name", "build_ui_prompt");
         t.set("description",
-            "Project the Aurora schema into a compact prompt for an EXTERNAL LLM. Aurora never calls any "
-            "network service itself — hand this text to your own model, then feed the result to repair_tree.");
+              "Project the Aurora schema into a compact prompt for an EXTERNAL LLM. Aurora never calls any "
+              "network service itself — hand this text to your own model, then feed the result to repair_tree.");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"description"})));
         tools.push_back(std::move(t));
     }
@@ -383,9 +384,9 @@ struct InspectorSession {
         au::Json t = au::Json::object();
         t.set("name", "repair_tree");
         t.set("description",
-            "Deterministically repair a UI-tree JSON without any LLM: fix unknown type names, fill missing "
-            "props from schema defaults, and drop children on types that declare children_policy=none. "
-            "Returns the repaired tree plus the remaining validation errors.");
+              "Deterministically repair a UI-tree JSON without any LLM: fix unknown type names, fill missing "
+              "props from schema defaults, and drop children on types that declare children_policy=none. "
+              "Returns the repaired tree plus the remaining validation errors.");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"tree"})));
         tools.push_back(std::move(t));
     }
@@ -393,14 +394,14 @@ struct InspectorSession {
     {
         au::Json props = au::Json::object();
         props.set("session",
-            str_prop(R"(Optional "6280" or "127.0.0.1:6280"; defaults to env AURORA_INSPECTOR_PORT, then 6280)"));
+                  str_prop(R"(Optional "6280" or "127.0.0.1:6280"; defaults to env AURORA_INSPECTOR_PORT, then 6280)"));
         props.set("window", int_prop("Optional window id; omit for the main window"));
         au::Json t = au::Json::object();
         t.set("name", "live_tree");
         t.set("description",
-            "Read the LIVE widget tree of a running Aurora application (via its Inspector HTTP server). "
-            "Unlike render_snapshot, this is the real UI with real runtime state. Requires the app to have "
-            "started an InspectorServer.");
+              "Read the LIVE widget tree of a running Aurora application (via its Inspector HTTP server). "
+              "Unlike render_snapshot, this is the real UI with real runtime state. Requires the app to have "
+              "started an InspectorServer.");
         t.set("inputSchema", schema_obj(std::move(props), au::Json::array()));
         tools.push_back(std::move(t));
     }
@@ -425,8 +426,8 @@ struct InspectorSession {
         au::Json t = au::Json::object();
         t.set("name", "live_widget_set");
         t.set("description",
-            "Write one property of a widget in a RUNNING application — this is how you edit live UI. "
-            "On failure the response carries the reason so you can retry with a corrected value.");
+              "Write one property of a widget in a RUNNING application — this is how you edit live UI. "
+              "On failure the response carries the reason so you can retry with a corrected value.");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"path", "prop", "value"})));
         tools.push_back(std::move(t));
     }
@@ -435,13 +436,13 @@ struct InspectorSession {
         au::Json props = au::Json::object();
         props.set("session", str_prop(R"(Optional "6280" or "127.0.0.1:6280")"));
         props.set("ops",
-            obj_prop(R"(JSON array of {"path": "/1/content", "value": <v>} (last path segment is the prop))"));
+                  obj_prop(R"(JSON array of {"path": "/1/content", "value": <v>} (last path segment is the prop))"));
         au::Json t = au::Json::object();
         t.set("name", "live_patch");
         t.set("description",
-            "Apply a minimal property patch to a RUNNING application in ONE request. Prefer this over "
-            "repeated live_widget_set: fewer round-trips and no whole-tree rebuild. Property-only — "
-            "structural add/remove is not expressible and requires replacing the tree.");
+              "Apply a minimal property patch to a RUNNING application in ONE request. Prefer this over "
+              "repeated live_widget_set: fewer round-trips and no whole-tree rebuild. Property-only — "
+              "structural add/remove is not expressible and requires replacing the tree.");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"ops"})));
         tools.push_back(std::move(t));
     }
@@ -457,8 +458,8 @@ struct InspectorSession {
         au::Json t = au::Json::object();
         t.set("name", "live_simulate");
         t.set("description",
-            "Dispatch a synthetic interaction (click / scroll / text) into a RUNNING application, going "
-            "through the real hit-test and dispatch path.");
+              "Dispatch a synthetic interaction (click / scroll / text) into a RUNNING application, going "
+              "through the real hit-test and dispatch path.");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"path", "action"})));
         tools.push_back(std::move(t));
     }
@@ -474,9 +475,9 @@ struct InspectorSession {
     {
         au::Json props = au::Json::object();
         props.set("tree", obj_prop("UI-tree JSON"));
-        props.set("path", str_prop(
-            "Target widget index path, e.g. \"0/1\" = second child of the first child; empty string targets the tree "
-            "root"));
+        props.set("path", str_prop("Target widget index path, e.g. \"0/1\" = second child of the first child; empty "
+                                   "string targets the tree "
+                                   "root"));
         props.set("action", str_prop("Interaction to simulate: click | scroll | text"));
         props.set("dx", num_prop("Horizontal scroll delta (action=scroll, default 0)"));
         props.set("dy", num_prop("Vertical scroll delta (action=scroll, default 0; positive scrolls content up)"));
@@ -486,25 +487,26 @@ struct InspectorSession {
         au::Json t = au::Json::object();
         t.set("name", "simulate_interaction");
         t.set("description",
-            "Build the UI-tree JSON offscreen, lay it out, dispatch a synthetic interaction (click / scroll / "
-            "text input) at the target widget, then return that widget's props and the post-interaction logical "
-            "snapshot. This closes the generate -> interact -> assert loop without running an app. Observable "
-            "state only: widgets built from JSON carry no user callbacks, so a click is verified through state "
-            "changes (e.g. Checkbox.checked, focus movement) rather than a callback side effect. Scroll exposes "
-            "no serialized state through this path: Scroll does not serialize its offset, and the containers "
-            "that do (LazyList / GridView 'scroll_offset') build their items from a runtime builder that a JSON "
-            "tree cannot supply. A successful scroll therefore only means the event reached a hit-testable "
-            "target after layout; read the offset itself back in a C++ test. Returns isError when the target "
-            "is not found or nothing at its centre is hit-testable (in that case no state is changed).");
+              "Build the UI-tree JSON offscreen, lay it out, dispatch a synthetic interaction (click / scroll / "
+              "text input) at the target widget, then return that widget's props and the post-interaction logical "
+              "snapshot. This closes the generate -> interact -> assert loop without running an app. Observable "
+              "state only: widgets built from JSON carry no user callbacks, so a click is verified through state "
+              "changes (e.g. Checkbox.checked, focus movement) rather than a callback side effect. Scroll exposes "
+              "no serialized state through this path: Scroll does not serialize its offset, and the containers "
+              "that do (LazyList / GridView 'scroll_offset') build their items from a runtime builder that a JSON "
+              "tree cannot supply. A successful scroll therefore only means the event reached a hit-testable "
+              "target after layout; read the offset itself back in a C++ test. Returns isError when the target "
+              "is not found or nothing at its centre is hit-testable (in that case no state is changed).");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"tree", "path", "action"})));
         tools.push_back(std::move(t));
     }
     // list_commands
     {
         au::Json props = au::Json::object();
-        props.set("commands", obj_prop(
-            "Command descriptors (the {\"commands\":[...]} envelope produced by CommandRegistry::to_json(); "
-            "a bare array is also accepted)"));
+        props.set(
+            "commands",
+            obj_prop("Command descriptors (the {\"commands\":[...]} envelope produced by CommandRegistry::to_json(); "
+                     "a bare array is also accepted)"));
         props.set("query", str_prop("Optional fuzzy query over command titles; empty matches all"));
         props.set("limit", int_prop("Maximum number of returned commands (default 50; negative = unlimited)"));
         au::Json include_disabled = au::Json::object();
@@ -514,22 +516,24 @@ struct InspectorSession {
         au::Json t = au::Json::object();
         t.set("name", "list_commands");
         t.set("description",
-            "Filter and rank a host-exported command list (CommandRegistry::to_json()): same fuzzy scoring and "
-            "ordering as the in-app command palette, so AI-side discovery matches what a user sees. Stateless: the "
-            "descriptors travel with the request, no running app is required.");
+              "Filter and rank a host-exported command list (CommandRegistry::to_json()): same fuzzy scoring and "
+              "ordering as the in-app command palette, so AI-side discovery matches what a user sees. Stateless: the "
+              "descriptors travel with the request, no running app is required.");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"commands"})));
         tools.push_back(std::move(t));
     }
     // invoke_command
     {
         au::Json props = au::Json::object();
-        props.set("commands", obj_prop(
-            "Command descriptors (the {\"commands\":[...]} envelope produced by CommandRegistry::to_json(); "
-            "a bare array is also accepted)"));
+        props.set(
+            "commands",
+            obj_prop("Command descriptors (the {\"commands\":[...]} envelope produced by CommandRegistry::to_json(); "
+                     "a bare array is also accepted)"));
         props.set("id", str_prop("Command identifier to resolve, e.g. \"file.open\""));
         au::Json t = au::Json::object();
         t.set("name", "invoke_command");
-        t.set("description",
+        t.set(
+            "description",
             "Resolve a command identifier against a host-exported command list and report whether it can be invoked: "
             "status is one of invocable / not-found / disabled / not-invocable. This server is stateless and cannot "
             "run the host process' command action, so it returns the invocation intent - the host performs the actual "
@@ -996,8 +1000,8 @@ struct InspectorSession {
             const aurora::Result<void> r = aurora::Inspector::simulate_click(*target);
             failure = r ? std::string{} : r.error().message;
         } else if (action == "scroll") {
-            const aurora::Result<void> r =
-                aurora::Inspector::simulate_scroll(*target, args.as_or<float>("dx", 0.0F), args.as_or<float>("dy", 0.0F));
+            const aurora::Result<void> r = aurora::Inspector::simulate_scroll(*target, args.as_or<float>("dx", 0.0F),
+                                                                              args.as_or<float>("dy", 0.0F));
             failure = r ? std::string{} : r.error().message;
         } else {
             const aurora::Result<void> r =
@@ -1023,8 +1027,8 @@ struct InspectorSession {
         }
         const au::Json *items = aurora::tools::command_descriptors(*commands_v);
         if (items == nullptr) {
-            return tool_result(
-                text_content("Error: 'commands' must be an array or the {\"commands\": [...]} envelope"), true);
+            return tool_result(text_content("Error: 'commands' must be an array or the {\"commands\": [...]} envelope"),
+                               true);
         }
         std::string query;
         if (const auto *it = args.find("query"); it != nullptr) {
@@ -1077,8 +1081,8 @@ struct InspectorSession {
         }
         const au::Json *items = aurora::tools::command_descriptors(*commands_v);
         if (items == nullptr) {
-            return tool_result(
-                text_content("Error: 'commands' must be an array or the {\"commands\": [...]} envelope"), true);
+            return tool_result(text_content("Error: 'commands' must be an array or the {\"commands\": [...]} envelope"),
+                               true);
         }
         const std::string id = id_v->as_or<std::string>("");
         aurora::tools::CommandStatus status = aurora::tools::CommandStatus::NotFound;
@@ -1088,7 +1092,8 @@ struct InspectorSession {
         out.set("id", id);
         out.set("resolved", au::Json{found != nullptr});
         out.set("enabled", au::Json{found != nullptr && aurora::tools::command_bool_field(*found, "enabled", true)});
-        out.set("invocable", au::Json{found != nullptr && aurora::tools::command_bool_field(*found, "invocable", false)});
+        out.set("invocable",
+                au::Json{found != nullptr && aurora::tools::command_bool_field(*found, "invocable", false)});
         out.set("status", aurora::tools::command_status_name(status));
         if (found != nullptr) {
             if (const auto *it = found->find("title"); it != nullptr && it->is_string()) {

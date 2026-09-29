@@ -49,7 +49,8 @@ auto aurora_append_extra_props(std::vector<std::pair<std::string, std::string>> 
             }
         }
         if (!found) {
-            const std::string val_str = e.value.is_string() ? e.value.as_or<std::string>("") : json::dump(e.value).unwrap();
+            const std::string val_str =
+                e.value.is_string() ? e.value.as_or<std::string>("") : json::dump(e.value).unwrap();
             rows.emplace_back(key, val_str);
         }
     }

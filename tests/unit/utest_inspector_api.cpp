@@ -261,8 +261,8 @@ AURORA_TEST_CASE(find_widget_and_tree_json_full_reach_virtualized_root) {
     const auto *const child0 = require_child_at(*children, 0);
     const auto *const inner0 = require_child_at(*require_child(*child0, "children"), 0);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(*inner0, "type"), "Column");
-    AURORA_TEST_CHECK_EQ(
-        require_field<std::string>(*require_child_at(*require_child(*inner0, "children"), 0), "type"), "Text");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*require_child(*inner0, "children"), 0), "type"),
+                         "Text");
 
     // 旧入口只沿 `child_nodes()` 下降，在虚拟化容器下必然断链 —— 与上一行形成对照。
     AURORA_TEST_CHECK_FALSE(static_cast<bool>(Inspector::find_node(root, "0")));

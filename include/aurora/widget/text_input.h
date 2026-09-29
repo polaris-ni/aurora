@@ -647,8 +647,8 @@ class TextInput : public LeafWidget {
             obscure_ = props.at("obscure_text")->as_or<bool>(false);
         }
         if (props.contains("direction") && props.at("direction")->is_string()) {
-            direction_ = props.at("direction")->as_or<std::string>("") == "RTL" ? TextDirection::RTL
-                                                                                : TextDirection::LTR;
+            direction_ =
+                props.at("direction")->as_or<std::string>("") == "RTL" ? TextDirection::RTL : TextDirection::LTR;
         }
     }
 

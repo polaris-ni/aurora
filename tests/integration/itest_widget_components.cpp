@@ -30,8 +30,8 @@
 #include "aurora/widget/switch.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
-#include "framework/json_literals.h"
 #include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::itest_widget_components {
 using aurora::testing::require_child;
@@ -215,8 +215,8 @@ AURORA_TEST_CASE(logical_snapshot_and_pixels_are_deterministic) {
     const Json snap = render_to_logical_snapshot(t1, 200, 200);
     AURORA_TEST_CHECK_STREQ(require_field<std::string>(snap, "type"), "Column");
     AURORA_TEST_CHECK_EQ(require_child(snap, "children")->size(), 2U);
-    AURORA_TEST_CHECK_STREQ(
-        require_field<std::string>(*require_child_at(*require_child(snap, "children"), 0), "type"), "Row");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(*require_child_at(*require_child(snap, "children"), 0), "type"),
+                            "Row");
     const auto &box = *require_child(snap, "box");
     AURORA_TEST_CHECK_NEAR(require_field<float>(box, "w"), 200.0F, 1e-3F);
     AURORA_TEST_CHECK_NEAR(require_field<float>(box, "h"), 200.0F, 1e-3F);

@@ -218,12 +218,10 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
                      .message = "widget \"" + type + "\" does not accept children (children_policy=none)",
                      .suggestion = "remove the \"children\" field or use a container widget (Column/Row/Stack)"});
             } else if (children_policy == "single" && node.at("children")->size() > 1) {
-                errors.push_back(
-                    {.path = children_path,
-                     .message =
-                         "widget \"" + type + "\" accepts at most 1 child but got " +
-                         std::to_string(node.at("children")->size()),
-                     .suggestion = "reduce children to a single element or use a multi-child container"});
+                errors.push_back({.path = children_path,
+                                  .message = "widget \"" + type + "\" accepts at most 1 child but got " +
+                                             std::to_string(node.at("children")->size()),
+                                  .suggestion = "reduce children to a single element or use a multi-child container"});
             }
 
             // 递归验证子节点（深度 +1）

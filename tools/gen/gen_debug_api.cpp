@@ -20,6 +20,8 @@
 // Note: this tool is a build-time generator; it does not link the Aurora widget/backend layers and does not
 //       depend on Aurora UI headers — it only uses the standard library and the aurora core/json headers.
 // ============================================================================
+#include <aurora/widget/props_io.h>
+
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -27,7 +29,6 @@
 
 #include "api_json_merge.h"
 #include "toml_lines.h"
-#include <aurora/widget/props_io.h>
 
 // Single source of truth for the version (AURORA_VERSION_STRING). This generator does not link aurora;
 // it only borrows this macro-only header (introducing no link symbols); when the version macros are not

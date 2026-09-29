@@ -201,9 +201,11 @@ namespace detail {
         const Json *item = j.at(i);
         os << pad << "- ";
         if (item->is_object()) {
-            os << (item->empty() ? "{}" : drop_first_indent(emit_object(*item, indent + 1, child_pad), child_pad.size()));
+            os << (item->empty() ? "{}"
+                                 : drop_first_indent(emit_object(*item, indent + 1, child_pad), child_pad.size()));
         } else if (item->is_array()) {
-            os << (item->empty() ? "[]" : drop_first_indent(emit_array(*item, indent + 1, child_pad), child_pad.size()));
+            os << (item->empty() ? "[]"
+                                 : drop_first_indent(emit_array(*item, indent + 1, child_pad), child_pad.size()));
         } else {
             os << emit_scalar(*item);
         }

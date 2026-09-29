@@ -49,10 +49,9 @@ auto layout_tree(Node &root, float width, float height) -> void {
     WidgetBox box;
     box.type = require_field<std::string>(j, "type");
     const auto *const box_json = require_child(j, "box");
-    box.bounds =
-        Rect{.origin = Point{.x = require_field<float>(*box_json, "x"), .y = require_field<float>(*box_json, "y")},
-             .size = Size{.width = require_field<float>(*box_json, "w"),
-                          .height = require_field<float>(*box_json, "h")}};
+    box.bounds = Rect{
+        .origin = Point{.x = require_field<float>(*box_json, "x"), .y = require_field<float>(*box_json, "y")},
+        .size = Size{.width = require_field<float>(*box_json, "w"), .height = require_field<float>(*box_json, "h")}};
     out.push_back(box);
     const auto *const children = require_child(j, "children");
     for (const auto *child = children->begin(); child != children->end(); ++child) {

@@ -101,7 +101,8 @@ AURORA_TEST_CASE(json_contains_exactly_the_documented_macro_keys) {
     AURORA_TEST_CHECK_EQ(j.size(), flag_key_table().size());
     // 全部值必须是布尔（工具直读依赖）。
     for (const auto &entry : j.entries()) {
-        AURORA_TEST_CHECK_MSG(entry.value.is_bool(), "macro key " + std::string(entry.key) + " must map to a JSON boolean");
+        AURORA_TEST_CHECK_MSG(entry.value.is_bool(),
+                              "macro key " + std::string(entry.key) + " must map to a JSON boolean");
     }
 }
 

@@ -14,8 +14,8 @@
 #include "aurora/widget/canvas.h"
 #include "aurora/widget/skeleton.h"
 #include "framework/aurora_test.h"
-#include "framework/json_literals.h"
 #include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::itest_default_construct {
 

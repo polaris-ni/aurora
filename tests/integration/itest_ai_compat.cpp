@@ -418,12 +418,11 @@ AURORA_TEST_CASE(interact_script_reports_missing_target) {
     // 反面用例：目标选不到时脚本必须报错，而不是「零断言通过」地静默变绿。
     au::Json fx = au::Json::object();
     fx.set("tree", testing::json_obj({{"type", "Column"}, {"props", au::Json::object()}}));
-    fx.set("steps",
-           testing::json_arr({testing::json_obj(
-               {{"action", "tap"}, {"target", testing::json_obj({{"type", "NoSuchWidget"}})}})}));
-    fx.set("expect",
-           testing::json_arr({testing::json_obj(
-               {{"target", testing::json_obj({{"type", "NoSuchWidget"}})}, {"prop", "show"}, {"value", au::Json{true}}})}));
+    fx.set("steps", testing::json_arr({testing::json_obj(
+                        {{"action", "tap"}, {"target", testing::json_obj({{"type", "NoSuchWidget"}})}})}));
+    fx.set("expect", testing::json_arr({testing::json_obj({{"target", testing::json_obj({{"type", "NoSuchWidget"}})},
+                                                           {"prop", "show"},
+                                                           {"value", au::Json{true}}})}));
 
     const ScriptError err = run_interact_fixture(fx);
     AURORA_TEST_CHECK_MSG(!err.empty(), "missing target must be reported");

@@ -434,8 +434,7 @@ auto RichTextEdit::deserialize_props(const Json &props) -> void {
     }
     // 书写方向反序列化（仅当显式提供）。auto/继承环境由运行期 Directionality 注入决定。
     if (props.contains("direction") && props.at("direction")->is_string()) {
-        direction_ = props.at("direction")->as_or<std::string>("") == "RTL" ? TextDirection::RTL
-                                                                           : TextDirection::LTR;
+        direction_ = props.at("direction")->as_or<std::string>("") == "RTL" ? TextDirection::RTL : TextDirection::LTR;
     }
 }
 

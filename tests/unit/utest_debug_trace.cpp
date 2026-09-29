@@ -17,11 +17,11 @@
 
 namespace aurora::test_cases::utest_debug_trace {
 
+using aurora::debug::feature_flags;
+using aurora::debug::why_trace;
 using aurora::testing::require_child;
 using aurora::testing::require_child_at;
 using aurora::testing::require_field;
-using aurora::debug::feature_flags;
-using aurora::debug::why_trace;
 
 /// @brief 运行时探测 AURORA_ENABLE_DEBUG 是否生效（feature_flags 为始终可用的编译期快照）。
 [[nodiscard]] static auto probe_debug_enabled() -> bool { return feature_flags().debug; }

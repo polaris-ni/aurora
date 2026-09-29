@@ -170,8 +170,9 @@ auto main(int argc, char **argv) -> int {
             p2_widgets.push_back(w);
         }
         p2.set("applicable_widgets", std::move(p2_widgets));
-        p2.set("json_example",
-               R"({"type": "Dropdown", "props": {"options": ["A","B","C"], "selected_index": 1}, "events": {"on_change": "handler"}})");
+        p2.set(
+            "json_example",
+            R"({"type": "Dropdown", "props": {"options": ["A","B","C"], "selected_index": 1}, "events": {"on_change": "handler"}})");
         state_patterns.push_back(p2);
 
         au::Json p3 = au::Json::object();

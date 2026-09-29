@@ -17,7 +17,7 @@
 #include "framework/aurora_test.h"
 
 // JSON 值的失败诊断打印由 framework/json_value_printer.h 的 ValuePrinter 特化提供
-//（经 aurora_test.h -> assertions.h 公共引入），无需本地特化。
+// （经 aurora_test.h -> assertions.h 公共引入），无需本地特化。
 
 namespace aurora::test_cases::utest_json {
 

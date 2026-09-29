@@ -15,8 +15,8 @@
 #include "aurora/event/keycode.h"
 #include "aurora/widget/alignment.h"
 #include "framework/aurora_test.h"
-#include "framework/json_literals.h"
 #include "framework/json_access.h"
+#include "framework/json_literals.h"
 #include "known_enums.h"
 
 namespace aurora::test_cases::itest_known_enums {

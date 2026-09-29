@@ -19,8 +19,8 @@
 #include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
-#include "framework/json_literals.h"
 #include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::itest_overflow_strategy {
 using aurora::testing::require_field;
@@ -29,9 +29,11 @@ AURORA_TEST_CASE(overflow_strategy_json_roundtrip_and_fallback) {
     // to_json：每个枚举值输出同名标准字符串。
     AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Visible).as_or<std::string>(""),
                          std::string{"Visible"});
-    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Hidden).as_or<std::string>(""), std::string{"Hidden"});
+    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Hidden).as_or<std::string>(""),
+                         std::string{"Hidden"});
     AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Clip).as_or<std::string>(""), std::string{"Clip"});
-    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Scroll).as_or<std::string>(""), std::string{"Scroll"});
+    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Scroll).as_or<std::string>(""),
+                         std::string{"Scroll"});
 
     // from_json：标准字符串还原。
     AURORA_TEST_CHECK_TRUE(json_to_overflow_strategy(Json("Visible")) == OverflowStrategy::Visible);

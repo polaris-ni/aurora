@@ -310,10 +310,9 @@ AURORA_TEST_CASE(mcp_simulate_text_inserts_into_target) {
 
 AURORA_TEST_CASE(mcp_simulate_scroll_reaches_layout_backed_target) {
     register_core_widgets();
-    const au::Json content =
-        node_json("Column", au::Json::object(),
-                  testing::json_arr({node_json("Text", testing::json_obj({{"content", "a"}})),
-                                     node_json("Text", testing::json_obj({{"content", "b"}}))}));
+    const au::Json content = node_json("Column", au::Json::object(),
+                                       testing::json_arr({node_json("Text", testing::json_obj({{"content", "a"}})),
+                                                          node_json("Text", testing::json_obj({{"content", "b"}}))}));
     const au::Json tree = node_json("Scroll", testing::json_obj({{"step", 20.0}}), testing::json_arr({content}));
 
     const Simulation s = simulate(tree, "scroll", "0", 0.0F, -24.0F);
@@ -373,8 +372,9 @@ AURORA_TEST_CASE(mcp_simulate_reports_missing_path_hidden_target_and_unknown_act
 
     // 目标存在但整个子树不参与命中（show=false）：派发前即失败，不改变状态。
     {
-        const au::Json hidden = node_json("Column", au::Json::object(),
-                                          testing::json_arr({node_json("Checkbox", testing::json_obj({{"show", au::Json{false}}}))}));
+        const au::Json hidden =
+            node_json("Column", au::Json::object(),
+                      testing::json_arr({node_json("Checkbox", testing::json_obj({{"show", au::Json{false}}}))}));
         const Simulation s = simulate(hidden, "click", "0");
         AURORA_TEST_CHECK(!s.error.empty());
     }
@@ -426,14 +426,18 @@ AURORA_TEST_CASE(mcp_list_commands_ranks_and_filters_like_the_palette) {
     const au::tools::CommandListing all = au::tools::list_commands(*items, "", false);
     AURORA_TEST_CHECK_EQ(all.indices.size(), std::size_t{2});
     AURORA_TEST_CHECK_EQ(all.considered, std::size_t{3});  // 形态合法的描述符总数（含未启用）
-    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*items, all.indices[0]), "id"), std::string{"file.copy"});
-    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*items, all.indices[1]), "id"), std::string{"file.open"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*items, all.indices[0]), "id"),
+                         std::string{"file.copy"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*items, all.indices[1]), "id"),
+                         std::string{"file.open"});
 
     // 模糊查询 "op"：词首命中者排前（与命令面板同一打分与排序）。
     const au::tools::CommandListing hits = au::tools::list_commands(*items, "op", false);
     AURORA_TEST_CHECK_EQ(hits.indices.size(), std::size_t{2});
-    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*items, hits.indices[0]), "id"), std::string{"file.open"});
-    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*items, hits.indices[1]), "id"), std::string{"file.copy"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*items, hits.indices[0]), "id"),
+                         std::string{"file.open"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*items, hits.indices[1]), "id"),
+                         std::string{"file.copy"});
 
     // 未启用者默认被过滤，显式放开后可见。
     AURORA_TEST_CHECK_EQ(au::tools::list_commands(*items, "clo", false).indices.size(), std::size_t{0});

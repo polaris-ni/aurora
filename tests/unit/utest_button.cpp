@@ -145,7 +145,8 @@ AURORA_TEST_CASE(button_serialize_deserialize_roundtrip) {
 
     Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "label"), "确认");  // CJK-LITERAL: cjk-fixture - Han label in JSON
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "label"),
+                         "确认");  // CJK-LITERAL: cjk-fixture - Han label in JSON
     AURORA_TEST_CHECK_EQ(require_field<bool>(props, "enabled"), false);
 
     Button dst;

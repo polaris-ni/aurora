@@ -22,14 +22,14 @@ namespace aurora::test_cases::utest_debug_backend {
 
 using aurora::debug::capture;
 using aurora::debug::CaptureSource;
-using aurora::testing::require_child;
-using aurora::testing::require_child_at;
-using aurora::testing::require_field;
 using aurora::debug::feature_flags;
 using aurora::debug::output_directory;
 using aurora::debug::resolve_output_path;
 using aurora::debug::set_output_directory;
 using aurora::debug::surface_state;
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 

@@ -18,15 +18,15 @@
 
 namespace aurora::test_cases::utest_debug_runtime {
 
-using aurora::testing::require_child;
-using aurora::testing::require_child_at;
-using aurora::testing::require_field;
 using aurora::debug::diagnostics;
 using aurora::debug::feature_flags;
 using aurora::debug::frame_phase_timeline;
 using aurora::debug::perf_snapshot;
 using aurora::debug::why_trace;
 using aurora::debug::widget_tree;
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 /// @brief 构造确定性测试树：Column 根 + 单个 Text 子节点（无需布局即可序列化）。
 [[nodiscard]] auto make_tree() -> Node {
@@ -122,7 +122,8 @@ AURORA_TEST_CASE(diagnostics_snapshot_shape) {
     const Json j = diagnostics();
     AURORA_TEST_CHECK_TRUE(require_child(j, "count")->is_number());
     AURORA_TEST_CHECK_TRUE(require_child(j, "diagnostics")->is_array());
-    AURORA_TEST_CHECK_EQ(require_child(j, "diagnostics")->size(), static_cast<std::size_t>(require_field<int>(j, "count")));
+    AURORA_TEST_CHECK_EQ(require_child(j, "diagnostics")->size(),
+                         static_cast<std::size_t>(require_field<int>(j, "count")));
 }
 
 AURORA_TEST_CASE(why_trace_snapshot_shape) {

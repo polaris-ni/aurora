@@ -12,6 +12,8 @@
 // Note: this tool is a build-time generator; it does not link the Aurora widget/backend layers and does not
 //       depend on Aurora UI headers — it only uses the standard library and the aurora core/json headers.
 // ============================================================================
+#include <aurora/widget/props_io.h>
+
 #include <array>
 #include <cctype>
 #include <fstream>
@@ -24,7 +26,6 @@
 
 #include "api_json_merge.h"
 #include "toml_lines.h"
-#include <aurora/widget/props_io.h>
 
 namespace {
 

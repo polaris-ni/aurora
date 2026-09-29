@@ -104,7 +104,8 @@ AURORA_TEST_CASE(rebuilt_grid_renders_after_host_attaches_builder) {
     // 「属性齐备、条目待挂」不是一句空话：set_item_builder 即那句「由宿主回填」的落点。
     const Json j = testing::json_obj(
         {{"type", "GridView"},
-         {"props", testing::json_obj({{"count", 12}, {"columns", 4}, {"cell_extent", 40.0F}, {"cache_extent", 0.0F}})}});
+         {"props",
+          testing::json_obj({{"count", 12}, {"columns", 4}, {"cell_extent", 40.0F}, {"cache_extent", 0.0F}})}});
     const auto rebuilt = from_json(j);
     AURORA_TEST_REQUIRE_MSG(rebuilt.ok(), "GridView from_json succeeds");
     auto *gv = dynamic_cast<GridView *>(rebuilt.value().get());

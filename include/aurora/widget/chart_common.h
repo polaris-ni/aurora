@@ -467,7 +467,8 @@ class BandScale {
         const auto *points = j.at("points");
         for (const auto *item = points->begin(); item != points->end(); ++item) {
             if (item->is_array() && item->size() >= 2 && item->at(0)->is_number() && item->at(1)->is_number()) {
-                s.points.push_back(ChartPoint{.x = item->at(0)->as_or<double>(0.0), .y = item->at(1)->as_or<double>(0.0)});
+                s.points.push_back(
+                    ChartPoint{.x = item->at(0)->as_or<double>(0.0), .y = item->at(1)->as_or<double>(0.0)});
             }
         }
     }

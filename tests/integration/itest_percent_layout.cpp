@@ -82,7 +82,9 @@ AURORA_TEST_CASE(nested_percent_resolves_against_parent) {
     // Column 应为 800px 宽。
     AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(snap, "box"), "w"), 800.0F, 1e-3F);
     // 内部 Text 应为 400px（50% of 800）。
-    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(*require_child_at(*require_child(snap, "children"), 0), "box"), "w"), 400.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(
+        require_field<float>(*require_child(*require_child_at(*require_child(snap, "children"), 0), "box"), "w"),
+        400.0F, 1e-3F);
 }
 
 AURORA_TEST_CASE(small_percent_fraction) {
