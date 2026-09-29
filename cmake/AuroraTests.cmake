@@ -232,6 +232,14 @@ if (AURORA_BUILD_TESTS)
             target_link_options(${tgt} PRIVATE
                     -sNODERAWFS=1
                     -sALLOW_MEMORY_GROWTH=1
+                    # STACK_SIZE：Emscripten 3.1.27+ 默认栈仅 64KB，而 JSON 解析器是递归下降
+                    # （sax.cpp emit_value → emit_object/emit_array → emit_value(depth+1)），
+                    # max_depth 默认 512 且深度检查在递归入口——会先扎满 512 层才折返；每层帧携带
+                    # Result<bool>（variant 里的 Error 含 7 个 std::string，单帧 200+ 字节），
+                    # 512 层双帧 ≈ 200KB+，远超 64KB ⇒ wasm 下表现为 RuntimeError: memory access
+                    # out of bounds（栈溢出的 wasm 形态）。native 栈 8MB 无感，仅 wasm 需要显式放大；
+                    # 4MB = 实测需求（200KB+）的 8 倍余量，ALLOW_MEMORY_GROWTH 下初始内存足够容纳。
+                    -sSTACK_SIZE=4194304
                     "--post-js=${CMAKE_SOURCE_DIR}/tests/support/wasm_noderawfs_cwd.js")
         endif ()
     endfunction()

@@ -134,7 +134,7 @@ set(_gen_error_codes_fmt_cmds "")
 if (_gen_error_codes_cf)
     set(_gen_error_codes_fmt_cmds
             COMMAND "${_gen_error_codes_cf}" -style=file -i
-            "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h")
+            "${CMAKE_BINARY_DIR}/_gen_error_codes_stage/error_codes.gen.h")
 else ()
     aurora_warn("no clang-format on PATH can parse the repo .clang-format (candidates: "
                 "${AURORA_CLANG_FORMAT_CANDIDATES}): generate_error_codes will emit an unfolded "
@@ -142,21 +142,32 @@ else ()
                 "(apt.llvm.org llvm-22 snapshot; CI uses ./.github/actions/setup-clang-format) or the "
                 "format-check gate will flag it. Note >= 20 alone is not enough.")
 endif ()
+# 生成到 build 暂存区，再 copy_if_different 落源码树：CI 每次构建都会重跑本命令
+# （gen_error_codes.exe 新于 ERROR_CATALOG.md），若生成器直接改写源码树里的 error_codes.gen.h，
+# 即便内容一字不变 mtime 也会被抬——consumer PCH 先建、gen.h 后被重写，所有走 consumer PCH 的
+# TU 报「modified since the precompiled header was built」（run 36544883331 的 windows-llvm 实测）。
+# copy_if_different 在内容不变时零触碰（不抬 mtime、PCH 保持有效）；内容真变时落盘抬 mtime，
+# PCH 编译的 depfile 含该头自然触发重建。两条路径都不重新引入下方注释所述的 ninja 依赖环。
+set(_gen_error_codes_stage "${CMAKE_BINARY_DIR}/_gen_error_codes_stage")
+file(MAKE_DIRECTORY "${_gen_error_codes_stage}")
 add_custom_command(
         # ⚠️ error_codes.gen.h 有意「不」列为 OUTPUT：它是随仓库分发的引导副本（与 aurora_api.json
         # 同口径，见上方注释）。它同时是生成器 gen_error_codes 的「输入」——gen_error_codes.cpp 经
         # props_io.h -> json.h -> result.h -> error_codes.h 传递包含它。若把它登记为 OUTPUT，ninja 会看到
         # 「error_codes.gen.h(输出) -> gen_error_codes.exe(依赖) -> gen_error_codes.cpp.obj(包含 error_codes.gen.h)」
         # 的依赖环而直接报 build.ninja: dependency cycle（任何令 gen_error_codes.exe 重链/重编的改动都会触发，
-        # 例如改动 aurora_json 源）。改为不进构建图输出后，环消失；命令仍把 error_codes.gen.h 作为写目标参数传入，
-        # 故 errors.toml 变更时本命令依旧顺带重写它（仅 ninja 不再将其视为可重建产物、不再构成环）。
+        # 例如改动 aurora_json 源）。故生成物先落 build 暂存区（见上方 copy_if_different 注释），源码树内的
+        # gen.h 仅在内容真变时被更新。
         OUTPUT ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
         COMMAND "${_gen_error_codes_exe}"
         "${CMAKE_SOURCE_DIR}/codespec/errors.toml"
-        "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
+        "${_gen_error_codes_stage}/error_codes.gen.h"
         "${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md"
         "${CMAKE_SOURCE_DIR}/aurora_api.json"
         ${_gen_error_codes_fmt_cmds}
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_gen_error_codes_stage}/error_codes.gen.h"
+                "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
         DEPENDS "${_gen_error_codes_exe}" ${CMAKE_SOURCE_DIR}/codespec/errors.toml
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         COMMENT "Regenerating error_codes.gen.h / ERROR_CATALOG.md / aurora_api.json from errors.toml"
