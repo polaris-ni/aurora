@@ -140,6 +140,15 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_doc_comments
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_doc_comments.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        # 字面量中文门禁（CODING_STANDARDS.md §14，LIT-1/LIT-2）：include/ src/ examples/ tests/
+        # tools/ 的 C++/Python **字符串字面量**里不得出现中日韩字符——它们经 stdout/stderr、
+        # Inspector、CLI、LSP 抵达控制台，在 GBK 等窄代码页上必成乱码。注释、Doxygen 文档块与
+        # Python docstring 不受限。功能必需的中文数据（CJK 断言素材、locale 输出、上屏 demo 文案、
+        # 着色器源码注释、正则语义片段）就地用 `CJK-LITERAL: <reason>` 标记豁免；文件级白名单条目
+        # 一旦不再命中任何诊断即由 LIT-2 判红灯。门禁自身输出全 ASCII（非 ASCII 转义成 \uXXXX）。
+        add_test(NAME check_no_cjk_literals
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_cjk_literals.py"
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     endif ()
 
     # ---- 空源集 guard ----
