@@ -143,8 +143,14 @@ else ()
                 "format-check gate will flag it. Note >= 20 alone is not enough.")
 endif ()
 add_custom_command(
-        OUTPUT ${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h
-        ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
+        # ⚠️ error_codes.gen.h 有意「不」列为 OUTPUT：它是随仓库分发的引导副本（与 aurora_api.json
+        # 同口径，见上方注释）。它同时是生成器 gen_error_codes 的「输入」——gen_error_codes.cpp 经
+        # props_io.h -> json.h -> result.h -> error_codes.h 传递包含它。若把它登记为 OUTPUT，ninja 会看到
+        # 「error_codes.gen.h(输出) -> gen_error_codes.exe(依赖) -> gen_error_codes.cpp.obj(包含 error_codes.gen.h)」
+        # 的依赖环而直接报 build.ninja: dependency cycle（任何令 gen_error_codes.exe 重链/重编的改动都会触发，
+        # 例如改动 aurora_json 源）。改为不进构建图输出后，环消失；命令仍把 error_codes.gen.h 作为写目标参数传入，
+        # 故 errors.toml 变更时本命令依旧顺带重写它（仅 ninja 不再将其视为可重建产物、不再构成环）。
+        OUTPUT ${CMAKE_SOURCE_DIR}/codespec/ERROR_CATALOG.md
         COMMAND "${_gen_error_codes_exe}"
         "${CMAKE_SOURCE_DIR}/codespec/errors.toml"
         "${CMAKE_SOURCE_DIR}/include/aurora/core/error_codes.gen.h"
