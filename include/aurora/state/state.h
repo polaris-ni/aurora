@@ -75,8 +75,9 @@ class StateBase {  // NOLINT(cppcoreguidelines-special-member-functions)
 /// @note Side-effects: none
 /// @note Rebuildable: no
 template <typename T>
-// NOLINTNEXTLINE(bugprone-exception-escape)
-class State : public SignalView<T>, public StateBase, public std::enable_shared_from_this<State<T>> {
+class State : public SignalView<T>,  // NOLINT(bugprone-exception-escape)
+              public StateBase,
+              public std::enable_shared_from_this<State<T>> {
   public:
     /// @brief 以初值构造状态源；不传参时按 `T{}` 值初始化。
     /// @param v 初始值（移入）。
