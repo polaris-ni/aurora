@@ -219,7 +219,7 @@ AURORA_TEST_P(A11yBackends, platform_bridge_projects_semantics) {
             ctx->add_note("uia_nodes=" + std::to_string(nodes.size()) + " " + seen);
         }
     }
-    // 客户端查询触发桥惰性激活（D14）：投影抵达平台后，桥必须已就位。
+    // 客户端查询触发桥惰性激活：投影抵达平台后，桥必须已就位。
     AURORA_TEST_CHECK_TRUE(session.surface().accessibility_provider() != nullptr);
 
     // 只比对库自有投影（FrameworkId == "Aurora"），排除系统非客户区元素。

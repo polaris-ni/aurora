@@ -30,10 +30,10 @@ struct ScatterChartProps {
     EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};  ///< 图内留白（dp）
 };
 
-/// @brief 散点图控件（叶控件，切片 6；契约见 specification/04-widget.md §3.8）。
+/// @brief 散点图控件（叶控件；契约见 specification/04-widget.md §3.8）。
 ///
 /// x / y 双 `LinearScale`（域由数据推导，可经 `axis_*.min/max` 覆盖），圆点绘制。
-/// 命中按**最近点欧氏距离**（阈值 = `dot_radius + 4dp`），与渲染同源于同一组比例尺（D6）。
+/// 命中按**最近点欧氏距离**（阈值 = `dot_radius + 4dp`），与渲染同源于同一组比例尺。
 ///
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
@@ -146,7 +146,7 @@ class ScatterChart : public LeafWidget, public ScatterChartProps {
     /// @param e 指针事件。
     auto on_pointer_event(MouseEvent &e) -> void override;
 
-    /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `ScatterChart`，
+    /// @brief 无障碍角色：图表族统一为 `Image`—— 推断表不识 `ScatterChart`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
     /// @return 恒为 AccessibilityRole::Image。
     /// @note Side-effects: pure
@@ -171,7 +171,7 @@ class ScatterChart : public LeafWidget, public ScatterChartProps {
     /// @param bounds 绘制边界
     /// @param ctx 构建上下文（取主题色/字体）
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
-    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态，D11）。
+    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态）。
     /// @param ctx 构建上下文（当前实现未使用）。
     auto on_mount([[maybe_unused]] const BuildContext &ctx) -> void override { grow_.mount(); }
 

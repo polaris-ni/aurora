@@ -609,7 +609,7 @@ AURORA_TEST_CASE(explicit_label_names_leaf_without_builtin_label) {
 }
 
 AURORA_TEST_CASE(sibling_text_label_hits_adjacent_leaf) {
-    // #1-C 的几何启发式此前只有真机探针覆盖，此处补无头断言：同行相邻的文本兄弟即叶子控件之名。
+    // 兄弟标签关联的几何启发式此前只有真机探针覆盖，此处补无头断言：同行相邻的文本兄弟即叶子控件之名。
     // 标签兄弟自己得有可读文本：显式声明经 `declared_label` 同样充当标签来源（与钩子覆写同源）。
     auto label = ProbeLeaf{"Text"};
     label.set_accessibility_label("启用通知");

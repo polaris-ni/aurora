@@ -2,7 +2,7 @@
 
 // AT-SPI2 平台桥（Linux）：**内部头**（与 `win32_ua.h` 同列于 src/，非公共 API）。
 //
-// 形态裁定（对齐设计 D9/D14/D15/D16 的 Win32 先例，按 AT-SPI2 现实修订处如实申报）：
+// 形态裁定（对齐 Win32/UIA 桥的既有先例，按 AT-SPI2 现实修订处如实申报）：
 //  * **每窗口一条 a11y 总线连接**（区别于 GTK 的进程级单连接）：本进程多窗口共用一个
 //    会话总线连接会让两条窗口树撞同一个规范 Cache 路径 `/org/a11y/atspi/cache`；
 //    分连接则路径天然唯一，代价是桌面树里一号多窗呈现为多个 application 节点（申报）。
@@ -11,11 +11,11 @@
 //    宿主按「无桥」继续运行。环境变量 `NO_AT_BRIDGE=1` 显式免提（GNOME 惯例）。
 //  * **激活时机**：AT-SPI 没有 `WM_GETOBJECT` 式的「查询即激活」信号（连接建立本身就是
 //    被查询的前提），故首个语义树根注入时尝试建连 + Embed；但**语义树仍是拉取式惰性**：
-//    无客户端方法调用到达前零建树成本（与 D14 的初衷一致）。
+//    无客户端方法调用到达前零建树成本（与惰性激活的初衷一致）。
 //  * **事件信号已接线**（Object: 的 StateChanged/PropertyChange/ChildrenChanged/Focus/
 //    Announcement + Cache: 的 AddAccessible/RemoveAccessible）：`sync_point()` 对两次快照
-//    做 TreeDiff 并按 atk-adaptor 发送侧线格式广播；播报经 `on_announcement` 直译
-//    （G4）。**余下空位（申报）**：window:* 窗口态事件、Text 细粒度事件
+//    做 TreeDiff 并按 atk-adaptor 发送侧线格式广播；播报经 `on_announcement` 直译。
+//    **余下空位（申报）**：window:* 窗口态事件、Text 细粒度事件
 //    （text-changed/text-caret-moved）、Bounds/Range/Actions 变化（AT-SPI 无规范事件词汇，
 //    客户端重读恒取新值）、关系集与键绑定 —— 均不影响「可见性 + 浏览 + 操作」主链路。
 //    关系集一项补充口径：`set_labelled_by` 的**名字已在本库语义树内解析完毕**，故 Linux 下

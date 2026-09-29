@@ -44,14 +44,14 @@ struct ChartPoint {
 struct ChartSeries {
     std::string name;  ///< 系列名（图例与 hover 值框的标签；可为空串）。
     std::vector<double> values;  ///< 等距采样的数值序列（第 i 项对应 x = i）。
-    std::optional<Color> color;  ///< 空 = 按索引取色板（D8 / D14）
+    std::optional<Color> color;  ///< 空 = 按索引取色板
 };
 
 /// @brief 散点系列（Scatter 专用）：显式 `ChartPoint` 坐标。
 struct ScatterSeries {
     std::string name;  ///< 系列名（图例标签；可为空串）。
     std::vector<ChartPoint> points;  ///< 显式坐标点序列（x/y 均为数据域单位）。
-    std::optional<Color> color;  ///< 空 = 按索引取色板（D8 / D14）。
+    std::optional<Color> color;  ///< 空 = 按索引取色板。
     float dot_radius = 4.0F;  ///< 散点半径（dp），默认 4.0。
 };
 
@@ -59,7 +59,7 @@ struct ScatterSeries {
 struct PieSection {
     std::string name;  ///< 扇区名（图例标签；可为空串）。
     double value = 0.0;  ///< 原始数值；仅有限且 > 0 的项参与占比计算（见 pie_section_ratios）。
-    std::optional<Color> color;  ///< 空 = 按索引取色板（D8 / D14）。
+    std::optional<Color> color;  ///< 空 = 按索引取色板。
 };
 
 // ---------- 轴与图例 ---------
@@ -91,7 +91,7 @@ struct ChartLegendSpec {
     LegendPosition position = LegendPosition::Top;  ///< 图例摆放位置（默认顶部）。
 };
 
-// ---------- 比例尺（D3 式纯值化）----------
+// ---------- 比例尺（d3-scale 式纯值化）----------
 
 /// @brief 线性比例尺：domain → px，含 nice 域、nice 刻度与反查（invert）。
 class LinearScale {
@@ -104,8 +104,8 @@ class LinearScale {
     /// @param step 刻度步长（须 > 0，否则 `ticks` 返回空序列）。
     LinearScale(double d0, double d1, double step) : d0_(d0), d1_(d1), step_(step) {}
 
-    /// @brief 由数据域构造并 nice 化（D3/Qt 通用做法：step ∈ {1,2,5}×10^k，上下界向 step 对齐）。
-    /// 域退化（range ≤ 0）时回退 `[lo, lo + 1]`，杜绝除零 / NaN（D15）。
+    /// @brief 由数据域构造并 nice 化（d3-scale 与 Qt 的通用做法：step ∈ {1,2,5}×10^k，上下界向 step 对齐）。
+    /// 域退化（range ≤ 0）时回退 `[lo, lo + 1]`，杜绝除零 / NaN。
     /// @param d0 数据域一端（可与 d1 倒序，内部取 min/max）。
     /// @param d1 数据域另一端。
     /// @param tick_count 期望刻度数（内部 clamp ≥ 1，用于推导原始步长）。
@@ -190,7 +190,7 @@ class LinearScale {
     }
 
   private:
-    /// @brief nice 步长（D3 `tickIncrement` 同算法）：把原始步长吸附到 {1,2,5,10}×10^k，
+    /// @brief nice 步长（与 d3-scale 的 `tickIncrement` 同算法）：把原始步长吸附到 {1,2,5,10}×10^k，
     ///        阈值取 √2 / √10 / √50，使 0..100 分 5 档得到 20 而非 50（后者只给出 3 个刻度）。
     [[nodiscard]] static auto nice_number(double raw_step) -> double {
         if (!(raw_step > 0.0) || !std::isfinite(raw_step)) {
@@ -214,14 +214,14 @@ class LinearScale {
 class BandScale {
   public:
     /// @brief 以类目数构造（仅记录个数，像素参数在查询时传入）。
-    /// @param n 类目数量（0 = 空轴，各查询接口按 D15 降级返回）。
+    /// @param n 类目数量（0 = 空轴，各查询接口按降级口径返回）。
     explicit BandScale(std::size_t n) : n_(n) {}
 
     /// @brief 类目数量。
     /// @return 构造时传入的 n（无类目时为 0）。
     [[nodiscard]] auto count() const -> std::size_t { return n_; }
 
-    /// @brief 单带宽度（dp）。n == 0 时为 0（调用方须先判空，D15）。
+    /// @brief 单带宽度（dp）。n == 0 时为 0（调用方须先判空）。
     /// @param px0 轴像素起点。
     /// @param px1 轴像素终点。
     /// @return (px1 - px0) / n；n == 0 时恒为 0。
@@ -291,7 +291,7 @@ class BandScale {
     return palette.at(index % palette.size());
 }
 
-/// @brief 系列取色优先级（D14）：显式 color > `Theme` 命名令牌 `chart.palette.<i%8>` > 内置色板。
+/// @brief 系列取色优先级：显式 color > `Theme` 命名令牌 `chart.palette.<i%8>` > 内置色板。
 /// @param index 系列索引（令牌名与内置色板均按 index % 8 选取）。
 /// @param explicit_color 系列显式色；有值时直接返回，不参与令牌查询。
 /// @param theme 查询 `chart.palette.*` 命名令牌的主题。
@@ -304,7 +304,7 @@ class BandScale {
     return theme.token_or<Color>("chart.palette." + std::to_string(index % 8U), chart_palette(index));
 }
 
-// ---------- JSON 编解码（数据进序列化面，D5）----------
+// ---------- JSON 编解码（数据进序列化面）----------
 
 /// @brief `vector<double>` → JSON 数组（非数值元素跳过）。
 /// @param v 数值序列。
@@ -673,13 +673,13 @@ class BandScale {
     return l;
 }
 
-// ---------- grow-in 动画载荷（切片 8）----------
+// ---------- grow-in 动画载荷 ----------
 
 /// @brief 图表入场动画（grow-in）：控制器 + 进度 `State<double>` + 帧循环注册/注销。
 ///
 /// 进度写入 `State<double>`，随 `collect_signals` 参与响应式刷新，故动画不另起通道。
 /// **无运行中 `Animator`（`Animator::current() == nullptr`，典型为 `render_to_png` / golden）时
-/// 进度恒为 1**——终态降级，保证无头渲染输出确定（D11）。`reduce_motion` 由
+/// 进度恒为 1**——终态降级，保证无头渲染输出确定。`reduce_motion` 由
 /// `AnimationController::tick` 统一短路，本类无需特判。
 ///
 /// 用法：控件持有一个成员，`on_mount` 调 `mount()`，数据变更调 `replay()`，绘制读 `progress()`。
@@ -852,7 +852,7 @@ inline auto draw_category_axis(Painter &p, Point origin, const Rect &plot, const
     }
 }
 
-/// @brief 扇区归一化占比（Σ ≤ 0 时返回全 0，由调用方按 D15 降级处理）。
+/// @brief 扇区归一化占比（Σ ≤ 0 时返回全 0，由调用方按降级口径处理）。
 /// @param sections 扇区序列（仅有限且 > 0 的 `value` 计入总和）。
 /// @return 与 sections 等长的占比序列（每项 = value / Σvalue；无效/非正项为 0）。
 [[nodiscard]] inline auto pie_section_ratios(const std::vector<PieSection> &sections) -> std::vector<double> {

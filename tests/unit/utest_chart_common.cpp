@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/chart_common.h
-/// 测试说明: 覆盖图表公共纯值数据层——LinearScale（D3 nice 步长、to_px/invert 往返、退化域兜底）、
+/// 测试说明: 覆盖图表公共纯值数据层——LinearScale（nice 步长、to_px/invert 往返、退化域兜底）、
 /// BandScale（带中心/带宽/命中夹取/空带）、内置色板取模与 resolve_series_color 三级优先
 /// （显式 color > Theme 令牌 chart.palette.N > 内置色板）、以及进序列化面的数组编解码
 /// （vector<double> / ChartSeries / ScatterSeries / PieSection / 轴与图例规格）往返与畸形输入兜底
@@ -28,7 +28,7 @@ AURORA_TEST_CASE(linear_scale_nice_domain_and_step) {
     const auto [d0, d1] = s.domain();
     AURORA_TEST_CHECK_TRUE(is_near(d0, 0.0));
     AURORA_TEST_CHECK_TRUE(is_near(d1, 100.0));
-    AURORA_TEST_CHECK_TRUE(is_near(s.step(), 20.0));  // D3 tickIncrement：0..100 分 5 档 → 20
+    AURORA_TEST_CHECK_TRUE(is_near(s.step(), 20.0));  // d3-scale tickIncrement：0..100 分 5 档 → 20
 }
 
 AURORA_TEST_CASE(linear_scale_ticks_cover_domain) {
@@ -51,7 +51,7 @@ AURORA_TEST_CASE(linear_scale_to_px_and_invert_roundtrip) {
 }
 
 AURORA_TEST_CASE(linear_scale_degenerate_domain_falls_back) {
-    // D15：range == 0 不得产生除零 / NaN；全 0 退化到 [0,1]，非零退化到 [v, v+1]。
+    // range == 0 不得产生除零 / NaN；全 0 退化到 [0,1]，非零退化到 [v, v+1]。
     const auto zero = LinearScale::from_domain(0.0, 0.0, 5);
     AURORA_TEST_CHECK_TRUE(is_near(zero.domain().first, 0.0));
     AURORA_TEST_CHECK_TRUE(is_near(zero.domain().second, 1.0));
@@ -161,7 +161,7 @@ AURORA_TEST_CASE(json_roundtrip_scatter_and_pie) {
     AURORA_TEST_REQUIRE_EQ(ratios.size(), 2U);
     AURORA_TEST_CHECK_TRUE(is_near(ratios[0], 0.75));
     AURORA_TEST_CHECK_TRUE(is_near(ratios[1], 0.25));
-    // Σ ≤ 0：全 0（由调用方按 D15 降级，不产生 NaN）
+    // Σ ≤ 0：全 0（由调用方按降级口径处理，不产生 NaN）
     const std::vector<double> empty = pie_section_ratios({PieSection{.name = "z", .value = 0.0}});
     AURORA_TEST_REQUIRE_EQ(empty.size(), 1U);
     AURORA_TEST_CHECK_TRUE(is_near(empty[0], 0.0));

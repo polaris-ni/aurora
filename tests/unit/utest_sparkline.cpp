@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/sparkline.h
-/// 测试说明: 覆盖 Sparkline（切片 4，最薄图表：无轴 / 无网格 / 无图例 / 无交互）——defaults /
+/// 测试说明: 覆盖 Sparkline（最薄图表：无轴 / 无网格 / 无图例 / 无交互）——defaults /
 /// describe_static / 序列化往返（values 数组 + 可选 color）/ 工厂 from_json 重建、
 /// 空数据与单点 / 全等值不崩、以及像素 golden 基线（chart_sparkline.png，受 AURORA_UPDATE_GOLDEN 控制）
 

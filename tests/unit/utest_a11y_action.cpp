@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/widget.h + include/aurora/event/focus.h
-/// 测试说明: 读屏动作通道的默认路由：Focus 经 resolve_focus_manager 落焦（G1，不依赖派发栈）、
-///           Click/Invoke 走同口径命中测试 + press/release 两段派发、Scroll* 转滚轮增量（G32）、
+/// 测试说明: 读屏动作通道的默认路由：Focus 经 resolve_focus_manager 落焦（不依赖派发栈）、
+///           Click/Invoke 走同口径命中测试 + press/release 两段派发、Scroll* 转滚轮增量、
 ///           语义强相关动作（Toggle/Value/Select）基类不支持；以及无焦点管理器时的降级
 
 #include <cstdint>
@@ -92,7 +92,7 @@ class ScopedFocusManager final {
 }  // namespace
 
 AURORA_TEST_CASE(focus_action_reaches_widget_outside_dispatch_stack) {
-    // G1：读屏回调不在派发栈内，`current_focus_manager()` 恒空 —— 必须能自行解析焦点管理器。
+    // 读屏回调不在派发栈内，`current_focus_manager()` 恒空 —— 必须能自行解析焦点管理器。
     set_current_focus_manager(nullptr);
     const auto probe = std::make_shared<ActionProbe>();
     probe->set_tab_index(0);

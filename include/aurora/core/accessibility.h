@@ -47,16 +47,16 @@ enum class AccessibilityAction : std::uint16_t {  // NOLINT(*-enum-size)
     Select = 1U << 3U,  ///< 选中 / 取消选中
     Invoke = 1U << 4U,  ///< 默认动作（按钮触发等）
     Toggle = 1U << 5U,  ///< 切换状态（复选 / 开关）
-    ScrollUp = 1U << 6U,  ///< 向上滚动（G32；对应 Flutter scrollUp）
-    ScrollDown = 1U << 7U,  ///< 向下滚动（G32）
-    ScrollLeft = 1U << 8U,  ///< 向左滚动（G32）
-    ScrollRight = 1U << 9U,  ///< 向右滚动（G32）
-    ScrollIntoView = 1U << 10U,  ///< 请求把本控件滚入视口（G32；UIA IScrollItemProvider）
+    ScrollUp = 1U << 6U,  ///< 向上滚动（对应 Flutter scrollUp）
+    ScrollDown = 1U << 7U,  ///< 向下滚动
+    ScrollLeft = 1U << 8U,  ///< 向左滚动
+    ScrollRight = 1U << 9U,  ///< 向右滚动
+    ScrollIntoView = 1U << 10U,  ///< 请求把本控件滚入视口（UIA IScrollItemProvider）
 };
 
 /// @brief 读屏反向动作请求：`Widget::perform_accessibility_action` 的入参。
 /// `text` 为 `std::string_view`：桥（如 UIA `IValueProvider::SetValue` 传入 UTF-16 BSTR）
-/// 在调用前须把文本转 UTF-8 并以 `std::string` 持有，调用返回前不得析构（G15）。
+/// 在调用前须把文本转 UTF-8 并以 `std::string` 持有，调用返回前不得析构。
 /// @note Thread: main-thread only
 struct AccessibilityActionRequest {
     AccessibilityAction action = AccessibilityAction::None;  ///< 要执行的动作位
@@ -83,7 +83,7 @@ struct AccessibilityNode {
     std::string value;  ///< 当前值（如文本内容、复选状态）
     std::string hint;  ///< 用途补充提示（控件可选覆写 `accessibility_hint()`）
     /// @brief 几何盒：**窗口本地 DIP**（原点为窗口客户区左上；与 `Widget::paint_bounds()` 同语义）。
-    ///        平台桥统一换算到屏幕物理像素（D12：`物理 = bounds × scale_factor + position`）。
+    ///        平台桥统一换算到屏幕物理像素（`物理 = bounds × scale_factor + position`）。
     Rect bounds;
     AccessibilityAction actions = AccessibilityAction::None;  ///< 支持的动作集合（位掩码，经 operator| 组合）
     std::vector<AccessibilityNode> children;  ///< 语义树子节点（已裁剪）
@@ -91,7 +91,7 @@ struct AccessibilityNode {
     std::uint64_t id = 0;  ///< 稳定身份（`Widget::runtime_id()`；0 = 无身份）
     AccessibilityState state;  ///< 状态位集（含 visible/focusable/offscreen 派生位）
     std::optional<AccessibilityRange> range;  ///< 取值域（Slider / ProgressIndicator）
-    std::optional<int> level;  ///< 标题层级（OQ4；`accessibility_level()`）
+    std::optional<int> level;  ///< 标题层级（`accessibility_level()`）
     bool is_control = true;  ///< 是否进控制视图（UIA IsControlElement / macOS isAccessibilityElement）
     bool is_content = true;  ///< 是否进内容视图（UIA IsContentElement）
     std::string stable_key;  ///< 宿主经 `Widget::set_stable_key` 声明的跨重建稳定键（空 = 未设）
@@ -194,7 +194,7 @@ namespace detail {
 
 // 注：需要 `Widget` 完整定义的求值函数（语义几何盒、Name 回退链）见 `widget/a11y_tree.h`。
 
-/// @brief 树裁剪 / 语义标记（G23，对标 Chromium `IsIgnored`、Flutter `excludeSemantics`）。
+/// @brief 树裁剪 / 语义标记（对标 Chromium `IsIgnored`、Flutter `excludeSemantics`）。
 /// 判定落在**共享层**（三桥共用，避免各桥语义漂移，见设计 §8.4-1）：
 /// - 控件显式声明「不参与语义树」（`accessibility_is_semantic() == false`）→ 非控制、非内容；
 /// - 无 label 且非交互的 `Image`（装饰图）→ 非控制（UIA 完全忽略该元素）；
@@ -237,7 +237,7 @@ struct AccessibilitySettings {
     bool high_contrast = false;  ///< 高对比样式请求（色 Responder 由各控件按此位取用）
     float font_scale = 1.0F;  ///< 字号缩放倍率（<= 0 或 NaN 视为 1.0，不缩放）
     /// @brief 读屏是否在线：**由平台桥在激活时回填**（heuristic——以「读屏主动取根对象」近似「有读屏
-    ///        在线」；读屏退出无反向信号，故仅窗口销毁 / 桥去激活时复位。见设计 R9 / §5.1）。
+    ///        在线」；读屏退出无反向信号，故仅窗口销毁 / 桥去激活时复位。见 specification/01-core.md §7.2）。
     bool screen_reader_active = false;
 
     /// @brief 归一化后的字号倍率：非法值（<= 0 / 非有限）回落到 1.0，避免污染度量。
@@ -284,7 +284,7 @@ enum class AccessibilityEventKind : std::uint8_t {
     ValueChanged,  ///< 可取值的控件取值变化（Checkbox / Switch / Slider / TextInput …）
     NameChanged,  ///< 可访问名变化（`Widget::set_accessibility_label`）：读屏应重念该控件
     StructureChanged,  ///< 子树结构变化（子节点增删 / 替换）
-    Announcement,  ///< 动态播报 / Live Region：请立即朗读 `announcement_text`（G4）
+    Announcement,  ///< 动态播报 / Live Region：请立即朗读 `announcement_text`
 };
 
 /// @brief 无障碍事件：携带种类与来源控件（非拥有指针，仅回调期间有效）。
@@ -320,7 +320,7 @@ namespace detail {
 
 /// @brief 无障碍事件**广播钩子**（平台桥注册表安装；与宿主单槽处理器并列，互不覆盖）。
 /// 为何不复用单槽：宿主可能在桥激活**之后**才 `set_accessibility_event_handler`，若桥以
-/// 「保存旧处理器 + 链式包裹」的方式挂载，先保存的处理器会失效、链式断裂（G12）。
+/// 「保存旧处理器 + 链式包裹」的方式挂载，先保存的处理器会失效、链式断裂。
 /// 独立钩子使二者顺序无关——宿主处理器永远被调用，桥广播独立生效，公共契约不变。
 /// @param AccessibilityEvent 签形参（未命名，名称取自类型）：事件对象的常量引用，仅回调期间有效。
 /// @return 钩子无返回值（签名为 `void(const AccessibilityEvent &)`）。
@@ -341,7 +341,7 @@ inline auto set_a11y_broadcast_hook(AccessibilityBroadcastHook h) -> void { a11y
 /// 为何需要独立通道：桥按设计只持**裸根指针 + 节点 id**，快照可随时重投影，故子节点生死
 /// 无需桥感知；但**根控件**一旦销毁，桥缓存的 `root_` 即悬垂——若宿主先拆 UI 树、后拆窗口
 /// （常规顺序），窗口仍活着期间任何平台查询都会拿悬垂根去重建语义树（实机 SIGSEGV）。
-/// 语义树事件（`AccessibilityEvent`）只能给出**宿主容器**（G3 要求上报父级、不得上报正在
+/// 语义树事件（`AccessibilityEvent`）只能给出**宿主容器**（要求上报父级、不得上报正在
 /// 析构的控件），无法用于「是不是我的根没了」这一判定，故单列此通道传递正在销毁的控件指针。
 /// @param Widget 形参（未命名，名称取自类型）：正在销毁的控件指针，仅回调期间有效，接收方不得保存。
 /// @return 钩子无返回值（签名为 `void(const Widget *)`）。
@@ -374,7 +374,7 @@ inline auto notify_accessibility_event(const AccessibilityEvent &e) -> void {
 }
 
 /// @brief 上报「某个控件实例即将销毁」（在 `Widget` 释放**之前**调用，指针仍有效）。
-/// 调用点唯一：`Node::~Node()` 中确认「真销毁控件实例」的分支（与结构事件同源，G3）。
+/// 调用点唯一：`Node::~Node()` 中确认「真销毁控件实例」的分支（与结构事件同源）。
 /// 桥据此判定自己缓存的根是否已亡并立即切断投影，避免解引用悬垂指针。
 /// @param w 正在销毁的控件（调用返回后即失效；接收方不得保存）
 /// @note Thread: main-thread only
@@ -387,7 +387,7 @@ inline auto notify_accessibility_widget_destroying(const Widget *w) -> void {
     }
 }
 
-/// @brief 动态播报：「请现在朗读这段文本」（Live Region / Announcement，G4）。
+/// @brief 动态播报：「请现在朗读这段文本」（Live Region / Announcement）。
 /// 走独立事件通道（`AccessibilityEventKind::Announcement`），**不经**语义树 diff——
 /// toast / 状态提示 / 异步结果这类临时文本没有焦点或取值变化，只有此通道能被读屏感知。
 /// 各桥映射：UIA `UiaRaiseNotificationEvent`（回退 `UIA_LiveRegionChangedEventId`）、

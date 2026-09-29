@@ -213,7 +213,7 @@ class RichTextEdit : public LeafWidget {
         return out;
     }
 
-    // ---- 无障碍语义（切片 1/2）：多行文本 + TextPattern 支撑 ----
+    // ---- 无障碍语义：多行文本 + TextPattern 支撑 ----
 
     /// @brief 无障碍状态：多行文本（UIA 侧映射 `Document` 而非 `Edit`）。
     /// @return 基类通用状态叠加 `multiline = true` 后的结果。

@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/scatter_chart.h
-/// 测试说明: 覆盖 ScatterChart（切片 6）——defaults / describe_static / 序列化往返（points 为 [[x,y]] 数组）/
+/// 测试说明: 覆盖 ScatterChart——defaults / describe_static / 序列化往返（points 为 [[x,y]] 数组）/
 /// 工厂 from_json 重建、最近点欧氏距离命中（阈值 = dot_radius + 4dp）、on_point_tapped、
 /// 空数据与 NaN 点跳过，以及像素 golden 基线（chart_scatter.png，受 AURORA_UPDATE_GOLDEN 控制）
 

@@ -13,7 +13,7 @@ namespace aurora::a11y {
 /// @brief 文本单位（UIA `TextUnit` / AT-SPI2 文本边界的共享语义）。
 enum class TextUnit : std::uint8_t {
     Character,  ///< Unicode 码点
-    Word,  ///< 空白 / 标点启发式分词（零依赖；CJK 整段一词为已知退化，设计 §13 R6）
+    Word,  ///< 空白 / 标点启发式分词（零依赖；CJK 整段一词为已知退化）
     Line,  ///< `\n` 分界
     Document,  ///< 全文
 };
@@ -72,11 +72,11 @@ namespace detail {
 
 }  // namespace detail
 
-/// @brief UTF-8 ↔ UTF-16 偏移映射（A4 / §7.4）。
+/// @brief UTF-8 ↔ UTF-16 偏移映射。
 /// UIA 文本偏移的单位是 **UTF-16 code unit**，而 Aurora 内部（含 `Widget::accessibility_text()`
 /// 等钩子）一律 **UTF-8 字节偏移**；换算只存在于平台桥边界，且由本表一次性 O(n) 构建。
 ///
-/// 关键纪律（G9）：emoji 等非 BMP 字符占 2 个 UTF-16 单元，`MoveEndpointByUnit(Character)`
+/// 关键纪律：emoji 等非 BMP 字符占 2 个 UTF-16 单元，`MoveEndpointByUnit(Character)`
 /// 会把端点落到代理对的**第二单元**——该索引在 UTF-8 侧无对应码点起点。故 `to_utf8()`
 /// 一律**向下夹紧到码点起点**（高代理处），绝不产生指向码点中部的偏移。
 /// @note Thread: main-thread only
@@ -115,7 +115,7 @@ class UtfOffsetMap {
     /// @return 末尾哨兵的 UTF-16 偏移；空表时为 0。
     [[nodiscard]] auto utf16_length() const -> std::size_t { return utf16_of_.empty() ? 0 : utf16_of_.back(); }
 
-    /// @brief UTF-16 偏移 → UTF-8 偏移（向下夹紧到码点起点，G9）。
+    /// @brief UTF-16 偏移 → UTF-8 偏移（向下夹紧到码点起点）。
     /// @param utf16_index UTF-16 单元下标；落在代理对第二单元时回夹到高代理起点。
     /// @return 对应码点起点的 UTF-8 字节偏移；不小于总长时返回文本字节长度。
     [[nodiscard]] auto to_utf8(std::size_t utf16_index) const -> std::size_t {
@@ -279,7 +279,7 @@ class UtfOffsetMap {
         return false;
     }
     // ASCII 标点视为分隔符；其余（含 CJK 全角标点本属 U+3000 段）按词内处理——
-    // CJK 无空格分词，退化成「整段一词」是可接受代价（设计 §13 R6）。
+    // CJK 无空格分词，退化成「整段一词」是可接受代价。
     if (cp < 0x80U) {
         const bool punct = (cp >= '!' && cp <= '/') || (cp >= ':' && cp <= '@') || (cp >= '[' && cp <= '`') ||
                            (cp >= '{' && cp <= '~');

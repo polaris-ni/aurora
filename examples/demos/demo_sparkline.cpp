@@ -1,4 +1,4 @@
-// Sparkline 控件 demo（图表控件族切片 4）：最薄图表——无轴 / 无网格 / 无图例 / 无交互，用于卡片内趋势缩览。
+// Sparkline 控件 demo（图表控件）：最薄图表——无轴 / 无网格 / 无图例 / 无交互，用于卡片内趋势缩览。
 #include "demo_common.h"
 
 // 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做

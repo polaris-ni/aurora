@@ -18,9 +18,9 @@ class Widget;
 namespace aurora::a11y {
 
 /// @brief 平台桥抽象（平台中立；各平台一个实现，见设计 §5.1）。
-/// 生命周期：**惰性激活**（D14）—— 无读屏在线时零开销（不构建语义树、不发平台事件）；
+/// 生命周期：**惰性激活**—— 无读屏在线时零开销（不构建语义树、不发平台事件）；
 /// 首个平台查询到达时才 `activate()` 并回填 `screen_reader_active`。
-/// 同步模型：**拉取式**（D9/G2）—— 事件到达只置 dirty，`sync_if_dirty()` 在平台查询
+/// 同步模型：**拉取式**—— 事件到达只置 dirty，`sync_if_dirty()` 在平台查询
 /// 到达时才重建快照 + diff + 发平台事件，避免高频变更下的重建风暴。
 /// @note Thread: main-thread only（in-proc provider 由平台在 UI 线程回调）
 class Provider {
@@ -63,12 +63,12 @@ class Provider {
     virtual auto set_rtl([[maybe_unused]] bool rtl) -> void {}
 
     /// @brief 事件到达（已置脏）：桥可在此做平台侧的即时处理（如焦点事件优先路由）。
-    /// 默认 no-op：拉取式模型（D9）下事件只需置脏，重建与事件派生推迟到
+    /// 默认 no-op：拉取式模型下事件只需置脏，重建与事件派生推迟到
     /// `sync_if_dirty()`，避免高频变更下的重建风暴。
     /// @param e 到达的语义事件（播报事件不经此通道）。
     virtual auto on_event([[maybe_unused]] const AccessibilityEvent &e) -> void {}
 
-    /// @brief 动态播报（G4）：不经 diff，桥直译平台「立即朗读」信号。
+    /// @brief 动态播报：不经 diff，桥直译平台「立即朗读」信号。
     /// @param text 待朗读的文本。
     /// @param target 播报目标的控件指针（非拥有，可为空）。
     virtual auto on_announcement([[maybe_unused]] const std::string &text, [[maybe_unused]] const Widget *target)
@@ -90,7 +90,7 @@ class Provider {
 /// @brief 实现细节命名空间：桥注册表与钩子装配，不属于面向消费者的 API 面。
 namespace detail {
 
-/// @brief 进程级桥注册表（事件广播路由，D16）。仅 activate/deactivate 时增删。
+/// @brief 进程级桥注册表（事件广播路由）。仅 activate/deactivate 时增删。
 /// 事件到达时广播给全部已激活桥；桥内按 `id → Widget*` 映射判定归属、无关即忽略
 /// （多窗口规模下广播成本可忽略，不为桥把单槽改多播）。
 class ProviderRegistry {
@@ -158,10 +158,10 @@ class ProviderRegistry {
   private:
     /// @brief 事件到达的桥侧入口：置脏 + 交给桥做平台侧即时处理（如焦点事件优先路由）。
     /// @param p 目标桥。
-    /// @param e 到达的事件。播报事件（G4）在此短路，直上抛平台「立即朗读」信号：
+    /// @param e 到达的事件。播报事件在此短路，直上抛平台「立即朗读」信号：
     /// p.on_announcement(e.announcement_text, e.target);
     static auto on_event(Provider &p, const AccessibilityEvent &e) -> void {
-        // 播报（G4）不经 diff：桥直接上抛平台「立即朗读」信号，不依赖 dirty 拉取。
+        // 播报不经 diff：桥直接上抛平台「立即朗读」信号，不依赖 dirty 拉取。
         if (e.kind == AccessibilityEventKind::Announcement) {
             p.on_announcement(e.announcement_text, e.target);
             return;

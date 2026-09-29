@@ -142,7 +142,7 @@ class Win32Host {
     /// @param h 缩放变化处理器，参数为新的缩放因子。
     auto set_scale_change_handler(std::function<void(float)> h) const -> void;
 
-    // ---- 无障碍桥（D13/D14/G14）----
+    // ---- 无障碍桥 ----
 
     /// @brief 本窗口的无障碍桥（`a11y::Provider`）；未激活（尚无读屏查询）返回 nullptr。
     ///

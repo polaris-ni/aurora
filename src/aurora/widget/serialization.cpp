@@ -234,7 +234,7 @@ auto register_core_widgets() -> void {
     reg_default<Badge>("Badge");
     reg_default<SegmentedControl>("SegmentedControl");
     reg_default<Stepper>("Stepper");
-    // 图表控件族（切片 3–6）：属性完整可序列化（含 series 对象数组），默认构造后回填属性即可重建。
+    // 图表控件族：属性完整可序列化（含 series 对象数组），默认构造后回填属性即可重建。
     reg_default<BarChart>("BarChart");
     reg_default<LineChart>("LineChart");
     reg_default<PieChart>("PieChart");

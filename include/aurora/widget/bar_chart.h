@@ -32,15 +32,15 @@ struct BarChartProps {
     ChartAxisSpec axis_x;  ///< 类目轴（Band）
     ChartAxisSpec axis_y;  ///< 数值轴（Linear）
     ChartLegendSpec legend;  ///< 图例
-    /// @brief 图内留白（dp）：轴标签 / 值框的避让区（D12）。
+    /// @brief 图内留白（dp）：轴标签 / 值框的避让区。
     EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};
 };
 
-/// @brief 柱状图控件（叶控件，切片 3；契约见 specification/04-widget.md §3.8）。
+/// @brief 柱状图控件（叶控件；契约见 specification/04-widget.md §3.8）。
 ///
-/// 纯值属性驱动（`BarChartProps`），数据进序列化面（D5），绘制全部经软件 `Painter`：
+/// 纯值属性驱动（`BarChartProps`），数据进序列化面，绘制全部经软件 `Painter`：
 /// 柱体 = `fill_rounded_rect`、网格 / 轴 = `draw_line` + `draw_text`、悬停值框自绘。
-/// 轴域与命中反查同源于 `LinearScale` / `BandScale`（D6），故悬停命中的类目与渲染一致。
+/// 轴域与命中反查同源于 `LinearScale` / `BandScale`，故悬停命中的类目与渲染一致。
 ///
 /// 三种构造形态等价（`CODING_STANDARDS.md` §11.1）：
 /// @code
@@ -159,7 +159,7 @@ class BarChart : public LeafWidget, public BarChartProps {
     /// @return 固定为 "BarChart"。
     [[nodiscard]] auto type_name() const -> const char * override { return "BarChart"; }
 
-    /// @brief 静态描述符入口：属性矩阵 / 事件 / 不变式（序列化契约 D5）。
+    /// @brief 静态描述符入口：属性矩阵 / 事件 / 不变式（序列化契约）。
     /// @return WidgetDescriptor（含 bar_width_ratio ∈ [0.05,1]、padding ≥ 0 等不变式）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
     /// @brief 返回控件描述符（属性矩阵 / 事件 / 不变式），与 describe_static 同源。
@@ -170,7 +170,7 @@ class BarChart : public LeafWidget, public BarChartProps {
     /// @param out 收集输出容器（不写入）。
     auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
-    /// @brief 写出序列化面属性（数据系列 / 类目 / 轴 / 图例 / 留白等，D5）：先走基类
+    /// @brief 写出序列化面属性（数据系列 / 类目 / 轴 / 图例 / 留白等）：先走基类
     ///        （width/height/show），再补图表十个字段。
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override;
@@ -199,9 +199,9 @@ class BarChart : public LeafWidget, public BarChartProps {
     /// @param e 鼠标事件；Move / Release 被消费（置 `is_handled`），其余回落基类。
     auto on_pointer_event(MouseEvent &e) -> void override;
 
-    /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `BarChart`，
+    /// @brief 无障碍角色：图表族统一为 `Image`—— 推断表不识 `BarChart`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
-    /// @return 统一为 `AccessibilityRole::Image`（D8）。
+    /// @return 统一为 `AccessibilityRole::Image`。
     /// @note Side-effects: pure
     [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override { return AccessibilityRole::Image; }
 
@@ -222,12 +222,12 @@ class BarChart : public LeafWidget, public BarChartProps {
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override;
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
-    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态，D11）。
+    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态）。
     /// @param ctx 构建上下文（当前实现未使用）。
     auto on_mount([[maybe_unused]] const BuildContext &ctx) -> void override { grow_.mount(); }
 
   private:
-    /// @brief 布局期算定的绘图几何（局部坐标，原点 0）：渲染与命中反查共用同一份（D6）。
+    /// @brief 布局期算定的绘图几何（局部坐标，原点 0）：渲染与命中反查共用同一份。
     struct Geometry {
         Rect plot{};  ///< 柱体绘制区（不含轴留白）
         LinearScale y_scale;  ///< 数值轴
@@ -252,7 +252,7 @@ class BarChart : public LeafWidget, public BarChartProps {
     ///        （bar_width_ratio 夹取 [0.05,1]）/ 单柱宽与图例命中区。
     /// @param size 控件尺寸。
     /// @param font 继承主题的字体。
-    /// @return 渲染与命中反查共用的 Geometry（D6 同源）。
+    /// @return 渲染与命中反查共用的 Geometry（同源）。
     [[nodiscard]] auto compute_geometry(const Size &size, const Font &font) const -> Geometry;
     /// @brief 反查局部坐标命中的数据点：先限绘图区内，堆叠按 y 分段、分组按柱宽切片定位系列。
     /// @param local 控件局部坐标。
@@ -313,7 +313,7 @@ inline auto BarChart::series_value(std::size_t series_idx, std::size_t cat_idx) 
     return std::isfinite(vals[cat_idx]) ? vals[cat_idx] : 0.0;
 }
 
-// min 与 max 同时显式时走 from_explicit，否则 from_domain 取整刻度；空数据退化 [0,1]（D15）。
+// min 与 max 同时显式时走 from_explicit，否则 from_domain 取整刻度；空数据退化 [0,1]。
 inline auto BarChart::compute_y_scale() const -> LinearScale {
     const std::size_t n_cat = category_count();
     double lo = 0.0;
@@ -344,7 +344,7 @@ inline auto BarChart::compute_y_scale() const -> LinearScale {
     }
     if (!have) {
         lo = 0.0;
-        hi = 1.0;  // 空数据：域退化为 [0,1]（D15），只画轴不画柱
+        hi = 1.0;  // 空数据：域退化为 [0,1]，只画轴不画柱
     }
     if (axis_y.min.has_value()) {
         lo = *axis_y.min;
@@ -715,7 +715,7 @@ inline auto BarChart::deserialize_props(const Json &props) -> void {
     mark_needs_paint();
 }
 
-/// @brief 绘制：y 轴网格、柱体（grow-in 进度缩放、图例联动降透明、越界裁剪 D12）、轴刻度与标签、
+/// @brief 绘制：y 轴网格、柱体（grow-in 进度缩放、图例联动降透明、越界裁剪）、轴刻度与标签、
 ///        图例（与 geom_.legend_rects 同源）、悬停高亮边框 / 十字准线 / 自绘值框（一律夹进 bounds）。
 /// @param p 软件绘制器。
 /// @param bounds 控件全局矩形（局部几何经偏移换算为全局坐标）。
@@ -773,7 +773,7 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
             const float y_lo = g.y_scale.to_px(lo, plot.bottom(), plot.origin.y);
             const float top = std::min(y_lo, y_hi);
             const float bottom = std::max(y_lo, y_hi);
-            // 夹进绘图区：域外的值不得画到轴外（D12）
+            // 夹进绘图区：域外的值不得画到轴外
             const float clipped_top = std::max(top, plot.origin.y);
             const float clipped_bottom = std::min(bottom, plot.bottom());
             if (clipped_bottom - clipped_top <= 0.0F) {
@@ -887,7 +887,7 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
                     std::to_string(series_value(static_cast<std::size_t>(si), static_cast<std::size_t>(ci)));
                 const float w = render::FontEngine::measure_width(text, font) + 16.0F;
                 const float h = line_h + 8.0F;
-                // 值框一律夹在控件 bounds 内（越界像素不会被脏区擦除 → 残影，D12）
+                // 值框一律夹在控件 bounds 内（越界像素不会被脏区擦除 → 残影）
                 float bx = hovered_bar->origin.x + (hovered_bar->size.width * 0.5F) - (w * 0.5F);
                 float by = hovered_bar->origin.y - h - 4.0F;
                 bx = std::clamp(bx, 0.0F, std::max(0.0F, bounds.size.width - w));

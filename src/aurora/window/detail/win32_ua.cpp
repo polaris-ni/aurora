@@ -98,7 +98,7 @@ auto variant_init_provider(VARIANT &v, IRawElementProviderSimple *p) -> void {
     }
 }
 
-/// @brief 属性「不支持」的保留 VARIANT（G21）：必须是 UIA 保留值而非 VT_EMPTY。
+/// @brief 属性「不支持」的保留 VARIANT：必须是 UIA 保留值而非 VT_EMPTY。
 auto variant_not_supported(VARIANT &v) -> void {
     VariantInit(&v);
     IUnknown *reserved = nullptr;
@@ -248,7 +248,7 @@ template <typename R>
     return SUCCEEDED(hr) ? frag : nullptr;
 }
 
-/// @brief 当前线程是否已初始化 COM 公寓（G8）：未初始化时 UIA 回调线程不确定。
+/// @brief 当前线程是否已初始化 COM 公寓：未初始化时 UIA 回调线程不确定。
 [[nodiscard]] auto ensure_sta_apartment() -> bool {
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (hr == S_OK || hr == S_FALSE) {
@@ -261,7 +261,7 @@ template <typename R>
 }  // namespace
 
 // ============================================================================
-// UiaApi：UIAutomationCore.dll 动态加载（D15/G20）
+// UiaApi：UIAutomationCore.dll 动态加载
 // ============================================================================
 
 auto UiaApi::instance() -> const UiaApi & {
@@ -292,7 +292,7 @@ auto UiaApi::instance() -> const UiaApi & {
             reinterpret_cast<decltype(a.host_provider_from_hwnd)>(GetProcAddress(dll, "UiaHostProviderFromHwnd"));
         a.get_reserved_not_supported = reinterpret_cast<decltype(a.get_reserved_not_supported)>(
             GetProcAddress(dll, "UiaGetReservedNotSupportedValue"));
-        // 可选：较老 Windows 上不存在，缺失时播报回退 LiveRegionChanged（G20/G30）。
+        // 可选：较老 Windows 上不存在，缺失时播报回退 LiveRegionChanged。
         a.raise_notification_event =
             reinterpret_cast<decltype(a.raise_notification_event)>(GetProcAddress(dll, "UiaRaiseNotificationEvent"));
         a.loaded = a.return_raw_element_provider != nullptr && a.raise_automation_event != nullptr &&
@@ -311,7 +311,7 @@ auto UiaApi::instance() -> const UiaApi & {
 // UiaNodeProvider：单个语义节点的 provider（fragment + 全 pattern）
 // ============================================================================
 
-/// @brief 语义节点 provider：实现 fragment 全方法（G17）+ 各 pattern。
+/// @brief 语义节点 provider：实现 fragment 全方法与各 pattern。
 ///
 /// 纪律（#53）：只持**桥裸指针 + 节点 id**，不持 `Widget*`。UIA 把每次回调投递在
 /// `UIAutomationCore` 的 COM/RPC 线程上，而 widget 树 / `snap_` / `providers_` 属主人线程，故
@@ -364,7 +364,7 @@ class UiaNodeProvider : public IRawElementProviderSimple,
         }
         return r;
     }
-    /// @brief 引用计数探针（G26 回收判据）：COM 没有只读计数口，只能临时借一份再还回去窥。
+    /// @brief 引用计数探针（回收判据）：COM 没有只读计数口，只能临时借一份再还回去窥。
     /// @return 除本次临时借还之外的既有持有者数。桥在 `providers_` 里恒持一份 ⇒ 下界为 1，
     ///         故探针期间计数不可能归零。
     /// @note 这里直拨 `ref_` 而不调 `AddRef()/Release()`：后者含「归零即 `delete this`」，
@@ -391,11 +391,11 @@ class UiaNodeProvider : public IRawElementProviderSimple,
         if (ret == nullptr) {
             return E_POINTER;
         }
-        *ret = nullptr;  // 非根 fragment：宿主由根提供（G19）
+        *ret = nullptr;  // 非根 fragment：宿主由根提供
         return S_OK;
     }
 
-    // ---- IRawElementProviderFragment（6 个方法全实现，G17）----
+    // ---- IRawElementProviderFragment（6 个方法全实现）----
     HRESULT STDMETHODCALLTYPE Navigate(enum NavigateDirection direction, IRawElementProviderFragment **ret) override;
     HRESULT STDMETHODCALLTYPE GetRuntimeId(SAFEARRAY **ret) override;
     HRESULT STDMETHODCALLTYPE get_BoundingRectangle(struct UiaRect *ret) override;
@@ -505,14 +505,14 @@ class UiaRootProvider : public UiaNodeProvider,
     ULONG STDMETHODCALLTYPE AddRef() override { return UiaNodeProvider::AddRef(); }
     ULONG STDMETHODCALLTYPE Release() override { return UiaNodeProvider::Release(); }
 
-    // 根：宿主 provider 由 hwnd 派生（G19）——免费获得窗口级属性与 IsOffscreen 判定。
+    // 根：宿主 provider 由 hwnd 派生——免费获得窗口级属性与 IsOffscreen 判定。
     HRESULT STDMETHODCALLTYPE get_HostRawElementProvider(IRawElementProviderSimple **ret) override;
 
     // ---- IRawElementProviderFragmentRoot ----
     HRESULT STDMETHODCALLTYPE ElementProviderFromPoint(double x, double y, IRawElementProviderFragment **ret) override;
     HRESULT STDMETHODCALLTYPE GetFocus(IRawElementProviderFragment **ret) override;
 
-    // ---- IRawElementProviderAdviseEvents（G31）----
+    // ---- IRawElementProviderAdviseEvents ----
     HRESULT STDMETHODCALLTYPE AdviseEventAdded(EVENTID /*event_id*/, SAFEARRAY * /*props*/) override {
         if (bridge_ != nullptr) {
             bridge_->note_listener_added();
@@ -531,7 +531,7 @@ class UiaRootProvider : public UiaNodeProvider,
 };
 
 // ============================================================================
-// UiaTextRangeProvider / UiaTextProvider（切片 5）
+// UiaTextRangeProvider / UiaTextProvider
 // ============================================================================
 
 /// @brief 文本区间 provider：内部以 **UTF-8 字节偏移**保存端点，UIA 边界用 `UtfOffsetMap` 换算。
@@ -612,7 +612,7 @@ class UiaTextRangeProvider : public ITextRangeProvider {
     ULONG ref_ = 1;
 };
 
-/// @brief TextPattern provider（每文本节点一个；`ITextProvider` 六方法全实现，G25）。
+/// @brief TextPattern provider（每文本节点一个；`ITextProvider` 六方法全实现）。
 ///
 /// 线程模型（#53）同 `UiaTextRangeProvider`：不持 `Widget*`，对 widget 的读写一律经 `read_on_main`
 /// 回投主人线程，跨线程只传副本。
@@ -647,7 +647,7 @@ class UiaTextProvider : public ITextProvider {
         if (ret != nullptr) {
             *ret = nullptr;
         }
-        return E_NOTIMPL;  // Aurora 无嵌入对象（G25 允许）
+        return E_NOTIMPL;  // Aurora 无嵌入对象，规范允许如此
     }
     HRESULT STDMETHODCALLTYPE RangeFromPoint(struct UiaPoint point, ITextRangeProvider **ret) override;
     HRESULT STDMETHODCALLTYPE get_DocumentRange(ITextRangeProvider **ret) override;
@@ -675,7 +675,7 @@ auto UiaNodeProvider::node() const -> std::optional<a11y::NodeSnapshot> {
     if (bridge_ == nullptr) {
         return std::nullopt;
     }
-    // 拉取式同步点（D9）与跨线程纪律（#53）都在 `snapshot_copy` 内：回投主人线程重建，
+    // 拉取式同步点与跨线程纪律（#53）都在 `snapshot_copy` 内：回投主人线程重建，
     // 再把该节点**按值**带回。此后本 provider 只读自己这份副本 —— 主线程随后怎么换快照、
     // 怎么摘 widget，都不会让这里的读数悬垂（旧实现返回指向 `snap_` 的裸指针，正是缺陷本体）。
     return bridge_->snapshot_copy(id_);
@@ -758,7 +758,7 @@ auto UiaNodeProvider::GetPropertyValue(PROPERTYID property_id, VARIANT *ret) -> 
     const auto n = node();
     if (!n.has_value()) {
         variant_not_supported(*ret);
-        return S_OK;  // 元素已销毁：不支持而非失败（G21 纪律）
+        return S_OK;  // 元素已销毁：不支持而非失败
     }
     const AccessibilityNode &an = n->node;
     switch (property_id) {
@@ -815,7 +815,7 @@ auto UiaNodeProvider::GetPropertyValue(PROPERTYID property_id, VARIANT *ret) -> 
             variant_init_bool(*ret, an.role == AccessibilityRole::Dialog);
             return S_OK;
         case UIA_LiveSettingPropertyId:
-            variant_init_i4(*ret, 1);  // LiveSetting::Polite（G4/G30 播报语义）
+            variant_init_i4(*ret, 1);  // LiveSetting::Polite（播报语义）
             return S_OK;
         case UIA_NativeWindowHandlePropertyId:
             variant_init_i4(*ret, 0);  // 非根：无窗口句柄（根在 UiaRootProvider 覆写）
@@ -898,7 +898,7 @@ auto UiaNodeProvider::Navigate(enum NavigateDirection direction, IRawElementProv
         return UIA_E_ELEMENTNOTAVAILABLE;  // 本节点已被摘出快照（与旧实现同判）
     }
     if (*target == 0) {
-        return S_OK;  // 该方向没有邻居（根无父，由宿主窗口 provider 承载，G19）
+        return S_OK;  // 该方向没有邻居（根无父，由宿主窗口 provider 承载）
     }
     // 缓存借用 → 交还前补一次引用（口径与旧 `as_fragment` + `AddRef` 一致）。
     IRawElementProviderFragment *frag = as_fragment(bridge_->provider_for(*target));
@@ -989,7 +989,7 @@ auto UiaNodeProvider::SetValue(LPCWSTR val) -> HRESULT {
     if (val == nullptr) {
         return E_POINTER;
     }
-    // G15：`req.text` 是 string_view，串本身必须在执行那一刻仍存活 —— #53 里由
+    // `req.text` 是 string_view，串本身必须在执行那一刻仍存活 —— #53 里由
     // `perform_on_main` 按值搬进闭包承担（超时后晚到的执行也读得到，读的是闭包而非栈帧）。
     const std::string utf8 = a11y::utf16_to_utf8(std::u16string_view{reinterpret_cast<const char16_t *>(val)});
     return hr_of(perform_on_main(AccessibilityAction::Value, 0.0, utf8));
@@ -1231,7 +1231,7 @@ auto UiaRootProvider::ElementProviderFromPoint(double x, double y, IRawElementPr
     if (bridge_ == nullptr) {
         return UIA_E_ELEMENTNOTAVAILABLE;
     }
-    // 物理屏幕像素 → 窗口本地 DIP（D12 反换算），再走与派发器同口径的命中测试（G18）。
+    // 物理屏幕像素 → 窗口本地 DIP（反换算），再走与派发器同口径的命中测试。
     const std::uint64_t id = bridge_->hit_test_id(bridge_->to_local(x, y));
     if (id == 0) {
         return S_OK;
@@ -1358,7 +1358,7 @@ auto UiaTextRangeProvider::GetBoundingRectangles(SAFEARRAY **ret) -> HRESULT {
         *ret = SafeArrayCreateVector(VT_R8, 0, 0);  // 空区间：空数组
         return S_OK;
     }
-    // 逐码点取字符盒（无字体度量时 `char_bounds` 返回 nullopt ⇒ 该字符跳过，G10）。整趟遍历收进
+    // 逐码点取字符盒（无字体度量时 `char_bounds` 返回 nullopt ⇒ 该字符跳过）。整趟遍历收进
     // **一次**回投：跨线程只带窗口本地 DIP 盒的副本回来（#53）。
     const auto boxes = read_on_main<std::optional<std::vector<Rect>>>(
         bridge_, id_,
@@ -1380,7 +1380,7 @@ auto UiaTextRangeProvider::GetBoundingRectangles(SAFEARRAY **ret) -> HRESULT {
     if (!boxes.has_value()) {
         return UIA_E_ELEMENTNOTAVAILABLE;
     }
-    // DIP → 物理屏幕像素（D12）：`to_physical` 只读 Win32 几何 API，在 UIA 调用线程换算即可。
+    // DIP → 物理屏幕像素：`to_physical` 只读 Win32 几何 API，在 UIA 调用线程换算即可。
     std::vector<double> rects;
     rects.reserve(boxes->size() * 4U);
     for (const Rect &box : *boxes) {
@@ -1499,7 +1499,7 @@ auto UiaTextRangeProvider::MoveEndpointByUnit(enum TextPatternRangeEndpoint endp
         // 同 MoveEndpointByUnit：分支互斥，直接以 const 初始化，避免未初始化告警与「初始化值未被读取」。
         const std::size_t next = [&]() -> std::size_t {
             if (unit == TextUnit_Character) {
-                // G9：UTF-16 半代理索引由 `advance_utf16` 向下夹紧到码点起点。
+                // UTF-16 半代理索引由 `advance_utf16` 向下夹紧到码点起点。
                 return map.advance_utf16(map.to_utf16(edge_ref), step);
             }
             const auto [s, e] = a11y::expand_to_unit(text, edge_ref, to_shared_unit(unit));
@@ -1572,7 +1572,7 @@ auto UiaTextRangeProvider::GetChildren(SAFEARRAY **ret) -> HRESULT {
     if (ret == nullptr) {
         return E_POINTER;
     }
-    // Aurora 无嵌入对象：返回空数组（而非 E_NOTIMPL，G25）。
+    // Aurora 无嵌入对象：返回空数组（而非 E_NOTIMPL）。
     *ret = SafeArrayCreateVector(VT_UNKNOWN, 0, 0);
     return (*ret != nullptr) ? S_OK : E_OUTOFMEMORY;
 }
@@ -1644,7 +1644,7 @@ auto UiaTextProvider::RangeFromPoint(struct UiaPoint point, ITextRangeProvider *
         return E_POINTER;
     }
     *ret = nullptr;
-    // 物理 → 本地 DIP 只读 Win32 几何（任意线程可调，G18）；随后的「按最近字符反查」整趟收进
+    // 物理 → 本地 DIP 只读 Win32 几何（任意线程可调）；随后的「按最近字符反查」整趟收进
     // 一次回投，跨线程只带一个字节偏移回来。
     const Point local = (bridge_ != nullptr) ? bridge_->to_local(point.x, point.y) : Point{};
     const auto offset = read_on_main<std::optional<std::size_t>>(
@@ -1780,7 +1780,7 @@ auto Win32UiaBridge::wait_on_main(std::function<void()> work, const std::shared_
 }
 
 auto Win32UiaBridge::widget_on_main(std::uint64_t id) -> Widget * {
-    // 只在 `eval_*_on_main` 的闭包内到达（主人线程）：先消费脏位（D9 的拉取式同步点），
+    // 只在 `eval_*_on_main` 的闭包内到达（主人线程）：先消费脏位（拉取式同步点），
     // 再把快照里的裸 widget 交出去 —— 该指针的有效期止于本次回投闭包，不得离开主人线程。
     sync_if_dirty();
     const auto *n = find_node(id);
@@ -1824,7 +1824,7 @@ auto Win32UiaBridge::navigate_target(std::uint64_t id, NavigationKind kind) -> s
             const bool rtl = rtl_.load(std::memory_order_relaxed);
             switch (kind) {
                 case NavigationKind::Parent:
-                    return n->parent_id;  // 0 = 根，父级由宿主窗口 provider 承载（G19）
+                    return n->parent_id;  // 0 = 根，父级由宿主窗口 provider 承载
                 case NavigationKind::FirstChild:
                 case NavigationKind::LastChild: {
                     const auto *kids = children_of(id);
@@ -1956,13 +1956,13 @@ auto Win32UiaBridge::activate() -> void {
     if (UiaApi::instance().host_provider_from_hwnd != nullptr && hwnd_ != nullptr && host_provider_ == nullptr) {
         IRawElementProviderSimple *host = nullptr;
         if (SUCCEEDED(UiaApi::instance().host_provider_from_hwnd(hwnd_, &host)) && host != nullptr) {
-            host_provider_ = host;  // 持有引用（G19：根 provider 派生的窗口级属性来源）
+            host_provider_ = host;  // 持有引用（根 provider 派生的窗口级属性来源）
         }
     }
     active_ = true;
     dirty_ = true;
     a11y::register_provider(*this);
-    // 激活即回填 `screen_reader_active`（D14；heuristic 语义见设计 R9）：保留其余字段。
+    // 激活即回填 `screen_reader_active`（heuristic 语义见 specification/01-core.md §7.2）：保留其余字段。
     auto settings = current_accessibility_settings();
     settings.screen_reader_active = true;
     set_accessibility_settings(settings);
@@ -2017,7 +2017,7 @@ auto Win32UiaBridge::sync_if_dirty() -> void {
 }
 
 auto Win32UiaBridge::on_event(const AccessibilityEvent & /*e*/) -> void {
-    // 拉取式模型（D9/G2）：事件只置脏（已由 `mark_dirty()` 完成），重建推迟到平台查询。
+    // 拉取式模型：事件只置脏（已由 `mark_dirty()` 完成），重建推迟到平台查询。
     // 焦点事件除外——读屏对焦点变化敏感，置脏后在下次查询即派发（见 `rebuild` 的 focus 项）。
 }
 
@@ -2035,7 +2035,7 @@ auto Win32UiaBridge::on_announcement(const std::string &text, const Widget * /*t
     }
     const BSTR bstr = bstr_from_utf8(text);
     if (api.raise_notification_event != nullptr) {
-        // G30：现代播报主通道（旧系统缺失时回退 LiveRegion，见下）。
+        // 现代播报主通道（旧系统缺失时回退 LiveRegion，见下）。
         const HRESULT hr = api.raise_notification_event(root, NotificationKind_Other,
                                                         NotificationProcessing_ImportantMostRecent, bstr, nullptr);
         if (SUCCEEDED(hr)) {
@@ -2056,7 +2056,7 @@ auto Win32UiaBridge::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LR
         return std::nullopt;
     }
     if (!active_) {
-        activate();  // 惰性激活（D14）
+        activate();  // 惰性激活
     }
     if (!active_) {
         return std::nullopt;  // 降级：UIA 不可用 → 交系统兜底
@@ -2248,7 +2248,7 @@ auto Win32UiaBridge::rebuild() -> void {
         return;
     }
 
-    // ---- 结构事件（G29：单增删用 ChildAdded/ChildRemoved + runtimeId，批量才 Invalidated）----
+    // ---- 结构事件（单增删用 ChildAdded/ChildRemoved + runtimeId，批量才 Invalidated）----
     for (const std::uint64_t id : diff.added) {
         const auto *n = next.find(id);
         queue_structure_changed(n != nullptr ? n->parent_id : 0, true, id);
@@ -2355,7 +2355,7 @@ auto Win32UiaBridge::recycle_removed(const std::vector<std::uint64_t> &removed) 
             continue;
         }
         UiaNodeProvider *p = it->second;
-        // G26：仅当**无 UIA 侧引用**（只有桥自己持有）时立即回收；
+        // 仅当**无 UIA 侧引用**（只有桥自己持有）时立即回收；
         // 仍有外部引用者延后到 deactivate 全量断连，保 R1 的悬垂防线。
         if (p->holder_count() > 1U) {  // 除桥外仍有持有者（UIA 侧缓存）⇒ 延后到 deactivate
             continue;
@@ -2407,7 +2407,7 @@ auto Win32UiaBridge::emit_pending() -> void {
     if (pending_.empty()) {
         return;
     }
-    // G28-②：去重（同一节点同一属性只保留最后一条）+ G31（无监听者整批丢弃）。
+    // 先按「同一节点同一属性只保留最后一条」去重；无监听者时整批丢弃并释放 VARIANT。
     if (!has_listeners()) {
         for (auto &e : pending_) {
             VariantClear(&e.old_value);
@@ -2416,7 +2416,7 @@ auto Win32UiaBridge::emit_pending() -> void {
         pending_.clear();
         return;
     }
-    // G28-③：排序批量发出 结构 → 焦点 → 属性 → 播报。
+    // 再排序批量发出：结构 → 焦点 → 属性 → 播报。
     std::ranges::stable_sort(pending_, [](const PendingEvent &a, const PendingEvent &b) -> bool {
         return static_cast<int>(a.kind) < static_cast<int>(b.kind);
     });
@@ -2445,7 +2445,7 @@ auto Win32UiaBridge::emit_pending() -> void {
         if (target == nullptr && e.kind != PendingEvent::Kind::Announcement) {
             VariantClear(&e.old_value);
             VariantClear(&e.new_value);
-            continue;  // 节点已销毁：丢弃（G28-④）
+            continue;  // 节点已销毁：丢弃
         }
         switch (e.kind) {
             case PendingEvent::Kind::Structure: {

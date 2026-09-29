@@ -114,7 +114,7 @@ class ProgressIndicator : public LeafWidget {
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_value() const -> std::string override { return std::to_string(value()); }
 
-    /// @brief 无障碍取值域（D7）：进度恒为 [0,1] 只读区间（`step` 0 = 连续）。
+    /// @brief 无障碍取值域：进度恒为 [0,1] 只读区间（`step` 0 = 连续）。
     /// @return 含当前值的 AccessibilityRange（min 0、max 1、step 0）。
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_range() const -> std::optional<AccessibilityRange> override {

@@ -9,9 +9,9 @@
 // `aurora/window/detail/aria_protocol.h`（先纯后桥），本头只剩生命周期与反向动作回灌。
 //
 // 与原生桥的两处**刻意差异**（如实申报）：
-//  - **无懒激活信号可用**（D14 例外）：浏览器没有 `WM_GETOBJECT`/D-Bus 查询那样的
+//  - **无懒激活信号可用**（例外）：浏览器没有 `WM_GETOBJECT`/D-Bus 查询那样的
 //    「读屏来了」事件（navigator 无读屏探测 API），故首个语义树根注入即激活 —— 拉取式
-//    （D9）仍成立：只有 dirty（结构/字段事件、换根）才重投影 + 发 ops，静止页面零 DOM  churn。
+//    仍成立：只有 dirty（结构/字段事件、换根）才重投影 + 发 ops，静止页面零 DOM  churn。
 //  - **无几何面**：镜像元素不带画布坐标，读屏按 DOM 顺序导航（不支持「点按位置探测」）。
 //
 // 反向动作（读屏 → 控件）：JS 侧在镜像元素上挂 click/focus 监听，把 (id, 动作位) 写入
@@ -58,7 +58,7 @@ class WasmAriaBridge final : public a11y::Provider {
 
     /// @brief 激活：注册进桥广播表、置 `screen_reader_active`、请求首帧全量应用。
     ///
-    /// WASM 无外部激活信号，本方法由**首个 `set_root`** 调用（见文件头 D14 例外申报）。
+    /// WASM 无外部激活信号，本方法由**首个 `set_root`** 调用（见文件头的惰性激活例外申报）。
     auto activate() -> void override;
     /// @brief 去激活：注销广播表、清空并移除镜像容器（窗口销毁必经，防残留孤儿树）。
     auto deactivate() -> void override;
@@ -118,7 +118,7 @@ class WasmAriaBridge final : public a11y::Provider {
     Widget *root_ = nullptr;  ///< 非拥有裸根（生命周期由宿主 `present_root` 喂入/切断）
     a11y::TreeSnapshot snapshot_;  ///< 活快照（DOM 镜像与之同构；widget 指针仅本帧内有效）
     bool has_snapshot_ = false;  ///< false = 下次同步走全量载荷
-    bool dirty_ = true;  ///< 拉取式脏位（D9）
+    bool dirty_ = true;  ///< 拉取式脏位
     bool active_ = false;  ///< 生命周期闩（activate/deactivate 幂等）
     bool raf_pending_ = false;  ///< 已排一拍未落（防双链；落拍/出局时复位）
     bool rtl_ = false;

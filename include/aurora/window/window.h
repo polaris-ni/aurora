@@ -556,8 +556,8 @@ class Window {
         BuildContext ctx = prepare_context(root, root_changed);
         const double layout_ms = run_layout(root, plan, ctx);
         const double paint_ms = run_paint(p, root, ctx, plan);
-        // 无障碍根注入（D9）：布局与绘制都完成后语义树几何才有效，故放在 paint 之后。
-        // 走宿主级通道而非 `accessibility_provider()`：桥惰性构造（D14），首个平台查询到达
+        // 无障碍根注入：布局与绘制都完成后语义树几何才有效，故放在 paint 之后。
+        // 走宿主级通道而非 `accessibility_provider()`：桥惰性构造，首个平台查询到达
         // 时它才存在，此时若无注入记录就无根可投影。无桥后端为 no-op。
         surface_->set_accessibility_root(&root.widget());
         const bool hud_refreshed = compose_hud_maybe(p, ctx);
@@ -1071,7 +1071,7 @@ class Window {
     /// @return 本帧 layout 阶段耗时（毫秒）。
     [[nodiscard]] auto run_layout(Node &root, const FramePlan &plan, const BuildContext &ctx) -> double {
         // 布局整棵子树：LayoutBuilder 等依赖 layout 阶段构建子节点（约束不变则复用缓存），
-        // 也是 T8 根 MediaQuery 注入对子树可见的前提。
+        // 也是根 MediaQuery 注入对子树可见的前提。
         Constraints c;
         c.max = size();
         const auto t_layout_start = std::chrono::steady_clock::now();

@@ -104,7 +104,7 @@ struct AriaElement {
 /// 不依赖增量的相对语义（丢一帧 ops 也不会错位）。
 [[nodiscard]] auto focus_id_of(const a11y::TreeSnapshot &snap) -> std::uint64_t;
 
-/// @brief 播报载荷（G4 → aria-live）：`{"text":"…","target":N}`（target 0 = 无关联控件）。
+/// @brief 播报载荷（折算为 aria-live）：`{"text":"…","target":N}`（target 0 = 无关联控件）。
 [[nodiscard]] auto aria_announce_json(const std::string &text, std::uint64_t target) -> std::string;
 
 }  // namespace aurora::detail

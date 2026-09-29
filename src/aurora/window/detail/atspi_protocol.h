@@ -220,7 +220,7 @@ struct AtspiEnv {
 
 /// @brief AT-SPI2 折算模型：快照 + 路径分配 + 方法面纯应答。
 ///
-/// 树裁剪口径：仅剔除 `!is_control && !is_content`（装饰节点，G23「完全忽略」档）并把其
+/// 树裁剪口径：仅剔除 `!is_control && !is_content`（装饰节点，「完全忽略」档）并把其
 /// 子节点上挂到最近的存活祖先 —— 与 UIA 桥「控制视图可见性」同源但按其语义放宽：AT-SPI2
 /// 没有 control/content 双视图概念，纯布局容器（is_control）照常入树（atk 应用同此形态）。
 /// @note Thread: main-thread only（与桥/快照同线程）

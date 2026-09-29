@@ -42,7 +42,7 @@ auto Widget::announce(const std::string &text) const -> void { notify_accessibil
 auto Widget::perform_accessibility_action(const AccessibilityActionRequest &req) -> bool {
     switch (req.action) {
         case AccessibilityAction::Focus: {
-            // 不得走 `request_focus()`：后者读派发期线程局部，在 UIA/AT-SPI2 回调栈里恒为空（G1）。
+            // 不得走 `request_focus()`：后者读派发期线程局部，在 UIA/AT-SPI2 回调栈里恒为空。
             FocusManager *fm = resolve_focus_manager(*this);
             if (fm == nullptr) {
                 Diagnostics::warn("perform_accessibility_action(Focus): no focus manager available",
@@ -86,7 +86,7 @@ auto Widget::perform_accessibility_action(const AccessibilityActionRequest &req)
         case AccessibilityAction::ScrollDown:
         case AccessibilityAction::ScrollLeft:
         case AccessibilityAction::ScrollRight: {
-            // 滚动语义（G32）：把读屏的「上下左右滚一屏」翻译为滚轮同款增量派发。
+            // 滚动语义：把读屏的「上下左右滚一屏」翻译为滚轮同款增量派发。
             // 步长取视口尺寸的 80%（与常见读屏滚动手感一致），方向沿用 ScrollEvent 约定。
             const bool vertical =
                 (req.action == AccessibilityAction::ScrollUp || req.action == AccessibilityAction::ScrollDown);
@@ -131,7 +131,7 @@ Node::~Node() {
     if (widget_ == nullptr) {
         return;
     }
-    // 结构事件的**唯一**上报点（G3）：所有摘除路径（`Container::remove_child`、`children_`
+    // 结构事件的**唯一**上报点：所有摘除路径（`Container::remove_child`、`children_`
     // 重排、容器析构）最终都走到本析构，若再在摘除处各报一次会双发 StructureChanged。
     //
     // 只在**真正销毁控件实例**时上报：`Node` 是可共享句柄（`shared_ptr` 语义），拷贝/临时

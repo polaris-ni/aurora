@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/pie_chart.h
-/// 测试说明: 覆盖 PieChart（切片 5）——defaults / describe_static / 序列化往返 / 工厂 from_json 重建、
+/// 测试说明: 覆盖 PieChart——defaults / describe_static / 序列化往返 / 工厂 from_json 重建、
 /// 极坐标命中（半径 + 角度定位扇区）、on_section_tapped、Σ≤0 与负值降级、图例命中优先，
 /// 以及像素 golden 基线（chart_pie.png，受 AURORA_UPDATE_GOLDEN 控制）
 

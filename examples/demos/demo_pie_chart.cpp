@@ -1,4 +1,4 @@
-// PieChart 控件 demo（图表控件族切片 5）：环图 + 百分比标签 + 极坐标命中 + 扇区点击回调。
+// PieChart 控件 demo（图表控件）：环图 + 百分比标签 + 极坐标命中 + 扇区点击回调。
 #include "demo_common.h"
 
 // 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做

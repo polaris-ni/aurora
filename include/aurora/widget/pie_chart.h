@@ -31,7 +31,7 @@ struct PieChartProps {
     EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};  ///< 图内留白（dp）
 };
 
-/// @brief 饼图 / 环图控件（叶控件，切片 5；契约见 specification/04-widget.md §3.8）。
+/// @brief 饼图 / 环图控件（叶控件；契约见 specification/04-widget.md §3.8）。
 ///
 /// 扇区经 `fill_sector` 绘制（`center_space_ratio > 0` 即环图），间隙以角度让位实现（非描边）。
 /// 命中使用**极坐标**判定：先按半径落在 `[inner, outer]`，再按角度定位扇区（与渲染同源）。
@@ -154,7 +154,7 @@ class PieChart : public LeafWidget, public PieChartProps {
     /// @param e 指针事件。
     auto on_pointer_event(MouseEvent &e) -> void override;
 
-    /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `PieChart`，
+    /// @brief 无障碍角色：图表族统一为 `Image`—— 推断表不识 `PieChart`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
     /// @return 恒为 AccessibilityRole::Image。
     /// @note Side-effects: pure
@@ -179,7 +179,7 @@ class PieChart : public LeafWidget, public PieChartProps {
     /// @param bounds 绘制边界
     /// @param ctx 构建上下文（取主题色/字体）
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
-    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态，D11）。
+    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态）。
     /// @param ctx 构建上下文（本实现未使用）。
     auto on_mount([[maybe_unused]] const BuildContext &ctx) -> void override { grow_.mount(); }
 
@@ -536,7 +536,7 @@ inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
             const float w = render::FontEngine::measure_width(text, font);
             const float tx = g.center.x + (std::cos(mid) * r) - (w * 0.5F);
             const float ty = g.center.y + (std::sin(mid) * r) - (line_h * 0.5F);
-            // 标签一律夹在控件内（D12）
+            // 标签一律夹在控件内
             const float cx = std::clamp(tx, 0.0F, std::max(0.0F, bounds.size.width - w));
             const float cy = std::clamp(ty, 0.0F, std::max(0.0F, bounds.size.height - line_h));
             const Rect box{.origin = Point{.x = origin.x + cx, .y = origin.y + cy},

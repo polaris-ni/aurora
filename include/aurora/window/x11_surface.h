@@ -171,7 +171,7 @@ class X11Surface final : public Surface {
     /// @return AT-SPI2 桥指针（本对象拥有；降级路径恒 nullptr）。
     [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override;
 
-    /// @brief 语义树根注入（`Window::present_root` 每帧调用；D9 宿主通道）。
+    /// @brief 语义树根注入（`Window::present_root` 每帧调用；宿主通道）。
     /// 首次调用即尝试建桥（dlopen libdbus + 连 a11y 总线 + Socket.Embed——AT-SPI 没有
     /// `WM_GETOBJECT` 式查询触发点，构造期连上总线是 GNOME/Qt 应用同款形态）；失败永久降级。
     /// @param root 语义树根控件指针。

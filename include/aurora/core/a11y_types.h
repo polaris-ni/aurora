@@ -38,7 +38,7 @@ struct AccessibilityState {
     bool password = false;  ///< 密码框：读屏不得逐字朗出
 };
 
-/// @brief 无障碍取值域：可量化控件的 min/max/step/value（D7）。
+/// @brief 无障碍取值域：可量化控件的 min/max/step/value。
 /// 供 Slider / ProgressIndicator 等覆写 `Widget::accessibility_range()`；
 /// UIA 侧有值即暴露 `IRangeValueProvider`，AT-SPI2 侧暴露 `org.a11y.atspi.Value`。
 /// @note Side-effects: reads state
@@ -58,7 +58,7 @@ struct AccessibilityTextSelection {
     std::size_t end = 0;  ///< 选区终点（字节偏移，不含）
 };
 
-/// @brief 无障碍滚动量：滚动容器的 {min, max, position} 三分量（G32）。
+/// @brief 无障碍滚动量：滚动容器的 {min, max, position} 三分量。
 /// 由 `Scroll` 等滚动控件覆写 `Widget::accessibility_scroll()` 提供；UIA 侧据此暴露
 /// `IScrollProvider`（可滚动量换算为百分比），AT-SPI2 / macOS 侧映射
 /// `Component.ScrollTo` / `accessibilityPerformScrollToVisible`。

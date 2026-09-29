@@ -377,7 +377,7 @@ class Surface {
 
     /// @brief 本窗口的无障碍桥（`a11y::Provider`）；默认 nullptr（无桥 / 未激活）。
     ///
-    /// 扩展点（D13）：各平台后端按能力返回自己的桥实例——Win32 家族（`Win32Surface` /
+    /// 扩展点：各平台后端按能力返回自己的桥实例——Win32 家族（`Win32Surface` /
     /// `D3D11Surface`，共用 `Win32Host` 宿主）返回同一个 `Win32UiaBridge`；其余平台
     /// 后续按 §8 契约接入。桥**惰性激活**：无读屏在线时返回 nullptr 或已注册但未激活的实例，
     /// 宿主据此零开销。公共头不引入任何平台头（仅前向声明）。
@@ -387,7 +387,7 @@ class Surface {
 
     /// @brief 把语义树根注入本窗口（每帧调用；默认 no-op）。
     ///
-    /// 为何不只用 `accessibility_provider()->set_root()`：桥是**惰性**构造的（D14，无读屏查询
+    /// 为何不只用 `accessibility_provider()->set_root()`：桥是**惰性**构造的（无读屏查询
     /// 时零开销），首个 `WM_GETOBJECT` 到达时它才存在——此刻若还没有任何注入记录，桥就无根可投影。
     /// 故根必须由**宿主**（恒存在）承接：桥构造后由宿主补喂，之后每次换根即时转发。
     /// @note Thread: main-thread only

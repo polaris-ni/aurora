@@ -115,7 +115,7 @@ class FocusManager {
 /// @param fm 本次派发栈内生效的 FocusManager（非拥有；nullptr 表示退出派发/清除）。
 auto set_current_focus_manager(FocusManager *fm) noexcept -> void;
 
-/// @brief 解析与某控件关联的焦点管理器（无障碍动作 / 交互模拟的统一取用点，G1）。
+/// @brief 解析与某控件关联的焦点管理器（无障碍动作 / 交互模拟的统一取用点）。
 /// `current_focus_manager()` 只在 `EventDispatcher::dispatch` 的派发栈内有效，而读屏桥的
 /// provider 回调（UIA Invoke/SetFocus、AT-SPI2 DoAction…）发生在**平台调用栈**里、不在任何
 /// 派发栈内 —— 那里 `current_focus_manager()` 恒为 nullptr，`Widget::request_focus()` 会静默

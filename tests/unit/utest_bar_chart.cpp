@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/bar_chart.h
-/// 测试说明: 覆盖 BarChart 切片 3 全链路——构造不变量与 defaults、describe_static 属性完备、
+/// 测试说明: 覆盖 BarChart 全链路——构造不变量与 defaults、describe_static 属性完备、
 /// 序列化往返（含 series 对象数组 / axis / legend / padding）、工厂 from_json 重建、
 /// hover 命中几何（纯计算，同源 BandScale 反查）、on_point_tapped 触发、空数据与畸形输入降级，
 /// 以及像素 golden 基线（chart_bar.png，受 AURORA_GOLDEN_DIR / MAX_DIFF / MAX_PIXELS / UPDATE_GOLDEN 控制）

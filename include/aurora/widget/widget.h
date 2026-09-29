@@ -59,7 +59,7 @@ auto notify_accessibility_focus_changed(const Widget *target) -> void;
 /// @note Side-effects: invokes accessibility event handler
 auto notify_accessibility_structure_changed(const Widget *host) -> void;
 
-/// @brief 上报**动态播报**（Live Region / Announcement，G4）到无障碍事件通道。
+/// @brief 上报**动态播报**（Live Region / Announcement）到无障碍事件通道。
 ///
 /// 与 `Widget::announce(text)` 的区别：本入口不绑定控件（`target` 可空），供 toast /
 /// 异步结果等无控件归属的临时文本使用；控件级播报用 `Widget::announce`。
@@ -172,7 +172,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 进程级唯一运行时身份（原子自增，自 1 起；0 保留为无效）。
     ///
-    /// 用途：语义树节点身份（`AccessibilityNode::id`）与平台桥的 diff 键（D5）。
+    /// 用途：语义树节点身份（`AccessibilityNode::id`）与平台桥的 diff 键。
     /// 构造时分配、实例生命周期内恒定；非序列化属性。
     /// @return 构造时分配的运行时身份 id（自 1 起；0 保留为无效）。
     /// @note Side-effects: pure
@@ -751,7 +751,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @note Side-effects: pure
     [[nodiscard]] virtual auto accessibility_hint() const -> std::string { return std::string{}; }
 
-    // ---- 无障碍语义钩子（切片 1：D6–D8 / G23 / G33 / OQ4）----
+    // ---- 无障碍语义钩子 ----
 
     /// @brief 无障碍语义角色：默认走既有 `infer_accessibility_role(type_name())` 推断表（零改动兼容）。
     ///
@@ -761,7 +761,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @note Side-effects: pure
     [[nodiscard]] virtual auto accessibility_role() const -> AccessibilityRole;
 
-    /// @brief 无障碍状态位集：基类默认只填 `focused`（D6）。
+    /// @brief 无障碍状态位集：基类默认只填 `focused`。
     ///
     /// 派生位 `visible` / `focusable` / `offscreen` 由共享语义层（`core/accessibility.h`
     /// 的 `build_accessibility_node`）统一填，覆写时无需关心。
@@ -771,17 +771,17 @@ class Widget : public std::enable_shared_from_this<Widget> {
         return AccessibilityState{.focused = is_focused_};
     }
 
-    /// @brief 无障碍取值域（D7）：默认无（nullopt）；Slider / ProgressIndicator 覆写。
+    /// @brief 无障碍取值域：默认无（nullopt）；Slider / ProgressIndicator 覆写。
     /// @return 取值域（最小值 / 最大值 / 当前值）；无可取值语义时为 `nullopt`。
     /// @note Side-effects: reads state
     [[nodiscard]] virtual auto accessibility_range() const -> std::optional<AccessibilityRange> { return std::nullopt; }
 
-    /// @brief 标题层级（OQ4）：`Header` 角色控件的 `aria-level` / UIA level；默认无。
+    /// @brief 标题层级：`Header` 角色控件的 `aria-level` / UIA level；默认无。
     /// @return 标题层级值：基类非标题控件恒为 `nullopt`。
     /// @note Side-effects: pure
     [[nodiscard]] virtual auto accessibility_level() const -> std::optional<int> { return std::nullopt; }
 
-    /// @brief 是否参与语义树（G23 裁剪钩子）：默认 true。
+    /// @brief 是否参与语义树（裁剪钩子）：默认 true。
     ///
     /// 纯装饰控件覆写返回 false ⇒ 读屏完全忽略（对标 Flutter `excludeSemantics` /
     ///  Chromium `IsIgnored`）；判定在共享层生效，三桥语义一致。
@@ -789,14 +789,14 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @note Side-effects: pure
     [[nodiscard]] virtual auto accessibility_is_semantic() const -> bool { return true; }
 
-    /// @brief 无障碍滚动量（G32）：默认无（nullopt）；`Scroll` 等滚动容器覆写返回 {min,max,position}。
+    /// @brief 无障碍滚动量：默认无（nullopt）；`Scroll` 等滚动容器覆写返回 {min,max,position}。
     /// @return 滚动量三元组（可滚范围与当前位置）；非滚动控件为 `nullopt`。
     /// @note Side-effects: reads state
     [[nodiscard]] virtual auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> {
         return std::nullopt;
     }
 
-    /// @brief 无障碍滚动定位（G32）：把偏移直接设到 `offset`（语义同 `accessibility_scroll()`
+    /// @brief 无障碍滚动定位：把偏移直接设到 `offset`（语义同 `accessibility_scroll()`
     ///        的 position 分量）；非滚动控件默认 no-op。
     ///
     /// 供 UIA `IScrollProvider::SetScrollPercent` / AT-SPI2 `Component.ScrollTo` 这类
@@ -805,7 +805,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @note Side-effects: mutates scroll state
     virtual auto accessibility_scroll_to([[maybe_unused]] double offset) -> void {}
 
-    // ---- 无障碍文本语义钩子（A4 / §4.5：全部默认空实现，仅可编辑文本控件覆写）----
+    // ---- 无障碍文本语义钩子（全部默认空实现，仅可编辑文本控件覆写）----
 
     /// @brief 纯文本全文（UTF-8；不含组合期 preedit——组合中文本属未确定态，读屏读 value 即可）。
     /// @return 控件当前纯文本的只读视图（生命周期至下一次文本变更前）；基类无可读文本语义，恒为空视图。
@@ -820,7 +820,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @param end 选区终点（UTF-8 字节偏移，半开区间右端）
     virtual auto accessibility_set_selection([[maybe_unused]] std::size_t start, [[maybe_unused]] std::size_t end)
         -> void {}
-    /// @brief 单字符盒（**窗口本地 DIP**）；无字体度量 / 越界时返回 nullopt（不得崩溃，G10）。
+    /// @brief 单字符盒（**窗口本地 DIP**）；无字体度量 / 越界时返回 nullopt（不得崩溃）。
     /// @return 目标字符的包围盒：基类无字体度量，恒为 `nullopt`。
     [[nodiscard]] virtual auto accessibility_char_bounds(std::size_t /*utf8_index*/) const -> std::optional<Rect> {
         return std::nullopt;
@@ -832,9 +832,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
     virtual auto accessibility_replace_text([[maybe_unused]] std::size_t start, [[maybe_unused]] std::size_t end,
                                             [[maybe_unused]] std::string_view utf8) -> void {}
 
-    // ---- 无障碍动作通道（切片 2：D3）----
+    // ---- 无障碍动作通道 ----
 
-    /// @brief 读屏反向操作入口（A3）。
+    /// @brief 读屏反向操作入口。
     ///
     /// 默认实现路由到**真实事件路径**：Focus → 焦点管理器；Click/Invoke → 与
     /// `Inspector::simulate_click` 同口径的中心点 press+release 派发（不可命中则失败）。
@@ -845,7 +845,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @note Side-effects: dispatches events
     virtual auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool;
 
-    /// @brief 动态播报：请求读屏立即朗读本段文本（G4 / Live Region）。
+    /// @brief 动态播报：请求读屏立即朗读本段文本（Live Region）。
     ///
     /// 不经语义树 diff（临时文本没有焦点或取值变化），由各桥直译平台「立即朗读」信号；
     /// 无读屏在线时为空转（事件通道无处理器）。

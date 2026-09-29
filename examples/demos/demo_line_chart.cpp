@@ -1,4 +1,4 @@
-// LineChart 控件 demo（图表控件族切片 4）：多系列折线 + 数据点 + 悬停十字准线 / 值框 + 图例联动。
+// LineChart 控件 demo（图表控件）：多系列折线 + 数据点 + 悬停十字准线 / 值框 + 图例联动。
 #include "demo_common.h"
 
 // 入口函数允许库异常逃逸到 main（terminate 即失败路径），示例/CLI 不做

@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/painter.h
-/// 测试说明: 覆盖图表控件族切片 1 的三个新增矢量原语——stroke_polyline（真 SDF，圆角连接 + 圆帽，
+/// 测试说明: 覆盖图表控件族的三个新增矢量原语——stroke_polyline（真 SDF，圆角连接 + 圆帽，
 /// 半透明下顶点不得二次合成）、fill_sector（扇形 / 环扇，内外半径与角向四条边 AA）、stroke_arc
 /// （环带语义糖）；并验证录制 / 回放（DisplayList）一致性、裁剪与 global_alpha 生效、退化入参
 /// 无操作，以及两张原语级像素 golden 基线（painter_polyline.png / painter_sector.png，
@@ -76,7 +76,7 @@ AURORA_TEST_CASE(polyline_covers_segments_and_join) {
 }
 
 AURORA_TEST_CASE(polyline_join_has_no_double_composite) {
-    // D13：图例联动把系列降到 alpha 0.35。真 SDF 只按几何算一次覆盖度，故顶点与段中部墨量一致；
+    // 图例联动把系列降到 alpha 0.35。真 SDF 只按几何算一次覆盖度，故顶点与段中部墨量一致；
     // 若退化成「逐段 draw_line + 顶点圆盘」，顶点会二次源覆盖合成而明显更浓（串珠）。
     // 注意：帧缓冲按不透明合成（set_pixel 恒写 alpha=255），覆盖度体现在 RGB 上，故比 R 通道。
     const Color dim{255, 0, 0, static_cast<std::uint8_t>(AURORA_DIM_ALPHA)};
@@ -219,7 +219,7 @@ AURORA_TEST_CASE(golden_polyline_matches_baseline) {
     p.begin(AURORA_GOLDEN_SIZE, AURORA_GOLDEN_SIZE);
     p.fill_rect(rect_at(0.0F, 0.0F, static_cast<float>(AURORA_GOLDEN_SIZE), static_cast<float>(AURORA_GOLDEN_SIZE)),
                 Color::white());
-    // 直角折线（join）+ 三点折线（细）+ 半透明折线（D13：顶点不得串珠）
+    // 直角折线（join）+ 三点折线（细）+ 半透明折线（顶点不得串珠）
     p.stroke_polyline(
         std::vector<Point>{Point{.x = 6.0F, .y = 8.0F}, Point{.x = 30.0F, .y = 8.0F}, Point{.x = 30.0F, .y = 28.0F}},
         4.0F, Color::red());

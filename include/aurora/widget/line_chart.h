@@ -32,14 +32,14 @@ struct LineChartProps {
     ChartAxisSpec axis_x;  ///< 类目轴
     ChartAxisSpec axis_y;  ///< 数值轴（Linear）
     ChartLegendSpec legend;  ///< 图例
-    /// @brief 图内留白（dp）：轴标签 / 值框的避让区（D12）。
+    /// @brief 图内留白（dp）：轴标签 / 值框的避让区。
     EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};
 };
 
-/// @brief 折线图控件（叶控件，切片 4；契约见 specification/04-widget.md §3.8）。
+/// @brief 折线图控件（叶控件；契约见 specification/04-widget.md §3.8）。
 ///
 /// 折线经 Painter 的 `stroke_polyline`（真 SDF，圆角连接），数据点用圆角矩形复用圆形。
-/// x 为等距索引（无独立 x 域），y 域与命中反查同源于 `LinearScale`（D6）。
+/// x 为等距索引（无独立 x 域），y 域与命中反查同源于 `LinearScale`。
 /// 悬停按「最近数据点欧氏距离」命中（阈值 = `dot_radius + 8dp`），并叠加吸附该点的十字准线。
 ///
 /// @note Thread: main-thread only
@@ -144,7 +144,7 @@ class LineChart : public LeafWidget, public LineChartProps {
     /// @return 固定为 "LineChart"。
     [[nodiscard]] auto type_name() const -> const char * override { return "LineChart"; }
 
-    /// @brief 静态描述符入口：属性矩阵 / 事件 / 不变式（序列化契约 D5）。
+    /// @brief 静态描述符入口：属性矩阵 / 事件 / 不变式（序列化契约）。
     /// @return WidgetDescriptor（含 line_width ≥ 0、dot_radius ≥ 0 等不变式）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
     /// @brief 返回控件描述符，与 describe_static 同源。
@@ -159,7 +159,7 @@ class LineChart : public LeafWidget, public LineChartProps {
     /// @return 未在动画中时为 true（可缓存）。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return !grow_.animating(); }
 
-    /// @brief 写出序列化面属性（数据系列 / 类目 / 线宽 / 点半径 / 轴 / 图例 / 留白等，D5）：先走基类
+    /// @brief 写出序列化面属性（数据系列 / 类目 / 线宽 / 点半径 / 轴 / 图例 / 留白等）：先走基类
     ///        （width/height/show），再补图表十个字段。
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override;
@@ -188,9 +188,9 @@ class LineChart : public LeafWidget, public LineChartProps {
     /// @param e 鼠标事件；Move / Release 被消费（置 `is_handled`），其余回落基类。
     auto on_pointer_event(MouseEvent &e) -> void override;
 
-    /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `LineChart`，
+    /// @brief 无障碍角色：图表族统一为 `Image`—— 推断表不识 `LineChart`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
-    /// @return 统一为 `AccessibilityRole::Image`（D8）。
+    /// @return 统一为 `AccessibilityRole::Image`。
     /// @note Side-effects: pure
     [[nodiscard]] auto accessibility_role() const -> AccessibilityRole override { return AccessibilityRole::Image; }
 
@@ -211,12 +211,12 @@ class LineChart : public LeafWidget, public LineChartProps {
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override;
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
-    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态，D11）。
+    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态）。
     /// @param ctx 构建上下文（当前实现未使用）。
     auto on_mount([[maybe_unused]] const BuildContext &ctx) -> void override { grow_.mount(); }
 
   private:
-    /// @brief 布局期算定的绘图几何（局部坐标）：渲染与命中反查共用同一份（D6）。
+    /// @brief 布局期算定的绘图几何（局部坐标）：渲染与命中反查共用同一份。
     struct Geometry {
         Rect plot{};  ///< 折线绘制区（不含轴留白）
         LinearScale y_scale;  ///< 数值轴
@@ -238,7 +238,7 @@ class LineChart : public LeafWidget, public LineChartProps {
     /// @brief 由尺寸与字体算定绘图几何：扣除图例带与轴标签留白得绘图区，并生成图例命中区。
     /// @param size 控件尺寸。
     /// @param font 继承主题的字体。
-    /// @return 渲染与命中反查共用的 Geometry（D6 同源）。
+    /// @return 渲染与命中反查共用的 Geometry（同源）。
     [[nodiscard]] auto compute_geometry(const Size &size, const Font &font) const -> Geometry;
     /// @brief 第 i 个数据点的 x 坐标（等距：单点居中，否则沿绘图区线性均分；x = 索引，无独立 x 域）。
     /// @param g 布局期几何。
@@ -296,7 +296,7 @@ inline auto LineChart::series_value(std::size_t series_idx, std::size_t point_id
     return std::isfinite(vals[point_idx]) ? vals[point_idx] : 0.0;
 }
 
-// min 与 max 同时显式时走 from_explicit，否则 from_domain；空数据退化 [0,1]（D15）。
+// min 与 max 同时显式时走 from_explicit，否则 from_domain；空数据退化 [0,1]。
 inline auto LineChart::compute_y_scale() const -> LinearScale {
     double lo = 0.0;
     double hi = 0.0;

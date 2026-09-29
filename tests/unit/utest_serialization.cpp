@@ -125,7 +125,7 @@ AURORA_TEST_CASE(unknown_type_still_rejected) {
 }
 
 AURORA_TEST_CASE(barchart_rebuilds_nested_series_array) {
-    // 图表数据进序列化面（D5）：series 是对象数组（首个「数组属性」先例），
+    // 图表数据进序列化面：series 是对象数组（首个「数组属性」先例），
     // 嵌套的 name / values / color 必须逐字段往返，且未设色的系列不输出 color 键。
     auto src = std::make_shared<BarChart>(BarChartProps{
         .series = {ChartSeries{.name = "A", .values = {1.0, 2.0, 3.0}, .color = Color{1, 2, 3, 255}},

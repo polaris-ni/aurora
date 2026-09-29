@@ -26,7 +26,7 @@ struct SparklineProps {
     EdgeInsets padding{.left = 2.0F, .top = 2.0F, .right = 2.0F, .bottom = 2.0F};  ///< 图内留白
 };
 
-/// @brief 迷你折线（叶控件，切片 4；契约见 specification/04-widget.md §3.8）。
+/// @brief 迷你折线（叶控件；契约见 specification/04-widget.md §3.8）。
 ///
 /// **无轴、无网格、无图例、无交互**——最薄的图表控件，用于表格 / 卡片内的趋势缩览。
 /// 值域直接取数据 min/max（退化时回退 `[0,1]`），绘制 = `stroke_polyline` + 末端圆点。
@@ -114,7 +114,7 @@ class Sparkline : public LeafWidget, public SparklineProps {
     /// @param props 源 JSON 对象；仅读取存在的键，缺失或类型不符的键保持当前值。
     auto deserialize_props(const Json &props) -> void override;
 
-    /// @brief 无障碍角色：图表族统一为 `Image`（D8）—— 推断表不识 `Sparkline`，
+    /// @brief 无障碍角色：图表族统一为 `Image`—— 推断表不识 `Sparkline`，
     ///        不覆写会回落 `Generic`，读屏念不出「这是一张图表」。
     /// @note Side-effects: pure
     /// @return 固定为 `AccessibilityRole::Image`。
@@ -139,7 +139,7 @@ class Sparkline : public LeafWidget, public SparklineProps {
         return Size{.width = std::max(s.width, 0.0F), .height = std::max(s.height, 0.0F)};
     }
 
-    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态，D11）。
+    /// @brief 接入帧循环并播放 grow-in（无运行中 Animator 时降级为终态）。
     auto on_mount(const BuildContext & /*ctx*/) -> void override { grow_.mount(); }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
@@ -192,7 +192,7 @@ class Sparkline : public LeafWidget, public SparklineProps {
         if (show_end_dot && dot_radius > 0.0F && grow_.progress() >= 1.0) {
             const Point &last = pts.back();
             const float d = dot_radius * 2.0F;
-            // 末端圆点须夹在控件内（D12：越界像素不会被脏区擦除）
+            // 末端圆点须夹在控件内（越界像素不会被脏区擦除）
             const float cx =
                 std::clamp(last.x, bounds.origin.x + dot_radius, bounds.origin.x + bounds.size.width - dot_radius);
             const float cy =

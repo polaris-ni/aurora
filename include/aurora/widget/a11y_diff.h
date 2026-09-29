@@ -22,7 +22,7 @@ struct NodeSnapshot {
     const Widget *widget = nullptr;  ///< 活指针（仅桥内使用，随快照刷新；不入序列化面）
 };
 
-/// @brief 一次语义树投影的完整快照（D9）。
+/// @brief 一次语义树投影的完整快照。
 /// @note Thread: main-thread only
 /// 本行隐式生成的拷贝/移动构造逐成员复制 vector 与两张 unordered_map（容器拷贝即可能 bad_alloc），
 /// 被本检查判「不应抛出」；该隐式特成员按 [except.spec] 本就是 potentially-throwing。快照按值
@@ -42,7 +42,7 @@ struct TreeSnapshot {
     }
 };
 
-/// @brief 字段级变化种类（D11 事件派生的输入）。
+/// @brief 字段级变化种类（事件派生的输入）。
 enum class FieldChange : std::uint8_t {
     Name,  ///< 名称（name）变化
     Value,  ///< 值（value）变化
@@ -53,7 +53,7 @@ enum class FieldChange : std::uint8_t {
     Actions,  ///< 可用动作列表（actions）变化
 };
 
-/// @brief 两次快照的差异（D11）。
+/// @brief 两次快照的差异。
 ///
 /// 语义：只描述「应让平台感知的变化」，不追求最小编辑脚本——结构整段重排时宁多报
 /// `moved` 也不误报 remove+add（读屏焦点稳定性优先）。
@@ -153,7 +153,7 @@ inline auto flatten_snapshot(const Widget &w, const AccessibilityNode &n, std::u
 
 }  // namespace detail
 
-/// @brief 构建语义树快照（D9 拉取式重投影的产出）。
+/// @brief 构建语义树快照（拉取式重投影的产出）。
 ///
 /// 与 `build_accessibility_tree` 同参数语义：调用前应先完成一次布局以获得真实几何。
 /// @note Thread: main-thread only
@@ -175,7 +175,7 @@ inline auto flatten_snapshot(const Widget &w, const AccessibilityNode &n, std::u
     return build_tree_snapshot(root, Rect{.origin = Point{}, .size = root.size()});
 }
 
-/// @brief 比较两次快照，产出平台事件派生的输入（D11）。
+/// @brief 比较两次快照，产出平台事件派生的输入。
 ///
 /// 算法：按 parent 分组的子 id 序列做 LCS 识别 moved/added/removed；同 id 同父的节点
 /// 逐字段比较产出 updated；焦点位变化单独产出 `focused_id`（平台焦点事件优先级最高）。

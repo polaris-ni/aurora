@@ -76,11 +76,11 @@ class UiaNodeProvider;
 // NOLINTNEXTLINE(cppcoreguidelines-virtual-class-destructor)
 class UiaTextRangeProvider;
 
-/// @brief 动态加载的 UIA 扁平 API（D15：无链接期依赖，缺库降级 no-op）。
+/// @brief 动态加载的 UIA 扁平 API（无链接期依赖，缺库降级 no-op）。
 ///
 /// `UIAutomationCore.dll` 只在桥首次激活时 `LoadLibraryA`；任一**核心**函数缺失即整桥降级
 /// （`Diagnostics::warn` 一次），`UiaRaiseNotificationEvent` 是**可选**项——较老系统上不存在，
-/// 缺失时播报回退 `UIA_LiveRegionChangedEventId`（G20/G30）。
+/// 缺失时播报回退 `UIA_LiveRegionChangedEventId`。
 struct UiaApi {
     bool loaded = false;
     LRESULT(WINAPI *return_raw_element_provider)(HWND, WPARAM, LPARAM, IRawElementProviderSimple *) = nullptr;
@@ -100,11 +100,11 @@ struct UiaApi {
 
 /// @brief Win32 UIA 桥：快照 / diff / provider 缓存 / 事件映射 / 坐标换算。
 ///
-/// 所有权（G14）：由 `Win32Host::Impl` 持有；`Win32Surface` 与 `D3D11Surface` 的
+/// 所有权：由 `Win32Host::Impl` 持有；`Win32Surface` 与 `D3D11Surface` 的
 /// `accessibility_provider()` 都返回同一实例，避免两份 id→Widget* 映射分裂。
 ///
-/// 同步模型（D9/G2）：事件只置 dirty；平台查询（Navigate / 属性拉取）到达时
-/// `sync_if_dirty()` 才重建快照 + diff + **批量**发事件（G28）。
+/// 同步模型：事件只置 dirty；平台查询（Navigate / 属性拉取）到达时
+/// `sync_if_dirty()` 才重建快照 + diff + **批量**发事件。
 ///
 /// 线程模型（#53）：UIA provider 的**每一个**回调都跑在 `UIAutomationCore.dll` 的 COM/RPC
 /// 线程上（见 `ensure_sta_apartment()`：以 `RPC_E_CHANGED_MODE` 为可接受即已知并依赖了这一点），
@@ -228,13 +228,13 @@ class Win32UiaBridge final : public a11y::Provider {
     /// 句柄级 API 本身跨线程安全，故 provider 可在 RPC 线程直接调（不回投）。
     [[nodiscard]] auto scale_factor() const -> float;
     [[nodiscard]] auto origin() const -> Point;
-    /// @brief 窗口本地 DIP → 物理屏幕像素（D12：`物理 = bounds × scale + position`）。任意线程可调。
+    /// @brief 窗口本地 DIP → 物理屏幕像素（`物理 = bounds × scale + position`）。任意线程可调。
     [[nodiscard]] auto to_physical(const Rect &dip) const -> UiaRect;
     /// @brief 物理屏幕像素 → 窗口本地 DIP（`ElementProviderFromPoint` 反换算）。任意线程可调。
     [[nodiscard]] auto to_local(double phys_x, double phys_y) const -> Point;
 
     [[nodiscard]] auto root_widget() const -> Widget * { return root_; }
-    /// @brief 窗口宿主 provider（`UiaHostProviderFromHwnd` 结果；G19）。
+    /// @brief 窗口宿主 provider（`UiaHostProviderFromHwnd` 结果）。
     /// `activate()` 于主人线程一次性赋值，此后只读；返回缓存借用（不增计数）。
     [[nodiscard]] auto host_provider() -> IRawElementProviderSimple *;
     /// @brief 根 provider（#53：回投主人线程取/建，返回缓存借用）。
@@ -270,7 +270,7 @@ class Win32UiaBridge final : public a11y::Provider {
     auto queue_structure_changed(std::uint64_t parent_id, bool child_added, std::uint64_t child_id) -> void;
     auto queue_focus_changed(std::uint64_t id) -> void;
     auto queue_announcement(const std::string &text) -> void;
-    /// @brief 是否有客户端在监听（G31：无监听者时整批丢弃）。
+    /// @brief 是否有客户端在监听（无监听者时整批丢弃）。
     /// 计数由 RPC 线程上的连接点增删、由主人线程的派发读，故用原子量（#53）。
     [[nodiscard]] auto has_listeners() const -> bool { return listener_count_.load(std::memory_order_relaxed) > 0; }
     auto note_listener_added() -> void { listener_count_.fetch_add(1, std::memory_order_relaxed); }
@@ -354,7 +354,7 @@ class Win32UiaBridge final : public a11y::Provider {
     a11y::TreeSnapshot snap_;
     std::unordered_map<const Widget *, std::uint64_t> id_by_widget_;
     std::unordered_map<std::uint64_t, UiaNodeProvider *> providers_;
-    IRawElementProviderSimple *host_provider_ = nullptr;  ///< `UiaHostProviderFromHwnd`（G19）
+    IRawElementProviderSimple *host_provider_ = nullptr;  ///< `UiaHostProviderFromHwnd`
     UiaNodeProvider *root_provider_ = nullptr;
     std::vector<PendingEvent> pending_;
 };

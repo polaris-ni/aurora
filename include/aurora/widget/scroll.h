@@ -304,7 +304,7 @@ class Scroll : public Container, public ScrollProps {
     /// @return `offset_y_`，未经额外夹取（布局后由滚动路径保证在 `[0, 内容高−视口高]` 内）。
     [[nodiscard]] auto offset_y() const -> float { return offset_y_; }
 
-    /// @brief 无障碍滚动量（G32）：{0, 内容量−视口量, 当前偏移}。
+    /// @brief 无障碍滚动量：{0, 内容量−视口量, 当前偏移}。
     ///
     /// 供读屏驱动滚动（UIA `IScrollProvider` / AT-SPI2 `Component.ScrollTo` /
     /// macOS `accessibilityPerformScrollToVisible`）；不可滚时 max = 0，桥据此不暴露滚动 pattern。
@@ -316,7 +316,7 @@ class Scroll : public Container, public ScrollProps {
             .min = 0.0, .max = static_cast<double>(max_offset), .position = static_cast<double>(offset_y_)};
     }
 
-    /// @brief 无障碍滚动定位（G32）：走 `set_offset` 既有夹取路径（不标布局脏）。
+    /// @brief 无障碍滚动定位：走 `set_offset` 既有夹取路径（不标布局脏）。
     /// @param offset 目标偏移（内容坐标，double 来自读屏协议）；越界值按可滚范围夹取。
     /// @note Side-effects: mutates scroll state
     auto accessibility_scroll_to(double offset) -> void override {

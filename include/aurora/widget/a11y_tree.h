@@ -66,7 +66,7 @@ namespace detail {
     return w.accessibility_label();
 }
 
-/// @brief 直接子节点中的「唯一文本子节点」文本（Name 回退链最后一级，G24）。
+/// @brief 直接子节点中的「唯一文本子节点」文本（Name 回退链最后一级）。
 ///
 /// 图标 + 文字按钮是常见形态：容器本身无 label，其唯一 `Text` 子节点即读屏应念的内容。
 /// 多个文本子节点时**不猜测**（避免把整段内容拼成名字），返回空串交由调用方回落。
@@ -95,7 +95,7 @@ namespace detail {
     return (text_children == 1) ? found : std::string{};
 }
 
-/// @brief 兄弟标签关联（Name 回退链的「兄弟」级，G24；设计 §16.2 #1-C）。
+/// @brief 兄弟标签关联（Name 回退链的「兄弟」级）。
 ///
 /// CheckBox / Switch / Slider 是无内置文本的叶子控件，其可读标签通常是**同容器的兄弟**
 /// `Text` / `Label` / `RichText` 节点（如 `Row { Text("启用"), Checkbox() }`）。「唯一文本子
@@ -168,16 +168,16 @@ namespace detail {
     return best;
 }
 
-/// @brief Name（可访问名）回退链（G24，对标 ARIA accessible name computation）。
+/// @brief Name（可访问名）回退链（对标 ARIA accessible name computation）。
 ///
 /// ```
 /// name = labelled_by 所指控件的名字（引用式关联，`set_labelled_by`，最高优先级）  // ← 后置遍历覆盖
 ///      ?: explicit_accessibility_label()              // 宿主显式声明（`set_accessibility_label`）
 ///      ?: accessibility_label()                       // 控件自带文案（Button 的 label / Text 的内容…）
 ///      ?: 文本内容（Text / TextInput 的 value）       // 文本类控件的内容即名字
-///      ?: 兄弟标签关联（最近且相邻的文本兄弟）          // CheckBox/Slider 等叶子控件（#1-C）
+///      ?: 兄弟标签关联（最近且相邻的文本兄弟）          // CheckBox/Slider 等叶子控件
 ///      ?: 唯一 Text 子节点的文本                      // 图标 + 文字按钮
-///      ?: ""                                          // 装饰节点，交由 G23 裁剪忽略
+///      ?: ""                                          // 装饰节点，交由树裁剪口径忽略
 /// ```
 /// @note 第三、四级只取**几何已绘制**的兄弟盒，未绘制时安全回落空串。
 /// @note 只对本控件求值，不含子节点递归（后两级是唯一例外，且只在恰好一个文本子节点时生效）。
@@ -330,7 +330,7 @@ inline auto apply_labelled_by_relations(AccessibilityNode &root) -> void {
     node.range = w.accessibility_range();
     node.level = w.accessibility_level();
 
-    // 滚动语义（G32）：容器声明了可滚动量即补滚动动作位（三桥共用同一来源）。
+    // 滚动语义：容器声明了可滚动量即补滚动动作位（三桥共用同一来源）。
     if (const auto scroll = w.accessibility_scroll(); scroll.has_value() && scroll->max > scroll->min) {
         node.actions = node.actions | AccessibilityAction::ScrollDown | AccessibilityAction::ScrollUp;
     }

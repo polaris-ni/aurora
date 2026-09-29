@@ -32,7 +32,7 @@ namespace aurora::detail {
 namespace {
 
 // ============================================================================
-// libdbus 扁平 API 的 dlopen 绑定（D15 同款：任一核心符号缺失 ⇒ 整桥降级 no-op）
+// libdbus 扁平 API 的 dlopen 绑定（任一核心符号缺失 ⇒ 整桥降级 no-op）
 // ============================================================================
 
 using Conn = struct DBusConnection *;
@@ -628,7 +628,7 @@ struct AtspiBridge::Impl {
         if (L.message_get_type(m) != mt_method_call) {
             return false;  // 信号/回报交 libdbus 内部处理
         }
-        sync_point();  // D9：平台查询到达是唯一的建树同步点
+        sync_point();  // 平台查询到达是唯一的建树同步点
         const char *raw_path = L.message_get_path(m);
         const char *raw_iface = L.message_get_interface(m);
         const char *raw_member = L.message_get_member(m);
@@ -637,7 +637,7 @@ struct AtspiBridge::Impl {
         const std::string member{raw_member != nullptr ? raw_member : ""};
         if (!client_seen) {
             client_seen = true;
-            current_accessibility_settings().screen_reader_active = true;  // G4/R9 heuristic 回填
+            current_accessibility_settings().screen_reader_active = true;  // heuristic 回填
         }
         if (path == atspi::k_cache_path) {
             return dispatch_cache(m, member);
@@ -1471,7 +1471,7 @@ struct AtspiBridge::Impl {
         std::int32_t index = -1;
     };
 
-    /// @brief TreeDiff → AT-SPI 信号批次（与 UIA 桥 `queue_*` 系列同一消费范式，D11）。
+    /// @brief TreeDiff → AT-SPI 信号批次（与 UIA 桥 `queue_*` 系列同一消费范式）。
     ///
     /// 覆盖面：added（AddAccessible + children-changed:add + focused 补位）、updated
     /// （Name/Value/Hint → property-change:*，State → 逐位 state-changed）、focused_id
@@ -1660,7 +1660,7 @@ auto AtspiBridge::set_root(Widget *root) -> void {
 }
 
 auto AtspiBridge::on_announcement(const std::string &text, const Widget *target) -> void {
-    // 动态播报（G4 平台直译）：Event.Object 的 "Announcement" 信号，body = (minor "",
+    // 动态播报（平台直译）：Event.Object 的 "Announcement" 信号，body = (minor "",
     // detail1 = politeness, detail2 0, variant "s" text) —— 上游 announcement_event_listener
     // 恒带 ATSPI_LIVE_POLITE(=1)。目标缺失/未投影 ⇒ 回落 FRAME（信号源必须可解析）。
     if (d_->conn == nullptr || !d_->active || text.empty()) {

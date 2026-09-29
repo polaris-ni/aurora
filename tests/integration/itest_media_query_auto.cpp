@@ -1,6 +1,6 @@
 /// 测试类型: integration
 /// 目标单元: include/aurora/environment/media_query.h
-/// 测试说明: T8 集成——Window::present_root 自动注入根 MediaQuery：根 widget（无手动 Provider）
+/// 测试说明: 集成——Window::present_root 自动注入根 MediaQuery：根 widget（无手动 Provider）
 ///           经 media_query_of 读到与 from_surface(surface) 一致的设备上下文；
 ///           手动 MediaQueryProvider 仍按「最近祖先优先」覆盖自动注入默认值
 
@@ -41,7 +41,7 @@ auto make_window(const aurora::HeadlessOptions &opts) -> std::unique_ptr<aurora:
 }  // namespace
 
 AURORA_TEST_CASE(root_widget_reads_auto_injected_media_query) {
-    // T8：根 widget（无任何手动 Provider）应能经 media_query_of 读到自动注入的 MediaQuery。
+    // 根 widget（无任何手动 Provider）应能经 media_query_of 读到自动注入的 MediaQuery。
     auto win = make_window(headless_opts("mq_auto"));
 
     bool seen = false;
@@ -56,7 +56,7 @@ AURORA_TEST_CASE(root_widget_reads_auto_injected_media_query) {
     aurora::Node node{std::move(host)};
     (void)win->present_root(node);
 
-    AURORA_TEST_REQUIRE_MSG(seen, "T8: root widget reads auto-injected MediaQuery (no manual Provider)");
+    AURORA_TEST_REQUIRE_MSG(seen, "root widget reads auto-injected MediaQuery (no manual Provider)");
 
     const aurora::MediaQuery expected = aurora::MediaQuery::from_surface(win->surface());
     AURORA_TEST_CHECK_NEAR(cap.scale_factor, expected.scale_factor, 1e-4F);
@@ -89,7 +89,7 @@ AURORA_TEST_CASE(manual_provider_overrides_auto_injection) {
     aurora::Node node{std::move(host)};
     (void)win->present_root(node);
 
-    AURORA_TEST_REQUIRE_MSG(seen, "T8: manual Provider still visible under auto-injection");
+    AURORA_TEST_REQUIRE_MSG(seen, "manual Provider still visible under auto-injection");
     AURORA_TEST_CHECK_NEAR(cap.scale_factor, 3.0F, 1e-4F);
     AURORA_TEST_CHECK(cap.platform == aurora::PlatformKind::Web);
 }

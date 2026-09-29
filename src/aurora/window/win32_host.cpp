@@ -188,7 +188,7 @@ struct Win32Host::Impl {
     WindowModeHandler window_mode_handler;
     PresentRequest present_request;
     std::function<void(float)> scale_handler;  ///< DPI 缩放变化上报（`WM_DPICHANGED` 后触发）。
-    /// @brief 无障碍桥（G14：由窗口宿主持有，GDI / D3D11 两个 Surface 共用同一实例）。
+    /// @brief 无障碍桥（由窗口宿主持有，GDI / D3D11 两个 Surface 共用同一实例）。
     std::unique_ptr<detail::Win32UiaBridge> a11y;
     /// @brief 宿主接管 `WM_GETOBJECT` 的钩子（默认空 → 走内置桥）。
     std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> a11y_hook;
@@ -635,7 +635,7 @@ auto Win32Host::Impl::handle_destroy() -> LRESULT {
     return 0;
 }
 
-// ---- 无障碍分族（WM_GETOBJECT → UIA 桥，D14）----
+// ---- 无障碍分族（WM_GETOBJECT → UIA 桥）----
 auto Win32Host::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT> {
     if (a11y_hook) {
         // 公共签名用指针宽度整数（避免公共头引入 <windows.h>），此处还原为原生类型。
@@ -655,7 +655,7 @@ auto Win32Host::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<L
         return std::nullopt;
     }
     if (a11y == nullptr) {
-        // 惰性构造（D14）：无读屏在线时连桥对象都不存在 ⇒ 零开销。
+        // 惰性构造：无读屏在线时连桥对象都不存在 ⇒ 零开销。
         a11y = std::make_unique<detail::Win32UiaBridge>(hwnd);
         a11y->set_root(a11y_root);  // 补喂：宿主在桥存在前已记下的根
     }

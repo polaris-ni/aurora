@@ -170,7 +170,7 @@ class Slider : public LeafWidget {
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_value() const -> std::string override { return std::to_string(value()); }
 
-    /// @brief 无障碍取值域（D7）：min/max/step 取控件既有刻度，value 取当前值。
+    /// @brief 无障碍取值域：min/max/step 取控件既有刻度，value 取当前值。
     /// @return 由既有刻度与当前值组装的 AccessibilityRange。
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_range() const -> std::optional<AccessibilityRange> override {
@@ -179,7 +179,7 @@ class Slider : public LeafWidget {
 
     /// @brief 读屏 Value 动作：设值（走 `set_value` 既有 clamp + step 语义）。
     ///
-    /// 与真实拖动的差异：无 drag 手势，但 `on_changed` 一致触发（OQ2：读屏操作本就是语义直通）。
+    /// 与真实拖动的差异：无 drag 手势，但 `on_changed` 一致触发（读屏操作本就是语义直通）。
     /// @param req 动作请求；action 为 AccessibilityAction::Value 时以 req.number 设值。
     /// @return Value 动作恒为 true（已处理）；其余动作回退基类结果。
     /// @note Side-effects: mutates state

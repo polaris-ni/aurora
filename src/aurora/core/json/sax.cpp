@@ -507,7 +507,7 @@ class SaxCore {
         return dispatch_number(in_.substr(start, pos_ - start), is_float);
     }
 
-    /// @brief 数字分派（D6）：整数字面量先 int64 再 uint64，溢出保真；小数字面量经 from_chars，
+    /// @brief 数字分派：整数字面量先 int64 再 uint64，溢出保真；小数字面量经 from_chars，
     ///        往返失真或域外一律落 RawNumber。
     [[nodiscard]] auto dispatch_number(std::string_view token, bool is_float) -> Result<bool> {
         const char *first = token.data();

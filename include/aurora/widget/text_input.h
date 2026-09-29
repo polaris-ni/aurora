@@ -245,7 +245,7 @@ class TextInput : public LeafWidget {
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_value() const -> std::string override { return composed_text(value_.get()); }
 
-    // ---- 无障碍语义（切片 1/2）：状态 + TextPattern 支撑的四组文本钩子 + Value 动作 ----
+    // ---- 无障碍语义：状态 + TextPattern 支撑的四组文本钩子 + Value 动作 ----
 
     /// @brief 无障碍状态：只读（含禁用）、密码掩码（读屏不得逐字朗出）、单行。
     /// @return 基类通用状态叠加输入框特有字段后的结果（multiline 恒 false）。
@@ -311,7 +311,7 @@ class TextInput : public LeafWidget {
     ///
     /// @param utf8_index 字符起点的 UTF-8 字节偏移（越界返回 nullopt）。
     /// @return 该字符的矩形盒；无字体度量（Headless）或未布局（零尺寸盒）时为 nullopt。
-    /// @note 无字体度量时（Headless 不加载字体，G10）返回 nullopt —— 契约是「不崩溃」，
+    /// @note 无字体度量时（Headless 不加载字体）返回 nullopt —— 契约是「不崩溃」，
     ///       几何断言只能靠真机探针（`tools/verify/win32_ua_live_probe`）。
     /// @note Side-effects: reads layout/state
     [[nodiscard]] auto accessibility_char_bounds(std::size_t utf8_index) const -> std::optional<Rect> override {

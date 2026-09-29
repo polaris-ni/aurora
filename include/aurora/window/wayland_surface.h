@@ -242,7 +242,7 @@ class WaylandSurface final : public Surface {
     /// @return 桥裸指针，所有权归本 Surface；降级或未激活时 nullptr。
     [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override;
 
-    /// @brief 语义树根注入（`Window::present_root` 每帧调用；D9 宿主通道）。
+    /// @brief 语义树根注入（`Window::present_root` 每帧调用；宿主通道）。
     /// 首次调用即尝试建桥（dlopen libdbus + 连 a11y 总线 + Socket.Embed）；失败永久降级。
     /// @param root 当前语义树根 Widget；首次非空触发建桥。
     /// @note 申报偏差：xdg-shell 不暴露窗口屏幕原点 ⇒ 几何按窗口本地 px 申报。

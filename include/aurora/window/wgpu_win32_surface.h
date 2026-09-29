@@ -213,7 +213,7 @@ class WgpuWin32Surface final : public Surface {
     [[nodiscard]] auto hwnd() const -> void * { return win_->hwnd(); }
     /// @brief 表层统一原生句柄：与 `hwnd()` 同源，返回窗口 HWND（以 `void *` 承载）。
     [[nodiscard]] auto native_handle() const -> void * override { return win_->hwnd(); }
-    /// @brief 本窗口的无障碍桥（D13）：转发共享宿主 `Win32Host` 持有的唯一实例。
+    /// @brief 本窗口的无障碍桥：转发共享宿主 `Win32Host` 持有的唯一实例。
     /// @return 宿主持有的桥指针（宿主拥有生命周期，调用方不得释放）。
     [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override {
         return win_->accessibility_provider();

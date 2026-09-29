@@ -31,8 +31,8 @@
 ///   WASM 只做后者。因为「置顶」在此只能靠改写宿主 DOM 顺序实现，隐式重排别人家的节点是
 ///   越权行为（正常流下会让画布换位跳动），故层序变更只在宿主**显式**调 `raise()` 时发生。
 /// - 无障碍（ARIA 镜像桥）：首帧 `set_accessibility_root` 即构造并激活 `WasmAriaBridge`
-///   （浏览器无读屏探测面，D14 惰性激活的既定例外，见 wasm_aria.h 申报）；镜像同步
-///   （D9 拉取式重投影）与读屏反向动作排水由桥**自持的 rAF 自驱拍**每帧执行——不经
+///   （浏览器无读屏探测面，惰性激活的既定例外，见 wasm_aria.h 申报）；镜像同步
+///   （拉取式重投影）与读屏反向动作排水由桥**自持的 rAF 自驱拍**每帧执行——不经
 ///   `present()` 帧尾，因静止页面没有脏帧就没有 present，反向通道会被饿死（见 wasm_aria.h）。
 
 #if defined(AURORA_PLATFORM_WASM) && defined(AURORA_BACKEND_WASM)

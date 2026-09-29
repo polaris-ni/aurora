@@ -273,7 +273,7 @@ auto WasmAriaBridge::activate() -> void {
     dirty_ = true;
     aria_js_boot();
     a11y::register_provider(*this);
-    // 「读屏在线」启发式（设计 R9）：浏览器无读屏探测面，桥激活 = 镜像面对页面恒在线。
+    // 「读屏在线」启发式：浏览器无读屏探测面，桥激活 = 镜像面对页面恒在线。
     current_accessibility_settings().screen_reader_active = true;
     // 自驱拍上线：present() 帧尾只在脏帧跑，静止页面的反向动作/播报/增量同步会饿死，
     // 故同步与排水由本桥自己的 rAF 链承担（去激活时链自然出局，见 raf_tick）。
@@ -302,7 +302,7 @@ auto WasmAriaBridge::set_root(Widget *root) -> void {
     }
     root_ = root;
     if (!active_) {
-        activate();  // 首个根 = 本桥激活信号（无懒探测面，头注释 D14 例外申报）
+        activate();  // 首个根 = 本桥激活信号（无懒探测面，头注释的惰性激活例外申报）
     }
     dirty_ = true;
 }
