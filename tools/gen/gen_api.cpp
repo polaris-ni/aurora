@@ -10,6 +10,7 @@
 //   gen_api_tools -               -> explicit stdout sentinel (used by tools/check/check_api_schema_sync.py)
 #include <fstream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,15 @@ namespace {
 // values must match the real enum members in include/aurora/** verbatim (guarded by
 // tests/integration/itest_known_enums.cpp).
 auto known_enums() -> std::map<std::string, std::vector<std::string>> { return aurora::tools::known_enums(); }
+
+/// @brief enum value list -> Json array (json::Value has no implicit construction from std::vector).
+[[nodiscard]] auto enum_values_json(const std::string &name) -> au::Json {
+    au::Json arr = au::Json::array();
+    for (const auto &v : known_enums()[name]) {
+        arr.push_back(v);
+    }
+    return arr;
+}
 
 /// @brief 命令行声明表：唯一的输出路径既写又读（就地合并），`-` 与缺省均为「输出到 stdout」。
 [[nodiscard]] auto build_spec() -> const aurora::cli::CommandSpec & {
@@ -76,104 +86,131 @@ auto main(int argc, char **argv) -> int {
 
     aurora::serialization::register_core_widgets();
 
-    nlohmann::json api = aurora::tools::build_api_skeleton();
+    au::Json api = aurora::tools::build_api_skeleton();
 
     // ---- layout_rules: simplified layout-protocol summary (for AI to generate JSON within constraints) ----
-    nlohmann::json layout_rules = nlohmann::json::object();
+    au::Json layout_rules = au::Json::object();
     {
-        nlohmann::json flex = nlohmann::json::object();
-        flex["description"] =
-            "Flex layout (Column/Row): children are laid out along the main axis, aligned on the cross axis";
-        flex["main_axis_alignment"] = known_enums()["MainAxisAlignment"];
-        flex["cross_axis_alignment"] = known_enums()["CrossAxisAlignment"];
-        flex["main_axis_size"] = known_enums()["MainAxisSize"];
-        flex["gap_constraint"] = "gap >= 0";
-        layout_rules["flex"] = flex;
+        au::Json flex = au::Json::object();
+        flex.set("description",
+                 "Flex layout (Column/Row): children are laid out along the main axis, aligned on the cross axis");
+        flex.set("main_axis_alignment", enum_values_json("MainAxisAlignment"));
+        flex.set("cross_axis_alignment", enum_values_json("CrossAxisAlignment"));
+        flex.set("main_axis_size", enum_values_json("MainAxisSize"));
+        flex.set("gap_constraint", "gap >= 0");
+        layout_rules.set("flex", flex);
 
-        nlohmann::json stack = nlohmann::json::object();
-        stack["description"] = "Stack layout: children are layered, later-drawn ones on top";
-        stack["fit"] = known_enums()["StackFit"];
-        layout_rules["stack"] = stack;
+        au::Json stack = au::Json::object();
+        stack.set("description", "Stack layout: children are layered, later-drawn ones on top");
+        stack.set("fit", enum_values_json("StackFit"));
+        layout_rules.set("stack", stack);
 
-        nlohmann::json grid = nlohmann::json::object();
-        grid["description"] = "Grid layout: a two-dimensional grid with a fixed column count";
-        grid["required_props"] = nlohmann::json::array({"columns"});
-        grid["column_constraint"] = "columns >= 1";
-        layout_rules["grid"] = grid;
+        au::Json grid = au::Json::object();
+        grid.set("description", "Grid layout: a two-dimensional grid with a fixed column count");
+        au::Json required_props = au::Json::array();
+        required_props.push_back("columns");
+        grid.set("required_props", std::move(required_props));
+        grid.set("column_constraint", "columns >= 1");
+        layout_rules.set("grid", grid);
 
-        nlohmann::json length = nlohmann::json::object();
-        length["description"] = "Length type: auto | fill | [px, v] | [percent, v]";
-        length["auto"] = "WrapContent, sized by its content";
-        length["fill"] = "Expand, absorb the remaining space";
-        length["px_example"] = nlohmann::json::array({"px", 100});
-        length["percent_example"] = nlohmann::json::array({"percent", 50});
-        layout_rules["length"] = length;
+        au::Json length = au::Json::object();
+        length.set("description", "Length type: auto | fill | [px, v] | [percent, v]");
+        length.set("auto", "WrapContent, sized by its content");
+        length.set("fill", "Expand, absorb the remaining space");
+        au::Json px_example = au::Json::array();
+        px_example.push_back("px");
+        px_example.push_back(100);
+        length.set("px_example", std::move(px_example));
+        au::Json percent_example = au::Json::array();
+        percent_example.push_back("percent");
+        percent_example.push_back(50);
+        length.set("percent_example", std::move(percent_example));
+        layout_rules.set("length", length);
 
-        nlohmann::json edge_insets = nlohmann::json::object();
-        edge_insets["description"] = "EdgeInsets object: {left, top, right, bottom}, unit dp";
-        layout_rules["edge_insets"] = edge_insets;
+        au::Json edge_insets = au::Json::object();
+        edge_insets.set("description", "EdgeInsets object: {left, top, right, bottom}, unit dp");
+        layout_rules.set("edge_insets", edge_insets);
 
-        nlohmann::json color = nlohmann::json::object();
-        color["description"] = "Color type: [r, g, b, a], each component 0-255";
-        color["example"] = nlohmann::json::array({255, 128, 0, 255});
-        layout_rules["color"] = color;
+        au::Json color = au::Json::object();
+        color.set("description", "Color type: [r, g, b, a], each component 0-255");
+        au::Json color_example = au::Json::array();
+        color_example.push_back(255);
+        color_example.push_back(128);
+        color_example.push_back(0);
+        color_example.push_back(255);
+        color.set("example", std::move(color_example));
+        layout_rules.set("color", color);
     }
-    api["layout_rules"] = layout_rules;
+    api.set("layout_rules", layout_rules);
 
     // ---- state_patterns: usage scenarios and JSON examples for the three state patterns ----
-    nlohmann::json state_patterns = nlohmann::json::array();
+    au::Json state_patterns = au::Json::array();
     {
-        nlohmann::json p1 = nlohmann::json::object();
-        p1["name"] = "simple_value";
-        p1["description"] =
-            "Simple value state: the widget holds a single mutable value and notifies via the on_changed callback";
-        p1["applicable_widgets"] = nlohmann::json::array(
-            {"TextInput", "Slider", "Checkbox", "Switch", "Dropdown", "RadioGroup", "SegmentedControl", "TabBar"});
-        p1["json_example"] =
-            R"({"type": "TextInput", "props": {"value": "hello"}, "events": {"on_changed": "handler_name"}})";
+        au::Json p1 = au::Json::object();
+        p1.set("name", "simple_value");
+        p1.set("description",
+               "Simple value state: the widget holds a single mutable value and notifies via the on_changed callback");
+        au::Json p1_widgets = au::Json::array();
+        for (const char *w :
+             {"TextInput", "Slider", "Checkbox", "Switch", "Dropdown", "RadioGroup", "SegmentedControl", "TabBar"}) {
+            p1_widgets.push_back(w);
+        }
+        p1.set("applicable_widgets", std::move(p1_widgets));
+        p1.set("json_example",
+               R"({"type": "TextInput", "props": {"value": "hello"}, "events": {"on_changed": "handler_name"}})");
         state_patterns.push_back(p1);
 
-        nlohmann::json p2 = nlohmann::json::object();
-        p2["name"] = "selection_index";
-        p2["description"] =
-            "Selection index state: one item is selected from an options list, managed via selected_index and "
-            "on_change";
-        p2["applicable_widgets"] = nlohmann::json::array({"Dropdown", "RadioGroup", "SegmentedControl", "TabBar"});
-        p2["json_example"] =
-            R"({"type": "Dropdown", "props": {"options": ["A","B","C"], "selected_index": 1}, "events": {"on_change": "handler"}})";
+        au::Json p2 = au::Json::object();
+        p2.set("name", "selection_index");
+        p2.set("description",
+               "Selection index state: one item is selected from an options list, managed via selected_index and "
+               "on_change");
+        au::Json p2_widgets = au::Json::array();
+        for (const char *w : {"Dropdown", "RadioGroup", "SegmentedControl", "TabBar"}) {
+            p2_widgets.push_back(w);
+        }
+        p2.set("applicable_widgets", std::move(p2_widgets));
+        p2.set("json_example",
+               R"({"type": "Dropdown", "props": {"options": ["A","B","C"], "selected_index": 1}, "events": {"on_change": "handler"}})");
         state_patterns.push_back(p2);
 
-        nlohmann::json p3 = nlohmann::json::object();
-        p3["name"] = "toggle_state";
-        p3["description"] = "Toggle state: a boolean toggle, managed via checked/value and on_changed/on_toggled";
-        p3["applicable_widgets"] = nlohmann::json::array({"Checkbox", "Switch", "ExpansionPanel"});
-        p3["json_example"] =
-            R"({"type": "Checkbox", "props": {"checked": false}, "events": {"on_changed": "handler"}})";
+        au::Json p3 = au::Json::object();
+        p3.set("name", "toggle_state");
+        p3.set("description", "Toggle state: a boolean toggle, managed via checked/value and on_changed/on_toggled");
+        au::Json p3_widgets = au::Json::array();
+        for (const char *w : {"Checkbox", "Switch", "ExpansionPanel"}) {
+            p3_widgets.push_back(w);
+        }
+        p3.set("applicable_widgets", std::move(p3_widgets));
+        p3.set("json_example",
+               R"({"type": "Checkbox", "props": {"checked": false}, "events": {"on_changed": "handler"}})");
         state_patterns.push_back(p3);
     }
-    api["state_patterns"] = state_patterns;
+    api.set("state_patterns", state_patterns);
 
     // Preserve the error_codes section generated by gen_error_codes so a full rewrite does not overwrite it.
     if (!to_stdout) {
         std::ifstream ein(output_path, std::ios::binary);
         if (ein) {
-            try {
-                nlohmann::json existing = nlohmann::json::parse(ein);
+            std::ostringstream ss;
+            ss << ein.rdbuf();
+            // 忽略损坏的既有文件：解析失败时保留新骨架（不继承 error_codes/debug 段）。
+            if (auto existing_r = au::json::parse(ss.str()); existing_r) {
+                const au::Json &existing = existing_r.value();
                 if (existing.contains("error_codes")) {
-                    api["error_codes"] = existing["error_codes"];
+                    api.set("error_codes", *existing.at("error_codes"));
                 }
                 // Preserve the debug section generated by gen_debug_api (same merge-only pattern) so a full
                 // rewrite does not overwrite it.
                 if (existing.contains("debug")) {
-                    api["debug"] = existing["debug"];
+                    api.set("debug", *existing.at("debug"));
                 }
-                // NOLINTNEXTLINE(*-empty-catch)
-            } catch (...) { /* ignore a corrupt existing file */
             }
         }
     }
 
-    const std::string text = api.dump(2);
+    const auto dumped = au::json::dump(api, {.indent = 2});
+    const std::string text = dumped.ok() ? std::move(dumped.value()) : std::string{};
     // When a file path argument is given, write the file directly (cross-platform, for the CMake target
     // aurora_api_json); otherwise write to stdout, preserving the `gen_api_tools > aurora_api.json` manual
     // redirection usage.

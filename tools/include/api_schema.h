@@ -10,38 +10,37 @@
 #pragma once
 
 #include <aurora/aurora.h>
-
-#include <nlohmann/json.hpp>
+#include <aurora/widget/props_io.h>
 
 #include "known_enums.h"
 
 namespace aurora::tools {
 
-inline auto build_api_skeleton() -> nlohmann::json {
-    nlohmann::json api = nlohmann::json::object();
-    api["library"] = "aurora";
-    api["language"] = "c++20";
-    api["include"] = "aurora/aurora.h";
-    api["alias"] = "au";
+inline auto build_api_skeleton() -> Json {
+    Json api = Json::object();
+    api.set("library", "aurora");
+    api.set("language", "c++20");
+    api.set("include", "aurora/aurora.h");
+    api.set("alias", "au");
 
-    nlohmann::json widgets = nlohmann::json::array();
+    Json widgets = Json::array();
     for (const std::string &type : serialization::WidgetRegistry::instance().list_types()) {
         widgets.push_back(serialization::component_schema(type));
     }
-    api["widgets"] = widgets;
+    api.set("widgets", widgets);
 
-    nlohmann::json enums = nlohmann::json::array();
+    Json enums = Json::array();
     for (const auto &[name, vals] : known_enums()) {
-        nlohmann::json e = nlohmann::json::object();
-        e["name"] = name;
-        nlohmann::json v = nlohmann::json::array();
+        Json e = Json::object();
+        e.set("name", name);
+        Json v = Json::array();
         for (const auto &x : vals) {
             v.push_back(x);
         }
-        e["values"] = v;
+        e.set("values", v);
         enums.push_back(e);
     }
-    api["enums"] = enums;
+    api.set("enums", enums);
 
     return api;
 }

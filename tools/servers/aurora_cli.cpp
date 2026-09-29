@@ -42,6 +42,12 @@ namespace {
 
 // read_json_file / parse_code_style / build_api_skeleton are provided by shared headers under tools/include.
 
+// json::dump returns a Result; CLI output falls back to an empty string on failure.
+[[nodiscard]] auto dump_pretty(const au::Json &v) -> std::string {
+    const auto rendered = au::json::dump(v, {.indent = 2});
+    return rendered ? std::move(rendered.value()) : std::string{};
+}
+
 /// @brief 渲染尺寸 / 输出路径 / 代码风格等按子命令复用的选项声明。
 struct CliOptions {
     int width = 800;
@@ -189,7 +195,7 @@ auto cmd_components() -> int {
     for (const auto &t : types) {
         arr.push_back(t);
     }
-    AURORA_LOG_RAW("cli", arr.dump(2), "\n");
+    AURORA_LOG_RAW("cli", dump_pretty(arr), "\n");
     return 0;
 }
 
@@ -199,7 +205,7 @@ auto cmd_describe(const std::string &name) -> int {
         AURORA_LOG_ERROR("cli", "Error: unknown component '", name, "'");
         return 2;
     }
-    AURORA_LOG_RAW("cli", schema.dump(2), "\n");
+    AURORA_LOG_RAW("cli", dump_pretty(schema), "\n");
     return 0;
 }
 
@@ -209,33 +215,39 @@ auto cmd_search(const std::string &query) -> int {
     for (const auto &r : results) {
         arr.push_back(r);
     }
-    AURORA_LOG_RAW("cli", arr.dump(2), "\n");
+    AURORA_LOG_RAW("cli", dump_pretty(arr), "\n");
     return 0;
 }
 
 auto cmd_validate(const std::string &path) -> int {
     au::Json tree = au::tools::read_json_file(path);
-    if (tree.is_discarded() || tree.is_null()) {
+    if (tree.is_null()) {
         AURORA_LOG_ERROR("cli", "Error: invalid JSON in '", path, "'");
         return 2;
     }
 
     auto widget = au::serialization::from_json(tree);
     if (!widget) {
-        const auto err = au::Json{{"ok", false}, {"error", widget.error().to_json()}};
-        AURORA_LOG_RAW("cli", err.dump(2), "\n");
+        au::Json err = au::Json::object();
+        err.set("ok", au::Json{false});
+        err.set("error", widget.error().to_json());
+        AURORA_LOG_RAW("cli", dump_pretty(err), "\n");
         return 1;
     }
 
     au::Node root(std::move(widget.value()));
     auto ok = validate(root);
     if (!ok) {
-        auto err = au::Json{{"ok", false}, {"error", ok.error().to_json()}};
-        AURORA_LOG_RAW("cli", err.dump(2), "\n");
+        au::Json err = au::Json::object();
+        err.set("ok", au::Json{false});
+        err.set("error", ok.error().to_json());
+        AURORA_LOG_RAW("cli", dump_pretty(err), "\n");
         return 1;
     }
 
-    AURORA_LOG_RAW("cli", au::Json{{"ok", true}}.dump(2), "\n");
+    au::Json result = au::Json::object();
+    result.set("ok", au::Json{true});
+    AURORA_LOG_RAW("cli", dump_pretty(result), "\n");
     return 0;
 }
 
@@ -245,7 +257,7 @@ auto cmd_snapshot(const CliOptions &opts) -> int {
         return 2;
     }
     au::Json tree = au::tools::read_json_file(opts.file);
-    if (tree.is_discarded() || tree.is_null()) {
+    if (tree.is_null()) {
         AURORA_LOG_ERROR("cli", "Error: invalid JSON in '", opts.file, "'");
         return 2;
     }
@@ -258,7 +270,7 @@ auto cmd_snapshot(const CliOptions &opts) -> int {
 
     au::Node root(std::move(widget.value()));
     au::Json snapshot = render_to_logical_snapshot(root, opts.width, opts.height);
-    AURORA_LOG_RAW("cli", snapshot.dump(2), "\n");
+    AURORA_LOG_RAW("cli", dump_pretty(snapshot), "\n");
     return 0;
 }
 
@@ -268,7 +280,7 @@ auto cmd_render(const CliOptions &opts) -> int {
         return 2;
     }
     au::Json tree = au::tools::read_json_file(opts.file);
-    if (tree.is_discarded() || tree.is_null()) {
+    if (tree.is_null()) {
         AURORA_LOG_ERROR("cli", "Error: invalid JSON in '", opts.file, "'");
         return 2;
     }
@@ -286,9 +298,12 @@ auto cmd_render(const CliOptions &opts) -> int {
         return 1;
     }
 
-    AURORA_LOG_RAW(
-        "cli", au::Json{{"ok", true}, {"path", opts.output}, {"width", opts.width}, {"height", opts.height}}.dump(2),
-        "\n");
+    au::Json result = au::Json::object();
+    result.set("ok", au::Json{true});
+    result.set("path", opts.output);
+    result.set("width", opts.width);
+    result.set("height", opts.height);
+    AURORA_LOG_RAW("cli", dump_pretty(result), "\n");
     return 0;
 }
 
@@ -298,7 +313,7 @@ auto cmd_preview(const CliOptions &opts) -> int {
         return 2;
     }
     au::Json tree = au::tools::read_json_file(opts.file);
-    if (tree.is_discarded() || tree.is_null()) {
+    if (tree.is_null()) {
         AURORA_LOG_ERROR("cli", "Error: invalid JSON in '", opts.file, "'");
         return 2;
     }
@@ -326,9 +341,12 @@ auto cmd_preview(const CliOptions &opts) -> int {
     }
 
     au::App().window(std::move(win.value())).view(std::move(root)).run();
-    AURORA_LOG_RAW(
-        "cli", au::Json{{"ok", true}, {"preview", opts.file}, {"width", opts.width}, {"height", opts.height}}.dump(2),
-        "\n");
+    au::Json result = au::Json::object();
+    result.set("ok", au::Json{true});
+    result.set("preview", opts.file);
+    result.set("width", opts.width);
+    result.set("height", opts.height);
+    AURORA_LOG_RAW("cli", dump_pretty(result), "\n");
     return 0;
 }
 
@@ -338,7 +356,7 @@ auto cmd_to_code(const CliOptions &opts) -> int {
         return 2;
     }
     const au::Json tree = au::tools::read_json_file(opts.file);
-    if (tree.is_discarded() || tree.is_null()) {
+    if (tree.is_null()) {
         AURORA_LOG_ERROR("cli", "Error: invalid JSON in '", opts.file, "'");
         return 2;
     }
@@ -356,7 +374,7 @@ auto cmd_to_yaml(const CliOptions &opts) -> int {
         return 2;
     }
     const au::Json tree = au::tools::read_json_file(opts.file);
-    if (tree.is_discarded() || tree.is_null()) {
+    if (tree.is_null()) {
         AURORA_LOG_ERROR("cli", "Error: invalid JSON in '", opts.file, "'");
         return 2;
     }
@@ -368,7 +386,7 @@ auto cmd_to_yaml(const CliOptions &opts) -> int {
 
 auto cmd_schema() -> int {
     const au::Json api = au::tools::build_api_skeleton();
-    AURORA_LOG_RAW("cli", api.dump(2), "\n");
+    AURORA_LOG_RAW("cli", dump_pretty(api), "\n");
     return 0;
 }
 

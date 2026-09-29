@@ -219,7 +219,7 @@ inline constexpr std::string_view AURORA_TEXT_PROP_KEYS[] = {"content", "text", 
     widget.serialize_props(props);
     const std::string name{key};
     if (props.contains(name)) {
-        return props[name];  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        return *props.at(name);
     }
     return Json{};
 }
@@ -230,7 +230,7 @@ inline constexpr std::string_view AURORA_TEXT_PROP_KEYS[] = {"content", "text", 
     for (const Node &node : collect_preorder(root)) {
         for (const std::string_view key : AURORA_TEXT_PROP_KEYS) {
             const Json value = read_prop(node.widget(), key);
-            if (value.is_string() && value.get<std::string>() == text) {
+            if (value.is_string() && value.as_or<std::string>("") == text) {
                 hits.push_back(node);
                 break;
             }

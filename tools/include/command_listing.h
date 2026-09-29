@@ -25,9 +25,9 @@ namespace aurora::tools {
         return &arg;
     }
     if (arg.is_object()) {
-        const auto it = arg.find("commands");
-        if (it != arg.end() && it->is_array()) {
-            return &(*it);
+        const auto *it = arg.find("commands");
+        if (it != nullptr && it->is_array()) {
+            return it;
         }
     }
     return nullptr;
@@ -35,11 +35,11 @@ namespace aurora::tools {
 
 /// @brief 读取可选的布尔成员；缺失或类型不符时返回 fallback（不抛异常）。
 [[nodiscard]] inline auto command_bool_field(const Json &obj, const char *key, bool fallback) -> bool {
-    const auto it = obj.find(key);
-    if (it == obj.end() || !it->is_boolean()) {
+    const auto *it = obj.find(key);
+    if (it == nullptr || !it->is_bool()) {
         return fallback;
     }
-    return it->get<bool>();
+    return it->as_or<bool>(false);
 }
 
 /// @brief 命令枚举结果：命中的描述符下标（对应入参数组）与参与过滤的描述符总数。
@@ -62,21 +62,21 @@ struct CommandListing {
     std::vector<Hit> hits;
     CommandListing out;
     for (std::size_t i = 0; i < items.size(); ++i) {
-        const Json &item = items[i];
+        const Json &item = *items.at(i);
         if (!item.is_object()) {
             continue;
         }
-        const auto id_it = item.find("id");
-        if (id_it == item.end() || !id_it->is_string()) {
+        const auto *id_it = item.find("id");
+        if (id_it == nullptr || !id_it->is_string()) {
             continue;
         }
         ++out.considered;
         if (!include_disabled && !command_bool_field(item, "enabled", true)) {
             continue;
         }
-        const auto title_it = item.find("title");
-        const std::string title = (title_it != item.end() && title_it->is_string()) ? title_it->get<std::string>()
-                                                                                    : id_it->get<std::string>();
+        const auto *title_it = item.find("title");
+        const std::string title = (title_it != nullptr && title_it->is_string()) ? title_it->as_or<std::string>("")
+                                                                                 : id_it->as_or<std::string>("");
         const int score = command_fuzzy_score(query, title);
         if (score < 0) {
             continue;
@@ -124,22 +124,22 @@ enum class CommandStatus : std::uint8_t {
 /// @return 命中的描述符；未命中返回 nullptr
 [[nodiscard]] inline auto resolve_command(const Json &items, const std::string &id, CommandStatus &status)
     -> const Json * {
-    for (const Json &item : items) {
-        if (!item.is_object()) {
+    for (const Json *item = items.begin(); item != items.end(); ++item) {
+        if (!item->is_object()) {
             continue;
         }
-        const auto it = item.find("id");
-        if (it == item.end() || !it->is_string() || it->get<std::string>() != id) {
+        const auto *it = item->find("id");
+        if (it == nullptr || !it->is_string() || it->as_or<std::string>("") != id) {
             continue;
         }
-        if (!command_bool_field(item, "enabled", true)) {
+        if (!command_bool_field(*item, "enabled", true)) {
             status = CommandStatus::Disabled;
-        } else if (!command_bool_field(item, "invocable", false)) {
+        } else if (!command_bool_field(*item, "invocable", false)) {
             status = CommandStatus::NotInvocable;
         } else {
             status = CommandStatus::Invocable;
         }
-        return &item;
+        return item;
     }
     status = CommandStatus::NotFound;
     return nullptr;

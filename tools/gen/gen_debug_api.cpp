@@ -17,17 +17,17 @@
 //     report the error and exit, **never write an empty object**, so as not to
 //     overwrite good sections (widgets/enums/error_codes would be lost forever).
 //
-// Note: this tool is a build-time generator; it does not link the Aurora library and does not
-//       depend on Aurora headers — it only uses the standard library and third_party/nlohmann/json.hpp.
+// Note: this tool is a build-time generator; it does not link the Aurora widget/backend layers and does not
+//       depend on Aurora UI headers — it only uses the standard library and the aurora core/json headers.
 // ============================================================================
 #include <fstream>
 #include <iostream>
-#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
 #include "api_json_merge.h"
 #include "toml_lines.h"
+#include <aurora/widget/props_io.h>
 
 // Single source of truth for the version (AURORA_VERSION_STRING). This generator does not link aurora;
 // it only borrows this macro-only header (introducing no link symbols); when the version macros are not
@@ -35,6 +35,8 @@
 #include "aurora/core/version.h"
 
 namespace {
+
+using aurora::Json;  // aurora 自研 JSON 值类型（props_io.h 别名），类型名保持 Json 不变
 
 // This tool is a build-time generator and does not link Aurora, so aurora's Logger is unavailable.
 // All diagnostic output is funneled through err() (single definition, uniform prefix).
@@ -106,22 +108,19 @@ auto parse_toml(const std::string &path, std::vector<DebugEntry> &out) -> bool {
     return true;
 }
 
-auto gen_debug_json(const std::vector<DebugEntry> &entries) -> nlohmann::json {
-    nlohmann::json arr = nlohmann::json::array();
+auto gen_debug_json(const std::vector<DebugEntry> &entries) -> Json {
+    Json arr = Json::array();
     for (const auto &x : entries) {
-        nlohmann::json o = nlohmann::json::object();
-        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
-        o["name"] = x.name;
-        o["since"] = x.since;
-        o["gated"] = x.gated;
-        o["signature"] = x.signature;
-        o["summary"] = x.summary;
+        Json o = Json::object();
+        o.set("name", x.name);
+        o.set("since", x.since);
+        o.set("gated", x.gated);
+        o.set("signature", x.signature);
+        o.set("summary", x.summary);
         if (!x.header.empty()) {
-            o["header"] = x.header;
+            o.set("header", x.header);
         }
-        arr.push_back(o);
-        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        arr.push_back(std::move(o));
     }
     return arr;
 }

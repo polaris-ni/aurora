@@ -25,13 +25,26 @@ function(aurora_add_tool _name _src)
     target_include_directories(${_name} PRIVATE "${CMAKE_SOURCE_DIR}/tools/include")
 endfunction()
 
+# 自研 JSON 容器实现 + 其 UTF-8 依赖的独立静态库：供「不链接 aurora」的宿主生成器
+# （gen_error_codes / gen_debug_api）复用。仅含 core 层零依赖 TU（json + utf8）；
+# 与 aurora 库不会被同一目标同时链接，不存在符号重叠冲突场景。
+add_library(aurora_json STATIC
+        src/aurora/core/json/value.cpp
+        src/aurora/core/json/sax.cpp
+        src/aurora/core/json/parse.cpp
+        src/aurora/core/json/dump.cpp
+        src/aurora/core/json/pointer.cpp
+        src/aurora/core/utf8.cpp)
+target_include_directories(aurora_json PUBLIC ${CMAKE_SOURCE_DIR}/include)
+set_target_properties(aurora_json PROPERTIES CXX_STANDARD 20)
+
 # 错误码生成器：解析 codespec/errors.toml -> error_codes.gen.h / ERROR_CATALOG.md /
 # aurora_api.json 的 "error_codes" 段。独立可执行文件，**不链接 aurora**（避免鸡生蛋，
-# 因为 aurora 自身包含生成的头）；仅依赖 third_party 的 nlohmann/json。
+# 因为 aurora 自身包含生成的头）；JSON 容器用自研 aurora/core/json，经 aurora_json 静态库取符号。
 add_executable(gen_error_codes tools/gen/gen_error_codes.cpp)
+target_link_libraries(gen_error_codes PRIVATE aurora_json)
 target_include_directories(gen_error_codes PRIVATE
-        ${CMAKE_SOURCE_DIR}/third_party
-        # toml_lines.h / api_json_merge.h 为「零 aurora 依赖」共享头，供本生成器复用。
+        # toml_lines.h / api_json_merge.h 为「零 aurora 链接依赖」共享头，供本生成器复用。
         ${CMAKE_SOURCE_DIR}/tools/include)
 set_target_properties(gen_error_codes PROPERTIES CXX_STANDARD 20)
 # 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。
@@ -48,7 +61,7 @@ endif ()
 # 仓库真实文件（「cannot open input file」）。「node + .js」只解决执行、解决不了文件系统契约，
 # 故此处按工具链切换：Emscripten 时在父 configure 期完成原生子配置（清 CMAKE_TOOLCHAIN_FILE
 # 与 CC/CXX 环境以摆脱 emcc），构建期由 ALL 目标先行产出原生 exe 再触发生成命令。
-# gen_error_codes 零 aurora 依赖（纯标准 C++ + third_party 头），子配置成本仅一次 configure。
+# gen_error_codes 无 aurora 链接依赖（json 实现源文件直接编入），子配置成本仅一次 configure。
 if (EMSCRIPTEN)
     set(AURORA_NATIVE_TOOLS_DIR "${CMAKE_BINARY_DIR}/_native_tools")
     # 注意用 HOST 判定：Emscripten 交叉下 WIN32 恒假（系统名 Emscripten），
@@ -169,12 +182,11 @@ add_custom_target(aurora_api_json
 add_dependencies(aurora_api_json gen_api_tools gen_debug_api)
 
 # 配套：调试能力 API 生成器。解析 codespec/debug_api.toml -> aurora_api.json 的 "debug" 段。
-# 独立可执行文件，**不链接 aurora**（与 gen_error_codes 同构），仅依赖 third_party 的 nlohmann/json。
+# 独立可执行文件，**不链接 aurora**（与 gen_error_codes 同构），JSON 经 aurora_json 静态库取符号。
 # merge-only：保留其它段，只写 debug 段。运行：cmake --build build --target gen_debug_api_json
 add_executable(gen_debug_api tools/gen/gen_debug_api.cpp)
+target_link_libraries(gen_debug_api PRIVATE aurora_json)
 target_include_directories(gen_debug_api PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
-        ${CMAKE_SOURCE_DIR}/third_party
         ${CMAKE_SOURCE_DIR}/tools/include)
 set_target_properties(gen_debug_api PROPERTIES CXX_STANDARD 20)
 # 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。

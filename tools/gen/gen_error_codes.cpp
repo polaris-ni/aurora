@@ -9,15 +9,14 @@
 // Usage: gen_error_codes <errors.toml> <error_codes.gen.h> <ERROR_CATALOG.md> <aurora_api.json>
 // Arguments are optional; when omitted they default to paths relative to CMAKE_SOURCE_DIR.
 //
-// Note: this tool is a build-time generator; it does not link the Aurora library and does not
-//       depend on Aurora headers — it only uses the standard library and third_party/nlohmann/json.hpp.
+// Note: this tool is a build-time generator; it does not link the Aurora widget/backend layers and does not
+//       depend on Aurora UI headers — it only uses the standard library and the aurora core/json headers.
 // ============================================================================
 #include <array>
 #include <cctype>
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <nlohmann/json.hpp>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -25,8 +24,11 @@
 
 #include "api_json_merge.h"
 #include "toml_lines.h"
+#include <aurora/widget/props_io.h>
 
 namespace {
+
+using aurora::Json;  // aurora 自研 JSON 值类型（props_io.h 别名），类型名保持 Json 不变
 
 // This tool is a build-time generator and does not link Aurora, so aurora's Logger/AURORA_LOG_* is unavailable.
 // To honor the project convention of "never touching the standard streams directly", all diagnostic output is
@@ -412,22 +414,22 @@ auto gen_catalog(const std::vector<ErrorEntry> &e) -> std::string {
     return o.str();
 }
 
-auto gen_api_json(const std::vector<ErrorEntry> &e) -> nlohmann::json {
-    nlohmann::json arr = nlohmann::json::array();
+auto gen_api_json(const std::vector<ErrorEntry> &e) -> Json {
+    Json arr = Json::array();
     for (size_t i = 0; i < e.size(); ++i) {
         const auto &x = e.at(i);
-        arr.push_back({
-            {"index", i},
-            {"enum", x.enum_name},
-            {"slug", x.slug},
-            {"category", x.category},
-            {"severity", x.severity},
-            {"auto_fixable", x.auto_fixable},
-            {"fix_category", x.fix_category},
-            {"retryable", x.retryable},
-            {"message", x.message},
-            {"hint", x.hint},
-        });
+        Json o = Json::object();
+        o.set("index", i);
+        o.set("enum", x.enum_name);
+        o.set("slug", x.slug);
+        o.set("category", x.category);
+        o.set("severity", x.severity);
+        o.set("auto_fixable", Json{x.auto_fixable});
+        o.set("fix_category", x.fix_category);
+        o.set("retryable", Json{x.retryable});
+        o.set("message", x.message);
+        o.set("hint", x.hint);
+        arr.push_back(std::move(o));
     }
     return arr;
 }
