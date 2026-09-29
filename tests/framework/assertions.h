@@ -290,9 +290,14 @@ class TraceScope {
 #define AURORA_TEST_UNIQUE_(prefix) AURORA_TEST_CAT_(aurora_test_##prefix, __COUNTER__)  // NOLINT(*-identifier-naming)
 
 /// clang 把 `__COUNTER__` 归为 C2y 扩展并逐点告警（GCC / MSVC 不报），就地把该告警关掉；
-/// 非 clang 编译器下展开为空。
+/// `-Wc2y-extensions` 仅在新版 clang 提供，旧版 clang 不识别该告警组会自报 "unknown warning group"，
+/// 且旧版 clang 本就不会对 `__COUNTER__` 告警，故仅在告警组存在时展开，否则展开为空。
 #ifdef AURORA_COMPILER_CLANG
+#if __has_warning("-Wc2y-extensions")
 #define AURORA_TEST_NO_C2Y _Pragma("clang diagnostic ignored \"-Wc2y-extensions\"")
+#else
+#define AURORA_TEST_NO_C2Y
+#endif
 #else
 #define AURORA_TEST_NO_C2Y
 #endif

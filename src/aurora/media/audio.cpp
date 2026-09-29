@@ -865,7 +865,7 @@ auto create_default_device_backend() -> std::unique_ptr<AudioDeviceBackend> {
 
 AudioContext::AudioContext(std::unique_ptr<AudioDeviceBackend> device_backend,
                            std::unique_ptr<AudioCaptureBackend> capture_backend)
-    : capture_backend_(std::move(capture_backend)), device_(std::move(device_backend)) {
+    : device_(std::move(device_backend)), capture_backend_(std::move(capture_backend)) {
     if (device_ == nullptr) {
         device_ = create_default_device_backend();
     }

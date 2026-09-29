@@ -83,14 +83,14 @@ namespace {
     }
 
     const auto parsed = au::json::parse(body);
-    return parsed ? std::move(parsed.value()) : au::Json{};
+    return parsed ? parsed.value() : au::Json{};
 }
 
 /// Write one MCP message to stdout (stdio wire frame; must use the prefix-free raw channel to keep the Content-Length
 /// header byte-exact).
 auto write_message(const au::Json &msg) -> void {
     const auto dumped = au::json::dump(msg);
-    std::string body = dumped.ok() ? std::move(dumped.value()) : std::string{};
+    std::string body = dumped.ok() ? dumped.value() : std::string{};
     AURORA_LOG_RAW("mcp", "Content-Length: ", body.size(), "\r\n\r\n", body);
 }
 
@@ -149,7 +149,7 @@ struct InspectorSession {
 [[nodiscard]] auto resolve_session(const au::Json &args, std::string &error_out) -> InspectorSession {
     InspectorSession session;
 
-    std::string raw = args.as_or<std::string>("session", std::string{});
+    auto raw = args.as_or<std::string>("session", std::string{});
     if (raw.empty()) {
         // 环境变量兜底：便于本机固定一个非默认端口，省去每次传参。
         if (const char *env = std::getenv("AURORA_INSPECTOR_PORT"); (env != nullptr) && (*env != '\0')) {
@@ -569,7 +569,7 @@ struct InspectorSession {
 
 [[nodiscard]] auto json_content(const au::Json &j) -> au::Json {
     const auto dumped = au::json::dump(j, {.indent = 2});
-    return text_content(dumped.ok() ? std::move(dumped.value()) : std::string{});
+    return text_content(dumped.ok() ? dumped.value() : std::string{});
 }
 
 /// @brief 向运行中的应用发一次请求，并把 HTTP 结果翻译成 MCP 工具结果。
@@ -710,7 +710,7 @@ struct InspectorSession {
         }
         int w = args.as_or<int>("width", 800);
         int h = args.as_or<int>("height", 600);
-        std::string path = args.as_or<std::string>("path", std::string("aurora_render.png"));
+        auto path = args.as_or<std::string>("path", std::string("aurora_render.png"));
         if (!is_confined_output_path(path)) {
             return tool_result(
                 text_content("Error: 'path' must be a relative path inside the working directory (no '..')"), true);
@@ -741,7 +741,7 @@ struct InspectorSession {
         if (baseline_v == nullptr || !baseline_v->is_string()) {
             return tool_result(text_content("Error: missing 'baseline_path' parameter"), true);
         }
-        std::string baseline_path = baseline_v->as_or<std::string>("");
+        auto baseline_path = baseline_v->as_or<std::string>("");
         if (!is_confined_output_path(baseline_path)) {
             return tool_result(text_content("Error: 'baseline_path' must be a relative path inside the working "
                                             "directory (no '..')"),
@@ -868,12 +868,12 @@ struct InspectorSession {
         if (value_v == nullptr) {
             return tool_result(text_content("Error: missing 'value' parameter"), true);
         }
-        const std::string path = args.at("path")->as_or<std::string>("");
-        const std::string prop = args.at("prop")->as_or<std::string>("");
+        const auto path = args.at("path")->as_or<std::string>("");
+        const auto prop = args.at("prop")->as_or<std::string>("");
         // REST 约定：/api/widget/{tree_path}/{prop_name}；根节点的树路径为空。
         const std::string target = "/api/widget/" + (path.empty() ? std::string{} : path + "/") + prop;
         const auto dumped = au::json::dump(*value_v);
-        return inspector_result(session, "PUT", target, dumped.ok() ? std::move(dumped.value()) : std::string{});
+        return inspector_result(session, "PUT", target, dumped.ok() ? dumped.value() : std::string{});
     }
 
     if (name == "live_patch") {
@@ -887,7 +887,7 @@ struct InspectorSession {
             return tool_result(text_content("Error: 'ops' must be a JSON array"), true);
         }
         const auto dumped = au::json::dump(*ops_v);
-        return inspector_result(session, "POST", "/api/patch", dumped.ok() ? std::move(dumped.value()) : std::string{});
+        return inspector_result(session, "POST", "/api/patch", dumped.ok() ? dumped.value() : std::string{});
     }
 
     if (name == "live_simulate") {
@@ -901,7 +901,7 @@ struct InspectorSession {
         if (path_v == nullptr || !path_v->is_string() || action_v == nullptr || !action_v->is_string()) {
             return tool_result(text_content("Error: missing 'path' or 'action' parameter"), true);
         }
-        const std::string action = action_v->as_or<std::string>("");
+        const auto action = action_v->as_or<std::string>("");
         if (action != "click" && action != "scroll" && action != "text") {
             return tool_result(text_content("Error: action must be click | scroll | text"), true);
         }
@@ -915,8 +915,7 @@ struct InspectorSession {
             body.set("text", args.as_or<std::string>("text", std::string{}));
         }
         const auto dumped = au::json::dump(body);
-        return inspector_result(session, "POST", "/api/input/" + action,
-                                dumped.ok() ? std::move(dumped.value()) : std::string{});
+        return inspector_result(session, "POST", "/api/input/" + action, dumped.ok() ? dumped.value() : std::string{});
     }
 
     if (name == "to_code") {
@@ -924,7 +923,7 @@ struct InspectorSession {
         if (tree_v == nullptr || !tree_v->is_object()) {
             return tool_result(text_content("Error: missing 'tree' parameter"), true);
         }
-        std::string style_str = args.as_or<std::string>("style", std::string("fluent"));
+        auto style_str = args.as_or<std::string>("style", std::string("fluent"));
         auto style = aurora::tools::parse_code_style(style_str);
 
         std::string code = to_code(*tree_v, style);
@@ -958,8 +957,8 @@ struct InspectorSession {
         if (action_v == nullptr || !action_v->is_string()) {
             return tool_result(text_content("Error: missing 'action' parameter"), true);
         }
-        const std::string path = path_v->as_or<std::string>("");
-        const std::string action = action_v->as_or<std::string>("");
+        const auto path = path_v->as_or<std::string>("");
+        const auto action = action_v->as_or<std::string>("");
         if (action != "click" && action != "scroll" && action != "text") {
             return tool_result(text_content("Error: 'action' must be one of click | scroll | text"), true);
         }
@@ -1084,7 +1083,7 @@ struct InspectorSession {
             return tool_result(text_content("Error: 'commands' must be an array or the {\"commands\": [...]} envelope"),
                                true);
         }
-        const std::string id = id_v->as_or<std::string>("");
+        const auto id = id_v->as_or<std::string>("");
         aurora::tools::CommandStatus status = aurora::tools::CommandStatus::NotFound;
         const au::Json *found = aurora::tools::resolve_command(*items, id, status);
 
@@ -1116,7 +1115,7 @@ struct InspectorSession {
 [[nodiscard]] auto handle_request(const au::Json &req) -> au::Json {
     const auto *id_v = req.at("id");
     const au::Json id = id_v != nullptr ? *id_v : au::Json{};
-    const std::string method = req.as_or<std::string>("method", std::string(""));
+    const auto method = req.as_or<std::string>("method", std::string(""));
     const auto *params_v = req.at("params");
     const au::Json params = (params_v != nullptr && params_v->is_object()) ? *params_v : au::Json::object();
 
@@ -1145,7 +1144,7 @@ struct InspectorSession {
     }
 
     if (method == "tools/call") {
-        const std::string tool_name = params.as_or<std::string>("name", std::string(""));
+        const auto tool_name = params.as_or<std::string>("name", std::string(""));
         const auto *args_v = params.at("arguments");
         const au::Json args = (args_v != nullptr && args_v->is_object()) ? *args_v : au::Json::object();
         if (tool_name.empty()) {

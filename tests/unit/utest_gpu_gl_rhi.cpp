@@ -132,7 +132,7 @@ auto any_proc(const char * /*name*/) -> void * {
 
 AURORA_TEST_CASE(glfn_completeness_and_loader) {
     // 空函数表：complete() 为 false，缺项可检测。
-    const rhi::GLFn empty{};
+    constexpr rhi::GLFn empty{};
     AURORA_TEST_CHECK_FALSE(empty.complete());
     AURORA_TEST_CHECK_TRUE(empty.create_shader == nullptr);
     AURORA_TEST_CHECK_TRUE(empty.blit_framebuffer == nullptr);
@@ -302,7 +302,7 @@ AURORA_TEST_CASE(gpu_gl_gradient_lut_semantics_and_batching) {
     rhi::GpuGlRhi rhi_obj(fake.fn);
     AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
     rhi::RhiFrameSink &sink = rhi_obj;
-    const Rect area{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}};
+    constexpr Rect area{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}};
     const std::vector<Color> warm{Color{255, 0, 0, 255}, Color{0, 0, 255, 255}};
     const std::vector<float> full{0.0F, 1.0F};
 
@@ -327,7 +327,7 @@ AURORA_TEST_CASE(gpu_gl_gradient_lut_semantics_and_batching) {
     AURORA_TEST_CHECK_EQ(lut.data[1], 0);
     AURORA_TEST_CHECK_EQ(lut.data[2], 0);
     AURORA_TEST_CHECK_EQ(lut.data[3], 255);
-    const std::size_t last = static_cast<std::size_t>(255U) * 4U;
+    constexpr std::size_t last = static_cast<std::size_t>(255U) * 4U;
     AURORA_TEST_CHECK_EQ(lut.data[last + 0], 0);  // texel 255 = 尾色（蓝）
     AURORA_TEST_CHECK_EQ(lut.data[last + 1], 0);
     AURORA_TEST_CHECK_EQ(lut.data[last + 2], 255);
@@ -409,7 +409,7 @@ AURORA_TEST_CASE(gpu_gl_image_tex_cache_and_batching) {
     rhi::GpuGlRhi rhi_obj(fake.fn);
     AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
     rhi::RhiFrameSink &sink = rhi_obj;
-    const Rect area{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 32.0F, .height = 16.0F}};
+    constexpr Rect area{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 32.0F, .height = 16.0F}};
 
     // 2×1 图像：px0 不透明、px1 半透明——验证上传副本为预乘 alpha（PMA）。
     Image img;
@@ -476,7 +476,7 @@ AURORA_TEST_CASE(gpu_gl_glyph_atlas_text_pipeline) {
     rhi::GpuGlRhi rhi_obj(fake.fn);
     AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
     rhi::RhiFrameSink &sink = rhi_obj;
-    const Rect area{.origin = Point{.x = 8.0F, .y = 8.0F}, .size = Size{.width = 48.0F, .height = 32.0F}};
+    constexpr Rect area{.origin = Point{.x = 8.0F, .y = 8.0F}, .size = Size{.width = 48.0F, .height = 32.0F}};
     const Font font;
 
     // 首帧：真实字形（内置字体 + FreeType）经字形发射桥上传 R8 图集槽位，Text 管线单批。
@@ -543,7 +543,7 @@ AURORA_TEST_CASE(gpu_gl_glyph_atlas_multipage_and_lru_eviction) {
     rhi::GpuGlRhi rhi_obj(fake.fn);
     AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
     rhi::RhiFrameSink &sink = rhi_obj;
-    const Rect area{.origin = Point{.x = 4.0F, .y = 4.0F}, .size = Size{.width = 400.0F, .height = 32.0F}};
+    constexpr Rect area{.origin = Point{.x = 4.0F, .y = 4.0F}, .size = Size{.width = 400.0F, .height = 32.0F}};
     const Font font;
 
     // 小页注入（默认 1024）：62 个字母数字字形远超 8 页 × 16² 容量，强制覆盖
@@ -579,7 +579,7 @@ AURORA_TEST_CASE(gpu_gl_shadow_pipeline) {
     rhi::GpuGlRhi rhi_obj(fake.fn);
     AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
     rhi::RhiFrameSink &sink = rhi_obj;
-    const Rect area{.origin = Point{.x = 10.0F, .y = 10.0F}, .size = Size{.width = 100.0F, .height = 50.0F}};
+    constexpr Rect area{.origin = Point{.x = 10.0F, .y = 10.0F}, .size = Size{.width = 100.0F, .height = 50.0F}};
 
     // 模糊阴影：单个 Shadow 批覆盖扩展区（内部因子 1 = fill，外部距离线性衰减同软件）。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(200, 150, 1.0F));
@@ -620,7 +620,7 @@ AURORA_TEST_CASE(gpu_gl_blur_region_pingpong) {
     rhi::GpuGlRhi rhi_obj(fake.fn);
     AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
     rhi::RhiFrameSink &sink = rhi_obj;
-    const Rect area{.origin = Point{.x = 20.0F, .y = 20.0F}, .size = Size{.width = 60.0F, .height = 40.0F}};
+    constexpr Rect area{.origin = Point{.x = 20.0F, .y = 20.0F}, .size = Size{.width = 60.0F, .height = 40.0F}};
 
     // 实心打底 + 模糊：批 flush 后前置 resolve 一次 → 水平(temp) → 垂直(msaa) 双 pass。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(200, 150, 1.0F));
@@ -674,7 +674,7 @@ AURORA_TEST_CASE(gpu_gl_blur_region_pingpong) {
     // 区域完全在画布外：空区域跳过（软件同形钳制后为空）。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(200, 150, 1.0F));
     DisplayList dl4;
-    const Rect outside{.origin = Point{.x = 500.0F, .y = 20.0F}, .size = Size{.width = 30.0F, .height = 30.0F}};
+    constexpr Rect outside{.origin = Point{.x = 500.0F, .y = 20.0F}, .size = Size{.width = 30.0F, .height = 30.0F}};
     dl4.push_cmd(make_blur_cmd(outside, 2.0F));
     dl4.replay(sink.backend());
     rhi_obj.end_frame();
@@ -688,7 +688,7 @@ AURORA_TEST_CASE(gpu_gl_blend_mask_region_pass) {
     rhi::GpuGlRhi rhi_obj(fake.fn);
     AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
     rhi::RhiFrameSink &sink = rhi_obj;
-    const Rect area{.origin = Point{.x = 10.0F, .y = 10.0F}, .size = Size{.width = 80.0F, .height = 50.0F}};
+    constexpr Rect area{.origin = Point{.x = 10.0F, .y = 10.0F}, .size = Size{.width = 80.0F, .height = 50.0F}};
 
     // Blend（Multiply 强度 0.6）：单 pass 直写 MSAA（批 flush + 前置 resolve + 效果 quad）。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(200, 150, 1.0F));
@@ -751,10 +751,10 @@ AURORA_TEST_CASE(gpu_gl_composite_transform_quad) {
     AURORA_TEST_CHECK_EQ(fake.uploads.size(), 1U);  // 内容键缓存首次上传
     // 顶点字节验证：20 字节/顶点（pos2f + uv2f + color4ub），四角顺序 (0,0)(w,0)(w,h)(0,h)。
     AURORA_TEST_REQUIRE(fake.last_vbo_data.size() == static_cast<std::size_t>(4U) * 20U);
-    const float expect_x[4] = {5.0F, 25.0F, 25.0F, 5.0F};
-    const float expect_y[4] = {7.0F, 7.0F, 17.0F, 17.0F};
-    const float expect_u[4] = {0.0F, 1.0F, 1.0F, 0.0F};
-    const float expect_v[4] = {0.0F, 0.0F, 1.0F, 1.0F};
+    constexpr float expect_x[4] = {5.0F, 25.0F, 25.0F, 5.0F};
+    constexpr float expect_y[4] = {7.0F, 7.0F, 17.0F, 17.0F};
+    constexpr float expect_u[4] = {0.0F, 1.0F, 1.0F, 0.0F};
+    constexpr float expect_v[4] = {0.0F, 0.0F, 1.0F, 1.0F};
     for (std::size_t i = 0; i < 4U; ++i) {
         const std::size_t off = i * 20U;
         float x = 0.0F;
@@ -778,7 +778,7 @@ AURORA_TEST_CASE(gpu_gl_composite_transform_quad) {
     // DrawImage 对照：同纹理管线双批（LINEAR vs NEAREST 采样模式断批）。
     AURORA_TEST_CHECK_TRUE(rhi_obj.begin_frame(200, 150, 1.0F));
     DisplayList dl2;
-    const Rect area{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 20.0F}};
+    constexpr Rect area{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 20.0F}};
     dl2.push_cmd(make_composite_cmd(img, Matrix2D::from_translate(1.0F, 1.0F), 2.0F, dl2));
     dl2.push_cmd(make_image_cmd(area, img, dl2));
     dl2.replay(sink.backend());
@@ -831,7 +831,7 @@ AURORA_TEST_CASE(gpu_gl_stream_texture_slot_version_gating) {
     rhi::GpuGlRhi rhi_obj(fake.fn);
     AURORA_TEST_CHECK_TRUE(rhi_obj.valid());
     rhi::RhiFrameSink &sink = rhi_obj;
-    const Rect area{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 32.0F, .height = 16.0F}};
+    constexpr Rect area{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 32.0F, .height = 16.0F}};
 
     // 流式图像：直色像素（未预乘）+ 流式键/版本标识。
     Image img;
@@ -924,7 +924,7 @@ AURORA_TEST_CASE(gpu_gl_stream_public_api_contract) {
     AURORA_TEST_CHECK_TRUE(fake.rgba_sub_uploads.back().data == px);
 
     // 跨距行（UNPACK_ROW_LENGTH 路径）：仅记录一次。
-    const std::size_t stride = (static_cast<std::size_t>(8) * 4U) + 8U;
+    constexpr std::size_t stride = (static_cast<std::size_t>(8) * 4U) + 8U;
     const std::vector<std::uint8_t> strided(stride * 4U, 0x5A);
     rhi_obj.update_stream_image(id, strided.data(), stride, 0, 0, 8, 4);
     AURORA_TEST_CHECK_EQ(fake.rgba_sub_uploads.size(), 2U);
@@ -959,7 +959,7 @@ AURORA_TEST_CASE(gpu_gl_layer_cache_lifecycle_and_miss_epoch) {
     constexpr std::uint64_t key = 7;
 
     // 失效帧命令形态：BeginLayer（建常驻层 FBO）→ 子树重定向层 FBO → EndLayer → DrawLayer 回 MSAA。
-    auto make_layer_dl = [&key](DisplayList &dl) {
+    auto make_layer_dl = [](DisplayList &dl) {
         DrawCmd begin;
         begin.kind = CmdKind::BeginLayer;
         begin.bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 48.0F}};

@@ -50,11 +50,15 @@ namespace {
     }
     const std::size_t start = pos + 1;
     const std::size_t slash = pointer.find('/', start);
+    // 用 noexcept 的 remove_prefix / remove_suffix 等价改写 substr：守卫虽排除了
+    // substr 的抛出条件（start > size），但检查器无法跨分支证明（wasm lint 实测）。
+    token = pointer;
     if (slash == std::string_view::npos) {
-        token = pointer.substr(start);
+        token.remove_prefix(start);
         pos = pointer.size();
     } else {
-        token = pointer.substr(start, slash - start);
+        token.remove_prefix(start);
+        token.remove_suffix(token.size() - (slash - start));
         pos = slash;
     }
     return true;

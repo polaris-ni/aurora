@@ -372,9 +372,9 @@ AURORA_TEST_CASE(build_tree_prefers_painted_bounds_over_layout_box) {
 }
 
 AURORA_TEST_CASE(build_tree_honours_explicit_root_box) {
-    ProbeLeaf leaf{"Button"};
-    const aurora::Rect given{.origin = aurora::Point{.x = 5.0F, .y = 7.0F},
-                             .size = aurora::Size{.width = 42.0F, .height = 21.0F}};
+    const ProbeLeaf leaf{"Button"};
+    constexpr aurora::Rect given{.origin = aurora::Point{.x = 5.0F, .y = 7.0F},
+                                 .size = aurora::Size{.width = 42.0F, .height = 21.0F}};
     const auto tree = aurora::build_accessibility_tree(leaf, given);
     AURORA_TEST_CHECK_NEAR(tree.bounds.origin.x, given.origin.x, 1e-5F);
     AURORA_TEST_CHECK_NEAR(tree.bounds.size.width, given.size.width, 1e-5F);
@@ -484,7 +484,7 @@ AURORA_TEST_CASE(environment_injection_overrides_process_default) {
     AURORA_TEST_CHECK_NEAR(injected.resolved_font_scale(), 2.5F, 1e-6F);
 
     // 未注入 ⇒ 回落进程级默认。
-    const aurora::BuildContext bare{};
+    constexpr aurora::BuildContext bare{};
     AURORA_TEST_CHECK_NEAR(aurora::resolved_accessibility_settings(bare).resolved_font_scale(), 1.5F, 1e-6F);
 }
 
@@ -526,7 +526,8 @@ AURORA_TEST_CASE(reduce_motion_snaps_controller_to_endpoint) {
 
 AURORA_TEST_CASE(font_scale_scales_text_layout_geometry) {
     const ScopedSettings guard;
-    const aurora::Constraints bounded{.min = aurora::Size{}, .max = aurora::Size{.width = 200.0F, .height = 400.0F}};
+    constexpr aurora::Constraints bounded{.min = aurora::Size{},
+                                          .max = aurora::Size{.width = 200.0F, .height = 400.0F}};
 
     aurora::set_accessibility_settings(aurora::AccessibilitySettings{});
     aurora::Text base{std::string{"Aurora"}};
@@ -756,11 +757,11 @@ AURORA_TEST_CASE(labelled_by_resolves_forward_and_backwards_references) {
 
 AURORA_TEST_CASE(labelled_by_beats_explicit_and_builtin_label) {
     // 优先级：引用 > 宿主显式声明 > 控件自带文案（与 ARIA「labelledby 压制 label」一致）。
-    auto label = std::make_shared<ProbeLeaf>("Text");
+    const auto label = std::make_shared<ProbeLeaf>("Text");
     label->set_accessibility_label("外部标题");  // CJK-LITERAL: cjk-fixture - Han referenced label wins
     label->set_stable_key("hdr");
 
-    auto button = std::make_shared<aurora::Button>(std::string{"确定"});
+    const auto button = std::make_shared<aurora::Button>(std::string{"确定"});
     button->set_accessibility_label("确认订单");  // CJK-LITERAL: cjk-fixture - Han explicit label kept but suppressed
     button->set_labelled_by("hdr");
 
@@ -900,7 +901,7 @@ AURORA_TEST_CASE(duplicate_stable_key_resolves_to_first_in_preorder) {
 AURORA_TEST_CASE(labelled_by_survives_widget_tree_rebuild) {
     // 稳定键的存在意义：重建后的控件 `runtime_id()` 全变，按键的引用必须照样命中。
     // （lambda 内只用非致命断言：致命断言的失败出口按 `void` 用例函数设计。）
-    auto read = [] -> std::pair<std::string, std::uint64_t> {
+    auto read = []() -> std::pair<std::string, std::uint64_t> {
         auto label = ProbeLeaf{"Text"};
         label.set_accessibility_label("音量");  // CJK-LITERAL: cjk-fixture - Han label probe
         label.set_stable_key("vol-label");

@@ -67,23 +67,32 @@ namespace {
             break;
         }
     }
-    std::string digits;
-    digits.reserve(mantissa_end);
+    // 原实现先把数字字符收进 std::string 再去首尾零；libc++ 下 string 的构造
+    // 可能抛（bad_alloc），会令本 noexcept 函数被 bugprone-exception-escape 点名
+    // （wasm lint 实测）。改为直接定位数字序列的首 / 末非零位，行为等价、零分配：
+    // 有效位数 = 末位非零下标 - 首位非零下标 + 1（全零 / 无数字为 0）。
+    std::size_t first = mantissa_end;
+    std::size_t last = mantissa_end;
     for (std::size_t i = 0; i < mantissa_end; ++i) {
         const char c = num[i];
-        if (c >= '0' && c <= '9') {
-            digits.push_back(c);
+        if (c >= '1' && c <= '9') {
+            if (first == mantissa_end) {
+                first = i;
+            }
+            last = i;
         }
     }
-    std::size_t begin = 0;
-    while (begin < digits.size() && digits[begin] == '0') {
-        ++begin;
+    if (first == mantissa_end) {
+        return 0;
     }
-    std::size_t end = digits.size();
-    while (end > begin && digits[end - 1] == '0') {
-        --end;
+    std::size_t count = 0;
+    for (std::size_t i = first; i <= last; ++i) {
+        const char c = num[i];
+        if (c >= '0' && c <= '9') {
+            ++count;
+        }
     }
-    return end - begin;
+    return count;
 }
 
 /// @brief 字符级递归下降 SAX 引擎：只产出事件，不构建任何 DOM。
@@ -141,7 +150,9 @@ class SaxCore {
         if (in_.size() - pos_ < literal.size()) {
             return false;
         }
-        if (in_.compare(pos_, literal.size(), literal) != 0) {
+        // 首个分支已保证 pos_ + literal.size() <= size_，compare 的抛出条件
+        // （pos > size）不可达；检查器无法建模该区间推理。
+        if (in_.compare(pos_, literal.size(), literal) != 0) {  // NOLINT(bugprone-exception-escape)
             return false;
         }
         pos_ += literal.size();
