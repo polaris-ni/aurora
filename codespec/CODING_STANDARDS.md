@@ -547,7 +547,7 @@ BREAKING CHANGE: 自定义 Widget 的 on_paint 实现须改用全局坐标，
 
 ## 11 需求规格
 
-### 11.1 #1 声明式双模 API（链式 / 分步 / 配置块等价）
+### 11.1 SPEC.API.DECLARATIVE-DUAL-API.1 声明式双模 API（链式 / 分步 / 配置块等价）
 
 **核心目标：** AI 易生成。
 
@@ -580,7 +580,7 @@ btn3.on_click = fn;
 
 **验收标准：** 同一界面用三种形态各写一遍，编译产物与运行时行为一致；AI 只需记住「属性名 + `*Props`」即可生成整棵嵌套树，无需记忆顺序位置参数。
 
-### 11.2 #2 极致命名一致性 + 扁平命名空间
+### 11.2 SPEC.API.NAMING-CONSISTENCY.2 极致命名一致性 + 扁平命名空间
 
 **核心目标：** AI 易补全。
 
@@ -595,7 +595,7 @@ btn3.on_click = fn;
 
 **自动化守护**：`tools/check/check_naming_conventions.py`（CTest 用例 `check_naming_conventions`）以 `aurora_api.json`（API SSOT）为数据源校验：控件/枚举类型 PascalCase、属性键 snake_case、事件名 snake_case 且 `on_` 前缀、`aurora::debug` 自由函数 snake_case；枚举值 PascalCase，`colors` 命名空间的 `AURORA_*` 常量（`core/color.h` 的 `constexpr Color`）按「常量前缀」惯例豁免。
 
-### 11.3 #3 正交可组合的最小核心 API
+### 11.3 SPEC.API.MINIMAL-COMPOSITION.3 正交可组合的最小核心 API
 
 **核心目标：** AI 少幻觉。
 
@@ -617,7 +617,7 @@ btn3.on_click = fn;
 
 **验收标准：** 任一常见界面（表单、工具栏、抽屉、Tab 页、菜单条）都有具名配方；不存在「只有某个控件才有、别处需要自行虚构」的孤立能力。
 
-### 11.4 #4 强类型 + 单位标注 + 编译期校验
+### 11.4 SPEC.API.STRONG-TYPES.4 强类型 + 单位标注 + 编译期校验
 
 **核心目标：** AI 生成的代码编译即验证。
 
@@ -639,7 +639,7 @@ button.alignment(au::Alignment::Cenetr);   // 编译错误：拼写错误立刻�
 
 **验收标准：** 典型误用（错枚举值、裸整数当尺寸、忘写单位）全部在编译期失败并给出可读修复建议。
 
-### 11.5 #5 合理默认值（声明处可见）
+### 11.5 SPEC.API.SENSIBLE-DEFAULTS.5 合理默认值（声明处可见）
 
 **核心目标：** AI 少写少错。
 
@@ -668,7 +668,7 @@ au::Button(au::ButtonProps{ .label = "OK" });
 - 线程安全边界：`State::set` 与控件树操作只在主线程；异步结果经 `au::async` 回投主线程后再写状态。
 - 强类型几何：尺寸 / 颜色 / 长度使用强类型，禁止裸整数隐式转换。
 - 输出纪律：禁止直接使用标准输出，一律走 `Logger` 双通道（§4.1）。
-- 更多设计原则见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §13（AI-first 设计原则）；「显式优于隐式（含样式继承）」的需求规格见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §8.1（#8）。
+- 更多设计原则见 [`ARCHITECTURE.md`](ARCHITECTURE.md) §13（AI-first 设计原则）；「显式优于隐式（含样式继承）」的需求规格见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §8.1（SPEC.API.EXPLICIT-FIRST.8）。
 - 注释形态与文档注释齐全度：一律遵守 §13（Doxygen 注释规范），由 `tools/check/check_doc_comments.py` 门禁把关。
 - 字符串字面量的语言：注释之外不得出现中日韩字符，一律遵守 §14（字面量语言规范），由 `tools/check/check_no_cjk_literals.py` 门禁把关。
 

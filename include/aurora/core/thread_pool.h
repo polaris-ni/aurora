@@ -11,7 +11,8 @@
 
 namespace aurora {
 
-/// @brief 有界 worker 线程池（需求 #19 / specification/01-core.md §6.1 异步层基础设施）。
+/// @brief 有界 worker 线程池（需求 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 / specification/01-core.md §6.1
+/// 异步层基础设施）。
 ///
 /// 取代「每次 `std::thread().detach()` 直接起 OS 线程」的旧实现：所有后台工作提交到
 /// 任务队列，固定数量 worker 线程复用消费。线程数有界（`default_worker_count()`，

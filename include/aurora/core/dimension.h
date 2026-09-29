@@ -6,7 +6,7 @@
 
 namespace aurora {
 
-/// @brief 强类型尺寸意图工厂（需求 #4 强类型 + 单位标注）。
+/// @brief 强类型尺寸意图工厂（需求 SPEC.API.STRONG-TYPES.4 强类型 + 单位标注）。
 ///
 /// 设计目标：让 `width` / `height` 等只接受带单位的 `Length`，**裸整数在编译期即被拒绝**
 /// （`Length` 没有从 `int` 的隐式构造），避免 `button.width(120)` 这类静默单位错误。
@@ -59,7 +59,7 @@ namespace aurora {
     return "auto";
 }
 
-/// @brief 尺寸字面量（需求 #4，与 `au::dp`/`au::px` 工厂互补）。
+/// @brief 尺寸字面量（需求 SPEC.API.STRONG-TYPES.4，与 `au::dp`/`au::px` 工厂互补）。
 ///
 /// **安全模式**：仅允许在 TU 内显式 `using namespace au::literals;` 后使用，
 /// **禁止在头文件中全局 `using`**，以免字面量污染所有包含者的命名空间。

@@ -345,7 +345,7 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 
 ## 8 需求规格
 
-### 8.1 #18 安全的内存与所有权模型
+### 8.1 SPEC.QUALITY.CORE.MEMORY-SAFETY.18 安全的内存与所有权模型
 
 **核心目标：** AI 生成无悬空指针、无泄漏的代码。
 
@@ -368,9 +368,9 @@ auto node = au::find_node_by_path(root, path);  // widget/inspect.h，位于 aur
 
 **单线程 UI（不变量，非并发 API）：** 所有 UI 构建、状态变更、事件派发、重绘都在 UI 线程进行，无锁无原子。`State<T>` 的读写与 `Node` 的复制移动只在 UI 线程发生，天然无数据竞争。`shared_ptr` 仅用于简化树的生命周期管理，并非为多线程共享；快照等只读场景可安全跨线程共享。
 
-**验收标准：** 公开头文件中不出现裸 `Widget*` 子节点或回调参数；AI 生成的树代码没有任何 `delete`；耗时工作的结果只经 #19 的回投路径写回状态。
+**验收标准：** 公开头文件中不出现裸 `Widget*` 子节点或回调参数；AI 生成的树代码没有任何 `delete`；耗时工作的结果只经 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 的回投路径写回状态。
 
-### 8.2 #19 结构化异步与并发模型
+### 8.2 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 结构化异步与并发模型
 
 **核心目标：** AI 轻松处理耗时操作。
 
@@ -380,7 +380,7 @@ auto node = au::find_node_by_path(root, path);  // widget/inspect.h，位于 aur
 
 > 异步 API 契约（`au::async`、`Task<T>::then`、`co_async`、`CoroTask<T>`、`launch`）见 [`02-state.md`](02-state.md) §5；定时与周期任务由 `Scheduler` / `Timer` 承担，见 [`06-app-platform.md`](06-app-platform.md)。
 
-### 8.3 #21 错误恢复与降级渲染
+### 8.3 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21 错误恢复与降级渲染
 
 **核心目标：** AI 生成的错误 UI 不会崩溃。
 
@@ -402,14 +402,14 @@ auto node = au::find_node_by_path(root, path);  // widget/inspect.h，位于 aur
 
 **验收标准：** 对任意非法输入构造的树，`HeadlessSurface` 渲染不崩溃、产出占位像素与结构化警告；开启严格模式后同一输入返回致命失败。
 
-### 8.4 #23 部分代码容错（半成品可编译可运行）
+### 8.4 SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.23 部分代码容错（半成品可编译可运行）
 
 **核心目标：** AI 可增量开发。
 
 **需求陈述：** 任何组件在任何「半成品」状态下都不应崩溃，而是优雅降级。这对 AI 的增量开发循环至关重要：先生成骨架 → 编译通过 → 逐步填充 → 每步都可运行。
 
 - 编译期：未完成的组件不应导致整个项目编译失败；以 `au::TODO`（§7.1）占位标记尚未实现的事件处理。
-- 运行时：缺少必要属性的组件渲染为占位框而非崩溃（降级视觉语言见 #21）。
+- 运行时：缺少必要属性的组件渲染为占位框而非崩溃（降级视觉语言见 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21）。
 
 **验收标准：** 只填了 label 的控件、带 `au::TODO` 回调的界面，均可编译、可渲染、可运行，并留下可读警告指明未完成处。
 

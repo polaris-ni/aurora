@@ -82,7 +82,7 @@ class Text : public LeafWidget, public TextProps {
         return *this;
     }
 
-    /// @brief 设置字号 pt（链式）；非正数降级为 14pt 并产生诊断（需求 #21）。
+    /// @brief 设置字号 pt（链式）；非正数降级为 14pt 并产生诊断（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21）。
     /// @param pt 字号（point）；<= 0 时取默认 14pt 并记 `Diagnostics::degraded`。
     /// @return 自身引用，便于链式调用。
     auto font_size(float pt) -> Text & {

@@ -210,8 +210,9 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     // 计数只统计「真实布局工作量」，缓存命中不计——复杂度门槛即基于此语义。
     AURORA_PROFILE_COUNT(layout_nodes, 1);
 
-    // 显式尺寸意图（specification/01-core.md §2.2 / 需求 #20）：固定宽度/高度构成"显式盒"，把对应轴约束
-    // 夹成 [v, v]，使子节点在固定盒内布局；其余意图（auto/fill）保持内容/弹性。
+    // 显式尺寸意图（specification/01-core.md §2.2 / 需求
+    // SPEC.QUALITY.LAYOUT.ALGEBRA.20）：固定宽度/高度构成"显式盒"，把对应轴约束 夹成 [v,
+    // v]，使子节点在固定盒内布局；其余意图（auto/fill）保持内容/弹性。
     Constraints cc = c;
     if (width_.kind == LengthKind::Fixed) {
         cc.min.width = width_.value;

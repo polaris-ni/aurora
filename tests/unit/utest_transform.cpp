@@ -126,7 +126,8 @@ AURORA_TEST_CASE(inverse_roundtrips_for_invertible_matrix) {
     AURORA_TEST_CHECK_NEAR(back_then_forward.y, p.y, 1e-4F);
 }
 
-// 退化矩阵（行列式≈0）求逆降级为单位矩阵，并上报 matrix2d-degenerate 诊断（需求 #21）。
+// 退化矩阵（行列式≈0）求逆降级为单位矩阵，并上报 matrix2d-degenerate 诊断（需求
+// SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21）。
 // @note 默认 strict mode 为 Off，degraded 只记录不终止；take() 是测试消费诊断的约定接口，
 // 且 runner 为文件级进程隔离，无跨用例污染。
 AURORA_TEST_CASE(degenerate_inverse_degrades_to_identity) {

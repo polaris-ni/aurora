@@ -226,8 +226,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     Reactive<bool> show{true};  ///< 可见性（非结构性隐藏）
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
-    /// @brief 显式宽度意图（specification/01-core.md §2.2 / 需求 #20）：默认 `auto`（按内容）。
-    /// 用 `au::px(120)` / `au::fill()` / `au::percent(0.5f)` 等强类型设置；
+    /// @brief 显式宽度意图（specification/01-core.md §2.2 / 需求 SPEC.QUALITY.LAYOUT.ALGEBRA.20）：默认
+    /// `auto`（按内容）。 用 `au::px(120)` / `au::fill()` / `au::percent(0.5f)` 等强类型设置；
     /// **裸整数编译失败**（无 `Length(int)` 隐式转换）。
     /// @param len 宽度意图：`Fixed` / `Fraction` / `Expand` 在布局时把该轴夹成等式。
     /// @return 自身引用，供链式继续设置其它属性。

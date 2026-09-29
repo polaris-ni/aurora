@@ -1,6 +1,7 @@
 #pragma once
 
-/// @brief 单一包含入口（需求 #2/#24：one import / one namespace）。
+/// @brief 单一包含入口（需求 SPEC.API.NAMING-CONSISTENCY.2 / SPEC.PERF.API.TOKEN-EFFICIENCY.24：one import / one
+/// namespace）。
 /// @file aurora.h
 ///
 /// 包含全部抽象层公共模块；任何翻译单元只需 `#include "aurora/aurora.h"` 即可使用
@@ -8,7 +9,7 @@
 /// **真实平台窗口 Surface**（GLFW/Win32）需另行 `#include "aurora/window/native_surfaces.h"`，
 /// 并经 `create_window`（window/window.h）统一构造。无头渲染工具见 render/offscreen.h。
 ///
-/// 推荐别名（需求 #2）：
+/// 推荐别名（需求 SPEC.API.NAMING-CONSISTENCY.2）：
 /// @code
 /// #include "aurora/aurora.h"
 /// using namespace aurora;   // 或只用 au:: 前缀
@@ -204,4 +205,4 @@
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
 
-namespace au = aurora;  ///< 推荐短别名（需求 #2）。`au::colors::Red` 经别名直接可用。
+namespace au = aurora;  ///< 推荐短别名（需求 SPEC.API.NAMING-CONSISTENCY.2）。`au::colors::Red` 经别名直接可用。

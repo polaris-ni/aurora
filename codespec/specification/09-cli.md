@@ -42,7 +42,7 @@
 五条不可让步的内核：
 
 1. **Schema-first**：唯一的输入是 §3 的声明表；无绑定目标、无回调、无反射。声明表本身可被 `validate` 检查、被
-   `schema_json` 导出（需求 #12 / #17）。
+   `schema_json` 导出（需求 SPEC.FEAT.TOOLING.API-SCHEMA.12 / SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17）。
 2. **零异常**：一切失败经 `Result<T>` + `Error`（`cli-*` slug）返回，`noexcept` 边界内不做分配（见 §5 的
    `value_kind_from_name`）。
 3. **强类型打通**：`ValueKind` 的 9 个取值中有 4 个直接落到库内既有类型（`Length` / `Color` / `LogLevel` /
@@ -382,9 +382,9 @@ parse(root, int argc, const char *const *argv)   // 自动跳过 argv[0]，程�
 
 ## 10 需求规格
 
-### 10.1 #17 LSP / MCP Server / CLI 工具链
+### 10.1 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 LSP / MCP Server / CLI 工具链
 
-本模块是 #17 的**共用底座**：仓库内一切「人敲进来的 argv」都收敛到同一份声明表驱动的解析器，从而保证
+本模块是 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 的**共用底座**：仓库内一切「人敲进来的 argv」都收敛到同一份声明表驱动的解析器，从而保证
 `--help` 文本、`schema_json` 与错误 slug 跨工具一致。已接入的载体：
 
 | 载体 | 接入形态 |
@@ -419,13 +419,13 @@ parse(root, int argc, const char *const *argv)   // 自动跳过 argv[0]，程�
 工具链可执行文件清单见 [`08-tooling.md`](08-tooling.md) §7.4。
 
 
-### 10.2 #12 机器可读 API Schema
+### 10.2 SPEC.FEAT.TOOLING.API-SCHEMA.12 机器可读 API Schema
 
 `schema_json()` 让命令树本身可被 AI 工具链消费（选项、arity、词表、区间、必填、子命令、内建注入形态与
 `early_view` 短路出口），与 `aurora_api.json` 的 UI Schema 属同一「自描述」原则；`EarlyView::Schema`
 （`demo_cli --dump-schema`）即其演示载体——导出的 schema 里能读回每个出口，不需要额外约定。
 
-### 10.3 #4 强类型 + 单位标注
+### 10.3 SPEC.API.STRONG-TYPES.4 强类型 + 单位标注
 
 `ValueKind` 与 `Length` / `Color` / `LogLevel` / 毫秒 `Duration` 的打通，使 CLI 层不再出现「字符串 + 手工
 `stoi`」的第二套词法，越界与跨类读取在 `Result` 上显式可见。

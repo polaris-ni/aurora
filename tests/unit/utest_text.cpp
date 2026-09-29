@@ -71,7 +71,7 @@ AURORA_TEST_CASE(chain_setters_update_serialized_props) {
 }
 
 AURORA_TEST_CASE(font_size_degrade_and_validate_props) {
-    // font_size() 的降级路径：非正字号回落 14pt（需求 #21），降级后属性合法。
+    // font_size() 的降级路径：非正字号回落 14pt（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21），降级后属性合法。
     Text zero;
     zero.font_size(0.0F);
     Text neg;

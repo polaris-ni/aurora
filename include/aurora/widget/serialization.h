@@ -14,7 +14,7 @@
 
 namespace aurora {
 
-/// @brief widget 树 ⇄ JSON 序列化 + JSON Patch 差分（需求 #13）。
+/// @brief widget 树 ⇄ JSON 序列化 + JSON Patch 差分（需求 SPEC.FEAT.TOOLING.UI-SERIALIZATION.13）。
 ///
 /// 设计要点：
 /// - 每个 widget 通过 `serializeProps`/`deserializeProps`（虚函数）暴露自有属性，

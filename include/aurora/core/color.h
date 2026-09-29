@@ -95,7 +95,7 @@ struct Color {
     [[nodiscard]] constexpr auto with_alpha(uint8_t alpha) const noexcept -> Color { return Color{r, g, b, alpha}; }
 };
 
-/// @brief 调色板命名空间（需求 #2：具名色集中在扁平的 `au::colors` 下，易发现）。
+/// @brief 调色板命名空间（需求 SPEC.API.NAMING-CONSISTENCY.2：具名色集中在扁平的 `au::colors` 下，易发现）。
 /// 与 `Color::red()` 等静态工厂并存；AI 可任选其一。
 namespace colors {
 constexpr Color AURORA_WHITE = Color::white();  ///< 纯白不透明色（= Color::white()）。
@@ -108,7 +108,7 @@ constexpr Color AURORA_YELLOW = Color::yellow();  ///< 纯黄色（= Color::yell
 constexpr Color AURORA_TRANSPARENT = Color::transparent();  ///< 全透明占位色（= Color::transparent()）。
 }  // namespace colors
 
-/// @brief 颜色字面量（需求 #4，与 `Color(0xFF,0,0)` 构造互补）。
+/// @brief 颜色字面量（需求 SPEC.API.STRONG-TYPES.4，与 `Color(0xFF,0,0)` 构造互补）。
 ///
 /// 十六进制按 `0xRRGGBB` / `0xRRGGBBAA` 解释；**仅可在 TU 内显式
 /// `using namespace au::literals;` 后使用**，禁止头文件全局 `using`。

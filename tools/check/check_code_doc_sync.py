@@ -6,7 +6,14 @@
 #
 # 规则（测试头部，编号 TEST-R1–TEST-R10，定义见 codespec/CODING_STANDARDS.md §3.2）：
 #   DOC1    代码注释中的 `架构 §N` 引用 → codespec/ARCHITECTURE.md 必须存在该章节；
-#   DOC2    代码注释中的 `规格 §N` 引用 → 需求 #N 必须存在于 SPECIFICATIONS.md 特性表（#1–#29）；
+#   DOC2    代码注释中的需求 ID（`SPEC.<类目>.<域>.[<子域>…]<短名>.<数字尾>`）引用
+#           → 必须存在于 SPECIFICATIONS.md 特性表首列（`规格 §N` 是章节号、不再是需求号，
+#           故不再参与本规则）；
+#   DOC3    需求标识回流（关键词形态）：`需求` / `规格` / `requirement` / `spec` 之后紧跟
+#           `#<数字>` 的旧式纯数字编号一律红灯——需求编号已由需求 ID 取代，残留即两制混用；
+#   DOC4    需求标识回流（体系文档裸编号）：SPECIFICATIONS.md / CODING_STANDARDS.md /
+#           GUIDELINE.md / AGENTS.md 内裸 `#<数字>`（其前为非单词字符、后无数字）一律红灯——
+#           这四份是 ID 体系的口径文档，必须零旧形态；
 #   TEST-R1 测试头部必须含标准三行块：/// 测试类型 / /// 目标单元 / /// 测试说明
 #           （历史 // 目标源单元： 约定不计入标准块，视为 TEST-R1 违规，须归一）；
 #   TEST-R2 测试头部「目标单元 / 目标源单元」声明路径必须真实存在（防注释路径烂掉）；
@@ -66,7 +73,14 @@ TEST_FACILITY_DIRS = ("framework", "support", "fixtures", "golden")
 CATCH_ALL_BASELINE = 20
 
 ARCH_REF_RE = re.compile(r"架构\s*§\s*([\d.]+)")  # CJK-LITERAL: regex-semantic
-SPEC_REF_RE = re.compile(r"规格\s*§\s*([\d.]+)")  # CJK-LITERAL: regex-semantic
+# 需求 ID：SPEC.<类目>.<域>[.<子域>…]<短名>.<数字尾>（至少 4 个点分段，数字尾 1–2 位）。
+# (?!\d) 防止把 `SPEC...142` 之类的更长数字尾巴截断成 `.14` 而误判通过。
+SPEC_ID_RE = re.compile(r"\bSPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{1,2}(?!\d)")
+# 回流形态：关键词 + `#数字`（旧的纯数字需求编号）。数字尾巴同样做 (?!\d) 截断保护，
+# 故 `Ref #142`（PR 号）这类更长的数字串不会被 `#14` 前缀误伤。
+BACKFLOW_KEYWORD_RE = re.compile(
+    r"(?:需求|规格|requirement|spec)\s*#\s*\d{1,2}(?!\d)",  # CJK-LITERAL: regex-semantic
+    re.IGNORECASE)
 # 只校验「目标单元 / 目标源单元」（路径声明）；「目标组合」是语义描述，不是路径。
 TARGET_RE = re.compile(r"目标(?:单元|源单元)[:：]\s*([^\s`]+)")  # CJK-LITERAL: regex-semantic
 PLACEHOLDER_RE = re.compile(r"[（(<*]待补|TODO|TBD|xxx", re.IGNORECASE)  # CJK-LITERAL: regex-semantic
@@ -129,26 +143,26 @@ def section_numbers(md_path):
     return numbers
 
 
-def feature_numbers(spec_path):
+def feature_ids(spec_path):
+    """Requirement IDs (`SPEC.<类目>.<域>.…<短名>.<数字尾>`) listed in SPECIFICATIONS.md's feature table."""
     if not os.path.isfile(spec_path):
         return None
-    numbers = set()
+    ids = set()
     with open(spec_path, encoding="utf-8") as handle:
         for line in handle:
-            match = re.match(r"^\s*\|\s*(\d{1,2})\s*\|", line)
+            match = re.match(
+                r"^\s*\|\s*`?(SPEC\.[A-Z0-9-]+(?:\.[A-Z0-9-]+)+\.\d{1,2})(?!\d)`?\s*\|", line)
             if match:
-                value = int(match.group(1))
-                # 上界刻意不写死：SPECIFICATIONS.md 中唯一「数字首列」的表就是特性清单表，
-                # 硬编码上界（曾为 24）会让新增需求（如 #25 多窗口）静默逃过 DOC2 校验。
-                if value >= 1:
-                    numbers.add(value)
-    return numbers
+                # 上界刻意不写死：SPECIFICATIONS.md 中唯一「需求 ID 首列」的表就是特性清单表，
+                # 硬编码数字上界会让新增需求静默逃过 DOC2 校验。
+                ids.add(match.group(1))
+    return ids
 
 
 def check_doc_refs(repo, problems):
-    """DOC1/DOC2: `架构 §N` and `规格 §N` references in code comments must resolve."""
+    """DOC1: `架构 §N` references in code comments must resolve; DOC2: requirement IDs must exist."""
     arch_numbers = section_numbers(os.path.join(repo, "codespec", "ARCHITECTURE.md"))
-    spec_numbers = feature_numbers(os.path.join(repo, "codespec", "SPECIFICATIONS.md"))
+    known_ids = feature_ids(os.path.join(repo, "codespec", "SPECIFICATIONS.md"))
     for rel in iter_source_files(repo):
         with open(os.path.join(repo, rel), encoding="utf-8", errors="replace") as handle:
             for lineno, line in enumerate(handle, start=1):
@@ -157,13 +171,59 @@ def check_doc_refs(repo, problems):
                 for number in ARCH_REF_RE.findall(line):
                     if arch_numbers is not None and number not in arch_numbers:
                         problems.append(("DOC1", rel, lineno, f"ARCHITECTURE.md section {number} not found"))
-                for raw in SPEC_REF_RE.findall(line):
-                    try:
-                        number = int(float(raw))
-                    except ValueError:
-                        continue
-                    if spec_numbers is not None and number not in spec_numbers:
-                        problems.append(("DOC2", rel, lineno, f"spec section {number} is not a known requirement"))
+                for req_id in SPEC_ID_RE.findall(line):
+                    if known_ids is not None and req_id not in known_ids:
+                        problems.append(("DOC2", rel, lineno,
+                                         f"requirement ID {req_id} is not in the SPECIFICATIONS.md feature table"))
+
+
+# ---- DOC3 / DOC4：需求标识回流（旧 `#N` 形态即红灯）-------------------------
+# 扫描范围对齐任务口径：codespec/ 全部文档 + 根 AGENTS.md + 代码/构建目录。
+BACKFLOW_DIRS = ("codespec", "include", "src", "tools", "tests", "cmake")
+BACKFLOW_FILES = ("AGENTS.md",)
+BACKFLOW_EXT = (".md", ".toml", ".h", ".hpp", ".cpp", ".cmake", ".py", ".txt")
+# 四份「ID 体系口径文档」：额外禁裸 `#N`（DOC4）。CHANGELOG.json 的历史 `#N` 有意保留，不进本名单。
+SPEC_SYSTEM_DOCS = ("codespec/SPECIFICATIONS.md", "codespec/CODING_STANDARDS.md",
+                    "codespec/GUIDELINE.md", "AGENTS.md")
+# 裸 `#N`：前为非单词字符、后无数字（`Ref #142` 这类长数字串不会被 `#14` 前缀截断命中）。
+BARE_HASH_RE = re.compile(r"(?<![\w])#\d{1,2}(?!\d)")
+# 注释分隔符与预处理指令：`#include` / `#define` / `# N` 之类不是需求编号。
+NOT_HASH_RE = re.compile(r"#\s*(include|define|pragma|if|ifdef|ifndef|else|endif|elif|undef|"
+                         r"line|error|warning|region|endregion)\b")
+
+
+def _backflow_targets(repo):
+    for rel in BACKFLOW_FILES:
+        if os.path.isfile(os.path.join(repo, rel)):
+            yield rel, True
+    for directory in BACKFLOW_DIRS:
+        base = os.path.join(repo, directory)
+        if not os.path.isdir(base):
+            continue
+        for current, dirs, files in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in ("build", ".git", "__pycache__", "third_party")]
+            for name in sorted(files):
+                if name.endswith(BACKFLOW_EXT) or name == "CMakeLists.txt":
+                    rel = os.path.relpath(os.path.join(current, name), repo).replace("\\", "/")
+                    yield rel, rel in SPEC_SYSTEM_DOCS
+
+
+def check_spec_id_backflow(repo, problems):
+    """DOC3 (keyword form, repo-wide) / DOC4 (bare `#N` in the ID-system docs)."""
+    for rel, strict in _backflow_targets(repo):
+        try:
+            with open(os.path.join(repo, rel), encoding="utf-8", errors="replace") as handle:
+                for lineno, line in enumerate(handle, start=1):
+                    if BACKFLOW_KEYWORD_RE.search(line):
+                        problems.append(("DOC3", rel, lineno,
+                                         "legacy numeric requirement reference; use the "
+                                         "SPEC.<CATEGORY>.<DOMAIN>.<SHORT-NAME>.<DIGIT-TAIL> ID instead"))
+                    if strict and not NOT_HASH_RE.search(line) and BARE_HASH_RE.search(line):
+                        problems.append(("DOC4", rel, lineno,
+                                         "bare numeric requirement number in an ID-system document; "
+                                         "write the SPEC.<CATEGORY>.<DOMAIN>.<SHORT-NAME>.<DIGIT-TAIL> ID instead"))
+        except OSError:
+            continue
 
 
 def resolve_target(repo, target):
@@ -520,6 +580,7 @@ def main() -> int:
 
     problems = []
     check_doc_refs(repo, problems)
+    check_spec_id_backflow(repo, problems)
     check_test_headers(repo, problems)
     check_public_header_coverage(repo, problems)
     check_parallel_safety(repo, problems)

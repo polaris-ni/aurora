@@ -101,13 +101,13 @@
 ## 4. 文档导航表（codespec/）
 
 `codespec/` 共 **15 份手写文档 + 1 份生成物**（`ERROR_CATALOG.md`），外加 2 份生成源数据（`errors.toml` / `debug_api.toml`）。
-各文档的章节号统一为纯数字点分层级（`1` / `1.1` / `1.1.1`）；需求编号 `#1–#30` 是独立的需求标识体系，与章节号并存。
+各文档的章节号统一为纯数字点分层级（`1` / `1.1` / `1.1.1`）；需求 ID（`SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`，共 30 条）是独立的需求标识体系，与章节号并存。
 
 **顶层文档（6 份，均为自包含正文，非外链索引）**
 
 | 你想了解                                              | 读这个文件                     | 权威性说明                                                                                                 |
 |-------------------------------------------------------|--------------------------------|-------------------------------------------------------------------------------------------------------------|
-| **项目定位 / 设计原则 / 需求清单 / 文档导航 / 版本门禁** | `codespec/SPECIFICATIONS.md`   | 总纲与索引：30 条特性清单（`#1–#30`）逐条指向其规格落点；分层蓝图、命名速查、API 兼容策略；版本与稳定性门禁（§12） |
+| **项目定位 / 设计原则 / 需求清单 / 文档导航 / 版本门禁** | `codespec/SPECIFICATIONS.md`   | 总纲与索引：30 条特性清单（需求 ID `SPEC.<类目>.<域>.<短名>.<数字尾>`）逐条指向其规格落点；分层蓝图、命名速查、API 兼容策略；版本与稳定性门禁（§12） |
 | **架构 / 运行时 / 分层 / 模块映射 / 设计不变量**      | `codespec/ARCHITECTURE.md`     | 🥇 架构与设计以它为准：分层、运行时、模块映射、核心数据流、组件树、事件、渲染、性能、11 条设计不变量、错误处理架构、AI-first 原则、测试与 CI |
 | **核心概念 / 跨框架映射 / 概念可枚举性**              | `codespec/CONCEPTS.md`         | 可枚举 UI 原语审计、状态作用域决策树、React / Flutter / Qt 概念映射、迁移要点                              |
 | **编码规范 / 命名 / 错误 / 注释 / 字面量语言 / AI 友好性 / 版本管理**     | `codespec/CODING_STANDARDS.md` | 🥇 编码规则以它为准：错误处理、命名、文档与示例、日志纪律、契约标注、Doxygen 注释规范（§13）、字符串字面量语言（§14）、AI 友好性、SemVer、函数签名、内部工具层、提交信息规范 |
@@ -115,22 +115,23 @@
 | **编译选项 / 宏 / 环境变量（统一参考）**              | `codespec/BUILD_OPTIONS.md`    | 🥇 所有 CMake 开关、缓存变量、feature 宏、运行时环境变量与 find_package 集成以它为准                       |
 
 > 导航表与文档内部引用由 CTest `check_codespec_xref` 守护（断链 / 失效锚点 / 章节号重复跳号 / 反引号路径 / 特性表落点可达），
-> 代码注释中的 `架构 §N` / `规格 §N` 引用与测试头部「目标单元」路径由 CTest `check_code_doc_sync` 守护。
+> 代码注释中的 `架构 §N` / `规格 §N` 章节引用、`SPEC.<类目>.` 需求 ID 引用、旧 `#N` 需求编号的防回流
+> （DOC3 关键词形态 / DOC4 体系文档裸编号）与测试头部「目标单元」路径由 CTest `check_code_doc_sync` 守护。
 > 两套守护只拦增量，存量豁免以白名单形式内置于脚本并注明原因。
 
 **子系统规格（9 份，按 `include/aurora/` 模块域切分）**
 
 | 文件 | 覆盖 | 需求 |
 |:---|:---|:---|
-| `specification/01-core.md` | `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池 | #18 #19 #21 #23 |
-| `specification/02-state.md` | `state/`：信号原语、订阅生命周期、`Store`、异步与协程 | #6 #19 |
-| `specification/03-layout-render.md` | `layout/` `render/` `image/` `media/`：布局协议、Flex/Grid 算法、Painter、字体引擎、Surface 与后端 | #11 #20 |
-| `specification/04-widget.md` | `widget/` `ui/`：控件基类契约、自描述、控件清单、可定制性契约 | #7 #22 |
-| `specification/05-event-navigation.md` | `event/` `animation/` `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈 | #8 |
-| `specification/06-app-platform.md` | `app/` `window/` `preferences/` `storage/` `perf/` `debug/`：应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面 | #14 #15 |
-| `specification/07-environment-modifier.md` | `environment/` `theming/` `i18n/` `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier | #12 |
-| `specification/08-tooling.md` | 序列化 / 代码生成 / YAML、控件树检查、Inspector、自描述发现、MCP / CLI / LSP、测试原语、日志通道 | #9 #10 #12 #13 #16 #17 #22 |
-| `specification/09-cli.md` | `cli/`：argv 语法、声明表与静态校验、字面量强类型、`cli-*` 错误码、usage / help / schema 派生视图 | #17 |
+| `specification/01-core.md` | `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池 | SPEC.QUALITY.CORE.MEMORY-SAFETY.18 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.21 SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.23 |
+| `specification/02-state.md` | `state/`：信号原语、订阅生命周期、`Store`、异步与协程 | SPEC.FEAT.STATE.SIGNAL-STATE.6 SPEC.FEAT.CORE.ASYNC-CONCURRENCY.19 |
+| `specification/03-layout-render.md` | `layout/` `render/` `image/` `media/`：布局协议、Flex/Grid 算法、Painter、字体引擎、Surface 与后端 | SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.11 SPEC.QUALITY.LAYOUT.ALGEBRA.20 |
+| `specification/04-widget.md` | `widget/` `ui/`：控件基类契约、自描述、控件清单、可定制性契约 | SPEC.FEAT.WIDGET.FLAT-COMPONENTS.7 SPEC.FEAT.TOOLING.UI-TO-CODE.22 |
+| `specification/05-event-navigation.md` | `event/` `animation/` `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈 | SPEC.API.EXPLICIT-FIRST.8 |
+| `specification/06-app-platform.md` | `app/` `window/` `preferences/` `storage/` `perf/` `debug/`：应用驱动、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面 | SPEC.PLATFORM.ZERO-IFDEF.14 SPEC.PLATFORM.CONSISTENT-BEHAVIOR.15 |
+| `specification/07-environment-modifier.md` | `environment/` `theming/` `i18n/` `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier | SPEC.FEAT.TOOLING.API-SCHEMA.12 |
+| `specification/08-tooling.md` | 序列化 / 代码生成 / YAML、控件树检查、Inspector、自描述发现、MCP / CLI / LSP、测试原语、日志通道 | SPEC.QUALITY.CORE.STRUCTURED-ERROR.9 SPEC.FEAT.TOOLING.UI-INSPECTOR.10 SPEC.FEAT.TOOLING.API-SCHEMA.12 SPEC.FEAT.TOOLING.UI-SERIALIZATION.13 SPEC.FEAT.TOOLING.RECIPE-DOCS.16 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 SPEC.FEAT.TOOLING.UI-TO-CODE.22 |
+| `specification/09-cli.md` | `cli/`：argv 语法、声明表与静态校验、字面量强类型、`cli-*` 错误码、usage / help / schema 派生视图 | SPEC.FEAT.TOOLING.AI-TOOLCHAIN.17 |
 
 > **模块存在性提醒**：`a11y`（无障碍）与 `audio`（音频）是真实存在的模块，`a11y` 横跨 `core/`（类型 / 事件 / 桥抽象）与 `widget/`（语义树构建与快照，因需 `Widget` 完整定义；见 `ARCHITECTURE.md` §8.5），`audio` 归属 `media/`（音频图 API 恒编译，设备后端经 `AURORA_ENABLE_AUDIO` 编入，见 `BUILD_OPTIONS.md` §4）。本表按 `include/aurora/` 顶层模块域切分 spec 文档，二者未单列独立文件，但不可误认为不存在。
 
@@ -171,7 +172,7 @@
     - **编译期开关 / feature 宏 / 环境变量** → `BUILD_OPTIONS.md`
     - **新增可复现用法 / 最小可编译配方** → `GUIDELINE.md`
     - **提交信息写法** → `CODING_STANDARDS.md` §10
-    - **文档章节号与需求编号写法**：章节号一律纯数字点分层级（`1` / `1.1` / `1.1.1`），禁止中英文序号；需求编号用 `#N`，与章节号并存
+    - **文档章节号与需求编号写法**：章节号一律纯数字点分层级（`1` / `1.1` / `1.1.1`），禁止中英文序号；需求 ID 用 `SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`，与章节号并存
     - 新增 / 删除 widget 或类型时，除 `aurora_api.json`（运行 `gen_api_tools`）外，还应在 `CONCEPTS.md`的控件映射中体现（如适用）。
     - **冲突回写原则**：当文档与代码运行时行为冲突时，以 **代码运行时**为准，并 **回填文档**
       消除冲突，杜绝「文档有、代码无」或「文档缺、代码有」的漂移；不得为迁就旧文档而保留错误实现。
@@ -206,8 +207,10 @@
     这类标记只是撰写当时的临时脚手架（源自某份评审草案、任务清单或对话轮次），脱离那份列表便不再指代任何东西；
     一旦编号重排或阶段改名，留在代码与文档中的旧编号会从「无信息」退化为**反向错误**——外部读者（人与 AI）
     据此既定位不到目标，还可能理解成相反含义。**规则**：一律改写为语义化表述（如「算术隐式入向」
-    「同 Type 严格比较」「先立骨」「断言阶段」）。**唯一例外**是需求编号 `#N`：它是体系化的稳定标识，
-    与章节号并存（见 §4 与硬规则 2）。仅存在于本地、不进入版本控制的临时草稿（`*.draft.md`）可自用编号，
+    「同 Type 严格比较」「先立骨」「断言阶段」）。**唯一例外**是需求 ID `SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`：
+    它是体系化的稳定标识，与章节号并存（见 §4 与硬规则 2）；ID 自身不含 `#`，旧的纯数字形态由
+    `tools/check/check_code_doc_sync.py` 的 DOC3 / DOC4 防回流规则拦下（`KeyCode D0`–`D9` / `D65` / `A8`、
+    `Bidi`、`TEST-R*` 等同形合法名不属需求编号，匹配口径已排除）。仅存在于本地、不进入版本控制的临时草稿（`*.draft.md`）可自用编号，
     但其内容在提升进代码或 `codespec/` 之前必须完成改写。本条目为说明禁止形态而列举的字符串是唯一例外。
 11. **引用必须可达，且目标必须随仓库分发**：不得引用不存在的文档、章节、符号与路径，也不得引用只存在于本机、
     未纳入版本控制的文件。**理由**：注释与文档中的引用是外部读者唯一的定位手段——指向不存在的目标等于制造死链，

@@ -68,7 +68,8 @@ class Button : public LeafWidget, public ButtonProps {
     /// NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::function<void()> on_click;  ///< 点击回调（同步派发，见 specification/05-event-navigation.md §3）
 
-    /// @brief 运行时可查询的默认属性值（属性默认值的单一事实来源，需求 #5；经实例 `btn.defaults()` 调用亦可）。
+    /// @brief 运行时可查询的默认属性值（属性默认值的单一事实来源，需求 SPEC.API.SENSIBLE-DEFAULTS.5；经实例
+    /// `btn.defaults()` 调用亦可）。
     /// @return 一份缺省构造的 `ButtonProps`，与 `ButtonProps{}` 完全一致
     [[nodiscard]] static auto defaults() -> ButtonProps { return ButtonProps{}; }
 

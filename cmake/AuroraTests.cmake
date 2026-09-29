@@ -95,11 +95,11 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_version_consistency
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_version_consistency.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-        # 公共 API 命名一致性门禁（#2）：类型 PascalCase、属性/事件/函数 snake_case、事件 on_ 前缀。
+        # 公共 API 命名一致性门禁（SPEC.API.NAMING-CONSISTENCY.2）：类型 PascalCase、属性/事件/函数 snake_case、事件 on_ 前缀。
         add_test(NAME check_naming_conventions
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_naming_conventions.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-        # 零原生平台宏门禁（#14）：include/ src/ 预处理分支禁止 _WIN32/__linux__/__x86_64__ 等
+        # 零原生平台宏门禁（SPEC.PLATFORM.ZERO-IFDEF.14）：include/ src/ 预处理分支禁止 _WIN32/__linux__/__x86_64__ 等
         # 原生宏（platform.h 自身与 _WIN32_WINNT 等 SDK 旋钮豁免）；规范化宏密度仅报告。
         add_test(NAME check_platform_macros
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_platform_macros.py"
@@ -109,7 +109,7 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_test_temp_hygiene
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_test_temp_hygiene.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-        # 公共 API 体量/token 预算门禁（#24）：aurora_api.json 估算 token 数不得超预算上限。
+        # 公共 API 体量/token 预算门禁（SPEC.PERF.API.TOKEN-EFFICIENCY.24）：aurora_api.json 估算 token 数不得超预算上限。
         add_test(NAME check_api_budget
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_budget.py"
                 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")

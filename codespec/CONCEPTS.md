@@ -152,7 +152,7 @@ push_route(au::Checkbox{ au::Reactive<bool>{ flag } });   // flag 存活期 = �
 
 | JSON 值容器 `au::json::Value` | `JSON.parse` / `JSON.stringify`（值语义；读缺失键返回 `undefined`，不改动原对象） | `dart:convert` 的 `jsonDecode` / `jsonEncode`（产出 `Map` / `List`，无保真数字概念） | `QJsonDocument` / `QJsonObject` / `QJsonArray`（隐式共享，值语义） |
 
-> 与 §3.1 并列于同一概念清单、仅因跨框架直接等价较少而单独成表的基础设施 / 平台层概念：Event（#12）、Platform Shell（#14）、Accessibility（#15）、DevTools（#16）、Result / Error（#18）、JSON 值容器（#30）。
+> 与 §3.1 并列于同一概念清单、仅因跨框架直接等价较少而单独成表的基础设施 / 平台层概念（括号内为本文件 §1 概念清单序号，非需求 ID）：Event（12）、Platform Shell（14）、Accessibility（15）、DevTools（16）、Result / Error（18）、JSON 值容器（30）。
 
 ### 3.3 生命周期：两级正交
 

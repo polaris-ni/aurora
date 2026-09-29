@@ -23,7 +23,7 @@ auto bounded(float w, float h) -> Constraints {
 }  // namespace
 
 AURORA_TEST_CASE(recipes_compose_basic_primitives) {
-    // 每个配方只是原语的约定排版：不新增核心 Widget 类（需求 #3 设计哲学）
+    // 每个配方只是原语的约定排版：不新增核心 Widget 类（需求 SPEC.API.MINIMAL-COMPOSITION.3 设计哲学）
     auto form = form_layout(
         {FormRow{.label = "Name", .field = Node{Text{"Ada"}}}, FormRow{.label = "Age", .field = Node{Text{"36"}}}});
     AURORA_TEST_CHECK_EQ(std::string{form.widget().type_name()}, "Column");

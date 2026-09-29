@@ -48,7 +48,7 @@ class LiteralFactory;
 
 // ---------------------------------------------------------------- 值类型
 
-/// @brief 选项/位置参数的值类型（需求 #9：类型集合封闭可枚举，无开放扩展点）。
+/// @brief 选项/位置参数的值类型（需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.9：类型集合封闭可枚举，无开放扩展点）。
 ///
 /// 决定 token → 内部表示的转换规则，字面量语法见 specification/09-cli.md §5。
 enum class ValueKind : std::uint8_t {
@@ -311,7 +311,7 @@ class Arguments {
     const CommandSpec *matched_ = nullptr;  ///< 命中的子命令叶节点声明（非拥有，可空）
 };
 
-/// @brief 提前展示的视图：封闭词表，新增一项即多一种可声明的「短路出口」（需求 #9）。
+/// @brief 提前展示的视图：封闭词表，新增一项即多一种可声明的「短路出口」（需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.9）。
 /// `Help`/`Version` 由库内建旗标使用（见 `CommandSpec::builtins`），`Schema` 既可作内建亦可由
 /// 调用方标在自有旗标上（如 `--dump-schema`）；`None` 表示没有展示请求，正常走业务。
 enum class EarlyView : std::uint8_t {
