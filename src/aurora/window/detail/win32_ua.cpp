@@ -111,7 +111,7 @@ auto variant_not_supported(VARIANT &v) -> void {
     v.vt = VT_EMPTY;  // 动态加载失败时的兜底
 }
 
-/// @brief 把「主人线程动作」的三态结果映射成 UIA 的 HRESULT（#53）。
+/// @brief 把「主人线程动作」的三态结果映射成 UIA 的 HRESULT。
 ///
 /// `nullopt`（元素已被摘出快照 / 回投超时）→ `UIA_E_ELEMENTNOTAVAILABLE`，与旧「widget 取不到」
 /// 同判；`false`（控件不认这个动作）→ `UIA_E_NOTSUPPORTED`；`true` → `S_OK`。
@@ -123,7 +123,7 @@ auto hr_of(const std::optional<bool> &performed) -> HRESULT {
     return *performed ? S_OK : UIA_E_NOTSUPPORTED;
 }
 
-/// @brief 主人线程一次**读**的三态结果（#53）。
+/// @brief 主人线程一次**读**的三态结果。
 ///
 /// 为何不能只用 `std::optional`：UIA 把「元素已不存在」（`UIA_E_ELEMENTNOTAVAILABLE`，客户端
 /// 应丢弃该元素）与「控件没有这项语义」（`UIA_E_NOTSUPPORTED`，客户端只是不显示该属性）当成两件
@@ -159,7 +159,7 @@ auto store_read(const MainRead<T> &r, T *ret) -> HRESULT {
     return r.state == MainRead<T>::State::Unsupported ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
 }
 
-/// @brief 在主人线程对本节点的真实 widget 施加 `fn`，结果**按值**带回调用线程（#53）。
+/// @brief 在主人线程对本节点的真实 widget 施加 `fn`，结果**按值**带回调用线程。
 ///
 /// 三个 provider 类（节点 / 文本区间 / 文本图案）共用这一份回投实现：`bridge == nullptr`、
 /// 「节点已摘出快照」与「回投超时」都归一成 `R{}`，由调用方按 `hr_of` / `store_read` 的口径
@@ -313,7 +313,7 @@ auto UiaApi::instance() -> const UiaApi & {
 
 /// @brief 语义节点 provider：实现 fragment 全方法与各 pattern。
 ///
-/// 纪律（#53）：只持**桥裸指针 + 节点 id**，不持 `Widget*`。UIA 把每次回调投递在
+/// 跨线程纪律：只持**桥裸指针 + 节点 id**，不持 `Widget*`。UIA 把每次回调投递在
 /// `UIAutomationCore` 的 COM/RPC 线程上，而 widget 树 / `snap_` / `providers_` 属主人线程，故
 /// 属性与几何读的是 `node()` 返回的快照**副本**，动作与活树读写一律经 `read_on_main` 回投。
 /// 未命中（元素已摘出快照）或回投超时即返回 `UIA_E_ELEMENTNOTAVAILABLE`（§4.1 安全不变量 / R1）。
@@ -451,10 +451,10 @@ class UiaNodeProvider : public IRawElementProviderSimple,
     // COM 基接口（IUnknown…）在 MinGW SDK 下析构器非 virtual，故此处不可写 `override`。
     virtual ~UiaNodeProvider() = default;
 
-    /// @brief 取当前节点的快照**副本**（内部回投主人线程）；`nullopt` = 控件已销毁 / 超时（#53）。
+    /// @brief 取当前节点的快照**副本**（内部回投主人线程）；`nullopt` = 控件已销毁 / 超时。
     [[nodiscard]] auto node() const -> std::optional<a11y::NodeSnapshot>;
 
-    /// @brief 在主人线程对本节点的真实 widget 施加 `fn`，结果**按值**带回（#53）。
+    /// @brief 在主人线程对本节点的真实 widget 施加 `fn`，结果**按值**带回。
     ///
     /// 这里刻意**没有** `widget()` 可用：活 `Widget*` 一旦离开主人线程就是本次缺陷的本体
     /// ——快照会被整体换掉、widget 会被摘除。一切读与动都经本口 hop 过去。
@@ -464,7 +464,7 @@ class UiaNodeProvider : public IRawElementProviderSimple,
         return read_on_main<R>(bridge_, id_, std::move(fn), timeout_ms);
     }
 
-    /// @brief 动作统一入口（#53）：主人线程解析 widget 后调 `perform_accessibility_action`。
+    /// @brief 动作统一入口：主人线程解析 widget 后调 `perform_accessibility_action`。
     /// @return `true` = 控件已执行；`false` = 控件不认该动作；`nullopt` = 元素不可得 / 超时。
     /// 入参一律按值携带：`AccessibilityActionRequest::text` 是 `string_view`，绝不引用调用方
     /// 栈上的串（超时后那次执行会晚于栈帧消失）。
@@ -536,7 +536,7 @@ class UiaRootProvider : public UiaNodeProvider,
 
 /// @brief 文本区间 provider：内部以 **UTF-8 字节偏移**保存端点，UIA 边界用 `UtfOffsetMap` 换算。
 ///
-/// 线程模型（#53）与 `UiaNodeProvider` 同纪律：只持**桥裸指针 + 节点 id**，对 widget 的每一次
+/// 线程模型与 `UiaNodeProvider` 同纪律：只持**桥裸指针 + 节点 id**，对 widget 的每一次
 /// 读写都经 `read_on_main` 回投主人线程、只取按值副本回来；`start_`/`end_` 是本 provider 的私有
 /// 状态，留在 UIA 调用线程上改，不涉及共享数据。
 class UiaTextRangeProvider : public ITextRangeProvider {
@@ -599,7 +599,7 @@ class UiaTextRangeProvider : public ITextRangeProvider {
   protected:
     virtual ~UiaTextRangeProvider() = default;
 
-    /// @brief 当前文本（#53：回投主人线程取 `Widget::accessibility_text()` 的**副本**）。
+    /// @brief 当前文本（回投主人线程取 `Widget::accessibility_text()` 的**副本**）。
     /// `nullopt` = 控件已销毁 / 回投超时 → 调用方回 `UIA_E_ELEMENTNOTAVAILABLE`。
     [[nodiscard]] auto current_text() const -> std::optional<std::string>;
     /// @brief 把端点夹紧到 `text` 的长度（入参由调用方取回，避免每步都回投一次）。
@@ -614,7 +614,7 @@ class UiaTextRangeProvider : public ITextRangeProvider {
 
 /// @brief TextPattern provider（每文本节点一个；`ITextProvider` 六方法全实现）。
 ///
-/// 线程模型（#53）同 `UiaTextRangeProvider`：不持 `Widget*`，对 widget 的读写一律经 `read_on_main`
+/// 线程模型同 `UiaTextRangeProvider`：不持 `Widget*`，对 widget 的读写一律经 `read_on_main`
 /// 回投主人线程，跨线程只传副本。
 class UiaTextProvider : public ITextProvider {
   public:
@@ -675,7 +675,7 @@ auto UiaNodeProvider::node() const -> std::optional<a11y::NodeSnapshot> {
     if (bridge_ == nullptr) {
         return std::nullopt;
     }
-    // 拉取式同步点与跨线程纪律（#53）都在 `snapshot_copy` 内：回投主人线程重建，
+    // 拉取式同步点与跨线程纪律都在 `snapshot_copy` 内：回投主人线程重建，
     // 再把该节点**按值**带回。此后本 provider 只读自己这份副本 —— 主线程随后怎么换快照、
     // 怎么摘 widget，都不会让这里的读数悬垂（旧实现返回指向 `snap_` 的裸指针，正是缺陷本体）。
     return bridge_->snapshot_copy(id_);
@@ -989,7 +989,7 @@ auto UiaNodeProvider::SetValue(LPCWSTR val) -> HRESULT {
     if (val == nullptr) {
         return E_POINTER;
     }
-    // `req.text` 是 string_view，串本身必须在执行那一刻仍存活 —— #53 里由
+    // `req.text` 是 string_view，串本身必须在执行那一刻仍存活 —— 回投协议里由
     // `perform_on_main` 按值搬进闭包承担（超时后晚到的执行也读得到，读的是闭包而非栈帧）。
     const std::string utf8 = a11y::utf16_to_utf8(std::u16string_view{reinterpret_cast<const char16_t *>(val)});
     return hr_of(perform_on_main(AccessibilityAction::Value, 0.0, utf8));
@@ -1359,7 +1359,7 @@ auto UiaTextRangeProvider::GetBoundingRectangles(SAFEARRAY **ret) -> HRESULT {
         return S_OK;
     }
     // 逐码点取字符盒（无字体度量时 `char_bounds` 返回 nullopt ⇒ 该字符跳过）。整趟遍历收进
-    // **一次**回投：跨线程只带窗口本地 DIP 盒的副本回来（#53）。
+    // **一次**回投：跨线程只带窗口本地 DIP 盒的副本回来。
     const auto boxes = read_on_main<std::optional<std::vector<Rect>>>(
         bridge_, id_,
         [s = start_, e = end_, text = *text](Widget &w) -> std::optional<std::vector<Rect>> {
@@ -1586,7 +1586,7 @@ auto UiaTextProvider::GetSelection(SAFEARRAY **ret) -> HRESULT {
         return E_POINTER;
     }
     *ret = nullptr;
-    // 选区与文本长度都只在主人线程可知：一次回投带回夹紧后的端点副本（#53）。
+    // 选区与文本长度都只在主人线程可知：一次回投带回夹紧后的端点副本。
     const auto span = read_on_main<std::optional<std::pair<std::size_t, std::size_t>>>(
         bridge_, id_,
         [](Widget &w) -> std::optional<std::pair<std::size_t, std::size_t>> {
@@ -1706,7 +1706,7 @@ auto UiaTextProvider::get_DocumentRange(ITextRangeProvider **ret) -> HRESULT {
 Win32UiaBridge::Win32UiaBridge(HWND hwnd) : hwnd_(hwnd) {}
 
 // ============================================================================
-// 跨线程回投（#53）
+// 跨线程回投
 // ============================================================================
 // UIA 把 provider 的每一次回调都投递在 UIAutomationCore 的 COM/RPC 线程上，而 widget 树、
 // `snap_`、`providers_` 只属于主人线程。故本桥对 provider 暴露的每一个访问口都经
@@ -1797,7 +1797,7 @@ auto Win32UiaBridge::snapshot_copy(std::uint64_t id) -> std::optional<a11y::Node
             }
             // 按值跨线程：调用方持有副本，之后的重建都不会影响它。
             auto copy = *n;
-            // 活指针随副本出境就是 #53 的本体缺陷，故一律抹掉：碰活 widget 只许走
+            // 活指针随副本出境就是跨线程回投要堵的本体缺陷，故一律抹掉：碰活 widget 只许走
             // `eval_widget_on_main`（在那里 `widget_on_main` 于主人线程解析，指针不出线程）。
             copy.widget = nullptr;
             return copy;
@@ -1878,7 +1878,7 @@ auto Win32UiaBridge::visible_box() -> Rect {
 }
 
 auto Win32UiaBridge::hit_test_id(Point local_dip) -> std::uint64_t {
-    // 活树遍历（`EventDispatcher::hit_test`）必须在主人线程做，与绘制/命中同源（#45 的不变量）。
+    // 活树遍历（`EventDispatcher::hit_test`）必须在主人线程做，与绘制/命中同源（既有派发不变量）。
     return eval_on_main<std::uint64_t>(
         [this, local_dip]() -> std::uint64_t {
             sync_if_dirty();
@@ -1923,7 +1923,7 @@ auto Win32UiaBridge::root_provider() -> IRawElementProviderSimple * {
 // 与仓内既有 3 处析构关停豁免同口径，故此处显式取舍而非包一层 catch。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 Win32UiaBridge::~Win32UiaBridge() {
-    // 第一件事必须是落存活闸（#53）：此刻起任何仍在队列里的回投闭包都不再解引用本桥。
+    // 第一件事必须是落存活闸：此刻起任何仍在队列里的回投闭包都不再解引用本桥。
     // 拆链与断连都在主人线程，与闭包执行同线程，故这道闸的写/读不会交错。
     alive_->store(false, std::memory_order_release);
     // 走 `disconnect_all()`：它同时负责**从进程级注册表注销**（`unregister_provider`）。

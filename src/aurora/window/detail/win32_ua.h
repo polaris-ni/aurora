@@ -54,7 +54,7 @@
 
 namespace aurora::detail {
 
-// 主线程回投超时预算（ms）—— #53 的降级门限。
+// 主线程回投超时预算（ms）—— 跨线程回投的降级门限。
 // 为何是这个量级：读屏客户端（NVDA 等）自身对 provider 调用有秒级超时，超了会整条
 // 无障碍链路报错并拖死前台。预算必须显著小于客户端超时，又要大于一次正常帧排空的
 // 延迟。读路径远多于动作，取更小的预算；动作是用户意图，多等一档。
@@ -106,7 +106,7 @@ struct UiaApi {
 /// 同步模型：事件只置 dirty；平台查询（Navigate / 属性拉取）到达时
 /// `sync_if_dirty()` 才重建快照 + diff + **批量**发事件。
 ///
-/// 线程模型（#53）：UIA provider 的**每一个**回调都跑在 `UIAutomationCore.dll` 的 COM/RPC
+/// 线程模型：UIA provider 的**每一个**回调都跑在 `UIAutomationCore.dll` 的 COM/RPC
 /// 线程上（见 `ensure_sta_apartment()`：以 `RPC_E_CHANGED_MODE` 为可接受即已知并依赖了这一点），
 /// 而 widget 树、`snap_`、`providers_` 只属于**主人线程**（= 构造本桥、并安装 `main_poster`
 /// 帧循环的那条线程）。故本类把访问面劈成两半：
@@ -129,7 +129,7 @@ class Win32UiaBridge final : public a11y::Provider {
     auto activate() -> void override;
     auto deactivate() -> void override;
     /// @brief 消费脏位：必要时重建快照 + diff + 批量发事件。
-    /// @warning **主人线程专用**（#53）：`rebuild()` 要走活 widget 树并整体换掉 `snap_`。
+    /// @warning **主人线程专用**：`rebuild()` 要走活 widget 树并整体换掉 `snap_`。
     ///          provider 侧一律经 `snapshot_copy` / `eval_widget_on_main` 间接到达，不得直调。
     auto sync_if_dirty() -> void override;
     auto mark_dirty() -> void override;
@@ -163,13 +163,13 @@ class Win32UiaBridge final : public a11y::Provider {
     /// @brief 设置 RTL 标志（由 `Window::set_accessibility_rtl` 转发）。
     auto set_rtl(bool rtl) -> void override { rtl_.store(rtl, std::memory_order_relaxed); }
     /// @brief 当前是否 RTL（影响 Navigate 遍历顺序，使读屏按从右到左阅读顺序遍历）。
-    /// RPC 线程在 `navigate_target` 之外也会读它，故用原子量（#53）。
+    /// RPC 线程在 `navigate_target` 之外也会读它，故用原子量。
     [[nodiscard]] auto is_rtl() const -> bool { return rtl_.load(std::memory_order_relaxed); }
     /// @brief 窗口可见盒（根节点几何，窗口本地 DIP）：裁剪离屏几何用（#3）。
-    /// **任意线程可调**（#53）：内部回投主人线程取副本。
+    /// **任意线程可调**：内部回投主人线程取副本。
     [[nodiscard]] auto visible_box() -> Rect;
 
-    // ---- 跨线程访问面（#53：provider 回调所在的 RPC 线程用）----
+    // ---- 跨线程访问面（provider 回调所在的 RPC 线程用）----
     /// @brief 把 `fn` 送到主人线程执行，并把结果**按值**带回调用线程。
     ///
     /// 三条路径，语义一致地都返回 `R`：
@@ -237,24 +237,24 @@ class Win32UiaBridge final : public a11y::Provider {
     /// @brief 窗口宿主 provider（`UiaHostProviderFromHwnd` 结果）。
     /// `activate()` 于主人线程一次性赋值，此后只读；返回缓存借用（不增计数）。
     [[nodiscard]] auto host_provider() -> IRawElementProviderSimple *;
-    /// @brief 根 provider（#53：回投主人线程取/建，返回缓存借用）。
+    /// @brief 根 provider（回投主人线程取/建，返回缓存借用）。
     [[nodiscard]] auto root_provider() -> IRawElementProviderSimple *;
-    /// @brief 节点 provider（**保对象同一性**：Qt/Chromium 实践；#53：回投创建，返回缓存借用）。
+    /// @brief 节点 provider（**保对象同一性**：Qt/Chromium 实践；回投创建，返回缓存借用）。
     [[nodiscard]] auto provider_for(std::uint64_t id) -> IRawElementProviderSimple *;
-    /// @brief 取某节点的快照**副本**（#53）：未命中/超时 → `nullopt`。provider 的属性读全走这里。
+    /// @brief 取某节点的快照**副本**：未命中/超时 → `nullopt`。provider 的属性读全走这里。
     /// @note 副本的 `widget` 活指针被置空 —— 出境的指针就是本缺陷的本体，碰活 widget 只许走
     ///       `eval_widget_on_main`。
     [[nodiscard]] auto snapshot_copy(std::uint64_t id) -> std::optional<a11y::NodeSnapshot>;
-    /// @brief 按方向取导航目标节点 id（#53：RTL 反转与 children_of 都在主人线程算完）。
+    /// @brief 按方向取导航目标节点 id（RTL 反转与 children_of 都在主人线程算完）。
     /// @return `nullopt` = 本节点已不在快照（→ `UIA_E_ELEMENTNOTAVAILABLE`）；值 0 = 该方向无目标；
     ///         其余 = 目标节点 id。用 `nullopt`/0 两态区分，是为了让一次回投就带回旧实现里
     ///         「先查节点、再查邻居」两步的全部信息（Navigate 是树遍历的热路）。
     [[nodiscard]] auto navigate_target(std::uint64_t id, NavigationKind kind) -> std::optional<std::uint64_t>;
-    /// @brief 是否存在「可滚动祖先」（`IScrollItemProvider` 暴露判据；#53：回投）。
+    /// @brief 是否存在「可滚动祖先」（`IScrollItemProvider` 暴露判据；回投）。
     [[nodiscard]] auto has_scrollable_ancestor(std::uint64_t id) -> bool;
-    /// @brief 命中测试（与派发器同口径）→ 节点 id（#53：回投，内部会活树遍历）。
+    /// @brief 命中测试（与派发器同口径）→ 节点 id（回投，内部会活树遍历）。
     [[nodiscard]] auto hit_test_id(Point local_dip) -> std::uint64_t;
-    /// @brief 当前聚焦节点 id（0 = 无；#53：回投）。
+    /// @brief 当前聚焦节点 id（0 = 无；回投）。
     [[nodiscard]] auto focused_id() -> std::uint64_t;
 
     // ---- 主人线程专用裸口 ----
@@ -271,11 +271,11 @@ class Win32UiaBridge final : public a11y::Provider {
     auto queue_focus_changed(std::uint64_t id) -> void;
     auto queue_announcement(const std::string &text) -> void;
     /// @brief 是否有客户端在监听（无监听者时整批丢弃）。
-    /// 计数由 RPC 线程上的连接点增删、由主人线程的派发读，故用原子量（#53）。
+    /// 计数由 RPC 线程上的连接点增删、由主人线程的派发读，故用原子量。
     [[nodiscard]] auto has_listeners() const -> bool { return listener_count_.load(std::memory_order_relaxed) > 0; }
     auto note_listener_added() -> void { listener_count_.fetch_add(1, std::memory_order_relaxed); }
     auto note_listener_removed() -> void {
-        // 与原「> 0 才减」逐位等价；CAS 是为「RPC 线程增删 + 主人线程读」并存准备的（#53）。
+        // 与原「> 0 才减」逐位等价；CAS 是为「RPC 线程增删 + 主人线程读」并存准备的。
         int expected = listener_count_.load(std::memory_order_relaxed);
         while (expected > 0 &&
                !listener_count_.compare_exchange_weak(expected, expected - 1, std::memory_order_relaxed)) {
@@ -284,7 +284,7 @@ class Win32UiaBridge final : public a11y::Provider {
     }
 
   private:
-    // ---- 回投内核（#53）----
+    // ---- 回投内核 ----
     /// @brief 把 `work` 送到主人线程执行并**限时**等待其完成。
     ///
     /// 就地执行的两条合法路径（都不入队、不等待）：调用线程本就是主人线程（宿主接线、帧循环、
@@ -339,7 +339,7 @@ class Win32UiaBridge final : public a11y::Provider {
     /// 立闩后重入只读旧快照、永不重建。
     bool tearing_down_ = false;
     /// @brief RTL 标志（#5）：影响 Navigate 遍历顺序；由应用侧 `Window::set_accessibility_rtl` 推送。
-    /// RPC 线程会读（Navigate 的翻转判据），故原子（#53）。
+    /// RPC 线程会读（Navigate 的翻转判据），故原子。
     std::atomic<bool> rtl_{false};
     std::atomic<int> listener_count_{0};
     /// @brief 主人线程 = 构造本桥的线程（`Win32Host` 建窗时于 UI 线程 `make_unique`，与

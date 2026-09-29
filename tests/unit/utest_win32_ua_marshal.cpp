@@ -1,7 +1,7 @@
 /// @file utest_win32_ua_marshal.cpp
 /// 测试类型: unit
 /// 目标单元: src/aurora/window/detail/win32_ua.cpp
-/// 测试说明: #53 —— UIA provider 的主线程回投内核。证明「跨线程读/动确实换到主人线程执行」、
+/// 测试说明: UIA provider 的主线程回投内核。证明「跨线程读/动确实换到主人线程执行」、
 ///           主人线程与无回投器两条就地路径不变、超时降级为零值且晚到的队列项被放弃闸拦住、
 ///           桥析构后仍在队列里的项不再解引用本桥，以及 provider 侧的快照读/导航读都经回投。
 
@@ -196,7 +196,7 @@ AURORA_TEST_CASE(timeout_returns_zero_value_and_drops_the_late_task) {
     AURORA_TEST_CHECK_FALSE(ran.load());  // 放弃闸必须拦住补做
 }
 
-// 目标：桥先于在途队列项析构时，存活闸拦住闭包（这是 #53 唯一的 use-after-free 通道）。
+// 目标：桥先于在途队列项析构时，存活闸拦住闭包（这是回投内核唯一的 use-after-free 通道）。
 AURORA_TEST_CASE(bridge_destruction_drops_a_still_queued_task) {
     QueuedPoster poster;
     auto bridge = std::make_unique<detail::Win32UiaBridge>(nullptr);
