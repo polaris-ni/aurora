@@ -383,11 +383,11 @@ app.set_on_window_state([](au::WindowState s) {
 
 **多窗口。** 桥与窗口一一对应（`Win32Host::Impl` 唯一持有），多窗口即多个桥同时注册；`screen_reader_active` 是**进程级**设置，任一桥激活即置 `true`、任一桥去激活即试置 `false`（多窗口下复位语义为 best-effort，见 §6.2 同类启发式约定）。
 
-**线程模型（#53：provider 回调一律回投主人线程）。** UIA 把 in-proc provider 的**每一次**回调投递在 `UIAutomationCore.dll` 的 COM/RPC 线程上（激活时初始化 STA 套间只保证公寓模型，并不保证那就是 UI 线程），而 widget 树、`snap_`、`id_by_widget_`、`providers_` 只属于**主人线程**（= 构造桥并安装 `main_poster` 帧循环的那条）。故 `Win32UiaBridge` 把访问面劈成两半：
+**线程模型（provider 回调一律回投主人线程）。** UIA 把 in-proc provider 的**每一次**回调投递在 `UIAutomationCore.dll` 的 COM/RPC 线程上（激活时初始化 STA 套间只保证公寓模型，并不保证那就是 UI 线程），而 widget 树、`snap_`、`id_by_widget_`、`providers_` 只属于**主人线程**（= 构造桥并安装 `main_poster` 帧循环的那条）。故 `Win32UiaBridge` 把访问面劈成两半：
 
 - **回投 + 按值副本**（provider 侧唯可用形）：`eval_on_main` / `eval_widget_on_main` 派生出的 `snapshot_copy`（属性与几何读的都是副本）、`navigate_target`、`has_scrollable_ancestor`、`hit_test_id`、`focused_id`、`visible_box`、`provider_for`、`root_provider`，以及全部动作（`Invoke` / `Toggle` / `SetValue` / `Scroll` / `ScrollIntoView` / `SetFocus`）与文本面（`ITextRangeProvider` / `ITextProvider` 的每次 `accessibility_text` / `accessibility_char_bounds` / 选区读写）。跨线程只传值，悬垂读由构造排除。
 - **主人线程裸口**（provider 侧禁用）：`sync_if_dirty` / `rebuild` / `find_node` / `snapshot()` / `id_of` / `mark_dirty` / `queue_*`。拉取式重建会整体换掉 `snap_`，任何指向它的指针出不了主人线程。
-- **就地执行的两条合法路径**（都不入队、不等待，代价与 #53 之前一致）：调用线程本就是主人线程（`WM_GETOBJECT`、帧循环、`UiaDisconnectProvider` 的同步重入），或进程级 `main_poster` 未安装（无头 / 单测，与 `Task::post_to_main` 的无回投器回退同语义）。
+- **就地执行的两条合法路径**（都不入队、不等待，代价与回投改造之前一致）：调用线程本就是主人线程（`WM_GETOBJECT`、帧循环、`UiaDisconnectProvider` 的同步重入），或进程级 `main_poster` 未安装（无头 / 单测，与 `Task::post_to_main` 的无回投器回退同语义）。
 - **限时等待 + 降级**：读路径预算 `AURORA_UI_READ_TIMEOUT_MS`（250ms）、动作路径 `AURORA_UI_ACTION_TIMEOUT_MS`（500ms），显著小于读屏客户端自身的秒级超时。超时即返回零值，provider 侧映射为 `UIA_E_ELEMENTNOTAVAILABLE`；「控件没有这项语义」仍回 `UIA_E_NOTSUPPORTED`，两者是不同判据，故回投结果用三态承载而非单一 `optional`。超时路径**刻意不打诊断**（`Diagnostics` 的收集器是主人线程专属），可观测性由客户端看到的错误码承担。
 - **两道闸**（队列项真正执行前逐条过）：`abandoned` —— 调用方已超时返回，则晚到的项绝不补做用户动作（Invoke/SetValue 不能事后发生）；`alive_` —— 桥已析构，则闭包绝不解引用本桥。`wait_on_main` 入队后只碰局部的 promise/future，不再访问 `this`，故桥与等待方是两条独立时间线。`rtl_` 与 `listener_count_` 因 RPC 线程也会读/写而改为原子量。
 
