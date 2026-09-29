@@ -241,26 +241,27 @@ st = find_one(Atspi.Role.STATIC, '\u8ba2\u5355\u603b\u989d')
 res('pass' if st is not None else 'fail', 'static-found',
     'role=static name=\u8ba2\u5355\u603b\u989d')
 
-# ---- 事件段：注册精确类型监听 → LISTENING → GLib 事件环（本进程零查询，事件全靠桥推）----
+# ---- event phase: register exact listeners -> LISTENING -> GLib loop (events are pushed, never queried) ----
 from gi.repository import GLib
 
 events = []
 
-def on_evt(e, *user_data):  # GI 可能附带 user_data 形参，一律吃掉
+def on_evt(e, *user_data):  # GI may pass extra user_data args; swallow them all
     try:
         src = e.source
         if src is None:
             return
         a = safe(src.get_application, None)
         if a is None or safe(a.get_name, '') != app_name:
-            return  # 同总线其他应用的事件不入账
+            return  # events from other apps on the same bus are not recorded
         events.append((getattr(e, 'type', '') or '', safe(src.get_role_name, '?'),
                        safe(src.get_name, ''), int(getattr(e, 'detail1', 0) or 0)))
     except Exception as ex:
         info('evt-cb-error', repr(ex))
 
-# libatspi 匹配为全串相等（is_superset），故逐个注册带 minor 的完整类型；
-# announcement 的 minor 为空 ⇒ 类型串无尾冒号（上游 handle_event 拼装规则）。
+# libatspi matching is full-string equality (is_superset), so register each complete
+# type with its minor one by one; the announcement minor is empty => no trailing colon
+# in the type string (upstream handle_event assembly rule).
 listeners = []
 for t in ('focus:',
           'object:state-changed:focused',
@@ -278,7 +279,7 @@ for t in ('focus:',
 print('LISTENING', flush=True)
 
 loop = GLib.MainLoop()
-# GI 里 GLib.Timeout 是不透明类型（无类方法），用模块级 GLib.timeout_add；回调返 None=假 ⇒ 一次性
+# GLib.Timeout is opaque in GI (no class methods); use module-level GLib.timeout_add; returning None = one-shot.
 GLib.timeout_add(25000, lambda: loop.quit())
 
 def grab():
@@ -330,11 +331,14 @@ struct ProbeWidgets {
 
 /// @brief 一列带无障碍语义的控件（与 Win32 UIA 探针同族的三件套 + ReorderableList）。
 [[nodiscard]] auto build_probe_column() -> ProbeWidgets {
+    // CJK-LITERAL: cjk-fixture - the client asserts the push button by this exact Han Name
     auto button = aurora::Button{aurora::ButtonProps{.label = aurora::LocalizedString{"确定"}}};
     button.set_on_click([] { g_press_executed = true; });
+    // CJK-LITERAL: cjk-fixture - Han item labels pushed through the AT-SPI cache and children-changed events
     auto items = std::make_shared<aurora::State<std::vector<std::string>>>(
         std::vector<std::string>{"订单一", "订单二", "订单三"});
     // Node 以 shared_ptr 持有 widget：先建节点取裸指针，再拷进 Column（同一实例）。
+    // CJK-LITERAL: cjk-fixture - Han placeholder painted in the real entry window (manual inspection)
     aurora::Node entry_node{aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}}};
     aurora::Node list_node{aurora::ReorderableList<std::string>{
         items,
@@ -350,6 +354,7 @@ struct ProbeWidgets {
         std::move(button),
         entry_node,
         list_node,
+        // CJK-LITERAL: cjk-fixture - the client asserts the STATIC node by this exact Han Name
         aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"订单总额"}}},
     }};
     return probe;
@@ -589,6 +594,7 @@ auto main(int argc, char **argv) -> int {
         probe.entry->set_value("abcde");  // ……再由这次 dirty 携带 remove diff 出帧
         pump_ms(500);
         auto grow = probe.items->get();
+        // CJK-LITERAL: cjk-fixture - regrows the Han item list to push children-changed:add with a Han name
         grow.push_back("订单三");
         probe.items->set(grow);
         probe.list->invalidate();
@@ -596,6 +602,7 @@ auto main(int argc, char **argv) -> int {
         pump_ms(500);
         list_state("after-regrow");
         probe.entry->set_value("abcdef");
+        // CJK-LITERAL: cjk-fixture - Han announcement text carried by the object:announcement push channel
         aurora::announce_accessibility("测试播报", probe.entry);  // 播报直发，不经 diff
     }
 

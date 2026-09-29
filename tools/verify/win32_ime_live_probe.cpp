@@ -159,6 +159,7 @@ struct ProbeUi {
 };
 
 [[nodiscard]] auto build_ui() -> ProbeUi {
+    // CJK-LITERAL: cjk-fixture - Han placeholder painted in the live window as a visual baseline for IME typing
     auto input = std::make_shared<aurora::TextInput>(aurora::TextInputProps{.value = "", .placeholder = "请键入"});
     // Node 拷贝即共享（`shared_ptr<Widget>` 语义），故树内节点与本指针是同一个 TextInput。
     return ProbeUi{.root = aurora::Node{std::static_pointer_cast<aurora::Widget>(input)}, .input = std::move(input)};
@@ -193,7 +194,7 @@ auto enable_and_report_ime(HIMC himc) -> void {
     DWORD conv = 0;
     DWORD sent = 0;
     (void)ImmGetConversionStatus(himc, &conv, &sent);
-    emit(std::string("[INFO] IME 上下文：open=") + (ImmGetOpenStatus(himc) != FALSE ? "yes" : "no") +
+    emit(std::string("[INFO] IME context: open=") + (ImmGetOpenStatus(himc) != FALSE ? "yes" : "no") +
          " native=" + ((conv & IME_CMODE_NATIVE) != 0U ? "yes" : "no") + " conversion=" + std::to_string(conv));
 }
 
@@ -207,7 +208,7 @@ auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focuse
         ++failures;
         return;
     }
-    emit("[PASS] 焦点经 VK_TAB 落到 TextInput（普通 WM_CHAR 上屏，value=\"a\"）");
+    emit("[PASS] focus landed on TextInput via VK_TAB (plain WM_CHAR committed, value=\"a\")");
     report_caret("idle", input.composition_caret_bounds());
 
     // ---- ① 组合期吞字纪律（**不依赖任何 IME 配合**：只依赖桥的 START/END 状态机）----
@@ -216,46 +217,54 @@ auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focuse
     SendMessageW(hwnd, WM_IME_STARTCOMPOSITION, 0, 0);
     SendMessageW(hwnd, WM_IME_CHAR, static_cast<WPARAM>('b'), 0);
     SendMessageW(hwnd, WM_CHAR, static_cast<WPARAM>('c'), 0);
-    check(input.value() == "a", "组合期：WM_IME_CHAR 与残余 WM_CHAR 均被吞（无上屏重复）", failures);
+    check(input.value() == "a", "composing: WM_IME_CHAR and residual WM_CHAR swallowed (no double commit)", failures);
 
     // ---- ② 组合结束即恢复收字（抑制窗口有界，不会永久吞键）----
     SendMessageW(hwnd, WM_IME_ENDCOMPOSITION, 0, 0);
     SendMessageW(hwnd, WM_CHAR, static_cast<WPARAM>('d'), 0);
-    check(input.value() == "ad", "ENDCOMPOSITION 后普通 WM_CHAR 恢复上屏（value=\"ad\"）", failures);
+    check(input.value() == "ad", "plain WM_CHAR commits again after ENDCOMPOSITION (value=\"ad\")", failures);
 
     // ---- ③ preedit / 上屏链路：需往 IME 上下文注入组合串，环境相关（见下方说明）----
     HIMC himc = ImmGetContext(hwnd);
     if (himc == nullptr) {
-        skip("无 IME 上下文 ⇒ preedit/上屏 断言交由 --interactive 人工段");
+        skip("no IME context -> preedit/commit assertions deferred to the --interactive manual section");
         return;
     }
     enable_and_report_ime(himc);
+    // CJK-LITERAL: cjk-fixture - IME composition must be CJK to exercise the preedit path
     const std::u16string comp = to_utf16("你好");
     // Win10/11 的 TSF 型 IME（微软拼音等）不接受第三方**写入**上下文组合串（`SCS_SETSTR` 返回 FALSE
     // 且LastError 置 0），故本项只能尽力而为；被拒时 preedit/上屏 的核对落在人工段。
     if (!set_comp_string(himc, GCS_COMPSTR, comp) || !set_caret(himc, 1)) {
-        skip("ImmSetCompositionStringW 被拒（本机 IME 为 TSF 型，不容外部写组合串）⇒ preedit/上屏 交 --interactive");
+        skip(
+            "ImmSetCompositionStringW rejected (this machine's IME is TSF-based and refuses external "
+            "composition-string writes) -> preedit/commit checks move to --interactive");
         ImmReleaseContext(hwnd, himc);
         return;
     }
     SendMessageW(hwnd, WM_IME_COMPOSITION, 0, static_cast<LPARAM>(GCS_COMPSTR | GCS_CURSORPOS));
-    check(input.is_composing(), "组合期：TextInput 进入组合态（preedit 可见）", failures);
-    check(input.preedit() == "你好", "组合期：preedit 为 UTF-8「你好」（GCS_COMPSTR 读回）", failures);
+    check(input.is_composing(), "composing: TextInput entered the composing state (preedit visible)", failures);
+    // CJK-LITERAL: cjk-fixture - compares preedit against the injected Han string read back via GCS_COMPSTR
+    check(input.preedit() == "你好", "composing: preedit is the injected UTF-8 Han string (GCS_COMPSTR)", failures);
     // 「你好」皆 BMP：UTF-16 单元下标 1 == 码点下标 1（非 BMP 的夹紧由单测覆盖）。
-    check(input.composition_cursor() == 1, "组合期：光标折算为码点下标 1", failures);
-    check(input.value() == "ad", "组合期：value() 不含 preedit（数据模型保持干净）", failures);
+    check(input.composition_cursor() == 1, "composing: caret mapped to code-point index 1", failures);
+    check(input.value() == "ad", "composing: value() excludes the preedit (data model stays clean)", failures);
     report_caret("composing", input.composition_caret_bounds());
-    check(input.composition_caret_bounds().size.height > 0.0F, "候选窗定位盒有高度（几何链路通）", failures);
+    check(input.composition_caret_bounds().size.height > 0.0F, "candidate bounds box has height (geometry chain works)",
+          failures);
 
     // ---- ④ 上屏：GCS_RESULTSTR 单通道落字，preedit 撤下 ----
     // 真实 IME 上屏时组合串已随结果清空，故先清 `GCS_COMPSTR` 再送结果。
     (void)set_comp_string(himc, GCS_COMPSTR, {});
     if (!set_comp_string(himc, GCS_RESULTSTR, comp)) {
-        skip("GCS_RESULTSTR 注入被拒 ⇒ 上屏断言交由 --interactive 人工段（选字后应得 \"ad你好\"）");
+        skip(
+            "GCS_RESULTSTR injection rejected -> commit assertions deferred to the --interactive manual "
+            "section (picking a candidate should commit \"ad\" plus the two injected Han chars)");
     } else {
         SendMessageW(hwnd, WM_IME_COMPOSITION, 0, static_cast<LPARAM>(GCS_RESULTSTR | GCS_COMPSTR | GCS_CURSORPOS));
-        check(input.value() == "ad你好", "上屏：committed 文本经组合事件单通道落入 value", failures);
-        check(!input.is_composing(), "上屏：preedit 清空（无残留下划线）", failures);
+        // CJK-LITERAL: cjk-fixture - expected value is the committed injection of "ad" + the Han string
+        check(input.value() == "ad你好", "commit: committed text lands in value via one composition channel", failures);
+        check(!input.is_composing(), "commit: preedit cleared (no leftover underline)", failures);
     }
 
     // ---- ⑤ 失焦取消：桥向 IME 发 CPS_CANCEL。取消由 IME 侧执行、环境相关 ⇒ 只呈现不判负 ----
@@ -265,8 +274,8 @@ auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focuse
         HIMC after = ImmGetContext(hwnd);
         const bool cleared = comp_string_of(after).empty();
         ImmReleaseContext(hwnd, after);
-        emit(std::string("[INFO] 失焦后 IME 上下文组合串已清空 = ") + (cleared ? "yes" : "no") +
-             "（本库只投递 CPS_CANCEL，取消动作由 IME 执行）");
+        emit(std::string("[INFO] IME context composition string cleared after focus loss = ") +
+             (cleared ? "yes" : "no") + " (this library only posts CPS_CANCEL; the IME performs the cancellation)");
     }
 
     ImmReleaseContext(hwnd, himc);
@@ -282,7 +291,7 @@ auto main(int argc, char **argv) -> int {
         return cli.exit_code;
     }
     const bool interactive = cli.arguments->flag("interactive");
-    emit("==== Win32 IMM32 输入法桥 真机验收 ====");
+    emit("==== Win32 IMM32 input-method bridge live acceptance ====");
 
     const ProbeUi ui = build_ui();
     auto made = aurora::create_native_window(
@@ -322,9 +331,13 @@ auto main(int argc, char **argv) -> int {
                 app.quit();
             } else {
                 emit("");
-                emit("---- 人工段：请用真实输入法（微软拼音/五笔…）在窗口内输入「你好世界」 ----");
-                emit("期望：preedit 带下划线更新 → 候选窗贴在插入点旁 → 选字只上一次屏 → Esc 取消无残留");
-                emit("（本段无自动判定；关闭窗口即退出）");
+                emit(
+                    "---- Manual section: with a real IME (Microsoft Pinyin/Wubi, ...) type the Han phrase for "
+                    "'hello world' into the window (pinyin: nihao shijie) ----");
+                emit(
+                    "Expect: preedit updates with an underline -> candidate window hugs the insertion point -> "
+                    "a picked candidate commits exactly once -> Esc cancels with no residue");
+                emit("(no automated verdict in this section; closing the window exits)");
             }
         }
         if (interactive) {
@@ -335,7 +348,9 @@ auto main(int argc, char **argv) -> int {
 
     if (!interactive) {
         emit("");
-        emit("自动段结束。要核对真实输入法（候选窗位置 / 选字上屏），请加 --interactive 重跑。");
+        emit(
+            "Automated section done. To verify against a real IME (candidate window position / commit-on-pick), "
+            "rerun with --interactive.");
     }
 
     if (failures > 0) {

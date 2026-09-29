@@ -117,7 +117,7 @@ def main():
     warnings = []
     # Matches wording like "188 standalone executable tests" (digits + standalone executable tests).
     # The pattern matches the Chinese phrase still used in CHANGELOG.json prose, e.g. "188 个独立可执行测试".
-    for m in re.finditer(r"(\d+)\s*个独立可执行测试", changelog_text):
+    for m in re.finditer(r"(\d+)\s*个独立可执行测试", changelog_text):  # CJK-LITERAL: regex-semantic - matches Chinese prose in CHANGELOG.json wording
         stated = int(m.group(1))
         actual = count_test_sources(root)
         if stated != actual:

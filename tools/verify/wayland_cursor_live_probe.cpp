@@ -105,19 +105,19 @@ auto main(int argc, char **argv) -> int {
     }
     const bool interactive = cli.arguments->flag("interactive");
     if (const char *wdpy = std::getenv("WAYLAND_DISPLAY"); wdpy == nullptr || *wdpy == '\0') {
-        emit("[SKIP] 无 WAYLAND_DISPLAY 环境变量（无 Wayland 合成器），Wayland 光标探针无法运行");
+        emit("[SKIP] WAYLAND_DISPLAY is not set (no Wayland compositor); the Wayland cursor probe cannot run");
         return 2;
     }
 
     aurora::WaylandSurface surface(640, 420, "aurora-verify-wayland-cursor");
     if (!surface.is_available()) {
-        AURORA_LOG_ERROR("verify", "WaylandSurface unavailable（合成器连接失败或缺 compositor/shm/xdg_wm_base）");
+        AURORA_LOG_ERROR("verify", "WaylandSurface unavailable (compositor connect failed or shm/xdg_wm_base missing)");
         return 2;
     }
     // 先出帧：xdg_toplevel 只有带缓冲 commit 后才会被合成器视为 mapped，未映射不会收到 enter。
     auto frame_out = surface.begin_frame(640, 420);
     if (!frame_out) {
-        AURORA_LOG_ERROR("verify", "begin_frame 失败，无法让窗口进入 mapped 态");
+        AURORA_LOG_ERROR("verify", "begin_frame failed, the window cannot reach the mapped state");
         return 2;
     }
     (void)surface.present();
@@ -156,21 +156,21 @@ auto main(int argc, char **argv) -> int {
     }
     emit("WAYLAND_DISPLAY=" +
          std::string(std::getenv("WAYLAND_DISPLAY") != nullptr ? std::getenv("WAYLAND_DISPLAY") : "") +
-         "，scale=" + aurora_verify::format_uint(static_cast<unsigned>(surface.scale_factor())) +
-         "，落点策略=" + aurora_verify::format_int(strategy) +
-         "，窗口尺寸=" + aurora_verify::format_int(static_cast<long long>(surface.size().width)) + "x" +
+         ", scale=" + aurora_verify::format_uint(static_cast<unsigned>(surface.scale_factor())) +
+         ", pointer landing strategy=" + aurora_verify::format_int(strategy) +
+         ", window size=" + aurora_verify::format_int(static_cast<long long>(surface.size().width)) + "x" +
          aurora_verify::format_int(static_cast<long long>(surface.size().height)) +
-         "，累计鼠标事件=" + aurora_verify::format_int(static_cast<long long>(mouse_events)));
+         ", mouse events so far=" + aurora_verify::format_int(static_cast<long long>(mouse_events)));
     if (!entered) {
         AURORA_LOG_ERROR("verify",
-                         "拿不到 wl_pointer.enter：最大化与全屏两级铺满后指针仍未落入本表面"
-                         "（累计鼠标事件 " +
+                         "no wl_pointer.enter: after both maximize and fullscreen the pointer still never entered "
+                         "this surface (mouse events so far " +
                              aurora_verify::format_int(static_cast<long long>(mouse_events)) +
-                             " 条；0 条即本会话根本没有指针设备）。无合法 serial 可供 "
-                             "wl_pointer.set_cursor，判据无从执行，须人工在真实桌面复核。");
+                             "; 0 means this session has no pointer device at all). No valid serial is available for "
+                             "wl_pointer.set_cursor, so the criteria cannot run and need a manual desktop review.");
         return 3;
     }
-    check(surface.cursor_state().pointer_entered, "已取得 wl_pointer.enter（set_cursor 有合法 serial）");
+    check(surface.cursor_state().pointer_entered, "wl_pointer.enter received (set_cursor has a valid serial)");
 
     // 首帧 enter 时后端会自动补下发一次（ptr_enter 内 force 重下发），提交计数含那一次。
     // 基线前先切到一个必与被测形状不同的形状，好让下面 11 形状逐个 +1 的判据成立
@@ -178,7 +178,8 @@ auto main(int argc, char **argv) -> int {
     surface.set_cursor(aurora::CursorShape::Crosshair);
     surface.poll_platform_events();
     const int baseline = surface.cursor_state().commits;
-    check(baseline >= 2, "enter 自动提交 + 基线切形状各一次（commits=" + aurora_verify::format_int(baseline) + "）");
+    check(baseline >= 2,
+          "enter auto commit + baseline switch, one each (commits=" + aurora_verify::format_int(baseline) + ")");
 
     // ---- 11 形状逐个下发 + 逐项读回 ----
     emit("");
@@ -221,12 +222,12 @@ auto main(int argc, char **argv) -> int {
         buffers.insert(st.buffer_id);
         names.insert(st.resolved_name);
     }
-    check(all_applied, "11/11 形状均提交到 cursor 表面（cursor_state().applied 恒真）");
-    check(all_named, "11/11 形状的主题命中名逐字等于 cursor_rfc_name（未走 default/left_ptr 回退）");
-    check(all_geom_ok, "11/11 形状的位图尺寸 > 0 且热点落在位图内（缩放折算无误）");
-    check(all_single_commit, "11/11 形状各自恰好提交一次（commits 逐形状 +1，无重复提交）");
+    check(all_applied, "all 11/11 shapes committed to the cursor surface (cursor_state().applied always true)");
+    check(all_named, "all 11/11 resolved names equal cursor_rfc_name verbatim (no default/left_ptr fallback)");
+    check(all_geom_ok, "all 11/11 bitmaps sized > 0 with the hotspot inside them (scaling converted correctly)");
+    check(all_single_commit, "all 11/11 shapes committed exactly once (commits +1 per shape, no duplicates)");
     if (names.empty() || *names.begin() == "") {
-        AURORA_LOG_ERROR("verify", "光标主题不可用（无 resolved name），判据无从执行");
+        AURORA_LOG_ERROR("verify", "cursor theme unavailable (no resolved name), the criteria cannot run");
         return 4;
     }
 
@@ -235,25 +236,25 @@ auto main(int argc, char **argv) -> int {
     const int c1 = surface.cursor_state().commits;
     surface.set_cursor(aurora::CursorShape::IBeam);
     const int c2 = surface.cursor_state().commits;
-    check(c1 == c2, "同形状重复下发幂等（commits " + aurora_verify::format_int(c1) + " → " +
-                        aurora_verify::format_int(c2) + "）");
+    check(c1 == c2, "reissuing the same shape is idempotent (commits " + aurora_verify::format_int(c1) + " → " +
+                        aurora_verify::format_int(c2) + ")");
 
     // ---- 主题尺寸按设备像素加载 ----
     const auto st = surface.cursor_state();
     check(st.theme_size == 24 * static_cast<int>(surface.scale_factor()),
-          "主题加载尺寸 == 24 × scale（实得 " + aurora_verify::format_int(st.theme_size) + "）");
+          "theme load size == 24 x scale (got " + aurora_verify::format_int(st.theme_size) + ")");
 
     // ---- 位图互异（Adwaita 的 default/move 同图，允许一处重合）----
     check(buffers.size() >= static_cast<std::size_t>(total) - 1,
-          "提交的互异光标位图 >= 10 / 11（实得 " + aurora_verify::format_uint(buffers.size()) +
-              "；判据留一处余量：某些主题 default 与 move 的光标文件字节相同）");
+          "distinct cursor bitmaps committed >= 10 / 11 (got " + aurora_verify::format_uint(buffers.size()) +
+              "; the criterion allows one collision: some themes ship identical bytes for default and move)");
 
     // ---- 人工段 ----
     if (interactive) {
-        emit("\n[人工段] 窗口常驻，每 1.2s 轮换一个光标形状。请把指针停在窗口内，目视确认屏幕上");
-        emit("的光标确实随之一一改变（text/pointer/ns-resize/…/fleur 等），并核对热点位置正确");
-        emit("（例如 IBeam 的竖线正对指针尖、缩放箭头正对边角）。关闭窗口退出。");
-        emit("注意：本探针的自动段只证明「提交了什么」，屏幕上真实显示的光标只能由本段人眼确认。");
+        emit("\n[Manual] The window stays open and cycles one cursor shape every 1.2s. Park the pointer inside the");
+        emit("window and watch the drawn cursor change shape one by one (text/pointer/ns-resize/.../fleur etc.),");
+        emit("and check the hotspot (IBeam bar on the tip, resize arrow on the corner); close the window to exit.");
+        emit("Note: the automated section only proves what was committed; the real on-screen cursor needs your eyes.");
         int idx = 0;
         while (!surface.should_close()) {
             surface.set_cursor(static_cast<aurora::CursorShape>(idx % total));
@@ -264,17 +265,19 @@ auto main(int argc, char **argv) -> int {
             ++idx;
         }
     } else {
-        emit("\n提示：加 --interactive 进入常驻窗口人工目视段（屏幕上真实光标只能由人眼确认）。");
+        emit(
+            "\nHint: pass --interactive for the resident-window visual check (only your eyes can confirm the real "
+            "on-screen cursor).");
     }
 
-    emit(std::string("\n结果：") + (failures == 0 ? "ALL PASS" : std::to_string(failures) + " FAILURES"));
+    emit(std::string("\nResult: ") + (failures == 0 ? "ALL PASS" : std::to_string(failures) + " FAILURES"));
     return failures == 0 ? 0 : 1;
 }
 
 #else
 
 auto main(int /*argc*/, char ** /*argv*/) -> int {
-    emit("[SKIP] 本探针仅在 Linux(非 Android) + AURORA_BACKEND_WAYLAND=ON 构建下有效");
+    emit("[SKIP] this probe only applies to a Linux (non-Android) build with AURORA_BACKEND_WAYLAND=ON");
     return 2;
 }
 

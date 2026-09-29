@@ -99,8 +99,9 @@ def check_file(rel, lines, violations, stats):
         for m in OPEN_PAREN_RE.finditer(line):
             if ")" not in line[m.end():]:
                 violations.append(
-                    f"{rel}:{i + 1}: [规则3] {m.group(0).strip()} 的检查表未在本行闭合（跨行写法）——"
-                    "clang-tidy 会解析成空列表，等于豁免**全部**检查；把整张表收拢到同一物理行")
+                    f"{rel}:{i + 1}: [Rule 3] {m.group(0).strip()} check list is not closed on this "
+                    "line (multi-line form); clang-tidy parses it as an empty list, which exempts "
+                    "**all** checks; collapse the whole list onto one physical line")
                 break
         comment_only = is_comment_line(line)
         body = comment_punct_end(line) if comment_only else None
@@ -109,13 +110,14 @@ def check_file(rel, lines, violations, stats):
         if comment_only:
             if body is None or toks[0].start() != body:
                 violations.append(
-                    f"{rel}:{i + 1}: [规则2] 注释散文里抄了 NOLINT 令牌（{toks[0].group(0).strip()}"
-                    "），它会对下一物理行形成全量豁免；指代豁免请写「紧邻式/区间式豁免」")
+                    f"{rel}:{i + 1}: [Rule 2] the comment prose copies a NOLINT token "
+                    f"({toks[0].group(0).strip()}); it forms a blanket exemption on the next "
+                    "physical line; to name an exemption write 'adjacent/range-style exemption'")
                 continue
             if len(toks) > 1:
                 violations.append(
-                    f"{rel}:{i + 1}: [规则2] 一条注释里出现多个 NOLINT 令牌，第二个起会被解析成"
-                    "独立指令；理由文字勿再抄令牌")
+                    f"{rel}:{i + 1}: [Rule 2] one comment contains multiple NOLINT tokens; from the "
+                    "second on they are parsed as independent directives; do not restate tokens in the reason")
                 continue
         else:
             # 只有 NOLINTNEXTLINE 挂在代码行尾才是错位：它的作用范围是**下一行**。
@@ -123,8 +125,9 @@ def check_file(rel, lines, violations, stats):
             nxtline = [t for t in toks if t.group(0).strip().startswith("NOLINTNEXTLINE")]
             if nxtline:
                 violations.append(
-                    f"{rel}:{i + 1}: [规则1] {nxtline[0].group(0).strip()} 挂在代码行尾，它作用于**下一行**"
-                    "而非本行；本行豁免改用 NOLINT(...)，下一行豁免请把指令独占一行上移")
+                    f"{rel}:{i + 1}: [Rule 1] {nxtline[0].group(0).strip()} hangs at the end of a code "
+                    "line; it applies to the **next line**, not this one; to exempt this line use "
+                    "NOLINT(...), to exempt the next line keep the directive on its own line above")
                 continue
 
         kind = toks[0].group(0).strip()
@@ -134,21 +137,26 @@ def check_file(rel, lines, violations, stats):
             continue
         # --- 规则 1：NEXTLINE 与代码之间不得插入注释行 / 空行 ---
         if i + 1 >= len(lines):
-            violations.append(f"{rel}:{i + 1}: [规则1] NOLINTNEXTLINE 后已无代码行（文件/块尾），豁免落空")
+            violations.append(
+                f"{rel}:{i + 1}: [Rule 1] no code line follows NOLINTNEXTLINE (end of file/block); "
+                "the exemption is void")
             continue
         nxt = lines[i + 1]
         if nxt.strip() == "":
-            violations.append(f"{rel}:{i + 1}: [规则1] NOLINTNEXTLINE 与代码之间夹了空行，豁免落空")
+            violations.append(
+                f"{rel}:{i + 1}: [Rule 1] a blank line sits between NOLINTNEXTLINE and the code; "
+                "the exemption is void")
         elif is_comment_line(nxt):
             violations.append(
-                f"{rel}:{i + 1}: [规则1] NOLINTNEXTLINE 的下一物理行仍是注释（多为 clang-format 在 120 列"
-                "处折断的理由文字），豁免罩住了注释而非代码；把理由整段移到指令**之前**")
+                f"{rel}:{i + 1}: [Rule 1] the physical line after NOLINTNEXTLINE is still a comment "
+                "(often the reason text wrapped at 120 columns by clang-format); the exemption covers "
+                "the comment instead of the code; move the whole reason block to **before** the directive")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=None, help="Aurora repo root (default: two levels above this script)")
-    ap.add_argument("--verbose", action="store_true", help="逐条打印后再汇总")
+    ap.add_argument("--verbose", action="store_true", help="print each finding before the summary")
     args = ap.parse_args()
     root = args.root or repo_root_of(__file__)
 
@@ -172,13 +180,15 @@ def main():
                 check_file(rel, lines, violations, stats)
 
     if violations:
-        print("[FAIL] NOLINT 指令排版违规（CODING_STANDARDS.md §5.2 规则 1/2：豁免静默失效）：")
+        print("[FAIL] NOLINT directive layout violations (CODING_STANDARDS.md 5.2 rules 1/2: "
+              "exemptions silently void):")
         for v in violations:
             print(f"  {v}")
-        print(f"  共 {len(violations)} 处；合法例外须在该行或其上两行写 'LAYOUT_EXEMPT: <原因>'")
+        print(f"  {len(violations)} total; a legitimate exception must write "
+              "'LAYOUT_EXEMPT: <reason>' on that line or the two lines above")
         return 1
 
-    print(f"[PASS] {stats['directives']} 条 NOLINT 指令排版全部落在代码行上（扫描 {files_scanned} 文件）")
+    print(f"[PASS] all {stats['directives']} NOLINT directives land on code lines (scanned {files_scanned} files)")
     return 0
 
 

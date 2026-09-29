@@ -46,37 +46,39 @@ WHITELIST = {
     # 相关章节（测试原语、测试框架用法）须随新框架一并重写——现在打补丁会留下半吊子描述，
     # 故集中豁免；「守门」/「收束」阶段随文档同步逐项清理，届时本表应清空。
     ("R4", "codespec\\ARCHITECTURE.md", "backticked path missing: tests/aurora_test_main.cpp"):
-        "测试体系重写：旧 runner 入口已删",
+        "Test suite rewrite: legacy runner entry removed",
     ("R4", "codespec\\BUILD_OPTIONS.md", "backticked path missing: tests/integration/utest_dirty_clip_paint.cpp"):
-        "测试体系重写：旧用例已删",
+        "Test suite rewrite: legacy case deleted",
     ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/aurora_test_main.cpp"):
-        "测试体系重写：旧 runner 入口已删",
+        "Test suite rewrite: legacy runner entry removed",
     ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/aurora_test_harness.h"):
-        "测试体系重写：旧框架头已删，新框架位于 tests/framework/",
+        "Test suite rewrite: legacy framework header removed, new framework lives in tests/framework/",
     ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/unit/utest_offscreen.cpp"):
-        "测试体系重写：旧用例已删",
+        "Test suite rewrite: legacy case deleted",
     ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/test_default_construct.h"):
-        "测试体系重写：旧公共 fixture 已删",
+        "Test suite rewrite: legacy shared fixture removed",
     ("R4", "codespec\\CODING_STANDARDS.md", "backticked path missing: tests/integration/utest_default_construct.cpp"):
-        "测试体系重写：旧用例已删",
+        "Test suite rewrite: legacy case deleted",
     ("R4", "codespec\\GUIDELINE.md", "backticked path missing: include/aurora/test_helpers.h"):
-        "测试体系重写：test_helpers.h 已迁入 tests/support/",
+        "Test suite rewrite: test_helpers.h moved into tests/support/",
     ("R4", "codespec\\specification\\07-environment-modifier.md",
      "backticked path missing: tests/unit/utest_clip_rounded_background.cpp"):
-        "测试体系重写：旧用例已删",
+        "Test suite rewrite: legacy case deleted",
     ("R4", "codespec\\specification\\08-tooling.md", "backticked path missing: tests/unit/utest_serialization.cpp"):
-        "测试体系重写：旧用例已删",
+        "Test suite rewrite: legacy case deleted",
     ("R4", "codespec\\specification\\08-tooling.md", "backticked path missing: include/aurora/test_helpers.h"):
-        "测试体系重写：test_helpers.h 已迁入 tests/support/",
+        "Test suite rewrite: test_helpers.h moved into tests/support/",
     ("R4", "codespec\\specification\\08-tooling.md", "backticked path missing: tests/aurora_test_harness.h"):
-        "测试体系重写：旧框架头已删，新框架位于 tests/framework/",
+        "Test suite rewrite: legacy framework header removed, new framework lives in tests/framework/",
 }
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 PATH_RE = re.compile(r"`([^`\s]+)`")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# CJK-LITERAL: regex-semantic - the fullwidth enumeration comma is a heading separator in repo docs
 NUM_PREFIX_RE = re.compile(r"^(\d+(?:\.\d+)*)[\s、.]+")
+# CJK-LITERAL: regex-semantic - matches CJK numeral ordinals (first/chapter words) so they get rejected
 CJK_NUM_RE = re.compile(r"^[第卷][一二三四五六七八九十百千]+[章節节]|^[一二三四五六七八九十]+[、.]")
 PLACEHOLDER_RE = re.compile(r"[<>*{}]|\b(example|foo|bar|placeholder|your_|xxx)\b", re.IGNORECASE)
 
@@ -258,6 +260,7 @@ def check_spec_table(rel, lines, repo, problems):
         if not LINK_RE.search(cells[-1]):
             # 「本文 §N」is a legitimate in-document reference (the landing point lives in this
             # very file); accept it when the cited section actually exists here.
+            # CJK-LITERAL: regex-semantic - matches the in-document reference idiom written in Chinese
             self_ref = re.search(r"本文\s*§\s*([\d.]+)", cells[-1])
             if self_ref:
                 wanted = self_ref.group(1)
@@ -325,7 +328,7 @@ def main() -> int:
         print(f"  {rule} {rel}:{lineno}  {detail}")
     if len(remaining) > 60:
         print(f"  ... and {len(remaining) - 60} more")
-    print("\n  Fix the above, or add a justified entry to WHITELIST (存量豁免只用于既有问题).")
+    print("\n  Fix the above, or add a justified entry to WHITELIST (stock exemptions cover existing issues only).")
     return 1
 
 

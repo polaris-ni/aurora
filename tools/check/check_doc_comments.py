@@ -62,12 +62,15 @@ SKIP_DIR_PREFIX = "build"
 CMD_RE = re.compile(r"@\w+")
 BLOCK_CMD_RE = re.compile(r"^@(param|return|retval|note|warning|tparam|throws|exception|deprecated|see|details)\b")
 # DOC-R7：命令 → 该命令缺失参数时的说明。名字类命令先剥掉 [in] 方向与 <...> 约束再取名。
-NAME_ARG_CMDS = {"param": "形参名", "tparam": "模板形参名", "retval": "返回值名"}
-TEXT_ARG_CMDS = {"brief": "一句话说明", "example": "示例源文件名", "return": "返回值说明",
-                 "note": "内容", "warning": "内容", "see": "引用目标", "details": "详述文字"}
+NAME_ARG_CMDS = {"param": "parameter name", "tparam": "template parameter name",
+                 "retval": "return value name"}
+TEXT_ARG_CMDS = {"brief": "one-line description", "example": "sample source file name",
+                 "return": "return value description",
+                 "note": "content", "warning": "content",
+                 "see": "reference target", "details": "detailed text"}
 # @deprecated 的附加义务（§13.5.2）：替代路径与生效版本都得在同一行出现。
-DEPRECATED_PATH_RE = re.compile(r"改用|替换为|请用|改为|等价于|replac|\buse\s")
-DEPRECATED_VERSION_RE = re.compile(r"\d+\.\d+|\bsince\b|\bv\d|自\s*\d|起于\s*\d")
+DEPRECATED_PATH_RE = re.compile(r"改用|替换为|请用|改为|等价于|replac|\buse\s")  # CJK-LITERAL: regex-semantic
+DEPRECATED_VERSION_RE = re.compile(r"\d+\.\d+|\bsince\b|\bv\d|自\s*\d|起于\s*\d")  # CJK-LITERAL: regex-semantic
 BACKSLASH_RE = re.compile(r"^\\(brief|param|return|retval|note|tparam|see|code|endcode|warning|todo|details|ingroup|defgroup|addtogroup|deprecated|author|date|version|throws|exception)\b")
 BANNER_RE = re.compile(r"^[\s\-*=#_+·─━▌/.|]*$")
 COND_RE = re.compile(r"^\s*#\s*(if|ifdef|ifndef|else|elif|endif|pragma|include)\b")
@@ -849,7 +852,7 @@ class Checker:
         try:
             text = open(path, "r", encoding="utf-8").read()
         except (OSError, UnicodeDecodeError) as exc:
-            raise RuntimeError(f"无法读取 {path}: {exc}") from exc
+            raise RuntimeError(f"unable to read {path}: {exc}") from exc
         src = Source(rel, text)
         public_api = rel.startswith("include/")
         before = len(self.findings)
@@ -889,16 +892,17 @@ class Checker:
     def check_markers(self, src: Source) -> None:
         for note in src.masked:
             if note["kind"] == "block" and note.get("blockdoc"):
-                self.add("DOC-R1", src.rel, note["line"], "块文档注释（/** */、/*! */、/**< */）须改为 /// 或 ///<")
+                self.add("DOC-R1", src.rel, note["line"],
+                         "block doc comment (/** */, /*! */, /**< */) must be changed to /// or ///<")
             elif note["kind"] == "doc_bad":
-                self.add("DOC-R1", src.rel, note["line"], "//! 文档注释须改为 ///")
+                self.add("DOC-R1", src.rel, note["line"], "//! doc comment must be changed to ///")
             elif note["kind"] == "doc":
                 body = note["text"].lstrip("/").lstrip()
                 if BACKSLASH_RE.match(body):
-                    self.add("DOC-R2", src.rel, note["line"], r"命令前缀 \cmd 须改为 @cmd")
+                    self.add("DOC-R2", src.rel, note["line"], r"command prefix \cmd must be changed to @cmd")
         for idx, raw in enumerate(src.lines, start=1):
             if "/**<" in raw or "/*!<" in raw:
-                self.add("DOC-R1", src.rel, idx, "尾注 /**< */ 须改为 ///<")
+                self.add("DOC-R1", src.rel, idx, "trailing note /**< */ must be changed to ///<")
 
     # ---- DOC-R3 / DOC-R6 ----
     def check_blocks(self, src: Source, public_api: bool) -> None:
@@ -916,7 +920,8 @@ class Checker:
                 prev_head = src.lines[above].strip()
                 if TPL_HDR_RE.match(prev_head) or REQUIRES_HDR_RE.match(prev_head):
                     self.add("DOC-R3", src.rel, start,
-                             "/// 块夹在 template/requires 头与声明之间，须整体上移到模板头之前")
+                             "/// block sits between a template/requires header and its declaration; "
+                             "move the whole block above the header")
                     continue
             nxt = src.next_code(end)
             attached = None
@@ -940,11 +945,15 @@ class Checker:
             # `auto res = create_window(...)` 会被 VAR_RE 认成声明，于是贴在它上面的 /// 块看似「紧邻」
             # 而躲过 DOC-R3，实际是把 API 文档写进了实现体内，Doxygen 只会报 @param 与签名不符。
             if attached is not None and nxt is not None and any(a <= nxt + 1 <= b for a, b in bodies):
-                self.add("DOC-R3", src.rel, start, "/// 位于函数体内（紧邻的是语句或局部声明），须降级为 //")
+                self.add("DOC-R3", src.rel, start,
+                         "/// block is inside a function body (next line is a statement or local "
+                         "declaration); downgrade to //")
                 continue
             if attached is None:
                 if "@file" not in text:
-                    self.add("DOC-R3", src.rel, start, "/// 未紧邻可文档化声明，实现叙述须降级为 //")
+                    self.add("DOC-R3", src.rel, start,
+                             "/// block is not adjacent to a documentable declaration; implementation "
+                             "narrative must become //")
                 continue
             if not public_api:
                 continue
@@ -979,7 +988,7 @@ class Checker:
         bodies = [n["text"].lstrip("/").strip() for n in block]
         brief_idx = [i for i, b in enumerate(bodies) if b.startswith("@brief")]
         if brief_idx and brief_idx[0] != 0:
-            self.add("DOC-R6", src.rel, block[brief_idx[0]]["line"], "@brief 须位于文档注释首行")
+            self.add("DOC-R6", src.rel, block[brief_idx[0]]["line"], "@brief must be the first line of the doc comment")
         seen_cmd = False
         blank_after_cmd = False
         for i, note in enumerate(block):
@@ -991,7 +1000,8 @@ class Checker:
                 blank_after_cmd = seen_cmd
             elif blank_after_cmd:
                 self.add("DOC-R6", src.rel, note["line"],
-                         "命令行之后不得另起散文段落（须前移到详述或并入 @note；跨行续写请紧贴上一行）")
+                         "no prose paragraph may start after a command line (move it into @details "
+                         "or @note; multi-line continuations must hug the previous line)")
 
     # ---- DOC-R7 ----
     def check_command_usage(self, src: Source, block: list[dict]) -> None:
@@ -1011,7 +1021,8 @@ class Checker:
             if cmd == "deprecated":
                 if not (DEPRECATED_PATH_RE.search(rest) and DEPRECATED_VERSION_RE.search(rest)):
                     self.add("DOC-R7", src.rel, note["line"],
-                             "@deprecated 须在同一行给出替代路径与生效版本（§13.5.2）")
+                             "@deprecated must give the replacement path and the effective version "
+                             "on the same line (Section 13.5.2)")
                 continue
             if cmd in NAME_ARG_CMDS:
                 rest = re.sub(r"^\[[^\]]*\]", "", rest).strip()
@@ -1025,7 +1036,7 @@ class Checker:
                 hit = os.path.isfile(os.path.join(self.root, arg)) or os.path.isfile(
                     os.path.join(self.root, "examples", "demos", os.path.basename(arg)))
                 if not hit:
-                    self.add("DOC-R7", src.rel, note["line"], f"@example 指向的示例文件不存在: {arg}")
+                    self.add("DOC-R7", src.rel, note["line"], f"@example target file does not exist: {arg}")
                 continue
             if rest:
                 continue
@@ -1033,7 +1044,7 @@ class Checker:
             if nxt and not nxt.startswith("@") and not BLOCK_CMD_RE.match(nxt):
                 continue  # 命令行的跨行续写：描述在紧随的一行里
             need = NAME_ARG_CMDS.get(cmd) or TEXT_ARG_CMDS.get(cmd)
-            self.add("DOC-R7", src.rel, note["line"], f"@{cmd} 缺{need}")
+            self.add("DOC-R7", src.rel, note["line"], f"@{cmd} missing {need}")
 
     # ---- DOC-R8 ----
     def check_body_notes(self, src: Source) -> None:
@@ -1052,7 +1063,8 @@ class Checker:
                 continue
             if any(a <= note["line"] <= b for a, b in spans):
                 self.add("DOC-R8", src.rel, note["line"],
-                         "函数体内的语句/局部声明不得用 ///< 尾注（非成员，不进文档；降级为 // 或删除）")
+                         "statements/local declarations inside a function body must not use ///< "
+                         "trailing notes (not members, not documented; downgrade to // or delete)")
                 continue
             code = src.code_lines[note["line"] - 1][:note["col"] - 1].strip()
             if not code:
@@ -1060,11 +1072,12 @@ class Checker:
             head = first_member(strip_attrs(code))
             if (looks_like_function(head) and not has_value_initializer(head)
                     and (FUNC_RE.match(strip_attrs(code)) or OPER_RE.match(strip_attrs(code)))):
-                self.add("DOC-R8", src.rel, note["line"], "函数/运算符不得用 ///< 尾注，须改为上方 /// 文档块")
+                self.add("DOC-R8", src.rel, note["line"], "Function/operator must not use ///<; use a /// block above")
                 continue
             if top_level_commas(head) >= 2:
                 self.add("DOC-R8", src.rel, note["line"],
-                         "同一行的多个声明不得共用一条 ///<（Doxygen 只把尾注给其中一个），须各自成行")
+                         "multiple declarations on one line must not share a ///< (Doxygen attaches "
+                         "it to only one); give each its own line")
 
     # ---- DOC-R4 / DOC-R5 ----
     def check_declarations(self, src: Source) -> None:
@@ -1099,18 +1112,18 @@ class Checker:
                 if self.trailing_doc(src, idx, _end):
                     continue        # 成员尾注 ///< 即其文档，不再要求上方注释块
                 if TYPE_RE.match(decl):
-                    self.add("DOC-R5", src.rel, line, "公共类型声明缺文档注释")
+                    self.add("DOC-R5", src.rel, line, "public type declaration missing doc comment")
                 elif is_func:
-                    self.add("DOC-R5", src.rel, line, "公共函数声明缺文档注释")
+                    self.add("DOC-R5", src.rel, line, "public function declaration missing doc comment")
                 elif ALIAS_RE.match(decl):
-                    self.add("DOC-R5", src.rel, line, "公共类型别名缺文档注释")
+                    self.add("DOC-R5", src.rel, line, "public type alias missing doc comment")
                 elif VAR_RE.match(decl):
-                    self.add("DOC-R5", src.rel, line, "公共数据成员缺文档注释")
+                    self.add("DOC-R5", src.rel, line, "public data member missing doc comment")
                 continue
             kind, start, end, text = run
             if kind in ("plain", "block_plain"):
                 if doc_required:
-                    self.add("DOC-R4", src.rel, start, "紧邻公共声明的 // 注释须升级为 ///")
+                    self.add("DOC-R4", src.rel, start, "// comment adjacent to a public declaration must become ///")
                 continue
             if kind not in ("doc", "doc_bad", "blockdoc"):
                 continue
@@ -1130,7 +1143,7 @@ class Checker:
                 extra = [d for d in docd if d not in names]
                 if extra:
                     self.add("DOC-R7", src.rel, start,
-                             "@param 名不在签名形参表中: " + ", ".join(extra))
+                             "@param name not in the signature parameter list: " + ", ".join(extra))
                 # 同一形参写两条 @param：Doxygen 报 "argument X ... has multiple @param documentation
                 # sections" 与 "too many @param commands. Found N while function has M parameter"，
                 # 文档站只呈现其中一条，另一条无声丢失；改名残留（旧名 + 新名各写一份）也落在这里。
@@ -1138,19 +1151,19 @@ class Checker:
                 dup = [d for d in dict.fromkeys(allp) if allp.count(d) > 1]
                 if dup:
                     self.add("DOC-R7", src.rel, start,
-                             "@param 重复文档同一形参: " + ", ".join(dup))
+                             "@param documents the same parameter more than once: " + ", ".join(dup))
             tparams = template_params(strip_attrs(decl))
             if tparams:
                 doc_tp = documented_tparams(text)
                 extra_tp = [d for d in doc_tp if d not in tparams]
                 if extra_tp:
                     self.add("DOC-R7", src.rel, start,
-                             "@tparam 名不在模板形参表中: " + ", ".join(extra_tp))
+                             "@tparam name not in the template parameter list: " + ", ".join(extra_tp))
                 all_tp = documented_tparams(text, dedupe=False)
                 dup_tp = [d for d in dict.fromkeys(all_tp) if all_tp.count(d) > 1]
                 if dup_tp:
                     self.add("DOC-R7", src.rel, start,
-                             "@tparam 重复文档同一模板形参: " + ", ".join(dup_tp))
+                             "@tparam documents the same template parameter more than once: " + ", ".join(dup_tp))
             # 同一矩阵的「不适用」侧：void 函数与构造/析构不写 @return。写了不是冗余而是误导——
             # Doxygen 会把它渲染成 Returns 段（并报 "found documented return type ... that does not
             # return anything"），读者据此以为存在返回通道。返回类型只看挂注释的那一个成员，
@@ -1158,16 +1171,16 @@ class Checker:
             _n0, m_void, m_ctor = parse_params(head_member)
             if is_func and (m_void or m_ctor) and "@return" in text:
                 self.add("DOC-R7", src.rel, start,
-                         "void / 构造析构不应写 @return（§13.5.2「不适用」列）")
+                         "void / ctor-dtor must not document @return (Section 13.5.2 'Not applicable' column)")
             if not enforce:
                 continue
             if "@brief" not in text:
-                self.add("DOC-R5", src.rel, start, "文档注释缺 @brief")
+                self.add("DOC-R5", src.rel, start, "doc comment missing @brief")
             missing = [p for p in names if not has_param(text, p)]
             if missing:
-                self.add("DOC-R5", src.rel, start, "缺 @param: " + ", ".join(missing))
+                self.add("DOC-R5", src.rel, start, "missing @param: " + ", ".join(missing))
             if is_func and not void and not ctor and "@return" not in text and "@tparam" not in text:
-                self.add("DOC-R5", src.rel, start, "缺 @return")
+                self.add("DOC-R5", src.rel, start, "missing @return")
 
     @staticmethod
     def trailing_doc(src: Source, start_idx: int, end_idx: int) -> bool:
@@ -1194,7 +1207,7 @@ class Checker:
             if tparams and run:
                 missing = [t for t in tparams if not has_tparam(text, t)]
                 if missing:
-                    self.add("DOC-R5", src.rel, run[1], "缺 @tparam: " + ", ".join(missing))
+                    self.add("DOC-R5", src.rel, run[1], "missing @tparam: " + ", ".join(missing))
             # 枚举体内每个枚举项须有一行说明
             if ENUM_RE.match(stripped):
                 self.check_enum_items(src, idx, end)
@@ -1202,7 +1215,9 @@ class Checker:
             mm = MACRO_RE.match(stripped)
             if mm and "(" not in mm.group(1) and not mm.group(1).endswith("_H"):
                 if run is None and not self.trailing_doc(src, idx, end):
-                    self.add("DOC-R5", src.rel, idx + 1, "公共常量宏缺一行说明（///< 尾注或紧邻 /// 块）")
+                    self.add("DOC-R5", src.rel, idx + 1,
+                             "public constant macro missing a one-line note "
+                             "(///< trailing note or adjacent /// block)")
 
     def check_enum_items(self, src: Source, decl_idx: int, decl_end: int) -> None:
         """枚举体内每个具名枚举项须有 ///< 尾注或紧邻 /// 块。"""
@@ -1224,7 +1239,7 @@ class Checker:
                 continue
             if self.trailing_doc(src, ln0, ln0) or src.prev_comment_run(ln0) is not None:
                 continue
-            self.add("DOC-R5", src.rel, ln0 + 1, f"枚举项 {item.group(1)} 缺一行说明")
+            self.add("DOC-R5", src.rel, ln0 + 1, f"enum item {item.group(1)} missing a one-line note")
 
     def check_file_level(self, src: Source) -> None:
         """include/ 头文件须有文件级 /// 块且含 @brief。"""
@@ -1233,7 +1248,7 @@ class Checker:
         head = "\n".join(src.lines[:80])
         if re.search(r"^///\s*@(?:brief|file)\b", head, re.M):
             return
-        self.add("DOC-R5", src.rel, 1, "头文件缺文件级 /// 注释块（须含 @brief）")
+        self.add("DOC-R5", src.rel, 1, "header missing the file-level /// block (must include @brief)")
 
     def run(self, roots: list[str]) -> None:
         for base in roots:
@@ -1252,13 +1267,13 @@ def report(findings: list[dict], limit: int) -> None:
     by_dir: dict[str, Counter] = defaultdict(Counter)
     for f in findings:
         by_dir[f["file"].split("/")[0]][f["rule"]] += 1
-    print("=== Doxygen 注释门禁 ===")
+    print("=== Doxygen doc-comment gate ===")
     for rule in sorted(by_rule):
         print(f"  {rule:8s} {by_rule[rule]:6d}")
-    print("--- 分目录 ---")
+    print("--- by directory ---")
     for d in sorted(by_dir):
         print(f"  {d:10s} " + "  ".join(f"{k}={v}" for k, v in sorted(by_dir[d].items())))
-    print(f"总计 {len(findings)} 条")
+    print(f"Total {len(findings)} finding(s)")
     for f in findings[:limit]:
         print(f"  {f['file']}:{f['line']}: [{f['rule']}] {f['msg']}")
 
@@ -1268,17 +1283,17 @@ def main(argv: list[str]) -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:  # noqa: BLE001
         pass
-    ap = argparse.ArgumentParser(description="Doxygen 文档注释规范门禁")
+    ap = argparse.ArgumentParser(description="Doxygen doc-comment compliance gate")
     ap.add_argument("--root", default=".")
     ap.add_argument("--roots", default=",".join(DEFAULT_ROOTS))
-    ap.add_argument("--rules", default="", help="仅检查这些规则（逗号分隔 DOC-R1..DOC-R8）")
-    ap.add_argument("--files", default="", help="仅报告这些路径前缀（逗号分隔）")
+    ap.add_argument("--rules", default="", help="only check these rules (comma-separated DOC-R1..DOC-R8)")
+    ap.add_argument("--files", default="", help="only report paths matching these prefixes (comma-separated)")
     ap.add_argument("--limit", type=int, default=40)
     ap.add_argument("--report", default="")
     args = ap.parse_args(argv)
 
     if not os.path.isdir(args.root):
-        print(f"错误：根目录不存在: {args.root}", file=sys.stderr)
+        print(f"Error: root directory not found: {args.root}", file=sys.stderr)
         return 2
     wanted = {r.strip().upper() for r in args.rules.split(",") if r.strip()}
     prefixes = [p.strip().replace("\\", "/") for p in args.files.split(",") if p.strip()]
@@ -1287,7 +1302,7 @@ def main(argv: list[str]) -> int:
     try:
         checker.run([r.strip() for r in args.roots.split(",") if r.strip()])
     except RuntimeError as exc:
-        print(f"错误：{exc}", file=sys.stderr)
+        print(f"Error: {exc}", file=sys.stderr)
         return 2
     findings = checker.findings
     if wanted:

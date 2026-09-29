@@ -506,130 +506,160 @@ auto bench_fx_wgpu(bool compute) -> WgpuFrameCost {
 }
 
 auto run_wgpu_scenarios() -> void {
-    AURORA_LOG_RAW("bench", "## 场景三：wgpu 真 GPU 离屏——视频逐帧更新（端到端帧成本，含提交与等待）\n\n");
+    AURORA_LOG_RAW("bench",
+                   "## Scenario 3: real wgpu GPU offscreen - per-frame video updates (end-to-end frame cost, "
+                   "submit and wait included)\n\n");
     const auto probe = offscreen_rhi(1, 1);
     if (probe == nullptr) {
-        AURORA_LOG_RAW("bench", "（无可用 wgpu adapter/device：场景三/四/五/六整段跳过）\n\n");
+        AURORA_LOG_RAW("bench", "(no usable wgpu adapter/device: scenarios 3/4/5/6 skipped entirely)\n\n");
         return;
     }
-    AURORA_LOG_RAW("bench", "| 路径 | 每帧提交（CPU） | 每帧端到端（批尾一次排空） |\n|:---|---:|---:|\n");
+    AURORA_LOG_RAW("bench",
+                   "| Path | Submit per frame (CPU) | End-to-end per frame (one drain at batch end) |\n"
+                   "|:---|---:|---:|\n");
     const WgpuFrameCost wl_legacy = bench_video_wgpu(false);
     const WgpuFrameCost wl_stream = bench_video_wgpu(true);
-    AURORA_LOG_RAW("bench", "| legacy（content_hash 缓存） | ", ffmt(3, wl_legacy.submit_ms), " ms | ",
+    AURORA_LOG_RAW("bench", "| legacy (content_hash cache) | ", ffmt(3, wl_legacy.submit_ms), " ms | ",
                    ffmt(3, wl_legacy.e2e_ms), " ms |\n");
-    AURORA_LOG_RAW("bench", "| streaming（常驻流式槽） | ", ffmt(3, wl_stream.submit_ms), " ms | ",
+    AURORA_LOG_RAW("bench", "| streaming (resident streaming slot) | ", ffmt(3, wl_stream.submit_ms), " ms | ",
                    ffmt(3, wl_stream.e2e_ms), " ms |\n");
-    AURORA_LOG_RAW("bench", "\n提交口径加速比 ",
+    AURORA_LOG_RAW("bench", "\nSubmit-basis speedup ",
                    ffmt(2, wl_stream.submit_ms > 0.0 ? wl_legacy.submit_ms / wl_stream.submit_ms : 0.0),
-                   " 倍、端到端口径 ", ffmt(2, wl_stream.e2e_ms > 0.0 ? wl_legacy.e2e_ms / wl_stream.e2e_ms : 0.0),
-                   " 倍。与场景一（fake 桩）同口径可比：本段 legacy 每帧唯一内容 → 每帧 PMA 全帧副本 + 新建纹理 + "
-                   "缓存超限全清淘汰；streaming 只整幅 sub-upload（无 CPU 预乘、槽复用）。\n\n");
+                   "x, end-to-end basis ", ffmt(2, wl_stream.e2e_ms > 0.0 ? wl_legacy.e2e_ms / wl_stream.e2e_ms : 0.0),
+                   "x. Comparable with scenario 1 (fake stub) on the same basis: legacy sees unique content every "
+                   "frame here, so every frame pays a premultiplied full-frame copy plus a new texture plus a "
+                   "full cache flush once the size limit is exceeded, while streaming only uploads the whole image "
+                   "into the reused slot (no CPU premultiply, slot reuse).\n\n");
 
-    AURORA_LOG_RAW("bench", "## 场景四：wgpu 真 GPU 离屏——transform-only 旋转动画层缓存\n\n");
-    AURORA_LOG_RAW("bench", "| 变体 | 每帧提交（CPU） | 每帧端到端（批尾一次排空） |\n|:---|---:|---:|\n");
+    AURORA_LOG_RAW("bench", "## Scenario 4: real wgpu GPU offscreen - layer cache for a transform-only rotation\n\n");
+    AURORA_LOG_RAW("bench",
+                   "| Variant | Submit per frame (CPU) | End-to-end per frame (one drain at batch end) |\n"
+                   "|:---|---:|---:|\n");
     const WgpuFrameCost wbase = bench_layer_wgpu(false);
     const WgpuFrameCost wcached = bench_layer_wgpu(true);
-    AURORA_LOG_RAW("bench", "| baseline（无 cache_layer） | ", ffmt(3, wbase.submit_ms), " ms | ",
-                   ffmt(3, wbase.e2e_ms), " ms |\n");
-    AURORA_LOG_RAW("bench", "| cache_layer（GPU 层缓存） | ", ffmt(3, wcached.submit_ms), " ms | ",
+    AURORA_LOG_RAW("bench", "| baseline (no cache_layer) | ", ffmt(3, wbase.submit_ms), " ms | ", ffmt(3, wbase.e2e_ms),
+                   " ms |\n");
+    AURORA_LOG_RAW("bench", "| cache_layer (GPU layer cache) | ", ffmt(3, wcached.submit_ms), " ms | ",
                    ffmt(3, wcached.e2e_ms), " ms |\n");
-    AURORA_LOG_RAW("bench", "\n提交口径加速比 ",
-                   ffmt(2, wcached.submit_ms > 0.0 ? wbase.submit_ms / wcached.submit_ms : 0.0), " 倍、端到端口径 ",
+    AURORA_LOG_RAW("bench", "\nSubmit-basis speedup ",
+                   ffmt(2, wcached.submit_ms > 0.0 ? wbase.submit_ms / wcached.submit_ms : 0.0), "x, end-to-end basis ",
                    ffmt(2, wcached.e2e_ms > 0.0 ? wbase.e2e_ms / wcached.e2e_ms : 0.0),
-                   " 倍。端到端口径的差额小于提交口径即说明该场景 GPU 侧并非瓶颈（本段每帧只一条 DrawLayer 或全量命令"
-                   "翻译，GPU 工作量小）。\n\n");
+                   "x. An end-to-end gap smaller than the submit gap shows the GPU side is not the bottleneck here "
+                   "(every frame is either one DrawLayer or a full command translation, so the GPU workload is "
+                   "small).\n\n");
 
-    AURORA_LOG_RAW("bench", "## 场景五：wgpu 大图缩小重采样（compute mip 链，", std::to_string(MIP_DIM), "×",
-                   std::to_string(MIP_DIM), " → ", std::to_string(MIP_DRAW), "×", std::to_string(MIP_DRAW), "）\n\n");
-    AURORA_LOG_RAW("bench", "| 变体 | 每帧提交（CPU） | 每帧端到端（批尾一次排空） |\n|:---|---:|---:|\n");
+    AURORA_LOG_RAW("bench", "## Scenario 5: wgpu large-image downsample (compute mip chain, ", std::to_string(MIP_DIM),
+                   "x", std::to_string(MIP_DIM), " -> ", std::to_string(MIP_DRAW), "x", std::to_string(MIP_DRAW),
+                   ")\n\n");
+    AURORA_LOG_RAW("bench",
+                   "| Variant | Submit per frame (CPU) | End-to-end per frame (one drain at batch end) |\n"
+                   "|:---|---:|---:|\n");
     const MipResult mstatic = bench_mip(false);
     const MipResult munique = bench_mip(true);
-    AURORA_LOG_RAW("bench", "| 静态同图（缓存命中，mip 链只建一次） | ", ffmt(3, mstatic.cost.submit_ms), " ms | ",
-                   ffmt(3, mstatic.cost.e2e_ms), " ms |\n");
-    AURORA_LOG_RAW("bench", "| 逐帧唯一内容（每帧重建 mip 链） | ", ffmt(3, munique.cost.submit_ms), " ms | ",
-                   ffmt(3, munique.cost.e2e_ms), " ms |\n");
+    AURORA_LOG_RAW("bench", "| static same image (cache hit, mip chain built once) | ", ffmt(3, mstatic.cost.submit_ms),
+                   " ms | ", ffmt(3, mstatic.cost.e2e_ms), " ms |\n");
+    AURORA_LOG_RAW("bench", "| unique content per frame (mip chain rebuilt every frame) | ",
+                   ffmt(3, munique.cost.submit_ms), " ms | ", ffmt(3, munique.cost.e2e_ms), " ms |\n");
     AURORA_LOG_RAW(
-        "bench", "\ncompute 能力位 ", mstatic.compute ? "true" : "false",
-        "（false = GLES 后端，无 mip 链，两行退化为纯上传对照）。两行之差即「大图每帧换内容走通用图像缓存」的"
-        "代价：PMA 全帧副本 + 整幅上传 + 整条 mip 链逐级 compute 重建。结论与场景三同向——逐帧更新的大图输入"
-        "必须走流式槽（流式槽恒单级、无 mip churn）。读绝对值注意：本段每帧重建 DisplayList（含整幅 ",
-        std::to_string(MIP_DIM), "×", std::to_string(MIP_DIM),
-        " 图像值拷贝与 content_hash 计算），故静态行的"
-        "地板值是**帧装配的 CPU 成本**（录制侧按值入池，流式分支亦然）而非 GPU 成本——流式路的净收益在槽复用、"
-        "免 PMA 副本与免 mip churn（场景三即此差额的体现）。\n\n");
+        "bench", "\ncompute capability flag ", mstatic.compute ? "true" : "false",
+        " (false = GLES backend, no mip chain, both rows degrade to a plain upload comparison). The gap between the "
+        "two rows is what routing a large image that changes every frame through the generic image cache costs: a "
+        "premultiplied full-frame copy + a full upload + a compute rebuild of the whole mip chain level by level. "
+        "The conclusion points the same way as scenario 3 - large image inputs updated every frame must use the "
+        "streaming slot (the slot is always single-level, no mip churn). Caveat when reading absolute values: this "
+        "section rebuilds the DisplayList every frame (including the full ",
+        std::to_string(MIP_DIM), "x", std::to_string(MIP_DIM),
+        " image value copy and content_hash computation), so the floor value of the static row is the **CPU cost of "
+        "frame assembly** (the recording side pools by value, and the streaming branch does the same), not a GPU "
+        "cost - the net gain of the streaming path is slot reuse, no premultiplied copy and no mip churn "
+        "(scenario 3 shows exactly this gap).\n\n");
 
-    AURORA_LOG_RAW("bench", "## 场景六：区域效果 compute vs 片元兜底两路（", std::to_string(FX_DIM), "×",
-                   std::to_string(FX_DIM), "，blur r6 + Multiply + LinearFade 整幅连做 ", std::to_string(FX_PASSES),
-                   " 遍，", std::to_string(FX_FRAMES), " 帧）\n\n");
-    AURORA_LOG_RAW("bench", "| 路径 | 每帧提交（CPU） | 每帧端到端（批尾一次排空） |\n|:---|---:|---:|\n");
+    AURORA_LOG_RAW("bench", "## Scenario 6: region effects, compute path vs fragment fallback (",
+                   std::to_string(FX_DIM), "x", std::to_string(FX_DIM),
+                   ", blur r6 + Multiply + LinearFade over the whole frame, ", std::to_string(FX_PASSES), " passes, ",
+                   std::to_string(FX_FRAMES), " frames)\n\n");
+    AURORA_LOG_RAW("bench",
+                   "| Path | Submit per frame (CPU) | End-to-end per frame (one drain at batch end) |\n"
+                   "|:---|---:|---:|\n");
     const WgpuFrameCost fxf = bench_fx_wgpu(false);
     const WgpuFrameCost fxc = bench_fx_wgpu(true);
-    AURORA_LOG_RAW("bench", "| 片元兜底路（强制，`set_compute_effects_enabled(false)`） | ", ffmt(3, fxf.submit_ms),
-                   " ms | ", ffmt(3, fxf.e2e_ms), " ms |\n");
-    AURORA_LOG_RAW("bench", "| compute 实路（默认） | ", ffmt(3, fxc.submit_ms), " ms | ", ffmt(3, fxc.e2e_ms),
+    AURORA_LOG_RAW("bench", "| fragment fallback path (forced, `set_compute_effects_enabled(false)`) | ",
+                   ffmt(3, fxf.submit_ms), " ms | ", ffmt(3, fxf.e2e_ms), " ms |\n");
+    AURORA_LOG_RAW("bench", "| compute path (default) | ", ffmt(3, fxc.submit_ms), " ms | ", ffmt(3, fxc.e2e_ms),
                    " ms |\n");
-    AURORA_LOG_RAW("bench", "\n提交口径加速比 ", ffmt(2, fxc.submit_ms > 0.0 ? fxf.submit_ms / fxc.submit_ms : 0.0),
-                   " 倍、端到端口径 ", ffmt(2, fxc.e2e_ms > 0.0 ? fxf.e2e_ms / fxc.e2e_ms : 0.0),
-                   " 倍。compute 能力位 ", probe->capabilities().compute ? "true" : "false",
-                   "（false = GLES 端 compute 管线未建成：两行同为片元路，比值无意义）。差额主要在端到端口径"
-                   "（效果族 compute 存储纹理路 vs 片元离屏读-改-写路）；提交口径两路同为回放同一帧内容，"
-                   "片元路略高源于每次效果额外的离屏 render pass/绑定组装配。本段帧内容恒定（棋盘格 + 斜线带 + "
-                   "整幅效果三连，无图像上传），排空量子（≈15.6 ms/批尾一次）按 ",
-                   std::to_string(FX_FRAMES), " 帧摊薄进 e2e 地板值，两路同额、不影响差额。\n\n");
+    AURORA_LOG_RAW("bench", "\nSubmit-basis speedup ",
+                   ffmt(2, fxc.submit_ms > 0.0 ? fxf.submit_ms / fxc.submit_ms : 0.0), "x, end-to-end basis ",
+                   ffmt(2, fxc.e2e_ms > 0.0 ? fxf.e2e_ms / fxc.e2e_ms : 0.0), "x. compute capability flag ",
+                   probe->capabilities().compute ? "true" : "false",
+                   " (false = the compute pipeline never came up on GLES: both rows run the fragment path, so the "
+                   "ratio is meaningless). The gap sits mostly in the end-to-end basis (the compute storage-texture "
+                   "path for the effect family vs the fragment offscreen read-modify-write path); on the submit "
+                   "basis both paths replay the same frame content, and the fragment path is slightly higher because "
+                   "every effect assembles one extra offscreen render pass and bind group. Frame content here is "
+                   "constant (checkerboard + diagonal bands + three full-frame effects, no image upload); the drain "
+                   "quantum (about 15.6 ms per batch-end drain) amortizes over ",
+                   std::to_string(FX_FRAMES),
+                   " frames into the e2e floor value, the same amount for both paths, so "
+                   "it does not affect the gap.\n\n");
 }
 
 #endif  // AURORA_BACKEND_GPU_WGPU
 
 auto run() -> void {
     AURORA_LOG_RAW("bench",
-                   "# GPU 特性基准（场景一/二 = fake GL 桩确定性计数 + 上传 memcpy 成本；"
-                   "场景三/四/五/六 = wgpu 真 GPU 离屏端到端帧成本）\n\n");
+                   "# GPU feature benchmarks (scenarios 1/2 = deterministic counters from the fake GL stub + upload "
+                   "memcpy cost; scenarios 3/4/5/6 = end-to-end frame cost on a real wgpu GPU offscreen)\n\n");
 
     // ---- 场景一：视频流式纹理 ----
-    AURORA_LOG_RAW("bench", "## 场景一：视频逐帧更新（", std::to_string(AURORA_VIDEO_W), "x",
+    AURORA_LOG_RAW("bench", "## Scenario 1: per-frame video updates (", std::to_string(AURORA_VIDEO_W), "x",
                    std::to_string(AURORA_VIDEO_H), " x ", std::to_string(AURORA_VIDEO_FRAMES),
-                   " 帧，每帧内容唯一）\n\n");
-    AURORA_LOG_RAW("bench", "| 路径 | 纹理分配次数 | 纹理删除次数 | 每帧上传字节 | 每帧 CPU |\n");
+                   " frames, unique content every frame)\n\n");
+    AURORA_LOG_RAW("bench",
+                   "| Path | Texture allocations | Texture deletions | Upload bytes per frame | CPU per "
+                   "frame |\n");
     AURORA_LOG_RAW("bench", "|:---|---:|---:|---:|---:|\n");
     const auto legacy = bench_video(false);
     const auto stream = bench_video(true);
     const auto per_frame_bytes = [](const GlCounters &c) {
         return ffmt(0, static_cast<double>(c.upload_bytes) / static_cast<double>(AURORA_VIDEO_FRAMES));
     };
-    AURORA_LOG_RAW("bench", "| legacy（content_hash 缓存） | ", std::to_string(legacy.counters.texture_gens), " | ",
+    AURORA_LOG_RAW("bench", "| legacy (content_hash cache) | ", std::to_string(legacy.counters.texture_gens), " | ",
                    std::to_string(legacy.counters.texture_deletes), " | ", per_frame_bytes(legacy.counters), " | ",
                    ffmt(3, legacy.cpu_ms_per_frame), " ms |\n");
-    AURORA_LOG_RAW("bench", "| streaming（常驻流式槽） | ", std::to_string(stream.counters.texture_gens), " | ",
-                   std::to_string(stream.counters.texture_deletes), " | ", per_frame_bytes(stream.counters), " | ",
-                   ffmt(3, stream.cpu_ms_per_frame), " ms |\n");
+    AURORA_LOG_RAW("bench", "| streaming (resident streaming slot) | ", std::to_string(stream.counters.texture_gens),
+                   " | ", std::to_string(stream.counters.texture_deletes), " | ", per_frame_bytes(stream.counters),
+                   " | ", ffmt(3, stream.cpu_ms_per_frame), " ms |\n");
     const auto speedup = stream.cpu_ms_per_frame > 0.0 ? legacy.cpu_ms_per_frame / stream.cpu_ms_per_frame : 0.0;
-    AURORA_LOG_RAW("bench", "\nlegacy 每帧 CPU 为 streaming 的 ", ffmt(2, speedup),
-                   " 倍；差额即 CPU 预乘全帧副本 + 纹理新建/淘汰 churn（上传字节两路径同量级，"
-                   "全帧视频逐帧必有整幅传输）。\n\n");
+    AURORA_LOG_RAW("bench", "\nlegacy CPU per frame is ", ffmt(2, speedup),
+                   "x streaming's; the gap is the CPU-premultiplied full-frame copy plus texture create/evict churn "
+                   "(upload bytes are of the same order for both paths - a full-frame video always transfers the "
+                   "whole image every frame).\n\n");
 
     // ---- 场景二：GPU 层缓存 ----
-    AURORA_LOG_RAW("bench", "## 场景二：transform-only 旋转动画（", std::to_string(AURORA_GRID_COLS), "×",
-                   std::to_string(AURORA_GRID_ROWS), " 静态盒网格，", std::to_string(AURORA_SCENE_W), "x",
-                   std::to_string(AURORA_SCENE_H), "）\n\n");
-    AURORA_LOG_RAW("bench", "| 变体 | 首帧（冷） | 稳态每帧 |\n");
+    AURORA_LOG_RAW("bench", "## Scenario 2: transform-only rotation (", std::to_string(AURORA_GRID_COLS), "x",
+                   std::to_string(AURORA_GRID_ROWS), " static box grid, ", std::to_string(AURORA_SCENE_W), "x",
+                   std::to_string(AURORA_SCENE_H), ")\n\n");
+    AURORA_LOG_RAW("bench", "| Variant | First frame (cold) | Steady-state per frame |\n");
     AURORA_LOG_RAW("bench", "|:---|---:|---:|\n");
     const auto base = bench_layer(false);
     const auto cached = bench_layer(true);
-    AURORA_LOG_RAW("bench", "| baseline（无 cache_layer） | ", ffmt(3, base.cold_ms), " ms | ",
+    AURORA_LOG_RAW("bench", "| baseline (no cache_layer) | ", ffmt(3, base.cold_ms), " ms | ",
                    ffmt(3, base.steady_ms_per_frame), " ms |\n");
-    AURORA_LOG_RAW("bench", "| cache_layer（GPU 层缓存） | ", ffmt(3, cached.cold_ms), " ms | ",
+    AURORA_LOG_RAW("bench", "| cache_layer (GPU layer cache) | ", ffmt(3, cached.cold_ms), " ms | ",
                    ffmt(3, cached.steady_ms_per_frame), " ms |\n");
     const auto layer_speedup =
         cached.steady_ms_per_frame > 0.0 ? base.steady_ms_per_frame / cached.steady_ms_per_frame : 0.0;
-    AURORA_LOG_RAW("bench", "\n稳态加速比 ", ffmt(2, layer_speedup),
-                   " 倍。baseline 的非恒等旋转变换走 render_into 离屏合成路径：每帧整棵子树重栅格化到"
-                   "离屏位图再 composite；cache_layer 在此之前拦截，稳态帧仅一条 DrawLayer（子树零重绘、"
-                   "零像素搬运，旋转在合成矩阵侧生效）。\n\n");
+    AURORA_LOG_RAW("bench", "\nSteady-state speedup ", ffmt(2, layer_speedup),
+                   "x. A non-identity rotation transform in baseline goes through the render_into offscreen "
+                   "compositing path: every frame re-rasterizes the whole subtree into an offscreen bitmap before "
+                   "compositing it; cache_layer intercepts before that, so a steady-state frame issues only one "
+                   "DrawLayer (zero subtree redraws, zero pixel movement - the rotation takes effect in the "
+                   "composite matrix).\n\n");
 
 #ifdef AURORA_BACKEND_GPU_WGPU
     run_wgpu_scenarios();
 #else
-    AURORA_LOG_RAW("bench", "## 场景三/四/五/六：未编译（`AURORA_BACKEND_GPU_WGPU=OFF`）\n\n");
+    AURORA_LOG_RAW("bench", "## Scenarios 3/4/5/6: not compiled (`AURORA_BACKEND_GPU_WGPU=OFF`)\n\n");
 #endif
 
     AURORA_LOG_RAW("bench", AURORA_BENCH_DISCLAIMER, "\n");

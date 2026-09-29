@@ -135,7 +135,8 @@ constexpr Expectation AURORA_EXPECTATIONS[] = {
      .want_value = false,
      .want_range = false,
      .require_name = false,
-     .sibling_expect = "启用自动更新"},
+     .sibling_expect =
+         "启用自动更新"},  // CJK-LITERAL: cjk-fixture - UIA sibling-label Name asserted against this Han text
     {.label = "Slider",
      .control_type = UIA_SliderControlTypeId,
      .want_invoke = false,
@@ -143,7 +144,7 @@ constexpr Expectation AURORA_EXPECTATIONS[] = {
      .want_value = false,
      .want_range = true,
      .require_name = false,
-     .sibling_expect = "音量"},
+     .sibling_expect = "音量"},  // CJK-LITERAL: cjk-fixture - UIA sibling-label Name asserted against this Han text
     {.label = "TextInput",
      .control_type = UIA_EditControlTypeId,
      .want_invoke = false,
@@ -214,6 +215,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     // 引用式标签关联（#21 验收）：目标带 `stable_key`，引用者 `set_labelled_by` 指过去。
     // 二者放进**纵向**列：`sibling_label_name` 的行内相邻判据在纵向下刻意不命中，
     // 且引用者自身无内置标签 —— 故它的 UIA Name 只可能来自 labelled_by 的解析结果。
+    // CJK-LITERAL: cjk-fixture - caption referenced by set_labelled_by; its Han Name is asserted via UIA (#21)
     auto caption = std::make_shared<aurora::Text>(aurora::TextProps{.content = aurora::LocalizedString{"季度汇总"}});
     caption->set_stable_key("probe-caption");
     auto referrer = std::make_shared<aurora::Checkbox>(aurora::Reactive{CHECKED});
@@ -222,12 +224,17 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     // Checkbox / Slider 用 `Row { 文本兄弟, 控件 }` 包裹，使其具备「兄弟标签」，
     // 验收 `sibling_label_name` 兜底（叶子控件标签常为兄弟而非子节点）。
     return aurora::Node{aurora::Column{
+        // CJK-LITERAL: cjk-fixture - Han widget texts painted in the live window and asserted via UIA Names
         aurora::Button{aurora::ButtonProps{.label = aurora::LocalizedString{"确定"}}},
+        // CJK-LITERAL: cjk-fixture - Han sibling label resolved into the Checkbox UIA Name
         aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"启用自动更新"}}},
                     aurora::Checkbox{aurora::Reactive{CHECKED}}},
+        // CJK-LITERAL: cjk-fixture - Han sibling label resolved into the Slider UIA Name
         aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"音量"}}},
                     aurora::Slider{aurora::Reactive{SLIDER_VALUE}}},
+        // CJK-LITERAL: cjk-fixture - Han placeholder is the Edit control's Name source (require_name)
         aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}},
+        // CJK-LITERAL: cjk-fixture - Han text node asserted through the UIA Name property
         aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"订单总额"}}},
         aurora::Node{std::move(caption)},
         aurora::Node{std::move(referrer)},
@@ -620,7 +627,7 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
     const auto own_nodes = static_cast<std::size_t>(
         std::ranges::count_if(nodes, [](const Visited &v) -> bool { return v.framework_id == "Aurora"; }));
     emit("own (FrameworkId=Aurora) nodes = " + aurora_verify::format_uint(own_nodes) + " / visited " +
-         aurora_verify::format_uint(nodes.size()) + " (剩余为 UIA 默认 HWND provider 合成的非客户区)");
+         aurora_verify::format_uint(nodes.size()) + " (the rest are non-client items from the default HWND provider)");
     if (own_nodes == 0) {
         AURORA_LOG_ERROR("verify", std::string(label) + ": bridge projected 0 elements (FrameworkId=Aurora absent)");
         ++failures;
@@ -644,7 +651,7 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
                                            std::to_string(exp.control_type) + ") missing required pattern; got [" +
                                            patterns_of(v) + "] hr{Invoke=" + hex_hr(v.hr_invoke) +
                                            " Toggle=" + hex_hr(v.hr_toggle) + " Value=" + hex_hr(v.hr_value) +
-                                           " Range=" + hex_hr(v.hr_range) + "} (0x0=S_OK/可用)");
+                                           " Range=" + hex_hr(v.hr_range) + "} (0x0=S_OK/available)");
             ++failures;
             continue;
         }
@@ -655,8 +662,8 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
                 ++failures;
             } else {
                 emit(std::string("~~  ") + exp.label +
-                     ": Name 为空 —— 本库 Checkbox/Slider 无内建标签，标签常为**兄弟**节点，"
-                     "唯一文本子节点兜底取不到（待设计决定是否引入标签关联）");
+                     ": Name is empty -- Checkbox/Slider have no built-in label, labels are usually **siblings**, "
+                     "the sole-text-child fallback finds none (label association pending a design call)");
             }
             continue;
         }
@@ -688,11 +695,12 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
         if (exp.label == std::string_view("Text") || exp.label == std::string_view("TextInput")) {
             if (v.text_range_rects == 0) {
                 emit(std::string("~~  ") + exp.label +
-                     ": TextPattern 存在但 GetBoundingRectangles 为空（可能字体度量未就绪；#7 盲区已覆盖）");
+                     ": TextPattern present but GetBoundingRectangles is empty "
+                     "(font metrics may not be ready; #7 blind spot covered)");
             } else if (v.text_range_rects >= 4) {
                 emit(std::string("ok  ") + exp.label + " text geometry rects present (#7)");
             } else {
-                emit(std::string("~~  ") + exp.label + ": 无 TextPattern（#7；只读控件通常不暴露）");
+                emit(std::string("~~  ") + exp.label + ": no TextPattern (#7; read-only controls usually expose none)");
             }
         }
     }
@@ -703,18 +711,22 @@ auto run_probe(aurora::Window &window, aurora::Surface &surface, aurora::Node &r
     // 本身就是「名字跟随引用」的证据，再叠一条关系可导航的显式断言。
     const auto ref_it = std::ranges::find_if(nodes, [](const Visited &v) -> bool {
         return v.framework_id == "Aurora" && v.control_type == static_cast<long long>(UIA_CheckBoxControlTypeId) &&
-               v.name == "季度汇总";
+               v.name == "季度汇总";  // CJK-LITERAL: cjk-fixture - Name must carry the Han caption through the bridge
     });
     if (ref_it == nodes.end()) {
-        AURORA_LOG_ERROR(
-            "verify", std::string(label) + ": 无 Name 为「季度汇总」的元素 —— set_labelled_by 的名字未跟随目标 (#21)");
+        AURORA_LOG_ERROR("verify", std::string(label) +
+                                       ": no element whose Name equals the caption label -- "
+                                       "set_labelled_by name did not follow its target (#21)");
         ++failures;
+        // CJK-LITERAL: cjk-fixture - compares the projected LabeledBy target name against the Han caption
     } else if (ref_it->labeled_by_name != "季度汇总") {
-        AURORA_LOG_ERROR("verify", std::string(label) + ": UIA_LabeledByPropertyId 未投影 (got \"" +
-                                       ref_it->labeled_by_name + "\", expected \"季度汇总\") (#21)");
+        AURORA_LOG_ERROR("verify", std::string(label) + ": UIA_LabeledByPropertyId not projected (got \"" +
+                                       ref_it->labeled_by_name + "\", expected the caption label) (#21)");
         ++failures;
     } else {
-        emit("ok  labelled-by: Name 跟随目标，LabeledBy 关系可导航（get_CurrentLabeledBy）(#21)");
+        emit(
+            "ok  labelled-by: Name follows the target and the LabeledBy relation is navigable "
+            "(get_CurrentLabeledBy) (#21)");
     }
 
     if (failures > 0) {

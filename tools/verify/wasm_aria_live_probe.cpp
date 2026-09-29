@@ -87,8 +87,10 @@ auto main() -> int {
     // 下行目标类型由紧邻上一行构造的控件锁定（Button/TextInput/Checkbox/Slider 各自建 Node），
     // dynamic_cast 徒增 RTTI 依赖且把「构造即已知」的确定性换成运行期查找。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-static-cast-downcast)
+    // CJK-LITERAL: cjk-fixture - the CDP driver locates and clicks the mirror button by this Han name
     au::Node btn_node{au::Button{au::ButtonProps{.label = au::LocalizedString{"确定"}}}};
     auto *btn = static_cast<au::Button *>(&btn_node.widget());
+    // CJK-LITERAL: cjk-fixture - the CDP driver locates the announcement mirror button by this Han name
     au::Node ann_node{au::Button{au::ButtonProps{.label = au::LocalizedString{"播报"}}}};
     auto *ann = static_cast<au::Button *>(&ann_node.widget());
     au::Node entry_node{au::TextInput{au::TextInputProps{.value = "abc"}}};
@@ -101,6 +103,7 @@ auto main() -> int {
 
     btn->set_on_click([obs, btn, entry]() -> void {
         ++obs->clicks;
+        // CJK-LITERAL: cjk-fixture - Han label prefix; the CDP driver asserts the mirrored name becomes 确定·N
         btn->set_label("确定·" + std::to_string(obs->clicks));
         entry->set_value("clk" + std::to_string(obs->clicks));  // ValueChanged 事件 ⇒ 桥置脏
         obs->entry_value = entry->value();

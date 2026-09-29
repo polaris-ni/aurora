@@ -145,12 +145,12 @@ auto main(int argc, char **argv) -> int {
     emit("== aurora verify: X11 wgpu GPU raster (host window + offscreen streams) ==");
 
 #if !defined(AURORA_BACKEND_GPU_WGPU) || !defined(AURORA_BACKEND_X11)
-    emit("[SKIP] 此构建未编译 X11 wgpu 通道（AURORA_BACKEND_GPU_WGPU / AURORA_BACKEND_X11）");
+    emit("[SKIP] this build has no X11 wgpu channel compiled in (AURORA_BACKEND_GPU_WGPU / AURORA_BACKEND_X11)");
     return 2;
 #else
     // X11 环境前置：无 DISPLAY 直接判环境不可用，与「断言失败」区分退出码。
     if (const char *dpy = std::getenv("DISPLAY"); dpy == nullptr || *dpy == '\0') {
-        emit("[SKIP] 无 DISPLAY 环境变量（无 X 服务器），X11 宿主探针无法运行");
+        emit("[SKIP] DISPLAY is unset (no X server), the X11 host probe cannot run");
         return 2;
     }
 
@@ -166,37 +166,38 @@ auto main(int argc, char **argv) -> int {
     auto session = aurora::e2e::open(spec);
     if (!session.ok()) {
         AURORA_LOG_ERROR("verify",
-                         "open(Wgpu) failed: " + session.reason() + " (X 连接失败 / 无 adapter / device init)");
+                         "open(Wgpu) failed: " + session.reason() + " (X connect failed / no adapter / init)");
         return 2;
     }
     auto &win = session.window();
 
     auto *ws = dynamic_cast<aurora::WgpuX11Surface *>(&win.surface());
-    check(ws != nullptr, "surface 动态类型为 WgpuX11Surface");
+    check(ws != nullptr, "surface dynamic type is WgpuX11Surface");
     if (ws == nullptr) {
         return 2;
     }
     auto *sink = win.surface().gpu_backend();
     if (sink == nullptr) {
-        emit("[FAIL] gpu_backend() 为空（WgpuRhi 未装载或已回退）");
+        emit("[FAIL] gpu_backend() is null (WgpuRhi not loaded or already degraded)");
         return 1;
     }
-    check(sink->name() == "gpu-wgpu", "GPU 通道 name == gpu-wgpu");
-    check(ws->is_available(), "is_available()（宿主 XID + wgpu device 就绪）");
-    check(ws->gpu_active(), "gpu_active() 初值为真（GPU 栅格路径生效）");
+    check(sink->name() == "gpu-wgpu", "GPU channel name == gpu-wgpu");
+    check(ws->is_available(), "is_available() (host XID + wgpu device ready)");
+    check(ws->gpu_active(), "gpu_active() initially true (GPU raster path in effect)");
 
     auto *gpu_host = dynamic_cast<aurora::rhi::WgpuRhi *>(&sink->backend());
-    check(gpu_host != nullptr, "宿主 backend 动态类型为 WgpuRhi");
+    check(gpu_host != nullptr, "host backend dynamic type is WgpuRhi");
     if (gpu_host == nullptr) {
         return 1;
     }
     const auto caps = gpu_host->capabilities();
     check(caps.gpu, "capabilities().gpu == true");
-    check(!caps.native_surface_import, "capabilities().native_surface_import == false（v29 仅契约位）");
+    check(!caps.native_surface_import, "capabilities().native_surface_import == false (v29: contract bit only)");
 
     // ---- 契约位：导入空帧恒 0（warn-once，不崩溃）----
     aurora::NativeSurfaceFrame empty_frame;
-    check(gpu_host->import_native_surface(empty_frame) == 0, "import_native_surface(空帧) == 0（契约不兑现口径）");
+    check(gpu_host->import_native_surface(empty_frame) == 0,
+          "import_native_surface(empty frame) == 0 (contract not fulfilled by design)");
 
     // ---- 离屏直驱通道（读回窗口：end_frame 之后、下一 begin_frame 之前）----
     aurora::rhi::WgpuRhiOptions off_opts;
@@ -205,7 +206,7 @@ auto main(int argc, char **argv) -> int {
     off_opts.offscreen_height = 1;
     aurora::rhi::WgpuRhi offscreen(off_opts);
     if (!offscreen.valid()) {
-        emit("[FAIL] 离屏 WgpuRhi 装载失败（无 adapter？）");
+        emit("[FAIL] offscreen WgpuRhi load failed (no adapter?)");
         return 1;
     }
 
@@ -238,9 +239,9 @@ auto main(int argc, char **argv) -> int {
     const auto c_red1 = sample(stream_frame(offscreen, 255, 0, 0, 1), CANVAS_W, CANVAS_W / 2, (FRAME_H + 8) / 2);
     const auto c_red2 = sample(stream_frame(offscreen, 255, 0, 0, 1), CANVAS_W, CANVAS_W / 2, (FRAME_H + 8) / 2);
     const auto c_blue = sample(stream_frame(offscreen, 0, 0, 255, 2), CANVAS_W, CANVAS_W / 2, (FRAME_H + 8) / 2);
-    check(c_red1[0] > 180 && c_red1[1] < 80 && c_red1[2] < 80, "流式帧 v1 中心为红（建槽 + 首传上屏）");
-    check(c_red2[0] > 180 && c_red2[1] < 80 && c_red2[2] < 80, "流式帧同版本重绘仍为红（槽复用）");
-    check(c_blue[2] > 180 && c_blue[0] < 80 && c_blue[1] < 80, "流式帧 v2 中心为蓝（同槽增量重传生效）");
+    check(c_red1[0] > 180 && c_red1[1] < 80 && c_red1[2] < 80, "stream frame v1 center is red (slot + first upload)");
+    check(c_red2[0] > 180 && c_red2[1] < 80 && c_red2[2] < 80, "same-version stream redraw stays red (slot reuse)");
+    check(c_blue[2] > 180 && c_blue[0] < 80 && c_blue[1] < 80, "stream frame v2 center is blue (same-slot re-upload)");
 
     // 层缓存持久性：冷帧 BeginLayer+内容+EndLayer+DrawLayer；暖帧仅 DrawLayer（命中常驻层纹理）。
     constexpr std::uint64_t LAYER_KEY = 77;
@@ -271,9 +272,9 @@ auto main(int argc, char **argv) -> int {
     };
     const auto s_cold_in = sample(layer_frame(true), LCANVAS_W, 40, 40);
     const auto s_warm_in = sample(layer_frame(false), LCANVAS_W, 40, 40);
-    check(s_cold_in[1] > 140 && s_cold_in[0] < 90, "层缓存冷帧层内为绿（BeginLayer+内容+DrawLayer）");
-    check(s_warm_in[1] > 140 && s_warm_in[0] < 90, "层缓存稳态帧层内仍为绿（仅 DrawLayer 命中常驻层）");
-    check(s_cold_in == s_warm_in, "冷帧与稳态帧层内像素一致（跨帧持久性）");
+    check(s_cold_in[1] > 140 && s_cold_in[0] < 90, "layer cache cold frame green inside the layer (full build)");
+    check(s_warm_in[1] > 140 && s_warm_in[0] < 90, "steady frame still green inside layer (DrawLayer hits resident)");
+    check(s_cold_in == s_warm_in, "cold and steady frames match inside the layer (cross-frame persistence)");
 
     // compute mip 链（大图降采样质量）：64×64 逐纹素红/绿棋盘 4× 缩小绘制——三线性命中
     // 均匀 mip≥1，整块为均值色 (120,120,20)；lod0 走样则是逐像素红/绿交替端点色。
@@ -310,9 +311,10 @@ auto main(int argc, char **argv) -> int {
             const auto is_mean = [](const std::array<int, 3> &c) {
                 return c[0] > 106 && c[0] < 134 && c[1] > 106 && c[1] < 134 && c[2] > 6 && c[2] < 34;
             };
-            check(is_mean(m1) && is_mean(m2), "大图 4× 降采样为 mip 均值色 (120,120,20)（compute mip 链 + 三线性）");
+            check(is_mean(m1) && is_mean(m2),
+                  "large image 4x downsampled to mip mean color (120,120,20) (compute mip chain + trilinear)");
         } else {
-            emit("[SKIP] adapter 无 compute（GLES 兜底端），mip 采样断言跳过");
+            emit("[SKIP] adapter has no compute (GLES fallback backend), mip sampling assertions skipped");
         }
     }
 
@@ -320,7 +322,9 @@ auto main(int argc, char **argv) -> int {
     // 粗粒度通断判定证明真实驱动接线；逐位 CPU 对照由 utest_wgpu_rhi 在 CI 锁定。
     // 内容场：64×64 底 (10,20,30) + [16,48)² 块 (200,100,50)。
     if (!offscreen.capabilities().compute) {
-        emit("[SKIP] adapter 无 compute，区域效果 compute 探针跳过（片元兜底由 golden 覆盖）");
+        emit(
+            "[SKIP] adapter has no compute, region-effect compute probe skipped "
+            "(fragment fallback covered by golden)");
     } else {
         auto fx_frame = [&](void (*apply_fx)(aurora::Painter &)) -> std::vector<std::uint8_t> {
             aurora::DisplayList dl;
@@ -343,7 +347,7 @@ auto main(int argc, char **argv) -> int {
             (void)offscreen.read_pixels(pixels);
             static bool first = true;
             if (first) {
-                check(no_skip, "区域效果三命令均被 compute 路接受（skipped_cmds == 0）");
+                check(no_skip, "all three region-effect commands accepted by compute (skipped_cmds == 0)");
                 first = false;
             }
             return pixels;
@@ -358,9 +362,9 @@ auto main(int argc, char **argv) -> int {
         const auto b_in = sample(pb, 64, 32, 32);  // 块内 3×3 全同色 → 恒等 (200,100,50)
         const auto b_out = sample(pb, 64, 60, 60);  // 区外 untouched
         check(b_edge[0] > 100 && b_edge[0] < 190,
-              "cs_blur：边界像素混入底色（r∈(100,190)，实得 " + std::to_string(b_edge[0]) + "）");
-        check(b_in == std::array<int, 3>{200, 100, 50}, "cs_blur：块内恒权均值恒等（精确不变）");
-        check(b_out == std::array<int, 3>{10, 20, 30}, "cs_blur：区外 untouched");
+              "cs_blur: edge pixel blends in the backdrop (r in (100,190), got " + std::to_string(b_edge[0]) + ")");
+        check(b_in == std::array<int, 3>{200, 100, 50}, "cs_blur: uniform mean inside the block is exact identity");
+        check(b_out == std::array<int, 3>{10, 20, 30}, "cs_blur: outside the region untouched");
         // blend：Multiply [8,24)²，tint=(255,0,255)，strength=0.5 → g 通道减半（s·0 混回）。
         const auto pj = fx_frame([](aurora::Painter &p) {
             p.blend_region(aurora::Rect{.origin = aurora::Point{.x = 8.0F, .y = 8.0F},
@@ -370,9 +374,9 @@ auto main(int argc, char **argv) -> int {
         const auto j_bg = sample(pj, 64, 12, 12);  // 底 (10,20,30) → g: 20+0.5·(0−20)=10
         const auto j_blk = sample(pj, 64, 20, 20);  // 块 (200,100,50) → g: 100+0.5·(0−100)=50
         check(std::abs(j_bg[1] - 10) <= 2,
-              "cs_blend：Multiply 底色 g 减半（期望≈10，实得 " + std::to_string(j_bg[1]) + "）");
+              "cs_blend: Multiply halves the backdrop g (expect ~10, got " + std::to_string(j_bg[1]) + ")");
         check(std::abs(j_blk[1] - 50) <= 2,
-              "cs_blend：Multiply 块色 g 减半（期望≈50，实得 " + std::to_string(j_blk[1]) + "）");
+              "cs_blend: Multiply halves the block g (expect ~50, got " + std::to_string(j_blk[1]) + ")");
         // mask：LinearFade [16,48)² 纵向淡出 → 顶行近原色、底行近全黑。
         const auto pm = fx_frame([](aurora::Painter &p) {
             p.mask_region(aurora::Rect{.origin = aurora::Point{.x = 16.0F, .y = 16.0F},
@@ -381,8 +385,8 @@ auto main(int argc, char **argv) -> int {
         });
         const auto m_top = sample(pm, 64, 32, 16);
         const auto m_bot = sample(pm, 64, 32, 47);
-        check(m_top[0] > 190, "cs_mask：LinearFade 顶行近原色（期望>190，实得 " + std::to_string(m_top[0]) + "）");
-        check(m_bot[0] < 20, "cs_mask：LinearFade 底行近全黑（期望<20，实得 " + std::to_string(m_bot[0]) + "）");
+        check(m_top[0] > 190, "cs_mask: LinearFade top near original (>190, got " + std::to_string(m_top[0]) + ")");
+        check(m_bot[0] < 20, "cs_mask: LinearFade bottom near black (<20, got " + std::to_string(m_bot[0]) + ")");
     }
 
     // ---- 平台 present 链路（真实窗口多帧上屏，含文本与流式图像）----
@@ -421,22 +425,25 @@ auto main(int argc, char **argv) -> int {
         }
         win.surface().poll_platform_events();
     }
-    check(present_ok, "present_root 连续 " + std::to_string(AUTO_FRAMES) + " 帧成功（真实窗口上屏 + 文本 + 流式图像）");
-    check(win.surface().frame_count() >= AUTO_FRAMES, "frame_count() >= " + std::to_string(AUTO_FRAMES) + "（实得 " +
-                                                          std::to_string(win.surface().frame_count()) + "）");
-    check(ws->gpu_active(), "帧后 gpu_active() 仍为真（未永久回退软件路径）");
+    check(present_ok, "present_root succeeded for " + std::to_string(AUTO_FRAMES) +
+                          " consecutive frames (real window present + text + streaming image)");
+    check(win.surface().frame_count() >= AUTO_FRAMES, "frame_count() >= " + std::to_string(AUTO_FRAMES) + " (got " +
+                                                          std::to_string(win.surface().frame_count()) + ")");
+    check(ws->gpu_active(), "gpu_active() still true after the frames (no permanent software-path fallback)");
 
     // XGetImage 截图落盘：合成器/WSLg 下含 GPU 上屏内容，人工复核花屏/错位的物证。
     const std::filesystem::path shot = "aurora_verify_x11_wgpu.png";
     const auto cap = ws->capture_window(shot.string());
     check(static_cast<bool>(cap) && std::filesystem::exists(shot),
-          "capture_window 落盘 " + shot.string() + "（窗口像素物证）" +
-              (cap ? std::string{} : "，错误: " + cap.error().message));
+          "capture_window wrote " + shot.string() + " (pixel evidence of the window)" +
+              (cap ? std::string{} : ", error: " + cap.error().message));
 
     // ---- 人工段 ----
     if (interactive) {
-        emit("\n[人工段] 窗口常驻：顶部为流式「视频」（逐帧重传），整体挂 cache_layer 并旋转。");
-        emit("预期：画面连续旋转、无花屏/错位/撕裂；关闭窗口退出。");
+        emit(
+            "\n[Manual] window stays open: streaming 'video' on top (re-uploaded per frame), "
+            "the whole tree on a rotating cache_layer.");
+        emit("Expect: continuous rotation, no corruption/misalignment/tearing; close the window to exit.");
         float angle = 0.0F;
         while (!win.should_close()) {
             angle += 1.5F;
@@ -446,10 +453,10 @@ auto main(int argc, char **argv) -> int {
             win.surface().poll_platform_events();
         }
     } else {
-        emit("\n提示：加 --interactive 进入常驻窗口人工目视段。");
+        emit("\nTip: pass --interactive to enter the persistent-window manual visual section.");
     }
 
-    emit(std::string("\n结果：") + (failures == 0 ? "ALL PASS" : std::to_string(failures) + " FAILURES"));
+    emit(std::string("\nResult: ") + (failures == 0 ? "ALL PASS" : std::to_string(failures) + " FAILURES"));
     return failures == 0 ? 0 : 1;
 #endif  // AURORA_BACKEND_GPU_WGPU && AURORA_BACKEND_X11
 }

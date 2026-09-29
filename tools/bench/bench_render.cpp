@@ -64,6 +64,7 @@ auto build_tree(std::shared_ptr<aurora::Chip> *out_probe) -> aurora::Node {
 }
 
 // Representative text (Latin + digits + CJK) covering the fallback chain and atlas-cache paths.
+// CJK-LITERAL: cjk-fixture - Han/kana/hangul runs are the shaping input fed to the glyph atlas, never printed
 constexpr auto AURORA_BENCH_TEXT = "The quick brown fox jumps 0123456789 灰狐跳过懒狗 こんにちは世界 안녕하세요";
 
 // Scroll-scene content tree: `aurora::Scroll` wrapping a column of 200 aurora::Chip (with label
@@ -298,7 +299,7 @@ auto main() -> int {
 // 无头后端未编译：本基准的唯一绘制目标是 `HeadlessSurface`，无替代实现——跳过并如实说明，
 // 不编译失败（基准的判据本身也无从成立）。
 auto main() -> int {
-    AURORA_LOG_RAW("bench", "bench_render: skipped (AURORA_BACKEND_HEADLESS 未开启，无绘制目标)\n");
+    AURORA_LOG_RAW("bench", "bench_render: skipped (AURORA_BACKEND_HEADLESS not enabled, no paint target)\n");
     return 0;
 }
 

@@ -138,21 +138,21 @@ auto main(int argc, char **argv) -> int {
 
     auto *sink = win.surface().gpu_backend();
     if (sink == nullptr) {
-        emit("[SKIP] 此构建未启用 GLFW GPU 通道（AURORA_ENABLE_GLFW_GPU_GL=OFF 或回退软件路径）");
+        emit("[SKIP] this build has no GLFW GPU channel (AURORA_ENABLE_GLFW_GPU_GL=OFF or it fell back to software)");
         return 2;
     }
     auto &backend = sink->backend();
-    check(backend.name() == "gpu-gl", "GPU 通道 name == gpu-gl");
+    check(backend.name() == "gpu-gl", "GPU channel name == gpu-gl");
     auto *gpu = dynamic_cast<aurora::rhi::GpuGlRhi *>(&backend);
 
     const auto caps = gpu->capabilities();
     check(caps.gpu, "capabilities().gpu == true");
-    check(!caps.native_surface_import, "capabilities().native_surface_import == false（GL 3.3 仅契约位）");
+    check(!caps.native_surface_import, "capabilities().native_surface_import == false (GL 3.3: contract bit only)");
 
     // ---- 契约位：导入空帧恒 0（warn-once，不崩溃）----
     aurora::NativeSurfaceFrame empty_frame;
     const auto imported = gpu->import_native_surface(empty_frame);
-    check(imported == 0, "import_native_surface(空帧) == 0（契约不兑现口径）");
+    check(imported == 0, "import_native_surface(empty frame) == 0 (contract not fulfilled)");
 
     // ---- 流式纹理逐版本像素（真实 GL 上传 + 采样）----
     // 同一 stream_key：v1 红（建槽 + 首传）→ v1 重绘（同版本命中常驻槽，无新上传）→
@@ -198,9 +198,9 @@ auto main(int argc, char **argv) -> int {
     const auto c_red1 = center_of(red1);
     const auto c_red2 = center_of(red2);
     const auto c_blue = center_of(blue);
-    check(c_red1[0] > 180 && c_red1[1] < 80 && c_red1[2] < 80, "流式帧 v1 中心为红（建槽 + 首传上屏）");
-    check(c_red2[0] > 180 && c_red2[1] < 80 && c_red2[2] < 80, "流式帧同版本重绘仍为红（槽复用）");
-    check(c_blue[2] > 180 && c_blue[0] < 80 && c_blue[1] < 80, "流式帧 v2 中心为蓝（同槽增量重传生效）");
+    check(c_red1[0] > 180 && c_red1[1] < 80 && c_red1[2] < 80, "stream v1 center is red (new slot + first upload)");
+    check(c_red2[0] > 180 && c_red2[1] < 80 && c_red2[2] < 80, "stream same-version redraw stays red (slot reused)");
+    check(c_blue[2] > 180 && c_blue[0] < 80 && c_blue[1] < 80, "stream v2 center is blue (incremental reupload works)");
 
     // ---- 层缓存持久性（FBO 常驻层 + DrawLayer）----
     // 冷帧：BeginLayer + 内容 + EndLayer + DrawLayer；稳态帧：仅 DrawLayer（命中 FBO）。
@@ -242,9 +242,9 @@ auto main(int argc, char **argv) -> int {
     // 层矩形在画布内居中（20..100 x 20..80 于 120x100），取样点与行序无关。
     const auto s_cold_in = sample(layer_cold, 40, 40);
     const auto s_warm_in = sample(layer_warm, 40, 40);
-    check(s_cold_in[1] > 140 && s_cold_in[0] < 90, "层缓存冷帧层内为绿（BeginLayer+内容+DrawLayer）");
-    check(s_warm_in[1] > 140 && s_warm_in[0] < 90, "层缓存稳态帧层内仍为绿（仅 DrawLayer 命中 FBO）");
-    check(s_cold_in == s_warm_in, "冷帧与稳态帧层内像素一致（跨帧持久性）");
+    check(s_cold_in[1] > 140 && s_cold_in[0] < 90, "cold frame green inside the layer (BeginLayer+content+DrawLayer)");
+    check(s_warm_in[1] > 140 && s_warm_in[0] < 90, "steady frame green inside the layer (DrawLayer hits the FBO)");
+    check(s_cold_in == s_warm_in, "cold and steady layer pixels match (persists across frames)");
 
     // ---- 平台 present 链路（真实窗口多帧上屏）----
     // 控件用独立 stream key（与上面直驱段的 key 7 互不干扰）。
@@ -278,12 +278,13 @@ auto main(int argc, char **argv) -> int {
             present_ok = false;
         }
     }
-    check(present_ok, "present_root 连续 " + std::to_string(AUTO_FRAMES) + " 帧成功（平台上屏链路）");
+    check(present_ok,
+          "present_root succeeded for " + std::to_string(AUTO_FRAMES) + " consecutive frames (platform present path)");
 
     // ---- 人工段 ----
     if (interactive) {
-        emit("\n[人工段] 窗口常驻：上半为流式「视频」（逐帧重传），整体挂 cache_layer 并旋转。");
-        emit("预期：画面连续旋转、无花屏/错位；关闭窗口退出。");
+        emit("\n[Manual] The window stays open: a streaming 'video' (reuploaded each frame) on top, the whole tree");
+        emit("carries cache_layer and rotates. Expect smooth rotation, no corruption; close the window to exit.");
         float angle = 0.0F;
         while (!win.should_close()) {
             angle += 1.5F;
@@ -292,9 +293,9 @@ auto main(int argc, char **argv) -> int {
             (void)win.present_root(root_node);
         }
     } else {
-        emit("\n提示：加 --interactive 进入常驻窗口人工目视段。");
+        emit("\nHint: pass --interactive to enter the resident-window visual check.");
     }
 
-    emit(std::string("\n结果：") + (failures == 0 ? "ALL PASS" : std::to_string(failures) + " FAILURES"));
+    emit(std::string("\nResult: ") + (failures == 0 ? "ALL PASS" : std::to_string(failures) + " FAILURES"));
     return failures == 0 ? 0 : 1;
 }
