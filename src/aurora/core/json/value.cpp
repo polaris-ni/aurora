@@ -469,9 +469,12 @@ auto Value::end() const noexcept -> const Value * {
 // ============================================================================
 // 封闭读类型集的显式实例化
 // ----------------------------------------------------------------------------
-// 头内不留模板实现，故此处为全部封闭特化提供唯一实例化点。std::size_t 与
-// std::uint64_t 在 64 位目标上同型（重复显式实例化非法），仅 32 位目标（如
-// wasm32、x86）才需要为 size_t 独立实例化，故按 AURORA_BIT_32 条件守卫。
+// 头内不留模板实现，故此处为全部封闭特化提供唯一实例化点。std::size_t 与 std::uint64_t 在 64 位
+// Linux/Windows 目标上同型（重复显式实例化非法，故跳过）；但在 macOS（libc++，AURORA_PLATFORM_MACOS）
+// 上 std::size_t == unsigned long 而 std::uint64_t == unsigned long long，是两种不同类型，必须独立
+// 实例化，否则 TextInput::deserialize_props 等引用 as_or<unsigned long> 会链接失败。32 位目标
+// （wasm32/x86/arm32，AURORA_BIT_32）同样为异型，需独立实例化。其余 64 位目标二者同型，跳过以避免
+// 重复显式实例化错误。
 // ============================================================================
 
 #define AURORA_JSON_INSTANTIATE_STRICT(T)    \
@@ -488,7 +491,7 @@ AURORA_JSON_INSTANTIATE_READ(bool)
 AURORA_JSON_INSTANTIATE_READ(int)
 AURORA_JSON_INSTANTIATE_READ(std::int64_t)
 AURORA_JSON_INSTANTIATE_READ(std::uint64_t)
-#if defined(AURORA_BIT_32)
+#if defined(AURORA_BIT_32) || defined(AURORA_PLATFORM_MACOS)
 AURORA_JSON_INSTANTIATE_READ(std::size_t)
 #endif
 AURORA_JSON_INSTANTIATE_READ(float)
