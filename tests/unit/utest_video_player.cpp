@@ -14,8 +14,10 @@
 #include "aurora/widget/text.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_video_player {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -244,10 +246,10 @@ AURORA_TEST_CASE(props_serialize_deserialize_roundtrip) {
     p.set_fit(BoxFit::Fill);
     p.set_show_controls(false);
 
-    aurora::Json props;
+    aurora::Json props = aurora::Json::object();
     p.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["fit"].get<std::string>(), "Fill");
-    AURORA_TEST_CHECK_EQ(props["show_controls"].get<bool>(), false);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "fit"), "Fill");
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "show_controls"), false);
 
     VideoPlayer q;
     q.deserialize_props(props);

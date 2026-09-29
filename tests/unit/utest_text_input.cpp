@@ -22,8 +22,12 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_text_input {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 using aurora::testing::require_value;
 
@@ -76,11 +80,11 @@ AURORA_TEST_CASE(props_constructor_sets_initial_state) {
     TextInput ti{props};
     AURORA_TEST_CHECK_EQ(ti.value(), std::string{"init"});
 
-    Json out;
+    Json out = Json::object();
     ti.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(out["value"].get<std::string>(), "init");
-    AURORA_TEST_CHECK_EQ(out["placeholder"].get<std::string>(), "ph");
-    AURORA_TEST_CHECK_NEAR(out["font_size"].get<float>(), 16.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "value"), "init");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "placeholder"), "ph");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "font_size"), 16.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(chained_setters_update_serialized_props) {
@@ -88,11 +92,11 @@ AURORA_TEST_CASE(chained_setters_update_serialized_props) {
     ti.set_value("v").set_placeholder("p").font_size(20.0F);
     AURORA_TEST_CHECK_EQ(ti.value(), std::string{"v"});
 
-    Json out;
+    Json out = Json::object();
     ti.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(out["value"].get<std::string>(), "v");
-    AURORA_TEST_CHECK_EQ(out["placeholder"].get<std::string>(), "p");
-    AURORA_TEST_CHECK_NEAR(out["font_size"].get<float>(), 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "value"), "v");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "placeholder"), "p");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "font_size"), 20.0F, 1e-4F);
 
     // 再次 setter 覆盖旧值。
     ti.set_value("w");
@@ -105,13 +109,13 @@ AURORA_TEST_CASE(read_only_flag_state_and_serialization) {
     ti.set_read_only(true);
     AURORA_TEST_CHECK_TRUE(ti.read_only());
 
-    Json out;
+    Json out = Json::object();
     ti.serialize_props(out);
     AURORA_TEST_CHECK_TRUE(out.contains("read_only"));
-    AURORA_TEST_CHECK_EQ(out["read_only"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(out, "read_only"), true);
 
     // 默认只读=false 时不落盘（键省略语义）。
-    Json defaults;
+    Json defaults = Json::object();
     TextInput def;
     def.serialize_props(defaults);
     AURORA_TEST_CHECK_FALSE(defaults.contains("read_only"));
@@ -326,35 +330,35 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {
         .set_obscure_text(true)
         .set_focused_border_color(Color(1, 2, 3, 4));
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["value"].get<std::string>(), "user");
-    AURORA_TEST_CHECK_EQ(props["max_length"].get<int>(), 5);
-    AURORA_TEST_CHECK_EQ(props["read_only"].get<bool>(), true);
-    AURORA_TEST_CHECK_EQ(props["obscure_text"].get<bool>(), true);
-    AURORA_TEST_CHECK_EQ(props["background"][0].get<int>(), 10);
-    AURORA_TEST_CHECK_EQ(props["focused_border_color"][2].get<int>(), 3);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "value"), "user");
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "max_length"), 5);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "read_only"), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "obscure_text"), true);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "background"), 0)->as_or<int>(-1), 10);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "focused_border_color"), 2)->as_or<int>(-1), 3);
 
     TextInput dst;
     dst.deserialize_props(props);
     AURORA_TEST_CHECK_EQ(dst.value(), std::string{"user"});
     AURORA_TEST_CHECK_TRUE(dst.read_only());
-    Json back;
+    Json back = Json::object();
     dst.serialize_props(back);
-    AURORA_TEST_CHECK_EQ(back["placeholder"].get<std::string>(), "type here");
-    AURORA_TEST_CHECK_NEAR(back["font_size"].get<float>(), 18.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(back["background"][3].get<int>(), 40);
-    AURORA_TEST_CHECK_EQ(back["focused_border_color"][0].get<int>(), 1);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(back, "placeholder"), "type here");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(back, "font_size"), 18.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(back, "background"), 3)->as_or<int>(-1), 40);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(back, "focused_border_color"), 0)->as_or<int>(-1), 1);
 
     // 负边框线宽被钳制为 1.0。
     TextInput clamped;
     clamped.set_border_width(-5.0F);
-    Json clamp_props;
+    Json clamp_props = Json::object();
     clamped.serialize_props(clamp_props);
-    AURORA_TEST_CHECK_NEAR(clamp_props["border_width"].get<float>(), 1.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(clamp_props, "border_width"), 1.0F, 1e-4F);
 
     // 默认值省略语义：未设置的键不落盘。
-    Json defaults;
+    Json defaults = Json::object();
     TextInput def;
     def.serialize_props(defaults);
     AURORA_TEST_CHECK_FALSE(defaults.contains("focused_border_color"));  // 保留「跟随主题」语义
@@ -650,16 +654,16 @@ AURORA_TEST_CASE(direction_prop_serialization_roundtrip) {
     // 显式方向落盘；未设置不输出（保留「继承环境」语义）。
     TextInput rtl;
     rtl.set_direction(TextDirection::RTL);
-    Json props;
+    Json props = Json::object();
     rtl.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["direction"].get<std::string>(), "RTL");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "direction"), "RTL");
 
     TextInput dst;
     dst.deserialize_props(props);
     AURORA_TEST_REQUIRE_TRUE(dst.direction().has_value());
     AURORA_TEST_CHECK_TRUE(require_value(dst.direction()) == TextDirection::RTL);
 
-    Json defaults;
+    Json defaults = Json::object();
     TextInput def;
     def.serialize_props(defaults);
     AURORA_TEST_CHECK_FALSE(defaults.contains("direction"));  // 未设置不落盘
@@ -701,7 +705,7 @@ AURORA_TEST_CASE(bidi_control_chars_roundtrip_serialization) {
     ti.set_value(std::string{"a"} + "\u202B" + "bc" + "\u202C");  // RLE … PDF 包 bc
 
     const std::string before = ti.value();
-    Json props;
+    Json props = Json::object();
     ti.serialize_props(props);
     TextInput dst;
     dst.deserialize_props(props);

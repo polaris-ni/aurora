@@ -12,8 +12,11 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/radio_spin.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_radio_spin {
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -119,10 +122,10 @@ AURORA_TEST_CASE(radiogroup_describe_and_roundtrip) {
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
 
     RadioGroup src({"A", "B"}, 1);
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["selected_index"].get<int>(), 1);
-    AURORA_TEST_REQUIRE_EQ(props["options"].size(), 2U);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "selected_index"), 1);
+    AURORA_TEST_REQUIRE_EQ(require_child(props, "options")->size(), 2U);
 
     RadioGroup dst;
     dst.deserialize_props(props);
@@ -223,10 +226,10 @@ AURORA_TEST_CASE(spinbox_describe_and_roundtrip) {
     src.set_suffix(" px");
     src.set_decimals(1);
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["value"].get<double>(), 50.0, 1e-4);
-    AURORA_TEST_CHECK_EQ(props["decimals"].get<int>(), 1);
+    AURORA_TEST_CHECK_NEAR(require_field<double>(props, "value"), 50.0, 1e-4);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "decimals"), 1);
 
     SpinBox dst;
     dst.deserialize_props(props);

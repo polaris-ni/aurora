@@ -23,8 +23,11 @@
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_containers {
+
+using aurora::testing::require_field;
 
 namespace {
 
@@ -346,10 +349,10 @@ AURORA_TEST_CASE(props_serialize_deserialize_roundtrip) {
     src.set_main_axis_size(MainAxisSize::Max);
     src.set_gap(12.0F);
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["main_axis_alignment"].get<std::string>(), "SpaceBetween");
-    AURORA_TEST_CHECK_EQ(props["gap"].get<float>(), 12.0F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "main_axis_alignment"), "SpaceBetween");
+    AURORA_TEST_CHECK_EQ(require_field<float>(props, "gap"), 12.0F);
 
     Column dst;
     dst.deserialize_props(props);

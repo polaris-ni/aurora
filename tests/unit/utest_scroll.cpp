@@ -24,9 +24,11 @@
 #include "aurora/widget/containers.h"
 #include "aurora/widget/scroll.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 #include "paths.h"
 
 namespace aurora::test_cases::utest_scroll {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -153,18 +155,16 @@ auto gate_threshold(const char *id) -> double {
     AURORA_TEST_REQUIRE_MSG(in.good(), "perf_gates.json must be readable: " + path);
     std::ostringstream ss;
     ss << in.rdbuf();
-    Json cfg = Json{};
-    try {
-        cfg = Json::parse(ss.str());
-    } catch (...) {
-        cfg = Json{};
-    }
-    AURORA_TEST_REQUIRE_MSG(cfg.contains("gates") && cfg["gates"].is_array(),
+    const auto parsed = json::parse(ss.str());
+    AURORA_TEST_REQUIRE_MSG(parsed.ok(), std::string{"perf_gates.json must parse: "} + path);
+    const Json &cfg = parsed.value();
+    AURORA_TEST_REQUIRE_MSG(cfg.contains("gates") && cfg.at("gates")->is_array(),
                             std::string{"perf_gates.json must carry a gates array: "} + path);
-    for (const auto &g : cfg["gates"]) {
-        if (g.contains("id") && g["id"].get<std::string>() == id) {
-            AURORA_TEST_REQUIRE_MSG(g.contains("threshold"), std::string{"gate "} + id + " has no threshold");
-            return g["threshold"].get<double>();
+    const auto &gates = *cfg.at("gates");
+    for (const auto *g = gates.begin(); g != gates.end(); ++g) {
+        if (g->contains("id") && g->at("id")->as_or<std::string>("") == id) {
+            AURORA_TEST_REQUIRE_MSG(g->contains("threshold"), std::string{"gate "} + id + " has no threshold");
+            return g->at("threshold")->as_or<double>(0.0);
         }
     }
     AURORA_TEST_REQUIRE_MSG(false, std::string{"gate "} + id + " is not declared in perf_gates.json");
@@ -267,17 +267,17 @@ AURORA_TEST_CASE(serialized_offset_round_trips_and_beats_restore_key) {
     LayoutEngine::layout(restored, bounded(100.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(restored.offset_y(), 250.0F, 1e-4F);  // 键恢复
 
-    Json props;
+    Json props = Json::object();
     restored.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["offset"].get<float>(), 250.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(props["restore_key"].get<std::string>(), std::string{"k"});
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "offset"), 250.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "restore_key"), std::string{"k"});
 
     // 显式反序列化的 offset 优先于键恢复。
     Scroll explicit_scroll;
     explicit_scroll.restore_key = "k";
     explicit_scroll.add(box(100.0F, 400.0F));
-    Json patch;
-    patch["offset"] = 30.0F;
+    Json patch = Json::object();
+    patch.set("offset", 30.0F);
     explicit_scroll.deserialize_props(patch);
     LayoutEngine::layout(explicit_scroll, bounded(100.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(explicit_scroll.offset_y(), 30.0F, 1e-4F);
@@ -363,14 +363,14 @@ AURORA_TEST_CASE(initializer_list_takes_first_child_only) {
 }
 
 AURORA_TEST_CASE(step_serialization_roundtrip) {
-    Json props;
+    Json props = Json::object();
     Scroll{}.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["step"].get<float>(), 16.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "step"), 16.0F, 1e-4F);
 
     Scroll src;
     src.step = 24.0F;
     src.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["step"].get<float>(), 24.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "step"), 24.0F, 1e-4F);
 
     // 反序列化出的 step 参与滚动计算：step=24 时滚一单位位移 24px。
     Scroll dst{ScrollProps{.child = box(300.0F, 800.0F)}};
@@ -535,11 +535,11 @@ AURORA_TEST_CASE(snap_properties_describe_and_round_trip) {
     Scroll src{ScrollProps{.child = box(300.0F, 800.0F),
                            .step = 1.0F,
                            .snap = ScrollSnap{.extent = 120.0F, .alignment = ScrollSnapAlignment::Center}}};
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["snap_extent"].get<float>(), 120.0F, 1e-4F);
-    AURORA_TEST_CHECK_FALSE(props["snap_paging"].get<bool>());
-    AURORA_TEST_CHECK_EQ(props["snap_alignment"].get<std::string>(), std::string{"Center"});
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "snap_extent"), 120.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(require_field<bool>(props, "snap_paging"));
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "snap_alignment"), std::string{"Center"});
 
     // 反序列化只还原属性、不还原子树：目标实例自带同尺寸内容，才能检验 snap 是否真生效。
     Scroll dst{ScrollProps{.child = box(300.0F, 800.0F)}};

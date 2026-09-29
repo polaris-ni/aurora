@@ -19,9 +19,15 @@
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/codegen.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 #include "paths.h"
 
 namespace aurora::test_cases::itest_cli {
+
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 using au::serialization::CodeStyle;
 using au::serialization::from_json;
@@ -79,20 +85,22 @@ AURORA_TEST_CASE(cli_components_lists_registered_widgets) {
     for (const auto &t : types) {
         arr.push_back(t);
     }
-    const std::string output = arr.dump(2);
-    AURORA_TEST_CHECK(output.find("Button") != std::string::npos);
-    AURORA_TEST_CHECK(output.find("Text") != std::string::npos);
+    auto output = au::json::dump(arr, {.indent = 2});
+    AURORA_TEST_REQUIRE_TRUE(output.ok());
+    AURORA_TEST_CHECK(output.value().find("Button") != std::string::npos);
+    AURORA_TEST_CHECK(output.value().find("Text") != std::string::npos);
 }
 
 AURORA_TEST_CASE(cli_describe_returns_button_schema) {
     const au::Json schema = au::describe_component("Button");
     AURORA_TEST_CHECK(!schema.empty());
-    AURORA_TEST_CHECK(schema["type"] == "Button");
+    AURORA_TEST_CHECK(require_field<std::string>(schema, "type") == "Button");
     AURORA_TEST_CHECK(schema.contains("prop_descriptors"));
 
     // 未知组件：返回空对象或不含有效 prop_descriptors。
     const au::Json unknown = au::describe_component("FooBar");
-    AURORA_TEST_CHECK(!unknown.contains("prop_descriptors") || unknown["prop_descriptors"].empty());
+    const auto *unknown_desc = unknown.find("prop_descriptors");
+    AURORA_TEST_CHECK(unknown_desc == nullptr || unknown_desc->empty());
 }
 
 AURORA_TEST_CASE(cli_search_finds_button_by_substring) {
@@ -103,16 +111,17 @@ AURORA_TEST_CASE(cli_search_finds_button_by_substring) {
     for (const auto &r : results) {
         arr.push_back(r);
     }
-    const std::string output = arr.dump();
-    AURORA_TEST_CHECK(output.find("Button") != std::string::npos);
+    auto output = au::json::dump(arr);
+    AURORA_TEST_REQUIRE_TRUE(output.ok());
+    AURORA_TEST_CHECK(output.value().find("Button") != std::string::npos);
 }
 
 AURORA_TEST_CASE(cli_validate_rejects_invalid_trees) {
     // 合法树。
     au::Json valid = au::Json::object();
-    valid["type"] = "Text";
-    valid["props"] = au::Json{{"content", "hi"}};
-    valid["children"] = au::Json::array();
+    valid.set("type", "Text");
+    valid.set("props", testing::json_obj({{"content", "hi"}}));
+    valid.set("children", au::Json::array());
 
     auto w = from_json(valid);
     AURORA_TEST_CHECK(w.ok());
@@ -124,9 +133,9 @@ AURORA_TEST_CASE(cli_validate_rejects_invalid_trees) {
 
     // 非法树（空类型）：from_json 拒绝或 validate 报错均算通过。
     au::Json invalid = au::Json::object();
-    invalid["type"] = "";
-    invalid["props"] = au::Json::object();
-    invalid["children"] = au::Json::array();
+    invalid.set("type", "");
+    invalid.set("props", au::Json::object());
+    invalid.set("children", au::Json::array());
 
     auto w2 = from_json(invalid);
     if (w2.ok()) {
@@ -140,13 +149,13 @@ AURORA_TEST_CASE(cli_validate_rejects_invalid_trees) {
 
 AURORA_TEST_CASE(cli_snapshot_renders_logical_tree) {
     au::Json tree = au::Json::object();
-    tree["type"] = "Column";
-    tree["props"] = au::Json::object();
+    tree.set("type", "Column");
+    tree.set("props", au::Json::object());
     au::Json child = au::Json::object();
-    child["type"] = "Text";
-    child["props"] = au::Json{{"content", "Hello"}};
-    child["children"] = au::Json::array();
-    tree["children"] = au::Json::array({child});
+    child.set("type", "Text");
+    child.set("props", testing::json_obj({{"content", "Hello"}}));
+    child.set("children", au::Json::array());
+    tree.set("children", testing::json_arr({child}));
 
     auto w = from_json(tree);
     AURORA_TEST_CHECK(w.ok());
@@ -155,18 +164,19 @@ AURORA_TEST_CASE(cli_snapshot_renders_logical_tree) {
     }
     au::Node root(std::move(w.value()));
     const au::Json snap = au::render_to_logical_snapshot(root, 800, 600);
-    AURORA_TEST_CHECK(snap["type"] == "Column");
+    AURORA_TEST_CHECK(require_field<std::string>(snap, "type") == "Column");
     AURORA_TEST_CHECK(snap.contains("children"));
-    AURORA_TEST_CHECK(snap["children"].is_array());
-    AURORA_TEST_CHECK(!snap["children"].empty());
-    AURORA_TEST_CHECK(snap["children"][0]["type"] == "Text");
+    const auto &children = *require_child(snap, "children");
+    AURORA_TEST_CHECK(children.is_array());
+    AURORA_TEST_CHECK(!children.empty());
+    AURORA_TEST_CHECK(require_field<std::string>(*require_child_at(children, 0), "type") == "Text");
 }
 
 AURORA_TEST_CASE(cli_to_code_supports_all_styles) {
     au::Json tree = au::Json::object();
-    tree["type"] = "Button";
-    tree["props"] = au::Json{{"label", "Click"}};
-    tree["children"] = au::Json::array();
+    tree.set("type", "Button");
+    tree.set("props", testing::json_obj({{"label", "Click"}}));
+    tree.set("children", au::Json::array());
 
     const std::string code_f = to_code(tree, CodeStyle::Fluent);
     AURORA_TEST_CHECK(!code_f.empty());
@@ -185,20 +195,21 @@ AURORA_TEST_CASE(cli_schema_lists_all_components_with_descriptors) {
     AURORA_TEST_CHECK(schemas.size() == au::list_all_components().size());
 
     au::Json api = au::Json::object();
-    api["library"] = "aurora";
-    api["language"] = "c++20";
+    api.set("library", "aurora");
+    api.set("language", "c++20");
     au::Json widgets = au::Json::array();
     for (const auto &s : schemas) {
         AURORA_TEST_CHECK(s.contains("type"));
         AURORA_TEST_CHECK(s.contains("prop_descriptors"));
         widgets.push_back(s);
     }
-    api["widgets"] = widgets;
+    api.set("widgets", widgets);
 
-    const std::string output = api.dump();
-    AURORA_TEST_CHECK(output.find("aurora") != std::string::npos);
-    AURORA_TEST_CHECK(output.find("widgets") != std::string::npos);
-    AURORA_TEST_CHECK(output.find("Button") != std::string::npos);
+    auto output = au::json::dump(api);
+    AURORA_TEST_REQUIRE_TRUE(output.ok());
+    AURORA_TEST_CHECK(output.value().find("aurora") != std::string::npos);
+    AURORA_TEST_CHECK(output.value().find("widgets") != std::string::npos);
+    AURORA_TEST_CHECK(output.value().find("Button") != std::string::npos);
 }
 
 // ---------- CLI 端到端测试（运行 aurora_cli 可执行文件） ----------

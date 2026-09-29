@@ -22,8 +22,16 @@
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_inspector_api {
+
+using aurora::testing::json_arr;
+using aurora::testing::json_obj;
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -70,12 +78,12 @@ auto cross_check_enum_and_address(Widget &root, const Json &node_json, const std
     if (w == nullptr) {
         return 0;
     }
-    AURORA_TEST_CHECK_EQ(node_json["type"], Json(w->type_name()));
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(node_json, "type"), std::string(w->type_name()));
     std::size_t visited = 1;
-    const Json &children = node_json["children"];
-    for (std::size_t i = 0; i < children.size(); ++i) {
+    const auto *const children = require_child(node_json, "children");
+    for (std::size_t i = 0; i < children->size(); ++i) {
         const std::string child_path = path.empty() ? std::to_string(i) : path + "/" + std::to_string(i);
-        visited += cross_check_enum_and_address(root, children[i], child_path);
+        visited += cross_check_enum_and_address(root, *require_child_at(*children, i), child_path);
     }
     return visited;
 }
@@ -98,18 +106,20 @@ AURORA_TEST_CASE(tree_text_and_rich_dump_widget_tree) {
 
 AURORA_TEST_CASE(tree_json_has_type_and_children_only) {
     const Json j = Inspector::tree_json(make_tree());
-    AURORA_TEST_CHECK_EQ(j["type"], "Column");
-    AURORA_TEST_CHECK_EQ(j["children"].size(), 1U);
-    AURORA_TEST_CHECK_EQ(j["children"][0]["type"], "Text");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(j, "type"), "Column");
+    const auto *const children = require_child(j, "children");
+    AURORA_TEST_CHECK_EQ(children->size(), 1U);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(*children, 0), "type"), "Text");
     AURORA_TEST_CHECK_FALSE(j.contains("props"));  // 结构化树仅 type + children
 }
 
 AURORA_TEST_CASE(tree_json_full_includes_props) {
     const Json j = Inspector::tree_json_full(make_tree());
-    AURORA_TEST_CHECK_TRUE(j["props"].is_object());
-    AURORA_TEST_CHECK_EQ(j["children"][0]["type"], "Text");
+    AURORA_TEST_CHECK_TRUE(require_child(j, "props")->is_object());
+    const auto *const child0 = require_child_at(*require_child(j, "children"), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*child0, "type"), "Text");
     // 完整快照携带序列化属性：Text 的 content 键为文本内容。
-    AURORA_TEST_CHECK_EQ(j["children"][0]["props"]["content"], "hi");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(*child0, "props"), "content"), "hi");
 }
 
 AURORA_TEST_CASE(tree_json_full_marks_the_focused_node) {
@@ -129,16 +139,17 @@ AURORA_TEST_CASE(tree_json_full_marks_the_focused_node) {
 
     fm.set_focus(a.get());
     const Json first = Inspector::tree_json_full(root);
-    AURORA_TEST_CHECK_TRUE(first["children"][0].contains("focused"));
-    AURORA_TEST_CHECK_FALSE(first["children"][1].contains("focused"));
+    AURORA_TEST_CHECK_TRUE(require_child_at(*require_child(first, "children"), 0)->contains("focused"));
+    AURORA_TEST_CHECK_FALSE(require_child_at(*require_child(first, "children"), 1)->contains("focused"));
 
     fm.set_focus(b.get());
     const Json second = Inspector::tree_json_full(root);
-    AURORA_TEST_CHECK_FALSE(second["children"][0].contains("focused"));
-    AURORA_TEST_CHECK_TRUE(second["children"][1].contains("focused"));
+    AURORA_TEST_CHECK_FALSE(require_child_at(*require_child(second, "children"), 0)->contains("focused"));
+    AURORA_TEST_CHECK_TRUE(require_child_at(*require_child(second, "children"), 1)->contains("focused"));
 
     fm.clear();
-    AURORA_TEST_CHECK_FALSE(Inspector::tree_json_full(root)["children"][1].contains("focused"));
+    AURORA_TEST_CHECK_FALSE(
+        require_child_at(*require_child(Inspector::tree_json_full(root), "children"), 1)->contains("focused"));
 }
 
 AURORA_TEST_CASE(widget_info_and_prop_reads) {
@@ -146,13 +157,13 @@ AURORA_TEST_CASE(widget_info_and_prop_reads) {
 
     // widget_info：descriptor 元数据 + values 当前值合并。
     const Json info = Inspector::widget_info(*w);
-    AURORA_TEST_CHECK_EQ(info["descriptor"]["name"], "Text");
-    AURORA_TEST_CHECK_EQ(info["values"]["content"], "hi");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(info, "descriptor"), "name"), "Text");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(info, "values"), "content"), "hi");
 
     // get_prop 与 widget_info 同构。
     const Json props = Inspector::get_prop(*w);
-    AURORA_TEST_CHECK_EQ(props["descriptor"]["name"], "Text");
-    AURORA_TEST_CHECK_EQ(props["values"]["content"], "hi");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(props, "descriptor"), "name"), "Text");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(props, "values"), "content"), "hi");
 
     // 单键读取；未命中键返回 null Json（而非抛错）。
     AURORA_TEST_CHECK_EQ(Inspector::get_prop_value(*w, "content"), "hi");
@@ -178,13 +189,13 @@ AURORA_TEST_CASE(apply_patch_sets_props_by_path) {
     Node root = make_tree();
 
     // 路径格式 "/<子节点索引路径>/<属性名>"：补丁作用于 0 号子节点的 content。
-    const Json patch = Json::array({Json{{"path", "/0/content"}, {"value", "patched"}}});
+    const Json patch = json_arr({json_obj({{"path", "/0/content"}, {"value", "patched"}})});
     const Result<void> r = Inspector::apply_patch(root, patch);
     AURORA_TEST_REQUIRE_TRUE(r.ok());
     AURORA_TEST_CHECK_EQ(Inspector::get_prop_value(Inspector::find_node(root, "0").widget(), "content"), "patched");
 
     // 缺 value 的操作项被跳过（仍返回 ok）。
-    const Json partial = Json::array({Json{{"path", "/0/content"}}});
+    const Json partial = json_arr({json_obj({{"path", "/0/content"}})});
     AURORA_TEST_CHECK_TRUE(Inspector::apply_patch(root, partial).ok());
 
     // 错误路径：补丁必须是 JSON 数组。
@@ -240,14 +251,18 @@ AURORA_TEST_CASE(find_widget_and_tree_json_full_reach_virtualized_root) {
     Node root{host};  // 供门面的 `Node` 入口使用；host 为树根，本无 `layout_parent_` 可被清
 
     const Json tree = Inspector::tree_json_full(root);
-    AURORA_TEST_CHECK_EQ(tree["type"], "NavigatorHost");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(tree, "type"), "NavigatorHost");
     // 旧口径（只沿 `child_nodes()`）此处恒为 0 —— 断言为 1 即锁定「子树可见」。
-    AURORA_TEST_REQUIRE_EQ(tree["children"].size(), 1U);
+    const auto *const children = require_child(tree, "children");
+    AURORA_TEST_REQUIRE_EQ(children->size(), 1U);
 
     // 页面被 `Provider<std::shared_ptr<HeroRegistry>>` 包裹，故树形为
     // NavigatorHost → Provider → Column → Text（`rebuild_display` 的统一包装层）。
-    AURORA_TEST_CHECK_EQ(tree["children"][0]["children"][0]["type"], "Column");
-    AURORA_TEST_CHECK_EQ(tree["children"][0]["children"][0]["children"][0]["type"], "Text");
+    const auto *const child0 = require_child_at(*children, 0);
+    const auto *const inner0 = require_child_at(*require_child(*child0, "children"), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*inner0, "type"), "Column");
+    AURORA_TEST_CHECK_EQ(
+        require_field<std::string>(*require_child_at(*require_child(*inner0, "children"), 0), "type"), "Text");
 
     // 旧入口只沿 `child_nodes()` 下降，在虚拟化容器下必然断链 —— 与上一行形成对照。
     AURORA_TEST_CHECK_FALSE(static_cast<bool>(Inspector::find_node(root, "0")));
@@ -286,7 +301,7 @@ AURORA_TEST_CASE(component_discovery_lists_registered_schemas) {
 
     const Json schema = Inspector::component_schema("Text");
     AURORA_TEST_CHECK_TRUE(schema.is_object());
-    AURORA_TEST_CHECK_EQ(schema["type"], "Text");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(schema, "type"), "Text");
 }
 
 AURORA_TEST_CASE(to_code_generates_source_from_tree) {

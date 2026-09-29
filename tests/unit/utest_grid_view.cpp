@@ -19,8 +19,12 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/grid_view.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_grid_view {
+
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -250,13 +254,13 @@ AURORA_TEST_CASE(cell_positions_follow_grid) {
 
 AURORA_TEST_CASE(serialize_and_describe) {
     GridView src{9, 2, {}, 80.0F};
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["count"].get<int>(), 9);
-    AURORA_TEST_CHECK_EQ(props["columns"].get<int>(), 2);
-    AURORA_TEST_CHECK_NEAR(props["cell_extent"].get<float>(), 80.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["scroll_offset"].get<float>(), 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["cache_extent"].get<float>(), 200.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "count"), 9);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "columns"), 2);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "cell_extent"), 80.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "scroll_offset"), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "cache_extent"), 200.0F, 1e-4F);
 
     const auto d = GridView::describe_static();
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "GridView");
@@ -276,15 +280,15 @@ AURORA_TEST_CASE(serialize_and_describe) {
 
 AURORA_TEST_CASE(deserialize_props_restores_every_scalar) {
     // 静态 JSON 回填属性（工厂重建路径）：几何/缓存/吸附逐项还原，二次序列化幂等。
-    Json props;
-    props["count"] = 30;
-    props["columns"] = 3;
-    props["cell_extent"] = 96.0F;
-    props["cache_extent"] = 300.0F;
-    props["scroll_offset"] = 192.0F;
-    props["restore_key"] = "demo.gallery";
-    props["snap_paging"] = true;
-    props["snap_alignment"] = "End";
+    Json props = Json::object();
+    props.set("count", 30);
+    props.set("columns", 3);
+    props.set("cell_extent", 96.0F);
+    props.set("cache_extent", 300.0F);
+    props.set("scroll_offset", 192.0F);
+    props.set("restore_key", "demo.gallery");
+    props.set("snap_paging", Json{true});
+    props.set("snap_alignment", "End");
 
     GridView grid;
     grid.deserialize_props(props);
@@ -296,19 +300,19 @@ AURORA_TEST_CASE(deserialize_props_restores_every_scalar) {
     AURORA_TEST_CHECK_TRUE(grid.snap().alignment == ScrollSnapAlignment::End);
     AURORA_TEST_CHECK_EQ(grid.restore_key(), std::string{"demo.gallery"});
 
-    Json again;
+    Json again = Json::object();
     grid.serialize_props(again);
     for (const char *key : {"count", "columns", "cell_extent", "cache_extent", "restore_key", "snap_paging"}) {
-        AURORA_TEST_CHECK_TRUE(again[key] == props[key]);
+        AURORA_TEST_CHECK_TRUE(*require_child(again, key) == *require_child(props, key));
     }
 }
 
 AURORA_TEST_CASE(deserialize_degrades_nonpositive_geometry) {
     // 反序列化路径与构造器同一降级判据：非正列数回落 1、非正格高回落 96、负项数归零。
-    Json props;
-    props["count"] = -1;
-    props["columns"] = 0;
-    props["cell_extent"] = 0.0F;
+    Json props = Json::object();
+    props.set("count", -1);
+    props.set("columns", 0);
+    props.set("cell_extent", 0.0F);
 
     GridView grid;
     grid.deserialize_props(props);
@@ -316,9 +320,9 @@ AURORA_TEST_CASE(deserialize_degrades_nonpositive_geometry) {
     AURORA_TEST_CHECK_EQ(grid.columns(), 1);
     AURORA_TEST_CHECK_EQ(grid.row_count(), 0);
 
-    Json out;
+    Json out = Json::object();
     grid.serialize_props(out);
-    AURORA_TEST_CHECK_NEAR(out["cell_extent"].get<float>(), 96.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "cell_extent"), 96.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(deserialized_offset_wins_over_restore_key) {
@@ -327,12 +331,12 @@ AURORA_TEST_CASE(deserialized_offset_wins_over_restore_key) {
     storage.clear_all();
     storage.write("demo.grid", 480.0F);
 
-    Json props;
-    props["count"] = 30;
-    props["columns"] = 3;
-    props["cell_extent"] = 96.0F;
-    props["restore_key"] = "demo.grid";
-    props["scroll_offset"] = 192.0F;
+    Json props = Json::object();
+    props.set("count", 30);
+    props.set("columns", 3);
+    props.set("cell_extent", 96.0F);
+    props.set("restore_key", "demo.grid");
+    props.set("scroll_offset", 192.0F);
 
     GridView grid;
     grid.deserialize_props(props);
@@ -341,11 +345,11 @@ AURORA_TEST_CASE(deserialized_offset_wins_over_restore_key) {
     AURORA_TEST_CHECK_EQ(grid.live_item_count(), static_cast<std::size_t>(0));  // 无 builder：齐备但暂无条目
 
     // 只声明 restore_key（无显式偏移）时，按键恢复照常生效；宿主随后挂 builder，窗口按恢复的偏移构建。
-    Json keyed_only;
-    keyed_only["count"] = 30;
-    keyed_only["columns"] = 3;
-    keyed_only["cell_extent"] = 96.0F;
-    keyed_only["restore_key"] = "demo.grid";
+    Json keyed_only = Json::object();
+    keyed_only.set("count", 30);
+    keyed_only.set("columns", 3);
+    keyed_only.set("cell_extent", 96.0F);
+    keyed_only.set("restore_key", "demo.grid");
     BuildRecorder rec;
     GridView restored;
     restored.deserialize_props(keyed_only);
@@ -435,11 +439,11 @@ AURORA_TEST_CASE(offset_signal_follows_programmatic_and_glide_frames) {
 AURORA_TEST_CASE(snap_properties_are_serialized) {
     GridView src{9, 3, {}, 96.0F};
     src.set_snap(ScrollSnap{.extent = 288.0F, .alignment = ScrollSnapAlignment::End});
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["snap_extent"].get<float>(), 288.0F, 1e-4F);
-    AURORA_TEST_CHECK_FALSE(props["snap_paging"].get<bool>());
-    AURORA_TEST_CHECK_EQ(props["snap_alignment"].get<std::string>(), std::string{"End"});
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "snap_extent"), 288.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(require_field<bool>(props, "snap_paging"));
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "snap_alignment"), std::string{"End"});
 
     // 吸附开关的可观测性：本控件以 set_snap 接线（builder 属运行时回调，from_json 不重建条目）。
     AURORA_TEST_CHECK_TRUE(src.snap().enabled(300.0F));

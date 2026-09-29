@@ -14,8 +14,11 @@
 #include "aurora/render/offscreen.h"
 #include "aurora/widget/canvas.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_canvas {
+
+using aurora::testing::require_field;
 
 namespace {
 
@@ -109,13 +112,13 @@ AURORA_TEST_CASE(serialize_notes_callback_and_roundtrips_lengths) {
     // 调用 setter，绕过虚分派，覆盖真实可序列化的 Fixed 意图往返路径。
     src.Widget::width(px(120.0F));
     src.Widget::height(px(60.0F));
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
     // 绘制回调不可序列化：以 note 键显式声明。
     AURORA_TEST_CHECK_TRUE(props.contains("note"));
     AURORA_TEST_CHECK_TRUE(props.contains("width"));
     AURORA_TEST_CHECK_TRUE(props.contains("height"));
-    AURORA_TEST_CHECK_EQ(props["show"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "show"), true);
 
     Canvas restored;
     restored.deserialize_props(props);

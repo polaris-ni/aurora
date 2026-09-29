@@ -17,9 +17,12 @@
 #include "aurora/render/offscreen.h"
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_access.h"
 #include "framework/golden.h"
 
 namespace aurora::test_cases::utest_sparkline {
+using aurora::testing::require_child;
 
 using aurora::testing::require_value;
 
@@ -76,7 +79,7 @@ AURORA_TEST_CASE(props_roundtrip_and_factory) {
     Sparkline src{p};
     Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["values"].size(), 4U);
+    AURORA_TEST_CHECK_EQ(require_child(props, "values")->size(), 4U);
 
     Sparkline dst{};
     dst.deserialize_props(props);
@@ -94,8 +97,8 @@ AURORA_TEST_CASE(props_roundtrip_and_factory) {
 
     serialization::register_core_widgets();
     Json node = Json::object();
-    node["type"] = "Sparkline";
-    node["props"] = props;
+    node.set("type", "Sparkline");
+    node.set("props", props);
     const auto built = serialization::from_json(node);
     AURORA_TEST_REQUIRE_TRUE(built.ok());
     AURORA_TEST_REQUIRE_NOT_NULL(dynamic_cast<const Sparkline *>(built.value().get()));

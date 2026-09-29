@@ -62,6 +62,8 @@ struct WidgetDescriptor {
 };
 
 /// @brief 取 JSON 值的类型名（迁移自 nlohmann 的 `Value::type_name()`；`aurora::json::Value` 无该成员）。
+/// @param j 待判别的 JSON 值。
+/// @return 类型名字符串："null" / "boolean" / "number" / "string" / "array" / "object"。
 inline auto json_type_name(const Json &j) -> std::string {
     if (j.is_null()) {
         return "null";

@@ -11,8 +11,10 @@
 #include "aurora/widget/stack.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_stack {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -111,10 +113,10 @@ AURORA_TEST_CASE(props_serialize_deserialize_roundtrip) {
     Stack src({box(10.0F, 10.0F)}, Alignment::BottomRight);
     src.set_fit(StackFit::Expand);
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["alignment"].get<int>(), static_cast<int>(Alignment::BottomRight));
-    AURORA_TEST_CHECK_EQ(props["fit"].get<int>(), static_cast<int>(StackFit::Expand));
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "alignment"), static_cast<int>(Alignment::BottomRight));
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "fit"), static_cast<int>(StackFit::Expand));
 
     Stack dst;
     dst.deserialize_props(props);

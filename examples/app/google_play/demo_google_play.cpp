@@ -140,16 +140,21 @@ auto main() -> int {
         });
         // 运行时信息：一次性打印全部门面 JSON 到 stdout（人工触发，不刷屏）。
         app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::P}, [&app]() -> void {
+            // json::dump 返回 Result<std::string>；序列化失败（NaN/Inf）时降级为错误文本。
+            const auto pretty = [](const au::json::Value &v) -> std::string {
+                auto r = au::json::dump(v, {.indent = 2});
+                return r ? std::move(r.value()) : std::string(r.error().message);
+            };
             AURORA_LOG_RAW("demo", "=== runtime info ===\n");
             if (app.window()) {
-                AURORA_LOG_RAW("demo", "surface_state:\n", au::debug::surface_state(app.window()->surface()).dump(2),
+                AURORA_LOG_RAW("demo", "surface_state:\n", pretty(au::debug::surface_state(app.window()->surface())),
                                "\n");
             }
-            AURORA_LOG_RAW("demo", "widget_tree:\n", au::debug::widget_tree(app.scene().root_node()).dump(2), "\n");
-            AURORA_LOG_RAW("demo", "perf_snapshot:\n", au::debug::perf_snapshot().dump(2), "\n");
-            AURORA_LOG_RAW("demo", "frame_phase_timeline:\n", au::debug::frame_phase_timeline().dump(2), "\n");
-            AURORA_LOG_RAW("demo", "why_trace:\n", au::debug::why_trace().dump(2), "\n");
-            AURORA_LOG_RAW("demo", "diagnostics:\n", au::debug::diagnostics().dump(2), "\n");
+            AURORA_LOG_RAW("demo", "widget_tree:\n", pretty(au::debug::widget_tree(app.scene().root_node())), "\n");
+            AURORA_LOG_RAW("demo", "perf_snapshot:\n", pretty(au::debug::perf_snapshot()), "\n");
+            AURORA_LOG_RAW("demo", "frame_phase_timeline:\n", pretty(au::debug::frame_phase_timeline()), "\n");
+            AURORA_LOG_RAW("demo", "why_trace:\n", pretty(au::debug::why_trace()), "\n");
+            AURORA_LOG_RAW("demo", "diagnostics:\n", pretty(au::debug::diagnostics()), "\n");
         });
         AURORA_LOG_RAW("demo",
                        "DEBUG shortcuts: F1-F5 overlays | F6 text AA | Ctrl+S framebuffer | Ctrl+Shift+S window | "

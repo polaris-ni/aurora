@@ -28,8 +28,11 @@
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_accessibility {
+
+using aurora::testing::require_field;
 
 namespace {
 
@@ -667,9 +670,9 @@ AURORA_TEST_CASE(unique_text_child_names_container_via_hook_override) {
 AURORA_TEST_CASE(explicit_label_round_trips_through_props) {
     aurora::Checkbox src;
     src.set_accessibility_label("静音");  // CJK-LITERAL: cjk-fixture - Han label through props round-trip
-    aurora::Json props;
+    aurora::Json props = aurora::Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["accessibility_label"].get<std::string>(), std::string{"静音"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "accessibility_label"), std::string{"静音"});
 
     aurora::Checkbox dst;
     dst.deserialize_props(props);
@@ -679,7 +682,7 @@ AURORA_TEST_CASE(explicit_label_round_trips_through_props) {
 
     // 未声明不写键：空值落盘会被误读成「显式清空名字」。
     aurora::Checkbox plain;
-    aurora::Json plain_props;
+    aurora::Json plain_props = aurora::Json::object();
     plain.serialize_props(plain_props);
     AURORA_TEST_CHECK_FALSE(plain_props.contains("accessibility_label"));
 }
@@ -925,10 +928,10 @@ AURORA_TEST_CASE(stable_key_and_labelled_by_round_trip_through_props) {
     aurora::Checkbox src;
     src.set_stable_key("notify-box");
     src.set_labelled_by("notify-label");
-    aurora::Json props;
+    aurora::Json props = aurora::Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["stable_key"].get<std::string>(), std::string{"notify-box"});
-    AURORA_TEST_CHECK_EQ(props["labelled_by"].get<std::string>(), std::string{"notify-label"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "stable_key"), std::string{"notify-box"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "labelled_by"), std::string{"notify-label"});
 
     aurora::Checkbox dst;
     dst.deserialize_props(props);
@@ -937,7 +940,7 @@ AURORA_TEST_CASE(stable_key_and_labelled_by_round_trip_through_props) {
 
     // 未声明不写键（同 `accessibility_label` 纪律）：空值落盘会被误读成「显式清空」。
     aurora::Checkbox plain;
-    aurora::Json plain_props;
+    aurora::Json plain_props = aurora::Json::object();
     plain.serialize_props(plain_props);
     AURORA_TEST_CHECK_FALSE(plain_props.contains("stable_key"));
     AURORA_TEST_CHECK_FALSE(plain_props.contains("labelled_by"));

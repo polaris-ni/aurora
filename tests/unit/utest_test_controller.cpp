@@ -233,7 +233,7 @@ AURORA_TEST_CASE(expect_prop_compares_resolved_value) {
 
     auto msg = tc.find_by_key("msg");
     AURORA_TEST_REQUIRE_EQ(msg.size(), 1U);
-    // 注意 Json{"hello"} 在 nlohmann 里是数组 ["hello"]，字符串期望值须显式构造。
+    // 注意：字符串期望值须显式构造（Json(std::string{...})），以免与数组形态混淆。
     AURORA_TEST_REQUIRE_TRUE(tc.expect_prop(msg.at(0), "content", Json(std::string{"hello"})).ok());
     AURORA_TEST_REQUIRE_TRUE(tc.expect_prop(msg.at(0), "show", Json(true)).ok());
 

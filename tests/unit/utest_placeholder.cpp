@@ -6,8 +6,13 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/placeholder.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_placeholder {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -21,18 +26,18 @@ AURORA_TEST_CASE(default_uses_fallback_text_and_palette) {
     const Placeholder p;
     AURORA_TEST_CHECK_EQ(std::string{p.type_name()}, "Placeholder");
 
-    Json props;
+    Json props = Json::object();
     p.serialize_props(props);
     // 空消息序列化原样空串（绘制期才回退 "(placeholder)"）。
-    AURORA_TEST_CHECK_EQ(props["message"].get<std::string>(), "");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "message"), "");
     // 默认配色：浅灰底 / 警示红边 / 深灰字。
-    const auto bg = props["background_color"];
-    AURORA_TEST_CHECK_EQ(bg[0].get<int>(), 0xF2);
-    AURORA_TEST_CHECK_EQ(bg[3].get<int>(), 0xFF);
-    const auto border = props["border_color"];
-    AURORA_TEST_CHECK_EQ(border[0].get<int>(), 0xC0);
-    const auto text = props["text_color"];
-    AURORA_TEST_CHECK_EQ(text[0].get<int>(), 0x55);
+    const auto &bg = *require_child(props, "background_color");
+    AURORA_TEST_CHECK_EQ(require_child_at(bg, 0)->as_or<int>(0), 0xF2);
+    AURORA_TEST_CHECK_EQ(require_child_at(bg, 3)->as_or<int>(0), 0xFF);
+    const auto &border = *require_child(props, "border_color");
+    AURORA_TEST_CHECK_EQ(require_child_at(border, 0)->as_or<int>(0), 0xC0);
+    const auto &text = *require_child(props, "text_color");
+    AURORA_TEST_CHECK_EQ(require_child_at(text, 0)->as_or<int>(0), 0x55);
 }
 
 AURORA_TEST_CASE(chain_setters_update_state) {
@@ -42,12 +47,12 @@ AURORA_TEST_CASE(chain_setters_update_state) {
         .set_border_color(Color(5, 6, 7, 8))
         .set_text_color(Color(9, 10, 11, 12));
 
-    Json props;
+    Json props = Json::object();
     p.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["message"].get<std::string>(), "boom");
-    AURORA_TEST_CHECK_EQ(props["background_color"][2].get<int>(), 3);
-    AURORA_TEST_CHECK_EQ(props["border_color"][1].get<int>(), 6);
-    AURORA_TEST_CHECK_EQ(props["text_color"][3].get<int>(), 12);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "message"), "boom");
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "background_color"), 2)->as_or<int>(0), 3);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "border_color"), 1)->as_or<int>(0), 6);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "text_color"), 3)->as_or<int>(0), 12);
 }
 
 AURORA_TEST_CASE(layout_sizes_from_text_metrics_plus_padding) {
@@ -81,19 +86,20 @@ AURORA_TEST_CASE(layout_clamps_into_tight_constraints) {
 
 AURORA_TEST_CASE(props_deserialize_roundtrip) {
     Json props = Json::object();
-    props["message"] = "restored";
-    props["background_color"] = Json::array({10, 20, 30, 40});
-    props["border_color"] = Json::array({50, 60, 70, 80});
-    props["text_color"] = Json::array({90, 100, 110, 120});
+    props.set("message", "restored");
+    props.set("background_color", testing::json_arr({10, 20, 30, 40}));
+    props.set("border_color", testing::json_arr({50, 60, 70, 80}));
+    props.set("text_color", testing::json_arr({90, 100, 110, 120}));
 
     Placeholder p;
     p.deserialize_props(props);
-    Json out;
+    Json out = Json::object();
     p.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(out["message"].get<std::string>(), "restored");
-    AURORA_TEST_CHECK_EQ(out["background_color"][0].get<int>(), 10);
-    AURORA_TEST_CHECK_EQ(out["border_color"][1].get<int>(), 60);
-    AURORA_TEST_CHECK_EQ(out["text_color"][2].get<int>(), 110);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "message"), "restored");
+    AURORA_TEST_CHECK_EQ(
+        require_child_at(*require_child(out, "background_color"), 0)->as_or<int>(0), 10);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "border_color"), 1)->as_or<int>(0), 60);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "text_color"), 2)->as_or<int>(0), 110);
 }
 
 AURORA_TEST_CASE(describe_reports_metadata) {

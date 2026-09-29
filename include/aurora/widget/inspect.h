@@ -249,7 +249,7 @@ struct WidgetPatchOp {
     } else if (tn == "TextInput") {
         text = dynamic_cast<const TextInput &>(w).value();
     }
-    Json j;
+    Json j = Json::object();
     w.serialize_props(j);
     std::string style;
     const auto pick = [&](const char *out_k, const char *ink) -> void {

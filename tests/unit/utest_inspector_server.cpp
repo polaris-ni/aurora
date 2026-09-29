@@ -270,8 +270,8 @@ class ScrollProbe : public LeafWidget {
     }
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["scroll_hits"] = scroll_hits_;
-        props["last_delta_y"] = last_delta_y_;
+        props.set("scroll_hits", scroll_hits_);
+        props.set("last_delta_y", last_delta_y_);
     }
 
   private:
@@ -311,11 +311,11 @@ class DragProbe : public LeafWidget {
     }
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props["press_hits"] = press_hits_;
-        props["move_hits"] = move_hits_;
-        props["release_hits"] = release_hits_;
-        props["move_dx"] = move_dx_;
-        props["move_dy"] = move_dy_;
+        props.set("press_hits", press_hits_);
+        props.set("move_hits", move_hits_);
+        props.set("release_hits", release_hits_);
+        props.set("move_dx", move_dx_);
+        props.set("move_dy", move_dy_);
     }
 
   private:
@@ -957,7 +957,9 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
     // 关键：值必须真的落到活控件上，而不只是回了个 200。
     Json props = Json::object();
     shared_tree()->child_nodes().at(0).widget().serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props.value("content", std::string{}), std::string{"patched"});
+    const auto *__p = props.at("content");
+    const Json v = __p != nullptr ? *__p : Json{std::string{}};
+    AURORA_TEST_CHECK_EQ(v, std::string{"patched"});
 
     // 非数组请求体必须被拒 —— 否则调用方无从知道补丁没生效。
     const std::string bad = http_post(server.port(), "/api/patch", R"({"path":"/0/content","value":"x"})");

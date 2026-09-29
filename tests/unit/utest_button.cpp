@@ -9,8 +9,11 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/button.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_button {
+
+using aurora::testing::require_field;
 
 namespace {
 
@@ -140,10 +143,10 @@ AURORA_TEST_CASE(button_serialize_deserialize_roundtrip) {
     src.set_corner_radius(10.0F);
     src.set_min_size(80.0F, 36.0F);
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["label"].get<std::string>(), "确认");  // CJK-LITERAL: cjk-fixture - Han label in JSON
-    AURORA_TEST_CHECK_EQ(props["enabled"].get<bool>(), false);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "label"), "确认");  // CJK-LITERAL: cjk-fixture - Han label in JSON
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "enabled"), false);
 
     Button dst;
     dst.deserialize_props(props);

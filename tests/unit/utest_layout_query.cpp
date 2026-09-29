@@ -11,8 +11,12 @@
 #include "aurora/widget/layout_query.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_layout_query {
+
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -39,17 +43,17 @@ AURORA_TEST_CASE(layout_query_describe_layout_reports_laid_out_root) {
     auto [root, sz] = make_laid_out_column(320.0F, 240.0F, ctx);
 
     const Json desc = describe_layout(root);
-    AURORA_TEST_CHECK_EQ(desc["type"], "Column");
-    AURORA_TEST_CHECK_NEAR(desc["x"].get<float>(), 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(desc["y"].get<float>(), 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_TRUE(desc["width"].get<float>() > 0.0F);
-    AURORA_TEST_CHECK_TRUE(desc["height"].get<float>() > 0.0F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(desc, "type"), "Column");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(desc, "x"), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(desc, "y"), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(require_field<float>(desc, "width") > 0.0F);
+    AURORA_TEST_CHECK_TRUE(require_field<float>(desc, "height") > 0.0F);
 
     // layout_of 与 describe_layout 读同一份 bounds，两者一致且等于布局返回尺寸。
     const Rect snap = layout_of(root);
     AURORA_TEST_CHECK_NEAR(snap.size.width, sz.width, 1e-4F);
     AURORA_TEST_CHECK_NEAR(snap.size.height, sz.height, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(snap.size.width, desc["width"].get<float>(), 1e-4F);
+    AURORA_TEST_CHECK_NEAR(snap.size.width, require_field<float>(desc, "width"), 1e-4F);
 }
 
 AURORA_TEST_CASE(layout_query_child_bounds_snapshot_query) {
@@ -63,13 +67,13 @@ AURORA_TEST_CASE(layout_query_child_bounds_snapshot_query) {
     kids[1].set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 20.0F}, .size = Size{.width = 50.0F, .height = 20.0F}});
 
     const Json d0 = describe_layout(kids[0]);
-    AURORA_TEST_CHECK_EQ(d0["type"], "Text");
-    AURORA_TEST_CHECK_NEAR(d0["x"].get<float>(), 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(d0["width"].get<float>(), 50.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(d0["height"].get<float>(), 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(d0, "type"), "Text");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(d0, "x"), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(d0, "width"), 50.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(d0, "height"), 20.0F, 1e-4F);
 
     const Json d1 = describe_layout(kids[1]);
-    AURORA_TEST_CHECK_NEAR(d1["y"].get<float>(), 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(d1, "y"), 20.0F, 1e-4F);
 
     const Rect s1 = layout_of(kids[1]);
     AURORA_TEST_CHECK_NEAR(s1.origin.y, 20.0F, 1e-4F);
@@ -80,9 +84,9 @@ AURORA_TEST_CASE(layout_query_unmounted_node_degrades_to_zero_rect) {
     Node fresh{Text{"z"}};  // 未挂载 / 未布局
 
     const Json fd = describe_layout(fresh);
-    AURORA_TEST_CHECK_EQ(fd["type"], "Text");
-    AURORA_TEST_CHECK_NEAR(fd["width"].get<float>(), 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(fd["height"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(fd, "type"), "Text");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(fd, "width"), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(fd, "height"), 0.0F, 1e-4F);
 
     const Rect fr = layout_of(fresh);
     AURORA_TEST_CHECK_NEAR(fr.origin.x, 0.0F, 1e-4F);
@@ -102,11 +106,11 @@ AURORA_TEST_CASE(layout_query_describe_layout_json_schema_complete) {
     AURORA_TEST_CHECK_TRUE(desc.contains("y"));
     AURORA_TEST_CHECK_TRUE(desc.contains("width"));
     AURORA_TEST_CHECK_TRUE(desc.contains("height"));
-    AURORA_TEST_CHECK_TRUE(desc["type"].is_string());
-    AURORA_TEST_CHECK_TRUE(desc["x"].is_number());
-    AURORA_TEST_CHECK_TRUE(desc["y"].is_number());
-    AURORA_TEST_CHECK_TRUE(desc["width"].is_number());
-    AURORA_TEST_CHECK_TRUE(desc["height"].is_number());
+    AURORA_TEST_CHECK_TRUE(require_child(desc, "type")->is_string());
+    AURORA_TEST_CHECK_TRUE(require_child(desc, "x")->is_number());
+    AURORA_TEST_CHECK_TRUE(require_child(desc, "y")->is_number());
+    AURORA_TEST_CHECK_TRUE(require_child(desc, "width")->is_number());
+    AURORA_TEST_CHECK_TRUE(require_child(desc, "height")->is_number());
 }
 
 }  // namespace aurora::test_cases::utest_layout_query

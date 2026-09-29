@@ -16,11 +16,15 @@
 #include "aurora/debug/debug_backend.h"
 #include "aurora/debug/feature_flags.h"  // 运行时探测 AURORA_ENABLE_DEBUG 的归一化镜像
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_debug_backend {
 
 using aurora::debug::capture;
 using aurora::debug::CaptureSource;
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 using aurora::debug::feature_flags;
 using aurora::debug::output_directory;
 using aurora::debug::resolve_output_path;
@@ -183,19 +187,20 @@ AURORA_TEST_CASE(surface_state_reflects_surface_when_enabled) {
     }
     StubSurface surface;
     const Json j = surface_state(surface);
-    AURORA_TEST_CHECK_EQ(j["available"], true);
-    AURORA_TEST_CHECK_EQ(j["width"], 4);
-    AURORA_TEST_CHECK_EQ(j["height"], 4);
-    AURORA_TEST_CHECK_NEAR(j["scale_factor"].get<double>(), 2.0, 1e-6);
-    AURORA_TEST_CHECK_EQ(j["frame_count"], 7);
-    AURORA_TEST_CHECK_TRUE(j["clear_color"].is_array());
-    AURORA_TEST_CHECK_EQ(j["clear_color"].size(), 4U);
-    AURORA_TEST_CHECK_EQ(j["clear_color"][0], 64);
-    AURORA_TEST_CHECK_EQ(j["clear_color"][1], 128);
-    AURORA_TEST_CHECK_EQ(j["clear_color"][2], 192);
-    AURORA_TEST_CHECK_EQ(j["clear_color"][3], 255);
-    AURORA_TEST_CHECK_EQ(j["should_close"], true);
-    AURORA_TEST_CHECK_EQ(j["has_native_window"], false);  // 桩无原生窗口句柄
+    AURORA_TEST_CHECK_EQ(require_field<bool>(j, "available"), true);
+    AURORA_TEST_CHECK_EQ(require_field<int>(j, "width"), 4);
+    AURORA_TEST_CHECK_EQ(require_field<int>(j, "height"), 4);
+    AURORA_TEST_CHECK_NEAR(require_field<double>(j, "scale_factor"), 2.0, 1e-6);
+    AURORA_TEST_CHECK_EQ(require_field<int>(j, "frame_count"), 7);
+    const auto *const clear_color = require_child(j, "clear_color");
+    AURORA_TEST_CHECK_TRUE(clear_color->is_array());
+    AURORA_TEST_CHECK_EQ(clear_color->size(), 4U);
+    AURORA_TEST_CHECK_EQ(*require_child_at(*clear_color, 0), 64);
+    AURORA_TEST_CHECK_EQ(*require_child_at(*clear_color, 1), 128);
+    AURORA_TEST_CHECK_EQ(*require_child_at(*clear_color, 2), 192);
+    AURORA_TEST_CHECK_EQ(*require_child_at(*clear_color, 3), 255);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(j, "should_close"), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(j, "has_native_window"), false);  // 桩无原生窗口句柄
 }
 
 AURORA_TEST_CASE(surface_state_unavailable_when_disabled) {
@@ -204,8 +209,8 @@ AURORA_TEST_CASE(surface_state_unavailable_when_disabled) {
     }
     StubSurface surface;
     const Json j = surface_state(surface);
-    AURORA_TEST_CHECK_EQ(j["available"], false);
-    AURORA_TEST_CHECK_TRUE(j["reason"].get<std::string>().find("AURORA_ENABLE_DEBUG") != std::string::npos);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(j, "available"), false);
+    AURORA_TEST_CHECK_TRUE(require_field<std::string>(j, "reason").find("AURORA_ENABLE_DEBUG") != std::string::npos);
 }
 
 }  // namespace aurora::test_cases::utest_debug_backend

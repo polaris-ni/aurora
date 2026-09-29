@@ -18,9 +18,12 @@
 #include "aurora/render/offscreen.h"
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_access.h"
 #include "framework/golden.h"
 
 namespace aurora::test_cases::utest_pie_chart {
+using aurora::testing::require_child;
 
 using aurora::testing::require_value;
 
@@ -106,7 +109,7 @@ AURORA_TEST_CASE(props_roundtrip_and_factory) {
     PieChart src{p};
     Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["sections"].size(), 2U);
+    AURORA_TEST_CHECK_EQ(require_child(props, "sections")->size(), 2U);
     PieChart dst{};
     dst.deserialize_props(props);
     AURORA_TEST_CHECK_TRUE(dst.sections[0].name == "A");
@@ -116,8 +119,8 @@ AURORA_TEST_CASE(props_roundtrip_and_factory) {
 
     serialization::register_core_widgets();
     Json node = Json::object();
-    node["type"] = "PieChart";
-    node["props"] = props;
+    node.set("type", "PieChart");
+    node.set("props", props);
     const auto built = serialization::from_json(node);
     AURORA_TEST_REQUIRE_TRUE(built.ok());
     AURORA_TEST_REQUIRE_NOT_NULL(dynamic_cast<const PieChart *>(built.value().get()));

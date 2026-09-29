@@ -21,8 +21,11 @@
 #include "aurora/state/async.h"
 #include "aurora/widget/image_widget.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_image_widget {
+
+using aurora::testing::require_field;
 
 namespace {
 
@@ -162,11 +165,11 @@ AURORA_TEST_CASE(paint_decoded_bitmap_rasterizes_pixels) {
 AURORA_TEST_CASE(source_serialization_roundtrip) {
     ImageViewProps props_src{.bitmap = make_image(32, 16), .source = "logo.png"};
     ImageView src{std::move(props_src)};
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["source"].get<std::string>(), "logo.png");
-    AURORA_TEST_CHECK_EQ(props["image_width"].get<int>(), 32);
-    AURORA_TEST_CHECK_EQ(props["image_height"].get<int>(), 16);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "source"), "logo.png");
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "image_width"), 32);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "image_height"), 16);
 
     ImageView dst;
     dst.deserialize_props(props);
@@ -176,13 +179,13 @@ AURORA_TEST_CASE(source_serialization_roundtrip) {
     AURORA_TEST_CHECK_EQ(dst.source.value(), "logo.png");
 
     // 未设置 source 时不落盘该键。
-    Json bare;
+    Json bare = Json::object();
     ImageView{}.serialize_props(bare);
     AURORA_TEST_CHECK_FALSE(bare.contains("source"));
 
     // 非字符串 source 反序列化被忽略（is_string 防御）。
-    Json bad;
-    bad["source"] = 42;
+    Json bad = Json::object();
+    bad.set("source", 42);
     ImageView guarded;
     guarded.deserialize_props(bad);
     AURORA_TEST_CHECK_FALSE(guarded.source.has_value());

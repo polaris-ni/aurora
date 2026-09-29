@@ -43,8 +43,8 @@ class LifecycleReadout : public au::LeafWidget {
     /// @brief 把最近一次绘出的两行读数一并序列化，使其可经 `/api/tree` 读取（无人值守取证用）。
     auto serialize_props(au::Json &props) const -> void override {
         au::LeafWidget::serialize_props(props);
-        props["window_state"] = last_state_;
-        props["window_mode"] = last_mode_;
+        props.set("window_state", last_state_);
+        props.set("window_mode", last_mode_);
     }
 
   private:

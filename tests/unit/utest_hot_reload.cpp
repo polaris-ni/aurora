@@ -9,25 +9,23 @@
 
 #include "aurora/app/hot_reload.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_hot_reload {
+
+using aurora::testing::json_arr;
+using aurora::testing::json_obj;
 
 namespace {
 
 /// 可 from_json 重建的最小 Text 树。
 auto text_tree(const char *text_value) -> Json {
-    Json j;
-    j["type"] = "Text";
-    j["props"]["text"] = text_value;
-    return j;
+    return json_obj({{"type", "Text"}, {"props", json_obj({{"text", text_value}})}});
 }
 
 /// 可 from_json 重建的最小 Button 树。
 auto button_tree(const char *label) -> Json {
-    Json j;
-    j["type"] = "Button";
-    j["props"]["label"] = label;
-    return j;
+    return json_obj({{"type", "Button"}, {"props", json_obj({{"label", label}})}});
 }
 
 }  // namespace
@@ -116,9 +114,9 @@ AURORA_TEST_CASE(invalid_structure_returns_nullptr_and_keeps_root) {
     AURORA_TEST_REQUIRE_TRUE(first != nullptr);
 
     // 非空但缺 type 的 JSON：from_json 失败 → nullptr，根与 last_json 不被污染。
-    current = Json{1, 2};  // 非空数组：节点必须是对象
+    current = json_arr({1, 2});  // 非空数组：节点必须是对象
     AURORA_TEST_CHECK_TRUE(hr.try_sync() == nullptr);
-    current = Json{{"foo", 1}};  // 非空对象：缺 "type" 字段
+    current = json_obj({{"foo", 1}});  // 非空对象：缺 "type" 字段
     AURORA_TEST_CHECK_TRUE(hr.try_sync() == nullptr);
     AURORA_TEST_CHECK_TRUE(hr.root() == first);
 
@@ -131,12 +129,9 @@ AURORA_TEST_CASE(invalid_structure_returns_nullptr_and_keeps_root) {
 AURORA_TEST_CASE(state_is_preserved_for_props_the_json_does_not_declare) {
     // 热重载的核心价值：改结构不该把用户刚勾上的状态冲掉。
     Json current = Json::object();
-    current["type"] = "Column";
-    Json checkbox_node = Json::object();
-    checkbox_node["type"] = "Checkbox";
-    checkbox_node["props"] = Json::object();
-    checkbox_node["props"]["checked"] = false;
-    current["children"] = Json::array({checkbox_node});
+    current.set("type", "Column");
+    Json checkbox_node = json_obj({{"type", "Checkbox"}, {"props", json_obj({{"checked", Json{false}}})}});
+    current.set("children", json_arr({checkbox_node}));
 
     HotReload hr("ui.json");
     hr.set_loader([&current]() -> Json { return current; });
@@ -151,31 +146,24 @@ AURORA_TEST_CASE(state_is_preserved_for_props_the_json_does_not_declare) {
     }
 
     // 新 JSON 追加了一个兄弟，且**没有**声明 checked ⇒ 勾选状态应被保留。
-    Json bare = Json::object();
-    bare["type"] = "Checkbox";
-    Json added = Json::object();
-    added["type"] = "Text";
-    added["props"] = Json::object();
-    added["props"]["content"] = "added";
-    current["children"] = Json::array({bare, added});
+    Json bare = json_obj({{"type", "Checkbox"}});
+    Json added = json_obj({{"type", "Text"}, {"props", json_obj({{"content", "added"}})}});
+    current.set("children", json_arr({bare, added}));
 
     auto rebuilt = hr.try_sync();
     AURORA_TEST_REQUIRE_TRUE(rebuilt != nullptr);
     Node checkbox = rebuilt->child_nodes().at(0);
     Json props = Json::object();
     checkbox.widget().serialize_props(props);
-    AURORA_TEST_CHECK_TRUE(props.value("checked", false));
+    AURORA_TEST_CHECK_TRUE(props.as_or<bool>("checked", false));
 }
 
 AURORA_TEST_CASE(declared_props_win_over_preserved_state) {
     // 反面对照：源文件显式声明的值永远优先，热重载不得反过来覆盖用户的 JSON。
     Json current = Json::object();
-    current["type"] = "Column";
-    Json checkbox_node = Json::object();
-    checkbox_node["type"] = "Checkbox";
-    checkbox_node["props"] = Json::object();
-    checkbox_node["props"]["checked"] = false;
-    current["children"] = Json::array({checkbox_node});
+    current.set("type", "Column");
+    Json checkbox_node = json_obj({{"type", "Checkbox"}, {"props", json_obj({{"checked", Json{false}}})}});
+    current.set("children", json_arr({checkbox_node}));
 
     HotReload hr("ui.json");
     hr.set_loader([&current]() -> Json { return current; });
@@ -190,22 +178,16 @@ AURORA_TEST_CASE(declared_props_win_over_preserved_state) {
     // 这次新 JSON **显式写了** checked=false ⇒ 必须落到 false。
     // 注意：JSON 必须与上一轮**确有不同**，否则 HotReload 按「无变化」直接跳过（返回 nullptr），
     // 那是在测另一条分支。这里追加一个无关兄弟来制造差异。
-    Json redeclared = Json::object();
-    redeclared["type"] = "Checkbox";
-    redeclared["props"] = Json::object();
-    redeclared["props"]["checked"] = false;
-    Json unrelated = Json::object();
-    unrelated["type"] = "Text";
-    unrelated["props"] = Json::object();
-    unrelated["props"]["content"] = "unrelated";
-    current["children"] = Json::array({redeclared, unrelated});
+    Json redeclared = json_obj({{"type", "Checkbox"}, {"props", json_obj({{"checked", Json{false}}})}});
+    Json unrelated = json_obj({{"type", "Text"}, {"props", json_obj({{"content", "unrelated"}})}});
+    current.set("children", json_arr({redeclared, unrelated}));
 
     auto rebuilt = hr.try_sync();
     AURORA_TEST_REQUIRE_TRUE(rebuilt != nullptr);
     Node checkbox = rebuilt->child_nodes().at(0);
     Json props = Json::object();
     checkbox.widget().serialize_props(props);
-    AURORA_TEST_CHECK_FALSE(props.value("checked", true));
+    AURORA_TEST_CHECK_FALSE(props.as_or<bool>("checked", true));
 }
 
 AURORA_TEST_CASE(set_state_key_and_deferred_loader_injection) {

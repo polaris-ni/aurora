@@ -104,7 +104,7 @@ AURORA_TEST_CASE(sticky_hook_defaults_to_false_and_header_overrides) {
     AURORA_TEST_CHECK_EQ(h.describe().name, std::string{"StickyHeader"});
 
     // 无自有属性：序列化产物不含吸顶相关键，反序列化亦不引入状态
-    Json props;
+    Json props = Json::object();
     h.serialize_props(props);
     AURORA_TEST_CHECK_FALSE(props.contains("sticky"));
     StickyHeader dst;

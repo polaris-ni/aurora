@@ -10,8 +10,12 @@
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::itest_percent_layout {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 AURORA_TEST_CASE(percent_width_half_viewport) {
     // 50% 宽度子项在 800px 视口中布局为 400px。
@@ -20,7 +24,7 @@ AURORA_TEST_CASE(percent_width_half_viewport) {
 
     Node root{std::move(txt)};
     const Json snap = render_to_logical_snapshot(root, 800, 600);
-    AURORA_TEST_CHECK_NEAR(snap["box"]["w"].get<float>(), 400.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(snap, "box"), "w"), 400.0F, 1e-3F);
 }
 
 AURORA_TEST_CASE(percent_height_quarter_viewport) {
@@ -30,7 +34,7 @@ AURORA_TEST_CASE(percent_height_quarter_viewport) {
 
     Node root{std::move(txt)};
     const Json snap = render_to_logical_snapshot(root, 800, 600);
-    AURORA_TEST_CHECK_NEAR(snap["box"]["h"].get<float>(), 150.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(snap, "box"), "h"), 150.0F, 1e-3F);
 }
 
 AURORA_TEST_CASE(percent_both_dimensions) {
@@ -41,8 +45,8 @@ AURORA_TEST_CASE(percent_both_dimensions) {
 
     Node root{std::move(txt)};
     const Json snap = render_to_logical_snapshot(root, 800, 600);
-    AURORA_TEST_CHECK_NEAR(snap["box"]["w"].get<float>(), 400.0F, 1e-3F);
-    AURORA_TEST_CHECK_NEAR(snap["box"]["h"].get<float>(), 300.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(snap, "box"), "w"), 400.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(snap, "box"), "h"), 300.0F, 1e-3F);
 }
 
 AURORA_TEST_CASE(percent_full_fills_viewport) {
@@ -52,8 +56,8 @@ AURORA_TEST_CASE(percent_full_fills_viewport) {
 
     Node root{std::move(txt)};
     const Json snap = render_to_logical_snapshot(root, 640, 480);
-    AURORA_TEST_CHECK_NEAR(snap["box"]["w"].get<float>(), 640.0F, 1e-3F);
-    AURORA_TEST_CHECK_NEAR(snap["box"]["h"].get<float>(), 480.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(snap, "box"), "w"), 640.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(snap, "box"), "h"), 480.0F, 1e-3F);
 }
 
 AURORA_TEST_CASE(fill_expands_to_viewport_width) {
@@ -62,7 +66,7 @@ AURORA_TEST_CASE(fill_expands_to_viewport_width) {
 
     Node root{std::move(txt)};
     const Json snap = render_to_logical_snapshot(root, 800, 600);
-    AURORA_TEST_CHECK_NEAR(snap["box"]["w"].get<float>(), 800.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(snap, "box"), "w"), 800.0F, 1e-3F);
 }
 
 AURORA_TEST_CASE(nested_percent_resolves_against_parent) {
@@ -76,9 +80,9 @@ AURORA_TEST_CASE(nested_percent_resolves_against_parent) {
     Node root{std::move(col)};
     const Json snap = render_to_logical_snapshot(root, 800, 600);
     // Column 应为 800px 宽。
-    AURORA_TEST_CHECK_NEAR(snap["box"]["w"].get<float>(), 800.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(snap, "box"), "w"), 800.0F, 1e-3F);
     // 内部 Text 应为 400px（50% of 800）。
-    AURORA_TEST_CHECK_NEAR(snap["children"][0]["box"]["w"].get<float>(), 400.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(*require_child_at(*require_child(snap, "children"), 0), "box"), "w"), 400.0F, 1e-3F);
 }
 
 AURORA_TEST_CASE(small_percent_fraction) {
@@ -87,7 +91,7 @@ AURORA_TEST_CASE(small_percent_fraction) {
 
     Node root{std::move(txt)};
     const Json snap = render_to_logical_snapshot(root, 800, 600);
-    AURORA_TEST_CHECK_NEAR(snap["box"]["w"].get<float>(), 80.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*require_child(snap, "box"), "w"), 80.0F, 1e-3F);
 }
 
 }  // namespace aurora::test_cases::itest_percent_layout

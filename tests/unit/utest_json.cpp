@@ -16,18 +16,8 @@
 #include "aurora/core/json.h"
 #include "framework/aurora_test.h"
 
-// 断言失败时把 JSON 值渲染为其紧凑文本，替代框架默认的容器遍历（对 Object / String 会退化成空）。
-namespace aurora::testing {
-
-template <>
-struct ValuePrinter<aurora::json::Value> {
-    static auto print(const aurora::json::Value &value) -> std::string {
-        const auto text = aurora::json::dump(value);
-        return text.ok() ? text.value() : std::string{"<unserializable>"};
-    }
-};
-
-}  // namespace aurora::testing
+// JSON 值的失败诊断打印由 framework/json_value_printer.h 的 ValuePrinter 特化提供
+//（经 aurora_test.h -> assertions.h 公共引入），无需本地特化。
 
 namespace aurora::test_cases::utest_json {
 

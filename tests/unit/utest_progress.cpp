@@ -12,8 +12,12 @@
 #include "aurora/state/state.h"
 #include "aurora/widget/progress.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_progress {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -28,13 +32,13 @@ AURORA_TEST_CASE(default_state_and_type_name) {
     AURORA_TEST_CHECK_EQ(std::string{p.type_name()}, "ProgressIndicator");
     AURORA_TEST_CHECK_NEAR(p.value(), 0.0, 1e-4);
 
-    Json props;
+    Json props = Json::object();
     p.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["value"].get<double>(), 0.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(require_field<double>(props, "value"), 0.0, 1e-4);
     AURORA_TEST_CHECK_FALSE(props.contains("color"));  // 未显式设色不落盘，保留「跟随主题」语义
-    AURORA_TEST_CHECK_EQ(props["track_color"][0].get<int>(), 220);
-    AURORA_TEST_CHECK_NEAR(props["thickness"].get<float>(), 6.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["corner_radius"].get<float>(), -1.0F, 1e-4F);  // <0 = 自动胶囊
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "track_color"), 0)->as_or<int>(0), 220);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "thickness"), 6.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "corner_radius"), -1.0F, 1e-4F);  // <0 = 自动胶囊
 }
 
 AURORA_TEST_CASE(set_value_clamps_to_unit_range) {
@@ -98,12 +102,12 @@ AURORA_TEST_CASE(color_setters_drive_serialization) {
     ProgressIndicator p;
     p.set_color(Color(1, 2, 3, 4)).set_track_color(Color(5, 6, 7, 8)).set_corner_radius(4.0F);
 
-    Json props;
+    Json props = Json::object();
     p.serialize_props(props);
     AURORA_TEST_CHECK_TRUE(props.contains("color"));  // 显式设色后才落盘
-    AURORA_TEST_CHECK_EQ(props["color"][2].get<int>(), 3);
-    AURORA_TEST_CHECK_EQ(props["track_color"][1].get<int>(), 6);
-    AURORA_TEST_CHECK_NEAR(props["corner_radius"].get<float>(), 4.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "color"), 2)->as_or<int>(0), 3);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "track_color"), 1)->as_or<int>(0), 6);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "corner_radius"), 4.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
@@ -111,7 +115,7 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
     src.set_value(0.75);
     src.set_color(Color(9, 9, 9, 9)).set_track_color(Color(1, 2, 3, 4)).set_thickness(8.0F).set_corner_radius(0.0F);
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
 
     ProgressIndicator dst;
@@ -120,17 +124,17 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
     LayoutEngine::layout(dst, bounded(150.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(dst.size().height, 8.0F, 1e-4F);  // 反序列化的厚度生效
 
-    Json out;
+    Json out = Json::object();
     dst.serialize_props(out);
-    AURORA_TEST_CHECK_NEAR(out["value"].get<double>(), 0.75, 1e-4);
-    AURORA_TEST_CHECK_NEAR(out["thickness"].get<float>(), 8.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(out["corner_radius"].get<float>(), 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(out["color"][0].get<int>(), 9);
-    AURORA_TEST_CHECK_EQ(out["track_color"][2].get<int>(), 3);
+    AURORA_TEST_CHECK_NEAR(require_field<double>(out, "value"), 0.75, 1e-4);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "thickness"), 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "corner_radius"), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "color"), 0)->as_or<int>(0), 9);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "track_color"), 2)->as_or<int>(0), 3);
 
     // 反序列化路径同样钳制进度值。
     Json over = Json::object();
-    over["value"] = 5.0;
+    over.set("value", 5.0);
     ProgressIndicator clamped;
     clamped.deserialize_props(over);
     AURORA_TEST_CHECK_NEAR(clamped.value(), 1.0, 1e-4);

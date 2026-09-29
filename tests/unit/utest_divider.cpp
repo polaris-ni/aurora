@@ -8,8 +8,13 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/divider.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_divider {
+
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -23,14 +28,14 @@ AURORA_TEST_CASE(default_state_and_type_name) {
     const Divider d;
     AURORA_TEST_CHECK_EQ(std::string{d.type_name()}, "Divider");
 
-    Json props;
+    Json props = Json::object();
     d.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["orientation"].get<std::string>(), "horizontal");
-    AURORA_TEST_CHECK_NEAR(props["thickness"].get<float>(), 1.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(props["color"][0].get<int>(), 200);
-    AURORA_TEST_CHECK_EQ(props["color"][3].get<int>(), 255);
-    AURORA_TEST_CHECK_NEAR(props["indent"].get<float>(), 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["end_indent"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "orientation"), "horizontal");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "thickness"), 1.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "color"), 0)->as<int>().value(), 200);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "color"), 3)->as<int>().value(), 255);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "indent"), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "end_indent"), 0.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(horizontal_fills_width_uses_thickness_height) {
@@ -68,10 +73,10 @@ AURORA_TEST_CASE(indent_setters_chain_and_serialize) {
     Divider d;
     d.set_indent(8.0F).set_end_indent(4.0F);  // 链式
 
-    Json props;
+    Json props = Json::object();
     d.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["indent"].get<float>(), 8.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["end_indent"].get<float>(), 4.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "indent"), 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "end_indent"), 4.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
@@ -80,19 +85,19 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
                              .color = Color(10, 20, 30, 40),
                              .indent = 6.0F,
                              .end_indent = 3.0F}};
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
 
     Divider dst;
     dst.deserialize_props(props);
-    Json out;
+    Json out = Json::object();
     dst.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(out["orientation"].get<std::string>(), "vertical");
-    AURORA_TEST_CHECK_NEAR(out["thickness"].get<float>(), 2.5F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(out["color"][1].get<int>(), 20);
-    AURORA_TEST_CHECK_EQ(out["color"][3].get<int>(), 40);
-    AURORA_TEST_CHECK_NEAR(out["indent"].get<float>(), 6.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(out["end_indent"].get<float>(), 3.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "orientation"), "vertical");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "thickness"), 2.5F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "color"), 1)->as<int>().value(), 20);
+    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(out, "color"), 3)->as<int>().value(), 40);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "indent"), 6.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(out, "end_indent"), 3.0F, 1e-4F);
 
     // 方向随 JSON 翻转：布局尺寸按垂直语义重算。
     LayoutEngine::layout(dst, bounded(300.0F, 80.0F));

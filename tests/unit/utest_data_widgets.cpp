@@ -13,8 +13,13 @@
 #include "aurora/render/painter.h"
 #include "aurora/widget/data_widgets.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_data_widgets {
+
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -211,16 +216,18 @@ AURORA_TEST_CASE(data_table_serialize_props) {
     dt.select_row(1);
     dt.sort_by(0);
 
-    Json props;
+    Json props = Json::object();
     dt.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["row_count"].get<int>(), 3);
-    AURORA_TEST_CHECK_EQ(props["selected_row"].get<int>(), 1);
-    AURORA_TEST_CHECK_EQ(props["sort_column"].get<int>(), 0);
-    AURORA_TEST_REQUIRE_EQ(props["columns"].size(), 2U);
-    AURORA_TEST_CHECK_EQ(props["columns"][0]["label"].get<std::string>(), std::string{"Name"});
-    AURORA_TEST_CHECK_EQ(props["columns"][0]["sortable"].get<bool>(), true);
-    AURORA_TEST_CHECK_EQ(props["columns"][1]["sortable"].get<bool>(), false);
-    AURORA_TEST_CHECK_EQ(props["show"].get<bool>(), true);  // 基类通用属性保留
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "row_count"), 3);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "selected_row"), 1);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "sort_column"), 0);
+    const auto *const columns = require_child(props, "columns");
+    AURORA_TEST_REQUIRE_EQ(columns->size(), 2U);
+    const auto *const column0 = require_child_at(*columns, 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*column0, "label"), std::string{"Name"});
+    AURORA_TEST_CHECK_EQ(require_field<bool>(*column0, "sortable"), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(*require_child_at(*columns, 1), "sortable"), false);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "show"), true);  // 基类通用属性保留
 }
 
 AURORA_TEST_CASE(data_table_describe_reports_invariants) {
@@ -329,11 +336,11 @@ AURORA_TEST_CASE(tree_view_serialize_props) {
     TreeView tv = make_tree();
     tv.select(2);
 
-    Json props;
+    Json props = Json::object();
     tv.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["selected_row"].get<int>(), 2);
-    AURORA_TEST_CHECK_EQ(props["visible_count"].get<int>(), 4);
-    AURORA_TEST_CHECK_EQ(props["show"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "selected_row"), 2);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "visible_count"), 4);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "show"), true);
 }
 
 AURORA_TEST_CASE(list_view_single_select_replaces) {
@@ -421,11 +428,12 @@ AURORA_TEST_CASE(list_view_serialize_deserialize_roundtrip) {
     ListView src{std::vector<std::string>{"X", "Y"}, true};
     src.select(1);  // 选中态不参与序列化
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_REQUIRE_EQ(props["items"].size(), 2U);
-    AURORA_TEST_CHECK_EQ(props["items"][0].get<std::string>(), std::string{"X"});
-    AURORA_TEST_CHECK_EQ(props["multi_select"].get<bool>(), true);
+    const auto *const items = require_child(props, "items");
+    AURORA_TEST_REQUIRE_EQ(items->size(), 2U);
+    AURORA_TEST_CHECK_EQ(require_child_at(*items, 0)->as<std::string>().value(), std::string{"X"});
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "multi_select"), true);
 
     ListView dst;
     dst.deserialize_props(props);

@@ -16,8 +16,10 @@
 #include "aurora/widget/slider.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_video_controls {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -152,16 +154,16 @@ AURORA_TEST_CASE(constructs_without_controller_no_crash) {
     // 独立反序列化场景下序列化仍可用。
     VideoControls c;
     AURORA_TEST_CHECK_EQ(c.child_nodes().size(), 0U);
-    aurora::Json props;
+    aurora::Json props = aurora::Json::object();
     AURORA_TEST_CHECK_NO_THROW(c.serialize_props(props));
 }
 
 AURORA_TEST_CASE(props_roundtrip_generic_fields) {
     VideoControls c;
-    aurora::Json props;
+    aurora::Json props = aurora::Json::object();
     c.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["show"].get<bool>(), true);
-    props["show"] = false;
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "show"), true);
+    props.set("show", Json{false});
     VideoControls d;
     d.deserialize_props(props);
     AURORA_TEST_CHECK_FALSE(d.show.get());

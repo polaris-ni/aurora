@@ -11,8 +11,11 @@
 #include "aurora/widget/spacer.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_spacer {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -103,12 +106,12 @@ AURORA_TEST_CASE(spacer_describe_and_serialize_roundtrip) {
     AURORA_TEST_CHECK_TRUE(has_expand);
 
     // 默认 expand=true 落盘；false 反序列化生效。
-    Json props;
+    Json props = Json::object();
     Spacer().serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["expand"].get<bool>(), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "expand"), true);
     Spacer off(false);
     off.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["expand"].get<bool>(), false);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "expand"), false);
 
     Spacer restored;
     restored.deserialize_props(props);
@@ -117,7 +120,7 @@ AURORA_TEST_CASE(spacer_describe_and_serialize_roundtrip) {
     // 权重挂在修饰链上（不进 props 序列化），故 expand 变更必须同步撤除/挂上。
     AURORA_TEST_CHECK_NEAR(restored.modifier.get().flex_weight(), 0.0F, 0.0F);
     Spacer re_on;
-    const Json expand_on = Json{{"expand", true}};
+    const Json expand_on = testing::json_obj({{"expand", Json{true}}});
     re_on.deserialize_props(expand_on);
     AURORA_TEST_CHECK_TRUE(re_on.modifier.get().flex_weight() > 0.0F);
 }

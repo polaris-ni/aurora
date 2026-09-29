@@ -9,8 +9,13 @@
 
 #include "aurora/commands.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_commands {
+
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -194,29 +199,29 @@ AURORA_TEST_CASE(registry_to_json_envelope_and_optional_fields) {
 
     const Json out = reg.to_json();
     AURORA_TEST_CHECK_TRUE(out.contains("commands"));
-    const Json &items = out["commands"];
-    AURORA_TEST_CHECK_EQ(items.size(), std::size_t{3});
+    const auto *const items = require_child(out, "commands");
+    AURORA_TEST_CHECK_EQ(items->size(), std::size_t{3});
 
-    const Json &first = items[0];
-    AURORA_TEST_CHECK_EQ(first["id"].get<std::string>(), "file.open");
-    AURORA_TEST_CHECK_EQ(first["title"].get<std::string>(), "Open File");
-    AURORA_TEST_CHECK_EQ(first["icon"].get<std::string>(), "folder");
-    AURORA_TEST_CHECK_EQ(first["category"].get<std::string>(), "File");
-    AURORA_TEST_CHECK_EQ(first["when"].get<std::string>(), "editorFocused");
-    AURORA_TEST_CHECK_TRUE(first["enabled"].get<bool>());
-    AURORA_TEST_CHECK_TRUE(first["invocable"].get<bool>());
-    AURORA_TEST_CHECK_EQ(first["default_binding"].get<std::string>(), combo.to_string());
+    const auto *const first = require_child_at(*items, 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*first, "id"), "file.open");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*first, "title"), "Open File");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*first, "icon"), "folder");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*first, "category"), "File");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*first, "when"), "editorFocused");
+    AURORA_TEST_CHECK_TRUE(require_field<bool>(*first, "enabled"));
+    AURORA_TEST_CHECK_TRUE(require_field<bool>(*first, "invocable"));
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*first, "default_binding"), combo.to_string());
 
     // 可选字段非空才输出。
-    const Json &second = items[1];
-    AURORA_TEST_CHECK_FALSE(second.contains("icon"));
-    AURORA_TEST_CHECK_FALSE(second.contains("category"));
-    AURORA_TEST_CHECK_FALSE(second.contains("when"));
-    AURORA_TEST_CHECK_FALSE(second.contains("default_binding"));
-    AURORA_TEST_CHECK_FALSE(second["invocable"].get<bool>());  // 无 action
+    const auto *const second = require_child_at(*items, 1);
+    AURORA_TEST_CHECK_FALSE(second->contains("icon"));
+    AURORA_TEST_CHECK_FALSE(second->contains("category"));
+    AURORA_TEST_CHECK_FALSE(second->contains("when"));
+    AURORA_TEST_CHECK_FALSE(second->contains("default_binding"));
+    AURORA_TEST_CHECK_FALSE(require_field<bool>(*second, "invocable"));  // 无 action
 
     // 启用状态如实反映谓词求值。
-    AURORA_TEST_CHECK_FALSE(items[2]["enabled"].get<bool>());
+    AURORA_TEST_CHECK_FALSE(require_field<bool>(*require_child_at(*items, 2), "enabled"));
 }
 
 AURORA_TEST_CASE(fuzzy_score_empty_query_and_non_match) {

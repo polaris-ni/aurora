@@ -7,27 +7,33 @@
 
 #include "aurora/event/drag_drop.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_drag_drop {
+
+using aurora::testing::json_arr;
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 AURORA_TEST_CASE(drag_data_text_factory_sets_mime_and_payload) {
     const auto data = DragData::text("hello");
     AURORA_TEST_CHECK_STREQ(data.mime_type, "text/plain");
     AURORA_TEST_REQUIRE(data.payload.is_string());
-    AURORA_TEST_CHECK_STREQ(data.payload.get<std::string>(), "hello");
+    AURORA_TEST_CHECK_STREQ(data.payload.as<std::string>().value(), "hello");
     AURORA_TEST_CHECK_FALSE(data.empty());
 }
 
 AURORA_TEST_CASE(drag_data_widget_tree_factory_moves_json) {
     Json tree = Json::object();
-    tree["type"] = "Button";
-    tree["children"] = Json::array({Json("Text")});
+    tree.set("type", "Button");
+    tree.set("children", json_arr({Json("Text")}));
 
     const auto data = DragData::widget_tree(tree);
     AURORA_TEST_CHECK_STREQ(data.mime_type, "aurora/widget");
     AURORA_TEST_REQUIRE(data.payload.is_object());
-    AURORA_TEST_CHECK_EQ(data.payload["type"].get<std::string>(), std::string{"Button"});
-    AURORA_TEST_CHECK_EQ(data.payload["children"].size(), std::size_t{1});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(data.payload, "type"), std::string{"Button"});
+    AURORA_TEST_CHECK_EQ(require_child(data.payload, "children")->size(), std::size_t{1});
     AURORA_TEST_CHECK_FALSE(data.empty());
 }
 
@@ -62,7 +68,7 @@ AURORA_TEST_CASE(drag_session_rebegin_replaces_data_and_origin) {
     session.begin(DragData::text("first"), Point{.x = 0.0F, .y = 0.0F});
     session.begin(DragData::text("second"), Point{.x = 9.0F, .y = 9.0F});
     AURORA_TEST_CHECK_TRUE(session.is_active());
-    AURORA_TEST_CHECK_STREQ(session.data().payload.get<std::string>(), "second");
+    AURORA_TEST_CHECK_STREQ(session.data().payload.as<std::string>().value(), "second");
     AURORA_TEST_CHECK_NEAR(session.origin().x, 9.0F, 1e-6F);
     AURORA_TEST_CHECK_NEAR(session.origin().y, 9.0F, 1e-6F);
 }

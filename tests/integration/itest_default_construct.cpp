@@ -14,8 +14,13 @@
 #include "aurora/widget/canvas.h"
 #include "aurora/widget/skeleton.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::itest_default_construct {
+
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -49,8 +54,8 @@ AURORA_TEST_CASE(basic_leaf_widgets_default_construct_and_layout) {
     }};
 
     const au::Json snap = layout_frame(root);
-    AURORA_TEST_CHECK_EQ(snap["type"].get<std::string>(), std::string{"Column"});
-    AURORA_TEST_CHECK_EQ(snap["children"].size(), 18U);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(snap, "type"), std::string{"Column"});
+    AURORA_TEST_CHECK_EQ(require_child(snap, "children")->size(), 18U);
 }
 
 AURORA_TEST_CASE(layout_containers_default_construct_and_layout) {
@@ -76,8 +81,8 @@ AURORA_TEST_CASE(layout_containers_default_construct_and_layout) {
     }};
 
     const au::Json snap = layout_frame(root);
-    AURORA_TEST_CHECK_EQ(snap["type"].get<std::string>(), std::string{"Column"});
-    AURORA_TEST_CHECK_EQ(snap["children"].size(), 18U);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(snap, "type"), std::string{"Column"});
+    AURORA_TEST_CHECK_EQ(require_child(snap, "children")->size(), 18U);
 }
 
 AURORA_TEST_CASE(input_widgets_default_construct_and_layout) {
@@ -95,8 +100,8 @@ AURORA_TEST_CASE(input_widgets_default_construct_and_layout) {
     }};
 
     const au::Json snap = layout_frame(root);
-    AURORA_TEST_CHECK_EQ(snap["type"].get<std::string>(), std::string{"Column"});
-    AURORA_TEST_CHECK_EQ(snap["children"].size(), 10U);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(snap, "type"), std::string{"Column"});
+    AURORA_TEST_CHECK_EQ(require_child(snap, "children")->size(), 10U);
 }
 
 AURORA_TEST_CASE(data_media_widgets_default_construct_and_layout) {
@@ -112,8 +117,8 @@ AURORA_TEST_CASE(data_media_widgets_default_construct_and_layout) {
     }};
 
     const au::Json snap = layout_frame(root);
-    AURORA_TEST_CHECK_EQ(snap["type"].get<std::string>(), std::string{"Column"});
-    AURORA_TEST_CHECK_EQ(snap["children"].size(), 8U);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(snap, "type"), std::string{"Column"});
+    AURORA_TEST_CHECK_EQ(require_child(snap, "children")->size(), 8U);
 }
 
 AURORA_TEST_CASE(registry_rebuilds_every_registered_type) {

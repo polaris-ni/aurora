@@ -11,6 +11,7 @@
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/serialization.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::itest_props_constraint {
 
@@ -31,10 +32,10 @@ AURORA_TEST_CASE(validate_prop_scalar_specializations) {
     // Color：数组长度 >= 4 且分量 0-255。
     {
         const PropDescriptor d{.name = "color", .json_type = "array"};
-        AURORA_TEST_CHECK(au::validate_prop<Color>(Json::array({10, 20, 30, 255}), d).ok());
-        AURORA_TEST_CHECK(!au::validate_prop<Color>(Json::array({300, 0, 0, 255}), d).ok());  // 分量越界
+        AURORA_TEST_CHECK(au::validate_prop<Color>(testing::json_arr({10, 20, 30, 255}), d).ok());
+        AURORA_TEST_CHECK(!au::validate_prop<Color>(testing::json_arr({300, 0, 0, 255}), d).ok());  // 分量越界
         AURORA_TEST_CHECK(!au::validate_prop<Color>(Json(42), d).ok());  // 非数组
-        AURORA_TEST_CHECK(!au::validate_prop<Color>(Json::array({1, 2, 3}), d).ok());  // 长度不足
+        AURORA_TEST_CHECK(!au::validate_prop<Color>(testing::json_arr({1, 2, 3}), d).ok());  // 长度不足
     }
     // float：min/max 约束。
     {
@@ -78,9 +79,9 @@ AURORA_TEST_CASE(validate_prop_length_edge_insets_and_enum) {
     {
         const PropDescriptor d{.name = "pad", .json_type = "edge_insets"};
         AURORA_TEST_CHECK(
-            au::validate_prop<EdgeInsets>(Json::object({{"left", 1}, {"top", 2}, {"right", 3}, {"bottom", 4}}), d)
+            au::validate_prop<EdgeInsets>(testing::json_obj({{"left", 1}, {"top", 2}, {"right", 3}, {"bottom", 4}}), d)
                 .ok());
-        AURORA_TEST_CHECK(!au::validate_prop<EdgeInsets>(Json::object({{"left", -1}}), d).ok());
+        AURORA_TEST_CHECK(!au::validate_prop<EdgeInsets>(testing::json_obj({{"left", -1}}), d).ok());
     }
     // 枚举值集合。
     {
@@ -96,7 +97,7 @@ AURORA_TEST_CASE(validate_or_default_falls_back_and_reports) {
 
     const PropDescriptor d{.name = "color", .json_type = "array"};
     // 非法：越界分量 → 回退默认值（黑）并 degraded 上报。
-    const auto c = au::validate_or_default<Color>(Json::array({999, 0, 0, 255}), d, Color::black());
+    const auto c = au::validate_or_default<Color>(testing::json_arr({999, 0, 0, 255}), d, Color::black());
     AURORA_TEST_CHECK_EQ(c.r, 0U);
     AURORA_TEST_CHECK_EQ(c.g, 0U);
     AURORA_TEST_CHECK_EQ(c.b, 0U);
@@ -104,7 +105,7 @@ AURORA_TEST_CASE(validate_or_default_falls_back_and_reports) {
     AURORA_TEST_CHECK(Diagnostics::count() >= 1U);
 
     // 合法：解析成功且上报数不变。
-    const auto c2 = au::validate_or_default<Color>(Json::array({1, 2, 3, 4}), d, Color::black());
+    const auto c2 = au::validate_or_default<Color>(testing::json_arr({1, 2, 3, 4}), d, Color::black());
     AURORA_TEST_CHECK_EQ(c2.r, 1U);
     AURORA_TEST_CHECK_EQ(Diagnostics::count(), 1U);
 }
@@ -121,10 +122,10 @@ AURORA_TEST_CASE(registry_make_degrades_invalid_color_and_reports) {
     serialization::register_core_widgets();
     Diagnostics::take();
 
-    const Json props = Json::object({
+    const Json props = testing::json_obj({
         {"content", "hello"},
         {"font_size", -3},
-        {"color", Json::array({300, 0, 0, 255})},
+        {"color", testing::json_arr({300, 0, 0, 255})},
     });
     const auto w = serialization::WidgetRegistry::instance().make("Text", props);
     AURORA_TEST_CHECK(w.ok());

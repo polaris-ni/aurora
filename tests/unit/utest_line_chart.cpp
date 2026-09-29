@@ -124,8 +124,8 @@ AURORA_TEST_CASE(props_roundtrip_and_factory) {
 
     serialization::register_core_widgets();
     Json node = Json::object();
-    node["type"] = "LineChart";
-    node["props"] = props;
+    node.set("type", "LineChart");
+    node.set("props", props);
     const auto built = serialization::from_json(node);
     AURORA_TEST_REQUIRE_TRUE(built.ok());
     const auto *chart = dynamic_cast<const LineChart *>(built.value().get());

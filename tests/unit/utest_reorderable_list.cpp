@@ -23,8 +23,10 @@
 #include "aurora/render/painter.h"
 #include "aurora/widget/reorderable_list.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_reorderable_list {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -386,14 +388,14 @@ AURORA_TEST_CASE(descriptor_and_serialization_surface) {
     list.set_restore_key("k");
     Json props = Json::object();
     list.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["restore_key"].get<std::string>(), std::string{"k"});
-    AURORA_TEST_CHECK_NEAR(props["gap"].get<float>(), 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_TRUE(props["keyboard_reorder"].get<bool>());  // 键盘路径默认开启
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "restore_key"), std::string{"k"});
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "gap"), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(require_field<bool>(props, "keyboard_reorder"));  // 键盘路径默认开启
     AURORA_TEST_CHECK_TRUE(props.contains("note"));  // 运行时数据不序列化，只留 note
     list.set_keyboard_reorder(false);
     Json disabled = Json::object();
     list.serialize_props(disabled);
-    AURORA_TEST_CHECK_FALSE(disabled["keyboard_reorder"].get<bool>());
+    AURORA_TEST_CHECK_FALSE(require_field<bool>(disabled, "keyboard_reorder"));
     AURORA_TEST_CHECK_EQ(std::string{list.type_name()}, std::string{"ReorderableList"});
 }
 

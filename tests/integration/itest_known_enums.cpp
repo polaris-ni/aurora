@@ -15,6 +15,8 @@
 #include "aurora/event/keycode.h"
 #include "aurora/widget/alignment.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_access.h"
 #include "known_enums.h"
 
 namespace aurora::test_cases::itest_known_enums {
@@ -123,15 +125,16 @@ AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {
     std::vector<std::string> uncovered;
     std::size_t checked = 0;
     for (const auto &s : schemas) {
-        if (!s.contains("prop_descriptors") || !s["prop_descriptors"].is_array()) {
+        const auto *descriptors = s.find("prop_descriptors");
+        if (descriptors == nullptr || !descriptors->is_array()) {
             continue;
         }
-        const std::string wtype = s.value("type", std::string{});
-        for (const auto &p : s["prop_descriptors"]) {
-            if (!p.contains("type") || !p["type"].is_string()) {
+        const std::string wtype = s.as_or<std::string>("type", "");
+        for (const auto *p = descriptors->begin(); p != descriptors->end(); ++p) {
+            if (!p->contains("type") || !p->at("type")->is_string()) {
                 continue;
             }
-            const std::string t = p["type"].get<std::string>();
+            const std::string t = p->at("type")->as_or<std::string>("");
             if (t.empty() || is_primitive_type(t)) {
                 continue;
             }

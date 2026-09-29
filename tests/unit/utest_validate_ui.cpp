@@ -9,8 +9,12 @@
 
 #include "aurora/app/validate_ui.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
+#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_validate_ui {
+using aurora::testing::require_child;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -26,22 +30,22 @@ auto find_error(const std::vector<ValidationError> &errs, const std::string &pat
 
 /// 可 from_json 的最小 Text 节点（schema 必填 prop 为 content，见 aurora_api.json Text 条目）。
 auto text_node(const char *content) -> Json {
-    Json j;
-    j["type"] = "Text";
-    j["props"]["content"] = content;
+    Json j = Json::object();
+    j.set("type", "Text");
+    j.set("props", testing::json_obj({{"content", content}}));
     return j;
 }
 
 /// 逐层嵌套 levels 层的 Column JSON 树。
 auto deep_tree(int levels) -> Json {
-    Json root;
-    root["type"] = "Column";
+    Json root = Json::object();
+    root.set("type", "Column");
     Json *cur = &root;
     for (int i = 0; i < levels; ++i) {
-        Json child;
-        child["type"] = "Column";
-        (*cur)["children"] = Json::array({child});
-        cur = &(*cur)["children"][0];
+        Json child = Json::object();
+        child.set("type", "Column");
+        cur->set("children", testing::json_arr({child}));
+        cur = cur->at("children")->at(0);
     }
     return root;
 }
@@ -49,17 +53,17 @@ auto deep_tree(int levels) -> Json {
 }  // namespace
 
 AURORA_TEST_CASE(valid_tree_passes_and_report_json_true) {
-    Json tree;
-    tree["type"] = "Column";
-    tree["children"] = Json::array({text_node("hi")});
+    Json tree = Json::object();
+    tree.set("type", "Column");
+    tree.set("children", testing::json_arr({text_node("hi")}));
 
     const auto errs = validate_ui_tree(tree);
     AURORA_TEST_CHECK_TRUE(errs.empty());
 
     // 便捷报告：valid=true + 空错误数组。
     const auto report = validate_ui_tree_json(tree);
-    AURORA_TEST_CHECK_EQ(report["valid"].get<bool>(), true);
-    AURORA_TEST_CHECK_TRUE(report["errors"].empty());
+    AURORA_TEST_CHECK_EQ(require_field<bool>(report, "valid"), true);
+    AURORA_TEST_CHECK_TRUE(require_child(report, "errors")->empty());
 }
 
 AURORA_TEST_CASE(non_object_or_missing_type_rejected) {
@@ -77,8 +81,8 @@ AURORA_TEST_CASE(non_object_or_missing_type_rejected) {
 }
 
 AURORA_TEST_CASE(unknown_widget_type_reported) {
-    Json tree;
-    tree["type"] = "NoSuchWidgetXyz";
+    Json tree = Json::object();
+    tree.set("type", "NoSuchWidgetXyz");
 
     const auto errs = validate_ui_tree(tree);
     AURORA_TEST_REQUIRE_EQ(errs.size(), 1U);
@@ -89,9 +93,9 @@ AURORA_TEST_CASE(unknown_widget_type_reported) {
 }
 
 AURORA_TEST_CASE(missing_required_prop_reported) {
-    Json tree;
-    tree["type"] = "Button";
-    tree["props"] = Json::object();
+    Json tree = Json::object();
+    tree.set("type", "Button");
+    tree.set("props", Json::object());
 
     const auto errs = validate_ui_tree(tree);
     const auto *e = find_error(errs, "$.props.label");
@@ -103,7 +107,7 @@ AURORA_TEST_CASE(missing_required_prop_reported) {
 
 AURORA_TEST_CASE(prop_type_mismatch_reported) {
     Json tree = text_node("x");
-    tree["props"]["content"] = 123;  // 声明为字符串（LocalizedString），给了数字
+    tree.at("props")->set("content", 123);  // 声明为字符串（LocalizedString），给了数字
 
     const auto errs = validate_ui_tree(tree);
     const auto *e = find_error(errs, "$.props.content");
@@ -116,16 +120,16 @@ AURORA_TEST_CASE(children_policy_violations_reported) {
     // children_policy=none：Text 不接受子节点。
     Json leaf = text_node("x");
     Json text_with_children = text_node("parent");
-    text_with_children["children"] = Json::array({leaf});
+    text_with_children.set("children", testing::json_arr({leaf}));
     const auto none_errs = validate_ui_tree(text_with_children);
     AURORA_TEST_REQUIRE_EQ(none_errs.size(), 1U);
     AURORA_TEST_CHECK_STREQ(none_errs[0].path, "$.children");
     AURORA_TEST_CHECK_TRUE(none_errs[0].message.find("does not accept children") != std::string::npos);
 
     // children_policy=single：PerfOverlay 最多 1 个子节点。
-    Json overlay;
-    overlay["type"] = "PerfOverlay";
-    overlay["children"] = Json::array({text_node("a"), text_node("b")});
+    Json overlay = Json::object();
+    overlay.set("type", "PerfOverlay");
+    overlay.set("children", testing::json_arr({text_node("a"), text_node("b")}));
     const auto single_errs = validate_ui_tree(overlay);
     AURORA_TEST_REQUIRE_EQ(single_errs.size(), 1U);
     AURORA_TEST_CHECK_STREQ(single_errs[0].path, "$.children");
@@ -148,14 +152,14 @@ AURORA_TEST_CASE(validation_error_json_shape) {
     e.message = "boom";
     e.suggestion = "";
     auto j = e.to_json();
-    AURORA_TEST_CHECK_STREQ(j["path"].get<std::string>(), "$.props.text");
-    AURORA_TEST_CHECK_STREQ(j["message"].get<std::string>(), "boom");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(j, "path"), "$.props.text");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(j, "message"), "boom");
     // 空建议不落盘。
     AURORA_TEST_CHECK_FALSE(j.contains("suggestion"));
 
     e.suggestion = "fix it";
     j = e.to_json();
-    AURORA_TEST_CHECK_STREQ(j["suggestion"].get<std::string>(), "fix it");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(j, "suggestion"), "fix it");
 }
 
 }  // namespace aurora::test_cases::utest_validate_ui

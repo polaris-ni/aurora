@@ -18,8 +18,10 @@
 #include "aurora/render/painter.h"
 #include "aurora/widget/rich_text_edit.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_rich_text_edit {
+using aurora::testing::require_field;
 
 using aurora::testing::require_value;
 
@@ -123,9 +125,9 @@ AURORA_TEST_CASE(current_style_setters_and_toggles) {
 AURORA_TEST_CASE(serialize_deserialize_plain_text_roundtrip) {
     RichTextEdit src;
     src.load_spans({TextSpan{.text = LocalizedString{"Hi"}, .font = Font{.size_pt = 16.0F}, .color = Color::red()}});
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["text"].get<std::string>(), "Hi");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "text"), "Hi");
 
     // 反序列化字符取接收方「当前输入样式」（默认字体 + 显式设置的蓝色）。
     RichTextEdit dst;
@@ -202,9 +204,9 @@ AURORA_TEST_CASE(composition_preedit_then_commit) {
     TextCompositionEvent pending;
     pending.preedit = "zai";
     edit.on_text_composition(pending);
-    Json out;
+    Json out = Json::object();
     edit.serialize_props(out);
-    AURORA_TEST_CHECK_EQ(out["text"].get<std::string>(), "你好");  // CJK-LITERAL: cjk-fixture - Han text serialized
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(out, "text"), "你好");  // CJK-LITERAL: cjk-fixture - Han text serialized
 }
 
 AURORA_TEST_CASE(blur_cancels_pending_composition) {
@@ -232,9 +234,9 @@ AURORA_TEST_CASE(rtl_direction_api_roundtrip_and_unset_omitted) {
     AURORA_TEST_CHECK_TRUE(rtl.direction().has_value());
     AURORA_TEST_CHECK_TRUE(require_value(rtl.direction()) == TextDirection::RTL);
 
-    Json props;
+    Json props = Json::object();
     rtl.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["direction"].get<std::string>(), std::string{"RTL"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "direction"), std::string{"RTL"});
 
     RichTextEdit back;
     back.deserialize_props(props);
@@ -244,7 +246,7 @@ AURORA_TEST_CASE(rtl_direction_api_roundtrip_and_unset_omitted) {
     // 继承语义（未显式设置）不落盘——与 Text/TextInput 一致。
     RichTextEdit inherit;
     AURORA_TEST_CHECK_FALSE(inherit.direction().has_value());
-    Json plain;
+    Json plain = Json::object();
     inherit.serialize_props(plain);
     AURORA_TEST_CHECK_FALSE(plain.contains("direction"));
 }

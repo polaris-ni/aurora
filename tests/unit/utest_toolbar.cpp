@@ -15,8 +15,10 @@
 #include "aurora/widget/text.h"
 #include "aurora/widget/toolbar.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_toolbar {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -66,17 +68,17 @@ AURORA_TEST_CASE(toolbar_defaults_and_chained_setters) {
     // 链式设置生效。
     tb.set_bar_height(56.0F).set_gap(10.0F);
     AURORA_TEST_CHECK_NEAR(tb.bar_height(), 56.0F, 1e-4F);
-    Json props;
+    Json props = Json::object();
     tb.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["gap"].get<float>(), 10.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "gap"), 10.0F, 1e-4F);
 
     // 非法值降级：bar_height 非正回到 40，gap 负值钳 0。
     ToolBar bad;
     bad.set_bar_height(-1.0F).set_gap(-2.0F);
     AURORA_TEST_CHECK_NEAR(bad.bar_height(), 40.0F, 1e-4F);
-    Json bprops;
+    Json bprops = Json::object();
     bad.serialize_props(bprops);
-    AURORA_TEST_CHECK_NEAR(bprops["gap"].get<float>(), 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(bprops, "gap"), 0.0F, 1e-4F);
 
     // StatusBar 默认 24，非法回落 24。
     StatusBar sb;
@@ -150,25 +152,25 @@ AURORA_TEST_CASE(toolbar_constructors_and_empty_bar) {
 AURORA_TEST_CASE(toolbar_json_roundtrip) {
     ToolBar src;
     src.set_bar_height(48.0F).set_gap(8.0F);
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(props["bar_height"].get<float>(), 48.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["gap"].get<float>(), 8.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(props["padding"].get<float>(), 6.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "bar_height"), 48.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "gap"), 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "padding"), 6.0F, 1e-4F);
 
     ToolBar dst;
     dst.deserialize_props(props);
     AURORA_TEST_CHECK_NEAR(dst.bar_height(), 48.0F, 1e-4F);
-    Json dprops;
+    Json dprops = Json::object();
     dst.serialize_props(dprops);
-    AURORA_TEST_CHECK_NEAR(dprops["gap"].get<float>(), 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(dprops, "gap"), 8.0F, 1e-4F);
 
     StatusBar ssrc;
     ssrc.set_bar_height(28.0F);
-    Json sprops;
+    Json sprops = Json::object();
     ssrc.serialize_props(sprops);
-    AURORA_TEST_CHECK_NEAR(sprops["bar_height"].get<float>(), 28.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(sprops["gap"].get<float>(), 12.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(sprops, "bar_height"), 28.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(sprops, "gap"), 12.0F, 1e-4F);
 
     StatusBar sdst;
     sdst.deserialize_props(sprops);

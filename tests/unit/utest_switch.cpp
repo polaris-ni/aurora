@@ -11,8 +11,10 @@
 #include "aurora/state/state.h"
 #include "aurora/widget/switch.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_switch {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -157,10 +159,10 @@ AURORA_TEST_CASE(switch_serialize_deserialize_roundtrip) {
     src.set_track_size(56.0F, 28.0F);
     src.set_enabled(false);
 
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["checked"].get<bool>(), true);
-    AURORA_TEST_CHECK_EQ(props["enabled"].get<bool>(), false);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "checked"), true);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "enabled"), false);
 
     Switch dst;
     dst.deserialize_props(props);

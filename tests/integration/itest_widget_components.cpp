@@ -30,8 +30,13 @@
 #include "aurora/widget/switch.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::itest_widget_components {
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -208,16 +213,22 @@ AURORA_TEST_CASE(logical_snapshot_and_pixels_are_deterministic) {
 
     Node t1 = make_tree();
     const Json snap = render_to_logical_snapshot(t1, 200, 200);
-    AURORA_TEST_CHECK_STREQ(snap["type"].get<std::string>(), "Column");
-    AURORA_TEST_CHECK_EQ(snap["children"].size(), 2U);
-    AURORA_TEST_CHECK_STREQ(snap["children"][0]["type"].get<std::string>(), "Row");
-    AURORA_TEST_CHECK_NEAR(snap["box"]["w"].get<float>(), 200.0F, 1e-3F);
-    AURORA_TEST_CHECK_NEAR(snap["box"]["h"].get<float>(), 200.0F, 1e-3F);
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(snap, "type"), "Column");
+    AURORA_TEST_CHECK_EQ(require_child(snap, "children")->size(), 2U);
+    AURORA_TEST_CHECK_STREQ(
+        require_field<std::string>(*require_child_at(*require_child(snap, "children"), 0), "type"), "Row");
+    const auto &box = *require_child(snap, "box");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(box, "w"), 200.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(box, "h"), 200.0F, 1e-3F);
 
     // 快照确定性：两棵同构树 dump 一致。
     Node t2 = make_tree();
     const Json snap2 = render_to_logical_snapshot(t2, 200, 200);
-    AURORA_TEST_CHECK_EQ(snap.dump(), snap2.dump());
+    auto d1 = aurora::json::dump(snap);
+    auto d2 = aurora::json::dump(snap2);
+    AURORA_TEST_REQUIRE_TRUE(d1.ok());
+    AURORA_TEST_REQUIRE_TRUE(d2.ok());
+    AURORA_TEST_CHECK_EQ(d1.value(), d2.value());
 
     // 像素确定性：同树两次栅格化结果一致。
     auto render_pixels = [](Widget &w, int ww, int hh) -> std::vector<std::uint8_t> {
@@ -268,21 +279,21 @@ AURORA_TEST_CASE(column_row_alignment_and_props_roundtrip) {
         .set_cross_axis_alignment(CrossAxisAlignment::Stretch)
         .set_main_axis_size(MainAxisSize::Max)
         .set_gap(8.0F);
-    Json j;
+    Json j = Json::object();
     col2.serialize_props(j);
-    AURORA_TEST_CHECK_STREQ(j["main_axis_alignment"].get<std::string>(), "Center");
-    AURORA_TEST_CHECK_STREQ(j["cross_axis_alignment"].get<std::string>(), "Stretch");
-    AURORA_TEST_CHECK_STREQ(j["main_axis_size"].get<std::string>(), "Max");
-    AURORA_TEST_CHECK_NEAR(j["gap"].get<float>(), 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(j, "main_axis_alignment"), "Center");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(j, "cross_axis_alignment"), "Stretch");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(j, "main_axis_size"), "Max");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(j, "gap"), 8.0F, 1e-4F);
 
     Column q{Node{Text{"b"}}};
     q.deserialize_props(j);
-    Json k;
+    Json k = Json::object();
     q.serialize_props(k);
-    AURORA_TEST_CHECK_STREQ(k["main_axis_alignment"].get<std::string>(), "Center");
-    AURORA_TEST_CHECK_STREQ(k["cross_axis_alignment"].get<std::string>(), "Stretch");
-    AURORA_TEST_CHECK_STREQ(k["main_axis_size"].get<std::string>(), "Max");
-    AURORA_TEST_CHECK_NEAR(k["gap"].get<float>(), 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(k, "main_axis_alignment"), "Center");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(k, "cross_axis_alignment"), "Stretch");
+    AURORA_TEST_CHECK_STREQ(require_field<std::string>(k, "main_axis_size"), "Max");
+    AURORA_TEST_CHECK_NEAR(require_field<float>(k, "gap"), 8.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::itest_widget_components

@@ -19,16 +19,19 @@
 #include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_literals.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::itest_overflow_strategy {
+using aurora::testing::require_field;
 
 AURORA_TEST_CASE(overflow_strategy_json_roundtrip_and_fallback) {
     // to_json：每个枚举值输出同名标准字符串。
-    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Visible).get<std::string>(),
+    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Visible).as_or<std::string>(""),
                          std::string{"Visible"});
-    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Hidden).get<std::string>(), std::string{"Hidden"});
-    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Clip).get<std::string>(), std::string{"Clip"});
-    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Scroll).get<std::string>(), std::string{"Scroll"});
+    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Hidden).as_or<std::string>(""), std::string{"Hidden"});
+    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Clip).as_or<std::string>(""), std::string{"Clip"});
+    AURORA_TEST_CHECK_EQ(overflow_strategy_to_json(OverflowStrategy::Scroll).as_or<std::string>(""), std::string{"Scroll"});
 
     // from_json：标准字符串还原。
     AURORA_TEST_CHECK_TRUE(json_to_overflow_strategy(Json("Visible")) == OverflowStrategy::Visible);
@@ -62,10 +65,10 @@ AURORA_TEST_CASE(overflow_props_serialize_deserialize_roundtrip) {
     Column col;
     col.overflow_strategy(OverflowStrategy::Hidden);
 
-    Json props;
+    Json props = Json::object();
     col.serialize_props(props);
     AURORA_TEST_CHECK_TRUE(props.contains("overflow"));
-    AURORA_TEST_CHECK_EQ(props["overflow"].get<std::string>(), std::string{"Hidden"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "overflow"), std::string{"Hidden"});
 
     // 反序列化到另一个 widget。
     Column col2;

@@ -23,9 +23,11 @@
 #include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_bar_chart {
 
+using aurora::testing::require_child;
 using aurora::testing::require_value;
 
 namespace golden = aurora::testing::golden;
@@ -123,8 +125,9 @@ AURORA_TEST_CASE(props_roundtrip_including_series_array) {
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_REQUIRE_TRUE(props.contains("series"));
-    AURORA_TEST_REQUIRE_TRUE(props["series"].is_array());
-    AURORA_TEST_CHECK_EQ(props["series"].size(), 2U);
+    const auto *const series = require_child(props, "series");
+    AURORA_TEST_REQUIRE_TRUE(series->is_array());
+    AURORA_TEST_CHECK_EQ(series->size(), 2U);
 
     BarChart dst{};
     dst.deserialize_props(props);
@@ -148,10 +151,10 @@ AURORA_TEST_CASE(props_roundtrip_including_series_array) {
 AURORA_TEST_CASE(factory_rebuilds_from_json) {
     serialization::register_core_widgets();
     Json props = Json::object();
-    props["series"] = chart_series_vector_to_json({ChartSeries{.name = "S", .values = {2.0, 4.0, 6.0}}});
+    props.set("series", chart_series_vector_to_json({ChartSeries{.name = "S", .values = {2.0, 4.0, 6.0}}}));
     Json node = Json::object();
-    node["type"] = "BarChart";
-    node["props"] = props;
+    node.set("type", "BarChart");
+    node.set("props", props);
 
     const auto built = serialization::from_json(node);
     AURORA_TEST_REQUIRE_TRUE(built.ok());

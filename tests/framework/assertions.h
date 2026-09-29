@@ -26,6 +26,7 @@
 #include <utility>
 
 #include "aurora/core/platform.h"
+#include "json_value_printer.h"
 #include "value_print.h"
 
 namespace aurora::testing {

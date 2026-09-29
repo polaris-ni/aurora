@@ -13,9 +13,11 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/image_widget.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 #include "support/paths.h"
 
 namespace aurora::test_cases::itest_image_view {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -89,11 +91,11 @@ AURORA_TEST_CASE(image_view_source_props_serialization) {
     // source 序列化：props 含 source / image_width / image_height。
     aurora::ImageViewProps props{.bitmap = make_image(32, 24), .source = std::string("logo.png")};
     aurora::ImageView iv_src{std::move(props)};
-    aurora::Json js;
+    aurora::Json js = aurora::Json::object();
     iv_src.serialize_props(js);
-    AURORA_TEST_CHECK_EQ(js["source"].get<std::string>(), std::string{"logo.png"});
-    AURORA_TEST_CHECK_EQ(js["image_width"].get<int>(), 32);
-    AURORA_TEST_CHECK_EQ(js["image_height"].get<int>(), 24);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(js, "source"), std::string{"logo.png"});
+    AURORA_TEST_CHECK_EQ(require_field<int>(js, "image_width"), 32);
+    AURORA_TEST_CHECK_EQ(require_field<int>(js, "image_height"), 24);
 }
 
 AURORA_TEST_CASE(image_view_golden_png_file_decodes_into_widget) {

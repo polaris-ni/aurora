@@ -10,8 +10,10 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/rich_text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_rich_text {
+using aurora::testing::require_field;
 
 namespace {
 
@@ -116,15 +118,15 @@ AURORA_TEST_CASE(serialize_concatenates_and_deserialize_reloads) {
         TextSpan{.text = LocalizedString{"Hel"}, .color = Color::red()},
         TextSpan{.text = LocalizedString{"lo"}, .color = Color::blue()},
     }}};
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["text"].get<std::string>(), "Hello");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "text"), "Hello");
 
     RichText dst;
     dst.deserialize_props(props);
-    Json back;
+    Json back = Json::object();
     dst.serialize_props(back);
-    AURORA_TEST_CHECK_EQ(back["text"].get<std::string>(), "Hello");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(back, "text"), "Hello");
 }
 
 AURORA_TEST_CASE(split_words_collapses_repeated_spaces) {

@@ -16,8 +16,13 @@
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_inspector_panel {
+
+using aurora::testing::require_child;
+using aurora::testing::require_child_at;
+using aurora::testing::require_field;
 
 namespace {
 
@@ -60,19 +65,19 @@ AURORA_TEST_CASE(inspector_panel_type_contract_and_describe) {
 AURORA_TEST_CASE(inspector_panel_ratio_clamped_and_serialized) {
     // 构造期把 tree_ratio 钳制到 [0.1, 0.9]（不变量 ratio ∈ [0,1]），并经 serialize_props 暴露。
     const InspectorPanel low{[]() -> Node { return Node{}; }, 0.05F};
-    Json pj;
+    Json pj = Json::object();
     low.serialize_props(pj);
-    AURORA_TEST_CHECK_NEAR(pj["ratio"].get<float>(), 0.1F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(pj, "ratio"), 0.1F, 1e-4F);
 
     const InspectorPanel high{[]() -> Node { return Node{}; }, 2.0F};
-    Json pj2;
+    Json pj2 = Json::object();
     high.serialize_props(pj2);
-    AURORA_TEST_CHECK_NEAR(pj2["ratio"].get<float>(), 0.9F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(pj2, "ratio"), 0.9F, 1e-4F);
 
     const InspectorPanel mid{[]() -> Node { return Node{}; }};
-    Json pj3;
+    Json pj3 = Json::object();
     mid.serialize_props(pj3);
-    AURORA_TEST_CHECK_NEAR(pj3["ratio"].get<float>(), 0.35F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(pj3, "ratio"), 0.35F, 1e-4F);
 }
 
 AURORA_TEST_CASE(inspector_panel_null_root_degrades_gracefully) {
@@ -157,9 +162,9 @@ AURORA_TEST_CASE(inspector_panel_divider_drag_updates_ratio) {
     panel.on_pointer_event(release);
     AURORA_TEST_CHECK_TRUE(release.is_handled);
 
-    Json pj;
+    Json pj = Json::object();
     panel.serialize_props(pj);
-    AURORA_TEST_CHECK_NEAR(pj["ratio"].get<float>(), 0.5F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(pj, "ratio"), 0.5F, 1e-3F);
 }
 
 AURORA_TEST_CASE(inspector_panel_export_code_button_invokes_callback) {
@@ -240,12 +245,14 @@ AURORA_TEST_CASE(inspector_panel_dump_tree_json_full_includes_props) {
     const Node root = make_sample_tree(std::make_shared<Button>("OK"), std::make_shared<TextInput>());
 
     const Json j = dump_tree_json_full(root);
-    AURORA_TEST_CHECK_EQ(j["type"], "Column");
-    AURORA_TEST_CHECK_TRUE(j["props"].is_object());
-    AURORA_TEST_REQUIRE_EQ(j["children"].size(), 3U);
-    AURORA_TEST_CHECK_EQ(j["children"][0]["type"], "Button");
-    AURORA_TEST_CHECK_TRUE(j["children"][0].contains("props"));
-    AURORA_TEST_CHECK_EQ(j["children"][0]["children"].size(), 0U);  // 叶节点 children 为空数组
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(j, "type"), "Column");
+    AURORA_TEST_CHECK_TRUE(require_child(j, "props")->is_object());
+    const auto *const children = require_child(j, "children");
+    AURORA_TEST_REQUIRE_EQ(children->size(), 3U);
+    const auto *const child0 = require_child_at(*children, 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*child0, "type"), "Button");
+    AURORA_TEST_CHECK_TRUE(child0->contains("props"));
+    AURORA_TEST_CHECK_EQ(require_child(*child0, "children")->size(), 0U);  // 叶节点 children 为空数组
 }
 
 AURORA_TEST_CASE(inspector_panel_find_node_by_path) {
@@ -275,10 +282,11 @@ AURORA_TEST_CASE(inspector_panel_get_and_set_widget_props) {
     Node root{std::move(col)};
 
     const Json props = get_widget_props(root.widget());
-    AURORA_TEST_CHECK_EQ(props["descriptor"]["name"], "Column");
-    AURORA_TEST_CHECK_TRUE(props["values"].is_object());
-    AURORA_TEST_CHECK_TRUE(props["values"].contains("gap"));
-    AURORA_TEST_CHECK_NEAR(props["values"]["gap"].get<float>(), 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(props, "descriptor"), "name"), "Column");
+    const auto *const values = require_child(props, "values");
+    AURORA_TEST_CHECK_TRUE(values->is_object());
+    AURORA_TEST_CHECK_TRUE(values->contains("gap"));
+    AURORA_TEST_CHECK_NEAR(require_field<float>(*values, "gap"), 8.0F, 1e-4F);
 
     // 单属性回写 → 读回一致；再恢复原值。
     auto &col_ref = dynamic_cast<Column &>(root.widget());

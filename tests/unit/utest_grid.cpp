@@ -9,8 +9,11 @@
 #include "aurora/widget/grid.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_grid {
+
+using aurora::testing::require_field;
 
 namespace {
 
@@ -93,10 +96,10 @@ AURORA_TEST_CASE(set_columns_clamps_non_positive) {
 
 AURORA_TEST_CASE(props_serialize_deserialize_roundtrip) {
     Grid src{GridProps{.columns = 3, .gap = 8.0F}};
-    Json props;
+    Json props = Json::object();
     src.serialize_props(props);
-    AURORA_TEST_CHECK_EQ(props["columns"].get<int>(), 3);
-    AURORA_TEST_CHECK_NEAR(props["gap"].get<float>(), 8.0F, 1e-6F);
+    AURORA_TEST_CHECK_EQ(require_field<int>(props, "columns"), 3);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "gap"), 8.0F, 1e-6F);
 
     Grid dst;
     dst.deserialize_props(props);
@@ -104,7 +107,7 @@ AURORA_TEST_CASE(props_serialize_deserialize_roundtrip) {
     AURORA_TEST_CHECK_NEAR(dst.gap, 8.0F, 1e-6F);
 
     // 反序列化钳制：columns<=0 回落 1。
-    props["columns"] = 0;
+    props.set("columns", 0);
     Grid clamp;
     clamp.deserialize_props(props);
     AURORA_TEST_CHECK_EQ(clamp.columns, 1);
