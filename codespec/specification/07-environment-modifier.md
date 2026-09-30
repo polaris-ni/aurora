@@ -161,6 +161,14 @@ auto root = au::MediaQueryProvider{
 
 令牌随 `ThemeProvider` 注入整体传递，后代经 `environment<Theme>()` 读到的 `Theme` 即含令牌表。
 
+**内置主题登记的令牌**（`Theme::light()` / `Theme::dark()` 各自 `set_token`，`Theme::with_defaults()` 与裸 `Theme{}` 不登记任何令牌）：
+
+| 令牌名 | 浅色 | 深色 | 消费方 | 未登记时的回退 |
+|:---|:---|:---|:---|:---|
+| `focus.ring` | 纯黑 | 纯白 | `Widget::paint_content` 的统一焦点环（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4） | `primary` |
+
+回退语义是刻意的：环色改由令牌驱动后，未登记该令牌的自定义主题仍画 `primary`，行为与改动前逐位一致，不构成未经请求的视觉变更。
+
 ### 5.2 StyleProps
 
 `StyleProps`（`theming/style_props.h`）是轻量样式叠加结构，字段（`background` / `foreground` / `font` / `corner_radius` / `padding`）均为 `TokenOr<T>` 两态——可填「具体值」或「令牌名」。

@@ -49,7 +49,7 @@
 |:---|:---|:---|
 | 窗口消息（`PostMessage` 的 move / down / up / wheel / key） | 点击、滚轮、拖拽——消息直达 `Win32Host` 的 wndproc → `on_mouse` → `EventDispatcher`，与物理输入共用同一条派发链；`Shift+Tab` 一类**组合键也可用投递键构造**（修饰态随消息队列推进，不再在派发时刻采样物理按键，见 `specification/05-event-navigation.md` §2.2） | 不经系统输入队列与 OS 捕获（`SetCapture`），故高频点击的 OS 侧合并 / 丢弃、以及「越出窗口仍被系统送回 Move」须另由代码走读佐证；投递键也**不覆盖前台语义**——修饰键只在持有键盘焦点的那个窗口内计数，故「别的窗口上物理按住的 Ctrl」与系统级 chord 抢注两类断言仍须真键盘 + 真前台 |
 | 进程内注入（`build/aurora_e2e_client.exe --port <n>` 的 `tap` / `drag` / `scroll` / `text`，载体须以 `AURORA_INSPECTOR_PORT` 启动且构建时开 `AURORA_BUILD_INSPECTOR_SERVER`） | 以目标控件中心为原点的一次完整 按下→移动→松开 序列，可跨控件边界派发 | 一次调用只含**一个** Move，不产出连续拖动；注入后需等 ≥2 s 让只绘帧落地 |
-| 像素（`PrintWindow` 抓帧） | 控件底色 / 文本带的位置与差异计数；**焦点落点**——持有焦点的控件由基类在其盒外 2–4 dp 环带画出主题色焦点环（`wants_focus_ring()`，见 `specification/05-event-navigation.md` §4.4），故可用「盒外新增蓝色染色像素数 + 内缩中心不染色」判为空环外显（TC-EVENT-007 即此判据） | 环本身不给出「焦点在第几个停点」这类序关系，也不区分键盘到达与指针到达（本轮不采用 `:focus-visible`）；须与 `/api/tree` 里带 `focused: true` 的节点互证。`TextInput` 关闭了基类环（自带 Fluent 聚焦边框），对其不能用「有无环」判焦点 |
+| 像素（`PrintWindow` 抓帧） | 控件底色 / 文本带的位置与差异计数；**焦点落点**——持有焦点的控件由基类在其盒外 2–4 dp 环带画出焦点环（`wants_focus_ring()`，见 `specification/05-event-navigation.md` §4.4），故可用「盒外环带内相对未获焦帧新增的染色像素数 + 内缩中心不染色」判为空环外显（TC-EVENT-007 即此判据）。判据**不得锁定色相**：环色由主题命名令牌 `focus.ring` 决定，浅色主题为纯黑、深色主题为纯白，与页面底色仅差 alpha 的情况也存在（Headless 帧底为全透明黑），故须按 RGBA 四通道差分而非「蓝主导」筛 | 环本身不给出「焦点在第几个停点」这类序关系，也不区分键盘到达与指针到达（本轮不采用 `:focus-visible`）；须与 `/api/tree` 里带 `focused: true` 的节点互证。`TextInput` 关闭了基类环（自带 Fluent 聚焦边框），对其不能用「有无环」判焦点 |
 
 ### 1.4 用例编号规则
 

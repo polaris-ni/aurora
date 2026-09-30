@@ -194,9 +194,11 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 ### 4.4 焦点可视化：基类统一焦点环
 
-焦点态必须在像素上可判定，否则人工侧只能靠猜（`Button` 这类控件自身不画任何聚焦外观）。为此 `Widget::paint_content` 末尾由**基类统一绘制焦点环**：控件持有焦点（`is_focused()`）且 `wants_focus_ring()` 为 `true` 时，在其视觉盒外画一圈主题色（`inherit_theme(ctx).primary`）圆角边框。
+焦点态必须在像素上可判定，否则人工侧只能靠猜（`Button` 这类控件自身不画任何聚焦外观）。为此 `Widget::paint_content` 末尾由**基类统一绘制焦点环**：控件持有焦点（`is_focused()`）且 `wants_focus_ring()` 为 `true` 时，在其视觉盒外画一圈圆角边框，环色取主题命名令牌 `focus.ring`（未登记时回退 `primary`，见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。
 
 - 几何：环带严格落在盒外 **2–4 dp** 的带宽内（间距 2 dp + 环宽 2 dp，圆角 4 dp 小于常见控件圆角故不与边框弧线相交）。**不得压在控件自身边缘像素上**——否则会把 `RichTextEdit` 之类贴着边缘绘制的-caret / 边框像素覆盖掉。这三项常量是 `Widget` 的 `AURORA_FOCUS_RING_GAP` / `AURORA_FOCUS_RING_THICKNESS` / `AURORA_FOCUS_RING_RADIUS`，绘制与标脏共用同一份（不得各写一份，否则脏区与像素会漂移）。
+- **环色（裁决）**：默认主题的环色是**极性色**（浅色主题纯黑、深色主题纯白），由 `Theme::light()` / `Theme::dark()` 登记 `focus.ring` 令牌提供，**不再直接取 `primary`**。理由：环与它所标注的控件同色时，会被知觉归组成「控件自带的一圈边框」，用户读作「控件变小了」——`primary` 恰是 `Button` 的默认底色，故原口径下这条误读必然发生。判据不是「环与页面底色的 WCAG 对比度」（纯蓝环对白页面有 8.59:1，指标合格却仍然误读），而是**环须与控件自身底色拉开**；实测该拉开幅度：极性色 2.44:1（浅）/ 3.90:1（深），蓝相强调色 1.90:1，中性灰浅底 1.02:1。
+- 回退：主题未登记 `focus.ring` 时环色回退 `primary`，即改动前的行为逐位不变。因此既有自定义主题不会因本条被单方面改色；要拿到新的默认观感，须显式改用 `Theme::light()` / `Theme::dark()` 或自行登记该令牌。
 - 开关：`wants_focus_ring()`（`Widget` 基类默认 `true`，虚钩子）已自带聚焦态外观的控件覆写为 `false`，以免双环。当前唯一覆写者是 `TextInput` 与 `RichTextEdit`（它们画 Fluent 式主题色加粗聚焦边框，`paint_frame`）。
 - 重绘：`on_focus_change(bool)` 基实现在维护 `is_focused_` 后调用 `mark_needs_paint()`，故焦点变化必然进下一帧，环不会「逻辑上聚焦、像素上无环」。
 - **脏区（关键契约）**：环画在控件自身盒**外**，而 `paint_bounds()` 只含自身盒，因此标脏**不得**直接用 `paint_bounds()`——必须用 `Widget::dirty_bounds()`（= 自身绘制盒 ∪ 盒外装饰）。该契约有两个方向，缺一即错：
