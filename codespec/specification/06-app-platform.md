@@ -191,7 +191,10 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 - `enable_dirty_tracking(bool)` 可关闭，回到每帧全量重绘的历史行为；`force_full_redraw()` 供动画 / 视频 / 定时器持续重绘或外部环境突变时强制下一帧全绘。
 - **首帧 `first_frame_ = true` 强制全绘**；重新挂载 / 根变化时自动 `mount` 接线响应式订阅，使 `State` 与修饰变更能标脏重绘。
 
-**仅绘制脏帧的处理**：跳过 `begin_frame` 保留上帧帧缓冲（部分后端的 `begin_frame` 会清零整帧，直接 begin 会使裁剪外黑屏），先 `Painter::clear_rect(merged_bounds)` 把脏矩形并界重置为新帧零基底，再 `push_clip(merged_bounds)` 裁剪重绘。裁剪内从零基底按原序重新合成、裁剪外沿用上帧像素，两侧均与整帧重绘**逐位一致**。`install_dirty_sink` 回调标记控件最近一次 `paint` 的绝对几何（`Widget::paint_bounds()`），使裁剪命中精确区域。
+**仅绘制脏帧的处理**：跳过 `begin_frame` 保留上帧帧缓冲（部分后端的 `begin_frame` 会清零整帧，直接 begin 会使裁剪外黑屏），先 `Painter::clear_rect(merged_bounds)` 把脏矩形并界重置为新帧零基底，再 `push_clip(merged_bounds)` 裁剪重绘。裁剪内从零基底按原序重新合成、裁剪外沿用上帧像素，两侧均与整帧重绘**逐位一致**。`install_dirty_sink` 回调标记控件本次标脏应覆盖的绝对几何（`Widget::dirty_bounds()` = 最近一次 `paint` 的自身盒 ∪ 画在盒外的装饰），使裁剪命中精确区域。
+
+- **为何不是 `paint_bounds()`**：基类统一焦点环刻意画在控件盒**外** 2–4 dp（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4）。只按自身盒标脏会让该环带落在裁剪之外，两个方向同时出错：获焦帧环画不上屏（偶发靠同帧其它控件的脏区扩张才出现），失焦或尺寸变化帧上一帧的环无人重绘而残留成「盒外一圈主题色」。
+- **第二条汇聚路径**：`Scroll::on_descendant_dirty` 把后代的 `dirty_bounds()`（内容坐标系）并入离屏缓冲脏带，同一契约；漏了会把残留固化在离屏缓冲里随视口反复上屏。
 
 **系统重绘请求驱动的帧不得只跳过**：由 `set_present_request` 回调（Win32 `WM_PAINT` / `WM_SIZE`）驱动的 `present_root`，即便脏追踪判定跳帧，也必须 `set_present_dirty({})` 后 `present()` 全量 blit 重新上屏——帧缓冲内容仍有效但窗口表面已被 OS 置无效（典型：**最小化还原**后为类背景刷底色，若只跳过则白屏；遮挡揭开同理）。普通 idle 帧不受影响，仍零上屏。
 

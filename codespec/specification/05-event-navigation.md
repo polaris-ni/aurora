@@ -196,9 +196,13 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 焦点态必须在像素上可判定，否则人工侧只能靠猜（`Button` 这类控件自身不画任何聚焦外观）。为此 `Widget::paint_content` 末尾由**基类统一绘制焦点环**：控件持有焦点（`is_focused()`）且 `wants_focus_ring()` 为 `true` 时，在其视觉盒外画一圈主题色（`inherit_theme(ctx).primary`）圆角边框。
 
-- 几何：环带严格落在盒外 **2–4 dp** 的带宽内（间距 2 dp + 环宽 2 dp，圆角 4 dp 小于常见控件圆角故不与边框弧线相交）。**不得压在控件自身边缘像素上**——否则会把 `RichTextEdit` 之类贴着边缘绘制的-caret / 边框像素覆盖掉。
+- 几何：环带严格落在盒外 **2–4 dp** 的带宽内（间距 2 dp + 环宽 2 dp，圆角 4 dp 小于常见控件圆角故不与边框弧线相交）。**不得压在控件自身边缘像素上**——否则会把 `RichTextEdit` 之类贴着边缘绘制的-caret / 边框像素覆盖掉。这三项常量是 `Widget` 的 `AURORA_FOCUS_RING_GAP` / `AURORA_FOCUS_RING_THICKNESS` / `AURORA_FOCUS_RING_RADIUS`，绘制与标脏共用同一份（不得各写一份，否则脏区与像素会漂移）。
 - 开关：`wants_focus_ring()`（`Widget` 基类默认 `true`，虚钩子）已自带聚焦态外观的控件覆写为 `false`，以免双环。当前唯一覆写者是 `TextInput` 与 `RichTextEdit`（它们画 Fluent 式主题色加粗聚焦边框，`paint_frame`）。
 - 重绘：`on_focus_change(bool)` 基实现在维护 `is_focused_` 后调用 `mark_needs_paint()`，故焦点变化必然进下一帧，环不会「逻辑上聚焦、像素上无环」。
+- **脏区（关键契约）**：环画在控件自身盒**外**，而 `paint_bounds()` 只含自身盒，因此标脏**不得**直接用 `paint_bounds()`——必须用 `Widget::dirty_bounds()`（= 自身绘制盒 ∪ 盒外装饰）。该契约有两个方向，缺一即错：
+  - 获焦帧：脏区不含环带 → 环落在 `push_clip` 之外被裁掉，「逻辑上聚焦、像素上无环」（要靠别的控件恰好同帧标脏扩大合并框才偶发出现）。
+  - 失焦帧（或尺寸变化后）：脏区不含环带 → 上一帧的环像素无人重绘，残留成「盒外一圈主题色，看起来比控件自身盒大」。
+  汇聚点共两处，都要走 `dirty_bounds()`：`Window::install_dirty_sink`（普通窗口坐标）与 `Scroll::on_descendant_dirty`（离屏内容缓冲的内容坐标系，脏带若漏环则残留固化在缓冲里随视口反复上屏）。回归见 `tests/integration/itest_dirty_clip_paint.cpp` 的 `focus_ring_band_repainted_when_focus_changes` / `focus_ring_band_inside_scroll_repainted`（不变量：部分脏区重绘与整帧重绘逐位一致）。
 - 可观测性：环是无条件的像素证据，配合树快照里持有焦点节点的 `focused: true`（见 [`08-tooling.md`](08-tooling.md)），Inspector 与人工验收都能在不依赖控件自觉的前提下确认焦点落点。
 - 取舍：未采用 `:focus-visible`（仅键盘触发环）方案——它需要给 `FocusDirection` 增「非导航来源」并让派发器透传来源信息，且会使「指针点击后的焦点」在像素上重新不可判定，与本条要解决的问题相反。
 
