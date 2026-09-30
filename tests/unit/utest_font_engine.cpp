@@ -3,11 +3,14 @@
 /// 测试说明: 覆盖 FontEngine 度量契约（空串零宽、长度/字号单调、行高为正）、caret_x 与 hit_test_char 的
 /// 码点索引与往返一致性、TextLayoutOpts 字距/词距对宽度的影响、AA 策略读写与光栅状态世代自增、
 /// draw_text 实际落笔、基线上沿度量（measure_ascent）与实绘落墨带自洽、shaping 缓存统计与清空，
-/// 以及 UTF-8 串的码点安全性
+/// 以及 UTF-8 串的码点安全性与等宽整格度量（monospace_cell）的取整口径
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <string>
+#include <vector>
 
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
@@ -345,6 +348,87 @@ AURORA_TEST_CASE(rtl_direction_participates_in_shape_cache_key) {
     const auto after = render::FontEngine::shape_cache_stats();
     // 两个不同的 opts 各自至少 miss 一次（不因 direction 缺失而错误命中同一键）。
     AURORA_TEST_CHECK_GE(after.misses, before.misses + 2U);
+}
+
+AURORA_TEST_CASE(monospace_cell_metrics_are_positive_and_monotonic) {
+    int prev_width = 0;
+    int prev_height = 0;
+    for (const float pt : {10.0F, 14.0F, 24.0F}) {
+        const Font font{.family = "sans-serif", .size_pt = pt, .weight = 400};
+        const auto cell = render::FontEngine::monospace_cell(font, 1.0F);
+        AURORA_TEST_CHECK_GT(cell.cell_width_px, 0);
+        AURORA_TEST_CHECK_GT(cell.cell_height_px, 0);
+        AURORA_TEST_CHECK_GE(cell.ascent_px, 0);
+        AURORA_TEST_CHECK_LE(cell.ascent_px, cell.cell_height_px);
+        AURORA_TEST_CHECK_GE(cell.cell_width_px, prev_width);
+        AURORA_TEST_CHECK_GE(cell.cell_height_px, prev_height);
+        prev_width = cell.cell_width_px;
+        prev_height = cell.cell_height_px;
+    }
+}
+
+AURORA_TEST_CASE(monospace_cell_ascent_and_height_snap_the_draw_side_baseline) {
+    // 单格的基线与行高必须等于绘制侧的 snap 值：按 `y = row * cell_height_px` 摆放的行，
+    // 其首行 pen_y 与直接调 draw_text 逐位相同，否则网格行会与实绘墨迹错开半行。
+    const Font font{.family = "sans-serif", .size_pt = 16.0F, .weight = 400};
+    const auto cell = render::FontEngine::monospace_cell(font, 1.0F);
+    AURORA_TEST_CHECK_EQ(cell.ascent_px, static_cast<int>(std::floor(render::FontEngine::measure_ascent(font) + 0.5F)));
+    AURORA_TEST_CHECK_EQ(cell.cell_height_px,
+                         static_cast<int>(std::floor(render::FontEngine::measure_height(font) + 0.5F)));
+}
+
+AURORA_TEST_CASE(monospace_cell_width_covers_reference_glyph_advances) {
+    // 格宽取「ASCII 数字」与「制表符 U+2500」两个参考字形实绘 advance 的较大者：只按数字定
+    // 格宽会让部分字体的边框压进相邻格；富余一整格则是把网格画稀。
+    const Font font{.family = "sans-serif", .size_pt = 16.0F, .weight = 400};
+    const auto opts = render::TextLayoutOpts{};
+    for (const float sc : {1.0F, 1.25F, 1.5F}) {
+        const auto cell = render::FontEngine::monospace_cell(font, sc);
+        const int digit = std::lround(render::FontEngine::display_width("0", font, opts, sc) * sc);
+        const int box = std::lround(render::FontEngine::display_width("\xE2\x94\x80", font, opts, sc) * sc);
+        AURORA_TEST_CHECK_GE(cell.cell_width_px, std::max(digit, box));
+        AURORA_TEST_CHECK_LE(cell.cell_width_px, std::max(digit, box) + 1);
+    }
+}
+
+AURORA_TEST_CASE(monospace_cell_grid_keeps_ink_columns_drift_free) {
+    // 整格网格的核心验收：同一字符摆在第 k 格，其左缘相对格起点的偏移必须逐格恒定。
+    // 列宽一旦是小数（把 dp 度量直接当列宽用的典型结果），偏移就会逐格累积成半格错位。
+    const Font font{.family = "sans-serif", .size_pt = 16.0F, .weight = 400};
+    const auto cell = render::FontEngine::monospace_cell(font, 1.0F);
+    constexpr int cells = 10;
+
+    auto runs = std::vector<render::TextRun>{};
+    for (int k = 0; k < cells; ++k) {
+        runs.push_back(render::TextRun{
+            .text = "0",
+            .box = rect_at(static_cast<float>(k * cell.cell_width_px), 0.0F, static_cast<float>(cell.cell_width_px),
+                           static_cast<float>(cell.cell_height_px)),
+            .font = font,
+            .color = Color::black()});
+    }
+    Painter p;
+    p.begin(cell.cell_width_px * cells, cell.cell_height_px);
+    p.draw_text_runs(std::span<const render::TextRun>{runs});
+
+    auto expected_offset = -1;
+    for (int k = 0; k < cells; ++k) {
+        int leftmost = -1;
+        for (int x = k * cell.cell_width_px; x < (k + 1) * cell.cell_width_px && leftmost < 0; ++x) {
+            for (int y = 0; y < p.height(); ++y) {
+                if (p.get_pixel(x, y).a > 0) {
+                    leftmost = x;
+                    break;
+                }
+            }
+        }
+        AURORA_TEST_REQUIRE_GE(leftmost, k * cell.cell_width_px);  // 每格都落墨，且不越进左邻格
+        const int offset = leftmost - (k * cell.cell_width_px);
+        if (expected_offset < 0) {
+            expected_offset = offset;
+        }
+        AURORA_TEST_CHECK_EQ(offset, expected_offset);
+    }
 }
 
 }  // namespace aurora::test_cases::utest_font_engine
