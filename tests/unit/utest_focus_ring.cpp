@@ -66,8 +66,9 @@ auto ring_pixels_above(const Painter &p, const Rect &box) -> int {
 /// 取环带中点的实绘像素色（供断言环色确取自主题令牌）。
 auto ring_sample(const Painter &p, const Rect &box) -> Color {
     const int y = static_cast<int>(std::floor(box.origin.y - AURORA_RING_GAP - AURORA_RING_THICKNESS)) + 1;
-    return p.get_pixel(static_cast<int>(std::floor(box.origin.x + box.size.width * 0.5F)), y);
+    return p.get_pixel(static_cast<int>(std::floor(box.origin.x + (box.size.width * 0.5F))), y);
 }
+
 /// 把控件挂载/布局后画到白底画布，返回其绝对盒。
 template <typename W>
 auto paint_on_white(W &w, Painter &p, bool focused) -> Rect {
