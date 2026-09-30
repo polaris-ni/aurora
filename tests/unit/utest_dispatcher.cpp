@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/event/dispatcher.h
 /// 测试说明: 命中测试最深目标、鼠标冒泡与 stop-on-handled、本地坐标写入与 Press
-/// 焦点转移/空白清焦、指针捕获越界续发、悬停进出 diff、悬停光标解析
+/// 焦点转移/空白清焦（并核对 Press 与 Tab 各自记录的焦点到达方式，它决定基类焦点环显隐）、
+/// 指针捕获越界续发、悬停进出 diff、悬停光标解析
 /// （修饰链 > 虚钩子 > Clickable 缺省，变化才下发）、键盘
 /// Tab/激活快捷键与焦点路由（含激活键 / 方向键优先投递 on_key_event 的控件级 opt-in，
 /// 以及真实 TextInput 的方向键归光标、不夺焦点）、滚轮/文本/文件拖放路由、
@@ -312,6 +313,33 @@ AURORA_TEST_CASE(mouse_press_localizes_coordinates_and_updates_focus) {
     blank.action = MouseAction::Press;
     AURORA_TEST_CHECK_FALSE(dispatcher.dispatch_mouse(*tree.row, blank, &fm));
     AURORA_TEST_CHECK(fm.focused() == nullptr);
+}
+
+AURORA_TEST_CASE(pointer_press_and_tab_record_their_focus_arrival_modality) {
+    // 焦点环显隐的接线口在派发层：指针按下记 Pointer（不出环，控件已有 pressed 反馈），键盘 Tab
+    // 记 Keyboard（必出环，无障碍停点的唯一可见线索）。见 Widget::focus_ring_shown 与规格 §4.4。
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    FocusManager fm;
+    fm.set_root(tree.row.get());
+
+    MouseEvent press;
+    press.position = Point{.x = 45.0F, .y = 10.0F};  // box2 内
+    press.action = MouseAction::Press;
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, press, &fm));
+    AURORA_TEST_REQUIRE(fm.focused() == tree.box2.get());
+    AURORA_TEST_CHECK(tree.box2->focus_arrival() == FocusArrival::Pointer);
+    AURORA_TEST_CHECK_FALSE(tree.box2->focus_ring_shown());
+
+    // 点击之后立刻按 Tab：键盘模态必须当场把可见停点带回来（候选 [box1, box2]，自 box2 回卷到 box1）。
+    KeyEvent tab;
+    tab.key = static_cast<int>(KeyCode::Tab);
+    tab.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, tab, fm));
+    AURORA_TEST_REQUIRE(fm.focused() == tree.box1.get());
+    AURORA_TEST_CHECK(tree.box1->focus_arrival() == FocusArrival::Keyboard);
+    AURORA_TEST_CHECK_MSG(tree.box1->focus_ring_shown(),
+                          "keyboard navigation after a click must restore the visible focus stop");
 }
 
 AURORA_TEST_CASE(pointer_capture_delivers_beyond_root_bounds) {

@@ -1,7 +1,9 @@
 /// 测试类型: unit
 /// 目标单元: src/aurora/widget/widget.cpp（Widget::paint_content 的统一焦点环）
-/// 测试说明: 持有焦点的控件由基类在自身盒外画出焦点环（可观测停点，规格 §4.4）；
-///           未获焦无环；已自带聚焦态外观的控件（TextInput）经 wants_focus_ring() 关闭，不出环。
+/// 测试说明: 持有焦点的控件由基类在自身盒外画出焦点环（可观测停点，规格 §4.4）；未获焦无环；
+///           已自带聚焦态外观的控件（TextInput）经 wants_focus_ring() 关闭，不出环。
+///           环的显隐还取决于焦点**到达方式**（FocusArrival）：指针按下不出环、键盘停点必出环、
+///           程序化聚焦保守出环。
 ///           判据为「盒外 2–4 dp 环带内偏离画布白底的像素数」，与控件自身外观无关，且不锁定色相
 ///           （环色由主题命名令牌 focus.ring 决定，见 Theme::light()/dark()）。
 
@@ -20,6 +22,8 @@ using au::BuildContext;
 using au::Button;
 using au::Color;
 using au::Constraints;
+using au::FocusArrival;
+using au::FocusDirection;
 using au::FocusManager;
 using au::Modifier;
 using au::Painter;
@@ -69,20 +73,19 @@ auto ring_sample(const Painter &p, const Rect &box) -> Color {
     return p.get_pixel(static_cast<int>(std::floor(box.origin.x + (box.size.width * 0.5F))), y);
 }
 
-/// 把控件挂载/布局后画到白底画布，返回其绝对盒。
+/// 挂载 + 布局成 160×40 的盒，供用例自行驱动焦点管理器后再绘制。
 template <typename W>
-auto paint_on_white(W &w, Painter &p, bool focused) -> Rect {
-    BuildContext ctx;
+auto prep(W &w, BuildContext &ctx) -> void {
     w.modifier.set(Modifier{}.size(160.0F, 40.0F));
     w.mount(ctx);
     const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
                          .max = Size{.width = AURORA_CANVAS_W, .height = AURORA_CANVAS_H}};
     w.layout(cc, ctx);
-    if (focused) {
-        FocusManager fm;
-        fm.set_root(&w);
-        fm.set_focus(&w);
-    }
+}
+
+/// 铺白底后把控件画到固定盒上，返回该盒（环带判据相对它取）。
+template <typename W>
+auto paint_frame(W &w, Painter &p, BuildContext &ctx) -> Rect {
     p.begin(static_cast<int>(AURORA_CANVAS_W), static_cast<int>(AURORA_CANVAS_H));
     p.fill_rect(
         Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = AURORA_CANVAS_W, .height = AURORA_CANVAS_H}},
@@ -90,6 +93,19 @@ auto paint_on_white(W &w, Painter &p, bool focused) -> Rect {
     const Rect box{.origin = Point{.x = AURORA_BOX_X, .y = AURORA_BOX_Y}, .size = w.size()};
     w.paint(p, box, ctx);
     return box;
+}
+
+/// 一步到位：挂载/布局 → 按需聚焦（arrival 指定到达方式）→ 画到白底画布。
+template <typename W>
+auto paint_on_white(W &w, Painter &p, bool focused, FocusArrival arrival = FocusArrival::Programmatic) -> Rect {
+    BuildContext ctx;
+    prep(w, ctx);
+    if (focused) {
+        FocusManager fm;
+        fm.set_root(&w);
+        fm.set_focus(&w, FocusDirection::Forward, arrival);
+    }
+    return paint_frame(w, p, ctx);
 }
 
 }  // namespace
@@ -136,6 +152,91 @@ AURORA_TEST_CASE(text_input_opts_out_of_the_base_ring) {
     const Rect box2 = paint_on_white(in2, p_focused, true);
     AURORA_TEST_REQUIRE_TRUE(in2.is_focused());
     AURORA_TEST_CHECK_EQ(ring_pixels_above(p_focused, box2), 0);
+}
+
+AURORA_TEST_CASE(pointer_arrival_paints_no_ring) {
+    // 指针按下把焦点交给控件：焦点照给，但基类环不画——此刻控件已有 pressed/hover 反馈，再补一圈
+    // 会被知觉归组成「控件自带的一圈边框」（规格 §4.4 与浏览器 :focus-visible 同口径）。
+    Button btn{"Go"};
+    Painter p;
+    const Rect box = paint_on_white(btn, p, true, FocusArrival::Pointer);
+    AURORA_TEST_REQUIRE_TRUE(btn.is_focused());  // 焦点归属不因环而变
+    AURORA_TEST_CHECK_FALSE(btn.focus_ring_shown());
+    AURORA_TEST_CHECK_MSG(ring_pixels_above(p, box) == 0,
+                          "focus arriving by pointer must not paint the base ring (the reported 'extra border after "
+                          "click' is exactly this band)");
+}
+
+AURORA_TEST_CASE(keyboard_arrival_paints_ring) {
+    // 键盘停点是无障碍可达性的唯一可见线索，必须出环；色仍取 focus.ring 令牌。
+    Button btn{"Go"};
+    Painter p;
+    const Rect box = paint_on_white(btn, p, true, FocusArrival::Keyboard);
+    AURORA_TEST_REQUIRE_TRUE(btn.focus_ring_shown());
+    AURORA_TEST_CHECK_MSG(ring_pixels_above(p, box) > 0, "keyboard stop must paint the base focus ring");
+    const Theme light = Theme::light();
+    AURORA_TEST_CHECK_EQ(ring_sample(p, box), light.token_or<Color>("focus.ring", light.primary));
+}
+
+AURORA_TEST_CASE(tab_after_pointer_click_restores_the_ring) {
+    // 模态切换回归：指针点击后环隐去，紧接着按 Tab 移焦必须**立刻**重新出环，否则键盘用户
+    // 从这一次点击起就再也看不见停点。
+    Button btn{"Go"};
+    BuildContext ctx;
+    prep(btn, ctx);
+    FocusManager fm;
+    fm.set_root(&btn);
+    fm.set_focus(&btn, FocusDirection::Forward, FocusArrival::Pointer);
+    AURORA_TEST_REQUIRE_FALSE(btn.focus_ring_shown());
+
+    AURORA_TEST_REQUIRE_TRUE(fm.move_focus(FocusDirection::Forward));  // 单停点：焦点回到同一控件
+    AURORA_TEST_CHECK(btn.is_focused());
+    AURORA_TEST_CHECK_MSG(btn.focus_arrival() == FocusArrival::Keyboard,
+                          "move_focus is keyboard-only, so it must re-establish the visible modality");
+    AURORA_TEST_CHECK(btn.focus_ring_shown());
+    Painter p;
+    const Rect box = paint_frame(btn, p, ctx);
+    AURORA_TEST_CHECK(ring_pixels_above(p, box) > 0);
+}
+
+AURORA_TEST_CASE(pointer_click_on_a_keyboard_focused_widget_hides_the_ring) {
+    // 同一控件再次获焦：焦点没换、不重发 on_focus_change，但到达方式须跟着最后一次手势更新。
+    // 漏掉这一步就留下「按 Tab 出了环、又用鼠标点它，环却不消」的残影。
+    Button btn{"Go"};
+    BuildContext ctx;
+    prep(btn, ctx);
+    FocusManager fm;
+    fm.set_root(&btn);
+    fm.set_focus(&btn, FocusDirection::Forward, FocusArrival::Keyboard);
+    AURORA_TEST_REQUIRE(btn.focus_ring_shown());
+
+    fm.set_focus(&btn, FocusDirection::Forward, FocusArrival::Pointer);
+    AURORA_TEST_CHECK(btn.is_focused());
+    AURORA_TEST_CHECK(btn.focus_arrival() == FocusArrival::Pointer);
+    AURORA_TEST_CHECK_FALSE(btn.focus_ring_shown());
+    Painter p;
+    const Rect box = paint_frame(btn, p, ctx);
+    AURORA_TEST_CHECK_EQ(ring_pixels_above(p, box), 0);
+}
+
+AURORA_TEST_CASE(request_focus_keeps_the_pointer_arrival) {
+    // 控件在自有 on_pointer_event 里自主要焦点（Spin 值区、Text 选区等）时，派发器已把 Pointer
+    // 记在同一控件上；request_focus 若恒按 Programmatic 覆盖，同一次点击会因「谁先改焦点」而
+    // 给出不同观感（点按钮无环、点 Spin 值区有环）。
+    Button btn{"Go"};
+    BuildContext ctx;
+    prep(btn, ctx);
+    FocusManager fm;
+    fm.set_root(&btn);
+    fm.set_focus(&btn, FocusDirection::Forward, FocusArrival::Pointer);
+    AURORA_TEST_REQUIRE(btn.focus_arrival() == FocusArrival::Pointer);
+
+    au::set_current_focus_manager(&fm);  // request_focus() 经线程局部槽位解析焦点管理器
+    btn.request_focus();
+    au::set_current_focus_manager(nullptr);
+    AURORA_TEST_CHECK(btn.is_focused());
+    AURORA_TEST_CHECK(btn.focus_arrival() == FocusArrival::Pointer);
+    AURORA_TEST_CHECK_FALSE(btn.focus_ring_shown());
 }
 
 }  // namespace aurora::test_cases::utest_focus_ring
