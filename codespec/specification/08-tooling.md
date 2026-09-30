@@ -527,7 +527,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 | 目标 | 说明 |
 |:---|:---|
-| `generate_error_codes` | 触发 `gen_error_codes` 重跑（errors.toml 变更时） |
+| `generate_error_codes` | 触发 `gen_error_codes` 重跑（errors.toml 变更时）。产物先落 `<build>/_gen_error_codes_stage/`，经 clang-format（配置以 `file:<仓库根绝对路径>` 钉死，口径见 `BUILD_OPTIONS.md` §4.7）折行后 `copy_if_different` 回源码树；生成器四个路径参数一律必需，缺省即拒绝执行，以免绕过折行步骤直写版控文件 |
 | `aurora_api_json` | 运行 `gen_api_tools` 直写 `aurora_api.json`，随后 `gen_debug_api` 再合并 `debug` 段（单跑即得完整文件） |
 | `gen_debug_api_json` | 仅刷新 `aurora_api.json` 的 `debug` 段 |
 | `perf_gates` | 本机时间类门槛校验（`tools/check/check_perf_gates.ps1`，仅 Windows，不进 CI） |

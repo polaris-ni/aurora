@@ -478,7 +478,7 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 | 配置来源 | 仓库根 `.clang-format`（`BasedOnStyle: Google` + 本仓覆盖项，含 `PointerAlignment: Right`、`DerivePointerAlignment: false`） |
 | 扫描范围 | `git ls-files` 中全部**非 `third_party/`、非 `build*/`** 的 `.cpp/.cc/.h/.hpp/.cxx`（无 git 时退化为文件系统遍历） |
 | 依赖 | clang-format（版本须读得懂本仓配置，见下）+ python（PATH）；**不需要** `compile_commands.json` |
-| 定位方式 | `aurora_find_clang_format`（`cmake/AuroraUtils.cmake`）按缓存变量 `AURORA_CLANG_FORMAT_CANDIDATES`（默认 `clang-format-22;clang-format-21;clang-format-20;clang-format`）逐个试跑 `--dump-config --style=file`，取**第一个退出码为 0** 者；结果以 `--clang-format <path>` 显式传给 runner |
+| 定位方式 | `aurora_find_clang_format`（`cmake/AuroraUtils.cmake`）按缓存变量 `AURORA_CLANG_FORMAT_CANDIDATES`（默认 `clang-format-22;clang-format-21;clang-format-20;clang-format`）逐个试跑 `--dump-config --style=file:<仓库根绝对路径>`（钉死形态，见 §4.7 末「配置来源钉死」裁决），取**第一个退出码为 0** 者；结果以 `--clang-format <path>` 显式传给 runner |
 
 为何要有这道门禁：门禁的作用是让排版漂移在**引入的那一刻**暴露，而不是攒到需要一次性大改。
 
@@ -498,17 +498,36 @@ ubuntu-latest 镜像预装的 `clang-format`（发行版 18）与候选表里的
 `BinPack` 在本机门禁**同判**（把 `.clang-format:46` 临时改成 `true` 复跑全仓：875/875 合规、差异 0 行），
 仓库保留枚举形态只为与该构建自身 `--dump-config` 的打印一致；`Break` 两侧都不是合法取值。
 
-处置是把「存在」与「可用」分开判：`aurora_find_clang_format` 以 `--dump-config --style=file` 真跑一遍
-（cwd 钉在仓库根，`--style=file` 才从那里上溯找配置），探针判别力本机实测（v22.1.2）——仓库根返回
-`0`，换一份含非法取值的配置（`IndentWidth: abc`）即返回 `1` 并打印 `error: invalid number`。
+处置是把「存在」与「可用」分开判：`aurora_find_clang_format` 以 `--dump-config --style=<钉死配置路径>` 真跑一遍
+（探针判别力本机实测（v22.1.2）——合法配置返回 `0`，换一份含非法取值的配置（`IndentWidth: abc`）即返回 `1`
+并打印 `error: invalid number`）。
 生成链（`cmake/AuroraTools.cmake` 的 `generate_error_codes`）与排版门禁共用该函数，两处必然落在同一个
 二进制上；生成链在判不到可用版本时**告警跳过而不中断构建**（仓库内已提交的 `error_codes.gen.h` 本就是
 格式化后的形态，缺工具只意味着「本次生成未折行」，真漂移仍由 format 门禁判，不该由它决定编译成败）。
+
+**配置来源钉死（裁决）**：仓库内每一次 clang-format 调用都必须显式带上 `AURORA_CLANG_FORMAT_STYLE`
+（= `file:${AURORA_SOURCE_DIR}/.clang-format`），不得写裸 `--style=file` / `-style=file`。判据是 clang-format 的
+配置解析**按入参类型分两条路**：给**具名文件**时从「该文件所在目录」逐级上溯找 `.clang-format`，只有走标准输入时
+才看工作目录。生成链折行的正是具名文件，且它是 `<build>/_gen_error_codes_stage/` 里的**构建目录产物**——构建目录
+位于仓库外（`cmake -B <仓外目录>`、WSL 侧的仓外构建树）时裸形态上溯不到配置，clang-format **不报错、静默退化成
+内置 LLVM 风格**（2 空格 / 80 列），随后 `copy_if_different` 把这份退化产物拷进版控文件。实测代价：内容与规范
+产物一字未改，仅排版退化即让 `check_doc_comments` 报 26 条（`DOC-R3`，折行后的 `///` 续行块被判定为不紧贴可文档化
+声明）、`format-check` 判整文件差异。旧口径「cwd 钉在仓库根，`--style=file` 才从那里上溯找配置」**已被本条取代**
+——它当初是为排版门禁设计的（传绝对路径 + cwd=仓库根，两条解析路恰好都命中），但对生成链的仓外暂存产物不成立；
+把解析依赖从「cwd / 文件位置」收到「显式绝对路径」，是为了让退化在任何构建目录布局下都不可达，也让探测与实调用
+同形态（否则探测恒通过、产物却红）。排版门禁 `tools/check/run_clang_format.py` 与 CI 的装后自证本轮一并改为同
+一形态，仓内不再有裸 `--style=file` 的调用点。两侧实测：Windows `22.1.2` 与 WSL Ubuntu `21.1.8`
+在钉死形态下重新生成的 `error_codes.gen.h` 与规范产物**逐字节相同**；同一份未折行产物在仓库外目录经裸形态处理后
+即得退化形态（负向自证，非空转）。
+另一条同族防线在生成器自身：`tools/gen/gen_error_codes.cpp` 的四个路径参数一律**必需**，缺省即报错退出码 `1`——
+曾允许省略并默认写 `include/aurora/core/error_codes.gen.h` 等源码树文件，那条路绕过了生成后的折行步骤，把未排版
+产物直接落进版控，与本条的退化形态殊途同归地弄红同一批门禁。
 「告警跳过」的代价被证实是真的：tidy / toggles / wasm 等作业的 configure 日志里
 `no clang-format on PATH can parse the repo .clang-format` 一路静默通过，`format` / `format-check`
 聚合目标在这些作业里压根没生成。故 CI 改为**每个跑 configure 的 Linux 作业**都装一个读得懂配置的
 clang-format——命令收在 `.github/actions/setup-clang-format`（apt.llvm.org 的 llvm-22 快照 +
-`/usr/local/bin/clang-format` 软链 + 装完立刻用与探针同形态的 `--dump-config --style=file` 自证），
+`/usr/local/bin/clang-format` 软链 + 装完立刻用与探针同形态的
+`--dump-config --style=file:<仓库根绝对路径>` 自证），
 `clang-format` 门禁作业与两道 `clang-tidy` 作业共用同一口径（后者在同一次 apt 里多带一个包，不重复
 `apt-get update`）。Windows / macOS 作业未纳入：那里没有 apt，且这两侧此前从未因该探测红过。
 
