@@ -67,6 +67,11 @@ auto build_tree(std::shared_ptr<aurora::Chip> *out_probe) -> aurora::Node {
 // CJK-LITERAL: cjk-fixture - Han/kana/hangul runs are the shaping input fed to the glyph atlas, never printed
 constexpr auto AURORA_BENCH_TEXT = "The quick brown fox jumps 0123456789 灰狐跳过懒狗 こんにちは世界 안녕하세요";
 
+// One same-style span: the length a terminal / table row actually breaks its text into. The batch
+// entry amortizes the per-call fixed cost, so the segment must stay short or that cost is buried.
+// CJK-LITERAL: cjk-fixture - Han run is shaping input fed to the glyph atlas, never printed
+constexpr auto AURORA_BENCH_RUN = "fox 012 灰";
+
 // Scroll-scene content tree: `aurora::Scroll` wrapping a column of 200 aurora::Chip (with label
 // text), content far taller than the viewport, for aurora::ScrollBenchHarness to run deterministic
 // scroll sequences (local convention for time-based gates).
@@ -240,11 +245,43 @@ auto main() -> int {
                                }
                            },
                            1, 5));
+
+                // 13) grid text (terminal / table shape): 24 rows x 12 same-font short spans -- one full
+                // screen's worth of styled runs -- laid out on the integer cell grid from monospace_cell
+                // (its values are physical px, the run boxes are logical dp, hence the / s below).
+                // Two ways to draw the identical content: span by span through draw_text (one face resolve
+                // + line metrics per span) versus one draw_text_runs call, so the batch entry's saving is
+                // measured rather than assumed.
+                const aurora::render::CellMetrics cell = aurora::render::FontEngine::monospace_cell(tf, s);
+                const float cx = static_cast<float>(cell.cell_width_px) / s;
+                const float cy = static_cast<float>(cell.cell_height_px) / s;
+                auto grid_runs = std::vector<aurora::render::TextRun>{};
+                for (int row = 0; row < 24; ++row) {
+                    for (int seg = 0; seg < 12; ++seg) {
+                        grid_runs.push_back(aurora::render::TextRun{
+                            .text = AURORA_BENCH_RUN,
+                            .box = aurora::Rect{.origin = aurora::Point{.x = static_cast<float>((seg * 12) + 1) * cx,
+                                                                        .y = static_cast<float>(row) * cy},
+                                                .size = aurora::Size{.width = 12.0F * cx, .height = cy}},
+                            .font = tf,
+                            .color = aurora::Color{40, 200, 120, 255}});
+                    }
+                }
+                report("grid_text_per_span_calls", size_label, s, dw, dh,
+                       aurora::bench::time_ms(
+                           [&]() -> void {
+                               for (const auto &run : grid_runs) {
+                                   p.draw_text(run.box, std::string{run.text}, run.font, run.color);
+                               }
+                           },
+                           warmup, fast_iters));
+                report("grid_text_batched_spans", size_label, s, dw, dh,
+                       aurora::bench::time_ms([&]() -> void { p.draw_text_runs(grid_runs); }, warmup, fast_iters));
             }
         }
     }
 
-    // 13) character-level hit (cost of hit-testing every Move event, amortized over 100 runs): line
+    // 14) character-level hit (cost of hit-testing every Move event, amortized over 100 runs): line
     // length x scale in two dimensions -- after fullscreen the paragraph does not wrap and the
     // single-line code-point count doubles; if the hit is O(n^2) (recomputing the prefix at each
     // boundary) the cost grows quadratically.
@@ -271,7 +308,7 @@ auto main() -> int {
         }
     }
 
-    // 14) scroll scene: reuse aurora::ScrollBenchHarness to run a deterministic scroll sequence,
+    // 15) scroll scene: reuse aurora::ScrollBenchHarness to run a deterministic scroll sequence,
     // producing p99 / jitter / full_redraw_frames and RenderCounters baselines. Time-based gates
     // (G-1~G-4, G-9~G-14) are affected by environment jitter and excluded from CTest; local trend
     // comparison is in tools/check/check_perf_gates.ps1. Counter-based gates G-5~G-8 are locked
