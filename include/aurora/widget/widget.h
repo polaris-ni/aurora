@@ -1099,9 +1099,20 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///       内的相对几何仍成立，跨视口比较不精确（此限制与 `paint_bounds_` 相同）。
     Rect focus_bounds_;
 
-    /// @brief 最近一次 paint 接收的绝对（窗口逻辑 dp）盒；脏区标记据此标记精确几何，
-    ///        使 `Window::present_root` 的脏区裁剪绘制（push_clip）命中正确区域，避免整帧重绘。
+    /// @brief 最近一次 paint 接收的绝对（窗口逻辑 dp）盒；`dirty_bounds()` 的基准盒，使
+    ///        `Window::present_root` 的脏区裁剪绘制（push_clip）命中正确区域，避免整帧重绘。
     Rect paint_bounds_{};
+
+    /// @brief 上一帧是否画过统一焦点环（即是否在自身盒外留下了像素）。
+    ///
+    /// 与 `is_focused_` 一起决定 `dirty_bounds()` 是否按外扩盒标脏：获焦帧需要外扩才能让环落在
+    /// 脏区裁剪之内，失焦帧则要靠外扩把上一帧的环像素重绘掉（否则残留成「盒外一圈主题色」）。
+    bool painted_focus_ring_ = false;
+
+    // ---- 统一焦点环几何（绘制与脏区外扩共用这一份常量，见 Widget::paint_content）----
+    static constexpr float AURORA_FOCUS_RING_GAP = 2.0F;  ///< 环与自身边框/内容的最小间距（dp），不得压在边缘像素上
+    static constexpr float AURORA_FOCUS_RING_THICKNESS = 2.0F;  ///< 环宽（dp）
+    static constexpr float AURORA_FOCUS_RING_RADIUS = 4.0F;  ///< 环圆角（dp）：小于常见控件圆角，故不与边框弧线相交
 
 #ifdef AURORA_ENABLE_DEBUG
     /// @brief 调试叠层（repaint_highlight）用：本控件最近一次实际重绘（render_into 入口）所在的
@@ -1120,9 +1131,27 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @return `focus_bounds_` 的值拷贝（绝对窗口逻辑 dp 盒）。
     [[nodiscard]] auto focus_bounds() const -> Rect { return focus_bounds_; }
 
-    /// @brief 读取最近一次 paint 的绝对（窗口逻辑 dp）盒（脏区标记用）。
+    /// @brief 读取最近一次 paint 的绝对（窗口逻辑 dp）盒。
     /// @return `paint_bounds_` 的值拷贝；从未绘制过则为默认零盒。
+    /// @note 标脏请用 `dirty_bounds()`：本盒只含控件自身，画在盒外的装饰（基类统一焦点环）不在其中。
     [[nodiscard]] auto paint_bounds() const -> Rect { return paint_bounds_; }
+
+    /// @brief 读取本控件本次标脏应覆盖的绝对（窗口逻辑 dp）盒 = 自身绘制盒 ∪ 画在盒外的装饰。
+    ///
+    /// 基类统一焦点环画在自身盒**外** `AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS` 处
+    /// （见 `Widget::paint_content`），而 `paint_bounds()` 只含自身盒：只按自身盒标脏会使环带落在
+    /// 脏区裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成「盒外一圈主题色」。
+    /// @return 当前持有焦点或上一帧画过环（且未经 `wants_focus_ring()` 关闭基类环）时，为
+    ///         `paint_bounds()` 四边各外扩环带宽的盒；其余情况与 `paint_bounds()` 逐位相同。
+    [[nodiscard]] auto dirty_bounds() const -> Rect {
+        const Rect box = paint_bounds_;
+        if (!wants_focus_ring() || (!is_focused_ && !painted_focus_ring_)) {
+            return box;
+        }
+        const float out = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
+        return Rect{.origin = Point{.x = box.origin.x - out, .y = box.origin.y - out},
+                    .size = Size{.width = box.size.width + (2.0F * out), .height = box.size.height + (2.0F * out)}};
+    }
 
 #ifdef AURORA_ENABLE_DEBUG
     /// @brief 读取最近一次实际重绘所在的调试帧序号（repaint_highlight 用）。

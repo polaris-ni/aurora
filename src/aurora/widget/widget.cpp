@@ -478,10 +478,11 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
     // 环取「最外侧 Paint 节点的盒」：链上没有 Paint 节点时退回内容盒（.align()/.padding() 展开出的
     // 留白不该被环罩住），二者都无收缩节点时与视觉盒逐位相同。
     // 自绘聚焦态外观的控件（TextInput 等）经 `wants_focus_ring()` 关闭，避免双环。
+    painted_focus_ring_ = false;  // 本次是否留下盒外环带，由下方画环分支认定（见 dirty_bounds()）
     if (is_focused_ && wants_focus_ring()) {
-        constexpr float ring_gap = 2.0F;  // 与自身边框/内容的最小间距（不得压在边缘像素上）
-        constexpr float ring_thickness = 2.0F;  // 环宽
-        constexpr float ring_radius = 4.0F;  // 环圆角：小于常见控件圆角，故不与边框弧线相交
+        constexpr float ring_gap = Widget::AURORA_FOCUS_RING_GAP;  // 与自身边框/内容的最小间距
+        constexpr float ring_thickness = Widget::AURORA_FOCUS_RING_THICKNESS;  // 环宽
+        constexpr float ring_radius = Widget::AURORA_FOCUS_RING_RADIUS;  // 环圆角
         Rect ring_box = visual_box;  // 链上无盒收缩节点 → 与历史行为逐位一致
         if (!paint_boxes.empty()) {
             ring_box = content_box;  // 有收缩但无 Paint 节点 → 罩住实际内容盒
@@ -499,6 +500,7 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
 
         if (ring.size.width > 0.0F && ring.size.height > 0.0F) {
             p.draw_rounded_border(ring, ring_radius, ring_thickness, inherit_theme(ctx).primary);
+            painted_focus_ring_ = true;  // 环像素落在自身盒外：标脏须按外扩盒，见 Widget::dirty_bounds()
         }
     }
 }
