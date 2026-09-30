@@ -141,7 +141,9 @@ auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *
         if (fm != nullptr) {
             // 最近可获焦目标获焦；整条链都不可获焦则清焦点（set_focus(nullptr)），
             // 与点击空白同义——否则点到纯展示容器时旧焦点/选区残留不消。
-            fm->set_focus(focus_target_of(chain));
+            // 到达方式记 Pointer：指针点击不出基类统一焦点环（此刻已有 pressed 反馈，再画一圈会被
+            // 读成控件自带边框），见 Widget::focus_ring_shown 与 specification/05 §4.4。
+            fm->set_focus(focus_target_of(chain), FocusDirection::Forward, FocusArrival::Pointer);
         }
         deliver_chain(chain, e);
         pointer_capture_[key] = std::move(chain);
@@ -268,7 +270,7 @@ auto TouchDispatcher::dispatch(Widget &root, TouchEvent &e, FocusManager *fm) ->
         // Press 时把焦点交给命中链上最近的「可聚焦」控件（与 MouseEvent 路径一致）；
         // 整条链不可获焦则清焦点（点到纯展示区域时旧选区不残留）。
         if (route.action == MouseAction::Press && fm != nullptr) {
-            fm->set_focus(focus_target_of(route.chain));
+            fm->set_focus(focus_target_of(route.chain), FocusDirection::Forward, FocusArrival::Pointer);
         }
         broadcast_touch(route.chain, e);
         deliver_synthesized(route.chain, p, route.action);

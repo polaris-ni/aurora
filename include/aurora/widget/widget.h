@@ -622,7 +622,34 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 控件（`TextInput` 画 Fluent 式主题色加粗边框）覆写为 `false` 以免双环。
     /// 仅影响绘制，不影响焦点序归属与 `focusable()` / `wants_focus()` 判定。
     /// @return 是否在持焦时由基类绘制焦点环：基类恒为 true。
+    /// @note 本谓词只是画环的必要条件之一；「本帧到底画不画」看 `focus_ring_shown()`（还须持焦且
+    ///       焦点不是指针到达）。
     [[nodiscard]] virtual auto wants_focus_ring() const -> bool { return true; }
+
+    /// @brief 本帧基类是否会为本控件画出统一焦点环 = 持焦 ∧ 未关闭环 ∧ 焦点非指针到达。
+    ///
+    /// 指针按下把焦点交给控件时不画环：此刻控件已有 pressed / hover 反馈，再补一圈会被知觉归组成
+    /// 「控件自带的一圈边框」（用户报的「按钮点后变小、外侧多一圈边」的成因），与浏览器
+    /// `:focus-visible`、WinUI `FocusVisual`、Qt `TabFocusReason` vs `MouseFocusReason` 同口径
+    /// （specification/05-event-navigation.md §4.4）。
+    ///
+    /// `Widget::paint_content` 的画环分支与 `dirty_bounds()` 的外扩判据**共用本谓词**，避免两处各写
+    /// 一份条件而漂移：画了却不标脏 = 环被脏区裁剪吃掉；标脏却不画 = 白擦一圈。
+    /// @return 是否画环；等价 `is_focused() && wants_focus_ring() && focus_arrival() != Pointer`。
+    [[nodiscard]] auto focus_ring_shown() const -> bool {
+        return is_focused_ && wants_focus_ring() && focus_arrival_ != FocusArrival::Pointer;
+    }
+
+    /// @brief 读取最近一次获焦的到达方式。
+    /// @return `FocusArrival`；由 `FocusManager::set_focus` 随焦点写入。从未获焦过的控件返回
+    ///         `Programmatic`——该值仅在 `is_focused()` 为真时才参与绘制判定，故默认值无观测面。
+    [[nodiscard]] auto focus_arrival() const -> FocusArrival { return focus_arrival_; }
+
+    /// @brief 写入焦点到达方式（供 `FocusManager::set_focus` 在改焦点时调用）。
+    /// @param a 本次焦点到达方式。
+    /// @note 只改状态位，不标脏也不重发 `on_focus_change`——由调用方在值真变时负责 `mark_needs_paint()`
+    ///       （`set_focus` 即如此），否则「环该消失却没重绘」会留下残影像素。
+    auto set_focus_arrival(FocusArrival a) -> void { focus_arrival_ = a; }
 
     /// @brief Tab 序权重（默认 0，越小越靠前）；move_focus 按此排序。
     /// @return 当前 Tab 序权重。
@@ -1142,11 +1169,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 基类统一焦点环画在自身盒**外** `AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS` 处
     /// （见 `Widget::paint_content`），而 `paint_bounds()` 只含自身盒：只按自身盒标脏会使环带落在
     /// 脏区裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成「盒外一圈环色」。
-    /// @return 当前持有焦点或上一帧画过环（且未经 `wants_focus_ring()` 关闭基类环）时，为
-    ///         `paint_bounds()` 四边各外扩环带宽的盒；其余情况与 `paint_bounds()` 逐位相同。
+    /// @return 本帧要画环（`focus_ring_shown()`）或上一帧画过环时，为 `paint_bounds()` 四边各外扩
+    ///         环带宽的盒；其余情况与 `paint_bounds()` 逐位相同。
     [[nodiscard]] auto dirty_bounds() const -> Rect {
         const Rect box = paint_bounds_;
-        if (!wants_focus_ring() || (!is_focused_ && !painted_focus_ring_)) {
+        if (!focus_ring_shown() && !painted_focus_ring_) {
             return box;
         }
         const float out = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
@@ -1180,6 +1207,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
     bool focusable_ = true;  ///< 宿主侧焦点否决位（默认未否决）；实际入 Tab 序还需 wants_focus()
     int tab_index_ = 0;  ///< Tab 序权重（越小越靠前）
     bool is_focused_ = false;  ///< 当前是否持有焦点
+    /// @brief 最近一次获焦的到达方式（由 `FocusManager::set_focus` 写入）；默认按可见处理，
+    ///        使「未经理事人直接改 `is_focused_`」的既有路径保持改动前观感。
+    FocusArrival focus_arrival_ = FocusArrival::Programmatic;
     /// @brief 宿主显式声明的读屏名（对标 ARIA `aria-label`）：Name 回退链最高优先级，空串 = 未声明。
     std::string explicit_label_;
     /// @brief 用户可设的跨重建稳定标识（对标 HTML `id`），空串 = 未设；见 `stable_key()`。

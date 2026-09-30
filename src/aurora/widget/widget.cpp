@@ -473,13 +473,14 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
         p.pop_clip();
     }
 
-    // 统一焦点环：持有焦点的控件由基类画出可见停点，使 Tab 落点不依赖各控件自带外观。
+    // 统一焦点环：持有焦点且焦点非指针到达时由基类画出可见停点，使 Tab 落点不依赖各控件自带外观
+    // （判据集中在 `focus_ring_shown()`，与 `dirty_bounds()` 同一份，见 widget.h）。
     // 画在溢出裁剪之后——环外扩于本控件的可见盒，若被本控件自身裁剪切掉就只剩三段残缺边。
     // 环取「最外侧 Paint 节点的盒」：链上没有 Paint 节点时退回内容盒（.align()/.padding() 展开出的
     // 留白不该被环罩住），二者都无收缩节点时与视觉盒逐位相同。
     // 自绘聚焦态外观的控件（TextInput 等）经 `wants_focus_ring()` 关闭，避免双环。
     painted_focus_ring_ = false;  // 本次是否留下盒外环带，由下方画环分支认定（见 dirty_bounds()）
-    if (is_focused_ && wants_focus_ring()) {
+    if (focus_ring_shown()) {
         constexpr float ring_gap = Widget::AURORA_FOCUS_RING_GAP;  // 与自身边框/内容的最小间距
         constexpr float ring_thickness = Widget::AURORA_FOCUS_RING_THICKNESS;  // 环宽
         constexpr float ring_radius = Widget::AURORA_FOCUS_RING_RADIUS;  // 环圆角

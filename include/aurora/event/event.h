@@ -52,6 +52,20 @@ enum class ModifierKey : std::uint8_t {
     return static_cast<std::uint8_t>(a) & static_cast<std::uint8_t>(b);
 }
 
+/// @brief 焦点到达方式：决定基类统一焦点环是否画出（specification/05-event-navigation.md §4.4）。
+///
+/// 由 `FocusManager::set_focus` 随焦点一并写入控件（`Widget::focus_arrival()`），控件与基类绘制
+/// 路径据此判定可见性；本枚举刻意定义在本头而非 `event/focus.h`，因为 `Widget` 需在包含关系上
+/// 先于焦点管理器看到它（`focus.h` 包含 `widget.h`，反向不可）。
+///
+/// - `Pointer`：指针 / 触摸按下把焦点交给控件。控件此刻已有 pressed / hover 反馈，再补一圈环会
+///   被知觉归组成「控件自带的边框」，故不画环——与浏览器 `:focus-visible`、WinUI 的 `FocusVisual`、
+///   Qt 的 `TabFocusReason` vs `MouseFocusReason` 同口径。
+/// - `Keyboard`：经 Tab / Shift+Tab / 方向键移动而来。键盘可达性的可观测停点，必须画环。
+/// - `Programmatic`：显式聚焦（`set_focus` / `request_focus` / 焦点作用域进出恢复等），无从判断
+///   用户所处模态，保守按可见处理，因而既有调用点行为逐位不变。
+enum class FocusArrival : std::uint8_t { Pointer, Keyboard, Programmatic };
+
 /// @brief 输入事件基类。
 ///
 /// 持有 `is_handled` 标志：响应链中某级消费事件后置 true，派发器据此停止冒泡（specification/05-event-navigation.md
