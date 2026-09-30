@@ -9,21 +9,23 @@ Why this exists instead of `clang-format --dry-run --Werror <files>`:
     streaming hundreds of raw unified diffs;
   * it hard-codes the invocation form that is known to be correct.
 
-Invocation correctness matters more than it looks: clang-format resolves the
-`file` style by walking up from the **arguments'** directory. Feeding it a
-relative `--assume-filename`, or running with a different cwd, silently falls
-back to the built-in default style and produces conclusions that point the
-opposite way. Hence: absolute path arguments + cwd pinned to the repository root.
+Invocation correctness matters more than it looks: clang-format resolves the `file` style by
+walking up from the **arguments'** directory (only standard input falls back to the cwd). Any
+invocation whose argument lives outside the source tree — a staged generator product under the
+build directory, a relative `--assume-filename`, a different cwd — therefore silently falls back
+to the built-in default style and produces conclusions that point the opposite way. Hence the
+repo-wide rule (codespec/BUILD_OPTIONS.md §4.7): always pass the config explicitly as
+`--style=file:<absolute path to the repo .clang-format>`, never a bare `--style=file`.
 
 Usage:
     run_clang_format.py [--fix] [--jobs N] [--include REGEX] [--clang-format PATH]
 
 --clang-format lets the caller pin the executable instead of gambling on PATH. cmake passes
 the binary it already validated (cmake/AuroraUtils.cmake: aurora_find_clang_format probes
-candidates with `--dump-config --style=file` and rejects any build that cannot parse this
-repo's .clang-format). That rejection is not hypothetical — the config uses enum values
-newer than distro packages (`BinPackParameters: BinPack`), and an old clang-format exits 1
-with `error: invalid boolean`, which would look like a repo-wide style failure.
+candidates with `--dump-config --style=file:<repo>/.clang-format` and rejects any build that
+cannot parse this repo's .clang-format). That rejection is not hypothetical — the config uses
+enum values newer than distro packages (`BinPackParameters: BinPack`), and an old clang-format
+exits 1 with `error: invalid boolean`, which would look like a repo-wide style failure.
 
 Exit codes:
     0  every checked file already conforms (or --fix finished)
@@ -92,7 +94,9 @@ def walk_sources(root: str) -> list[str]:
 
 def run_format(root: str, cf: str, rel: str, fix: bool) -> tuple[str, int, str]:
     abs_path = os.path.join(root, rel.replace("/", os.sep))
-    args = [cf, "--style=file"]
+    # 钉死配置绝对路径而非裸 `--style=file`：见模块头「Invocation correctness」与本仓 §4.7 裁决。
+    style = "--style=file:" + os.path.join(root, ".clang-format").replace("\\", "/")
+    args = [cf, style]
     if fix:
         args.append("-i")
     args.append(abs_path)
@@ -104,7 +108,7 @@ def run_format(root: str, cf: str, rel: str, fix: bool) -> tuple[str, int, str]:
     if fix:
         # -i rewrites in place; re-check that the result is now stable (idempotent).
         verify = subprocess.run(
-            [cf, "--style=file", abs_path], capture_output=True, text=True,
+            [cf, style, abs_path], capture_output=True, text=True,
             encoding="utf-8", errors="replace", cwd=root,
         )
         current = read_text(abs_path)

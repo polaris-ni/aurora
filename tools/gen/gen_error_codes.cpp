@@ -7,7 +7,8 @@
 //   3) the "error_codes" section of aurora_api.json (machine-readable contract)
 //
 // Usage: gen_error_codes <errors.toml> <error_codes.gen.h> <ERROR_CATALOG.md> <aurora_api.json>
-// Arguments are optional; when omitted they default to paths relative to CMAKE_SOURCE_DIR.
+// All four paths are required: output paths that default to the source tree would bypass the
+// generate_error_codes target's clang-format step and leave unformatted content in version control.
 //
 // Note: this tool is a build-time generator; it does not link the Aurora widget/backend layers and does not
 //       depend on Aurora UI headers — it only uses the standard library and the aurora core/json headers.
@@ -448,11 +449,20 @@ void write_file(const std::string &path, const std::string &content) {
 // This tool intentionally uses exceptions (e.g. try/catch around json parsing in main, std::string allocation,
 // ofstream failures), so main should not be forced to noexcept; hence exception-escape is suppressed.
 auto main(int argc, char **argv) -> int {  // NOLINT(bugprone-exception-escape)
+    // 四个路径一律要求显式给出。曾允许省略并默认写 `include/aurora/core/error_codes.gen.h` 等
+    // 源码树文件：那条路径绕过了 generate_error_codes 的 clang-format 步骤（生成器自己写出的是
+    // 单行超长形态），把未排版产物直接留在版控文件里，之后任何一次外部格式化都会把它折成非仓库
+    // 风格并把 check_doc_comments / format-check 弄红。细则见 cmake/AuroraTools.cmake 的生成注释。
+    if (argc < 5) {
+        err("usage: gen_error_codes <errors.toml> <error_codes.gen.h> <ERROR_CATALOG.md> <aurora_api.json>");
+        err("refusing to write generator outputs without explicit paths");
+        return 1;
+    }
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-bounds-constant-array-index)
-    const std::string toml = (argc > 1) ? argv[1] : "codespec/errors.toml";
-    const std::string gen_h = (argc > 2) ? argv[2] : "include/aurora/core/error_codes.gen.h";
-    const std::string catalog = (argc > 3) ? argv[3] : "codespec/ERROR_CATALOG.md";
-    const std::string api = (argc > 4) ? argv[4] : "aurora_api.json";
+    const std::string toml = argv[1];
+    const std::string gen_h = argv[2];
+    const std::string catalog = argv[3];
+    const std::string api = argv[4];
     // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-bounds-constant-array-index)
 
     std::vector<ErrorEntry> entries;

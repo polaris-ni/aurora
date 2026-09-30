@@ -44,7 +44,7 @@
 #   `generate_error_codes` 换不到可用格式化器，只留一行 warning 静默降级。处置：凡跑 configure 的 Linux 作业
 #   都引用该复合动作（core / backends 的 Linux 矩阵项、toggles、asan、coverage、wasm 及其
 #   lint-wasm、install-consumer、fmt），动作里装完立刻用与探针同形态的
-#   `--dump-config --style=file` 自证；job 8 / 8w 的 clang-tidy 步骤在同一次 apt 里多带
+#   `--dump-config --style=file:<仓库根绝对路径>` 自证；job 8 / 8w 的 clang-tidy 步骤在同一次 apt 里多带
 #   clang-format-22，不重复 `apt-get update`。Windows / macOS 未纳入：无 apt，且这两侧从未因
 #   该探测红过。
 #

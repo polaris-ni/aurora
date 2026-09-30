@@ -66,6 +66,20 @@ function(aurora_setup_consumer_target _tgt)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# AURORA_CLANG_FORMAT_STYLE — 本仓排版配置的**钉死引用形态**（`file:<绝对路径>`）。
+#
+# ⚠️ 任何调用 clang-format 的地方都必须用它，不得写裸 `--style=file`。裸形态的配置解析口径
+#   取决于入参类型：给**具名文件**时从「该文件所在目录」逐级上溯，只有走标准输入才看工作目录。
+#   生成链（AuroraTools 的 generate_error_codes）把产物先落在 `<build>/_gen_error_codes_stage/`
+#   再拷回源码树，构建目录一旦位于仓库外（`cmake -B <仓外目录>`、WSL 侧的仓外构建树），裸形态就
+#   寻不到配置、**静默退化成内置 LLVM 风格（2 空格 / 80 列）**，再把这份退化产物拷进版控文件。
+#   实测代价：内容与 HEAD 一字未改，仅排版退化就让 check_doc_comments 报 26 条、format-check
+#   报整文件 diff。钉死路径后，配置来源与构建目录位置解耦；探测与实调用同用这一形态，退化才不可能
+#   「探测通过、产物却红」。Windows 与 WSL 两侧实测（clang-format 22.1.2 / Ubuntu 21.1.8）：
+#   该形态下重新生成的 error_codes.gen.h 与 HEAD 逐字节相同。
+set(AURORA_CLANG_FORMAT_STYLE "file:${AURORA_SOURCE_DIR}/.clang-format")
+
+# ---------------------------------------------------------------------------
 # aurora_find_clang_format(<out_var>)
 #   按 AURORA_CLANG_FORMAT_CANDIDATES 的顺序挑出**第一个能读懂本仓 `.clang-format`** 的
 #   clang-format，绝对路径写入 <out_var>；一个都不行则写空串（不 FATAL_ERROR）。
@@ -85,9 +99,10 @@ function(aurora_find_clang_format _out)
         if (NOT _exe)
             continue()
         endif ()
-        # cwd 必须是仓库根：`--style=file` 从工作目录逐级上溯找 .clang-format。
-        execute_process(COMMAND "${_exe}" --dump-config --style=file
-                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}"
+        # 探测用钉死形态（见 AURORA_CLANG_FORMAT_STYLE）：既不依赖 cwd，也不依赖被检查文件的位置，
+        # 与生成链 / 排版门禁的实调用完全同口径——否则会出现「探测恒通过、实调用却因寻不到配置而
+        # 静默退化成内置 LLVM 风格」。
+        execute_process(COMMAND "${_exe}" --dump-config "--style=${AURORA_CLANG_FORMAT_STYLE}"
                 RESULT_VARIABLE _rc
                 OUTPUT_VARIABLE _probe_out
                 ERROR_VARIABLE _probe_err)

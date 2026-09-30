@@ -120,7 +120,12 @@ endif ()
 # 生成物必须再过一遍 clang-format：`.gen.h` 里的长 hint 由 clang-format 的 BreakStringLiterals
 # 按 ColumnLimit 折成相邻字面量，生成器自己写出的是单行超长形态——于是「重新生成」这一步本身
 # 就把仓库弄红（实测：内容一字未改，仅重新生成即让 format-check 报 99 行 diff，而 HEAD 里的
-# 版本本就是「生成 + 格式化」的产物）。故生成命令后紧跟 -style=file -i，让生成与门禁同口径。
+# 版本本就是「生成 + 格式化」的产物）。故生成命令后紧跟格式化步骤，让生成与门禁同口径。
+# ⚠️ 该步用 AURORA_CLANG_FORMAT_STYLE（`file:<源码树>/.clang-format` 的钉死形态）而不是裸
+# `-style=file`：本步格式化的是**构建目录里的暂存文件**，裸形态从「该文件所在目录」上溯找配置，
+# 构建目录位于仓库外时（`cmake -B <仓外目录>` / WSL 侧仓外构建树）就寻不到配置、**静默按内置
+# LLVM 风格（2 空格 / 80 列）折完再拷进源码树**——内容一字未改却把 check_doc_comments 弄红
+# （实测 26 条）并把 format-check 整文件判差。细则与两侧实测见 cmake/AuroraUtils.cmake。
 # ⚠️ 这一步**必须**用 aurora_find_clang_format 而不是裸 find_program：把该选项当布尔的构建读不懂
 # 本仓 `.clang-format` 的枚举取值（`BinPackParameters: BinPack`；门槛是迁移后的较新 patch 构建，
 # 不是主版本号 ≥ 20，实测见 cmake/AuroraUtils.cmake 的探针注释），会
@@ -131,7 +136,7 @@ aurora_find_clang_format(_gen_error_codes_cf)
 set(_gen_error_codes_fmt_cmds "")
 if (_gen_error_codes_cf)
     set(_gen_error_codes_fmt_cmds
-            COMMAND "${_gen_error_codes_cf}" -style=file -i
+            COMMAND "${_gen_error_codes_cf}" "--style=${AURORA_CLANG_FORMAT_STYLE}" -i
             "${CMAKE_BINARY_DIR}/_gen_error_codes_stage/error_codes.gen.h")
 else ()
     aurora_warn("no clang-format on PATH can parse the repo .clang-format (candidates: "
