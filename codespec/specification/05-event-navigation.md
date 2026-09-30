@@ -151,7 +151,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 ### 4.1 FocusManager
 
-`FocusManager`（`event/focus.h`）持 `root_` 与 `focused_`，接口：`set_root(Widget*)`、`set_focus(Widget*, FocusDirection)`、`request_focus(Widget*)`、`has_focus(const Widget*)`、`clear()`、`move_focus(FocusDirection)`、`focused()`、`set_on_change(cb)`、`push_scope(Widget*)`、`pop_scope()`、`scope_depth()`。
+`FocusManager`（`event/focus.h`）持 `root_` 与 `focused_`，接口：`set_root(Widget*)`、`set_focus(Widget*, FocusDirection, FocusArrival)`、`request_focus(Widget*)`、`has_focus(const Widget*)`、`clear()`、`move_focus(FocusDirection)`、`focused()`、`set_on_change(cb)`、`push_scope(Widget*)`、`pop_scope()`、`scope_depth()`。`set_focus` 的到达方式参数默认 `FocusArrival::Programmatic`（环可见），故显式聚焦的全部既有调用点行为不变；`move_focus` 恒以 `Keyboard` 送达（见 §4.4）。
 
 `FocusDirection`（`focus.h`）取值 `Forward` `Backward` `Up` `Down` `Left` `Right`。
 
@@ -161,7 +161,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 ### 4.2 组件焦点接口
 
-`Widget` 提供：`focusable()`、`set_focusable(bool)`、`wants_focus()`（虚钩子，Tab 停点意愿，见下）、`tab_index()`、`set_tab_index(int)`、`is_focused()`、`request_focus()`、`on_focus_change(bool)`（虚钩子，基类维护 `is_focused_` 并标脏重绘）、`wants_focus_ring()`（虚钩子，基类统一焦点环开关，见 §4.4）。
+`Widget` 提供：`focusable()`、`set_focusable(bool)`、`wants_focus()`（虚钩子，Tab 停点意愿，见下）、`tab_index()`、`set_tab_index(int)`、`is_focused()`、`request_focus()`、`on_focus_change(bool)`（虚钩子，基类维护 `is_focused_` 并标脏重绘）、`focus_arrival()` / `set_focus_arrival()`（最近一次获焦的到达方式，由 `FocusManager::set_focus` 写入）、`wants_focus_ring()`（虚钩子，基类统一焦点环开关）与 `focus_ring_shown()`（本帧是否画环，见 §4.4）。
 
 **焦点管理器「随派发可得」**：`EventDispatcher::dispatch(Widget&, MouseEvent&, FocusManager*)` 在派发期经线程局部暴露「当前焦点管理器」（`current_focus_manager()`），`request_focus()` 读之，无需在每控件上递归注入。无焦点管理器（`nullptr`）时 `request_focus` 静默 no-op。
 
@@ -188,25 +188,32 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **整条链都不可获焦**（点到纯展示容器）或**命中链为空**（点到根外空白）均视为点击空白——`FocusManager` 清焦点（`set_focus(nullptr)`），旧焦点控件收到 `on_focus_change(false)`（`Text` 据此清除选区高亮，`TextInput` 据此隐藏光标）。
 
-鼠标与触控路径行为一致。`Release` **不**切换焦点，避免拖选结束落在别处时选区被清。
+鼠标与触控路径行为一致，且两条 Press 分支都以 `FocusArrival::Pointer` 送达焦点——焦点照给，但不画基类统一焦点环（见 §4.4）。`Release` **不**切换焦点，避免拖选结束落在别处时选区被清。
 
-`TextInput` 点击时 `request_focus`，`is_focused()` 控制光标显示。
+`TextInput` 点击时 `request_focus`，`is_focused()` 控制光标显示；该自主请求**保留**派发器已记下的到达方式，不把指针送达改写成程序化送达。
 
 ### 4.4 焦点可视化：基类统一焦点环
 
-焦点态必须在像素上可判定，否则人工侧只能靠猜（`Button` 这类控件自身不画任何聚焦外观）。为此 `Widget::paint_content` 末尾由**基类统一绘制焦点环**：控件持有焦点（`is_focused()`）且 `wants_focus_ring()` 为 `true` 时，在其视觉盒外画一圈圆角边框，环色取主题命名令牌 `focus.ring`（未登记时回退 `primary`，见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。
+焦点态必须在像素上可判定，否则人工侧只能靠猜（`Button` 这类控件自身不画任何聚焦外观）。为此 `Widget::paint_content` 末尾由**基类统一绘制焦点环**：判据集中在 `Widget::focus_ring_shown()`——控件持有焦点（`is_focused()`）、`wants_focus_ring()` 为 `true`、且**焦点不是指针按下送达**（`focus_arrival() != FocusArrival::Pointer`）时，在其视觉盒外画一圈圆角边框，环色取主题命名令牌 `focus.ring`（未登记时回退 `primary`，见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。绘制分支与 `dirty_bounds()` 的外扩判据**共用这同一个谓词**，不得各写一份条件：画了却不标脏 = 环被裁剪吃掉，标脏却不画 = 白擦一圈。
 
 - 几何：环带严格落在盒外 **2–4 dp** 的带宽内（间距 2 dp + 环宽 2 dp，圆角 4 dp 小于常见控件圆角故不与边框弧线相交）。**不得压在控件自身边缘像素上**——否则会把 `RichTextEdit` 之类贴着边缘绘制的-caret / 边框像素覆盖掉。这三项常量是 `Widget` 的 `AURORA_FOCUS_RING_GAP` / `AURORA_FOCUS_RING_THICKNESS` / `AURORA_FOCUS_RING_RADIUS`，绘制与标脏共用同一份（不得各写一份，否则脏区与像素会漂移）。
 - **环色（裁决）**：默认主题的环色是**极性色**（浅色主题纯黑、深色主题纯白），由 `Theme::light()` / `Theme::dark()` 登记 `focus.ring` 令牌提供，**不再直接取 `primary`**。理由：环与它所标注的控件同色时，会被知觉归组成「控件自带的一圈边框」，用户读作「控件变小了」——`primary` 恰是 `Button` 的默认底色，故原口径下这条误读必然发生。判据不是「环与页面底色的 WCAG 对比度」（纯蓝环对白页面有 8.59:1，指标合格却仍然误读），而是**环须与控件自身底色拉开**；实测该拉开幅度：极性色 2.44:1（浅）/ 3.90:1（深），蓝相强调色 1.90:1，中性灰浅底 1.02:1。
 - 回退：主题未登记 `focus.ring` 时环色回退 `primary`，即改动前的行为逐位不变。因此既有自定义主题不会因本条被单方面改色；要拿到新的默认观感，须显式改用 `Theme::light()` / `Theme::dark()` 或自行登记该令牌。
-- 开关：`wants_focus_ring()`（`Widget` 基类默认 `true`，虚钩子）已自带聚焦态外观的控件覆写为 `false`，以免双环。当前唯一覆写者是 `TextInput` 与 `RichTextEdit`（它们画 Fluent 式主题色加粗聚焦边框，`paint_frame`）。
-- 重绘：`on_focus_change(bool)` 基实现在维护 `is_focused_` 后调用 `mark_needs_paint()`，故焦点变化必然进下一帧，环不会「逻辑上聚焦、像素上无环」。
+- 开关：`wants_focus_ring()`（`Widget` 基类默认 `true`，虚钩子）已自带聚焦态外观的控件覆写为 `false`，以免双环。当前唯一覆写者是 `TextInput` 与 `RichTextEdit`（它们画 Fluent 式主题色加粗聚焦边框，`paint_frame`）。它是画环的**必要非充分**条件，最终显隐看 `focus_ring_shown()`。
+- 重绘：`on_focus_change(bool)` 基实现在维护 `is_focused_` 后调用 `mark_needs_paint()`，故焦点变化必然进下一帧，环不会「逻辑上聚焦、像素上无环」。**到达方式变更同样要进下一帧**：`FocusManager::set_focus` 命中「新焦点即当前焦点」分支时不重发 `on_focus_change`，但到达方式一旦改变就必须 `mark_needs_paint()`，否则「按 Tab 出了环、又用鼠标点它」会把环留在帧上。
+- **到达方式（裁决）**：焦点环按焦点**如何到达**分级显隐，来源由 `FocusArrival` 表达、`FocusManager::set_focus` 随焦点一并写入控件（`Widget::focus_arrival()` / `set_focus_arrival()`）：
+  - `Pointer`——指针 / 触摸按下送达（`EventDispatcher::dispatch_mouse`、`TouchDispatcher::dispatch` 的 Press 分支）。**不画环**：控件此刻已有 pressed / hover 反馈，再补一圈会被知觉归组成「控件自带的一圈边框」，读作「控件变小了、外侧多一圈边」。
+  - `Keyboard`——`move_focus`（Tab / Shift+Tab / 方向键）送达。该入口只由键盘驱动，故恒记 `Keyboard`，**必画环**。
+  - `Programmatic`——显式聚焦、`request_focus`、焦点作用域进出恢复、无障碍 `SetFocus` 动作、Inspector 直改焦点。无从判断用户所处模态，**保守按可见处理**，因此改动前那些调用点的观感逐位不变。
+  - 控件在自有 `on_pointer_event` 里自主 `request_focus()`（`TextInput` / Spin 值区 / `Text` 选区等）时**保留该控件已有的到达方式**，不改写成 `Programmatic`：派发器已先记下 `Pointer`，若覆盖就成了「点按钮无环、点 Spin 值区有环」这种取决于谁先改焦点的观感。
+  - 对齐：浏览器 `:focus-visible`、WinUI 的 `FocusVisual`、Qt 的 `TabFocusReason` vs `MouseFocusReason` 都以「指针送达不画环、键盘送达必画环」为共识，本条采其**保守子集**——只关指针这一条路径，程序化一律显环。
+  - **未采用**浏览器 / Chrome 的「全局交互模态」规则（脚本 `element.focus()` 沿用最后一次用户手势的模态、按任意键即恢复可见环）。那条规则把可见性挂在派发器的全局状态上，会让「焦点在第几个停点」这类像素验收随历史操作漂移；本库改为把到达方式记在每个控件上，判定局部、可重放。代价：指针点击后再用脚本/无障碍聚焦同一控件时仍无环，须按 Tab 或点击其它键盘停点才恢复可见——与浏览器观感一致，故不视为缺陷。
+- 可观测性：环是键盘与程序化停点的像素证据，配合树快照里持有焦点节点的 `focused: true`（见 [`08-tooling.md`](08-tooling.md)），Inspector 与人工验收都能在不依赖控件自觉的前提下确认焦点落点。**指针送达的焦点没有环**，因此「有无环」不再等价于「有无焦点」：验收指针路径须以 `focused` 标记为准，环只用于确认键盘/程序化停点。
 - **脏区（关键契约）**：环画在控件自身盒**外**，而 `paint_bounds()` 只含自身盒，因此标脏**不得**直接用 `paint_bounds()`——必须用 `Widget::dirty_bounds()`（= 自身绘制盒 ∪ 盒外装饰）。该契约有两个方向，缺一即错：
   - 获焦帧：脏区不含环带 → 环落在 `push_clip` 之外被裁掉，「逻辑上聚焦、像素上无环」（要靠别的控件恰好同帧标脏扩大合并框才偶发出现）。
   - 失焦帧（或尺寸变化后）：脏区不含环带 → 上一帧的环像素无人重绘，残留成「盒外一圈主题色，看起来比控件自身盒大」。
-  汇聚点共两处，都要走 `dirty_bounds()`：`Window::install_dirty_sink`（普通窗口坐标）与 `Scroll::on_descendant_dirty`（离屏内容缓冲的内容坐标系，脏带若漏环则残留固化在缓冲里随视口反复上屏）。回归见 `tests/integration/itest_dirty_clip_paint.cpp` 的 `focus_ring_band_repainted_when_focus_changes` / `focus_ring_band_inside_scroll_repainted`（不变量：部分脏区重绘与整帧重绘逐位一致）。
-- 可观测性：环是无条件的像素证据，配合树快照里持有焦点节点的 `focused: true`（见 [`08-tooling.md`](08-tooling.md)），Inspector 与人工验收都能在不依赖控件自觉的前提下确认焦点落点。
-- 取舍：未采用 `:focus-visible`（仅键盘触发环）方案——它需要给 `FocusDirection` 增「非导航来源」并让派发器透传来源信息，且会使「指针点击后的焦点」在像素上重新不可判定，与本条要解决的问题相反。
+  汇聚点共两处，都要走 `dirty_bounds()`：`Window::install_dirty_sink`（普通窗口坐标）与 `Scroll::on_descendant_dirty`（离屏内容缓冲的内容坐标系，脏带若漏环则残留固化在缓冲里随视口反复上屏）。回归见 `tests/integration/itest_dirty_clip_paint.cpp` 的 `focus_ring_band_repainted_when_focus_changes` / `focus_ring_band_inside_scroll_repainted` / `pointer_arrival_hides_the_ring_with_no_band_residual`（不变量：部分脏区重绘与整帧重绘逐位一致），显隐分级见 `tests/unit/utest_focus_ring.cpp` 与 `tests/unit/utest_dispatcher.cpp` 的到达方式用例。
+- 口径变更：本节曾裁决「不采用 `:focus-visible`（仅键盘触发环）」，理由是它需要给 `FocusDirection` 增「非导航来源」并让派发器透传，且会使指针点击后的焦点在像素上不可判定。两条理由现已不成立：来源有独立载体（`FocusArrival`，不扩 `FocusDirection` 的导航语义），不可判定性由树快照 `focused: true` 兜住；而「点后外侧多一圈边、控件像变小了」的误读恰是无条件的环造成的。故以上一条取代旧裁决，旧口径不再适用。
 
 ---
 

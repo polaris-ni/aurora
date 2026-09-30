@@ -193,7 +193,7 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 
 **仅绘制脏帧的处理**：跳过 `begin_frame` 保留上帧帧缓冲（部分后端的 `begin_frame` 会清零整帧，直接 begin 会使裁剪外黑屏），先 `Painter::clear_rect(merged_bounds)` 把脏矩形并界重置为新帧零基底，再 `push_clip(merged_bounds)` 裁剪重绘。裁剪内从零基底按原序重新合成、裁剪外沿用上帧像素，两侧均与整帧重绘**逐位一致**。`install_dirty_sink` 回调标记控件本次标脏应覆盖的绝对几何（`Widget::dirty_bounds()` = 最近一次 `paint` 的自身盒 ∪ 画在盒外的装饰），使裁剪命中精确区域。
 
-- **为何不是 `paint_bounds()`**：基类统一焦点环刻意画在控件盒**外** 2–4 dp（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4）。只按自身盒标脏会让该环带落在裁剪之外，两个方向同时出错：获焦帧环画不上屏（偶发靠同帧其它控件的脏区扩张才出现），失焦或尺寸变化帧上一帧的环无人重绘而残留成「盒外一圈环色」。
+- **为何不是 `paint_bounds()`**：基类统一焦点环刻意画在控件盒**外** 2–4 dp（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4）。只按自身盒标脏会让该环带落在裁剪之外，两个方向同时出错：获焦帧环画不上屏（偶发靠同帧其它控件的脏区扩张才出现），失焦、焦点到达方式变更（键盘有环 → 指针点击隐环）或尺寸变化帧上一帧的环无人重绘而残留成「盒外一圈环色」。外扩判据与绘制分支共用 `Widget::focus_ring_shown()`，另加「上一帧画过环」（`painted_focus_ring_`）保证消除方向也进裁剪。
 - **第二条汇聚路径**：`Scroll::on_descendant_dirty` 把后代的 `dirty_bounds()`（内容坐标系）并入离屏缓冲脏带，同一契约；漏了会把残留固化在离屏缓冲里随视口反复上屏。
 
 **系统重绘请求驱动的帧不得只跳过**：由 `set_present_request` 回调（Win32 `WM_PAINT` / `WM_SIZE`）驱动的 `present_root`，即便脏追踪判定跳帧，也必须 `set_present_dirty({})` 后 `present()` 全量 blit 重新上屏——帧缓冲内容仍有效但窗口表面已被 OS 置无效（典型：**最小化还原**后为类背景刷底色，若只跳过则白屏；遮挡揭开同理）。普通 idle 帧不受影响，仍零上屏。
