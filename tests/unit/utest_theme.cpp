@@ -55,19 +55,25 @@ AURORA_TEST_CASE(theme_default_flat_fields) {
 }
 
 AURORA_TEST_CASE(theme_light_is_default_and_dark_overrides) {
-    // light() 等价于默认构造；dark() 只改背景/主色/文本三色。
+    // light() 的扁平字段等价于默认构造，但额外登记 focus.ring 令牌；dark() 改背景/主色/文本三色并登记自己的
+    // focus.ring。
     AURORA_TEST_CHECK_EQ(Theme::light().background, Theme{}.background);
     AURORA_TEST_CHECK_EQ(Theme::light().primary, Theme{}.primary);
+    AURORA_TEST_CHECK_EQ(Theme::light().token_or<Color>("focus.ring", Color{}), Color::black());
 
     const Theme dark = Theme::dark();
     AURORA_TEST_CHECK_EQ(dark.background, Color::from_rgba(32, 33, 36));
     AURORA_TEST_CHECK_EQ(dark.primary, Color::from_rgba(90, 120, 240));
     AURORA_TEST_CHECK_EQ(dark.text, Color::white());
     AURORA_TEST_CHECK_NE(dark.background, Theme::light().background);
+    AURORA_TEST_CHECK_EQ(dark.token_or<Color>("focus.ring", Color{}), Color::white());
+    // 焦点环必须与主色拉开，否则环会被读成控件自带的一圈边框（见 Widget::paint_content）。
+    AURORA_TEST_CHECK_NE(dark.token_or<Color>("focus.ring", Color{}), dark.primary);
+    AURORA_TEST_CHECK_NE(Theme::light().token_or<Color>("focus.ring", Color{}), Theme::light().primary);
 }
 
 AURORA_TEST_CASE(theme_with_defaults_is_merge_root) {
-    // with_defaults 与默认构造逐字段一致，作为 resolve_theme 的兜底根主题。
+    // with_defaults 与默认构造逐字段一致（含空令牌表），作为 resolve_theme 的兜底根主题。
     const Theme root = Theme::with_defaults();
     const Theme base;
     AURORA_TEST_CHECK_EQ(root.background, base.background);
@@ -75,6 +81,7 @@ AURORA_TEST_CASE(theme_with_defaults_is_merge_root) {
     AURORA_TEST_CHECK_EQ(root.on_primary, base.on_primary);
     AURORA_TEST_CHECK_EQ(root.text, base.text);
     AURORA_TEST_CHECK_EQ(root.font, base.font);
+    AURORA_TEST_CHECK_EQ(root.tokens.size(), base.tokens.size());
 }
 
 AURORA_TEST_CASE(theme_token_roundtrip_and_overwrite) {

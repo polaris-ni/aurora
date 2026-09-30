@@ -48,11 +48,14 @@ auto count_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8
     return d;
 }
 
-/// @brief 统计盒外环带（`box` 外扩 5 px 一圈、`box` 自身除外）内的蓝主导像素数。
+/// @brief 统计盒外环带（`box` 外扩 5 px 一圈、`box` 自身除外）内相对参考帧发生变化的像素数。
 ///
 /// 该带完全落在控件自身盒之外，故命中只可能是画在盒外的装饰（本用例针对基类统一焦点环，
-/// 环带位于外扩 2–4 dp）；控件自身外观（含 Button 的蓝色底）不参与计数。
-auto ring_pixels_outside(const std::vector<std::uint8_t> &px, int img_w, int img_h, const au::Rect &box) -> size_t {
+/// 环带位于外扩 2–4 dp）；控件自身外观不参与计数。判据取「与未获焦参考帧的差」而非某个具体
+/// 色相，因为环色由主题命名令牌 `focus.ring` 决定（浅色主题为黑、深色主题为白，见 `Theme::light()`），
+/// 写死色相会让这条脏区回归随主题配色漂移。
+auto ring_pixels_outside(const std::vector<std::uint8_t> &px, const std::vector<std::uint8_t> &ref, int img_w,
+                         int img_h, const au::Rect &box) -> size_t {
     const int x0 = std::max(0, static_cast<int>(std::floor(box.origin.x)) - 5);
     const int y0 = std::max(0, static_cast<int>(std::floor(box.origin.y)) - 5);
     const int x1 = std::min(img_w, static_cast<int>(std::ceil(box.right())) + 5);
@@ -65,8 +68,11 @@ auto ring_pixels_outside(const std::vector<std::uint8_t> &px, int img_w, int img
                 continue;  // 盒内像素属控件自身外观，不计
             }
             const size_t i = ((static_cast<size_t>(y) * static_cast<size_t>(img_w)) + static_cast<size_t>(x)) * 4U;
-            if (static_cast<int>(px.at(i + 2)) - static_cast<int>(px.at(i)) > 30) {  // 蓝主导 = 主题色装饰
-                ++n;
+            // 比 RGBA 四通道而非仅 RGB：Headless 帧底色是全透明黑 (0,0,0,0)，浅色主题的环色恰为
+            // 纯黑 (0,0,0,255)——RGB 逐位相同，只有 alpha 把它显影出来。
+            if (px.at(i) != ref.at(i) || px.at(i + 1U) != ref.at(i + 1U) || px.at(i + 2U) != ref.at(i + 2U) ||
+                px.at(i + 3U) != ref.at(i + 3U)) {
+                ++n;  // 与参考帧该处不同 = 盒外装饰落到了这里
             }
         }
     }
@@ -194,14 +200,13 @@ AURORA_TEST_CASE(focus_ring_band_repainted_when_focus_changes) {
     AURORA_TEST_REQUIRE(box.size.width > 0.0F && box.size.height > 0.0F);
     AURORA_TEST_REQUIRE(box.origin.y > 6.0F);  // 上方留空，否则环带被窗口上边缘切掉无从观测
     const auto unfocused = copy_pixels(hs.data(), n);
-    AURORA_TEST_REQUIRE_EQ(ring_pixels_outside(unfocused, w, h, box), 0U);  // 对照：无焦点无环
 
     fm.set_focus(btn.get());
     AURORA_TEST_REQUIRE(btn->is_focused());
     AURORA_TEST_CHECK(btn->dirty_bounds().size.width > box.size.width);  // 标脏盒须含盒外环带
     AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 2：获焦，部分脏区裁剪绘制
     const auto focused = copy_pixels(hs.data(), n);
-    AURORA_TEST_CHECK_MSG(ring_pixels_outside(focused, w, h, box) > 0,
+    AURORA_TEST_CHECK_MSG(ring_pixels_outside(focused, unfocused, w, h, box) > 0,
                           "focused control must paint the base ring in the band outside its box");
 
     win.force_full_redraw();
@@ -219,7 +224,7 @@ AURORA_TEST_CASE(focus_ring_band_repainted_when_focus_changes) {
 
     // 核心不变量（方向②）：失焦帧与整帧重绘逐位一致（无修复时差出环带那一圈残留）。
     AURORA_TEST_CHECK(count_diff(after_blur, full) == 0);
-    AURORA_TEST_CHECK_EQ(ring_pixels_outside(after_blur, w, h, box), 0U);
+    AURORA_TEST_CHECK_EQ(ring_pixels_outside(after_blur, unfocused, w, h, box), 0U);
     // 回到未获焦外观：与帧 1 逐位一致（环带既无残留也无二次混合）。
     AURORA_TEST_CHECK(count_diff(after_blur, unfocused) == 0);
 #else
