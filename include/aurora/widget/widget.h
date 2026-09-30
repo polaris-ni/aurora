@@ -186,7 +186,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 绘制：应用 modifier（背景等）后调用 on_paint。
     /// @param p 目标画笔（软件光栅 `Painter`，可为离屏缓冲或 Display List 录制器）。
     /// @param bounds 本控件的绝对（窗口逻辑 dp）盒，入口即记入 `paint_bounds()` / `focus_bounds()`。
-    /// @param ctx 构建上下文（基类焦点环从中取主题色）。
+    /// @param ctx 构建上下文（基类焦点环从中取主题，环色见命名令牌 `focus.ring`）。
     auto paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void;
     /// @brief 使离屏缓存（`Modifier::cache_layer`）失效，下次绘制重新渲染子树。
     auto invalidate_paint_cache() const -> void;
@@ -616,7 +616,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 持焦时是否由基类统一绘制焦点环（默认 true）。
     ///
-    /// 基类在 `Widget::paint_content` 末尾为**任何持有焦点**的控件画出主题色环，使 Tab 停点
+    /// 基类在 `Widget::paint_content` 末尾为**任何持有焦点**的控件画出焦点环（环色取主题命名令牌
+    /// `focus.ring`，未登记时回退 `primary`），使 Tab 停点
     /// 在任意控件上都可观测（specification/05-event-navigation.md §4.4）。已自带聚焦态外观的
     /// 控件（`TextInput` 画 Fluent 式主题色加粗边框）覆写为 `false` 以免双环。
     /// 仅影响绘制，不影响焦点序归属与 `focusable()` / `wants_focus()` 判定。
@@ -1106,7 +1107,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 上一帧是否画过统一焦点环（即是否在自身盒外留下了像素）。
     ///
     /// 与 `is_focused_` 一起决定 `dirty_bounds()` 是否按外扩盒标脏：获焦帧需要外扩才能让环落在
-    /// 脏区裁剪之内，失焦帧则要靠外扩把上一帧的环像素重绘掉（否则残留成「盒外一圈主题色」）。
+    /// 脏区裁剪之内，失焦帧则要靠外扩把上一帧的环像素重绘掉（否则残留成「盒外一圈环色」）。
     bool painted_focus_ring_ = false;
 
     // ---- 统一焦点环几何（绘制与脏区外扩共用这一份常量，见 Widget::paint_content）----
@@ -1140,7 +1141,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///
     /// 基类统一焦点环画在自身盒**外** `AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS` 处
     /// （见 `Widget::paint_content`），而 `paint_bounds()` 只含自身盒：只按自身盒标脏会使环带落在
-    /// 脏区裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成「盒外一圈主题色」。
+    /// 脏区裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成「盒外一圈环色」。
     /// @return 当前持有焦点或上一帧画过环（且未经 `wants_focus_ring()` 关闭基类环）时，为
     ///         `paint_bounds()` 四边各外扩环带宽的盒；其余情况与 `paint_bounds()` 逐位相同。
     [[nodiscard]] auto dirty_bounds() const -> Rect {

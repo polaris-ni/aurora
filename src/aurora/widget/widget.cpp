@@ -499,7 +499,10 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
             .size = Size{.width = ring_box.size.width + (2.0F * out), .height = ring_box.size.height + (2.0F * out)}};
 
         if (ring.size.width > 0.0F && ring.size.height > 0.0F) {
-            p.draw_rounded_border(ring, ring_radius, ring_thickness, inherit_theme(ctx).primary);
+            // 环色取命名令牌 "focus.ring"；未登记时回退 primary，使自定义主题保持改动前行为。
+            const Theme theme = inherit_theme(ctx);
+            p.draw_rounded_border(ring, ring_radius, ring_thickness,
+                                  theme.token_or<Color>("focus.ring", theme.primary));
             painted_focus_ring_ = true;  // 环像素落在自身盒外：标脏须按外扩盒，见 Widget::dirty_bounds()
         }
     }

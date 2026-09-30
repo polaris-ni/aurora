@@ -708,7 +708,7 @@ class Window {
             // 空盒（未绘制过/尺寸为 0）被 mark 忽略。布局脏仍走 mark_all → 整帧重绘。
             // 用 dirty_bounds() 而非 paint_bounds()：统一焦点环画在自身盒外（见 Widget::paint_content），
             // 只按自身盒标脏会让环带落在裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成
-            // 「盒外一圈主题色」。
+            // 「盒外一圈环色」。
             dirty_.mark(w.dirty_bounds());
         };
     }

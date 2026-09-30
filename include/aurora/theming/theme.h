@@ -78,17 +78,24 @@ struct Theme {
     /// @brief 命名令牌表：名称 → 设计令牌值（颜色/字体/尺寸）。
     std::unordered_map<std::string, TokenValue> tokens;
 
-    /// @brief 生成一个浅色主题（便于示例/测试）。
-    /// @return 全字段默认值的主题（当前与 `with_defaults()` 同形）。
-    [[nodiscard]] static auto light() -> Theme { return Theme{}; }
+    /// @brief 生成一个浅色主题（便于示例/测试；亦是未挂 `ThemeScope` 的树经 `inherit_theme`
+    /// 拿到的兜底主题）。
+    /// @return 全字段默认值 + 命名令牌 `focus.ring` = 纯黑（焦点环取极性色，与 `primary` 拉开）。
+    /// @note 与 `with_defaults()` 不同形：后者是「逐字段取声明默认值」的裸主题，不登记任何令牌。
+    [[nodiscard]] static auto light() -> Theme {
+        Theme t;
+        t.set_token("focus.ring", TokenValue{Color::black()});
+        return t;
+    }
 
     /// @brief 生成一个深色主题。
-    /// @return 深底（rgb 32,33,36）+ 蓝紫主色 + 白正文的主题。
+    /// @return 深底（rgb 32,33,36）+ 蓝紫主色 + 白正文 + 命名令牌 `focus.ring` = 纯白的主题。
     [[nodiscard]] static auto dark() -> Theme {
         Theme t;
         t.background = Color::from_rgba(32, 33, 36);
         t.primary = Color::from_rgba(90, 120, 240);
         t.text = Color::white();
+        t.set_token("focus.ring", TokenValue{Color::white()});
         return t;
     }
 
