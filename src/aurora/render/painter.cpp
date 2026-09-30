@@ -803,6 +803,27 @@ auto Painter::draw_text(const Rect &r, const std::string &s, const Font &f, Colo
     }
 }
 
+auto Painter::draw_text_runs(std::span<const render::TextRun> runs) -> void {
+    if (runs.empty()) {
+        return;
+    }
+    if (is_recording()) {
+        // 录制态逐片段各落一条 DrawText：回放后端（software / gpu_gl / wgpu）因此无需认识新的
+        // 命令类型，批量化的收益只落在直绘路径——那正是终端/表格每帧重画整屏的走法。
+        for (const auto &run : runs) {
+            record_text_cmd(run.box, std::string{run.text}, run.font, run.color, render::FontEngine::text_aa_mode(),
+                            render::TextLayoutOpts{});
+        }
+        return;
+    }
+    AURORA_PROFILE_COUNT(draw_calls, 1);
+    AURORA_PROFILE_COUNT(draw_texts, 1);
+    {
+        detail::PaintTimer guard{&g_pt.text};
+        render::FontEngine::draw_text_runs(*this, runs, render::FontEngine::text_aa_mode(), render::TextLayoutOpts{});
+    }
+}
+
 auto Painter::blend_pixel(int x, int y, Color c) -> void { set_pixel(x, y, c); }
 
 auto Painter::blend_rect(const Rect &r, Color c) -> void { fill_rect(r, c); }

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstring>
 #include <list>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -636,12 +637,27 @@ auto draw_text_bitmap_fallback(Painter &p, const Rect &r, const std::string &tex
 // 返回 false 表示无可用字体面（调用方自行兜底，如软件路径回退 BitmapFont）。
 // sink 以 `const&` 接收：它在字形循环内被逐字形多次调用（转发/move 语义不适用），
 // 而各调用点传入的都是临时 lambda，`const&` 可同时绑定左值与右值。
-template <typename Sink>
-auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale,
-                           TextAAMode aa, Color c, float origin_x, float origin_y, const Sink &sink) -> bool {
+
+// 发射所需的派生量只依赖 (Font, scale)：字体面解析要构造 "family#weight" 键再查缓存，像素尺寸、
+// 行高与 ascender 各含一次 FT_Set_Pixel_Sizes 状态变更。逐段 draw_text 时每段都得重做，而网格类
+// 调用是整屏同一个 Font，故批量入口把派生量单独提出、只在 Font 变化时重建。
+// faces 指向 resolve_faces 的结果缓存（unordered_map 的值，仅字体注册时整体清空），单次批量循环
+// 内持有其指针安全——批量绘制不可能是重入点，UI 线程在循环内不会注册字体。
+struct EmitContext {
+    const std::vector<FontFace *> *faces = nullptr;
+    int px = 0;
+    float scale = 1.0F;  ///< dp→物理像素倍率：排版里的 letter/word spacing 须在物理像素空间叠加
+    float line_h = 0.0F;
+    float ascent = 0.0F;
+    FT_Pos embolden_strength = 0;
+    bool synthetic_bold = false;
+    float embolden_px = 0.0F;
+};
+
+[[nodiscard]] auto make_emit_context(const Font &f, float scale) -> std::optional<EmitContext> {
     const auto &faces = resolve_faces(f.family, f.weight);
     if (faces.empty()) {
-        return false;
+        return std::nullopt;
     }
     // 与度量（px_measure）保持一致的逻辑像素尺寸，再按设备缩放；保证绘制字形尺寸 == 布局度量尺寸。
     const int px = std::max(1, static_cast<int>(std::lround(static_cast<float>(px_measure(f)) * scale)));
@@ -652,11 +668,23 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
     const bool has_bold_face = std::ranges::any_of(faces, [](const FontFace *fc) { return fc->weight >= 600; });
     const FT_Pos embolden_strength =
         (want_bold && !has_bold_face) ? static_cast<FT_Pos>(std::lround(static_cast<float>(px) * 0.045F * 64.0F)) : 0;
-    const bool synthetic_bold = embolden_strength > 0;
-    const float embolden_px = static_cast<float>(embolden_strength) / 64.0F;
+    EmitContext ctx;
+    ctx.faces = &faces;
+    ctx.px = px;
+    ctx.scale = scale;
+    ctx.line_h = line_height_px(faces, px);
+    ctx.ascent = ascender_px(faces, px);
+    ctx.embolden_strength = embolden_strength;
+    ctx.synthetic_bold = embolden_strength > 0;
+    ctx.embolden_px = static_cast<float>(embolden_strength) / 64.0F;
+    return ctx;
+}
+
+template <typename Sink>
+auto emit_glyphs_with_context(const EmitContext &ctx, const std::string &text, const TextLayoutOpts &opts,
+                              TextAAMode aa, Color c, float origin_x, float origin_y, const Sink &sink) -> void {
     const GlyphAtlas::Mode mode =
         (aa == TextAAMode::ClearType && c.a == 255) ? GlyphAtlas::Mode::Lcd : GlyphAtlas::Mode::Gray;
-    const float line_h = line_height_px(faces, px);
 
     // 与度量/绘制逐位同源：整段按行切分，逐行调用 shape_line（hb_shape）得到字形序列，
     // 再按 shaped run 推进 pen 并合成为像素——度量（measure/caret）与命中测试复用同一逻辑。
@@ -666,9 +694,9 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
     // 将行首 snap 到整数物理像素：hinted 字形 advance 为整像素，从整数坐标开始绘制
     // 可避免高 DPI/非整数列宽造成的半像素模糊（如 125% DPI 下 GridView 列宽为半整数
     // 时，1、3 列清晰而 2、4 列发虚）。
-    float pen_y = std::floor(origin_y + ascender_px(faces, px) + 0.5F);
+    float pen_y = std::floor(origin_y + ctx.ascent + 0.5F);
     for (const auto &line_str : lines) {
-        const auto sl = shape_line(line_str, faces, px, opts);
+        const auto sl = shape_line(line_str, *ctx.faces, ctx.px, opts);
         float pen_x = std::floor(origin_x + 0.5F);  // 每行 pen 推进归零并 snap 到整数像素
         for (std::size_t j = 0; j < sl.glyphs.size(); ++j) {
             const auto &sg = sl.glyphs.at(j);
@@ -679,9 +707,9 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
                 continue;
             }
             const FT_Face face = sg.face->face;  // NOLINT
-            const std::uint64_t key =
-                make_key(static_cast<std::uint32_t>(sg.face->id), static_cast<std::uint32_t>(sg.gi),
-                         static_cast<std::uint32_t>(px), mode == GlyphAtlas::Mode::Lcd, opts.italic, synthetic_bold);
+            const std::uint64_t key = make_key(static_cast<std::uint32_t>(sg.face->id),
+                                               static_cast<std::uint32_t>(sg.gi), static_cast<std::uint32_t>(ctx.px),
+                                               mode == GlyphAtlas::Mode::Lcd, opts.italic, ctx.synthetic_bold);
             const GlyphAtlas::Entry *e = atlas().find(key);
             AURORA_PROFILE_COUNT(glyphs_rendered, 1);
             AURORA_PROFILE_COUNT(glyph_cache_hits, e != nullptr ? 1 : 0);
@@ -689,13 +717,13 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
             if (e == nullptr) {
                 // atlas 未命中才加载/光栅化字形槽；命中时 left/top/advance 已在 atlas 中，
                 // blit 只用 atlas 字段，跳过 FT_Load_Glyph 省下每字形 ~10µs（文本快路径关键）。
-                FT_Set_Pixel_Sizes(face, 0, px);
+                FT_Set_Pixel_Sizes(face, 0, ctx.px);
                 apply_italic(face, opts.italic);  // 与首绘同字形变换，保证逐位一致
                 FT_Load_Glyph(face, sg.gi, FT_LOAD_DEFAULT);
                 const FT_GlyphSlot slot = face->glyph;  // NOLINT
                 // 合成粗体：加载后、渲染前加粗轮廓（strength 为 F26.6 像素）。仅可缩放轮廓有效。
-                if (synthetic_bold && (slot->format == FT_GLYPH_FORMAT_OUTLINE)) {
-                    FT_Outline_Embolden(&slot->outline, embolden_strength);
+                if (ctx.synthetic_bold && (slot->format == FT_GLYPH_FORMAT_OUTLINE)) {
+                    FT_Outline_Embolden(&slot->outline, ctx.embolden_strength);
                 }
                 FT_Render_Glyph(slot, mode == GlyphAtlas::Mode::Lcd ? FT_RENDER_MODE_LCD : FT_RENDER_MODE_NORMAL);
                 GlyphAtlas::Entry ne;
@@ -708,7 +736,8 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
                     static_cast<int>(mode == GlyphAtlas::Mode::Lcd ? slot->bitmap.width / 3 : slot->bitmap.width);
                 ne.rows = static_cast<int>(slot->bitmap.rows);
                 ne.pitch = slot->bitmap.pitch;
-                ne.advance = (static_cast<float>(slot->advance.x) / 64.0F) + (synthetic_bold ? embolden_px : 0.0F);
+                ne.advance =
+                    (static_cast<float>(slot->advance.x) / 64.0F) + (ctx.synthetic_bold ? ctx.embolden_px : 0.0F);
                 // copy_w 为 FT 位图每行真实字节数（LCD 已含 3× 子像素宽度），与绘制循环的行步长一致。
                 const int copy_w = static_cast<int>(slot->bitmap.width);
                 ne.buf.resize(static_cast<std::size_t>(copy_w) * static_cast<std::size_t>(ne.rows));
@@ -737,47 +766,69 @@ auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLay
             // letter_spacing 仅加在相邻字形之间（整串共 (n-1) 次），末字形后不加，与 line_prefix 一致。
             // 合成粗体额外叠加 embolden_px：轮廓加粗向右扩展约 strength/64，若不扩推进，
             // 相邻字形会以 embolden_px 重叠。
-            pen_x += sg.x_adv + (synthetic_bold ? embolden_px : 0.0F);
+            pen_x += sg.x_adv + (ctx.synthetic_bold ? ctx.embolden_px : 0.0F);
             if (sg.cp == ' ' && opts.word_spacing != 0.0F) {
-                pen_x += opts.word_spacing * scale;
+                pen_x += opts.word_spacing * ctx.scale;
             }
             if (j + 1 < sl.glyphs.size()) {
-                pen_x += opts.letter_spacing * scale;
+                pen_x += opts.letter_spacing * ctx.scale;
             }
         }
-        pen_y += line_h;
+        pen_y += ctx.line_h;
         pen_y = std::floor(pen_y + 0.5F);  // 下一行同样 snap 到整数像素
     }
+}
+
+// 单次绘制的便捷封装：现派生上下文再发射。批量入口（draw_text_runs）走 make_emit_context +
+// emit_glyphs_with_context，以便相邻同 Font 片段复用派生量。
+template <typename Sink>
+auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale,
+                           TextAAMode aa, Color c, float origin_x, float origin_y, const Sink &sink) -> bool {
+    const auto ctx = make_emit_context(f, scale);
+    if (!ctx.has_value()) {
+        return false;
+    }
+    emit_glyphs_with_context(*ctx, text, opts, aa, c, origin_x, origin_y, sink);
     return true;
 }
+
+// 软件 blit 的 sink：把图集条目的覆盖度按整行一次性合成（裁剪只判一次，内联 gamma 混合，
+// 消除逐像素函数调用开销）。颜色持指针而非值：批量入口用同一个 sink 服务整批片段，逐片段只改写
+// 指针所指的色，不必重建闭包。
+struct SoftwareBlitSink {
+    Painter *p = nullptr;
+    const Color *c = nullptr;
+
+    auto operator()(const GlyphAtlas::Entry &e, GlyphAtlas::Mode mode, int dx0, int dy0, std::uint64_t /*key*/) const
+        -> void {
+        if (mode == GlyphAtlas::Mode::Gray) {
+            const std::span<const std::uint8_t> buf(e.buf);
+            for (int y = 0; y < e.rows; ++y) {
+                const int py = dy0 + y;
+                const std::size_t off = static_cast<std::size_t>(y) * static_cast<std::size_t>(e.width);
+                // 批处理整行：裁剪只判一次，内联 gamma 混合，消除逐像素开销。
+                p->blend_subpixel_span(dx0, py, *c, buf.subspan(off, static_cast<std::size_t>(e.width)).data(), e.width,
+                                       false, static_cast<float>(c->a) / 255.0F);
+            }
+        } else {
+            const int cols = e.width;
+            const std::span<const std::uint8_t> buf(e.buf);
+            for (int y = 0; y < e.rows; ++y) {
+                const int py = dy0 + y;
+                const std::size_t off = static_cast<std::size_t>(y) * static_cast<std::size_t>(cols) * 3U;
+                // 批处理整行（LCD 三通道）：裁剪只判一次，内联 gamma 混合。
+                p->blend_subpixel_span(dx0, py, *c, buf.subspan(off, static_cast<std::size_t>(cols) * 3U).data(), cols,
+                                       true);
+            }
+        }
+    }
+};
 
 // ---------- 真·FreeType 绘制 ----------
 auto draw_text_impl(Painter &p, const Rect &r, const std::string &text, const Font &f, Color c, TextAAMode aa,
                     const TextLayoutOpts &opts) -> void {
-    const bool emitted = emit_text_glyphs_core(
-        text, f, opts, p.scale(), aa, c, r.origin.x, r.origin.y,
-        [&p, &c](const GlyphAtlas::Entry &e, GlyphAtlas::Mode mode, int dx0, int dy0, std::uint64_t /*key*/) {
-            if (mode == GlyphAtlas::Mode::Gray) {
-                const std::span<const std::uint8_t> buf(e.buf);
-                for (int y = 0; y < e.rows; ++y) {
-                    const int py = dy0 + y;
-                    const std::size_t off = static_cast<std::size_t>(y) * static_cast<std::size_t>(e.width);
-                    // 批处理整行：裁剪只判一次，内联 gamma 混合，消除逐像素开销。
-                    p.blend_subpixel_span(dx0, py, c, buf.subspan(off, static_cast<std::size_t>(e.width)).data(),
-                                          e.width, false, static_cast<float>(c.a) / 255.0F);
-                }
-            } else {
-                const int cols = e.width;
-                const std::span<const std::uint8_t> buf(e.buf);
-                for (int y = 0; y < e.rows; ++y) {
-                    const int py = dy0 + y;
-                    const std::size_t off = static_cast<std::size_t>(y) * static_cast<std::size_t>(cols) * 3U;
-                    // 批处理整行（LCD 三通道）：裁剪只判一次，内联 gamma 混合。
-                    p.blend_subpixel_span(dx0, py, c, buf.subspan(off, static_cast<std::size_t>(cols) * 3U).data(),
-                                          cols, true);
-                }
-            }
-        });
+    const bool emitted = emit_text_glyphs_core(text, f, opts, p.scale(), aa, c, r.origin.x, r.origin.y,
+                                               SoftwareBlitSink{.p = &p, .c = &c});
     if (!emitted) {
         draw_text_bitmap_fallback(p, r, text, f, c, opts);
     }
@@ -887,6 +938,33 @@ auto FontEngine::measure_ascent(const Font &f) -> float {
     // 与 draw_text 的首行基线同源：同一 px_measure 尺寸下的主 face ascender；绘制侧在此基础上
     // 额外做整像素 snap（emit_text_glyphs_core 的 pen_y），布局度量保持未 snap 值。
     return ascender_px(faces, px_measure(f));
+}
+
+auto FontEngine::monospace_cell(const Font &f, float scale) -> CellMetrics {
+    const float sc = (scale > 0.0F) ? scale : 1.0F;
+    const auto ctx = make_emit_context(f, sc);
+    if (!ctx.has_value()) {
+        // 无字体面时与绘制路径同兜底：内置位图字体本就是整格网格，三值直接取其格宽/行高/上沿。
+        const int ps = BitmapFont::pixel_size(f.size_pt);
+        return CellMetrics{.cell_width_px = BitmapFont::AURORA_CELL * ps,
+                           .cell_height_px = BitmapFont::AURORA_CELL * ps,
+                           .ascent_px = (BitmapFont::AURORA_CELL - 1) * ps};
+    }
+    // 参考字形集刻意含制表符 U+2500（其 UTF-8 字节序列）：它在部分字体里比 ASCII 数字宽，
+    // 只按数字定格宽会让边框压进相邻格。hinted advance 本身已是整像素，lround 只做定型。
+    // 合成粗体的 embolden 不加进格宽：按格排布的调用方切粗体时字形可溢出半格，但不推挤邻格。
+    int cell_w = 0;
+    for (const std::string &ref : {std::string{"0"}, std::string{"\xE2\x94\x80"}}) {
+        const auto sl = shape_line(ref, *ctx->faces, ctx->px, TextLayoutOpts{});
+        float acc = 0.0F;
+        for (const auto &g : sl.glyphs) {
+            acc += g.x_adv;
+        }
+        cell_w = std::max(cell_w, static_cast<int>(std::lround(acc)));
+    }
+    return CellMetrics{.cell_width_px = std::max(1, cell_w),
+                       .cell_height_px = std::max(1, static_cast<int>(std::floor(ctx->line_h + 0.5F))),
+                       .ascent_px = static_cast<int>(std::floor(ctx->ascent + 0.5F))};
 }
 
 auto FontEngine::caret_x(const std::string &text, std::size_t char_index, const Font &f) -> float {
@@ -1006,6 +1084,31 @@ auto FontEngine::draw_text(Painter &p, const Rect &r, const std::string &text, c
 auto FontEngine::draw_text(Painter &p, const Rect &r, const std::string &text, const Font &f, Color c,
                            TextAAMode aa_mode, const TextLayoutOpts &opts) -> void {
     draw_text_impl(p, r, text, f, c, aa_mode, opts);
+}
+
+auto FontEngine::draw_text_runs(Painter &p, std::span<const TextRun> runs, TextAAMode aa_mode,
+                                const TextLayoutOpts &opts) -> void {
+    std::optional<EmitContext> ctx;
+    Font ctx_font;  // 与 ctx 同源的字体描述：相邻同 Font 的片段复用派生量，换字体才重建
+    Color current{};  // sink 经指针读取它，逐片段改写即可完成换色
+    const auto sink = SoftwareBlitSink{.p = &p, .c = &current};
+    const float sc = p.scale();
+    for (const auto &run : runs) {
+        if (!ctx.has_value() || run.font != ctx_font) {
+            ctx = make_emit_context(run.font, sc);
+            ctx_font = run.font;
+        }
+        current = run.color;
+        // 片段原点是逻辑 dp（本入口的刻意约定，理由见头文件），此处折算到物理像素后与
+        // Painter::draw_text 预缩放的路径完全同形。
+        const Rect pr{.origin = Point{.x = run.box.origin.x * sc, .y = run.box.origin.y * sc}, .size = run.box.size};
+        const std::string text(run.text);
+        if (!ctx.has_value()) {
+            draw_text_bitmap_fallback(p, pr, text, run.font, run.color, opts);
+            continue;
+        }
+        emit_glyphs_with_context(*ctx, text, opts, aa_mode, run.color, pr.origin.x, pr.origin.y, sink);
+    }
 }
 
 }  // namespace aurora::render

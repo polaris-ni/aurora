@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,18 @@ struct ShapeCacheStats {
     std::uint64_t misses = 0;  ///< 未命中次数（触发 hb_shape）
     std::size_t entries = 0;  ///< 当前缓存条目数
     std::size_t bytes = 0;  ///< 当前估算占用字节数
+};
+
+/// @brief 等宽整像素网格的单格度量（单位：物理像素）。
+///
+/// 网格类消费者（终端、表格单元格）要的是「第 k 列/行落在哪个整像素」，而非整串排版宽度：
+/// hinting 把每个字形的 advance 取整到整像素，整串宽度是这些整数之和，但把 dp 度量再乘
+/// `scale` 折算会得到小数列宽，逐列累积成半格错位。三个字段的取整口径一律与绘制路径同源，
+/// 故按 `x = col * cell_width_px`、`y = row * cell_height_px` 摆放的单行片段与实绘像素对齐。
+struct CellMetrics {
+    int cell_width_px = 0;  ///< 单格推进宽度：参考字形在该像素尺寸下的整像素 hinted advance
+    int cell_height_px = 0;  ///< 单格行高：与绘制侧行推进同源的一次取整值
+    int ascent_px = 0;  ///< 行盒顶 → 基线：与首行 pen_y 的 snap 口径逐位一致
 };
 
 /// @brief 字体引擎（单例）：提供「真实字体渲染」的度量与绘制（specification/03-layout-render.md §8.2）。
@@ -183,6 +196,18 @@ class FontEngine {
     /// @return 行盒顶到首行基线的距离（与 `measure_height` 完全同单位）。
     [[nodiscard]] static auto measure_ascent(const Font &f) -> float;
 
+    /// @brief 等宽整像素网格的单格度量：终端/表格这类「按格排布」场景的列宽与行高来源。
+    ///
+    /// 口径与实绘同源：像素尺寸取 `lround(px_measure(f) * scale)`（与 `draw_text` 一致），
+    /// `cell_width_px` 取该尺寸下参考字形 advance 的最大整数值。参考集刻意含制表符
+    /// `U+2500`：它在部分字体里比数字宽，只按 ASCII 数字定格宽会让边框压到相邻格。
+    /// 行高与基线取绘制侧同一次 `line_height_px` / `ascender_px` 结果并按同一口径取整。
+    /// 无可用字体面时回退内置位图字体的整格网格（`AURORA_CELL` 的整数倍）。
+    /// @param f 字体描述。同一网格应固定用一个参考 Font 取一次度量：字重切换可带来 1px advance 差。
+    /// @param scale 绘制所用帧缓冲像素比（dp→物理），取与 `Painter::scale` 同值；<= 0 按 1 处理。
+    /// @return 物理像素单位的单格度量。
+    [[nodiscard]] static auto monospace_cell(const Font &f, float scale) -> CellMetrics;
+
     /// @brief 选中原语：第 `char_index` 个码点之前的基线 x（码点索引，UTF-8 安全）。
     /// @param text 待定位的 UTF-8 文本。
     /// @param char_index 光标码点下标（0..码点数）。
@@ -299,6 +324,22 @@ class FontEngine {
     /// @param opts 排版附加选项。
     static auto draw_text(Painter &p, const Rect &r, const std::string &text, const Font &f, Color c,
                           TextAAMode aa_mode, const TextLayoutOpts &opts) -> void;
+
+    /// @brief 批量绘制文本片段（`Painter::draw_text_runs` 的引擎侧实现）。
+    ///
+    /// 与「对每个片段各调一次 `draw_text`」逐位一致：落笔坐标、图集条目键、snap 口径全同，差别只在
+    /// 相邻同 `Font` 的片段共用一次字体面解析、像素尺寸与行高度量——这三项各含字符串键构造与
+    /// `FT_Set_Pixel_Sizes` 状态变更，是逐段调用时的每段固定开销。
+    ///
+    /// 单位与同类其余入口不同，刻意如此：`runs` 的区域原点是**逻辑 dp**，本函数内部按 `p.scale()`
+    /// 折算到物理像素。`draw_text` 由调用方（`Painter`）预缩放，是因为它只传一个矩形；批量入参若同样
+    /// 要求预缩放，调用方就得复制整段数组只为改写原点，连带复制每片段的 `Font::family`。
+    /// @param p 目标 Painter。
+    /// @param runs 片段数组（可为空，空即无操作）。
+    /// @param aa_mode 整批共用的抗锯齿策略。
+    /// @param opts 整批共用的排版附加选项。
+    static auto draw_text_runs(Painter &p, std::span<const TextRun> runs, TextAAMode aa_mode,
+                               const TextLayoutOpts &opts) -> void;
 
     /// @brief 文本 shaping 缓存统计：命中率 = hits/(hits+misses) 。
     /// @return 当前缓存的统计快照（命中/未命中次数、条目数、估算字节占用）。
