@@ -212,8 +212,43 @@ freely, subject to the following restrictions:
 
 ---
 
+## 9. Unicode Character Database — 码点宽度判定数据
+
+- **版本**：18.0.0（`EastAsianWidth-18.0.0.txt` 与 `DerivedGeneralCategory-18.0.0.txt`，文件头日期
+  2026-06-29）
+- **来源**：unicode.org 公开的 UCD 数据文件（**未 vendored 源文件**）；从两文件合并相邻同类区间导出
+  `src/aurora/core/unicode_width.cpp` 内的三张 `constexpr` 区间表（零宽 `Mn`/`Me`/`Cf`、宽 `W`+`F`、
+  歧义 `A`），随静态库交付
+- **用途**：`aurora::unicode_cell_width()`（`include/aurora/core/unicode_width.h`）判定码点在等宽
+  网格里的占位格数，见 `codespec/specification/01-core.md` §7.3
+- **许可**：Unicode License v3（Unicode, Inc. 的版权与许可声明如下；再生成一份区间表时须带上所依据
+  的文件名与版本，以便追溯数据口径）
+
+```
+UNICODE LICENSE V3
+
+Copyright © 1991-2026 Unicode, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of data files
+and any associated documentation (the "Data Files") or software and any associated
+documentation (the "Software") to deal in the Data Files or Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+and/or sell copies of the Data Files or Software, and to permit persons to whom the Data
+Files or Software are furnished to do so, provided that either (a) this copyright and
+permission notice appear with all copies of the Data Files or Software, or (b) this
+copyright and permission notice appear in associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD PARTY RIGHTS.
+
+Full text: https://www.unicode.org/license.txt
+```
+
+---
+
 ## 合规说明
 
-- 上述组件均以源码形式 vendored 于仓库内，版本锁定、可审计；除 wgpu-native 的 Rust 依赖树（首次构建需 cargo 在线拉取，见第 8 节）外均可无网络构建。
-- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
+- 上述组件均以源码形式 vendored 于仓库内，版本锁定、可审计；除 wgpu-native 的 Rust 依赖树（首次构建需 cargo 在线拉取，见第 8 节）外均可无网络构建。第 9 节 Unicode UCD 是**唯一例外**：其源数据文件不入库，入库的是按其许可导出的区间表，版本与导出来源就写在该节内，可审计口径不变。
+- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）、Unicode UCD（Unicode License v3，导出区间表随库交付）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
 - 许可全文以各组件目录内原始 `LICENSE.TXT` / `COPYING` / 头注释为权威来源；本文件仅作索引与归档。
