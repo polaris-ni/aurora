@@ -412,6 +412,7 @@ au::Column{}
 | `fill_sector(Point center, float outer_r, float inner_r, float a0, float a1, Color)` | 抗锯齿扇形 / 环扇（y 轴向下，弧度制；`a1 - a0 >= 2π` 视为整圆 / 整环；`inner_r <= 0` 即实心扇形） |
 | `stroke_arc(Point center, float radius, float thickness, float a0, float a1, Color)` | 弧线描边（`fill_sector` 的环带语义糖） |
 | `draw_text(Rect, string, Font, Color[, TextLayoutOpts][, TextAAMode])` | 绘制文本，三个重载 |
+| `draw_text_runs(span<const render::TextRun>)` | 批量绘制同属性文本片段（详见 §8.2 的「批量入口」）；空数组即无操作 |
 | `draw_image(const Image&, const Rect&)` | 绘制图像（双线性采样） |
 
 **混合与效果**
@@ -482,6 +483,10 @@ au::Column{}
 **排版选项（`TextLayoutOpts`）**：`measure_width` / `caret_x` / `hit_test_char` / `draw_text` 均提供接受 `TextLayoutOpts` 的重载，携带 `letter_spacing`（相邻字形间间距，整串共 `n-1` 次）、`word_spacing`（词间距，仅空格后追加）、`italic`（经 FreeType `FT_Set_Transform` 仿斜）。统一 opts 保证度量、光标、命中、绘制四者完全一致。
 
 **锚定契约**：`draw_text(r, ...)` 的 `r.origin.y` 是**行盒顶**而非基线。实现内部首行基线 = `origin.y + 主 face ascender`，回退 face 字形统一按主 face 基线对齐。全库调用方均按顶锚定传值，**不得自行加减 ascent**。该 ascent 由 `measure_ascent(f)` 公开（与绘制同源、不做绘制侧的整像素 snap），供 `CrossAxisAlignment::Baseline` 的控件级基线使用；无可用字体面时回退 `BitmapFont::measure_ascent`（同一 `pixel_size` 口径），恒有 `0 <= measure_ascent <= measure_height`。
+
+**等宽整格度量（`monospace_cell(f, scale)` → `render::CellMetrics`）**：按列排版的消费方（终端网格、表格单元格）需要整像素单格尺寸来同时定列位与判换行，而 `measure_*` 给的是浮点自然度量，逐格各自取整会让列位随列号漂移。`CellMetrics{cell_width_px, cell_height_px, ascent_px}` 三值均为**物理像素整数**，口径：宽取参考字形集 `{'0', U+2500}` 在绘制同源像素尺寸（`lround(px_measure × scale)`）下整像素 hinted advance 的最大值——含 U+2500 是因为制表符在部分字体里比 ASCII 数字宽，只量 `'0'` 会让相邻边框压字；不放宽到全字形集是避免把网格画稀（`utest_font_engine.cpp` 以 `display_width` 反查上界，钉住「≥ 两者最大且 ≤ 最大 + 1」）。高与基线与绘制侧同源（`floor(line_height_px + 0.5)` / `floor(ascender_px + 0.5)`，即首行 pen 的 snap 口径），故按本度量排的多行文本与 `draw_text` 的行推进共用同一行盒；`cell_width_px` 恒 ≥ 1，`scale <= 0` 按 1 处理，无可用字体面时回退 `BitmapFont` 整格口径。**合成粗体的 embolden 量不计入格宽**（绘制期膨胀允许字形溢出半格，但不推挤邻格）。列起点、跨格与换行一律由消费方按本度量自行计算——框架不提供「整格模式」的排版选项。
+
+**批量入口（`Painter::draw_text_runs` / `FontEngine::draw_text_runs`）**：一段文本按样式切成多个片段是终端与表格的常态，逐片段调 `draw_text` 会让每次调用重做与文本内容无关的派生量（字体候选面解析含堆键构造、像素尺寸换算、两次 `FT_Set_Pixel_Sizes` 取行高与 ascender）。批量入口把这些派生量外提成一份发射上下文，**只在相邻片段 `Font` 不同时重建**，落笔算式与逐片段调用逐位相同（`utest_painter.cpp` 以两画布全像素差分 == 0 钉住）。收益上限即「每次调用的派生量 × 片段数」：实测一屏规模（24 行 × 12 同属性短片段 = 288 片段）在 9 组「逻辑尺寸 × scale」下两轮各为 −8.5%…+8%、中位约 −1%，落在环境抖动之内——该场景的成本主体是字形 blit 与图集查找，不是派生量，故 `bench_render` 的 `grid_text_per_span_calls` / `grid_text_batched_spans` 两行**只作观测项、不进 `tools/check/perf_gates.json`**（无稳定阈值可锁）。片段风格越碎（同屏片段数越多、每片段越短）收益越接近线性；本入口的正当性首先是「逐片段调用与整批调用输出一致」而非提速幅度。片段类型 `render::TextRun{text, box, font, color}` 与 `draw_text` 的单次入参一一对应，区域原点单位为**逻辑 dp**、只读 `origin`；`FontEngine::draw_text_runs` 因此与同类其余「收物理像素」的入口**刻意不同**（内部按 `p.scale()` 折算）——预缩放需复制整段数组并连带复制每片段的 `Font::family`，每帧数千次堆分配恰好抵消收益。抗锯齿取进程级 `text_aa_mode()`、排版选项取默认值。**录制态逐片段各落一条 `DrawText` 命令**，故 RHI 回放后端无需认识新命令类型，批量化收益只落在直绘路径（终端/表格每帧重画整屏正是该路径）。
 
 **实显度量（`display_*`）**：FT hinting 把每个字形 advance 取整到整像素，同一字形在不同像素尺寸下的 advance 不成 scale 比例。因此 `display_width` / `display_caret_x` / `display_hit_test_char{,_inclusive}` 必须按「绘制同源的物理像素尺寸 `lround(px × scale)` 真算前缀推进后折回 dp」，**不得写成自然度量的转发别名**——否则缩放屏下行内累计误差跨字符边界，造成命中 off-by-one。`scale == 1` 时退化为对应自然版。
 
