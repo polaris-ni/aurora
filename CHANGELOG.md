@@ -18,6 +18,20 @@ freeze: minor-versions-are-additive
 - PATCH: 缺陷修复与文档，无 API 行为变化。
 - 废弃 API 须先以 [[deprecated]] 标注并保留至少 1 个 MINOR 周期，再于下个 MAJOR 移除。
 
+## [Unreleased]
+
+### Added
+- `Painter::draw_text_runs` 新增两个重载，与 `draw_text` 的 opts / aa_mode 梯度对齐：`draw_text_runs(runs, opts)` 与 `draw_text_runs(runs, aa_mode, opts)`。整批共用一份 `TextLayoutOpts`（字距 / 词距 / 斜体），输出与逐个 `draw_text(..., aa_mode, opts)` 逐位一致。单参重载语义不变（现按委托实现）。不提供 per-run opts——各片段排版属性不同时请按属性分组分批调用。
+- `MouseEvent::click_count`（`std::uint8_t`，默认 1）：本次 Press 是同一指针、同一按键上的第几次连续点击（1 / 2 / 3，封顶 3）。判定集中在派发层（`ClickTracker`），鼠标与触控合成流同口径，触摸因此支持双 tap。阈值 `click_window_ms`（默认 500ms）与 `click_radius_dp`（默认 4dp）暴露为 `EventDispatcher` / `TouchDispatcher` 的公开可调成员。
+- 库级常量 `kDefaultClickWindowMs` / `kDefaultClickRadiusDp` / `kMaxClickCount`（`event/event.h`）：连击判定的单一真源，窗口装饰层（Wayland CSD 标题栏双击最大化）亦引用之。
+
+### Changed
+- Wayland CSD 标题栏的双击最大化阈值由 300ms / 5px 改为与其它平台一致的 500ms / 4dp（改引库级常量，消除库内两套阈值）。
+
+### Notes
+- `click_count` 的阈值是库内约定常量，**未接线到系统双击速度设置**（Windows `GetDoubleClickTime` / X11 等），以换取跨平台手感一致。
+- 触摸路径的 `click_count` 由「恒 1」变为可能取 2 / 3（双 tap 语义）；依赖该恒等式的调用方需复核。
+
 ## [1.0.0-alpha.9] - 2026-09-24
 > 类型：pre-release
 
