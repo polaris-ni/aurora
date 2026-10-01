@@ -334,8 +334,7 @@ AURORA_TEST_CASE(draw_text_runs_with_opts_matches_individual_draw_text_calls) {
     // 带 opts 的批量入口必须与逐个 `draw_text(..., opts)` 逐位一致：字距/词距/斜体整批同值。
     const Font f{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
     const auto runs = {
-        render::TextRun{
-            .text = "spacing", .box = rect_at(4.0F, 6.0F, 130.0F, 20.0F), .font = f, .color = Color::red()},
+        render::TextRun{.text = "spacing", .box = rect_at(4.0F, 6.0F, 130.0F, 20.0F), .font = f, .color = Color::red()},
         render::TextRun{
             .text = "wrap it", .box = rect_at(4.0F, 30.0F, 130.0F, 20.0F), .font = f, .color = Color::blue()}};
     const render::TextLayoutOpts opts{.letter_spacing = 1.5F, .word_spacing = 2.0F, .italic = true};
@@ -355,8 +354,8 @@ AURORA_TEST_CASE(draw_text_runs_with_opts_matches_individual_draw_text_calls) {
 AURORA_TEST_CASE(draw_text_runs_with_aa_mode_and_opts_matches_individual_calls) {
     // 显式 aa_mode 的批量入口同样逐位等价于逐个 `draw_text(..., aa_mode, opts)`。
     const Font f{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
-    const auto runs = {render::TextRun{
-        .text = "Aa", .box = rect_at(2.0F, 2.0F, 80.0F, 20.0F), .font = f, .color = Color::black()}};
+    const auto runs = {
+        render::TextRun{.text = "Aa", .box = rect_at(2.0F, 2.0F, 80.0F, 20.0F), .font = f, .color = Color::black()}};
     const render::TextLayoutOpts opts{.letter_spacing = 0.0F, .word_spacing = 0.0F, .italic = false};
     const auto aa = render::TextAAMode::ClearType;
 

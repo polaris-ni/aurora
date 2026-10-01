@@ -158,8 +158,7 @@ auto ClickTracker::resolve(MouseEvent &e, std::uint32_t window_ms, float radius_
     const float dy = e.position.y - it->second.position.y;
     // window_ms == 0 表示「关闭连击判定」：任何间隔都不累加。取严格大于 0 而非依赖
     // `elapsed_ms <= 0` 的边界——同一毫秒内的两次点击实测 elapsed 恰为 0，靠 <= 会误判为命中。
-    const bool within_window =
-        window_ms > 0 && elapsed_ms >= 0 && static_cast<std::uint64_t>(elapsed_ms) <= window_ms;
+    const bool within_window = window_ms > 0 && elapsed_ms >= 0 && static_cast<std::uint64_t>(elapsed_ms) <= window_ms;
     const bool within_radius = std::sqrt(dx * dx + dy * dy) <= radius_dp;
 
     if (within_window && within_radius) {
