@@ -384,8 +384,8 @@ AURORA_TEST_CASE(monospace_cell_width_covers_reference_glyph_advances) {
     const auto opts = render::TextLayoutOpts{};
     for (const float sc : {1.0F, 1.25F, 1.5F}) {
         const auto cell = render::FontEngine::monospace_cell(font, sc);
-        const int digit = std::lround(render::FontEngine::display_width("0", font, opts, sc) * sc);
-        const int box = std::lround(render::FontEngine::display_width("\xE2\x94\x80", font, opts, sc) * sc);
+        const int digit = static_cast<int>(std::lround(render::FontEngine::display_width("0", font, opts, sc) * sc));
+        const int box = static_cast<int>(std::lround(render::FontEngine::display_width("\xE2\x94\x80", font, opts, sc) * sc));
         AURORA_TEST_CHECK_GE(cell.cell_width_px, std::max(digit, box));
         AURORA_TEST_CHECK_LE(cell.cell_width_px, std::max(digit, box) + 1);
     }
