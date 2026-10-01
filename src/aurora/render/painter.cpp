@@ -804,15 +804,26 @@ auto Painter::draw_text(const Rect &r, const std::string &s, const Font &f, Colo
 }
 
 auto Painter::draw_text_runs(std::span<const render::TextRun> runs) -> void {
+    // 单参重载委托到显式重载：抗锯齿取进程级默认、排版取默认 opts，行为与历史版本逐位一致。
+    draw_text_runs(runs, render::FontEngine::text_aa_mode(), render::TextLayoutOpts{});
+}
+
+auto Painter::draw_text_runs(std::span<const render::TextRun> runs, const render::TextLayoutOpts &opts) -> void {
+    draw_text_runs(runs, render::FontEngine::text_aa_mode(), opts);
+}
+
+auto Painter::draw_text_runs(std::span<const render::TextRun> runs, render::TextAAMode aa_mode,
+                             const render::TextLayoutOpts &opts) -> void {
     if (runs.empty()) {
         return;
     }
     if (is_recording()) {
         // 录制态逐片段各落一条 DrawText：回放后端（software / gpu_gl / wgpu）因此无需认识新的
         // 命令类型，批量化的收益只落在直绘路径——那正是终端/表格每帧重画整屏的走法。
+        // 整批共用 opts / aa_mode：回放端据 DrawCmd 的 aa_mode / text_ls / text_ws / text_italic 重建，
+        // 因此与逐个 draw_text(..., aa_mode, opts) 录出的命令序列逐位一致。
         for (const auto &run : runs) {
-            record_text_cmd(run.box, std::string{run.text}, run.font, run.color, render::FontEngine::text_aa_mode(),
-                            render::TextLayoutOpts{});
+            record_text_cmd(run.box, std::string{run.text}, run.font, run.color, aa_mode, opts);
         }
         return;
     }
@@ -820,7 +831,7 @@ auto Painter::draw_text_runs(std::span<const render::TextRun> runs) -> void {
     AURORA_PROFILE_COUNT(draw_texts, 1);
     {
         detail::PaintTimer guard{&g_pt.text};
-        render::FontEngine::draw_text_runs(*this, runs, render::FontEngine::text_aa_mode(), render::TextLayoutOpts{});
+        render::FontEngine::draw_text_runs(*this, runs, aa_mode, opts);
     }
 }
 

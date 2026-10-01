@@ -192,6 +192,22 @@ class Painter {
     /// @param runs 片段数组（可空；空数组即无操作）。片段区域内所有 `Font` 相同时收益最大。
     auto draw_text_runs(std::span<const render::TextRun> runs) -> void;
 
+    /// @brief 批量绘制文本片段（**整批共用排版 opts**）：字距/词距/斜体按同一份 `opts` 作用于全部片段。
+    ///        与逐个 `draw_text(..., opts)` 逐位一致；调用方若各片段排版属性不同，请按属性分组分批调用
+    ///        （本入口不提供 per-run opts，避免 `TextRun` 承载排版字段后与 `Font` 语义重叠）。
+    ///        抗锯齿策略取 FontEngine 进程级 `text_aa_mode()`。
+    /// @param runs 片段数组（可空；空数组即无操作）。
+    /// @param opts 整批共用的排版选项（字距/词距/斜体）。
+    auto draw_text_runs(std::span<const render::TextRun> runs, const render::TextLayoutOpts &opts) -> void;
+
+    /// @brief 批量绘制文本片段（**整批共用排版 opts + 显式覆盖抗锯齿策略**）。
+    ///        与逐个 `draw_text(..., aa_mode, opts)` 逐位一致。
+    /// @param runs 片段数组（可空；空数组即无操作）。
+    /// @param aa_mode 抗锯齿策略（覆盖 FontEngine 进程级默认）。
+    /// @param opts 整批共用的排版选项（字距/词距/斜体）。
+    auto draw_text_runs(std::span<const render::TextRun> runs, render::TextAAMode aa_mode,
+                        const render::TextLayoutOpts &opts) -> void;
+
     /// @brief 把带 alpha 的源色按源覆盖混合到单像素（受裁剪约束）；供字体/半透明使用。
     /// @param x 物理像素列（不做 dp 换算）。
     /// @param y 物理像素行（不做 dp 换算）。
