@@ -482,8 +482,11 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
             }
 
             // 标题栏空白区 → 双击最大化 或 拖拽移动（客户端自行检测双击；Wayland 无原生双击事件）。
-            const bool is_dblclick =
-                (timestamp - d.last_click_time < 300) && std::hypot(x - d.last_click_x, y - d.last_click_y) < 5.0;
+            // 阈值引自 event 层的连击常量（kDefaultClickWindowMs / kDefaultClickRadiusDp）：
+            // 窗口装饰层的双击与 widget 树的 MouseEvent::click_count 因此共用同一份真源，
+            // 不会各写一套而漂移。两者语义正交（CSD 标题栏不进 widget 树、不经 EventDispatcher）。
+            const bool is_dblclick = (timestamp - d.last_click_time < kDefaultClickWindowMs) &&
+                                     std::hypot(x - d.last_click_x, y - d.last_click_y) < kDefaultClickRadiusDp;
             d.last_click_time = timestamp;
             d.last_click_x = x;
             d.last_click_y = y;

@@ -1,6 +1,7 @@
 #include "aurora/event/dispatcher.h"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <ranges>
 
@@ -120,9 +121,69 @@ auto EventDispatcher::resolve_cursor(const std::vector<HitNode> &chain) const ->
     return CursorShape::Arrow;
 }
 
+auto ClickTracker::key_of(const MouseEvent &e) -> std::uint64_t {
+    // 指针 id 可能为任意 int（含 -1 哨兵）：整体 +1 偏移后转无符号，避免负值与鼠标哨兵撞键。
+    const int raw = e.pointer_id.has_value() ? e.pointer_id.value() : -1;
+    const auto pointer = static_cast<std::uint32_t>(raw + 1);
+    return (static_cast<std::uint64_t>(e.button) << 32U) | static_cast<std::uint64_t>(pointer);
+}
+
+auto ClickTracker::resolve(MouseEvent &e, std::uint32_t window_ms, float radius_dp) -> void {
+    const auto key = key_of(e);
+
+    // 只有 Press 参与连击计数；Release / Move 恒为 1（抬起只是把本次点击标记「已完成」）。
+    if (e.action != MouseAction::Press) {
+        e.click_count = 1;
+        if (e.action == MouseAction::Release) {
+            // 完成点：只推进时刻与坐标，**保留 Press 阶段累加出的序号**（不写 count）。
+            // 若在此把 count 覆成 1，下一次 Press 便永远只能算出 2，连击序列到不了 3。
+            // 坐标取窗口逻辑坐标 `position`，不用 `local_position`（后者随命中链逐控件改写）。
+            auto &last = last_clicks_[key];
+            last.at = std::chrono::steady_clock::now();
+            last.position = e.position;
+        }
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto it = last_clicks_.find(key);
+    if (it == last_clicks_.end()) {
+        last_clicks_.emplace(key, LastClick{.at = now, .position = e.position, .count = 1});
+        e.click_count = 1;
+        return;
+    }
+
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second.at).count();
+    const float dx = e.position.x - it->second.position.x;
+    const float dy = e.position.y - it->second.position.y;
+    // window_ms == 0 表示「关闭连击判定」：任何间隔都不累加。取严格大于 0 而非依赖
+    // `elapsed_ms <= 0` 的边界——同一毫秒内的两次点击实测 elapsed 恰为 0，靠 <= 会误判为命中。
+    const bool within_window =
+        window_ms > 0 && elapsed_ms >= 0 && static_cast<std::uint64_t>(elapsed_ms) <= window_ms;
+    const bool within_radius = std::sqrt(dx * dx + dy * dy) <= radius_dp;
+
+    if (within_window && within_radius) {
+        // 累加并封顶：更快的连续点击仍记 kMaxClickCount，供「三击选整段」使用。
+        const auto next = static_cast<std::uint8_t>(std::min<int>(it->second.count + 1, kMaxClickCount));
+        it->second.count = next;
+        it->second.at = now;
+        it->second.position = e.position;
+        e.click_count = next;
+        return;
+    }
+
+    // 超窗或位移过大：重置为一次全新点击序列的起点。
+    it->second.at = now;
+    it->second.position = e.position;
+    it->second.count = 1;
+    e.click_count = 1;
+}
+
 auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm) -> bool {
     FocusManager *prev = current_focus_manager();
     set_current_focus_manager(fm);
+    // 连击序号在派发前集中写入：后端不参与判定，五个后端与触控合成路径共用同一口径。
+    click_tracker_.resolve(e, click_window_ms, click_radius_dp);
     const int key = e.pointer_id.has_value() ? e.pointer_id.value() : AURORA_MOUSE_CAPTURE_KEY;
     const Rect root_rect{.origin = Point(), .size = root.size()};
 
@@ -232,12 +293,14 @@ auto broadcast_touch(const std::vector<HitNode> &chain, TouchEvent &e) -> void {
 }
 
 // ③ 手势流：按当前触点合成 MouseEvent（携带 pointer_id）驱动 Draggable/LongPress/Clickable，冒泡至被消费。
-auto deliver_synthesized(const std::vector<HitNode> &chain, const TouchPoint &p, MouseAction action) -> void {
+auto deliver_synthesized(const std::vector<HitNode> &chain, const TouchPoint &p, MouseAction action,
+                         std::uint8_t click_count) -> void {
     MouseEvent me;
     me.action = action;
     me.position = p.position;
     me.button = MouseButton::Left;
     me.pointer_id = p.id;
+    me.click_count = click_count;
     for (const auto &it : std::views::reverse(chain)) {
         std::shared_ptr<Widget> keepalive;  // 同 ②：回调可能销毁该控件，须持强引用跨越调用
         Widget *sp = it.lock(keepalive);
@@ -273,7 +336,15 @@ auto TouchDispatcher::dispatch(Widget &root, TouchEvent &e, FocusManager *fm) ->
             fm->set_focus(focus_target_of(route.chain), FocusDirection::Forward, FocusArrival::Pointer);
         }
         broadcast_touch(route.chain, e);
-        deliver_synthesized(route.chain, p, route.action);
+        // 合成事件同样过一遍连击判定（双 tap 语义）：与鼠标路径共用同一状态机与阈值口径，
+        // 触点 id 天然提供「同一指针」判据，多指并发时各自独立计数。
+        MouseEvent synth;
+        synth.action = route.action;
+        synth.position = p.position;
+        synth.button = MouseButton::Left;
+        synth.pointer_id = p.id;
+        click_tracker_.resolve(synth, click_window_ms, click_radius_dp);
+        deliver_synthesized(route.chain, p, route.action, synth.click_count);
     }
 
     set_current_focus_manager(prev);

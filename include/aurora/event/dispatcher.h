@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <cstdint>
 #include <unordered_map>
 
 #include "aurora/environment/build_context.h"
@@ -8,6 +10,44 @@
 #include "aurora/widget/widget.h"
 
 namespace aurora {
+
+/// @brief 连击判定状态机：按「按键 + 指针」独立计数，鼠标与触控、左键与右键互不干扰。
+///
+/// 以 **Release 为「一次点击完成」的标记点**：Press 与上次完成点比对决定是否累加序号，
+/// 因此连击窗口是「上次抬起到本次按下」——与浏览器 `detail` / Win32 `WM_LBUTTONDBLCLK`
+/// 同口径（按住不放不产生连击）。阈值由调用方每次传入，故同一份状态机可同时服务
+/// `EventDispatcher`（鼠标）与 `TouchDispatcher`（触控合成流），两条路径口径一致。
+///
+/// 判定集中在此而非平台后端：后端只负责把原始输入翻译成 `MouseEvent`，不参与连击语义
+/// （specification/05-event-navigation.md §2.2）。
+/// @note Thread: main-thread only
+/// @note Side-effects: 写入入参 `e.click_count`
+class ClickTracker {
+  public:
+    /// @brief 计算并写入本次事件的连击序号（`e.click_count`）；Release 时顺带更新「上次已完成点击」。
+    /// @param e 待判定的鼠标事件（就地写入 `click_count`）。
+    /// @param window_ms 连击时间窗（毫秒）；0 = 每次点击都重置为 1，极大值 = 窗口恒开。
+    /// @param radius_dp 连击位移半径（逻辑 dp）；判据取 `e.position`（窗口逻辑坐标）。
+    auto resolve(MouseEvent &e, std::uint32_t window_ms, float radius_dp) -> void;
+
+    /// @brief 清空全部连击状态（换场景 / 测试隔离用）。
+    auto reset() -> void { last_clicks_.clear(); }
+
+  private:
+    /// @brief 上次「已完成」一次点击的记录。
+    struct LastClick {
+        std::chrono::steady_clock::time_point at{};  ///< 上次点击完成（Release）的时刻
+        Point position{};  ///< 上次点击的窗口逻辑坐标
+        std::uint8_t count = 0;  ///< 上次点击的连击序号（1 起）
+    };
+
+    /// @brief 合成判定表的键：把 `button`（高 32 位）与指针 id（低 32 位，+1 偏移使 -1 哨兵可用）打包。
+    /// @param e 待判定的鼠标事件。
+    /// @return 该「按键 + 指针」组合的键。
+    [[nodiscard]] static auto key_of(const MouseEvent &e) -> std::uint64_t;
+
+    std::unordered_map<std::uint64_t, LastClick> last_clicks_;  ///< 按「按键 + 指针」分组的上次点击
+};
 
 /// @brief 事件派发器：命中测试 + 同步派发（specification/05-event-navigation.md §3）。
 ///
@@ -57,7 +97,20 @@ class EventDispatcher {
     /// @param e    待派发的鼠标事件；冒泡期间任一控件可写 `e.is_handled = true` 终止冒泡。
     /// @param fm   派发期间的当前焦点管理器（可选）；Press 时据此转移/清除焦点，nullptr 则跳过焦点处理。
     /// @return 是否命中到任意控件（是否「消费」由 `e.is_handled` 表达）。
+    /// @note 本入口在派发前**覆写** `e.click_count`：Press 写入连击序号（1/2/3），
+    ///       Release / Move 恒写 1。连击判定集中在此，后端不参与（specification/05 §2.2）。
     auto dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm = nullptr) -> bool;
+
+    /// @brief 连击判定时间窗（毫秒）：本次 Press 与上次**已完成**点击（Release）的间隔不超过该值才累加序号。
+    ///        初值 `kDefaultClickWindowMs`（500ms）——库内约定常量，**未接线到系统双击速度设置**
+    ///        （Windows `GetDoubleClickTime` / X11 等），跨平台手感一致。
+    ///        可写：置 0 使每次点击都重置为 1；置极大值使窗口恒开。测试据此注入极端阈值。
+    std::uint32_t click_window_ms = kDefaultClickWindowMs;
+
+    /// @brief 连击判定位移半径（逻辑 dp）：两次点击落点距离不超过该值才累加序号。
+    ///        初值 `kDefaultClickRadiusDp`（4dp）。可写，语义同 `click_window_ms`。
+    ///        判据取 `MouseEvent::position`（窗口逻辑坐标），与 `local_position` 无关。
+    float click_radius_dp = kDefaultClickRadiusDp;
 
     /// @brief 同步派发键盘事件；Tab/Shift+Tab 触发焦点移动，否则派发到焦点 widget。
     /// @param root 派发起点（根 widget）；键盘派发不经命中链，该形参未使用（仅为统一重载签名而保留）。
@@ -127,6 +180,9 @@ class EventDispatcher {
     ///        悬停链中对应的弱引用失效，`update_hover` 经 `lock()` 检测后安全跳过，绝不解引用悬垂指针。
     std::vector<HitNode> hover_chain_;
 
+    /// @brief 连击判定状态（按「按键 + 指针」独立计数）；阈值取 `click_window_ms` / `click_radius_dp`。
+    ClickTracker click_tracker_;
+
     /// @brief 悬停光标下发钩子与当前已下发形状（只在变化时回调，避免每 Move 都打平台光标 API）。
     CursorHandler cursor_handler_;
     CursorShape current_cursor_ = CursorShape::Arrow;
@@ -147,15 +203,25 @@ class TouchDispatcher {
     /// @brief 多点触控派发：按 `TouchPoint::id` 做指针捕获。
     ///        每个触点同时：① 把完整 `TouchEvent` 交给命中链（原始流，`touch()` 修饰器 / `PinchRecognizer` 消费）；
     ///        ② 合成对应 `MouseEvent`（携带 `pointer_id`）驱动 `Draggable`/`LongPress`/`Clickable`。
+    ///        合成事件同样写入 `click_count`（双 tap 语义），判定与鼠标路径同一口径（specification/05 §2.2）。
     /// @param root 派发起点（根 widget）；按其子树做命中测试并建立指针捕获。
     /// @param e    待派发的多点触控事件（`TouchEvent::points` 逐点处理，手势流冒泡可写 `is_handled`）。
     /// @param fm   派发期间的当前焦点管理器（可选）；触点首次按下时据此转移焦点，nullptr 则跳过。
     /// @return 是否有任意触点命中（is_handled 由各 widget 写入 e）。
     auto dispatch(Widget &root, TouchEvent &e, FocusManager *fm = nullptr) -> bool;
 
+    /// @brief 连击（双 tap）判定时间窗（毫秒）；语义与 `EventDispatcher::click_window_ms` 一致。
+    std::uint32_t click_window_ms = kDefaultClickWindowMs;
+
+    /// @brief 连击（双 tap）判定位移半径（逻辑 dp）；语义与 `EventDispatcher::click_radius_dp` 一致。
+    float click_radius_dp = kDefaultClickRadiusDp;
+
   private:
     /// @brief 按指针 ID 缓存的命中链（指针捕获表）。某指针 `id` 由活跃→非活跃（抬起）时清除对应链，避免悬空引用。
     std::unordered_map<int, std::vector<HitNode>> pointer_capture_;
+
+    /// @brief 连击判定状态（按「按键 + 指针」独立计数）；阈值取 `click_window_ms` / `click_radius_dp`。
+    ClickTracker click_tracker_;
 };
 
 }  // namespace aurora

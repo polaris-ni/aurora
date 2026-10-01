@@ -7,12 +7,16 @@
 /// Tab/激活快捷键与焦点路由（含激活键 / 方向键优先投递 on_key_event 的控件级 opt-in，
 /// 以及真实 TextInput 的方向键归光标、不夺焦点）、滚轮/文本/文件拖放路由、
 /// 滚轮余量自最深可滚动者上冒给更浅祖先（嵌套滚动协调：内层到顶后外层下拉刷新接手）、
-/// TouchDispatcher 按指针 id 捕获与合成鼠标事件
+/// TouchDispatcher 按指针 id 捕获与合成鼠标事件、连击序号（click_count）在 Press 上累加并在
+/// Release / Move 上恒为 1、超窗或位移过大重置、上限封顶为 3、左右键与多指针各自独立计数
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -43,6 +47,7 @@ class TestBox final : public LeafWidget {
     int release_count = 0;
     int move_count = 0;
     int key_count = 0;
+    std::uint8_t last_click_count = 0;  ///< 最近一次指针事件携带的连击序号（供 click_count 用例断言）
     int hover_changes = 0;
     int activations = 0;
     int scroll_count = 0;
@@ -79,6 +84,7 @@ class TestBox final : public LeafWidget {
         }
         last_local = e.local_position;
         last_pointer_id = e.pointer_id;
+        last_click_count = e.click_count;
         if (consume_pointer) {
             e.is_handled = true;
         }
@@ -819,6 +825,174 @@ AURORA_TEST_CASE(wheel_margin_bubbles_from_inner_scroll_to_pull_to_refresh) {
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*down.outer, downward));
     AURORA_TEST_CHECK_NEAR(down.inner->offset_y(), 5.0F, 1e-4F);  // step=1：5 单位 = 5dp
     AURORA_TEST_CHECK_NEAR(down.outer->pull_distance(), 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(click_count_accumulates_on_press_and_resets_on_release) {
+    // 连击序号只在 Press 上累加，且以「上次 Release」为比对基准：按住不放不产生连击。
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;  // 窗口恒开：隔离时间因素，只验计数与重置语义
+
+    MouseEvent first;
+    first.action = MouseAction::Press;
+    first.position = Point{.x = 10.0F, .y = 10.0F};
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, first));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(first.click_count), 1);
+
+    MouseEvent up = first;
+    up.action = MouseAction::Release;
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, up));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(up.click_count), 1);  // Release 恒为 1
+
+    MouseEvent second;
+    second.action = MouseAction::Press;
+    second.position = Point{.x = 10.0F, .y = 10.0F};
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, second));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(second.click_count), 2);
+
+    MouseEvent up2 = second;
+    up2.action = MouseAction::Release;
+    dispatcher.dispatch_mouse(*tree.row, up2);
+
+    MouseEvent third;
+    third.action = MouseAction::Press;
+    third.position = Point{.x = 10.0F, .y = 10.0F};
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, third));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(third.click_count), 3);
+}
+
+AURORA_TEST_CASE(click_count_caps_at_three) {
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;
+    const Point at{.x = 10.0F, .y = 10.0F};
+
+    auto last = 0;
+    for (int i = 1; i <= 5; ++i) {
+        MouseEvent down;
+        down.action = MouseAction::Press;
+        down.position = at;
+        dispatcher.dispatch_mouse(*tree.row, down);
+        last = static_cast<int>(down.click_count);
+        MouseEvent up = down;
+        up.action = MouseAction::Release;
+        dispatcher.dispatch_mouse(*tree.row, up);
+    }
+    // 更快的连续点击仍记 kMaxClickCount，供「三击选整段」语义使用。
+    AURORA_TEST_CHECK_EQ(last, static_cast<int>(kMaxClickCount));
+}
+
+AURORA_TEST_CASE(click_count_resets_when_position_moves_beyond_radius) {
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;
+    dispatcher.click_radius_dp = 4.0F;
+
+    MouseEvent a;
+    a.action = MouseAction::Press;
+    a.position = Point{.x = 10.0F, .y = 10.0F};
+    dispatcher.dispatch_mouse(*tree.row, a);
+    MouseEvent up = a;
+    up.action = MouseAction::Release;
+    dispatcher.dispatch_mouse(*tree.row, up);
+
+    // 位移 5dp > 半径 4dp：判为新一次点击序列。判据取窗口逻辑坐标 position。
+    MouseEvent b;
+    b.action = MouseAction::Press;
+    b.position = Point{.x = 15.0F, .y = 10.0F};
+    dispatcher.dispatch_mouse(*tree.row, b);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(b.click_count), 1);
+}
+
+AURORA_TEST_CASE(click_count_resets_when_window_expires) {
+    // 窗口置 0：每次点击都重置为 1（极端阈值注入，避免测试依赖真实时钟推进）。
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 0;
+    dispatcher.click_radius_dp = 100.0F;
+
+    for (int i = 0; i < 3; ++i) {
+        MouseEvent down;
+        down.action = MouseAction::Press;
+        down.position = Point{.x = 10.0F, .y = 10.0F};
+        dispatcher.dispatch_mouse(*tree.row, down);
+        AURORA_TEST_CHECK_EQ(static_cast<int>(down.click_count), 1);
+        MouseEvent up = down;
+        up.action = MouseAction::Release;
+        dispatcher.dispatch_mouse(*tree.row, up);
+    }
+}
+
+AURORA_TEST_CASE(click_count_is_tracked_per_button_and_pointer) {
+    // 左/右键与不同指针各自独立计数：右键点击不得吃掉左键的连击序列。
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;
+    const Point at{.x = 10.0F, .y = 10.0F};
+
+    auto cycle = [&](MouseButton button, std::optional<int> pointer_id) -> int {
+        MouseEvent down;
+        down.action = MouseAction::Press;
+        down.position = at;
+        down.button = button;
+        down.pointer_id = pointer_id;
+        dispatcher.dispatch_mouse(*tree.row, down);
+        MouseEvent up = down;
+        up.action = MouseAction::Release;
+        dispatcher.dispatch_mouse(*tree.row, up);
+        return static_cast<int>(down.click_count);
+    };
+
+    AURORA_TEST_CHECK_EQ(cycle(MouseButton::Left, std::nullopt), 1);
+    AURORA_TEST_CHECK_EQ(cycle(MouseButton::Right, std::nullopt), 1);  // 换键 → 独立序列
+    AURORA_TEST_CHECK_EQ(cycle(MouseButton::Left, std::nullopt), 2);  // 回到左键 → 承接
+    AURORA_TEST_CHECK_EQ(cycle(MouseButton::Left, 7), 1);  // 换指针 → 独立序列
+}
+
+AURORA_TEST_CASE(click_count_stays_one_for_move_events) {
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;
+
+    MouseEvent down;
+    down.action = MouseAction::Press;
+    down.position = Point{.x = 10.0F, .y = 10.0F};
+    dispatcher.dispatch_mouse(*tree.row, down);
+    MouseEvent up = down;
+    up.action = MouseAction::Release;
+    dispatcher.dispatch_mouse(*tree.row, up);
+
+    MouseEvent move;
+    move.action = MouseAction::Move;
+    move.position = Point{.x = 10.0F, .y = 10.0F};
+    dispatcher.dispatch_mouse(*tree.row, move);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(move.click_count), 1);  // Move 不参与计数
+}
+
+AURORA_TEST_CASE(touch_double_tap_sets_click_count_on_synthesized_events) {
+    // 触摸合成流同样过连击判定：双 tap 达 click_count=2，与鼠标双击同口径。
+    auto tree = make_tree();
+    TouchDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;
+    dispatcher.click_radius_dp = 100.0F;
+
+    auto tap = [&](int id, bool active) -> void {
+        TouchEvent te;
+        TouchPoint p;
+        p.id = id;
+        p.position = Point{.x = 10.0F, .y = 10.0F};
+        p.prev_position = p.position;
+        p.is_active = active;
+        te.points.push_back(p);
+        dispatcher.dispatch(*tree.row, te);
+    };
+
+    tap(1, true);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(tree.box1->last_click_count), 1);
+    tap(1, false);  // 抬起：标记本次点击完成
+    AURORA_TEST_CHECK_EQ(static_cast<int>(tree.box1->last_click_count), 1);  // Release 恒为 1
+    tap(1, true);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(tree.box1->last_click_count), 2);  // 双 tap
 }
 
 }  // namespace aurora::test_cases::utest_dispatcher

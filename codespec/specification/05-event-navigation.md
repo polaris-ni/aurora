@@ -36,7 +36,7 @@ struct Event {
 
 | 事件 | 字段 | 位置 |
 |:---|:---|:---|
-| `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button` | `event.h` |
+| `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button`、`pointer_id`、`click_count`（连击序号，见下） | `event.h` |
 | `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers` | `event.h` |
 | `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0） | `event.h` |
 | `TextInputEvent` | `text`（UTF-8 文本片段） | `event.h` |
@@ -53,6 +53,36 @@ struct Event {
 - **`WM_SYSKEY*` 只跟态、不派发**：按住 Alt 期间的按键仍交 `DefWindowProc`（`Alt+F4`、菜单助记键归系统），但 Alt 自身的按下/抬起计入跟踪器，否则 Alt 松开后的普通按键会错报带 Alt。副作用是 Alt 组合在库侧仍不派发（既有边界）。
 
 指针类事件（`MouseEvent` / `ScrollEvent`）不携带修饰位。
+
+### 2.2.1 连击序号（`MouseEvent::click_count`）
+
+`MouseEvent::click_count`（`std::uint8_t`，默认 1）表示本次 Press 是同一指针、同一按键上的第几次连续点击：1 = 单击，2 = 双击，3 = 三击。
+
+**判定集中在派发层，平台后端不参与**：五个后端只负责把原始输入翻译成 `MouseEvent`，不读也不写 `click_count`。实现为 `ClickTracker`（`event/dispatcher.h`），被 `EventDispatcher`（鼠标）与 `TouchDispatcher`（触控合成流）共用，两条路径口径一致——触摸因此也支持双 tap。
+
+判定规则（以 **Release 为「一次点击完成」的标记点**）：
+
+1. **只有 Press 参与计数**；Release / Move 恒写 1（抬起只是把本次点击标记「已完成」）。因此「按住不放」不产生连击——与浏览器 `detail`、Win32 `WM_LBUTTONDBLCLK` 同口径。
+2. 本次 Press 与**上次已完成点击（Release）**比对，同时满足才累加 `count = 上次 + 1`：
+   - 同一 `button`；
+   - 同一指针（`pointer_id`，鼠标与触控、左键与右键各自独立计数）；
+   - 时间差 `dt <= click_window_ms`；
+   - 位移 `<= click_radius_dp`。
+3. 任一不满足即**重置为 1**，成为新点击序列的起点。
+4. 累加**封顶 `kMaxClickCount`（3）**：更快的连续点击仍记 3，供「三击选整段」这类语义使用。
+
+**判据坐标取 `position`（窗口逻辑坐标），不取 `local_position`**：后者由派发器沿命中链逐控件改写，跨事件比较无意义。
+
+**可调阈值**（`EventDispatcher` / `TouchDispatcher` 上的公开成员，初值取自 `event.h` 的库级常量）：
+
+| 成员 | 初值 | 常量 | 语义 |
+|:---|:---|:---|:---|
+| `click_window_ms` | 500 | `kDefaultClickWindowMs` | 连击时间窗（毫秒）；**置 0 即关闭连击判定**（任何间隔都不累加），置极大值使窗口恒开——供测试注入极端阈值，无需全局时钟钩子 |
+| `click_radius_dp` | 4 | `kDefaultClickRadiusDp` | 连击位移半径（逻辑 dp） |
+
+阈值是**库内约定常量，未接线到系统双击速度设置**（Windows `GetDoubleClickTime` / X11 等）；取库内一致值换跨平台手感一致，后续接系统值时须同步修订本段。
+
+**窗口装饰层（Wayland CSD 标题栏双击最大化）直接引用同一对常量**（`kDefaultClickWindowMs` / `kDefaultClickRadiusDp`），不另写一套，避免「库内两套阈值」漂移。两者语义正交：CSD 标题栏属窗口装饰层、不进 widget 树、不经 `EventDispatcher`，因此它读不到（也无需读）派发器实例上的可调成员，只能引常量。历史值为 300ms / 5px，统一后与其它平台一致为 500ms / 4dp。
 
 **滚动方向约定**：`ScrollEvent::delta_y` 正方向为「向上滚动」（应露出上方内容、offset 减小）。所有滚动控件统一用 `offset_ - e.delta_y * step`；误用 `+` 会导致方向相反。
 
@@ -113,7 +143,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | 入口 | 说明 |
 |:---|:---|
 | `static dispatch(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool` | 指针事件；委托进程内持久 `EventDispatcher` 单例，故同样保留跨事件指针捕获；`FocusManager*` 可选，非空时派发期暴露为「当前焦点管理器」 |
-| `dispatch_mouse(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool`（实体方法） | 带指针捕获的鼠标派发：Press 命中后缓存命中链，后续 Move/Release 即使命中失败也持续派发给按下时目标，直到 Release 解除捕获（`Application` 走此路径） |
+| `dispatch_mouse(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool`（实体方法） | 带指针捕获的鼠标派发：Press 命中后缓存命中链，后续 Move/Release 即使命中失败也持续派发给按下时目标，直到 Release 解除捕获（`Application` 走此路径）；**派发前覆写 `e.click_count`**（连击序号，§2.2.1） |
 | `static dispatch(Widget& root, KeyEvent&, FocusManager&) -> bool` | 键盘事件；识别 Tab / Shift+Tab 并转为 `move_focus`，方向键与激活键各有一个控件级 opt-in 前置投递（`wants_navigation_keys()` / `wants_activation_keys()`，见 §4.2）；`root` 为统一重载签名而保留，键盘不经命中链 |
 | `static dispatch(Widget& root, ScrollEvent&) -> bool` | 滚动事件：沿命中链**自最深向根**找 `wants_scroll()` 者逐个派发，余量经 `remaining_y` 上冒（§3.3） |
 | `static dispatch(Widget& root, FileDropEvent&) -> bool` | 文件拖放事件（不冒泡，仅交给命中目标） |
@@ -122,7 +152,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 派发流程：先经 `Widget::hit_test` 找到最深命中的目标组件，再沿父链向上调用处理方法，直到 `handled` 为真或到达根。
 
-`TouchDispatcher`（`dispatcher.h`）处理触控路径：实体方法 `dispatch(Widget& root, TouchEvent&, FocusManager* = nullptr) -> bool`，按 `TouchPoint::id` 做指针捕获，原始多点流全链广播 + 合成 `MouseEvent` 手势流冒泡，焦点行为与鼠标路径一致。
+`TouchDispatcher`（`dispatcher.h`）处理触控路径：实体方法 `dispatch(Widget& root, TouchEvent&, FocusManager* = nullptr) -> bool`，按 `TouchPoint::id` 做指针捕获，原始多点流全链广播 + 合成 `MouseEvent` 手势流冒泡，焦点行为与鼠标路径一致。合成事件同样过 `ClickTracker`，因此**触摸支持双 tap**（`click_count` 达 2），与鼠标双击同口径；`click_window_ms` / `click_radius_dp` 在 `TouchDispatcher` 上有同名的公开可调成员。
 
 ### 3.2 命中测试
 

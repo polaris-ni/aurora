@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -12,6 +13,21 @@ namespace aurora {
 
 // 分段说明：以下事件类型均为纯数据载荷，只在主线程构造与派发
 // （契约 Thread: main-thread only、Side-effects: pure 逐类成立，此处统一声明）。
+
+/// @brief 连击判定的**默认时间窗**（毫秒）：两次点击间隔不超过该值才可能累加连击序号。
+/// 单一真源：`EventDispatcher::click_window_ms` 以它为初值，窗口装饰层（Wayland CSD 标题栏
+/// 双击最大化）直接引用同一常量，避免「库内两套阈值」漂移。
+/// @note 该值是库内约定常量，**未接线到系统双击速度设置**（Windows `GetDoubleClickTime` /
+///       X11 `Xkb` 等），跨平台才有一致手感；后续接系统值时须同步调整本注释。
+inline constexpr std::uint32_t kDefaultClickWindowMs = 500;
+
+/// @brief 连击判定的**默认位移半径**（逻辑 dp）：两次点击的落点距离不超过该值才可能累加连击序号。
+/// 单一真源：`EventDispatcher::click_radius_dp` 以它为初值，窗口装饰层与派发器共用。
+/// @note 与 `kDefaultClickWindowMs` 同口径：库内约定常量，未接线到系统设置。
+inline constexpr float kDefaultClickRadiusDp = 4.0F;
+
+/// @brief 连击序号上限：达到后继续快速点击仍记该值（供「三击选整段」语义使用）。
+inline constexpr std::uint8_t kMaxClickCount = 3;
 
 /// @brief 鼠标/触摸按键。
 enum class MouseButton : std::uint8_t { Left, Right, Middle };
@@ -95,6 +111,11 @@ struct MouseEvent : Event {
     ///        鼠标/真实 MouseEvent 为 nullopt，表示「任意指针」）。用于 Draggable/LongPress
     ///        在并发触控下绑定到具体指针，避免同控件被第二根手指误触发。
     std::optional<int> pointer_id;
+    /// @brief 连击序号：本次 Press 是同一指针、同一按键上的第几次连续点击（1 = 单击，2 = 双击，3 = 三击）。
+    ///        由 `EventDispatcher::dispatch_mouse` 在派发前**集中**计算并写入（后端不参与判定）；
+    ///        Release / Move 事件恒为 1（不参与连击计数）。判别口径见 specification/05-event-navigation.md §2.2。
+    ///        上限 3：更快的连续点击仍记 3，供「三击选整段」这类语义使用。
+    std::uint8_t click_count = 1;
 };
 
 /// @brief 键盘事件：键码为平台无关的逻辑键码（见 event/keycode.h 的 KeyCode）。
