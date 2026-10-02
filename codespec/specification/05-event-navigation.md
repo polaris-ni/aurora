@@ -36,9 +36,9 @@ struct Event {
 
 | 事件 | 字段 | 位置 |
 |:---|:---|:---|
-| `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button`、`pointer_id`、`click_count`（连击序号，见下） | `event.h` |
-| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers`（位掩码，含 `Shift`/`Control`/`Alt`/`Meta` 与 **`NumLock`**） | `event.h` |
-| `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0） | `event.h` |
+| `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button`、`pointer_id`、`click_count`（连击序号，见下）、`modifiers`（修饰键位组合，后端在产生处写入，见 §2.2.2） | `event.h` |
+| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers`（位掩码，含 `Shift`/`Control`/`Alt`/`Meta` 与 **`NumLock`**；指针与滚轮事件同用此枚举，见 §2.2.2） | `event.h` |
+| `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0）、`modifiers`（修饰键位组合，后端在产生处写入，见 §2.2.2） | `event.h` |
 | `TextInputEvent` | `text`（UTF-8 文本片段） | `event.h` |
 | `TextCompositionEvent` | `preedit`（UTF-8 预编辑串，空 = 组合结束/取消）、`cursor_index`（组合光标，**preedit 内码点下标**）、`sel_start` / `sel_end`（待转换选区，含尾；无选区时 `sel_end == AURORA_NO_SELECTION`）、`committed`（本次上屏文本，UTF-8） | `event.h` |
 | `FileDropEvent` | `position` 与拖放文件信息 | `event.h` |
@@ -58,7 +58,7 @@ struct Event {
 - **失焦清空、激活播种**：`WM_ACTIVATE` 转非激活与 `WM_KILLFOCUS` 整体清零（未送达的抬起消息不可追），重新取得激活时用一次异步读数播种基线（覆盖「Alt+Tab 切进来时 Alt 已按下」）。因此修饰键**只在持有键盘焦点的那个窗口内计数**——非前台窗口上的物理 Ctrl 不再被别的窗口借读，这恰是 Windows 自身的键盘语义。
 - **`WM_SYSKEY*` 与常规键同路进派发链**：按住 Alt 期间的按键（`WM_SYSKEYDOWN` / `WM_SYSKEYUP`）与 `WM_KEY*` 走**同一个** `on_key` 通道产出 `KeyEvent`，消费（`is_handled`）即 `return 0`；未消费则原样回落 `DefWindowProcA`——系统菜单、菜单助记键、`Alt+F4` 关闭等原生行为**只在 Aurora 侧不认领时**发生，不会被无条件掐死。修饰态推进**早于**派发（与 `WM_KEY*` 同口径），故「按下 Alt 的那条 `KeyEvent` 自身就带 Alt 位」。**例外（只推进态、不派发）**：`VK_MENU`（Alt 自身，左右都算）与 `VK_F10`（系统菜单键）——它们是修饰/系统语义，发出无意义键码会污染快捷键匹配；判据是纯函数 `detail::syskey_dispatches(int vk)`（`win32_modifiers.h`），可单测直接吃表。**本轮仅 Win32 收敛**：X11 / Wayland / GLFW 侧 Alt 组合是否已作为常规 key press 派发需各自复核，未在本轮统一。文本通道不受影响：Alt 系本就不产 `TextInputEvent`（Windows 不为 Alt 组合发 `WM_CHAR`），故消费方的口径是「无 Alt/Meta 的可打印键走文本通道，带 Alt 的走键码通道」，两边不会重复发送同一字符。
 
-指针类事件（`MouseEvent` / `ScrollEvent`）不携带修饰位。
+指针类事件（`MouseEvent` / `ScrollEvent`）的修饰键位见 §2.2.2。
 
 ### 2.2.1 连击序号（`MouseEvent::click_count`）
 
@@ -93,6 +93,42 @@ struct Event {
 **滚动方向约定**：`ScrollEvent::delta_y` 正方向为「向上滚动」（应露出上方内容、offset 减小）。所有滚动控件统一用 `offset_ - e.delta_y * step`；误用 `+` 会导致方向相反。
 
 **滚动增量单位**：`delta_y` 是**设备无关增量**（滚轮格数口径），不是 dp；控件按自己的 `step`（dp/增量单位）换算位移。回传余量 `remaining_y` **与 `delta_y` 同单位同号**（未吃尽的增量数），派发器把它原样作为下一跳的 `delta_y`，故跨控件嵌套时各层按自己的 `step` 折算——内层 `step=16`、外层 `step=1` 也不会串味。
+
+### 2.2.2 指针与滚轮事件的修饰键位
+
+`MouseEvent::modifiers` 与 `ScrollEvent::modifiers`（`ModifierKey`，默认 `ModifierKey::None`）携带**事件产生那一刻**的修饰键位组合，与 `KeyEvent::modifiers` **同一个位掩码枚举、同一份真值源、同一套判读方式**（`e.modifiers & ModifierKey::Shift` 非 0 即该修饰键在事件发生时有效）。此前只有 `KeyEvent` 携带修饰位，控件拿到指针事件时无法判断 Shift / Ctrl / Alt / Meta 是否按下，「Alt+拖拽选区」「Ctrl+滚轮缩放」「Ctrl+点击打开链接」这类组合在框架事件模型上结构上不可能实现。
+
+**核心原则：后端在事件产生处盖章，派发器只透传、绝不推断**。`EventDispatcher::dispatch_mouse` 只写 `local_position` 与 `click_count` 两个字段，对 `modifiers` 只透传不改写；`EventDispatcher::dispatch(Widget&, ScrollEvent&)` 的余量上冒循环只重置 `remaining_y`、改写 `delta_y`，`position` 与 `modifiers` 均不被动——故嵌套滚动的两级派发中 `modifiers` 两次都可见且相同。
+
+**两种被明确否决的做法**（不要实现，后果都是「看起来能跑、实则静默错」）：
+
+- ❌ **在派发器里用「最后一次 `KeyEvent` 的 `modifiers` 快照」兜底**。修饰键的按下事件可能根本不属于本窗口：`Alt+Tab` 切进来时按住的 Alt，其按下消息投给了别的窗口，本窗口的快照必然错。快照兜底在单窗口快速操作下看起来是对的，只在跨窗口切换时失效——正是最难复现的一类。
+- ❌ **在派发时刻现场轮询物理按键态**（Win32 的 `GetAsyncKeyState` 一类）。指针事件同属消息驱动，从消息进队列到派发可能已晚于一帧；UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时修饰键早已抬起，热键/手势**静默**丢失（同载体同形态实测 0/10，见 `manual-test/21-debug.md` TC-DEBUG-004 备注）。
+
+**逐后端真值源**（每条路径只允许一个来源；同一字段两个真值源会在两个来源分歧时静默错位）：
+
+| 后端 | 真值源 | 落点与要点 |
+|:---|:---|:---|
+| Win32 | `src/aurora/window/detail/win32_modifiers.h` 的 `ModifierKeyTracker`（随键盘消息流推进，与 `KeyEvent` 同一份 `get()`） | `on_mouse` / `on_wheel` 内 `e.modifiers = mods.get();`。**不改 `handle_mouse(HWND, UINT, LPARAM)` 签名、不读 `wParam` 的 `MK_LBUTTON` 一类位**：按 Win32 约定那几位不携带 Alt，走它就得为 Alt 另接第二个来源。tracker 的既有策略原样保留——失激活 `clear()`、重激活 `seed(async_modifiers())` 播种一次、**指针捕获变化不清空**（键盘焦点未动、抬起消息仍进本窗口，清空反而会让 Shift+拖选跨出窗口时丢掉 Shift） |
+| X11 | 事件自带的 `state` 掩码（`XButtonEvent` / `XMotionEvent` 与 `XKeyEvent` 共用同一字段布局，X 核心协议保证语义一致） | `send_mouse` 增一参 `state` 并透传，滚轮按钮 4..7 分支同源；折算走 `src/aurora/window/detail/x11_modifiers.h` 的 `mods_from_x11_state`（**Mod1=Alt、Mod4=Meta** 的 X PC 惯例），与键盘路径同一实现，不为指针另写一份掩码映射。`XLeaveWindowEvent`（`XCrossingEvent`）**没有 `state` 字段**，该条合成 Move 传 0 → `None`（不可知即无修饰），它只用于清悬停、不承载手势语义 |
+| Wayland | `on_modifiers` 经 xkbcommon 维护的 `mods` 缓存 | `send_mouse` 与 `ptr_axis`（滚轮）均填该缓存，与键盘路径（`on_key`）读的同一个字段。**Wayland 协议不随指针事件送修饰态**（`wl_pointer` 的 enter/motion/button 回调都没有 mods 参数），故该缓存是本后端指针路径唯一可得来源，不新增机制 |
+| GLFW | ① `on_mouse_button` 的**回调形参 `mods`**（GLFW 在按钮回调上确实发掩码）；② `on_cursor_pos` / `on_scroll` 读 `glfwGetKey` 的**缓存事件态** | 两条入口都收敛到 `src/aurora/window/detail/glfw_modifiers.h`，避免同一后端内两种 Shift 语义。入口 ② 的合法性依据：GLFW 只给 button / key / char 回调发掩码，这两个回调的签名不给；`glfwGetKey` 读的是 GLFW 自己随 key 事件推进的缓存、**不是对系统的物理轮询**（`third_party/glfw/docs/input.md`：「This function only returns cached key event state. It does not poll the system for the current state of the key.」）。左右两侧任一按下即置位，与 Win32 侧同归并口径。**仓库固定 GLFW 3.5.1，没有「读当前修饰态」的窗口属性**（`GLFW_MODIFIERS` 在 3.6 开发分支与 master 上均尚未存在，3.6 也未发布），故不升级依赖 |
+| WASM | `EmscriptenMouseEvent` 的 `ctrlKey` / `shiftKey` / `altKey` / `metaKey` 四个 `bool`（字段名以本机 emsdk 的 `html5.h` 实测为准，与键盘路径读的 `EmscriptenKeyboardEvent` 同名同型） | `wasm_surface.h` 的 `on_mouse` 内折算；DOM 事件自带该快照，读取即「那一刻」的状态。**本后端不注册滚轮回调**（不产 `ScrollEvent`），不属漏实现而是另一条独立能力 |
+| macOS | — | 指针通道整条未实装（骨架文件零 `MouseEvent` / `ScrollEvent` 构造），不伪造实现 |
+
+**合成事件一律 `None`**：由触控合成的 `MouseEvent`、以及 `Widget::scroll_by` / `Scroll::scroll_by` 这类程序化滚动合成的 `ScrollEvent` 恒为 `ModifierKey::None`——它们不对应任何物理修饰态，凭空补一个「当前修饰态」会让消费方把程序化滚动误判成用户手势。**本仓当前的合成点清单**（逐条对应单测）：
+
+| 合成路径 | 位置 | 事件 |
+|:---|:---|:---|
+| 触控合成（`TouchDispatcher` 按 `pointer_id` 造事件） | `event/dispatcher.cpp` 的 `deliver_synthesized` | `MouseEvent` |
+| 程序化滚动（`scroll_by` 内部**确实构造**一条 `ScrollEvent`，只填 `delta_y` 后交 `on_scroll`） | `widget.h` / `scroll.h` 的 `scroll_by` | `ScrollEvent` |
+| 可达性动作合成（Click 造 press+release、ScrollUp/Down/Left/Right） | `widget/widget.cpp` 的 `perform_action` | `MouseEvent` / `ScrollEvent` |
+| 诊断注入（`simulate_click` / `_scroll` / `_drag` / `_pointer`） | `inspector_api.cpp` | `MouseEvent` / `ScrollEvent` |
+| perf 基准造的事件 | `perf/scroll_bench.cpp` | `ScrollEvent` |
+
+诊断注入面**刻意不加修饰参数**：测试请直接构造事件字面量经 `EventDispatcher::dispatch` 派发；给注入面加修饰键位属另一项独立决策。**需要区分事件来源的调用方用既有的 `pointer_id`**（触控合成有值、真实鼠标为 `nullopt`），不要靠 `modifiers` 推断——它在两种情形下都是 `None`。`ScrollEvent` 无 `pointer_id` 字段，消费方按「`None` 即无修饰」使用即可。
+
+**`NumLock` 位在指针事件上的宽度差异（已知、不对齐）**：`MouseEvent` / `ScrollEvent` 与 `KeyEvent` 复用同一枚举，故 Win32 / X11 / Wayland 侧的真值源会把 `NumLock` 锁定位**一并带上**（它们的折算入口是键盘与指针共用的同一份函数）；GLFW 指针路径只取四个可按住的位（锁定位与指针手势无语义关系，无小键盘参与）。消费方**只看四个可按住位时无需掩码**（判定 `& ModifierKey::Shift` 等不受高位影响），也不应从指针事件取 `NumLock`。这条差异是刻意保留的：指针路径另开一份裁剪逻辑会在同一后端内制造第二个真值源。
 
 ### 2.3 坐标契约
 
