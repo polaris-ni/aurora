@@ -118,6 +118,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_syskey)
     endif ()
 
+    # ---- Win32 DPI 缩放单点真值源（scale 成员 + to_physical / to_logical 唯二换算点）----
+    # 自动段覆盖 set_size 往返、WM_SIZE 后帧/逻辑/scale 三方同源、鼠标 dp 映射、
+    # WM_GETMINMAXINFO 与 set_size 同换算。本机 100% DPI 时五条判据恒真，如实以退出码 3 记 SKIP。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_dpi "${_aurora_verify_dir}/win32_dpi_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_dpi)
+    endif ()
+
     # ---- macOS 光标（NSCursor 派发接线）：[NSCursor currentCursor] 单例同一性读回 ----
     # 需 ObjC++ 语言：条件启用，其它平台上完全不涉及（不改动默认构建的语言集合）。
     if (APPLE AND AURORA_BACKEND_MACOS)
