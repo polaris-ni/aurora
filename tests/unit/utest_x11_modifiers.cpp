@@ -105,7 +105,9 @@ AURORA_TEST_CASE(x11_state_composes_bits_without_cross_talk) {
     AURORA_TEST_CHECK_NE(with_numlock & ModifierKey::NumLock, std::uint8_t{0});
     AURORA_TEST_CHECK_NE(with_numlock & ModifierKey::Shift, std::uint8_t{0});
     AURORA_TEST_CHECK_NE(with_numlock & ModifierKey::Alt, std::uint8_t{0});
-    AURORA_TEST_CHECK_EQ(with_numlock & ModifierKey::Meta, std::uint8_t{0});
+    // with_numlock 由四位组合（Shift|Control|kMod1→Alt|kMod4→Meta）叠加 NumLock 而来；
+    // 锁定位不得扰动既有四位，故 Meta 仍须在位（此断言原为复制 shift_alt 块的 ==0，属笔误）。
+    AURORA_TEST_CHECK_NE(with_numlock & ModifierKey::Meta, std::uint8_t{0});
 
     // 叠加无消费方的位（Lock / Mod3）：不改变已有语义位。
     const auto with_ignored = aurora::detail::mods_from_x11_state(mask::kShift | mask::kLock | mask::kMod3);
