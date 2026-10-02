@@ -543,6 +543,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 | `commands.h` | 命令模型与注册表（快捷键 / 菜单 / 命令面板的统一真源） |
 | `widget/command_palette.h` | 命令面板（模态浮层，模糊检索并执行命令） |
 | `app/os_hotkey.h` | **OS 级全局热键**（无焦点时也触发，见 §8.6） |
+| `app/notification.h` | **跨平台系统通知**（Win32 气球 / XDG 桌面通知，见 §8.7） |
 | `app/display.h` | 显示设备与 DPI 查询 |
 
 **命令是唯一真源**：`CommandRegistry`（`commands.h`）持 `Command{ id, title, icon, category, action, default_binding, scope, enabled, when_label }`。`bind_shortcuts(ShortcutRegistry&)` 与 `to_menu_items()` 是它面向快捷键与菜单的两个**投影**，命令面板是第三个消费方；三者共用 `invoke(id)` 出口，故启用条件与空动作判定单点生效。启用条件为两段式：`enabled` 谓词承担运行期判定（空 = 恒启用），`when_label` 仅作展示 / 序列化标签（**不参与求值**，也不解析条件 DSL）。`to_json()` 产出 `{"commands":[…]}` 自描述信封供工具面枚举；`search()` 与工具面共用 `command_fuzzy_score()`，故 AI 检索与用户检索次序一致。
@@ -582,6 +583,46 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 **句柄**：`OsHotkeyHandle{std::uint32_t id}`，值语义，`id == 0` 恒为无效句柄，有效 ID 自 1 起。强类型而非裸整数，避免与 `ShortcutRegistry::add()` 返回的 `int` ID 混淆（传错类型编译期即报错）。
 
 **测试注入**：`OsHotkeyRegistry::install_test_backend(bool)` 安装进程内 inert 后端，此后 `add`/`remove` 只走内存、不触碰 OS 热键接口。单测不得真的抢占系统热键（CI 机器上会干扰系统与别的用例），但又必须覆盖「平台不支持」的降级路径——那在受支持的平台上没有别的办法复现。该注入面受 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release 下自动失效。
+
+### 8.7 跨平台系统通知
+
+`NotificationCenter`（`app/notification.h`）发系统通知，`Application::notify()` / `Application::set_on_notification_activated()` 是其转发入口。
+
+```cpp
+app.notify(Notification{.title = "Build finished", .body = "42 targets", .tag = "build",
+                        .urgency = NotificationUrgency::Normal, .timeout_ms = 5000});
+app.set_on_notification_activated([](std::string tag) { focus_pane(tag); });
+```
+
+`Notification{title, body, tag, urgency, timeout_ms}`：`tag` 既是**去重 / 替换标识**（同一 tag 的后续通知在支持去重的服务器上替换前一条），也是**激活回调回传的键**——点击通知时回调收到的就是这个 tag。`timeout_ms == 0` 表示交给平台默认策略。
+
+**平台矩阵**：
+
+| 平台 | 实现 | 激活回调 |
+|:---|:---|:---|
+| Windows | `Shell_NotifyIconW` 按需添加隐藏托盘图标 + `NIF_INFO` 气球；超时 / 关闭 / 点击后 `NIM_DELETE` 撤掉图标 | 支持（`NIN_BALLOONUSERCLICK`） |
+| Linux | 三层运行时降级链，见下 | 前两层支持（需宿主排空 `pump_events()`） |
+| Headless | 仅记录 `last_notification()`，`notify()` 返回成功 | 不支持 |
+| macOS / 其它 | 本轮不支持 | 不支持 |
+
+**Win32 的托盘副作用**：应用本身没有托盘图标时，发通知会在任务栏**短暂出现一个图标**（`Shell_NotifyIcon` 气球必须依附图标）。气球消失后实现会 `NIM_DELETE` 撤掉，不长期占位。这是「零接线即可发通知」换来的可见副作用；调用方若已有 `SystemTray`，实现复用其图标、不额外增删。
+
+**Linux 三层降级链**（全部 `dlopen` / `popen`，**无构建期依赖**，也不新增 `AURORA_ENABLE_*` 开关）：
+
+| 优先级 | 后端 | 能力 |
+|:---|:---|:---|
+| 1 | `dlopen("libnotify.so.4")` | 高层 API；激活回调可接 |
+| 2 | `dlopen("libdbus-1.so.3")` 手写 `org.freedesktop.Notifications.Notify` | 原生协议；经 `ActionInvoked` 信号接激活回调 |
+| 3 | `popen("notify-send")` | 兜底，即发即忘，无激活回调 |
+| 4 | 全部缺失 | `NotificationPostFailed` |
+
+因为全部走 `dlopen`，实现**不** `#include <dbus/dbus.h>` / `<libnotify/notify.h>`，改为自行声明函数指针类型与 `dlsym` 符号名。
+
+**失败口径**：一切失败统一为 `ErrorCode::NotificationPostFailed`（`detail` 指出缺失哪个库 / 哪个系统调用失败），调用方可据此退化为自己 UI 内的提示条；不抛异常、不静默 no-op。
+
+**`last_notification()` 在所有平台上维护**（含投递失败的调用），让无桌面环境也能断言「请求了什么」——这是 Headless 与自动化测试的主观测面。`install_recording_backend()` 可强制只记录、不触达系统通知服务，供开发机上的字段往返测试。
+
+**宿主排空义务**：Windows 下依附宿主消息泵（`PeekMessage` 天然覆盖）；Linux 下必须靠 `pump_events()` 驱动 GLib 主循环迭代 / libdbus 套接字读取，`Application::step_frame()` 已每帧调用一次。**宿主不排空 ⇒ 通知照常显示、回调不到**（不会虚假成功）。
 
 ### 8.5 输入法桥（Win32 IMM32 / X11 XIM / Wayland text-input-v3）
 

@@ -72,51 +72,52 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     PlatformComInitFailed = 28,  ///< platform-com-init-failed: COM initialization failed
     PlatformDialogCreateFailed = 29,  ///< platform-dialog-create-failed: Platform dialog creation failed
     OsHotkeyRegisterFailed = 30,  ///< os-hotkey-register-failed: OS global hotkey registration failed: '{detail}'
-    RuntimeCoroutineException = 31,  ///< runtime-coroutine-exception
-    RuntimeAsyncException = 32,  ///< runtime-async-exception
-    RuntimeAsyncTimeout = 33,  ///< async-timeout: Async task timed out (not completed within {ms}ms)
-    GenerateUiEmpty = 34,  ///< generation-ui-empty: NL-to-UI generation result is empty (no valid widget)
-    RendererUnavailable = 35,  ///< renderer-unavailable: Requested render backend is unavailable
-    PrefsNotPersistent = 36,  ///< prefs-not-persistent: Preferences is in memory-only mode and cannot be persisted
-    PrefsOpenFailed = 37,  ///< prefs-open-failed: Failed to open config file: '{path}'
-    PrefsParseFailed = 38,  ///< prefs-parse-failed: Config file JSON parse failed: '{detail}'
-    PrefsWriteFailed = 39,  ///< prefs-write-failed: Config file write failed: '{detail}'
-    WidgetDepthExceeded = 40,  ///< widget-depth-exceeded: Widget tree depth exceeded the limit (default 64)
-    RenderDegraded = 41,  ///< render-degraded: Rendering degraded due to missing resources (e.g. font/image fallback)
-    FontMissing = 42,  ///< font-missing: Requested font unavailable, fell back to built-in Bitmap font
-    SurfaceLost = 43,  ///< surface-lost: Surface lost (e.g. window destroyed/device reset)
-    NotRestorable = 44,  ///< not-restorable: Widget not restorable (skipped during serialization/deserialization)
-    JsonParseError = 45,  ///< json-parse-error: JSON parse failed
-    JsonDepthExceeded = 46,  ///< json-depth-exceeded
-    JsonTypeMismatch = 47,  ///< json-type-mismatch: JSON type mismatch: expected {expected}, got {actual}
-    JsonValueNotSerializable = 48,  ///< json-value-not-serializable: Value cannot be serialized to JSON: {detail}
-    StorageBackendUnavailable = 49,  ///< storage-backend-unavailable
-    StorageRecordNotFound = 50,  ///< storage-record-not-found: Storage record does not exist
-    StorageRecordCorrupt = 51,  ///< storage-record-corrupt
-    StorageTypeMismatch = 52,  ///< storage-type-mismatch: Typed read type mismatch
-    StorageEncodingMismatch = 53,  ///< storage-encoding-mismatch: Serialized wire format mismatch
-    StorageIoError = 54,  ///< storage-io-error: Storage underlying I/O failed
-    AudioGraphCycle = 55,  ///< audio-graph-cycle: Audio graph connection would create a cycle ({src} -> {dst})
-    AudioEdgeNotFound = 56,  ///< audio-edge-not-found: Audio connection does not exist and cannot be disconnected
-    AudioContextClosed = 57,  ///< audio-context-closed
-    AudioParamInvalid = 58,  ///< audio-param-invalid: Invalid audio parameter automation ({reason})
-    AudioBufferInvalid = 59,  ///< audio-buffer-invalid: Invalid audio buffer ({reason})
-    AudioDeviceUnavailable = 60,  ///< audio-device-unavailable
-    AudioRecordingFailed = 61,  ///< audio-recording-failed: Audio recording failed: {reason}
-    CliSpecInvalid = 62,  ///< cli-spec-invalid: Invalid command spec: {reason}
-    CliUnknownOption = 63,  ///< cli-unknown-option: Unknown option '{option}' for command '{command}'
-    CliUnknownSubcommand = 64,  ///< cli-unknown-subcommand: Unknown subcommand '{subcommand}' for command '{command}'
-    CliMissingSubcommand = 65,  ///< cli-missing-subcommand: Command '{command}' requires a subcommand
-    CliMissingValue = 66,  ///< cli-missing-value: Option '{option}' requires a value
-    CliInvalidValue = 67,  ///< cli-invalid-value: Value '{value}' is not a valid {kind} for option '{option}'
-    CliChoiceInvalid = 68,  ///< cli-choice-invalid
-    CliRangeViolated = 69,  ///< cli-range-violated: Value '{value}' for option '{option}' is outside [{min}, {max}]
-    CliArityViolated = 70,  ///< cli-arity-violated
-    CliMissingRequired = 71,  ///< cli-missing-required: Required option '{option}' is missing for command '{command}'
-    CliTooManyPositionals = 72,  ///< cli-too-many-positionals
-    CliConflictViolated = 73,  ///< cli-conflict-violated: Options '{option}' and '{conflict}' cannot be used together
-    ClipboardAccessFailed = 74,  ///< clipboard-access-failed: System clipboard is inaccessible: '{detail}'
-    ClipboardWriteFailed = 75,  ///< clipboard-write-failed: Clipboard payload could not be committed: '{detail}'
+    NotificationPostFailed = 31,  ///< notification-post-failed: System notification could not be posted: '{detail}'
+    RuntimeCoroutineException = 32,  ///< runtime-coroutine-exception
+    RuntimeAsyncException = 33,  ///< runtime-async-exception
+    RuntimeAsyncTimeout = 34,  ///< async-timeout: Async task timed out (not completed within {ms}ms)
+    GenerateUiEmpty = 35,  ///< generation-ui-empty: NL-to-UI generation result is empty (no valid widget)
+    RendererUnavailable = 36,  ///< renderer-unavailable: Requested render backend is unavailable
+    PrefsNotPersistent = 37,  ///< prefs-not-persistent: Preferences is in memory-only mode and cannot be persisted
+    PrefsOpenFailed = 38,  ///< prefs-open-failed: Failed to open config file: '{path}'
+    PrefsParseFailed = 39,  ///< prefs-parse-failed: Config file JSON parse failed: '{detail}'
+    PrefsWriteFailed = 40,  ///< prefs-write-failed: Config file write failed: '{detail}'
+    WidgetDepthExceeded = 41,  ///< widget-depth-exceeded: Widget tree depth exceeded the limit (default 64)
+    RenderDegraded = 42,  ///< render-degraded: Rendering degraded due to missing resources (e.g. font/image fallback)
+    FontMissing = 43,  ///< font-missing: Requested font unavailable, fell back to built-in Bitmap font
+    SurfaceLost = 44,  ///< surface-lost: Surface lost (e.g. window destroyed/device reset)
+    NotRestorable = 45,  ///< not-restorable: Widget not restorable (skipped during serialization/deserialization)
+    JsonParseError = 46,  ///< json-parse-error: JSON parse failed
+    JsonDepthExceeded = 47,  ///< json-depth-exceeded
+    JsonTypeMismatch = 48,  ///< json-type-mismatch: JSON type mismatch: expected {expected}, got {actual}
+    JsonValueNotSerializable = 49,  ///< json-value-not-serializable: Value cannot be serialized to JSON: {detail}
+    StorageBackendUnavailable = 50,  ///< storage-backend-unavailable
+    StorageRecordNotFound = 51,  ///< storage-record-not-found: Storage record does not exist
+    StorageRecordCorrupt = 52,  ///< storage-record-corrupt
+    StorageTypeMismatch = 53,  ///< storage-type-mismatch: Typed read type mismatch
+    StorageEncodingMismatch = 54,  ///< storage-encoding-mismatch: Serialized wire format mismatch
+    StorageIoError = 55,  ///< storage-io-error: Storage underlying I/O failed
+    AudioGraphCycle = 56,  ///< audio-graph-cycle: Audio graph connection would create a cycle ({src} -> {dst})
+    AudioEdgeNotFound = 57,  ///< audio-edge-not-found: Audio connection does not exist and cannot be disconnected
+    AudioContextClosed = 58,  ///< audio-context-closed
+    AudioParamInvalid = 59,  ///< audio-param-invalid: Invalid audio parameter automation ({reason})
+    AudioBufferInvalid = 60,  ///< audio-buffer-invalid: Invalid audio buffer ({reason})
+    AudioDeviceUnavailable = 61,  ///< audio-device-unavailable
+    AudioRecordingFailed = 62,  ///< audio-recording-failed: Audio recording failed: {reason}
+    CliSpecInvalid = 63,  ///< cli-spec-invalid: Invalid command spec: {reason}
+    CliUnknownOption = 64,  ///< cli-unknown-option: Unknown option '{option}' for command '{command}'
+    CliUnknownSubcommand = 65,  ///< cli-unknown-subcommand: Unknown subcommand '{subcommand}' for command '{command}'
+    CliMissingSubcommand = 66,  ///< cli-missing-subcommand: Command '{command}' requires a subcommand
+    CliMissingValue = 67,  ///< cli-missing-value: Option '{option}' requires a value
+    CliInvalidValue = 68,  ///< cli-invalid-value: Value '{value}' is not a valid {kind} for option '{option}'
+    CliChoiceInvalid = 69,  ///< cli-choice-invalid
+    CliRangeViolated = 70,  ///< cli-range-violated: Value '{value}' for option '{option}' is outside [{min}, {max}]
+    CliArityViolated = 71,  ///< cli-arity-violated
+    CliMissingRequired = 72,  ///< cli-missing-required: Required option '{option}' is missing for command '{command}'
+    CliTooManyPositionals = 73,  ///< cli-too-many-positionals
+    CliConflictViolated = 74,  ///< cli-conflict-violated: Options '{option}' and '{conflict}' cannot be used together
+    ClipboardAccessFailed = 75,  ///< clipboard-access-failed: System clipboard is inaccessible: '{detail}'
+    ClipboardWriteFailed = 76,  ///< clipboard-write-failed: Clipboard payload could not be committed: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -134,7 +135,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 76> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -508,6 +509,19 @@ inline constexpr std::array<ErrorMeta, 76> AURORA_ERROR_TABLE = {
             .message_tpl = "OS global hotkey registration failed: '{detail}'",
             .hint = "The key combination may already be grabbed by another process, unsupported on this platform, or "
                     "the platform backend is unavailable",
+        },
+        {
+            .code = ErrorCode::NotificationPostFailed,
+            .ident = "NotificationPostFailed",
+            .slug = "notification-post-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "System notification could not be posted: '{detail}'",
+            .hint = "The desktop notification service may be unavailable, or the platform backend does not support "
+                    "notifications",
         },
         {
             .code = ErrorCode::RuntimeCoroutineException,

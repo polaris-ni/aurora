@@ -176,8 +176,7 @@ auto pump_and_drain(aurora::OsHotkeyRegistry &registry) -> std::size_t {
 /// detail，故这里只读 code_enum、把 message 原样打出来供人判因。
 /// @param scenario 场景描述（打印在结论行头部）。
 /// @param result 待判定的注册结果。
-auto expect_register_failed(const std::string &scenario,
-                            const aurora::Result<aurora::OsHotkeyHandle> &result) -> void {
+auto expect_register_failed(const std::string &scenario, const aurora::Result<aurora::OsHotkeyHandle> &result) -> void {
     const bool expected = !result.ok() && result.error().code_enum == aurora::ErrorCode::OsHotkeyRegisterFailed;
     const std::string detail = result.ok() ? std::string("got Ok instead") : result.error().message;
     check(expected, scenario + ": rejected with OsHotkeyRegisterFailed (" + detail + ")");
@@ -209,8 +208,9 @@ auto run_auto_stage() -> int {
         check(registry.count() == 1U,
               "count() is 1 after the first successful add(): " + aurora_verify::format_uint(registry.count()));
     } else {
-        emit("Hint: the OS refused Ctrl+Alt+Shift+A. Typical cause: another process already owns the combination "
-             "(IMEs, screen recorders, IDE global shortcuts) or this session has no interactive desktop.");
+        emit(
+            "Hint: the OS refused Ctrl+Alt+Shift+A. Typical cause: another process already owns the combination "
+            "(IMEs, screen recorders, IDE global shortcuts) or this session has no interactive desktop.");
     }
 
     // 3. 重复组合（本注册表内判重，与 OS 侧无关）。
@@ -242,8 +242,7 @@ auto run_auto_stage() -> int {
     check(registry.count() == 2U,
           "count() is 2 with two live registrations: " + aurora_verify::format_uint(registry.count()));
     registry.clear();
-    check(registry.count() == 0U,
-          "clear() brings count() back to 0: " + aurora_verify::format_uint(registry.count()));
+    check(registry.count() == 0U, "clear() brings count() back to 0: " + aurora_verify::format_uint(registry.count()));
     // 反证的核心：`next_hotkey_id()` 只递增不复用，故这条 `add()` 一定用的是新 ID。若 OS 侧仍占
     // 着该组合，`RegisterHotKey` 会以组合已被占用为由失败，amina 这里就该拿到错误而非 Ok。
     expect_register_failed("none", aurora::OsHotkeyHandle{});  // 占位：真实断言见下一行
@@ -261,8 +260,9 @@ auto run_auto_stage() -> int {
     // 注意：注入期间不得调 `clear()`——inert 后端会跳过 OS 侧注销，那会把真实注册漏在系统里。
     const bool injected = aurora::OsHotkeyRegistry::install_test_backend(false);
     if (!injected) {
-        skip("test backend injection is unavailable in this build (both AURORA_ENABLE_DEBUG and "
-             "AURORA_ENABLE_TEST_HOOKS are required); the degraded platform path is not covered here");
+        skip(
+            "test backend injection is unavailable in this build (both AURORA_ENABLE_DEBUG and "
+            "AURORA_ENABLE_TEST_HOOKS are required); the degraded platform path is not covered here");
     } else {
         check(!registry.enabled(), "install_test_backend(false) turns enabled() off");
         expect_register_failed("degraded platform path (no backend)",
@@ -299,8 +299,9 @@ auto run_interactive_stage() -> int {
         });
         if (!result.ok()) {
             emit("[FAIL] interactive: cannot register " + combo.to_string() + " (" + result.error().message + ")");
-            emit("Hint: the combination is likely owned by another process (IME / screen recorder / IDE global "
-                 "shortcut). Free it or switch to a colder combination, then re-run with --interactive.");
+            emit(
+                "Hint: the combination is likely owned by another process (IME / screen recorder / IDE global "
+                "shortcut). Free it or switch to a colder combination, then re-run with --interactive.");
             return 1;
         }
     }
@@ -339,8 +340,9 @@ auto run_interactive_stage() -> int {
               combo.to_string() + " fired while the foreground window belonged to another process (no-focus evidence)");
     }
     if (missed > 0) {
-        emit("Hint: a missing combination usually means another process grabbed it (common causes: an IME, a screen "
-             "recorder, or an IDE global shortcut). Re-run after freeing it, or choose a colder combination.");
+        emit(
+            "Hint: a missing combination usually means another process grabbed it (common causes: an IME, a screen "
+            "recorder, or an IDE global shortcut). Re-run after freeing it, or choose a colder combination.");
     }
     return missed == 0 ? 0 : 1;
 }
@@ -366,8 +368,9 @@ auto main(int argc, char **argv) -> int {
         return auto_code;
     }
     if (!interactive) {
-        emit("Skipping the interactive stage: the no-focus claim needs a human to press the keys elsewhere "
-             "(re-run with --interactive).");
+        emit(
+            "Skipping the interactive stage: the no-focus claim needs a human to press the keys elsewhere "
+            "(re-run with --interactive).");
         emit("PASS: Win32 OS global hotkey wiring acceptance passed (auto stage)");
         return 0;
     }

@@ -69,6 +69,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_x11_ime)
     endif ()
 
+    # ---- Linux XDG 跨平台系统通知（libnotify.so.4 → libdbus-1.so.3 → notify-send 三级运行时降级）----
+    # 自动段验收 API 面（last_notification 往返 / 三档紧急度 / 去重 / recording 注入 / 激活回调注入 /
+    # pump_events 安全）；「屏幕真的出现气泡」与「点击触发回调」靠 --interactive 人工段。本探针仅
+    # 在桌面 Linux 可构建（含 #error 守卫），WSLg/Weston 下经 XDG 桌面通知服务可验。
+    if (AURORA_BACKEND_X11 OR AURORA_BACKEND_WAYLAND)
+        aurora_add_verify_probe(aurora_verify_linux_notification "${_aurora_verify_dir}/linux_notification_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_linux_notification)
+    endif ()
+
     # ---- Win32 家族光标（GDI 上屏 / D3D11 GPU 上屏共用 Win32Host 宿主）：GetCursorInfo 读回 ----
     if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
         aurora_add_verify_probe(aurora_verify_win32_cursor "${_aurora_verify_dir}/win32_cursor_live_probe.cpp")

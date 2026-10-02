@@ -25,6 +25,7 @@
 #include "aurora/app/generate_ui.h"
 #include "aurora/app/hot_reload.h"
 #include "aurora/app/menu.h"
+#include "aurora/app/notification.h"
 #include "aurora/app/os_hotkey.h"
 #include "aurora/app/perf_overlay.h"
 #include "aurora/app/scene.h"
