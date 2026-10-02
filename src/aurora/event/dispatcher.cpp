@@ -4,6 +4,7 @@
 #include <cmath>
 #include <optional>
 #include <ranges>
+#include <utility>
 
 #include "aurora/event/keycode.h"
 
@@ -158,12 +159,13 @@ auto ClickTracker::resolve(MouseEvent &e, std::uint32_t window_ms, float radius_
     const float dy = e.position.y - it->second.position.y;
     // window_ms == 0 表示「关闭连击判定」：任何间隔都不累加。取严格大于 0 而非依赖
     // `elapsed_ms <= 0` 的边界——同一毫秒内的两次点击实测 elapsed 恰为 0，靠 <= 会误判为命中。
-    const bool within_window = window_ms > 0 && elapsed_ms >= 0 && static_cast<std::uint64_t>(elapsed_ms) <= window_ms;
-    const bool within_radius = std::sqrt(dx * dx + dy * dy) <= radius_dp;
+    const bool within_window =
+        window_ms > 0U && elapsed_ms >= 0 && std::cmp_less_equal(static_cast<std::uint64_t>(elapsed_ms), window_ms);
+    const bool within_radius = std::sqrt((dx * dx) + (dy * dy)) <= radius_dp;
 
     if (within_window && within_radius) {
-        // 累加并封顶：更快的连续点击仍记 kMaxClickCount，供「三击选整段」使用。
-        const auto next = static_cast<std::uint8_t>(std::min<int>(it->second.count + 1, kMaxClickCount));
+        // 累加并封顶：更快的连续点击仍记 AURORA_MAX_CLICK_COUNT，供「三击选整段」使用。
+        const auto next = static_cast<std::uint8_t>(std::min<int>(it->second.count + 1, AURORA_MAX_CLICK_COUNT));
         it->second.count = next;
         it->second.at = now;
         it->second.position = e.position;

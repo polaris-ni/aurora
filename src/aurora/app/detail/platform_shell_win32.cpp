@@ -73,7 +73,8 @@ LRESULT CALLBACK shell_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (kv.first != id) {
                 continue;
             }
-            const ShellMessage payload{static_cast<std::uintptr_t>(wp), static_cast<std::intptr_t>(lp)};
+            const ShellMessage payload{.wparam = static_cast<std::uintptr_t>(wp),
+                                       .lparam = static_cast<std::intptr_t>(lp)};
             if (kv.second && kv.second(static_cast<std::uint32_t>(msg), payload)) {
                 return 0;
             }
@@ -139,7 +140,7 @@ auto message_window_available() -> bool {
 #endif
 }
 
-auto add_message_hook(ShellMessageHook hook) -> std::uint32_t {
+auto add_message_hook(const ShellMessageHook &hook) -> std::uint32_t {
     if (!hook) {
         return 0;
     }
@@ -149,7 +150,7 @@ auto add_message_hook(ShellMessageHook hook) -> std::uint32_t {
     }
     auto &st = shell_state();
     const std::uint32_t id = st.next_hook_id++;
-    st.hooks.emplace_back(id, std::move(hook));
+    st.hooks.emplace_back(id, hook);
     return id;
 #else
     return 0;

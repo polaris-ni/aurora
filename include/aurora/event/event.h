@@ -19,15 +19,15 @@ namespace aurora {
 /// 双击最大化）直接引用同一常量，避免「库内两套阈值」漂移。
 /// @note 该值是库内约定常量，**未接线到系统双击速度设置**（Windows `GetDoubleClickTime` /
 ///       X11 `Xkb` 等），跨平台才有一致手感；后续接系统值时须同步调整本注释。
-inline constexpr std::uint32_t kDefaultClickWindowMs = 500;
+inline constexpr std::uint32_t AURORA_DEFAULT_CLICK_WINDOW_MS = 500;
 
 /// @brief 连击判定的**默认位移半径**（逻辑 dp）：两次点击的落点距离不超过该值才可能累加连击序号。
 /// 单一真源：`EventDispatcher::click_radius_dp` 以它为初值，窗口装饰层与派发器共用。
-/// @note 与 `kDefaultClickWindowMs` 同口径：库内约定常量，未接线到系统设置。
-inline constexpr float kDefaultClickRadiusDp = 4.0F;
+/// @note 与 `AURORA_DEFAULT_CLICK_WINDOW_MS` 同口径：库内约定常量，未接线到系统设置。
+inline constexpr float AURORA_DEFAULT_CLICK_RADIUS_DP = 4.0F;
 
 /// @brief 连击序号上限：达到后继续快速点击仍记该值（供「三击选整段」语义使用）。
-inline constexpr std::uint8_t kMaxClickCount = 3;
+inline constexpr std::uint8_t AURORA_MAX_CLICK_COUNT = 3;
 
 /// @brief 鼠标/触摸按键。
 enum class MouseButton : std::uint8_t { Left, Right, Middle };

@@ -46,9 +46,10 @@ auto main() -> int {
     au::Application app{au::Scene{au::Column{}}, std::move(win_res.value()), opts};
 
     auto status = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"(nothing posted yet)"});
-    auto activated = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"(no notification clicked yet)"});
+    auto activated =
+        std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"(no notification clicked yet)"});
 
-    au::NotificationCenter::set_on_notification_activated([activated](std::string tag) -> void {
+    au::NotificationCenter::set_on_notification_activated([activated](const std::string &tag) -> void {
         // 空 tag 的通知在平台层被换成一个占位动作键，回传时已还原成调用方的语义（空串）。
         const std::string shown = tag.empty() ? "(untagged)" : tag;
         activated->set(au::LocalizedString{shown});

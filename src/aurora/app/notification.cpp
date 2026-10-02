@@ -68,11 +68,11 @@ namespace {
 /// @brief 默认 tag 的占位动作键：通知结构是值语义，`tag` 允许为空，
 /// 但 XDG `ActionInvoked` 与 libnotify 的 action key 都要求非空的标识串。
 /// 用 `x-` 前缀（freedesktop 保留自定义前缀）避免与真实业务 tag 撞车。
-inline constexpr const char *k_default_tag_key = "x-aurora-default-action";
+inline constexpr const char *AURORA_DEFAULT_TAG_KEY = "x-aurora-default-action";
 
 /// @brief  Windows 气球的兜底清理时长（毫秒）与「气球结束后再留的余量」。
-inline constexpr std::uint32_t k_default_cleanup_ms = 12000;
-inline constexpr std::uint32_t k_cleanup_slack_ms = 2000;
+inline constexpr std::uint32_t AURORA_DEFAULT_CLEANUP_MS = 12000;
+inline constexpr std::uint32_t AURORA_CLEANUP_SLACK_MS = 2000;
 
 /// @brief 通知中心的进程级状态（互斥保护：`last_notification` 允许跨线程读取）。
 struct CenterState {
@@ -92,14 +92,14 @@ struct CenterState {
 /// @param notification 通知内容。
 /// @return 用于向桌面服务注册「点击」动作的非空键。
 [[nodiscard]] auto action_key(const Notification &notification) -> std::string {
-    return notification.tag.empty() ? std::string{k_default_tag_key} : notification.tag;
+    return notification.tag.empty() ? std::string{AURORA_DEFAULT_TAG_KEY} : notification.tag;
 }
 
 /// @brief 把回调拿到的动作键还原成调用方语义下的 tag（占位键还原为空串）。
 /// @param key 桌面服务回传的动作键。
 /// @return 与 `Notification::tag` 同语义的 tag。
 [[nodiscard]] auto tag_from_action_key(const std::string &key) -> std::string {
-    return (key == k_default_tag_key) ? std::string{} : key;
+    return (key == AURORA_DEFAULT_TAG_KEY) ? std::string{} : key;
 }
 
 /// @brief 转发一次激活事件给已注册的回调（先把回调拷出来再放行，避免在持锁状态下调用用户代码）。
@@ -132,11 +132,11 @@ auto dispatch_activated(const std::string &tag) -> void {
 
 /// @brief 通知专用回调消息（挂 `NOTIFYICONDATAW::uCallbackMessage`）。
 /// 与 `system_tray` 的 `WM_APP+1` 拉开距离：两个图标可能挂在同一隐藏窗口上。
-inline constexpr UINT k_notify_callback_msg = WM_APP + 0x40;
+inline constexpr UINT AURORA_NOTIFY_CALLBACK_MSG = WM_APP + 0x40;
 /// @brief 兜底清理定时器的事件 ID。
-inline constexpr UINT_PTR k_notify_timer_id = 0xA0;
+inline constexpr UINT_PTR AURORA_NOTIFY_TIMER_ID = 0xA0;
 /// @brief 通知图标的 `uID`（版本 4 回调把它放进 lParam 高字，用于筛掉同一窗口上的别的图标）。
-inline constexpr UINT k_notify_icon_id = 2;
+inline constexpr UINT AURORA_NOTIFY_ICON_ID = 2;
 
 /// @brief Windows 气球的状态：一个进程同时只驻留一条通知（后来的覆盖前一条）。
 struct BalloonState {
@@ -159,6 +159,8 @@ struct BalloonState {
 /// @param dst 目标宽字符数组。
 /// @param dst_chars `dst` 的槽位数（含结尾空字符）。
 /// @param src 源串（UTF-16）。
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic): 定长 wchar_t 缓冲以有界下标做拷贝，下标受 dst_chars
+// 约束
 auto copy_bounded(wchar_t *dst, std::size_t dst_chars, const std::wstring &src) -> void {
     const wchar_t *source = src.c_str();
     std::size_t i = 0;
@@ -168,6 +170,7 @@ auto copy_bounded(wchar_t *dst, std::size_t dst_chars, const std::wstring &src) 
     }
     dst[i] = L'\0';
 }
+// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 
 /// @brief 撤掉临时图标与兜底定时器（幂等）。
 ///
@@ -195,19 +198,19 @@ auto balloon_cleanup() -> void {
 auto balloon_hook(std::uint32_t message, const internal::ShellMessage &payload) -> bool {
     auto &b = balloon();
     if (message == WM_TIMER) {
-        if (static_cast<UINT_PTR>(payload.wparam) == k_notify_timer_id) {
+        if (static_cast<UINT_PTR>(payload.wparam) == AURORA_NOTIFY_TIMER_ID) {
             balloon_cleanup();  // 兜底：服务器没吐超时事件时也要把图标撤掉
             return true;
         }
         return false;
     }
-    if (message != k_notify_callback_msg) {
+    if (message != AURORA_NOTIFY_CALLBACK_MSG) {
         return false;
     }
     const auto raw = static_cast<DWORD_PTR>(payload.lparam);
     const UINT event = LOWORD(raw);
     const UINT icon_id = HIWORD(raw);
-    if (b.version4 && (icon_id != k_notify_icon_id)) {
+    if (b.version4 && (icon_id != AURORA_NOTIFY_ICON_ID)) {
         return false;  // 同一窗口上别的图标发的回调，不归通知模块管
     }
     if (event == NIN_BALLOONUSERCLICK) {
@@ -246,17 +249,17 @@ auto balloon_hook(std::uint32_t message, const internal::ShellMessage &payload) 
     std::memset(&nid, 0, sizeof(nid));  // 上一次的长字符串不残留到本次
     nid.cbSize = sizeof(NOTIFYICONDATAW);
     nid.hWnd = b.hwnd;
-    nid.uID = k_notify_icon_id;
+    nid.uID = AURORA_NOTIFY_ICON_ID;
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_INFO;
-    nid.uCallbackMessage = k_notify_callback_msg;
+    nid.uCallbackMessage = AURORA_NOTIFY_CALLBACK_MSG;
     nid.hIcon = LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay): 定长数组成员无法取 Span
-    copy_bounded(nid.szTip, (sizeof(nid.szTip) / sizeof(wchar_t)), internal::utf8_to_wstr("Aurora"));
+    copy_bounded(nid.szTip, sizeof(nid.szTip) / sizeof(wchar_t), internal::utf8_to_wstr("Aurora"));
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay): 定长数组成员无法取 Span
-    copy_bounded(nid.szInfoTitle, (sizeof(nid.szInfoTitle) / sizeof(wchar_t)),
+    copy_bounded(nid.szInfoTitle, sizeof(nid.szInfoTitle) / sizeof(wchar_t),
                  internal::utf8_to_wstr(notification.title));
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-array-to-pointer-decay): 定长数组成员无法取 Span
-    copy_bounded(nid.szInfo, (sizeof(nid.szInfo) / sizeof(wchar_t)), internal::utf8_to_wstr(notification.body));
+    copy_bounded(nid.szInfo, sizeof(nid.szInfo) / sizeof(wchar_t), internal::utf8_to_wstr(notification.body));
 
     // 紧急度 → 提示旗标：Low 不出声；Critical 不加 `NIIF_RESPECT_QUIET_TIME`，即不受专注时段抑制。
     UINT info_flags = NIIF_INFO;
@@ -287,12 +290,12 @@ auto balloon_hook(std::uint32_t message, const internal::ShellMessage &payload) 
         KillTimer(b.hwnd, b.timer);  // 覆盖上一条通知：定时器按新的驻留时长重挂
         b.timer = 0;
     }
-    const std::uint32_t wait_ms =
-        (notification.timeout_ms == 0U) ? k_default_cleanup_ms : (notification.timeout_ms + k_cleanup_slack_ms);
-    if (SetTimer(b.hwnd, k_notify_timer_id, static_cast<UINT>(wait_ms), nullptr) == 0) {
+    const std::uint32_t wait_ms = (notification.timeout_ms == 0U) ? AURORA_DEFAULT_CLEANUP_MS
+                                                                  : (notification.timeout_ms + AURORA_CLEANUP_SLACK_MS);
+    if (SetTimer(b.hwnd, AURORA_NOTIFY_TIMER_ID, static_cast<UINT>(wait_ms), nullptr) == 0) {
         AURORA_LOG_WARN("notification", "SetTimer failed; relying on NIN_BALLOONTIMEOUT for icon cleanup");
     } else {
-        b.timer = k_notify_timer_id;
+        b.timer = AURORA_NOTIFY_TIMER_ID;
     }
     return Result<void>{};
 }
@@ -349,12 +352,12 @@ template <typename Fn>
 //                                       NotifyActionCallback cb, gpointer user_data, GDestroyNotify free_func);
 //   gboolean notify_notification_show(NotifyNotification *, GError **error);
 using FnNotifyInit = int (*)(const char *);
-using FnNotifyIsInitted = int (*)(void);
+using FnNotifyIsInitted = int (*)();
 using FnNotifyNew = void *(*)(const char *, const char *, const char *);
 using FnNotifySetUrgency = void (*)(void *, int);
 using FnNotifySetTimeout = void (*)(void *, int);
 using FnNotifyAddAction = void (*)(void *, const char *, const char *, void (*)(void *, char *, void *), void *,
-                                  void (*)(void *));
+                                   void (*)(void *));
 using FnNotifyShow = int (*)(void *, void **);
 
 struct NotifyApi {
@@ -545,17 +548,17 @@ struct LibdbusError {
     std::uint64_t opaque[8];  ///< 不透明暂存区
 };
 
-inline constexpr int k_dbus_bus_session = 0;  ///< `DBusBusType::DBUS_BUS_SESSION`
-inline constexpr int k_dbus_type_byte = 'y';  ///< DBUS_TYPE_BYTE
-inline constexpr int k_dbus_type_boolean = 'b';  ///< DBUS_TYPE_BOOLEAN
-inline constexpr int k_dbus_type_int32 = 'i';  ///< DBUS_TYPE_INT32
-inline constexpr int k_dbus_type_uint32 = 'u';  ///< DBUS_TYPE_UINT32
-inline constexpr int k_dbus_type_string = 's';  ///< DBUS_TYPE_STRING
-inline constexpr int k_dbus_type_array = 'a';  ///< DBUS_TYPE_ARRAY
-inline constexpr int k_dbus_type_dict_entry = 'e';  ///< DBUS_TYPE_DICT_ENTRY
-inline constexpr int k_dbus_type_variant = 'v';  ///< DBUS_TYPE_VARIANT
-inline constexpr int k_dbus_message_type_error = 3;  ///< DBUS_MESSAGE_TYPE_ERROR
-inline constexpr int k_dbus_message_type_method_return = 2;  ///< DBUS_MESSAGE_TYPE_METHOD_RETURN
+inline constexpr int AURORA_DBUS_BUS_SESSION = 0;  ///< `DBusBusType::DBUS_BUS_SESSION`
+inline constexpr int AURORA_DBUS_TYPE_BYTE = 'y';  ///< DBUS_TYPE_BYTE
+inline constexpr int AURORA_DBUS_TYPE_BOOLEAN = 'b';  ///< DBUS_TYPE_BOOLEAN
+inline constexpr int AURORA_DBUS_TYPE_INT32 = 'i';  ///< DBUS_TYPE_INT32
+inline constexpr int AURORA_DBUS_TYPE_UINT32 = 'u';  ///< DBUS_TYPE_UINT32
+inline constexpr int AURORA_DBUS_TYPE_STRING = 's';  ///< DBUS_TYPE_STRING
+inline constexpr int AURORA_DBUS_TYPE_ARRAY = 'a';  ///< DBUS_TYPE_ARRAY
+inline constexpr int AURORA_DBUS_TYPE_DICT_ENTRY = 'e';  ///< DBUS_TYPE_DICT_ENTRY
+inline constexpr int AURORA_DBUS_TYPE_VARIANT = 'v';  ///< DBUS_TYPE_VARIANT
+inline constexpr int AURORA_DBUS_MESSAGE_TYPE_ERROR = 3;  ///< DBUS_MESSAGE_TYPE_ERROR
+inline constexpr int AURORA_DBUS_MESSAGE_TYPE_METHOD_RETURN = 2;  ///< DBUS_MESSAGE_TYPE_METHOD_RETURN
 
 using FnDbusErrorInit = void (*)(void *);
 using FnDbusErrorFree = void (*)(void *);
@@ -615,7 +618,7 @@ struct DbusApi {
 [[nodiscard]] auto dbus_error_set(const LibdbusError &error) -> bool {
     // DBusError 的首个成员是 `const char *name`：libdbus 的错误一笔就是这个指针非空。
     const auto *words = reinterpret_cast<const void *const *>(&error);
-    return words[0] != nullptr;
+    return *words != nullptr;
 }
 
 /// @brief 取出错误描述；拿不到（未置位 / 版本差异）时返回空串。
@@ -626,7 +629,9 @@ struct DbusApi {
         return fallback;
     }
     const auto *fields = reinterpret_cast<const char *const *>(&error);
-    return (fields[1] != nullptr) ? std::string{fields[1]} : fallback;
+    return (fields[1] != nullptr) ? std::string{fields[1]}
+                                  : fallback;  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic):
+                                               // libdbus ABI 边界，按首二成员布局读 error
 }
 
 /// @brief 加载 libdbus 符号表（幂等；失败后不再重试）。
@@ -651,7 +656,8 @@ struct DbusApi {
     api.iter_append_basic = resolve<FnDbusMessageIterAppendBasic>(api.handle, "dbus_message_iter_append_basic");
     api.iter_open = resolve<FnDbusMessageIterOpenContainer>(api.handle, "dbus_message_iter_open_container");
     api.iter_close = resolve<FnDbusMessageIterCloseContainer>(api.handle, "dbus_message_iter_close_container");
-    api.send_blocking = resolve<FnDbusConnectionSendReplyBlock>(api.handle, "dbus_connection_send_with_reply_and_block");
+    api.send_blocking =
+        resolve<FnDbusConnectionSendReplyBlock>(api.handle, "dbus_connection_send_with_reply_and_block");
     api.message_get_type = resolve<FnDbusMessageGetType>(api.handle, "dbus_message_get_type");
     api.iter_init = resolve<FnDbusMessageIterInit>(api.handle, "dbus_message_iter_init");
     api.iter_arg_type = resolve<FnDbusMessageIterGetArgType>(api.handle, "dbus_message_iter_get_arg_type");
@@ -681,7 +687,7 @@ struct DbusApi {
     }
     LibdbusError error{};
     api->error_init(&error);
-    void *raw = api->bus_get(k_dbus_bus_session, &error);
+    void *raw = api->bus_get(AURORA_DBUS_BUS_SESSION, &error);
     const std::string detail = dbus_detail_or_unknown(error, "unknown reason");
     if (api->error_free != nullptr) {
         api->error_free(&error);
@@ -706,17 +712,17 @@ auto append_hint(void *hints, const char *key, const char *signature, const void
     DbusApi &api = dbus_api();
     LibdbusMessageIter entry{};
     LibdbusMessageIter variant{};
-    if (api.iter_open(hints, k_dbus_type_dict_entry, nullptr, &entry) == 0) {
+    if (api.iter_open(hints, AURORA_DBUS_TYPE_DICT_ENTRY, nullptr, &entry) == 0) {
         return false;
     }
     const char *key_ptr = key;
-    if (api.iter_append_basic(&entry, k_dbus_type_string, &key_ptr) == 0) {
+    if (api.iter_append_basic(&entry, AURORA_DBUS_TYPE_STRING, static_cast<const void *>(&key_ptr)) == 0) {
         return false;
     }
-    if (api.iter_open(&entry, k_dbus_type_variant, signature, &variant) == 0) {
+    if (api.iter_open(&entry, AURORA_DBUS_TYPE_VARIANT, signature, &variant) == 0) {
         return false;
     }
-    const bool value_ok = api.iter_append_basic(&variant, static_cast<int>(signature[0]), value) != 0;
+    const bool value_ok = api.iter_append_basic(&variant, static_cast<int>(*signature), value) != 0;
     (void)api.iter_close(&entry, &variant);
     (void)api.iter_close(hints, &entry);
     return value_ok;
@@ -753,18 +759,21 @@ auto append_hint(void *hints, const char *key, const char *signature, const void
     const char *body = notification.body.c_str();
     std::uint32_t replaces_id = 0;
     bool shaped = true;
-    shaped = (api->iter_append_basic(&top, k_dbus_type_string, &app_name) != 0) && shaped;
-    shaped = (api->iter_append_basic(&top, k_dbus_type_uint32, &replaces_id) != 0) && shaped;
-    shaped = (api->iter_append_basic(&top, k_dbus_type_string, &app_icon) != 0) && shaped;
-    shaped = (api->iter_append_basic(&top, k_dbus_type_string, &summary) != 0) && shaped;
-    shaped = (api->iter_append_basic(&top, k_dbus_type_string, &body) != 0) && shaped;
+    shaped =
+        (api->iter_append_basic(&top, AURORA_DBUS_TYPE_STRING, static_cast<const void *>(&app_name)) != 0) && shaped;
+    shaped = (api->iter_append_basic(&top, AURORA_DBUS_TYPE_UINT32, &replaces_id) != 0) && shaped;
+    shaped =
+        (api->iter_append_basic(&top, AURORA_DBUS_TYPE_STRING, static_cast<const void *>(&app_icon)) != 0) && shaped;
+    shaped =
+        (api->iter_append_basic(&top, AURORA_DBUS_TYPE_STRING, static_cast<const void *>(&summary)) != 0) && shaped;
+    shaped = (api->iter_append_basic(&top, AURORA_DBUS_TYPE_STRING, static_cast<const void *>(&body)) != 0) && shaped;
 
     // actions = ["default", <label>]：多数桌面把 `default` 当作「点通知本体」的动作，点击即触发。
     const char *action_key_cstr = "default";
     const char *action_label = "";
-    if (api->iter_open(&top, k_dbus_type_array, "s", &actions) != 0) {
-        (void)api->iter_append_basic(&actions, k_dbus_type_string, &action_key_cstr);
-        (void)api->iter_append_basic(&actions, k_dbus_type_string, &action_label);
+    if (api->iter_open(&top, AURORA_DBUS_TYPE_ARRAY, "s", &actions) != 0) {
+        (void)api->iter_append_basic(&actions, AURORA_DBUS_TYPE_STRING, static_cast<const void *>(&action_key_cstr));
+        (void)api->iter_append_basic(&actions, AURORA_DBUS_TYPE_STRING, static_cast<const void *>(&action_label));
         shaped = (api->iter_close(&top, &actions) != 0) && shaped;
     } else {
         shaped = false;
@@ -774,9 +783,9 @@ auto append_hint(void *hints, const char *key, const char *signature, const void
     const std::uint8_t urgency = urgency_value(notification.urgency);
     const char *category_value = "im.received";
     const int transient_value = (notification.urgency == NotificationUrgency::Low) ? 1 : 0;
-    if (api->iter_open(&top, k_dbus_type_array, "{sv}", &hints) != 0) {
+    if (api->iter_open(&top, AURORA_DBUS_TYPE_ARRAY, "{sv}", &hints) != 0) {
         shaped = append_hint(&hints, "urgency", "y", &urgency) && shaped;
-        shaped = append_hint(&hints, "category", "s", &category_value) && shaped;
+        shaped = append_hint(&hints, "category", "s", static_cast<const void *>(&category_value)) && shaped;
         shaped = append_hint(&hints, "transient", "b", &transient_value) && shaped;
         shaped = (api->iter_close(&top, &hints) != 0) && shaped;
     } else {
@@ -786,7 +795,7 @@ auto append_hint(void *hints, const char *key, const char *signature, const void
     // timeout：-1 = 交给服务器策略（「平台默认」），0 = 永不超时（本 API 不产生这种取值）。
     const std::int32_t expire_timeout =
         (notification.timeout_ms == 0U) ? -1 : static_cast<std::int32_t>(notification.timeout_ms);
-    shaped = (api->iter_append_basic(&top, k_dbus_type_int32, &expire_timeout) != 0) && shaped;
+    shaped = (api->iter_append_basic(&top, AURORA_DBUS_TYPE_INT32, &expire_timeout) != 0) && shaped;
     if (!shaped) {
         api->message_unref(message);
         return post_failed("failed to marshal the Notify arguments");
@@ -813,13 +822,13 @@ auto append_hint(void *hints, const char *key, const char *signature, const void
     std::uint32_t id = 0;
     const int kind = api->message_get_type(reply);
     LibdbusMessageIter response{};
-    if ((kind == k_dbus_message_type_method_return) && (api->iter_init != nullptr) && (api->iter_arg_type != nullptr) &&
-        (api->iter_get_basic != nullptr) && (api->iter_init(reply, &response) != 0) &&
-        (api->iter_arg_type(&response) == k_dbus_type_uint32)) {
+    if ((kind == AURORA_DBUS_MESSAGE_TYPE_METHOD_RETURN) && (api->iter_init != nullptr) &&
+        (api->iter_arg_type != nullptr) && (api->iter_get_basic != nullptr) &&
+        (api->iter_init(reply, &response) != 0) && (api->iter_arg_type(&response) == AURORA_DBUS_TYPE_UINT32)) {
         api->iter_get_basic(&response, &id);
     }
     api->message_unref(reply);
-    if ((kind == k_dbus_message_type_error) || (id == 0U)) {
+    if ((kind == AURORA_DBUS_MESSAGE_TYPE_ERROR) || (id == 0U)) {
         return post_failed("the notification server rejected the Notify call");
     }
 
@@ -877,7 +886,7 @@ auto handle_dbus_signal(void *raw) -> void {
     constexpr const char *k_iface = "org.freedesktop.Notifications";
     LibdbusMessageIter body{};
     if ((api.message_is_signal(raw, k_iface, "ActionInvoked") != 0) && (api.iter_init(raw, &body) != 0) &&
-        (api.iter_arg_type(&body) == k_dbus_type_uint32)) {
+        (api.iter_arg_type(&body) == AURORA_DBUS_TYPE_UINT32)) {
         std::uint32_t id = 0;
         api.iter_get_basic(&body, &id);
         (void)api.iter_next(&body);
@@ -888,7 +897,7 @@ auto handle_dbus_signal(void *raw) -> void {
         return;
     }
     if ((api.message_is_signal(raw, k_iface, "NotificationClosed") != 0) && (api.iter_init(raw, &body) != 0) &&
-        (api.iter_arg_type(&body) == k_dbus_type_uint32)) {
+        (api.iter_arg_type(&body) == AURORA_DBUS_TYPE_UINT32)) {
         std::uint32_t id = 0;
         api.iter_get_basic(&body, &id);
         std::string ignored;
@@ -1025,7 +1034,6 @@ auto NotificationCenter::pump_events() -> void {
 #ifdef AURORA_PLATFORM_WINDOWS
     // Windows 的气球事件由隐藏窗口的消息 pump 同步送达（宿主的 PeekMessage 即覆盖，
     // 这里若再抽一次会把宿主的窗口消息抢走），故这条就是 no-op。
-    return;
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
     linux_state();  // 保证状态先于下面两级访问而构造
     load_glib();

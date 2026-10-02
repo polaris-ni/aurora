@@ -51,7 +51,7 @@ using ShellMessageHook = std::function<bool(std::uint32_t message, const ShellMe
 /// @param hook 钩子回调（返回 `true` 表示消费该消息）；空钩子直接返回 0。
 /// @return 钩子 ID（自 1 起，供 `remove_message_hook` 注销）；平台不支持或建窗失败时为 0。
 /// @note Thread: main-thread only
-auto add_message_hook(ShellMessageHook hook) -> std::uint32_t;
+auto add_message_hook(const ShellMessageHook &hook) -> std::uint32_t;
 
 /// @brief 注销一个消息钩子（ID 不存在或为 0 时静默返回 false）。
 /// @param id `add_message_hook` 返回的钩子 ID。

@@ -153,7 +153,7 @@ AURORA_TEST_CASE(unregistering_the_callback_makes_activation_silent) {
     enter_recording_mode();
 
     int calls = 0;
-    NotificationCenter::set_on_notification_activated([&calls](std::string tag) -> void {
+    NotificationCenter::set_on_notification_activated([&calls](const std::string &tag) -> void {
         (void)tag;
         ++calls;
     });
@@ -192,9 +192,12 @@ AURORA_TEST_CASE(pump_events_is_safe_without_a_backend) {
 // 支持与否都必须「有答案」：不支持时不许假装成功（静默 no-op），更不许崩溃。
 // 有真实后端的平台已在上面的记录模式用例里覆盖语义面，这里不真发系统通知。
 AURORA_TEST_CASE(unsupported_platform_reports_a_structured_error) {
-#if defined(AURORA_PLATFORM_WINDOWS) || (defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID))
-    AURORA_TEST_SKIP("this machine has a desktop notification backend; "
-                     "posting a real notification belongs to the live probe, not to the unit suite");
+// Headless 构建（含 macOS CI）按契约 `notify()` 直接成功，不属于「不支持」路径，故一并跳过。
+#if defined(AURORA_PLATFORM_WINDOWS) || (defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)) || \
+    defined(AURORA_BACKEND_HEADLESS)
+    AURORA_TEST_SKIP(
+        "this machine has a desktop notification backend (or headless build); "
+        "posting a real notification belongs to the live probe, not to the unit suite");
 #else
     NotificationCenter::clear_last_notification();
     const auto result = NotificationCenter::notify(sample_notification());

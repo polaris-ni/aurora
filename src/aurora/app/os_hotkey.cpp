@@ -9,6 +9,7 @@
 // 消息泵内重入用户回调（重建页面 / 触发重排）会撞上半途的布局状态，故一律排队。
 #include "aurora/app/os_hotkey.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -220,13 +221,11 @@ auto OsHotkeyRegistry::Impl::find(std::uint32_t id) const -> const OsHotkeyRegis
 }
 
 auto OsHotkeyRegistry::Impl::has_combo(const KeyCombo &combo) const -> bool {
-    for (const auto &e : entries) {
-        if ((static_cast<std::uint8_t>(e.combo.modifiers) == static_cast<std::uint8_t>(combo.modifiers)) &&
-            (e.combo.key == combo.key)) {
-            return true;
-        }
-    }
-    return false;
+    const auto matches = [&](const auto &e) {
+        return (static_cast<std::uint8_t>(e.combo.modifiers) == static_cast<std::uint8_t>(combo.modifiers)) &&
+               (e.combo.key == combo.key);
+    };
+    return std::ranges::any_of(entries, matches);
 }
 
 auto OsHotkeyRegistry::Impl::on_hotkey(std::uint32_t id) -> bool {

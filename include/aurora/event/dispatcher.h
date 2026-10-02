@@ -36,7 +36,7 @@ class ClickTracker {
   private:
     /// @brief 上次「已完成」一次点击的记录。
     struct LastClick {
-        std::chrono::steady_clock::time_point at{};  ///< 上次点击完成（Release）的时刻
+        std::chrono::steady_clock::time_point at;  ///< 上次点击完成（Release）的时刻
         Point position{};  ///< 上次点击的窗口逻辑坐标
         std::uint8_t count = 0;  ///< 上次点击的连击序号（1 起）
     };
@@ -102,15 +102,15 @@ class EventDispatcher {
     auto dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm = nullptr) -> bool;
 
     /// @brief 连击判定时间窗（毫秒）：本次 Press 与上次**已完成**点击（Release）的间隔不超过该值才累加序号。
-    ///        初值 `kDefaultClickWindowMs`（500ms）——库内约定常量，**未接线到系统双击速度设置**
+    ///        初值 `AURORA_DEFAULT_CLICK_WINDOW_MS`（500ms）——库内约定常量，**未接线到系统双击速度设置**
     ///        （Windows `GetDoubleClickTime` / X11 等），跨平台手感一致。
     ///        可写：置 0 使每次点击都重置为 1；置极大值使窗口恒开。测试据此注入极端阈值。
-    std::uint32_t click_window_ms = kDefaultClickWindowMs;
+    std::uint32_t click_window_ms = AURORA_DEFAULT_CLICK_WINDOW_MS;
 
     /// @brief 连击判定位移半径（逻辑 dp）：两次点击落点距离不超过该值才累加序号。
-    ///        初值 `kDefaultClickRadiusDp`（4dp）。可写，语义同 `click_window_ms`。
+    ///        初值 `AURORA_DEFAULT_CLICK_RADIUS_DP`（4dp）。可写，语义同 `click_window_ms`。
     ///        判据取 `MouseEvent::position`（窗口逻辑坐标），与 `local_position` 无关。
-    float click_radius_dp = kDefaultClickRadiusDp;
+    float click_radius_dp = AURORA_DEFAULT_CLICK_RADIUS_DP;
 
     /// @brief 同步派发键盘事件；Tab/Shift+Tab 触发焦点移动，否则派发到焦点 widget。
     /// @param root 派发起点（根 widget）；键盘派发不经命中链，该形参未使用（仅为统一重载签名而保留）。
@@ -211,10 +211,10 @@ class TouchDispatcher {
     auto dispatch(Widget &root, TouchEvent &e, FocusManager *fm = nullptr) -> bool;
 
     /// @brief 连击（双 tap）判定时间窗（毫秒）；语义与 `EventDispatcher::click_window_ms` 一致。
-    std::uint32_t click_window_ms = kDefaultClickWindowMs;
+    std::uint32_t click_window_ms = AURORA_DEFAULT_CLICK_WINDOW_MS;
 
     /// @brief 连击（双 tap）判定位移半径（逻辑 dp）；语义与 `EventDispatcher::click_radius_dp` 一致。
-    float click_radius_dp = kDefaultClickRadiusDp;
+    float click_radius_dp = AURORA_DEFAULT_CLICK_RADIUS_DP;
 
   private:
     /// @brief 按指针 ID 缓存的命中链（指针捕获表）。某指针 `id` 由活跃→非活跃（抬起）时清除对应链，避免悬空引用。

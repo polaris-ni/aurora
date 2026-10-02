@@ -24,8 +24,8 @@ struct OsHotkeyHandle {
     /// @brief 默认构造：无效句柄（id == 0）。
     OsHotkeyHandle() = default;
     /// @brief 由 ID 构造（供注册表内部发放；调用方不应自行造号）。
-    /// @param id_ 热键 ID。
-    explicit OsHotkeyHandle(std::uint32_t id_) : id(id_) {}
+    /// @param id 热键 ID。
+    explicit OsHotkeyHandle(std::uint32_t id) : id(id) {}
 
     /// @brief 相等比较：ID 相同即同一热键。
     /// @param other 另一个句柄。
@@ -67,6 +67,10 @@ class OsHotkeyRegistry {
     /// @brief 禁止拷贝赋值：同拷贝构造的理由。
     /// @return 恒不返回（已 delete）。
     auto operator=(const OsHotkeyRegistry &) -> OsHotkeyRegistry & = delete;
+    /// @brief 禁止移动：持有 `unique_ptr<Impl>` 实现体，移动语义无必要且易误用（与拷贝同理）。
+    OsHotkeyRegistry(OsHotkeyRegistry &&) = delete;
+    /// @brief 禁止移动赋值：同移动构造。
+    auto operator=(OsHotkeyRegistry &&) -> OsHotkeyRegistry & = delete;
     /// @brief 析构：注销本注册表注册的全部热键，并摘掉消息钩子。
     ~OsHotkeyRegistry();
 

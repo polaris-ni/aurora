@@ -878,8 +878,8 @@ AURORA_TEST_CASE(click_count_caps_at_three) {
         up.action = MouseAction::Release;
         dispatcher.dispatch_mouse(*tree.row, up);
     }
-    // 更快的连续点击仍记 kMaxClickCount，供「三击选整段」语义使用。
-    AURORA_TEST_CHECK_EQ(last, static_cast<int>(kMaxClickCount));
+    // 更快的连续点击仍记 AURORA_MAX_CLICK_COUNT，供「三击选整段」语义使用。
+    AURORA_TEST_CHECK_EQ(last, static_cast<int>(AURORA_MAX_CLICK_COUNT));
 }
 
 AURORA_TEST_CASE(click_count_resets_when_position_moves_beyond_radius) {
