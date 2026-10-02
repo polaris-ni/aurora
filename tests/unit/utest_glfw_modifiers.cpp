@@ -12,7 +12,7 @@
 #include <cstdint>
 
 #include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
-#if defined(AURORA_BACKEND_GLFW)
+#ifdef AURORA_BACKEND_GLFW
 #include <GLFW/glfw3.h>
 
 #include "aurora/window/detail/glfw_modifiers.h"
@@ -22,7 +22,7 @@
 
 namespace aurora::test_cases::utest_glfw_modifiers {
 
-#if defined(AURORA_BACKEND_GLFW)
+#ifdef AURORA_BACKEND_GLFW
 
 /// @brief 断言辅助：位集与期望逐位比对（枚举位掩码按 uint8_t 比）。
 auto check_mods(ModifierKey got, ModifierKey want) -> void {
@@ -37,7 +37,7 @@ auto check_mods(ModifierKey got, ModifierKey want) -> void {
 // GLFW_MOD_* 掩码值与位宽：折算表逐位正确的地基。仓库固定 GLFW 3.5.1（第三方源码内置），
 // 这些值随上游定义而变，故写死断言——错位后果是「某个组合永不生效」且极难归因。
 AURORA_TEST_CASE(glfw_mod_mask_values_match_the_sdk) {
-#if defined(AURORA_BACKEND_GLFW)
+#ifdef AURORA_BACKEND_GLFW
     AURORA_TEST_CHECK_EQ(static_cast<int>(GLFW_MOD_SHIFT), 0x0001);
     AURORA_TEST_CHECK_EQ(static_cast<int>(GLFW_MOD_CONTROL), 0x0002);
     AURORA_TEST_CHECK_EQ(static_cast<int>(GLFW_MOD_ALT), 0x0004);
@@ -52,7 +52,7 @@ AURORA_TEST_CASE(glfw_mod_mask_values_match_the_sdk) {
 
 // 八个修饰键码常量：指针回调入口按这些码读缓存态，码值写错则某个键永远读不到。
 AURORA_TEST_CASE(glfw_modifier_key_tokens_match_the_sdk) {
-#if defined(AURORA_BACKEND_GLFW)
+#ifdef AURORA_BACKEND_GLFW
     AURORA_TEST_CHECK_EQ(GLFW_KEY_LEFT_SHIFT, 340);
     AURORA_TEST_CHECK_EQ(GLFW_KEY_RIGHT_SHIFT, 344);
     AURORA_TEST_CHECK_EQ(GLFW_KEY_LEFT_CONTROL, 341);
@@ -73,7 +73,7 @@ AURORA_TEST_CASE(glfw_modifier_key_tokens_match_the_sdk) {
 
 // 入口①：回调形参掩码 → 位集。逐位 + 组合 + 空掩码。
 AURORA_TEST_CASE(callback_mod_mask_folds_to_the_four_pointer_bits) {
-#if defined(AURORA_BACKEND_GLFW)
+#ifdef AURORA_BACKEND_GLFW
     check_mods(detail::glfw_mods_to_aurora(0), ModifierKey::None);
     check_mods(detail::glfw_mods_to_aurora(GLFW_MOD_SHIFT), ModifierKey::Shift);
     check_mods(detail::glfw_mods_to_aurora(GLFW_MOD_CONTROL), ModifierKey::Control);
@@ -104,7 +104,7 @@ AURORA_TEST_CASE(callback_mod_mask_folds_to_the_four_pointer_bits) {
 // 入口②：八个键码的按下态 → 位集，**左右归并**。归并的必要性同 Win32 侧：不归并则左右
 // 各占一位，消费方拿到「左 Shift」这种值还得自己再折，且不配对的左右变体会留下幻影位。
 AURORA_TEST_CASE(key_states_fold_left_and_right_into_one_bit_each) {
-#if defined(AURORA_BACKEND_GLFW)
+#ifdef AURORA_BACKEND_GLFW
     using detail::glfw_key_states_to_modifiers;
     // 全 false → None。
     check_mods(glfw_key_states_to_modifiers(false, false, false, false, false, false, false, false), ModifierKey::None);
@@ -139,7 +139,7 @@ AURORA_TEST_CASE(key_states_fold_left_and_right_into_one_bit_each) {
 // （`on_mouse_button` 有掩码形参、`on_cursor_pos` / `on_scroll` 没有只能读缓存态），
 // 若折算规则各写一份，就会长出「按住 Shift 点按钮有位、拖动时没位」这类只在真机显形的分叉。
 AURORA_TEST_CASE(both_entry_points_agree_on_the_same_physical_state) {
-#if defined(AURORA_BACKEND_GLFW)
+#ifdef AURORA_BACKEND_GLFW
     using detail::glfw_key_states_to_modifiers;
     using detail::glfw_mods_to_aurora;
     // 三种组合各比一次：单 Shift、Ctrl+Alt、四位齐按。

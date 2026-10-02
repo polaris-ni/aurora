@@ -6,6 +6,13 @@
 // 会被 Xlib 的 `#define None 0L` 污染，且本头不可在 #undef None 之后再包含。
 #include "aurora/window/detail/atspi_bridge.h"
 
+// 修饰键折算头同属这一组：`mods_from_x11_state` 内部以 `ModifierKey::None` 起手，
+// 在 Xlib 之后首次解析该头时 `None` 仍是对象宏，会被展开成 `ModifierKey::0L` 并报
+// `expected unqualified-id before numeric constant`。文件末尾的 `#undef None` 救不了它——
+// 那句在本头**之后**才执行；其余 aurora 头之所以无恙，只因它们早被首行的头链解析过
+// （头文件 guard 生效、宏尚未定义）。故本头必须与 atspi_bridge.h 同组前置。
+#include "aurora/window/detail/x11_modifiers.h"
+
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
 
 // aurora 头必须先于 Xlib：Xlib 会 #define None/Bool/Status 等通用词为宏，
@@ -48,7 +55,6 @@
 #include "aurora/render/png.h"
 #include "aurora/window/cursor_map.h"
 #include "aurora/window/detail/ime_composition.h"
-#include "aurora/window/detail/x11_modifiers.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/window_state.h"
 
