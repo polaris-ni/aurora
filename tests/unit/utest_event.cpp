@@ -93,6 +93,40 @@ AURORA_TEST_CASE(numlock_is_a_separate_modifier_bit) {
     AURORA_TEST_CHECK_EQ(off & ModifierKey::NumLock, std::uint8_t{0});
 }
 
+// 指针与滚轮事件复用同一 ModifierKey 枚举、同一判读方式（specification/05-event-navigation.md
+// §2.2.2）。本条守三件事：① 两个字段缺省都是 None（250 处既有构造点逐位不变）；② 写入后
+// 逐位往返与 KeyEvent 完全一致；③ 缺省语义两义（「没按修饰键」与「不由真实指针产生」不可
+// 从字段区分，需靠 pointer_id），此处只把「缺省确为 None」钉住，不去编码那层推断。
+AURORA_TEST_CASE(pointer_and_scroll_carry_the_same_modifier_bits) {
+    const MouseEvent fresh_mouse{};
+    AURORA_TEST_CHECK(fresh_mouse.modifiers == ModifierKey::None);
+    const ScrollEvent fresh_scroll{};
+    AURORA_TEST_CHECK(fresh_scroll.modifiers == ModifierKey::None);
+
+    // 逐位往返：Alt|Shift 在两个结构体上判读一致，且与 KeyEvent 同值。
+    const auto want = ModifierKey::Shift | ModifierKey::Alt;
+    MouseEvent m;
+    m.modifiers = want;
+    ScrollEvent s;
+    s.modifiers = want;
+    KeyEvent k;
+    k.modifiers = want;
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(m.modifiers), std::uint8_t{5});
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(s.modifiers), static_cast<std::uint8_t>(k.modifiers));
+    AURORA_TEST_CHECK_NE(m.modifiers & ModifierKey::Alt, std::uint8_t{0});
+    AURORA_TEST_CHECK_NE(s.modifiers & ModifierKey::Alt, std::uint8_t{0});
+    AURORA_TEST_CHECK_NE(s.modifiers & ModifierKey::Shift, std::uint8_t{0});
+    // 未置位的位判读必须为 0，否则消费方的 `& Alt` 判定会误命中。
+    AURORA_TEST_CHECK_EQ(m.modifiers & ModifierKey::Meta, std::uint8_t{0});
+    AURORA_TEST_CHECK_EQ(s.modifiers & ModifierKey::Control, std::uint8_t{0});
+    // NumLock 位与指针事件的四位共存：X11 / Wayland / Win32 侧的真值源会把它一并带上，
+    // 消费方只看四个可按住位时自行掩码。既有四位的判读不受其影响。
+    const auto with_numlock = want | ModifierKey::NumLock;
+    AURORA_TEST_CHECK_NE(with_numlock & ModifierKey::NumLock, std::uint8_t{0});
+    AURORA_TEST_CHECK_NE(with_numlock & ModifierKey::Shift, std::uint8_t{0});
+    AURORA_TEST_CHECK_EQ(with_numlock & ModifierKey::Meta, std::uint8_t{0});
+}
+
 AURORA_TEST_CASE(same_type_copy_preserves_event_payload) {
     MouseEvent press;
     press.position = Point{.x = 12.0F, .y = 34.0F};

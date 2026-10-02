@@ -224,6 +224,53 @@ constexpr auto make_keydown_lparam(unsigned char scan, bool extended) -> LPARAM 
 }
 #endif
 
+// 指针事件（MouseEvent / ScrollEvent）现在也消费 tracker 的 `get()` 值——Win32 后端在
+// `on_mouse` / `on_wheel` 里把它盖进事件字段（specification/05-event-navigation.md §2.2.2）。
+// 这给跟踪器加了一条**此前不存在的耦合**：修饰态的准确性从此不再只影响键盘热键，也决定
+// 「Shift+拖选」「Ctrl+滚轮」这类指针手势能否成立。
+//
+// 本条守两件事：
+// ① **鼠标消息不得意外清空 tracker**。指针捕获变化（SetCapture / ReleaseCapture）在
+//    `on_mouse` 内发生，Win32 不为它发键盘消息——若哪天有人把「指针捕获变化也清空」照搬
+//    键盘的失焦清空策略进来，Shift+拖选跨出窗口就会丢掉 Shift，而这种回归在真机上只表现为
+//    「拖选偶尔不扩展」，极难定位。
+// ② **指针读到的是当前 tracker 态而非某个快照**：按下 Shift 之后产生的鼠标事件必须带上它。
+AURORA_TEST_CASE(pointer_events_consume_get_without_disturbing_the_tracker) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    ModifierKeyTracker t;
+    // 基线：重激活时的一次异步播种（覆盖「Alt+Tab 切进来时 Alt 仍按着」）。
+    t.seed(ModifierKey::Shift | ModifierKey::Alt);
+    check_mods(t, ModifierKey::Shift | ModifierKey::Alt);
+
+    // ① 鼠标消息进消息流：VK_LBUTTON 非修饰键，apply 翻不了任何位，get() 的值原样保留。
+    //    指针事件正是读这个 get()——读到的仍是 Shift|Alt。
+    AURORA_TEST_CHECK_FALSE(t.apply(VK_LBUTTON, true));
+    check_mods(t, ModifierKey::Shift | ModifierKey::Alt);
+    AURORA_TEST_CHECK_FALSE(t.apply(VK_RBUTTON, false));
+    check_mods(t, ModifierKey::Shift | ModifierKey::Alt);
+    AURORA_TEST_CHECK_FALSE(t.apply(VK_MBUTTON, true));
+    check_mods(t, ModifierKey::Shift | ModifierKey::Alt);
+    //    指针捕获变化（WMD_SETCURSOR / WM_MOUSEACTIVATE 之类）在实现里不清空 tracker：
+    //    键盘焦点未动、抬起消息仍进本窗口，清空反而会丢 Shift。此处显式钉住该策略。
+    check_mods(t, ModifierKey::Shift | ModifierKey::Alt);
+
+    // ② 指针事件读到的是**当前**态：此后按下 Ctrl，紧接着的鼠标事件必须带 Control。
+    AURORA_TEST_CHECK_TRUE(t.apply(VK_CONTROL, true));
+    check_mods(t, ModifierKey::Shift | ModifierKey::Alt | ModifierKey::Control);
+    AURORA_TEST_CHECK_FALSE(t.apply(VK_LBUTTON, false));
+    check_mods(t, ModifierKey::Shift | ModifierKey::Alt | ModifierKey::Control);
+
+    // ③ 键盘路径与指针路径读的是同一个 get()，两侧逐位相等（同一份真值源，无第二来源）。
+    ModifierKeyTracker for_key;
+    ModifierKeyTracker for_pointer;
+    for_key.seed(ModifierKey::Meta);
+    for_pointer.seed(ModifierKey::Meta);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(for_key.get()), static_cast<std::uint8_t>(for_pointer.get()));
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
 // Win32 导航区把主键盘与小键盘**共用同一组 VK**，判据只能落在 lParam 的扫描码上。
 // 这组用例锁住该判据的**实测结论**：六个导航键里只有 `Home` 真的可分。
 //
