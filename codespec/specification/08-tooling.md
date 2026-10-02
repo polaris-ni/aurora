@@ -787,10 +787,10 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   接线独立 `FocusManager` 后合成窗口事件互不串台；应用内焦点互不干扰（获焦只改变本窗聚焦控件的
   聚焦背景）。
 - 帧等比率口径：读回帧与逻辑尺寸的**等比率**（纵横比一致，容差 0.02）是跨后端不变量；「物理 =
-  逻辑 × scale」**不是**——GLFW 软件路径读回帧为逻辑尺寸，Win32 家族为物理尺寸。断言不得绑定绝对
-  物理像素，`scale_factor()` 逐窗动态读取（Win32 的 scale 成员在 DPI 感知启用前初始化——进程首窗
-  恒 1.0、后续窗口为系统真实缩放，属已知库层缺口，见下文 resize 条），DPI 缩放环境下的采样点按
-  帧/逻辑尺寸比例映射。
+  逻辑 × scale」**不是跨后端**不变量——GLFW 软件路径读回帧为逻辑尺寸，Win32 家族为物理尺寸。
+  断言不得绑定绝对物理像素，`scale_factor()` 逐窗动态读取，DPI 缩放环境下的采样点按帧/逻辑尺寸
+  比例映射。**Win32 家族内部**则已收敛为单一真值源：帧物理尺寸 == 逻辑 × `scale_factor()` 逐位成立
+  （见下文 resize 条的 Win32 几何口径）。
 - 生命周期：关闭一窗不影响另一窗继续渲染读回；RAII 兜底经异常路径验证（中途 throw 后 `Session`
   析构关窗、不残留幽灵窗口）；同规格重建与连续开关循环成功（资源不泄漏的可移植运行时证据；OS 层
   枚举窗口数不可移植，不做）。
@@ -802,11 +802,28 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
 - resize 的 Win32 几何口径：`Win32Host::set_size` 已与构造路径同换算（逻辑 × scale → `AdjustWindowRectEx`
   非客户区补偿 → `SetWindowPos`），保证客户区尺寸 == 请求逻辑尺寸——此前逻辑值被直接当外框尺寸传
   下去，客户区被 chrome 挤占（标题栏随 DPI 放大尤甚，150% 显示器上客户区逻辑高度可比请求值缩水近半）。
-  遗留缺口（守卫 skip 记录在案）：`Win32Host` 的 scale 成员在成员初始化列表取值、早于构造体内的
-  `enable_dpi_awareness()`——进程首窗 scale 恒 1.0，而 `WM_SIZE` 的逻辑换算用实时 `dpi_scale()`（感知
-  生效后为系统真实缩放），≠100% DPI 显示器上帧/逻辑/scale 三方记账发散，resize 用例以三方一致性守卫
-  skip；100% DPI 环境（含 CI）三方恒 1.0 不受影响。修复须连带评估首窗 scale 语义变更对坐标换算面
-  （鼠标 / IME / a11y 投影矩形）的影响，独立成题。
+  **DPI 单点真值源（已修复，原 skip 守卫已解除）**：`Win32Host::Impl::scale` 曾有两处不同源的取值
+  ——成员初始化列表里的 `dpi_scale()`（此时 `hwnd == nullptr`、进程 DPI 感知尚未启用，
+  `GetDeviceCaps` 恒回 96 ⇒ 进程首窗 scale 恒 1.0）与 `WM_SIZE` / `WM_GETMINMAXINFO` 里的现调
+  `dpi_scale()`（感知生效后为系统真实缩放）。≠100% DPI 显示器上二者发散，帧 / 逻辑 / scale 三方
+  记账对不上，resize 与 smoke 用例只能以 skip 守卫记为「库层缺口」。现收敛为：
+  - **awareness 启用前移**到 `window_factory.cpp` 的 `make_window()`——它是所有 `create_window`
+    重载的公共出口，且早于任何 `Surface` 构造（即早于 `CreateWindowExA`）。`Impl` 构造体内保留一处
+    幂等兜底，供不经工厂直接构造 `Win32Host` 的消费者使用。
+  - **`scale` 改为句柄就绪后求值**：建窗成功后立刻 `refresh_scale()`（`GetDpiForWindow` → 回落
+    `GetDpiForSystem` → 回落 96），此后 `WM_DPICHANGED` / 跨屏迁移复用同一函数更新。
+  - **换算收敛为唯二入口**：`to_physical(Size)` / `to_logical(int, int)`。构造尺寸、`set_size`、
+    `WM_GETMINMAXINFO`、鼠标、滚轮、文件拖放、IME hook、a11y 投影矩形全部经它们；宿主内不再有
+    裸写的 `* scale` / `/ scale`。`a11y` 桥（`win32_ua.cpp`）同步改走 `GetDpiForWindow`，与宿主
+    真正同源（此前它自读 `GetDeviceCaps`，与宿主可能各报各的）。
+  - 验收：`tools/verify/win32_dpi_live_probe.cpp`（真机，不进 CTest）在 ≠100% DPI 环境下跑五条判据
+    ——(a) `set_size` 往返、(b) `WM_SIZE` 后三方同源、(c) 鼠标 dp 映射、(d) `WM_GETMINMAXINFO` 与
+    `set_size` 同换算（防 150% 屏上的往返漂移）、(e) a11y 与鼠标同源。**本机 150% DPI 实测
+    `scale=1.5`，五条全 PASS、退出码 0**。该探针另设一条「宿主 scale == 独立系统 DPI 读数」的
+    环境自证断言：删掉建窗后的 `refresh_scale()` 时，(a)–(d) 仍会**自洽地**全绿（三方都是 1.0），
+    唯有这条断言转红——原缺陷的隐蔽性正在于此，不可省。
+  - **本轮仅 Win32 收敛**：X11 / Wayland / GLFW 的 `scale_factor()` 仍缺缩放变化上报
+    （`Surface::set_scale_change_handler` 未被它们 override），见 §7.4 的 resize 缺口条。
 - 脏区语义（`present_root` partial-clip 路径）：树状态已变但无脏登记时 idle 跳帧（`frame_count` 不增、
   `has_pending_dirty()` 为假）；手动 `mark_dirty` 局部矩形后仅裁剪区重绘、**裁剪外保留上帧像素**（与
   「整屏刷底色」实现可区分——后者会画出已变的新色）；随后补标另一侧再验证增量覆盖。

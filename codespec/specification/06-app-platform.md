@@ -141,7 +141,7 @@
 |:---|:---|
 | `WindowOptions::persist_id` | 几何持久化键（空 = 不持久化），多个窗口用不同键区分 |
 | `Application::set_window_geometry_store(prefs)` | 指定 `Preferences` 存储；会对**已登记**窗口补做恢复（主窗口在构造期即已登记） |
-| `WindowGeometry{origin, size, mode, display_id}` | 坐标与尺寸为**屏幕物理像素**（与 `app::Display` 同源）——只有物理坐标跨 DPI 稳定；恢复时按当前 `scale_factor` 折回逻辑 dp |
+| `WindowGeometry{origin, size, mode, display_id}` | 坐标与尺寸为**屏幕物理像素**（与 `app::Display` 同源）——只有物理坐标跨 DPI 稳定；恢复时按当前 `scale_factor` 折回逻辑 dp。**该 `scale_factor` 与宿主内 dp ↔ 物理换算同源**（Win32 侧已收敛为 `Impl::scale` 单点真值，`scale_factor()` 读之；见 `03-layout-render.md` DPI 感知条）。**Linux 三后端（X11 / Wayland / GLFW）的缩放变化上报仍未实现**，故其 `scale_factor` 在改系统缩放或跨屏后不会自动更新，持久化恢复暂按旧值折算 |
 | `save_window_geometry` / `load_window_geometry` | 读写；另有 `Preferences::Group` 重载用于**窗口组**：`prefs.group("windows")` + 各窗口键 |
 | `is_window_geometry_usable(g, displays)` | 判据：尺寸为正，且与某显示器工作区**有交集**（部分越界算可用，多屏拼接/任务栏遮挡下不应拒绝恢复） |
 

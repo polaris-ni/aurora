@@ -656,6 +656,8 @@ au::Column{}
 
 **DPI 感知**：`enable_dpi_awareness()`（`window/window.h`）在进程创建**任何窗口之前**启用高 DPI 感知。这是 **OS/进程级**设置，非 per-Window、非 per-Surface——Win32 经 `SetProcessDpiAwarenessContext`（Per-Monitor V2 → V1 → `SetProcessDPIAware`）一次性启用；macOS 与 Linux 无需 opt-in，为空实现。**关键不变量**：必须在 `init_console()`（`AllocConsole` 会创建控制台窗口）与 `create_window()` 之前调用，否则 Windows 上启用失败会退化为 DPI 未感知（scale = 1.0）。每窗口的 scale 查询仍是各 `Surface::scale_factor()` 的职责，与「启用」正交。
 
+**Win32 侧的实现落点与唯一换算位置**（本条承诺此前与代码不符，已收敛）：awareness 由 `window_factory.cpp` 的 `make_window()` 启用——它是所有 `create_window` 重载的公共出口，且早于任何 `Surface` 构造（即早于 `CreateWindowExA`）；`Win32Host::Impl` 构造体内保留一处幂等兜底，供不经工厂直接构造宿主的消费者。`Win32Host` 内部 dp ↔ 物理像素的换算**只发生在两个私有函数**里：`to_physical(Size)`（逻辑 → 物理）与 `to_logical(int, int)`（物理 → 逻辑）；两者共读 `Impl::scale` 这**一个**成员，该成员由 `refresh_scale()`（`GetDpiForWindow` → 回落 `GetDpiForSystem` → 回落 96）在句柄就绪后求得、并在 `WM_DPICHANGED` 时更新。构造尺寸、`set_size`、`WM_GETMINMAXINFO`、鼠标 / 滚轮 / 文件拖放、IME hook、a11y 投影矩形全部经这两个函数，宿主内不再有裸写的 `* scale` / `/ scale`。**消费方只见逻辑坐标（dp）**：物理像素只出现在宿主内部与 `WindowGeometry`（见 `06-app-platform.md`）。收敛背景与验收见 `08-tooling.md` §8.2。
+
 ### 8.6 显示列表与 RHI 后端
 
 `DisplayList`（`render/display_list.h`）是**绘制指令的唯一来源**：`Painter` 在录制态把每条上屏原语追加为一条 `DrawCmd`——几何 / 颜色 / 标量内联，文本字符串 / 渐变色标 / 字体 / 图像 / 变换矩阵等**变长数据入池**、命令只持下标（避免每条命令内嵌大对象）。命中缓存时父级整树一次 `replay` 即可压平重放。
