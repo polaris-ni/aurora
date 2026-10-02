@@ -394,18 +394,28 @@ struct MergedModifiers {
 
 // ③ 快捷键匹配：Tab / 方向键 / Enter·Space 的全局快捷键。命中并消费返回 is_handled_ 结果；
 // 否则返回 nullopt，交由焦点路由把事件交给当前焦点控件（如文本框内部光标/选区）。
-// 方向键与激活键各有一个「控件优先」钩子（`Widget::wants_navigation_keys()` /
-// `wants_activation_keys()`）：覆写者先经 `on_key_event` 观察按键，未消费才回落全局语义。
+// Tab / 方向键 / 激活键各有一个「控件优先」钩子（`Widget::wants_tab_keys()` /
+// `wants_navigation_keys()` / `wants_activation_keys()`）：覆写者先经 `on_key_event` 观察按键，
+// 未消费才回落全局语义。
 [[nodiscard]] auto match_shortcut(KeyEvent &e, FocusManager &fm, KeyCategory cat, const MergedModifiers &mods)
     -> std::optional<bool> {
     if (e.action != KeyAction::Down) {
         return std::nullopt;  // 仅按下阶段匹配快捷键；释放等交给焦点控件
     }
     switch (cat) {
-        case KeyCategory::Tab:  // Tab 序导航：Shift+Tab 后退，否则前进（specification/05-event-navigation.md §4）
+        case KeyCategory::Tab: {  // Tab 序导航：Shift+Tab 后退，否则前进（specification/05-event-navigation.md §4）
+            // 控件优先：声明 `wants_tab_keys()` 的复合控件（字段分组跳转 / 同级折叠切换等）先观察
+            // Tab，消费即止；未消费再回落焦点序遍历（与 Arrow / Activate 分支的 opt-in 钩子同构）。
+            if (Widget *focused = fm.focused(); focused != nullptr && focused->wants_tab_keys()) {
+                focused->on_key_event(e);
+                if (e.is_handled) {
+                    return true;
+                }
+            }
             fm.move_focus(mods.shift ? FocusDirection::Backward : FocusDirection::Forward);
             e.is_handled = true;
             return true;
+        }
         case KeyCategory::Arrow: {
             auto dir = FocusDirection::Forward;
             switch (static_cast<KeyCode>(e.key)) {

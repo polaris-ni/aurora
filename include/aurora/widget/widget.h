@@ -552,6 +552,19 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @return true = 方向键先投递 `on_key_event`；false（默认）= 派发器直接做几何焦点导航。
     [[nodiscard]] virtual auto wants_navigation_keys() const -> bool { return false; }
 
+    /// @brief Tab / Shift+Tab 是否优先投递给 `on_key_event`。
+    ///
+    /// 派发器对 Tab 的默认处理是**焦点序遍历**（`FocusManager::move_focus(Forward/Backward)`）：
+    /// 有候选即移动焦点并消费，焦点控件观察不到按键。自带 Tab 语义的复合控件（字段列表的
+    /// 「跳到下一组」、树件的同级折叠切换、分区跳转……）需覆写本钩子为 true：派发器先调
+    /// `on_key_event`，其消费（`is_handled`）即止；**未消费则回落焦点序遍历**，故控件只需处理
+    /// 自己认识的组合键，其余 Tab 行为保持不变。与 `wants_navigation_keys()` /
+    /// `wants_activation_keys()` 同一「控件优先、宿主兜底」约定；复数形式指 Tab 与 Shift+Tab
+    /// 一对都算（方向由事件自身的 Shift 修饰位给出，钩子不区分）。
+    /// 默认 false，保持既有焦点序遍历语义（按钮 / 复选框 / 输入框等不受影响）。
+    /// @return true = Tab/Shift+Tab 先投递 `on_key_event`；false（默认）= 派发器直接做焦点序遍历。
+    [[nodiscard]] virtual auto wants_tab_keys() const -> bool { return false; }
+
     /// @brief 文本输入入口（焦点 widget 上调用）。默认标记为已消费。
     /// @param e 文本输入事件；默认实现只置 `e.is_handled = true`（不落任何文本）。
     virtual auto on_text_input(TextInputEvent &e) -> void { e.is_handled = true; }
@@ -1236,12 +1249,12 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 「有输入语义」判据：纯布局容器与纯展示件用它实现 `wants_focus()`。
     /// 命中任一即认为该控件需要键盘可达：点击目标（含 `.clickable()` 修饰）、指针手势、
-    /// 上下文菜单、滚动视口、或认领方向键 / 激活键。
+    /// 上下文菜单、滚动视口、或认领方向键 / 激活键 / Tab 键。
     /// @return 上述任一输入语义命中时为 true；全部未命中为 false。
     [[nodiscard]] auto has_input_semantics() const -> bool {
         const Modifier &mod = modifier.get();
         return wants_click() || mod.has_gesture() || mod.has_context_menu() || wants_scroll() ||
-               wants_navigation_keys() || wants_activation_keys();
+               wants_navigation_keys() || wants_activation_keys() || wants_tab_keys();
     }
 
   private:
