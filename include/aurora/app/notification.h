@@ -43,12 +43,13 @@ struct Notification {
 ///
 /// 各平台后端（全部为**运行时**探测，无构建期依赖，也不新增 `AURORA_ENABLE_*` 开关）：
 ///
-/// | 平台 | 实现 | 激活回调 |
-/// |:---|:---|:---|
-/// | Windows | `Shell_NotifyIconW` 按需添加隐藏托盘图标 + `NIF_INFO` 气球；超时/关闭/点击后 `NIM_DELETE` 撤掉图标 | 支持（走 `NIN_BALLOONUSERCLICK`） |
-/// | Linux | ① `dlopen("libnotify.so.4")` ② `dlopen("libdbus-1.so.3")` 手写 `org.freedesktop.Notifications.Notify` ③ `popen("notify-send")` 兜底 | ①② 支持（需宿主排空，见 `pump_events`）；③ 不支持 |
-/// | Headless 回退 | 仅记录 `last_notification()`，`notify()` 返回成功 | 不支持 |
-/// | macOS / 其它 | 本轮不支持，`notify()` 返回结构化错误 | 不支持 |
+/// - **Windows**：`Shell_NotifyIconW` 加隐藏托盘图标 + `NIF_INFO` 气球，超时 / 关闭后
+///   `NIM_DELETE` 撤除；支持激活回调（走 `NIN_BALLOONUSERCLICK`）。
+/// - **Linux**：三层降级，依次尝试 ① `dlopen("libnotify.so.4")` ② `dlopen("libdbus-1.so.3")`
+///   手写 `org.freedesktop.Notifications.Notify` ③ `popen("notify-send")` 兜底。①② 支持激活回调
+///   （需宿主排空，见 `pump_events`），③ 不支持。
+/// - **Headless 回退**：仅记录 `last_notification()`，`notify()` 返回成功；不支持激活回调。
+/// - **macOS / 其它**：本轮不支持，`notify()` 返回结构化错误。
 ///
 /// **失败口径**：一切失败统一为 `NotificationPostFailed`（`ErrorParams{{"detail", ...}}`，
 /// 永久失败、不可重试语义），调用方可据此退化为自己 UI 内的提示条；不抛异常、不静默 no-op。
