@@ -159,9 +159,9 @@ struct BalloonState {
 /// @param dst 目标宽字符数组。
 /// @param dst_chars `dst` 的槽位数（含结尾空字符）。
 /// @param src 源串（UTF-16）。
-// NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic): 定长 wchar_t 缓冲以有界下标做拷贝，下标受 dst_chars
-// 约束
 auto copy_bounded(wchar_t *dst, std::size_t dst_chars, const std::wstring &src) -> void {
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic): 定长 wchar_t 缓冲以有界下标做拷贝，下标受 dst_chars
+    // 约束
     const wchar_t *source = src.c_str();
     std::size_t i = 0;
     while (((i + 1U) < dst_chars) && (source[i] != L'\0')) {
@@ -169,8 +169,8 @@ auto copy_bounded(wchar_t *dst, std::size_t dst_chars, const std::wstring &src) 
         ++i;
     }
     dst[i] = L'\0';
+    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 }
-// NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 
 /// @brief 撤掉临时图标与兜底定时器（幂等）。
 ///
