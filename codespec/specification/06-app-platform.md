@@ -542,6 +542,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 | `app/shortcuts.h` | 快捷键注册 |
 | `commands.h` | 命令模型与注册表（快捷键 / 菜单 / 命令面板的统一真源） |
 | `widget/command_palette.h` | 命令面板（模态浮层，模糊检索并执行命令） |
+| `app/os_hotkey.h` | **OS 级全局热键**（无焦点时也触发，见 §8.6） |
 | `app/display.h` | 显示设备与 DPI 查询 |
 
 **命令是唯一真源**：`CommandRegistry`（`commands.h`）持 `Command{ id, title, icon, category, action, default_binding, scope, enabled, when_label }`。`bind_shortcuts(ShortcutRegistry&)` 与 `to_menu_items()` 是它面向快捷键与菜单的两个**投影**，命令面板是第三个消费方；三者共用 `invoke(id)` 出口，故启用条件与空动作判定单点生效。启用条件为两段式：`enabled` 谓词承担运行期判定（空 = 恒启用），`when_label` 仅作展示 / 序列化标签（**不参与求值**，也不解析条件 DSL）。`to_json()` 产出 `{"commands":[…]}` 自描述信封供工具面枚举；`search()` 与工具面共用 `command_fuzzy_score()`，故 AI 检索与用户检索次序一致。
@@ -549,6 +550,38 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 **接线**：`Application::commands()` 返回注册表；`app.commands().bind_shortcuts(app.shortcuts())` 一行把默认快捷键接入。绑定为**显式**而非 `run()` 内自动执行——否则 `run()` 之后注册的命令会静默失效。`Application` 在 `dispatch*` 入口统一暴露「当前焦点管理器」（`current_focus_manager()`），快捷键动作与控件回调内同样可取到，模态弹层据此完成焦点陷阱。原「命令式逃生舱」`aurora::imperative::run_raw`（`imperative.h`）与命令系统无关。
 
 **命令面板键位**：`CommandPalette` 打开时把自己的作用域压入 `FocusManager`（子树内**唯一**可聚焦控件是搜索框，故左右方向键仍落到搜索框做光标移动、上下方向键不引发焦点跳转）；Enter 经搜索框的提交回调执行选中项；Esc / ↑ / ↓ 经打开期临时注册的快捷键绑定接管（依赖注册表已 `bind_shortcuts`，未接线时这几键不可用，面板以 WARN 提示）。Space 只经文本输入落字，不触发执行。命令清单可经 `to_json()` 序列化并由 MCP 工具面枚举，见 [`08-tooling.md`](08-tooling.md) §7.1。
+
+### 8.6 OS 级全局热键（无焦点时也触发）
+
+`OsHotkeyRegistry`（`app/os_hotkey.h`）把键组合注册到**操作系统**，焦点在别的进程里同样生效。经 `Application::os_hotkeys()` 取用。
+
+**与 `ShortcutRegistry` 的分工**（两者不重叠、也不互相接管）：
+
+| | `ShortcutRegistry`（`app/shortcuts.h`） | `OsHotkeyRegistry` |
+|:---|:---|:---|
+| 作用域 | 应用内：需窗口有焦点、经键盘事件派发命中 | OS 级：系统范围内，应用无焦点也触发 |
+| 键组合类型 | `KeyCombo`（复用同一类型） | `KeyCombo`（复用同一类型） |
+| 失败语义 | 无冲突概念 | 被别的进程抢占 / 平台无后端 → `OsHotkeyRegisterFailed` |
+
+`ShortcutScope::Global` 的语义**不变**：它仍是「应用内跨焦点作用域」的标记，不因本节新增而改写为 OS 级。
+
+**触发时机 —— 排队到帧循环排空，不在消息泵内同步回调**：`WM_HOTKEY` 到达时只把命中的 ID 推进内部队列，由 `Application::step_frame()` 每帧调 `os_hotkeys().drain_pending()` 在主线程排空并调用动作。理由：动作可能重建页面 / 触发重排，在窗口过程帧内重入会把布局与绘制切到半途的状态。代价是最坏延迟一帧（约 16ms），对热键这类低频触发无感。
+
+**平台矩阵**：
+
+| 平台 | 实现 | 状态 |
+|:---|:---|:---|
+| Windows | `RegisterHotKey` + `WM_HOTKEY`，经共享的内部隐藏消息窗口 `src/aurora/app/detail/platform_shell_win32.{h,cpp}` 收消息 | 支持 |
+| X11 | `xcb_grab_key` | 支持 |
+| Wayland | 无全局热键协议 | 运行时降级：`enabled()==false`，`add()` 返回错误 |
+| GLFW | 无对应能力 | 不支持 |
+| macOS | — | 本轮不实现 |
+
+**失败口径一律机器可见，不做静默 no-op**：主键无法映射到原生虚拟键、组合未指定主键、注册表内重复注册、OS 侧被抢占，统一为 `ErrorCode::OsHotkeyRegisterFailed`，`detail` 给出具体成因。`remove()` 对无效 / 非本表的句柄返回 `false`（不抛、不报错）。
+
+**句柄**：`OsHotkeyHandle{std::uint32_t id}`，值语义，`id == 0` 恒为无效句柄，有效 ID 自 1 起。强类型而非裸整数，避免与 `ShortcutRegistry::add()` 返回的 `int` ID 混淆（传错类型编译期即报错）。
+
+**测试注入**：`OsHotkeyRegistry::install_test_backend(bool)` 安装进程内 inert 后端，此后 `add`/`remove` 只走内存、不触碰 OS 热键接口。单测不得真的抢占系统热键（CI 机器上会干扰系统与别的用例），但又必须覆盖「平台不支持」的降级路径——那在受支持的平台上没有别的办法复现。该注入面受 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release 下自动失效。
 
 ### 8.5 输入法桥（Win32 IMM32 / X11 XIM / Wayland text-input-v3）
 

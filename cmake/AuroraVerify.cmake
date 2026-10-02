@@ -92,6 +92,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_ime)
     endif ()
 
+    # ---- Win32 OS 级全局热键（真实窗口 + 隐藏消息窗口接 WM_HOTKEY；「应用无焦点也触发」+ 排空语义）----
+    # 自动段验收注册表 API 面（enabled / add / 判重 / 无效主键 / remove / clear / drain / 注入降级）；
+    # 「OS 真把按键投到本进程」靠 --interactive 人工段（把焦点切到别的进程再按）。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_os_hotkey "${_aurora_verify_dir}/win32_os_hotkey_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_os_hotkey)
+    endif ()
+
     # ---- macOS 光标（NSCursor 派发接线）：[NSCursor currentCursor] 单例同一性读回 ----
     # 需 ObjC++ 语言：条件启用，其它平台上完全不涉及（不改动默认构建的语言集合）。
     if (APPLE AND AURORA_BACKEND_MACOS)

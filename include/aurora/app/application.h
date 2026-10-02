@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "aurora/animation/animator.h"
+#include "aurora/app/os_hotkey.h"
 #include "aurora/app/perf_overlay.h"
 #include "aurora/app/scene.h"
 #include "aurora/app/scheduler.h"
@@ -284,6 +285,14 @@ class Application {
     /// 菜单与命令面板分别经 `to_menu_items()` / `CommandPalette` 消费同一份命令。
     /// @return 应用级命令注册表引用。
     [[nodiscard]] auto commands() -> CommandRegistry & { return commands_; }
+
+    /// @brief OS 级全局热键注册表：**应用无焦点时也触发**（specification/06-app-platform.md §8.6）。
+    /// 用法：`app.os_hotkeys().add(KeyCombo{ModifierKey::Control | ModifierKey::Alt, KeyCode::O}, []{ ... });`
+    /// 与 `shortcuts()` 的分工：后者是应用内快捷键（需窗口有焦点、经键盘派发命中），本注册表走
+    /// OS 接口，焦点在别的进程里同样生效。平台无后端（Wayland / GLFW / macOS）时 `enabled()` 为 false。
+    /// 命中不在消息泵内同步回调，而是排队到帧循环排空（`drain_pending()`，`step_frame()` 每帧调用）。
+    /// @return 应用级全局热键注册表引用。
+    [[nodiscard]] auto os_hotkeys() -> OsHotkeyRegistry & { return os_hotkeys_; }
 
     /// @brief 设置每帧回调（在 present_root 之前调用），用于注入自定义每帧逻辑
     ///        （如把共享状态写入 Reactive 标签）。默认为空。
@@ -582,6 +591,10 @@ class Application {
         loop_last_ = now;
         drain_posted();
         pump_all_once();
+        // 热键命中在帧内排空，不在平台消息泵里同步回调：动作可能重建页面 / 触发重排，在消息泵内
+        // 重入会把布局与绘制切到半途的状态。抽完平台事件后排空，保证本帧命中的热键当帧就生效
+        // （与 on_frame_ 同一时点语义）。
+        static_cast<void>(os_hotkeys_.drain_pending());
         if (on_frame_) {
             on_frame_();
         }
@@ -679,6 +692,7 @@ class Application {
     std::shared_ptr<AudioContext> audio_ctx_{nullptr};  ///< 应用级默认音频上下文（惰性创建，见 audio()）。
     CommandRegistry commands_;  ///< 命令注册表（快捷键/菜单/面板的统一真源）。
     ShortcutRegistry shortcuts_;  ///< 快捷键注册表（键盘事件派发前优先匹配）。
+    OsHotkeyRegistry os_hotkeys_;  ///< OS 级全局热键注册表（无焦点时也触发；平台无后端时 enabled()==false）。
     State<WindowState> window_state_{WindowState::Visible};  ///< 窗口可见性状态（响应式）。
     State<WindowMode> window_mode_{WindowMode::Normal};  ///< 窗口几何态（响应式）。
     std::function<void(WindowState)> on_window_state_;  ///< 可见性状态命令式回调。
