@@ -419,17 +419,21 @@ AURORA_TEST_P(MultiWindowBackends, resize_relayout_converges) {
                               std::to_string(enlarged_frame.height) + ")");
     expect_frame_ratio(session, "frame ratio after enlarge");
     const au::Size enlarged_logical = session.window().size();
-    // 帧缓冲/逻辑尺寸换算必须与 scale_factor() 三方一致，采样映射（DPI 无关口径）才成立。
-    // 不一致 = 库层缺口（Win32Host 的 scale 成员在 enable_dpi_awareness 之前取值：进程
-    // 首窗 scale 恒 1.0，与 WM_SIZE 的实时 dpi_scale 换算在 ≠100% DPI 显示器上发散），
-    // 记录于 specification/08-tooling.md §8.2；100% DPI 环境三方恒 1.0，不受影响。
+    // 帧缓冲 / 逻辑尺寸 / scale_factor() 三方必须同源，采样映射（DPI 无关口径）才成立。
+    // 收敛后三者共读 `Win32Host::Impl::scale` 这一个成员（`to_physical` / `to_logical` 是宿主内
+    // 唯一的两个换算点，见 specification/08-tooling.md §8.2），故此处是**真断言**而非 SKIP。
     const auto enlarged_ratio_x =
         static_cast<double>(enlarged_frame.width) / static_cast<double>(enlarged_logical.width);
     const auto scale_reported = static_cast<double>(session.surface().scale_factor());
-    if (std::fabs(enlarged_ratio_x - scale_reported) > 0.02) {
-        AURORA_TEST_SKIP("resize DPI bookkeeping inconsistent: frame/logical=" + std::to_string(enlarged_ratio_x) +
-                         " != scale_factor=" + std::to_string(scale_reported) + " (library gap, recorded)");
+    if (std::fabs(scale_reported - 1.0) < 0.01) {
+        // 100% DPI 环境（含 CI）：三方恒 1.0，本断言必然空转。显式记 SKIP 并注明「未在
+        // ≠100% DPI 环境验证」，不允许把 CI 上的绿当作本条已验收。
+        AURORA_TEST_SKIP("100% DPI environment (scale_factor=" + std::to_string(scale_reported) +
+                         "): frame/logical==scale_factor holds trivially and is NOT verified here; re-run on "
+                         "a scaled display (08-tooling.md 8.2)");
     }
+    // ≠100% DPI：真断言，三方偏差须在 2% 取整容差内（修复前此处正是 1.0 vs 1.5 的发散形态）。
+    AURORA_TEST_CHECK_LE(std::fabs(enlarged_ratio_x - scale_reported), 0.02);
     expect_pixel(enlarged_frame, enlarged_logical.width, enlarged_logical.height, 60.0F, 80.0F, AURORA_WIN_RED,
                  "left block after enlarge");
     expect_pixel(enlarged_frame, enlarged_logical.width, enlarged_logical.height, 180.0F, 80.0F, AURORA_WIN_BLUE,
