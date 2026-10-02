@@ -48,7 +48,7 @@ class ModifierKeyTracker {
     /// @param vk 消息 `wParam` 的虚拟键码
     /// @param down true = 按下（`WM_KEYDOWN` / `WM_SYSKEYDOWN`），false = 抬起
     /// @return 该键是否为修饰键（false 时状态不变；调用方不据此决定是否放行消息——
-    ///         `WM_KEY*` 恒派发，`WM_SYSKEY*` 恒转交 `DefWindowProcA`）
+    ///         `WM_KEY*` 恒派发；`WM_SYSKEY*` 的派发与否由 `syskey_dispatches()` 判定）
     auto apply(int vk, bool down) -> bool {
         const auto bit = bit_for(vk);
         if (!bit.has_value()) {
@@ -98,6 +98,31 @@ class ModifierKeyTracker {
   private:
     ModifierKey state_ = ModifierKey::None;
 };
+
+/// @brief `WM_SYSKEY*` 的 VK 是否进入派发链（其余一律只推进修饰态后转交系统）。
+///
+/// `WM_SYSKEY*` 是「按住 Alt 期间的按键」，此前一律只借它推进修饰态、按键本身交
+/// `DefWindowProcA`，代价是 Alt 组合在 Aurora 侧完全观察不到。现改为与常规键同路进派发：
+/// 消费即止（`return 0`），未消费才回落 `DefWindowProcA`——系统菜单、菜单助记键、`Alt+F4`
+/// 关闭等原生行为只有在「Aurora 侧不认领」时才发生，不会被无条件掐死。
+///
+/// **例外（只推进修饰态、不派发）**：
+///   * `VK_MENU` / `VK_LMENU` / `VK_RMENU`（Alt 自身，左右都算）——它就是修饰键，
+///     发出的那条 `KeyEvent` 语义为空，且会污染紧随其后的快捷键匹配；
+///   * `VK_F10`（系统菜单键）——激活系统菜单属系统语义，无对应的 GUI 按键含义。
+///
+/// 判据是**纯函数**（不读任何状态），故可单测直接吃表：`WM_SYSKEY*` 的分叉只有这一处。
+[[nodiscard]] inline auto syskey_dispatches(int vk) -> bool {
+    switch (vk) {
+        case VK_MENU:
+        case VK_LMENU:
+        case VK_RMENU:
+        case VK_F10:
+            return false;
+        default:
+            return true;
+    }
+}
 
 }  // namespace aurora::detail
 

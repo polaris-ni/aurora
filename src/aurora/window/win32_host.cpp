@@ -217,7 +217,9 @@ struct Win32Host::Impl {
     // 事件翻译（输入分族内部调用）
     auto on_mouse(MouseAction action, MouseButton button, int x, int y) const -> void;
     auto on_wheel(int delta, int x, int y) const -> void;
-    auto on_key(KeyAction action, int vk) const -> void;
+    /// @brief 翻译一条键盘消息并派发；`WM_SYSKEY*` 依此判定是否回落 `DefWindowProcA`。
+    /// @return 该 `KeyEvent` 是否被消费（`is_handled`）；无 handler 时恒 false（不消费）。
+    [[nodiscard]] auto on_key(KeyAction action, int vk) const -> bool;
     auto on_char(std::uint32_t ch) const -> void;
 
     /// @brief 由最小化/激活标志重算可见性状态，仅实际改变时上报（避免重复通知）。
@@ -393,15 +395,16 @@ auto Win32Host::Impl::on_wheel(int delta, int x, int y) const -> void {
     handler(e);
 }
 
-auto Win32Host::Impl::on_key(KeyAction action, int vk) const -> void {
+[[nodiscard]] auto Win32Host::Impl::on_key(KeyAction action, int vk) const -> bool {
     if (!handler) {
-        return;
+        return false;
     }
     KeyEvent e;
     e.action = action;
     e.key = static_cast<int>(from_win32_vk(vk));
     e.modifiers = mods.get();
     handler(e);
+    return e.is_handled;
 }
 
 auto Win32Host::Impl::on_char(std::uint32_t ch) const -> void {
@@ -481,17 +484,27 @@ auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp) -> LRESULT {
     // 先推进修饰态再派发：本条消息若正是修饰键自身，它应当计入本事件的 `modifiers`
     // （Windows 的常规语义是「Ctrl 按下的那条 KeyEvent 就带 Control」，热键匹配依赖它）。
     mods.apply(static_cast<int>(wp), action == KeyAction::Down);
-    on_key(action, static_cast<int>(wp));
+    // 常规键恒由 Aurora 消费：派发结果在此无关紧要（不走 DefWindowProcA），故显式弃置。
+    (void)on_key(action, static_cast<int>(wp));
     return 0;
 }
 
-// `WM_SYSKEY*` = 按住 Alt 期间的按键（Alt 自身也算）。这里只借它推进修饰态，按键本身仍交
-// `DefWindowProcA`：`Alt+F4` 关闭、`Alt+Tab` 切换与菜单助记键都由系统实现，在此吞掉即掐死系统
-// 热键。代价是 Alt 组合在 Aurora 侧依旧不派发（既有边界，见
-// `specification/05-event-navigation.md` §2.2），但 Alt 的按下/抬起不再
-// 变成跟踪器里的幻影位——不推进它，`Alt` 之后的普通按键会一直错报带 Alt。
+// `WM_SYSKEY*` = 按住 Alt 期间的按键（Alt 自身也算）。与常规键**同路进派发链**：
+// 先推进修饰态（与 `handle_key` 同口径，故「按下 Alt 的那条 KeyEvent 自身就带 Alt 位」），
+// 再经同一个 `on_key` 通道产出 `KeyEvent`；被消费则 `return 0`（Aurora 侧认领），
+// 未消费则原样回落 `DefWindowProcA`——`Alt+F4` 关闭、`Alt+Tab` 切换与菜单助记键都由系统
+// 实现，只有在「无人认领」时才发生，不会被无条件掐死。
+//
+// 例外（`VK_MENU` 左右与 `VK_F10`）：只推进修饰态、不派发。它们分别是修饰键与系统菜单键，
+// 发出的键码无语义且会污染紧随其后的快捷键匹配（见 `detail::syskey_dispatches`）。
+// 文本通道不受影响：Alt 系本就不产 `TextInputEvent`（Windows 不为 Alt 组合发 `WM_CHAR`），
+// 故不存在同一字符两条通道重复上屏。
 auto Win32Host::Impl::handle_syskey(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
-    mods.apply(static_cast<int>(wp), msg != WM_SYSKEYUP);
+    const int vk = static_cast<int>(wp);
+    mods.apply(vk, msg != WM_SYSKEYUP);
+    if (detail::syskey_dispatches(vk) && on_key(msg == WM_SYSKEYUP ? KeyAction::Up : KeyAction::Down, vk)) {
+        return 0;
+    }
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
