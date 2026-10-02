@@ -629,10 +629,11 @@ struct DbusApi {
         return fallback;
     }
     // libdbus ABI 边界：`DBusError` 的首二成员是 `const char *name` / `const char *message`，
-    // 头文件未安装时按首二成员布局读取。豁免取「下一行」形态而非行尾形态——三元表达式折行后
-    // 行尾注释会落到续行上，匹配不到真正报出告警的那一行。
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    // 头文件未安装时按首二成员布局读取。`fields[1]` 的下标在 return 行触发
+    // bounds-pointer-arithmetic 告警；豁免标注须落在真正报出告警的那一行之前
+    // （reinterpret_cast 行本身不报该告警）。
     const auto *fields = reinterpret_cast<const char *const *>(&error);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return (fields[1] != nullptr) ? std::string{fields[1]} : fallback;
 }
 
