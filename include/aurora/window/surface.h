@@ -122,7 +122,7 @@ class Surface {
     /// @brief 当前表面尺寸（设备像素）。
     /// @return 表面 Size。
     [[nodiscard]] virtual auto size() const -> Size = 0;
-    /// @brief 设备像素密度（dpi / 160）。
+    /// @brief 设备像素密度（dpi / 96）。
     /// @return 缩放因子；默认 1.0（真实后端覆写上报实际 DPI）。
     [[nodiscard]] virtual auto scale_factor() const -> float { return 1.0F; }
     /// @brief 平台是否已请求关闭（帧循环据此退出）。
