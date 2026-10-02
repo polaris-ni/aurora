@@ -113,8 +113,6 @@ static_assert(detail::x11_state_mask::kMod2 == Mod2Mask, "X11 Mod2Mask value dri
 static_assert(detail::x11_state_mask::kMod3 == Mod3Mask, "X11 Mod3Mask value drifted");
 static_assert(detail::x11_state_mask::kMod4 == Mod4Mask, "X11 Mod4Mask value drifted");
 
-namespace aurora {
-
 /// @brief X11Surface 的全部 Xlib 状态（pimpl）：公共头零 Xlib 依赖。
 struct X11Surface::Impl {
     Display *dpy = nullptr;
