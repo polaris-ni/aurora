@@ -50,7 +50,7 @@ struct Event {
 
 - **左右归并**：`VK_LSHIFT` / `VK_RSHIFT` / `VK_SHIFT` 折到同一位，使不配对的变体（注入或布局按下给 L 变体、抬起给通用码）不残留幻影；代价是同位上任一变体抬起即清位。
 - **失焦清空、激活播种**：`WM_ACTIVATE` 转非激活与 `WM_KILLFOCUS` 整体清零（未送达的抬起消息不可追），重新取得激活时用一次异步读数播种基线（覆盖「Alt+Tab 切进来时 Alt 已按下」）。因此修饰键**只在持有键盘焦点的那个窗口内计数**——非前台窗口上的物理 Ctrl 不再被别的窗口借读，这恰是 Windows 自身的键盘语义。
-- **`WM_SYSKEY*` 只跟态、不派发**：按住 Alt 期间的按键仍交 `DefWindowProc`（`Alt+F4`、菜单助记键归系统），但 Alt 自身的按下/抬起计入跟踪器，否则 Alt 松开后的普通按键会错报带 Alt。副作用是 Alt 组合在库侧仍不派发（既有边界）。
+- **`WM_SYSKEY*` 与常规键同路进派发链**：按住 Alt 期间的按键（`WM_SYSKEYDOWN` / `WM_SYSKEYUP`）与 `WM_KEY*` 走**同一个** `on_key` 通道产出 `KeyEvent`，消费（`is_handled`）即 `return 0`；未消费则原样回落 `DefWindowProcA`——系统菜单、菜单助记键、`Alt+F4` 关闭等原生行为**只在 Aurora 侧不认领时**发生，不会被无条件掐死。修饰态推进**早于**派发（与 `WM_KEY*` 同口径），故「按下 Alt 的那条 `KeyEvent` 自身就带 Alt 位」。**例外（只推进态、不派发）**：`VK_MENU`（Alt 自身，左右都算）与 `VK_F10`（系统菜单键）——它们是修饰/系统语义，发出无意义键码会污染快捷键匹配；判据是纯函数 `detail::syskey_dispatches(int vk)`（`win32_modifiers.h`），可单测直接吃表。**本轮仅 Win32 收敛**：X11 / Wayland / GLFW 侧 Alt 组合是否已作为常规 key press 派发需各自复核，未在本轮统一。文本通道不受影响：Alt 系本就不产 `TextInputEvent`（Windows 不为 Alt 组合发 `WM_CHAR`），故消费方的口径是「无 Alt/Meta 的可打印键走文本通道，带 Alt 的走键码通道」，两边不会重复发送同一字符。
 
 指针类事件（`MouseEvent` / `ScrollEvent`）不携带修饰位。
 
@@ -144,7 +144,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 |:---|:---|
 | `static dispatch(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool` | 指针事件；委托进程内持久 `EventDispatcher` 单例，故同样保留跨事件指针捕获；`FocusManager*` 可选，非空时派发期暴露为「当前焦点管理器」 |
 | `dispatch_mouse(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool`（实体方法） | 带指针捕获的鼠标派发：Press 命中后缓存命中链，后续 Move/Release 即使命中失败也持续派发给按下时目标，直到 Release 解除捕获（`Application` 走此路径）；**派发前覆写 `e.click_count`**（连击序号，§2.2.1） |
-| `static dispatch(Widget& root, KeyEvent&, FocusManager&) -> bool` | 键盘事件；识别 Tab / Shift+Tab 并转为 `move_focus`，方向键与激活键各有一个控件级 opt-in 前置投递（`wants_navigation_keys()` / `wants_activation_keys()`，见 §4.2）；`root` 为统一重载签名而保留，键盘不经命中链 |
+| `static dispatch(Widget& root, KeyEvent&, FocusManager&) -> bool` | 键盘事件；识别 Tab / Shift+Tab 并转为 `move_focus`，Tab、方向键与激活键各有一个控件级 opt-in 前置投递（`wants_tab_keys()` / `wants_navigation_keys()` / `wants_activation_keys()`，见 §4.2）；`root` 为统一重载签名而保留，键盘不经命中链 |
 | `static dispatch(Widget& root, ScrollEvent&) -> bool` | 滚动事件：沿命中链**自最深向根**找 `wants_scroll()` 者逐个派发，余量经 `remaining_y` 上冒（§3.3） |
 | `static dispatch(Widget& root, FileDropEvent&) -> bool` | 文件拖放事件（不冒泡，仅交给命中目标） |
 | `static dispatch(Widget& root, TextInputEvent&, FocusManager&) -> bool` | 文本输入（只路由到焦点控件；无焦点返回 `false`） |
@@ -197,9 +197,21 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 `move_focus` 按 `tab_index` 稳定排序后循环取前 / 后一个；Tab / Shift+Tab 由 `dispatch(Widget&, KeyEvent&, FocusManager&)` 识别并转 `move_focus`。
 
+**三个「控件优先、宿主兜底」钩子**：激活键、方向键、Tab 三类键各自有一个 opt-in 虚钩子，共用同一约定——**默认 false，宿主语义逐字节不变；覆写为 true 后派发器先投递 `on_key_event`，其消费（`is_handled`）即止；未消费才回落宿主的全局语义**。因此控件只需处理自己认识的按键，其余按键行为保持不变，无需为不关心的组合键写空实现。三个钩子都只在**焦点控件**上探测，不经冒泡（键盘路由本就不冒泡），且都只在 `KeyAction::Down` 阶段生效。
+
+| 键类 | 宿主默认语义 | 控件级 opt-in 钩子 | 未消费时回落 |
+|:---|:---|:---|:---|
+| 激活键（Enter / Space） | `focused->activate()` | `wants_activation_keys()` | `activate()` |
+| 方向键（↑ / ↓ / ← / →） | `move_focus(dir)` 几何焦点导航 | `wants_navigation_keys()` | 几何焦点导航 |
+| Tab / Shift+Tab | `move_focus(Forward/Backward)` 焦点序遍历 | `wants_tab_keys()` | 焦点序遍历 |
+
+`wants_tab_keys()` 取复数形式：Tab 与 Shift+Tab 一对都算，前进 / 后退方向由事件自身的 Shift 修饰位给出，钩子不区分二者。
+
 **激活键（Enter / Space）路由**：`Enter` 与 `Space` 归为「激活键」，默认由派发器直接调用焦点控件的 `activate()`（按钮等「按下即激活」语义），控件本身观察不到这两个按键。需要观察 Enter 的文本录入类控件（`TextInput` / `RichTextEdit`）覆写 `Widget::wants_activation_keys()` 返回 true：派发器先投递 `on_key_event`，其消费（`is_handled`）即止；未消费才回落 `activate()`。`TextInput::on_submit`（Enter 提交）即由此路径可达——若只依赖激活语义，Enter 会被在焦点路由前消费掉而永远到不了控件。
 
-**方向键（↑ / ↓ / ← / →）路由**：与激活键同构的「控件优先、宿主兜底」约定。方向键默认归 `FocusManager::move_focus(dir)` 做几何焦点导航，控件观察不到；覆写 `Widget::wants_navigation_keys()` 返回 true 的控件先收到 `on_key_event`，消费即止、焦点不动，未消费才回落几何焦点导航。认领方向键的两类控件：文本录入类（`TextInput` 与 `RichTextEdit` 的 ←/→ 移光标与 Shift 扩选）与键盘重排类（`ReorderableList`）。**文本录入控件必须在此认领**：单行输入框左右键若落到几何焦点导航，`move_focus(Left/Right)` 一旦命中候选就把焦点移走，此后所有按键（含退格）都发给新焦点控件，输入框当场失焦且再也无法用键盘编辑——这正是无人认领时的错误形态。未被认领的方向（如单行框的 ↑/↓）仍走焦点导航，默认 `false` 对既有非文本控件逐字节不变。两处谓词都只在**焦点控件**上探测，不经冒泡（键盘路由本就不冒泡）。
+**方向键（↑ / ↓ / ← / →）路由**：与激活键同构的「控件优先、宿主兜底」约定。方向键默认归 `FocusManager::move_focus(dir)` 做几何焦点导航，控件观察不到；覆写 `Widget::wants_navigation_keys()` 返回 true 的控件先收到 `on_key_event`，消费即止、焦点不动，未消费才回落几何焦点导航。认领方向键的两类控件：文本录入类（`TextInput` 与 `RichTextEdit` 的 ←/→ 移光标与 Shift 扩选）与键盘重排类（`ReorderableList`）。**文本录入控件必须在此认领**：单行输入框左右键若落到几何焦点导航，`move_focus(Left/Right)` 一旦命中候选就把焦点移走，此后所有按键（含退格）都发给新焦点控件，输入框当场失焦且再也无法用键盘编辑——这正是无人认领时的错误形态。未被认领的方向（如单行框的 ↑/↓）仍走焦点导航，默认 `false` 对既有非文本控件逐字节不变。
+
+**Tab 键路由**：`Tab` 与 `Shift+Tab` 默认归 `move_focus(Forward / Backward)` 做焦点序遍历，焦点控件观察不到这两个按键。带自有 Tab 语义的复合控件（字段分组的「跳到下一组」、树件的同级折叠切换、分区跳转等）覆写 `Widget::wants_tab_keys()` 返回 true：派发器先投递 `on_key_event`，消费即止、焦点不动；未消费才回落到焦点序遍历，故控件只需处理自己认识的组合键。框架**不内置**任何此类终端控件，钩子给出即可，由消费者自行覆写。
 
 **端点键（Home / End）语义**：`Home` / `End` 不属派发器的 Tab / 方向键 / 激活键任一类别，因此**无需认领**——未匹配全局快捷键时天然经焦点路由直达焦点控件，控件消费即止。两个文本录入控件都把它实现为「文本 / 文档两端」（单行框本无行首行尾之别；`RichTextEdit` 的行内定位属未实现项，当前按整篇文档首尾处理），且与 ←/→ 共用各自的选区模型：非 Shift 时跳光标并清选区，Shift 时从光标扩到对应端点。`TextInput` 额外约束：光标本已在端点且原无选区时，Shift+`Home`/`End` 的扩选结果为空，不得伪造一个单字符选区（否则一次退格会删掉无辜字符）。
 
@@ -208,7 +220,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 - `focusable()` 是**宿主侧的显式开关**（默认 `true`）：`false` 一票否决，`true` 只代表「宿主没否决」，不代表该停点存在。
 - `wants_focus()` 是**控件类型侧的意愿**（`Widget` 基类默认 `true`）：由类型自己声明「我是不是一个交互停点」，宿主无需逐个关闭。
 
-覆写为「有输入语义才入序」的只有两类：**纯布局容器**（`Container` / `SingleChild` 基类——`Column`/`Row`/`Stack`/`Grid`/`Wrap` 与 `Show`/`Provider`/`Lifecycle`/`Badge` 等，它们本身不接受输入）与**纯展示件**（`Text`/`Divider`/`Spacer`/`Placeholder`/`RichText`/`Progress`/`Skeleton`/`ImageView`/`Canvas`/`BreakpointBuilder`/`LayoutBuilder`）。判定统一走 `Widget::has_input_semantics()`（protected）：`wants_click() || modifier.has_gesture() || modifier.has_context_menu() || wants_scroll() || wants_navigation_keys() || wants_activation_keys()`——任一成立即认为该控件确实需要键盘到达，于是同一个 `Text` 挂上 `.clickable(...)` 后自动回到 Tab 序，宿主不必再改焦点属性。因此该覆写是**减法而非一刀切**：自带滚动语义的容器（`Scroll`/`LazyList`/`LazyRow`/`GridView`/`ReorderableList`/`PullToRefresh`）与自带点击的 `ExpansionPanel` 仍是停点。**交互控件无需任何声明**（基类默认 `true` 已覆盖）。
+覆写为「有输入语义才入序」的只有两类：**纯布局容器**（`Container` / `SingleChild` 基类——`Column`/`Row`/`Stack`/`Grid`/`Wrap` 与 `Show`/`Provider`/`Lifecycle`/`Badge` 等，它们本身不接受输入）与**纯展示件**（`Text`/`Divider`/`Spacer`/`Placeholder`/`RichText`/`Progress`/`Skeleton`/`ImageView`/`Canvas`/`BreakpointBuilder`/`LayoutBuilder`）。判定统一走 `Widget::has_input_semantics()`（protected）：`wants_click() || modifier.has_gesture() || modifier.has_context_menu() || wants_scroll() || wants_navigation_keys() || wants_activation_keys() || wants_tab_keys()`——任一成立即认为该控件确实需要键盘到达，于是同一个 `Text` 挂上 `.clickable(...)` 后自动回到 Tab 序，宿主不必再改焦点属性。因此该覆写是**减法而非一刀切**：自带滚动语义的容器（`Scroll`/`LazyList`/`LazyRow`/`GridView`/`ReorderableList`/`PullToRefresh`）与自带点击的 `ExpansionPanel` 仍是停点。**交互控件无需任何声明**（基类默认 `true` 已覆盖）。三个 opt-in 钩子都计入本谓词：认领 Tab 的控件若被漏并，会因不在焦点序里而永远拿不到焦点——它能收到 `on_key_event`，却收不到那一次能让自己进入序的 Tab。
 
 分级只作用于 `move_focus` 的候选集，**不影响**指针 Press 的焦点归属（§4.3）与 `set_focus` / `request_focus` 的显式聚焦——二者仍只看 `focusable()`，因此点击一个纯展示容器依然不会误清焦点，而业务代码强制聚焦任何未被否决的控件都仍然成功。
 

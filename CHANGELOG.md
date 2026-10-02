@@ -27,6 +27,7 @@ freeze: minor-versions-are-additive
 - 旧名直接替换为新名即可；语义、初值（500ms / 4dp / 3）与 `EventDispatcher` / `TouchDispatcher` 的 `click_window_ms` / `click_radius_dp` 成员初值均不变。
 
 ### Added
+- `Widget::wants_tab_keys()`（虚钩子，默认 `false`）：给 Tab / Shift+Tab 一对键补上第三个「控件优先、宿主兜底」opt-in 钩子，与既有 `wants_navigation_keys()`（方向键）/ `wants_activation_keys()`（Enter·Space）同构同风格。覆写为 `true` 后派发器先投递焦点控件的 `on_key_event`，其消费（`is_handled`）即止、焦点不动；**未消费才回落到 `move_focus(Forward/Backward)` 焦点序遍历**，故控件只需处理自己认识的组合键。已并入 `Widget::has_input_semantics()`（否则覆写者被当成纯展示件：能收到按键却永远进不了焦点序拿不到焦点）。默认 `false` ⇒ 现网行为逐位不变；仅在 `KeyAction::Down` 生效；不改 `FocusDirection` 判定式、`wants_focus()` 分级默认与 `focusable()` / `set_focus` 语义。框架不内置任何此类终端控件，钩子给出即可，消费者自行覆写（见 `specification/05-event-navigation.md` §4.2 的三钩子对照表）。
 - `Painter::draw_text_runs` 新增两个重载，与 `draw_text` 的 opts / aa_mode 梯度对齐：`draw_text_runs(runs, opts)` 与 `draw_text_runs(runs, aa_mode, opts)`。整批共用一份 `TextLayoutOpts`（字距 / 词距 / 斜体），输出与逐个 `draw_text(..., aa_mode, opts)` 逐位一致。单参重载语义不变（现按委托实现）。不提供 per-run opts——各片段排版属性不同时请按属性分组分批调用。
 - `MouseEvent::click_count`（`std::uint8_t`，默认 1）：本次 Press 是同一指针、同一按键上的第几次连续点击（1 / 2 / 3，封顶 3）。判定集中在派发层（`ClickTracker`），鼠标与触控合成流同口径，触摸因此支持双 tap。阈值 `click_window_ms`（默认 500ms）与 `click_radius_dp`（默认 4dp）暴露为 `EventDispatcher` / `TouchDispatcher` 的公开可调成员。
 - 库级常量 `AURORA_DEFAULT_CLICK_WINDOW_MS` / `AURORA_DEFAULT_CLICK_RADIUS_DP` / `AURORA_MAX_CLICK_COUNT`（`event/event.h`）：连击判定的单一真源，窗口装饰层（Wayland CSD 标题栏双击最大化）亦引用之。
@@ -34,6 +35,8 @@ freeze: minor-versions-are-additive
 - `NotificationCenter`（`app/notification.h`）+ `Application::notify()` / `set_on_notification_activated()` 转发入口：跨平台系统通知，失败一律结构化 `NotificationPostFailed`，不做静默 no-op。`Notification{title, body, tag, urgency, timeout_ms}`：`tag` 既是去重/替换标识、也是激活回调回传的键。`NotificationUrgency{Low, Normal, Critical}` 映射 XDG `urgency`。平台矩阵：Windows 走 `Shell_NotifyIconW` 气球（按需建隐藏图标、超时/关闭/点击后 `NIM_DELETE` 撤掉，支持点击激活）——这是「零接线即可发通知」换来的「任务栏短暂出现图标」副作用；Linux 走 `libnotify.so.4` → `libdbus-1.so.3` → `notify-send` 三级**运行时** `dlopen`/`popen` 降级链（无构建期依赖、不新增 `AURORA_ENABLE_*` 开关）；Headless 仅记录 `last_notification()` 并成功返回。激活回调依赖宿主排空：Win32 依附消息泵，Linux 须靠 `pump_events()` 驱动 GLib/libdbus；`Application::step_frame()` 已每帧调用一次。`last_notification()` 在所有平台维护（含投递失败），是 Headless 与单测主观测面；`install_recording_backend()` 供开发机字段往返测试。错误码 `NotificationPostFailed`（category=platform）。
 
 ### Changed
+- Win32 宿主：`WM_SYSKEY*`（按住 Alt 期间的按键）改为与 `WM_KEY*` **同路进派发链**。`handle_syskey` 由「只借它推进修饰态、按键本身一律交 `DefWindowProcA`」改为「推进修饰态 → 经同一个 `on_key` 通道产出 `KeyEvent` → 消费（`is_handled`）即 `return 0`；未消费才原样回落 `DefWindowProcA`」。系统菜单、菜单助记键、`Alt+F4` 关闭等原生行为**只在 Aurora 侧不认领时**发生，不再被无条件掐死。修饰态推进早于派发（与 `WM_KEY*` 同口径），故「按下 Alt 的那条 `KeyEvent` 自身就带 Alt 位」。**例外（只推进态、不派发）**：`VK_MENU`（Alt 自身，左右都算）与 `VK_F10`（系统菜单键）——它们是修饰/系统语义，发出无意义键码会污染快捷键匹配；判据是新增的纯函数 `detail::syskey_dispatches(int vk)`（`src/aurora/window/detail/win32_modifiers.h`）。文本通道不动：Alt 系本就不产 `TextInputEvent`，不存在同一字符两条通道重复上屏。**本轮仅 Win32 收敛**：X11 / Wayland / GLFW 侧 Alt 组合是否已作为常规 key press 派发需各自复核（见 `specification/05-event-navigation.md` §2.2）。
+- `Win32Host::Impl::on_key` 返回值由 `void` 改为 `bool`（该类型是 `src/aurora/window/` 下的内部实现，不进公共头 `include/`，故不构成公共 API 变更）。`Win32Host` 的公共回调形状（`EventHandler`）与 `include/aurora/window/win32_host.h` 未变。
 - Wayland CSD 标题栏的双击最大化阈值由 300ms / 5px 改为与其它平台一致的 500ms / 4dp（改引库级常量，消除库内两套阈值）。
 
 ### Notes
