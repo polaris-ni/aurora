@@ -208,6 +208,38 @@ namespace aurora {
         case GLFW_KEY_F12:
             return KeyCode::F12;
         default:
+            break;
+    }
+    // ---- 数字小键盘 ----
+    //
+    // GLFW 把 `KP_0-9` 定为连号区间（320..329），与主键盘数字行同形，按区间判。
+    if (key >= GLFW_KEY_KP_0 && key <= GLFW_KEY_KP_9) {
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::KP_0) + (key - GLFW_KEY_KP_0));
+    }
+    switch (key) {
+        case GLFW_KEY_KP_DECIMAL:
+            return KeyCode::KP_Decimal;
+        case GLFW_KEY_KP_DIVIDE:
+            return KeyCode::KP_Divide;
+        case GLFW_KEY_KP_MULTIPLY:
+            return KeyCode::KP_Multiply;
+        case GLFW_KEY_KP_SUBTRACT:
+            return KeyCode::KP_Subtract;
+        case GLFW_KEY_KP_ADD:
+            return KeyCode::KP_Add;
+        // `GLFW_KEY_KP_ENTER` 按既有决定并入 `KeyCode::Enter`，与另两后端同口径。
+        case GLFW_KEY_KP_ENTER:
+            return KeyCode::Enter;
+        // `GLFW_KEY_KP_EQUAL`（336）在 KeyCode 里无对应码位（小键盘等号无独立语义），不臆造。
+        //
+        // **导航六键在 GLFW 上完全无法区分**：GLFW 的键码表**没有** `GLFW_KEY_KP_INSERT` /
+        // `_HOME` 之类的常量——它把小键盘导航区与主键盘导航区合并成同一组 `GLFW_KEY_HOME` /
+        // `_END` / `_PAGE_UP` / `_PAGE_DOWN` / `_DELETE`，故本后端恒给主键码。`KP_Insert` /
+        // `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` /
+        // `KP_Separator` 这几项**在 GLFW 后端恒不产生**（X11 / Wayland 侧 keysym 分得开；
+        // Win32 侧六个键里也只有 `Home` 可分）。这是 GLFW 库自身的键码表限制，属平台事实
+        // 而非疏漏，详见 `keycode.h` 的小键盘口径注释。
+        default:
             return KeyCode::Unknown;
     }
 }
@@ -228,6 +260,22 @@ namespace aurora {
         m = m | ModifierKey::Meta;
     }
     // NOLINTEND(*-signed-bitwise)
+    return m;
+}
+
+/// @brief 读 NumLock 锁定态并并入修饰位集。
+///
+/// GLFW 的 `GLFW_MOD_*` 掩码**不含** NumLock（它只有 Shift / Control / Alt / Super / CapsLock /
+/// NumLock 五个，其中后两个在本版本未暴露为掩码），故须按 `GLFW_KEY_NUM_LOCK` 单独查询。
+/// 读法用 `glfwGetKey` 的**当前态**而非按下事件：NumLock 是切换键，没有「按住」语义。
+/// @param w 目标窗口。
+/// @return 该位已并入的修饰位集。
+[[nodiscard]] static auto with_glfw_numlock(GLFWwindow *w, ModifierKey m) -> ModifierKey {
+    // GLFW 平台实现对未支持的键返回 `GLFW_KEY_UNKNOWN`；此处按「读不到 = 关」处理，
+    // 不静默假报「开」。
+    if (glfwGetKey(w, GLFW_KEY_NUM_LOCK) == GLFW_PRESS) {
+        return m | ModifierKey::NumLock;
+    }
     return m;
 }
 
@@ -690,7 +738,7 @@ auto GlfwSurface::Impl::on_key(GLFWwindow *w, int key, int /*scancode*/, int act
     KeyEvent e;
     e.key = static_cast<int>(from_glfw_key(key));
     e.action = (action == GLFW_RELEASE) ? KeyAction::Up : KeyAction::Down;
-    e.modifiers = glfw_mods_to_aurora(mods);
+    e.modifiers = with_glfw_numlock(w, glfw_mods_to_aurora(mods));
     self->handler(e);
 }
 

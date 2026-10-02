@@ -95,6 +95,10 @@ auto detect_scale(Display *dpy) -> float {
 auto from_keysym(KeySym ks) -> KeyCode { return detail::keysym_to_keycode(static_cast<unsigned long>(ks)); }
 
 /// @brief XKeyEvent.state → 修饰键位组合（Mod1=Alt、Mod4=Super/Meta，X 惯例）。
+///
+/// NumLock 按 X 惯例落在 **Mod2**（`Mod2Mask`）。它不是「按住态」而是**锁定态**，但 X 把锁定态
+/// 也编进事件的 `state` 字段，故这里与其它位同口径取用、无需额外查询。取不到该位时按「关」
+/// 处理，不静默假报「开」。
 auto mods_from_state(unsigned int state) -> ModifierKey {
     auto m = ModifierKey::None;
     if ((state & ShiftMask) != 0U) {
@@ -108,6 +112,9 @@ auto mods_from_state(unsigned int state) -> ModifierKey {
     }
     if ((state & Mod4Mask) != 0U) {
         m = m | ModifierKey::Meta;
+    }
+    if ((state & Mod2Mask) != 0U) {
+        m = m | ModifierKey::NumLock;
     }
     return m;
 }

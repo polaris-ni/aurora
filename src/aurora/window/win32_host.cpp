@@ -1,6 +1,7 @@
 #include "aurora/window/win32_host.h"
 
 #include "aurora/window/detail/win32_ime.h"
+#include "aurora/window/detail/win32_keymap.h"
 #include "aurora/window/detail/win32_modifiers.h"
 #include "aurora/window/detail/win32_ua.h"
 
@@ -57,82 +58,13 @@ namespace aurora {
     if (is_async_key_down(VK_LWIN) || is_async_key_down(VK_RWIN)) {
         m = m | ModifierKey::Meta;
     }
+    // NumLock 是切换键、不是瞬时按住态，故读它的**锁定指示**（toggle 位，bit 0）而不是
+    // 「是否按住」。它是键盘上唯一的 NumLock 键，不存在左右之分，故无需归并。
+    // 读不到（低版本 Windows 的兼容路径）时按「关」处理——不静默假报「开」。
+    if ((static_cast<std::uint8_t>(GetKeyState(VK_NUMLOCK)) & 0x01U) != 0U) {
+        m = m | ModifierKey::NumLock;
+    }
     return m;
-}
-
-[[nodiscard]] static auto from_win32_vk(int vk) -> KeyCode {
-    if (vk >= 'A' && vk <= 'Z') {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::A) + (vk - 'A'));
-    }
-    if (vk >= '0' && vk <= '9') {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::D0) + (vk - '0'));
-    }
-    switch (vk) {
-        case VK_RETURN:
-            return KeyCode::Enter;
-        case VK_ESCAPE:
-            return KeyCode::Escape;
-        case VK_TAB:
-            return KeyCode::Tab;
-        case VK_BACK:
-            return KeyCode::Backspace;
-        case VK_DELETE:
-            return KeyCode::Delete;
-        case VK_SPACE:
-            return KeyCode::Space;
-        case VK_LEFT:
-            return KeyCode::ArrowLeft;
-        case VK_RIGHT:
-            return KeyCode::ArrowRight;
-        case VK_UP:
-            return KeyCode::ArrowUp;
-        case VK_DOWN:
-            return KeyCode::ArrowDown;
-        case VK_SHIFT:
-            return KeyCode::Shift;
-        case VK_CONTROL:
-            return KeyCode::Control;
-        case VK_MENU:
-            return KeyCode::Alt;
-        case VK_LWIN:
-        case VK_RWIN:
-            return KeyCode::Meta;
-        case VK_HOME:
-            return KeyCode::Home;
-        case VK_END:
-            return KeyCode::End;
-        case VK_PRIOR:
-            return KeyCode::PageUp;
-        case VK_NEXT:
-            return KeyCode::PageDown;
-        case VK_OEM_MINUS:
-            return KeyCode::Minus;
-        case VK_OEM_PLUS:
-            return KeyCode::Equal;
-        case VK_OEM_1:
-            return KeyCode::Semicolon;
-        case VK_OEM_7:
-            return KeyCode::Quote;
-        case VK_OEM_COMMA:
-            return KeyCode::Comma;
-        case VK_OEM_PERIOD:
-            return KeyCode::Period;
-        case VK_OEM_2:
-            return KeyCode::Slash;
-        case VK_OEM_3:
-            return KeyCode::Backquote;
-        case VK_OEM_4:
-            return KeyCode::LeftBracket;
-        case VK_OEM_6:
-            return KeyCode::RightBracket;
-        case VK_OEM_5:
-            return KeyCode::Backslash;
-        default:
-            if (vk >= VK_F1 && vk <= VK_F12) {
-                return static_cast<KeyCode>(static_cast<int>(KeyCode::F1) + (vk - VK_F1));
-            }
-            return KeyCode::Unknown;
-    }
 }
 
 [[nodiscard]] static auto utf8_to_acp(const std::string &utf8) -> std::string {
@@ -219,7 +151,7 @@ struct Win32Host::Impl {
     auto on_wheel(int delta, int x, int y) const -> void;
     /// @brief 翻译一条键盘消息并派发；`WM_SYSKEY*` 依此判定是否回落 `DefWindowProcA`。
     /// @return 该 `KeyEvent` 是否被消费（`is_handled`）；无 handler 时恒 false（不消费）。
-    [[nodiscard]] auto on_key(KeyAction action, int vk) const -> bool;
+    [[nodiscard]] auto on_key(KeyAction action, int vk, LPARAM lp) const -> bool;
     auto on_char(std::uint32_t ch) const -> void;
 
     /// @brief 由最小化/激活标志重算可见性状态，仅实际改变时上报（避免重复通知）。
@@ -229,7 +161,7 @@ struct Win32Host::Impl {
     static auto handle_create() -> LRESULT;
     auto handle_mouse(HWND hwnd_in, UINT msg, LPARAM lp) -> LRESULT;
     auto handle_wheel(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> LRESULT;
-    [[nodiscard]] auto handle_key(UINT msg, WPARAM wp) -> LRESULT;
+    [[nodiscard]] auto handle_key(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT;
     [[nodiscard]] auto handle_syskey(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT;
     [[nodiscard]] auto handle_char(WPARAM wp) const -> LRESULT;
     auto handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT;
@@ -395,13 +327,16 @@ auto Win32Host::Impl::on_wheel(int delta, int x, int y) const -> void {
     handler(e);
 }
 
-[[nodiscard]] auto Win32Host::Impl::on_key(KeyAction action, int vk) const -> bool {
+[[nodiscard]] auto Win32Host::Impl::on_key(KeyAction action, int vk, LPARAM lp) const -> bool {
     if (!handler) {
         return false;
     }
     KeyEvent e;
     e.action = action;
-    e.key = static_cast<int>(from_win32_vk(vk));
+    // 导航区在 Win32 上与小键盘共用 VK，来处只在 lParam 的扫描码里，且六个键里只有 Home
+    // 真的可分（详见 `is_numpad_nav_scan` 的实测对照表），故映射带这个判据。
+    const bool from_numpad = detail::is_numpad_nav_scan(vk, detail::scan_code_of(lp));
+    e.key = static_cast<int>(detail::from_win32_vk(vk, from_numpad));
     e.modifiers = mods.get();
     handler(e);
     return e.is_handled;
@@ -479,13 +414,13 @@ auto Win32Host::Impl::handle_wheel(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> 
     return 0;
 }
 
-auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp) -> LRESULT {
+auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
     const auto action = (msg == WM_KEYUP) ? KeyAction::Up : KeyAction::Down;
     // 先推进修饰态再派发：本条消息若正是修饰键自身，它应当计入本事件的 `modifiers`
     // （Windows 的常规语义是「Ctrl 按下的那条 KeyEvent 就带 Control」，热键匹配依赖它）。
     mods.apply(static_cast<int>(wp), action == KeyAction::Down);
     // 常规键恒由 Aurora 消费：派发结果在此无关紧要（不走 DefWindowProcA），故显式弃置。
-    (void)on_key(action, static_cast<int>(wp));
+    (void)on_key(action, static_cast<int>(wp), lp);
     return 0;
 }
 
@@ -502,7 +437,7 @@ auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp) -> LRESULT {
 auto Win32Host::Impl::handle_syskey(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
     const int vk = static_cast<int>(wp);
     mods.apply(vk, msg != WM_SYSKEYUP);
-    if (detail::syskey_dispatches(vk) && on_key(msg == WM_SYSKEYUP ? KeyAction::Up : KeyAction::Down, vk)) {
+    if (detail::syskey_dispatches(vk) && on_key(msg == WM_SYSKEYUP ? KeyAction::Up : KeyAction::Down, vk, lp)) {
         return 0;
     }
     return DefWindowProcA(hwnd, msg, wp, lp);
@@ -797,7 +732,7 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return self->handle_wheel(hwnd, wp, lp);
         case WM_KEYDOWN:
         case WM_KEYUP:
-            return self->handle_key(msg, wp);
+            return self->handle_key(msg, wp, lp);
         case WM_SYSKEYDOWN:
         case WM_SYSKEYUP:
             return self->handle_syskey(msg, wp, lp);

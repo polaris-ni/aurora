@@ -149,6 +149,12 @@ CheckOptions:
     value: UPPER_CASE
   - key: readability-identifier-naming.GlobalConstantPrefix
     value: 'AURORA_'
+  # keysym 常量的驼峰尾段豁免 UPPER_CASE：`AURORA_KEYSYM_Home` / `AURORA_KEYSYM_KP_Insert`
+  # 这类写法逐字对应 X11 `XK_Home` / `XK_KP_Insert` 的官方拼写，改成全大写会与上游
+  # `X11/keysym.h` 对不上号，检索时反而找不到。该文件是既有基线（豁免前已有 19 项同类告警），
+  # 本条只是不让新增的 KP_* 段继续加重它；只放宽大小写风格，前缀规则仍照常校验。
+  - key: readability-identifier-naming.GlobalConstantIgnoredRegexp
+    value: 'AURORA_KEYSYM_.*'
 
   # 静态成员常量（全大写无前缀）
   - key: readability-identifier-naming.StaticConstantCase
@@ -161,6 +167,12 @@ CheckOptions:
   # 枚举常量（CamelCase 无前缀）
   - key: readability-identifier-naming.EnumConstantCase
     value: CamelCase
+  # 数字小键盘键码（`KeyCode::KP_*`）豁免 CamelCase：`KP_` 是 Keypad 的通用缩写，与 X11 的
+  # `XK_KP_*` keysym、X11 键名文档、GLFW 的 `GLFW_KEY_KP_*` 逐字一致。去掉下划线写成
+  # `KpInsert` 会丢掉「Keypad」的可读性、且与上述三处对不上号——跨后端键码对齐时这个前缀
+  # 就是检索锚点。IgnoredRegexp 只放宽「大小写风格」这一维，真 CamelCase 枚举项仍照常告警。
+  - key: readability-identifier-naming.EnumConstantIgnoredRegexp
+    value: 'KP_.*'
 
   # 类型别名/typedef
   - key: readability-identifier-naming.TypeAliasCase

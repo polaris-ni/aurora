@@ -866,6 +866,15 @@ auto WaylandSurface::Impl::on_modifiers(std::uint32_t depressed, std::uint32_t l
     if (xkb_state_mod_name_is_active(xkb_st, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0) {
         m = m | ModifierKey::Meta;
     }
+    // NumLock 是**锁定**态而非按住态，故查 `XKB_STATE_MODS_LOCKED`（effective 只反映
+    // 「此刻是否生效」，对锁定类修饰不反映锁定灯态）。用 `XKB_MOD_NAME_NUM`（= `"Mod2"`）
+    // 而非 `XKB_VMOD_NAME_NUM`（= `"NumLock"`）：后者自 xkbcommon 1.8 才引入，而本仓
+    // `pkg_check_modules(XKBCOMMON REQUIRED xkbcommon)` 未设版本下限，故取共存于所有版本的
+    // 前者（xkbcommon 1.10 起该名被标 deprecated，但语义与映射均未变，且与本函数其余四个
+    // `XKB_MOD_NAME_*` 同族、口径一致）。查不到时按「关」处理，不静默假报「开」。
+    if (xkb_state_mod_name_is_active(xkb_st, XKB_MOD_NAME_NUM, XKB_STATE_MODS_LOCKED) > 0) {
+        m = m | ModifierKey::NumLock;
+    }
     mods = m;
 }
 
