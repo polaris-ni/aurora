@@ -82,9 +82,9 @@ int failures = 0;
 
 /// @brief 宿主回调侧收到的全部 `KeyEvent` 记录（本探针的观察面）。
 struct KeyRecord {
-    int key = 0;              ///< `KeyEvent::key`（`KeyCode` 的整数值）。
+    int key = 0;  ///< `KeyEvent::key`（`KeyCode` 的整数值）。
     std::uint8_t modifiers = 0;  ///< `KeyEvent::modifiers` 按位转 uint8_t 后的位集。
-    bool is_down = false;     ///< `action == KeyAction::Down`。
+    bool is_down = false;  ///< `action == KeyAction::Down`。
 
     /// @return 该记录的修饰位是否含 Alt。
     [[nodiscard]] auto has_alt() const -> bool {
@@ -148,9 +148,7 @@ auto send_syskey(HWND hwnd, bool syskey_down, int vk) -> LRESULT {
 /// @brief 取窗口句柄（探针需要向真实的宿主窗口注入消息）。
 /// @param host 宿主引用。
 /// @return 宿主窗口句柄。
-[[nodiscard]] auto hwnd_of(aurora::Win32Host &host) -> HWND {
-    return static_cast<HWND>(host.hwnd());
-}
+[[nodiscard]] auto hwnd_of(aurora::Win32Host &host) -> HWND { return static_cast<HWND>(host.hwnd()); }
 
 // ---- 窗口子类：观测系统菜单 / 关闭请求是否真的到达（**仅人工段**）----
 //
@@ -242,9 +240,8 @@ auto run_auto_stage() -> int {
     sink.records.clear();
     send_syskey(hwnd, true, VK_MENU);  // Alt 自身：只推进态
     const std::size_t after_alt = sink.records.size();
-    check(after_alt == 0U,
-          "WM_SYSKEYDOWN(VK_MENU) does NOT dispatch a KeyEvent (Alt itself is modifier-only): " +
-              aurora_verify::format_uint(after_alt));
+    check(after_alt == 0U, "WM_SYSKEYDOWN(VK_MENU) does NOT dispatch a KeyEvent (Alt itself is modifier-only): " +
+                               aurora_verify::format_uint(after_alt));
     send_syskey(hwnd, true, 'B');
     const bool b_got = sink.records.size() == 1U;
     check(b_got, "the letter after Alt still reaches the handler: " + aurora_verify::format_uint(sink.records.size()));
@@ -273,24 +270,25 @@ auto run_auto_stage() -> int {
     //
     //    可注入证明的部分已在上面覆盖：Alt 组合确实进入了派发链（(1)~(3) 与 (6)），
     //    故「未消费时交回系统」的前半段成立；后半段「消费时不交回」只能真机证明。
-    skip("consumed-blocks-SC_CLOSE / unconsumed-reaches-SC_SYSMENU: DefWindowProcA reads "
-         "GetKeyState(VK_MENU) (physical Alt state), which SendMessage injection cannot set; verified with a "
-         "bare Win32 control that no WM_SYSCOMMAND is produced on this path either way. Covered by the "
-         "--interactive Alt+F4 stage instead.");
+    skip(
+        "consumed-blocks-SC_CLOSE / unconsumed-reaches-SC_SYSMENU: DefWindowProcA reads "
+        "GetKeyState(VK_MENU) (physical Alt state), which SendMessage injection cannot set; verified with a "
+        "bare Win32 control that no WM_SYSCOMMAND is produced on this path either way. Covered by the "
+        "--interactive Alt+F4 stage instead.");
     // 消费开关本身仍需被走到一次，证明「消费态下事件仍到达处理器」（判据不成立但路径要覆盖）。
     sink.consume = true;
     sink.records.clear();
     send_syskey(hwnd, true, VK_F4);
-    check(sink.records.size() == 1U,
-          "consumed Alt+F4: the handler still saw the event (consume path is reached): " +
-              aurora_verify::format_uint(sink.records.size()));
+    check(sink.records.size() == 1U, "consumed Alt+F4: the handler still saw the event (consume path is reached): " +
+                                         aurora_verify::format_uint(sink.records.size()));
     sink.consume = false;
 
     // 6. 释放阶段同样进派发链。
     sink.records.clear();
     send_syskey(hwnd, false, 'D');
     const bool up_got = sink.records.size() == 1U;
-    check(up_got, "WM_SYSKEYUP reaches the handler as one KeyEvent: " + aurora_verify::format_uint(sink.records.size()));
+    check(up_got,
+          "WM_SYSKEYUP reaches the handler as one KeyEvent: " + aurora_verify::format_uint(sink.records.size()));
     if (up_got) {
         check(!sink.records.front().is_down, "the release KeyEvent action is KeyAction::Up");
     }
@@ -329,8 +327,7 @@ auto run_interactive_stage() -> int {
     emit("Step 1 (unconsumed path): press Alt+F4 NOW on the probe window.");
     emit("  Expected: the window stays open (the probe intercepts SC_CLOSE), and the log below shows it arrived.");
     host.wait_events(30.0);  // 阻塞等消息，最多 30s；操作者按键即提前返回
-    const bool close_seen =
-        std::find(g_syscommands.begin(), g_syscommands.end(), kScClose) != g_syscommands.end();
+    const bool close_seen = std::find(g_syscommands.begin(), g_syscommands.end(), kScClose) != g_syscommands.end();
     check(close_seen,
           "unconsumed Alt+F4: WM_SYSCOMMAND(SC_CLOSE) reached the system (fell through to DefWindowProcA), "
           "commands seen = " +

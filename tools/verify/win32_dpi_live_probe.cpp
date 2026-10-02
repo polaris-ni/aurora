@@ -86,9 +86,7 @@ auto skip(const std::string &label) -> void { emit(std::string("[SKIP] ") + labe
 /// @brief 取窗口句柄（判据 (d) 需要向窗口问一次 min/max track）。
 /// @param host 宿主引用。
 /// @return 宿主窗口句柄。
-[[nodiscard]] auto hwnd_of(aurora::Win32Host &host) -> HWND {
-    return static_cast<HWND>(host.hwnd());
-}
+[[nodiscard]] auto hwnd_of(aurora::Win32Host &host) -> HWND { return static_cast<HWND>(host.hwnd()); }
 
 /// @brief 取客户区物理尺寸（经 `GetClientRect` —— DPI 感知下它返回物理像素）。
 /// @param hwnd 窗口句柄。
@@ -98,7 +96,8 @@ auto skip(const std::string &label) -> void { emit(std::string("[SKIP] ") + labe
     if (GetClientRect(hwnd, &rc) == 0) {
         return aurora::Size{};
     }
-    return aurora::Size{.width = static_cast<float>(rc.right - rc.left), .height = static_cast<float>(rc.bottom - rc.top)};
+    return aurora::Size{.width = static_cast<float>(rc.right - rc.left),
+                        .height = static_cast<float>(rc.bottom - rc.top)};
 }
 
 /// @brief 读宿主上报的缩放因子（判据的 scale 真值）。
@@ -159,8 +158,8 @@ auto check_set_size_roundtrip(aurora::Win32Host &host, HWND hwnd, aurora::Size r
     // (b) 宿主逻辑尺寸 × scale 回到同一物理值：这条正是「帧 / 逻辑 / scale 三方同源」的判据，
     // 修复前 WM_SIZE 走现调 dpi_scale() 而上报走 cached scale，二者会各走一条路径。
     check(approx_eq(logical.width * scale, physical.width, 1.0F),
-          "(b) host logical size * scale == client physical width: " + std::to_string(logical.width * scale) +
-              " vs " + std::to_string(physical.width));
+          "(b) host logical size * scale == client physical width: " + std::to_string(logical.width * scale) + " vs " +
+              std::to_string(physical.width));
     check(approx_eq(logical.height * scale, physical.height, 1.0F),
           "(b) host logical size * scale == client physical height: " + std::to_string(logical.height * scale) +
               " vs " + std::to_string(physical.height));
@@ -278,8 +277,8 @@ auto main() -> int {
     emit("measured scale (system DC, independent) = " + std::to_string(sys_scale));
     // 宿主必须与系统真实 DPI 一致。不一致 = 库层缺陷，绝不记 SKIP。
     check(approx_eq(scale, sys_scale, 0.01F),
-          "host scale_factor() matches the system DPI (single source, not a stale 1.0): host=" +
-              std::to_string(scale) + " system=" + std::to_string(sys_scale));
+          "host scale_factor() matches the system DPI (single source, not a stale 1.0): host=" + std::to_string(scale) +
+              " system=" + std::to_string(sys_scale));
     scale_is_unity = std::fabs(sys_scale - 1.0F) < 0.01F;
     if (scale_is_unity) {
         emit("[NOTE] this machine reports 100% DPI: all five criteria hold trivially and are recorded as");

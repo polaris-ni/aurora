@@ -255,8 +255,9 @@ auto main(int argc, char **argv) -> int {
     const bool interactive = cli.arguments->flag("interactive");
 
     emit("== Aurora Linux desktop notification live probe ==");
-    emit("auto segment: env tiers / full-field post / last_notification round trip / three urgencies / clear / "
-         "tag dedup / recording backend / activation injection / pump_events");
+    emit(
+        "auto segment: env tiers / full-field post / last_notification round trip / three urgencies / clear / "
+        "tag dedup / recording backend / activation injection / pump_events");
     if (interactive) {
         emit("interactive segment: three urgencies on screen / click-activation");
     }
@@ -268,7 +269,7 @@ auto main(int argc, char **argv) -> int {
     bool libnotify_usable = false;
     if (probe_library("libnotify.so.4")) {
         static constexpr const char *k_notify_symbols[] = {"notify_init", "notify_notification_new",
-                                                          "notify_notification_show"};
+                                                           "notify_notification_show"};
         libnotify_usable = probe_symbols("libnotify.so.4", k_notify_symbols, 3);
         emit(std::string("       tier 1 libnotify.so.4   : ") + (libnotify_usable ? "usable" : "incomplete symbols"));
     } else {
@@ -278,7 +279,7 @@ auto main(int argc, char **argv) -> int {
     bool libdbus_usable = false;
     if (probe_library("libdbus-1.so.3")) {
         static constexpr const char *k_dbus_symbols[] = {"dbus_bus_get", "dbus_message_new_method_call",
-                                                        "dbus_connection_send_with_reply_and_block"};
+                                                         "dbus_connection_send_with_reply_and_block"};
         libdbus_usable = probe_symbols("libdbus-1.so.3", k_dbus_symbols, 3);
         emit(std::string("       tier 2 libdbus-1.so.3   : ") + (libdbus_usable ? "usable" : "incomplete symbols"));
     } else {
@@ -293,10 +294,12 @@ auto main(int argc, char **argv) -> int {
     emit(std::string("       dbus_bus_get(SESSION)   : ") + (probe_session_bus() ? "connected" : "no connection"));
 
     if (!libnotify_usable && !libdbus_usable && !has_notify_send) {
-        emit("[SKIP] none of the three tiers is present on this machine "
-             "(libnotify.so.4, libdbus-1.so.3 and notify-send are all unavailable)");
-        emit("[SKIP] NotificationCenter::notify() must then return NotificationPostFailed: "
-             "there is nothing here to accept a desktop notification");
+        emit(
+            "[SKIP] none of the three tiers is present on this machine "
+            "(libnotify.so.4, libdbus-1.so.3 and notify-send are all unavailable)");
+        emit(
+            "[SKIP] NotificationCenter::notify() must then return NotificationPostFailed: "
+            "there is nothing here to accept a desktop notification");
         emit("result: ENV-UNAVAILABLE (exit 2)");
         return 2;
     }
@@ -305,8 +308,9 @@ auto main(int argc, char **argv) -> int {
         libnotify_usable ? "tier 1 (libnotify)" : (libdbus_usable ? "tier 2 (raw libdbus)" : "tier 3 (notify-send)");
     emit("[HINT] expected tier on this machine: " + expected_tier +
          " (informational only; the library decides at runtime, the probe does not assert it)");
-    emit("[HINT] tier 3 is fire-and-forget and cannot register an action, so click-activation may legitimately "
-         "never arrive (reported as WARN, not FAIL)");
+    emit(
+        "[HINT] tier 3 is fire-and-forget and cannot register an action, so click-activation may legitimately "
+        "never arrive (reported as WARN, not FAIL)");
 
     // ---- ② 全字段投递 ----
     emit("");
@@ -318,10 +322,10 @@ auto main(int argc, char **argv) -> int {
     request.timeout_ms = 5000;
     emit("[POST] notify() with every field set (a notification should appear on screen)");
     const std::string full_field_failure = post_and_report(request);
-    check(full_field_failure.empty(), full_field_failure.empty()
-                                          ? "full-field notify() returns Ok"
-                                          : std::string("full-field notify() returns Ok (detail: ") +
-                                                full_field_failure + ")");
+    check(full_field_failure.empty(),
+          full_field_failure.empty()
+              ? "full-field notify() returns Ok"
+              : std::string("full-field notify() returns Ok (detail: ") + full_field_failure + ")");
 
     // ---- ③ last_notification() 往返 ----
     const std::optional<aurora::Notification> recorded = aurora::NotificationCenter::last_notification();
@@ -329,19 +333,17 @@ auto main(int argc, char **argv) -> int {
           "last_notification() round-trips every field of the request");
 
     // ---- ④ 紧急度三档 ----
-    constexpr aurora::NotificationUrgency k_urgencies[] = {aurora::NotificationUrgency::Low,
-                                                           aurora::NotificationUrgency::Normal,
-                                                           aurora::NotificationUrgency::Critical};
+    constexpr aurora::NotificationUrgency k_urgencies[] = {
+        aurora::NotificationUrgency::Low, aurora::NotificationUrgency::Normal, aurora::NotificationUrgency::Critical};
     for (const aurora::NotificationUrgency urgency : k_urgencies) {
         aurora::Notification nudge = request;
         nudge.tag = std::string("aurora-verify-urgency-") + urgency_name(urgency);
         nudge.body = std::string("Urgency ") + urgency_name(urgency) + " by aurora_verify_linux_notification";
         nudge.urgency = urgency;
         const std::string failure = post_and_report(nudge);
-        check(failure.empty(), failure.empty()
-                                   ? (std::string("urgency ") + urgency_name(urgency) + " delivers Ok")
-                                   : (std::string("urgency ") + urgency_name(urgency) +
-                                      " delivers Ok (server-side limit, detail: " + failure + ")"));
+        check(failure.empty(), failure.empty() ? (std::string("urgency ") + urgency_name(urgency) + " delivers Ok")
+                                               : (std::string("urgency ") + urgency_name(urgency) +
+                                                  " delivers Ok (server-side limit, detail: " + failure + ")"));
     }
 
     // ---- ⑤ clear_last_notification() ----
@@ -410,8 +412,9 @@ auto main(int argc, char **argv) -> int {
     // ---- 人工段 ----
     if (interactive) {
         emit("");
-        emit("[MANUAL] a. three urgencies are about to appear; please compare how long each stays on screen and "
-             "whether it interrupts you (dwell time and interruption are server policy, driven by the urgency hint)");
+        emit(
+            "[MANUAL] a. three urgencies are about to appear; please compare how long each stays on screen and "
+            "whether it interrupts you (dwell time and interruption are server policy, driven by the urgency hint)");
         for (const aurora::NotificationUrgency urgency : k_urgencies) {
             aurora::Notification shown;
             shown.title = std::string("Aurora ") + urgency_name(urgency) + " notification";
@@ -422,13 +425,15 @@ auto main(int argc, char **argv) -> int {
             shown.timeout_ms = 0;  // 交给桌面默认策略：单独观察紧急度本身的影响
             const std::string failure = post_and_report(shown);
             if (!failure.empty()) {
-                warn(std::string("manual urgency ") + urgency_name(urgency) + " was rejected by the server: " + failure);
+                warn(std::string("manual urgency ") + urgency_name(urgency) +
+                     " was rejected by the server: " + failure);
             }
             aurora::NotificationCenter::pump_events();
             nap_ms(k_urgency_gap_ms);
         }
-        emit("[MANUAL] did the three urgencies differ on screen (dwell time / interruption)? If they all looked "
-             "identical, this desktop server ignores the urgency hint — note it in the acceptance record.");
+        emit(
+            "[MANUAL] did the three urgencies differ on screen (dwell time / interruption)? If they all looked "
+            "identical, this desktop server ignores the urgency hint — note it in the acceptance record.");
 
         emit("");
         emit("[MANUAL] b. one more notification is about to appear; please CLICK IT within " +
@@ -460,7 +465,7 @@ auto main(int argc, char **argv) -> int {
                  "an action at all - not a failure of the library");
         } else {
             check(clicked_tag == clickable.tag, std::string("clicking the notification fired the activation callback "
-                                                           "with the exact tag (got \"") +
+                                                            "with the exact tag (got \"") +
                                                     clicked_tag + "\")");
         }
         aurora::NotificationCenter::set_on_notification_activated(nullptr);
@@ -468,7 +473,8 @@ auto main(int argc, char **argv) -> int {
 
     emit("");
     if (failures > 0) {
-        emit("result: " + std::to_string(failures) + " FAILURE(S), " + std::to_string(warnings) + " warning(s) (exit 1)");
+        emit("result: " + std::to_string(failures) + " FAILURE(S), " + std::to_string(warnings) +
+             " warning(s) (exit 1)");
         return 1;
     }
     emit("result: ALL PASS, " + std::to_string(warnings) + " warning(s) (exit 0)");
