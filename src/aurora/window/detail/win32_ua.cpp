@@ -2118,16 +2118,30 @@ auto Win32UiaBridge::release_platform_providers() -> void {
     }
 }
 
+// 与 `Win32Host::scale_factor()` **同源**：同样走 `GetDpiForWindow`、同样以 96 为分母、同样在
+// 取不到时按 1.0 处理。两处若各读各的（DPI 通知与 UIA 通知的时序不同），a11y 投影矩形就会与
+// 鼠标坐标在 scale != 1 时落到不同的格——屏幕上表现为「读屏焦点框与鼠标错位」。
+// `GetDpiForWindow` 只在 Win8.1+ / Win10 1607+ 导出，运行时解析；老系统回落 `GetDeviceCaps`。
 auto Win32UiaBridge::scale_factor() const -> float {
     if (hwnd_ == nullptr) {
         return 1.0F;
     }
-    const HDC dc = GetDC(hwnd_);
-    if (dc == nullptr) {
-        return 1.0F;
+    int dpi = 0;
+    using GetDpiForWindowFn = UINT(WINAPI *)(HWND);
+    // NOLINTBEGIN(*-pro-type-reinterpret-cast, *-casting-through-void)
+    if (const auto f = reinterpret_cast<GetDpiForWindowFn>(
+            reinterpret_cast<void *>(GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForWindow")))) {
+        dpi = static_cast<int>(f(hwnd_));
     }
-    const int dpi = GetDeviceCaps(dc, LOGPIXELSY);
-    ReleaseDC(hwnd_, dc);
+    // NOLINTEND(*-pro-type-reinterpret-cast, *-casting-through-void)
+    if (dpi <= 0) {
+        const HDC dc = GetDC(hwnd_);
+        if (dc == nullptr) {
+            return 1.0F;
+        }
+        dpi = GetDeviceCaps(dc, LOGPIXELSY);  // Win32 两轴同值，故只取 Y 轴
+        ReleaseDC(hwnd_, dc);
+    }
     return dpi > 0 ? static_cast<float>(dpi) / 96.0F : 1.0F;  // 与 Win32Host::scale_factor 同口径
 }
 

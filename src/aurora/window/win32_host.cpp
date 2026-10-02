@@ -105,7 +105,11 @@ struct Win32Host::Impl {
     HWND hwnd = nullptr;
     HINSTANCE hinst = nullptr;
     Size size{.width = 0.0F, .height = 0.0F};
-    float scale = 1.0F;  ///< device pixel ratio（dp → 物理像素）
+    /// device pixel ratio（dp ↔ 物理像素）。**本成员是宿主内 dp↔物理换算的唯一真值源**：
+    /// 句柄就绪后由 `refresh_scale()` 按 `GetDpiForWindow(hwnd)` 求得（`WM_DPICHANGED` 与跨屏
+    /// 迁移时更新），其余一律读它——不得再调任何「现调 DPI」的函数，否则逻辑尺寸与上报给
+    /// 消费方的 `scale` 会各走一条路径而发散（历史缺口见 `specification/08-tooling.md` §8.2）。
+    float scale = 1.0F;
     WindowStyleOptions style{};  ///< 高级样式（置顶/无边框/尺寸限制）。
     bool should_close = false;
     EventHandler handler;
@@ -184,7 +188,12 @@ struct Win32Host::Impl {
     auto handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT;
 
     auto register_class() const -> void;
-    [[nodiscard]] auto dpi_scale() const -> float;
+    /// @brief 按当前窗口重算 `scale`（唯一读 DPI 处）；句柄未就绪时按 96 处理。
+    auto refresh_scale() -> void;
+    /// @brief 物理像素 → 逻辑 dp。宿主内唯一的「除 scale」入口。
+    [[nodiscard]] auto to_logical(int px, int py) const -> Point;
+    /// @brief 逻辑 dp → 物理像素。宿主内唯一的「乘 scale」入口。
+    [[nodiscard]] auto to_physical(Size dp) const -> Size;
 
     // 窗口过程：仅在最早时机（WM_NCCREATE/WM_CREATE）把 Impl* 存入 GWLP_USERDATA，
     // 随后按消息族分发到对应 handle_* 处理函数（创建/输入/尺寸/绘制/关闭 等）。
@@ -194,8 +203,12 @@ struct Win32Host::Impl {
 // ---- Impl 构造：窗口创建 + DPI 适配 + 类注册 + 显示 ----
 Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style,
                       WindowVisibility visibility)
-    : scale(dpi_scale()),  // 创建时主显示器 DPI
-      style(style) {
+    : style(style) {
+    // DPI 感知必须早于**任何**窗口创建：`create_window` 路径已由 `make_window` 前移启用；
+    // 直接构造 `Win32Host` 的消费者（不经工厂）由这处兜底。函数幂等（进程级 static 守卫），
+    // 两条路径都过不会重复设置。`scale` 此刻**不**取值——此时 hwnd 仍是 nullptr，进程感知未必
+    // 生效，`GetDeviceCaps` 只会回 96（scale 恒 1.0，正是历史缺口）；它在建窗后由
+    // `refresh_scale()` 求得。
     enable_dpi_awareness();
 
     // 适配工作区，保证窗口在屏幕内可见（逻辑 dp）。
@@ -226,11 +239,17 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
     }
     const DWORD ex_style = (style.always_on_top ? WS_EX_TOPMOST : 0U) | (style.transparent ? WS_EX_LAYERED : 0U);
 
+    // 句柄尚未创建，但 DPI 感知此时已生效（见构造体开头的 `enable_dpi_awareness`），故先取一次
+    // 显示器 DPI 作为建窗尺寸的换算基准；建窗后立刻由 `refresh_scale()` 换成按窗口的真实值。
+    refresh_scale();
+
     // DPI 感知下窗口坐标即物理像素：物理窗口尺寸 = 逻辑 dp × scale。
+    const Size logical_size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
+    const Size physical_size = to_physical(logical_size);
     RECT rect{.left = 0,
               .top = 0,
-              .right = static_cast<int>(std::lround(static_cast<float>(w) * scale)),
-              .bottom = static_cast<int>(std::lround(static_cast<float>(h) * scale))};
+              .right = static_cast<int>(std::lround(physical_size.width)),
+              .bottom = static_cast<int>(std::lround(physical_size.height))};
     AdjustWindowRect(&rect, win_style, FALSE);
     const int win_w = rect.right - rect.left;
     const int win_h = rect.bottom - rect.top;
@@ -242,6 +261,9 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
                            win_w, win_h, nullptr, nullptr, hinst, this);
 
     if (hwnd != nullptr) {
+        // 句柄就绪：换成**按窗口**的真实 DPI（跨显示器时与所在屏一致），此后 `scale` 全程只读
+        // 这一个成员。这是「帧 / 逻辑 / scale 三方同源」的起点。
+        refresh_scale();
         if (style.always_on_top) {
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         }
@@ -313,7 +335,7 @@ auto Win32Host::Impl::on_mouse(MouseAction action, MouseButton button, int x, in
     MouseEvent e;
     e.action = action;
     e.button = button;
-    e.position = Point{.x = static_cast<float>(x) / scale, .y = static_cast<float>(y) / scale};
+    e.position = to_logical(x, y);
     handler(e);
 }
 
@@ -322,7 +344,7 @@ auto Win32Host::Impl::on_wheel(int delta, int x, int y) const -> void {
         return;
     }
     ScrollEvent e;
-    e.position = Point{.x = static_cast<float>(x) / scale, .y = static_cast<float>(y) / scale};
+    e.position = to_logical(x, y);
     e.delta_y = static_cast<float>(delta) / static_cast<float>(WHEEL_DELTA);
     handler(e);
 }
@@ -459,8 +481,10 @@ auto Win32Host::Impl::handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT
     const int pw = static_cast<int>(LOWORD(lp));
     const int ph = static_cast<int>(HIWORD(lp));
     if (pw > 0 && ph > 0) {
-        const float sc = dpi_scale();
-        size = Size{.width = static_cast<float>(pw) / sc, .height = static_cast<float>(ph) / sc};
+        // 读缓存的 `scale`（不现调 DPI）：这是「帧 / 逻辑 / scale 三方同源」的关键一处。
+        // 现调 DPI 会与上报给消费方的 `scale` 各走一条路径，在 ≠100% DPI 显示器上发散。
+        const Point logical = to_logical(pw, ph);
+        size = Size{.width = logical.x, .height = logical.y};
     }
     // 几何态变化（最小化/最大化/还原）上报，仅模式实际改变时通知。
     const WindowMode want = classify_size_mode(wp);
@@ -518,15 +542,17 @@ auto Win32Host::Impl::handle_activate(WPARAM wp) -> LRESULT {
 }
 
 // ---- DPI 变化分族（WM_DPICHANGED）----
-auto Win32Host::Impl::handle_dpi_changed(HWND hwnd, WPARAM wp, LPARAM lp) -> LRESULT {
+auto Win32Host::Impl::handle_dpi_changed(HWND hwnd, [[maybe_unused]] WPARAM wp, LPARAM lp) -> LRESULT {
     const auto *pr = reinterpret_cast<RECT *>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
     SetWindowPos(hwnd, nullptr, pr->left, pr->top, pr->right - pr->left, pr->bottom - pr->top,
                  SWP_NOZORDER | SWP_NOACTIVATE);
-    // wParam 的 HIWORD 为系统建议的新 Y 轴 DPI：更新逻辑缩放并上报表层，
-    // 由 `Window` 强制全量重排重绘（否则 logical↔physical 换算失配会内容错位/发虚）。
-    const int dpi_y = static_cast<int>(HIWORD(wp));
-    if (dpi_y > 0) {
-        scale = static_cast<float>(dpi_y) / 96.0F;
+    // 缩放更新与上报表层：由 `Window` 强制全量重排重绘（否则 logical↔physical 换算失配会内容
+    // 错位 / 发虚）。取值走 `refresh_scale()`（`GetDpiForWindow`）而非 `wParam` 的 HIWORD——
+    // 两者在正常路径上同值，但前者是**按窗口**的权威读数，与构造期、跨屏迁移共用同一条路径，
+    // 不会因某次消息的 wParam 异常而与其它换算点脱钩。
+    const float before = scale;
+    refresh_scale();
+    if (scale != before) {
         notify_scale_changed();
     }
     return 0;
@@ -540,21 +566,23 @@ auto Win32Host::Impl::notify_scale_changed() const -> void {
 
 // ---- 尺寸限制分族（WM_GETMINMAXINFO）----
 auto Win32Host::Impl::handle_getminmaxinfo(LPARAM lp) const -> LRESULT {
-    // 尺寸限制：逻辑 dp × scale → 物理像素（含非客户区补偿）。
+    // 尺寸限制：逻辑 dp → 物理像素。与 `set_size` 走**同一个** `to_physical`，否则 150% 屏上
+    // 「按 1.5 放大上报 → OS 最大化到物理 3840 → WM_SIZE 再除回 1.5」会产生往返漂移。
     auto *mmi = reinterpret_cast<MINMAXINFO *>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
-    const float sc = dpi_scale();
     const WindowStyleOptions &st = style;
+    const Size min_px = to_physical(st.min_size);
+    const Size max_px = to_physical(st.max_size);
     if (st.min_size.width > 0.0F) {
-        mmi->ptMinTrackSize.x = static_cast<LONG>(std::lround(st.min_size.width * sc));
+        mmi->ptMinTrackSize.x = static_cast<LONG>(std::lround(min_px.width));
     }
     if (st.min_size.height > 0.0F) {
-        mmi->ptMinTrackSize.y = static_cast<LONG>(std::lround(st.min_size.height * sc));
+        mmi->ptMinTrackSize.y = static_cast<LONG>(std::lround(min_px.height));
     }
     if (st.max_size.width > 0.0F) {
-        mmi->ptMaxTrackSize.x = static_cast<LONG>(std::lround(st.max_size.width * sc));
+        mmi->ptMaxTrackSize.x = static_cast<LONG>(std::lround(max_px.width));
     }
     if (st.max_size.height > 0.0F) {
-        mmi->ptMaxTrackSize.y = static_cast<LONG>(std::lround(st.max_size.height * sc));
+        mmi->ptMaxTrackSize.y = static_cast<LONG>(std::lround(max_px.height));
     }
     return 0;
 }
@@ -663,7 +691,7 @@ auto Win32Host::Impl::handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT
     ScreenToClient(hwnd_in, &pt);  // 屏幕坐标 → 客户区坐标
     DragFinish(hdrop);
     FileDropEvent fde;
-    fde.position = Point{.x = static_cast<float>(pt.x) / scale, .y = static_cast<float>(pt.y) / scale};
+    fde.position = to_logical(pt.x, pt.y);
     fde.paths = std::move(paths);
     if (handler) {
         handler(fde);
@@ -691,14 +719,43 @@ auto Win32Host::Impl::register_class() const -> void {
     }
 }
 
-auto Win32Host::Impl::dpi_scale() const -> float {
-    int dpi = 96;
-    const HDC dc = (hwnd != nullptr) ? GetDC(hwnd) : GetDC(nullptr);
-    if (dc != nullptr) {
-        dpi = GetDeviceCaps(dc, LOGPIXELSY);
-        ReleaseDC(hwnd, dc);
+// ---- DPI：唯一真值源与两处换算 ----
+//
+// `refresh_scale()` 是**唯一**读 DPI 的地方：按窗口（而非按显示器 / 按 DC）取值，故跨屏迁移后
+// 立即反映新屏 DPI。取不到时逐级回落 `GetDpiForSystem` → 96，任何一级取不到都按 96（= 1.0）
+// 处理而不是猜。
+auto Win32Host::Impl::refresh_scale() -> void {
+    int dpi = 0;
+    // GetDpiForWindow / GetDpiForSystem 只在 Win8.1+ / Win10 1607+ 导出，运行时解析而非静态
+    // 依赖 SDK 版本宏；老系统回落 `GetDeviceCaps`（只取 Y 轴：Win32 两轴 DPI 同值，见下方注释）。
+    using GetDpiForWindowFn = UINT(WINAPI *)(HWND);
+    using GetDpiForSystemFn = UINT(WINAPI *)();
+    // NOLINTBEGIN(*-pro-type-reinterpret-cast, *-casting-through-void)
+    if (const auto f = reinterpret_cast<GetDpiForWindowFn>(
+            reinterpret_cast<void *>(GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForWindow")))) {
+        dpi = static_cast<int>(f(hwnd));
+    } else if (const auto f = reinterpret_cast<GetDpiForSystemFn>(
+                   reinterpret_cast<void *>(GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForSystem")))) {
+        dpi = static_cast<int>(f());
+    } else {
+        const HDC dc = GetDC(hwnd);
+        if (dc != nullptr) {
+            dpi = GetDeviceCaps(dc, LOGPIXELSY);  // Win32 两轴同值，故只取 Y 轴
+            ReleaseDC(hwnd, dc);
+        }
     }
-    return dpi > 0 ? static_cast<float>(dpi) / 96.0F : 1.0F;
+    // NOLINTEND(*-pro-type-reinterpret-cast, *-casting-through-void)
+    scale = dpi > 0 ? static_cast<float>(dpi) / 96.0F : 1.0F;
+}
+
+// dp ↔ 物理像素的**唯一**两个换算点。宿主内任何地方都不得再裸写 `* scale` / `/ scale`——
+// 那样等于把换算复制到各处，某一处漏改就重现 §8.2 那种「帧 / 逻辑 / scale 三方记账发散」。
+auto Win32Host::Impl::to_logical(int px, int py) const -> Point {
+    return Point{.x = static_cast<float>(px) / scale, .y = static_cast<float>(py) / scale};
+}
+
+auto Win32Host::Impl::to_physical(Size dp) const -> Size {
+    return Size{.width = dp.width * scale, .height = dp.height * scale};
 }
 
 // ---- 窗口过程：仅在最早时机（WM_NCCREATE/WM_CREATE）把 Impl* 存入 GWLP_USERDATA，
@@ -919,8 +976,8 @@ auto Win32Host::set_size(Size s) const -> void {
     const auto ex_style = static_cast<DWORD>(GetWindowLongPtrA(pimpl_->hwnd, GWL_EXSTYLE));
     RECT rect{.left = 0,
               .top = 0,
-              .right = static_cast<int>(std::lround(s.width * pimpl_->scale)),
-              .bottom = static_cast<int>(std::lround(s.height * pimpl_->scale))};
+              .right = static_cast<int>(std::lround(pimpl_->to_physical(s).width)),
+              .bottom = static_cast<int>(std::lround(pimpl_->to_physical(s).height))};
     AdjustWindowRectEx(&rect, win_style, GetMenu(pimpl_->hwnd) != nullptr ? TRUE : FALSE, ex_style);
     SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
