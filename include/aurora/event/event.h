@@ -49,6 +49,9 @@ enum class ModifierKey : std::uint8_t {
     Control = 1U << 1U,
     Alt = 1U << 2U,
     Meta = 1U << 3U,
+    // 数字小键盘锁（NumLock）当前状态；建模为修饰位而非键码（切换键无发送意义），消费方据此
+    // 自行决定 KP_Prior 的语义——框架不做这层二次翻译，详见 keycode.h 的小键盘口径。
+    NumLock = 1U << 4U
 };
 
 /// @brief 修饰键位按位或（便于组合 `modifiers`）。
