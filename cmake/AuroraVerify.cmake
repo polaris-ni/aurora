@@ -109,6 +109,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_os_hotkey)
     endif ()
 
+    # ---- Win32 WM_SYSKEY* 派发链（Alt 组合与常规键同路，消费即止 / 未消费回落 DefWindowProc）----
+    # 自动段向真实宿主窗口同步注入 WM_SYSKEYDOWN/UP，核对 (i) Alt 组合进派发链且修饰位带 Alt、
+    # (ii) Alt 自身与 F10 只推进态不派发、(iii) 消费与非消费两种返回值分岔；Alt+F4 的
+    # 「消费则不关窗」是否定性断言，只能目视，故留 --interactive 人工段。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_syskey "${_aurora_verify_dir}/win32_syskey_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_syskey)
+    endif ()
+
     # ---- macOS 光标（NSCursor 派发接线）：[NSCursor currentCursor] 单例同一性读回 ----
     # 需 ObjC++ 语言：条件启用，其它平台上完全不涉及（不改动默认构建的语言集合）。
     if (APPLE AND AURORA_BACKEND_MACOS)
