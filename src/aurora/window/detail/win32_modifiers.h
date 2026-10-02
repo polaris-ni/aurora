@@ -124,6 +124,47 @@ class ModifierKeyTracker {
     }
 }
 
+/// @brief 判「这条导航键消息是否来自数字小键盘导航区」——**只对 `Home` 成立**。
+///
+/// **背景**：Win32 在导航区把主键盘与小键盘**共用同一组虚拟键码**（`VK_HOME` / `VK_END` /
+/// `VK_PRIOR` / `VK_NEXT` / `VK_INSERT` / `VK_DELETE` 两边都发这两个值），`wParam` 无从区分来处。
+/// 唯一的额外信息是 `lParam` 里的扫描码与 extended（E0 前缀）位。
+///
+/// **实测结论（本条判据的全部依据）**：逐个核对标准 PC 键盘的 (VK, scan, extended) 组合后，
+/// 六个导航键里**只有 `Home` 真的可分**——
+///
+/// | 键 | 主键盘 (scan, E0) | 小键盘 (scan, E0) | 可分？ |
+/// |:---|:---|:---|:---|
+/// | Home   | `0x47`, 0 | `0x4E`, 1 | **是**（扫描码不同） |
+/// | End    | `0x4F`, 0 | `0x4F`, 1 | 否（仅 extended 位不同） |
+/// | PgUp   | `0x49`, 1 | `0x49`, 1 | 否（完全相同） |
+/// | PgDn   | `0x51`, 1 | `0x51`, 1 | 否（完全相同） |
+/// | Insert | `0x52`, 0 | `0x52`, 1 | 否（仅 extended 位不同） |
+/// | Delete | `0x53`, 0 | `0x53`, 1 | 否（仅 extended 位不同） |
+///
+/// 也就是说 **extended 位不足以判别**：主键盘的 PgUp / PgDn 本身就带 E0 前缀，把「带 E0」
+/// 当成「来自小键盘」会把主键盘那两个键一起误判成 `KP_Prior` / `KP_Next`——那比不判更糟。
+/// 故本判据**只认 `Home` 的扫描码差异**（`0x47` = 主键盘、`0x4E` = 小键盘），其余五个键一律
+/// 返回 false，即恒给主键码、维持现网行为。
+///
+/// 代价是明确的：Win32 后端只产 `KP_Home`，`KP_End` / `KP_Prior` / `KP_Next` / `KP_Insert` /
+/// `KP_Delete` 在本后端**恒不产生**。X11 / Wayland 侧 keysym 天然分得开、GLFW 侧键码表本身
+/// 就缺这几项，故三后端键码集不完全一致——这是平台事实而非疏漏，`keycode.h` 的小键盘口径
+/// 注释已写明。消费方需要这几项时应走 X11 / Wayland 后端，或按平台兜底。
+///
+/// 判据是纯函数（只读两个入参），故可单测直接吃表。
+[[nodiscard]] constexpr auto is_numpad_nav_scan(int vk, unsigned char scan) -> bool {
+    // 唯一真可分的一键：小键盘 Home 的 E0 4E 对主键盘 Home 的 47。
+    return vk == VK_HOME && scan == 0x4E;
+}
+
+/// @brief 把 `WM_KEYDOWN` / `WM_SYSKEY*` 的 `lParam` 拆出扫描码字节（第 16-23 位）。
+/// @param lp 消息 `lParam`。
+/// @return 扫描码字节（0-255）。
+[[nodiscard]] constexpr auto scan_code_of(LPARAM lp) -> unsigned char {
+    return static_cast<unsigned char>((static_cast<unsigned long long>(lp) >> 16U) & 0xFFULL);
+}
+
 }  // namespace aurora::detail
 
 #endif  // AURORA_PLATFORM_WINDOWS && (AURORA_BACKEND_WIN32 || AURORA_BACKEND_D3D11)
