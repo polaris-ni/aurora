@@ -76,6 +76,23 @@ AURORA_TEST_CASE(modifier_key_bitwise_or_and_and) {
     AURORA_TEST_CHECK_EQ(e.modifiers & ModifierKey::Shift, std::uint8_t{0});
 }
 
+// NumLock 是**锁定**态而非按住态，故单列一条：位值必须与既有四位互不重叠，且能与其它位共存。
+// 位值写死断言的理由与 KeyCode 相同：消费方按 `modifiers & ModifierKey::NumLock` 判小键盘语义，
+// 改位值会让所有这类判读静默失效。
+AURORA_TEST_CASE(numlock_is_a_separate_modifier_bit) {
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(ModifierKey::NumLock), std::uint8_t{16});
+    // 与既有四位两两不重叠：按位或之后仍可逐位反解。
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(ModifierKey::NumLock | ModifierKey::Shift), std::uint8_t{17});
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(ModifierKey::NumLock | ModifierKey::Meta), std::uint8_t{24});
+    const auto all =
+        ModifierKey::Shift | ModifierKey::Control | ModifierKey::Alt | ModifierKey::Meta | ModifierKey::NumLock;
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(all), std::uint8_t{31});
+    AURORA_TEST_CHECK_NE(all & ModifierKey::NumLock, std::uint8_t{0});
+    // NumLock 关闭时该位为 0：消费方正是靠这个「零」把 KP_Prior 当 PageUp 用。
+    const auto off = ModifierKey::Shift;
+    AURORA_TEST_CHECK_EQ(off & ModifierKey::NumLock, std::uint8_t{0});
+}
+
 AURORA_TEST_CASE(same_type_copy_preserves_event_payload) {
     MouseEvent press;
     press.position = Point{.x = 12.0F, .y = 34.0F};

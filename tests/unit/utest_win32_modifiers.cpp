@@ -23,6 +23,7 @@
 #include <windows.h>
 
 #include "aurora/event/event.h"
+#include "aurora/window/detail/win32_keymap.h"
 #include "aurora/window/detail/win32_modifiers.h"
 #endif
 
@@ -206,6 +207,129 @@ AURORA_TEST_CASE(syskey_exceptions_still_advance_the_modifier_state) {
     check_mods(t, ModifierKey::Alt);
     AURORA_TEST_CHECK_TRUE(t.apply(VK_LMENU, false));
     check_mods(t, ModifierKey::None);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+/// @brief 构造一条带指定扫描码与 extended 位的 `WM_KEYDOWN` lParam。
+/// @param scan 扫描码字节。
+/// @param extended 是否带 E0 前缀（extended 位）。
+/// @return 拼好的 lParam。
+constexpr auto make_keydown_lparam(unsigned char scan, bool extended) -> LPARAM {
+    return static_cast<LPARAM>(1ULL | (static_cast<unsigned long long>(scan) << 16U) |
+                               (static_cast<unsigned long long>(extended ? 1U : 0U) << 24U) | (1ULL << 30U) |
+                               (1ULL << 31U));
+}
+#endif
+
+// Win32 导航区把主键盘与小键盘**共用同一组 VK**，判据只能落在 lParam 的扫描码上。
+// 这组用例锁住该判据的**实测结论**：六个导航键里只有 `Home` 真的可分。
+//
+// 为什么这条值得单测：把「带 E0 前缀」当成「来自小键盘」是**错的**——主键盘的 PgUp / PgDn
+// 本身就带 E0 前缀（scan 0x49 / 0x51，两边完全相同），那样判会把主键盘那两个键一起误判成
+// `KP_Prior` / `KP_Next`。误判比不判更糟，故判据必须保守到「只认 Home 的扫描码差异」。
+AURORA_TEST_CASE(numpad_nav_scan_separates_only_the_keys_it_really_can) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // 唯一真可分的一键：小键盘 Home = E0 4E，主键盘 Home = 47。
+    AURORA_TEST_CHECK_TRUE(detail::is_numpad_nav_scan(VK_HOME, 0x4E));
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_HOME, 0x47));
+    // 五个不可分的键：主键盘那侧（即便扫描码与小键盘相同）一律判 false。
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_END, 0x4F));
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_PRIOR, 0x49));
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_NEXT, 0x51));
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_INSERT, 0x52));
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_DELETE, 0x53));
+    // 主键盘方向键与小键盘方向键：判据只认 Home，其它一律 false。
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_UP, 0x48));
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_LEFT, 0x4B));
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_DOWN, 0x50));
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_RIGHT, 0x4D));
+    // 非导航键：小键盘 0-9 与运算键各有独立 VK，不走这条判据。
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_NUMPAD5, 0x4C));
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(VK_ADD, 0x4E));
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(0x41, 0x1E));  // 字母 A
+    AURORA_TEST_CHECK_FALSE(detail::is_numpad_nav_scan(0x41, 0x4E));
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(scan_code_of_reads_only_the_scan_byte_field) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // scan_code_of 只取第 16-23 位，不受高位标志位（extended / 上下文码 / 前后态）影响。
+    AURORA_TEST_CHECK_EQ(static_cast<int>(detail::scan_code_of(make_keydown_lparam(0x4E, true))), 0x4E);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(detail::scan_code_of(make_keydown_lparam(0x4E, false))), 0x4E);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(detail::scan_code_of(make_keydown_lparam(0x53, true))), 0x53);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(detail::scan_code_of(make_keydown_lparam(0x00, true))), 0x00);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+// Win32 VK → KeyCode 映射表。这组用例的价值在于**变异自证**：删掉任一 KP_* 的 case，
+// 对应断言立刻变红——映射表错位在运行期只表现为「某个键没反应」，没有单测就只能靠人工撞。
+AURORA_TEST_CASE(win32_vk_maps_the_keypad_digits_and_operators) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // 小键盘 0-9：各 VK 连号（0x60..0x69），与主键盘数字行（'0'..'9'）**分得开**。
+    for (int i = 0; i <= 9; ++i) {
+        AURORA_TEST_CHECK(detail::from_win32_vk(VK_NUMPAD0 + i, false) ==
+                          static_cast<KeyCode>(static_cast<int>(KeyCode::KP_0) + i));
+    }
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_ADD, false) == KeyCode::KP_Add);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_SUBTRACT, false) == KeyCode::KP_Subtract);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_MULTIPLY, false) == KeyCode::KP_Multiply);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_DIVIDE, false) == KeyCode::KP_Divide);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_DECIMAL, false) == KeyCode::KP_Decimal);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_SEPARATOR, false) == KeyCode::KP_Separator);
+    // 主键盘数字行不得被小键盘 VK 污染：'0' 仍是 D0、'9' 仍是 D9。
+    AURORA_TEST_CHECK(detail::from_win32_vk('0', false) == KeyCode::D0);
+    AURORA_TEST_CHECK(detail::from_win32_vk('9', false) == KeyCode::D9);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(win32_vk_splits_keypad_home_and_keeps_the_rest_on_the_mainboard_codes) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // 唯一真可分的一键：小键盘 Home 给 KP_Home，主键盘 Home 仍给 Home。
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_HOME, true) == KeyCode::KP_Home);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_HOME, false) == KeyCode::Home);
+    // 其余五个导航键：即便 from_numpad 为真也**不给** KP_*（判据在真实链路上根本不会为真），
+    // 恒给主键码 —— 守住「不误判主键盘」这条比「多给一个小键盘码位」重要的取舍。
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_END, true) == KeyCode::End);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_PRIOR, true) == KeyCode::PageUp);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_NEXT, true) == KeyCode::PageDown);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_DELETE, true) == KeyCode::Delete);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_INSERT, true) == KeyCode::Unknown);
+    // 小键盘方向键（中央倒 T 簇）在 KeyCode 里无 KP_ 码位，与主键盘同码。
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_UP, true) == KeyCode::ArrowUp);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_LEFT, true) == KeyCode::ArrowLeft);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_DOWN, true) == KeyCode::ArrowDown);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_RIGHT, true) == KeyCode::ArrowRight);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(win32_vk_keeps_the_existing_mainboard_mapping) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // 本轮只增小键盘，既有主键盘映射必须逐位不变（`from_numpad` 为 false 一律走原分支）。
+    AURORA_TEST_CHECK(detail::from_win32_vk('A', false) == KeyCode::A);
+    AURORA_TEST_CHECK(detail::from_win32_vk('Z', false) == KeyCode::Z);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_RETURN, false) == KeyCode::Enter);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_ESCAPE, false) == KeyCode::Escape);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_TAB, false) == KeyCode::Tab);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_SPACE, false) == KeyCode::Space);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_F1, false) == KeyCode::F1);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_F12, false) == KeyCode::F12);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_OEM_PLUS, false) == KeyCode::Equal);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_OEM_5, false) == KeyCode::Backslash);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_LWIN, false) == KeyCode::Meta);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_MENU, false) == KeyCode::Alt);
+    // 未收录的键落 Unknown（`VK_NONAME` 之类的哨兵码不在任何 case 内）。
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_NONAME, false) == KeyCode::Unknown);
 #else
     AURORA_WIN32_MODIFIERS_SKIP;
 #endif
