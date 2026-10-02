@@ -4,6 +4,8 @@
 /// 测试说明: Win32 宿主修饰键跟踪器 —— 位翻转随消息推进、左右与通用码归并、失焦清空、激活
 ///           播种、AltGr 两段序列。它取代了原先「派发时刻 `GetAsyncKeyState` 采样」，故这些
 ///           消息序列正是热键能否命中的判据本体（竞态实测见 `manual-test/21-debug.md` TC-DEBUG-004）
+///           另覆盖 `WM_SYSKEY*` 的派发分叉判据 `syskey_dispatches()`：除 Alt 自身与 F10 外
+///           一律进派发链，而例外项仍照常推进修饰态
 /// 平台门控: 依赖 `<windows.h>` 的 VK 码与后端宏；宏未开启时每条用例落 SKIP 桩（声明无条件可见）
 
 #include <cstdint>
@@ -162,6 +164,48 @@ AURORA_TEST_CASE(non_modifier_keys_never_touch_the_state) {
     // 大写锁定既不是修饰位也不该污染状态（`VK_CAPITAL` 不在映射内）
     AURORA_TEST_CHECK_FALSE(t.apply(VK_CAPITAL, true));
     check_mods(t, ModifierKey::Control);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(syskey_dispatches_all_but_alt_itself_and_f10) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // `WM_SYSKEY*` 的分叉判据本体。改动这张表 = 改「哪些 Alt 组合能被 Aurora 看见」。
+    // 例外只有两类：Alt 自身（左右都算，纯修饰语义）与 F10（系统菜单键）。
+    for (const int vk : {VK_MENU, VK_LMENU, VK_RMENU, VK_F10}) {
+        AURORA_TEST_CHECK_FALSE(detail::syskey_dispatches(vk));
+    }
+    // 其余一律进派发：字母 / 功能键 / 编辑键 / 小键盘（含 Alt 组合的系统键如 Alt+Enter）。
+    for (const int vk : {0x41 /* 'A' */, 0x7A /* 'Z' */, VK_F4, VK_RETURN, VK_TAB, VK_ESCAPE, VK_LEFT, VK_DELETE,
+                         VK_SPACE, VK_NUMPAD0, VK_ADD}) {
+        AURORA_TEST_CHECK_TRUE(detail::syskey_dispatches(vk));
+    }
+    // 判据是纯函数（不读状态）：同一 vk 反复判定结果一致，与跟踪器当前位集无关。
+    ModifierKeyTracker t;
+    t.apply(VK_LMENU, true);
+    AURORA_TEST_CHECK_FALSE(detail::syskey_dispatches(VK_LMENU));
+    t.clear();
+    AURORA_TEST_CHECK_FALSE(detail::syskey_dispatches(VK_LMENU));
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(syskey_exceptions_still_advance_the_modifier_state) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // 「只推进态、不派发」不能读成「不处理」：Alt 自身的 syskey 若不推进修饰位，
+    // 紧随其后的 Alt+字母就会错报不带 Alt（这正是引入 dispatch 分叉前的原始动机）。
+    ModifierKeyTracker t;
+    AURORA_TEST_CHECK_FALSE(detail::syskey_dispatches(VK_LMENU));
+    AURORA_TEST_CHECK_TRUE(t.apply(VK_LMENU, true));
+    check_mods(t, ModifierKey::Alt);
+    // 随后的 Alt+字母进派发，且该位带着 Alt —— 这就是「修饰态推进必须早于派发」的可测形态。
+    AURORA_TEST_CHECK_TRUE(detail::syskey_dispatches(0x41 /* 'A' */));
+    AURORA_TEST_CHECK_FALSE(t.apply(0x41, true));
+    check_mods(t, ModifierKey::Alt);
+    AURORA_TEST_CHECK_TRUE(t.apply(VK_LMENU, false));
+    check_mods(t, ModifierKey::None);
 #else
     AURORA_WIN32_MODIFIERS_SKIP;
 #endif
