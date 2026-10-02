@@ -301,9 +301,19 @@ constexpr auto in_ranges(std::span<const CodePointRange> table, char32_t code_po
     return next != table.begin() && std::prev(next)->last >= code_point;
 }
 
+// WHY 可以是单点比较：判定的三次查表各自独立，而每张表都按 first 升序且互不相交（本文件头部的不变量），
+// 故小于某张表首项的码点必然落在该表之外。取三表首项的最小值即得一个同时躲开三次二分的下界。
+// 这是可证明等价而非近似——落在界内的码点按既有次序的结果恒为 1，与 ambiguous_mode 无关。
+// 界由表导出而非写死字面量：数据表再生成后若首项下移，本常量随之收紧，无需人工同步阈值。
+constexpr std::uint32_t AURORA_UNICODE_SINGLE_WIDTH_BELOW = std::min(
+    {AURORA_ZERO_WIDTH_RANGES.front().first, AURORA_WIDE_RANGES.front().first, AURORA_AMBIGUOUS_RANGES.front().first});
+
 }  // namespace
 
 auto unicode_cell_width(char32_t code_point, AmbiguousWidthMode ambiguous_mode) noexcept -> std::uint8_t {
+    if (static_cast<std::uint32_t>(code_point) < AURORA_UNICODE_SINGLE_WIDTH_BELOW) {
+        return 1U;
+    }
     if (in_ranges(AURORA_ZERO_WIDTH_RANGES, code_point)) {
         return 0U;
     }

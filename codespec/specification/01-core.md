@@ -353,7 +353,9 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 
 **判定次序是本条原语的全部内容**：先按 `General_Category ∈ {Mn, Me, Cf}` 判零宽，再按 East Asian Width 判 1 / 2。次序不可交换——`0300..036F`、`FE00..FE0F`、`E0100..E01EF` 这些组合与格式区段在 UCD 里同时带 `A` 标记，先查宽度表就会让 `Wide` 口径下的一个重音符占 2 格，把它依附的基础格挤成半格错位。
 
-**数据面**：`src/aurora/core/unicode_width.cpp` 内三张 `constexpr` 区间表（零宽 / 宽+全角 / 歧义），由 Unicode CDATA 的 `EastAsianWidth-18.0.0.txt` 与 `DerivedGeneralCategory-18.0.0.txt`（2026-06-29）合并相邻同类区间导出，许可与再生成口径见 [`../../THIRD_PARTY_LICENSES.md`](../../THIRD_PARTY_LICENSES.md) 第 9 节。表须保持「按 `first` 升序且互不相交」——二分查找的正确性全靠该不变量，改动数据后跑 `tests/unit/utest_unicode_width.cpp` 的区间端点用例。
+**数据面**：`src/aurora/core/unicode_width.cpp` 内三张 `constexpr` 区间表（零宽 / 宽+全角 / 歧义），由 Unicode CDATA 的 `EastAsianWidth-18.0.0.txt` 与 `DerivedGeneralCategory-18.0.0.txt`（2026-06-29）合并相邻同类区间导出，许可与再生成口径见 [`../../THIRD_PARTY_LICENSES.md`](../../THIRD_PARTY_LICENSES.md) 第 9 节。表须保持「按 `first` 升序且互不相交」——二分查找的正确性全靠该不变量，改动数据后跑 `tests/unit/utest_unicode_width.cpp` 的区间端点用例。**该不变量现有第二个依赖者**：`unicode_cell_width` 开头那条单宽短路（`AURORA_UNICODE_SINGLE_WIDTH_BELOW`）同样建立在它之上，故破坏升序或相交会同时打掉二分与短路两条路径。
+
+**单宽短路**：三表皆升序且互不相交 ⇒ 存在一个**由表导出**的单宽下界 `AURORA_UNICODE_SINGLE_WIDTH_BELOW = std::min`（三表 `front().first`）——小于三表最小首项的码点必不落在任何表内，ASCII 与拉丁-1 前段（全部低于该界）不经二分即判为 1。这是**可证明等价而非近似**：落在界内的码点按既有判定次序（三次查表全不命中）结果恒为 1，与 `AmbiguousWidthMode` 无关。界由表导出而非写死阈值字面量，数据表再生成后若首项下移即随之自动收紧，无需人工同步。等价性由 `tests/unit/utest_unicode_width.cpp` 的全码点穷举例守门（两种口径下的分布计数 + 覆盖全部码点的 FNV-1a 64 位摘要，常数取自短路加入之前的树）。
 
 **职责边界**：本函数只回答「占几格」。字素簇切分（基础码点与组合序列的成组）、变体选择符对字形的影响、以及「把零宽码点并入前一个基础格」的存储动作都不在此头内——前者属文本整形（见 [`03-layout-render.md`](03-layout-render.md)），后者由调用方的网格层承担。
 

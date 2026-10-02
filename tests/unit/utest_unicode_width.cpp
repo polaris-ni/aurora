@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/unicode_width.h
 /// 测试说明: 覆盖「零宽优先于 East Asian Width」的判定次序、W/F 双宽、Ambiguous 随口径取值、中性类单宽、
-/// 区间表端点边界，以及全码点扫描下返回值只落在 {0,1,2}
+/// 区间表端点边界，全码点扫描下返回值只落在 {0,1,2}，以及单宽短路与逐表二分在全码点上的逐点等价
 
 #include <cstdint>
 
@@ -73,6 +73,68 @@ AURORA_TEST_CASE(return_value_is_always_zero_one_or_two) {
         AURORA_TEST_CHECK(wide <= 2U);
         // 口径只可能把单宽抬成双宽，绝不会改变零宽或压缩双宽。
         AURORA_TEST_CHECK(wide >= narrow);
+    }
+}
+
+// 全码点穷举等值守门：函数内那条「小于单宽下界直接返回 1」的短路必须与短路前的逐表二分**逐码点等价**，
+// 而不是「看起来差不多」。判据取两组与实现无关的常数——0/1/2 的分布计数 + 覆盖全部码点的 FNV-1a 64 位摘要，
+// 二者任一不符即转红：只钉计数会漏掉「计数恰好不变但逐点错位」，只钉摘要在分布漂移时不易定位，故两者都断言。
+//
+// 常数如何复现（务必在改动本函数**之前**取，否则等于拿新实现的自洽当正确性）：
+//   1) 用改动前的 src/aurora/core/unicode_width.cpp 与本文件同形的遍历口径跑一遍全码点；
+//   2) 每种口径下累加 0/1/2 的计数，并按码点升序把返回值并入 FNV-1a 64：
+//      种子 = 偏移基 14695981039346656037 XOR static_cast<std::uint64_t>(mode)，每步 hash ^= 返回值; hash *=
+//      1099511628211；
+//   3) 两侧口径各自记下计数三元组与摘要，写进下面的常量。
+// 另用一份独立实现（按表重写的 Python 脚本同样口径）交叉复算过，两法一致，排除「摘要只是复述 C++ 自己的错」。
+//
+// 遍历含代理区段（D800..DFFF）：既有实现对这些值同样返回确定结果，短路不得改变它，故一并纳入而不跳过。
+AURORA_TEST_CASE(exhaustive_scan_matches_the_table_driven_reference) {
+    constexpr std::uint64_t fnv_offset_basis = 14695981039346656037ULL;
+    constexpr std::uint64_t fnv_prime = 1099511628211ULL;
+    // 实测常数（变更前的树上取得，口径见上）。用结构体而非 std::pair：数组形参会退化成指针，
+    // 类模板实参推导会失败。
+    struct Expectation {
+        AmbiguousWidthMode mode;
+        std::uint64_t zero;
+        std::uint64_t one;
+        std::uint64_t two;
+        std::uint64_t digest;
+    };
+    constexpr Expectation narrow{.mode = AmbiguousWidthMode::Narrow,
+                                 .zero = 2273ULL,
+                                 .one = 927980ULL,
+                                 .two = 183859ULL,
+                                 .digest = 5890205287482552179ULL};
+    constexpr Expectation wide{.mode = AmbiguousWidthMode::Wide,
+                               .zero = 2273ULL,
+                               .one = 789610ULL,
+                               .two = 322229ULL,
+                               .digest = 3203393021350612880ULL};
+
+    for (const auto &expected : {narrow, wide}) {
+        std::uint64_t zero = 0ULL;
+        std::uint64_t one = 0ULL;
+        std::uint64_t two = 0ULL;
+        std::uint64_t digest = fnv_offset_basis ^ static_cast<std::uint64_t>(expected.mode);
+        for (char32_t code_point = 0U; code_point <= 0x10FFFFU; ++code_point) {
+            const auto width = unicode_cell_width(code_point, expected.mode);
+            AURORA_TEST_REQUIRE(width <= 2U);
+            // 三个分支各自累加，不用 counts[width] 下标：下标形式会被 clang-tidy 的定长数组越界检查拦下。
+            if (width == 0U) {
+                ++zero;
+            } else if (width == 1U) {
+                ++one;
+            } else {
+                ++two;
+            }
+            digest ^= static_cast<std::uint64_t>(width);
+            digest *= fnv_prime;
+        }
+        AURORA_TEST_CHECK_EQ(zero, expected.zero);
+        AURORA_TEST_CHECK_EQ(one, expected.one);
+        AURORA_TEST_CHECK_EQ(two, expected.two);
+        AURORA_TEST_CHECK_EQ(digest, expected.digest);
     }
 }
 

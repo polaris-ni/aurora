@@ -13,7 +13,9 @@
 // Dimension matrix: logical sizes 1280x720 / 1920x1080 / 2560x1440; scales 1.0 / 1.5 / 2.0.
 // Primitive scenes: full-screen opaque/translucent fill_rect, linear/radial gradient, shadow, blur
 // (multiple radii), composite (rotate + scale), rounded-clip fill, text (incl. CJK); end-to-end:
-// widget-tree whole frame, single-control dirtying (dirty-region clip path), single hit_test.
+// widget-tree whole frame, single-control dirtying (dirty-region clip path), single hit_test, plus a
+// paint-free unicode_cell_width per-code-point scan (isolates the width-decision cost itself).
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -71,6 +73,10 @@ constexpr auto AURORA_BENCH_TEXT = "The quick brown fox jumps 0123456789 灰狐�
 // entry amortizes the per-call fixed cost, so the segment must stay short or that cost is buried.
 // CJK-LITERAL: cjk-fixture - Han run is shaping input fed to the glyph atlas, never printed
 constexpr auto AURORA_BENCH_RUN = "fox 012 灰";
+
+// Pure ASCII material for the unicode_cell_width scan scene below: the same width decision is charged
+// per code point by every column-aligned surface, and ASCII is the bulk of a typical text stream.
+constexpr auto AURORA_BENCH_TEXT_ASCII = "The quick brown fox jumps over the lazy dog 0123456789 ";
 
 // Scroll-scene content tree: `aurora::Scroll` wrapping a column of 200 aurora::Chip (with label
 // text), content far taller than the viewport, for aurora::ScrollBenchHarness to run deterministic
@@ -325,6 +331,51 @@ auto main() -> int {
                        "> time-based gates (G-1~G-4, G-9~G-14) are affected by environment jitter and excluded from "
                        "CTest; local trend comparison see "
                        "tools/check/check_perf_gates.ps1. Counter-based gates G-5~G-8 are asserted in CTest.\n");
+    }
+
+    // 16) unicode_cell_width scan: the pure width-decision cost a column-aligned surface (terminal-like)
+    // pays per code point. A block of ASCII text walked code point by code point in Narrow mode, summing
+    // the returned widths into a volatile sink so the calls cannot be optimized away. Reading the cost of
+    // the decision itself, isolated from any paint target -- hence "-" for size and 0x0 for device.
+    // Build tier is self-reported: a non-optimized tier makes this row meaningless (the whole point is
+    // the cost of the table binary search), so it prints the tier rather than assuming one.
+    {
+        // ~64 K code points per pass: large enough that one pass runs well above timer resolution
+        // (a short pass lands in the 0.00x ms range, where the reading is quantization, not cost).
+        constexpr std::size_t pass_points = std::size_t{64} * 1024U;
+        std::vector<char32_t> points;
+        points.reserve(pass_points);
+        while (points.size() < pass_points) {
+            for (const char ch : std::string{AURORA_BENCH_TEXT_ASCII}) {
+                points.push_back(static_cast<char32_t>(static_cast<unsigned char>(ch)));
+            }
+        }
+        points.resize(pass_points);
+        volatile std::uint32_t sink = 0U;
+#ifdef NDEBUG
+        constexpr auto tier = "release (NDEBUG)";
+#else
+        constexpr auto tier = "debug (assertions on)";
+#endif
+        AURORA_LOG_RAW("bench", "\n## unicode_cell_width scan (64 K code points/pass, narrow mode, build tier: ", tier,
+                       ")\n\n");
+        const double width_ms = aurora::bench::time_ms(
+            [&]() -> void {
+                std::uint32_t acc = 0U;
+                for (const char32_t code_point : points) {
+                    acc += aurora::unicode_cell_width(code_point, aurora::AmbiguousWidthMode::Narrow);
+                }
+                sink = acc;
+            },
+            warmup,
+            40);  // more iterations than slow_iters: this pass is short, so few iterations land in the jitter range
+        report("unicode_width_scan_ascii", "-", 1.0F, 0, 0, width_ms);
+        // Derived throughput: the decision's own cost per code point, free of the pass overhead.
+        const double ns_per_point = width_ms * 1.0e6 / static_cast<double>(points.size());
+        const double points_per_s = static_cast<double>(points.size()) / (width_ms * 1.0e-3);
+        AURORA_LOG_RAW("bench", "| unicode_width_scan_ascii | ", aurora::bench::ffmt(3, ns_per_point),
+                       " ns/code point | ", aurora::bench::ffmt(3, points_per_s / 1.0e6), " M code points/s | sink ",
+                       static_cast<std::uint32_t>(sink), " |\n");
     }
 
     AURORA_LOG_RAW("bench", "\n", aurora::bench::AURORA_BENCH_DISCLAIMER, "\n");
