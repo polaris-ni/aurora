@@ -72,8 +72,8 @@ namespace aurora::detail {
 /// @param right_super 右 Super 是否按下。
 /// @return 四位修饰键的位集；任一位左右两侧任一按下即置位。
 [[nodiscard]] constexpr auto glfw_key_states_to_modifiers(bool left_shift, bool right_shift, bool left_control,
-                                                         bool right_control, bool left_alt, bool right_alt,
-                                                         bool left_super, bool right_super) -> ModifierKey {
+                                                          bool right_control, bool left_alt, bool right_alt,
+                                                          bool left_super, bool right_super) -> ModifierKey {
     auto m = ModifierKey::None;
     if (left_shift || right_shift) {
         m = m | ModifierKey::Shift;
@@ -107,8 +107,8 @@ namespace aurora::detail {
     const auto down = [w](int key) { return glfwGetKey(w, key) == GLFW_PRESS; };
     return glfw_key_states_to_modifiers(down(GLFW_KEY_LEFT_SHIFT), down(GLFW_KEY_RIGHT_SHIFT),
                                         down(GLFW_KEY_LEFT_CONTROL), down(GLFW_KEY_RIGHT_CONTROL),
-                                        down(GLFW_KEY_LEFT_ALT), down(GLFW_KEY_RIGHT_ALT),
-                                        down(GLFW_KEY_LEFT_SUPER), down(GLFW_KEY_RIGHT_SUPER));
+                                        down(GLFW_KEY_LEFT_ALT), down(GLFW_KEY_RIGHT_ALT), down(GLFW_KEY_LEFT_SUPER),
+                                        down(GLFW_KEY_RIGHT_SUPER));
 }
 
 }  // namespace aurora::detail

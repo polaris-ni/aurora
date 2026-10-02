@@ -82,8 +82,8 @@ AURORA_TEST_CASE(callback_mod_mask_folds_to_the_four_pointer_bits) {
 
     const auto ctrl_shift = detail::glfw_mods_to_aurora(GLFW_MOD_CONTROL | GLFW_MOD_SHIFT);
     AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(ctrl_shift), std::uint8_t{3});
-    const auto all_four = detail::glfw_mods_to_aurora(
-        GLFW_MOD_SHIFT | GLFW_MOD_CONTROL | GLFW_MOD_ALT | GLFW_MOD_SUPER);
+    const auto all_four =
+        detail::glfw_mods_to_aurora(GLFW_MOD_SHIFT | GLFW_MOD_CONTROL | GLFW_MOD_ALT | GLFW_MOD_SUPER);
     AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(all_four), std::uint8_t{15});
 
     // CapsLock / NumLock 两个掩码**不被折**：锁定位与指针手势无语义关系（无小键盘参与），
@@ -107,30 +107,24 @@ AURORA_TEST_CASE(key_states_fold_left_and_right_into_one_bit_each) {
 #if defined(AURORA_BACKEND_GLFW)
     using detail::glfw_key_states_to_modifiers;
     // 全 false → None。
-    check_mods(glfw_key_states_to_modifiers(false, false, false, false, false, false, false, false),
-               ModifierKey::None);
+    check_mods(glfw_key_states_to_modifiers(false, false, false, false, false, false, false, false), ModifierKey::None);
     // 逐位：左侧单独按下即置位（右侧不该被要求同时按下）。
-    check_mods(glfw_key_states_to_modifiers(true, false, false, false, false, false, false, false),
-               ModifierKey::Shift);
+    check_mods(glfw_key_states_to_modifiers(true, false, false, false, false, false, false, false), ModifierKey::Shift);
     check_mods(glfw_key_states_to_modifiers(false, false, true, false, false, false, false, false),
                ModifierKey::Control);
     check_mods(glfw_key_states_to_modifiers(false, false, false, false, true, false, false, false), ModifierKey::Alt);
     check_mods(glfw_key_states_to_modifiers(false, false, false, false, false, false, true, false), ModifierKey::Meta);
     // 逐位：右侧单独按下同样置位（这正是「归并」的含义）。
-    check_mods(glfw_key_states_to_modifiers(false, true, false, false, false, false, false, false),
-               ModifierKey::Shift);
+    check_mods(glfw_key_states_to_modifiers(false, true, false, false, false, false, false, false), ModifierKey::Shift);
     check_mods(glfw_key_states_to_modifiers(false, false, false, true, false, false, false, false),
                ModifierKey::Control);
     check_mods(glfw_key_states_to_modifiers(false, false, false, false, false, true, false, false), ModifierKey::Alt);
     check_mods(glfw_key_states_to_modifiers(false, false, false, false, false, false, false, true), ModifierKey::Meta);
     // 左右同时按下仍是同一位（不得叠出第二位）。
-    check_mods(glfw_key_states_to_modifiers(true, true, false, false, false, false, false, false),
-               ModifierKey::Shift);
+    check_mods(glfw_key_states_to_modifiers(true, true, false, false, false, false, false, false), ModifierKey::Shift);
     // 四位齐按 = 15；参数顺序错位（把右当左传）时结果必须不同，否则顺序无意义。
-    check_mods(glfw_key_states_to_modifiers(true, true, true, true, true, true, true, true), ModifierKey::Shift |
-                                                                                                          ModifierKey::Control |
-                                                                                                          ModifierKey::Alt |
-                                                                                                          ModifierKey::Meta);
+    check_mods(glfw_key_states_to_modifiers(true, true, true, true, true, true, true, true),
+               ModifierKey::Shift | ModifierKey::Control | ModifierKey::Alt | ModifierKey::Meta);
     // 只有左 Alt 时不得点亮 Meta：位与位之间不能串扰。
     const auto left_alt_only = glfw_key_states_to_modifiers(false, false, false, false, true, false, false, false);
     AURORA_TEST_CHECK_EQ(left_alt_only & ModifierKey::Meta, std::uint8_t{0});

@@ -30,9 +30,10 @@ auto check_mods(ModifierKey got, ModifierKey want) -> void {
 
 #endif
 
-#define AURORA_X11_MODIFIERS_SKIP                                                                                      \
-    AURORA_TEST_SKIP("non-Linux or AURORA_BACKEND_X11 off: detail/x11_modifiers.h is compiled out; "                     \
-                     "this case requires a real X11 build")
+#define AURORA_X11_MODIFIERS_SKIP                                                       \
+    AURORA_TEST_SKIP(                                                                   \
+        "non-Linux or AURORA_BACKEND_X11 off: detail/x11_modifiers.h is compiled out; " \
+        "this case requires a real X11 build")
 
 // 掩码常量必须与 X11 ABI 一致。这条看似同义反复，实则守着「头内自带常量」这个决定的根：
 // 头刻意不引 Xlib（`None` / `Status` / `Bool` 等宏会污染所有包含者），代价是常量靠手工誊写。
@@ -93,8 +94,8 @@ AURORA_TEST_CASE(x11_state_composes_bits_without_cross_talk) {
     AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(ctrl_shift), std::uint8_t{3});
 
     // 四位齐按：Shift(1) | Ctrl(2) | Mod1→Alt(4) | Mod4→Meta(8) = 15。
-    const auto all_four = aurora::detail::mods_from_x11_state(
-        mask::kShift | mask::kControl | mask::kMod1 | mask::kMod4);
+    const auto all_four =
+        aurora::detail::mods_from_x11_state(mask::kShift | mask::kControl | mask::kMod1 | mask::kMod4);
     AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(all_four), std::uint8_t{15});
 
     // 叠加 NumLock（指针事件也照实携带该位，见 05-event-navigation.md §2.2.2）：
