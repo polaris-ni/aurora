@@ -119,13 +119,26 @@ struct MouseEvent : Event {
     ///        Release / Move 事件恒为 1（不参与连击计数）。判别口径见 specification/05-event-navigation.md §2.2。
     ///        上限 3：更快的连续点击仍记 3，供「三击选整段」这类语义使用。
     std::uint8_t click_count = 1;
+    /// @brief 事件产生那一刻的修饰键位组合（由 Surface 后端在事件构造处写入）。
+    ///
+    /// 与 `KeyEvent::modifiers` 同一个位掩码枚举、同一份真值源，判读方式一致
+    /// （`e.modifiers & ModifierKey::Shift` 非 0 即「按下时 Shift 有效」）。默认 `None` 有两义：
+    /// 既可能是「用户确实没按任何修饰键」，也可能是「本事件不由真实指针产生」——触控合成、
+    /// 可达性动作、诊断注入的程序化事件一律 `None`，因为不存在对应的物理修饰态。**需要区分
+    /// 来源的调用方用既有的 `pointer_id`**（触控合成有值、鼠标为 `nullopt`），不要靠本字段推断。
+    ///
+    /// **派发器只透传、不推断**：`EventDispatcher::dispatch_mouse` 不读「最后一次 `KeyEvent`
+    /// 的 `modifiers`」兜底，也不在派发时刻轮询物理按键态（两种做法的失效场景见
+    /// codespec/specification/05-event-navigation.md §2.2.2）。逐后端真值源同见该节。
+    ModifierKey modifiers = ModifierKey::None;
 };
 
 /// @brief 键盘事件：键码为平台无关的逻辑键码（见 event/keycode.h 的 KeyCode）。
 struct KeyEvent : Event {
     int key = 0;  ///< 逻辑键码的整数值（按 `KeyCode` 解释，见 event/keycode.h）；0 == KeyCode::Unknown（未映射）
     KeyAction action = KeyAction::Down;  ///< 键盘动作（按下/抬起）
-    ModifierKey modifiers = ModifierKey::None;  ///< 修饰键位组合（Shift/Ctrl/Alt/Meta）
+    ModifierKey modifiers =
+        ModifierKey::None;  ///< 修饰键位组合（Shift/Ctrl/Alt/Meta/NumLock；指针与滚轮事件同用此枚举，见 §2.2.2）
 };
 
 /// @brief 滚轮事件（specification/05-event-navigation.md §2.2）。delta 为设备无关增量，y 正方向为向上滚动。
@@ -139,6 +152,15 @@ struct ScrollEvent : Event {
     /// **默认 0 = 全量消费**：不写本字段的既有自定义 handler 行为与「最深可滚动者
     /// 一次性消费、不冒泡」的旧约定逐位一致。
     float remaining_y = 0;
+    /// @brief 事件产生那一刻的修饰键位组合（由 Surface 后端在事件构造处写入）。
+    ///
+    /// 语义与 `MouseEvent::modifiers` 完全一致：同枚举、判读方式相同、真值源在后端、派发器
+    /// 只透传。默认 `None` 同样两义——真实滚轮事件里是「没按修饰键」，程序化合成里是「不由
+    /// 真实滚轮产生」（`Widget::scroll_by` / `Scroll::scroll_by` 这类程序化滚动恒 `None`，
+    /// 不存在对应的物理修饰态）。本结构体无 `pointer_id`，故合成来源不由字段区分：消费方按
+    /// 「`None` 即无修饰」使用即可。逐后端真值源见
+    /// codespec/specification/05-event-navigation.md §2.2.2。
+    ModifierKey modifiers = ModifierKey::None;
 };
 
 /// @brief 文本输入事件（specification/05-event-navigation.md §2.2）：由键盘/输入法产生的 Unicode 文本片段。

@@ -48,6 +48,7 @@
 #include "aurora/render/png.h"
 #include "aurora/window/cursor_map.h"
 #include "aurora/window/detail/ime_composition.h"
+#include "aurora/window/detail/x11_modifiers.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/window_state.h"
 
@@ -94,32 +95,19 @@ auto detect_scale(Display *dpy) -> float {
 /// @brief keysym → 平台无关 KeyCode（X11 后端入口；映射逻辑见 detail::keysym_to_keycode）。
 auto from_keysym(KeySym ks) -> KeyCode { return detail::keysym_to_keycode(static_cast<unsigned long>(ks)); }
 
-/// @brief XKeyEvent.state → 修饰键位组合（Mod1=Alt、Mod4=Super/Meta，X 惯例）。
-///
-/// NumLock 按 X 惯例落在 **Mod2**（`Mod2Mask`）。它不是「按住态」而是**锁定态**，但 X 把锁定态
-/// 也编进事件的 `state` 字段，故这里与其它位同口径取用、无需额外查询。取不到该位时按「关」
-/// 处理，不静默假报「开」。
-auto mods_from_state(unsigned int state) -> ModifierKey {
-    auto m = ModifierKey::None;
-    if ((state & ShiftMask) != 0U) {
-        m = m | ModifierKey::Shift;
-    }
-    if ((state & ControlMask) != 0U) {
-        m = m | ModifierKey::Control;
-    }
-    if ((state & Mod1Mask) != 0U) {
-        m = m | ModifierKey::Alt;
-    }
-    if ((state & Mod4Mask) != 0U) {
-        m = m | ModifierKey::Meta;
-    }
-    if ((state & Mod2Mask) != 0U) {
-        m = m | ModifierKey::NumLock;
-    }
-    return m;
-}
-
 }  // namespace
+
+// 本头自带的 `state` 掩码常量与真实 Xlib 宏逐一对照：X11 协议把它们定为 ABI 稳定常量，
+// 一旦上游改值即编译失败，不会静默错位（折算表本体见 detail/x11_modifiers.h）。
+static_assert(detail::x11_state_mask::kShift == ShiftMask, "X11 ShiftMask value drifted");
+static_assert(detail::x11_state_mask::kLock == LockMask, "X11 LockMask value drifted");
+static_assert(detail::x11_state_mask::kControl == ControlMask, "X11 ControlMask value drifted");
+static_assert(detail::x11_state_mask::kMod1 == Mod1Mask, "X11 Mod1Mask value drifted");
+static_assert(detail::x11_state_mask::kMod2 == Mod2Mask, "X11 Mod2Mask value drifted");
+static_assert(detail::x11_state_mask::kMod3 == Mod3Mask, "X11 Mod3Mask value drifted");
+static_assert(detail::x11_state_mask::kMod4 == Mod4Mask, "X11 Mod4Mask value drifted");
+
+namespace aurora {
 
 /// @brief X11Surface 的全部 Xlib 状态（pimpl）：公共头零 Xlib 依赖。
 struct X11Surface::Impl {
@@ -981,7 +969,11 @@ auto X11Surface::poll_platform_events() -> void {
             notify_window_state(want);
         }
     };
-    auto send_mouse = [&](MouseAction action, MouseButton button, float px, float py) -> void {
+    // `state` = 该消息的修饰态掩码（`XButtonEvent` / `XMotionEvent` 与 `XKeyEvent` 共用同一字段
+    // 布局，X 核心协议保证三者的 `state` 语义一致）。折算走 detail::mods_from_x11_state，
+    // 与键盘路径同一实现、同一口径（Mod1=Alt、Mod4=Meta），不为指针另写一份掩码映射。
+    // 调用方传 0 表示「该消息不带状态」（见 LeaveNotify），折算结果为 None，即不可知即无修饰。
+    auto send_mouse = [&](MouseAction action, MouseButton button, float px, float py, unsigned int state) -> void {
         if (!d.handler) {
             return;
         }
@@ -989,6 +981,7 @@ auto X11Surface::poll_platform_events() -> void {
         e.action = action;
         e.button = button;
         e.position = Point{.x = px / d.scale, .y = py / d.scale};
+        e.modifiers = detail::mods_from_x11_state(state);
         d.handler(e);
     };
     XEvent ev;
@@ -1020,6 +1013,8 @@ auto X11Surface::poll_platform_events() -> void {
                         } else {
                             se.delta_x = 1.0F;
                         }
+                        // 修饰态取本条 `XButtonEvent` 的 state，与键盘 / 指针路径同一折算。
+                        se.modifiers = detail::mods_from_x11_state(ev.xbutton.state);
                         d.handler(se);
                     }
                     break;
@@ -1028,7 +1023,7 @@ auto X11Surface::poll_platform_events() -> void {
                                        : (btn == 2) ? MouseButton::Middle
                                                     : MouseButton::Left;
                 send_mouse(press ? MouseAction::Press : MouseAction::Release, mb, static_cast<float>(ev.xbutton.x),
-                           static_cast<float>(ev.xbutton.y));
+                           static_cast<float>(ev.xbutton.y), ev.xbutton.state);
                 break;
             }
             case MotionNotify: {
@@ -1043,12 +1038,14 @@ auto X11Surface::poll_platform_events() -> void {
                     }
                 }
                 send_mouse(MouseAction::Move, MouseButton::Left, static_cast<float>(ev.xmotion.x),
-                           static_cast<float>(ev.xmotion.y));
+                           static_cast<float>(ev.xmotion.y), ev.xmotion.state);
                 break;
             }
             case LeaveNotify:
                 // 光标离开窗口：合成一次远离窗口的 Move → 命中空链清除全部悬停态（对齐 WM_MOUSELEAVE）。
-                send_mouse(MouseAction::Move, MouseButton::Left, -10000.0F * d.scale, -10000.0F * d.scale);
+                // 传 0：`XLeaveWindowEvent`（`XCrossingEvent`）**没有** `state` 字段，修饰态在此
+                // 不可知，按「不可知即 None」处理——本条事件只用于清悬停，不承载手势语义。
+                send_mouse(MouseAction::Move, MouseButton::Left, -10000.0F * d.scale, -10000.0F * d.scale, 0U);
                 break;
             case KeyPress: {
                 KeySym ks = 0;
@@ -1079,7 +1076,7 @@ auto X11Surface::poll_platform_events() -> void {
                     KeyEvent e;
                     e.action = KeyAction::Down;
                     e.key = static_cast<int>(from_keysym(ks));
-                    e.modifiers = mods_from_state(ev.xkey.state);
+                    e.modifiers = detail::mods_from_x11_state(ev.xkey.state);
                     d.handler(e);
                 }
                 // 可打印文本 → TextInputEvent；控制字符（回车/退格/Esc…）交给 KeyEvent。
@@ -1105,7 +1102,7 @@ auto X11Surface::poll_platform_events() -> void {
                     KeyEvent e;
                     e.action = KeyAction::Up;
                     e.key = static_cast<int>(from_keysym(XLookupKeysym(&ev.xkey, 0)));
-                    e.modifiers = mods_from_state(ev.xkey.state);
+                    e.modifiers = detail::mods_from_x11_state(ev.xkey.state);
                     d.handler(e);
                 }
                 break;

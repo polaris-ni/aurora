@@ -225,6 +225,10 @@ struct WaylandSurface::Impl {
         e.action = action;
         e.button = button;
         e.position = Point{lx, ly};
+        // 修饰态取 `on_modifiers` 维护的 xkb 缓存：Wayland 协议**不随指针事件送修饰态**
+        // （wl_pointer 的 enter/motion/button 回调都没有 mods 参数），故该缓存是本后端指针
+        // 路径唯一可得来源，与键盘路径（on_key）读的同一个字段、同一份值。
+        e.modifiers = mods;
         handler(e);
     }
 
@@ -567,6 +571,7 @@ void ptr_axis(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, std::uint3
     } else {
         se.delta_x = amount;
     }
+    se.modifiers = d.mods;  // 真值源同 send_mouse / on_key：xkb 缓存（协议不随指针事件送修饰态）。
     d.handler(se);
 }
 

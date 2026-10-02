@@ -336,6 +336,11 @@ auto Win32Host::Impl::on_mouse(MouseAction action, MouseButton button, int x, in
     e.action = action;
     e.button = button;
     e.position = to_logical(x, y);
+    // 修饰态取自 `ModifierKeyTracker`——与 `KeyEvent` 同一份队列相对状态（同一个 `get()`）。
+    // 不读鼠标消息 `wParam` 的 `MK_LBUTTON` 一类位：按 Win32 约定那几位不携带 Alt，走它就得
+    // 为 Alt 另接一个来源，同一字段两个真值源不可取。tracker 的生命周期策略（失激活清空、
+    // 重激活播种一次异步读数、指针捕获变化**不**清空）保证 Shift+拖选跨出窗口仍保住 Shift。
+    e.modifiers = mods.get();
     handler(e);
 }
 
@@ -346,6 +351,7 @@ auto Win32Host::Impl::on_wheel(int delta, int x, int y) const -> void {
     ScrollEvent e;
     e.position = to_logical(x, y);
     e.delta_y = static_cast<float>(delta) / static_cast<float>(WHEEL_DELTA);
+    e.modifiers = mods.get();  // 真值源同 `on_mouse` / `on_key`：一份 tracker，队列相对。
     handler(e);
 }
 

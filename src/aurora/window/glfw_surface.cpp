@@ -37,6 +37,7 @@
 #include "aurora/event/keycode.h"
 #include "aurora/render/png.h"
 #include "aurora/window/cursor_map.h"
+#include "aurora/window/detail/glfw_modifiers.h"
 #include "aurora/window/win32_capture.h"
 #include "aurora/window/window_state.h"
 
@@ -244,30 +245,12 @@ namespace aurora {
     }
 }
 
-[[nodiscard]] static auto glfw_mods_to_aurora(int mods) -> ModifierKey {
-    auto m = ModifierKey::None;
-    // NOLINTBEGIN(*-signed-bitwise)
-    if ((mods & GLFW_MOD_SHIFT) != 0) {
-        m = m | ModifierKey::Shift;
-    }
-    if ((mods & GLFW_MOD_CONTROL) != 0) {
-        m = m | ModifierKey::Control;
-    }
-    if ((mods & GLFW_MOD_ALT) != 0) {
-        m = m | ModifierKey::Alt;
-    }
-    if ((mods & GLFW_MOD_SUPER) != 0) {
-        m = m | ModifierKey::Meta;
-    }
-    // NOLINTEND(*-signed-bitwise)
-    return m;
-}
-
 /// @brief 读 NumLock 锁定态并并入修饰位集。
 ///
-/// GLFW 的 `GLFW_MOD_*` 掩码**不含** NumLock（它只有 Shift / Control / Alt / Super / CapsLock /
-/// NumLock 五个，其中后两个在本版本未暴露为掩码），故须按 `GLFW_KEY_NUM_LOCK` 单独查询。
-/// 读法用 `glfwGetKey` 的**当前态**而非按下事件：NumLock 是切换键，没有「按住」语义。
+/// GLFW 的 `GLFW_MOD_*` 掩码确有 `GLFW_MOD_NUM_LOCK`（0x0020），但它**只在开启了
+/// `GLFW_LOCK_KEY_MODS` 输入模式时**才随事件上报（见 `glfw3.h` 对该掩码的说明）；本后端不
+/// 依赖该模式，故按 `GLFW_KEY_NUM_LOCK` 单独查询。读法用 `glfwGetKey` 的**缓存事件态**
+/// 而非按下事件：NumLock 是切换键，没有「按住」语义。
 /// @param w 目标窗口。
 /// @return 该位已并入的修饰位集。
 [[nodiscard]] static auto with_glfw_numlock(GLFWwindow *w, ModifierKey m) -> ModifierKey {
@@ -706,10 +689,12 @@ auto GlfwSurface::Impl::on_cursor_pos(GLFWwindow *w, double x, double y) -> void
     e.action = MouseAction::Move;
     e.button = MouseButton::Left;
     e.position = to_logical(x, y);
+    // 本回调签名不带 `mods`（GLFW 只给 button / key / char 回调发掩码），故读缓存事件态。
+    e.modifiers = detail::glfw_cached_modifiers(w);
     self->handler(e);
 }
 
-auto GlfwSurface::Impl::on_mouse_button(GLFWwindow *w, int button, int action, int /*mods*/) -> void {
+auto GlfwSurface::Impl::on_mouse_button(GLFWwindow *w, int button, int action, int mods) -> void {
     const auto *self = static_cast<Impl *>(glfwGetWindowUserPointer(w));
     if (self == nullptr || !self->handler) {
         return;
@@ -727,6 +712,8 @@ auto GlfwSurface::Impl::on_mouse_button(GLFWwindow *w, int button, int action, i
     double y = 0.0;
     glfwGetCursorPos(w, &x, &y);
     e.position = to_logical(x, y);
+    // 回调形参已带 `mods` 掩码，直接折算——与键盘路径同一入口、同一口径。
+    e.modifiers = detail::glfw_mods_to_aurora(mods);
     self->handler(e);
 }
 
@@ -738,7 +725,7 @@ auto GlfwSurface::Impl::on_key(GLFWwindow *w, int key, int /*scancode*/, int act
     KeyEvent e;
     e.key = static_cast<int>(from_glfw_key(key));
     e.action = (action == GLFW_RELEASE) ? KeyAction::Up : KeyAction::Down;
-    e.modifiers = with_glfw_numlock(w, glfw_mods_to_aurora(mods));
+    e.modifiers = with_glfw_numlock(w, detail::glfw_mods_to_aurora(mods));
     self->handler(e);
 }
 
@@ -754,6 +741,8 @@ auto GlfwSurface::Impl::on_scroll(GLFWwindow *w, double xoff, double yoff) -> vo
     e.position = to_logical(x, y);
     e.delta_x = static_cast<float>(xoff);
     e.delta_y = static_cast<float>(yoff);
+    // 同 on_cursor_pos：本回调签名不带 `mods`，读 GLFW 缓存事件态（详见 detail/glfw_modifiers.h）。
+    e.modifiers = detail::glfw_cached_modifiers(w);
     self->handler(e);
 }
 

@@ -345,6 +345,21 @@ class WasmSurface : public Surface {
         ev.action = (type == EMSCRIPTEN_EVENT_MOUSEDOWN) ? MouseAction::Press
                     : (type == EMSCRIPTEN_EVENT_MOUSEUP) ? MouseAction::Release
                                                          : MouseAction::Move;
+        // 修饰态：四个 `bool` 字段（实测本机 emsdk 的 `html5.h`，字段名与键盘路径的
+        // `EmscriptenKeyboardEvent` 同名同型）。DOM 事件自带该快照，故读取即「那一刻」的状态，
+        // 无需额外查询。DOM 不提供 NumLock（浏览器无此键），故本后端指针事件恒四位。
+        if (e->shiftKey) {
+            ev.modifiers = ev.modifiers | ModifierKey::Shift;
+        }
+        if (e->ctrlKey) {
+            ev.modifiers = ev.modifiers | ModifierKey::Control;
+        }
+        if (e->altKey) {
+            ev.modifiers = ev.modifiers | ModifierKey::Alt;
+        }
+        if (e->metaKey) {
+            ev.modifiers = ev.modifiers | ModifierKey::Meta;
+        }
         // 多窗口：最近交互（按下）的 canvas 成为键盘/事件焦点，页面标题随之跟随。
         if (ev.action == MouseAction::Press) {
             take_focus(self);
