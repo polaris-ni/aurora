@@ -37,7 +37,7 @@ struct Event {
 | 事件 | 字段 | 位置 |
 |:---|:---|:---|
 | `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button`、`pointer_id`、`click_count`（连击序号，见下） | `event.h` |
-| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers` | `event.h` |
+| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers`（位掩码，含 `Shift`/`Control`/`Alt`/`Meta` 与 **`NumLock`**） | `event.h` |
 | `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0） | `event.h` |
 | `TextInputEvent` | `text`（UTF-8 文本片段） | `event.h` |
 | `TextCompositionEvent` | `preedit`（UTF-8 预编辑串，空 = 组合结束/取消）、`cursor_index`（组合光标，**preedit 内码点下标**）、`sel_start` / `sel_end`（待转换选区，含尾；无选区时 `sel_end == AURORA_NO_SELECTION`）、`committed`（本次上屏文本，UTF-8） | `event.h` |
@@ -45,6 +45,12 @@ struct Event {
 | `TouchEvent` | `TouchPoint{id, position, prev_position, is_active}` 集合 | `event.h` |
 
 枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h）、`KeyCode`（`keycode.h`）。
+
+**数字小键盘（Keypad）口径**：`KeyCode` 的 `KP_*` 段（`KP_Insert` / `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` / `KP_Add` / `KP_Subtract` / `KP_Multiply` / `KP_Divide` / `KP_Decimal` / `KP_Separator` / `KP_0`–`KP_9`）建模全部小键盘键位，追加在枚举末尾并**写死显式数值**（`KP_Insert = 100` 起）——消费方普遍持有「键码 → 平台原生值」的逐值对齐映射表，中间插入新项会让那些表**静默错位**。`KP_Enter` 按既有决定并入 `KeyCode::Enter`，不单列。`NumLock` 建模为**修饰位**（`ModifierKey::NumLock = 1 << 4`）而非键码：它是切换键、对终端无发送意义，而消费方需要的是「本条按键发生时 NumLock 是开还是关」这一位。
+
+**框架不做二次翻译**：`KP_Prior` 恒为 `KP_Prior`，**不会**因 NumLock 关闭就降级成 `PageUp`。宿主的职责只到这里——「平台原始键 → 语义键码 + 修饰态」的一一映射；「NumLock 关闭时 `KP_Prior` 语义 = PageUp」这类降级由消费方按 `modifiers & ModifierKey::NumLock` 自行决定。后端取不到 NumLock 状态时按「关」处理，不静默假报「开」。
+
+**跨后端产出不一致（平台事实，非疏漏）**：`KP_0`–`KP_9` 与运算键（`KP_Add` / `KP_Subtract` / `KP_Multiply` / `KP_Divide` / `KP_Decimal` / `KP_Separator`）三后端齐备；`KP_Insert` / `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` **只有 X11 / Wayland 后端产出**（X11 的 KP_* keysym 与主键各占独立码点，天然可分）。Win32 在导航区把两边**共用同一组虚拟键码**，实测六个键里只有 `Home` 真的可分（主键盘扫描码 `0x47` / 小键盘 `E0 4E`）——`End` / `PgUp` / `PgDn` 两边的 (VK, scan, extended) 完全相同或仅 extended 位不同（主键盘 PgUp / PgDn 本身就带 E0 前缀），把「带 E0」当成「来自小键盘」会**误判主键盘那两个键**，误判比不判更糟，故判据保守到只认 Home。GLFW 的键码表本身没有 `GLFW_KEY_KP_INSERT` / `_HOME` 之类的常量，同样无法区分。**故消费方在 Win32 与 GLFW 上不能假定这几项一定命中**，需要时应按平台兜底。判据本体在 `src/aurora/window/detail/win32_keymap.h` 的 `is_numpad_nav_scan`（含完整实测对照表）与 `src/aurora/window/keysym_map.h`，均有单测逐值锁定。
 
 **修饰键语义（`KeyEvent::modifiers`）= 队列相对，而非派发时刻的物理读数**：宿主按键盘消息流推进一份修饰位状态（Win32 侧为 `src/aurora/window/detail/win32_modifiers.h` 的 `ModifierKeyTracker`），`KeyEvent` 携带的是「该键在队列里被处理的那一刻」的修饰态。取此口径的理由：在派发时刻异步采样（`GetAsyncKeyState`）会让热键命中与否取决于「消息被泵到之前修饰键是否仍按着」，于是 UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时按键**静默**丢失（同载体同形态实测 0/10，见 `manual-test/21-debug.md` TC-DEBUG-004 备注）。三条配套边界：
 
