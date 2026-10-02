@@ -42,6 +42,7 @@ class TestBox final : public LeafWidget {
     bool consume_drop = false;
     bool activation_keys_to_key_event = false;  ///< 覆写 wants_activation_keys() 的开关
     bool navigation_keys_to_key_event = false;  ///< 覆写 wants_navigation_keys() 的开关
+    bool tab_keys_to_key_event = false;  ///< 覆写 wants_tab_keys() 的开关
 
     int press_count = 0;
     int release_count = 0;
@@ -102,6 +103,8 @@ class TestBox final : public LeafWidget {
     [[nodiscard]] auto wants_activation_keys() const -> bool override { return activation_keys_to_key_event; }
 
     [[nodiscard]] auto wants_navigation_keys() const -> bool override { return navigation_keys_to_key_event; }
+
+    [[nodiscard]] auto wants_tab_keys() const -> bool override { return tab_keys_to_key_event; }
 
     auto on_hover_change(bool entered) -> void override {
         ++hover_changes;
@@ -624,6 +627,82 @@ AURORA_TEST_CASE(direction_keys_reach_a_focused_text_input_before_focus_navigati
     KeyEvent up = key(static_cast<int>(KeyCode::ArrowUp), ModifierKey::None);
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, up, fm));
     AURORA_TEST_CHECK(fm.focused() == tree.left.get());
+}
+
+AURORA_TEST_CASE(tab_keys_honour_the_tab_keys_opt_in) {
+    auto tree = make_tree();
+    FocusManager fm;
+    fm.set_root(tree.row.get());
+
+    auto press_tab = [](ModifierKey mods) -> KeyEvent {
+        KeyEvent e;
+        e.key = static_cast<int>(KeyCode::Tab);
+        e.action = KeyAction::Down;
+        e.modifiers = mods;
+        return e;
+    };
+
+    // (c) 未覆写 wants_tab_keys()：Tab 序遍历，焦点控件观察不到按键（既有语义逐位不变）。
+    KeyEvent baseline = press_tab(ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, baseline, fm));
+    AURORA_TEST_CHECK(fm.focused() == tree.box1.get());
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 0);
+    KeyEvent baseline_next = press_tab(ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, baseline_next, fm));
+    AURORA_TEST_CHECK(fm.focused() == tree.box2.get());
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 0);
+
+    // (a) 覆写为 true 且 on_key_event 消费：按键先到控件，焦点不动，派发返回已处理。
+    fm.set_focus(tree.box1.get());
+    tree.box1->tab_keys_to_key_event = true;
+    tree.box1->consume_keys = true;
+    KeyEvent claimed = press_tab(ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, claimed, fm));
+    AURORA_TEST_CHECK_TRUE(claimed.is_handled);
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 1);
+    AURORA_TEST_CHECK(fm.focused() == tree.box1.get());
+
+    // (b) 覆写为 true 但不消费：回落焦点序遍历，焦点按方向前移。
+    tree.box1->consume_keys = false;
+    KeyEvent unclaimed = press_tab(ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, unclaimed, fm));
+    AURORA_TEST_CHECK_TRUE(unclaimed.is_handled);
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 2);
+    AURORA_TEST_CHECK(fm.focused() == tree.box2.get());
+
+    // (d) Shift+Tab 后退方向在 (a) 消费态下正确：焦点控件消费即止，不做后退。
+    fm.set_focus(tree.box2.get());
+    tree.box2->tab_keys_to_key_event = true;
+    tree.box2->consume_keys = true;
+    KeyEvent shift_claimed = press_tab(ModifierKey::Shift);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, shift_claimed, fm));
+    AURORA_TEST_CHECK_EQ(tree.box2->key_count, 1);
+    AURORA_TEST_CHECK(fm.focused() == tree.box2.get());
+
+    // (d) Shift+Tab 后退方向在 (b) 不消费态下正确：回落后退到 box1。
+    tree.box2->consume_keys = false;
+    KeyEvent shift_unclaimed = press_tab(ModifierKey::Shift);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, shift_unclaimed, fm));
+    AURORA_TEST_CHECK_EQ(tree.box2->key_count, 2);
+    AURORA_TEST_CHECK(fm.focused() == tree.box1.get());
+}
+
+// Tab 序遍历的「仅按下阶段」口径：KeyAction::Up 不匹配全局快捷键，直接落焦点控件。
+// 这一条守住 wants_tab_keys() 前置投递没有被误放到释放阶段（否则控件会收到两次 Tab）。
+AURORA_TEST_CASE(tab_key_opt_in_only_applies_to_key_down) {
+    auto tree = make_tree();
+    FocusManager fm;
+    fm.set_root(tree.row.get());
+    tree.box1->tab_keys_to_key_event = true;
+    tree.box1->consume_keys = true;
+    fm.set_focus(tree.box1.get());
+
+    KeyEvent up;
+    up.key = static_cast<int>(KeyCode::Tab);
+    up.action = KeyAction::Up;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, up, fm));
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 1);
+    AURORA_TEST_CHECK(fm.focused() == tree.box1.get());
 }
 
 AURORA_TEST_CASE(activation_keys_route_to_key_event_for_opt_in_widgets) {
