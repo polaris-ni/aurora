@@ -37,6 +37,7 @@
 #include "aurora/event/keycode.h"
 #include "aurora/render/png.h"
 #include "aurora/window/cursor_map.h"
+#include "aurora/window/detail/glfw_dpi.h"
 #include "aurora/window/detail/glfw_keymap.h"
 #include "aurora/window/detail/glfw_modifiers.h"
 #include "aurora/window/win32_capture.h"
@@ -73,11 +74,11 @@ namespace aurora {
 // pimpl：全部 GLFW/OpenGL 状态与回调都在这里；公共头仅持有 unique_ptr<Impl>。
 struct GlfwSurface::Impl {
     GLFWwindow *window = nullptr;
+    /// 逻辑尺寸（dp）——对外 `size()` 的值，由帧缓冲物理像素除以 `scale` 得。
     Size logical_size{.width = 800.0F, .height = 600.0F};
+    /// 内容缩放因子（`glfwGetWindowContentScale`）：GLFW 屏幕坐标 → aurora 逻辑 dp 的换算因子。
     float scale = 1.0F;
     Painter painter_impl;
-    int painter_w = 0;
-    int painter_h = 0;
     int frame = 0;
     EventHandler handler;
     bool minimized = false;  ///< 是否最小化（GLFW iconify 回调）。
@@ -123,6 +124,12 @@ struct GlfwSurface::Impl {
     auto painter() -> Painter & { return painter_impl; }
     auto present() -> Result<bool>;
     [[nodiscard]] auto size() const -> Size { return logical_size; }
+    /// 帧缓冲**物理**像素尺寸：与 `data()` 返回的软件缓冲严格同尺寸（`Surface` 契约要求
+    /// painter 按物理分辨率分配时必须覆写，否则快照 PNG 宽高与像素数据错位）。
+    [[nodiscard]] auto framebuffer_size() const -> Size {
+        return Size{.width = static_cast<float>(painter_impl.width()),
+                    .height = static_cast<float>(painter_impl.height())};
+    }
     [[nodiscard]] auto scale_factor() const -> float { return scale; }
     [[nodiscard]] auto should_close() const -> bool { return glfwWindowShouldClose(window) == GLFW_TRUE; }
     static auto poll_platform_events() -> void { glfwPollEvents(); }
@@ -168,9 +175,11 @@ struct GlfwSurface::Impl {
     static auto on_window_focus(GLFWwindow *w, int focused) -> void;
     static auto on_window_maximize(GLFWwindow *w, int maximized) -> void;
 
-    /// @brief 坐标换算：GLFW 光标位置已是内容坐标，与 aurora 逻辑坐标空间一致，故恒等。
-    [[nodiscard]] static auto to_logical(double x, double y) -> Point {
-        return Point{.x = static_cast<float>(x), .y = static_cast<float>(y)};
+    /// @brief 坐标换算：GLFW 光标位置是**屏幕坐标**（DPI 感知进程里即物理像素），
+    /// 换算成 aurora 逻辑 dp 须除以内容缩放因子。滚轮增量是**delta**，不换算。
+    [[nodiscard]] static auto to_logical(double x, double y, float scale) -> Point {
+        return Point{.x = static_cast<float>(detail::glfw_dp_from_px(static_cast<int>(x), scale)),
+                     .y = static_cast<float>(detail::glfw_dp_from_px(static_cast<int>(y), scale))};
     }
 
     /// @brief 由最小化/最大化标志重算几何态，仅实际改变时上报。
@@ -229,8 +238,21 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
             break;
     }
 
-    window = glfwCreateWindow(static_cast<int>(cfg.size.width), static_cast<int>(cfg.size.height), cfg.title.c_str(),
-                              nullptr, nullptr);
+    // 建窗尺寸的单位是**屏幕坐标**（= DPI 感知进程里的物理像素），而 cfg.size 是逻辑 dp，
+    // 两者只差一个内容缩放因子。GLFW 没有「尚未创建的窗口」的内容缩放查询，只能先按主显示器
+    // 预估：命中主显示器时首次出现即正确（无尺寸跳变），窗口最终落到别的显示器时由下面的
+    // 建窗后校正兜一次。
+    float hint_scale = 1.0F;
+    if (GLFWmonitor *primary = glfwGetPrimaryMonitor(); primary != nullptr) {
+        float mx = 1.0F;
+        float my = 1.0F;
+        glfwGetMonitorContentScale(primary, &mx, &my);
+        hint_scale = mx;  // 假设各向同性 DPI（与建窗后读 window content scale 同口径）
+    }
+    const int create_w = detail::glfw_px_from_dp(static_cast<int>(std::lround(cfg.size.width)), hint_scale);
+    const int create_h = detail::glfw_px_from_dp(static_cast<int>(std::lround(cfg.size.height)), hint_scale);
+
+    window = glfwCreateWindow(create_w, create_h, cfg.title.c_str(), nullptr, nullptr);
     if (window == nullptr && want_gpu) {
         // core profile 创建失败（驱动过老/远程桌面/虚拟机等）：降级软件模式重建窗口，不整体失败。
         AURORA_LOG_INFO("gpu-gl", "core-profile window creation failed; retrying with software compat profile");
@@ -239,8 +261,7 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
         // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 死存储只在 GPU_GL=OFF 配置下成立，开启后读点要用它
         want_gpu = false;
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
-        window = glfwCreateWindow(static_cast<int>(cfg.size.width), static_cast<int>(cfg.size.height),
-                                  cfg.title.c_str(), nullptr, nullptr);
+        window = glfwCreateWindow(create_w, create_h, cfg.title.c_str(), nullptr, nullptr);
     }
     if (window == nullptr) {
         glfwTerminate();
@@ -278,6 +299,17 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     float yscale = 1.0F;
     glfwGetWindowContentScale(window, &xscale, &yscale);
     scale = xscale;  // 假设各向同性 DPI
+    // 建窗后校正一次：窗口的真实内容缩放（per-monitor）可能与上面按主显示器预估的不同
+    // （窗口落到了另一块屏、或主屏本身在 GLFW 初始化后才确定缩放）。校正只做一次，且在
+    // 第一次 present 之前完成——与 Win32 建窗期 DPI 那条腿（08-tooling.md §8.2）同一口径。
+    const int want_w = detail::glfw_px_from_dp(static_cast<int>(std::lround(cfg.size.width)), scale);
+    const int want_h = detail::glfw_px_from_dp(static_cast<int>(std::lround(cfg.size.height)), scale);
+    int cur_w = 0;
+    int cur_h = 0;
+    glfwGetWindowSize(window, &cur_w, &cur_h);
+    if ((cur_w != want_w) || (cur_h != want_h)) {
+        glfwSetWindowSize(window, want_w, want_h);
+    }
 }
 
 GlfwSurface::Impl::~Impl() {
@@ -370,41 +402,48 @@ auto GlfwSurface::set_cursor(CursorShape shape) -> void {
     glfwSetCursor(pimpl_->window, handle);
 }
 
-auto GlfwSurface::Impl::begin_frame(int /*width*/, int /*height*/) -> Result<bool> {
-    int c_w = 0;
-    int c_h = 0;
-    glfwGetWindowSize(window, &c_w, &c_h);
-    if (c_w <= 0) {
-        c_w = static_cast<int>(logical_size.width);
-    }
-    if (c_h <= 0) {
-        c_h = static_cast<int>(logical_size.height);
-    }
+auto GlfwSurface::Impl::begin_frame(int width, int height) -> Result<bool> {
+    // 软件帧缓冲按**物理**分辨率分配，几何绘制把 dp 坐标 × scale，1:1 贴窗口避免发虚——
+    // 与 Win32Surface / D3D11Surface / X11 / Wayland 同一模型。落地只需一次
+    // `Painter::set_scale`（`Painter::begin` 收的是逻辑 dp，内部按 scale_ 分配物理缓冲），
+    // 本后端此前漏调这一句，于是 `size()` 报的是 GLFW 屏幕坐标（物理像素）而
+    // `scale_factor()` 报 1.5，同一时刻对外宣称两个互斥的尺寸口径。
+    painter_impl.set_scale(scale);
 
+    // 帧缓冲物理像素是真值源（GLFW 屏幕坐标）；报不出来时（最小化等）按调用方给的
+    // 逻辑 dp × scale 兜底。
     int fb_w = 0;
     int fb_h = 0;
     glfwGetFramebufferSize(window, &fb_w, &fb_h);
     if (fb_w <= 0) {
-        fb_w = c_w;
+        fb_w = detail::glfw_px_from_dp(width, scale);
     }
     if (fb_h <= 0) {
-        fb_h = c_h;
+        fb_h = detail::glfw_px_from_dp(height, scale);
+    }
+    if (fb_w <= 0) {
+        fb_w = 1;
+    }
+    if (fb_h <= 0) {
+        fb_h = 1;
     }
 
-    // aurora 逻辑坐标空间 == GLFW 内容坐标空间，故逻辑尺寸即内容尺寸。
-    logical_size = Size{.width = static_cast<float>(c_w), .height = static_cast<float>(c_h)};
-    if (c_w != painter_w || c_h != painter_h) {
-        painter_impl.begin(c_w, c_h);  // 软件栅格缓冲按逻辑尺寸；呈现时拉伸到 framebuffer。
-        painter_w = c_w;
-        painter_h = c_h;
+    // 对外逻辑尺寸（dp）= 物理像素 ÷ scale；物理像素只留在本函数内部与 framebuffer_size()。
+    const int dp_w = detail::glfw_dp_from_px(fb_w, scale);
+    const int dp_h = detail::glfw_dp_from_px(fb_h, scale);
+    logical_size = Size{.width = static_cast<float>(dp_w), .height = static_cast<float>(dp_h)};
+    // 判据用 painter 的**物理**缓冲尺寸（Painter::width/height 返回物理值），与
+    // begin_frame 的入参单位无关，故两次调用间不会因单位混用而每帧重分配。
+    if ((fb_w != painter_impl.width()) || (fb_h != painter_impl.height())) {
+        painter_impl.begin(dp_w, dp_h);
     }
 
     // 每帧用浅色背景清空软件帧缓冲：默认文字为黑色，需要浅色底才能可见
     // （widget 默认 Color::black()；此前全屏纹理为透明黑导致黑底黑字不可见）。
+    // 矩形给**逻辑 dp**，由 painter 内部 × scale 落到物理缓冲。
     // GPU 模式下本 fill 处于录制模式（present_root 先 record 后 begin_frame），
     // 命令入帧 DL 承担窗口底色，软件像素缓冲仅为回退兜底。
-    painter_impl.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                                .size = Size{.width = static_cast<float>(c_w), .height = static_cast<float>(c_h)}},
+    painter_impl.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = logical_size},
                            Color{245, 245, 247, 255});
 
     // 默认帧缓冲清屏仅软件路径需要（立即模式全屏 quad 不覆盖区外的边角）；
@@ -456,13 +495,16 @@ auto GlfwSurface::Impl::upload_and_draw() -> void {
     ensure_gl_objects();
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, tex);
-    if (tex_w != painter_w || tex_h != painter_h) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, painter_w, painter_h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                     painter_impl.data());
-        tex_w = painter_w;
-        tex_h = painter_h;
+    // 纹理按 painter 的**物理**缓冲尺寸分配（Painter::width/height 返回物理像素），
+    // 与全屏四边形的采样坐标逐像素对齐；上传后不缩放，故与帧缓冲 1:1 呈现。
+    const int buf_w = painter_impl.width();
+    const int buf_h = painter_impl.height();
+    if (tex_w != buf_w || tex_h != buf_h) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, buf_w, buf_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, painter_impl.data());
+        tex_w = buf_w;
+        tex_h = buf_h;
     } else {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, painter_w, painter_h, GL_RGBA, GL_UNSIGNED_BYTE, painter_impl.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, buf_w, buf_h, GL_RGBA, GL_UNSIGNED_BYTE, painter_impl.data());
     }
     // 立即模式全屏四边形：UV 翻转使软件帧缓冲（上→下）正确呈现为直立图像。
     glBegin(GL_QUADS);
@@ -496,7 +538,7 @@ auto GlfwSurface::Impl::on_cursor_pos(GLFWwindow *w, double x, double y) -> void
     MouseEvent e;
     e.action = MouseAction::Move;
     e.button = MouseButton::Left;
-    e.position = to_logical(x, y);
+    e.position = to_logical(x, y, self->scale);
     // 本回调签名不带 `mods`（GLFW 只给 button / key / char 回调发掩码），故读缓存事件态。
     e.modifiers = detail::glfw_cached_modifiers(w);
     self->handler(e);
@@ -519,7 +561,7 @@ auto GlfwSurface::Impl::on_mouse_button(GLFWwindow *w, int button, int action, i
     double x = 0.0;
     double y = 0.0;
     glfwGetCursorPos(w, &x, &y);
-    e.position = to_logical(x, y);
+    e.position = to_logical(x, y, self->scale);
     // 回调形参已带 `mods` 掩码，直接折算——与键盘路径同一入口、同一口径。
     e.modifiers = detail::glfw_mods_to_aurora(mods);
     self->handler(e);
@@ -546,7 +588,7 @@ auto GlfwSurface::Impl::on_scroll(GLFWwindow *w, double xoff, double yoff) -> vo
     double x = 0.0;
     double y = 0.0;
     glfwGetCursorPos(w, &x, &y);
-    e.position = to_logical(x, y);
+    e.position = to_logical(x, y, self->scale);
     e.delta_x = static_cast<float>(xoff);
     e.delta_y = static_cast<float>(yoff);
     // 同 on_cursor_pos：本回调签名不带 `mods`，读 GLFW 缓存事件态（详见 detail/glfw_modifiers.h）。
@@ -655,8 +697,13 @@ auto GlfwSurface::set_size(Size s) -> void {
     if (pimpl_ == nullptr || pimpl_->window == nullptr) {
         return;
     }
-    glfwSetWindowSize(pimpl_->window, static_cast<int>(std::lround(s.width)), static_cast<int>(std::lround(s.height)));
+    // 入参是逻辑 dp，GLFW 窗口尺寸是屏幕坐标（物理像素）——必须换算，否则 ≠100% DPI 下
+    // 窗口会比请求的 dp 小一个 scale 倍（与建窗路径 `glfwCreateWindow` 同一换算）。
+    glfwSetWindowSize(pimpl_->window, detail::glfw_px_from_dp(static_cast<int>(std::lround(s.width)), pimpl_->scale),
+                      detail::glfw_px_from_dp(static_cast<int>(std::lround(s.height)), pimpl_->scale));
 }
+
+[[nodiscard]] auto GlfwSurface::framebuffer_size() const -> Size { return pimpl_->framebuffer_size(); }
 
 [[nodiscard]] auto GlfwSurface::begin_frame(int width, int height) -> Result<bool> {
     return pimpl_->begin_frame(width, height);

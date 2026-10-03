@@ -786,11 +786,10 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
 - 双窗独立性：两窗各自 `present` 后帧尺寸等比且中心色独立命中；各自经 `Surface::set_event_handler`
   接线独立 `FocusManager` 后合成窗口事件互不串台；应用内焦点互不干扰（获焦只改变本窗聚焦控件的
   聚焦背景）。
-- 帧等比率口径：读回帧与逻辑尺寸的**等比率**（纵横比一致，容差 0.02）是跨后端不变量；「物理 =
-  逻辑 × scale」**不是跨后端**不变量——GLFW 软件路径读回帧为逻辑尺寸，Win32 家族为物理尺寸。
-  断言不得绑定绝对物理像素，`scale_factor()` 逐窗动态读取，DPI 缩放环境下的采样点按帧/逻辑尺寸
-  比例映射。**Win32 家族内部**则已收敛为单一真值源：帧物理尺寸 == 逻辑 × `scale_factor()` 逐位成立
-  （见下文 resize 条的 Win32 几何口径）。
+- 帧等比率口径：读回帧与逻辑尺寸的**等比率**（纵横比一致，容差 0.02）是跨后端不变量；断言不得
+  绑定绝对物理像素，`scale_factor()` 逐窗动态读取，DPI 缩放环境下的采样点按帧/逻辑尺寸比例映射。
+  「物理 = 逻辑 × scale」现已**升为跨后端不变量**（GLFW 侧已收敛，见下条），但仍按后端声明的
+  `framebuffer_size()` 而非推算值取尺寸——断言的是「后端自己声明的帧缓冲尺寸与逻辑尺寸之比」。
 - 生命周期：关闭一窗不影响另一窗继续渲染读回；RAII 兜底经异常路径验证（中途 throw 后 `Session`
   析构关窗、不残留幽灵窗口）；同规格重建与连续开关循环成功（资源不泄漏的可移植运行时证据；OS 层
   枚举窗口数不可移植，不做）。
@@ -839,8 +838,16 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
     `533.33×400 vs 800×600` 并转红。该探针另设一条「宿主 scale == 独立系统 DPI 读数」的
     环境自证断言：删掉建窗后的 `refresh_scale()` 时，(a)–(d) 仍会**自洽地**全绿（三方都是 1.0），
     唯有这条断言转红——原缺陷的隐蔽性正在于此，不可省。
-  - **本轮仅 Win32 收敛**：X11 / Wayland / GLFW 的 `scale_factor()` 仍缺缩放变化上报
-    （`Surface::set_scale_change_handler` 未被它们 override），见 §7.4 的 resize 缺口条。
+  - **尺寸与标量的口径已跨后端一致，但缩放变化上报仍缺**：GLFW 侧原先把
+    `glfwGetWindowSize`（GLFW 3.3 起是**屏幕坐标**＝物理像素）直接当逻辑 dp 用，却又把
+    `glfwGetWindowContentScale` 原样上报为 `scale_factor()`，于是同一时刻对外宣称
+    「size = 320 dp」与「scale = 1.5」，而窗口实际是 320 物理像素 = 213 dp——`WindowOptions::size`
+    请求的 dp 被系统性缩小了一个 scale 倍，且 100% DPI 下 scale 恰为 1.0、两种单位解读重合，
+    **该分叉在 CI 上完全不显形**。现补 `Painter::set_scale`（Win32 / D3D11 / X11 / Wayland 早有，
+    唯独 GLFW 漏调）+ `framebuffer_size()` override + 建窗与 `set_size` 的 dp↔px 换算（收敛在内部头
+    `window/detail/glfw_dpi.h`，由 `utest_glfw_dpi` 钉住）。**但 X11 / Wayland / GLFW 的
+    `scale_factor()` 仍缺缩放变化上报**（`Surface::set_scale_change_handler` 未被它们 override），
+    跨屏或改系统缩放时该值不会自动更新，见 §7.4 的 resize 缺口条。
 - 脏区语义（`present_root` partial-clip 路径）：树状态已变但无脏登记时 idle 跳帧（`frame_count` 不增、
   `has_pending_dirty()` 为假）；手动 `mark_dirty` 局部矩形后仅裁剪区重绘、**裁剪外保留上帧像素**（与
   「整屏刷底色」实现可区分——后者会画出已变的新色）；随后补标另一侧再验证增量覆盖。
