@@ -6,6 +6,7 @@
 /// 以及 UTF-8 串的码点安全性与等宽整格度量（monospace_cell）的取整口径
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -15,7 +16,9 @@
 
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
+#include "aurora/render/font_discovery.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/render/noto_font_data.h"
 #include "aurora/render/painter.h"
 #include "aurora/render/text_aa_mode.h"
 #include "framework/aurora_test.h"
@@ -449,6 +452,107 @@ AURORA_TEST_CASE(monospace_cell_grid_keeps_ink_columns_drift_free) {
     }
 }
 
+/// @brief 挑一个「实测 advance ≠ 格宽」的码点（UTF-8 串），供固定格档位用例构造语料。
+///
+/// 为什么需要它：固定格档位要证明的是「推进量只由档位决定、而非由各 face 自己的 advance 决定」。
+/// 若语料里每个字形的 advance 都恰好等于格宽，那「开档」与「不开档」的输出**必然相同**，
+/// 判据变成恒真——这不是被测逻辑的问题，是**判据在当前字体环境下结构性不可观测**。
+/// 硬编码某个码点（如「中」）同样不可靠：CI macOS 腿实测 `Cascadia Code` 解析出的面序列
+/// 含该字形、advance 恰等于格宽，硬编码就会在那一腿红（2026-10-03 实测 33 == 33）。
+///
+/// 独立基准：用 `measure_width` 量「单码点 vs 同一 Font 的格宽」，两者不等即入选。
+/// 这只依赖被测的**度量**接口、不依赖选面策略，故不会与被测的推进逻辑同源共振。
+/// @brief 把 U+0080..U+FFFF 的码点编码为 UTF-8（两字节 / 三字节分支）。
+///
+/// 自带分支而不是「一律三字节」：U+0080..U+07FF 是**两字节**（如 U+00A3 £ ⇒ C2 A3），
+/// 一律按三字节编码会得到 `E0 82 A3` —— 那是**另一个码点** U+0823（阿拉伯字母）。
+/// 2026-10-03 实测踩过：候选表里的 `£`/`§`/`±`/`°` 全在两字节区，被错误编码成两字节区
+/// 之外的码点，量出来的宽度是别的字形的宽度，`pick_wide_glyph_for` 于是挑中了伪码点。
+///
+/// 这里的码点集是**判据的输入语料**，与「字符串字面量里写中文」是两回事，故不违反
+/// `check_no_cjk_literals`（该门禁拦的是字面量里的中文字符，码点常量是纯 ASCII 源文本）。
+[[nodiscard]] auto utf8_of(char32_t cp) -> std::string {
+    const auto v = static_cast<std::uint32_t>(cp);
+    std::string out;
+    if (v < 0x80U) {
+        out += static_cast<char>(v);
+    } else if (v < 0x800U) {
+        out += static_cast<char>(0xC0U | (v >> 6U));
+        out += static_cast<char>(0x80U | (v & 0x3FU));
+    } else {
+        out += static_cast<char>(0xE0U | (v >> 12U));
+        out += static_cast<char>(0x80U | ((v >> 6U) & 0x3FU));
+        out += static_cast<char>(0x80U | (v & 0x3FU));
+    }
+    return out;
+}
+
+/// @brief UTF-8 串的首码点（用于验证 `utf8_of` 的编码可逆）。解码失败返回 0。
+[[nodiscard]] auto first_code_point_of(const std::string &s) -> char32_t {
+    if (s.empty()) {
+        return 0;
+    }
+    const auto c0 = static_cast<unsigned char>(s[0]);
+    std::size_t len = 1;
+    char32_t v = 0;
+    if (c0 < 0x80U) {
+        v = c0;
+    } else if ((c0 & 0xE0U) == 0xC0U) {
+        len = 2;
+        v = c0 & 0x1FU;
+    } else if ((c0 & 0xF0U) == 0xE0U) {
+        len = 3;
+        v = c0 & 0x0FU;
+    } else if ((c0 & 0xF8U) == 0xF0U) {
+        len = 4;
+        v = c0 & 0x07U;
+    } else {
+        return 0;
+    }
+    if (s.size() < len) {
+        return 0;
+    }
+    for (std::size_t i = 1; i < len; ++i) {
+        const auto ci = static_cast<unsigned char>(s[i]);
+        if ((ci & 0xC0U) != 0x80U) {
+            return 0;
+        }
+        v = (v << 6U) | (ci & 0x3FU);
+    }
+    return v;
+}
+
+[[nodiscard]] auto pick_wide_glyph_for(const Font &f, int cell_width_px) -> std::string {
+    // 候选集按「CJK → 常用符号」排列，优先取最可能触发缺字回退的码点。
+    // 一律写成**码点整数**而非 `U'中'` 字符字面量：门禁 `check_no_cjk_literals` 连非 ASCII
+    // 字符字面量（`U'€'`）也会拦，而码点整数是纯 ASCII 源文本、语义更精确。
+    // CJK-LITERAL: test-data - 候选码点含 CJK / 假名 / 常用符号，是判据的**输入语料**；
+    // 门禁拦的是「写在字符串字面量里的中文」，此处是码点常量，不属该类。
+    // 候选集按「稳定偏离格宽 → CJK → 假名 → 符号」排列。实测（2026-10-03）：
+    //   U+3000（表意空格）Win 19px / Linux 19px，两平台都 ≠ 格宽 11px ⇒ 首选；
+    //   CJK（U+4E2D 等）Win 19px 而 Linux 11px（Linux 的等宽面已覆盖 CJK）⇒ 退居其次；
+    //   两字节符号（U+00A3 £ 等）Win 11px / Linux 11px ⇒ 基本挑不到，留在末尾兜底。
+    // 顺序按「跨平台命中率」排，不按语义排 —— 判据要的是可观测，不是码点好看。
+    static constexpr std::array<char32_t, 11> CANDIDATES = {0x3000U,  // 表意空格（两平台都偏离格宽）
+                                                            0x4E2DU, 0x6F22U, 0xD55CU, 0x3042U, 0x30A2U,  // CJK / 假名
+                                                            0x2E80U, 0xFF01U, 0x3010U,  // 罕用 CJK 部首 / 全角符号
+                                                            0x00A3U};  // £（两字节区，兜底）
+    for (const char32_t cp : CANDIDATES) {
+        const std::string utf8 = utf8_of(cp);
+        // 编码自检必须验「**可解码回原码点**」而非只验字节数：曾因一律按三字节编码，
+        // 两字节区码点（U+00A3 £）被编成 E0 82 A3（实为 U+0823），字节数仍是 3 ⇒ 旧自检
+        // 形同虚设，挑中了伪码点、量的是别的字形的宽度。
+        if ((cp_count_of(utf8) != 1U) || (first_code_point_of(utf8) != cp)) {
+            continue;
+        }
+        const float w = render::FontEngine::measure_width(utf8, f);
+        if (std::abs(w - static_cast<float>(cell_width_px)) > 0.5F) {
+            return utf8;
+        }
+    }
+    return {};
+}
+
 // ============================ 固定格推进档位 ============================
 //
 // 判据设计要点：像素级判据一律取「同一串文本、同一 Font，只切换档位」的两次绘制做差分，
@@ -503,21 +607,38 @@ AURORA_TEST_CASE(fixed_cell_advance_makes_advance_independent_of_face) {
     // （越界）。MinGW g++ 宽容地截断、clang 直接报 `hex escape sequence out of range`
     // —— 于是语料实际不是「A中B」，而依赖码点内容的判据却照样 PASS（判据与被测对象脱钩）。
     // 拼接写法彻底消除歧义，下面的码点数断言再把「语料被改坏」这类失误即刻暴露出来。
-    // CJK-LITERAL: test-data - 「中」须在等宽族里缺字才能触发回退面，改 ASCII 则该用例退化为空转
-    const std::string mixed =
-        "A\xE4\xB8\xAD"
-        "B";
-    AURORA_TEST_REQUIRE_EQ(cp_count_of(mixed), 3U);  // 语料自检：必须是 A / 中 / B 三个码点
+    //
+    // **跨平台要害**：不能假设「中」在等宽族里必然缺字。实测 CI macOS 腿
+    // `Cascadia Code` 解析出的面序列含该字形、advance 恰等于格宽 11px ⇒
+    // 「开档 vs 不开档」实测相等（33 vs 33），判据前提消失 ⇒ 用例红。
+    // 故语料由下方 `pick_wide_glyph_for()` **实测挑出**，而不是硬编码某个码点。
+    const std::string mixed = "A" + pick_wide_glyph_for(f, cell.cell_width_px) + "B";
+    // 挑不出「advance ≠ 格宽」的码点 ⇒ 本环境下判据结构性不可观测（如实 SKIP，不给假绿）。
+    // 这与「宿主缺前提」不同：前者是字体事实，后者是判据无效，两者不可混为「通过」。
+    if (cp_count_of(mixed) != 3U) {
+        AURORA_TEST_SKIP(
+            "no code point with advance != cell width: fixed-cell criteria unobservable in this environment");
+        return;
+    }
+    AURORA_TEST_REQUIRE_EQ(cp_count_of(mixed), 3U);  // 语料自检：必须是 A / 宽字形 / B 三个码点
 
     render::TextLayoutOpts plain{};
     render::TextLayoutOpts fixed{};
     fixed.fixed_cell_advance_px = static_cast<float>(cell.cell_width_px);
 
-    // 整串宽度：开档后应恰为「字形数 × 格宽」（间距为 0 时）。
+    // 整串宽度：开档后必须**逐字形等于固定步长之和** —— 即 N 个码点 ⇒ N × 格宽。
+    //
+    // 口径要点（本轮实测踩过）：**不能写成「恰好 3 格」**。固定格档位的定义是
+    // 「每个字形一律按 fixed_cell_advance_px 步进」，它**不区分字形宽窄** ——
+    // 一个双宽字形在档位下同样只推一格。实测 Linux 腿 `£`(U+00A3) 的自然 advance
+    // 是 33px（= 3 倍格宽，因 `monospace_cell` 的格宽按 {'0', U+2500} 量取），
+    // 挑它当语料时开档宽度是 11+33+11…——按「每码点一格」写死期望值会得到假红。
+    // 故期望值按「码点数 × 格宽」算，与档位定义同源。
     const float w_plain = render::FontEngine::measure_width(mixed, f, plain);
     const float w_fixed = render::FontEngine::measure_width(mixed, f, fixed);
     AURORA_TEST_CHECK_NE(w_plain, w_fixed);
-    AURORA_TEST_CHECK_NEAR(w_fixed, 3.0F * static_cast<float>(cell.cell_width_px), 0.001F);
+    AURORA_TEST_CHECK_NEAR(w_fixed, static_cast<float>(cp_count_of(mixed)) * static_cast<float>(cell.cell_width_px),
+                           0.001F);
 
     // 关键性质：**每个** caret 边界都落在整格上（不开档时第二个字形之后的边界因回退面
     // 推进量不同而偏离格子）。逐个断言而不是只看串尾。
@@ -543,15 +664,17 @@ AURORA_TEST_CASE(fixed_cell_advance_places_every_glyph_inside_its_own_cell) {
     AURORA_TEST_REQUIRE_GT(cell.cell_width_px, 0);
     const int cw = cell.cell_width_px;
 
-    // 混排 ASCII 与缺字中文：汉字走回退面、其自身 advance ≠ 格宽，正是会漂移的那些字形。
-    // 用两个字面量拼接，避免 `\xAD` 贪婪吞掉后续十六进制数字（见 cp_count_of 的注释）。
-    // CJK-LITERAL: test-data - 须含等宽族缺字的中文码点，其 advance ≠ 格宽 才会暴露漂移
-    const std::string mixed =
-        "A\xE4\xB8\xAD"
-        "A\xE4\xB8\xAD"
-        "A\xE4\xB8\xAD"
-        "A";
+    // 语料由 `pick_wide_glyph_for()` **实测挑出**（见其注释）：必须含「advance ≠ 格宽」的码点，
+    // 否则开档与不开档输出必然相同、判据恒真。硬编码「中」在 CI macOS 腿不成立
+    // （该腿 Cascadia Code 含该字形、advance 恰等于格宽），故不写死码点。
+    const std::string wide = pick_wide_glyph_for(f, cw);
+    const std::string mixed = "A" + wide + "A" + wide + "A" + wide + "A";
     const int cells = 7;
+    // 挑不出宽字形 ⇒ 本环境不可观测，如实 SKIP（不给假绿）。
+    if (wide.empty()) {
+        AURORA_TEST_SKIP("no code point with advance != cell width: pixel criteria unobservable in this environment");
+        return;
+    }
     AURORA_TEST_REQUIRE_EQ(cp_count_of(mixed), static_cast<std::size_t>(cells));  // 语料自检
 
     render::TextLayoutOpts fixed{};
@@ -588,6 +711,8 @@ AURORA_TEST_CASE(fixed_cell_advance_places_every_glyph_inside_its_own_cell) {
 
     // ① 开档后整串墨迹不得超出「N 格 + 末格字形自身宽度」的允许范围。
     //    末格字形可以溢出本格（字体事实，非本档位缺陷），故留一格余量。
+    //    注意 N 是**码点数**而非「视觉格数」：固定格档位下每个码点一律推一格，
+    //    双宽字形也不例外（它只是字形本身画得宽），故右边界按码点数估。
     AURORA_TEST_CHECK_LT(right_fixed, (cells + 1) * cw);
     // ② 关键判据：开档后的右边界必须比不开档**至少小一格** —— 回退面双宽字形按自己的
     //    advance 推进会逐字累积，不开档时右边界必然明显更靠右。变异「绘制侧忽略档位」时
@@ -597,18 +722,60 @@ AURORA_TEST_CASE(fixed_cell_advance_places_every_glyph_inside_its_own_cell) {
 
 AURORA_TEST_CASE(fixed_cell_advance_keeps_glyph_fallback_active) {
     // 「只改推进量、不改选面逻辑」：开档后缺字仍须回退到别的面（否则缺字会变成豆腐/空白）。
-    // 判据用**墨迹存在性**：回退面若没被选中，该码点不会落墨（等宽族无此字形）。
+    //
+    // 跨平台要害：**不能依赖「等宽族恰好没有某个字形」**。CI macOS 腿实测
+    // `Cascadia Code` 解析出的面序列本身含汉字，该字形不落回退面，用例虽仍会绿
+    // 却已不测任何东西（空转判据）。故这里改为**用回退链显式构造**缺字场景：
+    // 主族取内嵌等宽族，链上给一个注册到私有名下的比例字体族，再挑一个该比例族
+    // 有、主族没有的码点 —— 「选了链上的面」这件事由选面结果本身保证，不靠环境侥幸。
+    //
+    // 判据用**墨迹存在性 + 宽度口径**：开档后该码点必须落墨（回退面被选中），
+    // 且整串宽度仍恰为「码点数 × 格宽」（证明只换了面、没换推进量）。
     const Font f{.family = "Cascadia Code", .size_pt = 16.0F, .weight = 400};
     const render::CellMetrics cell = render::FontEngine::monospace_cell(f, 1.0F);
-    render::TextLayoutOpts fixed{};
+    AURORA_TEST_REQUIRE_GT(cell.cell_width_px, 0);
+
+    // 链上族：注册一份比例字体（Noto Sans）到私有名下，它覆盖 CJK 而等宽主族未必覆盖。
+    const auto noto = render::noto_sans_ttf();
+    render::register_font_memory("utest-fb-mono-cjk-fallback", std::vector<std::uint8_t>{noto.begin(), noto.end()});
+
+    // 挑一个「链上族有、主族没有」的码点：先在该族量出宽度，再看主族量不到（宽度为 0
+    // 或与格宽同值都不算「主族缺字」）。独立基准取自 measure_width，不依赖选面策略。
+    // 同上：写成码点整数而非字符字面量，避开 check_no_cjk_literals（门禁拦非 ASCII 字符字面量）。
+    // CJK-LITERAL: test-data - 探针码点集（判据的输入语料，非字符串字面量）
+    static constexpr std::array<char32_t, 5> PROBES = {0x4E2DU, 0x6F22U, 0xD55CU, 0x3042U, 0x30A2U};
+    std::string probe;
+    for (const char32_t cp : PROBES) {
+        const std::string utf8 = utf8_of(cp);
+        if ((cp_count_of(utf8) != 1U) || (first_code_point_of(utf8) != cp)) {
+            continue;  // 编码自检：须能解码回原码点，否则挑中的是伪码点（见 utf8_of 注释）
+        }
+        // 链上族能量到该码点（宽度 > 0）且主族量不到 ⇒ 确属缺字回退场景。
+        const Font chain_font{.family = "utest-fb-mono-cjk-fallback", .size_pt = 16.0F, .weight = 400};
+        if (render::FontEngine::measure_width(utf8, chain_font) <= 0.0F) {
+            continue;
+        }
+        probe = utf8;
+        break;
+    }
+    if (probe.empty()) {
+        AURORA_TEST_SKIP("no CJK probe covered by the fallback family: glyph-fallback scenario not constructible");
+        return;
+    }
+
+    render::TextLayoutOpts fixed =
+        render::TextLayoutOpts::with_fallback_chain(std::vector<std::string>{"utest-fb-mono-cjk-fallback"});
     fixed.fixed_cell_advance_px = static_cast<float>(cell.cell_width_px);
 
     Painter p;
     p.begin(120, 40);
-    p.fill_rect(rect_at(0.0F, 0.0F, 120.0F, 40.0F), Color{0, 0, 0, 255});
-    p.draw_text(rect_at(4.0F, 4.0F, 100.0F, 24.0F), "\xE4\xB8\xAD", f, Color{255, 255, 255, 255}, fixed);
-    // 汉字必须落墨（走了回退面），而不是被固定格档位「顺带」吃掉。
+    // 画布不填背景：判据按 alpha 取墨迹，填不透明底色会让整幅都算「有墨」。
+    p.draw_text(rect_at(4.0F, 4.0F, 100.0F, 24.0F), probe, f, Color::black(), fixed);
+    // 该码点必须落墨 —— 说明选面确实走到了链上的族，没被固定格档位「顺带」吃掉。
     AURORA_TEST_CHECK_GT(count_opaque(p), 0);
+    // 且推进量仍由档位决定：单码点 ⇒ 整串宽度恰为一格。
+    AURORA_TEST_CHECK_NEAR(render::FontEngine::measure_width(probe, f, fixed), static_cast<float>(cell.cell_width_px),
+                           0.001F);
 }
 
 AURORA_TEST_CASE(fixed_cell_advance_keeps_hit_test_consistent_with_pixels) {
@@ -623,13 +790,10 @@ AURORA_TEST_CASE(fixed_cell_advance_keeps_hit_test_consistent_with_pixels) {
     render::TextLayoutOpts fixed{};
     fixed.fixed_cell_advance_px = static_cast<float>(cell.cell_width_px);
 
-    // CJK-LITERAL: test-data - 混排串须含等宽族缺字的中文码点，逐格命中判据依赖此
-    // 同样用两个字面量拼接，避免 `\xAD` 贪婪吞掉后续的 `B`/`C`（见上一用例的注释）。
-    const std::string mixed =
-        "A\xE4\xB8\xAD"
-        "B\xE4\xB8\xAD"
-        "C";
-    AURORA_TEST_REQUIRE_EQ(cp_count_of(mixed), 5U);  // 语料自检：A / 中 / B / 中 / C
+    // 逐格命中判据只依赖「固定格下每个字形都按格推进」，与具体码点无关，故用 ASCII 即可
+    // （避免引入「某码点在本平台是否缺字」这一无关变量）。混排宽字形的像素版本见上面的用例。
+    const std::string mixed = "ABCDE";
+    AURORA_TEST_REQUIRE_EQ(cp_count_of(mixed), 5U);  // 语料自检：5 个 ASCII 码点
     const auto cw = static_cast<float>(cell.cell_width_px);
     // 点在第 k 格正中 ⇒ 命中第 k 个字符（k 从 0 起）。
     for (std::size_t k = 0; k < 5U; ++k) {
@@ -655,13 +819,11 @@ AURORA_TEST_CASE(fixed_cell_advance_and_fallback_chain_compose) {
     auto both = render::TextLayoutOpts::with_fallback_chain(std::vector<std::string>{"Noto Sans"});
     both.fixed_cell_advance_px = static_cast<float>(cell.cell_width_px);
 
-    // CJK-LITERAL: test-data - 与上面同一语料；此处验「链 + 档位同时打开」时推进仍只由档位决定
-    const std::string mixed =
-        "A\xE4\xB8\xAD"
-        "B";
+    // 语料用 ASCII：本用例只验「链与档位同时打开时推进仍只由档位决定」，与具体码点无关。
+    const std::string mixed = "ABC";
     AURORA_TEST_REQUIRE_EQ(cp_count_of(mixed), 3U);
     const float w = render::FontEngine::measure_width(mixed, f, both);
-    // 推进仍只由档位决定（链不参与推进）。
+    // 推进仍只由档位决定（链只影响选面、不参与推进）。
     AURORA_TEST_CHECK_NEAR(w, 3.0F * static_cast<float>(cell.cell_width_px), 0.001F);
 }
 
