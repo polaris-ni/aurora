@@ -207,6 +207,14 @@ struct ShapeCacheKey {
     /// 调用点会被 `bugprone-exception-escape` 拦（2026-10-03 CI wasm lint 分片实测）。
     /// 摘要挪到构造处算一次、这里只混数值，语义不变（仍是「按链内容区分条目」）。
     std::uint64_t chain_key = 0;
+    // 豁免理由（相邻行式）：`noexcept` 是刻意的 —— 本函数在 shaping 缓存的**查找路径**上被调用
+    // （unordered_map 每次查找都比键），那条路径不允许异常逃逸，否则一次 bad_alloc 会把
+    // 整个排版流程变成 terminate、连降级兜底都进不去。
+    // 报警告的两处字符串比较（`line == o.line` 与经 `opts == o.opts` 传导的链比较）在理论
+    // 上可能抛 bad_alloc，但那一刻进程本就已在 OOM 边缘，「让排版继续」并无意义；
+    // 去掉 `noexcept` 反而会把异常带进 unordered_map 的查找而中断整条 shaping 路径。
+    // 链内容已另由 chain_key 覆盖（其计算在非 noexcept 的构造处），故此处只做内容比对。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     auto operator==(const ShapeCacheKey &o) const noexcept -> bool {
         return px == o.px && opts == o.opts && faces_key == o.faces_key && chain_key == o.chain_key && line == o.line;
     }
