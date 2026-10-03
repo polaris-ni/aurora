@@ -293,7 +293,16 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
+            # 虚拟屏显式 24 位深度：Xvfb 默认是 8 位伪彩，GLX 拿不到 RGBA 视觉，
+            # GLFW 腿会在建窗期退化（这也是「GLFW 需要 mesa(llvmpipe) + GLX 3.3」那条前提）。
+            #
+            # e2e 单独一趟且**串行**（其余测试仍满核并行）：e2e 用例建的是真实窗口与真实
+            # GL 上下文，16 路并发挤在同一个 X server 上会互相抢 X / GL 资源，实测表现为
+            # x11 与 glfw 两腿**随机**抛 `XOpenDisplay` / `glfwInit` 失败（同一进程里前一
+            # 用例刚过、后一用例就红），属编排层抖动而非代码缺陷。串行不改变任何判据
+            # （期望集内不可用仍是红灯），只消除资源争抢；代价是 e2e 段多花十来秒。
+            xvfb-run -a -s "-screen 0 1920x1080x24" ctest --test-dir build --output-on-failure -C Release -LE e2e -j "$(nproc)"
+            xvfb-run -a -s "-screen 0 1920x1080x24" ctest --test-dir build --output-on-failure -C Release -L e2e
           else
             ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
           fi

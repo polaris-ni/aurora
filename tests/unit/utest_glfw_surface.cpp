@@ -10,6 +10,10 @@
 #include <type_traits>
 #include <vector>
 
+#ifdef AURORA_BACKEND_GLFW
+#include <GLFW/glfw3.h>
+#endif
+
 #include "aurora/debug/feature_flags.h"  // 运行时探测 AURORA_ENABLE_DEBUG 的归一化镜像
 #include "aurora/window/glfw_surface.h"
 #include "framework/aurora_test.h"
@@ -112,6 +116,47 @@ AURORA_TEST_CASE(glfw_surface_live_capture_window) {
     AURORA_TEST_CHECK_EQ(bytes[3], 'G');
     f.close();
     std::remove(path.c_str());
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW is not enabled (default OFF): the backend is not compiled or linked");
+#endif
+}
+
+AURORA_TEST_CASE(glfw_surface_live_multi_window_close_isolation) {
+#ifdef AURORA_BACKEND_GLFW
+    const char *opt_in = std::getenv("AURORA_LIVE_GLFW");
+    if (opt_in == nullptr || *opt_in == '\0') {
+        AURORA_TEST_SKIP(
+            "set AURORA_LIVE_GLFW=1 explicitly: this case creates two real windows and GL "
+            "contexts to verify that closing one does not tear down GLFW process-wide");
+    }
+
+    // 判据的可观测性前提：GLFW 的 init / terminate 是**进程级**状态，aurora 的公共面
+    // （`size` / `framebuffer_size` / `data`）读的都是软件侧缓存与 painter 尺寸，terminate
+    // 之后照样返回原值 —— 用它们当判据是空转（删掉修复也全绿）。故探针取
+    // `glfwGetPrimaryMonitor()`：GLFW 未初始化时该函数恒返回 NULL（`_GLFW_REQUIRE_INIT_OR_RETURN`
+    // 语义），已初始化且存在输出时返回非 NULL，两端可确定性区分（最小复现实测：terminate 后立即
+    // 变 NULL，同时存活窗口的尺寸查询退化为 0×0）。引入 GLFW 头只为这一个查询。
+    GlfwSurface::Config cfg_a;
+    cfg_a.size = Size{.width = 200.0F, .height = 150.0F};
+    cfg_a.title = "aurora-live-glfw-close-a";
+    cfg_a.resizable = false;
+    GlfwSurface::Config cfg_b;
+    cfg_b.size = Size{.width = 220.0F, .height = 160.0F};
+    cfg_b.title = "aurora-live-glfw-close-b";
+    cfg_b.resizable = false;
+
+    GlfwSurface kept{cfg_b};
+    {
+        GlfwSurface closing{cfg_a};
+        AURORA_TEST_REQUIRE_TRUE(closing.begin_frame(200, 150).ok());
+        AURORA_TEST_REQUIRE_TRUE(closing.present().ok());
+    }  // closing 析构 = 关闭窗口 A
+
+    // A 关闭后 GLFW 必须仍处于初始化态：否则 B 的窗口已被 `glfwTerminate()` 一并销毁。
+    AURORA_TEST_CHECK_TRUE(glfwGetPrimaryMonitor() != nullptr);
+    // 存活窗口仍可正常出帧（旧实现下这一对调用操作的是已销毁的 GLFW 窗口）。
+    AURORA_TEST_REQUIRE_TRUE(kept.begin_frame(220, 160).ok());
+    AURORA_TEST_REQUIRE_TRUE(kept.present().ok());
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_GLFW is not enabled (default OFF): the backend is not compiled or linked");
 #endif

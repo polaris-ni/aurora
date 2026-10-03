@@ -95,6 +95,46 @@ namespace aurora {
     return m;
 }
 
+namespace {
+
+/// @brief 进程内存活的 GLFW 窗口计数（`glfwInit` / `glfwTerminate` 引用计数的唯一真源）。
+///
+/// GLFW 的初始化是**进程级**全局状态，而 `GlfwSurface` 是**窗口级**对象。若每个 surface
+/// 析构都 `glfwTerminate()`，会同时踩两个坑：① terminate 销毁进程内**全部**剩余窗口与游标，
+/// 于是「关掉一窗」连带摧毁同进程里还活着的其它窗口；② 「关一窗再开一窗」被迫走一次完整的
+/// terminate → init 重建，在受限的虚拟显示环境（CI 的 Xvfb + llvmpipe）里这次重建会失败，
+/// 表现为 `glfwInit failed`。故改为引用计数：首个窗口负责初始化、最后一个窗口销毁时才终止。
+/// 计数只在 UI 线程上增减（本库单线程 UI 模型，GLFW 亦要求其调用集中在主线程），无需加锁。
+///
+/// @return 该计数的可读写引用（进程内单例，首次调用时零初始化）。
+auto glfw_live_surfaces() -> int & {
+    static int count = 0;
+    return count;
+}
+
+/// @brief 取得一个 GLFW 使用期：计数由 0 起跳时才真正 `glfwInit`。
+/// @throw std::runtime_error GLFW 初始化失败（无显示环境 / 无可用 GL 驱动）。
+auto glfw_acquire() -> void {
+    if (glfw_live_surfaces() == 0 && glfwInit() == 0) {
+        throw std::runtime_error("GlfwSurface: glfwInit failed");
+    }
+    ++glfw_live_surfaces();
+}
+
+/// @brief 归还一个 GLFW 使用期：计数归零（进程内已无窗口）时才 `glfwTerminate`。
+auto glfw_release() -> void {
+    int &count = glfw_live_surfaces();
+    if (count == 0) {
+        return;
+    }
+    --count;
+    if (count == 0) {
+        glfwTerminate();
+    }
+}
+
+}  // namespace
+
 // pimpl：全部 GLFW/OpenGL 状态与回调都在这里；公共头仅持有 unique_ptr<Impl>。
 struct GlfwSurface::Impl {
     GLFWwindow *window = nullptr;
@@ -234,9 +274,8 @@ struct GlfwSurface::Impl {
 };
 
 GlfwSurface::Impl::Impl(const Config &cfg) {
-    if (glfwInit() == 0) {
-        throw std::runtime_error("GlfwSurface: glfwInit failed");
-    }
+    // 进程级引用计数：首个窗口初始化 GLFW（失败即抛，不计入存活数）。
+    glfw_acquire();
     bool want_gpu = false;
 #ifdef AURORA_ENABLE_GLFW_GPU_GL
     want_gpu = cfg.render_mode == RenderMode::HardwareGL;
@@ -292,7 +331,8 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
         window = glfwCreateWindow(create_w, create_h, cfg.title.c_str(), nullptr, nullptr);
     }
     if (window == nullptr) {
-        glfwTerminate();
+        // 建窗失败：归还本窗口的使用期（归零则终止 GLFW），再交给调用方。
+        glfw_release();
         throw std::runtime_error("GlfwSurface: glfwCreateWindow failed");
     }
     glfwMakeContextCurrent(window);
@@ -350,7 +390,8 @@ GlfwSurface::Impl::~Impl() {
     if (window != nullptr) {
         glfwDestroyWindow(window);
     }
-    glfwTerminate();
+    // 引用计数归还：进程内还有别的 GLFW 窗口时**不**终止，避免连带摧毁它们。
+    glfw_release();
 }
 
 // ---- 光标形状：CursorShape → GLFW 标准光标常量 ----
