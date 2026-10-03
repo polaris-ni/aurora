@@ -472,6 +472,15 @@ au::Column{}
 
 **字体注入**：`set_default_font(ttf_path)` / `register_font(family, ttf_path)` / `register_font_from_memory(family, ttf_bytes)`（`family` 为空表示默认 sans-serif）。
 
+**字体族枚举（`render::list_font_families(monospace_only = false)` → `vector<FontFamilyInfo>`，见 `render/font_discovery.h`）**：供「字体族下拉」这类 UI 直接消费。此前的公共面**只**有按名解析（`resolve_faces(family, weight)`）——每一条都要求调用方**先知道族名**，而系统字体目录的扫描根本没有族名产出（既有 `register_system_fallbacks()` 只是固定候选文件清单，且经 `add_default_face()` 只挂进 `""` / `"sans-serif"` 两个键，不产生族名），于是消费方只能自己复制一套目录扫描或手写族名表，两者都会与框架的 `resolve_faces` 口径漂移。
+
+- **同源保证（核心不变量）**：返回的每个 `family` 都保证 `resolve_faces(family, weight)` 能解析出**属于该族**的面，而不是悄悄落到默认链——枚举出来的名字点下去解析不到 face 比不枚举更糟。实现上系统字体目录只建「族名 → 文件路径」的 catalog（不预开上百个 `FT_Face`），`resolve_faces` 未命中时按 catalog **懒加载**该族。**注意**：判这条不变量不能用「`resolve_faces` 非空」——它对任何未命中族都会 emit 默认链，因而**恒非空**，是一条空转判据；须与「必然落到纯默认链的哨兵族」做序列对拍（`utest_font_discovery` 已按此实现）。
+- **等宽判定以度量为准**：取该族一个面，同像素尺寸下比较 `'i'` / `'W'` / `'0'` 的 advance 是否全等。既有族名特判（`monospace` / `mono`）**降级为补充命中**，只在度量不可得时生效——故「名字像等宽但度量非等宽」的族判 `false`。
+- **三平台同口径**：目录扫描 + `FT_Face::family_name`（Windows `C:\Windows\Fonts` 递归；Linux `/usr/share/fonts` 等；macOS `/System/Library/Fonts` 等）。**不引入 fontconfig**：它给出的族名与 `FT_Face::family_name` 不同源，反而会让三平台口径对不齐。返回的**集合**允许因平台所装字体而异，但排序、去重、等宽判定、与 `resolve_faces` 的同源性四处逐平台一致。
+- **稳定序**：按 `family` 升序、去重（下拉数据源要求，不让 UI 侧自己排序）。伪族名 `""` / `"sans-serif"` / `"default"` 是默认链的键而非族名，**不**出现在结果里（三者指向同一个 Noto Sans 面，列出来只会让下拉出现三个等价项，其中一个还是空串）。
+- **缓存与失效**：目录扫描首次调用时建立，随 `shutdown_font_discovery()` 自然失效；调用方**无需**手动刷新。未初始化时返回仅含内置族 / 已注册族的集合，不崩溃。
+- **内置等宽族**：框架此前没有任何内置等宽族（内置族只有非等宽的 Noto Sans），故内置 **Cascadia Code**（SIL OFL 1.1，见 `THIRD_PARTY_LICENSES.md`）并注册到族名 `"Cascadia Code"`——只注册到自己的名下、**不挂默认链**，既有默认链行为不变。
+
 **度量与绘制**：`measure_width` / `measure_height` / `measure_ascent` / `draw_text`。
 
 **选中原语**：`caret_x(text, idx, font)` / `hit_test_char(text, x, font)` / `hit_test_char_inclusive`（以码点为索引，UTF-8 安全）。
@@ -656,7 +665,7 @@ au::Column{}
 
 **DPI 感知**：`enable_dpi_awareness()`（`window/window.h`）在进程创建**任何窗口之前**启用高 DPI 感知。这是 **OS/进程级**设置，非 per-Window、非 per-Surface——Win32 经 `SetProcessDpiAwarenessContext`（Per-Monitor V2 → V1 → `SetProcessDPIAware`）一次性启用；macOS 与 Linux 无需 opt-in，为空实现。**关键不变量**：必须在 `init_console()`（`AllocConsole` 会创建控制台窗口）与 `create_window()` 之前调用，否则 Windows 上启用失败会退化为 DPI 未感知（scale = 1.0）。每窗口的 scale 查询仍是各 `Surface::scale_factor()` 的职责，与「启用」正交。
 
-**Win32 侧的实现落点与唯一换算位置**（本条承诺此前与代码不符，已收敛）：awareness 由 `window_factory.cpp` 的 `make_window()` 启用——它是所有 `create_window` 重载的公共出口，且早于任何 `Surface` 构造（即早于 `CreateWindowExA`）；`Win32Host::Impl` 构造体内保留一处幂等兜底，供不经工厂直接构造宿主的消费者。`Win32Host` 内部 dp ↔ 物理像素的换算**只发生在两个私有函数**里：`to_physical(Size)`（逻辑 → 物理）与 `to_logical(int, int)`（物理 → 逻辑）；两者共读 `Impl::scale` 这**一个**成员，该成员由 `refresh_scale()`（`GetDpiForWindow` → 回落 `GetDpiForSystem` → 回落 96）在句柄就绪后求得、并在 `WM_DPICHANGED` 时更新。构造尺寸、`set_size`、`WM_GETMINMAXINFO`、鼠标 / 滚轮 / 文件拖放、IME hook、a11y 投影矩形全部经这两个函数，宿主内不再有裸写的 `* scale` / `/ scale`。**消费方只见逻辑坐标（dp）**：物理像素只出现在宿主内部与 `WindowGeometry`（见 `06-app-platform.md`）。收敛背景与验收见 `08-tooling.md` §8.2。
+**Win32 侧的实现落点与唯一换算位置**（本条承诺此前与代码不符，已收敛）：awareness 由 `window_factory.cpp` 的 `make_window()` 启用——它是所有 `create_window` 重载的公共出口，且早于任何 `Surface` 构造（即早于 `CreateWindowExA`）；`Win32Host::Impl` 构造体内保留一处幂等兜底，供不经工厂直接构造宿主的消费者。`Win32Host` 内部 dp ↔ 物理像素的换算**只发生在两个私有函数**里：`to_physical(Size)`（逻辑 → 物理）与 `to_logical(int, int)`（物理 → 逻辑）；两者共读 `Impl::scale` 这**一个**成员，该成员由 `refresh_scale()`（降级链 `GetDpiForWindow` → `GetDpiForMonitor` → `GetDpiForSystem` → `GetDeviceCaps` → 96，**判据是「取到 > 0 才算成功」而非「函数指针非空」**）求得、并在 `WM_DPICHANGED` 时更新。**建窗期**（句柄尚未创建）按「窗口即将落位的显示器」取 DPI（`MonitorFromPoint(工作区中心)` → `GetDpiForMonitor`），建窗成功后若真实值与建窗期不同则在 `ShowWindow` 之前按真实 scale 重设一次尺寸——首帧客户区逻辑尺寸必须等于请求的 dp。取值实现在可单测内部头 `window/detail/win32_dpi.h`；换算点单源由 `tools/check/check_dpi_single_source.py` 静态守卫。构造尺寸、`set_size`、`WM_GETMINMAXINFO`、鼠标 / 滚轮 / 文件拖放、IME hook、a11y 投影矩形全部经这两个函数，宿主内不再有裸写的 `* scale` / `/ scale`。**消费方只见逻辑坐标（dp）**：物理像素只出现在宿主内部与 `WindowGeometry`（见 `06-app-platform.md`）。收敛背景与验收见 `08-tooling.md` §8.2。
 
 ### 8.6 显示列表与 RHI 后端
 
