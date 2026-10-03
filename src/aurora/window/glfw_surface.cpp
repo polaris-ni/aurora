@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "aurora/core/log.h"
@@ -105,6 +106,9 @@ struct GlfwSurface::Impl {
 
     WindowStateHandler window_state_handler;
     WindowModeHandler window_mode_handler;
+    /// DPI 缩放变化上报（`glfwSetWindowContentScaleCallback` 驱动）。与上面两个 handler
+    /// 同形态：Impl 自持副本，由 `GlfwSurface::set_scale_change_handler` 转存。
+    ScaleChangeHandler scale_change_handler;
 
     // ---- 光标形状：标准光标句柄按 CursorShape 取值序缓存（nullptr = 未创建/不可用）----
     // 复用句柄而非每次 glfwCreateStandardCursor：后者每次创建都是新资源，反复悬停切换必泄漏。
@@ -174,6 +178,7 @@ struct GlfwSurface::Impl {
     static auto on_window_iconify(GLFWwindow *w, int iconified) -> void;
     static auto on_window_focus(GLFWwindow *w, int focused) -> void;
     static auto on_window_maximize(GLFWwindow *w, int maximized) -> void;
+    static auto on_content_scale(GLFWwindow *w, float xscale, float yscale) -> void;
 
     /// @brief 坐标换算：GLFW 光标位置是**屏幕坐标**（DPI 感知进程里即物理像素），
     /// 换算成 aurora 逻辑 dp 须除以内容缩放因子。滚轮增量是**delta**，不换算。
@@ -294,6 +299,7 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     glfwSetWindowIconifyCallback(window, &Impl::on_window_iconify);
     glfwSetWindowFocusCallback(window, &Impl::on_window_focus);
     glfwSetWindowMaximizeCallback(window, &Impl::on_window_maximize);
+    glfwSetWindowContentScaleCallback(window, &Impl::on_content_scale);
 
     float xscale = 1.0F;
     float yscale = 1.0F;
@@ -611,6 +617,27 @@ auto GlfwSurface::Impl::on_window_size(GLFWwindow *w, int /*width*/, int /*heigh
     (void)w;
 }
 
+auto GlfwSurface::Impl::on_content_scale(GLFWwindow *w, float xscale, float /*yscale*/) -> void {
+    auto *self = static_cast<Impl *>(glfwGetWindowUserPointer(w));
+    if (self == nullptr) {
+        return;
+    }
+    // 口径与 Win32 的 `handle_dpi_changed` 一致：取「实际生效的缩放」这一个真值，
+    // 变化才上报。取值优先用 GLFW 递来的 xscale（它是 WM_DPICHANGED 的 wParam 换算而来），
+    // 但仍与成员里的旧值比对一次——GLFW 在 Wayland / X11 之外的个别平台上可能递来 0
+    // （表示「该输出缩放未知」），此时退化到成员值不变，等同于无变化。
+    const float next = (xscale > 0.0F) ? xscale : self->scale;
+    if (next == self->scale) {
+        return;
+    }
+    self->scale = next;
+    // 先换算再上报：`WindowHost::on_scale_changed` 会立刻 force_full_redraw()，
+    // 若上报滞后一帧则该帧会拿旧 scale 分配缓冲 → 内容错位一帧。
+    if (self->scale_change_handler) {
+        self->scale_change_handler(next);
+    }
+}
+
 auto GlfwSurface::Impl::on_window_iconify(GLFWwindow *w, int iconified) -> void {
     auto *self = static_cast<Impl *>(glfwGetWindowUserPointer(w));
     if (self == nullptr) {
@@ -657,6 +684,9 @@ auto GlfwSurface::set_window_state_handler(WindowStateHandler h) -> void {
     pimpl_->window_state_handler = std::move(h);
 }
 auto GlfwSurface::set_window_mode_handler(WindowModeHandler h) -> void { pimpl_->window_mode_handler = std::move(h); }
+auto GlfwSurface::set_scale_change_handler(ScaleChangeHandler h) -> void {
+    pimpl_->scale_change_handler = std::move(h);
+}
 
 // ---- z 序（多窗口）----
 
@@ -718,6 +748,27 @@ auto GlfwSurface::wait_events(double timeout_ms) -> void { pimpl_->wait_events(t
 auto GlfwSurface::request_wake() -> void { Impl::request_wake(); }
 [[nodiscard]] auto GlfwSurface::data() const -> const std::uint8_t * { return pimpl_->data(); }
 [[nodiscard]] auto GlfwSurface::frame_count() const -> int { return pimpl_->frame_count(); }
+
+auto GlfwSurface::native_handle() const -> void * {
+    if (pimpl_ == nullptr || pimpl_->window == nullptr) {
+        return nullptr;
+    }
+    // 各平台原生句柄：Windows = HWND，macOS = NSWindow*，X11 = Window(为 XID 非指针)。
+    // 与 Win32 / D3D11 / X11 / Wayland 四个后端同口径（`Surface::native_handle` 契约）。
+    // 此前本后端未覆写 → 恒返回 nullptr，使 GLFW 窗口的跨屏行为在本仓**不可观测**：
+    // 真机探针既拿不到句柄注入平台消息、也无处核对原生几何。
+#if defined(AURORA_PLATFORM_WINDOWS)
+    return reinterpret_cast<void *>(glfwGetWin32Window(pimpl_->window));  // NOLINT(*-pro-type-reinterpret-cast)
+#elif defined(AURORA_PLATFORM_MACOS)
+    return glfwGetCocoaWindow(pimpl_->window);
+#elif defined(AURORA_PLATFORM_LINUX)
+    // XWayland 下 GLFW 仍经 X11 取句柄（Wayland 原生路径由 WaylandSurface 负责）。
+    return reinterpret_cast<void *>(
+        static_cast<std::intptr_t>(glfwGetX11Window(pimpl_->window)));  // NOLINT(*-pro-type-reinterpret-cast)
+#else
+    return nullptr;  // 未知平台：无稳定句柄语义，不猜。
+#endif
+}
 [[nodiscard]] auto GlfwSurface::gpu_backend() -> rhi::RhiFrameSink * { return pimpl_->gpu_backend(); }
 
 auto GlfwSurface::capture_window(const std::string &path) -> Result<bool> {

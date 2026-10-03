@@ -152,6 +152,12 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         aurora_add_verify_probe(aurora_verify_glfw_cursor "${_aurora_verify_dir}/glfw_cursor_live_probe.cpp")
         list(APPEND _aurora_verify_targets aurora_verify_glfw_cursor)
 
+    # ---- GLFW DPI 缩放上报（跨平台真实窗口）：接线/换算自动核对 + 跨屏拖动人工验收 ----
+    # 自动段验「回调通道接通 + frame/逻辑/scale 三者同源」（任何 DPI 环境均可证伪）；
+    # 跨屏拖动触发 content scale 变更只能由人操作，故人工段未做记 PENDING MANUAL（退出码 3）。
+    aurora_add_verify_probe(aurora_verify_glfw_dpi "${_aurora_verify_dir}/glfw_dpi_live_probe.cpp")
+    list(APPEND _aurora_verify_targets aurora_verify_glfw_dpi)
+
     # ---- GLFW GPU 特性（跨平台真实窗口）：常驻流式纹理与 GPU 层缓存真机核对 ----
     # 自动段核对能力位/契约位/流式逐版本像素/层缓存跨帧持久性；--interactive 人工目视。
     # 需 GPU 通道编译进库（AURORA_ENABLE_GLFW_GPU_GL）。

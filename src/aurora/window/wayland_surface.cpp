@@ -84,6 +84,11 @@ struct WaylandSurface::Impl {
     };
 
     std::vector<OutputInfo> outputs;
+    /// 本表面当前所在的输出（`wl_surface.enter` / `leave` 维护，未 enter 时为空）。
+    /// per-output 缩放的输入：合成器只对「表面所在输出」给 buffer scale 期望值，
+    /// 取所有输出的最大值会在窗口落到低 DPI 屏时按高 DPI 渲染（缩水的字 + 浪费显存）。
+    /// 跨屏拖动即表现为 enter/leave 交替 ⇒ 该集合变化时须重算缩放。
+    std::vector<wl_output *> entered;
     // xkbcommon 键盘状态。
     xkb_context *xkb_ctx = nullptr;
     xkb_keymap *keymap = nullptr;
@@ -233,20 +238,39 @@ struct WaylandSurface::Impl {
     }
 
     auto refresh_scale() -> void {
-        // 简化模型：取所有输出的最大缩放（map 前 surface 尚未 enter 任何输出，
-        // 以最大值渲染可避免高 DPI 屏首帧模糊；enter 后如有变化再重渲染）。
+        // per-output 模型：取**表面当前所在输出**的缩放，而不是全部输出的最大值。
+        // - 已 enter：按所在输出的 scale（跨屏拖动即 enter/leave 交替 ⇒ 缩放随之切换）。
+        //   窗口可能同时跨在两屏上（两个输出都 enter）；此时取其中最大者——与合成器
+        //   「必须按最大者渲染才不被拉伸」的约束一致。
+        // - 未 enter（map 前 / 全屏切输出途中）：退回全部输出的最大值。这与旧模型同，
+        //   目的是让高 DPI 屏上的首帧不因「猜 1x」而模糊；随后 enter 到达即纠正。
+        // 两级都受 `compositor_version < 3` 约束：set_buffer_scale 需 wl_surface v3。
         int want = 1;
-        for (const OutputInfo &o : outputs) {
-            want = std::max(want, o.scale);
-        }
         if (compositor_version < 3U) {
             want = 1;  // set_buffer_scale 需 wl_surface v3：不支持则退化 1x
+        } else if (!entered.empty()) {
+            for (const wl_output *o : entered) {
+                for (const OutputInfo &info : outputs) {
+                    if (info.out == o) {
+                        want = std::max(want, info.scale);
+                    }
+                }
+            }
+        } else {
+            for (const OutputInfo &o : outputs) {
+                want = std::max(want, o.scale);
+            }
         }
         if (want != scale) {
             scale = want;
             // 光标主题按设备像素加载：缩放变了旧主题的位图就不再匹配，立即重载并重下发
             // （force=true 跨过「同形状同缩放」去重——此处缩放恰已变，去重键本身也已失效）。
             apply_cursor(true);
+            // 上报缩放变化：`WindowHost::on_scale_changed` 据此 force_full_redraw()。
+            // 必须在 present_request_ **之前**——present_request 只是「安排一帧」，而上报
+            // 触发的重绘会立即按新 scale 分配缓冲；顺序反了会有一帧用旧 scale 渲染。
+            // `self` 必非空：`d.self = this` 在挂 listener 与首次 refresh_scale 之前已赋值。
+            self->notify_scale_change(static_cast<float>(scale));
             if (self->present_request_) {
                 self->present_request_();
             }
@@ -692,6 +716,33 @@ void out_name(void * /*d*/, wl_output * /*o*/, const char * /*name*/) {}
 void out_desc(void * /*d*/, wl_output * /*o*/, const char * /*desc*/) {}
 
 constexpr wl_output_listener OUTPUT_LISTENER = {out_geometry, out_mode, out_done, out_scale, out_name, out_desc};
+
+// ---- wl_surface：enter / leave 决定表面所在输出（per-output 缩放的输入）。 ----
+// 只维护「本表面当前在哪些输出上」这一个集合，缩放取值仍统一在 `Impl::refresh_scale()`
+// —— 事件只负责改状态、不自己算 scale，与 `out_scale` 改 info.scale 后由 out_done 统一
+// 重算是同一分工（`out_scale` 本身不带 done 标记，靠后续 done 事件兜底）。
+void surf_enter(void *data, wl_surface * /*s*/, wl_output *output) {
+    Impl &d = *static_cast<Impl *>(data);
+    for (const wl_output *o : d.entered) {
+        if (o == output) {
+            return;  // 同一输出重复 enter（合成器可在输出重新点亮时重发）
+        }
+    }
+    d.entered.push_back(output);
+    d.refresh_scale();
+}
+
+void surf_leave(void *data, wl_surface * /*s*/, wl_output *output) {
+    Impl &d = *static_cast<Impl *>(data);
+    const auto it = std::find(d.entered.begin(), d.entered.end(), output);
+    if (it == d.entered.end()) {
+        return;
+    }
+    d.entered.erase(it);
+    d.refresh_scale();
+}
+
+constexpr wl_surface_listener SURFACE_LISTENER = {surf_enter, surf_leave};
 
 // ---- wl_registry：globals 绑定。 ----
 void reg_global(void *data, wl_registry * /*r*/, std::uint32_t name, const char *iface, std::uint32_t version) {
@@ -1237,6 +1288,7 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
     d.xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     // 窗口壳：wl_surface → xdg_surface → xdg_toplevel。
     d.surface = wl_compositor_create_surface(d.compositor);
+    wl_surface_add_listener(d.surface, &SURFACE_LISTENER, &d);
     d.xsurface = xdg_wm_base_get_xdg_surface(d.wm_base, d.surface);
     xdg_surface_add_listener(d.xsurface, &XDG_SURFACE_LISTENER, &d);
     d.toplevel = xdg_surface_get_toplevel(d.xsurface);
@@ -1373,6 +1425,7 @@ WaylandSurface::~WaylandSurface() {
                 wl_output_destroy(o.out);
             }
         }
+        d.entered.clear();  // 非拥有指针副本：随 outputs 一并失效，清空以免读成「仍在屏上」
         if (d.toplevel != nullptr) {
             xdg_toplevel_destroy(d.toplevel);
         }

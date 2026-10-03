@@ -368,6 +368,9 @@ auto main() -> int {
 //   3. 跨屏迁移（拔掉外接显示器 / 把窗口拖到另一块屏）触发的 `WM_DPICHANGED` 路径本探针不覆盖：
 //      它需要真实的显示器拓扑变化。代码路径是 `handle_dpi_changed` → `refresh_scale`，
 //      与构造期共用同一取值函数。
-//   4. X11 / Wayland / GLFW 三个后端的缩放变化**上报**仍未实现（`Surface::set_scale_change_handler`
-//      未被它们 override）。本轮仅 Win32 收敛，见 `codespec/specification/07-environment-modifier.md`。
+//   4. 其他后端的缩放变化**上报**现状（口径见 `codespec/specification/08-tooling.md` §8.2
+//      「缩放变化上报的跨后端现状」）：GLFW 与 Wayland 已实现并各有验收（GLFW 走
+//      `glfw_dpi_live_probe`，自动段注入 `WM_DPICHANGED` 造变化、不需第二块显示器）；
+//      X11 **不适用**——其缩放取自进程级全局 `Xft.dpi`（运行期不变），X11 核心亦无
+//      per-monitor DPI 概念，本就无信号可报。
 // ---------------------------------------------------------------------------

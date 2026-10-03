@@ -29,8 +29,8 @@ namespace aurora {
 ///   「消费方只见逻辑 dp、物理像素只留在后端内部」，两者只差一个 content scale。故本后端
 ///   把 painter 按**物理**分辨率分配（`Painter::set_scale` + `begin(逻辑 dp)`，与 Win32 / D3D11 /
 ///   X11 / Wayland 同模型），`size()` 是 dp 而 `framebuffer_size()` 是物理像素；换算收敛在
-///   内部头 `detail/glfw_dpi.h`，由 `utest_glfw_dpi` 钉住。**跨屏移动导致的缩放变化不上报**
-///   （`set_scale_change_handler` 未 override），与 X11 / Wayland 同为已知的待补项。
+///   内部头 `detail/glfw_dpi.h`，由 `utest_glfw_dpi` 钉住。**跨屏移动导致的缩放变化经
+///   `set_scale_change_handler` 上报**（GLFW 的 content scale 回调由 `WM_DPICHANGED` 驱动）。
 ///
 /// pimpl 封装：公共头不再包含 <GL/gl.h> / <GLFW/glfw3.h>，所有 GLFW/OpenGL 细节（窗口、
 /// 纹理、键码映射、回调转发等）移入 src/aurora/window/glfw_surface.cpp 的 Impl，
@@ -89,6 +89,10 @@ class GlfwSurface : public Surface {
     /// @brief 注册窗口几何态上报句柄（Normal/Maximized/Minimized/FullScreen）。
     /// @param h 几何态回调，由 GLFW 窗口状态与尺寸回调翻译产生。
     auto set_window_mode_handler(WindowModeHandler h) -> void override;
+    /// @brief 注册 DPI 缩放变化上报句柄（跨屏拖动导致 content scale 改变时触发）。
+    /// @param h 缩放回调；参数为新的 `scale_factor()` 值。仅实际变化时触发。
+    /// @note 逻辑↔物理换算随之改变，框架侧收到即强制整帧重排重绘。
+    auto set_scale_change_handler(ScaleChangeHandler h) -> void override;
 
     /// @brief 运行时更新悬停光标形状：`glfwSetCursor` + `glfwCreateStandardCursor`。
     /// 标准光标句柄按 `CursorShape` 取值序缓存在 Impl（每次重建会泄漏，故复用），析构统一释放。
@@ -161,6 +165,11 @@ class GlfwSurface : public Surface {
     /// @brief 程序化移动窗口（`glfwSetWindowPos`）。
     /// @param p 目标左上角位置（物理像素）。
     auto set_position(Point p) -> void override;
+    /// @brief 原生窗口句柄：Windows = `HWND`，macOS = `NSWindow*`，X11/XWayland = `Window`
+    /// （X11 的 XID，本质是非指针整数）。窗口未就绪或平台无稳定句柄语义时返回 nullptr。
+    /// @note 与 Win32 / D3D11 / X11 / Wayland 后端同口径；用于跨模块窗口操作
+    ///       （注入平台消息、核对原生几何、wgpu surface 创建等）。
+    [[nodiscard]] auto native_handle() const -> void * override;
     /// @brief 程序化设置窗口尺寸（内部按内容缩放因子把逻辑 dp 换算为 GLFW 屏幕坐标）。
     /// @param s 目标逻辑尺寸（dp）。
     auto set_size(Size s) -> void override;
