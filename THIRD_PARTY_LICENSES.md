@@ -139,6 +139,15 @@ PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 
 ---
 
+## 5.1 Cascadia Code — 内置等宽字体
+
+- **来源**：`src/aurora/render/cascadia_font_data.cpp` 中的字节数组（AUTO-GENERATED，由 Cascadia Code 字体文件导出）
+- **用途**：内置**等宽**字体，族名 `"Cascadia Code"`；经 `render::list_font_families()` 可枚举、经 `render::resolve_faces("Cascadia Code")` 可解析
+- **许可**：SIL Open Font License 1.1（OFL 允许再分发；上游 https://github.com/microsoft/cascadia-code）
+- **备注**：只注册到它自己的族名下，**不挂默认链**——既有默认链行为不变，需要等宽的调用方按族名显式选择
+
+---
+
 ## 6. GLFW — 跨平台窗口与输入（可选后端依赖）
 
 - **版本**：3.5.1（`third_party/glfw/include/GLFW/glfw3.h`：`GLFW_VERSION_MAJOR=3` / `MINOR=5` / `REVISION=1`）

@@ -51,4 +51,43 @@ auto set_default_font_file(const std::string &path) -> void;
 /// @param ff 待加入 `""`/`sans-serif` 默认链的字体面共享指针；空指针被忽略。
 auto add_default_face(const std::shared_ptr<FontFace> &ff) -> void;
 
+/// @brief 一个可枚举的字体族（供「字体族下拉」这类 UI 直接消费）。
+struct FontFamilyInfo {
+    std::string family;  ///< 族名；可原样喂给 `resolve_faces()` 且一定解析得到面（见 `list_font_families` 的同源保证）
+    bool monospace = false;  ///< 是否等宽：**以度量判定为准**，族名只作度量不可得时的补充命中
+    int face_count = 0;  ///< 该族已注册的面数（>= 1）
+};
+
+/// @brief 列出当前可用的字体族（按 `family` **升序、去重**，下拉数据源要求的稳定序）。
+///
+/// **同源保证（核心不变量）**：返回的每个 `family` 都保证 `resolve_faces(family, weight)` 能解析出
+/// **属于该族**的面，而不是悄悄落到默认链——枚举出来的名字点下去解析不到 face，比不枚举更糟。
+/// 因此本函数对每个族**真实加载**其面再判定等宽性（系统字体按目录扫描结果懒加载）。
+///
+/// **等宽判定以度量为准**：取该族一个面，在同一像素尺寸下比较代表性码点（`'i'` / `'W'` / `'0'`）
+/// 的 advance 是否全等；全等即等宽。既有的族名特判（`monospace` / `mono`）**降级为补充命中**——
+/// 只在度量不可得（面加载失败 / 缺码点）时生效。故「名字像等宽但度量非等宽」的族判 `false`，
+/// 名字表命中不了度量测得出的真等宽族。
+///
+/// 三平台口径一致（目录扫描 + `FT_Face` 的 `family_name`）：Windows 扫 `C:\\Windows\\Fonts`
+/// （递归），Linux 扫 `/usr/share/fonts` / `/usr/local/share/fonts` / `~/.fonts` /
+/// `~/.local/share/fonts`，macOS 扫 `/System/Library/Fonts` / `/Library/Fonts` / `~/Library/Fonts`。
+/// **不引入 fontconfig**（保持零三方依赖）：它给出的族名与 `FT_Face::family_name` 不同源，
+/// 反而会让三平台的口径对不齐。返回的**集合**允许因平台装的字体不同而不同，但排序、去重、
+/// 等宽判定、与 `resolve_faces` 的同源性这四处必须逐平台一致。
+///
+/// 伪族名 `""` / `"sans-serif"` / `"default"` 是默认链的键而非族名，**不**出现在结果里
+/// （它们指向同一个 Noto Sans 面，列出来只会让下拉里出现三个等价项）。
+///
+/// 无头（headless）与其余后端走**同一实现**（字体发现不按后端分支）：至少内置族与经
+/// `register_font_*` 注册的族一定出现在结果里，故无头 / CI 通道也能断言同源性。
+///
+/// 缓存：目录扫描结果首次调用时建立，随 `shutdown_font_discovery()` 与任一 `register_font_*`
+/// 自然失效；调用方**无需**手动刷新。
+/// 未初始化时（未调 `init_font_discovery()`）返回仅含内置族 / 已注册族的集合，不崩溃。
+///
+/// @param monospace_only `true` 时只返回 `monospace == true` 的族（是全集的子集，判据自明）。
+/// @return 升序、去重、同源可用的族列表；无任何可用族时为空。
+[[nodiscard]] auto list_font_families(bool monospace_only = false) -> std::vector<FontFamilyInfo>;
+
 }  // namespace aurora::render
