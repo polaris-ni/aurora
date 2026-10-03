@@ -812,14 +812,31 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
     幂等兜底，供不经工厂直接构造 `Win32Host` 的消费者使用。
   - **`scale` 改为句柄就绪后求值**：建窗成功后立刻 `refresh_scale()`（`GetDpiForWindow` → 回落
     `GetDpiForSystem` → 回落 96），此后 `WM_DPICHANGED` / 跨屏迁移复用同一函数更新。
+  - **建窗期这一腿（后补，闭合上一条遗留）**：上一条只解决了「句柄就绪后」，建窗**之前**仍是
+    缺口——`CreateWindowExA` 前调 `refresh_scale()` 时 `hwnd == nullptr`，`GetDpiForWindow(nullptr)`
+    返回 **0**，而当时的降级判据挂在「函数指针为空」的 `else if` 上（Win10+ 该函数恒已导出），
+    0 被当成有效读数落到 `dpi > 0 ? dpi/96 : 1.0` ⇒ **scale 恒 1.0** ⇒ `WindowOptions::size`
+    请求的逻辑 dp 被原样当物理像素消费（150% 屏上请求 960×640 得到含边框 982×696 物理窗口，折回
+    dp 恰为 655×464）。现改为：① 降级判据改为「**取到 > 0 才算成功**」，0 也算失败、继续往下落，
+    使 `GetDpiForSystem` → `GetDeviceCaps` → 96 逐级真正可达；② 建窗期新增「按**落位显示器**」一级
+    （`MonitorFromPoint(工作区中心)` → `GetDpiForMonitor`），句柄就绪后仍优先按窗口；③ 建窗成功后
+    若真实 scale 与建窗期不同（多显示器混合 DPI 下 `CW_USEDEFAULT` 可能把窗口放到另一块屏），在
+    **`ShowWindow` 之前**按真实 scale 重设一次尺寸——首帧客户区逻辑尺寸必须等于请求的 dp，而纠正
+    发生在窗口进入用户视野之前，故不产生可见的「两帧不一致」。取值实现收进可单测内部头
+    `src/aurora/window/detail/win32_dpi.h`（`read_dpi` 接受注入的 `DpiApi`），「各级可达」由
+    `utest_win32_dpi` 逐条钉住；换算点单源由 `tools/check/check_dpi_single_source.py`（进 CTest）
+    静态守卫——这类分叉在 100% DPI 的 CI 上恒不显形，只能靠静态检查拦住。
   - **换算收敛为唯二入口**：`to_physical(Size)` / `to_logical(int, int)`。构造尺寸、`set_size`、
     `WM_GETMINMAXINFO`、鼠标、滚轮、文件拖放、IME hook、a11y 投影矩形全部经它们；宿主内不再有
     裸写的 `* scale` / `/ scale`。`a11y` 桥（`win32_ua.cpp`）同步改走 `GetDpiForWindow`，与宿主
     真正同源（此前它自读 `GetDeviceCaps`，与宿主可能各报各的）。
-  - 验收：`tools/verify/win32_dpi_live_probe.cpp`（真机，不进 CTest）在 ≠100% DPI 环境下跑五条判据
+  - 验收：`tools/verify/win32_dpi_live_probe.cpp`（真机，不进 CTest）在 ≠100% DPI 环境下跑六条判据
     ——(a) `set_size` 往返、(b) `WM_SIZE` 后三方同源、(c) 鼠标 dp 映射、(d) `WM_GETMINMAXINFO` 与
-    `set_size` 同换算（防 150% 屏上的往返漂移）、(e) a11y 与鼠标同源。**本机 150% DPI 实测
-    `scale=1.5`，五条全 PASS、退出码 0**。该探针另设一条「宿主 scale == 独立系统 DPI 读数」的
+    `set_size` 同换算（防 150% 屏上的往返漂移）、(e) a11y 与鼠标同源、**(f) 建窗期尺寸**（以
+    800×600 dp 新建窗口、不经 `set_size`，首帧客户区逻辑尺寸须逐位等于请求值——(a)–(e) 全部走
+    `set_size` 之后，覆盖不到建窗那一刻）。**本机 150% DPI 实测 `scale=1.5`，六条全 PASS、退出码 0**。
+    (f) 的变异自证：还原「建窗期 scale 恒 1.0 + 不做建窗后纠正」的历史形态时，(f) 精确复现
+    `533.33×400 vs 800×600` 并转红。该探针另设一条「宿主 scale == 独立系统 DPI 读数」的
     环境自证断言：删掉建窗后的 `refresh_scale()` 时，(a)–(d) 仍会**自洽地**全绿（三方都是 1.0），
     唯有这条断言转红——原缺陷的隐蔽性正在于此，不可省。
   - **本轮仅 Win32 收敛**：X11 / Wayland / GLFW 的 `scale_factor()` 仍缺缩放变化上报

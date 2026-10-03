@@ -83,6 +83,7 @@ cmake --build build --target docs       # Doxygen，WARN_AS_ERROR=YES，查「�
 | `include/aurora/aurora.h` 伞头 | `check_umbrella_header` | 同步 `tools/check/umbrella_manifest.txt` 基线（直连集合不得缩减） |
 | `core/` 层依赖、模块边界、目录 | `check_core_layer_boundary`、`check_arch_module_map` | `ARCHITECTURE.md` §2 / §4 |
 | 平台/后端分支、feature 宏 | `check_platform_macros`、`toggles` 对应矩阵（CI） | `BUILD_OPTIONS.md` §3 / §4 |
+| Win32 宿主的 DPI / dp↔物理换算 | `check_dpi_single_source`（换算只许在 `to_physical` / `to_logical`，DPI 只许在 `refresh_scale()` 读）；建窗尺寸那一腿另需真机探针 `--target aurora_verify_win32_dpi`（不进 CTest，100% DPI 环境下判据恒真并记 SKIP） | `specification/08-tooling.md` §8.2 |
 | 字符串字面量 | `check_no_cjk_literals` | — |
 | NOLINT 豁免排版 | `check_nolint_layout` | `CODING_STANDARDS.md` §5.2 |
 | 测试文件 | `registry_integrity`、`check_test_temp_hygiene`、`framework_selftest` | `CODING_STANDARDS.md` §3 |

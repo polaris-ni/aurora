@@ -1,5 +1,6 @@
 #include "aurora/window/win32_host.h"
 
+#include "aurora/window/detail/win32_dpi.h"
 #include "aurora/window/detail/win32_ime.h"
 #include "aurora/window/detail/win32_keymap.h"
 #include "aurora/window/detail/win32_modifiers.h"
@@ -188,8 +189,10 @@ struct Win32Host::Impl {
     auto handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT;
 
     auto register_class() const -> void;
-    /// @brief 按当前窗口重算 `scale`（唯一读 DPI 处）；句柄未就绪时按 96 处理。
-    auto refresh_scale() -> void;
+    /// @brief 重算 `scale`（宿主内**唯一**读 DPI 处），并返回本次读到的缩放因子。
+    /// @param desired 建窗期的期望落位矩形（主显示器工作区）；句柄已就绪时传 nullptr 走按窗口那一级。
+    /// @return 本次求得的缩放因子（供建窗期与建窗后的纠正逻辑比较）。
+    auto refresh_scale(const RECT *desired = nullptr) -> float;
     /// @brief 物理像素 → 逻辑 dp。宿主内唯一的「除 scale」入口。
     [[nodiscard]] auto to_logical(int px, int py) const -> Point;
     /// @brief 逻辑 dp → 物理像素。宿主内唯一的「乘 scale」入口。
@@ -206,18 +209,19 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
     : style(style) {
     // DPI 感知必须早于**任何**窗口创建：`create_window` 路径已由 `make_window` 前移启用；
     // 直接构造 `Win32Host` 的消费者（不经工厂）由这处兜底。函数幂等（进程级 static 守卫），
-    // 两条路径都过不会重复设置。`scale` 此刻**不**取值——此时 hwnd 仍是 nullptr，进程感知未必
-    // 生效，`GetDeviceCaps` 只会回 96（scale 恒 1.0，正是历史缺口）；它在建窗后由
-    // `refresh_scale()` 求得。
+    // 两条路径都过不会重复设置。建窗尺寸的换算基准（`scale`）在建窗前由 `refresh_scale(&wa)`
+    // 按「落位显示器」求得，建窗后再按窗口真实值刷新一次——两处都走同一个 `refresh_scale()`。
     enable_dpi_awareness();
 
     // 适配工作区，保证窗口在屏幕内可见（逻辑 dp）。
     RECT wa{};
+    bool have_work_area = false;
     if (SystemParametersInfoA(SPI_GETWORKAREA, 0, &wa, 0) != 0) {
         const int max_w = wa.right - wa.left;
         const int max_h = wa.bottom - wa.top;
         w = std::min(w, max_w);
         h = std::min(h, max_h);
+        have_work_area = true;
     }
     if (w <= 0) {
         w = 320;
@@ -239,9 +243,11 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
     }
     const DWORD ex_style = (style.always_on_top ? WS_EX_TOPMOST : 0U) | (style.transparent ? WS_EX_LAYERED : 0U);
 
-    // 句柄尚未创建，但 DPI 感知此时已生效（见构造体开头的 `enable_dpi_awareness`），故先取一次
-    // 显示器 DPI 作为建窗尺寸的换算基准；建窗后立刻由 `refresh_scale()` 换成按窗口的真实值。
-    refresh_scale();
+    // 建窗期：**句柄尚未创建**，故不能按窗口取 DPI（此时 `GetDpiForWindow(nullptr)` 恒回 0，
+    // 旧代码把它当成有效读数 ⇒ scale 恒 1.0 ⇒ 请求 dp 被原样当物理像素消费）。改按「窗口即将
+    // 落位的显示器」取：落位信息此刻只有主显示器工作区 `wa`（`CreateWindowEx` 传 `CW_USEDEFAULT`，
+    // 系统就在该工作区内层叠放置）。建窗成功后还会再取一次按窗口的真实值并按需纠正尺寸。
+    const float creation_scale = refresh_scale(have_work_area ? &wa : nullptr);
 
     // DPI 感知下窗口坐标即物理像素：物理窗口尺寸 = 逻辑 dp × scale。
     const Size logical_size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
@@ -264,6 +270,19 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
         // 句柄就绪：换成**按窗口**的真实 DPI（跨显示器时与所在屏一致），此后 `scale` 全程只读
         // 这一个成员。这是「帧 / 逻辑 / scale 三方同源」的起点。
         refresh_scale();
+        // 建窗期的落位屏只是**最佳猜测**（`CW_USEDEFAULT` 下系统也可能把窗口放到另一块屏）。
+        // 若真实 DPI 与建窗期不同，客户区逻辑尺寸会偏离请求的 dp，故按真实 scale **重设一次尺寸**。
+        // 这一步发生在 `ShowWindow` 之前、窗口尚未进入用户视野，因此不存在「首帧与第二帧不一致」
+        // 的观感——它修正的是尚未被看见的那一帧。代价是一次 `SetWindowPos`（附带一条 WM_SIZE）。
+        if (scale != creation_scale) {
+            RECT fix{.left = 0,
+                     .top = 0,
+                     .right = static_cast<int>(std::lround(to_physical(logical_size).width)),
+                     .bottom = static_cast<int>(std::lround(to_physical(logical_size).height))};
+            AdjustWindowRect(&fix, win_style, FALSE);
+            SetWindowPos(hwnd, nullptr, 0, 0, fix.right - fix.left, fix.bottom - fix.top,
+                         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
         if (style.always_on_top) {
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         }
@@ -727,31 +746,20 @@ auto Win32Host::Impl::register_class() const -> void {
 
 // ---- DPI：唯一真值源与两处换算 ----
 //
-// `refresh_scale()` 是**唯一**读 DPI 的地方：按窗口（而非按显示器 / 按 DC）取值，故跨屏迁移后
-// 立即反映新屏 DPI。取不到时逐级回落 `GetDpiForSystem` → 96，任何一级取不到都按 96（= 1.0）
-// 处理而不是猜。
-auto Win32Host::Impl::refresh_scale() -> void {
-    int dpi = 0;
-    // GetDpiForWindow / GetDpiForSystem 只在 Win8.1+ / Win10 1607+ 导出，运行时解析而非静态
-    // 依赖 SDK 版本宏；老系统回落 `GetDeviceCaps`（只取 Y 轴：Win32 两轴 DPI 同值，见下方注释）。
-    using GetDpiForWindowFn = UINT(WINAPI *)(HWND);
-    using GetDpiForSystemFn = UINT(WINAPI *)();
-    // NOLINTBEGIN(*-pro-type-reinterpret-cast, *-casting-through-void)
-    if (const auto f = reinterpret_cast<GetDpiForWindowFn>(
-            reinterpret_cast<void *>(GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForWindow")))) {
-        dpi = static_cast<int>(f(hwnd));
-    } else if (const auto f = reinterpret_cast<GetDpiForSystemFn>(
-                   reinterpret_cast<void *>(GetProcAddress(GetModuleHandleA("user32.dll"), "GetDpiForSystem")))) {
-        dpi = static_cast<int>(f());
-    } else {
-        const HDC dc = GetDC(hwnd);
-        if (dc != nullptr) {
-            dpi = GetDeviceCaps(dc, LOGPIXELSY);  // Win32 两轴同值，故只取 Y 轴
-            ReleaseDC(hwnd, dc);
-        }
-    }
-    // NOLINTEND(*-pro-type-reinterpret-cast, *-casting-through-void)
-    scale = dpi > 0 ? static_cast<float>(dpi) / 96.0F : 1.0F;
+// `refresh_scale()` 是宿主内**唯一**读 DPI 的地方，取值实现在可单测的内部头
+// `detail/win32_dpi.h`（`read_dpi`）。降级链为：
+//   `GetDpiForWindow(hwnd)` → `GetDpiForMonitor(落位显示器)` → `GetDpiForSystem` →
+//   `GetDeviceCaps(LOGPIXELSY)` → 96（= 1.0）。
+//
+// **判据是「取到 > 0 才算成功」，不是「函数指针非空」**：此前降级挂在 `else if`（函数指针为空）
+// 上，而 Win10+ 的 `GetDpiForWindow` 恒已导出 ⇒ `GetDpiForSystem` 那一支**结构上不可达**；
+// 更糟的是建窗期 `hwnd == nullptr` 时 `GetDpiForWindow(nullptr)` 返回 0，0 被当成有效读数落到
+// `dpi > 0 ? dpi/96 : 1.0` ⇒ scale 恒 1.0 ⇒ 请求的逻辑 dp 被原样当物理像素消费（≠100% DPI 上
+// 窗口偏小）。现在任一级取到 0 即继续往下一级，且建窗期多出「按落位显示器」这一级。
+auto Win32Host::Impl::refresh_scale(const RECT *desired) -> float {
+    const detail::DpiReading reading = detail::read_dpi(hwnd, desired, detail::resolve_dpi_api());
+    scale = detail::dpi_to_scale(reading.dpi);
+    return scale;
 }
 
 // dp ↔ 物理像素的**唯一**两个换算点。宿主内任何地方都不得再裸写 `* scale` / `/ scale`——

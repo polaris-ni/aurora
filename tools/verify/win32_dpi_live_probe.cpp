@@ -8,6 +8,8 @@
 //   (d) `WM_GETMINMAXINFO` 的 min/max track 与 `set_size` 走同一换算（防 150% 屏上「按 1.5 放大
 //       上报 → OS 最大化到物理 3840 → WM_SIZE 再除回 1.5」的往返漂移——这正是消费者实测撞到的）；
 //   (e) a11y 投影矩形与鼠标坐标在 scale != 1 下落在同一格。
+//   (f) **建窗期**尺寸：以 800×600 dp 建窗后（不经 `set_size`）客户区逻辑尺寸逐位等于请求值——
+//       既有五条判据全部走 `set_size()` 之后，覆盖不到建窗那一刻的换算。
 //
 // 为什么必须有本探针（无头 / CI 证明不了的部分）：
 //   * `scale` 的真实取值依赖 `GetDpiForWindow` 与进程 DPI 感知状态，CI 的 100% DPI 环境下
@@ -206,6 +208,51 @@ auto check_mouse_mapping(MouseSink &sink, HWND hwnd, float scale) -> bool {
     return true;
 }
 
+/// @brief 判据 (f)：**建窗期**尺寸 —— 以 800×600 dp 建窗后（不经 `set_size`），客户区逻辑尺寸
+/// 必须逐位等于 800×600。
+///
+/// 为什么必须单独建一个窗口来测：本判据测的是「建窗那一刻」的换算，而既有五条判据全部走
+/// `set_size()` **之后**的往返，覆盖面里根本没有建窗尺寸。历史上建窗期 `hwnd == nullptr` 使
+/// `GetDpiForWindow(nullptr)` 返回 0，而降级判据挂在「函数指针为空」的 `else if` 上 ⇒ 0 被当成
+/// 有效读数 ⇒ scale 恒 1.0 ⇒ 请求的 dp 被原样当物理像素消费（150% 屏上 800×600 请求得到
+/// 约 533×400 的逻辑客户区）。修复后建窗期改按「落位显示器」取 DPI，并在建窗成功后按
+/// `GetDpiForWindow` 的真实值于 `ShowWindow` 之前纠正一次尺寸。
+/// @param requested 建窗请求的逻辑尺寸。
+/// @return 本段是否执行了真断言（false = 100% DPI 记 SKIP）。
+auto check_creation_size_matches_requested_dp(aurora::Size requested) -> bool {
+    if (scale_is_unity) {
+        skip("(f) creation-time size: 100% DPI, physical == dp trivially; NOT verified");
+        return false;
+    }
+    aurora::WindowStyleOptions style{};
+    style.resizable = true;
+    // 判据本体在构造参数里：`Win32Host(w, h, ...)` 的 w/h 单位是逻辑 dp（见 window.h 的
+    // `WindowOptions::size`）。构造返回后不再调 `set_size`，直接读客户区。
+    aurora::Win32Host host{static_cast<int>(requested.width), static_cast<int>(requested.height),
+                           "Aurora Win32 DPI creation-size probe", style};
+    HWND hwnd = hwnd_of(host);
+    if (hwnd == nullptr) {
+        check(false, "(f) a window could be created for the creation-size criterion");
+        return true;
+    }
+    MSG msg{};
+    while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE) != 0) {
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+    const float scale = scale_of(host);
+    const aurora::Size physical = client_physical(hwnd);
+    const float logical_w = physical.width / scale;
+    const float logical_h = physical.height / scale;
+    check(approx_eq(logical_w, requested.width, 1.0F),
+          "(f) first-frame client logical width == requested dp: " + std::to_string(logical_w) + " vs " +
+              std::to_string(requested.width));
+    check(approx_eq(logical_h, requested.height, 1.0F),
+          "(f) first-frame client logical height == requested dp: " + std::to_string(logical_h) + " vs " +
+              std::to_string(requested.height));
+    return true;
+}
+
 /// @brief 判据 (d)：`WM_GETMINMAXINFO` 的 min track 与 `set_size` 走同一换算。
 /// @param hwnd 窗口句柄。
 /// @param scale 当前 scale。
@@ -287,6 +334,7 @@ auto main() -> int {
         check_set_size_roundtrip(host, hwnd, aurora::Size{.width = 800.0F, .height = 600.0F});
         check_mouse_mapping(sink, hwnd, scale);
         check_minmax_same_conversion(hwnd, scale, logical_min);
+        check_creation_size_matches_requested_dp(aurora::Size{.width = 800.0F, .height = 600.0F});
         emit("result: 100% DPI environment, criteria not exercised (exit 3)");
         return 3;
     }
@@ -295,6 +343,8 @@ auto main() -> int {
     check_set_size_roundtrip(host, hwnd, aurora::Size{.width = 800.0F, .height = 600.0F});
     check_mouse_mapping(sink, hwnd, scale);
     check_minmax_same_conversion(hwnd, scale, logical_min);
+    // (f) 建窗期尺寸：既有五条判据全部走 set_size 之后，覆盖不到建窗那一刻的换算。
+    check_creation_size_matches_requested_dp(aurora::Size{.width = 800.0F, .height = 600.0F});
     // (e) a11y 投影矩形与鼠标同格：其判据是「`Win32UiaBridge::scale_factor()` 与宿主 scale 逐位相等」，
     // 两者同源（都走 `GetDpiForWindow` / 96）后 a11y 矩形与鼠标坐标必然落在同一格。直接断言同源值。
     emit("[NOTE] (e) a11y projection rect: the bridge now reads GetDpiForWindow like the host does, so its");

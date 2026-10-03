@@ -119,6 +119,12 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_no_hardcoded_paths
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_hardcoded_paths.py"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # Win32 DPI 换算点单源门禁（specification/08-tooling.md §8.2 的历史缺口）：宿主内 `scale`
+        # 的乘除只许出现在 to_physical / to_logical，DPI 只许在 refresh_scale() 里读。这类分叉在
+        # 100% DPI 的 CI 上恒不显形（scale 恒 1.0），故须静态检查在合入前拦住。
+        add_test(NAME check_dpi_single_source
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_dpi_single_source.py" --root "${AURORA_SOURCE_DIR}"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # clang-tidy 豁免指令排版门禁（CODING_STANDARDS.md §5.2 规则 1/2）：紧邻式豁免与目标代码
         # 之间不得插入注释行或空行——clang-format 在 120 列折断指令后的理由，会让豁免静默失效；
         # 注释散文里也不得抄 NOLINT 令牌（它会被解析成对下一物理行的全量豁免）。
