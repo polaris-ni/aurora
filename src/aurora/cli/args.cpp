@@ -1063,6 +1063,118 @@ auto Value::read_log_level() const -> Result<LogLevel> {
 
 // ------------------------------------------------------------ Arguments
 
+namespace {
+
+/// @brief 在 `root` 声明树中按**指针身份**求出 `target` 选项的路径。
+/// @param root 声明树根。
+/// @param target 待定位的选项声明（非空）。
+/// @param path 命中时写入「子命令下标链 + 层内选项下标」；未命中时内容不变。
+/// @return 命中返回 true；未命中返回 false。
+auto find_option_path(const CommandSpec &root, const OptionSchema *target, std::vector<std::size_t> &path) -> bool {
+    for (std::size_t i = 0; i < root.options.size(); ++i) {
+        if (&root.options[i] == target) {
+            path.push_back(i);
+            return true;
+        }
+    }
+    for (std::size_t s = 0; s < root.subcommands.size(); ++s) {
+        path.push_back(s);
+        if (find_option_path(root.subcommands[s], target, path)) {
+            return true;
+        }
+        path.pop_back();
+    }
+    return false;
+}
+
+/// @brief 在 `root` 声明树中按指针身份求出 `target` 命令节点的路径。
+/// @param root 声明树根。
+/// @param target 待定位的命令节点（非空）。
+/// @param path 命中时写入子命令下标链；空路径即根节点。未命中时内容不变。
+/// @return 命中返回 true；未命中返回 false。
+auto find_command_path(const CommandSpec &root, const CommandSpec *target, std::vector<std::size_t> &path) -> bool {
+    if (&root == target) {
+        return true;
+    }
+    for (std::size_t s = 0; s < root.subcommands.size(); ++s) {
+        path.push_back(s);
+        if (find_command_path(root.subcommands[s], target, path)) {
+            return true;
+        }
+        path.pop_back();
+    }
+    return false;
+}
+
+/// @brief 按下标路径在 `root` 声明树中取节点。
+/// @param root 声明树根。
+/// @param command_path 子命令下标链；空即根节点。
+/// @param option_count 命中命令节点内的选项数；`command_path` 为空且需要取选项时才用。
+/// @return 命令节点；路径越界返回 nullptr。
+auto walk_command(const CommandSpec &root, const std::vector<std::size_t> &command_path) -> const CommandSpec * {
+    const CommandSpec *node = &root;
+    for (const std::size_t index : command_path) {
+        if (index >= node->subcommands.size()) {
+            return nullptr;
+        }
+        node = &node->subcommands[index];
+    }
+    return node;
+}
+
+}  // namespace
+
+auto Arguments::rebind_slots(const CommandSpec &original) -> void {
+    if (owned_spec_ == nullptr) {
+        return;  // 借用路径：spec 由调用方持有，无需重指向
+    }
+    for (auto &slot : slots_) {
+        if (slot.spec == nullptr) {
+            continue;
+        }
+        std::vector<std::size_t> path;
+        if (!find_option_path(original, slot.spec, path) || path.empty()) {
+            continue;  // 原树里已找不到（理论上不可达）：保留原指针，由 `parse` 契约兜底
+        }
+        const std::size_t option_index = path.back();
+        path.pop_back();
+        const CommandSpec *node = walk_command(*owned_spec_, path);
+        if (node == nullptr || option_index >= node->options.size()) {
+            continue;
+        }
+        slot.spec = &node->options[option_index];
+    }
+}
+
+auto Arguments::rebind_matched(const CommandSpec &original) -> void {
+    if (owned_spec_ == nullptr || matched_ == nullptr) {
+        return;
+    }
+    std::vector<std::size_t> path;
+    if (!find_command_path(original, matched_, path)) {
+        return;
+    }
+    if (const CommandSpec *node = walk_command(*owned_spec_, path); node != nullptr) {
+        matched_ = node;
+    }
+}
+
+auto Arguments::adopt_spec(const CommandSpec &root) -> Arguments & {
+    // 先记下原指针（重指向要用它们作身份线索），再把 owned 副本装上并重指向。
+    const CommandSpec *const original_matched = matched_;
+    owned_spec_ = std::make_shared<const CommandSpec>(root);
+    rebind_slots(root);
+    if (original_matched != nullptr) {
+        std::vector<std::size_t> path;
+        if (find_command_path(root, original_matched, path)) {
+            if (const CommandSpec *node = walk_command(*owned_spec_, path); node != nullptr) {
+                matched_ = node;
+            }
+        }
+    }
+    return *this;
+}
+
 auto Arguments::find_slot(std::string_view long_name) const -> const Slot * {
     for (const auto &slot : slots_) {
         if (slot.spec->long_name == long_name) {
@@ -1239,6 +1351,42 @@ auto parse(const CommandSpec &root, int argc, const char *const *argv) -> Result
         program_name = (slash == std::string_view::npos) ? std::string{raw} : std::string{raw.substr(slash + 1)};
     }
     return run_parser(root, std::span<const std::string_view>{views}, program_name);
+}
+
+auto parse_owned(const CommandSpec &root, const std::vector<std::string> &tokens, std::string_view program_name)
+    -> Result<Invocation> {
+    const auto borrowed = parse(root, tokens, program_name);
+    if (!borrowed) {
+        return borrowed.error();
+    }
+    const Invocation &source = borrowed.value();
+    if (source.shows_display()) {
+        // 展示请求的 display_text 已渲染完毕，不含指向 spec 的指针，按值转移即可。
+        return source;
+    }
+    Invocation owned;
+    owned.view = source.view;
+    owned.display_text = source.display_text;
+    owned.arguments = source.arguments;
+    owned.arguments.adopt_spec(root);
+    return owned;
+}
+
+auto parse_owned(const CommandSpec &root, int argc, const char *const *argv) -> Result<Invocation> {
+    const auto borrowed = parse(root, argc, argv);
+    if (!borrowed) {
+        return borrowed.error();
+    }
+    const Invocation &source = borrowed.value();
+    if (source.shows_display()) {
+        return source;
+    }
+    Invocation owned;
+    owned.view = source.view;
+    owned.display_text = source.display_text;
+    owned.arguments = source.arguments;
+    owned.arguments.adopt_spec(root);
+    return owned;
 }
 
 }  // namespace aurora::cli

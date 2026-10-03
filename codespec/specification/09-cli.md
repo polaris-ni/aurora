@@ -355,6 +355,24 @@ parse(root, int argc, const char *const *argv)   // 自动跳过 argv[0]，程�
 `Invocation` 活得久（全局 / `static` / 同作用域栈对象）；把 `Invocation` 存进比声明表更久的容器是未定义行为。
 `Value` 是纯值类型，可自由拷贝。
 
+**违约是静默的，不 crashing。** 槽位指针失效后 `find_slot` 只是找不到匹配项，于是 `flag()` 恒返回
+`false`、`values()` 返回空表——**不崩、不报错、不抛异常**。实测形态：声明表写成函数返回的临时量
+（`cli::parse(build_spec(), argc, argv)`）时 `parse` 返回瞬间该临时量即销毁，此后每次读 `--flag`
+都读到已释放内存。这类缺陷靠「跑一遍看结果」极难发现，必须在选 API 时就避开。
+
+**`cli::parse_owned`：临时量形态的正确入口。** 与 `parse` 同签名语义（token 解释、错误码、默认值物化、
+`view` 短路全部同源），差别只在声明的持有方式——它把 `CommandSpec` **值拷贝**进返回的 `Invocation`，
+此后不借用调用方对象。代价是深拷贝整棵声明树（含子命令）。
+
+| 形态 | 用哪条 |
+|:---|:---|
+| 声明树是 `static` / 全局 / 同作用域栈对象 | `parse`（无拷贝开销） |
+| 声明表由函数返回（临时量），或 `Invocation` 会活得比声明表久 | **`parse_owned`** |
+
+`parse_owned` 与 `parse` 的 `matched_command()` 都返回**有效**指针，但仅 `parse` 路径保证其地址
+等于调用方原对象地址（`parse_owned` 返回副本内地址）。故**按指针身份比较**「命中的是叶子还是根」
+的代码（`demo_cli.cpp`、`aurora_cli.cpp`）只应在 `parse` 路径上这么写。
+
 ### 8.5 常见误用
 
 - 用 `get<T>()` 读可重复选项 → `cli-arity-violated`；改 `values()` + `count()`（`demo_cli.cpp` 的
@@ -362,6 +380,9 @@ parse(root, int argc, const char *const *argv)   // 自动跳过 argv[0]，程�
 - 想「保留 `-h` 又不声明选项」而给内建 `--help` 改名 → 用 `builtins`（§4.6），不必再猜哪个短名被占用。
 - 把「默认值」当「用户输入」 → 用 `explicitly_given()` 判。
 - 在循环里 `as<int>()` 反复吞错误 → 解析期已成功，取值失败只可能是 §5 的跨类读取，应作为编程错误直接上报。
+- 声明表写成函数返回值却用 `parse` → 悬空，且**表现为主动读到的旗标恒假**（见 §8.4）；改 `parse_owned`。
+  `tools/verify/verify_args.h` 是本仓的集中点：17 份真机探针都经它的 `parse_interactive` 取旗标，
+  一旦那里用错 `parse`，所有探针的 `--interactive` 人工段会被**静默跳过且退出码仍为 0**。
 
 ---
 
@@ -370,6 +391,7 @@ parse(root, int argc, const char *const *argv)   // 自动跳过 argv[0]，程�
 | 层 | 位置 | 覆盖 |
 |:---|:---|:---|
 | 单元（语法与取值） | `tests/unit/utest_cli.cpp` | §4 全部语法形态、§5 字面量、§6 错误码、命令链合并 |
+| 单元（借用 vs 拥有） | `tests/unit/utest_parse_owned.cpp` | §8.4 契约分界：临时量声明树下 `parse_owned` 的旗标 / 值 / 命令链 / 子命令分层读取，`matched_command` 落进副本，`--help` 短路与错误码同源；借用路径的指针身份契约不回归 |
 | 单元（校验与派生文本） | `tests/unit/utest_cli_format.cpp` | §3.5 `validate` 各检查项、§7 四个视图、文本 golden |
 | 共享夹具 | `tests/support/cli_fixture.h` | 三棵共用树：宽松树 `spec()`（覆盖全部 `ValueKind` / arity / 取值域 / 互斥 / 子命令 / hidden）、严格树 `strict_spec()`（必填 + 强制子命令）、让位树 `displacement_spec()`（`-h`/`-V` 被自有选项占用 + 自标 `early_view` 的 `--help`/`--dump-schema` + `builtins` 全关的子命令）。两个单元文件同树，保证断言口径一致 |
 | Golden | `tests/golden/cli_snapshots.json` | 7 段文本 + `schema`；`AURORA_UPDATE_GOLDEN=1` 经 `aurora_test_runner --run=utest_cli_format` 重生成，勿手改 |

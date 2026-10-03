@@ -23,6 +23,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -273,6 +274,22 @@ class Arguments {
     /// @return 命中的子命令叶节点声明指针；未设置时为 nullptr。
     [[nodiscard]] auto matched_command() const -> const CommandSpec * { return matched_; }
 
+    /// @brief 就地把**借用型**结果升级为拥有型：值拷贝 `root`，并把自身的槽位 / 命中命令
+    ///        指针全部重指向该副本。
+    ///
+    /// 存在的理由：`parse` 的契约要求 `root` 比返回的 `Invocation` 活得久，但调用方常把声明表
+    /// 写成函数返回的临时量（`parse(make_spec(), argc, argv)`），无法满足该契约。违约后果是
+    /// **静默**的——不崩不报错，只是 `flag()` / `values()` / `matched_command()` 解引用已释放内存，
+    /// `flag()` 恒返回 false（`Slot::spec` 失效 → `find_slot` 找不到匹配槽）。本方法把声明树纳入
+    /// 结果自身，从根上消除该悬空。
+    ///
+    /// 正常路径无需直接调用：`parse_owned` 内部已自动升级。仅当调用方要自行处理
+    /// 「先借用解析、后延长寿命」时才显式用之。
+    ///
+    /// @param root 声明树；被值拷贝进本对象。调用时 `root` 须仍有效（本方法内即完成重指向）。
+    /// @return `*this` 的引用，便于链式或就地赋值。
+    auto adopt_spec(const CommandSpec &root) -> Arguments &;
+
   private:
     friend class Parser;
 
@@ -299,6 +316,46 @@ class Arguments {
         : slots_(std::move(slots)), positionals_(std::move(positionals)), rest_(std::move(rest)),
           chain_(std::move(chain)), matched_(matched) {}
 
+    /// @brief 拥有型全量构造（仅由 `parse_owned` 使用）：把命令声明**值拷贝**进本对象，
+    ///        并把所有槽位与 `matched_` 的指针重指向这份副本。
+    ///
+    /// 为什么需要它：`Slot::spec` 与 `matched_` 都是非拥有指针，而 `Arguments` 可以比调用方的
+    /// `CommandSpec` 活得久（典型形态是声明表写成函数返回的临时量，如 `parse(make_spec(), argc, argv)`）。
+    /// 此时原契约「`root` 必须比返回的 `Invocation` 活得久」无法由调用方满足——临时量在 `parse`
+    /// 返回瞬间即销毁，而 `flag()` / `values()` / `matched_command()` 仍会解引用它。该形态下缺陷是
+    /// **静默**的：不崩不报错，只是读到的 `long_name` / 值类型来自已释放内存，`flag()` 恒返回 false
+    /// （`Slot::spec` 已失效 → `find_slot` 找不到匹配槽，却不报任何错）。本构造把 spec 纳入
+    /// `Arguments` 自身生命周期，从根上消除该悬空。
+    ///
+    /// @note 代价是深拷贝整棵声明树（含子命令）。探针那类「只有一个旗标」的小声明表代价可忽略；
+    ///       声明树很大且调用方本就长寿时，应继续用 `parse` 而非本路径。
+    /// @param slots 选项槽位表（按声明序；`spec` 指针将被重指向副本内对应声明）。
+    /// @param positionals 展平后的位置参数值（含默认值物化）。
+    /// @param rest `--` 之后的原始 token。
+    /// @param chain 命中的命令链（根在前）。
+    /// @param original 源声明树（本次调用期间有效；仅用于按身份反查路径，不被保存）。
+    /// @param spec 命令声明；将被值拷贝并成为槽位与 `matched_` 指针的唯一拥有者。
+    [[nodiscard]] Arguments(std::vector<Slot> slots, std::vector<Value> positionals, std::vector<std::string> rest,
+                            std::vector<std::string> chain, const CommandSpec &original, const CommandSpec &spec)
+        : slots_(std::move(slots)), positionals_(std::move(positionals)), rest_(std::move(rest)),
+          chain_(std::move(chain)), owned_spec_(std::make_shared<CommandSpec>(spec)) {
+        rebind_slots(original);
+        rebind_matched(original);
+    }
+
+    /// @brief 把每个槽位的 `spec` 指针重指向 owned 副本内的等价声明。
+    ///
+    /// 做法分两步且都在 `original` 仍有效时完成：先按**指针身份**在原树中求出该选项的
+    /// 「子命令下标链 + 层内选项下标」，再拿这条路径去副本里取。不能只按 `long_name` 反查——
+    /// 同名选项可出现在不同层（根与子命令各有一个 `--verbose`），按名字会绑错层。
+    ///
+    /// @param original 源声明树；仅用于身份反查，不被保存。
+    auto rebind_slots(const CommandSpec &original) -> void;
+
+    /// @brief 把 `matched_` 重指向 owned 副本内对应的命令节点。
+    /// @param original 源声明树；仅用于身份反查，不被保存。
+    auto rebind_matched(const CommandSpec &original) -> void;
+
     /// @brief 长名 → 槽位查找。
     /// @param long_name 选项长名（不带 `--` 前缀）。
     /// @return 命中的槽位只读指针；未声明的长名为 nullptr。
@@ -308,6 +365,15 @@ class Arguments {
     std::vector<Value> positionals_;  ///< 展平后的位置参数值（含默认值物化）
     std::vector<std::string> rest_;  ///< `--` 之后的原始 token
     std::vector<std::string> chain_;  ///< 命中的命令链（根在前）
+    /// @brief 声明树副本：仅 `parse_owned` 路径持有；为空即借用调用方的 spec。
+    ///
+    /// 选型说明（两条硬约束共同决定）：
+    ///   - 不能用 `optional<CommandSpec>`：本类定义在 `command.h` **之前**，此处 `CommandSpec`
+    ///     是不完整类型，而 `std::optional<T>` 要求 `T` 完整，实例化即静态断言失败。
+    ///   - 不能用 `unique_ptr`：那会使 `Arguments` 不可拷贝，而 `Invocation` 需按值拷贝
+    ///     （`adopt` 里要走 `out = borrowed`），`Result<Invocation>` 亦然。
+    ///   `shared_ptr<const T>` 同时绕开两者：不完整类型下可声明，析构可拷贝。
+    std::shared_ptr<const CommandSpec> owned_spec_;
     const CommandSpec *matched_ = nullptr;  ///< 命中的子命令叶节点声明（非拥有，可空）
 };
 
@@ -356,5 +422,31 @@ struct Invocation {
 /// @param argv main 的 argv；argv[0] 只用于取程序名，其后 token 参与解析。
 /// @return 与 vector 重载同义：用法错误返回 `cli-*` 结构化 Error，展示请求返回成功的 `Invocation`。
 [[nodiscard]] auto parse(const CommandSpec &root, int argc, const char *const *argv) -> Result<Invocation>;
+
+/// @brief 拥有型解析：把 `root` **值拷贝**进返回的 `Invocation`，之后不再借用调用方的声明。
+///
+/// 何时用：`root` 是函数返回的临时量、或调用方确定会让 `Invocation` 比 `root` 活得久时。
+/// 此时 `parse` 的「`root` 必须比返回值活得久」契约无法满足，而违约后果是**静默**的——
+/// `flag()` / `values()` / `matched_command()` 解引用已释放内存，`flag()` 恒返回 false 而不报错。
+/// 本重载把声明树纳入返回值自身，从根上消除该悬空。
+///
+/// 何时**不**用：声明树很大（深拷贝整棵树含子命令有代价）且调用方本就能保证长寿时，继续用 `parse`。
+///
+/// @note 与 `parse` 的一致性：token 解释、错误码、默认值物化、`view` 短路全部同源，
+///       仅声明的持有方式不同。`matched_command()` 在两条路径上都返回**有效**指针，
+///       但仅 `parse` 路径保证其地址等于调用方原对象的地址（`parse_owned` 返回副本内地址）。
+/// @param root 命令声明；将被值拷贝。
+/// @param tokens 不含 argv[0] 的参数序列。
+/// @param program_name usage/help 里显示的程序名；空则回落 `root.name`，再空则 "program"。
+/// @return 语义与 `parse` 同义。
+[[nodiscard]] auto parse_owned(const CommandSpec &root, const std::vector<std::string> &tokens,
+                               std::string_view program_name = {}) -> Result<Invocation>;
+
+/// @brief 拥有型解析的 C 入口重载；语义与 `parse` 的 argc 重载同义，仅声明持有方式不同。
+/// @param root 命令声明；将被值拷贝。
+/// @param argc main 的 argc（<= 0 按无参数处理）。
+/// @param argv main 的 argv；argv[0] 只用于取程序名，其后 token 参与解析。
+/// @return 语义与 `parse` 的 argc 重载同义。
+[[nodiscard]] auto parse_owned(const CommandSpec &root, int argc, const char *const *argv) -> Result<Invocation>;
 
 }  // namespace aurora::cli

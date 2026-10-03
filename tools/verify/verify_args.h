@@ -38,7 +38,12 @@ struct CommandLine {
 /// @brief 解析探针 argv；`--help` 文本与用法诊断都在此打印。
 [[nodiscard]] inline auto parse_command_line(const aurora::cli::CommandSpec &spec, int argc, char **argv)
     -> CommandLine {
-    const auto parsed = aurora::cli::parse(spec, argc, argv);
+    // 必须走 `parse_owned` 而非 `parse`：`Arguments` 内的槽位指针指向 `spec`，而本函数的
+    // 调用方（探针 main）常把 spec 写成局部量并在 `Invocation` 之后才析构——`parse` 那时已安全。
+    // 但 `parse_interactive` 传的是 `interactive_spec(about)` 的**临时量**，`parse` 返回即销毁，
+    // 之后 `flag()` 读的是已释放内存：静默恒返回 false（实测），人工段被无声跳过、退出码仍为 0。
+    // `parse_owned` 把声明树值拷贝进结果，从根上消除该悬空。
+    const auto parsed = aurora::cli::parse_owned(spec, argc, argv);
     if (!parsed) {
         std::string detail = parsed.error().message;
         if (!parsed.error().suggestion.empty()) {
