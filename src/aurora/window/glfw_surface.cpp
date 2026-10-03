@@ -21,9 +21,32 @@
 #endif
 #include <GLFW/glfw3.h>
 
+// `native_handle()` 逐平台取原生句柄（Win32 HWND / macOS NSWindow* / X11 Window），
+// 三者都只在 `glfw3native.h` 里声明，且各自被平台宏门控 —— 缺宏则该平台的
+// `glfwGet*Window` 是未声明标识符。故此处按平台只开启自己需要的那一个，
+// 不多开（如不开 GLX/EGL/Wayland）以免拖入无用的系统头。
 #ifdef AURORA_PLATFORM_WINDOWS
 #define GLFW_EXPOSE_NATIVE_WIN32  // NOLINT(*-identifier-naming)
+#elif defined(AURORA_PLATFORM_MACOS)
+#define GLFW_EXPOSE_NATIVE_COCOA  // NOLINT(*-identifier-naming)
+#elif defined(AURORA_PLATFORM_LINUX)
+// XWayland 下 GLFW 仍经 X11 取句柄（Wayland 原生句柄由 WaylandSurface 负责），
+// 故 Linux 腿只需 X11 而非 GLFW_EXPOSE_NATIVE_WAYLAND。
+#define GLFW_EXPOSE_NATIVE_X11  // NOLINT(*-identifier-naming)
+#endif
 #include <GLFW/glfw3native.h>
+
+// X11 的 `<X11/X.h>`（经上面 glfw3native.h 拉入）无条件定义对象宏 `CursorShape`（值 0，
+// 光标最大尺寸）与 `None`（值 0L）：前者与公共类型 `aurora::CursorShape`（core/enums.h）
+// 硬碰撞 → `CursorShape shape` 被展开成 `0 shape`；后者与枚举项 `ModifierKey::None`
+// 碰撞 → 报 `expected unqualified-id before numeric constant`。本项目不用这两个 Xlib
+// 恒定量（光标形状经 GLFW 标准光标枚举；修饰态经上表的 GLFW 掩码），故直接解除。
+// 必须在本文件后续包含 aurora 头（cursor_map.h / detail/glfw_modifiers.h）之前解除 ——
+// 头文件 guard 一旦把它们解析完，事后 #undef 救不回来。
+// 与 `x11_surface.cpp` 的同名处理同口径（那里还需先取 `None` 的值再 #undef）。
+#if defined(AURORA_PLATFORM_LINUX)
+#undef CursorShape
+#undef None
 #endif
 
 #include <algorithm>

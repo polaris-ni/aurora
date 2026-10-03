@@ -23,6 +23,8 @@
 #ifdef AURORA_WIN32_DPI_AVAILABLE
 #include <windows.h>
 
+#include <cstdint>
+
 #include "aurora/window/detail/win32_dpi.h"
 #endif
 
@@ -34,17 +36,36 @@ namespace aurora::test_cases::utest_win32_dpi {
 #ifdef AURORA_WIN32_DPI_AVAILABLE
 namespace {
 
+/// @brief 供注入用的**非空**伪句柄。
+///
+/// 单测从不把它交给系统 API，只传给 `read_dpi` 的「句柄是否就绪」这一位门控，故由一个静态
+/// 对象的地址冒充即可；具名而非就地 `reinterpret_cast<HWND>(1)`，是为了让「必须非空」这个
+/// 判据前提在读代码时可见，也免掉整数转指针的强转。
+HWND fake_hwnd() {
+    // 命名空间的 static 存储（非函数内static）：门禁按「全局常量」判，故须AURORA_ 前缀。
+    static char fake_hwnd_backing = 0;
+    return reinterpret_cast<HWND>(&fake_hwnd_backing);  // NOLINT(*-pro-type-reinterpret-cast)
+}
+
 /// @brief 注入用的假 `GetDpiForWindow`：返回 0（模拟「句柄尚未创建」时该 API 的真实行为）。
-UINT WINAPI fake_for_window(HWND) { return 0; }
+UINT WINAPI fake_for_window(HWND hwnd) {
+    (void)hwnd;
+    return 0;
+}
 
 /// @brief 注入用的假 `GetDpiForWindow`：返回 120（模拟句柄就绪后的真读数，125% 屏）。
-UINT WINAPI fake_for_window_ok(HWND) { return 120; }
+UINT WINAPI fake_for_window_ok(HWND hwnd) {
+    (void)hwnd;
+    return 120;
+}
 
 /// @brief 注入用的假 `GetDpiForSystem`：固定回 144（150% 屏），用于证明该级**可达**。
 UINT WINAPI fake_for_system() { return 144; }
 
 /// @brief 注入用的假 `GetDpiForMonitor`：固定回 192（200% 屏），用于证明该级**可达**。
-HRESULT WINAPI fake_for_monitor(HMONITOR, int, UINT *x, UINT *y) {
+HRESULT WINAPI fake_for_monitor(HMONITOR monitor, int dpi_y, UINT *x, UINT *y) {
+    (void)monitor;
+    (void)dpi_y;
     if (x != nullptr) {
         *x = 192;
     }
@@ -68,7 +89,7 @@ AURORA_TEST_CASE(window_dpi_unavailable_falls_through_to_system) {
     // 必须传**非空** hwnd：按窗口那一级的守卫是「句柄已就绪 ∧ 函数已解析」，传 nullptr 会直接
     // 跳过该支，于是「解析不到 → 落到下一级」根本没被走到 —— 判据会空转成恒真。
     const DpiApi api{.for_window = nullptr, .for_system = &fake_for_system, .for_monitor = nullptr};
-    const auto r = read_dpi(reinterpret_cast<HWND>(1), nullptr, api);
+    const auto r = read_dpi(fake_hwnd(), nullptr, api);
     AURORA_TEST_CHECK(r.source == DpiSource::System);
     AURORA_TEST_CHECK_EQ(r.dpi, 144);
 #else
@@ -84,7 +105,7 @@ AURORA_TEST_CASE(window_dpi_of_zero_counts_as_failure_not_as_a_reading) {
     using detail::DpiSource;
     using detail::read_dpi;
     const DpiApi api{.for_window = &fake_for_window, .for_system = &fake_for_system, .for_monitor = nullptr};
-    const auto r = read_dpi(reinterpret_cast<HWND>(1), nullptr, api);
+    const auto r = read_dpi(fake_hwnd(), nullptr, api);
     AURORA_TEST_CHECK(r.source == DpiSource::System);
     AURORA_TEST_CHECK_EQ(r.dpi, 144);
     // 直接钉住「不得把 0 报成按窗口的读数」：旧代码正是这么掉进 scale == 1.0 的。
@@ -111,7 +132,7 @@ AURORA_TEST_CASE(creation_time_reads_the_monitor_the_window_will_land_on) {
     // 句柄就绪后即使给了落位矩形也**优先**按窗口：建窗后的纠正逻辑依赖这个优先级。
     const DpiApi with_window{
         .for_window = &fake_for_window_ok, .for_system = nullptr, .for_monitor = &fake_for_monitor};
-    const auto r2 = read_dpi(reinterpret_cast<HWND>(1), &work_area, with_window);
+    const auto r2 = read_dpi(fake_hwnd(), &work_area, with_window);
     AURORA_TEST_CHECK(r2.source == DpiSource::Window);
     AURORA_TEST_CHECK_EQ(r2.dpi, 120);
 #else

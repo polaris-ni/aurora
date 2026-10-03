@@ -74,12 +74,12 @@ AURORA_TEST_CASE(reinit_after_shutdown_restores_discovery) {
 namespace {
 
 /// @brief 一个绝不会命中任何族的哨兵族名。
-constexpr const char *kSentinelFamily = "utest-no-such-family-sentinel-zzz";
+constexpr const char *AURORA_UTEST_SENTINEL_FAMILY = "utest-no-such-family-sentinel-zzz";
 
 /// @brief 默认链的面集合（哨兵族解析到的就是它）。
 /// @return 哨兵族的解析结果（按 FontFace 裸指针）。
 [[nodiscard]] auto default_chain_faces() -> const std::vector<render::FontFace *> & {
-    return render::resolve_faces(kSentinelFamily, 400);
+    return render::resolve_faces(AURORA_UTEST_SENTINEL_FAMILY, 400);
 }
 
 /// @brief 该族的解析结果是否**不同于**纯默认链（即它真的贡献了自己的面）。
@@ -140,6 +140,7 @@ AURORA_TEST_CASE(enumerated_families_are_sorted_deduplicated_and_stable) {
         AURORA_TEST_CHECK_EQ(a[i].monospace ? 1 : 0, b[i].monospace ? 1 : 0);
     }
     std::vector<std::string> names;
+    names.reserve(a.size());
     for (const auto &info : a) {
         names.push_back(info.family);
     }
@@ -208,7 +209,7 @@ AURORA_TEST_CASE(enumerating_does_not_disturb_existing_resolution) {
     render::init_font_discovery();
     const auto before = render::resolve_faces("", 400);
     const auto before_size = before.size();
-    const auto before_front = before.front();
+    const auto *const before_front = before.front();
     const auto all = render::list_font_families();
     AURORA_TEST_CHECK_FALSE(all.empty());
     const auto after = render::resolve_faces("", 400);

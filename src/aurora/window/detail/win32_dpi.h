@@ -25,6 +25,8 @@
 
 #include <windows.h>
 
+#include <cstdint>
+
 namespace aurora::detail {
 
 /// @brief 运行时解析到的 DPI API 函数指针集合；全空 = 老系统（逐级回落 `GetDeviceCaps` → 96）。
@@ -43,7 +45,7 @@ struct DpiApi {
 };
 
 /// @brief 一次 DPI 读数的**来源**，供调用方与单测判断降到了哪一级。
-enum class DpiSource {
+enum class DpiSource : std::uint8_t {
     Window,  ///< `GetDpiForWindow(hwnd)`（句柄就绪后的首选）。
     Monitor,  ///< `GetDpiForMonitor`（建窗期：句柄尚未创建，按落位显示器取）。
     System,  ///< `GetDpiForSystem`（系统级 DPI）。
@@ -92,8 +94,9 @@ struct DpiReading {
 [[nodiscard]] inline auto monitor_for_creation(const RECT *desired) -> HMONITOR {
     POINT pt{};
     if (desired != nullptr) {
-        pt.x = desired->left + (desired->right - desired->left) / 2;
-        pt.y = desired->top + (desired->bottom - desired->top) / 2;
+        // 括号是门禁要求的显式优先级：`-` 先于 `/`，写清意图免得读者重新推。
+        pt.x = desired->left + ((desired->right - desired->left) / 2);
+        pt.y = desired->top + ((desired->bottom - desired->top) / 2);
         return MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
     }
     return MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
@@ -157,9 +160,7 @@ struct DpiReading {
 /// @brief DPI → 缩放因子（唯一换算口径：96 DPI == 1.0）。
 /// @param dpi DPI 读数；<= 0 按 96 处理（不猜）。
 /// @return 缩放因子。
-[[nodiscard]] inline constexpr auto dpi_to_scale(int dpi) -> float {
-    return dpi > 0 ? static_cast<float>(dpi) / 96.0F : 1.0F;
-}
+[[nodiscard]] constexpr auto dpi_to_scale(int dpi) -> float { return dpi > 0 ? static_cast<float>(dpi) / 96.0F : 1.0F; }
 
 }  // namespace aurora::detail
 

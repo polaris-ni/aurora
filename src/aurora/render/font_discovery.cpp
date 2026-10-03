@@ -98,13 +98,15 @@ struct FontSource {
     int index = 0;  ///< 文件内的 face 下标（`.ttc` 集合字体；首版只取 0，见 scan 处注释）。
 };
 
-// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
+// 静态存储期的容器构造若抛出，进程无法恢复；同`software_rhi.cpp` / `debug_runtime.cpp`
+// 的既有取舍：进程级缓存不值得为「构造失败」建一套恢复路径，分配失败即终止。
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables, bugprone-throwing-static-initialization)
 std::unordered_map<std::string, std::vector<FontSource>> g_catalog;
 bool g_catalog_scanned = false;
-// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables, bugprone-throwing-static-initialization)
 
 /// @brief 等宽判定的度量像素尺寸：只用于比较 advance 是否相等，取值本身无语义。
-constexpr int kMonospaceProbePx = 16;
+constexpr int AURORA_MONOSPACE_PROBE_PX = 16;
 
 /// @brief 系统字体目录（按平台）。三平台同口径：目录扫描 + `FT_Face::family_name`。
 /// @return 该平台的字体目录候选根（不存在者由调用方跳过）。
@@ -117,14 +119,14 @@ auto system_font_roots() -> std::vector<std::string> {
 #elif defined(AURORA_PLATFORM_LINUX)
     roots.emplace_back("/usr/share/fonts");
     roots.emplace_back("/usr/local/share/fonts");
-    if (const char *home = std::getenv("HOME"); (home != nullptr) && (home[0] != '\0')) {
+    if (const char *home = std::getenv("HOME"); (home != nullptr) && (*home != '\0')) {
         roots.emplace_back(std::string(home) + "/.fonts");
         roots.emplace_back(std::string(home) + "/.local/share/fonts");
     }
 #elif defined(AURORA_PLATFORM_MACOS)
     roots.emplace_back("/System/Library/Fonts");
     roots.emplace_back("/Library/Fonts");
-    if (const char *home = std::getenv("HOME"); (home != nullptr) && (home[0] != '\0')) {
+    if (const char *home = std::getenv("HOME"); (home != nullptr) && (*home != '\0')) {
         roots.emplace_back(std::string(home) + "/Library/Fonts");
     }
 #endif
@@ -166,7 +168,8 @@ auto ensure_catalog_scanned() -> void {
             if (FT_New_Face(lib, entry.path().string().c_str(), 0, &probe) != 0) {
                 continue;
             }
-            if ((probe->family_name != nullptr) && (probe->family_name[0] != '\0')) {
+            // 解引用取首字符而非 `family_name[0]`：后者是下标运算（指针算术），门禁拦。
+            if ((probe->family_name != nullptr) && (*probe->family_name != '\0')) {
                 g_catalog[probe->family_name].push_back(FontSource{.path = entry.path().string(), .index = 0});
             }
             FT_Done_Face(probe);
@@ -181,7 +184,7 @@ auto ensure_catalog_scanned() -> void {
 /// @param face 待判定的 FT_Face（须已可用）。
 /// @return 度量可得且三者全等时 true；度量不可得时 false（由调用方决定要不要用族名兜底）。
 [[nodiscard]] auto advances_are_uniform(FT_Face face) -> bool {
-    if (FT_Set_Pixel_Sizes(face, 0, kMonospaceProbePx) != 0) {
+    if (FT_Set_Pixel_Sizes(face, 0, AURORA_MONOSPACE_PROBE_PX) != 0) {
         return false;
     }
     int reference = -1;
@@ -354,7 +357,7 @@ auto resolve_faces(const std::string &family, int weight) -> const std::vector<F
     }
     // 系统字体目录的族首次被请求时**按需加载**：`list_font_families()` 承诺「枚举出来的族一定
     // 解析得到属于该族的面」，而这个承诺对目录扫描出来的族只能靠这一步兑现。
-    if (!family.empty() && (g_registry.find(family) == g_registry.end())) {
+    if (!family.empty() && !g_registry.contains(family)) {
         materialize_catalog_family(family);
     }
     std::vector<std::shared_ptr<FontFace>> owned;
@@ -420,7 +423,7 @@ auto list_font_families(bool monospace_only) -> std::vector<FontFamilyInfo> {
         }
     }
     for (const auto &key : g_catalog | std::views::keys) {
-        if (!is_pseudo_family(key) && (g_registry.find(key) == g_registry.end())) {
+        if (!is_pseudo_family(key) && !g_registry.contains(key)) {
             names.push_back(key);
         }
     }

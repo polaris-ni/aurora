@@ -43,7 +43,7 @@ struct Argv {
     /// @brief 以程序名 + 给定 token 构造 argv。
     /// @param tokens 不含程序名的参数序列。
     explicit Argv(std::vector<std::string> tokens) {
-        storage.push_back("probe");
+        storage.emplace_back("probe");
         for (auto &token : tokens) {
             storage.push_back(std::move(token));
         }
@@ -60,8 +60,8 @@ struct Argv {
 
 /// @brief 给「活对象」对照提供长寿命声明树。
 [[nodiscard]] inline auto live_reference_spec() -> const cli::CommandSpec & {
-    static const cli::CommandSpec value = temporary_spec();
-    return value;
+    static const cli::CommandSpec AURORA_LIVE_SPEC = temporary_spec();
+    return AURORA_LIVE_SPEC;
 }
 
 AURORA_TEST_CASE(owned_parse_reads_flag_correctly_when_spec_is_temporary) {
