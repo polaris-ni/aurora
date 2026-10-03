@@ -200,8 +200,15 @@ struct ShapeCacheKey {
     int px = 0;
     TextLayoutOpts opts;
     std::uint64_t faces_key = 0;
+    /// @brief 回退链的内容摘要，由构造处（`shape_line`，非 noexcept）预计算。
+    ///
+    /// 为什么不直接在本键上哈希链内容：`ShapeCacheKeyHash::operator()` 标了 `noexcept`，
+    /// 而 `std::hash<std::string>` 可能抛 `bad_alloc` —— 在 `noexcept` 函数里新增字符串哈希
+    /// 调用点会被 `bugprone-exception-escape` 拦（2026-10-03 CI wasm lint 分片实测）。
+    /// 摘要挪到构造处算一次、这里只混数值，语义不变（仍是「按链内容区分条目」）。
+    std::uint64_t chain_key = 0;
     auto operator==(const ShapeCacheKey &o) const noexcept -> bool {
-        return px == o.px && opts == o.opts && faces_key == o.faces_key && line == o.line;
+        return px == o.px && opts == o.opts && faces_key == o.faces_key && chain_key == o.chain_key && line == o.line;
     }
 };
 
@@ -220,13 +227,10 @@ struct ShapeCacheKeyHash {
         mix(k.opts.italic ? 0x1001ULL : 0ULL);
         // direction 进缓存键：nullopt=guess（0），显式 LTR/RTL 各占一档。
         mix(k.opts.direction.has_value() ? (0x2000ULL + static_cast<std::uint64_t>(*k.opts.direction)) : 0ULL);
-        // 回退链进缓存键：链决定选面。虽然 faces_key 已覆盖解析出的面序列，但只在「两条链
-        // 恰好解析出同一组面」时才等价（如两条链都只含已注册的空链）；此处按**内容**混入链的
-        // 身份，使「链不同」一律不共用条目 —— 保守方向（宁可少命中，不可命中错的）。
-        for (std::size_t i = 0; i < k.opts.font_fallback_chain_size; ++i) {
-            mix(std::hash<std::string>{}(k.opts.font_fallback_chain.at(i)));
-        }
-        mix(static_cast<std::uint64_t>(k.opts.font_fallback_chain_size) * 0x9E37ULL);
+        // 回退链进缓存键：链决定选面。摘要由构造处预计算（见 chain_key 字段的注释：哈希函数
+        // 是 noexcept，不能在里面哈希字符串）。faces_key 已覆盖解析出的面序列，链摘要只补
+        // 「两条链解析出同一组面」时的那部分差异 —— 保守方向：宁可少命中，不可命中错的。
+        mix(k.chain_key);
         // fixed_cell_advance_px 不影响 shaping 输出（只改 pen 推进），但推进相关的度量函数
         // 复用本缓存的 glyphs，故必须进键 —— 否则开了档与没档会互相命中，字距静默错位。
         mix(k.opts.fixed_cell_advance_px.has_value()
@@ -312,6 +316,25 @@ class ShapeCache {
     return h;
 }
 
+/// @brief 按族回退链的内容摘要（FNV-1a，空链为固定基值）。
+///
+/// 供 `ShapeCacheKey::chain_key` 用，在**非 noexcept 的构造处**调用：`ShapeCacheKeyHash`
+/// 与 `operator==` 都是 `noexcept`，在那里哈希 `std::string` 会被 `bugprone-exception-escape`
+/// 拦（`std::hash<std::string>` 可能抛 `bad_alloc`）。空链也参与哈希（长度混入），
+/// 使「空链」与「某个哈希恰好为基值的链」不撞。
+[[nodiscard]] auto chain_key_of(const TextLayoutOpts &opts) -> std::uint64_t {
+    std::uint64_t h = 0xcbf29ce484222325ULL ^ (static_cast<std::uint64_t>(opts.font_fallback_chain_size) * 0x9E37ULL);
+    for (std::size_t i = 0; i < opts.font_fallback_chain_size; ++i) {
+        for (const char ch : opts.font_fallback_chain.at(i)) {
+            h ^= static_cast<std::uint64_t>(static_cast<unsigned char>(ch));
+            h *= 0x100000001b3ULL;
+        }
+        h ^= 0x1FULL;  // 族名分隔符，防 {"a","bc"} 与 {"ab","c"} 撞
+        h *= 0x100000001b3ULL;
+    }
+    return h;
+}
+
 // 前向声明（定义见下方）：_uncached 是真正跑 hb_shape 的纯函数体。
 [[nodiscard]] auto shape_line_uncached(const std::string &line, const std::vector<FontFace *> &faces, int px,
                                        const TextLayoutOpts &opts) -> ShapedLine;
@@ -323,7 +346,8 @@ class ShapeCache {
     if (line.empty()) {
         return out;
     }
-    const ShapeCacheKey key{.line = line, .px = px, .opts = opts, .faces_key = faces_key_of(faces)};
+    const ShapeCacheKey key{
+        .line = line, .px = px, .opts = opts, .faces_key = faces_key_of(faces), .chain_key = chain_key_of(opts)};
     if (const auto *cached = shape_cache().find(key)) {
         out.glyphs = *cached;  // 命中：跳过 hb_shape。纯函数输出，与重算逐位一致（golden 零影响）。
         AURORA_PROFILE_COUNT(shape_cache_hits, 1);

@@ -172,7 +172,7 @@ mutate "$FE_SRC" <<'PY'
 import io, sys
 p = sys.argv[1]
 s = io.open(p, encoding='utf-8').read()
-old = "        for (std::size_t i = 0; i < k.opts.font_fallback_chain_size; ++i) {\n            mix(std::hash<std::string>{}(k.opts.font_fallback_chain.at(i)));\n        }\n        mix(static_cast<std::uint64_t>(k.opts.font_fallback_chain_size) * 0x9E37ULL);"
+old = "        mix(k.chain_key);"
 new = "        // MUTATION: 链不进缓存键"
 assert old in s, "anchor not found"
 io.open(p, 'w', encoding='utf-8', newline='').write(s.replace(old, new, 1))
