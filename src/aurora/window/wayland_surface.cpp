@@ -31,6 +31,7 @@
 #include "aurora/window/detail/atspi_bridge.h"
 #include "aurora/window/detail/ime_composition.h"
 #include "aurora/window/detail/title_bar_painter.h"
+#include "aurora/window/detail/wayland_output_scale.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/swizzle.h"
 #include "aurora/window/window_state.h"
@@ -238,29 +239,21 @@ struct WaylandSurface::Impl {
     }
 
     auto refresh_scale() -> void {
-        // per-output 模型：取**表面当前所在输出**的缩放，而不是全部输出的最大值。
-        // - 已 enter：按所在输出的 scale（跨屏拖动即 enter/leave 交替 ⇒ 缩放随之切换）。
-        //   窗口可能同时跨在两屏上（两个输出都 enter）；此时取其中最大者——与合成器
-        //   「必须按最大者渲染才不被拉伸」的约束一致。
-        // - 未 enter（map 前 / 全屏切输出途中）：退回全部输出的最大值。这与旧模型同，
-        //   目的是让高 DPI 屏上的首帧不因「猜 1x」而模糊；随后 enter 到达即纠正。
-        // 两级都受 `compositor_version < 3` 约束：set_buffer_scale 需 wl_surface v3。
-        int want = 1;
-        if (compositor_version < 3U) {
-            want = 1;  // set_buffer_scale 需 wl_surface v3：不支持则退化 1x
-        } else if (!entered.empty()) {
-            for (const wl_output *o : entered) {
-                for (const OutputInfo &info : outputs) {
-                    if (info.out == o) {
-                        want = std::max(want, info.scale);
-                    }
-                }
-            }
-        } else {
-            for (const OutputInfo &o : outputs) {
-                want = std::max(want, o.scale);
-            }
+        // per-output 模型的取值决策收敛在 detail/wayland_output_scale.h（纯函数、可单测）；
+        // 此处只负责把协议对象转成身份键、施加副作用（换光标 / 上报 / 请帧）。
+        // 三条分支的取舍理由见该头文件注释。
+        std::vector<std::uintptr_t> entered_keys;
+        entered_keys.reserve(entered.size());
+        for (const wl_output *o : entered) {
+            entered_keys.push_back(reinterpret_cast<std::uintptr_t>(o));
         }
+        std::vector<detail::WaylandOutput> out_scales;
+        out_scales.reserve(outputs.size());
+        for (const OutputInfo &info : outputs) {
+            out_scales.push_back(
+                detail::WaylandOutput{.key = reinterpret_cast<std::uintptr_t>(info.out), .scale = info.scale});
+        }
+        const int want = detail::select_wayland_buffer_scale(compositor_version, out_scales, entered_keys);
         if (want != scale) {
             scale = want;
             // 光标主题按设备像素加载：缩放变了旧主题的位图就不再匹配，立即重载并重下发

@@ -851,17 +851,44 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   - **GLFW**：经 `glfwSetWindowContentScaleCallback`（Win32 上由 `WM_DPICHANGED` 驱动、X11 /
     Wayland 上由输出 scale 事件驱动）上报，同样只报变化。真机验收见
     `tools/verify/glfw_dpi_live_probe.cpp`——自动段**注入 `WM_DPICHANGED` 造变化**（不需要第二块
-    显示器）断言回调被调用且值与 `scale_factor()` 一致，人工段做真跨屏拖动。
+    显示器）断言回调被调用且值与 `scale_factor()` 一致；随后**再注入一次同值 DPI** 断言 handler
+    **不再被调用**，即「变化才上报」的去重分支也被覆盖。人工段做真跨屏拖动。
     该探针依赖 `GlfwSurface::native_handle()` 取 HWND（此前本后端未覆写，是四个真实窗口后端里
     唯一的缺口，导致 GLFW 跨屏行为在本仓不可观测）。
+    - **同值注入是去重分支唯一的驱动手段，且不可省**：GLFW 自身**不去重**——
+      `win32_window.c` 收 `WM_DPICHANGED` 时无条件调 `_glfwInputWindowContentScale`，该函数
+      （`window.c`）只要注册了回调就无条件派发。于是「再递一次相同值」时回调**一定到达**，
+      `GlfwSurface::Impl::on_content_scale` 的 `if (next == self->scale) return;` 是唯一拦截点。
+      探针此前**恰好排除了同值注入**（理由写作「去重会静默返回」），致该分支在自动段永远走不到：
+      删掉去重后变异仍全 PASS 暴露。现补 (e5)（计数不得增加）+ (e6)（成员 scale 须仍为注入值，
+      排除「靠提前 return 连换算一起吞掉」的实现）。变异自证：删去重 ⇒ (e5) 转红且其余判据仍绿。
   - **Wayland**：经 `wl_surface.enter` / `leave` 维护「表面当前所在输出」集合，
-    `refresh_scale()` 取**所在输出**的缩放（跨在两屏上时取较大者，与合成器「按最大者渲染才不被
+    取值决策收敛在内部头 `window/detail/wayland_output_scale.h` 的纯函数
+    `select_wayland_buffer_scale()`（跨在两屏上时取较大者，与合成器「按最大者渲染才不被
     拉伸」的约束一致）；未 enter 时退回全部输出的最大值以保首帧不糊。变化时先
     `notify_scale_change` 再 `present_request_`（顺序反了会有一帧用旧 scale 渲染）。
+    - 该头**刻意不加** `AURORA_BACKEND_WAYLAND` 门控（与 `glfw_dpi.h` 的差异是有意的）：它只含
+      纯整数逻辑、不含平台 API，门控没有编译期收益，代价却是让唯一能覆盖它的单测在非 Linux
+      平台退化成 SKIP 桩。实测 Windows `build/` 下 `utest_wayland_output_scale` 5 条**真跑**
+      （对照：同目录 `utest_glfw_dpi` 因门控裁掉而恒 4 条 SKIP）。已核 `check_platform_macros` /
+      `check_arch_module_map` 不因此判红。
+    - 该决策只在窗口**跨屏**时才与「取全部输出最大值」给出不同答案，而 CI 无头、单机无第二屏，
+      跨屏无法自然复现 ⇒ 这正是它必须可单测的原因。`utest_wayland_output_scale` 三条分支各有用例，
+      变异自证：关闭 per-output 分支 ⇒ `entered_output_wins_over_global_maximum` 与
+      `unknown_output_key_never_inflates_the_scale` 转红、另 3 条仍绿。
+    - Linux 侧真机腿已可跑：WSL Ubuntu + WSLg 合成器（`WAYLAND_DISPLAY=wayland-0`）下
+      `AURORA_LIVE_WAYLAND=1` 令 `utest_wayland_surface` 的 `live_cursor_commit_sweep` 真建窗
+      真提交光标通过。剩余 2 条 SKIP 各有具体成因（单测不碰 OS 资源 / 合成器未宣告 text-input-v3），
+      非本仓缺陷；后者完整验收在 `aurora_verify_wayland_ime` 探针。
   - **X11**：**不适用，非缺口**。`detect_scale()` 读的是 X 资源管理器的 `Xft.dpi`——**进程级全局
     设置、运行期不变**，且 X11 核心没有 per-monitor DPI 概念。X11 上「跨屏」本就不会引起 scale
     变化，无信号可报。要在 X11 上实现 per-monitor DPI 需另接 XRandR（新特性，非补通知）。
     运行时改 `Xft.dpi` 也不会被感知（该值仅在建窗时读一次），此为已知限制。
+- **尚未验收的缩放场景（如实记，非缺陷）**：GLFW 探针的**人工段 (d) 真跨屏拖动**在本开发机
+  **客观不可执行**——机器只有一块物理显示器（`\.\DISPLAY1` 3840×2160 @150%，`DISPLAY2-5` 的
+  `stateFlags=0` 即未挂载），无第二个不同缩放的输出可拖。探针此时按约定报 `PENDING MANUAL`
+  （退出码 3）而**非 PASS**，并已实测确认该退出码。⇒ 跨屏端到端仍属人工验收项，
+  须在双屏异缩放机器上跑 `--interactive` 后方可记通过；在此之前不得据自动段结论推断跨屏正确。
 - 脏区语义（`present_root` partial-clip 路径）：树状态已变但无脏登记时 idle 跳帧（`frame_count` 不增、
   `has_pending_dirty()` 为假）；手动 `mark_dirty` 局部矩形后仅裁剪区重绘、**裁剪外保留上帧像素**（与
   「整屏刷底色」实现可区分——后者会画出已变的新色）；随后补标另一侧再验证增量覆盖。

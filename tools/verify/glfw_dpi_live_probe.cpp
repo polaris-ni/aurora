@@ -9,15 +9,16 @@
 //     驱动，CI 的一次性容器窗口不会被拖到另一块屏 ⇒ 回调在 CI 里恒不触发；
 //   * 本仓已确认的教训：这类「接线是否漏掉」的分叉在 100% DPI 下不显形（scale 恰 1.0 时
 //     两种单位解读重合），只有真机 ≠100% DPI 才炸（`etest_smoke_render` 的 GLFW 腿曾恒红）。
-//   ⇒ 自动段刻意**不依赖 scale 变化**：它验的是「注册通道真的接通、换算真的被调用」，
-//     这在 100% DPI 下同样能证伪；scale 真变后的端到端效果由人工段覆盖。
+//   ⇒ 自动段**刻意只用注入造变化**（不依赖真机第二块屏）：它验的是「注册通道真的接通、
+//     换算真的被调用、去重真的拦得住重复值」——这三点在 100% DPI 下同样能证伪；
+//     真跨屏后的端到端效果由人工段覆盖。
 //
 // 自动段（无需人工，任何 DPI 环境均可跑）：
-//   (e) **上报通道真的通**（Windows）：向窗口注入 `WM_DPICHANGED`（GLFW 在该消息里
-//       `_glfwInputWindowContentScale`），断言 handler 被调用、收到的值 == 注入 DPI/96
-//       == `scale_factor()`。这是本探针的核心判据——只验「注册不抛 / 无源时不误报」
-//       是空转的：把 `set_scale_change_handler` override 整个删掉，那些判据照样全绿
-//       （变异实测）。不需要第二块显示器。
+//   (e) **上报通道真的通 + 去重真的生效**（Windows）：向窗口注入 `WM_DPICHANGED`（GLFW 在该
+//       消息里无条件调 `_glfwInputWindowContentScale`），先注**异值** DPI 断言 handler 被调用、
+//       收到的值 == 注入 DPI/96 == `scale_factor()`；再注**同值** DPI 断言 handler **不再被调用**
+//       （`on_content_scale` 的 `if (next == self->scale) return;` 是唯一拦截点）。同值这一注是
+//       去重分支唯一的驱动手段——GLFW 自身不去重，故不需要第二块显示器。
 //   (b) 换算自洽：建窗请求的逻辑 dp 逐位回到 `size()`；`framebuffer_size()` == 物理像素；
 //       且 `framebuffer_size() == round(size() × scale)`。这三者同源才说明
 //       `detail/glfw_dpi.h` 的换算在线（对照 08-tooling.md §8.2 的 Win32 单一真值源口径）。
@@ -170,6 +171,33 @@ auto main(int argc, char **argv) -> int {
                       "(e3) reported scale == scale_factor() after injection (" + std::to_string(reported_scale) +
                           " vs " + std::to_string(win.surface().scale_factor()) + ")");
             }
+
+            // ---- 判据 (e5)：去重分支真的拦下「无变化」的上报 ----
+            //
+            // 前提核对（决定了这条判据能不能成立，缺了就是空转）：
+            //   * `third_party/glfw/src/win32_window.c:1218` 在 `WM_DPICHANGED` 里**无条件**调
+            //     `_glfwInputWindowContentScale`；
+            //   * `third_party/glfw/src/window.c:142-143` 的派发同样无条件——只要注册了回调
+            //     就调，**GLFW 自身不做「值未变则跳过」的去重**。
+            // ⇒ 所以再注入一次**当前值**（此刻成员 scale 已是 inject_dpi/96）时，回调**一定会
+            // 被递到**，`GlfwSurface::Impl::on_content_scale` 的 `if (next == self->scale) return;`
+            // 是唯一能拦住这次上报的地方。这与本探针上一版注释里的推断恰好相反——那一版据
+            // 「去重会静默返回」为由把同值注入排除在外，致该分支在自动段永远走不到，
+            // 删掉去重后变异全 PASS 暴露（见 memory 2026-10-03「已知缺口」）。
+            // 变异自证：删掉 `if (next == self->scale) return;` ⇒ (e5) 转红。
+            const int before_dup = report_count;
+            RECT same{};
+            (void)GetWindowRect(hwnd, &same);
+            SendMessageW(hwnd, WM_DPICHANGED, MAKEWPARAM(inject_dpi, inject_dpi), reinterpret_cast<LPARAM>(&same));
+            (void)session.pump(1);
+            check(report_count == before_dup, "(e5) duplicate-scale WM_DPICHANGED is deduped (count " +
+                                                  std::to_string(before_dup) + " -> " + std::to_string(report_count) +
+                                                  ")");
+            // 顺带钉住「去重不是靠提前 return 吞掉换算」：成员 scale 必须仍是注入后的值。
+            check(nearly(win.surface().scale_factor(), static_cast<float>(inject_dpi) / 96.0F),
+                  "(e6) dedup kept the adopted scale (" + std::to_string(win.surface().scale_factor()) + " vs " +
+                      std::to_string(static_cast<float>(inject_dpi) / 96.0F) + ")");
+
             // 复位：把 scale 推回原值，避免污染后续 (b) 组判据的读数。
             RECT again{};
             (void)GetWindowRect(hwnd, &again);
