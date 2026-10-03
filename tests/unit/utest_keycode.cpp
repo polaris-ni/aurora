@@ -3,6 +3,7 @@
 /// 测试说明: key_name 对字母/数字/导航/修饰/标点/功能键的全覆盖、未知与越界键码回退 Unknown、KeyCode
 /// 分组连续性与相对次序
 
+#include <string_view>
 #include <type_traits>
 
 #include "aurora/event/keycode.h"
@@ -142,6 +143,35 @@ AURORA_TEST_CASE(key_name_covers_keypad_keys) {
     AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_0), "KP_0");
     AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_5), "KP_5");
     AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_9), "KP_9");
+}
+
+// 主键盘 Insert：数值钉死 + 键名唯一。
+//
+// 数值为什么钉死在 123：它语义上属「编辑 / 导航」段，却**不**插回该段——既有段（0..94）靠隐式
+// 连号，插一项会让其后全部取值整体位移，而消费方的「键码 → 平台原生值」逐值表会**静默错位**。
+// 故取 `KP_9`（122）之后的下一个显式初值位，与 `KP_Insert = 100` 同一条「只许往后接」的纪律。
+AURORA_TEST_CASE(insert_has_a_pinned_numeric_value) {
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::Insert), 123);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::Insert) - static_cast<int>(KeyCode::KP_9), 1);
+    // 追加而非插入：不得落在 KP_* 段内、也不得落在任何隐式连号段内。
+    AURORA_TEST_CHECK_LT(static_cast<int>(KeyCode::KP_9), static_cast<int>(KeyCode::Insert));
+}
+
+// 键名唯一性为什么走「全枚举遍历」而不是只对拍 `KP_Insert`：只断言 `Insert != "KP_Insert"`
+// 挡不住「新键复用了某个既有档的名字」——那种错位在逐值对齐的消费方里表现为某个键静默失效。
+// 遍历把「name 恰好出现一次」钉成全局性质，任何重名都转红。
+AURORA_TEST_CASE(key_name_of_insert_is_unique_across_all_codes) {
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::Insert), "Insert");
+    int insert_name_count = 0;
+    for (int i = 0; i <= static_cast<int>(KeyCode::Insert); ++i) {
+        // 遍历会经过未使用的枚举取值（如 78..99 的间隔段），那正是本用例要覆盖的兜底形态。
+        // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+        const auto k = static_cast<KeyCode>(i);
+        if (std::string_view{key_name(k)} == "Insert") {
+            ++insert_name_count;
+        }
+    }
+    AURORA_TEST_CHECK_EQ(insert_name_count, 1);
 }
 
 }  // namespace aurora::test_cases::utest_keycode

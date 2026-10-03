@@ -86,8 +86,13 @@ namespace aurora::detail {
             return KeyCode::PageDown;
         case VK_DELETE:
             return KeyCode::Delete;
-        // `VK_INSERT` 维持既有行为（落 `default` → `Unknown`）：主键盘导航区有 Insert 而 Win32
-        // 未给本库 `VK_INSERT` 分支，本轮不顺手补这个与 G16 无关的键。
+        // `VK_INSERT` **恒给主档** `KeyCode::Insert`、不做扫描码二次判定：主键盘 Insert 与小键盘
+        // Insert（NumLock 关闭时的 `KP_0`）在 Win32 上发同一个 VK，区分依据只在 lParam 的扫描码
+        // 与 extended 位，而该判据在其余导航键上已被实测证伪（见 `is_numpad_nav_scan` 的对照表）。
+        // 两区的终端语义本就等价，恒给主档可让四后端对齐；要按来处分流的消费方请读
+        // `modifiers & ModifierKey::NumLock` 自行决定——框架不做二次翻译。
+        case VK_INSERT:
+            return KeyCode::Insert;
         case VK_OEM_MINUS:
             return KeyCode::Minus;
         case VK_OEM_PLUS:

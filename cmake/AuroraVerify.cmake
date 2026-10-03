@@ -126,6 +126,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_dpi)
     endif ()
 
+    # ---- 主键盘 Insert 键码（`KeyCode::Insert`）----
+    # 自动段只做通道覆盖（注入的 VK_INSERT 是否译成 KeyCode::Insert），真验收在人工段：
+    # 真前台按一次物理 Insert，断言 Down/Up 成对且总数为二。锁屏 / 未按键记 PENDING MANUAL（退出码 3），
+    # 不记 PASS —— 用注入冒充真按键会让本条判据恒真。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_insert_key "${_aurora_verify_dir}/win32_insert_key_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_insert_key)
+    endif ()
+
     # ---- macOS 光标（NSCursor 派发接线）：[NSCursor currentCursor] 单例同一性读回 ----
     # 需 ObjC++ 语言：条件启用，其它平台上完全不涉及（不改动默认构建的语言集合）。
     if (APPLE AND AURORA_BACKEND_MACOS)

@@ -35,6 +35,12 @@ namespace aurora {
 ///       (VK, scan, extended) 完全相同或仅 extended 位不同，无法可靠判别；GLFW 的键码表
 ///       本身就没有 `GLFW_KEY_KP_INSERT` / `_HOME` 之类的常量。**故消费方在 Win32 与 GLFW
 ///       上不能假定这几项一定命中**，需要时应按平台兜底。
+///   * **主键盘 `Insert`（`Insert = 123`）与 `KP_Insert` 并存是刻意的**，两档不可互换：
+///     X11 / Wayland 能区分来处（两个 keysym 各占独立码点）就区分；Win32 / GLFW 区分不了就
+///     **恒给主档 `Insert`**——Win32 两区共用 `VK_INSERT`（判据见 `win32_modifiers.h` 的
+///     `is_numpad_nav_scan` 对照表），GLFW 键码表没有 `GLFW_KEY_KP_INSERT` 常量。
+///     **「恒给主档」不是 bug**：两区的终端语义本就等价（同为 CSI 2~），而按扫描码二次判定会把
+///     Win32 拖进一条与其他后端不可对齐的私有口径。后来者不要把它「修」成按来处分派。
 ///   * 新增键位一律**追加到枚举末尾并写死显式数值**，理由见末尾 KP_* 段的注释。
 ///   * 本枚举**刻意**混用隐式与显式初值：既有段（0..94）靠隐式连号，新增的 KP_* 段首项
 ///     写死 100 作「本段只能追加」的机器可读锚点。全量显式化会把 0..94 逐个数字钉进源码、
@@ -172,6 +178,16 @@ enum class KeyCode : int {  // NOLINT(*-enum-size, readability-enum-initial-valu
     KP_7,  ///< 小键盘数字 7（NumLock 关闭时消费方通常映射为 `KP_Home`）。
     KP_8,  ///< 小键盘数字 8（NumLock 关闭时消费方通常映射为 `KP_Up`）。
     KP_9,  ///< 小键盘数字 9（NumLock 关闭时消费方通常映射为 `KP_Prior`）。
+
+    // ---- 主键盘 Insert（后补段）----
+    //
+    // 语义上属于「编辑 / 导航」段（`Home` / `End` / `PageUp` 那一组），却**不**插回该段：
+    // 既有段（0..94）靠隐式连号，往中间插一项会让它之后的全部取值整体位移，而消费方普遍
+    // 持有「键码 → 平台原生值」的逐值对齐映射表——位移不报错、只会全盘静默错位。故本键取
+    // `KP_9`（122）之后的下一个显式初值位，与 `KP_Insert = 100` 同一条「只许往后接」的纪律。
+    //
+    // 它与 `KP_Insert` 的关系（两档并存、Win32 / GLFW 恒给本档）见文件头的口径注释。
+    Insert = 123,  ///< 主键盘 Insert（导航区；NumLock 关闭时小键盘 0 也发同一个平台键）。
 };
 
 /// @brief 返回键码的可读名称（用于调试/日志）。
@@ -335,6 +351,8 @@ enum class KeyCode : int {  // NOLINT(*-enum-size, readability-enum-initial-valu
             return "F11";
         case KeyCode::F12:
             return "F12";
+        case KeyCode::Insert:
+            return "Insert";
         case KeyCode::KP_Insert:
             return "KP_Insert";
         case KeyCode::KP_Delete:

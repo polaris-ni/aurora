@@ -35,6 +35,17 @@ AURORA_TEST_CASE(function_and_navigation_keys_map) {
     AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Next) == KeyCode::PageDown);
 }
 
+// 主键盘 Insert（0xFF63）与小键盘 `KP_Insert`（0xFF9E）在 X11 / Wayland 上各占独立码点，故本后端
+// 是**唯一**能把两区分开的后端——主档因此单列一档、不与 `KP_Insert` 合并（Win32 / GLFW 分不开，
+// 恒给主档）。两条互串断言是这条的本体：任意一方被并掉都会转红。
+AURORA_TEST_CASE(main_keyboard_insert_maps_to_insert) {
+    AURORA_TEST_CHECK(ks::AURORA_KEYSYM_Insert == 0xFF63UL);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Insert) == KeyCode::Insert);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Insert) != KeyCode::KP_Insert);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_KP_Insert) == KeyCode::KP_Insert);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_KP_Insert) != KeyCode::Insert);
+}
+
 // KP_Enter 并入 Enter 是既有决定（头注释已落定），此处锁住它不被某次「补全小键盘」改动推翻。
 AURORA_TEST_CASE(keypad_enter_shares_the_main_enter_code) {
     AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Return) == KeyCode::Enter);
@@ -83,6 +94,9 @@ AURORA_TEST_CASE(keypad_navigation_does_not_alias_mainboard_keys) {
                       aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Prior));
     AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_KP_Next) !=
                       aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Next));
+    // Insert 同理：本后端分得开，故主键盘 Insert 与 `KP_Insert` 必须各归各档。
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_KP_Insert) !=
+                      aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Insert));
     // `KP_Begin`（0xFF9D）与 `KP_Home`（0xFF95）是**两个不同**的 keysym：前者是小键盘 5 无
     // NumLock 时的 Home 位，后者是小键盘 Home 键位。两者不得混为同一码。
     AURORA_TEST_CHECK(ks::AURORA_KEYSYM_KP_Begin != ks::AURORA_KEYSYM_KP_Home);

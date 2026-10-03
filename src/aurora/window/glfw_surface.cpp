@@ -37,6 +37,7 @@
 #include "aurora/event/keycode.h"
 #include "aurora/render/png.h"
 #include "aurora/window/cursor_map.h"
+#include "aurora/window/detail/glfw_keymap.h"
 #include "aurora/window/detail/glfw_modifiers.h"
 #include "aurora/window/win32_capture.h"
 #include "aurora/window/window_state.h"
@@ -47,203 +48,10 @@
 
 namespace aurora {
 
-// ---- 键码 / 修饰键 / UTF-8 翻译（纯函数，static 成员）----
-[[nodiscard]] static auto from_glfw_key(int key) -> KeyCode {
-    switch (key) {
-        case GLFW_KEY_A:
-            return KeyCode::A;
-        case GLFW_KEY_B:
-            return KeyCode::B;
-        case GLFW_KEY_C:
-            return KeyCode::C;
-        case GLFW_KEY_D:
-            return KeyCode::D;
-        case GLFW_KEY_E:
-            return KeyCode::E;
-        case GLFW_KEY_F:
-            return KeyCode::F;
-        case GLFW_KEY_G:
-            return KeyCode::G;
-        case GLFW_KEY_H:
-            return KeyCode::H;
-        case GLFW_KEY_I:
-            return KeyCode::I;
-        case GLFW_KEY_J:
-            return KeyCode::J;
-        case GLFW_KEY_K:
-            return KeyCode::K;
-        case GLFW_KEY_L:
-            return KeyCode::L;
-        case GLFW_KEY_M:
-            return KeyCode::M;
-        case GLFW_KEY_N:
-            return KeyCode::N;
-        case GLFW_KEY_O:
-            return KeyCode::O;
-        case GLFW_KEY_P:
-            return KeyCode::P;
-        case GLFW_KEY_Q:
-            return KeyCode::Q;
-        case GLFW_KEY_R:
-            return KeyCode::R;
-        case GLFW_KEY_S:
-            return KeyCode::S;
-        case GLFW_KEY_T:
-            return KeyCode::T;
-        case GLFW_KEY_U:
-            return KeyCode::U;
-        case GLFW_KEY_V:
-            return KeyCode::V;
-        case GLFW_KEY_W:
-            return KeyCode::W;
-        case GLFW_KEY_X:
-            return KeyCode::X;
-        case GLFW_KEY_Y:
-            return KeyCode::Y;
-        case GLFW_KEY_Z:
-            return KeyCode::Z;
-        case GLFW_KEY_0:
-            return KeyCode::D0;
-        case GLFW_KEY_1:
-            return KeyCode::D1;
-        case GLFW_KEY_2:
-            return KeyCode::D2;
-        case GLFW_KEY_3:
-            return KeyCode::D3;
-        case GLFW_KEY_4:
-            return KeyCode::D4;
-        case GLFW_KEY_5:
-            return KeyCode::D5;
-        case GLFW_KEY_6:
-            return KeyCode::D6;
-        case GLFW_KEY_7:
-            return KeyCode::D7;
-        case GLFW_KEY_8:
-            return KeyCode::D8;
-        case GLFW_KEY_9:
-            return KeyCode::D9;
-        case GLFW_KEY_ESCAPE:
-            return KeyCode::Escape;
-        case GLFW_KEY_ENTER:
-            return KeyCode::Enter;
-        case GLFW_KEY_TAB:
-            return KeyCode::Tab;
-        case GLFW_KEY_BACKSPACE:
-            return KeyCode::Backspace;
-        case GLFW_KEY_DELETE:
-            return KeyCode::Delete;
-        case GLFW_KEY_SPACE:
-            return KeyCode::Space;
-        case GLFW_KEY_LEFT:
-            return KeyCode::ArrowLeft;
-        case GLFW_KEY_RIGHT:
-            return KeyCode::ArrowRight;
-        case GLFW_KEY_UP:
-            return KeyCode::ArrowUp;
-        case GLFW_KEY_DOWN:
-            return KeyCode::ArrowDown;
-        case GLFW_KEY_LEFT_SHIFT:
-        case GLFW_KEY_RIGHT_SHIFT:
-            return KeyCode::Shift;
-        case GLFW_KEY_LEFT_CONTROL:
-        case GLFW_KEY_RIGHT_CONTROL:
-            return KeyCode::Control;
-        case GLFW_KEY_LEFT_ALT:
-        case GLFW_KEY_RIGHT_ALT:
-            return KeyCode::Alt;
-        case GLFW_KEY_LEFT_SUPER:
-        case GLFW_KEY_RIGHT_SUPER:
-            return KeyCode::Meta;
-        case GLFW_KEY_HOME:
-            return KeyCode::Home;
-        case GLFW_KEY_END:
-            return KeyCode::End;
-        case GLFW_KEY_PAGE_UP:
-            return KeyCode::PageUp;
-        case GLFW_KEY_PAGE_DOWN:
-            return KeyCode::PageDown;
-        case GLFW_KEY_MINUS:
-            return KeyCode::Minus;
-        case GLFW_KEY_EQUAL:
-            return KeyCode::Equal;
-        case GLFW_KEY_LEFT_BRACKET:
-            return KeyCode::LeftBracket;
-        case GLFW_KEY_RIGHT_BRACKET:
-            return KeyCode::RightBracket;
-        case GLFW_KEY_BACKSLASH:
-            return KeyCode::Backslash;
-        case GLFW_KEY_SEMICOLON:
-            return KeyCode::Semicolon;
-        case GLFW_KEY_APOSTROPHE:
-            return KeyCode::Quote;
-        case GLFW_KEY_COMMA:
-            return KeyCode::Comma;
-        case GLFW_KEY_PERIOD:
-            return KeyCode::Period;
-        case GLFW_KEY_SLASH:
-            return KeyCode::Slash;
-        case GLFW_KEY_GRAVE_ACCENT:
-            return KeyCode::Backquote;
-        case GLFW_KEY_F1:
-            return KeyCode::F1;
-        case GLFW_KEY_F2:
-            return KeyCode::F2;
-        case GLFW_KEY_F3:
-            return KeyCode::F3;
-        case GLFW_KEY_F4:
-            return KeyCode::F4;
-        case GLFW_KEY_F5:
-            return KeyCode::F5;
-        case GLFW_KEY_F6:
-            return KeyCode::F6;
-        case GLFW_KEY_F7:
-            return KeyCode::F7;
-        case GLFW_KEY_F8:
-            return KeyCode::F8;
-        case GLFW_KEY_F9:
-            return KeyCode::F9;
-        case GLFW_KEY_F10:
-            return KeyCode::F10;
-        case GLFW_KEY_F11:
-            return KeyCode::F11;
-        case GLFW_KEY_F12:
-            return KeyCode::F12;
-        default:
-            break;
-    }
-    // ---- 数字小键盘 ----
-    //
-    // GLFW 把 `KP_0-9` 定为连号区间（320..329），与主键盘数字行同形，按区间判。
-    if (key >= GLFW_KEY_KP_0 && key <= GLFW_KEY_KP_9) {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::KP_0) + (key - GLFW_KEY_KP_0));
-    }
-    switch (key) {
-        case GLFW_KEY_KP_DECIMAL:
-            return KeyCode::KP_Decimal;
-        case GLFW_KEY_KP_DIVIDE:
-            return KeyCode::KP_Divide;
-        case GLFW_KEY_KP_MULTIPLY:
-            return KeyCode::KP_Multiply;
-        case GLFW_KEY_KP_SUBTRACT:
-            return KeyCode::KP_Subtract;
-        case GLFW_KEY_KP_ADD:
-            return KeyCode::KP_Add;
-        // `GLFW_KEY_KP_ENTER` 按既有决定并入 `KeyCode::Enter`，与另两后端同口径。
-        case GLFW_KEY_KP_ENTER:
-            return KeyCode::Enter;
-        // `GLFW_KEY_KP_EQUAL`（336）在 KeyCode 里无对应码位（小键盘等号无独立语义），不臆造。
-        //
-        // **导航六键在 GLFW 上完全无法区分**：GLFW 的键码表**没有** `GLFW_KEY_KP_INSERT` /
-        // `_HOME` 之类的常量——它把小键盘导航区与主键盘导航区合并成同一组 `GLFW_KEY_HOME` /
-        // `_END` / `_PAGE_UP` / `_PAGE_DOWN` / `_DELETE`，故本后端恒给主键码。`KP_Insert` /
-        // `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` /
-        // `KP_Separator` 这几项**在 GLFW 后端恒不产生**（X11 / Wayland 侧 keysym 分得开；
-        // Win32 侧六个键里也只有 `Home` 可分）。这是 GLFW 库自身的键码表限制，属平台事实
-        // 而非疏漏，详见 `keycode.h` 的小键盘口径注释。
-        default:
-            return KeyCode::Unknown;
-    }
-}
+// ---- 修饰键 / UTF-8 翻译（纯函数，static 成员）----
+//
+// 键码翻译 `from_glfw_key` 已移至可单测的内部头 `detail/glfw_keymap.h`（与 `win32_keymap.h`
+// 对称，使「四后端键码一致」这条契约在 GLFW 腿上也有 CTest 断言）。
 
 /// @brief 读 NumLock 锁定态并并入修饰位集。
 ///
@@ -723,7 +531,7 @@ auto GlfwSurface::Impl::on_key(GLFWwindow *w, int key, int /*scancode*/, int act
         return;
     }
     KeyEvent e;
-    e.key = static_cast<int>(from_glfw_key(key));
+    e.key = static_cast<int>(detail::from_glfw_key(key));
     e.action = (action == GLFW_RELEASE) ? KeyAction::Up : KeyAction::Down;
     e.modifiers = with_glfw_numlock(w, detail::glfw_mods_to_aurora(mods));
     self->handler(e);

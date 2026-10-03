@@ -27,6 +27,9 @@ constexpr unsigned long AURORA_KEYSYM_Alt_L = 0xFFE9, AURORA_KEYSYM_Alt_R = 0xFF
 constexpr unsigned long AURORA_KEYSYM_Super_L = 0xFFEB, AURORA_KEYSYM_Super_R = 0xFFEC;
 constexpr unsigned long AURORA_KEYSYM_Home = 0xFF50, AURORA_KEYSYM_End = 0xFF57, AURORA_KEYSYM_Prior = 0xFF55,
                         AURORA_KEYSYM_Next = 0xFF56;
+// 主键盘 Insert（0xFF63）与小键盘 `KP_Insert`（0xFF9E）各占独立码点 ⇒ 本后端**天然可分**，
+// 故主键盘 Insert 单列一档、不与 `KP_Insert` 合并（Win32 / GLFW 分不开才恒给主档，见 keycode.h）。
+constexpr unsigned long AURORA_KEYSYM_Insert = 0xFF63;
 constexpr unsigned long AURORA_KEYSYM_minus = 0x2D, AURORA_KEYSYM_equal = 0x3D;
 constexpr unsigned long AURORA_KEYSYM_bracket_left = 0x5B, AURORA_KEYSYM_bracket_right = 0x5D,
                         AURORA_KEYSYM_backslash = 0x5C;
@@ -107,6 +110,8 @@ inline auto keysym_to_keycode(unsigned long ks) -> KeyCode {
             return KeyCode::PageUp;
         case keysym::AURORA_KEYSYM_Next:
             return KeyCode::PageDown;
+        case keysym::AURORA_KEYSYM_Insert:
+            return KeyCode::Insert;
         case keysym::AURORA_KEYSYM_minus:
             return KeyCode::Minus;
         case keysym::AURORA_KEYSYM_equal:

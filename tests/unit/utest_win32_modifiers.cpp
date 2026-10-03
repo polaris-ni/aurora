@@ -349,12 +349,35 @@ AURORA_TEST_CASE(win32_vk_splits_keypad_home_and_keeps_the_rest_on_the_mainboard
     AURORA_TEST_CHECK(detail::from_win32_vk(VK_PRIOR, true) == KeyCode::PageUp);
     AURORA_TEST_CHECK(detail::from_win32_vk(VK_NEXT, true) == KeyCode::PageDown);
     AURORA_TEST_CHECK(detail::from_win32_vk(VK_DELETE, true) == KeyCode::Delete);
-    AURORA_TEST_CHECK(detail::from_win32_vk(VK_INSERT, true) == KeyCode::Unknown);
+    // Insert 同族：即便 `from_numpad` 为真也**不给** `KP_Insert`，恒给主档 `Insert`
+    // （NumLock 关闭时小键盘 0 与主键盘 Insert 打同一个 VK，不做扫描码二次判定；
+    // 判据与取舍见下面 `win32_vk_maps_insert_to_the_mainboard_code`）。
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_INSERT, true) == KeyCode::Insert);
     // 小键盘方向键（中央倒 T 簇）在 KeyCode 里无 KP_ 码位，与主键盘同码。
     AURORA_TEST_CHECK(detail::from_win32_vk(VK_UP, true) == KeyCode::ArrowUp);
     AURORA_TEST_CHECK(detail::from_win32_vk(VK_LEFT, true) == KeyCode::ArrowLeft);
     AURORA_TEST_CHECK(detail::from_win32_vk(VK_DOWN, true) == KeyCode::ArrowDown);
     AURORA_TEST_CHECK(detail::from_win32_vk(VK_RIGHT, true) == KeyCode::ArrowRight);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+// `VK_INSERT` 恒给主档 `KeyCode::Insert`：主键盘 Insert 与小键盘 Insert（NumLock 关闭时的 `KP_0`）
+// 在 Win32 上发**同一个 VK**，来处只在 lParam 的扫描码 / extended 位里，而那套判据在导航区其余
+// 键上已被实测证伪（见 `is_numpad_nav_scan` 的对照表）。故此处**不做**二次判定——`from_numpad`
+// 为 false 与 true 两条都必须落到 `Insert`，这是本条判据的本体（只钉一条挡不住「顺手加个
+// `from_numpad ? KP_Insert : Insert`」的写法，而那正是本条明确否决的口径）。
+AURORA_TEST_CASE(win32_vk_maps_insert_to_the_mainboard_code) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_INSERT, false) == KeyCode::Insert);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_INSERT, true) == KeyCode::Insert);
+    // 主档与小键盘档不可互换：本后端恒不产 `KP_Insert`（与 `KP_End` / `KP_Prior` 等同族口径）。
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_INSERT, true) != KeyCode::KP_Insert);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_INSERT, false) != KeyCode::KP_Insert);
+    // 与相邻的 Delete 互不串码（两者在 Win32 上也是两个独立 VK，此处仅防手滑写反）。
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_DELETE, false) == KeyCode::Delete);
+    AURORA_TEST_CHECK(detail::from_win32_vk(VK_DELETE, false) != KeyCode::Insert);
 #else
     AURORA_WIN32_MODIFIERS_SKIP;
 #endif
