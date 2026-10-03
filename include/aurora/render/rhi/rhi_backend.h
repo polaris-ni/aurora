@@ -42,6 +42,9 @@ struct CmdData {
     const Image *image = nullptr;  ///< DrawImage / Composite 的图像
     const Matrix2D *matrix = nullptr;  ///< Composite 的仿射变换矩阵
     const std::vector<Point> *points = nullptr;  ///< Polyline 的折线点集（逻辑 dp）
+    /// @brief DrawText 按族缺字回退链（U+001F 分隔的族名序列）；`nullptr` = 无链。
+    ///        与 `text` 同为字符串池引用，故一并走本结构，由 `DisplayList::replay` 集中解析下标。
+    const std::string *text_chain = nullptr;
 };
 
 /// @brief RHI 后端：`DisplayList` 回放的**目标抽象**（command sink）。

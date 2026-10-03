@@ -14,6 +14,7 @@
 #include "aurora/render/detail/painter_simd.inl"
 #include "aurora/render/display_list.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/render/glyph_emit.h"
 
 // 【性能豁免说明】本 TU 自下一行起按区间豁免 `*-pro-bounds-*`（像素缓冲按裸指针逐通道步进与
 // 变址）、`*-narrowing-*`（float→uint8 装配须与 SIMD 路径逐位一致，golden 测试逐位比对）、
@@ -1042,9 +1043,19 @@ auto Painter::record_text_cmd(const Rect &r, const std::string &s, const Font &f
     cmd.color = c;
     cmd.font_idx = recording_stack_.back()->add_font(f);
     cmd.aa_mode = aa;
-    cmd.text_ls = opts.letter_spacing;
-    cmd.text_ws = opts.word_spacing;
-    cmd.text_italic = opts.italic;
+    render::encode_text_layout(cmd, opts);
+    // 回退链按值序列化进字符串池（定长数组不跨录制边界传递）：族名以 U+001F 连接。
+    // 空链不入池，避免每帧为「无链」白占一个池位。
+    if (opts.font_fallback_chain_size > 0) {
+        std::string serialized;
+        for (std::size_t i = 0; i < opts.font_fallback_chain_size; ++i) {
+            if (!serialized.empty()) {
+                serialized += '\x1F';
+            }
+            serialized += opts.font_fallback_chain.at(i);
+        }
+        cmd.text_chain_idx = recording_stack_.back()->add_string(serialized);
+    }
     cmd.str_idx = recording_stack_.back()->add_string(s);
     recording_stack_.back()->push_cmd(cmd);
 }

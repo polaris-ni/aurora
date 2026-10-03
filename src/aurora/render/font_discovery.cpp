@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <ranges>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -337,9 +338,29 @@ auto add_default_face(const std::shared_ptr<FontFace> &ff) -> void {
 }
 
 auto resolve_faces(const std::string &family, int weight) -> const std::vector<FontFace *> & {
+    // 空链走**原路径**：主族与全局链合并后做一次全局 weight 排序（见下方 else 分支的注释），
+    // 是既有消费者观察到的行为。分段实现只用于「调用方显式声明了非空链」，否则分段会把
+    // 「主族与全局链一起排序」悄悄改成「各自成段」，破坏「不指定时逐字节一致」这条不变量。
+    return resolve_faces(family, weight, std::span<const std::string>{});
+}
+
+auto resolve_faces(const std::string &family, int weight, std::span<const std::string> fallback_families)
+    -> const std::vector<FontFace *> & {
     init_font_discovery();
-    // 缓存键 = family + 请求字重（不同字重的排序结果不同，须分别缓存）。
-    const std::string cache_key = family + "#" + std::to_string(weight);
+    const bool has_chain = !fallback_families.empty();
+    // 缓存键 = family + 请求字重（不同字重的排序结果不同，须分别缓存）+ 回退链。
+    // 空链时键**恰为** `family#weight`（不带任何链编码），与本函数加链前的键逐字节相同 ⇒ 复用
+    // 同一份缓存条目，既有消费者不仅输出不变、连缓存行为都不变。
+    std::string cache_key = family + "#" + std::to_string(weight);
+    if (has_chain) {
+        // 链编码用 U+001F（UNIT SEPARATOR）作分隔：它不是任何真实字体族名的字符，故不同的
+        // 链组合不会撞出同一个键（族名含分隔符的病态情形除外，代价只是退化成一次多余解析）。
+        cache_key += '\x1F';
+        for (const auto &fb : fallback_families) {
+            cache_key += fb;
+            cache_key += '\x1F';
+        }
+    }
     // 裸指针缓存命中：直接返回引用，零分配。
     const auto pit = g_resolve_ptr_cache.find(cache_key);
     if (pit != g_resolve_ptr_cache.end()) {
@@ -356,51 +377,109 @@ auto resolve_faces(const std::string &family, int weight) -> const std::vector<F
         return ptrs;
     }
     // 系统字体目录的族首次被请求时**按需加载**：`list_font_families()` 承诺「枚举出来的族一定
-    // 解析得到属于该族的面」，而这个承诺对目录扫描出来的族只能靠这一步兑现。
-    if (!family.empty() && !g_registry.contains(family)) {
-        materialize_catalog_family(family);
+    // 解析得到属于该族的面」，而这个承诺对目录扫描出来的族只能靠这一步兑现。回退链上的族名
+    // 走**同一条**路径 —— 这是「链上族名与 list_font_families() 同源」的实现处。
+    const auto ensure_family_loaded = [](const std::string &name) -> void {
+        if (!name.empty() && !g_registry.contains(name)) {
+            materialize_catalog_family(name);
+        }
+    };
+    ensure_family_loaded(family);
+    for (const auto &fb : fallback_families) {
+        ensure_family_loaded(fb);
     }
-    std::vector<std::shared_ptr<FontFace>> owned;
-    auto emit = [&](const std::string &key) -> void {
+
+    // 去重：按裸指针地址去重，保留首次出现（链上族与主族指向同一个面时只取首现）。
+    std::vector<std::shared_ptr<FontFace>> uniq;
+    auto &seen = g_resolve_ptr_cache[cache_key];
+    const auto append_family_faces = [&](const std::string &key) -> void {
         const auto it = g_registry.find(key);
-        if (it != g_registry.end()) {
-            for (auto &ff : it->second) {
-                owned.push_back(ff);
+        if (it == g_registry.end()) {
+            return;
+        }
+        for (auto &ff : it->second) {
+            if (ff && std::ranges::find(seen, ff.get()) == seen.end()) {
+                seen.push_back(ff.get());
+                uniq.push_back(ff);
             }
         }
     };
+
+    if (!has_chain) {
+        // ---- 原路径（回退链为空）：与本函数加链前的实现逐行一致 ----
+        auto emit = [&append_family_faces](const std::string &key) -> void { append_family_faces(key); };
+        if (!family.empty()) {
+            emit(family);
+            if (family == "serif") {
+                emit("Times New Roman");
+            } else if (family == "monospace" || family == "mono") {
+                emit("Consolas");
+            }
+        }
+        // 默认链兜底（去重已在 append_family_faces 内完成）。
+        emit("");
+        emit("sans-serif");
+        emit("default");
+        // 字重感知排序：精确匹配请求字重的面排最前（保持注册序），其余按字重距离升序稳定排列。
+        // find_glyph 取首个含该字形的面 → 有粗体面时粗体字优先命中，缺字仍回退其他字重/脚本回退面。
+        // 注意：必须同步重排 `seen`（返回给调用方的裸指针序列），否则排序只作用于 owned 缓存、
+        // 实际选面顺序不变，weight 参数形同虚设。
+        std::ranges::stable_sort(uniq, [weight](const auto &a, const auto &b) {
+            return std::abs(a->weight - weight) < std::abs(b->weight - weight);
+        });
+        for (std::size_t i = 0; i < uniq.size(); ++i) {
+            seen[i] = uniq[i].get();
+        }
+        g_resolve_cache[cache_key] = std::move(uniq);
+        return seen;
+    }
+
+    // ---- 分段路径（调用方声明了非空回退链）----
+    //
+    // 为什么分段：需求是「顺序由调用方给定且框架不得重排」。若沿用空链路径的单次全局 weight
+    // 排序，链上族的面会与主族、默认链的面按字重距离互相穿插，「A 族优先于 B 族」的声明即被
+    // 打乱。故每个族各自成段、段内按字重距离稳定排序（与无链时同口径），段间严格保持声明序：
+    //   主族 → 链族1 → 链族2 → … → 默认链（仅尾部回落）
+    //
+    // 段内排序而非段间排序，是「精确字重优先」这条既有语义在族内的保留：某个链族有自己的粗体面
+    // 时该族内仍粗体优先，只是不跨族争夺位置。
+    const auto sort_segment_weight = [weight](std::vector<std::shared_ptr<FontFace>> &seg) {
+        std::ranges::stable_sort(seg, [weight](const auto &a, const auto &b) {
+            return std::abs(a->weight - weight) < std::abs(b->weight - weight);
+        });
+    };
+    const auto emit_segment = [&](const std::string &key) {
+        const std::size_t begin = uniq.size();
+        append_family_faces(key);
+        if (uniq.size() > begin) {
+            // 只重排本段（[begin, size)），已定格的前序段不受影响。
+            std::vector<std::shared_ptr<FontFace>> seg(uniq.begin() + static_cast<std::ptrdiff_t>(begin), uniq.end());
+            sort_segment_weight(seg);
+            std::copy(seg.begin(), seg.end(), uniq.begin() + static_cast<std::ptrdiff_t>(begin));
+        }
+    };
+
     if (!family.empty()) {
-        emit(family);
+        emit_segment(family);
         if (family == "serif") {
-            emit("Times New Roman");
+            emit_segment("Times New Roman");
         } else if (family == "monospace" || family == "mono") {
-            emit("Consolas");
+            emit_segment("Consolas");
         }
     }
-    // 默认链兜底（去重在末尾处理）。
-    emit("");
-    emit("sans-serif");
-    emit("default");
-    // 去重：按裸指针地址去重，保留首次出现。
-    std::vector<std::shared_ptr<FontFace>> uniq;
-    auto &seen = g_resolve_ptr_cache[cache_key];
-    for (auto &sp : owned) {
-        if (std::ranges::find(seen, sp.get()) == seen.end()) {
-            seen.push_back(sp.get());
-            uniq.push_back(sp);
+    for (const auto &fb : fallback_families) {
+        // 空串是默认链的键而非族名（`list_font_families` 明确不列出伪族名），链上出现空串按
+        // 「解析不到面」跳过——否则等于把尾部回落提前，与调用方声明的顺序相悖。
+        if (!fb.empty()) {
+            emit_segment(fb);
         }
     }
-    // 字重感知排序：精确匹配请求字重的面排最前（保持注册序），其余按字重距离升序稳定排列。
-    // find_glyph 取首个含该字形的面 → 有粗体面时粗体字优先命中，缺字仍回退其他字重/脚本回退面。
-    // 注意：必须同步重排 `seen`（返回给调用方的裸指针序列），否则排序只作用于 owned 缓存、
-    // 实际选面顺序不变，weight 参数形同虚设。
-    std::ranges::stable_sort(uniq, [weight](const auto &a, const auto &b) {
-        return std::abs(a->weight - weight) < std::abs(b->weight - weight);
-    });
-    for (std::size_t i = 0; i < uniq.size(); ++i) {
-        seen[i] = uniq[i].get();
-    }
-    g_resolve_cache[cache_key] = std::move(uniq);
+    // 默认链兜底：仍只作**尾部**回落，位置在整条链之后。
+    emit_segment("");
+    emit_segment("sans-serif");
+    emit_segment("default");
+
+    g_resolve_cache[cache_key] = uniq;  // uniq 已按最终段序排好，拷贝一份持有 shared_ptr 保活
     return seen;
 }
 

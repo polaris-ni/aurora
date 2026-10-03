@@ -220,6 +220,19 @@ struct ShapeCacheKeyHash {
         mix(k.opts.italic ? 0x1001ULL : 0ULL);
         // direction 进缓存键：nullopt=guess（0），显式 LTR/RTL 各占一档。
         mix(k.opts.direction.has_value() ? (0x2000ULL + static_cast<std::uint64_t>(*k.opts.direction)) : 0ULL);
+        // 回退链进缓存键：链决定选面。虽然 faces_key 已覆盖解析出的面序列，但只在「两条链
+        // 恰好解析出同一组面」时才等价（如两条链都只含已注册的空链）；此处按**内容**混入链的
+        // 身份，使「链不同」一律不共用条目 —— 保守方向（宁可少命中，不可命中错的）。
+        for (std::size_t i = 0; i < k.opts.font_fallback_chain_size; ++i) {
+            mix(std::hash<std::string>{}(k.opts.font_fallback_chain.at(i)));
+        }
+        mix(static_cast<std::uint64_t>(k.opts.font_fallback_chain_size) * 0x9E37ULL);
+        // fixed_cell_advance_px 不影响 shaping 输出（只改 pen 推进），但推进相关的度量函数
+        // 复用本缓存的 glyphs，故必须进键 —— 否则开了档与没档会互相命中，字距静默错位。
+        mix(k.opts.fixed_cell_advance_px.has_value()
+                ? (0x4000ULL +
+                   static_cast<std::uint64_t>(std::lround(static_cast<double>(*k.opts.fixed_cell_advance_px) * 64.0)))
+                : 0ULL);
         mix(k.faces_key);
         return h;
     }
@@ -465,6 +478,16 @@ class ShapeCache {
     return lines;
 }
 
+// 单个字形的水平推进量（px）：默认取 HarfBuzz 给出的该 face 自身 advance；
+// 开启 `fixed_cell_advance_px` 档位时一律取该固定值。
+//
+// 提取成函数而非在三处各写 if：绘制侧（emit_glyphs_with_context）与度量侧
+// （line_prefix / hit_test_single_pass）必须**逐位同源** —— 档位一旦在绘制侧生效而度量侧
+// 仍按各自 advance 累加，选区高亮 / caret / 命中就会与实绘像素错位（差值逐字累积）。
+[[nodiscard]] inline auto glyph_advance_px(const ShapedGlyph &g, const TextLayoutOpts &opts) -> float {
+    return opts.fixed_cell_advance_px.has_value() ? *opts.fixed_cell_advance_px : g.x_adv;
+}
+
 // 整行前缀推进：前 count 个字形（绘制顺序）的 pen 推进，与 draw_text_impl 逐位同源
 // （同 px、同 hb 推进、同 letter/word_spacing 语义）。spacing_scale 把 dp 间距换算到 px 空间。
 [[nodiscard]] auto line_prefix(const std::vector<ShapedGlyph> &glyphs, const TextLayoutOpts &opts, float spacing_scale,
@@ -476,7 +499,7 @@ class ShapeCache {
             w += opts.letter_spacing * spacing_scale;  // 相邻字形间加字距，整串共 (n-1) 次
         }
         const auto &g = glyphs.at(j);
-        w += g.x_adv;
+        w += glyph_advance_px(g, opts);
         if (g.cp == ' ' && opts.word_spacing != 0.0F) {
             w += opts.word_spacing * spacing_scale;
         }
@@ -562,7 +585,7 @@ class ShapeCache {
                 w += opts.letter_spacing * spacing_scale;
             }
             const auto &g = sl.glyphs.at(j);
-            w += g.x_adv;
+            w += glyph_advance_px(g, opts);
             if (g.cp == ' ' && opts.word_spacing != 0.0F) {
                 w += opts.word_spacing * spacing_scale;
             }
@@ -654,8 +677,19 @@ struct EmitContext {
     float embolden_px = 0.0F;
 };
 
-[[nodiscard]] auto make_emit_context(const Font &f, float scale) -> std::optional<EmitContext> {
-    const auto &faces = resolve_faces(f.family, f.weight);
+// 按 (Font, 回退链) 解析候选面：度量、命中、绘制三条路径共用的唯一入口。
+//
+// 提取成函数是为了让「哪些度量接口受回退链影响」一眼可数：凡经此函数取 faces 的接口，
+// 都与绘制侧选出**同一组面**，故 measure / caret / hit_test / 像素四者自动同源。漏掉任何一处
+// （例如只改绘制不改度量）都会让选区与实绘错位，且不会触发任何编译或运行错误。
+[[nodiscard]] auto resolve_faces_for(const Font &f, const TextLayoutOpts &opts) -> const std::vector<FontFace *> & {
+    return resolve_faces(f.family, f.weight, opts.fallback_chain_view());
+}
+
+[[nodiscard]] auto make_emit_context(const Font &f, const TextLayoutOpts &opts, float scale)
+    -> std::optional<EmitContext> {
+    // 回退链为空时走无链重载：缓存键与加链前逐字节相同，既有消费者的缓存条目与选面结果不变。
+    const auto &faces = resolve_faces_for(f, opts);
     if (faces.empty()) {
         return std::nullopt;
     }
@@ -766,7 +800,17 @@ auto emit_glyphs_with_context(const EmitContext &ctx, const std::string &text, c
             // letter_spacing 仅加在相邻字形之间（整串共 (n-1) 次），末字形后不加，与 line_prefix 一致。
             // 合成粗体额外叠加 embolden_px：轮廓加粗向右扩展约 strength/64，若不扩推进，
             // 相邻字形会以 embolden_px 重叠。
-            pen_x += sg.x_adv + (ctx.synthetic_bold ? ctx.embolden_px : 0.0F);
+            //
+            // 固定格档位（fixed_cell_advance_px）：推进量由调用方给定，不再看各 face 自己的
+            // advance —— 回退面的双宽字形因此不再把同 run 后续字形逐字推偏。此档下**不叠加**
+            // embolden_px：格宽是约定值不是量出来的推进，加粗字形溢出半格也不该推挤邻格
+            // （与 `monospace_cell` 「合成粗体不加进格宽」的既有口径一致）。
+            const bool fixed_cell = opts.fixed_cell_advance_px.has_value();
+            if (fixed_cell) {
+                pen_x += *opts.fixed_cell_advance_px;
+            } else {
+                pen_x += sg.x_adv + (ctx.synthetic_bold ? ctx.embolden_px : 0.0F);
+            }
             if (sg.cp == ' ' && opts.word_spacing != 0.0F) {
                 pen_x += opts.word_spacing * ctx.scale;
             }
@@ -784,7 +828,7 @@ auto emit_glyphs_with_context(const EmitContext &ctx, const std::string &text, c
 template <typename Sink>
 auto emit_text_glyphs_core(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale,
                            TextAAMode aa, Color c, float origin_x, float origin_y, const Sink &sink) -> bool {
-    const auto ctx = make_emit_context(f, scale);
+    const auto ctx = make_emit_context(f, opts, scale);
     if (!ctx.has_value()) {
         return false;
     }
@@ -846,6 +890,59 @@ auto emit_text_glyphs(const std::string &text, const Font &f, const TextLayoutOp
                                          std::uint64_t key) { sink(e, mode, dx0, dy0, key); });
 }
 
+// ---- DrawText 录制/回放的排版选项编解码（glyph_emit.h 声明，三后端共用） ----
+//
+// 链的序列化格式：族名以 U+001F（UNIT SEPARATOR）连接，整体作为一条字符串进 `str_pool_`。
+// 选分隔符而非逗号/竖线：族名理论上可含任意可打印字符，而 U+001F 是控制字符、不出现在真实
+// 字体族名里，解析因此无歧义。空链不占池位（`text_chain_idx` 保持 -1）。
+namespace {
+constexpr char AURORA_CHAIN_SEP = '\x1F';
+}  // namespace
+
+void encode_text_layout(DrawCmd &cmd, const TextLayoutOpts &opts) {
+    cmd.text_ls = opts.letter_spacing;
+    cmd.text_ws = opts.word_spacing;
+    cmd.text_italic = opts.italic;
+    // direction：nullopt → -1（回放侧还原为 nullopt，即按内容 guess）。
+    cmd.text_dir = opts.direction.has_value() ? static_cast<int>(*opts.direction) : -1;
+    // 固定格档位：nullopt → 0（回放侧还原为 nullopt）。
+    cmd.text_cell_px = opts.fixed_cell_advance_px.value_or(0.0F);
+    // text_chain_idx 不在此设置：链的序列化与入池需要 DisplayList，本函数拿不到。
+}
+
+auto decode_text_layout(const DrawCmd &cmd, const std::string &chain_str) -> TextLayoutOpts {
+    TextLayoutOpts opts;
+    opts.letter_spacing = cmd.text_ls;
+    opts.word_spacing = cmd.text_ws;
+    opts.italic = cmd.text_italic;
+    if (cmd.text_dir >= 0) {
+        // 录制端只可能写入 LTR(0) / RTL(1) 两个字面量，故直接强转；越界值按 LTR 兜底
+        // （损坏的命令不应让回放抛异常）。
+        opts.direction =
+            (cmd.text_dir == static_cast<int>(TextDirection::RTL)) ? TextDirection::RTL : TextDirection::LTR;
+    }
+    if (cmd.text_cell_px > 0.0F) {
+        opts.fixed_cell_advance_px = cmd.text_cell_px;
+    }
+    if (!chain_str.empty()) {
+        // 由序列化串重建定长链（回放侧每条命令一次；源串已被 str_pool_ 持有）。
+        opts.font_fallback_chain_size = 0;
+        std::size_t start = 0;
+        while ((start <= chain_str.size()) && (opts.font_fallback_chain_size < AURORA_TEXT_FALLBACK_CHAIN_MAX)) {
+            const std::size_t pos = chain_str.find(AURORA_CHAIN_SEP, start);
+            const std::size_t end = (pos == std::string::npos) ? chain_str.size() : pos;
+            opts.font_fallback_chain.at(opts.font_fallback_chain_size) = chain_str.substr(start, end - start);
+            ++opts.font_fallback_chain_size;
+            if (pos == std::string::npos) {
+                break;
+            }
+            start = pos + 1;
+        }
+        // 超出容量的项被丢弃（与录制侧 with_fallback_chain 的截断口径一致：保留前 N 项）。
+    }
+    return opts;
+}
+
 auto FontEngine::instance() -> FontEngine & {
     static FontEngine s;
     return s;
@@ -891,7 +988,7 @@ auto FontEngine::measure_width(const std::string &text, const Font &f) -> float 
 }
 
 auto FontEngine::measure_width(const std::string &text, const Font &f, const TextLayoutOpts &opts) -> float {
-    const auto &faces = resolve_faces(f.family, f.weight);
+    const auto &faces = resolve_faces_for(f, opts);
     if (faces.empty()) {
         return BitmapFont::measure_width(text, f.size_pt);
     }
@@ -904,7 +1001,7 @@ auto FontEngine::display_width(const std::string &text, const Font &f, const Tex
     // 实显宽度：按绘制同源的物理像素尺寸真算后折回 dp。FT hinting 把 advance 取整到
     // 整像素，同一字形在两个像素尺寸下的 advance 不成 scale 比例，故不能用自然度量
     // 线性近似（行尾可差数 dp，行内累计误差造成选区/命中与实绘错位）。
-    const auto &faces = resolve_faces(f.family, f.weight);
+    const auto &faces = resolve_faces_for(f, opts);
     if (faces.empty() || scale == 1.0F) {
         return measure_width(text, f, opts);
     }
@@ -915,7 +1012,7 @@ auto FontEngine::display_caret_x(const std::string &text, std::size_t char_index
                                  const TextLayoutOpts &opts, float scale) -> float {
     // 实显 caret：物理像素尺寸下的前缀推进折回 dp，与 draw_text_impl 的 pen_x 逐字符对齐；
     // scale=1 退化为 caret_x（两者同源，结果逐位相等）。
-    const auto &faces = resolve_faces(f.family, f.weight);
+    const auto &faces = resolve_faces_for(f, opts);
     if (faces.empty() || scale == 1.0F) {
         return caret_x(text, char_index, f, opts);
     }
@@ -942,7 +1039,11 @@ auto FontEngine::measure_ascent(const Font &f) -> float {
 
 auto FontEngine::monospace_cell(const Font &f, float scale) -> CellMetrics {
     const float sc = (scale > 0.0F) ? scale : 1.0F;
-    const auto ctx = make_emit_context(f, sc);
+    // 刻意传空 opts（无回退链、无固定格档位）：格宽是**主族自身的**度量属性，链只影响缺字时
+    // 回退到哪一族、不参与格宽决定；固定格档位更不能参与 —— 否则档位值依赖格宽、格宽又依赖
+    // 档位，形成自我循环。故本函数与 `fixed_cell_advance_px` 的关系是「先由本函数量出格宽、
+    // 再由调用方把该值填进档位」，而不是本函数读档位。
+    const auto ctx = make_emit_context(f, TextLayoutOpts{}, sc);
     if (!ctx.has_value()) {
         // 无字体面时与绘制路径同兜底：内置位图字体本就是整格网格，三值直接取其格宽/行高/上沿。
         const int ps = BitmapFont::pixel_size(f.size_pt);
@@ -973,7 +1074,7 @@ auto FontEngine::caret_x(const std::string &text, std::size_t char_index, const 
 
 auto FontEngine::caret_x(const std::string &text, std::size_t char_index, const Font &f, const TextLayoutOpts &opts)
     -> float {
-    const auto &faces = resolve_faces(f.family, f.weight);
+    const auto &faces = resolve_faces_for(f, opts);
     if (faces.empty()) {
         return BitmapFont::measure_width(cp_substr(text, char_index), f.size_pt);
     }
@@ -997,7 +1098,7 @@ auto FontEngine::hit_test_char(const std::string &text, float x, const Font &f, 
     if (x <= 0.0F) {
         return opts.direction == TextDirection::RTL ? total : 0;
     }
-    const auto &faces = resolve_faces(f.family, f.weight);
+    const auto &faces = resolve_faces_for(f, opts);
     if (faces.empty()) {
         // BitmapFont 兜底：逐边界走 caret_x（位图字体恒定宽，成本低，无需单趟优化）。
         float prev = 0.0F;
@@ -1031,7 +1132,7 @@ auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const
     if (x <= 0.0F) {
         return opts.direction == TextDirection::RTL ? total - 1U : 0;
     }
-    const auto &faces = resolve_faces(f.family, f.weight);
+    const auto &faces = resolve_faces_for(f, opts);
     if (faces.empty()) {
         // BitmapFont 兜底：逐边界走 caret_x。
         for (std::size_t i = 0; i < total; ++i) {
@@ -1048,7 +1149,7 @@ auto FontEngine::hit_test_char_inclusive(const std::string &text, float x, const
 
 auto FontEngine::display_hit_test_char(const std::string &text, float x, const Font &f, const TextLayoutOpts &opts,
                                        float scale) -> std::size_t {
-    const auto &faces = resolve_faces(f.family, f.weight);
+    const auto &faces = resolve_faces_for(f, opts);
     if (faces.empty() || scale == 1.0F) {
         return hit_test_char(text, x, f, opts);
     }
@@ -1059,7 +1160,7 @@ auto FontEngine::display_hit_test_char(const std::string &text, float x, const F
 
 auto FontEngine::display_hit_test_char_inclusive(const std::string &text, float x, const Font &f,
                                                  const TextLayoutOpts &opts, float scale) -> std::size_t {
-    const auto &faces = resolve_faces(f.family, f.weight);
+    const auto &faces = resolve_faces_for(f, opts);
     if (faces.empty() || scale == 1.0F) {
         return hit_test_char_inclusive(text, x, f, opts);
     }
@@ -1094,8 +1195,10 @@ auto FontEngine::draw_text_runs(Painter &p, std::span<const TextRun> runs, TextA
     const auto sink = SoftwareBlitSink{.p = &p, .c = &current};
     const float sc = p.scale();
     for (const auto &run : runs) {
+        // faces 由 (Font, 回退链) 共同决定，故复用判据必须同时看两者：只比 Font 会在
+        // 「同 Font 不同链」时复用错的 faces，缺字回退到错误的族且无任何编译/运行报错。
         if (!ctx.has_value() || run.font != ctx_font) {
-            ctx = make_emit_context(run.font, sc);
+            ctx = make_emit_context(run.font, opts, sc);
             ctx_font = run.font;
         }
         current = run.color;

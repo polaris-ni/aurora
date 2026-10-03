@@ -413,7 +413,7 @@ au::Column{}
 | `stroke_arc(Point center, float radius, float thickness, float a0, float a1, Color)` | 弧线描边（`fill_sector` 的环带语义糖） |
 | `draw_text(Rect, string, Font, Color[, TextLayoutOpts][, TextAAMode])` | 绘制文本，三个重载 |
 | `draw_text_runs(span<const render::TextRun>)` | 批量绘制同属性文本片段（详见 §8.2 的「批量入口」）；空数组即无操作 |
-| `draw_text_runs(span<const render::TextRun>, const TextLayoutOpts &)` | 同上，**整批共用一份排版 opts**（字距/词距/斜体）；抗锯齿取进程级 `text_aa_mode()` |
+| `draw_text_runs(span<const render::TextRun>, const TextLayoutOpts &)` | 同上，**整批共用一份排版 opts**（字距/词距/斜体/方向/回退链/固定格档位）；抗锯齿取进程级 `text_aa_mode()` |
 | `draw_text_runs(span<const render::TextRun>, TextAAMode, const TextLayoutOpts &)` | 同上，**显式覆盖抗锯齿策略** + 整批共用排版 opts |
 | `draw_image(const Image&, const Rect&)` | 绘制图像（双线性采样） |
 
@@ -477,6 +477,13 @@ au::Column{}
 - **同源保证（核心不变量）**：返回的每个 `family` 都保证 `resolve_faces(family, weight)` 能解析出**属于该族**的面，而不是悄悄落到默认链——枚举出来的名字点下去解析不到 face 比不枚举更糟。实现上系统字体目录只建「族名 → 文件路径」的 catalog（不预开上百个 `FT_Face`），`resolve_faces` 未命中时按 catalog **懒加载**该族。**注意**：判这条不变量不能用「`resolve_faces` 非空」——它对任何未命中族都会 emit 默认链，因而**恒非空**，是一条空转判据；须与「必然落到纯默认链的哨兵族」做序列对拍（`utest_font_discovery` 已按此实现）。
 - **等宽判定以度量为准**：取该族一个面，同像素尺寸下比较 `'i'` / `'W'` / `'0'` 的 advance 是否全等。既有族名特判（`monospace` / `mono`）**降级为补充命中**，只在度量不可得时生效——故「名字像等宽但度量非等宽」的族判 `false`。
 - **三平台同口径**：目录扫描 + `FT_Face::family_name`（Windows `C:\Windows\Fonts` 递归；Linux `/usr/share/fonts` 等；macOS `/System/Library/Fonts` 等）。**不引入 fontconfig**：它给出的族名与 `FT_Face::family_name` 不同源，反而会让三平台口径对不齐。返回的**集合**允许因平台所装字体而异，但排序、去重、等宽判定、与 `resolve_faces` 的同源性四处逐平台一致。
+
+**按族缺字回退链（`resolve_faces(family, weight, span<const std::string> fallback_families)` 重载 + `TextLayoutOpts::font_fallback_chain`）**：全局默认链是**进程级固定序列**——`add_default_face()` 只往 `""` / `"sans-serif"` 两个键挂面且**不产生族名**，故调用方既看不到全局链里有哪些族，也无法改变其顺序或插入族名。于是「本族缺字时先看哪一族」此前没有任何表达入口：等宽 + CJK 缺字回退这类需求（默认回退至系统等宽 CJK 字体、**回退链顺序可配**）无法落地。本重载即该入口。
+
+- **顺序即语义，框架不重排**：链上族按给定顺序依次追加到「本族自身的面」之后，全局默认链仍只作**尾部回落**。字重排序只作用于**单个族自身**（精确匹配字重的面排该族首位、其余按字重距离升序，与无链时同口径），**不跨族重排**——否则「A 族优先于 B 族」的声明会被打乱。这条与无链路径的差别是实质性的：无链时主族与全局链合并后做**一次**全局 weight 排序，有链时改为分段（每族一段、段内排序、段间保序）。
+- **链上族名与 `list_font_families()` 同源**：链上任一族名都经与族名枚举**同一条**懒加载路径解析（目录 catalog → `materialize_catalog_family`），故取自枚举结果的族名必定解析得到属于该族的面；**解析不到的族跳过**（含伪族名 `""` / `"sans-serif"` / `"default` —— 它们是默认链的键而非族名，链上出现它们等于把尾部回落提前），不阻断后续链段，最终仍由全局链兜底。
+- **不指定即零影响**：链长为 0 时本重载与无链重载**共用同一条代码路径与同一份缓存条目**（缓存键此时恰为 `family#weight`、不带任何链编码），输出逐字节一致。有链时缓存键追加 U+001F 分隔的链编码，不同链互不污染。
+- **承载形态是定长数组 + 长度**（`font_fallback_chain` + `font_fallback_chain_size`，容量 `AURORA_TEXT_FALLBACK_CHAIN_MAX = 8`），不是 `vector` / `shared_ptr`：后两者会让 `TextLayoutOpts` 失去字面类型，本仓既有 12 处 `constexpr TextLayoutOpts` 全部编译失败。超出容量的项**丢弃并保留前 N 项**（顺序语义不变），不静默扩容。
 - **稳定序**：按 `family` 升序、去重（下拉数据源要求，不让 UI 侧自己排序）。伪族名 `""` / `"sans-serif"` / `"default"` 是默认链的键而非族名，**不**出现在结果里（三者指向同一个 Noto Sans 面，列出来只会让下拉出现三个等价项，其中一个还是空串）。
 - **缓存与失效**：目录扫描首次调用时建立，随 `shutdown_font_discovery()` 自然失效；调用方**无需**手动刷新。未初始化时返回仅含内置族 / 已注册族的集合，不崩溃。
 - **内置等宽族**：框架此前没有任何内置等宽族（内置族只有非等宽的 Noto Sans），故内置 **Cascadia Code**（SIL OFL 1.1，见 `THIRD_PARTY_LICENSES.md`）并注册到族名 `"Cascadia Code"`——只注册到自己的名下、**不挂默认链**，既有默认链行为不变。
@@ -491,11 +498,23 @@ au::Column{}
 
 **光栅状态世代**：`FontEngine::raster_generation()` 返回全局计数。三个字体注入接口（`set_default_font` / `register_font` / `register_font_from_memory`，换用不同字面同样改变字形光栅结果）**无条件**自增它；`set_text_aa_mode` 仅在写入值真正变化时自增（同值写入短路返回）。控件的 Display List 与离屏层缓存在录制/生成那一刻固化了 AA 模式与字面，而 `Widget::mark_needs_paint()` 只沿父链向上传播失效、不触及后代缓存——故控件必须把本世代纳入缓存命中条件（`Widget::paint` 已内置），否则切换后后代仍回放旧光栅，表现为「切换瞬间无变化、过一会儿才随无关失效零星生效」。字形图集键已含 AA 模式与 `px`，世代失效只触发重录、不产生脏条目。
 
-**排版选项（`TextLayoutOpts`）**：`measure_width` / `caret_x` / `hit_test_char` / `draw_text` 均提供接受 `TextLayoutOpts` 的重载，携带 `letter_spacing`（相邻字形间间距，整串共 `n-1` 次）、`word_spacing`（词间距，仅空格后追加）、`italic`（经 FreeType `FT_Set_Transform` 仿斜）。统一 opts 保证度量、光标、命中、绘制四者完全一致。
+**排版选项（`TextLayoutOpts`）**：`measure_width` / `caret_x` / `hit_test_char` / `draw_text` 均提供接受 `TextLayoutOpts` 的重载，携带 `letter_spacing`（相邻字形间间距，整串共 `n-1` 次）、`word_spacing`（词间距，仅空格后追加）、`italic`（经 FreeType `FT_Set_Transform` 仿斜）、`direction`（书写方向）、`font_fallback_chain`（按族缺字回退链）、`fixed_cell_advance_px`（固定格推进档位）。统一 opts 保证度量、光标、命中、绘制四者完全一致。**六个字段全部进 `DrawCmd` 参与录制**（见下「录制—回放」段），且全部进 shaping 缓存键的哈希与相等比较——漏掉任一字段都会让开了该档的文本命中没开的缓存条目，字距/选面静默错乱。
 
 **锚定契约**：`draw_text(r, ...)` 的 `r.origin.y` 是**行盒顶**而非基线。实现内部首行基线 = `origin.y + 主 face ascender`，回退 face 字形统一按主 face 基线对齐。全库调用方均按顶锚定传值，**不得自行加减 ascent**。该 ascent 由 `measure_ascent(f)` 公开（与绘制同源、不做绘制侧的整像素 snap），供 `CrossAxisAlignment::Baseline` 的控件级基线使用；无可用字体面时回退 `BitmapFont::measure_ascent`（同一 `pixel_size` 口径），恒有 `0 <= measure_ascent <= measure_height`。
 
-**等宽整格度量（`monospace_cell(f, scale)` → `render::CellMetrics`）**：按列排版的消费方（终端网格、表格单元格）需要整像素单格尺寸来同时定列位与判换行，而 `measure_*` 给的是浮点自然度量，逐格各自取整会让列位随列号漂移。`CellMetrics{cell_width_px, cell_height_px, ascent_px}` 三值均为**物理像素整数**，口径：宽取参考字形集 `{'0', U+2500}` 在绘制同源像素尺寸（`lround(px_measure × scale)`）下整像素 hinted advance 的最大值——含 U+2500 是因为制表符在部分字体里比 ASCII 数字宽，只量 `'0'` 会让相邻边框压字；不放宽到全字形集是避免把网格画稀（`utest_font_engine.cpp` 以 `display_width` 反查上界，钉住「≥ 两者最大且 ≤ 最大 + 1」）。高与基线与绘制侧同源（`floor(line_height_px + 0.5)` / `floor(ascender_px + 0.5)`，即首行 pen 的 snap 口径），故按本度量排的多行文本与 `draw_text` 的行推进共用同一行盒；`cell_width_px` 恒 ≥ 1，`scale <= 0` 按 1 处理，无可用字体面时回退 `BitmapFont` 整格口径。**合成粗体的 embolden 量不计入格宽**（绘制期膨胀允许字形溢出半格，但不推挤邻格）。列起点、跨格与换行一律由消费方按本度量自行计算——框架不提供「整格模式」的排版选项。
+**等宽整格度量（`monospace_cell(f, scale)` → `render::CellMetrics`）**：按列排版的消费方（终端网格、表格单元格）需要整像素单格尺寸来同时定列位与判换行，而 `measure_*` 给的是浮点自然度量，逐格各自取整会让列位随列号漂移。`CellMetrics{cell_width_px, cell_height_px, ascent_px}` 三值均为**物理像素整数**，口径：宽取参考字形集 `{'0', U+2500}` 在绘制同源像素尺寸（`lround(px_measure × scale)`）下整像素 hinted advance 的最大值——含 U+2500 是因为制表符在部分字体里比 ASCII 数字宽，只量 `'0'` 会让相邻边框压字；不放宽到全字形集是避免把网格画稀（`utest_font_engine.cpp` 以 `display_width` 反查上界，钉住「≥ 两者最大且 ≤ 最大 + 1」）。高与基线与绘制侧同源（`floor(line_height_px + 0.5)` / `floor(ascender_px + 0.5)`，即首行 pen 的 snap 口径），故按本度量排的多行文本与 `draw_text` 的行推进共用同一行盒；`cell_width_px` 恒 ≥ 1，`scale <= 0` 按 1 处理，无可用字体面时回退 `BitmapFont` 整格口径。**合成粗体的 embolden 量不计入格宽**（绘制期膨胀允许字形溢出半格，但不推挤邻格）。列起点与换行一律由消费方按本度量自行计算。
+
+**固定格推进档位（`TextLayoutOpts::fixed_cell_advance_px`，`optional<float>`，nullopt = 不启用）**：字形落笔与推进的默认算式是 `dx0 = floor(pen_x + x_off) + left` / `pen_x += x_adv`，而 `x_adv` 取 HarfBuzz 给出的**该 face 自己**的物理 px advance——于是回退面的双宽字形（实测 Cascadia Code 14pt 单格 11px、汉字 19px）会把同一 run 内其后的字形整体挪位并**逐字累积**。开启本档位后推进量改由调用方给定（每字形一律 `fixed_cell_advance_px` px），**只改推进量、不改选面逻辑**：缺字照旧走回退链落到 CJK 面，档位与选面解耦。
+
+三条口径：
+
+- **单位是物理像素且已含 scale**。调用方直接传 `monospace_cell(f, scale).cell_width_px` 的整数倍即可，不需自己把 dp 折算成物理像素——这正是「与 `monospace_cell` 的整格度量同源、不要求调用方重复算 scale」的兑现方式。传逻辑 dp 会导致缩放屏上格宽与实际推进不符。
+- **不叠加合成粗体的 `embolden_px`**。格宽是约定值不是量出来的推进，加粗字形溢出半格也不推挤邻格，与 `monospace_cell`「embolden 不计入格宽」的既有口径一致。
+- **与 `letter_spacing` / `word_spacing` 叠加**（间距语义不变），故网格消费方通常同时把它们留 0。
+
+**度量侧必须同步**：`emit_glyphs_with_context`（绘制）、`line_prefix`（宽度 / caret）、`hit_test_single_pass`（命中）三处的推进量统一走 `glyph_advance_px(g, opts)` 单一判定。只改绘制不改度量会让选区高亮 / caret / 命中与实绘像素逐字错位，且不触发任何编译或运行错误。
+
+**档位粒度是「整批一档」**（`TextLayoutOpts` 逐批共用，`TextRun` 不带 per-run 覆盖）：一行内 ASCII 占 1 格、汉字占 2 格的混排**无法用单一固定档表达**，消费方须按格宽断 run 分批调用 `draw_text_runs`（这与 `opts 整批共用、不提供 per-run opts` 的既有约定一致）。`monospace_cell` 刻意传空 opts 度量：链只影响缺字时回退到哪一族、不参与格宽决定；档位更不能参与（否则档位依赖格宽、格宽又依赖档位，形成自我循环）。
 
 **批量入口（`Painter::draw_text_runs` / `FontEngine::draw_text_runs`）**：一段文本按样式切成多个片段是终端与表格的常态，逐片段调 `draw_text` 会让每次调用重做与文本内容无关的派生量（字体候选面解析含堆键构造、像素尺寸换算、两次 `FT_Set_Pixel_Sizes` 取行高与 ascender）。批量入口把这些派生量外提成一份发射上下文，**只在相邻片段 `Font` 不同时重建**，落笔算式与逐片段调用逐位相同（`utest_painter.cpp` 以两画布全像素差分 == 0 钉住）。收益上限即「每次调用的派生量 × 片段数」：实测一屏规模（24 行 × 12 同属性短片段 = 288 片段）在 9 组「逻辑尺寸 × scale」下两轮各为 −8.5%…+8%、中位约 −1%，落在环境抖动之内——该场景的成本主体是字形 blit 与图集查找，不是派生量，故 `bench_render` 的 `grid_text_per_span_calls` / `grid_text_batched_spans` 两行**只作观测项、不进 `tools/check/perf_gates.json`**（无稳定阈值可锁）。片段风格越碎（同屏片段数越多、每片段越短）收益越接近线性；本入口的正当性首先是「逐片段调用与整批调用输出一致」而非提速幅度。片段类型 `render::TextRun{text, box, font, color}` 与 `draw_text` 的单次入参一一对应，区域原点单位为**逻辑 dp**、只读 `origin`；`FontEngine::draw_text_runs` 因此与同类其余「收物理像素」的入口**刻意不同**（内部按 `p.scale()` 折算）——预缩放需复制整段数组并连带复制每片段的 `Font::family`，每帧数千次堆分配恰好抵消收益。抗锯齿取进程级 `text_aa_mode()`、排版选项取默认值。**录制态逐片段各落一条 `DrawText` 命令**，故 RHI 回放后端无需认识新命令类型，批量化收益只落在直绘路径（终端/表格每帧重画整屏正是该路径）。
 
@@ -507,7 +526,11 @@ au::Column{}
 
 **opts 是整批共用的，不提供 per-run opts**：`TextRun` 因此不新增排版字段，避免与 `Font` 的既有语义（`weight` / `style`）重叠成两条互相矛盾的样式来源。调用方若各片段排版属性不同，请**按属性分组分批调用**。等价性由 `utest_painter.cpp` 钉住：带 opts 的批量结果与逐个 `draw_text(..., opts)` 全像素差分 == 0，带 `aa_mode` 的批量结果与逐个 `draw_text(..., aa_mode, opts)` 同样差分 == 0。
 
-录制态把 `aa_mode` 与 `opts`（`letter_spacing` / `word_spacing` / `italic`）逐片段写入各自 `DrawCmd`，回放端据此重建 `TextLayoutOpts`，因此录制—回放路径与直绘路径同样逐位一致。**`TextLayoutOpts::direction` 不进 `DrawCmd`**：三个 RHI 回放端（`software_rhi` / `gpu_gl_rhi` / `wgpu_rhi`）重建 opts 时本就不构造该字段、按其默认 `nullopt` 取值，故不记录即等于记录默认值，无需为此扩 `DrawCmd`。
+录制态把 `aa_mode` 与 `opts` 的全部六个字段逐片段写入各自 `DrawCmd`（`text_ls` / `text_ws` / `text_italic` / `text_dir` / `text_cell_px` / `text_chain_idx`），回放端经**同一份** `encode_text_layout` / `decode_text_layout`（`glyph_emit.h`，三后端共用）重建 `TextLayoutOpts`，因此录制—回放路径与直绘路径逐位一致，且新增排版字段不可能出现「加了忘同步」。
+
+**回退链不进 `DrawCmd` 而走字符串池**：`TextLayoutOpts` 的链是定长数组（`font_fallback_chain` + `font_fallback_chain_size`），无法跨录制边界按引用传递，故按值序列化为 U+001F 分隔的族名串入 `str_pool_`，下标记在 `text_chain_idx`（-1 = 无链，空链不占池位）。解析集中在 `DisplayList::replay` 的 `resolve_cmd_data`（与 `text` / `font` 同批），后端经 `CmdData::text_chain` 取用、不接触池下标语义。
+
+**`direction` 现已进 `DrawCmd`（`text_dir`，-1 = 未指定）**：此前它是**只存在于直绘路径**的字段——三个回放端重建 opts 时本就不构造该字段，故录制时被静默丢弃、RTL 文本经 DisplayList 后方向可能与直绘不同。现随上述统一编解码一并带上，此既有缺口关闭。
 
 **实显度量（`display_*`）**：FT hinting 把每个字形 advance 取整到整像素，同一字形在不同像素尺寸下的 advance 不成 scale 比例。因此 `display_width` / `display_caret_x` / `display_hit_test_char{,_inclusive}` 必须按「绘制同源的物理像素尺寸 `lround(px × scale)` 真算前缀推进后折回 dp」，**不得写成自然度量的转发别名**——否则缩放屏下行内累计误差跨字符边界，造成命中 off-by-one。`scale == 1` 时退化为对应自然版。
 

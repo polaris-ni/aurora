@@ -300,7 +300,8 @@ auto main() -> int {
             }
             for (const float s : {1.0F, 1.5F}) {
                 const aurora::Font f{.size_pt = 15.0F};
-                constexpr aurora::render::TextLayoutOpts o{};
+                // 非 constexpr：TextLayoutOpts 增按族回退链后不再是字面类型（定长 std::string 数组）。
+                const aurora::render::TextLayoutOpts o{};
                 const float w = aurora::render::FontEngine::display_width(line, f, o, s);
                 report(("char_hit_x100_n" + std::to_string(line.size())).c_str(), "-", s, 0, 0,
                        aurora::bench::time_ms(
