@@ -845,9 +845,23 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
     请求的 dp 被系统性缩小了一个 scale 倍，且 100% DPI 下 scale 恰为 1.0、两种单位解读重合，
     **该分叉在 CI 上完全不显形**。现补 `Painter::set_scale`（Win32 / D3D11 / X11 / Wayland 早有，
     唯独 GLFW 漏调）+ `framebuffer_size()` override + 建窗与 `set_size` 的 dp↔px 换算（收敛在内部头
-    `window/detail/glfw_dpi.h`，由 `utest_glfw_dpi` 钉住）。**但 X11 / Wayland / GLFW 的
-    `scale_factor()` 仍缺缩放变化上报**（`Surface::set_scale_change_handler` 未被它们 override），
-    跨屏或改系统缩放时该值不会自动更新，见 §7.4 的 resize 缺口条。
+    `window/detail/glfw_dpi.h`，由 `utest_glfw_dpi` 钉住）。
+- **缩放变化上报的跨后端现状**（`Surface::set_scale_change_handler` override 情况）：
+  - **Win32 / D3D11 / wgpu-Win32**：`WM_DPICHANGED` → 重读 scale → **变化才上报**。已收敛。
+  - **GLFW**：经 `glfwSetWindowContentScaleCallback`（Win32 上由 `WM_DPICHANGED` 驱动、X11 /
+    Wayland 上由输出 scale 事件驱动）上报，同样只报变化。真机验收见
+    `tools/verify/glfw_dpi_live_probe.cpp`——自动段**注入 `WM_DPICHANGED` 造变化**（不需要第二块
+    显示器）断言回调被调用且值与 `scale_factor()` 一致，人工段做真跨屏拖动。
+    该探针依赖 `GlfwSurface::native_handle()` 取 HWND（此前本后端未覆写，是四个真实窗口后端里
+    唯一的缺口，导致 GLFW 跨屏行为在本仓不可观测）。
+  - **Wayland**：经 `wl_surface.enter` / `leave` 维护「表面当前所在输出」集合，
+    `refresh_scale()` 取**所在输出**的缩放（跨在两屏上时取较大者，与合成器「按最大者渲染才不被
+    拉伸」的约束一致）；未 enter 时退回全部输出的最大值以保首帧不糊。变化时先
+    `notify_scale_change` 再 `present_request_`（顺序反了会有一帧用旧 scale 渲染）。
+  - **X11**：**不适用，非缺口**。`detect_scale()` 读的是 X 资源管理器的 `Xft.dpi`——**进程级全局
+    设置、运行期不变**，且 X11 核心没有 per-monitor DPI 概念。X11 上「跨屏」本就不会引起 scale
+    变化，无信号可报。要在 X11 上实现 per-monitor DPI 需另接 XRandR（新特性，非补通知）。
+    运行时改 `Xft.dpi` 也不会被感知（该值仅在建窗时读一次），此为已知限制。
 - 脏区语义（`present_root` partial-clip 路径）：树状态已变但无脏登记时 idle 跳帧（`frame_count` 不增、
   `has_pending_dirty()` 为假）；手动 `mark_dirty` 局部矩形后仅裁剪区重绘、**裁剪外保留上帧像素**（与
   「整屏刷底色」实现可区分——后者会画出已变的新色）；随后补标另一侧再验证增量覆盖。

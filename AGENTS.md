@@ -84,6 +84,7 @@ cmake --build build --target docs       # Doxygen，WARN_AS_ERROR=YES，查「�
 | `core/` 层依赖、模块边界、目录 | `check_core_layer_boundary`、`check_arch_module_map` | `ARCHITECTURE.md` §2 / §4 |
 | 平台/后端分支、feature 宏 | `check_platform_macros`、`toggles` 对应矩阵（CI） | `BUILD_OPTIONS.md` §3 / §4 |
 | Win32 宿主的 DPI / dp↔物理换算 | `check_dpi_single_source`（换算只许在 `to_physical` / `to_logical`，DPI 只许在 `refresh_scale()` 读）；建窗尺寸那一腿另需真机探针 `--target aurora_verify_win32_dpi`（不进 CTest，100% DPI 环境下判据恒真并记 SKIP） | `specification/08-tooling.md` §8.2 |
+| GLFW / Wayland 的缩放变化上报 | 探针 `--target aurora_verify_glfw_dpi`（不进 CTest：自动段注入 `WM_DPICHANGED` 造变化、任何 DPI 环境均可跑，人工段做真跨屏拖动、未做记 PENDING MANUAL）。Wayland 腿需 Linux 合成器环境 | `specification/08-tooling.md` §8.2「缩放变化上报的跨后端现状」 |
 | 字符串字面量 | `check_no_cjk_literals` | — |
 | NOLINT 豁免排版 | `check_nolint_layout` | `CODING_STANDARDS.md` §5.2 |
 | 测试文件 | `registry_integrity`、`check_test_temp_hygiene`、`framework_selftest` | `CODING_STANDARDS.md` §3 |
