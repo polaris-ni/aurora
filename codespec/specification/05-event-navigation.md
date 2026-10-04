@@ -37,7 +37,7 @@ struct Event {
 | 事件 | 字段 | 位置 |
 |:---|:---|:---|
 | `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button`、`pointer_id`、`click_count`（连击序号，见下）、`modifiers`（修饰键位组合，后端在产生处写入，见 §2.2.2） | `event.h` |
-| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers`（位掩码，含 `Shift`/`Control`/`Alt`/`Meta` 与 **`NumLock`**；指针与滚轮事件同用此枚举，见 §2.2.2） | `event.h` |
+| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers`（位掩码，含 `Shift`/`Control`/`Alt`/`Meta` 与 **`NumLock`**；该字节**混合两类语义**（按住态 / 锁定态），比较时须按 `AURORA_MODIFIER_PRESSABLE_MASK` 取子集，见 §2.2.2；指针与滚轮事件同用此枚举） | `event.h` |
 | `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0）、`modifiers`（修饰键位组合，后端在产生处写入，见 §2.2.2） | `event.h` |
 | `TextInputEvent` | `text`（UTF-8 文本片段） | `event.h` |
 | `TextCompositionEvent` | `preedit`（UTF-8 预编辑串，空 = 组合结束/取消）、`cursor_index`（组合光标，**preedit 内码点下标**）、`sel_start` / `sel_end`（待转换选区，含尾；无选区时 `sel_end == AURORA_NO_SELECTION`）、`committed`（本次上屏文本，UTF-8） | `event.h` |
@@ -131,6 +131,10 @@ struct Event {
 诊断注入面**刻意不加修饰参数**：测试请直接构造事件字面量经 `EventDispatcher::dispatch` 派发；给注入面加修饰键位属另一项独立决策。**需要区分事件来源的调用方用既有的 `pointer_id`**（触控合成有值、真实鼠标为 `nullopt`），不要靠 `modifiers` 推断——它在两种情形下都是 `None`。`ScrollEvent` 无 `pointer_id` 字段，消费方按「`None` 即无修饰」使用即可。
 
 **`NumLock` 位在指针事件上的宽度差异（已知、不对齐）**：`MouseEvent` / `ScrollEvent` 与 `KeyEvent` 复用同一枚举，故 Win32 / X11 / Wayland 侧的真值源会把 `NumLock` 锁定位**一并带上**（它们的折算入口是键盘与指针共用的同一份函数）；GLFW 指针路径只取四个可按住的位（锁定位与指针手势无语义关系，无小键盘参与）。消费方**只看四个可按住位时无需掩码**（判定 `& ModifierKey::Shift` 等不受高位影响），也不应从指针事件取 `NumLock`。这条差异是刻意保留的：指针路径另开一份裁剪逻辑会在同一后端内制造第二个真值源。
+
+**该字节混合两类语义，比较时须按掩码取子集**：`modifiers` 里 `Shift` / `Control` / `Alt` / `Meta` 是「此刻被按住」，`NumLock` 是「键盘锁定灯态」——切换键按下的瞬间翻转、抬起不恢复，与按住态不可混用。四个后端都会在事件上盖章锁定位，故**做两处位集的整体比较时必须先摘掉锁定位**，否则键盘锁定态会污染结果（快捷键层即因此踩过一次：`KeyCombo::matches` 曾按整字节相等比较，`NumLock` 开着时全部应用级快捷键恒不匹配）。掩码常量 `AURORA_MODIFIER_PRESSABLE_MASK` / `AURORA_MODIFIER_LOCK_MASK` 的分工与「新增锁定位归后者」的纪律见 [`06-app-platform.md`](06-app-platform.md) §8.4。
+
+**Win32 侧该位现随消息流推进**：Win32 的 `ModifierKeyTracker` 把两类位分成两份内部状态——`bit_for` 只管按住态（置位 / 清位），锁定态由独立的 `lock_bit_for` 承载并按 **toggle** 处理（`WM_KEYDOWN` / `WM_SYSKEYUP` 的 `VK_NUMLOCK` 翻转该位，抬起消息不翻：一次 Down + 一次 Up 是一次物理动作）。此前该位只在 `handle_activate` 时经 `async_modifiers()` 播种一次、此后在派发期是陈旧值，且失激活 / `WM_KILLFOCUS` 的 `clear()` 会把它抹成「关」——现 `clear()` 只清按住态，锁定态保留（锁定态没有抬起消息可言，抹成「关」是假报）。`get()` 回两者的并集，故 `KeyEvent` / `MouseEvent` / `ScrollEvent` 三个落笔点的对外形状逐位不变，指针事件也因此带上新鲜的锁定位（与 X11 / Wayland 现行行为一致）。GLFW 的不对称照旧：其指针路径刻意不读该位，仍属上段登记的「已知、不对齐」。
 
 ### 2.3 坐标契约
 

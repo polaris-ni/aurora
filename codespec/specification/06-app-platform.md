@@ -552,6 +552,21 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 **命令面板键位**：`CommandPalette` 打开时把自己的作用域压入 `FocusManager`（子树内**唯一**可聚焦控件是搜索框，故左右方向键仍落到搜索框做光标移动、上下方向键不引发焦点跳转）；Enter 经搜索框的提交回调执行选中项；Esc / ↑ / ↓ 经打开期临时注册的快捷键绑定接管（依赖注册表已 `bind_shortcuts`，未接线时这几键不可用，面板以 WARN 提示）。Space 只经文本输入落字，不触发执行。命令清单可经 `to_json()` 序列化并由 MCP 工具面枚举，见 [`08-tooling.md`](08-tooling.md) §7.1。
 
+**`KeyCombo::matches` 的匹配语义：只比可按住的位**。`ModifierKey` 把「可按住的修饰位」（`Shift` / `Control` / `Alt` / `Meta`）与「键盘锁定态位」（`NumLock`）建模在**同一个字节**里，而四个后端都会在事件上盖章锁定位（Win32 读 `GetKeyState(VK_NUMLOCK)` 的 toggle 位、X11 折 `Mod2`、Wayland 查 `XKB_STATE_MODS_LOCKED`、GLFW 键盘路径查 `GLFW_KEY_NUM_LOCK`）。匹配前两侧都先与 `AURORA_MODIFIER_PRESSABLE_MASK` 取子集，锁定态位两侧一律屏蔽——否则 `NumLock` 开着时**任何**未登记该位的应用内快捷键恒不匹配，是整层静默失效（与焦点、作用域无关）。四个配套常量（`event.h`）：
+
+| 常量 | 含义 | 纪律 |
+|:---|:---|:---|
+| `AURORA_MODIFIER_PRESSABLE_MASK` | 可按住的位并集（四个） | 判定「某修饰键是否按下」用单个位即可，无需本掩码；本掩码专用于**位集的整体比较** |
+| `AURORA_MODIFIER_LOCK_MASK` | 键盘锁定态位的并集（当前只有 `NumLock`） | **新增锁定类位（`CapsLock` / `ScrollLock` 等）时必须并入本掩码**，否则该位会落进两掩码之外的缝隙、在按位比较中继续污染结果 |
+
+两者应恒为 `ModifierKey` 全部已定义位的一个**无余划分**（并集全覆盖、交集为 0），该恒等式由 `utest_shortcuts` 的位集自证用例钉住——新增锁定位时那条用例会要求同步。
+
+其余三条口径均为刻意决定，不得顺手改：
+
+- **仍是「相等」而非「包含」**：`Ctrl+O` 不匹配 `Ctrl+Shift+O`。这是 Qt `QKeySequence` / WPF `KeyGesture` / Flutter `SingleActivator` 的共同语义；改成包含会让所有「更具体组合优先」的注册表失去区分度。
+- **注册侧的锁定位不可表达**：`KeyCombo{Control | NumLock, K}` 里的锁定位被忽略（等价于 `Control+K`）。`matches` **刻意不加断言、不加日志、不返回 `Result`**——它在每条按键消息上被调用，热路径里的噪声比它想防的错更贵，该口径由 `matches` 的文档注释承担。`to_string()` 不列锁定位，与此恰好一致。
+- **不引入 per-combo 的「要求 NumLock 开 / 关」字段**：当前无任何消费者需要，属扩大 API 预算。若将来需要，应另立字段并走一次独立的公共 API 变更。相应地**不新增匹配档位 / 枚举参数**，保持单一算式，避免同一字段出现两个真值源。
+
 ### 8.6 OS 级全局热键（无焦点时也触发）
 
 `OsHotkeyRegistry`（`app/os_hotkey.h`）把键组合注册到**操作系统**，焦点在别的进程里同样生效。经 `Application::os_hotkeys()` 取用。

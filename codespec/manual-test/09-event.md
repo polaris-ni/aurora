@@ -280,6 +280,17 @@
 > 两段判据在 30s 超时后如实报 `[FAIL]`——**这正是判据在正常工作的表现**（不是回归）。
 > 故本用例**不得**在未按 `Alt+F4` 的情况下记 PASS。
 
+#### TC-EVENT-010 窗口激活期间切换 NumLock，快捷键与小键盘导航档即时跟随
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-EVENT-010 |
+| 测试目的 | 验证锁定态修饰位在真机上随消息流推进：激活期间切换 NumLock 后，应用级快捷键仍命中、小键盘导航档的语义随之改变 |
+| 前置条件 | 载体 `demo_command_palette` 已构建成功；窗口处于前台激活状态；键盘带 NumLock 键 |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 启动 `./build/demo_command_palette.exe`，保持窗口在前台（纯执行，无预期结果）<br>2. 按一次 `Ctrl+Shift+P` 打开命令面板，关闭面板<br>3. 按一次 `NumLock` 切到开启档（纯执行，无预期结果）<br>4. 不切换焦点、再按一次 `Ctrl+Shift+P`<br>5. 按一次小键盘 `Home` 键（`VK_NUMLOCK` 开启时其上档为导航档），观察焦点落点<br>6. 按一次 `NumLock` 切回关闭档（纯执行，无预期结果）<br>7. 按一次小键盘 `1` 键，观察输入的字符 |
+| 预期结果 | 2. 命令面板打开，作为步骤 4 的对照：同一组合在未切档时即已命中<br>4. 命令面板打开——`KeyCombo::matches` 只比可按住的位，事件上的锁定态位被屏蔽，故 `NumLock` 开着不影响命中<br>5. 焦点落到导航目标；该位随消息流推进，不停留在激活时刻的播种值<br>7. 输入字符为 `1`（NumLock 关闭档），即小键盘数字档随锁定态改变 |
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -293,3 +304,4 @@
 | TC-EVENT-007 | 2026-09-28 | Qoder Agent | PASS | | 解锁会话用真实 `SendInput`（`VK_TAB` / `Shift+VK_TAB` 扫描码）复跑，焦点落点同时由 `/api/tree` 的 `focused` 标记与像素焦点环两路读出。步骤 2/3：起始无焦点，正向连按 12 次得循环序列 `Button@/0/2/0 → Button@/0/2/2 → Button@/0/4 → Button@/0/2/0 → …`（每 3 次回卷一轮），首个停点即 `Drag me A`（`/0/2/0`），随后 `Drag me B`（`/0/2/2`）、`Raw stream listener`（`/0/4`），相对顺序与视觉排布一致、无跳序；步骤 4：一轮恰经过 3 个不同停点、无重复，3 等于该载体内交互控件总数（上一轮的 12 个停点里混入的 3 个布局容器、1 个标题、3 个空名间隔件与 2 段说明文本已全部退出 Tab 序）；步骤 5：`Shift+Tab` 连按 6 次得 `Button@/0/2/2 → Button@/0/2/0 → Button@/0/4 → …`，与正向序列严格互逆且不跳过；焦点可视化：焦点落在 `/0/2/0` 后新帧的蓝染色像素净增 425，其外接盒 (22,132)-(266,316) 即该按钮盒外扩环带，把盒外 4 dp 再内缩一圈的中心区蓝染色为 0，判为空心环（环带 2–4 dp、不压控件自身边缘像素） | | 本条由 FAIL 改判 PASS 的前提是契约已定并落地：**Tab 停点按控件类型分级默认**——`Widget::wants_focus()` 基类返回 `true`（自定义/交互控件零声明即键盘可达），只有纯布局容器（`Container` / `SingleChild`）与纯展示件（`Text` / `Divider` / `Spacer` / `RichText` 等 11 类）覆写为 `has_input_semantics()`，即挂上点击 / 手势 / 上下文菜单 / 滚动 / 键盘认领时才重新成为停点，谓词动态、不按类型一刀切；`focusable()` 改为纯宿主否决位（`false` 一票否决，`true` 只代表未否决）。判据链见 `specification/05-event-navigation.md` §4.2，回归 `utest_focus.wants_focus_tiered_defaults` / `utest_focus.tab_cycle_hits_only_interactive_controls`。焦点环为基类统一绘制（`specification/05-event-navigation.md` §4.4），`on_focus_change` 同时 `mark_needs_paint()`，`TextInput` 经 `wants_focus_ring()` 关闭基类环以免与自带 Fluent 聚焦边框双环；回归 `utest_focus_ring` 两条。载体 `examples/demos/demo_common.h` 的 `GradientTitle` 因是自定义叶控件（基类默认可入序）改由宿主侧 `set_focusable(false)` 让位。本轮不采用 `:focus-visible`（仅键盘触发环）：它需给 `FocusDirection` 增来源信息且使指针点击后的焦点在像素上重新不可判定，与本条要证明的可观测性相反。 |
 | TC-EVENT-008 | 2026-10-02 | Aurora Agent | PASS | | 自动段 12 行输出：10 条 `[PASS]`、1 条 `[SKIP]`、0 条 `[FAIL]`，退出码 0。`WM_SYSKEYDOWN(Alt+A)` 恰 1 条 `KeyEvent`（`action=Down`、`key=KeyCode::A`）；`VK_MENU` 送 0 条、其后字母仍带 `Alt` 位；`VK_F10` 送 0 条；消费开关打开时处理器仍见到 Alt+F4；`WM_SYSKEYUP` 1 条且 `action=Up`。「消费即止 / 未消费回落」那一对为 `[SKIP]`，成因已打印 | | SKIP 的成因经**裸 Win32 对照**实测确认（不经 Aurora、直接 `DefWindowProcA`）：注入 Alt+F4 / Alt+Space / Alt+Enter 均不产生 `WM_SYSCOMMAND`——`DefWindowProcA` 读 `GetKeyState(VK_MENU)` 物理态，`SendMessage` 改不了。故该对语义由 TC-EVENT-009 的真键盘段验收，不以注入通道的空转断言充数。库内判据本体（哪些 vk 进派发）另有单测 `utest_win32_modifiers.syskey_dispatches_all_but_alt_itself_and_f10` / `syskey_exceptions_still_advance_the_modifier_state` 覆盖 |
 | TC-EVENT-009 | 2026-10-03 | WorkBuddy | SKIP | | 未执行：本次只验「载体能否进入人工段」，未按 `Alt+F4`（`Step 1` 提示后 30s 超时，两段判据如实报 `[FAIL]`）——**该 FAIL 是判据在正常工作**（`SC_CLOSE` 收不到），不是缺陷。未在无按键情况下记 PASS | | 成因是前置「控制台会话已解锁且活动」不满足（执行时无人值守），非判据失败。载体可用性已在此确认：`--interactive` 修复前被**静默跳过**（输出 `Skipping the interactive stage`、退出码仍 0），修复后确实进入人工段并打出 `Step 1` 提示 |
+| TC-EVENT-010 |  |  |  |  |  |  |  |
