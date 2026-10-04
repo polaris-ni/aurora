@@ -151,8 +151,45 @@ class LazyList : public Widget {
     auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
     /// @brief 总项数。
-    /// @return 条目总数（构造/反序列化后恒 ≥0）。
+    /// @return 条目总数（构造/反序列化/`set_count` 后恒 ≥0）。
     [[nodiscard]] auto count() const -> int { return count_; }
+
+    /// @brief 运行期改总项数（`count` 的可写入口）。
+    ///
+    /// 语义：
+    /// - **越界**：负值按 0 处理（与带参构造、`deserialize_props` 同一口径，不分叉）。
+    /// - **状态保持**：下标仍在新范围内的**存活条目不重建**——其内部状态（展开态、输入内容、
+    ///   滚动位置、子控件身份）原样保留；只有滚出可见窗口或超出新范围的条目被回收，下次进入
+    ///   窗口时由 `ItemBuilder` 重新构建。这正是「运行期改条目数」相对「重建整个列表」的
+    ///   价值所在。
+    /// - **回收口径**：新范围外的存活实例立即销毁（`live_` 中 `index >= count` 的条目）。
+    ///   若当前焦点落在被回收的条目上，焦点随之失效（`FocusManager` 持弱引用，见
+    ///   `focused()`）——宿主若需保留焦点应先把焦点移到仍在范围内的条目上。
+    /// - **偏移夹取**：条目数减少后若当前偏移超出新的可滚范围，按新范围夹取并标脏，
+    ///   否则列表会停在内容末尾之外的空白处。
+    ///
+    /// @param count 新的总项数（负值按 0 处理）。
+    /// @note Side-effects: may recycle live items, clamps scroll offset, marks layout dirty
+    auto set_count(int count) -> void {
+        const int target = (count < 0) ? 0 : count;
+        if (target == count_) {
+            return;
+        }
+        count_ = target;
+        // 立即回收越界实例（不等下一次布局）：否则 set_count 之后到重排之间，
+        // live_ 里仍留着已不存在的条目，命中链会命中它们。
+        for (auto it = live_.begin(); it != live_.end();) {
+            if (it->first >= count_) {
+                it = live_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        // 条目减少后偏移可能越界：按新范围夹取（apply_offset 内部判重，值未变则不标脏）。
+        apply_offset(offset_, /*cancel_glide=*/true);
+        mark_needs_layout();
+        mark_needs_paint();
+    }
 
     /// @brief 当前滚动偏移（dp，向下为正）。
     /// @return 实时偏移，已钳制在 [0, max_scroll_offset()]。

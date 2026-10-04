@@ -47,12 +47,27 @@ struct ScrollProps {
 /// - 内容在宽松约束下测量自然尺寸；容器自身取父约束给出的视口尺寸。
 /// - 离屏缓冲 `content_` 是**滑动窗口**而非整页：尺寸 = 视口宽 × 视口高 ×(1 + 2×overscan)，
 /// 与内容总量解耦（缓冲内存随内容 ×10 不增长）。缓冲以「稳定的内容坐标」录制
-/// （偏移不烘焙进子控件 bounds，子控件的 Display List 缓存不被偏移击穿）。
+/// （子控件的 Display List 缓存不被滚动偏移击穿）。
 /// - 滚动只改变下方 `composite` 的平移量，纯滚动帧整页仅一次 blit（平移合成），**不重新栅格化**。
 /// - 视口滚出缓冲安全区（上下各 overscan 屏）时才**重锚点并整块重录有界缓冲**；重录频率正比于
 /// 滚动距离（每滚约 1 屏触发一次），而非内容总量 —— 这才是正确的复杂度。
 /// - 非滚动帧（如自动轮播 banner 标脏）重录同一块有界缓冲（已从上百 MB 降到约 3 屏量级）。
 /// 这避免了旧实现把偏移烤进 bounds + 绘制时压裁剪，导致每帧重栅整页内容而卡顿的问题。
+///
+/// @section geom 几何与命中契约
+///
+/// **内容子节点的 `bounds` 是内容坐标**（原点 = 内容左上角，不含滚动偏移），与
+/// `on_paint` 录制进离屏缓冲时传入的盒（`origin.y = -buffer_origin_y_`）同一坐标系。
+/// 该坐标系是三条路径的共同基准，不可改成视口坐标：
+/// - 绘制：`composite` 按 `bounds.origin.y + buffer_origin_y_ - offset_y_` 平移合成；
+/// - 命中：`on_hit_test_chain` 把局部命中点 **加上** `offset_y_` 换算回内容坐标再下降；
+/// - 吸顶：`collect_stickies` 沿内容子树累加 `bounds().origin.y` 得 `natural_y`，
+///   `paint_sticky_overlay` 以 `natural_y >= offset_y_` 判钉驻——若 `bounds` 烘焙了偏移，
+///   该判据即失配、吸顶功能坏掉。
+///
+/// ⚠️ 这与 `LazyList` / `LazyRow` / `GridView` 的模型**不同**：它们让偏移参与子布局，
+/// 写的是 `y = index * extent - offset`（视口坐标），命中链因此可直接照抄基类。
+/// 两类滚动容器不可互相参照实现。
 ///
 /// 采用**继承式双模 API**（specification/04-widget.md §2.5）：`ScrollProps` 字段即本控件公有字段，
 /// `step` 可直接赋值（`scroll.step = 16`）或以配置块构造
@@ -422,6 +437,10 @@ class Scroll : public Container, public ScrollProps {
             cc.min = Size{.width = viewport_w, .height = 0.0F};
             cc.max = Size{.width = viewport_w, .height = Size::infinity().height};
             content = children_[0].widget().layout(cc, ctx);
+            // 几何权威写入 Node::bounds_（内容坐标，见类注释「几何与命中契约」）：
+            // 命中链按此盒下降并自行换算偏移。不写则内容子树停留在默认零盒，
+            // 其内按钮/输入框一个都点不到，且命中链只剩本控件（点击被容器吞掉）。
+            children_[0].set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = content});
         }
         // 内容尺寸变化 → 离屏缓冲失效，下帧整体重建；视口尺寸变化不影响内容缓冲。
         if (content.width != content_w_ || content.height != content_h_) {
@@ -615,6 +634,51 @@ class Scroll : public Container, public ScrollProps {
             return this;  // 整个视口可滚动（容器优先）
         }
         return nullptr;
+    }
+
+    /// @brief 命中链：把局部命中点换算到内容坐标后下降给内容子树。
+    ///
+    /// 换算：`local.y + offset_y_`（`bounds_` 是内容坐标，见类注释「几何与命中契约」）。
+    /// 不换算则滚过一段后点击落点与视觉错位一个滚动量——按钮画在 A 处、判定在 B 处。
+    ///
+    /// 可视区裁剪取**显式钳位**：命中点须先落在视口盒内才换算下降。内容盒与视口盒的相交
+    /// 只说明「有内容可见」，不能替代逐点判定——点在视口上下边缘之外时，换算后仍可能落进
+    /// 某个行的范围（该行位于内容区但不在可视区），故必须先按视口盒钳位。
+    /// 越界项的收紧由内容子树自身逐层 `bounds.contains` 完成，本处不重复裁剪。
+    ///
+    /// 容器自身仍在链上（`wants_scroll()` 为真，滚轮/拖拽需要它），但排在内容之后——
+    /// 派发器自链尾向链头派发，故内容先收到事件、不会被容器吞掉。
+    ///
+    /// @param local 相对本控件视口原点的命中点。
+    /// @param bounds 本控件的视口盒（`bounds.origin` 为其全局原点）。
+    /// @param ctx 构建上下文，原样透传给内容子树。
+    /// @return 命中内容的子树链；点在可视区外或无子节点时为空链。
+    auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
+        -> std::vector<HitNode> override {
+        if (children_.empty()) {
+            return {};
+        }
+        // 视口盒（本控件自身盒，原点归零）。与 on_hit_test 的整视口判定同口径：
+        // 点在视口外一律不命中——包括可视区外的内容（被 offset 推出的那段）。
+        const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size};
+        if (!viewport.contains(local)) {
+            return {};
+        }
+        const Rect content_box = children_[0].bounds();
+        if (!content_box.intersects(viewport)) {
+            return {};  // 内容整体滚出可视区
+        }
+        // 视口→内容坐标：加回滚动偏移（内容坐标系的原点随内容上移）。
+        const Point content_local{.x = local.x, .y = local.y + offset_y_};
+        if (!content_box.contains(content_local)) {
+            return {};  // 命中点在内容盒外（含可视区内的空白处）
+        }
+        // 内容子树的全局原点：视口原点 + 内容盒原点（内容盒原点恒为 (0,0)，但仍按通用式
+        // 求和，避免与绘制/命中再次分叉）。
+        const Rect global{
+            .origin = Point{.x = bounds.origin.x + content_box.origin.x, .y = bounds.origin.y + content_box.origin.y},
+            .size = content_box.size};
+        return children_[0]->hit_test_chain(content_local - content_box.origin, global, ctx);
     }
 
     /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Dismissible/ReorderableList 模式）。

@@ -262,6 +262,13 @@ au::Text("Welcome").font_size(24).bold();
 
 `Scroll` 把内容录进**滑窗**离屏缓冲 `content_`（尺寸 = 视口高 ×(1 + 2 × `overscan`)，`buffer_origin_y_` 为缓冲锚点）：短内容（`max_origin == 0`）滚动帧仅一次 blit 平移合成；长内容（`max_origin > 0`）在滚动帧按增量条带重录（`scrolling_` 触发重锚，`shift_pixels` memmove + 重绘新暴露带，见 `scroll.h`），非纯 blit。
 
+**滚动的两套坐标系（不可混用）**：几何权威在 `Node::bounds_`，而各滚动宿主写子节点 bounds 时取的坐标系不同，命中链的换算方式随之不同——这是两类滚动容器**不可互相参照实现**的根因。
+
+- **`Scroll`：内容坐标**。`children_[0].bounds()` 的原点恒为 (0,0)、不含滚动偏移，且该原点必须在每次 `on_layout` 落定（否则内容子树停在默认零盒，既不落笔也不可命中）。三条路径共用这一基准：绘制按 `bounds.origin.y + buffer_origin_y_ - offset_y_` 平移合成；命中把局部命中点 **加上** `offset_y_` 换算回内容坐标再下降；吸顶由 `collect_stickies` 沿内容子树累加 `bounds().origin.y` 得 `natural_y`、以 `natural_y >= offset_y_` 判钉驻——若 bounds 烘焙了偏移，该判据即失配。命中另受**可视区裁剪**：先按视口盒显式钳位（点在视口外一律不命中，含被 `offset_y_` 推出的那段），再逐层由内容子树各自的 `bounds.contains` 收紧。容器自身仍在命中链上（滚轮/拖拽需要它）且排在内容之后，故内容先收事件、不被容器吞掉。
+- **`LazyList` / `LazyRow` / `GridView`：视口坐标**。偏移参与子布局，条目 bounds 直接写 `y = index * extent - offset`（LazyList 固定行高）/ 等价折算（LazyRow 横向、GridView 二维），故命中链可原样复用 `Container::on_hit_test_chain`，无需自行换算。
+
+**运行期改条目数（`LazyList::set_count`）**：`LazyList` 的虚拟化窗口此前只能在构造或反序列化时定条目数，运行期变化只能重建整个列表或重挂 `ItemBuilder`。`set_count(int)` 补上这条入口，口径三条：负值按 0 处理（与带参构造、`deserialize_props` 同一口径，不分叉）；下标仍在新范围内的**存活条目不重建**（其展开态、输入内容、子控件身份原样保留），只有滚出窗口或越界的条目被回收、下次进入窗口时由 `ItemBuilder` 重建；条目数减少后当前偏移按新的 `max_scroll_offset()` 夹取（否则列表停在内容末尾之外的空白处）。焦点落在被回收条目上时随之失效（`FocusManager` 持弱引用）——宿主若需保留焦点应先把焦点移到仍在范围内的条目上。
+
 **滚动位置保存/恢复**：四个滚动控件（`Scroll` / `LazyList` / `LazyRow` / `GridView`）都有 `restore_key`（空 = 不参与）。控件在**首次可滚动布局**时按 `app::ScrollStorage` 恢复偏移（由 `deserialize_props` 显式给入的偏移优先），此后位置变化（滚轮 / 拖拽 / `set_scroll_offset`）即写回（仅内存，落盘由 App 决定）；恢复只生效一次，用户主动滚动不会再被回拉。契约与多窗口作用域隔离见 `06-app-platform.md` §9.3。
 
 **滚动增强契约**（吸附 / 下拉刷新 / 吸顶 / 余量上冒 / 偏移信号）：
@@ -322,7 +329,7 @@ au::Text("Welcome").font_size(24).bold();
 | `ToolBar` / `MenuBar` / `TabBar` | 工具栏 / 菜单条 / 标签页 |
 | `TabBody` | 标签内容体（`widget/recipes.h`，`detail` 命名空间）：按 `selected` 索引显示对应页，随状态刷新；与 `TabBar` 配套使用 |
 | `StatusBar` | 底部状态栏（`widget/toolbar.h`）；`bar_height`（默认 24dp）、`gap`（区域间距），多子节点 |
-| `Dialog` / `Popup` / `ToastHost` | 对话框 / 弹出层 / 轻提示宿主（`ToastHost::show(text, duration_ms)` 投放） |
+| `Dialog` / `Popup` / `ToastHost` | 对话框 / 弹出层 / 轻提示宿主（`ToastHost::show(text, duration_ms)` 投放）。**Dialog 的几何与命中契约**：打开态 `on_layout` 把居中后的内容盒写入 `children_[0]`（几何权威唯一在 `Node::bounds_`），`on_paint` 直接读该盒落笔、遮罩按自身 bounds 铺满——两处各算一遍居中必然分叉。命中分两区：内容盒内下降到内容子树（按钮等可交互控件正常命中）；内容盒外（遮罩区）**本控件自身入链吸收该次点击、不下落穿透**到对话框下方的视口，且**不触发** `on_close_`（遮罩吸收 ≠ 取消）。关闭态命中链恒为空，即便上帧 `bounds` 仍有效。`show()` / `close()` / `set_content()` 均须标布局脏（`on_layout` 以 `open_` 为分支且布局缓存只看约束相等，不标脏则开/关切换与换内容都会被缓存跳过）。焦点作用域（`show`/`close` 经 `current_focus_manager()` push/pop）语义不受此影响 |
 | `ProgressDialog` | 模态进度对话框（`widget/drawer.h`）；`message`、`progress`（0..1，-1 = 不确定态）、`open`、`cancellable`；回调 `on_cancel` |
 | `OverlayHost` | 浮层宿主（`widget/popup.h`）；`add_overlay(Node)` 追加浮层并返回序号，允许多子 |
 

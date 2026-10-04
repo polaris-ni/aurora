@@ -513,4 +513,94 @@ AURORA_TEST_CASE(wheel_margin_bubbles_up_when_clamped_at_edges) {
     AURORA_TEST_CHECK_NEAR(mid.remaining_y, 0.0F, 1e-4F);
 }
 
+// ---- 运行期改条目数（set_count）----
+AURORA_TEST_CASE(set_count_keeps_surviving_items_and_recycles_rest) {
+    // 口径：下标仍在新范围内的存活条目**不重建**（状态保持），越界条目立即回收。
+    // 观测手段：`BuildRecorder` 持有每个条目实例的强引用，故地址比对可判「同一实例」；
+    // 存活集用 `live_item_count()` + 构建序列（`built_order`）间接钉住——
+    // LazyList 的 `child_nodes()` 恒空（虚拟化条目不经children_ 暴露），故不用它做判据。
+    BuildRecorder rec;
+    LazyList list(100, rec.builder(), 48.0F);
+    list.set_cache_extent(0.0F);
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    AURORA_TEST_REQUIRE(rec.items.size() > 1U);
+
+    const std::size_t live_before = list.live_item_count();
+    const std::size_t built_before = rec.built_order.size();
+    // 记录改count 前已构建条目的实例地址。
+    std::map<int, FixedBox *> addr_before;
+    for (const auto &kv : rec.items) {
+        addr_before.emplace(kv.first, kv.second.get());
+    }
+
+    list.set_count(60);
+    AURORA_TEST_CHECK_EQ(list.count(), 60);
+    // 回收：视口（400dp ≈ 8.3 行）内的存活条目数不得超过新count。
+    AURORA_TEST_CHECK(list.live_item_count() <= static_cast<std::size_t>(60));
+    // 缩count 后重排：已构建条目不重复构建（状态保持的直接证据）。
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    for (std::size_t i = built_before; i < rec.built_order.size(); ++i) {
+        // 新构建只能来自先前未构建的下标；同一实例不得重建。
+        AURORA_TEST_CHECK(!addr_before.contains(rec.built_order[i]));
+    }
+    AURORA_TEST_CHECK(live_before > 0U);
+}
+
+AURORA_TEST_CASE(set_count_clamps_offset_to_new_content_range) {
+    // 口径：条目数减少后偏移越界须按新范围夹取，否则列表停在内容末尾之外的空白处。
+    BuildRecorder rec;
+    LazyList list(100, rec.builder(), 48.0F);
+    list.set_cache_extent(0.0F);
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    list.set_scroll_offset(4000.0F);  // 内容高4800 − 视口 400 = 4400，故 4000 合法
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 4000.0F, 1e-4F);
+
+    list.set_count(20);  // 新内容高 960 ⇒ 可滚上限 560
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), list.max_scroll_offset(), 1e-4F);
+    AURORA_TEST_CHECK(list.scroll_offset() <= 560.0F + 1e-3F);
+}
+
+AURORA_TEST_CASE(set_count_treats_negative_as_zero) {
+    // 口径：负值按 0 处理（与带参构造、deserialize_props 同一口径，不分叉）。
+    BuildRecorder rec;
+    LazyList list(10, rec.builder(), 48.0F);
+    list.set_cache_extent(0.0F);
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    list.set_count(-5);
+    AURORA_TEST_CHECK_EQ(list.count(), 0);
+    AURORA_TEST_CHECK_EQ(list.live_item_count(), 0U);
+    AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(set_count_grow_rebuilds_new_items_only) {
+    // 口径：扩容只构建新进入窗口的条目，已有存活条目不重复构建。
+    BuildRecorder rec;
+    LazyList list(5, rec.builder(), 48.0F);
+    list.set_cache_extent(0.0F);
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    const int built_before = static_cast<int>(rec.built_order.size());
+    AURORA_TEST_CHECK(built_before > 0);
+
+    list.set_count(8);
+    AURORA_TEST_CHECK_EQ(list.count(), 8);
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    // 新构建的下标皆落在新增区间 [5, 8)。
+    for (auto i = static_cast<std::size_t>(built_before); i < rec.built_order.size(); ++i) {
+        AURORA_TEST_CHECK(rec.built_order[i] >= 5);
+        AURORA_TEST_CHECK(rec.built_order[i] < 8);
+    }
+}
+
+AURORA_TEST_CASE(set_count_is_idempotent_on_same_value) {
+    // 同值不改变任何状态（不回收、不标脏）。
+    BuildRecorder rec;
+    LazyList list(10, rec.builder(), 48.0F);
+    list.set_cache_extent(0.0F);
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+    const std::size_t live_before = list.live_item_count();
+    list.set_count(10);
+    AURORA_TEST_CHECK_EQ(list.live_item_count(), live_before);
+    AURORA_TEST_CHECK_EQ(list.count(), 10);
+}
+
 }  // namespace aurora::test_cases::utest_lazy_list

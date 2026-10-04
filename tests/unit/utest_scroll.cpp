@@ -18,6 +18,7 @@
 
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
+#include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/perf/counters.h"
 #include "aurora/perf/scroll_bench.h"
@@ -604,6 +605,227 @@ AURORA_TEST_CASE(scroll_regression_counter_gates) {
     AURORA_TEST_CHECK_LE(full_redraw_frames, gate_threshold("G-7"));
     // G-8：一帧的脏区应合并成少数几块，而不是每个可见行一块。
     AURORA_TEST_CHECK_LE(dirty_rects_max, gate_threshold("G-8"));
+}
+
+// ---- 内容命中链（G27）：内容须可点，且命中点须随滚动偏移换算 ----
+//
+// 回归背景：修复前 Scroll 的 on_layout 从不调 Node::set_bounds，内容子树停留在默认零盒，
+// 且未覆写 on_hit_test_chain ⇒ 命中链只剩 Scroll 自身，内容里的可交互控件一个都点不到。
+//
+// 探针取点纪律：命中点取**目标行自身盒的中心**（行高固定 40dp，换算是确定的），
+// 断言的是「盒内 ⇒ 命中该行」这一关系，不硬编码绝对坐标。
+
+namespace {
+
+constexpr float AURORA_G27_ROW_H = 40.0F;  ///< 内容行高（dp）
+constexpr float AURORA_G27_VIEW_W = 300.0F;  ///< 视口宽（dp）
+constexpr float AURORA_G27_VIEW_H = 200.0F;  ///< 视口高（dp）＝ 5 行
+constexpr int AURORA_G27_ROWS = 20;  ///< 内容行数（内容总高 800dp > 视口，可滚）
+constexpr float AURORA_G27_CONTENT_H = static_cast<float>(AURORA_G27_ROWS) * AURORA_G27_ROW_H;
+
+auto g27_viewport() -> Rect {
+    return Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                .size = Size{.width = AURORA_G27_VIEW_W, .height = AURORA_G27_VIEW_H}};
+}
+
+/// @brief 命中观测台账：记录累计点击数与最近一次被点的行号。
+struct HitLedger {
+    int clicks = 0;
+    int last_index = -1;
+};
+
+/// @brief 可点击的内容行（叶控件）：固定行高，点击于 Release 记入共享台账。
+class HitRow final : public Widget {
+  public:
+    HitRow(int index, HitLedger &ledger) : index_(index), ledger_(&ledger) {}
+
+    [[nodiscard]] auto type_name() const -> const char * override { return "HitRow"; }
+    [[nodiscard]] auto index() const -> int { return index_; }
+    [[nodiscard]] auto ledger() -> HitLedger & { return *ledger_; }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+        return c.constrain(Size{.width = AURORA_G27_VIEW_W, .height = AURORA_G27_ROW_H});
+    }
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+    /// @brief 点击记账入口：基类在「先按下、再抬起」且未构成拖拽时调用（见 Widget::activate）。
+    /// 记账挂在此处而非 on_pointer_event —— 后者受 `wants_click()` 门控，不可靠。
+    auto activate() -> void override {
+        ++ledger_->clicks;
+        ledger_->last_index = index_;
+    }
+
+  private:
+    int index_;
+    HitLedger *ledger_;  ///< 非拥有：台账由 fixture 持有，生命周期长于本控件
+};
+
+/// @brief 构造「Scroll 套Column」固定内容树，并保留各行实例供断言取用。
+struct ScrollFixture {
+    std::shared_ptr<Scroll> scroll;
+    std::shared_ptr<Column> content;
+    std::vector<std::shared_ptr<HitRow>> rows;
+    std::vector<std::unique_ptr<HitLedger>> ledgers;  ///< 每个行一份台账（行实例可能先于台账销毁）
+};
+
+/// @brief 按给定偏移搭好并布局一棵可滚的 Scroll 树。
+/// @param offset 布局后立即设置的滚动偏移（dp）。
+/// @return 已完成布局的 fixture（rows/ledgers 保持行实例与台账的对应关系）。
+auto make_scrollable(float offset) -> ScrollFixture {
+    ScrollFixture f;
+    f.scroll = std::make_shared<Scroll>();
+    f.content = std::make_shared<Column>();
+    for (int i = 0; i < AURORA_G27_ROWS; ++i) {
+        f.ledgers.push_back(std::make_unique<HitLedger>());
+        auto row = std::make_shared<HitRow>(i, *f.ledgers.back());
+        // 挂 Clickable 修饰：`wants_click()` 默认只看修饰链，缺它则基类不识别点击、
+        // activate() 永不触发（探针自身接线错误的经典陷阱）。
+        row->modifier.set(Modifier{}.clickable([]() -> void {}));
+        f.rows.push_back(row);
+        f.content->add(Node{std::move(row)});
+    }
+    f.scroll->add(Node{f.content});
+    LayoutEngine::layout(*f.scroll, bounded(AURORA_G27_VIEW_W, AURORA_G27_VIEW_H));
+    if (offset > 0.0F) {
+        (void)f.scroll->set_offset(offset);
+    }
+    return f;
+}
+
+/// @brief 在视口内点一次（Press + Release 成对）。
+auto click_at(Widget &root, float x, float y) -> void {
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    press.button = MouseButton::Left;
+    press.position = Point{.x = x, .y = y};
+    EventDispatcher::dispatch(root, press, nullptr);
+    MouseEvent release;
+    release.action = MouseAction::Release;
+    release.button = MouseButton::Left;
+    release.position = Point{.x = x, .y = y};
+    EventDispatcher::dispatch(root, release, nullptr);
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(content_bounds_written_in_content_coordinates) {
+    // 回归点：布局必须把内容盒写入 children_[0]；且是**内容坐标**（原点 0,0、不含滚动偏移）。
+    // 吸顶判据（natural_y >= offset_y_）依赖此前提，写成视口坐标会破坏它。
+    ScrollFixture f = make_scrollable(200.0F);
+    const std::vector<Node> &kids = f.scroll->child_nodes();
+    AURORA_TEST_REQUIRE(!kids.empty());
+    const Rect cb = kids.front().bounds();
+    // 修复前此盒为默认 Rect{}（宽高皆 0）。
+    AURORA_TEST_CHECK_NEAR(cb.size.width, AURORA_G27_VIEW_W, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(cb.size.height, AURORA_G27_CONTENT_H, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(cb.origin.x, 0.0F, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(cb.origin.y, 0.0F, 1e-3F);
+}
+
+AURORA_TEST_CASE(scrolled_content_still_hits_visual_row) {
+    // 核心验收：滚到 offset=200 后点击「视觉上那一行」必须命中它。
+    // 若命中链不做 `local.y + offset_y_` 换算，此处会命中错位一个滚动量的行。
+    ScrollFixture f = make_scrollable(200.0F);
+    AURORA_TEST_REQUIRE(f.scroll->set_offset(200.0F) || f.scroll->offset_y() == 200.0F);
+    AURORA_TEST_CHECK_NEAR(f.scroll->offset_y(), 200.0F, 1e-3F);
+
+    const float visual_y = 60.0F;  ///< 视口内 y=60（第 2 行的中心带）
+    // 视口 y=60 + 偏移 200 = 内容 y=260 ⇒ 行号 floor(260 / 40) = 6。
+    const int expected = static_cast<int>((200.0F + visual_y) / AURORA_G27_ROW_H);
+    AURORA_TEST_CHECK_EQ(expected, 6);
+    AURORA_TEST_REQUIRE(expected < static_cast<int>(f.rows.size()));
+
+    const auto chain = f.scroll->hit_test_chain(Point{.x = 150.0F, .y = visual_y}, g27_viewport(), BuildContext{});
+    // 回归点：修复前此处链为空（内容零盒）或最深是 Scroll 自身。
+    AURORA_TEST_REQUIRE_FALSE(chain.empty());
+    AURORA_TEST_CHECK_EQ(std::string{chain.back().ptr->type_name()}, std::string{"HitRow"});
+    // 链尾即目标行实例本身（不只是类型名相同）。
+    AURORA_TEST_CHECK_EQ(chain.back().ptr, static_cast<Widget *>(f.rows[static_cast<std::size_t>(expected)].get()));
+
+    // 条目回调触发：目标行台账 +1，其余行不动。
+    const int before = f.rows[static_cast<std::size_t>(expected)]->ledger().clicks;
+    click_at(*f.scroll, 150.0F, visual_y);
+    AURORA_TEST_CHECK_EQ(f.rows[static_cast<std::size_t>(expected)]->ledger().clicks, before + 1);
+    AURORA_TEST_CHECK_EQ(f.rows[static_cast<std::size_t>(expected)]->ledger().last_index, expected);
+    // 容器不吞点击：整棵树只有一个台账被记（各行独立台账，其余必须保持 0）。
+    int touched = 0;
+    for (const auto &l : f.ledgers) {
+        if (l->clicks > 0) {
+            ++touched;
+        }
+    }
+    AURORA_TEST_CHECK_EQ(touched, 1);
+}
+
+AURORA_TEST_CASE(content_outside_viewport_is_not_hittable) {
+    // 被 offset 推出可视区的内容不应命中（可视区裁剪）。
+    ScrollFixture f = make_scrollable(400.0F);
+    AURORA_TEST_CHECK_NEAR(f.scroll->offset_y(), 400.0F, 1e-3F);
+
+    // 视口顶（y=0.5）对应内容 y=400.5 ⇒ 行号 10；行 9（y=360..400）已在视口之上，不得命中。
+    auto chain = f.scroll->hit_test_chain(Point{.x = 150.0F, .y = 0.5F}, g27_viewport(), BuildContext{});
+    AURORA_TEST_REQUIRE_FALSE(chain.empty());
+    for (const auto &n : chain) {
+        auto *row = dynamic_cast<HitRow *>(n.ptr);
+        if (row != nullptr) {
+            AURORA_TEST_CHECK(row->index() >= 10);
+        }
+    }
+    // 视口下边界之外（视口高 200，探测 y=250）：即便换算后落在某行范围内，
+    // 该行也已不在可视区 —— 命中链不得包含任何行。裁剪来源见 on_hit_test_chain 的视口相交闸门。
+    const auto below = f.scroll->hit_test_chain(Point{.x = 150.0F, .y = 250.0F}, g27_viewport(), BuildContext{});
+    for (const auto &n : below) {
+        AURORA_TEST_CHECK(dynamic_cast<HitRow *>(n.ptr) == nullptr);
+    }
+    // 视口上边界之外（探测 y=-50）：同上，链中不得有行。
+    const auto above = f.scroll->hit_test_chain(Point{.x = 150.0F, .y = -50.0F}, g27_viewport(), BuildContext{});
+    for (const auto &n : above) {
+        AURORA_TEST_CHECK(dynamic_cast<HitRow *>(n.ptr) == nullptr);
+    }
+    // 被推出可视区的行（下标 0 到 9）一次都点不到。步进用整型索引再换算坐标，
+    // 避免以 float 作循环计数器（浮点累加不可靠，且 clang-tidy 会报 FloatLoopCounter）。
+    const int probe_steps = 25;  ///< 25 × 8dp = 200dp，恰覆盖整个视口高
+    const float probe_step = 8.0F;  ///< 探测步长（dp）
+    for (int step = 0; step < probe_steps; ++step) {
+        const float y = static_cast<float>(step) * probe_step;
+        for (const auto &n : f.scroll->hit_test_chain(Point{.x = 150.0F, .y = y}, g27_viewport(), BuildContext{})) {
+            auto *row = dynamic_cast<HitRow *>(n.ptr);
+            if (row != nullptr) {
+                AURORA_TEST_CHECK(row->index() >= 10);
+            }
+        }
+    }
+}
+
+AURORA_TEST_CASE(container_stays_on_chain_behind_content) {
+    // 容器自身须仍在链上（滚轮/拖拽需要它），但排在内容之后（派发自链尾向链头）。
+    ScrollFixture f = make_scrollable(0.0F);
+    const auto chain = f.scroll->hit_test_chain(Point{.x = 150.0F, .y = 60.0F}, g27_viewport(), BuildContext{});
+    AURORA_TEST_REQUIRE(chain.size() >= 2U);
+    AURORA_TEST_CHECK_EQ(chain.front().ptr, static_cast<Widget *>(f.scroll.get()));
+    AURORA_TEST_CHECK_EQ(std::string{chain.back().ptr->type_name()}, std::string{"HitRow"});
+    // 滚轮仍能路由到容器（wants_scroll 为真、自身在链上）。
+    AURORA_TEST_CHECK(f.scroll->wants_scroll());
+}
+
+AURORA_TEST_CASE(positive_control_column_root_also_clickable) {
+    // 正对照：同一行直接挂 Column（Column 写视口坐标 bounds）时同一派发路径可点。
+    // 用于排除「探针接线错误判成通过」——若此对照红，问题在探针而非 Scroll。
+    auto ledger = std::make_unique<HitLedger>();
+    auto col = std::make_shared<Column>();
+    auto row = std::make_shared<HitRow>(3, *ledger);
+    row->modifier.set(Modifier{}.clickable([]() -> void {}));
+    col->add(Node{std::move(row)});
+    LayoutEngine::layout(*col, bounded(AURORA_G27_VIEW_W, 400.0F));
+
+    const std::vector<Node> &kids = col->child_nodes();
+    AURORA_TEST_REQUIRE(!kids.empty());
+    const Rect bb = kids.front().bounds();
+    AURORA_TEST_REQUIRE(bb.size.height > 0.0F);
+
+    click_at(*col, bb.origin.x + 150.0F, bb.origin.y + (bb.size.height * 0.5F));
+    AURORA_TEST_CHECK_EQ(ledger->clicks, 1);
+    AURORA_TEST_CHECK_EQ(ledger->last_index, 3);
 }
 
 }  // namespace aurora::test_cases::utest_scroll
