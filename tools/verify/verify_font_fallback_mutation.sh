@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# G23/G24 验收判据的「变异自证」脚本。
+# 字体按族回退链 + 固定格推进 验收判据的「变异自证」脚本。
 #
 # 为什么要它：判据全绿不构成证据 —— 把被测逻辑整段删掉（退化为「不生效」）时，很多断言
 # 依然全绿。本脚本逐个注入真实变异，确认对应判据**转红**，再还原。
@@ -33,7 +33,7 @@ FAIL=0
 # 备份目录放在仓库内：Git Bash 的 `mktemp -d` 返回的是 Windows 风格路径（指向用户临时目录），
 # `cp` 拿它当源会失败，且末尾 `rm -rf` 会触发路径安全拦截。
 # 固定放 build/ 下（产物目录不入版控），并用相对路径供 cp 使用。
-BACKUP_DIR="build/.g23_g24_mutation_backup"
+BACKUP_DIR="build/.font_fallback_mutation_backup"
 rm -rf "$BACKUP_DIR"
 mkdir -p "$BACKUP_DIR"
 
@@ -100,7 +100,7 @@ run_case() {
     restore
 }
 
-echo "=== 变异自证：G23 按族回退链 / G24 固定格推进 ==="
+echo "=== 变异自证：字体按族回退链 / 固定格推进 ==="
 backup
 
 # 变异 1：让 resolve_faces 完全忽略调用方给的回退链（退化为加字段前的行为）。
@@ -116,7 +116,7 @@ new = "    const bool has_chain = false;  // MUTATION: 忽略调用方给的回�
 assert old in s, "anchor not found"
 io.open(p, 'w', encoding='utf-8', newline='').write(s.replace(old, new, 1))
 PY
-run_case utest_font_discovery "G23 忽略回退链（应转红：链生效 / 顺序）"
+run_case utest_font_discovery "字体回退链：忽略回退链（应转红：链生效 / 顺序）"
 
 # 变异 2：把「分段保序」改回「全局 weight 重排」——即让框架重排调用方声明的链顺序。
 #   期望：「顺序不被重排」转红。
@@ -135,7 +135,7 @@ new = ("    std::ranges::stable_sort(uniq, [weight](const auto &a, const auto &b
 assert old in s, "anchor not found"
 io.open(p, 'w', encoding='utf-8', newline='').write(s.replace(old, new, 1))
 PY
-run_case utest_font_discovery "G23 跨族重排链（应转红：顺序不被重排）"
+run_case utest_font_discovery "字体回退链：跨族重排链（应转红：顺序不被重排）"
 
 # 变异 3：让固定格档位在绘制侧失效（回到各自 face 的 advance）。
 #   期望：「推进与 face 无关」「命中与像素同源」转红；
@@ -149,7 +149,7 @@ new = "[[nodiscard]] inline auto glyph_advance_px(const ShapedGlyph &g, const Te
 assert old in s, "anchor not found"
 io.open(p, 'w', encoding='utf-8', newline='').write(s.replace(old, new, 1))
 PY
-run_case utest_font_engine "G24 档位不生效（应转红：推进 / 命中）"
+run_case utest_font_engine "固定格推进：档位不生效（应转红：推进 / 命中）"
 
 # 变异 4：只让**绘制侧**忽略档位、度量侧照用（模拟「改了绘制忘了改度量」这个真实漏法）。
 #   期望：「推进与 face 无关」转红（绘制宽度不再等于 3 格）；
@@ -163,7 +163,7 @@ new = "            const bool fixed_cell = false;  // MUTATION: 仅绘制侧忽�
 assert old in s, "anchor not found"
 io.open(p, 'w', encoding='utf-8', newline='').write(s.replace(old, new, 1))
 PY
-run_case utest_font_engine "G24 仅绘制侧忽略档位（应转红：度量与像素失配）"
+run_case utest_font_engine "固定格推进：仅绘制侧忽略档位（应转红：度量与像素失配）"
 
 # 变异 5：让回退链不进缓存键 —— 两条不同链会共用 shaping 缓存条目。
 #   期望：可能不转红（本仓用例的链都指向不同面、faces_key 已不同）⇒ 属「覆盖不足」，
@@ -181,7 +181,7 @@ PY
 # `faces_key`（face id 序列的 FNV），链解析出不同 faces 时 faces_key 本身就不同 ⇒ 缓存条目
 # 天然隔离；而「两条不同链解析出同一组 faces」时共用条目也无害（faces 相同 ⇒ shaping 输出相同）。
 # 即链的哈希混入是 belt-and-suspenders，不是正确性必需项。它观测不到，正是预期结论。
-run_case utest_font_engine "G24 链不进 shaping 缓存键（覆盖度探测，预期 NO-RED）" no
+run_case utest_font_engine "固定格推进：链不进 shaping 缓存键（覆盖度探测，预期 NO-RED）" no
 
 restore
 rm -rf "$BACKUP_DIR"
