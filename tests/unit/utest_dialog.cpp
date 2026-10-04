@@ -31,7 +31,7 @@ namespace aurora::test_cases::utest_dialog {
 
 namespace {
 
-constexpr float AURORA_WIDTH = 400.0F;   ///< 对话框宿主视口宽（dp）
+constexpr float AURORA_WIDTH = 400.0F;  ///< 对话框宿主视口宽（dp）
 constexpr float AURORA_HEIGHT = 300.0F;  ///< 对话框宿主视口高（dp）
 
 auto viewport() -> Rect {
@@ -255,7 +255,7 @@ AURORA_TEST_CASE(set_content_while_open_marks_layout_dirty) {
     MouseEvent release = mouse(MouseAction::Release, probe.x, probe.y);
     EventDispatcher::dispatch(*dialog, release, nullptr);
     AURORA_TEST_CHECK_EQ(new_hits, 1);  // 新内容的回调触发
-    AURORA_TEST_CHECK_EQ(hits, 0);      // 旧内容已被替换，不应再被点到
+    AURORA_TEST_CHECK_EQ(hits, 0);  // 旧内容已被替换，不应再被点到
 }
 
 AURORA_TEST_CASE(close_then_reopen_restores_content_hit) {
