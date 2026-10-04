@@ -6,6 +6,9 @@
 ///           消息序列正是热键能否命中的判据本体（竞态实测见 `manual-test/21-debug.md` TC-DEBUG-004）
 ///           另覆盖 `WM_SYSKEY*` 的派发分叉判据 `syskey_dispatches()`：除 Alt 自身与 F10 外
 ///           一律进派发链，而例外项仍照常推进修饰态
+///           锁定态位（NumLock）单列一组：它按 toggle 记账（Down 翻转 / Up 不翻）且与按住态
+///           分离成两份状态——`bit_for` 刻意不认它，由 `lock_bit_for` 承载；`clear()` 只清
+///           按住态（锁定态没有抬起消息可言，抹成「关」是假报）
 /// 平台门控: 依赖 `<windows.h>` 的 VK 码与后端宏；宏未开启时每条用例落 SKIP 桩（声明无条件可见）
 
 #include <cstdint>
@@ -125,6 +128,7 @@ AURORA_TEST_CASE(blur_clears_every_held_bit) {
 AURORA_TEST_CASE(seed_replaces_state_wholesale) {
 #ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
     // 激活基线播种：Alt+Tab 切进来时 Alt 已按下，那条按下属于旧前台窗口。
+    // 注意 seed 按掩码**拆分**写入：这条读数里没有锁定位，故 locks_ 落 None。
     ModifierKeyTracker t;
     t.apply(VK_CONTROL, true);
     t.clear();  // 交出前台
@@ -400,6 +404,169 @@ AURORA_TEST_CASE(win32_vk_keeps_the_existing_mainboard_mapping) {
     AURORA_TEST_CHECK(detail::from_win32_vk(VK_MENU, false) == KeyCode::Alt);
     // 未收录的键落 Unknown（`VK_NONAME` 之类的哨兵码不在任何 case 内）。
     AURORA_TEST_CHECK(detail::from_win32_vk(VK_NONAME, false) == KeyCode::Unknown);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// 锁定态位（NumLock）的记账：toggle 语义 + 与按住态分离
+//
+// 背景：`async_modifiers()` 只在拿到前台时播种一次锁定位，此后该位在派发期是陈旧值——用户
+// 切换 NumLock，事件上的位不变，且失焦的 `clear()` 会把它抹成「关」。现改为随消息流推进：
+// `apply` 的第二段按 toggle 处理，`clear()` 只清按住态。
+// ---------------------------------------------------------------------------
+
+AURORA_TEST_CASE(lock_bit_is_not_routed_through_bit_for) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // 两条判据分离是结构保证：锁定位是 toggle（按下即翻转），若混进 bit_for 的置位/清位模型，
+    // 一次 Down+Up 会净翻转零次，该位永远停在初值。
+    AURORA_TEST_CHECK_FALSE(ModifierKeyTracker::bit_for(VK_NUMLOCK).has_value());
+    const auto lock = ModifierKeyTracker::lock_bit_for(VK_NUMLOCK);
+    AURORA_TEST_REQUIRE(lock.has_value());
+    AURORA_TEST_CHECK(*lock == ModifierKey::NumLock);
+    // 按住态那四个仍只归 bit_for，lock_bit_for 不认它们（否则一次 Shift+Tab 会去翻锁定位）。
+    for (const int vk : {VK_SHIFT, VK_LSHIFT, VK_RSHIFT, VK_CONTROL, VK_LCONTROL, VK_RCONTROL, VK_MENU, VK_LMENU,
+                         VK_RMENU, VK_LWIN, VK_RWIN}) {
+        AURORA_TEST_CHECK(ModifierKeyTracker::bit_for(vk).has_value());
+        AURORA_TEST_CHECK_FALSE(ModifierKeyTracker::lock_bit_for(vk).has_value());
+    }
+    // 非修饰、非锁定的键两侧都不命中（裸码 0x41 = 'A'，见下方用例的同款说明）。
+    AURORA_TEST_CHECK_FALSE(ModifierKeyTracker::bit_for(0x41).has_value());
+    AURORA_TEST_CHECK_FALSE(ModifierKeyTracker::lock_bit_for(0x41).has_value());
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(numlock_down_toggles_the_lock_bit) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // 翻转而非置位：NumLock 是切换键，GetKeyState 的 bit0 就是它自己的指示位，
+    // 按下消息到达即代表用户刚切换过一次。第二次按下（用户再按一次关掉）必须回到关。
+    ModifierKeyTracker t;
+    check_mods(t, ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(t.apply(VK_NUMLOCK, true));
+    check_mods(t, ModifierKey::NumLock);
+    AURORA_TEST_CHECK_TRUE(t.apply(VK_NUMLOCK, true));
+    check_mods(t, ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(t.apply(VK_NUMLOCK, true));
+    check_mods(t, ModifierKey::NumLock);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(numlock_down_up_pair_flips_exactly_once) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // 防 Up 二次翻转：一次 Down + 一次 Up = 一次物理动作，净翻转必须是**一次**而不是两次或零次。
+    // 自动重复（按住不放连发 WM_KEYDOWN）在真实 Win32 上同样只算用户的一次切换意图。
+    ModifierKeyTracker t;
+    t.apply(VK_NUMLOCK, true);
+    t.apply(VK_NUMLOCK, false);
+    check_mods(t, ModifierKey::NumLock);
+    // 第二对：再翻回关。
+    t.apply(VK_NUMLOCK, true);
+    t.apply(VK_NUMLOCK, false);
+    check_mods(t, ModifierKey::None);
+    // Up 先行（无 Down）时不得翻转：净翻转零次。
+    ModifierKeyTracker lone;
+    AURORA_TEST_CHECK_TRUE(lone.apply(VK_NUMLOCK, false));
+    check_mods(lone, ModifierKey::None);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(numlock_toggle_leaves_the_held_bits_untouched) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // 判据 B 的核心：用户切 NumLock 时通常同时按着 Ctrl/Shift（NumLock 就在小键盘边上），
+    // 按住态位必须逐位不变。锁定位与按住态是两份独立记账。
+    ModifierKeyTracker t;
+    t.apply(VK_CONTROL, true);
+    t.apply(VK_SHIFT, true);
+    check_mods(t, ModifierKey::Control | ModifierKey::Shift);
+    // 一对 Down/Up = 一次物理切换 = 净翻转一次，故该位**停在开**，不是回到关。
+    t.apply(VK_NUMLOCK, true);
+    check_mods(t, ModifierKey::Control | ModifierKey::Shift | ModifierKey::NumLock);
+    t.apply(VK_NUMLOCK, false);
+    check_mods(t, ModifierKey::Control | ModifierKey::Shift | ModifierKey::NumLock);
+    // 再一对翻回关，按住态自始至终逐位不变。
+    t.apply(VK_NUMLOCK, true);
+    t.apply(VK_NUMLOCK, false);
+    check_mods(t, ModifierKey::Control | ModifierKey::Shift);
+    // 按住态自己的抬起仍只清自己那位，锁定位不受牵连。
+    t.apply(VK_CONTROL, false);
+    check_mods(t, ModifierKey::Shift);
+    t.apply(VK_SHIFT, false);
+    check_mods(t, ModifierKey::None);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(clear_drops_held_bits_but_keeps_the_lock_bit) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // clear() 服务的是幻影防护，而幻影的成因是「抬起消息投给了别的窗口」——锁定态没有抬起消息
+    // 可言，NumLock 也不因本窗口失焦而改变。抹成「关」是假报（这不是「取不到」，是被无条件清零）。
+    ModifierKeyTracker t;
+    t.apply(VK_CONTROL, true);
+    t.apply(VK_NUMLOCK, true);
+    check_mods(t, ModifierKey::Control | ModifierKey::NumLock);
+    t.clear();
+    check_mods(t, ModifierKey::NumLock);  // 按住态已清、锁定位保留
+    // 交出前台前未送达的抬起消息回来时也不该把锁定位「抬」掉（Up 本就不翻）。
+    AURORA_TEST_CHECK_TRUE(t.apply(VK_NUMLOCK, false));
+    check_mods(t, ModifierKey::NumLock);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(seed_splits_the_lock_bit_out_of_the_observed_mask) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // `async_modifiers()` 的读数本身就混装两类位（GetAsyncKeyState 的四个按住位 +
+    // GetKeyState(VK_NUMLOCK) 的锁定指示位），故 seed 必须按掩码拆分写入。
+    // 判据：拆分后 get() 逐位不变（对外形状不变），而 clear() 之后锁定位仍在——这正是
+    // 「不整体覆盖」的证据：整体覆盖的写法在这里也能过 get()，但锁定位会与按住态同生共死。
+    ModifierKeyTracker t;
+    t.seed(ModifierKey::Shift | ModifierKey::Control | ModifierKey::NumLock);
+    check_mods(t, ModifierKey::Shift | ModifierKey::Control | ModifierKey::NumLock);
+    t.clear();
+    check_mods(t, ModifierKey::NumLock);
+    // 播种后切换 NumLock 仍能翻到「关」——锁定位不是被钉死在播种值上的。
+    t.apply(VK_NUMLOCK, true);
+    check_mods(t, ModifierKey::None);
+    // 只有锁定位的读数：按下态为空、锁定位落位。
+    ModifierKeyTracker only_lock;
+    only_lock.seed(ModifierKey::NumLock);
+    check_mods(only_lock, ModifierKey::NumLock);
+    // 只有按住位的读数：锁定位为空。
+    ModifierKeyTracker only_held;
+    only_held.seed(ModifierKey::Alt);
+    check_mods(only_held, ModifierKey::Alt);
+    only_held.clear();
+    check_mods(only_held, ModifierKey::None);
+#else
+    AURORA_WIN32_MODIFIERS_SKIP;
+#endif
+}
+
+AURORA_TEST_CASE(non_modifier_keys_leave_both_states_alone) {
+#ifdef AURORA_WIN32_MODIFIERS_AVAILABLE
+    // 非修饰键走 apply 仍返回 false，且**两份**状态都不改（含已置位的锁定位）。
+    // 用裸码 0x41（'A'）而非 `VK_A`：MinGW 的 <windows.h> 不定义字母类 VK_ 宏（既有
+    // `non_modifier_keys_never_touch_the_state` 同款写法），而 tracker's 判据只比数值。
+    ModifierKeyTracker t;
+    t.apply(VK_CONTROL, true);
+    t.apply(VK_NUMLOCK, true);
+    const auto before = static_cast<std::uint8_t>(t.get());
+    AURORA_TEST_CHECK_FALSE(t.apply(0x41, true));
+    AURORA_TEST_CHECK_FALSE(t.apply(0x41, false));
+    AURORA_TEST_CHECK_FALSE(t.apply(VK_SPACE, true));
+    // 大写锁定既不在按住态表也不在锁定态表（`VK_CAPITAL` 未建模），不得污染任一份状态。
+    AURORA_TEST_CHECK_FALSE(t.apply(VK_CAPITAL, true));
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(t.get()), before);
+    check_mods(t, ModifierKey::Control | ModifierKey::NumLock);
 #else
     AURORA_WIN32_MODIFIERS_SKIP;
 #endif

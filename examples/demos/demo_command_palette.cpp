@@ -85,6 +85,12 @@ auto main() -> int {
     // ---- 三源接线 ----
     app.commands().bind_shortcuts(app.shortcuts());  // ① 默认快捷键
     palette->set_commands(&app.commands());  // ③ 命令面板
+    // 可见证人：这条绑定带**两个**修饰键，故旧口径（整字节相等比较）在 NumLock 开着时恒不命中。
+    // 试法：开 NumLock 后按 Ctrl+Shift+P，仍应打开面板——`KeyCombo::matches` 只比可按住的位，
+    // 锁定态位（NumLock）两侧屏蔽。
+    app.shortcuts().add(
+        au::KeyCombo{au::ModifierKey::Control | au::ModifierKey::Shift, au::KeyCode::P},
+        [palette]() -> void { palette->toggle(); }, au::ShortcutScope::Global, "Open command palette (Ctrl+Shift+P)");
     app.shortcuts().add(
         au::KeyCombo{au::ModifierKey::Control, au::KeyCode::K}, [palette]() -> void { palette->toggle(); },
         au::ShortcutScope::Global, "Open command palette");
