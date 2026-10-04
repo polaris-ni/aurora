@@ -54,6 +54,23 @@ enum class ModifierKey : std::uint8_t {
     NumLock = 1U << 4U
 };
 
+/// @brief 可按住的修饰位并集（Shift / Control / Alt / Meta）。
+/// @note 这是 `ModifierKey` 里**语义为「此刻被按住」**的那部分位。消费方做「某修饰键是否按下」
+///       判定时用单个位（`e.modifiers & ModifierKey::Shift`）即可，无需本掩码；本掩码用于
+///       **两处位集的整体比较**——此时必须先摘掉锁定态位，否则键盘锁定态会污染比较结果
+///       （`KeyCombo::matches` 即按它取子集，见 `app/shortcuts.h`）。
+inline constexpr std::uint8_t AURORA_MODIFIER_PRESSABLE_MASK =
+    static_cast<std::uint8_t>(ModifierKey::Shift) | static_cast<std::uint8_t>(ModifierKey::Control) |
+    static_cast<std::uint8_t>(ModifierKey::Alt) | static_cast<std::uint8_t>(ModifierKey::Meta);
+
+/// @brief 键盘锁定态位的并集（当前只有 `NumLock`）。
+/// @note 这部分位语义为「键盘的锁定灯态」而非「手指按住」：切换键按下的瞬间翻转，抬起不恢复，
+///       故与 `AURORA_MODIFIER_PRESSABLE_MASK` 是两类不可混用的位。**新增锁定类位（`CapsLock` /
+///       `ScrollLock` 等）时必须并入本掩码**，否则该位会落进「两掩码之外」的缝隙、在按位比较中
+///       继续污染结果；`AURORA_MODIFIER_PRESSABLE_MASK | AURORA_MODIFIER_LOCK_MASK` 应恒等于
+///       `ModifierKey` 的全部已定义位，该恒等式由 `utest_shortcuts` 的位集自证用例钉住。
+inline constexpr std::uint8_t AURORA_MODIFIER_LOCK_MASK = static_cast<std::uint8_t>(ModifierKey::NumLock);
+
 /// @brief 修饰键位按位或（便于组合 `modifiers`）。
 /// @param a 左侧掩码。
 /// @param b 右侧掩码。

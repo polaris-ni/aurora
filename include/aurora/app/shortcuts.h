@@ -19,7 +19,7 @@ namespace aurora {
 /// @note Side-effects: none
 /// @note Rebuildable: no
 struct KeyCombo {
-    ModifierKey modifiers = ModifierKey::None;  ///< 修饰键组合（Ctrl/Shift/Alt/Meta 位掩码）
+    ModifierKey modifiers = ModifierKey::None;  ///< 修饰键组合（Ctrl/Shift/Alt/Meta 位掩码；锁定位被 `matches` 忽略）
     KeyCode key = KeyCode::Unknown;  ///< 主键
 
     /// @brief 默认构造：无修饰键 + Unknown 主键，不匹配任何事件。
@@ -32,9 +32,28 @@ struct KeyCombo {
     /// @param k 主键。
     explicit KeyCombo(KeyCode k) : key(k) {}
 
-    /// @brief 检查键盘事件是否匹配本组合（按下事件 + 键码 + 修饰键完全一致）。
+    /// @brief 检查键盘事件是否匹配本组合（按下事件 + 键码 + **可按住的**修饰位完全一致）。
+    ///
+    /// **只比可按住的位**：比较前两侧都先与 `AURORA_MODIFIER_PRESSABLE_MASK` 取子集，键盘锁定态位
+    /// （`NumLock`）两侧一律屏蔽。`e.modifiers` 混装两类语义（按住态 / 锁定态，四个后端都会在事件
+    /// 上盖章），而注册侧从不登记锁定位，若按整字节相等比较，`NumLock` 开着时**任何**未登记该位的
+    /// 应用内快捷键恒不匹配——整层静默失效，且与焦点、作用域无关。
+    ///
+    /// 口径细则（四条均为刻意决定）：
+    ///  - **仍是「相等」而非「包含」**：`Ctrl+O` 不匹配 `Ctrl+Shift+O`。这是 Qt `QKeySequence` /
+    ///    WPF `KeyGesture` / Flutter `SingleActivator` 的共同语义；改成包含会让所有「更具体组合
+    ///    优先」的注册表失去区分度。
+    ///  - **注册侧的锁定位不可表达**：`KeyCombo{Control | NumLock, K}` 里的锁定位被忽略（等价于
+    ///    `Control+K`）。此处**刻意不加断言、不加日志、不返回 `Result`**——`matches` 在每条按键
+    ///    消息上被调用，热路径里的噪声比它想防的错更贵，该口径由本注释承担。
+    ///  - **不引入 per-combo 的「要求 NumLock 开 / 关」字段**：当前无任何消费者需要，属扩大 API
+    ///    预算。若将来需要，应另立字段并走一次独立的公共 API 变更。
+    ///  - **不新增匹配档位 / 枚举参数**：保持单一算式，避免同一字段出现两个真值源。
+    ///
+    /// `to_string()` 不列锁定位，与上述「注册侧不可表达」的口径恰好一致，故不在此重复说明。
+    ///
     /// @param e 待匹配的键盘事件。
-    /// @return 仅 `KeyAction::Down` 且键码与修饰键位掩码都一致时为 `true`。
+    /// @return 仅 `KeyAction::Down`、键码一致、且**可按住的**修饰位一致时为 `true`。
     [[nodiscard]] auto matches(const KeyEvent &e) const -> bool {
         if (e.action != KeyAction::Down) {
             return false;
@@ -42,7 +61,8 @@ struct KeyCombo {
         if (static_cast<KeyCode>(e.key) != key) {
             return false;
         }
-        return static_cast<std::uint8_t>(e.modifiers) == static_cast<std::uint8_t>(modifiers);
+        return (static_cast<std::uint8_t>(e.modifiers) & AURORA_MODIFIER_PRESSABLE_MASK) ==
+               (static_cast<std::uint8_t>(modifiers) & AURORA_MODIFIER_PRESSABLE_MASK);
     }
 
     /// @brief 可读文本（如 "Ctrl+Shift+O"），用于菜单显示与调试。
