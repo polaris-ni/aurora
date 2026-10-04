@@ -9423,6 +9423,30 @@
     },
     {
       "index": 30,
+      "enum": "OsHotkeyRegisterFailed",
+      "slug": "os-hotkey-register-failed",
+      "category": "platform",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "OS global hotkey registration failed: '{detail}'",
+      "hint": "The key combination may already be grabbed by another process, unsupported on this platform, or the platform backend is unavailable"
+    },
+    {
+      "index": 31,
+      "enum": "NotificationPostFailed",
+      "slug": "notification-post-failed",
+      "category": "platform",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "System notification could not be posted: '{detail}'",
+      "hint": "The desktop notification service may be unavailable, or the platform backend does not support notifications"
+    },
+    {
+      "index": 32,
       "enum": "RuntimeCoroutineException",
       "slug": "runtime-coroutine-exception",
       "category": "runtime",
@@ -9434,7 +9458,7 @@
       "hint": "Check the coroutine body for exception catching or fix the logic"
     },
     {
-      "index": 31,
+      "index": 33,
       "enum": "RuntimeAsyncException",
       "slug": "runtime-async-exception",
       "category": "runtime",
@@ -9446,7 +9470,7 @@
       "hint": "Check the async callback for exception catching or fix the logic"
     },
     {
-      "index": 32,
+      "index": 34,
       "enum": "RuntimeAsyncTimeout",
       "slug": "async-timeout",
       "category": "runtime",
@@ -9458,7 +9482,7 @@
       "hint": "Increase the timeout threshold or optimize async task duration"
     },
     {
-      "index": 33,
+      "index": 35,
       "enum": "GenerateUiEmpty",
       "slug": "generation-ui-empty",
       "category": "generation",
@@ -9470,7 +9494,7 @@
       "hint": "Provide a more specific natural language description or constraints"
     },
     {
-      "index": 34,
+      "index": 36,
       "enum": "RendererUnavailable",
       "slug": "renderer-unavailable",
       "category": "platform",
@@ -9482,7 +9506,7 @@
       "hint": "Check the backend compile switch (AURORA_BACKEND_D3D11) or fall back to software rendering (RendererPreference::Auto/Software)"
     },
     {
-      "index": 35,
+      "index": 37,
       "enum": "PrefsNotPersistent",
       "slug": "prefs-not-persistent",
       "category": "platform",
@@ -9494,7 +9518,7 @@
       "hint": "Bind a config file path (Preferences(file)) to gain persistence"
     },
     {
-      "index": 36,
+      "index": 38,
       "enum": "PrefsOpenFailed",
       "slug": "prefs-open-failed",
       "category": "platform",
@@ -9506,7 +9530,7 @@
       "hint": "Check the file path and read permissions"
     },
     {
-      "index": 37,
+      "index": 39,
       "enum": "PrefsParseFailed",
       "slug": "prefs-parse-failed",
       "category": "platform",
@@ -9518,7 +9542,7 @@
       "hint": "Check JSON syntax (quotes/commas/brackets) and field types"
     },
     {
-      "index": 38,
+      "index": 40,
       "enum": "PrefsWriteFailed",
       "slug": "prefs-write-failed",
       "category": "platform",
@@ -9530,7 +9554,7 @@
       "hint": "Check disk space, whether the directory exists, and target file permissions"
     },
     {
-      "index": 39,
+      "index": 41,
       "enum": "WidgetDepthExceeded",
       "slug": "widget-depth-exceeded",
       "category": "widget",
@@ -9542,7 +9566,7 @@
       "hint": "Usually caused by infinitely recursive Repeater / self-referencing Provider; check rebuild conditions or set_max_depth()"
     },
     {
-      "index": 40,
+      "index": 42,
       "enum": "RenderDegraded",
       "slug": "render-degraded",
       "category": "render",
@@ -9554,7 +9578,7 @@
       "hint": "Non-fatal degradation, UI remains usable; check the missing resource path or provide alternatives"
     },
     {
-      "index": 41,
+      "index": 43,
       "enum": "FontMissing",
       "slug": "font-missing",
       "category": "render",
@@ -9566,7 +9590,7 @@
       "hint": "On non-Windows platforms the GDI font fallback chain may differ; ensure the font is registered or use the built-in font"
     },
     {
-      "index": 42,
+      "index": 44,
       "enum": "SurfaceLost",
       "slug": "surface-lost",
       "category": "platform",
@@ -9578,7 +9602,7 @@
       "hint": "Need to rebuild the Surface to continue rendering; in most cases the framework auto-recovers on next present"
     },
     {
-      "index": 43,
+      "index": 45,
       "enum": "NotRestorable",
       "slug": "not-restorable",
       "category": "widget",
@@ -9590,7 +9614,7 @@
       "hint": "Widgets relying on runtime callbacks such as Repeater / Canvas cannot be restored from JSON; use a named factory or State injection"
     },
     {
-      "index": 44,
+      "index": 46,
       "enum": "JsonParseError",
       "slug": "json-parse-error",
       "category": "io",
@@ -9602,7 +9626,7 @@
       "hint": "Check JSON syntax (quotes/commas/brackets) and whether field types match the Schema"
     },
     {
-      "index": 45,
+      "index": 47,
       "enum": "JsonDepthExceeded",
       "slug": "json-depth-exceeded",
       "category": "io",
@@ -9614,7 +9638,7 @@
       "hint": "Reduce the nesting depth or raise ParseOptions::max_depth"
     },
     {
-      "index": 46,
+      "index": 48,
       "enum": "JsonTypeMismatch",
       "slug": "json-type-mismatch",
       "category": "io",
@@ -9626,7 +9650,7 @@
       "hint": "Check the value type or use the tolerant as_or(key, fallback) reader"
     },
     {
-      "index": 47,
+      "index": 49,
       "enum": "JsonValueNotSerializable",
       "slug": "json-value-not-serializable",
       "category": "io",
@@ -9638,7 +9662,7 @@
       "hint": "JSON has no textual form for NaN/Inf; replace the value or drop it"
     },
     {
-      "index": 48,
+      "index": 50,
       "enum": "StorageBackendUnavailable",
       "slug": "storage-backend-unavailable",
       "category": "io",
@@ -9650,7 +9674,7 @@
       "hint": "Check storage path permissions; when a cross-process lock is held, wait or close the occupying process"
     },
     {
-      "index": 49,
+      "index": 51,
       "enum": "StorageRecordNotFound",
       "slug": "storage-record-not-found",
       "category": "io",
@@ -9662,7 +9686,7 @@
       "hint": "Confirm the id spelling; or put first then get"
     },
     {
-      "index": 50,
+      "index": 52,
       "enum": "StorageRecordCorrupt",
       "slug": "storage-record-corrupt",
       "category": "validation",
@@ -9674,7 +9698,7 @@
       "hint": "Delete the corrupt file or restore from backup; use clear to rebuild if necessary"
     },
     {
-      "index": 51,
+      "index": 53,
       "enum": "StorageTypeMismatch",
       "slug": "storage-type-mismatch",
       "category": "validation",
@@ -9686,7 +9710,7 @@
       "hint": "Ensure put/get use the same type T; or use get_value to read the raw payload"
     },
     {
-      "index": 52,
+      "index": 54,
       "enum": "StorageEncodingMismatch",
       "slug": "storage-encoding-mismatch",
       "category": "validation",
@@ -9698,7 +9722,7 @@
       "hint": "Record stored as binary but type T only supports JSON (or vice versa); use get_value or fix T's serialization concept"
     },
     {
-      "index": 53,
+      "index": 55,
       "enum": "StorageIoError",
       "slug": "storage-io-error",
       "category": "io",
@@ -9710,7 +9734,7 @@
       "hint": "Check disk space/permissions; rename failure may be a cross-volume move, use a same-volume path"
     },
     {
-      "index": 54,
+      "index": 56,
       "enum": "AudioGraphCycle",
       "slug": "audio-graph-cycle",
       "category": "validation",
@@ -9722,7 +9746,7 @@
       "hint": "Remove the back-edge; the audio graph must remain acyclic (DAG)"
     },
     {
-      "index": 55,
+      "index": 57,
       "enum": "AudioEdgeNotFound",
       "slug": "audio-edge-not-found",
       "category": "validation",
@@ -9734,7 +9758,7 @@
       "hint": "Connect the nodes first; connect() result is the authoritative edge state"
     },
     {
-      "index": 56,
+      "index": 58,
       "enum": "AudioContextClosed",
       "slug": "audio-context-closed",
       "category": "runtime",
@@ -9746,7 +9770,7 @@
       "hint": "Create a new AudioContext; close() is terminal"
     },
     {
-      "index": 57,
+      "index": 59,
       "enum": "AudioParamInvalid",
       "slug": "audio-param-invalid",
       "category": "validation",
@@ -9758,7 +9782,7 @@
       "hint": "Check times (non-negative, non-decreasing), exponential ramp must not cross zero, time_constant > 0"
     },
     {
-      "index": 58,
+      "index": 60,
       "enum": "AudioBufferInvalid",
       "slug": "audio-buffer-invalid",
       "category": "validation",
@@ -9770,7 +9794,7 @@
       "hint": "Ensure sample_rate > 0, channels in {1,2} and samples non-empty before playback"
     },
     {
-      "index": 59,
+      "index": 61,
       "enum": "AudioDeviceUnavailable",
       "slug": "audio-device-unavailable",
       "category": "platform",
@@ -9782,7 +9806,7 @@
       "hint": "The audio graph keeps running and drops samples; build with AURORA_ENABLE_AUDIO and check the platform device"
     },
     {
-      "index": 60,
+      "index": 62,
       "enum": "AudioRecordingFailed",
       "slug": "audio-recording-failed",
       "category": "io",
@@ -9794,7 +9818,7 @@
       "hint": "Check the output path and permissions; capture device availability is reported separately as audio-device-unavailable"
     },
     {
-      "index": 61,
+      "index": 63,
       "enum": "CliSpecInvalid",
       "slug": "cli-spec-invalid",
       "category": "validation",
@@ -9806,7 +9830,7 @@
       "hint": "Fix the CommandSpec/OptionSchema declaration: names must be non-empty and unique, enum kinds must list choices"
     },
     {
-      "index": 62,
+      "index": 64,
       "enum": "CliUnknownOption",
       "slug": "cli-unknown-option",
       "category": "validation",
@@ -9818,7 +9842,7 @@
       "hint": "Check the spelling, or run with --help to list the options accepted by this command"
     },
     {
-      "index": 63,
+      "index": 65,
       "enum": "CliUnknownSubcommand",
       "slug": "cli-unknown-subcommand",
       "category": "validation",
@@ -9830,7 +9854,7 @@
       "hint": "Pick one of the subcommands listed in --help for this command"
     },
     {
-      "index": 64,
+      "index": 66,
       "enum": "CliMissingSubcommand",
       "slug": "cli-missing-subcommand",
       "category": "validation",
@@ -9842,7 +9866,7 @@
       "hint": "Pass one of the subcommands listed in --help before any options"
     },
     {
-      "index": 65,
+      "index": 67,
       "enum": "CliMissingValue",
       "slug": "cli-missing-value",
       "category": "validation",
@@ -9854,7 +9878,7 @@
       "hint": "Pass the value inline as --name=value or as a following token; flags that take no value must be declared Bool with arity 0"
     },
     {
-      "index": 66,
+      "index": 68,
       "enum": "CliInvalidValue",
       "slug": "cli-invalid-value",
       "category": "validation",
@@ -9866,7 +9890,7 @@
       "hint": "Check the literal syntax expected by the declared kind (see the value hint in --help)"
     },
     {
-      "index": 67,
+      "index": 69,
       "enum": "CliChoiceInvalid",
       "slug": "cli-choice-invalid",
       "category": "validation",
@@ -9878,7 +9902,7 @@
       "hint": "Choices are listed in the option's help entry; matching is case-sensitive"
     },
     {
-      "index": 68,
+      "index": 70,
       "enum": "CliRangeViolated",
       "slug": "cli-range-violated",
       "category": "validation",
@@ -9890,7 +9914,7 @@
       "hint": "Clamp or widen the bound declared on the option"
     },
     {
-      "index": 69,
+      "index": 71,
       "enum": "CliArityViolated",
       "slug": "cli-arity-violated",
       "category": "validation",
@@ -9902,7 +9926,7 @@
       "hint": "Adjust the number of repetitions/tokens, or relax the declared arity"
     },
     {
-      "index": 70,
+      "index": 72,
       "enum": "CliMissingRequired",
       "slug": "cli-missing-required",
       "category": "validation",
@@ -9914,7 +9938,7 @@
       "hint": "Pass the option, or declare a default_value so it becomes optional"
     },
     {
-      "index": 71,
+      "index": 73,
       "enum": "CliTooManyPositionals",
       "slug": "cli-too-many-positionals",
       "category": "validation",
@@ -9926,7 +9950,7 @@
       "hint": "Declare the extra slot in the positional schema, or pass it after '--' to treat it as trailing input"
     },
     {
-      "index": 72,
+      "index": 74,
       "enum": "CliConflictViolated",
       "slug": "cli-conflict-violated",
       "category": "validation",
@@ -9938,7 +9962,7 @@
       "hint": "Drop one of the mutually exclusive options; the conflict group is declared on the option schema"
     },
     {
-      "index": 73,
+      "index": 75,
       "enum": "ClipboardAccessFailed",
       "slug": "clipboard-access-failed",
       "category": "platform",
@@ -9950,7 +9974,7 @@
       "hint": "Another thread/process may own the clipboard (retry once it is released), the OS helper may be missing (install xclip or xsel on Linux), or the stored payload failed validation"
     },
     {
-      "index": 74,
+      "index": 76,
       "enum": "ClipboardWriteFailed",
       "slug": "clipboard-write-failed",
       "category": "platform",

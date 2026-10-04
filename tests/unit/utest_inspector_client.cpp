@@ -7,6 +7,9 @@
 /// 「5 毫秒」，慢于 5ms 的正常响应被 `WSAETIMEDOUT` 掐成 `empty response`。用例因此起一个
 /// 「60ms 后才回数据」的回环监听口，断言客户端照样拿到 200（60ms ≫ 5ms、≪ 5s，两种形态在此分岔）。
 /// 端口一律 0（系统分配临时端口，无冲突）；只连 127.0.0.1。
+/// 「服务不在」那条用例的 `error` 断言按**传输层成因白名单**判定（`connect() failed` 或
+/// `empty response`）而非钉死单条措辞：契约是「未获得 HTTP 响应」，而 WSL2 的 NAT 会让
+/// 刚关闭的回环端口被快速复用、`connect()` 竟成功并读到 0 字节——同一语义的第二种表述。
 /// ⚠️ 平台分支写在**用例体内**而非包裹 `AURORA_TEST_CASE`：registry_integrity 是「静态扫源码
 /// 的用例名字面量」与「runner --list」逐条比对，被 `#ifdef` 摘掉的声明在另一种构建里必然单边
 /// 失踪。故 wasm 只让用例体退化为 AURORA_TEST_SKIP，声明恒可见（与 utest_x11_surface 同一手法）。
@@ -247,7 +250,7 @@ AURORA_TEST_CASE(resolve_port_prefers_argument_then_env_then_default) {
 #endif
 }
 
-// 「服务不在」必须落在 TransportError（status 恒 0、无 body、error 指明 connect 失败），
+// 「服务不在」必须落在 TransportError（status 恒 0、无 body、error 指明传输层原因），
 // 不得伪装成空树或空结果——这是驱动方区分「环境未就绪」与「被测界面为空」的判据。
 AURORA_TEST_CASE(transport_error_distinguishable_when_server_down) {
 #ifdef AURORA_PLATFORM_WASM
@@ -269,7 +272,21 @@ AURORA_TEST_CASE(transport_error_distinguishable_when_server_down) {
     AURORA_TEST_CHECK_TRUE(call.kind == aurora::tools::e2e::CallResult::Kind::TransportError);
     AURORA_TEST_CHECK_EQ(call.status, 0);
     AURORA_TEST_CHECK_TRUE(call.body.empty());
-    AURORA_TEST_CHECK_NE(call.error.find("connect() failed"), std::string::npos);
+    // `error` 须指明**传输层**原因，但**不钉死具体措辞**：契约是「未获得 HTTP 响应」，
+    // 而达到该状态的传输层路径依平台/环境而异——
+    //   * `connect() failed on <host>:<port>`：连接被拒（端口确定无人监听。Windows 与
+    //     原生 Linux 恒走此支）；
+    //   * `empty response`：连接建立但读端拿到 0 字节。**WSL2 实测走此支**——它的 NAT 层
+    //     会让刚关闭的回环端口被快速复用，于是 `connect()` 竟成功，而对端并无服务在跑。
+    // 两者是同一语义（服务不可达）的两种传输层表述，故此处按「已知传输层成因」白名单判定。
+    //
+    // 为什么值得放宽：本用例的正身是**跨平台**的。只认 `connect() failed` 等于把
+    // 「Windows 上的措辞」当成契约本身，使这条判据在 WSL 上恒红——而红的原因（端口复用）
+    // 与本客户端的实现质量无关。另注：白名单不是空转，若客户端把此类场景归成
+    // Ok / HttpError（伪装成空树或空结果），前三条断言仍会转红。
+    const bool names_transport_cause = call.error.find("connect() failed") != std::string::npos ||
+                                       call.error.find("empty response") != std::string::npos;
+    AURORA_TEST_CHECK_TRUE(names_transport_cause);
 #endif
 }
 

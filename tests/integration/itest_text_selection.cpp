@@ -338,7 +338,7 @@ AURORA_TEST_CASE(endpoint_chars_inclusive_on_drag_select) {
     txt.mount(ctx);
     txt.layout(bounded(1000.0F, 100.0F), ctx);
     const Font f = txt.font;
-    constexpr render::TextLayoutOpts o{};
+    const render::TextLayoutOpts o{};
     const std::string s = "Hello World";
     const std::size_t total = s.size();  // 全 ASCII：字节数 == 码点数
 
@@ -382,7 +382,7 @@ AURORA_TEST_CASE(multi_line_endpoints_inclusive) {
     BuildContext ctx;
     txt.mount(ctx);
     const Font f = txt.font;
-    constexpr render::TextLayoutOpts o{};
+    const render::TextLayoutOpts o{};
     const float w_hello = render::FontEngine::measure_width("Hello", f, o);
     txt.layout(bounded(w_hello + 2.0F, 100.0F), ctx);
     // line0="Hello"(cp0-4)，line1="World"(cp6-10)。选 line0 的 'l'(idx3) 到 line1 的 'r'(idx8)。
@@ -414,7 +414,7 @@ AURORA_TEST_CASE(single_line_full_selection_highlights_line_endpoints) {
     BuildContext ctx;
     txt.mount(ctx);
     const Font f = txt.font;
-    constexpr render::TextLayoutOpts o{};
+    const render::TextLayoutOpts o{};
     const float full_w = render::FontEngine::measure_width(s, f, o);
     const Size sz = txt.layout(bounded(400.0F, 100.0F), ctx);
 
@@ -476,7 +476,7 @@ AURORA_TEST_CASE(word_wrap_per_line_endpoint_highlight) {
     BuildContext ctx;
     txt.mount(ctx);
     const Font f = txt.font;
-    constexpr render::TextLayoutOpts o{};
+    const render::TextLayoutOpts o{};
     const float w_hello = render::FontEngine::measure_width("Hello", f, o);
     const float w_world = render::FontEngine::measure_width("World", f, o);
     const float line_h = render::FontEngine::measure_height(f);
@@ -538,7 +538,7 @@ AURORA_TEST_CASE(justify_line_highlight_reaches_right_edge_and_gap_hits_space) {
     BuildContext ctx;
     txt.mount(ctx);
     const Font f = txt.font;
-    constexpr render::TextLayoutOpts o{};
+    const render::TextLayoutOpts o{};
     const float w_aa = render::FontEngine::measure_width("aa", f, o);
     const float w_bb = render::FontEngine::measure_width("bb", f, o);
     const float w_c = render::FontEngine::measure_width("cccccccc", f, o);
@@ -676,7 +676,7 @@ AURORA_TEST_CASE(scaled_display_last_line_tail_fully_highlighted) {
     BuildContext ctx;
     txt.mount(ctx);
     const Font f = txt.font;
-    constexpr render::TextLayoutOpts o{};
+    const render::TextLayoutOpts o{};
     const float full = render::FontEngine::measure_width(k_para, f, o);
     const float line_h = render::FontEngine::measure_height(f);
     const Size sz = txt.layout(bounded(full * 0.52F, 300.0F), ctx);  // 折成两行：末行≈半段长度
@@ -746,7 +746,7 @@ AURORA_TEST_CASE(per_char_display_space_hit_round_trip) {
     BuildContext ctx;
     txt.mount(ctx);
     const Font f = txt.font;
-    constexpr render::TextLayoutOpts o{};
+    const render::TextLayoutOpts o{};
     const float full = render::FontEngine::measure_width(k_line, f, o);
     const Size sz = txt.layout(bounded(full + 20.0F, 100.0F), ctx);
 
@@ -810,7 +810,7 @@ AURORA_TEST_CASE(display_metrics_diverge_from_natural_and_align_with_ink) {
     constexpr float k_scale = 1.5F;
     const std::string k_line = "The pale illimitable moonlit hills still fill the silent little mill.";
     const auto f = Font{.size_pt = 15.0F};
-    constexpr render::TextLayoutOpts o{};
+    const render::TextLayoutOpts o{};
     const std::size_t n_cp = k_line.size();  // 纯 ASCII：字节数即码点数
 
     // 分叉：实显行宽与自然行宽在 1.5x 下必须不同（伪转发时两者恒等）。

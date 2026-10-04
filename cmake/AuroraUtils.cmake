@@ -66,28 +66,23 @@ function(aurora_setup_consumer_target _tgt)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# AURORA_CLANG_FORMAT_STYLE — 本仓排版配置的**钉死引用形态**（`file:<绝对路径>`）。
+#
+# ⚠️ 任何调用 clang-format 的地方都必须用它，不得写裸 `--style=file`。裸形态的配置解析口径
+#   取决于入参类型：给**具名文件**时从「该文件所在目录」逐级上溯，只有走标准输入才看工作目录。
+#   生成链（AuroraTools 的 generate_error_codes）把产物先落在 `<build>/_gen_error_codes_stage/`
+#   再拷回源码树，构建目录一旦位于仓库外（`cmake -B <仓外目录>`、WSL 侧的仓外构建树），裸形态就
+#   寻不到配置、**静默退化成内置 LLVM 风格（2 空格 / 80 列）**，再把这份退化产物拷进版控文件。
+#   实测代价：内容与 HEAD 一字未改，仅排版退化就让 check_doc_comments 报 26 条、format-check
+#   报整文件 diff。钉死路径后，配置来源与构建目录位置解耦；探测与实调用同用这一形态，退化才不可能
+#   「探测通过、产物却红」。Windows 与 WSL 两侧实测（clang-format 22.1.2 / Ubuntu 21.1.8）：
+#   该形态下重新生成的 error_codes.gen.h 与 HEAD 逐字节相同。
+set(AURORA_CLANG_FORMAT_STYLE "file:${AURORA_SOURCE_DIR}/.clang-format")
+
+# ---------------------------------------------------------------------------
 # aurora_find_clang_format(<out_var>)
 #   按 AURORA_CLANG_FORMAT_CANDIDATES 的顺序挑出**第一个能读懂本仓 `.clang-format`** 的
 #   clang-format，绝对路径写入 <out_var>；一个都不行则写空串（不 FATAL_ERROR）。
-#
-# 为什么要「试跑一遍」而不是 find_program 了事：本仓配置用了新于发行版的选项取值——
-# `.clang-format` 的 `BinPackParameters: BinPack`（枚举形态）在把它当布尔的构建里直接
-# `.clang-format:46:20: error: invalid boolean` / `Error reading ...: Invalid argument`
-# 并以退出码 1 结束（2026-09-23 CI run 35839746160 实测：凡是跑 `generate_error_codes`
-# 的作业全红，Windows / macOS / 装了 clang-format-22 的 format 作业全绿）。
-# ⚠️ 门槛是**patch 构建**而非主版本号，别拿「装个 clang-format ≥ 20」当解法：2026-09-28 对
-# run 36348853231 逐作业取日志实测，GitHub ubuntu-latest 镜像预装的 `clang-format`（发行版 18）
-# 与候选表里的 clang-format-20 / -21 / -22（旧 patch 构建）**四个全拒**，同 run 里 apt.llvm.org
-# 的 `1:22.1.8~++20260714` 快照却接受；本机 git 构建 22.1.2 与 WSL 里的 Ubuntu 21.1.8 也都接受。
-# 即「迁移后的较新 patch 构建才认」，同一主版本内部两侧都可能。正因判据落在版本上就稳不住，
-# 这里才按**行为**筛：`--dump-config --style=file` 真跑一遍，读得懂配置才收。
-# `find_program` 只看「存在」，看不出「能不能用」，故探针不可省。
-#
-# 判别力本机已实测（v22.1.2）：同一份 `--dump-config --style=file` 在仓库根返回 0（说明该构建认
-# `BinPackParameters: BinPack`），换到一份放了非法取值的 `.clang-format`（`IndentWidth: abc`）的
-# 临时目录即返回 1 并打印 `error: invalid number`——配置读不懂就会非零退出，故该探针筛得住版本。
-# 另测得 `true` 与 `BinPack` 在本机门禁**同判**（临时改 46 行复跑全仓：875/875 合规、差异 0 行），
-# 保留枚举形态只为与格式化器自身 `--dump-config` 的打印一致；`Break` 则在两侧都不是合法取值。
 #
 # 生成链（AuroraTools 的 generate_error_codes）与排版门禁（AuroraFormat 的 format/format-check）
 # 共用本函数，两处因此必然落在同一个可执行文件上——避免「生成时按 A 版本折行、门禁按 B 版本
@@ -104,9 +99,10 @@ function(aurora_find_clang_format _out)
         if (NOT _exe)
             continue()
         endif ()
-        # cwd 必须是仓库根：`--style=file` 从工作目录逐级上溯找 .clang-format。
-        execute_process(COMMAND "${_exe}" --dump-config --style=file
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        # 探测用钉死形态（见 AURORA_CLANG_FORMAT_STYLE）：既不依赖 cwd，也不依赖被检查文件的位置，
+        # 与生成链 / 排版门禁的实调用完全同口径——否则会出现「探测恒通过、实调用却因寻不到配置而
+        # 静默退化成内置 LLVM 风格」。
+        execute_process(COMMAND "${_exe}" --dump-config "--style=${AURORA_CLANG_FORMAT_STYLE}"
                 RESULT_VARIABLE _rc
                 OUTPUT_VARIABLE _probe_out
                 ERROR_VARIABLE _probe_err)

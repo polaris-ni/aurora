@@ -2851,8 +2851,8 @@ struct WgpuRhi::Impl {
                 if (data.text == nullptr || data.font == nullptr || data.text->empty() || cmd.color.a == 0) {
                     break;
                 }
-                const render::TextLayoutOpts opts{
-                    .letter_spacing = cmd.text_ls, .word_spacing = cmd.text_ws, .italic = cmd.text_italic};
+                const render::TextLayoutOpts opts =
+                    render::decode_text_layout(cmd, data.text_chain != nullptr ? *data.text_chain : std::string{});
                 // 软件路径同源：FontEngine 全程物理像素语义；DrawCmd.bounds 为逻辑 dp，原点先换算。
                 const float origin_x = cmd.bounds.origin.x * scale;
                 const float origin_y = cmd.bounds.origin.y * scale;

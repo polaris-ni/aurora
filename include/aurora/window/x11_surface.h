@@ -125,7 +125,7 @@ class X11Surface final : public Surface {
     /// ResizeEW→`XC_sb_h_double_arrow`、ResizeNWSE→`XC_top_left_corner`、ResizeNESW→`XC_top_right_corner`、
     /// Move→`XC_fleur`、Crosshair→`XC_crosshair`、NotAllowed→`XC_X_cursor`、Wait→`XC_watch`。
     /// @param shape 光标语义形状，按上表映射为 Xlib 游标字形。
-    /// @note 真机已验证（2026-09-13）：以 `AURORA_BACKEND_X11=ON` 编译通过；并在真实 X server
+    /// @note 以 `AURORA_BACKEND_X11=ON` 编译通过；并在真实 X server
     /// 上运行时读回（XFIXES `XFixesGetCursorImage`）确认 11 个形状逐个改变了屏幕显示光标且两两互异，
     /// 名称与上表逐项吻合（left_ptr / xterm / hand2 / sb_v_double_arrow / sb_h_double_arrow /
     /// top_left_corner / top_right_corner / fleur / crosshair / X_cursor / watch）。

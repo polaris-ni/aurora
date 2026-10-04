@@ -3,6 +3,7 @@
 #include "aurora/core/log.h"
 #include "aurora/render/detail/gpu_layer.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/render/glyph_emit.h"
 #include "aurora/render/painter.h"
 
 namespace aurora::rhi {
@@ -82,8 +83,10 @@ auto SoftwareRhi::submit(const DrawCmd &cmd, const CmdData &data) -> void {
         case CmdKind::DrawText: {
             const std::string &s = data.text != nullptr ? *data.text : AURORA_EMPTY_STR;
             const Font &f = data.font != nullptr ? *data.font : AURORA_DEFAULT_FONT;
-            const render::TextLayoutOpts opts{
-                .letter_spacing = cmd.text_ls, .word_spacing = cmd.text_ws, .italic = cmd.text_italic};
+            // 排版选项经共用解码重建（含方向 / 固定格档位 / 按族回退链）：三后端同一份实现，
+            // 避免各自手搬字段而漏项（direction 此前就是这样在录制中丢掉的）。
+            const render::TextLayoutOpts opts =
+                render::decode_text_layout(cmd, data.text_chain != nullptr ? *data.text_chain : AURORA_EMPTY_STR);
             p.draw_text(cmd.bounds, s, f, cmd.color, cmd.aa_mode, opts);
             break;
         }

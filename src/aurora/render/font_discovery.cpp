@@ -2,12 +2,18 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
+#include <cstdlib>
+#include <filesystem>
 #include <ranges>
+#include <span>
+#include <string>
 #include <unordered_map>
 #include <utility>
 
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"
+#include "aurora/render/cascadia_font_data.h"
 #include "aurora/render/freetype_library.h"
 #include "aurora/render/noto_font_data.h"
 
@@ -76,6 +82,174 @@ auto push_face(const std::string &family, const std::shared_ptr<FontFace> &ff) -
     }
 }
 
+// ---- 系统字体目录 catalog（族名 → 字体文件）----
+//
+// 为什么要有它：`list_font_families()` 的同源保证要求「枚举出来的族一定解析得到面」，而既有
+// 的 `register_system_fallbacks()` 只是**固定候选文件清单**（Win 8 个文件名 / Linux 10 个路径），
+// 且经 `add_default_face()` 只挂进 `""` / `"sans-serif"` 两个键——**不产生任何族名**。故系统字体
+// 目录扫描是本条从零新增的能力，不是「把已有的扫描暴露出来」。
+//
+// 为什么只存「族名 → 文件路径」而不预注册全部 FT_Face：Windows 字体目录有 150+ 个字体文件，
+// 全量预注册会让进程启动即持有上百个 face。catalog 只记位置，`resolve_faces` 未命中时按目录
+// **懒加载**该族；`list_font_families` 需要判等宽时才临时开面（量完即关）。
+
+/// @brief 一个字体族的来源（文件 + face 下标）。
+struct FontSource {
+    std::string path;  ///< 字体文件绝对路径。
+    int index = 0;  ///< 文件内的 face 下标（`.ttc` 集合字体；首版只取 0，见 scan 处注释）。
+};
+
+// 静态存储期的容器构造若抛出，进程无法恢复；同`software_rhi.cpp` / `debug_runtime.cpp`
+// 的既有取舍：进程级缓存不值得为「构造失败」建一套恢复路径，分配失败即终止。
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables, bugprone-throwing-static-initialization)
+std::unordered_map<std::string, std::vector<FontSource>> g_catalog;
+bool g_catalog_scanned = false;
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables, bugprone-throwing-static-initialization)
+
+/// @brief 等宽判定的度量像素尺寸：只用于比较 advance 是否相等，取值本身无语义。
+constexpr int AURORA_MONOSPACE_PROBE_PX = 16;
+
+/// @brief 系统字体目录（按平台）。三平台同口径：目录扫描 + `FT_Face::family_name`。
+/// @return 该平台的字体目录候选根（不存在者由调用方跳过）。
+auto system_font_roots() -> std::vector<std::string> {
+    std::vector<std::string> roots;
+#ifdef AURORA_PLATFORM_WINDOWS
+    // Windows 的系统字体目录是固定位置（`GetWindowsDirectory` 引入 shell32 依赖不值得，
+    // 且与既有 `register_system_fallbacks()` 的写法保持一致）。
+    roots.emplace_back("C:\\Windows\\Fonts");
+#elif defined(AURORA_PLATFORM_LINUX)
+    roots.emplace_back("/usr/share/fonts");
+    roots.emplace_back("/usr/local/share/fonts");
+    if (const char *home = std::getenv("HOME"); (home != nullptr) && (*home != '\0')) {
+        roots.emplace_back(std::string(home) + "/.fonts");
+        roots.emplace_back(std::string(home) + "/.local/share/fonts");
+    }
+#elif defined(AURORA_PLATFORM_MACOS)
+    roots.emplace_back("/System/Library/Fonts");
+    roots.emplace_back("/Library/Fonts");
+    if (const char *home = std::getenv("HOME"); (home != nullptr) && (*home != '\0')) {
+        roots.emplace_back(std::string(home) + "/Library/Fonts");
+    }
+#endif
+    return roots;
+}
+
+/// @brief 是否是可扫描的字体文件扩展名。
+/// @param path 文件路径。
+/// @return 是 `.ttf` / `.ttc` / `.otf`（小写后比较）时返回 true。
+[[nodiscard]] auto is_font_file(const std::filesystem::path &path) -> bool {
+    const std::string ext = path.extension().string();
+    return (ext == ".ttf") || (ext == ".ttc") || (ext == ".otf");
+}
+
+/// @brief 扫描系统字体目录，填 `g_catalog`（族名 → 来源）。幂等：只扫一次。
+///
+/// 只取每个文件的 **face 0**：`.ttc` 集合字体里同一族的 Regular / Bold / Italic 各占一个 face，
+/// 全量遍历会把同一个族名重复登记多次且显著拉长扫描；首版取首面即够用（族名与等宽性都由它决定），
+/// 需要按字重分裂时再扩。扫描失败（权限 / 目录不存在）静默跳过——字体目录不可读不是致命错误。
+auto ensure_catalog_scanned() -> void {
+    if (g_catalog_scanned) {
+        return;
+    }
+    g_catalog_scanned = true;
+    const FT_Library lib = ft_library();
+    if (lib == nullptr) {
+        return;
+    }
+    for (const std::string &root : system_font_roots()) {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(root, ec)) {
+            continue;
+        }
+        for (const auto &entry : std::filesystem::recursive_directory_iterator(root, ec)) {
+            if (ec || !entry.is_regular_file(ec) || !is_font_file(entry.path())) {
+                continue;
+            }
+            FT_Face probe = nullptr;
+            if (FT_New_Face(lib, entry.path().string().c_str(), 0, &probe) != 0) {
+                continue;
+            }
+            // 解引用取首字符而非 `family_name[0]`：后者是下标运算（指针算术），门禁拦。
+            if ((probe->family_name != nullptr) && (*probe->family_name != '\0')) {
+                g_catalog[probe->family_name].push_back(FontSource{.path = entry.path().string(), .index = 0});
+            }
+            FT_Done_Face(probe);
+        }
+    }
+}
+
+/// @brief 以**度量**判定一个面是否等宽。
+///
+/// 判据：同一像素尺寸下，代表性码点 `'i'`（窄）/ `'W'`（宽）/ `'0'`（数字）的 advance **全等**。
+/// 只比 `'0'` 会把「数字等宽但字母不等宽」的比例字体误判成等宽，故三个码点都要量。
+/// @param face 待判定的 FT_Face（须已可用）。
+/// @return 度量可得且三者全等时 true；度量不可得时 false（由调用方决定要不要用族名兜底）。
+[[nodiscard]] auto advances_are_uniform(FT_Face face) -> bool {
+    if (FT_Set_Pixel_Sizes(face, 0, AURORA_MONOSPACE_PROBE_PX) != 0) {
+        return false;
+    }
+    int reference = -1;
+    for (const FT_ULong cp : {static_cast<FT_ULong>('i'), static_cast<FT_ULong>('W'), static_cast<FT_ULong>('0')}) {
+        if (FT_Load_Char(face, cp, FT_LOAD_NO_HINTING) != 0) {
+            return false;
+        }
+        const int advance = static_cast<int>(face->glyph->metrics.horiAdvance);
+        if (reference < 0) {
+            reference = advance;
+        } else if (advance != reference) {
+            return false;
+        }
+    }
+    return reference >= 0;
+}
+
+/// @brief 族名是否像等宽族（**仅**作度量不可得时的补充命中）。
+/// @param family 族名。
+/// @return 名字含等宽线索时 true。
+[[nodiscard]] auto family_name_looks_monospace(const std::string &family) -> bool {
+    const std::string lower = [&] {
+        std::string s = family;
+        std::ranges::transform(s, s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return s;
+    }();
+    return lower.find("mono") != std::string::npos;
+}
+
+/// @brief 判定一个族是否等宽：**以度量为准，族名只在度量不可得时补充命中**。
+/// @param family 族名（量不到时的兜底依据）。
+/// @param face 该族的一个面；nullptr 表示无面可用。
+/// @return 是否等宽。
+[[nodiscard]] auto family_is_monospace(const std::string &family, FT_Face face) -> bool {
+    if (face == nullptr) {
+        return family_name_looks_monospace(family);
+    }
+    // 度量可得即**只看度量**：名字叫 Mono 但度量非等宽的族必须判 false，否则测试只覆盖到名字表。
+    return advances_are_uniform(face);
+}
+
+/// @brief 按 catalog 把一个系统字体族的面加载并注册进 `g_registry`。
+/// @param family 族名。
+/// @return 是否至少注册了一个面。
+auto materialize_catalog_family(const std::string &family) -> bool {
+    ensure_catalog_scanned();
+    const auto it = g_catalog.find(family);
+    if (it == g_catalog.end()) {
+        return false;
+    }
+    bool any = false;
+    for (const FontSource &src : it->second) {
+        auto ff = make_face_from_file(src.path);
+        if (ff) {
+            push_face(family, ff);
+            any = true;
+        }
+    }
+    if (any) {
+        invalidate_resolve_cache();
+    }
+    return any;
+}
+
 auto register_system_fallbacks() -> void;
 }  // namespace
 
@@ -98,6 +272,15 @@ auto init_font_discovery() -> void {
         g_registry["Noto Sans"].push_back(nf);
         g_registry["default"].push_back(nf);
     }
+    // 内置 Cascadia Code（SIL OFL 1.1）：框架此前**没有任何内置等宽族**——内置族只有非等宽的
+    // Noto Sans，于是「系统等宽字体枚举」这条能力在本仓拿不到一个正例（名字像等宽但度量非等宽
+    // 的反例倒是可以造）。注册到**它自己的族名**下、不挂默认链：既有默认链行为零改动，
+    // 需要等宽的消费方按族名 `"Cascadia Code"` 选即可。
+    const auto cascadia_data = cascadia_code_ttf();
+    std::vector<std::uint8_t> cascadia(cascadia_data.begin(), cascadia_data.end());
+    if (const auto cf = make_face_from_memory(std::move(cascadia))) {
+        g_registry["Cascadia Code"].push_back(cf);
+    }
     // 平台系统字体回退（含 CJK），保证缺字非 tofu。
     register_system_fallbacks();
 }
@@ -114,6 +297,9 @@ auto shutdown_font_discovery() -> void {
     g_registry.clear();
     g_resolve_cache.clear();
     g_resolve_ptr_cache.clear();
+    // 目录 catalog 的**自然失效点**：与注册表一起清空，下次调用重新扫描。调用方无需手动刷新。
+    g_catalog.clear();
+    g_catalog_scanned = false;
     g_initialized = false;
     ft_shutdown();
 }
@@ -152,9 +338,29 @@ auto add_default_face(const std::shared_ptr<FontFace> &ff) -> void {
 }
 
 auto resolve_faces(const std::string &family, int weight) -> const std::vector<FontFace *> & {
+    // 空链走**原路径**：主族与全局链合并后做一次全局 weight 排序（见下方 else 分支的注释），
+    // 是既有消费者观察到的行为。分段实现只用于「调用方显式声明了非空链」，否则分段会把
+    // 「主族与全局链一起排序」悄悄改成「各自成段」，破坏「不指定时逐字节一致」这条不变量。
+    return resolve_faces(family, weight, std::span<const std::string>{});
+}
+
+auto resolve_faces(const std::string &family, int weight, std::span<const std::string> fallback_families)
+    -> const std::vector<FontFace *> & {
     init_font_discovery();
-    // 缓存键 = family + 请求字重（不同字重的排序结果不同，须分别缓存）。
-    const std::string cache_key = family + "#" + std::to_string(weight);
+    const bool has_chain = !fallback_families.empty();
+    // 缓存键 = family + 请求字重（不同字重的排序结果不同，须分别缓存）+ 回退链。
+    // 空链时键**恰为** `family#weight`（不带任何链编码），与本函数加链前的键逐字节相同 ⇒ 复用
+    // 同一份缓存条目，既有消费者不仅输出不变、连缓存行为都不变。
+    std::string cache_key = family + "#" + std::to_string(weight);
+    if (has_chain) {
+        // 链编码用 U+001F（UNIT SEPARATOR）作分隔：它不是任何真实字体族名的字符，故不同的
+        // 链组合不会撞出同一个键（族名含分隔符的病态情形除外，代价只是退化成一次多余解析）。
+        cache_key += '\x1F';
+        for (const auto &fb : fallback_families) {
+            cache_key += fb;
+            cache_key += '\x1F';
+        }
+    }
     // 裸指针缓存命中：直接返回引用，零分配。
     const auto pit = g_resolve_ptr_cache.find(cache_key);
     if (pit != g_resolve_ptr_cache.end()) {
@@ -170,48 +376,169 @@ auto resolve_faces(const std::string &family, int weight) -> const std::vector<F
         }
         return ptrs;
     }
-    std::vector<std::shared_ptr<FontFace>> owned;
-    auto emit = [&](const std::string &key) -> void {
+    // 系统字体目录的族首次被请求时**按需加载**：`list_font_families()` 承诺「枚举出来的族一定
+    // 解析得到属于该族的面」，而这个承诺对目录扫描出来的族只能靠这一步兑现。回退链上的族名
+    // 走**同一条**路径 —— 这是「链上族名与 list_font_families() 同源」的实现处。
+    const auto ensure_family_loaded = [](const std::string &name) -> void {
+        if (!name.empty() && !g_registry.contains(name)) {
+            materialize_catalog_family(name);
+        }
+    };
+    ensure_family_loaded(family);
+    for (const auto &fb : fallback_families) {
+        ensure_family_loaded(fb);
+    }
+
+    // 去重：按裸指针地址去重，保留首次出现（链上族与主族指向同一个面时只取首现）。
+    std::vector<std::shared_ptr<FontFace>> uniq;
+    auto &seen = g_resolve_ptr_cache[cache_key];
+    const auto append_family_faces = [&](const std::string &key) -> void {
         const auto it = g_registry.find(key);
-        if (it != g_registry.end()) {
-            for (auto &ff : it->second) {
-                owned.push_back(ff);
+        if (it == g_registry.end()) {
+            return;
+        }
+        for (auto &ff : it->second) {
+            if (ff && std::ranges::find(seen, ff.get()) == seen.end()) {
+                seen.push_back(ff.get());
+                uniq.push_back(ff);
             }
         }
     };
+
+    if (!has_chain) {
+        // ---- 原路径（回退链为空）：与本函数加链前的实现逐行一致 ----
+        auto emit = [&append_family_faces](const std::string &key) -> void { append_family_faces(key); };
+        if (!family.empty()) {
+            emit(family);
+            if (family == "serif") {
+                emit("Times New Roman");
+            } else if (family == "monospace" || family == "mono") {
+                emit("Consolas");
+            }
+        }
+        // 默认链兜底（去重已在 append_family_faces 内完成）。
+        emit("");
+        emit("sans-serif");
+        emit("default");
+        // 字重感知排序：精确匹配请求字重的面排最前（保持注册序），其余按字重距离升序稳定排列。
+        // find_glyph 取首个含该字形的面 → 有粗体面时粗体字优先命中，缺字仍回退其他字重/脚本回退面。
+        // 注意：必须同步重排 `seen`（返回给调用方的裸指针序列），否则排序只作用于 owned 缓存、
+        // 实际选面顺序不变，weight 参数形同虚设。
+        std::ranges::stable_sort(uniq, [weight](const auto &a, const auto &b) {
+            return std::abs(a->weight - weight) < std::abs(b->weight - weight);
+        });
+        for (std::size_t i = 0; i < uniq.size(); ++i) {
+            seen[i] = uniq[i].get();
+        }
+        g_resolve_cache[cache_key] = std::move(uniq);
+        return seen;
+    }
+
+    // ---- 分段路径（调用方声明了非空回退链）----
+    //
+    // 为什么分段：需求是「顺序由调用方给定且框架不得重排」。若沿用空链路径的单次全局 weight
+    // 排序，链上族的面会与主族、默认链的面按字重距离互相穿插，「A 族优先于 B 族」的声明即被
+    // 打乱。故每个族各自成段、段内按字重距离稳定排序（与无链时同口径），段间严格保持声明序：
+    //   主族 → 链族1 → 链族2 → … → 默认链（仅尾部回落）
+    //
+    // 段内排序而非段间排序，是「精确字重优先」这条既有语义在族内的保留：某个链族有自己的粗体面
+    // 时该族内仍粗体优先，只是不跨族争夺位置。
+    const auto sort_segment_weight = [weight](std::vector<std::shared_ptr<FontFace>> &seg) {
+        std::ranges::stable_sort(seg, [weight](const auto &a, const auto &b) {
+            return std::abs(a->weight - weight) < std::abs(b->weight - weight);
+        });
+    };
+    const auto emit_segment = [&](const std::string &key) {
+        const std::size_t begin = uniq.size();
+        append_family_faces(key);
+        if (uniq.size() > begin) {
+            // 只重排本段（[begin, size)），已定格的前序段不受影响。
+            std::vector<std::shared_ptr<FontFace>> seg(uniq.begin() + static_cast<std::ptrdiff_t>(begin), uniq.end());
+            sort_segment_weight(seg);
+            std::copy(seg.begin(), seg.end(), uniq.begin() + static_cast<std::ptrdiff_t>(begin));
+        }
+    };
+
     if (!family.empty()) {
-        emit(family);
+        emit_segment(family);
         if (family == "serif") {
-            emit("Times New Roman");
+            emit_segment("Times New Roman");
         } else if (family == "monospace" || family == "mono") {
-            emit("Consolas");
+            emit_segment("Consolas");
         }
     }
-    // 默认链兜底（去重在末尾处理）。
-    emit("");
-    emit("sans-serif");
-    emit("default");
-    // 去重：按裸指针地址去重，保留首次出现。
-    std::vector<std::shared_ptr<FontFace>> uniq;
-    auto &seen = g_resolve_ptr_cache[cache_key];
-    for (auto &sp : owned) {
-        if (std::ranges::find(seen, sp.get()) == seen.end()) {
-            seen.push_back(sp.get());
-            uniq.push_back(sp);
+    for (const auto &fb : fallback_families) {
+        // 空串是默认链的键而非族名（`list_font_families` 明确不列出伪族名），链上出现空串按
+        // 「解析不到面」跳过——否则等于把尾部回落提前，与调用方声明的顺序相悖。
+        if (!fb.empty()) {
+            emit_segment(fb);
         }
     }
-    // 字重感知排序：精确匹配请求字重的面排最前（保持注册序），其余按字重距离升序稳定排列。
-    // find_glyph 取首个含该字形的面 → 有粗体面时粗体字优先命中，缺字仍回退其他字重/脚本回退面。
-    // 注意：必须同步重排 `seen`（返回给调用方的裸指针序列），否则排序只作用于 owned 缓存、
-    // 实际选面顺序不变，weight 参数形同虚设。
-    std::ranges::stable_sort(uniq, [weight](const auto &a, const auto &b) {
-        return std::abs(a->weight - weight) < std::abs(b->weight - weight);
-    });
-    for (std::size_t i = 0; i < uniq.size(); ++i) {
-        seen[i] = uniq[i].get();
-    }
-    g_resolve_cache[cache_key] = std::move(uniq);
+    // 默认链兜底：仍只作**尾部**回落，位置在整条链之后。
+    emit_segment("");
+    emit_segment("sans-serif");
+    emit_segment("default");
+
+    g_resolve_cache[cache_key] = uniq;  // uniq 已按最终段序排好，拷贝一份持有 shared_ptr 保活
     return seen;
+}
+
+auto list_font_families(bool monospace_only) -> std::vector<FontFamilyInfo> {
+    init_font_discovery();
+    ensure_catalog_scanned();
+
+    // 伪族名：默认链的键，不是族名（三者指向同一个 Noto Sans 面，列出来只会让下拉里出现
+    // 三个等价项，其中一个还是空串）。
+    const auto is_pseudo_family = [](const std::string &name) -> bool {
+        return name.empty() || (name == "sans-serif") || (name == "default");
+    };
+
+    // 候选族 = 已注册族 ∪ 目录扫描到的族。后者此时尚未开面，等宽判定需要临时开一次。
+    std::vector<std::string> names;
+    names.reserve(g_registry.size() + g_catalog.size());
+    for (const auto &key : g_registry | std::views::keys) {
+        if (!is_pseudo_family(key)) {
+            names.push_back(key);
+        }
+    }
+    for (const auto &key : g_catalog | std::views::keys) {
+        if (!is_pseudo_family(key) && !g_registry.contains(key)) {
+            names.push_back(key);
+        }
+    }
+    std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
+
+    std::vector<FontFamilyInfo> out;
+    out.reserve(names.size());
+    const FT_Library lib = ft_library();
+    for (const std::string &name : names) {
+        // 已注册族直接取面；目录扫描到的族临时开一个面量完即关（不常驻，避免持有上百个 face）。
+        FT_Face probe = nullptr;
+        int count = 0;
+        const auto reg = g_registry.find(name);
+        if (reg != g_registry.end()) {
+            count = static_cast<int>(reg->second.size());
+            if (!reg->second.empty()) {
+                probe = reg->second.front()->face;
+            }
+        } else {
+            const auto cat = g_catalog.find(name);
+            if ((cat != g_catalog.end()) && (lib != nullptr) && !cat->second.empty() &&
+                (FT_New_Face(lib, cat->second.front().path.c_str(), 0, &probe) == 0)) {
+                count = static_cast<int>(cat->second.size());
+            }
+        }
+        const bool monospace = family_is_monospace(name, probe);
+        if ((reg == g_registry.end()) && (probe != nullptr)) {
+            FT_Done_Face(probe);
+        }
+        if ((count <= 0) || (monospace_only && !monospace)) {
+            continue;
+        }
+        out.push_back(FontFamilyInfo{.family = name, .monospace = monospace, .face_count = count});
+    }
+    return out;
 }
 
 namespace {

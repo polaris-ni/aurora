@@ -36,6 +36,10 @@ auto resolve_cmd_data(const DrawCmd &cmd, const DisplayList &dl) -> rhi::CmdData
     if (cmd.pt_idx >= 0) {
         data.points = &dl.points_at(cmd.pt_idx);
     }
+    // DrawText 的按族回退链与文本同走字符串池，故一并在此解析（后端不接触池下标语义）。
+    if (cmd.text_chain_idx >= 0) {
+        data.text_chain = &dl.string_at(cmd.text_chain_idx);
+    }
     return data;
 }
 }  // namespace

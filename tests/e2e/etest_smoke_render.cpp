@@ -24,6 +24,7 @@
 ///     `requires_scale_one` 申报，surface scale != 1 时记 SKIP（CI 100% DPI 环境全跑，本地高
 ///     DPI 环境诚实跳过）。
 
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
@@ -234,9 +235,23 @@ AURORA_TEST_P(RealWindowBackends, reads_back_scene_pixels) {
     }
     const e2e::Frame &frame = read.value();
 
-    // 帧尺寸为帧缓冲物理像素：先断言与请求尺寸一致，再做像素断言（否则采样点无意义）。
-    AURORA_TEST_CHECK_EQ(frame.width, spec.width);
-    AURORA_TEST_CHECK_EQ(frame.height, spec.height);
+    // 帧尺寸为帧缓冲物理像素，等式 `frame == 逻辑尺寸 × scale` 由 Win32 单点真值源保证
+    // （`Win32Host::Impl::scale` + `to_physical` / `to_logical`，收敛记录见
+    // specification/08-tooling.md §8.2）。本守卫按 scale 缩放期望值，而不是像修复前那样
+    // 一见不等就整条 SKIP——那样等于把「缩放下的尺寸等式」永久记成未验证。
+    const float scale = session.surface().scale_factor();
+    if (scale <= 0.0F || std::fabs(scale - 1.0F) < 0.01F) {
+        // 100% DPI 环境（含 CI）：三方恒 1.0，本断言必然空转。显式记 SKIP 并在结论里注明
+        // 「未在 ≠100% DPI 环境验证」，不允许把 CI 上的绿当作本条已验收。
+        AURORA_TEST_SKIP("100% DPI environment (scale=" + std::to_string(scale) +
+                         "): frame==logical*scale holds trivially and is NOT verified here; re-run on a "
+                         "scaled display to validate the Win32 DPI single-source fix (08-tooling.md 8.2)");
+    }
+    // ≠100% DPI：真断言。期望物理尺寸 = 逻辑 × scale（按 ±0.5px 容差吸收取整）。
+    const auto expected_w = static_cast<int>(std::lround(static_cast<double>(spec.width) * scale));
+    const auto expected_h = static_cast<int>(std::lround(static_cast<double>(spec.height) * scale));
+    AURORA_TEST_CHECK_LE(std::abs(frame.width - expected_w), 1);
+    AURORA_TEST_CHECK_LE(std::abs(frame.height - expected_h), 1);
     AURORA_TEST_REQUIRE_EQ(frame.pixels.size(),
                            static_cast<std::size_t>(frame.width) * static_cast<std::size_t>(frame.height) * 4U);
 

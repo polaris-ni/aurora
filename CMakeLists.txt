@@ -30,6 +30,15 @@ project(aurora
 set(AURORA_VERSION_SUFFIX "alpha.9" CACHE STRING
         "Pre-release suffix appended after PROJECT_VERSION (empty for stable releases)" FORCE)
 
+# 本仓源码树根（子项目安全版 CMAKE_SOURCE_DIR）：下游经 add_subdirectory 消费本仓时，
+# CMAKE_SOURCE_DIR 指向**下游**根，本仓若用它拼自身路径（codespec/errors.toml、
+# include/aurora/core/error_codes.gen.h、tools/check 等）会全部指错，且生成的 custom command
+# 落不到任何规则上（实测：Borealis 侧 ninja 报 error_codes.gen.h missing and no known rule）。
+# 故本仓一切「指向自身源码树」的路径一律经 AURORA_SOURCE_DIR 表达。
+# 用 CACHE INTERNAL：本仓定义的函数（如 aurora_run_*）在下游作用域被调用时仍可取到该值。
+set(AURORA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL
+        "Aurora source tree root; use instead of CMAKE_SOURCE_DIR so add_subdirectory consumers work")
+
 # ============================================================
 # 统一配置期日志前缀：BUILD AURORA:
 # 便于从海量 CMake 输出中过滤 Aurora 自身诊断信息（详见 cmake/ 下各模块调用）。

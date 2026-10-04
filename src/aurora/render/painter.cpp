@@ -14,6 +14,7 @@
 #include "aurora/render/detail/painter_simd.inl"
 #include "aurora/render/display_list.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/render/glyph_emit.h"
 
 // 【性能豁免说明】本 TU 自下一行起按区间豁免 `*-pro-bounds-*`（像素缓冲按裸指针逐通道步进与
 // 变址）、`*-narrowing-*`（float→uint8 装配须与 SIMD 路径逐位一致，golden 测试逐位比对）、
@@ -803,6 +804,38 @@ auto Painter::draw_text(const Rect &r, const std::string &s, const Font &f, Colo
     }
 }
 
+auto Painter::draw_text_runs(std::span<const render::TextRun> runs) -> void {
+    // 单参重载委托到显式重载：抗锯齿取进程级默认、排版取默认 opts，行为与历史版本逐位一致。
+    draw_text_runs(runs, render::FontEngine::text_aa_mode(), render::TextLayoutOpts{});
+}
+
+auto Painter::draw_text_runs(std::span<const render::TextRun> runs, const render::TextLayoutOpts &opts) -> void {
+    draw_text_runs(runs, render::FontEngine::text_aa_mode(), opts);
+}
+
+auto Painter::draw_text_runs(std::span<const render::TextRun> runs, render::TextAAMode aa_mode,
+                             const render::TextLayoutOpts &opts) -> void {
+    if (runs.empty()) {
+        return;
+    }
+    if (is_recording()) {
+        // 录制态逐片段各落一条 DrawText：回放后端（software / gpu_gl / wgpu）因此无需认识新的
+        // 命令类型，批量化的收益只落在直绘路径——那正是终端/表格每帧重画整屏的走法。
+        // 整批共用 opts / aa_mode：回放端据 DrawCmd 的 aa_mode / text_ls / text_ws / text_italic 重建，
+        // 因此与逐个 draw_text(..., aa_mode, opts) 录出的命令序列逐位一致。
+        for (const auto &run : runs) {
+            record_text_cmd(run.box, std::string{run.text}, run.font, run.color, aa_mode, opts);
+        }
+        return;
+    }
+    AURORA_PROFILE_COUNT(draw_calls, 1);
+    AURORA_PROFILE_COUNT(draw_texts, 1);
+    {
+        detail::PaintTimer guard{&g_pt.text};
+        render::FontEngine::draw_text_runs(*this, runs, aa_mode, opts);
+    }
+}
+
 auto Painter::blend_pixel(int x, int y, Color c) -> void { set_pixel(x, y, c); }
 
 auto Painter::blend_rect(const Rect &r, Color c) -> void { fill_rect(r, c); }
@@ -1010,9 +1043,19 @@ auto Painter::record_text_cmd(const Rect &r, const std::string &s, const Font &f
     cmd.color = c;
     cmd.font_idx = recording_stack_.back()->add_font(f);
     cmd.aa_mode = aa;
-    cmd.text_ls = opts.letter_spacing;
-    cmd.text_ws = opts.word_spacing;
-    cmd.text_italic = opts.italic;
+    render::encode_text_layout(cmd, opts);
+    // 回退链按值序列化进字符串池（定长数组不跨录制边界传递）：族名以 U+001F 连接。
+    // 空链不入池，避免每帧为「无链」白占一个池位。
+    if (opts.font_fallback_chain_size > 0) {
+        std::string serialized;
+        for (std::size_t i = 0; i < opts.font_fallback_chain_size; ++i) {
+            if (!serialized.empty()) {
+                serialized += '\x1F';
+            }
+            serialized += opts.font_fallback_chain.at(i);
+        }
+        cmd.text_chain_idx = recording_stack_.back()->add_string(serialized);
+    }
     cmd.str_idx = recording_stack_.back()->add_string(s);
     recording_stack_.back()->push_cmd(cmd);
 }

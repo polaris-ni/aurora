@@ -3,6 +3,7 @@
 /// 测试说明: key_name 对字母/数字/导航/修饰/标点/功能键的全覆盖、未知与越界键码回退 Unknown、KeyCode
 /// 分组连续性与相对次序
 
+#include <string_view>
 #include <type_traits>
 
 #include "aurora/event/keycode.h"
@@ -80,6 +81,97 @@ AURORA_TEST_CASE(key_code_groups_are_contiguous_and_ordered) {
     AURORA_TEST_CHECK_LT(static_cast<int>(KeyCode::Control), static_cast<int>(KeyCode::Alt));
     AURORA_TEST_CHECK_LT(static_cast<int>(KeyCode::Alt), static_cast<int>(KeyCode::Meta));
     AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::F12) - static_cast<int>(KeyCode::F1), 11);
+}
+
+// 枚举值稳定性：逐个锁死既有项与新增的 KP_* 项。
+//
+// 为什么必须逐值断言（而不是只断言「分组连续」）：消费方普遍持有「KeyCode → 平台原生值」的
+// **逐值对齐**映射表（如 `KeyCode::D5 → GLFW_KEY_5`），任何在枚举中间插入新项的改动都会让那些
+// 表**静默错位**——不报错、只是全盘对不上。`KP_*` 段因此只能追加到末尾并写死显式数值，
+// 这条用例就是那个「只能追加」纪律的守门。
+AURORA_TEST_CASE(enum_values_are_pinned_for_cross_backend_alignment) {
+    // 既有项：Unknown=0 与各分组起点锁死（中间项由「分组连续性」那条覆盖）。
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::Unknown), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::A), 1);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::Z), 26);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::D0), 27);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::D9), 36);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::Escape), 37);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::Enter), 38);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::Tab), 39);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::F1), 66);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::F12), 77);
+
+    // KP_* 段：从 100 起、连号、逐值锁死。首项写死 100 是「与既有段留出明确间隔」的可测形态。
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Insert), 100);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Delete), 101);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Begin), 102);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_End), 103);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Home), 104);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Prior), 105);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Next), 106);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Add), 107);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Subtract), 108);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Multiply), 109);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Divide), 110);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Decimal), 111);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_Separator), 112);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_0), 113);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_9), 122);
+
+    // KP_0-9 必须连号：三后端都按「首项 + 偏移」做区间映射（Win32 的 VK_NUMPAD0、keysym 的
+    // 0xFFB0、GLFW 的 GLFW_KEY_KP_0 各自连号），一旦在中间插项，这三处区间映射会一起失准。
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::KP_9) - static_cast<int>(KeyCode::KP_0), 9);
+    // KP_* 段整体在既有项之后：追加而非插入。
+    AURORA_TEST_CHECK_LT(static_cast<int>(KeyCode::F12), static_cast<int>(KeyCode::KP_Insert));
+}
+
+AURORA_TEST_CASE(key_name_covers_keypad_keys) {
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Insert), "KP_Insert");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Delete), "KP_Delete");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Begin), "KP_Begin");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_End), "KP_End");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Home), "KP_Home");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Prior), "KP_Prior");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Next), "KP_Next");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Add), "KP_Add");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Subtract), "KP_Subtract");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Multiply), "KP_Multiply");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Divide), "KP_Divide");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Decimal), "KP_Decimal");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_Separator), "KP_Separator");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_0), "KP_0");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_5), "KP_5");
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::KP_9), "KP_9");
+}
+
+// 主键盘 Insert：数值钉死 + 键名唯一。
+//
+// 数值为什么钉死在 123：它语义上属「编辑 / 导航」段，却**不**插回该段——既有段（0..94）靠隐式
+// 连号，插一项会让其后全部取值整体位移，而消费方的「键码 → 平台原生值」逐值表会**静默错位**。
+// 故取 `KP_9`（122）之后的下一个显式初值位，与 `KP_Insert = 100` 同一条「只许往后接」的纪律。
+AURORA_TEST_CASE(insert_has_a_pinned_numeric_value) {
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::Insert), 123);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(KeyCode::Insert) - static_cast<int>(KeyCode::KP_9), 1);
+    // 追加而非插入：不得落在 KP_* 段内、也不得落在任何隐式连号段内。
+    AURORA_TEST_CHECK_LT(static_cast<int>(KeyCode::KP_9), static_cast<int>(KeyCode::Insert));
+}
+
+// 键名唯一性为什么走「全枚举遍历」而不是只对拍 `KP_Insert`：只断言 `Insert != "KP_Insert"`
+// 挡不住「新键复用了某个既有档的名字」——那种错位在逐值对齐的消费方里表现为某个键静默失效。
+// 遍历把「name 恰好出现一次」钉成全局性质，任何重名都转红。
+AURORA_TEST_CASE(key_name_of_insert_is_unique_across_all_codes) {
+    AURORA_TEST_CHECK_STREQ(key_name(KeyCode::Insert), "Insert");
+    int insert_name_count = 0;
+    for (int i = 0; i <= static_cast<int>(KeyCode::Insert); ++i) {
+        // 遍历会经过未使用的枚举取值（如 78..99 的间隔段），那正是本用例要覆盖的兜底形态。
+        // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+        const auto k = static_cast<KeyCode>(i);
+        if (std::string_view{key_name(k)} == "Insert") {
+            ++insert_name_count;
+        }
+    }
+    AURORA_TEST_CHECK_EQ(insert_name_count, 1);
 }
 
 }  // namespace aurora::test_cases::utest_keycode

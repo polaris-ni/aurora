@@ -71,6 +71,21 @@ struct DrawCmd {
     float text_ls = 0;  ///< 文本字距（DrawText 排版标量，拆出存储以降低头耦合）
     float text_ws = 0;  ///< 文本词距（DrawText 排版标量，拆出存储以降低头耦合）
     bool text_italic = false;  ///< DrawText 是否以斜体绘制
+    /// @brief DrawText 书写方向：-1 = 未指定（按内容自动 guess，`TextLayoutOpts::direction` 的
+    ///        nullopt 语义）；0 = LTR；1 = RTL。存成整数而非 `optional<TextDirection>` 是为
+    ///        避免本头包含 font_engine.h（它包含 painter.h，与本头互为前置声明）。
+    ///        本字段补上了一个既有缺口：`direction` 此前只存在于直绘路径，录制时被丢弃、
+    ///        回放按 guess 走，RTL 文本经 DisplayList 后方向可能与直绘不同。
+    int text_dir = -1;
+    /// @brief DrawText 固定格推进档位（物理 px，已含 scale）；<= 0 表示不启用，
+    ///        对应 `TextLayoutOpts::fixed_cell_advance_px` 的 nullopt。
+    ///        只存一个标量而非 optional：档位的全部语义就是「有没有值 + 值是多少」，
+    ///        0 / 负值无实际意义（零步进会让所有字形叠在一列），故以 <= 0 兼表「未启用」。
+    float text_cell_px = 0.0F;
+    /// @brief DrawText 按族缺字回退链在 `str_pool_` 中的下标（存 U+001F 分隔的族名序列）；
+    ///        -1 = 无链。共享句柄无法跨录制/回放边界传递（回放侧须重建等价 opts），
+    ///        故按值序列化。用字符串池而非新增字段数组，是为不引入第四个数据池。
+    int text_chain_idx = -1;
     int font_idx = -1;  ///< 文本字体在 font_pool_ 的索引
     int image_idx = -1;  ///< 图像在 image_pool_ 的索引
     int pt_idx = -1;  ///< Polyline 点集在 point_pool_ 的索引

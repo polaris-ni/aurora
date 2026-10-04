@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -15,11 +17,24 @@
 /// @brief Aurora 根命名空间：本头在其中提供软件栅格绘制器 Painter 与光栅耗时排查接口。
 namespace aurora {
 
-/// @brief 渲染子域命名空间：本头仅前向声明其文本排版类型，避免 painter.h ↔ font_engine.h 循环包含。
+/// @brief 渲染子域命名空间：本头在此定义批量文本的片段类型，其余文本排版类型只前向声明
+///        （完整定义见 font_engine.h / text_aa_mode.h），避免 painter.h ↔ font_engine.h 循环包含。
 namespace render {
 struct TextLayoutOpts;  // 前向声明（完整定义见 font_engine.h），避免 painter.h ↔ font_engine.h 循环包含
 /// @brief 文本抗锯齿策略枚举（前向声明；完整定义见 text_aa_mode.h）。
 enum class TextAAMode : std::uint8_t;  // 前向声明（完整定义见 text_aa_mode.h）
+
+/// @brief 批量文本绘制的一个片段：一段同属性文本与其摆放区域。
+///
+/// 刻意与 `Painter::draw_text` 的单次入参一一对应（区域只读 `origin`，单位为逻辑 dp），
+/// 因此「一批片段逐个 `draw_text`」与 `draw_text_runs` 的输出逐位相同——批量化省的是每次
+/// 调用的字体面解析、像素尺寸与行高度量，不改变任何落笔坐标。
+struct TextRun {
+    std::string_view text;  ///< 片段的 UTF-8 文本（含 `\n` 时按多行排版，与 `draw_text` 同口径）。
+    Rect box;  ///< 摆放区域（逻辑 dp，仅读 `origin`：片段首行左上角）。
+    Font font;  ///< 字体描述（族/字号/字重）。
+    Color color;  ///< 文字颜色（alpha 参与混合）。
+};
 }  // namespace render
 
 class DisplayList;  // 前向声明（完整定义见 display_list.h）；录制/回放接口
@@ -169,6 +184,29 @@ class Painter {
     /// @param opts 排版选项。
     auto draw_text(const Rect &r, const std::string &s, const Font &f, Color c, render::TextAAMode aa_mode,
                    const render::TextLayoutOpts &opts) -> void;
+
+    /// @brief 批量绘制文本片段：把「一行拆成若干同属性片段」的场景（终端网格、表格单元格）从每片段一次
+    ///        调用降为整批一次调用。输出与逐个 `draw_text` 逐位一致，省的是每次调用的字体面解析、像素尺寸
+    ///        与行高度量。录制态按片段各落一条 `DrawText` 命令（回放后端不需新增分支）。
+    ///        抗锯齿策略取 FontEngine 进程级 `text_aa_mode()`，排版选项取默认值。
+    /// @param runs 片段数组（可空；空数组即无操作）。片段区域内所有 `Font` 相同时收益最大。
+    auto draw_text_runs(std::span<const render::TextRun> runs) -> void;
+
+    /// @brief 批量绘制文本片段（**整批共用排版 opts**）：字距/词距/斜体按同一份 `opts` 作用于全部片段。
+    ///        与逐个 `draw_text(..., opts)` 逐位一致；调用方若各片段排版属性不同，请按属性分组分批调用
+    ///        （本入口不提供 per-run opts，避免 `TextRun` 承载排版字段后与 `Font` 语义重叠）。
+    ///        抗锯齿策略取 FontEngine 进程级 `text_aa_mode()`。
+    /// @param runs 片段数组（可空；空数组即无操作）。
+    /// @param opts 整批共用的排版选项（字距/词距/斜体）。
+    auto draw_text_runs(std::span<const render::TextRun> runs, const render::TextLayoutOpts &opts) -> void;
+
+    /// @brief 批量绘制文本片段（**整批共用排版 opts + 显式覆盖抗锯齿策略**）。
+    ///        与逐个 `draw_text(..., aa_mode, opts)` 逐位一致。
+    /// @param runs 片段数组（可空；空数组即无操作）。
+    /// @param aa_mode 抗锯齿策略（覆盖 FontEngine 进程级默认）。
+    /// @param opts 整批共用的排版选项（字距/词距/斜体）。
+    auto draw_text_runs(std::span<const render::TextRun> runs, render::TextAAMode aa_mode,
+                        const render::TextLayoutOpts &opts) -> void;
 
     /// @brief 把带 alpha 的源色按源覆盖混合到单像素（受裁剪约束）；供字体/半透明使用。
     /// @param x 物理像素列（不做 dp 换算）。

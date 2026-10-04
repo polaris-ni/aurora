@@ -40,7 +40,7 @@
 //       unmap+接管+重映射会让窗口在观测连接上长期停在非 IsViewable 态，反而堵死落点判定）。
 //       本探针不移动用户的物理指针离开被测窗口，退出前关闭观测连接；落点判定按几何放行时，
 //       区分真伪的仍是第 3 步的 XFIXES 读回，故不会因此给出假阳性。
-//   本仓库实测（2026-09-20，WSLg rootless Xwayland，7680x2160）：策略 1 即以几何放行命中
+//   本仓库实测（WSLg rootless Xwayland，7680x2160）：策略 1 即以几何放行命中
 //       （`XQueryPointer` 回 child≠win，指针由合成器侧持有），11 形状读回 11/11 互异且逐行
 //       等于 `x11_cursor_glyph` 期望字形（left_ptr / xterm / hand2 / sb_v_double_arrow /
 //       sb_h_double_arrow / top_left_corner / top_right_corner / fleur / crosshair /

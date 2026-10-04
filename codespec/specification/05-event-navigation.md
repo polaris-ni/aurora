@@ -36,9 +36,9 @@ struct Event {
 
 | 事件 | 字段 | 位置 |
 |:---|:---|:---|
-| `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button` | `event.h` |
-| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers` | `event.h` |
-| `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0） | `event.h` |
+| `MouseEvent` | `position`（全局窗口逻辑坐标，由 Surface 后端写入）、`local_position`（相对当前控件的本地坐标，由 `EventDispatcher` 写入）、`action`、`button`、`pointer_id`、`click_count`（连击序号，见下）、`modifiers`（修饰键位组合，后端在产生处写入，见 §2.2.2） | `event.h` |
+| `KeyEvent` | `key`、`action`（`KeyAction::Down` / `Up`）、`modifiers`（位掩码，含 `Shift`/`Control`/`Alt`/`Meta` 与 **`NumLock`**；该字节**混合两类语义**（按住态 / 锁定态），比较时须按 `AURORA_MODIFIER_PRESSABLE_MASK` 取子集，见 §2.2.2；指针与滚轮事件同用此枚举） | `event.h` |
+| `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0）、`modifiers`（修饰键位组合，后端在产生处写入，见 §2.2.2） | `event.h` |
 | `TextInputEvent` | `text`（UTF-8 文本片段） | `event.h` |
 | `TextCompositionEvent` | `preedit`（UTF-8 预编辑串，空 = 组合结束/取消）、`cursor_index`（组合光标，**preedit 内码点下标**）、`sel_start` / `sel_end`（待转换选区，含尾；无选区时 `sel_end == AURORA_NO_SELECTION`）、`committed`（本次上屏文本，UTF-8） | `event.h` |
 | `FileDropEvent` | `position` 与拖放文件信息 | `event.h` |
@@ -46,17 +46,95 @@ struct Event {
 
 枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h）、`KeyCode`（`keycode.h`）。
 
+**数字小键盘（Keypad）口径**：`KeyCode` 的 `KP_*` 段（`KP_Insert` / `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` / `KP_Add` / `KP_Subtract` / `KP_Multiply` / `KP_Divide` / `KP_Decimal` / `KP_Separator` / `KP_0`–`KP_9`）建模全部小键盘键位，追加在枚举末尾并**写死显式数值**（`KP_Insert = 100` 起）——消费方普遍持有「键码 → 平台原生值」的逐值对齐映射表，中间插入新项会让那些表**静默错位**。`KP_Enter` 按既有决定并入 `KeyCode::Enter`，不单列。`NumLock` 建模为**修饰位**（`ModifierKey::NumLock = 1 << 4`）而非键码：它是切换键、对终端无发送意义，而消费方需要的是「本条按键发生时 NumLock 是开还是关」这一位。
+
+**框架不做二次翻译**：`KP_Prior` 恒为 `KP_Prior`，**不会**因 NumLock 关闭就降级成 `PageUp`。宿主的职责只到这里——「平台原始键 → 语义键码 + 修饰态」的一一映射；「NumLock 关闭时 `KP_Prior` 语义 = PageUp」这类降级由消费方按 `modifiers & ModifierKey::NumLock` 自行决定。后端取不到 NumLock 状态时按「关」处理，不静默假报「开」。
+
+**主键盘 `Insert`（`KeyCode::Insert = 123`）**：导航区此前只有小键盘档 `KP_Insert`，主键盘 Insert 在四个后端上全部落 `Unknown`（Win32 侧的 `case VK_INSERT` 是刻意留白、注释自陈「本轮不顺手补」）。现补上主档，取值为 `KP_9`（122）之后的下一个显式初值位——它语义上属「编辑 / 导航」段却**不**插回该段，因为既有段（0..94）靠隐式连号，插一项会让其后全部取值整体位移，而消费方的逐值对齐表会**静默错位**。**两档并存是刻意的**：X11 / Wayland 能区分来处（主键 keysym `0xFF63` 与 `KP_Insert` 的 `0xFF9E` 各占独立码点）就区分；Win32 / GLFW 区分不了就**恒给主档**——Win32 两区共用 `VK_INSERT`（NumLock 关闭时小键盘 0 也发该 VK），区分依据只在 lParam 的扫描码与 extended 位，而那套判据在导航区其余键上已被实测证伪；GLFW 键码表没有 `GLFW_KEY_KP_INSERT` 常量。**「恒给主档」不是 bug**：两区的终端语义本就等价（同为 CSI 2~），而按扫描码二次判定会把 Win32 拖进一条与其他后端不可对齐的私有口径。不要把它「修」成按来处分派。
+
+**跨后端产出不一致（平台事实，非疏漏）**：`KP_0`–`KP_9` 与运算键（`KP_Add` / `KP_Subtract` / `KP_Multiply` / `KP_Divide` / `KP_Decimal` / `KP_Separator`）三后端齐备；`KP_Insert` / `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` **只有 X11 / Wayland 后端产出**（X11 的 KP_* keysym 与主键各占独立码点，天然可分）。Win32 在导航区把两边**共用同一组虚拟键码**，实测六个键里只有 `Home` 真的可分（主键盘扫描码 `0x47` / 小键盘 `E0 4E`）——`End` / `PgUp` / `PgDn` 两边的 (VK, scan, extended) 完全相同或仅 extended 位不同（主键盘 PgUp / PgDn 本身就带 E0 前缀），把「带 E0」当成「来自小键盘」会**误判主键盘那两个键**，误判比不判更糟，故判据保守到只认 Home。GLFW 的键码表本身没有 `GLFW_KEY_KP_INSERT` / `_HOME` 之类的常量，同样无法区分。**故消费方在 Win32 与 GLFW 上不能假定这几项一定命中**，需要时应按平台兜底。判据本体在 `src/aurora/window/detail/win32_keymap.h` 的 `is_numpad_nav_scan`（含完整实测对照表）与 `src/aurora/window/keysym_map.h`，均有单测逐值锁定。GLFW 侧的键码表自 `glfw_surface.cpp` 的 `static` 函数抽到可单测内部头 `src/aurora/window/detail/glfw_keymap.h`（与 `win32_keymap.h` 对称）：此前「四后端键码一致」这条契约在 Win32 与 X11 / Wayland 两腿都有 CTest 断言，唯独 GLFW 腿没有，错位只能等真机才显形。
+
 **修饰键语义（`KeyEvent::modifiers`）= 队列相对，而非派发时刻的物理读数**：宿主按键盘消息流推进一份修饰位状态（Win32 侧为 `src/aurora/window/detail/win32_modifiers.h` 的 `ModifierKeyTracker`），`KeyEvent` 携带的是「该键在队列里被处理的那一刻」的修饰态。取此口径的理由：在派发时刻异步采样（`GetAsyncKeyState`）会让热键命中与否取决于「消息被泵到之前修饰键是否仍按着」，于是 UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时按键**静默**丢失（同载体同形态实测 0/10，见 `manual-test/21-debug.md` TC-DEBUG-004 备注）。三条配套边界：
 
 - **左右归并**：`VK_LSHIFT` / `VK_RSHIFT` / `VK_SHIFT` 折到同一位，使不配对的变体（注入或布局按下给 L 变体、抬起给通用码）不残留幻影；代价是同位上任一变体抬起即清位。
 - **失焦清空、激活播种**：`WM_ACTIVATE` 转非激活与 `WM_KILLFOCUS` 整体清零（未送达的抬起消息不可追），重新取得激活时用一次异步读数播种基线（覆盖「Alt+Tab 切进来时 Alt 已按下」）。因此修饰键**只在持有键盘焦点的那个窗口内计数**——非前台窗口上的物理 Ctrl 不再被别的窗口借读，这恰是 Windows 自身的键盘语义。
-- **`WM_SYSKEY*` 只跟态、不派发**：按住 Alt 期间的按键仍交 `DefWindowProc`（`Alt+F4`、菜单助记键归系统），但 Alt 自身的按下/抬起计入跟踪器，否则 Alt 松开后的普通按键会错报带 Alt。副作用是 Alt 组合在库侧仍不派发（既有边界）。
+- **`WM_SYSKEY*` 与常规键同路进派发链**：按住 Alt 期间的按键（`WM_SYSKEYDOWN` / `WM_SYSKEYUP`）与 `WM_KEY*` 走**同一个** `on_key` 通道产出 `KeyEvent`，消费（`is_handled`）即 `return 0`；未消费则原样回落 `DefWindowProcA`——系统菜单、菜单助记键、`Alt+F4` 关闭等原生行为**只在 Aurora 侧不认领时**发生，不会被无条件掐死。修饰态推进**早于**派发（与 `WM_KEY*` 同口径），故「按下 Alt 的那条 `KeyEvent` 自身就带 Alt 位」。**例外（只推进态、不派发）**：`VK_MENU`（Alt 自身，左右都算）与 `VK_F10`（系统菜单键）——它们是修饰/系统语义，发出无意义键码会污染快捷键匹配；判据是纯函数 `detail::syskey_dispatches(int vk)`（`win32_modifiers.h`），可单测直接吃表。**本轮仅 Win32 收敛**：X11 / Wayland / GLFW 侧 Alt 组合是否已作为常规 key press 派发需各自复核，未在本轮统一。文本通道不受影响：Alt 系本就不产 `TextInputEvent`（Windows 不为 Alt 组合发 `WM_CHAR`），故消费方的口径是「无 Alt/Meta 的可打印键走文本通道，带 Alt 的走键码通道」，两边不会重复发送同一字符。
 
-指针类事件（`MouseEvent` / `ScrollEvent`）不携带修饰位。
+指针类事件（`MouseEvent` / `ScrollEvent`）的修饰键位见 §2.2.2。
+
+### 2.2.1 连击序号（`MouseEvent::click_count`）
+
+`MouseEvent::click_count`（`std::uint8_t`，默认 1）表示本次 Press 是同一指针、同一按键上的第几次连续点击：1 = 单击，2 = 双击，3 = 三击。
+
+**判定集中在派发层，平台后端不参与**：五个后端只负责把原始输入翻译成 `MouseEvent`，不读也不写 `click_count`。实现为 `ClickTracker`（`event/dispatcher.h`），被 `EventDispatcher`（鼠标）与 `TouchDispatcher`（触控合成流）共用，两条路径口径一致——触摸因此也支持双 tap。
+
+判定规则（以 **Release 为「一次点击完成」的标记点**）：
+
+1. **只有 Press 参与计数**；Release / Move 恒写 1（抬起只是把本次点击标记「已完成」）。因此「按住不放」不产生连击——与浏览器 `detail`、Win32 `WM_LBUTTONDBLCLK` 同口径。
+2. 本次 Press 与**上次已完成点击（Release）**比对，同时满足才累加 `count = 上次 + 1`：
+   - 同一 `button`；
+   - 同一指针（`pointer_id`，鼠标与触控、左键与右键各自独立计数）；
+   - 时间差 `dt <= click_window_ms`；
+   - 位移 `<= click_radius_dp`。
+3. 任一不满足即**重置为 1**，成为新点击序列的起点。
+4. 累加**封顶 `AURORA_MAX_CLICK_COUNT`（3）**：更快的连续点击仍记 3，供「三击选整段」这类语义使用。
+
+**判据坐标取 `position`（窗口逻辑坐标），不取 `local_position`**：后者由派发器沿命中链逐控件改写，跨事件比较无意义。
+
+**可调阈值**（`EventDispatcher` / `TouchDispatcher` 上的公开成员，初值取自 `event.h` 的库级常量）：
+
+| 成员 | 初值 | 常量 | 语义 |
+|:---|:---|:---|:---|
+| `click_window_ms` | 500 | `AURORA_DEFAULT_CLICK_WINDOW_MS` | 连击时间窗（毫秒）；**置 0 即关闭连击判定**（任何间隔都不累加），置极大值使窗口恒开——供测试注入极端阈值，无需全局时钟钩子 |
+| `click_radius_dp` | 4 | `AURORA_DEFAULT_CLICK_RADIUS_DP` | 连击位移半径（逻辑 dp） |
+
+阈值是**库内约定常量，未接线到系统双击速度设置**（Windows `GetDoubleClickTime` / X11 等）；取库内一致值换跨平台手感一致，后续接系统值时须同步修订本段。
+
+**窗口装饰层（Wayland CSD 标题栏双击最大化）直接引用同一对常量**（`AURORA_DEFAULT_CLICK_WINDOW_MS` / `AURORA_DEFAULT_CLICK_RADIUS_DP`），不另写一套，避免「库内两套阈值」漂移。两者语义正交：CSD 标题栏属窗口装饰层、不进 widget 树、不经 `EventDispatcher`，因此它读不到（也无需读）派发器实例上的可调成员，只能引常量。历史值为 300ms / 5px，统一后与其它平台一致为 500ms / 4dp。
 
 **滚动方向约定**：`ScrollEvent::delta_y` 正方向为「向上滚动」（应露出上方内容、offset 减小）。所有滚动控件统一用 `offset_ - e.delta_y * step`；误用 `+` 会导致方向相反。
 
 **滚动增量单位**：`delta_y` 是**设备无关增量**（滚轮格数口径），不是 dp；控件按自己的 `step`（dp/增量单位）换算位移。回传余量 `remaining_y` **与 `delta_y` 同单位同号**（未吃尽的增量数），派发器把它原样作为下一跳的 `delta_y`，故跨控件嵌套时各层按自己的 `step` 折算——内层 `step=16`、外层 `step=1` 也不会串味。
+
+### 2.2.2 指针与滚轮事件的修饰键位
+
+`MouseEvent::modifiers` 与 `ScrollEvent::modifiers`（`ModifierKey`，默认 `ModifierKey::None`）携带**事件产生那一刻**的修饰键位组合，与 `KeyEvent::modifiers` **同一个位掩码枚举、同一份真值源、同一套判读方式**（`e.modifiers & ModifierKey::Shift` 非 0 即该修饰键在事件发生时有效）。此前只有 `KeyEvent` 携带修饰位，控件拿到指针事件时无法判断 Shift / Ctrl / Alt / Meta 是否按下，「Alt+拖拽选区」「Ctrl+滚轮缩放」「Ctrl+点击打开链接」这类组合在框架事件模型上结构上不可能实现。
+
+**核心原则：后端在事件产生处盖章，派发器只透传、绝不推断**。`EventDispatcher::dispatch_mouse` 只写 `local_position` 与 `click_count` 两个字段，对 `modifiers` 只透传不改写；`EventDispatcher::dispatch(Widget&, ScrollEvent&)` 的余量上冒循环只重置 `remaining_y`、改写 `delta_y`，`position` 与 `modifiers` 均不被动——故嵌套滚动的两级派发中 `modifiers` 两次都可见且相同。
+
+**两种被明确否决的做法**（不要实现，后果都是「看起来能跑、实则静默错」）：
+
+- ❌ **在派发器里用「最后一次 `KeyEvent` 的 `modifiers` 快照」兜底**。修饰键的按下事件可能根本不属于本窗口：`Alt+Tab` 切进来时按住的 Alt，其按下消息投给了别的窗口，本窗口的快照必然错。快照兜底在单窗口快速操作下看起来是对的，只在跨窗口切换时失效——正是最难复现的一类。
+- ❌ **在派发时刻现场轮询物理按键态**（Win32 的 `GetAsyncKeyState` 一类）。指针事件同属消息驱动，从消息进队列到派发可能已晚于一帧；UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时修饰键早已抬起，热键/手势**静默**丢失（同载体同形态实测 0/10，见 `manual-test/21-debug.md` TC-DEBUG-004 备注）。
+
+**逐后端真值源**（每条路径只允许一个来源；同一字段两个真值源会在两个来源分歧时静默错位）：
+
+| 后端 | 真值源 | 落点与要点 |
+|:---|:---|:---|
+| Win32 | `src/aurora/window/detail/win32_modifiers.h` 的 `ModifierKeyTracker`（随键盘消息流推进，与 `KeyEvent` 同一份 `get()`） | `on_mouse` / `on_wheel` 内 `e.modifiers = mods.get();`。**不改 `handle_mouse(HWND, UINT, LPARAM)` 签名、不读 `wParam` 的 `MK_LBUTTON` 一类位**：按 Win32 约定那几位不携带 Alt，走它就得为 Alt 另接第二个来源。tracker 的既有策略原样保留——失激活 `clear()`、重激活 `seed(async_modifiers())` 播种一次、**指针捕获变化不清空**（键盘焦点未动、抬起消息仍进本窗口，清空反而会让 Shift+拖选跨出窗口时丢掉 Shift） |
+| X11 | 事件自带的 `state` 掩码（`XButtonEvent` / `XMotionEvent` 与 `XKeyEvent` 共用同一字段布局，X 核心协议保证语义一致） | `send_mouse` 增一参 `state` 并透传，滚轮按钮 4..7 分支同源；折算走 `src/aurora/window/detail/x11_modifiers.h` 的 `mods_from_x11_state`（**Mod1=Alt、Mod4=Meta** 的 X PC 惯例），与键盘路径同一实现，不为指针另写一份掩码映射。`XLeaveWindowEvent`（`XCrossingEvent`）**没有 `state` 字段**，该条合成 Move 传 0 → `None`（不可知即无修饰），它只用于清悬停、不承载手势语义 |
+| Wayland | `on_modifiers` 经 xkbcommon 维护的 `mods` 缓存 | `send_mouse` 与 `ptr_axis`（滚轮）均填该缓存，与键盘路径（`on_key`）读的同一个字段。**Wayland 协议不随指针事件送修饰态**（`wl_pointer` 的 enter/motion/button 回调都没有 mods 参数），故该缓存是本后端指针路径唯一可得来源，不新增机制 |
+| GLFW | ① `on_mouse_button` 的**回调形参 `mods`**（GLFW 在按钮回调上确实发掩码）；② `on_cursor_pos` / `on_scroll` 读 `glfwGetKey` 的**缓存事件态** | 两条入口都收敛到 `src/aurora/window/detail/glfw_modifiers.h`，避免同一后端内两种 Shift 语义。入口 ② 的合法性依据：GLFW 只给 button / key / char 回调发掩码，这两个回调的签名不给；`glfwGetKey` 读的是 GLFW 自己随 key 事件推进的缓存、**不是对系统的物理轮询**（`third_party/glfw/docs/input.md`：「This function only returns cached key event state. It does not poll the system for the current state of the key.」）。左右两侧任一按下即置位，与 Win32 侧同归并口径。**仓库固定 GLFW 3.5.1，没有「读当前修饰态」的窗口属性**（`GLFW_MODIFIERS` 在 3.6 开发分支与 master 上均尚未存在，3.6 也未发布），故不升级依赖 |
+| WASM | `EmscriptenMouseEvent` 的 `ctrlKey` / `shiftKey` / `altKey` / `metaKey` 四个 `bool`（字段名以本机 emsdk 的 `html5.h` 实测为准，与键盘路径读的 `EmscriptenKeyboardEvent` 同名同型） | `wasm_surface.h` 的 `on_mouse` 内折算；DOM 事件自带该快照，读取即「那一刻」的状态。**本后端不注册滚轮回调**（不产 `ScrollEvent`），不属漏实现而是另一条独立能力 |
+| macOS | — | 指针通道整条未实装（骨架文件零 `MouseEvent` / `ScrollEvent` 构造），不伪造实现 |
+
+**合成事件一律 `None`**：由触控合成的 `MouseEvent`、以及 `Widget::scroll_by` / `Scroll::scroll_by` 这类程序化滚动合成的 `ScrollEvent` 恒为 `ModifierKey::None`——它们不对应任何物理修饰态，凭空补一个「当前修饰态」会让消费方把程序化滚动误判成用户手势。**本仓当前的合成点清单**（逐条对应单测）：
+
+| 合成路径 | 位置 | 事件 |
+|:---|:---|:---|
+| 触控合成（`TouchDispatcher` 按 `pointer_id` 造事件） | `event/dispatcher.cpp` 的 `deliver_synthesized` | `MouseEvent` |
+| 程序化滚动（`scroll_by` 内部**确实构造**一条 `ScrollEvent`，只填 `delta_y` 后交 `on_scroll`） | `widget.h` / `scroll.h` 的 `scroll_by` | `ScrollEvent` |
+| 可达性动作合成（Click 造 press+release、ScrollUp/Down/Left/Right） | `widget/widget.cpp` 的 `perform_action` | `MouseEvent` / `ScrollEvent` |
+| 诊断注入（`simulate_click` / `_scroll` / `_drag` / `_pointer`） | `inspector_api.cpp` | `MouseEvent` / `ScrollEvent` |
+| perf 基准造的事件 | `perf/scroll_bench.cpp` | `ScrollEvent` |
+
+诊断注入面**刻意不加修饰参数**：测试请直接构造事件字面量经 `EventDispatcher::dispatch` 派发；给注入面加修饰键位属另一项独立决策。**需要区分事件来源的调用方用既有的 `pointer_id`**（触控合成有值、真实鼠标为 `nullopt`），不要靠 `modifiers` 推断——它在两种情形下都是 `None`。`ScrollEvent` 无 `pointer_id` 字段，消费方按「`None` 即无修饰」使用即可。
+
+**`NumLock` 位在指针事件上的宽度差异（已知、不对齐）**：`MouseEvent` / `ScrollEvent` 与 `KeyEvent` 复用同一枚举，故 Win32 / X11 / Wayland 侧的真值源会把 `NumLock` 锁定位**一并带上**（它们的折算入口是键盘与指针共用的同一份函数）；GLFW 指针路径只取四个可按住的位（锁定位与指针手势无语义关系，无小键盘参与）。消费方**只看四个可按住位时无需掩码**（判定 `& ModifierKey::Shift` 等不受高位影响），也不应从指针事件取 `NumLock`。这条差异是刻意保留的：指针路径另开一份裁剪逻辑会在同一后端内制造第二个真值源。
+
+**该字节混合两类语义，比较时须按掩码取子集**：`modifiers` 里 `Shift` / `Control` / `Alt` / `Meta` 是「此刻被按住」，`NumLock` 是「键盘锁定灯态」——切换键按下的瞬间翻转、抬起不恢复，与按住态不可混用。四个后端都会在事件上盖章锁定位，故**做两处位集的整体比较时必须先摘掉锁定位**，否则键盘锁定态会污染结果（快捷键层即因此踩过一次：`KeyCombo::matches` 曾按整字节相等比较，`NumLock` 开着时全部应用级快捷键恒不匹配）。掩码常量 `AURORA_MODIFIER_PRESSABLE_MASK` / `AURORA_MODIFIER_LOCK_MASK` 的分工与「新增锁定位归后者」的纪律见 [`06-app-platform.md`](06-app-platform.md) §8.4。
+
+**Win32 侧该位现随消息流推进**：Win32 的 `ModifierKeyTracker` 把两类位分成两份内部状态——`bit_for` 只管按住态（置位 / 清位），锁定态由独立的 `lock_bit_for` 承载并按 **toggle** 处理（`WM_KEYDOWN` / `WM_SYSKEYUP` 的 `VK_NUMLOCK` 翻转该位，抬起消息不翻：一次 Down + 一次 Up 是一次物理动作）。此前该位只在 `handle_activate` 时经 `async_modifiers()` 播种一次、此后在派发期是陈旧值，且失激活 / `WM_KILLFOCUS` 的 `clear()` 会把它抹成「关」——现 `clear()` 只清按住态，锁定态保留（锁定态没有抬起消息可言，抹成「关」是假报）。`get()` 回两者的并集，故 `KeyEvent` / `MouseEvent` / `ScrollEvent` 三个落笔点的对外形状逐位不变，指针事件也因此带上新鲜的锁定位（与 X11 / Wayland 现行行为一致）。GLFW 的不对称照旧：其指针路径刻意不读该位，仍属上段登记的「已知、不对齐」。
 
 ### 2.3 坐标契约
 
@@ -113,8 +191,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | 入口 | 说明 |
 |:---|:---|
 | `static dispatch(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool` | 指针事件；委托进程内持久 `EventDispatcher` 单例，故同样保留跨事件指针捕获；`FocusManager*` 可选，非空时派发期暴露为「当前焦点管理器」 |
-| `dispatch_mouse(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool`（实体方法） | 带指针捕获的鼠标派发：Press 命中后缓存命中链，后续 Move/Release 即使命中失败也持续派发给按下时目标，直到 Release 解除捕获（`Application` 走此路径） |
-| `static dispatch(Widget& root, KeyEvent&, FocusManager&) -> bool` | 键盘事件；识别 Tab / Shift+Tab 并转为 `move_focus`，方向键与激活键各有一个控件级 opt-in 前置投递（`wants_navigation_keys()` / `wants_activation_keys()`，见 §4.2）；`root` 为统一重载签名而保留，键盘不经命中链 |
+| `dispatch_mouse(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool`（实体方法） | 带指针捕获的鼠标派发：Press 命中后缓存命中链，后续 Move/Release 即使命中失败也持续派发给按下时目标，直到 Release 解除捕获（`Application` 走此路径）；**派发前覆写 `e.click_count`**（连击序号，§2.2.1） |
+| `static dispatch(Widget& root, KeyEvent&, FocusManager&) -> bool` | 键盘事件；识别 Tab / Shift+Tab 并转为 `move_focus`，Tab、方向键与激活键各有一个控件级 opt-in 前置投递（`wants_tab_keys()` / `wants_navigation_keys()` / `wants_activation_keys()`，见 §4.2）；`root` 为统一重载签名而保留，键盘不经命中链 |
 | `static dispatch(Widget& root, ScrollEvent&) -> bool` | 滚动事件：沿命中链**自最深向根**找 `wants_scroll()` 者逐个派发，余量经 `remaining_y` 上冒（§3.3） |
 | `static dispatch(Widget& root, FileDropEvent&) -> bool` | 文件拖放事件（不冒泡，仅交给命中目标） |
 | `static dispatch(Widget& root, TextInputEvent&, FocusManager&) -> bool` | 文本输入（只路由到焦点控件；无焦点返回 `false`） |
@@ -122,7 +200,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 派发流程：先经 `Widget::hit_test` 找到最深命中的目标组件，再沿父链向上调用处理方法，直到 `handled` 为真或到达根。
 
-`TouchDispatcher`（`dispatcher.h`）处理触控路径：实体方法 `dispatch(Widget& root, TouchEvent&, FocusManager* = nullptr) -> bool`，按 `TouchPoint::id` 做指针捕获，原始多点流全链广播 + 合成 `MouseEvent` 手势流冒泡，焦点行为与鼠标路径一致。
+`TouchDispatcher`（`dispatcher.h`）处理触控路径：实体方法 `dispatch(Widget& root, TouchEvent&, FocusManager* = nullptr) -> bool`，按 `TouchPoint::id` 做指针捕获，原始多点流全链广播 + 合成 `MouseEvent` 手势流冒泡，焦点行为与鼠标路径一致。合成事件同样过 `ClickTracker`，因此**触摸支持双 tap**（`click_count` 达 2），与鼠标双击同口径；`click_window_ms` / `click_radius_dp` 在 `TouchDispatcher` 上有同名的公开可调成员。
 
 ### 3.2 命中测试
 
@@ -151,7 +229,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 ### 4.1 FocusManager
 
-`FocusManager`（`event/focus.h`）持 `root_` 与 `focused_`，接口：`set_root(Widget*)`、`set_focus(Widget*, FocusDirection)`、`request_focus(Widget*)`、`has_focus(const Widget*)`、`clear()`、`move_focus(FocusDirection)`、`focused()`、`set_on_change(cb)`、`push_scope(Widget*)`、`pop_scope()`、`scope_depth()`。
+`FocusManager`（`event/focus.h`）持 `root_` 与 `focused_`，接口：`set_root(Widget*)`、`set_focus(Widget*, FocusDirection, FocusArrival)`、`request_focus(Widget*)`、`has_focus(const Widget*)`、`clear()`、`move_focus(FocusDirection)`、`focused()`、`set_on_change(cb)`、`push_scope(Widget*)`、`pop_scope()`、`scope_depth()`。`set_focus` 的到达方式参数默认 `FocusArrival::Programmatic`（环可见），故显式聚焦的全部既有调用点行为不变；`move_focus` 恒以 `Keyboard` 送达（见 §4.4）。
 
 `FocusDirection`（`focus.h`）取值 `Forward` `Backward` `Up` `Down` `Left` `Right`。
 
@@ -161,15 +239,27 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 ### 4.2 组件焦点接口
 
-`Widget` 提供：`focusable()`、`set_focusable(bool)`、`wants_focus()`（虚钩子，Tab 停点意愿，见下）、`tab_index()`、`set_tab_index(int)`、`is_focused()`、`request_focus()`、`on_focus_change(bool)`（虚钩子，基类维护 `is_focused_` 并标脏重绘）、`wants_focus_ring()`（虚钩子，基类统一焦点环开关，见 §4.4）。
+`Widget` 提供：`focusable()`、`set_focusable(bool)`、`wants_focus()`（虚钩子，Tab 停点意愿，见下）、`tab_index()`、`set_tab_index(int)`、`is_focused()`、`request_focus()`、`on_focus_change(bool)`（虚钩子，基类维护 `is_focused_` 并标脏重绘）、`focus_arrival()` / `set_focus_arrival()`（最近一次获焦的到达方式，由 `FocusManager::set_focus` 写入）、`wants_focus_ring()`（虚钩子，基类统一焦点环开关）与 `focus_ring_shown()`（本帧是否画环，见 §4.4）。
 
 **焦点管理器「随派发可得」**：`EventDispatcher::dispatch(Widget&, MouseEvent&, FocusManager*)` 在派发期经线程局部暴露「当前焦点管理器」（`current_focus_manager()`），`request_focus()` 读之，无需在每控件上递归注入。无焦点管理器（`nullptr`）时 `request_focus` 静默 no-op。
 
 `move_focus` 按 `tab_index` 稳定排序后循环取前 / 后一个；Tab / Shift+Tab 由 `dispatch(Widget&, KeyEvent&, FocusManager&)` 识别并转 `move_focus`。
 
+**三个「控件优先、宿主兜底」钩子**：激活键、方向键、Tab 三类键各自有一个 opt-in 虚钩子，共用同一约定——**默认 false，宿主语义逐字节不变；覆写为 true 后派发器先投递 `on_key_event`，其消费（`is_handled`）即止；未消费才回落宿主的全局语义**。因此控件只需处理自己认识的按键，其余按键行为保持不变，无需为不关心的组合键写空实现。三个钩子都只在**焦点控件**上探测，不经冒泡（键盘路由本就不冒泡），且都只在 `KeyAction::Down` 阶段生效。
+
+| 键类 | 宿主默认语义 | 控件级 opt-in 钩子 | 未消费时回落 |
+|:---|:---|:---|:---|
+| 激活键（Enter / Space） | `focused->activate()` | `wants_activation_keys()` | `activate()` |
+| 方向键（↑ / ↓ / ← / →） | `move_focus(dir)` 几何焦点导航 | `wants_navigation_keys()` | 几何焦点导航 |
+| Tab / Shift+Tab | `move_focus(Forward/Backward)` 焦点序遍历 | `wants_tab_keys()` | 焦点序遍历 |
+
+`wants_tab_keys()` 取复数形式：Tab 与 Shift+Tab 一对都算，前进 / 后退方向由事件自身的 Shift 修饰位给出，钩子不区分二者。
+
 **激活键（Enter / Space）路由**：`Enter` 与 `Space` 归为「激活键」，默认由派发器直接调用焦点控件的 `activate()`（按钮等「按下即激活」语义），控件本身观察不到这两个按键。需要观察 Enter 的文本录入类控件（`TextInput` / `RichTextEdit`）覆写 `Widget::wants_activation_keys()` 返回 true：派发器先投递 `on_key_event`，其消费（`is_handled`）即止；未消费才回落 `activate()`。`TextInput::on_submit`（Enter 提交）即由此路径可达——若只依赖激活语义，Enter 会被在焦点路由前消费掉而永远到不了控件。
 
-**方向键（↑ / ↓ / ← / →）路由**：与激活键同构的「控件优先、宿主兜底」约定。方向键默认归 `FocusManager::move_focus(dir)` 做几何焦点导航，控件观察不到；覆写 `Widget::wants_navigation_keys()` 返回 true 的控件先收到 `on_key_event`，消费即止、焦点不动，未消费才回落几何焦点导航。认领方向键的两类控件：文本录入类（`TextInput` 与 `RichTextEdit` 的 ←/→ 移光标与 Shift 扩选）与键盘重排类（`ReorderableList`）。**文本录入控件必须在此认领**：单行输入框左右键若落到几何焦点导航，`move_focus(Left/Right)` 一旦命中候选就把焦点移走，此后所有按键（含退格）都发给新焦点控件，输入框当场失焦且再也无法用键盘编辑——这正是无人认领时的错误形态。未被认领的方向（如单行框的 ↑/↓）仍走焦点导航，默认 `false` 对既有非文本控件逐字节不变。两处谓词都只在**焦点控件**上探测，不经冒泡（键盘路由本就不冒泡）。
+**方向键（↑ / ↓ / ← / →）路由**：与激活键同构的「控件优先、宿主兜底」约定。方向键默认归 `FocusManager::move_focus(dir)` 做几何焦点导航，控件观察不到；覆写 `Widget::wants_navigation_keys()` 返回 true 的控件先收到 `on_key_event`，消费即止、焦点不动，未消费才回落几何焦点导航。认领方向键的两类控件：文本录入类（`TextInput` 与 `RichTextEdit` 的 ←/→ 移光标与 Shift 扩选）与键盘重排类（`ReorderableList`）。**文本录入控件必须在此认领**：单行输入框左右键若落到几何焦点导航，`move_focus(Left/Right)` 一旦命中候选就把焦点移走，此后所有按键（含退格）都发给新焦点控件，输入框当场失焦且再也无法用键盘编辑——这正是无人认领时的错误形态。未被认领的方向（如单行框的 ↑/↓）仍走焦点导航，默认 `false` 对既有非文本控件逐字节不变。
+
+**Tab 键路由**：`Tab` 与 `Shift+Tab` 默认归 `move_focus(Forward / Backward)` 做焦点序遍历，焦点控件观察不到这两个按键。带自有 Tab 语义的复合控件（字段分组的「跳到下一组」、树件的同级折叠切换、分区跳转等）覆写 `Widget::wants_tab_keys()` 返回 true：派发器先投递 `on_key_event`，消费即止、焦点不动；未消费才回落到焦点序遍历，故控件只需处理自己认识的组合键。框架**不内置**任何此类终端控件，钩子给出即可，由消费者自行覆写。
 
 **端点键（Home / End）语义**：`Home` / `End` 不属派发器的 Tab / 方向键 / 激活键任一类别，因此**无需认领**——未匹配全局快捷键时天然经焦点路由直达焦点控件，控件消费即止。两个文本录入控件都把它实现为「文本 / 文档两端」（单行框本无行首行尾之别；`RichTextEdit` 的行内定位属未实现项，当前按整篇文档首尾处理），且与 ←/→ 共用各自的选区模型：非 Shift 时跳光标并清选区，Shift 时从光标扩到对应端点。`TextInput` 额外约束：光标本已在端点且原无选区时，Shift+`Home`/`End` 的扩选结果为空，不得伪造一个单字符选区（否则一次退格会删掉无辜字符）。
 
@@ -178,7 +268,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 - `focusable()` 是**宿主侧的显式开关**（默认 `true`）：`false` 一票否决，`true` 只代表「宿主没否决」，不代表该停点存在。
 - `wants_focus()` 是**控件类型侧的意愿**（`Widget` 基类默认 `true`）：由类型自己声明「我是不是一个交互停点」，宿主无需逐个关闭。
 
-覆写为「有输入语义才入序」的只有两类：**纯布局容器**（`Container` / `SingleChild` 基类——`Column`/`Row`/`Stack`/`Grid`/`Wrap` 与 `Show`/`Provider`/`Lifecycle`/`Badge` 等，它们本身不接受输入）与**纯展示件**（`Text`/`Divider`/`Spacer`/`Placeholder`/`RichText`/`Progress`/`Skeleton`/`ImageView`/`Canvas`/`BreakpointBuilder`/`LayoutBuilder`）。判定统一走 `Widget::has_input_semantics()`（protected）：`wants_click() || modifier.has_gesture() || modifier.has_context_menu() || wants_scroll() || wants_navigation_keys() || wants_activation_keys()`——任一成立即认为该控件确实需要键盘到达，于是同一个 `Text` 挂上 `.clickable(...)` 后自动回到 Tab 序，宿主不必再改焦点属性。因此该覆写是**减法而非一刀切**：自带滚动语义的容器（`Scroll`/`LazyList`/`LazyRow`/`GridView`/`ReorderableList`/`PullToRefresh`）与自带点击的 `ExpansionPanel` 仍是停点。**交互控件无需任何声明**（基类默认 `true` 已覆盖）。
+覆写为「有输入语义才入序」的只有两类：**纯布局容器**（`Container` / `SingleChild` 基类——`Column`/`Row`/`Stack`/`Grid`/`Wrap` 与 `Show`/`Provider`/`Lifecycle`/`Badge` 等，它们本身不接受输入）与**纯展示件**（`Text`/`Divider`/`Spacer`/`Placeholder`/`RichText`/`Progress`/`Skeleton`/`ImageView`/`Canvas`/`BreakpointBuilder`/`LayoutBuilder`）。判定统一走 `Widget::has_input_semantics()`（protected）：`wants_click() || modifier.has_gesture() || modifier.has_context_menu() || wants_scroll() || wants_navigation_keys() || wants_activation_keys() || wants_tab_keys()`——任一成立即认为该控件确实需要键盘到达，于是同一个 `Text` 挂上 `.clickable(...)` 后自动回到 Tab 序，宿主不必再改焦点属性。因此该覆写是**减法而非一刀切**：自带滚动语义的容器（`Scroll`/`LazyList`/`LazyRow`/`GridView`/`ReorderableList`/`PullToRefresh`）与自带点击的 `ExpansionPanel` 仍是停点。**交互控件无需任何声明**（基类默认 `true` 已覆盖）。三个 opt-in 钩子都计入本谓词：认领 Tab 的控件若被漏并，会因不在焦点序里而永远拿不到焦点——它能收到 `on_key_event`，却收不到那一次能让自己进入序的 Tab。
 
 分级只作用于 `move_focus` 的候选集，**不影响**指针 Press 的焦点归属（§4.3）与 `set_focus` / `request_focus` 的显式聚焦——二者仍只看 `focusable()`，因此点击一个纯展示容器依然不会误清焦点，而业务代码强制聚焦任何未被否决的控件都仍然成功。
 
@@ -188,19 +278,32 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **整条链都不可获焦**（点到纯展示容器）或**命中链为空**（点到根外空白）均视为点击空白——`FocusManager` 清焦点（`set_focus(nullptr)`），旧焦点控件收到 `on_focus_change(false)`（`Text` 据此清除选区高亮，`TextInput` 据此隐藏光标）。
 
-鼠标与触控路径行为一致。`Release` **不**切换焦点，避免拖选结束落在别处时选区被清。
+鼠标与触控路径行为一致，且两条 Press 分支都以 `FocusArrival::Pointer` 送达焦点——焦点照给，但不画基类统一焦点环（见 §4.4）。`Release` **不**切换焦点，避免拖选结束落在别处时选区被清。
 
-`TextInput` 点击时 `request_focus`，`is_focused()` 控制光标显示。
+`TextInput` 点击时 `request_focus`，`is_focused()` 控制光标显示；该自主请求**保留**派发器已记下的到达方式，不把指针送达改写成程序化送达。
 
 ### 4.4 焦点可视化：基类统一焦点环
 
-焦点态必须在像素上可判定，否则人工侧只能靠猜（`Button` 这类控件自身不画任何聚焦外观）。为此 `Widget::paint_content` 末尾由**基类统一绘制焦点环**：控件持有焦点（`is_focused()`）且 `wants_focus_ring()` 为 `true` 时，在其视觉盒外画一圈主题色（`inherit_theme(ctx).primary`）圆角边框。
+焦点态必须在像素上可判定，否则人工侧只能靠猜（`Button` 这类控件自身不画任何聚焦外观）。为此 `Widget::paint_content` 末尾由**基类统一绘制焦点环**：判据集中在 `Widget::focus_ring_shown()`——控件持有焦点（`is_focused()`）、`wants_focus_ring()` 为 `true`、且**焦点不是指针按下送达**（`focus_arrival() != FocusArrival::Pointer`）时，在其视觉盒外画一圈圆角边框，环色取主题命名令牌 `focus.ring`（未登记时回退 `primary`，见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。绘制分支与 `dirty_bounds()` 的外扩判据**共用这同一个谓词**，不得各写一份条件：画了却不标脏 = 环被裁剪吃掉，标脏却不画 = 白擦一圈。
 
-- 几何：环带严格落在盒外 **2–4 dp** 的带宽内（间距 2 dp + 环宽 2 dp，圆角 4 dp 小于常见控件圆角故不与边框弧线相交）。**不得压在控件自身边缘像素上**——否则会把 `RichTextEdit` 之类贴着边缘绘制的-caret / 边框像素覆盖掉。
-- 开关：`wants_focus_ring()`（`Widget` 基类默认 `true`，虚钩子）已自带聚焦态外观的控件覆写为 `false`，以免双环。当前唯一覆写者是 `TextInput` 与 `RichTextEdit`（它们画 Fluent 式主题色加粗聚焦边框，`paint_frame`）。
-- 重绘：`on_focus_change(bool)` 基实现在维护 `is_focused_` 后调用 `mark_needs_paint()`，故焦点变化必然进下一帧，环不会「逻辑上聚焦、像素上无环」。
-- 可观测性：环是无条件的像素证据，配合树快照里持有焦点节点的 `focused: true`（见 [`08-tooling.md`](08-tooling.md)），Inspector 与人工验收都能在不依赖控件自觉的前提下确认焦点落点。
-- 取舍：未采用 `:focus-visible`（仅键盘触发环）方案——它需要给 `FocusDirection` 增「非导航来源」并让派发器透传来源信息，且会使「指针点击后的焦点」在像素上重新不可判定，与本条要解决的问题相反。
+- 几何：环带严格落在盒外 **2–4 dp** 的带宽内（间距 2 dp + 环宽 2 dp，圆角 4 dp 小于常见控件圆角故不与边框弧线相交）。**不得压在控件自身边缘像素上**——否则会把 `RichTextEdit` 之类贴着边缘绘制的-caret / 边框像素覆盖掉。这三项常量是 `Widget` 的 `AURORA_FOCUS_RING_GAP` / `AURORA_FOCUS_RING_THICKNESS` / `AURORA_FOCUS_RING_RADIUS`，绘制与标脏共用同一份（不得各写一份，否则脏区与像素会漂移）。
+- **环色（裁决）**：默认主题的环色是**极性色**（浅色主题纯黑、深色主题纯白），由 `Theme::light()` / `Theme::dark()` 登记 `focus.ring` 令牌提供，**不再直接取 `primary`**。理由：环与它所标注的控件同色时，会被知觉归组成「控件自带的一圈边框」，用户读作「控件变小了」——`primary` 恰是 `Button` 的默认底色，故原口径下这条误读必然发生。判据不是「环与页面底色的 WCAG 对比度」（纯蓝环对白页面有 8.59:1，指标合格却仍然误读），而是**环须与控件自身底色拉开**；实测该拉开幅度：极性色 2.44:1（浅）/ 3.90:1（深），蓝相强调色 1.90:1，中性灰浅底 1.02:1。
+- 回退：主题未登记 `focus.ring` 时环色回退 `primary`，即改动前的行为逐位不变。因此既有自定义主题不会因本条被单方面改色；要拿到新的默认观感，须显式改用 `Theme::light()` / `Theme::dark()` 或自行登记该令牌。
+- 开关：`wants_focus_ring()`（`Widget` 基类默认 `true`，虚钩子）已自带聚焦态外观的控件覆写为 `false`，以免双环。当前唯一覆写者是 `TextInput` 与 `RichTextEdit`（它们画 Fluent 式主题色加粗聚焦边框，`paint_frame`）。它是画环的**必要非充分**条件，最终显隐看 `focus_ring_shown()`。
+- 重绘：`on_focus_change(bool)` 基实现在维护 `is_focused_` 后调用 `mark_needs_paint()`，故焦点变化必然进下一帧，环不会「逻辑上聚焦、像素上无环」。**到达方式变更同样要进下一帧**：`FocusManager::set_focus` 命中「新焦点即当前焦点」分支时不重发 `on_focus_change`，但到达方式一旦改变就必须 `mark_needs_paint()`，否则「按 Tab 出了环、又用鼠标点它」会把环留在帧上。
+- **到达方式（裁决）**：焦点环按焦点**如何到达**分级显隐，来源由 `FocusArrival` 表达、`FocusManager::set_focus` 随焦点一并写入控件（`Widget::focus_arrival()` / `set_focus_arrival()`）：
+  - `Pointer`——指针 / 触摸按下送达（`EventDispatcher::dispatch_mouse`、`TouchDispatcher::dispatch` 的 Press 分支）。**不画环**：控件此刻已有 pressed / hover 反馈，再补一圈会被知觉归组成「控件自带的一圈边框」，读作「控件变小了、外侧多一圈边」。
+  - `Keyboard`——`move_focus`（Tab / Shift+Tab / 方向键）送达。该入口只由键盘驱动，故恒记 `Keyboard`，**必画环**。
+  - `Programmatic`——显式聚焦、`request_focus`、焦点作用域进出恢复、无障碍 `SetFocus` 动作、Inspector 直改焦点。无从判断用户所处模态，**保守按可见处理**，因此改动前那些调用点的观感逐位不变。
+  - 控件在自有 `on_pointer_event` 里自主 `request_focus()`（`TextInput` / Spin 值区 / `Text` 选区等）时**保留该控件已有的到达方式**，不改写成 `Programmatic`：派发器已先记下 `Pointer`，若覆盖就成了「点按钮无环、点 Spin 值区有环」这种取决于谁先改焦点的观感。
+  - 对齐：浏览器 `:focus-visible`、WinUI 的 `FocusVisual`、Qt 的 `TabFocusReason` vs `MouseFocusReason` 都以「指针送达不画环、键盘送达必画环」为共识，本条采其**保守子集**——只关指针这一条路径，程序化一律显环。
+  - **未采用**浏览器 / Chrome 的「全局交互模态」规则（脚本 `element.focus()` 沿用最后一次用户手势的模态、按任意键即恢复可见环）。那条规则把可见性挂在派发器的全局状态上，会让「焦点在第几个停点」这类像素验收随历史操作漂移；本库改为把到达方式记在每个控件上，判定局部、可重放。代价：指针点击后再用脚本/无障碍聚焦同一控件时仍无环，须按 Tab 或点击其它键盘停点才恢复可见——与浏览器观感一致，故不视为缺陷。
+- 可观测性：环是键盘与程序化停点的像素证据，配合树快照里持有焦点节点的 `focused: true`（见 [`08-tooling.md`](08-tooling.md)），Inspector 与人工验收都能在不依赖控件自觉的前提下确认焦点落点。**指针送达的焦点没有环**，因此「有无环」不再等价于「有无焦点」：验收指针路径须以 `focused` 标记为准，环只用于确认键盘/程序化停点。
+- **脏区（关键契约）**：环画在控件自身盒**外**，而 `paint_bounds()` 只含自身盒，因此标脏**不得**直接用 `paint_bounds()`——必须用 `Widget::dirty_bounds()`（= 自身绘制盒 ∪ 盒外装饰）。该契约有两个方向，缺一即错：
+  - 获焦帧：脏区不含环带 → 环落在 `push_clip` 之外被裁掉，「逻辑上聚焦、像素上无环」（要靠别的控件恰好同帧标脏扩大合并框才偶发出现）。
+  - 失焦帧（或尺寸变化后）：脏区不含环带 → 上一帧的环像素无人重绘，残留成「盒外一圈主题色，看起来比控件自身盒大」。
+  汇聚点共两处，都要走 `dirty_bounds()`：`Window::install_dirty_sink`（普通窗口坐标）与 `Scroll::on_descendant_dirty`（离屏内容缓冲的内容坐标系，脏带若漏环则残留固化在缓冲里随视口反复上屏）。回归见 `tests/integration/itest_dirty_clip_paint.cpp` 的 `focus_ring_band_repainted_when_focus_changes` / `focus_ring_band_inside_scroll_repainted` / `pointer_arrival_hides_the_ring_with_no_band_residual`（不变量：部分脏区重绘与整帧重绘逐位一致），显隐分级见 `tests/unit/utest_focus_ring.cpp` 与 `tests/unit/utest_dispatcher.cpp` 的到达方式用例。
+- 口径变更：本节曾裁决「不采用 `:focus-visible`（仅键盘触发环）」，理由是它需要给 `FocusDirection` 增「非导航来源」并让派发器透传，且会使指针点击后的焦点在像素上不可判定。两条理由现已不成立：来源有独立载体（`FocusArrival`，不扩 `FocusDirection` 的导航语义），不可判定性由树快照 `focused: true` 兜住；而「点后外侧多一圈边、控件像变小了」的误读恰是无条件的环造成的。故以上一条取代旧裁决，旧口径不再适用。
 
 ---
 

@@ -68,7 +68,11 @@ AURORA_TEST_CASE(drag_selection_paint_only_skips_relayout) {
 
     const auto text = std::make_shared<Text>("hello world this is a selection test for drag");
     const auto spy = std::make_shared<SpyWidget>();
-    Node root{Column{Node{text}, Node{spy}}};
+    // 行间留 8dp：Text 获焦后基类焦点环外扩自身盒 4dp（见 Widget::dirty_bounds()），行距为 0 时
+    // 环带会压进间谍控件顶边，使「脏区确实覆盖它」→ 下方 paint_calls==1 断言失去可观测性。
+    au::Column body{Node{text}, Node{spy}};
+    body.set_gap(8.0F);
+    Node root{std::move(body)};
 
     // 帧 1：挂载 + 布局 + 绘制（建立命中几何与文本行缓存）。
     AURORA_TEST_CHECK(win.present_root(root).ok());

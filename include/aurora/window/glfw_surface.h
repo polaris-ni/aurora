@@ -24,8 +24,13 @@ namespace aurora {
 /// - 渲染：OpenGL 1.1 立即模式纹理四边形（无需着色器/VAO/GL 加载器），见 `Impl::ensure_gl_objects`/`upload_and_draw`。
 /// - 事件：鼠标/键盘（含 GLFW 键码 → `KeyCode` 映射）、滚轮、文本输入、窗口 resize
 /// 均翻译为 aurora `Event`，经 `set_event_handler` 暴露（ARCHITECTURE.md §3.1）。
-/// - 高 DPI：用 `glfwGetWindowContentScale` 取 scaleFactor；坐标换算采用「内容坐标即
-/// aurora 逻辑坐标」模型（GLFW 光标位置本就是内容坐标，与 widget 布局空间一致）。
+/// - 高 DPI：内容缩放因子取自 `glfwGetWindowContentScale`。**单位口径**：GLFW 3.3 起窗口尺寸与
+///   光标位置用的都是**屏幕坐标**（DPI 感知进程里即物理像素），而 aurora 的窗口模型是
+///   「消费方只见逻辑 dp、物理像素只留在后端内部」，两者只差一个 content scale。故本后端
+///   把 painter 按**物理**分辨率分配（`Painter::set_scale` + `begin(逻辑 dp)`，与 Win32 / D3D11 /
+///   X11 / Wayland 同模型），`size()` 是 dp 而 `framebuffer_size()` 是物理像素；换算收敛在
+///   内部头 `detail/glfw_dpi.h`，由 `utest_glfw_dpi` 钉住。**跨屏移动导致的缩放变化经
+///   `set_scale_change_handler` 上报**（GLFW 的 content scale 回调由 `WM_DPICHANGED` 驱动）。
 ///
 /// pimpl 封装：公共头不再包含 <GL/gl.h> / <GLFW/glfw3.h>，所有 GLFW/OpenGL 细节（窗口、
 /// 纹理、键码映射、回调转发等）移入 src/aurora/window/glfw_surface.cpp 的 Impl，
@@ -43,9 +48,10 @@ class GlfwSurface : public Surface {
         HardwareGL,  ///< GPU 栅格：DisplayList 经 GpuGlRhi 渲染进 MSAA 帧缓冲；需 GPU_GL 开关，失败回退软件模式
     };
 
-    /// @brief 后端配置。逻辑尺寸为 aurora 坐标系下的像素（不含 DPI 缩放）。
+    /// @brief 后端配置。**逻辑尺寸为 aurora 坐标系下的 dp**（不含 DPI 缩放）；后端内部按
+    /// 内容缩放因子换算成 GLFW 屏幕坐标（物理像素）再建窗。
     struct Config {
-        Size size{.width = 800.0F, .height = 600.0F};  ///< 逻辑尺寸（= GLFW 内容尺寸）
+        Size size{.width = 800.0F, .height = 600.0F};  ///< 逻辑尺寸（dp，× scale 才是窗口物理像素）
         std::string title{"Aurora"};  ///< 窗口标题（UTF-8 字节串，交给平台窗口系统显示）
         int gl_major = 3;  ///< 请求的 OpenGL 主版本号（GLFW_CONTEXT_VERSION_MAJOR）
         int gl_minor = 3;  ///< 请求的 OpenGL 次版本号（GLFW_CONTEXT_VERSION_MINOR）
@@ -83,6 +89,10 @@ class GlfwSurface : public Surface {
     /// @brief 注册窗口几何态上报句柄（Normal/Maximized/Minimized/FullScreen）。
     /// @param h 几何态回调，由 GLFW 窗口状态与尺寸回调翻译产生。
     auto set_window_mode_handler(WindowModeHandler h) -> void override;
+    /// @brief 注册 DPI 缩放变化上报句柄（跨屏拖动导致 content scale 改变时触发）。
+    /// @param h 缩放回调；参数为新的 `scale_factor()` 值。仅实际变化时触发。
+    /// @note 逻辑↔物理换算随之改变，框架侧收到即强制整帧重排重绘。
+    auto set_scale_change_handler(ScaleChangeHandler h) -> void override;
 
     /// @brief 运行时更新悬停光标形状：`glfwSetCursor` + `glfwCreateStandardCursor`。
     /// 标准光标句柄按 `CursorShape` 取值序缓存在 Impl（每次重建会泄漏，故复用），析构统一释放。
@@ -97,10 +107,10 @@ class GlfwSurface : public Surface {
     /// （CI / Windows / macOS）构建后复查。
     auto set_cursor(CursorShape shape) -> void override;
 
-    /// @brief 开始新帧：按 GLFW 内容尺寸（重）建软件栅格缓冲并铺浅色底色。
-    /// @param width 期望帧宽；GLFW 后端忽略，实际尺寸取自窗口内容尺寸。
-    /// @param height 期望帧高；GLFW 后端忽略，实际尺寸取自窗口内容尺寸。
-    /// @return 恒为成功（缓冲尺寸异常时以内容尺寸/framebuffer 兜底）。
+    /// @brief 开始新帧：按**帧缓冲物理像素**（重）建软件栅格缓冲并铺浅色底色。
+    /// @param width 期望帧宽（逻辑 dp）；GLFW 报不出帧缓冲尺寸时按 `width × scale` 兜底。
+    /// @param height 期望帧高（逻辑 dp）；同上。
+    /// @return 恒为成功（缓冲尺寸异常时以 `width × scale` 兜底）。
     [[nodiscard]] auto begin_frame(int width, int height) -> Result<bool> override;
     /// @brief 当前帧的软件栅格化 Painter（写入内部像素缓冲）。
     /// @return Painter 引用，生命周期同本 Surface。
@@ -109,9 +119,16 @@ class GlfwSurface : public Surface {
     /// GPU 路径栅格已在 `GpuGlRhi::end_frame` 完成，直接交换缓冲。
     /// @return 呈现成功 true；窗口失效时 false 及错误信息。
     [[nodiscard]] auto present() -> Result<bool> override;
-    /// @brief 逻辑尺寸：aurora 坐标空间 == GLFW 内容坐标空间。
-    /// @return 最近一次 begin_frame 采用的内容尺寸。
+    /// @brief 逻辑尺寸（dp）：= 帧缓冲物理像素 ÷ 内容缩放因子。
+    /// @return 最近一次 begin_frame 换算出的逻辑尺寸。
     [[nodiscard]] auto size() const -> Size override;
+    /// @brief 帧缓冲**物理**像素尺寸：与 `data()` 的软件缓冲严格同尺寸。
+    ///
+    /// 本后端的 painter 按物理分辨率分配（HiDPI 下 1 dp = scale px 绘制，避免发虚），
+    /// 故必须覆写——基类默认返回逻辑 `size()`，会让 `save_snapshot` 写出的 PNG 宽高与
+    /// 像素数据错位（缩放比 ≠1 时图像被压扁）。
+    /// @return 物理像素尺寸；尚未 begin_frame 时为 0。
+    [[nodiscard]] auto framebuffer_size() const -> Size override;
     /// @brief begin_frame 铺的浅色底色（与 begin_frame 内 fill_rect 同色）：供脏区裁剪重绘重铺底色。
     /// @return RGB(245,245,247) 不透明浅色。
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
@@ -148,12 +165,17 @@ class GlfwSurface : public Surface {
     /// @brief 程序化移动窗口（`glfwSetWindowPos`）。
     /// @param p 目标左上角位置（物理像素）。
     auto set_position(Point p) -> void override;
-    /// @brief 程序化设置窗口尺寸（`glfwSetWindowSize`）。
-    /// @param s 目标内容尺寸（GLFW 内容坐标，物理像素）。
+    /// @brief 原生窗口句柄：Windows = `HWND`，macOS = `NSWindow*`，X11/XWayland = `Window`
+    /// （X11 的 XID，本质是非指针整数）。窗口未就绪或平台无稳定句柄语义时返回 nullptr。
+    /// @note 与 Win32 / D3D11 / X11 / Wayland 后端同口径；用于跨模块窗口操作
+    ///       （注入平台消息、核对原生几何、wgpu surface 创建等）。
+    [[nodiscard]] auto native_handle() const -> void * override;
+    /// @brief 程序化设置窗口尺寸（内部按内容缩放因子把逻辑 dp 换算为 GLFW 屏幕坐标）。
+    /// @param s 目标逻辑尺寸（dp）。
     auto set_size(Size s) -> void override;
 
-    /// @brief 最近一帧的软件像素缓冲（RGBA8）。
-    /// @return 首像素只读指针，尺寸见 size()；GPU 模式下为懒读回缓存（可能滞后一帧）。
+    /// @brief 最近一帧的软件像素缓冲（RGBA8，**物理**分辨率）。
+    /// @return 首像素只读指针，尺寸见 `framebuffer_size()`；GPU 模式下为懒读回缓存（可能滞后一帧）。
     [[nodiscard]] auto data() const -> const std::uint8_t * override;
     /// @brief 已成功 present 的帧计数。
     /// @return 自构造以来的呈现帧数。

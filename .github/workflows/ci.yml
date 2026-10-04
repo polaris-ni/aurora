@@ -17,8 +17,6 @@
 #   5. coverage    — AURORA_ENABLE_COVERAGE=ON 的 `coverage` 聚合目标（内含 ctest + gcov 摘要）。
 #   6. wasm        — emcmake + AURORA_BACKEND_WASM=ON，构建库与测试 runner 并跑 ctest
 #                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）。
-#                    浏览器口径 clang-tidy 原本挂在末步，2026-09-23 拆到 8w（单遍 69.7 分钟，
-#                    占本作业 79.4 分钟的 88%，卡着整个 run 的墙钟）。
 #  7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
 #  8. lint        — clang-tidy 门禁，矩阵 = pass(DEBUG OFF / ON 两份编译数据库) × shard(TU 清单
@@ -27,9 +25,6 @@
 #                    依赖 AuroraLint.cmake 提供的 `lint` 目标与 AURORA_LINT_SHARD 分片开关。
 #                    为什么摊成矩阵：runner 只有 4 vCPU，单遍 498 TU 实测 86 分钟，两遍串跑
 #                    3 小时量级、必超时；分片只改排布不减覆盖面，总核时不变而墙钟 ~25 分钟。
-#                    现为 **必过**（2026-09-23 收回 report-only：三份清单的 unique_findings 已各自
-#                    量到 0）；findings artifact 照旧上传——「不报」与「跑到了」是两件事，判因要看清单。
-#                    该门禁为何一度 report-only、以及本机 0 与 CI 数百条为何不矛盾，见 job 8 顶部注释。
 #                    ⚠️ 判据是「8 个作业全绿」：任一片红即整门红，缺片等于缺覆盖面。
 #                    ⚠️ 本矩阵的口径是 **native**：EMSCRIPTEN 门后的 TU 不在这两份编译库里，
 #                    其静态检查由 8w 在同一份 wasm 编译库上跑浏览器口径 lint 补齐。
@@ -46,11 +41,10 @@
 #   `invalid boolean` 而整条命令失败——门槛是「迁移后的较新 patch 构建」，不是主版本号 ≥ 20
 #   （口径与逐作业实测证据见 codespec/BUILD_OPTIONS.md §4.7）。configure 期的
 #   `aurora_find_clang_format` 因此可能一个候选都挑不中，`format` / `format-check` 目标不生成、
-#   `generate_error_codes` 换不到可用格式化器，只留一行 warning 静默降级（2026-09-28 run
-#   36348853231 的 tidy / toggles / wasm 作业日志即此形）。处置：凡跑 configure 的 Linux 作业
+#   `generate_error_codes` 换不到可用格式化器，只留一行 warning 静默降级。处置：凡跑 configure 的 Linux 作业
 #   都引用该复合动作（core / backends 的 Linux 矩阵项、toggles、asan、coverage、wasm 及其
 #   lint-wasm、install-consumer、fmt），动作里装完立刻用与探针同形态的
-#   `--dump-config --style=file` 自证；job 8 / 8w 的 clang-tidy 步骤在同一次 apt 里多带
+#   `--dump-config --style=file:<仓库根绝对路径>` 自证；job 8 / 8w 的 clang-tidy 步骤在同一次 apt 里多带
 #   clang-format-22，不重复 `apt-get update`。Windows / macOS 未纳入：无 apt，且这两侧从未因
 #   该探测红过。
 #
@@ -299,7 +293,16 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
+            # 虚拟屏显式 24 位深度：Xvfb 默认是 8 位伪彩，GLX 拿不到 RGBA 视觉，
+            # GLFW 腿会在建窗期退化（这也是「GLFW 需要 mesa(llvmpipe) + GLX 3.3」那条前提）。
+            #
+            # e2e 单独一趟且**串行**（其余测试仍满核并行）：e2e 用例建的是真实窗口与真实
+            # GL 上下文，16 路并发挤在同一个 X server 上会互相抢 X / GL 资源，实测表现为
+            # x11 与 glfw 两腿**随机**抛 `XOpenDisplay` / `glfwInit` 失败（同一进程里前一
+            # 用例刚过、后一用例就红），属编排层抖动而非代码缺陷。串行不改变任何判据
+            # （期望集内不可用仍是红灯），只消除资源争抢；代价是 e2e 段多花十来秒。
+            xvfb-run -a -s "-screen 0 1920x1080x24" ctest --test-dir build --output-on-failure -C Release -LE e2e -j "$(nproc)"
+            xvfb-run -a -s "-screen 0 1920x1080x24" ctest --test-dir build --output-on-failure -C Release -L e2e
           else
             ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
           fi
@@ -591,8 +594,7 @@ jobs:
   # 以覆盖 #if（debug-ON）与 #else（debug-OFF）两分支——
   # AURORA_ENABLE_DEBUG=AUTO 是 generator expression，单配置只分析一分支，门禁天然盲一半。
   #
-  # 为什么要摊成矩阵（2026-09-23）：这两遍原本在**同一个 job 里串跑**，而 runner 只有 4 vCPU——
-  # 单遍实测 498 TU / 5172s = 86 分钟（run 35844126045 的 86.9 分钟只跑完 DEBUG=OFF 那遍），
+  # 为什么要摊成矩阵：这两遍原本在**同一个 job 里串跑**，而 runner 只有 4 vCPU —— 单遍实测 498 TU / 5172s = 86 分钟，
   # 两遍串跑就是 3 小时量级，`timeout-minutes: 240` 根本不够，红灯是必然、不是偶发。
   # runner 侧的并行度早已开满核数，所以**唯一还能动的量是把 TU 分到多个作业**：
   # pass(2) × shard(4) = 8 个作业，每片约 125 TU ≈ 22 分钟，整门墙钟 86 → ~25 分钟。
@@ -625,25 +627,6 @@ jobs:
         total: [4]
     steps:
       - uses: actions/checkout@v7
-
-      # ── 本作业为**必过**门禁（2026-09-23 收回此前的 report-only）────────────────────
-      # 收回条件已满足：三份清单（本矩阵 DEBUG=OFF / DEBUG=ON 两遍 + 作业 8w 浏览器口径一遍）的
-      # unique_findings 均为 0。findings artifact 照旧上传——「不报」与「跑到了」是两件事。
-      # 它为何一度 report-only：该门禁自引入起**从未绿过**——早期红在装不上 clang-tidy-22（apt 404），
-      # 修好后红在存量告警（native 上一轮 501 条 / 当时 422 条）。一个永远红的必过位不等于
-      # 门禁，只是把红灯常态化、并让所有 PR 背一个与自身无关的失败。故当时先解阻塞，用 artifact 追清单。
-      # 当时本机 0 而 CI 数百条并不矛盾：`.clang-tidy` 的 `HeaderFilterRegex` 只认正斜杠，Windows
-      # 本机编译库里的头文件路径是「正斜杠根 + 反斜杠段」的混合形态、被过滤掉，Linux 上则
-      # 全部穿过——本机「两口径 0 findings」证明的面比字面窄（详见 codespec/BUILD_OPTIONS.md §4.5）。
-      # 该缺口现已改写为分隔符无关，本机与 CI 量的是同一张覆盖面；存量也按「覆盖面代价」排序清到
-      # 0，代价小者优先：① `.clang-tidy` 的 CheckOptions（命名类占大头，`*IgnoredRegexp` 按类别
-      # 精确豁免，不牺牲文件其余检查）；② 逐点 NOLINT + 原因；③ 整文件排除（永久盲点，只给
-      # 桩/替身这类「本就不受本仓风格约束」的文件，当前仅 tests/support/fake_gl.h 一例）。
-      # ⚠️ 仍留一条本机盲区，如实申报而非掩盖：本机 native 遍在 Windows 上跑，`AURORA_PLATFORM_LINUX`
-      # 独享的 `#if` 分支不进分析。已核过其规模——库与测试里的 Linux-only 文件（x11/wayland/wgpu
-      # 表面与 atspi 桥）在 CI 默认开关下整文件即空 TU，真正未被本机覆盖的只有 clipboard.cpp /
-      # font_discovery.cpp 等文件里约百行量级的平台分支。若日后在此转红，按上面同一阶梯处置，
-      # **不得**回退 report-only。
       - name: Install clang-tidy-22
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
@@ -680,9 +663,6 @@ jobs:
   # AuroraLint 在 Emscripten 配置下自动给 `lint` 附加 --emscripten：runner 先把 em++ 写的
   # 编译库重写成 native clang-tidy 能消费的形态（换 wasm 三元组、指 sysroot、弃 PCH、补驱动宏），
   # 再走同一套并行 / 去重 / 汇总流程——两种口径的产物因此可比。
-  # 为什么从作业 6 拆出来（2026-09-23）：这一遍在 4 核 runner 上实测单遍 69.7 分钟，而作业 6
-  # 总共 79.4 分钟——lint 一步占了 88%，整个 workflow run 的墙钟被它卡住。拆成矩阵后
-  # 作业 6 回到 ~10 分钟，本作业每片 ~20 分钟，与作业 8 同量级、并行跑。
   # ⚠️ 本作业**只 configure 不构建**：`lint` 目标只要 compile_commands.json + sysroot，
   #    不链库。这与作业 8 一直以来的跑法一致，且成立的前提是仓库内所有生成物
   #    （error_codes.gen.h / aurora_api.json）都落在源码树并已提交——若日后新增

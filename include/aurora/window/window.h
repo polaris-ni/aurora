@@ -704,9 +704,12 @@ class Window {
                     layout_dirty_ = true;  // 非 boundary（或无法登记）：下一帧整树重排
                 }
             }
-            // 标记控件最近一次 paint 的绝对（窗口逻辑 dp）几何，使脏区裁剪命中精确区域；
+            // 标记控件本次标脏应覆盖的绝对（窗口逻辑 dp）几何，使脏区裁剪命中精确区域；
             // 空盒（未绘制过/尺寸为 0）被 mark 忽略。布局脏仍走 mark_all → 整帧重绘。
-            dirty_.mark(w.paint_bounds());
+            // 用 dirty_bounds() 而非 paint_bounds()：统一焦点环画在自身盒外（见 Widget::paint_content），
+            // 只按自身盒标脏会让环带落在裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成
+            // 「盒外一圈环色」。
+            dirty_.mark(w.dirty_bounds());
         };
     }
 

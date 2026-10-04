@@ -1,10 +1,14 @@
 /// 测试类型: integration
-/// 目标单元: include/aurora/window/window.h
+/// 目标单元: include/aurora/window/window.h（脏区 sink）、include/aurora/widget/scroll.h（离屏缓冲脏带）
 /// 测试说明: 验证 Window::present_root 脏区裁剪绘制——「仅绘制脏区（保留上帧缓冲 + clear_rect +
 ///           push_clip）」与「整帧重绘」逐位一致，且脏区外像素不被改写；用 HeadlessSurface::data()
 ///           直接读取设备像素缓冲比对（Headless 部分受 AURORA_BACKEND_HEADLESS 门控）；
-///           本测试不含计时断言
+///           本测试不含计时断言。另覆盖「绘制落在自身盒外」的一类脏区缺陷：基类统一焦点环
+///           外扩于控件盒，获焦帧须入裁剪才能上屏、失焦帧须入裁剪才能重绘掉上一帧的环，
+///           普通 sink 与 Scroll 离屏缓冲脏带两条标脏路径都要覆盖。环的显隐另由焦点到达方式
+///           （FocusArrival）决定，到达方式变更同样须走完整脏区重绘——残留只在这一路径上暴露。
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -43,6 +47,37 @@ auto count_diff(const std::vector<std::uint8_t> &a, const std::vector<std::uint8
         }
     }
     return d;
+}
+
+/// @brief 统计盒外环带（`box` 外扩 5 px 一圈、`box` 自身除外）内相对参考帧发生变化的像素数。
+///
+/// 该带完全落在控件自身盒之外，故命中只可能是画在盒外的装饰（本用例针对基类统一焦点环，
+/// 环带位于外扩 2–4 dp）；控件自身外观不参与计数。判据取「与未获焦参考帧的差」而非某个具体
+/// 色相，因为环色由主题命名令牌 `focus.ring` 决定（浅色主题为黑、深色主题为白，见 `Theme::light()`），
+/// 写死色相会让这条脏区回归随主题配色漂移。
+auto ring_pixels_outside(const std::vector<std::uint8_t> &px, const std::vector<std::uint8_t> &ref, int img_w,
+                         int img_h, const au::Rect &box) -> size_t {
+    const int x0 = std::max(0, static_cast<int>(std::floor(box.origin.x)) - 5);
+    const int y0 = std::max(0, static_cast<int>(std::floor(box.origin.y)) - 5);
+    const int x1 = std::min(img_w, static_cast<int>(std::ceil(box.right())) + 5);
+    const int y1 = std::min(img_h, static_cast<int>(std::ceil(box.bottom())) + 5);
+    size_t n = 0;
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            if (x >= static_cast<int>(box.origin.x) && x < static_cast<int>(std::ceil(box.right())) &&
+                y >= static_cast<int>(box.origin.y) && y < static_cast<int>(std::ceil(box.bottom()))) {
+                continue;  // 盒内像素属控件自身外观，不计
+            }
+            const size_t i = ((static_cast<size_t>(y) * static_cast<size_t>(img_w)) + static_cast<size_t>(x)) * 4U;
+            // 比 RGBA 四通道而非仅 RGB：Headless 帧底色是全透明黑 (0,0,0,0)，浅色主题的环色恰为
+            // 纯黑 (0,0,0,255)——RGB 逐位相同，只有 alpha 把它显影出来。
+            if (px.at(i) != ref.at(i) || px.at(i + 1U) != ref.at(i + 1U) || px.at(i + 2U) != ref.at(i + 2U) ||
+                px.at(i + 3U) != ref.at(i + 3U)) {
+                ++n;  // 与参考帧该处不同 = 盒外装饰落到了这里
+            }
+        }
+    }
+    return n;
 }
 
 }  // namespace
@@ -135,6 +170,164 @@ AURORA_TEST_CASE(nested_partial_dirty_clip_matches_full_redraw) {
 
     // 脏区内确实重绘出了新颜色。
     AURORA_TEST_CHECK(count_diff(dirty, before) > 0);
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
+#endif
+}
+
+AURORA_TEST_CASE(focus_ring_band_repainted_when_focus_changes) {
+#ifdef AURORA_BACKEND_HEADLESS
+    // 回归：基类统一焦点环画在控件盒**外** 2–4 dp（src/aurora/widget/widget.cpp 的 paint_content），
+    // 而脏区曾只按控件自身 paint_bounds() 标记 → 环带落在脏区裁剪之外，两个方向同时出错：
+    //  ① 获焦帧裁剪不含环带 → 环根本画不上屏；
+    //  ② 失焦帧裁剪不含环带 → 上一帧的环像素留在帧缓冲上，屏幕表现即「控件外面多一圈主题色、
+    //     看起来比自身盒大」。
+    // 标脏现走 Widget::dirty_bounds()（自身盒 ∪ 盒外装饰），两个方向都须与整帧重绘逐位一致。
+    constexpr int w = 320;
+    constexpr int h = 240;
+    const auto label = std::make_shared<au::Text>("row above keeps the button off the window edge");
+    const auto btn = std::make_shared<au::Button>("tap");
+    btn->set_focusable(true);
+    au::Node root{au::Column{au::Node{label}, au::Node{btn}}};
+
+    au::Window win = make_window(w, h);
+    au::FocusManager fm;
+    fm.set_root(&root.widget());
+    auto const &hs = dynamic_cast<au::HeadlessSurface &>(win.surface());
+    constexpr size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 4U;
+
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 1：未获焦
+    const au::Rect box = btn->paint_bounds();
+    AURORA_TEST_REQUIRE(box.size.width > 0.0F && box.size.height > 0.0F);
+    AURORA_TEST_REQUIRE(box.origin.y > 6.0F);  // 上方留空，否则环带被窗口上边缘切掉无从观测
+    const auto unfocused = copy_pixels(hs.data(), n);
+
+    fm.set_focus(btn.get());
+    AURORA_TEST_REQUIRE(btn->is_focused());
+    AURORA_TEST_CHECK(btn->dirty_bounds().size.width > box.size.width);  // 标脏盒须含盒外环带
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 2：获焦，部分脏区裁剪绘制
+    const auto focused = copy_pixels(hs.data(), n);
+    AURORA_TEST_CHECK_MSG(ring_pixels_outside(focused, unfocused, w, h, box) > 0,
+                          "focused control must paint the base ring in the band outside its box");
+
+    win.force_full_redraw();
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 3：获焦态的整帧重绘基准
+    AURORA_TEST_CHECK(count_diff(focused, copy_pixels(hs.data(), n)) == 0);  // 方向①：获焦帧 == 整帧
+
+    fm.set_focus(nullptr);
+    AURORA_TEST_REQUIRE_FALSE(btn->is_focused());
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 4：失焦，部分脏区裁剪绘制
+    const auto after_blur = copy_pixels(hs.data(), n);
+
+    win.force_full_redraw();
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 5：整帧重绘基准
+    const auto full = copy_pixels(hs.data(), n);
+
+    // 核心不变量（方向②）：失焦帧与整帧重绘逐位一致（无修复时差出环带那一圈残留）。
+    AURORA_TEST_CHECK(count_diff(after_blur, full) == 0);
+    AURORA_TEST_CHECK_EQ(ring_pixels_outside(after_blur, unfocused, w, h, box), 0U);
+    // 回到未获焦外观：与帧 1 逐位一致（环带既无残留也无二次混合）。
+    AURORA_TEST_CHECK(count_diff(after_blur, unfocused) == 0);
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
+#endif
+}
+
+AURORA_TEST_CASE(pointer_arrival_hides_the_ring_with_no_band_residual) {
+#ifdef AURORA_BACKEND_HEADLESS
+    // 焦点到达方式（FocusArrival）改的只是环的显隐，脏区契约必须同样成立：键盘到达画出环后，
+    // 指针再点同一控件（焦点未变、只到达方式变）须把上一帧的环带重绘干净。
+    // set_focus 的「同一控件」分支不重发 on_focus_change，只按需标脏——漏标即留下残影像素，
+    // 正是用户报的「点一下外侧多一圈边」；多标则白擦一圈。两个方向都由逐位一致约束。
+    constexpr int w = 320;
+    constexpr int h = 240;
+    const auto label = std::make_shared<au::Text>("row above keeps the button off the window edge");
+    const auto btn = std::make_shared<au::Button>("tap");
+    btn->set_focusable(true);
+    au::Node root{au::Column{au::Node{label}, au::Node{btn}}};
+
+    au::Window win = make_window(w, h);
+    au::FocusManager fm;
+    fm.set_root(&root.widget());
+    auto const &hs = dynamic_cast<au::HeadlessSurface &>(win.surface());
+    constexpr size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 4U;
+
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 1：未获焦
+    const au::Rect box = btn->paint_bounds();
+    AURORA_TEST_REQUIRE(box.origin.y > 6.0F);  // 上方留空，否则环带被窗口上边缘切掉无从观测
+    const auto unfocused = copy_pixels(hs.data(), n);
+
+    fm.set_focus(btn.get(), au::FocusDirection::Forward, au::FocusArrival::Keyboard);
+    AURORA_TEST_REQUIRE(btn->focus_ring_shown());
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 2：键盘到达，环上屏
+    const auto ringed = copy_pixels(hs.data(), n);
+    AURORA_TEST_CHECK(ring_pixels_outside(ringed, unfocused, w, h, box) > 0);
+
+    // 指针按下已聚焦控件：EventDispatcher::dispatch_mouse 即以此到达方式调用（焦点不变）。
+    fm.set_focus(btn.get(), au::FocusDirection::Forward, au::FocusArrival::Pointer);
+    AURORA_TEST_REQUIRE(btn->is_focused());
+    AURORA_TEST_REQUIRE_FALSE(btn->focus_ring_shown());
+    AURORA_TEST_CHECK(btn->dirty_bounds().size.width > box.size.width);  // 上一帧画过环 → 仍须外扩重绘
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 3：部分脏区裁剪绘制
+    const auto hidden = copy_pixels(hs.data(), n);
+
+    win.force_full_redraw();
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 4：整帧重绘基准
+    AURORA_TEST_CHECK(count_diff(hidden, copy_pixels(hs.data(), n)) == 0);  // 裁剪 == 整帧
+    AURORA_TEST_CHECK(count_diff(hidden, ringed) > 0);  // 环确实被消掉了（非空转）
+    AURORA_TEST_CHECK_EQ(ring_pixels_outside(hidden, unfocused, w, h, box), 0U);  // 盒外零残留
+    AURORA_TEST_CHECK(count_diff(hidden, unfocused) == 0);  // 回到帧 1 外观
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
+#endif
+}
+
+AURORA_TEST_CASE(focus_ring_band_inside_scroll_repainted) {
+#ifdef AURORA_BACKEND_HEADLESS
+    // 同一缺陷的第二条汇聚路径：后代落在 Scroll 的离屏内容缓冲内时，标脏经
+    // `Scroll::on_descendant_dirty` 合并成缓冲局部脏带（内容坐标系）并只重录该带。脏带若不含
+    // 后代的盒外环带，残留会固化在离屏缓冲里、随视口反复上屏（普通脏区 sink 修好也不覆盖此路）。
+    constexpr int w = 320;
+    constexpr int h = 240;
+    const auto btn = std::make_shared<au::Button>("tap");
+    btn->set_focusable(true);
+    // 内容高于视口才成其为滚动容器；按钮放第二行，视口 offset=0 时其环带完整可见。
+    au::Node content{au::Column{au::Node{au::Text("first row")}, au::Node{btn}, au::Node{au::Text("row 3")},
+                                au::Node{au::Text("row 4")}, au::Node{au::Text("row 5")}, au::Node{au::Text("row 6")}}};
+    const auto scroller = std::make_shared<au::Scroll>(au::ScrollProps{.child = std::move(content)});
+    scroller->modifier.set(au::Modifier{}.size(static_cast<float>(w), 100.0F));  // 视口高 100 < 内容高
+    au::Node root{au::Column{au::Node{au::Text("header")}, au::Node{scroller}}};
+
+    au::Window win = make_window(w, h);
+    au::FocusManager fm;
+    fm.set_root(&root.widget());
+    auto const &hs = dynamic_cast<au::HeadlessSurface &>(win.surface());
+    constexpr size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 4U;
+
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 1：未获焦
+    const auto unfocused = copy_pixels(hs.data(), n);
+
+    fm.set_focus(btn.get());
+    AURORA_TEST_REQUIRE(btn->is_focused());
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 2：获焦，脏带局部重录
+    const auto focused = copy_pixels(hs.data(), n);
+    AURORA_TEST_CHECK_MSG(count_diff(focused, unfocused) > 0,
+                          "focus gain must actually reach the screen through the scroll band (ring never committed "
+                          "when the band excludes the out-of-box decoration)");
+
+    win.force_full_redraw();
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 3：获焦态整帧重绘基准
+    AURORA_TEST_CHECK(count_diff(focused, copy_pixels(hs.data(), n)) == 0);
+
+    fm.set_focus(nullptr);
+    AURORA_TEST_REQUIRE_FALSE(btn->is_focused());
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 4：失焦，脏带局部重录
+    const auto after_blur = copy_pixels(hs.data(), n);
+
+    win.force_full_redraw();
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 5：整帧重绘基准
+    AURORA_TEST_CHECK(count_diff(after_blur, copy_pixels(hs.data(), n)) == 0);  // 无环带残留
+    AURORA_TEST_CHECK(count_diff(after_blur, unfocused) == 0);  // 回到帧 1 外观
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
 #endif

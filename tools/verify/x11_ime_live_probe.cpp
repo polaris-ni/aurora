@@ -43,7 +43,7 @@
 //   2  环境不可用（无 DISPLAY / X 连接失败 / 无 X11 后端构建）
 //   4  部分验收项不符 —— 见逐行 PASS/FAIL
 //
-// 本机实测（2026-09-20，WSLg rootless Xwayland）：`XMODIFIERS` 未设但 `XOpenIM` 仍成功
+// 本机实测（WSLg rootless Xwayland）：`XMODIFIERS` 未设但 `XOpenIM` 仍成功
 //   （Xwayland 自带轻量 XIM），风格协商回退 `XIMPreeditNothing`（`preedit_callbacks`=n，
 //   该 XIM 不广告 PreeditCallbacks），故组合事件回推走 --interactive；但 ②焦点宣告往返与
 //   ②b XTEST 假键 `a`→`TextInputEvent("a")` 两条**自动**判据全绿（退出码 0）——补齐的

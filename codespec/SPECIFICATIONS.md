@@ -2,7 +2,7 @@
 
 > **项目名称**：Aurora —— AI-First C++ 跨平台 UI 库
 > **设计内核**：声明式、响应式、概念可枚举
-> **版本说明**：本文档为设计规格（文档自身无版本号）。库发布版本见 `CHANGELOG.json`（`currentVersion`）；文档与实现冲突时以**代码运行时**为准并回填本文档。
+> **版本说明**：本文档为设计规格（文档自身无版本号）。库发布版本见 `CHANGELOG.md`（`currentVersion`）；文档与实现冲突时以**代码运行时**为准并回填本文档。
 >
 > 本文件是**总纲与索引**：定位、设计原则、范围、约束、29 条特性清单与文档导航。各主题的详细契约见 `specification/` 九份子系统文档与五份顶层文档。
 
@@ -243,7 +243,7 @@ AI 的训练数据中可能包含同一库的多个版本。当 Aurora API 演�
 Button& setCaption(std::string s) { return text(std::move(s)); }
 ```
 
-**原则**：非主版本**只增不删**——API 一旦发布，签名在 MINOR / PATCH 内不改变。因为 AI 无法「忘记」旧 API。破坏性变更只能进 MAJOR，并须在 `CHANGELOG.json` 记录 `breakingChanges` 且提供 `migrations`。详见 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §7。
+**原则**：非主版本**只增不删**——API 一旦发布，签名在 MINOR / PATCH 内不改变。因为 AI 无法「忘记」旧 API。破坏性变更只能进 MAJOR，并须在 `CHANGELOG.md` 记录 `breakingChanges` 且提供 `migrations`。详见 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §7。
 
 ---
 
@@ -289,7 +289,7 @@ ctest -R itest_ai_compat
 
 > 本小节为占位，待用户启动 CHANGELOG 补账工作时填实具体迁移路径。
 
-- 流程骨架：SemVer 判定 breaking → 在 `CHANGELOG.json` 记录 `breakingChanges` + 提供 `migrations` 迁移脚本 → 仅可进 MAJOR（见 `CODING_STANDARDS.md` §7 的向后兼容原则）。
+- 流程骨架：SemVer 判定 breaking → 在 `CHANGELOG.md` 记录 `breakingChanges` + 提供 `migrations` 迁移脚本 → 仅可进 MAJOR（见 `CODING_STANDARDS.md` §7 的向后兼容原则）。
 - 迁移路径模板、自动化巡检项在此预留，不在本文首版展开。
 
 ### 12.4 门禁清单（CI 必须全绿）

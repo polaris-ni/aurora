@@ -2,11 +2,15 @@
 /// 目标单元: include/aurora/render/painter.h
 /// 测试说明: 覆盖 Painter 的画布分配与零基底、fill_rect 覆写与 alpha 混合、clear_rect 复位、draw_rect 描边、
 /// 裁剪栈（矩形/圆角/边界查询）、global_alpha 乘入、blend_pixel、draw_image 缩放、线性渐变方向、
-/// draw_line 覆盖、shift_pixels 垂直搬移、to_image 导出与 get_pixel 越界兜底
+/// draw_line 覆盖、shift_pixels 垂直搬移、to_image 导出与 get_pixel 越界兜底、draw_text_runs 与逐个
+/// draw_text 的逐位一致及空批无操作、带 opts/aa_mode 的批量入口与逐个 draw_text(..., aa_mode, opts) 逐位一致
 
 #include <cstdint>
+#include <span>
+#include <string>
 
 #include "aurora/core/image.h"
+#include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "framework/aurora_test.h"
 
@@ -29,6 +33,25 @@ namespace {
         }
     }
     return count;
+}
+
+/// @brief 某像素是否为红调（R 明显高于 G/B）。
+[[nodiscard]] auto color_is_reddish(const Color &c) -> bool { return c.r > 128 && c.g < 64 && c.b < 64; }
+
+/// @brief 某像素是否为蓝调（B 明显高于 R/G）。
+[[nodiscard]] auto color_is_bluish(const Color &c) -> bool { return c.b > 128 && c.r < 64 && c.g < 64; }
+
+/// @brief 两画布逐像素不同的格数（文本批量入口用它自证与逐个绘制等价）。
+[[nodiscard]] auto count_diff_pixels(const Painter &a, const Painter &b) -> int {
+    AURORA_TEST_REQUIRE_EQ(a.width(), b.width());
+    AURORA_TEST_REQUIRE_EQ(a.height(), b.height());
+    int diff = 0;
+    for (int y = 0; y < a.height(); ++y) {
+        for (int x = 0; x < a.width(); ++x) {
+            diff += (a.get_pixel(x, y) != b.get_pixel(x, y)) ? 1 : 0;
+        }
+    }
+    return diff;
 }
 }  // namespace
 
@@ -249,6 +272,142 @@ AURORA_TEST_CASE(get_pixel_out_of_range_returns_transparent) {
     AURORA_TEST_CHECK_EQ(p.get_pixel(0, -1), Color{0, 0, 0, 0});
     AURORA_TEST_CHECK_EQ(p.get_pixel(4, 0), Color{0, 0, 0, 0});
     AURORA_TEST_CHECK_EQ(p.get_pixel(0, 4), Color{0, 0, 0, 0});
+}
+
+AURORA_TEST_CASE(draw_text_runs_matches_individual_draw_text_calls) {
+    // 批量化只省每次调用的字体面解析与行高度量，不得改变任何落笔坐标：整屏逐位比对。
+    // 第三段的字重与前后不同，覆盖「换 Font 即重建发射上下文」那条分支。
+    const Font regular{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
+    const Font bold{.family = "sans-serif", .size_pt = 14.0F, .weight = 700};
+    const auto runs = {
+        render::TextRun{
+            .text = "alpha", .box = rect_at(4.0F, 6.0F, 60.0F, 20.0F), .font = regular, .color = Color::red()},
+        render::TextRun{
+            .text = "0-9 \xC3\xA9", .box = rect_at(70.0F, 6.0F, 60.0F, 20.0F), .font = regular, .color = Color::blue()},
+        render::TextRun{
+            .text = "beta", .box = rect_at(4.0F, 30.0F, 60.0F, 20.0F), .font = bold, .color = Color::green()}};
+
+    Painter batch;
+    batch.begin(140, 56);
+    batch.draw_text_runs(std::span<const render::TextRun>{runs});
+
+    Painter single;
+    single.begin(140, 56);
+    for (const auto &run : runs) {
+        single.draw_text(run.box, std::string{run.text}, run.font, run.color);
+    }
+    AURORA_TEST_REQUIRE_EQ(count_diff_pixels(batch, single), 0);
+}
+
+AURORA_TEST_CASE(draw_text_runs_paints_each_run_with_its_own_color) {
+    Painter p;
+    p.begin(140, 24);
+    const Font f{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
+    const auto runs = {
+        render::TextRun{.text = "left", .box = rect_at(2.0F, 2.0F, 60.0F, 20.0F), .font = f, .color = Color::red()},
+        render::TextRun{.text = "right", .box = rect_at(72.0F, 2.0F, 60.0F, 20.0F), .font = f, .color = Color::blue()}};
+    p.draw_text_runs(std::span<const render::TextRun>{runs});
+
+    // 两段各自着色：换色不要求重建绘制上下文，也不得让后一段覆盖前一段的色调。
+    auto reddish = 0;
+    auto bluish = 0;
+    for (int y = 0; y < p.height(); ++y) {
+        for (int x = 0; x < 64; ++x) {
+            reddish += color_is_reddish(p.get_pixel(x, y)) ? 1 : 0;
+        }
+        for (int x = 68; x < p.width(); ++x) {
+            bluish += color_is_bluish(p.get_pixel(x, y)) ? 1 : 0;
+        }
+    }
+    AURORA_TEST_CHECK_GT(reddish, 0);
+    AURORA_TEST_CHECK_GT(bluish, 0);
+}
+
+AURORA_TEST_CASE(empty_draw_text_runs_batch_is_a_no_op) {
+    Painter p;
+    p.begin(8, 8);
+    p.draw_text_runs(std::span<const render::TextRun>{});
+    AURORA_TEST_CHECK_EQ(p.get_pixel(4, 4), Color{0, 0, 0, 0});
+}
+
+AURORA_TEST_CASE(draw_text_runs_with_opts_matches_individual_draw_text_calls) {
+    // 带 opts 的批量入口必须与逐个 `draw_text(..., opts)` 逐位一致：字距/词距/斜体整批同值。
+    const Font f{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
+    const auto runs = {
+        render::TextRun{.text = "spacing", .box = rect_at(4.0F, 6.0F, 130.0F, 20.0F), .font = f, .color = Color::red()},
+        render::TextRun{
+            .text = "wrap it", .box = rect_at(4.0F, 30.0F, 130.0F, 20.0F), .font = f, .color = Color::blue()}};
+    const render::TextLayoutOpts opts{.letter_spacing = 1.5F, .word_spacing = 2.0F, .italic = true};
+
+    Painter batch;
+    batch.begin(160, 56);
+    batch.draw_text_runs(std::span<const render::TextRun>{runs}, opts);
+
+    Painter single;
+    single.begin(160, 56);
+    for (const auto &run : runs) {
+        single.draw_text(run.box, std::string{run.text}, run.font, run.color, opts);
+    }
+    AURORA_TEST_REQUIRE_EQ(count_diff_pixels(batch, single), 0);
+}
+
+AURORA_TEST_CASE(draw_text_runs_with_aa_mode_and_opts_matches_individual_calls) {
+    // 显式 aa_mode 的批量入口同样逐位等价于逐个 `draw_text(..., aa_mode, opts)`。
+    const Font f{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
+    const auto runs = {
+        render::TextRun{.text = "Aa", .box = rect_at(2.0F, 2.0F, 80.0F, 20.0F), .font = f, .color = Color::black()}};
+    const render::TextLayoutOpts opts{.letter_spacing = 0.0F, .word_spacing = 0.0F, .italic = false};
+    const auto aa = render::TextAAMode::ClearType;
+
+    Painter batch;
+    batch.begin(96, 28);
+    batch.draw_text_runs(std::span<const render::TextRun>{runs}, aa, opts);
+
+    Painter single;
+    single.begin(96, 28);
+    for (const auto &run : runs) {
+        single.draw_text(run.box, std::string{run.text}, run.font, run.color, aa, opts);
+    }
+    AURORA_TEST_REQUIRE_EQ(count_diff_pixels(batch, single), 0);
+}
+
+AURORA_TEST_CASE(draw_text_runs_italic_changes_pixels_but_keeps_layout) {
+    // 斜体只改变字形倾角，不得改变排版盒/行高：非斜体批与斜体批在**整盒**上必有像素差，
+    // 而段落盒高度（排版盒）由调用方给定、不受 italic 影响。
+    const Font f{.family = "sans-serif", .size_pt = 16.0F, .weight = 400};
+    const auto runs = {render::TextRun{
+        .text = "Italic", .box = rect_at(2.0F, 2.0F, 120.0F, 24.0F), .font = f, .color = Color::black()}};
+
+    Painter upright;
+    upright.begin(128, 32);
+    upright.draw_text_runs(std::span<const render::TextRun>{runs}, render::TextLayoutOpts{});
+
+    Painter slanted;
+    slanted.begin(128, 32);
+    slanted.draw_text_runs(std::span<const render::TextRun>{runs},
+                           render::TextLayoutOpts{.letter_spacing = 0.0F, .word_spacing = 0.0F, .italic = true});
+
+    AURORA_TEST_CHECK_GT(count_diff_pixels(upright, slanted), 0);
+}
+
+AURORA_TEST_CASE(draw_text_runs_letter_spacing_matches_single_fragment) {
+    // 正/负字距的批量结果须分别等于同字距的逐个绘制：收紧不得被批量路径夹掉。
+    const Font f{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
+    const auto runs = {render::TextRun{
+        .text = "tracking", .box = rect_at(2.0F, 2.0F, 160.0F, 20.0F), .font = f, .color = Color::black()}};
+
+    for (const float ls : {-1.0F, 2.5F}) {
+        const render::TextLayoutOpts opts{.letter_spacing = ls};
+        Painter batch;
+        batch.begin(168, 28);
+        batch.draw_text_runs(std::span<const render::TextRun>{runs}, opts);
+
+        Painter single;
+        single.begin(168, 28);
+        single.draw_text(runs.begin()->box, std::string{runs.begin()->text}, f, Color::black(), opts);
+
+        AURORA_TEST_REQUIRE_EQ(count_diff_pixels(batch, single), 0);
+    }
 }
 
 }  // namespace aurora::test_cases::utest_painter

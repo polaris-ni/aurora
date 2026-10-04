@@ -31,6 +31,7 @@
 #include "aurora/window/detail/atspi_bridge.h"
 #include "aurora/window/detail/ime_composition.h"
 #include "aurora/window/detail/title_bar_painter.h"
+#include "aurora/window/detail/wayland_output_scale.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/swizzle.h"
 #include "aurora/window/window_state.h"
@@ -84,6 +85,11 @@ struct WaylandSurface::Impl {
     };
 
     std::vector<OutputInfo> outputs;
+    /// 本表面当前所在的输出（`wl_surface.enter` / `leave` 维护，未 enter 时为空）。
+    /// per-output 缩放的输入：合成器只对「表面所在输出」给 buffer scale 期望值，
+    /// 取所有输出的最大值会在窗口落到低 DPI 屏时按高 DPI 渲染（缩水的字 + 浪费显存）。
+    /// 跨屏拖动即表现为 enter/leave 交替 ⇒ 该集合变化时须重算缩放。
+    std::vector<wl_output *> entered;
     // xkbcommon 键盘状态。
     xkb_context *xkb_ctx = nullptr;
     xkb_keymap *keymap = nullptr;
@@ -225,24 +231,39 @@ struct WaylandSurface::Impl {
         e.action = action;
         e.button = button;
         e.position = Point{lx, ly};
+        // 修饰态取 `on_modifiers` 维护的 xkb 缓存：Wayland 协议**不随指针事件送修饰态**
+        // （wl_pointer 的 enter/motion/button 回调都没有 mods 参数），故该缓存是本后端指针
+        // 路径唯一可得来源，与键盘路径（on_key）读的同一个字段、同一份值。
+        e.modifiers = mods;
         handler(e);
     }
 
     auto refresh_scale() -> void {
-        // 简化模型：取所有输出的最大缩放（map 前 surface 尚未 enter 任何输出，
-        // 以最大值渲染可避免高 DPI 屏首帧模糊；enter 后如有变化再重渲染）。
-        int want = 1;
-        for (const OutputInfo &o : outputs) {
-            want = std::max(want, o.scale);
+        // per-output 模型的取值决策收敛在 detail/wayland_output_scale.h（纯函数、可单测）；
+        // 此处只负责把协议对象转成身份键、施加副作用（换光标 / 上报 / 请帧）。
+        // 三条分支的取舍理由见该头文件注释。
+        std::vector<std::uintptr_t> entered_keys;
+        entered_keys.reserve(entered.size());
+        for (const wl_output *o : entered) {
+            entered_keys.push_back(reinterpret_cast<std::uintptr_t>(o));
         }
-        if (compositor_version < 3U) {
-            want = 1;  // set_buffer_scale 需 wl_surface v3：不支持则退化 1x
+        std::vector<detail::WaylandOutput> out_scales;
+        out_scales.reserve(outputs.size());
+        for (const OutputInfo &info : outputs) {
+            out_scales.push_back(
+                detail::WaylandOutput{.key = reinterpret_cast<std::uintptr_t>(info.out), .scale = info.scale});
         }
+        const int want = detail::select_wayland_buffer_scale(compositor_version, out_scales, entered_keys);
         if (want != scale) {
             scale = want;
             // 光标主题按设备像素加载：缩放变了旧主题的位图就不再匹配，立即重载并重下发
             // （force=true 跨过「同形状同缩放」去重——此处缩放恰已变，去重键本身也已失效）。
             apply_cursor(true);
+            // 上报缩放变化：`WindowHost::on_scale_changed` 据此 force_full_redraw()。
+            // 必须在 present_request_ **之前**——present_request 只是「安排一帧」，而上报
+            // 触发的重绘会立即按新 scale 分配缓冲；顺序反了会有一帧用旧 scale 渲染。
+            // `self` 必非空：`d.self = this` 在挂 listener 与首次 refresh_scale 之前已赋值。
+            self->notify_scale_change(static_cast<float>(scale));
             if (self->present_request_) {
                 self->present_request_();
             }
@@ -482,8 +503,12 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
             }
 
             // 标题栏空白区 → 双击最大化 或 拖拽移动（客户端自行检测双击；Wayland 无原生双击事件）。
+            // 阈值引自 event 层的连击常量（AURORA_DEFAULT_CLICK_WINDOW_MS / AURORA_DEFAULT_CLICK_RADIUS_DP）：
+            // 窗口装饰层的双击与 widget 树的 MouseEvent::click_count 因此共用同一份真源，
+            // 不会各写一套而漂移。两者语义正交（CSD 标题栏不进 widget 树、不经 EventDispatcher）。
             const bool is_dblclick =
-                (timestamp - d.last_click_time < 300) && std::hypot(x - d.last_click_x, y - d.last_click_y) < 5.0;
+                (timestamp - d.last_click_time < AURORA_DEFAULT_CLICK_WINDOW_MS) &&
+                std::hypot(x - d.last_click_x, y - d.last_click_y) < AURORA_DEFAULT_CLICK_RADIUS_DP;
             d.last_click_time = timestamp;
             d.last_click_x = x;
             d.last_click_y = y;
@@ -563,6 +588,7 @@ void ptr_axis(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, std::uint3
     } else {
         se.delta_x = amount;
     }
+    se.modifiers = d.mods;  // 真值源同 send_mouse / on_key：xkb 缓存（协议不随指针事件送修饰态）。
     d.handler(se);
 }
 
@@ -683,6 +709,33 @@ void out_name(void * /*d*/, wl_output * /*o*/, const char * /*name*/) {}
 void out_desc(void * /*d*/, wl_output * /*o*/, const char * /*desc*/) {}
 
 constexpr wl_output_listener OUTPUT_LISTENER = {out_geometry, out_mode, out_done, out_scale, out_name, out_desc};
+
+// ---- wl_surface：enter / leave 决定表面所在输出（per-output 缩放的输入）。 ----
+// 只维护「本表面当前在哪些输出上」这一个集合，缩放取值仍统一在 `Impl::refresh_scale()`
+// —— 事件只负责改状态、不自己算 scale，与 `out_scale` 改 info.scale 后由 out_done 统一
+// 重算是同一分工（`out_scale` 本身不带 done 标记，靠后续 done 事件兜底）。
+void surf_enter(void *data, wl_surface * /*s*/, wl_output *output) {
+    Impl &d = *static_cast<Impl *>(data);
+    for (const wl_output *o : d.entered) {
+        if (o == output) {
+            return;  // 同一输出重复 enter（合成器可在输出重新点亮时重发）
+        }
+    }
+    d.entered.push_back(output);
+    d.refresh_scale();
+}
+
+void surf_leave(void *data, wl_surface * /*s*/, wl_output *output) {
+    Impl &d = *static_cast<Impl *>(data);
+    const auto it = std::find(d.entered.begin(), d.entered.end(), output);
+    if (it == d.entered.end()) {
+        return;
+    }
+    d.entered.erase(it);
+    d.refresh_scale();
+}
+
+constexpr wl_surface_listener SURFACE_LISTENER = {surf_enter, surf_leave};
 
 // ---- wl_registry：globals 绑定。 ----
 void reg_global(void *data, wl_registry * /*r*/, std::uint32_t name, const char *iface, std::uint32_t version) {
@@ -861,6 +914,15 @@ auto WaylandSurface::Impl::on_modifiers(std::uint32_t depressed, std::uint32_t l
     }
     if (xkb_state_mod_name_is_active(xkb_st, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0) {
         m = m | ModifierKey::Meta;
+    }
+    // NumLock 是**锁定**态而非按住态，故查 `XKB_STATE_MODS_LOCKED`（effective 只反映
+    // 「此刻是否生效」，对锁定类修饰不反映锁定灯态）。用 `XKB_MOD_NAME_NUM`（= `"Mod2"`）
+    // 而非 `XKB_VMOD_NAME_NUM`（= `"NumLock"`）：后者自 xkbcommon 1.8 才引入，而本仓
+    // `pkg_check_modules(XKBCOMMON REQUIRED xkbcommon)` 未设版本下限，故取共存于所有版本的
+    // 前者（xkbcommon 1.10 起该名被标 deprecated，但语义与映射均未变，且与本函数其余四个
+    // `XKB_MOD_NAME_*` 同族、口径一致）。查不到时按「关」处理，不静默假报「开」。
+    if (xkb_state_mod_name_is_active(xkb_st, XKB_MOD_NAME_NUM, XKB_STATE_MODS_LOCKED) > 0) {
+        m = m | ModifierKey::NumLock;
     }
     mods = m;
 }
@@ -1219,6 +1281,7 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
     d.xkb_ctx = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     // 窗口壳：wl_surface → xdg_surface → xdg_toplevel。
     d.surface = wl_compositor_create_surface(d.compositor);
+    wl_surface_add_listener(d.surface, &SURFACE_LISTENER, &d);
     d.xsurface = xdg_wm_base_get_xdg_surface(d.wm_base, d.surface);
     xdg_surface_add_listener(d.xsurface, &XDG_SURFACE_LISTENER, &d);
     d.toplevel = xdg_surface_get_toplevel(d.xsurface);
@@ -1355,6 +1418,7 @@ WaylandSurface::~WaylandSurface() {
                 wl_output_destroy(o.out);
             }
         }
+        d.entered.clear();  // 非拥有指针副本：随 outputs 一并失效，清空以免读成「仍在屏上」
         if (d.toplevel != nullptr) {
             xdg_toplevel_destroy(d.toplevel);
         }

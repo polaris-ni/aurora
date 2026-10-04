@@ -412,6 +412,9 @@ au::Column{}
 | `fill_sector(Point center, float outer_r, float inner_r, float a0, float a1, Color)` | 抗锯齿扇形 / 环扇（y 轴向下，弧度制；`a1 - a0 >= 2π` 视为整圆 / 整环；`inner_r <= 0` 即实心扇形） |
 | `stroke_arc(Point center, float radius, float thickness, float a0, float a1, Color)` | 弧线描边（`fill_sector` 的环带语义糖） |
 | `draw_text(Rect, string, Font, Color[, TextLayoutOpts][, TextAAMode])` | 绘制文本，三个重载 |
+| `draw_text_runs(span<const render::TextRun>)` | 批量绘制同属性文本片段（详见 §8.2 的「批量入口」）；空数组即无操作 |
+| `draw_text_runs(span<const render::TextRun>, const TextLayoutOpts &)` | 同上，**整批共用一份排版 opts**（字距/词距/斜体/方向/回退链/固定格档位）；抗锯齿取进程级 `text_aa_mode()` |
+| `draw_text_runs(span<const render::TextRun>, TextAAMode, const TextLayoutOpts &)` | 同上，**显式覆盖抗锯齿策略** + 整批共用排版 opts |
 | `draw_image(const Image&, const Rect&)` | 绘制图像（双线性采样） |
 
 **混合与效果**
@@ -469,6 +472,22 @@ au::Column{}
 
 **字体注入**：`set_default_font(ttf_path)` / `register_font(family, ttf_path)` / `register_font_from_memory(family, ttf_bytes)`（`family` 为空表示默认 sans-serif）。
 
+**字体族枚举（`render::list_font_families(monospace_only = false)` → `vector<FontFamilyInfo>`，见 `render/font_discovery.h`）**：供「字体族下拉」这类 UI 直接消费。此前的公共面**只**有按名解析（`resolve_faces(family, weight)`）——每一条都要求调用方**先知道族名**，而系统字体目录的扫描根本没有族名产出（既有 `register_system_fallbacks()` 只是固定候选文件清单，且经 `add_default_face()` 只挂进 `""` / `"sans-serif"` 两个键，不产生族名），于是消费方只能自己复制一套目录扫描或手写族名表，两者都会与框架的 `resolve_faces` 口径漂移。
+
+- **同源保证（核心不变量）**：返回的每个 `family` 都保证 `resolve_faces(family, weight)` 能解析出**属于该族**的面，而不是悄悄落到默认链——枚举出来的名字点下去解析不到 face 比不枚举更糟。实现上系统字体目录只建「族名 → 文件路径」的 catalog（不预开上百个 `FT_Face`），`resolve_faces` 未命中时按 catalog **懒加载**该族。**注意**：判这条不变量不能用「`resolve_faces` 非空」——它对任何未命中族都会 emit 默认链，因而**恒非空**，是一条空转判据；须与「必然落到纯默认链的哨兵族」做序列对拍（`utest_font_discovery` 已按此实现）。
+- **等宽判定以度量为准**：取该族一个面，同像素尺寸下比较 `'i'` / `'W'` / `'0'` 的 advance 是否全等。既有族名特判（`monospace` / `mono`）**降级为补充命中**，只在度量不可得时生效——故「名字像等宽但度量非等宽」的族判 `false`。
+- **三平台同口径**：目录扫描 + `FT_Face::family_name`（Windows `C:\Windows\Fonts` 递归；Linux `/usr/share/fonts` 等；macOS `/System/Library/Fonts` 等）。**不引入 fontconfig**：它给出的族名与 `FT_Face::family_name` 不同源，反而会让三平台口径对不齐。返回的**集合**允许因平台所装字体而异，但排序、去重、等宽判定、与 `resolve_faces` 的同源性四处逐平台一致。
+
+**按族缺字回退链（`resolve_faces(family, weight, span<const std::string> fallback_families)` 重载 + `TextLayoutOpts::font_fallback_chain`）**：全局默认链是**进程级固定序列**——`add_default_face()` 只往 `""` / `"sans-serif"` 两个键挂面且**不产生族名**，故调用方既看不到全局链里有哪些族，也无法改变其顺序或插入族名。于是「本族缺字时先看哪一族」此前没有任何表达入口：等宽 + CJK 缺字回退这类需求（默认回退至系统等宽 CJK 字体、**回退链顺序可配**）无法落地。本重载即该入口。
+
+- **顺序即语义，框架不重排**：链上族按给定顺序依次追加到「本族自身的面」之后，全局默认链仍只作**尾部回落**。字重排序只作用于**单个族自身**（精确匹配字重的面排该族首位、其余按字重距离升序，与无链时同口径），**不跨族重排**——否则「A 族优先于 B 族」的声明会被打乱。这条与无链路径的差别是实质性的：无链时主族与全局链合并后做**一次**全局 weight 排序，有链时改为分段（每族一段、段内排序、段间保序）。
+- **链上族名与 `list_font_families()` 同源**：链上任一族名都经与族名枚举**同一条**懒加载路径解析（目录 catalog → `materialize_catalog_family`），故取自枚举结果的族名必定解析得到属于该族的面；**解析不到的族跳过**（含伪族名 `""` / `"sans-serif"` / `"default` —— 它们是默认链的键而非族名，链上出现它们等于把尾部回落提前），不阻断后续链段，最终仍由全局链兜底。
+- **不指定即零影响**：链长为 0 时本重载与无链重载**共用同一条代码路径与同一份缓存条目**（缓存键此时恰为 `family#weight`、不带任何链编码），输出逐字节一致。有链时缓存键追加 U+001F 分隔的链编码，不同链互不污染。
+- **承载形态是定长数组 + 长度**（`font_fallback_chain` + `font_fallback_chain_size`，容量 `AURORA_TEXT_FALLBACK_CHAIN_MAX = 8`），不是 `vector` / `shared_ptr`：后两者会让 `TextLayoutOpts` 失去字面类型，本仓既有 12 处 `constexpr TextLayoutOpts` 全部编译失败。超出容量的项**丢弃并保留前 N 项**（顺序语义不变），不静默扩容。
+- **稳定序**：按 `family` 升序、去重（下拉数据源要求，不让 UI 侧自己排序）。伪族名 `""` / `"sans-serif"` / `"default"` 是默认链的键而非族名，**不**出现在结果里（三者指向同一个 Noto Sans 面，列出来只会让下拉出现三个等价项，其中一个还是空串）。
+- **缓存与失效**：目录扫描首次调用时建立，随 `shutdown_font_discovery()` 自然失效；调用方**无需**手动刷新。未初始化时返回仅含内置族 / 已注册族的集合，不崩溃。
+- **内置等宽族**：框架此前没有任何内置等宽族（内置族只有非等宽的 Noto Sans），故内置 **Cascadia Code**（SIL OFL 1.1，见 `THIRD_PARTY_LICENSES.md`）并注册到族名 `"Cascadia Code"`——只注册到自己的名下、**不挂默认链**，既有默认链行为不变。
+
 **度量与绘制**：`measure_width` / `measure_height` / `measure_ascent` / `draw_text`。
 
 **选中原语**：`caret_x(text, idx, font)` / `hit_test_char(text, x, font)` / `hit_test_char_inclusive`（以码点为索引，UTF-8 安全）。
@@ -479,9 +498,39 @@ au::Column{}
 
 **光栅状态世代**：`FontEngine::raster_generation()` 返回全局计数。三个字体注入接口（`set_default_font` / `register_font` / `register_font_from_memory`，换用不同字面同样改变字形光栅结果）**无条件**自增它；`set_text_aa_mode` 仅在写入值真正变化时自增（同值写入短路返回）。控件的 Display List 与离屏层缓存在录制/生成那一刻固化了 AA 模式与字面，而 `Widget::mark_needs_paint()` 只沿父链向上传播失效、不触及后代缓存——故控件必须把本世代纳入缓存命中条件（`Widget::paint` 已内置），否则切换后后代仍回放旧光栅，表现为「切换瞬间无变化、过一会儿才随无关失效零星生效」。字形图集键已含 AA 模式与 `px`，世代失效只触发重录、不产生脏条目。
 
-**排版选项（`TextLayoutOpts`）**：`measure_width` / `caret_x` / `hit_test_char` / `draw_text` 均提供接受 `TextLayoutOpts` 的重载，携带 `letter_spacing`（相邻字形间间距，整串共 `n-1` 次）、`word_spacing`（词间距，仅空格后追加）、`italic`（经 FreeType `FT_Set_Transform` 仿斜）。统一 opts 保证度量、光标、命中、绘制四者完全一致。
+**排版选项（`TextLayoutOpts`）**：`measure_width` / `caret_x` / `hit_test_char` / `draw_text` 均提供接受 `TextLayoutOpts` 的重载，携带 `letter_spacing`（相邻字形间间距，整串共 `n-1` 次）、`word_spacing`（词间距，仅空格后追加）、`italic`（经 FreeType `FT_Set_Transform` 仿斜）、`direction`（书写方向）、`font_fallback_chain`（按族缺字回退链）、`fixed_cell_advance_px`（固定格推进档位）。统一 opts 保证度量、光标、命中、绘制四者完全一致。**六个字段全部进 `DrawCmd` 参与录制**（见下「录制—回放」段），且全部进 shaping 缓存键的哈希与相等比较——漏掉任一字段都会让开了该档的文本命中没开的缓存条目，字距/选面静默错乱。
 
 **锚定契约**：`draw_text(r, ...)` 的 `r.origin.y` 是**行盒顶**而非基线。实现内部首行基线 = `origin.y + 主 face ascender`，回退 face 字形统一按主 face 基线对齐。全库调用方均按顶锚定传值，**不得自行加减 ascent**。该 ascent 由 `measure_ascent(f)` 公开（与绘制同源、不做绘制侧的整像素 snap），供 `CrossAxisAlignment::Baseline` 的控件级基线使用；无可用字体面时回退 `BitmapFont::measure_ascent`（同一 `pixel_size` 口径），恒有 `0 <= measure_ascent <= measure_height`。
+
+**等宽整格度量（`monospace_cell(f, scale)` → `render::CellMetrics`）**：按列排版的消费方（终端网格、表格单元格）需要整像素单格尺寸来同时定列位与判换行，而 `measure_*` 给的是浮点自然度量，逐格各自取整会让列位随列号漂移。`CellMetrics{cell_width_px, cell_height_px, ascent_px}` 三值均为**物理像素整数**，口径：宽取参考字形集 `{'0', U+2500}` 在绘制同源像素尺寸（`lround(px_measure × scale)`）下整像素 hinted advance 的最大值——含 U+2500 是因为制表符在部分字体里比 ASCII 数字宽，只量 `'0'` 会让相邻边框压字；不放宽到全字形集是避免把网格画稀（`utest_font_engine.cpp` 以 `display_width` 反查上界，钉住「≥ 两者最大且 ≤ 最大 + 1」）。高与基线与绘制侧同源（`floor(line_height_px + 0.5)` / `floor(ascender_px + 0.5)`，即首行 pen 的 snap 口径），故按本度量排的多行文本与 `draw_text` 的行推进共用同一行盒；`cell_width_px` 恒 ≥ 1，`scale <= 0` 按 1 处理，无可用字体面时回退 `BitmapFont` 整格口径。**合成粗体的 embolden 量不计入格宽**（绘制期膨胀允许字形溢出半格，但不推挤邻格）。列起点与换行一律由消费方按本度量自行计算。
+
+**固定格推进档位（`TextLayoutOpts::fixed_cell_advance_px`，`optional<float>`，nullopt = 不启用）**：字形落笔与推进的默认算式是 `dx0 = floor(pen_x + x_off) + left` / `pen_x += x_adv`，而 `x_adv` 取 HarfBuzz 给出的**该 face 自己**的物理 px advance——于是回退面的双宽字形（实测 Cascadia Code 14pt 单格 11px、汉字 19px）会把同一 run 内其后的字形整体挪位并**逐字累积**。开启本档位后推进量改由调用方给定（每字形一律 `fixed_cell_advance_px` px），**只改推进量、不改选面逻辑**：缺字照旧走回退链落到 CJK 面，档位与选面解耦。
+
+三条口径：
+
+- **单位是物理像素且已含 scale**。调用方直接传 `monospace_cell(f, scale).cell_width_px` 的整数倍即可，不需自己把 dp 折算成物理像素——这正是「与 `monospace_cell` 的整格度量同源、不要求调用方重复算 scale」的兑现方式。传逻辑 dp 会导致缩放屏上格宽与实际推进不符。
+- **不叠加合成粗体的 `embolden_px`**。格宽是约定值不是量出来的推进，加粗字形溢出半格也不推挤邻格，与 `monospace_cell`「embolden 不计入格宽」的既有口径一致。
+- **与 `letter_spacing` / `word_spacing` 叠加**（间距语义不变），故网格消费方通常同时把它们留 0。
+
+**度量侧必须同步**：`emit_glyphs_with_context`（绘制）、`line_prefix`（宽度 / caret）、`hit_test_single_pass`（命中）三处的推进量统一走 `glyph_advance_px(g, opts)` 单一判定。只改绘制不改度量会让选区高亮 / caret / 命中与实绘像素逐字错位，且不触发任何编译或运行错误。
+
+**档位粒度是「整批一档」**（`TextLayoutOpts` 逐批共用，`TextRun` 不带 per-run 覆盖）：一行内 ASCII 占 1 格、汉字占 2 格的混排**无法用单一固定档表达**，消费方须按格宽断 run 分批调用 `draw_text_runs`（这与 `opts 整批共用、不提供 per-run opts` 的既有约定一致）。`monospace_cell` 刻意传空 opts 度量：链只影响缺字时回退到哪一族、不参与格宽决定；档位更不能参与（否则档位依赖格宽、格宽又依赖档位，形成自我循环）。
+
+**批量入口（`Painter::draw_text_runs` / `FontEngine::draw_text_runs`）**：一段文本按样式切成多个片段是终端与表格的常态，逐片段调 `draw_text` 会让每次调用重做与文本内容无关的派生量（字体候选面解析含堆键构造、像素尺寸换算、两次 `FT_Set_Pixel_Sizes` 取行高与 ascender）。批量入口把这些派生量外提成一份发射上下文，**只在相邻片段 `Font` 不同时重建**，落笔算式与逐片段调用逐位相同（`utest_painter.cpp` 以两画布全像素差分 == 0 钉住）。收益上限即「每次调用的派生量 × 片段数」：实测一屏规模（24 行 × 12 同属性短片段 = 288 片段）在 9 组「逻辑尺寸 × scale」下两轮各为 −8.5%…+8%、中位约 −1%，落在环境抖动之内——该场景的成本主体是字形 blit 与图集查找，不是派生量，故 `bench_render` 的 `grid_text_per_span_calls` / `grid_text_batched_spans` 两行**只作观测项、不进 `tools/check/perf_gates.json`**（无稳定阈值可锁）。片段风格越碎（同屏片段数越多、每片段越短）收益越接近线性；本入口的正当性首先是「逐片段调用与整批调用输出一致」而非提速幅度。片段类型 `render::TextRun{text, box, font, color}` 与 `draw_text` 的单次入参一一对应，区域原点单位为**逻辑 dp**、只读 `origin`；`FontEngine::draw_text_runs` 因此与同类其余「收物理像素」的入口**刻意不同**（内部按 `p.scale()` 折算）——预缩放需复制整段数组并连带复制每片段的 `Font::family`，每帧数千次堆分配恰好抵消收益。抗锯齿取进程级 `text_aa_mode()`、排版选项取默认值。**录制态逐片段各落一条 `DrawText` 命令**，故 RHI 回放后端无需认识新命令类型，批量化收益只落在直绘路径（终端/表格每帧重画整屏正是该路径）。
+
+**带排版选项的批量入口**：`draw_text_runs` 另有两个重载，与 `draw_text` 的 opts / aa_mode 梯度一一对应：
+
+- `draw_text_runs(runs, opts)`：整批共用一份 `TextLayoutOpts`。
+- `draw_text_runs(runs, aa_mode, opts)`：再显式覆盖抗锯齿策略。
+- 单参重载保留不变，语义上等价于 `draw_text_runs(runs, FontEngine::text_aa_mode(), TextLayoutOpts{})`——**实现即按此委托**，故历史调用点逐位不变。
+
+**opts 是整批共用的，不提供 per-run opts**：`TextRun` 因此不新增排版字段，避免与 `Font` 的既有语义（`weight` / `style`）重叠成两条互相矛盾的样式来源。调用方若各片段排版属性不同，请**按属性分组分批调用**。等价性由 `utest_painter.cpp` 钉住：带 opts 的批量结果与逐个 `draw_text(..., opts)` 全像素差分 == 0，带 `aa_mode` 的批量结果与逐个 `draw_text(..., aa_mode, opts)` 同样差分 == 0。
+
+录制态把 `aa_mode` 与 `opts` 的全部六个字段逐片段写入各自 `DrawCmd`（`text_ls` / `text_ws` / `text_italic` / `text_dir` / `text_cell_px` / `text_chain_idx`），回放端经**同一份** `encode_text_layout` / `decode_text_layout`（`glyph_emit.h`，三后端共用）重建 `TextLayoutOpts`，因此录制—回放路径与直绘路径逐位一致，且新增排版字段不可能出现「加了忘同步」。
+
+**回退链不进 `DrawCmd` 而走字符串池**：`TextLayoutOpts` 的链是定长数组（`font_fallback_chain` + `font_fallback_chain_size`），无法跨录制边界按引用传递，故按值序列化为 U+001F 分隔的族名串入 `str_pool_`，下标记在 `text_chain_idx`（-1 = 无链，空链不占池位）。解析集中在 `DisplayList::replay` 的 `resolve_cmd_data`（与 `text` / `font` 同批），后端经 `CmdData::text_chain` 取用、不接触池下标语义。
+
+**`direction` 现已进 `DrawCmd`（`text_dir`，-1 = 未指定）**：此前它是**只存在于直绘路径**的字段——三个回放端重建 opts 时本就不构造该字段，故录制时被静默丢弃、RTL 文本经 DisplayList 后方向可能与直绘不同。现随上述统一编解码一并带上，此既有缺口关闭。
 
 **实显度量（`display_*`）**：FT hinting 把每个字形 advance 取整到整像素，同一字形在不同像素尺寸下的 advance 不成 scale 比例。因此 `display_width` / `display_caret_x` / `display_hit_test_char{,_inclusive}` 必须按「绘制同源的物理像素尺寸 `lround(px × scale)` 真算前缀推进后折回 dp」，**不得写成自然度量的转发别名**——否则缩放屏下行内累计误差跨字符边界，造成命中 off-by-one。`scale == 1` 时退化为对应自然版。
 
@@ -504,8 +553,8 @@ au::Column{}
 | `set_present_dirty(const std::vector<Rect>&)` | `Window::present_root` 在清脏前把本帧脏矩形（逻辑→设备坐标）交给后端；支持增量上屏的后端仅更新变化区，空向量表示全量上传 |
 | `set_title(const std::string&)` | 虚方法，默认空实现；`Win32Host` 经 `SetWindowTextA` + `utf8_to_acp` 生效，`Headless` / `Glfw` 忽略。`Window::set_title` 写 `title_` 后同步下发 |
 | `set_cursor(CursorShape)` | 虚方法，默认空实现。宿主在悬停链解析出的形状**变化**时下发（`EventDispatcher` 按 `cursor_emitted_` / `current_cursor_` 去重，避免每个 Move 都打平台 API）。平台映射在各后端 `.cpp`：GLFW `glfwSetCursor` + `glfwCreateStandardCursor`（句柄缓存）、Win32 `SetCursor` + `LoadCursor(nullptr, IDC_*)`、X11 `XDefineCursor` + `XCreateFontCursor`（`XC_*` 字形，句柄缓存）、Wayland 客户端主题光标（`wl_cursor_theme_load(nullptr, 24×scale, wl_shm)` + `wl_cursor_theme_get_cursor(cursor_rfc_name)` → 专用 cursor `wl_surface` attach 主题自有 ARGB `wl_buffer` → `wl_pointer_set_cursor(pointer, enter_serial, ...)`，详见下方 Wayland 光标条目）、macOS `[[NSCursor …] set]`。`HeadlessSurface` 覆写为「按序记录」（`cursor_log()` / `last_cursor()` / `clear_cursor_log()`），使整链在无头环境可端到端断言；`D3D11Surface` 复用 Win32 宿主映射（内部头 `src/aurora/window/win32_cursor.h` 的 `detail::set_win32_cursor`，与 `Win32Surface` 共用一份），`WasmSurface` 保持空实现（浏览器自管 cursor） |
-| `native_handle() -> void*`（`const`） | 虚方法，**基类默认返回 `nullptr`**；真实窗口后端须覆写为宿主原生句柄。Win32 家族两路 `Win32Surface`（GDI 上屏）/ `D3D11Surface`（GPU 上屏）共用同一个 `Win32Host` 宿主，**二者均**返回 `hwnd()`（与 `hwnd()` 访问器同义）。`aurora::debug::surface_state()` 的 `has_native_window` 就由它非空判定——**漏覆写会让真实窗口后端误报「无原生窗口」**（`D3D11Surface` 曾如此，2026-09-13 补齐）。该契约由 `tests/unit/utest_native_surfaces.cpp` 的 `windows_family_native_handle_contract` 以类型级 `static_assert` 守门（`decltype(&T::native_handle)` 判定覆写存在） |
-| ⚠️ X11 翻译单元的宏碰撞（实现约束，非 API 变更） | `<X11/X.h>`（经 `Xlib.h` 引入）**无条件** `#define CursorShape 0`（"largest size that can be displayed"），与本表类型名 `aurora::CursorShape` 硬碰撞：不解除时该记号一律被预处理器展开为 `0`，`CursorShape shape` 变成 `0 shape`，报出极难定位的 `expected ')' before 'shape'`（2026-09-13 开 `AURORA_BACKEND_X11=ON` 真编译时才暴露）。故**任何引入 Xlib 的翻译单元**都必须在 Xlib 头之后、并在引入 `cursor_map.h` 之前 `#undef CursorShape`（同款处置见 `src/aurora/window/x11_surface.cpp` 顶部与 `x11_surface.h` 的 `@warning`）。同理 `#undef None` 用于避免污染 `ModifierKey::None` |
+| `native_handle() -> void*`（`const`） | 虚方法，**基类默认返回 `nullptr`**；真实窗口后端须覆写为宿主原生句柄。Win32 家族两路 `Win32Surface`（GDI 上屏）/ `D3D11Surface`（GPU 上屏）共用同一个 `Win32Host` 宿主，**二者均**返回 `hwnd()`（与 `hwnd()` 访问器同义）。`aurora::debug::surface_state()` 的 `has_native_window` 就由它非空判定——**漏覆写会让真实窗口后端误报「无原生窗口」**。该契约由 `tests/unit/utest_native_surfaces.cpp` 的 `windows_family_native_handle_contract` 以类型级 `static_assert` 守门（`decltype(&T::native_handle)` 判定覆写存在） |
+| ⚠️ X11 翻译单元的宏碰撞（实现约束，非 API 变更） | `<X11/X.h>`（经 `Xlib.h` 引入）**无条件** `#define CursorShape 0`（"largest size that can be displayed"），与本表类型名 `aurora::CursorShape` 硬碰撞：不解除时该记号一律被预处理器展开为 `0`，`CursorShape shape` 变成 `0 shape`，报出极难定位的 `expected ')' before 'shape'`（开 `AURORA_BACKEND_X11=ON` 真编译时才暴露）。故**任何引入 Xlib 的翻译单元**都必须在 Xlib 头之后、并在引入 `cursor_map.h` 之前 `#undef CursorShape`（同款处置见 `src/aurora/window/x11_surface.cpp` 顶部与 `x11_surface.h` 的 `@warning`）。同理 `#undef None` 用于避免污染 `ModifierKey::None` |
 
 > **光标形状映射 SSOT**：形状 → 平台中立的规范名由 `window/cursor_map.h` 提供唯一一份表——
 > `cursor_rfc_name(CursorShape)` 返回 freedesktop 光标主题名，同时即 W3C CSS `cursor` 关键字
@@ -638,6 +687,8 @@ au::Column{}
 **自定义后端入口**：扩展点收口于 `Surface` 子类与 `create_window` 工厂，而非 `Application` 构造重载。`Application` / `App` 只认两种形态——(a) `create_window(XxxOptions)` 产出的 `unique_ptr<Window>`；(b) 任意自定义后端经 `Application(Scene, unique_ptr<Surface>, WindowOptions)` 或 `App().surface(...)` 注入的 `unique_ptr<Surface>`。空 `Surface` / `Window` 仅告警降级。无头便捷构造 `Application(Scene, w, h)` 保持不变。
 
 **DPI 感知**：`enable_dpi_awareness()`（`window/window.h`）在进程创建**任何窗口之前**启用高 DPI 感知。这是 **OS/进程级**设置，非 per-Window、非 per-Surface——Win32 经 `SetProcessDpiAwarenessContext`（Per-Monitor V2 → V1 → `SetProcessDPIAware`）一次性启用；macOS 与 Linux 无需 opt-in，为空实现。**关键不变量**：必须在 `init_console()`（`AllocConsole` 会创建控制台窗口）与 `create_window()` 之前调用，否则 Windows 上启用失败会退化为 DPI 未感知（scale = 1.0）。每窗口的 scale 查询仍是各 `Surface::scale_factor()` 的职责，与「启用」正交。
+
+**Win32 侧的实现落点与唯一换算位置**（本条承诺此前与代码不符，已收敛）：awareness 由 `window_factory.cpp` 的 `make_window()` 启用——它是所有 `create_window` 重载的公共出口，且早于任何 `Surface` 构造（即早于 `CreateWindowExA`）；`Win32Host::Impl` 构造体内保留一处幂等兜底，供不经工厂直接构造宿主的消费者。`Win32Host` 内部 dp ↔ 物理像素的换算**只发生在两个私有函数**里：`to_physical(Size)`（逻辑 → 物理）与 `to_logical(int, int)`（物理 → 逻辑）；两者共读 `Impl::scale` 这**一个**成员，该成员由 `refresh_scale()`（降级链 `GetDpiForWindow` → `GetDpiForMonitor` → `GetDpiForSystem` → `GetDeviceCaps` → 96，**判据是「取到 > 0 才算成功」而非「函数指针非空」**）求得、并在 `WM_DPICHANGED` 时更新。**建窗期**（句柄尚未创建）按「窗口即将落位的显示器」取 DPI（`MonitorFromPoint(工作区中心)` → `GetDpiForMonitor`），建窗成功后若真实值与建窗期不同则在 `ShowWindow` 之前按真实 scale 重设一次尺寸——首帧客户区逻辑尺寸必须等于请求的 dp。取值实现在可单测内部头 `window/detail/win32_dpi.h`；换算点单源由 `tools/check/check_dpi_single_source.py` 静态守卫。构造尺寸、`set_size`、`WM_GETMINMAXINFO`、鼠标 / 滚轮 / 文件拖放、IME hook、a11y 投影矩形全部经这两个函数，宿主内不再有裸写的 `* scale` / `/ scale`。**消费方只见逻辑坐标（dp）**：物理像素只出现在宿主内部与 `WindowGeometry`（见 `06-app-platform.md`）。收敛背景与验收见 `08-tooling.md` §8.2。
 
 ### 8.6 显示列表与 RHI 后端
 
@@ -866,7 +917,7 @@ class RhiBackend {
 
 **设备层**：`AudioDeviceBackend` 接口（`format()` / `start(RenderFn)` / `stop()`），桌面真实后端自起设备线程（**浏览器例外**：Web Audio 无设备线程可调，`render_block` 发生在浏览器主线程的排空定时器里，见下「Web Audio 后端」），测试用 `FakeAudioDevice`（`tests/support/fake_audio.h`）手动驱动保证确定性。`render_block(out, frames)` 公开可手动泵图（无头/测试）。`suspend()` 冻结时钟输出静音；`close()` 终态不可逆。
 
-**WASAPI 后端**（Windows，`AURORA_ENABLE_AUDIO_WASAPI`，pimpl 隔离于 `src/aurora/media/audio_wasapi.*`，windows.h 不外泄）：shared mode event-driven——引擎事件驱动设备线程逐块 `GetCurrentPadding → render → GetBuffer/ReleaseBuffer`；格式协商优先以图契约格式（48000/2 float32）+ `AUTOCONVERTPCM` 初始化（引擎侧转换吸收设备差异，重路由后契约不变），旧系统回退 float32 stereo 混合格式直用；协商失败 → `start()` 返回 false → 静默降级。**重路由**：`IMMNotificationClient` 监听默认设备变更/设备状态变化，设备线程重建端点客户端（失败退避 200ms 重试），期间时钟冻结（对齐 suspend 语义）。**采集后端**（`WasapiCaptureBackend`，库内部）：默认捕获端点 event-driven，GetMixFormat 原生率/声道回调、SILENT 包补零；启动期设备不可用 → `start()` false（调用方转显式 `AudioDeviceUnavailable`）；**中段失败**（端点移除/GetBuffer 出错）→ 采集线程退出、回调止流，经内部观察口 `failed()` 申报（内部 `running` 标志是 stop 握手位、承载 join 义务，不可作死活判据——若在退出时清零，`stop()` 早退不 join 将令 `~thread` `std::terminate`）。**守卫审计（2026-09-20）**修出三处：① `DeviceNotifyClient` 引用计数归零不自毁（每次后端生命周期泄漏一份）→ 标准 COM `delete this`；② `start()` 半途失败漏关事件句柄（重试覆盖旧值 → 句柄泄漏）→ 失败路径统一 `CloseHandle`；③ 采集中段失败注释声称「由调用方感知」但无观察通道 → 落 `failed()` 口并修正契约。探针 `aurora_verify_wasapi_audio` 自动段新增第 7 项直连验收（`failed()` 干净启停不误报 + 停后再启成功；本机无可用采集设备落 SKIP，实测走 start 失败清理路径）。真机探针 `aurora_verify_wasapi_audio`（`tools/verify/`，自动段 + `--interactive` 出声段，不进 CTest）。
+**WASAPI 后端**（Windows，`AURORA_ENABLE_AUDIO_WASAPI`，pimpl 隔离于 `src/aurora/media/audio_wasapi.*`，windows.h 不外泄）：shared mode event-driven——引擎事件驱动设备线程逐块 `GetCurrentPadding → render → GetBuffer/ReleaseBuffer`；格式协商优先以图契约格式（48000/2 float32）+ `AUTOCONVERTPCM` 初始化（引擎侧转换吸收设备差异，重路由后契约不变），旧系统回退 float32 stereo 混合格式直用；协商失败 → `start()` 返回 false → 静默降级。**重路由**：`IMMNotificationClient` 监听默认设备变更/设备状态变化，设备线程重建端点客户端（失败退避 200ms 重试），期间时钟冻结（对齐 suspend 语义）。**采集后端**（`WasapiCaptureBackend`，库内部）：默认捕获端点 event-driven，GetMixFormat 原生率/声道回调、SILENT 包补零；启动期设备不可用 → `start()` false（调用方转显式 `AudioDeviceUnavailable`）；**中段失败**（端点移除/GetBuffer 出错）→ 采集线程退出、回调止流，经内部观察口 `failed()` 申报（内部 `running` 标志是 stop 握手位、承载 join 义务，不可作死活判据——若在退出时清零，`stop()` 早退不 join 将令 `~thread` `std::terminate`）。**守卫审计**修出三处：① `DeviceNotifyClient` 引用计数归零不自毁（每次后端生命周期泄漏一份）→ 标准 COM `delete this`；② `start()` 半途失败漏关事件句柄（重试覆盖旧值 → 句柄泄漏）→ 失败路径统一 `CloseHandle`；③ 采集中段失败注释声称「由调用方感知」但无观察通道 → 落 `failed()` 口并修正契约。探针 `aurora_verify_wasapi_audio` 自动段新增第 7 项直连验收（`failed()` 干净启停不误报 + 停后再启成功；本机无可用采集设备落 SKIP，实测走 start 失败清理路径）。真机探针 `aurora_verify_wasapi_audio`（`tools/verify/`，自动段 + `--interactive` 出声段，不进 CTest）。
 
 **ALSA 后端**（Linux，`AURORA_ENABLE_AUDIO_ALSA`，pimpl 隔离于 `src/aurora/media/audio_alsa.*`，与 WASAPI 后端逐项对称）：**运行时绑定**——`dlopen("libasound.so.2")` 解析 `snd_pcm_*` 简单参数 API 最小符号集，ABI 常量按内核 UAPI 本地转录，**零构建期依赖**（不需 libasound dev 包、不链 libasound；库缺失/符号不全 → `start()` false → 与 WASAPI 同一静默降级/显式报错口径）。渲染线程 `"default"` 端点 + `snd_pcm_set_params`（RW_INTERLEAVED float32 48000/2，soft_resync，20ms 缓冲——插件层 plug/dmix/pulse 桥吸收设备差异，图侧契约恒定），循环 `avail_update → render（≤ 20ms 块）→ writei`，阻塞式写入天然节流、`wait` 20ms 超时保 stop 响应性；XRUN(-EPIPE)/系统挂起(-ESTRPIPE) 经 `snd_pcm_recover` 自愈，不可恢复错误或 DISCONNECTED → 关闭端点退避 200ms 重开（对齐 WASAPI 重路由与 suspend 冻结语义）。**采集后端**（`AlsaCaptureBackend`）：捕获端点格式顺位协商（48000/2 → 48000/1 → 44100/2 → 44100/1，readi 交付协商后 float32 交错、回调携带实际 rate/channels）；`failed()` 中段失败观察口与 `running`=stop 握手位纪律直接继承 WASAPI 审计结论。与 WASAPI 的已知口径差异：无默认设备变更通知源（snd_pcm 仅断连/错误重开），切换系统默认输出不改变 `"default"` 插件指向属设计内行为。**工厂择路**：`create_default_device_backend()/create_default_capture_backend()` 按 `AURORA_ENABLE_AUDIO_ALSA` 宏选 ALSA，否则 WASAPI（Windows 真实实现 / 其余 disabled 桩），AudioContext 契约不变。真机探针 `aurora_verify_alsa_audio`（同段结构 + 采集观察口第 7 项，无 libasound 或无设备的机器退出码 2 报 ENV-UNAVAILABLE 属合法降级；本机 WSL 无 ALSA 栈即此形态），单测 `utest_audio_alsa` 覆盖环境无关不变量（格式契约 / stop 幂等 / 重启生命周期 join 义务 / 启动期失败不置 `failed()`）。
 

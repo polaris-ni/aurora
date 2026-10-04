@@ -17,7 +17,7 @@ namespace aurora {
 class BuildContext {
   public:
     const Environment *env = nullptr;  ///< 当前环境（由 Provider 注入）；可为 nullptr
-    float scale_factor = 1.0F;  ///< 设备像素密度（dpi / 160 等），快速访问器
+    float scale_factor = 1.0F;  ///< 设备像素密度（dpi / 96），快速访问器
     Size size{};  ///< 本节点布局后的尺寸（布局阶段填充）
 
     /// @brief 向上查找类型 T 的环境值；不存在返回 nullptr。

@@ -1,17 +1,22 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/event/dispatcher.h
 /// 测试说明: 命中测试最深目标、鼠标冒泡与 stop-on-handled、本地坐标写入与 Press
-/// 焦点转移/空白清焦、指针捕获越界续发、悬停进出 diff、悬停光标解析
+/// 焦点转移/空白清焦（并核对 Press 与 Tab 各自记录的焦点到达方式，它决定基类焦点环显隐）、
+/// 指针捕获越界续发、悬停进出 diff、悬停光标解析
 /// （修饰链 > 虚钩子 > Clickable 缺省，变化才下发）、键盘
 /// Tab/激活快捷键与焦点路由（含激活键 / 方向键优先投递 on_key_event 的控件级 opt-in，
 /// 以及真实 TextInput 的方向键归光标、不夺焦点）、滚轮/文本/文件拖放路由、
 /// 滚轮余量自最深可滚动者上冒给更浅祖先（嵌套滚动协调：内层到顶后外层下拉刷新接手）、
-/// TouchDispatcher 按指针 id 捕获与合成鼠标事件
+/// TouchDispatcher 按指针 id 捕获与合成鼠标事件、连击序号（click_count）在 Press 上累加并在
+/// Release / Move 上恒为 1、超窗或位移过大重置、上限封顶为 3、左右键与多指针各自独立计数
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -37,11 +42,16 @@ class TestBox final : public LeafWidget {
     bool consume_drop = false;
     bool activation_keys_to_key_event = false;  ///< 覆写 wants_activation_keys() 的开关
     bool navigation_keys_to_key_event = false;  ///< 覆写 wants_navigation_keys() 的开关
+    bool tab_keys_to_key_event = false;  ///< 覆写 wants_tab_keys() 的开关
 
     int press_count = 0;
     int release_count = 0;
     int move_count = 0;
     int key_count = 0;
+    std::uint8_t last_click_count = 0;  ///< 最近一次指针事件携带的连击序号（供 click_count 用例断言）
+    /// 收到的每条指针 / 滚轮事件各自携带的修饰位（按接收顺序追加，供透传用例逐条断言）。
+    std::vector<ModifierKey> pointer_modifier_log;
+    std::vector<ModifierKey> scroll_modifier_log;
     int hover_changes = 0;
     int activations = 0;
     int scroll_count = 0;
@@ -78,6 +88,8 @@ class TestBox final : public LeafWidget {
         }
         last_local = e.local_position;
         last_pointer_id = e.pointer_id;
+        last_click_count = e.click_count;
+        pointer_modifier_log.push_back(e.modifiers);
         if (consume_pointer) {
             e.is_handled = true;
         }
@@ -96,6 +108,8 @@ class TestBox final : public LeafWidget {
 
     [[nodiscard]] auto wants_navigation_keys() const -> bool override { return navigation_keys_to_key_event; }
 
+    [[nodiscard]] auto wants_tab_keys() const -> bool override { return tab_keys_to_key_event; }
+
     auto on_hover_change(bool entered) -> void override {
         ++hover_changes;
         Widget::on_hover_change(entered);
@@ -103,6 +117,7 @@ class TestBox final : public LeafWidget {
 
     auto on_scroll(ScrollEvent &e) -> void override {
         ++scroll_count;
+        scroll_modifier_log.push_back(e.modifiers);
         Widget::on_scroll(e);  // 默认消费
     }
 
@@ -135,6 +150,8 @@ class TestRow final : public Container {
     int text_count = 0;
     int composition_count = 0;
     Point last_local{};
+    std::vector<ModifierKey> pointer_modifier_log;  ///< 逐条记录收到的指针事件修饰位
+    std::vector<ModifierKey> scroll_modifier_log;  ///< 逐条记录收到的滚轮事件修饰位
 
     using Widget::on_pointer_event;
 
@@ -159,6 +176,7 @@ class TestRow final : public Container {
     auto on_pointer_event(MouseEvent &e) -> void override {
         ++pointer_events;
         last_local = e.local_position;
+        pointer_modifier_log.push_back(e.modifiers);
         if (consume_pointer) {
             e.is_handled = true;
         }
@@ -166,6 +184,7 @@ class TestRow final : public Container {
 
     auto on_scroll(ScrollEvent &e) -> void override {
         ++scroll_count;
+        scroll_modifier_log.push_back(e.modifiers);
         Widget::on_scroll(e);
     }
 
@@ -203,6 +222,99 @@ struct NestedScrollTree {
     std::shared_ptr<PullToRefresh> outer;
     std::shared_ptr<Scroll> inner;
 };
+
+/// 记录每条滚轮事件的修饰位、并可声明「只吃一部分、余量上冒」的可滚动叶控件。
+///
+/// 为什么需要它：`ScrollEvent::modifiers` 的关键契约是**余量上冒到更浅祖先时两次都可见**。
+/// 真实的 `Scroll` / `PullToRefresh` 不暴露「我收到了什么修饰位」这个观测面，而这条契约
+/// 一旦被派发器改写（比如某次「顺手」在循环里重置了事件），从外面完全看不出来——只有把
+/// 观测点放进控件里才拦得住。
+class RecordingScroller final : public LeafWidget {
+  public:
+    float box_width = 40.0F;
+    float box_height = 40.0F;
+    /// 声明吃尽的纵向余量（0 = 全量消费、不上冒）。
+    float leave_remaining_y = 0.0F;
+    std::vector<ModifierKey> modifier_log;
+    std::vector<Point> position_log;  ///< 逐条记录 position（确认派发器不改坐标）
+    std::vector<float> delta_y_log;  ///< 逐条记录 delta_y（确认只有余量被改写）
+
+    auto type_name() const -> const char * override { return "RecordingScroller"; }
+
+    auto on_layout(const Constraints &c, [[maybe_unused]] const BuildContext &ctx) -> Size override {
+        size_ = c.constrain(Size{.width = box_width, .height = box_height});
+        return size_;
+    }
+
+    auto on_paint([[maybe_unused]] Painter &p, [[maybe_unused]] const Rect &bounds,
+                  [[maybe_unused]] const BuildContext &ctx) -> void override {}
+
+    [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
+
+    auto on_scroll(ScrollEvent &e) -> void override {
+        modifier_log.push_back(e.modifiers);
+        position_log.push_back(e.position);
+        delta_y_log.push_back(e.delta_y);
+        e.is_handled = true;
+        e.remaining_y = leave_remaining_y;
+    }
+};
+
+/// 命中链是「root → 最深命中」的一段祖先链，**兄弟节点不会同时入链**
+/// （`Container::on_hit_test_chain` 命中一个子节点即返回）。故要观察余量上冒的**两级**派发，
+/// 外层必须是内层的**祖先**而非兄弟——这正是真实嵌套滚动（PullToRefresh 包 Scroll）的形状。
+class RecordingScrollStack final : public Container {
+  public:
+    std::shared_ptr<RecordingScroller> outer;
+    std::shared_ptr<RecordingScroller> inner;
+
+    auto type_name() const -> const char * override { return "RecordingScrollStack"; }
+
+    auto on_layout(const Constraints &c, [[maybe_unused]] const BuildContext &ctx) -> Size override {
+        // 外层铺满可用空间，内层与其同盒（命中点落内层即命中两层的同一格）。
+        size_ = c.constrain(Size{.width = 80.0F, .height = 40.0F});
+        if (inner) {
+            inner->layout(Constraints{.min = Size{}, .max = size_}, BuildContext{});
+            children_.front().set_bounds(Rect{.origin = Point{}, .size = size_});
+        }
+        return size_;
+    }
+
+    auto on_paint([[maybe_unused]] Painter &p, [[maybe_unused]] const Rect &bounds,
+                  [[maybe_unused]] const BuildContext &ctx) -> void override {}
+
+    /// 外层自身即可滚动目标（wants_scroll），并记录收到的修饰位。
+    [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
+
+    auto on_scroll(ScrollEvent &e) -> void override {
+        outer_modifier_log.push_back(e.modifiers);
+        outer_delta_y_log.push_back(e.delta_y);
+        e.is_handled = true;
+        e.remaining_y = 0.0F;  // 吃尽，链路终止
+    }
+
+    std::vector<ModifierKey> outer_modifier_log;
+    std::vector<float> outer_delta_y_log;
+};
+
+/// 内层 `RecordingScroller` 套在 `RecordingScrollStack` 内（同盒，故命中点同时命中两层）。
+struct NestedRecordingScroll {
+    std::shared_ptr<RecordingScrollStack> stack;
+    std::shared_ptr<RecordingScroller> inner;
+};
+
+/// 外层容器（自身即可滚动）包住内层叶控件，两者同盒 80x40。
+auto make_nested_recording_scroll() -> NestedRecordingScroll {
+    auto stack = std::make_shared<RecordingScrollStack>();
+    auto inner = std::make_shared<RecordingScroller>();
+    inner->box_width = 80.0F;
+    inner->box_height = 40.0F;
+    stack->inner = inner;
+    stack->outer = inner;  // 外层观测点复用内层指针不需要：外层记录在 stack 自身
+    stack->add(Node{inner});
+    stack->layout(Constraints{}, BuildContext{});
+    return NestedRecordingScroll{.stack = stack, .inner = inner};
+}
 
 /// 外层下拉刷新包住内层滚动：视口 300×300、内容 800 → 内层可滚 [0, 500]（step=1 便于按 dp 推算）。
 auto make_nested_scroll_tree() -> NestedScrollTree {
@@ -312,6 +424,33 @@ AURORA_TEST_CASE(mouse_press_localizes_coordinates_and_updates_focus) {
     blank.action = MouseAction::Press;
     AURORA_TEST_CHECK_FALSE(dispatcher.dispatch_mouse(*tree.row, blank, &fm));
     AURORA_TEST_CHECK(fm.focused() == nullptr);
+}
+
+AURORA_TEST_CASE(pointer_press_and_tab_record_their_focus_arrival_modality) {
+    // 焦点环显隐的接线口在派发层：指针按下记 Pointer（不出环，控件已有 pressed 反馈），键盘 Tab
+    // 记 Keyboard（必出环，无障碍停点的唯一可见线索）。见 Widget::focus_ring_shown 与规格 §4.4。
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    FocusManager fm;
+    fm.set_root(tree.row.get());
+
+    MouseEvent press;
+    press.position = Point{.x = 45.0F, .y = 10.0F};  // box2 内
+    press.action = MouseAction::Press;
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, press, &fm));
+    AURORA_TEST_REQUIRE(fm.focused() == tree.box2.get());
+    AURORA_TEST_CHECK(tree.box2->focus_arrival() == FocusArrival::Pointer);
+    AURORA_TEST_CHECK_FALSE(tree.box2->focus_ring_shown());
+
+    // 点击之后立刻按 Tab：键盘模态必须当场把可见停点带回来（候选 [box1, box2]，自 box2 回卷到 box1）。
+    KeyEvent tab;
+    tab.key = static_cast<int>(KeyCode::Tab);
+    tab.action = KeyAction::Down;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, tab, fm));
+    AURORA_TEST_REQUIRE(fm.focused() == tree.box1.get());
+    AURORA_TEST_CHECK(tree.box1->focus_arrival() == FocusArrival::Keyboard);
+    AURORA_TEST_CHECK_MSG(tree.box1->focus_ring_shown(),
+                          "keyboard navigation after a click must restore the visible focus stop");
 }
 
 AURORA_TEST_CASE(pointer_capture_delivers_beyond_root_bounds) {
@@ -592,6 +731,82 @@ AURORA_TEST_CASE(direction_keys_reach_a_focused_text_input_before_focus_navigati
     AURORA_TEST_CHECK(fm.focused() == tree.left.get());
 }
 
+AURORA_TEST_CASE(tab_keys_honour_the_tab_keys_opt_in) {
+    auto tree = make_tree();
+    FocusManager fm;
+    fm.set_root(tree.row.get());
+
+    auto press_tab = [](ModifierKey mods) -> KeyEvent {
+        KeyEvent e;
+        e.key = static_cast<int>(KeyCode::Tab);
+        e.action = KeyAction::Down;
+        e.modifiers = mods;
+        return e;
+    };
+
+    // (c) 未覆写 wants_tab_keys()：Tab 序遍历，焦点控件观察不到按键（既有语义逐位不变）。
+    KeyEvent baseline = press_tab(ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, baseline, fm));
+    AURORA_TEST_CHECK(fm.focused() == tree.box1.get());
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 0);
+    KeyEvent baseline_next = press_tab(ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, baseline_next, fm));
+    AURORA_TEST_CHECK(fm.focused() == tree.box2.get());
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 0);
+
+    // (a) 覆写为 true 且 on_key_event 消费：按键先到控件，焦点不动，派发返回已处理。
+    fm.set_focus(tree.box1.get());
+    tree.box1->tab_keys_to_key_event = true;
+    tree.box1->consume_keys = true;
+    KeyEvent claimed = press_tab(ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, claimed, fm));
+    AURORA_TEST_CHECK_TRUE(claimed.is_handled);
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 1);
+    AURORA_TEST_CHECK(fm.focused() == tree.box1.get());
+
+    // (b) 覆写为 true 但不消费：回落焦点序遍历，焦点按方向前移。
+    tree.box1->consume_keys = false;
+    KeyEvent unclaimed = press_tab(ModifierKey::None);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, unclaimed, fm));
+    AURORA_TEST_CHECK_TRUE(unclaimed.is_handled);
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 2);
+    AURORA_TEST_CHECK(fm.focused() == tree.box2.get());
+
+    // (d) Shift+Tab 后退方向在 (a) 消费态下正确：焦点控件消费即止，不做后退。
+    fm.set_focus(tree.box2.get());
+    tree.box2->tab_keys_to_key_event = true;
+    tree.box2->consume_keys = true;
+    KeyEvent shift_claimed = press_tab(ModifierKey::Shift);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, shift_claimed, fm));
+    AURORA_TEST_CHECK_EQ(tree.box2->key_count, 1);
+    AURORA_TEST_CHECK(fm.focused() == tree.box2.get());
+
+    // (d) Shift+Tab 后退方向在 (b) 不消费态下正确：回落后退到 box1。
+    tree.box2->consume_keys = false;
+    KeyEvent shift_unclaimed = press_tab(ModifierKey::Shift);
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, shift_unclaimed, fm));
+    AURORA_TEST_CHECK_EQ(tree.box2->key_count, 2);
+    AURORA_TEST_CHECK(fm.focused() == tree.box1.get());
+}
+
+// Tab 序遍历的「仅按下阶段」口径：KeyAction::Up 不匹配全局快捷键，直接落焦点控件。
+// 这一条守住 wants_tab_keys() 前置投递没有被误放到释放阶段（否则控件会收到两次 Tab）。
+AURORA_TEST_CASE(tab_key_opt_in_only_applies_to_key_down) {
+    auto tree = make_tree();
+    FocusManager fm;
+    fm.set_root(tree.row.get());
+    tree.box1->tab_keys_to_key_event = true;
+    tree.box1->consume_keys = true;
+    fm.set_focus(tree.box1.get());
+
+    KeyEvent up;
+    up.key = static_cast<int>(KeyCode::Tab);
+    up.action = KeyAction::Up;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, up, fm));
+    AURORA_TEST_CHECK_EQ(tree.box1->key_count, 1);
+    AURORA_TEST_CHECK(fm.focused() == tree.box1.get());
+}
+
 AURORA_TEST_CASE(activation_keys_route_to_key_event_for_opt_in_widgets) {
     auto tree = make_tree();
     FocusManager fm;
@@ -791,6 +1006,312 @@ AURORA_TEST_CASE(wheel_margin_bubbles_from_inner_scroll_to_pull_to_refresh) {
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*down.outer, downward));
     AURORA_TEST_CHECK_NEAR(down.inner->offset_y(), 5.0F, 1e-4F);  // step=1：5 单位 = 5dp
     AURORA_TEST_CHECK_NEAR(down.outer->pull_distance(), 0.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(click_count_accumulates_on_press_and_resets_on_release) {
+    // 连击序号只在 Press 上累加，且以「上次 Release」为比对基准：按住不放不产生连击。
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;  // 窗口恒开：隔离时间因素，只验计数与重置语义
+
+    MouseEvent first;
+    first.action = MouseAction::Press;
+    first.position = Point{.x = 10.0F, .y = 10.0F};
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, first));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(first.click_count), 1);
+
+    MouseEvent up = first;
+    up.action = MouseAction::Release;
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, up));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(up.click_count), 1);  // Release 恒为 1
+
+    MouseEvent second;
+    second.action = MouseAction::Press;
+    second.position = Point{.x = 10.0F, .y = 10.0F};
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, second));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(second.click_count), 2);
+
+    MouseEvent up2 = second;
+    up2.action = MouseAction::Release;
+    dispatcher.dispatch_mouse(*tree.row, up2);
+
+    MouseEvent third;
+    third.action = MouseAction::Press;
+    third.position = Point{.x = 10.0F, .y = 10.0F};
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, third));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(third.click_count), 3);
+}
+
+AURORA_TEST_CASE(click_count_caps_at_three) {
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;
+    const Point at{.x = 10.0F, .y = 10.0F};
+
+    auto last = 0;
+    for (int i = 1; i <= 5; ++i) {
+        MouseEvent down;
+        down.action = MouseAction::Press;
+        down.position = at;
+        dispatcher.dispatch_mouse(*tree.row, down);
+        last = static_cast<int>(down.click_count);
+        MouseEvent up = down;
+        up.action = MouseAction::Release;
+        dispatcher.dispatch_mouse(*tree.row, up);
+    }
+    // 更快的连续点击仍记 AURORA_MAX_CLICK_COUNT，供「三击选整段」语义使用。
+    AURORA_TEST_CHECK_EQ(last, static_cast<int>(AURORA_MAX_CLICK_COUNT));
+}
+
+AURORA_TEST_CASE(click_count_resets_when_position_moves_beyond_radius) {
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;
+    dispatcher.click_radius_dp = 4.0F;
+
+    MouseEvent a;
+    a.action = MouseAction::Press;
+    a.position = Point{.x = 10.0F, .y = 10.0F};
+    dispatcher.dispatch_mouse(*tree.row, a);
+    MouseEvent up = a;
+    up.action = MouseAction::Release;
+    dispatcher.dispatch_mouse(*tree.row, up);
+
+    // 位移 5dp > 半径 4dp：判为新一次点击序列。判据取窗口逻辑坐标 position。
+    MouseEvent b;
+    b.action = MouseAction::Press;
+    b.position = Point{.x = 15.0F, .y = 10.0F};
+    dispatcher.dispatch_mouse(*tree.row, b);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(b.click_count), 1);
+}
+
+AURORA_TEST_CASE(click_count_resets_when_window_expires) {
+    // 窗口置 0：每次点击都重置为 1（极端阈值注入，避免测试依赖真实时钟推进）。
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 0;
+    dispatcher.click_radius_dp = 100.0F;
+
+    for (int i = 0; i < 3; ++i) {
+        MouseEvent down;
+        down.action = MouseAction::Press;
+        down.position = Point{.x = 10.0F, .y = 10.0F};
+        dispatcher.dispatch_mouse(*tree.row, down);
+        AURORA_TEST_CHECK_EQ(static_cast<int>(down.click_count), 1);
+        MouseEvent up = down;
+        up.action = MouseAction::Release;
+        dispatcher.dispatch_mouse(*tree.row, up);
+    }
+}
+
+AURORA_TEST_CASE(click_count_is_tracked_per_button_and_pointer) {
+    // 左/右键与不同指针各自独立计数：右键点击不得吃掉左键的连击序列。
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;
+    const Point at{.x = 10.0F, .y = 10.0F};
+
+    auto cycle = [&](MouseButton button, std::optional<int> pointer_id) -> int {
+        MouseEvent down;
+        down.action = MouseAction::Press;
+        down.position = at;
+        down.button = button;
+        down.pointer_id = pointer_id;
+        dispatcher.dispatch_mouse(*tree.row, down);
+        MouseEvent up = down;
+        up.action = MouseAction::Release;
+        dispatcher.dispatch_mouse(*tree.row, up);
+        return static_cast<int>(down.click_count);
+    };
+
+    AURORA_TEST_CHECK_EQ(cycle(MouseButton::Left, std::nullopt), 1);
+    AURORA_TEST_CHECK_EQ(cycle(MouseButton::Right, std::nullopt), 1);  // 换键 → 独立序列
+    AURORA_TEST_CHECK_EQ(cycle(MouseButton::Left, std::nullopt), 2);  // 回到左键 → 承接
+    AURORA_TEST_CHECK_EQ(cycle(MouseButton::Left, 7), 1);  // 换指针 → 独立序列
+}
+
+AURORA_TEST_CASE(click_count_stays_one_for_move_events) {
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;
+
+    MouseEvent down;
+    down.action = MouseAction::Press;
+    down.position = Point{.x = 10.0F, .y = 10.0F};
+    dispatcher.dispatch_mouse(*tree.row, down);
+    MouseEvent up = down;
+    up.action = MouseAction::Release;
+    dispatcher.dispatch_mouse(*tree.row, up);
+
+    MouseEvent move;
+    move.action = MouseAction::Move;
+    move.position = Point{.x = 10.0F, .y = 10.0F};
+    dispatcher.dispatch_mouse(*tree.row, move);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(move.click_count), 1);  // Move 不参与计数
+}
+
+AURORA_TEST_CASE(touch_double_tap_sets_click_count_on_synthesized_events) {
+    // 触摸合成流同样过连击判定：双 tap 达 click_count=2，与鼠标双击同口径。
+    auto tree = make_tree();
+    TouchDispatcher dispatcher;
+    dispatcher.click_window_ms = 60000;
+    dispatcher.click_radius_dp = 100.0F;
+
+    auto tap = [&](int id, bool active) -> void {
+        TouchEvent te;
+        TouchPoint p;
+        p.id = id;
+        p.position = Point{.x = 10.0F, .y = 10.0F};
+        p.prev_position = p.position;
+        p.is_active = active;
+        te.points.push_back(p);
+        dispatcher.dispatch(*tree.row, te);
+    };
+
+    tap(1, true);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(tree.box1->last_click_count), 1);
+    tap(1, false);  // 抬起：标记本次点击完成
+    AURORA_TEST_CHECK_EQ(static_cast<int>(tree.box1->last_click_count), 1);  // Release 恒为 1
+    tap(1, true);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(tree.box1->last_click_count), 2);  // 双 tap
+}
+
+// ---- 指针 / 滚轮事件的修饰键位（specification/05-event-navigation.md §2.2.2）----
+//
+// 契约只有一句：**派发器只透传、不推断**。它既不用「最后一次 KeyEvent 的 modifiers」兜底，
+// 也不在派发时刻轮询物理按键态；`modifiers` 从后端产生处一路原样抵达控件。下面三条分别
+// 钉住「原样抵达」「余量上冒时不变」「合成路径恒 None」。
+
+AURORA_TEST_CASE(pointer_modifiers_reach_the_widget_unchanged) {
+    // 命中链两级（最深 box1 → 根 row）都必须读到同一份位集：透传若在某一环被改写，
+    // 「Alt+拖选」这类手势就会在真机上表现为「按住 Alt 拖不动」。
+    auto tree = make_tree();
+    EventDispatcher dispatcher;
+
+    const auto want = ModifierKey::Shift | ModifierKey::Alt;
+    MouseEvent press;
+    press.position = Point{.x = 20.0F, .y = 20.0F};  // box1 内
+    press.action = MouseAction::Press;
+    press.modifiers = want;
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, press, nullptr));
+
+    AURORA_TEST_REQUIRE_EQ(static_cast<int>(tree.box1->pointer_modifier_log.size()), 1);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(tree.box1->pointer_modifier_log[0]),
+                         static_cast<std::uint8_t>(want));
+    AURORA_TEST_REQUIRE_EQ(static_cast<int>(tree.row->pointer_modifier_log.size()), 1);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(tree.row->pointer_modifier_log[0]), static_cast<std::uint8_t>(want));
+
+    // 未消费的 Move 仍逐位不变（指针捕获期间修饰态要能持续送达，拖选才跟得住）。
+    tree.box1->consume_pointer = false;
+    MouseEvent move;
+    move.position = press.position;
+    move.action = MouseAction::Move;
+    move.modifiers = want | ModifierKey::Control;
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, move, nullptr));
+    AURORA_TEST_REQUIRE_GE(static_cast<int>(tree.box1->pointer_modifier_log.size()), 2);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(tree.box1->pointer_modifier_log.back()),
+                         static_cast<std::uint8_t>(want | ModifierKey::Control));
+    // 未置位的位不得被凭空补上。
+    AURORA_TEST_CHECK_EQ(tree.box1->pointer_modifier_log.back() & ModifierKey::Meta, std::uint8_t{0});
+
+    // 缺省即「无修饰」：既有构造点（不带 modifiers 的字面量）行为逐位不变。
+    MouseEvent bare;
+    bare.position = press.position;
+    bare.action = MouseAction::Press;
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*tree.row, bare, nullptr));
+    AURORA_TEST_CHECK(tree.box1->pointer_modifier_log.back() == ModifierKey::None);
+}
+
+AURORA_TEST_CASE(scroll_modifiers_survive_the_remaining_amount_bubble) {
+    // 余量上冒是派发器对 ScrollEvent 唯一的写操作（重置 remaining_y、改写 delta_y）。
+    // 本条守住「它没顺手把 modifiers 也清了」——一旦被清，嵌套滚动里外层拿到的就是
+    // 「无修饰」，Ctrl+滚轮的字号缩放只会在内层生效一次、外层接手时静默失效。
+    auto tree = make_nested_recording_scroll();
+    tree.inner->leave_remaining_y = 2.0F;  // 内层只吃一半，余量上冒
+
+    const auto want = ModifierKey::Control | ModifierKey::Alt;
+    ScrollEvent se;
+    se.position = Point{.x = 20.0F, .y = 20.0F};
+    se.delta_y = 3.0F;
+    se.modifiers = want;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.stack, se));
+
+    AURORA_TEST_REQUIRE_EQ(static_cast<int>(tree.inner->modifier_log.size()), 1);
+    AURORA_TEST_REQUIRE_EQ(static_cast<int>(tree.stack->outer_modifier_log.size()), 1);
+    // 两次派发都读到同一份位集，逐位不变。
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(tree.inner->modifier_log[0]), static_cast<std::uint8_t>(want));
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(tree.stack->outer_modifier_log[0]), static_cast<std::uint8_t>(want));
+    // 派发器只改写 delta_y（余量作为新请求上冒），position 与 modifiers 一律不动。
+    AURORA_TEST_CHECK_NEAR(tree.inner->delta_y_log[0], 3.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(tree.stack->outer_delta_y_log[0], 2.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(tree.inner->position_log[0].x, 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(tree.inner->position_log[0].y, 20.0F, 1e-4F);
+
+    // 全量消费（余量 0）时只到内层一层，修饰位同样原样。
+    auto single = make_nested_recording_scroll();
+    single.inner->leave_remaining_y = 0.0F;
+    const auto only_inner = ModifierKey::Meta;
+    ScrollEvent one_hop;
+    one_hop.position = Point{.x = 20.0F, .y = 20.0F};
+    one_hop.delta_y = 1.0F;
+    one_hop.modifiers = only_inner;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*single.stack, one_hop));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(single.inner->modifier_log.size()), 1);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(single.stack->outer_modifier_log.size()), 0);
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(single.inner->modifier_log[0]),
+                         static_cast<std::uint8_t>(only_inner));
+}
+
+AURORA_TEST_CASE(synthesized_pointer_and_scroll_events_carry_no_modifiers) {
+    // 合成事件的修饰位恒为 `None`：触控合成、程序化滚动都不存在对应的物理修饰态，凭空补一个
+    // 「当前修饰态」会让消费方把程序化滚动误判成用户手势。需要区分来源的调用方用 `pointer_id`
+    // （见下一段断言），不用本字段。
+    auto tree = make_tree();
+
+    // ① 触控合成：TouchDispatcher 按 pointer_id 合成出的 MouseEvent。
+    TouchDispatcher touch;
+    auto tap = [&](int id) {
+        TouchEvent te;
+        TouchPoint p;
+        p.id = id;
+        p.position = Point{.x = 10.0F, .y = 10.0F};
+        p.prev_position = p.position;
+        p.is_active = true;
+        te.points.push_back(p);
+        touch.dispatch(*tree.row, te);
+    };
+    tap(7);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(tree.box1->press_count), 1);
+    AURORA_TEST_CHECK(tree.box1->pointer_modifier_log.back() == ModifierKey::None);
+    // 来源靠 pointer_id 区分，而不是靠修饰位。
+    AURORA_TEST_REQUIRE(tree.box1->last_pointer_id.has_value());
+    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_EQ(tree.box1->last_pointer_id.value(), 7);
+
+    // ② 程序化滚动：`Widget::scroll_by` / `Scroll::scroll_by` 内部**确实构造一条 ScrollEvent**
+    //    （只填 delta_y 后交 on_scroll 走共享视口内核），但它不来自任何后端、没有对应的
+    //    物理修饰态，故必须落缺省 None——否则「无障碍滚动 / 程序化滚动」在消费方眼里就与
+    //    「用户按住 Ctrl 滚的」无法区分。
+    auto scrolls = make_nested_recording_scroll();
+    (void)scrolls.inner->scroll_by(2.0F);  // 返回值只表示视口是否变化，与本断言无关
+    AURORA_TEST_REQUIRE_EQ(static_cast<int>(scrolls.inner->modifier_log.size()), 1);
+    AURORA_TEST_CHECK(scrolls.inner->modifier_log[0] == ModifierKey::None);
+    AURORA_TEST_CHECK_NEAR(scrolls.inner->delta_y_log[0], 2.0F, 1e-4F);
+    // scroll_by 直接经虚 on_scroll 派发、不经命中链，故外层收不到（余量未声明时为 0）。
+    AURORA_TEST_CHECK_EQ(static_cast<int>(scrolls.stack->outer_modifier_log.size()), 0);
+
+    // 真实 Scroll 组件的同一条路径：视口确已平移，而合成事件的修饰位为 None。
+    auto content = std::make_shared<TestBox>();
+    content->box_width = 300.0F;
+    content->box_height = 800.0F;
+    auto real_scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{content}, .step = 1.0F});
+    LayoutEngine::layout(*real_scroll, Constraints{.min = Size{}, .max = Size{.width = 300.0F, .height = 300.0F}});
+    // delta_y 为正 = 向上滚动（offset 减小），初始已在顶部故向上滚不动；向下滚才出可滚区间。
+    AURORA_TEST_CHECK_FALSE(real_scroll->scroll_by(60.0F));  // 已在顶部：向上滚不动
+    AURORA_TEST_CHECK_TRUE(real_scroll->scroll_by(-60.0F));  // 向下滚：视口下移
+    AURORA_TEST_CHECK_NEAR(real_scroll->offset_y(), 60.0F, 1e-3F);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(content->scroll_count), 0);  // 未派发到子控件（无命中链）
 }
 
 }  // namespace aurora::test_cases::utest_dispatcher

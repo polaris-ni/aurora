@@ -38,9 +38,6 @@
 定义于 `widget/props_io.h` 与 `widget/yaml.h` 两处安装头。容器自身的类型系统、读写契约与错误码见
 [`01-core.md`](01-core.md) §9。
 
-迁移期曾以第三方单头库 `nlohmann/json` 承载该别名（2026-09 收敛完成）：历史惯用法到现 API 的
-机械对照如下，供阅读旧代码或写迁移类工具时参考。
-
 | 第三方单头用法 | 收敛后写法 |
 |:---|:---|
 | `Json::parse(s)` | `json::parse(s)` → `Result<Value>` |
@@ -530,7 +527,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 | 目标 | 说明 |
 |:---|:---|
-| `generate_error_codes` | 触发 `gen_error_codes` 重跑（errors.toml 变更时） |
+| `generate_error_codes` | 触发 `gen_error_codes` 重跑（errors.toml 变更时）。产物先落 `<build>/_gen_error_codes_stage/`，经 clang-format（配置以 `file:<仓库根绝对路径>` 钉死，口径见 `BUILD_OPTIONS.md` §4.7）折行后 `copy_if_different` 回源码树；生成器四个路径参数一律必需，缺省即拒绝执行，以免绕过折行步骤直写版控文件 |
 | `aurora_api_json` | 运行 `gen_api_tools` 直写 `aurora_api.json`，随后 `gen_debug_api` 再合并 `debug` 段（单跑即得完整文件） |
 | `gen_debug_api_json` | 仅刷新 `aurora_api.json` 的 `debug` 段 |
 | `perf_gates` | 本机时间类门槛校验（`tools/check/check_perf_gates.ps1`，仅 Windows，不进 CI） |
@@ -601,9 +598,9 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | 探针 | 验证目标 | 读回方式 |
 |:---|:---|:---|
 | `aurora_verify_win32_cursor` / `aurora_verify_x11_cursor` / `aurora_verify_macos_cursor` / `aurora_verify_glfw_cursor` | `Surface::set_cursor` 是否真的改变了屏幕上显示的**光标**（Win32 一支同时验 `Win32Surface`(GDI)、`D3D11Surface` 与 `WgpuWin32Surface` 三个宿主调用点，共用 `detail::set_win32_cursor` 映射） | 平台查询读回（Win32 `GetCursorInfo` / X11 XFIXES `XFixesGetCursorImage` / macOS `[NSCursor currentCursor]` 单例同一性；GLFW 无查询 API → 能力核对 + 人工目视） |
-| `aurora_verify_wayland_cursor` | `WaylandSurface::set_cursor` 是否真的把该形状的光标位图**提交给了合成器**（客户端主题光标三步：`wl_cursor_theme_load` → cursor `wl_surface` attach 主题自有 `wl_buffer` → `wl_pointer_set_cursor`） | **本端提交事实读回**（`WaylandSurface::cursor_state()`：主题命中名 / 位图尺寸 / 热点 / `wl_buffer` 身份 / 提交次数）——Wayland 协议**没有**客户端可达的「屏幕当前光标」查询，故「合成器画出来了」由 `--interactive` 人工目视段负责；实测（2026-09-20，WSLg Weston + Adwaita）自动段 9 条 `[PASS]`：11/11 形状命中名逐字等于 `cursor_rfc_name`、位图均 24x24、11 个互异 `wl_buffer`、`wait` 动画 60 帧取首帧、同形状重复下发幂等（14→14） |
+| `aurora_verify_wayland_cursor` | `WaylandSurface::set_cursor` 是否真的把该形状的光标位图**提交给了合成器**（客户端主题光标三步：`wl_cursor_theme_load` → cursor `wl_surface` attach 主题自有 `wl_buffer` → `wl_pointer_set_cursor`） | **本端提交事实读回**（`WaylandSurface::cursor_state()`：主题命中名 / 位图尺寸 / 热点 / `wl_buffer` 身份 / 提交次数）——Wayland 协议**没有**客户端可达的「屏幕当前光标」查询，故「合成器画出来了」由 `--interactive` 人工目视段负责；实测（WSLg Weston + Adwaita）自动段 9 条 `[PASS]`：11/11 形状命中名逐字等于 `cursor_rfc_name`、位图均 24x24、11 个互异 `wl_buffer`、`wait` 动画 60 帧取首帧、同形状重复下发幂等（14→14） |
 | `aurora_verify_win32_ua` | Win32 UIA 无障碍桥与 Windows 的接缝：根对象能否应答、语义树能否 `Navigate`、必需属性是否有值、各 pattern 能否 QueryInterface 到 | **COM UIA 客户端**（`CUIAutomation8`，与 NVDA / Narrator 同路径）`ElementFromHandle` 取根 → 控件视图遍历器先序下钻 → 逐节点读属性与 pattern 并与期望表比对；`FrameworkId == "Aurora"` 区分桥投影元素与 UIA 默认 HWND provider 合成的非客户区 |
-| `aurora_verify_atspi` | Linux AT-SPI2 桥与真实 a11y 总线的接缝：`Socket.Embed` 握手、树可见性、状态集 / 动作 / 几何 / 文本读回、`DoAction` 回灌宿主（`on_click` 真实执行）、**事件推送段**（客户端注册 7 类精确事件监听，父进程按时间表做声明式变更：标题/输入值/ReorderableList 收缩再增长/播报，断言 `focus:`、`state-changed:focused`、`property-change:accessible-{value,name}`、`children-changed:{add,remove}`、`announcement` 全部被动收到） | **libatspi 客户端**（探针内起 `python3-gi` 子进程，与 Orca 同路径）从桌面树按 app/frame/button/entry/static 逐检查项断言并打印 `RES|pass/fail`；实测（2026-09-20，WSLg）Wayland 与 X11 两路 20/20 ALL PASS。运行需 `GI_TYPELIB_PATH`/`PYTHONPATH` 指向解包好的 gir 仓库（见源文件头注释） |
+| `aurora_verify_atspi` | Linux AT-SPI2 桥与真实 a11y 总线的接缝：`Socket.Embed` 握手、树可见性、状态集 / 动作 / 几何 / 文本读回、`DoAction` 回灌宿主（`on_click` 真实执行）、**事件推送段**（客户端注册 7 类精确事件监听，父进程按时间表做声明式变更：标题/输入值/ReorderableList 收缩再增长/播报，断言 `focus:`、`state-changed:focused`、`property-change:accessible-{value,name}`、`children-changed:{add,remove}`、`announcement` 全部被动收到） | **libatspi 客户端**（探针内起 `python3-gi` 子进程，与 Orca 同路径）从桌面树按 app/frame/button/entry/static 逐检查项断言并打印 `RES|pass/fail`；实测（WSLg）Wayland 与 X11 两路 20/20 ALL PASS。运行需 `GI_TYPELIB_PATH`/`PYTHONPATH` 指向解包好的 gir 仓库（见源文件头注释） |
 
 各探针的验收范围、逐项期望与退出码语义写在对应源文件头注释内（`tools/verify/*.cpp|.mm`）；真机验收须在**对应平台**手工执行。
 
@@ -611,11 +608,11 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 **由后台进程执行时的物理前提**（不是软件缺陷，探针按退出码如实申报而非假通过）：凡判据落在「屏幕上真实显示的指针/光标」上的探针（`aurora_verify_win32_cursor`，以及各探针的 `--interactive` 人工段），要求**已解锁且处于活动状态的交互桌面**——探针会把被测窗口置顶（`HWND_TOPMOST`）并依次试摆「屏幕中心 → 四角内侧」共 5 个落点（同处置顶带内他人窗口可长期压住中心点，`SetForegroundWindow` 又受前台锁约束），多次不中才以退出码 3 报出「期望落点 / 实际指针位置 / 该点上的窗口类名 / 试过的落点数」现场证据后终止（远程桌面会话隔离、锁屏时的 `LockScreenBackstopFrame` 同理）。纯逻辑/句柄类判据（如 GLFW 探针自动段：`glfwCreateStandardCursor` 句柄互异计数）不受此约束，可在任意会话内跑通。
 
-**读回屏幕光标前必须真正派发平台事件**（探针侧时序约束，非库缺陷）：`Surface::wait_events` 只等待、不派发（Win32 侧派发在 `poll_platform_events` 的 `PeekMessage`/`DispatchMessage`），而 `GetCursorInfo` 读回的共享光标随 WM_SETCURSOR 走完 wndproc 才刷新——只 wait 不 poll 会让读回恒停在上一手的值，本线程 `GetCursor()` 却逐形状命中，极易误判成「本会话读不回」。故 Win32 探针每形状按时序「1px 位移 → 派发 → `set_cursor` → 立刻读回（不再派发，避免 DefWindowProc 用窗口类光标覆盖）」执行；实测（2026-09-20，Windows 11 + MinGW 构建）`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 三路各 11/11 读回命中且两两互异。
+**读回屏幕光标前必须真正派发平台事件**（探针侧时序约束，非库缺陷）：`Surface::wait_events` 只等待、不派发（Win32 侧派发在 `poll_platform_events` 的 `PeekMessage`/`DispatchMessage`），而 `GetCursorInfo` 读回的共享光标随 WM_SETCURSOR 走完 wndproc 才刷新——只 wait 不 poll 会让读回恒停在上一手的值，本线程 `GetCursor()` 却逐形状命中，极易误判成「本会话读不回」。故 Win32 探针每形状按时序「1px 位移 → 派发 → `set_cursor` → 立刻读回（不再派发，避免 DefWindowProc 用窗口类光标覆盖）」执行；实测（Windows 11 + MinGW 构建）`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 三路各 11/11 读回命中且两两互异。
 
-**Wayland 侧取 `wl_pointer.enter` 的 serial 只能靠铺满窗口**（同上类约束）：`wl_pointer.set_cursor` 的 serial **必须**来自本表面的 `wl_pointer.enter`，而 Wayland 客户端**没有** warp 指针的 API（指针位置由合成器持有），故探针只能把窗口铺满输出、让静止的物理指针必然落入表面。铺满分两级：先最大化，拿不到 enter 再全屏——实测（2026-09-20，WSLg 3840x2160）**最大化不够**：其最大化表面只有 3840x2088（顶部让出面板带），静止指针恰好停在带上，enter 永不到达；全屏（3840x2160）随即取到。判据无从执行时以退出码 3 报出，并打印「累计鼠标事件」区分「本会话根本没有指针设备」（0 条）与「有指针但落不进窗口」。
+**Wayland 侧取 `wl_pointer.enter` 的 serial 只能靠铺满窗口**（同上类约束）：`wl_pointer.set_cursor` 的 serial **必须**来自本表面的 `wl_pointer.enter`，而 Wayland 客户端**没有** warp 指针的 API（指针位置由合成器持有），故探针只能把窗口铺满输出、让静止的物理指针必然落入表面。铺满分两级：先最大化，拿不到 enter 再全屏——实测（WSLg 3840x2160）**最大化不够**：其最大化表面只有 3840x2088（顶部让出面板带），静止指针恰好停在带上，enter 永不到达；全屏（3840x2160）随即取到。判据无从执行时以退出码 3 报出，并打印「累计鼠标事件」区分「本会话根本没有指针设备」（0 条）与「有指针但落不进窗口」。
 
-**X11 侧落点必须按窗口自身几何求，不能按请求坐标**（同上类约束）：`XMoveResizeWindow` 只是请求，rootless Xwayland 下合成器会把窗口安放到别处（实测请求全屏 `(0,0,7680x2160)` 后窗口报回左上角 `(639,1214)`），故「按硬编码点 warp + 按另一份几何判」两套口径互斥、恒判「指针放不过去」。探针改为等窗口几何稳定且完整落在 root 内、按**该几何中心** warp、再用同一次读回判命中（强判据 `XQueryPointer` 的 `child==win`，Xwayland 常不回 child 故按几何包含放行）。放行不是假阳性——判据仍是 XFIXES 读回；实测（2026-09-20，WSLg）11 形状读回 11/11 互异且逐行等于 `x11_cursor_glyph` 期望字形名。
+**X11 侧落点必须按窗口自身几何求，不能按请求坐标**（同上类约束）：`XMoveResizeWindow` 只是请求，rootless Xwayland 下合成器会把窗口安放到别处（实测请求全屏 `(0,0,7680x2160)` 后窗口报回左上角 `(639,1214)`），故「按硬编码点 warp + 按另一份几何判」两套口径互斥、恒判「指针放不过去」。探针改为等窗口几何稳定且完整落在 root 内、按**该几何中心** warp、再用同一次读回判命中（强判据 `XQueryPointer` 的 `child==win`，Xwayland 常不回 child 故按几何包含放行）。放行不是假阳性——判据仍是 XFIXES 读回；实测（WSLg）11 形状读回 11/11 互异且逐行等于 `x11_cursor_glyph` 期望字形名。
 
 ---
 
@@ -789,11 +786,10 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
 - 双窗独立性：两窗各自 `present` 后帧尺寸等比且中心色独立命中；各自经 `Surface::set_event_handler`
   接线独立 `FocusManager` 后合成窗口事件互不串台；应用内焦点互不干扰（获焦只改变本窗聚焦控件的
   聚焦背景）。
-- 帧等比率口径：读回帧与逻辑尺寸的**等比率**（纵横比一致，容差 0.02）是跨后端不变量；「物理 =
-  逻辑 × scale」**不是**——GLFW 软件路径读回帧为逻辑尺寸，Win32 家族为物理尺寸。断言不得绑定绝对
-  物理像素，`scale_factor()` 逐窗动态读取（Win32 的 scale 成员在 DPI 感知启用前初始化——进程首窗
-  恒 1.0、后续窗口为系统真实缩放，属已知库层缺口，见下文 resize 条），DPI 缩放环境下的采样点按
-  帧/逻辑尺寸比例映射。
+- 帧等比率口径：读回帧与逻辑尺寸的**等比率**（纵横比一致，容差 0.02）是跨后端不变量；断言不得
+  绑定绝对物理像素，`scale_factor()` 逐窗动态读取，DPI 缩放环境下的采样点按帧/逻辑尺寸比例映射。
+  「物理 = 逻辑 × scale」现已**升为跨后端不变量**（GLFW 侧已收敛，见下条），但仍按后端声明的
+  `framebuffer_size()` 而非推算值取尺寸——断言的是「后端自己声明的帧缓冲尺寸与逻辑尺寸之比」。
 - 生命周期：关闭一窗不影响另一窗继续渲染读回；RAII 兜底经异常路径验证（中途 throw 后 `Session`
   析构关窗、不残留幽灵窗口）；同规格重建与连续开关循环成功（资源不泄漏的可移植运行时证据；OS 层
   枚举窗口数不可移植，不做）。
@@ -805,11 +801,94 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
 - resize 的 Win32 几何口径：`Win32Host::set_size` 已与构造路径同换算（逻辑 × scale → `AdjustWindowRectEx`
   非客户区补偿 → `SetWindowPos`），保证客户区尺寸 == 请求逻辑尺寸——此前逻辑值被直接当外框尺寸传
   下去，客户区被 chrome 挤占（标题栏随 DPI 放大尤甚，150% 显示器上客户区逻辑高度可比请求值缩水近半）。
-  遗留缺口（守卫 skip 记录在案）：`Win32Host` 的 scale 成员在成员初始化列表取值、早于构造体内的
-  `enable_dpi_awareness()`——进程首窗 scale 恒 1.0，而 `WM_SIZE` 的逻辑换算用实时 `dpi_scale()`（感知
-  生效后为系统真实缩放），≠100% DPI 显示器上帧/逻辑/scale 三方记账发散，resize 用例以三方一致性守卫
-  skip；100% DPI 环境（含 CI）三方恒 1.0 不受影响。修复须连带评估首窗 scale 语义变更对坐标换算面
-  （鼠标 / IME / a11y 投影矩形）的影响，独立成题。
+  **DPI 单点真值源（已修复，原 skip 守卫已解除）**：`Win32Host::Impl::scale` 曾有两处不同源的取值
+  ——成员初始化列表里的 `dpi_scale()`（此时 `hwnd == nullptr`、进程 DPI 感知尚未启用，
+  `GetDeviceCaps` 恒回 96 ⇒ 进程首窗 scale 恒 1.0）与 `WM_SIZE` / `WM_GETMINMAXINFO` 里的现调
+  `dpi_scale()`（感知生效后为系统真实缩放）。≠100% DPI 显示器上二者发散，帧 / 逻辑 / scale 三方
+  记账对不上，resize 与 smoke 用例只能以 skip 守卫记为「库层缺口」。现收敛为：
+  - **awareness 启用前移**到 `window_factory.cpp` 的 `make_window()`——它是所有 `create_window`
+    重载的公共出口，且早于任何 `Surface` 构造（即早于 `CreateWindowExA`）。`Impl` 构造体内保留一处
+    幂等兜底，供不经工厂直接构造 `Win32Host` 的消费者使用。
+  - **`scale` 改为句柄就绪后求值**：建窗成功后立刻 `refresh_scale()`（`GetDpiForWindow` → 回落
+    `GetDpiForSystem` → 回落 96），此后 `WM_DPICHANGED` / 跨屏迁移复用同一函数更新。
+  - **建窗期这一腿（后补，闭合上一条遗留）**：上一条只解决了「句柄就绪后」，建窗**之前**仍是
+    缺口——`CreateWindowExA` 前调 `refresh_scale()` 时 `hwnd == nullptr`，`GetDpiForWindow(nullptr)`
+    返回 **0**，而当时的降级判据挂在「函数指针为空」的 `else if` 上（Win10+ 该函数恒已导出），
+    0 被当成有效读数落到 `dpi > 0 ? dpi/96 : 1.0` ⇒ **scale 恒 1.0** ⇒ `WindowOptions::size`
+    请求的逻辑 dp 被原样当物理像素消费（150% 屏上请求 960×640 得到含边框 982×696 物理窗口，折回
+    dp 恰为 655×464）。现改为：① 降级判据改为「**取到 > 0 才算成功**」，0 也算失败、继续往下落，
+    使 `GetDpiForSystem` → `GetDeviceCaps` → 96 逐级真正可达；② 建窗期新增「按**落位显示器**」一级
+    （`MonitorFromPoint(工作区中心)` → `GetDpiForMonitor`），句柄就绪后仍优先按窗口；③ 建窗成功后
+    若真实 scale 与建窗期不同（多显示器混合 DPI 下 `CW_USEDEFAULT` 可能把窗口放到另一块屏），在
+    **`ShowWindow` 之前**按真实 scale 重设一次尺寸——首帧客户区逻辑尺寸必须等于请求的 dp，而纠正
+    发生在窗口进入用户视野之前，故不产生可见的「两帧不一致」。取值实现收进可单测内部头
+    `src/aurora/window/detail/win32_dpi.h`（`read_dpi` 接受注入的 `DpiApi`），「各级可达」由
+    `utest_win32_dpi` 逐条钉住；换算点单源由 `tools/check/check_dpi_single_source.py`（进 CTest）
+    静态守卫——这类分叉在 100% DPI 的 CI 上恒不显形，只能靠静态检查拦住。
+  - **换算收敛为唯二入口**：`to_physical(Size)` / `to_logical(int, int)`。构造尺寸、`set_size`、
+    `WM_GETMINMAXINFO`、鼠标、滚轮、文件拖放、IME hook、a11y 投影矩形全部经它们；宿主内不再有
+    裸写的 `* scale` / `/ scale`。`a11y` 桥（`win32_ua.cpp`）同步改走 `GetDpiForWindow`，与宿主
+    真正同源（此前它自读 `GetDeviceCaps`，与宿主可能各报各的）。
+  - 验收：`tools/verify/win32_dpi_live_probe.cpp`（真机，不进 CTest）在 ≠100% DPI 环境下跑六条判据
+    ——(a) `set_size` 往返、(b) `WM_SIZE` 后三方同源、(c) 鼠标 dp 映射、(d) `WM_GETMINMAXINFO` 与
+    `set_size` 同换算（防 150% 屏上的往返漂移）、(e) a11y 与鼠标同源、**(f) 建窗期尺寸**（以
+    800×600 dp 新建窗口、不经 `set_size`，首帧客户区逻辑尺寸须逐位等于请求值——(a)–(e) 全部走
+    `set_size` 之后，覆盖不到建窗那一刻）。**本机 150% DPI 实测 `scale=1.5`，六条全 PASS、退出码 0**。
+    (f) 的变异自证：还原「建窗期 scale 恒 1.0 + 不做建窗后纠正」的历史形态时，(f) 精确复现
+    `533.33×400 vs 800×600` 并转红。该探针另设一条「宿主 scale == 独立系统 DPI 读数」的
+    环境自证断言：删掉建窗后的 `refresh_scale()` 时，(a)–(d) 仍会**自洽地**全绿（三方都是 1.0），
+    唯有这条断言转红——原缺陷的隐蔽性正在于此，不可省。
+  - **尺寸与标量的口径已跨后端一致，但缩放变化上报仍缺**：GLFW 侧原先把
+    `glfwGetWindowSize`（GLFW 3.3 起是**屏幕坐标**＝物理像素）直接当逻辑 dp 用，却又把
+    `glfwGetWindowContentScale` 原样上报为 `scale_factor()`，于是同一时刻对外宣称
+    「size = 320 dp」与「scale = 1.5」，而窗口实际是 320 物理像素 = 213 dp——`WindowOptions::size`
+    请求的 dp 被系统性缩小了一个 scale 倍，且 100% DPI 下 scale 恰为 1.0、两种单位解读重合，
+    **该分叉在 CI 上完全不显形**。现补 `Painter::set_scale`（Win32 / D3D11 / X11 / Wayland 早有，
+    唯独 GLFW 漏调）+ `framebuffer_size()` override + 建窗与 `set_size` 的 dp↔px 换算（收敛在内部头
+    `window/detail/glfw_dpi.h`，由 `utest_glfw_dpi` 钉住）。
+- **缩放变化上报的跨后端现状**（`Surface::set_scale_change_handler` override 情况）：
+  - **Win32 / D3D11 / wgpu-Win32**：`WM_DPICHANGED` → 重读 scale → **变化才上报**。已收敛。
+  - **GLFW**：经 `glfwSetWindowContentScaleCallback`（Win32 上由 `WM_DPICHANGED` 驱动、X11 /
+    Wayland 上由输出 scale 事件驱动）上报，同样只报变化。真机验收见
+    `tools/verify/glfw_dpi_live_probe.cpp`——自动段**注入 `WM_DPICHANGED` 造变化**（不需要第二块
+    显示器）断言回调被调用且值与 `scale_factor()` 一致；随后**再注入一次同值 DPI** 断言 handler
+    **不再被调用**，即「变化才上报」的去重分支也被覆盖。人工段做真跨屏拖动。
+    该探针依赖 `GlfwSurface::native_handle()` 取 HWND（此前本后端未覆写，是四个真实窗口后端里
+    唯一的缺口，导致 GLFW 跨屏行为在本仓不可观测）。
+    - **同值注入是去重分支唯一的驱动手段，且不可省**：GLFW 自身**不去重**——
+      `win32_window.c` 收 `WM_DPICHANGED` 时无条件调 `_glfwInputWindowContentScale`，该函数
+      （`window.c`）只要注册了回调就无条件派发。于是「再递一次相同值」时回调**一定到达**，
+      `GlfwSurface::Impl::on_content_scale` 的 `if (next == self->scale) return;` 是唯一拦截点。
+      探针此前**恰好排除了同值注入**（理由写作「去重会静默返回」），致该分支在自动段永远走不到：
+      删掉去重后变异仍全 PASS 暴露。现补 (e5)（计数不得增加）+ (e6)（成员 scale 须仍为注入值，
+      排除「靠提前 return 连换算一起吞掉」的实现）。变异自证：删去重 ⇒ (e5) 转红且其余判据仍绿。
+  - **Wayland**：经 `wl_surface.enter` / `leave` 维护「表面当前所在输出」集合，
+    取值决策收敛在内部头 `window/detail/wayland_output_scale.h` 的纯函数
+    `select_wayland_buffer_scale()`（跨在两屏上时取较大者，与合成器「按最大者渲染才不被
+    拉伸」的约束一致）；未 enter 时退回全部输出的最大值以保首帧不糊。变化时先
+    `notify_scale_change` 再 `present_request_`（顺序反了会有一帧用旧 scale 渲染）。
+    - 该头**刻意不加** `AURORA_BACKEND_WAYLAND` 门控（与 `glfw_dpi.h` 的差异是有意的）：它只含
+      纯整数逻辑、不含平台 API，门控没有编译期收益，代价却是让唯一能覆盖它的单测在非 Linux
+      平台退化成 SKIP 桩。实测 Windows `build/` 下 `utest_wayland_output_scale` 5 条**真跑**
+      （对照：同目录 `utest_glfw_dpi` 因门控裁掉而恒 4 条 SKIP）。已核 `check_platform_macros` /
+      `check_arch_module_map` 不因此判红。
+    - 该决策只在窗口**跨屏**时才与「取全部输出最大值」给出不同答案，而 CI 无头、单机无第二屏，
+      跨屏无法自然复现 ⇒ 这正是它必须可单测的原因。`utest_wayland_output_scale` 三条分支各有用例，
+      变异自证：关闭 per-output 分支 ⇒ `entered_output_wins_over_global_maximum` 与
+      `unknown_output_key_never_inflates_the_scale` 转红、另 3 条仍绿。
+    - Linux 侧真机腿已可跑：WSL Ubuntu + WSLg 合成器（`WAYLAND_DISPLAY=wayland-0`）下
+      `AURORA_LIVE_WAYLAND=1` 令 `utest_wayland_surface` 的 `live_cursor_commit_sweep` 真建窗
+      真提交光标通过。剩余 2 条 SKIP 各有具体成因（单测不碰 OS 资源 / 合成器未宣告 text-input-v3），
+      非本仓缺陷；后者完整验收在 `aurora_verify_wayland_ime` 探针。
+  - **X11**：**不适用，非缺口**。`detect_scale()` 读的是 X 资源管理器的 `Xft.dpi`——**进程级全局
+    设置、运行期不变**，且 X11 核心没有 per-monitor DPI 概念。X11 上「跨屏」本就不会引起 scale
+    变化，无信号可报。要在 X11 上实现 per-monitor DPI 需另接 XRandR（新特性，非补通知）。
+    运行时改 `Xft.dpi` 也不会被感知（该值仅在建窗时读一次），此为已知限制。
+- **尚未验收的缩放场景（如实记，非缺陷）**：GLFW 探针的**人工段 (d) 真跨屏拖动**在本开发机
+  **客观不可执行**——机器只有一块物理显示器（`\.\DISPLAY1` 3840×2160 @150%，`DISPLAY2-5` 的
+  `stateFlags=0` 即未挂载），无第二个不同缩放的输出可拖。探针此时按约定报 `PENDING MANUAL`
+  （退出码 3）而**非 PASS**，并已实测确认该退出码。⇒ 跨屏端到端仍属人工验收项，
+  须在双屏异缩放机器上跑 `--interactive` 后方可记通过；在此之前不得据自动段结论推断跨屏正确。
 - 脏区语义（`present_root` partial-clip 路径）：树状态已变但无脏登记时 idle 跳帧（`frame_count` 不增、
   `has_pending_dirty()` 为假）；手动 `mark_dirty` 局部矩形后仅裁剪区重绘、**裁剪外保留上帧像素**（与
   「整屏刷底色」实现可区分——后者会画出已变的新色）；随后补标另一侧再验证增量覆盖。

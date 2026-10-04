@@ -2,7 +2,7 @@
 // 事件信号广播（Object:/Cache: 信号与播报，格式对 atk-adaptor/event.c 逐字核实）。
 //
 // 分层：所有「语义 → 协议值」的折算都在 `atspi_protocol.cpp`（无头可测）；本文件只剩
-// D-Bus 编解码与生命周期粘合。协议签名与成员名 2026-09-20 逐字核对上游
+// D-Bus 编解码与生命周期粘合。协议签名与成员名 逐字核对上游
 // at-spi2-core main @ 2.60 线的 `xml/*.xml` 与 libatspi 消费者侧读法。
 //
 // 线程模型：全部在 UI 线程（宿主帧循环 pump()），与 UIA 桥同口径 —— in-proc provider
@@ -1355,7 +1355,7 @@ struct AtspiBridge::Impl {
 
     // ---- 事件信号发射（发送侧 SSOT = atk-adaptor/event.c `emit_event`）----
     //
-    // 线格式（2026-09-20 逐字核对上游 + libatspi 消费者 `_atspi_dbus_handle_event`）：
+    // 线格式（逐字核对上游 + libatspi 消费者 `_atspi_dbus_handle_event`）：
     //  * 信号 interface = 事件类（`Event.Object` / `Event.Focus`），member = major 名的
     //    D-Bus 化（"state-changed"→"StateChanged" 等），path = 源对象自身路径，
     //    **无 destination**（a11y 总线广播，registryd 按注册事件转发）。

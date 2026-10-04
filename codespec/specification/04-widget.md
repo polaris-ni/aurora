@@ -353,7 +353,7 @@ au::Text("Welcome").font_size(24).bold();
 
 1. **数据与视觉配置都是纯值属性**，整包进序列化面（`to_json` / `from_json` / `diff` / `apply_patch`）——AI 可经 schema + `from_json` 生成带真实数据的图表；交互回调（如 `on_point_tapped`）旁挂、**不进序列化面**。
 2. **轴域与命中反查同源**：渲染、刻度生成、hover 命中都消费同一份 `LinearScale` / `BandScale`，不得各算一遍。
-3. **绘制不得越出控件 `bounds`**：`Widget::paint_bounds_` 决定脏区，越界像素不会被擦除（残影）。轴留白与图例带在控件内部以 `padding` 预留，悬浮值框按可用区夹取 / 翻转。
+3. **绘制不得越出控件 `bounds`**：控件自身的绘制越界不会被擦除（残影），脏区按 `Widget::dirty_bounds()`（= `paint_bounds_` ∪ 盒外装饰）标记。轴留白与图例带在控件内部以 `padding` 预留，悬浮值框按可用区夹取 / 翻转。唯一被认可的盒外绘制是基类统一焦点环，其外扩已由 `dirty_bounds()` 承担（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4）。
 4. **取色与取 Locale 一律带回退**：系列色 = 显式 `color` > `Theme` 命名令牌 `chart.palette.<i%8>` > 内置 8 色板；网格 / 标签色取自 `inherit_theme(ctx)`；刻度文本经 `format_number(v, locale, digits)`，Locale 用 `ctx.environment<Locale>()` 取值、**未注入回退 `Locale{}`**（`render_to_png` 传 `constexpr BuildContext`，`env_of<Locale>` 会断言失败）。
 
 健壮性降级：空数据只画轴；`range == 0` 时域退化为 `[v, v+1]`（全 0 即 `[0,1]`）；NaN / ±inf 数据点跳过；点数超限时截断。反序列化对畸形数组元素逐项跳过并 `Diagnostics::degraded`，绝不抛异常。

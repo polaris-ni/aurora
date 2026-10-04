@@ -21,12 +21,25 @@
 
 ### 1.2 执行载体
 
-复用既有示例程序，不新增载体：
+复用既有示例程序与真机探针，不新增载体：
 
 | 载体 | 构建目标 | 用途 |
 |:---|:---|:---|
 | `examples/demos/demo_multi_window.cpp` | `demo_multi_window` | 多窗口创建与关闭、窗口角色与模态、跨显示器移动、跨窗广播、退出路径 |
 | `examples/demos/demo_custom_surface.cpp` | `demo_custom_surface` | 自定义 `Surface` 注入、无窗口（Headless）路径与产物 |
+| `tools/verify/glfw_dpi_live_probe.cpp` | `aurora_verify_glfw_dpi` | **GLFW 后端**的 DPI 缩放换算自洽与缩放变化上报（探针，非 demo） |
+
+**第三个载体的构建口径与前两个不同，须单独构建目录**（探针受两个开关门控，二者在本模块的默认
+`build/` 里都不满足，故前两个载体的构建步骤不能覆盖它）：
+
+```
+cmake -S . -B build-verify-glfw -G Ninja -DAURORA_BACKEND_GLFW=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build-verify-glfw --target aurora_verify_glfw_dpi
+```
+
+探针**全部输出走 stdout**（经 `AURORA_LOG_RAW`），**stderr 恒为空**——判定读 stdout，勿按
+「stderr 应有 N 行」立判据。退出码：`0` 全过；`1` 有断言失败；`2` 环境不可用；`3` 人工段待执行
+（自动段已过但真跨屏未做，**此时是「待验收」不是「通过」**）。
 
 **关于 `demo_custom_surface` 的已知现象（判定时不得记为缺陷）**：该载体含两条路径。
 
@@ -44,7 +57,7 @@
 | 终端 | 支持 UTF-8 输出 |
 | 分离输出 | 诊断日志写 stderr；判定前须重定向 |
 | 指针与键盘 | 真实鼠标与键盘 |
-| 显示器 | **TC-WINDOW-008 与 TC-WINDOW-009 需要 ≥2 台显示器**；单显示器环境下该两条记 `SKIP` |
+| 显示器 | **TC-WINDOW-008 / 009 / 013 需要 ≥2 台且缩放不同**；单显示器环境下该三条记 `SKIP` |
 
 **本机实际启用的后端（实测自本机构建目录的 CMakeCache 缓存值，构建产物不入库）**：
 
@@ -55,7 +68,13 @@
 | `AURORA_BACKEND_GLFW` / `D3D11` / `GPU_GL` / `GPU_WGPU` | OFF |
 | `AURORA_BACKEND_X11` / `WAYLAND` / `MACOS` / `WASM` | OFF |
 
-因此 **GLFW、D3D11、wgpu、X11、Wayland、macOS、WASM 七个后端的人工验证在本机不可执行**，本模块不为它们编写用例（其窗口表现差异属跨平台真机验收的范畴）。TC-WINDOW-001 的方案 B 覆盖 Headless 路径，其余用例覆盖 Win32 路径。
+因此 **D3D11、wgpu、X11、Wayland、macOS、WASM 六个后端的人工验证在本机不可执行**，本模块不为它们
+编写用例（其窗口表现差异属跨平台真机验收的范畴）。TC-WINDOW-001 的方案 B 覆盖 Headless 路径，
+其余用例覆盖 Win32 路径。
+
+**GLFW 后端的例外**：它是**本机可执行**的——只需另建一个开启 `AURORA_BACKEND_GLFW` 的构建目录
+（口径见 §1.2），不依赖本节表格所列的 `build/` 配置。故 TC-WINDOW-013 覆盖 GLFW 的 DPI 换算与
+缩放上报；其跨屏段与其他后端一样受单显示器限制（见该用例前置条件）。
 
 ### 1.4 用例编号规则
 
@@ -306,6 +325,31 @@
 
 **关于 TC-WINDOW-011 与 TC-WINDOW-012 的分工**：`ExitPolicy::LastWindowClosed`（`window.h` 的默认策略，语义见 `specification/06-app-platform.md` §2.4）下，「关闭主窗即退出」只在主窗是**最后一扇**窗口时成立；仍有辅助窗口时进程必须存活。两例合起来覆盖该边界，任何单独一例都不足。
 
+### 2.7 GLFW 后端 DPI 换算与缩放上报
+
+#### TC-WINDOW-013 GLFW 后端缩放换算自洽且跨屏后上报新缩放
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-013 |
+| 测试目的 | 验证 GLFW 后端把窗口尺寸与帧缓冲的物理像素 / 逻辑 dp 两套口径保持自洽，且跨不同 DPI 显示器后把新缩放如实上报给上层 |
+| 前置条件 | 已按 §1.2 建好 `build-verify-glfw` 并构建出 `aurora_verify_glfw_dpi`；**跨屏段另需本机连接 ≥2 台缩放不同的显示器**（单显示器时该段记 `SKIP`，自动段仍须执行）；本机需有活动桌面会话（锁屏时窗口无法接收注入消息） |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 运行 `./build-verify-glfw/aurora_verify_glfw_dpi.exe 1> out.txt 2> err.txt`，记录退出码与 `out.txt` 中的 `scale_factor()` 读数（纯执行，无预期结果）<br>2. 查看 `out.txt` 中标记 `(b1)` 至 `(b4)` 的四行断言结果<br>3. 查看 `out.txt` 中标记 `(c1)`、`(e1)` 至 `(e3)`、`(e5)`、`(e6)` 的六行断言结果<br>4. 查看 `err.txt` 的行数<br>5. 加上 `--interactive` 重跑，在探针窗口出现后将其**拖到缩放比不同的显示器**，待控制台提示后按回车（纯执行，无预期结果）<br>6. 查看退出码与 `out.txt` 中标记 `(d1)` 至 `(d4)` 的断言结果 |
+| 预期结果 | 2. 四行均为 `PASS`：`size()` 等于请求的 480x320 逻辑 dp、`framebuffer_size()` 等于 480x320 乘 `scale_factor()`、且 `逻辑尺寸 x scale` 与帧缓冲逐位相符（`(b4)` 证明帧缓冲未退化为逻辑尺寸）<br>3. 六行均为 `PASS`：`scale_factor()` 未因构造期校正而误报（`count=0`）；注入 `WM_DPICHANGED` 后 handler 被调用且收到的值等于注入 DPI/96 并与 `scale_factor()` 一致；**再注入同一 DPI 时 handler 不再被调用**（`(e5)` 的计数与前一步相同）且已采纳的缩放保持不变（`(e6)`）<br>4. `err.txt` 为 0 字节（探针输出全走 stdout）<br>6. `(d1)` 至 `(d4)` 均为 `PASS`（handler 收到新缩放、该值与 `scale_factor()` 一致、跨屏后一帧的帧缓冲按新缩放重算），退出码为 0 |
+
+**本例与 TC-WINDOW-008 / 009 的分工**：那两条走 `demo_multi_window` 的 Win32 宿主路径、以**人眼**判定内容清晰度；本条走 GLFW 后端的探针、以**断言**判定数值自洽与上报时序。两者不可互相替代——Win32 路径正确不代表 GLFW 正确：GLFW 3.3 起窗口尺寸用的是屏幕坐标（物理像素），而 aurora 的窗口模型是逻辑 dp，此前该后端正是漏了这层换算（把 `glfwGetWindowSize` 当 dp 用），100% DPI 下两种单位解读重合故在 CI 上完全不显形。
+
+**为什么 `(e5)` 这条不能省**：GLFW 自身**不做**「值未变则跳过」的去重（`win32_window.c` 收 `WM_DPICHANGED` 时
+无条件调 `_glfwInputWindowContentScale`，后者只要注册了回调就无条件派发），所以「再注入一次相同 DPI」是
+驱动 Aurora 侧去重分支（`on_content_scale` 的 `if (next == self->scale) return;`）的**唯一**手段。少了它，
+该分支在自动段永远走不到——删掉去重后探针仍全绿，这类假绿已在本仓发生过一次（判据空转由变异注入暴露，
+非由代码走查发现）。
+
+**单显示器环境下本例的记法**：自动段（步骤 1-4）照常执行并记其结果；步骤 5-6 因前置不满足记 `SKIP`，
+此时探针自身报 `PENDING MANUAL` 且退出码为 3。⚠️ **退出码 3 是「待验收」不是「通过」**，不得记 `PASS`。
+本机当前即此状态（仅一块物理显示器），故下方记录表中本例的人工段记 `SKIP`。
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -322,3 +366,4 @@
 | TC-WINDOW-010 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：退出码 0，`EnumWindows` 已枚举不到该进程的任何窗口（含仍打开的 `Auxiliary #1`），进程不残留。步骤 4：`err.txt` 全文 2 行均为 `INF`（`main window shown`、`opened window id=2 total=2`），无 `ERR`/`FTL` | | 辅助窗口未各自关闭即随进程结束，符合 `Application::quit()` 在任何退出策略下都生效的语义（对照 TC-WINDOW-012） |
 | TC-WINDOW-011 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：退出码 0，进程不再存在且无窗口残留。步骤 4：`err.txt` 仅启动的 1 行 `INF`，无 `ERR`/`FTL` | | 本机会话锁屏，标题栏属非客户区、合成点击落不到，故步骤 2 以发送 `WM_SYSCOMMAND`/`SC_CLOSE` 等价代替——这正是点击标题栏关闭按钮时系统投递给窗口的消息。本用例文本于本轮修订（原步骤含「新建一扇辅助窗口」，与 `ExitPolicy::LastWindowClosed` 语义冲突，见 §2.6 分工说明） |
 | TC-WINDOW-012 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：关闭主窗后进程仍存活，存活窗口只剩标题 `Auxiliary #1` 的一扇，`err.txt` 新增 1 行 `INF` 且消息为 `[app] window host closed and reaped: id=1`（id=1 即主窗）。步骤 5：关闭该辅助窗口后退出码 0，无窗口残留。步骤 6：`err.txt` 全文 3 行均为 `INF`，无 `ERR`/`FTL` | | 关闭最后一扇窗口时进程先行退出，故不再有该窗口的回收日志行，属预期时序。本例为新增，用以固定「主窗关闭不连带关闭其他窗口」这一默认策略边界 |
+| TC-WINDOW-013 | 2026-10-03 | WorkBuddy | SKIP | | 自动段（步骤 1-4）全部通过：`scale_factor()` = 1.5（本机 150%）；`(b1)` 480x320 逻辑 dp、`(b2)` 帧缓冲 720x480、`(b3)` 480x320x1.5=720x480 三者逐位相符、`(b4)` 未退化为逻辑尺寸；`(c1)` 构造期无误报 count=0；`(e1)` 注入后 handler 被调用 count=1、`(e2)` 上报值 1.0 == 注入 96/96、`(e3)` 与 `scale_factor()` 一致、`(e5)` 同值再注入计数保持 1（去重生效）、`(e6)` 已采纳缩放保持 1.0；`err.txt` 为 0 字节。人工段（步骤 5-6）未执行：探针报 `PENDING MANUAL`、退出码 3 | | 记 `SKIP` 的原因是前置不满足而非判据失败：本机仅一块物理显示器（`\\.\DISPLAY1` 3840x2160 @150%，`DISPLAY2-5` 的 `stateFlags=0` 即未挂载），无第二个不同缩放的输出可拖，与 TC-WINDOW-008/009 同因。步骤 4 顺带核实了探针的通道分离：输出全走 stdout，stderr 恒空。本例为新增载体（探针而非 demo），故本模块 §1.2/§1.3 已同步登记该载体的独立构建口径与后端例外。⚠️ 取证过程中曾出现一次「自动段 (e5) 转红」的假故障，根因是恢复变异源码后未重编、跑的是变异前的旧 `aurora.lib`（产物 mtime 早于源码 mtime），重建后即恢复全绿——与本仓既有教训一致（记忆恢复后必须重跑验证） |

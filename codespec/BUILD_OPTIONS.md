@@ -94,7 +94,7 @@ cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
 | 说明 | 定义 `tools/verify/` 下的**真机验收探针**可执行目标。这类探针证明的是「无头 CI 无法证明」的平台接线能力（典型：光标形状的各后端 `Surface::set_cursor` 是否真的改变了屏幕上显示的光标；输入法桥的 `WM_IME_*` 是否真的落到焦点控件） |
 | 传播宏 | 无（纯交付物开关，不向库代码注入宏） |
 | 模块 | `cmake/AuroraVerify.cmake` |
-| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_wayland_cursor`（`AURORA_BACKEND_WAYLAND`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）/ `aurora_verify_glfw_gpu_features`（`AURORA_BACKEND_GLFW` 且开 `AURORA_ENABLE_GLFW_GPU_GL`）/ `aurora_verify_win32_ua`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，另链 `oleacc`）/ `aurora_verify_win32_ime`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，`imm32` 已随库 PUBLIC 链接）/ `aurora_verify_x11_ime`（`LINUX` 且开 `AURORA_BACKEND_X11`，XIM 协商/焦点宣告/XTEST 落键）/ `aurora_verify_wayland_ime`（`LINUX` 且开 `AURORA_BACKEND_WAYLAND`，门 `AURORA_HAVE_WL_TEXT_INPUT`）/ `aurora_verify_win32_wgpu`（`WIN32` 且开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WIN32`，§3.8）/ `aurora_verify_x11_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_X11`，§3.8，XGetImage 截图物证，需 `AURORA_ENABLE_DEBUG` 开启）/ `aurora_verify_wayland_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WAYLAND`，§3.8）/ `aurora_verify_wasapi_audio`（`WIN32` 且开 `AURORA_ENABLE_AUDIO_WASAPI`）/ `aurora_verify_alsa_audio`（`LINUX` 且开 `AURORA_ENABLE_AUDIO_ALSA`）；聚合目标 `aurora_verify`。**浏览器**产物另按 `EMSCRIPTEN` + `AURORA_BACKEND_WASM` 定义 `aurora_verify_wasm_raf` / `aurora_verify_wasm_multiwin` / `aurora_verify_wasm_aria` / `aurora_verify_wasm_audio`（末者另需 `AURORA_ENABLE_AUDIO_WEBAUDIO`）——它们是 `.html+.js+.wasm` 三件套、须走本地 http 由无头 Edge 打开，判据由随库的 `tools/verify/wasm_*_cdp_drive.mjs` 派发，**有意不进**聚合目标（该目标面向本机直接运行的探针） |
+| 产物 | 按条件定义：`aurora_verify_x11_cursor`（`AURORA_BACKEND_X11`）/ `aurora_verify_wayland_cursor`（`AURORA_BACKEND_WAYLAND`）/ `aurora_verify_win32_cursor`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`）/ `aurora_verify_macos_cursor`（`APPLE` 且开 `AURORA_BACKEND_MACOS`，需 ObjC++）/ `aurora_verify_glfw_cursor`（`AURORA_BACKEND_GLFW`）/ `aurora_verify_glfw_gpu_features`（`AURORA_BACKEND_GLFW` 且开 `AURORA_ENABLE_GLFW_GPU_GL`）/ `aurora_verify_win32_ua`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，另链 `oleacc`）/ `aurora_verify_win32_ime`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`，`imm32` 已随库 PUBLIC 链接）/ `aurora_verify_x11_ime`（`LINUX` 且开 `AURORA_BACKEND_X11`，XIM 协商/焦点宣告/XTEST 落键）/ `aurora_verify_wayland_ime`（`LINUX` 且开 `AURORA_BACKEND_WAYLAND`，门 `AURORA_HAVE_WL_TEXT_INPUT`）/ `aurora_verify_win32_wgpu`（`WIN32` 且开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WIN32`，§3.8）/ `aurora_verify_x11_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_X11`，§3.8，XGetImage 截图物证，需 `AURORA_ENABLE_DEBUG` 开启）/ `aurora_verify_wayland_wgpu`（开 `AURORA_BACKEND_GPU_WGPU` + `AURORA_BACKEND_WAYLAND`，§3.8）/ `aurora_verify_wasapi_audio`（`WIN32` 且开 `AURORA_ENABLE_AUDIO_WASAPI`）/ `aurora_verify_alsa_audio`（`LINUX` 且开 `AURORA_ENABLE_AUDIO_ALSA`）/ `aurora_verify_win32_os_hotkey`（`WIN32` 且开 `AURORA_BACKEND_WIN32` 或 `D3D11`：`OsHotkeyRegistry` 的注册表 API 面 + 「应用无焦点也触发」人工段，见 §2.4 末与 `specification/06-app-platform.md` §8.6）/ `aurora_verify_linux_notification`（`LINUX` 且开 `AURORA_BACKEND_X11` 或 `AURORA_BACKEND_WAYLAND`：`NotificationCenter` 的 API 面 + XDG 桌面气泡人工段，仅桌面 Linux 可构建（含 `#error` 守卫），见 `specification/06-app-platform.md` §8.7）；聚合目标 `aurora_verify`。**浏览器**产物另按 `EMSCRIPTEN` + `AURORA_BACKEND_WASM` 定义 `aurora_verify_wasm_raf` / `aurora_verify_wasm_multiwin` / `aurora_verify_wasm_aria` / `aurora_verify_wasm_audio`（末者另需 `AURORA_ENABLE_AUDIO_WEBAUDIO`）——它们是 `.html+.js+.wasm` 三件套、须走本地 http 由无头 Edge 打开，判据由随库的 `tools/verify/wasm_*_cdp_drive.mjs` 派发，**有意不进**聚合目标（该目标面向本机直接运行的探针） |
 
 三点与其它"产物开关"不同的地方：
 
@@ -434,7 +434,7 @@ cmake -S . -B build-shard0 -DAURORA_LINT_SHARD=0/4 ...                          
 
 **NOLINT 纪律**：凡用 `NOLINT` / `NOLINTNEXTLINE` 抑制告警，须遵守 `CODING_STANDARDS.md` §5.2——写明具体检查名（禁止裸 `NOLINT` 的新增使用），并紧邻注释说明「为何不能按建议修复」。抑制只在物理行上生效，排错位即静默失效，故该纪律由 CTest 用例 `check_nolint_layout` 常驻把关（clang-tidy 自身查不出这一类）。
 
-**排除项的取舍判据 = 实测规模**：`Checks` 里每一条 `-check-name,` 之前都写了它的实测条数与结论，量法见下面的「如何量一个当前被排除的检查」。已开启 / 保持关闭不由口味决定：`bugprone-exception-escape` 曾因「逐点噪声过大」整体排除，2026-09-22 量得残留仅 22 条后**改为开启**并逐点处置；`cppcoreguidelines-pro-bounds-avoid-unchecked-container-access` 同法量得残留 2050 条且与本库两处刻意设计冲突，**保持关闭**。
+**排除项的取舍判据 = 实测规模**：`Checks` 里每一条 `-check-name,` 之前都写了它的实测条数与结论，量法见下面的「如何量一个当前被排除的检查」。已开启 / 保持关闭不由口味决定：`bugprone-exception-escape` 曾因「逐点噪声过大」整体排除，残留仅 22 条后**改为开启**并逐点处置；`cppcoreguidelines-pro-bounds-avoid-unchecked-container-access` 同法量得残留 2050 条且与本库两处刻意设计冲突，**保持关闭**。
 
 **如何量一个当前被排除的检查**：`run_clang_tidy.py --config <去掉该排除项的配置> --include <范围> --json-out <结果>`，读 JSON 的 `by_check`。三点须知（脚本 docstring 同步记有一份）：① `--config` 是**整体替换**而非叠加，临时配置须把 `Checks` 全串抄过来再删那一行排除项，否则等于只跑一条检查、数出来的规模毫无意义；② 结果里的条数是**净新增**——代码里已写的豁免会被静默消费，所以「开启的总代价 = 净新增 + 既有豁免数」，只看净新增会低估；③ 量之前先确认豁免排版有效（`check_nolint_layout` 绿），否则失效豁免既不消费告警、也不出现在任何计数里，会把「已有人判过因」的代码读成「无人管过的存量」。
 
@@ -446,7 +446,7 @@ cmake -S . -B build-shard0 -DAURORA_LINT_SHARD=0/4 ...                          
 python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏览器 TU + #ifdef AURORA_BACKEND_WASM 分支
 ```
 
-两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面。CI 两条都跑，且各自是一道独立的必过位：`lint` 作业（8）做 native 双 Pass（DEBUG ON/OFF 各一份编译库），`lint-wasm` 作业（8w）对同一套 configure 产物跑 `--emscripten` 口径；二者互不替代——任一绿灯都不构成另一条通过的证据。浏览器口径原本挂在 `wasm` 作业的末步，2026-09-23 拆出：单遍实测 69.7 分钟，占该作业 79.4 分钟的 88%，整条 workflow 的墙钟被一个静态检查步骤卡住；拆成 8w 的分片矩阵后 `wasm` 作业回到 ~10 分钟（configure + 构建 + ctest），两条 lint 门禁并行同量级。
+两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面。CI 两条都跑，且各自是一道独立的必过位：`lint` 作业（8）做 native 双 Pass（DEBUG ON/OFF 各一份编译库），`lint-wasm` 作业（8w）对同一套 configure 产物跑 `--emscripten` 口径；二者互不替代——任一绿灯都不构成另一条通过的证据。浏览器口径原本挂在 `wasm` 作业的末步，拆出：单遍实测 69.7 分钟，占该作业 79.4 分钟的 88%，整条 workflow 的墙钟被一个静态检查步骤卡住；拆成 8w 的分片矩阵后 `wasm` 作业回到 ~10 分钟（configure + 构建 + ctest），两条 lint 门禁并行同量级。
 
 ⚠️ 本机跑 native 遍还有一层与 CI 不同：门禁口径的 native 遍在 **Linux runner** 上跑，而本机在 Windows 上跑，于是 `AURORA_PLATFORM_LINUX` 独享的 `#if` 分支不进分析（`bugprone-dynamic-static-initializers` 那类「随编译目标而变的命中分支」同一根因的另一面，见 `CODING_STANDARDS.md` §5.2）。已核过其规模：库与测试里的 Linux-only 文件（x11 / wayland / wgpu 表面、atspi 桥）在 CI 默认开关下整文件即空 TU，真正只有 Linux 才分析的代码是 `clipboard.cpp` / `font_discovery.cpp` 等文件里约百行量级的平台分支。该项属**已申报的残余盲区**，CI 首跑即为其真机测量；转红时按处置阶梯清理，不回退门禁语义。
 
@@ -454,9 +454,9 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 
 **「0 告警」不等于「跑到了」**：TU 编译失败时 clang-tidy 不产出任何带 `[check]` 的诊断，静默下来就是一轮绿灯。故本脚本对**前端 `error:`（含 `fatal error:`、`unable to handle compilation`）与超时**单独记账并以退出码 1 失败，`--emscripten` 重写还会校验条数守恒与 include 目录存在性，任一不满足直接以退出码 2 拒跑。反例实测：用 `shlex.split(posix=True)` 拆 Windows 编译库里的 `command`，会把反斜杠一律当转义符吃掉——盘符与目录粘连、分隔符丢失，路径全废，整轮 TU 编译不过，而门禁显示 0 告警。
 
-**`HeaderFilterRegex` 的路径分隔符缺口（2026-09-22 记为「暂缓」，2026-09-23 已扩面收口）**：现值为 `(include[/\\]aurora|src[/\\]aurora|[/\\]tests[/\\]|[/\\]tools[/\\]|[/\\]examples[/\\])`，**分隔符无关**。缺口本身：旧值只认正斜杠，而编译库里的头文件路径常是「正斜杠根 + 反斜杠段」的混合形态，某一段的分隔符与正则不符，该段之后的头文件告警就被过滤掉。实测后果（扩面前）：同一份 `tests/framework` 下的头文件，收口前 native 遍报 0 条、wasm 遍报十余条（两条口径拼出的路径形态不同，穿过过滤的能力也就不同），因此**本机 native 门禁的有效覆盖面主要是主文件诊断**——本机那句「两口径 0 findings」证明的面比字面窄。缺口在 Linux runner 上不存在（路径全正斜杠）：2026-09-22 的 CI 首跑因此放出 native 422 条 / wasm 470 条，与本机 0 并不矛盾，是同一份代码在两张覆盖面下的两个数。扩面的一次性代价本机也量过：**417 条 / 64 文件**（多为同一头文件被多个 TU 重复上报），其中 `readability-identifier-naming` 163 条（global constant 76、enum constant 47）、`readability-named-parameter` 50 条。这批存量已按下面的处置阶梯逐项清到 0（改名 / `CheckOptions` 按类别豁免 / 带理由的逐点与区间式 `NOLINT`），两条口径复验各自 **0 findings**，本机与 CI 自此量的是同一张覆盖面。
+**`HeaderFilterRegex` 的路径分隔符缺口**：现值为 `(include[/\\]aurora|src[/\\]aurora|[/\\]tests[/\\]|[/\\]tools[/\\]|[/\\]examples[/\\])`，**分隔符无关**。缺口本身：旧值只认正斜杠，而编译库里的头文件路径常是「正斜杠根 + 反斜杠段」的混合形态，某一段的分隔符与正则不符，该段之后的头文件告警就被过滤掉。实测后果（扩面前）：同一份 `tests/framework` 下的头文件，收口前 native 遍报 0 条、wasm 遍报十余条（两条口径拼出的路径形态不同，穿过过滤的能力也就不同），因此**本机 native 门禁的有效覆盖面主要是主文件诊断**——本机那句「两口径 0 findings」证明的面比字面窄。缺口在 Linux runner 上不存在（路径全正斜杠）：CI 首跑因此放出 native 422 条 / wasm 470 条，与本机 0 并不矛盾，是同一份代码在两张覆盖面下的两个数。扩面的一次性代价本机也量过：**417 条 / 64 文件**（多为同一头文件被多个 TU 重复上报），其中 `readability-identifier-naming` 163 条（global constant 76、enum constant 47）、`readability-named-parameter` 50 条。这批存量已按下面的处置阶梯逐项清到 0（改名 / `CheckOptions` 按类别豁免 / 带理由的逐点与区间式 `NOLINT`），两条口径复验各自 **0 findings**，本机与 CI 自此量的是同一张覆盖面。
 
-**CI 语义：三道 lint 均为必过门禁**（2026-09-23 收回 report-only；同日把两条 native pass 与浏览器口径那一遍都摊成分片矩阵）。三道 = `lint` 作业的 DEBUG=OFF 遍、DEBUG=ON 遍，与 `lint-wasm` 作业的浏览器口径遍；每道各 4 片，**整门绿 = 12 个作业全绿**，任一片 `unique_findings` 非 0（或有 TU 编译失败）即让该片红、进而让整门红。十二份 `lint-findings.json` 以 `tidy-findings-{debug-off,debug-on}-shard{0..3}` / `tidy-findings-wasm-shard{0..3}` 逐片落盘——**「不报」与「跑到了」是两件事**，判因与回归定位都要看清单，而分片后清单是互补的：读单片只是全量的 1/n，聚合时按 `shard` / `tu_total` 核对片数齐没齐。为什么曾经 report-only：该门禁自引入起从未绿过——先红在装不上 clang-tidy-22（apt 404），修好后红在上述分隔符缺口兑现的存量；一个永远红的必过位不等于门禁，只是把红灯常态化、让每个 PR 背一个与自身无关的失败。收回条件（三份清单的 `unique_findings` 均为 0）已于本轮达成。**日后在此转红按同一阶梯清理，不得再次回退 report-only。** 存量按覆盖面代价从小到大处置：① `.clang-tidy` 的 `CheckOptions`（命名类占大头，`*IgnoredRegexp` 按类别精确豁免，不牺牲文件其余检查）；② 逐点 `NOLINT` + 原因（受 §4.5「NOLINT 纪律」与 `check_nolint_layout` 约束）；③ 整文件排除（永久盲点，只给桩/替身这类本就不受本仓风格约束的文件）。
+**CI 语义：三道 lint 均为必过门禁**。三道 = `lint` 作业的 DEBUG=OFF 遍、DEBUG=ON 遍，与 `lint-wasm` 作业的浏览器口径遍；每道各 4 片，**整门绿 = 12 个作业全绿**，任一片 `unique_findings` 非 0（或有 TU 编译失败）即让该片红、进而让整门红。十二份 `lint-findings.json` 以 `tidy-findings-{debug-off,debug-on}-shard{0..3}` / `tidy-findings-wasm-shard{0..3}` 逐片落盘——**「不报」与「跑到了」是两件事**，判因与回归定位都要看清单，而分片后清单是互补的：读单片只是全量的 1/n，聚合时按 `shard` / `tu_total` 核对片数齐没齐。为什么曾经 report-only：该门禁自引入起从未绿过——先红在装不上 clang-tidy-22（apt 404），修好后红在上述分隔符缺口兑现的存量；一个永远红的必过位不等于门禁，只是把红灯常态化、让每个 PR 背一个与自身无关的失败。收回条件（三份清单的 `unique_findings` 均为 0）已于本轮达成。**日后在此转红按同一阶梯清理，不得再次回退 report-only。** 存量按覆盖面代价从小到大处置：① `.clang-tidy` 的 `CheckOptions`（命名类占大头，`*IgnoredRegexp` 按类别精确豁免，不牺牲文件其余检查）；② 逐点 `NOLINT` + 原因（受 §4.5「NOLINT 纪律」与 `check_nolint_layout` 约束）；③ 整文件排除（永久盲点，只给桩/替身这类本就不受本仓风格约束的文件）。
 
 ### 4.6 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
 
@@ -478,7 +478,7 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 | 配置来源 | 仓库根 `.clang-format`（`BasedOnStyle: Google` + 本仓覆盖项，含 `PointerAlignment: Right`、`DerivePointerAlignment: false`） |
 | 扫描范围 | `git ls-files` 中全部**非 `third_party/`、非 `build*/`** 的 `.cpp/.cc/.h/.hpp/.cxx`（无 git 时退化为文件系统遍历） |
 | 依赖 | clang-format（版本须读得懂本仓配置，见下）+ python（PATH）；**不需要** `compile_commands.json` |
-| 定位方式 | `aurora_find_clang_format`（`cmake/AuroraUtils.cmake`）按缓存变量 `AURORA_CLANG_FORMAT_CANDIDATES`（默认 `clang-format-22;clang-format-21;clang-format-20;clang-format`）逐个试跑 `--dump-config --style=file`，取**第一个退出码为 0** 者；结果以 `--clang-format <path>` 显式传给 runner |
+| 定位方式 | `aurora_find_clang_format`（`cmake/AuroraUtils.cmake`）按缓存变量 `AURORA_CLANG_FORMAT_CANDIDATES`（默认 `clang-format-22;clang-format-21;clang-format-20;clang-format`）逐个试跑 `--dump-config --style=file:<仓库根绝对路径>`（钉死形态，见 §4.7 末「配置来源钉死」裁决），取**第一个退出码为 0** 者；结果以 `--clang-format <path>` 显式传给 runner |
 
 为何要有这道门禁：门禁的作用是让排版漂移在**引入的那一刻**暴露，而不是攒到需要一次性大改。
 
@@ -486,12 +486,11 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 枚举取值——`BinPackParameters: BinPack`（把它当布尔的构建不认）。这些构建读到它即
 `.clang-format:46:20: error: invalid boolean` / `Error reading …: Invalid argument` 并以退出码 1 结束，
 **且这不是「排版判红」而是「命令失败」**：任何把 clang-format 排进构建链的地方都会因此炸掉。
-实测代价（2026-09-23 CI run `35839746160`）：`generate_error_codes` 的生成后折行一步用了
-`find_program(clang-format)`，于是 ubuntu runner 上的发行版版本被选中，凡依赖该生成物的作业
+实测代价：`generate_error_codes` 的生成后折行一步用了`find_program(clang-format)`，于是 ubuntu runner 上的发行版版本被选中，凡依赖该生成物的作业
 （core linux / 各 toggles / install / coverage / asan / wasm）**全红**，Windows、macOS 与装了
 clang-format-22 的 `clang-format` 作业全绿——同一份配置、两种命运，差别只在 PATH 上那个二进制的版本。
 
-**门槛是 patch 构建，不是主版本号**（2026-09-28 对 run `36348853231` 逐作业取日志实测）：GitHub
+**门槛是 patch 构建，不是主版本号**：GitHub
 ubuntu-latest 镜像预装的 `clang-format`（发行版 18）与候选表里的 `clang-format-20 / -21 / -22`
 **四个全拒**，而同一条 run 里 apt.llvm.org 的 `1:22.1.8~++20260714` 快照接受；本机 git 构建 `22.1.2`
 与 WSL 的 Ubuntu `21.1.8` 也都接受。所以 `>= 20` 这类按 major 的劝告会把人直接引到坑里，两侧同一
@@ -499,17 +498,36 @@ ubuntu-latest 镜像预装的 `clang-format`（发行版 18）与候选表里的
 `BinPack` 在本机门禁**同判**（把 `.clang-format:46` 临时改成 `true` 复跑全仓：875/875 合规、差异 0 行），
 仓库保留枚举形态只为与该构建自身 `--dump-config` 的打印一致；`Break` 两侧都不是合法取值。
 
-处置是把「存在」与「可用」分开判：`aurora_find_clang_format` 以 `--dump-config --style=file` 真跑一遍
-（cwd 钉在仓库根，`--style=file` 才从那里上溯找配置），探针判别力本机实测（v22.1.2）——仓库根返回
-`0`，换一份含非法取值的配置（`IndentWidth: abc`）即返回 `1` 并打印 `error: invalid number`。
+处置是把「存在」与「可用」分开判：`aurora_find_clang_format` 以 `--dump-config --style=<钉死配置路径>` 真跑一遍
+（探针判别力本机实测（v22.1.2）——合法配置返回 `0`，换一份含非法取值的配置（`IndentWidth: abc`）即返回 `1`
+并打印 `error: invalid number`）。
 生成链（`cmake/AuroraTools.cmake` 的 `generate_error_codes`）与排版门禁共用该函数，两处必然落在同一个
 二进制上；生成链在判不到可用版本时**告警跳过而不中断构建**（仓库内已提交的 `error_codes.gen.h` 本就是
 格式化后的形态，缺工具只意味着「本次生成未折行」，真漂移仍由 format 门禁判，不该由它决定编译成败）。
-「告警跳过」的代价在 2026-09-28 被证实是真的：tidy / toggles / wasm 等作业的 configure 日志里
+
+**配置来源钉死（裁决）**：仓库内每一次 clang-format 调用都必须显式带上 `AURORA_CLANG_FORMAT_STYLE`
+（= `file:${AURORA_SOURCE_DIR}/.clang-format`），不得写裸 `--style=file` / `-style=file`。判据是 clang-format 的
+配置解析**按入参类型分两条路**：给**具名文件**时从「该文件所在目录」逐级上溯找 `.clang-format`，只有走标准输入时
+才看工作目录。生成链折行的正是具名文件，且它是 `<build>/_gen_error_codes_stage/` 里的**构建目录产物**——构建目录
+位于仓库外（`cmake -B <仓外目录>`、WSL 侧的仓外构建树）时裸形态上溯不到配置，clang-format **不报错、静默退化成
+内置 LLVM 风格**（2 空格 / 80 列），随后 `copy_if_different` 把这份退化产物拷进版控文件。实测代价：内容与规范
+产物一字未改，仅排版退化即让 `check_doc_comments` 报 26 条（`DOC-R3`，折行后的 `///` 续行块被判定为不紧贴可文档化
+声明）、`format-check` 判整文件差异。旧口径「cwd 钉在仓库根，`--style=file` 才从那里上溯找配置」**已被本条取代**
+——它当初是为排版门禁设计的（传绝对路径 + cwd=仓库根，两条解析路恰好都命中），但对生成链的仓外暂存产物不成立；
+把解析依赖从「cwd / 文件位置」收到「显式绝对路径」，是为了让退化在任何构建目录布局下都不可达，也让探测与实调用
+同形态（否则探测恒通过、产物却红）。排版门禁 `tools/check/run_clang_format.py` 与 CI 的装后自证本轮一并改为同
+一形态，仓内不再有裸 `--style=file` 的调用点。两侧实测：Windows `22.1.2` 与 WSL Ubuntu `21.1.8`
+在钉死形态下重新生成的 `error_codes.gen.h` 与规范产物**逐字节相同**；同一份未折行产物在仓库外目录经裸形态处理后
+即得退化形态（负向自证，非空转）。
+另一条同族防线在生成器自身：`tools/gen/gen_error_codes.cpp` 的四个路径参数一律**必需**，缺省即报错退出码 `1`——
+曾允许省略并默认写 `include/aurora/core/error_codes.gen.h` 等源码树文件，那条路绕过了生成后的折行步骤，把未排版
+产物直接落进版控，与本条的退化形态殊途同归地弄红同一批门禁。
+「告警跳过」的代价被证实是真的：tidy / toggles / wasm 等作业的 configure 日志里
 `no clang-format on PATH can parse the repo .clang-format` 一路静默通过，`format` / `format-check`
 聚合目标在这些作业里压根没生成。故 CI 改为**每个跑 configure 的 Linux 作业**都装一个读得懂配置的
 clang-format——命令收在 `.github/actions/setup-clang-format`（apt.llvm.org 的 llvm-22 快照 +
-`/usr/local/bin/clang-format` 软链 + 装完立刻用与探针同形态的 `--dump-config --style=file` 自证），
+`/usr/local/bin/clang-format` 软链 + 装完立刻用与探针同形态的
+`--dump-config --style=file:<仓库根绝对路径>` 自证），
 `clang-format` 门禁作业与两道 `clang-tidy` 作业共用同一口径（后者在同一次 apt 里多带一个包，不重复
 `apt-get update`）。Windows / macOS 作业未纳入：那里没有 apt，且这两侧此前从未因该探测红过。
 
@@ -640,6 +658,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 
 | 变量 | 默认值 | 说明 |
 |:---|:---|:---|
+| `AURORA_SOURCE_DIR` | Aurora 源码树根（顶层 `CMakeLists.txt` 设置，`CACHE INTERNAL`） | 本仓源码树根；子项目安全版 `CMAKE_SOURCE_DIR`——Aurora 内部指向自身源码树的路径一律经它表达（约定与理由见 §9.5） |
 | `CMAKE_BUILD_TYPE` | `Release`（若未设） | 常规构建默认 Release；覆盖率 / ASan 开关会自行清除其中的 `-O3` / `-Os` / `-DNDEBUG` |
 | `CMAKE_CXX_STANDARD` | `20` | 强制 C++20（`CMAKE_CXX_STANDARD_REQUIRED ON`，`CMAKE_CXX_EXTENSIONS OFF`） |
 | 生成器 | — | 推荐 `Ninja`（空转 / 增量调度远快于 Make）；Make 仍支持。GLFW / D3D11 后端链接依赖对应工具链的 `lib-*` 目录 |
@@ -713,6 +732,58 @@ cmake --build build
 ```
 
 > 消费端生成器须与安装库的生成器 / 工具链一致。
+
+### 9.5 源码树消费（add_subdirectory）
+
+**何时用源码树而非安装产物**：同机开发、需要联调 / 步进框架源码、或希望框架与下游共享同一份构建与编译缓存时，用 `add_subdirectory` 直接挂 Aurora 源码树；交付 / 分发 / CI 场景仍走 §9.1–§9.4 的安装产物 + `find_package`。
+
+**最小可用写法**（下游顶层 `CMakeLists.txt` 片段）：
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(my_app CXX)
+
+# ① 先以缓存变量关掉 Aurora 默认 ON 的产物 / 门禁开关
+set(AURORA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(AURORA_BUILD_E2E OFF CACHE BOOL "" FORCE)
+set(AURORA_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
+set(AURORA_ENABLE_CLANG_FORMAT OFF CACHE BOOL "" FORCE)
+set(AURORA_ENABLE_CLANG_TIDY OFF CACHE BOOL "" FORCE)
+set(AURORA_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(AURORA_ENABLE_CCACHE OFF CACHE BOOL "" FORCE)
+
+# ② 再挂源码树；第二参数给独立构建子目录，避免 Aurora 产物散进下游构建根
+add_subdirectory(<aurora 源树> <构建子目录>)
+
+add_executable(my_app main.cpp)
+aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE include 目录
+```
+
+**① 为什么必须写在 `add_subdirectory` 之前**：`option()` 只在缓存变量**尚不存在**时写入默认值，先用 `set(... CACHE BOOL ... FORCE)` 预置后，Aurora 侧的 `option()` 即退化为读取；写在之后则无效——那时 ON 已进缓存，且相关目标（测试 runner、demo、lint / format / docs）已被加入构建面。
+
+| 开关 | 默认 | 子项目下保留默认的下场 |
+|:---|:---|:---|
+| `AURORA_BUILD_TESTS` | `ON` | `aurora_test_runner` 与全部 `check_*` 静态门禁注册进下游 CTest（§2） |
+| `AURORA_BUILD_E2E` | `ON` | 追加真实后端 E2E 用例（依赖本机可用后端，见 §2） |
+| `AURORA_BUILD_DEMOS` | `ON` | 每组件一个 demo 可执行（`EXCLUDE_FROM_ALL`，但仍占 configure 与目标面，§2.1） |
+| `AURORA_ENABLE_CLANG_FORMAT` | `ON` | 多出 `format` / `format-check`，工作目录为 Aurora 源码树（§4.7） |
+| `AURORA_ENABLE_CLANG_TIDY` | `ON` | 多出 `lint` / `lint-fix`；runner 读的是下游构建根的 `compile_commands.json`，覆盖面随之扩到下游 TU，并把 `lint-findings.json` 写进下游构建根（§4.5） |
+| `AURORA_BUILD_DOCS` | `ON` | 多出 `docs`（`EXCLUDE_FROM_ALL`，缺 doxygen 时自动跳过，§2） |
+| `AURORA_ENABLE_CCACHE` | `ON` | Aurora 目录作用域内的 `CMAKE_{C,CXX}_COMPILER_LAUNCHER` 被换成 ccache 启动器（§4.3） |
+
+其余开关保持默认即可，需要时按 §10 速查表逐项覆盖。
+
+**`aurora_setup_consumer_target(<tgt> [额外私有 include 目录...])`**：由 `cmake/AuroraUtils.cmake` 提供（§1.1、§6），对已存在的目标一次性完成——`target_link_libraries(... PRIVATE aurora)`（PUBLIC 传递头目录 / feature 宏 / 版本定义）、`CXX_STANDARD 20`、复用消费者共享 PCH（`REUSE_FROM aurora_consumer_pch`，§2.2；`AURORA_PCH_ENABLED` 为假时自动跳过）、项目统一告警、MinGW 下 `-Wa,-mbig-obj`；尾随参数作为额外 PRIVATE include 目录。demo / 测试 / 工具与下游目标走同一条路径，不要自行拼这套旗标。
+
+> §6 的 `NOMINMAX` 是 Aurora 顶层 `add_compile_definitions`，作用域只到 Aurora 目录及其子目录，不会传播到下游目录；Windows 下游须自行声明。
+
+**`AURORA_SOURCE_DIR` 约定**（登记见 §8）：
+
+- **定义**：顶层 `CMakeLists.txt` 在 `project()` 之后设置 `AURORA_SOURCE_DIR`，值恒为 Aurora 源码树根。
+- **用法**：Aurora 内部一切「指向自身源码树」的路径一律经它表达——生成器的 `codespec/errors.toml`、生成产物 `include/aurora/core/error_codes.gen.h`、`tools/check` 脚本、`third_party/` 下的源码路径等。新写的 `cmake/` 模块继续沿用该约定，不要回退到 `CMAKE_SOURCE_DIR`。
+- **为什么不用 `CMAKE_SOURCE_DIR`**：Aurora 作为子项目时它指向**下游**根，上述路径全部指错，生成器与 custom command 落不到任何规则上（ninja 报 `error_codes.gen.h missing and no known rule to make it`）。
+- **为什么是 `CACHE INTERNAL`**：本仓定义的函数 / 宏（如 `cmake/AuroraUtils.cmake`、`cmake/AuroraTools.cmake` 中的 `aurora_*`）在下游目录作用域被调用时，普通目录变量已不可见；缓存条目不受目录作用域限制，取值恒可用。
+- **第三方源码例外**：`third_party/freetype/CMakeLists.txt` 仍用 `CMAKE_SOURCE_DIR`（仅用于拼 `third_party/freetype/builds/cmake/iOS.cmake` 与 in-source 构建守卫），`third_party/glfw/CMakeLists.txt` 据此判定 `GLFW_STANDALONE`（子项目下为非独立，正是期望值）。二者属三方源码，不做改动。
 
 ---
 

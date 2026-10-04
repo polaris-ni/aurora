@@ -60,6 +60,26 @@ class FocusRow final : public Container {
     auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 };
 
+/// 认领 Tab 的布局容器：用来验证 has_input_semantics() 把 wants_tab_keys() 计入输入语义。
+class TabClaimRow final : public Container {
+  public:
+    bool tab_claim = false;
+
+    auto type_name() const -> const char * override { return "TabClaimRow"; }
+
+    [[nodiscard]] auto wants_tab_keys() const -> bool override { return tab_claim; }
+
+    /// has_input_semantics() 是 protected，按仓规不改访问区，故在派生类开一个转发面供用例断言。
+    [[nodiscard]] auto input_semantics() const -> bool { return has_input_semantics(); }
+
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+        size_ = c.constrain(Size{.width = 100.0F, .height = 100.0F});
+        return size_;
+    }
+
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+};
+
 /// 构造带 n 个探针子控件的根行；根自身不可聚焦，候选集恰为全部探针。
 auto make_row(int kids) -> std::pair<std::shared_ptr<FocusRow>, std::vector<std::shared_ptr<FocusProbe>>> {
     auto row = std::make_shared<FocusRow>();
@@ -330,6 +350,19 @@ AURORA_TEST_CASE(input_semantics_on_a_container_put_it_back_in_the_order) {
     // 宿主否决位一票否决，优先于输入语义。
     col.set_focusable(false);
     AURORA_TEST_CHECK_FALSE(col.focusable());
+}
+
+// 认领 Tab 的控件即重新成为 Tab 停点：has_input_semantics() 必须把 wants_tab_keys() 计入。
+// 漏并这一位的后果是「覆写者被当成纯展示件」——它能收到 Tab，却因不在焦点序里而永远拿不到焦点。
+AURORA_TEST_CASE(tab_key_opt_in_counts_as_input_semantics) {
+    TabClaimRow row{};
+    AURORA_TEST_CHECK_FALSE(row.wants_focus());  // 纯布局容器默认不是停点
+    AURORA_TEST_CHECK_FALSE(row.wants_tab_keys());
+
+    row.tab_claim = true;
+    AURORA_TEST_CHECK_TRUE(row.wants_tab_keys());
+    AURORA_TEST_CHECK_TRUE(row.input_semantics());
+    AURORA_TEST_CHECK_TRUE(row.wants_focus());
 }
 
 AURORA_TEST_CASE(tab_cycle_hits_only_interactive_controls) {

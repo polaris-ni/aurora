@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -12,6 +13,21 @@ namespace aurora {
 
 // 分段说明：以下事件类型均为纯数据载荷，只在主线程构造与派发
 // （契约 Thread: main-thread only、Side-effects: pure 逐类成立，此处统一声明）。
+
+/// @brief 连击判定的**默认时间窗**（毫秒）：两次点击间隔不超过该值才可能累加连击序号。
+/// 单一真源：`EventDispatcher::click_window_ms` 以它为初值，窗口装饰层（Wayland CSD 标题栏
+/// 双击最大化）直接引用同一常量，避免「库内两套阈值」漂移。
+/// @note 该值是库内约定常量，**未接线到系统双击速度设置**（Windows `GetDoubleClickTime` /
+///       X11 `Xkb` 等），跨平台才有一致手感；后续接系统值时须同步调整本注释。
+inline constexpr std::uint32_t AURORA_DEFAULT_CLICK_WINDOW_MS = 500;
+
+/// @brief 连击判定的**默认位移半径**（逻辑 dp）：两次点击的落点距离不超过该值才可能累加连击序号。
+/// 单一真源：`EventDispatcher::click_radius_dp` 以它为初值，窗口装饰层与派发器共用。
+/// @note 与 `AURORA_DEFAULT_CLICK_WINDOW_MS` 同口径：库内约定常量，未接线到系统设置。
+inline constexpr float AURORA_DEFAULT_CLICK_RADIUS_DP = 4.0F;
+
+/// @brief 连击序号上限：达到后继续快速点击仍记该值（供「三击选整段」语义使用）。
+inline constexpr std::uint8_t AURORA_MAX_CLICK_COUNT = 3;
 
 /// @brief 鼠标/触摸按键。
 enum class MouseButton : std::uint8_t { Left, Right, Middle };
@@ -33,7 +49,27 @@ enum class ModifierKey : std::uint8_t {
     Control = 1U << 1U,
     Alt = 1U << 2U,
     Meta = 1U << 3U,
+    // 数字小键盘锁（NumLock）当前状态；建模为修饰位而非键码（切换键无发送意义），消费方据此
+    // 自行决定 KP_Prior 的语义——框架不做这层二次翻译，详见 keycode.h 的小键盘口径。
+    NumLock = 1U << 4U
 };
+
+/// @brief 可按住的修饰位并集（Shift / Control / Alt / Meta）。
+/// @note 这是 `ModifierKey` 里**语义为「此刻被按住」**的那部分位。消费方做「某修饰键是否按下」
+///       判定时用单个位（`e.modifiers & ModifierKey::Shift`）即可，无需本掩码；本掩码用于
+///       **两处位集的整体比较**——此时必须先摘掉锁定态位，否则键盘锁定态会污染比较结果
+///       （`KeyCombo::matches` 即按它取子集，见 `app/shortcuts.h`）。
+inline constexpr std::uint8_t AURORA_MODIFIER_PRESSABLE_MASK =
+    static_cast<std::uint8_t>(ModifierKey::Shift) | static_cast<std::uint8_t>(ModifierKey::Control) |
+    static_cast<std::uint8_t>(ModifierKey::Alt) | static_cast<std::uint8_t>(ModifierKey::Meta);
+
+/// @brief 键盘锁定态位的并集（当前只有 `NumLock`）。
+/// @note 这部分位语义为「键盘的锁定灯态」而非「手指按住」：切换键按下的瞬间翻转，抬起不恢复，
+///       故与 `AURORA_MODIFIER_PRESSABLE_MASK` 是两类不可混用的位。**新增锁定类位（`CapsLock` /
+///       `ScrollLock` 等）时必须并入本掩码**，否则该位会落进「两掩码之外」的缝隙、在按位比较中
+///       继续污染结果；`AURORA_MODIFIER_PRESSABLE_MASK | AURORA_MODIFIER_LOCK_MASK` 应恒等于
+///       `ModifierKey` 的全部已定义位，该恒等式由 `utest_shortcuts` 的位集自证用例钉住。
+inline constexpr std::uint8_t AURORA_MODIFIER_LOCK_MASK = static_cast<std::uint8_t>(ModifierKey::NumLock);
 
 /// @brief 修饰键位按位或（便于组合 `modifiers`）。
 /// @param a 左侧掩码。
@@ -51,6 +87,20 @@ enum class ModifierKey : std::uint8_t {
 [[nodiscard]] inline auto operator&(ModifierKey a, ModifierKey b) noexcept -> std::uint8_t {
     return static_cast<std::uint8_t>(a) & static_cast<std::uint8_t>(b);
 }
+
+/// @brief 焦点到达方式：决定基类统一焦点环是否画出（specification/05-event-navigation.md §4.4）。
+///
+/// 由 `FocusManager::set_focus` 随焦点一并写入控件（`Widget::focus_arrival()`），控件与基类绘制
+/// 路径据此判定可见性；本枚举刻意定义在本头而非 `event/focus.h`，因为 `Widget` 需在包含关系上
+/// 先于焦点管理器看到它（`focus.h` 包含 `widget.h`，反向不可）。
+///
+/// - `Pointer`：指针 / 触摸按下把焦点交给控件。控件此刻已有 pressed / hover 反馈，再补一圈环会
+///   被知觉归组成「控件自带的边框」，故不画环——与浏览器 `:focus-visible`、WinUI 的 `FocusVisual`、
+///   Qt 的 `TabFocusReason` vs `MouseFocusReason` 同口径。
+/// - `Keyboard`：经 Tab / Shift+Tab / 方向键移动而来。键盘可达性的可观测停点，必须画环。
+/// - `Programmatic`：显式聚焦（`set_focus` / `request_focus` / 焦点作用域进出恢复等），无从判断
+///   用户所处模态，保守按可见处理，因而既有调用点行为逐位不变。
+enum class FocusArrival : std::uint8_t { Pointer, Keyboard, Programmatic };
 
 /// @brief 输入事件基类。
 ///
@@ -81,13 +131,31 @@ struct MouseEvent : Event {
     ///        鼠标/真实 MouseEvent 为 nullopt，表示「任意指针」）。用于 Draggable/LongPress
     ///        在并发触控下绑定到具体指针，避免同控件被第二根手指误触发。
     std::optional<int> pointer_id;
+    /// @brief 连击序号：本次 Press 是同一指针、同一按键上的第几次连续点击（1 = 单击，2 = 双击，3 = 三击）。
+    ///        由 `EventDispatcher::dispatch_mouse` 在派发前**集中**计算并写入（后端不参与判定）；
+    ///        Release / Move 事件恒为 1（不参与连击计数）。判别口径见 specification/05-event-navigation.md §2.2。
+    ///        上限 3：更快的连续点击仍记 3，供「三击选整段」这类语义使用。
+    std::uint8_t click_count = 1;
+    /// @brief 事件产生那一刻的修饰键位组合（由 Surface 后端在事件构造处写入）。
+    ///
+    /// 与 `KeyEvent::modifiers` 同一个位掩码枚举、同一份真值源，判读方式一致
+    /// （`e.modifiers & ModifierKey::Shift` 非 0 即「按下时 Shift 有效」）。默认 `None` 有两义：
+    /// 既可能是「用户确实没按任何修饰键」，也可能是「本事件不由真实指针产生」——触控合成、
+    /// 可达性动作、诊断注入的程序化事件一律 `None`，因为不存在对应的物理修饰态。**需要区分
+    /// 来源的调用方用既有的 `pointer_id`**（触控合成有值、鼠标为 `nullopt`），不要靠本字段推断。
+    ///
+    /// **派发器只透传、不推断**：`EventDispatcher::dispatch_mouse` 不读「最后一次 `KeyEvent`
+    /// 的 `modifiers`」兜底，也不在派发时刻轮询物理按键态（两种做法的失效场景见
+    /// codespec/specification/05-event-navigation.md §2.2.2）。逐后端真值源同见该节。
+    ModifierKey modifiers = ModifierKey::None;
 };
 
 /// @brief 键盘事件：键码为平台无关的逻辑键码（见 event/keycode.h 的 KeyCode）。
 struct KeyEvent : Event {
     int key = 0;  ///< 逻辑键码的整数值（按 `KeyCode` 解释，见 event/keycode.h）；0 == KeyCode::Unknown（未映射）
     KeyAction action = KeyAction::Down;  ///< 键盘动作（按下/抬起）
-    ModifierKey modifiers = ModifierKey::None;  ///< 修饰键位组合（Shift/Ctrl/Alt/Meta）
+    ModifierKey modifiers =
+        ModifierKey::None;  ///< 修饰键位组合（Shift/Ctrl/Alt/Meta/NumLock；指针与滚轮事件同用此枚举，见 §2.2.2）
 };
 
 /// @brief 滚轮事件（specification/05-event-navigation.md §2.2）。delta 为设备无关增量，y 正方向为向上滚动。
@@ -101,6 +169,15 @@ struct ScrollEvent : Event {
     /// **默认 0 = 全量消费**：不写本字段的既有自定义 handler 行为与「最深可滚动者
     /// 一次性消费、不冒泡」的旧约定逐位一致。
     float remaining_y = 0;
+    /// @brief 事件产生那一刻的修饰键位组合（由 Surface 后端在事件构造处写入）。
+    ///
+    /// 语义与 `MouseEvent::modifiers` 完全一致：同枚举、判读方式相同、真值源在后端、派发器
+    /// 只透传。默认 `None` 同样两义——真实滚轮事件里是「没按修饰键」，程序化合成里是「不由
+    /// 真实滚轮产生」（`Widget::scroll_by` / `Scroll::scroll_by` 这类程序化滚动恒 `None`，
+    /// 不存在对应的物理修饰态）。本结构体无 `pointer_id`，故合成来源不由字段区分：消费方按
+    /// 「`None` 即无修饰」使用即可。逐后端真值源见
+    /// codespec/specification/05-event-navigation.md §2.2.2。
+    ModifierKey modifiers = ModifierKey::None;
 };
 
 /// @brief 文本输入事件（specification/05-event-navigation.md §2.2）：由键盘/输入法产生的 Unicode 文本片段。

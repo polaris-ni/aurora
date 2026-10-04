@@ -186,7 +186,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @brief 绘制：应用 modifier（背景等）后调用 on_paint。
     /// @param p 目标画笔（软件光栅 `Painter`，可为离屏缓冲或 Display List 录制器）。
     /// @param bounds 本控件的绝对（窗口逻辑 dp）盒，入口即记入 `paint_bounds()` / `focus_bounds()`。
-    /// @param ctx 构建上下文（基类焦点环从中取主题色）。
+    /// @param ctx 构建上下文（基类焦点环从中取主题，环色见命名令牌 `focus.ring`）。
     auto paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void;
     /// @brief 使离屏缓存（`Modifier::cache_layer`）失效，下次绘制重新渲染子树。
     auto invalidate_paint_cache() const -> void;
@@ -552,6 +552,19 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @return true = 方向键先投递 `on_key_event`；false（默认）= 派发器直接做几何焦点导航。
     [[nodiscard]] virtual auto wants_navigation_keys() const -> bool { return false; }
 
+    /// @brief Tab / Shift+Tab 是否优先投递给 `on_key_event`。
+    ///
+    /// 派发器对 Tab 的默认处理是**焦点序遍历**（`FocusManager::move_focus(Forward/Backward)`）：
+    /// 有候选即移动焦点并消费，焦点控件观察不到按键。自带 Tab 语义的复合控件（字段列表的
+    /// 「跳到下一组」、树件的同级折叠切换、分区跳转……）需覆写本钩子为 true：派发器先调
+    /// `on_key_event`，其消费（`is_handled`）即止；**未消费则回落焦点序遍历**，故控件只需处理
+    /// 自己认识的组合键，其余 Tab 行为保持不变。与 `wants_navigation_keys()` /
+    /// `wants_activation_keys()` 同一「控件优先、宿主兜底」约定；复数形式指 Tab 与 Shift+Tab
+    /// 一对都算（方向由事件自身的 Shift 修饰位给出，钩子不区分）。
+    /// 默认 false，保持既有焦点序遍历语义（按钮 / 复选框 / 输入框等不受影响）。
+    /// @return true = Tab/Shift+Tab 先投递 `on_key_event`；false（默认）= 派发器直接做焦点序遍历。
+    [[nodiscard]] virtual auto wants_tab_keys() const -> bool { return false; }
+
     /// @brief 文本输入入口（焦点 widget 上调用）。默认标记为已消费。
     /// @param e 文本输入事件；默认实现只置 `e.is_handled = true`（不落任何文本）。
     virtual auto on_text_input(TextInputEvent &e) -> void { e.is_handled = true; }
@@ -616,12 +629,40 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 持焦时是否由基类统一绘制焦点环（默认 true）。
     ///
-    /// 基类在 `Widget::paint_content` 末尾为**任何持有焦点**的控件画出主题色环，使 Tab 停点
+    /// 基类在 `Widget::paint_content` 末尾为**任何持有焦点**的控件画出焦点环（环色取主题命名令牌
+    /// `focus.ring`，未登记时回退 `primary`），使 Tab 停点
     /// 在任意控件上都可观测（specification/05-event-navigation.md §4.4）。已自带聚焦态外观的
     /// 控件（`TextInput` 画 Fluent 式主题色加粗边框）覆写为 `false` 以免双环。
     /// 仅影响绘制，不影响焦点序归属与 `focusable()` / `wants_focus()` 判定。
     /// @return 是否在持焦时由基类绘制焦点环：基类恒为 true。
+    /// @note 本谓词只是画环的必要条件之一；「本帧到底画不画」看 `focus_ring_shown()`（还须持焦且
+    ///       焦点不是指针到达）。
     [[nodiscard]] virtual auto wants_focus_ring() const -> bool { return true; }
+
+    /// @brief 本帧基类是否会为本控件画出统一焦点环 = 持焦 ∧ 未关闭环 ∧ 焦点非指针到达。
+    ///
+    /// 指针按下把焦点交给控件时不画环：此刻控件已有 pressed / hover 反馈，再补一圈会被知觉归组成
+    /// 「控件自带的一圈边框」（用户报的「按钮点后变小、外侧多一圈边」的成因），与浏览器
+    /// `:focus-visible`、WinUI `FocusVisual`、Qt `TabFocusReason` vs `MouseFocusReason` 同口径
+    /// （specification/05-event-navigation.md §4.4）。
+    ///
+    /// `Widget::paint_content` 的画环分支与 `dirty_bounds()` 的外扩判据**共用本谓词**，避免两处各写
+    /// 一份条件而漂移：画了却不标脏 = 环被脏区裁剪吃掉；标脏却不画 = 白擦一圈。
+    /// @return 是否画环；等价 `is_focused() && wants_focus_ring() && focus_arrival() != Pointer`。
+    [[nodiscard]] auto focus_ring_shown() const -> bool {
+        return is_focused_ && wants_focus_ring() && focus_arrival_ != FocusArrival::Pointer;
+    }
+
+    /// @brief 读取最近一次获焦的到达方式。
+    /// @return `FocusArrival`；由 `FocusManager::set_focus` 随焦点写入。从未获焦过的控件返回
+    ///         `Programmatic`——该值仅在 `is_focused()` 为真时才参与绘制判定，故默认值无观测面。
+    [[nodiscard]] auto focus_arrival() const -> FocusArrival { return focus_arrival_; }
+
+    /// @brief 写入焦点到达方式（供 `FocusManager::set_focus` 在改焦点时调用）。
+    /// @param a 本次焦点到达方式。
+    /// @note 只改状态位，不标脏也不重发 `on_focus_change`——由调用方在值真变时负责 `mark_needs_paint()`
+    ///       （`set_focus` 即如此），否则「环该消失却没重绘」会留下残影像素。
+    auto set_focus_arrival(FocusArrival a) -> void { focus_arrival_ = a; }
 
     /// @brief Tab 序权重（默认 0，越小越靠前）；move_focus 按此排序。
     /// @return 当前 Tab 序权重。
@@ -1099,9 +1140,20 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///       内的相对几何仍成立，跨视口比较不精确（此限制与 `paint_bounds_` 相同）。
     Rect focus_bounds_;
 
-    /// @brief 最近一次 paint 接收的绝对（窗口逻辑 dp）盒；脏区标记据此标记精确几何，
-    ///        使 `Window::present_root` 的脏区裁剪绘制（push_clip）命中正确区域，避免整帧重绘。
+    /// @brief 最近一次 paint 接收的绝对（窗口逻辑 dp）盒；`dirty_bounds()` 的基准盒，使
+    ///        `Window::present_root` 的脏区裁剪绘制（push_clip）命中正确区域，避免整帧重绘。
     Rect paint_bounds_{};
+
+    /// @brief 上一帧是否画过统一焦点环（即是否在自身盒外留下了像素）。
+    ///
+    /// 与 `is_focused_` 一起决定 `dirty_bounds()` 是否按外扩盒标脏：获焦帧需要外扩才能让环落在
+    /// 脏区裁剪之内，失焦帧则要靠外扩把上一帧的环像素重绘掉（否则残留成「盒外一圈环色」）。
+    bool painted_focus_ring_ = false;
+
+    // ---- 统一焦点环几何（绘制与脏区外扩共用这一份常量，见 Widget::paint_content）----
+    static constexpr float AURORA_FOCUS_RING_GAP = 2.0F;  ///< 环与自身边框/内容的最小间距（dp），不得压在边缘像素上
+    static constexpr float AURORA_FOCUS_RING_THICKNESS = 2.0F;  ///< 环宽（dp）
+    static constexpr float AURORA_FOCUS_RING_RADIUS = 4.0F;  ///< 环圆角（dp）：小于常见控件圆角，故不与边框弧线相交
 
 #ifdef AURORA_ENABLE_DEBUG
     /// @brief 调试叠层（repaint_highlight）用：本控件最近一次实际重绘（render_into 入口）所在的
@@ -1120,9 +1172,27 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @return `focus_bounds_` 的值拷贝（绝对窗口逻辑 dp 盒）。
     [[nodiscard]] auto focus_bounds() const -> Rect { return focus_bounds_; }
 
-    /// @brief 读取最近一次 paint 的绝对（窗口逻辑 dp）盒（脏区标记用）。
+    /// @brief 读取最近一次 paint 的绝对（窗口逻辑 dp）盒。
     /// @return `paint_bounds_` 的值拷贝；从未绘制过则为默认零盒。
+    /// @note 标脏请用 `dirty_bounds()`：本盒只含控件自身，画在盒外的装饰（基类统一焦点环）不在其中。
     [[nodiscard]] auto paint_bounds() const -> Rect { return paint_bounds_; }
+
+    /// @brief 读取本控件本次标脏应覆盖的绝对（窗口逻辑 dp）盒 = 自身绘制盒 ∪ 画在盒外的装饰。
+    ///
+    /// 基类统一焦点环画在自身盒**外** `AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS` 处
+    /// （见 `Widget::paint_content`），而 `paint_bounds()` 只含自身盒：只按自身盒标脏会使环带落在
+    /// 脏区裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成「盒外一圈环色」。
+    /// @return 本帧要画环（`focus_ring_shown()`）或上一帧画过环时，为 `paint_bounds()` 四边各外扩
+    ///         环带宽的盒；其余情况与 `paint_bounds()` 逐位相同。
+    [[nodiscard]] auto dirty_bounds() const -> Rect {
+        const Rect box = paint_bounds_;
+        if (!focus_ring_shown() && !painted_focus_ring_) {
+            return box;
+        }
+        const float out = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
+        return Rect{.origin = Point{.x = box.origin.x - out, .y = box.origin.y - out},
+                    .size = Size{.width = box.size.width + (2.0F * out), .height = box.size.height + (2.0F * out)}};
+    }
 
 #ifdef AURORA_ENABLE_DEBUG
     /// @brief 读取最近一次实际重绘所在的调试帧序号（repaint_highlight 用）。
@@ -1150,6 +1220,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
     bool focusable_ = true;  ///< 宿主侧焦点否决位（默认未否决）；实际入 Tab 序还需 wants_focus()
     int tab_index_ = 0;  ///< Tab 序权重（越小越靠前）
     bool is_focused_ = false;  ///< 当前是否持有焦点
+    /// @brief 最近一次获焦的到达方式（由 `FocusManager::set_focus` 写入）；默认按可见处理，
+    ///        使「未经理事人直接改 `is_focused_`」的既有路径保持改动前观感。
+    FocusArrival focus_arrival_ = FocusArrival::Programmatic;
     /// @brief 宿主显式声明的读屏名（对标 ARIA `aria-label`）：Name 回退链最高优先级，空串 = 未声明。
     std::string explicit_label_;
     /// @brief 用户可设的跨重建稳定标识（对标 HTML `id`），空串 = 未设；见 `stable_key()`。
@@ -1176,12 +1249,12 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 「有输入语义」判据：纯布局容器与纯展示件用它实现 `wants_focus()`。
     /// 命中任一即认为该控件需要键盘可达：点击目标（含 `.clickable()` 修饰）、指针手势、
-    /// 上下文菜单、滚动视口、或认领方向键 / 激活键。
+    /// 上下文菜单、滚动视口、或认领方向键 / 激活键 / Tab 键。
     /// @return 上述任一输入语义命中时为 true；全部未命中为 false。
     [[nodiscard]] auto has_input_semantics() const -> bool {
         const Modifier &mod = modifier.get();
         return wants_click() || mod.has_gesture() || mod.has_context_menu() || wants_scroll() ||
-               wants_navigation_keys() || wants_activation_keys();
+               wants_navigation_keys() || wants_activation_keys() || wants_tab_keys();
     }
 
   private:

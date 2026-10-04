@@ -6,7 +6,7 @@
 //   * 旧版（未升到 `NOTIFYICON_VERSION_4`）：lParam **就是**鼠标消息本身（`WM_LBUTTONUP` / `WM_RBUTTONUP` …）；
 //   * 版本 4：lParam 是打包值，**低字**是事件（鼠标消息与 `NIN_*` 各发一条），**高字**是图标 `uID`。
 //
-// 版本 4 下真机一次左键实测连发四条回调（`build/manual-lib/tray4.err`，2026-09-28）：
+// 版本 4 下真机一次左键实测连发四条回调（`build/manual-lib/tray4.err`）：
 // `NIN_POPUPOPEN` → `WM_LBUTTONDOWN` → `WM_LBUTTONUP` → `NIN_SELECT`，右键则发
 // `WM_RBUTTONDOWN` → `WM_RBUTTONUP` → `WM_CONTEXTMENU`。因此只认鼠标消息会把激活判两遍、把菜单弹两遍
 // （`TrackPopupMenu` 带 `TPM_RETURNCMD` 会阻塞到菜单关闭，第二条随即再弹一次）；只认整值 `switch(lp)`

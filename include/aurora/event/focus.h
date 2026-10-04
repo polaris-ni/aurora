@@ -21,6 +21,8 @@ enum class FocusDirection : std::uint8_t { Forward, Backward, Up, Down, Left, Ri
 /// - 记录并切换焦点 widget（`set_focus` / `request_focus` / `clear`）。
 /// - 沿 Tab 序移动焦点（`move_focus`，基于 widget 树的 `focusable` + `tabIndex` 顺序遍历）。
 /// - 焦点变更时通知相关 widget（`on_focus_change(true/false)`），便于控件重绘聚焦态。
+/// - 记录焦点**到达方式**（`FocusArrival`：指针 / 键盘 / 程序化）并写入控件，供基类判定统一焦点环
+///   的显隐——指针点击不出环、键盘停点必出环（specification/05-event-navigation.md §4.4）。
 ///
 /// 键盘事件经 `EventDispatcher::dispatch(KeyEvent, FocusManager)` 派发到焦点 widget；
 /// Tab / Shift+Tab 由派发器识别并转交 `move_focus`。
@@ -43,12 +45,21 @@ class FocusManager {
 
     /// @brief 主动请求焦点（等价 set_focus，语义上由 widget 调用）。
     /// @param w 请求获得焦点的 widget（nullptr 时清除焦点）。
+    /// @note 目标已是当前焦点时**保留其到达方式**，不把已按 Pointer 获焦的控件改写成 Programmatic：
+    ///       指针派发中派发器先记 Pointer，控件随后在自己的 `on_pointer_event` 里调本入口，若覆盖
+    ///       就成了「点按钮无环、点 Spin 值区有环」。首次获焦按 `Programmatic`（环可见）。
     auto request_focus(Widget *w) -> void;
 
     /// @brief 设置焦点 widget（可为 nullptr 清除）；执行失焦/获焦通知。
     /// @param w widget
     /// @param reason 移动方向（用于扩展；当前仅影响 Tab 序定位，不强制方向性）。
-    auto set_focus(Widget *w, FocusDirection reason = FocusDirection::Forward) -> void;
+    /// @param arrival 焦点到达方式，随焦点一并写入控件并决定基类统一焦点环是否可见
+    ///                （见 `FocusArrival` 与 specification/05-event-navigation.md §4.4）。默认
+    ///                `Programmatic` = 按可见处理，故既有调用点（显式聚焦 / 作用域恢复）行为不变。
+    /// @note 新焦点与当前焦点同一控件时不重发 `on_focus_change`，但**仍更新到达方式**并按需标脏：
+    ///       键盘到达后紧接着鼠标点同一控件，环须按新模态消失，残留会成「点了却还有环」。
+    auto set_focus(Widget *w, FocusDirection reason = FocusDirection::Forward,
+                   FocusArrival arrival = FocusArrival::Programmatic) -> void;
 
     /// @brief 清除焦点（触发旧 widget 失焦通知）。
     auto clear() -> void;
@@ -61,6 +72,9 @@ class FocusManager {
     /// @param dir `Forward`/`Backward` 沿 Tab 序循环；`Up`/`Down`/`Left`/`Right` 按几何最近候选移动（无候选返回
     /// false）。
     /// @return 是否成功移动焦点（无候选时返回 false）。
+    /// @note 本入口只由键盘派发（Tab / Shift+Tab / 方向键）调用，故新焦点的到达方式恒记
+    ///       `FocusArrival::Keyboard`，基类随之画出可见焦点环；显式 `set_focus` / `request_focus`
+    ///       不在此列（默认 `Programmatic`）。
     auto move_focus(FocusDirection dir = FocusDirection::Forward) -> bool;
 
     /// @brief 压入焦点作用域（焦点陷阱）：此后 `move_focus` 的候选集限定在 `subtree` 子树内，

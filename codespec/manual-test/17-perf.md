@@ -262,6 +262,24 @@
 | 操作步骤 | 1. 以分离进程方式启动 `./build-inspector/demo_google_play.exe`，并将 stdout 重定向到文件（帧率摘要行经 `AURORA_LOG_RAW` 输出到 stdout，stderr 恒为空）（纯执行，无预期结果）<br>2. 静止观察不少于 10 s，间隔数秒两次采样该进程 CPU 时间并计算占单核百分比<br>3. 结束进程后读回输出文件，统计 `idle` 计数的逐秒增量<br>4. 统计输出中 `(stale)` 标记出现的秒数 |
 | 预期结果 | 2. 稳态 CPU 占比处于极低水平（实测参照值约 3.4% 占单核），远未接近忙轮询的 ~100%；若 CPU 长期顶满即 FAIL，说明 HUD 唤醒退化成忙轮询<br>3. `idle` 计数逐秒增量恒为 ~2（= 500 ms 叠加层刷新周期），不出现「一帧都不出」也不出现「逐秒大幅增加」；增量中偶发的 16 / 19 为轮播动画推进、不判 FAIL<br>4. 多数静止秒出现 `(stale)` 标记且 FPS 保持末值而非归零，说明停帧陈旧语义生效 |
 
+### 2.6 DPI 缩放单点真值源（Win32）
+
+#### TC-PERF-010 Win32 DPI 缩放五条判据在 ≠100% DPI 环境下成立
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-PERF-010 |
+| 测试目的 | 验证 Win32 宿主内 dp ↔ 物理像素的换算收敛为单一真值源后，帧 / 逻辑 / scale 三方在缩放显示器上逐位一致 |
+| 前置条件 | 探针 `aurora_verify_win32_dpi` 已构建（`cmake -S . -B build-verify -DAURORA_BACKEND_WIN32=ON -DAURORA_BUILD_VERIFY_TOOLS=ON`，再 `--target aurora_verify_win32_dpi`）；**本机显示器为 ≠100% DPI**（100% 环境下判据恒真，探针以退出码 3 记 SKIP） |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 记录系统显示缩放设置（Windows「显示 → 缩放与布局 → 缩放」），确认不是 100%（纯执行，无预期结果）<br>2. 运行 `build-verify/aurora_verify_win32_dpi.exe`（纯执行，无预期结果）<br>3. 记录 stdout 中的 `measured scale_factor (host)` 与 `measured scale (system DC, independent)` 两行<br>4. 记录其余 `[PASS]` / `[FAIL]` / `[SKIP]` 行<br>5. 记录进程退出码 |
+| 预期结果 | 3. 两个 `measured` 行**逐位相等**，且不等于 1.0（例：`1.500000` / `1.500000`）<br>4. 判据 (a) 客户区物理尺寸 == 逻辑 × scale；(b) 宿主逻辑尺寸 × scale == 客户区物理尺寸；(c) `MouseEvent.position` == 物理落点 ÷ scale；(d) `WM_GETMINMAXINFO` 的 min track == 逻辑 min × scale（与 `set_size` 同一换算）；另有「宿主 scale == 独立系统 DPI 读数」一条环境自证断言——**全部为 `[PASS]`，无 `[FAIL]`**<br>5. 退出码为 0 |
+
+> **不可省的环境自证**：本条必须以「宿主上报的 scale」与「探针独立读系统 DC 得到的 scale」**两者相等**
+> 为前提。只有宿主一个读数时，「真 100% DPI 环境」与「宿主把 scale 弄丢、掉回 1.0」无法区分——而后者
+> 恰是本修复前的缺陷形态。实测：删掉建窗后的 `refresh_scale()` 后，判据 (a)–(d) 仍会**自洽地**全绿
+> （三方都退化成 1.0），唯有这条自证断言转红、退出码 1。这正是该缺陷的隐蔽性所在。
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -274,3 +292,4 @@
 | TC-PERF-006 | 2026-09-25 | Qoder Agent | PASS | | idle 段输出 cpu 0.5%、render fps 0.3、wakeup/s 3.7 并自报 PASS 行；active 段 cpu 1.6%、fps 35.6 夹在 max_fps 60 之下 | | 与 `specification/08-tooling.md` §7.4.1 的无叠加层基线（0.5% / 0.3 fps / 4.3 wakes）同量级，唤醒次数由 4.3 降至 3.7 属负载波动 |
 | TC-PERF-007 | 2026-09-26 | Qoder Agent | PASS | | 步骤 2：`perf_gates.json` 共 14 项门槛，时间类 10 项（G-1 至 G-4 滚动、G-9 至 G-11 帧阶段、G-12 至 G-14 绘制场景）、计数类 4 项（G-5 layout_nodes 峰值阈 0、G-6 dl_records 峰值阈 6、G-7 整帧重绘帧数阈 0、G-8 dirty_rect_count 峰值阈 2），counted 为 true 的 11 项、false 的 3 项。步骤 4：`utest_scroll.cpp` 的 `scroll_regression_counter_gates` 逐项引用 G-5 至 G-8 四个 id，阈值经 `gate_threshold()` 从该 JSON 读取、代码内无复写；变异自证两轮——先把四项阈值分别压到 0 以下、2、0 以下、0，四条断言逐条报红（实测读数 0 对 -1、3 对 2、0 对 -1、1 对 0），再删掉 G-6 条目，用例以「gate G-6 is not declared in perf_gates.json」致命失败而非静默跳过。步骤 5：PROFILING 为 ON 的 `build-prof`（Release）打印四项峰值读数 layout_nodes_max 0、dl_records_max 3、full_redraw_frames 0、dirty_rect_count_max 1 并判 PASS；同一用例在 WSL Linux 构建（Debug，PROFILING 经 AUTO 取 ON）读数逐项相同（`counters_max` 整段 JSON 与 Windows 完全一致，含 pixels_filled 243900 与 scroll_buffer_bytes 720000），门槛不随机型与编译器漂移；PROFILING 为 OFF 的 `build`（Release）记 SKIPPED 且原因为「RenderCounters compiled out」，该构建下 `utest_scroll` 其余 20 条全通过。步骤 6：全仓检索 G-5 至 G-8 与 scroll_regression，四处复述（JSON 的 note、`check_perf_gates.ps1` 约定段、`bench_render.cpp` 注释与收尾输出、`itest_perf_display_list.cpp` 头部注释）均指向该用例与 JSON 登记处，与实物一致 | | 本行覆盖 2026-09-25 那次 FAIL（当时步骤 5：JSON 无 G-5 至 G-8 条目、测试无该段，四处散文空转，原文见提交 `7c4ddbb`）——本轮补齐实物后按修订过的六步重跑。两处口径变更须知悉门槛维护者——① G-8 取 `dirty_rect_count` 而非 `counters.h` 点名的 `dirty_area_ratio`，因为滚动帧的脏区本就覆盖整个视口、该比值逐帧恒为 1.0，任何阈值要么空转要么必红（理由同时记在 JSON 的 note）；② 阈值只登记在 JSON，测试按 id 读取且缺条目即失败，杜绝门槛被删空后断言空转。`check_perf_gates.ps1` 仍只解析时间类条目，新增四项对它是惰性数据，不改变该脚本判定 |
 | TC-PERF-008 | 2026-09-25 | Qoder Agent | PASS | | 以分离进程起 `build-inspector/demo_google_play.exe`（stdout 重定向，InspectorServer 在 127.0.0.1 端口 6280 起监听，stderr 恒为 2 行 INFO）。静止 20 秒内按 2 秒间隔采 10 次进程 CPU 时间：剔除含快照编码的 3 个窗口后，其余 7 窗占单核比依次为 3.09%、0.76%、0%、1.55%、0.77%、0%、1.55%，均值约 1.1%，含快照编码的窗最高 7.85%，远未接近忙轮询的约 100%。stdout 得 22 行 FPS 摘要：idle 相邻增量有 15 个恰为 2，其余 6 个为 7、14、16、13、25、26（轮播动画推进，按预期不判 FAIL）；22 行中 11 行带 (stale) 后缀，且这些行的 FPS 与上一行逐字相同（37.3512 连续三行、35.9163 连续三行、33.711 连续三行），FPS 未归零 | | 全程不依赖鼠标与前台（本机会话锁屏，`SendInput` 通道不可用），观测改由进程外 E2E 客户端取证：`tree` 读到 54 节点活树；`get 0/0/1` 读出 Scroll 的 offset 与 step；`text 0/0/0/2/1 aurora` 注入后 `get` 实读 value 为 aurora（真实状态变更）；`tap`、`scroll`、`snapshot` 端点均返回 ok。间隔 1.2 秒的两张 framebuffer 快照做像素差分：右上角 HUD 面板区（x 652 至 1092、y 8 至 158）变化 5929 像素，轮播以外的下半屏（y 285 至 760）变化恰 0 像素，即叠加层在按周期重绘而主内容未整树重绘，与 §7.4.1 的叠加层可见基线（stale 6/11、增量含 16 与 19）同形态。两项顺带观察：被 `tap` 的 FilterChip 在 descriptor 中 property_names 为空，其点击效果无法经 `get` 读出；`scroll 0/0/1 0 400` 返回 ok 但 offset 前后均 0.0——均属 E2E 输入通道的待查观察，不影响本用例判据 |
+| TC-PERF-010 | 2026-10-02 | Aurora Agent | PASS | | 步骤 1/3：本机为 150% 缩放（非 100%）。步骤 2/3：`measured scale_factor (host) = 1.500000`、`measured scale (system DC, independent) = 1.500000`，两者逐位相等。步骤 4：判据 (a) 客户区 1200×900 == 逻辑 800×600 × 1.5；(b) 宿主逻辑 800×600 × 1.5 == 客户区物理 1200×900；(c) 物理落点 (600,450) → 事件 position (400,300) == ÷1.5；(d) `WM_GETMINMAXINFO` min track 300 == 逻辑 min 200 × 1.5，与 `set_size` 同一换算；环境自证断言 PASS。步骤 5：退出码 0 | | **这是任务书要求的「≠100% DPI 环境真验收」**，非 CI 空转。变异自证：删掉 `win32_host.cpp` 建窗后的 `refresh_scale()`（回到「构造期 `hwnd==nullptr` ⇒ `GetDeviceCaps` 回 96 ⇒ scale 恒 1.0」的原始缺陷形态）后重编重跑，判据 (a)–(d) **仍自洽地全 PASS**（三方都退化成 1.0），唯有环境自证断言转红（host=1.000000 vs system=1.500000）、退出码 1 —— 该缺陷的隐蔽性正在于此。判据 (c) 曾一度报 `-6666.67`：原因是探针取末条鼠标记录，而注入的 `WM_MOUSEMOVE` 触发 `TrackMouseEvent(TME_LEAVE)` 后系统补发 `WM_MOUSELEAVE`，宿主把它合成为 `(-10000,-10000)` 的离开 Move（`-10000/1.5 = -6666.67`）；改取首条（注入的那次）后通过，非库缺陷。判据 (e) 以「a11y 桥与宿主同源」间接验证，UIA provider 树的实际投影矩形由 `tools/verify/win32_ua_live_probe.cpp` 那一层覆盖 |

@@ -54,7 +54,7 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 | 字段 | 说明 |
 |:---|:---|
 | `size` | 当前窗口 / 子树可用逻辑尺寸（dp） |
-| `scale_factor` | 设备像素比（由 `Window::present_root` 从 `Surface::scale_factor()` 注入到 `BuildContext::scale_factor`，是本地坐标缩放的**唯一权威来源**） |
+| `scale_factor` | 设备像素比（`dpi / 96`；由 `Window::present_root` 从 `Surface::scale_factor()` 注入到 `BuildContext::scale_factor`，是本地坐标缩放的**唯一权威来源**）。**Win32 已收敛为单点真值源**：宿主内 `Impl::scale` 一个成员经 `to_physical` / `to_logical` 两个换算函数供给全部坐标面（见 `03-layout-render.md` 的 DPI 感知条与 `08-tooling.md` §8.2）；**X11 / Wayland / GLFW 的缩放变化上报仍未实现**（`Surface::set_scale_change_handler` 未被它们 override），跨屏或改系统缩放时该值不会自动更新 |
 | `text_scale_factor` | 系统字体缩放（辅助功能） |
 | `orientation` | 由 `size`（非 Win32）/ `screen_size`（Win32）派生：宽 ≥ 高判为 `Landscape`，正方形归入 `Landscape`。枚举 `ScreenOrientation{Portrait, Landscape}`，与 `divider.h` 的 `Orientation` 语义不同，**不复用** |
 | `screen_size` | 物理屏幕的逻辑尺寸（dp） |
@@ -160,6 +160,14 @@ auto root = au::MediaQueryProvider{
 | `Theme::token_or<T>(name, fallback)` | 强转目标类型，缺失或类型不匹配时回退 |
 
 令牌随 `ThemeProvider` 注入整体传递，后代经 `environment<Theme>()` 读到的 `Theme` 即含令牌表。
+
+**内置主题登记的令牌**（`Theme::light()` / `Theme::dark()` 各自 `set_token`，`Theme::with_defaults()` 与裸 `Theme{}` 不登记任何令牌）：
+
+| 令牌名 | 浅色 | 深色 | 消费方 | 未登记时的回退 |
+|:---|:---|:---|:---|:---|
+| `focus.ring` | 纯黑 | 纯白 | `Widget::paint_content` 的统一焦点环（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4） | `primary` |
+
+回退语义是刻意的：环色改由令牌驱动后，未登记该令牌的自定义主题仍画 `primary`，行为与改动前逐位一致，不构成未经请求的视觉变更。
 
 ### 5.2 StyleProps
 

@@ -1,6 +1,8 @@
 #include "aurora/window/win32_host.h"
 
+#include "aurora/window/detail/win32_dpi.h"
 #include "aurora/window/detail/win32_ime.h"
+#include "aurora/window/detail/win32_keymap.h"
 #include "aurora/window/detail/win32_modifiers.h"
 #include "aurora/window/detail/win32_ua.h"
 
@@ -57,82 +59,13 @@ namespace aurora {
     if (is_async_key_down(VK_LWIN) || is_async_key_down(VK_RWIN)) {
         m = m | ModifierKey::Meta;
     }
+    // NumLock 是切换键、不是瞬时按住态，故读它的**锁定指示**（toggle 位，bit 0）而不是
+    // 「是否按住」。它是键盘上唯一的 NumLock 键，不存在左右之分，故无需归并。
+    // 读不到（低版本 Windows 的兼容路径）时按「关」处理——不静默假报「开」。
+    if ((static_cast<std::uint8_t>(GetKeyState(VK_NUMLOCK)) & 0x01U) != 0U) {
+        m = m | ModifierKey::NumLock;
+    }
     return m;
-}
-
-[[nodiscard]] static auto from_win32_vk(int vk) -> KeyCode {
-    if (vk >= 'A' && vk <= 'Z') {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::A) + (vk - 'A'));
-    }
-    if (vk >= '0' && vk <= '9') {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::D0) + (vk - '0'));
-    }
-    switch (vk) {
-        case VK_RETURN:
-            return KeyCode::Enter;
-        case VK_ESCAPE:
-            return KeyCode::Escape;
-        case VK_TAB:
-            return KeyCode::Tab;
-        case VK_BACK:
-            return KeyCode::Backspace;
-        case VK_DELETE:
-            return KeyCode::Delete;
-        case VK_SPACE:
-            return KeyCode::Space;
-        case VK_LEFT:
-            return KeyCode::ArrowLeft;
-        case VK_RIGHT:
-            return KeyCode::ArrowRight;
-        case VK_UP:
-            return KeyCode::ArrowUp;
-        case VK_DOWN:
-            return KeyCode::ArrowDown;
-        case VK_SHIFT:
-            return KeyCode::Shift;
-        case VK_CONTROL:
-            return KeyCode::Control;
-        case VK_MENU:
-            return KeyCode::Alt;
-        case VK_LWIN:
-        case VK_RWIN:
-            return KeyCode::Meta;
-        case VK_HOME:
-            return KeyCode::Home;
-        case VK_END:
-            return KeyCode::End;
-        case VK_PRIOR:
-            return KeyCode::PageUp;
-        case VK_NEXT:
-            return KeyCode::PageDown;
-        case VK_OEM_MINUS:
-            return KeyCode::Minus;
-        case VK_OEM_PLUS:
-            return KeyCode::Equal;
-        case VK_OEM_1:
-            return KeyCode::Semicolon;
-        case VK_OEM_7:
-            return KeyCode::Quote;
-        case VK_OEM_COMMA:
-            return KeyCode::Comma;
-        case VK_OEM_PERIOD:
-            return KeyCode::Period;
-        case VK_OEM_2:
-            return KeyCode::Slash;
-        case VK_OEM_3:
-            return KeyCode::Backquote;
-        case VK_OEM_4:
-            return KeyCode::LeftBracket;
-        case VK_OEM_6:
-            return KeyCode::RightBracket;
-        case VK_OEM_5:
-            return KeyCode::Backslash;
-        default:
-            if (vk >= VK_F1 && vk <= VK_F12) {
-                return static_cast<KeyCode>(static_cast<int>(KeyCode::F1) + (vk - VK_F1));
-            }
-            return KeyCode::Unknown;
-    }
 }
 
 [[nodiscard]] static auto utf8_to_acp(const std::string &utf8) -> std::string {
@@ -173,7 +106,11 @@ struct Win32Host::Impl {
     HWND hwnd = nullptr;
     HINSTANCE hinst = nullptr;
     Size size{.width = 0.0F, .height = 0.0F};
-    float scale = 1.0F;  ///< device pixel ratio（dp → 物理像素）
+    /// device pixel ratio（dp ↔ 物理像素）。**本成员是宿主内 dp↔物理换算的唯一真值源**：
+    /// 句柄就绪后由 `refresh_scale()` 按 `GetDpiForWindow(hwnd)` 求得（`WM_DPICHANGED` 与跨屏
+    /// 迁移时更新），其余一律读它——不得再调任何「现调 DPI」的函数，否则逻辑尺寸与上报给
+    /// 消费方的 `scale` 会各走一条路径而发散（历史缺口见 `specification/08-tooling.md` §8.2）。
+    float scale = 1.0F;
     WindowStyleOptions style{};  ///< 高级样式（置顶/无边框/尺寸限制）。
     bool should_close = false;
     EventHandler handler;
@@ -217,7 +154,9 @@ struct Win32Host::Impl {
     // 事件翻译（输入分族内部调用）
     auto on_mouse(MouseAction action, MouseButton button, int x, int y) const -> void;
     auto on_wheel(int delta, int x, int y) const -> void;
-    auto on_key(KeyAction action, int vk) const -> void;
+    /// @brief 翻译一条键盘消息并派发；`WM_SYSKEY*` 依此判定是否回落 `DefWindowProcA`。
+    /// @return 该 `KeyEvent` 是否被消费（`is_handled`）；无 handler 时恒 false（不消费）。
+    [[nodiscard]] auto on_key(KeyAction action, int vk, LPARAM lp) const -> bool;
     auto on_char(std::uint32_t ch) const -> void;
 
     /// @brief 由最小化/激活标志重算可见性状态，仅实际改变时上报（避免重复通知）。
@@ -227,7 +166,7 @@ struct Win32Host::Impl {
     static auto handle_create() -> LRESULT;
     auto handle_mouse(HWND hwnd_in, UINT msg, LPARAM lp) -> LRESULT;
     auto handle_wheel(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> LRESULT;
-    [[nodiscard]] auto handle_key(UINT msg, WPARAM wp) -> LRESULT;
+    [[nodiscard]] auto handle_key(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT;
     [[nodiscard]] auto handle_syskey(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT;
     [[nodiscard]] auto handle_char(WPARAM wp) const -> LRESULT;
     auto handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT;
@@ -250,7 +189,14 @@ struct Win32Host::Impl {
     auto handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT;
 
     auto register_class() const -> void;
-    [[nodiscard]] auto dpi_scale() const -> float;
+    /// @brief 重算 `scale`（宿主内**唯一**读 DPI 处），并返回本次读到的缩放因子。
+    /// @param desired 建窗期的期望落位矩形（主显示器工作区）；句柄已就绪时传 nullptr 走按窗口那一级。
+    /// @return 本次求得的缩放因子（供建窗期与建窗后的纠正逻辑比较）。
+    auto refresh_scale(const RECT *desired = nullptr) -> float;
+    /// @brief 物理像素 → 逻辑 dp。宿主内唯一的「除 scale」入口。
+    [[nodiscard]] auto to_logical(int px, int py) const -> Point;
+    /// @brief 逻辑 dp → 物理像素。宿主内唯一的「乘 scale」入口。
+    [[nodiscard]] auto to_physical(Size dp) const -> Size;
 
     // 窗口过程：仅在最早时机（WM_NCCREATE/WM_CREATE）把 Impl* 存入 GWLP_USERDATA，
     // 随后按消息族分发到对应 handle_* 处理函数（创建/输入/尺寸/绘制/关闭 等）。
@@ -260,17 +206,22 @@ struct Win32Host::Impl {
 // ---- Impl 构造：窗口创建 + DPI 适配 + 类注册 + 显示 ----
 Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style,
                       WindowVisibility visibility)
-    : scale(dpi_scale()),  // 创建时主显示器 DPI
-      style(style) {
+    : style(style) {
+    // DPI 感知必须早于**任何**窗口创建：`create_window` 路径已由 `make_window` 前移启用；
+    // 直接构造 `Win32Host` 的消费者（不经工厂）由这处兜底。函数幂等（进程级 static 守卫），
+    // 两条路径都过不会重复设置。建窗尺寸的换算基准（`scale`）在建窗前由 `refresh_scale(&wa)`
+    // 按「落位显示器」求得，建窗后再按窗口真实值刷新一次——两处都走同一个 `refresh_scale()`。
     enable_dpi_awareness();
 
     // 适配工作区，保证窗口在屏幕内可见（逻辑 dp）。
     RECT wa{};
+    bool have_work_area = false;
     if (SystemParametersInfoA(SPI_GETWORKAREA, 0, &wa, 0) != 0) {
         const int max_w = wa.right - wa.left;
         const int max_h = wa.bottom - wa.top;
         w = std::min(w, max_w);
         h = std::min(h, max_h);
+        have_work_area = true;
     }
     if (w <= 0) {
         w = 320;
@@ -292,11 +243,19 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
     }
     const DWORD ex_style = (style.always_on_top ? WS_EX_TOPMOST : 0U) | (style.transparent ? WS_EX_LAYERED : 0U);
 
+    // 建窗期：**句柄尚未创建**，故不能按窗口取 DPI（此时 `GetDpiForWindow(nullptr)` 恒回 0，
+    // 旧代码把它当成有效读数 ⇒ scale 恒 1.0 ⇒ 请求 dp 被原样当物理像素消费）。改按「窗口即将
+    // 落位的显示器」取：落位信息此刻只有主显示器工作区 `wa`（`CreateWindowEx` 传 `CW_USEDEFAULT`，
+    // 系统就在该工作区内层叠放置）。建窗成功后还会再取一次按窗口的真实值并按需纠正尺寸。
+    const float creation_scale = refresh_scale(have_work_area ? &wa : nullptr);
+
     // DPI 感知下窗口坐标即物理像素：物理窗口尺寸 = 逻辑 dp × scale。
+    const Size logical_size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
+    const Size physical_size = to_physical(logical_size);
     RECT rect{.left = 0,
               .top = 0,
-              .right = static_cast<int>(std::lround(static_cast<float>(w) * scale)),
-              .bottom = static_cast<int>(std::lround(static_cast<float>(h) * scale))};
+              .right = static_cast<int>(std::lround(physical_size.width)),
+              .bottom = static_cast<int>(std::lround(physical_size.height))};
     AdjustWindowRect(&rect, win_style, FALSE);
     const int win_w = rect.right - rect.left;
     const int win_h = rect.bottom - rect.top;
@@ -308,6 +267,22 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
                            win_w, win_h, nullptr, nullptr, hinst, this);
 
     if (hwnd != nullptr) {
+        // 句柄就绪：换成**按窗口**的真实 DPI（跨显示器时与所在屏一致），此后 `scale` 全程只读
+        // 这一个成员。这是「帧 / 逻辑 / scale 三方同源」的起点。
+        refresh_scale();
+        // 建窗期的落位屏只是**最佳猜测**（`CW_USEDEFAULT` 下系统也可能把窗口放到另一块屏）。
+        // 若真实 DPI 与建窗期不同，客户区逻辑尺寸会偏离请求的 dp，故按真实 scale **重设一次尺寸**。
+        // 这一步发生在 `ShowWindow` 之前、窗口尚未进入用户视野，因此不存在「首帧与第二帧不一致」
+        // 的观感——它修正的是尚未被看见的那一帧。代价是一次 `SetWindowPos`（附带一条 WM_SIZE）。
+        if (scale != creation_scale) {
+            RECT fix{.left = 0,
+                     .top = 0,
+                     .right = static_cast<int>(std::lround(to_physical(logical_size).width)),
+                     .bottom = static_cast<int>(std::lround(to_physical(logical_size).height))};
+            AdjustWindowRect(&fix, win_style, FALSE);
+            SetWindowPos(hwnd, nullptr, 0, 0, fix.right - fix.left, fix.bottom - fix.top,
+                         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
         if (style.always_on_top) {
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         }
@@ -379,7 +354,12 @@ auto Win32Host::Impl::on_mouse(MouseAction action, MouseButton button, int x, in
     MouseEvent e;
     e.action = action;
     e.button = button;
-    e.position = Point{.x = static_cast<float>(x) / scale, .y = static_cast<float>(y) / scale};
+    e.position = to_logical(x, y);
+    // 修饰态取自 `ModifierKeyTracker`——与 `KeyEvent` 同一份队列相对状态（同一个 `get()`）。
+    // 不读鼠标消息 `wParam` 的 `MK_LBUTTON` 一类位：按 Win32 约定那几位不携带 Alt，走它就得
+    // 为 Alt 另接一个来源，同一字段两个真值源不可取。tracker 的生命周期策略（失激活清空、
+    // 重激活播种一次异步读数、指针捕获变化**不**清空）保证 Shift+拖选跨出窗口仍保住 Shift。
+    e.modifiers = mods.get();
     handler(e);
 }
 
@@ -388,20 +368,25 @@ auto Win32Host::Impl::on_wheel(int delta, int x, int y) const -> void {
         return;
     }
     ScrollEvent e;
-    e.position = Point{.x = static_cast<float>(x) / scale, .y = static_cast<float>(y) / scale};
+    e.position = to_logical(x, y);
     e.delta_y = static_cast<float>(delta) / static_cast<float>(WHEEL_DELTA);
+    e.modifiers = mods.get();  // 真值源同 `on_mouse` / `on_key`：一份 tracker，队列相对。
     handler(e);
 }
 
-auto Win32Host::Impl::on_key(KeyAction action, int vk) const -> void {
+[[nodiscard]] auto Win32Host::Impl::on_key(KeyAction action, int vk, LPARAM lp) const -> bool {
     if (!handler) {
-        return;
+        return false;
     }
     KeyEvent e;
     e.action = action;
-    e.key = static_cast<int>(from_win32_vk(vk));
+    // 导航区在 Win32 上与小键盘共用 VK，来处只在 lParam 的扫描码里，且六个键里只有 Home
+    // 真的可分（详见 `is_numpad_nav_scan` 的实测对照表），故映射带这个判据。
+    const bool from_numpad = detail::is_numpad_nav_scan(vk, detail::scan_code_of(lp));
+    e.key = static_cast<int>(detail::from_win32_vk(vk, from_numpad));
     e.modifiers = mods.get();
     handler(e);
+    return e.is_handled;
 }
 
 auto Win32Host::Impl::on_char(std::uint32_t ch) const -> void {
@@ -476,22 +461,32 @@ auto Win32Host::Impl::handle_wheel(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> 
     return 0;
 }
 
-auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp) -> LRESULT {
+auto Win32Host::Impl::handle_key(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
     const auto action = (msg == WM_KEYUP) ? KeyAction::Up : KeyAction::Down;
     // 先推进修饰态再派发：本条消息若正是修饰键自身，它应当计入本事件的 `modifiers`
     // （Windows 的常规语义是「Ctrl 按下的那条 KeyEvent 就带 Control」，热键匹配依赖它）。
     mods.apply(static_cast<int>(wp), action == KeyAction::Down);
-    on_key(action, static_cast<int>(wp));
+    // 常规键恒由 Aurora 消费：派发结果在此无关紧要（不走 DefWindowProcA），故显式弃置。
+    (void)on_key(action, static_cast<int>(wp), lp);
     return 0;
 }
 
-// `WM_SYSKEY*` = 按住 Alt 期间的按键（Alt 自身也算）。这里只借它推进修饰态，按键本身仍交
-// `DefWindowProcA`：`Alt+F4` 关闭、`Alt+Tab` 切换与菜单助记键都由系统实现，在此吞掉即掐死系统
-// 热键。代价是 Alt 组合在 Aurora 侧依旧不派发（既有边界，见
-// `specification/05-event-navigation.md` §2.2），但 Alt 的按下/抬起不再
-// 变成跟踪器里的幻影位——不推进它，`Alt` 之后的普通按键会一直错报带 Alt。
+// `WM_SYSKEY*` = 按住 Alt 期间的按键（Alt 自身也算）。与常规键**同路进派发链**：
+// 先推进修饰态（与 `handle_key` 同口径，故「按下 Alt 的那条 KeyEvent 自身就带 Alt 位」），
+// 再经同一个 `on_key` 通道产出 `KeyEvent`；被消费则 `return 0`（Aurora 侧认领），
+// 未消费则原样回落 `DefWindowProcA`——`Alt+F4` 关闭、`Alt+Tab` 切换与菜单助记键都由系统
+// 实现，只有在「无人认领」时才发生，不会被无条件掐死。
+//
+// 例外（`VK_MENU` 左右与 `VK_F10`）：只推进修饰态、不派发。它们分别是修饰键与系统菜单键，
+// 发出的键码无语义且会污染紧随其后的快捷键匹配（见 `detail::syskey_dispatches`）。
+// 文本通道不受影响：Alt 系本就不产 `TextInputEvent`（Windows 不为 Alt 组合发 `WM_CHAR`），
+// 故不存在同一字符两条通道重复上屏。
 auto Win32Host::Impl::handle_syskey(UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
-    mods.apply(static_cast<int>(wp), msg != WM_SYSKEYUP);
+    const int vk = static_cast<int>(wp);
+    mods.apply(vk, msg != WM_SYSKEYUP);
+    if (detail::syskey_dispatches(vk) && on_key(msg == WM_SYSKEYUP ? KeyAction::Up : KeyAction::Down, vk, lp)) {
+        return 0;
+    }
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
@@ -511,8 +506,10 @@ auto Win32Host::Impl::handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT
     const int pw = static_cast<int>(LOWORD(lp));
     const int ph = static_cast<int>(HIWORD(lp));
     if (pw > 0 && ph > 0) {
-        const float sc = dpi_scale();
-        size = Size{.width = static_cast<float>(pw) / sc, .height = static_cast<float>(ph) / sc};
+        // 读缓存的 `scale`（不现调 DPI）：这是「帧 / 逻辑 / scale 三方同源」的关键一处。
+        // 现调 DPI 会与上报给消费方的 `scale` 各走一条路径，在 ≠100% DPI 显示器上发散。
+        const Point logical = to_logical(pw, ph);
+        size = Size{.width = logical.x, .height = logical.y};
     }
     // 几何态变化（最小化/最大化/还原）上报，仅模式实际改变时通知。
     const WindowMode want = classify_size_mode(wp);
@@ -570,15 +567,17 @@ auto Win32Host::Impl::handle_activate(WPARAM wp) -> LRESULT {
 }
 
 // ---- DPI 变化分族（WM_DPICHANGED）----
-auto Win32Host::Impl::handle_dpi_changed(HWND hwnd, WPARAM wp, LPARAM lp) -> LRESULT {
+auto Win32Host::Impl::handle_dpi_changed(HWND hwnd, [[maybe_unused]] WPARAM wp, LPARAM lp) -> LRESULT {
     const auto *pr = reinterpret_cast<RECT *>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
     SetWindowPos(hwnd, nullptr, pr->left, pr->top, pr->right - pr->left, pr->bottom - pr->top,
                  SWP_NOZORDER | SWP_NOACTIVATE);
-    // wParam 的 HIWORD 为系统建议的新 Y 轴 DPI：更新逻辑缩放并上报表层，
-    // 由 `Window` 强制全量重排重绘（否则 logical↔physical 换算失配会内容错位/发虚）。
-    const int dpi_y = static_cast<int>(HIWORD(wp));
-    if (dpi_y > 0) {
-        scale = static_cast<float>(dpi_y) / 96.0F;
+    // 缩放更新与上报表层：由 `Window` 强制全量重排重绘（否则 logical↔physical 换算失配会内容
+    // 错位 / 发虚）。取值走 `refresh_scale()`（`GetDpiForWindow`）而非 `wParam` 的 HIWORD——
+    // 两者在正常路径上同值，但前者是**按窗口**的权威读数，与构造期、跨屏迁移共用同一条路径，
+    // 不会因某次消息的 wParam 异常而与其它换算点脱钩。
+    const float before = scale;
+    refresh_scale();
+    if (scale != before) {
         notify_scale_changed();
     }
     return 0;
@@ -592,21 +591,23 @@ auto Win32Host::Impl::notify_scale_changed() const -> void {
 
 // ---- 尺寸限制分族（WM_GETMINMAXINFO）----
 auto Win32Host::Impl::handle_getminmaxinfo(LPARAM lp) const -> LRESULT {
-    // 尺寸限制：逻辑 dp × scale → 物理像素（含非客户区补偿）。
+    // 尺寸限制：逻辑 dp → 物理像素。与 `set_size` 走**同一个** `to_physical`，否则 150% 屏上
+    // 「按 1.5 放大上报 → OS 最大化到物理 3840 → WM_SIZE 再除回 1.5」会产生往返漂移。
     auto *mmi = reinterpret_cast<MINMAXINFO *>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
-    const float sc = dpi_scale();
     const WindowStyleOptions &st = style;
+    const Size min_px = to_physical(st.min_size);
+    const Size max_px = to_physical(st.max_size);
     if (st.min_size.width > 0.0F) {
-        mmi->ptMinTrackSize.x = static_cast<LONG>(std::lround(st.min_size.width * sc));
+        mmi->ptMinTrackSize.x = static_cast<LONG>(std::lround(min_px.width));
     }
     if (st.min_size.height > 0.0F) {
-        mmi->ptMinTrackSize.y = static_cast<LONG>(std::lround(st.min_size.height * sc));
+        mmi->ptMinTrackSize.y = static_cast<LONG>(std::lround(min_px.height));
     }
     if (st.max_size.width > 0.0F) {
-        mmi->ptMaxTrackSize.x = static_cast<LONG>(std::lround(st.max_size.width * sc));
+        mmi->ptMaxTrackSize.x = static_cast<LONG>(std::lround(max_px.width));
     }
     if (st.max_size.height > 0.0F) {
-        mmi->ptMaxTrackSize.y = static_cast<LONG>(std::lround(st.max_size.height * sc));
+        mmi->ptMaxTrackSize.y = static_cast<LONG>(std::lround(max_px.height));
     }
     return 0;
 }
@@ -715,7 +716,7 @@ auto Win32Host::Impl::handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT
     ScreenToClient(hwnd_in, &pt);  // 屏幕坐标 → 客户区坐标
     DragFinish(hdrop);
     FileDropEvent fde;
-    fde.position = Point{.x = static_cast<float>(pt.x) / scale, .y = static_cast<float>(pt.y) / scale};
+    fde.position = to_logical(pt.x, pt.y);
     fde.paths = std::move(paths);
     if (handler) {
         handler(fde);
@@ -743,14 +744,32 @@ auto Win32Host::Impl::register_class() const -> void {
     }
 }
 
-auto Win32Host::Impl::dpi_scale() const -> float {
-    int dpi = 96;
-    const HDC dc = (hwnd != nullptr) ? GetDC(hwnd) : GetDC(nullptr);
-    if (dc != nullptr) {
-        dpi = GetDeviceCaps(dc, LOGPIXELSY);
-        ReleaseDC(hwnd, dc);
-    }
-    return dpi > 0 ? static_cast<float>(dpi) / 96.0F : 1.0F;
+// ---- DPI：唯一真值源与两处换算 ----
+//
+// `refresh_scale()` 是宿主内**唯一**读 DPI 的地方，取值实现在可单测的内部头
+// `detail/win32_dpi.h`（`read_dpi`）。降级链为：
+//   `GetDpiForWindow(hwnd)` → `GetDpiForMonitor(落位显示器)` → `GetDpiForSystem` →
+//   `GetDeviceCaps(LOGPIXELSY)` → 96（= 1.0）。
+//
+// **判据是「取到 > 0 才算成功」，不是「函数指针非空」**：此前降级挂在 `else if`（函数指针为空）
+// 上，而 Win10+ 的 `GetDpiForWindow` 恒已导出 ⇒ `GetDpiForSystem` 那一支**结构上不可达**；
+// 更糟的是建窗期 `hwnd == nullptr` 时 `GetDpiForWindow(nullptr)` 返回 0，0 被当成有效读数落到
+// `dpi > 0 ? dpi/96 : 1.0` ⇒ scale 恒 1.0 ⇒ 请求的逻辑 dp 被原样当物理像素消费（≠100% DPI 上
+// 窗口偏小）。现在任一级取到 0 即继续往下一级，且建窗期多出「按落位显示器」这一级。
+auto Win32Host::Impl::refresh_scale(const RECT *desired) -> float {
+    const detail::DpiReading reading = detail::read_dpi(hwnd, desired, detail::resolve_dpi_api());
+    scale = detail::dpi_to_scale(reading.dpi);
+    return scale;
+}
+
+// dp ↔ 物理像素的**唯一**两个换算点。宿主内任何地方都不得再裸写 `* scale` / `/ scale`——
+// 那样等于把换算复制到各处，某一处漏改就重现 §8.2 那种「帧 / 逻辑 / scale 三方记账发散」。
+auto Win32Host::Impl::to_logical(int px, int py) const -> Point {
+    return Point{.x = static_cast<float>(px) / scale, .y = static_cast<float>(py) / scale};
+}
+
+auto Win32Host::Impl::to_physical(Size dp) const -> Size {
+    return Size{.width = dp.width * scale, .height = dp.height * scale};
 }
 
 // ---- 窗口过程：仅在最早时机（WM_NCCREATE/WM_CREATE）把 Impl* 存入 GWLP_USERDATA，
@@ -784,7 +803,7 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return self->handle_wheel(hwnd, wp, lp);
         case WM_KEYDOWN:
         case WM_KEYUP:
-            return self->handle_key(msg, wp);
+            return self->handle_key(msg, wp, lp);
         case WM_SYSKEYDOWN:
         case WM_SYSKEYUP:
             return self->handle_syskey(msg, wp, lp);
@@ -971,8 +990,8 @@ auto Win32Host::set_size(Size s) const -> void {
     const auto ex_style = static_cast<DWORD>(GetWindowLongPtrA(pimpl_->hwnd, GWL_EXSTYLE));
     RECT rect{.left = 0,
               .top = 0,
-              .right = static_cast<int>(std::lround(s.width * pimpl_->scale)),
-              .bottom = static_cast<int>(std::lround(s.height * pimpl_->scale))};
+              .right = static_cast<int>(std::lround(pimpl_->to_physical(s).width)),
+              .bottom = static_cast<int>(std::lround(pimpl_->to_physical(s).height))};
     AdjustWindowRectEx(&rect, win_style, GetMenu(pimpl_->hwnd) != nullptr ? TRUE : FALSE, ex_style);
     SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);

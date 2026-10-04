@@ -85,12 +85,27 @@ auto FocusManager::focused() const -> Widget * { return live_focused(); }
 
 auto FocusManager::has_focus(const Widget *w) const -> bool { return w != nullptr && w == live_focused(); }
 
-auto FocusManager::request_focus(Widget *w) -> void { set_focus(w, FocusDirection::Forward); }
+auto FocusManager::request_focus(Widget *w) -> void {
+    // 控件自主请求焦点**不改变**本次焦点的到达方式：指针按下的派发里，派发器已先把 Pointer 记到被点
+    // 控件（EventDispatcher::dispatch_mouse），控件随后在自己的 on_pointer_event 里再调本入口
+    // （TextInput / Spin 值区 / Text 选区等自带焦点语义的控件都这么做）。若此处恒按 Programmatic
+    // 覆盖，同一次点击就会因「谁先改焦点」给出不同观感——点按钮无环、点 Spin 值区有环。
+    // 已是当前焦点即沿用其到达方式；首次获焦仍按保守可见处理。
+    const FocusArrival keep = (w != nullptr && w == live_focused()) ? w->focus_arrival() : FocusArrival::Programmatic;
+    set_focus(w, FocusDirection::Forward, keep);
+}
 
-auto FocusManager::set_focus(Widget *w, FocusDirection /*reason*/) -> void {
+auto FocusManager::set_focus(Widget *w, FocusDirection /*reason*/, FocusArrival arrival) -> void {
     // 与已回收的旧焦点比较须用存活视图，否则「新焦点恰好复用了同一地址」会被误判为无变化。
     Widget *old = live_focused();
     if (w == old) {
+        // 同一控件再次获焦：不重发 on_focus_change，但**到达方式仍须更新**并按需标脏。
+        // 键盘到达（有环）后紧接着鼠标点同一控件，若在此处直接 return 就会留下「点了却还有环」
+        // 的残影；反向（指针到达后按方向键移开再回来）同理，环的显隐必须跟最后一次到达方式一致。
+        if (w != nullptr && w->focus_arrival() != arrival) {
+            w->set_focus_arrival(arrival);
+            w->mark_needs_paint();  // 环显隐变化须进下一帧重绘（含把上一帧环像素擦净）
+        }
         return;
     }
     focused_ = w;
@@ -101,6 +116,8 @@ auto FocusManager::set_focus(Widget *w, FocusDirection /*reason*/) -> void {
         old->on_focus_change(false);
     }
     if (w != nullptr) {
+        // 先写到达方式再回调：控件的 on_focus_change 覆写里若读 focus_arrival()，须看到本次的值。
+        w->set_focus_arrival(arrival);
         w->on_focus_change(true);
     }
     if (on_change_) {
@@ -162,20 +179,23 @@ auto FocusManager::move_focus(FocusDirection dir) -> bool {
     if (dir == FocusDirection::Forward || dir == FocusDirection::Backward) {
         const bool backward = (dir == FocusDirection::Backward);
         if (cur_focus == nullptr) {
-            set_focus(candidates.front(), dir);
+            set_focus(candidates.front(), dir, FocusArrival::Keyboard);
             return true;
         }
         const auto it = std::ranges::find(candidates, cur_focus);
         const size_t idx = it == candidates.end() ? 0 : static_cast<size_t>(it - candidates.begin());
         const size_t n = candidates.size();
         const size_t next = backward ? (idx + n - 1) % n : (idx + 1) % n;
-        set_focus(candidates[next], dir);  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
+        // move_focus 只由键盘（Tab / Shift+Tab / 方向键）驱动，故到达方式恒记 Keyboard——基类据此
+        // 画出可见焦点环（见 Widget::focus_ring_shown）。
+        // NOLINTNEXTLINE(*-pro-bounds-avoid-unchecked-container-access) 下标经上方取模必在界内
+        set_focus(candidates[next], dir, FocusArrival::Keyboard);
         return true;
     }
 
     // 方向键导航（Up/Down/Left/Right）：按几何位置找最近候选
     if (cur_focus == nullptr) {
-        set_focus(candidates.front(), dir);
+        set_focus(candidates.front(), dir, FocusArrival::Keyboard);
         return true;
     }
 
@@ -237,7 +257,7 @@ auto FocusManager::move_focus(FocusDirection dir) -> bool {
     }
 
     if (best != nullptr) {
-        set_focus(best, dir);
+        set_focus(best, dir, FocusArrival::Keyboard);
         return true;
     }
     return false;

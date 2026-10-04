@@ -218,12 +218,12 @@ class Scroll : public Container, public ScrollProps {
     /// 的上溯式传播没有快照，动态新建的子树天然被覆盖。
     ///
     /// 后代的 `request_frame` 上溯到 `Window` 汇聚点（`on_subtree_dirty`）时，标记的是**起源控件**
-    /// 自身的 `paint_bounds()`——而离屏缓冲内的后代处于**内容坐标系**，其 `paint_bounds()` 不等于
+    /// 自身的 `dirty_bounds()`——而离屏缓冲内的后代处于**内容坐标系**，其 `dirty_bounds()` 不等于
     /// Scroll **视口的屏幕坐标**，不会覆盖视口区域 → `present_root` 的增量裁剪把视口排除在外 →
     /// 视口永不重绘（白屏 / 内容冻结）。故此处显式 `mark_needs_paint()`：它经布局父链上溯到 sink 时
     /// 标记的是 **Scroll 自身的视口（窗口坐标）**，保证离屏缓冲重录后合成到屏幕的视口被真正重绘。
     ///
-    /// @param origin 触发标脏的后代控件（不含 Scroll 自身）；绘制脏时以它的 `paint_bounds()` 并入脏带。
+    /// @param origin 触发标脏的后代控件（不含 Scroll 自身）；绘制脏时以它的 `dirty_bounds()` 并入脏带。
     /// @param layout true = 后代布局脏（尺寸/结构可能变，整块重录）；false = 仅绘制脏（局部重录）。
     ///
     /// @note 只响应**后代**：Scroll 自身 `on_scroll` 的 `request_frame(false)` 不经此路径，
@@ -234,10 +234,12 @@ class Scroll : public Container, public ScrollProps {
         } else {
             // 仅绘制变化（动画后代）：合并其绘制区域（缓冲局部坐标）为脏带，下一帧只重录该带，
             // 避免把整块 3 屏离屏缓冲每帧全量重录（动画标脏拖垮帧率的症结）。
-            // origin.paint_bounds() 处于内容坐标系；本 Scroll 以内容坐标固定录制缓冲
-            // （children_[0].paint 传入 bounds.origin=(0,-buffer_origin_y_)），故 paint_bounds
+            // origin.dirty_bounds() 处于内容坐标系；本 Scroll 以内容坐标固定录制缓冲
+            // （children_[0].paint 传入 bounds.origin=(0,-buffer_origin_y_)），故该盒
             // 即缓冲局部坐标（x∈[0,content_w], y∈[0,buffer_h]），可直接夹到缓冲窗口使用，无需屏幕坐标换算。
-            const Rect &ob = origin.paint_bounds();
+            // 用 dirty_bounds() 而非 paint_bounds()：统一焦点环画在后代自身盒外（见 Widget::paint_content），
+            // 脏带须含环带，否则该后代失焦后缓冲只重录自身盒，上一帧的环像素残留。
+            const Rect ob = origin.dirty_bounds();
             if (has_dirty_band_) {
                 const float x0 = std::min(dirty_band_.origin.x, ob.origin.x);
                 const float y0 = std::min(dirty_band_.origin.y, ob.origin.y);

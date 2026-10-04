@@ -356,6 +356,28 @@ message = "Platform dialog creation failed"
 hint = "Check the parent window handle or runtime environment"
 
 [[error]]
+enum = "OsHotkeyRegisterFailed"
+slug = "os-hotkey-register-failed"
+category = "platform"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "OS global hotkey registration failed: '{detail}'"
+hint = "The key combination may already be grabbed by another process, unsupported on this platform, or the platform backend is unavailable"
+
+[[error]]
+enum = "NotificationPostFailed"
+slug = "notification-post-failed"
+category = "platform"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "System notification could not be posted: '{detail}'"
+hint = "The desktop notification service may be unavailable, or the platform backend does not support notifications"
+
+[[error]]
 enum = "RuntimeCoroutineException"
 slug = "runtime-coroutine-exception"
 category = "runtime"

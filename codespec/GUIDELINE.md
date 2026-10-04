@@ -1088,7 +1088,7 @@ app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::K},
 // 面板须进 widget 树（例如 `Stack{ content, palette }` + `StackFit::Expand`）才会渲染与参与命中。
 ```
 
-要点：`bind_shortcuts()` 必须**显式**调用（`run()` 不会自动绑定，否则 `run()` 之后注册的命令会静默失效），且面板的 Esc / ↑ / ↓ 键位依赖它——未接线时面板仍可鼠标操作与 Enter 执行，但键盘导航不可用并会记一条 WARN。`invoke(id)` 求值启用条件后才执行，未启用 / 无 `action` 时返回 `false` 而不静默成功；`remove(id)` / `clear()` 会**连带撤销**对应的快捷键绑定。检索用 `command_fuzzy_score`（不区分大小写的子序列匹配，词首命中与连续命中加权），与 MCP `list_commands` 工具共用同一打分与排序，故 AI 侧检索次序与面板一致。`to_json()` 产出 `{"commands":[…]}` 自描述信封供 AI 工具面枚举。可编译样例见 `examples/demos/demo_command_palette.cpp`。
+要点：`bind_shortcuts()` 必须**显式**调用（`run()` 不会自动绑定，否则 `run()` 之后注册的命令会静默失效），且面板的 Esc / ↑ / ↓ 键位依赖它——未接线时面板仍可鼠标操作与 Enter 执行，但键盘导航不可用并会记一条 WARN。`invoke(id)` 求值启用条件后才执行，未启用 / 无 `action` 时返回 `false` 而不静默成功；`remove(id)` / `clear()` 会**连带撤销**对应的快捷键绑定。检索用 `command_fuzzy_score`（不区分大小写的子序列匹配，词首命中与连续命中加权），与 MCP `list_commands` 工具共用同一打分与排序，故 AI 侧检索次序与面板一致。`to_json()` 产出 `{"commands":[…]}` 自描述信封供 AI 工具面枚举。这里的快捷键是**应用内**的（需窗口有焦点、经键盘派发命中）——若需要**应用无焦点时也触发**，用 OS 级全局热键（§43），不要把本节的绑定当全局热键用。可编译样例见 `examples/demos/demo_command_palette.cpp`。
 
 ---
 
@@ -1211,7 +1211,7 @@ auto main() -> int {
 - **数据进序列化面**：`series` / `sections` / `values` / `points` 都是属性键（值经 `to_json` / `from_json` 往返，畸形元素逐项跳过、绝不抛异常）；交互回调（`on_point_tapped` / `on_section_tapped`）是 `std::function` 成员，**不进序列化面**，Inspector PUT 与 `from_json` 都不会重建它们。
 - **取色三级优先**：系列显式 `color` > `Theme` 命名令牌 `chart.palette.N`（N = 系列序号取模 8）> 内置 Material 风 8 色板（`chart_palette(i)`）。
 - **轴域与命中同源**：渲染、刻度、hover 命中都消费同一份 `LinearScale` / `BandScale`，不要各算一遍；`axis_x`/`axis_y` 的 `min`/`max` 显式指定即锁定域，否则按数据 nice 化（含 0 基线由 `include_zero` 控制）。
-- **绘制不得越出 `bounds`**：`Widget::paint_bounds_` 决定脏区，越界像素不会被擦除（残影）；悬浮值框 / 十字准线 / 百分比标签都按可用区夹取或翻转。
+- **绘制不得越出 `bounds`**：控件自身的绘制越界不会被擦除（残影），脏区按 `Widget::dirty_bounds()`（= 自身绘制盒 ∪ 盒外装饰，基类统一焦点环即靠此外扩）标记；悬浮值框 / 十字准线 / 百分比标签都按可用区夹取或翻转。
 - **无头渲染 golden**：`render_to_png` 无 `Application` ⇒ `Animator::current() == nullptr` ⇒ grow-in 动画进度恒为 1（终态），故 golden 基线稳定可复现。
 - 可编译样例见 `examples/demos/demo_bar_chart.cpp` / `demo_line_chart.cpp` / `demo_pie_chart.cpp` / `demo_scatter_chart.cpp` / `demo_sparkline.cpp`；控件契约见 `specification/04-widget.md` §3.8，矢量原语（`Polyline` / `Sector`）见 `specification/03-layout-render.md` §8.1。
 
@@ -2073,3 +2073,97 @@ ctest --test-dir build -R "^utest_json" --output-on-failure
 
 处置表与语料清单双向比对：同步语料时漏改表一定失败；反过来表也不会自动跟随实现漂移——这正是它
 要拦住的事。契约见 [`specification/01-core.md`](specification/01-core.md) §9.12。
+
+---
+
+## 43 OS 级全局热键（无焦点时也触发）
+
+`OsHotkeyRegistry`（`app/os_hotkey.h`）把键组合注册到**操作系统**，焦点在别的进程里也照样触发；经 `app.os_hotkeys()` 取用。它与 `app.shortcuts()`（§31 的应用内 `ShortcutRegistry`）是两套能力，不重叠、也不互相接管。
+
+```cpp
+#include "aurora/aurora.h"
+namespace au = aurora;
+
+auto grab_hotkey(au::Application &app) -> void {
+    auto &hotkeys = app.os_hotkeys();              // 或自建：au::OsHotkeyRegistry hotkeys;
+
+    // 1) 注册前先看平台后端：Wayland / GLFW / macOS 无 OS 级热键接口，enabled() 为 false
+    if (!hotkeys.enabled()) {
+        return;                                    // 降级：改走应用内提示，不要静默跳过
+    }
+
+    // 2) 注册：修饰键位掩码 + 主键（主键为 KeyCode::Unknown 会被拒）
+    const auto res = hotkeys.add(
+        au::KeyCombo{au::ModifierKey::Control | au::ModifierKey::Alt | au::ModifierKey::Shift,
+                     au::KeyCode::K},
+        []() -> void { /* 唤起窗口 / 切换面板 */ });
+    if (!res) {
+        return;                                    // OsHotkeyRegisterFailed；res.error().message 可直接展示
+    }
+    const au::OsHotkeyHandle handle = res.value();
+
+    // 3) 用 app.run() 时无需自己排空：其帧循环每帧已调 os_hotkeys().drain_pending()
+    app.run();
+
+    // 自己写主循环时**必须**显式排空 —— 命中只入队，不排空就是「按了没反应」：
+    // while (!should_exit()) {
+    //     static_cast<void>(hotkeys.drain_pending());
+    //     ...
+    // }
+
+    static_cast<void>(hotkeys.remove(handle));     // 单条注销；整批撤掉用 hotkeys.clear()
+}
+```
+
+要点：
+
+- **触发不在消息泵内同步回调**：`WM_HOTKEY` 到达时只把命中的 ID 推进内部队列，`drain_pending()` 才在主线程执行动作（最坏延迟一帧）。理由：动作可能重建页面 / 触发重排，在窗口过程帧内重入会把布局与绘制切到半途的状态。
+- **与 `ShortcutRegistry` 的分工**：后者是应用内快捷键（需窗口有焦点、经键盘事件派发命中）；本类是 OS 级，应用无焦点也触发。`ShortcutScope::Global` 仍是「应用内跨焦点」的标记，不因本节改写成 OS 级。
+- **平台矩阵**：Windows（`RegisterHotKey` + `WM_HOTKEY`）、X11（`xcb_grab_key`）支持；Wayland / GLFW / macOS 运行时降级——`enabled()==false`，`add()` 恒返回错误。
+- **失败一律机器可见**：主键无法映射到原生虚拟键、未指定主键、同一组合在本注册表内重复注册、被别的进程抢占，统一为 `ErrorCode::OsHotkeyRegisterFailed`（`detail` 给出成因）。判 `Result` 并给用户看得见的反馈，不要当静默 no-op 吞掉；`remove()` 对无效 / 非本表句柄返回 `false`（不抛、不报错）。
+- **句柄是值语义**：`OsHotkeyHandle`（`id == 0` 恒为无效句柄，有效 ID 自 1 起），与 `ShortcutRegistry::add()` 返回的 `int` 是不同类型，传错编译期即报错。
+- **测试**：`install_test_backend(bool)` 装进程内 inert 后端（不真的抢占系统热键），受 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release 下自动失效。
+- 注册 / 注销 / 排空须在**建窗与跑消息泵的同一线程**；注册表析构会注销本表全部热键，退出前的 `clear()` 用于换一批组合重建。
+
+可编译样例见 `examples/demos/demo_os_hotkey.cpp`；契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.6。
+
+---
+
+## 44 跨平台系统通知
+
+`NotificationCenter`（`app/notification.h`）发系统通知，`Application::notify()` 与 `Application::set_on_notification_activated()` 是它的转发入口（该头不依赖 `application.h`，可单独包含）。
+
+```cpp
+#include "aurora/aurora.h"
+namespace au = aurora;
+
+// 1) 激活回调收到的是 tag：按它分流回自己的业务对象
+app.set_on_notification_activated([](std::string tag) -> void {
+    if (tag == "build") { /* 聚焦构建面板 */ }
+});
+
+// 2) 发一条：聚合初始化的字段顺序须与 Notification 一致
+//    （title / body / tag / urgency / timeout_ms）；timeout_ms == 0 表示交给平台默认策略
+const auto res = app.notify(au::Notification{
+    .title = "Build finished",
+    .body = "42 targets, 0 errors",
+    .tag = "build",
+    .urgency = au::NotificationUrgency::Normal,
+    .timeout_ms = 5000,
+});
+if (!res) {
+    // NotificationPostFailed（永久失败、不可重试）：res.error().message 指出缺哪个库 / 哪个调用失败。
+    // 处置：退化为自己 UI 内的提示条，不要当成「发了但可能没显示」。
+}
+```
+
+要点：
+
+- **`tag` 双重身份**：既是去重 / 替换标识（同一 tag 的后续通知在支持去重的服务器上替换前一条），也是激活回调回传的键；空 tag 由实现层换成稳定占位键，回调里收到空串。
+- **激活回调依赖宿主排空**：Win32 依附宿主消息泵（`PeekMessage` 天然覆盖，`pump_events()` 在那里是 no-op）；Linux 必须靠 `NotificationCenter::pump_events()` 驱动 GLib 主循环迭代 / libdbus 套接字读取，建议每帧一次——用 `Application::run()` 时框架已在帧循环里做了，自己写主循环要显式调。**不排空 ⇒ 通知照常显示、回调不到**（不会虚假成功）。
+- **失败口径**：一切失败统一为 `ErrorCode::NotificationPostFailed`（`detail` 指出缺失哪个库 / 哪个系统调用失败），永久失败、不可重试；不抛异常、不静默 no-op。Linux 走 `libnotify` → `libdbus` → `notify-send` 三层运行时降级链（全部 `dlopen` / `popen`，无构建期依赖），**全部**缺失才返回该错误，第三层没有激活回调。
+- **平台矩阵**：Windows（`Shell_NotifyIconW` 气球）支持激活回调；Linux 前两层支持；Headless 只记录 `last_notification()` 且返回成功；macOS / 其它本轮不支持，`notify()` 返回错误。
+- **Win32 的可见副作用**：应用本身没有托盘图标时，发通知会在通知区域**短暂出现一个图标**（气球必须依附图标），气球消失后实现会 `NIM_DELETE` 撤掉，不长期占位；已有 `SystemTray` 时复用其图标。
+- **无桌面 / 测试友好**：`last_notification()` 在**所有**平台上维护（含投递失败的调用），是无桌面环境的主动观测面；`install_recording_backend()` 可强制只记录、不触达系统通知服务，供开发机上的字段往返测试。
+
+可编译样例见 `examples/demos/demo_notification.cpp`；契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.7。

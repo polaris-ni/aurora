@@ -2,25 +2,23 @@
 # ============================================================================
 # check_no_hardcoded_paths.py - no machine-specific absolute paths in the repo
 # ----------------------------------------------------------------------------
-# Spec: codespec/CODING_STANDARDS.md §10.5 (2026-09-22 定论)
+# Spec: codespec/CODING_STANDARDS.md §10.5
 #   "仓库内禁止写死任何本机安装路径（盘符 / 用户目录一律不得入库）——换机即
 #    失效且污染他人构建；需要定位外部工具/库时一律由使用者显式传入
 #    （-D<选项>=<目录> 或环境变量），自动探测只作为兜底且不得含盘符。"
 #
-# Why a gate: 2026-09-22 found `D:/Development/Environment/LLVM/bin` hardcoded in  HARDPATH_EXEMPT: example cited in rationale, not a path present in the repo
-# cmake/AuroraBackends.cmake (plus the same本机 path in CHANGELOG.json and a doc
+# Why a gate: found `D:/Development/Environment/LLVM/bin` hardcoded in  HARDPATH_EXEMPT: example cited in rationale, not a path present in the repo
+# cmake/AuroraBackends.cmake (plus the same path in CHANGELOG.md and a doc
 # example). A path that is not passed in is a path that only builds on one machine.
 #
 # Scan scope: every version-controlled text file (git ls-files), minus
-# third_party/, build*/, tests/fixtures/, .workbuddy/ and binary extensions.
+# third_party/, build*/, tests/fixtures/ and binary extensions.
 #
 # Blocking rules:
 #   1) [blocking] User home directory literal — `C:/Users/<name>`, `/home/<name>`,
 #      `/Users/<name>` (placeholder names like `user`/`you` are allowed).
 #   2) [blocking] Non-system drive absolute path — `<D-Z>:/<seg>` or `<D-Z>:\<seg>`
 #      (C: is the Windows system drive; other drive letters are machine-specific).
-#      tests/ is exempt: 盘符本身就是若干用例的被测对象（去盘符逻辑），且夹具里的
-#      "C:/work" 之类是字符串值而非构建配置。
 #   3) [blocking] Machine-specific directory segment under a drive — e.g.  HARDPATH_EXEMPT: example path patterns documented for rule 3
 #      `C:/Development/...`, `D:/Projects/...`, `.../msys64/...`.
 #

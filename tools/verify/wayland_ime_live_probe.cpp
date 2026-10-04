@@ -40,7 +40,7 @@
 //   2  环境不可用（无 WAYLAND_DISPLAY / 合成器连接失败 / 构建缺 v3 协议代码生成）
 //   4  部分验收项不符 —— 见逐行 PASS/FAIL
 //
-// 本机实测（2026-09-20，WSLg Weston）：registry globals **未发布** zwp_text_input_manager_v3
+// 本机实测（WSLg Weston）：registry globals **未发布** zwp_text_input_manager_v3
 //   ⇒ 走②优雅降级路全绿（退出码 0）：provider 接线 + 多帧出帧后桥零请求
 //   （`input_created/enabled/commits` 恒零）、连接无错。③/④（enter→enable 判据双向+去重）
 //   代码路径经编译与静态监听表验证，运行期证明需换发布 v3 的合成器（KDE/mutter 桌面会话）。

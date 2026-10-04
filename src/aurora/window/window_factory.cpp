@@ -66,7 +66,15 @@
 namespace aurora {
 
 // 通用：用已构造的 Surface 组装 Window，并套用跨后端共享的尺寸/标题。
+//
+// DPI 感知在这里启用（而非在 `Win32Host::Impl` 构造体内）：本函数是**所有** `create_window`
+// 重载的公共出口，而各重载在调用它**之前**就已经把 Surface 构造出来了——`Win32Surface` 的
+// 构造即 `CreateWindowExA`。放到 `Impl` 构造里就必然晚于首个窗口，进程在该时刻的 DPI 感知
+// 尚未生效，`GetDeviceCaps` 只能回 96（= scale 1.0）。此处是「任何窗口创建之前」的最后可用
+// 落点，与 `specification/03-layout-render.md` 的承诺一致。函数自身幂等（进程级 static 守卫），
+// 直接构造 `Win32Host` 的消费者仍由 `Impl` 构造体内那处兜底。
 static auto make_window(std::unique_ptr<Surface> surf, const WindowOptions &o) -> std::unique_ptr<Window> {
+    enable_dpi_awareness();
     auto w = std::make_unique<Window>(std::move(surf));
     w->set_title(o.title);
     return w;

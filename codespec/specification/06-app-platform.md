@@ -141,7 +141,7 @@
 |:---|:---|
 | `WindowOptions::persist_id` | 几何持久化键（空 = 不持久化），多个窗口用不同键区分 |
 | `Application::set_window_geometry_store(prefs)` | 指定 `Preferences` 存储；会对**已登记**窗口补做恢复（主窗口在构造期即已登记） |
-| `WindowGeometry{origin, size, mode, display_id}` | 坐标与尺寸为**屏幕物理像素**（与 `app::Display` 同源）——只有物理坐标跨 DPI 稳定；恢复时按当前 `scale_factor` 折回逻辑 dp |
+| `WindowGeometry{origin, size, mode, display_id}` | 坐标与尺寸为**屏幕物理像素**（与 `app::Display` 同源）——只有物理坐标跨 DPI 稳定；恢复时按当前 `scale_factor` 折回逻辑 dp。**该 `scale_factor` 与宿主内 dp ↔ 物理换算同源**（Win32 侧已收敛为 `Impl::scale` 单点真值，`scale_factor()` 读之；见 `03-layout-render.md` DPI 感知条）。**Linux 三后端（X11 / Wayland / GLFW）的缩放变化上报仍未实现**，故其 `scale_factor` 在改系统缩放或跨屏后不会自动更新，持久化恢复暂按旧值折算 |
 | `save_window_geometry` / `load_window_geometry` | 读写；另有 `Preferences::Group` 重载用于**窗口组**：`prefs.group("windows")` + 各窗口键 |
 | `is_window_geometry_usable(g, displays)` | 判据：尺寸为正，且与某显示器工作区**有交集**（部分越界算可用，多屏拼接/任务栏遮挡下不应拒绝恢复） |
 
@@ -191,7 +191,10 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 - `enable_dirty_tracking(bool)` 可关闭，回到每帧全量重绘的历史行为；`force_full_redraw()` 供动画 / 视频 / 定时器持续重绘或外部环境突变时强制下一帧全绘。
 - **首帧 `first_frame_ = true` 强制全绘**；重新挂载 / 根变化时自动 `mount` 接线响应式订阅，使 `State` 与修饰变更能标脏重绘。
 
-**仅绘制脏帧的处理**：跳过 `begin_frame` 保留上帧帧缓冲（部分后端的 `begin_frame` 会清零整帧，直接 begin 会使裁剪外黑屏），先 `Painter::clear_rect(merged_bounds)` 把脏矩形并界重置为新帧零基底，再 `push_clip(merged_bounds)` 裁剪重绘。裁剪内从零基底按原序重新合成、裁剪外沿用上帧像素，两侧均与整帧重绘**逐位一致**。`install_dirty_sink` 回调标记控件最近一次 `paint` 的绝对几何（`Widget::paint_bounds()`），使裁剪命中精确区域。
+**仅绘制脏帧的处理**：跳过 `begin_frame` 保留上帧帧缓冲（部分后端的 `begin_frame` 会清零整帧，直接 begin 会使裁剪外黑屏），先 `Painter::clear_rect(merged_bounds)` 把脏矩形并界重置为新帧零基底，再 `push_clip(merged_bounds)` 裁剪重绘。裁剪内从零基底按原序重新合成、裁剪外沿用上帧像素，两侧均与整帧重绘**逐位一致**。`install_dirty_sink` 回调标记控件本次标脏应覆盖的绝对几何（`Widget::dirty_bounds()` = 最近一次 `paint` 的自身盒 ∪ 画在盒外的装饰），使裁剪命中精确区域。
+
+- **为何不是 `paint_bounds()`**：基类统一焦点环刻意画在控件盒**外** 2–4 dp（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4）。只按自身盒标脏会让该环带落在裁剪之外，两个方向同时出错：获焦帧环画不上屏（偶发靠同帧其它控件的脏区扩张才出现），失焦、焦点到达方式变更（键盘有环 → 指针点击隐环）或尺寸变化帧上一帧的环无人重绘而残留成「盒外一圈环色」。外扩判据与绘制分支共用 `Widget::focus_ring_shown()`，另加「上一帧画过环」（`painted_focus_ring_`）保证消除方向也进裁剪。
+- **第二条汇聚路径**：`Scroll::on_descendant_dirty` 把后代的 `dirty_bounds()`（内容坐标系）并入离屏缓冲脏带，同一契约；漏了会把残留固化在离屏缓冲里随视口反复上屏。
 
 **系统重绘请求驱动的帧不得只跳过**：由 `set_present_request` 回调（Win32 `WM_PAINT` / `WM_SIZE`）驱动的 `present_root`，即便脏追踪判定跳帧，也必须 `set_present_dirty({})` 后 `present()` 全量 blit 重新上屏——帧缓冲内容仍有效但窗口表面已被 OS 置无效（典型：**最小化还原**后为类背景刷底色，若只跳过则白屏；遮挡揭开同理）。普通 idle 帧不受影响，仍零上屏。
 
@@ -233,7 +236,7 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 
 **系统重绘处理**：窗口类背景刷 `wc.hbrBackground` 用浅灰实心刷 `RGB(245,245,247)`（而非默认黑色擦除）；`wnd_proc` 处理 `WM_PAINT`，在系统要求重绘时立即 `present()` 当前已就绪帧缓冲。
 
-**最大化白闪处理**：`Surface` 提供 `set_present_request` 回调通道（默认空实现），`Window` 构造时把该回调接为「对当前缓存根再渲染一帧」；`Win32Surface` 的 `WM_SIZE` / `WM_PAINT` 在几何变化当下同步调用该回调，使离屏缓冲在 DWM 合成前已为新尺寸真实内容。浅灰刷保留作兜底。`present_count()` 观测器供测试验证「WM_SIZE 触发了同步重渲染」，**与 `Surface::frame_count()` 无关**：后者是「已呈现帧数」，`Win32Surface::present()` 每真正上屏一帧自增一次（帧循环出帧计入，几何未变也计入），由 `itest_win32_present` 锁死两个计数器的独立性（逐帧 `present()` 使 `frame_count()` +1 而 `present_count()` 不动）。此口径曾出错：`frame_count()` 一度直接转发宿主的同步重渲染计数，导致持续出帧的窗口恒报 0（2026-09-24 修复）。
+**最大化白闪处理**：`Surface` 提供 `set_present_request` 回调通道（默认空实现），`Window` 构造时把该回调接为「对当前缓存根再渲染一帧」；`Win32Surface` 的 `WM_SIZE` / `WM_PAINT` 在几何变化当下同步调用该回调，使离屏缓冲在 DWM 合成前已为新尺寸真实内容。浅灰刷保留作兜底。`present_count()` 观测器供测试验证「WM_SIZE 触发了同步重渲染」，**与 `Surface::frame_count()` 无关**：后者是「已呈现帧数」，`Win32Surface::present()` 每真正上屏一帧自增一次（帧循环出帧计入，几何未变也计入），由 `itest_win32_present` 锁死两个计数器的独立性（逐帧 `present()` 使 `frame_count()` +1 而 `present_count()` 不动）。此口径曾出错：`frame_count()` 一度直接转发宿主的同步重渲染计数，导致持续出帧的窗口恒报 0。
 
 **系统重绘 × GPU 帧路径**（`Window::evaluate_dirty_plan` 的 `system_redraw_` 分支）：该请求落在「无脏、无布局脏、尺寸未变」的 idle 判定时，软件后端只需全量 blit 兜底（`set_present_dirty({})` → `present()`，GPU 无关）；但 **GPU 栅格生效期间** `present()` 上屏的是 `Painter` 软件缓冲，而该缓冲在 GPU 模式下只铺底色、从不含控件像素——裸 `present()` 等于闪一屏空白（白闪缺陷的真因）。故此时改为 `dirty_.mark_all()` 落回正常渲染决策，走完整的「重录帧 DL → `replay` → `sink.end_frame`」；`is_full` 已保证无裁剪、全量上屏。已永久回退（`gpu_fallback_`）的后端维持裸 `present()` 兜底。观测签名：各 wgpu 宿主的 `software_present_count()` 在 GPU 生效期间恒 0（`utest_window` 两例分别锁「GPU 生效时重渲染而非裸 present」与「回退后维持裸 blit」）。
 
@@ -509,7 +512,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - **空内容不是失败**：「可访问但当前没有文本/图像」是正常态，返回 `Ok`，不得与「读不到」混为一谈。
 - **空写入是契约内 no-op**：空文本 / 空图像不触碰剪贴板、**保留既有内容**，返回 `Ok`。
 - **Windows 写文本先转码后开剪贴板**：`MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, ...)` 在 `EmptyClipboard` **之前**校验，非法 UTF-8 那一笔被拒时不会把用户原本复制的内容清掉；同理 `SetClipboardData` 失败意味着所有权未转移，须 `GlobalFree` 归还，不泄漏句柄。
-- 声明与迁移：四函数由「`void` / `std::string` 静默返回」改为 `Result`，属预览期破坏性收敛（semver 记录随版本收口批量落 `CHANGELOG.json`）；消费端把原 `std::string` 返回值改 `.value()` 即可保持旧行为，但**建议检查 `error()`**，否则又回到静默吞失败。
+- 声明与迁移：四函数由「`void` / `std::string` 静默返回」改为 `Result`，属预览期破坏性收敛（semver 记录随版本收口批量落 `CHANGELOG.md`）；消费端把原 `std::string` 返回值改 `.value()` 即可保持旧行为，但**建议检查 `error()`**，否则又回到静默吞失败。
 
 **控件层（`TextInput` / `Text` / `RichTextEdit` 的 Ctrl+C/X/V）**：这些快捷键路径无 `Result` 出口（`on_key_event` 返回 `void`），故失败经 `Diagnostics::warn(msg, where, code)` 上报——桥接 Logger 且进 `Diagnostics::report()` 收集，机器可读，与 `widget.cpp` / `timer.h` 既有口径一致。同时快捷键语义随失败收紧：
 
@@ -539,6 +542,8 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 | `app/shortcuts.h` | 快捷键注册 |
 | `commands.h` | 命令模型与注册表（快捷键 / 菜单 / 命令面板的统一真源） |
 | `widget/command_palette.h` | 命令面板（模态浮层，模糊检索并执行命令） |
+| `app/os_hotkey.h` | **OS 级全局热键**（无焦点时也触发，见 §8.6） |
+| `app/notification.h` | **跨平台系统通知**（Win32 气球 / XDG 桌面通知，见 §8.7） |
 | `app/display.h` | 显示设备与 DPI 查询 |
 
 **命令是唯一真源**：`CommandRegistry`（`commands.h`）持 `Command{ id, title, icon, category, action, default_binding, scope, enabled, when_label }`。`bind_shortcuts(ShortcutRegistry&)` 与 `to_menu_items()` 是它面向快捷键与菜单的两个**投影**，命令面板是第三个消费方；三者共用 `invoke(id)` 出口，故启用条件与空动作判定单点生效。启用条件为两段式：`enabled` 谓词承担运行期判定（空 = 恒启用），`when_label` 仅作展示 / 序列化标签（**不参与求值**，也不解析条件 DSL）。`to_json()` 产出 `{"commands":[…]}` 自描述信封供工具面枚举；`search()` 与工具面共用 `command_fuzzy_score()`，故 AI 检索与用户检索次序一致。
@@ -546,6 +551,93 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 **接线**：`Application::commands()` 返回注册表；`app.commands().bind_shortcuts(app.shortcuts())` 一行把默认快捷键接入。绑定为**显式**而非 `run()` 内自动执行——否则 `run()` 之后注册的命令会静默失效。`Application` 在 `dispatch*` 入口统一暴露「当前焦点管理器」（`current_focus_manager()`），快捷键动作与控件回调内同样可取到，模态弹层据此完成焦点陷阱。原「命令式逃生舱」`aurora::imperative::run_raw`（`imperative.h`）与命令系统无关。
 
 **命令面板键位**：`CommandPalette` 打开时把自己的作用域压入 `FocusManager`（子树内**唯一**可聚焦控件是搜索框，故左右方向键仍落到搜索框做光标移动、上下方向键不引发焦点跳转）；Enter 经搜索框的提交回调执行选中项；Esc / ↑ / ↓ 经打开期临时注册的快捷键绑定接管（依赖注册表已 `bind_shortcuts`，未接线时这几键不可用，面板以 WARN 提示）。Space 只经文本输入落字，不触发执行。命令清单可经 `to_json()` 序列化并由 MCP 工具面枚举，见 [`08-tooling.md`](08-tooling.md) §7.1。
+
+**`KeyCombo::matches` 的匹配语义：只比可按住的位**。`ModifierKey` 把「可按住的修饰位」（`Shift` / `Control` / `Alt` / `Meta`）与「键盘锁定态位」（`NumLock`）建模在**同一个字节**里，而四个后端都会在事件上盖章锁定位（Win32 读 `GetKeyState(VK_NUMLOCK)` 的 toggle 位、X11 折 `Mod2`、Wayland 查 `XKB_STATE_MODS_LOCKED`、GLFW 键盘路径查 `GLFW_KEY_NUM_LOCK`）。匹配前两侧都先与 `AURORA_MODIFIER_PRESSABLE_MASK` 取子集，锁定态位两侧一律屏蔽——否则 `NumLock` 开着时**任何**未登记该位的应用内快捷键恒不匹配，是整层静默失效（与焦点、作用域无关）。四个配套常量（`event.h`）：
+
+| 常量 | 含义 | 纪律 |
+|:---|:---|:---|
+| `AURORA_MODIFIER_PRESSABLE_MASK` | 可按住的位并集（四个） | 判定「某修饰键是否按下」用单个位即可，无需本掩码；本掩码专用于**位集的整体比较** |
+| `AURORA_MODIFIER_LOCK_MASK` | 键盘锁定态位的并集（当前只有 `NumLock`） | **新增锁定类位（`CapsLock` / `ScrollLock` 等）时必须并入本掩码**，否则该位会落进两掩码之外的缝隙、在按位比较中继续污染结果 |
+
+两者应恒为 `ModifierKey` 全部已定义位的一个**无余划分**（并集全覆盖、交集为 0），该恒等式由 `utest_shortcuts` 的位集自证用例钉住——新增锁定位时那条用例会要求同步。
+
+其余三条口径均为刻意决定，不得顺手改：
+
+- **仍是「相等」而非「包含」**：`Ctrl+O` 不匹配 `Ctrl+Shift+O`。这是 Qt `QKeySequence` / WPF `KeyGesture` / Flutter `SingleActivator` 的共同语义；改成包含会让所有「更具体组合优先」的注册表失去区分度。
+- **注册侧的锁定位不可表达**：`KeyCombo{Control | NumLock, K}` 里的锁定位被忽略（等价于 `Control+K`）。`matches` **刻意不加断言、不加日志、不返回 `Result`**——它在每条按键消息上被调用，热路径里的噪声比它想防的错更贵，该口径由 `matches` 的文档注释承担。`to_string()` 不列锁定位，与此恰好一致。
+- **不引入 per-combo 的「要求 NumLock 开 / 关」字段**：当前无任何消费者需要，属扩大 API 预算。若将来需要，应另立字段并走一次独立的公共 API 变更。相应地**不新增匹配档位 / 枚举参数**，保持单一算式，避免同一字段出现两个真值源。
+
+### 8.6 OS 级全局热键（无焦点时也触发）
+
+`OsHotkeyRegistry`（`app/os_hotkey.h`）把键组合注册到**操作系统**，焦点在别的进程里同样生效。经 `Application::os_hotkeys()` 取用。
+
+**与 `ShortcutRegistry` 的分工**（两者不重叠、也不互相接管）：
+
+| | `ShortcutRegistry`（`app/shortcuts.h`） | `OsHotkeyRegistry` |
+|:---|:---|:---|
+| 作用域 | 应用内：需窗口有焦点、经键盘事件派发命中 | OS 级：系统范围内，应用无焦点也触发 |
+| 键组合类型 | `KeyCombo`（复用同一类型） | `KeyCombo`（复用同一类型） |
+| 失败语义 | 无冲突概念 | 被别的进程抢占 / 平台无后端 → `OsHotkeyRegisterFailed` |
+
+`ShortcutScope::Global` 的语义**不变**：它仍是「应用内跨焦点作用域」的标记，不因本节新增而改写为 OS 级。
+
+**触发时机 —— 排队到帧循环排空，不在消息泵内同步回调**：`WM_HOTKEY` 到达时只把命中的 ID 推进内部队列，由 `Application::step_frame()` 每帧调 `os_hotkeys().drain_pending()` 在主线程排空并调用动作。理由：动作可能重建页面 / 触发重排，在窗口过程帧内重入会把布局与绘制切到半途的状态。代价是最坏延迟一帧（约 16ms），对热键这类低频触发无感。
+
+**平台矩阵**：
+
+| 平台 | 实现 | 状态 |
+|:---|:---|:---|
+| Windows | `RegisterHotKey` + `WM_HOTKEY`，经共享的内部隐藏消息窗口 `src/aurora/app/detail/platform_shell_win32.{h,cpp}` 收消息 | 支持 |
+| X11 | `xcb_grab_key` | 支持 |
+| Wayland | 无全局热键协议 | 运行时降级：`enabled()==false`，`add()` 返回错误 |
+| GLFW | 无对应能力 | 不支持 |
+| macOS | — | 本轮不实现 |
+
+**失败口径一律机器可见，不做静默 no-op**：主键无法映射到原生虚拟键、组合未指定主键、注册表内重复注册、OS 侧被抢占，统一为 `ErrorCode::OsHotkeyRegisterFailed`，`detail` 给出具体成因。`remove()` 对无效 / 非本表的句柄返回 `false`（不抛、不报错）。
+
+**句柄**：`OsHotkeyHandle{std::uint32_t id}`，值语义，`id == 0` 恒为无效句柄，有效 ID 自 1 起。强类型而非裸整数，避免与 `ShortcutRegistry::add()` 返回的 `int` ID 混淆（传错类型编译期即报错）。
+
+**测试注入**：`OsHotkeyRegistry::install_test_backend(bool)` 安装进程内 inert 后端，此后 `add`/`remove` 只走内存、不触碰 OS 热键接口。单测不得真的抢占系统热键（CI 机器上会干扰系统与别的用例），但又必须覆盖「平台不支持」的降级路径——那在受支持的平台上没有别的办法复现。该注入面受 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release 下自动失效。
+
+### 8.7 跨平台系统通知
+
+`NotificationCenter`（`app/notification.h`）发系统通知，`Application::notify()` / `Application::set_on_notification_activated()` 是其转发入口。
+
+```cpp
+app.notify(Notification{.title = "Build finished", .body = "42 targets", .tag = "build",
+                        .urgency = NotificationUrgency::Normal, .timeout_ms = 5000});
+app.set_on_notification_activated([](std::string tag) { focus_pane(tag); });
+```
+
+`Notification{title, body, tag, urgency, timeout_ms}`：`tag` 既是**去重 / 替换标识**（同一 tag 的后续通知在支持去重的服务器上替换前一条），也是**激活回调回传的键**——点击通知时回调收到的就是这个 tag。`timeout_ms == 0` 表示交给平台默认策略。
+
+**平台矩阵**：
+
+| 平台 | 实现 | 激活回调 |
+|:---|:---|:---|
+| Windows | `Shell_NotifyIconW` 按需添加隐藏托盘图标 + `NIF_INFO` 气球；超时 / 关闭 / 点击后 `NIM_DELETE` 撤掉图标 | 支持（`NIN_BALLOONUSERCLICK`） |
+| Linux | 三层运行时降级链，见下 | 前两层支持（需宿主排空 `pump_events()`） |
+| Headless | 仅记录 `last_notification()`，`notify()` 返回成功 | 不支持 |
+| macOS / 其它 | 本轮不支持 | 不支持 |
+
+**Win32 的托盘副作用**：应用本身没有托盘图标时，发通知会在任务栏**短暂出现一个图标**（`Shell_NotifyIcon` 气球必须依附图标）。气球消失后实现会 `NIM_DELETE` 撤掉，不长期占位。这是「零接线即可发通知」换来的可见副作用；调用方若已有 `SystemTray`，实现复用其图标、不额外增删。
+
+**Linux 三层降级链**（全部 `dlopen` / `popen`，**无构建期依赖**，也不新增 `AURORA_ENABLE_*` 开关）：
+
+| 优先级 | 后端 | 能力 |
+|:---|:---|:---|
+| 1 | `dlopen("libnotify.so.4")` | 高层 API；激活回调可接 |
+| 2 | `dlopen("libdbus-1.so.3")` 手写 `org.freedesktop.Notifications.Notify` | 原生协议；经 `ActionInvoked` 信号接激活回调 |
+| 3 | `popen("notify-send")` | 兜底，即发即忘，无激活回调 |
+| 4 | 全部缺失 | `NotificationPostFailed` |
+
+因为全部走 `dlopen`，实现**不** `#include <dbus/dbus.h>` / `<libnotify/notify.h>`，改为自行声明函数指针类型与 `dlsym` 符号名。
+
+**失败口径**：一切失败统一为 `ErrorCode::NotificationPostFailed`（`detail` 指出缺失哪个库 / 哪个系统调用失败），调用方可据此退化为自己 UI 内的提示条；不抛异常、不静默 no-op。
+
+**`last_notification()` 在所有平台上维护**（含投递失败的调用），让无桌面环境也能断言「请求了什么」——这是 Headless 与自动化测试的主观测面。`install_recording_backend()` 可强制只记录、不触达系统通知服务，供开发机上的字段往返测试。
+
+**宿主排空义务**：Windows 下依附宿主消息泵（`PeekMessage` 天然覆盖）；Linux 下必须靠 `pump_events()` 驱动 GLib 主循环迭代 / libdbus 套接字读取，`Application::step_frame()` 已每帧调用一次。**宿主不排空 ⇒ 通知照常显示、回调不到**（不会虚假成功）。
 
 ### 8.5 输入法桥（Win32 IMM32 / X11 XIM / Wayland text-input-v3）
 
@@ -721,7 +813,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 **门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Host` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`（GLFW：Windows 经原生 HWND 走 PrintWindow 含非客户区；X11/Wayland/Mac 走 GL 帧缓冲读回——软件路径先重放上一帧再 `glReadPixels`，GPU 路径经 `GpuGlRhi::read_pixels`，得客户区 framebuffer 尺寸画面，须在某次 present 之后调用）；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
 
-`Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询），**基类默认返回 `nullptr`**；真实窗口后端必须覆写为宿主原生句柄——Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用同一 `Win32Host` 宿主）**均**覆写为 `hwnd()`。上表 `surface_state()` 的 `has_native_window` 即由它非空判定，漏覆写会让真实窗口后端**恒报 false**（`D3D11Surface` 曾如此，2026-09-13 补齐），故由 `utest_native_surfaces` 的 `windows_family_native_handle_contract` 类型级守门。
+`Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询），**基类默认返回 `nullptr`**；真实窗口后端必须覆写为宿主原生句柄——Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用同一 `Win32Host` 宿主）**均**覆写为 `hwnd()`。上表 `surface_state()` 的 `has_native_window` 即由它非空判定，漏覆写会让真实窗口后端**恒报 false**，故由 `utest_native_surfaces` 的 `windows_family_native_handle_contract` 类型级守门。
 
 ### 11.1 可视化调试叠层
 
@@ -781,7 +873,7 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 
 **自动化守护**：`tools/check/check_platform_macros.py`（CTest 用例 `check_platform_macros`）扫描 `include/` 与 `src/` 全部预处理条件（含续行），命中原生平台/架构/位宽宏即红灯；`core/platform.h` 自身按例外豁免，`_WIN32_WINNT` / `_WIN32_IE` 等 SDK 旋钮不在禁用集合。规范化宏（`AURORA_PLATFORM_*` / `AURORA_ARCH_*` / `AURORA_BIT_*` / `AURORA_BACKEND_*` / `AURORA_COMPILER_*` / `AURORA_CAP_*`）的分支密度仅打印报告、不设门槛，供平台抽象层演进时追踪趋势。编译器特性宏已收敛：`core/platform.h` 现提供 `AURORA_COMPILER_*`（GCC / CLANG / MSVC 三个 base 加 APPLE_CLANG / CLANG_CL / MINGW / EMSCRIPTEN 精化），库内原生 `__GNUC__` / `__clang__` / `_MSC_VER` / `__MINGW*` / `__apple_build_version__` 一律映射为后者，分支统一经 `AURORA_COMPILER_*`；原生编译器宏仅允许出现在 `core/platform.h` 自身（检查豁免）。**编译期能力宏已独立成族**：`core/platform.h` 提供**恒定义**的 `AURORA_CAP_*`（取值 0/1，回答「本 TU 可用什么能力」而非「目标是什么平台」），现仅 `AURORA_CAP_THREADS`——Emscripten 未开 `-pthread` 时为 0、其余目标为 1；原先散落的 `__EMSCRIPTEN_PTHREADS__` 直用一并归入该宏。
 
-**版本常量**（`core/version.h`）：`AURORA_VERSION_MAJOR` / `MINOR` / `PATCH`（数字分量，CMake `project(VERSION)` 注入）、`AURORA_VERSION_SUFFIX_STR` + `AURORA_HAS_VERSION_SUFFIX`（semver 预发布后缀，来自 CMake 缓存变量 `AURORA_VERSION_SUFFIX`）、合成宏 `AURORA_VERSION_STRING`（完整 semver 串）。**库发布版本的单一事实来源是根 `CHANGELOG.json` 的 `currentVersion`**。
+**版本常量**（`core/version.h`）：`AURORA_VERSION_MAJOR` / `MINOR` / `PATCH`（数字分量，CMake `project(VERSION)` 注入）、`AURORA_VERSION_SUFFIX_STR` + `AURORA_HAS_VERSION_SUFFIX`（semver 预发布后缀，来自 CMake 缓存变量 `AURORA_VERSION_SUFFIX`）、合成宏 `AURORA_VERSION_STRING`（完整 semver 串）。**库发布版本的单一事实来源是根 `CHANGELOG.md` 的 `currentVersion`**。
 
 **Web / WASM 平台适配：**
 

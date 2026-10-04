@@ -21,7 +21,8 @@ runs:
         sudo apt-get install -y clang-format-22
         sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
         # 装完立刻自证「这份二进制读得懂仓库配置」：试跑与 CMake 探测（aurora_find_clang_format）
-        # 同一条命令形态，cwd 即仓库根、--style=file 逐级上溯找 .clang-format。
+        # 同一条命令形态——钉死配置绝对路径（对应 cmake/AuroraUtils.cmake 的 AURORA_CLANG_FORMAT_STYLE），
+        # 不依赖 cwd，也不依赖被检查文件的位置。
         # 不写这一行，源里换到不兼容的 patch 构建时只会静默回到老问题。
-        clang-format --dump-config --style=file >/dev/null
+        clang-format --dump-config "--style=file:${GITHUB_WORKSPACE}/.clang-format" >/dev/null
         clang-format --version
