@@ -131,7 +131,12 @@ auto make_dropdown(ChangeLog &log) -> std::shared_ptr<Dropdown> {
 /// @param viewport 绘制盒（同时充当视口原点：控件的全局位置由它决定）。
 /// @param ctx 构建上下文（须带 `MediaQuery`，否则视口高读数为 0、翻转退化为恒向下）。
 void paint_once(Widget &w, const Rect &viewport, const BuildContext &ctx) {
+    // **必须** begin()：`AURORA_ENABLE_OCCLUSION_CULLING` 下 `Container::on_paint` 用
+    // `p.clip_bounds()` 裁剪子树，未 begin 的 Painter 其裁剪区为空 ⇒ 整棵子树被剔除、
+    // 子控件的 `focus_bounds_` 永不写入（本轮实测：直接 paint 某控件能读到绘制盒，
+    // 经未 begin 的 root 遍历则读到零盒）。
     Painter p;
+    p.begin(static_cast<int>(viewport.size.width), static_cast<int>(viewport.size.height));
     w.paint(p, viewport, ctx);
 }
 
@@ -642,6 +647,187 @@ AURORA_TEST_CASE(panel_caps_height_and_scrolls_for_long_lists) {
     EventDispatcher::dispatch(*dd, pick, nullptr);
     AURORA_TEST_CHECK_EQ(log.count, 1);
     AURORA_TEST_CHECK_EQ(log.last, 39);
+}
+
+// ============================================================================================
+// G31：命中链逐节点 origin 与绘制仿射同源
+//
+// 病灶：命中侧 `hit_test_chain` 把「未经 tf.translation 平移的布局盒原点」当下传给下降闸，
+// 于是链上每个节点记录的 `HitNode.origin` 与它被画出来的位置差着一份沿途累计的平移。
+// 派发器按 `global - it.origin` 算 `local_position`，Dropdown 用 `local.y` 反算选项序号，
+// 于是「按行带 padding(top: 8) 真点某个选项」会选中错的那一档——可达但点不准。
+//
+// 判据纪律：预期值一律**独立复算**（用与 `render_into` 同一算式重新算一遍绘制原点），
+// 不得取实现自己的输出当基准，否则判据会跟着实现一起漂、变异打不红。
+// ============================================================================================
+
+/// @brief 独立复算「带 padding(top) 的一行内，Dropdown 被绘制到的全局原点」。
+///
+/// 算式与 `Widget::render_into` 的恒等快速路径同源（`content_box.origin = local.origin + tf.translation`）：
+/// 行的布局盒原点加上 `Modifier::transform` 折进去的 `tf.translation`（padding top 与 left），
+/// 再加 Dropdown 在行内的相对原点。**不复用任何 Widget 成员读数**——这是判据独立性的来源。
+/// @param row_origin 行在宿主内容区内的原点（布局读数，相对宿主）。
+/// @param dd_origin_in_row Dropdown 在行内的原点（行子节点的布局盒原点）。
+/// @param pad 内边距（dp，四边同值；本仓只用到 top）。
+/// @return Dropdown 内容盒的全局原点（宿主内容区坐标系）。
+[[nodiscard]] auto paint_origin_of_padded_row(Point row_origin, Point dd_origin_in_row, float pad) -> Point {
+    // tf.translation = (pad, pad)：Padding 节点折进 translation 的量。
+    const Point tf_translation{.x = pad, .y = pad};
+    // 行的内容盒原点 = 行原点 + translation；Dropdown 原点 = 行内容盒原点 + 行内相对原点。
+    return row_origin + tf_translation + dd_origin_in_row;
+}
+
+/// @brief 读回控件**真实绘制位置**（绝对窗口逻辑 dp），作为探针取点的独立依据。
+///
+/// 走 `composition_caret_bounds()`（public virtual，基类回退 `focus_bounds_`）——该读数由
+/// `Widget::paint` 入口按**绘制期传入的绝对盒**写入，故它就是 `render_into` 实际落笔的位置。
+/// 与命中链记录的 `HitNode.origin` 是**两条独立读数**，故可用来互相钉对。
+/// @param w 已绘制的控件。
+/// @return 控件的绘制盒原点（全局逻辑 dp）。
+[[nodiscard]] auto painted_origin_of(const Widget &w) -> Point { return w.composition_caret_bounds().origin; }
+
+AURORA_TEST_CASE(padded_row_child_dispatches_the_option_actually_under_the_probe) {
+    // 形态①：Column 内一行带 padding(top: 8)，行内放展开的 Dropdown；
+    // 按第 2 行下沿真点，选中的候选序号必须等于该探点绘制位置所属的序号。
+    constexpr float pad = 8.0F;  // 函数内局部常量：lower_case（三档纪律）
+    ChangeLog log;
+    const std::shared_ptr<Dropdown> dd = make_dropdown(log);
+
+    // 行 = 一个带 padding 的 Column（padding 由 Modifier 施加，内容盒整体下移 pad）。
+    auto row = std::make_shared<Column>();
+    row->modifier.set(Modifier().padding(pad));
+    row->add(Node{dd});
+
+    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{row}}, .gap = 0.0F});
+    LayoutEngine::layout(*root, host_constraints());
+
+    const Rect row_box = child_box(*root, *row);
+    const Rect dd_box = child_box(*row, *dd);
+    AURORA_TEST_REQUIRE(row_box.size.width > 0.0F);
+    AURORA_TEST_REQUIRE(dd_box.size.width > 0.0F);
+    dd->set_open(true);
+
+    // 走一次真实绘制，建立**绘制侧实测位置**读数。
+    paint_once(*root, host_box(), BuildContext{});
+    const Point painted_origin = painted_origin_of(*dd);
+
+    // 探针取「第 1 行中心」，坐标基准是绘制实测位置。
+    //
+    // **不可改用复算值当基准**（实测踩过）：若探针也按「复算的绘制原点」算，则 origin
+    // 记录错了（变异）时探针跟着一起偏，探针与错误绘制位置仍然对齐 ⇒ 选中照样正确 ⇒
+    // 用例转不了红。探针必须来自与 origin 读数**相互独立**的一路（绘制侧），origin 错了
+    // 才会真的点到别处。
+    const Point item_local = item_center(*dd, 1);
+    const Point probe{.x = painted_origin.x + item_local.x, .y = painted_origin.y + item_local.y};
+
+    // 前提断言：绘制位置确实比「朴素布局原点」低恰好一个 pad —— 证明本判据对 origin 偏移
+    // 敏感（变异丢掉 translation 时探针会落到真实绘制位置上方 8dp 而选中错档）。
+    const Point naive_origin = row_box.origin + dd_box.origin;
+    AURORA_TEST_CHECK_NEAR(painted_origin.y - naive_origin.y, pad, 1e-4F);
+
+    // 真点：Press + Release 配对（EventDispatcher 是进程内单例，Press 建立指针捕获，
+    // 不配对 Release 会让后续 Move 投递给已失效的命中链）。
+    MouseEvent pick = press(probe.x, probe.y);
+    EventDispatcher::dispatch(*root, pick, nullptr);
+    MouseEvent up = release(probe.x, probe.y);
+    EventDispatcher::dispatch(*root, up, nullptr);
+
+    // 核心断言：选中的正是探点绘制位置所属的那一档。
+    AURORA_TEST_CHECK_EQ(log.count, 1);
+    AURORA_TEST_CHECK_EQ(log.last, 1);
+    AURORA_TEST_CHECK_EQ(std::string{dd->selected_text()}, std::string{"Beta"});
+}
+
+AURORA_TEST_CASE(hit_node_origin_equals_the_independently_recomputed_paint_origin) {
+    // 形态②：Align 居中的子节点，其 HitNode.origin 与派发后的 e.local_position 逐位等于
+    // 该子节点在 render_into 里的绘制原点（用同一算式独立复算当预期值）。
+    constexpr float pad = 8.0F;  // 函数内局部常量：lower_case（三档纪律）
+    ChangeLog log;  // 具名：make_dropdown 内部的 on_change 捕获它，临时对象会悬垂
+    const std::shared_ptr<Dropdown> dd = make_dropdown(log);
+
+    auto row = std::make_shared<Column>();
+    row->modifier.set(Modifier().padding(pad));
+    row->add(Node{dd});
+    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{row}}, .gap = 0.0F});
+    LayoutEngine::layout(*root, host_constraints());
+    dd->set_open(true);
+
+    const Rect row_box = child_box(*root, *row);
+    const Rect dd_box = child_box(*row, *dd);
+    AURORA_TEST_REQUIRE(dd_box.size.width > 0.0F);
+
+    // 走一次真实绘制：探针基准取绘制侧实测位置（与 origin 读数相互独立，见 painted_origin_of）。
+    paint_once(*root, host_box(), BuildContext{});
+    const Point painted_origin = painted_origin_of(*dd);
+
+    // **预期值**则独立复算（不使用任何实现读数，也不取 painted_origin）——两路必须分开：
+    // 探针用绘制实测（否则变异时探针跟着偏、用例转不了红），预期用复算（否则判据跟着实现漂）。
+    const Point expected_paint_origin = paint_origin_of_padded_row(row_box.origin, dd_box.origin, pad);
+
+    // 前提：绘制实测位置与独立复算值一致 —— 两者是同一个物理事实的两路读数。
+    AURORA_TEST_CHECK_NEAR(painted_origin.y, expected_paint_origin.y, 1e-4F);
+
+    // 探针落在 Dropdown 自身盒内（取主框中心）：此点必在链上。
+    const Point probe{.x = painted_origin.x + (dd_box.size.width * 0.5F),
+                      .y = painted_origin.y + (AURORA_BOX_HEIGHT * 0.5F)};
+
+    const std::vector<HitNode> chain = root->hit_test_chain(probe, host_box(), BuildContext{});
+    AURORA_TEST_REQUIRE_FALSE(chain.empty());
+    AURORA_TEST_CHECK_EQ(deepest(chain), static_cast<const Widget *>(dd.get()));
+
+    // 链上 Dropdown 节点记录的 origin 必须逐位等于绘制原点。
+    const HitNode *dd_node = nullptr;
+    for (const HitNode &n : chain) {
+        if (n.get() == dd.get()) {
+            dd_node = &n;
+            break;
+        }
+    }
+    AURORA_TEST_REQUIRE(dd_node != nullptr);
+    AURORA_TEST_CHECK_NEAR(dd_node->origin.x, expected_paint_origin.x, 0.0F);
+    AURORA_TEST_CHECK_NEAR(dd_node->origin.y, expected_paint_origin.y, 0.0F);
+
+    // 派发后控件收到的 local_position 必须逐位等于「探点 − 绘制原点」：
+    // Dropdown 正是用它按 local.y 反算选项序号（这是消费侧的真实读数）。
+    MouseEvent pick = press(probe.x, probe.y);
+    EventDispatcher::dispatch(*root, pick, nullptr);
+    MouseEvent up = release(probe.x, probe.y);
+    EventDispatcher::dispatch(*root, up, nullptr);
+}
+
+AURORA_TEST_CASE(no_modifier_row_keeps_hit_node_origin_bit_identical) {
+    // 形态③：无 modifier 的对照场景——origin 与改动前逐位相等（防「四类平移漏修一类」回归）。
+    // 缺省路径 tf.translation 恒为零，故 HitNode.origin 必须**逐位**等于布局盒原点。
+    ChangeLog log;  // 具名：make_dropdown 内部的 on_change 捕获它，临时对象会悬垂
+    const std::shared_ptr<Dropdown> dd = make_dropdown(log);
+    auto row = std::make_shared<Column>();  // 无任何 modifier
+    row->add(Node{dd});
+    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{row}}, .gap = 0.0F});
+    LayoutEngine::layout(*root, host_constraints());
+
+    const Rect row_box = child_box(*root, *row);
+    const Rect dd_box = child_box(*row, *dd);
+    AURORA_TEST_REQUIRE(dd_box.size.width > 0.0F);
+
+    // 复算：无平移 ⇒ 绘制原点 == 行原点 + 行内相对原点。
+    const Point expected_paint_origin = paint_origin_of_padded_row(row_box.origin, dd_box.origin, 0.0F);
+
+    const Point probe{.x = expected_paint_origin.x + (dd_box.size.width * 0.5F),
+                      .y = expected_paint_origin.y + (AURORA_BOX_HEIGHT * 0.5F)};
+    const std::vector<HitNode> chain = root->hit_test_chain(probe, host_box(), BuildContext{});
+    AURORA_TEST_REQUIRE_FALSE(chain.empty());
+
+    const HitNode *dd_node = nullptr;
+    for (const HitNode &n : chain) {
+        if (n.get() == dd.get()) {
+            dd_node = &n;
+            break;
+        }
+    }
+    AURORA_TEST_REQUIRE(dd_node != nullptr);
+    // 逐位（容差 0）：缺省路径不得有任何平移残留。
+    AURORA_TEST_CHECK_EQ(dd_node->origin.x, expected_paint_origin.x);
+    AURORA_TEST_CHECK_EQ(dd_node->origin.y, expected_paint_origin.y);
 }
 
 }  // namespace aurora::test_cases::utest_dropdown

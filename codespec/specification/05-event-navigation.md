@@ -269,7 +269,25 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **「视口」的两种语义（注入那份为准）**：① **第一真值源** = `Window::prepare_context` 注入 `root_env_` 的那份（`MediaQuery::from_surface`，等价于 `Window::size()` ← `Surface::size()`），多窗口下各窗口互不串；② **可选覆写** = 应用经 `Provider<MediaQuery>` 显式注入的子树视口，适用于把子树布局在嵌入区、面板应贴合该区而非整窗的场景。`PanelGeometry` 读的是「最近祖先 Provider 值」，无 Provider 时即落到 ①。`Provider<T>` 是本仓既有的按子树覆盖机制（`widget/provider.h`），`MediaQuery` 是其已支持的类型。
 
-**验收**：`utest_dropdown` 新增五条——三层嵌套孙辈申报可达（`LazyList → Row → Dropdown`，正对照）、被裁剪的申报不可达（条目可见但面板整段在视口外）、`Scroll` 与 `LazyList` 两入口同形（派发链与 `covers_extra_hit_box` 同判）、面板翻转（贴视口下沿时向上）、面板限高 + 内部滚动（长列表尾部滚入后才可点）。变异自证：只回退 `covers_extra_hit_box` 的聚合段（保留控件侧 `extra_hit_box`）⇒ 三层嵌套用例转红；只回退 `LazyList` 的视口钳位 ⇒ 两条裁剪用例转红。两者分别证明「聚合」与「裁剪」各自是必要条件。 另有一条专钉「翻转不依赖绘制期缓存」：`panel_flips_up_at_viewport_bottom` 构造一个**从未 paint** 的 `Dropdown`（`focus_bounds_` 为零盒），经 `ancestor_offset` 传入全局顶边后仍须判为上翻。变异自证：把 `extra_hit_box` 里的 `ancestor_offset.y` 换回 `focus_bounds_.origin.y` ⇒ 该断言转红（未翻转）。
+**验收**：`utest_dropdown` 新增五条——三层嵌套孙辈申报可达（`LazyList → Row → Dropdown`，正对照）、被裁剪的申报不可达（条目可见但面板整段在视口外）、`Scroll` 与 `LazyList` 两入口同形（派发链与 `covers_extra_hit_box` 同判）、面板翻转（贴视口下沿时向上）、面板限高 + 内部滚动（长列表尾部滚入后才可点）。变异自证：只回退 `covers_extra_hit_box` 的聚合段（保留控件侧 `extra_hit_box`）⇒ 三层嵌套用例转红；只回退 `LazyList` 的视口钳位 ⇒ 两条裁剪用例转红。两者分别证明「聚合」与「裁剪」各自是必要条件。 另有一条专钉「翻转不依赖绘制期缓存」：`panel_flips_up_at_viewport_bottom` 构造一个**从未 paint** 的 `Dropdown`（`focus_bounds_` 为零盒），经 `ancestor_offset` 传入全局顶边后仍须判为上翻。变异自证：把 `extra_hit_box` 里的 `ancestor_offset.y`换回 `focus_bounds_.origin.y` ⇒ 该断言转红（未翻转）。
+
+#### 3.2.3 命中链的坐标模型：origin 与绘制仿射同源
+
+**不变量**：命中链里逐节点记录的 `HitNode.origin`，必须与该控件在 `render_into` 里被绘制的**内容盒原点**逐位相等。二者是同一份读数，不得各算一份。
+
+**为什么是硬要求**：`EventDispatcher` 按 `e.local_position = global − it.origin` 本地化坐标，消费方再拿它做本地几何判定（`Dropdown` 按 `local.y` 反算选项序号、`TitleBar` 按 `local.y` 定吸附边）。origin 少减一份平移，误差就整体落在「点得准不准」上——**可达但点不准**：覆盖绘制区照旧能进链（那是上一节的聚合判据），但交回的坐标偏了。
+
+**同源的唯一真值源**：`Modifier::TransformInfo::translation`。`Modifier::transform` 把 `Padding` / `PaddingEdges` / `Align` / `Offset` 四类平移**一律**折进 `tf.translation`，绘制侧 `render_into` 据此算内容盒原点（`src/aurora/widget/widget.cpp`），命中侧必须复用同一份产物。**禁止**在命中侧另写一份「加不加 padding」的算式：只补 `Padding` 等于把病灶换个名字留下（`Align` 尤其要算，它已经通过 `hit_size` 收缩改变了命中盒，却不改记录的 origin）。
+
+实现上由 `content_origin()` 一处产出（与 `render_into` 共用），`hit_test_chain` 的 `self_box.origin`、入链时记入的 `HitNode.origin`、以及 `covers_own_extra_hit_box` 的 `ancestor_offset` 三者同取该值——**三处必须一起改**，只改其一会让「派发入口」与「兼容入口」分叉。
+
+**两处不必同源**：① `self_local`（原点归零）用于本控件自身的命中盒判定，其坐标系是内容局部，与 origin 无关；② 各容器覆写里由 `bounds.origin + cb.origin` 累加出的**子**盒——它接收的 `bounds` 已经是内容原点，故累加结果自动同源，不得再加一次 `translation`（会双重平移）。
+
+**非恒等 matrix 分支**：`tf.matrix` 非恒等时绘制走离屏合成（内容盒先落在离屏缓冲、再经 `translate(local.origin) ∘ mtx` 贴回），此时内容盒**不存在单一「原点」概念**（旋转会让不同子节点的偏移方向不同）。本仓的处理是记 `tf.translation` 作代表点：与恒等支口径一致，且与 `adjust_for_transform` 保持互逆（实测往返误差 ~1e-5）。`adjust_for_transform` 的次序（`mtx⁻¹ · local − t`）经独立复算验证**与绘制正向映射互逆**，勿改。
+
+**验收**：`utest_dropdown` 三条。① `padded_row_child_dispatches_the_option_actually_under_the_probe`：Column 内一行带 `padding(top: 8)`，行内放展开的 Dropdown，按第 1 行的**绘制位置**真点，`on_change` 收到的序号必须等于该序号——端到端，且判据对 origin 偏移敏感（同时断言「朴素布局原点」与「复算绘制原点」相差恰为 pad）。② `hit_node_origin_equals_the_independently_recomputed_paint_origin`：链上该节点的 `HitNode.origin` 逐位等于**独立复算**的绘制原点。③ `no_modifier_row_keeps_hit_node_origin_bit_identical`：无 modifier 时**容差 0** 的逐位相等，守住「缺省路径零变化」。
+
+**预期值必须独立复算**：三条判据的期望原点都由测试自己按 `render_into` 的算式重算（`row_origin + (pad, pad) + dd_origin_in_row`），**不得取实现自己的输出当基准**——否则判据会跟着实现一起漂，变异打不红。变异自证：只在祖先闸那里把内边距减掉、而 origin 不同源 ⇒ 形态①②转红；把 `content_origin()` 退回 `widget_origin`（丢弃 translation）⇒ ①②③ 全部转红。
 
 
 ### 3.3 嵌套滚动协调（滚轮余量上冒）

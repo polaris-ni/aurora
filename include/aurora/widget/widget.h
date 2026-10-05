@@ -1065,9 +1065,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 返回直接子节点**视图**（引用，零拷贝；introspection/深度守卫用）。默认空。
     /// Container/Repeater/SingleChild 覆写以暴露真实子节点。
-    /// @note 以引用返回（而非副本）：若按值返回 `std::vector<Node>`，临时副本析构会触发
-    ///       `Node::~Node` 清空子控件的 `layout_parent_`（树所有权语义），使遍历后
-    ///       `request_frame` 沿父链上溯断链、脏标记无法到达渲染根（历史 bug：grid_rows 滚动失效）。
+    /// @note 以引用返回（而非副本）：副本析构不得改变任何控件的 `layout_parent_`。
+    ///       该不变量由「摘除一律走父侧 `detach_child_layout_parent`」保证（`~Node` 已不再清
+    ///       父指针，见 `widget.cpp`），故按值返回除多余拷贝外是安全的；仍以引用返回是为
+    ///       零拷贝，历史上 `Node::~Node` 的无条件清零曾使本接口按值返回即断链
+    ///       （历史 bug：grid_rows 滚动失效）。
     /// @warning 返回的引用在树重建（子节点增删）期间可能失效，仅限单帧内只读遍历。
     /// @return 直接子节点的引用视图；基类返回静态空表（无子节点的控件）。
     [[nodiscard]] virtual auto child_nodes() const -> const std::vector<Node> & {
@@ -1077,9 +1079,61 @@ class Widget : public std::enable_shared_from_this<Widget> {
         return EMPTY;
     }
 
+    /// @brief 返回直接子节点的**可写**视图（供容器下行清父链用）。
+    ///
+    /// 与 `child_nodes()` 的关系：默认实现返回本控件的可写存储（`const_cast` 掉 `child_nodes()`
+    /// 的 const），故对**没有**覆写 `child_nodes()` 的控件恒为空、对覆写者与 const 版同源。
+    /// 之所以不直接在 `child_nodes()` 上 `const_cast`：`child_nodes()` 的 const 是 introspection
+    /// 通道的契约（`dump_tree` / `find_widget_by_path` 只读），把可写能力混进同一入口会让
+    /// 「谁在改子树」不可辨识。
+    ///
+    /// 覆写 `child_nodes()` 的容器（`Container` / `SingleChild` 等）应**同时**覆写本函数返回
+    /// 可写引用，使下行清零不必依赖 `const_cast`。
+    /// @warning 返回的引用在树重建（子节点增删）期间失效；仅供容器析构 / 换子路径单次遍历。
+    /// @return 直接子节点的可写引用视图；基类返回静态空表（无子节点的控件）。
+    [[nodiscard]] virtual auto child_nodes_mut() -> std::vector<Node> & {
+        // 理由：覆写者返回自身可变成员；未覆写者返回的就是本控件的静态空表，
+        // const_cast 无副作用。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+        return const_cast<std::vector<Node> &>(child_nodes());
+    }
+
     /// @brief 读取最近一次布局得到的自身尺寸（`Widget::layout` 写回 `size_` 的读数）。
     /// @return 本控件尺寸（dp）：`show == false` 时为零盒，显式宽高意图则严格等于设定值。
     [[nodiscard]] auto size() const -> Size { return size_; }
+
+    /// @brief 摘除一个子控件：清零它的布局父指针，使「这控件确实脱离了这一只父」可被观测。
+    ///
+    /// 父侧下行清零的唯一入口。**所有**让子节点离开本容器的路径（容器析构、`remove_child`、
+    /// `set_children` / `adopt_children` / `set_child` 整体替换）都必须经此调用，理由：
+    ///
+    /// - 布局父链是脏标记上溯（`mark_needs_layout_impl` / `request_frame`）与布局 / Display List
+    ///   缓存向上失效的**共同前提**（见 `widget.cpp` 的 `t_layout_parent`）。留一个已死的父
+    ///   指针 = 上溯解引用悬垂；留一个「已脱离却仍挂着旧父」的指针 = 脏标记传播到不该到的子树。
+    /// - 判定必须留在**父侧**：`Node` 是可共享句柄，控件析构时无从判断自己是临时句柄还是
+    ///   唯一持有者（`use_count()` 对「临时副本」与「父先亡」两种情形取值相同，分不开）。
+    ///   父容器明确知道「这些子节点要脱离我了」，故这里是唯一真值源。
+    ///
+    /// 另发一条 `AURORA_LOG_WARN`：被清的是**仍存活**控件的父指针（真正销毁控件的路径不经本
+    /// 函数），这是消费方可观测的断链信号，用于把「控件已脱离树却仍被标脏」与「忘记标脏」区分开。
+    /// @param child 待摘除的子控件（非空，且其 `layout_parent()` 确为 `this`）。
+    /// @note Side-effects: 写 `child->layout_parent_`（清零）；子控件仍存活，不触及其析构。
+    /// @note Thread: main-thread only
+    void detach_child_layout_parent(Widget *child);
+
+    /// @brief 摘除全部直接子节点的布局父指针（父先亡那一半的悬垂防护）。
+    ///
+    /// 子控件被外部 `shared_ptr` 持有时，父容器析构不会连带销毁它，此时它的 `layout_parent_`
+    /// 会指向已析构的父 —— 后续 `mark_needs_layout()` 沿链上溯即解引用悬垂指针。
+    /// 基类析构体执行时 `this` 仍是合法 `Widget*`（派生部分已析构，但本函数只调子控件的
+    /// `set_layout_parent`，不触碰 `this` 的派生状态），故可安全下行。
+    ///
+    /// 持有子节点的容器**必须**在其析构路径调用本函数（`~Widget` 基类版本遍历
+    /// `child_nodes()`；容器子类若自行覆写析构则须在析构体首行调用），否则该容器摘除时
+    /// 留悬垂父链。
+    /// @note Side-effects: 写各子控件的 `layout_parent_`（清零）。
+    /// @note Thread: main-thread only
+    void detach_all_children_layout_parent();
 
   protected:
     /// @brief 子类实现：在给定约束下返回自身尺寸（可写入子节点 bounds）。
@@ -1436,6 +1490,39 @@ class Widget : public std::enable_shared_from_this<Widget> {
 /// @note Rebuildable: yes, via from_json
 ///
 class Container : public Widget {
+  public:
+    /// @brief 析构：下行清零全部子节点的布局父指针（父先亡的悬垂防护）。
+    ///
+    /// 子控件被外部 `shared_ptr` 持有时容器析构不连带销毁它，其 `layout_parent_` 若留着
+    /// 本容器地址，后续 `mark_needs_layout()` 沿链上溯即解引用悬垂指针。`~Node` 已不再清
+    /// 父指针（它分不清临时句柄与真摘除），故这一半必须由父侧承担。
+    /// @note Side-effects: 写各子控件的 `layout_parent_`（清零）。
+    /// @note Thread: main-thread only
+    /// @note 定义在 widget.cpp：与 `Node::~Node` 同理，析构所需的工具豁免注释与头内文档块的
+    ///       邻接关系会与 `check_doc_comments` 的 DOC-R3 / DOC-R4 互斥，故定义移出头文件。
+    ~Container() override;
+
+    /// @brief 默认构造（显式补回，值实现）：声明移动构造 / 析构后默认构造不再隐式生成。
+    Container() = default;
+
+    /// @brief 拷贝构造：禁用（`Widget` 已禁用拷贝——拷贝会复制 `runtime_id_`，令两个实例共用身份）。
+    Container(const Container &) = delete;
+
+    /// @brief 拷贝赋值：禁用（同拷贝构造）。
+    /// @return 该重载恒为 `= delete`，任何拷贝赋值尝试止于编译期。
+    auto operator=(const Container &) -> Container & = delete;
+
+    /// @brief 移动构造（显式补回，值实现）：声明了析构函数后，编译器不再隐式生成移动构造，
+    ///       而派生容器（`Row` / `Column` 等）被整体搬入 `Node` 是既有形态
+    ///       （见 `media/video_controls.cpp` 的 `make_unique<Row>(std::move(row))`）。
+    /// @param other 源容器（其子节点随本容器接管；源容器随即不再持有这些子节点）。
+    Container(Container &&other) noexcept = default;
+
+    /// @brief 移动赋值（显式补回，理由同 `Container(Container&&)`）。
+    /// @param other 源容器。
+    /// @return 自身引用。
+    auto operator=(Container &&other) noexcept -> Container & = default;
+
   protected:
     std::vector<Node> children_;  // NOLINT(*-non-private-member-variables-in-classes)
 
@@ -1563,13 +1650,20 @@ class Container : public Widget {
 
     /// @brief 接纳子节点列表（Container 实现：整体搬入 `children_`，替换既有子树）。
     /// @param kids 待接管的子节点；本实现以 `std::move` 消费，故抑制「右值形参未 move」告警。
+    /// @note 替换掉的旧子节点先经 `detach_child_layout_parent` 清父链：它们若被外部
+    ///       `shared_ptr` 持有则继续存活，留着指向本容器的旧父链已不成立（`~Node` 不再兜底）。
     auto adopt_children(std::vector<Node> &&kids) -> void override {
+        detach_all_children_layout_parent();
         children_ = std::move(kids);
     }  // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
 
     /// @brief 子节点视图（Container 实现）：直接返回 `children_` 本体，零拷贝。
     /// @return 直接子节点的引用视图；树结构变更（`add` / `remove_child` / `adopt_children`）期间可能失效。
     [[nodiscard]] auto child_nodes() const -> const std::vector<Node> & override { return children_; }
+
+    /// @brief 可写子节点视图（`Container` 实现）：供析构 / 换子路径下行清父链，避免 `const_cast`。
+    /// @return `children_` 的可写引用。
+    [[nodiscard]] auto child_nodes_mut() -> std::vector<Node> & override { return children_; }
 
     /// @brief 默认收集子节点信号（遍历 `children_`）。
     /// 容器子类若有自身信号，覆写时先 push 自身信号再调用 `Container::collect_signals(out)`。
@@ -1592,11 +1686,15 @@ class Container : public Widget {
     /// @brief 按控件地址移除子节点（如 Dismissible 飞出后自摘；Node 随之析构释放）。
     /// @param w 待移除的子控件地址（与 `children_` 中节点的 `widget()` 地址比对；只读，不用于解引用）。
     /// @return 是否找到并移除。移除后标记重排（树结构变化对外可见，可后续 observe）。
+    /// @note 先清该子节点的布局父指针再 erase：子控件可能被外部 `shared_ptr` 持有而继续
+    ///       存活，`~Node` 不再兜底清父链（它分不清临时句柄与真摘除），故「真摘除」这一半
+    ///       由本路径显式承担。
     auto remove_child(const Widget *w) -> bool {
         const auto it = std::ranges::find_if(children_, [w](const Node &n) { return &n.widget() == w; });
         if (it == children_.end()) {
             return false;
         }
+        detach_child_layout_parent(it->operator->());
         children_.erase(it);
         mark_needs_layout();
         return true;
@@ -1663,13 +1761,41 @@ class LeafWidget : public Widget {
 /// @note Rebuildable: yes, via from_json
 ///
 class SingleChild : public Widget {
+  public:
+    /// @brief 析构：下行清零唯一子节点的布局父指针（父先亡的悬垂防护）。
+    /// @note Side-effects: 写子控件的 `layout_parent_`（清零）。
+    /// @note Thread: main-thread only
+    /// @note 定义在 widget.cpp：理由同 `~Container`（豁免注释与文档块的邻接关系会与
+    ///       `check_doc_comments` 的 DOC-R3 / DOC-R4 互斥）。
+    ~SingleChild() override;
+
+    /// @brief 拷贝构造：禁用（`Widget` 已禁用拷贝，理由同 `Container`）。
+    SingleChild(const SingleChild &) = delete;
+
+    /// @brief 拷贝赋值：禁用（同拷贝构造）。
+    /// @return 该重载恒为 `= delete`，任何拷贝赋值尝试止于编译期。
+    auto operator=(const SingleChild &) -> SingleChild & = delete;
+
+    /// @brief 移动构造（显式补回，值实现）：理由同 `Container(Container&&)`——声明析构函数后
+    ///       编译器不再隐式生成移动构造，而单子容器被整体搬入 `Node` 是既有形态。
+    /// @param other 源容器（其子节点随本容器接管）。
+    SingleChild(SingleChild &&other) noexcept = default;
+
+    /// @brief 移动赋值（显式补回，理由同 `SingleChild(SingleChild&&)`）。
+    /// @param other 源容器。
+    /// @return 自身引用。
+    auto operator=(SingleChild &&other) noexcept -> SingleChild & = default;
+
   protected:
     SingleChild() = default;
     explicit SingleChild(Node child) : child_(std::move(child)) {}
 
     /// @brief 运行时替换唯一子节点（aurora::ui 工厂层复用）。标脏，下一帧重排。
     /// @param child 新的子节点；移入 `child_`，旧子节点随之释放。
+    /// @note 旧子节点先清父链：它若被外部 `shared_ptr` 持有则继续存活，留着指向本容器的
+    ///       旧父链已不成立（`~Node` 不再兜底，见 `Widget::detach_child_layout_parent`）。
     auto set_child(Node child) -> void {
+        detach_all_children_layout_parent();
         child_ = std::move(child);
         child_view_valid_ = false;
         mark_needs_layout();
@@ -1680,6 +1806,11 @@ class SingleChild : public Widget {
     /// @brief child_nodes() 视图缓存（const 方法返回引用需持久存储；set_child 时置失效）。
     mutable std::vector<Node> child_view_;
     mutable bool child_view_valid_ = false;
+    /// @brief child_nodes_mut() 的可写视图：与 `child_` 同步维护的**单元素**表。
+    ///
+    /// 不能直接对 `child_view_` 取可写引用（它是 `child_nodes()` 的缓存拷贝，改它只改副本、
+    /// 真实子节点不受影响），故另存一份与 `child_` 同步的可写表；`set_child` / 析构期重建。
+    std::vector<Node> child_view_mut_;
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
@@ -1758,6 +1889,25 @@ class SingleChild : public Widget {
             child_.widget().set_layout_parent(this);
         }
         return Widget::layout(c, ctx);
+    }
+
+  protected:
+    /// @brief 可写子节点视图（`SingleChild` 实现）：返回与 `child_` 同步的单元素可写表。
+    ///
+    /// **不可**复用 `child_nodes()` 的 `child_view_` 缓存：那是一份**拷贝**，对它取可写引用
+    /// 会让清父链的副作用落在缓存副本上（真实子节点的 `layout_parent_` 反而没被清）。
+    /// 每次调用按 `child_` 惰性重建，保证析构 / 换子路径读到的一定是当前真实子节点。
+    /// @return 与 `child_` 同步的可写引用（`child_` 为空时返回静态空表）。
+    [[nodiscard]] auto child_nodes_mut() -> std::vector<Node> & override {
+        if (!child_) {
+            static std::vector<Node> EMPTY;  // NOLINT: 故意可变（返回类型为非 const 引用）
+            return EMPTY;
+        }
+        if (child_view_mut_.size() != 1U || &child_view_mut_.front().widget() != &child_.widget()) {
+            child_view_mut_.clear();
+            child_view_mut_.push_back(child_);
+        }
+        return child_view_mut_;
     }
 };
 

@@ -8,6 +8,7 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/core/debug.h"
 #include "aurora/core/diagnostics.h"
+#include "aurora/core/log.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/focus.h"
 #include "aurora/modifier/modifier.h"
@@ -148,8 +149,61 @@ Node::~Node() {
         Widget *host = widget_->layout_parent();
         notify_accessibility_structure_changed(host);
     }
-    widget_->set_layout_parent(nullptr);
+    // **不再**在此清 `layout_parent_`。
+    //
+    // `Node` 是可共享句柄：本析构在「临时句柄 / 拷贝 / `std::move` 后的旧对象」情形下
+    // 也照样执行，而此时控件仍在世、仍挂在那一只父下面。无条件清会把活控件的布局父链
+    // 抹断，而 `mark_needs_layout_impl` / `request_frame` / `invalidate_display_list_up`
+    // 全靠它上溯（见 `t_layout_parent` 处的不变量说明）——脏标记被静默丢弃，无日志无断言
+    // （StrictMode 在本构建档关闭），表现为「改 show 后屏幕不动」。
+    //
+    // 「该控件确实脱离那一只父」与「那一只父先亡」两种情形改由**父侧**统一处理：父容器
+    // 析构与换子路径（`Container::remove_child` / `set_children` / `adopt_children` /
+    // `SingleChild::set_child`）主动下行清零（见 `Widget::detach_child_layout_parent`）。
+    // 父容器明确知道「这些子节点要脱离我了」，而子控件析构时无从判断自己是临时句柄还是
+    // 唯一持有者——`use_count()` 对「临时副本」与「父先亡」取值相同，分不开。
 }
+
+void Widget::detach_child_layout_parent(Widget *child) {
+    if (child == nullptr) {
+        return;
+    }
+    if (child->layout_parent() != this) {
+        // 不是本容器的直接子节点（或已被摘除）：不动。避免误清别人的父链。
+        return;
+    }
+    child->set_layout_parent(nullptr);
+    // 断链可见：被清的是**仍存活**控件的父指针（真正销毁控件的路径不经本函数），消费方
+    // 据此把「控件已脱离树却仍被标脏」与「忘记标脏」区分开。诊断文案按本仓口径用 ASCII。
+    AURORA_LOG_WARN("widget",
+                    "layout parent detached while the child widget is still alive: %s; dirty marks on it "
+                    "will no longer reach the render root",
+                    child->type_name());
+}
+
+void Widget::detach_all_children_layout_parent() {
+    // 遍历 `child_nodes_mut()`（可写视图）而非 `child_nodes()` / `for_each_child`：后两者都是
+    // const 通道，拿不到可写的 `Widget*` 去清 `layout_parent_`（`set_layout_parent` 非 const）。
+    //
+    // 调用时机约束：本函数虚分派 `child_nodes_mut()`，故**必须**由容器在自身析构体首行调用
+    // （此时动态类型仍是该容器）；放进 `~Widget` 基类会因派生部分已析构而分派到基类空实现，
+    // 静默漏清。
+    for (Node &n : child_nodes_mut()) {
+        if (!n) {
+            continue;
+        }
+        detach_child_layout_parent(&n.widget());
+    }
+}
+
+// 抛出面与 `Node::~Node` 同口径：detach_all_children_layout_parent 只做指针判空 / 赋值与
+// 一条日志，不分配、不回调宿主代码，故不会抛。
+// NOLINTNEXTLINE(bugprone-exception-escape)
+Container::~Container() { detach_all_children_layout_parent(); }
+
+// 抛出面理由同 `~Container`。
+// NOLINTNEXTLINE(bugprone-exception-escape)
+SingleChild::~SingleChild() { detach_all_children_layout_parent(); }
 
 /// @brief 把 widget 局部坐标 `local` 经修饰链的平移与仿射矩阵映射回「内容局部」坐标。
 /// 恒等矩阵时退化为 `local - translation`；否则用绕内容中心的逆矩阵映射，使
@@ -163,6 +217,26 @@ namespace {
 /// （`Widget::request_frame`）与布局/DL 缓存向上失效的共同前提。
 /// @note Thread: main-thread only（`thread_local` 仅为多渲染线程隔离，不做跨线程同步）
 thread_local Widget *t_layout_parent = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+/// @brief 本控件**内容盒**相对 widget 盒原点的偏移 = `render_into` 喂给 `paint_content`
+/// 的那份 `content_box.origin`（`local.origin + tf.translation`）。
+///
+/// 与 `render_into` 共用同一份 `Modifier::TransformInfo::translation` 产物：命中链逐节点
+/// 记录的 `HitNode.origin` 必须与绘制原点逐位相等，否则派发器按 `global - it.origin` 算出的
+/// `local_position` 会整体少减沿途累计的平移（表现为「可达但点不准」）。**不得在命中侧另写
+/// 一份「加不加 padding」的算式**——四类平移（Padding / PaddingEdges / Align / Offset）都折进
+/// `tf.translation`，只补 Padding 等于把病灶换个名字留下。
+///
+/// 非恒等矩阵支：绘制走离屏合成（内容盒先落在 sub 缓冲的 `t` 处，再经 `translate(local.origin) ∘ mtx`
+/// 贴回），此时内容盒不存在单一「原点」概念，旋转会让不同子节点的偏移方向不同；本函数返回
+/// `t` 作为代表点，与绘制在**恒等**支的口径一致，且与 `adjust_for_transform` 保持互逆
+/// （二者共用同一 `translation`，实测往返误差 ~1e-5）。
+/// @param widget_origin 本控件布局盒的全局原点。
+/// @param tf 修饰链合成结果（`mod.transform(size)`）。
+/// @return 内容盒全局原点。
+[[nodiscard]] auto content_origin(const Point &widget_origin, const Modifier::TransformInfo &tf) -> Point {
+    return widget_origin + tf.translation;
+}
 }  // namespace
 
 static auto adjust_for_transform(const Modifier::TransformInfo &tf, Point local) -> Point {
@@ -524,8 +598,9 @@ auto Widget::render_into(Painter &dst, const Rect &local, const BuildContext &ct
     }
 
     if (tf.matrix.is_identity()) {
-        // 恒等快速路径：与旧行为完全一致（零回归）。
-        paint_content(dst, local, Rect{.origin = local.origin + tf.translation, .size = tf.content_size}, ctx);
+        // 恒等快速路径：与旧行为完全一致（零回归）。内容盒原点走共享 helper，与命中链
+        // 逐节点记录的 `HitNode.origin` 同源（见 `content_origin`）。
+        paint_content(dst, local, Rect{.origin = content_origin(local.origin, tf), .size = tf.content_size}, ctx);
     } else {
         // 离屏合成：把整棵子树渲染到离屏缓冲，再按仿射矩阵合成回目标缓冲，
         // 旋转/缩放内容（含文本经重采样）正确；命中测试用逆矩阵映射配套。
@@ -677,7 +752,14 @@ auto Widget::hit_test(const Point &local, const Rect &bounds, const BuildContext
     const Rect content_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = tf.content_size};
     // 自身盒尺寸按 hit_size 交给子类判定：链上没有 Align 时 hit_size == bounds.size，
     // 与历史行为逐位一致；有外侧 Align 时命中盒收缩到对齐后的子盒，与绘制盒同源。
-    const Rect self_box{.origin = bounds.origin, .size = tf.hit_size};
+    //
+    // `self_box.origin` 取**内容盒**全局原点（与 `render_into` 喂 `paint_content` 的那份同源，
+    // 见 `content_origin`），而非未经平移的布局盒原点：`local_adj` 已是内容局部坐标
+    // （`adjust_for_transform` 减掉了 translation），故下传的 origin 必须与它同一坐标系，
+    // 否则子节点记录的 `HitNode.origin` 会少减 `tf.translation`，派发器按 `global - origin`
+    // 算出的 `local_position` 随之整体偏移（可达但点不准）。缺省路径（链上无
+    // Padding / Align / Offset）tf.translation 恒为零，与改动前逐位相同。
+    const Rect self_box{.origin = content_origin(bounds.origin, tf), .size = tf.hit_size};
 
     for (const auto &mn : mod.nodes()) {
         if (mn->kind() == ModifierNode::Kind::Input) {
@@ -704,7 +786,14 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
     const Rect content_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = tf.content_size};
     // 命中盒尺寸按 hit_size 判定：链上无 Align 时等于布局盒（与历史行为逐位一致）；
     // 有外侧 Align 时收缩到对齐后的子盒，使「什么都没画的展开区」不再吞点击。
-    const Rect self_box{.origin = bounds.origin, .size = tf.hit_size};
+    //
+    // `self_box.origin` 取**内容盒**全局原点（与 `render_into` 喂 `paint_content` 的那份同源，
+    // 见 `content_origin`），而非未经平移的布局盒原点：`local_adj` 已是内容局部坐标
+    // （`adjust_for_transform` 减掉了 translation），下传 origin 必须与它同一坐标系，否则
+    // 子节点记录的 `HitNode.origin` 会少减 `tf.translation`，派发器按 `global - origin` 算出的
+    // `local_position` 随之整体偏移（可达但点不准）。缺省路径（链上无 Padding / Align / Offset）
+    // tf.translation 恒为零，与改动前逐位相同。
+    const Rect self_box{.origin = content_origin(bounds.origin, tf), .size = tf.hit_size};
     const Rect self_local{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = tf.hit_size};
     const bool hit_shrunk = tf.hit_size.width != bounds.size.width || tf.hit_size.height != bounds.size.height;
 
@@ -733,9 +822,10 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
     // 与历史行为逐位等价；有 Align 收缩命中盒（`hit_shrunk`）时，覆盖区正是靠这一项入链。
     // 用 covers_own_extra_hit_box（只看本控件自己的申报）而非聚合入口：自身入链意为
     // 「本控件接管这一个点」，后代申报的命中归后代所有，把中间容器一并拽进链会改变链的组成。
-    // bounds.origin 即本控件原点在视口坐标系中的位置（命中链里逐层下传的那份），
-    // 是翻转判据所需的全局偏移——与绘制期写回的 focus_bounds_ 无关，不受其缓存缺口影响。
-    if (!self_hit && covers_own_extra_hit_box(local_adj, ctx, bounds.origin)) {
+    // self_box.origin 即本控件**内容盒**原点在视口坐标系中的位置（与绘制同源，且是命中链里
+    // 逐层下传的那份），是翻转判据所需的全局偏移——与绘制期写回的 focus_bounds_ 无关，
+    // 不受其缓存缺口影响。
+    if (!self_hit && covers_own_extra_hit_box(local_adj, ctx, self_box.origin)) {
         self_hit = true;
     }
 
@@ -751,7 +841,10 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
         std::vector<HitNode> result;
         result.reserve(descendants.size() + 1);
         if (!self_in_chain) {
-            result.emplace_back(this, weak_from_this(), bounds.origin);
+            // 记入链的 origin 必须是**内容盒**原点（self_box.origin），与绘制同源：
+            // 派发器按 `global - it.origin` 本地化坐标，用布局盒原点会让 `local_position`
+            // 少减沿途累计的 `tf.translation`（Dropdown 按 local.y 反算选项序号即错位一档）。
+            result.emplace_back(this, weak_from_this(), self_box.origin);
         }
         result.insert(result.end(), descendants.begin(), descendants.end());
         return result;

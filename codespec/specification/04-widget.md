@@ -116,6 +116,17 @@ auto info = au::Button::describe_static();
 
 `on_paint` 收到的 `bounds` 是**全局坐标**（相对窗口客户区）；绘制原语必须基于 `bounds.origin` 计算。
 
+**布局父链的生命周期契约（`Node` 所有权）**：布局父链（`layout_parent_`）是脏标记上溯与缓存向上失效的共同前提，其完整性由两条**父侧**不变量保证，`Node::~Node` **不参与**：
+
+1. **句柄析构不得清活控件的父链**——`Node` 是可共享句柄（`shared_ptr` 语义），拷贝 / 临时（如 `SingleChild` 的视图缓存、`set_children` 的初始化列表）/ `std::move` 后的旧对象析构时，控件仍在世、仍挂在那一只父下面。`~Node` 无从区分「临时句柄没了」与「控件真脱离」（`use_count()` 对这两种情形取值相同），故**一律不碰** `layout_parent_`。
+2. **真摘除与父先亡都由父侧清零**——「该控件确实脱离那一只父」走 `Widget::detach_child_layout_parent`（经 `Container::remove_child` / `set_children` / `adopt_children` / `SingleChild::set_child`）；「那一只父先亡、子控件仍被外部 `shared_ptr` 持有」走 `Widget::detach_all_children_layout_parent`（`~Container` / `~SingleChild` 首行）。两者是**同一份真值源**——父容器明确知道「这些子节点要脱离我了」，而子控件析构时猜不出来。
+
+**断链必须可见**：`detach_child_layout_parent` 清的是**仍存活**控件的父指针（真正销毁控件的路径不经此函数），此时发一条 `AURORA_LOG_WARN`（category `widget`），供消费方把「控件已脱离树却仍被标脏」与「忘记标脏」区分开。`StrictMode` 另有影子断言（`request_frame` 内），但它在本仓多数构建档关闭，**不能**当作唯一防线。
+
+**新增容器的义务**：持有子节点的类须在析构体首行调 `detach_all_children_layout_parent()`。该函数虚分派 `child_nodes_mut()`，故**不能**放在 `~Widget` 基类里——那时派生部分已析构，会分派到基类空实现、静默漏清。另须注意 `SingleChild::child_nodes()` 返回的是**缓存副本**（`child_view_`），对它取可写引用会把清父链的副作用落在副本上，故 `SingleChild` 单独覆写 `child_nodes_mut()` 返回与 `child_` 同步的可写表。
+
+**验收**：`utest_layout_parent_chain` 三条——① 拷贝 / 进 `vector` 后丢弃 / `std::move` 后旧对象析构后，父链仍在且 `mark_needs_layout()` 仍抵达根侧汇聚回调；② `remove_child` 后 `layout_parent()` 为空、此后标脏不崩不悬垂；③ 父容器析构后仍存活的子控件 `layout_parent()` 为空。判据用「`on_dirty` 命中而根侧 `on_subtree_dirty` 不命中」区分「控件知道自己脏了」与「脏抵达了根」——只钉前者等于没钉病灶。变异自证：只在应用侧「顺手多标一层祖先脏」而不清断链 ⇒ ①②转红（补标是掩盖，不是修复）。
+
 ### 2.4 脏标记与缓存
 
 | 成员 | 说明 | 位置 |

@@ -271,6 +271,12 @@ for col in 0..cols:
 
 > 布局父链必须闭合：凡在 `on_layout` 中把子节点登记为布局父（`set_layout_parent`）的容器，必须完整登记全部子节点，否则脏标记无法上溯，缓存永不失效。
 
+> **闭合的另一半：父链不得被静默抹断。** 上溯（`mark_needs_layout_impl` → `request_frame` → 根侧 `on_subtree_dirty`）与布局 / Display List 缓存向上失效都沿 `layout_parent_` 单链进行，链上任一环失效都是**静默**的：无日志、无断言（`StrictMode` 在本仓多数构建档关闭），症状是「改了状态屏幕不动」。两条前提必须同时成立：
+> - **登记**（本节）：父容器的 `layout()` 入口为全部子节点登记父链。父链由构造保证（`Widget::layout` 的嵌套栈自动登记），历史上 `NavigatorHost` 漏登记过一次。
+> - **不抹断**（见 `04-widget.md` §2.3「布局父链的生命周期契约」）：`Node::~Node` **不**清 `layout_parent_`——它是可共享句柄，拷贝 / 临时 / `std::move` 后旧对象析构时控件仍在世、仍挂在那一只父下面，无条件清即断链。真摘除与父先亡一律由**父侧**清零（`detach_child_layout_parent` / `detach_all_children_layout_parent`），并在清「仍存活控件」的父指针时发 `AURORA_LOG_WARN`，使断链对消费方可见。
+>
+> 断链属**编程错误**而非受支持形态：它与「忘记标脏」症状相同（都表现为改了状态屏幕不动），故必须靠上述 WARN 把两者区分开，否则无从排查。
+
 ### 5.2 溢出策略
 
 | `OverflowStrategy` | 语义 |
