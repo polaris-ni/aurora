@@ -255,7 +255,7 @@ class LazyRow : public Widget, public LazyRowProps {
     /// @note Side-effects: reads state
     /// @return `{min=0, max=0, position=0, viewport=content=viewport_h_}`。
     [[nodiscard]] auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> override {
-        const double vh = static_cast<double>(viewport_h_);
+        const auto vh = static_cast<double>(viewport_h_);
         return AccessibilityScrollRange{.min = 0.0, .max = 0.0, .position = 0.0, .viewport = vh, .content = vh};
     }
 
