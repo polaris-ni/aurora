@@ -87,9 +87,9 @@ auto make_dropdown(ChangeLog &log) -> std::shared_ptr<Dropdown> {
 /// @param dd 已布局的下拉（取布局宽度）。
 /// @return 面板矩形；选项数为 0 时高度为零。
 [[nodiscard]] auto panel_rect(const Dropdown &dd) -> Rect {
-    return Rect{.origin = Point{.x = 0.0F, .y = AURORA_BOX_HEIGHT},
-                .size = Size{.width = dd.size().width,
-                             .height = static_cast<float>(dd.option_count()) * AURORA_ITEM_HEIGHT}};
+    return Rect{
+        .origin = Point{.x = 0.0F, .y = AURORA_BOX_HEIGHT},
+        .size = Size{.width = dd.size().width, .height = static_cast<float>(dd.option_count()) * AURORA_ITEM_HEIGHT}};
 }
 
 /// @brief 面板第 index 行中心的本地坐标。
@@ -151,8 +151,8 @@ AURORA_TEST_CASE(panel_press_selects_option_via_real_dispatch) {
     auto btn = Button(ButtonProps{.label = "Below"});
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
-    auto root = std::make_shared<Column>(
-        ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
+    auto root =
+        std::make_shared<Column>(ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect db = child_box(*root, *dd);
@@ -185,11 +185,8 @@ AURORA_TEST_CASE(panel_point_reaches_dropdown_in_lazy_list_item) {
     auto other = std::make_shared<Button>(ButtonProps{.label = "Other"});
     other->set_on_click([&other_hits]() -> void { ++other_hits; });
 
-    auto list = std::make_shared<LazyList>(2,
-                                           [dd, other](int index) -> Node {
-                                               return index == 0 ? Node{dd} : Node{other};
-                                           },
-                                           60.0F);
+    auto list = std::make_shared<LazyList>(
+        2, [dd, other](int index) -> Node { return index == 0 ? Node{dd} : Node{other}; }, 60.0F);
     LayoutEngine::layout(*list, host_constraints());
     dd->set_open(true);
 
@@ -217,8 +214,8 @@ AURORA_TEST_CASE(closed_dropdown_never_covers_the_sibling_below) {
     auto btn = Button(ButtonProps{.label = "Below"});
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
-    auto root = std::make_shared<Column>(
-        ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
+    auto root =
+        std::make_shared<Column>(ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
     LayoutEngine::layout(*root, host_constraints());
 
     const Widget &sibling = root->child_nodes().back().widget();
@@ -245,8 +242,8 @@ AURORA_TEST_CASE(point_below_open_panel_still_goes_to_sibling) {
     auto btn = Button(ButtonProps{.label = "Below"});
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
-    auto root = std::make_shared<Column>(
-        ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
+    auto root =
+        std::make_shared<Column>(ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect db = child_box(*root, *dd);
@@ -345,8 +342,7 @@ AURORA_TEST_CASE(extra_hit_box_matches_panel_rect_and_compat_entry) {
             const bool in_panel = panel.contains(p);
             AURORA_TEST_CHECK_EQ(dd->covers_extra_hit_box(p, BuildContext{}), in_panel);
             // 面板内的点：兼容入口同样认（判定同源）；面板外且在盒外的点：两入口都不认。
-            AURORA_TEST_CHECK_EQ(dd->hit_test(p, self, BuildContext{}) == dd.get(),
-                                 self.contains(p) || in_panel);
+            AURORA_TEST_CHECK_EQ(dd->hit_test(p, self, BuildContext{}) == dd.get(), self.contains(p) || in_panel);
         }
     }
 }

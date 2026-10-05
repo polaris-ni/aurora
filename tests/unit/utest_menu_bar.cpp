@@ -99,9 +99,9 @@ auto make_menu_bar(int &hits, int &last) -> std::shared_ptr<MenuBar> {
 /// @param item_count 展开菜单的菜单项数。
 /// @return 浮层矩形（x 取 0：展开的是第 0 个顶级菜单）。
 [[nodiscard]] auto flyout_rect(std::size_t item_count) -> Rect {
-    return Rect{.origin = Point{.x = 0.0F, .y = AURORA_BAR_HEIGHT},
-                .size = Size{.width = AURORA_FLYOUT_WIDTH,
-                             .height = static_cast<float>(item_count) * AURORA_ITEM_HEIGHT}};
+    return Rect{
+        .origin = Point{.x = 0.0F, .y = AURORA_BAR_HEIGHT},
+        .size = Size{.width = AURORA_FLYOUT_WIDTH, .height = static_cast<float>(item_count) * AURORA_ITEM_HEIGHT}};
 }
 
 /// @brief 浮层第 index 行中心的本地坐标。
@@ -187,11 +187,8 @@ AURORA_TEST_CASE(flyout_point_reaches_menu_bar_in_lazy_list_item) {
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
     auto other = std::make_shared<MenuBar>(std::vector<Menu>{});
-    auto list = std::make_shared<LazyList>(2,
-                                           [bar, other](int index) -> Node {
-                                               return index == 0 ? Node{bar} : Node{other};
-                                           },
-                                           60.0F);
+    auto list = std::make_shared<LazyList>(
+        2, [bar, other](int index) -> Node { return index == 0 ? Node{bar} : Node{other}; }, 60.0F);
     LayoutEngine::layout(*list, host_constraints());
     bar->open(0);
 

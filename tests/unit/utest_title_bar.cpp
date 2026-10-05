@@ -102,9 +102,9 @@ auto make_title_bar(int &snap_hits) -> std::shared_ptr<TitleBar> {
 /// @return 弹窗矩形。
 [[nodiscard]] auto flyout_rect(std::size_t entry_count) -> Rect {
     const TitleBarGeometry geom = title_bar_geometry(AURORA_HOST_WIDTH, TitleBarStyle{}, false, true);
-    return Rect{.origin = Point{.x = geom.maximize.origin.x, .y = AURORA_BAR_HEIGHT + AURORA_FLYOUT_GAP},
-                .size = Size{.width = AURORA_FLYOUT_WIDTH,
-                             .height = static_cast<float>(entry_count) * AURORA_ITEM_HEIGHT}};
+    return Rect{
+        .origin = Point{.x = geom.maximize.origin.x, .y = AURORA_BAR_HEIGHT + AURORA_FLYOUT_GAP},
+        .size = Size{.width = AURORA_FLYOUT_WIDTH, .height = static_cast<float>(entry_count) * AURORA_ITEM_HEIGHT}};
 }
 
 /// @brief 弹窗第 index 条中心的本地坐标。
@@ -203,11 +203,8 @@ AURORA_TEST_CASE(snap_flyout_point_reaches_title_bar_in_lazy_list_item) {
     const std::shared_ptr<TitleBar> bar = make_title_bar(snap_hits);
     auto other = std::make_shared<TitleBar>();
     other->set_height(AURORA_BAR_HEIGHT);
-    auto list = std::make_shared<LazyList>(2,
-                                           [bar, other](int index) -> Node {
-                                               return index == 0 ? Node{bar} : Node{other};
-                                           },
-                                           60.0F);
+    auto list = std::make_shared<LazyList>(
+        2, [bar, other](int index) -> Node { return index == 0 ? Node{bar} : Node{other}; }, 60.0F);
     LayoutEngine::layout(*list, host_constraints());
     hover_open_snap_flyout(*list, *bar, Point{.x = 0.0F, .y = 0.0F});  // 条目 0 位于视口顶端
     AURORA_TEST_REQUIRE(bar->snap_open());
