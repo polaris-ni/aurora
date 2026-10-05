@@ -493,7 +493,8 @@ class TabBar : public Widget {
             Node &content = tabs_[static_cast<std::size_t>(sel)].content;
             const Rect cb = content.bounds();
             // 闸并入内容的追加命中盒（同 `Container::on_hit_test` 口径）。
-            if (cb.contains(local) || content.widget().covers_extra_hit_box(local - cb.origin, ctx)) {
+            if (cb.contains(local) ||
+                content.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 const Rect global{
                     .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                     .size = cb.size};
@@ -511,7 +512,8 @@ class TabBar : public Widget {
                 Node &content = tabs_[static_cast<std::size_t>(sel)].content;
                 const Rect cb = content.bounds();
                 // 闸并入内容的追加命中盒（同 `Container::on_hit_test_chain` 口径）。
-                if (cb.contains(local) || content.widget().covers_extra_hit_box(local - cb.origin, ctx)) {
+                if (cb.contains(local) ||
+                    content.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                     const Rect global{
                         .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                         .size = cb.size};

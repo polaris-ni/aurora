@@ -213,20 +213,72 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 进不了命中链。真实派发只经 `on_hit_test_chain`，故这类控件把判据写进 `on_hit_test`
     /// 是无效的——必须由祖先侧的闸把覆盖区并入判定，追加盒就是控件交给闸的那份声明。
     ///
+    /// **形态约束（列表行内禁用）**：追加盒只放宽「能否下降」，**不改变兄弟间的 z 序**——
+    /// `on_paint` 按子节点前向绘制、`on_hit_test_chain` 逆序下降，两者不对称。故覆盖绘制不占
+    /// 布局的面板会被**更晚绘制**的兄弟行盖住：追加盒让面板可点，但视觉上是残段，且重叠处
+    /// 点击归视觉更上层的兄弟（与视觉一致，非缺陷）。**列表行内不得使用覆盖绘制不占布局的
+    /// 控件**；需要行内浮层时把内容挂到真正的浮层宿主（`OverlayHost` / `Popup`），它们按
+    /// 自身次序自顶向下询问。详见 `05-event-navigation.md` §3.2.2。
+    ///
     /// @param ctx 构建上下文：本次命中判定的环境读数（与 `on_hit_test` 同一 pass）。
+    /// @param ancestor_offset 本控件原点在视口坐标系中的 y（祖先下降时逐层累加传入；缺省零）。
+    ///        覆写方**只在需要按「离视口多远」决定几何时**用它（如面板翻转）——纯本地几何的
+    ///        覆写方直接忽略该形参即可，不必在自己的签名里改名或加名（`const Point &` 匿名即可）。
     /// @return 追加命中盒（**本地坐标**：原点即自身左上角，与 `on_hit_test` 的 `local` 同坐标系）；
     ///         `std::nullopt` = 不追加，此时可命中区 == 自身布局盒，与未覆写时逐位等价。
     /// @note Side-effects: pure
-    [[nodiscard]] virtual auto extra_hit_box(const BuildContext &ctx) const -> std::optional<Rect>;
+    [[nodiscard]] virtual auto extra_hit_box(const BuildContext &ctx,
+                                             const Point &ancestor_offset = Point{.x = 0.0F, .y = 0.0F}) const
+        -> std::optional<Rect>;
 
-    /// @brief 判定本地坐标点是否落在追加命中盒内（未追加时恒 false，即只看自身布局盒）。
+    /// @brief 判定本地坐标点是否落在追加命中盒内，或是否被**子树**中任一后代申报覆盖。
     ///
-    /// 祖先的下降闸与自身入链判定共用这一个入口，杜绝「闸认、自身不认」或反之的分叉。
+    /// 祖先的下降闸调这一个入口（单源化，杜绝「闸认、自身不认」或反之的分叉）。
+    /// 自身入链判定用 `covers_own_extra_hit_box`（只看自己那份申报）——见该入口的说明。
+    ///
+    /// **聚合语义（递归）**：本入口问的是「以本控件为根的子树是否覆盖此点」，不止节点自身。
+    /// 判定分两段——① 节点自身由 `extra_hit_box(ctx)` 申报的追加盒；② 逐个直接子节点，
+    /// 按其 `bounds().origin` 把点折算到子节点本地坐标，递归问该子节点的同一入口。
+    /// 递归是必须的：孙辈覆写了 `extra_hit_box()` 而中间层（`Row` / `Column` 等）自己不申报时，
+    /// 若只问直接子节点，门就在中间层判假，覆盖区仍进不了链（三层嵌套 `LazyList → Row → Dropdown`
+    /// 即此形态）。逐层折算偏移与 `on_hit_test_chain` 的下降式逐字同构，故聚合结果等价于
+    /// 「从该子节点出发走一次命中链」——**这是与自身入链判定同源的前提**。
+    ///
+    /// **裁剪必须由容器自己声明**：带视口裁剪的容器（`Scroll` / `LazyList` / `GridView`）
+    /// 覆写本入口并加视口钳位，否则被裁出视口的子孙会把追加盒申报出去——肉眼不可见的区域
+    /// 变得可点，比不做修复更糟。`Popup` 覆写恒返回 `false`：它按 `anchor_` 在自己的
+    /// `on_hit_test_chain` 里重映射下降，是「正面范式」，不需要祖先开闸。
+    ///
+    /// **全局偏移（翻转判据需要）**：部分覆盖绘制控件要按「自己离视口多远」决定面板往哪翻
+    /// （`Dropdown` 贴视口下沿时向上翻）。这需要**全局**位置，而本入口的坐标是本地的——
+    /// 故由祖先在下降时把自己已累加的偏移传下来：`ancestor_offset` 是「本控件原点在视口坐标系
+    /// 中的 y」。缺省 `{0, 0}` 表示调用方不知道全局位置（顶层直接查询、或未接入累加的闸），
+    /// 此时控件只能按纯本地几何判定，不得凭空假设自己在视口中的位置。
+    ///
     /// @param local 待测点（本控件本地坐标，已减去自身 origin）。
     /// @param ctx 构建上下文。
-    /// @return 点落在追加命中盒内为 true；无追加盒为 false（可命中区仍等于自身布局盒）。
+    /// @param ancestor_offset 本控件原点在视口坐标系中的 y（祖先累加；缺省零）。
+    /// @return 点落在自身或子树的追加命中盒内为 true；无追加盒为 false（可命中区仍等于自身布局盒）。
     /// @note Side-effects: pure
-    [[nodiscard]] auto covers_extra_hit_box(const Point &local, const BuildContext &ctx) const -> bool;
+    [[nodiscard]] auto covers_extra_hit_box(const Point &local, const BuildContext &ctx,
+                                            const Point &ancestor_offset = Point{.x = 0.0F, .y = 0.0F}) const -> bool;
+
+    /// @brief 判定本地坐标点是否落在**本节点自身**申报的追加命中盒内（不递归子树）。
+    ///
+    /// 与 `covers_extra_hit_box` 的区别仅在**是否含子树**：本入口只看 `extra_hit_box(ctx)` 一份
+    /// 声明，恒为 O(1)。`Widget::hit_test_chain` 判定「自身是否入链」时用本入口——
+    /// 自身入链是**本控件自己接管**这个点，子树申报的命中属于子控件，不该把中间容器一并拽进链。
+    ///
+    /// `ancestor_offset` 语义与 `covers_extra_hit_box` 相同（本控件原点的全局 y）；默认零。
+    ///
+    /// @param local 待测点（本控件本地坐标）。
+    /// @param ctx 构建上下文。
+    /// @param ancestor_offset 本控件原点在视口坐标系中的 y（缺省零）。
+    /// @return 点落在自身追加命中盒内为 true；无追加盒为 false。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto covers_own_extra_hit_box(const Point &local, const BuildContext &ctx,
+                                                const Point &ancestor_offset = Point{.x = 0.0F, .y = 0.0F}) const
+        -> bool;
 
     /// @brief 挂载：注册响应式依赖并递归挂载子树（由 build 后一次性调用）。
     /// @param ctx 构建上下文，透传给 `on_mount` 供子类读取主题 / 环境。
@@ -1067,6 +1119,33 @@ class Widget : public std::enable_shared_from_this<Widget> {
         (void)ctx;
         return {};
     }
+    /// @brief 子类可覆写：判定「本节点的**后代**子树是否申报覆盖了此局部点」（不含节点自身）。
+    ///
+    /// 是 `covers_extra_hit_box` 聚合语义的**递归下降段**，与 `on_hit_test_chain` 同构：
+    /// 默认实现遍历 `child_nodes()`，按每个子节点的 `bounds().origin` 把点折算到子节点本地坐标，
+    /// 递归问该子节点的 `covers_extra_hit_box`。节点自身的追加盒由调用方先问
+    /// `covers_own_extra_hit_box`，故本入口只管后代。
+    ///
+    /// **覆写场景（两类）**：
+    /// ① 子节点来源不是 `child_nodes()` 或坐标系与布局盒不一致时——`LazyList` / `GridView` 的子项
+    ///    在 `live_` 表里（虚拟化，非 `children_`），须自行遍历；`Popup` 按 `anchor_` 全局映射，
+    ///    覆写为恒 `false`（它是「正面范式」，在自己的 `on_hit_test_chain` 里重映射下降，
+    ///    不经祖先开闸）。
+    /// ② **带视口裁剪的容器必须覆写并加视口钳位**（`Scroll` / `LazyList` / `GridView`）：
+    ///    否则被裁出视口的子孙会照样申报追加盒，一个肉眼不可见的区域变得可点。
+    ///
+    /// 覆写时必须与本控件 `on_hit_test_chain` 的下降口径**逐字同构**（同一套钳位与坐标换算），
+    /// 否则出现「闸认、自身不认」的分叉。
+    ///
+    /// @param local 待测点（本控件本地坐标，已减去自身 origin）。
+    /// @param ctx 构建上下文。
+    /// @param ancestor_offset 本控件原点在视口坐标系中的 y（祖先下降时逐层累加；
+    ///        缺省零表示调用方不知全局位置，覆写体须按纯本地几何判定）。
+    /// @return 后代子树中任一节点申报覆盖此点为 true；否则 false。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto covers_descendant_extra_hit_box(const Point &local, const BuildContext &ctx,
+                                                               const Point &ancestor_offset) const -> bool;
+
     /// @brief 内容自然高度（OverflowStrategy::Scroll 用）：滚轮夹取上限 = 内容高 − 视口高。
     /// 默认取自身尺寸（叶控件无溢出内容 → 不可滚）；容器覆写为子节点 bounds 的最大 bottom。
     /// @return 内容自然高度（dp）；基类返回自身 `size_.height`。
@@ -1388,7 +1467,8 @@ class Container : public Widget {
             // local 处于本容器局部坐标系：子节点位置为 cb（相对本容器内容区）。
             // 闸 = 子布局盒 ∪ 子的追加命中盒：覆盖绘制（下拉面板/菜单浮层/Snap 弹窗）画在布局盒外，
             // 只按布局盒判定会让那片区域永远进不了命中链。
-            if (cb.contains(local) || child.widget().covers_extra_hit_box(local - cb.origin, ctx)) {
+            if (cb.contains(local) ||
+                child.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 // 向下传递子节点“全局”盒（本容器全局原点 + 子相对原点），供更深层级本地化。
                 const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
                 Widget *r = child.widget().hit_test(local - cb.origin, global, ctx);
@@ -1407,7 +1487,8 @@ class Container : public Widget {
             const Rect cb = child.bounds();
             // 闸 = 子布局盒 ∪ 子的追加命中盒（与 `on_hit_test` 同一口径）：真实派发只走本入口，
             // 只按布局盒判定时覆盖绘制区（面板/浮层/弹窗）拿不到点击。
-            if (cb.contains(local) || child.widget().covers_extra_hit_box(local - cb.origin, ctx)) {
+            if (cb.contains(local) ||
+                child.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 // global.origin 即子节点全局 origin，随命中链带入，供派发器本地化坐标。
                 const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
                 std::vector<HitNode> r = child.widget().hit_test_chain(local - cb.origin, global, ctx);

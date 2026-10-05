@@ -307,7 +307,8 @@ class TitleBar : public Widget {
     /// 布局盒，故弹窗区域必须在此声明才会被闸并入命中链——判据只写在 `on_hit_test` 里对真实
     /// 派发无效。与 `on_hit_test` 的弹窗分支共用 `snap_flyout_box()` 这一份判据。
     /// @return 展开态为弹窗矩形（本地坐标）；未展开为 `std::nullopt`。
-    [[nodiscard]] auto extra_hit_box(const BuildContext & /*ctx*/) const -> std::optional<Rect> override {
+    [[nodiscard]] auto extra_hit_box(const BuildContext & /*ctx*/, const Point & /*ancestor_offset*/) const
+        -> std::optional<Rect> override {
         return snap_flyout_box();
     }
 

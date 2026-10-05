@@ -250,6 +250,19 @@ class Popup : public SingleChild {
         return child_.widget().hit_test_chain(content_local, content_box, ctx);
     }
 
+    /// @brief 恒 false：本控件是「正面范式」，不经祖先开闸。
+    ///
+    /// 弹出内容按 `anchor_`（**全局**坐标）绘制，与布局盒坐标系不一致，故基类的
+    /// 「按 `bounds().origin` 折算逐层下探」在这里算不出正确结果。命中由本控件自己的
+    /// `on_hit_test_chain` 在**自己的入口**里重映射并下降，无需祖先把追加盒并入判定；
+    /// 覆写为 false 以免基类折算产出一个与派发链分叉的假申报。
+    /// @return 恒 false。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto covers_descendant_extra_hit_box(const Point & /*local*/, const BuildContext & /*ctx*/,
+                                                       const Point & /*ancestor_offset*/) const -> bool override {
+        return false;
+    }
+
   private:
     bool open_ = false;
     bool dismiss_outside_ = true;

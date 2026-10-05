@@ -742,8 +742,8 @@ class ReorderableList : public Container {
         for (int i = static_cast<int>(children_.size()) - 1; i >= 0; --i) {
             const Rect cb = item_rect(bounds, i);
             // 闸并入条目的追加命中盒（同 `Container::on_hit_test_chain` 口径）。
-            if (!cb.contains(local) &&
-                !children_[static_cast<std::size_t>(i)].widget().covers_extra_hit_box(local - cb.origin, ctx)) {
+            if (!cb.contains(local) && !children_[static_cast<std::size_t>(i)].widget().covers_extra_hit_box(
+                                           local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 continue;
             }
             const Rect global{.origin = bounds.origin + cb.origin, .size = cb.size};

@@ -452,10 +452,17 @@ class GridView : public Widget {
 
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
+        // 视口钳位与本控件 on_hit_test / on_paint 同口径：点在视口外一律不命中。虚拟化使 live_
+        // 里留有视口外的缓存行，不加钳位时视口外单元格的覆盖绘制区仍会被祖先的闸认。
+        const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size};
+        if (!viewport.contains(local)) {
+            return {};
+        }
         for (auto &val : live_ | std::views::values) {
             const Rect cb = val.bounds();
             // 闸并入单元格的追加命中盒（同 `Container::on_hit_test_chain` 口径）。
-            if (cb.contains(local) || val.widget().covers_extra_hit_box(local - cb.origin, ctx)) {
+            if (cb.contains(local) ||
+                val.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 const Rect global{
                     .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                     .size = cb.size};
@@ -466,6 +473,28 @@ class GridView : public Widget {
             }
         }
         return {};
+    }
+
+    /// @brief 子树追加命中盒的聚合下降：遍历 live_ 单元格（虚拟化子项不在 `child_nodes()` 里）。
+    ///
+    /// 视口钳位与 `on_hit_test_chain` **逐字同构**（同 `LazyList` 的纪律）：祖先问本控件是否覆盖
+    /// 某点时走本入口，不钳位则与派发链分叉。
+    /// @param local 待测点（本控件本地坐标）。
+    /// @param ctx 构建上下文，原样透传给单元格子树。
+    /// @param ancestor_offset 本控件原点在视口坐标系中的 y（祖先下降时逐层累加；
+    ///        缺省零表示调用方不知全局位置，覆写体须按纯本地几何判定）。
+    /// @return 任一单元格的子树申报覆盖此点为 true；点在视口外恒 false。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto covers_descendant_extra_hit_box(const Point &local, const BuildContext &ctx,
+                                                       const Point &ancestor_offset) const -> bool override {
+        const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = size()};
+        if (!viewport.contains(local)) {
+            return false;
+        }
+        return std::ranges::any_of(live_, [&local, &ctx, &ancestor_offset](const auto &val) {
+            const Rect cb = val.second.bounds();
+            return val.second.widget().covers_extra_hit_box(local - cb.origin, ctx, ancestor_offset + cb.origin);
+        });
     }
 
     /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Scroll/LazyList 模式）。

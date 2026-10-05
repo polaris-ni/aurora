@@ -673,7 +673,8 @@ class Scroll : public Container, public ScrollProps {
         // 闸并入内容的追加命中盒（同 `Container::on_hit_test_chain` 口径）：覆盖绘制区画在内容盒外，
         // 只按内容盒判定会被判成「可视区内的空白处」而丢弃。
         if (!content_box.contains(content_local) &&
-            !children_[0]->covers_extra_hit_box(content_local - content_box.origin, ctx)) {
+            !children_[0]->covers_extra_hit_box(content_local - content_box.origin, ctx,
+                                                bounds.origin + content_box.origin)) {
             return {};  // 命中点在内容盒外（含可视区内的空白处）
         }
         // 内容子树的全局原点：视口原点 + 内容盒原点（内容盒原点恒为 (0,0)，但仍按通用式
@@ -682,6 +683,36 @@ class Scroll : public Container, public ScrollProps {
             .origin = Point{.x = bounds.origin.x + content_box.origin.x, .y = bounds.origin.y + content_box.origin.y},
             .size = content_box.size};
         return children_[0]->hit_test_chain(content_local - content_box.origin, global, ctx);
+    }
+
+    /// @brief 子树追加命中盒的聚合下降：换算到内容坐标后问内容子树（与本控件 on_hit_test_chain 同构）。
+    ///
+    /// 两处必须与 `on_hit_test_chain` 逐字一致，否则分叉：
+    /// ① **视口钳位**——点在视口外一律不申报，否则被滚出视口的子孙（及其覆盖绘制区）可点；
+    /// ② **内容坐标换算**（`local.y + offset_y_`）——不换算则申报区与绘制区错位一个滚动量。
+    /// @param local 待测点（本控件视口本地坐标）。
+    /// @param ctx 构建上下文，原样透传给内容子树。
+    /// @param ancestor_offset 本控件原点在视口坐标系中的 y（祖先下降时逐层累加；
+    ///        缺省零表示调用方不知全局位置，覆写体须按纯本地几何判定）。
+    /// @return 内容子树申报覆盖此点为 true；点在视口外或无子节点时 false。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto covers_descendant_extra_hit_box(const Point &local, const BuildContext &ctx,
+                                                       const Point &ancestor_offset) const -> bool override {
+        if (children_.empty()) {
+            return false;
+        }
+        // 视口盒：与 on_hit_test_chain 的整视口判定同口径。
+        const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = size()};
+        if (!viewport.contains(local)) {
+            return false;
+        }
+        const Rect content_box = children_[0].bounds();
+        const Point content_local{.x = local.x, .y = local.y + offset_y_};
+        // 内容子树的全局偏移：视口原点 + 内容盒原点。内容坐标与视口坐标差一个 offset_y_，
+        // 折算回全局时须加上（否则内容里靠上的控件会被算成贴视口顶）。
+        const Point content_offset{.x = ancestor_offset.x + content_box.origin.x,
+                                   .y = ancestor_offset.y + content_box.origin.y};
+        return children_[0]->covers_extra_hit_box(content_local - content_box.origin, ctx, content_offset);
     }
 
     /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Dismissible/ReorderableList 模式）。

@@ -201,7 +201,8 @@ class MenuBar : public Widget {
     /// 浮层是覆盖绘制：不占布局，祖先下降前的包含闸只看布局盒，故浮层区域必须在此声明
     /// 才会被闸并入命中链——判据只写在 `on_hit_test` 里对真实派发无效。
     /// @return 展开态为浮层矩形（本地坐标）；未展开为 `std::nullopt`。
-    [[nodiscard]] auto extra_hit_box(const BuildContext & /*ctx*/) const -> std::optional<Rect> override {
+    [[nodiscard]] auto extra_hit_box(const BuildContext & /*ctx*/, const Point & /*ancestor_offset*/) const
+        -> std::optional<Rect> override {
         return flyout_box();
     }
 

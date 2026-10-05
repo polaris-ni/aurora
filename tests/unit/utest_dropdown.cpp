@@ -19,12 +19,17 @@
 #include <string>
 #include <vector>
 
+#include "aurora/environment/environment.h"
+#include "aurora/environment/media_query.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/modifier/modifier.h"
+#include "aurora/render/painter.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/dropdown.h"
 #include "aurora/widget/lazy_list.h"
+#include "aurora/widget/scroll.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_dropdown {
@@ -119,6 +124,15 @@ auto make_dropdown(ChangeLog &log) -> std::shared_ptr<Dropdown> {
 /// @return 最深控件指针；链空为 nullptr。
 [[nodiscard]] auto deepest(const std::vector<HitNode> &chain) -> const Widget * {
     return chain.empty() ? nullptr : chain.back().get();
+}
+
+/// @brief 走一次真实绘制：建立 `focus_bounds_`（绝对盒）与 Dropdown 的视口高缓存这两个读数。
+/// @param w 被绘控件。
+/// @param viewport 绘制盒（同时充当视口原点：控件的全局位置由它决定）。
+/// @param ctx 构建上下文（须带 `MediaQuery`，否则视口高读数为 0、翻转退化为恒向下）。
+void paint_once(Widget &w, const Rect &viewport, const BuildContext &ctx) {
+    Painter p;
+    w.paint(p, viewport, ctx);
 }
 
 }  // namespace
@@ -328,7 +342,7 @@ AURORA_TEST_CASE(extra_hit_box_matches_panel_rect_and_compat_entry) {
     const Rect self{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = dd->size()};
 
     // 收起态：追加盒为空（可命中区 == 自身布局盒）。
-    AURORA_TEST_CHECK_FALSE(dd->extra_hit_box(BuildContext{}).has_value());
+    AURORA_TEST_CHECK_FALSE(dd->extra_hit_box(BuildContext{}, Point{.x = 0.0F, .y = 0.0F}).has_value());
     AURORA_TEST_CHECK_FALSE(dd->covers_extra_hit_box(item_center(*dd, 0), BuildContext{}));
 
     dd->set_open(true);
@@ -345,6 +359,289 @@ AURORA_TEST_CASE(extra_hit_box_matches_panel_rect_and_compat_entry) {
             AURORA_TEST_CHECK_EQ(dd->hit_test(p, self, BuildContext{}) == dd.get(), self.contains(p) || in_panel);
         }
     }
+}
+
+AURORA_TEST_CASE(grandchild_extra_hit_box_propagates_three_levels) {
+    // G30 核心证人：三层嵌套 LazyList → Row → Dropdown，孙辈（Dropdown）申报的面板区必须可达。
+    //
+    // 几何（本机无头 scale 恒 1.0）：行盒 56、上下内边距各 8 ⇒ Dropdown 紧约束盒高 40；
+    // 面板自下拉局部 y = box_height_(30) 起。探点取下拉局部 y = 60 ⇒ 行局部 60+8-8 = 60，
+    // 越过行下沿（56）——中间的 Row 不申报任何追加盒，修复前门在 Row 那一层判假。
+    ChangeLog log;
+    const std::shared_ptr<Dropdown> dd = make_dropdown(log);
+
+    // 每行 = Row 内放 Dropdown（复现 borealis 设置面板的「LazyList → Row → Dropdown」形态）。
+    // 上下内边距各 8 ⇒ 行高 56 时 Dropdown 的紧约束盒高 40，与真实场景一致。
+    auto make_row = [dd](const std::shared_ptr<Dropdown> &target) -> Node {
+        auto row = std::make_shared<Row>(RowProps{.children = {Node{target}}});
+        row->modifier.set(Modifier{}.padding(8.0F));
+        return Node{row};
+    };
+    const std::shared_ptr<Node> row0 = std::make_shared<Node>(make_row(dd));
+    auto list = std::make_shared<LazyList>(2, [row0](int index) -> Node { return index == 0 ? *row0 : Node{}; }, 56.0F);
+    LayoutEngine::layout(*list, host_constraints());
+    AURORA_TEST_REQUIRE(list->live_item_count() >= 1U);
+
+    dd->set_open(true);
+    // 行盒 = 条目盒，在列表局部坐标里顶边 y = 0（未滚动）；Dropdown 在行内的偏移经 child_box 取。
+    const Rect db = child_box(row0->widget(), *dd);
+    AURORA_TEST_REQUIRE(db.size.height > 0.0F);
+
+    // 面板第 2 行中心（局部 y = 30 + 2.5*26 = 95），越过行盒下沿 56。
+    const Point local = item_center(*dd, 2);
+    const Point probe{.x = db.origin.x + local.x, .y = db.origin.y + local.y};
+    const Rect row_box{.origin = Point{.x = 0.0F, .y = 0.0F},
+                       .size = Size{.width = list->size().width, .height = 56.0F}};
+    AURORA_TEST_REQUIRE(probe.y > row_box.bottom());  // 前提：该点确实越出行盒，否则判据空转
+
+    const std::vector<HitNode> chain = list->hit_test_chain(probe, host_box(), BuildContext{});
+    AURORA_TEST_REQUIRE_FALSE(chain.empty());
+    AURORA_TEST_CHECK_EQ(deepest(chain), static_cast<const Widget *>(dd.get()));
+
+    // 真实派发：该点必须选中第 2 项。
+    MouseEvent pick = press(probe.x, probe.y);
+    EventDispatcher::dispatch(*list, pick, nullptr);
+    AURORA_TEST_CHECK_EQ(log.count, 1);
+    AURORA_TEST_CHECK_EQ(log.last, 2);
+    MouseEvent up = release(probe.x, probe.y);  // 配对 Release：解除派发器单例的指针捕获
+    EventDispatcher::dispatch(*list, up, nullptr);
+}
+
+AURORA_TEST_CASE(clipped_list_item_extra_hit_box_stays_unreachable) {
+    // 裁剪边界：滚出视口的条目，其追加盒不得申报——否则肉眼不可见的区域变得可点。
+    //
+    // 构造：20 行 × 56dp = 1120dp 内容，视口 260 ⇒ 可滚 860。把展开的 Dropdown 放在**最后一行**，
+    // 滚到底后该行盒顶边 = 19*56 - 860 = 204，面板自其下方 y=30 起 ⇒ 面板整段落在视口下沿之外，
+    // 即「条目可见但面板不可见」的最坏形态——面板本就不该可点。
+    ChangeLog log;
+    const std::shared_ptr<Dropdown> dd = make_dropdown(log);
+    const std::shared_ptr<Row> row = std::make_shared<Row>(RowProps{.children = {Node{dd}}});
+    row->modifier.set(Modifier{}.padding(8.0F));
+    // 20 行，Dropdown 在最后一行（index 19）。
+    auto make_row = [row](int index) -> Node { return index == 19 ? Node{row} : Node{}; };
+    auto list = std::make_shared<LazyList>(20, make_row, 56.0F);
+    LayoutEngine::layout(*list, host_constraints());
+    dd->set_open(true);
+
+    // 滚到底：偏移被夹到 max_scroll_offset。
+    list->set_scroll_offset(9999.0F);
+    LayoutEngine::layout(*list, host_constraints());
+    const float offset = list->scroll_offset();
+    const float row_top = (19.0F * 56.0F) - offset;  // 末行盒顶边（列表局部 y）
+    const Rect db = child_box(*row, *dd);
+    AURORA_TEST_REQUIRE(db.size.height > 0.0F);
+
+    // 面板第 0 行中心（行局部 y ≈ 38）换算到列表局部。
+    const Point row_local = item_center(*dd, 0);
+    const Point probe_first{.x = db.origin.x + row_local.x, .y = (row_top + db.origin.y) + row_local.y};
+    // 末行盒 [204,260) 整段在视口内，但面板共 78 高：首行中心（247）尚在视口内、末行中心（299）
+    // 已出视口。取末行中心才是有判别力的裁剪场景——条目可见、面板尾部不可见。
+    const Point probe{.x = db.origin.x + row_local.x,
+                      .y = (row_top + db.origin.y) + (AURORA_BOX_HEIGHT + (2.5F * AURORA_ITEM_HEIGHT))};
+    AURORA_TEST_REQUIRE_GT(offset, 800.0F);  // 前提：确实滚到了底
+    AURORA_TEST_REQUIRE_LT(probe_first.y, list->size().height);  // 对照：面板首行仍可见（证明条目在视口内）
+    AURORA_TEST_REQUIRE_GT(probe.y, list->size().height);  // 前提：面板末行在视口外，否则判据空转
+
+    const std::vector<HitNode> chain = list->hit_test_chain(probe, host_box(), BuildContext{});
+    AURORA_TEST_CHECK(deepest(chain) != static_cast<const Widget *>(dd.get()));
+    // 祖先闸问「本列表是否覆盖此点」也必须为假（两入口同形，不得只有派发链拒绝）。
+    AURORA_TEST_CHECK_FALSE(list->covers_extra_hit_box(probe, BuildContext{}));
+}
+
+AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
+    // 两入口同形：Scroll 与 LazyList 都是带视口裁剪的容器，裁剪口径必须一致。
+    //
+    // 各自的场景都是「展开的 Dropdown 位于视口下沿之外，面板整段不可见」，断言两条：
+    // ① 真实派发链（`hit_test_chain`）不含该 Dropdown；② 祖先闸问「本容器是否覆盖此点」
+    // （`covers_extra_hit_box`）为假。缺 ② 就可能出现「闸认、自身不认」的分叉。
+    ChangeLog log;
+
+    // LazyList 腿：20 行 × 56dp，Dropdown 在末行；滚到底后末行顶边 = 19*56 - offset，
+    // 面板自其下方 30dp 起 ⇒ 整段落在视口下沿（260）之外。
+    {
+        const std::shared_ptr<Dropdown> dd = make_dropdown(log);
+        const std::shared_ptr<Row> row = std::make_shared<Row>(RowProps{.children = {Node{dd}}});
+        row->modifier.set(Modifier{}.padding(8.0F));
+        auto list =
+            std::make_shared<LazyList>(20, [row](int i) -> Node { return i == 19 ? Node{row} : Node{}; }, 56.0F);
+        LayoutEngine::layout(*list, host_constraints());
+        dd->set_open(true);
+        list->set_scroll_offset(9999.0F);  // 夹到 max_scroll_offset
+        LayoutEngine::layout(*list, host_constraints());
+
+        const Rect db = child_box(*row, *dd);
+        AURORA_TEST_REQUIRE(db.size.height > 0.0F);
+        // 行局部 → 列表局部：末行盒顶边 = 19*56 - offset。
+        // 取面板**末行**中心（序号 2）：行局部 y = 30 + 2.5*26 = 95，加行内偏移 8 ⇒ 行局部 103。
+        const Point probe{.x = db.origin.x + (db.size.width * 0.5F),
+                          .y = (db.origin.y + (AURORA_BOX_HEIGHT + (2.5F * AURORA_ITEM_HEIGHT))) +
+                               ((19.0F * 56.0F) - list->scroll_offset())};
+        // 末行盒 [204,260) 整段在视口内、但它的面板（自盒下方 y=30 起 ⇒ 全局 264+）整段在视口外。
+        // 这才是有判别力的裁剪场景：条目可见、面板不可见 ⇒ 面板区必须不可命中。
+        // （若改成「条目本身滚出视口」，虚拟化已把该条目回收出 live_，判据会退化成空转。）
+        AURORA_TEST_REQUIRE_GT(probe.y, list->size().height);  // 前提：该点确实在视口外，否则判据空转
+        AURORA_TEST_CHECK(deepest(list->hit_test_chain(probe, host_box(), BuildContext{})) !=
+                          static_cast<const Widget *>(dd.get()));
+        AURORA_TEST_CHECK_FALSE(list->covers_extra_hit_box(probe, BuildContext{}));
+    }
+
+    // Scroll 腿：内容高 400+ 的下拉滚到视口下沿之外，换算与 Scroll::covers_descendant_extra_hit_box 同式。
+    {
+        const std::shared_ptr<Dropdown> dd = make_dropdown(log);
+        auto content = std::make_shared<Column>(
+            ColumnProps{.children = {Node{Button(ButtonProps{.label = "top"})}, Node{dd}}, .gap = 400.0F});
+        auto scroller = std::make_shared<Scroll>(ScrollProps{.child = Node{content}});
+        LayoutEngine::layout(*scroller, host_constraints());
+        dd->set_open(true);
+        scroller->scroll_by(9999.0F);
+        LayoutEngine::layout(*scroller, host_constraints());
+
+        const Rect db = child_box(*content, *dd);
+        AURORA_TEST_REQUIRE(db.size.height > 0.0F);
+        const Point probe{.x = db.origin.x + (db.size.width * 0.5F),
+                          .y = (db.origin.y + 38.0F) - scroller->scroll_offset_y()};
+        AURORA_TEST_REQUIRE_GT(probe.y, scroller->size().height);
+        AURORA_TEST_CHECK(deepest(scroller->hit_test_chain(probe, host_box(), BuildContext{})) !=
+                          static_cast<const Widget *>(dd.get()));
+        AURORA_TEST_CHECK_FALSE(scroller->covers_extra_hit_box(probe, BuildContext{}));
+    }
+}
+
+AURORA_TEST_CASE(panel_flips_up_at_viewport_bottom) {
+    // 贴视口下沿时向上翻转：面板不再伸出窗口外。
+    //
+    // 读数来源与其代价：视口高由 `on_paint` 从 `MediaQuery` 采样并缓存（事件路径不带 ctx），
+    // 控件全局顶边来自 `focus_bounds_`（`Widget::paint` 入口写回的绝对盒）。故本用例走**真实
+    // 绘制路径**一次来建立读数，而不是直接 `set_focus_bounds` 注入——注入是旁路，钉不住
+    // 「绘制与判定同源」这条纪律。两个读数都由本用例显式给定，不靠宿主自报。
+    ChangeLog log;
+    const std::shared_ptr<Dropdown> dd = make_dropdown(log);
+    // 视口高 200；控件摆在 y = 190 ⇒ 主框下沿 220 已越界，下方只剩 -20，上方 190 装得下。
+    const Rect viewport{.origin = Point{.x = 0.0F, .y = 190.0F}, .size = host_box().size};
+
+    Environment env;
+    MediaQuery mq;
+    mq.size = viewport.size;
+    env.set_local<MediaQuery>(mq);
+    BuildContext ctx;
+    ctx.env = &env;
+    ctx.scale_factor = 1.0F;
+
+    LayoutEngine::layout(*dd, Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = viewport.size});
+    AURORA_TEST_REQUIRE(dd->size().width > 0.0F);
+    dd->set_open(true);
+    // 视口高由 on_layout 存的 env_ 提供（地址恒定、每帧更新）；self_top 来自 focus_bounds_，
+    // 故仍走一次真实绘制建立绝对盒——两者都是 panel_geometry 的输入。
+    paint_once(*dd, viewport, ctx);
+
+    // require_value 收口「检查 + 取值」：宏展开对路径分析不透明，须用框架 helper。
+    // ancestor_offset 传控件在视口坐标系中的顶边 y —— 这是新增的「祖先累加」通道：
+    // 翻转判据不再读绘制期写回的 focus_bounds_，故未绘制过也能判对。
+    const Rect panel = testing::require_value(dd->extra_hit_box(ctx, Point{.x = 0.0F, .y = viewport.origin.y}));
+    // 上翻：窗口顶落在主框上方（局部 y < box_height_），底边恰好贴主框顶（3 档 × 26 = 78）。
+    AURORA_TEST_CHECK_NEAR(panel.origin.y, AURORA_BOX_HEIGHT - (3.0F * AURORA_ITEM_HEIGHT), 1e-3);
+    AURORA_TEST_CHECK_NEAR(panel.size.height, 3.0F * AURORA_ITEM_HEIGHT, 1e-3);
+    // 视口上沿：面板顶（全局 190 + 局部 y = 190 + 30 - 78 = 142）不得越出 0。
+    AURORA_TEST_CHECK_GE(viewport.origin.y + panel.origin.y, 0.0F);
+    // 新通道的判别点：**不绘制**也能判对翻转。focus_bounds_ 此时为零盒（从未 paint），
+    // 若实现仍读它，self_top 就是 0（视口顶）⇒ 下方装得下 ⇒ 不翻转，与上面断言相反。
+    // 故本条同时钉住「翻转判据不依赖绘制期缓存」。
+    const Rect no_paint_viewport{.origin = Point{.x = 0.0F, .y = 190.0F}, .size = host_box().size};
+    Environment env2;
+    MediaQuery mq2;
+    mq2.size = no_paint_viewport.size;
+    env2.set_local<MediaQuery>(mq2);
+    BuildContext ctx2;
+    ctx2.env = &env2;
+    const std::shared_ptr<Dropdown> fresh = make_dropdown(log);
+    LayoutEngine::layout(*fresh, Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = no_paint_viewport.size},
+                         ctx2);
+    fresh->set_open(true);
+    // 仅经 on_layout 兜底写入 env_（不 paint）⇒ 视口高读得到、self_top 由 ancestor_offset 提供。
+    const Rect fresh_panel =
+        testing::require_value(fresh->extra_hit_box(ctx2, Point{.x = 0.0F, .y = no_paint_viewport.origin.y}));
+    AURORA_TEST_CHECK_LT(fresh_panel.origin.y, AURORA_BOX_HEIGHT);  // 仍判为上翻
+
+    // 反向对照：控件摆在视口顶部时下方装得下（3 档 78 ≤ 200 - 0 - 30 = 170），不应翻转。
+    LayoutEngine::layout(*dd, host_constraints());
+    dd->set_open(false);
+    const Rect top_viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = host_box().size};
+    mq.size = top_viewport.size;
+    env.set<MediaQuery>(mq);
+    dd->set_open(true);
+    paint_once(*dd, top_viewport, ctx);
+    const Rect down = testing::require_value(dd->extra_hit_box(ctx, Point{.x = 0.0F, .y = top_viewport.origin.y}));
+    AURORA_TEST_CHECK_NEAR(down.origin.y, AURORA_BOX_HEIGHT, 1e-3);
+}
+
+AURORA_TEST_CASE(panel_caps_height_and_scrolls_for_long_lists) {
+    // 档位很多时：面板被限高、尾部经内部滚动才可达，且不可见的行点不到。
+    ChangeLog log;
+    std::vector<std::string> many;
+    many.reserve(40);
+    for (int i = 0; i < 40; ++i) {  // 40 档 × 26dp = 1040dp，远超任何视口
+        many.push_back("Opt " + std::to_string(i));
+    }
+    const std::shared_ptr<Dropdown> dd = std::make_shared<Dropdown>(many);
+    dd->set_box_height(AURORA_BOX_HEIGHT);
+    dd->set_item_height(AURORA_ITEM_HEIGHT);
+    dd->set_on_change([&log](int index) -> void {
+        ++log.count;
+        log.last = index;
+    });
+
+    // 视口高 300；控件摆在顶部 ⇒ 下方可用 300 - 30 = 270 < 1040，上方 0 装不下 ⇒ 取下方限高。
+    const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = host_box().size};
+    Environment env;
+    MediaQuery mq;
+    mq.size = Size{.width = AURORA_HOST_WIDTH, .height = 300.0F};
+    env.set_local<MediaQuery>(mq);
+    BuildContext ctx;
+    ctx.env = &env;
+    ctx.scale_factor = 1.0F;
+
+    LayoutEngine::layout(*dd, Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = viewport.size});
+    dd->set_open(true);
+    paint_once(*dd, viewport, ctx);
+
+    const Rect panel = testing::require_value(dd->extra_hit_box(ctx, Point{.x = 0.0F, .y = viewport.origin.y}));
+    AURORA_TEST_CHECK_LT(panel.size.height, 40.0F * AURORA_ITEM_HEIGHT);  // 确实被限高
+    // 限高 = min(下方可用 270, limit = 300 - 2*8 = 284) = 270 ⇒ 可见 270/26 ≈ 10.4 行。
+    AURORA_TEST_CHECK_NEAR(panel.size.height, 270.0F, 1e-3);
+
+    const Rect self{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = dd->size()};
+    // 第 0 行中心在窗口内 ⇒ 可命中。
+    const Point first_center{.x = dd->size().width * 0.5F, .y = AURORA_BOX_HEIGHT + (0.5F * AURORA_ITEM_HEIGHT)};
+    AURORA_TEST_CHECK(dd->covers_extra_hit_box(first_center, ctx));
+    // 第 39 行中心在窗口外 ⇒ 不可命中（不可见即不可点），兼容入口同样不认。
+    const Point last_center{.x = dd->size().width * 0.5F, .y = AURORA_BOX_HEIGHT + (39.5F * AURORA_ITEM_HEIGHT)};
+    AURORA_TEST_REQUIRE_FALSE(panel.contains(last_center));
+    AURORA_TEST_CHECK_FALSE(dd->covers_extra_hit_box(last_center, ctx));
+    AURORA_TEST_CHECK(dd->hit_test(last_center, self, ctx) == nullptr);
+
+    // 滚轮把内部滚动推到尾部后，第 39 行滚入窗口 ⇒ 变得可见可点（点它选中第 39 项）。
+    // 经真实派发走（EventDispatcher 沿命中链找最近可滚动者），而非直接调 protected 的 on_scroll。
+    ScrollEvent wheel;
+    wheel.position = Point{.x = (viewport.origin.x + first_center.x), .y = (viewport.origin.y + first_center.y)};
+    wheel.delta_y = -2000.0F;  // 向下滚（delta_y 上为正，故取负）
+    EventDispatcher::dispatch(*dd, wheel);
+    AURORA_TEST_CHECK(wheel.is_handled);
+
+    // 滚动后第 39 行中心在窗口内。
+    const Point last_visible{.x = dd->size().width * 0.5F,
+                             .y = (panel.origin.y + panel.size.height) - (0.5F * AURORA_ITEM_HEIGHT)};
+    AURORA_TEST_REQUIRE(panel.contains(last_visible));
+    AURORA_TEST_CHECK(dd->covers_extra_hit_box(last_visible, ctx));
+
+    // 经真实派发点击它：序号按「窗口内偏移 + 滚动偏移」反算，必须落在 39（末尾越界则钉住 off-by-one）。
+    MouseEvent pick;
+    pick.action = MouseAction::Press;
+    pick.button = MouseButton::Left;
+    pick.position = Point{.x = viewport.origin.x + last_visible.x, .y = viewport.origin.y + last_visible.y};
+    pick.local_position = last_visible;
+    EventDispatcher::dispatch(*dd, pick, nullptr);
+    AURORA_TEST_CHECK_EQ(log.count, 1);
+    AURORA_TEST_CHECK_EQ(log.last, 39);
 }
 
 }  // namespace aurora::test_cases::utest_dropdown

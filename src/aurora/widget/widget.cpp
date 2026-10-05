@@ -731,7 +731,11 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
     }
     // 追加命中盒（覆盖绘制区）：点在盒内即自身入链。缺省无追加盒 ⇒ 本项恒 false，
     // 与历史行为逐位等价；有 Align 收缩命中盒（`hit_shrunk`）时，覆盖区正是靠这一项入链。
-    if (!self_hit && covers_extra_hit_box(local_adj, ctx)) {
+    // 用 covers_own_extra_hit_box（只看本控件自己的申报）而非聚合入口：自身入链意为
+    // 「本控件接管这一个点」，后代申报的命中归后代所有，把中间容器一并拽进链会改变链的组成。
+    // bounds.origin 即本控件原点在视口坐标系中的位置（命中链里逐层下传的那份），
+    // 是翻转判据所需的全局偏移——与绘制期写回的 focus_bounds_ 无关，不受其缓存缺口影响。
+    if (!self_hit && covers_own_extra_hit_box(local_adj, ctx, bounds.origin)) {
         self_hit = true;
     }
 
@@ -755,14 +759,40 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
     return descendants;
 }
 
-auto Widget::extra_hit_box(const BuildContext &ctx) const -> std::optional<Rect> {
+auto Widget::extra_hit_box(const BuildContext &ctx, const Point &ancestor_offset) const -> std::optional<Rect> {
     (void)ctx;
+    (void)ancestor_offset;
     return std::nullopt;  // 缺省不追加：可命中区 == 自身布局盒
 }
 
-auto Widget::covers_extra_hit_box(const Point &local, const BuildContext &ctx) const -> bool {
-    const std::optional<Rect> extra = extra_hit_box(ctx);
+auto Widget::covers_own_extra_hit_box(const Point &local, const BuildContext &ctx, const Point &ancestor_offset) const
+    -> bool {
+    const std::optional<Rect> extra = extra_hit_box(ctx, ancestor_offset);
     return extra.has_value() && extra->contains(local);
+}
+
+auto Widget::covers_extra_hit_box(const Point &local, const BuildContext &ctx, const Point &ancestor_offset) const
+    -> bool {
+    // 聚合 = 自身申报 ∪ 子树申报。自身段 O(1)，后代段沿 child_nodes() 逐层折算偏移下探，
+    // 与 on_hit_test_chain 的下降式同构 —— 故结果等价于「从本控件出发走一次命中链」。
+    if (covers_own_extra_hit_box(local, ctx, ancestor_offset)) {
+        return true;
+    }
+    return covers_descendant_extra_hit_box(local, ctx, ancestor_offset);
+}
+
+auto Widget::covers_descendant_extra_hit_box(const Point &local, const BuildContext &ctx,
+                                             const Point &ancestor_offset) const -> bool {
+    const std::vector<Node> &kids = child_nodes();
+    return std::ranges::any_of(kids, [&local, &ctx, &ancestor_offset](const Node &child) {
+        const Rect cb = child.bounds();
+        // 折算到子节点本地坐标（与 Container::on_hit_test_chain 的下降式逐字同构）。
+        // 不先判 cb.contains：追加盒本就画在子布局盒之外，用布局盒剪枝会把覆盖区剪掉。
+        // 全局偏移同步累加子节点原点：与 hit_test_chain 把 bounds.origin 逐层下传同源，
+        // 使「离视口多远」这类翻转判据不必依赖绘制期写回的绝对盒（focus_bounds_ 有缓存缺口）。
+        const Point child_offset{.x = ancestor_offset.x + cb.origin.x, .y = ancestor_offset.y + cb.origin.y};
+        return child.widget().covers_extra_hit_box(local - cb.origin, ctx, child_offset);
+    });
 }
 
 auto Widget::mount(const BuildContext &ctx) -> void {

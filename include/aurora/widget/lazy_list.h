@@ -519,11 +519,19 @@ class LazyList : public Widget {
 
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
+        // 视口钳位与本控件 on_hit_test / on_paint 同口径：点在视口外一律不命中。虚拟化使 live_
+        // 里留有视口外的缓存条目（cache_extent 预取），不加钳位时「条目已滚出视口、其覆盖绘制
+        // 区却仍被祖先的闸认」⇒ 肉眼不可见的区域变得可点。
+        const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size};
+        if (!viewport.contains(local)) {
+            return {};
+        }
         for (auto &kv : live_ | std::views::values) {
             const Rect cb = kv.bounds();
             // 闸并入条目的追加命中盒：条目内控件的覆盖绘制区（如条目里的展开面板）画在条目盒外，
             // 只按条目盒判定会拿不到点击（与 `Container::on_hit_test_chain` 同口径）。
-            if (cb.contains(local) || kv.widget().covers_extra_hit_box(local - cb.origin, ctx)) {
+            if (cb.contains(local) ||
+                kv.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 const Rect global{
                     .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                     .size = cb.size};
@@ -534,6 +542,32 @@ class LazyList : public Widget {
             }
         }
         return {};
+    }
+
+    /// @brief 子树追加命中盒的聚合下降：遍历 live_ 条目（虚拟化子项不在 `child_nodes()` 里）。
+    ///
+    /// 视口钳位与本控件 `on_hit_test_chain` **逐字同构**——这是「闸认、自身不认」分叉的禁令来源：
+    /// 祖先（`Column` 等）问本控件是否覆盖某点时走的正是本入口，此处不钳位则视口外缓存条目的
+    /// 面板会被申报出去，而真实派发链上那一点会被 `on_hit_test_chain` 的钳位拒掉，两者分叉。
+    /// @param local 待测点（本控件本地坐标）。
+    /// @param ctx 构建上下文，原样透传给条目子树。
+    /// @param ancestor_offset 本控件原点在视口坐标系中的 y（祖先下降时逐层累加；
+    ///        缺省零表示调用方不知全局位置，覆写体须按纯本地几何判定）。
+    /// @return 任一条目的子树申报覆盖此点为 true；点在视口外恒 false。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto covers_descendant_extra_hit_box(const Point &local, const BuildContext &ctx,
+                                                       const Point &ancestor_offset) const -> bool override {
+        // 视口盒取自身尺寸（与 on_hit_test 的 `bounds.size` 同源：本控件在常规流中的盒即视口）。
+        const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = size()};
+        if (!viewport.contains(local)) {
+            return false;
+        }
+        // live_ 是 std::map：any_of 直接吃 associative_range，无需物化 values 视图
+        // （Node 不可拷贝构造，物化那条路走不通）。
+        return std::ranges::any_of(live_, [&local, &ctx, &ancestor_offset](const auto &kv) {
+            const Rect cb = kv.second.bounds();
+            return kv.second.widget().covers_extra_hit_box(local - cb.origin, ctx, ancestor_offset + cb.origin);
+        });
     }
 
     /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Scroll/Dismissible 模式）。

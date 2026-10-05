@@ -107,8 +107,10 @@ auto info = au::Button::describe_static();
 | `on_scroll(ScrollEvent&) -> void` | 滚轮入口：默认按 `overflow_` 的内建滑窗夹取滚动并写 `remaining_y` 余量；真实滚动控件覆写（路由见 `05-event-navigation.md` §3.3） | `widget.h` |
 | `wants_scroll() -> bool` | 是否参与滚轮命中链路由。默认 = 声明了 `OverflowStrategy::Scroll`；`Scroll` / `LazyList` / `LazyRow` / `GridView` / `PullToRefresh` 覆写为 `true`，保证嵌套时**最深滚动者优先** | `widget.h` |
 | `is_sticky_header() -> bool` | 是否为吸顶头部（`StickyHeader` 覆写为 `true`），供滚动宿主在 blit 后以覆盖层按 pin 位重绘 | `widget.h` |
-| `extra_hit_box(const BuildContext&) -> std::optional<Rect>` | 追加命中盒：**覆盖绘制**（面板画在自身布局盒之外）的控件在此声明那段区域（本地坐标），祖先下降闸据此并入判定；缺省 `std::nullopt` = 不追加（可命中区 == 自身布局盒）。位于 **public 区**：祖先要跨对象查询子控件的声明。详见 `05-event-navigation.md` §3.2.1 | `widget.h` |
-| `covers_extra_hit_box(local, ctx) -> bool` | 追加盒判定入口（非虚）：祖先的下降闸与自身入链判定共用它；无追加盒时恒 `false` | `widget.h` |
+| `extra_hit_box(ctx, ancestor_offset = {0,0}) -> std::optional<Rect>` | 追加命中盒：**覆盖绘制**（面板画在自身布局盒之外）的控件在此声明那段区域（本地坐标），祖先下降闸据此并入判定；缺省 `std::nullopt` = 不追加（可命中区 == 自身布局盒）。位于 **public 区**：祖先要跨对象查询子控件的声明。`ancestor_offset` 是本控件原点在视口坐标系中的 y（祖先下降时累加、带默认值），**只在需要按「离视口多远」决定几何时**用（如面板翻转），纯本地几何的覆写方忽略即可。详见 `05-event-navigation.md` §3.2.1 / §3.2.2 | `widget.h` |
+| `covers_extra_hit_box(local, ctx, ancestor_offset = {0,0}) -> bool` | 追加盒**聚合**判定入口（非虚）：祖先的下降闸调它，问的是「以本控件为根的**子树**是否覆盖此局部点」（自身申报 ∪ 逐子节点折算递归），故孙辈申报能穿过不申报的中间层上达；无任何覆写时恒 `false`，与改动前逐位等价。详见 `05-event-navigation.md` §3.2.2 | `widget.h` |
+| `covers_own_extra_hit_box(local, ctx, ancestor_offset = {0,0}) -> bool` | 只问**本控件自身**申报的追加盒（非虚，恒 O(1)）：`hit_test_chain` 判定自身是否入链用此入口，避免把中间容器一并拽进命中链 | `widget.h` |
+| `covers_descendant_extra_hit_box(local, ctx, ancestor_offset) -> bool` | 聚合的递归下降段（**protected virtual**，不含自身）：缺省遍历 `child_nodes()` 折算下探。仅两类控件覆写——子节点来源/坐标系与布局盒不一致者（`LazyList` / `GridView` 走 `live_`、`Popup` 按 `anchor_` 返回 `false`）、带视口裁剪者（`Scroll` / `LazyList` / `GridView` 必须加视口钳位，否则不可见区域变得可点） | `widget.h` |
 
 **可见性约定**：布局 / 绘制 / 命中测试类内部虚回调 `on_layout` / `on_paint` / `on_hit_test` / `on_mount` / `tick_gestures` 位于 `protected` 区（`widget.h` 起）；指针事件入口 `on_pointer_event` 的两个重载（`MouseEvent`，`widget.h`；`TouchEvent`，`widget.h`）与 `on_hover_change` / `wants_click` 位于 **public 区**且为虚函数——派发器与外部工具直接调用，子类按需要覆写；业务控件覆写 `tick_gestures` 以推进手势，框架容器基类（`Container` / `SingleChild`）可覆写公开 `tick` 以递归子树（见 `widget.h` / `widget.h`），而非经 NVI 模板方法。
 

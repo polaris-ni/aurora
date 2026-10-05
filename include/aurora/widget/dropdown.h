@@ -9,6 +9,7 @@
 
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
+#include "aurora/environment/media_query.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
@@ -216,7 +217,7 @@ class Dropdown : public Widget {
     /// @return 启用为 true。
     [[nodiscard]] auto enabled() const -> bool { return enabled_; }
 
-    /// @brief 点击交互：框内点击开合；展开时点击选项选中并收起。
+    /// @brief 点击交互：框内点击开合；展开时点击可视窗口内的选项选中并收起。
     /// @param e 鼠标事件；仅 Press 参与判定，其余动作转发基类。
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (!enabled_) {
@@ -230,17 +231,27 @@ class Dropdown : public Widget {
         // 主框区域：开合切换
         if (e.local_position.y < box_height_) {
             is_open_ = !is_open_;
+            // 每次展开从顶部开始：否则上次滚动到的位置会让「展开后首屏」随上次状态漂移。
+            panel_scroll_ = 0.0F;
             mark_needs_paint();
             e.is_handled = true;
             return;
         }
-        // 展开中的选项列表
-        if (is_open_) {
-            const int idx = static_cast<int>((e.local_position.y - box_height_) / item_height_);
+        // 展开中的选项列表：序号由「可视窗口 + 滚动偏移」反算，与 panel_geometry 同一份算式。
+        // 只认落在可视窗口内的点（翻转时窗口在主框上方，故此处不按 local.y >= box_height_ 分流）。
+        // self_top 由事件自带的两份坐标反算：`position`（全局，命中链冒泡时不变）减
+        // `local_position`（本控件本地，派发器逐控件改写）＝ 本控件原点的全局 y。
+        // 事件路径因此完全不需要 BuildContext 或绘制期缓存。
+        const float self_top = e.position.y - e.local_position.y;
+        const std::optional<PanelGeometry> geo = panel_geometry(size().width, self_top);
+        if (geo.has_value() && geo->window.contains(e.local_position)) {
+            const float content_y = (e.local_position.y - geo->window.origin.y) + geo->scroll;
+            const int idx = static_cast<int>(std::floor(content_y / item_height_));
             if (idx >= 0 && std::cmp_less(idx, options_.size())) {
                 select(idx);
             }
             is_open_ = false;
+            panel_scroll_ = 0.0F;
             mark_needs_paint();
             e.is_handled = true;
             return;
@@ -248,18 +259,39 @@ class Dropdown : public Widget {
         Widget::on_pointer_event(e);
     }
 
+    /// @brief 挂载时存环境链：布局与绘制都还没跑的首帧也能读到视口高。
+    ///
+    /// `on_paint` 是主写入点（每帧必过），`on_layout` 是兜底（**布局缓存命中时整段被跳过**，
+    /// 见 `Widget::layout`），本入口则保证「一次都没布局/绘制过」时也有环境链可用。
+    /// @param ctx 构建上下文：取其环境链地址（`root_env_`，窗口生命周期内恒定）。
+    auto on_mount(const BuildContext &ctx) -> void override { env_ = ctx.env; }
+
     /// @brief 声明本控件参与点击分发。
     /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
-    /// @brief 追加命中盒：展开态的下拉面板（画在主框下方、自身布局盒之外）。
+    /// @brief 面板被限高时本控件成为滚轮派发目标（面板内部滚动）。
+    ///
+    /// 派发器沿命中链自最深向根找第一个 `wants_scroll()` 者，故须在**展开且内容超出
+    /// 可视窗口**时才为真——否则收起态 / 短列表会白吃掉滚轮，外层列表/页面就滚不动了。
+    /// @return 展开态且面板内容高超出可视窗口高时为 true。
+    [[nodiscard]] auto wants_scroll() const -> bool override {
+        const std::optional<PanelGeometry> geo = panel_geometry(size().width, focus_bounds_.origin.y);
+        return geo.has_value() && geo->content_h > geo->window.size.height + 1e-3F;
+    }
+
+    /// @brief 追加命中盒：展开态的下拉面板（画在主框下方或上方、自身布局盒之外）。
     ///
     /// 面板是覆盖绘制：它不占布局，祖先下降前的包含闸只看布局盒，故面板区域必须在此
     /// 声明才会被闸并入命中链——判据写在 `on_hit_test` 里对真实派发无效（派发只走
     /// `on_hit_test_chain`）。与 `on_hit_test` 的面板分支共用 `panel_box()` 这一份判据。
-    /// @return 展开态为面板矩形（本地坐标）；收起态为 `std::nullopt`（可命中区 == 主框）。
-    [[nodiscard]] auto extra_hit_box(const BuildContext & /*ctx*/) const -> std::optional<Rect> override {
-        return panel_box(size().width);
+    /// 声明的是**可视窗口盒**（翻转 + 限高后的那块），未限高的部分须经面板内滚动才可达。
+    /// @param ancestor_offset 祖先下降时累加传入的本控件全局原点；其 `.y` 即翻转判据所需的
+    ///        「离视口多远」，故本控件的追加盒几何**依赖**它（其余覆写方忽略即可）。
+    /// @return 展开态为面板可视窗口矩形（本地坐标）；收起态为 `std::nullopt`（可命中区 == 主框）。
+    [[nodiscard]] auto extra_hit_box(const BuildContext & /*ctx*/, const Point &ancestor_offset) const
+        -> std::optional<Rect> override {
+        return panel_box(size().width, ancestor_offset.y);
     }
 
     /// @brief 悬停反馈：主框边框高亮为强调色。
@@ -349,7 +381,8 @@ class Dropdown : public Widget {
     }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        env_ = ctx.env;  // 环境链兜底写入（主写入点在 on_paint，见 PanelGeometry 文档）
         // 主框宽度 = 最长选项宽 + 箭头区；下拉为覆盖绘制不占布局
         Font f;
         f.size_pt = font_size_;
@@ -365,6 +398,10 @@ class Dropdown : public Widget {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        // 环境链主写入点：每帧必过、不受布局缓存影响（on_layout 在缓存命中时被整段跳过，
+        // 不可作为唯一写入点）。存的是 root_env_ 的地址——窗口生命周期内恒定、每帧原地
+        // 更新，故事件侧查链读到的视口高恒新鲜，不像「采样成标量」那样滞后一帧。
+        env_ = ctx.env;
         Font f;
         f.size_pt = font_size_;
         // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
@@ -386,21 +423,23 @@ class Dropdown : public Widget {
         const Rect box_rect{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = box_height_}};
         paint_box(p, box_rect, f, box, border, text, arrow);
 
-        // 下拉选项面板
-        if (is_open_) {
-            const float h = static_cast<float>(options_.size()) * item_height_;
-            const Rect drop{.origin = Point{.x = box_rect.origin.x, .y = box_rect.origin.y + box_height_},
-                            .size = Size{.width = box_rect.size.width, .height = h}};
+        // 下拉选项面板：几何与命中同源（panel_geometry 一份算式），翻转 / 限高 / 滚动偏移
+        // 三者在绘制与判定两侧逐字一致，否则出现「看得见的行点不到」或反之。
+        if (const std::optional<PanelGeometry> geo = panel_geometry(box_rect.size.width, bounds.origin.y);
+            geo.has_value()) {
+            const Rect drop = geo->window;
             p.draw_shadow(drop, 0.0F, 2.0F, 8.0F, Color(0, 0, 0, 48));
             p.fill_rect(drop, box_color_);
             p.draw_rect(drop, border_color_);
-            float y = drop.origin.y;
+            // 裁剪到窗口盒：被限高时只画窗口内那几行，其余行滚入后才可见。
+            p.push_clip(drop);
+            const float y = drop.origin.y - geo->scroll;  // 内容顶相对窗口顶上移 scroll
             for (std::size_t i = 0; i < options_.size(); ++i) {
-                const Rect item{.origin = Point{.x = drop.origin.x, .y = y},
+                const Rect item{.origin = Point{.x = drop.origin.x, .y = y + (static_cast<float>(i) * item_height_)},
                                 .size = Size{.width = drop.size.width, .height = item_height_}};
                 paint_item(p, i, item, std::cmp_equal(i, selected_.get()), f, accent, text);
-                y += item_height_;
             }
+            p.pop_clip();
         }
     }
 
@@ -452,16 +491,94 @@ class Dropdown : public Widget {
         p.draw_text(item_box, options_[index], f, selected ? accent : text);
     }
 
-    /// @brief 下拉面板矩形（本地坐标）：命中判据的唯一来源，`extra_hit_box()` 与 `on_hit_test()`
-    ///        共用，避免「兼容入口认、派发入口不认」的分叉。
+    /// @brief 下拉面板几何：翻转 / 高度上限 / 内部滚动的**唯一算式**，四处共用一份。
+    ///
+    /// 面板是覆盖绘制，既无上限也不滚动时，档位一多（真实场景：系统等宽字体枚举 20+ 档）
+    /// 会直接伸出窗口外，尾部既不可见也不可点。本结构把「可视窗口」与「完整内容」拆成两个盒：
+    /// - `window`：实际绘制与命中的那块（局部坐标），受视口高度上限约束，位置随翻转而变；
+    /// - `content_h`：全部选项的完整高度（dp），可超出 `window.size.height`；
+    /// - `scroll`：内容相对窗口的滚动偏移（dp，恒被夹取在 `[0, content_h - window.h]`）。
+    ///
+    /// 翻转规则：下方剩余空间装不下时，若上方装得下则整体翻到主框上方（`window.origin.y` 为负）；
+    /// 两侧都装不下时，取空间较大的一侧并把 `window` 限高——此时内容需内部滚动才可达尾部。
+    ///
+    /// **视口语义（两种，注入那份为准）**：`viewport_h` 读「最近祖先 `MediaQuery` Provider 注入的
+    /// 视口逻辑高」——链上无 Provider 时由 `Window::prepare_context` 把 `MediaQuery::from_surface`
+    /// 注入 `root_env_`，那一份即**第一真值源**（等价于 `Window::size()` ← `Surface::size()`）；
+    /// 应用经 `Provider<MediaQuery>` 显式注入的子树视口作为**可选覆写**（适用于把子树布局在
+    /// 嵌入区、面板应贴合该区而非整窗的场景）。
+    ///
+    /// **两个几何读数各走各的通道，都不依赖绘制期缓存**：
+    /// - `viewport_h`：查 `env_` 环境链上最近祖先注入的 `MediaQuery`（`on_layout` 存的 `root_env_`
+    ///   地址，窗口期恒定、每帧原地更新）⇒ 恒新鲜。注意不能只写在 `on_layout`：`Widget::layout`
+    ///   在**布局缓存命中时直接 return、完全跳过 `on_layout`**，故纯 on_layout 写入不可靠。
+    /// - `self_top`（本控件全局顶边 y）：命中链下降时由祖先逐层累加传入（`extra_hit_box` 的
+    ///   `ancestor_offset` 形参）；事件路径另有一路——`MouseEvent::position`（全局）减
+    ///   `local_position`（本地）即得，无需任何缓存。`on_paint` 用 `bounds.origin`。
+    ///
+    /// 绘制与判定共用本函数，故两侧**永远**同源；`self_top` 在「无事件坐标」的入口
+    /// （`wants_scroll` / `on_scroll`）退化为 `focus_bounds_.origin.y`，而那两处只判
+    /// 「是否可滚」不判位置，故退化无害。
+    struct PanelGeometry {
+        Rect window;  ///< 可视窗口盒（本地坐标）：绘制与命中的实际区域
+        float content_h = 0.0F;  ///< 完整内容高（dp）：`option_count() * item_height()`
+        float scroll = 0.0F;  ///< 内部滚动偏移（dp）：内容顶相对窗口顶的位移
+    };
+
+    /// @brief 面板可视窗口盒（本地坐标）：`extra_hit_box()` / `on_hit_test()` 的唯一来源。
     /// @param width 面板宽度（取主框宽度）。
-    /// @return 展开态为紧贴主框下方的面板矩形；收起态为 `std::nullopt`。
-    [[nodiscard]] auto panel_box(float width) const -> std::optional<Rect> {
+    /// @param self_top 本控件原点在视口坐标系中的 y（祖先下降时累加传入）。
+    /// @return 展开态为可视窗口盒；收起态为 `std::nullopt`。
+    [[nodiscard]] auto panel_box(float width, float self_top) const -> std::optional<Rect> {
+        const std::optional<PanelGeometry> geo = panel_geometry(width, self_top);
+        return geo.has_value() ? std::optional<Rect>{geo->window} : std::nullopt;
+    }
+
+    /// @brief 视口逻辑高（dp）：查 `env_` 环境链上最近祖先注入的 `MediaQuery`。
+    /// @return 视口高；环境链无 `MediaQuery` 或读数为非正时返回 0（调用方据此退化为无限高）。
+    [[nodiscard]] auto viewport_height() const -> float {
+        const MediaQuery *mq = (env_ != nullptr) ? env_->get<MediaQuery>() : nullptr;
+        return (mq != nullptr) ? mq->size.height : 0.0F;
+    }
+
+    /// @brief 面板几何（翻转 + 限高 + 滚动偏移）的唯一实现；绘制与全部命中入口共用它。
+    /// @param width 面板宽度（取主框宽度）。
+    /// @param self_top 本控件原点在视口坐标系中的 y（祖先下降时累加传入）。
+    /// @return 展开态为面板几何；收起态为 `std::nullopt`。
+    [[nodiscard]] auto panel_geometry(float width, float self_top) const -> std::optional<PanelGeometry> {
         if (!is_open_) {
             return std::nullopt;
         }
-        const float h = static_cast<float>(options_.size()) * item_height_;
-        return Rect{.origin = Point{.x = 0.0F, .y = box_height_}, .size = Size{.width = width, .height = h}};
+        const float full_h = static_cast<float>(options_.size()) * item_height_;
+        const float viewport_h = viewport_height();
+        if (viewport_h <= 0.0F) {
+            // 无视口读数（未布局 / 环境链无 MediaQuery）：退化为无限高、恒向下、不可滚。
+            return PanelGeometry{.window = Rect{.origin = Point{.x = 0.0F, .y = box_height_},
+                                                .size = Size{.width = width, .height = full_h}},
+                                 .content_h = full_h,
+                                 .scroll = 0.0F};
+        }
+        // 主框下沿 / 上沿到视口边界的可用空间（self_top 由祖先下降时累加传入，见 extra_hit_box）。
+        const float below = viewport_h - (self_top + box_height_);
+        const float above = self_top;
+        const float limit = std::max(viewport_h - (2.0F * AURORA_PANEL_MARGIN), AURORA_MIN_PANEL_HEIGHT);
+
+        float origin_y = box_height_;  // 默认向下：紧贴主框下沿
+        float window_h = full_h;
+        if (full_h > below) {
+            // 下方装不下：上方装得下则整体上翻，否则取较大一侧并限高（内容内部滚动）。
+            if (above >= full_h) {
+                origin_y = box_height_ - full_h;  // 上翻：窗口顶落在主框上方（负值）
+            } else {
+                window_h = std::min((above > below) ? above : below, limit);
+            }
+        }
+        window_h = std::min(window_h, limit);
+        const float max_scroll = std::max(0.0F, full_h - window_h);
+        return PanelGeometry{
+            .window = Rect{.origin = Point{.x = 0.0F, .y = origin_y}, .size = Size{.width = width, .height = window_h}},
+            .content_h = full_h,
+            .scroll = std::clamp(panel_scroll_, 0.0F, max_scroll)};
     }
 
     /// @brief 命中测试：主框区域与展开中的下拉面板命中本控件，其余区域不命中。
@@ -478,14 +595,37 @@ class Dropdown : public Widget {
             return this;
         }
         // 展开的下拉区：与追加命中盒同一份判据（面板画在布局盒外，不要求点落在自身布局盒内）。
-        if (const std::optional<Rect> drop = panel_box(bounds.size.width); drop.has_value() && drop->contains(local)) {
+        if (const std::optional<Rect> drop = panel_box(bounds.size.width, bounds.origin.y);
+            drop.has_value() && drop->contains(local)) {
             return this;
         }
         return nullptr;
     }
 
+    /// @brief 滚轮：面板被限高时把余量转成面板内部滚动，吃不完的上冒给外层可滚动祖先。
+    /// @param e 滚轮事件：读 `delta_y`，回写 `is_handled` 与未吸收余量 `remaining_y`。
+    auto on_scroll(ScrollEvent &e) -> void override {
+        // 面板未被限高（无需内部滚动）时不接管，交给外层——与「面板即完整内容」的情形一致。
+        const std::optional<PanelGeometry> geo = panel_geometry(size().width, focus_bounds_.origin.y);
+        const bool scrollable = geo.has_value() && geo->content_h > geo->window.size.height + 1e-3F;
+        if (!scrollable || e.delta_y == 0.0F) {
+            Widget::on_scroll(e);
+            return;
+        }
+        e.is_handled = true;
+        const float before = panel_scroll_;
+        const float max_scroll = std::max(0.0F, geo->content_h - geo->window.size.height);
+        panel_scroll_ = std::clamp(panel_scroll_ - e.delta_y, 0.0F, max_scroll);
+        if (panel_scroll_ != before) {
+            mark_needs_paint();
+        }
+        e.remaining_y = e.delta_y + (panel_scroll_ - before);
+    }
+
     static constexpr float AURORA_PAD = 10.0F;  ///< 文本内边距(dp)
     static constexpr float AURORA_ARROW_ZONE = 24.0F;  ///< 箭头区宽度(dp)
+    static constexpr float AURORA_PANEL_MARGIN = 8.0F;  ///< 面板与视口上下沿的最小留白(dp)
+    static constexpr float AURORA_MIN_PANEL_HEIGHT = 48.0F;  ///< 限高后的最小可视面板高(dp)
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     /// @brief 选项文本列表：构造/反序列化回填，绘制、命中测试与宽度测量按序号索引。
@@ -501,6 +641,8 @@ class Dropdown : public Widget {
     Color arrow_color_ = Color{120, 120, 125, 255};  ///< 箭头颜色
     float box_height_ = 30.0F;  ///< 主框高度 dp
     float item_height_ = 26.0F;  ///< 选项行高 dp
+    float panel_scroll_ = 0.0F;  ///< 面板内部滚动偏移 dp（仅面板被限高时非零；见 panel_geometry）
+    const Environment *env_ = nullptr;  ///< 环境链（on_layout 从 ctx.env 存；窗口期恒定，事件阶段读视口用）
     float font_size_ = 13.0F;  ///< 字号 pt
     float corner_radius_ = 4.0F;  ///< 主框圆角半径 dp；0 = 直角
     bool enabled_ = true;  ///< 禁用态灰化并忽略点击

@@ -237,6 +237,41 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **验收**：`utest_dropdown` / `utest_menu_bar` / `utest_title_bar` 三个套件守护——嵌 `Column` 与嵌 `LazyList` 条目两种宿主下覆盖区可点、覆盖区外不抢（面板底边以下的点仍归下方兄弟控件）、收起态逐位不变、展开结束后陈旧点不中、兼容入口与派发入口逐点一致；`utest_containers` 的 `default_extra_hit_box_equals_own_layout_box` 钉住缺省等价（密集取点上，命中链最深节点与「只按子布局盒判定」的参考实现逐点相同）。变异自证：只回退闸（保留控件侧追加盒）或只回退控件侧 `extra_hit_box()`（保留闸）都必须让上述用例转红——两者分别是必要条件。
 
+#### 3.2.2 追加命中盒的聚合深度（子树上报）
+
+**上一节的缺口是查询深度**：闸问的是「**直接子节点自己**申报了没」，不是「这棵子树里有没有人申报」。孙辈覆写了 `extra_hit_box()` 而中间的容器（`Row` / `Column` 等不申报的中间层）不申报时，门就在中间层判假——控件说「我这里可达」、祖先说「不可达」。真实形态是三层嵌套：设置面板的每行是 `LazyList → Row → Dropdown`，面板自下拉局部 `y = box_height_` 起，探点越过行盒下沿即落入这个洞。
+
+**聚合语义（递归，与下降式同构）**：`covers_extra_hit_box(local, ctx)` 升级为「以本控件为根的**子树**是否覆盖此局部点」。两段判定——① 节点自身由 `extra_hit_box(ctx)` 申报的追加盒；② 逐个直接子节点，按其 `bounds().origin` 把点折算到子节点本地坐标，递归问该子节点的同一入口。折算方式与 `Container::on_hit_test_chain` 的下降式**逐字同构**，故聚合结果等价于「从该控件出发走一次命中链」。缺省路径（无覆写、无溢出）仍恒为假，与改动前逐位等价。
+
+| 角色 | 契约 |
+|:---|:---|
+| `Widget::covers_extra_hit_box(local, ctx)`（public，非虚） | 聚合入口：自身申报 ∪ 子树申报。祖先下降闸只调这一个 |
+| `Widget::covers_own_extra_hit_box(local, ctx)`（public，非虚） | 只问自身申报，恒 O(1)。`Widget::hit_test_chain` 判定「自身是否入链」用**它**而非聚合入口——自身入链意为「本控件接管这一个点」，把中间容器一并拽进链会改变链的组成 |
+| `Widget::covers_descendant_extra_hit_box(local, ctx)`（**protected virtual**） | 聚合的递归下降段，只管后代。缺省遍历 `child_nodes()` 折算下探 |
+
+**覆写场景仅两类**（新增控件时按此二选一，不必逐处重写闸）：
+
+1. **子节点来源或坐标系与布局盒不一致**——`LazyList` / `GridView` 的子项在 `live_` 表里（虚拟化，不在 `children_` / `child_nodes()` 中），须自行遍历；`Popup` 按 `anchor_`（**全局**坐标）绘制内容，基类折算算不出正确结果，覆写为恒 `false`（它是上一节的「正面范式」，在自己的 `on_hit_test_chain` 里重映射下降，不经祖先开闸）。
+2. **带视口裁剪的容器必须覆写并加视口钳位**——`Scroll` / `LazyList` / `GridView`。虚拟化与滚动使子树里存在被裁出视口的节点；不钳位则它们照样申报追加盒，**一个肉眼不可见的区域变得可点**，比不做修复更糟。覆写时钳位与坐标换算必须与本控件 `on_hit_test_chain` 的下降口径**逐字同构**，否则出现「闸认、自身不认」。
+
+**z 序与覆盖绘制并用的限制（形态约束，非缺陷）**：`on_paint` 按子节点**前向**绘制、`on_hit_test_chain` **逆序**下降。覆盖绘制不占布局，故其面板会被**更晚绘制**的兄弟行盖住——追加盒聚合修好的是「派发可达」，视觉残段仍在，且重叠处点击归视觉更上层的兄弟（与视觉一致）。**因此列表行内不得使用覆盖绘制不占布局的控件**；推荐替代是把面板挂到真正的浮层宿主（`OverlayHost` / `Popup`），它们按自身次序自顶向下询问。本仓不为此改绘制顺序：那样会在每帧绘制路径上引入「读一个在绘制期语义未定义的查询」，并改变全部容器的层叠语义。
+
+**全局偏移的传递（翻转判据需要「离视口多远」）**：追加盒的坐标是**本地**的，但部分覆盖绘制控件要按「自己离视口多远」决定几何（`Dropdown` 贴视口下沿时向上翻）。这需要**全局**位置，故 `covers_extra_hit_box` / `covers_own_extra_hit_box` / `extra_hit_box` 均带一个 `ancestor_offset` 形参（**带默认值，缺省 `{0,0}`**，既有调用方零改动）：祖先下降时把自己累加的偏移传下去（`bounds.origin + cb.origin`），与 `hit_test_chain` 把 `bounds.origin` 逐层下传**同源**。默认值表示「调用方不知全局位置」，覆写方此时只能按纯本地几何判定，不得凭空假设自己在视口中的位置。
+
+**两类几何读数各走各的通道，都不依赖绘制期缓存**（`Dropdown::PanelGeometry` 是完整样本）：
+
+| 读数 | 通道 | 为何不能用别的 |
+|:---|:---|:---|
+| 视口逻辑高 | 查 `env_` 环境链上最近祖先注入的 `MediaQuery`（存的是 `root_env_` 地址，窗口期恒定、每帧原地更新） | 事件回调（`on_pointer_event` / `on_scroll`）签名**不带 `BuildContext`**，只有布局 / 绘制两条路拿得到环境 |
+| 本控件全局顶边 y | 命中链下降时由祖先累加传入（`ancestor_offset`）；事件路径另有一路——`MouseEvent::position`（全局）减 `local_position`（本地） | 绘制期写回的 `focus_bounds_` **有缓存缺口**：`Widget::paint` 在显示列表缓存命中时提前 `return`，跳过 `focus_bounds_` 写入（`src/aurora/widget/widget.cpp`），故它不是可靠的真值源 |
+
+⚠️ **写 `env_` 不可只写在 `on_layout`**：`Widget::layout` 在**布局缓存命中时直接 `return`、完全跳过 `on_layout`**（`AURORA_ENABLE_LAYOUT_CACHE` 下），故靠 `on_layout` 单点写入不可靠。本仓既有 `TitleBar` 正是把 `env_` 只写在 `on_layout`（`title_bar.h`）——同款隐患，仅因 `WindowChrome` 缺失时有 null 兜底而未暴露。正确做法：**`on_paint` 为主写入点**（每帧必过）+ `on_layout` / `on_mount` 为兜底。
+
+**「视口」的两种语义（注入那份为准）**：① **第一真值源** = `Window::prepare_context` 注入 `root_env_` 的那份（`MediaQuery::from_surface`，等价于 `Window::size()` ← `Surface::size()`），多窗口下各窗口互不串；② **可选覆写** = 应用经 `Provider<MediaQuery>` 显式注入的子树视口，适用于把子树布局在嵌入区、面板应贴合该区而非整窗的场景。`PanelGeometry` 读的是「最近祖先 Provider 值」，无 Provider 时即落到 ①。`Provider<T>` 是本仓既有的按子树覆盖机制（`widget/provider.h`），`MediaQuery` 是其已支持的类型。
+
+**验收**：`utest_dropdown` 新增五条——三层嵌套孙辈申报可达（`LazyList → Row → Dropdown`，正对照）、被裁剪的申报不可达（条目可见但面板整段在视口外）、`Scroll` 与 `LazyList` 两入口同形（派发链与 `covers_extra_hit_box` 同判）、面板翻转（贴视口下沿时向上）、面板限高 + 内部滚动（长列表尾部滚入后才可点）。变异自证：只回退 `covers_extra_hit_box` 的聚合段（保留控件侧 `extra_hit_box`）⇒ 三层嵌套用例转红；只回退 `LazyList` 的视口钳位 ⇒ 两条裁剪用例转红。两者分别证明「聚合」与「裁剪」各自是必要条件。 另有一条专钉「翻转不依赖绘制期缓存」：`panel_flips_up_at_viewport_bottom` 构造一个**从未 paint** 的 `Dropdown`（`focus_bounds_` 为零盒），经 `ancestor_offset` 传入全局顶边后仍须判为上翻。变异自证：把 `extra_hit_box` 里的 `ancestor_offset.y` 换回 `focus_bounds_.origin.y` ⇒ 该断言转红（未翻转）。
+
+
 ### 3.3 嵌套滚动协调（滚轮余量上冒）
 
 `dispatch(Widget&, ScrollEvent&)`（`event/dispatcher.cpp`）把滚轮判给**最近可滚动祖先**，并在内层吃到端点后把余量交给外层：
