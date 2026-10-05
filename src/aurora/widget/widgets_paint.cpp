@@ -227,28 +227,29 @@ auto Button::paint_border(Painter &p, const Rect &bounds) -> void {
     }
 }
 
-auto Button::paint_label(Painter &p, const Rect &bounds, Color text_color) -> void {
+auto Button::paint_label(Painter &p, const Rect &bounds, Color text_color, const std::string &display) -> void {
     const float fs = font.size_pt > 0.0F ? font.size_pt : 14.0F;
     const Font f{.size_pt = fs};
-    float tw = cached_text_width_;
-    float th = cached_text_height_;
-    if (tw <= 0.0F || th <= 0.0F) {
-        tw = render::FontEngine::measure_width(label.get().text, f);
-        th = render::FontEngine::measure_height(f);
-        cached_text_width_ = tw;
-        cached_text_height_ = th;
+    // 缓存失效：显示串变了（或尚未测过）就重测，避免复用另一 locale 下的旧宽。
+    if (cached_display_text_ != display || cached_text_width_ <= 0.0F || cached_text_height_ <= 0.0F) {
+        cached_display_text_ = display;
+        cached_text_width_ = render::FontEngine::measure_width(display, f);
+        cached_text_height_ = render::FontEngine::measure_height(f);
     }
+    const float tw = cached_text_width_;
+    const float th = cached_text_height_;
     const float tx = bounds.origin.x + ((bounds.size.width - tw) * 0.5F);
     const float ty = bounds.origin.y + ((bounds.size.height - th) * 0.5F);
-    p.draw_text(Rect{.origin = Point{.x = tx, .y = ty}, .size = Size{.width = tw, .height = th}}, label.get().text,
-                font, text_color);
+    p.draw_text(Rect{.origin = Point{.x = tx, .y = ty}, .size = Size{.width = tw, .height = th}}, display, font,
+                text_color);
 }
 
-auto Button::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void {
+auto Button::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     // 绘制分阶段（继承扩展点）：背景 → 边框 → 文字；状态色由 resolve_* 钩子解析。
     paint_background(p, bounds, resolve_background());
     paint_border(p, bounds);
-    paint_label(p, bounds, resolve_text_color());
+    // 本帧只解析一次：量宽与落笔共用 display 这一份副本。
+    paint_label(p, bounds, resolve_text_color(), resolved_label(ctx));
 }
 
 }  // namespace aurora
