@@ -91,6 +91,11 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_manual_test_format
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_manual_test_format.py"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 变更提案（codespec/changes/*/proposal.md）解析契约守护：目录命名、标题形态、编号唯一
+        # 与升序、元信息五字段与取值域、关联需求是否真在特性表、四节齐全与顺序、回写落点可达。
+        add_test(NAME check_change_proposals
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_change_proposals.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 版本一致性门禁（CHANGELOG.md 的 currentVersion 必须等于库版本；描述性口径不符仅告警）。
         add_test(NAME check_version_consistency
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_version_consistency.py"

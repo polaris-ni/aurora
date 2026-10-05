@@ -2,7 +2,7 @@
 
 > **本文件只做两件事**：① 用一张导航表把你（人或 AI）导到 `codespec/` 里唯一的权威文档；② 列出不可违反的硬约束。
 > **细则一律不在这里**——构建选项、测试框架用法、编码规则、CI 矩阵全部下沉到 §4 标注 🥇 的文件，避免双份真相漂移。
-> 动手前看 §5 硬规则，动手后按 §4「变更 → 回写落点 + 必跑门禁」闭环。
+> 动手前看 §5 硬规则；端到端怎么走看 §6；动手后按 §3.1「变更 → 必跑门禁 + 回写落点」闭环。
 
 ---
 
@@ -90,6 +90,7 @@ cmake --build build --target docs       # Doxygen，WARN_AS_ERROR=YES，查「�
 | 测试文件 | `registry_integrity`、`check_test_temp_hygiene`、`framework_selftest` | `CODING_STANDARDS.md` §3 |
 | `codespec/` 文档与交叉引用 | `check_codespec_xref`、`check_code_doc_sync` | — |
 | `codespec/manual-test/*.md` | `check_manual_test_format` | — |
+| `codespec/changes/*/proposal.md` 变更提案（新增或改状态） | `check_change_proposals` | `codespec/changes/README.md`（契约本身；提案所述改动另按本表对应行回写） |
 | 版本号 / `CHANGELOG.md` | `check_version_consistency` | `CODING_STANDARDS.md` §7 |
 | 任何代码行为 | 相关 `ctest -R <stem>`、`--target docs` | 见 §4 权威表 |
 
@@ -116,7 +117,7 @@ CI 全量矩阵（core / backends / toggles / asan / coverage / wasm / install-c
 
 ## 4 文档导航（codespec/）
 
-**顶层 6 份自包含正文** + **子系统规格 9 份** + **生成物** `ERROR_CATALOG.md` + **数据源** `errors.toml` / `debug_api.toml`（后三者路径被 `tools/` 与 `src/aurora/core/diagnostics.cpp` 硬编码，不可移动）+ **待评审手工测试记录** `manual-test/`（22 份，按约定**不进本导航、不被其他文档引用**，格式由 `check_manual_test_format` 守护）。
+**顶层 6 份自包含正文** + **子系统规格 9 份** + **生成物** `ERROR_CATALOG.md` + **数据源** `errors.toml` / `debug_api.toml`（后三者路径被 `tools/` 与 `src/aurora/core/diagnostics.cpp` 硬编码，不可移动）+ **待评审手工测试记录** `manual-test/`（22 份，按约定**不进本导航、不被其他文档引用**，格式由 `check_manual_test_format` 守护）+ **变更提案** `changes/`（契约见 `changes/README.md`，格式由 `check_change_proposals` 守护）。
 
 | 你要解决的问题 | 读这个（🥇 = 该领域唯一权威，冲突时以它为准） |
 |:---|:---|
@@ -162,5 +163,81 @@ CI 全量矩阵（core / backends / toggles / asan / coverage / wasm / install-c
 11. **引用必须可达且随仓库分发**：文档引用写仓库相对路径 + 真实章节锚点（如 `ARCHITECTURE.md` §8.5），代码引用写路径不写行号；**禁引** `*.draft.md`、`.workbuddy/`、`.codebuddy/`、`build*/`、本机绝对路径与个人目录；未落地的规划须标注「计划 / 待建」。
 12. **公共 API 注释按 `CODING_STANDARDS.md` §13 写全**：`///`（成员尾注 `///<`）、命令一律 `@` 前缀、`@brief` 居块首，并按 §13.5.2 矩阵补齐 `@param`/`@return`/`@tparam`/枚举项/常量说明；实现叙述与 TODO 用 `//` 且不紧贴可文档化声明；描述以代码实际行为为准，禁零信息套话；豁免写 `DOC-EXEMPT: <规则> <原因>`。
 13. **字符串字面量不得含中文**（`CODING_STANDARDS.md` §14）：注释可中文，字面量会抵达不受本库控制的终端代码页（GBK 下必乱码）；例外仅限功能必需中文并就地标 `CJK-LITERAL: <类别> - <原因>`，**诊断文案不属例外**。
+14. **改动先落变更提案再落码**：触及公共 API、分层边界、后端矩阵或性能门槛的改动，先在 `codespec/changes/<语义短名>/proposal.md` 写清动机、变更内容、验收判据与回写落点，状态按 `已提议 → 实施中 → 已归档` 流转；契约见 `codespec/changes/README.md`，由 `check_change_proposals` 守护。日常小修（不改契约、不改公共面）无需提案。
 
 > 上述规则的**增量**由 §3.1 表中的 CTest 门禁把关（`check_doc_comments`、`check_no_cjk_literals`、`check_codespec_xref`、`check_code_doc_sync` 等），存量豁免以白名单内置于脚本并注明原因；门禁自身输出必须全 ASCII，否则日志读不清。
+
+---
+
+## 6 端到端工作流程
+
+> 本节是**流程路由**，不是细则本身。每一步只回答三件事：做什么、去哪读、什么算完。
+> 细则一律在第三列指向的权威文档里，此处不复制一份，避免双份真相漂移。
+> 对人（维护者）与 AI（协作助手）同样适用；AI 侧额外受 §5 硬规则与 §3.2 反例清单约束。
+
+**主线**：定位 → 提案 → 落码 → 本地验证 → 回写 → 跨平台与 CI → 归档。
+
+### 6.1 定位与提案
+
+| 动作 | 去哪读 | 出口判据 |
+|:---|:---|:---|
+| 确定改动落在哪个域，找到对应的唯一权威文档 | §4 导航表 | 能指出要改的文件与要回写的文档 |
+| 动手前先读，确认契约与设计不变量不被破坏 | `SPECIFICATIONS.md` §5、`ARCHITECTURE.md` | 不变量清单未被违反 |
+| 触及公共 API / 分层边界 / 后端矩阵 / 性能门槛 → 先落变更提案 | `codespec/changes/README.md`（硬规则 14） | 提案存在，状态 `已提议` |
+| 评审达成共识后转实施 | `codespec/changes/README.md` | 状态 `实施中` |
+
+> **疑问未消不动手**。需要人拍板的取舍（如为性能违反既有设计原则、越界操作）先问清，不靠猜补全。
+
+### 6.2 落码与配套产物
+
+| 动作 | 去哪读 | 出口判据 |
+|:---|:---|:---|
+| 按编码规则落码；API 以头文件与 `aurora_api.json` 为唯一事实，不凭记忆假设 | 🥇 `CODING_STANDARDS.md` | 编译零 error |
+| 新增公共 API / widget / 核心逻辑必配单测；demo 按 §3 的一对一约定 | `CODING_STANDARDS.md` §3、§2 目录表 | `utest_*` 存在并经 GLOB 接入 CTest |
+| 新增或改动 widget / 类型 / 属性键 → 刷新 API schema（硬规则 3） | `BUILD_OPTIONS.md` §3.6 | `check_api_schema_sync` 绿 |
+
+### 6.3 本地验证
+
+| 动作 | 去哪读 | 出口判据 |
+|:---|:---|:---|
+| 跑全量测试与全部静态门禁 | §3（复制即用命令块） | `ctest --preset ninja-test` 全绿 |
+| 跑静态分析与格式化门禁 | §3 | `lint` / `format-check` 全绿 |
+| 按改动类型补跑针对性门禁（真机探针、DPI 单源等） | §3.1 表第二列 | 对应项全绿 |
+
+### 6.4 回写、版本与提交
+
+| 动作 | 去哪读 | 出口判据 |
+|:---|:---|:---|
+| 按改动类型回写 `codespec/` 文档 | §3.1 表第三列 | `check_codespec_xref` / `check_code_doc_sync` 绿 |
+| 版本与变更记录更新；破坏性变更给出迁移路径 | `CHANGELOG.md` SemVer 规则、`SPECIFICATIONS.md` §12 | `check_version_consistency` 绿 |
+| 按 Conventional Commits 写提交信息 | `CODING_STANDARDS.md` §10 | `git log` 可归类、无任务编号词 |
+
+### 6.5 跨平台与 CI
+
+> ⚠️ `ctest --preset ninja-test` **只覆盖 Windows Release 一腿**。改动一旦触及公共头，必须补跑其余两腿，
+> 否则 MinGW / clang / gcc 之间的严格度差异会一直拖到 CI 才暴露。
+
+| 腿 | 去哪读 | 出口判据 |
+|:---|:---|:---|
+| Windows Release 全量 | §3 | `ctest --preset ninja-test` 全绿 |
+| wasm 腿（Emscripten） | `ARCHITECTURE.md` §14.4 | 该腿全绿 |
+| Linux X11 / Wayland 腿 | `ARCHITECTURE.md` §14.4 | 该腿全绿 |
+| 推送后 CI 全矩阵 | `ARCHITECTURE.md` §14.4、`.github/workflows/` | 十组作业全绿 |
+
+### 6.6 归档
+
+| 动作 | 去哪读 | 出口判据 |
+|:---|:---|:---|
+| 提案状态转 `已归档` | `codespec/changes/README.md` | 状态 `已归档` |
+| 核对提案列出的回写落点确已落地 | §3.1 表第三列 | 落点文档与代码现状一致 |
+
+### 6.7 什么可以跳过
+
+流程的价值在拦住真正会漂的东西，不在制造仪式。下表之外的情形一律走完整流程；**判断不了是否触及，就按触及处理**。
+
+| 可跳过 | 前提 | 依据 |
+|:---|:---|:---|
+| 变更提案 | 不触及公共 API / 分层边界 / 后端矩阵 / 性能门槛的日常小修 | 硬规则 14 |
+| 跨平台三腿 | 本次未改动任何公共头 | §6.5 |
+| 回写文档 | 改动类型在 §3.1 表第三列标注为「—」 | §3.1 |
+| 配套单测 | 一次性示例 / 演示，且已在说明里标注「无单测」 | 硬规则 7 |
