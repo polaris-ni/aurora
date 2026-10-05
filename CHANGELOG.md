@@ -26,6 +26,14 @@ freeze: minor-versions-are-additive
 - 连击判定常量改名（`readability-identifier-naming` 要求全局常量 `AURORA_` 前缀 + 全大写）：`kDefaultClickWindowMs` → `AURORA_DEFAULT_CLICK_WINDOW_MS`、`kDefaultClickRadiusDp` → `AURORA_DEFAULT_CLICK_RADIUS_DP`、`kMaxClickCount` → `AURORA_MAX_CLICK_COUNT`（均位于 `event/event.h`）。纯符号重命名，无行为变化（MAJOR 级）。
 - `AccessibilityScrollRange`（`core/a11y_types.h`）新增两个字段 `viewport` 与 `content`（均带默认初值 `0.0`），并新增平台中立纯函数 `compute_vertical_view_size(range) -> double`。两量是 UIA `IScrollProvider::get_VerticalViewSize` 的「可见内容占比」真源（`viewport/content×100`，夹到 `[0,100]`；无跨度/不支持滚动报 100），用于修正此前 `max/(max+1)×100` 把「可滚跨度」误当「可见占比」、内容越大反而越接近 100% 的语义反向缺陷。`max/min/position` 仅用于滚动位置（`VerticalScrollPercent`），与 `VerticalViewSize` 的占比语义相互独立。ABI 层面结构体布局变化（静态库 alpha 阶段）；按指定初始化器填字段的调用方零改动，**位置式聚合初始化** `{min,max,position}` 因字段数变化须补两参。
 
+### Added
+- `Node::use_count() -> long`（`widget/node.h`，inline 只读访问器）：共享该控件的 `shared_ptr` 引用数，供父侧判「本容器是否唯一持有者」。与 `widget.cpp` 中 a11y 结构事件的唯一所有权判定同口径。空节点返回 0。诊断用途，本身不改变任何生命周期行为。
+- `Widget::child_owned_ref_count() -> long`（`widget/widget.h`，**protected virtual**，缺省返回 `1`）：本容器对任一直接子节点持有的份数，供 `detach_all_children_layout_parent` 判唯一所有权。基类缺省适用于 `child_nodes_mut()` 即真实存储的容器（`Container` 的 `children_`，每子一份）；**持有子节点视图缓存副本的容器须覆写**（`SingleChild` 要算上 `child_view_mut_` 与 `child_view_`），否则正常销毁会被误判为「有外部持有者」而继续刷 WARN。新增容器若 `child_nodes_mut()` 返回的不是真实存储，同样须覆写。
+
+### Changed
+- **`detach_child_layout_parent` 的断链告警改为分档，只在异常时可见**（`widget/widget.cpp`）。此前 `~Container` / `~SingleChild` 析构体首行的 `detach_all_children_layout_parent()` 对**每一个**子节点无条件发 `AURORA_LOG_WARN`，而那一刻子控件仍被容器持有、尚未析构——即每一次正常的树销毁都逐子刷屏（实测「反复重建 widget 子树」的集成套件单套件可刷数千行），把一次真断链埋进噪声。现按「被摘子节点是否在容器之外仍被持有」分档：随容器正常销毁 ⇒ 静默清指针（该清的照旧清，只是不再当成异常）；活在容器之外被摘走 ⇒ 仍发 `WARN`。指针清理行为与告警文案语义均未变，仅告警**出现次数**收敛。判别式见 `04-widget.md` §2.3。
+- 断链告警文案改用该仓日志宏的可变参数拼接形态：`AURORA_LOG_WARN("widget", "…still alive: ", child->type_name(), "; dirty marks…")`。此前写成 printf 风格的 `%s` 占位符，但 `AURORA_LOG_*` 经 `detail::log_concat`（`operator<<` 折叠）拼接、**不是** printf，`%s` 原样输出且类型名被附在整句末尾。现在类型名作为独立参数进入消息正文。诊断文案保持 ASCII。
+
 ### Migration
 - `OverlayHost::add_overlay` 调用点：把「拿到序号就存下来稍后 `remove_overlay`」的写法改成先判 `has_value()`。典型迁移形态：
   ```cpp
@@ -40,6 +48,8 @@ freeze: minor-versions-are-additive
 - `Button` 子类覆写 `paint_label` 处补上第四个形参并直接采用它：`paint_label(p, bounds, color, display)`。原先在覆写体内自行 `resolve(...)` 或直读 `label.get().text` 的写法仍能编译，但会与布局期解析结果分叉（同一帧内出两串），应一并改为采用形参。
 - 旧名直接替换为新名即可；语义、初值（500ms / 4dp / 3）与 `EventDispatcher` / `TouchDispatcher` 的 `click_window_ms` / `click_radius_dp` 成员初值均不变。
 - `AccessibilityScrollRange` 调用点：已用指定初始化器（`{.min=…, .max=…, .position=…}`）的零改动；仅「位置式聚合初始化」 `AccessibilityScrollRange{a,b,c}` 须补两参 `AccessibilityScrollRange{a,b,c,0.0,0.0}`（或改用指定初始化器）。取 `VerticalViewSize` 改走 `compute_vertical_view_size(range)`，不要再自行写 `max/(max+1)`。
+- 新增持有子节点的容器：若其 `child_nodes_mut()` 返回的不是真实存储（而是某种缓存 / 视图副本），**必须覆写 `child_owned_ref_count()`** 报出自身实际持有份数，否则该容器的正常销毁会被误判为异常、逐子发 `WARN`（不崩、不影响功能，但会刷屏）。`child_nodes_mut()` 直接返回真实存储的容器（典型如 `Container` 子类沿用基类实现）无需任何改动。
+- 既有 `detach_child_layout_parent` 调用方（含 `Container::remove_child`）**零改动**：真摘除路径的告警行为完全不变。
 
 ### Added
 - **追加命中盒的几何读数改走权威通道**（续上条，消除翻转判据对绘制期缓存的依赖）。

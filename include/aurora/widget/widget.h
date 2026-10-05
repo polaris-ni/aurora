@@ -1114,8 +1114,12 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///   唯一持有者（`use_count()` 对「临时副本」与「父先亡」两种情形取值相同，分不开）。
     ///   父容器明确知道「这些子节点要脱离我了」，故这里是唯一真值源。
     ///
-    /// 另发一条 `AURORA_LOG_WARN`：被清的是**仍存活**控件的父指针（真正销毁控件的路径不经本
-    /// 函数），这是消费方可观测的断链信号，用于把「控件已脱离树却仍被标脏」与「忘记标脏」区分开。
+    /// 另发一条 `AURORA_LOG_WARN`：**仅当子节点在本容器之外仍被持有**（即它脱离本容器后还要
+    /// 继续活）时才发——这是消费方可观测的断链信号，用于把「控件已脱离树却仍被标脏」与「忘记
+    /// 标脏」区分开。调用方 `detach_all_children_layout_parent` 会在「容器持最后一份、子节点随
+    /// 本容器即刻销毁」这一正常档位上先行静默清理（见该函数），故正常树销毁不刷此告警；
+    /// 真正「活在容器之外被摘走」（如 `remove_child` 后仍被外部持有）才命中。消息正文经
+    /// `log_concat` 折叠拼接，类型名以独立参数给出（非 printf 占位符）。
     /// @param child 待摘除的子控件（非空，且其 `layout_parent()` 确为 `this`）。
     /// @note Side-effects: 写 `child->layout_parent_`（清零）；子控件仍存活，不触及其析构。
     /// @note Thread: main-thread only
@@ -1131,11 +1135,31 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 持有子节点的容器**必须**在其析构路径调用本函数（`~Widget` 基类版本遍历
     /// `child_nodes()`；容器子类若自行覆写析构则须在析构体首行调用），否则该容器摘除时
     /// 留悬垂父链。
-    /// @note Side-effects: 写各子控件的 `layout_parent_`（清零）。
+    ///
+    /// 告警分档（G34）：本函数按「容器是否持最后一份」区分两种情形——
+    /// - `use_count()==1`（容器是唯一持有者）：子节点随本容器即刻销毁，属**正常**路径，
+    ///   静默清指针、不发 WARN（否则每次正常树销毁都逐子刷屏，真断链会被噪声淹没）；
+    /// - `use_count()>1`（子节点在容器之外仍被持有，脱离后还要继续活）：属**异常**断链，
+    ///   逐子发 `AURORA_LOG_WARN`。
+    ///
+    /// 判别式与 a11y 结构事件的唯一所有权判定同口径（`Node::use_count`），且为父侧在析构时刻
+    /// 即得的读数，不依赖「延迟到子控件析构再判」。指针清理两种情形都执行。
+    /// @note Side-effects: 写各子控件的 `layout_parent_`（清零）；可能发 WARN。
     /// @note Thread: main-thread only
     void detach_all_children_layout_parent();
 
   protected:
+    /// @brief 本容器对**任一**直接子节点持有的 `shared_ptr` 份数（供 `detach_all` 判唯一所有权）。
+    ///
+    /// `child_nodes_mut()` 对多数容器就是真实存储本身（`Container` 的 `children_`）⇒ 每子一份；
+    /// 但 `SingleChild` 返回的是 `child_view_mut_`（`child_` 的拷贝副本，可能另有 `child_view_`
+    /// 惰性缓存），其自身即持多份。`detach_all_children_layout_parent` 据此把
+    /// `Node::use_count() <= child_owned_ref_count()` 判为「无外部持有者」（正常、静默清理），
+    /// 否则判为「子节点活在容器之外」（异常、告警）。**必须**覆写持视图副本的容器，否则
+    /// `use_count()` 恒大于自身份数 ⇒ 正常销毁被误报。
+    /// @return 自身持有的份数（≥1）。
+    [[nodiscard]] virtual auto child_owned_ref_count() const -> long;
+
     /// @brief 子类实现：在给定约束下返回自身尺寸（可写入子节点 bounds）。
     /// @param c 父容器下发的尺寸约束（min/max，dp）；本控件的测量必须落在其范围内。
     /// @param ctx 构建上下文：本次布局 pass 的环境读数（主题 / locale 等，见 `build_context.h`）。
@@ -1908,6 +1932,27 @@ class SingleChild : public Widget {
             child_view_mut_.push_back(child_);
         }
         return child_view_mut_;
+    }
+
+    /// @brief 自身持有份数（`SingleChild` 实现）：`child_` + 可能已建的 `child_view_mut_`
+    ///        + 可能已建且有效的 `child_view_`。
+    ///
+    /// `child_nodes_mut()`（`detach_all` 的遍历源）每次访问都会物化 `child_view_mut_` 一份
+    /// `child_` 的拷贝，故调用时刻它必然存在；`child_view_` 则仅在被 `child_nodes()` 访问过
+    /// 后才有效（`child_view_valid_`）。二者都是**本容器自己的**持有，不算外部持有者。
+    /// @return 自身持有的份数（≥1；空壳返回 1，与「无子可摘」一致）。
+    [[nodiscard]] auto child_owned_ref_count() const -> long override {
+        if (!child_) {
+            return 1L;
+        }
+        long count = 1L;  // child_ 本体
+        if (child_view_mut_.size() == 1U && &child_view_mut_.front().widget() == &child_.widget()) {
+            ++count;  // 可写视图副本（detach_all 遍历时刚物化）
+        }
+        if (child_view_valid_ && child_view_.size() == 1U && &child_view_.front().widget() == &child_.widget()) {
+            ++count;  // const 视图惰性缓存副本
+        }
+        return count;
     }
 };
 

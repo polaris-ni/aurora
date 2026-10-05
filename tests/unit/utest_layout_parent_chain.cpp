@@ -16,10 +16,15 @@
 /// 「`on_dirty` 命中而根的 `on_subtree_dirty` 不命中」精确区分「控件自己知道脏了」与「脏到达了
 /// 根」—— 只断言前者会漏掉断链，故必须断后者。形态①②的根侧汇聚点由 `DirtyRoot` 提供。
 
+#include <algorithm>
 #include <memory>
+#include <ranges>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "aurora/core/log.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
@@ -177,6 +182,130 @@ AURORA_TEST_CASE(parent_destruction_clears_the_layout_parent_of_a_still_alive_ch
     // 且对这样的控件标脏不崩、不悬垂读（自身回调照常命中）。
     probe->mark_needs_layout();
     AURORA_TEST_CHECK_EQ(probe->self_dirty, 1);
+}
+
+/// 摘除告警的判别子串（与 widget.cpp 的文案一致；三处判定共用，改文案只需改这里）。
+constexpr std::string_view AURORA_DETACH_MARK = "layout parent detached";
+
+// 判据支撑：接管 Logger 捕获诊断行，析构时按「先读原值」恢复（不改全局默认行为）。
+// 参照 utest_log.cpp 的 CapturedLogger 同款 RAII。
+class LogCapture final {
+  public:
+    LogCapture() : level_{aurora::Logger::instance().level()}, enabled_{aurora::Logger::instance().is_enabled()} {
+        auto &logger = aurora::Logger::instance();
+        logger.set_level(aurora::LogLevel::Trace);  // 确保 WARN 不被默认阈值(Info)之外拦掉
+        logger.set_sink([this](std::string_view line) -> void { lines_.emplace_back(line); });
+    }
+    ~LogCapture() {
+        auto &logger = aurora::Logger::instance();
+        logger.set_level(level_);
+        logger.set_enabled(enabled_);
+        logger.set_sink(nullptr);  // 恢复默认 stderr
+    }
+    LogCapture(const LogCapture &) = delete;
+    auto operator=(const LogCapture &) -> LogCapture & = delete;
+    LogCapture(LogCapture &&) = delete;
+    auto operator=(LogCapture &&) -> LogCapture & = delete;
+
+    [[nodiscard]] auto detach_count() const -> std::size_t {
+        return static_cast<std::size_t>(std::ranges::count_if(
+            lines_, [](const std::string &line) { return line.find(AURORA_DETACH_MARK) != std::string::npos; }));
+    }
+    /// 某条 detach 告警正文是否含给定子串（判据③：类型名出现在消息正文里）。
+    [[nodiscard]] auto detach_line_contains(std::string_view needle) const -> bool {
+        return std::ranges::any_of(lines_, [needle](const std::string &line) {
+            return line.find(AURORA_DETACH_MARK) != std::string::npos && line.find(needle) != std::string::npos;
+        });
+    }
+    /// 是否存在含 printf 占位符 `%s` 的 detach 告警（判据③的反面：占位符必须消失）。
+    [[nodiscard]] auto detach_line_has_placeholder() const -> bool {
+        return std::ranges::any_of(lines_, [](const std::string &line) {
+            return line.find(AURORA_DETACH_MARK) != std::string::npos && line.find("%s") != std::string::npos;
+        });
+    }
+
+  private:
+    std::vector<std::string> lines_;
+    aurora::LogLevel level_;
+    bool enabled_;
+};
+
+/// SingleChild 探针：暴露 protected 的 child_nodes_mut() 以便测试构造/驱动，并让
+/// `type_name()` 产出可断言的稳定串（判据③要断类型名进正文）。
+class ProbeSingleChild final : public SingleChild {
+  public:
+    explicit ProbeSingleChild(Node child) : SingleChild(std::move(child)) {}
+    using SingleChild::child_nodes_mut;
+    [[nodiscard]] auto type_name() const -> const char * override { return "ProbeSingleChild"; }
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        return child_ ? child_.widget().layout(c, ctx) : c.max;
+    }
+    auto on_paint(Painter &p, const Rect &b, const BuildContext &ctx) -> void override {
+        if (child_) {
+            child_.widget().paint(p, b, ctx);
+        }
+    }
+};
+
+// 判据①上半：容器连同其子控件一起销毁（Column 路径）时，**不得**产生 detach 告警。
+AURORA_TEST_CASE(normal_container_teardown_emits_no_detach_warning) {
+    LogCapture capture;
+    {
+        auto col = std::make_shared<Column>();
+        col->set_children({Node{DirtyProbe{}}});
+        drive_layout(*col);
+    }  // 容器与其子控件一起正常销毁（子节点无外部持有）
+    AURORA_TEST_CHECK_EQ(capture.detach_count(), 0U);
+}
+
+// 判据①上半（SingleChild 路径）：其遍历源 child_view_mut_ 是 child_ 的拷贝副本，
+// use_count 基线为 2/3 而非 1——本例钉住「自身持有份数」判别在 SingleChild 上同样静默，
+// 防止实现退化成硬编码 `use_count()==1`（那会让本例转红）。
+AURORA_TEST_CASE(normal_single_child_teardown_emits_no_detach_warning) {
+    LogCapture capture;
+    {
+        auto sc = std::make_shared<ProbeSingleChild>(Node{DirtyProbe{}});
+        drive_layout(*sc);
+    }  // SingleChild 与其子控件一起正常销毁
+    AURORA_TEST_CHECK_EQ(capture.detach_count(), 0U);
+}
+
+// 判据①下半：子件确实活在容器之外被摘走（Column + 外部持有后 remove_child）时，**必须**告警。
+AURORA_TEST_CASE(detaching_an_externally_held_child_emits_detach_warning) {
+    LogCapture capture;
+    auto probe = std::make_shared<DirtyProbe>();
+    auto col = std::make_shared<Column>();
+    col->set_children({Node{probe}});
+    drive_layout(*col);
+    AURORA_TEST_REQUIRE(probe->layout_parent() == col.get());
+    AURORA_TEST_REQUIRE(col->remove_child(probe.get()));  // 外部仍持有 probe ⇒ 真摘除
+    AURORA_TEST_CHECK_EQ(capture.detach_count(), 1U);
+}
+
+// 判据①下半（SingleChild 换子路径）：adopt_children 换子时若旧子仍被外部持有，须告警。
+AURORA_TEST_CASE(replacing_an_externally_held_child_emits_detach_warning) {
+    LogCapture capture;
+    auto probe = std::make_shared<DirtyProbe>();
+    auto col = std::make_shared<Column>();
+    col->set_children({Node{probe}});
+    drive_layout(*col);
+    col->adopt_children({Node{DirtyProbe{}}});  // 换子：旧 probe 仍被外部持有 ⇒ 异常断链
+    AURORA_TEST_CHECK_EQ(capture.detach_count(), 1U);
+}
+
+// 判据③：告警正文含被摘控件的类型名，且不再残留 printf 占位符 `%s`。
+AURORA_TEST_CASE(detach_warning_message_embeds_the_child_type_name_without_placeholder) {
+    LogCapture capture;
+    auto probe = std::make_shared<DirtyProbe>();
+    auto col = std::make_shared<Column>();
+    col->set_children({Node{probe}});
+    drive_layout(*col);
+    AURORA_TEST_REQUIRE(col->remove_child(probe.get()));
+
+    // 类型名出现在消息正文里（log_concat 折叠拼接的结果）。
+    AURORA_TEST_CHECK(capture.detach_line_contains("DirtyProbe"));
+    // printf 占位符已消失（AURORA_LOG_* 不是 printf，%s 会原样输出——必须清掉）。
+    AURORA_TEST_CHECK(!capture.detach_line_has_placeholder());
 }
 
 }  // namespace aurora::test_cases::utest_layout_parent_chain

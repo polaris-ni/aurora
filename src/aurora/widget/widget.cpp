@@ -173,12 +173,11 @@ void Widget::detach_child_layout_parent(Widget *child) {
         return;
     }
     child->set_layout_parent(nullptr);
-    // 断链可见：被清的是**仍存活**控件的父指针（真正销毁控件的路径不经本函数），消费方
-    // 据此把「控件已脱离树却仍被标脏」与「忘记标脏」区分开。诊断文案按本仓口径用 ASCII。
-    AURORA_LOG_WARN("widget",
-                    "layout parent detached while the child widget is still alive: %s; dirty marks on it "
-                    "will no longer reach the render root",
-                    child->type_name());
+    // 断链可见：被清的是**仍存活**控件的父指针，消费方据此把「控件已脱离树却仍被标脏」与
+    // 「忘记标脏」区分开。诊断文案按本仓口径用 ASCII；消息正文经 `log_concat` 折叠拼接，
+    // 故类型名以独立参数给出（**不可**写成 printf 占位符——该宏不是 printf，`%s` 会原样输出）。
+    AURORA_LOG_WARN("widget", "layout parent detached while the child widget is still alive: ", child->type_name(),
+                    "; dirty marks on it will no longer reach the render root");
 }
 
 void Widget::detach_all_children_layout_parent() {
@@ -188,12 +187,36 @@ void Widget::detach_all_children_layout_parent() {
     // 调用时机约束：本函数虚分派 `child_nodes_mut()`，故**必须**由容器在自身析构体首行调用
     // （此时动态类型仍是该容器）；放进 `~Widget` 基类会因派生部分已析构而分派到基类空实现，
     // 静默漏清。
+    //
+    // 告警抑制（G34）：容器持最后一份时子节点随本容器即刻销毁，那是**正常**路径——每一次
+    // 正常的树销毁都会走到这里，逐子发 WARN 会把一次真断链埋进噪声。故这一档静默清指针
+    // （该清的照旧清，只是不再当成异常）；仅当子节点在容器之外仍被持有（它脱离本容器后还要
+    // 继续活）时才告警。
+    //
+    // 判别式不能直接写 `use_count()==1`：`child_nodes_mut()` 对 `SingleChild` 返回的是
+    // `child_view_mut_`（`child_` 的**拷贝副本**，另可能有 `child_view_` 惰性缓存），故其子节点
+    // 的基线是 2/3 而非 1；实测「无外部持有」时 Column 报 1、SingleChild 报 2。故改为
+    // 「自身持有份数」口径：虚函数 `child_owned_ref_count()` 由各容器报出**自己**持有了几份
+    // （`Container` 的 `children_` 每子一份 ⇒ 1；`SingleChild` 还要算上两个视图副本），
+    // `use_count()` 恰等于它即无外部持有者。该读数是**父侧在析构时刻**即可得的，不依赖
+    // 「延迟到子控件析构再判」。
     for (Node &n : child_nodes_mut()) {
         if (!n) {
             continue;
         }
+        if (n.use_count() <= child_owned_ref_count()) {
+            // 容器是唯一持有者：子节点随本容器死，走静默清理（不视为异常）。
+            n.widget().set_layout_parent(nullptr);
+            continue;
+        }
         detach_child_layout_parent(&n.widget());
     }
+}
+
+long Widget::child_owned_ref_count() const {
+    // 基类默认：`child_nodes_mut()` 就是真实存储（`Container::children_` 本体），每个子节点
+    // 恰好一份 ⇒ 自身持有 1 份。持视图缓存副本的容器（`SingleChild`）须覆写。
+    return 1L;
 }
 
 // 抛出面与 `Node::~Node` 同口径：detach_all_children_layout_parent 只做指针判空 / 赋值与
