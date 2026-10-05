@@ -30,6 +30,7 @@
 
 namespace aurora::test_cases::utest_scroll {
 using aurora::testing::require_field;
+using aurora::testing::require_value;
 
 namespace {
 
@@ -826,6 +827,33 @@ AURORA_TEST_CASE(positive_control_column_root_also_clickable) {
     click_at(*col, bb.origin.x + 150.0F, bb.origin.y + (bb.size.height * 0.5F));
     AURORA_TEST_CHECK_EQ(ledger->clicks, 1);
     AURORA_TEST_CHECK_EQ(ledger->last_index, 3);
+}
+
+// ---- G33: VerticalViewSize 数据源（Scroll） ----
+AURORA_TEST_CASE(vertical_view_size_reports_visible_fraction_of_content) {
+    // 判据①（数据源）：视口 100 / 内容 400 ⇒ 25%；与 LazyList 同源。
+    Scroll s{ScrollProps{.child = box(300.0F, 400.0F)}};
+    LayoutEngine::layout(s, bounded(300.0F, 100.0F));
+    const auto range = require_value(s.accessibility_scroll());
+    AURORA_TEST_CHECK_NEAR(range.viewport, 100.0, 1e-3);
+    AURORA_TEST_CHECK_NEAR(range.content, 400.0, 1e-3);
+    AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size(range), 25.0, 1e-6);
+}
+
+AURORA_TEST_CASE(vertical_view_size_and_scroll_percent_consistent) {
+    // 判据③（数据源）：滚到中段时 percent 增大、viewsize 恒定（可见比例不随位置变）。
+    Scroll s{ScrollProps{.child = box(300.0F, 800.0F)}};
+    LayoutEngine::layout(s, bounded(300.0F, 100.0F));
+    const auto top = require_value(s.accessibility_scroll());
+    const double top_view = aurora::compute_vertical_view_size(top);
+    const double top_pct = (top.position - top.min) / (top.max - top.min) * 100.0;
+    AURORA_TEST_CHECK_NEAR(top_pct, 0.0, 1e-6);
+    s.set_offset(350.0F);
+    const auto mid = require_value(s.accessibility_scroll());
+    const double mid_pct = (mid.position - mid.min) / (mid.max - mid.min) * 100.0;
+    const double mid_view = aurora::compute_vertical_view_size(mid);
+    AURORA_TEST_CHECK(mid_pct > 1.0);
+    AURORA_TEST_CHECK_NEAR(mid_view, top_view, 1e-6);
 }
 
 }  // namespace aurora::test_cases::utest_scroll

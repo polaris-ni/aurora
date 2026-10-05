@@ -190,7 +190,7 @@ au::Text("Welcome").font_size(24).bold();
 | `accessibility_state() const -> AccessibilityState` | 只填 `focused` | `Checkbox` / `Switch` 补 `checkable` + `checked`；`Slider` / `Progress` 补 `read_only`；`TextInput` 补 `read_only` / `password` / `multiline` |
 | `accessibility_range() const -> std::optional<AccessibilityRange>` | `nullopt` | `Slider`（min/max/step/value）、`Progress`（0–1） |
 | `accessibility_level() const -> std::optional<int>` | `nullopt` | 标题层级（`Header` 角色用于文档结构导航） |
-| `accessibility_scroll() const -> std::optional<AccessibilityScrollRange>` | `nullopt` | `Scroll`（可滚动范围的当前位置与边界） |
+| `accessibility_scroll() const -> std::optional<AccessibilityScrollRange>` | `nullopt` | `Scroll` / `LazyList` / `GridView`（填 `min/max/position` + `viewport`/`content` 两量；UIA `get_VerticalViewSize` = `compute_vertical_view_size(range)` = `viewport/content×100`，即「可见内容占全部内容的百分比」）。`LazyRow` 为横轴专用、纵轴不可滚 ⇒ 报 `viewport = content`（纵轴 100% 可见）。无滚动语义 ⇒ 桥侧直接报 100 |
 | `accessibility_is_semantic() const -> bool` | `true` | 声明「不参与语义树」的纯装饰控件返回 `false`（该控件及其标记含义被平台完全忽略） |
 
 **可编辑文本（TextPattern 支撑）**
@@ -207,7 +207,7 @@ au::Text("Welcome").font_size(24).bold();
 
 | 钩子 | 说明 |
 |:---|:---|
-| `perform_accessibility_action(const AccessibilityActionRequest&) -> bool` | 读屏反向操作控件的**唯一**入口。基类默认实现把动作**路由到真实事件路径**（聚焦 / 点击 / 调用 / 滚动经 `EventDispatcher` 与 `resolve_focus_manager`），不另造旁路；控件可覆写定制语义（如 `Toggle` → `set_value`、`Value` → `set_value`）；无法处理返回 `false` |
+| `perform_accessibility_action(const AccessibilityActionRequest&) -> bool` | 读屏反向操作控件的**唯一**入口。基类默认实现把动作**路由到真实事件路径**（聚焦 / 点击 / 调用 / 滚动经 `EventDispatcher` 与 `resolve_focus_manager`），不另造旁路；控件可覆写定制语义（如 `Toggle` → `set_value`、`Value` → `set_value`）；无法处理返回 `false`。滚动控件（`Scroll` / `LazyList` / `GridView`）额外覆写 `ScrollDown` / `ScrollUp` 为整视口翻页（基类无对应事件路径 ⇒ 否则静默 no-op）；`ScrollUp` 落到顶、`ScrollDown` 落到底时返回 `true`（动作已消费，不误报失败） |
 | `accessibility_scroll_to(double offset) -> void` | 默认 no-op；`Scroll` 覆写为「语义滚动到指定偏移」（平台 `ScrollIntoView` 的落点） |
 | `announce(const std::string&) const -> void` | 动态播报（Live Region）：上抛 `AccessibilityEventKind::Announcement`，不经语义树 diff。无控件归属的播报走自由函数 `notify_accessibility_announcement(text, nullptr)` |
 

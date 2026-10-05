@@ -250,6 +250,15 @@ class LazyRow : public Widget, public LazyRowProps {
     /// @return 恒为 true（覆盖基类按 `overflow_` 的默认判定，使嵌套时滚轮归本控件）。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
+    /// @brief 无障碍滚动量：纯横向虚拟列表，纵向按「不可滚容器」申报（视口高 == 内容高 ⇒ 跨度 0）。
+    /// 不暴露纵向 `IScrollProvider`；`get_VerticalViewSize` 由 `compute_vertical_view_size` 算得 100%。
+    /// @note Side-effects: reads state
+    /// @return `{min=0, max=0, position=0, viewport=content=viewport_h_}`。
+    [[nodiscard]] auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> override {
+        const double vh = static_cast<double>(viewport_h_);
+        return AccessibilityScrollRange{.min = 0.0, .max = 0.0, .position = 0.0, .viewport = vh, .content = vh};
+    }
+
     /// @brief 指针事件入口：按下记录命中子项，横向拖拽推进滚动偏移，抬起未拖拽则回调子项点击。
     /// @param e 鼠标事件（就地读写：拖拽消费其 `local_position.x` 增量，消费后把 `is_handled` 置 true）。
     auto on_pointer_event(MouseEvent &e) -> void override {
@@ -302,6 +311,8 @@ class LazyRow : public Widget, public LazyRowProps {
         const Size constrained = c.constrain(Size{.width = full, .height = h});
         // 视口宽用**本次**约束结果（`size()` 在 on_layout 返回后才更新，恢复判定不能依赖它）。
         viewport_w_ = std::max(1.0F, constrained.width - h_pad);
+        // 纵向视口高同样取自本次约束结果（纯横向列表纵向不可滚，视口高 == 内容高 ⇒ 跨度 0）。
+        viewport_h_ = constrained.height;
         // 滚动位置恢复（首次可滚动布局时生效；显式反序列化的 offset 优先）。
         maybe_restore_scroll();
         return constrained;
@@ -421,6 +432,7 @@ class LazyRow : public Widget, public LazyRowProps {
     float full_content_ = 0.0F;
     float offset_ = 0.0F;
     float viewport_w_ = 0.0F;  ///< 最近一次布局得到的视口宽（`size()` 在 on_layout 内尚是旧值）
+    float viewport_h_ = 0.0F;  ///< 最近一次布局得到的视口高（纵向不可滚，仅供无障碍 ViewSize 申报）
     std::optional<float> pending_offset_;  ///< 显式反序列化的偏移（优先于 restore_key 恢复）
     bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）
     std::vector<Node> built_;

@@ -24,6 +24,7 @@ namespace aurora::test_cases::utest_lazy_list {
 
 using aurora::testing::require_child;
 using aurora::testing::require_field;
+using aurora::testing::require_value;
 
 namespace {
 
@@ -601,6 +602,18 @@ AURORA_TEST_CASE(set_count_is_idempotent_on_same_value) {
     list.set_count(10);
     AURORA_TEST_CHECK_EQ(list.live_item_count(), live_before);
     AURORA_TEST_CHECK_EQ(list.count(), 10);
+}
+
+// ---- G33: VerticalViewSize 数据源（LazyList） ----
+AURORA_TEST_CASE(vertical_view_size_reports_visible_fraction_of_content) {
+    // 判据①（数据源，LazyList 源）：视口 100 / 内容 400（10 行 × 40） ⇒ 25%。
+    BuildRecorder rec;
+    LazyList list{10, rec.builder(), 40.0F};
+    LayoutEngine::layout(list, bounded(300.0F, 100.0F));
+    const auto range = require_value(list.accessibility_scroll());
+    AURORA_TEST_CHECK_NEAR(range.viewport, 100.0, 1e-3);
+    AURORA_TEST_CHECK_NEAR(range.content, 400.0, 1e-3);
+    AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size(range), 25.0, 1e-6);
 }
 
 }  // namespace aurora::test_cases::utest_lazy_list

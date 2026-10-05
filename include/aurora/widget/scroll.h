@@ -321,16 +321,21 @@ class Scroll : public Container, public ScrollProps {
     /// @return `offset_y_`，未经额外夹取（布局后由滚动路径保证在 `[0, 内容高−视口高]` 内）。
     [[nodiscard]] auto offset_y() const -> float { return offset_y_; }
 
-    /// @brief 无障碍滚动量：{0, 内容量−视口量, 当前偏移}。
+    /// @brief 无障碍滚动量：{0, 内容量−视口量, 当前偏移} + 视口高/内容高两量。
     ///
     /// 供读屏驱动滚动（UIA `IScrollProvider` / AT-SPI2 `Component.ScrollTo` /
     /// macOS `accessibilityPerformScrollToVisible`）；不可滚时 max = 0，桥据此不暴露滚动 pattern。
+    /// `viewport`/`content` 直接取自布局期已知量，供 `get_VerticalViewSize` 按几何算百分比。
     /// @note Side-effects: reads state
-    /// @return `{min = 0, max = max(0, content_h_ − viewport_h_), position = offset_y_}`。
+    /// @return `{min = 0, max = max(0, content_h_ − viewport_h_), position = offset_y_,
+    ///          viewport = viewport_h_, content = content_h_}`。
     [[nodiscard]] auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> override {
         const float max_offset = std::max(0.0F, content_h_ - viewport_h_);
-        return AccessibilityScrollRange{
-            .min = 0.0, .max = static_cast<double>(max_offset), .position = static_cast<double>(offset_y_)};
+        return AccessibilityScrollRange{.min = 0.0,
+                                        .max = static_cast<double>(max_offset),
+                                        .position = static_cast<double>(offset_y_),
+                                        .viewport = static_cast<double>(viewport_h_),
+                                        .content = static_cast<double>(content_h_)};
     }
 
     /// @brief 无障碍滚动定位：走 `set_offset` 既有夹取路径（不标布局脏）。

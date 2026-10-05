@@ -302,7 +302,7 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 | 头文件 | 内容 |
 |:---|:---|
 | `accessibility.h` | 角色（`AccessibilityRole`）、动作（`AccessibilityAction` / `AccessibilityActionRequest`）、节点（`AccessibilityNode`）、事件（`AccessibilityEvent` / `AccessibilityEventKind`）、设置（`AccessibilitySettings`）、语义裁剪（`apply_semantic_pruning`）、角色推断与默认动作（`infer_accessibility_role` / `default_actions`）。**只以指针持有 `Widget`**（前置声明），树遍历入口见 `widget/a11y_tree.h` |
-| `a11y_types.h` | 纯值类型：`AccessibilityState`（13 位状态集）、`AccessibilityRange`（min/max/step/value）、`AccessibilityTextSelection`（UTF-8 字节半开区间）、`AccessibilityScrollRange` |
+| `a11y_types.h` | 纯值类型：`AccessibilityState`（13 位状态集）、`AccessibilityRange`（min/max/step/value）、`AccessibilityTextSelection`（UTF-8 字节半开区间）、`AccessibilityScrollRange`（min/max/position + `viewport`/`content` 两量，供 UIA `get_VerticalViewSize` 算「可见内容占全部内容的百分比」）。另含平台中立纯函数 `compute_vertical_view_size(range) -> double`（`viewport/content×100` 夹到 `[0,100]`；无跨度/不支持滚动报 100）——UIA provider 与三桥共用的唯一真源，便于脱离 COM 做三腿单测 |
 | `a11y_provider.h` | 桥抽象 `a11y::Provider` + 进程级 `a11y::detail::ProviderRegistry`（注册 / 广播 / 注销） |
 | `a11y_text.h` | `UtfOffsetMap`（UTF-8 ↔ UTF-16 偏移换算，代理对按码点起点夹取）、`utf8_to_utf16` / `utf16_to_utf8`、`TextUnit` / `expand_to_unit` |
 

@@ -301,6 +301,39 @@ class GridView : public Widget {
     /// @return 恒为 true。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
+    /// @brief 无障碍滚动量：{0, 最大偏移, 当前偏移} + 视口高/内容高两量。
+    /// 供 UIA `IScrollProvider::get_VerticalViewSize` 按几何算百分比（而非按跨度反解）。
+    /// @note Side-effects: reads state
+    /// @return `{min=0, max=max_scroll_offset(), position=offset_, viewport=viewport_height_,
+    /// content=content_height()}`。
+    [[nodiscard]] auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> override {
+        return AccessibilityScrollRange{.min = 0.0,
+                                        .max = static_cast<double>(max_scroll_offset()),
+                                        .position = static_cast<double>(offset_),
+                                        .viewport = static_cast<double>(viewport_height_),
+                                        .content = static_cast<double>(content_height())};
+    }
+
+    /// @brief 无障碍滚动定位：走 `set_scroll_offset` 既有夹取路径（标布局/绘制脏）。
+    /// @param offset 目标偏移（内容坐标，double 来自读屏协议）；越界值按可滚范围夹取。
+    /// @note Side-effects: mutates scroll state
+    auto accessibility_scroll_to(double offset) -> void override { set_scroll_offset(static_cast<float>(offset)); }
+
+    /// @brief 读屏滚动动作：按一屏（视口高）增量滚动，方向为 down 正 / up 负。
+    /// @param req 动作请求：只处理 `ScrollDown`/`ScrollUp`，其余动作转交 `Widget` 基类。
+    /// @return 偏移实际变化为 true（基类动作取基类结果）。
+    /// @note Side-effects: mutates scroll state
+    auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool override {
+        const bool down = req.action == AccessibilityAction::ScrollDown;
+        const bool up = req.action == AccessibilityAction::ScrollUp;
+        if (!down && !up) {
+            return Widget::perform_accessibility_action(req);
+        }
+        const float dir = down ? 1.0F : -1.0F;
+        set_scroll_offset(offset_ + (dir * viewport_height_));
+        return true;
+    }
+
     /// @brief 序列化：通用属性 + 几何/滚动标量 + snap 三字段。
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {

@@ -968,4 +968,40 @@ AURORA_TEST_CASE(labelled_by_change_raises_name_changed_idempotently) {
     AURORA_TEST_REQUIRE_EQ(events.size(), 3U);
 }
 
+// ---- G33: 修 IScrollProvider::get_VerticalViewSize 算式（UIA 语义错误） ----
+AURORA_TEST_CASE(vertical_view_size_is_visible_fraction_of_content) {
+    // 判据①：视口 100 / 内容 400 ⇒ 约 25%；随内容增长单调下降。
+    AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size({.viewport = 100.0, .content = 400.0}), 25.0, 1e-6);
+    AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size({.viewport = 100.0, .content = 800.0}), 12.5, 1e-6);
+    AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size({.viewport = 100.0, .content = 1600.0}), 6.25, 1e-6);
+}
+
+AURORA_TEST_CASE(vertical_view_size_reports_full_when_not_scrollable) {
+    // 判据②：无跨度 / 不支持滚动（content<=0 或 viewport<=0）报 100，而非杂值。
+    AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size({.viewport = 100.0, .content = 0.0}), 100.0, 1e-9);
+    AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size({.viewport = 0.0, .content = 400.0}), 100.0, 1e-9);
+    // 不可滚（内容恰好等于视口）⇒ 100。
+    AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size({.viewport = 100.0, .content = 100.0}), 100.0, 1e-6);
+}
+
+AURORA_TEST_CASE(vertical_view_size_and_scroll_percent_are_consistent) {
+    // 判据③：同一滚动量，「滚到哪儿」(percent) 与「看到多少」(viewsize) 语义自洽。
+    //         顶部：percent≈0、viewsize 固定比例；中段：percent 增大、viewsize 不变（可见比例恒定）。
+    const double viewport = 100.0;
+    const double content = 800.0;
+    const double span = content - viewport;  // 可滚跨度 700
+    const double view = aurora::compute_vertical_view_size({.viewport = viewport, .content = content});
+    AURORA_TEST_CHECK_NEAR(view, 12.5, 1e-6);
+    aurora::AccessibilityScrollRange top{
+        .min = 0.0, .max = span, .position = 0.0, .viewport = viewport, .content = content};
+    const double top_pct = (top.position - top.min) / (top.max - top.min) * 100.0;
+    AURORA_TEST_CHECK_NEAR(top_pct, 0.0, 1e-9);
+    AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size(top), view, 1e-9);
+    aurora::AccessibilityScrollRange mid{
+        .min = 0.0, .max = span, .position = 350.0, .viewport = viewport, .content = content};
+    const double mid_pct = (mid.position - mid.min) / (mid.max - mid.min) * 100.0;
+    AURORA_TEST_CHECK(mid_pct > 1.0);  // 已离开顶部
+    AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size(mid), view, 1e-9);  // 可见比例不变
+}
+
 }  // namespace aurora::test_cases::utest_accessibility
