@@ -212,6 +212,31 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **自带拖拽区的容器必须把自身显式入链**：基类 `Widget::hit_test_chain`（`src/aurora/widget/widget.cpp`）只在「后代链非空 / `wants_click()` / `wants_scroll()` / 带 Input 修饰」之一成立时才把控件自身追加进链尾。因此靠 `on_pointer_event` 自绘拖拽带、又不 `wants_click()` 的容器（典型为 `Splitter` 的分隔条）若在其拖拽带上返回**空**后代链，就会整条链为空，被派发器判为「点在空白处」而根本不投递 Press——拖拽在任何后端都失效，且与 `on_hit_test`（点命中）口径不一致而难以察觉。此类控件须在拖拽带内返回 `std::vector{HitNode{this, weak_from_this(), bounds.origin}}`，并在带内无交互后代的空白点同样自入链，否则拖拽过程中指针一旦越出拖拽带，后续 Move 会因链空被丢弃。契约由 `utest_splitter` 的 `hit_chain_at_divider_includes_splitter` 与 `divider_drag_via_dispatcher_updates_ratio_and_clamps` 守护。
 
+### 3.2.1 覆盖绘制与命中链（追加命中盒）
+
+**问题形态**：部分控件把面板画在自身布局盒**之外**（下拉面板、菜单浮层、标题栏 Snap 弹窗），即「覆盖绘制」——面板不占布局，`on_layout` 只报主框 / 栏条自身的尺寸。真实派发只经 `Widget::hit_test_chain`（`EventDispatcher::dispatch_mouse` 取它），而命中链的下降由**祖先**侧的包含闸决定：`Container::on_hit_test_chain` 等容器下降前判 `child.bounds().contains(local)`，只认**布局盒**。于是覆盖区连「进链」的机会都没有——把判据写进控件自己的 `on_hit_test`（兼容入口）对派发无效，在 `on_hit_test_chain` 里补判据同样无效（祖先根本不下降到本控件）。
+
+**修法：闸在祖先侧，就在闸这一侧修。** 由控件把覆盖区**声明**给祖先，闸把这段区域并入判定：
+
+| 角色 | 契约 |
+|:---|:---|
+| `Widget::extra_hit_box(ctx) -> std::optional<Rect>`（public virtual） | 控件声明「画在布局盒之外、仍归自己接管」的区域，**本地坐标**（原点即自身左上角，与 `on_hit_test` 的 `local` 同坐标系）。缺省返回 `std::nullopt` ⇒ 可命中区 == 自身布局盒，与未覆写时逐位等价 |
+| `Widget::covers_extra_hit_box(local, ctx) -> bool`（public，非虚） | 判定入口唯一化：祖先的下降闸与自身入链判定共用它，杜绝「闸认、自身不认」或反之的分叉；无追加盒时恒 `false` |
+| 祖先下降闸 | `cb.contains(local) \|\| child.covers_extra_hit_box(local - cb.origin, ctx)`——在原有判定后**追加**一项，故缺省情形与原判定逐位等价 |
+| `Widget::hit_test_chain` 的自身入链 | 命中点落在追加盒内时自身同样入链；有 `Align` 收缩命中盒（`hit_size`）时，覆盖区正是靠这一项进链 |
+
+已把闸并入追加盒的祖先：`Container`（兼容入口 `on_hit_test` 与派发入口 `on_hit_test_chain` 同口径）、`LazyList`、`GridView`、`ReorderableList`、`Scroll`、`TabBar`、`Splitter`、`ExpansionPanel`、`Dialog`。`OverlayHost::on_hit_test_chain` 刻意不加闸——浮层按绘制次序自顶向下逐个询问，由浮层自身决定收不收。
+
+**控件侧判据单源化**：覆盖区的判据只写一份（私有 helper），`extra_hit_box()` 与 `on_hit_test()` 共用。兼容入口里不得再要求「点落在自身布局盒内」——面板本就画在盒外，该前提使分支恒不成立，与派发入口分叉（`TitleBar` 的 Snap 弹窗即曾如此）。
+
+**「自身盒」分支须与闸同谓词**：`on_hit_test` 里判定自身盒的那一支必须写成 `Rect{0,0,bounds.size}.contains(local)`——与祖先下降闸逐字相同。此前三个控件各自额外加了 `local.y < 条/框高` 之类的**严格**比较，而 `Rect::contains` 是闭区间判定，于是边界行（y == 条高）上「派发入口命中、兼容入口不命中」。本次一并收敛；`Dropdown` / `MenuBar` / `TitleBar` 的逐点一致用例即钉住这条。
+
+**z 序不受影响**：闸并入追加盒只放宽「能否下降」，不改变兄弟间的优先次序（仍按绘制逆序、视觉最上层优先）。故覆盖控件的面板若被**更晚绘制**的兄弟压住，重叠处点击归兄弟——与视觉一致；要让面板完整可点，须把它挂到真正的浮层宿主（`OverlayHost` / `Popup`）上。
+
+**正面范式**：`Popup::on_hit_test_chain`（`popup.h`）在**自己的入口**里按 `anchor_` 把局部点重映射到内容盒后下降，无需祖先开闸。另两种已收敛的形态见 `04-widget.md`：`Dialog`（内容盒外即遮罩区、自身入链吸收点击而不穿透）与 `Scroll`（视口 → 内容坐标换算后再下降，见「滚动的两套坐标系」）。
+
+**验收**：`utest_dropdown` / `utest_menu_bar` / `utest_title_bar` 三个套件守护——嵌 `Column` 与嵌 `LazyList` 条目两种宿主下覆盖区可点、覆盖区外不抢（面板底边以下的点仍归下方兄弟控件）、收起态逐位不变、展开结束后陈旧点不中、兼容入口与派发入口逐点一致；`utest_containers` 的 `default_extra_hit_box_equals_own_layout_box` 钉住缺省等价（密集取点上，命中链最深节点与「只按子布局盒判定」的参考实现逐点相同）。变异自证：只回退闸（保留控件侧追加盒）或只回退控件侧 `extra_hit_box()`（保留闸）都必须让上述用例转红——两者分别是必要条件。
+
 ### 3.3 嵌套滚动协调（滚轮余量上冒）
 
 `dispatch(Widget&, ScrollEvent&)`（`event/dispatcher.cpp`）把滚轮判给**最近可滚动祖先**，并在内层吃到端点后把余量交给外层：

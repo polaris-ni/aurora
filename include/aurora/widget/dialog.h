@@ -174,7 +174,9 @@ class Dialog : public Container {
             return {};  // 关闭态/无内容：不可见即不参与命中（否则会命中上帧残留的 bounds）
         }
         const Rect cb = children_[0].bounds();
-        if (cb.contains(local)) {
+        // 闸并入内容的追加命中盒：内容里的覆盖绘制区（如展开的下拉面板）画在内容盒外，
+        // 只按内容盒判定会被当成遮罩区、由本控件吸收（同 `Container` 口径）。
+        if (cb.contains(local) || children_[0].widget().covers_extra_hit_box(local - cb.origin, ctx)) {
             const Rect global{.origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                               .size = cb.size};
             return children_[0].widget().hit_test_chain(local - cb.origin, global, ctx);

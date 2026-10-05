@@ -14,7 +14,9 @@
 /// Column 子项之间有 gap，内容盒中心可能落在间隙里（与被测行为无关）。同理不硬编码任何
 /// 坐标：字体度量按平台不同，只断言「点在该按钮盒内 ⇒ 命中该按钮」这一关系。
 
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -299,7 +301,9 @@ AURORA_TEST_CASE(overlay_host_dialog_does_not_penetrate_to_base) {
     auto dialog = std::make_shared<Dialog>();
     dialog->set_content(make_content(hits));
     dialog->show();
-    host->add_overlay(Node{std::static_pointer_cast<Widget>(dialog)});
+    // 有基础内容 ⇒ 追加得到可移除序号（≥ 1）；空宿主会返回 nullopt（见 utest_overlay_host）。
+    const std::optional<std::size_t> overlay_index = host->add_overlay(Node{std::static_pointer_cast<Widget>(dialog)});
+    AURORA_TEST_REQUIRE(overlay_index.has_value());
     LayoutEngine::layout(*host, full());
 
     const Point probe = button_probe(*dialog);

@@ -454,7 +454,8 @@ class GridView : public Widget {
         -> std::vector<HitNode> override {
         for (auto &val : live_ | std::views::values) {
             const Rect cb = val.bounds();
-            if (cb.contains(local)) {
+            // 闸并入单元格的追加命中盒（同 `Container::on_hit_test_chain` 口径）。
+            if (cb.contains(local) || val.widget().covers_extra_hit_box(local - cb.origin, ctx)) {
                 const Rect global{
                     .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                     .size = cb.size};

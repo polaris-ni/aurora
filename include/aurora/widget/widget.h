@@ -206,6 +206,28 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @return 根→最深命中的 `HitNode` 链；自身与后代均未命中时为空链。
     auto hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx) -> std::vector<HitNode>;
 
+    /// @brief 子类可覆写：声明「画在自身布局盒之外、仍归本控件接管」的追加命中盒（本地坐标）。
+    ///
+    /// 覆盖绘制的控件（下拉面板 / 菜单浮层 / 标题栏 Snap 弹窗）把面板画在自身布局盒之外，
+    /// 而祖先下降前的包含闸按**布局盒**判定（`child.bounds().contains(local)`）⇒ 覆盖区永远
+    /// 进不了命中链。真实派发只经 `on_hit_test_chain`，故这类控件把判据写进 `on_hit_test`
+    /// 是无效的——必须由祖先侧的闸把覆盖区并入判定，追加盒就是控件交给闸的那份声明。
+    ///
+    /// @param ctx 构建上下文：本次命中判定的环境读数（与 `on_hit_test` 同一 pass）。
+    /// @return 追加命中盒（**本地坐标**：原点即自身左上角，与 `on_hit_test` 的 `local` 同坐标系）；
+    ///         `std::nullopt` = 不追加，此时可命中区 == 自身布局盒，与未覆写时逐位等价。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto extra_hit_box(const BuildContext &ctx) const -> std::optional<Rect>;
+
+    /// @brief 判定本地坐标点是否落在追加命中盒内（未追加时恒 false，即只看自身布局盒）。
+    ///
+    /// 祖先的下降闸与自身入链判定共用这一个入口，杜绝「闸认、自身不认」或反之的分叉。
+    /// @param local 待测点（本控件本地坐标，已减去自身 origin）。
+    /// @param ctx 构建上下文。
+    /// @return 点落在追加命中盒内为 true；无追加盒为 false（可命中区仍等于自身布局盒）。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto covers_extra_hit_box(const Point &local, const BuildContext &ctx) const -> bool;
+
     /// @brief 挂载：注册响应式依赖并递归挂载子树（由 build 后一次性调用）。
     /// @param ctx 构建上下文，透传给 `on_mount` 供子类读取主题 / 环境。
     auto mount(const BuildContext &ctx) -> void;
@@ -1364,7 +1386,9 @@ class Container : public Widget {
         for (auto &child : std::views::reverse(children_)) {
             const Rect cb = child.bounds();
             // local 处于本容器局部坐标系：子节点位置为 cb（相对本容器内容区）。
-            if (cb.contains(local)) {
+            // 闸 = 子布局盒 ∪ 子的追加命中盒：覆盖绘制（下拉面板/菜单浮层/Snap 弹窗）画在布局盒外，
+            // 只按布局盒判定会让那片区域永远进不了命中链。
+            if (cb.contains(local) || child.widget().covers_extra_hit_box(local - cb.origin, ctx)) {
                 // 向下传递子节点“全局”盒（本容器全局原点 + 子相对原点），供更深层级本地化。
                 const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
                 Widget *r = child.widget().hit_test(local - cb.origin, global, ctx);
@@ -1381,7 +1405,9 @@ class Container : public Widget {
         // 同样反向遍历，使重叠时视觉顶层控件成为命中链最深（最后派发）目标。
         for (auto &child : std::views::reverse(children_)) {
             const Rect cb = child.bounds();
-            if (cb.contains(local)) {
+            // 闸 = 子布局盒 ∪ 子的追加命中盒（与 `on_hit_test` 同一口径）：真实派发只走本入口，
+            // 只按布局盒判定时覆盖绘制区（面板/浮层/弹窗）拿不到点击。
+            if (cb.contains(local) || child.widget().covers_extra_hit_box(local - cb.origin, ctx)) {
                 // global.origin 即子节点全局 origin，随命中链带入，供派发器本地化坐标。
                 const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
                 std::vector<HitNode> r = child.widget().hit_test_chain(local - cb.origin, global, ctx);

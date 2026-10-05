@@ -1,7 +1,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <functional>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -298,13 +300,18 @@ class OverlayHost : public Container {
     /// @param out 信号视图累加表（恒不写入）。
     auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
-    /// @brief 追加一个浮层（返回浮层序号）。
+    /// @brief 追加一个浮层（返回可移除的浮层序号）。
+    ///
+    /// 宿主尚无基础内容时（`children_` 为空）新节点落在序号 0，而 0 恒被解释为**基础内容**、
+    /// `remove_overlay` 拒收 ⇒ 返回 0 会让调用方持有一个永远删不掉的序号。此处以 `std::nullopt`
+    /// 显式表达「本次追加未产生可移除浮层」，与 `remove_overlay` 的口径保持一致。
     /// @param overlay 浮层节点（如 Popup）。
-    /// @return 新浮层在子节点中的序号。
-    auto add_overlay(Node overlay) -> std::size_t {
+    /// @return 新浮层的序号（≥ 1）；宿主尚无基础内容时为 `std::nullopt`。
+    [[nodiscard]] auto add_overlay(Node overlay) -> std::optional<std::size_t> {
         children_.push_back(std::move(overlay));
         mark_needs_layout();
-        return children_.size() - 1;
+        const std::size_t index = children_.size() - 1;
+        return index == 0 ? std::nullopt : std::optional<std::size_t>{index};
     }
 
     /// @brief 移除指定序号的浮层（0 = 基础内容，不可移除）。

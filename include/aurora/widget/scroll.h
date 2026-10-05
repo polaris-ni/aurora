@@ -670,7 +670,10 @@ class Scroll : public Container, public ScrollProps {
         }
         // 视口→内容坐标：加回滚动偏移（内容坐标系的原点随内容上移）。
         const Point content_local{.x = local.x, .y = local.y + offset_y_};
-        if (!content_box.contains(content_local)) {
+        // 闸并入内容的追加命中盒（同 `Container::on_hit_test_chain` 口径）：覆盖绘制区画在内容盒外，
+        // 只按内容盒判定会被判成「可视区内的空白处」而丢弃。
+        if (!content_box.contains(content_local) &&
+            !children_[0]->covers_extra_hit_box(content_local - content_box.origin, ctx)) {
             return {};  // 命中点在内容盒外（含可视区内的空白处）
         }
         // 内容子树的全局原点：视口原点 + 内容盒原点（内容盒原点恒为 (0,0)，但仍按通用式

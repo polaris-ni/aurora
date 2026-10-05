@@ -729,6 +729,11 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
             }
         }
     }
+    // 追加命中盒（覆盖绘制区）：点在盒内即自身入链。缺省无追加盒 ⇒ 本项恒 false，
+    // 与历史行为逐位等价；有 Align 收缩命中盒（`hit_shrunk`）时，覆盖区正是靠这一项入链。
+    if (!self_hit && covers_extra_hit_box(local_adj, ctx)) {
+        self_hit = true;
+    }
 
     if (self_hit) {
         // 避免与 on_hit_test_chain 已返回自身（叶控件在命中点返回 [this]）重复入链。
@@ -748,6 +753,16 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
         return result;
     }
     return descendants;
+}
+
+auto Widget::extra_hit_box(const BuildContext &ctx) const -> std::optional<Rect> {
+    (void)ctx;
+    return std::nullopt;  // 缺省不追加：可命中区 == 自身布局盒
+}
+
+auto Widget::covers_extra_hit_box(const Point &local, const BuildContext &ctx) const -> bool {
+    const std::optional<Rect> extra = extra_hit_box(ctx);
+    return extra.has_value() && extra->contains(local);
 }
 
 auto Widget::mount(const BuildContext &ctx) -> void {

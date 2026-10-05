@@ -107,6 +107,8 @@ auto info = au::Button::describe_static();
 | `on_scroll(ScrollEvent&) -> void` | 滚轮入口：默认按 `overflow_` 的内建滑窗夹取滚动并写 `remaining_y` 余量；真实滚动控件覆写（路由见 `05-event-navigation.md` §3.3） | `widget.h` |
 | `wants_scroll() -> bool` | 是否参与滚轮命中链路由。默认 = 声明了 `OverflowStrategy::Scroll`；`Scroll` / `LazyList` / `LazyRow` / `GridView` / `PullToRefresh` 覆写为 `true`，保证嵌套时**最深滚动者优先** | `widget.h` |
 | `is_sticky_header() -> bool` | 是否为吸顶头部（`StickyHeader` 覆写为 `true`），供滚动宿主在 blit 后以覆盖层按 pin 位重绘 | `widget.h` |
+| `extra_hit_box(const BuildContext&) -> std::optional<Rect>` | 追加命中盒：**覆盖绘制**（面板画在自身布局盒之外）的控件在此声明那段区域（本地坐标），祖先下降闸据此并入判定；缺省 `std::nullopt` = 不追加（可命中区 == 自身布局盒）。位于 **public 区**：祖先要跨对象查询子控件的声明。详见 `05-event-navigation.md` §3.2.1 | `widget.h` |
+| `covers_extra_hit_box(local, ctx) -> bool` | 追加盒判定入口（非虚）：祖先的下降闸与自身入链判定共用它；无追加盒时恒 `false` | `widget.h` |
 
 **可见性约定**：布局 / 绘制 / 命中测试类内部虚回调 `on_layout` / `on_paint` / `on_hit_test` / `on_mount` / `tick_gestures` 位于 `protected` 区（`widget.h` 起）；指针事件入口 `on_pointer_event` 的两个重载（`MouseEvent`，`widget.h`；`TouchEvent`，`widget.h`）与 `on_hover_change` / `wants_click` 位于 **public 区**且为虚函数——派发器与外部工具直接调用，子类按需要覆写；业务控件覆写 `tick_gestures` 以推进手势，框架容器基类（`Container` / `SingleChild`）可覆写公开 `tick` 以递归子树（见 `widget.h` / `widget.h`），而非经 NVI 模板方法。
 
@@ -236,6 +238,20 @@ au::Text("Welcome").font_size(24).bold();
 | `Form` | `gap`（字段垂直间距）；回调 `on_submit`；仅允许 `FormField` 子节点；`validate_all()` 递归验证（`widget/form.h`） |
 | `FormField` | 单子字段包装；`error_text`（空 = 通过）；回调 `on_validate`；`validate()` / `clear_error()` |
 
+**`Button` 标签的 i18n 契约（绘制 / 无障碍 / 自然宽同源）**：`ButtonProps::label` 是 `LocalizedString`，经
+`tr(key)` 构造时 `text` 恒空、只带 `key`。故三处消费标签的路径一律经 `Button::resolved_label(ctx)` 查
+`StringTable`（`Environment` 注入了 `Locale` 就按它解析，否则回落 `Locale{}` 走 `default_string_table()`
+的缺省档）——**不得直读 `label.get().text`**，否则 `tr()` 出的键会被画成空白：
+
+- `on_layout`：以解析后的显示串量宽，自然宽 = 量宽 + 左右内边距（`min_width` 不足时）；
+- `on_paint`：本帧只解析一次，`paint_label` 收到的是该串的**同一份副本**（按 const 引用传入），量宽与
+  `draw_text` 必然同值，不会因同帧内 locale 变化而分叉；子类覆写 `paint_label` 应直接用该串，不要再自行解析 `label`；
+- `accessibility_label()`：与绘制同源——优先复用布局 / 绘制期落在 `cached_display_text_` 的解析结果，尚未布局
+  或绘制时按默认 locale 现场解析（口径同 `Text::resolved_text`）。
+
+字面档（`set_label("Save")`）不受影响：非本地化的 `LocalizedString` 经 `resolve()` 原样返回 `text`，与查表路径
+输出等价。宽度缓存按「上次测量所用的显示串」比对失效：显示串变化即重测，不复用另一 locale 下的旧宽。
+
 ### 3.3 布局容器
 
 | 控件 | 关键属性 |
@@ -331,7 +347,7 @@ au::Text("Welcome").font_size(24).bold();
 | `StatusBar` | 底部状态栏（`widget/toolbar.h`）；`bar_height`（默认 24dp）、`gap`（区域间距），多子节点 |
 | `Dialog` / `Popup` / `ToastHost` | 对话框 / 弹出层 / 轻提示宿主（`ToastHost::show(text, duration_ms)` 投放）。**Dialog 的几何与命中契约**：打开态 `on_layout` 把居中后的内容盒写入 `children_[0]`（几何权威唯一在 `Node::bounds_`），`on_paint` 直接读该盒落笔、遮罩按自身 bounds 铺满——两处各算一遍居中必然分叉。命中分两区：内容盒内下降到内容子树（按钮等可交互控件正常命中）；内容盒外（遮罩区）**本控件自身入链吸收该次点击、不下落穿透**到对话框下方的视口，且**不触发** `on_close_`（遮罩吸收 ≠ 取消）。关闭态命中链恒为空，即便上帧 `bounds` 仍有效。`show()` / `close()` / `set_content()` 均须标布局脏（`on_layout` 以 `open_` 为分支且布局缓存只看约束相等，不标脏则开/关切换与换内容都会被缓存跳过）。焦点作用域（`show`/`close` 经 `current_focus_manager()` push/pop）语义不受此影响 |
 | `ProgressDialog` | 模态进度对话框（`widget/drawer.h`）；`message`、`progress`（0..1，-1 = 不确定态）、`open`、`cancellable`；回调 `on_cancel` |
-| `OverlayHost` | 浮层宿主（`widget/popup.h`）；`add_overlay(Node)` 追加浮层并返回序号，允许多子 |
+| `OverlayHost` | 浮层宿主（`widget/popup.h`）；`add_overlay(Node)` 追加浮层并返回**可移除序号**（`std::optional<std::size_t>`，宿主尚无基础内容时为 `std::nullopt`——此时新节点落在序号 0，而 0 恒被解释为**基础内容**、`remove_overlay` 拒收，返回它等于给调用方一个永远删不掉的下标），`remove_overlay(index)` 拒收 0 与越界序号；允许多子 |
 
 ### 3.7 平台与调试
 
@@ -383,9 +399,13 @@ hover / 按下统一用 `Color::shaded(k)` 乘性调暗（hover ≈ ×0.90 / ×0
 
 `on_paint` 分解为若干 **protected 虚函数**，状态色由 `resolve_*` 钩子解析；成员一律 `protected`（非 private），子类可单点覆盖某个绘制阶段而无需重写整个 `on_paint`。
 
+**显示串单一来源约束**：凡绘制钩子需要可本地化文本，一律由 `on_paint` 解析一次后按 const 引用传给钩子
+（如 `Button::paint_label` 的 `display` 形参），钩子内部不得再自行解析；`accessibility_label()` 必须与绘制
+所用的显示串**逐字相等**（复用同一份解析结果，不得各算一遍）。
+
 | 控件 | 绘制钩子 |
 |:---|:---|
-| `Button` | `resolve_background` / `resolve_text_color` / `paint_background` / `paint_border` / `paint_label` |
+| `Button` | `resolve_background` / `resolve_text_color` / `paint_background` / `paint_border` / `paint_label`（末者多收一个 `const std::string &display` 形参 = 本帧显示串） |
 | `Switch` | `paint_track` / `paint_thumb` |
 | `Slider` | `paint_track` / `paint_active_track` / `paint_thumb`；几何 `track_rect` / `value_fraction` |
 | `ProgressIndicator` | `paint_track` / `paint_fill` |

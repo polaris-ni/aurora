@@ -252,6 +252,16 @@ class Dropdown : public Widget {
     /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
+    /// @brief 追加命中盒：展开态的下拉面板（画在主框下方、自身布局盒之外）。
+    ///
+    /// 面板是覆盖绘制：它不占布局，祖先下降前的包含闸只看布局盒，故面板区域必须在此
+    /// 声明才会被闸并入命中链——判据写在 `on_hit_test` 里对真实派发无效（派发只走
+    /// `on_hit_test_chain`）。与 `on_hit_test` 的面板分支共用 `panel_box()` 这一份判据。
+    /// @return 展开态为面板矩形（本地坐标）；收起态为 `std::nullopt`（可命中区 == 主框）。
+    [[nodiscard]] auto extra_hit_box(const BuildContext & /*ctx*/) const -> std::optional<Rect> override {
+        return panel_box(size().width);
+    }
+
     /// @brief 悬停反馈：主框边框高亮为强调色。
     /// @param entered true 悬停进入，false 悬停离开。
     auto on_hover_change(bool entered) -> void override {
@@ -442,25 +452,34 @@ class Dropdown : public Widget {
         p.draw_text(item_box, options_[index], f, selected ? accent : text);
     }
 
+    /// @brief 下拉面板矩形（本地坐标）：命中判据的唯一来源，`extra_hit_box()` 与 `on_hit_test()`
+    ///        共用，避免「兼容入口认、派发入口不认」的分叉。
+    /// @param width 面板宽度（取主框宽度）。
+    /// @return 展开态为紧贴主框下方的面板矩形；收起态为 `std::nullopt`。
+    [[nodiscard]] auto panel_box(float width) const -> std::optional<Rect> {
+        if (!is_open_) {
+            return std::nullopt;
+        }
+        const float h = static_cast<float>(options_.size()) * item_height_;
+        return Rect{.origin = Point{.x = 0.0F, .y = box_height_}, .size = Size{.width = width, .height = h}};
+    }
+
     /// @brief 命中测试：主框区域与展开中的下拉面板命中本控件，其余区域不命中。
+    ///
+    /// 「自身盒」分支必须与祖先下降闸同一谓词（`Rect{0,0,bounds.size}.contains(local)`）——
+    /// 曾额外加 `local.y < box_height_` 这类**严格**比较，而闸用矩形的闭区间包含判定，
+    /// 两者在边界行（y == box_height_）分叉：派发入口命中、兼容入口不命中。
     /// @param local 相对本控件左上角的命中点坐标。
-    /// @param bounds 本控件布局后的矩形（取宽度做水平包含判定）。
+    /// @param bounds 本控件布局后的矩形。
     /// @return 命中时返回 this，未命中返回 nullptr。
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override {
-        // 主框
-        if (local.y < box_height_ &&
-            Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = bounds.size.width, .height = box_height_}}
-                .contains(local)) {
+        // 自身盒（与闸同谓词）
+        if (Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local)) {
             return this;
         }
-        // 展开的下拉区
-        if (is_open_) {
-            const float h = static_cast<float>(options_.size()) * item_height_;
-            const Rect drop{.origin = Point{.x = 0.0F, .y = box_height_},
-                            .size = Size{.width = bounds.size.width, .height = h}};
-            if (drop.contains(local)) {
-                return this;
-            }
+        // 展开的下拉区：与追加命中盒同一份判据（面板画在布局盒外，不要求点落在自身布局盒内）。
+        if (const std::optional<Rect> drop = panel_box(bounds.size.width); drop.has_value() && drop->contains(local)) {
+            return this;
         }
         return nullptr;
     }

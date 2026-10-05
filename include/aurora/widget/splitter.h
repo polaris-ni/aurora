@@ -329,7 +329,8 @@ class Splitter : public Widget {
                 continue;
             }
             const Rect cb = child->bounds();
-            if (cb.contains(local)) {
+            // 闸并入区域的追加命中盒（同 `Container::on_hit_test` 口径）。
+            if (cb.contains(local) || child->widget().covers_extra_hit_box(local - cb.origin, ctx)) {
                 const Rect global{
                     .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                     .size = cb.size};
@@ -359,7 +360,8 @@ class Splitter : public Widget {
                 continue;
             }
             const Rect cb = child->bounds();
-            if (cb.contains(local)) {
+            // 闸并入区域的追加命中盒（同 `Container::on_hit_test_chain` 口径）。
+            if (cb.contains(local) || child->widget().covers_extra_hit_box(local - cb.origin, ctx)) {
                 const Rect global{
                     .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                     .size = cb.size};

@@ -521,7 +521,9 @@ class LazyList : public Widget {
         -> std::vector<HitNode> override {
         for (auto &kv : live_ | std::views::values) {
             const Rect cb = kv.bounds();
-            if (cb.contains(local)) {
+            // 闸并入条目的追加命中盒：条目内控件的覆盖绘制区（如条目里的展开面板）画在条目盒外，
+            // 只按条目盒判定会拿不到点击（与 `Container::on_hit_test_chain` 同口径）。
+            if (cb.contains(local) || kv.widget().covers_extra_hit_box(local - cb.origin, ctx)) {
                 const Rect global{
                     .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                     .size = cb.size};

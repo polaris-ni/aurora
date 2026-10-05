@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -300,6 +301,16 @@ class TitleBar : public Widget {
     /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
+    /// @brief 追加命中盒：展开态的 Snap 弹窗面板（画在栏下方、自身布局盒之外）。
+    ///
+    /// 弹窗是覆盖绘制：不占布局（栏的布局高度只有 `style_.height`），祖先下降前的包含闸只看
+    /// 布局盒，故弹窗区域必须在此声明才会被闸并入命中链——判据只写在 `on_hit_test` 里对真实
+    /// 派发无效。与 `on_hit_test` 的弹窗分支共用 `snap_flyout_box()` 这一份判据。
+    /// @return 展开态为弹窗矩形（本地坐标）；未展开为 `std::nullopt`。
+    [[nodiscard]] auto extra_hit_box(const BuildContext & /*ctx*/) const -> std::optional<Rect> override {
+        return snap_flyout_box();
+    }
+
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         env_ = ctx.env;  // 事件阶段读取 chrome 用（树存活期内环境链稳定）
@@ -413,8 +424,14 @@ class TitleBar : public Widget {
 
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override {
         // 命中区 = 标题栏条 + 展开的弹窗面板（弹窗覆盖于内容上方，须拦截其区域点击）。
-        if (Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) &&
-            ((local.y >= 0.0F && local.y < style_.height) || (snap_open_ && flyout_rect_.contains(local)))) {
+        // 自身盒：与祖先下降闸同谓词（去掉原先额外的 `local.y < style_.height` 严格比较，
+        // 否则边界行上派发入口命中、兼容入口不命中）；栏的布局盒即栏条本身。
+        if (Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local)) {
+            return this;
+        }
+        // 弹窗：画在布局盒**之外**，故不再要求点落在自身布局盒内（否则该分支恒不成立，
+        // 与追加命中盒的判定分叉）。与 `extra_hit_box()` 共用 `snap_flyout_box()`。
+        if (const std::optional<Rect> flyout = snap_flyout_box(); flyout.has_value() && flyout->contains(local)) {
             return this;
         }
         return nullptr;
@@ -422,7 +439,7 @@ class TitleBar : public Widget {
 
     auto on_hit_test_chain(const Point & /*local*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/)
         -> std::vector<HitNode> override {
-        return {};  // 自身即最深命中（基类前置 this）
+        return {};  // 自身即最深命中（基类前置 this；弹窗能否进链由祖先的闸决定）
     }
 
   private:
@@ -477,6 +494,14 @@ class TitleBar : public Widget {
             out.push_back(a);
         }
         return out;
+    }
+
+    /// @brief Snap 弹窗矩形（本地坐标）的唯一来源：未展开为 `std::nullopt`。
+    ///
+    /// `extra_hit_box()`（派发入口）与 `on_hit_test()`（兼容入口）共用它，杜绝两入口判定分叉。
+    /// @return 展开态为 `flyout_rect_`；未展开为 `std::nullopt`。
+    [[nodiscard]] auto snap_flyout_box() const -> std::optional<Rect> {
+        return snap_open_ ? std::optional<Rect>{flyout_rect_} : std::nullopt;
     }
 
     /// @brief 展开 Snap 弹窗（锚定最大化钮正下方右对齐）。
