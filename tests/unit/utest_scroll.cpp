@@ -684,10 +684,10 @@ class LocalProbeRow final : public Widget {
     }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext &/*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = AURORA_G27_VIEW_W, .height = AURORA_G27_ROW_H});
     }
-    auto on_paint(Painter &/*p*/, const Rect &/*r*/, const BuildContext &/*ctx*/) -> void override {}
+    auto on_paint(Painter & /*p*/, const Rect & /*r*/, const BuildContext & /*ctx*/) -> void override {}
 
   private:
     int index_;

@@ -529,10 +529,11 @@ class OffsetProbe final : public aurora::Widget {
     [[nodiscard]] auto received() const -> Point { return received_; }
 
   protected:
-    auto on_layout(const aurora::Constraints &c, const aurora::BuildContext &/*ctx*/) -> aurora::Size override {
+    auto on_layout(const aurora::Constraints &c, const aurora::BuildContext & /*ctx*/) -> aurora::Size override {
         return c.constrain(aurora::Size{.width = 40.0F, .height = 40.0F});
     }
-    auto on_paint(aurora::Painter &/*p*/, const aurora::Rect &/*r*/, const aurora::BuildContext &/*ctx*/) -> void override {}
+    auto on_paint(aurora::Painter & /*p*/, const aurora::Rect & /*r*/, const aurora::BuildContext & /*ctx*/)
+        -> void override {}
 
   private:
     mutable Point received_{};  ///< mutable：`extra_hit_box` 是 const 钩子，本类只做记录
