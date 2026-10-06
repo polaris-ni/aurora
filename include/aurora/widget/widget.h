@@ -186,7 +186,10 @@ class Widget : public std::enable_shared_from_this<Widget> {
     virtual auto layout(const Constraints &c, const BuildContext &ctx) -> Size;
     /// @brief 绘制：应用 modifier（背景等）后调用 on_paint。
     /// @param p 目标画笔（软件光栅 `Painter`，可为离屏缓冲或 Display List 录制器）。
-    /// @param bounds 本控件的绝对（窗口逻辑 dp）盒，入口即记入 `paint_bounds()` / `focus_bounds()`。
+    /// @param bounds 本控件本次绘制实际收到的盒，入口即记入 `paint_bounds()` / `focus_bounds()`。
+    ///        ⚠️ 一般是窗口逻辑 dp 绝对盒，但**离屏缓冲内的子树收到的是缓冲坐标**（如 `Scroll`
+    ///        内容，原点含 `-buffer_origin_y_`）——该坐标系不是恒定的窗口坐标，
+    ///        需要窗口绝对盒时用 `window_bounds()`（见 `paint_bounds()` 的 `@warning`）。
     /// @param ctx 构建上下文（基类焦点环从中取主题，环色见命名令牌 `focus.ring`）。
     auto paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void;
     /// @brief 使离屏缓存（`Modifier::cache_layer`）失效，下次绘制重新渲染子树。
@@ -1248,6 +1251,23 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 默认取自身尺寸（叶控件无溢出内容 → 不可滚）；容器覆写为子节点 bounds 的最大 bottom。
     /// @return 内容自然高度（dp）；基类返回自身 `size_.height`。
     [[nodiscard]] virtual auto scroll_content_height() const -> float { return size_.height; }
+
+    /// @brief 子类可覆写：本控件作为「滚动偏移坐标系宿主」时，其子节点几何相对**视口原点**的平移量。
+    ///
+    /// `window_bounds()` 沿布局父链上溯累加时，每途经一个滚动宿主就要问一次本入口，以把该宿主的
+    /// 滚动偏移从子节点盒里扣掉——否则滚动容器内的后代会带着一个滚动量返回窗口盒。
+    ///
+    /// 缺省返回零偏移，即「本控件的子节点盒就是相对视口原点的盒」，这是**绝大多数控件**的情形：
+    /// 普通容器的 `bounds.origin` 已是父级内容区全局原点，累加即得；`LazyList` / `LazyRow` /
+    /// `GridView` 的偏移已参与子布局（子 bounds 直接写视口坐标），同样无需扣减。
+    /// 仅 `Scroll` 需覆写——它的内容子节点 bounds 是**内容坐标**（不含偏移，见 `scroll.h`
+    /// 的「几何与命中契约」）。
+    ///
+    /// @param out 输出平移量（引用，就地写入）；缺省实现置零。
+    /// @note Side-effects: writes `out`
+    virtual auto scroll_content_offset(const Point & /*child_origin*/, Point &out) const -> void {
+        out = Point{.x = 0.0F, .y = 0.0F};
+    }
     /// @brief 子类可覆写：挂载时额外逻辑（默认递归挂载在 Container 中处理）。
     /// @param ctx 挂载上下文；基类默认实现不消费（覆写者用它的 environment / 层级信息）。
     virtual auto on_mount(const BuildContext &ctx) -> void { (void)ctx; }
@@ -1292,6 +1312,13 @@ class Widget : public std::enable_shared_from_this<Widget> {
     Size size_;
     /// @brief 布局脏标记：由 `mark_needs_layout_impl` 置位，供断点/调试指认本控件的重排请求。
     bool needs_layout_ = false;
+    /// @brief 本控件是否至少完成过一次**成功测量**（`Widget::layout` 量出 `size_` 后置位）。
+    ///
+    /// 供 `window_bounds()` 区分「从未布局过」与「布局过但尺寸为零」：后者是合法几何（无内容控件、
+    /// 纯布局单测里的探针桩），前者没有可上报的窗口盒。**不能用 `size_` 是否为零来判**——零尺寸
+    /// 控件同样有确定的位置。
+    /// @note 非几何字段（不缓存任何盒），故不违反「`Widget` 上不存在任何几何字段」。
+    bool has_measured_ = false;
     /// @brief 绘制脏标记：由 `mark_needs_paint_impl` 置位；帧调度本身不读此位（重绘由 `request_frame` 驱动）。
     bool needs_paint_ = false;
     // NOLINTEND(*-non-private-member-variables-in-classes)
@@ -1369,10 +1396,15 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 布局调用链上拿不到控件自身的绝对盒。
     /// @note 离屏缓冲（如 `Scroll` 内容）内的后代处于**内容坐标系**，其盒不等于屏幕坐标——同一视口
     ///       内的相对几何仍成立，跨视口比较不精确（此限制与 `paint_bounds_` 相同）。
+    ///       需要窗口逻辑 dp 绝对盒时用 `window_bounds()`（本成员不承诺窗口坐标）。
     Rect focus_bounds_;
 
-    /// @brief 最近一次 paint 接收的绝对（窗口逻辑 dp）盒；`dirty_bounds()` 的基准盒，使
+    /// @brief 最近一次 paint **实际收到**的盒，`dirty_bounds()` 的基准盒，使
     ///        `Window::present_root` 的脏区裁剪绘制（push_clip）命中正确区域，避免整帧重绘。
+    ///
+    /// ⚠️ 坐标系随祖先的离屏缓冲录制方式而变，**不是恒定的窗口坐标**（`Scroll` 内容后代为
+    /// 缓冲坐标、原点含 `-buffer_origin_y_`）；需要窗口绝对盒时用 `window_bounds()`。
+    /// 另：本成员是绘制期写入，DL 缓存命中的帧上不会被刷新（带缓存缺口）。
     Rect paint_bounds_{};
 
     /// @brief 上一帧是否画过统一焦点环（即是否在自身盒外留下了像素）。
@@ -1399,14 +1431,52 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        生产路径由 `Widget::paint` 每次绘制按真实绝对盒写入，调用方无需设置。
     /// @param r 手工指定的焦点盒（绝对窗口逻辑 dp 坐标），直接覆盖 `focus_bounds_`。
     auto set_focus_bounds(const Rect &r) -> void { focus_bounds_ = r; }
-    /// @brief 读取焦点导航几何盒（最近一次绘制写入的绝对盒；从未绘制过则为零盒）。
-    /// @return `focus_bounds_` 的值拷贝（绝对窗口逻辑 dp 盒）。
+    /// @brief 读取焦点导航几何盒（最近一次绘制写入的盒；从未绘制过则为零盒）。
+    /// @return `focus_bounds_` 的值拷贝。
+    /// @warning 与 `paint_bounds()` 同限制：该盒坐标系随祖先的离屏缓冲录制方式而变，**不是恒定的
+    ///          窗口坐标**（`Scroll` 内容后代为缓冲坐标），且绘制期写入、在 DL 缓存命中的帧上不刷新。
+    ///          需要窗口绝对盒时用 `window_bounds()`。
     [[nodiscard]] auto focus_bounds() const -> Rect { return focus_bounds_; }
 
-    /// @brief 读取最近一次 paint 的绝对（窗口逻辑 dp）盒。
+    /// @brief 读取最近一次 paint **实际收到**的盒。
+    ///
     /// @return `paint_bounds_` 的值拷贝；从未绘制过则为默认零盒。
+    ///
+    /// @warning 该盒的坐标系**随祖先的离屏缓冲录制方式而变**，不是恒定的窗口坐标：
+    ///          - 普通子树：窗口逻辑 dp 绝对盒（`Widget::paint` 的 `bounds` 入参即窗口坐标）。
+    ///          - 离屏缓冲内的子树（`Scroll` 的内容）：**缓冲坐标**，其原点含 `-buffer_origin_y_`
+    ///            （见 `widget/scroll.h` 的「几何与命中契约」）。故 `Scroll` 内容后代的本读数
+    ///            与其在屏幕上的实际位置差一个缓冲锚点。
+    ///          - 其它覆盖绘制 / 离屏合成的控件（`Popup` 按 `anchor_`、非恒等 matrix 的 Transform）
+    ///            同样可能不是窗口坐标。
+    ///          **需要「控件 → 窗口逻辑 dp 绝对盒」的事后查询时，一律改用 `window_bounds()`。**
+    ///
     /// @note 标脏请用 `dirty_bounds()`：本盒只含控件自身，画在盒外的装饰（基类统一焦点环）不在其中。
+    /// @note 本读数是**绘制期写入**，在显示列表缓存命中的帧上 `Widget::paint` 会提前返回而不刷新它
+    ///       （见 `Widget::paint` 的缓存命中分支），故它带有缓存缺口，不适合作为精确几何的基准。
     [[nodiscard]] auto paint_bounds() const -> Rect { return paint_bounds_; }
+
+    /// @brief 事后查询本控件的**窗口逻辑 dp 绝对盒**（与 `MouseEvent::position` 同一坐标空间）。
+    ///
+    /// 这是公共面上「控件 → 窗口绝对盒」的唯一入口：沿 `layout_parent()` 链自叶向根累加每层
+    /// `Node::bounds().origin` 与 Modifier 的内容盒平移（复用绘制/命中链同一份
+    /// `Modifier::TransformInfo::translation`，见 `content_origin`），并逐段扣掉滚动祖先的
+    /// 滚动偏移，使读数与派发链同源——同一控件、同一帧、同一坐标空间。
+    ///
+    /// @return 有有效窗口盒时为该盒；以下情形返回 `std::nullopt`：
+    ///         - 本控件 `show == false`（布局期尺寸被夹成零盒，无有效几何）；
+    ///         - 本控件从未布局过（`size()` 为零盒）；
+    ///         - 不在任何已布局的树内（`layout_parent()` 为空）且自身无根盒。
+    ///         取空值而非零盒，是为了让调用方能区分「查不到有效窗口盒」与「盒恰好在窗口原点」
+    ///         ——否则空盒会被「非空即采用」的几何判据（如语义树的绘制盒回退）当成有效几何。
+    ///
+    /// @note 与 `paint_bounds()` 的区别：后者是绘制期写入、坐标系随祖先缓冲方式而变（见其
+    ///       `@warning`）；本入口是**查询时现算**、恒为窗口坐标，且不依赖绘制是否发生过。
+    /// @note 代价：O(树深 × 每层子节点数) 的上溯查找，且每层需重算该层的 Modifier 变换。
+    ///       故本入口面向平台桥 / 无障碍 / 调试观测这类**低频事后查询**，不得引入每帧绘制路径。
+    /// @note 语义与 `Node::bounds_` 是几何权威这一既有约定一致（见 `04-widget.md` §3.6）：
+    ///       `Widget` 自身不持有几何缓存，本入口亦不缓存结果。
+    [[nodiscard]] auto window_bounds() const -> std::optional<Rect>;
 
     /// @brief 读取本控件本次标脏应覆盖的绝对（窗口逻辑 dp）盒 = 自身绘制盒 ∪ 画在盒外的装饰。
     ///

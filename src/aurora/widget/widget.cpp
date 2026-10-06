@@ -307,7 +307,7 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     // 永不命中缓存，保证其 on_layout 在每个布局 pass 被真正执行，杜绝“约束不变 ⇒ 内容冻结”类白屏。
     if (layout_cache_valid_ && cached_constraints_ == c && can_cache_layout()) {
         size_ = cached_size_;
-        return size_;
+        return size_;  // 缓存命中即「已测量过」：缓存的存在本身以测量过一次为前提
     }
 #endif
     // 缓存未命中：本节点将真正重新测量（含修饰链构建 + on_layout + 子树递归）。
@@ -353,6 +353,10 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     }
 
     size_ = measure(cc);
+    // 首次成功测量：`window_bounds()` 据此区分「从未布局过」（返回空值）与「布局过但零尺寸」
+    // （是有效答案——零尺寸控件同样有确定位置）。上方两条早返回路径不置位：`show == false` 本次
+    // 未参与测量；布局缓存命中则由「缓存存在本身以测量过一次为前提」隐含已测量。
+    has_measured_ = true;
     // 显式盒最终尺寸严格等于设定值（内容溢出不撑大盒子，符合 CSS box 语义）。
     if (width_.kind == LengthKind::Fixed) {
         size_.width = width_.value;
@@ -886,6 +890,73 @@ auto Widget::extra_hit_box(const BuildContext &ctx, const Point &ancestor_offset
     (void)ctx;
     (void)ancestor_offset;
     return std::nullopt;  // 缺省不追加：可命中区 == 自身布局盒
+}
+
+auto Widget::window_bounds() const -> std::optional<Rect> {
+    // 与 `paint_bounds()` 的根本区别：那个是**绘制期写入**、坐标系随祖先的缓冲录制方式而变；本入口
+    // 查询时现算、恒为窗口逻辑 dp。故不读任何绘制期缓存成员（它们有 DL 缓存缺口，见 paint_bounds）。
+    if (!show.get()) {
+        return std::nullopt;  // show==false ⇒ 布局期尺寸被夹成零盒，无有效几何
+    }
+    if (!has_measured_) {
+        // 从未布局过：没有任何可上报的窗口盒。注意**不能**用「尺寸为零」代替本判据——零尺寸控件
+        // （无内容控件、布局单测的探针桩）同样有确定的位置，它的窗口盒是有效答案而非空值。
+        return std::nullopt;
+    }
+    const Widget *child = this;
+    const Widget *parent = layout_parent_;
+    if (parent == nullptr) {
+        // 自身即根：根的窗口盒原点取**最近一次绘制实际使用的根盒**——`Window::run_paint` 以
+        // `{0,0}` 起绘，故正常窗口里恒为窗口原点；但根也可能被宿主摆在非原点（嵌入另一棵树、
+        // 离屏出图），此时根原点不是 (0,0) 而只有绘制记录知道。未绘制过则回落窗口原点。
+        //
+        // ⚠️ 这条**只对根成立**：根之上没有缓冲录制祖先，故其绘制读数就是窗口坐标；对有祖先的
+        // 控件绝不能这样取（那正是 paint_bounds 不可信的原因，见上）。
+        const Point root_origin = paint_bounds_.size.width > 0.0F || paint_bounds_.size.height > 0.0F
+                                      ? paint_bounds_.origin
+                                      : Point{.x = 0.0F, .y = 0.0F};
+        return Rect{.origin = root_origin, .size = size_};
+    }
+    // 本控件在父子视图里的盒：几何权威在父侧的 Node 上（见 04-widget.md §6.1「几何权威在 Node」），
+    // 故**尺寸也取自该 Node**而非 `size_`——`size_` 是本控件 `on_layout` 的自报尺寸，与父写入
+    // `Node::bounds_` 的盒可以不同（如自报零尺寸的探针桩、或父施加了额外约束）。
+    Rect self_in_parent{};
+
+    // 逐层上溯。递推式与 `Container::on_paint` 的下降式逐字同构，只是方向相反：
+    //   子的窗口布局原点 = 父的窗口布局原点 + 父 Modifier 的内容平移 + 子在父内容区内的盒原点
+    // 「父的滚动修正」一项只对滚动宿主非零：`Scroll` 的内容子节点盒写的是**内容坐标**（不含偏移），
+    // 须扣掉滚动量才是它在视口里的真实位置（见 scroll.h 的「几何与命中契约」）。
+    // `LazyList` / `LazyRow` / `GridView` 的偏移已参与子布局（子 bounds 直接是视口坐标），
+    // 它们的 `scroll_content_offset` 保持缺省零值。
+    Point origin{.x = 0.0F, .y = 0.0F};  // 根的窗口布局原点
+    for (;;) {
+        // 几何权威只在父侧的 Node 上（见 04-widget.md §6.1），Widget 自身不持有 ⇒ 每层按地址
+        // 比对回本控件在父子视图里的盒。虚拟化容器的 live_ 项不在 `child_nodes()` 里，那种形态
+        // 走下面的 nullopt 出口（几何不可定），不猜。
+        const std::vector<Node> &siblings = parent->child_nodes();
+        const auto it =
+            std::ranges::find_if(siblings, [&child](const Node &n) -> bool { return &n.widget() == child; });
+        if (it == siblings.end()) {
+            return std::nullopt;
+        }
+        const Rect cb = it->bounds();
+        if (child == this) {
+            self_in_parent = cb;  // 只取**本控件自身**那一份；后续迭代拿到的是祖先的盒
+        }
+        Point scroll_delta{.x = 0.0F, .y = 0.0F};
+        parent->scroll_content_offset(cb.origin, scroll_delta);
+        // 父 Modifier 的平移按**该父实际用于绘制的盒尺寸**重算：绘制侧 `render_into` 收到的是
+        // 「父下传的子盒尺寸」，故这里用 cb.size 而非父的 size_——相等时无差别，不等时与绘制同源。
+        const Modifier::TransformInfo tf = parent->modifier.get().transform(cb.size);
+        origin = origin + cb.origin + scroll_delta + tf.translation;
+        const Widget *grand = parent->layout_parent();
+        if (grand == nullptr) {
+            break;  // parent 即根：根的窗口布局原点为 (0,0)，已在 origin 的起值里
+        }
+        child = parent;
+        parent = grand;
+    }
+    return Rect{.origin = origin, .size = self_in_parent.size};
 }
 
 auto Widget::covers_own_extra_hit_box(const Point &local, const BuildContext &ctx, const Point &ancestor_offset) const

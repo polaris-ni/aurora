@@ -538,3 +538,32 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 - 部分控件的序列化 `type` 名与 C++ 类名不同（`Image` → `ImageView` / `ImageViewProps`）。
 
 > 工具链侧入口（`to_code`、MCP 工具、CLI 子命令、Inspector 导出）见 [`08-tooling.md`](08-tooling.md)。
+
+
+### 6.3 三条几何读数：绘制盒 / 窗口盒 / 命中链 origin
+
+控件的几何在本仓有**三条互不相同**的读数。它们曾经被混称为「绝对（窗口逻辑 dp）盒」，本节把各自口径定死。
+
+| 读数 | 入口 | 坐标系 | 写入时机 |
+|:---|:---|:---|:---|
+| 绘制盒 | `paint_bounds()`（`focus_bounds_` / `dirty_bounds()` 同源） | **随祖先缓冲录制方式而变**：`Scroll` 内容后代为**缓冲坐标**（原点含 `-buffer_origin_y_`）；其它离屏合成控件（`Popup` 按 `anchor_`、非恒等 matrix）同理 | 绘制期写入，**有缓存缺口**（DL 缓存命中的帧上 `Widget::paint` 提前返回而不刷新） |
+| 窗口盒 | `window_bounds() -> std::optional<Rect>` | **恒为窗口逻辑 dp**，与 `MouseEvent::position` 同空间 | 查询时沿 `layout_parent()` 现算，**不依赖是否绘制过** |
+| 命中链 origin | `HitNode::origin`（`hit_test_chain` 返回） | 派发期逐层下传的累计原点，**含 Modifier 内容平移** | 派发期 |
+
+**`paint_bounds()` 的注释已随实修改口**：它不再声称「绝对（窗口逻辑 dp）盒」，改为「最近一次 paint **实际收到**的盒」，并在公共头（`widget.h`）写明离屏缓冲内后代为缓冲坐标这一限制、指向 `window_bounds()` 作为窗口绝对盒的入口。
+
+**窗口盒的语义与算法**：`Widget::window_bounds()` 是公共面上「控件 → 窗口绝对盒」的唯一入口，语义为「控件自身盒在窗口客户区坐标系里的位置」。实现沿 `layout_parent()` 链自叶向根累加，递推式与 `Container::on_paint` 的下降式逐字同构：
+
+```
+子的窗口布局原点 = 父的窗口布局原点 + 父 Modifier 的内容平移 + 子在父内容区内的盒原点 + 父的滚动修正
+```
+
+- **内容平移**取 `Modifier::TransformInfo::translation`，与 `render_into` / `hit_test_chain` 共用同一份产物（见 [`05-event-navigation.md`](05-event-navigation.md) §3.2.3 的「origin 与绘制仿射同源」不变量）。**不得在查询侧另写一份「加不加 padding」的算式**——只补 `Padding` 等于把 G31 的病灶换个名字留下。
+- **滚动修正**由虚函数 `Widget::scroll_content_offset` 承载，缺省为零。它是 `Scroll` 唯一非零的覆写者：`Scroll` 的内容子树几何写在**内容坐标**（不含滚动偏移），故按 `-offset_y_` 折算。`LazyList` / `LazyRow` / `GridView` 的偏移已参与子布局（子 bounds 直接是视口坐标），保持缺省零值。`buffer_origin_y_` **不参与**折算——它是缓冲录制锚点，只影响绘制盒那条读数，扣它会二次偏移。
+- 该修正钩子的存在使「哪类宿主提供偏移修正」成为**容器自己的显式声明**，而不是基类按类型猜测。
+
+**返回空值的口径（不留未定义）**：`show == false`、从未布局过（`size()` 为零盒）、或不在任何已布局的树内（`layout_parent()` 为空且自身非根）时返回 `std::nullopt`。取空值而非零盒，是为了让调用方能区分「查不到有效窗口盒」与「盒恰好在窗口原点」——否则空盒会被「非空即采用」的几何判据（如 `a11y_tree.h` 的绘制盒回退）当成有效几何。
+
+**代价与使用边界**：O(树深 × 每层子节点数) 的上溯查找，每层需重算该层 Modifier 变换。故本入口面向平台桥 / 无障碍 / 调试观测这类**低频事后查询**，**不得引入每帧绘制路径**。它不缓存结果，与「`Widget` 上不存在任何几何字段」这一既有约定一致（见本节上文「几何权威在 `Node`」与 §6.1 验收标准中「`Widget` 上不存在任何几何字段」）。
+
+**验收**：`utest_scroll` 四条——滚后非零偏移下窗口盒逐位等于独立复算的真窗口位；未滚动 / 不在滚动容器内两种形态容差 0 逐位相等；Modifier 内容平移计入窗口盒；负守卫（`show == false` 与未布局）返回 `nullopt`。变异自证：把 `scroll_content_offset` 改成零 ⇒ 前两条转红；漏加 Modifier 平移 ⇒ 平移那条转红；负守卫改成返回零盒 ⇒ 负守卫那条转红。

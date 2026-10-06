@@ -7,7 +7,7 @@
 // （唯一文本子节点 / 兄弟标签关联）、递归节点与整树构建。
 //
 // 为何单列在 `widget/` 而非与类型同处 `core/accessibility.h`：语义树构建本质是**对控件树
-// 的遍历**（调 `Widget::for_each_child` / `child_nodes()` / `paint_bounds()` / `accessibility_*()`
+// 的遍历**（调 `Widget::for_each_child` / `child_nodes()` / `window_bounds()` / `accessibility_*()`
 // 钩子），据此 `core/`（基础层）会反向依赖 `widget/`（组件层），违反「core/ 不依赖任何其他
 // aurora 模块」的硬边界。拆分后 `core/accessibility.h` 只保留纯数据类型与指针级钩子，
 // 本头承担全部的树上遍历；`core/` 的跨模块依赖因此归零（见 ARCHITECTURE.md §2）。
@@ -32,22 +32,35 @@ namespace aurora {
 
 namespace detail {
 
-/// @brief 语义几何盒取值：已绘制优先取绘制遍历写入的绝对盒，否则回退布局累加盒。
+/// @brief 控件几何盒的**三级回退**：窗口盒 → 绘制盒 → 调用方给的布局累加盒。
 ///
-/// 绘制盒（`Widget::paint_bounds()`，与 `Widget::focus_bounds_` 同源同值）含 Modifier 的
-/// padding / border 位移，是屏幕坐标下的真实盒；布局累加盒只累加各级 `Node` 的局部原点，
-/// 不带父级 padding 偏移。**优先绘制盒**保证有 present 过的树几何精确；
-/// **回退累加盒**保证未绘制（纯布局单测、首帧前查询）时节点仍有非空几何。
-/// @note 离屏缓冲（如 `Scroll` 内容）内的后代盒为内容坐标系，与 `paint_bounds()` 同限制。
-/// @param w          目标控件，读取其 `paint_bounds()` 绘制盒
-/// @param layout_box 调用方按布局累加得到的候选全局盒（未绘制时的回退值）
-/// @return 绘制盒非空（宽或高 > 0）时返回 `w.paint_bounds()`，否则原样返回 `layout_box`
-[[nodiscard]] inline auto accessibility_box(const Widget &w, const Rect &layout_box) -> Rect {
+/// 三级的必要性（每一级都对应一类真实形态，缺一级就丢一类控件的几何）：
+/// ① `Widget::window_bounds()`：语义树真正需要的坐标——读屏与 UIA / AT-SPI2 桥报的是控件在
+///    **窗口**里的位置。恒为窗口逻辑 dp，不依赖是否绘制过。
+/// ② `Widget::paint_bounds()`：**绘制期写入**的读数，仅在已绘制时非空。它不是恒定的窗口坐标
+///    （`Scroll` 内容后代为缓冲坐标，原点含 `-buffer_origin_y_`；`Popup` / 非恒等 matrix 同理），
+///    且在显示列表缓存命中的帧上不会刷新——故只作次选，绝不单独依赖。
+/// ③ 调用方按布局累加得到的盒：覆盖「父容器直接写 `Node::bounds_` 而不调子控件 `layout`」的形态
+///    （自报尺寸为零的探针桩、某些虚拟化条目），此时子控件从未测量过、`window_bounds()` 返回空值，
+///    但绘制盒与布局盒仍然有效。
+///
+/// @param w          目标控件
+/// @param layout_box 调用方按布局累加得到的候选盒（第三级回退值）
+/// @return 三级中第一个非空的盒；全为空时原样返回 `layout_box`
+[[nodiscard]] inline auto resolved_geometry_box(const Widget &w, const Rect &layout_box) -> Rect {
+    if (const std::optional<Rect> window_box = w.window_bounds()) {
+        return *window_box;
+    }
     const Rect painted = w.paint_bounds();
     if (painted.size.width > 0.0F || painted.size.height > 0.0F) {
         return painted;
     }
     return layout_box;
+}
+
+/// @brief 语义几何盒取值：`resolved_geometry_box` 的语义树侧别名（读数口径见该函数）。
+[[nodiscard]] inline auto accessibility_box(const Widget &w, const Rect &layout_box) -> Rect {
+    return resolved_geometry_box(w, layout_box);
 }
 
 /// @brief 控件「自带/声明的可读文本」：`explicit` 声明优先于 `accessibility_label()` 覆写。
@@ -107,7 +120,7 @@ namespace detail {
 ///
 /// @note RTL 下标签可能在控件右侧；本兜底接受左右两侧的最近者，方向无关。
 /// @param w   需要标签的叶子控件（仅 Checkbox / Switch / Slider 角色生效）
-/// @param box 建树已知的本节点盒；为空盒时回退 `w.paint_bounds()`
+/// @param box 建树已知的本节点窗口盒；为空盒时现取 `w.window_bounds()`
 /// @return 父容器内垂直重叠且水平相邻、几何最近的可见文本兄弟的标签；无父/无几何/无兄弟时为空串
 [[nodiscard]] inline auto sibling_label_name(const Widget &w, const Rect &box) -> std::string {
     const AccessibilityRole role = w.accessibility_role();
@@ -118,7 +131,8 @@ namespace detail {
     if (parent == nullptr) {
         return std::string{};
     }
-    const Rect wb = (box.size.width > 0.0F || box.size.height > 0.0F) ? box : w.paint_bounds();
+    // 自身盒：优先调用方已知的盒（建树时算出的窗口盒），否则走三级回退现取。
+    const Rect wb = resolved_geometry_box(w, (box.size.width > 0.0F || box.size.height > 0.0F) ? box : Rect{});
     if (wb.size.width <= 0.0F || wb.size.height <= 0.0F) {
         return std::string{};  // 几何缺失：不安全关联
     }
@@ -142,7 +156,8 @@ namespace detail {
         if (label.empty()) {
             return;
         }
-        const Rect sb = sib.paint_bounds();
+        // 兄弟盒走同一套三级回退：与自身盒、语义树主路径同源，避免启发式在某一层换坐标系。
+        const Rect sb = resolved_geometry_box(sib, Rect{});
         if (sb.size.width <= 0.0F || sb.size.height <= 0.0F) {
             return;
         }

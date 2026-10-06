@@ -289,6 +289,23 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **预期值必须独立复算**：三条判据的期望原点都由测试自己按 `render_into` 的算式重算（`row_origin + (pad, pad) + dd_origin_in_row`），**不得取实现自己的输出当基准**——否则判据会跟着实现一起漂，变异打不红。变异自证：只在祖先闸那里把内边距减掉、而 origin 不同源 ⇒ 形态①②转红；把 `content_origin()` 退回 `widget_origin`（丢弃 translation）⇒ ①②③ 全部转红。
 
+**与窗口盒查询的关系（`window_bounds()`，非本节不变量）**：上面的同源不变量是**帧内**的对齐（绘制与命中在同一帧用同一份 `tf.translation`），它**不覆盖事后查询**。公共面为此另有一条入口 `Widget::window_bounds()`，语义是「控件自身盒的**窗口逻辑 dp 绝对盒**」，算法见 [`04-widget.md`](04-widget.md) §6.3。
+
+它与 `HitNode.origin` 的关系必须讲清，否则会把两条读数当同一条用：
+
+| 读数 | `Scroll` 后代上的取值（视口原点 60、`offset_y_` = 200、内容 y = 200） | 坐标系 |
+|:---|:---|:---|
+| 真窗口 y（视口原点 + 内容 y − `offset_y_`） | 60 | 窗口逻辑 dp |
+| `window_bounds().origin.y` | 60 | 窗口逻辑 dp |
+| `HitNode.origin.y` | 260 | 视口原点 + 内容盒原点（**未扣 `offset_y_`**） |
+| `paint_bounds().origin.y` | 200 | 内容 / 缓冲坐标 |
+
+**⚠️ `HitNode.origin` 不是窗口坐标**：`Scroll::on_hit_test_chain` 给内容子树下传的是「视口原点 + 内容盒原点」，**未扣 `offset_y_`**（见 `scroll.h` 的「几何与命中契约」）。后果是滚动容器内控件收到的 `MouseEvent::local_position` 会整体多出一个 `offset_y_`——这既是「点得准不准」的老问题，也让 `HitNode.origin` 无法直接当窗口几何用。`window_bounds()` 则**显式扣掉**该偏移，给出真窗口位。
+
+两者「同源」的准确含义是：共用同一份 Modifier 内容平移产物（`tf.translation`）、同一套坐标空间定义、同一帧的布局与偏移状态；**不是**逐位相等。判据相应地写成「窗口盒逐位等于**独立复算**的真窗口位」，而不是「等于 `HitNode.origin`」——后者会把上表的差额固化成期望值。
+
+修复 `HitNode.origin` 使其成为真窗口坐标会改变滚动容器内所有控件的 `local_position`，属派发链语义变更，须另开提案，不在本条范围内。
+
 
 ### 3.3 嵌套滚动协调（滚轮余量上冒）
 

@@ -856,4 +856,140 @@ AURORA_TEST_CASE(vertical_view_size_and_scroll_percent_consistent) {
     AURORA_TEST_CHECK_NEAR(mid_view, top_view, 1e-6);
 }
 
+// ---- G36: 控件 -> 窗口逻辑 dp 绝对盒的事后查询（Widget::window_bounds） ----
+//
+// 背景：`paint_bounds()` 的注释曾承诺「绝对（窗口逻辑 dp）盒」，但 Scroll 把内容录进离屏缓冲时
+// 给子树传的是 `{0, -buffer_origin_y_}`，故滚动容器内后代的该读数是**缓冲坐标**；消费侧要换算
+// 成窗口坐标需要 `buffer_origin_y_`，而它既无 getter 也不进 serialize_props ⇒ 结构上无法折算。
+// `window_bounds()` 是公共面上该换算的唯一入口。
+//
+// 判据纪律：**预期值一律由测试自己独立复算**（视口窗口原点 + 内容 y − offset_y_），不得取实现
+// 自己的输出当基准，否则判据会跟着实现一起漂、变异打不红。
+
+AURORA_TEST_CASE(window_bounds_of_scrolled_descendant_equals_independently_recomputed_origin) {
+    // 形态①：Scroll 内容后代在**非零偏移**后取窗口盒，逐位等于独立复算的真窗口位。
+    // 视口放在 y=60 的父容器里，确保「视口原点」真的进入读数（视口原点为 0 的形态会把该项漏掉）。
+    constexpr float g36_viewport_origin_y = 60.0F;
+    auto outer = std::make_shared<Column>();
+    outer->add(Node{std::make_shared<FixedBox>(AURORA_G27_VIEW_W, g36_viewport_origin_y)});
+    ScrollFixture f = make_scrollable(200.0F);
+    outer->add(Node{f.scroll});
+
+    // 按外层尺寸重排（60dp 占位 + 200dp 视口），使视口原点确实落在 y=60。
+    LayoutEngine::layout(*outer, bounded(AURORA_G27_VIEW_W, AURORA_G27_VIEW_H + g36_viewport_origin_y));
+    (void)f.scroll->set_offset(200.0F);
+    const float offset = f.scroll->offset_y();
+    AURORA_TEST_REQUIRE(offset > 0.0F);
+
+    // 逐行核对：真窗口位 = 视口窗口原点 + 行内容 y − offset_y_。
+    int checked = 0;
+    for (std::size_t i = 0; i < f.rows.size(); ++i) {
+        const float content_y = static_cast<float>(i) * AURORA_G27_ROW_H;
+        if (!f.rows[i]->window_bounds().has_value()) {
+            continue;
+        }
+        ++checked;
+        const Rect wb = require_value(f.rows[i]->window_bounds());
+        const float expected = g36_viewport_origin_y + content_y - offset;
+        AURORA_TEST_CHECK_NEAR(wb.origin.y, expected, 1e-3F);
+    }
+    AURORA_TEST_CHECK(checked > 0);
+
+    // 关键区分：缓冲锚点 `buffer_origin_y_` **不得**参与折算。若实现误把它加上/减掉，
+    // 上面的逐行核对会整体错位一个锚点量而转红。
+    // ⚠️ 本用例**不绘制**：故 `paint_bounds()` 此处是零盒（该读数是绘制期写入、有缓存缺口，
+    // 见其 `@warning`）。这恰好说明为什么公共面需要 `window_bounds()` 这条不依赖绘制的查询路径。
+    AURORA_TEST_CHECK(f.rows[5]->paint_bounds().size.height <= 0.0F);
+}
+
+AURORA_TEST_CASE(paint_bounds_of_scrolled_descendant_stays_in_buffer_coordinates) {
+    // 本次只改 `paint_bounds()` 的注释口径、不改其行为，故在此钉住现状：绘制后该读数给的是
+    // **内容坐标**（等于行的内容 y），不是窗口坐标——这正是改口的理由，也是与 `window_bounds()`
+    // 并存两条读数的原因。两条读数之差 = offset_y_ − 视口窗口原点。
+    constexpr float g36_viewport_origin_y = 60.0F;
+    auto outer = std::make_shared<Column>();
+    outer->add(Node{std::make_shared<FixedBox>(AURORA_G27_VIEW_W, g36_viewport_origin_y)});
+    ScrollFixture f = make_scrollable(200.0F);
+    outer->add(Node{f.scroll});
+    LayoutEngine::layout(*outer, bounded(AURORA_G27_VIEW_W, AURORA_G27_VIEW_H + g36_viewport_origin_y));
+    (void)f.scroll->set_offset(200.0F);
+
+    Painter p;
+    p.begin(400, 400);
+    outer->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 400.0F}},
+                 BuildContext{});
+
+    const float offset = f.scroll->offset_y();
+    const Rect mid = require_value(f.rows[5]->window_bounds());
+    AURORA_TEST_REQUIRE(f.rows[5]->paint_bounds().size.height > 0.0F);
+    // 缓冲口径：绘制读数 == 内容 y（不含视口原点、也不含滚动偏移）。
+    AURORA_TEST_CHECK_NEAR(f.rows[5]->paint_bounds().origin.y, 5.0F * AURORA_G27_ROW_H, 1e-3F);
+    // 与窗口盒的差恰为「offset − 视口原点」，两条读数不可混用。
+    AURORA_TEST_CHECK_NEAR(f.rows[5]->paint_bounds().origin.y - mid.origin.y, offset - g36_viewport_origin_y, 1e-3F);
+}
+
+AURORA_TEST_CASE(window_bounds_matches_recomputed_origin_without_scrolling) {
+    // 形态②：未滚动 / 不在滚动容器内两种形态，窗口盒与独立复算值**容差 0** 逐位相等。
+    // 「容差 0」守住缺省路径零变化：任何多减/少减一份平移都会在这里现形。
+
+    // 形态②-a：不在滚动容器内 —— 纯 Column 树，偏移恒 0。
+    auto col = std::make_shared<Column>();
+    std::vector<std::shared_ptr<HitRow>> rows;
+    for (int i = 0; i < 4; ++i) {
+        auto r = std::make_shared<HitRow>(i, *std::make_unique<HitLedger>());
+        r->modifier.set(Modifier{}.clickable([]() -> void {}));
+        rows.push_back(r);
+        col->add(Node{r});
+    }
+    LayoutEngine::layout(*col, bounded(AURORA_G27_VIEW_W, 400.0F));
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        const Rect wb = require_value(rows[i]->window_bounds());
+        const float content_y = static_cast<float>(i) * AURORA_G27_ROW_H;
+        AURORA_TEST_CHECK(wb.origin.y == content_y);  // 容差 0：逐位相等
+    }
+
+    // 形态②-b：在Scroll 内但**未滚动**（offset==0）⇒ 窗口位 == 视口原点 + 内容 y。
+    ScrollFixture f = make_scrollable(0.0F);
+    AURORA_TEST_CHECK_NEAR(f.scroll->offset_y(), 0.0F, 1e-4F);
+    for (std::size_t i = 0; i < f.rows.size(); ++i) {
+        const Rect wb = require_value(f.rows[i]->window_bounds());
+        const float content_y = static_cast<float>(i) * AURORA_G27_ROW_H;
+        AURORA_TEST_CHECK(wb.origin.y == content_y);
+    }
+}
+
+AURORA_TEST_CASE(window_bounds_accounts_for_modifier_translation) {
+    // G31 同源性的回归：中间层Column 带 padding(10) 时，窗口盒须含该内容盒平移，
+    // 否则「origin 与绘制仿射同源」这条不变量在事后查询侧就断了（退化成朴素布局原点）。
+    auto col = std::make_shared<Column>();
+    col->modifier.set(Modifier{}.padding(10.0F));
+    auto target = std::make_shared<HitRow>(0, *std::make_unique<HitLedger>());
+    target->modifier.set(Modifier{}.clickable([]() -> void {}));
+    col->add(Node{target});
+
+    auto root = std::make_shared<Column>();
+    root->add(Node{std::make_shared<HitRow>(0, *std::make_unique<HitLedger>())});  // 40dp 占位行
+    root->add(Node{col});
+    LayoutEngine::layout(*root, bounded(AURORA_G27_VIEW_W, 200.0F));
+
+    const Rect wb = require_value(target->window_bounds());
+    // 独立复算：占位行高 40（col 盒原点 y=40）+ col 的 Modifier 内容平移 10 = 50。
+    AURORA_TEST_CHECK_NEAR(wb.origin.y, 50.0F, 1e-3F);
+}
+
+AURORA_TEST_CASE(window_bounds_is_empty_for_hidden_and_unlaid_out_widget) {
+    // 负守卫（口径定死，不得留未定义）：show==false 与从未布局两种情形均返回 nullopt，
+    // 而**不是**零盒 —— 零盒无法与「盒恰在窗口原点」区分，会被「非空即采用」的几何判据
+    // （如语义树的绘制盒回退）当成有效几何。
+    FixedBox fresh(40.0F, 20.0F);
+    AURORA_TEST_CHECK_FALSE(fresh.window_bounds().has_value());
+
+    ScrollFixture f = make_scrollable(200.0F);
+    AURORA_TEST_REQUIRE(f.rows.size() > 3U);
+    f.rows[3]->show.set(false);
+    AURORA_TEST_CHECK_FALSE(f.rows[3]->window_bounds().has_value());
+    // 同一条树里的兄弟未受影响：判据不得因一个隐藏节点而整树失效。
+    AURORA_TEST_CHECK(f.rows[4]->window_bounds().has_value());
+}
+
 }  // namespace aurora::test_cases::utest_scroll

@@ -641,6 +641,21 @@ class Scroll : public Container, public ScrollProps {
         return nullptr;
     }
 
+    /// @brief 滚动偏移坐标系修正（`Widget::window_bounds` 上溯用）：内容子节点的盒原点须扣掉偏移。
+    ///
+    /// 本控件是 `Widget::scroll_content_offset` 唯一非零的覆写者：`Scroll` 的内容子树几何写在
+    /// **内容坐标**（`children_[0].bounds().origin` 恒为 (0,0)、不含滚动偏移，见类注释
+    /// 「几何与命中契约」），而 `window_bounds()` 要的是窗口坐标，故按 `-offset_y_` 折算。
+    ///
+    /// `buffer_origin_y_` **不参与**此折算：它是离屏缓冲的录制锚点（只影响 `paint_bounds()`
+    /// 那条读数），与控件在视口里的实际位置无关，扣它会二次偏移。
+    ///
+    /// @param out 输出平移量（引用，就地写入）：y = `-offset_y_`，x = 0。
+    /// @note Side-effects: writes `out`
+    auto scroll_content_offset(const Point & /*child_origin*/, Point &out) const -> void override {
+        out = Point{.x = 0.0F, .y = -offset_y_};
+    }
+
     /// @brief 命中链：把局部命中点换算到内容坐标后下降给内容子树。
     ///
     /// 换算：`local.y + offset_y_`（`bounds_` 是内容坐标，见类注释「几何与命中契约」）。
