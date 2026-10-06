@@ -291,16 +291,25 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **与窗口盒查询的关系（`window_bounds()`，非本节不变量）**：上面的同源不变量是**帧内**的对齐（绘制与命中在同一帧用同一份 `tf.translation`），它**不覆盖事后查询**。公共面为此另有一条入口 `Widget::window_bounds()`，语义是「控件自身盒的**窗口逻辑 dp 绝对盒**」，算法见 [`04-widget.md`](04-widget.md) §6.3。
 
-它与 `HitNode.origin` 的关系必须讲清，否则会把两条读数当同一条用：
+它与 `HitNode.origin` 的关系必须讲清，否则会把两条读数当同一条用。下表为**修复前**的实测（视口原点 60、`offset_y_` = 200、内容 y = 200）：
 
-| 读数 | `Scroll` 后代上的取值（视口原点 60、`offset_y_` = 200、内容 y = 200） | 坐标系 |
-|:---|:---|:---|
-| 真窗口 y（视口原点 + 内容 y − `offset_y_`） | 60 | 窗口逻辑 dp |
-| `window_bounds().origin.y` | 60 | 窗口逻辑 dp |
-| `HitNode.origin.y` | 260 | 视口原点 + 内容盒原点（**未扣 `offset_y_`**） |
-| `paint_bounds().origin.y` | 200 | 内容 / 缓冲坐标 |
+| 读数 | 修复前取值 | 修复后取值 | 坐标系 |
+|:---|:---|:---|:---|
+| 真窗口 y（视口原点 + 内容 y − `offset_y_`） | 60 | 60 | 窗口逻辑 dp |
+| `window_bounds().origin.y` | 60 | 60 | 窗口逻辑 dp |
+| `HitNode.origin.y` | **260**（漏扣 `offset_y_`） | **60** | 窗口逻辑 dp（已修） |
+| `paint_bounds().origin.y` | 200 | 200 | 内容 / 缓冲坐标（**不变**，见上） |
 
-**⚠️ `HitNode.origin` 不是窗口坐标**：`Scroll::on_hit_test_chain` 给内容子树下传的是「视口原点 + 内容盒原点」，**未扣 `offset_y_`**（见 `scroll.h` 的「几何与命中契约」）。后果是滚动容器内控件收到的 `MouseEvent::local_position` 会整体多出一个 `offset_y_`——这既是「点得准不准」的老问题，也让 `HitNode.origin` 无法直接当窗口几何用。`window_bounds()` 则**显式扣掉**该偏移，给出真窗口位。
+**`HitNode.origin` 已修为真窗口坐标**（`Scroll::on_hit_test_chain` 下传时 y 扣 `offset_y_`）：修复前它给的是「视口原点 + 内容盒原点」，漏扣滚动量，使滚动容器内控件收到的 `local_position` 整体错位一个 `offset_y_`（实测点行视觉中心收到 −180，正确值 20）。修复后它与 `window_bounds()` 对同一控件、同一帧给出**同一个窗口位置**，消费侧无需自算折算。
+
+**两条通路的坐标系是刻意不同的，不是漏改的同一处**：
+
+| 通路 | 传递的量 | 坐标系 | 用途 |
+|:---|:---|:---|:---|
+| 事件本地化 | `HitNode::origin` | **窗口**坐标 | 派发器算 `local_position = position − origin` |
+| 追加命中盒 | `ancestor_offset` | **视口**坐标 | 判「离视口多远」（`Dropdown` 据此决定面板翻上/翻下） |
+
+`ancestor_offset` **刻意不扣** `offset_y_`：`widget.h` 声明其语义是「本控件原点在**视口坐标系**中的 y」，而翻转判据要的正是「离视口多远」——面板贴视口下沿时无论滚到哪都应翻上，该距离本就不含滚动量。改成窗口坐标会改掉这个翻转阈值（嵌套滚动场景下行为变化）。改动其一必须重新审视另一。
 
 两者「同源」的准确含义是：共用同一份 Modifier 内容平移产物（`tf.translation`）、同一套坐标空间定义、同一帧的布局与偏移状态；**不是**逐位相等。判据相应地写成「窗口盒逐位等于**独立复算**的真窗口位」，而不是「等于 `HitNode.origin`」——后者会把上表的差额固化成期望值。
 

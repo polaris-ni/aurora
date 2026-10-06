@@ -661,6 +661,71 @@ class HitRow final : public Widget {
     HitLedger *ledger_;  ///< 非拥有：台账由 fixture 持有，生命周期长于本控件
 };
 
+/// @brief 记录派发期收到的 `local_position` / `position` 的探针行（事件本地化观测用）。
+///
+/// 与 `HitRow` 分工：`HitRow` 只记「有没有被点中」（走 `activate`，受 `wants_click()` 门控），
+/// 本类改从 `on_pointer_event` 直接取**事件自带坐标**，用于钉住「滚动容器内控件收到的本地坐标
+/// 是否正确」。它不需要 clickable 修饰——`on_pointer_event` 是控件收到事件的入口。
+class LocalProbeRow final : public Widget {
+  public:
+    explicit LocalProbeRow(int index) : index_(index) {}
+
+    [[nodiscard]] auto type_name() const -> const char * override { return "LocalProbeRow"; }
+    [[nodiscard]] auto index() const -> int { return index_; }
+    [[nodiscard]] auto seen() const -> bool { return seen_; }
+    [[nodiscard]] auto last_local() const -> Point { return local_; }
+    [[nodiscard]] auto last_position() const -> Point { return position_; }
+
+    auto on_pointer_event(MouseEvent &e) -> void override {
+        seen_ = true;
+        local_ = e.local_position;
+        position_ = e.position;
+        e.is_handled = true;  // 只记不消费：避免打断同批用例的其它派发断言
+    }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext &/*ctx*/) -> Size override {
+        return c.constrain(Size{.width = AURORA_G27_VIEW_W, .height = AURORA_G27_ROW_H});
+    }
+    auto on_paint(Painter &/*p*/, const Rect &/*r*/, const BuildContext &/*ctx*/) -> void override {}
+
+  private:
+    int index_;
+    bool seen_ = false;
+    Point local_{};
+    Point position_{};
+};
+
+/// @brief 构造「Scroll 套 Column」固定内容树（行控件为 `LocalProbeRow`），供事件本地化判据使用。
+struct LocalProbeFixture {
+    std::shared_ptr<Scroll> scroll;
+    std::shared_ptr<Column> content;
+    std::vector<std::shared_ptr<LocalProbeRow>> rows;
+};
+
+/// @brief 搭一棵带探针行的可滚 Scroll，并按给定偏移就位。
+/// @param offset 布局后设置的滚动偏移（dp）。
+/// @return 已完成布局的 fixture（行实例在布局期由 Column 写入 Node bounds）。
+auto make_local_probe_scrollable(float offset) -> LocalProbeFixture {
+    LocalProbeFixture f;
+    f.scroll = std::make_shared<Scroll>();
+    f.content = std::make_shared<Column>();
+    for (int i = 0; i < AURORA_G27_ROWS; ++i) {
+        auto r = std::make_shared<LocalProbeRow>(i);
+        // 必须挂 Clickable 修饰：`wants_click()` 缺省只看修饰链，不挂则基类不认它为命中目标，
+        // `on_pointer_event` 永不触发（探针自身接线错误的经典陷阱，与 make_scrollable 同因）。
+        r->modifier.set(Modifier{}.clickable([]() -> void {}));
+        f.rows.push_back(r);
+        f.content->add(Node{r});
+    }
+    f.scroll->add(Node{f.content});
+    LayoutEngine::layout(*f.scroll, bounded(AURORA_G27_VIEW_W, AURORA_G27_VIEW_H));
+    if (offset > 0.0F) {
+        (void)f.scroll->set_offset(offset);
+    }
+    return f;
+}
+
 /// @brief 构造「Scroll 套Column」固定内容树，并保留各行实例供断言取用。
 struct ScrollFixture {
     std::shared_ptr<Scroll> scroll;
@@ -990,6 +1055,85 @@ AURORA_TEST_CASE(window_bounds_is_empty_for_hidden_and_unlaid_out_widget) {
     AURORA_TEST_CHECK_FALSE(f.rows[3]->window_bounds().has_value());
     // 同一条树里的兄弟未受影响：判据不得因一个隐藏节点而整树失效。
     AURORA_TEST_CHECK(f.rows[4]->window_bounds().has_value());
+}
+
+// ---- 派发链 origin 修复：滚动容器内控件的事件本地化 ----
+//
+// 缺陷：`Scroll::on_hit_test_chain` 下传给内容子树的全局原点漏扣 `offset_y_`，而派发器按
+// `local_position = position − origin` 本地化坐标 ⇒ 滚动容器内每个控件收到的本地坐标整体错位
+// 一个滚动量（实测点行视觉中心收到 −180，正确值 20）。
+//
+// 判据纪律：预期值一律由测试**独立复算**，不得取实现输出当基准。
+
+AURORA_TEST_CASE(scrolled_descendant_receives_correct_local_position) {
+    // 判据①：滚到 offset=200 后点击内容 y=200 那��的视觉中心，控件收到的 local_position
+    // 必须是「行内局部 y」= 行高的一半，而不是错位一个 offset_y_ 的值。
+    constexpr float aurora_g27_offset = 200.0F;
+    LocalProbeFixture f = make_local_probe_scrollable(aurora_g27_offset);
+    AURORA_TEST_REQUIRE(f.scroll->offset_y() > 0.0F);
+
+    // 选内容 y = offset 的行（滚后恰在视口顶），点它的视觉中心。
+    const auto idx = static_cast<std::size_t>(aurora_g27_offset / AURORA_G27_ROW_H);
+    AURORA_TEST_REQUIRE(idx < f.rows.size());
+    // 独立复算视觉中心：视口原点 0 + 行内容 y − offset + 行高/2（视口本身是根，原点为 0）。
+    const float row_center_window_y =
+        (static_cast<float>(idx) * AURORA_G27_ROW_H) - f.scroll->offset_y() + (AURORA_G27_ROW_H * 0.5F);
+    const float expected_local_y = AURORA_G27_ROW_H * 0.5F;
+
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    press.button = MouseButton::Left;
+    press.position = Point{.x = 10.0F, .y = row_center_window_y};
+    EventDispatcher::dispatch(*f.scroll, press, nullptr);
+
+    AURORA_TEST_REQUIRE(f.rows[idx]->seen());
+    // 事件本身的全局位置须与派发点一致（确认探针没被坐标系问题带偏）。
+    AURORA_TEST_CHECK_NEAR(f.rows[idx]->last_position().y, row_center_window_y, 1e-3F);
+    // 核心断言：本地坐标 = 点在行盒内的偏移。
+    AURORA_TEST_CHECK_NEAR(f.rows[idx]->last_local().y, expected_local_y, 1e-3F);
+    // 反向钉住「不是错位值」：修复前此处为 expected − offset_y_。
+    AURORA_TEST_CHECK(f.rows[idx]->last_local().y > expected_local_y - 1.0F);
+}
+
+AURORA_TEST_CASE(hit_node_origin_equals_independently_recomputed_window_position) {
+    // 判据②：`HitNode.origin` 逐位等于独立复算的真窗口位（视口原点 + 内容 y − offset_y_）。
+    // 这条同时钉住「origin 是窗口坐标」这一语义，供`local_position = position − origin` 本地化。
+    constexpr float aurora_g27_offset = 120.0F;
+    LocalProbeFixture f = make_local_probe_scrollable(aurora_g27_offset);
+    AURORA_TEST_REQUIRE(f.scroll->offset_y() > 0.0F);
+
+    // 命中一条滚后可见的行：视口局部点取该行中心。
+    const auto idx = static_cast<std::size_t>(aurora_g27_offset / AURORA_G27_ROW_H);
+    AURORA_TEST_REQUIRE(idx < f.rows.size());
+    const float local_y =
+        (static_cast<float>(idx) * AURORA_G27_ROW_H) - f.scroll->offset_y() + (AURORA_G27_ROW_H * 0.5F);
+    const auto chain = f.scroll->hit_test_chain(Point{.x = 10.0F, .y = local_y}, g27_viewport(), BuildContext{});
+    AURORA_TEST_REQUIRE(!chain.empty());
+
+    const auto it = std::ranges::find_if(
+        chain, [&f, idx](const HitNode &n) -> bool { return n.ptr == static_cast<Widget *>(f.rows[idx].get()); });
+    AURORA_TEST_REQUIRE(it != chain.end());
+    // 独立复算真窗口位：该行盒顶 = 内容 y − offset_y_（视口是根，原点 0）。
+    const float expected_window_y = (static_cast<float>(idx) * AURORA_G27_ROW_H) - f.scroll->offset_y();
+    AURORA_TEST_CHECK_NEAR(it->origin.y, expected_window_y, 1e-3F);
+}
+
+AURORA_TEST_CASE(hit_node_origin_agrees_with_window_bounds) {
+    // 判据②的交叉验证：`HitNode.origin`（事件本地化基准）与 `window_bounds()`（事后查询）
+    // 对同一控件、同一帧必须给出**同一个窗口位置**——这是 CHG-002 与本次修复合流后的关键不变量：
+    // 两者同源，消费侧无需再自算折算。
+    constexpr float aurora_g27_offset = 120.0F;
+    LocalProbeFixture f = make_local_probe_scrollable(aurora_g27_offset);
+    const auto idx = static_cast<std::size_t>(aurora_g27_offset / AURORA_G27_ROW_H);
+    AURORA_TEST_REQUIRE(idx < f.rows.size());
+    const float local_y =
+        (static_cast<float>(idx) * AURORA_G27_ROW_H) - f.scroll->offset_y() + (AURORA_G27_ROW_H * 0.5F);
+    const auto chain = f.scroll->hit_test_chain(Point{.x = 10.0F, .y = local_y}, g27_viewport(), BuildContext{});
+    const auto it = std::ranges::find_if(
+        chain, [&f, idx](const HitNode &n) -> bool { return n.ptr == static_cast<Widget *>(f.rows[idx].get()); });
+    AURORA_TEST_REQUIRE(it != chain.end());
+    const Rect wb = require_value(f.rows[idx]->window_bounds());
+    AURORA_TEST_CHECK(it->origin.y == wb.origin.y);  // 容差 0：逐位相等
 }
 
 }  // namespace aurora::test_cases::utest_scroll

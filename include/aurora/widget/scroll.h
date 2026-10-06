@@ -697,11 +697,21 @@ class Scroll : public Container, public ScrollProps {
                                                 bounds.origin + content_box.origin)) {
             return {};  // 命中点在内容盒外（含可视区内的空白处）
         }
-        // 内容子树的全局原点：视口原点 + 内容盒原点（内容盒原点恒为 (0,0)，但仍按通用式
-        // 求和，避免与绘制/命中再次分叉）。
-        const Rect global{
-            .origin = Point{.x = bounds.origin.x + content_box.origin.x, .y = bounds.origin.y + content_box.origin.y},
-            .size = content_box.size};
+        // 内容子树的全局原点 = 视口原点 + 内容盒原点 − `offset_y_`（内容盒原点恒为 (0,0)，
+        // 但仍按通用式求和，避免与绘制/命中再次分叉）。
+        //
+        // ⚠️ `− offset_y_` 不可省：`HitNode.origin` 的语义是**窗口坐标**（派发器按
+        // `local_position = position − origin` 本地化坐标），而内容子树的 bounds 是**内容坐标**。
+        // 漏扣则 origin 整体偏大一个滚动量，滚动容器内每个控件收到的 local_position 都错位
+        // `offset_y_`（用 local_position 做本地几何判定的控件——Dropdown 反算序号、TextInput
+        // 定光标落点、拖拽阈值——全部偏一个滚动量）。
+        //
+        // 与上面 `local.y + offset_y_` 的换算是**两侧各自职责**、不是重复扣减：那一侧把探测点
+        // 从视口坐标送回内容坐标系（命中判定用），这一侧把子树的原点从内容坐标送回窗口坐标
+        // （事件本地化用）。只改一侧都会坏：改 local 会使命中整体错位、漏改 origin 会让本地化错位。
+        const Rect global{.origin = Point{.x = bounds.origin.x + content_box.origin.x,
+                                          .y = bounds.origin.y + content_box.origin.y - offset_y_},
+                          .size = content_box.size};
         return children_[0]->hit_test_chain(content_local - content_box.origin, global, ctx);
     }
 
@@ -728,8 +738,15 @@ class Scroll : public Container, public ScrollProps {
         }
         const Rect content_box = children_[0].bounds();
         const Point content_local{.x = local.x, .y = local.y + offset_y_};
-        // 内容子树的全局偏移：视口原点 + 内容盒原点。内容坐标与视口坐标差一个 offset_y_，
-        // 折算回全局时须加上（否则内容里靠上的控件会被算成贴视口顶）。
+        // 内容子树的祖先偏移：`ancestor_offset` + 内容盒原点。**刻意不扣 `offset_y_`**——
+        // `ancestor_offset` 的语义是「本控件原点在**视口坐标系**中的 y」（见 widget.h），而
+        // 追加命中盒的用途正是判「离视口多远」（`Dropdown::panel_box` 据此决定面板翻上/翻下），
+        // 该距离本就**不含滚动量**：面板贴视口下沿时无论滚到哪都应翻上。改成窗口坐标会改掉
+        // 这个翻转阈值（嵌套滚动场景下行为变化）。
+        //
+        // ⚠️ 故 `on_hit_test_chain` 下传的 `HitNode.origin`（窗口坐标）与这里的 `ancestor_offset`
+        // （视口坐标）**是两个有意不同的坐标系**，不是漏改的同一处：前者供
+        // `position − origin` 本地化，后者供视口相对几何决策。改动其一必须重新审视另一。
         const Point content_offset{.x = ancestor_offset.x + content_box.origin.x,
                                    .y = ancestor_offset.y + content_box.origin.y};
         return children_[0]->covers_extra_hit_box(content_local - content_box.origin, ctx, content_offset);

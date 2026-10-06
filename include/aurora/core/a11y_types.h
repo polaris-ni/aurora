@@ -77,11 +77,14 @@ struct AccessibilityScrollRange {
 
 /// @brief 由滚动量算 UIA `VerticalViewSize` 百分比（可见内容占全部内容的百分比）。
 /// 纯函数、平台中立：UIA provider 与三桥共用的唯一真源，便于脱离 COM 环境做三腿单测。
-/// @param range 滚动量（`.viewport` = 视口尺寸，`.content` = 内容总尺寸）。
+/// @param range 滚动量：视口尺寸取 `.viewport`，内容总尺寸取 `.content`。
 /// @return `viewport / content × 100`，夹到 `[0, 100]`；无跨度 / 不支持滚动
-///         （`content <= 0` 或 `viewport <= 0`）报 100（全部可见）。
+///         （`content` 或 `viewport` 非正）报 100（全部可见）。
 /// @note 与 `max - min` 无关：即便 `content - viewport != max - min` 也能算得有几何意义的百分比。
 /// @note Side-effects: pure
+/// @note 措辞勿改成「反引号内以 `.` 开头 + 等号」的形态（如 `.viewport` = …）：Doxygen 会把
+///       点号开头的反引号内容当 HTML 属性解析，生成定宽标签时失配，以 WARN_AS_ERROR 判红。
+///       改成「取 `x`」的措辞即可绕过，语义不变。
 [[nodiscard]] inline auto compute_vertical_view_size(const AccessibilityScrollRange &range) -> double {
     if (range.content <= 0.0 || range.viewport <= 0.0) {
         return 100.0;  // 无内容 / 无视口 ⇒ 全部可见

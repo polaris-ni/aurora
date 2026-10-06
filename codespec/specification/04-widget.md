@@ -548,7 +548,7 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 |:---|:---|:---|:---|
 | 绘制盒 | `paint_bounds()`（`focus_bounds_` / `dirty_bounds()` 同源） | **随祖先缓冲录制方式而变**：`Scroll` 内容后代为**缓冲坐标**（原点含 `-buffer_origin_y_`）；其它离屏合成控件（`Popup` 按 `anchor_`、非恒等 matrix）同理 | 绘制期写入，**有缓存缺口**（DL 缓存命中的帧上 `Widget::paint` 提前返回而不刷新） |
 | 窗口盒 | `window_bounds() -> std::optional<Rect>` | **恒为窗口逻辑 dp**，与 `MouseEvent::position` 同空间 | 查询时沿 `layout_parent()` 现算，**不依赖是否绘制过** |
-| 命中链 origin | `HitNode::origin`（`hit_test_chain` 返回） | 派发期逐层下传的累计原点，**含 Modifier 内容平移** | 派发期 |
+| 命中链 origin | `HitNode::origin`（`hit_test_chain` 返回） | 派发期逐层下传的累计原点，**含 Modifier 内容平移**；滚动容器内已扣 `offset_y_`，与窗口盒同空间（见 [`05-event-navigation.md`](05-event-navigation.md) §3.2.3） | 派发期 |
 
 **`paint_bounds()` 的注释已随实修改口**：它不再声称「绝对（窗口逻辑 dp）盒」，改为「最近一次 paint **实际收到**的盒」，并在公共头（`widget.h`）写明离屏缓冲内后代为缓冲坐标这一限制、指向 `window_bounds()` 作为窗口绝对盒的入口。
 
