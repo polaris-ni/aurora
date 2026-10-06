@@ -29,10 +29,17 @@ freeze: minor-versions-are-additive
 ### Added
 - `Node::use_count() -> long`（`widget/node.h`，inline 只读访问器）：共享该控件的 `shared_ptr` 引用数，供父侧判「本容器是否唯一持有者」。与 `widget.cpp` 中 a11y 结构事件的唯一所有权判定同口径。空节点返回 0。诊断用途，本身不改变任何生命周期行为。
 - `Widget::child_owned_ref_count() -> long`（`widget/widget.h`，**protected virtual**，缺省返回 `1`）：本容器对任一直接子节点持有的份数，供 `detach_all_children_layout_parent` 判唯一所有权。基类缺省适用于 `child_nodes_mut()` 即真实存储的容器（`Container` 的 `children_`，每子一份）；**持有子节点视图缓存副本的容器须覆写**（`SingleChild` 要算上 `child_view_mut_` 与 `child_view_`），否则正常销毁会被误判为「有外部持有者」而继续刷 WARN。新增容器若 `child_nodes_mut()` 返回的不是真实存储，同样须覆写。
+- `Widget::unmount() -> void`（`widget/widget.h` / `widget.cpp`，public）：卸载的镜像入口——置 `mounted_ = false`、清空 `effects_`（真正退订）、复位手势 tick 位，并以**挂载期记录的那份 ctx** 派发新增的 `on_unmount`。未挂载即调用是幂等空操作，重复调用同样幂等。
+- `virtual auto on_unmount(const BuildContext &ctx) -> void`（`widget/widget.h`，**protected**，缺省空实现）：与既有 `on_mount` 对称的控件级卸载钩子。`ctx` 是**当初挂载的那一份**（不是发起卸载的那份），故重挂场景下读到的仍是旧宿主环境。本仓已逐处对称覆写：`Container` / `SingleChild` / `TabBar` / `Provider` / `Splitter` / `Drawer` / `TransitionLayer` / `NavigatorHost` 递归各自持有的子树，`Timer` 取消挂载期注册的 interval 句柄，`LayoutBuilder` / `BreakpointBuilder` 释放挂载期建的 builder effect，`Dropdown` 清缓存的 `env` 指针。**注意**：`Lifecycle` 的 `on_unmount` 是**析构回调**，与本控件级钩子各自独立，契约不变。
+- `BuildContext::host_id`（`environment/build_context.h`，`std::uint64_t`，缺省 `0`）：宿主身份，`Widget::mount` 判定「是否同一宿主」的唯一依据，**只比较不解引用**。由 `Window` 构造期取进程内唯一值（`detail::next_host_id`）并在 `prepare_context` 写入，沿 `Provider` 子环境 / 转场层 / 容器逐层透传不变。`0` 表示未声明宿主（无头渲染、裸 ctx），不作为换宿主的证据。
+- `Widget::note_pending_mount()` / `virtual Widget::flush_pending_mounts(ctx)`（`widget/widget.h`，前者 **protected** inline、后者 **protected virtual** 缺省空实现）：运行期追加子树的补挂共享件。追加入口只置位，真正的 `mount(ctx)` 由 `Widget::layout` 入口在 `show` 与布局缓存判定**之前**消费，时机与 `LayoutBuilder` / `LazyList` 既有语义同源。
 
 ### Changed
 - **`detach_child_layout_parent` 的断链告警改为分档，只在异常时可见**（`widget/widget.cpp`）。此前 `~Container` / `~SingleChild` 析构体首行的 `detach_all_children_layout_parent()` 对**每一个**子节点无条件发 `AURORA_LOG_WARN`，而那一刻子控件仍被容器持有、尚未析构——即每一次正常的树销毁都逐子刷屏（实测「反复重建 widget 子树」的集成套件单套件可刷数千行），把一次真断链埋进噪声。现按「被摘子节点是否在容器之外仍被持有」分档：随容器正常销毁 ⇒ 静默清指针（该清的照旧清，只是不再当成异常）；活在容器之外被摘走 ⇒ 仍发 `WARN`。指针清理行为与告警文案语义均未变，仅告警**出现次数**收敛。判别式见 `04-widget.md` §2.3。
 - 断链告警文案改用该仓日志宏的可变参数拼接形态：`AURORA_LOG_WARN("widget", "…still alive: ", child->type_name(), "; dirty marks…")`。此前写成 printf 风格的 `%s` 占位符，但 `AURORA_LOG_*` 经 `detail::log_concat`（`operator<<` 折叠）拼接、**不是** printf，`%s` 原样输出且类型名被附在整句末尾。现在类型名作为独立参数进入消息正文。诊断文案保持 ASCII。
+- **运行期追加的子树现在会被补挂**（`widget/widget.h` / `widget.cpp`）。此前 `Container::on_mount` 只在容器自身被挂载时遍历一遍子节点，而 `OverlayHost::add_overlay`、`TabBar::add_tab`、`Container::add` / `set_children` / `adopt_children` 只做「push + 标脏」，不带任何 `mount`；`Window::present_root` 的条件是 `!root_mounted_ || root_changed`，根不变即永不重挂整树。于是「根长期存活 + 运行期加子树」这一常见形态（浮层、Toast、动态 tab、动态面板）里，新子树从未进入挂载序列：覆写了 `on_mount` 的控件主题不跟、闪烁 / 定时档不启动、外部信号订阅不注册，且**全程无日志**——症状与「代码没写」完全同形。现由父侧在下一次布局以自己持有的 ctx 补挂，调用方无须自备 `BuildContext` 或自行 `mount`。`TabBar` 补挂覆盖**全部**标签内容（未选中的动态 tab 同样是挂载的）。
+- **`Widget::mount` 的幂等判据由「只看是否已挂载」改为「已挂载且同宿主」**（`widget.cpp`）。已挂载且 `ctx.host_id` 相同 ⇒ 跳过（转场切换复用同一 widget 实例这一既有保护原样保留）；已挂载但两侧 `host_id` 均非 0 且不同 ⇒ 先 `unmount()` 再挂载，否则新 ctx 永远拿不到而旧订阅一直活着。**不比较 `env` 指针**——`NavigatorHost::rebuild_display` 每次换页都用新建的 `Provider` 重新包裹页面，`Provider::on_mount` 拿自己的 `child_env_` 挂子树，环境地址每轮都变，比指针会把「转场复用同一页实例」误判成换宿主；**也不比较 `scale_factor` / 主题等值**——值相等不等于同一宿主。`present_root` 的 `root_changed` 条件与既有对外幂等效果均未变。
+- **容器在移除子项时不再（也不得）代调 `unmount`**（`widget.h` / `popup.h` / `tab_bar.h`）。`remove_overlay` / `remove_child` / `set_children` / `adopt_children` 的行为逐位不变：摘除时刻容器无从判断这只子件是否「活在容器之外仍被持有」（`SingleChild::child_nodes_mut()` 返回 `child_view_mut_` 即 `child_` 的拷贝副本；实测无外部持有时 `Container` 报 `use_count() == 1`、`SingleChild` 报 2），任何按引用计数自动退订的写法都会误伤仍存活的子树。卸载只由持有者显式发起，或由换宿主重挂路径内部发起。
 
 ### Migration
 - `OverlayHost::add_overlay` 调用点：把「拿到序号就存下来稍后 `remove_overlay`」的写法改成先判 `has_value()`。典型迁移形态：
@@ -50,6 +57,18 @@ freeze: minor-versions-are-additive
 - `AccessibilityScrollRange` 调用点：已用指定初始化器（`{.min=…, .max=…, .position=…}`）的零改动；仅「位置式聚合初始化」 `AccessibilityScrollRange{a,b,c}` 须补两参 `AccessibilityScrollRange{a,b,c,0.0,0.0}`（或改用指定初始化器）。取 `VerticalViewSize` 改走 `compute_vertical_view_size(range)`，不要再自行写 `max/(max+1)`。
 - 新增持有子节点的容器：若其 `child_nodes_mut()` 返回的不是真实存储（而是某种缓存 / 视图副本），**必须覆写 `child_owned_ref_count()`** 报出自身实际持有份数，否则该容器的正常销毁会被误判为异常、逐子发 `WARN`（不崩、不影响功能，但会刷屏）。`child_nodes_mut()` 直接返回真实存储的容器（典型如 `Container` 子类沿用基类实现）无需任何改动。
 - 既有 `detach_child_layout_parent` 调用方（含 `Container::remove_child`）**零改动**：真摘除路径的告警行为完全不变。
+- `add_overlay` / `add_tab` / `Container::add` 之后**不得再手工 `mount`**（现在这么写的消费方应撤除）：子树已由父侧在下一次布局自动补挂，消费方再 `mount` 一次虽被幂等判据挡下（不会重复订阅），但它依赖调用方自备 `BuildContext`——这正是本次要消除的那份生命周期责任。典型迁移形态：
+  ```cpp
+  // 旧：调用方被迫自己准备 ctx，父侧补挂后又重复一遍
+  BuildContext ctx;  // env 为 nullptr，控件读不到主题
+  host->add_overlay(node);
+  node.widget().mount(ctx);
+  // 新：只追加，父侧在下次布局用自己持有的 ctx 挂载
+  host->add_overlay(node);
+  ```
+- 摘下并持有控件的调用方：若希望被摘下的子树**退掉旧宿主的订阅**，改为显式调 `widget.unmount()`（无参，用挂载期记录的 ctx）。不调是合法的——子树保持挂载态，只是它仍持着旧宿主派生的订阅。
+- 覆写了 `on_mount` 且在挂载期启动了资源的控件：把对应的清理搬进新增的 `on_unmount(ctx)` 覆写（该 `ctx` 是挂载时那一份），否则换宿主重挂时资源不会被释放。
+- 自建 `BuildContext` 的调用方（无头渲染 / 工具 / 测试）：无需改动，缺省 `host_id = 0` 即「未声明宿主」，行为与改动前一致。只有确实要把同一棵树在两个宿主之间搬移、且需要触发重挂时，才需要给两份 ctx 分别设不同的非 0 `host_id`。
 
 ### Added
 - **追加命中盒的几何读数改走权威通道**（续上条，消除翻转判据对绘制期缓存的依赖）。

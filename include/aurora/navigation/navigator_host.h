@@ -232,6 +232,20 @@ class NavigatorHost : public Widget {
         rebuild_display();
     }
 
+    /// @brief 卸载当前展示页（与 `on_mount` 对称）。
+    ///
+    /// 先落 `host_mounted_ = false`：它同时是「宿主已挂载」的判位与 `rebuild_display` 里「新页要不要补挂」
+    /// 的闸，卸载后若还有换页发生，新页不得再挂到这份已失效的 `host_ctx_` 上。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        host_mounted_ = false;
+        host_ctx_ = BuildContext{};
+        if (display_) {
+            display_.widget().unmount();
+        }
+    }
+
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);
         if (display_) {

@@ -54,7 +54,7 @@ struct ScrollProps {
 /// - 非滚动帧（如自动轮播 banner 标脏）重录同一块有界缓冲（已从上百 MB 降到约 3 屏量级）。
 /// 这避免了旧实现把偏移烤进 bounds + 绘制时压裁剪，导致每帧重栅整页内容而卡顿的问题。
 ///
-/// @section geom 几何与命中契约
+/// @section scroll_geom 几何与命中契约
 ///
 /// **内容子节点的 `bounds` 是内容坐标**（原点 = 内容左上角，不含滚动偏移），与
 /// `on_paint` 录制进离屏缓冲时传入的盒（`origin.y = -buffer_origin_y_`）同一坐标系。

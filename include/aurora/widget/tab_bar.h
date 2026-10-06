@@ -189,9 +189,13 @@ class TabBar : public Widget {
     }
 
     /// @brief 追加标签。
+    ///
+    /// 挂载时机：新标签内容由本控件的补挂机制在**下一次布局**时以父侧 ctx 挂上，调用方**无须**
+    /// 自备 `BuildContext` 或自行 `mount`。
     /// @param tab 新标签（文本/内容/可关闭），移入列表尾部并标记重排
     auto add_tab(Tab tab) -> void {
         tabs_.push_back(std::move(tab));
+        note_pending_mount();
         mark_needs_layout();
     }
 
@@ -524,7 +528,23 @@ class TabBar : public Widget {
         return {};
     }
 
-    auto on_mount(const BuildContext &ctx) -> void override {
+    auto on_mount(const BuildContext &ctx) -> void override { flush_pending_mounts(ctx); }
+
+    /// @brief 递归卸载各标签内容（与 `on_mount` 逐字对称）。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;  // 各标签内容各自回传自己挂载时记录的那份
+        for (auto &t : tabs_) {
+            if (t.content) {
+                t.content.widget().unmount();
+            }
+        }
+    }
+
+    /// @brief 逐个挂载标签内容：控件整体挂载与「运行期追加标签后的补挂」是同一个动作，只是时机不同。
+    /// @param ctx 挂载 / 本次布局的构建上下文。
+    auto flush_pending_mounts(const BuildContext &ctx) -> void override {
+        pending_mount_flush_ = false;
         for (auto &t : tabs_) {
             if (t.content) {
                 t.content.widget().mount(ctx);

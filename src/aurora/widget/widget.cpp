@@ -288,6 +288,13 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
         ~LayoutParentScope() { t_layout_parent = saved; }
     } parent_scope{this};
 
+    // 运行期追加子树的补挂：与 LayoutBuilder / LazyList 同一条时机——父侧在此持有本帧的 ctx，
+    // 新增子树即时挂载。放在 show 判定与布局缓存判定**之前**：补挂是生命周期动作，不该被「当前不可见」
+    // 或「本帧无需重排」跳过（否则子树要等到下一次无关失效才挂上，表现为浮层不跟主题）。
+    if (pending_mount_flush_) {
+        flush_pending_mounts(ctx);
+    }
+
     if (!show.get()) {
         size_ = Size{.width = 0.0F, .height = 0.0F};
         return size_;
@@ -913,9 +920,18 @@ auto Widget::covers_descendant_extra_hit_box(const Point &local, const BuildCont
 
 auto Widget::mount(const BuildContext &ctx) -> void {
     if (mounted_) {
-        return;  // 幂等：已挂载则跳过，避免转场切换复用同一 widget 实例时重复订阅信号
+        // 同宿主重复挂载：跳过（转场切换复用同一 widget 实例这一既有保护不得移除）。
+        // 判据是「两侧都声明了宿主且不同」才换宿主：host_id 为 0 表示未声明（无头渲染 / 裸 ctx），
+        // 拿它去和窗口宿主比会把无头渲染误当成换宿主，白白重挂一遍。
+        const bool same_host = (ctx.host_id == 0U) || (mount_ctx_.host_id == 0U) || (mount_ctx_.host_id == ctx.host_id);
+        if (same_host) {
+            return;
+        }
+        // 换宿主重挂：先干净卸载（释放旧宿主派生的订阅与定时档），否则旧订阅一直活着、新 ctx 又拿不到。
+        unmount();
     }
     mounted_ = true;
+    mount_ctx_ = ctx;
     std::vector<SignalViewBase *> sigs;
     collect_signals(sigs);
     sigs.push_back(&modifier);
@@ -933,6 +949,18 @@ auto Widget::mount(const BuildContext &ctx) -> void {
     }
 
     on_mount(ctx);
+}
+
+auto Widget::unmount() -> void {
+    if (!mounted_) {
+        return;  // 幂等：未挂载即调用是空操作，不留半个退订状态
+    }
+    mounted_ = false;
+    // 先派发再清订阅：子类在 on_unmount 里仍可安全读自己的状态；effects_ 的销毁（退订）发生在其后。
+    on_unmount(mount_ctx_);
+    effects_.clear();
+    needs_gesture_tick_ = false;
+    mount_ctx_ = BuildContext{};
 }
 
 auto Widget::request_focus() -> void {

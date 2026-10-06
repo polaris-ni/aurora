@@ -101,7 +101,8 @@ auto info = au::Button::describe_static();
 | `on_layout(const Constraints&, const BuildContext&) -> Size` | 纯虚 | `widget.h` |
 | `on_paint(Painter&, const Rect& bounds, const BuildContext&) -> void` | 纯虚 | `widget.h` |
 | `on_hit_test(const Point& local, const Rect& bounds, const BuildContext&) -> Widget*` | 默认返回 `nullptr`（叶控件无子可下探）；后代命中由 `on_hit_test_chain` 递归提供，容器覆写 | `widget.h` |
-| `on_mount(const BuildContext&) -> void` | 挂载后恰好一次 | `widget.h` |
+| `on_mount(const BuildContext&) -> void` | 挂载后恰好一次。`Widget::mount` 递归下发，见 §2.3.1 | `widget.h` |
+| `on_unmount(const BuildContext&) -> void` | 卸载时恰好一次，与 `on_mount` 对称（protected，缺省空实现）。拿到的 `ctx` 是**当初挂载的那一份**，不是发起卸载的那份 | `widget.h` |
 | `tick(time_point) -> void` | 框架容器基类可覆写的公开入口（见下） | `widget.h` |
 | `tick_gestures(time_point) -> void` | 手势推进 | `widget.h` |
 | `on_scroll(ScrollEvent&) -> void` | 滚轮入口：默认按 `overflow_` 的内建滑窗夹取滚动并写 `remaining_y` 余量；真实滚动控件覆写（路由见 `05-event-navigation.md` §3.3） | `widget.h` |
@@ -133,6 +134,27 @@ auto info = au::Button::describe_static();
 **新增容器的义务**：持有子节点的类须在析构体首行调 `detach_all_children_layout_parent()`。该函数虚分派 `child_nodes_mut()`，故**不能**放在 `~Widget` 基类里——那时派生部分已析构，会分派到基类空实现、静默漏清。另须注意 `SingleChild::child_nodes()` 返回的是**缓存副本**（`child_view_`），对它取可写引用会把清父链的副作用落在副本上，故 `SingleChild` 单独覆写 `child_nodes_mut()` 返回与 `child_` 同步的可写表。
 
 **验收**：`utest_layout_parent_chain` 共 8 条——①（原有三条）拷贝 / 进 `vector` 后丢弃 / `std::move` 后旧对象析构后，父链仍在且 `mark_needs_layout()` 仍抵达根侧汇聚回调；② `remove_child` 后 `layout_parent()` 为空、此后标脏不崩不悬垂；③ 父容器析构后仍存活的子控件 `layout_parent()` 为空；④（告警分档）`Column` 与 `SingleChild` 各自「随容器正常销毁」时日志里**没有** detach 告警；⑤「子件被外部持有后 `remove_child`」与「被外部持有后 `adopt_children` 换子」两次**都有**告警（两条判据分别守 `detach_child_layout_parent` 直调与 `detach_all` 两条独立路径，互不遮蔽）；⑥ 告警正文含被摘控件类型名且不再残留 `%s`。判据用「`on_dirty` 命中而根侧 `on_subtree_dirty` 不命中」区分「控件知道自己脏了」与「脏抵达了根」——只钉前者等于没钉病灶。变异自证：只在应用侧「顺手多标一层祖先脏」而不清断链 ⇒ ①②转红（补标是掩盖，不是修复）；去掉 `use_count` 判别改无条件告警 ⇒ ④的两条转红；连真摘除也静默（抑制扩大过头）⇒ ⑤的 `adopt_children` 那条转红；级别降成 `DEBUG` ⇒ ④⑤仍全绿（判据按消息内容判定，不按级别，降级藏不住分档）；保留 `%s` ⇒ ⑥的占位符断言转红。
+
+### 2.3.1 挂载与卸载的对称契约
+
+`Widget::mount(ctx)` 负责注册响应式依赖（经 `track` 把 `collect_signals` 收来的信号连同 `modifier` / `show` 挂进 `effects_`）并递归下发子树，`Widget::unmount()` 是它的镜像：置 `mounted_ = false`、清空 `effects_`（真正退订）、复位手势 tick 位，并派发 `on_unmount(ctx)`。
+
+**同一性判据是宿主身份，不是「是否已挂载」这一个布尔。** `BuildContext::host_id`（`std::uint64_t`，`build_context.h`）由 `Window` 构造期取进程内唯一值（`detail::next_host_id`）、在 `prepare_context` 每帧写入，并沿 `Provider` 子环境、转场层、容器逐层透传**不变**。判别式：
+
+| 挂载前状态 | 传入 ctx | 行为 |
+|:---|:---|:---|
+| 未挂载 | 任意 | 正常挂载（订阅 + `on_mount`） |
+| 已挂载 | `host_id` 相同 | **跳过**（转场复用同一实例这一既有保护，不得移除） |
+| 已挂载 | `host_id` 不同（两侧均非 0） | 先 `unmount()` 再挂载——否则新 ctx 永远拿不到，旧订阅一直活着 |
+| 已挂载 | 任一侧 `host_id == 0` | 跳过（0 = 未声明宿主，不作为换宿主的证据） |
+
+**为什么不用 `ctx.env` 指针**：`NavigatorHost::rebuild_display` 每次换页都用**新建的** `Provider` 重新包裹页面，而 `Provider::on_mount` 是拿自己的 `child_env_` 挂子树的 ⇒ 环境地址每轮都变，比指针会把「转场复用同一页实例」误判成换宿主，`on_mount` 反复重触发。**为什么不用值相等**（`scale_factor` / 主题）：值相等不等于同一宿主，两窗口完全可以同 DPI 同主题。`0` 这一档还兼带守住无头渲染：`render_to_png` / `render_to_logical_snapshot` 走 `constexpr BuildContext{}`，若把它们当成换宿主，一次无头截图就会把窗口里已挂载的树重挂一遍。
+
+**运行期追加的子树由父侧补挂，时机是下一次布局。** `Container::add` / `set_children` / `adopt_children`、`OverlayHost::add_overlay`、`TabBar::add_tab` 只调 `note_pending_mount()` 置位；真正的 `mount(ctx)` 由 `Widget::layout` 入口（**在 `show` 判定与布局缓存判定之前**）调 `flush_pending_mounts(ctx)` 完成。这与 `LayoutBuilder` / `LazyList` / `GridView` 既有的「父侧持有 `on_layout` 的那份 ctx，新增子树即时挂载」是同一条时机，调用方**不自带 `BuildContext`、也不自行 `mount`**——生命周期责任不外推给应用侧。补挂放在缓存判定之前是必需的：否则「当前不可见」或「本帧无需重排」会让子树一直挂不上，表现为浮层不跟主题。`TabBar` 的补挂覆盖**全部**标签内容而非仅选中项，故未选中的动态 tab 同样是挂载的。
+
+**卸载只由持有者显式发起，或由换宿主重挂路径内部发起；容器不得在移除子项时代调 `unmount`。** 摘除时刻容器无从判断这只子件是否「活在容器之外仍被持有」（`SingleChild::child_nodes_mut()` 返回 `child_view_mut_` 即 `child_` 的拷贝副本；实测无外部持有时 `Container` 报 `use_count() == 1`、`SingleChild` 报 2），任何按引用计数自动退订的写法都会误伤仍存活的子树。`on_unmount` 与既有 `on_mount` **逐处对称**：`Container` / `SingleChild` / `TabBar` / `Provider` / `Splitter` / `Drawer` / `TransitionLayer` / `NavigatorHost` 递归各自持有的子树；`Timer` 取消挂载期注册的 interval 句柄（否则摘下的 Timer 留在 `Scheduler` 任务表里继续触发，闭包持 `this`）；`LayoutBuilder` / `BreakpointBuilder` 释放挂载期建的 builder effect；`Dropdown` 清缓存的 `env` 指针。`Lifecycle` 的 `on_unmount` 回调是**析构回调**，与控件级钩子各自独立，契约不变。
+
+**验收**：`utest_overlay_host`（判据 1 与负向判据）、`utest_tab_bar`（判据 2）、`itest_widget_lifetime`（判据 3/4/6）共 8 条。变异自证：去掉 `add_overlay` / `add_tab` 的补挂登记 ⇒ 判据 1/2 转红；保留补挂但去掉重挂前的 `unmount` ⇒ 判据 3 的「净订阅数不增长」转红（订阅条数是唯一可判量——`mount` 的幂等保护**本来就**让重复挂载不重复订阅，只看挂载次数区分不出「旧宿主已退订」与「只是没重复挂」）；把同一性判据改成值相等 ⇒ 判据 3 在两宿主 `scale` 相同的构造下转红（用例刻意让两宿主除 `host_id` 外逐位相同）；让 `remove_overlay` 代调 `unmount` ⇒ 负向判据转红。
 
 ### 2.4 脏标记与缓存
 

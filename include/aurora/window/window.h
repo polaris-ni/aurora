@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -338,6 +339,21 @@ auto enable_dpi_awareness() -> void;
 /// 其次 MacOS/Wasm/Win32/Glfw，最后 Headless 兜底（与 window_factory.cpp 同序）。
 /// @return 当前构建内最佳可用后端的 `SurfaceKind` 标签。
 [[nodiscard]] auto auto_detect_surface() -> SurfaceKind;
+
+namespace detail {
+
+/// @brief 宿主身份自增源：每个 `Window` 构造期取一个唯一值，写入 `BuildContext::host_id`。
+///
+/// 控件的挂载幂等判据（`Widget::mount`）据此区分「同宿主重复挂载」与「换宿主重挂」。取进程级自增序号
+/// 而非 `this` 指针：地址会在窗口销毁后被复用，届时新窗口会被误判成同一宿主。0 保留为「未声明宿主」
+/// （无头渲染 / 单元测试的裸 `BuildContext`）。
+/// @return 本窗口的宿主身份（恒 ≥ 1，单调递增，进程内不重复）。
+inline auto next_host_id() -> std::uint64_t {
+    static std::atomic<std::uint64_t> counter{0};
+    return counter.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+}  // namespace detail
 
 /// @brief 窗口：组合一个 `Surface` 后端（Headless/Glfw/Win32），提供 pumps 事件、
 /// present 根 widget、尺寸/标题管理与帧循环（ARCHITECTURE.md §8.4 后端家族）。
@@ -800,6 +816,11 @@ class Window {
   private:
     std::unique_ptr<Surface> surface_;  ///< 组合的后端（不可知）
     std::string title_{"Aurora"};
+    /// @brief 本窗口的宿主身份（见 `detail::next_host_id`），每帧随 `prepare_context` 写入
+    ///        `BuildContext::host_id`；控件的挂载幂等判据据此区分同宿主重复挂载与换宿主重挂。
+    ///        唯一性由 `next_host_id` 的进程级自增保证，成员本身不必是 `const`（const 成员会触发
+    ///        `cppcoreguidelines-avoid-const-or-ref-data-members`，且与 `Window` 的可移动语义无益）。
+    std::uint64_t host_id_ = detail::next_host_id();
     Environment
         root_env_;  ///< 每帧原地更新注入值（对象本身不重建）的根 MediaQuery 注入环境（地址恒定）；present_root 注入。
     WindowState window_state_ = WindowState::Visible;  ///< 当前窗口可见性快照（由 Application 设置）。
@@ -1030,6 +1051,7 @@ class Window {
         root_env_.set<WindowChrome>(WindowChrome{&*surface_});
         BuildContext ctx;
         ctx.env = &root_env_;
+        ctx.host_id = host_id_;  // 宿主身份：控件据此判「是否同一宿主」（见 BuildContext::host_id）
         ctx.scale_factor = surface_->scale_factor();
         ctx.size = size();
         // 首次（或根变化后的新树）自动挂载：接线响应式订阅，使 State/修饰变更能标脏重绘。

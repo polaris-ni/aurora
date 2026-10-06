@@ -162,6 +162,20 @@ class TransitionLayer : public Widget {
         }
     }
 
+    /// @brief 递归卸载旧页与新页（与 `on_mount` 逐字对称）。
+    ///
+    /// 转场中两页同处一棵树、分别挂载，故任一页被换宿主重挂时另一页不受影响。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        if (old_) {
+            old_.widget().unmount();
+        }
+        if (new_) {
+            new_.widget().unmount();
+        }
+    }
+
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);  // 本节点修饰链（LongPress 等）
         if (old_) {

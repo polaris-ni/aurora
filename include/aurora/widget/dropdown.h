@@ -266,6 +266,16 @@ class Dropdown : public Widget {
     /// @param ctx 构建上下文：取其环境链地址（`root_env_`，窗口生命周期内恒定）。
     auto on_mount(const BuildContext &ctx) -> void override { env_ = ctx.env; }
 
+    /// @brief 清空缓存的环境链地址（与 `on_mount` 对称）。
+    ///
+    /// `env_` 指向宿主的环境链，被摘下后宿主可能先销毁 ⇒ 留着就是悬垂指针。下次布局的兜底写入
+    /// （`on_layout` / `on_paint`）会重新填上，故清空不影响任何读取路径。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        env_ = nullptr;
+    }
+
     /// @brief 声明本控件参与点击分发。
     /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }

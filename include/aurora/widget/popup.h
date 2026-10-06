@@ -318,10 +318,14 @@ class OverlayHost : public Container {
     /// 宿主尚无基础内容时（`children_` 为空）新节点落在序号 0，而 0 恒被解释为**基础内容**、
     /// `remove_overlay` 拒收 ⇒ 返回 0 会让调用方持有一个永远删不掉的序号。此处以 `std::nullopt`
     /// 显式表达「本次追加未产生可移除浮层」，与 `remove_overlay` 的口径保持一致。
+    ///
+    /// 挂载时机：新浮层由 `Container` 的补挂机制在**本宿主下一次布局**时以父侧 ctx 挂上
+    /// （`Widget::layout` 入口消费登记），调用方**无须**自备 `BuildContext` 或自行 `mount`。
     /// @param overlay 浮层节点（如 Popup）。
     /// @return 新浮层的序号（≥ 1）；宿主尚无基础内容时为 `std::nullopt`。
     [[nodiscard]] auto add_overlay(Node overlay) -> std::optional<std::size_t> {
         children_.push_back(std::move(overlay));
+        note_pending_mount();
         mark_needs_layout();
         const std::size_t index = children_.size() - 1;
         return index == 0 ? std::nullopt : std::optional<std::size_t>{index};

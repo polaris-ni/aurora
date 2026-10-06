@@ -389,6 +389,18 @@ class Splitter : public Widget {
         }
     }
 
+    /// @brief 递归卸载两片（与 `on_mount` 逐字对称）。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        if (first_) {
+            first_.widget().unmount();
+        }
+        if (second_) {
+            second_.widget().unmount();
+        }
+    }
+
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);
         if (first_) {

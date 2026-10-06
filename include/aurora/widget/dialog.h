@@ -17,7 +17,7 @@ namespace aurora {
 /// 模态覆盖层：显示/隐藏由 `open_` 控制，关闭时不渲染。
 /// 内容居中显示在半透明遮罩之上。
 ///
-/// @section geom 几何与命中契约
+/// @section dialog_geom 几何与命中契约
 ///
 /// 几何权威唯一落在 `Node::bounds_`：`on_layout` 度量内容后把**居中后的内容盒**写入
 /// `children_[0]`，`on_paint` 直接读该盒落笔（遮罩仍按自身 bounds 铺满）。命中链与绘制

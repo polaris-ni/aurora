@@ -147,6 +147,18 @@ class BreakpointBuilder : public Widget {
         builder.subscribe(*builder_effect_);
     }
 
+    /// @brief 释放挂载期建的 builder 订阅并卸载当前子节点（与 `on_mount` 对称）。
+    ///
+    /// 子节点由 `on_layout` 在断点重算后挂载（父侧 ctx），不经 `on_mount`，故这里显式回收。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        builder_effect_.reset();  // Effect 析构即退订
+        if (child_) {
+            child_.widget().unmount();
+        }
+    }
+
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         // 档位宽度来源：MediaQuery 注入优先（真窗口/子树宽度），退化取父约束最大宽（无限视 0）。
         const MediaQuery *mq = media_query_of(ctx);

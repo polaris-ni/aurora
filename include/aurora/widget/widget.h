@@ -22,6 +22,7 @@
 #include "aurora/core/types.h"
 #include "aurora/debug/debug_paint.h"
 #include "aurora/debug/debug_trace.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/event/event.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/render/display_list.h"
@@ -281,8 +282,27 @@ class Widget : public std::enable_shared_from_this<Widget> {
         -> bool;
 
     /// @brief 挂载：注册响应式依赖并递归挂载子树（由 build 后一次性调用）。
-    /// @param ctx 构建上下文，透传给 `on_mount` 供子类读取主题 / 环境。
+    ///
+    /// 幂等判据是**宿主身份**（`ctx.host_id`），不是「是否已挂载」这一个布尔：
+    /// - 已挂载且同宿主 ⇒ 跳过。转场切换复用同一 widget 实例、同一 ctx 重复 `mount` 都走这条，
+    ///   既有「只订阅一次」的保护原样保留。
+    /// - 已挂载但换宿主 ⇒ 先 `unmount()`（释放旧宿主派生的订阅）再挂载，否则新 ctx 永远拿不到，
+    ///   而旧订阅会一直活着。
+    ///
+    /// 判同一性刻意不用 `env` 指针或 `scale_factor` / 主题等值：中途换 `Provider` 只是换了环境链上的
+    /// 一层覆盖（`NavigatorHost` 每次换页都新建包裹 `Provider`），不是换宿主；值相等更不等于同一宿主。
+    ///
+    /// @param ctx 构建上下文，透传给 `on_mount` 供子类读取主题 / 环境；其 `host_id` 同时被记为本控件的挂载宿主。
     auto mount(const BuildContext &ctx) -> void;
+
+    /// @brief 卸载：释放本控件的响应式订阅与手势 tick 位，并递归通知子树（与 `mount` 对称）。
+    ///
+    /// 由**持有者显式**发起，或由 `mount` 的换宿主重挂路径内部发起；容器**不会**在移除子项时代调
+    /// ——摘除时刻容器无从判断这只子件是否「活在容器之外仍被持有」，按引用计数自动退订会误伤仍存活的子树。
+    ///
+    /// 未挂载即调用是幂等空操作：既不崩溃，也不留下「已清订阅却仍标着已挂载」的半个状态。
+    /// 重复调用同样幂等（第二次直接返回）。
+    auto unmount() -> void;
 
     /// @brief 收集本 widget 的响应式信号（供基类注册依赖）；子类覆写 push 自身信号。
     /// 默认实现为空：无信号叶控件无需再写空 override（子节点在自身 mount 时自行订阅）。
@@ -1232,6 +1252,31 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @param ctx 挂载上下文；基类默认实现不消费（覆写者用它的 environment / 层级信息）。
     virtual auto on_mount(const BuildContext &ctx) -> void { (void)ctx; }
 
+    /// @brief 子类可覆写：卸载时额外逻辑，与 `on_mount` 对称（默认无动作）。
+    ///
+    /// 拿到的 `ctx` 是**当初挂载的那一份**（基类按挂载期记录回传），因此重挂场景下这里读到的仍是旧
+    /// 宿主的环境，而不是新宿主的。释放挂载期启动的资源（定时器句柄、额外订阅、缓存的环境指针）写在此处。
+    /// 需要递归子树卸载的容器（`Container` / `SingleChild` / `TabBar` 等）各自覆写，与它们覆写
+    /// `on_mount` 的位置一一对应。
+    ///
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    virtual auto on_unmount(const BuildContext &ctx) -> void { (void)ctx; }
+
+    /// @brief 登记「本控件在运行期追加了子树，待补挂」——由持有子项的控件在追加后调用。
+    ///
+    /// 补挂本身**不在这里**发生：追加那一刻父侧未必拿得到 `BuildContext`（这正是 `add_overlay` /
+    /// `add_tab` 过去漏挂的原因）。这里只置位，真正的 `mount(ctx)` 由 `Widget::layout` 入口在下次布局时
+    /// 调 `flush_pending_mounts` 完成——与 `LayoutBuilder` / `LazyList` 「父侧持有 `on_layout` 的那份 ctx，
+    /// 新增子树即时挂载」的既有时机同一条。
+    auto note_pending_mount() -> void { pending_mount_flush_ = true; }
+
+    /// @brief 消费待补挂子树：以本次布局的 ctx 把新增子树挂上（`Widget::layout` 入口调用）。
+    ///
+    /// 缺省无动作——只有真正持有多份子项并在运行期追加的控件才覆写（`Container` / `TabBar`）。覆写体
+    /// 应遍历自己持有的子项逐个 `mount(ctx)`：已挂载且同宿主的子项由 `mount` 自身的幂等判据跳过。
+    /// @param ctx 本次布局的构建上下文。
+    virtual auto flush_pending_mounts(const BuildContext &ctx) -> void { (void)ctx; }
+
     /// @brief 驱动手势计时（长按阈值检测 + Tooltip 延迟检测）。默认处理本 widget 修饰链中的 LongPress/Tooltip；
     /// 容器类覆写以递归子树。由公开入口 `tick` 委派调用。
     /// @param now 本帧的单调时钟时刻，用于长按阈值与 Tooltip 延迟的计时基准。
@@ -1295,7 +1340,14 @@ class Widget : public std::enable_shared_from_this<Widget> {
     Size cached_size_{};  ///< 上一次成功布局得到的尺寸
     Widget *layout_parent_ = nullptr;  ///< 布局父节点（容器在布局入口设置）
     bool is_relayout_boundary_ = false;  ///< 显式重排边界声明（见 is_relayout_boundary）
-    bool mounted_ = false;  ///< 是否已挂载（mount 幂等保护，避免转场切换复用同一 widget 实例时重复订阅信号）
+    bool mounted_ = false;  ///< 是否已挂载（`mount` 幂等的第一道判；换宿主重挂由 `mount_ctx_` 的宿主身份区分）
+    /// @brief 挂载期记录的上下文：既是 `unmount()` 回传给 `on_unmount` 的那一份，也承载宿主身份。
+    ///
+    /// 只在 `mount` 成功时写入。⚠️ 其中 `env` 指向当时的注入环境：正常路径下宿主先于控件存活，
+    /// 但若宿主已销毁而控件仍被外部持有，此时再 `unmount()`，`on_unmount` 里读 `env` 是悬垂访问
+    /// ——故 `on_unmount` 的实现只应读「与宿主存活解耦」的状态（自己的定时器句柄、订阅、缓存指针）。
+    BuildContext mount_ctx_{};
+    bool pending_mount_flush_ = false;  ///< 运行期追加了子树、待下次布局补挂（见 note_pending_mount）
     bool pressed_ = false;  ///< 指针是否在本控件上按下（用于识别一次完整点击）
     bool hover_ = false;  ///< 指针是否悬停在本控件上（EventDispatcher 命中链 diff 维护）
     bool click_pending_ = false;  ///< 本次按下后待触发点击（松开且未达长按/拖拽阈值时触发）
@@ -1611,7 +1663,24 @@ class Container : public Widget {
         return {};
     }
 
-    auto on_mount(const BuildContext &ctx) -> void override {
+    auto on_mount(const BuildContext &ctx) -> void override { flush_pending_mounts(ctx); }
+
+    /// @brief 递归卸载子树（与 `on_mount` 逐字对称）。
+    ///
+    /// 由**持有者显式**发起或换宿主重挂路径内部发起，本控件的 `remove_child` / `set_children` /
+    /// `adopt_children` **不代调**——摘除时无从判断子件是否仍在容器之外被持有。
+    /// @param ctx 本容器挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;  // 子节点各自回传自己挂载时记录的那份（带本容器的 env 链），这里不替它们重建
+        for (Node &child : children_) {
+            child.widget().unmount();
+        }
+    }
+
+    /// @brief 逐个子项补挂：容器整体挂载与「运行期追加子树后的补挂」是同一个动作，只是时机不同。
+    /// @param ctx 挂载 / 本次布局的构建上下文。
+    auto flush_pending_mounts(const BuildContext &ctx) -> void override {
+        pending_mount_flush_ = false;
         for (Node &child : children_) {
             child.widget().mount(ctx);
         }
@@ -1679,6 +1748,7 @@ class Container : public Widget {
     auto adopt_children(std::vector<Node> &&kids) -> void override {
         detach_all_children_layout_parent();
         children_ = std::move(kids);
+        note_pending_mount();  // 换进来的子树在下次布局补挂（构造期调用则由首次挂载/布局消费掉）
     }  // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
 
     /// @brief 子节点视图（Container 实现）：直接返回 `children_` 本体，零拷贝。
@@ -1696,13 +1766,17 @@ class Container : public Widget {
 
     /// @brief 便捷辅助：从扁平初始化列表接管子节点（供 Column/Row 等便捷构造复用，避免重复代码）。
     /// @param kids 子节点初始化列表：整体赋值覆盖既有 `children_`（非追加）。
-    auto set_children(std::initializer_list<Node> kids) -> void { children_.assign(kids.begin(), kids.end()); }
+    auto set_children(std::initializer_list<Node> kids) -> void {
+        children_.assign(kids.begin(), kids.end());
+        note_pending_mount();  // 同 adopt_children：运行期整体替换后由下次布局补挂
+    }
 
     /// @brief 运行时追加子节点（aurora::ui 工厂层与动态增子复用）。尾插并标脏，下一帧重排。
     /// @param child 待追加的子节点：拷贝入 `children_` 尾部，子控件生命周期自此由父树 `shared_ptr` 接管。
     /// @note 子控件生命周期由父树 `shared_ptr` 持有，返回/持有的裸指针仅在父树存活期间有效。
     auto add(const Node &child) -> void {
         children_.push_back(child);  // 尾插：节点的持有权随子控件留在本容器
+        note_pending_mount();  // 运行期追加的子树在下一次布局由父侧 ctx 挂载（见 note_pending_mount）
         mark_needs_layout();  // 子树多了一个子节点：标脏布局，下一帧重排纳入测量
         notify_accessibility_structure_changed(this);  // 结构变化上报：三桥下一次投影重建语义树
     }
@@ -1852,6 +1926,14 @@ class SingleChild : public Widget {
     auto on_mount(const BuildContext &ctx) -> void override {
         if (child_) {
             child_.widget().mount(ctx);
+        }
+    }
+    /// @brief 递归卸载唯一子节点（与 `on_mount` 逐字对称）。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;  // 子节点各自回传自己挂载时记录的那份，这里不替它重建
+        if (child_) {
+            child_.widget().unmount();
         }
     }
 

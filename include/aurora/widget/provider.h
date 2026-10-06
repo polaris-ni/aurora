@@ -43,12 +43,14 @@ inline auto provider_type_name<MediaQuery>() -> const char * {
 /// 把值 `T` 注入环境，子树经 `BuildContext::environment<T>()` 取到最近祖先的 Provider。
 /// 注意：实作放在 widget 模块以避免 environment→widget 的循环依赖；环境机制
 /// （Environment/BuildContext）本身在 environment 模块。
-/// 本行隐式生成的拷贝/移动构造复制响应式持有 Reactive<T>（其拷贝即分配值存储与订阅），被本检查判
+/// 本行隐式生成的拷贝/移动构造复制响应式持有 Reactive<T>（其拷贝即分配值存储与订阅），被异常逃逸检查判
 /// 「不应抛出」；该隐式特成员按 [except.spec] 本就是 potentially-throwing，抛出（bad_alloc）沿栈交给
 /// 构造方。本类刻意依赖隐式拷贝/移动（CODING_STANDARDS.md §5.1），故不补 = delete 而逐点豁免。
-/// NOLINTNEXTLINE(bugprone-exception-escape)
+/// 豁免取**行尾**形态而非「下一行」形态：本类是模板，告警报在**实例化点**所属的声明行
+/// （clang-tidy 把实例化归到模板声明行），下一行形态只压住紧邻的那一行，压不住模板的各次实例化。
+/// @note LAYOUT_EXEMPT: 下行的行尾豁免是本段理由的落点（`check_nolint_layout` 的合法例外）。
 template <typename T>
-class Provider : public SingleChild {
+class Provider : public SingleChild {  // NOLINT(bugprone-exception-escape)
   public:
     /// @brief 用静态值注入（按值构造响应式持有）。
     /// @param value 注入的值。
@@ -135,6 +137,18 @@ class Provider : public SingleChild {
         BuildContext child_ctx = ctx;
         child_ctx.env = &child_env_;
         child_.widget().mount(child_ctx);
+    }
+
+    /// @brief 递归卸载子节点（与 `on_mount` 逐字对称）。
+    ///
+    /// 子节点各自回传**它自己**挂载时记录的 ctx（即带本控件 `child_env_` 的那份），故这里无需也不能
+    /// 替它重建环境——`on_unmount` 的契约就是「读当初挂载的那份」。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        if (child_) {
+            child_.widget().unmount();
+        }
     }
 
   private:

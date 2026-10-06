@@ -132,6 +132,20 @@ class Timer : public SingleChild {
         child_.widget().mount(ctx);
     }
 
+    /// @brief 取消挂载期注册的周期任务并卸载子节点（与 `on_mount` 对称）。
+    ///
+    /// 取消是必需的而非可选：否则一只被摘下（换宿主重挂、或宿主显式卸载）的 `Timer` 仍留在
+    /// `Scheduler` 的任务表里，闭包持着 `this` 继续每期触发——既漏又可能打到已不在树上的控件。
+    /// 换宿主重挂时 `on_mount` 会重新注册，句柄随之替换。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        handle_.cancel();
+        if (child_) {
+            child_.widget().unmount();
+        }
+    }
+
   private:
     std::chrono::steady_clock::duration period_{};
     std::function<void(int)> on_tick_;
