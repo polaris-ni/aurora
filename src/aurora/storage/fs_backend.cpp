@@ -8,6 +8,7 @@
 
 #include "aurora/storage/fs_backend.h"
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -121,15 +122,40 @@ constexpr char AURORA_B64_URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrs
     return std::chrono::system_clock::time_point(std::chrono::milliseconds(ms));
 }
 
-// 目录是否可写：写删一个探针文件验证。
+// 进程内唯一探针名后缀：pid + 单调递增计数器（跨进程 pid 不同，足以避免同目录并发碰撞）。
+[[nodiscard]] auto unique_probe_suffix() -> std::string {
+    static std::atomic<std::uint64_t> counter{0};
+#ifdef AURORA_PLATFORM_WINDOWS
+    const auto pid = GetCurrentProcessId();
+#else
+    const auto pid = static_cast<std::uint64_t>(getpid());
+#endif
+    return std::to_string(pid) + "_" + std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
+}
+
+// 目录是否可写：创建"打开即删除"的临时探针验证——句柄/ fd 关闭后由 OS 自动抹除，
+// 即便后续 remove 因 AV/锁失败也不残留（旧实现用固定名 + 显式 remove，remove 失败被
+// 静默吞掉会留下 .aurora_write_probe 残片）。文件名带唯一后缀避免同目录并发构造碰撞。
 [[nodiscard]] auto dir_is_writable(const std::filesystem::path &dir) -> bool {
-    const auto probe = dir / ".aurora_write_probe";
-    std::error_code ec;
-    std::ofstream f(probe, std::ios::binary | std::ios::trunc);
-    const bool ok = static_cast<bool>(f);
-    f.close();
-    std::filesystem::remove(probe, ec);
-    return ok;
+    const auto probe = dir / (".aurora_write_probe_" + unique_probe_suffix());
+#ifdef AURORA_PLATFORM_WINDOWS
+    const auto wpath = probe.wstring();
+    const HANDLE h = CreateFileW(wpath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                 FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    CloseHandle(h);
+    return true;
+#else
+    const int fd = ::open(probe.string().c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) {
+        return false;
+    }
+    ::unlink(probe.string().c_str());  // 目录项立即消失，fd 关闭后空间回收，绝不残留
+    ::close(fd);
+    return true;
+#endif
 }
 
 // 原子写文本：临时文件 + rename（失败回退为删目标再 rename）。

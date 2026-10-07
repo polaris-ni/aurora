@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "aurora/app/clipboard.h"
 #include "aurora/core/platform.h"
@@ -196,9 +197,62 @@ auto set_env(const char *name, const std::string &value) -> void {
     return {};
 }
 
+/// @brief 启动期清扫：删除 test_temp/ 下上一轮被杀进程遗留的 aurora_test_* 目录。
+///
+/// 测试进程被强杀/崩溃时 end_case 来不及跑，临时目录会堆积（即"很多 aurora 测试文件"的主因）。
+/// 仅清理 mtime 早于 1 小时的目录，避免误删并行 ctest 其他 runner 仍在使用的活跃目录。
+auto sweep_stale_temp_dirs() -> void {
+    const auto &root = repo_root();  // setup 之前亦可确定仓库根；绑引用避免复制返回的 const&。
+    if (root.empty()) {
+        return;
+    }
+    const auto threshold = fs::file_time_type::clock::now() - std::chrono::hours(1);
+    std::vector<fs::path> bases;
+    bases.push_back(fs::path{root} / "test_temp");  // 主基目录（运行路径下的 test_temp/）
+    std::error_code sys_ec;
+    const auto sys_tmp = fs::temp_directory_path(sys_ec);
+    if (!sys_ec) {
+        bases.push_back(sys_tmp);  // 回退①：系统临时目录
+    }
+#ifndef AURORA_PLATFORM_WINDOWS
+    bases.push_back(fs::path{"/tmp"});  // 回退②：POSIX /tmp
+#endif
+    std::vector<fs::path> stale;
+    for (const auto &base : bases) {
+        std::error_code ec;
+        if (!fs::is_directory(base, ec) || ec) {
+            continue;
+        }
+        std::error_code iter_ec;
+        for (const auto &entry : fs::directory_iterator(base, iter_ec)) {
+            if (iter_ec) {
+                break;
+            }
+            std::error_code e2;
+            if (!entry.is_directory(e2) || e2) {
+                continue;
+            }
+            const auto name = entry.path().filename().string();
+            if (!name.starts_with("aurora_test_")) {
+                continue;
+            }
+            const auto mtime = entry.last_write_time(e2);
+            if (e2 || mtime >= threshold) {
+                continue;  // 活跃目录（本/并行 runner）不动
+            }
+            stale.push_back(entry.path());
+        }
+    }
+    for (const auto &p : stale) {
+        std::error_code rm_ec;
+        fs::remove_all(p, rm_ec);  // 个别删除失败不阻断其余
+    }
+}
+
 }  // namespace
 
 auto setup() -> void {
+    sweep_stale_temp_dirs();  // 先清扫上一轮被杀进程遗留的临时目录
     const auto &root = repo_root();
     if (root.empty()) {
         return;
