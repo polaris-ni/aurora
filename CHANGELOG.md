@@ -3,6 +3,12 @@
 > 库发布版本的单一事实来源是本文档顶部 `currentVersion`（见下方 `aurora-changelog-meta` 注释块，机器可读）。>   
 > 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/)：每个版本一个二级标题，按 **新→旧** 排列；>   
 > 各版本下分 `Breaking` / `Added` / `Changed` / `Fixed` / `Migration` / `Notes` 子节。
+<!-- aurora-changelog-meta
+schema: aurora-changelog/1.0
+currentVersion: 1.0.0-alpha.9
+policy: semver
+freeze: minor-versions-are-additive
+-->
 
 ## SemVer 规则
 
