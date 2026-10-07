@@ -391,12 +391,12 @@ AURORA_TEST_CASE(placeholder_defaults_to_lookup_result_or_fallback) {
     CommandPalette palette;
     // 未登记译文：恒非空（判据要求），且等于库内兜底串——即改动前的那条字面量。
     AURORA_TEST_CHECK_FALSE(palette.placeholder().empty());
-    AURORA_TEST_CHECK_EQ(palette.placeholder(), std::string{CommandPalette::kDefaultPlaceholderText});
+    AURORA_TEST_CHECK_EQ(palette.placeholder(), std::string{CommandPalette::AURORA_DEFAULT_PLACEHOLDER_TEXT});
     AURORA_TEST_CHECK_FALSE(palette.empty_message().empty());
-    AURORA_TEST_CHECK_EQ(palette.empty_message(), std::string{CommandPalette::kDefaultEmptyMessageText});
+    AURORA_TEST_CHECK_EQ(palette.empty_message(), std::string{CommandPalette::AURORA_DEFAULT_EMPTY_MESSAGE_TEXT});
 
     // 两条 key 以**字面量**钉死（不用常量对照）：宿主登记译文要靠这条串，它是外部契约的一部分。
-    // 若写成 `kDefaultPlaceholderKey` 自比自，key 拼错时注册端与查表端一起错、两边抵消 → 恒绿。
+    // 若写成 `AURORA_DEFAULT_PLACEHOLDER_KEY` 自比自，key 拼错时注册端与查表端一起错、两边抵消 → 恒绿。
     AURORA_TEST_CHECK_EQ(palette.placeholder_key(), std::string{"command_palette.placeholder"});
     AURORA_TEST_CHECK_EQ(palette.empty_message_key(), std::string{"command_palette.no_results"});
 }
@@ -424,8 +424,8 @@ AURORA_TEST_CASE(placeholder_and_empty_message_follow_context_locale) {
     constexpr BuildContext plain;
     palette.mark_needs_layout();
     (void)palette.layout(bounded(640.0F, 480.0F), plain);
-    AURORA_TEST_CHECK_EQ(palette.placeholder(), std::string{CommandPalette::kDefaultPlaceholderText});
-    AURORA_TEST_CHECK_EQ(palette.empty_message(), std::string{CommandPalette::kDefaultEmptyMessageText});
+    AURORA_TEST_CHECK_EQ(palette.placeholder(), std::string{CommandPalette::AURORA_DEFAULT_PLACEHOLDER_TEXT});
+    AURORA_TEST_CHECK_EQ(palette.empty_message(), std::string{CommandPalette::AURORA_DEFAULT_EMPTY_MESSAGE_TEXT});
     palette.close();
 }
 
@@ -465,7 +465,7 @@ AURORA_TEST_CASE(custom_key_still_localizes) {
 
     // 换 key 后**仍走 i18n**：缺省档未登记 → 兜底；fr 档 → 译文。
     constexpr BuildContext plain;
-    AURORA_TEST_CHECK_EQ(palette.placeholder(), std::string{CommandPalette::kDefaultPlaceholderText});
+    AURORA_TEST_CHECK_EQ(palette.placeholder(), std::string{CommandPalette::AURORA_DEFAULT_PLACEHOLDER_TEXT});
 
     const Environment env = Environment{}.with<Locale>(Locale{.language = "fr"});
     const BuildContext ctx = ctx_with(env);

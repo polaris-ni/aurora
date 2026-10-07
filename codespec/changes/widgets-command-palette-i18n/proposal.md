@@ -43,8 +43,8 @@
 
 | 常量 | 值 | 兜底文本（查表失败时） |
 |:--|:--|:--|
-| `kDefaultPlaceholderKey` | `"command_palette.placeholder"` | `"Type a command..."` |
-| `kDefaultEmptyMessageKey` | `"command_palette.no_results"` | `"No matching commands"` |
+| `AURORA_DEFAULT_PLACEHOLDER_KEY` | `"command_palette.placeholder"` | `"Type a command..."` |
+| `AURORA_DEFAULT_EMPTY_MESSAGE_KEY` | `"command_palette.no_results"` | `"No matching commands"` |
 
 内部以 `LocalizedString` 持有（key + 兜底 `text`），**不在库内预置任何语言的词条**——
 `default_string_table()` 只由宿主登记译文，库不往里写。这样「我没翻译」与「库自带英文」在宿主侧可区分，

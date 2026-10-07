@@ -43,7 +43,7 @@ namespace aurora {
 ///
 /// **上屏文案的 i18n 契约**：搜索框占位符与空态提示**不是**字面量，而是按词条 key 查
 /// `default_string_table()` 取得（`LocalizedString` 口径，与 `ReorderableListView::announce_text`
-/// 同款）；库不预置任何语言的词条，未登记时回退 `kDefaultPlaceholderText` / `kDefaultEmptyMessageText`
+/// 同款）；库不预置任何语言的词条，未登记时回退 `AURORA_DEFAULT_PLACEHOLDER_TEXT` / `AURORA_DEFAULT_EMPTY_MESSAGE_TEXT`
 /// 两条英文字面量。三档优先级：**文本覆盖（`set_placeholder` / `set_empty_message`）> 按 key 查表 >
 /// 兜底字面量**。解析发生在布局与绘制期，locale 取 `ctx` 注入的 `Locale`（与 `Text` / `Button` 同口径），
 /// 故运行期切 locale 立即生效。
@@ -54,13 +54,13 @@ namespace aurora {
 class CommandPalette : public Container {
   public:
     /// @brief 占位符的默认 i18n 词条 key（宿主可换；未在 `StringTable` 登记则回退兜底串）。
-    static constexpr const char *kDefaultPlaceholderKey = "command_palette.placeholder";
+    static constexpr const char *AURORA_DEFAULT_PLACEHOLDER_KEY = "command_palette.placeholder";
     /// @brief 空态提示的默认 i18n 词条 key（宿主可换；未登记则回退兜底串）。
-    static constexpr const char *kDefaultEmptyMessageKey = "command_palette.no_results";
+    static constexpr const char *AURORA_DEFAULT_EMPTY_MESSAGE_KEY = "command_palette.no_results";
     /// @brief 占位符的兜底文本（查表失败时使用，即改动前的字面量）。
-    static constexpr const char *kDefaultPlaceholderText = "Type a command...";
+    static constexpr const char *AURORA_DEFAULT_PLACEHOLDER_TEXT = "Type a command...";
     /// @brief 空态提示的兜底文本（查表失败时使用，即改动前的字面量）。
-    static constexpr const char *kDefaultEmptyMessageText = "No matching commands";
+    static constexpr const char *AURORA_DEFAULT_EMPTY_MESSAGE_TEXT = "No matching commands";
 
     /// @brief 构造面板并内置搜索框（输入即过滤、Enter 执行选中项）。
     /// @param commands 命令注册表（非拥有，须比面板长寿）；可为 nullptr，此时面板为空列表。
@@ -68,8 +68,8 @@ class CommandPalette : public Container {
         auto field = std::make_shared<TextInput>();
         // 构造期尚无 `BuildContext`，先按缺省 locale 解析一次，使 `placeholder()` / `empty_message()`
         // 在首次布局前即可读出非空值；此后每次布局与绘制都按 `ctx` 的 locale 重算。
-        resolved_placeholder_ = lookup_text(placeholder_key_, kDefaultPlaceholderText, Locale{});
-        resolved_empty_message_ = lookup_text(empty_message_key_, kDefaultEmptyMessageText, Locale{});
+        resolved_placeholder_ = lookup_text(placeholder_key_, AURORA_DEFAULT_PLACEHOLDER_TEXT, Locale{});
+        resolved_empty_message_ = lookup_text(empty_message_key_, AURORA_DEFAULT_EMPTY_MESSAGE_TEXT, Locale{});
         field->set_placeholder(resolved_placeholder_);
         field->set_on_changed([this](const std::string &value) -> void {
             query_ = value;
@@ -111,25 +111,25 @@ class CommandPalette : public Container {
                      .min_value = "1"},
                     {.name = "placeholder",
                      .type = "string",
-                     .default_value = kDefaultPlaceholderText,
+                     .default_value = AURORA_DEFAULT_PLACEHOLDER_TEXT,
                      .required = false,
                      .note = "Search field placeholder; when set it overrides the i18n lookup",
                      .json_type = "string"},
                     {.name = "placeholder_key",
                      .type = "string",
-                     .default_value = kDefaultPlaceholderKey,
+                     .default_value = AURORA_DEFAULT_PLACEHOLDER_KEY,
                      .required = false,
                      .note = "i18n key for the placeholder; setting it clears any text override",
                      .json_type = "string"},
                     {.name = "empty_message",
                      .type = "string",
-                     .default_value = kDefaultEmptyMessageText,
+                     .default_value = AURORA_DEFAULT_EMPTY_MESSAGE_TEXT,
                      .required = false,
                      .note = "Empty-state text shown when nothing matches; when set it overrides the i18n lookup",
                      .json_type = "string"},
                     {.name = "empty_message_key",
                      .type = "string",
-                     .default_value = kDefaultEmptyMessageKey,
+                     .default_value = AURORA_DEFAULT_EMPTY_MESSAGE_KEY,
                      .required = false,
                      .note = "i18n key for the empty-state text; setting it clears any text override",
                      .json_type = "string"},
@@ -176,13 +176,13 @@ class CommandPalette : public Container {
             set_max_results(static_cast<std::size_t>(v->as_or<std::int64_t>(50)));
         }
         if (const auto *v = props.at("placeholder_key"); v != nullptr) {
-            const std::string key = v->as_or<std::string>(kDefaultPlaceholderKey);
+            const auto key = v->as_or<std::string>(AURORA_DEFAULT_PLACEHOLDER_KEY);
             if (!key.empty()) {
                 set_placeholder_key(key);
             }
         }
         if (const auto *v = props.at("empty_message_key"); v != nullptr) {
-            const std::string key = v->as_or<std::string>(kDefaultEmptyMessageKey);
+            const auto key = v->as_or<std::string>(AURORA_DEFAULT_EMPTY_MESSAGE_KEY);
             if (!key.empty()) {
                 set_empty_message_key(key);
             }
@@ -236,11 +236,11 @@ class CommandPalette : public Container {
     ///
     /// 与文本覆盖的区别：换 key 后文案**仍走 i18n**，故同一进程内多个面板可各挂不同词条且都能翻译。
     ///
-    /// @param key 词条 key；空串按默认 key `kDefaultPlaceholderKey` 处理。
+    /// @param key 词条 key；空串按默认 key `AURORA_DEFAULT_PLACEHOLDER_KEY` 处理。
     auto set_placeholder_key(const std::string &key) -> void {
-        placeholder_key_ = key.empty() ? kDefaultPlaceholderKey : key;
+        placeholder_key_ = key.empty() ? AURORA_DEFAULT_PLACEHOLDER_KEY : key;
         placeholder_override_.reset();
-        resolved_placeholder_ = lookup_text(placeholder_key_, kDefaultPlaceholderText, Locale{});
+        resolved_placeholder_ = lookup_text(placeholder_key_, AURORA_DEFAULT_PLACEHOLDER_TEXT, Locale{});
         if (field_raw_ != nullptr) {
             field_raw_->set_placeholder(resolved_placeholder_);
         }
@@ -259,11 +259,11 @@ class CommandPalette : public Container {
     }
 
     /// @brief 换用另一条 i18n 词条 key 作空态提示（清掉 `set_empty_message` 的文本覆盖）。
-    /// @param key 词条 key；空串按默认 key `kDefaultEmptyMessageKey` 处理。
+    /// @param key 词条 key；空串按默认 key `AURORA_DEFAULT_EMPTY_MESSAGE_KEY` 处理。
     auto set_empty_message_key(const std::string &key) -> void {
-        empty_message_key_ = key.empty() ? kDefaultEmptyMessageKey : key;
+        empty_message_key_ = key.empty() ? AURORA_DEFAULT_EMPTY_MESSAGE_KEY : key;
         empty_message_override_.reset();
-        resolved_empty_message_ = lookup_text(empty_message_key_, kDefaultEmptyMessageText, Locale{});
+        resolved_empty_message_ = lookup_text(empty_message_key_, AURORA_DEFAULT_EMPTY_MESSAGE_TEXT, Locale{});
         mark_needs_paint();
     }
 
@@ -274,10 +274,10 @@ class CommandPalette : public Container {
     /// @return 文本覆盖值，或按 key 查表 / 兜底得到的串。
     [[nodiscard]] auto empty_message() const -> std::string { return resolved_empty_message_; }
     /// @brief 当前占位符的词条 key。
-    /// @return key 串；始终非空（未显式设置时为 `kDefaultPlaceholderKey`）。
+    /// @return key 串；始终非空（未显式设置时为 `AURORA_DEFAULT_PLACEHOLDER_KEY`）。
     [[nodiscard]] auto placeholder_key() const -> std::string { return placeholder_key_; }
     /// @brief 当前空态提示的词条 key。
-    /// @return key 串；始终非空（未显式设置时为 `kDefaultEmptyMessageKey`）。
+    /// @return key 串；始终非空（未显式设置时为 `AURORA_DEFAULT_EMPTY_MESSAGE_KEY`）。
     [[nodiscard]] auto empty_message_key() const -> std::string { return empty_message_key_; }
 
     /// @brief 执行回调：在 `invoke` 之后触发，参数为命令 id（宿主可接管副作用）。
@@ -570,10 +570,10 @@ class CommandPalette : public Container {
     auto refresh_localized_texts(const BuildContext &ctx) -> void {
         resolved_placeholder_ = placeholder_override_.has_value()
                                     ? *placeholder_override_
-                                    : lookup_text(placeholder_key_, kDefaultPlaceholderText, ctx);
+                                    : lookup_text(placeholder_key_, AURORA_DEFAULT_PLACEHOLDER_TEXT, ctx);
         resolved_empty_message_ = empty_message_override_.has_value()
                                       ? *empty_message_override_
-                                      : lookup_text(empty_message_key_, kDefaultEmptyMessageText, ctx);
+                                      : lookup_text(empty_message_key_, AURORA_DEFAULT_EMPTY_MESSAGE_TEXT, ctx);
         if (field_raw_ != nullptr) {
             field_raw_->set_placeholder(resolved_placeholder_);
         }
@@ -674,8 +674,8 @@ class CommandPalette : public Container {
     std::vector<const Command *> results_;  ///< 当前过滤结果（按得分排序）
     std::size_t selected_ = 0;  ///< 当前选中下标
     std::size_t max_results_ = 50;  ///< 结果上限
-    std::string placeholder_key_ = kDefaultPlaceholderKey;  ///< 占位符词条 key（恒非空）
-    std::string empty_message_key_ = kDefaultEmptyMessageKey;  ///< 空态提示词条 key（恒非空）
+    std::string placeholder_key_ = AURORA_DEFAULT_PLACEHOLDER_KEY;  ///< 占位符词条 key（恒非空）
+    std::string empty_message_key_ = AURORA_DEFAULT_EMPTY_MESSAGE_KEY;  ///< 空态提示词条 key（恒非空）
     std::optional<std::string> placeholder_override_;  ///< 占位符字面覆盖（置位即不再查表）
     std::optional<std::string> empty_message_override_;  ///< 空态提示字面覆盖（置位即不再查表）
     std::string resolved_placeholder_;  ///< 最近一次解析出的占位符（供绘制与 getter 读）
