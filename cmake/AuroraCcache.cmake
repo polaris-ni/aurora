@@ -18,8 +18,10 @@
 # 故编译器为 MSVC 时整体跳过注入，靠 PCH 提速（PCH 在 MSVC 为正收益，见 BUILD_OPTIONS）。
 #
 # ⚠️ Aurora 作为三方库不主动安装 ccache：仅在 PATH 中查找；未找到则提示用户自行安装，
-# 缓存关闭不影响构建正确性。用户可通过 -DAURORA_CCACHE_OPTIONS="..." 注入任意 ccache
-# 命令行选项——一旦设置，即直接使用用户输入，不再注入 Aurora 默认 CCACHE_* 配置。
+# 缓存关闭不影响构建正确性。各 ccache 配置默认由框架经 env 注入（含 PCH 必需的
+# SLOPPINESS），用户侧仅暴露单一变量 AURORA_CCACHE_ARGS 做追加/覆盖：
+#   -DAURORA_CCACHE_ARGS="--max-size=20G --max-files=1000000"
+# 该变量追加在框架默认之后；ccache CLI 选项优先于同名 CCACHE_* 环境变量，覆盖直观可控。
 # ============================================================
 
 option(AURORA_ENABLE_CCACHE "Use ccache for compilation caching" ON)
@@ -46,54 +48,40 @@ if (AURORA_ENABLE_CCACHE)
     endif ()
 
     if (CCACHE_PROGRAM)
-        # 用户自定义 ccache 命令行选项：若设置 AURORA_CCACHE_OPTIONS，则直接使用用户输入，
-        # 不再注入 Aurora 默认的 CCACHE_* 环境配置（用户自行承担完整配置责任）。
-        #   cmake -S . -B build -DAURORA_CCACHE_OPTIONS="--max-size=5G --sloppiness=pch_defines,time_macros"
-        # 注意：用户选项会完全取代默认；若需 PCH 缓存命中，须自行包含
-        #   --sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
-        set(AURORA_CCACHE_OPTIONS "" CACHE STRING
-                "Extra ccache CLI options passed verbatim (e.g. --max-size=5G); if set, overrides Aurora defaults")
+        # ---- 框架默认（经 env 注入，保 PCH 可缓存 + 多构建目录共享）----
+        # 这些不是用户可读变量；要改任意一项，用 AURORA_CCACHE_ARGS（见下）。
+        # ccache CLI 选项优先级高于同名 CCACHE_* 环境变量（CLI > env > config > builtin），
+        # 故用户通过 ARGS 显式覆盖时直观可控。
+        set(_aurora_ccache_env
+                "CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime"
+                "CCACHE_BASEDIR=${AURORA_SOURCE_DIR}"
+                "CCACHE_NOHASHDIR=1"
+                "CCACHE_COMPRESS=1"
+                "CCACHE_COMPRESSLEVEL=6"
+                "CCACHE_MAXSIZE=10G")
 
-        if (AURORA_CCACHE_OPTIONS)
-            # 按 shell 语义拆分用户选项（支持引号包裹的带空格参数），直接透传给 ccache。
-            separate_arguments(_aurora_ccache_user_opts UNIX_COMMAND "${AURORA_CCACHE_OPTIONS}")
-            set(_aurora_ccache_launcher "${CCACHE_PROGRAM}" ${_aurora_ccache_user_opts})
-            aurora_log("ccache: using user-provided AURORA_CCACHE_OPTIONS = ${AURORA_CCACHE_OPTIONS}")
-        else ()
-            # Aurora 默认配置（经 cmake -E env 注入构建期生效）：
-            #   SLOPPINESS —— PCH 场景必需：未设 pch_defines/time_macros 时，命令行带
-            #     -include .../cmake_pch.hxx 的调用被 ccache 直接判 Uncacheable（消费者
-            #     TU 全量裸编、缓存形同虚设）；include_file_mtime/ctime 让头文件时间戳
-            #     变化而内容不变时仍可命中（preprocessor 模式按内容摘要，安全）。
-            #   BASEDIR + NOHASHDIR —— 相对化绝对路径、忽略编译目录参与 hash：
-            #     build/ 与 build-msvc 等多构建目录共享同一缓存的前提。
-            #   COMPRESS/LEVEL —— 缓存产物压缩存储；注意 hardlink 与压缩互斥，故不启用。
-            set(_aurora_ccache_env
-                    "CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime"
-                    "CCACHE_BASEDIR=${AURORA_SOURCE_DIR}"
-                    "CCACHE_NOHASHDIR=1"
-                    "CCACHE_COMPRESS=1"
-                    "CCACHE_COMPRESSLEVEL=6")
+        # ---- 单一用户覆盖点：AURORA_CCACHE_ARGS ----
+        # 追加式 ccache 命令行选项，嵌在框架默认之后。用于覆盖任意默认或设置本框架未
+        # 单列的高级开关，例如：
+        #   -DAURORA_CCACHE_ARGS="--max-size=20G --max-files=1000000 --cache-dir=/path/to/ccache"
+        # 注：CLI 选项会写入用户缓存的 ccache.conf 并持久生效；上方 CCACHE_* 环境注入不持久。
+        # 若需完全接管配置，用 -DAURORA_ENABLE_CCACHE=OFF 关闭后自行在构建环境配置 ccache。
+        set(AURORA_CCACHE_ARGS "" CACHE STRING
+                "Extra ccache CLI options appended after Aurora defaults, e.g. --max-size=20G --max-files=1000000")
 
-            # 缓存目录与容量（经启动器注入后构建期真正生效）。
-            set(AURORA_CCACHE_DIR "" CACHE PATH "ccache cache directory (default: system default)")
-            if (AURORA_CCACHE_DIR)
-                list(APPEND _aurora_ccache_env "CCACHE_DIR=${AURORA_CCACHE_DIR}")
-            endif ()
-            set(AURORA_CCACHE_MAXSIZE "5G" CACHE STRING "ccache maximum cache size")
-            if (AURORA_CCACHE_MAXSIZE)
-                list(APPEND _aurora_ccache_env "CCACHE_MAXSIZE=${AURORA_CCACHE_MAXSIZE}")
-            endif ()
-
-            set(_aurora_ccache_launcher
-                    "${CMAKE_COMMAND};-E;env;${_aurora_ccache_env};${CCACHE_PROGRAM}")
-            aurora_log("ccache: launcher env = ${_aurora_ccache_env}")
+        # 启动器：cmake -E env <框架默认 CCACHE_*> ccache [<用户 ARGS>] <编译器>
+        set(_aurora_ccache_launcher "${CMAKE_COMMAND};-E;env;${_aurora_ccache_env};${CCACHE_PROGRAM}")
+        if (AURORA_CCACHE_ARGS)
+            separate_arguments(_aurora_ccache_user_args UNIX_COMMAND "${AURORA_CCACHE_ARGS}")
+            list(APPEND _aurora_ccache_launcher ${_aurora_ccache_user_args})
+            aurora_log("ccache: extra user args appended (AURORA_CCACHE_ARGS) = ${AURORA_CCACHE_ARGS}")
         endif ()
 
         set(CMAKE_C_COMPILER_LAUNCHER "${_aurora_ccache_launcher}")
         set(CMAKE_CXX_COMPILER_LAUNCHER "${_aurora_ccache_launcher}")
 
         aurora_log("ccache: enabled (${CCACHE_PROGRAM})")
+        aurora_log("ccache: launcher env = ${_aurora_ccache_env}")
     else ()
         # 未找到 ccache：Aurora 作为三方库不主动安装，仅提示用户自行安装；
         # 缓存关闭不影响构建正确性与可用性。

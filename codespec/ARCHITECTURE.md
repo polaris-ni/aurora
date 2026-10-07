@@ -541,3 +541,4 @@ CI 配置位于 `.github/workflows/`：
 - 编译缓存接入 `hendrikmuhs/ccache-action`（key 按 job / 矩阵名分桶）：core（Linux / macOS / windows-mingw）、backends（Linux / macOS）、toggles、asan、coverage、install-consumer；缓存口径（SLOPPINESS / BASEDIR / NOHASHDIR / 压缩）由 `cmake/AuroraCcache.cmake` 的编译器启动器统一注入，与本地构建共享同一语义，避免「本地命中、CI 全 miss」。
 - windows-msvc（默认 Visual Studio 多配置生成器）不接入编译缓存：CMake 的编译器启动器（`<LANG>_COMPILER_LAUNCHER`，sccache / ccache 的挂接点）仅在 Makefile / Ninja 生成器实现，VS 生成器下被静默忽略；要接入须先将该矩阵切换到 Ninja + cl，暂无必要（该配置无缓存路径、PCH 净收益显著，冷构建本身不构成瓶颈）。
 - windows 侧 Test 步骤显式 `shell: bash` 并设 `PYTHONUTF8=1`（默认 pwsh 无 `nproc`；cp1252 控制台无法编码 CJK 诊断输出）。
+- **编译耗时观测**：`core` 与 `backends` job 在 Build/Test 之后调用 `tools/check/build_baseline.py`（解析 `.ninja_log` 与 `LastTest.log`，纯观测、恒退出 0、不进门禁），把 `.ninja_log` / `LastTest.log` / `build-baseline.json` 作为 artifact 上传，并把摘要写入 step summary。before/after 对照用于决定 Unity Build 试点（`BUILD_OPTIONS.md` §4.8）的默认开关与批大小。

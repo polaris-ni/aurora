@@ -43,6 +43,26 @@
         "AURORA_BUILD_TESTS": "ON",
         "AURORA_BUILD_DEMOS": "ON"
       }
+    },
+    {
+      "name": "ninja-shards",
+      "displayName": "Ninja + 4-way test-runner shards (build-shards)",
+      "description": "Same as `ninja`, but splits the test runner into 4 shards (AURORA_TEST_SHARDS=4) so the test link step parallelises instead of serialising all cases into one executable. AURORA_TEST_SHARDS stays 1 by default: this preset is the explicit activation path, and other counts are swept on top of it with -DAURORA_TEST_SHARDS=<N>.",
+      "inherits": "ninja",
+      "binaryDir": "${sourceDir}/build-shards",
+      "cacheVariables": {
+        "AURORA_TEST_SHARDS": "4"
+      }
+    },
+    {
+      "name": "measure",
+      "displayName": "Compile-speed baseline (build-measure, ccache off)",
+      "description": "Fixed conditions for a before/after compile-speed comparison: dedicated build-measure/ directory, gcc, Release, ccache disabled. Vary only the knob under test on top of it (e.g. -DAURORA_TEST_SHARDS=4 or -DAURORA_ENABLE_UNITY_CORE=ON) so both sides share the directory, the compiler and the cache setting.",
+      "inherits": "ninja",
+      "binaryDir": "${sourceDir}/build-measure",
+      "cacheVariables": {
+        "AURORA_ENABLE_CCACHE": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -59,6 +79,18 @@
       "displayName": "Test (build/, parallel)",
       "description": "Run the full ctest suite in build/ with per-test process isolation in parallel (equivalent to ctest --test-dir build --output-on-failure -j N).",
       "configurePreset": "ninja",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 16
+      }
+    },
+    {
+      "name": "ninja-shards-test",
+      "displayName": "Test (build-shards/, parallel)",
+      "description": "Run the ctest suite in build-shards/ (the 4-way sharded test runner preset). Same per-test process isolation and parallelism as ninja-test; only the runner split differs.",
+      "configurePreset": "ninja-shards",
       "output": {
         "outputOnFailure": true
       },

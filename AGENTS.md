@@ -57,15 +57,18 @@
 
 ```powershell
 cmake --preset ninja                    # configure（Ninja + gcc/g++，等价 -G Ninja）
+cmake --preset ninja-shards             # configure 变体：测试 runner 分片 = 4（链接并行；默认仍为 1）
+cmake --preset measure                  # configure 变体：ccache 关闭，固定基线条件供编译耗时 before/after 对照
 cmake --build build --target <tgt>      # 建库/工具/测试；全量 demo 用 --target demos，单个用 --target demo_lazy_list
 ctest --preset ninja-test               # 全量测试 + 全部静态门禁（并行、进程隔离）
 cmake --build build --target lint       # Clang-Tidy 门禁（-fix 版为 lint-fix）
 cmake --build build --target format-check   # clang-format 门禁（改写用 format）
 cmake --build build --target aurora_api_json  # 新增/改动 widget、类型、属性键后刷新
 cmake --build build --target docs       # Doxygen，WARN_AS_ERROR=YES，查「注释写了但读不出」
+python3 tools/check/build_baseline.py --build-dir build --json baseline.json   # 编译/测试耗时基线（观测，非门禁；见 BUILD_OPTIONS.md §4.8 / ARCHITECTURE §14.4）
 ```
 
-- **预设**（`CMakePresets.json`）：`ninja`（默认）、`mingw`、`wasm`（Emscripten）、test 预设 `ninja-test`。
+- **预设**（`CMakePresets.json`）：`ninja`（默认）、`mingw`、`wasm`（Emscripten）、test 预设 `ninja-test`；构建变体预设 `ninja-shards`（测试分片 = 4）、`measure`（ccache 关，固定基线条件）。
 - **工具链门槛**：CMake ≥ 3.20 + 任一 C++20 编译器在 `PATH`；推荐 Ninja。**仓库文档内不得写本机绝对路径**（`check_no_hardcoded_paths`）。
 - ⚠️ **demo 不进默认构建**（`EXCLUDE_FROM_ALL`）：`cmake --build build` 只建库/工具/测试。
 - ⚠️ **新增 `.cpp` 后须让 CMake 刷新 GLOB**：`CONFIGURE_DEPENDS` 多数情况自动，否则碰一下 `CMakeLists.txt` 或重建 `build/`。

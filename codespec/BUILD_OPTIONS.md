@@ -50,7 +50,7 @@
 |:---|:---|:---|:---|
 | `AURORA_BUILD_DEMOS` | `ON` | **定义**（非默认构建）`examples/demos/` 下每组件一个的可运行窗口 demo 目标；均 `EXCLUDE_FROM_ALL`，按需构建 | 各 `demo_<组件>` 可执行文件 + 聚合目标 `demos` |
 | `AURORA_BUILD_TESTS` | `ON` | 编译 `tests/` 下全部用例并接入 CTest：`AURORA_TEST()` 注册、单一 runner 一次链接，逐条 `--run=<stem>` 隔离 | `aurora_test_runner` 可执行 + `enable_testing()` + `registry_integrity` 守护 |
-| `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`，其中 `k` 从 `0` 起取 `0..N-1`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>`（`k` 取 `0..N-1`）可执行；是否默认开启待收束期链接耗时数据 |
+| `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`，其中 `k` 从 `0` 起取 `0..N-1`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>`（`k` 取 `0..N-1`）可执行；默认保持 `1`（单 runner，全局默认行为不变），需要并行链接用 `cmake --preset ninja-shards`（= `AURORA_TEST_SHARDS=4`），或用 `-DAURORA_TEST_SHARDS=<N>` 任意覆盖。 |
 | `AURORA_BUILD_E2E` | `ON` | 编译 `tests/e2e/`（`etest_` 前缀）下的**真实后端端到端**用例：建真实窗口 + 走上屏链路 + 读回像素断言。Emscripten 交叉构建下强制不纳入（wasm 产物无宿主窗口 / 显示），且须与 `registry_integrity` 的 `--tests-dir` 保持同口径 | `tests/e2e/*.cpp` 并入 `aurora_test_runner`；CTest 侧对 `etest_` 用例额外打 `LABELS e2e`（供 `ctest -L e2e` 分层编排） |
 | `AURORA_E2E_TIMEOUT_MS` | `60000` | E2E 用例的看门狗超时（非开关、为正整数字符串缓存变量）：按 stem 前缀 `etest_` 以 `--timeout=<ms>` 注入。runner 默认不设限，而真实窗口事件循环一旦挂起没有兜底，故须显式设限——到点先写报告再以退出码 3 结束 | 无（仅改变 `etest_` 用例的 CTest 命令行） |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
@@ -374,19 +374,21 @@ cmake -S . -B build-trace -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_TRACING=ON
 |:---|:---|
 | 默认值 | `ON` |
 | feature 宏 | 不注入，仅设置编译器启动器 |
-| 缓存策略 | 压缩（level 6）、默认缓存大小 5G、`SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime`、`BASEDIR=<源码根>` + `NOHASHDIR`（多构建目录共享缓存） |
+| 缓存策略 | 压缩（level 6）、默认缓存大小 10G、`SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime`、`BASEDIR=<源码根>` + `NOHASHDIR`（多构建目录共享缓存）。以上默认由框架经 env 注入（保 PCH 可缓存）；用户侧仅暴露单一变量 `AURORA_CCACHE_ARGS` 做追加/覆盖 |
 
 - **安装方式**：Aurora 作为三方库**不主动安装 ccache**，仅在 `PATH` 中查找；未找到则提示用户自行安装（见 configure 日志），缓存关闭不影响构建正确性。不支持扫描 winget 等安装目录的自动检测。
 - **配置注入机制**：CMake 的 `set(ENV{...})` 只在 configure 期生效、不随构建期子进程传递，因此全部 ccache 配置经编译器启动器注入——`CMAKE_{C,CXX}_COMPILER_LAUNCHER = cmake -E env <CCACHE_*>… ccache [<用户选项>]`，在每个编译边构建期展开，精确作用于本项目、不污染全局环境，对 Ninja / Make / Visual Studio 生成器与 GCC/Clang/MSVC 一律适用。
 - **SLOPPINESS 各项**：`pch_defines` + `time_macros` 为 PCH 场景必需（缺省时命令行带 `-include cmake_pch.hxx` 的消费者 TU 直接被判 Uncacheable）；`include_file_mtime` / `include_file_ctime` 让头文件时间戳变化而内容不变时仍命中（preprocessor 模式按内容摘要，安全）。
-- **配置变量**：`AURORA_CCACHE_DIR`（缓存目录，默认系统默认）、`AURORA_CCACHE_MAXSIZE`（最大缓存，默认 `5G`）。二者同样经启动器注入构建期生效，仅在未设置 `AURORA_CCACHE_OPTIONS` 时作为 Aurora 默认值使用。注意：既有构建目录中已缓存的旧默认值（`2G`）不会自动更新，需显式 `-D` 覆盖。
-- **用户自定义选项 `AURORA_CCACHE_OPTIONS`**：字符串，原样透传为 ccache 命令行选项。一旦设置，**直接使用用户输入**，不再注入 Aurora 默认的 `CCACHE_*` 环境配置（用户自行承担完整配置责任，含 PCH 缓存所需的 `--sloppiness=...`）。未设置时使用 Aurora 默认配置。
+- **用户覆盖点 `AURORA_CCACHE_ARGS`**（唯一面向用户的 cache 变量）：字符串，configure 期追加任意 ccache 命令行选项，**嵌在框架默认 `CCACHE_*` 环境之后**，用 CLI 形式覆盖默认或设置高级开关，例如 `-DAURORA_CCACHE_ARGS="--max-size=20G --max-files=1000000 --cache-dir=/path/to/ccache"`。ccache CLI 选项优先级高于同名 `CCACHE_*` 环境变量（CLI > env > config > builtin），故用户覆盖直观可控；框架默认（PCH 必需的 `SLOPPINESS` 等）在用户未覆盖时仍逐字生效，开箱即 PCH 可缓存。
+  注：CLI 选项会写入用户缓存的 `ccache.conf` 并**持久生效**；若覆盖了 `SLOPPINESS` 等导致 PCH 失配，移除 `AURORA_CCACHE_ARGS` 重 configure 后框架默认会重新注入，但 `ccache.conf` 里的残留需手动清（或清缓存目录）。
+- **完全接管**：若需绕过框架默认，用 `-DAURORA_ENABLE_CCACHE=OFF` 关闭后自行在构建环境配置 ccache（也可在 `AURORA_CCACHE_ARGS` 中覆盖全部相关项）。
 - **MSVC 豁免**：当检测到的编译器为 MSVC（`cl`）时，即便 `AURORA_ENABLE_CCACHE=ON`，ccache 也会整体被禁用（见 `cmake/AuroraCcache.cmake`）：ccache 对 MSVC 的 `/Yu + /FI + /Fp` PCH 旗标组合支持不完整，改写强制包含会丢失 PCH 边界匹配导致 C1010；且 VS 多配置生成器本就不实现 `<LANG>_COMPILER_LAUNCHER`（Ninja + cl 同样命中）。MSVC 下靠 PCH 提速（MSVC 上 PCH 为正收益），不接入 ccache。
 
 ```powershell
 cmake -S . -B build -DAURORA_ENABLE_CCACHE=OFF                                  # 禁用
-cmake -S . -B build -DAURORA_CCACHE_DIR=<缓存目录> -DAURORA_CCACHE_MAXSIZE=10G   # 自定义（默认分支）
-cmake -S . -B build -DAURORA_CCACHE_OPTIONS="--max-size=5G --sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime"  # 完全接管配置
+cmake -S . -B build -DAURORA_CCACHE_ARGS="--max-size=20G"                       # 改容量（保留默认 SLOPPINESS 等）
+cmake -S . -B build -DAURORA_CCACHE_ARGS="--max-size=20G --max-files=1000000 --cache-dir=/path/to/ccache"  # 叠加多项覆盖
+cmake -S . -B build -DAURORA_CCACHE_ARGS="--compression-level=9"               # 改压缩级别（覆盖默认 6）
 ```
 
 ### 4.4 `AURORA_ENABLE_LLD`
@@ -559,6 +561,24 @@ EM_JS(int, wa_available, (), { return typeof AudioContext === 'undefined' ? 0 : 
 ```
 
 ⚠️ 指令必须**裸写**：clang-format 22 把带尾注的 `// clang-format off  (理由)` 当成普通注释、保护**不生效**（实测静默损坏），理由注释另起一行放在指令上方即可（该处在保护体外，可被正常重排）。落点见 `src/aurora/media/audio_webaudio.cpp`、`src/aurora/window/wasm_aria.cpp`、`include/aurora/window/wasm_surface.h`、`include/aurora/app/application.h` 与 `tools/verify/wasm_*_live_probe.cpp`；新增任何触达 DOM 的 JS 宏时同样处理，并在 `format` 之后核对 JS 块与改前逐字一致。
+
+### 4.8 `AURORA_ENABLE_UNITY_CORE`（Unity Build 试点）
+
+| 项 | 值 |
+|:---|:---|
+| 默认值 | `OFF`（opt-in；默认构建与已落地的 CI 矩阵完全不变） |
+| feature 宏 | 不注入，仅改变 `aurora` 静态库的内部编译组织方式 |
+| 作用范围 | 仅 `src/aurora/core/` 下的源；库内其余 ~100 个源（`widget/` / `window/` / `render/` 等）保持逐文件独立编译 |
+
+`UNITY_BUILD` 是 **target 级**属性，无法只对某子目录开启。本试点以反向排除实现「仅 core/」：**先**对 `aurora` 目标打开 `UNITY_BUILD`（`UNITY_BUILD_MODE BATCH`、`UNITY_BUILD_BATCH_SIZE` 由 `AURORA_UNITY_BATCH_SIZE` 控制，默认 `4`），**再**对每一个**不**在 `src/aurora/core/` 下的源设 `SKIP_UNITY_BUILD_INCLUSION TRUE`。core/ 的源按批被 CMake 拼成 `Unity/unity_<n>_cxx.cxx` 一次编译。
+
+- **为什么只试点 core/**：Unity Build 把多个 `.cpp` 拼进同一个翻译单元，要求被合并的文件之间无冲突（同名匿名命名空间、重复 `static` 符号、宏 / `using` 泄漏等）。`core/` 是几何 / 状态 / 基础数据结构层，文件间耦合最小，最安全；其余模块（尤其 `window/`、`widget/` 大量互引）暂未纳入，避免 ODR / 重复符号风险。
+- **实测**（本仓，`AURORA_ENABLE_UNITY_CORE=ON` + ccache 热身）：core/ 14 个源打成 4 个 batch，库成功编出 `libaurora.a`；非 core 源命中既有 ccache，仅 batch 段重新编译。
+- **lint 覆盖面塌陷（重要）**：开启后 `compile_commands.json` 不再逐文件列出 core/ 源，本构建目录里的 `lint` 目标会**静默丢失 core/ 的 clang-tidy 覆盖**。要跑全量 lint，须从**未开启该开关的独立构建目录**（如 `build/`）发起 `lint` 目标。
+- **`AURORA_UNITY_BATCH_SIZE`**：正整数（非法值 configure 期 `aurora_error` 终止）；批大小越小、单 TU 越安全但合并收益越低；CMake 默认 8，试点期取 `4` 以优先保证可编译性。
+- **0 匹配保护**：若没有任何源落在 `src/aurora/core/` 下（如目录被整体移动），configure 期 `aurora_error` 终止，避免「开关开了却静默空转」。
+
+> 该开关**不改变任何运行时行为或 ABI**：只是把 core/ 的编译组织方式从「逐文件」改为「按批」，产出物逐位等价。是否默认开启、批大小取何值，待收束期编译耗时基线数据（见 `ARCHITECTURE.md` §14.4 与 `tools/check/build_baseline.py`）再定。
 
 ## 5 强制缓存变量（三方库源码构建内部）
 
@@ -793,7 +813,7 @@ aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE includ
 # 产物开关
 -D AURORA_BUILD_DEMOS=ON|OFF                  # demos（默认 ON）
 -D AURORA_BUILD_TESTS=ON|OFF                  # CTest（默认 ON）
--D AURORA_TEST_SHARDS=<N>                     # 测试 runner 分片数（默认 1 = 单 runner）
+-D AURORA_TEST_SHARDS=<N>                     # 测试 runner 分片数（默认 1 = 单 runner；显式开启：cmake --preset ninja-shards = 4 片）
 -D AURORA_BUILD_E2E=ON|OFF                    # 真实后端 E2E 用例 tests/e2e/（默认 ON；Emscripten 强制排除）
 -D AURORA_E2E_TIMEOUT_MS=<ms>                 # etest_ 用例看门狗超时（默认 60000）
 -D AURORA_BUILD_INSPECTOR_SERVER=ON|OFF       # Inspector HTTP 服务器（默认 OFF）
@@ -833,7 +853,9 @@ aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE includ
 -D AURORA_ENABLE_SIMD=ON|OFF             # 光栅 SIMD 双实现（默认 ON，内部宏）
 -D AURORA_ENABLE_IMAGE_{JPEG,WEBP,PNG}=ON|OFF  # 图像解码能力（默认均 OFF，内部宏）
 -D AURORA_ENABLE_GLFW_GPU_GL=ON|OFF    # GPU OpenGL 3.3 core 栅格（默认 OFF；依赖 AURORA_BACKEND_GLFW=ON，非独立后端）
--D AURORA_ENABLE_CCACHE=ON|OFF           # ccache 编译缓存（默认 ON）
+-D AURORA_ENABLE_CCACHE=ON|OFF           # ccache 编译缓存（默认 ON；容量默认 10G）
+-D AURORA_ENABLE_UNITY_CORE=ON|OFF       # Unity Build 试点：仅 src/aurora/core/ 打成 batch（默认 OFF，见 §4.8）
+-D AURORA_UNITY_BATCH_SIZE=<n>           # 每批源数（默认 4；AURORA_ENABLE_UNITY_CORE=ON 时生效）
 -D AURORA_ENABLE_LLD=ON|OFF              # lld 链接器（默认 ON）
 -D AURORA_ENABLE_CLANG_TIDY=ON|OFF       # lint / lint-fix 目标（默认 ON）
 -D AURORA_LINT_SHARD=0/4                 # TU 分片（默认空 = 全量一遍；CI 矩阵用，见 §4.5）

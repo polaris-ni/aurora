@@ -218,6 +218,34 @@ jobs:
             ctest --test-dir build --output-on-failure -C ${{ matrix.build-type }} -j "$(nproc)"
           fi
 
+      # 编译/测试耗时观测（纯观测、恒退出 0、不进门禁；见 ARCHITECTURE.md §14.4）。
+      # build_baseline.py 解析 .ninja_log（编译边耗时分布/p95/top-N）与
+      # Testing/Temporary/LastTest.log（逐测试串行耗时），落 JSON 供 before/after 对照。
+      - name: Build/test timing baseline
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          python3 tools/check/build_baseline.py --build-dir build --json build/build-baseline.json --top 20
+          {
+            echo "### Build/Test timing baseline (${{ matrix.name }})"
+            echo '```json'
+            cat build/build-baseline.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload timing artifacts
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-timing-${{ matrix.name }}
+          path: |
+            build/.ninja_log
+            build/Testing/Temporary/LastTest.log
+            build/build-baseline.json
+          if-no-files-found: warn
+
   # ---------------------------------------------------------------------------
   # 2. 后端矩阵：AURORA_BACKEND_* 各非默认后端至少编译一次
   # ---------------------------------------------------------------------------
@@ -306,6 +334,32 @@ jobs:
           else
             ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
           fi
+
+      # 编译/测试耗时观测（纯观测、恒退出 0、不进门禁；见 ARCHITECTURE.md §14.4）。
+      - name: Build/test timing baseline
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          python3 tools/check/build_baseline.py --build-dir build --json build/build-baseline.json --top 20
+          {
+            echo "### Build/Test timing baseline (${{ matrix.name }})"
+            echo '```json'
+            cat build/build-baseline.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload timing artifacts
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-timing-${{ matrix.name }}
+          path: |
+            build/.ninja_log
+            build/Testing/Temporary/LastTest.log
+            build/build-baseline.json
+          if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
   # 3. feature 宏极性矩阵（ubuntu/gcc，Release）：
