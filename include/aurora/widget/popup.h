@@ -250,17 +250,75 @@ class Popup : public SingleChild {
         return child_.widget().hit_test_chain(content_local, content_box, ctx);
     }
 
-    /// @brief 恒 false：本控件是「正面范式」，不经祖先开闸。
+    /// @brief 恒 false：本控件是「正面范式」，**不申报追加命中盒**。
     ///
     /// 弹出内容按 `anchor_`（**全局**坐标）绘制，与布局盒坐标系不一致，故基类的
     /// 「按 `bounds().origin` 折算逐层下探」在这里算不出正确结果。命中由本控件自己的
-    /// `on_hit_test_chain` 在**自己的入口**里重映射并下降，无需祖先把追加盒并入判定；
+    /// `on_hit_test_chain` 在**自己的入口**里重映射并下降，无需祖先把它当追加盒折算。
     /// 覆写为 false 以免基类折算产出一个与派发链分叉的假申报。
+    ///
+    /// ⚠️ 这与「祖先**不需要**为本控件开闸」是两件事：祖先仍须问一次
+    /// `covers_remapped_descendant`（见下）才能放行——本控件在常规流中占**零尺寸**盒，
+    /// 基类按布局盒折算的两道闸对它恒判假。
+    ///
     /// @return 恒 false。
     /// @note Side-effects: pure
     [[nodiscard]] auto covers_descendant_extra_hit_box(const Point & /*local*/, const BuildContext & /*ctx*/,
                                                        const Point & /*ancestor_offset*/) const -> bool override {
         return false;
+    }
+
+    /// @brief 命中侧可达区申报：把局部点换算到全局后判 `content_box` 是否含该点。
+    ///
+    /// 与本类 `on_hit_test_chain` 的下降口径**逐字同构**：同一个 `content_box`、同一套换算，故
+    /// 「祖先闸认」与「本控件认」不会分叉。关闭态与无子节点返回 `false`（此时既不绘制也不命中）。
+    ///
+    /// ⚠️ `ancestor_offset` 在本入口是**完整全局原点**（x 与 y 都有），不是「视口坐标系 y」——
+    /// 换算需要 x。这与 `covers_extra_hit_box` 家族的形参语义**不同**（那个只累加、供翻转判据
+    /// 判「离视口多远」，不需要 x），故本入口不复用那个形参的语义，改由调用方直接给全局原点。
+    ///
+    /// @param local 待测点（本控件本地坐标）。
+    /// @param ctx 构建上下文。
+    /// @param self_origin 本控件的**全局原点**（调用方从 `bounds.origin + cb.origin` 取得）。
+    /// @return 该点落在弹出内容盒内为 true。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto covers_remapped_descendant_at(const Point &local, const BuildContext &ctx,
+                                                     const Point &self_origin) const -> bool override {
+        (void)ctx;
+        if (!open_ || !child_) {
+            return false;
+        }
+        const Rect content_box{.origin = anchor_, .size = content_size_};
+        return content_box.contains(Point{.x = self_origin.x + local.x, .y = self_origin.y + local.y});
+    }
+
+    /// @brief 绘制侧放行：打开态且有内容时返回 true。
+    ///
+    /// 本控件在常规流中占**零尺寸**盒，而 `Container::on_paint` 的遮挡剔除闸按
+    /// `global.intersects(clip)` 判定（`Rect::intersects` 是严格比较）⇒ 零尺寸盒恒假、整棵被跳过，
+    /// 表现为「浮层没画出来且无任何报错」。与 `covers_remapped_descendant` **必须同改**。
+    ///
+    /// @return 打开态且有内容为 true。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto paints_outside_layout_box_at() const -> bool override { return open_ && child_; }
+
+    /// @brief 窗口盒基准重映射：打开态返回 `anchor_`，其上祖先链一概不参与。
+    ///
+    /// 与本类 `on_paint` / `on_hit_test_chain` 同源：两者下传给内容的盒原点都是 `anchor_`
+    /// （**全局**坐标，`on_paint` 直接 `content_box{origin = anchor_}`、命中链用
+    /// `content_box.contains(global)` 判），全程不参与 `Popup` 自身在树中的位置——
+    /// 故 `window_bounds()` 沿父链递推到本层时必须以 `anchor_` **替换**已累加量并终止上溯，
+    /// 而不是叠加（叠加会读成「`Popup` 的树上位置 + `anchor_`」，与派发链分叉）。
+    ///
+    /// 关闭态（`!open_`）与无子节点时返回 `std::nullopt`：此时内容未被布局、`content_size_`
+    /// 为零盒，基准没有被重映射，维持 `Widget` 的缺省递推。
+    ///
+    /// @return `anchor_`（打开且有内容）；否则 `std::nullopt`。
+    [[nodiscard]] auto child_content_origin() const -> std::optional<Point> override {
+        if (!open_ || !child_) {
+            return std::nullopt;
+        }
+        return anchor_;
     }
 
   private:

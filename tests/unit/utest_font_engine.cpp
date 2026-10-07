@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstddef>
 #include <memory>
 #include <span>
 #include <string>
@@ -452,6 +451,8 @@ AURORA_TEST_CASE(monospace_cell_grid_keeps_ink_columns_drift_free) {
     }
 }
 
+namespace {
+
 /// @brief 挑一个「实测 advance ≠ 格宽」的码点（UTF-8 串），供固定格档位用例构造语料。
 ///
 /// 为什么需要它：固定格档位要证明的是「推进量只由档位决定、而非由各 face 自己的 advance 决定」。
@@ -552,6 +553,8 @@ AURORA_TEST_CASE(monospace_cell_grid_keeps_ink_columns_drift_free) {
     }
     return {};
 }
+
+}  // namespace
 
 // ============================ 固定格推进档位 ============================
 //
@@ -669,7 +672,7 @@ AURORA_TEST_CASE(fixed_cell_advance_places_every_glyph_inside_its_own_cell) {
     // （该腿 Cascadia Code 含该字形、advance 恰等于格宽），故不写死码点。
     const std::string wide = pick_wide_glyph_for(f, cw);
     const std::string mixed = "A" + wide + "A" + wide + "A" + wide + "A";
-    const int cells = 7;
+    constexpr int cells = 7;
     // 挑不出宽字形 ⇒ 本环境不可观测，如实 SKIP（不给假绿）。
     if (wide.empty()) {
         AURORA_TEST_SKIP("no code point with advance != cell width: pixel criteria unobservable in this environment");

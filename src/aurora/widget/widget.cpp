@@ -928,7 +928,13 @@ auto Widget::window_bounds() const -> std::optional<Rect> {
     // 须扣掉滚动量才是它在视口里的真实位置（见 scroll.h 的「几何与命中契约」）。
     // `LazyList` / `LazyRow` / `GridView` 的偏移已参与子布局（子 bounds 直接是视口坐标），
     // 它们的 `scroll_content_offset` 保持缺省零值。
-    Point origin{.x = 0.0F, .y = 0.0F};  // 根的窗口布局原点
+    //
+    // 「坐标系重映射」是另一类、语义相反的修正：`Popup` 按 `anchor_`（**全局**坐标）绘制与命中
+    // 内容，其 `on_paint` / `on_hit_test_chain` 全程不参与 `Popup` 自身在树中的位置，故经过该层时
+    // 已累加的量要被 `anchor_` **替换**、且其上祖先链一律不再参与——与上面那个**加性**滚动修正
+    // 不可代偿，故走另一个钩子（见 widget.h 的 `child_content_origin`）。此处不做类型判断：
+    // 「哪类宿主重映射坐标系」由容器自己显式声明。
+    Point origin{.x = 0.0F, .y = 0.0F};  // 相对本控件内容盒原点的累计偏移（自叶向根）
     for (;;) {
         // 几何权威只在父侧的 Node 上（见 04-widget.md §6.1），Widget 自身不持有 ⇒ 每层按地址
         // 比对回本控件在父子视图里的盒。虚拟化容器的 live_ 项不在 `child_nodes()` 里，那种形态
@@ -942,6 +948,11 @@ auto Widget::window_bounds() const -> std::optional<Rect> {
         const Rect cb = it->bounds();
         if (child == this) {
             self_in_parent = cb;  // 只取**本控件自身**那一份；后续迭代拿到的是祖先的盒
+        }
+        // 坐标系重映射宿主的基准替换：累计量是「本控件内容盒原点 → 根」的路程，宿主把整棵子树
+        // 摆在另一个绝对基准上，故以其返回值替换并终止上溯。
+        if (const std::optional<Point> mapped = parent->child_content_origin(); mapped.has_value()) {
+            return Rect{.origin = *mapped + origin, .size = self_in_parent.size};
         }
         Point scroll_delta{.x = 0.0F, .y = 0.0F};
         parent->scroll_content_offset(cb.origin, scroll_delta);
@@ -988,6 +999,15 @@ auto Widget::covers_descendant_extra_hit_box(const Point &local, const BuildCont
         return child.widget().covers_extra_hit_box(local - cb.origin, ctx, child_offset);
     });
 }
+
+auto Widget::covers_remapped_descendant(const Point &local, const BuildContext &ctx, const Point &self_origin) const
+    -> bool {
+    // public 非虚转发入口 → protected virtual。与 covers_extra_hit_box 的分层同构：
+    // 容器下降闸要对 child.widget()（任意派生类实例）提问，protected 成员在派生类里不可达。
+    return covers_remapped_descendant_at(local, ctx, self_origin);
+}
+
+auto Widget::paints_outside_layout_box() const -> bool { return paints_outside_layout_box_at(); }
 
 auto Widget::mount(const BuildContext &ctx) -> void {
     if (mounted_) {

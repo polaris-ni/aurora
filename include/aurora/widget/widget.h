@@ -267,6 +267,36 @@ class Widget : public std::enable_shared_from_this<Widget> {
     [[nodiscard]] auto covers_extra_hit_box(const Point &local, const BuildContext &ctx,
                                             const Point &ancestor_offset = Point{.x = 0.0F, .y = 0.0F}) const -> bool;
 
+    /// @brief 判定本地坐标点是否落在**坐标系被重映射的子树内容**上（供容器下降闸放行用）。
+    ///
+    /// 与 `covers_extra_hit_box` 同为 **public 非虚转发入口**，真正的判定在 protected virtual
+    /// `covers_remapped_descendant`（缺省恒 false）。做成转发入口是访问权限所迫：`Container`
+    /// 的下降闸要对 `child.widget()`（可能是任意派生类实例）问这个问题，protected 成员在派生类
+    /// 里不可达——与 `covers_extra_hit_box` / `covers_own_extra_hit_box` 的分层同构。
+    ///
+    /// 存在的理由：`Popup` 按 `anchor_`（**全局**坐标）绘制与命中其内容，而它在常规流中占
+    /// **零尺寸**盒。零尺寸盒与 clip 的 `Rect::intersects`（严格比较）恒假、闭区间 `contains`
+    /// 也恒假 ⇒ 基类的绘制闸与命中闸对整棵子树判假，浮层**画不出也点不到，且不抛错不告警**。
+    /// 本入口让这类宿主自己申报「我的内容摆在别处、这个点落在我内容上」。
+    ///
+    /// @param local 待测点（本控件本地坐标，已减去自身 origin）。
+    /// @param ctx 构建上下文。
+    /// @param self_origin 本控件的**全局原点**（x 与 y；`Container` 的闸传 `bounds.origin + cb.origin`）。
+    /// @return 该点落在被重映射的子树内容上为 true；否则 false。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto covers_remapped_descendant(const Point &local, const BuildContext &ctx,
+                                                  const Point &self_origin) const -> bool;
+
+    /// @brief 判定本控件是否在**自身布局盒之外**绘制内容（供 `Container::on_paint` 的遮挡剔除闸放行用）。
+    ///
+    /// 与 `covers_remapped_descendant` 同为 **public 非虚转发入口**，真正的判定在 protected
+    /// virtual `paints_outside_layout_box`（缺省恒 false）。两者**必须同改**：本入口管绘制侧、
+    /// `covers_remapped_descendant` 管命中侧，只改其一会造成「画得出点不到」或反向分叉。
+    ///
+    /// @return 在自身布局盒之外绘制内容为 true。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto paints_outside_layout_box() const -> bool;
+
     /// @brief 判定本地坐标点是否落在**本节点自身**申报的追加命中盒内（不递归子树）。
     ///
     /// 与 `covers_extra_hit_box` 的区别仅在**是否含子树**：本入口只看 `extra_hit_box(ctx)` 一份
@@ -1247,6 +1277,52 @@ class Widget : public std::enable_shared_from_this<Widget> {
     [[nodiscard]] virtual auto covers_descendant_extra_hit_box(const Point &local, const BuildContext &ctx,
                                                                const Point &ancestor_offset) const -> bool;
 
+    /// @brief 子类可覆写：判定本地坐标点是否落在**坐标系被重映射的子树内容**上。
+    ///
+    /// 由 public 转发入口 `covers_remapped_descendant` 调用（后者是容器下降闸唯一能问到的入口）。
+    /// 缺省返回 `false`，即「本控件没有坐标系重映射的可达区」——绝大多数控件的情形，
+    /// 故既有判定逐位不变。
+    ///
+    /// **与 `covers_descendant_extra_hit_box` 的分工**（两者同族，语义不同、不可互相代偿）：
+    /// - `covers_descendant_extra_hit_box` 问「后代申报的**追加命中盒**（本地坐标）是否覆盖此点」，
+    ///   偏移由 `ancestor_offset` 逐层累加给出（该形参语义是「本控件原点的视口 y」）；
+    /// - 本入口问「子树的**内容被摆在别处**时该点是否落在那片内容上」。⚠️ 本入口的 `self_origin`
+    ///   语义与上面**不同**：它是本控件的**完整全局原点（x 与 y）**，因为换算到内容坐标系需要 x。
+    ///
+    /// 仅「内容坐标系与布局盒不一致」的宿主需要覆写——`Popup` 按 `anchor_`（**全局**坐标）绘制与
+    /// 命中其内容，而它占零尺寸盒，基类两道闸对它恒判假。覆写体必须与本控件 `on_hit_test_chain`
+    /// 下传给子树的内容盒**逐字同构**，否则出现「画得出点不到」或反向分叉。
+    ///
+    /// @param local 待测点（本控件本地坐标，已减去自身 origin）。
+    /// @param ctx 构建上下文。
+    /// @param self_origin 本控件的**全局原点**（x 与 y）。
+    /// @return 该点落在被重映射的子树内容上为 true；否则 false。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto covers_remapped_descendant_at(const Point &local, const BuildContext &ctx,
+                                                             const Point &self_origin) const -> bool {
+        (void)local;
+        (void)ctx;
+        (void)self_origin;
+        return false;
+    }
+
+    /// @brief 子类可覆写：本控件是否在**自身布局盒之外**绘制内容（覆盖绘制 / 坐标系重映射）。
+    ///
+    /// 由 public 转发入口 `paints_outside_layout_box` 调用（后者是 `Container::on_paint` 的遮挡
+    /// 剔除闸唯一能问到的入口）。缺省返回 `false`，即「只在自身布局盒内绘制」——绝大多数控件的
+    /// 情形，既有行为逐位不变。
+    ///
+    /// 存在的理由：`Container::on_paint` 的遮挡剔除闸按「子节点全局盒与裁剪区无交集就整棵跳过」
+    /// 判定，而覆盖绘制型控件的内容画在布局盒之外，其布局盒可能与裁剪区**完全无交集**
+    /// （`Popup` 在常规流中占零尺寸盒，`Rect::intersects` 是严格比较 ⇒ 恒假）⇒ 不放行则它整棵
+    /// 画不出来，且**失败完全静默**（不抛错、不告警）。
+    ///
+    /// ⚠️ 与 `covers_remapped_descendant_at` **必须同改**：本入口管绘制侧放行、后者管命中侧放行。
+    ///
+    /// @return 在自身布局盒之外绘制内容为 true。
+    /// @note Side-effects: pure
+    [[nodiscard]] virtual auto paints_outside_layout_box_at() const -> bool { return false; }
+
     /// @brief 内容自然高度（OverflowStrategy::Scroll 用）：滚轮夹取上限 = 内容高 − 视口高。
     /// 默认取自身尺寸（叶控件无溢出内容 → 不可滚）；容器覆写为子节点 bounds 的最大 bottom。
     /// @return 内容自然高度（dp）；基类返回自身 `size_.height`。
@@ -1268,6 +1344,28 @@ class Widget : public std::enable_shared_from_this<Widget> {
     virtual auto scroll_content_offset(const Point & /*child_origin*/, Point &out) const -> void {
         out = Point{.x = 0.0F, .y = 0.0F};
     }
+
+    /// @brief 子类可覆写：本控件作为「坐标系重映射宿主」时，其子树的窗口盒基准被重映射到哪个绝对坐标。
+    ///
+    /// `window_bounds()` 沿布局父链上溯时，每层先问一次本入口：返回非空值 `O` 表示
+    /// 「本控件子树内任一后代 `W` 的窗口盒原点 = `O` + `W` 相对本控件内容盒原点的偏移」，
+    /// 累加量以 `O` **替换**、上溯到此**终止**；返回 `std::nullopt`（缺省）表示子树沿父链正常递推。
+    ///
+    /// 与 `scroll_content_offset` 的分工：后者是**加性**修正（从子节点盒里扣掉一个滚动量，
+    /// 基准仍是父链递推结果）；本入口是**替换性**重映射（基准本身被换掉，故其上祖先链一律不参与）。
+    /// 两者语义不可互相代偿，故设两个入口。
+    ///
+    /// 缺省返回 `std::nullopt`，这是**绝大多数控件**的情形：普通容器的 `bounds.origin` 已是父级
+    /// 内容区全局原点，递推即得。仅覆盖绘制 / 坐标系与布局盒不一致的宿主需要覆写——`Popup` 按
+    /// `anchor_`（**全局**坐标）绘制与命中其内容，`on_paint` / `on_hit_test_chain` 全程不参与
+    /// `Popup` 自身在树中的位置，故只有它给出替换性基准（见 `popup.h` 的「几何与命中契约」）。
+    ///
+    /// ⚠️ 覆写体必须与本控件 `on_paint` / `on_hit_test_chain` 下传给子树的盒**同源**：返回的坐标
+    /// 就是那两条路径实际使用的子树基准原点，另算一份必然与派发链分叉。
+    ///
+    /// @return 子树的窗口盒基准绝对坐标；不重映射（绝大多数控件）时为 `std::nullopt`。
+    [[nodiscard]] virtual auto child_content_origin() const -> std::optional<Point> { return std::nullopt; }
+
     /// @brief 子类可覆写：挂载时额外逻辑（默认递归挂载在 Container 中处理）。
     /// @param ctx 挂载上下文；基类默认实现不消费（覆写者用它的 environment / 层级信息）。
     virtual auto on_mount(const BuildContext &ctx) -> void { (void)ctx; }
@@ -1462,6 +1560,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// `Node::bounds().origin` 与 Modifier 的内容盒平移（复用绘制/命中链同一份
     /// `Modifier::TransformInfo::translation`，见 `content_origin`），并逐段扣掉滚动祖先的
     /// 滚动偏移，使读数与派发链同源——同一控件、同一帧、同一坐标空间。
+    ///
+    /// 两类宿主修正各走一个钩子，口径不可互换：**加性**修正由 `scroll_content_offset` 承载
+    /// （`Scroll` 把内容写在内容坐标系，扣掉滚动量，基准仍是父链递推结果）；**替换性**重映射由
+    /// `child_content_origin` 承载（`Popup` 按 `anchor_` 把内容摆在全局坐标，其上祖先链不参与，
+    /// 故以该坐标替换累计量并终止上溯）。
     ///
     /// @return 有有效窗口盒时为该盒；以下情形返回 `std::nullopt`：
     ///         - 本控件 `show == false`（布局期尺寸被夹成零盒，无有效几何）；
@@ -1683,7 +1786,10 @@ class Container : public Widget {
             const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
 #ifdef AURORA_ENABLE_OCCLUSION_CULLING
             // 遮挡剔除：子控件全局盒与裁剪区无交集则整棵子树跳过（保守外接矩形判定）。
-            if (!global.intersects(clip)) {
+            // ⚠️ 「坐标系重映射宿主」（如 `Popup` 按 `anchor_` 在**全局**坐标绘制内容，而自身在常规流中
+            // 占零尺寸盒）必须放行：零尺寸盒与 clip 的 `intersects` 恒假，不放行则它整棵画不出来。
+            // 与下面两处命中闸**必须同改**，只改其一会让「画得出点不到」或反向分叉。
+            if (!global.intersects(clip) && !child.widget().paints_outside_layout_box()) {
                 continue;
             }
 #endif
@@ -1698,10 +1804,13 @@ class Container : public Widget {
         for (auto &child : std::views::reverse(children_)) {
             const Rect cb = child.bounds();
             // local 处于本容器局部坐标系：子节点位置为 cb（相对本容器内容区）。
-            // 闸 = 子布局盒 ∪ 子的追加命中盒：覆盖绘制（下拉面板/菜单浮层/Snap 弹窗）画在布局盒外，
-            // 只按布局盒判定会让那片区域永远进不了命中链。
+            // 闸 = 子布局盒 ∪ 子的追加命中盒 ∪ 子的坐标系重映射可达区：覆盖绘制（下拉面板/菜单浮层/
+            // Snap 弹窗）画在布局盒外，只按布局盒判定会让那片区域永远进不了命中链；而坐标系重映射
+            // 宿主（`Popup` 占零尺寸盒、按 `anchor_` 在全局坐标绘制与命中）连布局盒判定都过不去，
+            // 须由它自己申报可达区（`covers_remapped_descendant`，缺省 false ⇒ 本支零变化）。
             if (cb.contains(local) ||
-                child.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
+                child.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin) ||
+                child.widget().covers_remapped_descendant(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 // 向下传递子节点“全局”盒（本容器全局原点 + 子相对原点），供更深层级本地化。
                 const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
                 Widget *r = child.widget().hit_test(local - cb.origin, global, ctx);
@@ -1718,10 +1827,12 @@ class Container : public Widget {
         // 同样反向遍历，使重叠时视觉顶层控件成为命中链最深（最后派发）目标。
         for (auto &child : std::views::reverse(children_)) {
             const Rect cb = child.bounds();
-            // 闸 = 子布局盒 ∪ 子的追加命中盒（与 `on_hit_test` 同一口径）：真实派发只走本入口，
-            // 只按布局盒判定时覆盖绘制区（面板/浮层/弹窗）拿不到点击。
+            // 闸 = 子布局盒 ∪ 子的追加命中盒 ∪ 子的坐标系重映射可达区（与 `on_hit_test` 同一口径）：
+            // 真实派发只走本入口，只按布局盒判定时覆盖绘制区（面板/浮层/弹窗）拿不到点击；
+            // 坐标系重映射宿主（`Popup`）占零尺寸盒，前两项恒假，须由第三项放行。
             if (cb.contains(local) ||
-                child.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
+                child.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin) ||
+                child.widget().covers_remapped_descendant(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 // global.origin 即子节点全局 origin，随命中链带入，供派发器本地化坐标。
                 const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
                 std::vector<HitNode> r = child.widget().hit_test_chain(local - cb.origin, global, ctx);

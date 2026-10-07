@@ -233,7 +233,22 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **z 序不受影响**：闸并入追加盒只放宽「能否下降」，不改变兄弟间的优先次序（仍按绘制逆序、视觉最上层优先）。故覆盖控件的面板若被**更晚绘制**的兄弟压住，重叠处点击归兄弟——与视觉一致；要让面板完整可点，须把它挂到真正的浮层宿主（`OverlayHost` / `Popup`）上。
 
-**正面范式**：`Popup::on_hit_test_chain`（`popup.h`）在**自己的入口**里按 `anchor_` 把局部点重映射到内容盒后下降，无需祖先开闸。另两种已收敛的形态见 `04-widget.md`：`Dialog`（内容盒外即遮罩区、自身入链吸收点击而不穿透）与 `Scroll`（视口 → 内容坐标换算后再下降，见「滚动的两套坐标系」）。
+**正面范式**：`Popup::on_hit_test_chain`（`popup.h`）在**自己的入口**里按 `anchor_` 把局部点重映射到内容盒后下降。另两种已收敛的形态见 `04-widget.md`：`Dialog`（内容盒外即遮罩区、自身入链吸收点击而不穿透）与 `Scroll`（视口 → 内容坐标换算后再下降，见「滚动的两套坐标系」）。
+
+⚠️ **「不申报追加命中盒」≠「祖先不必开闸」**：`Popup` 覆写 `covers_descendant_extra_hit_box` 为恒 `false`（不把内容当追加盒折算），但它在常规流中占**零尺寸**盒，而 `Container` 的三道闸都按「盒与区域有交集」判定——绘制侧的遮挡剔除闸 `!global.intersects(clip)`（`Rect::intersects` 是**严格**比较，零尺寸盒恒假）、两道命中闸的 `cb.contains(local)`（闭区间但零尺寸亦恒假）⇒ 挂在普通容器下**整棵被跳过：画不出也点不到，且不抛错不告警**。`OverlayHost` 之所以可用，是因为它自己覆写了 `on_paint` 与 `on_hit_test_chain`、下降时**无条件**问每个子节点（连闸都不设），恰好绕过基类这两道闸。
+
+修法是让这类宿主自己向三道闸申报可达区，两个入口**必须同改**（一个管绘制侧、一个管命中侧，只改其一造成「画得出点不到」或反向分叉）：
+
+| 角色 | 契约 |
+|:---|:---|
+| `Widget::covers_remapped_descendant(local, ctx, self_origin)`（**public 非虚**）→ protected virtual `covers_remapped_descendant_at`（缺省恒 `false`） | 命中侧放行：把 `local` 换算到内容坐标系后判是否落在内容盒内。⚠️ `self_origin` 是本控件的**完整全局原点（x 与 y）**，与 `covers_extra_hit_box` 家族的 `ancestor_offset`（只累加、供翻转判据判「离视口多远」）语义**不同** |
+| `Widget::paints_outside_layout_box()`（**public 非虚**）→ protected virtual `paints_outside_layout_box_at`（缺省恒 `false`） | 绘制侧放行：本控件是否在自身布局盒之外绘制内容 |
+
+做成 public 转发入口 + protected virtual 的分层是**访问权限所迫**（`Container` 要对 `child.widget()` 提问，protected 成员在派生类里不可达），与既有 `covers_extra_hit_box` / `covers_own_extra_hit_box` 家族同构。缺省恒 `false` ⇒ 17 处现有 `covers_extra_hit_box` 调用点与所有既有容器行为**逐位不变**；「零尺寸一律放行」这条全局语义**不得**引入（负守卫见下）。
+
+⚠️ **已知代价**：绘制侧放行意味着 `Popup` 内容不再被父容器的 clip 裁剪（可能被裁到视口外仍照画）。这是「`anchor_` 是全局坐标」这一既有语义的必然推论——内容本就不属于父容器的裁剪坐标系。
+
+**验收**：`utest_overlay_host` 三条——`Column` + 打开的 `Popup` 像素级判据（有落墨）**与**命中链判据（盒内非空、盒外为空）**同时**成立；零尺寸兄弟控件（未覆写新钩子）仍被剔除，且两个放行钩子的**缺省值都是 `false`**（两段缺一不可——只钉外部行为会漏过「只改一侧缺省」的变异，因为另一侧仍绿）；盒内一点**既被绘制又被命中**、盒外一点两者都不（钉住三道闸同改）。变异自证：只改绘制闸 ⇒ 命中判据红（「点得到但看不见」）；只改命中闸 ⇒ 像素判据红（「看得见但点不到」）；缺省改 `true` ⇒ 负守卫的缺省值断言红。
 
 **验收**：`utest_dropdown` / `utest_menu_bar` / `utest_title_bar` 三个套件守护——嵌 `Column` 与嵌 `LazyList` 条目两种宿主下覆盖区可点、覆盖区外不抢（面板底边以下的点仍归下方兄弟控件）、收起态逐位不变、展开结束后陈旧点不中、兼容入口与派发入口逐点一致；`utest_containers` 的 `default_extra_hit_box_equals_own_layout_box` 钉住缺省等价（密集取点上，命中链最深节点与「只按子布局盒判定」的参考实现逐点相同）。变异自证：只回退闸（保留控件侧追加盒）或只回退控件侧 `extra_hit_box()`（保留闸）都必须让上述用例转红——两者分别是必要条件。
 
@@ -251,7 +266,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **覆写场景仅两类**（新增控件时按此二选一，不必逐处重写闸）：
 
-1. **子节点来源或坐标系与布局盒不一致**——`LazyList` / `GridView` 的子项在 `live_` 表里（虚拟化，不在 `children_` / `child_nodes()` 中），须自行遍历；`Popup` 按 `anchor_`（**全局**坐标）绘制内容，基类折算算不出正确结果，覆写为恒 `false`（它是上一节的「正面范式」，在自己的 `on_hit_test_chain` 里重映射下降，不经祖先开闸）。
+1. **子节点来源或坐标系与布局盒不一致**——`LazyList` / `GridView` 的子项在 `live_` 表里（虚拟化，不在 `children_` / `child_nodes()` 中），须自行遍历；`Popup` 按 `anchor_`（**全局**坐标）绘制内容，基类折算算不出正确结果，覆写为恒 `false`（它是上一节的「正面范式」，在自己的 `on_hit_test_chain` 里重映射下降，**不把内容当追加盒折算**）。⚠️ 但它仍须经上一节那两个「重映射可达区」入口向三道闸申报可达区——覆写本钩子为 `false` 只是不申报追加盒，不等于祖先不必放行。
 2. **带视口裁剪的容器必须覆写并加视口钳位**——`Scroll` / `LazyList` / `GridView`。虚拟化与滚动使子树里存在被裁出视口的节点；不钳位则它们照样申报追加盒，**一个肉眼不可见的区域变得可点**，比不做修复更糟。覆写时钳位与坐标换算必须与本控件 `on_hit_test_chain` 的下降口径**逐字同构**，否则出现「闸认、自身不认」。
 
 **z 序与覆盖绘制并用的限制（形态约束，非缺陷）**：`on_paint` 按子节点**前向**绘制、`on_hit_test_chain` **逆序**下降。覆盖绘制不占布局，故其面板会被**更晚绘制**的兄弟行盖住——追加盒聚合修好的是「派发可达」，视觉残段仍在，且重叠处点击归视觉更上层的兄弟（与视觉一致）。**因此列表行内不得使用覆盖绘制不占布局的控件**；推荐替代是把面板挂到真正的浮层宿主（`OverlayHost` / `Popup`），它们按自身次序自顶向下询问。本仓不为此改绘制顺序：那样会在每帧绘制路径上引入「读一个在绘制期语义未定义的查询」，并改变全部容器的层叠语义。
@@ -299,6 +314,19 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | `window_bounds().origin.y` | 60 | 60 | 窗口逻辑 dp |
 | `HitNode.origin.y` | **260**（漏扣 `offset_y_`） | **60** | 窗口逻辑 dp（已修） |
 | `paint_bounds().origin.y` | 200 | 200 | 内容 / 缓冲坐标（**不变**，见上） |
+
+**坐标系重映射宿主下三读数的关系（`Popup`）**：上表的两条「已同源」结论只在**布局坐标系与窗口坐标系一致**的容器里成立。覆盖绘制型宿主会**另立一套基准**，此时三条读数各自的口径是：
+
+| 读数 | `Popup` 内容控件的取值 | 坐标系 |
+|:---|:---|:---|
+| 真窗口位（派发链实际使用的） | `anchor_` + 内容盒内偏移 | 窗口逻辑 dp |
+| `window_bounds().origin` | 同上（经 `Widget::child_content_origin` 替换基准后） | 窗口逻辑 dp |
+| `HitNode.origin` | 同上 | 窗口逻辑 dp |
+| `paint_bounds().origin` | 同上（`Popup` 不录离屏缓冲） | 窗口逻辑 dp |
+
+**`Popup` 是三条读数唯一全部同源的形态**，因为它的绘制与命中都直接用 `anchor_` 这个全局基准、不录离屏缓冲。修复前 `window_bounds()` 沿 `layout_parent_` 递推看不到 `anchor_`（`Popup::on_layout` 把内容子盒 origin 钉在 `{0,0}`），读数少一个锚点 ⇒ 消费侧按该读数取点落不到控件，`type()` 的字符被基类 `Widget::on_text_input` 缺省 `is_handled = true` 静默吞掉。修法是**替换基准并终止上溯**而非叠加（叠加会读成「`Popup` 的树上位置 + `anchor_`」），详见 [`04-widget.md`](04-widget.md) §6.3 的「坐标系重映射」。
+
+⚠️ 因此**判据不得拿 `HitNode.origin` 当窗口坐标基准**去校验其它形态：它在滚动容器内不是窗口坐标（上表「修复前」列）。要独立校验某控件的可达框，只能用**真实命中链密集探针**实测「命中该控件」的点集外接框——那条通路与坐标系解耦。
 
 **`HitNode.origin` 已修为真窗口坐标**（`Scroll::on_hit_test_chain` 下传时 y 扣 `offset_y_`）：修复前它给的是「视口原点 + 内容盒原点」，漏扣滚动量，使滚动容器内控件收到的 `local_position` 整体错位一个 `offset_y_`（实测点行视觉中心收到 −180，正确值 20）。修复后它与 `window_bounds()` 对同一控件、同一帧给出**同一个窗口位置**，消费侧无需自算折算。
 
