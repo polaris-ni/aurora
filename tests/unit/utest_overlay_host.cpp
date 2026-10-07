@@ -701,10 +701,23 @@ AURORA_TEST_CASE(plain_container_gate_still_culls_zero_sized_siblings) {
     AURORA_TEST_CHECK_FALSE(gate->paint_gate_default());
     AURORA_TEST_CHECK_FALSE(gate->hit_gate_default());
 
-    // 外部行为段：零尺寸兄弟仍被绘制闸剔除（它铺的 60×60 墨迹一块都不该出现）。
-    AURORA_TEST_CHECK(count_ink_pixels(*root, 200, 200) == 0);
     const Rect root_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 200.0F}};
+
+    // 命中侧：零尺寸兄弟仍被命中闸跳过（cb.contains 闭区间对零尺寸盒恒假 + 两钩子缺省 false）。
+    // 这条与 AURORA_ENABLE_OCCLUSION_CULLING 无关，恒成立——下降闸不依赖遮挡剔除宏。
     AURORA_TEST_CHECK(root->hit_test_chain(Point{.x = 10.0F, .y = 10.0F}, root_box, BuildContext{}).empty());
+
+    // 绘制侧：零尺寸兄弟是否被绘制闸剔除，**取决于 AURORA_ENABLE_OCCLUSION_CULLING**。
+    // 本用例要钉的是「两钩子缺省值恒为 false」（上面已钉），而**实际剔不剔除**由宏决定：
+    // - ON：遮挡剔除闸按 global.intersects(clip) 严格判定，零尺寸盒恒假、且无 paints_outside
+    //   放行 ⇒ 整棵被跳过，不应有墨迹（探点 (10,10) 落在它铺的 60×60 墨迹内）。
+    // - OFF：无剔除闸，子节点无条件绘制，探针照常铺它的 60×60 墨迹 ⇒ 必有墨迹。
+    // 反向不变量（宏关时零尺寸控件不被错误剔除）同样值得守住，故两侧各断言其正确极性。
+#ifdef AURORA_ENABLE_OCCLUSION_CULLING
+    AURORA_TEST_CHECK(count_ink_pixels(*root, 200, 200) == 0);
+#else
+    AURORA_TEST_CHECK(count_ink_pixels(*root, 200, 200) > 0);
+#endif
 }
 
 AURORA_TEST_CASE(popup_draw_and_hit_gates_agree_in_plain_column) {
