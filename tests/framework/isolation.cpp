@@ -215,7 +215,7 @@ auto sweep_stale_temp_dirs() -> void {
         bases.push_back(sys_tmp);  // 回退①：系统临时目录
     }
 #ifndef AURORA_PLATFORM_WINDOWS
-    bases.push_back(fs::path{"/tmp"});  // 回退②：POSIX /tmp
+    bases.emplace_back("/tmp");  // 回退②：POSIX /tmp（emplace 避免临时 path 拷贝）
 #endif
     std::vector<fs::path> stale;
     for (const auto &base : bases) {
