@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -12,8 +14,11 @@
 #include "aurora/core/font.h"
 #include "aurora/core/log.h"
 #include "aurora/core/types.h"
+#include "aurora/environment/build_context.h"  // 绘制期需完整类型以调 ctx.environment<Locale>()
 #include "aurora/event/focus.h"
 #include "aurora/event/keycode.h"
+#include "aurora/i18n/localized_string.h"
+#include "aurora/i18n/string_table.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme.h"
@@ -36,16 +41,36 @@ namespace aurora {
 /// （依赖 `CommandRegistry` 已 `bind_shortcuts`；未绑定时这几键不可用，面板以 WARN 提示）。
 /// Space 只经文本输入落字，不会触发执行。
 ///
+/// **上屏文案的 i18n 契约**：搜索框占位符与空态提示**不是**字面量，而是按词条 key 查
+/// `default_string_table()` 取得（`LocalizedString` 口径，与 `ReorderableListView::announce_text`
+/// 同款）；库不预置任何语言的词条，未登记时回退 `kDefaultPlaceholderText` / `kDefaultEmptyMessageText`
+/// 两条英文字面量。三档优先级：**文本覆盖（`set_placeholder` / `set_empty_message`）> 按 key 查表 >
+/// 兜底字面量**。解析发生在布局与绘制期，locale 取 `ctx` 注入的 `Locale`（与 `Text` / `Button` 同口径），
+/// 故运行期切 locale 立即生效。
+///
 /// @note Thread: main-thread only
-/// @note Side-effects: paints; `open`/`close` 修改焦点作用域与快捷键表
+/// @note Side-effects: paints; reads i18n table; `open`/`close` 修改焦点作用域与快捷键表
 /// @note Rebuildable: no（依赖外部 `CommandRegistry` 数据源）
 class CommandPalette : public Container {
   public:
+    /// @brief 占位符的默认 i18n 词条 key（宿主可换；未在 `StringTable` 登记则回退兜底串）。
+    static constexpr const char *kDefaultPlaceholderKey = "command_palette.placeholder";
+    /// @brief 空态提示的默认 i18n 词条 key（宿主可换；未登记则回退兜底串）。
+    static constexpr const char *kDefaultEmptyMessageKey = "command_palette.no_results";
+    /// @brief 占位符的兜底文本（查表失败时使用，即改动前的字面量）。
+    static constexpr const char *kDefaultPlaceholderText = "Type a command...";
+    /// @brief 空态提示的兜底文本（查表失败时使用，即改动前的字面量）。
+    static constexpr const char *kDefaultEmptyMessageText = "No matching commands";
+
     /// @brief 构造面板并内置搜索框（输入即过滤、Enter 执行选中项）。
     /// @param commands 命令注册表（非拥有，须比面板长寿）；可为 nullptr，此时面板为空列表。
     explicit CommandPalette(CommandRegistry *commands = nullptr) : commands_(commands) {
         auto field = std::make_shared<TextInput>();
-        field->set_placeholder("Type a command...");
+        // 构造期尚无 `BuildContext`，先按缺省 locale 解析一次，使 `placeholder()` / `empty_message()`
+        // 在首次布局前即可读出非空值；此后每次布局与绘制都按 `ctx` 的 locale 重算。
+        resolved_placeholder_ = lookup_text(placeholder_key_, kDefaultPlaceholderText, Locale{});
+        resolved_empty_message_ = lookup_text(empty_message_key_, kDefaultEmptyMessageText, Locale{});
+        field->set_placeholder(resolved_placeholder_);
         field->set_on_changed([this](const std::string &value) -> void {
             query_ = value;
             selected_ = 0;
@@ -63,8 +88,8 @@ class CommandPalette : public Container {
     [[nodiscard]] auto type_name() const -> const char * override { return "CommandPalette"; }
 
     /// @brief 运行时自描述（规格附录 B）。
-    /// @return 名为 "CommandPalette" 的静态描述符（open / max_results 两属性，事件 on_execute / on_close，
-    ///         子节点策略 none）。
+    /// @return 名为 "CommandPalette" 的静态描述符（open / max_results 与两对文案属性，
+    ///         事件 on_execute / on_close，子节点策略 none）。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = "CommandPalette",
@@ -84,6 +109,30 @@ class CommandPalette : public Container {
                      .json_type = "integer",
                      .enum_values = {},
                      .min_value = "1"},
+                    {.name = "placeholder",
+                     .type = "string",
+                     .default_value = kDefaultPlaceholderText,
+                     .required = false,
+                     .note = "Search field placeholder; when set it overrides the i18n lookup",
+                     .json_type = "string"},
+                    {.name = "placeholder_key",
+                     .type = "string",
+                     .default_value = kDefaultPlaceholderKey,
+                     .required = false,
+                     .note = "i18n key for the placeholder; setting it clears any text override",
+                     .json_type = "string"},
+                    {.name = "empty_message",
+                     .type = "string",
+                     .default_value = kDefaultEmptyMessageText,
+                     .required = false,
+                     .note = "Empty-state text shown when nothing matches; when set it overrides the i18n lookup",
+                     .json_type = "string"},
+                    {.name = "empty_message_key",
+                     .type = "string",
+                     .default_value = kDefaultEmptyMessageKey,
+                     .required = false,
+                     .note = "i18n key for the empty-state text; setting it clears any text override",
+                     .json_type = "string"},
                 },
             .events = {"on_execute", "on_close"},
             .children_policy = "none",
@@ -94,6 +143,57 @@ class CommandPalette : public Container {
     /// @brief 运行时自描述（规格附录 B）。
     /// @return 名为 "CommandPalette" 的完整描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
+
+    /// @brief 序列化属性：写出结果上限与两对文案键；**文案覆盖值仅在生效时写出**
+    ///        （「未设不写键」纪律：空串语义是「未覆盖」，写出会被读成撤除指令）。
+    ///
+    /// `open` 是带副作用的运行期模态态（压焦点作用域 + 装卸快捷键绑定），故不进序列化通道，
+    /// 它只作为状态查询出现在 `describe_static()` 的属性表里。
+    ///
+    /// @param props 目标 JSON 对象（基类先写通用布局字段）。
+    auto serialize_props(Json &props) const -> void override {
+        Widget::serialize_props(props);
+        props.set("max_results", max_results_);
+        props.set("placeholder_key", placeholder_key_);
+        props.set("empty_message_key", empty_message_key_);
+        if (placeholder_override_.has_value()) {
+            props.set("placeholder", *placeholder_override_);
+        }
+        if (empty_message_override_.has_value()) {
+            props.set("empty_message", *empty_message_override_);
+        }
+    }
+
+    /// @brief 反序列化属性（与 `serialize_props` 键同名，缺失键保持当前值）。
+    ///
+    /// 两条 key 先于两条覆盖值处理，故二者同时出现时以覆盖值为准——与类注释写的
+    /// 「文本覆盖 > 按 key 查表 > 兜底字面量」三档优先级一致。
+    ///
+    /// @param props 来源属性 JSON 对象。
+    auto deserialize_props(const Json &props) -> void override {
+        Widget::deserialize_props(props);
+        if (const auto *v = props.at("max_results"); v != nullptr) {
+            set_max_results(static_cast<std::size_t>(v->as_or<std::int64_t>(50)));
+        }
+        if (const auto *v = props.at("placeholder_key"); v != nullptr) {
+            const std::string key = v->as_or<std::string>(kDefaultPlaceholderKey);
+            if (!key.empty()) {
+                set_placeholder_key(key);
+            }
+        }
+        if (const auto *v = props.at("empty_message_key"); v != nullptr) {
+            const std::string key = v->as_or<std::string>(kDefaultEmptyMessageKey);
+            if (!key.empty()) {
+                set_empty_message_key(key);
+            }
+        }
+        if (const auto *v = props.at("placeholder"); v != nullptr) {
+            set_placeholder(v->as_or<std::string>(""));
+        }
+        if (const auto *v = props.at("empty_message"); v != nullptr) {
+            set_empty_message(v->as_or<std::string>(""));
+        }
+    }
 
     /// @brief 后置注入命令注册表；打开中调用会重建键位绑定。
     /// @param commands 新的命令注册表（非拥有）；替换当前数据源并重筛结果。
@@ -116,6 +216,69 @@ class CommandPalette : public Container {
         rebuild_results();
         mark_needs_layout();  // 列表高度随上限变化
     }
+
+    /// @brief 覆盖搜索框占位符为字面文本（与 `TextInput::set_placeholder` 同口径）。
+    ///
+    /// 该覆盖优先于词条查表：调用后这条文案**不再走 i18n**，宿主须自己备多语言。
+    /// 想回到查表请调 `set_placeholder_key`（它会清掉本次覆盖）。
+    ///
+    /// @param text 占位符文本；空串按空串生效（即「无占位提示」），不回落查表。
+    auto set_placeholder(const std::string &text) -> void {
+        placeholder_override_ = text;
+        resolved_placeholder_ = text;
+        if (field_raw_ != nullptr) {
+            field_raw_->set_placeholder(text);
+        }
+        mark_needs_paint();
+    }
+
+    /// @brief 换用另一条 i18n 词条 key 作占位符（清掉 `set_placeholder` 的文本覆盖）。
+    ///
+    /// 与文本覆盖的区别：换 key 后文案**仍走 i18n**，故同一进程内多个面板可各挂不同词条且都能翻译。
+    ///
+    /// @param key 词条 key；空串按默认 key `kDefaultPlaceholderKey` 处理。
+    auto set_placeholder_key(const std::string &key) -> void {
+        placeholder_key_ = key.empty() ? kDefaultPlaceholderKey : key;
+        placeholder_override_.reset();
+        resolved_placeholder_ = lookup_text(placeholder_key_, kDefaultPlaceholderText, Locale{});
+        if (field_raw_ != nullptr) {
+            field_raw_->set_placeholder(resolved_placeholder_);
+        }
+        mark_needs_paint();
+    }
+
+    /// @brief 覆盖空态提示为字面文本（无匹配结果时显示）。
+    ///
+    /// 语义与 `set_placeholder` 同：覆盖优先于查表，且不再走 i18n。
+    ///
+    /// @param text 空态提示文本；空串按空串生效（即「空态不显示文字」），不回落查表。
+    auto set_empty_message(const std::string &text) -> void {
+        empty_message_override_ = text;
+        resolved_empty_message_ = text;
+        mark_needs_paint();
+    }
+
+    /// @brief 换用另一条 i18n 词条 key 作空态提示（清掉 `set_empty_message` 的文本覆盖）。
+    /// @param key 词条 key；空串按默认 key `kDefaultEmptyMessageKey` 处理。
+    auto set_empty_message_key(const std::string &key) -> void {
+        empty_message_key_ = key.empty() ? kDefaultEmptyMessageKey : key;
+        empty_message_override_.reset();
+        resolved_empty_message_ = lookup_text(empty_message_key_, kDefaultEmptyMessageText, Locale{});
+        mark_needs_paint();
+    }
+
+    /// @brief 当前生效的占位符文本（最近一次解析结果，构造后即非空）。
+    /// @return 文本覆盖值，或按 key 查表 / 兜底得到的串。
+    [[nodiscard]] auto placeholder() const -> std::string { return resolved_placeholder_; }
+    /// @brief 当前生效的空态提示文本（最近一次解析结果，构造后即非空）。
+    /// @return 文本覆盖值，或按 key 查表 / 兜底得到的串。
+    [[nodiscard]] auto empty_message() const -> std::string { return resolved_empty_message_; }
+    /// @brief 当前占位符的词条 key。
+    /// @return key 串；始终非空（未显式设置时为 `kDefaultPlaceholderKey`）。
+    [[nodiscard]] auto placeholder_key() const -> std::string { return placeholder_key_; }
+    /// @brief 当前空态提示的词条 key。
+    /// @return key 串；始终非空（未显式设置时为 `kDefaultEmptyMessageKey`）。
+    [[nodiscard]] auto empty_message_key() const -> std::string { return empty_message_key_; }
 
     /// @brief 执行回调：在 `invoke` 之后触发，参数为命令 id（宿主可接管副作用）。
     /// @param cb 以命令 id 为参的回调；覆盖既有值。
@@ -276,6 +439,7 @@ class CommandPalette : public Container {
                              AURORA_CARD_PADDING;
         card_box_ = Rect{.origin = Point{.x = (self.width - card_w) * 0.5F, .y = (self.height - card_h) * 0.5F},
                          .size = Size{.width = card_w, .height = card_h}};
+        refresh_localized_texts(ctx);  // 布局期即按 ctx 的 locale 定稿文案，绘制前的查询也读得到
         if (field_raw_ != nullptr) {
             const Size field_size{.width = card_w - (AURORA_CARD_PADDING * 2.0F), .height = AURORA_FIELD_HEIGHT};
             (void)field_raw_->layout(Constraints{.min = field_size, .max = field_size}, ctx);
@@ -287,6 +451,7 @@ class CommandPalette : public Container {
         if (!open_) {
             return;
         }
+        refresh_localized_texts(ctx);  // 绘制期按 ctx 的 locale 定稿文案（布局可能未跑或 locale 已变）
         const Theme &theme = inherit_theme(ctx);
         const Rect card = to_global(card_box_, bounds);
 
@@ -315,7 +480,7 @@ class CommandPalette : public Container {
             p.draw_text(Rect{.origin = Point{.x = card.origin.x + AURORA_CARD_PADDING, .y = list_top},
                              .size = Size{.width = card.size.width - (AURORA_CARD_PADDING * 2.0F),
                                           .height = AURORA_ROW_HEIGHT}},
-                        "No matching commands", row_font, muted);
+                        resolved_empty_message_, row_font, muted);
         } else {
             const float text_h = render::FontEngine::measure_height(row_font);
             for (std::size_t i = 0; i < results_.size(); ++i) {
@@ -367,6 +532,53 @@ class CommandPalette : public Container {
     }
 
   private:
+    /// @brief 按 key 查 `default_string_table()` 取词条；未登记时回退 `fallback` 英文字面量。
+    ///
+    /// 与 `ReorderableListView::announce_text` 同口径：把 key 与兜底串一起交给 `LocalizedString::resolve`，
+    /// 查表落空即返回 `fallback`，**绝不返回空串**。
+    ///
+    /// @param key 词条 key。
+    /// @param fallback 查表失败时的兜底文本。
+    /// @param loc 查表所用的区域设置。
+    /// @return 解析后的显示串；非空（两条兜底串均非空）。
+    [[nodiscard]] static auto lookup_text(const std::string &key, const std::string &fallback, const Locale &loc)
+        -> std::string {
+        LocalizedString s;
+        s.key = key;
+        s.localize = true;
+        s.text = fallback;  // StringTable::resolve 查表失败即用 text 兜底
+        return s.resolve(&default_string_table(), loc);
+    }
+
+    /// @brief 绘制期版本：locale 取 `ctx` 注入的 `Locale`（与 `Text` / `Button` 同口径），未注入回落缺省档。
+    /// @param key 词条 key。
+    /// @param fallback 查表失败时的兜底文本。
+    /// @param ctx 构建上下文。
+    /// @return 解析后的显示串；非空。
+    [[nodiscard]] static auto lookup_text(const std::string &key, const std::string &fallback, const BuildContext &ctx)
+        -> std::string {
+        const auto *lp = ctx.environment<Locale>();
+        return lookup_text(key, fallback, (lp != nullptr) ? *lp : Locale{});
+    }
+
+    /// @brief 按当前 key / 覆盖值重算两处上屏文案，并把占位符同步进内置搜索框。
+    ///
+    /// 布局与绘制各调一次：布局期定稿让「未绘制就查询」也读得到，绘制期再算一次覆盖
+    /// 「只重绘未重排」与「运行期换了 locale」两种情形。
+    ///
+    /// @param ctx 构建上下文：提供 `Environment` 注入的 `Locale`。
+    auto refresh_localized_texts(const BuildContext &ctx) -> void {
+        resolved_placeholder_ = placeholder_override_.has_value()
+                                    ? *placeholder_override_
+                                    : lookup_text(placeholder_key_, kDefaultPlaceholderText, ctx);
+        resolved_empty_message_ = empty_message_override_.has_value()
+                                      ? *empty_message_override_
+                                      : lookup_text(empty_message_key_, kDefaultEmptyMessageText, ctx);
+        if (field_raw_ != nullptr) {
+            field_raw_->set_placeholder(resolved_placeholder_);
+        }
+    }
+
     /// @brief 搜索框在容器局部坐标系中的矩形（不含 bounds.origin）。
     [[nodiscard]] auto field_box() const -> Rect {
         return Rect{
@@ -462,6 +674,12 @@ class CommandPalette : public Container {
     std::vector<const Command *> results_;  ///< 当前过滤结果（按得分排序）
     std::size_t selected_ = 0;  ///< 当前选中下标
     std::size_t max_results_ = 50;  ///< 结果上限
+    std::string placeholder_key_ = kDefaultPlaceholderKey;  ///< 占位符词条 key（恒非空）
+    std::string empty_message_key_ = kDefaultEmptyMessageKey;  ///< 空态提示词条 key（恒非空）
+    std::optional<std::string> placeholder_override_;  ///< 占位符字面覆盖（置位即不再查表）
+    std::optional<std::string> empty_message_override_;  ///< 空态提示字面覆盖（置位即不再查表）
+    std::string resolved_placeholder_;  ///< 最近一次解析出的占位符（供绘制与 getter 读）
+    std::string resolved_empty_message_;  ///< 最近一次解析出的空态提示（供绘制与 getter 读）
     std::string query_;  ///< 当前查询串
     bool open_ = false;  ///< 是否显示
     Rect card_box_ = {};  ///< 卡片矩形（容器局部坐标，布局期计算）

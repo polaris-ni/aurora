@@ -371,7 +371,7 @@ au::Text("Welcome").font_size(24).bold();
 | `Hero` | 共享元素转场包装（`navigation/hero.h`）；`tag`（跨页配对键），单子节点 |
 | `Canvas` | 自定义绘制回调，用于高频绘制场景 |
 | `Dismissible` | 滑动消除包装（`widget/dismissible.h`）：单子节点沿 `axis`（默认 Horizontal）拖拽至阈值后消除，对标 Flutter `Dismissible`；手势由每帧 `tick` 驱动 |
-| `CommandPalette` | 模态命令面板（`widget/command_palette.h`）：居中浮层，按关键字模糊检索并执行命令，依赖 `CommandRegistry`（未绑定时为空列表）；`open` / `close` 切换 |
+| `CommandPalette` | 模态命令面板（`widget/command_palette.h`）：居中浮层，按关键字模糊检索并执行命令，依赖 `CommandRegistry`（未绑定时为空列表）；`open` / `close` 切换。搜索框占位符与空态提示是**控件内置**上屏文案，按 `command_palette.placeholder` / `command_palette.no_results` 查表（见 [`07-environment-modifier.md`](07-environment-modifier.md) §6.2），可经 `set_placeholder` / `set_empty_message` 覆盖文本，或经 `set_placeholder_key` / `set_empty_message_key` 换 key |
 
 ### 3.6 图像、绘制与占位
 
