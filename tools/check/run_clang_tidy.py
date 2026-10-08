@@ -54,6 +54,7 @@ Measuring a check that `.clang-tidy` currently excludes (取数用，不是门�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -63,28 +64,26 @@ import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
+# 编译库读取 / argv 还原 / 取依赖的底层件与 `select_lint_tus.py` 共用同一份实现：
+# 两处若各写一套，选集判定的「受影响 TU」与缓存指纹覆盖的 TU 会分叉，而分叉的症状是
+# 门禁少跑 TU 却仍报绿。本脚本以「脚本自身所在目录」入路径，供 CMake 目标与 CI 直接调用。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from lint_db import (  # noqa: E402  (path bootstrap above must run first)
+    DEFAULT_EXCLUDE,
+    argv_from_command,
+    is_auto_generated,
+    load_db,
+    load_tus,
+    norm,
+    which,
+)
+
 # <path>:<line>:<col>: warning: <msg> [<check>]
 DIAG = re.compile(r"^(.*?):(\d+):(\d+):\s+(warning|error):\s+(.*?)\s+\[(.+)\]\s*$")
 
 # 编译器前端诊断（不含带 [check] 的 tidy 诊断）：带路径与不带路径（如
 # "fatal error: too many errors emitted"、"unable to handle compilation"）两类都要抓。
 FRONT_ERROR = re.compile(r"^(?:(.*?):(\d+):\d+:\s+)?(?:fatal\s+)?error:\s+(.*)$")
-
-# 排除项在两处生效：`load_tus` 筛翻译单元、主循环筛诊断所属文件。
-# ① `third_party/`：三方代码不按本仓风格检查。
-# ② `tests/support/fake_gl.h`——GL 驱动桩：整份文件是按 `GLFn` 函数表逐个填的桩，
-#    56 条告警里 48 条是 `readability-named-parameter`（桩不读参数，命名只会误导读者）、
-#    5 条是指针算术（按字节铺 GL 数据）。这类检查没有「按名字豁免」的选项，逐点 NOLINT
-#    就是 56 处指令，且该文件永不该被本仓风格约束——排除比豁免划算。
-#    ⚠️ 逐文件点名，不用目录通配：新增豁免须显式登记，避免整目录被静默放行。
-# 反面判据（勿照抄本条）：`gl_core.h`(49) 与 `atspi_protocol.h`(74) 也在这份名单的候选里
-# 跑过一轮，但它们的告警几乎全是 `readability-identifier-naming`，而该检查有按类别的
-# `*IgnoredRegexp`（clang-tidy 22 实测有效，探针见 BUILD_OPTIONS.md §4.5）——用命名豁免能
-# 保住这两个文件的其余覆盖面，故不改用「整文件排除」这种永久盲点。
-DEFAULT_EXCLUDE = re.compile(
-    r"(^|/)third_party/"
-    r"|tests/support/fake_gl\.h$"
-)
 
 # ---- Emscripten 编译库改写（--emscripten）------------------------------------
 # 三元组与驱动注入项：em++ 会在真实 argv 里补 `__EMSCRIPTEN__` 与垫片头目录
@@ -258,40 +257,6 @@ def rewrite_emscripten_db(build_dir: str) -> str:
 
 
 
-def norm(p: str) -> str:
-    return os.path.normpath(p).replace("\\", "/")
-
-
-def which(name: str) -> str:
-    from shutil import which as _w
-
-    return _w(name)
-
-
-def load_tus(compile_db: str, include: re.Pattern,
-             exclude: re.Pattern) -> list[str]:
-    with open(compile_db, encoding="utf-8") as fh:
-        entries = json.load(fh)
-    out, seen = [], set()
-    for e in entries:
-        # 'file' is relative in newer CMake DBs; 'directory' holds the base.
-        f = e.get("file", "")
-        if not os.path.isabs(f):
-            f = os.path.join(e.get("directory", ""), f)
-        f = norm(f)
-        if f in seen:
-            continue
-        seen.add(f)
-        if exclude.search(f):
-            continue
-        if is_auto_generated(f):
-            continue
-        if include and not include.search(f):
-            continue
-        out.append(f)
-    return sorted(out)
-
-
 def parse_shard(spec: str) -> tuple[int, int]:
     """把 `--shard` 的 `i/n` 解析成 (片号, 片数)，非法即 argparse 报错退出。
 
@@ -315,22 +280,6 @@ def parse_shard(spec: str) -> tuple[int, int]:
     return idx, total
 
 
-def is_auto_generated(path: str) -> bool:
-    """判断源文件是否为自动生成（首部若干行标注 AUTO-GENERATED）。
-
-    生成物（如字模字节表）不应纳入 lint：改动会被下次重新生成覆盖，
-    且其 C 数组/指针形态由生成器决定，人工抑制毫无意义。
-    """
-    try:
-        with open(path, encoding="utf-8", errors="ignore") as fh:
-            for _ in range(10):
-                if "AUTO-GENERATED" in fh.readline():
-                    return True
-    except OSError:
-        pass
-    return False
-
-
 def run_one(job: tuple[str, str | None, str, bool, str | None]) -> tuple[str, str, float]:
     tu, checks, build_dir, do_fix, config = job
     cmd: list[str] = [which("clang-tidy") or "clang-tidy", "-p", build_dir, "--quiet"]
@@ -350,6 +299,106 @@ def run_one(job: tuple[str, str | None, str, bool, str | None]) -> tuple[str, st
         return tu, f"__TIMEOUT__ {tu}\n", time.time() - t0
     except OSError as exc:
         return tu, f"__ERROR__ {tu}: {exc}\n", time.time() - t0
+
+
+def _sha256_file(path: str) -> str:
+    """文件内容指纹；读不到（被删 / 无权限）一律记为 `missing` 并参与指纹。
+
+    刻意不返回 None：缺文件也是「这个 TU 此刻的形态」的一部分，把它排除在指纹之外，
+    等于让「改了却读不到」的 TU 命中上一次的缓存。
+    """
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return "missing"
+
+
+class ResultCache:
+    """Per-TU clang-tidy result cache: key = content fingerprint, value = raw output.
+
+    指纹覆盖六项：clang-tidy 版本、编译器版本、`.clang-tidy` 内容、该 TU 的编译 argv、
+    TU 自身内容、以及该 TU 的依赖（由 `--deps` 给出，选集脚本产出）逐文件内容。
+    缺任何一项都不缓存——指纹一旦退化成「只看 TU 自身」，改了它包含的头文件却命中
+    上一次结果，就是本缓存唯一能造出来的假绿。
+
+    ⚠️ 第二条硬边界：**编译失败与超时的 TU 绝不入缓存**。这类 TU 一条带 `[check]` 的
+    诊断都不产出，「0 告警」于是既可能是真干净、也可能是覆盖面塌了；把这种结果写进
+    缓存，等于把一次偶发塌方固化成永久绿灯。故存储动作排在完成解析、确认该 TU 既未
+    broken 也未超时之后（见 `main()`）。
+    """
+
+    def __init__(self, root: str, deps: dict[str, list[str]], db_argv: dict[str, list[str]],
+                 tidy_version: str, config_text: str) -> None:
+        self.root = root
+        self.deps = deps
+        self.db_argv = db_argv
+        self.tidy_version = tidy_version
+        self.config_text = config_text
+        self.hits = 0
+        self.misses = 0
+        self.stored = 0
+        self._compiler_versions: dict[str, str] = {}
+
+    def _compiler_version(self, compiler: str) -> str:
+        if compiler not in self._compiler_versions:
+            try:
+                r = subprocess.run([compiler, "--version"], capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace", timeout=60)
+                self._compiler_versions[compiler] = (r.stdout or "")[:400]
+            except (OSError, subprocess.TimeoutExpired):
+                self._compiler_versions[compiler] = "unknown"
+        return self._compiler_versions[compiler]
+
+    def key_for(self, tu: str) -> str | None:
+        """返回该 TU 的指纹；依赖清单里没有它时返回 None（调用方按「不可缓存」处理）。"""
+        deps = self.deps.get(tu)
+        if deps is None:
+            return None
+        argv = self.db_argv.get(tu, [])
+        h = hashlib.sha256()
+        for part in (self.tidy_version, self.config_text, "\x00".join(argv)):
+            h.update(part.encode("utf-8", "replace"))
+            h.update(b"\x00")
+        h.update(self._compiler_version(argv[0] if argv else "").encode("utf-8", "replace"))
+        h.update(_sha256_file(tu).encode("ascii"))
+        for dep in sorted(deps):
+            h.update(dep.encode("utf-8", "replace"))
+            h.update(_sha256_file(dep).encode("ascii"))
+        return h.hexdigest()
+
+    def _path(self, key: str) -> str:
+        return os.path.join(self.root, key[:2], key + ".json")
+
+    def load(self, tu: str) -> str | None:
+        """命中返回缓存的原始输出，未命中（或不可缓存）返回 None。"""
+        key = self.key_for(tu)
+        if key is None:
+            return None
+        try:
+            with open(self._path(key), encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (OSError, ValueError):
+            return None
+        if payload.get("tu") != tu:
+            return None
+        self.hits += 1
+        return payload.get("out", "")
+
+    def store(self, tu: str, out: str) -> None:
+        key = self.key_for(tu)
+        if key is None:
+            return
+        path = self._path(key)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"tu": tu, "key": key, "out": out}, fh)
+            os.replace(tmp, path)  # 原子落盘：并发分片不会读到写了一半的条目
+            self.stored += 1
+        except OSError as exc:
+            print(f"[lint] cache: could not store {tu}: {exc}", flush=True)
 
 
 def main() -> int:
@@ -375,6 +424,18 @@ def main() -> int:
                     help="use an alternate .clang-tidy file")
     ap.add_argument("--include", default=None,
                     help="regex; only lint TUs whose path matches")
+    ap.add_argument("--tu-list", default=None, metavar="FILE",
+                    help="newline-separated TU paths to lint (exact match, not a regex). "
+                         "Produced by tools/check/select_lint_tus.py; every entry must exist in "
+                         "the compile database, otherwise the run aborts (exit 2) instead of "
+                         "silently analysing a smaller set")
+    ap.add_argument("--deps", default=None, metavar="FILE",
+                    help="JSON map TU -> dependency paths, used only for cache fingerprints")
+    ap.add_argument("--cache-dir", default=None, metavar="DIR",
+                    help="reuse per-TU results across runs: a TU whose fingerprint "
+                         "(tidy/compiler version, config, argv, own content, dependencies) is "
+                         "unchanged replays its previous output instead of being re-analysed. "
+                         "Requires --deps; TUs missing from it are never cached")
     ap.add_argument("--exclude", default=DEFAULT_EXCLUDE.pattern,
                     help="regex; skip TUs whose path matches (default: see DEFAULT_EXCLUDE)")
     ap.add_argument("--fix", action="store_true",
@@ -411,6 +472,22 @@ def main() -> int:
     include = re.compile(a.include) if a.include else None
     exclude = re.compile(a.exclude) if a.exclude else None
     tus = load_tus(compile_db, include, exclude) if exclude else load_tus(compile_db, include, re.compile(r"(?!x)x"))
+    if a.tu_list:
+        # 显式清单（选集脚本的产物）**逐项校验**必须落在本编译库里：清单路径与库内条目对不上时
+        # 最常见的成因是「换了构建目录还拿着上一轮的清单」，而它的症状是 clang-tidy 静默少跑
+        # 一批 TU 却给出绿灯。宁可当场拒跑。
+        try:
+            with open(a.tu_list, encoding="utf-8") as fh:
+                listed = [ln.strip() for ln in fh if ln.strip()]
+        except OSError as exc:
+            print(f"error: cannot read --tu-list {a.tu_list!r}: {exc}", file=sys.stderr)
+            return 2
+        unknown = [t for t in listed if t not in set(tus)]
+        if unknown:
+            print(f"error: --tu-list has {len(unknown)} entries absent from this compile database "
+                  f"(stale list for another build dir?); first: {unknown[:3]}", file=sys.stderr)
+            return 2
+        tus = sorted(set(listed))
     if not tus:
         print("error: no translation units selected.", file=sys.stderr)
         return 2
@@ -437,7 +514,53 @@ def main() -> int:
     # 绕过该过滤——观测到 MSVC STL 的 `xfilesystem_abi.h` 即属此类。系统头既不可修、又会随
     # 工具链升级漂移，故在计数前按「是否位于仓库根之下」再过滤一次。
     repo_root = norm(os.path.abspath(".")) + "/"
-    print(f"[lint] clang-tidy over {len(tus)} translation units, {jobs} parallel{mode}{shard_desc}")
+
+    cache = None
+    if a.cache_dir:
+        if not a.deps:
+            print("error: --cache-dir requires --deps (per-TU dependency lists, as produced by "
+                  "tools/check/select_lint_tus.py); without them a fingerprint cannot see header "
+                  "changes and the cache would manufacture false greens.", file=sys.stderr)
+            return 2
+        try:
+            with open(a.deps, encoding="utf-8") as fh:
+                deps = json.load(fh)
+        except (OSError, ValueError) as exc:
+            print(f"error: cannot read --deps {a.deps!r}: {exc}", file=sys.stderr)
+            return 2
+        db_argv = {f: args for f, args, _d in load_db(compile_db)}
+        tidy_bin = which("clang-tidy") or "clang-tidy"
+        try:
+            tidy_ver = subprocess.run([tidy_bin, "--version"], capture_output=True, text=True,
+                                      encoding="utf-8", errors="replace", timeout=120).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            tidy_ver = "unknown"
+        config_text = ""
+        try:
+            with open(a.config or ".clang-tidy", encoding="utf-8") as fh:
+                config_text = fh.read()
+        except OSError:
+            pass
+        cache = ResultCache(a.cache_dir, deps, db_argv, tidy_ver, config_text)
+
+    cached_out: dict[str, str] = {}
+    to_run: list[str] = list(tus)
+    if cache is not None:
+        to_run = []
+        for tu in tus:
+            hit = cache.load(tu)
+            if hit is None:
+                cache.misses += 1
+                to_run.append(tu)
+            else:
+                cached_out[tu] = hit
+        print(f"[lint] cache: {cache.hits} hit / {cache.misses} miss "
+              f"({len(cached_out)}/{len(tus)} replayed without re-analysis)", flush=True)
+
+    # 打印**本轮总覆盖面**（含缓存复放）而不只是真跑的条数：读日志的人要判断的是
+    # 「这一遍到底覆盖了几个 TU」，写 `0` 会被读成「这一遍没跑」。
+    print(f"[lint] clang-tidy over {len(tus)} translation units "
+          f"({len(to_run)} analysed, {len(cached_out)} replayed), {jobs} parallel{mode}{shard_desc}")
 
     findings: dict[tuple[str, str, str], str] = {}
     # 每条告警的**首发 TU**：头文件告警会在每个包含它的 TU 里重复上报，去重后只剩一条，
@@ -451,39 +574,54 @@ def main() -> int:
     # 「0 findings」于是既可能是真干净、也可能是覆盖面塌了。两者必须可区分。
     broken: dict[str, str] = {}
     t0 = time.time()
-    with ThreadPoolExecutor(max_workers=jobs) as ex:
-        jobs_args = [(t, a.checks, a.build_dir, a.fix, a.config) for t in tus]
-        for i, (tu, out, _dt) in enumerate(ex.map(run_one, jobs_args), 1):
-            if out.startswith("__TIMEOUT__") or out.startswith("__ERROR__"):
-                timeouts.append(out.strip())
-            for line in out.splitlines():
-                m = DIAG.match(line.strip())
-                if not m:
-                    e = FRONT_ERROR.match(line.strip())
-                    if e and tu not in broken:
-                        loc = f"{norm(e.group(1))}:{e.group(2)}: " if e.group(1) else ""
-                        broken[tu] = f"{loc}{e.group(3)}"
-                    continue
-                path, line_no, _col, sev, msg, check = m.groups()
-                np_ = norm(path)
-                if exclude and exclude.search(np_):
-                    continue
-                abs_p = np_ if os.path.isabs(np_) else norm(os.path.join(os.getcwd(), np_))
-                if not abs_p.lower().startswith(repo_root.lower()):
-                    continue  # 仓库外（系统头 / 工具链头）诊断不计入门禁
-                # keyed by (file, line, check): a header diagnostic is re-emitted in
-                # every including TU, so later occurrences just refresh the message.
-                if (np_, line_no, check) not in found_by:
-                    found_by[(np_, line_no, check)] = norm(tu)
-                findings[(np_, line_no, check)] = (sev, msg)
-                try:
-                    rel = os.path.relpath(np_).replace("\\", "/")
-                except ValueError:
-                    # 诊断路径在另一盘符（如系统头在 C:，仓库在 D:），无法求相对路径
-                    rel = np_
-                by_area[rel.split("/")[0] if "/" in rel else rel] += 1
-            if i % 25 == 0 or i == len(tus):
-                print(f"  ... {i}/{len(tus)}  ({time.time() - t0:.0f}s)", flush=True)
+    outputs: dict[str, str] = dict(cached_out)
+    if to_run:
+        with ThreadPoolExecutor(max_workers=jobs) as ex:
+            jobs_args = [(t, a.checks, a.build_dir, a.fix, a.config) for t in to_run]
+            for i, (tu, out, _dt) in enumerate(ex.map(run_one, jobs_args), 1):
+                outputs[tu] = out
+                if i % 25 == 0 or i == len(to_run):
+                    print(f"  ... {i}/{len(to_run)}  ({time.time() - t0:.0f}s)", flush=True)
+    # 解析一律按 sorted 的 TU 清单顺序进行：缓存复放与真跑的产物在此合流，故去重后记下的
+    # 「首发 TU」与全量跑法同一口径（`found_by` 的跨轮次可比性依赖这一点）。
+    for tu in tus:
+        out = outputs.get(tu, "")
+        if out.startswith("__TIMEOUT__") or out.startswith("__ERROR__"):
+            timeouts.append(out.strip())
+        for line in out.splitlines():
+            m = DIAG.match(line.strip())
+            if not m:
+                e = FRONT_ERROR.match(line.strip())
+                if e and tu not in broken:
+                    loc = f"{norm(e.group(1))}:{e.group(2)}: " if e.group(1) else ""
+                    broken[tu] = f"{loc}{e.group(3)}"
+                continue
+            path, line_no, _col, sev, msg, check = m.groups()
+            np_ = norm(path)
+            if exclude and exclude.search(np_):
+                continue
+            abs_p = np_ if os.path.isabs(np_) else norm(os.path.join(os.getcwd(), np_))
+            if not abs_p.lower().startswith(repo_root.lower()):
+                continue  # 仓库外（系统头 / 工具链头）诊断不计入门禁
+            # keyed by (file, line, check): a header diagnostic is re-emitted in
+            # every including TU, so later occurrences just refresh the message.
+            if (np_, line_no, check) not in found_by:
+                found_by[(np_, line_no, check)] = norm(tu)
+            findings[(np_, line_no, check)] = (sev, msg)
+            try:
+                rel = os.path.relpath(np_).replace("\\", "/")
+            except ValueError:
+                # 诊断路径在另一盘符（如系统头在 C:，仓库在 D:），无法求相对路径
+                rel = np_
+            by_area[rel.split("/")[0] if "/" in rel else rel] += 1
+    if cache is not None:
+        for tu in to_run:
+            out = outputs.get(tu, "")
+            if tu in broken or out.startswith("__TIMEOUT__") or out.startswith("__ERROR__"):
+                continue  # 编译失败 / 超时的 TU 绝不入缓存：见 ResultCache 的类注释
+            cache.store(tu, out)
+        print(f"[lint] cache: stored {cache.stored}; "
+              f"replayed {cache.hits} of {len(tus)} (elapsed {time.time() - t0:.0f}s)", flush=True)
 
     by_check = Counter(c for (_f, _l, c) in findings)
     by_file = Counter(f for (f, _l, _c) in findings)

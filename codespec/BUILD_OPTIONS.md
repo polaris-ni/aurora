@@ -427,10 +427,51 @@ python tools/check/run_clang_tidy.py --build-dir build --json-out findings.json 
 python tools/check/run_clang_tidy.py --build-dir build --include 'src/'          # 只 lint 库代码
 python tools/check/run_clang_tidy.py --build-dir build --shard 0/4 --print-tus   # 看第 0 片跑哪些 TU（不跑 tidy）
 cmake -S . -B build-shard0 -DAURORA_LINT_SHARD=0/4 ...                           # 本目录的 lint 目标只跑第 0 片
+python tools/check/select_lint_tus.py --build-dir build --git-diff HEAD~1        # 按改动挑 TU（见下节）
+python tools/check/run_clang_tidy.py --build-dir build --tu-list build/lint-selection/tus_0.txt \
+       --deps build/lint-selection/deps.json --cache-dir .tidy-cache              # 只跑挑出来的那批 + 结果缓存
 ```
 
 **墙钟与分片（`--shard=i/n`）**：门禁的墙钟 = TU 数 × 单 TU 分析成本 ÷ 并行度，而 CI runner 只有 4 vCPU，并行度已经开满核数——native 一遍 498 TU 实测 `elapsed 5172s`（86 分钟，run 35844126045 的 86.9 分钟连 DEBUG=ON 那遍都没跑到），两道 pass 串在一个作业里就是 3 小时量级。剩下的唯一变量是**把 TU 摊到多个作业**：`-DAURORA_LINT_SHARD=i/n` 让本目录的 `lint` 目标只跑第 i 片，CI 因此按 pass(2) × shard(4) = 8 个作业并跑，每片 ~125 TU ≈ 22 分钟，整门墙钟 86 → ~25 分钟，而**总核时分毫未变**。
 三点约束：① 切分只在 `load_tus()` 的 `sorted()` 结果上做 `tus[i::n]`，清单顺序唯一确定「谁归哪片」，同一份编译库重复取片稳定，且相邻同目录（往往同样重）的 TU 被摊到不同片上；② 分片**不减覆盖面也不改判据**——任一片红即整门红，缺片等于缺覆盖面，故格式非法 / 索引越界在 configure 期 `FATAL_ERROR`，片内选中 0 个 TU 在 runner 期以退出码 2 拒跑，两层都不许「跑到了但没活儿」被读成「跑过且干净」；③ 每片 JSON 自带 `shard` 与 `tu_total`（切分前的全量条数）自述「本片是全量的哪一份」，`--print-tus` 则只打印本片清单便退出，用来离线核验互斥性与并集完整性（本机实测：504 TU → 4 片各 126，两两不相交、并集恰等于全量）。
+
+**按改动选集（`tools/check/select_lint_tus.py`，变更提案 CHG-008）**：分片解决的是「一遍太慢」，
+选集解决的是「这一遍里的大多数 TU 与本次改动无关」。输入一份改动清单（`--changed <文件>` 或直接
+`--git-diff <ref>`），输出 `selection.json` / `deps.json` / `tus_<i>.txt`，再交给 runner 的
+`--tu-list` 消费。判据不变（仍是 0 finding 才过），变的只是「这一轮把判据施加在哪些 TU 上」——
+可行性来自一条事实：clang-tidy 的诊断只可能来自 TU 自身与它读到的头文件，没被挑中的 TU 本轮
+不可能因本次改动而产生新告警。
+
+判定依据是**编译库自身的 include 闭包**（对每条编译命令跑一次 `-MM`），不是构建图：
+
+> `ninja -t deps` 只认**已经构建过**的目标，而 demos 是 `EXCLUDE_FROM_ALL`——它们不在构建图里，
+> 却实实在在在编译库里、也实实在在会因为改一个公共头而产生新告警。本机实测：`keycode.h` 的
+> 一条 `readability-string-compare` 正是从 `examples/app/google_play/demo_google_play.cpp`
+> 这个 TU 报出来的，按构建图选集会正好漏掉它。
+
+三条「宁可多选、不可漏选」的兜底：① 取依赖失败（超时 / 编译器缺失 / 不支持 `-MM`）的 TU 一律
+入选；② 改动里出现**已不存在**的文件（删头，删后闭包算不出来）→ 退化为全量；③ 改动命中
+「全局配置」（`.clang-tidy`、`compile_flags.txt`、CMake 模块、本脚本与 runner 自身）→ 退化为
+全量，因为这类文件改的是**分析口径本身**，选任何子集都是错的。
+反向守卫是脚本唯一会以退出码 2 失败的情形：**改动里存在本编译库认得的 C/C++ 文件，却一个 TU
+都没选中**——逻辑上不可能，一旦发生说明选集链路坏了，不能让它以「0 待跑」的形态流进 CI。
+本机实测口径：556 TU 的编译库做一轮依赖探测 ~22 秒（8 并行）；G40 那批改动（10 个 C/C++ 文件）
+选中 184 个 TU（33%）。
+
+**结果缓存（`--cache-dir` + `--deps`）**：指纹 = clang-tidy 版本 + 编译器版本 + `.clang-tidy`
+内容 + 该 TU 的编译 argv + TU 自身内容 + 依赖逐文件内容；命中即**复放上一次的原始输出**，不是
+「记为通过」。两条硬边界：① 编译失败 / 超时的 TU **绝不入缓存**——这类 TU 一条 `[check]` 诊断
+都不产出，把这种「0 告警」写进缓存等于把一次偶发塌方固化成永久绿灯；② `--deps` 里没有的 TU
+不缓存，否则指纹退化成「只看自身内容」，改了它包含的头却命中旧结果，那是本缓存唯一能造出的
+假绿。本机实测：10 个 demo TU 冷跑 92 秒 → 热跑 0.38 秒，两轮 `findings` 逐条相等。
+
+**CI 的全量 / 增量分界**：`lint` 与 `lint-wasm` 各有一个「Decide lint scope」步骤——**master
+推送、每周定时（周一 03:17 UTC）与手动触发跑全量**；PR 与功能分支推送走增量选集。取不到基线
+提交（浅克隆、首次推送）一律**退化为全量**并留 warning，绝不退化成空集。增量路径下子集按
+`--min-tu-per-shard`（默认 40）少分片，多出来的片写一份 `idle: true` 的 JSON 后退出 0——
+「没活儿」与「跑过且干净」在日志里长得一模一样，故空片必须留痕。全量出口由 master 与每周定时
+兜底，增量因此不是覆盖面的削减，而是把同一道门禁的付费时点从「每个 PR 全付」改成
+「改动面 + 每周全付」。
 
 **排除名单（脚本的 `DEFAULT_EXCLUDE`）**：`third_party/` 之外只点名一条——`tests/support/fake_gl.h`（GL 驱动桩：56 条告警里 48 条 `readability-named-parameter`、5 条指针算术。桩不读参数、签名须逐字对齐 `GLFn` 函数表，「按本仓规范改名」即失真）。逐文件点名而非目录通配：新增排除必须显式登记，杜绝整目录被静默放行。判据是「哪种手段留下的盲点小」，不是「看着像不像三方代码」——整文件排除会让该文件此后的手写代码一并脱离检查，故仅当告警类别没有更窄的豁免手段时才用它。反例已量过：`src/aurora/render/gpu/gl_core.h`（49 条）与 `src/aurora/window/detail/atspi_protocol.h`（74 条）曾进同一候选名单，但它们的告警几乎全是 `readability-identifier-naming`，而该检查有**按类别**的 `*IgnoredRegexp`（clang-tidy 22 实测：与 `EnumConstantCase` 同配时，命中正则的枚举常量不再上报，未命中的照常上报），所以这两份留在覆盖面内、由命名豁免处置。两种取舍都能复证：把 `HeaderFilterRegex` 换成分隔符无关的配置、只跑包含这三份头的 TU，桩一条也不上报（被排除），另两份分别报回 74 / 49 条（在覆盖面内）。
 

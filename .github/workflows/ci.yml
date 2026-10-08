@@ -28,6 +28,11 @@
 #                    ⚠️ 判据是「8 个作业全绿」：任一片红即整门红，缺片等于缺覆盖面。
 #                    ⚠️ 本矩阵的口径是 **native**：EMSCRIPTEN 门后的 TU 不在这两份编译库里，
 #                    其静态检查由 8w 在同一份 wasm 编译库上跑浏览器口径 lint 补齐。
+#                    全量 / 增量：master 推送、每周定时与手动触发跑全量；其余（PR 与功能分支
+#                    推送）只跑「本次改动牵动的 TU」——由 tools/check/select_lint_tus.py 按
+#                    编译库的 include 闭包挑出读到改动文件的 TU（详见 BUILD_OPTIONS.md §4.5）。
+#                    增量省的是墙钟不是判据：诊断只可能来自 TU 自身与它读到的头，没被挑中的
+#                    TU 本轮不可能产生新告警；全量出口由 master 与每周定时兜底。
 #  8w. lint-wasm  — 浏览器口径 clang-tidy（`lint` 目标在 Emscripten 配置下自动加 --emscripten，
 #                    见 job 8 与 BUILD_OPTIONS.md §4.5）：4 个分片作业，只 configure 不构建。
 #                    这是 EMSCRIPTEN 门后那批 TU 唯一的静态检查面，与 job 8 同为**必过**门禁，
@@ -64,6 +69,12 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # 每周一次全量 + 手动触发：增量门禁的覆盖面是「本次改动牵动的 TU」，而「某个 TU 长期
+  # 没被任何 PR 选中」这类系统性缺口不会自愈。全量门槛因此保留两处固定出口：master 推送
+  # 与每周一凌晨的定时遍；workflow_dispatch 供人工补跑。
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -695,11 +706,110 @@ jobs:
 
       # AURORA_LINT_SHARD 只在 configure 期烧进 `lint` 目标的命令行（见 AuroraLint.cmake），
       # 且格式非法 / 索引越界会当场 FATAL_ERROR——分片配错的症状是「某片没人跑」，必须早响。
+      # 全量 / 增量的分界：master 推送、每周定时与手动触发跑全量；PR 与功能分支推送走增量。
+      # 增量需要的「改动清单」来自 git：PR 取与基线的三点差异，push 取 `github.event.before`
+      # 与当前 SHA 的两点差异。两者都要显式补 fetch——默认 checkout 是 depth=1 的浅克隆，
+      # 基线提交不在本地；取不到基线的后果不是「少跑一点」，而是无从判断改动面，故一律
+      # **退化为全量**并留 warning，绝不退化成空集（空集会被读成「本片干净」）。
+      - name: Decide lint scope
+        id: scope
+        run: |
+          set -euo pipefail
+          full=false
+          case "${{ github.event_name }}" in
+            schedule|workflow_dispatch) full=true ;;
+            pull_request) ;;
+            *) case "${{ github.ref }}" in refs/heads/master|refs/heads/main) full=true ;; esac ;;
+          esac
+          if [ "$full" != "true" ]; then
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              git -c core.quotepath=off fetch --depth=1 origin \
+                "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+              git -c core.quotepath=off diff --name-only "origin/${{ github.base_ref }}..." > changed.txt
+            else
+              before="${{ github.event.before }}"
+              git -c core.quotepath=off fetch --depth=1 origin "$before" 2>/dev/null || true
+              if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ] \
+                 || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+                full=true
+                echo "::warning::previous commit unavailable; falling back to a full lint pass"
+              else
+                git -c core.quotepath=off diff --name-only "$before" "${{ github.sha }}" > changed.txt
+              fi
+            fi
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          if [ "$full" != "true" ]; then
+            echo "incremental scope: $(wc -l < changed.txt) changed files"
+          else
+            echo "full scope: every TU in this compile database"
+          fi
+
       - name: Configure (debug ${{ matrix.pass.debug }}, export compile_commands.json)
         run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=${{ matrix.pass.debug }} -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }}
 
+      # 选集必须在 configure 之后：它读的就是这份编译库。全量时跳过（那份清单只有增量用得上）。
+      - name: Select affected translation units
+        if: steps.scope.outputs.full != 'true'
+        run: |
+          set -euo pipefail
+          python3 tools/check/select_lint_tus.py --build-dir build-lint --changed changed.txt \
+            --out-dir build-lint/lint-selection --shards ${{ matrix.total }} --min-tu-per-shard 40 --jobs 4
+          cat build-lint/lint-selection/selection.json
+
+      # 结果缓存（方案 C）：按「TU 内容 + 依赖内容 + 编译器/tidy 版本 + 配置 + 编译 argv」的
+      # 指纹复用上一次的输出。改了什么就只重算受牵动的那批，其余跨 PR 直接复放。
+      - name: Restore tidy result cache
+        if: steps.scope.outputs.full != 'true'
+        uses: actions/cache@v4
+        with:
+          path: .tidy-cache
+          key: aurora-tidy-${{ matrix.pass.label }}-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            aurora-tidy-${{ matrix.pass.label }}-${{ runner.os }}-
+
       - name: Lint (shard ${{ matrix.shard }}/${{ matrix.total }})
-        run: cmake --build build-lint --target lint
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.scope.outputs.full }}" = "true" ]; then
+            cmake --build build-lint --target lint
+            exit 0
+          fi
+          list="build-lint/lint-selection/tus_${{ matrix.shard }}.txt"
+          if [ ! -s "$list" ]; then
+            # 空片只在增量模式下合法（子集不够摊满 4 片，脚本已按 --min-tu-per-shard 少分片）。
+            # 必须留痕：「没活儿」与「跑过且干净」在日志里长得一模一样。
+            printf '{"idle":true,"mode":"incremental","shard":[%s,%s],"tu_count":0,"tu_total":0,"unique_findings":0,"broken_tus":[],"by_check":[],"by_file":[],"findings":[]}\n' \
+              "${{ matrix.shard }}" "${{ matrix.total }}" > build-lint/lint-findings.json
+            echo "incremental: no TU assigned to shard ${{ matrix.shard }} (subset smaller than the shard count)"
+            exit 0
+          fi
+          python3 tools/check/run_clang_tidy.py --build-dir build-lint \
+            --tu-list "$list" \
+            --deps build-lint/lint-selection/deps.json \
+            --cache-dir .tidy-cache \
+            --json-out build-lint/lint-findings.json --jobs 4
+
+      # 增量片的 JSON 补上 `shard` / `tu_total`：判「片数齐没齐」读的是这两个字段，
+      # 与全量片保持同形，聚合时才不需要区分两种来源。
+      - name: Annotate findings with shard scope
+        if: steps.scope.outputs.full != 'true'
+        env:
+          SHARD: ${{ matrix.shard }}
+          TOTAL: ${{ matrix.total }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          sel_p = "build-lint/lint-selection/selection.json"
+          out_p = "build-lint/lint-findings.json"
+          sel = json.load(open(sel_p, encoding="utf-8"))
+          data = json.load(open(out_p, encoding="utf-8"))
+          data["shard"] = [int(os.environ["SHARD"]), int(os.environ["TOTAL"])]
+          data["tu_total"] = sel["selected_count"]
+          data["selection_mode"] = sel["mode"]
+          json.dump(data, open(out_p, "w", encoding="utf-8"), indent=1)
+          PY
 
       - name: Upload tidy findings
         if: always()
@@ -766,11 +876,102 @@ jobs:
 
       # configure 开关与作业 6 **逐项相同**（含 CMAKE_BUILD_TYPE=Release 与 AURORA_BUILD_TESTS=ON）：
       # 换开关等于换覆盖面，本作业的历史清单（首轮 420 TU / 470 条）就不可比了。
+      # 与作业 8 同一套全量 / 增量分界（workflow 不支持 YAML 锚点复用，故同款块写两份）。
+      # 浏览器口径的编译库是另一张 TU 清单，选集必须在本作业的编译库上重算一遍，
+      # 不能复用 native 那份：`EMSCRIPTEN` 门后的 TU 与 `AURORA_BACKEND_WASM` 分支只在
+      # 这里存在，拿 native 的清单来跑会正好把它们漏掉。
+      - name: Decide lint scope
+        id: scope
+        run: |
+          set -euo pipefail
+          full=false
+          case "${{ github.event_name }}" in
+            schedule|workflow_dispatch) full=true ;;
+            pull_request) ;;
+            *) case "${{ github.ref }}" in refs/heads/master|refs/heads/main) full=true ;; esac ;;
+          esac
+          if [ "$full" != "true" ]; then
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              git -c core.quotepath=off fetch --depth=1 origin \
+                "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+              git -c core.quotepath=off diff --name-only "origin/${{ github.base_ref }}..." > changed.txt
+            else
+              before="${{ github.event.before }}"
+              git -c core.quotepath=off fetch --depth=1 origin "$before" 2>/dev/null || true
+              if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ] \
+                 || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+                full=true
+                echo "::warning::previous commit unavailable; falling back to a full lint pass"
+              else
+                git -c core.quotepath=off diff --name-only "$before" "${{ github.sha }}" > changed.txt
+              fi
+            fi
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          if [ "$full" != "true" ]; then
+            echo "incremental scope: $(wc -l < changed.txt) changed files"
+          else
+            echo "full scope: every TU in this compile database"
+          fi
+
       - name: Configure (emcmake, export compile_commands.json)
         run: emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }}
 
+      - name: Select affected translation units
+        if: steps.scope.outputs.full != 'true'
+        run: |
+          set -euo pipefail
+          python3 tools/check/select_lint_tus.py --build-dir build-wasm-lint --changed changed.txt \
+            --out-dir build-wasm-lint/lint-selection --shards ${{ matrix.total }} --min-tu-per-shard 40 --jobs 4
+          cat build-wasm-lint/lint-selection/selection.json
+
+      - name: Restore tidy result cache
+        if: steps.scope.outputs.full != 'true'
+        uses: actions/cache@v4
+        with:
+          path: .tidy-cache
+          key: aurora-tidy-wasm-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            aurora-tidy-wasm-${{ runner.os }}-
+
       - name: Lint (shard ${{ matrix.shard }}/${{ matrix.total }})
-        run: cmake --build build-wasm-lint --target lint
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.scope.outputs.full }}" = "true" ]; then
+            cmake --build build-wasm-lint --target lint
+            exit 0
+          fi
+          list="build-wasm-lint/lint-selection/tus_${{ matrix.shard }}.txt"
+          if [ ! -s "$list" ]; then
+            printf '{"idle":true,"mode":"incremental","shard":[%s,%s],"tu_count":0,"tu_total":0,"unique_findings":0,"broken_tus":[],"by_check":[],"by_file":[],"findings":[]}\n' \
+              "${{ matrix.shard }}" "${{ matrix.total }}" > build-wasm-lint/lint-findings.json
+            echo "incremental: no TU assigned to shard ${{ matrix.shard }} (subset smaller than the shard count)"
+            exit 0
+          fi
+          python3 tools/check/run_clang_tidy.py --build-dir build-wasm-lint --emscripten \
+            --tu-list "$list" \
+            --deps build-wasm-lint/lint-selection/deps.json \
+            --cache-dir .tidy-cache \
+            --json-out build-wasm-lint/lint-findings.json --jobs 4
+
+      - name: Annotate findings with shard scope
+        if: steps.scope.outputs.full != 'true'
+        env:
+          SHARD: ${{ matrix.shard }}
+          TOTAL: ${{ matrix.total }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          sel_p = "build-wasm-lint/lint-selection/selection.json"
+          out_p = "build-wasm-lint/lint-findings.json"
+          sel = json.load(open(sel_p, encoding="utf-8"))
+          data = json.load(open(out_p, encoding="utf-8"))
+          data["shard"] = [int(os.environ["SHARD"]), int(os.environ["TOTAL"])]
+          data["tu_total"] = sel["selected_count"]
+          data["selection_mode"] = sel["mode"]
+          json.dump(data, open(out_p, "w", encoding="utf-8"), indent=1)
+          PY
 
       - name: Upload tidy findings
         if: always()

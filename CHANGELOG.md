@@ -39,6 +39,8 @@ freeze: minor-versions-are-additive
 - `Widget::note_pending_mount()` / `virtual Widget::flush_pending_mounts(ctx)`（`widget/widget.h`，前者 **protected** inline、后者 **protected virtual** 缺省空实现）：运行期追加子树的补挂共享件。追加入口只置位，真正的 `mount(ctx)` 由 `Widget::layout` 入口在 `show` 与布局缓存判定**之前**消费，时机与 `LayoutBuilder` / `LazyList` 既有语义同源。
 - 构建系统：新增 CMake 预设 `ninja-shards`（测试 runner 分片 = 4，链接并行化）与 `measure`（ccache 关闭、固定基线条件）；新增 opt-in 开关 `AURORA_ENABLE_UNITY_CORE`（默认 OFF，仅 `src/aurora/core/` 走 Unity Build 试点，详见 `BUILD_OPTIONS.md` §4.8）与 `AURORA_UNITY_BATCH_SIZE`。`tools/check/build_baseline.py` 接入 CI（`core` / `backends` 作业上传 `.ninja_log` / `LastTest.log` / 基线 JSON，仅观测不进门禁）。
 
+- CI 静态检查门禁按改动选集（变更提案 CHG-008）：新增 `tools/check/select_lint_tus.py`，按**编译库自身的 include 闭包**（逐条编译命令跑 `-MM`，而非 `ninja -t deps`——后者只认已构建目标，会漏掉 `EXCLUDE_FROM_ALL` 的 demos：本机实测 `keycode.h` 的一条告警正是从 `demo_google_play.cpp` 报出）挑出「读到本次改动文件」的 TU；`run_clang_tidy.py` 新增 `--tu-list` 与 `--cache-dir` + `--deps`（指纹 = tidy / 编译器版本 + 配置 + argv + TU 与依赖内容，命中即复放上一次输出；编译失败与超时的 TU 绝不入缓存）。CI 编排：master 推送 / 每周定时 / 手动触发跑全量，PR 与功能分支推送跑增量；取不到基线提交退化为全量而非空集，空片写 `idle` JSON 留痕。判据不变（仍为 0 finding 才过），变的是这一轮把判据施加在哪些 TU 上。本机实测：556 TU 依赖探测 ~22s；G40 那批改动选中 184/556（33%）；10 个 demo TU 冷跑 92s → 热跑 0.38s 且 findings 全等。
+
 ### Changed
 
 - **`detach_child_layout_parent` 的断链告警改为分档，只在异常时可见**（`widget/widget.cpp`）。此前 `~Container` / `~SingleChild` 析构体首行的 `detach_all_children_layout_parent()` 对**每一个**子节点无条件发 `AURORA_LOG_WARN`，而那一刻子控件仍被容器持有、尚未析构——即每一次正常的树销毁都逐子刷屏（实测「反复重建 widget 子树」的集成套件单套件可刷数千行），把一次真断链埋进噪声。现按「被摘子节点是否在容器之外仍被持有」分档：随容器正常销毁 ⇒ 静默清指针（该清的照旧清，只是不再当成异常）；活在容器之外被摘走 ⇒ 仍发 `WARN`。指针清理行为与告警文案语义均未变，仅告警**出现次数**收敛。判别式见 `04-widget.md` §2.3。
