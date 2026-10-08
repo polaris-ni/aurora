@@ -869,3 +869,22 @@ au::Button(au::ButtonProps{ .label = "OK" });
 - **不在扫描面**：`codespec/` 文档正文（中文是本仓文档语言）与 `third_party/`。`cmake/` 与根 `CMakeLists.txt` **在**扫描面内：`aurora_log()` / `add_custom_target(COMMENT)` 的文案进配置与构建控制台，`CACHE` 描述进 cmake-gui 面板，与库内诊断是同一类「会离开源码的文本」（该目录下的中文注释同样放行）。
 - **自查**：`python tools/check/check_no_cjk_literals.py --limit 0` 跑全量；整改过程中反复跑并只看自己的文件。新增或修改公共控件的 `.note`/`.description` 时直接写英文，避免先写中文再翻译的往返。
 
+## 15 常见反例速查（AI 协作）
+
+本节是高频错误做法与唯一正确做法的对照表，供写码与评审时逐条扫。左列是在本仓反复出现过的做法，右列是唯一允许的做法；**本表只做定位，不是规范正文**——条文分散在 §1 错误处理、§4.1 统一日志与输出纪律、§5 契约与表达、§6 AI 友好性、§10 提交信息、§13 注释规范、§14 字面量语言规范，以及根目录 `AGENTS.md` 的硬规则与门禁映射表。本表与正文冲突时以正文为准。
+
+| 反例 | 正确做法 |
+|:---|:---|
+| 凭训练记忆调用「应该有」的 API | 先 `grep` / 查 `aurora_api.json` / 查 `GUIDELINE.md` 配方，找不到就当不存在（§6.11） |
+| 顺手把 `protected` 虚回调改 `public`、把私有字段挪区 | 保持改动前的访问区，除非本次语义确实要求（并在说明里写理由，见 `AGENTS.md` 硬规则 9） |
+| 用 `#ifdef` 包住整个虚函数/成员**定义** | 定义无条件写、分支放进函数体——否则 Release vtable 悬空引用 |
+| `#if` 包住 `AURORA_TEST_CASE` 声明 | 条件编译只能在**用例体内**，声明须无条件可见，否则 `registry_integrity` 单边失踪（§3.1） |
+| 测试文件里自己写 `main()` | `main` 由 `tests/framework/test_main.cpp` 唯一提供（§3.1） |
+| 新增 `std::cout` / `printf` / `puts` | 走 `AURORA_LOG_*`（stderr）/ `AURORA_LOG_RAW`（stdout 产品输出）/ 测试与工具里的 `AURORA_TEST_PRINTF*`（§4.1） |
+| 字符串字面量里写中文 | 字面量写英文 + ASCII 标点；确属功能必需中文时就地 `CJK-LITERAL: <类别> - <原因>`（§14） |
+| 只写 `@brief` 就交差 | 按 §13.5.2「命令必选矩阵」补齐 `@param[in/out]`、`@return`、`@tparam`、枚举项/常量说明 |
+| 在代码/文档留 `P0` / `Phase 1` / 旧编号 | 一律改成语义化表述（唯一稳定标识是需求 ID 与文档章节号，见 §11 与 `AGENTS.md` 硬规则 10） |
+| 引用本机路径、临时草稿、构建目录 | 只引用随仓库分发的相对路径 + 真实存在的章节锚点（门禁 `check_no_hardcoded_paths`） |
+| 改完代码不回写文档 | 按 `AGENTS.md` §3.1 回写列与 [`ARCHITECTURE.md`](ARCHITECTURE.md) §15 的出口判据补齐；文档与运行时冲突时以代码为准并回填文档 |
+| 把 demo 当成默认构建目标 | `--target demos` 或按名单独构建（demo 是 `EXCLUDE_FROM_ALL`，见 `AGENTS.md` §3） |
+
