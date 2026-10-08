@@ -7,7 +7,6 @@
 //  - 默认 g_simd_level = SSE2（x86-64 基线恒可用）；AVX2 走运行时 CPUID 分发；
 //    ARM/NEON 本轮暂缓，回落 Scalar。
 #pragma once
-#include <algorithm>
 #include <cstdint>
 
 #include "aurora/core/platform.h"
@@ -16,7 +15,6 @@
 /// @brief 光栅内核 SIMD 双实现接口：标量黄金参考与显式 SSE2/AVX2 实现的声明，以及运行时分发入口。
 /// @file
 namespace aurora::detail {
-
 /// @brief SIMD 能力档位：Scalar 纯标量黄金路径，SSE2 x86-64 基线档位，AVX2 八字节通道档位；分发按运行时探测择档。
 enum class SimdLevel : std::uint8_t { Scalar, SSE2, AVX2 };
 
@@ -40,8 +38,8 @@ auto ensure_simd_init() noexcept -> void;
 /// inline 变量替代「extern 声明 + 外部定义」两段式：链接器保证跨 TU 单一对象，
 /// 且 dispatch 热路径 switch(g_simd_level) 可直读，零间接开销；刻意不包访问器，
 /// 避免热路径函数调用。非 SIMD 构建下该变量无引用者（仅一字节枚举，无副作用）。
-inline SimdLevel g_simd_level = SimdLevel::SSE2;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables): x86-64
-                                                  // 基线；运行时 detect 后可能升为 AVX2
+/// 运行时 detect 后可能升为 AVX2。
+inline auto g_simd_level = SimdLevel::SSE2; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables): x86-64 基线
 
 // ---- 标量黄金参考（与现有像素逐位一致）----
 /// @brief 标量黄金参考：伽马混合逐通道 alpha（ar/ag/ab），覆盖文本 AA 的 per-channel 覆盖率。
@@ -264,6 +262,7 @@ inline auto blend_srgb_over_region(std::uint8_t *px, std::uint8_t sr, std::uint8
 #endif
     blend_srgb_over_region_scalar(px, sr, sg, sb, ar, ag, ab, n);
 }
+
 /// @brief 线性空间混合分发入口（生产路径调用）：确保 SIMD 档位初始化后按 g_simd_level 择档，未命中回落标量黄金。
 /// @param px 像素段首指针；每像素 4 字节。
 /// @param sr 源 8 位红分量。
@@ -355,6 +354,7 @@ inline auto gradient_linear_fill(std::uint8_t *row, int x0, int n, float sx, flo
 #endif
     gradient_linear_scanline_scalar(row, x0, n, sx, py, dx, dy, inv_len_sq, c0, c1, stop0, range);
 }
+
 /// @brief 径向渐变扫描线分发入口（生产路径调用）：SIMD
 /// 填充向量宽度整数倍像素，尾部由标量黄金补齐，整行结果等同标量黄金。
 /// @param row 该行 x0 处首字节指针；填充 [x0, x0+n) 共 n 个像素，直接写 RGB + A(=255)。
@@ -465,5 +465,4 @@ inline auto gradient_radial_fill(std::uint8_t *row, int x0, int n, float cx, flo
     gradient_radial_scanline_scalar(row, x0, n, cx, py, inv_r, c0, c1, stop0, range);
 }
 #endif
-
-}  // namespace aurora::detail
+} // namespace aurora::detail
