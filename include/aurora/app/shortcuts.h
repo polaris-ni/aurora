@@ -20,21 +20,19 @@ namespace aurora {
 /// @note Side-effects: none
 /// @note Rebuildable: no
 struct KeyCombo {
-    ModifierKey modifiers = ModifierKey::None; ///< 修饰键组合（Ctrl/Shift/Alt/Meta 位掩码；锁定位被 `matches` 忽略）
-    KeyCode key = KeyCode::Unknown; ///< 主键
+    ModifierKey modifiers = ModifierKey::None;  ///< 修饰键组合（Ctrl/Shift/Alt/Meta 位掩码；锁定位被 `matches` 忽略）
+    KeyCode key = KeyCode::Unknown;  ///< 主键
 
     /// @brief 默认构造：无修饰键 + Unknown 主键，不匹配任何事件。
     KeyCombo() = default;
     /// @brief 由修饰键组合与主键构造。
     /// @param mods 修饰键位掩码（Ctrl/Shift/Alt/Meta 组合）。
     /// @param k 主键。
-    KeyCombo(ModifierKey mods, KeyCode k) : modifiers(mods), key(k) {
-    }
+    KeyCombo(ModifierKey mods, KeyCode k) : modifiers(mods), key(k) {}
 
     /// @brief 仅主键构造（无修饰键）。
     /// @param k 主键。
-    explicit KeyCombo(KeyCode k) : key(k) {
-    }
+    explicit KeyCombo(KeyCode k) : key(k) {}
 
     /// @brief 检查键盘事件是否匹配本组合（按下事件 + 键码 + **可按住的**修饰位完全一致）。
     ///
@@ -73,16 +71,16 @@ struct KeyCombo {
     /// @return 按 Ctrl/Shift/Alt/Meta 顺序拼接修饰键、再接主键名（key_name）的组合文本；无修饰键时仅主键名。
     [[nodiscard]] auto to_string() const -> std::string {
         std::string s;
-        if ((modifiers & ModifierKey::Control) != 0) { // NOLINT(*-redundant-parentheses)
+        if ((modifiers & ModifierKey::Control) != 0) {  // NOLINT(*-redundant-parentheses)
             s += "Ctrl+";
         }
-        if ((modifiers & ModifierKey::Shift) != 0) { // NOLINT(*-redundant-parentheses)
+        if ((modifiers & ModifierKey::Shift) != 0) {  // NOLINT(*-redundant-parentheses)
             s += "Shift+";
         }
-        if ((modifiers & ModifierKey::Alt) != 0) { // NOLINT(*-redundant-parentheses)
+        if ((modifiers & ModifierKey::Alt) != 0) {  // NOLINT(*-redundant-parentheses)
             s += "Alt+";
         }
-        if ((modifiers & ModifierKey::Meta) != 0) { // NOLINT(*-redundant-parentheses)
+        if ((modifiers & ModifierKey::Meta) != 0) {  // NOLINT(*-redundant-parentheses)
             s += "Meta+";
         }
         s += key_name(key);
@@ -115,7 +113,7 @@ struct KeyCombo {
     /// @note Rebuildable: no
     [[nodiscard]] static auto from(std::string_view text) -> std::optional<KeyCombo> {
         if (text.empty()) {
-            return std::nullopt; // 空串：连主键都没有，不构成组合键
+            return std::nullopt;  // 空串：连主键都没有，不构成组合键
         }
         auto mods = ModifierKey::None;
         std::size_t pos = 0;
@@ -124,7 +122,7 @@ struct KeyCombo {
             const bool is_main = plus == std::string_view::npos;
             const std::string_view token = is_main ? text.substr(pos) : text.substr(pos, plus - pos);
             if (token.empty()) {
-                return std::nullopt; // 空片段："Ctrl+" 尾巴 / "Ctrl++P" / 纯分隔符
+                return std::nullopt;  // 空片段："Ctrl+" 尾巴 / "Ctrl++P" / 纯分隔符
             }
             if (!is_main) {
                 std::optional<ModifierKey> bit;
@@ -139,10 +137,10 @@ struct KeyCombo {
                     bit = ModifierKey::Meta;
                 }
                 if (!bit.has_value()) {
-                    return std::nullopt; // 非修饰位字面量：未知修饰名
+                    return std::nullopt;  // 非修饰位字面量：未知修饰名
                 }
-                if ((mods & *bit) != 0) { // NOLINT(*-redundant-parentheses)
-                    return std::nullopt; // 同一位重复出现
+                if ((mods & *bit) != 0) {  // NOLINT(*-redundant-parentheses)
+                    return std::nullopt;  // 同一位重复出现
                 }
                 mods = mods | *bit;
                 pos = plus + 1;
@@ -150,7 +148,7 @@ struct KeyCombo {
             }
             const std::optional<KeyCode> key = key_code_from_name(token);
             if (!key.has_value()) {
-                return std::nullopt; // 未知主键名（含占位名 "Unknown" 与非 ASCII 串）
+                return std::nullopt;  // 未知主键名（含占位名 "Unknown" 与非 ASCII 串）
             }
             return KeyCombo{mods, *key};
         }
@@ -159,17 +157,17 @@ struct KeyCombo {
 
 /// @brief 快捷键作用域。
 enum class ShortcutScope : std::uint8_t {
-    Global, ///< 全局：无论焦点在哪都响应
-    Focus, ///< 焦点：仅当作用域内控件持有焦点时响应
+    Global,  ///< 全局：无论焦点在哪都响应
+    Focus,  ///< 焦点：仅当作用域内控件持有焦点时响应
 };
 
 /// @brief 单条快捷键绑定：键组合 -> 动作。
 struct ShortcutBinding {
-    KeyCombo combo; ///< 触发键组合
-    std::function<void()> action; ///< 触发动作
-    ShortcutScope scope = ShortcutScope::Global; ///< 作用域
-    bool enabled = true; ///< 是否启用
-    std::string description; ///< 描述（供调试/帮助面板）
+    KeyCombo combo;  ///< 触发键组合
+    std::function<void()> action;  ///< 触发动作
+    ShortcutScope scope = ShortcutScope::Global;  ///< 作用域
+    bool enabled = true;  ///< 是否启用
+    std::string description;  ///< 描述（供调试/帮助面板）
 };
 
 /// @brief 快捷键注册表：集中管理应用级快捷键绑定（specification/06-app-platform.md §8.4）。
@@ -183,7 +181,7 @@ struct ShortcutBinding {
 /// @note Side-effects: none
 /// @note Rebuildable: no
 class ShortcutRegistry {
-public:
+  public:
     /// @brief 注册一条快捷键绑定，返回绑定 ID（用于解绑）。
     /// @param combo 触发键组合。
     /// @param action 命中时执行的动作（可空；空动作仍会消费事件）。
@@ -193,7 +191,7 @@ public:
     auto add(KeyCombo combo, std::function<void()> action, ShortcutScope scope = ShortcutScope::Global,
              std::string description = {}) -> int {
         const int id = next_id_++;
-        bindings_.emplace_back(id, ShortcutBinding{.combo = combo, // 指定初始化列表跨行续写：构造绑定并登记
+        bindings_.emplace_back(id, ShortcutBinding{.combo = combo,  // 指定初始化列表跨行续写：构造绑定并登记
                                                    .action = std::move(action),
                                                    .scope = scope,
                                                    .enabled = true,
@@ -255,8 +253,8 @@ public:
     /// @brief 枚举全部绑定（帮助面板/调试用）。
     /// @return 绑定副本列表（含被禁用的；顺序为注册序）。
     [[nodiscard]] auto bindings() const -> std::vector<ShortcutBinding> {
-        std::vector<ShortcutBinding> out; // 逐条拷贝注册表后返回
-        out.reserve(bindings_.size()); // 预分配与注册表等容量的空间
+        std::vector<ShortcutBinding> out;  // 逐条拷贝注册表后返回
+        out.reserve(bindings_.size());  // 预分配与注册表等容量的空间
         for (const auto &kv : bindings_ | std::views::values) {
             out.push_back(kv);
         }
@@ -266,8 +264,8 @@ public:
     /// @brief 清空全部绑定。
     auto clear() -> void { bindings_.clear(); }
 
-private:
+  private:
     std::vector<std::pair<int, ShortcutBinding>> bindings_;
-    int next_id_ = 1; ///< 下一个可分配绑定 ID（自 1 起，add() 每次 +1，回收不复用）
+    int next_id_ = 1;  ///< 下一个可分配绑定 ID（自 1 起，add() 每次 +1，回收不复用）
 };
-} // namespace aurora
+}  // namespace aurora

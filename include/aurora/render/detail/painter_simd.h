@@ -39,7 +39,7 @@ auto ensure_simd_init() noexcept -> void;
 /// 且 dispatch 热路径 switch(g_simd_level) 可直读，零间接开销；刻意不包访问器，
 /// 避免热路径函数调用。非 SIMD 构建下该变量无引用者（仅一字节枚举，无副作用）。
 /// 运行时 detect 后可能升为 AVX2。
-inline auto g_simd_level = SimdLevel::SSE2; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables): x86-64 基线
+inline auto g_simd_level = SimdLevel::SSE2;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables): x86-64 基线
 
 // ---- 标量黄金参考（与现有像素逐位一致）----
 /// @brief 标量黄金参考：伽马混合逐通道 alpha（ar/ag/ab），覆盖文本 AA 的 per-channel 覆盖率。
@@ -465,4 +465,4 @@ inline auto gradient_radial_fill(std::uint8_t *row, int x0, int n, float cx, flo
     gradient_radial_scanline_scalar(row, x0, n, cx, py, inv_r, c0, c1, stop0, range);
 }
 #endif
-} // namespace aurora::detail
+}  // namespace aurora::detail
