@@ -254,4 +254,53 @@ AURORA_TEST_CASE(fuzzy_score_valid_match_never_uses_the_no_match_sentinel) {
     AURORA_TEST_CHECK_EQ(command_fuzzy_score("ab", "b"), -1);
 }
 
+// set_binding 为什么必须「只改绑定」：此前改绑定只有 add(Command) 一条路，而它是整条覆盖语义——
+// 宿主重述一遍就得把 enabled 谓词这类「取得到、复制不了语义」的字段抄全，漏抄即静默的能力丢失。
+AURORA_TEST_CASE(set_binding_rewrites_only_the_default_binding) {
+    CommandRegistry reg;
+    bool gate = true;
+    int calls = 0;
+    Command cmd = make_command("file.open", "Open");
+    cmd.icon = "folder";
+    cmd.category = "File";
+    cmd.default_binding = KeyCombo{ModifierKey::Control, KeyCode::O};
+    cmd.scope = ShortcutScope::Focus;
+    cmd.when_label = "hasEditor";
+    cmd.enabled = [&gate]() -> bool { return gate; };
+    cmd.action = [&calls]() -> void { ++calls; };
+    reg.add(cmd);
+
+    const Command before = *reg.find("file.open");
+    AURORA_TEST_CHECK_TRUE(
+        reg.set_binding("file.open", KeyCombo{ModifierKey::Control | ModifierKey::Shift, KeyCode::P}));
+
+    const Command *after = reg.find("file.open");
+    AURORA_TEST_REQUIRE_NOT_NULL(after);
+    AURORA_TEST_CHECK_STREQ(after->id, before.id);
+    AURORA_TEST_CHECK_STREQ(after->title, before.title);
+    AURORA_TEST_CHECK_STREQ(after->icon, before.icon);
+    AURORA_TEST_CHECK_STREQ(after->category, before.category);
+    AURORA_TEST_CHECK_STREQ(after->when_label, before.when_label);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(after->scope), static_cast<int>(before.scope));  // 作用域未被动
+    AURORA_TEST_CHECK_STREQ(aurora::testing::require_value(after->default_binding).to_string(), "Ctrl+Shift+P");
+
+    // 谓词与动作体仍在（std::function 比不了对象身份，比求值结果与可调用性）。
+    gate = false;
+    AURORA_TEST_CHECK_FALSE(reg.is_enabled("file.open"));
+    gate = true;
+    AURORA_TEST_CHECK_TRUE(reg.invoke("file.open"));
+    AURORA_TEST_CHECK_EQ(calls, 1);
+
+    // 注册次序与条目数不变。
+    AURORA_TEST_CHECK_EQ(reg.count(), std::size_t{1});
+    AURORA_TEST_CHECK_STREQ(reg.all().front().id, "file.open");
+
+    // 未注册 id：返回 false、不入表、不动既有条目。
+    AURORA_TEST_CHECK_FALSE(reg.set_binding("app.quit", KeyCombo{KeyCode::F5}));
+    AURORA_TEST_CHECK_EQ(reg.count(), std::size_t{1});
+    AURORA_TEST_CHECK_NULL(reg.find("app.quit"));
+    AURORA_TEST_CHECK_STREQ(aurora::testing::require_value(reg.find("file.open")->default_binding).to_string(),
+                            "Ctrl+Shift+P");
+}
+
 }  // namespace aurora::test_cases::utest_commands

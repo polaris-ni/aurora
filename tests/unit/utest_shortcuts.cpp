@@ -6,9 +6,13 @@
 ///           另覆盖锁定态修饰位（NumLock）与匹配的关系：事件侧多带未登记的锁定位仍匹配、
 ///           锁定位不把「相等」变成「包含」、注册侧锁定位被忽略、两个位掩码常量对
 ///           ModifierKey 全部已定义位的无余划分（新增锁定位时该用例要求同步）
+///           另覆盖 `KeyCombo::from` 的反解：与 `to_string` 逐字节往返（全键名 × 全修饰子集）、
+///           修饰次序不敏感、畸形文本一律回 nullopt 且不回落假有效值
 
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "aurora/app/shortcuts.h"
 #include "framework/aurora_test.h"
@@ -246,6 +250,7 @@ AURORA_TEST_CASE(pressable_and_lock_masks_partition_the_modifier_bits) {
     // 「新增锁定位时这条会要求同步」正是它存在的目的——漏并入 AURORA_MODIFIER_LOCK_MASK 的位会落进
     // 两掩码之外的缝隙，在按位比较中继续污染结果（那正是本次缺陷的形态）。
     constexpr std::uint8_t all_defined =
+        // NOLINTNEXTLINE(*-signed-bitwise)
         static_cast<std::uint8_t>(ModifierKey::Shift) | static_cast<std::uint8_t>(ModifierKey::Control) |
         static_cast<std::uint8_t>(ModifierKey::Alt) | static_cast<std::uint8_t>(ModifierKey::Meta) |
         static_cast<std::uint8_t>(ModifierKey::NumLock);
@@ -263,6 +268,85 @@ AURORA_TEST_CASE(pressable_and_lock_masks_partition_the_modifier_bits) {
     AURORA_TEST_CHECK_EQ(
         static_cast<std::uint8_t>(static_cast<std::uint8_t>(ModifierKey::NumLock) & AURORA_MODIFIER_LOCK_MASK),
         static_cast<std::uint8_t>(ModifierKey::NumLock));
+}
+
+// ---- KeyCombo::from：与 to_string 的往返 ----
+
+// 往返为什么走「全键名 × 全修饰子集」而不是挑几个代表：代表集挑漏的那一档正是宿主覆盖表会撞上的
+// 那一档（比如 KP_* 段带 Meta）。全量遍历把「to_string → from 逐位还原」钉成全局性质。
+AURORA_TEST_CASE(key_combo_from_roundtrips_every_name_and_modifier_subset) {
+    int combos = 0;
+    for (int i = 0; i < aurora::detail::AURORA_KEY_NAME_TABLE_SIZE; ++i) {
+        // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+        const auto code = static_cast<KeyCode>(i);
+        if (std::string_view{key_name(code)} == "Unknown") {
+            continue;  // 占位键码不可绑定，from 亦不接受 "Unknown"
+        }
+        for (std::uint8_t bits = 0; bits < 16U; ++bits) {  // Shift/Ctrl/Alt/Meta 的 16 个子集
+            ModifierKey mods = ModifierKey::None;
+            if ((bits & 1U) != 0) {
+                mods = mods | ModifierKey::Shift;
+            }
+            if ((bits & 2U) != 0) {
+                mods = mods | ModifierKey::Control;
+            }
+            if ((bits & 4U) != 0) {
+                mods = mods | ModifierKey::Alt;
+            }
+            if ((bits & 8U) != 0) {
+                mods = mods | ModifierKey::Meta;
+            }
+            const KeyCombo combo{mods, code};
+            const std::string text = combo.to_string();
+            AURORA_TEST_TRACE(text);
+            // require_value 兼做「检查 + 取值」：直接 *parsed 会被 bugprone-unchecked-optional-access 判为未检查
+            // （REQUIRE 宏的展开对路径分析不透明），见 framework/assertions.h 的同名包装。
+            const KeyCombo restored = aurora::testing::require_value(KeyCombo::from(text));
+            AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(restored.modifiers), static_cast<std::uint8_t>(mods));
+            AURORA_TEST_CHECK_EQ(restored.key, code);
+            AURORA_TEST_CHECK_STREQ(restored.to_string(), text);  // 再序列化逐字节相同
+            AURORA_TEST_CHECK_TRUE(restored.matches(key_event(code, mods)));  // 反解结果仍匹配自身
+            ++combos;
+        }
+    }
+    // 守卫：0 命中即通过是空扫，那样本用例恒真。
+    AURORA_TEST_CHECK_GE(combos, 1400);
+}
+
+AURORA_TEST_CASE(key_combo_from_accepts_modifiers_in_any_order) {
+    const KeyCombo canonical = aurora::testing::require_value(KeyCombo::from("Ctrl+Shift+P"));
+    const KeyCombo reordered = aurora::testing::require_value(KeyCombo::from("Shift+Ctrl+P"));
+    AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(canonical.modifiers),
+                         static_cast<std::uint8_t>(reordered.modifiers));
+    AURORA_TEST_CHECK_EQ(canonical.key, reordered.key);
+    // 产出仍是 to_string 的规范序（Ctrl/Shift/Alt/Meta），不保留输入次序——显示串规范只有一份。
+    AURORA_TEST_CHECK_STREQ(reordered.to_string(), "Ctrl+Shift+P");
+}
+
+// 畸形一律回 nullopt，绝不回落：回落会把「这一条没配上」伪装成「配上了某个键」，
+// 宿主按覆盖表重放时该条目会静默消失且不留任何痕迹。
+AURORA_TEST_CASE(key_combo_from_rejects_malformed_text) {
+    const std::string non_ascii = "Ctrl+\xC3\xA9";
+    const std::vector<std::string> malformed = {
+        "",  // 空串
+        "+",  // 只有分隔符
+        "Ctrl+",  // 尾巴
+        "Ctrl++P",  // 连续分隔符
+        "ctrl+p",  // 小写修饰位（to_string 输出 "Ctrl+"）
+        "CTRL+P",  // 全大写
+        "Control+P",  // 修饰位写成键名形态
+        "Unknown",  // 占位键名不可绑定
+        "Ctrl+Unknown",
+        "F13",  // 未知键名
+        "Ctrl+Ctrl+P",  // 修饰位重复
+        "Shift+Ctrl+Shift+P",  // 重复出现在不同位置
+        " Ctrl+P",  // 前导空格
+        "Ctrl+ ",  // 主键为空格
+        non_ascii,  // 非 ASCII 主键名
+    };
+    for (const std::string &text : malformed) {
+        AURORA_TEST_CHECK_MSG(!KeyCombo::from(text).has_value(), "should reject: " + text);
+    }
 }
 
 }  // namespace aurora::test_cases::utest_shortcuts

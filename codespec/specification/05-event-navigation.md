@@ -46,6 +46,8 @@ struct Event {
 
 枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h）、`KeyCode`（`keycode.h`）。
 
+**键名反查 `key_code_from_name(name) -> std::optional<KeyCode>`** 是 `key_name` 的逆（组合键文本反解等路径消费它，见 [`06-app-platform.md`](06-app-platform.md) §8.4）。它**不另列键名表**：遍历 `KeyCode` 的取值空间、逐项取 `key_name()` 的输出与入参比对，故键名字面量的唯一来源仍是 `key_name` 那一处——新增键位只改那一处，不存在第二张表可与之漂移（「另抄一份反查表」正是本函数刻意规避的形态：同源却分叉，且框架侧无任何门禁能发现）。区分大小写，非 ASCII 恒不命中；占位名 `"Unknown"` **不予接受**——它是「后端映射表未收录」的占位值而非可绑定的键位，认下它等于把「解析不出来」假报成「绑定到了某个键」。
+
 **数字小键盘（Keypad）口径**：`KeyCode` 的 `KP_*` 段（`KP_Insert` / `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` / `KP_Add` / `KP_Subtract` / `KP_Multiply` / `KP_Divide` / `KP_Decimal` / `KP_Separator` / `KP_0`–`KP_9`）建模全部小键盘键位，追加在枚举末尾并**写死显式数值**（`KP_Insert = 100` 起）——消费方普遍持有「键码 → 平台原生值」的逐值对齐映射表，中间插入新项会让那些表**静默错位**。`KP_Enter` 按既有决定并入 `KeyCode::Enter`，不单列。`NumLock` 建模为**修饰位**（`ModifierKey::NumLock = 1 << 4`）而非键码：它是切换键、对终端无发送意义，而消费方需要的是「本条按键发生时 NumLock 是开还是关」这一位。
 
 **框架不做二次翻译**：`KP_Prior` 恒为 `KP_Prior`，**不会**因 NumLock 关闭就降级成 `PageUp`。宿主的职责只到这里——「平台原始键 → 语义键码 + 修饰态」的一一映射；「NumLock 关闭时 `KP_Prior` 语义 = PageUp」这类降级由消费方按 `modifiers & ModifierKey::NumLock` 自行决定。后端取不到 NumLock 状态时按「关」处理，不静默假报「开」。

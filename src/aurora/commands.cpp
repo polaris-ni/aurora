@@ -88,9 +88,9 @@ auto CommandRegistry::remove(const std::string &id) -> bool {
     }
     cmds_.erase(cmds_.begin() + static_cast<std::ptrdiff_t>(pos));  // 保持注册序
     index_.erase(it);
-    for (auto &kv : index_) {  // 其后元素下标整体前移
-        if (kv.second > pos) {
-            --kv.second;
+    for (auto &value : index_ | std::views::values) {  // 其后元素下标整体前移
+        if (value > pos) {
+            --value;
         }
     }
     enabled_overrides_.erase(id);
@@ -99,8 +99,8 @@ auto CommandRegistry::remove(const std::string &id) -> bool {
 
 auto CommandRegistry::clear() -> void {
     if (shortcuts_ != nullptr) {
-        for (const auto &kv : shortcut_of_) {
-            shortcuts_->remove(kv.second);
+        for (const auto &kv : shortcut_of_ | std::views::values) {
+            shortcuts_->remove(kv);
         }
     }
     shortcut_of_.clear();
@@ -141,6 +141,29 @@ auto CommandRegistry::set_enabled(const std::string &id, bool on) -> bool {
     return true;
 }
 
+auto CommandRegistry::set_binding(const std::string &id, KeyCombo combo) -> bool {
+    const auto it = index_.find(id);
+    if (it == index_.end()) {
+        return false;  // 未注册：不入表、不动任何既有条目
+    }
+    Command &cmd = cmds_[it->second];
+    cmd.default_binding = combo;
+    if (shortcuts_ != nullptr) {  // 已投影过：把该条换成新组合键，两个投影不各持一份真值
+        if (const auto bound = shortcut_of_.find(id); bound != shortcut_of_.end()) {
+            shortcuts_->remove(bound->second);
+        }
+        const std::string cid = cmd.id;  // 按值捕获，避免悬垂
+        // 同 bind_shortcuts：该回调转入 std::function，本检查对任何可调用对象一律判为「不应抛出」；
+        // invoke 以 bool 在带内回报成败，异常只可能来自宿主注册的 action——本库不在派发边界吞宿主异常。
+        // NOLINTBEGIN(bugprone-exception-escape)
+        const int bound =
+            shortcuts_->add(combo, [this, cid]() -> void { (void)this->invoke(cid); }, cmd.scope, cmd.title);
+        // NOLINTEND(bugprone-exception-escape)
+        shortcut_of_[id] = bound;
+    }
+    return true;
+}
+
 auto CommandRegistry::invoke(const std::string &id) const -> bool {
     const Command *cmd = find(id);
     if (cmd == nullptr || !cmd->action || !enabled_of(*cmd)) {
@@ -167,7 +190,7 @@ auto CommandRegistry::search(const std::string &query, bool only_enabled) const 
         }
         hits.push_back(Scored{.cmd = &cmd, .score = score});
     }
-    std::stable_sort(hits.begin(), hits.end(), [](const Scored &a, const Scored &b) -> bool {
+    std::ranges::stable_sort(hits, [](const Scored &a, const Scored &b) -> bool {
         if (a.score != b.score) {
             return a.score > b.score;  // 得分降序
         }
@@ -210,8 +233,8 @@ auto CommandRegistry::to_json() const -> Json {
 }
 
 auto CommandRegistry::bind_shortcuts(ShortcutRegistry &sr) -> void {
-    for (const auto &kv : shortcut_of_) {  // 幂等：先撤销上次产生的绑定
-        sr.remove(kv.second);
+    for (const auto &kv : shortcut_of_ | std::views::values) {  // 幂等：先撤销上次产生的绑定
+        sr.remove(kv);
     }
     shortcut_of_.clear();
     shortcuts_ = &sr;

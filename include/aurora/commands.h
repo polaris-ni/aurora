@@ -96,6 +96,22 @@ class CommandRegistry {
     /// @return 命中返回 `true`；未命中不记录覆盖值并返回 `false`。
     auto set_enabled(const std::string &id, bool on) -> bool;
 
+    /// @brief 只改某条命令的默认快捷键绑定（供宿主的外部覆盖表在启动期重放）。
+    ///
+    /// 除 `default_binding` 外**不动任何字段**（`title` / `icon` / `action` / `category` / `scope` /
+    /// `enabled` 谓词 / `when_label`），也不改变注册次序。此前改绑定只有 `add(Command)` 一条路，
+    /// 而它是**整条覆盖**语义——宿主重述一遍就得把 `enabled` 这类「取得到、复制不了语义」的字段
+    /// 抄全，漏抄即静默的能力丢失。本入口即为「只换键位」而设。
+    ///
+    /// 已 `bind_shortcuts` 过时，连带把该条在 `ShortcutRegistry` 里的绑定换成新组合键（先撤后建），
+    /// 使命令表与快捷键表两个投影不各持一份绑定真值；尚未投影过则为纯数据变更，由下一次
+    /// `bind_shortcuts`（幂等重建）生效。
+    ///
+    /// @param id 命令唯一标识；未注册时既不入表也不改动任何既有条目。
+    /// @param combo 新的默认快捷键。
+    /// @return 命中并改写为 `true`；未命中为 `false`。
+    auto set_binding(const std::string &id, KeyCombo combo) -> bool;
+
     /// @brief 求值启用条件后执行 `action`。返回是否真的执行（未命中 / 未启用 / 无 action = false）。
     /// @param id 待执行命令的唯一标识。
     /// @return 真正调用了 `action` 时为 `true`。
