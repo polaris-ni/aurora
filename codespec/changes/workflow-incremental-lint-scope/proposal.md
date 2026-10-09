@@ -55,7 +55,7 @@ TU 自身与它读到的头文件，没被挑中的 TU 本轮不可能因为本�
 
 1. **选集不漏**：对「改动 `include/aurora/event/keycode.h`」这一输入，选出的 TU 集合必须包含
    所有读到该头的 TU——含 `examples/app/google_play/demo_google_play.cpp`（构建图法会漏掉它）。
-   本机实测：G40 那批改动（10 个 C/C++ 文件）选中 184/556 个 TU，且 10 个改动文件全部落在
+   本机实测：该批改动（10 个 C/C++ 文件）选中 184/556 个 TU，且 10 个改动文件全部落在
    `applicable_cpp` 里、无 unmatched。
 2. **缓存不改变结果**：同一份 TU 清单连跑两轮，第二轮 `cache: N hit / 0 miss`，两轮
    `findings` 逐条相等（本机实测 10 TU：92s → 0.38s，findings 全等）。
