@@ -458,8 +458,8 @@ namespace {
 /// 为什么需要它：固定格档位要证明的是「推进量只由档位决定、而非由各 face 自己的 advance 决定」。
 /// 若语料里每个字形的 advance 都恰好等于格宽，那「开档」与「不开档」的输出**必然相同**，
 /// 判据变成恒真——这不是被测逻辑的问题，是**判据在当前字体环境下结构性不可观测**。
-/// 硬编码某个码点（如「中」）同样不可靠：CI macOS 腿实测 `Cascadia Code` 解析出的面序列
-/// 含该字形、advance 恰等于格宽，硬编码就会在那一腿红（2026-10-03 实测 33 == 33）。
+/// 硬编码某个码点（如「中」）同样不可靠：CI macOS 环境实测 `Cascadia Code` 解析出的面序列
+/// 含该字形、advance 恰等于格宽，硬编码就会在那一环境红（2026-10-03 实测 33 == 33）。
 ///
 /// 独立基准：用 `measure_width` 量「单码点 vs 同一 Font 的格宽」，两者不等即入选。
 /// 这只依赖被测的**度量**接口、不依赖选面策略，故不会与被测的推进逻辑同源共振。
@@ -611,7 +611,7 @@ AURORA_TEST_CASE(fixed_cell_advance_makes_advance_independent_of_face) {
     // —— 于是语料实际不是「A中B」，而依赖码点内容的判据却照样 PASS（判据与被测对象脱钩）。
     // 拼接写法彻底消除歧义，下面的码点数断言再把「语料被改坏」这类失误即刻暴露出来。
     //
-    // **跨平台要害**：不能假设「中」在等宽族里必然缺字。实测 CI macOS 腿
+    // **跨平台要害**：不能假设「中」在等宽族里必然缺字。实测 CI macOS 环境
     // `Cascadia Code` 解析出的面序列含该字形、advance 恰等于格宽 11px ⇒
     // 「开档 vs 不开档」实测相等（33 vs 33），判据前提消失 ⇒ 用例红。
     // 故语料由下方 `pick_wide_glyph_for()` **实测挑出**，而不是硬编码某个码点。
@@ -633,7 +633,7 @@ AURORA_TEST_CASE(fixed_cell_advance_makes_advance_independent_of_face) {
     //
     // 口径要点（本轮实测踩过）：**不能写成「恰好 3 格」**。固定格档位的定义是
     // 「每个字形一律按 fixed_cell_advance_px 步进」，它**不区分字形宽窄** ——
-    // 一个双宽字形在档位下同样只推一格。实测 Linux 腿 `£`(U+00A3) 的自然 advance
+    // 一个双宽字形在档位下同样只推一格。实测 Linux 环境 `£`(U+00A3) 的自然 advance
     // 是 33px（= 3 倍格宽，因 `monospace_cell` 的格宽按 {'0', U+2500} 量取），
     // 挑它当语料时开档宽度是 11+33+11…——按「每码点一格」写死期望值会得到假红。
     // 故期望值按「码点数 × 格宽」算，与档位定义同源。
@@ -668,8 +668,8 @@ AURORA_TEST_CASE(fixed_cell_advance_places_every_glyph_inside_its_own_cell) {
     const int cw = cell.cell_width_px;
 
     // 语料由 `pick_wide_glyph_for()` **实测挑出**（见其注释）：必须含「advance ≠ 格宽」的码点，
-    // 否则开档与不开档输出必然相同、判据恒真。硬编码「中」在 CI macOS 腿不成立
-    // （该腿 Cascadia Code 含该字形、advance 恰等于格宽），故不写死码点。
+    // 否则开档与不开档输出必然相同、判据恒真。硬编码「中」在 CI macOS 环境不成立
+    // （该环境 Cascadia Code 含该字形、advance 恰等于格宽），故不写死码点。
     const std::string wide = pick_wide_glyph_for(f, cw);
     const std::string mixed = "A" + wide + "A" + wide + "A" + wide + "A";
     constexpr int cells = 7;
@@ -726,7 +726,7 @@ AURORA_TEST_CASE(fixed_cell_advance_places_every_glyph_inside_its_own_cell) {
 AURORA_TEST_CASE(fixed_cell_advance_keeps_glyph_fallback_active) {
     // 「只改推进量、不改选面逻辑」：开档后缺字仍须回退到别的面（否则缺字会变成豆腐/空白）。
     //
-    // 跨平台要害：**不能依赖「等宽族恰好没有某个字形」**。CI macOS 腿实测
+    // 跨平台要害：**不能依赖「等宽族恰好没有某个字形」**。CI macOS 环境实测
     // `Cascadia Code` 解析出的面序列本身含汉字，该字形不落回退面，用例虽仍会绿
     // 却已不测任何东西（空转判据）。故这里改为**用回退链显式构造**缺字场景：
     // 主族取内嵌等宽族，链上给一个注册到私有名下的比例字体族，再挑一个该比例族

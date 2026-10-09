@@ -3,7 +3,7 @@
 /// 测试说明: 覆盖字体发现的初始化与 family 解析：内嵌默认字体可用、未知 family 回退默认链、
 /// 内存字体注册后可按 family 解析出可用 FT_Face、face id 稳定，以及 shutdown 后重新 init 可恢复。
 ///           另覆盖字体族枚举 `list_font_families()`：与 `resolve_faces` 的同源性（对拍判据）、
-///           稳定序去重、等宽判定以度量为准、过滤腿、内置等宽族可见
+///           稳定序去重、等宽判定以度量为准、过滤分支、内置等宽族可见
 
 #include <algorithm>
 #include <cstdint>
@@ -170,7 +170,7 @@ AURORA_TEST_CASE(monospace_flag_follows_metrics_not_the_family_name) {
     AURORA_TEST_CHECK(it->face_count >= 1);
 }
 
-// 过滤腿（A-4）：monospace_only 的返回集是全集的子集，且每个元素 monospace == true。
+// 过滤分支（A-4）：monospace_only 的返回集是全集的子集，且每个元素 monospace == true。
 AURORA_TEST_CASE(monospace_only_returns_a_subset_flagged_monospace) {
     render::init_font_discovery();
     const auto all = render::list_font_families();
@@ -193,7 +193,7 @@ AURORA_TEST_CASE(builtin_cascadia_code_is_enumerated_as_monospace) {
     AURORA_TEST_REQUIRE(cascadia != families.end());
     AURORA_TEST_CHECK(cascadia->monospace);
     AURORA_TEST_CHECK(cascadia->face_count >= 1);
-    // 真等宽族必须能过过滤腿。
+    // 真等宽族必须能过过滤分支。
     const auto mono = render::list_font_families(true);
     AURORA_TEST_CHECK(std::ranges::find(mono, std::string{"Cascadia Code"}, &render::FontFamilyInfo::family) !=
                       mono.end());
@@ -403,7 +403,7 @@ AURORA_TEST_CASE(empty_chain_is_byte_identical_to_no_chain_overload) {
     for (std::size_t i = 0; i < plain.size(); ++i) {
         AURORA_TEST_CHECK_EQ(with_empty.at(i), plain.at(i));
     }
-    // 默认链腿同样验一遍（既有消费者最关心的那条）。
+    // 默认链路径同样验一遍（既有消费者最关心的那条）。
     const auto &def_with_empty = render::resolve_faces("", 400, empty_chain);
     const auto &def_plain = render::resolve_faces("", 400);
     AURORA_TEST_REQUIRE_EQ(def_with_empty.size(), def_plain.size());

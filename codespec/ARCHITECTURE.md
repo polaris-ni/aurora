@@ -543,18 +543,18 @@ CI 配置位于 `.github/workflows/`：
 - windows 侧 Test 步骤显式 `shell: bash` 并设 `PYTHONUTF8=1`（默认 pwsh 无 `nproc`；cp1252 控制台无法编码 CJK 诊断输出）。
 - **编译耗时观测**：`core` 与 `backends` job 在 Build/Test 之后调用 `tools/check/build_baseline.py`（解析 `.ninja_log` 与 `LastTest.log`，纯观测、恒退出 0、不进门禁），把 `.ninja_log` / `LastTest.log` / `build-baseline.json` 作为 artifact 上传，并把摘要写入 step summary。before/after 对照用于决定 Unity Build 试点（`BUILD_OPTIONS.md` §4.8）的默认开关与批大小。
 
-### 14.5 本地验证的腿序与真机探针
+### 14.5 本地验证的目标平台与真机探针
 
-⚠️ `ctest --preset ninja-test` **只覆盖 Windows Release 一腿**。改动一旦触及公共头，必须补跑其余两腿（wasm、Linux X11 / Wayland），否则 MinGW / clang / gcc 之间的严格度差异会一直拖到 CI 才暴露；推送后由 CI 十组作业全矩阵兜底（§14.4）。
+⚠️ `ctest --preset ninja-test` **只覆盖 Windows Release 一个目标平台**。改动一旦触及公共头，必须补跑其余两个目标平台（wasm、Linux X11 / Wayland），否则 MinGW / clang / gcc 之间的严格度差异会一直拖到 CI 才暴露；推送后由 CI 十组作业全矩阵兜底（§14.4）。
 
-| 腿 | 入口 | 出口判据 |
+| 目标平台 | 入口 | 出口判据 |
 |:---|:---|:---|
 | Windows Release 全量 | `ctest --preset ninja-test`（逐条复跑用 `ctest -R <stem>`） | 全绿，含全部静态门禁 |
-| wasm 腿（Emscripten） | wasm 配置下全量 ctest | 该腿全绿 |
-| Linux X11 / Wayland 腿 | 对应后端配置下全量 ctest | 该腿全绿 |
+| wasm 配置（Emscripten） | wasm 配置下全量 ctest | 该配置全绿 |
+| Linux X11 / Wayland 配置 | 对应后端配置下全量 ctest | 该配置全绿 |
 | 推送后 CI 全矩阵 | `.github/workflows/`（§14.4） | 全矩阵作业全绿（功能分支推送 lint 收窄为 1 个 `lint-incremental` 单 job，PR / master 推送走全量 12-job 矩阵） |
 
-**真机验收探针不进 CTest**（`AURORA_BUILD_VERIFY_TOOLS` 默认 OFF、`EXCLUDE_FROM_ALL`，聚合目标 `aurora_verify`）：`--target aurora_verify_win32_dpi` 在 100% DPI 环境下判据恒真并记 SKIP，其自动段注入 `WM_DPICHANGED` 造变化故任何 DPI 环境均可跑，人工段做真跨屏拖动、未做记 PENDING MANUAL；`--target aurora_verify_glfw_dpi` 同构，Wayland 腿需 Linux 合成器环境。契约与判据见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2。
+**真机验收探针不进 CTest**（`AURORA_BUILD_VERIFY_TOOLS` 默认 OFF、`EXCLUDE_FROM_ALL`，聚合目标 `aurora_verify`）：`--target aurora_verify_win32_dpi` 在 100% DPI 环境下判据恒真并记 SKIP，其自动段注入 `WM_DPICHANGED` 造变化故任何 DPI 环境均可跑，人工段做真跨屏拖动、未做记 PENDING MANUAL；`--target aurora_verify_glfw_dpi` 同构，Wayland 验证需 Linux 合成器环境。契约与判据见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2。
 
 ### 14.6 按改动类型的门禁矩阵
 
@@ -566,7 +566,7 @@ CI 配置位于 `.github/workflows/`：
 | `include/aurora/aurora.h` 伞头 | `check_umbrella_header`（直连集合不得相对 `tools/check/umbrella_manifest.txt` 缩减） | `tools/check/umbrella_manifest.txt` 基线 |
 | `core/` 层依赖、模块边界、目录 | `check_core_layer_boundary`、`check_arch_module_map` | 本文件 §2 / §4 |
 | 平台 / 后端分支、feature 宏 | `check_platform_macros` + CI `toggles` 矩阵 | `BUILD_OPTIONS.md` §3 / §4 |
-| Win32 宿主的 DPI / dp↔物理换算 | `check_dpi_single_source`（换算只许在 `to_physical` / `to_logical`，DPI 只许在 `refresh_scale()` 读）；建窗尺寸那一腿另跑真机探针 `aurora_verify_win32_dpi` | `specification/08-tooling.md` §8.2 |
+| Win32 宿主的 DPI / dp↔物理换算 | `check_dpi_single_source`（换算只许在 `to_physical` / `to_logical`，DPI 只许在 `refresh_scale()` 读）；建窗尺寸那一项另跑真机探针 `aurora_verify_win32_dpi` | `specification/08-tooling.md` §8.2 |
 | GLFW / Wayland 的缩放变化上报 | 真机探针 `aurora_verify_glfw_dpi`（自动段注入 `WM_DPICHANGED`，人工段未做记 PENDING MANUAL） | `specification/08-tooling.md` §8.2「缩放变化上报的跨后端现状」 |
 | 字符串字面量 | `check_no_cjk_literals` | `CODING_STANDARDS.md` §14 |
 | NOLINT 豁免排版 | `check_nolint_layout` | `CODING_STANDARDS.md` §5.2 |
@@ -594,7 +594,7 @@ CI 配置位于 `.github/workflows/`：
 | 落码 | 按编码规则落码；API 以头文件与 `aurora_api.json` 为唯一事实，不凭记忆假设 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §1–§8、§15 | 编译零 error |
 | 落码 | 新增公共 API / widget / 核心逻辑必配单测；demo 与公共源一对一 | `CODING_STANDARDS.md` §3 | `utest_*` 存在并经 GLOB 接入 CTest |
 | 落码 | 新增或改动 widget / 类型 / 属性键 → 刷新 API schema | [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §3.6 | `check_api_schema_sync` 绿 |
-| 验证 | 跑全量测试与全部静态门禁、lint、format-check | `AGENTS.md` §3 | 全绿；多腿与真机探针口径见本文件 §14.5 |
+| 验证 | 跑全量测试与全部静态门禁、lint、format-check | `AGENTS.md` §3 | 全绿；多目标平台与真机探针口径见本文件 §14.5 |
 | 回写 | 按改动类型回写 `codespec/` 文档 | `AGENTS.md` §3.1 第三列 | `check_codespec_xref` / `check_code_doc_sync` 绿 |
 | 回写 | 版本与变更记录更新；破坏性变更给出迁移路径 | `CHANGELOG.md` SemVer 规则、[`SPECIFICATIONS.md`](SPECIFICATIONS.md) §12 | `check_version_consistency` 绿 |
 | 回写 | 按 Conventional Commits 写提交信息 | `CODING_STANDARDS.md` §10 | `git log` 可归类、无任务编号词 |
@@ -607,6 +607,6 @@ CI 配置位于 `.github/workflows/`：
 | 可跳过 | 前提 | 依据 |
 |:---|:---|:---|
 | 变更提案 | 不触及公共 API / 分层边界 / 后端矩阵 / 性能门槛的日常小修 | 变更提案机制当前未以独立目录承载；日常小修按本文件 §15 主线直接落码与回写 |
-| 跨平台三腿 | 本次未改动任何公共头 | 本文件 §14.5 |
+| 跨平台三个目标平台 | 本次未改动任何公共头 | 本文件 §14.5 |
 | 回写文档 | 改动类型在 `AGENTS.md` §3.1 表第三列标注为「—」 | `AGENTS.md` §3.1 |
 | 配套单测 | 一次性示例 / 演示，且已在说明里标注「无单测」 | `CODING_STANDARDS.md` §3 |

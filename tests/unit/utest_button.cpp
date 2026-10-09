@@ -383,7 +383,7 @@ AURORA_TEST_CASE(button_paint_remeasures_when_display_text_changes_without_relay
     const float old_w = render::FontEngine::measure_width("Old", f);
     const float fresh_w = render::FontEngine::measure_width("Substantially longer", f);
     AURORA_TEST_CHECK_GT(fresh_w, old_w);
-    // 缓存失效腿：显示串与上次测量用串不同 → 重测，不能复用 "Old" 的旧宽。
+    // 缓存失效路径：显示串与上次测量用串不同 → 重测，不能复用 "Old" 的旧宽。
     AURORA_TEST_CHECK_NEAR(entries[0].bounds.size.width, fresh_w, 1e-3F);
 #else
     AURORA_TEST_SKIP("AURORA_ENABLE_DISPLAY_LIST is off; draw-record probe unavailable");

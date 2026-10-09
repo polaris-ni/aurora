@@ -474,8 +474,7 @@ AURORA_TEST_CASE(popup_content_window_bounds_matches_probe_measured_reachable_bo
     AURORA_TEST_CHECK_NEAR(wb.size.height, AURORA_PROBE_H, 1e-3F);
     // 反向钉住「不是错值」：叠加读法（宿主树上位置 + anchor）比本读数恰多一个 LEAD_IN。
     AURORA_TEST_CHECK(wb.origin.y != AURORA_LEAD_IN + AURORA_ANCHOR.y + AURORA_CONTENT_HEAD);
-    AURORA_TEST_CHECK_NEAR(wb.origin.y + AURORA_LEAD_IN,
-                           AURORA_LEAD_IN + AURORA_ANCHOR.y + AURORA_CONTENT_HEAD, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(wb.origin.y + AURORA_LEAD_IN, AURORA_LEAD_IN + AURORA_ANCHOR.y + AURORA_CONTENT_HEAD, 1e-3F);
 }
 
 AURORA_TEST_CASE(plain_subtree_window_bounds_matches_probe_measured_reachable_box) {
@@ -502,18 +501,18 @@ AURORA_TEST_CASE(plain_subtree_window_bounds_matches_probe_measured_reachable_bo
 AURORA_TEST_CASE(popup_paint_and_hit_semantics_unchanged) {
     // 判据③：钉住 `Popup` 现有绘制与命中语义，作为两形态用例的基线。
     // `anchor_` 的施加方式不止一种（绘制下传盒 / 命中链 contains 判定），两者都是既有语义，
-    // 本次只补事后查询腿，不得改动。
+    // 本次只补事后查询路径，不得改动。
     const Point anchor = AURORA_ANCHOR;
     PopupTree f = make_popup_tree(anchor);
     AURORA_TEST_REQUIRE(f.popup->is_open());
 
-    // 绘制腿：内容盒原点仍为 `anchor_`（全局），不含 `OverlayHost` 在树上的位置。
+    // 绘制路径：内容盒原点仍为 `anchor_`（全局），不含 `OverlayHost` 在树上的位置。
     const Rect content_box = f.popup->content_bounds();
     AURORA_TEST_CHECK(content_box.origin.x == anchor.x);
     AURORA_TEST_CHECK(content_box.origin.y == anchor.y);
     AURORA_TEST_CHECK_NEAR(content_box.size.height, AURORA_CONTENT_HEAD + AURORA_PROBE_H, 1e-3F);
 
-    // 命中腿：`anchor_` 盒内命中内容、盒外不命中（`content_box` 闭区间语义）。
+    // 命中路径：`anchor_` 盒内命中内容、盒外不命中（`content_box` 闭区间语义）。
     const Point inside{.x = anchor.x + 60.0F, .y = anchor.y + AURORA_CONTENT_HEAD + 10.0F};
     AURORA_TEST_CHECK(chain_hits(*f.root, inside, f.target.get()));
     AURORA_TEST_CHECK_FALSE(chain_hits(*f.root, Point{.x = anchor.x - 1.0F, .y = inside.y}, f.target.get()));

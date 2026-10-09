@@ -76,7 +76,7 @@ struct AccessibilityScrollRange {
 };
 
 /// @brief 由滚动量算 UIA `VerticalViewSize` 百分比（可见内容占全部内容的百分比）。
-/// 纯函数、平台中立：UIA provider 与三桥共用的唯一真源，便于脱离 COM 环境做三腿单测。
+/// 纯函数、平台中立：UIA provider 与三桥共用的唯一真源，便于脱离 COM 环境做三桥单测。
 /// @param range 滚动量：视口尺寸取 `.viewport`，内容总尺寸取 `.content`。
 /// @return `viewport / content × 100`，夹到 `[0, 100]`；无跨度 / 不支持滚动
 ///         （`content` 或 `viewport` 非正）报 100（全部可见）。

@@ -625,8 +625,7 @@ constexpr int AURORA_ROWS = 20;  ///< 内容行数（内容总高 800dp > 视口
 constexpr float AURORA_CONTENT_H = static_cast<float>(AURORA_ROWS) * AURORA_ROW_H;
 
 auto g27_viewport() -> Rect {
-    return Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                .size = Size{.width = AURORA_VIEW_W, .height = AURORA_VIEW_H}};
+    return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = AURORA_VIEW_W, .height = AURORA_VIEW_H}};
 }
 
 /// @brief 命中观测台账：记录累计点击数与最近一次被点的行号。
@@ -1105,8 +1104,7 @@ AURORA_TEST_CASE(hit_node_origin_equals_independently_recomputed_window_position
     // 命中一条滚后可见的行：视口局部点取该行中心。
     const auto idx = static_cast<std::size_t>(aurora_scroll_offset / AURORA_ROW_H);
     AURORA_TEST_REQUIRE(idx < f.rows.size());
-    const float local_y =
-        (static_cast<float>(idx) * AURORA_ROW_H) - f.scroll->offset_y() + (AURORA_ROW_H * 0.5F);
+    const float local_y = (static_cast<float>(idx) * AURORA_ROW_H) - f.scroll->offset_y() + (AURORA_ROW_H * 0.5F);
     const auto chain = f.scroll->hit_test_chain(Point{.x = 10.0F, .y = local_y}, g27_viewport(), BuildContext{});
     AURORA_TEST_REQUIRE(!chain.empty());
 
@@ -1126,8 +1124,7 @@ AURORA_TEST_CASE(hit_node_origin_agrees_with_window_bounds) {
     LocalProbeFixture f = make_local_probe_scrollable(aurora_scroll_offset);
     const auto idx = static_cast<std::size_t>(aurora_scroll_offset / AURORA_ROW_H);
     AURORA_TEST_REQUIRE(idx < f.rows.size());
-    const float local_y =
-        (static_cast<float>(idx) * AURORA_ROW_H) - f.scroll->offset_y() + (AURORA_ROW_H * 0.5F);
+    const float local_y = (static_cast<float>(idx) * AURORA_ROW_H) - f.scroll->offset_y() + (AURORA_ROW_H * 0.5F);
     const auto chain = f.scroll->hit_test_chain(Point{.x = 10.0F, .y = local_y}, g27_viewport(), BuildContext{});
     const auto it = std::ranges::find_if(
         chain, [&f, idx](const HitNode &n) -> bool { return n.ptr == static_cast<Widget *>(f.rows[idx].get()); });

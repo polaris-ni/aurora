@@ -12,7 +12,7 @@
 /// `glfwGetWindowSize` 的返回值直接当 dp 用，却又把 `glfwGetWindowContentScale` 原样作为
 /// `scale_factor()` 上报——同一时刻对外宣称「size = 320 dp」与「scale = 1.5」，而窗口实际是
 /// 320 物理像素 = 213 dp。100% DPI 下 scale 恰为 1.0、两种单位解读重合，该分叉**完全不显形**，
-/// 只能靠换算本身的机械校验兜住（接线是否漏掉由 `etest_smoke_render` 的 GLFW 腿判定）。
+/// 只能靠换算本身的机械校验兜住（接线是否漏掉由 `etest_smoke_render` 的 GLFW 配置判定）。
 
 #include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
 #ifdef AURORA_BACKEND_GLFW

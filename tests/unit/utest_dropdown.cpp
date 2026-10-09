@@ -461,7 +461,7 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
     // （`covers_extra_hit_box`）为假。缺 ② 就可能出现「闸认、自身不认」的分叉。
     ChangeLog log;
 
-    // LazyList 腿：20 行 × 56dp，Dropdown 在末行；滚到底后末行顶边 = 19*56 - offset，
+    // LazyList 路径：20 行 × 56dp，Dropdown 在末行；滚到底后末行顶边 = 19*56 - offset，
     // 面板自其下方 30dp 起 ⇒ 整段落在视口下沿（260）之外。
     {
         const std::shared_ptr<Dropdown> dd = make_dropdown(log);
@@ -490,7 +490,7 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
         AURORA_TEST_CHECK_FALSE(list->covers_extra_hit_box(probe, BuildContext{}));
     }
 
-    // Scroll 腿：内容高 400+ 的下拉滚到视口下沿之外，换算与 Scroll::covers_descendant_extra_hit_box 同式。
+    // Scroll 路径：内容高 400+ 的下拉滚到视口下沿之外，换算与 Scroll::covers_descendant_extra_hit_box 同式。
     {
         const std::shared_ptr<Dropdown> dd = make_dropdown(log);
         auto content = std::make_shared<Column>(
