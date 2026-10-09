@@ -29,6 +29,7 @@ namespace aurora::csd {
 /// @brief 一帧 CSD 装饰的绘制输入（纯值，无副作用；由宿主在绘制/录制那一刻装配）。
 struct TitleBarPaintState {
     float width = 0.0F;  ///< 窗口宽（逻辑 dp，含装饰整幅）
+    float height = 0.0F;  ///< 窗口高（逻辑 dp，含装饰整幅；边框带绘制所需，宿主必须装配）
     WindowMode mode = WindowMode::Normal;  ///< 决定标题栏显隐与「最大化/还原」字形
     bool fullscreen_bar_revealed = false;  ///< 全屏下顶边悬停揭示态（仅此一例全屏仍绘制）
     bool title_bar = false;  ///< 是否自绘标题栏（`DecorationPolicy` 解析结果 csd_title）
@@ -38,11 +39,14 @@ struct TitleBarPaintState {
     std::string title;  ///< 标题文字（`style.show_title` 为 false 或本串为空则不画）
     std::shared_ptr<Image> icon;  ///< 图标像素（nullptr = 留白，预留几何位不变）
     TitleBarStyle style{};  ///< 样式（高度 / 配色 / 按钮布局 / 各元素显隐开关）
+    /// @brief CSD 缩放边框带厚度（逻辑 px；0 = 无带）。
+    /// 宿主须在最大化/全屏置 0，与 `Surface::content_inset` 同口径——带是可见装饰，非纯热区。
+    float border = 0.0F;
 
     /// @brief 本帧是否有任何装饰要画（GPU 路径据此整段跳过录制与回放，不产生空重放开销）。
     [[nodiscard]] auto paints_anything() const -> bool {
         if (!title_bar) {
-            return false;
+            return border > 0.0F;  // Borderless（无标题栏）仍可能有缩放边框带
         }
         return mode != WindowMode::FullScreen || fullscreen_bar_revealed;
     }

@@ -20,8 +20,23 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
     const Color bg = s.active ? s.style.bg_active : s.style.bg_inactive;
     const Color fg = s.active ? s.style.fg_active : s.style.fg_inactive;
 
+    if (!s.title_bar && s.border <= 0.0F) {
+        // 无任何可见装饰。
+        return;
+    }
+
+    // CSD 缩放边框带：与标题栏同底色，构成一体的窗口框架（应用内容已被 content_inset 下沉，
+    // 此带若不画则露出画布底色）。最大化/全屏由宿主置 border=0，与 inset 归零同口径。
+    if (s.border > 0.0F && s.height > 0.0F) {
+        const float h = s.height, b = s.border;
+        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = b, .height = h}}, bg);
+        p.fill_rect(Rect{.origin = Point{.x = w - b, .y = 0.0F}, .size = Size{.width = b, .height = h}}, bg);
+        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = h - b}, .size = Size{.width = w, .height = b}}, bg);
+        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = w, .height = b}}, bg);
+    }
+
     if (!s.title_bar) {
-        // 可缩放边框：不画可见线（缩放由宿主边缘热区驱动，浅色背景上画线反而突兀）。
+        // Borderless（无标题栏）：仅边框带，无标题栏背景/文字/按钮。
         return;
     }
 

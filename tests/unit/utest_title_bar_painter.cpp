@@ -265,4 +265,53 @@ AURORA_TEST_CASE(inactive_palette_and_hidden_slots_leave_only_bg) {
     }
 }
 
+AURORA_TEST_CASE(border_band_paints_chrome_frame) {
+    // CSD 缩放边框带（content_inset 下沉后暴露的窗口四周 6px 带）须由装饰层画成框架底色，
+    // 且直绘与录制/回放两路逐位一致；带内不得向内渗漏（内部仍是画布底色）。
+    csd::TitleBarPaintState s = plain_state();
+    s.height = 120.0F;
+    s.border = 6.0F;
+    AURORA_TEST_CHECK(s.paints_anything());
+    check_paths_bit_identical(s);
+
+    const Color bg = s.style.bg_active;
+    Painter p;
+    raster_direct(p, s);
+    // 四条带：左/右/下/上边缘采样点全部是标题栏底色。
+    AURORA_TEST_CHECK(px(p, Point{3.0F, 80.0F}) == bg);
+    AURORA_TEST_CHECK(px(p, Point{396.0F, 80.0F}) == bg);
+    AURORA_TEST_CHECK(px(p, Point{200.0F, 117.0F}) == bg);
+    AURORA_TEST_CHECK(px(p, Point{200.0F, 3.0F}) == bg);
+    // 带内（越过边框厚度）不被污染：标题栏下方、远离带的内部仍是画布底色。
+    AURORA_TEST_CHECK(px(p, Point{200.0F, 80.0F}) == AURORA_BASE);
+}
+
+AURORA_TEST_CASE(border_band_zero_and_borderless_states) {
+    // border=0（最大化/全屏由宿主归零）：与历史行为逐位一致——边缘不留下任何带像素。
+    csd::TitleBarPaintState s = plain_state();
+    s.height = 120.0F;
+    s.border = 0.0F;
+    {
+        Painter p;
+        raster_direct(p, s);
+        AURORA_TEST_CHECK(px(p, Point{3.0F, 80.0F}) == AURORA_BASE);
+    }
+
+    // Borderless（无标题栏 + 有边框带）：paints_anything 放行，只画边框带、不画标题栏背景。
+    csd::TitleBarPaintState bl;
+    bl.width = 400.0F;
+    bl.height = 120.0F;
+    bl.title_bar = false;
+    bl.border = 6.0F;
+    AURORA_TEST_CHECK(bl.paints_anything());
+    check_paths_bit_identical(bl);
+    {
+        Painter p;
+        raster_direct(p, bl);
+        AURORA_TEST_CHECK(px(p, Point{3.0F, 80.0F}) == bl.style.bg_active);
+        // 标题栏背景区域（带内顶部）不应出现——无标题栏即无背景填充。
+        AURORA_TEST_CHECK(px(p, Point{200.0F, 10.0F}) == AURORA_BASE);
+    }
+}
+
 }  // namespace aurora::test_cases::utest_title_bar_painter

@@ -1502,6 +1502,7 @@ auto WaylandSurface::data() const -> const std::uint8_t * {
 auto WaylandSurface::Impl::decoration_state() const -> csd::TitleBarPaintState {
     csd::TitleBarPaintState s;
     s.width = static_cast<float>(size.width);
+    s.height = static_cast<float>(size.height);
     s.mode = mode;
     s.fullscreen_bar_revealed = fs_bar_revealed;
     s.title_bar = csd_title;
@@ -1511,6 +1512,8 @@ auto WaylandSurface::Impl::decoration_state() const -> csd::TitleBarPaintState {
     s.title = title;
     s.icon = tb_icon;
     s.style = tb_style;
+    // 边框带：仅 Normal 态可见（最大化/全屏无缩放边框），与 content_inset 的归零口径一致。
+    s.border = (csd_border && mode == WindowMode::Normal) ? static_cast<float>(border) : 0.0F;
     return s;
 }
 
@@ -1779,10 +1782,14 @@ auto WaylandSurface::uses_client_decorations() const -> bool { return impl_->csd
 auto WaylandSurface::content_inset() const -> EdgeInsets {
     const Impl &d = *impl_;
     float tb = d.csd_title ? d.tb_style.height : 0.0F;
+    float b = d.csd_border ? static_cast<float>(d.border) : 0.0F;
     if (d.mode == WindowMode::FullScreen) {
-        tb = 0.0F;  // 全屏下标题栏退化为揭示条（覆盖层），不回流应用布局，故安全区 top 归零
+        // 全屏：标题栏退化为揭示条（覆盖层）、边框消失，均不回流应用布局。
+        tb = 0.0F;
+        b = 0.0F;
+    } else if (d.mode == WindowMode::Maximized) {
+        b = 0.0F;  // 最大化：工作区铺满，无缩放边框带
     }
-    const float b = d.csd_border ? static_cast<float>(d.border) : 0.0F;
     return EdgeInsets{b, tb, b, b};  // 顺序：left, top, right, bottom
 }
 
