@@ -558,7 +558,7 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 子的窗口布局原点 = 父的窗口布局原点 + 父 Modifier 的内容平移 + 子在父内容区内的盒原点 + 父的滚动修正
 ```
 
-- **内容平移**取 `Modifier::TransformInfo::translation`，与 `render_into` / `hit_test_chain` 共用同一份产物（见 [`05-event-navigation.md`](05-event-navigation.md) §3.2.3 的「origin 与绘制仿射同源」不变量）。**不得在查询侧另写一份「加不加 padding」的算式**——只补 `Padding` 等于把 G31 的病灶换个名字留下。
+- **内容平移**取 `Modifier::TransformInfo::translation`，与 `render_into` / `hit_test_chain` 共用同一份产物（见 [`05-event-navigation.md`](05-event-navigation.md) §3.2.3 的「origin 与绘制仿射同源」不变量）。**不得在查询侧另写一份「加不加 padding」的算式**——只补 `Padding` 等于把该历史病灶换个名字留下。
 - **滚动修正**由虚函数 `Widget::scroll_content_offset` 承载，缺省为零。它是 `Scroll` 唯一非零的覆写者：`Scroll` 的内容子树几何写在**内容坐标**（不含滚动偏移），故按 `-offset_y_` 折算。`LazyList` / `LazyRow` / `GridView` 的偏移已参与子布局（子 bounds 直接是视口坐标），保持缺省零值。`buffer_origin_y_` **不参与**折算——它是缓冲录制锚点，只影响绘制盒那条读数，扣它会二次偏移。
 - 该修正钩子的存在使「哪类宿主提供偏移修正」成为**容器自己的显式声明**，而不是基类按类型猜测。
 - **坐标系重映射**由另一个虚函数 `Widget::child_content_origin` 承载，缺省为 `std::nullopt`（不重映射）。它与上面那个滚动修正**语义相反、不可互相代偿**：滚动修正是**加性**的（基准仍是父链递推结果，只从中扣掉一个滚动量）；重映射是**替换性**的——宿主把整棵子树摆在另一个**绝对**基准上，累计量须以它替换，且其上祖先链一律不再参与。

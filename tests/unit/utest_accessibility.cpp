@@ -968,7 +968,7 @@ AURORA_TEST_CASE(labelled_by_change_raises_name_changed_idempotently) {
     AURORA_TEST_REQUIRE_EQ(events.size(), 3U);
 }
 
-// ---- G33: 修 IScrollProvider::get_VerticalViewSize 算式（UIA 语义错误） ----
+// ---- 修 IScrollProvider::get_VerticalViewSize 算式（UIA 语义错误） ----
 AURORA_TEST_CASE(vertical_view_size_is_visible_fraction_of_content) {
     // 判据①：视口 100 / 内容 400 ⇒ 约 25%；随内容增长单调下降。
     AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size({.viewport = 100.0, .content = 400.0}), 25.0, 1e-6);

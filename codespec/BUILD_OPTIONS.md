@@ -435,7 +435,7 @@ python tools/check/run_clang_tidy.py --build-dir build --tu-list build/lint-sele
 **墙钟与分片（`--shard=i/n`）**：门禁的墙钟 = TU 数 × 单 TU 分析成本 ÷ 并行度，而 CI runner 只有 4 vCPU，并行度已经开满核数——native 一遍 498 TU 实测 `elapsed 5172s`（86 分钟，run 35844126045 的 86.9 分钟连 DEBUG=ON 那遍都没跑到），两道 pass 串在一个作业里就是 3 小时量级。剩下的唯一变量是**把 TU 摊到多个作业**：`-DAURORA_LINT_SHARD=i/n` 让本目录的 `lint` 目标只跑第 i 片，CI 因此按 pass(2) × shard(4) = 8 个作业并跑，每片 ~125 TU ≈ 22 分钟，整门墙钟 86 → ~25 分钟，而**总核时分毫未变**。
 三点约束：① 切分只在 `load_tus()` 的 `sorted()` 结果上做 `tus[i::n]`，清单顺序唯一确定「谁归哪片」，同一份编译库重复取片稳定，且相邻同目录（往往同样重）的 TU 被摊到不同片上；② 分片**不减覆盖面也不改判据**——任一片红即整门红，缺片等于缺覆盖面，故格式非法 / 索引越界在 configure 期 `FATAL_ERROR`，片内选中 0 个 TU 在 runner 期以退出码 2 拒跑，两层都不许「跑到了但没活儿」被读成「跑过且干净」；③ 每片 JSON 自带 `shard` 与 `tu_total`（切分前的全量条数）自述「本片是全量的哪一份」，`--print-tus` 则只打印本片清单便退出，用来离线核验互斥性与并集完整性（本机实测：504 TU → 4 片各 126，两两不相交、并集恰等于全量）。
 
-**按改动选集（`tools/check/select_lint_tus.py`，变更提案 CHG-008）**：分片解决的是「一遍太慢」，
+**按改动选集（`tools/check/select_lint_tus.py`）**：分片解决的是「一遍太慢」，
 选集解决的是「这一遍里的大多数 TU 与本次改动无关」。输入一份改动清单（`--changed <文件>` 或直接
 `--git-diff <ref>`），输出 `selection.json` / `deps.json` / `tus_<i>.txt`，再交给 runner 的
 `--tu-list` 消费。判据不变（仍是 0 finding 才过），变的只是「这一轮把判据施加在哪些 TU 上」——

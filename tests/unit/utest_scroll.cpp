@@ -608,7 +608,7 @@ AURORA_TEST_CASE(scroll_regression_counter_gates) {
     AURORA_TEST_CHECK_LE(dirty_rects_max, gate_threshold("G-8"));
 }
 
-// ---- 内容命中链（G27）：内容须可点，且命中点须随滚动偏移换算 ----
+// ---- 内容命中链：内容须可点，且命中点须随滚动偏移换算 ----
 //
 // 回归背景：修复前 Scroll 的 on_layout 从不调 Node::set_bounds，内容子树停留在默认零盒，
 // 且未覆写 on_hit_test_chain ⇒ 命中链只剩 Scroll 自身，内容里的可交互控件一个都点不到。
@@ -894,7 +894,7 @@ AURORA_TEST_CASE(positive_control_column_root_also_clickable) {
     AURORA_TEST_CHECK_EQ(ledger->last_index, 3);
 }
 
-// ---- G33: VerticalViewSize 数据源（Scroll） ----
+// ---- VerticalViewSize 数据源（Scroll） ----
 AURORA_TEST_CASE(vertical_view_size_reports_visible_fraction_of_content) {
     // 判据①（数据源）：视口 100 / 内容 400 ⇒ 25%；与 LazyList 同源。
     Scroll s{ScrollProps{.child = box(300.0F, 400.0F)}};
@@ -921,7 +921,7 @@ AURORA_TEST_CASE(vertical_view_size_and_scroll_percent_consistent) {
     AURORA_TEST_CHECK_NEAR(mid_view, top_view, 1e-6);
 }
 
-// ---- G36: 控件 -> 窗口逻辑 dp 绝对盒的事后查询（Widget::window_bounds） ----
+// ---- 控件 -> 窗口逻辑 dp 绝对盒的事后查询（Widget::window_bounds） ----
 //
 // 背景：`paint_bounds()` 的注释曾承诺「绝对（窗口逻辑 dp）盒」，但 Scroll 把内容录进离屏缓冲时
 // 给子树传的是 `{0, -buffer_origin_y_}`，故滚动容器内后代的该读数是**缓冲坐标**；消费侧要换算
@@ -1024,7 +1024,7 @@ AURORA_TEST_CASE(window_bounds_matches_recomputed_origin_without_scrolling) {
 }
 
 AURORA_TEST_CASE(window_bounds_accounts_for_modifier_translation) {
-    // G31 同源性的回归：中间层Column 带 padding(10) 时，窗口盒须含该内容盒平移，
+    // 同源性回归：中间层Column 带 padding(10) 时，窗口盒须含该内容盒平移，
     // 否则「origin 与绘制仿射同源」这条不变量在事后查询侧就断了（退化成朴素布局原点）。
     auto col = std::make_shared<Column>();
     col->modifier.set(Modifier{}.padding(10.0F));
@@ -1120,7 +1120,7 @@ AURORA_TEST_CASE(hit_node_origin_equals_independently_recomputed_window_position
 
 AURORA_TEST_CASE(hit_node_origin_agrees_with_window_bounds) {
     // 判据②的交叉验证：`HitNode.origin`（事件本地化基准）与 `window_bounds()`（事后查询）
-    // 对同一控件、同一帧必须给出**同一个窗口位置**——这是 CHG-002 与本次修复合流后的关键不变量：
+    // 对同一控件、同一帧必须给出**同一个窗口位置**——这是与本次修复合流后的关键不变量：
     // 两者同源，消费侧无需再自算折算。
     constexpr float aurora_g27_offset = 120.0F;
     LocalProbeFixture f = make_local_probe_scrollable(aurora_g27_offset);

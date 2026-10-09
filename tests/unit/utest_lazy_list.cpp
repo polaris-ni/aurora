@@ -604,7 +604,7 @@ AURORA_TEST_CASE(set_count_is_idempotent_on_same_value) {
     AURORA_TEST_CHECK_EQ(list.count(), 10);
 }
 
-// ---- G33: VerticalViewSize 数据源（LazyList） ----
+// ---- VerticalViewSize 数据源（LazyList） ----
 AURORA_TEST_CASE(vertical_view_size_reports_visible_fraction_of_content) {
     // 判据①（数据源，LazyList 源）：视口 100 / 内容 400（10 行 × 40） ⇒ 25%。
     BuildRecorder rec;

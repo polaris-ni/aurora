@@ -367,7 +367,7 @@ AURORA_TEST_CASE(extra_hit_box_matches_panel_rect_and_compat_entry) {
 }
 
 AURORA_TEST_CASE(grandchild_extra_hit_box_propagates_three_levels) {
-    // G30 核心证人：三层嵌套 LazyList → Row → Dropdown，孙辈（Dropdown）申报的面板区必须可达。
+    // 核心证人：三层嵌套 LazyList → Row → Dropdown，孙辈（Dropdown）申报的面板区必须可达。
     //
     // 几何（本机无头 scale 恒 1.0）：行盒 56、上下内边距各 8 ⇒ Dropdown 紧约束盒高 40；
     // 面板自下拉局部 y = box_height_(30) 起。探点取下拉局部 y = 60 ⇒ 行局部 60+8-8 = 60，
