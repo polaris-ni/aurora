@@ -39,9 +39,9 @@ auto make_window(const aurora::HeadlessOptions &opts) -> std::unique_ptr<aurora:
     return std::move(created.value());
 }
 
-/// 取窗口的 HeadlessSurface（测试 seam 入口）。
+/// 取窗口的 HeadlessSurface（测试 seam 入口；类型由 headless_opts 构造保证）。
 auto headless_surface(aurora::Window &win) -> aurora::HeadlessSurface & {
-    return static_cast<aurora::HeadlessSurface &>(win.surface());
+    return dynamic_cast<aurora::HeadlessSurface &>(win.surface());
 }
 
 }  // namespace
@@ -49,7 +49,8 @@ auto headless_surface(aurora::Window &win) -> aurora::HeadlessSurface & {
 AURORA_TEST_CASE(content_inset_sinks_root_and_adjusts_media_query) {
     auto win = make_window(headless_opts("inset_sink"));
     // 模拟 Wayland CSD 自绘标题栏预留：顶部 36dp。
-    headless_surface(*win).set_content_inset(aurora::EdgeInsets{.left = 0.0F, .top = 36.0F, .right = 0.0F, .bottom = 0.0F});
+    headless_surface(*win).set_content_inset(
+        aurora::EdgeInsets{.left = 0.0F, .top = 36.0F, .right = 0.0F, .bottom = 0.0F});
 
     bool seen = false;
     aurora::MediaQuery cap{};
@@ -82,7 +83,8 @@ AURORA_TEST_CASE(inset_reset_relayouts_next_frame) {
     // 模拟进出全屏：inset 归零后下一帧应用根回到原点、MediaQuery 恢复窗口口径——
     // 证明下沉是每帧布局期生效，而非建树时一次性偏移。
     auto win = make_window(headless_opts("inset_reset"));
-    headless_surface(*win).set_content_inset(aurora::EdgeInsets{.left = 0.0F, .top = 36.0F, .right = 0.0F, .bottom = 0.0F});
+    headless_surface(*win).set_content_inset(
+        aurora::EdgeInsets{.left = 0.0F, .top = 36.0F, .right = 0.0F, .bottom = 0.0F});
 
     auto host = aurora::LayoutBuilder{[&](const aurora::BuildContext &, const aurora::Constraints &) -> aurora::Node {
         return aurora::Node{aurora::Text{"reset"}};
@@ -95,14 +97,13 @@ AURORA_TEST_CASE(inset_reset_relayouts_next_frame) {
     bool seen = false;
     aurora::MediaQuery cap{};
     // 换一个会重新读 MediaQuery 的树触发整帧重排（inset 变化经 force_full_redraw 驱动）。
-    auto host2 =
-        aurora::LayoutBuilder{[&](const aurora::BuildContext &c, const aurora::Constraints &) -> aurora::Node {
-            if (const aurora::MediaQuery *mq = aurora::media_query_of(c)) {
-                seen = true;
-                cap = *mq;
-            }
-            return aurora::Node{aurora::Text{"reset2"}};
-        }};
+    auto host2 = aurora::LayoutBuilder{[&](const aurora::BuildContext &c, const aurora::Constraints &) -> aurora::Node {
+        if (const aurora::MediaQuery *mq = aurora::media_query_of(c)) {
+            seen = true;
+            cap = *mq;
+        }
+        return aurora::Node{aurora::Text{"reset2"}};
+    }};
     aurora::Node node2{std::move(host2)};
     (void)win->present_root(node2);
 

@@ -79,6 +79,8 @@ class ReorderableList : public Container {
           gap_(gap < 0.0F ? (Diagnostics::degraded("layout", "ReorderableList gap is negative, degraded to 0"), 0.0F)
                           : gap) {
         // 落位动画与近边缘 auto-scroll 均由每帧 tick 驱动（同 Dismissible/ToastHost 模式）。
+        // 基类 Widget 成员不能进派生类初始化列表，只能在构造体内置位。
+        // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
         needs_gesture_tick_ = true;
         rebuild_if_needed();  // 构造即按当前数据量实例化子项
     }

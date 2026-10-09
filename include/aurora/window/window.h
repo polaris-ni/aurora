@@ -578,6 +578,7 @@ class Window {
         bool app_root_changed = false;
         if (!inset_root_ready_ || (!reentered_with_shell && root.operator->() != app_root_.operator->())) {
             app_root_ = root;
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast): inset_root_ 构造即 ContentInsetRoot
             static_cast<detail::ContentInsetRoot &>(inset_root_.widget()).adopt(root);
             inset_root_ready_ = true;
             app_root_changed = true;
@@ -585,6 +586,7 @@ class Window {
         if (applied_inset_.left != inset.left || applied_inset_.top != inset.top ||
             applied_inset_.right != inset.right || applied_inset_.bottom != inset.bottom) {
             applied_inset_ = inset;
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast): inset_root_ 构造即 ContentInsetRoot
             static_cast<detail::ContentInsetRoot &>(inset_root_.widget()).modifier =
                 (inset.left == 0.0F && inset.top == 0.0F && inset.right == 0.0F && inset.bottom == 0.0F)
                     ? Modifier{}
@@ -1133,7 +1135,7 @@ class Window {
                                .height = std::max(0.0F, mq.size.height - inset.vertical())};
             }
         }
-        root_env_.set<MediaQuery>(std::move(mq));
+        root_env_.set<MediaQuery>(mq);
         // 注入窗口级生命周期快照：子树可 ctx.env->get<WindowState>() / ctx.env->get<WindowMode>() 读取。
         root_env_.set<WindowState>(window_state_);
         root_env_.set<WindowMode>(window_mode_);

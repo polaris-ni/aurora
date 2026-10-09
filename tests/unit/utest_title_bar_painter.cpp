@@ -69,6 +69,82 @@ auto raster_recorded(Painter &p, const csd::TitleBarPaintState &s) -> void {
     dl.replay(p);
 }
 
+// ── 阴影边距（shadow margin）专用夹具：画布 = 整幅表面（内容 + 2×margin）────────
+// 注意：Painter 的全局不变量是「目标画布不透明」（混合恒写 alpha=255），本夹具只验证
+// GPU/DL underlay 的命令序列在直绘与录制/回放两路逐位一致；真 alpha 衰减的像素断言在
+// utest_csd_shadow_compose（软件 wl_shm 上屏的 BGRA 合成器）里。
+constexpr int AURORA_MARGIN = 10;  ///< 与 csd::AURORA_SHADOW_MARGIN_DP 同值（阴影带厚度）
+constexpr int AURORA_CONTENT_W = 400;
+constexpr int AURORA_CONTENT_H = 100;
+constexpr int AURORA_SURF_W = AURORA_CONTENT_W + (2 * AURORA_MARGIN);  // 420
+constexpr int AURORA_SURF_H = AURORA_CONTENT_H + (2 * AURORA_MARGIN);  // 120
+
+/// @brief Borderless 风格的阴影状态（无标题栏，纯阴影 underlay，便于对 margin 像素做断言）。
+[[nodiscard]] auto shadow_state(bool margin_on) -> csd::TitleBarPaintState {
+    csd::TitleBarPaintState s;
+    s.width = static_cast<float>(AURORA_CONTENT_W);
+    s.height = static_cast<float>(AURORA_CONTENT_H);
+    s.title_bar = false;  // 不画标题栏，只验证阴影 underlay
+    s.active = true;
+    s.resizable = true;
+    if (margin_on) {
+        s.origin_x = s.origin_y = static_cast<float>(AURORA_MARGIN);
+        s.shadow_margin = static_cast<float>(AURORA_MARGIN);
+    }
+    return s;
+}
+
+/// @brief GPU 帧在软件画布上的同构序列：不透明基底 → 阴影 underlay → 内容矩形底色二次覆盖。
+auto raster_shadow_direct(Painter &p, const csd::TitleBarPaintState &s) -> void {
+    p.begin(AURORA_SURF_W, AURORA_SURF_H);
+    p.fill_rect(
+        Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+             .size = Size{.width = static_cast<float>(AURORA_SURF_W), .height = static_cast<float>(AURORA_SURF_H)}},
+        AURORA_BASE);
+    csd::paint_window_shadow(p, s);
+    p.fill_rect(
+        Rect{.origin = Point{.x = s.origin_x, .y = s.origin_y}, .size = Size{.width = s.width, .height = s.height}},
+        AURORA_BASE);
+}
+
+/// @brief 同序列录进 DL 再回放（GPU 宿主 Sink::begin_frame underlay + app 帧底色的录制口径）。
+auto raster_shadow_recorded(Painter &p, const csd::TitleBarPaintState &s) -> void {
+    p.begin(AURORA_SURF_W, AURORA_SURF_H);
+    p.fill_rect(
+        Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+             .size = Size{.width = static_cast<float>(AURORA_SURF_W), .height = static_cast<float>(AURORA_SURF_H)}},
+        AURORA_BASE);
+    DisplayList dl;
+    p.record(dl);
+    csd::paint_window_shadow(p, s);
+    p.fill_rect(
+        Rect{.origin = Point{.x = s.origin_x, .y = s.origin_y}, .size = Size{.width = s.width, .height = s.height}},
+        AURORA_BASE);
+    p.stop();
+    dl.replay(p);
+}
+
+/// @brief 阴影序列直绘 vs 录制/回放逐字节一致（软件 begin_frame 与 GPU underlay 的核心不变量）。
+auto check_shadow_bit_identical(const csd::TitleBarPaintState &s) -> void {
+    Painter direct;
+    raster_shadow_direct(direct, s);
+    Painter replayed;
+    raster_shadow_recorded(replayed, s);
+    AURORA_TEST_REQUIRE(direct.data() != nullptr);
+    AURORA_TEST_REQUIRE(replayed.data() != nullptr);
+    AURORA_TEST_REQUIRE_EQ(direct.width(), replayed.width());
+    AURORA_TEST_REQUIRE_EQ(direct.height(), replayed.height());
+    const std::size_t n = static_cast<std::size_t>(direct.width()) * static_cast<std::size_t>(direct.height()) * 4U;
+    std::size_t diff = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 逐字节比较两帧缓冲，下标即字节偏移
+        if (direct.data()[i] != replayed.data()[i]) {
+            ++diff;
+        }
+    }
+    AURORA_TEST_CHECK_EQ(diff, 0U);
+}
+
 [[nodiscard]] auto solid_icon(int side, Color c) -> std::shared_ptr<Image> {
     auto img = std::make_shared<Image>();
     img->width = side;
@@ -133,7 +209,7 @@ AURORA_TEST_CASE(gated_states_emit_no_pixels) {
 
     // 无 CSD 标题栏（合成器提供 SSD / 无边框策略）：整幅仍是底色 → GPU 宿主据此跳过回放。
     s.title_bar = false;
-    AURORA_TEST_CHECK_FALSE(s.paints_anything());
+    AURORA_TEST_CHECK_FALSE(s.paints_title_bar());
     {
         Painter p;
         raster_direct(p, s);
@@ -143,14 +219,14 @@ AURORA_TEST_CASE(gated_states_emit_no_pixels) {
     // 全屏默认隐藏标题栏；顶边悬停揭示后必须重新可见（覆盖层语义，不改窗口尺寸）。
     s.title_bar = true;
     s.mode = WindowMode::FullScreen;
-    AURORA_TEST_CHECK_FALSE(s.paints_anything());
+    AURORA_TEST_CHECK_FALSE(s.paints_title_bar());
     {
         Painter p;
         raster_direct(p, s);
         AURORA_TEST_CHECK(px(p, mid_band) == AURORA_BASE);
     }
     s.fullscreen_bar_revealed = true;
-    AURORA_TEST_CHECK_TRUE(s.paints_anything());
+    AURORA_TEST_CHECK_TRUE(s.paints_title_bar());
     {
         Painter p;
         raster_direct(p, s);
@@ -265,53 +341,66 @@ AURORA_TEST_CASE(inactive_palette_and_hidden_slots_leave_only_bg) {
     }
 }
 
-AURORA_TEST_CASE(border_band_paints_chrome_frame) {
-    // CSD 缩放边框带（content_inset 下沉后暴露的窗口四周 6px 带）须由装饰层画成框架底色，
-    // 且直绘与录制/回放两路逐位一致；带内不得向内渗漏（内部仍是画布底色）。
-    csd::TitleBarPaintState s = plain_state();
-    s.height = 120.0F;
-    s.border = 6.0F;
-    AURORA_TEST_CHECK(s.paints_anything());
-    check_paths_bit_identical(s);
+AURORA_TEST_CASE(shadow_underlay_paints_margin_and_restores_content) {
+    // paint_window_shadow 是 GPU/DL underlay 源：本用例在「不透明画布」不变量下验证——
+    // ① 直绘与录制/回放逐位一致；② 阴影落在内容矩形外的 margin 环（环像素变暗）；
+    // ③ 内容矩形被随后的不透明底色完整恢复；④ 远外缘（衰减已归零）保持基底不被触碰。
+    // 真 alpha 数值（外缘字=0x0、渐变预乘）由 utest_csd_shadow_compose 对 BGRA 合成器断言。
+    const csd::TitleBarPaintState s = shadow_state(true);
+    check_shadow_bit_identical(s);
 
-    const Color bg = s.style.bg_active;
     Painter p;
-    raster_direct(p, s);
-    // 四条带：左/右/下/上边缘采样点全部是标题栏底色。
-    AURORA_TEST_CHECK(px(p, Point{3.0F, 80.0F}) == bg);
-    AURORA_TEST_CHECK(px(p, Point{396.0F, 80.0F}) == bg);
-    AURORA_TEST_CHECK(px(p, Point{200.0F, 117.0F}) == bg);
-    AURORA_TEST_CHECK(px(p, Point{200.0F, 3.0F}) == bg);
-    // 带内（越过边框厚度）不被污染：标题栏下方、远离带的内部仍是画布底色。
-    AURORA_TEST_CHECK(px(p, Point{200.0F, 80.0F}) == AURORA_BASE);
+    raster_shadow_direct(p, s);
+
+    // 左/上 margin 带中点：处于衰减环内，黑色阴影在不透明基底上使像素变暗。
+    AURORA_TEST_CHECK_LT(px(p, Point{5.0F, 60.0F}).r, AURORA_BASE.r);
+    AURORA_TEST_CHECK_LT(px(p, Point{210.0F, 5.0F}).g, AURORA_BASE.g);
+    // 对侧环同样闭合（取避开 Painter 边界行口径的一列）。
+    AURORA_TEST_CHECK_LT(px(p, Point{415.0F, 60.0F}).b, AURORA_BASE.b);
+    AURORA_TEST_CHECK_LT(px(p, Point{210.0F, 115.0F}).r, AURORA_BASE.r);
+
+    // 四向缓冲外缘：距离 ≥ blur=margin−1，衰减环不覆盖（软件画布上保持基底；真上屏缓冲
+    // 这些字由 BGRA 合成器覆写为 0x0，见 utest_csd_shadow_compose）。
+    AURORA_TEST_CHECK(px(p, Point{0.0F, 60.0F}) == AURORA_BASE);
+    AURORA_TEST_CHECK(px(p, Point{210.0F, 0.0F}) == AURORA_BASE);
+
+    // 内容矩形被不透明底色二次覆盖完整恢复（阴影形状内部实心填充不向内渗漏）。
+    AURORA_TEST_CHECK(px(p, Point{200.0F, 60.0F}) == AURORA_BASE);
+    AURORA_TEST_CHECK(px(p, Point{11.0F, 11.0F}) == AURORA_BASE);  // 内容左上角内点
 }
 
-AURORA_TEST_CASE(border_band_zero_and_borderless_states) {
-    // border=0（最大化/全屏由宿主归零）：与历史行为逐位一致——边缘不留下任何带像素。
-    csd::TitleBarPaintState s = plain_state();
-    s.height = 120.0F;
-    s.border = 0.0F;
+AURORA_TEST_CASE(shadow_collapses_when_margin_zero_and_borderless_has_no_overlay) {
+    // 塌缩态（margin=0：最大化/全屏/平铺/非 CSD）：paint_window_shadow 无操作。
+    const csd::TitleBarPaintState s = shadow_state(false);
+    check_shadow_bit_identical(s);
     {
         Painter p;
-        raster_direct(p, s);
-        AURORA_TEST_CHECK(px(p, Point{3.0F, 80.0F}) == AURORA_BASE);
+        raster_shadow_direct(p, s);
+        AURORA_TEST_CHECK(px(p, Point{3.0F, 60.0F}) == AURORA_BASE);
+        AURORA_TEST_CHECK(px(p, Point{419.0F, 119.0F}) == AURORA_BASE);
     }
 
-    // Borderless（无标题栏 + 有边框带）：paints_anything 放行，只画边框带、不画标题栏背景。
-    csd::TitleBarPaintState bl;
-    bl.width = 400.0F;
-    bl.height = 120.0F;
-    bl.title_bar = false;
-    bl.border = 6.0F;
-    AURORA_TEST_CHECK(bl.paints_anything());
-    check_paths_bit_identical(bl);
+    // Borderless：有阴影 underlay 但无标题栏 overlay——两个门控相互独立，GPU 宿主据此
+    // 分别决定 underlay/overlay DL 是否回放。
+    AURORA_TEST_CHECK_FALSE(s.paints_title_bar());
+    const csd::TitleBarPaintState borderless = shadow_state(true);
+    AURORA_TEST_CHECK_FALSE(borderless.paints_title_bar());
+    AURORA_TEST_CHECK(borderless.shadow_margin > 0.0F);
     {
+        // Borderless 阴影帧的内容区顶部不得出现标题栏背景填充。
         Painter p;
-        raster_direct(p, bl);
-        AURORA_TEST_CHECK(px(p, Point{3.0F, 80.0F}) == bl.style.bg_active);
-        // 标题栏背景区域（带内顶部）不应出现——无标题栏即无背景填充。
-        AURORA_TEST_CHECK(px(p, Point{200.0F, 10.0F}) == AURORA_BASE);
+        raster_shadow_direct(p, borderless);
+        AURORA_TEST_CHECK(px(p, Point{210.0F, 15.0F}) == AURORA_BASE);  // 内容顶部 = 底色非标题色
     }
+
+    // 全屏揭示条只放行 overlay，不复活阴影（全屏 margin 恒塌缩）。
+    csd::TitleBarPaintState fs = shadow_state(false);
+    fs.title_bar = true;
+    fs.mode = WindowMode::FullScreen;
+    AURORA_TEST_CHECK_FALSE(fs.paints_title_bar());
+    fs.fullscreen_bar_revealed = true;
+    AURORA_TEST_CHECK_TRUE(fs.paints_title_bar());
+    AURORA_TEST_CHECK_EQ(fs.shadow_margin, 0.0F);
 }
 
 }  // namespace aurora::test_cases::utest_title_bar_painter

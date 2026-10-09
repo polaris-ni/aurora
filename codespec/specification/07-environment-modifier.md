@@ -117,13 +117,23 @@ auto root = au::MediaQueryProvider{
 
 | 取值 | 行为 |
 |:---|:---|
-| `Auto` | 优先协商服务端装饰（SSD，原生标题栏）；compositor 不支持时回退客户端自绘（CSD）标题栏 + 边框兜底 |
+| `Auto` | 优先协商服务端装饰（SSD，原生标题栏）；compositor 不支持时回退客户端自绘（CSD）标题栏 + 窗口阴影边距（margin 承载缩放热区，见下） |
 | `ServerSide` | 强制 SSD；不可用时退化为 CSD 兜底（避免无装饰且不可操作） |
-| `ClientSide` | 强制自绘 CSD 标题栏（即便 compositor 支持 SSD） |
-| `Borderless` | 无标题栏，但保留可拖拽缩放边框；移动靠**修饰键拖拽**（按住 `Super` / `Alt` 拖拽任意处 → `xdg_toplevel_move`） |
-| `Frameless` | 完全无装饰，由应用自绘 UI 并经程序化窗口控制驱动状态 |
+| `ClientSide` | 强制自绘 CSD 标题栏（即便 compositor 支持 SSD），带窗口阴影边距 |
+| `Borderless` | 无标题栏，保留窗口阴影边距（margin 带可拖拽缩放）；移动靠**修饰键拖拽**（按住 `Super` / `Alt` 拖拽任意处 → `xdg_toplevel_move`） |
+| `Frameless` | 完全无装饰、无阴影边距，由应用自绘 UI 并经程序化窗口控制驱动状态 |
 
-**安全区**：CSD 标题栏 / 边框占用区经 `Surface::content_inset()` 暴露，由 `present_root` 的下沉壳自动消费（见 §3.1「客户端自绘装饰的安全区」）；根注入 `MediaQuery.padding` 恒为内容区口径（已消费 ⇒ 归零）。
+**安全区**：CSD 标题栏 / 阴影边距占用区经 `Surface::content_inset()` 暴露，由 `present_root` 的下沉壳（`ContentInsetRoot`）自动消费（见 §3.1「客户端自绘装饰的安全区」）；根注入 `MediaQuery.padding` 恒为内容区口径（已消费 ⇒ 归零）。
+
+Wayland CSD 的**阴影边距模型**（单表面，libadwaita 风格；纯逻辑收敛在 `src/aurora/window/detail/csd_geometry.h`）：wl_surface buffer = 应用内容 + 四周 `AURORA_SHADOW_MARGIN_DP`（10dp）边距，边距承载真 alpha 柔影与 ≥8dp 的八向缩放热区；`xdg_surface.set_window_geometry(m,m,内容宽,内容高)` 声明可视窗口边界，`wl_surface.set_opaque_region` 仅报内容矩形。此模型下 **`WaylandSurface::size()` 返回整幅表面逻辑尺寸（内容 + 2×margin）**，`content_inset()` 语义为「表面原点 → 应用内容原点」，按下表取值（`m` = margin、`tb` = 标题栏高）：
+
+| 状态 | ClientSide / Auto 回退 CSD | Borderless | SSD / Frameless |
+|:---|:---|:---|:---|
+| Normal / 平铺外常态 | `{m, m+tb, m, m}` | `{m, m, m, m}` | `{0,0,0,0}` |
+| Maximized / 任意向 tiled | `{0, tb, 0, 0}`（margin 塌缩） | `{0,0,0,0}` | `{0,0,0,0}` |
+| FullScreen | `{0, tb, 0, 0}`（揭示条出现前 tb 亦不绘制） | `{0,0,0,0}` | `{0,0,0,0}` |
+
+margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙、无阴影），回 Normal 恢复；状态切换走整幅重绘。指针在进入表面的三个入口统一做「表面坐标 → 内容坐标（−margin）」映射，热区判定 `csd::classify_resize_zone` 在内容坐标域进行（表驱动纯函数，`utest_csd_geometry` 守门）。X11/Win32/Headless 后端无 margin 分量，`content_inset()` 维持原口径。
 
 **程序化窗口控制**（`Surface` / `Window` 虚函数，默认空实现）：`close()`、`minimize()`、`toggle_maximize()`、`set_fullscreen(bool)`。Wayland 经 `xdg_toplevel` 协议生效，使无标题栏 / 无边框窗口也能由应用按钮驱动状态。
 
@@ -136,6 +146,8 @@ auto root = au::MediaQueryProvider{
 **几何单一来源**：纯函数 `title_bar_geometry(width, style, maximized, resizable)` 返回各按钮 / 图标 / 标题矩形（隐藏 = 空盒）；绘制与命中测试共用，规则以其实现注释为唯一权威。
 
 **绘制单一来源**：`csd::paint_title_bar(Painter&, const TitleBarPaintState&)`（`src/aurora/window/detail/title_bar_painter.h`，库内私有）把 `title_bar_geometry` 的矩形集光栅为一次 `Painter` 调用（背景 + 图标 + 标题 + 三套视觉语言的按钮，hover/激活态入状态结构）。软件路径（`WaylandSurface::Impl::draw_decoration`）与 GPU 路径（`WaylandSurface::record_client_decoration` → 帧 `Sink::end_frame` 回放进 swapchain 帧，见 [`03-layout-render.md`](03-layout-render.md) §8.8）同为它的消费者，故两条上屏路径的装饰逐位一致（`utest_title_bar_painter` 以「直绘 vs 录制回放」全画布字节比对守门）；无装饰可绘（SSD 合成器 / `Frameless`）时录制侧返回 false、当帧不含装饰命令。
+
+**窗口阴影 underlay**：`csd::paint_window_shadow`（同头文件）以内容矩形为形状、零偏移、模糊半径 `margin−AURORA_SHADOW_BLUR_INSET_PX` 录制 `Painter::draw_shadow`，仅作 GPU/DisplayList 路径的阴影源（`record_client_decoration_underlay` → `Sink::begin_frame` 先于 app 帧回放，Shadow 管线写真 alpha 到透明清除的 swapchain）。软件 wl_shm 路径不经 Painter（Painter 目标画布恒不透明，混合恒写 alpha=255，画不出半透明柔影）：`present()` 在 RGBA→BGRA 预乘 swizzle 之后调 `csd::compose_shadow_margins_bgra`（`src/aurora/window/detail/csd_shadow_compose.h`）直接覆写 margin 环的 BGRA 字——内容矩形跳过、角部按两向欧氏距离衰减、外缘写透明字 0 且幂等。视觉参数两条路径同源于 `csd_geometry.h`（`AURORA_SHADOW_BASE_COLOR{0,0,0,70}` / `AURORA_SHADOW_BLUR_INSET_PX` / `shadow_attenuation`），由 `utest_csd_shadow_compose` 对 BGRA 字逐值守门。
 
 **`Surface` 相关虚函数**：`set_title_bar_icon(std::shared_ptr<Image>)`（图标槽）、`begin_window_move()` / `begin_window_resize(WindowResizeEdge)`（控件发起拖拽 / 缩放——**须在指针按下事件派发栈内同步调用**，受 Wayland `xdg` move / resize 的 serial 时效约束）。
 

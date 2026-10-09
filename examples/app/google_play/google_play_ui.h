@@ -1401,8 +1401,8 @@ class AppShell : public au::Container {
         children_[1].widget().layout(au::Constraints{.min = au::Size{.width = w, .height = body_h},
                                                      .max = au::Size{.width = w, .height = body_h}},
                                      ctx);
-        children_[1].set_bounds(au::Rect{.origin = au::Point{.x = 0.0F, .y = top_h},
-                                         .size = au::Size{.width = w, .height = body_h}});
+        children_[1].set_bounds(
+            au::Rect{.origin = au::Point{.x = 0.0F, .y = top_h}, .size = au::Size{.width = w, .height = body_h}});
 
         children_[2].widget().layout(
             au::Constraints{.min = au::Size{.width = w, .height = nav_h}, .max = au::Size{.width = w, .height = nav_h}},

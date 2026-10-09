@@ -16,11 +16,13 @@
 /// 与 X11 版差异（如实申报）：
 /// - 无 `capture_window`（Wayland 协议无抓屏原语，内嵌宿主同样未覆写，基类默认
 ///   报 disabled 即最终行为）；
-/// - 自绘 CSD 装饰经命令通道合成进 GPU 帧：swapchain 独占整块 wl_surface，内嵌宿主画进
-///   Painter 的标题栏不会随帧缓冲上屏，故每帧在 `Sink::end_frame` 里把装饰录制成
-///   DisplayList 追加回放在 app 帧之后（绘制实现与软件路径同源 `csd::paint_title_bar`，
-///   见 `WaylandSurface::record_client_decoration`）。合成器提供 xdg-decoration SSD 时
-///   内嵌宿主不绘装饰，录制返回 false → 零额外开销。
+/// - 自绘 CSD 装饰经命令通道合成进 GPU 帧（双层）：swapchain 独占整块 wl_surface，内嵌宿主
+///   画进 Painter 的内容不会随帧缓冲上屏，故每帧把两类装饰录制成 DisplayList 回放——
+///   窗口阴影 underlay 在 `Sink::begin_frame` 里 app 帧之前回放（位于内容底色之下），
+///   标题栏 overlay 在 `Sink::end_frame` 里 app 帧之后回放（绘制实现与软件路径同源
+///   `csd::paint_window_shadow` / `csd::paint_title_bar`，见
+///   `WaylandSurface::record_client_decoration_underlay` / `record_client_decoration`）。
+///   阴影边距塌缩态（最大化/全屏/平铺）或合成器提供 SSD 时录制返回 false → 零额外开销。
 /// @return 无返回值：本块为文件级说明（紧随的伪声明是 `#if` 续行折叠产物，非真实函数）。
 
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && \
@@ -235,20 +237,22 @@ class WgpuWaylandSurface final : public Surface {
         /// @return 绑定的 WgpuRhi 的基类引用。
         [[nodiscard]] auto backend() -> rhi::RhiBackend & override { return *rhi_; }
         /// @brief 开始 GPU 帧：逻辑 dp 尺寸 ×scale 折算设备像素后转发 `WgpuRhi::begin_frame`。
-        /// 失败置 owner 的永久回退标志（gpu_dead_）。
-        /// @param width 帧逻辑宽（dp）。
-        /// @param height 帧逻辑高（dp）。
+        /// 成功后、app 帧 DL 回放前，先把窗口阴影 underlay 回放进 pass（位于内容底色之下，
+        /// 塌缩态录制返回 false 则跳过）。失败置 owner 的永久回退标志（gpu_dead_）。
+        /// @param width 帧逻辑宽（dp，整幅表面口径 = 内容 + 2×阴影边距）。
+        /// @param height 帧逻辑高（dp，同上）。
         /// @param scale DPI 缩放因子（非正按 1.0 兜底）。
         /// @return GPU 帧开始成功为 true；失败为 false（本帧转软件回退）。
         [[nodiscard]] auto begin_frame(int width, int height, float scale) -> bool override;
-        /// @brief 收口本帧：先把自绘 CSD 装饰回放在 app 帧之上（swapchain 独占 wl_surface，
-        /// 装饰只能走命令通道），再交 `WgpuRhi::end_frame` 提交 + present。见 `.cpp`。
+        /// @brief 收口本帧：先把自绘 CSD 标题栏 overlay 回放在 app 帧之上（swapchain 独占
+        /// wl_surface，装饰只能走命令通道），再交 `WgpuRhi::end_frame` 提交 + present。见 `.cpp`。
         auto end_frame() -> void override;
 
       private:
         rhi::WgpuRhi *rhi_;
         WgpuWaylandSurface *owner_;
-        DisplayList deco_dl_;  ///< 装饰录制缓冲（逐帧复用，避免每帧分配）
+        DisplayList deco_dl_;  ///< 标题栏 overlay 录制缓冲（逐帧复用，避免每帧分配）
+        DisplayList deco_underlay_dl_;  ///< 窗口阴影 underlay 录制缓冲（margin>0 时非空）
     };
 
     std::unique_ptr<WaylandSurface> host_;  ///< 内嵌 Wayland 宿主（窗口壳/事件/软件回退上屏）

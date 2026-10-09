@@ -29,6 +29,8 @@
 #include "aurora/event/keycode.h"
 #include "aurora/window/cursor_map.h"
 #include "aurora/window/detail/atspi_bridge.h"
+#include "aurora/window/detail/csd_geometry.h"
+#include "aurora/window/detail/csd_shadow_compose.h"
 #include "aurora/window/detail/ime_composition.h"
 #include "aurora/window/detail/title_bar_painter.h"
 #include "aurora/window/detail/wayland_output_scale.h"
@@ -113,7 +115,9 @@ struct WaylandSurface::Impl {
     int presented = 0;  ///< 已上屏帧数（见 `WaylandSurface::frame_count()`）。
     /// @brief 本帧 attach 因 configure 打断而丢弃，需在下次事件泵补一帧（见 present() 内注释）。
     bool present_stale = false;
-    Size size{0.0F, 0.0F};  ///< 逻辑 dp（Wayland 表面坐标即逻辑坐标）。
+    /// @brief 内容（window geometry）逻辑 dp 尺寸——configure 口径，不含阴影边距。
+    /// 整幅表面 = full_size() = size + 2×shadow_margin()；Wayland 表面坐标即逻辑坐标。
+    Size size{0.0F, 0.0F};
     int scale = 1;
     bool configured = false;  ///< 收到首个 xdg_surface.configure 前不得 attach buffer。
     // xdg_toplevel.configure 暂存（ack 于 xdg_surface.configure 时统一应用）。
@@ -122,10 +126,12 @@ struct WaylandSurface::Impl {
     bool pending_max = false;
     bool pending_fs = false;
     bool pending_susp = false;
+    bool pending_tiled = false;  ///< 任一 TILED_LEFT/RIGHT/TOP/BOTTOM（xdg-shell v2，阴影边距塌缩用）
     bool pending_act = true;
     bool close_requested = false;
     bool active = true;
     bool minimized = false;
+    bool tiled = false;  ///< 当前合成器平铺态（阴影边距塌缩；标题栏保留）
     WindowVisibility visibility = WindowVisibility::Normal;  ///< 构造期定档的可见性策略。
     WindowState state = WindowState::Visible;
     WindowMode mode = WindowMode::Normal;
@@ -156,8 +162,19 @@ struct WaylandSurface::Impl {
     bool resizable = true;  ///< 可调大小（false = 固定尺寸，最大化按钮隐藏）
     int hovered_btn = -1;  ///< 当前悬停的标题栏按钮索引（-1 = 无悬停）
     bool fs_bar_revealed = false;  ///< 全屏揭示条是否展开（覆盖层语义，不回流布局）
-    int border = 6;  ///< 可拖拽缩放边框厚度（逻辑 px）
     bool csd_grab = false;  ///< 当前是否处于 CSD/修饰键拖拽交互中（吞噬指针事件）
+    // 阴影边距（单表面架构）：buffer = 内容 + 四周 margin，margin 内画 alpha 阴影、承载缩放
+    // 热区；xdg_surface.set_window_geometry 声明可视窗口边界。几何/热区纯逻辑收敛在
+    // detail::csd_geometry.h。塌缩态（最大化/全屏/平铺/非 CSD）margin = 0，整幅即内容。
+    wl_region *opaque_region = nullptr;  ///< 当前 set_opaque_region 的区域（仅内容矩形）
+    int opaque_gx = 0;  ///< 已下发 opaque 区域几何（表面坐标；-1 初始哨兵）
+    int opaque_gy = 0;
+    int opaque_gw = -1;
+    int opaque_gh = -1;
+    int geometry_gx = 0;  ///< 已下发 window geometry（表面坐标；初始哨兵 w=-1）
+    int geometry_gy = 0;
+    int geometry_gw = -1;
+    int geometry_gh = -1;
     std::uint32_t last_press_serial = 0;  ///< 最近按键 serial：控件经 begin_window_move/resize 同步调用时有效
     // ---- 光标形状（客户端主题光标：libwayland-cursor 取位图 → cursor wl_surface → set_cursor）----
     CursorShape pending_cursor_shape = CursorShape::Arrow;  ///< 期望的语义形状（set_cursor 落盘）。
@@ -313,10 +330,20 @@ struct WaylandSurface::Impl {
             self->present_request_();
         }
     }
-    /// @brief 自绘装饰：标题栏（csd_title）+ 边框（csd_border）。
+    /// @brief 当前态阴影边距厚度（逻辑 px；塌缩态 0），纯逻辑见 detail::csd_geometry.h。
+    /// @return margin 厚度。
+    [[nodiscard]] auto shadow_margin() const -> int {
+        return csd::shadow_margin_dp(csd_title || csd_border, mode, tiled);
+    }
+    /// @brief 整幅表面逻辑尺寸（内容 + 2×margin；塌缩态等于内容尺寸）。
+    /// @return buffer 对应的表面逻辑尺寸。
+    [[nodiscard]] auto full_size() const -> Size { return csd::surface_size(size, shadow_margin()); }
+    /// @brief 自绘标题栏 overlay（csd_title；全屏揭示条同路）。
     auto draw_decoration(Painter &p) const -> void;
     /// @brief 装配本帧装饰绘制状态（软件光栅与 GPU 录制两条路径共用的唯一装配点）。
     [[nodiscard]] auto decoration_state() const -> csd::TitleBarPaintState;
+    /// @brief 按当前 margin/内容尺寸同步 window geometry 与 opaque region（双缓冲，下一 commit 生效）。
+    auto apply_surface_geometry() -> void;
     /// @brief 装饰录制专用 Painter：不复用 `painter`——app 帧录制期间其录制栈非空，嵌套会污染帧 DL。
     Painter deco_recorder;
 };
@@ -359,8 +386,10 @@ void ptr_enter(void *data, wl_pointer * /*p*/, std::uint32_t serial, wl_surface 
     // 默认光标，故每次 enter 都强制重下发（跨过同形状去重）。
     d.pointer_enter_serial = serial;
     d.apply_cursor(true);
-    d.ptr_x = wl_fixed_to_double(sx);
-    d.ptr_y = wl_fixed_to_double(sy);
+    // 表面坐标 → 内容坐标（阴影边距平移；三入口统一映射，纯逻辑见 detail::csd_geometry.h）。
+    const int m = d.shadow_margin();
+    d.ptr_x = csd::surface_to_content(wl_fixed_to_double(sx), m);
+    d.ptr_y = csd::surface_to_content(wl_fixed_to_double(sy), m);
     d.send_mouse(MouseAction::Move, MouseButton::Left, static_cast<float>(d.ptr_x), static_cast<float>(d.ptr_y));
 }
 
@@ -371,8 +400,10 @@ void ptr_leave(void *data, wl_pointer * /*p*/, std::uint32_t /*serial*/, wl_surf
 
 void ptr_motion(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, wl_fixed_t sx, wl_fixed_t sy) {
     Impl &d = *static_cast<Impl *>(data);
-    d.ptr_x = wl_fixed_to_double(sx);
-    d.ptr_y = wl_fixed_to_double(sy);
+    // 表面坐标 → 内容坐标（与 ptr_enter 同映射；标题栏命中/全屏揭示/转发均消费内容坐标）。
+    const int m = d.shadow_margin();
+    d.ptr_x = csd::surface_to_content(wl_fixed_to_double(sx), m);
+    d.ptr_y = csd::surface_to_content(wl_fixed_to_double(sy), m);
     // ── CSD 悬停跟踪 + 全屏顶边揭示（仅驱动装饰重绘，不吞 Move 转发）──
     bool want_repaint = false;
     if (d.csd_title) {
@@ -439,34 +470,38 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
 
     d.last_press_serial = serial;  // 缓存本次按键 serial：xdg move/resize 协议要求
 
+    // 内容坐标 → 表面坐标：xdg 协议请求（show_window_menu）取输入事件的表面本地坐标。
+    const int margin = d.shadow_margin();
+    const double surf_x = d.ptr_x + static_cast<double>(margin);
+    const double surf_y = d.ptr_y + static_cast<double>(margin);
+
     // ── 右键标题栏 → 合成器原生窗口菜单（xdg-shell 标准协议；GNOME/KDE 均实现）。
     //    仅在自绘标题栏上拦截；其余区域右键照常转发应用。──
-    if (button == BTN_RIGHT && d.csd_title && d.toplevel != nullptr && d.seat != nullptr && d.ptr_y >= 0.0 &&
-        d.ptr_y < static_cast<double>(d.tb_style.height)) {
-        xdg_toplevel_show_window_menu(d.toplevel, d.seat, serial, static_cast<std::int32_t>(d.ptr_x),
-                                      static_cast<std::int32_t>(d.ptr_y));
+    if (button == BTN_RIGHT && d.csd_title && d.toplevel != nullptr && d.seat != nullptr &&
+        csd::point_in_title_bar(d.ptr_y, d.tb_style.height)) {
+        xdg_toplevel_show_window_menu(d.toplevel, d.seat, serial, static_cast<std::int32_t>(surf_x),
+                                      static_cast<std::int32_t>(surf_y));
         wl_surface_commit(d.surface);
         wl_display_flush(d.dpy);
         return;
     }
 
     // 左键按下时按装饰策略尝试拖拽/关闭：区域命中则吞噬，不转发给应用（避免误触控件）。
-    // 覆盖三种情形：csd_title（标题栏移动+关闭+边框缩放）、csd_border（边框缩放）、
+    // 覆盖三种情形：csd_title（标题栏移动+关闭+margin 缩放）、csd_border（margin 缩放）、
     // mod_move（无标题栏时 Super/Alt + 拖拽移动）。
     if (button == BTN_LEFT && !d.csd_grab && d.toplevel != nullptr && d.seat != nullptr &&
         (d.csd_title || d.csd_border || d.mod_move)) {
         const double W = d.size.width, H = d.size.height;
-        const int tb = static_cast<int>(d.tb_style.height), b = d.border;
+        const float tb = d.tb_style.height;
         const double x = d.ptr_x, y = d.ptr_y;
-        const bool in_left = (x >= 0.0 && x < static_cast<double>(b));
-        const bool in_right = (x > W - static_cast<double>(b) && x < W);
-        const bool in_top_border = (y >= 0.0 && y < static_cast<double>(b));
-        const bool in_bottom = (y > H - static_cast<double>(b) && y < H);
-        // 标题栏区域（整个标题栏高度 tb，不是边框厚度 b！）
-        const bool in_title = (y >= 0.0 && y < static_cast<double>(tb));
+        // 标题栏区域（整个标题栏高度 tb，不是 margin 厚度！）
+        const bool in_title = d.csd_title && csd::point_in_title_bar(y, tb);
+        // margin 缩放带（内容坐标域外的外延环；纯逻辑见 detail::csd_geometry.h）。
+        const csd::CsdResizeZone zone =
+            d.resizable ? csd::classify_resize_zone(x, y, W, H, margin) : csd::CsdResizeZone::None;
 
         // ── 标题栏按钮命中（仅 csd_title；几何单一来源，热区=绘制矩形）──
-        if (d.csd_title && in_title) {
+        if (in_title) {
             const TitleBarGeometry g =
                 title_bar_geometry(static_cast<float>(W), d.tb_style, d.mode == WindowMode::Maximized, d.resizable);
             const auto hit_btn = [&](const Rect &r) {
@@ -529,33 +564,41 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
             return;
         }
 
-        // ── 可缩放边框抓手（csd_title 或 csd_border）──
-        if (d.csd_border || d.csd_title) {
-            // 注意：有标题栏时顶部边框被标题栏覆盖（已由上面的 in_title 处理），
-            // 此处 in_top_border 仅在无标题栏（Borderless）时生效。
-            if (in_left || in_right || in_top_border || in_bottom) {
-                xdg_toplevel_resize_edge edge = XDG_TOPLEVEL_RESIZE_EDGE_NONE;
-                if (in_left && in_top_border) {
+        // ── margin 缩放带抓手（csd_title 或 csd_border；热区在视觉窗口之外，不吞内容事件）──
+        // 顶边带位于标题栏之外的 margin 区，有标题栏时同样可从顶部边缘缩放（对齐 libadwaita）。
+        if ((d.csd_border || d.csd_title) && zone != csd::CsdResizeZone::None) {
+            xdg_toplevel_resize_edge edge = XDG_TOPLEVEL_RESIZE_EDGE_NONE;
+            switch (zone) {
+                case csd::CsdResizeZone::TopLeft:
                     edge = XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT;
-                } else if (in_right && in_top_border) {
+                    break;
+                case csd::CsdResizeZone::TopRight:
                     edge = XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT;
-                } else if (in_left && in_bottom) {
+                    break;
+                case csd::CsdResizeZone::BottomLeft:
                     edge = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT;
-                } else if (in_right && in_bottom) {
+                    break;
+                case csd::CsdResizeZone::BottomRight:
                     edge = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT;
-                } else if (in_left) {
+                    break;
+                case csd::CsdResizeZone::Left:
                     edge = XDG_TOPLEVEL_RESIZE_EDGE_LEFT;
-                } else if (in_right) {
+                    break;
+                case csd::CsdResizeZone::Right:
                     edge = XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
-                } else if (in_top_border) {
+                    break;
+                case csd::CsdResizeZone::Top:
                     edge = XDG_TOPLEVEL_RESIZE_EDGE_TOP;
-                } else {
+                    break;
+                case csd::CsdResizeZone::Bottom:
                     edge = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM;
-                }
-                d.csd_grab = true;
-                xdg_toplevel_resize(d.toplevel, d.seat, serial, edge);
-                return;
+                    break;
+                case csd::CsdResizeZone::None:
+                    break;
             }
+            d.csd_grab = true;
+            xdg_toplevel_resize(d.toplevel, d.seat, serial, edge);
+            return;
         }
 
         // 无标题栏时（Borderless/Frameless）：按住 Super/Alt 拖拽任意处移动窗口。
@@ -795,18 +838,22 @@ auto WaylandSurface::Impl::on_xdg_surface_configure(std::uint32_t serial) -> voi
                                  : pending_max  ? WindowMode::Maximized
                                  : pending_susp ? WindowMode::Minimized
                                                 : WindowMode::Normal;
+    // 阴影边距相关态：模式或平铺标志变化即需整帧重排重绘（margin 塌缩/恢复会改变 buffer 尺寸
+    // 与 content_inset；平铺配置不一定携带尺寸变化，故不能只在 resized 时请帧）。
+    const bool margin_state_changed = (want_mode != mode) || (pending_tiled != tiled);
     if (want_mode != mode) {
         mode = want_mode;
         minimized = (want_mode == WindowMode::Minimized);
         self->notify_window_mode(want_mode);
         update_state();
     }
+    tiled = pending_tiled;
     if (active != pending_act) {
         active = pending_act;
         update_state();
     }
-    if (resized && self->present_request_) {
-        // 几何变化当下同步重渲染（对齐 Win32 WM_SIZE / X11 ConfigureNotify）：
+    if ((resized || margin_state_changed) && self->present_request_) {
+        // 几何/边距变化当下同步重渲染（对齐 Win32 WM_SIZE / X11 ConfigureNotify）：
         // 下一次 commit 的缓冲已为新尺寸内容，无黑边/残留。
         self->present_request_();
     }
@@ -818,6 +865,7 @@ auto WaylandSurface::Impl::on_toplevel_configure(std::int32_t w, std::int32_t h,
     pending_max = false;
     pending_fs = false;
     pending_susp = false;
+    pending_tiled = false;
     pending_act = false;
     const auto *arr = static_cast<const std::uint32_t *>(states->data);
     const std::size_t n = states->size / sizeof(std::uint32_t);
@@ -834,6 +882,14 @@ auto WaylandSurface::Impl::on_toplevel_configure(std::int32_t w, std::int32_t h,
                 break;
             case XDG_TOPLEVEL_STATE_SUSPENDED:
                 pending_susp = true;
+                break;
+            // xdg-shell v2 平铺态（wm_base 绑定封顶 v2，可收到）：任一方向平铺都令阴影
+            // 边距塌缩（合成器贴边布局时窗口外侧无阴影/热区语义），标题栏保留。
+            case XDG_TOPLEVEL_STATE_TILED_LEFT:
+            case XDG_TOPLEVEL_STATE_TILED_RIGHT:
+            case XDG_TOPLEVEL_STATE_TILED_TOP:
+            case XDG_TOPLEVEL_STATE_TILED_BOTTOM:
+                pending_tiled = true;
                 break;
             default:
                 break;
@@ -974,7 +1030,9 @@ auto WaylandSurface::Impl::ensure_slot(Slot &s, int w, int h) const -> bool {
         return false;
     }
     wl_shm_pool *pool = wl_shm_create_pool(shm, fd, static_cast<std::int32_t>(bytes));
-    s.buf = wl_shm_pool_create_buffer(pool, 0, w, h, static_cast<std::int32_t>(stride), WL_SHM_FORMAT_XRGB8888);
+    // ARGB8888：阴影边距需要每像素 alpha（合成器按预乘 alpha 解读，swizzle 侧已预乘）；
+    // 内容区 alpha 恒 255，与旧 XRGB 路径逐值等价。
+    s.buf = wl_shm_pool_create_buffer(pool, 0, w, h, static_cast<std::int32_t>(stride), WL_SHM_FORMAT_ARGB8888);
     wl_shm_pool_destroy(pool);
     ::close(fd);  // pool 已持有 fd 引用，本端句柄可关
     if (s.buf == nullptr) {
@@ -1324,13 +1382,13 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
             d.csd_title = !ssd_available;
             d.csd_border = d.csd_title;
             break;
-        case DecorationPolicy::ClientSide:  // 强制自绘标题栏（即便 KDE 支持 SSD）；不画边框。
-            // 边缘缩放仍可用：ptr_button 的 `csd_border || csd_title` 分支保留左/右/下热区，
-            // 顶部被标题栏覆盖；content_inset 仅报告标题栏，不额外留边框。
+        case DecorationPolicy::ClientSide:  // 强制自绘标题栏（即便 KDE 支持 SSD）；阴影边距由标题态启用。
+            // 八向缩放全可用：ptr_button 的 classify_resize_zone 热区在视觉窗口之外的 margin 带内
+            // （含标题栏上方的顶部边），不吞内容点击，也不占用布局。
             d.csd_title = true;
             d.csd_border = false;
             break;
-        case DecorationPolicy::Borderless:  // 无标题栏：可缩放边框；移动靠修饰键拖拽。
+        case DecorationPolicy::Borderless:  // 无标题栏：阴影边距缩放热区；移动靠修饰键拖拽。
             d.csd_title = false;
             d.csd_border = true;
             d.mod_move = true;
@@ -1384,6 +1442,12 @@ WaylandSurface::~WaylandSurface() {
         }
         if (d.deco_mgr != nullptr) {
             zxdg_decoration_manager_v1_destroy(d.deco_mgr);
+        }
+        if (d.opaque_region != nullptr) {
+            // 解除表面引用后销毁区域对象（surface 本身紧随其后销毁，顺序安全）。
+            wl_surface_set_opaque_region(d.surface, nullptr);
+            wl_region_destroy(d.opaque_region);
+            d.opaque_region = nullptr;
         }
         if (d.pointer != nullptr) {
             wl_pointer_destroy(d.pointer);
@@ -1467,26 +1531,41 @@ auto WaylandSurface::begin_frame(int width, int height) -> Result<bool> {
     // 新帧默认全量上屏；present_root 会在 present 前重新 set_present_dirty。
     d.present_dirty.clear();
     d.painter.set_scale(static_cast<float>(d.scale));
-    // configure 已把最新逻辑尺寸写入 d.size（对齐 Win32/X11「查真实几何」策略：
-    // 调用方入参可能滞后一帧，以 d.size 为准保证缓冲与表面 1:1 吻合）。
-    int lw = static_cast<int>(std::lround(d.size.width));
-    int lh = static_cast<int>(std::lround(d.size.height));
-    if (lw <= 0) {
-        lw = width > 0 ? width : 1;
+    // configure 写入的 d.size 是 window geometry（内容）尺寸；整幅表面 = 内容 + 2×margin
+    // （阴影边距架构，detail::csd_geometry.h）。调用方入参可能滞后一帧，以 d.size 为准。
+    const int m = d.shadow_margin();
+    int cw = static_cast<int>(std::lround(d.size.width));
+    int ch = static_cast<int>(std::lround(d.size.height));
+    if (cw <= 0) {
+        cw = width > 0 ? width : 1;
     }
-    if (lh <= 0) {
-        lh = height > 0 ? height : 1;
+    if (ch <= 0) {
+        ch = height > 0 ? height : 1;
     }
+    const int lw = cw + (2 * m);
+    const int lh = ch + (2 * m);
     // Painter 缓冲按物理分辨率分配（逻辑 × scale）：与 painter.width()（物理）比较判重建。
     const int phys_w = lw * d.scale;
     const int phys_h = lh * d.scale;
     if (phys_w != d.painter.width() || phys_h != d.painter.height() || d.painter.data() == nullptr) {
         d.painter.begin(lw, lh);
     }
-    // 浅色背景：默认文字为黑色，需浅色底才可见（与 Win32/GLFW/X11 后端一致）。
-    d.painter.fill_rect(
-        Rect{Point{0.0F, 0.0F}, Size{static_cast<float>(d.painter.width()), static_cast<float>(d.painter.height())}},
-        Color{245, 245, 247, 255});
+    const Color base{245, 245, 247, 255};
+    // GPU 帧录制期间本 Painter 正把命令录进帧 DL：只允许「内容区不透明底色」入 DL（app 半透明
+    // 控件需要它垫底），清底不得入 DL——GPU 侧 render pass 自带透明清除，阴影 underlay 由
+    // WgpuWaylandSurface::Sink 在 app 帧之前单独录制回放（record_client_decoration_underlay）。
+    const bool recording = d.painter.is_recording();
+    if (!recording) {
+        // 软件直绘：整幅恢复零基底（清掉上帧内容像素；缓冲槽轮换后也可能是上一窗口的残留）。
+        // margin 阴影不经 Painter（其混合恒写 alpha=255，画不出真 alpha），由 present() 的
+        // csd::compose_shadow_margins_bgra 在 swizzle 后直接合成进 wl_shm BGRA 缓冲。
+        d.painter.clear_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                                  .size = Size{.width = static_cast<float>(lw), .height = static_cast<float>(lh)}});
+    }
+    // 浅色背景（内容区不透明）：默认文字为黑色，需浅色底才可见（与 Win32/GLFW/X11 后端一致）。
+    d.painter.fill_rect(Rect{.origin = Point{.x = static_cast<float>(m), .y = static_cast<float>(m)},
+                             .size = Size{.width = static_cast<float>(cw), .height = static_cast<float>(ch)}},
+                        base);
     return Result<bool>{true};
 }
 
@@ -1501,8 +1580,12 @@ auto WaylandSurface::data() const -> const std::uint8_t * {
 
 auto WaylandSurface::Impl::decoration_state() const -> csd::TitleBarPaintState {
     csd::TitleBarPaintState s;
-    s.width = static_cast<float>(size.width);
+    s.width = static_cast<float>(size.width);  // 内容尺寸（window geometry 口径）
     s.height = static_cast<float>(size.height);
+    const int m = shadow_margin();
+    s.origin_x = static_cast<float>(m);  // 内容区在整幅表面上的原点 = margin（塌缩态 0）
+    s.origin_y = static_cast<float>(m);
+    s.shadow_margin = static_cast<float>(m);
     s.mode = mode;
     s.fullscreen_bar_revealed = fs_bar_revealed;
     s.title_bar = csd_title;
@@ -1512,26 +1595,68 @@ auto WaylandSurface::Impl::decoration_state() const -> csd::TitleBarPaintState {
     s.title = title;
     s.icon = tb_icon;
     s.style = tb_style;
-    // 边框带：仅 Normal 态可见（最大化/全屏无缩放边框），与 content_inset 的归零口径一致。
-    s.border = (csd_border && mode == WindowMode::Normal) ? static_cast<float>(border) : 0.0F;
     return s;
 }
 
 auto WaylandSurface::Impl::draw_decoration(Painter &p) const -> void {
-    // 绘制实现收敛在 `csd::paint_title_bar`——GPU 路径（WgpuWaylandSurface）录制同一份内容进帧，
-    // 两条上屏路径必须画同一套装饰，故此处只装配状态、不持有绘制代码。
+    // 标题栏 overlay 绘制收敛在 `csd::paint_title_bar`——GPU 路径（WgpuWaylandSurface）录制
+    // 同一份内容进帧，两条上屏路径画同一套装饰。阴影 underlay 在 begin_frame 阶段绘制，
+    // 不经过这里（须位于内容底色之下）。
     csd::paint_title_bar(p, decoration_state());
+}
+
+auto WaylandSurface::Impl::apply_surface_geometry() -> void {
+    // window geometry：可视窗口边界 = 内容矩形（表面坐标）；margin 带在几何之外（阴影/热区）。
+    // 与 opaque region 同为双缓冲状态，随本帧 commit 统一生效；几何未变则不重发。
+    const int m = shadow_margin();
+    const int cw = static_cast<int>(std::lround(size.width));
+    const int ch = static_cast<int>(std::lround(size.height));
+    if (m != geometry_gx || m != geometry_gy || cw != geometry_gw || ch != geometry_gh) {
+        xdg_surface_set_window_geometry(xsurface, m, m, cw, ch);
+        geometry_gx = geometry_gy = m;
+        geometry_gw = cw;
+        geometry_gh = ch;
+    }
+    // opaque region 只报内容矩形（margin 半透明，报 opaque 会让合成器跳过阴影混合）。
+    if (m != opaque_gx || m != opaque_gy || cw != opaque_gw || ch != opaque_gh) {
+        if (opaque_region != nullptr) {
+            wl_region_destroy(opaque_region);
+            opaque_region = nullptr;
+        }
+        opaque_region = wl_compositor_create_region(compositor);
+        wl_region_add(opaque_region, m, m, cw, ch);
+        wl_surface_set_opaque_region(surface, opaque_region);
+        opaque_gx = opaque_gy = m;
+        opaque_gw = cw;
+        opaque_gh = ch;
+    }
 }
 
 auto WaylandSurface::record_client_decoration(DisplayList &dl) -> bool {
     Impl &d = *impl_;
     const csd::TitleBarPaintState s = d.decoration_state();
-    if (!s.paints_anything()) {
+    if (!s.paints_title_bar()) {
         return false;
     }
     // 独立录制 Painter（见 Impl::deco_recorder 注）：调用点在外层 app 帧录制栈之上，二者互不干扰。
     d.deco_recorder.record(dl);
     csd::paint_title_bar(d.deco_recorder, s);
+    d.deco_recorder.stop();
+    return true;
+}
+
+auto WaylandSurface::record_client_decoration_underlay(DisplayList &dl) -> bool {
+    Impl &d = *impl_;
+    const csd::TitleBarPaintState s = d.decoration_state();
+    if (s.shadow_margin <= 0.0F) {
+        return false;  // 塌缩态 / 非 CSD：无阴影，不产生回放
+    }
+    // GPU 路径专用：阴影须位于 app 帧（含不透明内容底色）之下，故由 Sink 在 rhi.begin_frame
+    // 之后、帧 DL 回放之前录制回放。软件 wl_shm 路径不调用本函数（Painter 画布恒不透明），
+    // 阴影由 present() 的 csd::compose_shadow_margins_bgra 在 swizzle 后直写 BGRA；两路视觉
+    // 参数同源 csd_geometry.h。record() 先清空 dl，成员录制器每帧复用不累积。
+    d.deco_recorder.record(dl);
+    csd::paint_window_shadow(d.deco_recorder, s);
     d.deco_recorder.stop();
     return true;
 }
@@ -1554,30 +1679,36 @@ auto WaylandSurface::present() -> Result<bool> {
                               "Compositor may be unresponsive; retry next frame.", "aurora/window/wayland_surface.h");
         }
         // 本帧几何是否仍与合成器的 configure 态吻合：begin_frame 之后、attach 之前唯一的派发点是
-        // pick_slot 的 roundtrip，其间的 xdg_toplevel.configure 会把 size 改成新尺寸，而它请求的同步重绘
-        // 又被 present_root 的重入护栏吞掉，于是 painter/缓冲槽仍按旧几何分配。这副「旧尺寸 buffer + 新
-        // configure 态」提交上去会被合成器判为协议错误并杀连接（Weston 实测报文的尺寸对即为
-        // 「stale buffer vs 新 configure」）。故丢帧不 attach（脏区原样留给补帧），下次事件泵补一帧。
-        const int want_w = static_cast<int>(std::lround(d.size.width)) * d.scale;
-        const int want_h = static_cast<int>(std::lround(d.size.height)) * d.scale;
+        // pick_slot 的 roundtrip，其间的 xdg_toplevel.configure 会把 size/mode 改成新值，而它请求的
+        // 同步重绘又被 present_root 的重入护栏吞掉，于是 painter/缓冲槽仍按旧几何分配。这副「旧尺寸
+        // buffer + 新 configure 态」提交上去会被合成器判为协议错误并杀连接（Weston 实测报文的尺寸
+        // 对即为「stale buffer vs 新 configure」）。故丢帧不 attach（脏区原样留给补帧），下次事件泵
+        // 补一帧。比对口径 = 整幅表面物理尺寸（内容 + 2×margin）。
+        const Size full = d.full_size();
+        const int want_w = static_cast<int>(std::lround(full.width)) * d.scale;
+        const int want_h = static_cast<int>(std::lround(full.height)) * d.scale;
         if (w != want_w || h != want_h) {
             d.present_stale = true;
             return Result<bool>{true};
         }
-        if (d.csd_title || d.csd_border) {
-            // 自绘装饰必须在 swizzle 前绘制到 painter（RGBA），随缓冲一同上屏。
+        // window geometry + opaque region：双缓冲状态，与本帧 buffer 同一 commit 生效。
+        d.apply_surface_geometry();
+        if (d.csd_title) {
+            // 标题栏 overlay 必须在 swizzle 前绘制到 painter（RGBA），随缓冲一同上屏。
+            // 阴影 underlay 不经 Painter（见下 compose_shadow_margins_bgra）；Borderless 本帧无 overlay。
             d.draw_decoration(d.painter);
         }
         const auto *src = reinterpret_cast<const std::uint32_t *>(d.painter.data());
         if (d.present_dirty.empty()) {
             // 全量：整幅 swizzle + 整面 damage（首帧/尺寸变化/布局帧）。
-            swizzle_rgba_to_bgra(src, slot->px, static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
+            // ARGB8888 按预乘 alpha 上传（margin 阴影半透必需；内容区 alpha=255 无损）。
+            swizzle_rgba_premul_to_bgra(src, slot->px, static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
             wl_surface_damage_buffer(d.surface, 0, 0, w, h);
         } else {
-            // 增量：逐脏矩形仅 swizzle + damage 变化区（拖选/局部重绘帧）。
+            // 增量：逐脏矩形仅 damage 变化区（拖选/局部重绘帧）。
             // 注意：槽轮换后缓冲内容可能是上上帧，脏区外像素也需追平 → 整幅 swizzle 但仅 damage 脏区
             // 的代价与全量无异；此处取「整幅 swizzle + 精确 damage」保正确性（合成器仅回读 damage 区）。
-            swizzle_rgba_to_bgra(src, slot->px, static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
+            swizzle_rgba_premul_to_bgra(src, slot->px, static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
             for (const Rect &r : d.present_dirty) {
                 const int x0 = std::max(0, static_cast<int>(std::floor(r.origin.x)));
                 const int y0 = std::max(0, static_cast<int>(std::floor(r.origin.y)));
@@ -1588,6 +1719,18 @@ auto WaylandSurface::present() -> Result<bool> {
                 }
                 wl_surface_damage_buffer(d.surface, x0, y0, x1 - x0, y1 - y0);
             }
+        }
+        // 阴影 margin 合成（软件路径专用；GPU 路径不经本函数上屏）：Painter 画布恒不透明，
+        // swizzle 产出的 margin 字是不透明垃圾值，这里按内容矩形外的衰减环整体覆写为
+        // BGRA 预乘真 alpha（幂等，全量/增量帧后都执行；塌缩态 m=0 整圈跳过）。
+        const int m_logical = d.shadow_margin();
+        if (m_logical > 0) {
+            const int mp = m_logical * d.scale;
+            const int cwp = static_cast<int>(std::lround(d.size.width)) * d.scale;
+            const int chp = static_cast<int>(std::lround(d.size.height)) * d.scale;
+            const auto blur_phys = static_cast<float>((m_logical - csd::AURORA_SHADOW_BLUR_INSET_PX) * d.scale);
+            csd::compose_shadow_margins_bgra(slot->px, w, h, mp, mp, cwp, chp, mp, blur_phys,
+                                             csd::AURORA_SHADOW_BASE_COLOR);
         }
         // 可见性：Hidden 档跳过 attach + commit——表面永不进入合成器视野；帧缓冲仍照常
         // swizzle/更新，data() 读回不受影响。构造期那次「无缓冲 commit 宣告表面存在」必须保留
@@ -1609,7 +1752,12 @@ auto WaylandSurface::present() -> Result<bool> {
     return Result<bool>{true};
 }
 
-auto WaylandSurface::size() const -> Size { return impl_->size; }
+auto WaylandSurface::size() const -> Size {
+    // 整幅表面逻辑尺寸（内容 + 2×阴影边距）：buffer/wl_surface 口径，Window 以此分配帧缓冲与
+    // 根约束；应用内容口径由 content_inset() 经 ContentInsetRoot 壳折算回内容尺寸（零感知）。
+    // 塌缩态（最大化/全屏/平铺/非 CSD）margin=0，与内容尺寸相同。
+    return impl_->full_size();
+}
 
 auto WaylandSurface::frame_count() const -> int { return impl_->presented; }
 
@@ -1781,16 +1929,10 @@ auto WaylandSurface::uses_client_decorations() const -> bool { return impl_->csd
 
 auto WaylandSurface::content_inset() const -> EdgeInsets {
     const Impl &d = *impl_;
-    float tb = d.csd_title ? d.tb_style.height : 0.0F;
-    float b = d.csd_border ? static_cast<float>(d.border) : 0.0F;
-    if (d.mode == WindowMode::FullScreen) {
-        // 全屏：标题栏退化为揭示条（覆盖层）、边框消失，均不回流应用布局。
-        tb = 0.0F;
-        b = 0.0F;
-    } else if (d.mode == WindowMode::Maximized) {
-        b = 0.0F;  // 最大化：工作区铺满，无缩放边框带
-    }
-    return EdgeInsets{b, tb, b, b};  // 顺序：left, top, right, bottom
+    // 阴影边距架构口径：表面原点 → 应用内容原点的总偏移（旧 border=6 内缩分量已删除，
+    // 缩放带迁到视觉窗口之外）。Normal CSD = {m, m+tb, m, m}；最大化/平铺边距塌缩、标题栏
+    // 保留 {0,tb,0,0}；全屏/SSD/Frameless 全零。纯逻辑见 detail::csd_geometry.h。
+    return csd::content_inset_for(d.csd_title, d.tb_style.height, d.shadow_margin(), d.mode);
 }
 
 auto WaylandSurface::close() -> void {

@@ -5,43 +5,55 @@
 
 #include "aurora/core/font.h"
 #include "aurora/render/painter.h"
+#include "aurora/window/detail/csd_geometry.h"
 #include "aurora/window/title_bar_geometry.h"
 
 namespace aurora::csd {
 
+namespace {
+/// @brief 把内容坐标域几何平移到整幅表面坐标域（内容原点 = 阴影边距）。
+auto shift_to_surface(const Rect &r, float ox, float oy) -> Rect {
+    return Rect{.origin = Point{.x = r.origin.x + ox, .y = r.origin.y + oy}, .size = r.size};
+}
+}  // namespace
+
+auto paint_window_shadow(Painter &p, const TitleBarPaintState &s) -> void {
+    if (s.shadow_margin <= 0.0F || s.width <= 0.0F || s.height <= 0.0F) {
+        return;
+    }
+    // GPU/DL underlay 专用（软件 wl_shm 路径见 csd::compose_shadow_margins_bgra——软件
+    // Painter 的「目标画布恒不透明」不变量使其无法直绘真 alpha 阴影）：形状 = 完整内容矩形
+    // （表面坐标），零投影偏移；模糊半径 = margin−1，衰减在 buffer 外缘归零。视觉参数与
+    // 软件合成器同源于 csd_geometry.h（AURORA_SHADOW_BASE_COLOR / AURORA_SHADOW_BLUR_INSET_PX /
+    // shadow_attenuation），GPU SDF 无软件 Painter 的边界行接缝，故形状不收缩。
+    const Rect shape{.origin = Point{.x = s.origin_x, .y = s.origin_y},
+                     .size = Size{.width = s.width, .height = s.height}};
+    p.draw_shadow(shape, 0.0F, 0.0F, s.shadow_margin - static_cast<float>(AURORA_SHADOW_BLUR_INSET_PX),
+                  AURORA_SHADOW_BASE_COLOR);
+}
+
 auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
     // 全屏默认隐藏标题栏；顶边悬停揭示由宿主置 fullscreen_bar_revealed 后重绘可见。
-    if (!s.paints_anything()) {
+    if (!s.paints_title_bar()) {
         return;
     }
     const float w = s.width;
     // 几何单一来源：与命中测试共用同一纯函数，杜绝热区与绘制错位。
-    const TitleBarGeometry g = title_bar_geometry(w, s.style, s.mode == WindowMode::Maximized, s.resizable);
+    const TitleBarGeometry gc = title_bar_geometry(w, s.style, s.mode == WindowMode::Maximized, s.resizable);
     const Color bg = s.active ? s.style.bg_active : s.style.bg_inactive;
     const Color fg = s.active ? s.style.fg_active : s.style.fg_inactive;
+    // 内容几何 → 表面几何：标题栏画在内容区顶部，原点随阴影边距平移（塌缩态偏移 0）。
+    const float ox = s.origin_x;
+    const float oy = s.origin_y;
+    // 指定初始化器须按 TitleBarGeometry 声明顺序（close/maximize/minimize/icon/title）。
+    const TitleBarGeometry g{.close = shift_to_surface(gc.close, ox, oy),
+                             .maximize = shift_to_surface(gc.maximize, ox, oy),
+                             .minimize = shift_to_surface(gc.minimize, ox, oy),
+                             .icon = shift_to_surface(gc.icon, ox, oy),
+                             .title = shift_to_surface(gc.title, ox, oy)};
 
-    if (!s.title_bar && s.border <= 0.0F) {
-        // 无任何可见装饰。
-        return;
-    }
-
-    // CSD 缩放边框带：与标题栏同底色，构成一体的窗口框架（应用内容已被 content_inset 下沉，
-    // 此带若不画则露出画布底色）。最大化/全屏由宿主置 border=0，与 inset 归零同口径。
-    if (s.border > 0.0F && s.height > 0.0F) {
-        const float h = s.height, b = s.border;
-        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = b, .height = h}}, bg);
-        p.fill_rect(Rect{.origin = Point{.x = w - b, .y = 0.0F}, .size = Size{.width = b, .height = h}}, bg);
-        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = h - b}, .size = Size{.width = w, .height = b}}, bg);
-        p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = w, .height = b}}, bg);
-    }
-
-    if (!s.title_bar) {
-        // Borderless（无标题栏）：仅边框带，无标题栏背景/文字/按钮。
-        return;
-    }
-
-    // 标题栏背景。
-    p.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = w, .height = s.style.height}}, bg);
+    // 标题栏背景（内容区整宽，顶部标题栏高度）。
+    p.fill_rect(Rect{.origin = Point{.x = ox, .y = oy}, .size = Size{.width = w, .height = s.style.height}}, bg);
 
     // 图标槽（set_title_bar_icon 注入后显示；无图标留白，几何预留位不变）。
     if (s.icon != nullptr && g.icon.size.width > 0.0F) {
