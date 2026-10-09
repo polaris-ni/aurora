@@ -396,6 +396,8 @@ app.set_on_window_state([](au::WindowState s) {
 
 回归面见 `tests/unit/utest_win32_ua_marshal`（换线程执行 / 两条就地路径 / 超时零值且丢弃晚到项 / 桥析构丢弃在途项 / provider 读经回投）。
 
+**滚动量 → UIA `IScrollProvider` 映射（公式单一真源）。** `get_VerticalViewSize` 的 UIA 语义是「可见内容占全部内容的百分比」，唯一真源是平台中立纯函数 `core::compute_vertical_view_size(range)`（`range.viewport / range.content × 100`，夹到 `[0,100]`）；`content <= 0` 或 `viewport <= 0` 即「无内容/无视口」报 100；无任何滚动语义的控件由桥侧直接报 100（恒「全部可见」，不反推 span）。两量 `viewport`/`content` 由 `Widget::accessibility_scroll()` 的覆写方填：纵向语义下 `viewport` = 视口高、`content` = 内容总高。`LazyRow` 等横轴专用控件纵轴不可滚，报 `viewport = content` ⇒ 纵轴 100% 可见。`min`/`max`/`position` 仅用于滚动位置（`get_VerticalScrollPercent`），与 `VerticalViewSize` 的「占比」语义相互独立——`content - viewport != max - min` 时仍按 `viewport/content` 算得有几何意义的百分比。此前的反向缺陷（`max/(max+1)×100` 把「可滚跨度」误当「可见占比」，内容越大反而越接近 100%）已修复，验证见 `utest_accessibility` 的 `vertical_view_size_*` 三例 + `utest_scroll` / `utest_lazy_list` 各一例（三平台全绿，变异自证：仅把公式换回 `max/(max+1)` ⇒ 占比判据转红）。
+
 `UIAutomationCore.dll` 运行时动态加载，缺库或必要导出缺失即整桥降级 no-op + 一次 `Diagnostics::warn`（无链接期依赖、无编译期裁剪开关）。
 
 ### 6.4 Linux 无障碍桥（AT-SPI2）
@@ -549,6 +551,8 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 **命令是唯一真源**：`CommandRegistry`（`commands.h`）持 `Command{ id, title, icon, category, action, default_binding, scope, enabled, when_label }`。`bind_shortcuts(ShortcutRegistry&)` 与 `to_menu_items()` 是它面向快捷键与菜单的两个**投影**，命令面板是第三个消费方；三者共用 `invoke(id)` 出口，故启用条件与空动作判定单点生效。启用条件为两段式：`enabled` 谓词承担运行期判定（空 = 恒启用），`when_label` 仅作展示 / 序列化标签（**不参与求值**，也不解析条件 DSL）。`to_json()` 产出 `{"commands":[…]}` 自描述信封供工具面枚举；`search()` 与工具面共用 `command_fuzzy_score()`，故 AI 检索与用户检索次序一致。
 
 **接线**：`Application::commands()` 返回注册表；`app.commands().bind_shortcuts(app.shortcuts())` 一行把默认快捷键接入。绑定为**显式**而非 `run()` 内自动执行——否则 `run()` 之后注册的命令会静默失效。`Application` 在 `dispatch*` 入口统一暴露「当前焦点管理器」（`current_focus_manager()`），快捷键动作与控件回调内同样可取到，模态弹层据此完成焦点陷阱。原「命令式逃生舱」`aurora::imperative::run_raw`（`imperative.h`）与命令系统无关。
+
+**快捷键可重绑（宿主覆盖表的启动重放）**：框架侧为此提供两个入口，二者组合才闭合——`KeyCombo::from(text)` 把覆盖表里的组合键文本反解成 `KeyCombo`，`CommandRegistry::set_binding(id, combo)` 把反解结果回灌到该命令的 `default_binding`（`id` 未注册返回 `false`）。前者与 `to_string()` **逐字节往返**：可解析的形态就是 `to_string()` 输出的那批串（不额外支持别的写法，否则组合键的显示串规范就有两份），修饰次序**不敏感**（`"Shift+Ctrl+P"` 与 `"Ctrl+Shift+P"` 同解，产出仍走 `to_string()` 的规范序），畸形输入**一律**回 `std::nullopt` 而**不**回落成「修饰位 + 空主键」的假有效值——回落会把「这一条没配上」伪装成「配上了某个键」，宿主按覆盖表重放时该条目会静默消失且不留痕迹。后者**只改绑定**：除 `default_binding` 外不动任何字段（`title` / `icon` / `action` / `category` / `scope` / `enabled` 谓词 / `when_label`），也不改变注册次序——改绑定此前只有 `add(Command)` 一条路，而它是**整条覆盖**语义，宿主重述一遍就得把 `enabled` 谓词这类「取得到、复制不了语义」的字段抄全，漏抄即静默的能力丢失。已 `bind_shortcuts` 过时 `set_binding` 连带把该条在快捷键表里的绑定换成新组合键（先撤后建），使命令表与快捷键表两个投影不各持一份真值；尚未投影过则是纯数据变更，由下一次 `bind_shortcuts`（幂等重建）生效。宿主侧的处置口径是「逐条解析、该条失败只留痕并跳过、其余照旧」——一条畸形覆盖不得挡住启动。
 
 **命令面板键位**：`CommandPalette` 打开时把自己的作用域压入 `FocusManager`（子树内**唯一**可聚焦控件是搜索框，故左右方向键仍落到搜索框做光标移动、上下方向键不引发焦点跳转）；Enter 经搜索框的提交回调执行选中项；Esc / ↑ / ↓ 经打开期临时注册的快捷键绑定接管（依赖注册表已 `bind_shortcuts`，未接线时这几键不可用，面板以 WARN 提示）。Space 只经文本输入落字，不触发执行。命令清单可经 `to_json()` 序列化并由 MCP 工具面枚举，见 [`08-tooling.md`](08-tooling.md) §7.1。
 

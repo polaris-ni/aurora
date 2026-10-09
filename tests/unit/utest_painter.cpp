@@ -5,7 +5,6 @@
 /// draw_line 覆盖、shift_pixels 垂直搬移、to_image 导出与 get_pixel 越界兜底、draw_text_runs 与逐个
 /// draw_text 的逐位一致及空批无操作、带 opts/aa_mode 的批量入口与逐个 draw_text(..., aa_mode, opts) 逐位一致
 
-#include <cstdint>
 #include <span>
 #include <string>
 
@@ -48,7 +47,7 @@ namespace {
     int diff = 0;
     for (int y = 0; y < a.height(); ++y) {
         for (int x = 0; x < a.width(); ++x) {
-            diff += (a.get_pixel(x, y) != b.get_pixel(x, y)) ? 1 : 0;
+            diff += a.get_pixel(x, y) != b.get_pixel(x, y) ? 1 : 0;
         }
     }
     return diff;
@@ -357,7 +356,7 @@ AURORA_TEST_CASE(draw_text_runs_with_aa_mode_and_opts_matches_individual_calls) 
     const auto runs = {
         render::TextRun{.text = "Aa", .box = rect_at(2.0F, 2.0F, 80.0F, 20.0F), .font = f, .color = Color::black()}};
     const render::TextLayoutOpts opts{.letter_spacing = 0.0F, .word_spacing = 0.0F, .italic = false};
-    const auto aa = render::TextAAMode::ClearType;
+    constexpr auto aa = render::TextAAMode::ClearType;
 
     Painter batch;
     batch.begin(96, 28);

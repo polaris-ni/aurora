@@ -1,7 +1,13 @@
 #pragma once
 
-/// @brief 平台无关逻辑键码模块：`KeyCode` 枚举与键名查询 `key_name`。
+/// @brief 平台无关逻辑键码模块：`KeyCode` 枚举与键名查询 `key_name`、反查 `key_code_from_name`。
 /// @file keycode.h
+
+#include <array>
+#include <cstddef>
+#include <optional>
+#include <string_view>
+#include <utility>
 
 namespace aurora {
 
@@ -190,10 +196,15 @@ enum class KeyCode : int {  // NOLINT(*-enum-size, readability-enum-initial-valu
     Insert = 123,  ///< 主键盘 Insert（导航区；NumLock 关闭时小键盘 0 也发同一个平台键）。
 };
 
-/// @brief 返回键码的可读名称（用于调试/日志）。
+namespace detail {
+
+/// @brief 键名字面量的唯一真源：逐键码的 switch。
 /// @param [in] k 待查询的逻辑键码。
 /// @return 键名静态字符串字面量（如 "Enter"、"ArrowLeft"）；枚举未覆盖的取值返回 "Unknown"。
-[[nodiscard]] inline auto key_name(KeyCode k) -> const char * {
+/// @note 本函数是键名的唯一来源：公共 `key_name` 所查的键名表由它**在编译期逐槽展开**得到
+///       （见 `AURORA_KEY_NAMES`），二者物理上不可能漂移。保留 switch 形态而非手写数组表，
+///       是为了留住 `-Wswitch`——新增枚举值而漏写分支时编译期即报错，手写数组表没有这层保护。
+[[nodiscard]] constexpr auto key_name_switch(KeyCode k) -> const char * {
     switch (k) {
         case KeyCode::Unknown:
             return "Unknown";
@@ -401,6 +412,82 @@ enum class KeyCode : int {  // NOLINT(*-enum-size, readability-enum-initial-valu
             return "KP_9";
     }
     return "Unknown";
+}
+
+/// @brief 键名表的槽位数（键码索引空间 `[0, N)` 的宽度）。
+/// @note 取 256 而非「当前最大显式值 + 1」（`Insert` 的 123 + 1）是刻意的：新增键位只改
+///       `key_name_switch` 一处的 switch，**本槽位数无需同步**，表内容在编译期由该 switch 逐槽
+///       展开（见 `AURORA_KEY_NAMES`），落在空洞与越界的槽位一并落到 `"Unknown"`。槽位数写成
+///       紧贴最大枚举值会把「加键忘了扩容」变成静默故障：新键码查表越界、恒返回 `"Unknown"`，
+///       且没有任何编译期信号。
+inline constexpr int AURORA_KEY_NAME_TABLE_SIZE = 256;
+
+/// @brief 把 `key_name_switch` 在编译期逐槽展开成键名表。
+/// @tparam I 槽位下标序列（由 `std::make_integer_sequence` 提供）。
+/// @return 槽位 i 恒为 `key_name_switch(static_cast<KeyCode>(i))` 的键名表。
+template <int... I>
+[[nodiscard]] constexpr auto build_key_name_table([[maybe_unused]] std::integer_sequence<int, I...> slots)
+    -> std::array<const char *, sizeof...(I)> {
+    return std::array<const char *, sizeof...(I)>{{key_name_switch(static_cast<KeyCode>(I))...}};
+}
+
+/// @brief 键名表：槽位 i 恒等于 `key_name_switch(static_cast<KeyCode>(i))`。
+/// @note `inline` 是必须的：只写 `constexpr`（内部链接）会让**每个**包含本头的 TU 各持一份表
+///       （实测 20 个 TU = 20 份表符号、19.8 KB `.data.rel.ro`）；`inline constexpr` 使它在
+///       comdat 中合并为全程序一份。
+inline constexpr auto AURORA_KEY_NAMES =
+    build_key_name_table(std::make_integer_sequence<int, AURORA_KEY_NAME_TABLE_SIZE>{});
+
+}  // namespace detail
+
+/// @brief 返回键码的可读名称（用于调试/日志）。
+/// @param [in] k 待查询的逻辑键码。
+/// @return 键名静态字符串字面量（如 "Enter"、"ArrowLeft"）；枚举未覆盖的取值返回 "Unknown"。
+/// @note 实现是「键名表 + 一次索引」，单次查询成本与键码取值、编译器、优化档**均无关**。写成
+///       switch 时其 O(1) 依赖编译器是否生成跳转表——实测 GCC -O0 退化成比较链，查 `A` 与查
+///       `Insert` 的耗时相差 8 倍；本形态在 -O0 下仍是恒定索引。
+[[nodiscard]] inline auto key_name(KeyCode k) -> const char * {
+    const auto index = static_cast<int>(k);
+    if (index < 0 || index >= detail::AURORA_KEY_NAME_TABLE_SIZE) {
+        return "Unknown";
+    }
+    // 下标已由上方区间检查钉死在 `[0, 表长)`；这里刻意用不做二次检查的 operator[]（而非 at()），
+    // 以免为一条已证明的不变式再付一次分支。
+    // （理由写在指令**之前**：写在同行会被 clang-format 在 120 列折行，指令便只覆盖到注释。）
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
+    return detail::AURORA_KEY_NAMES[static_cast<std::size_t>(index)];
+}
+
+/// @brief 键名 → 键码的反查（`key_name` 的逆，specification/05-event-navigation.md §2.2）。
+///
+/// **反查不另列键名表**：遍历键名表、逐槽取内容与入参比对，故键名字面量的唯一来源仍是
+/// `detail::key_name_switch` 那一处——新增键位只改它，不存在第二张表可与之漂移。
+/// 「另抄一份反查表」是本函数刻意规避的形态：那张表与真源同源却分叉，且框架侧无任何
+/// 门禁能发现两边的漂移。排除判据是**按输出串排除**（跳过 `"Unknown"`）而非按键码排除：
+/// 越界键码的 `key_name` 同样是 `"Unknown"`，只挡 `KeyCode::Unknown` 挡不住它们。
+///
+/// @param [in] name 待反查的键名；须与 `key_name` 的输出**逐字节一致**（区分大小写；非 ASCII 恒不命中）。
+/// @return 命中为对应键码；未命中为 `std::nullopt`。占位键名 `"Unknown"` **不予接受**——它是
+///         「后端映射表未收录」的占位值而非可绑定的键位，认下它等于把「解析不出来」假报成
+///         「绑定到了某个键」，与「解析失败不得回落假有效值」同口径。
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
+[[nodiscard]] inline auto key_code_from_name(std::string_view name) -> std::optional<KeyCode> {
+    for (int raw = 0; raw < detail::AURORA_KEY_NAME_TABLE_SIZE; ++raw) {
+        // 取值在底层类型 int 内；枚举空洞与越界取值由下方「跳过 "Unknown"」那一支排除。
+        // （理由写在指令**之前**：写在同行会被 clang-format 在 120 列折行，指令便只覆盖到注释。）
+        // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+        const auto code = static_cast<KeyCode>(raw);
+        const std::string_view candidate{key_name(code)};
+        if (candidate == "Unknown") {
+            continue;  // 兜底串（含枚举空洞与越界取值），不是键名
+        }
+        if (name == candidate) {
+            return code;
+        }
+    }
+    return std::nullopt;
 }
 
 }  // namespace aurora

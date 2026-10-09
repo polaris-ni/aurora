@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -58,15 +59,37 @@ struct AccessibilityTextSelection {
     std::size_t end = 0;  ///< 选区终点（字节偏移，不含）
 };
 
-/// @brief 无障碍滚动量：滚动容器的 {min, max, position} 三分量。
+/// @brief 无障碍滚动量：滚动容器的 {min, max, position} + 视口/内容两量。
 /// 由 `Scroll` 等滚动控件覆写 `Widget::accessibility_scroll()` 提供；UIA 侧据此暴露
-/// `IScrollProvider`（可滚动量换算为百分比），AT-SPI2 / macOS 侧映射
-/// `Component.ScrollTo` / `accessibilityPerformScrollToVisible`。
+/// `IScrollProvider`（`get_VerticalViewSize` 取 `viewport/content × 100` 表达「可见内容占全部内容」，
+/// `get_VerticalScrollPercent` 取 `(position−min)/(max−min) × 100` 表达「已滚到哪儿」），
+/// AT-SPI2 / macOS 侧映射 `Component.ScrollTo` / `accessibilityPerformScrollToVisible`。
+/// @note 不变量：`max - min` 应等于 `content - viewport`（同义——可滚跨度）；两量独立提供是为了让
+///       `get_VerticalViewSize` 直接从几何算百分比，不依赖「差值恰好等于 content−viewport」这条隐含约式。
 /// @note Side-effects: reads state
 struct AccessibilityScrollRange {
     double min = 0.0;  ///< 最小偏移（通常为 0）
     double max = 0.0;  ///< 最大偏移（内容量 − 视口量；不可滚时为 0）
     double position = 0.0;  ///< 当前偏移
+    double viewport = 0.0;  ///< 视口尺寸（纵向为视口高）：`get_VerticalViewSize` 的分子
+    double content = 0.0;  ///< 内容总尺寸（纵向为内容高）：`get_VerticalViewSize` 的分母
 };
+
+/// @brief 由滚动量算 UIA `VerticalViewSize` 百分比（可见内容占全部内容的百分比）。
+/// 纯函数、平台中立：UIA provider 与三桥共用的唯一真源，便于脱离 COM 环境做三桥单测。
+/// @param range 滚动量：视口尺寸取 `.viewport`，内容总尺寸取 `.content`。
+/// @return `viewport / content × 100`，夹到 `[0, 100]`；无跨度 / 不支持滚动
+///         （`content` 或 `viewport` 非正）报 100（全部可见）。
+/// @note 与 `max - min` 无关：即便 `content - viewport != max - min` 也能算得有几何意义的百分比。
+/// @note Side-effects: pure
+/// @note 措辞勿改成「反引号内以 `.` 开头 + 等号」的形态（如 `.viewport` = …）：Doxygen 会把
+///       点号开头的反引号内容当 HTML 属性解析，生成定宽标签时失配，以 WARN_AS_ERROR 判红。
+///       改成「取 `x`」的措辞即可绕过，语义不变。
+[[nodiscard]] inline auto compute_vertical_view_size(const AccessibilityScrollRange &range) -> double {
+    if (range.content <= 0.0 || range.viewport <= 0.0) {
+        return 100.0;  // 无内容 / 无视口 ⇒ 全部可见
+    }
+    return std::clamp((range.viewport / range.content) * 100.0, 0.0, 100.0);
+}
 
 }  // namespace aurora

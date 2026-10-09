@@ -216,6 +216,18 @@ class Drawer : public Widget {
         }
     }
 
+    /// @brief 递归卸载内容与面板（与 `on_mount` 逐字对称）。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        if (content_) {
+            content_.widget().unmount();
+        }
+        if (panel_) {
+            panel_.widget().unmount();
+        }
+    }
+
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);
         if (content_) {

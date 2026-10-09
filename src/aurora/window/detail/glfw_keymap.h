@@ -6,9 +6,9 @@
 // 为什么要独立成头而不是留在 `glfw_surface.cpp` 里：这张表是「跨后端键码对齐」的唯一实现，
 // 消费方普遍持有 `KeyCode → 平台原生值` 的反向映射表，哪一端错位都只表现为「某个键没反应」，
 // 极难定位。此前它是 `glfw_surface.cpp` 里的 `static` 函数（内部链接），单测**吃不到表**，
-// 于是「四后端键码一致性」这条契约在 GLFW 那一腿上没有任何 CTest 断言——同样是键码表，
+// 于是「四后端键码一致性」这条契约在 GLFW 配置上没有任何 CTest 断言——同样是键码表，
 // Win32 有 `win32_keymap.h`、X11/Wayland 有 `keysym_map.h`，唯独 GLFW 缺一个可测入口。
-// 收进本头后该腿由 `utest_glfw_keymap` 机械校验。
+// 收进本头后该配置由 `utest_glfw_keymap` 机械校验。
 //
 // 门控与 `glfw_surface.cpp` 同款：`AURORA_BACKEND_GLFW`。
 #include "aurora/core/platform.h"

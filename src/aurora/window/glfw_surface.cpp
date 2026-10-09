@@ -31,7 +31,7 @@
 #define GLFW_EXPOSE_NATIVE_COCOA  // NOLINT(*-identifier-naming)
 #elif defined(AURORA_PLATFORM_LINUX)
 // XWayland 下 GLFW 仍经 X11 取句柄（Wayland 原生句柄由 WaylandSurface 负责），
-// 故 Linux 腿只需 X11 而非 GLFW_EXPOSE_NATIVE_WAYLAND。
+// 故 Linux 配置只需 X11 而非 GLFW_EXPOSE_NATIVE_WAYLAND。
 #define GLFW_EXPOSE_NATIVE_X11  // NOLINT(*-identifier-naming)
 #endif
 #include <GLFW/glfw3native.h>
@@ -76,7 +76,7 @@ namespace aurora {
 // ---- 修饰键 / UTF-8 翻译（纯函数，static 成员）----
 //
 // 键码翻译 `from_glfw_key` 已移至可单测的内部头 `detail/glfw_keymap.h`（与 `win32_keymap.h`
-// 对称，使「四后端键码一致」这条契约在 GLFW 腿上也有 CTest 断言）。
+// 对称，使「四后端键码一致」这条契约在 GLFW 配置上也有 CTest 断言）。
 
 /// @brief 读 NumLock 锁定态并并入修饰位集。
 ///
@@ -370,7 +370,7 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     scale = xscale;  // 假设各向同性 DPI
     // 建窗后校正一次：窗口的真实内容缩放（per-monitor）可能与上面按主显示器预估的不同
     // （窗口落到了另一块屏、或主屏本身在 GLFW 初始化后才确定缩放）。校正只做一次，且在
-    // 第一次 present 之前完成——与 Win32 建窗期 DPI 那条腿（08-tooling.md §8.2）同一口径。
+    // 第一次 present 之前完成——与 Win32 建窗期 DPI 那一条路径（08-tooling.md §8.2）同一口径。
     const int want_w = detail::glfw_px_from_dp(static_cast<int>(std::lround(cfg.size.width)), scale);
     const int want_h = detail::glfw_px_from_dp(static_cast<int>(std::lround(cfg.size.height)), scale);
     int cur_w = 0;

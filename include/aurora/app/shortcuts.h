@@ -2,15 +2,16 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 
 namespace aurora {
-
 /// @brief 键组合（快捷键描述）：修饰键位掩码 + 主键。
 ///
 /// 对标 Qt `QKeySequence`、WPF `KeyGesture`、Flutter `SingleActivator`。
@@ -28,6 +29,7 @@ struct KeyCombo {
     /// @param mods 修饰键位掩码（Ctrl/Shift/Alt/Meta 组合）。
     /// @param k 主键。
     KeyCombo(ModifierKey mods, KeyCode k) : modifiers(mods), key(k) {}
+
     /// @brief 仅主键构造（无修饰键）。
     /// @param k 主键。
     explicit KeyCombo(KeyCode k) : key(k) {}
@@ -83,6 +85,73 @@ struct KeyCombo {
         }
         s += key_name(key);
         return s;
+    }
+
+    /// @brief 由 `to_string()` 形态的文本反解组合键（与其**逐字节往返**）。
+    ///
+    /// 可解析的形态**就是 `to_string()` 目前输出的那些**——若干修饰位字面量后接主键名，以 `+`
+    /// 连接（`"Ctrl+Shift+P"` / `"Alt+Tab"` / `"F5"`）。**不**额外支持别的写法：组合键的显示串
+    /// 规范只有 `to_string()` 一份，多认一种写法就多一份真值源（也多一处可漂移的对照表）。
+    /// 反查经 `key_code_from_name` 走 `key_name` 的同一份键名字面量，不另列键名表。
+    ///
+    /// 三条刻意决定：
+    ///  - **修饰次序不敏感**：`"Shift+Ctrl+P"` 与 `"Ctrl+Shift+P"` 同解，产出走同一份修饰位与
+    ///    主键，故对 `to_string` 生成的那批串恒有 `to_string(from(s)) == s`。
+    ///  - **同一修饰位重复出现即非法**（`"Ctrl+Ctrl+P"`）：它没有无歧义的解释，与其猜「算一次」
+    ///    不如回 `nullopt`，交由调用方自己留痕。
+    ///  - **畸形一律 `nullopt`，绝不回落**：空串、只有分隔符、`"Ctrl+"` 尾巴、未知键名、非 ASCII
+    ///    主键名均**不**产出「无修饰 + 空主键」式的假有效值。回落会把「这一条没配上」伪装成
+    ///    「配上了某个键」——宿主按覆盖表重放时，该条目会静默消失且无任何痕迹。
+    ///
+    /// 失败原因只有「形态不合规范」一种，故以 `std::optional` 而非 `Result` 表达（无错误码与
+    /// 修复建议可携带；宿主侧的处置是统一的「记一条 WARN 并跳过该条」）。
+    ///
+    /// @param text 待解析的文本；须与 `to_string` 的输出逐字节一致（区分大小写）。
+    /// @return 解析成功为对应组合键；任何畸形输入为 `std::nullopt`。
+    /// @note Thread: main-thread only
+    /// @note Side-effects: none
+    /// @note Rebuildable: no
+    [[nodiscard]] static auto from(std::string_view text) -> std::optional<KeyCombo> {
+        if (text.empty()) {
+            return std::nullopt;  // 空串：连主键都没有，不构成组合键
+        }
+        auto mods = ModifierKey::None;
+        std::size_t pos = 0;
+        for (;;) {
+            const std::size_t plus = text.find('+', pos);
+            const bool is_main = plus == std::string_view::npos;
+            const std::string_view token = is_main ? text.substr(pos) : text.substr(pos, plus - pos);
+            if (token.empty()) {
+                return std::nullopt;  // 空片段："Ctrl+" 尾巴 / "Ctrl++P" / 纯分隔符
+            }
+            if (!is_main) {
+                std::optional<ModifierKey> bit;
+                if (token == "Ctrl") {
+                    // 修饰位字面量与 to_string 的输出同源，不认 "Control" 等键名形态
+                    bit = ModifierKey::Control;
+                } else if (token == "Shift") {
+                    bit = ModifierKey::Shift;
+                } else if (token == "Alt") {
+                    bit = ModifierKey::Alt;
+                } else if (token == "Meta") {
+                    bit = ModifierKey::Meta;
+                }
+                if (!bit.has_value()) {
+                    return std::nullopt;  // 非修饰位字面量：未知修饰名
+                }
+                if ((mods & *bit) != 0) {  // NOLINT(*-redundant-parentheses)
+                    return std::nullopt;  // 同一位重复出现
+                }
+                mods = mods | *bit;
+                pos = plus + 1;
+                continue;
+            }
+            const std::optional<KeyCode> key = key_code_from_name(token);
+            if (!key.has_value()) {
+                return std::nullopt;  // 未知主键名（含占位名 "Unknown" 与非 ASCII 串）
+            }
+            return KeyCombo{mods, *key};
+        }
     }
 };
 
@@ -199,5 +268,4 @@ class ShortcutRegistry {
     std::vector<std::pair<int, ShortcutBinding>> bindings_;
     int next_id_ = 1;  ///< 下一个可分配绑定 ID（自 1 起，add() 每次 +1，回收不复用）
 };
-
 }  // namespace aurora

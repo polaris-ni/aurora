@@ -7,6 +7,7 @@
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
+#include "aurora/environment/build_context.h"  // resolved_label 需完整类型以调 ctx.environment<Locale>()
 #include "aurora/i18n/localized_string.h"
 #include "aurora/i18n/string_table.h"
 #include "aurora/render/font_engine.h"
@@ -47,6 +48,10 @@ struct ButtonProps {
 ///
 /// 继承扩展点（protected 虚函数，子类可单独覆盖某个绘制阶段）：
 /// `resolve_background()` → `paint_background()` → `paint_border()` → `paint_label()`。
+///
+/// 标签的 i18n 契约：`label` 是 `LocalizedString`，绘制与布局一律经 `resolved_label()` 查
+/// `StringTable`（`Environment` 注入 `Locale` 时按它解析，否则回落缺省档）——不直读
+/// `label.get().text`，否则 `tr()` 构造的键会画成空白。`accessibility_label()` 与绘制同源。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
 ///
@@ -194,9 +199,14 @@ class Button : public LeafWidget, public ButtonProps {
     [[nodiscard]] auto baseline_distance(const BuildContext &ctx) const -> std::optional<float> override;
 
     /// @brief 无障碍名称：取按钮文字（经 i18n 表解析后的最终显示串）。
+    /// @note 与 `paint_label` 所绘同源：二者共用 `resolved_label()`——布局/绘制期的解析结果落在
+    ///       `cached_display_text_`，本钩子优先复用它；尚未布局或绘制时按默认 locale 现场解析。
     /// @note Side-effects: reads i18n table
     /// @return `label` 解析后的显示文本（与 `paint_label` 所绘一致）
     [[nodiscard]] auto accessibility_label() const -> std::string override {
+        if (!cached_display_text_.empty()) {
+            return cached_display_text_;
+        }
         return label.get().resolve(&default_string_table(), Locale{});
     }
 
@@ -469,12 +479,15 @@ class Button : public LeafWidget, public ButtonProps {
     }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         Font f = font;
         if (f.size_pt <= 0.0F) {
             f.size_pt = 14.0F;
         }
-        cached_text_width_ = render::FontEngine::measure_width(label.get().text, f);
+        // 显示串唯一来源：与绘制共用 resolved_label()，不再直读 label.get().text。
+        const std::string display = resolved_label(ctx);
+        cached_display_text_ = display;
+        cached_text_width_ = render::FontEngine::measure_width(display, f);
         cached_text_height_ = render::FontEngine::measure_height(f);
         const float w = std::max(cached_text_width_ + padding.left + padding.right, min_width);
         const float h = std::max(cached_text_height_ + padding.top + padding.bottom, min_height);
@@ -516,17 +529,36 @@ class Button : public LeafWidget, public ButtonProps {
     /// @param p 绘制器。
     /// @param bounds 按钮区域。
     virtual auto paint_border(Painter &p, const Rect &bounds) -> void;
+    /// @brief 解析当前应显示的标签串（i18n 求值）：绘制与布局的**唯一显示串来源**。
+    ///
+    /// 与 `Text::resolved_text` 同口径：`Environment` 注入了 `Locale` 就按它解析，否则回落
+    /// `Locale{}` 走 `default_string_table()` 的缺省档。`on_layout` 与 `on_paint` 各自解析一次
+    /// （布局与绘制是两个阶段，无法共享局部量），但**同一阶段内**只解析一次：
+    /// `paint_label` 收到的是该串的引用，量宽与落笔必然同值。
+    /// @param ctx 构建上下文：提供 `Environment` 注入的 `Locale`。
+    /// @return 解析后的 UTF-8 标签；`label` 为字面值时即其原文本。
+    /// @note Side-effects: reads i18n table
+    [[nodiscard]] auto resolved_label(const BuildContext &ctx) const -> std::string {
+        const auto *lp = ctx.environment<Locale>();
+        return label.get().resolve(&default_string_table(), (lp != nullptr) ? *lp : Locale{});
+    }
+
     /// @brief 绘制居中文字。
     /// @param p 绘制器。
     /// @param bounds 按钮区域。
     /// @param text_color 当前状态解析出的文字色。
-    virtual auto paint_label(Painter &p, const Rect &bounds, Color text_color) -> void;
+    /// @param display 本帧应绘制的显示串（= `resolved_label(ctx)` 的同一份副本）：量宽与
+    ///        `draw_text` 都取它，故二者不会因同帧内 locale 变化而分叉。子类覆写时应直接
+    ///        用该串，不要再自行解析 `label`。
+    virtual auto paint_label(Painter &p, const Rect &bounds, Color text_color, const std::string &display) -> void;
 
     // 缓存供 on_layout / paint_label 使用；受 protected 扩展点约束，有意非 private。
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
-    float cached_text_width_ = 0.0F;  ///< on_layout 缓存的文字宽度（dp）
+    float cached_text_width_ = 0.0F;  ///< 缓存的显示串宽度（dp）
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
-    float cached_text_height_ = 0.0F;  ///< on_layout 缓存的文字高度（dp）
+    float cached_text_height_ = 0.0F;  ///< 缓存的显示串高度（dp）
+    // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
+    std::string cached_display_text_;  ///< 上次测量所用的显示串：与缓存宽度配套，串变即重测
 };
 
 }  // namespace aurora

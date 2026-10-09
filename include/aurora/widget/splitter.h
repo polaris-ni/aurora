@@ -329,7 +329,9 @@ class Splitter : public Widget {
                 continue;
             }
             const Rect cb = child->bounds();
-            if (cb.contains(local)) {
+            // 闸并入区域的追加命中盒（同 `Container::on_hit_test` 口径）。
+            if (cb.contains(local) ||
+                child->widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 const Rect global{
                     .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                     .size = cb.size};
@@ -359,7 +361,9 @@ class Splitter : public Widget {
                 continue;
             }
             const Rect cb = child->bounds();
-            if (cb.contains(local)) {
+            // 闸并入区域的追加命中盒（同 `Container::on_hit_test_chain` 口径）。
+            if (cb.contains(local) ||
+                child->widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 const Rect global{
                     .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                     .size = cb.size};
@@ -382,6 +386,18 @@ class Splitter : public Widget {
         }
         if (second_) {
             second_.widget().mount(ctx);
+        }
+    }
+
+    /// @brief 递归卸载两片（与 `on_mount` 逐字对称）。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        if (first_) {
+            first_.widget().unmount();
+        }
+        if (second_) {
+            second_.widget().unmount();
         }
     }
 

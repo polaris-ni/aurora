@@ -159,4 +159,33 @@ AURORA_TEST_CASE(application_hosts_command_registry) {
     AURORA_TEST_CHECK_EQ(calls, 1);
 }
 
+// 已投影后改绑定：命令表与快捷键表是两个投影，各持一份真值会让「改了绑定却照旧触发」。
+AURORA_TEST_CASE(set_binding_reprojects_into_an_already_bound_registry) {
+    CommandRegistry reg;
+    int calls = 0;
+    Command open = make_command("file.open", "Open");
+    open.default_binding = KeyCombo{ModifierKey::Control, KeyCode::O};
+    open.action = [&calls]() -> void { ++calls; };
+    reg.add(std::move(open));
+
+    ShortcutRegistry shortcuts;
+    reg.bind_shortcuts(shortcuts);
+    AURORA_TEST_CHECK_TRUE(shortcuts.handle(key_event(KeyCode::O, ModifierKey::Control)));
+    AURORA_TEST_CHECK_EQ(calls, 1);
+
+    AURORA_TEST_CHECK_TRUE(reg.set_binding("file.open", KeyCombo{ModifierKey::Control, KeyCode::P}));
+    AURORA_TEST_CHECK_FALSE(shortcuts.handle(key_event(KeyCode::O, ModifierKey::Control)));  // 旧组合键失效
+    AURORA_TEST_CHECK_EQ(calls, 1);
+    AURORA_TEST_CHECK_TRUE(shortcuts.handle(key_event(KeyCode::P, ModifierKey::Control)));  // 新组合键生效
+    AURORA_TEST_CHECK_EQ(calls, 2);
+    AURORA_TEST_CHECK_EQ(shortcuts.count(), std::size_t{1});  // 换绑定不重复登记
+
+    // 幂等重建之后仍是新绑定。
+    reg.bind_shortcuts(shortcuts);
+    AURORA_TEST_CHECK_EQ(shortcuts.count(), std::size_t{1});
+    AURORA_TEST_CHECK_FALSE(shortcuts.handle(key_event(KeyCode::O, ModifierKey::Control)));
+    AURORA_TEST_CHECK_TRUE(shortcuts.handle(key_event(KeyCode::P, ModifierKey::Control)));
+    AURORA_TEST_CHECK_EQ(calls, 3);
+}
+
 }  // namespace aurora::test_cases::utest_commands_shortcut

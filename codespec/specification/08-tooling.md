@@ -811,7 +811,7 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
     幂等兜底，供不经工厂直接构造 `Win32Host` 的消费者使用。
   - **`scale` 改为句柄就绪后求值**：建窗成功后立刻 `refresh_scale()`（`GetDpiForWindow` → 回落
     `GetDpiForSystem` → 回落 96），此后 `WM_DPICHANGED` / 跨屏迁移复用同一函数更新。
-  - **建窗期这一腿（后补，闭合上一条遗留）**：上一条只解决了「句柄就绪后」，建窗**之前**仍是
+  - **建窗期这一路径（后补，闭合上一条遗留）**：上一条只解决了「句柄就绪后」，建窗**之前**仍是
     缺口——`CreateWindowExA` 前调 `refresh_scale()` 时 `hwnd == nullptr`，`GetDpiForWindow(nullptr)`
     返回 **0**，而当时的降级判据挂在「函数指针为空」的 `else if` 上（Win10+ 该函数恒已导出），
     0 被当成有效读数落到 `dpi > 0 ? dpi/96 : 1.0` ⇒ **scale 恒 1.0** ⇒ `WindowOptions::size`
@@ -876,7 +876,7 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
       跨屏无法自然复现 ⇒ 这正是它必须可单测的原因。`utest_wayland_output_scale` 三条分支各有用例，
       变异自证：关闭 per-output 分支 ⇒ `entered_output_wins_over_global_maximum` 与
       `unknown_output_key_never_inflates_the_scale` 转红、另 3 条仍绿。
-    - Linux 侧真机腿已可跑：WSL Ubuntu + WSLg 合成器（`WAYLAND_DISPLAY=wayland-0`）下
+    - Linux 侧真机验证已可跑：WSL Ubuntu + WSLg 合成器（`WAYLAND_DISPLAY=wayland-0`）下
       `AURORA_LIVE_WAYLAND=1` 令 `utest_wayland_surface` 的 `live_cursor_commit_sweep` 真建窗
       真提交光标通过。剩余 2 条 SKIP 各有具体成因（单测不碰 OS 资源 / 合成器未宣告 text-input-v3），
       非本仓缺陷；后者完整验收在 `aurora_verify_wayland_ime` 探针。

@@ -46,13 +46,15 @@ struct Event {
 
 枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h）、`KeyCode`（`keycode.h`）。
 
+**键名反查 `key_code_from_name(name) -> std::optional<KeyCode>`** 是 `key_name` 的逆（组合键文本反解等路径消费它，见 [`06-app-platform.md`](06-app-platform.md) §8.4）。它**不另列键名表**：遍历 `KeyCode` 的取值空间、逐项取 `key_name()` 的输出与入参比对，故键名字面量的唯一来源仍是 `key_name` 那一处——新增键位只改那一处，不存在第二张表可与之漂移（「另抄一份反查表」正是本函数刻意规避的形态：同源却分叉，且框架侧无任何门禁能发现）。区分大小写，非 ASCII 恒不命中；占位名 `"Unknown"` **不予接受**——它是「后端映射表未收录」的占位值而非可绑定的键位，认下它等于把「解析不出来」假报成「绑定到了某个键」。
+
 **数字小键盘（Keypad）口径**：`KeyCode` 的 `KP_*` 段（`KP_Insert` / `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` / `KP_Add` / `KP_Subtract` / `KP_Multiply` / `KP_Divide` / `KP_Decimal` / `KP_Separator` / `KP_0`–`KP_9`）建模全部小键盘键位，追加在枚举末尾并**写死显式数值**（`KP_Insert = 100` 起）——消费方普遍持有「键码 → 平台原生值」的逐值对齐映射表，中间插入新项会让那些表**静默错位**。`KP_Enter` 按既有决定并入 `KeyCode::Enter`，不单列。`NumLock` 建模为**修饰位**（`ModifierKey::NumLock = 1 << 4`）而非键码：它是切换键、对终端无发送意义，而消费方需要的是「本条按键发生时 NumLock 是开还是关」这一位。
 
 **框架不做二次翻译**：`KP_Prior` 恒为 `KP_Prior`，**不会**因 NumLock 关闭就降级成 `PageUp`。宿主的职责只到这里——「平台原始键 → 语义键码 + 修饰态」的一一映射；「NumLock 关闭时 `KP_Prior` 语义 = PageUp」这类降级由消费方按 `modifiers & ModifierKey::NumLock` 自行决定。后端取不到 NumLock 状态时按「关」处理，不静默假报「开」。
 
 **主键盘 `Insert`（`KeyCode::Insert = 123`）**：导航区此前只有小键盘档 `KP_Insert`，主键盘 Insert 在四个后端上全部落 `Unknown`（Win32 侧的 `case VK_INSERT` 是刻意留白、注释自陈「本轮不顺手补」）。现补上主档，取值为 `KP_9`（122）之后的下一个显式初值位——它语义上属「编辑 / 导航」段却**不**插回该段，因为既有段（0..94）靠隐式连号，插一项会让其后全部取值整体位移，而消费方的逐值对齐表会**静默错位**。**两档并存是刻意的**：X11 / Wayland 能区分来处（主键 keysym `0xFF63` 与 `KP_Insert` 的 `0xFF9E` 各占独立码点）就区分；Win32 / GLFW 区分不了就**恒给主档**——Win32 两区共用 `VK_INSERT`（NumLock 关闭时小键盘 0 也发该 VK），区分依据只在 lParam 的扫描码与 extended 位，而那套判据在导航区其余键上已被实测证伪；GLFW 键码表没有 `GLFW_KEY_KP_INSERT` 常量。**「恒给主档」不是 bug**：两区的终端语义本就等价（同为 CSI 2~），而按扫描码二次判定会把 Win32 拖进一条与其他后端不可对齐的私有口径。不要把它「修」成按来处分派。
 
-**跨后端产出不一致（平台事实，非疏漏）**：`KP_0`–`KP_9` 与运算键（`KP_Add` / `KP_Subtract` / `KP_Multiply` / `KP_Divide` / `KP_Decimal` / `KP_Separator`）三后端齐备；`KP_Insert` / `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` **只有 X11 / Wayland 后端产出**（X11 的 KP_* keysym 与主键各占独立码点，天然可分）。Win32 在导航区把两边**共用同一组虚拟键码**，实测六个键里只有 `Home` 真的可分（主键盘扫描码 `0x47` / 小键盘 `E0 4E`）——`End` / `PgUp` / `PgDn` 两边的 (VK, scan, extended) 完全相同或仅 extended 位不同（主键盘 PgUp / PgDn 本身就带 E0 前缀），把「带 E0」当成「来自小键盘」会**误判主键盘那两个键**，误判比不判更糟，故判据保守到只认 Home。GLFW 的键码表本身没有 `GLFW_KEY_KP_INSERT` / `_HOME` 之类的常量，同样无法区分。**故消费方在 Win32 与 GLFW 上不能假定这几项一定命中**，需要时应按平台兜底。判据本体在 `src/aurora/window/detail/win32_keymap.h` 的 `is_numpad_nav_scan`（含完整实测对照表）与 `src/aurora/window/keysym_map.h`，均有单测逐值锁定。GLFW 侧的键码表自 `glfw_surface.cpp` 的 `static` 函数抽到可单测内部头 `src/aurora/window/detail/glfw_keymap.h`（与 `win32_keymap.h` 对称）：此前「四后端键码一致」这条契约在 Win32 与 X11 / Wayland 两腿都有 CTest 断言，唯独 GLFW 腿没有，错位只能等真机才显形。
+**跨后端产出不一致（平台事实，非疏漏）**：`KP_0`–`KP_9` 与运算键（`KP_Add` / `KP_Subtract` / `KP_Multiply` / `KP_Divide` / `KP_Decimal` / `KP_Separator`）三后端齐备；`KP_Insert` / `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` **只有 X11 / Wayland 后端产出**（X11 的 KP_* keysym 与主键各占独立码点，天然可分）。Win32 在导航区把两边**共用同一组虚拟键码**，实测六个键里只有 `Home` 真的可分（主键盘扫描码 `0x47` / 小键盘 `E0 4E`）——`End` / `PgUp` / `PgDn` 两边的 (VK, scan, extended) 完全相同或仅 extended 位不同（主键盘 PgUp / PgDn 本身就带 E0 前缀），把「带 E0」当成「来自小键盘」会**误判主键盘那两个键**，误判比不判更糟，故判据保守到只认 Home。GLFW 的键码表本身没有 `GLFW_KEY_KP_INSERT` / `_HOME` 之类的常量，同样无法区分。**故消费方在 Win32 与 GLFW 上不能假定这几项一定命中**，需要时应按平台兜底。判据本体在 `src/aurora/window/detail/win32_keymap.h` 的 `is_numpad_nav_scan`（含完整实测对照表）与 `src/aurora/window/keysym_map.h`，均有单测逐值锁定。GLFW 侧的键码表自 `glfw_surface.cpp` 的 `static` 函数抽到可单测内部头 `src/aurora/window/detail/glfw_keymap.h`（与 `win32_keymap.h` 对称）：此前「四后端键码一致」这条契约在 Win32 与 X11 / Wayland 两配置都有 CTest 断言，唯独 GLFW 配置没有，错位只能等真机才显形。
 
 **修饰键语义（`KeyEvent::modifiers`）= 队列相对，而非派发时刻的物理读数**：宿主按键盘消息流推进一份修饰位状态（Win32 侧为 `src/aurora/window/detail/win32_modifiers.h` 的 `ModifierKeyTracker`），`KeyEvent` 携带的是「该键在队列里被处理的那一刻」的修饰态。取此口径的理由：在派发时刻异步采样（`GetAsyncKeyState`）会让热键命中与否取决于「消息被泵到之前修饰键是否仍按着」，于是 UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时按键**静默**丢失（同载体同形态实测 0/10，见 `manual-test/21-debug.md` TC-DEBUG-004 备注）。三条配套边界：
 
@@ -211,6 +213,138 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 **可滚动容器自动进入命中链**：`Widget::hit_test_chain` 在「无命中的后代、自身不可点击」时仍会把 `wants_scroll()` 为真且命中点落在内容盒内的控件自身纳入链尾——内容全非可点击时滚动容器也必须在链内，否则滚轮落空。容器**无需**再覆写 `on_hit_test` 返回 `this`。
 
 **自带拖拽区的容器必须把自身显式入链**：基类 `Widget::hit_test_chain`（`src/aurora/widget/widget.cpp`）只在「后代链非空 / `wants_click()` / `wants_scroll()` / 带 Input 修饰」之一成立时才把控件自身追加进链尾。因此靠 `on_pointer_event` 自绘拖拽带、又不 `wants_click()` 的容器（典型为 `Splitter` 的分隔条）若在其拖拽带上返回**空**后代链，就会整条链为空，被派发器判为「点在空白处」而根本不投递 Press——拖拽在任何后端都失效，且与 `on_hit_test`（点命中）口径不一致而难以察觉。此类控件须在拖拽带内返回 `std::vector{HitNode{this, weak_from_this(), bounds.origin}}`，并在带内无交互后代的空白点同样自入链，否则拖拽过程中指针一旦越出拖拽带，后续 Move 会因链空被丢弃。契约由 `utest_splitter` 的 `hit_chain_at_divider_includes_splitter` 与 `divider_drag_via_dispatcher_updates_ratio_and_clamps` 守护。
+
+### 3.2.1 覆盖绘制与命中链（追加命中盒）
+
+**问题形态**：部分控件把面板画在自身布局盒**之外**（下拉面板、菜单浮层、标题栏 Snap 弹窗），即「覆盖绘制」——面板不占布局，`on_layout` 只报主框 / 栏条自身的尺寸。真实派发只经 `Widget::hit_test_chain`（`EventDispatcher::dispatch_mouse` 取它），而命中链的下降由**祖先**侧的包含闸决定：`Container::on_hit_test_chain` 等容器下降前判 `child.bounds().contains(local)`，只认**布局盒**。于是覆盖区连「进链」的机会都没有——把判据写进控件自己的 `on_hit_test`（兼容入口）对派发无效，在 `on_hit_test_chain` 里补判据同样无效（祖先根本不下降到本控件）。
+
+**修法：闸在祖先侧，就在闸这一侧修。** 由控件把覆盖区**声明**给祖先，闸把这段区域并入判定：
+
+| 角色 | 契约 |
+|:---|:---|
+| `Widget::extra_hit_box(ctx) -> std::optional<Rect>`（public virtual） | 控件声明「画在布局盒之外、仍归自己接管」的区域，**本地坐标**（原点即自身左上角，与 `on_hit_test` 的 `local` 同坐标系）。缺省返回 `std::nullopt` ⇒ 可命中区 == 自身布局盒，与未覆写时逐位等价 |
+| `Widget::covers_extra_hit_box(local, ctx) -> bool`（public，非虚） | 判定入口唯一化：祖先的下降闸与自身入链判定共用它，杜绝「闸认、自身不认」或反之的分叉；无追加盒时恒 `false` |
+| 祖先下降闸 | `cb.contains(local) \|\| child.covers_extra_hit_box(local - cb.origin, ctx)`——在原有判定后**追加**一项，故缺省情形与原判定逐位等价 |
+| `Widget::hit_test_chain` 的自身入链 | 命中点落在追加盒内时自身同样入链；有 `Align` 收缩命中盒（`hit_size`）时，覆盖区正是靠这一项进链 |
+
+已把闸并入追加盒的祖先：`Container`（兼容入口 `on_hit_test` 与派发入口 `on_hit_test_chain` 同口径）、`LazyList`、`GridView`、`ReorderableList`、`Scroll`、`TabBar`、`Splitter`、`ExpansionPanel`、`Dialog`。`OverlayHost::on_hit_test_chain` 刻意不加闸——浮层按绘制次序自顶向下逐个询问，由浮层自身决定收不收。
+
+**控件侧判据单源化**：覆盖区的判据只写一份（私有 helper），`extra_hit_box()` 与 `on_hit_test()` 共用。兼容入口里不得再要求「点落在自身布局盒内」——面板本就画在盒外，该前提使分支恒不成立，与派发入口分叉（`TitleBar` 的 Snap 弹窗即曾如此）。
+
+**「自身盒」分支须与闸同谓词**：`on_hit_test` 里判定自身盒的那一支必须写成 `Rect{0,0,bounds.size}.contains(local)`——与祖先下降闸逐字相同。此前三个控件各自额外加了 `local.y < 条/框高` 之类的**严格**比较，而 `Rect::contains` 是闭区间判定，于是边界行（y == 条高）上「派发入口命中、兼容入口不命中」。本次一并收敛；`Dropdown` / `MenuBar` / `TitleBar` 的逐点一致用例即钉住这条。
+
+**z 序不受影响**：闸并入追加盒只放宽「能否下降」，不改变兄弟间的优先次序（仍按绘制逆序、视觉最上层优先）。故覆盖控件的面板若被**更晚绘制**的兄弟压住，重叠处点击归兄弟——与视觉一致；要让面板完整可点，须把它挂到真正的浮层宿主（`OverlayHost` / `Popup`）上。
+
+**正面范式**：`Popup::on_hit_test_chain`（`popup.h`）在**自己的入口**里按 `anchor_` 把局部点重映射到内容盒后下降。另两种已收敛的形态见 `04-widget.md`：`Dialog`（内容盒外即遮罩区、自身入链吸收点击而不穿透）与 `Scroll`（视口 → 内容坐标换算后再下降，见「滚动的两套坐标系」）。
+
+⚠️ **「不申报追加命中盒」≠「祖先不必开闸」**：`Popup` 覆写 `covers_descendant_extra_hit_box` 为恒 `false`（不把内容当追加盒折算），但它在常规流中占**零尺寸**盒，而 `Container` 的三道闸都按「盒与区域有交集」判定——绘制侧的遮挡剔除闸 `!global.intersects(clip)`（`Rect::intersects` 是**严格**比较，零尺寸盒恒假）、两道命中闸的 `cb.contains(local)`（闭区间但零尺寸亦恒假）⇒ 挂在普通容器下**整棵被跳过：画不出也点不到，且不抛错不告警**。`OverlayHost` 之所以可用，是因为它自己覆写了 `on_paint` 与 `on_hit_test_chain`、下降时**无条件**问每个子节点（连闸都不设），恰好绕过基类这两道闸。
+
+修法是让这类宿主自己向三道闸申报可达区，两个入口**必须同改**（一个管绘制侧、一个管命中侧，只改其一造成「画得出点不到」或反向分叉）：
+
+| 角色 | 契约 |
+|:---|:---|
+| `Widget::covers_remapped_descendant(local, ctx, self_origin)`（**public 非虚**）→ protected virtual `covers_remapped_descendant_at`（缺省恒 `false`） | 命中侧放行：把 `local` 换算到内容坐标系后判是否落在内容盒内。⚠️ `self_origin` 是本控件的**完整全局原点（x 与 y）**，与 `covers_extra_hit_box` 家族的 `ancestor_offset`（只累加、供翻转判据判「离视口多远」）语义**不同** |
+| `Widget::paints_outside_layout_box()`（**public 非虚**）→ protected virtual `paints_outside_layout_box_at`（缺省恒 `false`） | 绘制侧放行：本控件是否在自身布局盒之外绘制内容 |
+
+做成 public 转发入口 + protected virtual 的分层是**访问权限所迫**（`Container` 要对 `child.widget()` 提问，protected 成员在派生类里不可达），与既有 `covers_extra_hit_box` / `covers_own_extra_hit_box` 家族同构。缺省恒 `false` ⇒ 17 处现有 `covers_extra_hit_box` 调用点与所有既有容器行为**逐位不变**；「零尺寸一律放行」这条全局语义**不得**引入（负守卫见下）。
+
+⚠️ **已知代价**：绘制侧放行意味着 `Popup` 内容不再被父容器的 clip 裁剪（可能被裁到视口外仍照画）。这是「`anchor_` 是全局坐标」这一既有语义的必然推论——内容本就不属于父容器的裁剪坐标系。
+
+**验收**：`utest_overlay_host` 三条——`Column` + 打开的 `Popup` 像素级判据（有落墨）**与**命中链判据（盒内非空、盒外为空）**同时**成立；零尺寸兄弟控件（未覆写新钩子）仍被剔除，且两个放行钩子的**缺省值都是 `false`**（两段缺一不可——只钉外部行为会漏过「只改一侧缺省」的变异，因为另一侧仍绿）；盒内一点**既被绘制又被命中**、盒外一点两者都不（钉住三道闸同改）。变异自证：只改绘制闸 ⇒ 命中判据红（「点得到但看不见」）；只改命中闸 ⇒ 像素判据红（「看得见但点不到」）；缺省改 `true` ⇒ 负守卫的缺省值断言红。
+
+**验收**：`utest_dropdown` / `utest_menu_bar` / `utest_title_bar` 三个套件守护——嵌 `Column` 与嵌 `LazyList` 条目两种宿主下覆盖区可点、覆盖区外不抢（面板底边以下的点仍归下方兄弟控件）、收起态逐位不变、展开结束后陈旧点不中、兼容入口与派发入口逐点一致；`utest_containers` 的 `default_extra_hit_box_equals_own_layout_box` 钉住缺省等价（密集取点上，命中链最深节点与「只按子布局盒判定」的参考实现逐点相同）。变异自证：只回退闸（保留控件侧追加盒）或只回退控件侧 `extra_hit_box()`（保留闸）都必须让上述用例转红——两者分别是必要条件。
+
+#### 3.2.2 追加命中盒的聚合深度（子树上报）
+
+**上一节的缺口是查询深度**：闸问的是「**直接子节点自己**申报了没」，不是「这棵子树里有没有人申报」。孙辈覆写了 `extra_hit_box()` 而中间的容器（`Row` / `Column` 等不申报的中间层）不申报时，门就在中间层判假——控件说「我这里可达」、祖先说「不可达」。真实形态是三层嵌套：设置面板的每行是 `LazyList → Row → Dropdown`，面板自下拉局部 `y = box_height_` 起，探点越过行盒下沿即落入这个洞。
+
+**聚合语义（递归，与下降式同构）**：`covers_extra_hit_box(local, ctx)` 升级为「以本控件为根的**子树**是否覆盖此局部点」。两段判定——① 节点自身由 `extra_hit_box(ctx)` 申报的追加盒；② 逐个直接子节点，按其 `bounds().origin` 把点折算到子节点本地坐标，递归问该子节点的同一入口。折算方式与 `Container::on_hit_test_chain` 的下降式**逐字同构**，故聚合结果等价于「从该控件出发走一次命中链」。缺省路径（无覆写、无溢出）仍恒为假，与改动前逐位等价。
+
+| 角色 | 契约 |
+|:---|:---|
+| `Widget::covers_extra_hit_box(local, ctx)`（public，非虚） | 聚合入口：自身申报 ∪ 子树申报。祖先下降闸只调这一个 |
+| `Widget::covers_own_extra_hit_box(local, ctx)`（public，非虚） | 只问自身申报，恒 O(1)。`Widget::hit_test_chain` 判定「自身是否入链」用**它**而非聚合入口——自身入链意为「本控件接管这一个点」，把中间容器一并拽进链会改变链的组成 |
+| `Widget::covers_descendant_extra_hit_box(local, ctx)`（**protected virtual**） | 聚合的递归下降段，只管后代。缺省遍历 `child_nodes()` 折算下探 |
+
+**覆写场景仅两类**（新增控件时按此二选一，不必逐处重写闸）：
+
+1. **子节点来源或坐标系与布局盒不一致**——`LazyList` / `GridView` 的子项在 `live_` 表里（虚拟化，不在 `children_` / `child_nodes()` 中），须自行遍历；`Popup` 按 `anchor_`（**全局**坐标）绘制内容，基类折算算不出正确结果，覆写为恒 `false`（它是上一节的「正面范式」，在自己的 `on_hit_test_chain` 里重映射下降，**不把内容当追加盒折算**）。⚠️ 但它仍须经上一节那两个「重映射可达区」入口向三道闸申报可达区——覆写本钩子为 `false` 只是不申报追加盒，不等于祖先不必放行。
+2. **带视口裁剪的容器必须覆写并加视口钳位**——`Scroll` / `LazyList` / `GridView`。虚拟化与滚动使子树里存在被裁出视口的节点；不钳位则它们照样申报追加盒，**一个肉眼不可见的区域变得可点**，比不做修复更糟。覆写时钳位与坐标换算必须与本控件 `on_hit_test_chain` 的下降口径**逐字同构**，否则出现「闸认、自身不认」。
+
+**z 序与覆盖绘制并用的限制（形态约束，非缺陷）**：`on_paint` 按子节点**前向**绘制、`on_hit_test_chain` **逆序**下降。覆盖绘制不占布局，故其面板会被**更晚绘制**的兄弟行盖住——追加盒聚合修好的是「派发可达」，视觉残段仍在，且重叠处点击归视觉更上层的兄弟（与视觉一致）。**因此列表行内不得使用覆盖绘制不占布局的控件**；推荐替代是把面板挂到真正的浮层宿主（`OverlayHost` / `Popup`），它们按自身次序自顶向下询问。本仓不为此改绘制顺序：那样会在每帧绘制路径上引入「读一个在绘制期语义未定义的查询」，并改变全部容器的层叠语义。
+
+**全局偏移的传递（翻转判据需要「离视口多远」）**：追加盒的坐标是**本地**的，但部分覆盖绘制控件要按「自己离视口多远」决定几何（`Dropdown` 贴视口下沿时向上翻）。这需要**全局**位置，故 `covers_extra_hit_box` / `covers_own_extra_hit_box` / `extra_hit_box` 均带一个 `ancestor_offset` 形参（**带默认值，缺省 `{0,0}`**，既有调用方零改动）：祖先下降时把自己累加的偏移传下去（`bounds.origin + cb.origin`），与 `hit_test_chain` 把 `bounds.origin` 逐层下传**同源**。默认值表示「调用方不知全局位置」，覆写方此时只能按纯本地几何判定，不得凭空假设自己在视口中的位置。
+
+**两类几何读数各走各的通道，都不依赖绘制期缓存**（`Dropdown::PanelGeometry` 是完整样本）：
+
+| 读数 | 通道 | 为何不能用别的 |
+|:---|:---|:---|
+| 视口逻辑高 | 查 `env_` 环境链上最近祖先注入的 `MediaQuery`（存的是 `root_env_` 地址，窗口期恒定、每帧原地更新） | 事件回调（`on_pointer_event` / `on_scroll`）签名**不带 `BuildContext`**，只有布局 / 绘制两条路拿得到环境 |
+| 本控件全局顶边 y | 命中链下降时由祖先累加传入（`ancestor_offset`）；事件路径另有一路——`MouseEvent::position`（全局）减 `local_position`（本地） | 绘制期写回的 `focus_bounds_` **有缓存缺口**：`Widget::paint` 在显示列表缓存命中时提前 `return`，跳过 `focus_bounds_` 写入（`src/aurora/widget/widget.cpp`），故它不是可靠的真值源 |
+
+⚠️ **写 `env_` 不可只写在 `on_layout`**：`Widget::layout` 在**布局缓存命中时直接 `return`、完全跳过 `on_layout`**（`AURORA_ENABLE_LAYOUT_CACHE` 下），故靠 `on_layout` 单点写入不可靠。本仓既有 `TitleBar` 正是把 `env_` 只写在 `on_layout`（`title_bar.h`）——同款隐患，仅因 `WindowChrome` 缺失时有 null 兜底而未暴露。正确做法：**`on_paint` 为主写入点**（每帧必过）+ `on_layout` / `on_mount` 为兜底。
+
+**「视口」的两种语义（注入那份为准）**：① **第一真值源** = `Window::prepare_context` 注入 `root_env_` 的那份（`MediaQuery::from_surface`，等价于 `Window::size()` ← `Surface::size()`），多窗口下各窗口互不串；② **可选覆写** = 应用经 `Provider<MediaQuery>` 显式注入的子树视口，适用于把子树布局在嵌入区、面板应贴合该区而非整窗的场景。`PanelGeometry` 读的是「最近祖先 Provider 值」，无 Provider 时即落到 ①。`Provider<T>` 是本仓既有的按子树覆盖机制（`widget/provider.h`），`MediaQuery` 是其已支持的类型。
+
+**验收**：`utest_dropdown` 新增五条——三层嵌套孙辈申报可达（`LazyList → Row → Dropdown`，正对照）、被裁剪的申报不可达（条目可见但面板整段在视口外）、`Scroll` 与 `LazyList` 两入口同形（派发链与 `covers_extra_hit_box` 同判）、面板翻转（贴视口下沿时向上）、面板限高 + 内部滚动（长列表尾部滚入后才可点）。变异自证：只回退 `covers_extra_hit_box` 的聚合段（保留控件侧 `extra_hit_box`）⇒ 三层嵌套用例转红；只回退 `LazyList` 的视口钳位 ⇒ 两条裁剪用例转红。两者分别证明「聚合」与「裁剪」各自是必要条件。 另有一条专钉「翻转不依赖绘制期缓存」：`panel_flips_up_at_viewport_bottom` 构造一个**从未 paint** 的 `Dropdown`（`focus_bounds_` 为零盒），经 `ancestor_offset` 传入全局顶边后仍须判为上翻。变异自证：把 `extra_hit_box` 里的 `ancestor_offset.y`换回 `focus_bounds_.origin.y` ⇒ 该断言转红（未翻转）。
+
+#### 3.2.3 命中链的坐标模型：origin 与绘制仿射同源
+
+**不变量**：命中链里逐节点记录的 `HitNode.origin`，必须与该控件在 `render_into` 里被绘制的**内容盒原点**逐位相等。二者是同一份读数，不得各算一份。
+
+**为什么是硬要求**：`EventDispatcher` 按 `e.local_position = global − it.origin` 本地化坐标，消费方再拿它做本地几何判定（`Dropdown` 按 `local.y` 反算选项序号、`TitleBar` 按 `local.y` 定吸附边）。origin 少减一份平移，误差就整体落在「点得准不准」上——**可达但点不准**：覆盖绘制区照旧能进链（那是上一节的聚合判据），但交回的坐标偏了。
+
+**同源的唯一真值源**：`Modifier::TransformInfo::translation`。`Modifier::transform` 把 `Padding` / `PaddingEdges` / `Align` / `Offset` 四类平移**一律**折进 `tf.translation`，绘制侧 `render_into` 据此算内容盒原点（`src/aurora/widget/widget.cpp`），命中侧必须复用同一份产物。**禁止**在命中侧另写一份「加不加 padding」的算式：只补 `Padding` 等于把病灶换个名字留下（`Align` 尤其要算，它已经通过 `hit_size` 收缩改变了命中盒，却不改记录的 origin）。
+
+实现上由 `content_origin()` 一处产出（与 `render_into` 共用），`hit_test_chain` 的 `self_box.origin`、入链时记入的 `HitNode.origin`、以及 `covers_own_extra_hit_box` 的 `ancestor_offset` 三者同取该值——**三处必须一起改**，只改其一会让「派发入口」与「兼容入口」分叉。
+
+**两处不必同源**：① `self_local`（原点归零）用于本控件自身的命中盒判定，其坐标系是内容局部，与 origin 无关；② 各容器覆写里由 `bounds.origin + cb.origin` 累加出的**子**盒——它接收的 `bounds` 已经是内容原点，故累加结果自动同源，不得再加一次 `translation`（会双重平移）。
+
+**非恒等 matrix 分支**：`tf.matrix` 非恒等时绘制走离屏合成（内容盒先落在离屏缓冲、再经 `translate(local.origin) ∘ mtx` 贴回），此时内容盒**不存在单一「原点」概念**（旋转会让不同子节点的偏移方向不同）。本仓的处理是记 `tf.translation` 作代表点：与恒等支口径一致，且与 `adjust_for_transform` 保持互逆（实测往返误差 ~1e-5）。`adjust_for_transform` 的次序（`mtx⁻¹ · local − t`）经独立复算验证**与绘制正向映射互逆**，勿改。
+
+**验收**：`utest_dropdown` 三条。① `padded_row_child_dispatches_the_option_actually_under_the_probe`：Column 内一行带 `padding(top: 8)`，行内放展开的 Dropdown，按第 1 行的**绘制位置**真点，`on_change` 收到的序号必须等于该序号——端到端，且判据对 origin 偏移敏感（同时断言「朴素布局原点」与「复算绘制原点」相差恰为 pad）。② `hit_node_origin_equals_the_independently_recomputed_paint_origin`：链上该节点的 `HitNode.origin` 逐位等于**独立复算**的绘制原点。③ `no_modifier_row_keeps_hit_node_origin_bit_identical`：无 modifier 时**容差 0** 的逐位相等，守住「缺省路径零变化」。
+
+**预期值必须独立复算**：三条判据的期望原点都由测试自己按 `render_into` 的算式重算（`row_origin + (pad, pad) + dd_origin_in_row`），**不得取实现自己的输出当基准**——否则判据会跟着实现一起漂，变异打不红。变异自证：只在祖先闸那里把内边距减掉、而 origin 不同源 ⇒ 形态①②转红；把 `content_origin()` 退回 `widget_origin`（丢弃 translation）⇒ ①②③ 全部转红。
+
+**与窗口盒查询的关系（`window_bounds()`，非本节不变量）**：上面的同源不变量是**帧内**的对齐（绘制与命中在同一帧用同一份 `tf.translation`），它**不覆盖事后查询**。公共面为此另有一条入口 `Widget::window_bounds()`，语义是「控件自身盒的**窗口逻辑 dp 绝对盒**」，算法见 [`04-widget.md`](04-widget.md) §6.3。
+
+它与 `HitNode.origin` 的关系必须讲清，否则会把两条读数当同一条用。下表为**修复前**的实测（视口原点 60、`offset_y_` = 200、内容 y = 200）：
+
+| 读数 | 修复前取值 | 修复后取值 | 坐标系 |
+|:---|:---|:---|:---|
+| 真窗口 y（视口原点 + 内容 y − `offset_y_`） | 60 | 60 | 窗口逻辑 dp |
+| `window_bounds().origin.y` | 60 | 60 | 窗口逻辑 dp |
+| `HitNode.origin.y` | **260**（漏扣 `offset_y_`） | **60** | 窗口逻辑 dp（已修） |
+| `paint_bounds().origin.y` | 200 | 200 | 内容 / 缓冲坐标（**不变**，见上） |
+
+**坐标系重映射宿主下三读数的关系（`Popup`）**：上表的两条「已同源」结论只在**布局坐标系与窗口坐标系一致**的容器里成立。覆盖绘制型宿主会**另立一套基准**，此时三条读数各自的口径是：
+
+| 读数 | `Popup` 内容控件的取值 | 坐标系 |
+|:---|:---|:---|
+| 真窗口位（派发链实际使用的） | `anchor_` + 内容盒内偏移 | 窗口逻辑 dp |
+| `window_bounds().origin` | 同上（经 `Widget::child_content_origin` 替换基准后） | 窗口逻辑 dp |
+| `HitNode.origin` | 同上 | 窗口逻辑 dp |
+| `paint_bounds().origin` | 同上（`Popup` 不录离屏缓冲） | 窗口逻辑 dp |
+
+**`Popup` 是三条读数唯一全部同源的形态**，因为它的绘制与命中都直接用 `anchor_` 这个全局基准、不录离屏缓冲。修复前 `window_bounds()` 沿 `layout_parent_` 递推看不到 `anchor_`（`Popup::on_layout` 把内容子盒 origin 钉在 `{0,0}`），读数少一个锚点 ⇒ 消费侧按该读数取点落不到控件，`type()` 的字符被基类 `Widget::on_text_input` 缺省 `is_handled = true` 静默吞掉。修法是**替换基准并终止上溯**而非叠加（叠加会读成「`Popup` 的树上位置 + `anchor_`」），详见 [`04-widget.md`](04-widget.md) §6.3 的「坐标系重映射」。
+
+⚠️ 因此**判据不得拿 `HitNode.origin` 当窗口坐标基准**去校验其它形态：它在滚动容器内不是窗口坐标（上表「修复前」列）。要独立校验某控件的可达框，只能用**真实命中链密集探针**实测「命中该控件」的点集外接框——那条通路与坐标系解耦。
+
+**`HitNode.origin` 已修为真窗口坐标**（`Scroll::on_hit_test_chain` 下传时 y 扣 `offset_y_`）：修复前它给的是「视口原点 + 内容盒原点」，漏扣滚动量，使滚动容器内控件收到的 `local_position` 整体错位一个 `offset_y_`（实测点行视觉中心收到 −180，正确值 20）。修复后它与 `window_bounds()` 对同一控件、同一帧给出**同一个窗口位置**，消费侧无需自算折算。
+
+**两条通路的坐标系是刻意不同的，不是漏改的同一处**：
+
+| 通路 | 传递的量 | 坐标系 | 用途 |
+|:---|:---|:---|:---|
+| 事件本地化 | `HitNode::origin` | **窗口**坐标 | 派发器算 `local_position = position − origin` |
+| 追加命中盒 | `ancestor_offset` | **视口**坐标 | 判「离视口多远」（`Dropdown` 据此决定面板翻上/翻下） |
+
+`ancestor_offset` **刻意不扣** `offset_y_`：`widget.h` 声明其语义是「本控件原点在**视口坐标系**中的 y」，而翻转判据要的正是「离视口多远」——面板贴视口下沿时无论滚到哪都应翻上，该距离本就不含滚动量。改成窗口坐标会改掉这个翻转阈值（嵌套滚动场景下行为变化）。改动其一必须重新审视另一。
+
+两者「同源」的准确含义是：共用同一份 Modifier 内容平移产物（`tf.translation`）、同一套坐标空间定义、同一帧的布局与偏移状态；**不是**逐位相等。判据相应地写成「窗口盒逐位等于**独立复算**的真窗口位」，而不是「等于 `HitNode.origin`」——后者会把上表的差额固化成期望值。
+
+修复 `HitNode.origin` 使其成为真窗口坐标会改变滚动容器内所有控件的 `local_position`，属派发链语义变更，须另开提案，不在本条范围内。
+
 
 ### 3.3 嵌套滚动协调（滚轮余量上冒）
 

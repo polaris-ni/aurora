@@ -10,7 +10,7 @@
 // `glfwGetWindowContentScale` 原样作为 `scale_factor()` 上报，于是同一时刻对外宣称
 // 「size = 320 dp」与「scale = 1.5」，而窗口实际是 320 **物理像素** = 213 dp。
 // 后果有两处：① 消费者按 `size * scale` 算帧缓冲必然对不上（`etest_smoke_render` 的 GLFW
-// 腿恒红即由此）；② 100% DPI 下 scale 恰为 1.0，两种单位解读**重合**，该分叉在 CI 上完全
+// 配置恒红即由此）；② 100% DPI 下 scale 恰为 1.0，两种单位解读**重合**，该分叉在 CI 上完全
 // 不显形。`Painter` 早已备好机制（`set_scale` + `begin(逻辑 dp)` 内部按 scale 分配物理缓冲），
 // Win32 / D3D11 / X11 / Wayland 四个后端都调了，只 GLFW 漏掉——本头把换算收敛成可测的
 // 两支纯函数，使「漏掉换算」这件事在单测层面可见。

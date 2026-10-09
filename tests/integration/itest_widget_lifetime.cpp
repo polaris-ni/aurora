@@ -112,6 +112,63 @@ auto realize(Widget &root, Painter &p, int w, int h) -> void {
                ctx);
 }
 
+/// @brief 挂载观测控件：记录挂载 / 卸载次数与订阅条数，并留下「挂载时读到的宿主身份」足迹。
+///
+/// 订阅条数是「净订阅不增长」唯一可判的量：`mount` 的既有幂等保护**本来就**让重复挂载不重复订阅，
+/// 宿主自报的挂载次数区分不出「旧宿主已退订」与「只是没重复挂」。
+class MountProbe final : public Widget {
+  public:
+    int mounts = 0;  ///< `on_mount` 触发次数
+    int unmounts = 0;  ///< `on_unmount` 触发次数
+    std::uint64_t host_of_mount = 0;  ///< 最近一次挂载时 ctx 的宿主身份
+    std::uint64_t host_of_unmount = 0;  ///< 最近一次卸载时回传 ctx 的宿主身份
+
+    [[nodiscard]] auto type_name() const -> const char * override { return "MountProbe"; }
+    /// @brief 额外登记一个自有信号，使订阅条数 = 自有 1 + `modifier` + `show` = 3（固定值可硬断言）。
+    /// @param out 信号视图累加表（本控件追加自身信号）。
+    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&tick_state_); }
+    [[nodiscard]] auto effect_count() const -> std::size_t { return effects_.size(); }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+        return c.constrain(Size{.width = 10.0F, .height = 10.0F});
+    }
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+    auto on_mount(const BuildContext &ctx) -> void override {
+        ++mounts;
+        host_of_mount = ctx.host_id;
+    }
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        ++unmounts;
+        host_of_unmount = ctx.host_id;
+    }
+
+  private:
+    Reactive<int> tick_state_;
+};
+
+/// @brief 铺满给定的布局约束（内容自然尺寸小于它，故不做夹取计算）。
+/// @param w 约束最大宽。
+/// @param h 约束最大高。
+/// @return 下限 0、上限为给定尺寸的约束。
+auto bounded_for(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// @brief 造一份宿主 ctx：`scale` / `size` 刻意与另一宿主**完全相同**，只有 `host_id` 不同。
+///
+/// 「值相等」判据的变异体（拿 `scale` / 主题等值比同一性）必须在这份构造下转红，所以这里不做任何区分。
+/// @param host_id 宿主身份（0 表示未声明宿主）。
+/// @param scale 设备像素密度（两宿主刻意相同）。
+/// @return 该宿主的构建上下文。
+auto host_ctx(std::uint64_t host_id, float scale) -> BuildContext {
+    BuildContext ctx;
+    ctx.host_id = host_id;
+    ctx.scale_factor = scale;
+    ctx.size = Size{.width = 200.0F, .height = 120.0F};
+    return ctx;
+}
+
 }  // namespace
 
 AURORA_TEST_CASE(suicidal_click_clears_subtree_safely) {
@@ -264,6 +321,69 @@ AURORA_TEST_CASE(animator_remove_is_idempotent_and_stops_writes) {
     AnimationController never{1.0};  // 从未登记
     anim.remove(never);
     AURORA_TEST_CHECK_FALSE(anim.has_active());
+}
+
+AURORA_TEST_CASE(same_widget_moves_to_second_host_is_remounted_cleanly) {
+    // 换宿主重挂：同一实例先挂进宿主 A，再摘下挂进宿主 B。
+    // 修复前 `mounted_` 恒真 ⇒ B 侧永远拿不到 on_mount，而 A 侧的订阅仍活着。
+    // 两宿主的 scale / 尺寸 / 环境**完全相同**，只有 host_id 不同：值相等判据的变异体在此转红。
+    const BuildContext ctx_a = host_ctx(101U, 2.0F);
+    const BuildContext ctx_b = host_ctx(202U, 2.0F);
+    AURORA_TEST_REQUIRE(ctx_a.host_id != ctx_b.host_id);
+
+    auto probe = std::make_shared<MountProbe>();
+    Column host_a;
+    host_a.set_children({Node{probe}});
+    host_a.mount(ctx_a);
+    host_a.layout(bounded_for(200.0F, 120.0F), ctx_a);
+    AURORA_TEST_CHECK_EQ(probe->mounts, 1);
+    AURORA_TEST_CHECK_EQ(probe->effect_count(), 3U);
+
+    // 摘下（A 侧不代调 unmount，见 OverlayHost 用例的负向契约），挂进宿主 B。
+    host_a.remove_child(probe.get());
+    Column host_b;
+    host_b.set_children({Node{probe}});
+    host_b.mount(ctx_b);
+    host_b.layout(bounded_for(200.0F, 120.0F), ctx_b);
+
+    AURORA_TEST_CHECK_EQ(probe->mounts, 2);  // B 侧真的重新挂载了
+    AURORA_TEST_CHECK_EQ(probe->unmounts, 1);  // A 侧那次真的退掉了
+    AURORA_TEST_CHECK_EQ(probe->host_of_unmount, 101U);  // 卸载拿到的是**旧宿主**那份 ctx
+    AURORA_TEST_CHECK_EQ(probe->host_of_mount, 202U);
+    // 净订阅不增长：退订后再订阅，仍是挂载一次的条数（3 = 自有 1 + modifier + show）。
+    AURORA_TEST_CHECK_EQ(probe->effect_count(), 3U);
+}
+
+AURORA_TEST_CASE(repeated_mount_in_same_host_still_subscribes_once) {
+    // D4：同宿主重复 mount 只订阅一次——转场复用同一实例这一既有保护不得被重挂语义破坏。
+    const BuildContext ctx = host_ctx(303U, 1.0F);
+    auto probe = std::make_shared<MountProbe>();
+    probe->mount(ctx);
+    probe->mount(ctx);
+    probe->mount(ctx);
+    AURORA_TEST_CHECK_EQ(probe->mounts, 1);
+    AURORA_TEST_CHECK_EQ(probe->effect_count(), 3U);
+}
+
+AURORA_TEST_CASE(unmount_without_mount_is_idempotent) {
+    // 判据 6：未挂载即调用 unmount 幂等——不崩、不留「已清订阅却仍标着已挂载」的半个状态；
+    // 随后的正常挂载仍应恰好一次。
+    auto probe = std::make_shared<MountProbe>();
+    AURORA_TEST_CHECK_NO_THROW(probe->unmount());
+    AURORA_TEST_CHECK_NO_THROW(probe->unmount());
+    AURORA_TEST_CHECK_EQ(probe->mounts, 0);
+    AURORA_TEST_CHECK_EQ(probe->unmounts, 0);
+    AURORA_TEST_CHECK_EQ(probe->effect_count(), 0U);
+
+    const BuildContext ctx = host_ctx(404U, 1.0F);
+    probe->mount(ctx);
+    AURORA_TEST_CHECK_EQ(probe->mounts, 1);
+    AURORA_TEST_CHECK_EQ(probe->effect_count(), 3U);
+    probe->unmount();
+    AURORA_TEST_CHECK_EQ(probe->unmounts, 1);
+    AURORA_TEST_CHECK_EQ(probe->effect_count(), 0U);
+    probe->unmount();  // 重复卸载幂等
+    AURORA_TEST_CHECK_EQ(probe->unmounts, 1);
 }
 
 }  // namespace aurora::test_cases::itest_widget_lifetime

@@ -439,4 +439,45 @@ AURORA_TEST_CASE(column_subtree_cache_hits_when_raster_state_unchanged) {
     AURORA_TEST_CHECK_EQ(paint_hash(*col), first);
 }
 
+AURORA_TEST_CASE(default_extra_hit_box_equals_own_layout_box) {
+    // 追加命中盒的缺省必须「等于没有」：Container 下降闸的判定逐点不变。
+    // 两条判据：① 树上任何控件都不额外声明命中盒；② 密集取点上，命中链最深节点与
+    // 「只按子布局盒判定」的参考实现逐点相同（参考实现即改动前的闸，故本用例可捕获任何漂移）。
+    auto root = std::make_shared<Column>(
+        ColumnProps{.children = {Node{Button(ButtonProps{.label = "A"})}, Node{Button(ButtonProps{.label = "B"})},
+                                 Node{Button(ButtonProps{.label = "C"})}},
+                    .gap = 8.0F});
+    LayoutEngine::layout(*root, bounded(240.0F, 200.0F));
+    AURORA_TEST_REQUIRE_EQ(root->child_count(), 3U);
+
+    for (const Node &n : root->child_nodes()) {
+        AURORA_TEST_CHECK_FALSE(n.widget().extra_hit_box(BuildContext{}).has_value());
+    }
+    AURORA_TEST_CHECK_FALSE(root->extra_hit_box(BuildContext{}).has_value());
+
+    // 参考实现：按改动前的闸（只看子布局盒）反向遍历，第一个命中的子即最深节点。
+    auto reference = [&root](const Point &p) -> const Widget * {
+        const auto &kids = root->child_nodes();
+        for (std::size_t i = kids.size(); i > 0; --i) {
+            const Node &n = kids[i - 1];
+            if (n.bounds().contains(p)) {
+                return &n.widget();
+            }
+        }
+        return nullptr;
+    };
+
+    const Rect host{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = root->size()};
+    for (int iy = 0; iy < 80; ++iy) {
+        const float y = static_cast<float>(iy) * 2.5F;
+        for (int ix = 0; ix < 15; ++ix) {
+            const float x = static_cast<float>(ix) * 17.0F;
+            const Point probe{.x = x, .y = y};
+            const std::vector<HitNode> chain = root->hit_test_chain(probe, host, BuildContext{});
+            const Widget *actual = chain.empty() ? nullptr : chain.back().get();
+            AURORA_TEST_CHECK_EQ(actual, reference(probe));
+        }
+    }
+}
+
 }  // namespace aurora::test_cases::utest_containers

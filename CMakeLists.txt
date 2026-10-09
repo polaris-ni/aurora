@@ -352,6 +352,56 @@ include(AuroraBackends)
 # ---- 光栅内核 SIMD 双实现开关 ----
 include(AuroraSimd)
 
+# ---- Unity Build 试点：仅 src/aurora/core/（AURORA_ENABLE_UNITY_CORE；默认 OFF）----
+# 目的：把 core/ 下那批 TU 合批编译，摊薄每个 TU 重复解析标准库头 + 重复实例化模板的成本。
+# GCC 侧 PCH 已强制关闭（见上方 AURORA_PCH_ENABLED 判定），故这条路径与 PCH 不重叠、不互相掩盖。
+#
+# CMake 的 UNITY_BUILD 是 **target 级**属性，而本仓只有一个 aurora 目标，故「仅 core/」只能反选：
+# 对 core/ 之外的每个源打 SKIP_UNITY_BUILD_INCLUSION，让它们照旧逐 TU 编译。源清单从**目标本身**
+# 取（get_target_property），因而含 AuroraBackends 追加的 Wayland 生成胶水——本块必须放在其后。
+# 批大小默认 4（而非 CMake 的 8）：core/ 现有 9 个 TU，批越大越省重复解析，但同名 static /
+# 匿名命名空间 / 宏污染的碰撞面也越大，试点期取小批先保可编译性，再用 AURORA_UNITY_BATCH_SIZE 扫。
+option(AURORA_ENABLE_UNITY_CORE
+        "Compile src/aurora/core/*.cpp in Unity Build batches (compile-speed pilot; see BUILD_OPTIONS.md 4.8)" OFF)
+set(AURORA_UNITY_BATCH_SIZE "4" CACHE STRING
+        "Sources per Unity Build batch when AURORA_ENABLE_UNITY_CORE=ON")
+if (AURORA_ENABLE_UNITY_CORE)
+    if (NOT AURORA_UNITY_BATCH_SIZE MATCHES "^[1-9][0-9]*$")
+        aurora_error("AURORA_UNITY_BATCH_SIZE must be a positive integer (got '${AURORA_UNITY_BATCH_SIZE}')")
+    endif ()
+    set_target_properties(aurora PROPERTIES
+            UNITY_BUILD ON
+            UNITY_BUILD_MODE BATCH
+            UNITY_BUILD_BATCH_SIZE "${AURORA_UNITY_BATCH_SIZE}")
+    get_target_property(_aurora_sources aurora SOURCES)
+    set(_aurora_unity_batched 0)
+    set(_aurora_unity_solo 0)
+    foreach (_src IN LISTS _aurora_sources)
+        if (_src MATCHES "/src/aurora/core/")
+            math(EXPR _aurora_unity_batched "${_aurora_unity_batched} + 1")
+        else ()
+            set_source_files_properties("${_src}" PROPERTIES SKIP_UNITY_BUILD_INCLUSION TRUE)
+            math(EXPR _aurora_unity_solo "${_aurora_unity_solo} + 1")
+        endif ()
+    endforeach ()
+    if (_aurora_unity_batched EQUAL 0)
+        # 一个都没匹配上 = 试点静默空转（例如源路径口径变更），必须当场报错而不是「构建照样绿」。
+        aurora_error("AURORA_ENABLE_UNITY_CORE=ON but no source matched '/src/aurora/core/' — the pilot would be a no-op")
+    endif ()
+    aurora_log("Unity Build pilot: ${_aurora_unity_batched} core/ source(s) batched (batch size ${AURORA_UNITY_BATCH_SIZE}),"
+            " ${_aurora_unity_solo} other source(s) kept out of unity inclusion")
+    # ⚠️ 覆盖面提醒（不阻断，故用 WARNING）：批编译后 compile_commands.json 里的 core/ 条目变成 Unity
+    # 批文件、不再逐 TU 列出，而 clang-tidy 正是按编译数据库枚举 TU——在**同一个构建目录**里跑 lint
+    # 会静默丢掉 core/ 的静态检查覆盖面（与 AURORA_LINT_SHARD 缺片同性质的「跑到但没活儿」）。
+    aurora_warn("AURORA_ENABLE_UNITY_CORE=ON: src/aurora/core/*.cpp are compiled as Unity batches, so"
+            " compile_commands.json no longer lists them individually and a clang-tidy run in THIS build"
+            " directory silently loses core/ coverage; run the 'lint' target from a separate build directory"
+            " configured without AURORA_ENABLE_UNITY_CORE.")
+    unset(_aurora_sources)
+    unset(_aurora_unity_batched)
+    unset(_aurora_unity_solo)
+endif ()
+
 # ---- 消费者共享 PCH（demo/测试/工具用） ----
 # 消费者 TU 的最大解析成本是 aurora.h 伞头（全部 widget/render 公共头）。aurora 库自身
 # 的 PCH 刻意不含库内头（保证库开发时命中率），但对消费者而言 aurora.h 变更本就会

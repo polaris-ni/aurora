@@ -101,16 +101,60 @@ auto info = au::Button::describe_static();
 | `on_layout(const Constraints&, const BuildContext&) -> Size` | 纯虚 | `widget.h` |
 | `on_paint(Painter&, const Rect& bounds, const BuildContext&) -> void` | 纯虚 | `widget.h` |
 | `on_hit_test(const Point& local, const Rect& bounds, const BuildContext&) -> Widget*` | 默认返回 `nullptr`（叶控件无子可下探）；后代命中由 `on_hit_test_chain` 递归提供，容器覆写 | `widget.h` |
-| `on_mount(const BuildContext&) -> void` | 挂载后恰好一次 | `widget.h` |
+| `on_mount(const BuildContext&) -> void` | 挂载后恰好一次。`Widget::mount` 递归下发，见 §2.3.1 | `widget.h` |
+| `on_unmount(const BuildContext&) -> void` | 卸载时恰好一次，与 `on_mount` 对称（protected，缺省空实现）。拿到的 `ctx` 是**当初挂载的那一份**，不是发起卸载的那份 | `widget.h` |
 | `tick(time_point) -> void` | 框架容器基类可覆写的公开入口（见下） | `widget.h` |
 | `tick_gestures(time_point) -> void` | 手势推进 | `widget.h` |
 | `on_scroll(ScrollEvent&) -> void` | 滚轮入口：默认按 `overflow_` 的内建滑窗夹取滚动并写 `remaining_y` 余量；真实滚动控件覆写（路由见 `05-event-navigation.md` §3.3） | `widget.h` |
 | `wants_scroll() -> bool` | 是否参与滚轮命中链路由。默认 = 声明了 `OverflowStrategy::Scroll`；`Scroll` / `LazyList` / `LazyRow` / `GridView` / `PullToRefresh` 覆写为 `true`，保证嵌套时**最深滚动者优先** | `widget.h` |
 | `is_sticky_header() -> bool` | 是否为吸顶头部（`StickyHeader` 覆写为 `true`），供滚动宿主在 blit 后以覆盖层按 pin 位重绘 | `widget.h` |
+| `extra_hit_box(ctx, ancestor_offset = {0,0}) -> std::optional<Rect>` | 追加命中盒：**覆盖绘制**（面板画在自身布局盒之外）的控件在此声明那段区域（本地坐标），祖先下降闸据此并入判定；缺省 `std::nullopt` = 不追加（可命中区 == 自身布局盒）。位于 **public 区**：祖先要跨对象查询子控件的声明。`ancestor_offset` 是本控件原点在视口坐标系中的 y（祖先下降时累加、带默认值），**只在需要按「离视口多远」决定几何时**用（如面板翻转），纯本地几何的覆写方忽略即可。详见 `05-event-navigation.md` §3.2.1 / §3.2.2 | `widget.h` |
+| `covers_extra_hit_box(local, ctx, ancestor_offset = {0,0}) -> bool` | 追加盒**聚合**判定入口（非虚）：祖先的下降闸调它，问的是「以本控件为根的**子树**是否覆盖此局部点」（自身申报 ∪ 逐子节点折算递归），故孙辈申报能穿过不申报的中间层上达；无任何覆写时恒 `false`，与改动前逐位等价。详见 `05-event-navigation.md` §3.2.2 | `widget.h` |
+| `covers_own_extra_hit_box(local, ctx, ancestor_offset = {0,0}) -> bool` | 只问**本控件自身**申报的追加盒（非虚，恒 O(1)）：`hit_test_chain` 判定自身是否入链用此入口，避免把中间容器一并拽进命中链 | `widget.h` |
+| `covers_descendant_extra_hit_box(local, ctx, ancestor_offset) -> bool` | 聚合的递归下降段（**protected virtual**，不含自身）：缺省遍历 `child_nodes()` 折算下探。仅两类控件覆写——子节点来源/坐标系与布局盒不一致者（`LazyList` / `GridView` 走 `live_`、`Popup` 按 `anchor_` 返回 `false`）、带视口裁剪者（`Scroll` / `LazyList` / `GridView` 必须加视口钳位，否则不可见区域变得可点） | `widget.h` |
 
 **可见性约定**：布局 / 绘制 / 命中测试类内部虚回调 `on_layout` / `on_paint` / `on_hit_test` / `on_mount` / `tick_gestures` 位于 `protected` 区（`widget.h` 起）；指针事件入口 `on_pointer_event` 的两个重载（`MouseEvent`，`widget.h`；`TouchEvent`，`widget.h`）与 `on_hover_change` / `wants_click` 位于 **public 区**且为虚函数——派发器与外部工具直接调用，子类按需要覆写；业务控件覆写 `tick_gestures` 以推进手势，框架容器基类（`Container` / `SingleChild`）可覆写公开 `tick` 以递归子树（见 `widget.h` / `widget.h`），而非经 NVI 模板方法。
 
 `on_paint` 收到的 `bounds` 是**全局坐标**（相对窗口客户区）；绘制原语必须基于 `bounds.origin` 计算。
+
+**布局父链的生命周期契约（`Node` 所有权）**：布局父链（`layout_parent_`）是脏标记上溯与缓存向上失效的共同前提，其完整性由两条**父侧**不变量保证，`Node::~Node` **不参与**：
+
+1. **句柄析构不得清活控件的父链**——`Node` 是可共享句柄（`shared_ptr` 语义），拷贝 / 临时（如 `SingleChild` 的视图缓存、`set_children` 的初始化列表）/ `std::move` 后的旧对象析构时，控件仍在世、仍挂在那一只父下面。`~Node` 无从区分「临时句柄没了」与「控件真脱离」（`use_count()` 对这两种情形取值相同），故**一律不碰** `layout_parent_`。
+2. **真摘除与父先亡都由父侧清零**——「该控件确实脱离那一只父」走 `Widget::detach_child_layout_parent`（经 `Container::remove_child` / `set_children` / `adopt_children` / `SingleChild::set_child`）；「那一只父先亡、子控件仍被外部 `shared_ptr` 持有」走 `Widget::detach_all_children_layout_parent`（`~Container` / `~SingleChild` 首行）。两者是**同一份真值源**——父容器明确知道「这些子节点要脱离我了」，而子控件析构时猜不出来。
+
+**断链必须可见，但只在异常时**：`detach_child_layout_parent` 清父指针后发一条 `AURORA_LOG_WARN`（category `widget`，文案经 `log_concat` 折叠拼接、被摘控件类型名作为独立参数进入正文——该宏**不是** printf，`%s` 会原样输出），供消费方把「控件已脱离树却仍被标脏」与「忘记标脏」区分开。
+
+告警**分两档**，分野是「被摘子节点是否在容器之外仍被持有」：
+
+- **随容器销毁＝正常，不告警**：容器持最后一份时子节点随容器即刻销毁，这是每一次正常树销毁都会经过的路径。逐子发 WARN 会把一次真断链埋进噪声（实测「反复重建 widget 子树」的集成套件单套件即可刷出数千行），故这一档静默清指针——该清的照旧清，只是不再当成异常。
+- **活在容器之外被摘走＝异常，告警**：子节点脱离本容器后还要继续活（外部 `shared_ptr` 仍持有），脏标记将无处上溯。
+
+判别式为「容器自身持有份数」口径：`detach_all_children_layout_parent` 遍历 `child_nodes_mut()`，把 `Node::use_count() <= child_owned_ref_count()`（各容器报出自己持有了几份；`Container` 的 `children_` 每子一份故为 1，`SingleChild` 还要算上 `child_view_mut_` / `child_view_` 两个视图副本）判为「无外部持有者」。**不可**直接写 `use_count()==1`——`child_nodes_mut()` 对 `SingleChild` 返回的是拷贝副本，其基线为 2/3 而非 1，那样会让所有 `Show` / `Provider` / `Badge` 类包装件的正常销毁继续被误报。判别与 a11y 结构事件的唯一所有权判定同口径，且为**父侧在析构时刻**即可得的读数，不依赖「延迟到子控件析构再判」。`StrictMode` 另有影子断言（`request_frame` 内），但它在本仓多数构建档关闭，**不能**当作唯一防线。
+
+**新增容器的义务**：持有子节点的类须在析构体首行调 `detach_all_children_layout_parent()`。该函数虚分派 `child_nodes_mut()`，故**不能**放在 `~Widget` 基类里——那时派生部分已析构，会分派到基类空实现、静默漏清。另须注意 `SingleChild::child_nodes()` 返回的是**缓存副本**（`child_view_`），对它取可写引用会把清父链的副作用落在副本上，故 `SingleChild` 单独覆写 `child_nodes_mut()` 返回与 `child_` 同步的可写表。
+
+**验收**：`utest_layout_parent_chain` 共 8 条——①（原有三条）拷贝 / 进 `vector` 后丢弃 / `std::move` 后旧对象析构后，父链仍在且 `mark_needs_layout()` 仍抵达根侧汇聚回调；② `remove_child` 后 `layout_parent()` 为空、此后标脏不崩不悬垂；③ 父容器析构后仍存活的子控件 `layout_parent()` 为空；④（告警分档）`Column` 与 `SingleChild` 各自「随容器正常销毁」时日志里**没有** detach 告警；⑤「子件被外部持有后 `remove_child`」与「被外部持有后 `adopt_children` 换子」两次**都有**告警（两条判据分别守 `detach_child_layout_parent` 直调与 `detach_all` 两条独立路径，互不遮蔽）；⑥ 告警正文含被摘控件类型名且不再残留 `%s`。判据用「`on_dirty` 命中而根侧 `on_subtree_dirty` 不命中」区分「控件知道自己脏了」与「脏抵达了根」——只钉前者等于没钉病灶。变异自证：只在应用侧「顺手多标一层祖先脏」而不清断链 ⇒ ①②转红（补标是掩盖，不是修复）；去掉 `use_count` 判别改无条件告警 ⇒ ④的两条转红；连真摘除也静默（抑制扩大过头）⇒ ⑤的 `adopt_children` 那条转红；级别降成 `DEBUG` ⇒ ④⑤仍全绿（判据按消息内容判定，不按级别，降级藏不住分档）；保留 `%s` ⇒ ⑥的占位符断言转红。
+
+### 2.3.1 挂载与卸载的对称契约
+
+`Widget::mount(ctx)` 负责注册响应式依赖（经 `track` 把 `collect_signals` 收来的信号连同 `modifier` / `show` 挂进 `effects_`）并递归下发子树，`Widget::unmount()` 是它的镜像：置 `mounted_ = false`、清空 `effects_`（真正退订）、复位手势 tick 位，并派发 `on_unmount(ctx)`。
+
+**同一性判据是宿主身份，不是「是否已挂载」这一个布尔。** `BuildContext::host_id`（`std::uint64_t`，`build_context.h`）由 `Window` 构造期取进程内唯一值（`detail::next_host_id`）、在 `prepare_context` 每帧写入，并沿 `Provider` 子环境、转场层、容器逐层透传**不变**。判别式：
+
+| 挂载前状态 | 传入 ctx | 行为 |
+|:---|:---|:---|
+| 未挂载 | 任意 | 正常挂载（订阅 + `on_mount`） |
+| 已挂载 | `host_id` 相同 | **跳过**（转场复用同一实例这一既有保护，不得移除） |
+| 已挂载 | `host_id` 不同（两侧均非 0） | 先 `unmount()` 再挂载——否则新 ctx 永远拿不到，旧订阅一直活着 |
+| 已挂载 | 任一侧 `host_id == 0` | 跳过（0 = 未声明宿主，不作为换宿主的证据） |
+
+**为什么不用 `ctx.env` 指针**：`NavigatorHost::rebuild_display` 每次换页都用**新建的** `Provider` 重新包裹页面，而 `Provider::on_mount` 是拿自己的 `child_env_` 挂子树的 ⇒ 环境地址每轮都变，比指针会把「转场复用同一页实例」误判成换宿主，`on_mount` 反复重触发。**为什么不用值相等**（`scale_factor` / 主题）：值相等不等于同一宿主，两窗口完全可以同 DPI 同主题。`0` 这一档还兼带守住无头渲染：`render_to_png` / `render_to_logical_snapshot` 走 `constexpr BuildContext{}`，若把它们当成换宿主，一次无头截图就会把窗口里已挂载的树重挂一遍。
+
+**运行期追加的子树由父侧补挂，时机是下一次布局。** `Container::add` / `set_children` / `adopt_children`、`OverlayHost::add_overlay`、`TabBar::add_tab` 只调 `note_pending_mount()` 置位；真正的 `mount(ctx)` 由 `Widget::layout` 入口（**在 `show` 判定与布局缓存判定之前**）调 `flush_pending_mounts(ctx)` 完成。这与 `LayoutBuilder` / `LazyList` / `GridView` 既有的「父侧持有 `on_layout` 的那份 ctx，新增子树即时挂载」是同一条时机，调用方**不自带 `BuildContext`、也不自行 `mount`**——生命周期责任不外推给应用侧。补挂放在缓存判定之前是必需的：否则「当前不可见」或「本帧无需重排」会让子树一直挂不上，表现为浮层不跟主题。`TabBar` 的补挂覆盖**全部**标签内容而非仅选中项，故未选中的动态 tab 同样是挂载的。
+
+**卸载只由持有者显式发起，或由换宿主重挂路径内部发起；容器不得在移除子项时代调 `unmount`。** 摘除时刻容器无从判断这只子件是否「活在容器之外仍被持有」（`SingleChild::child_nodes_mut()` 返回 `child_view_mut_` 即 `child_` 的拷贝副本；实测无外部持有时 `Container` 报 `use_count() == 1`、`SingleChild` 报 2），任何按引用计数自动退订的写法都会误伤仍存活的子树。`on_unmount` 与既有 `on_mount` **逐处对称**：`Container` / `SingleChild` / `TabBar` / `Provider` / `Splitter` / `Drawer` / `TransitionLayer` / `NavigatorHost` 递归各自持有的子树；`Timer` 取消挂载期注册的 interval 句柄（否则摘下的 Timer 留在 `Scheduler` 任务表里继续触发，闭包持 `this`）；`LayoutBuilder` / `BreakpointBuilder` 释放挂载期建的 builder effect；`Dropdown` 清缓存的 `env` 指针。`Lifecycle` 的 `on_unmount` 回调是**析构回调**，与控件级钩子各自独立，契约不变。
+
+**验收**：`utest_overlay_host`（判据 1 与负向判据）、`utest_tab_bar`（判据 2）、`itest_widget_lifetime`（判据 3/4/6）共 8 条。变异自证：去掉 `add_overlay` / `add_tab` 的补挂登记 ⇒ 判据 1/2 转红；保留补挂但去掉重挂前的 `unmount` ⇒ 判据 3 的「净订阅数不增长」转红（订阅条数是唯一可判量——`mount` 的幂等保护**本来就**让重复挂载不重复订阅，只看挂载次数区分不出「旧宿主已退订」与「只是没重复挂」）；把同一性判据改成值相等 ⇒ 判据 3 在两宿主 `scale` 相同的构造下转红（用例刻意让两宿主除 `host_id` 外逐位相同）；让 `remove_overlay` 代调 `unmount` ⇒ 负向判据转红。
 
 ### 2.4 脏标记与缓存
 
@@ -175,7 +219,7 @@ au::Text("Welcome").font_size(24).bold();
 | `accessibility_state() const -> AccessibilityState` | 只填 `focused` | `Checkbox` / `Switch` 补 `checkable` + `checked`；`Slider` / `Progress` 补 `read_only`；`TextInput` 补 `read_only` / `password` / `multiline` |
 | `accessibility_range() const -> std::optional<AccessibilityRange>` | `nullopt` | `Slider`（min/max/step/value）、`Progress`（0–1） |
 | `accessibility_level() const -> std::optional<int>` | `nullopt` | 标题层级（`Header` 角色用于文档结构导航） |
-| `accessibility_scroll() const -> std::optional<AccessibilityScrollRange>` | `nullopt` | `Scroll`（可滚动范围的当前位置与边界） |
+| `accessibility_scroll() const -> std::optional<AccessibilityScrollRange>` | `nullopt` | `Scroll` / `LazyList` / `GridView`（填 `min/max/position` + `viewport`/`content` 两量；UIA `get_VerticalViewSize` = `compute_vertical_view_size(range)` = `viewport/content×100`，即「可见内容占全部内容的百分比」）。`LazyRow` 为横轴专用、纵轴不可滚 ⇒ 报 `viewport = content`（纵轴 100% 可见）。无滚动语义 ⇒ 桥侧直接报 100 |
 | `accessibility_is_semantic() const -> bool` | `true` | 声明「不参与语义树」的纯装饰控件返回 `false`（该控件及其标记含义被平台完全忽略） |
 
 **可编辑文本（TextPattern 支撑）**
@@ -192,7 +236,7 @@ au::Text("Welcome").font_size(24).bold();
 
 | 钩子 | 说明 |
 |:---|:---|
-| `perform_accessibility_action(const AccessibilityActionRequest&) -> bool` | 读屏反向操作控件的**唯一**入口。基类默认实现把动作**路由到真实事件路径**（聚焦 / 点击 / 调用 / 滚动经 `EventDispatcher` 与 `resolve_focus_manager`），不另造旁路；控件可覆写定制语义（如 `Toggle` → `set_value`、`Value` → `set_value`）；无法处理返回 `false` |
+| `perform_accessibility_action(const AccessibilityActionRequest&) -> bool` | 读屏反向操作控件的**唯一**入口。基类默认实现把动作**路由到真实事件路径**（聚焦 / 点击 / 调用 / 滚动经 `EventDispatcher` 与 `resolve_focus_manager`），不另造旁路；控件可覆写定制语义（如 `Toggle` → `set_value`、`Value` → `set_value`）；无法处理返回 `false`。滚动控件（`Scroll` / `LazyList` / `GridView`）额外覆写 `ScrollDown` / `ScrollUp` 为整视口翻页（基类无对应事件路径 ⇒ 否则静默 no-op）；`ScrollUp` 落到顶、`ScrollDown` 落到底时返回 `true`（动作已消费，不误报失败） |
 | `accessibility_scroll_to(double offset) -> void` | 默认 no-op；`Scroll` 覆写为「语义滚动到指定偏移」（平台 `ScrollIntoView` 的落点） |
 | `announce(const std::string&) const -> void` | 动态播报（Live Region）：上抛 `AccessibilityEventKind::Announcement`，不经语义树 diff。无控件归属的播报走自由函数 `notify_accessibility_announcement(text, nullptr)` |
 
@@ -236,6 +280,20 @@ au::Text("Welcome").font_size(24).bold();
 | `Form` | `gap`（字段垂直间距）；回调 `on_submit`；仅允许 `FormField` 子节点；`validate_all()` 递归验证（`widget/form.h`） |
 | `FormField` | 单子字段包装；`error_text`（空 = 通过）；回调 `on_validate`；`validate()` / `clear_error()` |
 
+**`Button` 标签的 i18n 契约（绘制 / 无障碍 / 自然宽同源）**：`ButtonProps::label` 是 `LocalizedString`，经
+`tr(key)` 构造时 `text` 恒空、只带 `key`。故三处消费标签的路径一律经 `Button::resolved_label(ctx)` 查
+`StringTable`（`Environment` 注入了 `Locale` 就按它解析，否则回落 `Locale{}` 走 `default_string_table()`
+的缺省档）——**不得直读 `label.get().text`**，否则 `tr()` 出的键会被画成空白：
+
+- `on_layout`：以解析后的显示串量宽，自然宽 = 量宽 + 左右内边距（`min_width` 不足时）；
+- `on_paint`：本帧只解析一次，`paint_label` 收到的是该串的**同一份副本**（按 const 引用传入），量宽与
+  `draw_text` 必然同值，不会因同帧内 locale 变化而分叉；子类覆写 `paint_label` 应直接用该串，不要再自行解析 `label`；
+- `accessibility_label()`：与绘制同源——优先复用布局 / 绘制期落在 `cached_display_text_` 的解析结果，尚未布局
+  或绘制时按默认 locale 现场解析（口径同 `Text::resolved_text`）。
+
+字面档（`set_label("Save")`）不受影响：非本地化的 `LocalizedString` 经 `resolve()` 原样返回 `text`，与查表路径
+输出等价。宽度缓存按「上次测量所用的显示串」比对失效：显示串变化即重测，不复用另一 locale 下的旧宽。
+
 ### 3.3 布局容器
 
 | 控件 | 关键属性 |
@@ -261,6 +319,13 @@ au::Text("Welcome").font_size(24).bold();
 **对齐原语**：容器与 `Stack` 的子项落点由 `widget/alignment.h` 统一提供——`enum class Alignment`（`TopLeft` / `TopCenter` / … / `BottomRight` 九宫格取值）配自由函数 `align_origin(Alignment, child_size, container_size) -> Point`（返回子项左上角相对容器的对齐落点）。该枚举同时被 `StackProps::align`、`Modifier::align(Alignment)`（`AlignNode`）与 flex 布局消费，是「子项在容器内如何对齐」的**单一类型来源**。
 
 `Scroll` 把内容录进**滑窗**离屏缓冲 `content_`（尺寸 = 视口高 ×(1 + 2 × `overscan`)，`buffer_origin_y_` 为缓冲锚点）：短内容（`max_origin == 0`）滚动帧仅一次 blit 平移合成；长内容（`max_origin > 0`）在滚动帧按增量条带重录（`scrolling_` 触发重锚，`shift_pixels` memmove + 重绘新暴露带，见 `scroll.h`），非纯 blit。
+
+**滚动的两套坐标系（不可混用）**：几何权威在 `Node::bounds_`，而各滚动宿主写子节点 bounds 时取的坐标系不同，命中链的换算方式随之不同——这是两类滚动容器**不可互相参照实现**的根因。
+
+- **`Scroll`：内容坐标**。`children_[0].bounds()` 的原点恒为 (0,0)、不含滚动偏移，且该原点必须在每次 `on_layout` 落定（否则内容子树停在默认零盒，既不落笔也不可命中）。三条路径共用这一基准：绘制按 `bounds.origin.y + buffer_origin_y_ - offset_y_` 平移合成；命中把局部命中点 **加上** `offset_y_` 换算回内容坐标再下降；吸顶由 `collect_stickies` 沿内容子树累加 `bounds().origin.y` 得 `natural_y`、以 `natural_y >= offset_y_` 判钉驻——若 bounds 烘焙了偏移，该判据即失配。命中另受**可视区裁剪**：先按视口盒显式钳位（点在视口外一律不命中，含被 `offset_y_` 推出的那段），再逐层由内容子树各自的 `bounds.contains` 收紧。容器自身仍在命中链上（滚轮/拖拽需要它）且排在内容之后，故内容先收事件、不被容器吞掉。
+- **`LazyList` / `LazyRow` / `GridView`：视口坐标**。偏移参与子布局，条目 bounds 直接写 `y = index * extent - offset`（LazyList 固定行高）/ 等价折算（LazyRow 横向、GridView 二维），故命中链可原样复用 `Container::on_hit_test_chain`，无需自行换算。
+
+**运行期改条目数（`LazyList::set_count`）**：`LazyList` 的虚拟化窗口此前只能在构造或反序列化时定条目数，运行期变化只能重建整个列表或重挂 `ItemBuilder`。`set_count(int)` 补上这条入口，口径三条：负值按 0 处理（与带参构造、`deserialize_props` 同一口径，不分叉）；下标仍在新范围内的**存活条目不重建**（其展开态、输入内容、子控件身份原样保留），只有滚出窗口或越界的条目被回收、下次进入窗口时由 `ItemBuilder` 重建；条目数减少后当前偏移按新的 `max_scroll_offset()` 夹取（否则列表停在内容末尾之外的空白处）。焦点落在被回收条目上时随之失效（`FocusManager` 持弱引用）——宿主若需保留焦点应先把焦点移到仍在范围内的条目上。
 
 **滚动位置保存/恢复**：四个滚动控件（`Scroll` / `LazyList` / `LazyRow` / `GridView`）都有 `restore_key`（空 = 不参与）。控件在**首次可滚动布局**时按 `app::ScrollStorage` 恢复偏移（由 `deserialize_props` 显式给入的偏移优先），此后位置变化（滚轮 / 拖拽 / `set_scroll_offset`）即写回（仅内存，落盘由 App 决定）；恢复只生效一次，用户主动滚动不会再被回拉。契约与多窗口作用域隔离见 `06-app-platform.md` §9.3。
 
@@ -306,7 +371,7 @@ au::Text("Welcome").font_size(24).bold();
 | `Hero` | 共享元素转场包装（`navigation/hero.h`）；`tag`（跨页配对键），单子节点 |
 | `Canvas` | 自定义绘制回调，用于高频绘制场景 |
 | `Dismissible` | 滑动消除包装（`widget/dismissible.h`）：单子节点沿 `axis`（默认 Horizontal）拖拽至阈值后消除，对标 Flutter `Dismissible`；手势由每帧 `tick` 驱动 |
-| `CommandPalette` | 模态命令面板（`widget/command_palette.h`）：居中浮层，按关键字模糊检索并执行命令，依赖 `CommandRegistry`（未绑定时为空列表）；`open` / `close` 切换 |
+| `CommandPalette` | 模态命令面板（`widget/command_palette.h`）：居中浮层，按关键字模糊检索并执行命令，依赖 `CommandRegistry`（未绑定时为空列表）；`open` / `close` 切换。搜索框占位符与空态提示是**控件内置**上屏文案，按 `command_palette.placeholder` / `command_palette.no_results` 查表（见 [`07-environment-modifier.md`](07-environment-modifier.md) §6.2），可经 `set_placeholder` / `set_empty_message` 覆盖文本，或经 `set_placeholder_key` / `set_empty_message_key` 换 key |
 
 ### 3.6 图像、绘制与占位
 
@@ -322,9 +387,9 @@ au::Text("Welcome").font_size(24).bold();
 | `ToolBar` / `MenuBar` / `TabBar` | 工具栏 / 菜单条 / 标签页 |
 | `TabBody` | 标签内容体（`widget/recipes.h`，`detail` 命名空间）：按 `selected` 索引显示对应页，随状态刷新；与 `TabBar` 配套使用 |
 | `StatusBar` | 底部状态栏（`widget/toolbar.h`）；`bar_height`（默认 24dp）、`gap`（区域间距），多子节点 |
-| `Dialog` / `Popup` / `ToastHost` | 对话框 / 弹出层 / 轻提示宿主（`ToastHost::show(text, duration_ms)` 投放） |
+| `Dialog` / `Popup` / `ToastHost` | 对话框 / 弹出层 / 轻提示宿主（`ToastHost::show(text, duration_ms)` 投放）。**Dialog 的几何与命中契约**：打开态 `on_layout` 把居中后的内容盒写入 `children_[0]`（几何权威唯一在 `Node::bounds_`），`on_paint` 直接读该盒落笔、遮罩按自身 bounds 铺满——两处各算一遍居中必然分叉。命中分两区：内容盒内下降到内容子树（按钮等可交互控件正常命中）；内容盒外（遮罩区）**本控件自身入链吸收该次点击、不下落穿透**到对话框下方的视口，且**不触发** `on_close_`（遮罩吸收 ≠ 取消）。关闭态命中链恒为空，即便上帧 `bounds` 仍有效。`show()` / `close()` / `set_content()` 均须标布局脏（`on_layout` 以 `open_` 为分支且布局缓存只看约束相等，不标脏则开/关切换与换内容都会被缓存跳过）。焦点作用域（`show`/`close` 经 `current_focus_manager()` push/pop）语义不受此影响 |
 | `ProgressDialog` | 模态进度对话框（`widget/drawer.h`）；`message`、`progress`（0..1，-1 = 不确定态）、`open`、`cancellable`；回调 `on_cancel` |
-| `OverlayHost` | 浮层宿主（`widget/popup.h`）；`add_overlay(Node)` 追加浮层并返回序号，允许多子 |
+| `OverlayHost` | 浮层宿主（`widget/popup.h`）；`add_overlay(Node)` 追加浮层并返回**可移除序号**（`std::optional<std::size_t>`，宿主尚无基础内容时为 `std::nullopt`——此时新节点落在序号 0，而 0 恒被解释为**基础内容**、`remove_overlay` 拒收，返回它等于给调用方一个永远删不掉的下标），`remove_overlay(index)` 拒收 0 与越界序号；允许多子 |
 
 ### 3.7 平台与调试
 
@@ -376,9 +441,13 @@ hover / 按下统一用 `Color::shaded(k)` 乘性调暗（hover ≈ ×0.90 / ×0
 
 `on_paint` 分解为若干 **protected 虚函数**，状态色由 `resolve_*` 钩子解析；成员一律 `protected`（非 private），子类可单点覆盖某个绘制阶段而无需重写整个 `on_paint`。
 
+**显示串单一来源约束**：凡绘制钩子需要可本地化文本，一律由 `on_paint` 解析一次后按 const 引用传给钩子
+（如 `Button::paint_label` 的 `display` 形参），钩子内部不得再自行解析；`accessibility_label()` 必须与绘制
+所用的显示串**逐字相等**（复用同一份解析结果，不得各算一遍）。
+
 | 控件 | 绘制钩子 |
 |:---|:---|
-| `Button` | `resolve_background` / `resolve_text_color` / `paint_background` / `paint_border` / `paint_label` |
+| `Button` | `resolve_background` / `resolve_text_color` / `paint_background` / `paint_border` / `paint_label`（末者多收一个 `const std::string &display` 形参 = 本帧显示串） |
 | `Switch` | `paint_track` / `paint_thumb` |
 | `Slider` | `paint_track` / `paint_active_track` / `paint_thumb`；几何 `track_rect` / `value_fraction` |
 | `ProgressIndicator` | `paint_track` / `paint_fill` |
@@ -469,3 +538,39 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 - 部分控件的序列化 `type` 名与 C++ 类名不同（`Image` → `ImageView` / `ImageViewProps`）。
 
 > 工具链侧入口（`to_code`、MCP 工具、CLI 子命令、Inspector 导出）见 [`08-tooling.md`](08-tooling.md)。
+
+
+### 6.3 三条几何读数：绘制盒 / 窗口盒 / 命中链 origin
+
+控件的几何在本仓有**三条互不相同**的读数。它们曾经被混称为「绝对（窗口逻辑 dp）盒」，本节把各自口径定死。
+
+| 读数 | 入口 | 坐标系 | 写入时机 |
+|:---|:---|:---|:---|
+| 绘制盒 | `paint_bounds()`（`focus_bounds_` / `dirty_bounds()` 同源） | **随祖先缓冲录制方式而变**：`Scroll` 内容后代为**缓冲坐标**（原点含 `-buffer_origin_y_`）；其它离屏合成控件（`Popup` 按 `anchor_`、非恒等 matrix）同理 | 绘制期写入，**有缓存缺口**（DL 缓存命中的帧上 `Widget::paint` 提前返回而不刷新） |
+| 窗口盒 | `window_bounds() -> std::optional<Rect>` | **恒为窗口逻辑 dp**，与 `MouseEvent::position` 同空间 | 查询时沿 `layout_parent()` 现算，**不依赖是否绘制过** |
+| 命中链 origin | `HitNode::origin`（`hit_test_chain` 返回） | 派发期逐层下传的累计原点，**含 Modifier 内容平移**；滚动容器内已扣 `offset_y_`，与窗口盒同空间（见 [`05-event-navigation.md`](05-event-navigation.md) §3.2.3） | 派发期 |
+
+**`paint_bounds()` 的注释已随实修改口**：它不再声称「绝对（窗口逻辑 dp）盒」，改为「最近一次 paint **实际收到**的盒」，并在公共头（`widget.h`）写明离屏缓冲内后代为缓冲坐标这一限制、指向 `window_bounds()` 作为窗口绝对盒的入口。
+
+**窗口盒的语义与算法**：`Widget::window_bounds()` 是公共面上「控件 → 窗口绝对盒」的唯一入口，语义为「控件自身盒在窗口客户区坐标系里的位置」。实现沿 `layout_parent()` 链自叶向根累加，递推式与 `Container::on_paint` 的下降式逐字同构：
+
+```
+子的窗口布局原点 = 父的窗口布局原点 + 父 Modifier 的内容平移 + 子在父内容区内的盒原点 + 父的滚动修正
+```
+
+- **内容平移**取 `Modifier::TransformInfo::translation`，与 `render_into` / `hit_test_chain` 共用同一份产物（见 [`05-event-navigation.md`](05-event-navigation.md) §3.2.3 的「origin 与绘制仿射同源」不变量）。**不得在查询侧另写一份「加不加 padding」的算式**——只补 `Padding` 等于把该历史病灶换个名字留下。
+- **滚动修正**由虚函数 `Widget::scroll_content_offset` 承载，缺省为零。它是 `Scroll` 唯一非零的覆写者：`Scroll` 的内容子树几何写在**内容坐标**（不含滚动偏移），故按 `-offset_y_` 折算。`LazyList` / `LazyRow` / `GridView` 的偏移已参与子布局（子 bounds 直接是视口坐标），保持缺省零值。`buffer_origin_y_` **不参与**折算——它是缓冲录制锚点，只影响绘制盒那条读数，扣它会二次偏移。
+- 该修正钩子的存在使「哪类宿主提供偏移修正」成为**容器自己的显式声明**，而不是基类按类型猜测。
+- **坐标系重映射**由另一个虚函数 `Widget::child_content_origin` 承载，缺省为 `std::nullopt`（不重映射）。它与上面那个滚动修正**语义相反、不可互相代偿**：滚动修正是**加性**的（基准仍是父链递推结果，只从中扣掉一个滚动量）；重映射是**替换性**的——宿主把整棵子树摆在另一个**绝对**基准上，累计量须以它替换，且其上祖先链一律不再参与。
+
+  唯一非空覆写者是 `Popup`：`anchor_` 是**全局**坐标，`Popup::on_paint`（`content_box{origin = anchor_}`）与 `Popup::on_hit_test_chain`（`content_box.contains(global)`）两条路径全程**不参与 `Popup` 自身在树中的位置**——叠加而非替换会读成「`Popup` 的树上位置 + `anchor_`」，与派发链分叉一个宿主偏移量。关闭态与无子节点时返回 `std::nullopt`（内容未被布局、`content_size_` 为零盒，基准没有被重映射）。覆写体必须与本控件 `on_paint` / `on_hit_test_chain` 下传给子树的盒**同源**：返回的坐标就是那两条路径实际使用的子树基准原点，另算一份必然分叉。
+
+**返回空值的口径（不留未定义）**：`show == false`、从未布局过（`size()` 为零盒）、或不在任何已布局的树内（`layout_parent()` 为空且自身非根）时返回 `std::nullopt`。取空值而非零盒，是为了让调用方能区分「查不到有效窗口盒」与「盒恰好在窗口原点」——否则空盒会被「非空即采用」的几何判据（如 `a11y_tree.h` 的绘制盒回退）当成有效几何。
+
+**代价与使用边界**：O(树深 × 每层子节点数) 的上溯查找，每层需重算该层 Modifier 变换。故本入口面向平台桥 / 无障碍 / 调试观测这类**低频事后查询**，**不得引入每帧绘制路径**。它不缓存结果，与「`Widget` 上不存在任何几何字段」这一既有约定一致（见本节上文「几何权威在 `Node`」与 §6.1 验收标准中「`Widget` 上不存在任何几何字段」）。两个修正钩子同样只在这条查询路径上被问，不进绘制。
+
+**验收**：`utest_scroll` 四条——滚后非零偏移下窗口盒逐位等于独立复算的真窗口位；未滚动 / 不在滚动容器内两种形态容差 0 逐位相等；Modifier 内容平移计入窗口盒；负守卫（`show == false` 与未布局）返回 `nullopt`。变异自证：把 `scroll_content_offset` 改成零 ⇒ 前两条转红；漏加 Modifier 平移 ⇒ 平移那条转红；负守卫改成返回零盒 ⇒ 负守卫那条转红。
+
+`utest_overlay_host` 四条（`Popup` 侧的坐标系重映射）——**Popup 内容**与**未挂 Popup 的普通子树**两形态，窗口盒均须与**命中链密集探针实测的可达框**相符（基准取自真实命中链：既不用 `window_bounds()` 自身输出，也不用 `HitNode.origin`——后者在滚动容器内本身不是窗口坐标）；`Popup` 绘制与命中的既有语义（`content_bounds()` 原点、盒内命中 / 盒外不命中、关闭态不命中且基准不被替换）逐位不变；按窗口盒读数取点派发必须落到内容控件、且 `local_position` 等于该点在盒内的偏移。
+
+变异自证（`Popup` 四条）：抽掉 `Popup::child_content_origin` 覆写 ⇒ Popup 形态那条与端到端那条转红，**普通子树那条与绘制命中基线那条保持绿**（证明修复只动事后查询路径）；把重映射改成**加性**（叠加且不终止上溯）⇒ Popup 形态那条转红，且其中「反向钉住不是叠加值」的断言同时转红；关闭态也返回 `anchor_`（去掉负守卫）⇒ 绘制命中基线那条的关闭态负守卫转红。

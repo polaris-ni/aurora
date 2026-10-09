@@ -96,7 +96,7 @@ void open_probe_window(aurora::Win32Host &host, const char *title) {
 ///
 /// 注入 `WM_KEYDOWN` / `WM_KEYUP`（`wParam = VK_INSERT`）证明宿主的 `wnd_proc` 拿到该虚拟键码时
 /// 确实译成 `KeyCode::Insert`——即新加的 `case VK_INSERT` 分支被真实消息路径走到。它证不了
-/// 「物理主键盘 Insert 会产生 `VK_INSERT`」（那是操作系统的事，也是本条真机腿的意义所在），
+/// 「物理主键盘 Insert 会产生 `VK_INSERT`」（那是操作系统的事，也是本条真机探针的意义所在），
 /// 故结果只作通道自检打印，计入失败但不算验收通过。
 /// @param host 宿主引用。
 /// @return 通道是否按要求产出 `KeyCode::Insert`。

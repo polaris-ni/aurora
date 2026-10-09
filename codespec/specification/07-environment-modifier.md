@@ -221,6 +221,35 @@ au::format_date(2025, 10, 25, Locale{"de"});                   // "25.10.2025"
 
 ---
 
+### 6.2 控件内置文案的词条 key
+
+除宿主传入的文本属性外，少数控件**自带**上屏文案（占位提示、空态提示之类）。这些不是字面量：
+一律按 key 查 `default_string_table()`，宿主登记译文即可本地化。**库不预置任何语言的词条**
+（`StringTable` 无删除接口，库侧写入会给宿主留下不可逆污染），未登记时回退控件内声明的英文字面量。
+
+| key | 控件 | 文案 | 兜底 |
+|:---|:---|:---|:---|
+| `command_palette.placeholder` | `CommandPalette` | 搜索框占位符 | `Type a command...` |
+| `command_palette.no_results` | `CommandPalette` | 无匹配结果时的空态提示 | `No matching commands` |
+
+三档优先级：**文本覆盖（`set_placeholder` / `set_empty_message`）> 按 key 查表 > 兜底字面量**。
+文本覆盖生效后该串**不再查表**，宿主须自己备多语言；换 key 则**仍走 i18n**，故同一进程内多个面板
+可各挂不同词条且都能翻译。设 key 会清掉此前的文本覆盖。
+
+解析发生在布局与绘制期，locale 取 `ctx` 注入的 `Locale`（未注入回落缺省档），与 `Text` / `Button`
+的 `resolved_text()` / `resolved_label()` 同口径，故运行期切 locale 立即生效。
+
+```cpp
+auto &t = au::default_string_table();
+t.add(Locale{"zh"}, "command_palette.placeholder", "输入命令…");
+t.add(Locale{"zh"}, "command_palette.no_results", "没有匹配的命令");
+```
+
+> 上表 key 是**外部契约**：宿主登记译文要靠这条串。单测以字面量钉死这两条 key（不用常量自比自），
+> 否则库侧 key 拼错时「注册端」与「查表端」一起错、两边抵消，用例会恒绿。
+
+---
+
 ## 7 Modifier 修饰系统
 
 ### 7.1 概述

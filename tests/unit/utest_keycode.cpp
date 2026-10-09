@@ -3,6 +3,7 @@
 /// 测试说明: key_name 对字母/数字/导航/修饰/标点/功能键的全覆盖、未知与越界键码回退 Unknown、KeyCode
 /// 分组连续性与相对次序
 
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -63,7 +64,7 @@ AURORA_TEST_CASE(key_name_falls_back_to_unknown) {
     // 越界值不在 switch 枚举列表内：走函数尾部的兜底返回
     // 越界取值正是本用例被测目标（验证 key_name 兜底返回 Unknown），不可改为合法枚举值。
     // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
-    const auto bogus = static_cast<KeyCode>(999);
+    constexpr auto bogus = static_cast<KeyCode>(999);
     AURORA_TEST_CHECK_STREQ(key_name(bogus), "Unknown");
 }
 
@@ -172,6 +173,38 @@ AURORA_TEST_CASE(key_name_of_insert_is_unique_across_all_codes) {
         }
     }
     AURORA_TEST_CHECK_EQ(insert_name_count, 1);
+}
+
+// key_code_from_name 与 key_name 同源：反查不另列键名表，而是逐项取 key_name 的输出比对。
+// 因此「两边漂移」这类缺陷不可能发生——新增键位只改 key_name 一处，反查自动跟上；本用例钉住这一点。
+AURORA_TEST_CASE(key_code_from_name_inverts_key_name_for_every_name) {
+    int checked = 0;
+    for (int i = 0; i < aurora::detail::AURORA_KEY_NAME_TABLE_SIZE; ++i) {
+        // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+        const auto k = static_cast<KeyCode>(i);
+        const std::string_view name{key_name(k)};
+        if (name == "Unknown") {
+            continue;  // 枚举空洞与越界取值：key_name 的兜底串，不是键名
+        }
+        AURORA_TEST_TRACE(std::string(name));
+        const KeyCode parsed = aurora::testing::require_value(key_code_from_name(name));
+        AURORA_TEST_CHECK_EQ(parsed, k);
+        ++checked;
+    }
+    // 守卫：0 命中也会「通过」，那样本用例就恒真了——必须真的扫到键名。
+    AURORA_TEST_CHECK_GE(checked, 90);
+}
+
+AURORA_TEST_CASE(key_code_from_name_rejects_non_key_names) {
+    // 占位名 "Unknown" 不可绑定：认下它等于把「解析不出来」假报成「绑定到了某个键」。
+    AURORA_TEST_CHECK_FALSE(key_code_from_name("Unknown").has_value());
+    AURORA_TEST_CHECK_FALSE(key_code_from_name("").has_value());
+    AURORA_TEST_CHECK_FALSE(key_code_from_name("ctrl").has_value());  // 区分大小写
+    AURORA_TEST_CHECK_FALSE(key_code_from_name("F13").has_value());  // 无此键位
+    AURORA_TEST_CHECK_FALSE(key_code_from_name("ArrowLeft ").has_value());  // 尾随空格
+    AURORA_TEST_CHECK_FALSE(key_code_from_name("Ctrl").has_value());  // 修饰位字面量不是键名
+    const std::string non_ascii = "Entr\xC3\xA9";  // 非 ASCII 恒不命中（主键名一律 ASCII）
+    AURORA_TEST_CHECK_FALSE(key_code_from_name(non_ascii).has_value());
 }
 
 }  // namespace aurora::test_cases::utest_keycode

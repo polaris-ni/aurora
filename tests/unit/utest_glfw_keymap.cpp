@@ -9,7 +9,7 @@
 ///
 /// 为什么要有本文件：`from_glfw_key` 原先是 `glfw_surface.cpp` 里的 `static`（内部链接），
 /// 单测吃不到表 —— 「四后端键码一致」这条契约在 Win32（`win32_keymap.h`）与 X11/Wayland
-/// （`keysym_map.h`）都有 CTest 断言，唯独 GLFW 那一腿没有，错位只能等真机才显形。
+/// （`keysym_map.h`）都有 CTest 断言，唯独 GLFW 配置没有，错位只能等真机才显形。
 
 #include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
 #ifdef AURORA_BACKEND_GLFW

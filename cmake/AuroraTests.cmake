@@ -86,10 +86,22 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_code_doc_sync
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_code_doc_sync.py"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 根入口 AGENTS.md 的注入预算门禁：该文件是每次协作会话原样注入的单一入口，超出注入
+        # 上限会被**静默从中部截断**，被丢掉的必然是文档导航与硬规则两节——恰是它唯一的职责。
+        # 本仓实测 23847 字节时注入止于 11705 字节（49%），§4/§5/§6 整节从未进入上下文。
+        # 故设 8 KiB 上限，超限即失败：细节下沉 codespec/，入口只留路由与硬约束。
+        add_test(NAME check_agents_size
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_agents_size.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 人工测试用例（codespec/manual-test/*.md）解析契约守护：六字段名/顺序/取值域、
         # 编号升序、依赖拓扑可解、预期结果与步骤同号映射、执行记录表列格式与判定一致性。
         add_test(NAME check_manual_test_format
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_manual_test_format.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 变更提案（codespec/changes/*/proposal.md）解析契约守护：目录命名、标题形态、编号唯一
+        # 与升序、元信息五字段与取值域、关联需求是否真在特性表、四节齐全与顺序、回写落点可达。
+        add_test(NAME check_change_proposals
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_change_proposals.py"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 版本一致性门禁（CHANGELOG.md 的 currentVersion 必须等于库版本；描述性口径不符仅告警）。
         add_test(NAME check_version_consistency

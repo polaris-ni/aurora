@@ -80,7 +80,7 @@ HRESULT WINAPI fake_for_monitor(HMONITOR monitor, int dpi_y, UINT *x, UINT *y) {
 
 // 本条是 A-5 的本体：**把 `GetDpiForWindow` 的解析结果置空**，读数必须落到 `GetDpiForSystem`
 // 而不是停在 1.0。旧代码里这一支结构上不可达（判据挂在「指针为空」的 `else if` 上，
-// 而 Win10+ 该函数恒已导出），正是要被本条锁住的那条腿。
+// 而 Win10+ 该函数恒已导出），正是要被本条锁住的那一条路径。
 AURORA_TEST_CASE(window_dpi_unavailable_falls_through_to_system) {
 #ifdef AURORA_WIN32_DPI_AVAILABLE
     using detail::DpiApi;

@@ -51,6 +51,14 @@ class Node {
     /// @return 持有 widget 时为 true。
     [[nodiscard]] explicit operator bool() const noexcept { return widget_ != nullptr; }
 
+    /// @brief 共享所有权引用计数（诊断用）：本节点之外是否还有别处持有同一控件。
+    ///
+    /// 与 `widget.cpp` 中 a11y 结构事件的 `use_count() == 1` 判唯一所有权同口径。典型用途：
+    /// `Widget::detach_all_children_layout_parent` 借此区分「容器持最后一份 ⇒ 子节点随本容器
+    /// 即刻销毁（正常，不告警）」与「子节点活在容器之外（异常，告警）」。
+    /// @return 共享该控件的 `shared_ptr` 引用数；空节点为 0。
+    [[nodiscard]] auto use_count() const noexcept -> long { return widget_.use_count(); }
+
     /// @brief 设置节点布局盒（布局阶段由父容器写入）。
     /// @param r 新的布局矩形。
     auto set_bounds(Rect r) -> void { bounds_ = r; }

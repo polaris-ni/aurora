@@ -541,3 +541,72 @@ CI 配置位于 `.github/workflows/`：
 - 编译缓存接入 `hendrikmuhs/ccache-action`（key 按 job / 矩阵名分桶）：core（Linux / macOS / windows-mingw）、backends（Linux / macOS）、toggles、asan、coverage、install-consumer；缓存口径（SLOPPINESS / BASEDIR / NOHASHDIR / 压缩）由 `cmake/AuroraCcache.cmake` 的编译器启动器统一注入，与本地构建共享同一语义，避免「本地命中、CI 全 miss」。
 - windows-msvc（默认 Visual Studio 多配置生成器）不接入编译缓存：CMake 的编译器启动器（`<LANG>_COMPILER_LAUNCHER`，sccache / ccache 的挂接点）仅在 Makefile / Ninja 生成器实现，VS 生成器下被静默忽略；要接入须先将该矩阵切换到 Ninja + cl，暂无必要（该配置无缓存路径、PCH 净收益显著，冷构建本身不构成瓶颈）。
 - windows 侧 Test 步骤显式 `shell: bash` 并设 `PYTHONUTF8=1`（默认 pwsh 无 `nproc`；cp1252 控制台无法编码 CJK 诊断输出）。
+- **编译耗时观测**：`core` 与 `backends` job 在 Build/Test 之后调用 `tools/check/build_baseline.py`（解析 `.ninja_log` 与 `LastTest.log`，纯观测、恒退出 0、不进门禁），把 `.ninja_log` / `LastTest.log` / `build-baseline.json` 作为 artifact 上传，并把摘要写入 step summary。before/after 对照用于决定 Unity Build 试点（`BUILD_OPTIONS.md` §4.8）的默认开关与批大小。
+
+### 14.5 本地验证的目标平台与真机探针
+
+⚠️ `ctest --preset ninja-test` **只覆盖 Windows Release 一个目标平台**。改动一旦触及公共头，必须补跑其余两个目标平台（wasm、Linux X11 / Wayland），否则 MinGW / clang / gcc 之间的严格度差异会一直拖到 CI 才暴露；推送后由 CI 十组作业全矩阵兜底（§14.4）。
+
+| 目标平台 | 入口 | 出口判据 |
+|:---|:---|:---|
+| Windows Release 全量 | `ctest --preset ninja-test`（逐条复跑用 `ctest -R <stem>`） | 全绿，含全部静态门禁 |
+| wasm 配置（Emscripten） | wasm 配置下全量 ctest | 该配置全绿 |
+| Linux X11 / Wayland 配置 | 对应后端配置下全量 ctest | 该配置全绿 |
+| 推送后 CI 全矩阵 | `.github/workflows/`（§14.4） | 全矩阵作业全绿（功能分支推送 lint 收窄为 1 个 `lint-incremental` 单 job，PR / master 推送走全量 12-job 矩阵） |
+
+**真机验收探针不进 CTest**（`AURORA_BUILD_VERIFY_TOOLS` 默认 OFF、`EXCLUDE_FROM_ALL`，聚合目标 `aurora_verify`）：`--target aurora_verify_win32_dpi` 在 100% DPI 环境下判据恒真并记 SKIP，其自动段注入 `WM_DPICHANGED` 造变化故任何 DPI 环境均可跑，人工段做真跨屏拖动、未做记 PENDING MANUAL；`--target aurora_verify_glfw_dpi` 同构，Wayland 验证需 Linux 合成器环境。契约与判据见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2。
+
+### 14.6 按改动类型的门禁矩阵
+
+`ctest --preset ninja-test` 已含全部 `check_*`；`check_gen_api_merge` / `check_api_schema_sync` 须先构建生成器。门禁脚本实现见 `tools/check/`，注册见 `cmake/AuroraTests.cmake`。下表是完整矩阵，仓库根目录 `AGENTS.md` §3.1 只保留高频四类并指向本表。
+
+| 改了什么 | 必跑门禁（CTest 名 / 目标） | 回写落点 |
+|:---|:---|:---|
+| 公共 API：签名、类 / 类型、信号、属性键、枚举 | `check_api_schema_sync`（先 `--target aurora_api_json`）、`check_naming_conventions`、`check_api_budget`、`check_doc_comments`、`lint`、`format-check` | `specification/NN-*.md`（按模块域）+ `CODING_STANDARDS.md` §6 + 必要时 `CONCEPTS.md` |
+| `include/aurora/aurora.h` 伞头 | `check_umbrella_header`（直连集合不得相对 `tools/check/umbrella_manifest.txt` 缩减） | `tools/check/umbrella_manifest.txt` 基线 |
+| `core/` 层依赖、模块边界、目录 | `check_core_layer_boundary`、`check_arch_module_map` | 本文件 §2 / §4 |
+| 平台 / 后端分支、feature 宏 | `check_platform_macros` + CI `toggles` 矩阵 | `BUILD_OPTIONS.md` §3 / §4 |
+| Win32 宿主的 DPI / dp↔物理换算 | `check_dpi_single_source`（换算只许在 `to_physical` / `to_logical`，DPI 只许在 `refresh_scale()` 读）；建窗尺寸那一项另跑真机探针 `aurora_verify_win32_dpi` | `specification/08-tooling.md` §8.2 |
+| GLFW / Wayland 的缩放变化上报 | 真机探针 `aurora_verify_glfw_dpi`（自动段注入 `WM_DPICHANGED`，人工段未做记 PENDING MANUAL） | `specification/08-tooling.md` §8.2「缩放变化上报的跨后端现状」 |
+| 字符串字面量 | `check_no_cjk_literals` | `CODING_STANDARDS.md` §14 |
+| NOLINT 豁免排版 | `check_nolint_layout` | `CODING_STANDARDS.md` §5.2 |
+| 测试文件 | `registry_integrity`、`check_test_temp_hygiene`、`framework_selftest` | `CODING_STANDARDS.md` §3 |
+| `codespec/` 文档与交叉引用 | `check_codespec_xref`、`check_code_doc_sync` | 本文件 §14 / §15 |
+| `codespec/manual-test/*.md` | `check_manual_test_format` | — |
+| 仓库入口 `AGENTS.md` 本身 | `check_agents_size`（> 8 KiB 红灯；超限时把细节下沉 `codespec/`，不得放宽阈值） | 本表（把细则搬回这里） |
+| 版本号 / `CHANGELOG.md` | `check_version_consistency` | `CODING_STANDARDS.md` §7 |
+| 任何代码行为 | 相关 `ctest -R <stem>`、`--target docs` | 本文件 §15 流程表「回写」阶段 |
+| CI 静态检查编排（`tools/check/select_lint_tus.py`、`tools/check/run_clang_tidy.py`、`.github/workflows/`） | `check_change_proposals`、`check_no_cjk_literals`、`check_no_hardcoded_paths`；且**全量出口不得被削弱**——PR / master(+main) 推送 / 每周定时 / 手动触发四类事件下仍须走全量 12-job 矩阵遍；功能分支推送改由作业 8i `lint-incremental`（单 job 增量）覆盖，**不得反向把全量事件降级为增量**（判据见 `BUILD_OPTIONS.md` §4.5、作业编排见 `.github/workflows/ci.yml` 作业 8 / 8w / 8i） | `BUILD_OPTIONS.md` §4.5 |
+
+门禁自身的两条纪律：凡「扫文档 / 目录做核对」的检查必须有**「0 命中即硬失败」守卫**（`check_arch_module_map` 曾因定位正则不匹配而空扫恒真 PASS，见其源码注释）；门禁输出必须全 ASCII，否则日志读不清。
+
+## 15 变更落地的端到端流程
+
+本节是**流程路由**，不是细则本身：每一步只回答「做什么 / 去哪读 / 什么算完」，细则一律在「去哪读」列指向的权威文档里，不在本节复制一份，避免双份真相漂移。对人（维护者）与 AI（协作助手）同样适用；AI 侧另受根目录 `AGENTS.md` 的硬规则与反例清单约束。**疑问未消不动手**——需要人拍板的取舍（为性能违反既有设计原则、越界操作等）先问清，不靠猜补全。
+
+**主线**：定位 → 提案 → 落码 → 本地验证 → 回写 → 跨平台与 CI → 归档。
+
+| 阶段 | 动作 | 去哪读 | 出口判据 |
+|:---|:---|:---|:---|
+| 定位 | 确定改动落在哪个域，找到该域的唯一权威文档 | `AGENTS.md` §4 导航表 | 能指出要改的文件与要回写的文档 |
+| 定位 | 动手前先读，确认契约与设计不变量不被破坏 | [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §5、本文件 §11 | 不变量清单未被违反 |
+| 提案 | 触及公共 API / 分层边界 / 后端矩阵 / 性能门槛 → 先落变更提案（变更提案机制当前未以独立目录承载，按本文件 §15.1 判定是否落提案） | 本文件 §15.1 | 提案存在且状态 `已提议`；评审达成共识后转 `实施中` |
+| 落码 | 按编码规则落码；API 以头文件与 `aurora_api.json` 为唯一事实，不凭记忆假设 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §1–§8、§15 | 编译零 error |
+| 落码 | 新增公共 API / widget / 核心逻辑必配单测；demo 与公共源一对一 | `CODING_STANDARDS.md` §3 | `utest_*` 存在并经 GLOB 接入 CTest |
+| 落码 | 新增或改动 widget / 类型 / 属性键 → 刷新 API schema | [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §3.6 | `check_api_schema_sync` 绿 |
+| 验证 | 跑全量测试与全部静态门禁、lint、format-check | `AGENTS.md` §3 | 全绿；多目标平台与真机探针口径见本文件 §14.5 |
+| 回写 | 按改动类型回写 `codespec/` 文档 | `AGENTS.md` §3.1 第三列 | `check_codespec_xref` / `check_code_doc_sync` 绿 |
+| 回写 | 版本与变更记录更新；破坏性变更给出迁移路径 | `CHANGELOG.md` SemVer 规则、[`SPECIFICATIONS.md`](SPECIFICATIONS.md) §12 | `check_version_consistency` 绿 |
+| 回写 | 按 Conventional Commits 写提交信息 | `CODING_STANDARDS.md` §10 | `git log` 可归类、无任务编号词 |
+| 归档 | 提案状态转 `已归档`，并核对提案列出的回写落点确已落地 | `AGENTS.md` §3.1 第三列 | 状态 `已归档`；落点文档与代码现状一致 |
+
+### 15.1 什么可以跳过
+
+流程的价值在拦住真正会漂的东西，不在制造仪式。下表之外的情形一律走完整流程；**判断不了是否触及，就按触及处理**。
+
+| 可跳过 | 前提 | 依据 |
+|:---|:---|:---|
+| 变更提案 | 不触及公共 API / 分层边界 / 后端矩阵 / 性能门槛的日常小修 | 变更提案机制当前未以独立目录承载；日常小修按本文件 §15 主线直接落码与回写 |
+| 跨平台三个目标平台 | 本次未改动任何公共头 | 本文件 §14.5 |
+| 回写文档 | 改动类型在 `AGENTS.md` §3.1 表第三列标注为「—」 | `AGENTS.md` §3.1 |
+| 配套单测 | 一次性示例 / 演示，且已在说明里标注「无单测」 | `CODING_STANDARDS.md` §3 |

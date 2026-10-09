@@ -103,6 +103,19 @@ class LayoutBuilder : public Widget {
         builder.subscribe(*builder_effect_);
     }
 
+    /// @brief 释放挂载期建的 builder 订阅并卸载当前子节点（与 `on_mount` 对称）。
+    ///
+    /// 子节点由 `on_layout` 在重建时挂载（父侧 ctx），不经 `on_mount`，故这里显式回收：换宿主重挂后
+    /// `child_` 会被下一次重建替换，在替换前它仍持着旧宿主派生的订阅。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        builder_effect_.reset();  // Effect 析构即退订（订阅由 Reactive 侧持有的弱锚点惰性摘除）
+        if (child_) {
+            child_.widget().unmount();
+        }
+    }
+
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         const BuilderFn &fn = builder.get();
         const bool constraints_changed = (last_.min.width != c.min.width) || (last_.min.height != c.min.height) ||

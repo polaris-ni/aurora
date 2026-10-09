@@ -151,8 +151,45 @@ class LazyList : public Widget {
     auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
 
     /// @brief 总项数。
-    /// @return 条目总数（构造/反序列化后恒 ≥0）。
+    /// @return 条目总数（构造/反序列化/`set_count` 后恒 ≥0）。
     [[nodiscard]] auto count() const -> int { return count_; }
+
+    /// @brief 运行期改总项数（`count` 的可写入口）。
+    ///
+    /// 语义：
+    /// - **越界**：负值按 0 处理（与带参构造、`deserialize_props` 同一口径，不分叉）。
+    /// - **状态保持**：下标仍在新范围内的**存活条目不重建**——其内部状态（展开态、输入内容、
+    ///   滚动位置、子控件身份）原样保留；只有滚出可见窗口或超出新范围的条目被回收，下次进入
+    ///   窗口时由 `ItemBuilder` 重新构建。这正是「运行期改条目数」相对「重建整个列表」的
+    ///   价值所在。
+    /// - **回收口径**：新范围外的存活实例立即销毁（`live_` 中 `index >= count` 的条目）。
+    ///   若当前焦点落在被回收的条目上，焦点随之失效（`FocusManager` 持弱引用，见
+    ///   `focused()`）——宿主若需保留焦点应先把焦点移到仍在范围内的条目上。
+    /// - **偏移夹取**：条目数减少后若当前偏移超出新的可滚范围，按新范围夹取并标脏，
+    ///   否则列表会停在内容末尾之外的空白处。
+    ///
+    /// @param count 新的总项数（负值按 0 处理）。
+    /// @note Side-effects: may recycle live items, clamps scroll offset, marks layout dirty
+    auto set_count(int count) -> void {
+        const int target = (count < 0) ? 0 : count;
+        if (target == count_) {
+            return;
+        }
+        count_ = target;
+        // 立即回收越界实例（不等下一次布局）：否则 set_count 之后到重排之间，
+        // live_ 里仍留着已不存在的条目，命中链会命中它们。
+        for (auto it = live_.begin(); it != live_.end();) {
+            if (it->first >= count_) {
+                it = live_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        // 条目减少后偏移可能越界：按新范围夹取（apply_offset 内部判重，值未变则不标脏）。
+        apply_offset(offset_, /*cancel_glide=*/true);
+        mark_needs_layout();
+        mark_needs_paint();
+    }
 
     /// @brief 当前滚动偏移（dp，向下为正）。
     /// @return 实时偏移，已钳制在 [0, max_scroll_offset()]。
@@ -301,6 +338,39 @@ class LazyList : public Widget {
     /// @brief 真实滚动控件：滚轮派发时本控件是可滚动目标（最深优先）。
     /// @return 恒为 true。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
+
+    /// @brief 无障碍滚动量：{0, 最大偏移, 当前偏移} + 视口高/内容高两量。
+    /// 供 UIA `IScrollProvider::get_VerticalViewSize` 按几何算百分比（而非按跨度反解）。
+    /// @note Side-effects: reads state
+    /// @return `{min=0, max=max_scroll_offset(), position=offset_, viewport=viewport_height_,
+    /// content=content_height()}`。
+    [[nodiscard]] auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> override {
+        return AccessibilityScrollRange{.min = 0.0,
+                                        .max = static_cast<double>(max_scroll_offset()),
+                                        .position = static_cast<double>(offset_),
+                                        .viewport = static_cast<double>(viewport_height_),
+                                        .content = static_cast<double>(content_height())};
+    }
+
+    /// @brief 无障碍滚动定位：走 `set_scroll_offset` 既有夹取路径（标布局/绘制脏）。
+    /// @param offset 目标偏移（内容坐标，double 来自读屏协议）；越界值按可滚范围夹取。
+    /// @note Side-effects: mutates scroll state
+    auto accessibility_scroll_to(double offset) -> void override { set_scroll_offset(static_cast<float>(offset)); }
+
+    /// @brief 读屏滚动动作：按一屏（视口高）增量滚动，方向为 down 正 / up 负。
+    /// @param req 动作请求：只处理 `ScrollDown`/`ScrollUp`，其余动作转交 `Widget` 基类。
+    /// @return 偏移实际变化为 true（基类动作取基类结果）。
+    /// @note Side-effects: mutates scroll state
+    auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool override {
+        const bool down = req.action == AccessibilityAction::ScrollDown;
+        const bool up = req.action == AccessibilityAction::ScrollUp;
+        if (!down && !up) {
+            return Widget::perform_accessibility_action(req);
+        }
+        const float dir = down ? 1.0F : -1.0F;
+        set_scroll_offset(offset_ + (dir * viewport_height_));
+        return true;
+    }
 
     /// @brief 序列化标量属性（行数/行高/偏移/缓冲/保存键/吸附）。
     /// @param props 目标 JSON 对象（基类通用属性先写入）。
@@ -482,9 +552,19 @@ class LazyList : public Widget {
 
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
+        // 视口钳位与本控件 on_hit_test / on_paint 同口径：点在视口外一律不命中。虚拟化使 live_
+        // 里留有视口外的缓存条目（cache_extent 预取），不加钳位时「条目已滚出视口、其覆盖绘制
+        // 区却仍被祖先的闸认」⇒ 肉眼不可见的区域变得可点。
+        const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size};
+        if (!viewport.contains(local)) {
+            return {};
+        }
         for (auto &kv : live_ | std::views::values) {
             const Rect cb = kv.bounds();
-            if (cb.contains(local)) {
+            // 闸并入条目的追加命中盒：条目内控件的覆盖绘制区（如条目里的展开面板）画在条目盒外，
+            // 只按条目盒判定会拿不到点击（与 `Container::on_hit_test_chain` 同口径）。
+            if (cb.contains(local) ||
+                kv.widget().covers_extra_hit_box(local - cb.origin, ctx, bounds.origin + cb.origin)) {
                 const Rect global{
                     .origin = Point{.x = bounds.origin.x + cb.origin.x, .y = bounds.origin.y + cb.origin.y},
                     .size = cb.size};
@@ -495,6 +575,32 @@ class LazyList : public Widget {
             }
         }
         return {};
+    }
+
+    /// @brief 子树追加命中盒的聚合下降：遍历 live_ 条目（虚拟化子项不在 `child_nodes()` 里）。
+    ///
+    /// 视口钳位与本控件 `on_hit_test_chain` **逐字同构**——这是「闸认、自身不认」分叉的禁令来源：
+    /// 祖先（`Column` 等）问本控件是否覆盖某点时走的正是本入口，此处不钳位则视口外缓存条目的
+    /// 面板会被申报出去，而真实派发链上那一点会被 `on_hit_test_chain` 的钳位拒掉，两者分叉。
+    /// @param local 待测点（本控件本地坐标）。
+    /// @param ctx 构建上下文，原样透传给条目子树。
+    /// @param ancestor_offset 本控件原点在视口坐标系中的 y（祖先下降时逐层累加；
+    ///        缺省零表示调用方不知全局位置，覆写体须按纯本地几何判定）。
+    /// @return 任一条目的子树申报覆盖此点为 true；点在视口外恒 false。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto covers_descendant_extra_hit_box(const Point &local, const BuildContext &ctx,
+                                                       const Point &ancestor_offset) const -> bool override {
+        // 视口盒取自身尺寸（与 on_hit_test 的 `bounds.size` 同源：本控件在常规流中的盒即视口）。
+        const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = size()};
+        if (!viewport.contains(local)) {
+            return false;
+        }
+        // live_ 是 std::map：any_of 直接吃 associative_range，无需物化 values 视图
+        // （Node 不可拷贝构造，物化那条路走不通）。
+        return std::ranges::any_of(live_, [&local, &ctx, &ancestor_offset](const auto &kv) {
+            const Rect cb = kv.second.bounds();
+            return kv.second.widget().covers_extra_hit_box(local - cb.origin, ctx, ancestor_offset + cb.origin);
+        });
     }
 
     /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Scroll/Dismissible 模式）。

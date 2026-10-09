@@ -1161,19 +1161,16 @@ auto UiaNodeProvider::get_VerticalViewSize(double *ret) -> HRESULT {
     if (ret == nullptr) {
         return E_POINTER;
     }
-    return store_read(
-        on_main<MainRead<double>>(
-            [](Widget &w) -> MainRead<double> {
-                const auto scroll = w.accessibility_scroll();
-                if (!scroll.has_value()) {
-                    return MainRead<double>::unsupported();
-                }
-                const double total = scroll->max;  // 可滚动量（内容 − 视口）
-                return MainRead<double>::value_of(
-                    total <= 0.0 ? 100.0 : std::clamp((scroll->max / (scroll->max + 1.0)) * 100.0, 0.0, 100.0));
-            },
-            AURORA_UI_READ_TIMEOUT_MS),
-        ret);
+    return store_read(on_main<MainRead<double>>(
+                          [](Widget &w) -> MainRead<double> {
+                              const auto scroll = w.accessibility_scroll();
+                              if (!scroll.has_value()) {
+                                  return MainRead<double>::value_of(100.0);  // 无滚动语义 ⇒ 全部可见
+                              }
+                              return MainRead<double>::value_of(compute_vertical_view_size(*scroll));
+                          },
+                          AURORA_UI_READ_TIMEOUT_MS),
+                      ret);
 }
 
 auto UiaNodeProvider::get_HorizontallyScrollable(UiaBool *ret) -> HRESULT {

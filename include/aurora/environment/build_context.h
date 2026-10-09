@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "aurora/core/aurora_assert.h"
 #include "aurora/core/types.h"
 #include "aurora/environment/environment.h"
@@ -19,6 +21,19 @@ class BuildContext {
     const Environment *env = nullptr;  ///< 当前环境（由 Provider 注入）；可为 nullptr
     float scale_factor = 1.0F;  ///< 设备像素密度（dpi / 96），快速访问器
     Size size{};  ///< 本节点布局后的尺寸（布局阶段填充）
+
+    /// @brief 宿主身份：`Widget::mount` 判定「是否同一宿主」的**唯一**依据（只比较，不解引用）。
+    ///
+    /// 由创建本 ctx 的宿主（`Window`）在构造期取唯一值并写入，沿 `Provider` 子环境、转场层、容器
+    /// 逐层透传**不变**——因为中途换掉的是「环境链上的一次覆盖」，不是宿主本身。控件据此区分两种
+    /// 重复 `mount`：同宿主重复挂载（转场复用同一实例）跳过，换宿主重挂先卸载再挂载。
+    ///
+    /// @note 刻意**不**用 `env` 指针或 `scale_factor` / 主题等值：前者会在每次 `Provider` 重新包裹子树
+    ///       时变化（`NavigatorHost` 每次换页都新建包裹 `Provider`），后者值相等不等于同一宿主。
+    /// @note 0 表示「未声明宿主」（无头渲染、单元测试构造的裸 ctx）。它**不作为换宿主的证据**——只有
+    ///       两个都非 0 且不同的 id 才判「换宿主」，故无头渲染（`render_to_png` /
+    ///       `render_to_logical_snapshot`）碰到窗口里已挂载的树时不会把它重挂一遍。
+    std::uint64_t host_id = 0;
 
     /// @brief 向上查找类型 T 的环境值；不存在返回 nullptr。
     /// @tparam T 待查找的环境值类型（任意经 Provider 注入的类型）。

@@ -47,12 +47,27 @@ struct ScrollProps {
 /// - 内容在宽松约束下测量自然尺寸；容器自身取父约束给出的视口尺寸。
 /// - 离屏缓冲 `content_` 是**滑动窗口**而非整页：尺寸 = 视口宽 × 视口高 ×(1 + 2×overscan)，
 /// 与内容总量解耦（缓冲内存随内容 ×10 不增长）。缓冲以「稳定的内容坐标」录制
-/// （偏移不烘焙进子控件 bounds，子控件的 Display List 缓存不被偏移击穿）。
+/// （子控件的 Display List 缓存不被滚动偏移击穿）。
 /// - 滚动只改变下方 `composite` 的平移量，纯滚动帧整页仅一次 blit（平移合成），**不重新栅格化**。
 /// - 视口滚出缓冲安全区（上下各 overscan 屏）时才**重锚点并整块重录有界缓冲**；重录频率正比于
 /// 滚动距离（每滚约 1 屏触发一次），而非内容总量 —— 这才是正确的复杂度。
 /// - 非滚动帧（如自动轮播 banner 标脏）重录同一块有界缓冲（已从上百 MB 降到约 3 屏量级）。
 /// 这避免了旧实现把偏移烤进 bounds + 绘制时压裁剪，导致每帧重栅整页内容而卡顿的问题。
+///
+/// @section scroll_geom 几何与命中契约
+///
+/// **内容子节点的 `bounds` 是内容坐标**（原点 = 内容左上角，不含滚动偏移），与
+/// `on_paint` 录制进离屏缓冲时传入的盒（`origin.y = -buffer_origin_y_`）同一坐标系。
+/// 该坐标系是三条路径的共同基准，不可改成视口坐标：
+/// - 绘制：`composite` 按 `bounds.origin.y + buffer_origin_y_ - offset_y_` 平移合成；
+/// - 命中：`on_hit_test_chain` 把局部命中点 **加上** `offset_y_` 换算回内容坐标再下降；
+/// - 吸顶：`collect_stickies` 沿内容子树累加 `bounds().origin.y` 得 `natural_y`，
+///   `paint_sticky_overlay` 以 `natural_y >= offset_y_` 判钉驻——若 `bounds` 烘焙了偏移，
+///   该判据即失配、吸顶功能坏掉。
+///
+/// ⚠️ 这与 `LazyList` / `LazyRow` / `GridView` 的模型**不同**：它们让偏移参与子布局，
+/// 写的是 `y = index * extent - offset`（视口坐标），命中链因此可直接照抄基类。
+/// 两类滚动容器不可互相参照实现。
 ///
 /// 采用**继承式双模 API**（specification/04-widget.md §2.5）：`ScrollProps` 字段即本控件公有字段，
 /// `step` 可直接赋值（`scroll.step = 16`）或以配置块构造
@@ -306,16 +321,21 @@ class Scroll : public Container, public ScrollProps {
     /// @return `offset_y_`，未经额外夹取（布局后由滚动路径保证在 `[0, 内容高−视口高]` 内）。
     [[nodiscard]] auto offset_y() const -> float { return offset_y_; }
 
-    /// @brief 无障碍滚动量：{0, 内容量−视口量, 当前偏移}。
+    /// @brief 无障碍滚动量：{0, 内容量−视口量, 当前偏移} + 视口高/内容高两量。
     ///
     /// 供读屏驱动滚动（UIA `IScrollProvider` / AT-SPI2 `Component.ScrollTo` /
     /// macOS `accessibilityPerformScrollToVisible`）；不可滚时 max = 0，桥据此不暴露滚动 pattern。
+    /// `viewport`/`content` 直接取自布局期已知量，供 `get_VerticalViewSize` 按几何算百分比。
     /// @note Side-effects: reads state
-    /// @return `{min = 0, max = max(0, content_h_ − viewport_h_), position = offset_y_}`。
+    /// @return `{min = 0, max = max(0, content_h_ − viewport_h_), position = offset_y_,
+    ///          viewport = viewport_h_, content = content_h_}`。
     [[nodiscard]] auto accessibility_scroll() const -> std::optional<AccessibilityScrollRange> override {
         const float max_offset = std::max(0.0F, content_h_ - viewport_h_);
-        return AccessibilityScrollRange{
-            .min = 0.0, .max = static_cast<double>(max_offset), .position = static_cast<double>(offset_y_)};
+        return AccessibilityScrollRange{.min = 0.0,
+                                        .max = static_cast<double>(max_offset),
+                                        .position = static_cast<double>(offset_y_),
+                                        .viewport = static_cast<double>(viewport_h_),
+                                        .content = static_cast<double>(content_h_)};
     }
 
     /// @brief 无障碍滚动定位：走 `set_offset` 既有夹取路径（不标布局脏）。
@@ -422,6 +442,10 @@ class Scroll : public Container, public ScrollProps {
             cc.min = Size{.width = viewport_w, .height = 0.0F};
             cc.max = Size{.width = viewport_w, .height = Size::infinity().height};
             content = children_[0].widget().layout(cc, ctx);
+            // 几何权威写入 Node::bounds_（内容坐标，见类注释「几何与命中契约」）：
+            // 命中链按此盒下降并自行换算偏移。不写则内容子树停留在默认零盒，
+            // 其内按钮/输入框一个都点不到，且命中链只剩本控件（点击被容器吞掉）。
+            children_[0].set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = content});
         }
         // 内容尺寸变化 → 离屏缓冲失效，下帧整体重建；视口尺寸变化不影响内容缓冲。
         if (content.width != content_w_ || content.height != content_h_) {
@@ -615,6 +639,117 @@ class Scroll : public Container, public ScrollProps {
             return this;  // 整个视口可滚动（容器优先）
         }
         return nullptr;
+    }
+
+    /// @brief 滚动偏移坐标系修正（`Widget::window_bounds` 上溯用）：内容子节点的盒原点须扣掉偏移。
+    ///
+    /// 本控件是 `Widget::scroll_content_offset` 唯一非零的覆写者：`Scroll` 的内容子树几何写在
+    /// **内容坐标**（`children_[0].bounds().origin` 恒为 (0,0)、不含滚动偏移，见类注释
+    /// 「几何与命中契约」），而 `window_bounds()` 要的是窗口坐标，故按 `-offset_y_` 折算。
+    ///
+    /// `buffer_origin_y_` **不参与**此折算：它是离屏缓冲的录制锚点（只影响 `paint_bounds()`
+    /// 那条读数），与控件在视口里的实际位置无关，扣它会二次偏移。
+    ///
+    /// @param out 输出平移量（引用，就地写入）：y = `-offset_y_`，x = 0。
+    /// @note Side-effects: writes `out`
+    auto scroll_content_offset(const Point & /*child_origin*/, Point &out) const -> void override {
+        out = Point{.x = 0.0F, .y = -offset_y_};
+    }
+
+    /// @brief 命中链：把局部命中点换算到内容坐标后下降给内容子树。
+    ///
+    /// 换算：`local.y + offset_y_`（`bounds_` 是内容坐标，见类注释「几何与命中契约」）。
+    /// 不换算则滚过一段后点击落点与视觉错位一个滚动量——按钮画在 A 处、判定在 B 处。
+    ///
+    /// 可视区裁剪取**显式钳位**：命中点须先落在视口盒内才换算下降。内容盒与视口盒的相交
+    /// 只说明「有内容可见」，不能替代逐点判定——点在视口上下边缘之外时，换算后仍可能落进
+    /// 某个行的范围（该行位于内容区但不在可视区），故必须先按视口盒钳位。
+    /// 越界项的收紧由内容子树自身逐层 `bounds.contains` 完成，本处不重复裁剪。
+    ///
+    /// 容器自身仍在链上（`wants_scroll()` 为真，滚轮/拖拽需要它），但排在内容之后——
+    /// 派发器自链尾向链头派发，故内容先收到事件、不会被容器吞掉。
+    ///
+    /// @param local 相对本控件视口原点的命中点。
+    /// @param bounds 本控件的视口盒（`bounds.origin` 为其全局原点）。
+    /// @param ctx 构建上下文，原样透传给内容子树。
+    /// @return 命中内容的子树链；点在可视区外或无子节点时为空链。
+    auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
+        -> std::vector<HitNode> override {
+        if (children_.empty()) {
+            return {};
+        }
+        // 视口盒（本控件自身盒，原点归零）。与 on_hit_test 的整视口判定同口径：
+        // 点在视口外一律不命中——包括可视区外的内容（被 offset 推出的那段）。
+        const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size};
+        if (!viewport.contains(local)) {
+            return {};
+        }
+        const Rect content_box = children_[0].bounds();
+        if (!content_box.intersects(viewport)) {
+            return {};  // 内容整体滚出可视区
+        }
+        // 视口→内容坐标：加回滚动偏移（内容坐标系的原点随内容上移）。
+        const Point content_local{.x = local.x, .y = local.y + offset_y_};
+        // 闸并入内容的追加命中盒（同 `Container::on_hit_test_chain` 口径）：覆盖绘制区画在内容盒外，
+        // 只按内容盒判定会被判成「可视区内的空白处」而丢弃。
+        if (!content_box.contains(content_local) &&
+            !children_[0]->covers_extra_hit_box(content_local - content_box.origin, ctx,
+                                                bounds.origin + content_box.origin)) {
+            return {};  // 命中点在内容盒外（含可视区内的空白处）
+        }
+        // 内容子树的全局原点 = 视口原点 + 内容盒原点 − `offset_y_`（内容盒原点恒为 (0,0)，
+        // 但仍按通用式求和，避免与绘制/命中再次分叉）。
+        //
+        // ⚠️ `− offset_y_` 不可省：`HitNode.origin` 的语义是**窗口坐标**（派发器按
+        // `local_position = position − origin` 本地化坐标），而内容子树的 bounds 是**内容坐标**。
+        // 漏扣则 origin 整体偏大一个滚动量，滚动容器内每个控件收到的 local_position 都错位
+        // `offset_y_`（用 local_position 做本地几何判定的控件——Dropdown 反算序号、TextInput
+        // 定光标落点、拖拽阈值——全部偏一个滚动量）。
+        //
+        // 与上面 `local.y + offset_y_` 的换算是**两侧各自职责**、不是重复扣减：那一侧把探测点
+        // 从视口坐标送回内容坐标系（命中判定用），这一侧把子树的原点从内容坐标送回窗口坐标
+        // （事件本地化用）。只改一侧都会坏：改 local 会使命中整体错位、漏改 origin 会让本地化错位。
+        const Rect global{.origin = Point{.x = bounds.origin.x + content_box.origin.x,
+                                          .y = bounds.origin.y + content_box.origin.y - offset_y_},
+                          .size = content_box.size};
+        return children_[0]->hit_test_chain(content_local - content_box.origin, global, ctx);
+    }
+
+    /// @brief 子树追加命中盒的聚合下降：换算到内容坐标后问内容子树（与本控件 on_hit_test_chain 同构）。
+    ///
+    /// 两处必须与 `on_hit_test_chain` 逐字一致，否则分叉：
+    /// ① **视口钳位**——点在视口外一律不申报，否则被滚出视口的子孙（及其覆盖绘制区）可点；
+    /// ② **内容坐标换算**（`local.y + offset_y_`）——不换算则申报区与绘制区错位一个滚动量。
+    /// @param local 待测点（本控件视口本地坐标）。
+    /// @param ctx 构建上下文，原样透传给内容子树。
+    /// @param ancestor_offset 本控件原点在视口坐标系中的 y（祖先下降时逐层累加；
+    ///        缺省零表示调用方不知全局位置，覆写体须按纯本地几何判定）。
+    /// @return 内容子树申报覆盖此点为 true；点在视口外或无子节点时 false。
+    /// @note Side-effects: pure
+    [[nodiscard]] auto covers_descendant_extra_hit_box(const Point &local, const BuildContext &ctx,
+                                                       const Point &ancestor_offset) const -> bool override {
+        if (children_.empty()) {
+            return false;
+        }
+        // 视口盒：与 on_hit_test_chain 的整视口判定同口径。
+        const Rect viewport{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = size()};
+        if (!viewport.contains(local)) {
+            return false;
+        }
+        const Rect content_box = children_[0].bounds();
+        const Point content_local{.x = local.x, .y = local.y + offset_y_};
+        // 内容子树的祖先偏移：`ancestor_offset` + 内容盒原点。**刻意不扣 `offset_y_`**——
+        // `ancestor_offset` 的语义是「本控件原点在**视口坐标系**中的 y」（见 widget.h），而
+        // 追加命中盒的用途正是判「离视口多远」（`Dropdown::panel_box` 据此决定面板翻上/翻下），
+        // 该距离本就**不含滚动量**：面板贴视口下沿时无论滚到哪都应翻上。改成窗口坐标会改掉
+        // 这个翻转阈值（嵌套滚动场景下行为变化）。
+        //
+        // ⚠️ 故 `on_hit_test_chain` 下传的 `HitNode.origin`（窗口坐标）与这里的 `ancestor_offset`
+        // （视口坐标）**是两个有意不同的坐标系**，不是漏改的同一处：前者供
+        // `position − origin` 本地化，后者供视口相对几何决策。改动其一必须重新审视另一。
+        const Point content_offset{.x = ancestor_offset.x + content_box.origin.x,
+                                   .y = ancestor_offset.y + content_box.origin.y};
+        return children_[0]->covers_extra_hit_box(content_local - content_box.origin, ctx, content_offset);
     }
 
     /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Dismissible/ReorderableList 模式）。

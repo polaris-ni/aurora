@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -187,6 +188,24 @@ class MenuBar : public Widget {
                     .size = Size{.width = AURORA_DROPDOWN_WIDTH, .height = h}};
     }
 
+    /// @brief 下拉浮层矩形（本地坐标）的唯一来源：未展开为 `std::nullopt`。
+    ///
+    /// `extra_hit_box()`（派发入口）与 `on_hit_test()`（兼容入口）共用它，杜绝两入口判定分叉。
+    /// @return 展开态为 `dropdown_bounds()`；未展开为 `std::nullopt`。
+    [[nodiscard]] auto flyout_box() const -> std::optional<Rect> {
+        return is_open() ? std::optional<Rect>{dropdown_bounds()} : std::nullopt;
+    }
+
+    /// @brief 追加命中盒：展开态的下拉浮层（画在栏下方、自身布局盒之外）。
+    ///
+    /// 浮层是覆盖绘制：不占布局，祖先下降前的包含闸只看布局盒，故浮层区域必须在此声明
+    /// 才会被闸并入命中链——判据只写在 `on_hit_test` 里对真实派发无效。
+    /// @return 展开态为浮层矩形（本地坐标）；未展开为 `std::nullopt`。
+    [[nodiscard]] auto extra_hit_box(const BuildContext & /*ctx*/, const Point & /*ancestor_offset*/) const
+        -> std::optional<Rect> override {
+        return flyout_box();
+    }
+
     /// @brief 序列化栏高与顶级菜单标题列表（菜单项回调不可序列化，仅保留标题）。
     /// @param props [out] 写入的属性 JSON 对象（先叠加基类属性）。
     auto serialize_props(Json &props) const -> void override {
@@ -272,11 +291,14 @@ class MenuBar : public Widget {
     }
 
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override {
-        // 栏区域 + 展开的下拉区域命中自身
-        if (local.y < bar_height_ && Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local)) {
+        // 栏区域 + 展开的下拉区域命中自身。
+        // 「自身盒」分支与祖先下降闸同谓词：去掉原先额外的 `local.y < bar_height_` 严格比较，
+        // 否则边界行（y == 栏高）上派发入口命中、兼容入口不命中（两入口分叉）。
+        if (Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local)) {
             return this;
         }
-        if (is_open() && dropdown_bounds().contains(local)) {
+        // 展开的下拉区：与追加命中盒同一份判据（浮层画在布局盒外，不要求点落在自身布局盒内）。
+        if (const std::optional<Rect> drop = flyout_box(); drop.has_value() && drop->contains(local)) {
             return this;
         }
         return nullptr;
@@ -284,7 +306,7 @@ class MenuBar : public Widget {
 
     auto on_hit_test_chain(const Point & /*local*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/)
         -> std::vector<HitNode> override {
-        return {};  // 自身即最深命中（基类前置 this）
+        return {};  // 自身即最深命中（基类前置 this；覆盖区能否进链由祖先的闸决定）
     }
 
   private:
