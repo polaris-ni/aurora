@@ -618,15 +618,15 @@ AURORA_TEST_CASE(scroll_regression_counter_gates) {
 
 namespace {
 
-constexpr float AURORA_G27_ROW_H = 40.0F;  ///< 内容行高（dp）
-constexpr float AURORA_G27_VIEW_W = 300.0F;  ///< 视口宽（dp）
-constexpr float AURORA_G27_VIEW_H = 200.0F;  ///< 视口高（dp）＝ 5 行
-constexpr int AURORA_G27_ROWS = 20;  ///< 内容行数（内容总高 800dp > 视口，可滚）
-constexpr float AURORA_G27_CONTENT_H = static_cast<float>(AURORA_G27_ROWS) * AURORA_G27_ROW_H;
+constexpr float AURORA_ROW_H = 40.0F;  ///< 内容行高（dp）
+constexpr float AURORA_VIEW_W = 300.0F;  ///< 视口宽（dp）
+constexpr float AURORA_VIEW_H = 200.0F;  ///< 视口高（dp）＝ 5 行
+constexpr int AURORA_ROWS = 20;  ///< 内容行数（内容总高 800dp > 视口，可滚）
+constexpr float AURORA_CONTENT_H = static_cast<float>(AURORA_ROWS) * AURORA_ROW_H;
 
 auto g27_viewport() -> Rect {
     return Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                .size = Size{.width = AURORA_G27_VIEW_W, .height = AURORA_G27_VIEW_H}};
+                .size = Size{.width = AURORA_VIEW_W, .height = AURORA_VIEW_H}};
 }
 
 /// @brief 命中观测台账：记录累计点击数与最近一次被点的行号。
@@ -646,7 +646,7 @@ class HitRow final : public Widget {
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{.width = AURORA_G27_VIEW_W, .height = AURORA_G27_ROW_H});
+        return c.constrain(Size{.width = AURORA_VIEW_W, .height = AURORA_ROW_H});
     }
     auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
     /// @brief 点击记账入口：基类在「先按下、再抬起」且未构成拖拽时调用（见 Widget::activate）。
@@ -685,7 +685,7 @@ class LocalProbeRow final : public Widget {
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{.width = AURORA_G27_VIEW_W, .height = AURORA_G27_ROW_H});
+        return c.constrain(Size{.width = AURORA_VIEW_W, .height = AURORA_ROW_H});
     }
     auto on_paint(Painter & /*p*/, const Rect & /*r*/, const BuildContext & /*ctx*/) -> void override {}
 
@@ -710,7 +710,7 @@ auto make_local_probe_scrollable(float offset) -> LocalProbeFixture {
     LocalProbeFixture f;
     f.scroll = std::make_shared<Scroll>();
     f.content = std::make_shared<Column>();
-    for (int i = 0; i < AURORA_G27_ROWS; ++i) {
+    for (int i = 0; i < AURORA_ROWS; ++i) {
         auto r = std::make_shared<LocalProbeRow>(i);
         // 必须挂 Clickable 修饰：`wants_click()` 缺省只看修饰链，不挂则基类不认它为命中目标，
         // `on_pointer_event` 永不触发（探针自身接线错误的经典陷阱，与 make_scrollable 同因）。
@@ -719,7 +719,7 @@ auto make_local_probe_scrollable(float offset) -> LocalProbeFixture {
         f.content->add(Node{r});
     }
     f.scroll->add(Node{f.content});
-    LayoutEngine::layout(*f.scroll, bounded(AURORA_G27_VIEW_W, AURORA_G27_VIEW_H));
+    LayoutEngine::layout(*f.scroll, bounded(AURORA_VIEW_W, AURORA_VIEW_H));
     if (offset > 0.0F) {
         (void)f.scroll->set_offset(offset);
     }
@@ -741,7 +741,7 @@ auto make_scrollable(float offset) -> ScrollFixture {
     ScrollFixture f;
     f.scroll = std::make_shared<Scroll>();
     f.content = std::make_shared<Column>();
-    for (int i = 0; i < AURORA_G27_ROWS; ++i) {
+    for (int i = 0; i < AURORA_ROWS; ++i) {
         f.ledgers.push_back(std::make_unique<HitLedger>());
         auto row = std::make_shared<HitRow>(i, *f.ledgers.back());
         // 挂 Clickable 修饰：`wants_click()` 默认只看修饰链，缺它则基类不识别点击、
@@ -751,7 +751,7 @@ auto make_scrollable(float offset) -> ScrollFixture {
         f.content->add(Node{std::move(row)});
     }
     f.scroll->add(Node{f.content});
-    LayoutEngine::layout(*f.scroll, bounded(AURORA_G27_VIEW_W, AURORA_G27_VIEW_H));
+    LayoutEngine::layout(*f.scroll, bounded(AURORA_VIEW_W, AURORA_VIEW_H));
     if (offset > 0.0F) {
         (void)f.scroll->set_offset(offset);
     }
@@ -782,8 +782,8 @@ AURORA_TEST_CASE(content_bounds_written_in_content_coordinates) {
     AURORA_TEST_REQUIRE(!kids.empty());
     const Rect cb = kids.front().bounds();
     // 修复前此盒为默认 Rect{}（宽高皆 0）。
-    AURORA_TEST_CHECK_NEAR(cb.size.width, AURORA_G27_VIEW_W, 1e-3F);
-    AURORA_TEST_CHECK_NEAR(cb.size.height, AURORA_G27_CONTENT_H, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(cb.size.width, AURORA_VIEW_W, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(cb.size.height, AURORA_CONTENT_H, 1e-3F);
     AURORA_TEST_CHECK_NEAR(cb.origin.x, 0.0F, 1e-3F);
     AURORA_TEST_CHECK_NEAR(cb.origin.y, 0.0F, 1e-3F);
 }
@@ -797,7 +797,7 @@ AURORA_TEST_CASE(scrolled_content_still_hits_visual_row) {
 
     const float visual_y = 60.0F;  ///< 视口内 y=60（第 2 行的中心带）
     // 视口 y=60 + 偏移 200 = 内容 y=260 ⇒ 行号 floor(260 / 40) = 6。
-    const int expected = static_cast<int>((200.0F + visual_y) / AURORA_G27_ROW_H);
+    const int expected = static_cast<int>((200.0F + visual_y) / AURORA_ROW_H);
     AURORA_TEST_CHECK_EQ(expected, 6);
     AURORA_TEST_REQUIRE(expected < static_cast<int>(f.rows.size()));
 
@@ -882,7 +882,7 @@ AURORA_TEST_CASE(positive_control_column_root_also_clickable) {
     auto row = std::make_shared<HitRow>(3, *ledger);
     row->modifier.set(Modifier{}.clickable([]() -> void {}));
     col->add(Node{std::move(row)});
-    LayoutEngine::layout(*col, bounded(AURORA_G27_VIEW_W, 400.0F));
+    LayoutEngine::layout(*col, bounded(AURORA_VIEW_W, 400.0F));
 
     const std::vector<Node> &kids = col->child_nodes();
     AURORA_TEST_REQUIRE(!kids.empty());
@@ -934,14 +934,14 @@ AURORA_TEST_CASE(vertical_view_size_and_scroll_percent_consistent) {
 AURORA_TEST_CASE(window_bounds_of_scrolled_descendant_equals_independently_recomputed_origin) {
     // 形态①：Scroll 内容后代在**非零偏移**后取窗口盒，逐位等于独立复算的真窗口位。
     // 视口放在 y=60 的父容器里，确保「视口原点」真的进入读数（视口原点为 0 的形态会把该项漏掉）。
-    constexpr float g36_viewport_origin_y = 60.0F;
+    constexpr float viewport_origin_y = 60.0F;
     auto outer = std::make_shared<Column>();
-    outer->add(Node{std::make_shared<FixedBox>(AURORA_G27_VIEW_W, g36_viewport_origin_y)});
+    outer->add(Node{std::make_shared<FixedBox>(AURORA_VIEW_W, viewport_origin_y)});
     ScrollFixture f = make_scrollable(200.0F);
     outer->add(Node{f.scroll});
 
     // 按外层尺寸重排（60dp 占位 + 200dp 视口），使视口原点确实落在 y=60。
-    LayoutEngine::layout(*outer, bounded(AURORA_G27_VIEW_W, AURORA_G27_VIEW_H + g36_viewport_origin_y));
+    LayoutEngine::layout(*outer, bounded(AURORA_VIEW_W, AURORA_VIEW_H + viewport_origin_y));
     (void)f.scroll->set_offset(200.0F);
     const float offset = f.scroll->offset_y();
     AURORA_TEST_REQUIRE(offset > 0.0F);
@@ -949,13 +949,13 @@ AURORA_TEST_CASE(window_bounds_of_scrolled_descendant_equals_independently_recom
     // 逐行核对：真窗口位 = 视口窗口原点 + 行内容 y − offset_y_。
     int checked = 0;
     for (std::size_t i = 0; i < f.rows.size(); ++i) {
-        const float content_y = static_cast<float>(i) * AURORA_G27_ROW_H;
+        const float content_y = static_cast<float>(i) * AURORA_ROW_H;
         if (!f.rows[i]->window_bounds().has_value()) {
             continue;
         }
         ++checked;
         const Rect wb = require_value(f.rows[i]->window_bounds());
-        const float expected = g36_viewport_origin_y + content_y - offset;
+        const float expected = viewport_origin_y + content_y - offset;
         AURORA_TEST_CHECK_NEAR(wb.origin.y, expected, 1e-3F);
     }
     AURORA_TEST_CHECK(checked > 0);
@@ -971,12 +971,12 @@ AURORA_TEST_CASE(paint_bounds_of_scrolled_descendant_stays_in_buffer_coordinates
     // 本次只改 `paint_bounds()` 的注释口径、不改其行为，故在此钉住现状：绘制后该读数给的是
     // **内容坐标**（等于行的内容 y），不是窗口坐标——这正是改口的理由，也是与 `window_bounds()`
     // 并存两条读数的原因。两条读数之差 = offset_y_ − 视口窗口原点。
-    constexpr float g36_viewport_origin_y = 60.0F;
+    constexpr float viewport_origin_y = 60.0F;
     auto outer = std::make_shared<Column>();
-    outer->add(Node{std::make_shared<FixedBox>(AURORA_G27_VIEW_W, g36_viewport_origin_y)});
+    outer->add(Node{std::make_shared<FixedBox>(AURORA_VIEW_W, viewport_origin_y)});
     ScrollFixture f = make_scrollable(200.0F);
     outer->add(Node{f.scroll});
-    LayoutEngine::layout(*outer, bounded(AURORA_G27_VIEW_W, AURORA_G27_VIEW_H + g36_viewport_origin_y));
+    LayoutEngine::layout(*outer, bounded(AURORA_VIEW_W, AURORA_VIEW_H + viewport_origin_y));
     (void)f.scroll->set_offset(200.0F);
 
     Painter p;
@@ -988,9 +988,9 @@ AURORA_TEST_CASE(paint_bounds_of_scrolled_descendant_stays_in_buffer_coordinates
     const Rect mid = require_value(f.rows[5]->window_bounds());
     AURORA_TEST_REQUIRE(f.rows[5]->paint_bounds().size.height > 0.0F);
     // 缓冲口径：绘制读数 == 内容 y（不含视口原点、也不含滚动偏移）。
-    AURORA_TEST_CHECK_NEAR(f.rows[5]->paint_bounds().origin.y, 5.0F * AURORA_G27_ROW_H, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(f.rows[5]->paint_bounds().origin.y, 5.0F * AURORA_ROW_H, 1e-3F);
     // 与窗口盒的差恰为「offset − 视口原点」，两条读数不可混用。
-    AURORA_TEST_CHECK_NEAR(f.rows[5]->paint_bounds().origin.y - mid.origin.y, offset - g36_viewport_origin_y, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(f.rows[5]->paint_bounds().origin.y - mid.origin.y, offset - viewport_origin_y, 1e-3F);
 }
 
 AURORA_TEST_CASE(window_bounds_matches_recomputed_origin_without_scrolling) {
@@ -1006,10 +1006,10 @@ AURORA_TEST_CASE(window_bounds_matches_recomputed_origin_without_scrolling) {
         rows.push_back(r);
         col->add(Node{r});
     }
-    LayoutEngine::layout(*col, bounded(AURORA_G27_VIEW_W, 400.0F));
+    LayoutEngine::layout(*col, bounded(AURORA_VIEW_W, 400.0F));
     for (std::size_t i = 0; i < rows.size(); ++i) {
         const Rect wb = require_value(rows[i]->window_bounds());
-        const float content_y = static_cast<float>(i) * AURORA_G27_ROW_H;
+        const float content_y = static_cast<float>(i) * AURORA_ROW_H;
         AURORA_TEST_CHECK(wb.origin.y == content_y);  // 容差 0：逐位相等
     }
 
@@ -1018,7 +1018,7 @@ AURORA_TEST_CASE(window_bounds_matches_recomputed_origin_without_scrolling) {
     AURORA_TEST_CHECK_NEAR(f.scroll->offset_y(), 0.0F, 1e-4F);
     for (std::size_t i = 0; i < f.rows.size(); ++i) {
         const Rect wb = require_value(f.rows[i]->window_bounds());
-        const float content_y = static_cast<float>(i) * AURORA_G27_ROW_H;
+        const float content_y = static_cast<float>(i) * AURORA_ROW_H;
         AURORA_TEST_CHECK(wb.origin.y == content_y);
     }
 }
@@ -1035,7 +1035,7 @@ AURORA_TEST_CASE(window_bounds_accounts_for_modifier_translation) {
     auto root = std::make_shared<Column>();
     root->add(Node{std::make_shared<HitRow>(0, *std::make_unique<HitLedger>())});  // 40dp 占位行
     root->add(Node{col});
-    LayoutEngine::layout(*root, bounded(AURORA_G27_VIEW_W, 200.0F));
+    LayoutEngine::layout(*root, bounded(AURORA_VIEW_W, 200.0F));
 
     const Rect wb = require_value(target->window_bounds());
     // 独立复算：占位行高 40（col 盒原点 y=40）+ col 的 Modifier 内容平移 10 = 50。
@@ -1068,17 +1068,17 @@ AURORA_TEST_CASE(window_bounds_is_empty_for_hidden_and_unlaid_out_widget) {
 AURORA_TEST_CASE(scrolled_descendant_receives_correct_local_position) {
     // 判据①：滚到 offset=200 后点击内容 y=200 那��的视觉中心，控件收到的 local_position
     // 必须是「行内局部 y」= 行高的一半，而不是错位一个 offset_y_ 的值。
-    constexpr float aurora_g27_offset = 200.0F;
-    LocalProbeFixture f = make_local_probe_scrollable(aurora_g27_offset);
+    constexpr float aurora_scroll_offset = 200.0F;
+    LocalProbeFixture f = make_local_probe_scrollable(aurora_scroll_offset);
     AURORA_TEST_REQUIRE(f.scroll->offset_y() > 0.0F);
 
     // 选内容 y = offset 的行（滚后恰在视口顶），点它的视觉中心。
-    const auto idx = static_cast<std::size_t>(aurora_g27_offset / AURORA_G27_ROW_H);
+    const auto idx = static_cast<std::size_t>(aurora_scroll_offset / AURORA_ROW_H);
     AURORA_TEST_REQUIRE(idx < f.rows.size());
     // 独立复算视觉中心：视口原点 0 + 行内容 y − offset + 行高/2（视口本身是根，原点为 0）。
     const float row_center_window_y =
-        (static_cast<float>(idx) * AURORA_G27_ROW_H) - f.scroll->offset_y() + (AURORA_G27_ROW_H * 0.5F);
-    const float expected_local_y = AURORA_G27_ROW_H * 0.5F;
+        (static_cast<float>(idx) * AURORA_ROW_H) - f.scroll->offset_y() + (AURORA_ROW_H * 0.5F);
+    const float expected_local_y = AURORA_ROW_H * 0.5F;
 
     MouseEvent press;
     press.action = MouseAction::Press;
@@ -1098,15 +1098,15 @@ AURORA_TEST_CASE(scrolled_descendant_receives_correct_local_position) {
 AURORA_TEST_CASE(hit_node_origin_equals_independently_recomputed_window_position) {
     // 判据②：`HitNode.origin` 逐位等于独立复算的真窗口位（视口原点 + 内容 y − offset_y_）。
     // 这条同时钉住「origin 是窗口坐标」这一语义，供`local_position = position − origin` 本地化。
-    constexpr float aurora_g27_offset = 120.0F;
-    LocalProbeFixture f = make_local_probe_scrollable(aurora_g27_offset);
+    constexpr float aurora_scroll_offset = 120.0F;
+    LocalProbeFixture f = make_local_probe_scrollable(aurora_scroll_offset);
     AURORA_TEST_REQUIRE(f.scroll->offset_y() > 0.0F);
 
     // 命中一条滚后可见的行：视口局部点取该行中心。
-    const auto idx = static_cast<std::size_t>(aurora_g27_offset / AURORA_G27_ROW_H);
+    const auto idx = static_cast<std::size_t>(aurora_scroll_offset / AURORA_ROW_H);
     AURORA_TEST_REQUIRE(idx < f.rows.size());
     const float local_y =
-        (static_cast<float>(idx) * AURORA_G27_ROW_H) - f.scroll->offset_y() + (AURORA_G27_ROW_H * 0.5F);
+        (static_cast<float>(idx) * AURORA_ROW_H) - f.scroll->offset_y() + (AURORA_ROW_H * 0.5F);
     const auto chain = f.scroll->hit_test_chain(Point{.x = 10.0F, .y = local_y}, g27_viewport(), BuildContext{});
     AURORA_TEST_REQUIRE(!chain.empty());
 
@@ -1114,7 +1114,7 @@ AURORA_TEST_CASE(hit_node_origin_equals_independently_recomputed_window_position
         chain, [&f, idx](const HitNode &n) -> bool { return n.ptr == static_cast<Widget *>(f.rows[idx].get()); });
     AURORA_TEST_REQUIRE(it != chain.end());
     // 独立复算真窗口位：该行盒顶 = 内容 y − offset_y_（视口是根，原点 0）。
-    const float expected_window_y = (static_cast<float>(idx) * AURORA_G27_ROW_H) - f.scroll->offset_y();
+    const float expected_window_y = (static_cast<float>(idx) * AURORA_ROW_H) - f.scroll->offset_y();
     AURORA_TEST_CHECK_NEAR(it->origin.y, expected_window_y, 1e-3F);
 }
 
@@ -1122,12 +1122,12 @@ AURORA_TEST_CASE(hit_node_origin_agrees_with_window_bounds) {
     // 判据②的交叉验证：`HitNode.origin`（事件本地化基准）与 `window_bounds()`（事后查询）
     // 对同一控件、同一帧必须给出**同一个窗口位置**——这是与本次修复合流后的关键不变量：
     // 两者同源，消费侧无需再自算折算。
-    constexpr float aurora_g27_offset = 120.0F;
-    LocalProbeFixture f = make_local_probe_scrollable(aurora_g27_offset);
-    const auto idx = static_cast<std::size_t>(aurora_g27_offset / AURORA_G27_ROW_H);
+    constexpr float aurora_scroll_offset = 120.0F;
+    LocalProbeFixture f = make_local_probe_scrollable(aurora_scroll_offset);
+    const auto idx = static_cast<std::size_t>(aurora_scroll_offset / AURORA_ROW_H);
     AURORA_TEST_REQUIRE(idx < f.rows.size());
     const float local_y =
-        (static_cast<float>(idx) * AURORA_G27_ROW_H) - f.scroll->offset_y() + (AURORA_G27_ROW_H * 0.5F);
+        (static_cast<float>(idx) * AURORA_ROW_H) - f.scroll->offset_y() + (AURORA_ROW_H * 0.5F);
     const auto chain = f.scroll->hit_test_chain(Point{.x = 10.0F, .y = local_y}, g27_viewport(), BuildContext{});
     const auto it = std::ranges::find_if(
         chain, [&f, idx](const HitNode &n) -> bool { return n.ptr == static_cast<Widget *>(f.rows[idx].get()); });

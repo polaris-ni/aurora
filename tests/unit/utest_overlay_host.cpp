@@ -212,23 +212,23 @@ AURORA_TEST_CASE(remove_overlay_does_not_unmount_detached_subtree) {
 
 /// @brief 树中 `OverlayHost` 之前的占位行高：刻意取非零，使「替换基准」与「叠加锚点」两种
 ///        读法在两形态判据里必然分叉（后者会多出这一个 LEAD_IN）。
-constexpr float AURORA_G37_LEAD_IN = 40.0F;
+constexpr float AURORA_LEAD_IN = 40.0F;
 /// @brief `Popup` 内容首行（占位）的高度：探针位于内容盒内 y = 6 处。
-constexpr float AURORA_G37_CONTENT_HEAD = 6.0F;
+constexpr float AURORA_CONTENT_HEAD = 6.0F;
 /// @brief 探针控件的固定尺寸。
-constexpr float AURORA_G37_PROBE_W = 120.0F;
-constexpr float AURORA_G37_PROBE_H = 20.0F;
+constexpr float AURORA_PROBE_W = 120.0F;
+constexpr float AURORA_PROBE_H = 20.0F;
 /// @brief 可达框实测的取点步长（dp）：实测框至多比真框大一个步长，判据容差取它。
-constexpr float AURORA_G37_PROBE_STEP = 0.25F;
+constexpr float AURORA_PROBE_STEP = 0.25F;
 /// @brief 可达框实测的搜索半宽（dp）：远大于步长，保证真框必被覆盖（读数错一个锚点也够得到）。
-constexpr float AURORA_G37_PROBE_SPAN = 48.0F;
+constexpr float AURORA_PROBE_SPAN = 48.0F;
 /// @brief 浮层锚点（窗口绝对坐标）。
 ///
 /// ⚠️ 必须落在 `OverlayHost` 的盒内（此处 y = LEAD_IN + 20 ∈ [LEAD_IN, LEAD_IN + 200]）：
 /// `OverlayHost` 之上仍有 `Container` 的下降闸（`cb.contains(local)`，见 `widget.h`），落在宿主
 /// 盒外的探点会被那一层挡掉、命中链到不了 `Popup`。这是「锚点须在宿主可视范围内」这一既有
 /// 性质，与本次修复无关，但决定了两形态判据的锚点不能取窗口原点。
-constexpr Point AURORA_G37_ANCHOR{.x = 12.0F, .y = 60.0F};
+constexpr Point AURORA_ANCHOR{.x = 12.0F, .y = 60.0F};
 
 /// @brief 固定尺寸哑控件：布局返回构造时给定的自然尺寸（经约束钳制），绘制无副作用。
 class AnchorBox final : public Widget {
@@ -317,12 +317,12 @@ struct PopupTree {
 auto make_popup_tree(const Point &anchor) -> PopupTree {
     PopupTree f;
     f.root = std::make_shared<Column>();
-    f.root->add(Node{std::make_shared<AnchorBox>(300.0F, AURORA_G37_LEAD_IN)});
+    f.root->add(Node{std::make_shared<AnchorBox>(300.0F, AURORA_LEAD_IN)});
     f.host = std::make_shared<OverlayHost>(Node{std::make_shared<AnchorBox>(300.0F, 10.0F)});
-    f.target = std::make_shared<DispatchProbe>(AURORA_G37_PROBE_W, AURORA_G37_PROBE_H);
+    f.target = std::make_shared<DispatchProbe>(AURORA_PROBE_W, AURORA_PROBE_H);
     auto inner = std::make_shared<Column>();
     // 内容首行：让探针不落在内容原点，窗口盒读数里才会出现「内容盒内偏移」这一项。
-    inner->add(Node{std::make_shared<AnchorBox>(AURORA_G37_PROBE_W, AURORA_G37_CONTENT_HEAD)});
+    inner->add(Node{std::make_shared<AnchorBox>(AURORA_PROBE_W, AURORA_CONTENT_HEAD)});
     inner->add(Node{f.target});
     f.content = inner;
     f.popup = std::make_shared<Popup>(Node{f.content});
@@ -349,8 +349,8 @@ struct PlainTree {
 auto make_plain_tree() -> PlainTree {
     PlainTree f;
     f.root = std::make_shared<Column>();
-    f.root->add(Node{std::make_shared<AnchorBox>(300.0F, AURORA_G37_LEAD_IN)});
-    f.target = std::make_shared<DispatchProbe>(AURORA_G37_PROBE_W, AURORA_G37_PROBE_H);
+    f.root->add(Node{std::make_shared<AnchorBox>(300.0F, AURORA_LEAD_IN)});
+    f.target = std::make_shared<DispatchProbe>(AURORA_PROBE_W, AURORA_PROBE_H);
     f.root->add(Node{f.target});
     LayoutEngine::layout(*f.root, bounded(320.0F, 240.0F));
     return f;
@@ -385,19 +385,19 @@ auto probe_reachable_box(Widget &root, const Widget *target, const Rect &hint) -
     // 扫描用**整型**计数而非浮点累加：浮点循环计数器会被 `bugprone-float-loop-counter` 与
     // `clang-analyzer-security.FloatLoopCounter` 判红，且步进累积误差会让边界格点漂移。
     // 步长本身是 0.25（二进制可精确表示），故「格点序号 × 步长」与逐次加法逐位等价。
-    const auto steps_x = static_cast<int>((hint.size.width + (2.0F * AURORA_G37_PROBE_SPAN)) / AURORA_G37_PROBE_STEP);
-    const auto steps_y = static_cast<int>((hint.size.height + (2.0F * AURORA_G37_PROBE_SPAN)) / AURORA_G37_PROBE_STEP);
-    const float x0 = hint.origin.x - AURORA_G37_PROBE_SPAN;
-    const float y0 = hint.origin.y - AURORA_G37_PROBE_SPAN;
+    const auto steps_x = static_cast<int>((hint.size.width + (2.0F * AURORA_PROBE_SPAN)) / AURORA_PROBE_STEP);
+    const auto steps_y = static_cast<int>((hint.size.height + (2.0F * AURORA_PROBE_SPAN)) / AURORA_PROBE_STEP);
+    const float x0 = hint.origin.x - AURORA_PROBE_SPAN;
+    const float y0 = hint.origin.y - AURORA_PROBE_SPAN;
     bool any = false;
     float min_x = 0.0F;
     float min_y = 0.0F;
     float max_x = 0.0F;
     float max_y = 0.0F;
     for (int iy = 0; iy <= steps_y; ++iy) {
-        const float y = y0 + (static_cast<float>(iy) * AURORA_G37_PROBE_STEP);
+        const float y = y0 + (static_cast<float>(iy) * AURORA_PROBE_STEP);
         for (int ix = 0; ix <= steps_x; ++ix) {
-            const float x = x0 + (static_cast<float>(ix) * AURORA_G37_PROBE_STEP);
+            const float x = x0 + (static_cast<float>(ix) * AURORA_PROBE_STEP);
             if (!chain_hits(root, Point{.x = x, .y = y}, target)) {
                 continue;
             }
@@ -449,7 +449,7 @@ AURORA_TEST_CASE(popup_content_window_bounds_matches_probe_measured_reachable_bo
     // 形态①：`Popup` 内容控件的窗口盒须与命中链实测可达框相符。
     // 树把 `OverlayHost` 摆在 y = LEAD_IN 的非零位置，故「叠加锚点」与「替换基准」两种读法
     // 在此必然分叉（前者 y 会多出一个 LEAD_IN），判据对修复机制本身敏感。
-    PopupTree f = make_popup_tree(AURORA_G37_ANCHOR);
+    PopupTree f = make_popup_tree(AURORA_ANCHOR);
     AURORA_TEST_REQUIRE(f.popup->is_open());
     // 缺口前提：`Popup` 在常规流中占零尺寸（否则内容子盒 origin 不会是 {0,0}）。
     AURORA_TEST_CHECK(f.popup->size().width <= 0.0F);
@@ -461,21 +461,21 @@ AURORA_TEST_CASE(popup_content_window_bounds_matches_probe_measured_reachable_bo
     AURORA_TEST_CHECK(reachable.size.width > 0.0F);
     AURORA_TEST_CHECK(reachable.size.height > 0.0F);
     // 与实测可达框相符，容差取探针步长（闭区间命中 ⇒ 实测框至多大一个步长）。
-    AURORA_TEST_CHECK_NEAR(wb.origin.x, reachable.origin.x, AURORA_G37_PROBE_STEP);
-    AURORA_TEST_CHECK_NEAR(wb.origin.y, reachable.origin.y, AURORA_G37_PROBE_STEP);
-    AURORA_TEST_CHECK_NEAR(wb.size.width, reachable.size.width, AURORA_G37_PROBE_STEP);
-    AURORA_TEST_CHECK_NEAR(wb.size.height, reachable.size.height, AURORA_G37_PROBE_STEP);
+    AURORA_TEST_CHECK_NEAR(wb.origin.x, reachable.origin.x, AURORA_PROBE_STEP);
+    AURORA_TEST_CHECK_NEAR(wb.origin.y, reachable.origin.y, AURORA_PROBE_STEP);
+    AURORA_TEST_CHECK_NEAR(wb.size.width, reachable.size.width, AURORA_PROBE_STEP);
+    AURORA_TEST_CHECK_NEAR(wb.size.height, reachable.size.height, AURORA_PROBE_STEP);
 
     // 独立复算真窗口位：anchor + 内容盒内偏移（探针上方 6dp 首行）。**不得**含 `OverlayHost`
     // 在树上的位置——那正是本次要钉死的语义：`anchor_` 是全局坐标，替换基准而非叠加。
-    AURORA_TEST_CHECK_NEAR(wb.origin.x, AURORA_G37_ANCHOR.x, 1e-3F);
-    AURORA_TEST_CHECK_NEAR(wb.origin.y, AURORA_G37_ANCHOR.y + AURORA_G37_CONTENT_HEAD, 1e-3F);
-    AURORA_TEST_CHECK_NEAR(wb.size.width, AURORA_G37_PROBE_W, 1e-3F);
-    AURORA_TEST_CHECK_NEAR(wb.size.height, AURORA_G37_PROBE_H, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(wb.origin.x, AURORA_ANCHOR.x, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(wb.origin.y, AURORA_ANCHOR.y + AURORA_CONTENT_HEAD, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(wb.size.width, AURORA_PROBE_W, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(wb.size.height, AURORA_PROBE_H, 1e-3F);
     // 反向钉住「不是错值」：叠加读法（宿主树上位置 + anchor）比本读数恰多一个 LEAD_IN。
-    AURORA_TEST_CHECK(wb.origin.y != AURORA_G37_LEAD_IN + AURORA_G37_ANCHOR.y + AURORA_G37_CONTENT_HEAD);
-    AURORA_TEST_CHECK_NEAR(wb.origin.y + AURORA_G37_LEAD_IN,
-                           AURORA_G37_LEAD_IN + AURORA_G37_ANCHOR.y + AURORA_G37_CONTENT_HEAD, 1e-3F);
+    AURORA_TEST_CHECK(wb.origin.y != AURORA_LEAD_IN + AURORA_ANCHOR.y + AURORA_CONTENT_HEAD);
+    AURORA_TEST_CHECK_NEAR(wb.origin.y + AURORA_LEAD_IN,
+                           AURORA_LEAD_IN + AURORA_ANCHOR.y + AURORA_CONTENT_HEAD, 1e-3F);
 }
 
 AURORA_TEST_CASE(plain_subtree_window_bounds_matches_probe_measured_reachable_box) {
@@ -487,23 +487,23 @@ AURORA_TEST_CASE(plain_subtree_window_bounds_matches_probe_measured_reachable_bo
 
     AURORA_TEST_CHECK(reachable.size.width > 0.0F);
     AURORA_TEST_CHECK(reachable.size.height > 0.0F);
-    AURORA_TEST_CHECK_NEAR(wb.origin.x, reachable.origin.x, AURORA_G37_PROBE_STEP);
-    AURORA_TEST_CHECK_NEAR(wb.origin.y, reachable.origin.y, AURORA_G37_PROBE_STEP);
-    AURORA_TEST_CHECK_NEAR(wb.size.width, reachable.size.width, AURORA_G37_PROBE_STEP);
-    AURORA_TEST_CHECK_NEAR(wb.size.height, reachable.size.height, AURORA_G37_PROBE_STEP);
+    AURORA_TEST_CHECK_NEAR(wb.origin.x, reachable.origin.x, AURORA_PROBE_STEP);
+    AURORA_TEST_CHECK_NEAR(wb.origin.y, reachable.origin.y, AURORA_PROBE_STEP);
+    AURORA_TEST_CHECK_NEAR(wb.size.width, reachable.size.width, AURORA_PROBE_STEP);
+    AURORA_TEST_CHECK_NEAR(wb.size.height, reachable.size.height, AURORA_PROBE_STEP);
 
     // 容差 0 的独立复算：占位行高，无任何修正项参与。
     AURORA_TEST_CHECK(wb.origin.x == 0.0F);
-    AURORA_TEST_CHECK(wb.origin.y == AURORA_G37_LEAD_IN);
-    AURORA_TEST_CHECK(wb.size.width == AURORA_G37_PROBE_W);
-    AURORA_TEST_CHECK(wb.size.height == AURORA_G37_PROBE_H);
+    AURORA_TEST_CHECK(wb.origin.y == AURORA_LEAD_IN);
+    AURORA_TEST_CHECK(wb.size.width == AURORA_PROBE_W);
+    AURORA_TEST_CHECK(wb.size.height == AURORA_PROBE_H);
 }
 
 AURORA_TEST_CASE(popup_paint_and_hit_semantics_unchanged) {
     // 判据③：钉住 `Popup` 现有绘制与命中语义，作为两形态用例的基线。
     // `anchor_` 的施加方式不止一种（绘制下传盒 / 命中链 contains 判定），两者都是既有语义，
     // 本次只补事后查询腿，不得改动。
-    const Point anchor = AURORA_G37_ANCHOR;
+    const Point anchor = AURORA_ANCHOR;
     PopupTree f = make_popup_tree(anchor);
     AURORA_TEST_REQUIRE(f.popup->is_open());
 
@@ -511,10 +511,10 @@ AURORA_TEST_CASE(popup_paint_and_hit_semantics_unchanged) {
     const Rect content_box = f.popup->content_bounds();
     AURORA_TEST_CHECK(content_box.origin.x == anchor.x);
     AURORA_TEST_CHECK(content_box.origin.y == anchor.y);
-    AURORA_TEST_CHECK_NEAR(content_box.size.height, AURORA_G37_CONTENT_HEAD + AURORA_G37_PROBE_H, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(content_box.size.height, AURORA_CONTENT_HEAD + AURORA_PROBE_H, 1e-3F);
 
     // 命中腿：`anchor_` 盒内命中内容、盒外不命中（`content_box` 闭区间语义）。
-    const Point inside{.x = anchor.x + 60.0F, .y = anchor.y + AURORA_G37_CONTENT_HEAD + 10.0F};
+    const Point inside{.x = anchor.x + 60.0F, .y = anchor.y + AURORA_CONTENT_HEAD + 10.0F};
     AURORA_TEST_CHECK(chain_hits(*f.root, inside, f.target.get()));
     AURORA_TEST_CHECK_FALSE(chain_hits(*f.root, Point{.x = anchor.x - 1.0F, .y = inside.y}, f.target.get()));
     AURORA_TEST_CHECK_FALSE(chain_hits(*f.root, Point{.x = inside.x, .y = anchor.y - 1.0F}, f.target.get()));
@@ -531,14 +531,14 @@ AURORA_TEST_CASE(popup_paint_and_hit_semantics_unchanged) {
     AURORA_TEST_CHECK_FALSE(chain_hits(*f.root, inside, f.target.get()));
     const Rect closed_wb = require_value(f.target->window_bounds());
     AURORA_TEST_CHECK_NEAR(closed_wb.origin.x, 0.0F, 1e-3F);
-    AURORA_TEST_CHECK_NEAR(closed_wb.origin.y, AURORA_G37_LEAD_IN + AURORA_G37_CONTENT_HEAD, 1e-3F);
+    AURORA_TEST_CHECK_NEAR(closed_wb.origin.y, AURORA_LEAD_IN + AURORA_CONTENT_HEAD, 1e-3F);
 }
 
 AURORA_TEST_CASE(dispatch_by_window_bounds_lands_on_popup_content) {
     // 判据④：端到端正面形态——按 `window_bounds()` 的读数取点派发，内容控件须收到事件，
     // 且 `local_position` 等于该点在盒内的偏移。这是缺口原始症状（取点落不到控件 → 字符被基类
     // `Widget::on_text_input` 缺省 `is_handled = true` 静默吞掉）的正面闭合。
-    PopupTree f = make_popup_tree(AURORA_G37_ANCHOR);
+    PopupTree f = make_popup_tree(AURORA_ANCHOR);
     const Rect wb = require_value(f.target->window_bounds());
     const Point probe_point{.x = wb.origin.x + 60.0F, .y = wb.origin.y + 10.0F};
 
@@ -554,7 +554,7 @@ AURORA_TEST_CASE(dispatch_by_window_bounds_lands_on_popup_content) {
     // 同一探针控件按**叠加读数**（宿主树上位置 + anchor，修复前的机制）取点落不到它——
     // 钉住缺口真实存在、非判据自证。
     f.target->clear_records();
-    const Point unanchored{.x = 60.0F, .y = AURORA_G37_LEAD_IN + AURORA_G37_ANCHOR.y + AURORA_G37_CONTENT_HEAD + 10.0F};
+    const Point unanchored{.x = 60.0F, .y = AURORA_LEAD_IN + AURORA_ANCHOR.y + AURORA_CONTENT_HEAD + 10.0F};
     AURORA_TEST_CHECK_FALSE(press_at(*f.root, *f.target, unanchored));
     AURORA_TEST_CHECK_FALSE(f.target->seen());
 }
