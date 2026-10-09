@@ -6,7 +6,7 @@
 8 + 4 个分片作业并跑。分片只改排布、不减覆盖面，但**每个 PR 仍然要为该 PR 没碰过的代码
 付一次全量代价**。本脚本买的是另一半：改一个文件只需重跑「读到它的那些 TU」。
 
-判定办法是**编译库自身的 include 闭包**，不是构建图：
+    判定办法是**编译库自身的 include 闭包**，不是构建图：
 
     ninja -t deps 只认**已经构建过**的目标，而 demos 是 EXCLUDE_FROM_ALL ——
     它们不在构建图里，却实实在在在编译库里、也实实在在会因为改一个公共头而产生新告警。
@@ -14,7 +14,15 @@
     正是从 `examples/app/google_play/demo_google_play.cpp` 这个 TU 报出来的，
     按构建图选集会正好漏掉它。故依赖只能来自编译库里那条编译命令本身（`-MM`）。
 
-三条「宁可多选、不可漏选」的兜底：
+两级选集（见 `--changed-only`）：
+  * 闭包（默认）：改动一个头 → 重跑所有包含它的 TU。覆盖面最全，但改公共头会膨胀到
+    近整库，墙钟长。PR / master 的全量 lint（作业 8 / 8w）走这一级。
+  * 仅改动 TU（`--changed-only`）：只跑改动集里「本身就是 TU」的文件，不展开闭包。
+    最快，但改一个头不会顺带重跑它的包含者——那些告警留给 PR / master 的全量 lint。
+    分支推送的增量预检（作业 8i `lint-incremental`）走这一级：要快，完整覆盖交给 PR。
+
+三条「宁可多选、不可漏选」的兜底（仅闭包模式生效；`--changed-only` 下全局触发/删除
+不再退化为全量，否则违背「只跑改动文件」的初衷，这类改动在增量口径下就是快速子集）：
   ① 取依赖失败（超时 / 编译器缺失 / 不支持 `-MM`）的 TU 一律入选；
   ② 改动里出现**已不存在**的文件（多半是删头）→ 退化为全量：删除后的依赖闭包算不出来，
      按闭包选会得到空集，那正是「没活儿被读成干净」的形态；
@@ -126,6 +134,11 @@ def main() -> int:
                          "handing empty lists to idle CI jobs (default: 40)")
     ap.add_argument("--jobs", type=int, default=0,
                     help="parallel dependency probes (0 = CPU count)")
+    ap.add_argument("--changed-only", action="store_true",
+                    help="select only TUs that are themselves in the change set, not their "
+                         "include closure. Much faster, but a header change will not be linted in "
+                         "the TUs that include it (deferred to the full PR/master lint). Pair with "
+                         "that full lint; used by the incremental push gate.")
     a = ap.parse_args()
 
     if bool(a.changed) == bool(a.git_diff):
@@ -172,50 +185,77 @@ def main() -> int:
     triggers = [c for c in changed if is_global_trigger(c)]
     missing = [c for c in changed if not os.path.exists(os.path.join(root, c))]
     cpp_changed = [c for c in changed if c.endswith(SOURCE_EXTS)]
+    changed_abs = {norm(os.path.join(root, c)) for c in cpp_changed}
 
-    mode, reason = "subset", "dependency closure"
-    if triggers:
-        mode, reason = "full", "global analysis config changed: " + ", ".join(triggers[:3])
-    elif missing:
-        mode, reason = "full", "change set contains deleted paths (closure unknowable): " + ", ".join(missing[:3])
-    elif not cpp_changed:
-        mode, reason = "none", "no C/C++ files in the change set"
+    def probe(tu: str) -> tuple[str, list[str] | None]:
+        return tu, preprocess_deps(tu_argv[tu], tu_dir[tu])
 
     selected: list[str] = []
     deps_failed: list[str] = []
     deps_map: dict[str, list[str]] = {}
-    if mode != "none":
-        # 全量模式下也照跑一遍依赖探测：那份 `deps.json` 是结果缓存的指纹来源，
-        # 少了它 master 的全量遍就永远享受不到跨轮次复用（而它恰是最贵的那一遍）。
-        changed_abs = {norm(os.path.join(root, c)) for c in cpp_changed}
-        jobs = a.jobs or (os.cpu_count() or 4)
 
-        def probe(tu: str) -> tuple[str, list[str] | None]:
-            return tu, preprocess_deps(tu_argv[tu], tu_dir[tu])
-
-        with ThreadPoolExecutor(max_workers=jobs) as ex:
-            for i, (tu, deps) in enumerate(ex.map(probe, universe), 1):
-                if deps is None:
-                    # 取不到依赖 = 无从判断它是否受影响 → 宁可多选
-                    deps_failed.append(tu)
-                    selected.append(tu)
-                    continue
-                if mode == "full" or tu in changed_abs or (changed_abs & set(deps)):
-                    selected.append(tu)
-                    # 只留仓库内的依赖：系统头随工具链漂移，进指纹只会让缓存永不命中
+    if a.changed_only:
+        # 仅改动 TU：不展开 include 闭包。改一个头不会顺带重跑包含者，那些告警留给
+        # PR / master 的全量 lint。全局触发/删除不再退化为全量——那会违背「只跑改动文件」。
+        if not cpp_changed:
+            mode, reason = "none", "no C/C++ files in the change set"
+        elif not (changed_abs & set(universe)):
+            # 改动集里没有「本身就是 TU」的文件（例如只改了头）：增量口径下即空闲，
+            # 不该报红，也别让它被解读成「0 待跑=干净」——全量 lint 才负责这条。
+            mode, reason = "none", "changed-only: no TU in the change set is itself a translation unit (header-only change)"
+        else:
+            mode, reason = "subset", "changed TUs only (no include closure)"
+            selected = sorted(tu for tu in universe if tu in changed_abs)
+            # 仍取这些 TU 的依赖用于缓存指纹：改了它们包含的头时缓存能正确失效。
+            # 取不到依赖的 TU 不入 deps_map → 缓存永不命中（ResultCache.key_for 返回 None），
+            # 宁可每次重跑，也不把「读不到依赖」的结果固化成绿灯。
+            jobs = a.jobs or (os.cpu_count() or 4)
+            with ThreadPoolExecutor(max_workers=jobs) as ex:
+                for i, (tu, deps) in enumerate(ex.map(probe, selected), 1):
+                    if deps is None:
+                        deps_failed.append(tu)
+                        continue
                     deps_map[tu] = sorted(d for d in deps if d.startswith(root + "/"))
-                if i % 100 == 0 or i == len(universe):
-                    print(f"  ... probed {i}/{len(universe)}", flush=True)
-        selected = sorted(set(selected))
+                    if i % 50 == 0 or i == len(selected):
+                        print(f"  ... probed {i}/{len(selected)}", flush=True)
+    else:
+        mode, reason = "subset", "dependency closure"
+        if triggers:
+            mode, reason = "full", "global analysis config changed: " + ", ".join(triggers[:3])
+        elif missing:
+            mode, reason = "full", "change set contains deleted paths (closure unknowable): " + ", ".join(missing[:3])
+        elif not cpp_changed:
+            mode, reason = "none", "no C/C++ files in the change set"
+
+        if mode != "none":
+            # 全量模式下也照跑一遍依赖探测：那份 `deps.json` 是结果缓存的指纹来源，
+            # 少了它 master 的全量遍就永远享受不到跨轮次复用（而它恰是最贵的那一遍）。
+            jobs = a.jobs or (os.cpu_count() or 4)
+            with ThreadPoolExecutor(max_workers=jobs) as ex:
+                for i, (tu, deps) in enumerate(ex.map(probe, universe), 1):
+                    if deps is None:
+                        # 取不到依赖 = 无从判断它是否受影响 → 宁可多选
+                        deps_failed.append(tu)
+                        selected.append(tu)
+                        continue
+                    if mode == "full" or tu in changed_abs or (changed_abs & set(deps)):
+                        selected.append(tu)
+                        # 只留仓库内的依赖：系统头随工具链漂移，进指纹只会让缓存永不命中
+                        deps_map[tu] = sorted(d for d in deps if d.startswith(root + "/"))
+                    if i % 100 == 0 or i == len(universe):
+                        print(f"  ... probed {i}/{len(universe)}", flush=True)
+            selected = sorted(set(selected))
 
     # ---- 守卫：认得的 C/C++ 改动却一个 TU 都没选中 = 选集链路坏了 ----
+    # （changed-only 模式下空集是合法空闲：只改了头、改动集里没有 TU 本体，留给全量 lint；
+    #   故该守卫只在闭包模式下生效。）
     known = set(universe)
     for deps in deps_map.values():
         known |= set(deps)
     known_rel = {norm(os.path.relpath(p, root)) for p in known if p.startswith(root + "/")}
     applicable = [c for c in cpp_changed if c in known_rel]
     unmatched = [c for c in cpp_changed if c not in known_rel]
-    if mode != "none" and applicable and not selected:
+    if not a.changed_only and mode != "none" and applicable and not selected:
         print("error: change set touches C/C++ files known to this compile database, "
               "yet 0 translation units were selected - the selection link is broken "
               "(must not be reported as clean).", file=sys.stderr)
@@ -236,6 +276,7 @@ def main() -> int:
     payload = {
         "mode": mode,
         "reason": reason,
+        "changed_only": a.changed_only,
         "build_dir": norm(a.build_dir),
         "changed_total": len(changed),
         "changed_cpp": cpp_changed,

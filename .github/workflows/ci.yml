@@ -995,8 +995,9 @@ jobs:
   # 各自独立计算，不能互用（EMSCRIPTEN 门后 TU 只在 wasm 库存在）。
   # 改动面来源：正常 push 取 `before..sha` 两点差异；首推 / 强推导致 `before` 不可用
   # 时回落到「相对 origin/master 的差异」，仍是有界子集（分支相对 master 的净改动）而非全量。
-  # 选集口径与作业 8/8w 完全一致（select_lint_tus.py 按 include 闭包挑 TU，且对
-  # .clang-tidy / CMakeLists / cmake/*.cmake / lint 脚本等全局口径改动自动退化为全量）。
+  # 选集口径与作业 8/8w **不同**：本 job 走 `select_lint_tus.py --changed-only`，只跑改动集里
+  # 本身就是 TU 的文件（不展开 include 闭包），求快；闭包级完整覆盖留给 PR / master 的作业
+  # 8 / 8w。故改一个公共头不会在本 job 顺带重跑它的包含者——那部分告警由全量 lint 兜底。
   # ---------------------------------------------------------------------------
   lint-incremental:
     name: clang-tidy (incremental, push)
@@ -1044,7 +1045,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF
-          python3 tools/check/select_lint_tus.py --build-dir build-lint-off --changed changed.txt --out-dir build-lint-off/sel --shards 1
+          python3 tools/check/select_lint_tus.py --build-dir build-lint-off --changed changed.txt --changed-only --out-dir build-lint-off/sel --shards 1
           list=build-lint-off/sel/tus_0.txt
           if [ ! -s "$list" ]; then
             printf '{"idle":true,"mode":"incremental","pass":"DEBUG=OFF","tu_count":0,"unique_findings":0,"broken_tus":[],"findings":[]}\n' > build-lint-off/findings.json
@@ -1063,7 +1064,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON
-          python3 tools/check/select_lint_tus.py --build-dir build-lint-on --changed changed.txt --out-dir build-lint-on/sel --shards 1
+          python3 tools/check/select_lint_tus.py --build-dir build-lint-on --changed changed.txt --changed-only --out-dir build-lint-on/sel --shards 1
           list=build-lint-on/sel/tus_0.txt
           if [ ! -s "$list" ]; then
             printf '{"idle":true,"mode":"incremental","pass":"DEBUG=ON","tu_count":0,"unique_findings":0,"broken_tus":[],"findings":[]}\n' > build-lint-on/findings.json
@@ -1087,7 +1088,7 @@ jobs:
         run: |
           set -euo pipefail
           emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON
-          python3 tools/check/select_lint_tus.py --build-dir build-wasm-lint --changed changed.txt --out-dir build-wasm-lint/sel --shards 1
+          python3 tools/check/select_lint_tus.py --build-dir build-wasm-lint --changed changed.txt --changed-only --out-dir build-wasm-lint/sel --shards 1
           list=build-wasm-lint/sel/tus_0.txt
           if [ ! -s "$list" ]; then
             printf '{"idle":true,"mode":"incremental","pass":"wasm","tu_count":0,"unique_findings":0,"broken_tus":[],"findings":[]}\n' > build-wasm-lint/findings.json
