@@ -552,7 +552,7 @@ CI 配置位于 `.github/workflows/`：
 | Windows Release 全量 | `ctest --preset ninja-test`（逐条复跑用 `ctest -R <stem>`） | 全绿，含全部静态门禁 |
 | wasm 腿（Emscripten） | wasm 配置下全量 ctest | 该腿全绿 |
 | Linux X11 / Wayland 腿 | 对应后端配置下全量 ctest | 该腿全绿 |
-| 推送后 CI 全矩阵 | `.github/workflows/`（§14.4） | 十组作业全绿 |
+| 推送后 CI 全矩阵 | `.github/workflows/`（§14.4） | 全矩阵作业全绿（功能分支推送 lint 收窄为 1 个 `lint-incremental` 单 job，PR / master 推送走全量 12-job 矩阵） |
 
 **真机验收探针不进 CTest**（`AURORA_BUILD_VERIFY_TOOLS` 默认 OFF、`EXCLUDE_FROM_ALL`，聚合目标 `aurora_verify`）：`--target aurora_verify_win32_dpi` 在 100% DPI 环境下判据恒真并记 SKIP，其自动段注入 `WM_DPICHANGED` 造变化故任何 DPI 环境均可跑，人工段做真跨屏拖动、未做记 PENDING MANUAL；`--target aurora_verify_glfw_dpi` 同构，Wayland 腿需 Linux 合成器环境。契约与判据见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2。
 
@@ -577,7 +577,7 @@ CI 配置位于 `.github/workflows/`：
 | 仓库入口 `AGENTS.md` 本身 | `check_agents_size`（> 8 KiB 红灯；超限时把细节下沉 `codespec/`，不得放宽阈值） | 本表（把细则搬回这里） |
 | 版本号 / `CHANGELOG.md` | `check_version_consistency` | `CODING_STANDARDS.md` §7 |
 | 任何代码行为 | 相关 `ctest -R <stem>`、`--target docs` | 本文件 §15 流程表「回写」阶段 |
-| CI 静态检查编排（`tools/check/select_lint_tus.py`、`tools/check/run_clang_tidy.py`、`.github/workflows/`） | `check_change_proposals`、`check_no_cjk_literals`、`check_no_hardcoded_paths`；且**全量出口不得被削弱**——master 推送 / 每周定时 / 手动触发三种事件下仍须走全量遍（判据见 `BUILD_OPTIONS.md` §4.5） | `BUILD_OPTIONS.md` §4.5 |
+| CI 静态检查编排（`tools/check/select_lint_tus.py`、`tools/check/run_clang_tidy.py`、`.github/workflows/`） | `check_change_proposals`、`check_no_cjk_literals`、`check_no_hardcoded_paths`；且**全量出口不得被削弱**——PR / master(+main) 推送 / 每周定时 / 手动触发四类事件下仍须走全量 12-job 矩阵遍；功能分支推送改由作业 8i `lint-incremental`（单 job 增量）覆盖，**不得反向把全量事件降级为增量**（判据见 `BUILD_OPTIONS.md` §4.5、作业编排见 `.github/workflows/ci.yml` 作业 8 / 8w / 8i） | `BUILD_OPTIONS.md` §4.5 |
 
 门禁自身的两条纪律：凡「扫文档 / 目录做核对」的检查必须有**「0 命中即硬失败」守卫**（`check_arch_module_map` 曾因定位正则不匹配而空扫恒真 PASS，见其源码注释）；门禁输出必须全 ASCII，否则日志读不清。
 

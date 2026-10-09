@@ -28,11 +28,12 @@
 #                    ⚠️ 判据是「8 个作业全绿」：任一片红即整门红，缺片等于缺覆盖面。
 #                    ⚠️ 本矩阵的口径是 **native**：EMSCRIPTEN 门后的 TU 不在这两份编译库里，
 #                    其静态检查由 8w 在同一份 wasm 编译库上跑浏览器口径 lint 补齐。
-#                    全量 / 增量：master 推送、每周定时与手动触发跑全量；其余（PR 与功能分支
-#                    推送）只跑「本次改动牵动的 TU」——由 tools/check/select_lint_tus.py 按
-#                    编译库的 include 闭包挑出读到改动文件的 TU（详见 BUILD_OPTIONS.md §4.5）。
-#                    增量省的是墙钟不是判据：诊断只可能来自 TU 自身与它读到的头，没被挑中的
-#                    TU 本轮不可能产生新告警；全量出口由 master 与每周定时兜底。
+#                    全量 / 增量分流（作业 8 / 8w）：全量矩阵只在 PR、master(+main) 推送、
+#                    每周定时与手动触发时跑；分支推送由作业 8i「单 job 增量」覆盖——只 lint
+#                    「本次改动牵动的 TU」（由 tools/check/select_lint_tus.py 按编译库 include
+#                    闭包挑出，详见 BUILD_OPTIONS.md §4.5），把分支 push 的 lint 开销从 12 个
+#                    job 压到 1 个。增量省的是 job 数与墙钟：诊断只可能来自 TU 自身与它读到的
+#                    头，没被挑中的 TU 本轮不可能产生新告警；全量出口由 PR / master 与每周定时兜底。
 #  8w. lint-wasm  — 浏览器口径 clang-tidy（`lint` 目标在 Emscripten 配置下自动加 --emscripten，
 #                    见 job 8 与 BUILD_OPTIONS.md §4.5）：4 个分片作业，只 configure 不构建。
 #                    这是 EMSCRIPTEN 门后那批 TU 唯一的静态检查面，与 job 8 同为**必过**门禁，
@@ -678,6 +679,9 @@ jobs:
     runs-on: ubuntu-latest
     # 240 → 40：每片 ~125 TU ≈ 22 分钟 tidy，加 apt 安装与 configure ≈ 3 分钟；40 分钟是两倍余量。
     # 余量必须留：本轮 TU 编译失败即整片红，慢起来没有上限。
+    # 全量矩阵只跑 PR / master(+main) / 每周定时 / 手动触发；分支推送改由下方 lint-incremental
+    # 单 job 增量覆盖（见作业 8i），避免每个功能分支 push 都发 8 个 native lint job。
+    if: github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -718,7 +722,7 @@ jobs:
           full=false
           case "${{ github.event_name }}" in
             schedule|workflow_dispatch) full=true ;;
-            pull_request) ;;
+            pull_request) full=true ;;
             *) case "${{ github.ref }}" in refs/heads/master|refs/heads/main) full=true ;; esac ;;
           esac
           if [ "$full" != "true" ]; then
@@ -760,7 +764,6 @@ jobs:
       # 结果缓存（方案 C）：按「TU 内容 + 依赖内容 + 编译器/tidy 版本 + 配置 + 编译 argv」的
       # 指纹复用上一次的输出。改了什么就只重算受牵动的那批，其余跨 PR 直接复放。
       - name: Restore tidy result cache
-        if: steps.scope.outputs.full != 'true'
         uses: actions/cache@v4
         with:
           path: .tidy-cache
@@ -837,6 +840,9 @@ jobs:
     name: clang-tidy (wasm, shard ${{ matrix.shard }}/${{ matrix.total }})
     runs-on: ubuntu-latest
     # 40：单片 ~17 分钟 tidy + emsdk/apt/configure ~4 分钟，留一倍余量。
+    # 与作业 8 同一套门禁分流：全量矩阵只在 PR / master(+main) / 定时 / 手动触发；分支推送
+    # 由 lint-incremental 单 job 覆盖浏览器口径的增量子集。
+    if: github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -887,7 +893,7 @@ jobs:
           full=false
           case "${{ github.event_name }}" in
             schedule|workflow_dispatch) full=true ;;
-            pull_request) ;;
+            pull_request) full=true ;;
             *) case "${{ github.ref }}" in refs/heads/master|refs/heads/main) full=true ;; esac ;;
           esac
           if [ "$full" != "true" ]; then
@@ -926,7 +932,6 @@ jobs:
           cat build-wasm-lint/lint-selection/selection.json
 
       - name: Restore tidy result cache
-        if: steps.scope.outputs.full != 'true'
         uses: actions/cache@v4
         with:
           path: .tidy-cache
@@ -979,6 +984,133 @@ jobs:
         with:
           name: tidy-findings-wasm-shard${{ matrix.shard }}
           path: build-wasm-lint/lint-findings.json
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 8i. 增量 lint（分支推送专用）：单 job 内顺序覆盖 native(DEBUG OFF/ON) 与 wasm 三套
+  # 编译库上「本次改动牵动的 TU」。只在 push 到非 master/main 分支时跑；PR 与 master 推送
+  # 走上方全量矩阵（作业 8 / 8w）。
+  # 为什么是单 job 而非矩阵：分支推送改动通常很小，单 job 内对受牵动子集跑三遍足矣，不必为
+  # 每个分片各发一个 runner；分片矩阵是给全量（每遍 556 TU）降墙钟用的。三套编译库的子集
+  # 各自独立计算，不能互用（EMSCRIPTEN 门后 TU 只在 wasm 库存在）。
+  # 改动面来源：正常 push 取 `before..sha` 两点差异；首推 / 强推导致 `before` 不可用
+  # 时回落到「相对 origin/master 的差异」，仍是有界子集（分支相对 master 的净改动）而非全量。
+  # 选集口径与作业 8/8w 完全一致（select_lint_tus.py 按 include 闭包挑 TU，且对
+  # .clang-tidy / CMakeLists / cmake/*.cmake / lint 脚本等全局口径改动自动退化为全量）。
+  # ---------------------------------------------------------------------------
+  lint-incremental:
+    name: clang-tidy (incremental, push)
+    runs-on: ubuntu-latest
+    # 单 job 串三遍：子集小时约 5–15 分钟；回落 origin/master 差异或触发全局全量时可能放大，
+    # 留一倍余量。
+    timeout-minutes: 90
+    if: github.event_name == 'push' && github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup clang-format (repo-parseable)
+        uses: ./.github/actions/setup-clang-format
+
+      - name: Install clang-tidy-22
+        run: |
+          sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          sudo apt-get update -y
+          sudo apt-get install -y clang-tidy-22 clang-format-22
+          sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
+          sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
+
+      - name: Compute changed files (push scope)
+        id: changed
+        run: |
+          set -euo pipefail
+          zero="0000000000000000000000000000000000000000"
+          before="${{ github.event.before }}"
+          if [ -n "$before" ] && [ "$before" != "$zero" ]; then
+            git -c core.quotepath=off fetch --depth=1 origin "$before" 2>/dev/null || true
+          fi
+          if [ -n "$before" ] && [ "$before" != "$zero" ] && git cat-file -e "${before}^{commit}" 2>/dev/null; then
+            git -c core.quotepath=off diff --name-only "$before" "${{ github.sha }}" > changed.txt
+            echo "scope=push" >> "$GITHUB_OUTPUT"
+          else
+            # 首推 / 强推：回落到「相对 origin/master 的净改动」，仍是有界子集
+            git -c core.quotepath=off fetch --depth=1 origin master 2>/dev/null || true
+            git -c core.quotepath=off diff --name-only origin/master "${{ github.sha }}" > changed.txt
+            echo "scope=fork" >> "$GITHUB_OUTPUT"
+          fi
+          echo "incremental scope: $(wc -l < changed.txt) changed files"
+
+      - name: Lint native (DEBUG=OFF)
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF
+          python3 tools/check/select_lint_tus.py --build-dir build-lint-off --changed changed.txt --out-dir build-lint-off/sel --shards 1
+          list=build-lint-off/sel/tus_0.txt
+          if [ ! -s "$list" ]; then
+            printf '{"idle":true,"mode":"incremental","pass":"DEBUG=OFF","tu_count":0,"unique_findings":0,"broken_tus":[],"findings":[]}\n' > build-lint-off/findings.json
+          else
+            python3 tools/check/run_clang_tidy.py --build-dir build-lint-off --tu-list "$list" --deps build-lint-off/sel/deps.json --cache-dir .tidy-cache-off --json-out build-lint-off/findings.json --jobs 4
+          fi
+          python3 - <<'PY'
+          import json
+          p="build-lint-off/findings.json"
+          d=json.load(open(p, encoding="utf-8"))
+          d.setdefault("pass", "DEBUG=OFF"); d["mode"] = "incremental"
+          json.dump(d, open(p, "w", encoding="utf-8"), indent=1)
+          PY
+
+      - name: Lint native (DEBUG=ON)
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON
+          python3 tools/check/select_lint_tus.py --build-dir build-lint-on --changed changed.txt --out-dir build-lint-on/sel --shards 1
+          list=build-lint-on/sel/tus_0.txt
+          if [ ! -s "$list" ]; then
+            printf '{"idle":true,"mode":"incremental","pass":"DEBUG=ON","tu_count":0,"unique_findings":0,"broken_tus":[],"findings":[]}\n' > build-lint-on/findings.json
+          else
+            python3 tools/check/run_clang_tidy.py --build-dir build-lint-on --tu-list "$list" --deps build-lint-on/sel/deps.json --cache-dir .tidy-cache-on --json-out build-lint-on/findings.json --jobs 4
+          fi
+          python3 - <<'PY'
+          import json
+          p="build-lint-on/findings.json"
+          d=json.load(open(p, encoding="utf-8"))
+          d.setdefault("pass", "DEBUG=ON"); d["mode"] = "incremental"
+          json.dump(d, open(p, "w", encoding="utf-8"), indent=1)
+          PY
+
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: latest
+
+      - name: Lint wasm
+        run: |
+          set -euo pipefail
+          emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON
+          python3 tools/check/select_lint_tus.py --build-dir build-wasm-lint --changed changed.txt --out-dir build-wasm-lint/sel --shards 1
+          list=build-wasm-lint/sel/tus_0.txt
+          if [ ! -s "$list" ]; then
+            printf '{"idle":true,"mode":"incremental","pass":"wasm","tu_count":0,"unique_findings":0,"broken_tus":[],"findings":[]}\n' > build-wasm-lint/findings.json
+          else
+            python3 tools/check/run_clang_tidy.py --build-dir build-wasm-lint --emscripten --tu-list "$list" --deps build-wasm-lint/sel/deps.json --cache-dir .tidy-cache-wasm --json-out build-wasm-lint/findings.json --jobs 4
+          fi
+          python3 - <<'PY'
+          import json
+          p="build-wasm-lint/findings.json"
+          d=json.load(open(p, encoding="utf-8"))
+          d.setdefault("pass", "wasm"); d["mode"] = "incremental"
+          json.dump(d, open(p, "w", encoding="utf-8"), indent=1)
+          PY
+
+      - name: Upload tidy findings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tidy-findings-incremental
+          path: |
+            build-lint-off/findings.json
+            build-lint-on/findings.json
+            build-wasm-lint/findings.json
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------

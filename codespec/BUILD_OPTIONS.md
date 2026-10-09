@@ -465,13 +465,17 @@ python tools/check/run_clang_tidy.py --build-dir build --tu-list build/lint-sele
 不缓存，否则指纹退化成「只看自身内容」，改了它包含的头却命中旧结果，那是本缓存唯一能造出的
 假绿。本机实测：10 个 demo TU 冷跑 92 秒 → 热跑 0.38 秒，两轮 `findings` 逐条相等。
 
-**CI 的全量 / 增量分界**：`lint` 与 `lint-wasm` 各有一个「Decide lint scope」步骤——**master
-推送、每周定时（周一 03:17 UTC）与手动触发跑全量**；PR 与功能分支推送走增量选集。取不到基线
-提交（浅克隆、首次推送）一律**退化为全量**并留 warning，绝不退化成空集。增量路径下子集按
-`--min-tu-per-shard`（默认 40）少分片，多出来的片写一份 `idle: true` 的 JSON 后退出 0——
-「没活儿」与「跑过且干净」在日志里长得一模一样，故空片必须留痕。全量出口由 master 与每周定时
-兜底，增量因此不是覆盖面的削减，而是把同一道门禁的付费时点从「每个 PR 全付」改成
-「改动面 + 每周全付」。
+**CI 的全量 / 增量分界**：lint 全量矩阵（`lint` 8 job + `lint-wasm` 4 job，共 12 个作业）只在
+**PR、master(+main) 推送、每周定时（周一 03:17 UTC）与手动触发** 四类事件下跑；**功能分支推送不
+触发全量矩阵**，改用作业 8i `lint-incremental` 单 job 增量覆盖——单 job 内顺序跑 native(DEBUG
+OFF/ON) 与 wasm 三套编译库上「本次改动牵动的 TU」，把分支 push 的 lint 开销从 12 个 job 压到 1 个。
+增量选集口径不变（`select_lint_tus.py` 按 include 闭包挑 TU，对 `.clang-tidy` / `CMakeLists` /
+`cmake/*.cmake` / 本仓库 lint 脚本等全局口径改动自动退化全量）。`lint-incremental` 与全量矩阵走
+同一套 `run_clang_tidy.py`，有告警即非零退出，零漏红；子集为空（而非全集）时写一份 `idle: true`
+的 JSON 留痕——「没活儿」与「跑过且干净」在日志里长得一模一样，故空片必须留痕。取不到基线
+（浅克隆、首推 / 强推）时回落「相对 origin/master 的净改动」仍为有界子集，**绝不退化成空集**。
+全量出口由 PR / master 与每周定时兜底，增量因此不是覆盖面的削减，而是把同一道门禁的付费时点
+从「每个 PR 全付」改成「分支推送只付增量 + 每周全付」。
 
 **排除名单（脚本的 `DEFAULT_EXCLUDE`）**：`third_party/` 之外只点名一条——`tests/support/fake_gl.h`（GL 驱动桩：56 条告警里 48 条 `readability-named-parameter`、5 条指针算术。桩不读参数、签名须逐字对齐 `GLFn` 函数表，「按本仓规范改名」即失真）。逐文件点名而非目录通配：新增排除必须显式登记，杜绝整目录被静默放行。判据是「哪种手段留下的盲点小」，不是「看着像不像三方代码」——整文件排除会让该文件此后的手写代码一并脱离检查，故仅当告警类别没有更窄的豁免手段时才用它。反例已量过：`src/aurora/render/gpu/gl_core.h`（49 条）与 `src/aurora/window/detail/atspi_protocol.h`（74 条）曾进同一候选名单，但它们的告警几乎全是 `readability-identifier-naming`，而该检查有**按类别**的 `*IgnoredRegexp`（clang-tidy 22 实测：与 `EnumConstantCase` 同配时，命中正则的枚举常量不再上报，未命中的照常上报），所以这两份留在覆盖面内、由命名豁免处置。两种取舍都能复证：把 `HeaderFilterRegex` 换成分隔符无关的配置、只跑包含这三份头的 TU，桩一条也不上报（被排除），另两份分别报回 74 / 49 条（在覆盖面内）。
 
