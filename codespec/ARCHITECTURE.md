@@ -573,7 +573,6 @@ CI 配置位于 `.github/workflows/`：
 | 测试文件 | `registry_integrity`、`check_test_temp_hygiene`、`framework_selftest` | `CODING_STANDARDS.md` §3 |
 | `codespec/` 文档与交叉引用 | `check_codespec_xref`、`check_code_doc_sync` | 本文件 §14 / §15 |
 | `codespec/manual-test/*.md` | `check_manual_test_format` | — |
-| `codespec/changes/*/proposal.md` | `check_change_proposals` | `changes/README.md`（契约本身；提案所述改动另按本表对应行回写） |
 | 仓库入口 `AGENTS.md` 本身 | `check_agents_size`（> 8 KiB 红灯；超限时把细节下沉 `codespec/`，不得放宽阈值） | 本表（把细则搬回这里） |
 | 版本号 / `CHANGELOG.md` | `check_version_consistency` | `CODING_STANDARDS.md` §7 |
 | 任何代码行为 | 相关 `ctest -R <stem>`、`--target docs` | 本文件 §15 流程表「回写」阶段 |
@@ -591,7 +590,7 @@ CI 配置位于 `.github/workflows/`：
 |:---|:---|:---|:---|
 | 定位 | 确定改动落在哪个域，找到该域的唯一权威文档 | `AGENTS.md` §4 导航表 | 能指出要改的文件与要回写的文档 |
 | 定位 | 动手前先读，确认契约与设计不变量不被破坏 | [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §5、本文件 §11 | 不变量清单未被违反 |
-| 提案 | 触及公共 API / 分层边界 / 后端矩阵 / 性能门槛 → 先落变更提案 | `codespec/changes/README.md` | 提案存在且状态 `已提议`；评审达成共识后转 `实施中` |
+| 提案 | 触及公共 API / 分层边界 / 后端矩阵 / 性能门槛 → 先落变更提案（变更提案机制当前未以独立目录承载，按本文件 §15.1 判定是否落提案） | 本文件 §15.1 | 提案存在且状态 `已提议`；评审达成共识后转 `实施中` |
 | 落码 | 按编码规则落码；API 以头文件与 `aurora_api.json` 为唯一事实，不凭记忆假设 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §1–§8、§15 | 编译零 error |
 | 落码 | 新增公共 API / widget / 核心逻辑必配单测；demo 与公共源一对一 | `CODING_STANDARDS.md` §3 | `utest_*` 存在并经 GLOB 接入 CTest |
 | 落码 | 新增或改动 widget / 类型 / 属性键 → 刷新 API schema | [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §3.6 | `check_api_schema_sync` 绿 |
@@ -599,7 +598,7 @@ CI 配置位于 `.github/workflows/`：
 | 回写 | 按改动类型回写 `codespec/` 文档 | `AGENTS.md` §3.1 第三列 | `check_codespec_xref` / `check_code_doc_sync` 绿 |
 | 回写 | 版本与变更记录更新；破坏性变更给出迁移路径 | `CHANGELOG.md` SemVer 规则、[`SPECIFICATIONS.md`](SPECIFICATIONS.md) §12 | `check_version_consistency` 绿 |
 | 回写 | 按 Conventional Commits 写提交信息 | `CODING_STANDARDS.md` §10 | `git log` 可归类、无任务编号词 |
-| 归档 | 提案状态转 `已归档`，并核对提案列出的回写落点确已落地 | `codespec/changes/README.md`、`AGENTS.md` §3.1 第三列 | 状态 `已归档`；落点文档与代码现状一致 |
+| 归档 | 提案状态转 `已归档`，并核对提案列出的回写落点确已落地 | `AGENTS.md` §3.1 第三列 | 状态 `已归档`；落点文档与代码现状一致 |
 
 ### 15.1 什么可以跳过
 
@@ -607,7 +606,7 @@ CI 配置位于 `.github/workflows/`：
 
 | 可跳过 | 前提 | 依据 |
 |:---|:---|:---|
-| 变更提案 | 不触及公共 API / 分层边界 / 后端矩阵 / 性能门槛的日常小修 | `codespec/changes/README.md` |
+| 变更提案 | 不触及公共 API / 分层边界 / 后端矩阵 / 性能门槛的日常小修 | 变更提案机制当前未以独立目录承载；日常小修按本文件 §15 主线直接落码与回写 |
 | 跨平台三腿 | 本次未改动任何公共头 | 本文件 §14.5 |
 | 回写文档 | 改动类型在 `AGENTS.md` §3.1 表第三列标注为「—」 | `AGENTS.md` §3.1 |
 | 配套单测 | 一次性示例 / 演示，且已在说明里标注「无单测」 | `CODING_STANDARDS.md` §3 |
