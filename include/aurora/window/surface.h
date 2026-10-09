@@ -616,11 +616,19 @@ class HeadlessSurface : public Surface {
     /// @param scale 模拟的新缩放因子（经 notify_scale_change 触发回调）。
     auto emit_scale_change(float scale) const -> void { notify_scale_change(scale); }
 
+    /// @brief 测试 seam：设置 CSD 安全区内边距（模拟 Wayland 自绘装饰的预留区）。
+    /// @param insets 模拟的各边内缩距离（经 `content_inset()` 上报给 `Window` 的自动下沉壳）。
+    auto set_content_inset(EdgeInsets insets) -> void { content_inset_ = insets; }
+    /// @brief 当前模拟的 CSD 安全区内边距（默认零 = 无自绘装饰，与历史行为一致）。
+    /// @return 各边内缩距离。
+    [[nodiscard]] auto content_inset() const -> EdgeInsets override { return content_inset_; }
+
   private:
     Painter painter_;
     /// @brief PNG 输出路径（非空时 present 落盘）。声明顺序先于 size_ 以匹配构造初始化列表，防 -Wreorder。
     std::string png_path_;
     Size size_{.width = 0.0F, .height = 0.0F};  ///< 当前逻辑尺寸（构造/begin_frame/set_size 驱动）
+    EdgeInsets content_inset_{};  ///< 模拟的 CSD 安全区（经 set_content_inset 置位；默认零）
     int frame_ = 0;  ///< 已 present 帧计数
     bool should_close_ = false;  ///< 关闭请求（经 `set_should_close` 置位；见 `should_close()`）。
     const Surface *owner_ = nullptr;  ///< 记录的 owner（多窗口测试观测点）。

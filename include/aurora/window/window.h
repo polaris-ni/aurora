@@ -355,6 +355,45 @@ inline auto next_host_id() -> std::uint64_t {
 
 }  // namespace detail
 
+namespace detail {
+
+/// @brief CSD 安全区自动下沉根壳（框架私有，`Window::present_root` 专用）。
+///
+/// 应用根统一挂到本壳下：壳的修饰链挂 `PaddingEdges(surface.content_inset())`（Wayland CSD
+/// 自绘标题栏/边框的预留区），测量期由修饰把约束按内缩量收紧、绘制/命中期由修饰把内容盒
+/// 平移 (left, top)——几何全部复用 `Modifier` 既有机制，命中链 `HitNode.origin` 与绘制
+/// 原点天然同源。inset 为零（Win32/X11 原生非客户区）时修饰链为空，行为与历史上逐位一致。
+/// @note Thread: main-thread only
+class ContentInsetRoot final : public SingleChild {
+  public:
+    ContentInsetRoot() = default;
+
+    /// @brief 运行时替换壳下应用根（转调 protected `SingleChild::set_child`，内部已标脏）。
+    /// @param child 新的应用根（移入壳）。
+    auto adopt(Node child) -> void { set_child(std::move(child)); }
+
+    /// @brief 类型名（诊断/命中链用；框架私有壳不进 CodeSpec 序列化）。
+    /// @return 恒为 "ContentInsetRoot"。
+    [[nodiscard]] auto type_name() const -> const char * override { return "ContentInsetRoot"; }
+
+    /// @brief 内容区布局：c 已被 PaddingEdges 收紧，直接测子并把子 bounds 写回内容区原点。
+    /// @param c 修饰收紧后的内容区约束。
+    /// @param ctx 构建上下文。
+    /// @return 子节点测得尺寸（基类测量链加回内缩后即壳自身尺寸 = 窗口尺寸）。
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        // 此处收到的 c 已被 PaddingEdges 修饰收紧为内容区约束（见 Widget::layout 的修饰测量链）；
+        // 子 bounds 存「相对壳内容区」的局部坐标（原点 0），下沉平移由修饰链在绘制/命中期统一施加。
+        if (!child_) {
+            return c.max;  // 壳先于应用根存在（present_root 每帧先接线再渲染），理论上不可达
+        }
+        const Size child_size = child_.widget().layout(c, ctx);
+        child_.set_bounds(Rect{.origin = Point{}, .size = child_size});
+        return child_size;
+    }
+};
+
+}  // namespace detail
+
 /// @brief 窗口：组合一个 `Surface` 后端（Headless/Glfw/Win32），提供 pumps 事件、
 /// present 根 widget、尺寸/标题管理与帧循环（ARCHITECTURE.md §8.4 后端家族）。
 ///
@@ -424,7 +463,9 @@ class Window {
     [[nodiscard]] auto should_close() const -> bool { return surface_->should_close(); }
 
     /// @brief 装饰预留给应用内容的安全区内边距（逻辑 dp），等价于 `surface().content_inset()`。
-    /// 应用可据其将根布局下沉，避开 CSD 标题栏/边框（对齐 Flutter `MediaQuery.padding` 安全区）。
+    /// @note 该占用区已由框架在 `present_root` 自动下沉（应用内容整体避开 CSD 标题栏/边框），
+    /// 应用一般**无需**读取本值；仅「自绘进安全区」（如接管标题栏）等特殊场景才需要，
+    /// 此时建议用空 `MediaQueryProvider` 覆盖根注入的内容区口径（`MediaQuery::padding` 已归零）。
     /// @return 各边内缩距离（透传 `Surface::content_inset`）。
     [[nodiscard]] auto content_inset() const -> EdgeInsets { return surface_->content_inset(); }
     /// @brief 程序化关闭窗口（等效于用户点 ×）。
@@ -504,6 +545,13 @@ class Window {
     /// 整棵树含根 widget 自身无需手动包 `MediaQueryProvider` 即可读取设备上下文；
     /// 手动 `MediaQueryProvider` 仍按「最近祖先优先」覆盖此默认值。
     ///
+    /// **CSD 安全区自动下沉**：应用根统一挂到框架私有壳 `detail::ContentInsetRoot` 下，
+    /// `Surface::content_inset()`（Wayland CSD 自绘标题栏/边框预留）经壳的 PaddingEdges
+    /// 修饰在布局期收紧约束、绘制/命中期平移内容盒——应用树无感知，无需手动消费安全区。
+    /// 根注入的 `MediaQuery` 相应调整为内容区口径：`padding` 归零、`size` 扣除内缩
+    /// （原始占用区仍可经 `Window::content_inset()` 读取）。inset 为零的后端（Win32/X11
+    /// 原生非客户区）壳的修饰链为空，与历史行为逐位一致；inset 变化（如进出全屏）整帧重排重绘。
+    ///
     /// 脏区域优化（specification/06-app-platform.md §3.2，默认开启）：脏追踪开启时按「绘制脏 / 布局脏 / 尺寸变化 /
     /// 根控件变化」 四要素决策本帧——无任一脏、尺寸未变且根未变 → 整帧跳过（idle 零开销，上帧画面仍有效）；
     /// 仅绘制脏（如文本选区高亮、主题切换）→ 跳过整树 layout，复用已缓存 Node 几何直接 paint；
@@ -518,7 +566,34 @@ class Window {
     /// @param root 要渲染的 widget 树根。
     /// @return 整帧渲染并上屏成功 true；begin/present 失败时 false 及错误信息。
     [[nodiscard]] auto present_root(Node &root) -> Result<bool> {
-        cached_root_ = root;  // 缓存当前根，供 resize/WM_PAINT 同步重渲染回调使用
+        // ---- CSD 安全区自动下沉（specification/07-environment-modifier.md §3.1）----
+        // 应用根统一挂到框架私有壳 `detail::ContentInsetRoot` 下：`Surface::content_inset()`
+        // （Wayland CSD 自绘装饰预留）经壳的 PaddingEdges 修饰自动下沉应用内容，应用无需
+        // （也不应再）手动消费 `MediaQuery::padding`——根注入的 padding 已归零，见 prepare_context。
+        // inset 为零时修饰链为空，与历史行为逐位一致；inset 变化（如进出全屏归零）整帧重排重绘。
+        const EdgeInsets inset = surface_->content_inset();
+        // 内部重入识别：同步重渲染回调（WM_PAINT 等）把 `cached_root_`（即壳）喂回本入口，
+        // 此时应用根未变，绝不可把壳 adopt 进壳自己（自引用环 ⇒ 段错误）。
+        const bool reentered_with_shell = root.operator->() == inset_root_.operator->();
+        bool app_root_changed = false;
+        if (!inset_root_ready_ || (!reentered_with_shell && root.operator->() != app_root_.operator->())) {
+            app_root_ = root;
+            static_cast<detail::ContentInsetRoot &>(inset_root_.widget()).adopt(root);
+            inset_root_ready_ = true;
+            app_root_changed = true;
+        }
+        if (applied_inset_.left != inset.left || applied_inset_.top != inset.top ||
+            applied_inset_.right != inset.right || applied_inset_.bottom != inset.bottom) {
+            applied_inset_ = inset;
+            static_cast<detail::ContentInsetRoot &>(inset_root_.widget()).modifier =
+                (inset.left == 0.0F && inset.top == 0.0F && inset.right == 0.0F && inset.bottom == 0.0F)
+                    ? Modifier{}
+                    : Modifier{}.padding(inset);
+            force_full_redraw();  // 内缩量变化 ⇒ 子树约束与绘制位置同时变化：整帧重排重绘
+        }
+        Node &presented = inset_root_;  // 后续帧管线统一以壳为根
+
+        cached_root_ = presented;  // 缓存当前根，供 resize/WM_PAINT 同步重渲染回调使用
         wire_present_request_once();
         if (presenting_) {
             return true;  // 防重入兜底（理论上不可达，回调已拦截）
@@ -544,9 +619,8 @@ class Window {
         idle_frame_ = false;  // 进入 present_root 即视为非 idle；idle 跳过分支会重新置 true
 
         FramePlan plan;
-        const bool root_changed = root.operator->() != last_root_.operator->();
         if (dirty_tracking_) {
-            if (auto skip = evaluate_dirty_plan(root, root_changed, plan)) {
+            if (auto skip = evaluate_dirty_plan(presented, app_root_changed, plan)) {
                 return *skip;
             }
         }
@@ -569,13 +643,13 @@ class Window {
             return bf;
         }
 
-        BuildContext ctx = prepare_context(root, root_changed);
-        const double layout_ms = run_layout(root, plan, ctx);
-        const double paint_ms = run_paint(p, root, ctx, plan);
+        BuildContext ctx = prepare_context(presented, app_root_changed);
+        const double layout_ms = run_layout(presented, plan, ctx);
+        const double paint_ms = run_paint(p, presented, ctx, plan);
         // 无障碍根注入：布局与绘制都完成后语义树几何才有效，故放在 paint 之后。
         // 走宿主级通道而非 `accessibility_provider()`：桥惰性构造，首个平台查询到达
         // 时它才存在，此时若无注入记录就无根可投影。无桥后端为 no-op。
-        surface_->set_accessibility_root(&root.widget());
+        surface_->set_accessibility_root(&presented.widget());
         const bool hud_refreshed = compose_hud_maybe(p, ctx);
         if (gpu_sink != nullptr) {
             p.stop();  // HUD 合成命令亦入帧级 DL，录制到此收口
@@ -854,9 +928,14 @@ class Window {
     }
     bool first_frame_ = true;  ///< 首帧强制全绘。
     Size last_size_{.width = 0.0F, .height = 0.0F};  ///< 上帧窗口尺寸（resize 检测）。
-    Node last_root_;  ///< 上一次 present 的根（导航切换检测）。
     bool root_mounted_ = false;  ///< 当前根是否已挂载（接线响应式订阅）。
     Node cached_root_;  ///< 最近一次 present_root 的根，供 resize 同步重渲染。
+    // ---- CSD 安全区自动下沉（specification/07-environment-modifier.md §3.1）----
+    /// @brief 框架私有下沉壳：应用根恒挂其下，content_inset 经其 PaddingEdges 修饰下沉（见 present_root）。
+    Node inset_root_{std::make_shared<detail::ContentInsetRoot>()};
+    bool inset_root_ready_ = false;  ///< 壳是否已接线应用根（首个 present_root 前为 false）。
+    Node app_root_;  ///< 最近一次 present 的应用根（换根检测；壳本身恒定不参与比较）。
+    EdgeInsets applied_inset_{};  ///< 已应用到壳修饰链的安全区（避免每帧重写修饰链）。
     bool present_wired_ = false;  ///< present-request 回调是否已接线到 Surface。
     bool presenting_ = false;  ///< present_root 重入护栏（同步重渲染回调用）。
     bool system_redraw_ = false;  ///< 本次 present_root 由系统重绘请求驱动（WM_PAINT 等）：跳帧时仍须重新上屏。
@@ -935,7 +1014,7 @@ class Window {
     }
 
     /// @brief 脏追踪决策：计算 FramePlan；若本帧可跳过则返回跳过结果。
-    /// @param root 当前帧根节点（用于 last_root_ 记录与全绘后更新）。
+    /// @param root 当前帧根节点（idle HUD-only 路径构建上下文用）。
     /// @param root_changed 根指针是否较上帧变化（导航切换需整体重绘）。
     /// @param plan 出参：本帧渲染计划（不跳过时填充）。
     /// @return 可跳帧时返回该帧结果（含 HUD-only/系统兜底上屏）；否则 nullopt 继续完整渲染。
@@ -1020,7 +1099,6 @@ class Window {
         layout_dirty_ = false;
         first_frame_ = false;
         last_size_ = size();
-        last_root_ = root;
         return std::nullopt;
     }
 
@@ -1042,7 +1120,20 @@ class Window {
     /// @param root_changed 根是否变化（变化则重新 mount 接线订阅）。
     /// @return 根 BuildContext（env 指向地址恒定的 `root_env_`）。
     [[nodiscard]] auto prepare_context(Node &root, bool root_changed) -> BuildContext {
-        root_env_.set<MediaQuery>(MediaQuery::from_surface(*surface_));
+        MediaQuery mq = MediaQuery::from_surface(*surface_);
+        {
+            // 安全区已由框架自动下沉消费（present_root 的 detail::ContentInsetRoot 壳）：
+            // 根注入的 padding 归零、size 折算为内容区——应用无需也不应再手动消费
+            // MediaQuery::padding（再消费即双重内缩）。原始占用区仍可经 Window::content_inset()
+            // 或自建 MediaQueryProvider 获取。
+            const EdgeInsets inset = surface_->content_inset();
+            if (inset.left != 0.0F || inset.top != 0.0F || inset.right != 0.0F || inset.bottom != 0.0F) {
+                mq.padding = EdgeInsets{};
+                mq.size = Size{.width = std::max(0.0F, mq.size.width - inset.horizontal()),
+                               .height = std::max(0.0F, mq.size.height - inset.vertical())};
+            }
+        }
+        root_env_.set<MediaQuery>(std::move(mq));
         // 注入窗口级生命周期快照：子树可 ctx.env->get<WindowState>() / ctx.env->get<WindowMode>() 读取。
         root_env_.set<WindowState>(window_state_);
         root_env_.set<WindowMode>(window_mode_);

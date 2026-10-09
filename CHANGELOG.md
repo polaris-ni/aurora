@@ -43,6 +43,8 @@ freeze: minor-versions-are-additive
 
 ### Changed
 
+
+- **CSD 安全区改为框架自动下沉，根注入 `MediaQuery` 调整为内容区口径**（`window/window.h`）。此前 `Surface::content_inset()`（Wayland CSD 自绘标题栏/边框预留）只经 `MediaQuery::padding` 上报，由应用在布局期手动消费（`AppShell::on_layout` 读 `padding` 下沉子树的 Flutter SafeArea 范式）；应用漏消费即在 GNOME 等 CSD 后端出现「标题栏压住内容首行」。现 `Window::present_root` 把应用根统一挂到框架私有壳 `detail::ContentInsetRoot` 下，内缩量经壳的 `PaddingEdges` 修饰自动生效：布局期收紧约束、绘制/命中期平移内容盒（`HitNode.origin` 与绘制同源，命中不漂移）；根注入的 `MediaQuery` 相应调整——`padding` 归零、`size` 扣除内缩。inset 为零的后端（Win32/X11 原生非客户区）修饰链为空，行为逐位不变；inset 变化（进出全屏）下一帧重排生效。官方 demo `google_play` 已迁移（删除手动消费）。规格：`codespec/specification/07-environment-modifier.md` §3.1 / §4.1；测试：`tests/integration/itest_content_inset_sink.cpp`。
 - CI 静态检查门禁的增量路径由「12 job 缩分片矩阵」收窄为「单 job 顺序三遍」：功能分支推送此前仍发 `lint` / `lint-wasm` 两个增量矩阵（共 12 个作业，仅每个 job 内只 lint 子集），现改为只发 1 个 `lint-incremental` job（native DEBUG OFF/ON + wasm 顺序跑）；PR / master(+main) 推送、每周定时、手动触发仍走全量 12-job 矩阵。省的是作业数（12 → 1）与相应排队 / 预热开销，与按改动选集、结果缓存同源；零漏红保障不变（全局口径改动自动退化全量、空子集写 idle 留痕、`run_clang_tidy.py` 有告警即退出 1）。
 - **`detach_child_layout_parent` 的断链告警改为分档，只在异常时可见**（`widget/widget.cpp`）。此前 `~Container` / `~SingleChild` 析构体首行的 `detach_all_children_layout_parent()` 对**每一个**子节点无条件发 `AURORA_LOG_WARN`，而那一刻子控件仍被容器持有、尚未析构——即每一次正常的树销毁都逐子刷屏（实测「反复重建 widget 子树」的集成套件单套件可刷数千行），把一次真断链埋进噪声。现按「被摘子节点是否在容器之外仍被持有」分档：随容器正常销毁 ⇒ 静默清指针（该清的照旧清，只是不再当成异常）；活在容器之外被摘走 ⇒ 仍发 `WARN`。指针清理行为与告警文案语义均未变，仅告警**出现次数**收敛。判别式见 `04-widget.md` §2.3。
 - 断链告警文案改用该仓日志宏的可变参数拼接形态：`AURORA_LOG_WARN("widget", "…still alive: ", child->type_name(), "; dirty marks…")`。此前写成 printf 风格的 `%s` 占位符，但 `AURORA_LOG_*` 经 `detail::log_concat`（`operator<<` 折叠）拼接、**不是** printf，`%s` 原样输出且类型名被附在整句末尾。现在类型名作为独立参数进入消息正文。诊断文案保持 ASCII。
@@ -54,6 +56,8 @@ freeze: minor-versions-are-additive
 
 ### Migration
 
+
+- CSD 安全区自动下沉的调用点迁移：应用侧**删除**手动消费 `MediaQuery::of(ctx).padding` 下沉子树的代码（根注入的 padding 已归零，再消费即双重内缩）。需要感知原始占用区的场景（如自绘进安全区）改读 `Window::content_inset()`，并以空 `MediaQueryProvider` 覆盖根注入口径。参考迁移：`examples/app/google_play/google_play_ui.h` 的 `AppShell::on_layout`。
 - `OverlayHost::add_overlay` 调用点：把「拿到序号就存下来稍后 `remove_overlay`」的写法改成先判 `has_value()`。典型迁移形态：
   ```cpp
   // 旧：序号可能是 0，remove_overlay(0) 会被静默忽略 ⇒ 浮层泄漏

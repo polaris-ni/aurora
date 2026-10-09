@@ -65,7 +65,7 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 
 `PlatformKind` / `DeviceKind` 反映**编译目标**平台（编译期常量），非运行期 OS 探测；运行期能力探测走 `au::platform().capabilities()`（见 [`06-app-platform.md`](06-app-platform.md) §5）。
 
-**客户端自绘装饰的安全区**：Wayland 客户端自绘装饰（CSD）标题栏 / 边框占用的区域经 `Surface::content_inset()` 并入 `padding`，子树据其为内容留白以避开自绘装饰——对齐 Flutter `MediaQuery.padding` / `SafeArea` 范式。
+**客户端自绘装饰的安全区（框架自动下沉）**：Wayland 客户端自绘装饰（CSD）标题栏 / 边框占用的区域经 `Surface::content_inset()` 暴露，由 `Window::present_root` **自动下沉**——应用根统一挂到框架私有壳 `detail::ContentInsetRoot` 下，内缩量经其 `PaddingEdges` 修饰在布局期收紧约束、绘制/命中期平移内容盒，应用树无感知。根注入的 `MediaQuery` 相应为**内容区口径**：`padding` 归零（占用区已被框架消费）、`size` 扣除内缩；应用**不应**再手动消费 `padding`（双重内缩）。需要「自绘进安全区」等特殊场景时，经 `Window::content_inset()` 读取原始占用区，并以空 `MediaQueryProvider` 覆盖根注入口径。inset 为零的后端（Win32/X11 原生非客户区）壳的修饰链为空，行为与无壳逐位一致；inset 变化（如进出全屏归零）下一帧重排生效。测试见 `tests/integration/itest_content_inset_sink.cpp`。
 
 **工厂**
 
@@ -123,7 +123,7 @@ auto root = au::MediaQueryProvider{
 | `Borderless` | 无标题栏，但保留可拖拽缩放边框；移动靠**修饰键拖拽**（按住 `Super` / `Alt` 拖拽任意处 → `xdg_toplevel_move`） |
 | `Frameless` | 完全无装饰，由应用自绘 UI 并经程序化窗口控制驱动状态 |
 
-**安全区**：CSD 标题栏 / 边框占用区经 `Surface::content_inset()` 暴露，并入 `MediaQuery.padding`。
+**安全区**：CSD 标题栏 / 边框占用区经 `Surface::content_inset()` 暴露，由 `present_root` 的下沉壳自动消费（见 §3.1「客户端自绘装饰的安全区」）；根注入 `MediaQuery.padding` 恒为内容区口径（已消费 ⇒ 归零）。
 
 **程序化窗口控制**（`Surface` / `Window` 虚函数，默认空实现）：`close()`、`minimize()`、`toggle_maximize()`、`set_fullscreen(bool)`。Wayland 经 `xdg_toplevel` 协议生效，使无标题栏 / 无边框窗口也能由应用按钮驱动状态。
 

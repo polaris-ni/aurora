@@ -1343,10 +1343,10 @@ class AppShell : public au::Container {
     auto on_layout(const au::Constraints &c, const au::BuildContext &ctx) -> au::Size override {
         const float w = c.max.width;
         const float h = c.max.height;
-        // 读取安全区内边距（Wayland CSD 标题栏/边框占用区经 content_inset → MediaQuery.padding 并入）。
-        // 子树据此下沉，避开自绘装饰（对齐 Flutter SafeArea 范式）。
-        const auto safe = au::MediaQuery::of(ctx).padding;
-        const float safe_top = safe.top;  // CSD 标题栏高度（GNOME 下 ≈32px；KDE/其他下 = 0）
+        // 安全区（Wayland CSD 标题栏/边框占用区）已由框架在 Window::present_root 自动下沉
+        // （detail::ContentInsetRoot 壳）：本壳收到的约束即内容区约束，无需再读 MediaQuery.padding
+        // 手动下沉（再消费即双重内缩）。
+        (void)ctx;
         const bool d = dark_ != nullptr && dark_->get();
         if (!built_ || d != rendered_dark_) {
             children_.clear();
@@ -1391,18 +1391,17 @@ class AppShell : public au::Container {
 
         constexpr float top_h = 56.0F;
         constexpr float nav_h = 64.0F;
-        // 安全区下沉：所有子节点 Y 偏移 safe_top，可用高度相应缩减。
         children_[0].widget().layout(
             au::Constraints{.min = au::Size{.width = w, .height = top_h}, .max = au::Size{.width = w, .height = top_h}},
             ctx);
         children_[0].set_bounds(
-            au::Rect{.origin = au::Point{.x = 0.0F, .y = safe_top}, .size = au::Size{.width = w, .height = top_h}});
+            au::Rect{.origin = au::Point{.x = 0.0F, .y = 0.0F}, .size = au::Size{.width = w, .height = top_h}});
 
-        const float body_h = std::max(0.0F, h - safe_top - top_h - nav_h);
+        const float body_h = std::max(0.0F, h - top_h - nav_h);
         children_[1].widget().layout(au::Constraints{.min = au::Size{.width = w, .height = body_h},
                                                      .max = au::Size{.width = w, .height = body_h}},
                                      ctx);
-        children_[1].set_bounds(au::Rect{.origin = au::Point{.x = 0.0F, .y = safe_top + top_h},
+        children_[1].set_bounds(au::Rect{.origin = au::Point{.x = 0.0F, .y = top_h},
                                          .size = au::Size{.width = w, .height = body_h}});
 
         children_[2].widget().layout(
