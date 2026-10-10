@@ -31,9 +31,9 @@ namespace aurora::csd {
     const auto g = static_cast<std::uint32_t>(c.g);
     const auto b = static_cast<std::uint32_t>(c.b);
     const auto aa = static_cast<std::uint32_t>(a);
-    const std::uint32_t rp = (r * aa + 0xFFU) >> 8;
-    const std::uint32_t gp = (g * aa + 0xFFU) >> 8;
-    const std::uint32_t bp = (b * aa + 0xFFU) >> 8;
+    const std::uint32_t rp = ((r * aa) + 0xFFU) >> 8;
+    const std::uint32_t gp = ((g * aa) + 0xFFU) >> 8;
+    const std::uint32_t bp = ((b * aa) + 0xFFU) >> 8;
     return (aa << 24U) | (rp << 16U) | (gp << 8U) | bp;
 }
 

@@ -56,7 +56,7 @@ auto make_fill(Rect bounds, Color color) -> DrawCmd {
     img.pixels.resize(static_cast<std::size_t>(64) * 64U * 4U);
     for (int y = 0; y < 64; ++y) {
         for (int x = 0; x < 64; ++x) {
-            const std::size_t idx = (static_cast<std::size_t>(y) * 64U + static_cast<std::size_t>(x)) * 4U;
+            const std::size_t idx = ((static_cast<std::size_t>(y) * 64U) + static_cast<std::size_t>(x)) * 4U;
             const bool hi = ((x ^ y) & 1) == 0;
             img.pixels[idx + 0] = hi ? 220 : 20;
             img.pixels[idx + 1] = hi ? 20 : 220;
@@ -103,7 +103,7 @@ auto make_draw_image(Rect bounds, const Image &img, DisplayList &dl) -> DrawCmd 
 // 取设备像素（RGBA8，自上而下行序）某点颜色；越界返回全零。
 auto pixel_at(const std::vector<std::uint8_t> &px, int w, int x, int y) -> std::array<int, 4> {
     const std::size_t idx =
-        (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 4U;
+        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + static_cast<std::size_t>(x)) * 4U;
     if (px.size() < idx + 4U) {
         return {0, 0, 0, 0};
     }
@@ -227,6 +227,8 @@ AURORA_TEST_CASE(wgpu_stream_image_and_native_import_contract) {
     // 原生表面导入：v29 C API 无导入入口 → 恒 0（能力位 false），调用方回退 CPU 上传。
     NativeSurfaceFrame nsf;
     nsf.kind = NativeSurfaceKind::DmaBuf;
+    // 假 dmabuf fd：数值装在 `void *handle` 中，测试不解引用。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr): 假 fd 值装入 void*
     nsf.handle = reinterpret_cast<void *>(static_cast<std::uintptr_t>(42));
     nsf.width = 16;
     nsf.height = 16;
@@ -297,6 +299,7 @@ namespace {
 [[nodiscard]] auto field_at(int x, int y, int ch) -> int {
     static constexpr int AURORA_COLORS[2][3] = {{10, 20, 30}, {200, 100, 50}};
     const bool blk = x >= 16 && x < 48 && y >= 16 && y < 48;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): 行列下标由块判定与形参 ch 界定（0..2）
     return AURORA_COLORS[blk ? 1 : 0][ch];
 }
 
@@ -345,6 +348,7 @@ AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
                 for (int k = -1; k <= 1; ++k) {
                     acc += field_at(16 + std::clamp(x + k, 0, 31), 16 + y, ch);
                 }
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): 三轴下标均由上方 < 32/< 3 循环界定
                 hp[y][x][ch] = acc / 3;
             }
         }
@@ -354,9 +358,11 @@ AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
             for (int ch = 0; ch < 3; ++ch) {
                 int acc = 0;
                 for (int k = -1; k <= 1; ++k) {
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): 三轴下标均已钳位 / 循环界定
                     acc += hp[std::clamp(y + k, 0, 31)][x][ch];
                 }
                 const auto got = pixel_at(px, 64, 16 + x, 16 + y);
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): ch 由外层 < 3 循环界定
                 AURORA_TEST_CHECK_EQ(got[ch], acc / 3);  // 整数域两端精确匹配
             }
             const auto got = pixel_at(px, 64, 16 + x, 16 + y);
@@ -392,9 +398,11 @@ AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
         for (int x = 8; x < 24; ++x) {
             const auto got = pixel_at(px2, 64, x, y);
             for (int ch = 0; ch < 3; ++ch) {
-                const double s = static_cast<double>(field_at(x, y, ch));
+                const auto s = static_cast<double>(field_at(x, y, ch));
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): ch 由外层 < 3 循环界定
                 const double m = s * static_cast<double>(AURORA_TINT[ch]) / 255.0;
-                const double o = std::clamp(s + 0.5 * (m - s), 0.0, 255.0);
+                const double o = std::clamp(s + (0.5 * (m - s)), 0.0, 255.0);
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): ch 同上
                 AURORA_TEST_CHECK(std::abs(static_cast<double>(got[ch]) - o) <= 1.5);
             }
             AURORA_TEST_CHECK_EQ(got[3], 255);
@@ -423,11 +431,12 @@ AURORA_TEST_CASE(wgpu_compute_region_effects_match_cpu_reference) {
     std::vector<std::uint8_t> px3;
     AURORA_TEST_REQUIRE(rhi_obj.read_pixels(px3));
     for (int y = 16; y < 48; ++y) {
-        const double factor = 1.0 - static_cast<double>(y - 16) / 32.0;
+        const double factor = 1.0 - (static_cast<double>(y - 16) / 32.0);
         for (int x = 16; x < 48; ++x) {
             const auto got = pixel_at(px3, 64, x, y);
             for (int ch = 0; ch < 3; ++ch) {
                 const double expected = std::floor(static_cast<double>(field_at(x, y, ch)) * factor);
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): ch 由外层 < 3 循环界定
                 AURORA_TEST_CHECK(std::abs(static_cast<double>(got[ch]) - expected) <= 1.5);
             }
             AURORA_TEST_CHECK_EQ(got[3], 255);  // alpha 原样
@@ -484,7 +493,7 @@ AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
     if (!rhi_obj.valid()) {
         AURORA_TEST_SKIP("no wgpu adapter/device available; decoration replay pixel assertions skipped");
     }
-    constexpr Color AURORA_CONTENT{0, 160, 0, 255};
+    constexpr Color content_color{0, 160, 0, 255};
     csd::TitleBarPaintState s;
     s.width = 160.0F;
     s.title_bar = true;
@@ -505,7 +514,7 @@ AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
     AURORA_TEST_REQUIRE(rhi_obj.begin_frame(160, 80, 1.0F));
     DisplayList content;
     content.push_cmd(make_fill(
-        Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 160.0F, .height = 80.0F}}, AURORA_CONTENT));
+        Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 160.0F, .height = 80.0F}}, content_color));
     content.replay(rhi_obj.backend());
     deco.replay(rhi_obj.backend());  // ← 帧尾追加回放：z 序在 app 内容之上
     rhi_obj.end_frame();
@@ -518,16 +527,17 @@ AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
     // 标题栏条带（图标槽左侧的纯底色区）。
     AURORA_TEST_CHECK_EQ(pixel_at(px, 160, 4, 18), (std::array<int, 4>{bg.r, bg.g, bg.b, bg.a}));
     // 悬停关闭钮圆底 = 特征红（与内容绿显著区分）。圆心本身被白色 ✕ 字形穿过，故取圆心上方。
-    const Point above_close{g.close.origin.x + g.close.size.width * 0.5F, g.close.origin.y + 3.0F};
+    const Point above_close{.x = g.close.origin.x + (g.close.size.width * 0.5F), .y = g.close.origin.y + 3.0F};
     const auto cc = pixel_at(px, 160, static_cast<int>(above_close.x), static_cast<int>(above_close.y));
     AURORA_TEST_CHECK(cc[0] > 180 && cc[1] < 90 && cc[2] < 90);
     // 图标槽：DrawImage 经纹理链路上屏（蓝色占优即证图标像素而非底色/内容色）。
-    const Point icon_c{g.icon.origin.x + g.icon.size.width * 0.5F, g.icon.origin.y + g.icon.size.height * 0.5F};
+    const Point icon_c{.x = g.icon.origin.x + (g.icon.size.width * 0.5F),
+                       .y = g.icon.origin.y + (g.icon.size.height * 0.5F)};
     const auto ic = pixel_at(px, 160, static_cast<int>(icon_c.x), static_cast<int>(icon_c.y));
     AURORA_TEST_CHECK(ic[2] > 150 && ic[2] > ic[0] && ic[2] > ic[1]);
     // 装饰带以下：仍是 app 内容绿（装饰未越界涂抹）。
     AURORA_TEST_CHECK_EQ(pixel_at(px, 160, 4, 60),
-                         (std::array<int, 4>{AURORA_CONTENT.r, AURORA_CONTENT.g, AURORA_CONTENT.b, 255}));
+                         (std::array<int, 4>{content_color.r, content_color.g, content_color.b, 255}));
 }
 
 }  // namespace aurora::test_cases::utest_wgpu_rhi

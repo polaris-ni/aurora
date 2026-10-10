@@ -41,9 +41,9 @@ inline auto swizzle_rgba_premul_to_bgra(const std::uint32_t *src, std::uint32_t 
         const std::uint32_t g = (px >> 8U) & 0xFFU;
         const std::uint32_t b = (px >> 16U) & 0xFFU;
         const std::uint32_t a = (px >> 24U) & 0xFFU;
-        const std::uint32_t rp = (r * a + 0xFFU) >> 8;  // 除以 255 的整数近似（误差 ≤ 1 LSB）
-        const std::uint32_t gp = (g * a + 0xFFU) >> 8;
-        const std::uint32_t bp = (b * a + 0xFFU) >> 8;
+        const std::uint32_t rp = ((r * a) + 0xFFU) >> 8;  // 除以 255 的整数近似（误差 ≤ 1 LSB）
+        const std::uint32_t gp = ((g * a) + 0xFFU) >> 8;
+        const std::uint32_t bp = ((b * a) + 0xFFU) >> 8;
         dst[i] = (a << 24U) | (rp << 16U) | (gp << 8U) | bp;
     }
 }

@@ -54,9 +54,13 @@ constexpr std::size_t AURORA_CHART_BUDGET = 12800;  // 320×200 网格细线 + �
 
 }  // namespace
 
+// AURORA_TEST_SKIP 终止当前用例（runner 捕获后记 Skipped），只能出现在用例函数体内；
+// 本宏把「就地构造离屏 Rhi → 无 adapter 即 SKIP」包成一条语句，依赖这条早退控制流，
+// constexpr 模板函数复刻不了（具名构造 + 早退控制流无函数等价物，与 itest_gl_golden 的 skip 宏同口径）。
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define AURORA_ITEST_WGPU_GPU_OR_SKIP(gpu)                                                                       \
     au::rhi::WgpuRhi gpu(gpu_options());                                                                         \
-    if (!gpu.valid()) {                                                                                          \
+    if (!(gpu).valid()) {                                                                                        \
         AURORA_TEST_SKIP("no usable wgpu adapter/device (CI or missing driver), skipping GPU tolerance golden"); \
     }
 

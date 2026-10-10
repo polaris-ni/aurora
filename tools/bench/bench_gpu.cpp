@@ -303,15 +303,15 @@ auto bench_layer(bool cache_layer) -> LayerResult {
 
 // ---- 场景三/四/五：wgpu 真 GPU 离屏实测（端到端帧成本）----
 
-constexpr int MIP_DIM = 512;  ///< 静态大图边长（≥ 4 才有 ≥ 2 级 mip 链）
-constexpr int MIP_DRAW = 128;  ///< 缩小绘制边长（4× 降采样，三线性命中 mip ≥ 1）
-constexpr int MIP_FRAMES = 24;  ///< 稳态帧数（unique 变体须预生成同样多的唯一内容图）
-constexpr int MIP_WARMUP = 3;
+constexpr int AURORA_MIP_DIM = 512;  ///< 静态大图边长（≥ 4 才有 ≥ 2 级 mip 链）
+constexpr int AURORA_MIP_DRAW = 128;  ///< 缩小绘制边长（4× 降采样，三线性命中 mip ≥ 1）
+constexpr int AURORA_MIP_FRAMES = 24;  ///< 稳态帧数（unique 变体须预生成同样多的唯一内容图）
+constexpr int AURORA_MIP_WARMUP = 3;
 
-constexpr int FX_DIM = 512;  ///< 场景六画幅边长（三效果族各以整幅为一遍）
-constexpr int FX_PASSES = 3;  ///< 每帧效果三连重数（提亮 GPU 工作量，压过批尾排空地板）
-constexpr int FX_FRAMES = 128;  ///< 稳态帧数（排空量子 ≈15.6ms 摊到 0.12 ms/帧地板）
-constexpr int FX_WARMUP = 8;
+constexpr int AURORA_FX_DIM = 512;  ///< 场景六画幅边长（三效果族各以整幅为一遍）
+constexpr int AURORA_FX_PASSES = 3;  ///< 每帧效果三连重数（提亮 GPU 工作量，压过批尾排空地板）
+constexpr int AURORA_FX_FRAMES = 128;  ///< 稳态帧数（排空量子 ≈15.6ms 摊到 0.12 ms/帧地板）
+constexpr int AURORA_FX_WARMUP = 8;
 
 /// @brief 离屏 `WgpuRhi` 装载（`native_window = nullptr` → 无 swapchain 的诊断通路，
 /// 与容差 golden / 探针同一条路）。失败返回 `nullptr`（无 adapter / device 申请失败）。
@@ -420,41 +420,44 @@ struct MipResult {
     bool compute = false;  ///< 该适配器是否走 compute mip 链（GLES 端 false）
 };
 
-/// @brief 场景五（wgpu 独有）：MIP_DIM×MIP_DIM 大图缩到 MIP_DRAW×MIP_DRAW 重采样。
+/// @brief 场景五（wgpu 独有）：AURORA_MIP_DIM×AURORA_MIP_DIM 大图缩到 AURORA_MIP_DRAW×AURORA_MIP_DRAW 重采样。
 /// - `unique_content = false`：同一张图逐帧重绘 → 图像缓存命中，mip 链只生成一次；
 /// - `unique_content = true`：每帧内容唯一（模拟解码输出）→ 每帧缓存未命中，
 ///   PMA 全帧副本 + 整幅上传 + 整条 mip 链重建（大图走错通道的代价即在此）。
 auto bench_mip(bool unique_content) -> MipResult {
-    auto gpu = offscreen_rhi(MIP_DRAW, MIP_DRAW);
+    auto gpu = offscreen_rhi(AURORA_MIP_DRAW, AURORA_MIP_DRAW);
     if (gpu == nullptr) {
         return {};
     }
     MipResult r;
     r.compute = gpu->capabilities().compute;
 
-    constexpr int total = MIP_WARMUP + MIP_FRAMES;
+    constexpr int total = AURORA_MIP_WARMUP + AURORA_MIP_FRAMES;
     std::vector<Image> frames;
     frames.reserve(static_cast<std::size_t>(total));
-    frames.push_back(make_noise_image(MIP_DIM, MIP_DIM, 1));
+    frames.push_back(make_noise_image(AURORA_MIP_DIM, AURORA_MIP_DIM, 1));
     for (int i = 1; i < total; ++i) {
         // 唯一内容变体逐帧新图；静态变体复用同一张（下标恒 0）。
-        frames.push_back(unique_content ? make_noise_image(MIP_DIM, MIP_DIM, static_cast<std::uint64_t>(i) + 1U)
-                                        : frames.front());
+        frames.push_back(unique_content
+                             ? make_noise_image(AURORA_MIP_DIM, AURORA_MIP_DIM, static_cast<std::uint64_t>(i) + 1U)
+                             : frames.front());
     }
-    r.cost = time_batch(*gpu, MIP_DRAW, MIP_DRAW, MIP_WARMUP, MIP_FRAMES, [&](int i, DisplayList &dl) {
-        // 绘制矩形 = 缩小后的目标框（4× 降采样；等大绘制不会命中 mip≥1）。
-        DrawCmd cmd;
-        cmd.kind = aurora::CmdKind::DrawImage;
-        cmd.bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                          .size = Size{.width = static_cast<float>(MIP_DRAW), .height = static_cast<float>(MIP_DRAW)}};
-        cmd.image_idx = dl.add_image(frames[static_cast<std::size_t>(i % frames.size())]);
-        dl.push_cmd(cmd);
-    });
+    r.cost = time_batch(*gpu, AURORA_MIP_DRAW, AURORA_MIP_DRAW, AURORA_MIP_WARMUP, AURORA_MIP_FRAMES,
+                        [&](int i, DisplayList &dl) {
+                            // 绘制矩形 = 缩小后的目标框（4× 降采样；等大绘制不会命中 mip≥1）。
+                            DrawCmd cmd;
+                            cmd.kind = aurora::CmdKind::DrawImage;
+                            cmd.bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                                              .size = Size{.width = static_cast<float>(AURORA_MIP_DRAW),
+                                                           .height = static_cast<float>(AURORA_MIP_DRAW)}};
+                            cmd.image_idx = dl.add_image(frames[static_cast<std::size_t>(i % frames.size())]);
+                            dl.push_cmd(cmd);
+                        });
     return r;
 }
 
 /// @brief 场景六原型帧：非均匀底图（棋盘格 + 斜线带）+ 整幅三效果族（blur/blend/mask）
-/// 连做 FX_PASSES 遍。帧内容恒定（无图像上传），两路（compute / 片元兜底）回放同一
+/// 连做 AURORA_FX_PASSES 遍。帧内容恒定（无图像上传），两路（compute / 片元兜底）回放同一
 /// DisplayList，差额即效果路本身的成本；重数放大 GPU 工作量至可测。
 [[nodiscard]] auto make_fx_proto() -> DisplayList {
     const auto mk = [](int x, int y, int w, int h) {
@@ -463,30 +466,30 @@ auto bench_mip(bool unique_content) -> MipResult {
     };
     DisplayList dl;
     Painter p;
-    p.begin(FX_DIM, FX_DIM);
+    p.begin(AURORA_FX_DIM, AURORA_FX_DIM);
     p.record(dl);
-    p.fill_rect(mk(0, 0, FX_DIM, FX_DIM), Color(24, 28, 38));
+    p.fill_rect(mk(0, 0, AURORA_FX_DIM, AURORA_FX_DIM), Color(24, 28, 38));
     // 8×8 棋盘（64px 块）：为 blur 提供恒定高频边缘；颜色随格号变化避免纯色块退化。
     for (int cy = 0; cy < 8; ++cy) {
         for (int cx = 0; cx < 8; ++cx) {
-            const auto shade = static_cast<std::uint8_t>(96 + 16 * ((cx * 3 + cy * 5) % 8));
+            const auto shade = static_cast<std::uint8_t>(96 + (16 * (((cx * 3) + (cy * 5)) % 8)));
             p.fill_rect(mk(cx * 64, cy * 64, 64, 64),
                         (cx + cy) % 2 == 0 ? Color(shade, shade, static_cast<std::uint8_t>(shade + 24))
-                                           : Color(static_cast<std::uint8_t>(220 - shade / 2), 224, 232));
+                                           : Color(static_cast<std::uint8_t>(220 - (shade / 2)), 224, 232));
         }
     }
     // 斜线带：跨象限的细高频内容（1px 宽对角线，间距 8px）。
-    for (int i = 0; i < FX_DIM; i += 8) {
+    for (int i = 0; i < AURORA_FX_DIM; i += 8) {
         p.draw_line(Point{.x = static_cast<float>(i), .y = 0.0F}, Point{.x = 0.0F, .y = static_cast<float>(i)}, 1.0F,
                     Color(255, 255, 255));
     }
     p.blur_region(mk(0, 0, 256, 256), 6.0F);
     p.blend_region(mk(256, 0, 256, 256), BlendMode::Multiply, Color(255, 0, 255), 0.6F);
     p.mask_region(mk(0, 256, 256, 256), ShaderMaskKind::LinearFade, 1.0F);
-    for (int i = 0; i < FX_PASSES; ++i) {
-        p.blur_region(mk(0, 0, FX_DIM, FX_DIM), 6.0F);
-        p.blend_region(mk(0, 0, FX_DIM, FX_DIM), BlendMode::Multiply, Color(255, 0, 255), 0.6F);
-        p.mask_region(mk(0, 0, FX_DIM, FX_DIM), ShaderMaskKind::LinearFade, 1.0F);
+    for (int i = 0; i < AURORA_FX_PASSES; ++i) {
+        p.blur_region(mk(0, 0, AURORA_FX_DIM, AURORA_FX_DIM), 6.0F);
+        p.blend_region(mk(0, 0, AURORA_FX_DIM, AURORA_FX_DIM), BlendMode::Multiply, Color(255, 0, 255), 0.6F);
+        p.mask_region(mk(0, 0, AURORA_FX_DIM, AURORA_FX_DIM), ShaderMaskKind::LinearFade, 1.0F);
     }
     p.stop();
     return dl;
@@ -496,13 +499,14 @@ auto bench_mip(bool unique_content) -> MipResult {
 /// `false` 经 `set_compute_effects_enabled(false)` 强制片元兜底路（如同管线未建成）。
 /// @return submit/e2e 均为 0 = 无可用 adapter（调用方整段跳过）。
 auto bench_fx_wgpu(bool compute) -> WgpuFrameCost {
-    auto gpu = offscreen_rhi(FX_DIM, FX_DIM);
+    auto gpu = offscreen_rhi(AURORA_FX_DIM, AURORA_FX_DIM);
     if (gpu == nullptr) {
         return {};
     }
     gpu->set_compute_effects_enabled(compute);
     const DisplayList proto = make_fx_proto();
-    return time_batch(*gpu, FX_DIM, FX_DIM, FX_WARMUP, FX_FRAMES, [&](int, DisplayList &dl) { dl = proto; });
+    return time_batch(*gpu, AURORA_FX_DIM, AURORA_FX_DIM, AURORA_FX_WARMUP, AURORA_FX_FRAMES,
+                      [&](int, DisplayList &dl) { dl = proto; });
 }
 
 auto run_wgpu_scenarios() -> void {
@@ -548,9 +552,9 @@ auto run_wgpu_scenarios() -> void {
                    "(every frame is either one DrawLayer or a full command translation, so the GPU workload is "
                    "small).\n\n");
 
-    AURORA_LOG_RAW("bench", "## Scenario 5: wgpu large-image downsample (compute mip chain, ", std::to_string(MIP_DIM),
-                   "x", std::to_string(MIP_DIM), " -> ", std::to_string(MIP_DRAW), "x", std::to_string(MIP_DRAW),
-                   ")\n\n");
+    AURORA_LOG_RAW("bench", "## Scenario 5: wgpu large-image downsample (compute mip chain, ",
+                   std::to_string(AURORA_MIP_DIM), "x", std::to_string(AURORA_MIP_DIM), " -> ",
+                   std::to_string(AURORA_MIP_DRAW), "x", std::to_string(AURORA_MIP_DRAW), ")\n\n");
     AURORA_LOG_RAW("bench",
                    "| Variant | Submit per frame (CPU) | End-to-end per frame (one drain at batch end) |\n"
                    "|:---|---:|---:|\n");
@@ -568,16 +572,16 @@ auto run_wgpu_scenarios() -> void {
         "The conclusion points the same way as scenario 3 - large image inputs updated every frame must use the "
         "streaming slot (the slot is always single-level, no mip churn). Caveat when reading absolute values: this "
         "section rebuilds the DisplayList every frame (including the full ",
-        std::to_string(MIP_DIM), "x", std::to_string(MIP_DIM),
+        std::to_string(AURORA_MIP_DIM), "x", std::to_string(AURORA_MIP_DIM),
         " image value copy and content_hash computation), so the floor value of the static row is the **CPU cost of "
         "frame assembly** (the recording side pools by value, and the streaming branch does the same), not a GPU "
         "cost - the net gain of the streaming path is slot reuse, no premultiplied copy and no mip churn "
         "(scenario 3 shows exactly this gap).\n\n");
 
     AURORA_LOG_RAW("bench", "## Scenario 6: region effects, compute path vs fragment fallback (",
-                   std::to_string(FX_DIM), "x", std::to_string(FX_DIM),
-                   ", blur r6 + Multiply + LinearFade over the whole frame, ", std::to_string(FX_PASSES), " passes, ",
-                   std::to_string(FX_FRAMES), " frames)\n\n");
+                   std::to_string(AURORA_FX_DIM), "x", std::to_string(AURORA_FX_DIM),
+                   ", blur r6 + Multiply + LinearFade over the whole frame, ", std::to_string(AURORA_FX_PASSES),
+                   " passes, ", std::to_string(AURORA_FX_FRAMES), " frames)\n\n");
     AURORA_LOG_RAW("bench",
                    "| Path | Submit per frame (CPU) | End-to-end per frame (one drain at batch end) |\n"
                    "|:---|---:|---:|\n");
@@ -598,7 +602,7 @@ auto run_wgpu_scenarios() -> void {
                    "every effect assembles one extra offscreen render pass and bind group. Frame content here is "
                    "constant (checkerboard + diagonal bands + three full-frame effects, no image upload); the drain "
                    "quantum (about 15.6 ms per batch-end drain) amortizes over ",
-                   std::to_string(FX_FRAMES),
+                   std::to_string(AURORA_FX_FRAMES),
                    " frames into the e2e floor value, the same amount for both paths, so "
                    "it does not affect the gap.\n\n");
 }

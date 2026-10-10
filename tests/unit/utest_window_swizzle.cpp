@@ -36,7 +36,7 @@ struct BgraPixel {
 
 /// @brief 生产实现同款整数近似：(c*a + 255) >> 8（误差 ≤ 1 LSB），测试逐字节断言用。
 [[nodiscard]] auto premul(std::uint32_t c, std::uint32_t a) -> std::uint8_t {
-    return static_cast<std::uint8_t>((c * a + 0xFFU) >> 8);
+    return static_cast<std::uint8_t>(((c * a) + 0xFFU) >> 8);
 }
 
 }  // namespace

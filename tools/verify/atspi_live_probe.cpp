@@ -372,6 +372,7 @@ struct ProbeWidgets {
 
 /// @brief python3 + gi/Atspi 可用性（阻塞调用即可：此步不触本进程桥）。
 [[nodiscard]] auto python_atspi_available() -> bool {
+    // NOLINTNEXTLINE(bugprone-command-processor): 探针以 python3 -c 探测 gi/Atspi 是否可导入，命令为就地字面量
     return std::system(
                "python3 -c \"import gi; gi.require_version('Atspi','2.0'); "
                "from gi.repository import Atspi\" >/dev/null 2>&1") == 0;

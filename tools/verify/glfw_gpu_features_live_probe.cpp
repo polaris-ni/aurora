@@ -196,7 +196,7 @@ auto main(int argc, char **argv) -> int {
         // read_pixels 为 GL 底行序；图像矩形在画布内居中对称，中心取样与行序无关。
         constexpr std::size_t row = frame_h + 8;
         constexpr std::size_t col = frame_w + 8;
-        constexpr std::size_t idx = ((row / 2) * col + (col / 2)) * 4U;
+        constexpr std::size_t idx = (((row / 2) * col) + (col / 2)) * 4U;
         if (px.size() < idx + 3) {
             return {0, 0, 0};
         }
@@ -241,7 +241,7 @@ auto main(int argc, char **argv) -> int {
     const auto layer_warm = layer_frame(false);
     const auto sample = [&](const std::vector<std::uint8_t> &px, int x, int y) -> std::array<int, 3> {
         constexpr std::size_t col = layer_w + 40;
-        const std::size_t idx = (static_cast<std::size_t>(y) * col + static_cast<std::size_t>(x)) * 4U;
+        const std::size_t idx = ((static_cast<std::size_t>(y) * col) + static_cast<std::size_t>(x)) * 4U;
         if (px.size() < idx + 3) {
             return {0, 0, 0};
         }
@@ -261,7 +261,7 @@ auto main(int argc, char **argv) -> int {
     for (int r = 0; r < 6; ++r) {
         aurora::RowProps rp;
         for (int c = 0; c < 8; ++c) {
-            const auto hue = static_cast<std::uint8_t>(((r * 8 + c) * 29U) % 256U);
+            const auto hue = static_cast<std::uint8_t>((((r * 8) + c) * 29U) % 256U);
             rp.children.emplace_back(std::make_shared<GridBox>(32.0F, 18.0F, aurora::Color{hue, 130, 200, 255}));
         }
         rows.emplace_back(std::make_shared<aurora::Row>(std::move(rp)));

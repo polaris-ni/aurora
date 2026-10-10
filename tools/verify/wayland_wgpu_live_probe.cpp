@@ -55,12 +55,16 @@ namespace {
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-int failures = 0;
+/// 失败计数：函数局部静态 + 访问器收敛（探针退出码的依据），避免命名空间级可变全局量。
+auto failures() -> int & {
+    static int count = 0;
+    return count;
+}
 
 auto check(bool ok, const std::string &label) -> void {
     emit(std::string("[") + (ok ? "PASS" : "FAIL") + "] " + label);
     if (!ok) {
-        failures++;
+        failures()++;
     }
 }
 
@@ -130,7 +134,7 @@ class GridBox final : public aurora::LeafWidget {
 // read_pixels 输出（RGBA8，行序自上而下）取样，越界返回全零。
 auto sample(const std::vector<std::uint8_t> &px, int canvas_w, int x, int y) -> std::array<int, 3> {
     const std::size_t idx =
-        (static_cast<std::size_t>(y) * static_cast<std::size_t>(canvas_w) + static_cast<std::size_t>(x)) * 4U;
+        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(canvas_w)) + static_cast<std::size_t>(x)) * 4U;
     if (px.size() < idx + 3) {
         return {0, 0, 0};
     }
@@ -217,24 +221,24 @@ auto main(int argc, char **argv) -> int {
     }
 
     // 流式纹理逐版本像素：v1 红（建槽 + 首传）→ 同版本重绘（槽复用）→ v2 蓝（增量重传）。
-    constexpr int FRAME_W = 96;
-    constexpr int FRAME_H = 64;
-    constexpr int CANVAS_W = FRAME_W + 8;
-    constexpr std::uint64_t STREAM_KEY = 7;
+    constexpr int frame_w = 96;
+    constexpr int frame_h = 64;
+    constexpr int canvas_w = frame_w + 8;
+    constexpr std::uint64_t stream_key = 7;
     const auto stream_frame = [](aurora::rhi::WgpuRhi &gpu, std::uint8_t r, std::uint8_t g, std::uint8_t b,
                                  std::uint64_t version) -> std::vector<std::uint8_t> {
-        aurora::Image img = make_video_frame(FRAME_W, FRAME_H, r, g, b);
-        img.stream_key = STREAM_KEY;
+        aurora::Image img = make_video_frame(frame_w, frame_h, r, g, b);
+        img.stream_key = stream_key;
         img.stream_version = version;
         aurora::DisplayList dl;
         aurora::Painter p;
-        p.begin(CANVAS_W, FRAME_H + 8);
+        p.begin(canvas_w, frame_h + 8);
         p.record(dl);
         p.draw_image(img, aurora::Rect{.origin = aurora::Point{.x = 4.0F, .y = 4.0F},
-                                       .size = aurora::Size{.width = static_cast<float>(FRAME_W),
-                                                            .height = static_cast<float>(FRAME_H)}});
+                                       .size = aurora::Size{.width = static_cast<float>(frame_w),
+                                                            .height = static_cast<float>(frame_h)}});
         p.stop();
-        (void)gpu.begin_frame(CANVAS_W, FRAME_H + 8, 1.0F);
+        (void)gpu.begin_frame(canvas_w, frame_h + 8, 1.0F);
         dl.replay(gpu.backend());
         gpu.end_frame();
         std::vector<std::uint8_t> pixels;
@@ -242,42 +246,42 @@ auto main(int argc, char **argv) -> int {
         return pixels;
     };
 
-    const auto c_red1 = sample(stream_frame(offscreen, 255, 0, 0, 1), CANVAS_W, CANVAS_W / 2, (FRAME_H + 8) / 2);
-    const auto c_red2 = sample(stream_frame(offscreen, 255, 0, 0, 1), CANVAS_W, CANVAS_W / 2, (FRAME_H + 8) / 2);
-    const auto c_blue = sample(stream_frame(offscreen, 0, 0, 255, 2), CANVAS_W, CANVAS_W / 2, (FRAME_H + 8) / 2);
+    const auto c_red1 = sample(stream_frame(offscreen, 255, 0, 0, 1), canvas_w, canvas_w / 2, (frame_h + 8) / 2);
+    const auto c_red2 = sample(stream_frame(offscreen, 255, 0, 0, 1), canvas_w, canvas_w / 2, (frame_h + 8) / 2);
+    const auto c_blue = sample(stream_frame(offscreen, 0, 0, 255, 2), canvas_w, canvas_w / 2, (frame_h + 8) / 2);
     check(c_red1[0] > 180 && c_red1[1] < 80 && c_red1[2] < 80, "stream v1 center is red (new slot + first upload)");
     check(c_red2[0] > 180 && c_red2[1] < 80 && c_red2[2] < 80, "stream same-version redraw stays red (slot reused)");
     check(c_blue[2] > 180 && c_blue[0] < 80 && c_blue[1] < 80, "stream v2 center is blue (incremental reupload works)");
 
     // 层缓存持久性：冷帧 BeginLayer+内容+EndLayer+DrawLayer；暖帧仅 DrawLayer（命中常驻层纹理）。
-    constexpr std::uint64_t LAYER_KEY = 77;
-    constexpr int LW = 80;
-    constexpr int LH = 60;
-    constexpr int LCANVAS_W = LW + 40;
+    constexpr std::uint64_t layer_key = 77;
+    constexpr int lw = 80;
+    constexpr int lh = 60;
+    constexpr int lcanvas_w = lw + 40;
     const auto layer_frame = [&](bool content) {
         aurora::DisplayList dl;
         aurora::Painter p;
-        p.begin(LCANVAS_W, LH + 40);
+        p.begin(lcanvas_w, lh + 40);
         p.record(dl);
         if (content) {
-            p.begin_layer(LAYER_KEY, aurora::Size{.width = static_cast<float>(LW), .height = static_cast<float>(LH)});
+            p.begin_layer(layer_key, aurora::Size{.width = static_cast<float>(lw), .height = static_cast<float>(lh)});
             p.fill_rect(
                 aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F},
-                             .size = aurora::Size{.width = static_cast<float>(LW), .height = static_cast<float>(LH)}},
+                             .size = aurora::Size{.width = static_cast<float>(lw), .height = static_cast<float>(lh)}},
                 aurora::Color{0, 200, 80, 255});
             p.end_layer();
         }
-        p.draw_layer(LAYER_KEY, aurora::Matrix2D::from_translate(20.0F, 20.0F), 1.0F);
+        p.draw_layer(layer_key, aurora::Matrix2D::from_translate(20.0F, 20.0F), 1.0F);
         p.stop();
-        (void)offscreen.begin_frame(LCANVAS_W, LH + 40, 1.0F);
+        (void)offscreen.begin_frame(lcanvas_w, lh + 40, 1.0F);
         dl.replay(offscreen.backend());
         offscreen.end_frame();
         std::vector<std::uint8_t> pixels;
         (void)offscreen.read_pixels(pixels);
         return pixels;
     };
-    const auto s_cold_in = sample(layer_frame(true), LCANVAS_W, 40, 40);
-    const auto s_warm_in = sample(layer_frame(false), LCANVAS_W, 40, 40);
+    const auto s_cold_in = sample(layer_frame(true), lcanvas_w, 40, 40);
+    const auto s_warm_in = sample(layer_frame(false), lcanvas_w, 40, 40);
     check(s_cold_in[1] > 140 && s_cold_in[0] < 90, "cold frame green inside the layer (BeginLayer+content+DrawLayer)");
     check(s_warm_in[1] > 140 && s_warm_in[0] < 90, "steady frame green inside the layer (DrawLayer hits resident)");
     check(s_cold_in == s_warm_in, "cold and steady layer pixels match (persists across frames)");
@@ -291,7 +295,7 @@ auto main(int argc, char **argv) -> int {
         board.pixels.resize(static_cast<std::size_t>(64) * 64U * 4U);
         for (int y = 0; y < 64; ++y) {
             for (int x = 0; x < 64; ++x) {
-                const std::size_t idx = (static_cast<std::size_t>(y) * 64U + static_cast<std::size_t>(x)) * 4U;
+                const std::size_t idx = ((static_cast<std::size_t>(y) * 64U) + static_cast<std::size_t>(x)) * 4U;
                 const bool hi = ((x ^ y) & 1) == 0;
                 board.pixels[idx + 0] = static_cast<std::uint8_t>(hi ? 220 : 20);
                 board.pixels[idx + 1] = static_cast<std::uint8_t>(hi ? 20 : 220);
@@ -399,12 +403,12 @@ auto main(int argc, char **argv) -> int {
 
     // ---- 平台 present 链路（真实窗口多帧上屏，含文本与流式图像）----
     // 控件用独立 stream key（与离屏段的 key 7 互不干扰）。
-    auto video = std::make_shared<StreamVideoBox>(160, 90, STREAM_KEY + 1U);
+    auto video = std::make_shared<StreamVideoBox>(160, 90, stream_key + 1U);
     std::vector<aurora::Node> rows;
     for (int r = 0; r < 6; ++r) {
         aurora::RowProps rp;
         for (int c = 0; c < 8; ++c) {
-            const auto hue = static_cast<std::uint8_t>(((r * 8 + c) * 29U) % 256U);
+            const auto hue = static_cast<std::uint8_t>((((r * 8) + c) * 29U) % 256U);
             rp.children.emplace_back(std::make_shared<GridBox>(32.0F, 18.0F, aurora::Color{hue, 130, 200, 255}));
         }
         rows.emplace_back(std::make_shared<aurora::Row>(std::move(rp)));
@@ -413,7 +417,7 @@ auto main(int argc, char **argv) -> int {
     aurora::ColumnProps grid_props;
     grid_props.children = std::move(rows);
     aurora::ColumnProps cp;
-    cp.children.push_back(std::move(video_widget));
+    cp.children.emplace_back(std::move(video_widget));
     cp.children.emplace_back(std::make_shared<aurora::Text>(
         aurora::TextProps{.content = aurora::LocalizedString{"wgpu wayland verify 0123"}}));
     cp.children.emplace_back(std::make_shared<aurora::Column>(std::move(grid_props)));
@@ -423,8 +427,8 @@ auto main(int argc, char **argv) -> int {
     aurora::Node root_node(root_widget);
 
     bool present_ok = true;
-    constexpr int AUTO_FRAMES = 8;
-    for (int i = 0; i < AUTO_FRAMES; ++i) {
+    constexpr int auto_frames = 8;
+    for (int i = 0; i < auto_frames; ++i) {
         root_widget->modifier.set(aurora::Modifier{}.cache_layer().rotate(static_cast<float>(i) * 4.0F));
         video->advance_version();
         win.force_full_redraw();  // 绕过 idle 跳帧，逐帧走完整 GPU 路径
@@ -433,9 +437,9 @@ auto main(int argc, char **argv) -> int {
         }
         win.surface().poll_platform_events();
     }
-    check(present_ok, "present_root succeeded for " + std::to_string(AUTO_FRAMES) +
+    check(present_ok, "present_root succeeded for " + std::to_string(auto_frames) +
                           " consecutive frames (real window present + text + streaming image)");
-    check(win.surface().frame_count() >= AUTO_FRAMES, "frame_count() >= " + std::to_string(AUTO_FRAMES) + " (got " +
+    check(win.surface().frame_count() >= auto_frames, "frame_count() >= " + std::to_string(auto_frames) + " (got " +
                                                           std::to_string(win.surface().frame_count()) + ")");
     check(ws->gpu_active(), "gpu_active() is still true after the frames (no permanent software-path fallback)");
     // 白闪签名：任何一帧经软件路径（wl_shm 上屏 Painter 缓冲）即为缺陷——GPU 模式下该缓冲
@@ -444,7 +448,7 @@ auto main(int argc, char **argv) -> int {
                                                  std::to_string(ws->software_present_count()) + ")");
     // CSD 装饰合成：SSD 合成器不绘装饰恒 0；CSD 兜底合成器逐帧回放装饰命令。
     const int deco = ws->decoration_replay_count();
-    check(deco == 0 || deco >= AUTO_FRAMES,
+    check(deco == 0 || deco >= auto_frames,
           "CSD decoration replays folded into GPU frames == 0 (SSD) or >= presented frame count (CSD); got " +
               std::to_string(deco));
     emit("  · decoration_replay_count()=" + std::to_string(deco) + ", frame_count()=" +
@@ -468,7 +472,7 @@ auto main(int argc, char **argv) -> int {
         emit("\nHint: pass --interactive for the resident-window visual check.");
     }
 
-    emit(std::string("\nResult: ") + (failures == 0 ? "ALL PASS" : std::to_string(failures) + " FAILURES"));
-    return failures == 0 ? 0 : 1;
+    emit(std::string("\nResult: ") + (failures() == 0 ? "ALL PASS" : std::to_string(failures()) + " FAILURES"));
+    return failures() == 0 ? 0 : 1;
 #endif  // AURORA_BACKEND_GPU_WGPU && AURORA_BACKEND_WAYLAND
 }
