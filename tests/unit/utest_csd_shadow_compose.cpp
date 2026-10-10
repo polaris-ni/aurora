@@ -27,12 +27,10 @@ struct Fixture {
     static constexpr int AURORA_CH = 100;
     static constexpr int AURORA_W = AURORA_CW + (2 * AURORA_MARGIN);  // 420
     static constexpr int AURORA_H = AURORA_CH + (2 * AURORA_MARGIN);  // 120
-    static constexpr float AURORA_BLUR =
-        static_cast<float>(AURORA_MARGIN - csd::AURORA_SHADOW_BLUR_INSET_PX);  // 9
+    static constexpr float AURORA_BLUR = static_cast<float>(AURORA_MARGIN - csd::AURORA_SHADOW_BLUR_INSET_PX);  // 9
     std::vector<std::uint32_t> words;
 
-    Fixture()
-        : words(static_cast<std::size_t>(AURORA_W) * static_cast<std::size_t>(AURORA_H), AURORA_SENTINEL_WORD) {}
+    Fixture() : words(static_cast<std::size_t>(AURORA_W) * static_cast<std::size_t>(AURORA_H), AURORA_SENTINEL_WORD) {}
 
     /// @brief 以标准基色（黑 alpha=70）合成一次。
     auto compose(Color base = csd::AURORA_SHADOW_BASE_COLOR) -> void {
@@ -42,8 +40,7 @@ struct Fixture {
 
     [[nodiscard]] auto at(int x, int y) const -> std::uint32_t {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 测试夹具按下标取字
-        return words[(static_cast<std::size_t>(y) * static_cast<std::size_t>(AURORA_W)) +
-                     static_cast<std::size_t>(x)];
+        return words[(static_cast<std::size_t>(y) * static_cast<std::size_t>(AURORA_W)) + static_cast<std::size_t>(x)];
     }
 };
 
@@ -128,9 +125,8 @@ AURORA_TEST_CASE(nonzero_base_color_is_premultiplied_like_swizzle) {
     const Color base{10, 20, 30, 70};
     f.compose(base);
     // (9,60)：dx=1 → a=62；预期字与 swizzle_rgba_premul_to_bgra 的逐像素算术完全一致
-    //（两路输出都进同一个 wl_shm 缓冲，算术漂移会在 margin/内容接缝处显形）。
-    const std::uint32_t src_rgba = static_cast<std::uint32_t>(base.r) |
-                                   (static_cast<std::uint32_t>(base.g) << 8U) |
+    // （两路输出都进同一个 wl_shm 缓冲，算术漂移会在 margin/内容接缝处显形）。
+    const std::uint32_t src_rgba = static_cast<std::uint32_t>(base.r) | (static_cast<std::uint32_t>(base.g) << 8U) |
                                    (static_cast<std::uint32_t>(base.b) << 16U) |
                                    (62U << 24U);  // 小端内存 R,G,B,A（Painter 像素序）
     std::uint32_t expected = 0U;
@@ -154,16 +150,15 @@ AURORA_TEST_CASE(scale_two_physical_geometry_grades_over_full_margin) {
     constexpr int ch = 200;
     constexpr int w = cw + (2 * m);
     constexpr int h = ch + (2 * m);
-    std::vector<std::uint32_t> words(static_cast<std::size_t>(w) * static_cast<std::size_t>(h),
-                                     AURORA_SENTINEL_WORD);
+    std::vector<std::uint32_t> words(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), AURORA_SENTINEL_WORD);
     csd::compose_shadow_margins_bgra(words.data(), w, h, m, m, cw, ch, m, 18.0F, csd::AURORA_SHADOW_BASE_COLOR);
     auto at = [&](int x, int y) -> std::uint32_t {
         return words[(static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + static_cast<std::size_t>(x)];
     };
-    AURORA_TEST_CHECK_EQ(at(0, 120), 0U);                       // 外缘归零（dx=20 > blur=18）
-    AURORA_TEST_CHECK_EQ(at(10, 120) >> 24U, 31U);              // dx=10 → f=4/9 → a=31
-    AURORA_TEST_CHECK_EQ(at(m - 1, 120) >> 24U, 66U);           // dx=1 → f=17/18 → a=66
-    AURORA_TEST_CHECK_EQ(at(m, m), AURORA_SENTINEL_WORD);       // 内容角不触
+    AURORA_TEST_CHECK_EQ(at(0, 120), 0U);  // 外缘归零（dx=20 > blur=18）
+    AURORA_TEST_CHECK_EQ(at(10, 120) >> 24U, 31U);  // dx=10 → f=4/9 → a=31
+    AURORA_TEST_CHECK_EQ(at(m - 1, 120) >> 24U, 66U);  // dx=1 → f=17/18 → a=66
+    AURORA_TEST_CHECK_EQ(at(m, m), AURORA_SENTINEL_WORD);  // 内容角不触
 }
 
 }  // namespace aurora::test_cases::utest_csd_shadow_compose

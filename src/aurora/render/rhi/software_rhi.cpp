@@ -12,16 +12,16 @@ namespace {
 // 哨兵对象不用 constexpr：MSVC STL 的 constexpr string/vector 仅 _ITERATOR_DEBUG_LEVEL==0
 // 可用（Debug IDL=2 下构造/析构非法，C2131）；库类型 Font/Image 含 STL 成员同理。
 // namespace-scope const（内部链接）语义等价，静态初始化阶段一次性构造，热路径零差异。
-constexpr std::string AURORA_EMPTY_STR;
-constexpr std::vector<Color> AURORA_EMPTY_COLORS;
-constexpr std::vector<float> AURORA_EMPTY_FLOATS;
+const std::string AURORA_EMPTY_STR;
+const std::vector<Color> AURORA_EMPTY_COLORS;
+const std::vector<float> AURORA_EMPTY_FLOATS;
 // Font 的默认构造只做空 std::string/vector 初始化，实无抛出路径；改用函数内静态会改变
 // 下列哨兵对象的作用域与初始化时机，热路径语义不等价。
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization): 同上
 const Font AURORA_DEFAULT_FONT{};
 const Image AURORA_DEFAULT_IMAGE{};
-constexpr Matrix2D AURORA_IDENTITY_MATRIX;
-constexpr std::vector<Point> AURORA_EMPTY_POINTS;
+const Matrix2D AURORA_IDENTITY_MATRIX;
+const std::vector<Point> AURORA_EMPTY_POINTS;
 
 // 进程级全局软件层存储：GPU 录制的 DL 可能回放至软件（begin_frame 失败回退 / 离屏
 // render_to_png），回放每次构造临时 SoftwareRhi——层位图必须进程级持久，干净帧的

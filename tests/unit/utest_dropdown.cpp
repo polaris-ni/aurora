@@ -33,11 +33,11 @@
 
 namespace aurora::test_cases::utest_dropdown {
 namespace {
-constexpr float AURORA_HOST_WIDTH = 320.0F; ///< 宿主视口宽（dp）
-constexpr float AURORA_HOST_HEIGHT = 260.0F; ///< 宿主视口高（dp）
-constexpr float AURORA_BOX_HEIGHT = 30.0F; ///< 主框高（dp；与 set_box_height 对齐）
-constexpr float AURORA_ITEM_HEIGHT = 26.0F; ///< 选项行高（dp；与 set_item_height 对齐）
-constexpr float AURORA_SIBLING_GAP = 60.0F; ///< 下方兄弟按钮与主框的间距（让按钮盒越过面板底边）
+constexpr float AURORA_HOST_WIDTH = 320.0F;  ///< 宿主视口宽（dp）
+constexpr float AURORA_HOST_HEIGHT = 260.0F;  ///< 宿主视口高（dp）
+constexpr float AURORA_BOX_HEIGHT = 30.0F;  ///< 主框高（dp；与 set_box_height 对齐）
+constexpr float AURORA_ITEM_HEIGHT = 26.0F;  ///< 选项行高（dp；与 set_item_height 对齐）
+constexpr float AURORA_SIBLING_GAP = 60.0F;  ///< 下方兄弟按钮与主框的间距（让按钮盒越过面板底边）
 
 auto host_box() -> Rect {
     return Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
@@ -136,7 +136,7 @@ auto make_dropdown(ChangeLog &log) -> std::shared_ptr<Dropdown> {
     p.begin(static_cast<int>(viewport.size.width), static_cast<int>(viewport.size.height));
     w.paint(p, viewport, ctx);
 }
-} // namespace
+}  // namespace
 
 AURORA_TEST_CASE(panel_point_reaches_dropdown_in_column_host) {
     // 核心证人：面板画在布局盒之外，经 Column 宿主派发时该点必须进链并止于 Dropdown。
@@ -218,7 +218,7 @@ AURORA_TEST_CASE(panel_point_reaches_dropdown_in_lazy_list_item) {
     AURORA_TEST_CHECK_EQ(log.count, 1);
     AURORA_TEST_CHECK_EQ(log.last, 2);
     AURORA_TEST_CHECK_EQ(other_hits, 0);
-    MouseEvent up = release(probe.x, probe.y); // 配对 Release：解除派发器单例的指针捕获
+    MouseEvent up = release(probe.x, probe.y);  // 配对 Release：解除派发器单例的指针捕获
     EventDispatcher::dispatch(*list, up, nullptr);
 }
 
@@ -270,7 +270,7 @@ AURORA_TEST_CASE(point_below_open_panel_still_goes_to_sibling) {
     const float panel_bottom = db.origin.y + panel_rect(*dd).bottom();
     // 取按钮盒内、但已在面板底边以下的点。
     const Point probe{.x = bb.origin.x + (bb.size.width * 0.5F), .y = bb.bottom() - 2.0F};
-    AURORA_TEST_REQUIRE(probe.y > panel_bottom); // 前提：该点确实在面板之外（否则判据空转）
+    AURORA_TEST_REQUIRE(probe.y > panel_bottom);  // 前提：该点确实在面板之外（否则判据空转）
     AURORA_TEST_REQUIRE(bb.contains(probe));
 
     const std::vector<HitNode> chain = root->hit_test_chain(probe, host_box(), BuildContext{});
@@ -393,7 +393,7 @@ AURORA_TEST_CASE(grandchild_extra_hit_box_propagates_three_levels) {
     const Point probe{.x = db.origin.x + local.x, .y = db.origin.y + local.y};
     const Rect row_box{.origin = Point{.x = 0.0F, .y = 0.0F},
                        .size = Size{.width = list->size().width, .height = 56.0F}};
-    AURORA_TEST_REQUIRE(probe.y > row_box.bottom()); // 前提：该点确实越出行盒，否则判据空转
+    AURORA_TEST_REQUIRE(probe.y > row_box.bottom());  // 前提：该点确实越出行盒，否则判据空转
 
     const std::vector<HitNode> chain = list->hit_test_chain(probe, host_box(), BuildContext{});
     AURORA_TEST_REQUIRE_FALSE(chain.empty());
@@ -404,7 +404,7 @@ AURORA_TEST_CASE(grandchild_extra_hit_box_propagates_three_levels) {
     EventDispatcher::dispatch(*list, pick, nullptr);
     AURORA_TEST_CHECK_EQ(log.count, 1);
     AURORA_TEST_CHECK_EQ(log.last, 2);
-    MouseEvent up = release(probe.x, probe.y); // 配对 Release：解除派发器单例的指针捕获
+    MouseEvent up = release(probe.x, probe.y);  // 配对 Release：解除派发器单例的指针捕获
     EventDispatcher::dispatch(*list, up, nullptr);
 }
 
@@ -428,7 +428,7 @@ AURORA_TEST_CASE(clipped_list_item_extra_hit_box_stays_unreachable) {
     list->set_scroll_offset(9999.0F);
     LayoutEngine::layout(*list, host_constraints());
     const float offset = list->scroll_offset();
-    const float row_top = (19.0F * 56.0F) - offset; // 末行盒顶边（列表局部 y）
+    const float row_top = (19.0F * 56.0F) - offset;  // 末行盒顶边（列表局部 y）
     const Rect db = child_box(*row, *dd);
     AURORA_TEST_REQUIRE(db.size.height > 0.0F);
 
@@ -439,9 +439,9 @@ AURORA_TEST_CASE(clipped_list_item_extra_hit_box_stays_unreachable) {
     // 已出视口。取末行中心才是有判别力的裁剪场景——条目可见、面板尾部不可见。
     const Point probe{.x = db.origin.x + row_local.x,
                       .y = (row_top + db.origin.y) + (AURORA_BOX_HEIGHT + (2.5F * AURORA_ITEM_HEIGHT))};
-    AURORA_TEST_REQUIRE_GT(offset, 800.0F); // 前提：确实滚到了底
-    AURORA_TEST_REQUIRE_LT(probe_first.y, list->size().height); // 对照：面板首行仍可见（证明条目在视口内）
-    AURORA_TEST_REQUIRE_GT(probe.y, list->size().height); // 前提：面板末行在视口外，否则判据空转
+    AURORA_TEST_REQUIRE_GT(offset, 800.0F);  // 前提：确实滚到了底
+    AURORA_TEST_REQUIRE_LT(probe_first.y, list->size().height);  // 对照：面板首行仍可见（证明条目在视口内）
+    AURORA_TEST_REQUIRE_GT(probe.y, list->size().height);  // 前提：面板末行在视口外，否则判据空转
 
     const std::vector<HitNode> chain = list->hit_test_chain(probe, host_box(), BuildContext{});
     AURORA_TEST_CHECK(deepest(chain) != static_cast<const Widget *>(dd.get()));
@@ -467,7 +467,7 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
             std::make_shared<LazyList>(20, [row](int i) -> Node { return i == 19 ? Node{row} : Node{}; }, 56.0F);
         LayoutEngine::layout(*list, host_constraints());
         dd->set_open(true);
-        list->set_scroll_offset(9999.0F); // 夹到 max_scroll_offset
+        list->set_scroll_offset(9999.0F);  // 夹到 max_scroll_offset
         LayoutEngine::layout(*list, host_constraints());
 
         const Rect db = child_box(*row, *dd);
@@ -480,9 +480,9 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
         // 末行盒 [204,260) 整段在视口内、但它的面板（自盒下方 y=30 起 ⇒ 全局 264+）整段在视口外。
         // 这才是有判别力的裁剪场景：条目可见、面板不可见 ⇒ 面板区必须不可命中。
         // （若改成「条目本身滚出视口」，虚拟化已把该条目回收出 live_，判据会退化成空转。）
-        AURORA_TEST_REQUIRE_GT(probe.y, list->size().height); // 前提：该点确实在视口外，否则判据空转
+        AURORA_TEST_REQUIRE_GT(probe.y, list->size().height);  // 前提：该点确实在视口外，否则判据空转
         AURORA_TEST_CHECK(deepest(list->hit_test_chain(probe, host_box(), BuildContext{})) !=
-            static_cast<const Widget *>(dd.get()));
+                          static_cast<const Widget *>(dd.get()));
         AURORA_TEST_CHECK_FALSE(list->covers_extra_hit_box(probe, BuildContext{}));
     }
 
@@ -503,7 +503,7 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
                           .y = (db.origin.y + 38.0F) - scroller->scroll_offset_y()};
         AURORA_TEST_REQUIRE_GT(probe.y, scroller->size().height);
         AURORA_TEST_CHECK(deepest(scroller->hit_test_chain(probe, host_box(), BuildContext{})) !=
-            static_cast<const Widget *>(dd.get()));
+                          static_cast<const Widget *>(dd.get()));
         AURORA_TEST_CHECK_FALSE(scroller->covers_extra_hit_box(probe, BuildContext{}));
     }
 }
@@ -514,30 +514,29 @@ namespace {
 /// `Scroll::covers_descendant_extra_hit_box` 把 `ancestor_offset + 内容盒原点` 传给内容子树；
 /// 该值的坐标系（视口 vs 窗口）是本用例的直接观测量——它不依赖任何控件状态，只看传进来什么。
 class OffsetProbe final : public Widget {
-public:
+  public:
     [[nodiscard]] auto type_name() const -> const char * override { return "OffsetProbe"; }
 
     [[nodiscard]] auto extra_hit_box(const aurora::BuildContext & /*ctx*/, const Point &ancestor_offset) const
         -> std::optional<Rect> override {
         received_ = ancestor_offset;
-        return std::nullopt; // 不申报覆盖区：只观测入参，不干扰命中判定
+        return std::nullopt;  // 不申报覆盖区：只观测入参，不干扰命中判定
     }
 
     [[nodiscard]] auto received() const -> Point { return received_; }
 
-protected:
+  protected:
     auto on_layout(const aurora::Constraints &c, const aurora::BuildContext & /*ctx*/) -> aurora::Size override {
         return c.constrain(aurora::Size{.width = 40.0F, .height = 40.0F});
     }
 
     auto on_paint(aurora::Painter & /*p*/, const aurora::Rect & /*r*/, const aurora::BuildContext & /*ctx*/)
-        -> void override {
-    }
+        -> void override {}
 
-private:
-    mutable Point received_{}; ///< mutable：`extra_hit_box` 是 const 钩子，本类只做记录
+  private:
+    mutable Point received_{};  ///< mutable：`extra_hit_box` 是 const 钩子，本类只做记录
 };
-}
+}  // namespace
 
 AURORA_TEST_CASE(scroll_passes_viewport_space_offset_to_descendant_extra_hit_box) {
     // `ancestor_offset` 保持**视口坐标系**（刻意不扣 `offset_y_`），与 `HitNode.origin`（窗口
@@ -572,4 +571,4 @@ AURORA_TEST_CASE(scroll_passes_viewport_space_offset_to_descendant_extra_hit_box
     AURORA_TEST_CHECK_NEAR(after.y, 0.0F, 1e-3F);
     AURORA_TEST_CHECK(before.y == after.y);
 }
-} // namespace aurora::test_cases::utest_dropdown
+}  // namespace aurora::test_cases::utest_dropdown

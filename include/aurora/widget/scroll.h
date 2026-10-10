@@ -94,7 +94,9 @@ class Scroll : public Container, public ScrollProps {
     /// @brief 便捷构造：扁平罗列子项，取首项为唯一子节点（Scroll{ Column{...} }）。
     /// @param kids 子项列表；只消费首项，其余静默忽略（本容器 children_policy = single）。
     Scroll(std::initializer_list<Node> kids) {
-        if (kids.size() > 0) {
+        // `std::initializer_list` 无 `empty()`（标准只给 size/begin/end），故以迭代器判空，
+        // 而非 clang-tidy 提示的 `empty()`——该形态在 libstdc++/libc++ 下均不可编译。
+        if (kids.begin() != kids.end()) {
             children_.push_back(*kids.begin());
         }
     }

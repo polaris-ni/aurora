@@ -49,7 +49,11 @@
 namespace {
 
 /// @brief 累计的断言失败条数，决定退出码 1。
-int failures = 0;
+///        函数局部静态 + 访问器收敛，避免命名空间级可变全局量。
+auto failures() -> int & {
+    static int count = 0;
+    return count;
+}
 
 /// @brief 一次物理按键的记录（整数键码 + 动作），供三条判据读取。
 struct KeyRecord {
@@ -57,7 +61,11 @@ struct KeyRecord {
     aurora::KeyAction action = aurora::KeyAction::Down;
 };
 
-std::vector<KeyRecord> g_records;  ///< 人工段收到的按键序列（换段时清空）。
+/// @brief 人工段收到的按键序列（换段时清空）。
+auto records() -> std::vector<KeyRecord> & {
+    static std::vector<KeyRecord> sink;
+    return sink;
+}
 
 /// @brief 输出一行探针结论到 stdout（经 `AURORA_LOG_RAW`：无日志前缀、不过级别过滤）。
 /// @param text 待输出的一行文本（调用方不传行尾换行）。
@@ -69,7 +77,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
 auto check(bool passed, const std::string &label) -> void {
     emit(std::string("[") + (passed ? "PASS" : "FAIL") + ") " + label);
     if (!passed) {
-        ++failures;
+        ++failures();
     }
 }
 
@@ -87,7 +95,7 @@ void open_probe_window(aurora::Win32Host &host, const char *title) {
         if (k == nullptr) {
             return;
         }
-        g_records.push_back(KeyRecord{.key = k->key, .action = k->action});
+        records().push_back(KeyRecord{.key = k->key, .action = k->action});
     });
     (void)title;
 }
@@ -102,7 +110,7 @@ void open_probe_window(aurora::Win32Host &host, const char *title) {
 /// @return 通道是否按要求产出 `KeyCode::Insert`。
 auto check_injected_path_reaches_insert(aurora::Win32Host &host) -> bool {
     emit("---- auto segment (channel coverage ONLY, not the acceptance criterion) ----");
-    g_records.clear();
+    records().clear();
     const HWND hwnd = hwnd_of(host);
     SendMessageA(hwnd, WM_KEYDOWN, VK_INSERT, 0);
     SendMessageA(hwnd, WM_KEYUP, VK_INSERT, 0);
@@ -113,13 +121,13 @@ auto check_injected_path_reaches_insert(aurora::Win32Host &host) -> bool {
     }
     const auto want = static_cast<int>(aurora::KeyCode::Insert);
     bool saw_insert = false;
-    for (const auto &r : g_records) {
+    for (const auto &r : records()) {
         if (r.key == want) {
             saw_insert = true;
         }
     }
     emit(std::string("[NOTE] injected WM_KEYDOWN/WM_KEYUP(VK_INSERT) produced ") +
-         aurora_verify::format_uint(g_records.size()) +
+         aurora_verify::format_uint(records().size()) +
          " KeyEvent(s); KeyCode::Insert present = " + (saw_insert ? "yes" : "no"));
     emit("[NOTE] this only proves the mapping table is reached by the message path; it does NOT prove");
     emit("       a physical Insert keypress yields VK_INSERT. That is what the manual stage is for.");
@@ -131,12 +139,12 @@ auto check_injected_path_reaches_insert(aurora::Win32Host &host) -> bool {
 /// @return 0 三条判据成立；1 有判据失败；3 未收到任何按键（待人工）。
 auto run_manual_stage(aurora::Win32Host &host) -> int {
     emit("---- manual segment (this is the real acceptance) ----");
-    g_records.clear();
+    records().clear();
     emit("Press the MAIN-KEYBOARD Insert key ONCE on the probe window now (press and release).");
     emit("  Expected: exactly two KeyEvents, one Down then one Up, both key == KeyCode::Insert.");
     host.wait_events(30.0);
 
-    if (g_records.empty()) {
+    if (records().empty()) {
         emit("[PENDING MANUAL] no key event within 30s - NOT counted as a pass.");
         emit("       Causes: the window is not focused, the session is locked (locked sessions deliver");
         emit("       no keyboard input), or the key was not pressed. Re-run with the probe window focused.");
@@ -147,7 +155,7 @@ auto run_manual_stage(aurora::Win32Host &host) -> int {
     std::size_t downs = 0;
     std::size_t ups = 0;
     std::size_t insert_hits = 0;
-    for (const auto &r : g_records) {
+    for (const auto &r : records()) {
         if (r.key == want) {
             ++insert_hits;
         }
@@ -159,19 +167,19 @@ auto run_manual_stage(aurora::Win32Host &host) -> int {
     }
     // (a) 事件流出现 KeyCode::Insert。
     check(insert_hits >= 1U, "(a) KeyEvent carries KeyCode::Insert: hits = " + aurora_verify::format_uint(insert_hits) +
-                                 " of " + aurora_verify::format_uint(g_records.size()) + " events");
+                                 " of " + aurora_verify::format_uint(records().size()) + " events");
     // (b) 成对：Down 一条 + Up 一条。
     check(downs == 1U && ups == 1U,
           "(b) one Down and one Up (key_state pairs): downs = " + aurora_verify::format_uint(downs) +
               " ups = " + aurora_verify::format_uint(ups));
     // (c) 无重复派发：一次按下只一条 Down、总条数为二。
-    check(g_records.size() == 2U, "(c) no duplicate dispatch: total events = " +
-                                      aurora_verify::format_uint(g_records.size()) + " (expected 2)");
-    if (g_records.size() >= 1U) {
-        emit("       first event: key=" + aurora_verify::format_int(g_records.front().key) +
-             " action=" + (g_records.front().action == aurora::KeyAction::Down ? "Down" : "Up"));
+    check(records().size() == 2U, "(c) no duplicate dispatch: total events = " +
+                                      aurora_verify::format_uint(records().size()) + " (expected 2)");
+    if (!records().empty()) {
+        emit("       first event: key=" + aurora_verify::format_int(records().front().key) +
+             " action=" + (records().front().action == aurora::KeyAction::Down ? "Down" : "Up"));
     }
-    return failures == 0 ? 0 : 1;
+    return failures() == 0 ? 0 : 1;
 }
 
 }  // namespace

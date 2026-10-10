@@ -86,14 +86,18 @@
 namespace {
 
 // 人工段等待按键的上限（毫秒）。30s 足够操作者切焦点并按三下，又不至于让人干等。
-constexpr int kInteractiveTimeoutMs = 30000;
+constexpr int AURORA_INTERACTIVE_TIMEOUT_MS = 30000;
 // 每轮排空之间的睡眠毫秒数：留出 CPU，同时保证超时窗内仍有数千轮排空机会。
-constexpr int kPumpSliceMs = 5;
+constexpr int AURORA_PUMP_SLICE_MS = 5;
 // 人工段取证用的组合条数（同时也是 `hits` / `elsewhere` 两个数组的宽度）。
-constexpr std::size_t kInteractiveComboCount = 3U;
+constexpr std::size_t AURORA_INTERACTIVE_COMBO_COUNT = 3U;
 
 /// @brief 累计的断言失败条数（自动段与人工段共用），决定退出码 1。
-int failures = 0;
+///        函数局部静态 + 访问器收敛，避免命名空间级可变全局量。
+auto failures() -> int & {
+    static int count = 0;
+    return count;
+}
 
 /// @brief 输出一行探针结论到 stdout（经 `AURORA_LOG_RAW`：无日志前缀、不过级别过滤）。
 /// @param text 待输出的一行文本（调用方不传行尾换行）。
@@ -105,7 +109,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
 auto check(bool passed, const std::string &label) -> void {
     emit(std::string("[") + (passed ? "PASS" : "FAIL") + "] " + label);
     if (!passed) {
-        ++failures;
+        ++failures();
     }
 }
 
@@ -147,7 +151,7 @@ auto ctrl_alt_shift(aurora::KeyCode key) -> aurora::KeyCombo {
 /// @param registry 待排空的热键注册表。
 /// @return 本轮实际执行了动作的热键条数（命中但动作为空的不计）。
 auto pump_and_drain(aurora::OsHotkeyRegistry &registry) -> std::size_t {
-    while (pump_one_message() != 0) {
+    while (pump_one_message()) {
         // 队列非空就一直抽：一次按键往往伴随若干条伴随消息，抽一半会留下不均匀的帧节奏。
     }
     return registry.drain_pending();
@@ -271,7 +275,7 @@ auto run_auto_stage() -> int {
         check(registry.enabled(), "enabled() is restored to true after remove_test_backend()");
     }
 
-    return failures == 0 ? 0 : 1;
+    return failures() == 0 ? 0 : 1;
 }
 
 /// @brief 人工段：注册三条组合，由操作者在**别的进程**的窗口里逐个按下。
@@ -283,10 +287,10 @@ auto run_interactive_stage() -> int {
     emit("---- interactive segment ----");
 
     aurora::OsHotkeyRegistry registry;
-    const std::array<aurora::KeyCode, kInteractiveComboCount> keys{aurora::KeyCode::F1, aurora::KeyCode::F2,
-                                                                   aurora::KeyCode::F3};
-    std::array<std::size_t, kInteractiveComboCount> hits{};
-    std::array<bool, kInteractiveComboCount> elsewhere{};
+    const std::array<aurora::KeyCode, AURORA_INTERACTIVE_COMBO_COUNT> keys{aurora::KeyCode::F1, aurora::KeyCode::F2,
+                                                                           aurora::KeyCode::F3};
+    std::array<std::size_t, AURORA_INTERACTIVE_COMBO_COUNT> hits{};
+    std::array<bool, AURORA_INTERACTIVE_COMBO_COUNT> elsewhere{};
 
     for (std::size_t i = 0; i < keys.size(); ++i) {
         const auto combo = ctrl_alt_shift(keys.at(i));
@@ -312,10 +316,10 @@ auto run_interactive_stage() -> int {
     for (const aurora::KeyCode key : keys) {
         emit("  - " + ctrl_alt_shift(key).to_string());
     }
-    emit(std::string("Waiting up to ") + aurora_verify::format_int(kInteractiveTimeoutMs / 1000) +
+    emit(std::string("Waiting up to ") + aurora_verify::format_int(AURORA_INTERACTIVE_TIMEOUT_MS / 1000) +
          "s; a global hotkey must fire even though this application has no focus.");
 
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kInteractiveTimeoutMs);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(AURORA_INTERACTIVE_TIMEOUT_MS);
     std::size_t pending_total = keys.size();
     while (pending_total > 0U && std::chrono::steady_clock::now() < deadline) {
         pump_and_drain(registry);
@@ -325,7 +329,7 @@ auto run_interactive_stage() -> int {
                 ++pending_total;
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(kPumpSliceMs));
+        std::this_thread::sleep_for(std::chrono::milliseconds(AURORA_PUMP_SLICE_MS));
     }
 
     int missed = 0;

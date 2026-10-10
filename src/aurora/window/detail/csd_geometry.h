@@ -106,8 +106,8 @@ enum class CsdResizeZone : std::uint8_t {
 /// @param content_h 内容高。
 /// @param margin_dp 边距厚度（0 = 无缩放带，恒返回 None）。
 /// @return 边/角分类；带外为 None。
-[[nodiscard]] inline auto classify_resize_zone(double cx, double cy, double content_w, double content_h,
-                                               int margin_dp) -> CsdResizeZone {
+[[nodiscard]] inline auto classify_resize_zone(double cx, double cy, double content_w, double content_h, int margin_dp)
+    -> CsdResizeZone {
     if (margin_dp <= 0) {
         return CsdResizeZone::None;
     }

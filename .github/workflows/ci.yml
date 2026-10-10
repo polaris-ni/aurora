@@ -1322,7 +1322,11 @@ jobs:
           "$bin/clang-tidy" --version
 
       - name: Configure (export compile_commands.json)
-        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF -DAURORA_BACKEND_MACOS=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+        # 本作业**只 configure 不 build**，故 PCH 产物不存在；而 clang 侧 AURORA_PCH_ENABLED 默认 ON，
+        # clang-tidy 会因 `PCH file ... cmake_pch.hxx.pch not found` 把每个 TU 判为 broken。此处为
+        # 「仅 lint」的 configure 关掉 PCH，使 compile_commands.json 不带 -include-pch
+        #（基于 GCC 的 lint 作业本就是 PCH-off，不受影响）。
+        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF -DAURORA_BACKEND_MACOS=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 
       - name: Select macOS platform TUs
         shell: bash

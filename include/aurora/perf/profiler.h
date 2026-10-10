@@ -27,18 +27,18 @@ namespace aurora {
 /// 生命周期须覆盖整个进程。禁止传入临时 `std::string` 的 `c_str()`。
 ///
 struct ZoneSample {
-    const char *name = nullptr; ///< 静态字符串，不拥有所有权
-    double start_ms = 0.0; ///< 相对本帧起点的偏移（毫秒）
-    double duration_ms = 0.0; ///< 作用域耗时（毫秒）
-    std::uint16_t depth = 0; ///< 嵌套深度（0 = 顶层），用于火焰图与 trace 缩进
+    const char *name = nullptr;  ///< 静态字符串，不拥有所有权
+    double start_ms = 0.0;  ///< 相对本帧起点的偏移（毫秒）
+    double duration_ms = 0.0;  ///< 作用域耗时（毫秒）
+    std::uint16_t depth = 0;  ///< 嵌套深度（0 = 顶层），用于火焰图与 trace 缩进
 };
 
 /// @brief 同名 zone 在一帧内的聚合结果。
 struct ZoneAggregate {
-    const char *name = nullptr; ///< 静态字符串，不拥有所有权
-    std::uint32_t call_count = 0; ///< 调用次数
-    double total_ms = 0.0; ///< 总耗时
-    double max_ms = 0.0; ///< 单次最大耗时
+    const char *name = nullptr;  ///< 静态字符串，不拥有所有权
+    std::uint32_t call_count = 0;  ///< 调用次数
+    double total_ms = 0.0;  ///< 总耗时
+    double max_ms = 0.0;  ///< 单次最大耗时
 };
 
 /// @brief 作用域性能采集器（进程级单例）。
@@ -50,15 +50,15 @@ struct ZoneAggregate {
 /// @note Side-effects: none（不写日志、不写文件）
 ///
 class Profiler {
-public:
+  public:
     /// @brief 默认单帧 zone 样本容量（超出即丢弃并计入 `dropped_zones()`）。
-    static constexpr std::size_t AURORA_DEFAULT_ZONE_CAPACITY = 512; // NOLINT(readability-identifier-naming)
+    static constexpr std::size_t AURORA_DEFAULT_ZONE_CAPACITY = 512;  // NOLINT(readability-identifier-naming)
 
     /// @brief 最大嵌套深度（超出即丢弃并计入 `dropped_zones()`）。
-    static constexpr std::size_t AURORA_MAX_ZONE_DEPTH = 64; // NOLINT(readability-identifier-naming)
+    static constexpr std::size_t AURORA_MAX_ZONE_DEPTH = 64;  // NOLINT(readability-identifier-naming)
 
     /// @brief 默认长任务阈值（毫秒）= 60fps 帧预算的一半。
-    static constexpr double AURORA_DEFAULT_LONG_TASK_THRESHOLD_MS = 8.333333; // NOLINT(readability-identifier-naming)
+    static constexpr double AURORA_DEFAULT_LONG_TASK_THRESHOLD_MS = 8.333333;  // NOLINT(readability-identifier-naming)
 
     /// @brief 取得全局唯一实例。
     /// @return 进程级单例的引用（首次调用时构造，存活至进程结束）。
@@ -164,13 +164,13 @@ public:
     ///
     [[nodiscard]] auto report_text() const -> std::string;
 
-private:
+  private:
     Profiler();
 
     struct OpenZone {
         const char *name = nullptr;
-        double start_ms = 0.0; ///< 相对帧起点
-        Stopwatch watch; ///< 本 zone 的高精度计时器：begin_zone 时复位，闭合时折算毫秒
+        double start_ms = 0.0;  ///< 相对帧起点
+        Stopwatch watch;  ///< 本 zone 的高精度计时器：begin_zone 时复位，闭合时折算毫秒
     };
 
     bool enabled_ = true;
@@ -180,8 +180,8 @@ private:
     double frame_start_ms_ = 0.0;
     std::uint64_t frame_index_ = 0;
 
-    std::vector<ZoneSample> zones_; ///< 当帧已闭合样本（容量预留，帧内不再分配）
-    std::vector<ZoneSample> long_tasks_; ///< 当帧长任务
+    std::vector<ZoneSample> zones_;  ///< 当帧已闭合样本（容量预留，帧内不再分配）
+    std::vector<ZoneSample> long_tasks_;  ///< 当帧长任务
     OpenZone stack_[AURORA_MAX_ZONE_DEPTH]{};
     // 未闭合 zone 栈（固定容量，零分配）
     std::size_t depth_ = 0;
@@ -197,7 +197,7 @@ private:
 /// @note Thread: main-thread only
 ///
 class ScopedTimer {
-public:
+  public:
     /// @brief 构造并进入计时作用域（等价于 `Profiler::begin_zone(name)`）。
     /// @param name 静态字符串字面量；生命周期须覆盖整个进程。
     explicit ScopedTimer(const char *name) { Profiler::instance().begin_zone(name); }
@@ -206,7 +206,7 @@ public:
     ~ScopedTimer() {
         try {
             Profiler::instance().end_zone();
-        } catch (...) { // NOLINT(*-empty-catch)
+        } catch (...) {  // NOLINT(*-empty-catch)
             // 析构不得抛出：性能采集失败绝不拖垮应用
         }
     }
@@ -225,7 +225,7 @@ namespace detail {
 /// @internal 仅供 `FrameScope` 调用，不属于公共 API。
 ///
 auto on_frame_scope_end() -> void;
-} // namespace detail
+}  // namespace detail
 
 /// @brief RAII 帧作用域：构造开帧（并清零当帧渲染计数器），析构闭帧。
 ///
@@ -238,7 +238,7 @@ auto on_frame_scope_end() -> void;
 /// @note Thread: main-thread only
 ///
 class FrameScope {
-public:
+  public:
     /// @brief 开帧：调用 `Profiler::begin_frame()` 并把当帧渲染计数器清零，使样本与计数同源。
     FrameScope() {
         Profiler::instance().begin_frame();
@@ -251,7 +251,7 @@ public:
         try {
             detail::on_frame_scope_end();
             Profiler::instance().end_frame();
-        } catch (...) { // NOLINT(*-empty-catch)
+        } catch (...) {  // NOLINT(*-empty-catch)
             // 析构不得抛出：性能采集失败绝不拖垮应用
         }
     }
@@ -261,7 +261,7 @@ public:
     FrameScope(FrameScope &&) = delete;
     auto operator=(FrameScope &&) -> FrameScope & = delete;
 };
-} // namespace aurora
+}  // namespace aurora
 
 // ---------------------------------------------------------------------------
 // 作用域埋点宏

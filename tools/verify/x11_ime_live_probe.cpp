@@ -119,7 +119,7 @@ void pump(aurora::X11Surface &surface, int iterations) {
            " draws=" + std::to_string(s.draw_callbacks) + " spotUpdates=" + std::to_string(s.spot_updates) +
            " preedit=\"" + s.preedit + "\"";
 }
-} // namespace
+}  // namespace
 
 // 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现，捕获反而把失败压成 0。
 // 口径与 tools/verify/ 其余探针、examples/ 各 demo 入口同。
@@ -185,9 +185,8 @@ auto main(int argc, char **argv) -> int {
         } else {
             check(true, "XCreateIC succeeded (ic_created)");
             emit(std::string("       negotiated style: ") +
-                 (st.preedit_callbacks
-                      ? "XIMPreeditCallbacks (composition pushback fully wired)"
-                      : "XIMPreeditNothing (fallback: commit channel only)"));
+                 (st.preedit_callbacks ? "XIMPreeditCallbacks (composition pushback fully wired)"
+                                       : "XIMPreeditNothing (fallback: commit channel only)"));
 
             // ---- ② 焦点宣告接线（不依赖输入法配合） ----
             // 用独立观测连接对被测窗口 XSetInputFocus 拉起/切走焦点，驱动被测 surface 自身事件

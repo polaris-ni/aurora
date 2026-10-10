@@ -50,7 +50,7 @@ struct alignas(8) Err {
     std::uint64_t w[8];
 
     [[nodiscard]] auto name() const -> const char * {
-        return reinterpret_cast<const char *>(static_cast<std::uintptr_t>(w[0])); // NOLINT
+        return reinterpret_cast<const char *>(static_cast<std::uintptr_t>(w[0]));  // NOLINT
     }
 };
 
@@ -122,7 +122,7 @@ auto LibDbus::instance() -> const LibDbus & {
             h = ::dlopen("libdbus-1.so", RTLD_NOW | RTLD_LOCAL);
         }
         if (h == nullptr) {
-            return a; // 无 libdbus：loaded=false，桥整体降级
+            return a;  // 无 libdbus：loaded=false，桥整体降级
         }
         bool ok = true;
         const auto bind = [&ok, h](const char *name, auto &dst) {
@@ -195,9 +195,9 @@ auto LibDbus::instance() -> const LibDbus & {
 // DBusDispatchStatus = {DATA_REMAINS 0, COMPLETE 1, NEED_MEMORY 2}；
 // DBusMessageType = {INVALID 0, METHOD_CALL 1, ...}；DBusWatchFlags = {READABLE 1, WRITABLE 2}）。
 constexpr int AURORA_MT_METHOD_CALL = 1;
-constexpr int AURORA_HANDLER_MORE = 0; ///< NOT_YET_HANDLED：交还给后续 filter/对象树
-constexpr int AURORA_HANDLER_OK = 1; ///< HANDLED：本端已应答
-constexpr int AURORA_DISPATCH_REMAINS = 0; ///< 还有排队消息可派发（pump 的 drain 条件；空转期恒为 1 不可作循环条件）
+constexpr int AURORA_HANDLER_MORE = 0;  ///< NOT_YET_HANDLED：交还给后续 filter/对象树
+constexpr int AURORA_HANDLER_OK = 1;  ///< HANDLED：本端已应答
+constexpr int AURORA_DISPATCH_REMAINS = 0;  ///< 还有排队消息可派发（pump 的 drain 条件；空转期恒为 1 不可作循环条件）
 constexpr unsigned AURORA_WATCH_READABLE = 1U;
 constexpr unsigned AURORA_WATCH_WRITEABLE = 2U;
 constexpr char AURORA_TY_BOOL = 'b';
@@ -316,14 +316,12 @@ auto put_variant(const LibDbus &dbus, Iter &it, const AtspiPropValue &v) -> bool
 
 /// @brief 入站参数游标（消息顶层 / 容器内子层共用）。
 class Cur {
-public:
+  public:
     Cur() = default;
 
-    Cur(const LibDbus &lib, Msg m) : dbus_(&lib), alive_(lib.iter_init(m, &it_) != 0) {
-    }
+    Cur(const LibDbus &lib, Msg m) : dbus_(&lib), alive_(lib.iter_init(m, &it_) != 0) {}
 
-    Cur(const LibDbus &lib, const Iter &sub) : dbus_(&lib), it_(sub), alive_(dbus_->iter_get_arg_type(&it_) != 0) {
-    }
+    Cur(const LibDbus &lib, const Iter &sub) : dbus_(&lib), it_(sub), alive_(dbus_->iter_get_arg_type(&it_) != 0) {}
 
     [[nodiscard]] auto ty() const -> int { return alive_ ? dbus_->iter_get_arg_type(&it_) : 0; }
     [[nodiscard]] [[maybe_unused]] auto done() const -> bool { return !alive_; }
@@ -399,9 +397,9 @@ public:
         return true;
     }
 
-private:
+  private:
     const LibDbus *dbus_ = nullptr;
-    mutable Iter it_{}; // 不透明缓冲：const 查询口（ty()）只透传指针给 libdbus，不解引用
+    mutable Iter it_{};  // 不透明缓冲：const 查询口（ty()）只透传指针给 libdbus，不解引用
     bool alive_ = false;
 };
 
@@ -459,7 +457,7 @@ auto a11y_bus_address(const LibDbus &dbus) -> const std::string & {
 
 // 注：Impl 是头文件里声明的嵌套类，定义必须留在具名命名空间（匿名 ns 内定义嵌套类是
 // 硬错误）；上方匿名 ns 的替身类型/常量对本 TU 仍然可见。
-} // namespace
+}  // namespace
 
 struct AtspiBridge::Impl {
     // 引用成员（LibDbus 单例）是有意设计：Impl 由 unique_ptr 持有、从不复制/赋值，引用保证
@@ -468,18 +466,17 @@ struct AtspiBridge::Impl {
     const LibDbus &dbus = LibDbus::instance();
     AtspiModel model;
     Conn conn = nullptr;
-    std::string unique_name; ///< 本连接唯一总线名（":1.57"）
+    std::string unique_name;  ///< 本连接唯一总线名（":1.57"）
     bool provider_registered = false;
     bool active = false;
     bool dirty = true;
-    bool tearing_down = false; ///< 根销毁门闩（UIA #8 同款：断开期间不再重建）
-    bool client_seen = false; ///< 收到过外部方法调用 ⇒ 判定「有 AT 客户端在线」
+    bool tearing_down = false;  ///< 根销毁门闩（UIA #8 同款：断开期间不再重建）
+    bool client_seen = false;  ///< 收到过外部方法调用 ⇒ 判定「有 AT 客户端在线」
     Widget *root = nullptr;
     a11y::TreeSnapshot snap{};
     std::vector<Watch> watches;
 
-    explicit Impl(AtspiEnv env) : model{std::move(env)} {
-    }
+    explicit Impl(AtspiEnv env) : model{std::move(env)} {}
 
     // ---- 建连 / 握手 ----
 
@@ -558,13 +555,13 @@ struct AtspiBridge::Impl {
         put_string(dbus, plug, AURORA_TY_OBJPATH, model.env().base_path);
         dbus.iter_close_container(&arg_top, &plug);
         Msg r = dbus.connection_send_with_reply_and_block(conn, c, 3000, &e);
-        const Err embed_err = e; // 应答前留存错误名（free 后不可读）
+        const Err embed_err = e;  // 应答前留存错误名（free 后不可读）
         dbus.error_free(&e);
         dbus.message_unref(c);
         if (r == nullptr) {
             degraded("Socket.Embed call", embed_err);
             close_conn();
-            return false; // 注册表不可达/超时（含 registryd 未装）
+            return false;  // 注册表不可达/超时（含 registryd 未装）
         }
         // 回包 `(so)` = 注册表总线名 + 其根路径（registry.c::socket_embed）。
         std::string reg_bus;
@@ -573,7 +570,7 @@ struct AtspiBridge::Impl {
         Cur so{};
         if (top.into(AURORA_TY_STRUCT, so)) {
             so.take_string(reg_bus);
-            so.take_string(reg_path); // objpath 也走 take_string（类型集含 'o'）
+            so.take_string(reg_path);  // objpath 也走 take_string（类型集含 'o'）
         }
         dbus.message_unref(r);
         if (reg_path.empty()) {
@@ -600,7 +597,7 @@ struct AtspiBridge::Impl {
         for (Watch w : watches) {
             const unsigned flags = dbus.watch_get_flags(w);
             if ((flags & (AURORA_WATCH_READABLE | AURORA_WATCH_WRITEABLE)) == 0U) {
-                continue; // 禁用的 watch
+                continue;  // 禁用的 watch
             }
             AtspiBridge::WatchFd fd;
             fd.fd = dbus.watch_get_unix_fd(w);
@@ -623,11 +620,11 @@ struct AtspiBridge::Impl {
         if (dirty) {
             sync_point();
         }
-        [[maybe_unused]] const int touched = dbus.connection_read_write(conn, 0); // 非阻塞收发
+        [[maybe_unused]] const int touched = dbus.connection_read_write(conn, 0);  // 非阻塞收发
         while (dbus.connection_dispatch(conn) == AURORA_DISPATCH_REMAINS) {
             // 逐条派发直到无排队消息；filter 内完成应答（应答已入队）
         }
-        dbus.connection_flush(conn); // 把派发期产生的回复一次写回传输
+        dbus.connection_flush(conn);  // 把派发期产生的回复一次写回传输
     }
 
     // ---- libdbus 回调（静态蹦床 → 本实例；仅 UI 线程触发）----
@@ -642,8 +639,7 @@ struct AtspiBridge::Impl {
         v.erase(std::ranges::remove(v, w).begin(), v.end());
     }
 
-    static void watch_toggled(Watch /*unused*/, void * /*unused*/) {
-    }
+    static void watch_toggled(Watch /*unused*/, void * /*unused*/) {}
 
     static int filter_tramp(Conn /*unused*/, Msg m, void *ud) {
         auto &self = *static_cast<Impl *>(ud);
@@ -654,9 +650,9 @@ struct AtspiBridge::Impl {
 
     [[nodiscard]] auto on_message(Msg m) -> bool {
         if (dbus.message_get_type(m) != AURORA_MT_METHOD_CALL) {
-            return false; // 信号/回报交 libdbus 内部处理
+            return false;  // 信号/回报交 libdbus 内部处理
         }
-        sync_point(); // 平台查询到达是唯一的建树同步点
+        sync_point();  // 平台查询到达是唯一的建树同步点
         const char *raw_path = dbus.message_get_path(m);
         const char *raw_iface = dbus.message_get_interface(m);
         const char *raw_member = dbus.message_get_member(m);
@@ -665,7 +661,7 @@ struct AtspiBridge::Impl {
         const std::string member{raw_member != nullptr ? raw_member : ""};
         if (!client_seen) {
             client_seen = true;
-            current_accessibility_settings().screen_reader_active = true; // heuristic 回填
+            current_accessibility_settings().screen_reader_active = true;  // heuristic 回填
         }
         if (path == atspi::k_cache_path) {
             return dispatch_cache(m, member);
@@ -707,7 +703,7 @@ struct AtspiBridge::Impl {
 
     [[nodiscard]] auto error_reply(Msg call, const char *name, const char *text) const -> bool {
         if (dbus.message_get_no_reply_expected(call) != 0) {
-            return true; // 客户端没等回复：不回，只消费
+            return true;  // 客户端没等回复：不回，只消费
         }
         Msg e = dbus.message_new_error(call, name, text);
         if (e == nullptr) {
@@ -905,7 +901,7 @@ struct AtspiBridge::Impl {
             return reply_so(m, model.application());
         }
         if (member == "GetRelationSet") {
-            return reply_empty_typed(m, "(ua(ii))"); // 关系集：本增量申报为空（申报见头注）
+            return reply_empty_typed(m, "(ua(ii))");  // 关系集：本增量申报为空（申报见头注）
         }
         if (member == "GetAttributes") {
             return reply_empty_typed(m, "{ss}");
@@ -938,7 +934,7 @@ struct AtspiBridge::Impl {
             std::uint32_t coord = 0;
             Cur cur{dbus, m};
             if (member == "GetSize") {
-                coord = atspi::coord_screen; // GetSize 无参
+                coord = atspi::coord_screen;  // GetSize 无参
             } else if (!cur.take_uint(coord)) {
                 return error_reply(m, AURORA_ERR_INVALID_ARGS, "expect coord u");
             }
@@ -1067,7 +1063,7 @@ struct AtspiBridge::Impl {
             }
             const bool done = model.do_action(id, index);
             if (done) {
-                dirty = true; // 动作可能改变语义树（勾选 / 滚动量等）
+                dirty = true;  // 动作可能改变语义树（勾选 / 滚动量等）
             }
             return reply_b(m, done);
         }
@@ -1091,12 +1087,12 @@ struct AtspiBridge::Impl {
                 if (!cur.take_int(index)) {
                     return error_reply(m, AURORA_ERR_INVALID_ARGS, "expect i");
                 }
-                return reply_s(m, ""); // Action 行无描述字段（Aurora 语义未导出）
+                return reply_s(m, "");  // Action 行无描述字段（Aurora 语义未导出）
             }
             return error_reply(m, AURORA_ERR_UNKNOWN_METHOD, member.c_str());
         }
         if (member == "GetKeyBinding") {
-            return reply_s(m, ""); // 键绑定未导出（申报）
+            return reply_s(m, "");  // 键绑定未导出（申报）
         }
 
         if (!iface.empty() && !AtspiModel::handles(iface, member)) {
@@ -1205,12 +1201,12 @@ struct AtspiBridge::Impl {
         if (!cur.take_string(iface)) {
             return error_reply(call, AURORA_ERR_INVALID_ARGS, "expect s");
         }
-        static const std::vector<std::string> ACCESSIBLE_PROPS{"version", "Name", "Description", "Parent",
+        static const std::vector<std::string> ACCESSIBLE_PROPS{"version",    "Name",   "Description",  "Parent",
                                                                "ChildCount", "Locale", "AccessibleId", "HelpText"};
-        static const std::vector<std::string> APPLICATION_PROPS{"ToolkitName", "Version", "ToolkitVersion",
+        static const std::vector<std::string> APPLICATION_PROPS{"ToolkitName",  "Version",          "ToolkitVersion",
                                                                 "AtspiVersion", "InterfaceVersion", "Id"};
         static const std::vector<std::string> TEXT_PROPS{"version", "CharacterCount", "CaretOffset"};
-        static const std::vector<std::string> VALUE_PROPS{"version", "MinimumValue", "MaximumValue",
+        static const std::vector<std::string> VALUE_PROPS{"version",          "MinimumValue", "MaximumValue",
                                                           "MinimumIncrement", "CurrentValue", "Text"};
         const std::vector<std::string> *props = nullptr;
         if (iface == atspi::k_iface_accessible) {
@@ -1401,7 +1397,7 @@ struct AtspiBridge::Impl {
         }
         const std::string path = model.path_of_id(id);
         if (path == atspi::k_null_path) {
-            return; // 未投影/已拆除的对象：无源路径 ⇒ 不发（客户端本就无法解析）
+            return;  // 未投影/已拆除的对象：无源路径 ⇒ 不发（客户端本就无法解析）
         }
         Msg s = dbus.message_new_signal(path.c_str(), iface, member);
         if (s == nullptr) {
@@ -1415,7 +1411,7 @@ struct AtspiBridge::Impl {
         (void)put_variant(dbus, top, var);
         Iter props{};
         if (dbus.iter_open_container(&top, AURORA_TY_ARRAY, "{sv}", &props) != 0) {
-            dbus.iter_close_container(&top, &props); // 空 properties（与上游一致）
+            dbus.iter_close_container(&top, &props);  // 空 properties（与上游一致）
         }
         dbus.connection_send(conn, s, nullptr);
         dbus.message_unref(s);
@@ -1428,7 +1424,7 @@ struct AtspiBridge::Impl {
         if (name == nullptr) {
             return;
         }
-        AtspiPropValue v; // variant = int32 0（上游 append_basic 常量）
+        AtspiPropValue v;  // variant = int32 0（上游 append_basic 常量）
         v.kind = AtspiPropValue::Kind::I32;
         emit_object_event(id, atspi::k_iface_event_object, "StateChanged", name, on ? 1 : 0, 0, v);
     }
@@ -1494,7 +1490,7 @@ struct AtspiBridge::Impl {
     /// @brief 被移除对象的事件素材（全部在 model.sync 之前定格：旧路径/有效父/旧索引）。
     struct RemovedInfo {
         AtspiRef ref;
-        std::uint64_t parent_id = 0; ///< 同步前的模型有效父（裁剪层已折算到最近存活祖先）
+        std::uint64_t parent_id = 0;  ///< 同步前的模型有效父（裁剪层已折算到最近存活祖先）
         std::int32_t index = -1;
     };
 
@@ -1510,7 +1506,7 @@ struct AtspiBridge::Impl {
         // 1) 结构新增：先让对象在客户端缓存可解析，再报父子的增位。
         for (const std::uint64_t id : diff.added) {
             if (!model.exists(id)) {
-                continue; // 裁剪层（is_control/is_content 皆假）未投影到模型
+                continue;  // 裁剪层（is_control/is_content 皆假）未投影到模型
             }
             emit_cache_add(id);
             const std::uint64_t parent = model.parent(id);
@@ -1518,7 +1514,7 @@ struct AtspiBridge::Impl {
                 emit_children_changed(parent, "add", model.index_in_parent(id), model.ref_of(id));
             }
             if (const auto *ns = model.node(id); ns != nullptr && ns->node.state.focused) {
-                emit_state_changed(id, atspi::state_focused, true); // 新节点带焦：父链无旧比较源
+                emit_state_changed(id, atspi::state_focused, true);  // 新节点带焦：父链无旧比较源
             }
         }
         // 2) 字段变化（同 id 两侧都在）。
@@ -1557,7 +1553,7 @@ struct AtspiBridge::Impl {
                     break;
                 }
                 default:
-                    break; // Bounds/Range/Actions：无规范事件词汇（申报）
+                    break;  // Bounds/Range/Actions：无规范事件词汇（申报）
             }
         }
         // 3) 焦点：Event.Focus（state-changed:focused 已由 2) 的逐位对拍覆盖存活节点）。
@@ -1584,20 +1580,20 @@ struct AtspiBridge::Impl {
         }
         dirty = false;
         if (tearing_down || root == nullptr) {
-            return; // 拆除期只读旧快照（UIA #8 同款门闩）
+            return;  // 拆除期只读旧快照（UIA #8 同款门闩）
         }
         // 单参重载：根几何按 root.size() 实时取，尺寸变化无需宿主重新 set_root。
         a11y::TreeSnapshot prev = std::move(snap);
         snap = a11y::build_tree_snapshot(*root);
         if (prev.flat.empty()) {
-            model.sync(snap); // 首帧建树：客户端经 Cache.GetItems 全量可见，不回放增量
+            model.sync(snap);  // 首帧建树：客户端经 Cache.GetItems 全量可见，不回放增量
             return;
         }
         const a11y::TreeDiff diff = a11y::diff_snapshots(prev, snap);
         std::vector<RemovedInfo> removed;
         for (const std::uint64_t id : diff.removed) {
             if (!model.exists(id)) {
-                continue; // 裁剪层从未投影 ⇒ 无缓存可撤
+                continue;  // 裁剪层从未投影 ⇒ 无缓存可撤
             }
             removed.push_back(RemovedInfo{
                 .ref = model.ref_of(id), .parent_id = model.parent(id), .index = model.index_in_parent(id)});
@@ -1605,7 +1601,7 @@ struct AtspiBridge::Impl {
         model.sync(snap);
         if (conn != nullptr && !diff.empty()) {
             publish_events(prev, diff, removed);
-            dbus.connection_flush(conn); // 事件先于同轮应答落线（同一 flush 覆盖两者）
+            dbus.connection_flush(conn);  // 事件先于同轮应答落线（同一 flush 覆盖两者）
         }
     }
 };
@@ -1616,7 +1612,7 @@ struct AtspiBridge::Impl {
 
 auto AtspiBridge::create(AtspiEnv env) -> std::unique_ptr<AtspiBridge> {
     if (const char *off = std::getenv("NO_AT_BRIDGE"); off != nullptr && *off != '\0' && std::strcmp(off, "0") != 0) {
-        return nullptr; // GNOME 惯例显式免提
+        return nullptr;  // GNOME 惯例显式免提
     }
     const auto &dbus = LibDbus::instance();
     if (!dbus.loaded) {
@@ -1624,19 +1620,18 @@ auto AtspiBridge::create(AtspiEnv env) -> std::unique_ptr<AtspiBridge> {
         return nullptr;
     }
     if (env.base_path.empty()) {
-        env.base_path = atspi::k_registry_root_path; // 规范 App 根路径（连接唯一 ⇒ 不撞号）
+        env.base_path = atspi::k_registry_root_path;  // 规范 App 根路径（连接唯一 ⇒ 不撞号）
     }
     auto d = std::make_unique<AtspiBridge::Impl>(std::move(env));
     if (!d->connect_and_embed()) {
-        return nullptr; // 总线/注册表不可达：静默降级（无会话总线是 Linux 常态）
+        return nullptr;  // 总线/注册表不可达：静默降级（无会话总线是 Linux 常态）
     }
     auto bridge = std::unique_ptr<AtspiBridge>(new AtspiBridge(std::move(d)));
     bridge->activate();
     return bridge;
 }
 
-AtspiBridge::AtspiBridge(std::unique_ptr<Impl> d) : d_(std::move(d)) {
-}
+AtspiBridge::AtspiBridge(std::unique_ptr<Impl> d) : d_(std::move(d)) {}
 
 AtspiBridge::~AtspiBridge() { deactivate(); }
 
@@ -1681,7 +1676,7 @@ auto AtspiBridge::set_root(Widget *root) -> void {
         return;
     }
     if (root != d_->root) {
-        d_->tearing_down = false; // 换根重建：解除拆除门闩（UIA reset_teardown 同理）
+        d_->tearing_down = false;  // 换根重建：解除拆除门闩（UIA reset_teardown 同理）
         d_->root = root;
         d_->dirty = true;
     }
@@ -1695,7 +1690,7 @@ auto AtspiBridge::on_announcement(const std::string &text, const Widget *target)
         return;
     }
     if (d_->dirty) {
-        d_->sync_point(); // 目标可能刚入树：先投影再寻址
+        d_->sync_point();  // 目标可能刚入树：先投影再寻址
     }
     std::uint64_t id = AURORA_ATSPI_FRAME_ID;
     if (target != nullptr) {
@@ -1714,7 +1709,7 @@ auto AtspiBridge::on_announcement(const std::string &text, const Widget *target)
 auto AtspiBridge::on_widget_destroying(const Widget *w) -> void {
     if (w != nullptr && w == d_->root) {
         d_->root = nullptr;
-        d_->tearing_down = true; // 悬垂根门闩：pump 期查询只读旧快照
+        d_->tearing_down = true;  // 悬垂根门闩：pump 期查询只读旧快照
     }
 }
 
@@ -1738,6 +1733,6 @@ auto AtspiBridge::set_window_title(std::string title) -> void {
         d_->dbus.connection_flush(d_->conn);
     }
 }
-} // namespace aurora::detail
+}  // namespace aurora::detail
 
 #endif  // AURORA_PLATFORM_LINUX && (AURORA_BACKEND_X11 || AURORA_BACKEND_WAYLAND)

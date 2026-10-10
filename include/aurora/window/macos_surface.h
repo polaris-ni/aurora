@@ -26,6 +26,17 @@ class MacOSSurface : public Surface {
     /// @brief 析构：经 Impl::destroy_window 释放窗口壳（当前为 stub，无实际释放动作）。
     ~MacOSSurface() override;
 
+    /// @brief 禁用拷贝构造：持有唯一窗口壳与整帧 Painter，拷贝会产生双重所有者。
+    MacOSSurface(const MacOSSurface &) = delete;
+    /// @brief 禁用拷贝赋值：同拷贝构造，唯一窗口/Painter 资源不可复制。
+    /// @return 已删除重载，不存在实际返回路径。
+    auto operator=(const MacOSSurface &) -> MacOSSurface & = delete;
+    /// @brief 禁用移动：窗口壳生命周期与对象同寿，资源无「移交给新属主」的语义。
+    MacOSSurface(MacOSSurface &&) = delete;
+    /// @brief 禁用移动赋值：同移动构造，唯一资源不可移交。
+    /// @return 已删除重载，不存在实际返回路径。
+    auto operator=(MacOSSurface &&) -> MacOSSurface & = delete;
+
     /// @brief 开启新一帧：重置 Painter 至目标尺寸、更新记录尺寸并以浅色底（#F5F5F7）整帧填充。
     /// @param w 帧宽（像素）。
     /// @param h 帧高（像素）。

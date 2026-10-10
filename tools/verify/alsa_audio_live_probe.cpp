@@ -232,6 +232,7 @@ auto main(int argc, char **argv) -> int {
     }
 
     static_cast<void>(ctx->close());
-    emit(failures() == 0 ? "result: ALL PASS (exit 0)" : "result: " + std::to_string(failures()) + " FAILURE(S) (exit 1)");
+    emit(failures() == 0 ? "result: ALL PASS (exit 0)"
+                         : "result: " + std::to_string(failures()) + " FAILURE(S) (exit 1)");
     return failures() == 0 ? 0 : 1;
 }

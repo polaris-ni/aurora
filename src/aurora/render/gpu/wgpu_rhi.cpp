@@ -407,38 +407,38 @@ static_assert(sizeof(Globals) == 176, "uniform block must stay 176 bytes");
 
 enum class PipeId : std::uint8_t {
     Solid = 0,
-    SolidNo, ///< ClearRect：无混合直写零
+    SolidNo,  ///< ClearRect：无混合直写零
     Border,
     Grad,
-    ImagePma, ///< DrawImage / Composite（PMA 混合）
-    ImageSrc, ///< DrawLayer（层内容直色 src-over）
+    ImagePma,  ///< DrawImage / Composite（PMA 混合）
+    ImageSrc,  ///< DrawLayer（层内容直色 src-over）
     Text,
     Shadow,
     Blur,
     Blend,
     Mask,
-    Copy, ///< 效果 B pass 区域回写 + present 上屏
+    Copy,  ///< 效果 B pass 区域回写 + present 上屏
     Count
 };
 
 struct PipeSpec {
-    const char *fs; ///< 片元入口名
-    int blend; ///< 0 = 无混合，1 = 直色 src-over，2 = PMA
+    const char *fs;  ///< 片元入口名
+    int blend;  ///< 0 = 无混合，1 = 直色 src-over，2 = PMA
 };
 
 // 批 key 基管线（GL 路径 Pipeline 同构；Solid 无混合 / Image PMA 变体在 flush 期解析）。
 enum class BasePipe : std::uint8_t { Solid = 0, Border = 1, Grad = 2, Image = 3, Text = 4, Shadow = 5 };
 
 constexpr PipeSpec AURORA_PIPE_SPECS[static_cast<std::size_t>(PipeId::Count)] = {
-    PipeSpec{.fs = "fs_solid", .blend = 1}, PipeSpec{.fs = "fs_solid", .blend = 0},
+    PipeSpec{.fs = "fs_solid", .blend = 1},  PipeSpec{.fs = "fs_solid", .blend = 0},
     PipeSpec{.fs = "fs_border", .blend = 1}, PipeSpec{.fs = "fs_grad", .blend = 1},
-    PipeSpec{.fs = "fs_image", .blend = 2}, PipeSpec{.fs = "fs_image", .blend = 1},
-    PipeSpec{.fs = "fs_text", .blend = 1}, PipeSpec{.fs = "fs_shadow", .blend = 1},
-    PipeSpec{.fs = "fs_blur", .blend = 0}, PipeSpec{.fs = "fs_blend", .blend = 0},
-    PipeSpec{.fs = "fs_mask", .blend = 0}, PipeSpec{.fs = "fs_copy", .blend = 0},
+    PipeSpec{.fs = "fs_image", .blend = 2},  PipeSpec{.fs = "fs_image", .blend = 1},
+    PipeSpec{.fs = "fs_text", .blend = 1},   PipeSpec{.fs = "fs_shadow", .blend = 1},
+    PipeSpec{.fs = "fs_blur", .blend = 0},   PipeSpec{.fs = "fs_blend", .blend = 0},
+    PipeSpec{.fs = "fs_mask", .blend = 0},   PipeSpec{.fs = "fs_copy", .blend = 0},
 };
 
-constexpr std::uint64_t AURORA_UNIFORM_ALIGN = 256; // uniform buffer offset 对齐下限
+constexpr std::uint64_t AURORA_UNIFORM_ALIGN = 256;  // uniform buffer offset 对齐下限
 constexpr std::uint32_t AURORA_MSAA_SAMPLES = 4;
 
 // ---- 缓存容量（与 GL 路径同参）----
@@ -495,7 +495,7 @@ auto hex_u32(std::uint32_t v) -> std::string {
     std::string s(8, '0');
     for (int i = 7; i >= 0; --i) {
         const auto *digits = "0123456789abcdef";
-        s[static_cast<std::size_t>(i)] = digits[v & 0xFU]; // NOLINT(*-pro-bounds-pointer-arithmetic)
+        s[static_cast<std::size_t>(i)] = digits[v & 0xFU];  // NOLINT(*-pro-bounds-pointer-arithmetic)
         v >>= 4U;
     }
     return s;
@@ -517,13 +517,13 @@ auto wgpu_vertex_attributes() -> std::array<WGPUVertexAttribute, 3> {
             WGPUVertexAttribute{.format = WGPUVertexFormat_Float32x2, .offset = 8, .shaderLocation = 1},
             WGPUVertexAttribute{.format = WGPUVertexFormat_Unorm8x4, .offset = 16, .shaderLocation = 2}};
 }
-} // namespace
+}  // namespace
 
 // ============================================================
 // Impl：全部 wgpu 资源与帧状态（pimpl，wgpu 头不外泄）
 // ============================================================
 
-struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
+struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
     // 单实例 pimpl：字段按语义分组（对象层级 / surface / 帧目标 / 缓存 / 批状态…），
     // 不为压缩 52B padding 打乱可读性，故显式豁免填充告警。
     // ---- 对象层级 ----
@@ -532,7 +532,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
     WGPUDevice device = nullptr;
     WGPUQueue queue = nullptr;
     bool device_ok = false;
-    bool compute_cap = false; // capabilities().compute（GL/GLES 后端为 false）
+    bool compute_cap = false;  // capabilities().compute（GL/GLES 后端为 false）
     WGPUBackendType adapter_backend = WGPUBackendType_Undefined;
 
     WgpuRhiOptions options;
@@ -553,25 +553,25 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         int height = 0;
     };
 
-    Tex canvas{}; ///< RGBA8 resolve 目标（可采样 + 读回拷贝源）
-    Tex msaa{}; ///< 4x 渲染附着（不可采样，pass 关闭时自动 resolve）
-    Tex alt{}; ///< 画布区域效果 A pass 目标（≥ 画布尺寸，层效果可撑大）
-    Tex dummy{}; ///< 1×1 RGBA8 全零：批不采样时的 binding 1 占位
+    Tex canvas{};  ///< RGBA8 resolve 目标（可采样 + 读回拷贝源）
+    Tex msaa{};  ///< 4x 渲染附着（不可采样，pass 关闭时自动 resolve）
+    Tex alt{};  ///< 画布区域效果 A pass 目标（≥ 画布尺寸，层效果可撑大）
+    Tex dummy{};  ///< 1×1 RGBA8 全零：批不采样时的 binding 1 占位
     int device_w = 0;
     int device_h = 0;
 
     // ---- 采样器（bind group 恒绑三枚；着色器按管线取用）----
     WGPUSampler samp_point = nullptr;
     WGPUSampler samp_linear = nullptr;
-    WGPUSampler samp_mip = nullptr; // Linear/Linear + 三线性 mip（静态大图降采样）
+    WGPUSampler samp_mip = nullptr;  // Linear/Linear + 三线性 mip（静态大图降采样）
 
     // ---- 着色器 / 管线 ----
     WGPUShaderModule shader = nullptr;
     WGPUBindGroupLayout bgl = nullptr;
     WGPUPipelineLayout pipeline_layout = nullptr;
-    WGPURenderPipeline pipes1[static_cast<std::size_t>(PipeId::Count)] = {}; // 采样数 1：层 pass / alt pass / present
-    WGPURenderPipeline pipes4[static_cast<std::size_t>(PipeId::Count)] = {}; // 采样数 4：画布 MSAA pass
-    WGPURenderPipeline pipe_present = nullptr; // vs_present + fs_copy（surface 格式）
+    WGPURenderPipeline pipes1[static_cast<std::size_t>(PipeId::Count)] = {};  // 采样数 1：层 pass / alt pass / present
+    WGPURenderPipeline pipes4[static_cast<std::size_t>(PipeId::Count)] = {};  // 采样数 4：画布 MSAA pass
+    WGPURenderPipeline pipe_present = nullptr;  // vs_present + fs_copy（surface 格式）
     WGPUTextureFormat present_format = WGPUTextureFormat_Undefined;
     // compute mip 链管线（仅 compute_cap 时创建；binding5 源纹理 + binding6 storage 目标）
     WGPUBindGroupLayout bgl_mip = nullptr;
@@ -599,8 +599,8 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
 
     // ---- 帧状态 ----
     WGPUCommandEncoder encoder = nullptr;
-    WGPURenderPassEncoder pass = nullptr; // 当前打开的目标 pass（效果序列中可短暂为空）
-    WGPUTextureView frame_view = nullptr; // 本帧 swapchain view（持有引用，帧尾释放）
+    WGPURenderPassEncoder pass = nullptr;  // 当前打开的目标 pass（效果序列中可短暂为空）
+    WGPUTextureView frame_view = nullptr;  // 本帧 swapchain view（持有引用，帧尾释放）
     // swapchain 纹理本体引用：⚠️ 必须活到 submit/present 之后（texture_arrays example 同序），
     // 提前释放会让 wgpu-core 在提交时判定「附着纹理已销毁」直接 Validation Error panic。
     WGPUTexture frame_tex = nullptr;
@@ -622,18 +622,18 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
     // 批 key：任一成员变化即 flush 当前批（对照 gpu_gl_rhi.cpp::BatchKey；GL 纹理名换
     // wgpu view 指针——view 即内容身份，同内容同 view 可合批）。
     struct BatchKey {
-        BasePipe pipeline = BasePipe::Solid; // 基管线（Solid/Border/Grad/Image/Text/Shadow）
+        BasePipe pipeline = BasePipe::Solid;  // 基管线（Solid/Border/Grad/Image/Text/Shadow）
         ClipState clip{};
-        bool blend_off = false; // Solid：ClearRect 无混合变体
-        bool blend_pma = false; // Image：PMA 混合变体
+        bool blend_off = false;  // Solid：ClearRect 无混合变体
+        bool blend_pma = false;  // Image：PMA 混合变体
         // Border / Shadow 共用 shape 盒（逻辑 dp 中心 + 半宽半高）
         float shape_cx = 0.0F;
         float shape_cy = 0.0F;
         float shape_hw = 0.0F;
         float shape_hh = 0.0F;
-        float border_radius = 0.0F; // Border 专用
+        float border_radius = 0.0F;  // Border 专用
         float border_width = 0.0F;
-        float shadow_blur = 0.0F; // Shadow 专用
+        float shadow_blur = 0.0F;  // Shadow 专用
         // Grad 专用：渐变几何参数 + LUT view
         bool grad_radial = false;
         float grad_ax = 0.0F;
@@ -642,9 +642,9 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         float grad_by = 0.0F;
         float grad_r = 0.0F;
         // Image 专用
-        bool pma_in_shader = false; // 1 = 直色纹理片元内 PMA（常驻流式通道）
-        bool nearest_filter = false; // Composite/DrawLayer 逐像素 floor 取样
-        bool use_mip = false; // 静态大图：三线性 mip 采样（compute 链已生成）
+        bool pma_in_shader = false;  // 1 = 直色纹理片元内 PMA（常驻流式通道）
+        bool nearest_filter = false;  // Composite/DrawLayer 逐像素 floor 取样
+        bool use_mip = false;  // 静态大图：三线性 mip 采样（compute 链已生成）
         // 源纹理 view（Grad LUT / Image / 字形页 / 层纹理；nullptr = dummy 占位）
         WGPUTextureView view = nullptr;
         auto operator==(const BatchKey &) const -> bool = default;
@@ -655,7 +655,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
     BatchKey key{};
     bool key_active = false;
     double alpha = 1.0;
-    float scale = 1.0F; // 设备像素 / 逻辑 dp
+    float scale = 1.0F;  // 设备像素 / 逻辑 dp
 
     // ---- 渐变 LUT 缓存（键 = 色标数组内容精确比对；容量溢出整体清空）----
     struct LutEntry {
@@ -672,15 +672,15 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         int width = 0;
         int height = 0;
         Tex tex{};
-        int mip_levels = 1; // compute 链级数（1 = 无 mip：GLES 后端 / 小图）
-        bool mips_pending = false; // 新建帧首次使用前生成（需 pass 关闭 + encoder 直录）
+        int mip_levels = 1;  // compute 链级数（1 = 无 mip：GLES 后端 / 小图）
+        bool mips_pending = false;  // 新建帧首次使用前生成（需 pass 关闭 + encoder 直录）
     };
 
     std::vector<ImageTexEntry> image_cache;
 
     // ---- GPU 字形图集（多页 R8 架式打包 + LRU 页淘汰，同 GL 策略）----
     struct GlyphSlotRect {
-        WGPUTextureView view = nullptr; // 所在页纹理 view（跨页文本自然断批）
+        WGPUTextureView view = nullptr;  // 所在页纹理 view（跨页文本自然断批）
         int x = 0;
         int y = 0;
         int w = 0;
@@ -710,7 +710,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         Tex tex{};
         int width = 0;
         int height = 0;
-        std::uint64_t version = 0; // 已上传内容对应的流式版本
+        std::uint64_t version = 0;  // 已上传内容对应的流式版本
     };
 
     std::unordered_map<std::uint64_t, StreamSlot> stream_slots;
@@ -718,7 +718,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
     // ---- GPU 层缓存（常驻层纹理 + 效果采样拷贝 aux，惰性分配）----
     struct LayerEntry {
         Tex tex{};
-        Tex aux{}; // 层内效果的采样拷贝（首次效果时分配）
+        Tex aux{};  // 层内效果的采样拷贝（首次效果时分配）
         int width = 0;
         int height = 0;
     };
@@ -735,7 +735,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
 
     std::unordered_map<std::uint64_t, LayerEntry> layer_cache;
     std::vector<LayerFrame> layer_stack;
-    bool layer_miss_warned = false; // DrawLayer 未命中告警只发一次
+    bool layer_miss_warned = false;  // DrawLayer 未命中告警只发一次
 
     WgpuRhi::FrameStats stats;
 
@@ -746,10 +746,10 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
     std::uint32_t readback_bpr = 0;
     bool map_done = false;
     bool map_armed = false;
-    bool readback_enabled = true; // 离屏帧尾是否录读回 copy + 登记 map（见 set_readback_enabled）
-    bool readback_mapped = false; // 自行跟踪映射态：v29 的 wgpuBufferGetMapState 是 unimplemented 存根，调用即 panic
+    bool readback_enabled = true;  // 离屏帧尾是否录读回 copy + 登记 map（见 set_readback_enabled）
+    bool readback_mapped = false;  // 自行跟踪映射态：v29 的 wgpuBufferGetMapState 是 unimplemented 存根，调用即 panic
 
-    std::vector<std::uint8_t> upload_scratch; // writeTexture 行 256 对齐暂存
+    std::vector<std::uint8_t> upload_scratch;  // writeTexture 行 256 对齐暂存
 
     // ---- 异步回调状态 ----
     bool cb_done = false;
@@ -788,8 +788,8 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         wgpu_release(uniform_buf, wgpuBufferRelease);
         wgpu_release(vertex_buf, wgpuBufferRelease);
         for (std::size_t i = 0; i < static_cast<std::size_t>(PipeId::Count); ++i) {
-            wgpu_release(pipes1[i], wgpuRenderPipelineRelease); // NOLINT(*-pro-bounds-constant-array-index)
-            wgpu_release(pipes4[i], wgpuRenderPipelineRelease); // NOLINT(*-pro-bounds-constant-array-index)
+            wgpu_release(pipes1[i], wgpuRenderPipelineRelease);  // NOLINT(*-pro-bounds-constant-array-index)
+            wgpu_release(pipes4[i], wgpuRenderPipelineRelease);  // NOLINT(*-pro-bounds-constant-array-index)
         }
         wgpu_release(pipe_present, wgpuRenderPipelineRelease);
         wgpu_release(pipe_mip, wgpuComputePipelineRelease);
@@ -849,7 +849,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         auto *self = static_cast<Impl *>(u1);
         self->cb_done = true;
         if (status == WGPURequestAdapterStatus_Success && ad != nullptr) {
-            self->adapter = ad; // PassedWithOwnership
+            self->adapter = ad;  // PassedWithOwnership
             return;
         }
         self->cb_error = "requestAdapter: " + sv_view(msg);
@@ -913,7 +913,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         WGPURequestAdapterOptions opts{};
         opts.featureLevel = options.backend == WgpuRhiOptions::Backend::GLES
                                 ? WGPUFeatureLevel_Compatibility
-                                : WGPUFeatureLevel_Undefined; // Undefined → Core
+                                : WGPUFeatureLevel_Undefined;  // Undefined → Core
         opts.powerPreference = WGPUPowerPreference_Undefined;
         opts.forceFallbackAdapter = WGPU_FALSE;
         opts.backendType = backend_filter();
@@ -924,7 +924,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         WGPURequestAdapterCallbackInfo cb{.mode = WGPUCallbackMode_WaitAnyOnly};
         cb.callback = &Impl::on_adapter_cb;
         cb.userdata1 = this;
-        wgpuInstanceRequestAdapter(instance, &opts, cb); // 回调在本调用返回前同步触发
+        wgpuInstanceRequestAdapter(instance, &opts, cb);  // 回调在本调用返回前同步触发
         if (!cb_done || adapter == nullptr) {
             if (cb_error.empty()) {
                 cb_error = "no adapter available (timeout or none matched)";
@@ -932,7 +932,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             AURORA_LOG_ERROR("gpu-wgpu", "adapter request failed: ", cb_error);
             return false;
         }
-        WGPUAdapterInfo info{.adapterType = WGPUAdapterType_Unknown}; // 0 值非法：占位，GetInfo 成功即覆盖
+        WGPUAdapterInfo info{.adapterType = WGPUAdapterType_Unknown};  // 0 值非法：占位，GetInfo 成功即覆盖
         if (wgpuAdapterGetInfo(adapter, &info) == WGPUStatus_Success) {
             compute_cap = info.backendType != WGPUBackendType_OpenGL && info.backendType != WGPUBackendType_OpenGLES;
             adapter_backend = info.backendType;
@@ -943,10 +943,10 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
     [[nodiscard]] bool init_device() {
         cb_done = false;
         cb_error.clear();
-        WGPURequestDeviceCallbackInfo cb{.mode = WGPUCallbackMode_WaitAnyOnly}; // mode 无 0 枚举项，随声明给值
+        WGPURequestDeviceCallbackInfo cb{.mode = WGPUCallbackMode_WaitAnyOnly};  // mode 无 0 枚举项，随声明给值
         cb.callback = &Impl::on_device_cb;
         cb.userdata1 = this;
-        wgpuAdapterRequestDevice(adapter, nullptr, cb); // 回调同步触发（同上）
+        wgpuAdapterRequestDevice(adapter, nullptr, cb);  // 回调同步触发（同上）
         if (!cb_done || device == nullptr) {
             if (cb_error.empty()) {
                 cb_error = "device request failed";
@@ -1003,7 +1003,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         if (hinstance == nullptr) {
             hinstance = GetModuleHandle(nullptr);
         }
-        WGPUSurfaceSourceWindowsHWND src; // sType 无 0 枚举项：字段就地赋值，勿零初始化
+        WGPUSurfaceSourceWindowsHWND src;  // sType 无 0 枚举项：字段就地赋值，勿零初始化
         src.chain.next = nullptr;
         src.chain.sType = WGPUSType_SurfaceSourceWindowsHWND;
         src.hinstance = hinstance;
@@ -1026,20 +1026,20 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         if (options.linux_host == WgpuRhiOptions::LinuxHost::Wayland) {
             // Wayland：display + wl_surface 双 void* 句柄直传（无 XID 那样的整数装拆）；
             // wl_surface 已由宿主在首个 xdg_toplevel.configure 后才走到这里（构造阻塞等齐）。
-            WGPUSurfaceSourceWaylandSurface src; // sType 无 0 枚举项：字段就地赋值，勿零初始化
+            WGPUSurfaceSourceWaylandSurface src;  // sType 无 0 枚举项：字段就地赋值，勿零初始化
             src.chain.next = nullptr;
             src.chain.sType = WGPUSType_SurfaceSourceWaylandSurface;
             src.display = options.native_display;
             src.surface = options.native_window;
             create_with(src.chain);
         } else {
-            WGPUSurfaceSourceXlibWindow src; // sType 无 0 枚举项：字段就地赋值，勿零初始化
+            WGPUSurfaceSourceXlibWindow src;  // sType 无 0 枚举项：字段就地赋值，勿零初始化
             src.chain.next = nullptr;
             src.chain.sType = WGPUSType_SurfaceSourceXlibWindow;
             src.display = options.native_display;
             // webgpu.h 的 SurfaceSourceXlibWindow::window 是 uint64_t（XID 全宽），勿窄化为 u32。
             src.window = static_cast<std::uint64_t>(
-                reinterpret_cast<std::uintptr_t>(options.native_window)); // NOLINT(*-pro-type-reinterpret-cast)
+                reinterpret_cast<std::uintptr_t>(options.native_window));  // NOLINT(*-pro-type-reinterpret-cast)
             create_with(src.chain);
         }
 #else
@@ -1075,7 +1075,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             fmt = caps.formats[0];
         }
         const WGPUPresentMode want = options.vsync ? WGPUPresentMode_Fifo : WGPUPresentMode_Immediate;
-        present_mode = WGPUPresentMode_Fifo; // FIFO 恒有保证（头注明）
+        present_mode = WGPUPresentMode_Fifo;  // FIFO 恒有保证（头注明）
         for (std::size_t i = 0; i < caps.presentModeCount; ++i) {
             if (caps.presentModes[i] == want) {
                 present_mode = want;
@@ -1099,7 +1099,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         cfg.height = static_cast<std::uint32_t>(h);
         cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
         cfg.presentMode = present_mode;
-        wgpuSurfaceConfigure(surface, &cfg); // 错误在下帧 getCurrentTexture 状态中暴露
+        wgpuSurfaceConfigure(surface, &cfg);  // 错误在下帧 getCurrentTexture 状态中暴露
         surface_format = fmt;
         surface_cw = w;
         surface_ch = h;
@@ -1342,7 +1342,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             if (bgl_fx == nullptr || pipeline_layout_fx == nullptr) {
                 return nullptr;
             }
-            WGPUComputeState fx_cs{}; // 命名区别于上方 cs_mip 的 cs（避免同名遮蔽）
+            WGPUComputeState fx_cs{};  // 命名区别于上方 cs_mip 的 cs（避免同名遮蔽）
             fx_cs.module = shader;
             fx_cs.entryPoint = sv(entry);
             WGPUComputePipelineDescriptor d{};
@@ -1489,9 +1489,8 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
 
     /// @brief compute 区域效果/storage 写出可用时的附加用法位（GLES 兜底端为 0，不请求不支持的用法）。
     [[nodiscard]] constexpr auto storage_usage() const -> WGPUTextureUsage {
-        return compute_cap
-                   ? static_cast<WGPUTextureUsage>(WGPUTextureUsage_StorageBinding)
-                   : static_cast<WGPUTextureUsage>(0);
+        return compute_cap ? static_cast<WGPUTextureUsage>(WGPUTextureUsage_StorageBinding)
+                           : static_cast<WGPUTextureUsage>(0);
     }
 
     /// @brief 画布三件套随设备尺寸建/重建（旧对象经已录制引用保活，直接弃置安全）。
@@ -1506,10 +1505,10 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         // canvas：compute blur V 段/回写通道的目标（CopyDst = alt→canvas 区域拷贝；Storage = compute 写）。
         canvas = make_tex(w, h, WGPUTextureFormat_RGBA8Unorm,
                           WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding |
-                          WGPUTextureUsage_CopySrc | WGPUTextureUsage_CopyDst | storage_usage());
+                              WGPUTextureUsage_CopySrc | WGPUTextureUsage_CopyDst | storage_usage());
         alt = make_tex(w, h, WGPUTextureFormat_RGBA8Unorm,
                        WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc |
-                       WGPUTextureUsage_CopyDst | storage_usage());
+                           WGPUTextureUsage_CopyDst | storage_usage());
         if (msaa.tex == nullptr || canvas.tex == nullptr || alt.tex == nullptr) {
             AURORA_LOG_ERROR("gpu-wgpu", "canvas targets ", w, "x", h, " creation failed");
             return false;
@@ -1529,7 +1528,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         release_tex(&alt);
         alt = make_tex(nw, nh, WGPUTextureFormat_RGBA8Unorm,
                        WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc |
-                       WGPUTextureUsage_CopyDst | storage_usage());
+                           WGPUTextureUsage_CopyDst | storage_usage());
         return alt.tex != nullptr;
     }
 
@@ -1736,7 +1735,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         }
         e.tex = make_tex(img.width, img.height, WGPUTextureFormat_RGBA8Unorm,
                          WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst |
-                         (e.mip_levels > 1 ? WGPUTextureUsage_StorageBinding : static_cast<WGPUTextureUsage>(0)),
+                             (e.mip_levels > 1 ? WGPUTextureUsage_StorageBinding : static_cast<WGPUTextureUsage>(0)),
                          1, static_cast<std::uint32_t>(e.mip_levels));
         if (e.tex.tex == nullptr) {
             AURORA_LOG_WARN("gpu-wgpu", "image texture alloc failed");
@@ -1792,8 +1791,8 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             if (cp != nullptr) {
                 wgpuComputePassEncoderSetPipeline(cp, pipe_mip);
                 wgpuComputePassEncoderSetBindGroup(cp, 0, bg, 0, nullptr);
-                const int dw = std::max(1, t.width >> l); // NOLINT(*-signed-bitwise)
-                const int dh = std::max(1, t.height >> l); // NOLINT(*-signed-bitwise)
+                const int dw = std::max(1, t.width >> l);  // NOLINT(*-signed-bitwise)
+                const int dh = std::max(1, t.height >> l);  // NOLINT(*-signed-bitwise)
                 wgpuComputePassEncoderDispatchWorkgroups(cp, static_cast<std::uint32_t>((dw + 7) / 8),
                                                          static_cast<std::uint32_t>((dh + 7) / 8), 1);
                 wgpuComputePassEncoderEnd(cp);
@@ -1821,8 +1820,8 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             return false;
         }
         ustage.resize(static_cast<std::size_t>(uoff));
-        const auto *gb = reinterpret_cast<const std::uint8_t *>(&gu); // NOLINT(*-pro-type-reinterpret-cast)
-        ustage.insert(ustage.end(), gb, gb + sizeof(Globals)); // NOLINT(*-pro-bounds-pointer-arithmetic)
+        const auto *gb = reinterpret_cast<const std::uint8_t *>(&gu);  // NOLINT(*-pro-type-reinterpret-cast)
+        ustage.insert(ustage.end(), gb, gb + sizeof(Globals));  // NOLINT(*-pro-bounds-pointer-arithmetic)
         wgpuQueueWriteBuffer(queue, uniform_buf, uoff, &gu, sizeof(Globals));
         WGPUBindGroupEntry entries[3] = {};
         entries[0].binding = 0;
@@ -2000,7 +1999,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             }
             pg = &glyph_pages[static_cast<std::size_t>(active_glyph_page)];
             if (w > pg->tex.width || h > pg->tex.height || pg->pack_x + w > pg->tex.width) {
-                return GlyphSlotRect{}; // 换页后仍放不下（异常大字形），放弃
+                return GlyphSlotRect{};  // 换页后仍放不下（异常大字形），放弃
             }
         }
         GlyphSlotRect slot;
@@ -2062,7 +2061,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         const auto usage = (WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding |
                             WGPUTextureUsage_CopySrc | WGPUTextureUsage_CopyDst | storage_usage());
         release_tex(&entry->tex);
-        release_tex(&entry->aux); // 尺寸变化：aux 采样拷贝一并作废重建（惰性分配）
+        release_tex(&entry->aux);  // 尺寸变化：aux 采样拷贝一并作废重建（惰性分配）
         entry->tex = make_tex(w, h, WGPUTextureFormat_RGBA8Unorm, usage);
         if (entry->tex.tex == nullptr) {
             AURORA_LOG_ERROR("gpu-wgpu", "layer texture ", w, "x", h, " creation failed");
@@ -2138,11 +2137,11 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             Vertex{.x = x1, .y = y1, .u = u1, .v = v1, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
             Vertex{.x = x0, .y = y1, .u = u0, .v = v1, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
         };
-        verts.insert(verts.end(), base, base + 4); // NOLINT(*-pro-bounds-pointer-arithmetic)
+        verts.insert(verts.end(), base, base + 4);  // NOLINT(*-pro-bounds-pointer-arithmetic)
     }
 
     void begin_batch(const BatchKey &k) {
-        if (key_active && !(key == k)) { // NOLINT
+        if (key_active && !(key == k)) {  // NOLINT
             flush_batch();
         }
         key = k;
@@ -2158,8 +2157,8 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             return false;
         }
         ustage.resize(static_cast<std::size_t>(uoff));
-        const auto *gb = reinterpret_cast<const std::uint8_t *>(&gu); // NOLINT(*-pro-type-reinterpret-cast)
-        ustage.insert(ustage.end(), gb, gb + sizeof(Globals)); // NOLINT(*-pro-bounds-pointer-arithmetic)
+        const auto *gb = reinterpret_cast<const std::uint8_t *>(&gu);  // NOLINT(*-pro-type-reinterpret-cast)
+        ustage.insert(ustage.end(), gb, gb + sizeof(Globals));  // NOLINT(*-pro-bounds-pointer-arithmetic)
         wgpuQueueWriteBuffer(queue, uniform_buf, uoff, &gu, sizeof(Globals));
 
         WGPUBindGroupEntry entries[5] = {};
@@ -2197,8 +2196,8 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             return false;
         }
         wgpuQueueWriteBuffer(queue, vertex_buf, voff, tri.data(), static_cast<std::size_t>(vbytes));
-        const auto *vb = reinterpret_cast<const std::uint8_t *>(tri.data()); // NOLINT(*-pro-type-reinterpret-cast)
-        vstage.insert(vstage.end(), vb, vb + vbytes); // NOLINT(*-pro-bounds-pointer-arithmetic)
+        const auto *vb = reinterpret_cast<const std::uint8_t *>(tri.data());  // NOLINT(*-pro-type-reinterpret-cast)
+        vstage.insert(vstage.end(), vb, vb + vbytes);  // NOLINT(*-pro-bounds-pointer-arithmetic)
         *voff_out = voff;
         *vbytes_out = vbytes;
         return true;
@@ -2268,7 +2267,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vertex_buf, voff, vbytes);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bg, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, static_cast<std::uint32_t>(tri.size()), 1, 0, 0);
-        wgpuBindGroupRelease(bg); // 已录制命令内部持有引用
+        wgpuBindGroupRelease(bg);  // 已录制命令内部持有引用
 
         stats.draw_calls++;
         stats.vertices += static_cast<std::uint32_t>(tri.size());
@@ -2339,7 +2338,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         std::vector<Vertex> tri;
         tri.reserve(6);
         for (const int idx : {0, 1, 2, 0, 2, 3}) {
-            tri.push_back(base[idx]); // NOLINT(*-pro-bounds-constant-array-index)
+            tri.push_back(base[idx]);  // NOLINT(*-pro-bounds-constant-array-index)
         }
         std::uint64_t voff = 0;
         std::uint64_t vbytes = 0;
@@ -2397,7 +2396,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
 
     void canvas_blend_mask(PipeId pipe_fx, const Globals &gu_fx, int rx0, int ry0, int rx1, int ry1) {
         flush_batch();
-        close_pass(); // resolve 落地：canvas_ 此刻新鲜
+        close_pass();  // resolve 落地：canvas_ 此刻新鲜
         if (!ensure_alt(device_w, device_h)) {
             return;
         }
@@ -2410,7 +2409,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             gu.region[2] = static_cast<float>(rx1 - rx0);
             gu.region[3] = static_cast<float>(ry1 - ry0);
             if (fx_compute_to_target(cp, gu, rx0, ry0, rx1, ry1, canvas.view, canvas)) {
-                return; // pass 维持关闭：后续命令经 ensure_target_pass 以 Load 重开
+                return;  // pass 维持关闭：后续命令经 ensure_target_pass 以 Load 重开
             }
         }
         const float s = scale > 0.0F ? scale : 1.0F;
@@ -2513,7 +2512,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             gu.region[2] = static_cast<float>(rx1 - rx0);
             gu.region[3] = static_cast<float>(ry1 - ry0);
             if (fx_compute_to_target(cp, gu, rx0, ry0, rx1, ry1, entry->aux.view, entry->tex)) {
-                return; // 层 pass 维持关闭（同下「compute 路」口径）
+                return;  // 层 pass 维持关闭（同下「compute 路」口径）
             }
         }
         if (!ensure_target_pass()) {
@@ -2552,7 +2551,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             gu_v.tex_ctl[3] = 1.0F;
             if (dispatch_region_fx(pipe_blur, gu_h, entry->aux.view, alt.view, rx1 - rx0, ry1 - ry0) &&
                 dispatch_region_fx(pipe_blur, gu_v, alt.view, entry->tex.view, rx1 - rx0, ry1 - ry0)) {
-                return; // 层 pass 维持关闭（同 layer_blend_mask 口径）
+                return;  // 层 pass 维持关闭（同 layer_blend_mask 口径）
             }
         }
         const auto lx0 = static_cast<float>(rx0) / s;
@@ -2607,7 +2606,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                 // 语义：区域归零（RGBA 全零，不走混合、不受裁剪/alpha 影响）——镜像 Painter::clear_rect。
                 BatchKey k{};
                 k.pipeline = BasePipe::Solid;
-                k.clip = ClipState{}; // 明确关闭裁剪
+                k.clip = ClipState{};  // 明确关闭裁剪
                 k.blend_off = true;
                 begin_batch(k);
                 push_quad(cmd.bounds.origin.x, cmd.bounds.origin.y, cmd.bounds.origin.x + cmd.bounds.size.width,
@@ -2661,7 +2660,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                     Vertex{.x = bx - nx, .y = by - ny, .u = 1.0F, .v = 1.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
                     Vertex{.x = ax - nx, .y = ay - ny, .u = 0.0F, .v = 1.0F, .r = c.r, .g = c.g, .b = c.b, .a = c.a},
                 };
-                verts.insert(verts.end(), base, base + 4); // NOLINT(*-pro-bounds-pointer-arithmetic)
+                verts.insert(verts.end(), base, base + 4);  // NOLINT(*-pro-bounds-pointer-arithmetic)
                 break;
             }
             case CmdKind::Polyline: {
@@ -2727,7 +2726,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                 begin_batch(k);
                 const Color c = bake_alpha(cmd.color, alpha);
                 // 首版降级：（环）扇按角度细分为梯形 quad，以弦逼近弧（无 SDF 羽化）。
-                constexpr float step = 0.12F; // 每段弧度（≈6.9°），弦误差 < 外径的 0.1%
+                constexpr float step = 0.12F;  // 每段弧度（≈6.9°），弦误差 < 外径的 0.1%
                 const int slices = std::clamp(static_cast<int>(std::ceil(sweep / step)), 8, 256);
                 for (int i = 0; i < slices; ++i) {
                     const float t0 = cmd.f2 + ((sweep * static_cast<float>(i)) / static_cast<float>(slices));
@@ -2840,7 +2839,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                 const int lw = std::max(1, static_cast<int>(std::lround(cmd.bounds.size.width * s)));
                 const int lh = std::max(1, static_cast<int>(std::lround(cmd.bounds.size.height * s)));
                 flush_batch();
-                close_pass(); // 父目标内容落地；后续 flush 按需 Load 重开
+                close_pass();  // 父目标内容落地；后续 flush 按需 Load 重开
                 LayerEntry &entry = layer_cache[lkey];
                 if (entry.width != lw || entry.height != lh) {
                     if (!create_layer_attachment(&entry, lw, lh)) {
@@ -2859,13 +2858,13 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                 layer_stack.push_back(std::move(frame));
                 // Clear 层内零基底；失败由后续 flush 的 ensure_target_pass 兜底重开。
                 (void)open_pass(entry.tex, nullptr, true, PassKind::Layer);
-                clip_stack.clear(); // 层局部坐标：外部裁剪不带入（合成时经 DrawLayer 批裁剪）
+                clip_stack.clear();  // 层局部坐标：外部裁剪不带入（合成时经 DrawLayer 批裁剪）
                 break;
             }
             case CmdKind::EndLayer: {
                 // 层内容定稿（pass 关闭即提交），恢复重定向前的目标与状态（裁剪栈 / alpha）。
                 if (layer_stack.empty()) {
-                    break; // 防御：不配对的 EndLayer
+                    break;  // 防御：不配对的 EndLayer
                 }
                 flush_batch();
                 close_pass();
@@ -2896,9 +2895,9 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                 const float lw = static_cast<float>(entry.width) / src_scale;
                 const float lh = static_cast<float>(entry.height) / src_scale;
                 BatchKey k{};
-                k.pipeline = BasePipe::Image; // blend_pma=false：层内容为直色 src-over
+                k.pipeline = BasePipe::Image;  // blend_pma=false：层内容为直色 src-over
                 k.clip = effective_clip();
-                k.nearest_filter = true; // 与软件位图 floor 采样同语义
+                k.nearest_filter = true;  // 与软件位图 floor 采样同语义
                 k.view = entry.tex.view;
                 begin_batch(k);
                 // 仿射矩阵直烘进四角顶点（与 Composite 同构）；uv = 层逻辑角点归一化。
@@ -2933,7 +2932,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                     [this, &clip, &cmd](const render::GlyphAtlas::Entry &entry, render::GlyphAtlas::Mode mode, int dx0,
                                         int dy0, std::uint64_t glyph_key) {
                         if (mode != render::GlyphAtlas::Mode::Gray) {
-                            return; // 防御：GPU 路径恒灰度
+                            return;  // 防御：GPU 路径恒灰度
                         }
                         // 取槽位可能触发页新建/淘汰（不 flush：wgpu 引用保活），须在
                         // begin_batch 之前完成。
@@ -2944,7 +2943,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                         BatchKey k{};
                         k.pipeline = BasePipe::Text;
                         k.clip = clip;
-                        k.view = slot.view; // 槽位所在页纹理（跨页文本自然断批）
+                        k.view = slot.view;  // 槽位所在页纹理（跨页文本自然断批）
                         begin_batch(k);
                         // 顶点坐标：物理像素 → 逻辑 dp（NDC 映射基准）；uv = 槽位预归一化矩形。
                         const float inv_s = 1.0F / scale;
@@ -2954,7 +2953,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                                      y0 + (static_cast<float>(slot.h) * inv_s), slot.u0, slot.v0, slot.u1, slot.v1,
                                      bake_alpha(cmd.color, alpha));
                     });
-                (void)ok; // 无字体面（引擎恒有内置字体，理论不触发）：GPU 路径无位图兜底，跳过
+                (void)ok;  // 无字体面（引擎恒有内置字体，理论不触发）：GPU 路径无位图兜底，跳过
                 break;
             }
             case CmdKind::DrawImage: {
@@ -2978,7 +2977,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                         break;
                     }
                     if (slot->version != img.stream_version) {
-                        flush_batch(); // 整帧重传前行 0 与已录制批的读危险：先落地引用旧内容的批
+                        flush_batch();  // 整帧重传前行 0 与已录制批的读危险：先落地引用旧内容的批
                         if (!write_tex_sub(slot->tex, 0, 0, img.width, img.height, img.pixels.data(), 0, 4)) {
                             break;
                         }
@@ -2987,8 +2986,8 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                     BatchKey k{};
                     k.pipeline = BasePipe::Image;
                     k.clip = effective_clip();
-                    k.blend_pma = true; // 输出 PMA 语义，混合同静态图
-                    k.pma_in_shader = true; // 直色纹理：PMA 下沉到片元（上传期无 CPU 预乘）
+                    k.blend_pma = true;  // 输出 PMA 语义，混合同静态图
+                    k.pma_in_shader = true;  // 直色纹理：PMA 下沉到片元（上传期无 CPU 预乘）
                     k.view = slot->tex.view;
                     begin_batch(k);
                     push_quad(cmd.bounds.origin.x, cmd.bounds.origin.y, cmd.bounds.origin.x + cmd.bounds.size.width,
@@ -3130,9 +3129,9 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                 const float s = scale > 0.0F ? scale : 1.0F;
                 const int r = std::max(1, static_cast<int>(cmd.f0 * s));
                 if (!layer_stack.empty()) {
-                    layer_blur(r, rx0, ry0, rx1, ry1); // aux → alt（dir0）→ 层（dir1）
+                    layer_blur(r, rx0, ry0, rx1, ry1);  // aux → alt（dir0）→ 层（dir1）
                 } else {
-                    canvas_blur(r, rx0, ry0, rx1, ry1); // canvas resolve → alt（dir0）→ 画布（dir1）
+                    canvas_blur(r, rx0, ry0, rx1, ry1);  // canvas resolve → alt（dir0）→ 画布（dir1）
                 }
                 break;
             }
@@ -3262,7 +3261,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
         const std::span tri_bytes{reinterpret_cast<const std::uint8_t *>(tri), sizeof(tri)};
         vstage.insert(vstage.end(), tri_bytes.begin(), tri_bytes.end());
-        constexpr Globals gu{}; // vs_present 不用 cv4；fs_copy 只用 uv
+        constexpr Globals gu{};  // vs_present 不用 cv4；fs_copy 只用 uv
         std::uint64_t uoff = 0;
         WGPUBindGroup bg = nullptr;
         if (!upload_globals_and_bind(gu, canvas.view, &uoff, &bg)) {
@@ -3313,12 +3312,12 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                     wgpuBufferUnmap(readback);
                     readback_mapped = false;
                 }
-                map_armed = false; // 映射已结清（成功解除或失败本就未映射）：缓冲可复用
+                map_armed = false;  // 映射已结清（成功解除或失败本就未映射）：缓冲可复用
             }
         }
         stats = {};
         clip_stack.clear();
-        layer_stack.clear(); // 防御：上帧不配对 BeginLayer 残留
+        layer_stack.clear();  // 防御：上帧不配对 BeginLayer 残留
         alpha = 1.0;
         key_active = false;
         key = BatchKey{};
@@ -3342,7 +3341,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                 st.status == WGPUSurfaceGetCurrentTextureStatus_Lost) {
                 // 尺寸/设备变化：重配一次再取；仍失败则本帧放弃。
                 if (st.texture != nullptr) {
-                    wgpuTextureRelease(st.texture); // Outdated 亦回纹理：先弃再重取
+                    wgpuTextureRelease(st.texture);  // Outdated 亦回纹理：先弃再重取
                 }
                 surface_configured = false;
                 if (!configure_surface(device_width, device_height)) {
@@ -3355,7 +3354,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                 case WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal:
                     break;
                 case WGPUSurfaceGetCurrentTextureStatus_Lost:
-                    device_ok = false; // 设备丢失级：永久回退（契约语义）
+                    device_ok = false;  // 设备丢失级：永久回退（契约语义）
                     return false;
                 default:
                     return false;
@@ -3364,9 +3363,9 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
                 return false;
             }
             wgpu_release(frame_view, wgpuTextureViewRelease);
-            wgpu_release(frame_tex, wgpuTextureRelease); // 上帧滞留引用（防御：end_frame 未跑）
+            wgpu_release(frame_tex, wgpuTextureRelease);  // 上帧滞留引用（防御：end_frame 未跑）
             frame_view = wgpuTextureCreateView(st.texture, nullptr);
-            frame_tex = st.texture; // 本体引用持到 end_frame submit 后释放（见成员注释）
+            frame_tex = st.texture;  // 本体引用持到 end_frame submit 后释放（见成员注释）
             if (frame_view == nullptr) {
                 return false;
             }
@@ -3394,7 +3393,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
             return;
         }
         flush_batch();
-        close_pass(); // 最终 resolve：canvas_ 纹理此刻承载整帧内容
+        close_pass();  // 最终 resolve：canvas_ 纹理此刻承载整帧内容
 
         if (surface == nullptr) {
             // 离屏诊断通道：帧尾拷贝，read_pixels 处等待 map。上一次 map 仍未落地
@@ -3417,7 +3416,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         wgpuQueueSubmit(queue, 1, &cmdbuf);
         wgpuCommandBufferRelease(cmdbuf);
         if (surface == nullptr) {
-            map_readback(); // 提交完成后才能登记映射（见 arm_readback 注释）
+            map_readback();  // 提交完成后才能登记映射（见 arm_readback 注释）
         }
 
         if (surface != nullptr && wgpuSurfacePresent(surface) != WGPUStatus_Success) {
@@ -3474,7 +3473,7 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
         if (!map_armed || readback == nullptr) {
             return;
         }
-        WGPUBufferMapCallbackInfo cb{.mode = WGPUCallbackMode_WaitAnyOnly}; // mode 无 0 枚举项，随声明给值
+        WGPUBufferMapCallbackInfo cb{.mode = WGPUCallbackMode_WaitAnyOnly};  // mode 无 0 枚举项，随声明给值
         cb.callback = &Impl::on_map_cb;
         cb.userdata1 = this;
         wgpuBufferMapAsync(readback, WGPUMapMode_Read, 0, readback_len, cb);
@@ -3513,11 +3512,9 @@ struct WgpuRhi::Impl { // NOLINT(clang-analyzer-optin.performance.Padding)
 // WgpuRhi 公共面
 // ============================================================
 
-WgpuRhi::WgpuRhi() : impl_(std::make_unique<Impl>()) {
-}
+WgpuRhi::WgpuRhi() : impl_(std::make_unique<Impl>()) {}
 
-WgpuRhi::WgpuRhi(const WgpuRhiOptions &options) : impl_(std::make_unique<Impl>(options)) {
-}
+WgpuRhi::WgpuRhi(const WgpuRhiOptions &options) : impl_(std::make_unique<Impl>(options)) {}
 
 WgpuRhi::~WgpuRhi() = default;
 
@@ -3525,7 +3522,7 @@ auto WgpuRhi::valid() const -> bool { return impl_ && impl_->device_ok; }
 
 auto WgpuRhi::submit(const DrawCmd &cmd, const CmdData &data) -> void {
     if (impl_ == nullptr || !impl_->device_ok || !impl_->frame_open) {
-        return; // 帧外提交的命令不消费（对齐 GL 路径 active 守卫）
+        return;  // 帧外提交的命令不消费（对齐 GL 路径 active 守卫）
     }
     impl_->translate(cmd, data);
 }
@@ -3599,9 +3596,9 @@ auto WgpuRhi::update_stream_image(StreamImageId id, const std::uint8_t *pixels, 
     }
     const Impl::StreamSlot &slot = it->second;
     if (x < 0 || y < 0 || x + w > slot.width || y + h > slot.height) {
-        return; // 脏矩形越界：按契约忽略（界内性由调用方保证）
+        return;  // 脏矩形越界：按契约忽略（界内性由调用方保证）
     }
-    impl_->flush_batch(); // 上传区可能与已录制批同区：先落地避免帧内读到半新内容
+    impl_->flush_batch();  // 上传区可能与已录制批同区：先落地避免帧内读到半新内容
     const std::size_t stride = stride_bytes != 0 ? stride_bytes : static_cast<std::size_t>(slot.width) * 4U;
     impl_->write_tex_sub(slot.tex, x, y, w, h,
                          // NOLINTNEXTLINE(*-pro-bounds-pointer-arithmetic)
@@ -3627,6 +3624,6 @@ auto WgpuRhi::import_native_surface(const NativeSurfaceFrame & /*frame*/) -> Str
                     "import_native_surface: no external texture import in wgpu-native v29 C API; CPU upload fallback");
     return 0;
 }
-} // namespace aurora::rhi
+}  // namespace aurora::rhi
 
 #endif

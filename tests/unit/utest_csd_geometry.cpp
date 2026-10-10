@@ -94,8 +94,8 @@ AURORA_TEST_CASE(content_inset_matches_decoration_matrix) {
 }
 
 AURORA_TEST_CASE(surface_to_content_subtracts_margin) {
-    AURORA_TEST_CHECK_EQ(csd::surface_to_content(10.0, 10), 0.0);    // 表面内容原点
-    AURORA_TEST_CHECK_EQ(csd::surface_to_content(0.0, 10), -10.0);   // 表面左上角（margin 外缘）
+    AURORA_TEST_CHECK_EQ(csd::surface_to_content(10.0, 10), 0.0);  // 表面内容原点
+    AURORA_TEST_CHECK_EQ(csd::surface_to_content(0.0, 10), -10.0);  // 表面左上角（margin 外缘）
     AURORA_TEST_CHECK_EQ(csd::surface_to_content(42.5, 10), 32.5);
     // 塌缩态映射恒等（指针坐标不偏移）。
     AURORA_TEST_CHECK_EQ(csd::surface_to_content(123.0, 0), 123.0);
@@ -124,7 +124,7 @@ AURORA_TEST_CASE(resize_zone_classifies_eight_directions) {
     AURORA_TEST_CHECK(csd::classify_resize_zone(-10.0, 40.0, w, h, margin) == Z::Left);  // 含外缘
     AURORA_TEST_CHECK(csd::classify_resize_zone(-11.0, 40.0, w, h, margin) == Z::None);
     AURORA_TEST_CHECK(csd::classify_resize_zone(110.0, 40.0, w, h, margin) == Z::None);  // x<W+m 为严格小于
-    AURORA_TEST_CHECK(csd::classify_resize_zone(50.0, 40.0, w, h, margin) == Z::None);   // 内容内部
+    AURORA_TEST_CHECK(csd::classify_resize_zone(50.0, 40.0, w, h, margin) == Z::None);  // 内容内部
 
     // 零边距（塌缩态）：任何坐标都不分类，含负坐标（此时指针不可能在表面外）。
     AURORA_TEST_CHECK(csd::classify_resize_zone(-1.0, 40.0, w, h, 0) == Z::None);
@@ -134,7 +134,7 @@ AURORA_TEST_CASE(resize_zone_classifies_eight_directions) {
 AURORA_TEST_CASE(title_bar_band_uses_content_domain) {
     constexpr float tb = 28.0F;
     AURORA_TEST_CHECK_FALSE(csd::point_in_title_bar(-1.0, tb));
-    AURORA_TEST_CHECK_TRUE(csd::point_in_title_bar(0.0, tb));    // 含内容上边界
+    AURORA_TEST_CHECK_TRUE(csd::point_in_title_bar(0.0, tb));  // 含内容上边界
     AURORA_TEST_CHECK_TRUE(csd::point_in_title_bar(27.9, tb));
     AURORA_TEST_CHECK_FALSE(csd::point_in_title_bar(28.0, tb));  // 严格小于标题栏高度
     AURORA_TEST_CHECK_FALSE(csd::point_in_title_bar(60.0, tb));
