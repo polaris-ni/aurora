@@ -725,11 +725,24 @@ jobs:
           # 其后是扩面所需的后端开发包（X11 / Wayland / GLFW 的 configure 依赖）：主 Linux 遍
           # 要打开 X11/Wayland/GLFW，缺这些包 configure 期直接 FATAL。ALSA 音频走运行期 dlopen、
           # 无 dev 包依赖（见 AuroraBackends.cmake 音频段），故不在列表里。
-          sudo apt-get install -y clang-tidy-22 clang-format-22 \
+          # libclang1-22：wgpu-native 的 bindgen 由 configure 期探测 libclang 共享库，clang-tidy-22
+          # 只拉 libclang-cpp22（C++ 接口）不含 C 接口的 libclang-22.so.1，故显式补装。
+          sudo apt-get install -y clang-tidy-22 clang-format-22 libclang1-22 \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
             libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
+
+      # AURORA_BACKEND_GPU_WGPU=ON 的 configure 期硬探测 cargo / rustc（见 AuroraBackends.cmake）；
+      # 运行器镜像通常已预装 Rust，存在即跳过，缺失时才经 rustup 装最小 stable。
+      - name: Ensure Rust toolchain (wgpu backend configure probe)
+        run: |
+          if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          cargo --version || true
+          rustc -vV || true
 
       # AURORA_LINT_SHARD 只在 configure 期烧进 `lint` 目标的命令行（见 AuroraLint.cmake），
       # 且格式非法 / 索引越界会当场 FATAL_ERROR——分片配错的症状是「某片没人跑」，必须早响。
@@ -773,8 +786,11 @@ jobs:
           fi
 
       # 扩面：主 Linux 遍打开除 Windows/macOS 特有宏之外的全部后端与能力开关，让
-      # `#ifdef AURORA_BACKEND_X11/WAYLAND/GLFW`、音频、SQLite、图像编解码、Inspector Server 与
-      # verify 探针都进入分析面。`matrix.pass.flags` 追加反极性遍的优化开关收口。
+      # `#ifdef AURORA_BACKEND_X11/WAYLAND/GLFW`、GPU（GL / wgpu-native）、音频、SQLite、图像编解码、
+      # Inspector Server、性能观测（PROFILING/TRACING）与 verify 探针都进入分析面。
+      # `matrix.pass.flags` 追加反极性遍的优化开关收口。
+      # ⚠️ AURORA_BACKEND_GPU_WGPU=ON 只做 configure 期工具链探测（cargo/rustc/libclang），lint 目标
+      #    不构建 wgpu_native_build，故无需真正跑 cargo 编译。
       - name: Configure (${{ matrix.pass.label }}, export compile_commands.json)
         run: |
           cmake -S . -B build-lint -G Ninja \
@@ -783,8 +799,10 @@ jobs:
             -DAURORA_ENABLE_DEBUG=${{ matrix.pass.debug }} \
             -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }} \
             -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON \
+            -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON \
             -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON \
             -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON \
+            -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON \
             -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON \
             ${{ matrix.pass.flags }}
 
@@ -1067,12 +1085,22 @@ jobs:
           echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           # clang-format-22 与扩面所需的后端开发包（X11/Wayland/GLFW 的 configure 依赖）一并装上，
-          # 与作业 8 同口径。ALSA 走运行期 dlopen，无 dev 包依赖。
-          sudo apt-get install -y clang-tidy-22 clang-format-22 \
+          # 与作业 8 同口径。ALSA 走运行期 dlopen，无 dev 包依赖。libclang1-22 见作业 8 同名步骤说明。
+          sudo apt-get install -y clang-tidy-22 clang-format-22 libclang1-22 \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
             libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
+
+      # 与作业 8 同口径：wgpu 后端的 configure 期硬探测 cargo / rustc；镜像预装则跳过。
+      - name: Ensure Rust toolchain (wgpu backend configure probe)
+        run: |
+          if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          cargo --version || true
+          rustc -vV || true
 
       - name: Compute changed files (push scope)
         id: changed
@@ -1099,8 +1127,10 @@ jobs:
           set -euo pipefail
           cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF \
             -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON \
+            -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON \
             -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON \
             -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON \
+            -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON \
             -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
           cmake --build build-lint-off --target wayland-gen
           python3 tools/check/select_lint_tus.py --build-dir build-lint-off --changed changed.txt --changed-only --out-dir build-lint-off/sel --shards 1
@@ -1123,8 +1153,10 @@ jobs:
           set -euo pipefail
           cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON \
             -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON \
+            -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON \
             -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON \
             -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON \
+            -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON \
             -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
           cmake --build build-lint-on --target wayland-gen
           python3 tools/check/select_lint_tus.py --build-dir build-lint-on --changed changed.txt --changed-only --out-dir build-lint-on/sel --shards 1
