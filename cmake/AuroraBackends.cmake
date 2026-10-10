@@ -371,6 +371,7 @@ if (AURORA_BACKEND_WAYLAND)
         aurora_log("Wayland text-input-unstable-v3: protocol XML missing (wayland-protocols too old?), IME bridge degrades to no-op")
     endif ()
     set(AURORA_WL_GEN_SRCS "")
+    set(AURORA_WL_GEN_HDRS "")
     foreach (_entry IN LISTS AURORA_WL_PROTOS)
         string(REPLACE "|" ";" _pair "${_entry}")
         list(GET _pair 0 _xml)
@@ -383,7 +384,14 @@ if (AURORA_BACKEND_WAYLAND)
                 DEPENDS "${_xml}" VERBATIM
                 COMMENT "wayland-scanner: ${_name}")
         list(APPEND AURORA_WL_GEN_SRCS "${_src}")
+        list(APPEND AURORA_WL_GEN_HDRS "${_hdr}")
     endforeach ()
+    # 聚合目标：把生成的协议头/源拉成一个可单独构建的 target。lint 作业只 configure 不构建
+    # （clang-tidy 只吃 compile_commands.json），但被分析的 TU 会 include 这些生成头——缺头即
+    # `broken_tus`，门禁把「缺文件」如实判红。故 lint 前先 `cmake --build <build> --target
+    # wayland-gen` 一次（秒级），让生成头就位。整套构建（`--target aurora`）本就会经 custom
+    # command 连带生成，这里的聚合只多给一个显式入口，不改变既有依赖关系。
+    add_custom_target(wayland-gen DEPENDS ${AURORA_WL_GEN_HDRS} ${AURORA_WL_GEN_SRCS})
     # 生成的 C 胶水非本项目代码：屏蔽 -Wall/-Wpedantic 告警（不改动其内容）。
     set_source_files_properties(${AURORA_WL_GEN_SRCS} PROPERTIES COMPILE_OPTIONS "-w")
     target_sources(aurora PRIVATE ${AURORA_WL_GEN_SRCS})

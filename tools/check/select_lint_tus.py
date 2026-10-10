@@ -53,14 +53,17 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lint_db import (  # noqa: E402  (path bootstrap above must run first)
-    DEFAULT_EXCLUDE,
+    default_exclude,
+    is_auto_generated,
     load_db,
     norm,
     preprocess_deps,
 )
 
 # C/C++ 家族：改这些才谈得上「要不要重跑 lint」。
-SOURCE_EXTS = (".h", ".hpp", ".hh", ".cpp", ".cc", ".cxx", ".c", ".inl")
+# 含 Objective-C / Objective-C++（`.m` / `.mm`）：macOS 后端的真机探针是 `.mm`，缺了它
+# 平台子作业（lint-macos）会把这个 TU 判成「非 C/C++ 文件」而漏选。
+SOURCE_EXTS = (".h", ".hpp", ".hh", ".cpp", ".cc", ".cxx", ".c", ".inl", ".m", ".mm")
 
 # 全局触发：改动它们等于改了「怎么分析」，选任何子集都是错的 → 全量。
 # ⚠️ 逐项点名，不用目录通配：加进来的每一项都得说清「为什么它影响所有 TU」。
@@ -165,14 +168,19 @@ def main() -> int:
 
     # ---- TU 宇宙：与 runner 同一套筛选（third_party / 生成物），另弃 PCH 条目 ----
     db = load_db(compile_db)
-    exclude = DEFAULT_EXCLUDE
+    # 生成物排除锚定到本轮构建目录：`*-gen/` 与 `<build>/gen/` 一并覆盖（见 lint_db.default_exclude）。
+    exclude = default_exclude(a.build_dir)
     universe, tu_argv, tu_dir = [], {}, {}
     seen = set()
     for f, args, directory in db:
         if f in seen:
             continue
         seen.add(f)
-        if exclude.search(f) or "cmake_pch" in f:
+        # 谓词必须与 lint_db.load_tus **逐项一致**：宇宙若比 runner 的 TU 集大，
+        # 选集就可能产出一个 runner 认不出的条目，`--tu-list` 校验随即 exit 2。
+        # 本处的 `is_auto_generated` 正是此前漏掉的一项（字模数据 `*_font_data.cpp` 是
+        # 编译库里真实存在的 TU，却被 runner 按 AUTO-GENERATED 剔除）。
+        if exclude.search(f) or "cmake_pch" in f or is_auto_generated(f):
             continue
         universe.append(f)
         tu_argv[f] = args

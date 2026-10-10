@@ -4,9 +4,9 @@
 |:---|:---|
 | 变更编号 | CHG-002 |
 | 提出日期 | 2026-10-10 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.QUALITY.CORE.MEMORY-SAFETY.001 |
-| 影响面 | CI 的三道 clang-tidy 作业（`.github/workflows/ci.yml` 作业 8 `lint` / 8w `lint-wasm` / 8i `lint-incremental`）的 configure 口径与矩阵形状；新增 Windows 口径 lint 作业；`tools/check/lint_db.py` 的生成物排除与 C 语言 TU 处理；`cmake/AuroraBackends.cmake` 的 Wayland 协议生成目标；`.clang-tidy` 的命名类 `CheckOptions` 与若干就地 `NOLINT`；按处置阶梯修改的运行时代码（`media/audio_alsa.cpp`、`storage/sqlite_backend.cpp`、`window/detail/atspi_bridge.cpp`、`window/detail/atspi_protocol.{h,cpp}`、`inspector/inspector_server.cpp`、`window/x11_surface.cpp`、`window/wayland_surface.cpp`、`tools/verify/*`），其中两处带**可观察行为修正**（`SqliteBackend::close()` 之后 `is_open()` 如实为 false、AT-SPI `Component.GrabFocus` 的「尽力而为受理」口径落成类型化单点），各配单测（`utest_sqlite_backend.close_releases_connection_without_virtual_call_in_destructor`、`utest_atspi_protocol.model_grab_focus_is_best_effort`）。公共 API 仅两处签名变化，且同源于 `performance-unnecessary-value-param`：`SqliteBackend` 构造形参按值 → `const SqliteOptions &`（`storage/sqlite_backend.h`）与 `Storage::create(SqliteOptions)` 重载 → `Storage::create(const SqliteOptions &)`（`storage/storage.h`），后者是前者落地后的调用侧连带（按值收参再 `std::move` 反而多一次整结构体拷贝）；调用方源码零改动、ABI 变化记入 CHANGELOG Breaking；不改信号/属性键、不改分层边界与后端支持矩阵本身 |
+| 影响面 | CI 的五道 clang-tidy 作业（`.github/workflows/ci.yml` 作业 8 `lint` / 8w `lint-wasm` / 8i `lint-incremental` / 8win `lint-windows` / 8mac `lint-macos`）的 configure 口径与矩阵形状；新增 Windows / macOS 口径 lint 作业；`tools/check/lint_db.py` 的生成物排除与 C 语言 TU 处理；`cmake/AuroraBackends.cmake` 的 Wayland 协议生成目标；`.clang-tidy` 的命名类 `CheckOptions` 与若干就地 `NOLINT`；按处置阶梯修改的运行时代码（`media/audio_alsa.cpp`、`storage/sqlite_backend.cpp`、`window/detail/atspi_bridge.cpp`、`window/detail/atspi_protocol.{h,cpp}`、`inspector/inspector_server.cpp`、`window/x11_surface.cpp`、`window/wayland_surface.cpp`、`tools/verify/*`），其中两处带**可观察行为修正**（`SqliteBackend::close()` 之后 `is_open()` 如实为 false、AT-SPI `Component.GrabFocus` 的「尽力而为受理」口径落成类型化单点），各配单测（`utest_sqlite_backend.close_releases_connection_without_virtual_call_in_destructor`、`utest_atspi_protocol.model_grab_focus_is_best_effort`）。公共 API 仅两处签名变化，且同源于 `performance-unnecessary-value-param`：`SqliteBackend` 构造形参按值 → `const SqliteOptions &`（`storage/sqlite_backend.h`）与 `Storage::create(SqliteOptions)` 重载 → `Storage::create(const SqliteOptions &)`（`storage/storage.h`），后者是前者落地后的调用侧连带（按值收参再 `std::move` 反而多一次整结构体拷贝）；调用方源码零改动、ABI 变化记入 CHANGELOG Breaking；不改信号/属性键、不改分层边界与后端支持矩阵本身 |
 
 ## 动机
 
@@ -105,7 +105,7 @@ clang-tidy 门禁当前的三道作业都按「最小后端」口径 configure�
     - 风格面约 160 条走 `lint-fix` 目标批量应用后人工审 diff（`.clang-tidy` 已因 clang-tidy 22 的错误 fix-it 关掉 `modernize-use-ranges` 与 `readability-convert-member-functions-to-static`）。
     - 逐条清单与文件分布已按 `(file, line, check)` 去重成表，随本批在 PR 描述里附出（构建目录里的临时报告不可作仓库引用，见「回写落点」的口径说明）。
 
-11. **切换批次**：上述存量在三道（扩面后含 Windows 共四道）口径下 `unique_findings` 归零，才把条目 1–9 的 `ci.yml` 改动一次性合入并转必过。本批不动 `ci.yml`。
+11. **切换批次**：上述存量在各道口径下 `unique_findings` 归零，才把条目 1–9 的 `ci.yml` 改动一次性合入并转必过。**本批已按此切换落码**——存量清零后，扩面 configure、`wayland-gen` 前置、生成物排除、增量收口为 `--changed-only`、反极性第三 pass 行、`lint-windows` / `lint-macos` 平台子作业、覆盖面自述字段一并合入，作业 8 由 8 变 12、整门跃至 18 个 lint 作业，四道（native 三 pass / wasm / Windows / macOS）lint 与排版均为必过位。条目 1–9 的落码逐条对应见 `codespec/BUILD_OPTIONS.md` §4.5 与 `codespec/ARCHITECTURE.md` §14.4。
 
 ## 验收判据
 

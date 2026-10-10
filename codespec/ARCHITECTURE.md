@@ -530,7 +530,7 @@ CI 配置位于 `.github/workflows/`：
 
 | 工作流 | 作用 |
 |:---|:---|
-| `ci.yml` | 宏矩阵全量覆盖，每推送 / PR 触发，`concurrency` 取消旧运行以提速。共 10 组 job：**core**（linux/gcc + linux/clang + windows/msvc + windows/mingw + windows/llvm（clang-cl）+ macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支，Debug 覆盖 linux/gcc、windows/msvc 与 windows/llvm；linux-gcc-release 与 windows-llvm 额外构建 `demos` 聚合目标）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关，均 ubuntu/gcc，另 HEADLESS 关分支仅验库与工具构建绿、跳过 Test 步骤）；**asan**（ASan+UBSan 全量 ctest，`-LE e2e` 排除真实后端 E2E）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact，`-LE e2e` 同上）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON`，构建库与测试 runner 并全量 ctest，能力缺失用例走 SKIP 路径）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方；默认配置与 Release 下强制 `AURORA_ENABLE_DEBUG=ON` 的「非默认宏一致性」各一组）；**lint**（clang-tidy 门禁，矩阵 = DEBUG OFF/ON 两份编译数据库 × TU 分片 4 片 = 8 个作业，去重后 0 finding 才过）；**lint-wasm**（同一门禁的浏览器口径，`--emscripten` 重写后的 wasm 编译库分 4 片，只 configure 不构建）；**fmt**（`format-check` 全量排版校验）。三道 lint 与排版均为**必过**位，各自清单逐片入 artifact；静态检查为什么按 TU 分片、分片改了判据没有，见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §4.5。core 与 backends 的 Test 步骤按实际编译的后端面逐作业声明 E2E 期望集（`AURORA_E2E_EXPECT`；asan / coverage 以 `-LE e2e` 排除，wasm 在 CMake 层即无 E2E 面），逐作业期望集表与边界结论见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2「CI 作业口径」 |
+| `ci.yml` | 宏矩阵全量覆盖，每推送 / PR 触发，`concurrency` 取消旧运行以提速。共 13 组 job：**core**（linux/gcc + linux/clang + windows/msvc + windows/mingw + windows/llvm（clang-cl）+ macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支，Debug 覆盖 linux/gcc、windows/msvc 与 windows/llvm；linux-gcc-release 与 windows-llvm 额外构建 `demos` 聚合目标）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关，均 ubuntu/gcc，另 HEADLESS 关分支仅验库与工具构建绿、跳过 Test 步骤）；**asan**（ASan+UBSan 全量 ctest，`-LE e2e` 排除真实后端 E2E）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact，`-LE e2e` 同上）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON`，构建库与测试 runner 并全量 ctest，能力缺失用例走 SKIP 路径）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方；默认配置与 Release 下强制 `AURORA_ENABLE_DEBUG=ON` 的「非默认宏一致性」各一组）；**lint**（clang-tidy 门禁，矩阵 = DEBUG OFF / DEBUG ON / optimizations-off 三份扩面编译数据库 × TU 分片 4 片 = 12 个作业，去重后 0 finding 才过；编译库显式打开除 Windows / macOS 特有宏外的全部后端与能力开关）；**lint-wasm**（同一门禁的浏览器口径，`--emscripten` 重写后的 wasm 编译库分 4 片，只 configure 不构建）；**lint-incremental**（只在非 master / main 分支推送时跑：单 job 顺序跑 native(DEBUG OFF/ON) 与 wasm 三套编译库上「本次改动本身即 TU」的那批，`--changed-only` 不展开 include 闭包）；**lint-windows** / **lint-macos**（平台子作业：用各自平台编译库**只扫平台相关 TU**，`git grep` 按平台 token 现场选集，Windows 另在每周定时跑一遍全量）；**fmt**（`format-check` 全量排版校验）。四道 lint 与排版均为**必过**位，各自清单逐片入 artifact；静态检查为什么按 TU 分片、分片改了判据没有，见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §4.5。core 与 backends 的 Test 步骤按实际编译的后端面逐作业声明 E2E 期望集（`AURORA_E2E_EXPECT`；asan / coverage 以 `-LE e2e` 排除，wasm 在 CMake 层即无 E2E 面），逐作业期望集表与边界结论见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2「CI 作业口径」 |
 | `release.yml` | 发布流程（构建产物 / 版本标签） |
 
 矩阵按「每个 feature 宏分支至少被一个 job 编译一次」设计；选项语义见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md)。CI 只负责「拉起构建 + 跑 CTest」，不承载测试设计。
@@ -545,14 +545,14 @@ CI 配置位于 `.github/workflows/`：
 
 ### 14.5 本地验证的目标平台与真机探针
 
-⚠️ `ctest --preset ninja-test` **只覆盖 Windows Release 一个目标平台**。改动一旦触及公共头，必须补跑其余两个目标平台（wasm、Linux X11 / Wayland），否则 MinGW / clang / gcc 之间的严格度差异会一直拖到 CI 才暴露；推送后由 CI 十组作业全矩阵兜底（§14.4）。
+⚠️ `ctest --preset ninja-test` **只覆盖 Windows Release 一个目标平台**。改动一旦触及公共头，必须补跑其余两个目标平台（wasm、Linux X11 / Wayland），否则 MinGW / clang / gcc 之间的严格度差异会一直拖到 CI 才暴露；推送后由 CI 十三组作业全矩阵兜底（§14.4）。
 
 | 目标平台 | 入口 | 出口判据 |
 |:---|:---|:---|
 | Windows Release 全量 | `ctest --preset ninja-test`（逐条复跑用 `ctest -R <stem>`） | 全绿，含全部静态门禁 |
 | wasm 配置（Emscripten） | wasm 配置下全量 ctest | 该配置全绿 |
 | Linux X11 / Wayland 配置 | 对应后端配置下全量 ctest | 该配置全绿 |
-| 推送后 CI 全矩阵 | `.github/workflows/`（§14.4） | 全矩阵作业全绿（功能分支推送 lint 收窄为 1 个 `lint-incremental` 单 job，PR / master 推送走全量 12-job 矩阵） |
+| 推送后 CI 全矩阵 | `.github/workflows/`（§14.4） | 全矩阵作业全绿（功能分支推送 lint 收窄为 1 个 `lint-incremental` 单 job，PR / master 推送走全量 18-job 矩阵） |
 
 **真机验收探针不进 CTest**（`AURORA_BUILD_VERIFY_TOOLS` 默认 OFF、`EXCLUDE_FROM_ALL`，聚合目标 `aurora_verify`）：`--target aurora_verify_win32_dpi` 在 100% DPI 环境下判据恒真并记 SKIP，其自动段注入 `WM_DPICHANGED` 造变化故任何 DPI 环境均可跑，人工段做真跨屏拖动、未做记 PENDING MANUAL；`--target aurora_verify_glfw_dpi` 同构，Wayland 验证需 Linux 合成器环境。契约与判据见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2。
 
@@ -565,7 +565,8 @@ CI 配置位于 `.github/workflows/`：
 | 公共 API：签名、类 / 类型、信号、属性键、枚举 | `check_api_schema_sync`（先 `--target aurora_api_json`）、`check_naming_conventions`、`check_api_budget`、`check_doc_comments`、`lint`、`format-check` | `specification/NN-*.md`（按模块域）+ `CODING_STANDARDS.md` §6 + 必要时 `CONCEPTS.md` |
 | `include/aurora/aurora.h` 伞头 | `check_umbrella_header`（直连集合不得相对 `tools/check/umbrella_manifest.txt` 缩减） | `tools/check/umbrella_manifest.txt` 基线 |
 | `core/` 层依赖、模块边界、目录 | `check_core_layer_boundary`、`check_arch_module_map` | 本文件 §2 / §4 |
-| 平台 / 后端分支、feature 宏 | `check_platform_macros` + CI `toggles` 矩阵 | `BUILD_OPTIONS.md` §3 / §4 |
+| 平台 / 后端分支、feature 宏 | `check_platform_macros` + CI `toggles` 矩阵 + **扩面后的 `lint`**（主 Linux 遍开全部非 Windows / macOS 特有宏；`lint-wasm` 补浏览器面，`lint-windows` / `lint-macos` 各只扫平台相关 TU） | `BUILD_OPTIONS.md` §3 / §4 |
+| 经后端 / 能力宏门控的模块代码（`window/`、`media/`、`storage/`、`inspector/`、`tools/verify/`） | **扩面后的 `lint`**（CI 作业 8 三 pass × 4 片 + `lint-wasm` + `lint-windows` / `lint-macos`）——默认 OFF 的宏若不显式打开，其代码在分析面上是「不存在」而非「干净」（判据与覆盖面自述见 `BUILD_OPTIONS.md` §4.5） | `BUILD_OPTIONS.md` §4.5 / §4.6 |
 | Win32 宿主的 DPI / dp↔物理换算 | `check_dpi_single_source`（换算只许在 `to_physical` / `to_logical`，DPI 只许在 `refresh_scale()` 读）；建窗尺寸那一项另跑真机探针 `aurora_verify_win32_dpi` | `specification/08-tooling.md` §8.2 |
 | GLFW / Wayland 的缩放变化上报 | 真机探针 `aurora_verify_glfw_dpi`（自动段注入 `WM_DPICHANGED`，人工段未做记 PENDING MANUAL） | `specification/08-tooling.md` §8.2「缩放变化上报的跨后端现状」 |
 | 字符串字面量 | `check_no_cjk_literals` | `CODING_STANDARDS.md` §14 |
@@ -576,7 +577,7 @@ CI 配置位于 `.github/workflows/`：
 | 仓库入口 `AGENTS.md` 本身 | `check_agents_size`（> 8 KiB 红灯；超限时把细节下沉 `codespec/`，不得放宽阈值） | 本表（把细则搬回这里） |
 | 版本号 / `CHANGELOG.md` | `check_version_consistency` | `CODING_STANDARDS.md` §7 |
 | 任何代码行为 | 相关 `ctest -R <stem>`、`--target docs` | 本文件 §15 流程表「回写」阶段 |
-| CI 静态检查编排（`tools/check/select_lint_tus.py`、`tools/check/run_clang_tidy.py`、`.github/workflows/`） | `check_change_proposals`、`check_no_cjk_literals`、`check_no_hardcoded_paths`；且**全量出口不得被削弱**——PR / master(+main) 推送 / 每周定时 / 手动触发四类事件下仍须走全量 12-job 矩阵遍；功能分支推送改由作业 8i `lint-incremental`（单 job 增量）覆盖，**不得反向把全量事件降级为增量**（判据见 `BUILD_OPTIONS.md` §4.5、作业编排见 `.github/workflows/ci.yml` 作业 8 / 8w / 8i） | `BUILD_OPTIONS.md` §4.5 |
+| CI 静态检查编排（`tools/check/select_lint_tus.py`、`tools/check/run_clang_tidy.py`、`.github/workflows/`） | `check_change_proposals`、`check_no_cjk_literals`、`check_no_hardcoded_paths`；且**全量出口不得被削弱**——PR / master(+main) 推送 / 每周定时 / 手动触发四类事件下仍须走全量 18-job 矩阵遍；功能分支推送改由作业 8i `lint-incremental`（单 job 增量）覆盖，**不得反向把全量事件降级为增量**（判据见 `BUILD_OPTIONS.md` §4.5、作业编排见 `.github/workflows/ci.yml` 作业 8 / 8w / 8i / 8win / 8mac） | `BUILD_OPTIONS.md` §4.5 |
 
 门禁自身的两条纪律：凡「扫文档 / 目录做核对」的检查必须有**「0 命中即硬失败」守卫**（`check_arch_module_map` 曾因定位正则不匹配而空扫恒真 PASS，见其源码注释）；门禁输出必须全 ASCII，否则日志读不清。
 

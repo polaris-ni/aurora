@@ -69,8 +69,9 @@ from concurrent.futures import ThreadPoolExecutor
 # 门禁少跑 TU 却仍报绿。本脚本以「脚本自身所在目录」入路径，供 CMake 目标与 CI 直接调用。
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lint_db import (  # noqa: E402  (path bootstrap above must run first)
-    DEFAULT_EXCLUDE,
     argv_from_command,
+    count_generated_tus,
+    default_exclude,
     is_auto_generated,
     load_db,
     load_tus,
@@ -280,6 +281,61 @@ def parse_shard(spec: str) -> tuple[int, int]:
     return idx, total
 
 
+# 编译库 argv 里显式定义的 AURORA 后端 / 能力开关（汇总 JSON 的 enabled_options 来源）。
+# 只收 BACKEND/ENABLE/BUILD 三组：版本宏（AURORA_VERSION_*）与派生宏（AURORA_HAVE_*）不单列。
+OPTION_DEF = re.compile(r"^AURORA_(?:BACKEND|ENABLE|BUILD)_[A-Z0-9_]+$")
+
+
+def detect_enabled_options(entries: list[tuple[str, list[str], str]]) -> list[str]:
+    """从编译库 argv 反推本遍显式打开的 AURORA_* 开关（去重、排序）。
+
+    为什么从 argv 反推而不是读 CMakeCache：本脚本只拿到 compile_commands.json，而汇总 JSON 要
+    自证「这一遍开了哪些开关」——扩面作业 configure 时漏写一个 `-D`，结果就是覆盖面悄悄缩水而
+    日志里看不出来。enabled_options 把覆盖面写进产物，便于与 BUILD_OPTIONS.md 的清单逐项比对。
+    """
+    found: set[str] = set()
+    for _f, args, _d in entries:
+        i = 0
+        while i < len(args):
+            t = args[i]
+            if t == "-D" and i + 1 < len(args):
+                name = args[i + 1].split("=", 1)[0]
+                i += 2
+            elif t.startswith("-D"):
+                name = t[2:].split("=", 1)[0]
+                i += 1
+            else:
+                i += 1
+                continue
+            if OPTION_DEF.match(name):
+                found.add(name)
+    return sorted(found)
+
+
+def write_c_tu_config(base_config: str | None, build_dir: str) -> str:
+    """为 C 翻译单元写一份剥掉 `ExtraArgs` 的 `.clang-tidy` 副本，返回其路径（不可用时为空串）。
+
+    本仓 `.clang-tidy` 的 `ExtraArgs: ['-std=c++20']` 对 C TU 非法（clang 直接报
+    `invalid argument '-std=c++20' not allowed with 'C'`），而 CLI 的 `--extra-arg` 压不住配置里的
+    ExtraArgs（配置项排在 CLI 之后生效，实测过）。故对 C TU 改用整份配置的副本：删掉 ExtraArgs 行，
+    其余（Checks / CheckOptions / HeaderFilterRegex）原样保留，经 `--config-file` 交给 clang-tidy。
+    """
+    src = base_config or ".clang-tidy"
+    try:
+        with open(src, encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return ""
+    kept = [ln for ln in lines if not ln.lstrip().startswith("ExtraArgs:")]
+    dst = os.path.join(build_dir, "tidy-c-tu.clang-tidy")
+    try:
+        with open(dst, "w", encoding="utf-8") as fh:
+            fh.writelines(kept)
+    except OSError:
+        return ""
+    return dst
+
+
 def run_one(job: tuple[str, str | None, str, bool, str | None]) -> tuple[str, str, float]:
     tu, checks, build_dir, do_fix, config = job
     cmd: list[str] = [which("clang-tidy") or "clang-tidy", "-p", build_dir, "--quiet"]
@@ -436,8 +492,9 @@ def main() -> int:
                          "(tidy/compiler version, config, argv, own content, dependencies) is "
                          "unchanged replays its previous output instead of being re-analysed. "
                          "Requires --deps; TUs missing from it are never cached")
-    ap.add_argument("--exclude", default=DEFAULT_EXCLUDE.pattern,
-                    help="regex; skip TUs whose path matches (default: see DEFAULT_EXCLUDE)")
+    ap.add_argument("--exclude", default=None,
+                    help="regex; skip TUs whose path matches (default: third_party/, the GL stub, "
+                         "and build-dir generated glue — see lint_db.generated_exclude)")
     ap.add_argument("--fix", action="store_true",
                     help="apply clang-tidy fix-its in place (does not fail the run)")
     ap.add_argument("--fail-on", choices=["warning", "error"], default="warning",
@@ -470,8 +527,8 @@ def main() -> int:
         mode = " [emscripten db]"
 
     include = re.compile(a.include) if a.include else None
-    exclude = re.compile(a.exclude) if a.exclude else None
-    tus = load_tus(compile_db, include, exclude) if exclude else load_tus(compile_db, include, re.compile(r"(?!x)x"))
+    exclude = re.compile(a.exclude) if a.exclude else default_exclude(a.build_dir)
+    tus = load_tus(compile_db, include, exclude)
     if a.tu_list:
         # 显式清单（选集脚本的产物）**逐项校验**必须落在本编译库里：清单路径与库内条目对不上时
         # 最常见的成因是「换了构建目录还拿着上一轮的清单」，而它的症状是 clang-tidy 静默少跑
@@ -488,6 +545,11 @@ def main() -> int:
                   f"(stale list for another build dir?); first: {unknown[:3]}", file=sys.stderr)
             return 2
         tus = sorted(set(listed))
+    # 生成物排除留痕：编译库里有几条 TU 因「构建目录生成物」被剔除（口径见 lint_db.generated_exclude）。
+    # 静默丢弃会让覆盖面缩水而无从察觉，故计数进汇总 JSON 并打印。
+    generated_skipped = count_generated_tus(compile_db, a.build_dir)
+    if generated_skipped:
+        print(f"[lint] build-dir generated TUs excluded: {generated_skipped}")
     if not tus:
         print("error: no translation units selected.", file=sys.stderr)
         return 2
@@ -575,9 +637,14 @@ def main() -> int:
     broken: dict[str, str] = {}
     t0 = time.time()
     outputs: dict[str, str] = dict(cached_out)
+    c_config = ""
+    if any(t.endswith(".c") for t in to_run):
+        # C TU 的 `-std=c++20` 语言分流：见 write_c_tu_config。
+        c_config = write_c_tu_config(a.config, a.build_dir)
     if to_run:
         with ThreadPoolExecutor(max_workers=jobs) as ex:
-            jobs_args = [(t, a.checks, a.build_dir, a.fix, a.config) for t in to_run]
+            jobs_args = [(t, a.checks, a.build_dir, a.fix,
+                          c_config if (c_config and t.endswith(".c")) else a.config) for t in to_run]
             for i, (tu, out, _dt) in enumerate(ex.map(run_one, jobs_args), 1):
                 outputs[tu] = out
                 if i % 25 == 0 or i == len(to_run):
@@ -661,6 +728,11 @@ def main() -> int:
             "tu_count": len(tus),
             "tu_total": tu_total,
             "unique_findings": len(findings),
+            # 覆盖面自述：本遍显式打开的后端 / 能力开关（从编译库 argv 反推），以及因「构建目录
+            # 生成物」被剔除的 TU 条数。两者都是「这一遍到底覆盖了什么」的证据，扩面作业靠它们
+            # 核对 configure 没漏开关、生成物排除确实生效（口径见 BUILD_OPTIONS.md §4.5）。
+            "enabled_options": detect_enabled_options(load_db(compile_db)),
+            "generated_skipped": generated_skipped,
             "broken_tus": sorted([[f, m] for f, m in broken.items()]),
             "by_check": by_check.most_common(),
             "by_file": by_file.most_common(),

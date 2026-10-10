@@ -19,15 +19,18 @@
 #                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）。
 #  7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
-#  8. lint        — clang-tidy 门禁，矩阵 = pass(DEBUG OFF / ON 两份编译数据库) × shard(TU 清单
-#                    分片，现 4 片) 共 8 个作业，去重后 0 finding 才通过。纯静态分析，仅
-#                    ubuntu-latest 单跑（与平台无关，且 windows/macos runner 默认无 clang-tidy）。
+#  8. lint        — clang-tidy 门禁，矩阵 = pass(DEBUG OFF / ON + 优化开关全关的反极性遍，三份
+#                    编译数据库) × shard(TU 清单分片，现 4 片) 共 12 个作业，去重后 0 finding 才
+#                    通过。纯静态分析，主 Linux 遍在 ubuntu-latest 单跑，且 configure 打开**除
+#                    Windows/macOS 特有宏之外的全部后端与能力开关**（X11/Wayland/GLFW/ALSA 音频/
+#                    SQLite/图像编解码/Inspector Server/verify 探针），使覆盖面尽可能贴近全仓。
 #                    依赖 AuroraLint.cmake 提供的 `lint` 目标与 AURORA_LINT_SHARD 分片开关。
-#                    为什么摊成矩阵：runner 只有 4 vCPU，单遍 498 TU 实测 86 分钟，两遍串跑
-#                    3 小时量级、必超时；分片只改排布不减覆盖面，总核时不变而墙钟 ~25 分钟。
-#                    ⚠️ 判据是「8 个作业全绿」：任一片红即整门红，缺片等于缺覆盖面。
-#                    ⚠️ 本矩阵的口径是 **native**：EMSCRIPTEN 门后的 TU 不在这两份编译库里，
-#                    其静态检查由 8w 在同一份 wasm 编译库上跑浏览器口径 lint 补齐。
+#                    为什么摊成矩阵：runner 只有 4 vCPU，单遍 500+ TU 实测 86 分钟，三遍串跑
+#                    4 小时量级、必超时；分片只改排布不减覆盖面，总核时不变而墙钟近线性下降。
+#                    ⚠️ 判据是「12 个作业全绿」：任一片红即整门红，缺片等于缺覆盖面。
+#                    ⚠️ 本矩阵的口径是 **native**：EMSCRIPTEN 门后的 TU 不在这三份编译库里，
+#                    其静态检查由 8w 在同一份 wasm 编译库上跑浏览器口径 lint 补齐；Windows /
+#                    macOS 特有宏下的代码各由 8win / 8mac 子作业定向补齐（只扫平台相关 TU）。
 #                    全量 / 增量分流（作业 8 / 8w）：全量矩阵只在 PR、master(+main) 推送、
 #                    每周定时与手动触发时跑；分支推送由作业 8i「单 job 增量」覆盖——只 lint
 #                    「本次改动牵动的 TU」（由 tools/check/select_lint_tus.py 按编译库 include
@@ -38,6 +41,13 @@
 #                    见 job 8 与 BUILD_OPTIONS.md §4.5）：4 个分片作业，只 configure 不构建。
 #                    这是 EMSCRIPTEN 门后那批 TU 唯一的静态检查面，与 job 8 同为**必过**门禁，
 #                    清单仍逐片作 artifact 落盘。
+#  8win. lint-windows / lint-macos — 平台专属 lint 子作业：主 Linux 遍开不了 Windows / macOS 特有的
+#                    编译选项（那两组宏只在各自平台存在），这两处的 `#ifdef _WIN32` / `__APPLE__`
+#                    代码因此不在主遍覆盖面内。子作业用各自的编译库**只扫平台相关 TU**（由
+#                    `git grep` 按平台 token 定向选集），不扫全仓，也不做分片；clang-tidy 钉同一
+#                    大版本 22（Windows 取官方 LLVM 22 tarball，macOS 取官方 LLVM 22 tarball），
+#                    使检查集与主遍可比。Windows 每周定时额外跑一遍**全量**（覆盖「平台 TU 长期
+#                    没被 token 选中」的系统性缺口）。
 #   9. fmt         — clang-format 排版门禁（`format-check` 聚合目标，任一文件与
 #                    `.clang-format` 有差异即红）。版本钉 apt.llvm.org 的 llvm-22 快照：不同
 #                    clang 构建的格式化规则会漂移，本机与 CI 必须量同一套。
@@ -675,12 +685,12 @@ jobs:
   # `tu_total` 自述字段核对，加聚合作业不值当（多一个作业、多一处会红的无关依赖）。
   # ---------------------------------------------------------------------------
   lint:
-    name: clang-tidy (DEBUG=${{ matrix.pass.debug }}, shard ${{ matrix.shard }}/${{ matrix.total }})
+    name: clang-tidy (${{ matrix.pass.label }}, shard ${{ matrix.shard }}/${{ matrix.total }})
     runs-on: ubuntu-latest
-    # 240 → 40：每片 ~125 TU ≈ 22 分钟 tidy，加 apt 安装与 configure ≈ 3 分钟；40 分钟是两倍余量。
-    # 余量必须留：本轮 TU 编译失败即整片红，慢起来没有上限。
+    # 240 → 40：每片 ~140 TU ≈ 24 分钟 tidy，加 apt 安装 / configure / wayland-gen ≈ 4 分钟；40 分钟是
+    # 一倍半余量。余量必须留：本轮 TU 编译失败即整片红，慢起来没有上限。
     # 全量矩阵只跑 PR / master(+main) / 每周定时 / 手动触发；分支推送改由下方 lint-incremental
-    # 单 job 增量覆盖（见作业 8i），避免每个功能分支 push 都发 8 个 native lint job。
+    # 单 job 增量覆盖（见作业 8i），避免每个功能分支 push 都发 12 个 native lint job。
     if: github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     timeout-minutes: 40
     strategy:
@@ -689,14 +699,22 @@ jobs:
         pass:
           - label: debug-off
             debug: "OFF"
+            flags: ""
           - label: debug-on
             debug: "ON"
+            flags: ""
+          # 反极性遍：架构级优化开关全部关闭（layout 缓存 / 遮挡剔除 / Display List / SIMD）
+          # 与测试注入点关闭——这些 `#ifdef` 收口的分支在默认三开关全开时根本不参与分析。
+          # 与上方两遍共用同一份扩面后端/能力开关（见 Configure 步骤）。
+          - label: optimizations-off
+            debug: "OFF"
+            flags: -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_OCCLUSION_CULLING=OFF -DAURORA_ENABLE_DISPLAY_LIST=OFF -DAURORA_ENABLE_SIMD=OFF -DAURORA_ENABLE_TEST_HOOKS=OFF
         shard: [0, 1, 2, 3]
         # 单值维度：只为给 `--shard=i/n` 的 n 一个 yaml 内的引用点（见上方注释）。
         total: [4]
     steps:
       - uses: actions/checkout@v7
-      - name: Install clang-tidy-22
+      - name: Install clang-tidy-22 + desktop backend dev dependencies
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
           # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
@@ -704,7 +722,12 @@ jobs:
           sudo apt-get update -y
           # clang-format-22 一并装上：aurora_find_clang_format 在 configure 期要找一个读得懂
           # 本仓 .clang-format 的版本，缺它则 format 目标与生成链静默降级（见 BUILD_OPTIONS.md §4.7）。
-          sudo apt-get install -y clang-tidy-22 clang-format-22
+          # 其后是扩面所需的后端开发包（X11 / Wayland / GLFW 的 configure 依赖）：主 Linux 遍
+          # 要打开 X11/Wayland/GLFW，缺这些包 configure 期直接 FATAL。ALSA 音频走运行期 dlopen、
+          # 无 dev 包依赖（见 AuroraBackends.cmake 音频段），故不在列表里。
+          sudo apt-get install -y clang-tidy-22 clang-format-22 \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
 
@@ -749,15 +772,37 @@ jobs:
             echo "full scope: every TU in this compile database"
           fi
 
-      - name: Configure (debug ${{ matrix.pass.debug }}, export compile_commands.json)
-        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=${{ matrix.pass.debug }} -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }}
+      # 扩面：主 Linux 遍打开除 Windows/macOS 特有宏之外的全部后端与能力开关，让
+      # `#ifdef AURORA_BACKEND_X11/WAYLAND/GLFW`、音频、SQLite、图像编解码、Inspector Server 与
+      # verify 探针都进入分析面。`matrix.pass.flags` 追加反极性遍的优化开关收口。
+      - name: Configure (${{ matrix.pass.label }}, export compile_commands.json)
+        run: |
+          cmake -S . -B build-lint -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON \
+            -DAURORA_ENABLE_DEBUG=${{ matrix.pass.debug }} \
+            -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }} \
+            -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON \
+            -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON \
+            -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON \
+            -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON \
+            ${{ matrix.pass.flags }}
+
+      # 生成物就位：lint 只 configure 不构建，而被分析的 TU 会 include wayland-scanner 产出的
+      # 协议头（<build>/wayland-gen/*-client-protocol.h）。缺头即 broken_tus，门禁如实判红。
+      # 秒级完成，全量与（生产不可达的）失效增量分支都需要，故无条件跑。
+      - name: Generate Wayland protocol glue
+        run: cmake --build build-lint --target wayland-gen
 
       # 选集必须在 configure 之后：它读的就是这份编译库。全量时跳过（那份清单只有增量用得上）。
+      # ⚠️ 本分支在生产中不可达——本作业的 `if:` 已排除「非 master 分支 push」，故 steps.scope 恒为
+      #    full=true；唯一的分支推送增量入口是作业 8i。这里保留 `--changed-only` 只为万一被改回可达时
+      #    不误跑闭包全量（闭包展开会把一次小改动放大成近整库）。
       - name: Select affected translation units
         if: steps.scope.outputs.full != 'true'
         run: |
           set -euo pipefail
-          python3 tools/check/select_lint_tus.py --build-dir build-lint --changed changed.txt \
+          python3 tools/check/select_lint_tus.py --build-dir build-lint --changed changed.txt --changed-only \
             --out-dir build-lint/lint-selection --shards ${{ matrix.total }} --min-tu-per-shard 40 --jobs 4
           cat build-lint/lint-selection/selection.json
 
@@ -880,8 +925,9 @@ jobs:
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
 
-      # configure 开关与作业 6 **逐项相同**（含 CMAKE_BUILD_TYPE=Release 与 AURORA_BUILD_TESTS=ON）：
-      # 换开关等于换覆盖面，本作业的历史清单（首轮 420 TU / 470 条）就不可比了。
+      # configure 的**能力开关**与作业 8 对齐（音频 / SQLite / 图像编解码 / Inspector Server），
+      # 只去掉 native 后端（X11/Wayland/GLFW 在 wasm 下无意义）——换开关等于换覆盖面，扩面后
+      # 本作业的 TU 清单较历史基线（首轮 420 TU / 470 条）有增量，属预期。
       # 与作业 8 同一套全量 / 增量分界（workflow 不支持 YAML 锚点复用，故同款块写两份）。
       # 浏览器口径的编译库是另一张 TU 清单，选集必须在本作业的编译库上重算一遍，
       # 不能复用 native 那份：`EMSCRIPTEN` 门后的 TU 与 `AURORA_BACKEND_WASM` 分支只在
@@ -921,13 +967,16 @@ jobs:
           fi
 
       - name: Configure (emcmake, export compile_commands.json)
-        run: emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }}
+        run: emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }} -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON
 
+      # 选集必须在 configure 之后：它读的就是这份编译库。全量时跳过（那份清单只有增量用得上）。
+      # ⚠️ 与作业 8 同理，本分支在生产中不可达（`if:` 已排除非 master 分支 push），唯一的分支推送
+      #    增量入口是作业 8i；保留 `--changed-only` 只为万一被改回可达时不误跑闭包全量。
       - name: Select affected translation units
         if: steps.scope.outputs.full != 'true'
         run: |
           set -euo pipefail
-          python3 tools/check/select_lint_tus.py --build-dir build-wasm-lint --changed changed.txt \
+          python3 tools/check/select_lint_tus.py --build-dir build-wasm-lint --changed changed.txt --changed-only \
             --out-dir build-wasm-lint/lint-selection --shards ${{ matrix.total }} --min-tu-per-shard 40 --jobs 4
           cat build-wasm-lint/lint-selection/selection.json
 
@@ -1012,12 +1061,16 @@ jobs:
       - name: Setup clang-format (repo-parseable)
         uses: ./.github/actions/setup-clang-format
 
-      - name: Install clang-tidy-22
+      - name: Install clang-tidy-22 + desktop backend dev dependencies
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
           echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
-          sudo apt-get install -y clang-tidy-22 clang-format-22
+          # clang-format-22 与扩面所需的后端开发包（X11/Wayland/GLFW 的 configure 依赖）一并装上，
+          # 与作业 8 同口径。ALSA 走运行期 dlopen，无 dev 包依赖。
+          sudo apt-get install -y clang-tidy-22 clang-format-22 \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
 
@@ -1044,7 +1097,12 @@ jobs:
       - name: Lint native (DEBUG=OFF)
         run: |
           set -euo pipefail
-          cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF
+          cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF \
+            -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON \
+            -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON \
+            -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON \
+            -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+          cmake --build build-lint-off --target wayland-gen
           python3 tools/check/select_lint_tus.py --build-dir build-lint-off --changed changed.txt --changed-only --out-dir build-lint-off/sel --shards 1
           list=build-lint-off/sel/tus_0.txt
           if [ ! -s "$list" ]; then
@@ -1063,7 +1121,12 @@ jobs:
       - name: Lint native (DEBUG=ON)
         run: |
           set -euo pipefail
-          cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON
+          cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON \
+            -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON \
+            -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON \
+            -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON \
+            -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+          cmake --build build-lint-on --target wayland-gen
           python3 tools/check/select_lint_tus.py --build-dir build-lint-on --changed changed.txt --changed-only --out-dir build-lint-on/sel --shards 1
           list=build-lint-on/sel/tus_0.txt
           if [ ! -s "$list" ]; then
@@ -1087,7 +1150,7 @@ jobs:
       - name: Lint wasm
         run: |
           set -euo pipefail
-          emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON
+          emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON
           python3 tools/check/select_lint_tus.py --build-dir build-wasm-lint --changed changed.txt --changed-only --out-dir build-wasm-lint/sel --shards 1
           list=build-wasm-lint/sel/tus_0.txt
           if [ ! -s "$list" ]; then
@@ -1112,6 +1175,149 @@ jobs:
             build-lint-off/findings.json
             build-lint-on/findings.json
             build-wasm-lint/findings.json
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 8win. Windows 平台 lint 子作业：主 Linux 遍开不了 Windows 特有编译选项
+  #   （AURORA_BACKEND_WIN32 / D3D11 / AUDIO_WASAPI 与 `_WIN32` 分支只在 Windows 存在），
+  #   本作业用 MSYS2 mingw 编译库**只扫平台相关 TU**（git grep 按平台 token 定向选集），不扫全仓。
+  #   clang-tidy 钉 LLVM 22 官方 tarball（与主遍 apt.llvm.org 22 同大版本，检查集可比）。
+  #   Windows 每周定时额外跑一遍**全量**（覆盖「平台 TU 长期没被 token 选中」的系统性缺口）。
+  # ---------------------------------------------------------------------------
+  lint-windows:
+    name: clang-tidy (windows, platform TUs)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    if: github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    env:
+      # 本作业的若干工具步打印中文（tools/check/*.py）：cp1252 控制台编码无法表示，强制 UTF-8。
+      PYTHONUTF8: 1
+    steps:
+      - uses: actions/checkout@v7
+
+      # windows-latest 自带 MSYS2 mingw-w64 工具链；choco mingw 路径作后备（口径同 core 作业）。
+      - name: Setup MinGW toolchain
+        shell: bash
+        run: |
+          for d in /c/msys64/mingw64/bin "/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin"; do
+            if [ -x "$d/gcc.exe" ]; then echo "$d" >> "$GITHUB_PATH"; break; fi
+          done
+          gcc --version
+
+      # clang-tidy 22：取 LLVM 官方 Windows tarball（curl + 7z 解包，无需安装器），与主 Linux 遍
+      # 同大版本——检查集随 clang 大版本漂移，两侧必须量同一套。
+      - name: Install LLVM 22 (clang-tidy)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-x86_64-pc-windows-msvc.tar.xz"
+          $out = Join-Path $env:RUNNER_TEMP "llvm.tar.xz"
+          Invoke-WebRequest -Uri $url -OutFile $out
+          $dest = Join-Path $env:RUNNER_TEMP "llvm"
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          & $sevenZip x $out "-o$dest" -y | Out-Null
+          & $sevenZip x (Join-Path $dest "llvm.tar") "-o$dest" -y | Out-Null
+          # 不写死解包目录名：tarball 顶层目录随 LLVM 版本/发行形态变化，按二进制实际位置定位更稳。
+          $bin = (Get-ChildItem -Path $dest -Recurse -Filter "clang-tidy.exe" | Select-Object -First 1).DirectoryName
+          if (-not $bin) { throw "clang-tidy.exe not found after extracting $url" }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          & (Join-Path $bin "clang-tidy.exe") --version
+
+      - name: Configure (mingw, export compile_commands.json)
+        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF -DAURORA_BACKEND_WIN32=ON -DAURORA_BACKEND_D3D11=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+
+      # 定向选集：按平台 token 从第一方源码里挑出 Windows 相关文件，再交由选集脚本保留其中
+      # 「本身就是 TU」的那些（--changed-only）。只扫平台相关代码，不扫全仓。
+      - name: Select Windows platform TUs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -c core.quotepath=off grep -lE 'AURORA_PLATFORM_WINDOWS|AURORA_BACKEND_WIN32|AURORA_ENABLE_AUDIO_WASAPI|AURORA_BACKEND_D3D11|AURORA_UIA|_WIN32|WINAPI|HWND|HMODULE|windows\.h|winnt\.h|shell32' -- src tools tests examples include | sort > win-tus.txt
+          echo "platform token files: $(wc -l < win-tus.txt)"
+          python3 tools/check/select_lint_tus.py --build-dir build-lint --changed win-tus.txt --changed-only --out-dir build-lint/sel --shards 1
+          cat build-lint/sel/selection.json
+
+      - name: Lint Windows platform TUs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # 每周定时：Windows 全量（覆盖「平台 TU 长期没被 token 选中」的系统性缺口）。
+            cmake --build build-lint --target lint
+            exit 0
+          fi
+          list=build-lint/sel/tus_0.txt
+          if [ ! -s "$list" ]; then
+            echo "::error::windows lint selection is empty - the platform token list matched no translation unit"
+            exit 1
+          fi
+          python3 tools/check/run_clang_tidy.py --build-dir build-lint --tu-list "$list" --json-out build-lint/findings.json --jobs "$(nproc)"
+
+      - name: Upload tidy findings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tidy-findings-windows
+          path: build-lint/findings.json
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 8mac. macOS 平台 lint 子作业：主 Linux 遍开不了 macOS 特有选项（AURORA_BACKEND_MACOS 与
+  #   `__APPLE__` 分支只在 Apple 平台存在）。与 8win 同构：Apple 工具链编译库 + 平台 token
+  #   定向选集 + LLVM 22 tarball（macOS 官方资产仅 ARM64，与 macos-latest runner 架构一致）。
+  # ---------------------------------------------------------------------------
+  lint-macos:
+    name: clang-tidy (macos, platform TUs)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    if: github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install LLVM 22 (clang-tidy)
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-macOS-ARM64.tar.xz"
+          curl -fsSL "$url" -o "$RUNNER_TEMP/llvm.tar.xz"
+          tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
+          # 不写死解包目录名：tarball 顶层目录随 LLVM 发行形态变化，按二进制实际位置定位更稳。
+          bin="$(dirname "$(find "$RUNNER_TEMP" -type f -name clang-tidy -path '*/bin/*' | head -1)")"
+          if [ -z "$bin" ] || [ "$bin" = "." ]; then
+            echo "::error::clang-tidy not found after extracting $url"
+            exit 1
+          fi
+          echo "$bin" >> "$GITHUB_PATH"
+          "$bin/clang-tidy" --version
+
+      - name: Configure (export compile_commands.json)
+        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF -DAURORA_BACKEND_MACOS=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+
+      - name: Select macOS platform TUs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -c core.quotepath=off grep -lE 'AURORA_BACKEND_MACOS|AURORA_PLATFORM_MACOS|AURORA_PLATFORM_APPLE|__APPLE__|TargetConditionals|Cocoa|AppKit|CoreFoundation|CFString' -- src tools tests examples include | sort > mac-tus.txt
+          echo "platform token files: $(wc -l < mac-tus.txt)"
+          python3 tools/check/select_lint_tus.py --build-dir build-lint --changed mac-tus.txt --changed-only --out-dir build-lint/sel --shards 1
+          cat build-lint/sel/selection.json
+
+      - name: Lint macOS platform TUs
+        shell: bash
+        run: |
+          set -euo pipefail
+          list=build-lint/sel/tus_0.txt
+          if [ ! -s "$list" ]; then
+            echo "::error::macOS lint selection is empty - the platform token list matched no translation unit"
+            exit 1
+          fi
+          python3 tools/check/run_clang_tidy.py --build-dir build-lint --tu-list "$list" --json-out build-lint/findings.json --jobs "$(sysctl -n hw.ncpu)"
+
+      - name: Upload tidy findings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tidy-findings-macos
+          path: build-lint/findings.json
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
