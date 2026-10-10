@@ -277,7 +277,7 @@ struct WaylandSurface::Impl {
         out_scales.reserve(outputs.size());
         for (const OutputInfo &info : outputs) {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-            const std::uintptr_t out_key = reinterpret_cast<std::uintptr_t>(info.out);
+            const auto out_key = reinterpret_cast<std::uintptr_t>(info.out);
             out_scales.push_back(detail::WaylandOutput{.key = out_key, .scale = info.scale});
         }
         const int want = detail::select_wayland_buffer_scale(compositor_version, out_scales, entered_keys);

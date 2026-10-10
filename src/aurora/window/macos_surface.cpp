@@ -53,7 +53,7 @@ struct MacOSSurface::Impl {
 };
 
 MacOSSurface::MacOSSurface(int w, int h, const std::string &title)
-    : impl_(std::make_unique<Impl>()), size_{static_cast<float>(w), static_cast<float>(h)} {
+    : impl_(std::make_unique<Impl>()), size_{.width = static_cast<float>(w), .height = static_cast<float>(h)} {
     if (!impl_->create_window(w, h, title)) {
         AURORA_LOG_WARN("macos_surface", "create_window failed");
     }
@@ -67,9 +67,10 @@ MacOSSurface::~MacOSSurface() {
 
 auto MacOSSurface::begin_frame(int w, int h) -> Result<bool> {
     painter_.begin(w, h);
-    size_ = Size{static_cast<float>(w), static_cast<float>(h)};
+    size_ = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
     // 浅色底色（与 Win32/X11 一致）
-    painter_.fill_rect(Rect{Point{0.0F, 0.0F}, Size{static_cast<float>(w), static_cast<float>(h)}},
+    painter_.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                            .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                        Color{245, 245, 247, 255});
     return true;
 }

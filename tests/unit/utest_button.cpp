@@ -274,9 +274,9 @@ AURORA_TEST_CASE(button_tr_label_draws_string_table_text) {
 
     LayoutEngine::layout(b, bounded(300.0F, 80.0F));
     const BuildContext ctx;  // 无 Provider<Locale> 注入 → 回落 default_string_table() 的缺省档
-    const Rect box{.origin = Point{}, .size = b.size()};
 
 #ifdef AURORA_ENABLE_DISPLAY_LIST
+    const Rect box{.origin = Point{}, .size = b.size()};
     const auto entries = capture_draw_text(b, box, ctx);
     AURORA_TEST_REQUIRE_FALSE(entries.empty());
     AURORA_TEST_CHECK_EQ(entries[0].text, translated);
@@ -302,9 +302,9 @@ AURORA_TEST_CASE(button_accessibility_label_equals_drawn_text) {
     b.label = LocalizedString::tr(key);
     LayoutEngine::layout(b, bounded(300.0F, 80.0F));
     const BuildContext ctx;
-    const Rect box{.origin = Point{}, .size = b.size()};
 
 #ifdef AURORA_ENABLE_DISPLAY_LIST
+    const Rect box{.origin = Point{}, .size = b.size()};
     const auto entries = capture_draw_text(b, box, ctx);
     AURORA_TEST_REQUIRE_FALSE(entries.empty());
     // 预期取绘制侧同一条 resolved_label() 的产物，不在用例里另算一遍。
@@ -374,8 +374,8 @@ AURORA_TEST_CASE(button_paint_remeasures_when_display_text_changes_without_relay
 
     table.add(Locale{}, key, "Substantially longer");  // 显示串变了，但刻意不重排
     const BuildContext ctx;
-    const Rect box{.origin = Point{}, .size = b.size()};
 #ifdef AURORA_ENABLE_DISPLAY_LIST
+    const Rect box{.origin = Point{}, .size = b.size()};
     const auto entries = capture_draw_text(b, box, ctx);
     AURORA_TEST_REQUIRE_FALSE(entries.empty());
     AURORA_TEST_CHECK_EQ(entries[0].text, "Substantially longer");
@@ -405,24 +405,23 @@ AURORA_TEST_CASE(button_literal_label_output_is_unchanged) {
     AURORA_TEST_CHECK_NEAR(literal.size().height, via_table.size().height, 1e-4F);
 
     const BuildContext ctx;
-    const Rect box{.origin = Point{}, .size = literal.size()};
 
 #ifdef AURORA_ENABLE_DISPLAY_LIST
+    const Rect box{.origin = Point{}, .size = literal.size()};
     // 字面档落笔的串仍是原文本，包围盒宽度也仍是它的量宽。
     const auto entries = capture_draw_text(literal, box, ctx);
     AURORA_TEST_REQUIRE_FALSE(entries.empty());
     AURORA_TEST_CHECK_EQ(entries[0].text, "Save");
     AURORA_TEST_CHECK_NEAR(entries[0].bounds.size.width,
                            render::FontEngine::measure_width("Save", effective_font(literal)), 1e-3F);
-#else
-    AURORA_TEST_SKIP("AURORA_ENABLE_DISPLAY_LIST is off; draw-record probe unavailable");
-#endif
-
     // 帧缓冲自证：字面档与「解析后同串」档必须逐像素同值——字面路径不走查表时就是这个输出。
     const auto px_literal = render_to_pixels(literal, box, ctx, 200, 60);
     const auto px_via_table = render_to_pixels(via_table, box, ctx, 200, 60);
     AURORA_TEST_REQUIRE_EQ(px_literal.size(), px_via_table.size());
     AURORA_TEST_CHECK_TRUE(px_literal == px_via_table);
+#else
+    AURORA_TEST_SKIP("AURORA_ENABLE_DISPLAY_LIST is off; draw-record probe unavailable");
+#endif
 }
 
 AURORA_TEST_CASE(cursor_shape_hook_defaults_to_pointing_hand) {

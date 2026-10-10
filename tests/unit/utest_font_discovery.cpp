@@ -396,7 +396,7 @@ AURORA_TEST_CASE(empty_chain_is_byte_identical_to_no_chain_overload) {
 
     // 「不指定时与现状逐字节一致」：空链重载须与无链重载给出**完全相同**的指针序列
     // （逐元素对拍，而非只比 size —— 只比 size 时「换了顺序」会漏判）。
-    constexpr std::vector<std::string> empty_chain{};
+    const std::vector<std::string> empty_chain{};
     const auto &with_empty = render::resolve_faces("utest-equiv-main", 400, empty_chain);
     const auto &plain = render::resolve_faces("utest-equiv-main", 400);
     AURORA_TEST_REQUIRE_EQ(with_empty.size(), plain.size());
