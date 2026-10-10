@@ -3,7 +3,7 @@
 #include <string>
 
 #include "aurora/core/log.h"
-#include "aurora/core/platform.h"
+#include "aurora/core/platform.h" // NOLINT
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
 
@@ -64,7 +64,6 @@
 #endif
 
 namespace aurora {
-
 // 通用：用已构造的 Surface 组装 Window，并套用跨后端共享的尺寸/标题。
 //
 // DPI 感知在这里启用（而非在 `Win32Host::Impl` 构造体内）：本函数是**所有** `create_window`
@@ -102,9 +101,10 @@ auto create_window(const HeadlessOptions &opts) -> Result<std::unique_ptr<Window
 
 #ifdef AURORA_BACKEND_WIN32
 auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> {
-    // 渲染后端偏好：统一的硬件加速可选开关。
+
+// 渲染后端偏好：统一的硬件加速可选开关。
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
-    if (opts.renderer == RendererPreference::GpuWgpu) {
+if (opts.renderer== RendererPreference::GpuWgpu) {
         // wgpu GPU 栅格路径（DisplayList 直接在 GPU 端光栅化，非 CPU 像素上传）。
         // Auto 不隐式选择本路径（保持既有 D3D11 优先序），仅显式强制时启用。
         auto gpu =
@@ -120,7 +120,7 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
         return make_window(std::move(gpu), opts);
     }
 #else
-    if (opts.renderer == RendererPreference::GpuWgpu) {
+if (opts.renderer== RendererPreference::GpuWgpu) {
         // 未编译 wgpu 后端（或缺 Win32 宿主）：强制 GPU 栅格时报错（Auto 不会隐式选它）。
         return make_error(
             ErrorCode::RendererUnavailable,
@@ -131,7 +131,7 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
     }
 #endif
 #ifdef AURORA_BACKEND_D3D11
-    if (opts.renderer == RendererPreference::Auto || opts.renderer == RendererPreference::GpuD3D11) {
+if (opts.renderer== RendererPreference::Auto|| opts.renderer== RendererPreference::GpuD3D11) {
         auto gpu = std::make_unique<D3D11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
                                                   opts.title, opts.style, opts.visibility);
         if (gpu->is_available()) {
@@ -146,7 +146,7 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
         AURORA_LOG_INFO("window", "D3D11 device unavailable; falling back to software GDI presenter.");
     }
 #else
-    if (opts.renderer == RendererPreference::GpuD3D11) {
+if (opts.renderer== RendererPreference::GpuD3D11) {
         // 未编译 D3D11 后端：强制 GPU 时报错（Auto 静默走软件）。
         return make_error(
             ErrorCode::RendererUnavailable,
@@ -155,9 +155,9 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
             "aurora/window/window.h");
     }
 #endif
-    auto surf = std::make_unique<Win32Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
-                                               opts.title, opts.style, opts.visibility);
-    return make_window(std::move(surf), opts);
+auto surf = std::make_unique<Win32Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
+                                           opts.title, opts.style, opts.visibility);
+    return make_window (std::move(surf), opts);
 }
 #endif
 
@@ -165,7 +165,7 @@ auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> 
 auto create_window(const D3D11Options &opts) -> Result<std::unique_ptr<Window>> {
     auto surf = std::make_unique<D3D11Surface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
                                                opts.title, opts.style, opts.visibility);
-    surf->set_vsync(opts.vsync);  // vsync 可选（false 交还 CPU 端帧预算节流）
+    surf->set_vsync(opts.vsync); // vsync 可选（false 交还 CPU 端帧预算节流）
     return make_window(std::move(surf), opts);
 }
 #endif
@@ -229,7 +229,7 @@ auto create_window(const GlfwOptions &opts) -> Result<std::unique_ptr<Window>> {
 
 #ifdef AURORA_BACKEND_X11
 auto create_window(const X11Options &opts) -> Result<std::unique_ptr<Window>> {
-#if defined(AURORA_BACKEND_GPU_WGPU)
+#ifdef AURORA_BACKEND_GPU_WGPU
     if (opts.renderer == RendererPreference::GpuWgpu) {
         // wgpu GPU 栅格路径（X11 宿主）：Auto 不隐式选择本路径，仅显式强制时启用（Win32 同口径）。
         auto gpu =
@@ -269,7 +269,7 @@ auto create_window(const X11Options &opts) -> Result<std::unique_ptr<Window>> {
 
 #ifdef AURORA_BACKEND_WAYLAND
 auto create_window(const WaylandOptions &opts) -> Result<std::unique_ptr<Window>> {
-#if defined(AURORA_BACKEND_GPU_WGPU)
+#ifdef AURORA_BACKEND_GPU_WGPU
     if (opts.renderer == RendererPreference::GpuWgpu) {
         // wgpu GPU 栅格路径（Wayland 宿主）：Auto 不隐式选择本路径，仅显式强制时启用（Win32/X11 同口径）。
         auto gpu =
@@ -429,13 +429,13 @@ auto enable_dpi_awareness() -> void {
     using SetDpiCtxFn = BOOL(WINAPI *)(DPI_AWARENESS_CONTEXT);
     // NOLINTBEGIN(*-pro-type-reinterpret-cast, *-casting-through-void)
     if (const auto f = reinterpret_cast<SetDpiCtxFn>(reinterpret_cast<void *>(
-            GetProcAddress(GetModuleHandleA("user32.dll"), "SetProcessDpiAwarenessContext")))) {
+        GetProcAddress(GetModuleHandleA("user32.dll"), "SetProcessDpiAwarenessContext")))) {
         f(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         return;
     }
     using SetDpiFn = HRESULT(WINAPI *)(int);
     if (const auto f = reinterpret_cast<SetDpiFn>(
-            reinterpret_cast<void *>(GetProcAddress(GetModuleHandleA("shcore.dll"), "SetProcessDpiAwareness")))) {
+        reinterpret_cast<void *>(GetProcAddress(GetModuleHandleA("shcore.dll"), "SetProcessDpiAwareness")))) {
         (void)f(PROCESS_PER_MONITOR_DPI_AWARE);
         return;
     }
@@ -445,5 +445,4 @@ auto enable_dpi_awareness() -> void {
     // macOS / Linux：DPI 感知由系统 compositor / Cocoa 自动处理，无需 opt-in；空实现保证跨平台调用安全。
 #endif
 }
-
-}  // namespace aurora
+} // namespace aurora

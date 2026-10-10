@@ -181,6 +181,13 @@ auto send_all(int sock, const std::string &data) -> bool {
 #else
     const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
     AURORA_TEST_REQUIRE_GE(sock, 0);
+    // REQUIRE 展开为「报告器调用 + 抛出」，对路径分析不透明（同 tests/framework/assertions.h 里
+    // require_value 的处置口径）：分析器据此推不出「此后 sock 必 ≥ 0」，而 Emscripten 无网络栈时
+    // socket() 返回 -1，紧随的 connect(-1) 即被 clang-analyzer-unix 判非法入参。补一条以**真返回**
+    // 收口的同判据守卫，让运行时与分析器在同一条件上收敛（REQUIRE 抛出后此路不可见，断言语义不变）。
+    if (sock < 0) {
+        return {};
+    }
 #endif
 
     sockaddr_in addr{};
@@ -198,9 +205,14 @@ auto send_all(int sock, const std::string &data) -> bool {
         static_cast<void>(::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout),
                                        static_cast<int>(sizeof(timeout))));
 #else
-        const timeval timeout{.tv_sec = recv_timeout_ms / 1000, .tv_usec = (recv_timeout_ms % 1000) * 1000};
-        static_cast<void>(
-            ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout), sizeof(timeout)));
+        // tv_usec 是 64 位字段：先在目标类型里做乘法，避免 `int × int` 结果再隐式拓宽
+        // （clang-tidy 判 multiplication-result 拓宽）。
+        const timeval timeout{.tv_sec = recv_timeout_ms / 1000,
+                              .tv_usec = static_cast<decltype(timeval::tv_usec)>(recv_timeout_ms % 1000) * 1000};
+        // socket API 的选项值形参是 `const char *`，取结构体地址只能强转（与 Windows 分支同款豁免）。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        const auto *const timeout_bytes = reinterpret_cast<const char *>(&timeout);
+        static_cast<void>(::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, timeout_bytes, sizeof(timeout)));
 #endif
     }
     AURORA_TEST_REQUIRE_TRUE(send_all(sock, request));
@@ -957,8 +969,8 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
     // 关键：值必须真的落到活控件上，而不只是回了个 200。
     Json props = Json::object();
     shared_tree()->child_nodes().at(0).widget().serialize_props(props);
-    const auto *__p = props.at("content");
-    const Json v = __p != nullptr ? *__p : Json{std::string{}};
+    const Json *const content = props.at("content");
+    const Json v = content != nullptr ? *content : Json{std::string{}};
     AURORA_TEST_CHECK_EQ(v, std::string{"patched"});
 
     // 非数组请求体必须被拒 —— 否则调用方无从知道补丁没生效。

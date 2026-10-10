@@ -64,14 +64,14 @@ class ProbeRoot final : public LeafWidget {
 }  // namespace
 
 AURORA_TEST_CASE(no_at_bridge_env_forces_degradation) {
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     (void)_putenv_s("NO_AT_BRIDGE", "1");
 #else
     (void)::setenv("NO_AT_BRIDGE", "1", 1);
 #endif
     // 显式免提（GNOME 惯例）：不碰 libdbus/总线，create 恒 nullptr。
     AURORA_TEST_CHECK_NULL(detail::AtspiBridge::create(probe_env()).get());
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     (void)_putenv_s("NO_AT_BRIDGE", "");
 #else
     (void)::unsetenv("NO_AT_BRIDGE");
@@ -80,7 +80,7 @@ AURORA_TEST_CASE(no_at_bridge_env_forces_degradation) {
 
 AURORA_TEST_CASE(live_embed_handshake_and_teardown) {
     const char *opt_in = std::getenv("AURORA_LIVE_ATSPI");
-    if (opt_in == nullptr || opt_in[0] == '\0' || std::string_view{opt_in} == "0") {
+    if (opt_in == nullptr || *opt_in == '\0' || std::string_view{opt_in} == "0") {
         AURORA_TEST_SKIP("set AURORA_LIVE_ATSPI=1 explicitly: connects to the real a11y bus and completes Embed");
         return;
     }

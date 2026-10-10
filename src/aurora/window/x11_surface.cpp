@@ -45,6 +45,7 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "aurora/core/a11y_text.h"  // a11y::detail::decode_cp（XIM 组合串的码点步进）
@@ -61,13 +62,11 @@
 namespace {
 // X11 的 None 宏与 aurora::ModifierKey::None 冲突：先取值再解除宏定义。
 constexpr long AURORA_X_NONE = None;
-}  // namespace
+} // namespace
 #undef None
 
 namespace aurora {
-
 namespace {
-
 /// @brief 掩码 → 位移：如 red_mask=0xFF0000 → 16。空掩码（异常 Visual）回退默认位移。
 auto mask_shift(unsigned long mask, int fallback) -> int {
     if (mask == 0UL) {
@@ -91,7 +90,7 @@ auto detect_scale(Display *dpy) -> float {
     if (p == nullptr) {
         return 1.0F;
     }
-    const double dpi = std::strtod(p + 8, nullptr);  // NOLINT(*-pro-bounds-pointer-arithmetic)
+    const double dpi = std::strtod(p + 8, nullptr); // NOLINT(*-pro-bounds-pointer-arithmetic)
     if (dpi <= 0.0) {
         return 1.0F;
     }
@@ -100,18 +99,17 @@ auto detect_scale(Display *dpy) -> float {
 
 /// @brief keysym → 平台无关 KeyCode（X11 后端入口；映射逻辑见 detail::keysym_to_keycode）。
 auto from_keysym(KeySym ks) -> KeyCode { return detail::keysym_to_keycode(static_cast<unsigned long>(ks)); }
-
-}  // namespace
+} // namespace
 
 // 本头自带的 `state` 掩码常量与真实 Xlib 宏逐一对照：X11 协议把它们定为 ABI 稳定常量，
 // 一旦上游改值即编译失败，不会静默错位（折算表本体见 detail/x11_modifiers.h）。
-static_assert(detail::x11_state_mask::kShift == ShiftMask, "X11 ShiftMask value drifted");
-static_assert(detail::x11_state_mask::kLock == LockMask, "X11 LockMask value drifted");
-static_assert(detail::x11_state_mask::kControl == ControlMask, "X11 ControlMask value drifted");
-static_assert(detail::x11_state_mask::kMod1 == Mod1Mask, "X11 Mod1Mask value drifted");
-static_assert(detail::x11_state_mask::kMod2 == Mod2Mask, "X11 Mod2Mask value drifted");
-static_assert(detail::x11_state_mask::kMod3 == Mod3Mask, "X11 Mod3Mask value drifted");
-static_assert(detail::x11_state_mask::kMod4 == Mod4Mask, "X11 Mod4Mask value drifted");
+static_assert(detail::x11_state_mask::AURORA_SHIFT_MASK == ShiftMask, "X11 ShiftMask value drifted");
+static_assert(detail::x11_state_mask::AURORA_LOCK_MASK == LockMask, "X11 LockMask value drifted");
+static_assert(detail::x11_state_mask::AURORA_CONTROL_MASK == ControlMask, "X11 ControlMask value drifted");
+static_assert(detail::x11_state_mask::AURORA_MOD1_MASK == Mod1Mask, "X11 Mod1Mask value drifted");
+static_assert(detail::x11_state_mask::AURORA_MOD2_MASK == Mod2Mask, "X11 Mod2Mask value drifted");
+static_assert(detail::x11_state_mask::AURORA_MOD3_MASK == Mod3Mask, "X11 Mod3Mask value drifted");
+static_assert(detail::x11_state_mask::AURORA_MOD4_MASK == Mod4Mask, "X11 Mod4Mask value drifted");
 
 /// @brief X11Surface 的全部 Xlib 状态（pimpl）：公共头零 Xlib 依赖。
 struct X11Surface::Impl {
@@ -137,11 +135,11 @@ struct X11Surface::Impl {
     // 仍有 keysym → KeyEvent 路径。
     XIM im = nullptr;
     XIC ic = nullptr;
-    bool ime_cb_style = false;  ///< 协商到 PreeditCallbacks（观测面 + draw 回调仅在 cb 风格下触发）
-    std::string ime_preedit;  ///< 最近 draw 回调的组合串（UTF-8，commit/清空时置空）
-    std::function<Rect()> composition_caret_provider;  ///< 宿主注入的插入点查询（窗口逻辑 dp）
-    int ime_draw_cbs = 0;  ///< preedit draw 回调次数
-    int ime_spot_updates = 0;  ///< XNSpotLocation 实际下发次数（去重后）
+    bool ime_cb_style = false; ///< 协商到 PreeditCallbacks（观测面 + draw 回调仅在 cb 风格下触发）
+    std::string ime_preedit; ///< 最近 draw 回调的组合串（UTF-8，commit/清空时置空）
+    std::function<Rect()> composition_caret_provider; ///< 宿主注入的插入点查询（窗口逻辑 dp）
+    int ime_draw_cbs = 0; ///< preedit draw 回调次数
+    int ime_spot_updates = 0; ///< XNSpotLocation 实际下发次数（去重后）
     /// @brief 建立/重建 IM 通道（构造期与首次 FocusIn 各调一次，幂等）：XOpenIM → 风格协商 →
     /// XCreateIC → 注册 preedit 回调。任一步失败即降级（keysym 路径不受影响）。
     auto ime_setup() -> void;
@@ -149,17 +147,17 @@ struct X11Surface::Impl {
     auto ime_emit_preedit(const std::string &utf8, int caret, int sel_begin_byte, int sel_end_byte) -> void;
     /// @brief 把 provider 的插入点盒折算为客户窗口物理 px 写入 XNSpotLocation（变化才发）。
     auto ime_update_spot() -> void;
-    XPoint ime_last_spot{};  ///< 上次下发的锚点（去重）
+    XPoint ime_last_spot{}; ///< 上次下发的锚点（去重）
     bool ime_spot_valid = false;
-    bool ime_focused = false;  ///< XSetICFocus 已发且未 XUnsetICFocus（观测面）
+    bool ime_focused = false; ///< XSetICFocus 已发且未 XUnsetICFocus（观测面）
     // 自唤醒管道（request_wake → wait_events poll 立即返回）。
     int wake_fd[2] = {-1, -1};
     // AT-SPI2 无障碍桥（宿主惰性构造：首次 set_accessibility_root 时尝试连接 a11y 总线；
     // 失败永久降级为 nullptr——无 libdbus/无会话总线/NO_AT_BRIDGE 都是 Linux 常态）。
     std::unique_ptr<detail::AtspiBridge> atspi;
     bool atspi_attempted = false;
-    std::string title;  ///< 最近标题缓存（桥构造时回填 FRAME 节点 Name）
-    int origin_x = 0;  ///< 客户区左上角的屏幕物理 px（ConfigureNotify 时 XTranslateCoordinates）
+    std::string title; ///< 最近标题缓存（桥构造时回填 FRAME 节点 Name）
+    int origin_x = 0; ///< 客户区左上角的屏幕物理 px（ConfigureNotify 时 XTranslateCoordinates）
     int origin_y = 0;
     // 光标形状：`XCreateFontCursor` 句柄按 CursorShape 取值序缓存（0 = 未创建）。
     // 每次创建都是新 X 资源，必须复用；析构统一 XFreeCursor。
@@ -170,14 +168,14 @@ struct X11Surface::Impl {
     int bshift = 0;
 
     Painter painter;
-    std::vector<Rect> present_dirty;  ///< 本帧增量上屏脏区（设备坐标；空=全量）。
-    int presented = 0;  ///< 已上屏帧数（见 `X11Surface::frame_count()`）。
-    Size size{.width = 0.0F, .height = 0.0F};  ///< 逻辑 dp（布局用）。
+    std::vector<Rect> present_dirty; ///< 本帧增量上屏脏区（设备坐标；空=全量）。
+    int presented = 0; ///< 已上屏帧数（见 `X11Surface::frame_count()`）。
+    Size size{.width = 0.0F, .height = 0.0F}; ///< 逻辑 dp（布局用）。
     float scale = 1.0F;
     bool close_requested = false;
     bool active = true;
     bool minimized = false;
-    WindowVisibility visibility = WindowVisibility::Normal;  ///< 构造期定档的可见性策略。
+    WindowVisibility visibility = WindowVisibility::Normal; ///< 构造期定档的可见性策略。
     WindowState state = WindowState::Visible;
     WindowMode mode = WindowMode::Normal;
     EventHandler handler;
@@ -190,10 +188,10 @@ struct X11Surface::Impl {
 /// @brief 设置窗口标题：ICCCM `XStoreName`（latin1 兜底）+ EWMH `_NET_WM_NAME`（UTF-8，现代 WM 优先读）。
 auto X11Surface::Impl::apply_title(const std::string &title_in) -> void {
     Impl &d = *this;
-    d.title = title_in;  // 缓存给 AT-SPI 桥（FRAME Name；桥可能晚于 set_title 构造）
+    d.title = title_in; // 缓存给 AT-SPI 桥（FRAME Name；桥可能晚于 set_title 构造）
     XStoreName(d.dpy, d.win, title_in.c_str());
     XChangeProperty(d.dpy, d.win, d.net_wm_name, d.utf8_string, 8, PropModeReplace,
-                    reinterpret_cast<const unsigned char *>(title_in.c_str()),  // NOLINT(*-pro-type-reinterpret-cast)
+                    reinterpret_cast<const unsigned char *>(title_in.c_str()), // NOLINT(*-pro-type-reinterpret-cast)
                     static_cast<int>(title_in.size()));
 }
 
@@ -212,7 +210,7 @@ auto X11Surface::Impl::ensure_image(int w, int h) -> bool {
     d.xbuf.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0U);
     const int screen = DefaultScreen(d.dpy);
     d.ximage = XCreateImage(d.dpy, DefaultVisual(d.dpy, screen), static_cast<unsigned int>(DefaultDepth(d.dpy, screen)),
-                            ZPixmap, 0, reinterpret_cast<char *>(d.xbuf.data()),  // NOLINT(*-pro-type-reinterpret-cast)
+                            ZPixmap, 0, reinterpret_cast<char *>(d.xbuf.data()), // NOLINT(*-pro-type-reinterpret-cast)
                             static_cast<unsigned int>(w), static_cast<unsigned int>(h), 32, w * 4);
     if (d.ximage == nullptr) {
         return false;
@@ -228,11 +226,11 @@ static auto swizzle_rows(const std::uint32_t *src, std::uint32_t *dst, std::size
     -> void {
     for (std::size_t i = 0; i < count; ++i) {
         // NOLINTNEXTLINE(*-pro-bounds-pointer-arithmetic)
-        const std::uint32_t px = src[i];  // 小端内存 R,G,B,A → px = A<<24|B<<16|G<<8|R
+        const std::uint32_t px = src[i]; // 小端内存 R,G,B,A → px = A<<24|B<<16|G<<8|R
         const std::uint32_t r = px & 0xFFU;
         const std::uint32_t g = (px >> 8U) & 0xFFU;
         const std::uint32_t b = (px >> 16U) & 0xFFU;
-        dst[i] = (r << rs) | (g << gs) | (b << bs);  // NOLINT(*-signed-bitwise, *-pro-bounds-pointer-arithmetic)
+        dst[i] = (r << rs) | (g << gs) | (b << bs); // NOLINT(*-signed-bitwise, *-pro-bounds-pointer-arithmetic)
     }
 }
 
@@ -246,7 +244,7 @@ auto X11Surface::Impl::query_mode() -> WindowMode {
     unsigned long after = 0;
     unsigned char *data = nullptr;
     if (XGetWindowProperty(d.dpy, d.win, d.net_wm_state, 0, 64, 0, XA_ATOM, &actual, &fmt, &n, &after, &data) ==
-            Success &&
+        Success &&
         data != nullptr) {
         // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
         const Atom *atoms = reinterpret_cast<Atom *>(data);
@@ -278,12 +276,11 @@ auto X11Surface::Impl::query_mode() -> WindowMode {
 // =============================================================================
 
 namespace {
-
 /// @brief XIMFeedback 位 → 是否属「目标段」（下划线/三类插入点皆视为高亮中的组合段，与
 /// Wayland preedit 高亮段及 Win32 GCS_COMPATTR 目标段口径一致）。
 constexpr auto ime_feedback_is_target(int fb) -> bool {
-    constexpr int AURORA_BITS = XIMUnderline | XIMPrimary | XIMSecondary | XIMTertiary;
-    return (fb & AURORA_BITS) != 0;
+    constexpr int bits = XIMUnderline | XIMPrimary | XIMSecondary | XIMTertiary;
+    return (fb & bits) != 0; // NOLINT(*-signed-bitwise)
 }
 
 /// @brief XIMText（multi_byte 或 wide_char）→ UTF-8 串 + 逐码点反馈位。
@@ -296,16 +293,22 @@ auto xim_text_to_utf8(const XIMText *t, std::vector<int> &feedback) -> std::stri
         return out;
     }
     if (t->encoding_is_wchar != 0) {
-        const wchar_t *const w = t->string.wide_char;
-        std::vector<wchar_t> src(w, w + t->length);  // 拷贝一份保证 NUL 终止（wcstombs 读入参）
+        // XIMText.string 是 Xlib 侧的 C union，判别式就是同结构的 encoding_is_wchar 位：本分支
+        // 读 wide_char、对侧读 multi_byte，读到的始终是写入者那一支 ⇒ 无未定义读取。
+        // variant 替代方案无从谈起（布局由 Xlib ABI 决定），故按 C ABI 边界就地豁免。
+        const wchar_t *const w = t->string.wide_char; // NOLINT(*-pro-type-union-access)
+        // XIMText.length 以元素个数给出：经 span 取范围迭代器构造拷贝（span 内部步进不出本 TU），
+        // 拷贝一份保证 NUL 终止（wcstombs 读入参）。
+        const std::span view{w, static_cast<std::size_t>(t->length)};
+        std::vector<wchar_t> src(view.begin(), view.end());
         src.push_back(L'\0');
-        std::vector<char> tmp(src.size() * 4U + 1U, '\0');
-        const std::size_t conv = std::wcstombs(tmp.data(), src.data(), tmp.size() - 1U);  // NOLINT(mt-unsafe)
-        if (conv != static_cast<std::size_t>(-1)) {
+        std::vector<char> tmp((src.size() * 4U) + 1U, '\0');
+        const std::size_t conv = std::wcstombs(tmp.data(), src.data(), tmp.size() - 1U); // NOLINT(mt-unsafe)
+        if (std::cmp_not_equal(conv, -1)) {
             out.assign(tmp.data(), conv);
-        }  // 非法序列：留空串（宁可不显示也不吐半截字节）
+        } // 非法序列：留空串（宁可不显示也不吐半截字节）
     } else {
-        out.assign(t->string.multi_byte, static_cast<std::size_t>(t->length));
+        out.assign(t->string.multi_byte, static_cast<std::size_t>(t->length)); // NOLINT(*-pro-type-union-access)
     }
     if (t->feedback != nullptr) {
         for (unsigned short i = 0; i < t->length; ++i) {
@@ -334,8 +337,8 @@ auto ime_cp_offsets(const std::string &utf8) -> std::vector<std::size_t> {
 /// 全串标为目标段——ibus-x11 常不带 feedback）→ 字节区间交 Impl 折算码点契约。
 /// R6 draw 无 action 枚举，全串重发即现状；空 text/零长 = 组合取消。
 /// 签名按 XICProc（Bool 返回，值无实义——Xlib 契约对 draw 回调返回值不检查）。
-auto ime_preedit_draw(XIC /*ic*/, XPointer cd, XIMPreeditDrawCallbackStruct *r) -> int {
-    auto &d = *reinterpret_cast<X11Surface::Impl *>(cd);  // NOLINT(*-pro-type-reinterpret-cast)
+auto ime_preedit_draw(XIC /*ic*/, XPointer cd, XIMPreeditDrawCallbackStruct *r) -> int { // NOLINT
+    auto &d = *reinterpret_cast<X11Surface::Impl *>(cd); // NOLINT(*-pro-type-reinterpret-cast)
     ++d.ime_draw_cbs;
     std::vector<int> fb;
     const std::string utf8 = (r != nullptr) ? xim_text_to_utf8(r->text, fb) : std::string{};
@@ -365,13 +368,12 @@ auto ime_preedit_draw(XIC /*ic*/, XPointer cd, XIMPreeditDrawCallbackStruct *r) 
 
 /// @brief XNPreeditCaretCallback 跳板：IM 请求移动组合光标——以现串 + 新位重发并全量接受。
 /// @return True = 接受移动（本端无横向滚动，恒接受；False 会让 IM 停在原位）。
-auto ime_preedit_caret(XIC /*ic*/, XPointer cd, XIMPreeditCaretCallbackStruct *r) -> int {
-    auto &d = *reinterpret_cast<X11Surface::Impl *>(cd);  // NOLINT(*-pro-type-reinterpret-cast)
+auto ime_preedit_caret(XIC /*ic*/, XPointer cd, XIMPreeditCaretCallbackStruct *r) -> int { // NOLINT
+    auto &d = *reinterpret_cast<X11Surface::Impl *>(cd); // NOLINT(*-pro-type-reinterpret-cast)
     d.ime_emit_preedit(d.ime_preedit, (r != nullptr) ? r->position : -1, -1, -1);
     return True;
 }
-
-}  // namespace
+} // namespace
 
 /// @brief 建立/重建 IM 通道（幂等）：XOpenIM → XNQueryInputStyle 协商 → XCreateIC →
 /// 注册 preedit 回调。任一步失败逐级降级：cb 风格不可用回退 PreeditNothing（commit 仍可经
@@ -384,11 +386,11 @@ auto X11Surface::Impl::ime_setup() -> void {
     if (im == nullptr) {
         im = XOpenIM(dpy, nullptr, nullptr, nullptr);
         if (im == nullptr) {
-            return;  // 无 XIM 服务器（XMODIFIERS 未设/IM 未起）：静默降级
+            return; // 无 XIM 服务器（XMODIFIERS 未设/IM 未起）：静默降级
         }
     }
     if (ic != nullptr) {
-        return;  // 已建过：不重协商（XIM 属性变更须重建，属运维路径而非运行期路径）
+        return; // 已建过：不重协商（XIM 属性变更须重建，属运维路径而非运行期路径）
     }
     // 协商输入风格：只有 IM 广告 XIMPreeditCallbacks 才走全事件路（draw/caret 回推）。
     // XGetIMValues 契约：成功返回 NULL（输出参数有效），失败返回错误字符串。
@@ -396,7 +398,7 @@ auto X11Surface::Impl::ime_setup() -> void {
     if (XIMStyles *styles = nullptr; XGetIMValues(im, XNQueryInputStyle, &styles, nullptr) == nullptr) {
         if (styles != nullptr) {
             // NOLINTBEGIN(*-pro-bounds-pointer-arithmetic)
-            for (int i = 0; i < styles->count_styles; ++i) {
+            for (int i = 0; std::cmp_less(i, styles->count_styles); ++i) {
                 if (styles->supported_styles[i] == static_cast<unsigned long>(XIMPreeditCallbacks | XIMStatusNothing)) {
                     cb_style = true;
                 }
@@ -405,13 +407,14 @@ auto X11Surface::Impl::ime_setup() -> void {
             XFree(styles);
         }
     } else if (styles != nullptr) {
-        XFree(styles);  // 失败路径按惯例仍可能带回顾句柄，不留悬挂
+        XFree(styles); // 失败路径按惯例仍可能带回顾句柄，不留悬挂
     }
-    const unsigned long style = cb_style ? static_cast<unsigned long>(XIMPreeditCallbacks | XIMStatusNothing)
-                                         : static_cast<unsigned long>(XIMPreeditNothing | XIMStatusNothing);
+    const unsigned long style = cb_style
+                                    ? static_cast<unsigned long>(XIMPreeditCallbacks | XIMStatusNothing)
+                                    : static_cast<unsigned long>(XIMPreeditNothing | XIMStatusNothing);
     ic = XCreateIC(im, XNInputStyle, style, XNClientWindow, win, nullptr);
     if (ic == nullptr) {
-        return;  // IM 掉线等极端场景：留 im 句柄，下次 FocusIn 再试
+        return; // IM 掉线等极端场景：留 im 句柄，下次 FocusIn 再试
     }
     ime_cb_style = cb_style;
     if (cb_style) {
@@ -420,13 +423,13 @@ auto X11Surface::Impl::ime_setup() -> void {
         // XICCallback 联合式分发契约）。client_data 直接指向本 Impl：回调全在事件派发栈内
         // 同步触发，生命周期无忧。
         XICCallback draw{};
-        draw.client_data = reinterpret_cast<XPointer>(this);  // NOLINT(*-pro-type-reinterpret-cast)
+        draw.client_data = reinterpret_cast<XPointer>(this); // NOLINT(*-pro-type-reinterpret-cast)
         // Xlib 把一切 IC 回调统一擦成 XICProc（第三参 XPointer），XIM 规范即要求此形态转换
         // （Qt/GTK 同款），派发时按注册名还原真实结构体指针。
-        draw.callback = reinterpret_cast<XICProc>(ime_preedit_draw);  // NOLINT(*-pro-type-reinterpret-cast)
+        draw.callback = reinterpret_cast<XICProc>(ime_preedit_draw); // NOLINT(*-pro-type-reinterpret-cast)
         XICCallback caret{};
         caret.client_data = draw.client_data;
-        caret.callback = reinterpret_cast<XICProc>(ime_preedit_caret);  // NOLINT(*-pro-type-reinterpret-cast)
+        caret.callback = reinterpret_cast<XICProc>(ime_preedit_caret); // NOLINT(*-pro-type-reinterpret-cast)
         if (XVaNestedList nested =
                 XVaCreateNestedList(0, XNPreeditDrawCallback, &draw, XNPreeditCaretCallback, &caret, nullptr);
             nested != nullptr) {
@@ -465,7 +468,7 @@ auto X11Surface::Impl::ime_update_spot() -> void {
     const Rect box = composition_caret_provider();
     XPoint pt{};
     pt.x = static_cast<short>(std::lround(box.origin.x * scale));
-    pt.y = static_cast<short>(std::lround((box.origin.y + box.size.height) * scale));  // 候选窗落在组合串下方
+    pt.y = static_cast<short>(std::lround((box.origin.y + box.size.height) * scale)); // 候选窗落在组合串下方
     if (ime_spot_valid && pt.x == ime_last_spot.x && pt.y == ime_last_spot.y) {
         return;
     }
@@ -506,8 +509,11 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
         h = 240;
     }
     // DPI 感知：窗口物理尺寸 = 逻辑 dp × scale（对齐 Win32 语义）。
-    const int pw = static_cast<int>(std::lround(w * d.scale));
-    const int ph = static_cast<int>(std::lround(h * d.scale));
+    // 换算前先显式转 float：整条链只有这一处隐式 int→float（lround 的入参是 double，故只报
+    // float 这一步）。窗口尺寸远小于 2^24（float 精确整数上限），转换不丢位；若将来支持
+    // 超大虚拟桌面尺寸需改 double 链。
+    const int pw = static_cast<int>(std::lround(static_cast<float>(w) * d.scale));
+    const int ph = static_cast<int>(std::lround(static_cast<float>(h) * d.scale));
     d.win = XCreateSimpleWindow(d.dpy, RootWindow(d.dpy, screen), 0, 0, static_cast<unsigned int>(pw),
                                 static_cast<unsigned int>(ph), 0, BlackPixel(d.dpy, screen), WhitePixel(d.dpy, screen));
     if (d.win == 0) {
@@ -518,8 +524,8 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     }
     XSelectInput(d.dpy, d.win,
                  ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
-                     PointerMotionMask | StructureNotifyMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask |
-                     PropertyChangeMask);
+                 PointerMotionMask | StructureNotifyMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask |
+                 PropertyChangeMask);
     // 关闭协议（点「×」经 ClientMessage 通知而非直接断链）。
     d.wm_delete = XInternAtom(d.dpy, "WM_DELETE_WINDOW", 0);
     XSetWMProtocols(d.dpy, d.win, &d.wm_delete, 1);
@@ -536,7 +542,7 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     if (style.always_on_top) {
         Atom above = XInternAtom(d.dpy, "_NET_WM_STATE_ABOVE", 0);
         XChangeProperty(d.dpy, d.win, d.net_wm_state, XA_ATOM, 32, PropModeAppend,
-                        reinterpret_cast<unsigned char *>(&above), 1);  // NOLINT(*-pro-type-reinterpret-cast)
+                        reinterpret_cast<unsigned char *>(&above), 1); // NOLINT(*-pro-type-reinterpret-cast)
     }
     if (style.frameless) {
         struct MotifHints {
@@ -552,23 +558,24 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
                          .input_mode = 0L,
                          .status = 0UL};
         const Atom motif = XInternAtom(d.dpy, "_MOTIF_WM_HINTS", 0);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         XChangeProperty(d.dpy, d.win, motif, motif, 32, PropModeReplace, reinterpret_cast<unsigned char *>(&hints),
-                        5);  // NOLINT(*-pro-type-reinterpret-cast)
+                        5); // NOLINT(*-pro-type-reinterpret-cast)
     }
     // 尺寸限制（XSizeHints）：不可调大小 → min=max=创建尺寸。
     if (XSizeHints *sh = XAllocSizeHints()) {
         if (!style.resizable) {
-            sh->flags = PMinSize | PMaxSize;  // NOLINT(*-signed-bitwise)
+            sh->flags = PMinSize | PMaxSize; // NOLINT(*-signed-bitwise)
             sh->min_width = sh->max_width = pw;
             sh->min_height = sh->max_height = ph;
         } else {
             if (style.min_size.width > 0.0F || style.min_size.height > 0.0F) {
-                sh->flags |= PMinSize;  // NOLINT(*-signed-bitwise)
+                sh->flags |= PMinSize; // NOLINT(*-signed-bitwise)
                 sh->min_width = static_cast<int>(std::lround(style.min_size.width * d.scale));
                 sh->min_height = static_cast<int>(std::lround(style.min_size.height * d.scale));
             }
             if (style.max_size.width > 0.0F || style.max_size.height > 0.0F) {
-                sh->flags |= PMaxSize;  // NOLINT(*-signed-bitwise)
+                sh->flags |= PMaxSize; // NOLINT(*-signed-bitwise)
                 sh->max_width = static_cast<int>(std::lround(style.max_size.width * d.scale));
                 sh->max_height = static_cast<int>(std::lround(style.max_size.height * d.scale));
             }
@@ -599,7 +606,7 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     }
     XFlush(d.dpy);
     d.ime_setup();
-    d.size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // NOLINT(*-narrowing-conversions)
+    d.size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}; // NOLINT(*-narrowing-conversions)
 }
 
 X11Surface::~X11Surface() {
@@ -609,15 +616,15 @@ X11Surface::~X11Surface() {
     window_state_handler_ = nullptr;
     window_mode_handler_ = nullptr;
     present_request_ = nullptr;
-    d.composition_caret_provider = nullptr;  // 捕获宿主 this 的回调：销毁前解绑（同 Win32 桥纪律）
+    d.composition_caret_provider = nullptr; // 捕获宿主 this 的回调：销毁前解绑（同 Win32 桥纪律）
     if (d.ximage != nullptr) {
-        d.ximage->data = nullptr;  // 缓冲由 vector 持有，不得让 XDestroyImage free
+        d.ximage->data = nullptr; // 缓冲由 vector 持有，不得让 XDestroyImage free
         XDestroyImage(d.ximage);
     }
     if (d.dpy != nullptr) {
         if (d.ic != nullptr) {
             if (d.ime_focused) {
-                XUnsetICFocus(d.ic);  // 先失焦再销毁：IM 侧组合状态随之释放，不留悬挂回调
+                XUnsetICFocus(d.ic); // 先失焦再销毁：IM 侧组合状态随之释放，不留悬挂回调
             }
             XDestroyIC(d.ic);
         }
@@ -649,7 +656,6 @@ X11Surface::~X11Surface() {
 // ---- 光标形状：CursorShape → X 核心光标字体字形（<X11/cursorfont.h>）----
 
 namespace {
-
 /// @brief `CursorShape` → `XC_*` 字形码（`XCreateFontCursor` 的入参）。
 /// X11 无「禁止」专用光标，`XC_X_cursor`（大叉号）为各工具包通行近似。
 constexpr auto x11_cursor_glyph(CursorShape shape) -> unsigned int {
@@ -679,13 +685,12 @@ constexpr auto x11_cursor_glyph(CursorShape shape) -> unsigned int {
     }
     return XC_left_ptr;
 }
-
-}  // namespace
+} // namespace
 
 auto X11Surface::set_cursor(CursorShape shape) -> void {
     Impl &d = *impl_;
     if (d.dpy == nullptr || d.win == 0) {
-        return;  // 连接/窗口未建成：安全 no-op。
+        return; // 连接/窗口未建成：安全 no-op。
     }
     const auto idx = static_cast<std::size_t>(shape);
     if (idx >= d.cursors.size()) {
@@ -696,7 +701,7 @@ auto X11Surface::set_cursor(CursorShape shape) -> void {
     }
     if (d.cursors.at(idx) != 0) {
         XDefineCursor(d.dpy, d.win, d.cursors.at(idx));
-        XFlush(d.dpy);  // 立即生效：光标不由后续事件驱动刷新（避免等到下次 poll）。
+        XFlush(d.dpy); // 立即生效：光标不由后续事件驱动刷新（避免等到下次 poll）。
     }
 }
 
@@ -707,8 +712,9 @@ auto X11Surface::begin_frame(int width, int height) -> Result<bool> {
     // 新帧默认全量上屏；present_root 会在 present 前重新 set_present_dirty。
     d.present_dirty.clear();
     d.painter.set_scale(d.scale);
-    int phys_w = width > 0 ? static_cast<int>(std::lround(width * d.scale)) : 0;
-    int phys_h = height > 0 ? static_cast<int>(std::lround(height * d.scale)) : 0;
+    // 逻辑 dp → 物理 px：显式 float 化左操作数（同上，尺寸 <2^24 不丢位）。
+    int phys_w = width > 0 ? static_cast<int>(std::lround(static_cast<float>(width) * d.scale)) : 0;
+    int phys_h = height > 0 ? static_cast<int>(std::lround(static_cast<float>(height) * d.scale)) : 0;
     // 以窗口真实几何为准（ConfigureNotify 后调用方 size 可能滞后一帧），缓冲 1:1 贴窗口。
     if (d.dpy != nullptr && d.win != 0) {
         ::Window root_ret = 0;
@@ -734,8 +740,10 @@ auto X11Surface::begin_frame(int width, int height) -> Result<bool> {
         phys_h = 1;
     }
     if (phys_w != d.painter.width() || phys_h != d.painter.height()) {
-        const int lw = static_cast<int>(std::lround(phys_w / d.scale));
-        const int lh = static_cast<int>(std::lround(phys_h / d.scale));
+        // 物理 px → 逻辑 dp：显式 float 化被除数。除数 d.scale 恒 ∈ [0.5, 4.0]（detect_scale
+        // 单一赋值点 clamp 后即不再变），不存在除零 ⇒ lround 入参不会是 inf。
+        const int lw = static_cast<int>(std::lround(static_cast<float>(phys_w) / d.scale));
+        const int lh = static_cast<int>(std::lround(static_cast<float>(phys_h) / d.scale));
         d.painter.begin(lw, lh);
     }
     // 浅色背景：默认文字为黑色，需浅色底才可见（与 Win32/GLFW 后端一致）。
@@ -802,9 +810,9 @@ auto X11Surface::capture_window(const std::string &path) -> Result<bool> {
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             const unsigned long pix = XGetPixel(ximg, x, y);
-            const auto r = static_cast<std::uint8_t>((pix & rm) >> rs);
-            const auto g = static_cast<std::uint8_t>((pix & gm) >> gs);
-            const auto b = static_cast<std::uint8_t>((pix & bm) >> bs);
+            const auto r = static_cast<std::uint8_t>((pix & rm) >> rs); // NOLINT(*-signed-bitwise)
+            const auto g = static_cast<std::uint8_t>((pix & gm) >> gs); // NOLINT(*-signed-bitwise)
+            const auto b = static_cast<std::uint8_t>((pix & bm) >> bs); // NOLINT(*-signed-bitwise)
             const std::size_t o =
                 ((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + static_cast<std::size_t>(x)) * 4;
             rgba[o] = r;
@@ -831,7 +839,7 @@ auto X11Surface::present() -> Result<bool> {
         const int w = d.painter.width();
         const int h = d.painter.height();
         if (d.ensure_image(w, h)) {
-            ++d.presented;  // 只计缓冲就绪并走完 XPutImage 上屏的帧
+            ++d.presented; // 只计缓冲就绪并走完 XPutImage 上屏的帧
             // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
             const auto *src = reinterpret_cast<const std::uint32_t *>(d.painter.data());
             if (d.present_dirty.empty()) {
@@ -853,8 +861,11 @@ auto X11Surface::present() -> Result<bool> {
                     for (int y = y0; y < y1; ++y) {
                         const std::size_t off =
                             (static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + static_cast<std::size_t>(x0);
+                        // 增量帧从脏区首像素起 swizzle：off 是脏矩形在整幅缓冲内的线性偏移，
+                        // 按字节步进指针是有意设计（与 painter 线性缓冲同一布局约定）。
+                        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
                         swizzle_rows(src + off, d.xbuf.data() + off, static_cast<std::size_t>(x1 - x0), d.rshift,
-                                     d.gshift, d.bshift);  // NOLINT(*-pro-bounds-pointer-arithmetic)
+                                     d.gshift, d.bshift); // NOLINT(*-pro-bounds-pointer-arithmetic)
                     }
                     XPutImage(d.dpy, d.win, d.gc, d.ximage, x0, y0, x0, y0, static_cast<unsigned int>(x1 - x0),
                               static_cast<unsigned int>(y1 - y0));
@@ -906,7 +917,7 @@ auto X11Surface::set_title(const std::string &title) -> void {
         XFlush(d.dpy);
     }
     if (d.atspi != nullptr) {
-        d.atspi->set_window_title(title);  // FRAME 节点 Name（AT 客户端读回窗口标题）
+        d.atspi->set_window_title(title); // FRAME 节点 Name（AT 客户端读回窗口标题）
     }
 }
 
@@ -953,11 +964,11 @@ auto X11Surface::set_accessibility_root(Widget *root) -> void {
 }
 
 auto X11Surface::native_handle() const -> void * {
-    return reinterpret_cast<void *>(impl_->win);  // NOLINT(*-pro-type-reinterpret-cast, performance-no-int-to-ptr)
+    return reinterpret_cast<void *>(impl_->win); // NOLINT(*-pro-type-reinterpret-cast, performance-no-int-to-ptr)
 }
 
 auto X11Surface::native_display() const -> void * {
-    return impl_->dpy;  // Display* → void* 隐式转换；未连接时为 nullptr
+    return impl_->dpy; // Display* → void* 隐式转换；未连接时为 nullptr
 }
 
 auto X11Surface::poll_platform_events() -> void {
@@ -992,7 +1003,7 @@ auto X11Surface::poll_platform_events() -> void {
     while (XPending(d.dpy) > 0) {
         XNextEvent(d.dpy, &ev);
         if (XFilterEvent(&ev, AURORA_X_NONE) != 0) {
-            continue;  // 输入法预编辑消费（如拼音候选期间的按键）
+            continue; // 输入法预编辑消费（如拼音候选期间的按键）
         }
         // NOLINTBEGIN(*-pro-type-union-access)
         switch (ev.type) {
@@ -1009,7 +1020,7 @@ auto X11Surface::poll_platform_events() -> void {
                                             .y = static_cast<float>(ev.xbutton.y) / d.scale};
                         // NOLINTEND(*-narrowing-conversions)
                         if (btn == 4) {
-                            se.delta_y = 1.0F;  // 上滚为正（见 event.h）
+                            se.delta_y = 1.0F; // 上滚为正（见 event.h）
                         } else if (btn == 5) {
                             se.delta_y = -1.0F;
                         } else if (btn == 6) {
@@ -1023,9 +1034,11 @@ auto X11Surface::poll_platform_events() -> void {
                     }
                     break;
                 }
-                const MouseButton mb = (btn == 3)   ? MouseButton::Right
-                                       : (btn == 2) ? MouseButton::Middle
-                                                    : MouseButton::Left;
+                const MouseButton mb = (btn == 3)
+                                           ? MouseButton::Right
+                                           : (btn == 2)
+                                           ? MouseButton::Middle
+                                           : MouseButton::Left;
                 send_mouse(press ? MouseAction::Press : MouseAction::Release, mb, static_cast<float>(ev.xbutton.x),
                            static_cast<float>(ev.xbutton.y), ev.xbutton.state);
                 break;
@@ -1085,7 +1098,7 @@ auto X11Surface::poll_platform_events() -> void {
                 }
                 // 可打印文本 → TextInputEvent；控制字符（回车/退格/Esc…）交给 KeyEvent。
                 if (d.handler && len > 0 &&
-                    (len != 1 || (static_cast<unsigned char>(text[0]) >= 0x20 && text[0] != 0x7F))) {
+                    (len != 1 || (static_cast<unsigned char>(*text) >= 0x20 && *text != 0x7F))) {
                     if (d.ime_cb_style && !d.ime_preedit.empty()) {
                         // PreeditCallbacks 风格下的 IM 提交串：与 Win32/Wayland 桥同走组合
                         // committed 通道（widget 侧同一条落字路径，preedit 随之清空）。
@@ -1192,7 +1205,7 @@ auto X11Surface::poll_platform_events() -> void {
                 }
                 break;
             case ClientMessage:
-                if (static_cast<Atom>(ev.xclient.data.l[0]) == d.wm_delete) {
+                if (std::cmp_equal(ev.xclient.data.l[0], d.wm_delete)) {
                     d.close_requested = true;
                 }
                 break;
@@ -1209,41 +1222,40 @@ auto X11Surface::poll_platform_events() -> void {
 auto X11Surface::wait_events(double timeout_ms) -> void {
     Impl &d = *impl_;
     if (d.atspi != nullptr) {
-        d.atspi->pump();  // 先非阻塞消化 AT-SPI 在途消息（X 事件密集期桥不被饿死）
+        d.atspi->pump(); // 先非阻塞消化 AT-SPI 在途消息（X 事件密集期桥不被饿死）
     }
     if (d.dpy == nullptr || timeout_ms == 0.0 || d.close_requested) {
         return;
     }
     if (XPending(d.dpy) > 0) {
-        return;  // 队列已有未处理事件：立即回到帧循环消费
+        return; // 队列已有未处理事件：立即回到帧循环消费
     }
     // 无限等待按 1000ms 分段兜底（对齐 Win32/默认实现）：唤醒渠道丢失也最迟 1s 自然醒。
     const double capped = (timeout_ms < 0.0 || timeout_ms > 1000.0) ? 1000.0 : timeout_ms;
     std::vector<pollfd> fds;
     fds.reserve(2 + (d.atspi != nullptr ? 2 : 0));
-    fds.push_back(pollfd{ConnectionNumber(d.dpy), POLLIN, 0});
+    fds.push_back(pollfd{.fd = ConnectionNumber(d.dpy), .events = POLLIN, .revents = 0});
     int wake_idx = -1;
     if (d.wake_fd[0] >= 0) {
         wake_idx = static_cast<int>(fds.size());
-        fds.push_back(pollfd{d.wake_fd[0], POLLIN, 0});
+        fds.push_back(pollfd{.fd = d.wake_fd[0], .events = POLLIN, .revents = 0});
     }
-    std::vector<detail::AtspiBridge::WatchFd> watches;
     if (d.atspi != nullptr) {
-        watches = d.atspi->poll_watches();
+        const std::vector<detail::AtspiBridge::WatchFd> watches = d.atspi->poll_watches();
         for (const auto &w : watches) {
-            fds.push_back(pollfd{w.fd, w.events, 0});
+            fds.push_back(pollfd{.fd = w.fd, .events = w.events, .revents = 0});
         }
     }
     const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), static_cast<int>(std::ceil(capped)));
     if (rc > 0 && wake_idx >= 0 &&
-        (fds[static_cast<std::size_t>(wake_idx)].revents & POLLIN) != 0) {  // NOLINT(*-signed-bitwise)
+        (fds[static_cast<std::size_t>(wake_idx)].revents & POLLIN) != 0) { // NOLINT(*-signed-bitwise)
         char drain[64];
         while (read(d.wake_fd[0], drain, sizeof(drain)) > 0) {
             // 排干唤醒字节（非阻塞读到 EAGAIN 为止），避免下次 wait 立即空醒。
         }
     }
     if (d.atspi != nullptr) {
-        d.atspi->pump();  // watch fd 就绪 ⇒ 读入并派发 AT-SPI 方法调用（应答经同一 fd 写出）
+        d.atspi->pump(); // watch fd 就绪 ⇒ 读入并派发 AT-SPI 方法调用（应答经同一 fd 写出）
     }
 }
 
@@ -1251,10 +1263,9 @@ auto X11Surface::request_wake() -> void {
     const Impl &d = *impl_;
     if (d.wake_fd[1] >= 0) {
         constexpr char b = 1;
-        [[maybe_unused]] const ssize_t rc = ::write(d.wake_fd[1], &b, 1);  // 满管道丢弃亦可：已有待读字节必醒
+        [[maybe_unused]] const ssize_t rc = ::write(d.wake_fd[1], &b, 1); // 满管道丢弃亦可：已有待读字节必醒
     }
 }
-
-}  // namespace aurora
+} // namespace aurora
 
 #endif  // AURORA_BACKEND_X11 / AURORA_PLATFORM_LINUX

@@ -92,7 +92,7 @@ auto atspi_role_of(const AccessibilityNode &n) -> std::uint32_t {
     }
 }
 
-auto atspi_role_name(std::uint32_t role) -> std::string {
+auto atspi_role_name(std::uint32_t role) -> std::string_view {
     switch (role) {
         case atspi::role_application:
             return "application";
@@ -396,7 +396,7 @@ auto AtspiModel::path_of_id(std::uint64_t id) const -> std::string {
 
 auto AtspiModel::live(std::uint64_t id) const -> const LiveNode * {
     const auto it = by_id_.find(id);
-    return (it == by_id_.end()) ? nullptr : &order_[it->second];
+    return it == by_id_.end() ? nullptr : &order_[it->second];
 }
 
 auto AtspiModel::exists(std::uint64_t id) const -> bool { return live(id) != nullptr; }
@@ -409,8 +409,11 @@ auto AtspiModel::node(std::uint64_t id) const -> const a11y::NodeSnapshot * {
 }
 
 auto AtspiModel::widget_of(std::uint64_t id) const -> Widget * {
+    // 快照里的 `widget` 之所以是常量指针，只因遍历口 `flatten_snapshot(const Widget &...)` 用
+    // 只读签名取址（见 a11y_diff.h）；控件对象本身由树持有且非 const ⇒ 此处剥离 const 合法，
+    // 且全桥的「id → 可写控件」解引用只发生在这一处。
     const a11y::NodeSnapshot *n = node(id);
-    return (n != nullptr) ? const_cast<Widget *>(n->widget) : nullptr;  // NOLINT
+    return (n != nullptr) ? const_cast<Widget *>(n->widget) : nullptr;  // NOLINT(cppcoreguidelines-pro-type-const-cast)
 }
 
 auto AtspiModel::name(std::uint64_t id) const -> std::string {
@@ -450,7 +453,7 @@ auto AtspiModel::role(std::uint64_t id) const -> std::uint32_t {
     return (n == nullptr) ? atspi::role_unknown : atspi_role_of(n->node);
 }
 
-auto AtspiModel::role_name(std::uint64_t id) const -> std::string { return atspi_role_name(role(id)); }
+auto AtspiModel::role_name(std::uint64_t id) const -> std::string { return std::string{atspi_role_name(role(id))}; }
 
 auto AtspiModel::states(std::uint64_t id) const -> std::vector<std::uint32_t> {
     if (id == AURORA_ATSPI_APP_ID) {
@@ -483,12 +486,12 @@ auto AtspiModel::interfaces(std::uint64_t id) const -> std::vector<std::string> 
 
 auto AtspiModel::child_count(std::uint64_t id) const -> std::int32_t {
     const auto it = kids_.find(id);
-    return static_cast<std::int32_t>((it == kids_.end()) ? 0 : it->second.size());
+    return static_cast<std::int32_t>(it == kids_.end() ? 0 : it->second.size());
 }
 
 auto AtspiModel::children(std::uint64_t id) const -> std::vector<std::uint64_t> {
     const auto it = kids_.find(id);
-    return (it == kids_.end()) ? std::vector<std::uint64_t>{} : it->second;
+    return it == kids_.end() ? std::vector<std::uint64_t>{} : it->second;
 }
 
 auto AtspiModel::child_at(std::uint64_t id, std::int32_t index) const -> std::optional<std::uint64_t> {
@@ -511,7 +514,7 @@ auto AtspiModel::index_in_parent(std::uint64_t id) const -> std::int32_t {
     }
     const auto kids = children(l->parent_id);
     const auto it = std::ranges::find(kids, id);
-    return (it == kids.end()) ? -1 : static_cast<std::int32_t>(it - kids.begin());
+    return it == kids.end() ? -1 : static_cast<std::int32_t>(it - kids.begin());
 }
 
 auto AtspiModel::ref_of(std::uint64_t id) const -> AtspiRef {
@@ -706,6 +709,16 @@ auto AtspiModel::accessible_at_point(std::uint64_t id, std::int32_t x, std::int3
         }
     }
     return AtspiRef::null();
+}
+
+auto AtspiModel::grab_focus(std::uint64_t id) const -> bool {
+    Widget *w = widget_of(id);
+    if (w == nullptr || !env_.perform) {
+        return false;
+    }
+    // 刻意丢弃 perform 的返回值：见头注的「尽力而为」口径，回包表示受理而非焦点已落地。
+    (void)env_.perform(w, AccessibilityActionRequest{.action = AccessibilityAction::Focus});
+    return true;
 }
 
 auto AtspiModel::prop_get(std::uint64_t id, const std::string &iface, const std::string &prop) const -> AtspiPropValue {

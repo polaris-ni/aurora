@@ -103,7 +103,7 @@ constexpr const char *AURORA_UTEST_SENTINEL_FAMILY = "utest-no-such-family-senti
         return true;
     }
     return (own.front()->face != nullptr) && (own.front()->face->family_name != nullptr) &&
-           (family == own.front()->face->family_name);
+           family == own.front()->face->family_name;
 }
 
 }  // namespace
@@ -333,7 +333,7 @@ AURORA_TEST_CASE(fallback_chain_order_survives_a_cross_family_weight_resort) {
     AURORA_TEST_REQUIRE_NOT_NULL(default_front);
     const auto idx_of = [&faces](const render::FontFace *needle) -> std::size_t {
         const auto it = std::ranges::find(faces, needle);
-        return (it == faces.end()) ? faces.size() : static_cast<std::size_t>(it - faces.begin());
+        return it == faces.end() ? faces.size() : static_cast<std::size_t>(it - faces.begin());
     };
     const std::size_t idx_bold = idx_of(bold_face);
     const std::size_t idx_default = idx_of(default_front);
@@ -350,7 +350,7 @@ AURORA_TEST_CASE(fallback_chain_order_survives_a_cross_family_weight_resort) {
     AURORA_TEST_REQUIRE(rev.size() >= 4U);
     const auto rev_idx_of = [&rev](const render::FontFace *needle) -> std::size_t {
         const auto it = std::ranges::find(rev, needle);
-        return (it == rev.end()) ? rev.size() : static_cast<std::size_t>(it - rev.begin());
+        return it == rev.end() ? rev.size() : static_cast<std::size_t>(it - rev.begin());
     };
     const std::size_t rev_idx_bold = rev_idx_of(bold_face);
     const std::size_t rev_idx_default = rev_idx_of(default_front);
@@ -396,7 +396,7 @@ AURORA_TEST_CASE(empty_chain_is_byte_identical_to_no_chain_overload) {
 
     // 「不指定时与现状逐字节一致」：空链重载须与无链重载给出**完全相同**的指针序列
     // （逐元素对拍，而非只比 size —— 只比 size 时「换了顺序」会漏判）。
-    const std::vector<std::string> empty_chain{};
+    constexpr std::vector<std::string> empty_chain{};
     const auto &with_empty = render::resolve_faces("utest-equiv-main", 400, empty_chain);
     const auto &plain = render::resolve_faces("utest-equiv-main", 400);
     AURORA_TEST_REQUIRE_EQ(with_empty.size(), plain.size());

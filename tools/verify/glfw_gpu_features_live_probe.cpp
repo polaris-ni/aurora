@@ -33,12 +33,16 @@ namespace {
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-int failures = 0;
+// 失败计数藏函数内静态：探针不落全局可变状态（与 alsa_audio_live_probe 同款）。
+auto failures() -> int & {
+    static int count = 0;
+    return count;
+}
 
 auto check(bool ok, const std::string &label) -> void {
     emit(std::string("[") + (ok ? "PASS" : "FAIL") + "] " + label);
     if (!ok) {
-        failures++;
+        failures()++;
     }
 }
 
@@ -108,6 +112,9 @@ class GridBox final : public aurora::LeafWidget {
 
 }  // namespace
 
+// 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现，捕获反而把失败压成 0。
+// 口径与 tools/verify/ 其余探针、examples/ 各 demo 入口同。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     const auto cli = aurora_verify::parse_interactive("GLFW GPU feature live probe", argc, argv);
     if (!cli.arguments) {
@@ -157,23 +164,23 @@ auto main(int argc, char **argv) -> int {
     // ---- 流式纹理逐版本像素（真实 GL 上传 + 采样）----
     // 同一 stream_key：v1 红（建槽 + 首传）→ v1 重绘（同版本命中常驻槽，无新上传）→
     // v2 蓝（版本递进触发增量重传）。中心像素逐帧读回核对。
-    constexpr int FRAME_W = 96;
-    constexpr int FRAME_H = 64;
-    constexpr std::uint64_t STREAM_KEY = 7;
+    constexpr int frame_w = 96;
+    constexpr int frame_h = 64;
+    constexpr std::uint64_t stream_key = 7;
     const auto stream_frame = [&](std::uint8_t r, std::uint8_t g, std::uint8_t b,
                                   std::uint64_t version) -> std::vector<std::uint8_t> {
-        aurora::Image img = make_video_frame(FRAME_W, FRAME_H, r, g, b);
-        img.stream_key = STREAM_KEY;
+        aurora::Image img = make_video_frame(frame_w, frame_h, r, g, b);
+        img.stream_key = stream_key;
         img.stream_version = version;
         aurora::DisplayList dl;
         aurora::Painter p;
-        p.begin(FRAME_W + 8, FRAME_H + 8);
+        p.begin(frame_w + 8, frame_h + 8);
         p.record(dl);
         p.draw_image(img, aurora::Rect{.origin = aurora::Point{.x = 4.0F, .y = 4.0F},
-                                       .size = aurora::Size{.width = static_cast<float>(FRAME_W),
-                                                            .height = static_cast<float>(FRAME_H)}});
+                                       .size = aurora::Size{.width = static_cast<float>(frame_w),
+                                                            .height = static_cast<float>(frame_h)}});
         p.stop();
-        (void)gpu->begin_frame(FRAME_W + 8, FRAME_H + 8, 1.0F);
+        (void)gpu->begin_frame(frame_w + 8, frame_h + 8, 1.0F);
         dl.replay(gpu->backend());
         std::vector<std::uint8_t> pixels;
         (void)gpu->read_pixels(pixels);
@@ -187,8 +194,8 @@ auto main(int argc, char **argv) -> int {
 
     const auto center_of = [&](const std::vector<std::uint8_t> &px) -> std::array<int, 3> {
         // read_pixels 为 GL 底行序；图像矩形在画布内居中对称，中心取样与行序无关。
-        constexpr std::size_t row = FRAME_H + 8;
-        constexpr std::size_t col = FRAME_W + 8;
+        constexpr std::size_t row = frame_h + 8;
+        constexpr std::size_t col = frame_w + 8;
         constexpr std::size_t idx = ((row / 2) * col + (col / 2)) * 4U;
         if (px.size() < idx + 3) {
             return {0, 0, 0};
@@ -204,25 +211,26 @@ auto main(int argc, char **argv) -> int {
 
     // ---- 层缓存持久性（FBO 常驻层 + DrawLayer）----
     // 冷帧：BeginLayer + 内容 + EndLayer + DrawLayer；稳态帧：仅 DrawLayer（命中 FBO）。
-    constexpr std::uint64_t LAYER_KEY = 77;
-    constexpr int LW = 80;
-    constexpr int LH = 60;
+    constexpr std::uint64_t layer_key = 77;
+    constexpr int layer_w = 80;
+    constexpr int layer_h = 60;
     const auto layer_frame = [&](bool content) {
         aurora::DisplayList dl;
         aurora::Painter p;
-        p.begin(LW + 40, LH + 40);
+        p.begin(layer_w + 40, layer_h + 40);
         p.record(dl);
         if (content) {
-            p.begin_layer(LAYER_KEY, aurora::Size{.width = static_cast<float>(LW), .height = static_cast<float>(LH)});
-            p.fill_rect(
-                aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F},
-                             .size = aurora::Size{.width = static_cast<float>(LW), .height = static_cast<float>(LH)}},
-                aurora::Color{0, 200, 80, 255});
+            p.begin_layer(layer_key,
+                          aurora::Size{.width = static_cast<float>(layer_w), .height = static_cast<float>(layer_h)});
+            p.fill_rect(aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F},
+                                     .size = aurora::Size{.width = static_cast<float>(layer_w),
+                                                          .height = static_cast<float>(layer_h)}},
+                        aurora::Color{0, 200, 80, 255});
             p.end_layer();
         }
-        p.draw_layer(LAYER_KEY, aurora::Matrix2D::from_translate(20.0F, 20.0F), 1.0F);
+        p.draw_layer(layer_key, aurora::Matrix2D::from_translate(20.0F, 20.0F), 1.0F);
         p.stop();
-        (void)gpu->begin_frame(LW + 40, LH + 40, 1.0F);
+        (void)gpu->begin_frame(layer_w + 40, layer_h + 40, 1.0F);
         dl.replay(gpu->backend());
         std::vector<std::uint8_t> pixels;
         (void)gpu->read_pixels(pixels);
@@ -232,7 +240,7 @@ auto main(int argc, char **argv) -> int {
     const auto layer_cold = layer_frame(true);
     const auto layer_warm = layer_frame(false);
     const auto sample = [&](const std::vector<std::uint8_t> &px, int x, int y) -> std::array<int, 3> {
-        constexpr std::size_t col = LW + 40;
+        constexpr std::size_t col = layer_w + 40;
         const std::size_t idx = (static_cast<std::size_t>(y) * col + static_cast<std::size_t>(x)) * 4U;
         if (px.size() < idx + 3) {
             return {0, 0, 0};
@@ -248,7 +256,7 @@ auto main(int argc, char **argv) -> int {
 
     // ---- 平台 present 链路（真实窗口多帧上屏）----
     // 控件用独立 stream key（与上面直驱段的 key 7 互不干扰）。
-    auto video = std::make_shared<StreamVideoBox>(160, 90, STREAM_KEY + 1U);
+    auto video = std::make_shared<StreamVideoBox>(160, 90, stream_key + 1U);
     std::vector<aurora::Node> rows;
     for (int r = 0; r < 6; ++r) {
         aurora::RowProps rp;
@@ -270,8 +278,8 @@ auto main(int argc, char **argv) -> int {
     aurora::Node root_node(root_widget);
 
     bool present_ok = true;
-    constexpr int AUTO_FRAMES = 8;
-    for (int i = 0; i < AUTO_FRAMES; ++i) {
+    constexpr int auto_frames = 8;
+    for (int i = 0; i < auto_frames; ++i) {
         root_widget->modifier.set(aurora::Modifier{}.cache_layer().rotate(static_cast<float>(i) * 4.0F));
         video->advance_version();
         if (!win.present_root(root_node)) {
@@ -279,7 +287,7 @@ auto main(int argc, char **argv) -> int {
         }
     }
     check(present_ok,
-          "present_root succeeded for " + std::to_string(AUTO_FRAMES) + " consecutive frames (platform present path)");
+          "present_root succeeded for " + std::to_string(auto_frames) + " consecutive frames (platform present path)");
 
     // ---- 人工段 ----
     if (interactive) {
@@ -296,6 +304,6 @@ auto main(int argc, char **argv) -> int {
         emit("\nHint: pass --interactive to enter the resident-window visual check.");
     }
 
-    emit(std::string("\nResult: ") + (failures == 0 ? "ALL PASS" : std::to_string(failures) + " FAILURES"));
-    return failures == 0 ? 0 : 1;
+    emit(std::string("\nResult: ") + (failures() == 0 ? "ALL PASS" : std::to_string(failures()) + " FAILURES"));
+    return failures() == 0 ? 0 : 1;
 }

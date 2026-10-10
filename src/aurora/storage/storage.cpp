@@ -46,8 +46,8 @@ auto Storage::create(FilesystemOptions opts) -> Result<Storage> {
 auto Storage::create(std::unique_ptr<StorageBackend> backend) -> Storage { return Storage(std::move(backend)); }
 
 #ifdef AURORA_ENABLE_STORAGE_SQLITE
-auto Storage::create(SqliteOptions opts) -> Result<Storage> {
-    auto be = std::make_unique<SqliteBackend>(std::move(opts));
+auto Storage::create(const SqliteOptions &opts) -> Result<Storage> {
+    auto be = std::make_unique<SqliteBackend>(opts);
     if (!be->is_open()) {
         return Result<Storage>{make_error(ErrorCode::StorageBackendUnavailable,
                                           "SQLite storage open failed: cannot open database or prepare schema")};

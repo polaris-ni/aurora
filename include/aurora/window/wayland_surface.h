@@ -69,6 +69,9 @@ class WaylandSurface final : public Surface {
     /// @brief 禁止拷贝赋值：listener user-data 绑定本对象，任何使用均为编译期错误。
     /// @return 删除声明无运行期返回值。
     WaylandSurface &operator=(const WaylandSurface &) = delete;
+    /// @brief 禁止移动：listener 的 user-data 指针绑定 this，移动后原地址失效即悬垂。
+    WaylandSurface(WaylandSurface &&) = delete;
+    WaylandSurface &operator=(WaylandSurface &&) = delete;
 
     /// @brief Wayland 连接与窗口壳是否创建成功（无 WAYLAND_DISPLAY/纯 TTY 环境为 false）。
     /// 工厂 `create_window(WaylandOptions)` 据此返回 `Result` 错误而非崩溃。

@@ -215,7 +215,7 @@ class GpuGlRhi final : public RhiBackend, public RhiFrameSink {
     /// @brief 装载构造：以上下文就绪的函数表初始化着色器/缓冲/MSAA 帧缓冲。
     /// 失败（含函数表缺项）时 `valid()` 为 false，不抛异常。
     /// @param fn 已装载的 GL 函数表（`load_gl` 或测试桩填充）；要求调用时当前线程已有就绪的 GL 上下文。
-    explicit GpuGlRhi(GLFn fn);
+    explicit GpuGlRhi(const GLFn &fn);
     /// @brief 析构：删除 VAO/VBO/IBO、MSAA/resolve/temp 帧缓冲与渲染缓冲，及全部缓存纹理
     /// （渐变 LUT、图像、字形图集页、流式槽）。
     /// 直接调用 GL 删除函数，须在构造所用上下文仍有效时销毁对象。
@@ -260,14 +260,14 @@ class GpuGlRhi final : public RhiBackend, public RhiFrameSink {
     /// @brief 字形图集页边长（默认 1024；须在 `begin_frame` 前设置，非正值忽略）。
     /// 常规消费者无须调用；测试用小页覆盖「满页开新页 / 页数封顶 LRU 淘汰」路径。
     /// @param side 新页边长（像素）；仅正值生效。
-    auto set_glyph_page_size(int side) -> void;
+    auto set_glyph_page_size(int side) const -> void;
 
     /// @brief 当前帧内容读回（RGBA8，行序自底向上为 GL 帧缓冲原序）。仅供诊断/快照。
     /// resolve 延迟到本次调用按需补做（`end_frame` 无效果消费时直接 MSAA 上屏）；
     /// 调用窗口：`end_frame` 之后、下一次 `begin_frame` 之前（此后 MSAA 已清屏）。
     /// @param out 输出缓冲：覆写为设备宽高 × 4 字节的 RGBA8 像素。
     /// @return true = 读回成功；false = 后端不可用、尺寸未就绪或 GL 读回失败。
-    [[nodiscard]] auto read_pixels(std::vector<std::uint8_t> &out) -> bool;
+    [[nodiscard]] auto read_pixels(std::vector<std::uint8_t> &out) const -> bool;
 
     // ---- RhiBackend 能力位与流式纹理契约（specification/03 §8.7）----
 

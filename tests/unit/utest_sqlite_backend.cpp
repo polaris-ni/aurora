@@ -2,7 +2,8 @@
 /// 目标单元: include/aurora/storage/sqlite_backend.h
 /// 测试说明: SqliteBackend 打开语义（内存库 / 文件库 / 坏路径不可用）、JSON 与二进制信封
 /// 往返（mtime 毫秒、BLOB 内联无 sidecar、空载荷）、覆盖写、删除幂等、list/contains/clear、
-/// 真事务提交与回滚、嵌套事务加入同一事务、文件库重开持久化、Storage::create 门面往返。
+/// 真事务提交与回滚、嵌套事务加入同一事务、文件库重开持久化、Storage::create 门面往返、
+/// close 幂等与「析构期内不调虚 close()」（派生钩子只在显式关闭时生效）。
 /// 注：后端整体被 AURORA_ENABLE_STORAGE_SQLITE（默认 OFF）门控，但**用例恒注册**
 /// （TEST-R6：--list 用例集须与源字面量一致），未开启时各用例体内 SKIP。
 
@@ -172,6 +173,47 @@ AURORA_TEST_CASE(closed_backend_returns_unavailable) {
     std::filesystem::remove(blocker, ec);
 }
 
+AURORA_TEST_CASE(close_releases_connection_without_virtual_call_in_destructor) {
+    // 析构期不再走虚 `close()`：`~SqliteBackend()` 调非虚的 `close_connection()`，派生重写的
+    // `close()` 只在显式调用时生效。这一条钉住原缺陷（析构体内 `(void)close();` 绕过虚派发、
+    // 派生侧收尾静默丢失）不回退，同时钉住 `close()` 幂等与「关后不可用」。
+    class CloseObserver final : public aus::SqliteBackend {
+      public:
+        CloseObserver(const aus::SqliteOptions &opts, int *calls) : aus::SqliteBackend(opts), calls_(calls) {}
+
+        [[nodiscard]] auto close() -> aurora::Result<void> override {
+            if (calls_ != nullptr) {
+                ++*calls_;
+            }
+            return aus::SqliteBackend::close();
+        }
+
+      private:
+        int *calls_ = nullptr;  ///< 观察位由用例持有，须比本对象活得久
+    };
+
+    int calls = 0;
+    const aus::SqliteOptions mem{.in_memory = true};
+    {
+        CloseObserver inner{mem, &calls};
+        AURORA_TEST_REQUIRE(inner.is_open());
+    }  // 此处只跑本类析构：派生钩子若被调用即为「析构内虚调用」回归
+    AURORA_TEST_CHECK_EQ(calls, 0);
+
+    CloseObserver be{mem, &calls};
+    AURORA_TEST_REQUIRE(be.is_open());
+    AURORA_TEST_CHECK(be.close().ok());
+    AURORA_TEST_CHECK_EQ(calls, 1);
+    AURORA_TEST_CHECK(!be.is_open());
+
+    // 重复 close 仍成功（幂等），且连接已关后所有操作回 StorageBackendUnavailable。
+    AURORA_TEST_CHECK(be.close().ok());
+    AURORA_TEST_CHECK_EQ(calls, 2);
+    const auto got = be.get_record("x");
+    AURORA_TEST_CHECK(!got.ok());
+    AURORA_TEST_CHECK_EQ(got.error().code_enum, ErrorCode::StorageBackendUnavailable);
+}
+
 AURORA_TEST_CASE(transaction_commits_body_writes) {
     auto be = memory_backend();
     const auto r = be.transaction([&](aus::StorageBackend &tx) -> aurora::Result<void> {
@@ -300,6 +342,9 @@ AURORA_TEST_CASE(overwrite_remove_list_contains_clear) {
     AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(closed_backend_returns_unavailable) {
+    AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
+}
+AURORA_TEST_CASE(close_releases_connection_without_virtual_call_in_destructor) {
     AURORA_TEST_SKIP("AURORA_ENABLE_STORAGE_SQLITE is not enabled (default OFF)");
 }
 AURORA_TEST_CASE(transaction_commits_body_writes) {

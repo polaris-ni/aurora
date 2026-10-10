@@ -167,14 +167,14 @@ AURORA_TEST_CASE(role_table_pins_upstream_numbers) {
 }
 
 AURORA_TEST_CASE(role_name_table_matches_libatspi_strings) {
-    AURORA_TEST_CHECK_STREQ(atspi_role_name(43).c_str(), "push button");
-    AURORA_TEST_CHECK_STREQ(atspi_role_name(40).c_str(), "password text");
-    AURORA_TEST_CHECK_STREQ(atspi_role_name(116).c_str(), "static");
-    AURORA_TEST_CHECK_STREQ(atspi_role_name(130).c_str(), "switch");
-    AURORA_TEST_CHECK_STREQ(atspi_role_name(75).c_str(), "application");
-    AURORA_TEST_CHECK_STREQ(atspi_role_name(23).c_str(), "frame");
-    AURORA_TEST_CHECK_STREQ(atspi_role_name(67).c_str(), "unknown");
-    AURORA_TEST_CHECK_STREQ(atspi_role_name(999).c_str(), "unknown");  // 越界兜底
+    AURORA_TEST_CHECK_STREQ(atspi_role_name(43).data(), "push button");
+    AURORA_TEST_CHECK_STREQ(atspi_role_name(40).data(), "password text");
+    AURORA_TEST_CHECK_STREQ(atspi_role_name(116).data(), "static");
+    AURORA_TEST_CHECK_STREQ(atspi_role_name(130).data(), "switch");
+    AURORA_TEST_CHECK_STREQ(atspi_role_name(75).data(), "application");
+    AURORA_TEST_CHECK_STREQ(atspi_role_name(23).data(), "frame");
+    AURORA_TEST_CHECK_STREQ(atspi_role_name(67).data(), "unknown");
+    AURORA_TEST_CHECK_STREQ(atspi_role_name(999).data(), "unknown");  // 越界兜底
 }
 
 AURORA_TEST_CASE(state_name_table_pins_event_minors) {
@@ -481,6 +481,53 @@ AURORA_TEST_CASE(model_text_value_action) {
     AURORA_TEST_CHECK_TRUE(last_action == AccessibilityAction::Click);
     AURORA_TEST_CHECK_EQ(performs, 2);
     AURORA_TEST_CHECK_FALSE(model.do_action(btn_id, 5));  // 越界
+}
+
+// GrabFocus 的「尽力而为」口径（头注 AtspiModel::grab_focus）：真值 = 活控件存在 ∧ 动作通道
+// 已装配 ∧ 请求已派发，**不**承诺焦点已落地；同时钉住「id → 可写控件」的解引用单点
+// （AtspiModel::widget_of）落回的就是树所持有的那个活控件对象。
+AURORA_TEST_CASE(model_grab_focus_is_best_effort) {
+    ProbeWidget w{"focus me"};
+    auto snap = snapshot({
+        leaf(10, 0, AccessibilityRole::Generic, "root"),
+        leaf(11, 10, AccessibilityRole::Button, "ok", &w),
+        leaf(12, 10, AccessibilityRole::Button, "detached"),  // 纯快照形态：控件已不在
+    });
+
+    int performs = 0;
+    Widget *seen = nullptr;
+    AccessibilityAction last_action = AccessibilityAction::None;
+    AtspiEnv env = test_env();
+    env.perform = [&](Widget *target, const AccessibilityActionRequest &req) {
+        ++performs;
+        seen = target;
+        last_action = req.action;
+        return true;
+    };
+    AtspiModel model{std::move(env)};
+    model.sync(snap);
+
+    AURORA_TEST_CHECK_TRUE(model.grab_focus(11));
+    AURORA_TEST_CHECK_TRUE(last_action == AccessibilityAction::Focus);
+    AURORA_TEST_CHECK_EQ(performs, 1);
+    AURORA_TEST_CHECK_TRUE(seen == &w);  // 去 const 只改指针常量性，对象身份不变
+
+    // 无活控件 / 未知 id ⇒ 不派发、如实报失败。
+    AURORA_TEST_CHECK_FALSE(model.grab_focus(12));
+    AURORA_TEST_CHECK_FALSE(model.grab_focus(9999));
+    AURORA_TEST_CHECK_EQ(performs, 1);
+
+    // 动作通道未装配 ⇒ 受理不成立。
+    AtspiModel bare{test_env()};
+    bare.sync(snap);
+    AURORA_TEST_CHECK_FALSE(bare.grab_focus(11));
+
+    // 控件侧执行失败仍回「受理」：回包语义是已派发，刻意丢弃 perform 的返回值。
+    AtspiEnv failing = test_env();
+    failing.perform = [](Widget *, const AccessibilityActionRequest &) { return false; };
+    AtspiModel rejected{std::move(failing)};
+    rejected.sync(snap);
+    AURORA_TEST_CHECK_TRUE(rejected.grab_focus(11));
 }
 
 // ============================================================================

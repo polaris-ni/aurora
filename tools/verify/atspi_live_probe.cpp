@@ -121,7 +121,12 @@ namespace {
 constexpr auto AURORA_AT_SPI_APP_NAME = "Aurora";  ///< 桥 env.app_name（宿主接线固定值）
 constexpr auto AURORA_AT_SPI_FRAME_TITLE = "Aurora AT-SPI verify";  ///< FRAME Name（窗口标题）
 
-bool g_press_executed = false;  ///< DoAction 跨半程闭环证据（on_click 在 UI 线程同步置位）
+/// DoAction 跨半程闭环证据（on_click 在 UI 线程同步置位）：函数局部静态 + 访问器收敛，
+/// 避免命名空间级可变全局量。
+auto press_executed() -> bool & {
+    static bool flag = false;
+    return flag;
+}
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
@@ -333,11 +338,15 @@ struct ProbeWidgets {
 [[nodiscard]] auto build_probe_column() -> ProbeWidgets {
     // CJK-LITERAL: cjk-fixture - the client asserts the push button by this exact Han Name
     auto button = aurora::Button{aurora::ButtonProps{.label = aurora::LocalizedString{"确定"}}};
-    button.set_on_click([] { g_press_executed = true; });
+    button.set_on_click([] { press_executed() = true; });
     // CJK-LITERAL: cjk-fixture - Han item labels pushed through the AT-SPI cache and children-changed events
     auto items = std::make_shared<aurora::State<std::vector<std::string>>>(
         std::vector<std::string>{"订单一", "订单二", "订单三"});
     // Node 以 shared_ptr 持有 widget：先建节点取裸指针，再拷进 Column（同一实例）。
+    // 下行目标类型由紧邻上方构造的控件锁定（TextInput / ReorderableList 各建一个 Node），
+    // dynamic_cast 徒增 RTTI 依赖，且把「构造即已知」的确定性换成运行期查找
+    // （与 tools/verify/wasm_aria_live_probe.cpp 的同款豁免一致）。
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-static-cast-downcast)
     // CJK-LITERAL: cjk-fixture - Han placeholder painted in the real entry window (manual inspection)
     aurora::Node entry_node{aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}}};
     aurora::Node list_node{aurora::ReorderableList<std::string>{
@@ -349,6 +358,7 @@ struct ProbeWidgets {
     ProbeWidgets probe;
     probe.entry = static_cast<aurora::TextInput *>(&entry_node.widget());
     probe.list = static_cast<aurora::ReorderableList<std::string> *>(&list_node.widget());
+    // NOLINTEND(cppcoreguidelines-pro-type-static-cast-downcast)
     probe.items = std::move(items);
     probe.root = aurora::Node{aurora::Column{
         std::move(button),
@@ -419,7 +429,7 @@ auto parse_client_output(const std::string &text, std::vector<ResLine> &results,
             done = true;
             continue;
         }
-        if (line.rfind("RES|", 0) == 0) {
+        if (line.starts_with("RES|")) {
             std::istringstream rs(line);
             ResLine r;
             std::string head;
@@ -428,7 +438,7 @@ auto parse_client_output(const std::string &text, std::vector<ResLine> &results,
             std::getline(rs, r.id, '|');
             std::getline(rs, r.detail);  // 其余全部（detail 不再含 '|' 由客户端保证）
             results.push_back(std::move(r));
-        } else if (line.rfind("TREE|", 0) == 0 || line.rfind("INFO|", 0) == 0 || line.rfind("EVT|", 0) == 0) {
+        } else if (line.starts_with("TREE|") || line.starts_with("INFO|") || line.starts_with("EVT|")) {
             notes.push_back(line);
         } else if (!line.empty()) {
             notes.push_back("OUT|" + line);  // 客户端 traceback 等
@@ -444,6 +454,9 @@ auto nap_pump(aurora::Window &window, int frames, double ms) -> void {
 
 }  // namespace
 
+// 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现，捕获反而把失败压成 0。
+// 口径与 tools/verify/ 其余探针、examples/ 各 demo 入口同。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     // 命令行面即声明表：--x11 / --wayland 选宿主，--interactive[=秒] 进人工驻留段。
     const auto spec = aurora::cli::CommandSpec{
@@ -595,7 +608,7 @@ auto main(int argc, char **argv) -> int {
         pump_ms(500);
         auto grow = probe.items->get();
         // CJK-LITERAL: cjk-fixture - regrows the Han item list to push children-changed:add with a Han name
-        grow.push_back("订单三");
+        grow.emplace_back("订单三");
         probe.items->set(grow);
         probe.list->invalidate();
         (void)window->present_root(root);  // 结构新增：AddAccessible 行先于 children-changed:add
@@ -638,7 +651,7 @@ auto main(int argc, char **argv) -> int {
     const bool do_action_ran =
         std::ranges::any_of(results, [](const ResLine &r) { return r.id == "button-do-action" && r.status == "pass"; });
     if (do_action_ran) {
-        const bool fired = g_press_executed;
+        const bool fired = press_executed();
         emit(aurora_verify::pad_right(fired ? "pass" : "fail", 8) +
              aurora_verify::pad_right("press-handler-side-effect", 26) +
              "on_click executed in-app (bridge routed action back to widget)");

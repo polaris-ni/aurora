@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <ranges>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -18,17 +19,15 @@
 #include "aurora/render/gpu/gl_core.h"
 
 namespace aurora::rhi {
-
 // GL 3.3 core 常量子集（aurora::rhi::gl，见 gl_core.h）：本 TU 内以裸名直接引用，
 // 函数调用则恒经 GLFn 函数表成员（fn 指针），二者命名空间互不重叠。
 using namespace gl;
 
 namespace {
-
 // ---- GLSL 3.3 core 着色器源（顶点共享；逻辑 dp 坐标系 → NDC y 翻转） ----
 
 // CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
-constexpr const char *AURORA_GLSL_VERT = R"(#version 330 core
+constexpr auto AURORA_GLSL_VERT = R"(#version 330 core
 layout(location=0) in vec2 a_pos;
 layout(location=1) in vec2 a_uv;
 layout(location=2) in vec4 a_color;
@@ -367,6 +366,7 @@ struct Vertex {
     std::uint8_t b = 0;
     std::uint8_t a = 0;
 };
+
 static_assert(sizeof(Vertex) == 20, "vertex layout must stay packed at 20 bytes");
 
 // 常量：MSAA 采样数（GL 3.3 core 保证 GL_MAX_SAMPLES ≥ 4）
@@ -376,9 +376,9 @@ constexpr int AURORA_MSAA_SAMPLES = 4;
 
 // GL 状态/错误码的 8 位十六进制诊断串（info log 为空的驱动上提供最低限度可定位信息）。
 auto hex_u32(std::uint32_t v) -> std::string {
-    const char *digits = "0123456789abcdef";
     std::string s(8, '0');
     for (int i = 7; i >= 0; --i) {
+        constexpr auto digits = "0123456789abcdef";
         // 固定 8 字符十六进制缓冲，下标由循环变量限定在 [0,7]；格式化热路径不宜引入 .at()
         // NOLINTNEXTLINE(*-bounds-constant-array-index, *-bounds-pointer-arithmetic)
         s[static_cast<std::size_t>(i)] = digits[v & 0xFU];
@@ -483,7 +483,6 @@ constexpr std::size_t AURORA_IMAGE_CACHE_CAP = 64;
 constexpr int AURORA_GLYPH_PAGE = 1024;
 constexpr int AURORA_GLYPH_PAGE_MAX = 2048;
 constexpr std::size_t AURORA_GLYPH_PAGE_CAP = 8;
-
 }  // namespace
 
 // ---- GLFn：装载与完整性 ----
@@ -966,7 +965,7 @@ struct GpuGlRhi::Impl {
         check_error("init");
     }
 
-    void destroy() {
+    void destroy() const {
         if (vao != 0) {
             const GLuint_ va = vao;
             gl.delete_vertex_arrays(1, &va);
@@ -1005,14 +1004,14 @@ struct GpuGlRhi::Impl {
                 gl.delete_textures(1, &tex);
             }
         }
-        for (auto &kv : stream_slots) {
-            const GLuint_ tex = kv.second.tex;
+        for (const auto &val : stream_slots | std::views::values) {
+            const GLuint_ tex = val.tex;
             if (tex != 0) {
                 gl.delete_textures(1, &tex);
             }
         }
-        for (auto &kv : layer_cache) {
-            const LayerEntry &e = kv.second;
+        for (const auto &val : layer_cache | std::views::values) {
+            const LayerEntry &e = val;
             if (e.fbo != 0 || e.aux_fbo != 0) {
                 const GLuint_ fbos[2] = {e.fbo, e.aux_fbo};
                 gl.delete_framebuffers(2, fbos);
@@ -1211,8 +1210,8 @@ struct GpuGlRhi::Impl {
 
     // 取字形槽位；未命中即放置上传。返回空矩形（w/h ≤ 0）= 无需绘制
     // （空位图字形或超出 AURORA_GLYPH_PAGE_MAX 的异常大字形）。
-    auto acquire_glyph_slot(std::uint64_t key, const render::GlyphAtlas::Entry &e) -> GlyphSlotRect {
-        const auto it = glyph_slots.find(key);
+    auto acquire_glyph_slot(std::uint64_t glyph_key, const render::GlyphAtlas::Entry &e) -> GlyphSlotRect {
+        const auto it = glyph_slots.find(glyph_key);
         if (it != glyph_slots.end()) {
             // 命中：刷新所在页 LRU。
             const GLuint_ tex = it->second.tex;
@@ -1312,7 +1311,7 @@ struct GpuGlRhi::Impl {
         pg->pack_x += w;
         pg->pack_row_h = std::max(pg->pack_row_h, h);
         pg->lru = ++glyph_lru_clock;
-        glyph_slots.emplace(key, slot);
+        glyph_slots.emplace(glyph_key, slot);
         return slot;
     }
 
@@ -1397,12 +1396,14 @@ struct GpuGlRhi::Impl {
         }
         return static_cast<float>(device_w) / (scale > 0.0F ? scale : 1.0F);
     }
+
     [[nodiscard]] auto logical_h() const -> float {
         if (!layer_stack.empty()) {
             return layer_stack.back().logical_h;
         }
         return static_cast<float>(device_h) / (scale > 0.0F ? scale : 1.0F);
     }
+
     /// @brief 当前绘制目标设备尺寸（层重定向中 = 层纹理尺寸；否则 = 画布）。
     [[nodiscard]] auto target_w() const -> int { return layer_stack.empty() ? device_w : layer_stack.back().width; }
     [[nodiscard]] auto target_h() const -> int { return layer_stack.empty() ? device_h : layer_stack.back().height; }
@@ -1416,14 +1417,15 @@ struct GpuGlRhi::Impl {
         std::uint64_t version = 0;  // 已上传内容对应的流式版本
         GLuint_ tex = 0;
     };
+
     std::unordered_map<std::uint64_t, StreamSlot> stream_slots;
 
     /// @brief 取流式槽（不存在则建槽；尺寸变化就地重定义存储）。失败返回 nullptr。
-    auto ensure_stream_slot(std::uint64_t key, int width, int height) -> StreamSlot * {
-        if (key == 0 || width <= 0 || height <= 0 || failed) {
+    auto ensure_stream_slot(std::uint64_t stream_key, int width, int height) -> StreamSlot * {
+        if (stream_key == 0 || width <= 0 || height <= 0 || failed) {
             return nullptr;
         }
-        auto it = stream_slots.find(key);
+        auto it = stream_slots.find(stream_key);
         if (it == stream_slots.end()) {
             GLuint_ tex = 0;
             gl.gen_textures(1, &tex);
@@ -1442,7 +1444,8 @@ struct GpuGlRhi::Impl {
                 return nullptr;
             }
             it =
-                stream_slots.emplace(key, StreamSlot{.width = width, .height = height, .version = 0, .tex = tex}).first;
+                stream_slots.emplace(stream_key, StreamSlot{.width = width, .height = height, .version = 0, .tex = tex})
+                    .first;
         } else if (it->second.width != width || it->second.height != height) {
             // 尺寸变化：先落地可能引用旧存储的待提交批，再就地重定义。
             flush_batch();
@@ -1469,6 +1472,7 @@ struct GpuGlRhi::Impl {
         int width = 0;  // 设备像素
         int height = 0;
     };
+
     struct LayerFrame {
         std::uint64_t key = 0;
         std::vector<ClipState> saved_clip;
@@ -1478,6 +1482,7 @@ struct GpuGlRhi::Impl {
         float logical_w = 0.0F;
         float logical_h = 0.0F;
     };
+
     std::unordered_map<std::uint64_t, LayerEntry> layer_cache;
     std::vector<LayerFrame> layer_stack;
     bool layer_miss_warned = false;  // DrawLayer 未命中告警只发一次
@@ -1573,7 +1578,7 @@ struct GpuGlRhi::Impl {
     }
 
     auto begin_batch(const BatchKey &k) -> void {
-        if (key_active && !(key == k)) {
+        if (key_active && !(key == k)) {  // NOLINT
             flush_batch();
         }
         key = k;
@@ -2062,7 +2067,7 @@ struct GpuGlRhi::Impl {
                     break;
                 }
                 const LayerEntry &entry = it->second;
-                const Matrix2D identity_mat{};
+                constexpr Matrix2D identity_mat{};
                 const Matrix2D &mat = data.matrix != nullptr ? *data.matrix : identity_mat;
                 const float src_scale = cmd.composite_scale > 0.0F ? cmd.composite_scale : 1.0F;
                 const float lw = static_cast<float>(entry.width) / src_scale;
@@ -2107,12 +2112,12 @@ struct GpuGlRhi::Impl {
                 const bool ok = render::emit_text_glyphs(
                     *data.text, *data.font, opts, scale, render::TextAAMode::Supersample, cmd.color, origin_x, origin_y,
                     [this, &clip, &cmd](const render::GlyphAtlas::Entry &entry, render::GlyphAtlas::Mode mode, int dx0,
-                                        int dy0, std::uint64_t key) {
+                                        int dy0, std::uint64_t glyph_key) {
                         if (mode != render::GlyphAtlas::Mode::Gray) {
                             return;  // 防御：GPU 路径恒灰度
                         }
                         // 取槽位可能触发满页 flush/淘汰，须在 begin_batch 之前完成。
-                        const GlyphSlotRect slot = acquire_glyph_slot(key, entry);
+                        const GlyphSlotRect slot = acquire_glyph_slot(glyph_key, entry);
                         if (slot.w <= 0 || slot.h <= 0 || failed) {
                             return;
                         }
@@ -2507,7 +2512,7 @@ struct GpuGlRhi::Impl {
                 if (tex == 0 || failed) {
                     break;
                 }
-                const Matrix2D identity{};
+                constexpr Matrix2D identity{};
                 const Matrix2D &mat = data.matrix != nullptr ? *data.matrix : identity;
                 const float src_scale = cmd.composite_scale > 0.0F ? cmd.composite_scale : 1.0F;
                 const float lw = static_cast<float>(img.width) / src_scale;
@@ -2543,7 +2548,7 @@ struct GpuGlRhi::Impl {
 
 GpuGlRhi::GpuGlRhi() = default;
 
-GpuGlRhi::GpuGlRhi(GLFn fn) : impl_(std::make_unique<Impl>()) {
+GpuGlRhi::GpuGlRhi(const GLFn &fn) : impl_(std::make_unique<Impl>()) {
     impl_->gl = fn;
     impl_->init();
 }
@@ -2603,13 +2608,13 @@ auto GpuGlRhi::end_frame() -> void {
 
 auto GpuGlRhi::stats() const -> FrameStats { return impl_ != nullptr ? impl_->stats : FrameStats{}; }
 
-auto GpuGlRhi::set_glyph_page_size(int side) -> void {
+auto GpuGlRhi::set_glyph_page_size(int side) const -> void {
     if (impl_ != nullptr && side > 0) {
         impl_->glyph_page_size = side;
     }
 }
 
-auto GpuGlRhi::read_pixels(std::vector<std::uint8_t> &out) -> bool {
+auto GpuGlRhi::read_pixels(std::vector<std::uint8_t> &out) const -> bool {
     if (impl_ == nullptr || impl_->failed || impl_->resolve_fbo == 0 || impl_->device_w <= 0 || impl_->device_h <= 0) {
         return false;
     }
@@ -2662,11 +2667,11 @@ auto GpuGlRhi::update_stream_image(StreamImageId id, const std::uint8_t *pixels,
     if (impl_ == nullptr || impl_->failed || id == 0 || pixels == nullptr || w <= 0 || h <= 0) {
         return;
     }
-    for (auto &kv : impl_->stream_slots) {
-        if (kv.second.tex != id) {
+    for (const auto &val : impl_->stream_slots | std::views::values) {
+        if (val.tex != id) {
             continue;
         }
-        const auto &slot = kv.second;
+        const auto &slot = val;
         if (x < 0 || y < 0 || x + w > slot.width || y + h > slot.height) {
             return;  // 脏矩形越界：按契约忽略（界内性由调用方保证）
         }
@@ -2712,5 +2717,4 @@ auto GpuGlRhi::import_native_surface(const NativeSurfaceFrame &frame) -> StreamI
     }
     return 0;
 }
-
 }  // namespace aurora::rhi

@@ -13,7 +13,6 @@
 #include <string>
 
 namespace aurora {
-
 /// @brief 细粒度性能埋点是否在本次构建中启用。
 ///
 /// 由 CMake 开关 `AURORA_ENABLE_PROFILING` 决定（默认随构建类型：
@@ -42,28 +41,28 @@ namespace aurora {
 /// @note Side-effects: none
 ///
 struct RenderCounters {
-    std::uint32_t draw_calls = 0;  ///< 绘制原语：DisplayList 命令总数（录制 + 直绘）
-    std::uint32_t fill_rects = 0;  ///< 矩形填充次数（含圆角/渐变变体）
-    std::uint32_t draw_texts = 0;  ///< 文本绘制调用次数
-    std::uint32_t glyphs_rendered = 0;  ///< 实际光栅化/贴出的字形数
-    std::uint64_t pixels_filled = 0;  ///< 填充率：实际写入帧缓冲的像素数
+    std::uint32_t draw_calls = 0; ///< 绘制原语：DisplayList 命令总数（录制 + 直绘）
+    std::uint32_t fill_rects = 0; ///< 矩形填充次数（含圆角/渐变变体）
+    std::uint32_t draw_texts = 0; ///< 文本绘制调用次数
+    std::uint32_t glyphs_rendered = 0; ///< 实际光栅化/贴出的字形数
+    std::uint64_t pixels_filled = 0; ///< 填充率：实际写入帧缓冲的像素数
 
-    std::uint32_t glyph_cache_hits = 0;  ///< 缓存效率：字形位图 atlas 命中
-    std::uint32_t glyph_cache_misses = 0;  ///< 字形位图 atlas 未命中（触发光栅化）
-    std::uint32_t shape_cache_hits = 0;  ///< 文本 shaping 缓存命中
-    std::uint32_t shape_cache_misses = 0;  ///< 文本 shaping 缓存未命中（触发 hb_shape）
-    std::uint32_t dl_replays = 0;  ///< DisplayList 回放次数（越高越好）
-    std::uint32_t dl_records = 0;  ///< DisplayList 重录次数（越低越好）
+    std::uint32_t glyph_cache_hits = 0; ///< 缓存效率：字形位图 atlas 命中
+    std::uint32_t glyph_cache_misses = 0; ///< 字形位图 atlas 未命中（触发光栅化）
+    std::uint32_t shape_cache_hits = 0; ///< 文本 shaping 缓存命中
+    std::uint32_t shape_cache_misses = 0; ///< 文本 shaping 缓存未命中（触发 hb_shape）
+    std::uint32_t dl_replays = 0; ///< DisplayList 回放次数（越高越好）
+    std::uint32_t dl_records = 0; ///< DisplayList 重录次数（越低越好）
 
-    std::uint32_t layout_nodes = 0;  ///< 树遍历规模：本帧实际执行 on_layout 的节点数
-    std::uint32_t paint_nodes = 0;  ///< 本帧实际执行 on_paint 的节点数
-    std::uint32_t relayout_boundaries_hit = 0;  ///< 布局脏在边界处被截断的次数
+    std::uint32_t layout_nodes = 0; ///< 树遍历规模：本帧实际执行 on_layout 的节点数
+    std::uint32_t paint_nodes = 0; ///< 本帧实际执行 on_paint 的节点数
+    std::uint32_t relayout_boundaries_hit = 0; ///< 布局脏在边界处被截断的次数
 
-    std::uint32_t dirty_rect_count = 0;  ///< 脏区效率：本帧脏矩形数量
-    double dirty_area_ratio = 0.0;  ///< 脏区面积 / 全屏面积，取值 [0,1]
-    bool full_redraw = false;  ///< 本帧是否退化为整帧重绘
+    std::uint32_t dirty_rect_count = 0; ///< 脏区效率：本帧脏矩形数量
+    double dirty_area_ratio = 0.0; ///< 脏区面积 / 全屏面积，取值 [0,1]
+    bool full_redraw = false; ///< 本帧是否退化为整帧重绘
 
-    std::uint64_t scroll_buffer_bytes = 0;  ///< 内存占用：Scroll 离屏缓冲字节数
+    std::uint64_t scroll_buffer_bytes = 0; ///< 内存占用：Scroll 离屏缓冲字节数
 
     /// @brief 取当前帧的计数器（进程级单例）。
     ///
@@ -100,8 +99,7 @@ struct RenderCounters {
     /// @return 进程期存活的表头字符串视图。
     [[nodiscard]] static auto csv_header() -> std::string_view;
 };
-
-}  // namespace aurora
+} // namespace aurora
 
 // ---------------------------------------------------------------------------
 // 计数埋点宏
@@ -111,10 +109,16 @@ struct RenderCounters {
 // 有代价或有副作用，调用点须自行用 `#ifdef AURORA_ENABLE_PROFILING` 包裹。
 // ---------------------------------------------------------------------------
 #ifdef AURORA_ENABLE_PROFILING
+
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+
 /// @brief 累加计数字段：`AURORA_PROFILE_COUNT(fill_rects, 1)`。
+/// `field` 是**记号**（按名访问 RenderCounters 成员），不是值——只能宏，无函数等价物。
 #define AURORA_PROFILE_COUNT(field, n) (void)(::aurora::RenderCounters::current().field += (n))
 /// @brief 直接赋值计数字段：`AURORA_PROFILE_SET(full_redraw, true)`。
 #define AURORA_PROFILE_SET(field, v) (void)(::aurora::RenderCounters::current().field = (v))
+
+// NOLINTEND(cppcoreguidelines-macro-usage)
 #else
 /// @brief 埋点关闭时与启用分支同形参：展开为空语句，宏参数不被求值。
 /// @param field 要累加的计数字段名（本分支忽略）。

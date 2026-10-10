@@ -28,9 +28,9 @@ namespace aurora::testing::gpu_golden {
 namespace au = aurora;
 
 // 场景常量：与 `utest_painter_primitives` / `utest_offscreen` / `utest_bar_chart` 同源。
-constexpr float HALF_PI = 1.57079632679489661923F;
-constexpr float TWO_PI = 6.28318530717958647692F;
-constexpr std::uint8_t DIM_ALPHA = 89;
+constexpr float AURORA_HALF_PI = 1.57079632679489661923F;
+constexpr float AURORA_TWO_PI = 6.28318530717958647692F;
+constexpr std::uint8_t AURORA_DIM_ALPHA = 89;
 
 [[nodiscard]] inline auto rect_f(float x, float y, float w, float h) -> au::Rect {
     return au::Rect{.origin = au::Point{.x = x, .y = y}, .size = au::Size{.width = w, .height = h}};
@@ -50,17 +50,18 @@ inline auto draw_polyline(au::Painter &p) -> void {
                       1.5F, au::Color::blue());
     p.stroke_polyline(std::vector<au::Point>{au::Point{.x = 40.0F, .y = 8.0F}, au::Point{.x = 56.0F, .y = 8.0F},
                                              au::Point{.x = 56.0F, .y = 24.0F}},
-                      4.0F, au::Color{255, 0, 0, DIM_ALPHA});
+                      4.0F, au::Color{255, 0, 0, AURORA_DIM_ALPHA});
 }
 
 /// @brief 扇形场景：实心扇形 + 环扇（donut）+ 整圆 + 弧线描边。
 inline auto draw_sector(au::Painter &p) -> void {
     constexpr int size = 64;
     p.fill_rect(rect_f(0.0F, 0.0F, static_cast<float>(size), static_cast<float>(size)), au::Color::white());
-    p.fill_sector(au::Point{.x = 16.0F, .y = 16.0F}, 14.0F, 0.0F, -HALF_PI, 0.0F, au::Color::red());
-    p.fill_sector(au::Point{.x = 46.0F, .y = 16.0F}, 14.0F, 7.0F, -HALF_PI, HALF_PI, au::Color::blue());
-    p.fill_sector(au::Point{.x = 16.0F, .y = 46.0F}, 12.0F, 0.0F, 0.0F, TWO_PI, au::Color::green());
-    p.stroke_arc(au::Point{.x = 46.0F, .y = 46.0F}, 10.0F, 3.0F, -HALF_PI, HALF_PI, au::Color{0, 0, 0, 255});
+    p.fill_sector(au::Point{.x = 16.0F, .y = 16.0F}, 14.0F, 0.0F, -AURORA_HALF_PI, 0.0F, au::Color::red());
+    p.fill_sector(au::Point{.x = 46.0F, .y = 16.0F}, 14.0F, 7.0F, -AURORA_HALF_PI, AURORA_HALF_PI, au::Color::blue());
+    p.fill_sector(au::Point{.x = 16.0F, .y = 46.0F}, 12.0F, 0.0F, 0.0F, AURORA_TWO_PI, au::Color::green());
+    p.stroke_arc(au::Point{.x = 46.0F, .y = 46.0F}, 10.0F, 3.0F, -AURORA_HALF_PI, AURORA_HALF_PI,
+                 au::Color{0, 0, 0, 255});
 }
 
 // ---- 场景构造体（控件树组：240×120 / 320×200）----

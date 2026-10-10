@@ -78,6 +78,10 @@ class HiddenGlContext {
     }
     HiddenGlContext(const HiddenGlContext &) = delete;
     auto operator=(const HiddenGlContext &) -> HiddenGlContext & = delete;
+    // 资源即 GLFW 全局状态（glfwInit/glfwTerminate 进程级一副），不可复制也不可搬移；
+    // 显式补全五件套（与 src/ 侧 Impl 同口径），不依赖隐式生成的悬垂语义。
+    HiddenGlContext(HiddenGlContext &&) = delete;
+    auto operator=(HiddenGlContext &&) -> HiddenGlContext & = delete;
     ~HiddenGlContext() {
         if (window_ != nullptr) {
             glfwDestroyWindow(window_);
@@ -97,42 +101,49 @@ class HiddenGlContext {
 
 /// @brief 逐例就地装载 GL 函数表并构造后端（`GpuGlRhi` 禁拷贝/搬移）；装载失败即 invalid。
 [[nodiscard]] auto load_rhi() -> au::rhi::GpuGlRhi {
+    // glfwGetProcAddress 返回 GLFWglproc（C 函数指针），与 `load_gl` 回调形态的签名对齐
+    // 是 C ABI 边界，唯一拼写即 reinterpret_cast（与 glfw_surface.cpp 建窗路径同口径）。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     return au::rhi::GpuGlRhi{au::rhi::load_gl(reinterpret_cast<void *(*)(const char *)>(&glfwGetProcAddress))};
 }
 
 }  // namespace
 
-#define ITEST_GL_GPU_OR_SKIP(ctx, gpu)                                                                    \
+// AURORA_TEST_SKIP 终止当前用例（runner 捕获后记 Skipped），只能出现在用例函数体内；
+// 本宏把「建隐形上下文 → 无显示即 SKIP → 装载 GL」包成一条语句，依赖这条早退控制流，
+// constexpr 模板函数复刻不了，宏形态是本测试框架下的唯一拼写（与 death_test.h 的 skip 宏同口径）。
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#define AURORA_ITEST_GL_GPU_OR_SKIP(ctx, gpu)                                                             \
     HiddenGlContext ctx;                                                                                  \
-    if (!ctx.ok()) {                                                                                      \
+    if (!(ctx).ok()) {                                                                                    \
         AURORA_TEST_SKIP("no display environment (hidden window open failed), skipping GL golden");       \
     }                                                                                                     \
     au::rhi::GpuGlRhi gpu = load_rhi();                                                                   \
-    if (!gpu.valid()) {                                                                                   \
+    if (!(gpu).valid()) {                                                                                 \
         AURORA_TEST_SKIP("GL 3.3 core load failed (old driver / missing functions), skipping GL golden"); \
     }
 
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
-    ITEST_GL_GPU_OR_SKIP(ctx, gpu);
+    AURORA_ITEST_GL_GPU_OR_SKIP(ctx, gpu);
     const auto current = scenes::render_display_list(gpu, 64, 64, scenes::draw_polyline, true);
     golden::compare_gpu_tolerance("painter_polyline", current, AURORA_GEOMETRY_TOL, AURORA_POLYLINE_BUDGET);
 }
 
 AURORA_TEST_CASE(gpu_sector_within_tolerance_of_software_golden) {
-    ITEST_GL_GPU_OR_SKIP(ctx, gpu);
+    AURORA_ITEST_GL_GPU_OR_SKIP(ctx, gpu);
     const auto current = scenes::render_display_list(gpu, 64, 64, scenes::draw_sector, true);
     golden::compare_gpu_tolerance("painter_sector", current, AURORA_GEOMETRY_TOL, AURORA_SECTOR_BUDGET);
 }
 
 AURORA_TEST_CASE(gpu_text_column_within_tolerance_of_software_golden) {
-    ITEST_GL_GPU_OR_SKIP(ctx, gpu);
+    AURORA_ITEST_GL_GPU_OR_SKIP(ctx, gpu);
     au::Node root = scenes::build_text_column();
     const auto current = scenes::render_tree(gpu, root, 240, 120, true);
     golden::compare_gpu_tolerance("golden_basic_column", current, AURORA_GEOMETRY_TOL, AURORA_TEXT_BUDGET, &root);
 }
 
 AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
-    ITEST_GL_GPU_OR_SKIP(ctx, gpu);
+    AURORA_ITEST_GL_GPU_OR_SKIP(ctx, gpu);
     au::Node root = scenes::build_bar_chart();
     const auto current = scenes::render_tree(gpu, root, 320, 200, true);
     golden::compare_gpu_tolerance("chart_bar", current, AURORA_GEOMETRY_TOL, AURORA_CHART_BUDGET, &root);

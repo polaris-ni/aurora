@@ -20,6 +20,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -266,6 +267,14 @@ class AtspiModel {
     /// @brief 屏幕点命中（本子树内、先序**最深**且面积最小者）；未命中 = null 引用。
     [[nodiscard]] auto accessible_at_point(std::uint64_t id, std::int32_t x, std::int32_t y, std::uint32_t coord) const
         -> AtspiRef;
+    /// @brief Component.GrabFocus 的折算：经动作通道请活控件获焦。
+    /// @details 「尽力而为」口径（与桥的既有回包同源）：返回值表示**目标活控件存在、动作通道
+    ///          已装配且请求已派发**，不表示控件真的拿到焦点——控件不支持获焦时静默但仍回 true，
+    ///          因为读屏端据该布尔判断「调用被受理」而非「焦点已落地」。id → 活控件的解引用
+    ///          与 const 剥离单点在 `widget_of`，桥侧不得自行 `const_cast`。
+    /// @param id 目标节点 id（App/Frame 合成节点与未存活者返回 false）。
+    /// @return 请求是否受理（见上）。
+    [[nodiscard]] auto grab_focus(std::uint64_t id) const -> bool;
 
     // ---- org.a11y.atspi.Text（码点偏移）----
     [[nodiscard]] auto has_text(std::uint64_t id) const -> bool;
@@ -340,7 +349,7 @@ class AtspiModel {
 /// @brief Aurora 语义角色 → AtspiRole 序号（含 password/multiline 细化）。
 [[nodiscard]] auto atspi_role_of(const AccessibilityNode &n) -> std::uint32_t;
 /// @brief AtspiRole 序号 → 英文名（与 libatspi `_atspi_role_get_name` 表同源）。
-[[nodiscard]] auto atspi_role_name(std::uint32_t role) -> std::string;
+[[nodiscard]] auto atspi_role_name(std::uint32_t role) -> std::string_view;
 /// @brief AtspiStateType 序号 → 规范状态名（小写连字符，与 GLib 枚举 nick 同源：
 ///        `object:state-changed:<name>` 事件 minor 的单一来源；越界 ⇒ nullptr）。
 [[nodiscard]] auto atspi_state_name(std::uint32_t state) -> const char *;

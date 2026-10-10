@@ -44,7 +44,7 @@
 // 必须在本文件后续包含 aurora 头（cursor_map.h / detail/glfw_modifiers.h）之前解除 ——
 // 头文件 guard 一旦把它们解析完，事后 #undef 救不回来。
 // 与 `x11_surface.cpp` 的同名处理同口径（那里还需先取 `None` 的值再 #undef）。
-#if defined(AURORA_PLATFORM_LINUX)
+#ifdef AURORA_PLATFORM_LINUX
 #undef CursorShape
 #undef None
 #endif
@@ -52,7 +52,6 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <vector>
 
 #include "aurora/core/log.h"
@@ -64,7 +63,9 @@
 #include "aurora/window/detail/glfw_dpi.h"
 #include "aurora/window/detail/glfw_keymap.h"
 #include "aurora/window/detail/glfw_modifiers.h"
+#ifdef AURORA_PLATFORM_WINDOWS
 #include "aurora/window/win32_capture.h"
+#endif
 #include "aurora/window/window_state.h"
 
 #ifdef AURORA_ENABLE_GLFW_GPU_GL
@@ -85,6 +86,7 @@ namespace aurora {
 /// 依赖该模式，故按 `GLFW_KEY_NUM_LOCK` 单独查询。读法用 `glfwGetKey` 的**缓存事件态**
 /// 而非按下事件：NumLock 是切换键，没有「按住」语义。
 /// @param w 目标窗口。
+/// @param m 既有修饰位集，NumLock 位在按下时并入其中后返回。
 /// @return 该位已并入的修饰位集。
 [[nodiscard]] static auto with_glfw_numlock(GLFWwindow *w, ModifierKey m) -> ModifierKey {
     // GLFW 平台实现对未支持的键返回 `GLFW_KEY_UNKNOWN`；此处按「读不到 = 关」处理，
@@ -220,7 +222,7 @@ struct GlfwSurface::Impl {
         return painter_impl.data();
     }
     [[nodiscard]] auto frame_count() const -> int { return frame; }
-    [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * {
+    [[nodiscard]] auto gpu_backend() const -> rhi::RhiFrameSink * {
 #ifdef AURORA_ENABLE_GLFW_GPU_GL
         return gpu.get();
 #else
@@ -342,6 +344,9 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     if (want_gpu) {
         // 装载 GL 3.3 core 函数表（经 glfwGetProcAddress）并初始化 GPU 栅格后端；
         // 失败（函数表缺项/着色器链接失败/GL 错误）→ gpu 置空，软件纹理路径兜底。
+        // glfwGetProcAddress 返回 GLFWglproc（C 函数指针），与 `load_gl` 回调形态的签名对齐
+        // 是 C ABI 边界，唯一拼写即 reinterpret_cast（与 itest_gl_golden.cpp 同口径）。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         rhi::GLFn fn = rhi::load_gl(reinterpret_cast<void *(*)(const char *)>(&glfwGetProcAddress));
         gpu = std::make_unique<rhi::GpuGlRhi>(fn);
         if (!gpu->valid()) {
@@ -821,14 +826,16 @@ auto GlfwSurface::native_handle() const -> void * {
     // 与 Win32 / D3D11 / X11 / Wayland 四个后端同口径（`Surface::native_handle` 契约）。
     // 此前本后端未覆写 → 恒返回 nullptr，使 GLFW 窗口的跨屏行为在本仓**不可观测**：
     // 真机探针既拿不到句柄注入平台消息、也无处核对原生几何。
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     return reinterpret_cast<void *>(glfwGetWin32Window(pimpl_->window));  // NOLINT(*-pro-type-reinterpret-cast)
 #elif defined(AURORA_PLATFORM_MACOS)
     return glfwGetCocoaWindow(pimpl_->window);
 #elif defined(AURORA_PLATFORM_LINUX)
     // XWayland 下 GLFW 仍经 X11 取句柄（Wayland 原生路径由 WaylandSurface 负责）。
-    return reinterpret_cast<void *>(
-        static_cast<std::intptr_t>(glfwGetX11Window(pimpl_->window)));  // NOLINT(*-pro-type-reinterpret-cast)
+    // X11 的 Window 是整数 XID 而非指针，把它折算成契约要求的 void* 与上一分支的 reinterpret_cast
+    // 同属 C ABI 边界：本仓不解引用该值，只按句柄语义传给平台调用，故两条指针形态告警就地豁免。
+    const auto x11_window = static_cast<std::intptr_t>(glfwGetX11Window(pimpl_->window));
+    return reinterpret_cast<void *>(x11_window);  // NOLINT(*-pro-type-reinterpret-cast,performance-no-int-to-ptr)
 #else
     return nullptr;  // 未知平台：无稳定句柄语义，不猜。
 #endif

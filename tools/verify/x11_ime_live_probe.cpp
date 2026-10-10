@@ -57,7 +57,7 @@
 #if !defined(AURORA_PLATFORM_UNIX) || defined(AURORA_PLATFORM_MACOS)
 #error "aurora_verify_x11_ime can only be built on Linux/Unix (non-Apple)"
 #endif
-#if !defined(AURORA_BACKEND_X11)
+#ifndef AURORA_BACKEND_X11
 #error "AURORA_BACKEND_X11 must be enabled"
 #endif
 
@@ -75,7 +75,6 @@
 #include "aurora/event/event.h"
 #include "aurora/window/x11_surface.h"  // aurora 头必须先于 Xlib（None/Bool/Status 宏污染）：Xlib 的 `#define None 0L` 会炸掉 aurora 侧以 None 为枚举成员的声明。
 #include "verify_args.h"
-#include "verify_print.h"
 
 #include <X11/Xlib.h>
 
@@ -84,15 +83,18 @@
 // clang-format on
 
 namespace {
-
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-int failures = 0;
+/// 失败计数：函数局部静态 + 访问器收敛（探针退出码的依据），避免命名空间级可变全局量。
+auto failures() -> int & {
+    static int count = 0;
+    return count;
+}
 
 auto check(bool ok, const std::string &label) -> void {
     emit(std::string("[") + (ok ? "PASS" : "FAIL") + "] " + label);
     if (!ok) {
-        ++failures;
+        ++failures();
     }
 }
 
@@ -117,9 +119,11 @@ void pump(aurora::X11Surface &surface, int iterations) {
            " draws=" + std::to_string(s.draw_callbacks) + " spotUpdates=" + std::to_string(s.spot_updates) +
            " preedit=\"" + s.preedit + "\"";
 }
+} // namespace
 
-}  // namespace
-
+// 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现，捕获反而把失败压成 0。
+// 口径与 tools/verify/ 其余探针、examples/ 各 demo 入口同。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     const auto cli = aurora_verify::parse_interactive("X11 XIM/IC input method bridge live probe", argc, argv);
     if (!cli.arguments) {
@@ -162,7 +166,8 @@ auto main(int argc, char **argv) -> int {
     emit(std::string("initial: ") + state_line(st));
 
     // provider：非零插入点盒（模拟宿主判定「焦点在文本控件」，锚点应落在其下沿）。
-    aurora::Rect caret_box{aurora::Point{64.0F, 96.0F}, aurora::Size{8.0F, 20.0F}};
+    aurora::Rect caret_box{.origin = aurora::Point{.x = 64.0F, .y = 96.0F},
+                           .size = aurora::Size{.width = 8.0F, .height = 20.0F}};
     surface.set_composition_caret_provider([&caret_box] { return caret_box; });
 
     if (!st.im_open) {
@@ -171,7 +176,7 @@ auto main(int argc, char **argv) -> int {
             "XOpenIM failed -> this machine has no XIM server (XMODIFIERS does not point at a running IM): the whole "
             "bridge is absent and input falls back to plain keysym, a legal degradation (same terms as Win32 without "
             "an IME)");
-        check(st.ic_created == false && st.draw_callbacks == 0 && st.spot_updates == 0,
+        check(!st.ic_created && st.draw_callbacks == 0 && st.spot_updates == 0,
               "with no XIM the bridge stays completely silent (no IC, no callbacks, no anchor requests)");
     } else {
         check(true, "XOpenIM succeeded (im_open): a reachable XIM server exists on this machine");
@@ -180,8 +185,9 @@ auto main(int argc, char **argv) -> int {
         } else {
             check(true, "XCreateIC succeeded (ic_created)");
             emit(std::string("       negotiated style: ") +
-                 (st.preedit_callbacks ? "XIMPreeditCallbacks (composition pushback fully wired)"
-                                       : "XIMPreeditNothing (fallback: commit channel only)"));
+                 (st.preedit_callbacks
+                      ? "XIMPreeditCallbacks (composition pushback fully wired)"
+                      : "XIMPreeditNothing (fallback: commit channel only)"));
 
             // ---- ② 焦点宣告接线（不依赖输入法配合） ----
             // 用独立观测连接对被测窗口 XSetInputFocus 拉起/切走焦点，驱动被测 surface 自身事件
@@ -190,6 +196,9 @@ auto main(int argc, char **argv) -> int {
             // 此时直接聚焦根窗不会触发 FocusOut（X 侧本就没焦点在本窗），focused 不降反为假失败。
             // 先聚焦被测窗确保 X 焦点确在其上，随后的切走才必然产出 FocusOut → XUnsetICFocus。
             if (Display *obs = XOpenDisplay(nullptr); obs != nullptr) {
+                // native_handle 契约返回 void *，X11 XID 本是整数：身份折算喂独立连接的
+                // Xlib 焦点调用，从不解引用（与 utest_x11_surface 同款豁免）。
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
                 const auto win = static_cast<::Window>(reinterpret_cast<std::uintptr_t>(surface.native_handle()));
                 // 先确保窗口可见（FocusIn 只对 viewable 窗口生成）。
                 XMapWindow(obs, win);
@@ -221,10 +230,12 @@ auto main(int argc, char **argv) -> int {
                 // 必须以 TextInputEvent 上屏（防「接了 IM 反而吞普通键」回归）。
                 using FakeKeyFn = int (*)(Display *, unsigned int, int, unsigned long);
                 void *xtst = dlopen("libXtst.so.6", RTLD_NOW | RTLD_GLOBAL);
-                auto fake_key = xtst != nullptr
-                                    ? reinterpret_cast<FakeKeyFn>(
-                                          dlsym(xtst, "XTestFakeKeyEvent"))  // NOLINT(*-pro-type-reinterpret-cast)
-                                    : nullptr;
+                FakeKeyFn fake_key = nullptr;
+                if (xtst != nullptr) {
+                    // dlsym 契约的「对象指针 → 函数指针」唯一拼法（同库内符号绑定豁免口径）。
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+                    fake_key = reinterpret_cast<FakeKeyFn>(dlsym(xtst, "XTestFakeKeyEvent"));
+                }
                 const int keycode_a = XKeysymToKeycode(obs, 0x61 /*XK_a*/);
                 if (fake_key == nullptr || keycode_a == 0) {
                     skip(
@@ -277,8 +288,8 @@ auto main(int argc, char **argv) -> int {
         }
     }
 
-    if (failures > 0) {
-        emit("FAILURES PRESENT (" + std::to_string(failures) + ")");
+    if (failures() > 0) {
+        emit("FAILURES PRESENT (" + std::to_string(failures()) + ")");
         return 4;
     }
     emit("ALL AUTOMATED CHECKS PASS");

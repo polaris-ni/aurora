@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -36,16 +37,27 @@
 // ---- Winsock 词汇 → POSIX 映射：使下方主体逻辑（socket / bind / listen / accept /
 //      recv / send / select / htonl / htons / ntohs / inet_addr）在两种平台编译运行一致 ----
 using SOCKET = int;
+// 下面 7 个名字（INVALID_SOCKET / SOCKET_ERROR / SD_BOTH / WSAStartup / WSACleanup /
+// WSAGetLastError / MAKEWORD）逐字取自 Winsock API：它们是「读到这里就去查 Winsock 文档」
+// 的检索锚点，且 POSIX 腿必须与 Windows 腿同名，否则下方主体逻辑无法两平台共用同一份代码。
+// 改成本仓 `AURORA_` 全大写 / snake 口径等于把跨平台兼容层变成需要额外注释才读得懂的东西，
+// 故这一段按命名规范区间豁免（本仓唯一一处词汇绑定型豁免，理由与逐条清单见
+// codespec/changes/widened-lint-coverage/proposal.md）。
+// NOLINTBEGIN(readability-identifier-naming)
 constexpr SOCKET INVALID_SOCKET = -1;
 constexpr int SOCKET_ERROR = -1;
 constexpr int SD_BOTH = SHUT_RDWR;
 struct WSADATA {
     int dummy = 0;
 };
-inline int WSAStartup(uint16_t, void *) { return 0; }
+inline int WSAStartup(uint16_t /*unused*/, void * /*unused*/) { return 0; }
 inline void WSACleanup() {}
 inline int WSAGetLastError() { return errno; }
+// MAKEWORD 是 Winsock 词汇绑定的函数式宏（Windows 腿同名宏、POSIX 腿恒 0 占位）：宏是
+// 词汇绑定形态的一部分，改成 constexpr 函数会失去与上游 API 的逐字对应。
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define MAKEWORD(a, b) (0)
+// NOLINTEND(readability-identifier-naming)
 inline int closesocket(SOCKET s) { return ::close(s); }
 // htonl / htons / ntohs / inet_addr / INADDR_LOOPBACK 由 <arpa/inet.h> / <netinet/in.h> 提供
 #endif
@@ -359,7 +371,10 @@ static auto send_all(SOCKET client, const std::string &data) -> bool {
     std::size_t left = data.size();
     constexpr std::size_t chunk_size = 1U << 20U;  // 每次 ≤1MiB，避免 int 截断
     while (left > 0) {
-        const int n = send(client, p, static_cast<int>(std::min(left, chunk_size)), 0);
+        // 返回值用 std::ptrdiff_t 承接：POSIX 的 send 返回 ssize_t（64 位），Winsock 返回 int，
+        // 直接落 int 在 LP64 上即实施定义内的窄化。单轮最多请求 1MiB ⇒ 返回字节数必落在
+        // [0, 2^20]，后续按该类型推进指针/计数不丢信息。
+        const std::ptrdiff_t n = send(client, p, static_cast<int>(std::min(left, chunk_size)), 0);
         if (n <= 0) {
             return false;
         }
@@ -784,7 +799,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             return error_response(
                 400, "Missing or invalid 'path' (tree index path string, e.g. \"0/1\"; empty string targets the root)");
         }
-        const std::string widget_path = path_it->as_or<std::string>("");
+        const auto widget_path = path_it->as_or<std::string>("");
         float dx = 0.0F;
         float dy = 0.0F;
         std::string text;
@@ -1112,12 +1127,14 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
 
     // 先读取头部
     while (total < buf_size - 1) {
+        // recv 在 POSIX 返回 ssize_t（64 位）；落 int 即实施定义内窄化，故用 std::ptrdiff_t 承接。
+        // 本轮请求字节数 ≤ buf_size-1（8191），返回值为正时必落在 int 可表示区间 ⇒ 累加处转 int 无损。
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 套接字接收按字节推进指针是有意设计
-        const int n = recv(client, buf + total, buf_size - 1 - total, 0);
+        const std::ptrdiff_t n = recv(client, buf + total, buf_size - 1 - total, 0);
         if (n <= 0) {
             break;
         }
-        total += n;
+        total += static_cast<int>(n);
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): 定长请求缓冲按运行时常量下标访问是有意设计
         buf[total] = '\0';
         // 检查是否已收到完整头部（以 \r\n\r\n 结束）
@@ -1214,12 +1231,14 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
         std::vector<char> body_buf(body_needed);
         int received = 0;
         while (received < body_needed) {
+            // 同上：ssize_t 用 std::ptrdiff_t 承接；body_needed 已被 max_body_bytes（4MiB）夹住，
+            // 正返回值转回 int 累加不丢位。
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 套接字接收按字节推进指针是有意设计
-            const int n = recv(client, body_buf.data() + received, body_needed - received, 0);
+            const std::ptrdiff_t n = recv(client, body_buf.data() + received, body_needed - received, 0);
             if (n <= 0) {
                 break;
             }
-            received += n;
+            received += static_cast<int>(n);
         }
         body.append(body_buf.data(), received);
     }

@@ -37,6 +37,15 @@ inline auto format_handle(const void *handle) -> std::string {
     return oss.str();
 }
 
+/// @brief 整数身份（X11 xid、Wayland wl_buffer 的指针值等）→ `0x` + 16 位零填充十六进制。
+/// 与 `format_handle` 同形制，但**不做整型→指针转换**：此处的身份本就是整数，为了打印把它转成
+/// 指针会白拿一条 `performance-no-int-to-ptr`（优化面受损）与一次 `reinterpret_cast`。
+inline auto format_hex(std::uint64_t value) -> std::string {
+    std::ostringstream oss;
+    oss << "0x" << std::hex << std::setw(16) << std::setfill('0') << value;
+    return oss.str();
+}
+
 /// @brief 有符号整数 → 十进制串。
 inline auto format_int(long long value) -> std::string {
     std::ostringstream oss;

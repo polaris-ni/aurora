@@ -56,6 +56,9 @@ class X11Surface final : public Surface {
     /// @brief 禁用拷贝赋值：同拷贝构造，唯一 X 资源不可复制。
     /// @return 已删除重载，不存在实际返回路径。
     X11Surface &operator=(const X11Surface &) = delete;
+    /// @brief 禁用移动：连接/窗口生命周期与对象同寿，资源无「移交给新属主」的语义。
+    X11Surface(X11Surface &&) = delete;
+    X11Surface &operator=(X11Surface &&) = delete;
 
     /// @brief X 连接与窗口是否创建成功（无 DISPLAY/纯 TTY 环境为 false）。
     /// 工厂 `create_window(X11Options)` 据此返回 `Result` 错误而非崩溃。

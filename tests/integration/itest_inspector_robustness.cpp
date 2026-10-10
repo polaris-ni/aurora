@@ -6,6 +6,7 @@
 ///           响应且进程存活，绝不 std::terminate。真实 loopback HTTP 往返驱动。
 ///           AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -108,7 +109,9 @@ auto http_raw(std::uint16_t port, const std::string &raw) -> std::string {
     std::string resp;
     char buf[4096];
     for (;;) {
-        const int n = recv(sock, buf, sizeof(buf), 0);
+        // POSIX 的 recv 返回 ssize_t（64 位），落 int 即实施定义内窄化 ⇒ 用 std::ptrdiff_t 承接；
+        // 单轮只请求 sizeof(buf)=4096 字节，正返回值上界由此确定，转 size_t 交 append 不丢信息。
+        const std::ptrdiff_t n = recv(sock, buf, sizeof(buf), 0);
         if (n <= 0) {
             break;
         }

@@ -135,6 +135,9 @@ auto sample(const std::vector<std::uint8_t> &px, int canvas_w, int x, int y) -> 
 
 }  // namespace
 
+// 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现，捕获反而把失败压成 0。
+// 口径与 tools/verify/ 其余探针、examples/ 各 demo 入口同。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     const auto cli = aurora_verify::parse_interactive("X11 + wgpu present live probe", argc, argv);
     if (!cli.arguments) {

@@ -71,6 +71,7 @@
 #include <cstdlib>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <utility>
@@ -81,14 +82,22 @@
 namespace {
 
 /// @brief 人工等待 `pump_events()` 的预算（毫秒）；超时视为「没收到点击」。
-constexpr long k_click_budget_ms = 60000;
+constexpr long AURORA_CLICK_BUDGET_MS = 60000;
 /// @brief 人工段每次 `pump_events()` 之间的间隔（毫秒）。
-constexpr long k_click_poll_ms = 50;
+constexpr long AURORA_CLICK_POLL_MS = 50;
 /// @brief 三档紧急度之间留给桌面服务器的间隔（毫秒），避免相互覆盖。
-constexpr long k_urgency_gap_ms = 1200;
+constexpr long AURORA_URGENCY_GAP_MS = 1200;
 
-int failures = 0;
-int warnings = 0;
+/// 失败/警告计数：函数局部静态 + 访问器收敛（探针退出码的依据），避免命名空间级可变全局量。
+auto failures() -> int & {
+    static int count = 0;
+    return count;
+}
+
+auto warnings() -> int & {
+    static int count = 0;
+    return count;
+}
 
 /// @brief 写一行探针输出到 stdout（走 raw 通道：无前缀、不过级别过滤）。
 /// @param text 待输出的一行文本。
@@ -100,7 +109,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
 auto check(bool ok, const std::string &label) -> void {
     emit(std::string("[") + (ok ? "PASS" : "FAIL") + "] " + label);
     if (!ok) {
-        ++failures;
+        ++failures();
     }
 }
 
@@ -108,7 +117,7 @@ auto check(bool ok, const std::string &label) -> void {
 /// @param label 提示文案（英文，ASCII）。
 auto warn(const std::string &label) -> void {
     emit("[WARN] " + label);
-    ++warnings;
+    ++warnings();
 }
 
 /// @brief 记一条跳过说明。
@@ -133,19 +142,18 @@ auto nap_ms(long ms) -> void { std::this_thread::sleep_for(std::chrono::millisec
 
 /// @brief 一组符号是否齐备：少任何一个，整级后端在库侧就会降级。
 /// @param soname 目标库的 soname。
-/// @param symbols 关键符号名数组。
-/// @param count 符号个数。
+/// @param symbols 关键符号名数组（span 携带长度，调用方不再另传计数）。
 /// @return 全部解析到地址为真。
-[[nodiscard]] auto probe_symbols(const char *soname, const char *const *symbols, std::size_t count) -> bool {
+[[nodiscard]] auto probe_symbols(const char *soname, std::span<const char *const> symbols) -> bool {
     void *handle = dlopen(soname, RTLD_LAZY | RTLD_LOCAL);
     if (handle == nullptr) {
         return false;
     }
     bool complete = true;
-    for (std::size_t i = 0; i < count; ++i) {
-        void *address = dlsym(handle, symbols[i]);
+    for (const char *name : symbols) {
+        void *address = dlsym(handle, name);
         if (address == nullptr) {
-            emit(std::string("       ") + symbols[i] + " is missing from " + soname);
+            emit(std::string("       ") + name + " is missing from " + soname);
             complete = false;
         }
     }
@@ -247,6 +255,9 @@ auto nap_ms(long ms) -> void { std::this_thread::sleep_for(std::chrono::millisec
 
 }  // namespace
 
+// 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现，捕获反而把失败压成 0。
+// 口径与 tools/verify/ 其余探针、examples/ 各 demo 入口同。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     const auto cli = aurora_verify::parse_interactive("Linux XDG desktop notification live probe", argc, argv);
     if (!cli.arguments) {
@@ -268,9 +279,9 @@ auto main(int argc, char **argv) -> int {
 
     bool libnotify_usable = false;
     if (probe_library("libnotify.so.4")) {
-        static constexpr const char *k_notify_symbols[] = {"notify_init", "notify_notification_new",
-                                                           "notify_notification_show"};
-        libnotify_usable = probe_symbols("libnotify.so.4", k_notify_symbols, 3);
+        static constexpr const char *NOTIFY_SYMBOLS[] = {"notify_init", "notify_notification_new",
+                                                         "notify_notification_show"};
+        libnotify_usable = probe_symbols("libnotify.so.4", NOTIFY_SYMBOLS);
         emit(std::string("       tier 1 libnotify.so.4   : ") + (libnotify_usable ? "usable" : "incomplete symbols"));
     } else {
         emit("       tier 1 libnotify.so.4   : absent");
@@ -278,9 +289,9 @@ auto main(int argc, char **argv) -> int {
 
     bool libdbus_usable = false;
     if (probe_library("libdbus-1.so.3")) {
-        static constexpr const char *k_dbus_symbols[] = {"dbus_bus_get", "dbus_message_new_method_call",
-                                                         "dbus_connection_send_with_reply_and_block"};
-        libdbus_usable = probe_symbols("libdbus-1.so.3", k_dbus_symbols, 3);
+        static constexpr const char *DBUS_SYMBOLS[] = {"dbus_bus_get", "dbus_message_new_method_call",
+                                                       "dbus_connection_send_with_reply_and_block"};
+        libdbus_usable = probe_symbols("libdbus-1.so.3", DBUS_SYMBOLS);
         emit(std::string("       tier 2 libdbus-1.so.3   : ") + (libdbus_usable ? "usable" : "incomplete symbols"));
     } else {
         emit("       tier 2 libdbus-1.so.3   : absent");
@@ -429,7 +440,7 @@ auto main(int argc, char **argv) -> int {
                      " was rejected by the server: " + failure);
             }
             aurora::NotificationCenter::pump_events();
-            nap_ms(k_urgency_gap_ms);
+            nap_ms(AURORA_URGENCY_GAP_MS);
         }
         emit(
             "[MANUAL] did the three urgencies differ on screen (dwell time / interruption)? If they all looked "
@@ -437,7 +448,7 @@ auto main(int argc, char **argv) -> int {
 
         emit("");
         emit("[MANUAL] b. one more notification is about to appear; please CLICK IT within " +
-             std::to_string(k_click_budget_ms / 1000) + " s");
+             std::to_string(AURORA_CLICK_BUDGET_MS / 1000) + " s");
         int clicks = 0;
         std::string clicked_tag;
         aurora::NotificationCenter::set_on_notification_activated([&clicks, &clicked_tag](std::string tag) -> void {
@@ -455,12 +466,12 @@ auto main(int argc, char **argv) -> int {
             warn(std::string("manual click target could not be posted: ") + failure);
         }
 
-        for (long elapsed = 0; (elapsed < k_click_budget_ms) && (clicks == 0); elapsed += k_click_poll_ms) {
+        for (long elapsed = 0; (elapsed < AURORA_CLICK_BUDGET_MS) && (clicks == 0); elapsed += AURORA_CLICK_POLL_MS) {
             aurora::NotificationCenter::pump_events();
-            nap_ms(k_click_poll_ms);
+            nap_ms(AURORA_CLICK_POLL_MS);
         }
         if (clicks == 0) {
-            warn("no activation arrived within " + std::to_string(k_click_budget_ms / 1000) +
+            warn("no activation arrived within " + std::to_string(AURORA_CLICK_BUDGET_MS / 1000) +
                  "s: nobody clicked, or the current degradation is the notify-send tier, which cannot register "
                  "an action at all - not a failure of the library");
         } else {
@@ -472,11 +483,11 @@ auto main(int argc, char **argv) -> int {
     }
 
     emit("");
-    if (failures > 0) {
-        emit("result: " + std::to_string(failures) + " FAILURE(S), " + std::to_string(warnings) +
+    if (failures() > 0) {
+        emit("result: " + std::to_string(failures()) + " FAILURE(S), " + std::to_string(warnings()) +
              " warning(s) (exit 1)");
         return 1;
     }
-    emit("result: ALL PASS, " + std::to_string(warnings) + " warning(s) (exit 0)");
+    emit("result: ALL PASS, " + std::to_string(warnings()) + " warning(s) (exit 0)");
     return 0;
 }

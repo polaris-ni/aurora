@@ -80,7 +80,10 @@ struct AlsaApi {
     Wait wait = nullptr;
     State state = nullptr;
     Drop drop = nullptr;
-    StrError strerror_ = nullptr;
+    StrError str_error = nullptr;
+    /// 符号绑定契约：为真 ⇔ 除 `str_error` 外的全部函数指针非空（`load()` 逐只判定）。
+    /// 触达下列任一符号的调用点须**就地**复核本位，不得依赖「调用者已经判过」：`api()`
+    /// 返回的是函数内静态引用，跨函数的「指针必非空」推断静态分析看不到。
     bool ok = false;
 
     AlsaApi() { load(); }
@@ -95,6 +98,11 @@ struct AlsaApi {
         if (lib == nullptr) {
             return;  // 无 ALSA 运行库：start 恒 false → 静默降级
         }
+        // 以下 11 处 reinterpret_cast 是 POSIX dlsym 契约的固定拼法：dlsym 返回对象指针 void *，
+        // 而取得的是函数指针——C++ 把「对象指针 → 函数指针」定为条件支持（POSIX dlsym 明确要求
+        // 可行），唯一直接拼写就是 reinterpret_cast；memcpy 往返只是等价噪声。符号名与 AlsaApi
+        // 成员一一对应，逐一就地豁免会淹没契约说明，故整段区间豁免。
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
         open = reinterpret_cast<Open>(dlsym_fn(lib, "snd_pcm_open"));
         close = reinterpret_cast<Close>(dlsym_fn(lib, "snd_pcm_close"));
         set_params = reinterpret_cast<SetParams>(dlsym_fn(lib, "snd_pcm_set_params"));
@@ -105,7 +113,8 @@ struct AlsaApi {
         wait = reinterpret_cast<Wait>(dlsym_fn(lib, "snd_pcm_wait"));
         state = reinterpret_cast<State>(dlsym_fn(lib, "snd_pcm_state"));
         drop = reinterpret_cast<Drop>(dlsym_fn(lib, "snd_pcm_drop"));
-        strerror_ = reinterpret_cast<StrError>(dlsym_fn(lib, "snd_strerror"));
+        str_error = reinterpret_cast<StrError>(dlsym_fn(lib, "snd_strerror"));
+        // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
         ok = open != nullptr && close != nullptr && set_params != nullptr && recover != nullptr && writei != nullptr &&
              readi != nullptr && avail_update != nullptr && wait != nullptr && state != nullptr && drop != nullptr;
         if (!ok) {
@@ -116,17 +125,17 @@ struct AlsaApi {
 
 /// 进程级单例：首次触达加载，线程安全（magic statics）。
 auto api() -> const AlsaApi & {
-    static const AlsaApi instance;
-    return instance;
+    static const AlsaApi INSTANCE;
+    return INSTANCE;
 }
 
 auto describe(int err) -> std::string {
     const auto &a = api();
-    if (a.strerror_ != nullptr) {
-        const char *text = a.strerror_(err);
+    if (a.str_error != nullptr) {
+        const char *text = a.str_error(err);
         return text != nullptr ? std::string(text) : std::string("unknown");
     }
-    return std::string("unavailable");
+    return {"unavailable"};
 }
 
 }  // namespace
@@ -139,6 +148,16 @@ struct AlsaDeviceBackend::Impl {
     PcmHandle *pcm = nullptr;  // 启动期由调用线程建立；运行期仅设备线程触达
 
     ~Impl() { close_endpoint(); }
+
+    // 声明了拷贝/移动即抑制隐式默认构造，显式补回（成员全 NSDMI，default 即可）。
+    Impl() = default;
+
+    // 资源属主（std::thread + ALSA 句柄）语义上不可复制：显式删除拷贝/移动补齐五件套口径，
+    // 让「误拷贝」在编译期报错而非落到 std::thread 隐式删除的间接报错。
+    Impl(const Impl &) = delete;
+    auto operator=(const Impl &) -> Impl & = delete;
+    Impl(Impl &&) = delete;
+    auto operator=(Impl &&) -> Impl & = delete;
 
     auto open_endpoint() -> bool {
         if (pcm != nullptr) {
@@ -162,15 +181,21 @@ struct AlsaDeviceBackend::Impl {
     auto close_endpoint() -> void {
         if (pcm != nullptr) {
             const auto &a = api();
-            a.drop(pcm);
-            a.close(pcm);
+            if (a.ok) {
+                a.drop(pcm);
+                a.close(pcm);
+            }
             pcm = nullptr;
         }
     }
 
     /// snd_pcm_recover 自愈 XRUN/挂起；失败（设备级错误）返回 false → 重路由。
     auto recover_or_reroute(int err) -> void {
-        if (api().recover(pcm, err, 1) != 0) {
+        const auto &a = api();
+        if (!a.ok) {
+            return;  // 符号不全：本函数只在 run() 的设备线程路径上被达，而该路径已就地复核 ok
+        }
+        if (a.recover(pcm, err, 1) != 0) {
             AURORA_LOG_WARN("audio", "ALSA recover failed (" + describe(err) + "); rerouting endpoint");
             reroute.store(true, std::memory_order_release);
         }
@@ -179,6 +204,9 @@ struct AlsaDeviceBackend::Impl {
     auto run() -> void {
         std::vector<float> scratch;
         const auto &a = api();
+        if (!a.ok) {
+            return;  // 符号不全：start() 已在建线程前拒启，此处把该前提变成就地可见
+        }
         while (running.load(std::memory_order_acquire)) {
             if (reroute.exchange(false, std::memory_order_acq_rel)) {
                 close_endpoint();
@@ -267,6 +295,14 @@ struct AlsaCaptureBackend::Impl {
 
     ~Impl() { close_endpoint(); }
 
+    Impl() = default;  // 同 AlsaDeviceBackend::Impl：显式删除拷贝/移动后需补回默认构造。
+
+    // 同 AlsaDeviceBackend::Impl：资源属主显式删除拷贝/移动，补齐五件套口径。
+    Impl(const Impl &) = delete;
+    auto operator=(const Impl &) -> Impl & = delete;
+    Impl(Impl &&) = delete;
+    auto operator=(Impl &&) -> Impl & = delete;
+
     /// "default" 捕获端点 + 格式顺位协商（48k 优先、stereo 优先）。
     auto open_endpoint() -> bool {
         static constexpr int AURORA_RATES[] = {48000, 44100};
@@ -298,8 +334,10 @@ struct AlsaCaptureBackend::Impl {
     auto close_endpoint() -> void {
         if (pcm != nullptr) {
             const auto &a = api();
-            a.drop(pcm);
-            a.close(pcm);
+            if (a.ok) {
+                a.drop(pcm);
+                a.close(pcm);
+            }
             pcm = nullptr;
         }
         rate = 0;
@@ -309,6 +347,9 @@ struct AlsaCaptureBackend::Impl {
     auto run() -> void {
         std::vector<float> scratch;
         const auto &a = api();
+        if (!a.ok) {
+            return;  // 符号不全：start() 已在建线程前拒启，此处把该前提变成就地可见
+        }
         while (running.load(std::memory_order_acquire)) {
             const long avail = a.avail_update(pcm);
             if (avail < 0) {
