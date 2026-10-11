@@ -7,7 +7,9 @@
 #include <string>
 #include <vector>
 
+#include "aurora/environment/build_context.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/painter.h"
 #include "aurora/widget/stepper.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -172,6 +174,28 @@ AURORA_TEST_CASE(describe_reports_metadata) {
         }
     }
     AURORA_TEST_CHECK_TRUE(has_step_count);
+}
+
+AURORA_TEST_CASE(paint_covers_indicator_content_and_button_labels) {
+    Stepper s{three_steps(), 1};
+    LayoutEngine::layout(s, bounded(400.0F, 600.0F));
+    Painter painter;
+    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = s.size()};
+
+    // 中间步：覆盖 is_done/is_current 着色 + "Next →" 按钮文本。
+    s.paint(painter, bounds, BuildContext{});
+
+    // 末步：覆盖 is_last_step() → "Done" 按钮文本分支。
+    s.set_current(2);
+    s.paint(painter, bounds, BuildContext{});
+
+    // 首步：无前置已完成步（is_done 分支为 false）。
+    s.set_current(0);
+    s.paint(painter, bounds, BuildContext{});
+
+    std::vector<SignalViewBase *> sigs;
+    s.collect_signals(sigs);
+    AURORA_TEST_CHECK_EQ(sigs.size(), 0U);  // Stepper 无外露信号
 }
 
 }  // namespace aurora::test_cases::utest_stepper
