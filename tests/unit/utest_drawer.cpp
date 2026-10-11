@@ -18,10 +18,14 @@
 
 #include <chrono>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <vector>
 
+#include "aurora/environment/build_context.h"
 #include "aurora/event/event.h"
+#include "aurora/layout/layout_engine.h"
+#include "aurora/render/painter.h"
 #include "aurora/widget/drawer.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"
@@ -29,6 +33,10 @@
 namespace aurora::test_cases::utest_drawer {
 
 namespace {
+
+auto bounded(float w, float h) -> Constraints {
+    return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
 
 class LeafProbe final : public Widget {
   public:
@@ -389,6 +397,164 @@ AURORA_TEST_CASE(page_view_serialize_roundtrip) {
     p.set("show_indicator", Json{true});
     restored.deserialize_props(p);
     AURORA_TEST_CHECK_EQ(restored.current_page(), 1);  // 反序列化不夹取
+}
+
+AURORA_TEST_CASE(drawer_layout_and_paint_branches) {
+    auto content = std::make_shared<LeafProbe>();
+    auto panel = std::make_shared<LeafProbe>();
+    BuildContext ctx;
+    Painter painter;
+
+    // 左停靠 + 打开：面板可见、内容占满、面板宽 240 贴左、绘制遮罩+阴影+面板+内容。
+    Drawer left{Node{content}, Node{panel}, DrawerSide::Left, 240.0F};
+    left.set_open(true);
+    LayoutEngine::layout(left, bounded(800.0F, 600.0F));
+    AURORA_TEST_CHECK_EQ(left.size().width, 800.0F);
+    AURORA_TEST_CHECK_EQ(left.size().height, 600.0F);
+    left.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = left.size()}, ctx);
+
+    // 左停靠 + 永久：无遮罩分支、面板仍绘制。
+    Drawer perm{Node{content}, Node{panel}, DrawerSide::Left, 240.0F};
+    perm.set_permanent(true);
+    LayoutEngine::layout(perm, bounded(800.0F, 600.0F));
+    perm.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = perm.size()}, ctx);
+
+    // 右停靠 + 打开：面板贴右、阴影 delta 取负。
+    Drawer right{Node{content}, Node{panel}, DrawerSide::Right, 240.0F};
+    right.set_open(true);
+    LayoutEngine::layout(right, bounded(800.0F, 600.0F));
+    right.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = right.size()}, ctx);
+
+    // 非有限约束 → 回退 480x320。
+    Drawer finite_fb{Node{content}, Node{panel}, DrawerSide::Left, 240.0F};
+    finite_fb.set_open(true);
+    LayoutEngine::layout(finite_fb,
+                         Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
+                                     .max = Size{.width = std::numeric_limits<float>::infinity(),
+                                                 .height = std::numeric_limits<float>::infinity()}},
+                         ctx);
+    AURORA_TEST_CHECK_EQ(finite_fb.size().width, 480.0F);
+    AURORA_TEST_CHECK_EQ(finite_fb.size().height, 320.0F);
+}
+
+AURORA_TEST_CASE(drawer_hit_test_branches) {
+    auto content = std::make_shared<LeafProbe>();
+    auto panel = std::make_shared<LeafProbe>();
+    BuildContext ctx;
+    Drawer d{Node{content}, Node{panel}, DrawerSide::Left, 240.0F};
+    d.set_open(true);
+    LayoutEngine::layout(d, bounded(800.0F, 600.0F));
+    const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = d.size()};
+
+    // 面板内点击 → 命中（面板子树或自身）。
+    Widget *in_panel = d.hit_test(Point{.x = 10.0F, .y = 10.0F}, box, ctx);
+    AURORA_TEST_CHECK_TRUE(in_panel != nullptr);
+    // 内容区点击 → 命中内容子树。
+    Widget *in_content = d.hit_test(Point{.x = 400.0F, .y = 300.0F}, box, ctx);
+    AURORA_TEST_CHECK_TRUE(in_content != nullptr);
+
+    // 空内容 + 打开：点击遮罩区（不在面板内）→ 返回自身（模态关闭语义）。
+    Drawer scrim{Node{}, Node{std::make_shared<LeafProbe>()}, DrawerSide::Left, 240.0F};
+    scrim.set_open(true);
+    LayoutEngine::layout(scrim, bounded(800.0F, 600.0F));
+    Widget *on_scrim = scrim.hit_test(Point{.x = 400.0F, .y = 300.0F},
+                                      Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = scrim.size()}, ctx);
+    AURORA_TEST_CHECK_TRUE(on_scrim != nullptr);
+
+    // 关闭且空：无命中。
+    Drawer closed{Node{}, Node{}};
+    LayoutEngine::layout(closed, bounded(800.0F, 600.0F));
+    Widget *none = closed.hit_test(Point{.x = 400.0F, .y = 300.0F},
+                                   Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = closed.size()}, ctx);
+    AURORA_TEST_CHECK_EQ(none, nullptr);
+}
+
+AURORA_TEST_CASE(progress_dialog_layout_paint_hit_test) {
+    BuildContext ctx;
+    Painter p;
+    const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
+
+    // 打开 + 确定进度：布局算盒 + 绘制进度填充 + 取消按钮。
+    ProgressDialog pd{"working", true};
+    pd.show();
+    pd.set_progress(0.5F);
+    LayoutEngine::layout(pd, bounded(400.0F, 300.0F));
+    pd.paint(p, box, ctx);  // 遮罩+盒+消息+进度填充(214-217)+取消按钮(227-235)
+
+    // 打开 + 不确定态：中段高亮块。
+    ProgressDialog ind{"thinking", true};
+    ind.show();
+    ind.set_progress(-1.0F);
+    LayoutEngine::layout(ind, bounded(400.0F, 300.0F));
+    ind.paint(p, box, ctx);  // 218-223
+
+    // 打开但不可取消：跳过取消按钮绘制。
+    ProgressDialog nocancel{"x", false};
+    nocancel.show();
+    nocancel.set_progress(0.3F);
+    LayoutEngine::layout(nocancel, bounded(400.0F, 300.0F));
+    nocancel.paint(p, box, ctx);  // 跳过 227
+
+    // 未打开：绘制提前返回。
+    ProgressDialog hidden{"y", true};
+    hidden.paint(p, box, ctx);  // 192-193
+
+    // 布局分支：非有限 → 400x300；未打开 → 0x0。
+    ProgressDialog fb{"z", true};
+    fb.show();
+    LayoutEngine::layout(fb,
+                         Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
+                                     .max = Size{.width = std::numeric_limits<float>::infinity(),
+                                                 .height = std::numeric_limits<float>::infinity()}},
+                         ctx);
+    AURORA_TEST_CHECK_EQ(fb.size().width, 400.0F);
+    AURORA_TEST_CHECK_EQ(fb.size().height, 300.0F);
+    ProgressDialog shut{"w", true};
+    LayoutEngine::layout(shut, bounded(400.0F, 300.0F), ctx);
+    AURORA_TEST_CHECK_EQ(shut.size().width, 0.0F);
+    AURORA_TEST_CHECK_EQ(shut.size().height, 0.0F);
+
+    // 命中测试：打开态盒内 → 自身；盒外 → nullptr；未打开 → nullptr。
+    ProgressDialog ht{"v", true};
+    ht.show();
+    LayoutEngine::layout(ht, bounded(400.0F, 300.0F), ctx);
+    AURORA_TEST_CHECK_TRUE(ht.hit_test(Point{.x = 200.0F, .y = 150.0F}, box, ctx) != nullptr);
+    AURORA_TEST_CHECK_EQ(ht.hit_test(Point{.x = 999.0F, .y = 999.0F}, box, ctx), nullptr);
+    ProgressDialog ht2{"u", true};  // 未打开
+    AURORA_TEST_CHECK_EQ(ht2.hit_test(Point{.x = 200.0F, .y = 150.0F}, box, ctx), nullptr);
+}
+
+AURORA_TEST_CASE(page_view_layout_paint_hit_test) {
+    auto a = std::make_shared<LeafProbe>();
+    auto b = std::make_shared<LeafProbe>();
+    auto c = std::make_shared<LeafProbe>();
+    BuildContext ctx;
+    Painter p;
+
+    // 多页 + 指示器：当前页绘制 + 圆点(active=0, 其余 inactive)。
+    PageView pv{std::vector<Node>{Node{a}, Node{b}, Node{c}}, 0};
+    pv.set_show_indicator(true);
+    LayoutEngine::layout(pv, bounded(400.0F, 300.0F));
+    const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = pv.size()};
+    pv.paint(p, box, ctx);  // 293-298 + 301-314
+    Widget *hit = pv.hit_test(Point{.x = 200.0F, .y = 150.0F}, box, ctx);
+    AURORA_TEST_CHECK_TRUE(hit != nullptr);  // 当前页命中
+
+    // 单页：指示器跳过（>1 不成立）。
+    PageView single{std::vector<Node>{Node{a}}, 0};
+    single.set_show_indicator(true);
+    LayoutEngine::layout(single, bounded(400.0F, 300.0F));
+    single.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = single.size()}, ctx);
+
+    // 非有限约束 → 回退 320x240。
+    PageView fb{std::vector<Node>{Node{a}}, 0};
+    LayoutEngine::layout(fb,
+                         Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
+                                     .max = Size{.width = std::numeric_limits<float>::infinity(),
+                                                 .height = std::numeric_limits<float>::infinity()}},
+                         ctx);
+    AURORA_TEST_CHECK_EQ(fb.size().width, 320.0F);
+    AURORA_TEST_CHECK_EQ(fb.size().height, 240.0F);
 }
 
 }  // namespace aurora::test_cases::utest_drawer
