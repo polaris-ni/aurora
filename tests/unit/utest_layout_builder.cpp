@@ -59,8 +59,7 @@ AURORA_TEST_CASE(empty_builder_falls_back_to_empty_child) {
     BuildContext ctx;
     def.mount(ctx);
     const Size sz = def.layout(
-        Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 300.0F, .height = 200.0F}},
-        ctx);
+        Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 300.0F, .height = 200.0F}}, ctx);
     AURORA_TEST_CHECK_EQ(sz.width, 0.0F);
     AURORA_TEST_CHECK_EQ(sz.height, 0.0F);
     AURORA_TEST_CHECK_EQ(def.child_nodes().size(), 0U);
@@ -85,7 +84,7 @@ AURORA_TEST_CASE(rebuild_on_constraint_change_reuse_on_same) {
 
     // 约束变化：重建子节点。
     lb->layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 500.0F, .height = 200.0F}},
-                ctx);
+               ctx);
     AURORA_TEST_CHECK_EQ(lb->child_nodes().size(), 1U);
 
     Painter painter;

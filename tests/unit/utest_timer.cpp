@@ -63,8 +63,9 @@ AURORA_TEST_CASE(mount_with_running_scheduler_registers_interval) {
 
     int fired = 0;
     auto child = std::make_shared<LeafProbe>();
-    Timer t2(std::chrono::seconds(1), [&](const SignalView<int> &) -> Node { return Node{child}; },
-             [&](int n) { fired = n; });
+    Timer t2(
+        std::chrono::seconds(1), [&](const SignalView<int> &) -> Node { return Node{child}; },
+        [&](int n) { fired = n; });
     BuildContext ctx;
     t2.mount(ctx);  // 有 Scheduler：set_interval 注册周期任务
     AURORA_TEST_CHECK_EQ(child->mounts, 1);

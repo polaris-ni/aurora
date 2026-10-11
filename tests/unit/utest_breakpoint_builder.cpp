@@ -73,28 +73,24 @@ AURORA_TEST_CASE(mount_layout_rebuild_unmount_covers_all_breakpoints) {
     bp->mount(ctx);  // on_mount：订阅 builder 信号
 
     // 宽 → Expanded，并构建子节点。
-    bp->layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
-                           .max = Size{.width = 1000.0F, .height = 800.0F}},
-                ctx);
+    bp->layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 1000.0F, .height = 800.0F}},
+               ctx);
     AURORA_TEST_CHECK_EQ(bp->current_breakpoint(), Breakpoint::Expanded);
     AURORA_TEST_CHECK_EQ(bp->child_nodes().size(), 1U);
 
     // 窄 → Compact（档位变化触发重建）。
-    bp->layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
-                           .max = Size{.width = 100.0F, .height = 200.0F}},
-                ctx);
+    bp->layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 200.0F}},
+               ctx);
     AURORA_TEST_CHECK_EQ(bp->current_breakpoint(), Breakpoint::Compact);
 
     // 中 → Medium。
-    bp->layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
-                           .max = Size{.width = 700.0F, .height = 200.0F}},
-                ctx);
+    bp->layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 700.0F, .height = 200.0F}},
+               ctx);
     AURORA_TEST_CHECK_EQ(bp->current_breakpoint(), Breakpoint::Medium);
 
     // 同档位内再布局：不重建（复用子树），covering 约束不变分支。
-    bp->layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
-                           .max = Size{.width = 700.0F, .height = 200.0F}},
-                ctx);
+    bp->layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 700.0F, .height = 200.0F}},
+               ctx);
     AURORA_TEST_CHECK_EQ(bp->current_breakpoint(), Breakpoint::Medium);
 
     // 退化：父约束无限宽 → width 视为 0 → Compact。

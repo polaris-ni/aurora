@@ -18,8 +18,7 @@ AURORA_TEST_CASE(forwarding_functions_execute_without_throwing) {
     (void)aurora::image::decode_file("/nonexistent/aurora_ci_image.png", aurora::image::DecodeOptions{});
     (void)aurora::image::decode_memory(std::span<const std::uint8_t>{}, aurora::image::DecodeOptions{});
     (void)aurora::image::decode(aurora::image::ImageSource{}, aurora::image::DecodeOptions{});
-    (void)aurora::image::decode_animated_file("/nonexistent/aurora_ci_anim.gif",
-                                               aurora::image::DecodeOptions{});
+    (void)aurora::image::decode_animated_file("/nonexistent/aurora_ci_anim.gif", aurora::image::DecodeOptions{});
     (void)aurora::image::encode(aurora::Image{}, aurora::image::EncodeOptions{});
 
     const std::filesystem::path out =

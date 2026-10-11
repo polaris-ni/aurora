@@ -27,19 +27,19 @@ namespace aurora::test_cases::utest_title_bar_api {
 
 namespace {
 
-constexpr float HOST_W = 320.0F;
-constexpr float HOST_H = 260.0F;
-constexpr float BAR_H = 36.0F;
-constexpr int HOVER_MS = 400;
+constexpr float AURORA_HOST_W = 320.0F;
+constexpr float AURORA_HOST_H = 260.0F;
+constexpr float AURORA_BAR_H = 36.0F;
+constexpr int AURORA_HOVER_MS = 400;
 
 auto host_constraints() -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
-                       .max = Size{.width = HOST_W, .height = HOST_H}};
+                       .max = Size{.width = AURORA_HOST_W, .height = AURORA_HOST_H}};
 }
 
 auto dummy_image() -> std::shared_ptr<Image> {
-    return std::make_shared<Image>(
-        Image{.width = 16, .height = 16, .pixels = std::vector<std::uint8_t>(16 * 16 * 4U, 255)});
+    return std::make_shared<Image>(Image{
+        .width = 16, .height = 16, .pixels = std::vector<std::uint8_t>(static_cast<std::size_t>(16) * 16 * 4U, 255)});
 }
 
 auto press(float x, float y) -> MouseEvent {
@@ -129,7 +129,7 @@ AURORA_TEST_CASE(control_button_press_without_chrome_is_safe) {
     bar->mount(ctx);
     LayoutEngine::layout(*bar, host_constraints());
 
-    const TitleBarGeometry geom = title_bar_geometry(HOST_W, TitleBarStyle{}, false, true);
+    const TitleBarGeometry geom = title_bar_geometry(AURORA_HOST_W, TitleBarStyle{}, false, true);
     auto center = [](const Rect &r) -> Point {
         return Point{.x = r.origin.x + (r.size.width * 0.5F), .y = r.origin.y + (r.size.height * 0.5F)};
     };
@@ -160,7 +160,7 @@ AURORA_TEST_CASE(action_chip_press_fires_callback) {
     Font f;
     f.size_pt = 13.0F;
     const float tw = render::FontEngine::measure_width("Foo", f) + 16.0F;
-    const float cx = (HOST_W - 12.0F) - (tw * 0.5F);
+    const float cx = (AURORA_HOST_W - 12.0F) - (tw * 0.5F);
     MouseEvent e = press(cx, 5.0F);
     bar->on_pointer_event(e);
     AURORA_TEST_CHECK_EQ(hits, 1);
@@ -195,16 +195,16 @@ AURORA_TEST_CASE(paint_covers_icon_title_subtitle_glyphs_and_snap) {
     LayoutEngine::layout(*root, host_constraints());
 
     Painter painter;
-    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = HOST_W, .height = HOST_H}};
+    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = AURORA_HOST_W, .height = AURORA_HOST_H}};
     bar->paint(painter, bounds, BuildContext{});  // 图标 + 标题 + 副标题 + 控制钮字形
 
     // 悬停最大化钮 ≥400ms → 真实路径展开 Snap 浮层。
-    const TitleBarGeometry geom = title_bar_geometry(HOST_W, TitleBarStyle{}, false, true);
-    const Point mc{geom.maximize.origin.x + (geom.maximize.size.width * 0.5F),
-                   geom.maximize.origin.y + (geom.maximize.size.height * 0.5F)};
+    const TitleBarGeometry geom = title_bar_geometry(AURORA_HOST_W, TitleBarStyle{}, false, true);
+    const Point mc{.x = geom.maximize.origin.x + (geom.maximize.size.width * 0.5F),
+                   .y = geom.maximize.origin.y + (geom.maximize.size.height * 0.5F)};
     MouseEvent hover1 = move_to(mc.x, mc.y);
     EventDispatcher::dispatch(*root, hover1, nullptr);
-    std::this_thread::sleep_for(std::chrono::milliseconds(HOVER_MS + 60));
+    std::this_thread::sleep_for(std::chrono::milliseconds(AURORA_HOVER_MS + 60));
     MouseEvent hover2 = move_to(mc.x, mc.y);
     EventDispatcher::dispatch(*root, hover2, nullptr);
     AURORA_TEST_CHECK(bar->snap_open());
@@ -214,8 +214,8 @@ AURORA_TEST_CASE(paint_covers_icon_title_subtitle_glyphs_and_snap) {
 
     // extra_hit_box 在展开态返回弹窗矩形。
     AURORA_TEST_CHECK(bar->extra_hit_box(BuildContext{}, Point{.x = 0.0F, .y = 0.0F}).has_value());
-    AURORA_TEST_CHECK(bar->covers_extra_hit_box(
-        Point{.x = geom.maximize.origin.x, .y = BAR_H + 4.0F}, BuildContext{}, Point{.x = 0.0F, .y = 0.0F}));
+    AURORA_TEST_CHECK(bar->covers_extra_hit_box(Point{.x = geom.maximize.origin.x, .y = AURORA_BAR_H + 4.0F},
+                                                BuildContext{}, Point{.x = 0.0F, .y = 0.0F}));
 }
 
 }  // namespace aurora::test_cases::utest_title_bar_api

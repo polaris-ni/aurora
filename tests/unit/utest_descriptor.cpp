@@ -63,11 +63,11 @@ AURORA_TEST_CASE(widget_descriptor_full_and_minimal) {
     WidgetDescriptor full;
     full.name = "ExpansionPanel";
     full.ns = "aurora";
-    full.properties.push_back(
-        PropDescriptor{.name = "header", .type = "string", .default_value = "\"\"", .required = true});
-    full.events.push_back("on_toggle");
+    full.properties.emplace_back(
+        PropDescriptor{.name = "header", .type = "string", .default_value = R"("")", .required = true});
+    full.events.emplace_back("on_toggle");
     full.children_policy = "single";
-    full.examples.push_back("au::ExpansionPanel(\"x\", au::Text(\"y\"))");
+    full.examples.emplace_back(R"(au::ExpansionPanel("x", au::Text("y")))");
     full.allowed_child_types = {"Text", "Image"};
     full.invariants = {"header non-empty"};
 
