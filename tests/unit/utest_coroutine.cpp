@@ -149,6 +149,49 @@ AURORA_TEST_CASE(coroutine_void_success_and_exception_paths) {
     // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
+AURORA_TEST_CASE(value_coroutine_exception_folds_into_error_result) {
+    // T 版 promise 的 unhandled_exception：std::exception 与非 std::exception 两分支。
+    const auto boom_fn = [](int mode) -> CoroTask<int> {
+        if (mode == 1) {
+            throw 42;  // 非 std::exception：走 catch (...) 分支
+        }
+        if (mode == 2) {
+            throw std::runtime_error{"int boom"};
+        }
+        co_return 0;
+    };
+    const auto std_task = launch(boom_fn(2));
+    AURORA_TEST_CHECK_TRUE(std_task.is_done());
+    const Result<int> std_res = std_task.result();
+    AURORA_TEST_CHECK_FALSE(std_res.ok());
+    AURORA_TEST_CHECK(std_res.error().code_enum == ErrorCode::RuntimeCoroutineException);
+    AURORA_TEST_CHECK_THAT(std_res.error().message, m::has_substr("int boom"));
+
+    const auto int_task = launch(boom_fn(1));
+    AURORA_TEST_CHECK_TRUE(int_task.is_done());
+    const Result<int> int_res = int_task.result();
+    AURORA_TEST_CHECK_FALSE(int_res.ok());
+    AURORA_TEST_CHECK_THAT(int_res.error().message, m::has_substr("unknown exception"));
+}
+
+AURORA_TEST_CASE(void_coroutine_non_std_exception_folds_into_unknown_error) {
+    // void 版 promise 的 catch (...) 分支：抛非 std::exception 对象。
+    const auto throw_fn = [](bool boom) -> CoroTask<void> {
+        if (boom) {
+            throw 7;  // NOLINT(*-throw-missing-move) 非 std::exception 触发未知异常分支
+        }
+        co_return;
+    };
+    const auto bad_task = launch(throw_fn(true));
+    AURORA_TEST_CHECK_TRUE(bad_task.is_done());
+    const std::optional<Error> err = bad_task.error();
+    AURORA_TEST_REQUIRE_TRUE(err.has_value());
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK(err.value().code_enum == ErrorCode::RuntimeCoroutineException);
+    AURORA_TEST_CHECK_THAT(err.value().message, m::has_substr("unknown exception"));
+    // NOLINTEND(bugprone-unchecked-optional-access)
+}
+
 AURORA_TEST_CASE(synchronous_coroutine_completes_with_result) {
     // 无挂起点：协程在调用表达式内同步跑完（final_suspend 即毁帧并置位 done）。
     const auto task = launch([]() -> CoroTask<int> { co_return 42; }());

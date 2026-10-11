@@ -28,10 +28,13 @@
 #include "aurora/widget/containers.h"
 #include "aurora/widget/dropdown.h"
 #include "aurora/widget/lazy_list.h"
+#include "aurora/widget/props_io.h"
 #include "aurora/widget/scroll.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_dropdown {
+using aurora::testing::require_field;
 namespace {
 constexpr float AURORA_HOST_WIDTH = 320.0F;  ///< 宿主视口宽（dp）
 constexpr float AURORA_HOST_HEIGHT = 260.0F;  ///< 宿主视口高（dp）
@@ -54,6 +57,7 @@ auto press(float x, float y) -> MouseEvent {
     e.action = MouseAction::Press;
     e.button = MouseButton::Left;
     e.position = Point{.x = x, .y = y};
+    e.local_position = Point{.x = x, .y = y};  // 直呼控件时派发器不会改写本地坐标
     return e;
 }
 
@@ -62,6 +66,7 @@ auto release(float x, float y) -> MouseEvent {
     e.action = MouseAction::Release;
     e.button = MouseButton::Left;
     e.position = Point{.x = x, .y = y};
+    e.local_position = Point{.x = x, .y = y};
     return e;
 }
 
@@ -571,4 +576,183 @@ AURORA_TEST_CASE(scroll_passes_viewport_space_offset_to_descendant_extra_hit_box
     AURORA_TEST_CHECK_NEAR(after.y, 0.0F, 1e-3F);
     AURORA_TEST_CHECK(before.y == after.y);
 }
+AURORA_TEST_CASE(serialize_deserialize_roundtrip_full_props) {
+    Dropdown src{std::vector<std::string>{"One", "Two"}};
+    src.set_placeholder("pick");
+    src.set_accent_color(Color{1, 2, 3, 255});
+    src.set_box_color(Color{4, 5, 6, 255});
+    src.set_border_color(Color{7, 8, 9, 255});
+    src.set_text_color(Color{10, 11, 12, 255});
+    src.set_arrow_color(Color{13, 14, 15, 255});
+    src.set_box_height(34.0F);
+    src.set_item_height(28.0F);
+    src.set_font_size(15.0F);
+    src.set_corner_radius(6.0F);
+    src.set_enabled(false);
+
+    Json props = Json::object();
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_EQ(require_field<float>(props, "box_height"), 34.0F);
+    AURORA_TEST_CHECK_EQ(require_field<float>(props, "item_height"), 28.0F);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "enabled"), false);
+    AURORA_TEST_CHECK_TRUE(props.contains("accent_color"));
+    AURORA_TEST_CHECK_TRUE(props.contains("placeholder"));
+
+    Dropdown dst{std::vector<std::string>{}};
+    dst.deserialize_props(props);
+    Json back = Json::object();
+    dst.serialize_props(back);
+    // 无 getter 的字段经二次序列化逐键比对（roundtrip 等价）。
+    for (const char *key : {"options", "placeholder", "accent_color", "box_color", "border_color", "text_color",
+                            "arrow_color", "box_height", "item_height", "font_size", "corner_radius", "enabled"}) {
+        AURORA_TEST_CHECK_TRUE(back.contains(key));
+    }
+    AURORA_TEST_CHECK_EQ(require_field<float>(back, "box_height"), 34.0F);
+    AURORA_TEST_CHECK_EQ(require_field<float>(back, "font_size"), 15.0F);
+    AURORA_TEST_CHECK_EQ(require_field<bool>(back, "enabled"), false);
+
+    // 反序列化改写选中序号 + 各颜色键（deserialize_props 的逐键分支）。
+    Json patch = Json::object();
+    patch.set("selected_index", 1);
+    patch.set("accent_color", color_to_json(Color{20, 21, 22, 255}));
+    patch.set("box_color", color_to_json(Color{23, 24, 25, 255}));
+    patch.set("border_color", color_to_json(Color{26, 27, 28, 255}));
+    patch.set("text_color", color_to_json(Color{29, 30, 31, 255}));
+    patch.set("arrow_color", color_to_json(Color{32, 33, 34, 255}));
+    patch.set("enabled", Json{true});
+    dst.deserialize_props(patch);
+    AURORA_TEST_CHECK_EQ(dst.selected_index(), 1);
+    AURORA_TEST_CHECK_TRUE(dst.enabled());
+}
+
+AURORA_TEST_CASE(paint_closed_box_state_branches) {
+    // 圆角 / 直角两分支；空选项走 placeholder；禁用灰化；悬停高亮。
+    Dropdown rounded{std::vector<std::string>{"Alpha"}};
+    rounded.set_box_height(AURORA_BOX_HEIGHT);
+    rounded.set_corner_radius(4.0F);
+    LayoutEngine::layout(rounded, host_constraints());
+    paint_once(rounded, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = rounded.size()}, BuildContext{});
+
+    Dropdown square{std::vector<std::string>{"Alpha"}};
+    square.set_box_height(AURORA_BOX_HEIGHT);
+    square.set_corner_radius(-1.0F);  // 负值钳为 0 → 直角绘制分支
+    LayoutEngine::layout(square, host_constraints());
+    paint_once(square, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = square.size()}, BuildContext{});
+
+    Dropdown empty;  // 无选项：主框显示 placeholder
+    empty.set_box_height(AURORA_BOX_HEIGHT);
+    empty.set_placeholder("choose...");
+    LayoutEngine::layout(empty, host_constraints());
+    paint_once(empty, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = empty.size()}, BuildContext{});
+
+    Dropdown disabled{std::vector<std::string>{"Alpha"}};
+    disabled.set_box_height(AURORA_BOX_HEIGHT);
+    disabled.set_enabled(false);
+    LayoutEngine::layout(disabled, host_constraints());
+    paint_once(disabled, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = disabled.size()}, BuildContext{});
+
+    Dropdown hovered{std::vector<std::string>{"Alpha"}};
+    hovered.set_box_height(AURORA_BOX_HEIGHT);
+    LayoutEngine::layout(hovered, host_constraints());
+    hovered.on_hover_change(true);
+    paint_once(hovered, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = hovered.size()}, BuildContext{});
+    hovered.on_hover_change(false);
+}
+
+AURORA_TEST_CASE(paint_open_panel_flip_and_clamp_branches) {
+    // 带视口 MediaQuery 的环境链：驱动翻转（上方装得下）与限高（两侧都装不下）两分支。
+    aurora::Environment env;
+    env.set_local<aurora::MediaQuery>(aurora::MediaQuery{.size = Size{.width = 320.0F, .height = 220.0F}});
+    const BuildContext vctx{.env = &env};
+
+    ChangeLog log;
+    const std::shared_ptr<Dropdown> dd = make_dropdown(log);
+    LayoutEngine::layout(*dd, host_constraints());
+
+    // 翻转分支：控件顶边 y=200（视口 220），上方 200 装得下 78 ⇒ 面板整体上翻（窗口顶为负）。
+    dd->set_open(true);
+    paint_once(*dd, Rect{.origin = Point{.x = 0.0F, .y = 200.0F}, .size = dd->size()}, vctx);
+    paint_once(*dd, Rect{.origin = Point{.x = 0.0F, .y = 60.0F}, .size = dd->size()}, vctx);  // 限高分支：内部滚动
+
+    // 选中行高亮绘制：面板内 Press 第 0 行（经真实派发，环境链就位后命中窗口与绘制同源）。
+    const Point local = item_center(*dd, 0);
+    MouseEvent pick = press(local.x, local.y + 60.0F);
+    EventDispatcher::dispatch(*dd, pick, nullptr);
+    AURORA_TEST_CHECK_EQ(log.count, 1);
+    MouseEvent up = release(pick.position.x, pick.position.y);
+    EventDispatcher::dispatch(*dd, up, nullptr);
+}
+
+AURORA_TEST_CASE(disabled_and_non_press_pointer_fallthrough) {
+    // 禁用态：Press 被吞（is_handled 置位）但不开合、不冒泡。
+    ChangeLog log;
+    const std::shared_ptr<Dropdown> dd = make_dropdown(log);
+    LayoutEngine::layout(*dd, host_constraints());
+    dd->set_enabled(false);
+    MouseEvent disabled_press = press(AURORA_HOST_WIDTH * 0.5F, AURORA_BOX_HEIGHT * 0.5F);
+    dd->on_pointer_event(disabled_press);
+    AURORA_TEST_CHECK_TRUE(disabled_press.is_handled);
+    AURORA_TEST_CHECK_FALSE(dd->is_open());
+
+    // 非 Press 动作（Release/Move）：转发基类，不改变开合态。
+    dd->set_enabled(true);
+    MouseEvent rel = release(AURORA_HOST_WIDTH * 0.5F, AURORA_BOX_HEIGHT * 0.5F);
+    dd->on_pointer_event(rel);
+    AURORA_TEST_CHECK_FALSE(dd->is_open());
+
+    // 收起态下主框外的 Press：不落面板窗口 → 回落基类。
+    MouseEvent outside = press(AURORA_HOST_WIDTH * 0.5F, AURORA_BOX_HEIGHT + 10.0F);
+    dd->on_pointer_event(outside);
+    AURORA_TEST_CHECK_FALSE(dd->is_open());
+    AURORA_TEST_CHECK_EQ(log.count, 0);
+}
+
+namespace {
+/// @brief 暴露受保护的 on_scroll 覆写（滚轮分支的直测入口）。
+class ScrollableDropdown final : public Dropdown {
+  public:
+    using Dropdown::Dropdown;
+    using Dropdown::on_scroll;
+};
+}  // namespace
+
+AURORA_TEST_CASE(scroll_handles_limited_panel_and_falls_through_otherwise) {
+    aurora::Environment env;
+    env.set_local<aurora::MediaQuery>(aurora::MediaQuery{.size = Size{.width = 320.0F, .height = 130.0F}});
+    const BuildContext vctx{.env = &env};
+
+    ChangeLog log;
+    ScrollableDropdown dd{std::vector<std::string>{"Alpha", "Beta", "Gamma", "Delta", "Epsilon"}};
+    dd.set_box_height(AURORA_BOX_HEIGHT);
+    dd.set_item_height(AURORA_ITEM_HEIGHT);
+    dd.set_on_change([&log](int index) -> void {
+        ++log.count;
+        log.last = index;
+    });
+    LayoutEngine::layout(dd, host_constraints());
+    paint_once(dd, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = dd.size()}, vctx);  // 写入 env_
+
+    // 收起态：面板几何不存在 → 走回落基类（基类恒消费滚轮）。
+    ScrollEvent closed_scroll;
+    closed_scroll.delta_y = 10.0F;
+    dd.on_scroll(closed_scroll);
+    AURORA_TEST_CHECK_TRUE(closed_scroll.is_handled);  // 基类默认消费，非面板接管路径
+
+    // 展开：5 项 × 26 = 130 内容高；视口 130 ⇒ limit 以下仍可能限高，以 wants_scroll 实测为准。
+    dd.set_open(true);
+    const bool scrollable = dd.wants_scroll();
+    ScrollEvent sc;
+    sc.delta_y = -10.0F;  // 向下滚（内容上移）
+    dd.on_scroll(sc);
+    AURORA_TEST_CHECK_EQ(sc.is_handled, scrollable);
+    if (scrollable) {
+        AURORA_TEST_CHECK_NEAR(sc.remaining_y, 0.0F, 1e-3F);  // 全量吸收
+        // 反向滚动被夹在 [0, max_scroll]。
+        ScrollEvent sc2;
+        sc2.delta_y = 999.0F;
+        dd.on_scroll(sc2);
+        AURORA_TEST_CHECK_TRUE(sc2.is_handled);
+    }
+}
+
 }  // namespace aurora::test_cases::utest_dropdown

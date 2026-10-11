@@ -100,6 +100,35 @@ inline auto migrate_storage(std::uint32_t old_version, const MigratingDoc * /*do
     return Result<aurora::json::Value>{std::move(j)};
 }
 
+/// @brief 带版本迁移的二进制文档类型（当前版本 2：迁移时追加标记字节）。
+struct MigratingBlob {
+    std::vector<std::byte> data;
+};
+
+inline auto storage_version(const MigratingBlob * /*doc*/) -> std::uint32_t { return 2; }
+
+inline auto to_storage_bytes(const MigratingBlob &b) -> aus::StorageBytes { return b.data; }
+
+inline auto from_storage_bytes(MigratingBlob &b, const aus::StorageBytes &bytes) -> Result<void> {
+    if (bytes.empty()) {
+        return Result<void>{make_error(ErrorCode::StorageRecordCorrupt, "migrating blob payload empty")};
+    }
+    b.data = bytes;
+    return Result<void>{};
+}
+
+/// @brief 迁移钩子：v0 记录判损坏（覆盖迁移失败透传分支）；v1 追加 v2 标记字节。
+inline auto migrate_storage(std::uint32_t old_version, const MigratingBlob * /*doc*/, aus::StorageBytes bytes)
+    -> Result<aus::StorageBytes> {
+    if (old_version == 0) {
+        return Result<aus::StorageBytes>{make_error(ErrorCode::StorageRecordCorrupt, "version 0 not migratable")};
+    }
+    if (old_version < 2) {
+        bytes.push_back(std::byte{0x2A});
+    }
+    return Result<aus::StorageBytes>{std::move(bytes)};
+}
+
 /// @brief 用例临时目录（fs 门面用例专用）。
 [[nodiscard]] auto make_case_dir(std::string_view tag) -> std::filesystem::path {
     return std::filesystem::path{aurora::testing::isolation::temp_dir()} / "aurora_utest_storage" /
@@ -494,6 +523,82 @@ AURORA_TEST_CASE(default_instance_returns_set_instance) {
     const auto contains = first.contains("dk");
     AURORA_TEST_REQUIRE(contains.ok());
     AURORA_TEST_CHECK(contains.value());
+}
+
+AURORA_TEST_CASE(typed_get_error_and_migration_branches) {
+    auto s = make_mem_storage();
+
+    // ① id 不存在：后端错误经 Result 透传。
+    auto missing = s.get<PlayerState>("nope");
+    AURORA_TEST_CHECK_FALSE(missing.ok());
+
+    // ② JSON-only 类型遇 Binary 记录：StorageEncodingMismatch（"only supports JSON"）。
+    aus::StorageRecord bin_raw;
+    bin_raw.id = "bin-for-json";
+    bin_raw.type = "__raw__";
+    bin_raw.version = 1;
+    bin_raw.encoding = aus::StorageEncoding::Binary;
+    bin_raw.payload = aus::StorageBytes{std::byte{1}};
+    bin_raw.mtime = std::chrono::system_clock::now();
+    AURORA_TEST_REQUIRE(s.put_record(bin_raw.id, bin_raw));
+    auto enc_bin = s.get<PlayerState>("bin-for-json");
+    AURORA_TEST_CHECK_FALSE(enc_bin.ok());
+
+    // ③ Binary-only 类型遇 JSON 记录：StorageEncodingMismatch（"only supports binary"）。
+    aus::StorageRecord json_raw;
+    json_raw.id = "json-for-bin";
+    json_raw.type = "__raw__";
+    json_raw.version = 1;
+    json_raw.encoding = aus::StorageEncoding::Json;
+    json_raw.payload = testing::json_obj({{"k", "v"}});
+    json_raw.mtime = std::chrono::system_clock::now();
+    AURORA_TEST_REQUIRE(s.put_record(json_raw.id, json_raw));
+    auto enc_json = s.get<Blob>("json-for-bin");
+    AURORA_TEST_CHECK_FALSE(enc_json.ok());
+
+    // ④ JSON 载荷损坏：from_storage_json 错误透传（player 字段缺失）。
+    aus::StorageRecord corrupt_json;
+    corrupt_json.id = "corrupt-json";
+    corrupt_json.type = "__raw__";
+    corrupt_json.version = 1;
+    corrupt_json.encoding = aus::StorageEncoding::Json;
+    corrupt_json.payload = testing::json_obj({});
+    corrupt_json.mtime = std::chrono::system_clock::now();
+    AURORA_TEST_REQUIRE(s.put_record(corrupt_json.id, corrupt_json));
+    auto bad_json = s.get<PlayerState>("corrupt-json");
+    AURORA_TEST_CHECK_FALSE(bad_json.ok());
+
+    // ⑤ Binary 载荷损坏：from_storage_bytes 错误透传（空载荷）。
+    aus::StorageRecord corrupt_bin;
+    corrupt_bin.id = "corrupt-bin";
+    corrupt_bin.type = "__raw__";
+    corrupt_bin.version = 1;
+    corrupt_bin.encoding = aus::StorageEncoding::Binary;
+    corrupt_bin.payload = aus::StorageBytes{};
+    corrupt_bin.mtime = std::chrono::system_clock::now();
+    AURORA_TEST_REQUIRE(s.put_record(corrupt_bin.id, corrupt_bin));
+    auto bad_bin = s.get<Blob>("corrupt-bin");
+    AURORA_TEST_CHECK_FALSE(bad_bin.ok());
+
+    // ⑥ 二进制类型版本迁移：v1 记录经 migrate_storage 升版后成功反序列化。
+    aus::StorageRecord old_bin;
+    old_bin.id = "old-blob";
+    old_bin.type = "__raw__";
+    old_bin.version = 1;
+    old_bin.encoding = aus::StorageEncoding::Binary;
+    old_bin.payload = aus::StorageBytes{std::byte{0xAA}};
+    old_bin.mtime = std::chrono::system_clock::now();
+    AURORA_TEST_REQUIRE(s.put_record(old_bin.id, old_bin));
+    auto migrated = s.get<MigratingBlob>("old-blob");
+    AURORA_TEST_REQUIRE(migrated.ok());
+    AURORA_TEST_CHECK_EQ(migrated.value().data.size(), 2U);  // v2 标记字节已追加
+
+    // ⑦ 迁移钩子判损坏：v0 记录迁移失败，错误透传。
+    old_bin.id = "v0-blob";
+    old_bin.version = 0;
+    AURORA_TEST_REQUIRE(s.put_record(old_bin.id, old_bin));
+    auto unmigratable = s.get<MigratingBlob>("v0-blob");
+    AURORA_TEST_CHECK_FALSE(unmigratable.ok());
 }
 
 }  // namespace aurora::test_cases::utest_storage

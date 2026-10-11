@@ -83,4 +83,22 @@ AURORA_TEST_CASE(measure_ascent_fits_within_line_height) {
     }
 }
 
+AURORA_TEST_CASE(remaining_punctuation_has_ink) {
+    // 覆盖查表 switch 其余标点分支：! " # % & ' * + ; ? @ ^ ` | ~
+    for (const char c : std::string{"!\"#%&'*+;?@^`|~"}) {
+        AURORA_TEST_TRACE(std::string{"glyph "} + c);
+        AURORA_TEST_CHECK_GT(ink_count(render::BitmapFont::glyph(c)), 0);
+    }
+}
+
+AURORA_TEST_CASE(measure_width_scales_with_size) {
+    // 宽度 = 字符数 × AURORA_CELL × pixel_size(size_pt)：与字号线性、与字符数线性。
+    const std::string s{"!?,aZ"};
+    const float w12 = render::BitmapFont::measure_width(s, 12.0F);
+    const float w24 = render::BitmapFont::measure_width(s, 24.0F);
+    AURORA_TEST_CHECK_GT(w12, 0.0F);
+    AURORA_TEST_CHECK_NEAR(w24, w12 * 2.0F, w12 * 0.01F);  // pixel_size 随字号翻倍
+    AURORA_TEST_CHECK_NEAR(render::BitmapFont::measure_width("", 12.0F), 0.0F, 1e-6);
+}
+
 }  // namespace aurora::test_cases::utest_bitmap_font
