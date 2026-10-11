@@ -4,9 +4,9 @@
 |:---|:---|
 | 变更编号 | CHG-005 |
 | 提出日期 | 2026-10-11 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.QUALITY.CORE.MEMORY-SAFETY.001 |
-| 影响面 | CI 的 `lint-macos`（作业 8mac）configure 口径新增 `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON`；按处置阶梯修改的平台门控源与公共头：`tools/verify/{win32_os_hotkey,win32_insert_key,win32_dpi,win32_syskey,win32_cursor}_live_probe.cpp`、`tools/verify/macos_cursor_live_probe.mm`、`include/aurora/widget/scroll.h`、`include/aurora/window/macos_surface.h`；落地回归修复：`src/aurora/render/rhi/software_rhi.cpp`（哨兵常量 `constexpr` → `const`）与 13 个 clang-format 漂移文件（`src/aurora/window/{wayland_surface,x11_surface,window_factory}.cpp`、`src/aurora/render/gpu/wgpu_rhi.cpp`、`src/aurora/window/detail/{atspi_bridge.cpp,csd_geometry.h}`、`include/aurora/perf/{profiler,counters}.h`、`tests/unit/{utest_dropdown,utest_csd_shadow_compose,utest_csd_geometry}.cpp`、`tools/verify/{x11_ime,alsa_audio}_live_probe.cpp`）。`MacOSSurface` 新增 4 个 deleted 特殊成员属公共头 API 表面变化（该类型自此不可拷贝 / 移动）；不改分层边界与后端支持矩阵 |
+| 影响面 | CI 的 `lint-macos`（作业 8mac）configure 口径新增 `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON`；按处置阶梯修改的平台门控源与公共头：`tools/verify/{win32_os_hotkey,win32_insert_key,win32_dpi,win32_syskey,win32_cursor}_live_probe.cpp`、`tools/verify/macos_cursor_live_probe.mm`、`include/aurora/widget/scroll.h`、`include/aurora/window/macos_surface.h`；落地回归修复：`src/aurora/render/rhi/software_rhi.cpp`（哨兵常量 `constexpr` → `const`）与 13 个 clang-format 漂移文件（`src/aurora/window/{wayland_surface,x11_surface,window_factory}.cpp`、`src/aurora/render/gpu/wgpu_rhi.cpp`、`src/aurora/window/detail/{atspi_bridge.cpp,csd_geometry.h}`、`include/aurora/perf/{profiler,counters}.h`、`tests/unit/{utest_dropdown,utest_csd_shadow_compose,utest_csd_geometry}.cpp`、`tools/verify/{x11_ime,alsa_audio}_live_probe.cpp`）。`MacOSSurface` 新增 4 个 deleted 特殊成员属公共头 API 表面变化（该类型自此不可拷贝 / 移动）；第二波回归修复：`src/aurora/window/{macos_surface,wayland_surface}.cpp`、`tests/unit/{utest_button,utest_font_discovery}.cpp`；不改分层边界与后端支持矩阵 |
 
 ## 动机
 
@@ -44,6 +44,8 @@ macOS 的 15 个 broken TU 是**基建缺陷而非代码缺陷**，且它使那 
 3. **macOS PCH 基建修复**：`lint-macos` 作业的 configure 步骤补 `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON`（CMake ≥ 3.16 支持），使 `compile_commands.json` 不再带 `-include-pch`，从根上消除 15 个 broken TU。GCC 侧（native / wasm / Windows 各遍）本就 PCH-off，不受影响；本 flag 只对该「仅 lint 的 clang configure」生效。**本机不可验证**（同 2），以 CI 首跑 broken_tus 归零为证。
 
 4. **落地回归修复**：`software_rhi.cpp` 的 5 个哨兵常量回退为 `const`（恢复与文件顶部注释「不用 constexpr」一致；namespace-scope `const` 内部链接语义等价、静态初始化一次性构造、热路径零差异）。13 个 clang-format 漂移文件用 clang-format 22.1.8 复排至全库一致，并复验 `wayland_surface.cpp` 的 `NOLINTNEXTLINE` 恢复与目标行相邻。
+
+   全量矩阵首跑又暴露**第二波回归**（上批修复自身引入或此前被 PCH / 宏门控遮蔽），同批收口：`src/aurora/window/wayland_surface.cpp` 因复排把 `WaylandOutput` 指定初始化器拆出行外具名局部、写成 `const std::uintptr_t out_key = reinterpret_cast<...>` 而触发 `modernize-use-auto`（上一行的 `NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)` 为具名实参，只豁免该一条检查）⇒ 改 `const auto`；`src/aurora/window/macos_surface.cpp` 于 PCH 修复后首入分析面，报 3 条 `modernize-use-designated-initializers`（构造初值列表与 `fill_rect` 的 `Size`）⇒ 全改指定初始化器；`tests/unit/utest_font_discovery.cpp` 的空链声明为 `constexpr std::vector<std::string>`，MSVC STL 下非常量表达式（C2131，`core (windows-msvc-debug)` / `core (windows-llvm)`）⇒ 回退 `const`；`tests/unit/utest_button.cpp` 四处 `const Rect box{...}` 声明在 `#ifdef AURORA_ENABLE_DISPLAY_LIST` 之外、却只在其中（用例四另在其后的像素自证）使用，而 `AURORA_TEST_SKIP` 是 `[[noreturn]]`、特性关时 `#else` 分支直接终止函数 ⇒ 其后代码不可达、`box` 成死存储（`clang-analyzer-deadcode.DeadStores`）⇒ 声明与像素自证一并移入 `#ifdef`。
 
 5. **覆盖面自述**：修复后 `lint-macos` 的 `broken_tus` 应为空、`tu_count` 应覆盖全量 macOS 编译库（而非修复前的 16），两道平台作业的 `unique_findings` 均为 0——「跑到了且干净」与「宏没开 / PCH 缺位」自此在产物里可区分。
 
