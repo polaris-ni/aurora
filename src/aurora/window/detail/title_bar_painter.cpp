@@ -3,6 +3,8 @@
 
 #include "aurora/window/detail/title_bar_painter.h"
 
+#include <algorithm>
+
 #include "aurora/core/font.h"
 #include "aurora/render/painter.h"
 #include "aurora/window/detail/csd_geometry.h"
@@ -53,7 +55,17 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
                              .title = shift_to_surface(gc.title, ox, oy)};
 
     // 标题栏背景（内容区整宽，顶部标题栏高度）。
-    p.fill_rect(Rect{.origin = Point{.x = ox, .y = oy}, .size = Size{.width = w, .height = s.style.height}}, bg);
+    // corner_radius > 0 时**只圆下两角**：窗口顶角归窗框/阴影外轮廓，标题栏顶边须与之上沿齐平
+    // （否则圆角处会透出窗框底色）。实现为「整圆角矩形 + 补回顶部两角」两步，省去按角拆路径。
+    const Rect bg_rect{.origin = Point{.x = ox, .y = oy}, .size = Size{.width = w, .height = s.style.height}};
+    const float cr = std::clamp(s.style.corner_radius, 0.0F, std::min(w, s.style.height) * 0.5F);
+    if (cr > 0.0F) {
+        p.fill_rounded_rect(bg_rect, cr, bg);
+        p.fill_rect(Rect{.origin = Point{.x = ox, .y = oy}, .size = Size{.width = cr, .height = cr}}, bg);
+        p.fill_rect(Rect{.origin = Point{.x = ox + w - cr, .y = oy}, .size = Size{.width = cr, .height = cr}}, bg);
+    } else {
+        p.fill_rect(bg_rect, bg);
+    }
 
     // 图标槽（set_title_bar_icon 注入后显示；无图标留白，几何预留位不变）。
     if (s.icon != nullptr && g.icon.size.width > 0.0F) {
@@ -63,13 +75,27 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
     // 标题文字（draw_text 缺字体时回退内置位图字体，不依赖 FontEngine）。
     if (s.style.show_title && !s.title.empty() && g.title.size.width > 0.0F) {
         Font f;
-        f.size_pt = 13.0F;
-        f.weight = 500;
+        f.size_pt = s.style.metrics.title_font_size_pt;
+        f.weight = s.style.metrics.title_font_weight;
         p.draw_text(g.title, s.title, f, fg);
     }
 
     // 悬停序号约定：0=minimize / 1=maximize / 2=close（宿主命中测试写入，与布局无关）。
     const int hb = s.hovered_button;
+
+    // 按钮填色优先级：**按压 > 悬停 > 不填**。按压必须压过悬停——按下时指针必然也在该钮上，
+    // 若悬停优先则按压态永远被遮住，用户得不到「已按下」的反馈。
+    const auto button_fill = [&](int ordinal, const Color &hover, const Color &pressed, Color &out) -> bool {
+        if (ordinal == s.pressed_button) {
+            out = pressed;
+            return true;
+        }
+        if (ordinal == hb) {
+            out = hover;
+            return true;
+        }
+        return false;
+    };
 
     auto center_of = [](const Rect &r) {
         return Point{.x = r.origin.x + (r.size.width * 0.5F), .y = r.origin.y + (r.size.height * 0.5F)};
@@ -131,20 +157,23 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
     } else if (s.style.button_layout == TitleBarButtonLayout::Windows) {
         // Windows：整高矩形热区，悬停整块填充。
         if (g.minimize.size.width > 0.0F) {
-            if (hb == 0) {
-                p.fill_rect(g.minimize, s.style.hover_tint);
+            Color fill;
+            if (button_fill(0, s.style.hover_tint, s.style.pressed_tint, fill)) {
+                p.fill_rect(g.minimize, fill);
             }
             glyph_min(g.minimize, 1.2F, fg);
         }
         if (g.maximize.size.width > 0.0F) {
-            if (hb == 1) {
-                p.fill_rect(g.maximize, s.style.hover_tint);
+            Color fill;
+            if (button_fill(1, s.style.hover_tint, s.style.pressed_tint, fill)) {
+                p.fill_rect(g.maximize, fill);
             }
             glyph_max(g.maximize, 1.2F, fg);
         }
         if (g.close.size.width > 0.0F) {
-            if (hb == 2) {
-                p.fill_rect(g.close, s.style.close_hover);
+            Color fill;
+            if (button_fill(2, s.style.close_hover, s.style.close_pressed, fill)) {
+                p.fill_rect(g.close, fill);
             }
             glyph_close(g.close, 1.2F, Color{255, 255, 255, 235});
         }
@@ -153,19 +182,20 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
         const Color sym{0x3D, 0x3D, 0x3D, 210};
         if (g.minimize.size.width > 0.0F) {
             p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5F, Color{0xFE, 0xBC, 0x2E, 255});
-            if (hb == 0) {
+            // macOS 红绿灯常显：悬停或按压都只浮现深色符号，不换底色。
+            if (hb == 0 || s.pressed_button == 0) {
                 glyph_min(g.minimize, 1.2F, sym);
             }
         }
         if (g.maximize.size.width > 0.0F) {
             p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5F, Color{0x28, 0xC8, 0x40, 255});
-            if (hb == 1) {
+            if (hb == 1 || s.pressed_button == 1) {
                 glyph_max(g.maximize, 1.2F, sym);
             }
         }
         if (g.close.size.width > 0.0F) {
             p.fill_rounded_rect(g.close, g.close.size.width * 0.5F, Color{0xFF, 0x5F, 0x57, 255});
-            if (hb == 2) {
+            if (hb == 2 || s.pressed_button == 2) {
                 glyph_close(g.close, 1.2F, sym);
             }
         }

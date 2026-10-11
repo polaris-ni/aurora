@@ -13,6 +13,21 @@ enum class TitleBarButtonLayout : std::uint8_t {
     Mac,  ///< macOS「红绿灯」：圆形按钮左缘外收 8dp 垂直居中，左→右 close→min→max（macOS 惯例顺序）。
 };
 
+/// @brief 标题栏度量覆写值（纯数据聚合；**缺省即沿用各视觉语言的推导规则**，故默认零改动）。
+///
+/// 为什么每个分量都有「0 = 自动」：三种按钮语言各自的盒尺寸、间距、贴边外边距原本是与栏高联动的
+/// 推导式（见 `src/aurora/window/title_bar_geometry.cpp` 顶部注释块）。直接把这些式子换成常量会一
+/// 次性破坏三套既有预设的观感，故改以 0 表示「我没意见，按语言规则推」，非 0 才是用户显式覆写。
+struct TitleBarMetrics {
+    float button_size = 0.0F;  ///< 按钮盒边长（逻辑 dp）；0 = 按语言规则由栏高推导
+    float button_gap = 0.0F;  ///< 相邻按钮间距（逻辑 dp）；0 = 按语言规则（Adwaita 4 / Windows 0 / Mac 8）
+    float button_margin = 0.0F;  ///< 按钮组贴边侧外边距（逻辑 dp）；0 = 按语言规则（Adwaita 8 / Windows 0 / Mac 8）
+    float icon_size = 0.0F;  ///< 图标槽边长（逻辑 dp）；0 = 按规则取 min(16, 栏高 − 20)
+    float content_padding = 12.0F;  ///< 标题侧安全内边距（逻辑 dp，同时决定图标槽与首枚标题 x）
+    float title_font_size_pt = 13.0F;  ///< 标题字号（磅）；沿用绘制层既有默认 13pt
+    int title_font_weight = 500;  ///< 标题字重（CSS 100..900 口径）；沿用绘制层既有默认 500
+};
+
 /// @brief CSD 自绘标题栏样式值类型（纯数据聚合，可直接 `TitleBarStyle{...}` 指定成员初始化）。
 /// 颜色按激活/失焦成对提供，由绘制层依据窗口焦点状态切换（失焦自动变暗）。
 /// 默认成员值 = `adwaita_dark()` 预设：`TitleBarStyle{}` 即得一套可直接使用的 GNOME 暗色 header bar。
@@ -32,6 +47,11 @@ struct TitleBarStyle {
     bool show_close = true;  ///< 是否绘制/命中关闭按钮
     bool show_title = true;  ///< 是否绘制标题文字（不影响几何分区划分）
     bool center_title = false;  ///< true=标题居中（Adwaita/WinUI 风格）；false=左对齐（现状兼容）
+
+    TitleBarMetrics metrics{};  ///< 度量覆写（各分量 0 = 沿用视觉语言的推导规则，非 0 才是显式覆写）
+    float corner_radius = 0.0F;  ///< 标题栏背景**下角**圆角半径（逻辑 dp）；0 = 直角（现状兼容）
+    Color pressed_tint{255, 255, 255, 56};  ///< 非关闭钮按压底色（白色 α≈0.22，强于悬停的 α32）
+    Color close_pressed{0xC0, 0x1B, 0x28};  ///< 关闭钮按压底色（Adwaita red3 按下态，比悬停态更深）
 
     /// @brief GNOME/libadwaita 暗色 header bar 预设（bg≈`#303030`/`#242424`、fg=白、close_hover=`#E01B24`）。
     /// @return 默认构造的 TitleBarStyle——其默认成员值即本暗色预设。

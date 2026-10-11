@@ -42,6 +42,12 @@ struct TitleBarPaintState {
     bool active = true;  ///< 焦点态：决定取激活色还是失焦色
     bool resizable = true;  ///< false 时最大化钮退化为空盒（与命中测试同口径）
     int hovered_button = -1;  ///< 悬停按钮序号：0=min / 1=max / 2=close / -1=无
+    /// @brief 按压按钮序号（同序号约定；`-1` = 未按）。
+    ///
+    /// 优先级高于悬停：同一枚按钮同时被按下与悬停时取**按压**配色（`pressed_tint` / `close_pressed`）。
+    /// 由宿主在「按下 → 释放」这段窗口内存续；按钮动作一律在**释放**时结算（对齐 GTK/Win32），
+    /// 故本字段在按下期间一定有机会被绘制到，不会一闪而过。
+    int pressed_button = -1;
     std::string title;  ///< 标题文字（`style.show_title` 为 false 或本串为空则不画）
     std::shared_ptr<Image> icon;  ///< 图标像素（nullptr = 留白，预留几何位不变）
     TitleBarStyle style{};  ///< 样式（高度 / 配色 / 按钮布局 / 各元素显隐开关）

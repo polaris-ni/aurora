@@ -29,6 +29,7 @@
 #include "aurora/event/keycode.h"
 #include "aurora/window/cursor_map.h"
 #include "aurora/window/detail/atspi_bridge.h"
+#include "aurora/window/detail/csd_decoration.h"
 #include "aurora/window/detail/csd_geometry.h"
 #include "aurora/window/detail/csd_shadow_compose.h"
 #include "aurora/window/detail/ime_composition.h"
@@ -165,9 +166,9 @@ struct WaylandSurface::Impl {
     TitleBarStyle tb_style{};  ///< CSD 标题栏样式（构造自 WindowStyleOptions::title_bar；运行期可热更）
     std::shared_ptr<Image> tb_icon;  ///< CSD 标题栏图标（shared_ptr 共享像素；set_title_bar_icon 存入）
     bool resizable = true;  ///< 可调大小（false = 固定尺寸，最大化按钮隐藏）
-    int hovered_btn = -1;  ///< 当前悬停的标题栏按钮索引（-1 = 无悬停）
-    bool fs_bar_revealed = false;  ///< 全屏揭示条是否展开（覆盖层语义，不回流布局）
-    bool csd_grab = false;  ///< 当前是否处于 CSD/修饰键拖拽交互中（吞噬指针事件）
+    /// @brief 装饰层的交互状态（悬停序号 / 全屏揭示条 / 拖拽抓取 / 连击记账）。
+    /// 集中在一个值对象里，是为了让其它后端接入 CSD 时**连同状态一起**搬过去，而不是再抄一份记账。
+    csd::DecorationInteraction csd_ui{};
     // 阴影边距（单表面架构）：buffer = 内容 + 四周 margin，margin 内画 alpha 阴影、承载缩放
     // 热区；xdg_surface.set_window_geometry 声明可视窗口边界。几何/热区纯逻辑收敛在
     // detail::csd_geometry.h。塌缩态（最大化/全屏/平铺/非 CSD）margin = 0，整幅即内容。
@@ -233,9 +234,6 @@ struct WaylandSurface::Impl {
     auto ti_on_delete(std::uint32_t before_length, std::uint32_t after_length) -> void;
 #endif
     // 双击标题栏最大化检测（Wayland 不提供双击事件，客户端自行追踪）。
-    std::uint32_t last_click_time = 0;  ///< 上次标题栏点击时间（ms，自某基准）
-    double last_click_x = 0.0;  ///< 上次点击 X
-    double last_click_y = 0.0;  ///< 上次点击 Y
 
     auto update_state() -> void {
         const WindowState want = compute_window_state(minimized, active);
@@ -418,50 +416,29 @@ void ptr_motion(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, wl_fixed
     d.ptr_x = csd::surface_to_content(wl_fixed_to_double(sx), m);
     d.ptr_y = csd::surface_to_content(wl_fixed_to_double(sy), m);
     // ── CSD 悬停跟踪 + 全屏顶边揭示（仅驱动装饰重绘，不吞 Move 转发）──
+    // 两处状态机已抽到 detail::csd_decoration.h（跨后端共用）：悬停序号与「只在栏高带内判按钮」
+    // 由 `resolve_hover` 决定，揭示条的展开/收回/复位由 `update_fullscreen_reveal` 决定。
     bool want_repaint = false;
-    if (d.csd_title) {
-        const auto th = static_cast<double>(d.tb_style.height);
-        int hov = -1;  // 序号约定：0=min / 1=max / 2=close（与 draw_decoration 消费端一致）
-        if (d.ptr_y >= 0.0 && d.ptr_y < th) {
-            const TitleBarGeometry g =
-                title_bar_geometry(d.size.width, d.tb_style, d.mode == WindowMode::Maximized, d.resizable);
-            const auto in_btn = [](const Rect &r, double px, double py) {
-                return r.size.width > 0.0F && px >= r.origin.x && px < r.origin.x + r.size.width && py >= r.origin.y &&
-                       py < r.origin.y + r.size.height;
-            };
-            if (in_btn(g.minimize, d.ptr_x, d.ptr_y)) {
-                hov = 0;
-            } else if (in_btn(g.maximize, d.ptr_x, d.ptr_y)) {
-                hov = 1;
-            } else if (in_btn(g.close, d.ptr_x, d.ptr_y)) {
-                hov = 2;
-            }
-        }
-        if (hov != d.hovered_btn) {
-            d.hovered_btn = hov;
-            want_repaint = true;
-        }
+    const int hov = csd::resolve_hover(d.tb_style, d.size.width, d.mode == WindowMode::Maximized, d.resizable,
+                                       d.csd_title, d.ptr_x, d.ptr_y);
+    if (hov != d.csd_ui.hovered_button) {
+        d.csd_ui.hovered_button = hov;
+        want_repaint = true;
     }
-    if (d.mode == WindowMode::FullScreen) {
-        // 顶边揭示状态机：近顶 6px 展开；指针下离栏区（height+4 缓冲）后收回。
-        bool reveal = d.fs_bar_revealed;
-        if (!reveal && d.ptr_y < 6.0) {
-            reveal = true;
-        } else if (reveal && d.ptr_y > static_cast<double>(d.tb_style.height) + 4.0) {
-            reveal = false;
-        }
-        if (reveal != d.fs_bar_revealed) {
-            d.fs_bar_revealed = reveal;
-            want_repaint = true;
-        }
-    } else if (d.fs_bar_revealed) {
-        d.fs_bar_revealed = false;  // 非全屏一律复位揭示态
+    const bool reveal = csd::update_fullscreen_reveal(d.csd_ui.fullscreen_revealed, d.mode, d.ptr_y, d.tb_style.height);
+    if (reveal != d.csd_ui.fullscreen_revealed) {
+        d.csd_ui.fullscreen_revealed = reveal;
+        want_repaint = true;
+    }
+    // 按下后指针拖离该钮 = 取消（对齐 GTK/Win32）：按压态须立刻撤掉，否则会留下「卡住的高亮」。
+    if (d.csd_ui.pressed_button != csd::AURORA_CSD_BUTTON_NONE && hov != d.csd_ui.pressed_button) {
+        d.csd_ui.pressed_button = csd::AURORA_CSD_BUTTON_NONE;
         want_repaint = true;
     }
     if (want_repaint) {
         d.request_repaint();  // 经 Impl 辅助方法触发重绘
     }
-    if (d.csd_grab) {
+    if (d.csd_ui.grab) {
         return;  // CSD 拖拽中：位置已记录，不转发悬停事件给应用
     }
     d.send_mouse(MouseAction::Move, MouseButton::Left, static_cast<float>(d.ptr_x), static_cast<float>(d.ptr_y));
@@ -472,9 +449,37 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
     Impl &d = *static_cast<Impl *>(data);
 
     if (state_v == WL_POINTER_BUTTON_STATE_RELEASED) {
-        if (d.csd_grab) {
-            // 结束 CSD 拖拽（move/resize/close 交互）：吞噬本次释放，不转发给应用。
-            d.csd_grab = false;
+        if (d.csd_ui.grab) {
+            // 结束 CSD 交互：**按钮动作在释放这一刻结算**（对齐 GTK/Win32），按下期间只维持
+            // 按压态供重绘（见 csd::begin_press）。移动/缩放拖拽在此仅清标志，无后续动作。
+            const int hovered = csd::resolve_hover(d.tb_style, d.size.width, d.mode == WindowMode::Maximized,
+                                                   d.resizable, d.csd_title, d.ptr_x, d.ptr_y);
+            const int act = csd::consume_press(d.csd_ui, hovered);
+            d.request_repaint();  // 先复位按压态再动作：关闭请求可能同步销毁窗口
+            if (act == csd::AURORA_CSD_BUTTON_CLOSE) {
+                AURORA_LOG_INFO("window", "CSD: close button released -> close request");
+                d.close_requested = true;
+                return;
+            }
+            if (act == csd::AURORA_CSD_BUTTON_MAXIMIZE && d.toplevel != nullptr) {
+                AURORA_LOG_INFO("window", "CSD: maximize button released (current mode=", static_cast<int>(d.mode), ")");
+                if (d.mode == WindowMode::Maximized) {
+                    xdg_toplevel_unset_maximized(d.toplevel);
+                } else {
+                    xdg_toplevel_set_maximized(d.toplevel);
+                }
+                // xdg-shell 协议：toplevel 状态请求须经 wl_surface.commit 才被合成器处理并回 configure。
+                wl_surface_commit(d.surface);
+                wl_display_flush(d.dpy);
+                return;
+            }
+            if (act == csd::AURORA_CSD_BUTTON_MINIMIZE && d.toplevel != nullptr) {
+                AURORA_LOG_INFO("window", "CSD: minimize button released -> xdg_toplevel_set_minimized");
+                xdg_toplevel_set_minimized(d.toplevel);
+                wl_surface_commit(d.surface);
+                wl_display_flush(d.dpy);
+                return;
+            }
             return;
         }
         d.send_mouse(MouseAction::Release, MouseButton::Left, static_cast<float>(d.ptr_x), static_cast<float>(d.ptr_y));
@@ -502,7 +507,7 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
     // 左键按下时按装饰策略尝试拖拽/关闭：区域命中则吞噬，不转发给应用（避免误触控件）。
     // 覆盖三种情形：csd_title（标题栏移动+关闭+margin 缩放）、csd_border（margin 缩放）、
     // mod_move（无标题栏时 Super/Alt + 拖拽移动）。
-    if (button == BTN_LEFT && !d.csd_grab && d.toplevel != nullptr && d.seat != nullptr &&
+    if (button == BTN_LEFT && !d.csd_ui.grab && d.toplevel != nullptr && d.seat != nullptr &&
         (d.csd_title || d.csd_border || d.mod_move)) {
         const double surf_w = d.size.width;
         const double surf_h = d.size.height;
@@ -515,55 +520,27 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
         const csd::CsdResizeZone zone =
             d.resizable ? csd::classify_resize_zone(x, y, surf_w, surf_h, margin) : csd::CsdResizeZone::None;
 
-        // ── 标题栏按钮命中（仅 csd_title；几何单一来源，热区=绘制矩形）──
+        // ── 标题栏按钮命中（仅 csd_title；命中序号见 detail::csd_decoration.h，绘制与命中共用同一份几何）──
         if (in_title) {
             const TitleBarGeometry g = title_bar_geometry(static_cast<float>(surf_w), d.tb_style,
                                                           d.mode == WindowMode::Maximized, d.resizable);
-            const auto hit_btn = [&](const Rect &r) {
-                return r.size.width > 0.0F && x >= r.origin.x && x < r.origin.x + r.size.width && y >= r.origin.y &&
-                       y < r.origin.y + r.size.height;
-            };
+            const int btn = csd::hit_button(g, x, y);
 
-            if (hit_btn(g.close)) {
-                AURORA_LOG_INFO("window", "CSD: close button clicked");
-                d.close_requested = true;
-                d.csd_grab = true;
-                return;
-            }
-            if (hit_btn(g.maximize)) {
-                AURORA_LOG_INFO("window", "CSD: maximize button clicked (current mode=", static_cast<int>(d.mode), ")");
-                d.csd_grab = true;
-                if (d.mode == WindowMode::Maximized) {
-                    xdg_toplevel_unset_maximized(d.toplevel);
-                } else {
-                    xdg_toplevel_set_maximized(d.toplevel);
-                }
-                // xdg-shell 协议：toplevel 状态请求须经 wl_surface.commit 才被合成器处理并回 configure。
-                wl_surface_commit(d.surface);
-                wl_display_flush(d.dpy);
-                return;
-            }
-            if (hit_btn(g.minimize)) {
-                AURORA_LOG_INFO("window", "CSD: minimize button clicked -> xdg_toplevel_set_minimized");
-                d.csd_grab = true;
-                xdg_toplevel_set_minimized(d.toplevel);
-                wl_surface_commit(d.surface);
-                wl_display_flush(d.dpy);
+            if (btn != csd::AURORA_CSD_BUTTON_NONE) {
+                // 只置按压态，**不在此触发动作**：动作推迟到释放（见 csd::begin_press 注释）。
+                // 这样按压态有可渲染的时间窗，且「按下后拖开再松手」可取消误触。
+                csd::begin_press(d.csd_ui, btn);
+                d.request_repaint();
                 return;
             }
 
             // 标题栏空白区 → 双击最大化 或 拖拽移动（客户端自行检测双击；Wayland 无原生双击事件）。
-            // 阈值引自 event 层的连击常量（AURORA_DEFAULT_CLICK_WINDOW_MS / AURORA_DEFAULT_CLICK_RADIUS_DP）：
-            // 窗口装饰层的双击与 widget 树的 MouseEvent::click_count 因此共用同一份真源，
-            // 不会各写一套而漂移。两者语义正交（CSD 标题栏不进 widget 树、不经 EventDispatcher）。
-            const bool is_dblclick =
-                (timestamp - d.last_click_time < AURORA_DEFAULT_CLICK_WINDOW_MS) &&
-                std::hypot(x - d.last_click_x, y - d.last_click_y) < AURORA_DEFAULT_CLICK_RADIUS_DP;
-            d.last_click_time = timestamp;
-            d.last_click_x = x;
-            d.last_click_y = y;
+            // 阈值取自 event 层的连击常量（见 csd::consume_double_click），窗口装饰层与 widget 树的
+            // MouseEvent::click_count 共用同一份真源，不会各写一套而漂移。两者语义正交
+            // （CSD 标题栏不进 widget 树、不经 EventDispatcher）。
+            const bool is_dblclick = csd::consume_double_click(d.csd_ui, timestamp, x, y);
             if (is_dblclick) {
-                d.csd_grab = true;
+                d.csd_ui.grab = true;
                 if (d.mode == WindowMode::Maximized) {
                     xdg_toplevel_unset_maximized(d.toplevel);
                 } else {
@@ -574,7 +551,7 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
                 return;
             }
             // 单击：拖拽移动。
-            d.csd_grab = true;
+            d.csd_ui.grab = true;
             xdg_toplevel_move(d.toplevel, d.seat, serial);
             return;
         }
@@ -611,16 +588,16 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
                 case csd::CsdResizeZone::None:
                     break;
             }
-            d.csd_grab = true;
+            d.csd_ui.grab = true;
             xdg_toplevel_resize(d.toplevel, d.seat, serial, edge);
             return;
         }
 
         // 无标题栏时（Borderless/Frameless）：按住 Super/Alt 拖拽任意处移动窗口。
-        const bool mod_held = ((d.mods & ModifierKey::Meta) != 0) ||
+        const bool mod_held = ((d.mods & ModifierKey::Meta) != 0) ||  // NOLINT(*-redundant-parentheses)
                               ((d.mods & ModifierKey::Alt) != 0);  // NOLINT(*-redundant-parentheses)
         if (d.mod_move && !d.csd_title && mod_held) {
-            d.csd_grab = true;
+            d.csd_ui.grab = true;
             xdg_toplevel_move(d.toplevel, d.seat, serial);
             return;
         }
@@ -1412,9 +1389,9 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
     if (style.always_on_top) {
         AURORA_LOG_WARN("window", "WaylandSurface: always_on_top has no core Wayland protocol; ignored.");
     }
-    // 服务端装饰协商 + CSD 兜底策略解析（见 DecorationPolicy）。
+    // 服务端装饰协商 + CSD 兜底策略解析（策略表内核已抽到 detail::csd_decoration.h，供跨后端共用）。
     // frameless 语义等价于 Frameless；否则取 style.decoration。
-    DecorationPolicy pol = style.frameless ? DecorationPolicy::Frameless : style.decoration;
+    DecorationPolicy pol = csd::normalize_policy(style.frameless, style.decoration);
     d.deco_policy = pol;
     const bool ssd_available = (d.deco_mgr != nullptr);
     if (ssd_available) {
@@ -1425,29 +1402,11 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
                                                                  : ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
     }
     // 依策略决定自绘装饰形态：标题栏（移动+关闭）/ 边框（缩放）/ 修饰键拖拽移动。
-    switch (pol) {
-        case DecorationPolicy::Auto:  // 有 SSD 用原生；无 SSD（GNOME）自绘兜底。
-        case DecorationPolicy::ServerSide:  // 强制服务端；不可用时退化为自绘兜底（避免不可操作）。
-            d.csd_title = !ssd_available;
-            d.csd_border = d.csd_title;
-            break;
-        case DecorationPolicy::ClientSide:  // 强制自绘标题栏（即便 KDE 支持 SSD）；阴影边距由标题态启用。
-            // 八向缩放全可用：ptr_button 的 classify_resize_zone 热区在视觉窗口之外的 margin 带内
-            // （含标题栏上方的顶部边），不吞内容点击，也不占用布局。
-            d.csd_title = true;
-            d.csd_border = false;
-            break;
-        case DecorationPolicy::Borderless:  // 无标题栏：阴影边距缩放热区；移动靠修饰键拖拽。
-            d.csd_title = false;
-            d.csd_border = true;
-            d.mod_move = true;
-            break;
-        case DecorationPolicy::Frameless:  // 完全无装饰：应用自绘 + 程序化 API；移动靠修饰键拖拽。
-            d.csd_title = false;
-            d.csd_border = false;
-            d.mod_move = true;
-            break;
-    }
+    // 每种策略 × 有无 SSD 的解析结果逐格锁在 utest_csd_decoration 的策略快照里，动这块前先看那张表。
+    const csd::CsdMode csd_mode = csd::resolve_mode(pol, ssd_available);
+    d.csd_title = csd_mode.title;
+    d.csd_border = csd_mode.border;
+    d.mod_move = csd_mode.mod_move;
     if (!ssd_available && pol != DecorationPolicy::Frameless && pol != DecorationPolicy::Borderless) {
         AURORA_LOG_INFO("window",
                         "WaylandSurface: compositor lacks xdg-decoration (GNOME): falling back to "
@@ -1628,23 +1587,21 @@ auto WaylandSurface::data() const -> const std::uint8_t * {
 }
 
 auto WaylandSurface::Impl::decoration_state() const -> csd::TitleBarPaintState {
-    csd::TitleBarPaintState s;
-    s.width = static_cast<float>(size.width);  // 内容尺寸（window geometry 口径）
-    s.height = static_cast<float>(size.height);
+    // 装配本帧状态迁到 detail::csd_decoration.h（跨后端共用同一装配口径）；本函数只负责收集宿主侧的值。
     const int m = shadow_margin();
-    s.origin_x = static_cast<float>(m);  // 内容区在整幅表面上的原点 = margin（塌缩态 0）
-    s.origin_y = static_cast<float>(m);
-    s.shadow_margin = static_cast<float>(m);
-    s.mode = mode;
-    s.fullscreen_bar_revealed = fs_bar_revealed;
-    s.title_bar = csd_title;
-    s.active = active;
-    s.resizable = resizable;
-    s.hovered_button = hovered_btn;  // 序号约定：0=min / 1=max / 2=close（ptr_motion 命中写入）
-    s.title = title;
-    s.icon = tb_icon;
-    s.style = tb_style;
-    return s;
+    csd::DecorationInput in;
+    in.size = size;
+    in.mode = mode;
+    in.active = active;
+    in.resizable = resizable;
+    in.margin_dp = m;
+    in.csd_title = csd_title;
+    in.fullscreen_revealed = csd_ui.fullscreen_revealed;
+    in.hovered_button = csd_ui.hovered_button;
+    in.title = title;
+    in.icon = tb_icon;
+    in.style = tb_style;
+    return csd::make_paint_state(std::move(in));
 }
 
 auto WaylandSurface::Impl::draw_decoration(Painter &p) const -> void {
