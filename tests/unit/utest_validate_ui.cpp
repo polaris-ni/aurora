@@ -162,4 +162,70 @@ AURORA_TEST_CASE(validation_error_json_shape) {
     AURORA_TEST_CHECK_STREQ(require_field<std::string>(j, "suggestion"), "fix it");
 }
 
+// props 字段存在但不是对象 -> 报错（覆盖 validate_node 的 props 类型守卫分支）。
+AURORA_TEST_CASE(props_not_object_reports_error) {
+    Json tree = Json::object();
+    tree.set("type", "Text");
+    tree.set("props", Json{"not-an-object"});
+
+    const auto errs = validate_ui_tree(tree);
+    AURORA_TEST_REQUIRE_FALSE(errs.empty());
+    bool hit = false;
+    for (const auto &e : errs) {
+        if (e.message.find("\"props\" must be a JSON object") != std::string::npos) {
+            hit = true;
+        }
+    }
+    AURORA_TEST_CHECK_TRUE(hit);
+}
+
+// children 字段存在但不是数组 -> 报错（覆盖 children 类型守卫分支）。
+AURORA_TEST_CASE(children_not_array_reports_error) {
+    Json tree = Json::object();
+    tree.set("type", "Text");
+    tree.set("props", testing::json_obj({{"content", "x"}}));
+    tree.set("children", "not-an-array");
+
+    const auto errs = validate_ui_tree(tree);
+    AURORA_TEST_REQUIRE_EQ(errs.size(), 1U);
+    AURORA_TEST_CHECK_STREQ(errs[0].path, "$.children");
+    AURORA_TEST_CHECK_TRUE(errs[0].message.find("\"children\" must be an array") != std::string::npos);
+}
+
+// DataTable.row_count 给定六种错误类型 -> 覆盖 type_matches 不匹配路径与 json_type_name 全部分支。
+AURORA_TEST_CASE(type_mismatch_classifies_every_json_type) {
+    const std::vector<std::pair<std::string, Json>> bad{
+        {"string", Json{"not-an-int"}}, {"number", Json{1.5}},    {"bool", Json{true}},
+        {"object", Json::object()},     {"array", Json::array()}, {"null", Json{nullptr}},
+    };
+    for (const auto &[kind, value] : bad) {
+        Json tree = Json::object();
+        tree.set("type", "DataTable");
+        Json props = Json::object();
+        props.set("columns", Json::array());  // 必填，给合法空数组
+        props.set("row_count", value);
+        tree.set("props", std::move(props));
+
+        const auto errs = validate_ui_tree(tree);
+        AURORA_TEST_REQUIRE_FALSE(errs.empty());
+        AURORA_TEST_CHECK_TRUE(errs[0].message.find("type mismatch") != std::string::npos);
+        AURORA_TEST_CHECK_TRUE(errs[0].message.find(kind) != std::string::npos);
+    }
+}
+
+// 合法 Text 带 bool/float/未知类型化属性 -> 覆盖 type_matches 的 bool / float / 未知类型放行分支。
+AURORA_TEST_CASE(valid_text_typed_props_exercise_type_matches) {
+    Json tree = Json::object();
+    tree.set("type", "Text");
+    Json props = Json::object();
+    props.set("content", "hi");  // LocalizedString -> string 分支
+    props.set("soft_wrap", Json{true});  // bool 分支
+    props.set("line_height", Json{1.5});  // float 分支
+    props.set("overflow", "Clip");  // TextOverflow -> 未知类型放行分支
+    tree.set("props", std::move(props));
+
+    const auto errs = validate_ui_tree(tree);
+    AURORA_TEST_CHECK_TRUE(errs.empty());
+}
+
 }  // namespace aurora::test_cases::utest_validate_ui
