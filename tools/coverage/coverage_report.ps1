@@ -70,7 +70,7 @@ if ($py -and $gcdas.Count -gt 0) {
             $gcdaFwd = ($g.FullName -replace '\\', '/')
             & gcov -i -t -o $objFwd $gcdaFwd 2>$null | Add-Content $inter
         }
-        & $py $agg $inter --src-root $SrcRoot `
+        & $py $agg $inter --src-root $SrcRoot --build-dir $SrcRoot `
             --html (Join-Path $BuildDir 'coverage.html') `
             --csv  (Join-Path $BuildDir 'coverage.csv')
         Write-Host ('HTML report: ' + (Join-Path $BuildDir 'coverage.html'))
