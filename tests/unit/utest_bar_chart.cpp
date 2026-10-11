@@ -265,4 +265,92 @@ AURORA_TEST_CASE(golden_bar_chart_matches_baseline) {
     golden::compare_or_update("chart_bar", current_path, &root);
 }
 
+AURORA_TEST_CASE(paint_and_interaction_branches) {
+    Painter painter;
+    const BuildContext ctx;
+    auto paint_at = [&painter, &ctx](Widget &w) -> void {
+        w.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = w.size()}, ctx);
+    };
+
+    // 1) 空数据：无界约束走 300x200 缺省画布；plot 内 Move 因 series 空命中早返回。
+    BarChart empty{};
+    empty.layout(Constraints{}, ctx);
+    paint_at(empty);
+    MouseEvent on_empty = move_at(40.0F, 100.0F);
+    empty.on_pointer_event(on_empty);
+    AURORA_TEST_CHECK_FALSE(empty.hovered_point().has_value());
+
+    // 2) 显式 y 域（from_explicit）+ x 轴标签 + 图例 Bottom：几何预留与绘制全路径。
+    BarChartProps p = bare_props();
+    p.series = {ChartSeries{.name = "A", .values = {1.0, 3.0}}, ChartSeries{.name = "B", .values = {2.0, NAN}}};
+    p.axis_y = ChartAxisSpec{.label = "v", .tick_count = 4, .min = 0.0, .max = 4.0};
+    p.axis_x.visible = true;
+    p.axis_x.label = "cat";
+    p.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Bottom};
+    BarChart chart{p};
+    layout_only(chart);
+    chart.on_hover_change(true);
+    paint_at(chart);
+
+    // 3) 堆叠模式：y 域按类目求和、命中按 y 分段定位系列、悬停值框 + 十字准线绘制。
+    BarChartProps sp = bare_props();
+    sp.series = {ChartSeries{.name = "A", .values = {1.0, 2.0}}, ChartSeries{.name = "B", .values = {2.0, 1.0}}};
+    sp.stacked = true;
+    BarChart stacked{sp};
+    layout_only(stacked);
+    MouseEvent hit_bar = move_at(40.0F, 190.0F);  // 带内、堆叠底部段（系列 A）
+    stacked.on_pointer_event(hit_bar);
+    const auto stacked_hit = aurora::testing::require_value(stacked.hovered_point());
+    AURORA_TEST_CHECK_EQ(stacked_hit.first, 0);
+    paint_at(stacked);  // 值框（夹边）+ 准线
+    AURORA_TEST_CHECK_FALSE(stacked.accessibility_value().empty());
+    AURORA_TEST_CHECK_TRUE(stacked.accessibility_role() == AccessibilityRole::Image);
+
+    // 4) 图例 Top（默认位）命中：优先于数据点 + 联动降透明绘制；悬停离开清除。
+    BarChartProps tp = bare_props();
+    tp.series = {ChartSeries{.name = "A", .values = {1.0, 2.0}}, ChartSeries{.name = "B", .values = {2.0, 1.0}}};
+    tp.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Top};
+    BarChart top{tp};
+    layout_only(top);
+    MouseEvent legend_move = move_at(2.0F, 2.0F);
+    top.on_pointer_event(legend_move);
+    AURORA_TEST_CHECK_TRUE(top.hovered_legend().has_value());
+    AURORA_TEST_CHECK_FALSE(top.hovered_point().has_value());
+    paint_at(top);
+    top.on_hover_change(false);
+    AURORA_TEST_CHECK_FALSE(top.hovered_legend().has_value());
+
+    // 5) 图例 Right：右侧图例带几何（宽 500 收窄绘图区）+ 纵排命中区生成。
+    BarChartProps rp = bare_props();
+    rp.series = {ChartSeries{.name = "A", .values = {1.0, 2.0}}, ChartSeries{.name = "B", .values = {2.0, 1.0}}};
+    rp.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Right};
+    BarChart right{rp};
+    Constraints wide;
+    wide.min = Size{.width = 0.0F, .height = 0.0F};
+    wide.max = Size{.width = 500.0F, .height = 200.0F};
+    right.layout(wide, ctx);
+    paint_at(right);
+
+    // 6) Press 事件不属 Move/Release：回落基类，不改变悬停态。
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    press.local_position = Point{.x = 40.0F, .y = 190.0F};
+    stacked.on_pointer_event(press);
+}
+
+AURORA_TEST_CASE(series_value_fallbacks_are_safe) {
+    // 系列越界 / 类目越界 / 非有限值：安全回退 0.0，布局与悬停不产生 NaN 几何。
+    BarChartProps p = bare_props();
+    p.series = {ChartSeries{.name = "short", .values = {1.0}},  // 类目数取 max(标签, 值) = 2
+                ChartSeries{.name = "nan", .values = {NAN, INFINITY}}};
+    p.categories = {"x", "y"};
+    BarChart chart{p};
+    layout_only(chart);
+    MouseEvent e = move_at(200.0F, 100.0F);
+    chart.on_pointer_event(e);
+    AURORA_TEST_CHECK_TRUE(chart.hovered_point().has_value());
+    Painter painter;
+    chart.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = chart.size()}, BuildContext{});
+}
+
 }  // namespace aurora::test_cases::utest_bar_chart
