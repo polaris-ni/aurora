@@ -9,9 +9,11 @@
 #include <memory>
 #include <string>
 
+#include "aurora/environment/build_context.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/painter.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/splitter.h"
 #include "aurora/widget/text.h"
@@ -170,6 +172,77 @@ AURORA_TEST_CASE(vertical_splitter_drag_uses_other_axis) {
     release.action = MouseAction::Release;
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*sp, release, nullptr));
     AURORA_TEST_CHECK_FALSE(sp->is_dragging());
+}
+
+AURORA_TEST_CASE(splitter_paint_draws_children_and_handle) {
+    // 覆盖 on_paint：两区域内容绘制 + 分隔条矩形绘制（非拖拽半透明黑 / 拖拽蓝高亮）。
+    Fixture f = make_fixture();
+    Painter painter;
+    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = f.sp->size()};
+
+    // 非拖拽态：分隔条 fill_rect(Color{0,0,0,24})。
+    f.sp->paint(painter, bounds, BuildContext{});
+
+    // 进入拖拽态：分隔条改用蓝高亮 fill_rect(Color{0,122,255,120})。
+    MouseEvent press = mouse(MouseAction::Press, divider_x(*f.sp));
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*f.root, press, nullptr));
+    AURORA_TEST_CHECK_TRUE(f.sp->is_dragging());
+    f.sp->paint(painter, bounds, BuildContext{});
+
+    MouseEvent release = mouse(MouseAction::Release, divider_x(*f.sp));
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*f.root, release, nullptr));
+    AURORA_TEST_CHECK_FALSE(f.sp->is_dragging());
+}
+
+AURORA_TEST_CASE(splitter_serialize_deserialize_roundtrip) {
+    auto sp = std::make_shared<Splitter>(SplitterOrientation::Vertical, Node{Text{"A"}}, Node{Text{"B"}}, 0.4F);
+    sp->set_min_sizes(70.0F, 90.0F);
+    sp->set_handle_size(10.0F);
+
+    Json props = Json::object();
+    sp->serialize_props(props);
+    AURORA_TEST_CHECK_EQ(std::string{props.at("orientation")->as_or<std::string>("")}, "vertical");
+    AURORA_TEST_CHECK_NEAR(props.at("ratio")->as_or<float>(0.0F), 0.4F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(props.at("handle_size")->as_or<float>(0.0F), 10.0F, 1e-4F);
+
+    // child_nodes()/for_each_child 覆盖两片（仅 first_/second_ 存在时）。
+    const auto &kids = sp->child_nodes();
+    AURORA_TEST_REQUIRE_EQ(kids.size(), 2U);
+    int child_count = 0;
+    sp->for_each_child([&child_count](const Widget &) -> void { ++child_count; });
+    AURORA_TEST_CHECK_EQ(child_count, 2);
+
+    Splitter dst;
+    dst.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(dst.ratio_value(), 0.4F);
+    // 反序列化后再序列化回读，确认 handle_size 已落地。
+    Json back = Json::object();
+    dst.serialize_props(back);
+    AURORA_TEST_CHECK_NEAR(back.at("handle_size")->as_or<float>(0.0F), 10.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(splitter_clamp_equalizes_when_minima_exceed_space) {
+    // 覆盖 clamp_ratio 的 lo>hi 分支：两侧下限之和超过可用长度时退化为对半。
+    auto sp = std::make_shared<Splitter>(SplitterOrientation::Horizontal, Node{Text{"A"}}, Node{Text{"B"}}, 0.5F);
+    LayoutEngine::layout(*sp, Constraints{.min = Size{}, .max = Size{.width = 100.0F, .height = 100.0F}});
+    sp->set_min_sizes(80.0F, 120.0F);  // avail = 100 - 6 = 94 < 80 + 120
+    sp->set_ratio(0.9F);
+    AURORA_TEST_CHECK_NEAR(sp->ratio_value(), 0.5F, 1e-4F);
+    sp->set_ratio(0.1F);
+    AURORA_TEST_CHECK_NEAR(sp->ratio_value(), 0.5F, 1e-4F);
+}
+
+AURORA_TEST_CASE(splitter_hit_test_recurses_and_self_at_handle) {
+    // 覆盖 on_hit_test：内容区递归命中子控件、分隔条处返回自身。
+    Fixture f = make_fixture();
+    const Rect root_rect{.origin = Point{}, .size = Size{.width = AURORA_WIDTH, .height = AURORA_HEIGHT}};
+
+    const float fx = first_extent(*f.sp) * 0.5F;  // 第一栏内容盒内
+    Widget *hit = f.root->hit_test(Point{.x = fx, .y = 50.0F}, root_rect, BuildContext{});
+    AURORA_TEST_CHECK(hit != nullptr);
+
+    Widget *handle = f.root->hit_test(Point{.x = divider_x(*f.sp), .y = 50.0F}, root_rect, BuildContext{});
+    AURORA_TEST_CHECK_EQ(handle, static_cast<Widget *>(f.sp.get()));
 }
 
 }  // namespace aurora::test_cases::utest_splitter
