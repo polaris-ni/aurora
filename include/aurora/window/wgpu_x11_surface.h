@@ -134,6 +134,13 @@ class WgpuX11Surface final : public Surface {
     /// @brief 运行时更新窗口标题（转发内嵌宿主）。
     /// @param title 新窗口标题（UTF-8）。
     auto set_title(const std::string &title) -> void override { host_->set_title(title); }
+
+    /// @brief 委托宿主：装饰样式热更与安全区口径均以 X11 宿主为准（GPU 层只换上屏路径）。
+    auto set_title_bar_style(const TitleBarStyle &style) -> void override { host_->set_title_bar_style(style); }
+    auto set_window_frame_style(const WindowFrameStyle &style) -> void override {
+        host_->set_window_frame_style(style);
+    }
+    [[nodiscard]] auto content_inset() const -> EdgeInsets override { return host_->content_inset(); }
     /// @brief 运行时更新悬停光标形状（转发内嵌宿主；句柄缓存与释放均在宿主）。
     /// @param shape 光标语义形状，按 X11Surface 映射表转为 Xlib 游标字形。
     auto set_cursor(CursorShape shape) -> void override { host_->set_cursor(shape); }
