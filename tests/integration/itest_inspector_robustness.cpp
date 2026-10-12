@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <sstream>
 #include <string>
 
@@ -18,20 +19,7 @@
 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
 
-#ifdef AURORA_PLATFORM_WINDOWS
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-using SOCKET = int;
-constexpr SOCKET AURORA_INVALID_SOCKET = -1;
-inline auto closesocket(SOCKET s) -> int { return ::close(s); }
-#endif
-
-#include "aurora/aurora.h"
+#include "aurora/aurora.h"  // 伞头自带 aurora::net（传输层唯一跨平台落点，CHG-006）
 #include "aurora/inspector/inspector_server.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
@@ -55,72 +43,30 @@ auto shared_tree() -> std::shared_ptr<Column> & {
 
 auto tree_getter() -> Node { return Node{shared_tree()}; }
 
-#ifdef AURORA_PLATFORM_WINDOWS
-/// @brief Winsock 会话（引用计数式启停，随作用域清理）。
-struct WinsockSession {
-    WinsockSession() {
-        WSADATA data{};
-        started = WSAStartup(MAKEWORD(2, 2), &data) == 0;
-    }
-    ~WinsockSession() {
-        if (started) {
-            WSACleanup();
-        }
-    }
-    WinsockSession(const WinsockSession &) = delete;
-    auto operator=(const WinsockSession &) -> WinsockSession & = delete;
-    WinsockSession(WinsockSession &&) = delete;
-    auto operator=(WinsockSession &&) -> WinsockSession & = delete;
-    bool started = false;
-};
-#endif
-
 /// @brief 对 127.0.0.1:port 发送原始请求文本并回收完整响应（服务端 Connection: close）。
 auto http_raw(std::uint16_t port, const std::string &raw) -> std::string {
-#ifdef AURORA_PLATFORM_WINDOWS
-    const WinsockSession wsa;
-#endif
-    const SOCKET sock =
-#ifdef AURORA_PLATFORM_WINDOWS
-        ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    // Winsock 惯用法：INVALID_SOCKET 为宏常量（各工具链经 cast 定义），tidy 穿透 cast 误报混比。
-    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
-    if (sock == INVALID_SOCKET) {
+    aurora::net::Session runtime;
+    auto connected = aurora::net::StreamSocket::connect_loopback(port);
+    if (!connected || !runtime.ok()) {
         return {};
     }
-#else
-        ::socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        return {};
-    }
-#endif
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(port);
-    // Winsock connect() 形参类型是 sockaddr*，sockaddr_in 强转为通用 socket 地址属必要写法。
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
-        closesocket(sock);
-        return {};
-    }
-    (void)send(sock, raw.data(), static_cast<int>(raw.size()), 0);
+    auto sock = std::move(connected.value());
+    // 旧实现单次 send 忽略部分写；畸形请求都远小于套接字缓冲，write_all 同形且更稳。
+    static_cast<void>(sock.write_all(std::span<const char>(raw)));
 
     std::string resp;
     char buf[4096];
     for (;;) {
-        // POSIX 的 recv 返回 ssize_t（64 位），落 int 即实施定义内窄化 ⇒ 用 std::ptrdiff_t 承接；
-        // 单轮只请求 sizeof(buf)=4096 字节，正返回值上界由此确定，转 size_t 交 append 不丢信息。
-        const std::ptrdiff_t n = recv(sock, buf, sizeof(buf), 0);
-        if (n <= 0) {
-            break;
+        const auto got = sock.read_some(std::span<char>(buf));
+        if (!got || got.value() == 0) {
+            break;  // 出错 / 对端关闭
         }
-        resp.append(buf, static_cast<std::size_t>(n));
+        resp.append(buf, got.value());
         if (resp.size() > (1U << 20U)) {
             break;  // 安全上限，防异常服务端无限输出
         }
     }
-    closesocket(sock);
+    sock.close();
     return resp;
 }
 

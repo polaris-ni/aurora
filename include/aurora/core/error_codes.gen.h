@@ -118,6 +118,17 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     CliConflictViolated = 74,  ///< cli-conflict-violated: Options '{option}' and '{conflict}' cannot be used together
     ClipboardAccessFailed = 75,  ///< clipboard-access-failed: System clipboard is inaccessible: '{detail}'
     ClipboardWriteFailed = 76,  ///< clipboard-write-failed: Clipboard payload could not be committed: '{detail}'
+    NetRuntimeFailed = 77,  ///< net-runtime-failed: Socket runtime initialization failed
+    NetSocketFailed = 78,  ///< net-socket-failed: Socket creation failed
+    NetBindFailed = 79,  ///< net-bind-failed: Socket bind on loopback failed
+    NetListenFailed = 80,  ///< net-listen-failed: Socket listen failed
+    NetAcceptFailed = 81,  ///< net-accept-failed: Socket accept failed
+    NetConnectFailed = 82,  ///< net-connect-failed: Connect to loopback endpoint failed
+    NetTimeoutOptionFailed = 83,  ///< net-timeout-option-failed: Socket timeout option could not be set
+    NetWaitFailed = 84,  ///< net-wait-failed: Socket readiness wait failed
+    NetSendFailed = 85,  ///< net-send-failed: Socket send failed
+    NetRecvFailed = 86,  ///< net-recv-failed: Socket receive failed
+    NetRecvTimeout = 87,  ///< net-recv-timeout: Socket receive timed out
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -135,7 +146,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 88> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1077,6 +1088,144 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .message_tpl = "Clipboard payload could not be committed: '{detail}'",
             .hint = "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free "
                     "memory or retry the copy",
+        },
+        {
+            .code = ErrorCode::NetRuntimeFailed,
+            .ident = "NetRuntimeFailed",
+            .slug = "net-runtime-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Socket runtime initialization failed",
+            .hint = "Winsock startup was rejected (WSAStartup); check winsock DLL availability and version request, "
+                    "then retry",
+        },
+        {
+            .code = ErrorCode::NetSocketFailed,
+            .ident = "NetSocketFailed",
+            .slug = "net-socket-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Socket creation failed",
+            .hint = "socket() returned an error (fd limit / protocol unsupported); close unused sockets and retry",
+        },
+        {
+            .code = ErrorCode::NetBindFailed,
+            .ident = "NetBindFailed",
+            .slug = "net-bind-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Socket bind on loopback failed",
+            .hint = "The port is taken or privileges are missing; pass port 0 to let the OS pick an ephemeral port",
+        },
+        {
+            .code = ErrorCode::NetListenFailed,
+            .ident = "NetListenFailed",
+            .slug = "net-listen-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Socket listen failed",
+            .hint = "listen() rejected the bound socket (backlog out of range or socket already closed)",
+        },
+        {
+            .code = ErrorCode::NetAcceptFailed,
+            .ident = "NetAcceptFailed",
+            .slug = "net-accept-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Socket accept failed",
+            .hint = "accept() returned an error (listener closed concurrently or fd limit); re-check the running flag "
+                    "before retrying",
+        },
+        {
+            .code = ErrorCode::NetConnectFailed,
+            .ident = "NetConnectFailed",
+            .slug = "net-connect-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Connect to loopback endpoint failed",
+            .hint = "No listener on 127.0.0.1:{port} (service not started) or the local firewall refused the loopback "
+                    "connect",
+        },
+        {
+            .code = ErrorCode::NetTimeoutOptionFailed,
+            .ident = "NetTimeoutOptionFailed",
+            .slug = "net-timeout-option-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Socket timeout option could not be set",
+            .hint = "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO) failed; do not continue into an unbounded wait, close and "
+                    "reopen the socket",
+        },
+        {
+            .code = ErrorCode::NetWaitFailed,
+            .ident = "NetWaitFailed",
+            .slug = "net-wait-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Socket readiness wait failed",
+            .hint =
+                "select() returned an error (fd set invalid or interrupted); re-check the running flag before retrying",
+        },
+        {
+            .code = ErrorCode::NetSendFailed,
+            .ident = "NetSendFailed",
+            .slug = "net-send-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Socket send failed",
+            .hint = "send() returned <= 0 mid-write (peer closed or timeout); the byte stream is no longer reliable",
+        },
+        {
+            .code = ErrorCode::NetRecvFailed,
+            .ident = "NetRecvFailed",
+            .slug = "net-recv-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Socket receive failed",
+            .hint = "recv() returned an error (peer reset or socket closed)",
+        },
+        {
+            .code = ErrorCode::NetRecvTimeout,
+            .ident = "NetRecvTimeout",
+            .slug = "net-recv-timeout",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Warning,
+            .auto_fixable = false,
+            .fix_category = "timeout",
+            .retryable = true,
+            .message_tpl = "Socket receive timed out",
+            .hint = "SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat "
+                    "this as 'no more data now'",
         },
     },
 };

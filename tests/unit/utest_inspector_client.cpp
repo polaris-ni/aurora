@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: tools/servers/inspector_client.h
 /// 测试说明: 覆盖最小 Inspector HTTP 客户端的「发不出手之前」拒单口径（非回环主机 / 端口 0 /
-/// target 未以 '/' 开头）与**收发超时的平台形态**。后者是本文件的回归位：Winsock 的
+/// target 未以 '/' 开头）与**收发超时的平台形态**（传输经 `aurora::net`，CHG-006）。后者是回归位：Winsock 的
 /// `SO_RCVTIMEO` / `SO_SNDTIMEO` 收的是 `DWORD` 毫秒数，POSIX 收的是 `struct timeval`，
 /// 把 `timeval` 递给 Winsock 它只把前 4 字节当毫秒读——于是「5 秒」在 Windows 上实际生效成
 /// 「5 毫秒」，慢于 5ms 的正常响应被 `WSAETIMEDOUT` 掐成 `empty response`。用例因此起一个
@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -35,117 +36,39 @@
 #include "aurora/window/surface.h"  // HeadlessSurface（无桌面端到端）
 #endif
 
-#ifdef AURORA_PLATFORM_WINDOWS
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
+#include "aurora/net/socket.h"
 
 namespace {
 
-#ifdef AURORA_PLATFORM_WINDOWS
-/// @brief Winsock 会话（引用计数式启停，随作用域清理）。
-struct WinsockSession {
-    WinsockSession() {
-        WSADATA data{};
-        started = ::WSAStartup(MAKEWORD(2, 2), &data) == 0;
+/// @brief 打开一个只绑回环、端口由系统分配的监听口，并把实际端口写回 `port_out`
+/// （经核心公共层 `aurora::net`，CHG-006；失败返回无效 `Listener`）。
+[[nodiscard]] auto open_loopback_listener(std::uint16_t &port_out) -> aurora::net::Listener {
+    auto listener = aurora::net::Listener::listen_loopback(0, 1);  // 临时端口：避免与并发用例或本机服务撞号
+    if (!listener) {
+        return {};
     }
-    ~WinsockSession() {
-        if (started) {
-            ::WSACleanup();
-        }
-    }
-    // 纯作用域 guard，禁止拷贝/移动（避免重复 WSACleanup）。
-    WinsockSession(const WinsockSession &) = delete;
-    auto operator=(const WinsockSession &) -> WinsockSession & = delete;
-    WinsockSession(WinsockSession &&) = delete;
-    auto operator=(WinsockSession &&) -> WinsockSession & = delete;
-    bool started = false;
-};
-#endif  // AURORA_PLATFORM_WINDOWS
-
-#ifdef AURORA_PLATFORM_WINDOWS
-using SocketHandle = SOCKET;
-inline constexpr SocketHandle AURORA_INVALID_SOCKET = INVALID_SOCKET;
-#else
-using SocketHandle = int;
-inline constexpr SocketHandle AURORA_INVALID_SOCKET = -1;
-#endif
-
-/// @brief 关闭监听/连接句柄（两侧平台拼写不同）。
-auto close_handle(SocketHandle handle) -> void {
-#ifdef AURORA_PLATFORM_WINDOWS
-    ::closesocket(handle);
-#else
-    ::close(handle);
-#endif
-}
-
-/// @brief 打开一个只绑回环、端口由系统分配的监听口，并把实际端口写回 `port_out`。
-[[nodiscard]] auto open_loopback_listener(std::uint16_t &port_out) -> SocketHandle {
-    const SocketHandle listener = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listener == AURORA_INVALID_SOCKET) {
-        return AURORA_INVALID_SOCKET;
-    }
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = 0;  // 临时端口：避免与并发用例或本机服务撞号
-#ifdef AURORA_PLATFORM_WINDOWS
-    int name_len = static_cast<int>(sizeof(addr));
-#else
-    socklen_t name_len = sizeof(addr);
-#endif
-    // bind / getsockname 的 socket API 契约要求把 `sockaddr_in` 擦除为通用 `sockaddr` 指针，
-    // 无类型安全替代（协议族字段即运行期判别依据）。
-    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
-    const int bound = ::bind(listener, reinterpret_cast<sockaddr *>(&addr), static_cast<socklen_t>(sizeof(addr)));
-    if (bound != 0 || ::listen(listener, 1) != 0 ||
-        ::getsockname(listener, reinterpret_cast<sockaddr *>(&addr), &name_len) != 0) {
-        close_handle(listener);
-        return AURORA_INVALID_SOCKET;
-    }
-    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
-    port_out = ntohs(addr.sin_port);
-    return listener;
+    port_out = listener.value().port();
+    return std::move(listener.value());
 }
 
 /// @brief 服务端：至多等 5s 连接 → 睡 `delay` → 回一段最小 200 → 关闭。
 ///
 /// 有界等待是刻意要求：客户端若在连接前就失败（本机 socket 资源不足等），本线程必须能自己退出，
 /// 否则 `join()` 会把整个用例挂死到 runner 超时。
-auto serve_after(SocketHandle listener, std::chrono::milliseconds delay) -> void {
+auto serve_after(aurora::net::Listener &listener, std::chrono::milliseconds delay) -> void {
     constexpr std::string_view response = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nok";
 
-    fd_set readable;
-    FD_ZERO(&readable);
-    FD_SET(listener, &readable);
-    timeval wait{};
-    wait.tv_sec = 5;
-#ifdef AURORA_PLATFORM_WINDOWS
-    // Windows 的 `select` 忽略 `nfds`：句柄不是描述符索引，传 `listener + 1` 反而可能越出 fd_set。
-    const int ready = ::select(0, &readable, nullptr, nullptr, &wait);
-#else
-    const int ready = ::select(static_cast<int>(listener) + 1, &readable, nullptr, nullptr, &wait);
-#endif
-    if (ready <= 0) {
+    const auto ready = listener.wait_readable(std::chrono::seconds{5});
+    if (!ready || !ready.value()) {
         return;
     }
-    const SocketHandle peer = ::accept(listener, nullptr, nullptr);
-    if (peer == AURORA_INVALID_SOCKET) {
+    auto peer = listener.accept();
+    if (!peer) {
         return;
     }
     std::this_thread::sleep_for(delay);
-    // 一次发完：socket API 只收裸指针 + 长度，无更安全替代。
-    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
-    ::send(peer, reinterpret_cast<const char *>(response.data()), static_cast<int>(response.size()), 0);
-    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
-    close_handle(peer);
+    // 小报文一次写完；忽略返回值与旧实现同形（失败也无从报告）。peer 随作用域自动关闭。
+    static_cast<void>(peer.value().write_all(std::span<const char>(response)));
 }
 
 /// @brief 环境变量写入的两侧平台拼写（写空串即删除语义由 _putenv_s/setenv 各自处理，
@@ -194,21 +117,17 @@ AURORA_TEST_CASE(io_timeout_survives_a_slow_response) {
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; this client is not built for wasm");
 #else
     AURORA_TEST_REQUIRE_THREADS();
-#ifdef AURORA_PLATFORM_WINDOWS
-    const WinsockSession wsa;
-    AURORA_TEST_REQUIRE(wsa.started);
-#endif
 
     std::uint16_t port = 0;
-    const SocketHandle listener = open_loopback_listener(port);
-    AURORA_TEST_REQUIRE(listener != AURORA_INVALID_SOCKET);
+    aurora::net::Listener listener = open_loopback_listener(port);
+    AURORA_TEST_REQUIRE(listener.is_valid());
     AURORA_TEST_REQUIRE_NE(port, std::uint16_t{0});
 
     // 60ms：远大于「被误当毫秒读的 5 秒」里真正生效那 5ms，又远小于本客户端的 5s 超时。
-    auto server = std::thread([listener] { serve_after(listener, std::chrono::milliseconds{60}); });
+    auto server = std::thread([&listener] { serve_after(listener, std::chrono::milliseconds{60}); });
     const auto response = aurora::tools::inspector::http_request("GET", "127.0.0.1", port, "/api/tree");
     server.join();
-    close_handle(listener);
+    listener.close();
 
     // 断言一律用 CHECK 而非 REQUIRE：失败也要走完上面的 join/关闭，不把挂死或句柄泄漏留给后续用例。
     AURORA_TEST_CHECK_TRUE(response.ok());
@@ -258,14 +177,10 @@ AURORA_TEST_CASE(transport_error_distinguishable_when_server_down) {
 #else
     // 先开监听拿一个系统分配的端口号再立刻关掉：同一时刻几乎不可能有人抢注，
     // 由此得到「肯定没人监听」的回环端口。
-#ifdef AURORA_PLATFORM_WINDOWS
-    const WinsockSession wsa;  // 裸 socket 调用需进程级 WSA 初始化（http_request 自带，此处不经过它）
-    AURORA_TEST_REQUIRE(wsa.started);
-#endif
     std::uint16_t port = 0;
-    const SocketHandle listener = open_loopback_listener(port);
-    AURORA_TEST_REQUIRE(listener != AURORA_INVALID_SOCKET);
-    close_handle(listener);
+    aurora::net::Listener listener = open_loopback_listener(port);
+    AURORA_TEST_REQUIRE(listener.is_valid());
+    listener.close();
     AURORA_TEST_REQUIRE_NE(port, std::uint16_t{0});
 
     const auto call = aurora::tools::e2e::get_tree("127.0.0.1", port);

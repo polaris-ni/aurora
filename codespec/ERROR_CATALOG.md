@@ -82,5 +82,16 @@
 | 74 | `CliConflictViolated` | `cli-conflict-violated` | validation | error | false | layout_conflict | false | Options '{option}' and '{conflict}' cannot be used together | Drop one of the mutually exclusive options; the conflict group is declared on the option schema |
 | 75 | `ClipboardAccessFailed` | `clipboard-access-failed` | platform | error | false | resource_error | true | System clipboard is inaccessible: '{detail}' | Another thread/process may own the clipboard (retry once it is released), the OS helper may be missing (install xclip or xsel on Linux), or the stored payload failed validation |
 | 76 | `ClipboardWriteFailed` | `clipboard-write-failed` | platform | error | false | resource_error | false | Clipboard payload could not be committed: '{detail}' | The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free memory or retry the copy |
+| 77 | `NetRuntimeFailed` | `net-runtime-failed` | io | error | false | resource_error | true | Socket runtime initialization failed | Winsock startup was rejected (WSAStartup); check winsock DLL availability and version request, then retry |
+| 78 | `NetSocketFailed` | `net-socket-failed` | io | error | false | resource_error | true | Socket creation failed | socket() returned an error (fd limit / protocol unsupported); close unused sockets and retry |
+| 79 | `NetBindFailed` | `net-bind-failed` | io | error | false | resource_error | true | Socket bind on loopback failed | The port is taken or privileges are missing; pass port 0 to let the OS pick an ephemeral port |
+| 80 | `NetListenFailed` | `net-listen-failed` | io | error | false | resource_error | true | Socket listen failed | listen() rejected the bound socket (backlog out of range or socket already closed) |
+| 81 | `NetAcceptFailed` | `net-accept-failed` | io | error | false | resource_error | true | Socket accept failed | accept() returned an error (listener closed concurrently or fd limit); re-check the running flag before retrying |
+| 82 | `NetConnectFailed` | `net-connect-failed` | io | error | false | resource_error | true | Connect to loopback endpoint failed | No listener on 127.0.0.1:{port} (service not started) or the local firewall refused the loopback connect |
+| 83 | `NetTimeoutOptionFailed` | `net-timeout-option-failed` | io | error | false | resource_error | false | Socket timeout option could not be set | setsockopt(SO_RCVTIMEO/SO_SNDTIMEO) failed; do not continue into an unbounded wait, close and reopen the socket |
+| 84 | `NetWaitFailed` | `net-wait-failed` | io | error | false | resource_error | true | Socket readiness wait failed | select() returned an error (fd set invalid or interrupted); re-check the running flag before retrying |
+| 85 | `NetSendFailed` | `net-send-failed` | io | error | false | resource_error | false | Socket send failed | send() returned <= 0 mid-write (peer closed or timeout); the byte stream is no longer reliable |
+| 86 | `NetRecvFailed` | `net-recv-failed` | io | error | false | resource_error | false | Socket receive failed | recv() returned an error (peer reset or socket closed) |
+| 87 | `NetRecvTimeout` | `net-recv-timeout` | io | warning | false | timeout | true | Socket receive timed out | SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat this as 'no more data now' |
 
-<!-- count: total 77 error codes -->
+<!-- count: total 88 error codes -->

@@ -796,23 +796,20 @@ AURORA_TEST_CASE(accessibility_selection_and_replace_hooks) {
     AURORA_TEST_CHECK_EQ(std::string{ti.accessibility_text()}, std::string{"héllo"});
 
     // 无选区：两端重合于光标（字节位置）。
-    const auto no_sel = ti.accessibility_selection();
-    AURORA_TEST_REQUIRE_TRUE(no_sel.has_value());
-    AURORA_TEST_CHECK_EQ(no_sel->start, no_sel->end);
+    const auto no_sel = aurora::testing::require_value(ti.accessibility_selection());
+    AURORA_TEST_CHECK_EQ(no_sel.start, no_sel.end);
 
     // 读屏设置选区（码点区间 [1,4)）→ 字节半开区间 [1,4)。
     ti.accessibility_set_selection(1, 4);
-    const auto sel = ti.accessibility_selection();
-    AURORA_TEST_REQUIRE_TRUE(sel.has_value());
-    AURORA_TEST_CHECK_EQ(sel->start, 1U);
-    AURORA_TEST_CHECK_EQ(sel->end, 4U);
+    const auto sel = aurora::testing::require_value(ti.accessibility_selection());
+    AURORA_TEST_CHECK_EQ(sel.start, 1U);
+    AURORA_TEST_CHECK_EQ(sel.end, 4U);
     AURORA_TEST_CHECK_EQ(ti.selected_text(), std::string{"él"});
 
     // 单点选区（start==end）：退化为光标位置，两端重合。
     ti.accessibility_set_selection(2, 2);
-    const auto caret_sel = ti.accessibility_selection();
-    AURORA_TEST_REQUIRE_TRUE(caret_sel.has_value());
-    AURORA_TEST_CHECK_EQ(caret_sel->start, caret_sel->end);
+    const auto caret_sel = aurora::testing::require_value(ti.accessibility_selection());
+    AURORA_TEST_CHECK_EQ(caret_sel.start, caret_sel.end);
     AURORA_TEST_CHECK_FALSE(ti.has_selection());
 
     // 越界钳制：字节索引截断到文本长度。

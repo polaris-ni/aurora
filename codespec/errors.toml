@@ -880,3 +880,126 @@ fix_category = "resource_error"
 retryable = false
 message = "Clipboard payload could not be committed: '{detail}'"
 hint = "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free memory or retry the copy"
+
+# ---- net-*: aurora::net socket 层（CHG-006 统一 socket 操作层）----
+
+[[error]]
+enum = "NetRuntimeFailed"
+slug = "net-runtime-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Socket runtime initialization failed"
+hint = "Winsock startup was rejected (WSAStartup); check winsock DLL availability and version request, then retry"
+
+[[error]]
+enum = "NetSocketFailed"
+slug = "net-socket-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Socket creation failed"
+hint = "socket() returned an error (fd limit / protocol unsupported); close unused sockets and retry"
+
+[[error]]
+enum = "NetBindFailed"
+slug = "net-bind-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Socket bind on loopback failed"
+hint = "The port is taken or privileges are missing; pass port 0 to let the OS pick an ephemeral port"
+
+[[error]]
+enum = "NetListenFailed"
+slug = "net-listen-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Socket listen failed"
+hint = "listen() rejected the bound socket (backlog out of range or socket already closed)"
+
+[[error]]
+enum = "NetAcceptFailed"
+slug = "net-accept-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Socket accept failed"
+hint = "accept() returned an error (listener closed concurrently or fd limit); re-check the running flag before retrying"
+
+[[error]]
+enum = "NetConnectFailed"
+slug = "net-connect-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Connect to loopback endpoint failed"
+hint = "No listener on 127.0.0.1:{port} (service not started) or the local firewall refused the loopback connect"
+
+[[error]]
+enum = "NetTimeoutOptionFailed"
+slug = "net-timeout-option-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "Socket timeout option could not be set"
+hint = "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO) failed; do not continue into an unbounded wait, close and reopen the socket"
+
+[[error]]
+enum = "NetWaitFailed"
+slug = "net-wait-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Socket readiness wait failed"
+hint = "select() returned an error (fd set invalid or interrupted); re-check the running flag before retrying"
+
+[[error]]
+enum = "NetSendFailed"
+slug = "net-send-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "Socket send failed"
+hint = "send() returned <= 0 mid-write (peer closed or timeout); the byte stream is no longer reliable"
+
+[[error]]
+enum = "NetRecvFailed"
+slug = "net-recv-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "Socket receive failed"
+hint = "recv() returned an error (peer reset or socket closed)"
+
+[[error]]
+enum = "NetRecvTimeout"
+slug = "net-recv-timeout"
+category = "io"
+severity = "warning"
+auto_fixable = false
+fix_category = "timeout"
+retryable = true
+message = "Socket receive timed out"
+hint = "SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat this as 'no more data now'"

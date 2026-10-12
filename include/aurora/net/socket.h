@@ -1,0 +1,190 @@
+#pragma once
+
+/// @brief 跨平台 socket 操作层（CHG-006：Winsock2 / BSD socket 的仓内唯一适配落点）。
+/// @file net/socket.h
+///
+/// 本头**不引入任何平台 socket 头**（`winsock2.h` / `sys/socket.h` 全部封闭在
+/// `src/aurora/net/socket.cpp`）：句柄以 `std::intptr_t` 承载、`-1` 恒为无效值，
+/// 字节序转换、`sockaddr` 形态、`socklen_t`、`SO_RCVTIMEO` 两平台不同形（Windows 收
+/// DWORD 毫秒、POSIX 收 `struct timeval`）等差异全部在实现侧一次消化。
+///
+/// 范围刻意收敛为「本仓 Inspector 工具链 + 后续本机 AI 交互」所需：
+/// - **仅 IPv4 回环**（127.0.0.1）：连接与监听都不经 DNS、不接受非回环地址，
+///   与 `tools/servers/inspector_client.h` 的信任模型同源（把运行中的 UI 交给 AI
+///   操作的边界绝不允许离开本机）。
+/// - 同步阻塞语义 + 显式超时/可中断等待，无事件循环、无异步回调。
+/// - 失败一律 `Result<T>` + 表驱动 `Error`（`net-*` 码，`ERROR_CATALOG.md`），
+///   OS 原生错误码（`WSAGetLastError`/`errno`）写入 `message`。
+///
+/// @code
+/// aurora::net::Session runtime;                       // RAII 运行时（Windows 需 WSAStartup）
+/// if (!runtime.ok()) { /* 初始化失败 */ }
+/// auto listener = aurora::net::Listener::listen_loopback(0, 5);   // port=0：系统分配
+/// if (listener) {
+///     auto ready = listener->wait_readable(std::chrono::milliseconds{200});
+///     if (ready && *ready) { auto peer = listener->accept(); /* ... */ }
+/// }
+/// @endcode
+
+#include <chrono>
+#include <cstdint>
+#include <span>
+
+#include "aurora/core/result.h"
+
+namespace aurora::net {
+
+/// @brief 进程级 socket 运行时会话（引用计数 RAII）。
+///
+/// Windows 上 socket API 使用前必须 `WSAStartup`、最后一个使用者退出时 `WSACleanup`；
+/// POSIX 无此概念、本类退化为零成本占位。计数语义：第一个构造的会话触发初始化，最后一个
+/// 析构的会话执行清理；嵌套/多会话并存安全。生命周期外用句柄的行为未定义（与平台一致）。
+/// @note Thread: 构造/析构线程安全（内部加锁计数）
+/// @note Side-effects: Windows 首次构造分配 Winsock 资源，末次析构释放
+class Session {
+  public:
+    /// @brief 构造会话：Windows 侧首个活跃会话触发 `WSAStartup`，POSIX 侧置 `ok_ = true`。
+    Session();
+    /// @brief 析构会话：Windows 侧末个活跃会话执行 `WSACleanup`，POSIX 侧无操作。
+    ~Session();
+
+    // 纯作用域 guard：拷贝会产生重复清理配对，移动会打乱引用计数归属，一律禁用。
+    Session(const Session &) = delete;
+    auto operator=(const Session &) -> Session & = delete;
+    Session(Session &&) = delete;
+    auto operator=(Session &&) -> Session & = delete;
+
+    /// @brief 运行时是否可用。
+    /// @return Windows 上 `WSAStartup` 成功（或已有活跃会话）为 true；初始化失败为 false；POSIX 恒 true。
+    [[nodiscard]] auto ok() const -> bool { return ok_; }
+
+  private:
+    bool ok_ = false;
+};
+
+/// @brief 面向字节流的 TCP 套接字（move-only RAII，析构自动关闭）。
+///
+/// 单所有权：同一时刻仅一个持有者可收发；跨线程移交用 std::move。接收返回 0 表示对端
+/// 已关闭写向（FIN），与出错（`Result` 失败态）严格区分。
+/// @note Thread: 不 thread-safe（单所有权句柄）
+/// @note Side-effects: 网络 I/O（仅限 loopback）
+class StreamSocket {
+  public:
+    /// @brief 构造无效句柄态（可作占位/移动后的落点）。
+    StreamSocket() = default;
+
+    /// @brief 连接本机回环端口（127.0.0.1，不经 DNS）。
+    /// @param port 目标 TCP 端口；非 0。
+    /// @return 成功为已连接套接字；失败为 `net-socket-failed` / `net-connect-failed`（message 含 OS 原生码）。
+    [[nodiscard]] static auto connect_loopback(std::uint16_t port) -> Result<StreamSocket>;
+
+    StreamSocket(const StreamSocket &) = delete;
+    auto operator=(const StreamSocket &) -> StreamSocket & = delete;
+    /// @brief 移动构造：句柄所有权移交，源对象转为无效态。
+    /// @param other 被移交的源套接字。
+    StreamSocket(StreamSocket &&other) noexcept;
+    /// @brief 移动赋值：先关闭自有句柄再接管，源对象转为无效态。
+    /// @param other 被移交的源套接字。
+    /// @return 本对象引用。
+    auto operator=(StreamSocket &&other) noexcept -> StreamSocket &;
+    /// @brief 析构：句柄有效则自动关闭。
+    ~StreamSocket();
+
+    /// @brief 句柄是否有效。
+    /// @return 未关闭且非默认构造时为 true。
+    [[nodiscard]] auto is_valid() const -> bool { return handle_ != AURORA_INVALID_HANDLE; }
+
+    /// @brief 设置收发超时（两方向同值，毫秒统一口径）。
+    ///
+    /// 这是本层存在的核心理由之一：`SO_RCVTIMEO`/`SO_SNDTIMEO` 在 Winsock 收 DWORD **毫秒数**、
+    /// 在 POSIX 收 `struct timeval`，按平台字节形态误传的生效值会差三个数量级（5 秒变 5 毫秒）。
+    /// 调用方只表达毫秒意图，形态换算封闭在实现侧。
+    /// @param timeout 单次 recv/send 的最长阻塞时长；须 > 0。
+    /// @return 成功为 OK；失败为 `net-timeout-option-failed`。
+    [[nodiscard]] auto set_io_timeout(std::chrono::milliseconds timeout) const -> Result<void>;
+
+    /// @brief 读取当前可读字节（至多填满 buffer，允许部分读）。
+    /// @param buffer 接收缓冲；空 span 直接返回 0。
+    /// @return 成功为实际读取字节数（**0 = 对端已关闭**）；失败为 `net-recv-failed`，超时为
+    /// `net-recv-timeout`（两者以 code 区分，不依赖措辞）。
+    [[nodiscard]] auto read_some(std::span<char> buffer) const -> Result<std::size_t>;
+
+    /// @brief 写完全部字节（内部 ≤1MiB 分块循环，规避两平台长度参数窄化陷阱）。
+    /// @param data 待发送字节；空 span 直接返回 OK。
+    /// @return 全部写入为 OK；中途失败为 `net-send-failed`（流已不可靠，调用方应放弃该连接）。
+    [[nodiscard]] auto write_all(std::span<const char> data) const -> Result<void>;
+
+    /// @brief 对端是否位于本机回环（服务端访问控制判据）。
+    /// @return `getpeername` 报告的地址为 127.0.0.0/8 时为 true；句柄无效或查询失败为 false。
+    [[nodiscard]] auto is_loopback_peer() const -> bool;
+
+    /// @brief 立即关闭套接字（幂等）。
+    auto close() -> void;
+
+  private:
+    friend class Listener;
+    static constexpr std::intptr_t AURORA_INVALID_HANDLE = -1;
+    /// @brief 以原生句柄接管（仅 `Listener::accept` 与本类工厂使用）。
+    /// @param handle 已创建/已接受的 `intptr_t` 化原生句柄；-1 视为无效。
+    explicit StreamSocket(std::intptr_t handle) : handle_(handle) {}
+
+    std::intptr_t handle_ = AURORA_INVALID_HANDLE;
+};
+
+/// @brief 本机回环 TCP 监听套接字（move-only RAII，析构自动关闭）。
+/// @note Thread: 不 thread-safe（单所有权句柄）；`close()` 允许与另一线程的 `wait_readable`/
+/// `accept` 竞态唤醒（设计用途：宿主以 close 中断 accept 线程）。
+/// @note Side-effects: 网络 I/O（仅限 loopback）
+class Listener {
+  public:
+    /// @brief 构造无效句柄态（可作占位/移动后的落点）。
+    Listener() = default;
+
+    /// @brief 在 127.0.0.1 上监听（只绑回环，非本机连接一律不进 accept）。
+    /// @param port TCP 端口；**0 = 系统分配临时端口**，实际值经 `port()` 查询。
+    /// @param backlog 挂起连接队列深度（透传 `listen(2)`）。
+    /// @return 成功为就绪监听器；失败为 `net-socket-failed` / `net-bind-failed` / `net-listen-failed`
+    /// （失败时句柄已在实现侧关闭）。
+    [[nodiscard]] static auto listen_loopback(std::uint16_t port, int backlog) -> Result<Listener>;
+
+    Listener(const Listener &) = delete;
+    auto operator=(const Listener &) -> Listener & = delete;
+    /// @brief 移动构造：句柄与端口一同移交，源对象转为无效态。
+    /// @param other 被移交的源监听器。
+    Listener(Listener &&other) noexcept;
+    /// @brief 移动赋值：先关闭自有句柄再接管，源对象转为无效态。
+    /// @param other 被移交的源监听器。
+    /// @return 本对象引用。
+    auto operator=(Listener &&other) noexcept -> Listener &;
+    /// @brief 析构：句柄有效则自动关闭（等价 `close()`）。
+    ~Listener();
+
+    /// @brief 句柄是否有效。
+    /// @return 未关闭且非默认构造时为 true。
+    [[nodiscard]] auto is_valid() const -> bool { return handle_ != AURORA_INVALID_HANDLE; }
+
+    /// @brief 实际绑定端口。
+    /// @return `listen_loopback` 成功时的端口（port=0 时为系统分配值）；无效态为 0。
+    [[nodiscard]] auto port() const -> std::uint16_t { return port_; }
+
+    /// @brief 可中断地等待监听口进入可读（有连接挂起）状态。
+    /// @param timeout 最长等待时长。
+    /// @return 成功为「timeout 内是否可读」（false = 纯超时，不是错误，调用方据此轮询自有停止标志）；
+    /// 失败为 `net-wait-failed`。
+    [[nodiscard]] auto wait_readable(std::chrono::milliseconds timeout) const -> Result<bool>;
+
+    /// @brief 接受一条已到达连接（须先 `wait_readable` 返回 true，否则阻塞）。
+    /// @return 成功为已连接套接字（对端地址经 `is_loopback_peer()` 复核）；失败为 `net-accept-failed`。
+    [[nodiscard]] auto accept() const -> Result<StreamSocket>;
+
+    /// @brief 先 `shutdown(both)` 再关闭（幂等）：唤醒并终止另一线程可能阻塞其中的
+    /// `wait_readable`/`accept`，语义与 InspectorServer 停机场径一致。
+    auto close() -> void;
+
+  private:
+    static constexpr std::intptr_t AURORA_INVALID_HANDLE = -1;
+    std::intptr_t handle_ = AURORA_INVALID_HANDLE;
+    std::uint16_t port_ = 0;
+};
+
+}  // namespace aurora::net

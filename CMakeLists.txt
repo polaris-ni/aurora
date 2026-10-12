@@ -229,7 +229,7 @@ file(GLOB_RECURSE AURORA_SOURCES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/*.cpp")
 
 # inspector_server.cpp 编入独立静态库 aurora_inspector_server（仅 AURORA_BUILD_INSPECTOR_SERVER=ON 时构建），
-# 不编入核心 aurora 库，避免未开启开关时引入 Winsock2 依赖（见 cmake/AuroraTools.cmake）。
+# 不编入核心 aurora 库——隔离的是 HTTP 服务端实现；socket 传输层 aurora::net 属核心公共能力（CHG-006）。
 list(FILTER AURORA_SOURCES EXCLUDE REGEX "inspector_server\.cpp$")
 
 add_library(aurora STATIC ${AURORA_SOURCES})
@@ -263,6 +263,11 @@ if (NOT MSVC)
 endif ()
 # FreeType：PUBLIC 链接使任意消费者（demo/测试/工具）静态链入，无需自行配置。
 target_link_libraries(aurora PUBLIC freetype harfbuzz)
+# aurora::net（CHG-006）：核心公共 socket 层的 Windows 传输库，PUBLIC 传导给全部消费者
+# （demo/测试/工具/inspector_server），散挂点已在 cmake/AuroraTools.cmake / AuroraTests.cmake 收敛删除。
+if (WIN32)
+    target_link_libraries(aurora PUBLIC ws2_32)
+endif ()
 
 # ---- 图片编解码器外部库（libjpeg-turbo / libwebp / wuffs）----
 # ⚠️ 必须在 add_library(aurora ...) 之后 include：本模块内部以 target_link_libraries(aurora ...)

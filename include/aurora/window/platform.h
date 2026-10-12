@@ -100,9 +100,9 @@ struct Platform {
 /// - 其余平台：`Unspecified`。
 /// @return OS 档位；无证据时不猜，返回 `Unspecified` 交由调用方回落。
 [[nodiscard]] inline auto os_color_scheme() -> ColorScheme {
-#if defined(AURORA_PLATFORM_LINUX)
+#ifdef AURORA_PLATFORM_LINUX
     const char *xdg = std::getenv("XDG_CONFIG_HOME");
-    std::string base = (xdg != nullptr && xdg[0] != '\0')
+    std::string base = (xdg != nullptr && *xdg != '\0')
                            ? std::string(xdg)
                            : std::string(std::getenv("HOME") == nullptr ? "" : std::getenv("HOME")) + "/.config";
     for (const char *ver : {"gtk-4.0", "gtk-3.0"}) {

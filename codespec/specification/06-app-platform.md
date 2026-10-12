@@ -697,6 +697,20 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 ---
 
+### 8.8 Socket 操作层（`aurora::net`）
+
+`include/aurora/net/socket.h` + `src/aurora/net/socket.cpp` 是全仓**唯一**的 Winsock2 / BSD socket 适配落点（CHG-006）：公共头零平台 socket 头，`#include <winsock2.h>` / `<sys/socket.h>` 只允许出现在该 `.cpp`（验收 grep 判据见 [`changes/winsock-bsd-socket-layer/proposal.md`](../changes/winsock-bsd-socket-layer/proposal.md)）。范围收敛为「Inspector 工具链 + 本机 AI 交互」所需：仅 IPv4 回环（127.0.0.1，不经 DNS）、同步阻塞 + 显式超时、失败一律 `Result<T>` + 表驱动 `net-*` 错误码（`ERROR_CATALOG.md`，message 携带 OS 原生码）。
+
+三个类型：
+
+- `Session`：进程级运行时 RAII。Windows 腿引用计数配对 `WSAStartup`/`WSACleanup`（首个构造初始化、末个析构清理，嵌套/并存安全）；POSIX 腿零成本占位、`ok()` 恒真。不可拷贝/移动（纯作用域 guard）。
+- `Listener`：`listen_loopback(port, backlog)`（只绑 `127.0.0.1`；port=0 由系统分配、`port()` 回报实际值）、`wait_readable(timeout) -> Result<bool>`（select 可中断等待，`false` = 纯超时非错误，两平台 nfds 差异内部消化）、`accept() -> Result<StreamSocket>`、`close()` 先 `shutdown(both)` 再关（唤醒并终止另一线程阻塞中的等待，`InspectorServer` 停机场径）。
+- `StreamSocket`：`connect_loopback(port)`、`set_io_timeout(milliseconds)`（**毫秒统一口径**：Winsock 收 DWORD 毫秒、POSIX 收 `timeval`，形态换算封闭在实现侧——按平台字节形态误传会把 5 秒执行成 5 毫秒，本层的存在理由）、`read_some(span) -> Result<size_t>`（**0 = 对端有序关闭**，与错误态严格区分；超时落独立码 `net-recv-timeout`）、`write_all(span)`（内部 ≤1MiB 分块写满，`send` 返回值窄化一次解决）、`is_loopback_peer()`（服务端访问控制判据，127.0.0.0/8 全段）。
+
+链接面：`ws2_32` 随核心 `aurora` 目标在 Windows 无条件 `PUBLIC` 传导（见 `BUILD_OPTIONS.md`），各消费者不再散挂。Emscripten 腿经其 BSD socket shim 编译，但浏览器运行时无真实监听语义，Inspector 相关用例在 wasm 构建下按 `AURORA_TEST_SKIP` 退避。回归：`utest_net_socket`（行为契约）+ `utest_inspector_client`（超时平台形态）。
+
+---
+
 ## 9 偏好与存储
 
 ### 9.1 Preferences

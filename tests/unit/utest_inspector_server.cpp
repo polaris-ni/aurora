@@ -6,8 +6,8 @@
 /// 以及 /api/input/{click,scroll,drag,text} 交互模拟（派发到目标控件、请求体校验、目标定位
 /// 失败与派发失败的错误映射）和 /api/find 的 key/type/text 定位（路径与寻址端点同口径）。
 /// 树端点的线程落点同样在此覆盖：装上传递器后必须换到主线程下树，无传递器时回退内联执行。
-/// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端为本 TU 内最小
-/// 回环 socket 实现，随用例关闭清理。
+/// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端经核心公共层
+/// `aurora::net`（CHG-006），随用例作用域关闭清理。
 /// AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩。
 
 #include <chrono>
@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -28,6 +29,7 @@
 
 #include "aurora/event/event.h"  // ScrollEvent
 #include "aurora/inspector/inspector_server.h"
+#include "aurora/net/socket.h"
 #include "aurora/state/async.h"  // detail::main_poster（跨线程投递器，marshal 的落点）
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
@@ -36,17 +38,6 @@
 #include "aurora/widget/text_input.h"
 #include "aurora/widget/widget.h"  // LeafWidget（滚动探针基类）
 #include "aurora/window/surface.h"  // set_surface_getter 的 Surface 完整类型
-
-#ifdef AURORA_PLATFORM_WINDOWS
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/time.h>  // SO_RCVTIMEO 的 timeval
-#include <unistd.h>
-#endif
 
 #endif  // AURORA_BUILD_INSPECTOR_SERVER
 
@@ -126,118 +117,34 @@ struct QueuedPoster {
     std::function<void(std::function<void()>)> previous;
 };
 
-#ifdef AURORA_PLATFORM_WINDOWS
-/// @brief Winsock 会话（引用计数式启停，随作用域清理）。
-struct WinsockSession {
-    WinsockSession() {
-        WSADATA data{};
-        started = WSAStartup(MAKEWORD(2, 2), &data) == 0;
-    }
-    ~WinsockSession() {
-        if (started) {
-            WSACleanup();
-        }
-    }
-    // 纯作用域 guard，禁止拷贝/移动（避免重复 WSACleanup）。
-    WinsockSession(const WinsockSession &) = delete;
-    auto operator=(const WinsockSession &) -> WinsockSession & = delete;
-    WinsockSession(WinsockSession &&) = delete;
-    auto operator=(WinsockSession &&) -> WinsockSession & = delete;
-    bool started = false;
-};
-#endif
-
-/// @brief 发送全部字节；失败返回 false（对端断开/出错）。
-auto send_all(int sock, const std::string &data) -> bool {
-    std::size_t left = data.size();
-    const char *p = data.data();
-    while (left > 0) {
-#ifdef AURORA_PLATFORM_WINDOWS
-        const int n = ::send(sock, p, static_cast<int>(left), 0);
-#else
-        const auto n = static_cast<int>(::send(sock, p, left, 0));
-#endif
-        if (n <= 0) {
-            return false;
-        }
-        // 逐段发送需前移缓冲指针，socket API 即要求裸指针+长度，无更安全替代。
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-        p += n;
-        left -= static_cast<std::size_t>(n);
-    }
-    return true;
-}
-
 /// @brief 对 127.0.0.1:port 发送原始 HTTP 请求并回收完整响应（服务端 Connection: close，
-/// 读到对端关闭即完整）。`recv_timeout_ms > 0` 时给接收加超时，超时按空响应失败。
+/// 读到对端关闭即完整）。`recv_timeout_ms > 0` 时给收发加超时（`aurora::net` 毫秒统一口径），
+/// 超时按空响应失败。
 [[nodiscard]] auto http_roundtrip(std::uint16_t port, const std::string &request, int recv_timeout_ms = 0)
     -> std::string {
-#ifdef AURORA_PLATFORM_WINDOWS
-    const WinsockSession wsa;
-#endif
-#ifdef AURORA_PLATFORM_WINDOWS
-    const auto sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    AURORA_TEST_REQUIRE_NE(sock, INVALID_SOCKET);
-#else
-    const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-    AURORA_TEST_REQUIRE_GE(sock, 0);
-    // REQUIRE 展开为「报告器调用 + 抛出」，对路径分析不透明（同 tests/framework/assertions.h 里
-    // require_value 的处置口径）：分析器据此推不出「此后 sock 必 ≥ 0」，而 Emscripten 无网络栈时
-    // socket() 返回 -1，紧随的 connect(-1) 即被 clang-analyzer-unix 判非法入参。补一条以**真返回**
-    // 收口的同判据守卫，让运行时与分析器在同一条件上收敛（REQUIRE 抛出后此路不可见，断言语义不变）。
-    if (sock < 0) {
-        return {};
-    }
-#endif
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(port);
-    // connect() 的 socket API 契约要求将 sockaddr_in 擦除为通用 sockaddr 指针，无类型安全替代。
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    AURORA_TEST_REQUIRE_EQ(::connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
-
+    aurora::net::Session runtime;
+    AURORA_TEST_REQUIRE_TRUE(runtime.ok());
+    auto connected = aurora::net::StreamSocket::connect_loopback(port);
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(connected));
+    auto client = std::move(connected.value());
     if (recv_timeout_ms > 0) {
-#ifdef AURORA_PLATFORM_WINDOWS
-        const auto timeout = static_cast<DWORD>(recv_timeout_ms);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        static_cast<void>(::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout),
-                                       static_cast<int>(sizeof(timeout))));
-#else
-        // tv_usec 是 64 位字段：先在目标类型里做乘法，避免 `int × int` 结果再隐式拓宽
-        // （clang-tidy 判 multiplication-result 拓宽）。
-        const timeval timeout{.tv_sec = recv_timeout_ms / 1000,
-                              .tv_usec = static_cast<decltype(timeval::tv_usec)>(recv_timeout_ms % 1000) * 1000};
-        // socket API 的选项值形参是 `const char *`，取结构体地址只能强转（与 Windows 分支同款豁免）。
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        const auto *const timeout_bytes = reinterpret_cast<const char *>(&timeout);
-        static_cast<void>(::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, timeout_bytes, sizeof(timeout)));
-#endif
+        static_cast<void>(client.set_io_timeout(std::chrono::milliseconds{recv_timeout_ms}));
     }
-    AURORA_TEST_REQUIRE_TRUE(send_all(sock, request));
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(client.write_all(std::span<const char>(request))));
 
     std::string response;
     char buf[4096];
     for (;;) {
-#ifdef AURORA_PLATFORM_WINDOWS
-        const int n = ::recv(sock, buf, sizeof(buf), 0);
-#else
-        const auto n = static_cast<int>(::recv(sock, buf, sizeof(buf), 0));
-#endif
-        if (n <= 0) {
-            break;
+        const auto got = client.read_some(std::span<char>(buf));
+        if (!got || got.value() == 0) {
+            break;  // 出错 / 超时 / 对端关闭
         }
-        response.append(buf, static_cast<std::size_t>(n));
+        response.append(buf, got.value());
         if (response.size() > (1U << 20U)) {
             break;  // 安全上限，防异常服务端无限输出
         }
     }
-#ifdef AURORA_PLATFORM_WINDOWS
-    ::closesocket(sock);
-#else
-    ::close(sock);
-#endif
+    client.close();
     AURORA_TEST_REQUIRE_FALSE(response.empty());
     return response;
 }

@@ -100,6 +100,7 @@
 #include "aurora/navigation/route.h"
 #include "aurora/navigation/router.h"
 #include "aurora/navigation/transition_layer.h"
+#include "aurora/net/socket.h"
 #include "aurora/perf/counters.h"
 #include "aurora/perf/perf_log.h"
 #include "aurora/perf/perf_session.h"

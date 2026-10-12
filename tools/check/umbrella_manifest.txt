@@ -92,6 +92,7 @@ aurora/navigation/navigator_host.h
 aurora/navigation/route.h
 aurora/navigation/router.h
 aurora/navigation/transition_layer.h
+aurora/net/socket.h
 aurora/perf/counters.h
 aurora/perf/perf_log.h
 aurora/perf/perf_session.h

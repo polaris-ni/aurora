@@ -53,7 +53,7 @@
 | `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`，其中 `k` 从 `0` 起取 `0..N-1`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>`（`k` 取 `0..N-1`）可执行；默认保持 `1`（单 runner，全局默认行为不变），需要并行链接用 `cmake --preset ninja-shards`（= `AURORA_TEST_SHARDS=4`），或用 `-DAURORA_TEST_SHARDS=<N>` 任意覆盖。 |
 | `AURORA_BUILD_E2E` | `ON` | 编译 `tests/e2e/`（`etest_` 前缀）下的**真实后端端到端**用例：建真实窗口 + 走上屏链路 + 读回像素断言。Emscripten 交叉构建下强制不纳入（wasm 产物无宿主窗口 / 显示），且须与 `registry_integrity` 的 `--tests-dir` 保持同口径 | `tests/e2e/*.cpp` 并入 `aurora_test_runner`；CTest 侧对 `etest_` 用例额外打 `LABELS e2e`（供 `ctest -L e2e` 分层编排） |
 | `AURORA_E2E_TIMEOUT_MS` | `60000` | E2E 用例的看门狗超时（非开关、为正整数字符串缓存变量）：按 stem 前缀 `etest_` 以 `--timeout=<ms>` 注入。runner 默认不设限，而真实窗口事件循环一旦挂起没有兜底，故须显式设限——到点先写报告再以退出码 3 结束 | 无（仅改变 `etest_` 用例的 CTest 命令行） |
-| `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：Windows 链 `ws2_32` / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
+| `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：传输经核心 `aurora::net`，Windows 的 `ws2_32` 随核心 `PUBLIC` 传导 / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
 | `AURORA_BUILD_VERIFY_TOOLS` | `OFF` | **定义**（非默认构建）`tools/verify/` 下的真机验收探针：按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**（会创建真实窗口、读取屏幕光标，非确定且干扰用户桌面） | 各 `aurora_verify_<平台>_cursor` 可执行文件 + 聚合目标 `aurora_verify` |
 | `AURORA_BUILD_DOCS` | `ON` | 是否**提供** Doxygen API 文档站目标：配置期 `find_program(doxygen)` 探测，未找到则跳过定义（不 FATAL——doxygen 属可选外部工具），也可显式传入可执行路径。目标本身 `EXCLUDE_FROM_ALL`，`cmake --build build` 不触发；配置单一来源是仓库根 `Doxyfile`（`WARN_AS_ERROR=YES`，告警即失败），口径见 `CODING_STANDARDS.md` §13.7 | `docs` 聚合目标（产物 `build/docs/`，告警日志 `build/docs/doxygen_warnings.log`） |
 | `AURORA_DOXYGEN_EXECUTABLE` | 空（= 在 PATH 上找） | doxygen 可执行路径（非开关、FILEPATH 缓存变量）：PATH 上没有 doxygen 的机器用它显式接入，仓库内不写死任何本机路径 | 仅改变 `docs` 目标调用的可执行 |
@@ -75,11 +75,11 @@ demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` �
 | 默认值 | `OFF` |
 | 说明 | 编译 Inspector 远程 HTTP 服务器（`InspectorServer`），暴露 REST 端点供外部工具远程访问运行时控件树 |
 | 传播宏 | `AURORA_BUILD_INSPECTOR_SERVER`（开关名 = 宏名，与 `AURORA_BACKEND_*` 同惯例；`aurora_inspector_server` 目标 PUBLIC，随链接注入 demo / 测试，经 `aurora_define_feature` 注入） |
-| 平台限制 | 跨平台（Windows: `ws2_32` / POSIX: `pthread`） |
+| 平台限制 | 跨平台（Windows: `ws2_32` 随核心 `aurora` 目标 `PUBLIC` 传导，不再散挂 / POSIX: `pthread`） |
 | 产物 | `aurora_inspector_server` 静态库（`src/aurora/inspector/inspector_server.cpp`） |
 | 头文件 | `include/aurora/inspector/inspector_server.h` |
 
-`inspector_server.cpp` 已从核心 `aurora` 库源文件列表中排除（`list(FILTER ... EXCLUDE)`），仅当开关为 `ON` 时编入独立静态库，避免未开启时引入 Winsock2 依赖。
+`inspector_server.cpp` 已从核心 `aurora` 库源文件列表中排除（`list(FILTER ... EXCLUDE)`），仅当开关为 `ON` 时编入独立静态库——排除的目的只是**按开关剪裁服务器实现本身**：socket 能力已随核心公共模块 `aurora::net`（`src/aurora/net/socket.cpp`，CHG-006）常驻核心，Windows 链接面由核心 `PUBLIC ws2_32` 统一传导，各消费者（demo / 测试 / 工具）不再各自挂载。
 
 ```powershell
 cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
