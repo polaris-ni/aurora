@@ -123,6 +123,14 @@ auto root = au::MediaQueryProvider{
 | `Borderless` | 无标题栏，保留窗口阴影边距（margin 带可拖拽缩放）；移动靠**修饰键拖拽**（按住 `Super` / `Alt` 拖拽任意处 → `xdg_toplevel_move`） |
 | `Frameless` | 完全无装饰、无阴影边距，由应用自绘 UI 并经程序化窗口控制驱动状态 |
 
+**三后端映射**（策略解析纯函数 `csd::resolve_mode(policy, ssd_available)`，`src/aurora/window/detail/csd_decoration.h`；「有无 SSD」各后端构造期一次判定）：
+
+| 后端 | Auto / ServerSide | ClientSide | Borderless | Frameless |
+|:---|:---|:---|:---|:---|
+| Wayland | 有 `xdg-decoration` → SSD；无 → CSD（title+margin） | CSD（title+margin，即便合成器支持 SSD） | 仅 margin 带 | 无任何装饰 |
+| X11 | 保留 WM 装饰（X11 的 SSD 即 WM 原生口沿，无须协商） | `_MOTIF_WM_HINTS` 撤 WM 口沿后自绘标题栏 + 内缘八向热区 | 仅内缘热区 | 无任何装饰 |
+| Win32 | 保留 `DWM`/系统非客户区装饰 | **契约已立、实现待落地**（`WM_NCHITTEST` 返回 `HTCAPTION`/`HT*` 映射热区 + DWM 扩展框自绘；未在本仓库无头构建内编译验证） | 同左 | 同左 |
+
 **安全区**：CSD 标题栏 / 阴影边距占用区经 `Surface::content_inset()` 暴露，由 `present_root` 的下沉壳（`ContentInsetRoot`）自动消费（见 §3.1「客户端自绘装饰的安全区」）；根注入 `MediaQuery.padding` 恒为内容区口径（已消费 ⇒ 归零）。
 
 Wayland CSD 的**阴影边距模型**（单表面，libadwaita 风格；纯逻辑收敛在 `src/aurora/window/detail/csd_geometry.h`）：wl_surface buffer = 应用内容 + 四周 `AURORA_SHADOW_MARGIN_DP`（10dp）边距，边距承载真 alpha 柔影与 ≥8dp 的八向缩放热区；`xdg_surface.set_window_geometry(m,m,内容宽,内容高)` 声明可视窗口边界，`wl_surface.set_opaque_region` 仅报内容矩形。此模型下 **`WaylandSurface::size()` 返回整幅表面逻辑尺寸（内容 + 2×margin）**，`content_inset()` 语义为「表面原点 → 应用内容原点」，按下表取值（`m` = margin、`tb` = 标题栏高）：
@@ -133,15 +141,21 @@ Wayland CSD 的**阴影边距模型**（单表面，libadwaita 风格；纯逻�
 | Maximized / 任意向 tiled | `{0, tb, 0, 0}`（margin 塌缩） | `{0,0,0,0}` | `{0,0,0,0}` |
 | FullScreen | `{0, tb, 0, 0}`（揭示条出现前 tb 亦不绘制） | `{0,0,0,0}` | `{0,0,0,0}` |
 
-margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙、无阴影），回 Normal 恢复；状态切换走整幅重绘。指针在进入表面的三个入口统一做「表面坐标 → 内容坐标（−margin）」映射，热区判定 `csd::classify_resize_zone` 在内容坐标域进行（表驱动纯函数，`utest_csd_geometry` 守门）。X11/Win32/Headless 后端无 margin 分量，`content_inset()` 维持原口径。
+margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙、无阴影），回 Normal 恢复；状态切换走整幅重绘。指针在进入表面的三个入口统一做「表面坐标 → 内容坐标（−margin）」映射，热区判定 `csd::classify_resize_zone` 在内容坐标域进行（表驱动纯函数，`utest_csd_geometry` 守门）。margin 厚度可经 `WindowFrameStyle::shadow_margin_dp` 显式配置（0 = 关闭；显式关闭 / 能力不足 / 非正值三路归零，见 `csd::frame_margin_dp`），默认值逐值等于既有 10dp 常量。X11 后端 buffer 即内容矩形（不假设 ARGB 视觉与合成器），无外延 margin 分量——外延阴影自动降级为 0，标题栏带为**内缘覆绘** + **内缘热区**（同一 `csd::classify_resize_zone` 判定式按「内容坐标缩进 margin 后的外延环」口径复用，不写第二份八向逻辑），`content_inset()` 只承载标题栏带高度。Win32/Headless 维持零 inset 口径。
 
 **程序化窗口控制**（`Surface` / `Window` 虚函数，默认空实现）：`close()`、`minimize()`、`toggle_maximize()`、`set_fullscreen(bool)`。Wayland 经 `xdg_toplevel` 协议生效，使无标题栏 / 无边框窗口也能由应用按钮驱动状态。
 
 ### 4.2 TitleBar
 
-**`TitleBarStyle`**（`window/title_bar_style.h`）是 CSD 标题栏样式值类型，字段：`height`（默认 36）、`bg_active`、`bg_inactive`、`fg_active`、`fg_inactive`、`hover_tint`、`close_hover`、`button_layout`（`TitleBarButtonLayout{Adwaita, Windows, Mac}`，默认 `Adwaita`）、`show_minimize`、`show_maximize`、`show_close`、`show_title`、`center_title`。预设：`adwaita_dark()` / `adwaita_light()` / `windows_dark()`。
+**`TitleBarStyle`**（`window/title_bar_style.h`）是 CSD 标题栏样式值类型，字段：`height`（默认 36）、`bg_active`、`bg_inactive`、`fg_active`、`fg_inactive`、`hover_tint`、`close_hover`、`button_layout`（`TitleBarButtonLayout{Adwaita, Windows, Mac}`，默认 `Adwaita`）、`show_minimize`、`show_maximize`、`show_close`、`show_title`、`center_title`，以及三类自定义项：`metrics`（`TitleBarMetrics`：按钮盒尺寸 / 间距 / 贴边外边距 / 图标槽 / 内容内边距 / 标题字号字重，各分量 **0 = 沿用视觉语言的栏高联动推导式**，非 0 才是显式覆写）、`corner_radius`（标题栏背景**下角**圆角，0 = 直角）、`pressed_tint` / `close_pressed`（按压态配色，绘制优先级「按压 > 悬停」）。
+
+**预设**：`CsdPreset`（三套视觉语言 × 明暗两档 = `AdwaitaLight/Dark`、`WindowsLight/Dark`、`MacLight/Dark` 六值）+ 工厂 `TitleBarStyle::from_preset(CsdPreset)`；`TitleBarStyle{}` 的默认成员值即 `AdwaitaDark`。旧三个静态预设函数（`adwaita_dark()` / `adwaita_light()` / `windows_dark()`）已删除，迁移路径见 `CHANGELOG.md` 的 Migration 节。各预设显隐开关全开、高度基准 36dp、按压 alpha 不低于悬停；macOS 红绿灯圆形底色由绘制层按布局语言固定，预设不覆盖。
 
 挂载于 `WindowStyleOptions::title_bar`，运行期经 `Surface::set_title_bar_style` 热更。
+
+**窗框样式**：`WindowFrameStyle`（`window/window_frame_style.h`，挂载于 `WindowStyleOptions::frame`，热更口 `Surface::set_window_frame_style`）：`shadow_enabled` / `shadow_margin_dp`（投影带厚度 = 缩放热区宽度）/ `shadow_color` / `shadow_blur_radius`（0 = 由 margin−1 推导，显式值夹到 margin 内）/ `corner_radius`（外轮廓圆角，0 = 直角）。默认值逐值等于既有 `AURORA_SHADOW_*` 常量，未配置零视觉变化；投影厚度 / 基色 / 模糊两条上屏路径（软件 `compose_shadow_margins_bgra` 与 GPU `draw_shadow`）同源消费折算后的值。X11 无外延 margin，厚度只作用于内缘热区宽度。
+
+**共享装饰层**：策略解析、按钮命中、按压结算（**动作在释放触发**——按下即触发会使按压色永不可见，且失去「按下后拖开即取消」的纠错语义，对齐 GTK/Win32）、全屏揭示条状态机、连击记账与绘制装配收敛在库内私有头 `src/aurora/window/detail/csd_decoration.h`（纯值、无平台头，`utest_csd_decoration` 以策略 × SSD 有无 × 窗口几何态的快照表逐格锁语义）；各后端只做平台事件映射。
 
 **几何单一来源**：纯函数 `title_bar_geometry(width, style, maximized, resizable)` 返回各按钮 / 图标 / 标题矩形（隐藏 = 空盒）；绘制与命中测试共用，规则以其实现注释为唯一权威。
 
@@ -172,6 +186,12 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 | `Theme::token_or<T>(name, fallback)` | 强转目标类型，缺失或类型不匹配时回退 |
 
 令牌随 `ThemeProvider` 注入整体传递，后代经 `environment<Theme>()` 读到的 `Theme` 即含令牌表。
+
+**明暗双档取值**（一个主题自带两套，角色名一套、明暗两列——Material 3 color roles / Fluent 2 alias tokens 同构）：`Theme::scheme`（`ColorScheme{Unspecified, Light, Dark}`，`light()` / `dark()` 工厂自动置位）+ 暗色覆写表 `dark_tokens`；解析经 `token_for(name)` / `token_in(name, scheme)`——Dark 档先查覆写表、未命中回落基础表 `tokens`，其余档位只查基础表。`light()` / `dark()` 播种约 16 个语义令牌（`surface` / `surface.raised` / `text` / `text.muted` / `accent` / `border` / `hover` / `pressed` / `danger`，命名取两家公共子集）与 `csd.*` 组件覆写位；`csd.*` 数值基准与 `CsdPreset::AdwaitaLight/Dark` 一致，保证「从令牌派生」与「直接取预设」两条路输出相同的默认观感。
+
+**明暗三级优先链**（`theming/csd_style_bridge.h` 的 `resolve_color_scheme(explicit, theme, os)` 纯函数）：显式样式覆盖 > `Theme::scheme` > OS 偏好；各层以 `Unspecified` 表示「不表态」逐层下探，全链未指定时由调用方回落 `AdwaitaDark`。OS 层经 `os_color_scheme()`（`window/platform.h`）显式查询——Linux 读 GTK 配置文件启发式（不引 DBus 依赖），Win32/macOS 按注册表 / `NSAppearance` 契约标注未在本仓库无头构建内编译验证；`Platform::color_scheme` 字段须由调用方填充（`platform()` 不代做——读偏好有文件 / 注册表访问副作用）。
+
+**Theme → CSD 派生通道**：`title_bar_style_from_theme(theme)` / `window_frame_style_from_theme(theme, base)`（`csd_style_bridge.h`）——预设做基座，`csd.title_bar.*` 组件令牌逐项覆盖，几何 / 显隐 / 度量字段不参与派生（属定制面）；应用在主题变化时重调 `set_title_bar_style(派生结果)` 即完成运行期明暗切换（装饰重绘下一帧生效），不引入轮询。测试见 `utest_theme_csd_bridge`。
 
 **内置主题登记的令牌**（`Theme::light()` / `Theme::dark()` 各自 `set_token`，`Theme::with_defaults()` 与裸 `Theme{}` 不登记任何令牌）：
 

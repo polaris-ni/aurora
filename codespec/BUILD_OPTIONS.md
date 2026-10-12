@@ -166,6 +166,12 @@ cmake --build build -j $(nproc)
 
 - Wayland 后端在配置期用 `pkg-config` 检测 `wayland-client` / `wayland-cursor` / `xkbcommon`（三者皆 `REQUIRED`：客户端主题光标 `wl_cursor_theme_*` 是 `set_cursor` 的硬依赖，缺失即配置期红灯而非运行期降级），并调用 `wayland-scanner` 把 `xdg-shell.xml` / `xdg-decoration-unstable-v1.xml` 生成为 C 胶水（落在 `build/wayland-gen/`，不入仓）。**依赖表无需追加包**：`libwayland-cursor` 属 wayland 核心项目，其头与 `.pc` 随核心 devel 包发布（Debian/Ubuntu 实测 `wayland-cursor.h` / `wayland-cursor.pc` 均在 `libwayland-dev` 内），上表已覆盖。
 - 服务端窗口装饰经 `zxdg_decoration_manager_v1` 协商：KDE 等支持方绘制标题栏；**GNOME / WSLg Weston 不实现该协议 → 后端自绘 CSD 标题栏兜底**（`AURORA_LOG_INFO` 提示），属合成器限制而非缺陷。
+- **平台差异（自绘装饰 / CSD）**：X11 后端的像素级 CSD 探针 `aurora_verify_x11_csd` 仅在
+  `AURORA_BACKEND_X11 ∧ AURORA_ENABLE_DEBUG ∧ AURORA_BUILD_VERIFY_TOOLS` 三开关同开时定义
+  （判据直读 `data()` 帧缓冲，Release 构建下该口被裁掉）；X11 无外延阴影 margin（不假设 ARGB
+  视觉与合成器），`WindowFrameStyle::shadow_margin_dp` 在该后端只作用于内缘缩放热区宽度。
+  Win32 的自绘装饰为**契约先行、实现待落地**（见 `specification/07-environment-modifier.md`
+  §4.1 三后端映射表），不代偿 Snap 布局与系统菜单。
 - 输入法桥协议 `zwp_text_input_manager_v3` 为**软探测**（`AURORA_HAVE_WL_TEXT_INPUT`，`PUBLIC` 编译宏 = `1`/`0`）：配置期在 `wayland-protocols` 的 XML 清单中找 `text-input-unstable-v3.xml`，命中则 `wayland-scanner` 生成胶水并置 `1`；缺失（老协议集发行版）则跳过生成并置 `0`——桥体整段被宏裁切，后端其余能力照常编译，**不报配置期红灯**（与 xdg-shell 硬依赖区分：输入法可运行期降级，协议头缺失不可）。
 - 非 Linux（含 Apple）平台开启任一后端将触发 `FATAL_ERROR`。
 - 静态分析口径：CI 的 lint 作业显式打开 X11 / Wayland / GLFW 及其余能力开关（§4.5），**只按上面「最小后端」示例 configure 的本地构建不构成 lint 覆盖面**——未开的宏其 `#ifdef` 收口代码不参与分析，`unique_findings = 0` 会被误读成「查过了」。

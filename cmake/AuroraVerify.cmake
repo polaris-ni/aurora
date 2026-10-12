@@ -174,6 +174,13 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_wgpu)
     endif ()
 
+    # ---- X11 客户端自绘装饰（真实 X server）：ClientSide 撤 WM 口沿后标题栏带真绘出 +
+    # content_inset 上报 + Auto/Frameless 零入侵口径。像素判据需 DEBUG 构建（data() 暴露帧缓冲）。
+    if (AURORA_BACKEND_X11 AND AURORA_ENABLE_DEBUG)
+        aurora_add_verify_probe(aurora_verify_x11_csd "${_aurora_verify_dir}/x11_csd_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_x11_csd)
+    endif ()
+
     # ---- X11 wgpu GPU 栅格（Linux 真实窗口 + 离屏直驱，WSLg vGPU 可验）：与 Win32 探针同段结构，
     # 宿主动态类型为 WgpuX11Surface，另加 XGetImage 截图落盘物证。需 WGPU+X11 通道编译进库。
     if (AURORA_BACKEND_GPU_WGPU AND AURORA_BACKEND_X11)
