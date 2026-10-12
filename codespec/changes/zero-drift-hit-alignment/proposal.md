@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-007 |
 | 提出日期 | 2026-10-12 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 |
 | 影响面 | `WindowHost` 位置类事件派发根（鼠标/滚轮/触控/文件拖放/程序化指针）、新增 `Window::hit_root()` / `hit_root_ready()` 公共访问器、Wayland 后端指针三入口 + 滚轮的转发出参口径（表面坐标直发）；X11/Win32/GLFW/Headless/Wasm 后端转发口径不变（已是整窗坐标）；不改 `DecorationPolicy` / `content_inset()` / 事件结构体字段语义 |
 
@@ -32,7 +32,7 @@
 
 1. headless 集成测试：注入非零 inset（top=36）后，按控件 `paint_bounds()` 的**实际绘制位置**经派发根点击可命中并触发 `on_click`；inset 归零时同点点击行为与历史一致（新增 `itest_content_inset_sink` 用例，逐值断言绘制盒与命中结果）。
 2. `WindowHost` 派发根语义有明确回退：`has_window()==false`（无头宿主）仍走 `scene_.root()`，既有程序化派发测试（`utest_application`）全绿。
-3. Win32 真机走查 `demo_csd_gallery`：ClientSide 预览窗按按钮可见位置点击「Cycle title-bar theme / Toggle window frame shadow / Toggle title-bar icon / Close this preview」逐一生效，无偏移；Borderless/Frameless 控件级 TitleBar 点击同步走查。
+3. Win32 真机走查 `demo_csd_gallery`：ClientSide 预览窗按按钮可见位置点击「Cycle title-bar theme / Toggle window frame shadow / Toggle title-bar icon / Close this preview」逐一生效，无偏移；Borderless/Frameless 控件级 TitleBar 点击同步走查。**实测补记（2026-10-12）**：控件级 TitleBar 的 `−` / `□` / `×` 在 Win32 为无害空动作——经 `WindowChrome` 转发的 `Surface::close()` / `minimize()` / `toggle_maximize()` / `set_fullscreen()` 为默认空实现、仅 Wayland 覆盖（既有平台范围，见 `specification/07-environment-modifier.md`「程序化窗口控制」段，非本变更引入）；命中链对齐以 `Info` 动作日志（按绘制位置逐次触发）与 `Close this preview` 可见位置点击判定，走查全过。执行记录见 `codespec/manual-test/10-window.md` TC-WINDOW-016。
 4. 全量 `ctest --preset ninja-test` 绿（含 `check_api_schema_sync`、`check_naming_conventions`、`check_doc_comments`、`lint`、`format-check` 等全部 `check_*`）。
 
 ## 回写落点
