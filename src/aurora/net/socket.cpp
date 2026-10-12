@@ -56,7 +56,7 @@ auto native_close(NativeSocket s) -> void {
 /// @brief 平台原生最近错误码（诊断文本用）。
 /// @return `WSAGetLastError()` 的 int 化值。
 auto native_last_error() -> int {
-    return static_cast<int>(::WSAGetLastError());
+    return ::WSAGetLastError();
 }
 
 /// @brief recv 超时判据：Winsock 显式回报 WSAETIMEDOUT。
@@ -111,7 +111,7 @@ auto from_handle(std::intptr_t h) -> NativeSocket {
 /// @return Winsock `INVALID_SOCKET` 或 POSIX 负值时为 true。
 auto native_is_invalid(NativeSocket s) -> bool {
 #ifdef AURORA_PLATFORM_WINDOWS
-    return s == INVALID_SOCKET;
+    return s == static_cast<NativeSocket>(INVALID_SOCKET);
 #else
     return s < 0;
 #endif
@@ -270,9 +270,9 @@ auto StreamSocket::set_io_timeout(std::chrono::milliseconds timeout) const -> Re
     const auto ms = static_cast<long long>(std::max<std::int64_t>(timeout.count(), 1));
 #ifdef AURORA_PLATFORM_WINDOWS
     // Winsock 形态：DWORD 毫秒数。
-    const DWORD timeout_value = static_cast<DWORD>(ms);
+    const auto timeout_value = static_cast<DWORD>(ms);
     const void *const option = &timeout_value;
-    const int option_size = static_cast<int>(sizeof(timeout_value));
+    constexpr int option_size = static_cast<int>(sizeof(timeout_value));
 #else
     // POSIX 形态：timeval（秒 + 微秒）；微秒字段先在目标类型内乘，避免 int 域算完再隐式拓宽。
     timeval timeout_value{};

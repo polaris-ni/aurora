@@ -7,17 +7,19 @@
 ///           收发超时落独立码 `net-recv-timeout`（与 `net-recv-failed` 以 code 区分，不依赖措辞；
 ///           并核对「毫秒意图」真实生效——历史坑：Windows 上 5 秒被读成 5 毫秒）、
 ///           `is_loopback_peer` 判定、`Session` 嵌套引用计数、监听口重复 bind 落 `net-bind-failed`。
-///           全程同线程即可（TCP 握手由内核 backlog 完成，无需 accept 线程）；端口一律 0 =
+///           全程同线程即可（TCP 握手由内核 backlog 完成，无需 accept 线程）；唯一例外是
+///           1MiB+7 往返用例的读侧住独立线程——Windows 回环无读者时仅缓冲约 320KiB，
+///           单线程先写后读必死锁（Linux 缓冲自动调大无此限制）。端口一律 0 =
 ///           系统分配，只连 127.0.0.1。平台差异都被本层吸收，断言两侧应同色。
 /// ⚠️ 平台分支写在**用例体内**而非包裹 `AURORA_TEST_CASE` 声明（registry_integrity 静态扫源码，
 ///    被 #ifdef 摘掉的声明在另一种构建里必然单边失踪）；wasm 无 BSD socket 语义，用例体退化
 ///    为 AURORA_TEST_SKIP。
 
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -60,7 +62,8 @@ AURORA_TEST_CASE(listen_reports_assigned_port) {
     auto moved = std::move(listener);
     AURORA_TEST_CHECK_TRUE(moved.is_valid());
     AURORA_TEST_CHECK_EQ(moved.port(), bound_port);
-    AURORA_TEST_CHECK_FALSE(listener.is_valid());  // NOLINT(bugprone-use-after-move, clang-analyzer-cplusplus.Move): 移动后仅断言其无效态，即为被测语义
+    AURORA_TEST_CHECK_FALSE(listener.is_valid());  // NOLINT(bugprone-use-after-move, clang-analyzer-cplusplus.Move):
+                                                   // 移动后仅断言其无效态，即为被测语义
 
     moved.close();
     moved.close();  // 幂等
@@ -105,11 +108,22 @@ AURORA_TEST_CASE(wait_readable_polls_then_accepts) {
 
 // write_all/read_some 字节完整往返：1MiB+7 刻意越过 ≤1MiB 分块边界（末轮剩 7 字节），
 // 双向都走一遍并校验内容逐字节一致——分块循环里的任何指针推进/窄化错误都会在此转红。
+// ⚠️ 读侧必须住在独立线程：实测 Windows 回环内核在无读者时只吞约 320KiB（非阻塞
+// `send` 进 WSAEWOULDBLOCK 前的可入队量）即停滞，远小于 1MiB+7 载荷；单线程「先写后读」
+// 会让阻塞写永远等一个尚未开始的读者而死锁（Linux 回环缓冲自动调大可吞整个载荷，
+// 故该死锁只在 Windows 腿显形）。两个方向各起一个读线程、写完即 join：同一时刻
+// 无任何套接字被两个线程共用（读线程只读、写只在 join 之后），不破 `StreamSocket`
+// 单所有权约定。线程内不做断言（框架计数器非线程安全），健康态经出参带回主线程核账；
+// 收发都挂超时，读者夭折时写方以超时失败转红而非把 join 挂死。
 AURORA_TEST_CASE(write_all_read_some_roundtrip_exact_bytes) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
+    AURORA_TEST_REQUIRE_THREADS();
+
     constexpr std::size_t payload_size = (1U << 20U) + 7U;
+    // 失败路径有界：读者夭折后写方不得无限阻塞（否则 join 把用例挂死到 runner 超时）。
+    constexpr auto transfer_timeout = std::chrono::seconds{10};
     std::string payload(payload_size, '\0');
     for (std::size_t i = 0; i < payload_size; ++i) {
         payload[i] = static_cast<char>(1 + (i % 250));
@@ -121,30 +135,40 @@ AURORA_TEST_CASE(write_all_read_some_roundtrip_exact_bytes) {
     AURORA_TEST_REQUIRE(client.ok());
     auto peer = listener.accept();
     AURORA_TEST_REQUIRE(peer.ok());
+    AURORA_TEST_REQUIRE(client.value().set_io_timeout(transfer_timeout).ok());
+    AURORA_TEST_REQUIRE(peer.value().set_io_timeout(transfer_timeout).ok());
 
-    AURORA_TEST_CHECK_TRUE(client.value().write_all(std::span<const char>(payload)).ok());
+    // 读满即止；读出错或对端提前关闭（0 字节）经 healthy 报告，由主线程断言。
+    auto drain_into = [](const aurora::net::StreamSocket &from, std::string &out, bool &healthy) {
+        std::vector<char> buf(std::size_t{64} * 1024U);
+        while (out.size() < payload_size) {
+            const auto got = from.read_some(std::span<char>(buf));
+            if (!got.ok() || got.value() == std::size_t{0}) {
+                healthy = false;
+                return;
+            }
+            out.append(buf.data(), got.value());
+        }
+    };
 
     std::string received;
-    std::vector<char> buf(std::size_t{64} * 1024U);
-    while (received.size() < payload_size) {
-        const auto got = peer.value().read_some(std::span<char>(buf));
-        AURORA_TEST_REQUIRE(got.ok());
-        AURORA_TEST_REQUIRE_NE(got.value(), std::size_t{0});
-        received.append(buf.data(), got.value());
-    }
+    bool healthy = true;
+    std::thread reader(drain_into, std::ref(peer.value()), std::ref(received), std::ref(healthy));
+    AURORA_TEST_CHECK_TRUE(client.value().write_all(std::span<const char>(payload)).ok());
+    reader.join();
+    AURORA_TEST_CHECK_TRUE(healthy);
     AURORA_TEST_CHECK_EQ(received.size(), payload_size);
     AURORA_TEST_CHECK_TRUE(received == payload);
 
     // 反向 echo：服务端写回、客户端读回同长度（两方向共用同一分块实现，须同色）。
+    std::string echoed;
+    bool echo_healthy = true;
+    std::thread echo_reader(drain_into, std::ref(client.value()), std::ref(echoed), std::ref(echo_healthy));
     AURORA_TEST_CHECK_TRUE(peer.value().write_all(std::span<const char>(payload)).ok());
-    std::size_t echoed = 0;
-    while (echoed < payload_size) {
-        const auto got = client.value().read_some(std::span<char>(buf));
-        AURORA_TEST_REQUIRE(got.ok());
-        AURORA_TEST_REQUIRE_NE(got.value(), std::size_t{0});
-        echoed += got.value();
-    }
-    AURORA_TEST_CHECK_EQ(echoed, payload_size);
+    echo_reader.join();
+    AURORA_TEST_CHECK_TRUE(echo_healthy);
+    AURORA_TEST_CHECK_EQ(echoed.size(), payload_size);
+    AURORA_TEST_CHECK_TRUE(echoed == payload);
 
     // 空 span 边界：write_all 空 = OK、read_some 空 = 0，均不触碰系统调用。
     AURORA_TEST_CHECK_TRUE(client.value().write_all(std::span<const char>{}).ok());
@@ -192,6 +216,9 @@ AURORA_TEST_CASE(connect_failure_reports_net_connect_failed) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
+    // Session 须活过随后的 connect_loopback：Windows 侧 WSAStartup 归属会话引用计数，
+    // 会话先于连接析构会令 socket() 落 WSANOTINITIALISED（net-socket-failed），
+    // 直接掩盖被测的 connect 失败路径；POSIX 侧 Session 零成本，无此约束。
     aurora::net::Session session;
     std::uint16_t dead_port = 0;
     {
@@ -230,7 +257,8 @@ AURORA_TEST_CASE(io_timeout_reports_distinct_code) {
     char buf[16];
     const auto started = std::chrono::steady_clock::now();
     const auto timed_out = client.value().read_some(std::span<char>(buf, sizeof(buf)));
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
 
     AURORA_TEST_REQUIRE(!timed_out.ok());
     AURORA_TEST_CHECK_EQ(timed_out.error().code_enum, ErrorCode::NetRecvTimeout);

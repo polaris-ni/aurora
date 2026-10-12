@@ -13,6 +13,10 @@
 /// ⚠️ 平台分支写在**用例体内**而非包裹 `AURORA_TEST_CASE`：registry_integrity 是「静态扫源码
 /// 的用例名字面量」与「runner --list」逐条比对，被 `#ifdef` 摘掉的声明在另一种构建里必然单边
 /// 失踪。故 wasm 只让用例体退化为 AURORA_TEST_SKIP，声明恒可见（与 utest_x11_surface 同一手法）。
+/// ⚠️ 触socket 的用例须在体内持有 `aurora::net::Session`（`socket.h` 契约：Windows 侧
+/// WSAStartup 是句柄操作的生命周期前提；POSIX 侧零成本）。漏持在 Linux 腿无感、Windows 腿
+/// 恒红（`socket()` 落 WSANOTINITIALISED）——CHG-006 迁移时曾漏，后由本注记与两处
+/// `AURORA_TEST_REQUIRE_TRUE(runtime.ok())` 把守。
 
 #include <chrono>
 #include <cstdint>
@@ -42,6 +46,9 @@ namespace {
 
 /// @brief 打开一个只绑回环、端口由系统分配的监听口，并把实际端口写回 `port_out`
 /// （经核心公共层 `aurora::net`，CHG-006；失败返回无效 `Listener`）。
+/// @param port_out 实际绑定的系统分配端口（失败时置 0）。
+/// @pre 调用方作用域内持有活跃 `aurora::net::Session`：Windows 侧 `WSAStartup` 是
+/// `aurora::net` 全部句柄操作的生命周期前提（`socket.h` 契约），POSIX 侧为零成本占位。
 [[nodiscard]] auto open_loopback_listener(std::uint16_t &port_out) -> aurora::net::Listener {
     auto listener = aurora::net::Listener::listen_loopback(0, 1);  // 临时端口：避免与并发用例或本机服务撞号
     if (!listener) {
@@ -118,6 +125,11 @@ AURORA_TEST_CASE(io_timeout_survives_a_slow_response) {
 #else
     AURORA_TEST_REQUIRE_THREADS();
 
+    // `aurora::net` 句柄的生命周期前提（Windows WSAStartup 归属）；本会话须活过
+    // 下面全部监听/连接操作（含服务线程与随后的客户端连接）。
+    aurora::net::Session runtime;
+    AURORA_TEST_REQUIRE_TRUE(runtime.ok());
+
     std::uint16_t port = 0;
     aurora::net::Listener listener = open_loopback_listener(port);
     AURORA_TEST_REQUIRE(listener.is_valid());
@@ -144,7 +156,7 @@ AURORA_TEST_CASE(resolve_port_prefers_argument_then_env_then_default) {
 #else
     using aurora::tools::e2e::resolve_port;
     const char *env_name = aurora::tools::inspector::AURORA_PORT_ENV.data();
-    const auto default_port = aurora::tools::inspector::AURORA_DEFAULT_PORT;
+    constexpr auto default_port = aurora::tools::inspector::AURORA_DEFAULT_PORT;
 
     // 显式入参最高优先：环境变量即便声明了也不看。
     set_env_var(env_name, "7777");
@@ -175,6 +187,10 @@ AURORA_TEST_CASE(transport_error_distinguishable_when_server_down) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; this client is not built for wasm");
 #else
+    // 会话须活过「开监听拿端口 → 关闭 → 客户端连接」全程（连接同样经 `aurora::net`）。
+    aurora::net::Session runtime;
+    AURORA_TEST_REQUIRE_TRUE(runtime.ok());
+
     // 先开监听拿一个系统分配的端口号再立刻关掉：同一时刻几乎不可能有人抢注，
     // 由此得到「肯定没人监听」的回环端口。
     std::uint16_t port = 0;
