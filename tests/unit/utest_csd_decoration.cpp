@@ -10,7 +10,6 @@
 ///   ⑦ `make_paint_state` 的逐字段装配。
 /// 全程进程内纯值运算，不连任何合成器 / 窗口系统，无头 CI 亦可跑。
 
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -296,8 +295,8 @@ AURORA_TEST_CASE(hidden_button_reflows_and_vacated_slot_reassigned) {
 
 AURORA_TEST_CASE(hit_button_priority_order) {
     // 人为造三盒重叠，锁定关闭 > 最大化 > 最小化的判定顺序。
-    const Rect overlap{.origin = Point{.x = 100.0F, .y = 4.0F}, .size = Size{.width = 20.0F, .height = 20.0F}};
-    const Point probe{.x = 110.0F, .y = 14.0F};
+    constexpr Rect overlap{.origin = Point{.x = 100.0F, .y = 4.0F}, .size = Size{.width = 20.0F, .height = 20.0F}};
+    constexpr Point probe{.x = 110.0F, .y = 14.0F};
 
     TitleBarGeometry all;
     all.close = overlap;
@@ -361,7 +360,7 @@ AURORA_TEST_CASE(reveal_resets_when_leaving_fullscreen) {
 
 AURORA_TEST_CASE(double_click_window_boundary) {
     // 阈值符号直取 event 层常量：装饰层与 widget 树的 click_count 共用同一份真源。
-    const std::uint32_t window = AURORA_DEFAULT_CLICK_WINDOW_MS;
+    constexpr std::uint32_t window = AURORA_DEFAULT_CLICK_WINDOW_MS;
     csd::DecorationInteraction st;
 
     AURORA_TEST_CHECK_FALSE(csd::consume_double_click(st, 1000U, 40.0, 10.0));  // 首击不成连击
@@ -371,7 +370,7 @@ AURORA_TEST_CASE(double_click_window_boundary) {
 }
 
 AURORA_TEST_CASE(double_click_radius_boundary) {
-    const auto radius = static_cast<double>(AURORA_DEFAULT_CLICK_RADIUS_DP);
+    constexpr auto radius = static_cast<double>(AURORA_DEFAULT_CLICK_RADIUS_DP);
     csd::DecorationInteraction st;
 
     AURORA_TEST_CHECK_FALSE(csd::consume_double_click(st, 0U, 100.0, 20.0));
@@ -450,9 +449,9 @@ AURORA_TEST_CASE(make_paint_state_assembles_fields) {
 
 AURORA_TEST_CASE(shadow_resize_band_follows_resolved_decoration) {
     // 缩放热区是否存在由「解析后的装饰形态 × 几何态」共同决定：只有带阴影边距的组合才有八向热区。
-    constexpr double content_w = 800.0;
-    constexpr double content_h = 600.0;
     for (const SnapshotRow &row : AURORA_POLICY_SNAPSHOT) {
+        constexpr double content_h = 600.0;
+        constexpr double content_w = 800.0;
         const csd::CsdMode m = csd::resolve_mode(row.policy, row.ssd);
         const std::string tag = row_tag(row);
         const int normal_margin = csd::shadow_margin_dp(m.client_decorated(), WindowMode::Normal, false);
@@ -524,29 +523,33 @@ AURORA_TEST_CASE(pressed_state_reaches_paint_state) {
 }
 
 AURORA_TEST_CASE(default_metrics_reproduce_legacy_geometry) {
-    // 度量覆写引入后 `TitleBarStyle{}` 必须**逐值复现**引入前的几何，否则三套既有预设的
-    // 观感会被一次性改坏。期望值全部手写推算（Adwaita，width=800，栏高 36）：
-    //   按钮边长 clamp(36-10, 22, 30)=26，间距 4，右缘外边距 8；图标 min(16, 36-20)=16 @ x=12。
+    // 度量覆写引入后 `TitleBarStyle{}`（= 默认 Adwaita）的几何基线必须显式钉住，否则改动
+    // 推导式会一次性改坏三套既有预设的观感。期望值全部手写推算（Adwaita，width=800，栏高 36）：
+    //   按钮边长 clamp(36-10, 22, 30)=26，间距 6，右缘外边距 6；图标 min(16, 36-20)=16 @ x=12。
+    // ⚠️ 间距 / 外边距原为 4 / 8（close 766 / min 706 / 标题 662），CHG-009 按 libadwaita
+    //   `.toolbar` 的「6px margins and spacing」改为 6 / 6，本用例基线随之更新。
     const TitleBarStyle style = sample_style();
     const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, true);
 
-    AURORA_TEST_CHECK_EQ(g.close.origin.x, 766.0F);
+    AURORA_TEST_CHECK_EQ(g.close.origin.x, 768.0F);
     AURORA_TEST_CHECK_EQ(g.close.origin.y, 5.0F);
     AURORA_TEST_CHECK_EQ(g.close.size.width, 26.0F);
     AURORA_TEST_CHECK_EQ(g.maximize.origin.x, 736.0F);
-    AURORA_TEST_CHECK_EQ(g.minimize.origin.x, 706.0F);
+    AURORA_TEST_CHECK_EQ(g.minimize.origin.x, 704.0F);
 
     AURORA_TEST_CHECK_EQ(g.icon.origin.x, 12.0F);
     AURORA_TEST_CHECK_EQ(g.icon.size.width, 16.0F);
 
-    // 标题左界 = 图标右缘 + 8；右界 = 按钮组内侧 - 8。
-    AURORA_TEST_CHECK_EQ(g.title.origin.x, 36.0F);
-    AURORA_TEST_CHECK_EQ(g.title.size.width, 662.0F);
+    // 标题区：Adwaita 档 `center_title` 默认 true ⇒ 整宽带（居中由绘制层按实测量宽完成）。
+    AURORA_TEST_CHECK_EQ(g.title.origin.x, 0.0F);
+    AURORA_TEST_CHECK_EQ(g.title.size.width, 800.0F);
 }
 
 AURORA_TEST_CASE(explicit_metrics_override_derived_rules) {
     // 非 0 才是覆写：按钮 40 / 间距 10 / 外边距 20 / 图标 24 / 内容内边距 30。
+    // `center_title` 现默认为 true（居中档给整宽带），本用例测左对齐口径的标题区，故显式置回。
     TitleBarStyle style = sample_style();
+    style.center_title = false;
     style.metrics.button_size = 40.0F;
     style.metrics.button_gap = 10.0F;
     style.metrics.button_margin = 20.0F;

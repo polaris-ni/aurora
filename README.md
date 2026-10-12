@@ -151,7 +151,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 | [codespec/CODING_STANDARDS.md](codespec/CODING_STANDARDS.md) | 编码规范 / AI 友好性规则                |
 | [codespec/GUIDELINE.md](codespec/GUIDELINE.md)               | 复制即用配方（最小可编译片段）          |
 | [codespec/BUILD_OPTIONS.md](codespec/BUILD_OPTIONS.md)       | CMake 开关 / 编译宏 / 环境变量（权威）  |
-| [CHANGELOG.md](CHANGELOG.md)                             | 版本与变更记录                          |
+| [CHANGELOG.md](CHANGELOG.md)                                 | 版本与变更记录                          |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)           | 第三方组件许可清单                      |
 
 ## 许可证

@@ -5,7 +5,8 @@
 //   Auto        —— 优先系统 SSD；Win32 下即 DWM 系统标题栏，host 自绘不激活
 //   ServerSide  —— 强制系统标题栏（KDE / Win32 DWM），无 host 自绘
 //   ClientSide  —— 强制 host 自绘 CSD 标题栏（本次 CHG-004 的 Win32 宿主路径）：
-//                  预览窗内置按钮可运行时切换 from_preset 主题 / 切换窗框投影 /
+//                  预览窗内置按钮可运行时循环切换 from_preset 的**全部六档**预设
+//                  （Adwaita / Windows / Mac 三套视觉语言 × 明暗两档）/ 切换窗框投影 /
 //                  放置或清除标题栏图标（演示 set_title_bar_style / set_window_frame_style /
 //                  set_title_bar_icon 三个运行期 setter）
 //   Borderless  —— 无标题栏、保留八向缩放边框；预览窗嵌入控件级 TitleBar widget
@@ -18,6 +19,7 @@
 //    实现仅 Win32 / X11 后端生效；其余平台对应 setter 为空实现（窗口仍可开，只是系统装饰）。
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "aurora/app/application.h"
@@ -31,8 +33,8 @@
 
 namespace {
 
-/// @brief 策略档位中文标签。
-[[nodiscard]] auto policy_label(au::DecorationPolicy p) -> std::string {
+/// @brief 策略档位中文标签（各分支均为字面量，返回视图避免每次调用都构造 std::string）。
+[[nodiscard]] auto policy_label(au::DecorationPolicy p) -> std::string_view {
     switch (p) {
         case au::DecorationPolicy::Auto:
             return "Auto";
@@ -48,8 +50,8 @@ namespace {
     return "?";
 }
 
-/// @brief 策略档位的使用要点（预览窗顶部说明）。
-[[nodiscard]] auto policy_description(au::DecorationPolicy p) -> std::string {
+/// @brief 策略档位的使用要点（预览窗顶部说明）；同样返回字面量视图。
+[[nodiscard]] auto policy_description(au::DecorationPolicy p) -> std::string_view {
     switch (p) {
         case au::DecorationPolicy::Auto:
             return "Auto: prefers the system title bar (SSD). On Win32 the DWM bar is shown and the host "
@@ -69,50 +71,62 @@ namespace {
     return "";
 }
 
-/// @brief 生成一张 24x24 的演示图标（聚合构造 Image，无需外部资源）。
+/// @brief 演示用窗口图标（内联 SVG 矢量图，经内置光栅器解码）。
+///
+/// ⚠️ 内置 SVG 光栅器仅支持 rect/circle/ellipse/line/polygon/polyline 基元，**不支持 `<path>`**
+/// （见 src/aurora/core/image_svg.cpp 顶部注释）—— 微软 Fluent 官方图标库的资源几乎全是 `<path>`，
+/// 直接下载会渲染为空图。故此处用基元手绘一枚「带标题栏的窗口」图标（同风格、矢量、零外部依赖），
+/// 既替换掉原先的占位色块，也演示 `set_title_bar_icon` 的真实矢量图标路径。
+/// 标题栏图标槽仅 16dp，故先光栅化为 64px 再交给绘制层缩放进槽，保证小尺寸下仍清晰。
 [[nodiscard]] auto make_demo_icon() -> std::shared_ptr<au::Image> {
-    auto img = std::make_shared<au::Image>();
-    img->width = 24;
-    img->height = 24;
-    img->pixels.resize(static_cast<std::size_t>(24) * 24 * 4U, 0U);
-    for (int y = 0; y < 24; ++y) {
-        for (int x = 0; x < 24; ++x) {
-            const std::size_t i = ((static_cast<std::size_t>(y) * 24U) + static_cast<std::size_t>(x)) * 4U;
-            const bool top = y < 12;
-            // 上下两色块：让标题栏图标槽里出现可辨识的图形（非纯色）
-            img->pixels[i + 0U] = top ? 0x4C : 0xAF;
-            img->pixels[i + 1U] = top ? 0xAF : 0x50;
-            img->pixels[i + 2U] = 0xFF;
-            img->pixels[i + 3U] = 0xFF;
-        }
+    constexpr auto window_icon_svg = R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">)"
+                                     R"(<rect x="3" y="4" width="18" height="16" rx="2" fill="#2563EB"/>)"
+                                     R"(<line x1="3" y1="9" x2="21" y2="9" stroke="#FFFFFF" stroke-width="2"/>)"
+                                     R"(<rect x="6" y="12" width="12" height="6" rx="1" fill="#BFDBFE"/>)"
+                                     R"(</svg>)";
+    const std::string doc{window_icon_svg};
+    auto r = au::detail::load_image_svg(std::vector<std::uint8_t>{doc.begin(), doc.end()}, 64, 64);
+    if (!r) {
+        return nullptr;  // 光栅失败时退化为「无图标」（开关仍可用，不崩）
     }
-    return img;
+    return std::make_shared<au::Image>(std::move(r.value()));
 }
 
 /// @brief 主题预设序号 → 枚举 + 名称（ClientSide 预览窗循环切换用）。
+///
+/// 六档全覆盖（三套视觉语言 × 明暗两档）：漏掉 Mac 两档会让 `set_title_bar_style` 的
+/// 红绿灯分支在本 demo 里永远走不到，回归时只能靠单测兜底。
 [[nodiscard]] auto theme_preset(int idx) -> au::CsdPreset {
-    switch (idx % 4) {
+    switch (idx % 6) {
         case 0:
             return au::CsdPreset::AdwaitaDark;
         case 1:
             return au::CsdPreset::AdwaitaLight;
         case 2:
             return au::CsdPreset::WindowsDark;
-        default:
+        case 3:
             return au::CsdPreset::WindowsLight;
+        case 4:
+            return au::CsdPreset::MacDark;
+        default:
+            return au::CsdPreset::MacLight;
     }
 }
 
-[[nodiscard]] auto theme_name(int idx) -> std::string {
-    switch (idx % 4) {
+[[nodiscard]] auto theme_name(int idx) -> std::string_view {
+    switch (idx % 6) {
         case 0:
             return "AdwaitaDark";
         case 1:
             return "AdwaitaLight";
         case 2:
             return "WindowsDark";
-        default:
+        case 3:
             return "WindowsLight";
+        case 4:
+            return "MacDark";
+        default:
+            return "MacLight";
     }
 }
 
@@ -147,7 +161,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     // 520dp 定高：预览内容（标题 + 说明 + 读数 + 三钮 + 状态 + 关闭钮 ≈ 505dp）完整呈现，
     // 不给「内容溢出裁断」留观感歧义——白条修复验证要看的是几何贴合，不是溢出裁剪。
     po.size = au::Size{.width = 560.0F, .height = 520.0F};
-    po.title = policy_label(p) + " preview";
+    po.title = std::string(policy_label(p)) + " preview";
     po.style.decoration = p;
     po.role = au::WindowRole::Auxiliary;
     auto wr = au::create_native_window(po);
@@ -167,9 +181,9 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
                                     const std::shared_ptr<au::State<au::LocalizedString>> &preview_info,
                                     const std::shared_ptr<au::State<au::LocalizedString>> &note) -> au::Node {
     std::vector<au::Node> kids;
-    kids.emplace_back(GradientTitle{policy_label(policy) + " — preview"});
+    kids.emplace_back(GradientTitle{std::string(policy_label(policy)) + " — preview"});
     kids.emplace_back(gap(10));
-    kids.emplace_back(au::Text{policy_description(policy)});
+    kids.emplace_back(au::Text{std::string(policy_description(policy))});
     kids.emplace_back(gap(10));
     kids.emplace_back(au::Text{au::TextProps{.content = au::Reactive{preview_info}}});
     kids.emplace_back(gap(10));
@@ -182,10 +196,12 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
 
         au::Button theme_btn{au::ButtonProps{.label = "Cycle title-bar theme (host self-draw)"}};
         theme_btn.on_click = [self_id, &app, theme_idx, note]() -> void {
-            *theme_idx = (*theme_idx + 1) % 4;
+            *theme_idx = (*theme_idx + 1) % 6;
+            const std::string label{theme_name(*theme_idx)};
             if (auto *w = resolve_preview(app, self_id)) {
                 w->set_title_bar_style(au::TitleBarStyle::from_preset(theme_preset(*theme_idx)));
-                note->set(au::LocalizedString{"host title-bar theme → " + theme_name(*theme_idx)});
+                note->set(au::LocalizedString{std::string{"host title-bar theme → "} + label});
+                w->set_title(label);
             }
         };
         kids.emplace_back(std::move(theme_btn));
@@ -217,7 +233,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         // 控件级 TitleBar widget：应用自绘标题栏，经 WindowChrome 驱动窗口状态
         // （headless 下 chrome 缺失，交互安全 no-op）。
         au::TitleBar tb;
-        tb.set_title(policy_label(policy) + " (widget)")
+        tb.set_title(std::string(policy_label(policy)) + " (widget)")
             .set_subtitle("app-drawn via WindowChrome")
             .add_action({.label = "Info", .on_click = []() -> void { AURORA_LOG_INFO("demo", "csdg: info clicked"); }});
         kids.emplace_back(std::move(tb));
@@ -248,7 +264,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
                                  const std::shared_ptr<au::State<au::LocalizedString>> &note,
                                  au::DecorationPolicy &preview_policy) -> au::Node {
     const auto add_policy = [&](au::DecorationPolicy p, std::vector<au::Node> &kids) -> void {
-        au::Button b{au::ButtonProps{.label = policy_label(p) + " preview"}};
+        au::Button b{au::ButtonProps{.label = std::string(policy_label(p)) + " preview"}};
         b.on_click = [&app, preview_id, preview_info, note, &preview_policy, p]() -> void {
             open_preview(app, p, preview_id, preview_info, note, preview_policy);
         };

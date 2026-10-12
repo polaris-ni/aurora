@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "aurora/core/font.h"
+#include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/window/detail/csd_geometry.h"
 #include "aurora/window/title_bar_geometry.h"
@@ -17,6 +18,18 @@ namespace {
 auto shift_to_surface(const Rect &r, float ox, float oy) -> Rect {
     return Rect{.origin = Point{.x = r.origin.x + ox, .y = r.origin.y + oy}, .size = r.size};
 }
+
+// 三套语言的标题栏字形一律走**固定设计网格**而非按钮盒比例：原生符号尺寸与按钮盒无关
+// ——Windows 是 10×10 epx（Segoe Fluent Icons）、GNOME 是 16×16 的 symbolic 图标、
+// macOS 红绿灯内符号约 6pt（直径 12pt 的圆里占一半）。早前统一按「盒宽 / 3」推导，使字形随
+// 盒放大（Windows 档实测占盒宽 2/3、Mac 档占圆直径 2/3），与真机差距显著且相邻字形互相挤在
+// 一起，故按各自的设计网格重写。
+constexpr float AURORA_WIN_GLYPH_HALF_DP = 5.0F;  // 设计网格半宽（10×10 格）
+constexpr float AURORA_WIN_GLYPH_STROKE_DP = 1.0F;  // 单线线宽（真机 1px @100% DPI）
+constexpr float AURORA_ADWAITA_GLYPH_HALF_DP = 8.0F;  // 16×16 symbolic 网格半宽
+constexpr float AURORA_ADWAITA_GLYPH_STROKE_DP = 1.5F;  // symbolic 单线线宽（沿用既有观感）
+constexpr float AURORA_MAC_GLYPH_HALF_DP = 3.0F;  // 6pt 符号半宽（12pt 圆内占一半）
+constexpr float AURORA_MAC_GLYPH_STROKE_DP = 1.0F;  // 圆内符号线宽
 }  // namespace
 
 auto paint_window_shadow(Painter &p, const TitleBarPaintState &s) -> void {
@@ -84,7 +97,20 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
         Font f;
         f.size_pt = s.style.metrics.title_font_size_pt;
         f.weight = s.style.metrics.title_font_weight;
-        p.draw_text(g.title, s.title, f, fg);
+        // center_title：几何层给的是**整宽带**（不扣按钮组），居中由绘制层按实测量宽完成
+        // ——macOS 窗口标题即居中，WinUI 左对齐。偏移后右缘不动，故超宽标题的截断口径与
+        // 左对齐时一致，不会因居中而少截/多截。
+        const float tw = render::FontEngine::measure_width(s.title, f);
+        const float off = s.style.center_title ? std::max(0.0F, (g.title.size.width - tw) * 0.5F) : 0.0F;
+        // 垂直居中：`draw_text` 的 y 是**行盒顶**（GDI TA_TOP 语义，基线 = 顶 + ascent），把标题
+        // 带原样传下去等于把文字顶到栏的上缘——实测墨迹中心比栏高中心偏上 Adwaita 6dp、
+        // Windows 8.5dp、Mac 1.5dp。三套语言的标题在栏内都是垂直居中的，故按字体行盒高把带顶
+        // 下移半程（行盒 = ascent+descent，与绘制侧同一 `measure_height` 口径；行盒含下伸部，
+        // 纯大写标题的视觉中心因此略低于几何中心 1~2dp，属字体度量固有偏差，不另加补偿常数）。
+        const float dy = std::max(0.0F, (g.title.size.height - render::FontEngine::measure_height(f)) * 0.5F);
+        const Rect band{.origin = Point{.x = g.title.origin.x + off, .y = g.title.origin.y + dy},
+                        .size = Size{.width = g.title.size.width - off, .height = g.title.size.height - dy}};
+        p.draw_text(band, s.title, f, fg);
     }
 
     // 悬停序号约定：0=minimize / 1=maximize / 2=close（宿主命中测试写入，与布局无关）。
@@ -107,103 +133,149 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
     auto center_of = [](const Rect &r) {
         return Point{.x = r.origin.x + (r.size.width * 0.5F), .y = r.origin.y + (r.size.height * 0.5F)};
     };
-    auto glyph_min = [&](const Rect &r, float lw, const Color &c) {
-        const Point m = center_of(r);
-        const float e = r.size.width / 3.0F;
-        p.draw_line(Point{.x = m.x - e, .y = m.y}, Point{.x = m.x + e, .y = m.y}, lw, c);
+    // 线段原语（三套语言共用）：字形一律由「横线 / 方框或双框 / 对角 ✕」组合而成。
+    const auto stroke = [&](float x1, float y1, float x2, float y2, float lw, const Color &c) -> void {
+        p.draw_line(Point{.x = x1, .y = y1}, Point{.x = x2, .y = y2}, lw, c);
     };
-    auto glyph_max = [&](const Rect &r, float lw, const Color &c) {
+    // 形状三件套按调用方给定的**设计网格半宽** `half` 与线宽 `lw` 居中绘制——盒再宽也不放大
+    // （各语言的 half 常量见文件顶部）。
+    const auto glyph_min_at = [&](const Rect &r, float half, float lw, const Color &c) -> void {
         const Point m = center_of(r);
-        const float e = r.size.width / 3.6F;
+        stroke(m.x - half, m.y, m.x + half, m.y, lw, c);  // 与真机一致：横线过按钮盒垂直中心
+    };
+    const auto glyph_max_at = [&](const Rect &r, float half, float lw, const Color &c) -> void {
+        const Point m = center_of(r);
         if (s.mode != WindowMode::Maximized) {
             // □ 空心方框。
-            p.draw_line(Point{.x = m.x - e, .y = m.y - e}, Point{.x = m.x + e, .y = m.y - e}, lw, c);
-            p.draw_line(Point{.x = m.x + e, .y = m.y - e}, Point{.x = m.x + e, .y = m.y + e}, lw, c);
-            p.draw_line(Point{.x = m.x + e, .y = m.y + e}, Point{.x = m.x - e, .y = m.y + e}, lw, c);
-            p.draw_line(Point{.x = m.x - e, .y = m.y + e}, Point{.x = m.x - e, .y = m.y - e}, lw, c);
+            stroke(m.x - half, m.y - half, m.x + half, m.y - half, lw, c);
+            stroke(m.x + half, m.y - half, m.x + half, m.y + half, lw, c);
+            stroke(m.x + half, m.y + half, m.x - half, m.y + half, lw, c);
+            stroke(m.x - half, m.y + half, m.x - half, m.y - half, lw, c);
         } else {
             // ▯ 还原：前实框 + 右上错位背框（双框表达「已最大化，点击还原」）。
-            const float o = e * 0.45F;
-            p.draw_line(Point{.x = m.x - e, .y = m.y + o - e}, Point{.x = m.x + e, .y = m.y + o - e}, lw, c);
-            p.draw_line(Point{.x = m.x + e, .y = m.y + o - e}, Point{.x = m.x + e, .y = m.y + o + e}, lw, c);
-            p.draw_line(Point{.x = m.x + e, .y = m.y + o + e}, Point{.x = m.x - e, .y = m.y + o + e}, lw, c);
-            p.draw_line(Point{.x = m.x - e, .y = m.y + o + e}, Point{.x = m.x - e, .y = m.y + o - e}, lw, c);
-            p.draw_line(Point{.x = m.x - e + o, .y = m.y - e}, Point{.x = m.x + e + o, .y = m.y - e}, lw, c);
-            p.draw_line(Point{.x = m.x + e + o, .y = m.y - e}, Point{.x = m.x + e + o, .y = m.y + e}, lw, c);
-            p.draw_line(Point{.x = m.x + e + o, .y = m.y + e}, Point{.x = m.x - e + o, .y = m.y + e}, lw, c);
-            p.draw_line(Point{.x = m.x - e + o, .y = m.y + e}, Point{.x = m.x - e + o, .y = m.y - e}, lw, c);
+            const float o = half * 0.45F;
+            stroke(m.x - half, m.y + o - half, m.x + half, m.y + o - half, lw, c);
+            stroke(m.x + half, m.y + o - half, m.x + half, m.y + o + half, lw, c);
+            stroke(m.x + half, m.y + o + half, m.x - half, m.y + o + half, lw, c);
+            stroke(m.x - half, m.y + o + half, m.x - half, m.y + o - half, lw, c);
+            stroke(m.x - half + o, m.y - half, m.x + half + o, m.y - half, lw, c);
+            stroke(m.x + half + o, m.y - half, m.x + half + o, m.y + half, lw, c);
+            stroke(m.x + half + o, m.y + half, m.x - half + o, m.y + half, lw, c);
+            stroke(m.x - half + o, m.y + half, m.x - half + o, m.y - half, lw, c);
         }
     };
-    auto glyph_close = [&](const Rect &r, float lw, const Color &c) {
+    const auto glyph_close_at = [&](const Rect &r, float half, float lw, const Color &c) -> void {
         const Point m = center_of(r);
-        const float e = r.size.width / 3.0F;
-        p.draw_line(Point{.x = m.x - e, .y = m.y - e}, Point{.x = m.x + e, .y = m.y + e}, lw, c);
-        p.draw_line(Point{.x = m.x + e, .y = m.y - e}, Point{.x = m.x - e, .y = m.y + e}, lw, c);
+        stroke(m.x - half, m.y - half, m.x + half, m.y + half, lw, c);
+        stroke(m.x + half, m.y - half, m.x - half, m.y + half, lw, c);
     };
 
+    // 各语言的「半宽 / 线宽」常量对（取值与理由见文件顶部）。
+    constexpr float wh = AURORA_WIN_GLYPH_HALF_DP;
+    constexpr float wlw = AURORA_WIN_GLYPH_STROKE_DP;
+    constexpr float ah = AURORA_ADWAITA_GLYPH_HALF_DP;
+    constexpr float alw = AURORA_ADWAITA_GLYPH_STROKE_DP;
+    constexpr float mh = AURORA_MAC_GLYPH_HALF_DP;
+    constexpr float mlw = AURORA_MAC_GLYPH_STROKE_DP;
+    // Windows 的还原态与另两套不同：真机是「8×8 主框居左下 + 副框只露顶边与右边」，不是通用
+    // 双框，故单列一份（最大化态仍与另两套同形）。
+    const auto win_max = [&](const Rect &r, const Color &c) -> void {
+        const Point m = center_of(r);
+        if (s.mode != WindowMode::Maximized) {
+            stroke(m.x - wh, m.y - wh, m.x + wh, m.y - wh, wlw, c);  // □ 满格空心方框
+            stroke(m.x + wh, m.y - wh, m.x + wh, m.y + wh, wlw, c);
+            stroke(m.x + wh, m.y + wh, m.x - wh, m.y + wh, wlw, c);
+            stroke(m.x - wh, m.y + wh, m.x - wh, m.y - wh, wlw, c);
+        } else {
+            // ▯ 还原：8×8 主框居左下（半宽 0.8 格、上沿抬 0.6 格），副框向右上错位 0.4 格后
+            // 只画落在格内的顶边与右边——这就是真机上「双层叠框」的可见部分。
+            constexpr float fw = wh * 0.8F;
+            constexpr float ft = wh * 0.6F;
+            constexpr float off = wh * 0.4F;
+            stroke(m.x - fw, m.y - ft, m.x + fw, m.y - ft, wlw, c);
+            stroke(m.x + fw, m.y - ft, m.x + fw, m.y + wh, wlw, c);
+            stroke(m.x + fw, m.y + wh, m.x - fw, m.y + wh, wlw, c);
+            stroke(m.x - fw, m.y + wh, m.x - fw, m.y - ft, wlw, c);
+            stroke(m.x - off, m.y - wh, m.x + wh, m.y - wh, wlw, c);
+            stroke(m.x + wh, m.y - wh, m.x + wh, m.y + ft, wlw, c);
+        }
+    };
+
+    // 关闭钮字形取色判据（Adwaita / Windows 两档同一条，Mac 档恒为彩底 + 深色符号不适用）：
+    // 由**底色是否被填充**决定——亮色档底色近白，恒白字形实测在按钮盒内检不到任何墨迹
+    // （等于关闭按钮画不出来），故常态须随前景色；底色换成悬停 / 按压的特征红后则须转白，
+    // 红底上的深色符号同样不可读。两侧是同一个判据。
     if (s.style.button_layout == TitleBarButtonLayout::Adwaita) {
-        // Adwaita：扁平单色符号，悬停浮出圆形底（关闭钮红底为其视觉签名）。
+        // Adwaita：扁平单色符号（16×16 symbolic 网格），悬停浮出圆形底（关闭钮红底为其视觉签名）。
+        // 按压态此前未被消费（只判 hovered_button），按下时没有任何反馈，故与 Windows 档一样
+        // 统一走 button_fill（按压 > 悬停）。
         if (g.minimize.size.width > 0.0F) {
-            if (hb == 0) {
-                p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5F, s.style.hover_tint);
+            Color fill;
+            if (button_fill(0, s.style.hover_tint, s.style.pressed_tint, fill)) {
+                p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5F, fill);
             }
-            glyph_min(g.minimize, 1.5F, fg);
+            glyph_min_at(g.minimize, ah, alw, fg);
         }
         if (g.maximize.size.width > 0.0F) {
-            if (hb == 1) {
-                p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5F, s.style.hover_tint);
+            Color fill;
+            if (button_fill(1, s.style.hover_tint, s.style.pressed_tint, fill)) {
+                p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5F, fill);
             }
-            glyph_max(g.maximize, 1.5F, fg);
+            glyph_max_at(g.maximize, ah, alw, fg);
         }
         if (g.close.size.width > 0.0F) {
-            if (hb == 2) {
-                p.fill_rounded_rect(g.close, g.close.size.width * 0.5F, s.style.close_hover);
+            Color fill;
+            const bool filled = button_fill(2, s.style.close_hover, s.style.close_pressed, fill);
+            if (filled) {
+                p.fill_rounded_rect(g.close, g.close.size.width * 0.5F, fill);
             }
-            glyph_close(g.close, 1.5F, Color{255, 255, 255, 235});
+            glyph_close_at(g.close, ah, alw, filled ? Color{255, 255, 255, 235} : fg);
         }
     } else if (s.style.button_layout == TitleBarButtonLayout::Windows) {
-        // Windows：整高矩形热区，悬停整块填充。
+        // Windows：整高矩形热区，悬停整块填充；字形按 10×10dp 设计网格（见文件顶部常量）。
         if (g.minimize.size.width > 0.0F) {
             Color fill;
             if (button_fill(0, s.style.hover_tint, s.style.pressed_tint, fill)) {
                 p.fill_rect(g.minimize, fill);
             }
-            glyph_min(g.minimize, 1.2F, fg);
+            glyph_min_at(g.minimize, wh, wlw, fg);
         }
         if (g.maximize.size.width > 0.0F) {
             Color fill;
             if (button_fill(1, s.style.hover_tint, s.style.pressed_tint, fill)) {
                 p.fill_rect(g.maximize, fill);
             }
-            glyph_max(g.maximize, 1.2F, fg);
+            win_max(g.maximize, fg);
         }
         if (g.close.size.width > 0.0F) {
             Color fill;
-            if (button_fill(2, s.style.close_hover, s.style.close_pressed, fill)) {
+            const bool filled = button_fill(2, s.style.close_hover, s.style.close_pressed, fill);
+            if (filled) {
                 p.fill_rect(g.close, fill);
             }
-            glyph_close(g.close, 1.2F, Color{255, 255, 255, 235});
+            glyph_close_at(g.close, wh, wlw, filled ? Color{255, 255, 255, 235} : fg);
         }
     } else {
-        // macOS：常显三色圆点，悬停浮现深色符号（close/min/max 左→右序由几何层保证）。
-        const Color sym{0x3D, 0x3D, 0x3D, 210};
+        // macOS：常显三色圆点，悬停浮现深色符号（close/min/max 左→右序由几何层保证）；
+        // 符号按 6pt 设计网格绘制——红绿灯恒 12pt，符号占圆的一半，与盒解耦。
+        constexpr Color sym{0x3D, 0x3D, 0x3D, 210};
         if (g.minimize.size.width > 0.0F) {
             p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5F, Color{0xFE, 0xBC, 0x2E, 255});
             // macOS 红绿灯常显：悬停或按压都只浮现深色符号，不换底色。
             if (hb == 0 || s.pressed_button == 0) {
-                glyph_min(g.minimize, 1.2F, sym);
+                glyph_min_at(g.minimize, mh, mlw, sym);
             }
         }
         if (g.maximize.size.width > 0.0F) {
             p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5F, Color{0x28, 0xC8, 0x40, 255});
             if (hb == 1 || s.pressed_button == 1) {
-                glyph_max(g.maximize, 1.2F, sym);
+                glyph_max_at(g.maximize, mh, mlw, sym);
             }
         }
         if (g.close.size.width > 0.0F) {
             p.fill_rounded_rect(g.close, g.close.size.width * 0.5F, Color{0xFF, 0x5F, 0x57, 255});
             if (hb == 2 || s.pressed_button == 2) {
-                glyph_close(g.close, 1.2F, sym);
+                glyph_close_at(g.close, mh, mlw, sym);
             }
         }
     }

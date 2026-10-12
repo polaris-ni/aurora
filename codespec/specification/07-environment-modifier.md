@@ -149,7 +149,25 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **`TitleBarStyle`**（`window/title_bar_style.h`）是 CSD 标题栏样式值类型，字段：`height`（默认 36）、`bg_active`、`bg_inactive`、`fg_active`、`fg_inactive`、`hover_tint`、`close_hover`、`button_layout`（`TitleBarButtonLayout{Adwaita, Windows, Mac}`，默认 `Adwaita`）、`show_minimize`、`show_maximize`、`show_close`、`show_title`、`center_title`，以及三类自定义项：`metrics`（`TitleBarMetrics`：按钮盒尺寸 / 间距 / 贴边外边距 / 图标槽 / 内容内边距 / 标题字号字重，各分量 **0 = 沿用视觉语言的栏高联动推导式**，非 0 才是显式覆写）、`corner_radius`（标题栏背景**下角**圆角，0 = 直角）、`pressed_tint` / `close_pressed`（按压态配色，绘制优先级「按压 > 悬停」）。
 
-**预设**：`CsdPreset`（三套视觉语言 × 明暗两档 = `AdwaitaLight/Dark`、`WindowsLight/Dark`、`MacLight/Dark` 六值）+ 工厂 `TitleBarStyle::from_preset(CsdPreset)`；`TitleBarStyle{}` 的默认成员值即 `AdwaitaDark`。旧三个静态预设函数（`adwaita_dark()` / `adwaita_light()` / `windows_dark()`）已删除，迁移路径见 `CHANGELOG.md` 的 Migration 节。各预设显隐开关全开、高度基准 36dp、按压 alpha 不低于悬停；macOS 红绿灯圆形底色由绘制层按布局语言固定，预设不覆盖。
+**预设**：`CsdPreset`（三套视觉语言 × 明暗两档 = `AdwaitaLight/Dark`、`WindowsLight/Dark`、`MacLight/Dark` 六值）+ 工厂 `TitleBarStyle::from_preset(CsdPreset)`；`TitleBarStyle{}` 的默认成员值即 `AdwaitaDark`。旧三个静态预设函数（`adwaita_dark()` / `adwaita_light()` / `windows_dark()`）已删除，迁移路径见 `CHANGELOG.md` 的 Migration 节。各预设显隐开关全开、按压 alpha 不低于悬停；macOS 红绿灯圆形底色由绘制层按布局语言固定，预设不覆盖。
+
+**度量口径三档分治**（`metrics` 的「0 = 沿用栏高联动推导式」仍成立，但三套语言的取值策略不同）：
+
+| 视觉语言 | 栏高 | 度量取法 | 出处 |
+|:---|:---|:---|:---|
+| Adwaita | 36dp | **不钉** `metrics`（`TitleBarStyle{}` 默认成员值即 `AdwaitaDark` 的契约，钉值会让两者分叉）；间距与贴边外边距由推导式旧值 4/8 改为 **6/6** | libadwaita `.toolbar`（`AdwHeaderBar` 自动带该类）「6px margins and spacing between widgets」，`headerbar` 另有 `padding: 0 6px`；按钮盒推导结果 `clamp(h−10,22,30)` = 26dp 已等于 libadwaita `windowcontrols` 尺寸，故不钉 |
+| Windows | 32dp | **显式钉值**：按钮盒 46dp、图标槽 16dp（栏高 32 时「`min(16, h−20)`」会退化成 12，故必须钉住）、标题 9pt / 400、悬停 / 按压遮罩 α≈0.0605 / ≈0.1 | Win11 DWM 真机实测（WinUI 标准遮罩口径） |
+| Mac | 28dp | **显式钉值**：红绿灯直径 12dp、间距 8dp（相邻圆心距 20dp）、贴边外边距 14dp（首枚圆心距左缘 20dp）、图标槽 16dp、标题 13pt / 400 且居中 | macOS 标准窗口口径；旧推导式在栏高 36 下给直径 14 / 外边距 8，差 17% / 43% |
+
+`TitleBarMetrics::title_font_weight` 默认 500 → **700**（libadwaita `.title` 为 bold），Windows / Mac 两档各自钉 400。
+
+**字形与按钮盒宽解耦的不变量**（三套语言统一）：字形一律由绘制层按固定设计网格居中于按钮盒绘制，按钮盒再宽字形也不放大——Windows 10×10 epx（Segoe Fluent Icons）/ 线宽 1dp、Adwaita 16×16 symbolic / 1.5dp、macOS 6pt（12pt 圆内占一半）/ 1dp，常量见 `title_bar_painter.cpp` 的 `AURORA_{WIN,ADWAITA,MAC}_GLYPH_HALF_DP` / `..._STROKE_DP`；旧实现统一按「盒宽 / 3.0、`盒宽 / 3.6`」推导，字形随盒放大（Windows 档实测放大到 34dp，是挤压感根因）。Windows 关闭钮还原字形重绘为「8×8 主框 + 右上错位副框的顶边与右边」。
+
+**关闭钮字形取色规则**（三套语言统一）：常态随前景色（亮色档为黑），仅当底色被悬停 / 按压的特征红替换时转白——红底上深色符号不可读、白底上白色符号不可见，是同一判据的两侧（修复 `AdwaitaLight`（`#EBEBEB`）/ `WindowsLight`（`#F3F3F3`）下关闭钮画不出来的功能性缺陷）。Adwaita 悬停 / 按压的圆形底与按压态反馈（优先级「按压 > 悬停」）同批补齐。
+
+**标题对齐**（水平与垂直各自成规，均由绘制层落地）：
+- **水平**：`center_title=true` 时几何层给**整宽带**（不扣按钮组），绘制层按 `FontEngine::measure_width` 实测量宽把文字摆到整宽带的中点。默认成员值为 **true**（默认档即 Adwaita：libadwaita `AdwHeaderBar` 的标题居中），macOS 两档同为 true，**Windows 两档显式置 false**（WinUI 标题左对齐）。此前该开关是「文档承诺、绘制层未实现」——置真只放开带宽，文字仍左对齐。
+- **垂直**：三套语言一律居中，与 `center_title` 无关。绘制层按 `FontEngine::measure_height` 把字体行盒摆到栏高的中点再调 `draw_text`——`draw_text` 的 y 是**行盒顶**（基线 = 顶 + ascent），把标题带原样传下去会把文字顶到栏的上缘（实测墨迹中心比栏高中心偏上：Adwaita 6dp / Windows 8.5dp / Mac 1.5dp）。行盒含下伸部，纯大写标题的视觉中心因此比几何中心低 1~2dp，属字体度量固有偏差，不另加补偿常数。
 
 挂载于 `WindowStyleOptions::title_bar`，运行期经 `Surface::set_title_bar_style` 热更。
 

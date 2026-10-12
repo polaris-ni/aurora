@@ -9,15 +9,23 @@ here rather than by reviewer memory, so that "we agreed on this" survives past t
 produced it.
 
 The rule set deliberately mirrors `check_manual_test_format.py`: same fixed-field table, same
-ascending-id discipline, same stale-whitelist detection. Two artifacts, one shape.
+unique-id discipline, same stale-whitelist detection. Two artifacts, one shape. (Manual test ids
+are additionally consecutive -- `TC-<module>-<NNN>` from 001 with no gap -- because there the id
+*is* the sequence; a change id is a handle, so only uniqueness is enforced here.)
 
 Rules guarded:
 - Directory name is kebab-case (`[a-z0-9]+(-[a-z0-9]+)*`); it is the stable handle a proposal is
   referred to by, so it must be safe to type in a path, a commit message and a URL.
 - Every proposal directory holds a `proposal.md`.
 - Level-1 heading is `# CHG-<NNN> <title>`; `<NNN>` is three digits.
-- Change ids are unique, and ascend in directory-name order (a gap only ever means an abandoned
-  proposal, which stays on record rather than being renumbered).
+- Change ids are unique; a gap only ever means an abandoned proposal, which stays on record
+  rather than being renumbered. **Uniqueness is the whole ordering contract** -- an earlier
+  revision also demanded that ids ascend in directory-name order, and that rule tied the number
+  to a **semantic short name**: the topic of a new proposal decides where it sorts, so every
+  mid-alphabet newcomer had to either renumber the whole backlog or take a meaningless name that
+  sorts last. "Which number is this" is a handle question, not a sequence question: chronology
+  is already carried by 提出日期, and the directory name is already carried by the path. Neither
+  needs the id to encode it, and forcing both is what made the rule unmaintainable.
 - Metadata table carries exactly the five fields, in fixed order, each non-empty.
 - 变更编号 equals its heading id; 提出日期 is YYYY-MM-DD; 当前状态 is inside the domain.
 - 关联需求 is `无` or a `SPEC.*` id that really exists in the SPECIFICATIONS.md feature table
@@ -375,17 +383,14 @@ def main() -> int:
             continue
         change_id = check_proposal(root, path, errors)
         if change_id:
-            seen.append((rel_dir, int(ID_RE.match(change_id).group(1)), change_id))
+            seen.append((rel_dir, change_id))
 
-    # 编号唯一 + 按目录名字典序升序（与人工用例的编号升序约束同构）
-    ids = [change_id for _, _, change_id in seen]
+    # 编号唯一（编号是提案的**句柄**，不是序号：顺序信息由提出日期承载，目录名由路径承载，
+    # 故不再要求编号与目录名字典序同向——那等于让语义短名决定编号，见本脚本头部 Rules）。
+    ids = [change_id for _, change_id in seen]
     if len(set(ids)) != len(ids):
         dup = sorted({i for i in ids if ids.count(i) > 1})
         errors.append(f"{'/'.join(CHANGES_DIR)}: duplicate change ids: {', '.join(dup)}")
-    for previous, current in zip(seen, seen[1:]):
-        if current[1] <= previous[1]:
-            errors.append(f"{'/'.join(CHANGES_DIR)}: change ids must ascend in directory order: "
-                          f"{previous[2]} ({previous[0]}) -> {current[2]} ({current[0]})")
 
     scanned = {os.path.relpath(os.path.join(d, PROPOSAL_NAME), root).replace(os.sep, "/")
                for d in targets}
@@ -410,7 +415,7 @@ def main() -> int:
         return 1
 
     print(f"[PASS] change proposal contract OK: {len(seen)} proposal(s) / "
-          f"ids unique and ascending / metadata, sections and write-back targets consistent"
+          f"ids unique / metadata, sections and write-back targets consistent"
           + (f" ({exempted} whitelisted)" if exempted else "") + ".")
     return 0
 

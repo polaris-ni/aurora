@@ -18,13 +18,19 @@ enum class TitleBarButtonLayout : std::uint8_t {
 /// 经 `TitleBarStyle::from_preset(CsdPreset)` 取值；预设只产 `TitleBarStyle`（颜色 / 布局语言 /
 /// 度量基线），显隐开关全部保持开启——显隐与几何细节属调用方的定制面，不属预设。
 /// `TitleBarStyle{}` 的默认成员值即 `CsdPreset::AdwaitaDark` 一档。
+/// 三套语言的**度量口径**分治：Adwaita 两档沿用栏高推导式（按钮盒 `clamp(h-10,22,30)`=26dp、
+/// 间距与贴边外边距 6dp，取 libadwaita `.toolbar` 的 6px 口径）；Windows 两档按 Win11 真机钉值
+/// （栏高 32dp / 按钮盒 46dp / 图标槽 16dp）；Mac 两档按 macOS 标准窗口钉值（栏高 28dp / 红绿灯
+/// 直径 12dp / 首枚圆心距左缘 20dp / 标题 13pt 居中）。字形尺寸与度量无关，一律由绘制层按各语言
+/// 的固定设计网格绘制（见 `title_bar_painter.cpp`）。
 enum class CsdPreset : std::uint8_t {
     AdwaitaLight,  ///< GNOME/libadwaita 亮色 header bar（bg≈`#EBEBEB`、fg=黑、close_hover=`#E01B24`）
     AdwaitaDark,  ///< GNOME/libadwaita 暗色 header bar（bg≈`#303030`、fg=白、close_hover=`#E01B24`）
-    WindowsLight,  ///< WinUI/Windows 11 亮色标题栏（bg≈`#F3F3F3`、fg=黑、close_hover=`#C42B1C`）
-    WindowsDark,  ///< WinUI/Windows 11 暗色标题栏（bg≈`#202020`、fg=白、close_hover=`#C42B1C`）
-    MacLight,  ///< macOS 亮色「红绿灯」标题栏（bg≈`#ECECEC`、fg=黑；红绿灯圆形底色由绘制层按语言固定）
-    MacDark,  ///< macOS 暗色「红绿灯」标题栏（bg≈`#323232`、fg=白；同上）
+    WindowsLight,  ///< WinUI/Windows 11 亮色标题栏（bg≈`#F3F3F3`、fg=黑、close_hover=`#C42B1C`；栏高 32dp / 按钮盒
+                   ///< 46dp）
+    WindowsDark,  ///< WinUI/Windows 11 暗色标题栏（bg≈`#202020`、fg=白、close_hover=`#C42B1C`；栏高与按钮盒同亮色档）
+    MacLight,  ///< macOS 亮色「红绿灯」标题栏（bg≈`#ECECEC`、fg=黑；圆形底色由绘制层按语言固定）
+    MacDark,  ///< macOS 暗色「红绿灯」标题栏（bg≈`#323232`、fg=白；度量同亮色档）
 };
 
 /// @brief 标题栏度量覆写值（纯数据聚合；**缺省即沿用各视觉语言的推导规则**，故默认零改动）。
@@ -39,7 +45,8 @@ struct TitleBarMetrics {
     float icon_size = 0.0F;  ///< 图标槽边长（逻辑 dp）；0 = 按规则取 min(16, 栏高 − 20)
     float content_padding = 12.0F;  ///< 标题侧安全内边距（逻辑 dp，同时决定图标槽与首枚标题 x）
     float title_font_size_pt = 13.0F;  ///< 标题字号（磅）；沿用绘制层既有默认 13pt
-    int title_font_weight = 500;  ///< 标题字重（CSS 100..900 口径）；沿用绘制层既有默认 500
+    int title_font_weight =
+        700;  ///< 标题字重（CSS 100..900）；默认取 libadwaita `.title` 的 bold（=700），Win / Mac 预设钉 400
 };
 
 /// @brief CSD 自绘标题栏样式值类型（纯数据聚合，可直接 `TitleBarStyle{...}` 指定成员初始化）。
@@ -60,7 +67,7 @@ struct TitleBarStyle {
     bool show_maximize = true;  ///< 显式开关；resizable=false 时绘制/命中层仍会自动隐藏
     bool show_close = true;  ///< 是否绘制/命中关闭按钮
     bool show_title = true;  ///< 是否绘制标题文字（不影响几何分区划分）
-    bool center_title = false;  ///< true=标题居中（Adwaita/WinUI 风格）；false=左对齐（现状兼容）
+    bool center_title = true;  ///< true=标题居中（默认档即 Adwaita / macOS 口径）；false=左对齐（WinUI 口径）
 
     TitleBarMetrics metrics{};  ///< 度量覆写（各分量 0 = 沿用视觉语言的推导规则，非 0 才是显式覆写）
     float corner_radius = 0.0F;  ///< 标题栏背景**下角**圆角半径（逻辑 dp）；0 = 直角（现状兼容）
@@ -74,6 +81,24 @@ struct TitleBarStyle {
     ///     亮 `#EBEBEB`/`#E0E0E0`、close_hover red3 `#E01B24`）；WinUI/Win11（暗 `#202020`/`#191919`、
     ///     亮 `#F3F3F3`、close_hover `#C42B1C`）；macOS（暗 `#323232`、亮 `#ECECEC`）。按压底色取
     ///     「悬停罩加深一档」的近似值；Mac 布局的圆形红绿灯底色由绘制层按语言固定，预设不覆盖。
+    /// @note Windows 两档的**度量**按真机 DWM 标题栏实测口径给出（非按栏高推导）：栏高 32dp、
+    ///     按钮盒 46dp、图标槽 16dp、标题 9pt / 字重 400；字形本身由绘制层按 10×10dp 设计网格
+    ///     绘制（见 `title_bar_painter.cpp`），故按钮盒再宽也不放大字形——这是 Win11 的实际行为。
+    ///     非关闭钮的悬停 / 按压遮罩取 WinUI 标准口径（α≈0.0605 / α≈0.1）。
+    /// @note Mac 两档的**度量**同上按 macOS 标准窗口口径钉值（栏高 28dp / 红绿灯 12dp / 圆心距
+    ///     20dp / 首枚圆心距左缘 20dp / 标题 13pt-Regular 且居中）；两条推导式（直径
+    ///     `clamp(h*0.4,11,14)`、外边距 8）在栏高 36 时分别给出 14 / 8，与真机差 17% / 43%，
+    ///     故必须显式钉住而不能沿用。Adwaita 两档**不钉度量**：其推导式（`clamp(h-10,22,30)`
+    ///     = 26dp）本就等于 libadwaita `windowcontrols` 按钮尺寸，间距与外边距已由几何层改按
+    ///     `.toolbar` 的 6px 口径推导——钉值反而会破坏「`TitleBarStyle{}` 默认成员值即
+    ///     AdwaitaDark」这条契约。
+    /// @note 三套语言的**字形**一律由绘制层按固定设计网格绘制，与按钮盒尺寸解耦（Windows
+    ///     10×10dp / Adwaita 16×16dp / macOS 6pt），详见 `title_bar_painter.cpp`。
+    /// @note **标题对齐**（两个方向各自成规）：水平方向 Adwaita / Mac 两档居中（libadwaita
+    ///     `AdwHeaderBar` 与 macOS 窗口标题均居中），Windows 两档左对齐（WinUI 即左对齐）——
+    ///     默认成员值 true 就是 Adwaita 档的口径，故只有 Windows 两档显式置 false。垂直方向
+    ///     三档一律居中：绘制层按 `FontEngine::measure_height` 把行盒摆到栏高的中点
+    ///     （`draw_text` 的 y 是**行盒顶**，把标题带原样传下去会让文字贴栏的上缘）。
     [[nodiscard]] static constexpr auto from_preset(CsdPreset p) noexcept -> TitleBarStyle {
         TitleBarStyle s;  // 基准 = AdwaitaDark（默认成员值）
         switch (p) {
@@ -88,27 +113,42 @@ struct TitleBarStyle {
                 s.pressed_tint = Color{0, 0, 0, 56};
                 break;
             case CsdPreset::WindowsDark:
+                s.height = 32.0F;  // Win11 标题栏高（真机实测口径，非 Adwaita 基准 36）
                 s.bg_active = Color{0x20, 0x20, 0x20};
                 s.bg_inactive = Color{0x19, 0x19, 0x19};
                 s.fg_inactive = Color{0xA0, 0xA0, 0xA0};  // WinUI 失焦标题文字灰
-                s.hover_tint = Color{255, 255, 255, 26};  // Win11 悬停极淡白罩
+                s.hover_tint = Color{255, 255, 255, 15};  // WinUI 悬停遮罩（白 α≈0.0605）
                 s.close_hover = Color{0xC4, 0x2B, 0x1C};  // Windows 关闭钮悬停特征红
-                s.pressed_tint = Color{255, 255, 255, 52};
+                s.pressed_tint = Color{255, 255, 255, 25};  // WinUI 按压遮罩（白 α≈0.1）
                 s.close_pressed = Color{0x99, 0x1D, 0x11};  // 悬停特征红的加深近似
                 s.button_layout = TitleBarButtonLayout::Windows;
+                s.center_title = false;  // WinUI 标题左对齐（默认 true 是 Adwaita/Mac 口径）
+                s.metrics.button_size = 46.0F;  // 真机 caption 按钮盒宽
+                s.metrics.icon_size = 16.0F;  // 图标槽：显式钉住（否则栏高 32 时推导退化为 12）
+                s.metrics.title_font_size_pt = 9.0F;  // 原生标题 12px
+                s.metrics.title_font_weight = 400;  // 原生 Regular
                 break;
             case CsdPreset::WindowsLight:
+                s.height = 32.0F;
                 s.bg_active = Color{0xF3, 0xF3, 0xF3};
                 s.bg_inactive = Color{0xEE, 0xEE, 0xEE};
                 s.fg_active = Color::black();
                 s.fg_inactive = Color{0x8A, 0x8A, 0x8A};
-                s.hover_tint = Color{0, 0, 0, 26};  // 暗色白 α26 的镜像
+                s.hover_tint = Color{0, 0, 0, 15};  // 暗色白 α15 的镜像
                 s.close_hover = Color{0xC4, 0x2B, 0x1C};
-                s.pressed_tint = Color{0, 0, 0, 52};
+                s.pressed_tint = Color{0, 0, 0, 25};
                 s.close_pressed = Color{0x99, 0x1D, 0x11};
                 s.button_layout = TitleBarButtonLayout::Windows;
+                s.center_title = false;
+                s.metrics.button_size = 46.0F;
+                s.metrics.icon_size = 16.0F;
+                s.metrics.title_font_size_pt = 9.0F;
+                s.metrics.title_font_weight = 400;
                 break;
             case CsdPreset::MacDark:
+                // macOS 标准窗口（无 toolbar）标题栏几何：栏高 28pt、红绿灯直径 12pt、相邻圆心
+                // 距 20pt（即边缘间距 8pt）、首枚圆心距窗口左缘 20pt（即左外边距 14pt）。
+                s.height = 28.0F;
                 s.bg_active = Color{0x32, 0x32, 0x32};
                 s.bg_inactive = Color{0x28, 0x28, 0x28};
                 s.fg_inactive = Color{0x98, 0x98, 0x98};
@@ -117,8 +157,16 @@ struct TitleBarStyle {
                 s.pressed_tint = Color{255, 255, 255, 56};
                 s.close_pressed = Color{255, 255, 255, 56};
                 s.button_layout = TitleBarButtonLayout::Mac;
+                s.center_title = true;  // macOS 窗口标题居中
+                s.metrics.button_size = 12.0F;  // 红绿灯直径
+                s.metrics.button_gap = 8.0F;  // 圆心距 20 − 直径 12
+                s.metrics.button_margin = 14.0F;  // 圆心距左缘 20 − 半径 6
+                s.metrics.icon_size = 16.0F;  // 同上：栏高 28 时推导式会退化，须钉住
+                s.metrics.title_font_size_pt = 13.0F;  // NSWindow 标题字号
+                s.metrics.title_font_weight = 400;  // SF 系标题为 Regular
                 break;
             case CsdPreset::MacLight:
+                s.height = 28.0F;
                 s.bg_active = Color{0xEC, 0xEC, 0xEC};
                 s.bg_inactive = Color{0xE2, 0xE2, 0xE2};
                 s.fg_active = Color::black();
@@ -128,6 +176,13 @@ struct TitleBarStyle {
                 s.pressed_tint = Color{0, 0, 0, 56};
                 s.close_pressed = Color{0, 0, 0, 56};
                 s.button_layout = TitleBarButtonLayout::Mac;
+                s.center_title = true;
+                s.metrics.button_size = 12.0F;
+                s.metrics.button_gap = 8.0F;
+                s.metrics.button_margin = 14.0F;
+                s.metrics.icon_size = 16.0F;
+                s.metrics.title_font_size_pt = 13.0F;
+                s.metrics.title_font_weight = 400;
                 break;
         }
         return s;

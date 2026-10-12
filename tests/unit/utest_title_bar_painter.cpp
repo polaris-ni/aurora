@@ -6,8 +6,8 @@
 /// 常态与悬停取色、失焦配色切换、隐藏按钮与不可缩放窗口在该槽不留任何像素。
 /// 无平台依赖（纯 Painter 画布），故 Windows/Linux/macOS 与无头 CI 均可跑。
 
-#include <cstddef>
-#include <cstdint>
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 
@@ -182,6 +182,47 @@ auto check_paths_bit_identical(const csd::TitleBarPaintState &s) -> void {
     AURORA_TEST_CHECK_EQ(diff, 0U);
 }
 
+/// @brief 盒内「非底色墨迹」像素的外接框（整数像素域）。
+struct InkBox {
+    int min_x = 0;  ///< 最左墨迹像素 x
+    int max_x = -1;  ///< 最右墨迹像素 x（max_x < min_x 即无墨迹）
+    int min_y = 0;  ///< 最上墨迹像素 y
+    int max_y = -1;  ///< 最下墨迹像素 y
+
+    [[nodiscard]] auto empty() const -> bool { return max_x < min_x; }
+    [[nodiscard]] auto width() const -> float { return empty() ? 0.0F : static_cast<float>(max_x - min_x); }
+    [[nodiscard]] auto center_x() const -> float { return empty() ? -1.0F : static_cast<float>(min_x + max_x) * 0.5F; }
+    [[nodiscard]] auto center_y() const -> float { return empty() ? -1.0F : static_cast<float>(min_y + max_y) * 0.5F; }
+};
+
+/// @brief 在盒内扫描「非底色墨迹」像素，返回其外接框。
+/// 底色判据：与 bg 任一通道差 > 30（抗抗锯齿半透明边）；字形为对比色，中心像素为纯前景色。
+/// 用于实测字形是否「撑满盒宽」或「与盒宽解耦」、以及文字是否居中——不依赖绘制实现细节。
+/// Mac 档把「底色」传成圆点色即可在圆内单独量出悬停符号。
+[[nodiscard]] auto ink_bbox(const Painter &p, const Rect &box, const Color &bg) -> InkBox {
+    const int x0 = static_cast<int>(std::floor(box.origin.x));
+    const int y0 = static_cast<int>(std::floor(box.origin.y));
+    const int x1 = static_cast<int>(std::ceil(box.origin.x + box.size.width));
+    const int y1 = static_cast<int>(std::ceil(box.origin.y + box.size.height));
+    InkBox out{.min_x = x1, .max_x = x0 - 1, .min_y = y1, .max_y = y0 - 1};
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const Color c = p.get_pixel(x, y);
+            const int dr = std::abs(c.r - bg.r);
+            const int dg = std::abs(c.g - bg.g);
+            const int db = std::abs(c.b - bg.b);
+            const int d = dr > dg ? (dr > db ? dr : db) : (dg > db ? dg : db);
+            if (d > 30) {
+                out.min_x = std::min(x, out.min_x);
+                out.max_x = std::max(x, out.max_x);
+                out.min_y = std::min(y, out.min_y);
+                out.max_y = std::max(y, out.max_y);
+            }
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 AURORA_TEST_CASE(direct_raster_and_record_replay_are_bit_identical) {
@@ -270,7 +311,7 @@ AURORA_TEST_CASE(adwaita_hover_paints_circle_tint_and_close_red) {
 }
 
 AURORA_TEST_CASE(windows_layout_hovers_full_height_rect) {
-    const TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::WindowsDark);
+    constexpr TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::WindowsDark);
     const TitleBarGeometry g = title_bar_geometry(400.0F, style, false, true);
     csd::TitleBarPaintState s = plain_state();
     s.style = style;
@@ -281,6 +322,206 @@ AURORA_TEST_CASE(windows_layout_hovers_full_height_rect) {
     // 整高矩形热区：上下缘内侧仍为红底（Adwaita 的圆底在同样位置会露出底色）。
     AURORA_TEST_CHECK(px(p, Point{cx, 2.0F}) == style.close_hover);
     AURORA_TEST_CHECK(px(p, Point{cx, style.height - 3.0F}) == style.close_hover);
+}
+
+AURORA_TEST_CASE(windows_light_close_glyph_uses_fg_ink_and_leaves_padding) {
+    // 验收判据 1：WindowsLight 下关闭钮盒内必须出现前景色墨迹（常态无悬停），且字形不撑满盒宽
+    // —— 盒内两侧留白须仍是底色。旧实现恒写白色 α235，亮色档底色近白时关闭钮画不出来（功能性缺陷），
+    // 故这项断言直接钉住「关闭钮可见」这个修复。
+    constexpr TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::WindowsLight);
+    const TitleBarGeometry g = title_bar_geometry(400.0F, style, false, true);
+    csd::TitleBarPaintState s = plain_state();
+    s.style = style;
+    s.active = true;
+    s.hovered_button = -1;  // 常态无悬停：字形应随前景色（黑）而非恒白
+    Painter p;
+    raster_direct(p, s);
+    constexpr Color bg = style.bg_active;  // #F3F3F3
+    const float cw = ink_bbox(p, g.close, bg).width();
+    // ① 盒内确有墨迹（关闭钮画出来了）。
+    AURORA_TEST_CHECK_GT(cw, 0.0F);
+    // ② 字形外接框宽 ≤ 半个盒宽（10dp 设计网格居中，两侧留白可见——未撑满盒）。
+    AURORA_TEST_CHECK_LE(cw, (g.close.size.width * 0.5F) + 1.0F);
+    // ③ 盒内两侧留白确为底色（取垂直中心、距左缘 3px 的点，远在 10dp 字形之外）。
+    const Point pad{.x = g.close.origin.x + 3.0F, .y = g.close.origin.y + (g.close.size.height * 0.5F)};
+    AURORA_TEST_CHECK(px(p, pad) == bg);
+}
+
+AURORA_TEST_CASE(windows_min_glyph_box_width_independent_of_button_size) {
+    // 验收判据 2：Windows 字形走固定 10×10dp 设计网格，与按钮盒宽解耦。换两组不同的
+    // metrics.button_size 渲染，最小化字形外接框宽应恒定 ≈10dp（不随盒宽放大）。两条渲染
+    // 共用同一画布/底色，仅盒宽不同，故「外接框宽差≈0」直接证明解耦不变量。
+    const auto measure_min_glyph = [&](float button_size) -> float {
+        TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::WindowsDark);
+        style.metrics.button_size = button_size;  // 显式覆盖盒宽（0 = 走栏高推导）
+        const TitleBarGeometry g = title_bar_geometry(400.0F, style, false, true);
+        csd::TitleBarPaintState s = plain_state();
+        s.style = style;
+        s.active = true;
+        s.hovered_button = -1;
+        Painter p;
+        raster_direct(p, s);
+        return ink_bbox(p, g.minimize, style.bg_active).width();
+    };
+    const float w46 = measure_min_glyph(46.0F);
+    const float w60 = measure_min_glyph(60.0F);
+    // 设计网格 10dp（±抗锯齿余量）；两条盒宽下字形外接框宽恒定 —— 解耦不变量。
+    AURORA_TEST_CHECK_NEAR(w46, 10.0F, 2.5F);
+    AURORA_TEST_CHECK_NEAR(w60, 10.0F, 2.5F);
+    AURORA_TEST_CHECK_NEAR(w46, w60, 1.0F);
+}
+
+AURORA_TEST_CASE(adwaita_light_close_glyph_uses_fg_ink_and_leaves_padding) {
+    // AdwaitaLight 与 WindowsLight 是同一个缺陷：关闭钮字形恒写白色 α235，而亮色档常态下
+    // 关闭钮**没有**底色（只有悬停才铺红），白字形落在 `#EBEBEB` 上等于画不出来。
+    // 判据与 Windows 档同构：常态下盒内必须出现前景色墨迹。
+    constexpr TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::AdwaitaLight);
+    const TitleBarGeometry g = title_bar_geometry(400.0F, style, false, true);
+    csd::TitleBarPaintState s = plain_state();
+    s.style = style;
+    s.active = true;
+    s.hovered_button = -1;  // 常态无悬停：字形应随前景色（黑）而非恒白
+    Painter p;
+    raster_direct(p, s);
+    constexpr Color bg = style.bg_active;  // #EBEBEB
+    const float cw = ink_bbox(p, g.close, bg).width();
+    // ① 盒内确有墨迹（关闭钮画出来了）。
+    AURORA_TEST_CHECK_GT(cw, 0.0F);
+    // ② 16dp symbolic 网格（±抗锯齿余量）：盒 26dp ⇒ 两侧各留 5dp。
+    AURORA_TEST_CHECK_NEAR(cw, 16.0F, 3.0F);
+    // ③ 盒内左侧留白确为底色（距左缘 2px，远在 16dp 字形之外）。
+    const Point pad{.x = g.close.origin.x + 2.0F, .y = g.close.origin.y + (g.close.size.height * 0.5F)};
+    AURORA_TEST_CHECK(px(p, pad) == bg);
+}
+
+AURORA_TEST_CASE(adwaita_min_glyph_box_width_independent_of_button_size) {
+    // Adwaita 字形同样走固定 16×16dp symbolic 网格（GNOME 的 `windowcontrols` 按钮 26dp 里
+    // 装的就是 16dp 图标），与按钮盒宽解耦：换两组盒宽渲染，最小化字形外接框宽恒定 ≈16dp。
+    const auto measure_min_glyph = [&](float button_size) -> float {
+        TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::AdwaitaDark);
+        style.metrics.button_size = button_size;  // 显式覆盖盒宽（0 = 走栏高推导）
+        const TitleBarGeometry g = title_bar_geometry(400.0F, style, false, true);
+        csd::TitleBarPaintState s = plain_state();
+        s.style = style;
+        s.active = true;
+        s.hovered_button = -1;
+        Painter p;
+        raster_direct(p, s);
+        return ink_bbox(p, g.minimize, style.bg_active).width();
+    };
+    const float w26 = measure_min_glyph(26.0F);
+    const float w34 = measure_min_glyph(34.0F);
+    AURORA_TEST_CHECK_NEAR(w26, 16.0F, 3.0F);
+    AURORA_TEST_CHECK_NEAR(w34, 16.0F, 3.0F);
+    AURORA_TEST_CHECK_NEAR(w26, w34, 1.0F);
+}
+
+AURORA_TEST_CASE(mac_glyph_box_width_independent_of_button_size) {
+    // macOS 红绿灯内符号按 6pt 设计网格绘制（恒 12pt 的圆里占一半），同样与盒解耦。
+    // 量法：把「底色」传成圆点色，只扫圆心水平带（避开圆外的标题栏底色），即得符号自身的外接框。
+    const auto measure_min_glyph = [&](float button_size) -> float {
+        TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::MacDark);
+        style.metrics.button_size = button_size;
+        const TitleBarGeometry g = title_bar_geometry(400.0F, style, false, true);
+        csd::TitleBarPaintState s = plain_state();
+        s.style = style;
+        s.active = true;
+        s.hovered_button = 0;  // macOS 符号仅在悬停 / 按压时浮现
+        Painter p;
+        raster_direct(p, s);
+        const Point c = center_of(g.minimize);
+        // 只扫**圆心那一行**、横向取盒宽 80%（半宽 0.4×直径，恒落在圆内）—— 若扫多行，
+        // 带角会滑出圆外，圆外的标题栏底色与圆点色差远大于阈值，会被误计成墨迹。
+        const Rect row{.origin = Point{.x = c.x - (g.minimize.size.width * 0.4F), .y = c.y},
+                       .size = Size{.width = g.minimize.size.width * 0.8F, .height = 1.0F}};
+        return ink_bbox(p, row, AURORA_MAC_YELLOW).width();
+    };
+    const float w12 = measure_min_glyph(12.0F);
+    const float w20 = measure_min_glyph(20.0F);
+    AURORA_TEST_CHECK_NEAR(w12, 6.0F, 3.0F);
+    AURORA_TEST_CHECK_NEAR(w20, 6.0F, 3.0F);
+    AURORA_TEST_CHECK_NEAR(w12, w20, 1.0F);
+}
+
+AURORA_TEST_CASE(mac_preset_title_is_centered_in_full_width_band) {
+    // macOS 窗口标题居中：几何层在 center_title=true 时给的是**整宽带**（不扣按钮组），
+    // 居中由绘制层按实测量宽完成。判据 = 标题墨迹外接框中心 ≈ 窗口水平中心；
+    // 对照组（center_title=false）须明显偏左——否则「居中」只是把带宽放开而没真居中。
+    constexpr TitleBarStyle preset = TitleBarStyle::from_preset(CsdPreset::MacDark);
+    const auto measure_title_centre = [&](bool centered) -> float {
+        TitleBarStyle style = preset;
+        style.center_title = centered;
+        csd::TitleBarPaintState s = plain_state();
+        s.style = style;
+        s.title = "Centered";  // 纯 ASCII：任何字体面都能出字，判据不依赖具体字体
+        s.active = true;
+        Painter p;
+        raster_direct(p, s);
+        // 只扫 x≥100 的区（避开左侧红绿灯），墨迹即标题本身。
+        const Rect band{.origin = Point{.x = 100.0F, .y = 0.0F}, .size = Size{.width = 300.0F, .height = style.height}};
+        return ink_bbox(p, band, style.bg_active).center_x();
+    };
+    const float mid = measure_title_centre(true);
+    const float left = measure_title_centre(false);
+    AURORA_TEST_CHECK_GT(mid, 0.0F);  // 标题确实画出来了（-1 表示无墨迹）
+    AURORA_TEST_CHECK_GT(left, 0.0F);
+    AURORA_TEST_CHECK_NEAR(mid, 200.0F, 12.0F);  // 整宽带中心 = 400 / 2
+    AURORA_TEST_CHECK_LT(left, 180.0F);  // 左对齐对照组：明显不在中点
+}
+
+AURORA_TEST_CASE(title_is_vertically_centered_in_every_language) {
+    // 标题在栏内**垂直**居中：`draw_text` 的 y 是行盒顶（基线 = 顶 + ascent），绘制层须按字体
+    // 行盒高把带顶下移半程，否则文字贴栏的上缘（修复前实测墨迹中心比栏高中心偏上：Adwaita
+    // 6dp / Windows 8.5dp / Mac 1.5dp）。判据 = 墨迹外接框中心与栏高中心的偏差 < 2.5dp——
+    // 容差取自「行盒含下伸部，纯大写标题的视觉中心本就比几何中心低 1~2dp」。三档全过才算绿：
+    // 敏感侧在 Adwaita / Windows（修复前偏差 6 / 8.5 远超阈值），Mac 档修复前只偏 1.5，单看它
+    // 不足以区分，故判据以三档整体为准。
+    const auto deviation = [&](CsdPreset preset) -> float {
+        TitleBarStyle style = TitleBarStyle::from_preset(preset);
+        style.show_minimize = false;  // 隐去三枚按钮：带内只剩标题墨迹，扫描不必避开按钮区
+        style.show_maximize = false;
+        style.show_close = false;
+        csd::TitleBarPaintState s = plain_state();
+        s.style = style;
+        s.title = "Title";
+        s.active = true;
+        Painter p;
+        raster_direct(p, s);
+        const Rect band{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = style.height}};
+        const InkBox k = ink_bbox(p, band, style.bg_active);
+        if (k.empty()) {
+            return 1e9F;  // 一个字都没画出来：判据直接转红（不静默当成「居中」）
+        }
+        return std::fabs(k.center_y() - (style.height * 0.5F));
+    };
+    AURORA_TEST_CHECK_LT(deviation(CsdPreset::AdwaitaDark), 2.5F);
+    AURORA_TEST_CHECK_LT(deviation(CsdPreset::WindowsDark), 2.5F);
+    AURORA_TEST_CHECK_LT(deviation(CsdPreset::MacDark), 2.5F);
+}
+
+AURORA_TEST_CASE(adwaita_preset_title_is_centered_in_full_width_band) {
+    // libadwaita `AdwHeaderBar` 的标题居中 ⇒ Adwaita 档 `center_title` 默认 true，几何层给整宽带。
+    // 判据与 Mac 档同构：墨迹中心 ≈ 窗口水平中心；对照组（显式 false）须明显偏左。
+    const auto measure_title_centre = [&](bool centered) -> float {
+        TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::AdwaitaDark);
+        style.center_title = centered;
+        csd::TitleBarPaintState s = plain_state();
+        s.style = style;
+        s.title = "Centered";
+        s.active = true;
+        Painter p;
+        raster_direct(p, s);
+        // 只扫 x∈[30,290] 的区：右侧避让按钮组（首枚 minimize 起于 304——扫到它会被当成标题
+        // 墨迹把中心拽向右）、左侧仍容纳左对齐对照组的文字（起于 36）。图标槽为空槽，不产墨迹。
+        const Rect band{.origin = Point{.x = 30.0F, .y = 0.0F}, .size = Size{.width = 260.0F, .height = style.height}};
+        return ink_bbox(p, band, style.bg_active).center_x();
+    };
+    const float mid = measure_title_centre(true);
+    const float left = measure_title_centre(false);
+    AURORA_TEST_CHECK_GT(mid, 0.0F);  // 标题确实画出来了（-1 = 无墨迹）
+    AURORA_TEST_CHECK_GT(left, 0.0F);
+    AURORA_TEST_CHECK_NEAR(mid, 200.0F, 12.0F);
+    AURORA_TEST_CHECK_LT(left, 180.0F);
 }
 
 AURORA_TEST_CASE(mac_layout_shows_traffic_lights_without_hover) {

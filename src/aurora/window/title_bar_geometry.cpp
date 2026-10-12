@@ -10,12 +10,17 @@ namespace aurora {
 // title_bar_geometry() 的输出，不得各自再推几何）：
 //
 // - Adwaita：按钮为正方形，边长 btn = clamp(height-10, 22, 30)，垂直居中；
-//   间距 4；右缘外边距 8。从右往左顺序 close→max→min。
+//   间距 6；右缘外边距 6。从右往左顺序 close→max→min。
 //   悬停圆即该正方形的内切圆（绘制层取盒即可）。
+//   间距与外边距同为 6 出自 libadwaita：`.toolbar`（AdwHeaderBar 自动带该类）
+//   「ensures 6px margins and spacing between widgets」，`headerbar` 另有 `padding: 0 6px`；
+//   旧值 4 / 8 是把 GTK 的 6px 与窗口内边距混记的结果。
 // - Windows：按钮矩形宽 = round(height*1.44)、高 = height 整高，
 //   从右上角无缝向左排（无外边距、无间距），顺序同上。
 // - Mac：圆形直径 d = clamp(height*0.4, 11, 14)，位于左侧，左缘外边距 8，
 //   间距 8，从左往右 close→min→max（macOS 顺序）。
+//   ⚠️ 本推导只是「未钉值时的回落」：Mac 两档预设已把直径 / 间距 / 外边距钉为
+//   12 / 8 / 14（真机口径），故经 `from_preset` 取到的样式不走这组推导式。
 // - icon：存在时边长 = min(16, height-20)，x=12（Mac 布局时排在按钮组右侧 +12），
 //   垂直居中。
 // - title：x 从 icon 右侧+8 起（无图标则 12；Mac 布局无图标则按钮组右侧+8；
@@ -46,8 +51,10 @@ auto layout_right_buttons(const TitleBarStyle &style, float width, bool resizabl
     const float side = style.metrics.button_size > 0.0F ? style.metrics.button_size
                                                         : (windows ? std::round(style.height * 1.44F)
                                                                    : std::clamp(style.height - 10.0F, 22.0F, 30.0F));
-    const float gap = style.metrics.button_gap > 0.0F ? style.metrics.button_gap : (windows ? 0.0F : 4.0F);
-    const float margin = style.metrics.button_margin > 0.0F ? style.metrics.button_margin : (windows ? 0.0F : 8.0F);
+    // 未钉值时 Adwaita 的间距 / 外边距同为 6dp（libadwaita `.toolbar` 口径，见文件头注释块）；
+    // Windows 恒 0（无缝整高排布）。
+    const float gap = style.metrics.button_gap > 0.0F ? style.metrics.button_gap : (windows ? 0.0F : 6.0F);
+    const float margin = style.metrics.button_margin > 0.0F ? style.metrics.button_margin : (windows ? 0.0F : 6.0F);
     float cursor = width - margin;  // 下一个按钮的贴边侧外缘
     float group_inner_edge = width - margin;
     const auto place = [&](Rect &dst) -> void {
