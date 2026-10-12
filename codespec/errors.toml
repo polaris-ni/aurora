@@ -1036,3 +1036,23 @@ fix_category = "resource_error"
 retryable = false
 message = "Clipboard format unsupported on this platform: '{mime}'"
 hint = "This platform exposes no mechanism for the requested MIME type; query available_formats() first, or fall back to text/plain"
+enum = "NetEndpointInvalid"
+slug = "net-endpoint-invalid"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Network endpoint is not a valid address: '{detail}'"
+hint = "Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use Endpoint::local for UnixSocket paths or named pipes"
+
+[[error]]
+enum = "NetCancelled"
+slug = "net-cancelled"
+category = "io"
+severity = "info"
+auto_fixable = false
+fix_category = "cancelled"
+retryable = true
+message = "Network operation was cancelled"
+hint = "The caller cancelled this operation (or its owner went away); the completion still fires once with this code, so drop the result only if the owner is gone"

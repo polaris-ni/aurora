@@ -131,7 +131,8 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetRecvTimeout = 87,  ///< net-recv-timeout: Socket receive timed out
     SystemDragNotSupported = 88,  ///< system-drag-not-supported: System drag-and-drop unavailable: '{detail}'
     SystemDragSessionFailed = 89,  ///< system-drag-session-failed: System drag-and-drop session failed: '{detail}'
-    ClipboardFormatUnsupported = 90,  ///< clipboard-format-unsupported
+    NetEndpointInvalid = 90,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
+    NetCancelled = 91,  ///< net-cancelled: Network operation was cancelled
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -149,7 +150,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 91> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 92> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1257,17 +1258,30 @@ inline constexpr std::array<ErrorMeta, 91> AURORA_ERROR_TABLE = {
                     "(action None) and surface a non-drag alternative",
         },
         {
-            .code = ErrorCode::ClipboardFormatUnsupported,
-            .ident = "ClipboardFormatUnsupported",
-            .slug = "clipboard-format-unsupported",
-            .category = ErrorCategory::Platform,
+            .code = ErrorCode::NetEndpointInvalid,
+            .ident = "NetEndpointInvalid",
+            .slug = "net-endpoint-invalid",
+            .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
             .auto_fixable = false,
-            .fix_category = "resource_error",
+            .fix_category = "invalid_value",
             .retryable = false,
-            .message_tpl = "Clipboard format unsupported on this platform: '{mime}'",
-            .hint = "This platform exposes no mechanism for the requested MIME type; query available_formats() first, "
-                    "or fall back to text/plain",
+            .message_tpl = "Network endpoint is not a valid address: '{detail}'",
+            .hint = "Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use "
+                    "Endpoint::local for UnixSocket paths or named pipes",
+        },
+        {
+            .code = ErrorCode::NetCancelled,
+            .ident = "NetCancelled",
+            .slug = "net-cancelled",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Info,
+            .auto_fixable = false,
+            .fix_category = "cancelled",
+            .retryable = true,
+            .message_tpl = "Network operation was cancelled",
+            .hint = "The caller cancelled this operation (or its owner went away); the completion still fires once "
+                    "with this code, so drop the result only if the owner is gone",
         },
     },
 };

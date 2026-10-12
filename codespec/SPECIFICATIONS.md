@@ -52,7 +52,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 ### 4.1 范围
 
-**包含**：声明式组件、响应式状态、布局引擎、软件渲染、平台 Surface（Headless / Win32 / Glfw / X11 / Wayland / Wasm / macOS）、序列化、导航、动画、异步、定时任务（Scheduler / Timer）、环境注入、偏好与存储、无障碍（a11y，语义树 + 平台桥，见 `ARCHITECTURE.md` §8.5）、音频（audio，Web Audio 语义节点图 + 设备后端，见 `03-layout-render.md`）。
+**包含**：声明式组件、响应式状态、布局引擎、软件渲染、平台 Surface（Headless / Win32 / Glfw / X11 / Wayland / Wasm / macOS）、序列化、导航、动画、异步、定时任务（Scheduler / Timer）、环境注入、偏好与存储、无障碍（a11y，语义树 + 平台桥，见 `ARCHITECTURE.md` §8.5）、音频（audio，Web Audio 语义节点图 + 设备后端，见 `03-layout-render.md`）、网络（`aurora::net`：事件驱动传输 + 代理族 + TLS / HTTP / WebSocket 引擎与三态绑定，见 §5 表 `SPEC.*.NET.*` 各行）。
 
 **不包含**：3D、硬件加速渲染、原生控件嵌入、跨进程、复杂数据网格。
 
@@ -75,7 +75,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 ---
 
-## 5 特性清单（需求 ID 体系，34 条）
+## 5 特性清单（需求 ID 体系，43 条）
 
 需求 ID 形如 `SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`：全大写、点分割、层级不限，短名多词用连字符。
 类目封闭 6 类（`API` 语言与接口设计原则 / `FEAT` 面向使用者的功能能力 / `QUALITY` 质量不变量与保证 /
@@ -121,6 +121,15 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.FEAT.APP.CLIPBOARD-RICH-FORMATS.001 | 剪贴板富格式（files / uri-list / HTML / 自定义 MIME） | AI 可实现文件清单与富文本的剪贴板交互；MIME 词汇与空口径同系统拖放一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8.2 |
 | SPEC.FEAT.APP.NATIVE-MENU-BAR.001 | 原生菜单栏（MenuModel 单一真源 + Win32 / macOS / Linux 原生渲染桥） | AI 声明一次菜单即获原生渲染，自绘与原生二显一存、不建平行菜单 API | [`06-app-platform.md`](specification/06-app-platform.md) §8 |
 | SPEC.FEAT.APP.RECENT-DOCUMENTS.001 | 最近文档列表（应用内 store 持久化 + OS 级投影） | AI 可实现跨重启的最近文档；OS 级缺位时应用内列表全平台行为一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8 |
+| SPEC.FEAT.NET.ENGINE-PLUGGABILITY.001 | 可插拔网络引擎（公共 API 面不加宏，实现按平台引擎可选） | AI 生成的网络代码零 `#ifdef`、无能力平台明确降级报错而非静默失败 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
+| SPEC.PLATFORM.NET.EVENT-SOURCE.001 | 事件循环网络完成事件与通用事件源注册口 | 网络结果恒回主线程投递，UI 线程不阻塞在 I/O 等待上 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
+| SPEC.FEAT.NET.TRANSPORT-SUITE.001 | 异步 TCP / UDP / 本地 IPC（UDS / NamedPipe）传输族，含 DNS 双栈与竞速、代理族（`CONNECT` / SOCKS5 / 系统与环境变量）、分帧工具与读写背压 | 可连任意主机、可监听服务、可取消，为第三方非阻塞会话（如 SSH）提供字节流底座，且慢消费者不导致无界缓冲 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
+| SPEC.PLATFORM.NET.TLS-BACKEND.001 | TLS 通道（系统栈引擎 + 使用方 provider + 默认证书校验与自定义信任根） | 加密通道与明文流同构，上层协议无需感知，校验失败即断连 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
+| SPEC.FEAT.NET.HTTP-CLIENT.001 | HTTP/1.1 客户端（`Url` 值类型 / 基础请求集 / 流式与帧对齐进度 / gzip 透明解压 / 条件请求与内存缓存 / Cookie / 认证 / SSE） | AI 可直接拉取数据与资源，手拼 URL 与静默字符集替换这类高频错误在类型层消失，大文件不占满内存，跨平台协议语义逐值一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
+| SPEC.FEAT.NET.WEBSOCKET.001 | WebSocket 客户端（RFC 6455 握手 / 分帧 / ping-pong / close code） | 长连接双向增量数据可订阅，帧上限与关闭语义明确 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
+| SPEC.FEAT.NET.DECLARATIVE-BINDING.001 | 异步结果三态响应式绑定（`state::Resource` / `StreamResource`） | 请求即状态源，`loading / ready / failed` 定点刷新，重发自动取消前序且宿主失效不回调 | [`02-state.md`](specification/02-state.md) §7.2 |
+| SPEC.FEAT.NET.OBSERVABILITY.001 | 网络活动可观测（请求时间线 + 活动表 + Inspector / MCP 暴露 + 凭据强制脱敏） | AI 能从一次界面异常反查到一次请求的耗时与失败阶段，且排障信息不会泄漏凭据 | [`08-tooling.md`](specification/08-tooling.md) §10.2、[`ARCHITECTURE.md`](ARCHITECTURE.md) §14 |
+| SPEC.TEST.NET.OFFLINE-FIXTURE.001 | 可注入假引擎与离线网络夹具（`FakeEngine` + 条件等待辅助） | 超时、取消、半关闭、TLS 失败等故障可在禁网 CI 内逐值断言，网络行为可验证性不退化 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8、[`ARCHITECTURE.md`](ARCHITECTURE.md) §14 |
 
 ---
 

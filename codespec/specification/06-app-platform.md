@@ -728,6 +728,15 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 链接面：`ws2_32` 随核心 `aurora` 目标在 Windows 无条件 `PUBLIC` 传导（见 `BUILD_OPTIONS.md`），各消费者不再散挂。Emscripten 腿经其 BSD socket shim 编译，但浏览器运行时无真实监听语义，Inspector 相关用例在 wasm 构建下按 `AURORA_TEST_SKIP` 退避。回归：`utest_net_socket`（行为契约）+ `utest_inspector_client`（超时平台形态）。
 
+#### 8.8.1 底座值类型：端点与取消令牌（CHG-007 已落地部分）
+
+`include/aurora/net/address.h` 与 `include/aurora/net/cancellation.h` 是通用网络栈的第一批落点。两者都不引入平台 socket 头，也**不改变**上一段所述同步传输面的当前范围（`socket.h` 仍只消费回环端点；非回环连通性随后续切片开放）。
+
+- `Endpoint` / `AddressFamily`：一条字节流「去往或来自何处」的纯值类型。**解析与规范化由仓内手写、不经 `inet_pton`**——同一输入在 Win32 / POSIX / Emscripten 上必须给出同一结果与同一条诊断（§12.2 一致行为判据；交给 libc 等于把「哪些畸形串被谁容忍」交给各平台实现）。判据要点：IPv4 禁前导零（避开八进制歧义）；IPv6 支持 `::` 压缩与内嵌 IPv4 尾段，输出按 RFC 5952 规范化（小写、去前导零、最左最长零游程压缩，故 `0:0:0:0:0:0:0:1` 与 `::1` 判等）；方括号形态只服务 IPv6 且**不得内嵌端口**（`"[::1]:8080"` 直接拒）；zone id 仅在 link-local（`fe80::/10`）上合法；回环与通配判定**按解析后的地址族与二进制值**而非字符串（`"localhost"` 是名字、不是地址）；本机 IPC 路径在值类型层就受 `AURORA_NET_MAX_LOCAL_PATH` 与 NUL 约束，不等 bind 才发现路径过长。端口 `0` 在值类型里合法并表达「由系统分配」，语境合法性由 `bind()` / `connect()` 分别判——值类型不预判用途。默认构造的无效占位在 `is_loopback()` / `is_unspecified()` 上一律 false（全零字节不参与语义判定）。
+- `Cancellation`：异步网络操作的取消令牌，共享状态句柄（拷贝即共享同一状态，`shares_state_with()` 可断言）。三条契约：**取消不抛异常**，一律以 `Result<T>` 的 `net-cancelled` 抵达调用方；**钩子至多一次、且在调用线程同步执行**——引擎据此把「释放句柄」排在「投递取消结果」之前，顺序反了会让回调里就地重连撞上刚被占满的句柄表；**取消先于登记时钩子立即触发**，不留「登记即失效」的窄竞态（那类缺陷只在真实网络延迟下现形）。它与既有 `Task::cancel()` 的「回调不再触发」**刻意不同**：协程帧只能靠 `resume` 前进到 `co_return` 正常析构，「不恢复」等于泄漏帧。
+- 错误码：`net-endpoint-invalid`（`message` 携 `detail=` 指明被拒原因）、`net-cancelled`（`retryable = true`，供重试与策略判定直接消费）。
+- 回归：`utest_net_address`（解析、规范化、校验与判等黄金判据）、`utest_net_cancellation`（含跨线程钩子落点与钩子内重入不死锁）。
+
 ---
 
 ### 8.9 系统拖放（跨进程）

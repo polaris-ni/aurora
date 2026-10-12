@@ -102,6 +102,8 @@
 #include "aurora/navigation/route.h"
 #include "aurora/navigation/router.h"
 #include "aurora/navigation/transition_layer.h"
+#include "aurora/net/address.h"
+#include "aurora/net/cancellation.h"
 #include "aurora/net/socket.h"
 #include "aurora/perf/counters.h"
 #include "aurora/perf/perf_log.h"

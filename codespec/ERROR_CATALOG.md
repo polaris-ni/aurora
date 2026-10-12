@@ -95,6 +95,7 @@
 | 87 | `NetRecvTimeout` | `net-recv-timeout` | io | warning | false | timeout | true | Socket receive timed out | SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat this as 'no more data now' |
 | 88 | `SystemDragNotSupported` | `system-drag-not-supported` | platform | error | false | resource_error | false | System drag-and-drop unavailable: '{detail}' | The platform/backend has no system drag-and-drop mechanism yet, or the capability bit is false; retrying cannot create the mechanism - fall back to a non-drag path (paste, file dialog) |
 | 89 | `SystemDragSessionFailed` | `system-drag-session-failed` | platform | error | false | resource_error | false | System drag-and-drop session failed: '{detail}' | The negotiation broke down or the source stopped providing data; treat the session as ended (action None) and surface a non-drag alternative |
-| 90 | `ClipboardFormatUnsupported` | `clipboard-format-unsupported` | platform | error | false | resource_error | false | Clipboard format unsupported on this platform: '{mime}' | This platform exposes no mechanism for the requested MIME type; query available_formats() first, or fall back to text/plain |
+| 90 | `NetEndpointInvalid` | `net-endpoint-invalid` | io | error | false | invalid_value | false | Network endpoint is not a valid address: '{detail}' | Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use Endpoint::local for UnixSocket paths or named pipes |
+| 91 | `NetCancelled` | `net-cancelled` | io | info | false | cancelled | true | Network operation was cancelled | The caller cancelled this operation (or its owner went away); the completion still fires once with this code, so drop the result only if the owner is gone |
 
-<!-- count: total 91 error codes -->
+<!-- count: total 92 error codes -->
