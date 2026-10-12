@@ -65,7 +65,7 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 
 `PlatformKind` / `DeviceKind` 反映**编译目标**平台（编译期常量），非运行期 OS 探测；运行期能力探测走 `au::platform().capabilities()`（见 [`06-app-platform.md`](06-app-platform.md) §5）。
 
-**客户端自绘装饰的安全区（框架自动下沉）**：Wayland 客户端自绘装饰（CSD）标题栏 / 边框占用的区域经 `Surface::content_inset()` 暴露，由 `Window::present_root` **自动下沉**——应用根统一挂到框架私有壳 `detail::ContentInsetRoot` 下，内缩量经其 `PaddingEdges` 修饰在布局期收紧约束、绘制/命中期平移内容盒，应用树无感知。根注入的 `MediaQuery` 相应为**内容区口径**：`padding` 归零（占用区已被框架消费）、`size` 扣除内缩；应用**不应**再手动消费 `padding`（双重内缩）。需要「自绘进安全区」等特殊场景时，经 `Window::content_inset()` 读取原始占用区，并以空 `MediaQueryProvider` 覆盖根注入口径。inset 为零的后端（Win32/X11 原生非客户区）壳的修饰链为空，行为与无壳逐位一致；inset 变化（如进出全屏归零）下一帧重排生效。测试见 `tests/integration/itest_content_inset_sink.cpp`。
+**客户端自绘装饰的安全区（框架自动下沉）**：Wayland 客户端自绘装饰（CSD）标题栏 / 边框占用的区域经 `Surface::content_inset()` 暴露，由 `Window::present_root` **自动下沉**——应用根统一挂到框架私有壳 `detail::ContentInsetRoot` 下，内缩量经其 `PaddingEdges` 修饰在布局期收紧约束、绘制/命中期平移内容盒，应用树无感知。根注入的 `MediaQuery` 相应为**内容区口径**：`padding` 归零（占用区已被框架消费）、`size` 扣除内缩；应用**不应**再手动消费 `padding`（双重内缩）。需要「自绘进安全区」等特殊场景时，经 `Window::content_inset()` 读取原始占用区，并以空 `MediaQueryProvider` 覆盖根注入口径。inset 为零的后端（各后端的 SSD / 系统非客户区档与 Frameless 档）壳的修饰链为空，行为与无壳逐位一致；inset 变化（如进出全屏归零）下一帧重排生效。测试见 `tests/integration/itest_content_inset_sink.cpp`。
 
 **工厂**
 
@@ -129,7 +129,7 @@ auto root = au::MediaQueryProvider{
 |:---|:---|:---|:---|:---|
 | Wayland | 有 `xdg-decoration` → SSD；无 → CSD（title+margin） | CSD（title+margin，即便合成器支持 SSD） | 仅 margin 带 | 无任何装饰 |
 | X11 | 保留 WM 装饰（X11 的 SSD 即 WM 原生口沿，无须协商） | `_MOTIF_WM_HINTS` 撤 WM 口沿后自绘标题栏 + 内缘八向热区 | 仅内缘热区 | 无任何装饰 |
-| Win32 | 保留 `DWM`/系统非客户区装饰 | **契约已立、实现待落地**（`WM_NCHITTEST` 返回 `HTCAPTION`/`HT*` 映射热区 + DWM 扩展框自绘；未在本仓库无头构建内编译验证） | 同左 | 同左 |
+| Win32 | 保留 `DWM`/系统非客户区装饰 | 去 `WS_CAPTION`（保留 `WS_THICKFRAME` 系统缩放模态）+ `WM_NCCALCSIZE`（wParam=TRUE）吞非客户区使客户区 = 整窗，最大化把客户区拉回显示器工作区（经典 −8dp 边框问题修正）；`WM_NCHITTEST` 回报热区：内缘八向（复用 `csd::classify_resize_zone`，带宽 = `frame_margin_dp(frame, dwm_capable)`）→ `HTLEFT`/…、标题带空白 → `HTCAPTION`（系统白给拖拽/双击最大化/Aero Snap）、按钮 → `HTCLIENT`，修饰键（Alt/Meta）拖拽兜底 → `HTCAPTION`；标题栏自绘经 `paint_decoration` 于三表面 present 路径覆绘，按钮按压/释放结算与 X11/Wayland 共层 | 无标题栏，热区与修饰键拖拽同左（`csd_mod_move` 激活） | `WS_POPUP`，无任何装饰 |
 
 **安全区**：CSD 标题栏 / 阴影边距占用区经 `Surface::content_inset()` 暴露，由 `present_root` 的下沉壳（`ContentInsetRoot`）自动消费（见 §3.1「客户端自绘装饰的安全区」）；根注入 `MediaQuery.padding` 恒为内容区口径（已消费 ⇒ 归零）。
 
@@ -141,7 +141,7 @@ Wayland CSD 的**阴影边距模型**（单表面，libadwaita 风格；纯逻�
 | Maximized / 任意向 tiled | `{0, tb, 0, 0}`（margin 塌缩） | `{0,0,0,0}` | `{0,0,0,0}` |
 | FullScreen | `{0, tb, 0, 0}`（揭示条出现前 tb 亦不绘制） | `{0,0,0,0}` | `{0,0,0,0}` |
 
-margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙、无阴影），回 Normal 恢复；状态切换走整幅重绘。指针在进入表面的三个入口统一做「表面坐标 → 内容坐标（−margin）」映射，热区判定 `csd::classify_resize_zone` 在内容坐标域进行（表驱动纯函数，`utest_csd_geometry` 守门）。margin 厚度可经 `WindowFrameStyle::shadow_margin_dp` 显式配置（0 = 关闭；显式关闭 / 能力不足 / 非正值三路归零，见 `csd::frame_margin_dp`），默认值逐值等于既有 10dp 常量。X11 后端 buffer 即内容矩形（不假设 ARGB 视觉与合成器），无外延 margin 分量——外延阴影自动降级为 0，标题栏带为**内缘覆绘** + **内缘热区**（同一 `csd::classify_resize_zone` 判定式按「内容坐标缩进 margin 后的外延环」口径复用，不写第二份八向逻辑），`content_inset()` 只承载标题栏带高度。Win32/Headless 维持零 inset 口径。
+margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙、无阴影），回 Normal 恢复；状态切换走整幅重绘。指针在进入表面的三个入口统一做「表面坐标 → 内容坐标（−margin）」映射，热区判定 `csd::classify_resize_zone` 在内容坐标域进行（表驱动纯函数，`utest_csd_geometry` 守门）。margin 厚度可经 `WindowFrameStyle::shadow_margin_dp` 显式配置（0 = 关闭；显式关闭 / 能力不足 / 非正值三路归零，见 `csd::frame_margin_dp`），默认值逐值等于既有 10dp 常量。X11 与 Win32 后端 buffer 即内容矩形（不假设 ARGB 视觉与合成器），无外延 margin 分量——外延阴影自动降级为 0，标题栏带为**内缘覆绘** + **内缘热区**（同一 `csd::classify_resize_zone` 判定式按「内容坐标缩进 margin 后的外延环」口径复用，不写第二份八向逻辑），`content_inset()` 只承载标题栏带高度；Win32 自绘档标题栏带宽 `frame_margin_dp(frame, dwm_capable)`（DWM 合成关闭时归零，探针 `aurora_verify_win32_csd` 锁降级语义）。Headless 维持零 inset 口径。
 
 **程序化窗口控制**（`Surface` / `Window` 虚函数，默认空实现）：`close()`、`minimize()`、`toggle_maximize()`、`set_fullscreen(bool)`。Wayland 经 `xdg_toplevel` 协议生效，使无标题栏 / 无边框窗口也能由应用按钮驱动状态。
 
@@ -189,7 +189,7 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **明暗双档取值**（一个主题自带两套，角色名一套、明暗两列——Material 3 color roles / Fluent 2 alias tokens 同构）：`Theme::scheme`（`ColorScheme{Unspecified, Light, Dark}`，`light()` / `dark()` 工厂自动置位）+ 暗色覆写表 `dark_tokens`；解析经 `token_for(name)` / `token_in(name, scheme)`——Dark 档先查覆写表、未命中回落基础表 `tokens`，其余档位只查基础表。`light()` / `dark()` 播种约 16 个语义令牌（`surface` / `surface.raised` / `text` / `text.muted` / `accent` / `border` / `hover` / `pressed` / `danger`，命名取两家公共子集）与 `csd.*` 组件覆写位；`csd.*` 数值基准与 `CsdPreset::AdwaitaLight/Dark` 一致，保证「从令牌派生」与「直接取预设」两条路输出相同的默认观感。
 
-**明暗三级优先链**（`theming/csd_style_bridge.h` 的 `resolve_color_scheme(explicit, theme, os)` 纯函数）：显式样式覆盖 > `Theme::scheme` > OS 偏好；各层以 `Unspecified` 表示「不表态」逐层下探，全链未指定时由调用方回落 `AdwaitaDark`。OS 层经 `os_color_scheme()`（`window/platform.h`）显式查询——Linux 读 GTK 配置文件启发式（不引 DBus 依赖），Win32/macOS 按注册表 / `NSAppearance` 契约标注未在本仓库无头构建内编译验证；`Platform::color_scheme` 字段须由调用方填充（`platform()` 不代做——读偏好有文件 / 注册表访问副作用）。
+**明暗三级优先链**（`theming/csd_style_bridge.h` 的 `resolve_color_scheme(explicit, theme, os)` 纯函数）：显式样式覆盖 > `Theme::scheme` > OS 偏好；各层以 `Unspecified` 表示「不表态」逐层下探，全链未指定时由调用方回落 `AdwaitaDark`。OS 层经 `os_color_scheme()`（`window/platform.h`）显式查询——Linux 读 GTK 配置文件启发式（不引 DBus 依赖），Win32 读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` 的 `AppsUseLightTheme`（REG_DWORD，0 = Dark；键在值缺 = Light；键打不开 = Unspecified，实现独立 TU `win32_platform.cpp` 避免公共头引入 `<windows.h>`），macOS 按 `NSAppearance` 契约标注未在本仓库无头构建内编译验证；`Platform::color_scheme` 字段须由调用方填充（`platform()` 不代做——读偏好有文件 / 注册表访问副作用）。
 
 **Theme → CSD 派生通道**：`title_bar_style_from_theme(theme)` / `window_frame_style_from_theme(theme, base)`（`csd_style_bridge.h`）——预设做基座，`csd.title_bar.*` 组件令牌逐项覆盖，几何 / 显隐 / 度量字段不参与派生（属定制面）；应用在主题变化时重调 `set_title_bar_style(派生结果)` 即完成运行期明暗切换（装饰重绘下一帧生效），不引入轮询。测试见 `utest_theme_csd_bridge`。
 

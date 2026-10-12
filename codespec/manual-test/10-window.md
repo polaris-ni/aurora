@@ -29,6 +29,7 @@
 | `examples/demos/demo_custom_surface.cpp` | `demo_custom_surface` | 自定义 `Surface` 注入、无窗口（Headless）路径与产物 |
 | `tools/verify/glfw_dpi_live_probe.cpp` | `aurora_verify_glfw_dpi` | **GLFW 后端**的 DPI 缩放换算自洽与缩放变化上报（探针，非 demo） |
 | `tools/verify/x11_csd_live_probe.cpp` | `aurora_verify_x11_csd` | **X11 后端**的客户端自绘装饰（CSD）离屏像素级判据：`ClientSide` 撤 WM 口沿后标题栏带真绘出、`content_inset` 上报栏高、`Auto`/`Frameless` 零入侵口径（探针，非 demo） |
+| `tools/verify/win32_csd_live_probe.cpp` | `aurora_verify_win32_csd` | **Win32 后端**的客户端自绘装饰（CSD）离屏像素级判据：`WM_NCCALCSIZE` 吞框（最大化拉回工作区）、五档策略的 `content_inset` / 像素 / `WM_NCHITTEST` 热区回归、按钮释放触发与拖离取消、降级归零、热更（探针，非 demo） |
 
 **第三个载体的构建口径与前两个不同，须单独构建目录**（探针受两个开关门控，二者在本模块的默认
 `build/` 里都不满足，故前两个载体的构建步骤不能覆盖它）：
@@ -45,6 +46,15 @@ cmake --build build-verify-glfw --target aurora_verify_glfw_dpi
 ```
 cmake -S . -B build-verify-x11 -G Ninja -DAURORA_BACKEND_X11=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 cmake --build build-verify-x11 --target aurora_verify_x11_csd
+```
+
+**Win32 CSD 探针的构建口径同 X11**（像素判据直读帧缓冲，须 `AURORA_ENABLE_DEBUG=ON`，另需
+`AURORA_BACKEND_WIN32=ON` 与 `AURORA_BUILD_VERIFY_TOOLS=ON`；本机默认 `build/` 的前两个开关
+已满足，仅须追加 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 重 configure）：
+
+```
+cmake -S . -B build-verify-win32 -G Ninja -DAURORA_BACKEND_WIN32=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build-verify-win32 --target aurora_verify_win32_csd
 ```
 
 探针的判据段（`content_inset` / 标题栏带像素 / 零入侵）为**自动段**，退出码语义同上；悬停 / 按压 /
@@ -87,8 +97,11 @@ cmake --build build-verify-x11 --target aurora_verify_x11_csd
 
 **X11 后端的例外**（口径同 GLFW）：本机有可达的 X server（`DISPLAY=:0`，XWayland 会话），只需另建
 一个开启 `AURORA_BACKEND_X11` **且 `AURORA_ENABLE_DEBUG=ON`** 的构建目录（口径见 §1.2 的
-X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据；Win32 的自绘装饰实现尚未落地
-（契约见 `07-environment-modifier.md` §4.1 三后端映射表），无用例可编。
+X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据。
+
+**Win32 后端的例外**：它是本机原生后端（`AURORA_BACKEND_WIN32=ON`），自绘装饰已落地（见
+`07-environment-modifier.md` §4.1 三后端映射表）；探针只须 `AURORA_BUILD_VERIFY_TOOLS=ON`
+（口径见 §1.2 的 Win32 CSD 探针段），故 TC-WINDOW-015 覆盖 Win32 的自绘装饰自动判据。
 
 **GLFW 后端的例外**：它是**本机可执行**的——只需另建一个开启 `AURORA_BACKEND_GLFW` 的构建目录
 （口径见 §1.2），不依赖本节表格所列的 `build/` 配置。故 TC-WINDOW-013 覆盖 GLFW 的 DPI 换算与
@@ -381,6 +394,17 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | 操作步骤 | 1. 运行 `DISPLAY=:0 ./build-verify-x11/aurora_verify_x11_csd 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 记录退出码<br>3. 查看 `out.txt` 的 PASS/FAIL 行、`band=`/`below=` 像素行与 `content_inset` 行<br>4. 查看 `err.txt` 应为空<br>5. （人工目视段）改用可见性 Normal 的最小示例或探针加 `--interactive` 观察：悬停三按钮的底色反馈、按压深于悬停、按住标题空白拖动窗口、标题双击切换最大化 |
 | 预期结果 | 2. 退出码 0<br>3. `content_inset` 行 `top=36.0` 且 `left/right/bottom` 为 0；`band=303030`、`below=FFFFFF`；恰 7 行 `[PASS]`、0 行 `[FAIL]`（client-side 三条 + auto 两条 + frameless 两条）<br>4. 恒空（探针输出全走 stdout）<br>5. 悬停底色即时出现且随指针离开消失；按压底色深于悬停且松手才触发动作（拖开即取消）；拖动平滑跟手；双击在最大化与还原间切换 |
 
+#### TC-WINDOW-015 Win32 后端自绘装饰策略映射、热区与释放触发判据
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-015 |
+| 测试目的 | 验证 `Win32Host` 对 `WindowStyleOptions::decoration` 的五档映射：`WM_NCCALCSIZE` 吞非客户区使客户区 = 整窗（最大化拉回显示器工作区）；`ClientSide` 标题栏带真绘出（AdwaitaDark `#303030`）且安全区上报栏高；五档的 `WM_NCHITTEST` 热区逐点与共享层口径重合；按钮**释放触发**与「按下拖离松手不动作」取消语义；降级（`shadow_margin_dp` 显式关闭）热区归零；`set_title_bar_style` 热更生效 |
+| 前置条件 | 仓库根目录；`build-verify-win32`（或追加了 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 的默认 `build/`）已按 §1.2 的 Win32 探针口径构建（三开关：`AURORA_BACKEND_WIN32` / `AURORA_ENABLE_DEBUG` / `AURORA_BUILD_VERIFY_TOOLS`）；DWM 桌面合成开启（关闭时降级判据自适应，探针自行探测） |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 运行 `./build-verify-win32/aurora_verify_win32_csd.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 记录退出码<br>3. 查看 `out.txt` 的 PASS/FAIL 行、`#RRGGBB` 像素行、`HT*` 命中行与 `checks=` 汇总行<br>4. 查看 `err.txt` 应为空<br>5. （人工目视段）拖动 ClientSide 窗口标题带空白移动窗口、标题带双击切换最大化、Win+方向键 Aero Snap、确认 Alt+Space 系统菜单在**系统档**可用（自绘档不提供，属平台边界见 `BUILD_OPTIONS.md` 平台差异注记） |
+| 预期结果 | 2. 退出码 0<br>3. `checks=47 pass=47`；`ClientSide` 段标题带 `#303030`、内容区 `#FFFFFF` 零入侵、`content_inset` `top=36`；热更后带 `#202020`（WindowsDark）且按压 `#991D11` 优先于悬停 `#C42B1C`；Auto 段带像素 `#FFFFFF` 且窗口顶部仍回报系统 caption；降级段左/底缘 `HTCLIENT` 化、角点回退标题带 `HTCAPTION`、带像素与栏高不变；最大化段客户区 = 工作区、左缘 `HTCLIENT`、释放最大化钮还原<br>4. 恒空（探针输出全走 stdout）<br>5. 拖动/双击/Aero Snap 由系统 `HTCAPTION` 白给、平滑跟手；系统档 Alt+Space 弹出系统菜单 |
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -399,3 +423,4 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | TC-WINDOW-012 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：关闭主窗后进程仍存活，存活窗口只剩标题 `Auxiliary #1` 的一扇，`err.txt` 新增 1 行 `INF` 且消息为 `[app] window host closed and reaped: id=1`（id=1 即主窗）。步骤 5：关闭该辅助窗口后退出码 0，无窗口残留。步骤 6：`err.txt` 全文 3 行均为 `INF`，无 `ERR`/`FTL` | | 关闭最后一扇窗口时进程先行退出，故不再有该窗口的回收日志行，属预期时序。本例为新增，用以固定「主窗关闭不连带关闭其他窗口」这一默认策略边界 |
 | TC-WINDOW-013 | 2026-10-03 | WorkBuddy | SKIP | | 自动段（步骤 1-4）全部通过：`scale_factor()` = 1.5（本机 150%）；`(b1)` 480x320 逻辑 dp、`(b2)` 帧缓冲 720x480、`(b3)` 480x320x1.5=720x480 三者逐位相符、`(b4)` 未退化为逻辑尺寸；`(c1)` 构造期无误报 count=0；`(e1)` 注入后 handler 被调用 count=1、`(e2)` 上报值 1.0 == 注入 96/96、`(e3)` 与 `scale_factor()` 一致、`(e5)` 同值再注入计数保持 1（去重生效）、`(e6)` 已采纳缩放保持 1.0；`err.txt` 为 0 字节。人工段（步骤 5-6）未执行：探针报 `PENDING MANUAL`、退出码 3 | | 记 `SKIP` 的原因是前置不满足而非判据失败：本机仅一块物理显示器（`\\.\DISPLAY1` 3840x2160 @150%，`DISPLAY2-5` 的 `stateFlags=0` 即未挂载），无第二个不同缩放的输出可拖，与 TC-WINDOW-008/009 同因。步骤 4 顺带核实了探针的通道分离：输出全走 stdout，stderr 恒空。本例为新增载体（探针而非 demo），故本模块 §1.2/§1.3 已同步登记该载体的独立构建口径与后端例外。⚠️ 取证过程中曾出现一次「自动段 (e5) 转红」的假故障，根因是恢复变异源码后未重编、跑的是变异前的旧 `aurora.lib`（产物 mtime 早于源码 mtime），重建后即恢复全绿——与本仓既有教训一致（记忆恢复后必须重跑验证） |
 | TC-WINDOW-014 | 2026-10-12 | WorkBuddy | PASS | | 步骤 2：退出码 0。步骤 3：`content_inset: top=36.0 left=0.0 right=0.0 bottom=0.0`；`band=303030 below=FFFFFF (expect 303030 / FFFFFF)`；恰 7 行 `[PASS]`（client-side 的 inset/带像素/内容零入侵三条 + auto 的 inset/零入侵两条 + frameless 的 inset/零入侵两条），0 行 `[FAIL]`，末行 `checks=7 pass=7`。步骤 4：`err.txt` 为空 | | 自动段三策略映射逐条过；步骤 5 人工目视段待真机会话补记（本会话无指针注入通道）。构建口径为 §1.2 的 `build-verify-x11`（`AURORA_BACKEND_X11=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON`） |
+| TC-WINDOW-015 | 2026-10-12 | WorkBuddy | PASS | | 步骤 2：退出码 0。步骤 3：末行 `checks=47 pass=47`；ClientSide 段客户区 = 窗口矩形（`WM_NCCALCSIZE` 吞框）、`content_inset` `top=36`、带像素 `#303030` 且内容区 `#FFFFFF` 零入侵、逐点热区回归过（八向 / 标题带 / 按钮→HTCLIENT）、悬停关钮 `#E01B24`、同钮释放触发关窗；热更段带 `#202020`、按压 `#991D11` 覆悬停 `#C42B1C`、拖离松手不关窗且无残留高亮；Auto 段带像素 `#FFFFFF`、窗口顶带仍报 `HTCAPTION`（系统 caption 完好）；降级段左/底缘与角点 `HTCLIENT` 化、角点落入标题带报 `HTCAPTION`、带像素与栏高不变；最大化段客户区 = 显示器工作区、左缘 `HTCLIENT`、带空白 `HTCAPTION`、释放最大化钮完成最大化→还原往返。步骤 4：`err.txt` 为 0 字节 | | 自动段五档映射逐条过；DWM 合成开启；降级判据经 `frame.shadow_margin_dp = 0` 显式注入实测；判据经三次变异（热区门收窄到 csd_border、最大化标题带门加 sizable、win32_surface 删除 `paint_decoration` 调用）逐一转红后恢复复绿，非结构性假绿。步骤 5 人工目视段（拖动/双击/Aero Snap/系统菜单）待真机会话补记。构建口径为本机默认 `build/` 追加 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 重 configure（WIN32/DEBUG 两开关已满足） |

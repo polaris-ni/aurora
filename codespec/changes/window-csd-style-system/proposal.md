@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-004 |
 | 提出日期 | 2026-10-11 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 |
 | 影响面 | CSD 装饰「策略/状态层」从 `WaylandSurface` 抽出为跨后端共享组件；公共样式类型 `TitleBarStyle` 扩「度量/圆角/自定义配色」三类字段并新增与之一一对应的窗框样式类型；新增 6 套预设（三视觉语言 × 亮暗）与深浅色信号源（`window/platform.h`）；`X11Surface` 与 `Win32Host`（Win32/D3D11/WgpuWin32 三 Surface 共用）首次获得自绘装饰路径与 `WindowStyleOptions::decoration` 的真实映射；`Theme` 与 CSD 建立令牌派生通道；`aurora_api.json` schema、`codespec/specification/{03,06,07}`、`codespec/manual-test/10-window.md`、`CHANGELOG.md` 同批回写。既有 3 个预设工厂、`DecorationPolicy` 五档枚举语义、既有安全区口径与软件/GPU 双上屏路径均保持向后兼容 |
 

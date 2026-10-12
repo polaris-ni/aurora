@@ -121,7 +121,7 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 | 选项 | 默认值 | 含义 | 传播宏 | 额外链接 |
 |:---|:---|:---|:---|:---|
 | `AURORA_BACKEND_HEADLESS` | `ON` | 无头内存 / PNG 后端（`HeadlessSurface`，离线渲染 / 测试）。⚠️ 关掉它只保证**库与工具**可构建（`AURORA_BUILD_TESTS=OFF`）：测试套件以无头后端为默认绘制目标，18 个测试 TU 直接引用 `HeadlessSurface`，故 `AURORA_BUILD_TESTS=ON` × `AURORA_BACKEND_HEADLESS=OFF` 不是受支持的组合（既存缺口） | `AURORA_BACKEND_HEADLESS` | — |
-| `AURORA_BACKEND_WIN32` | Windows `ON`，否则 `OFF` | Win32/GDI 后端（`Win32Surface` + `Win32Host` 共享宿主） | `AURORA_BACKEND_WIN32` | `user32` `gdi32` `shell32` `ole32` `uuid` `imm32`（仅 `_WIN32`；`imm32` 供输入法组合桥） |
+| `AURORA_BACKEND_WIN32` | Windows `ON`，否则 `OFF` | Win32/GDI 后端（`Win32Surface` + `Win32Host` 共享宿主） | `AURORA_BACKEND_WIN32` | `user32` `gdi32` `shell32` `ole32` `uuid` `imm32` `dwmapi`（仅 `_WIN32`；`imm32` 供输入法组合桥，`dwmapi` 供 CSD 能力探测与帧扩展） |
 | `AURORA_BACKEND_D3D11` | `OFF` | D3D11 GPU 增量上屏后端（`D3D11Surface`） | `AURORA_BACKEND_D3D11` | `d3d11` `dxgi` `d3dcompiler`（仅 `_WIN32`） |
 | `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；真窗口帧路径 `WgpuWin32Surface` / `WgpuX11Surface` / `WgpuWaylandSurface` 另与宿主 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread` `m`(Linux) |
 | `AURORA_BACKEND_GLFW` | `OFF` | GLFW + OpenGL（上下文 3.3 兼容剖面，绘制 1.1 立即模式） | `AURORA_BACKEND_GLFW` | `glfw` 目标（源码静态库）+ `opengl32`(Windows)/`OpenGL::GL`(其他平台) |
@@ -170,8 +170,13 @@ cmake --build build -j $(nproc)
   `AURORA_BACKEND_X11 ∧ AURORA_ENABLE_DEBUG ∧ AURORA_BUILD_VERIFY_TOOLS` 三开关同开时定义
   （判据直读 `data()` 帧缓冲，Release 构建下该口被裁掉）；X11 无外延阴影 margin（不假设 ARGB
   视觉与合成器），`WindowFrameStyle::shadow_margin_dp` 在该后端只作用于内缘缩放热区宽度。
-  Win32 的自绘装饰为**契约先行、实现待落地**（见 `specification/07-environment-modifier.md`
-  §4.1 三后端映射表），不代偿 Snap 布局与系统菜单。
+  Win32 后端的像素级 CSD 探针 `aurora_verify_win32_csd` 同款门控（`AURORA_BACKEND_WIN32 ∧
+  AURORA_ENABLE_DEBUG ∧ AURORA_BUILD_VERIFY_TOOLS`）。Win32 自绘装饰已落地（见
+  `specification/07-environment-modifier.md` §4.1 三后端映射表）：自绘档依赖 DWM 合成
+  （关闭时缩放热区/投影带宽归零降级），且**不代偿 Aero Snap 布局面板与 Alt+Space 系统菜单**
+  （系统档 Auto/ServerSide 保留两者；自绘档缺失为平台边界，非缺陷）；探针不覆盖的
+  拖拽/双击最大化/Aero Snap 手势由系统 `HTCAPTION`/`HT*` 免费提供，属手工验收范围
+  （manual-test TC-WINDOW-015）。
 - 输入法桥协议 `zwp_text_input_manager_v3` 为**软探测**（`AURORA_HAVE_WL_TEXT_INPUT`，`PUBLIC` 编译宏 = `1`/`0`）：配置期在 `wayland-protocols` 的 XML 清单中找 `text-input-unstable-v3.xml`，命中则 `wayland-scanner` 生成胶水并置 `1`；缺失（老协议集发行版）则跳过生成并置 `0`——桥体整段被宏裁切，后端其余能力照常编译，**不报配置期红灯**（与 xdg-shell 硬依赖区分：输入法可运行期降级，协议头缺失不可）。
 - 非 Linux（含 Apple）平台开启任一后端将触发 `FATAL_ERROR`。
 - 静态分析口径：CI 的 lint 作业显式打开 X11 / Wayland / GLFW 及其余能力开关（§4.5），**只按上面「最小后端」示例 configure 的本地构建不构成 lint 覆盖面**——未开的宏其 `#ifdef` 收口代码不参与分析，`unique_findings = 0` 会被误读成「查过了」。
@@ -763,7 +768,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 | `freetype` | 随附 FreeType 静态库 |
 | `harfbuzz` | 随附 HarfBuzz 静态库 |
 
-`Aurora::aurora` 自动传递链接：`freetype` + `harfbuzz` + zlib（FreeType 解压字体表需要，尽力定位；找不到则跳过）+ `winpthread` / `pthread`（HarfBuzz 内部互斥，MinGW 下为 `winpthread`）+ Win32 系统库（`user32 gdi32 shell32 ole32 uuid imm32`，仅 `WIN32`）。消费者**无需**手动 `find_package(FreeType)` / `find_package(HarfBuzz)`。
+`Aurora::aurora` 自动传递链接：`freetype` + `harfbuzz` + zlib（FreeType 解压字体表需要，尽力定位；找不到则跳过）+ `winpthread` / `pthread`（HarfBuzz 内部互斥，MinGW 下为 `winpthread`）+ Win32 系统库（`user32 gdi32 shell32 ole32 uuid imm32 dwmapi advapi32`，仅 `WIN32`；`dwmapi`/`advapi32` 供 CSD 能力探测与 `os_color_scheme` 注册表读取）。消费者**无需**手动 `find_package(FreeType)` / `find_package(HarfBuzz)`。
 
 ### 9.3 feature 宏导出约定
 
