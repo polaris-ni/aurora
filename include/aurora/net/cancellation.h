@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief 异步网络操作的取消令牌（CHG-007 底座切片）。
+/// @brief 异步网络操作的取消令牌（CHG-008 底座切片）。
 /// @file net/cancellation.h
 ///
 /// 一次网络操作的「能不能中途放弃」由 `Cancellation` 表达：它是**共享状态**的句柄，拷贝只

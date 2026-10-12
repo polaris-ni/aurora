@@ -728,7 +728,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 链接面：`ws2_32` 随核心 `aurora` 目标在 Windows 无条件 `PUBLIC` 传导（见 `BUILD_OPTIONS.md`），各消费者不再散挂。Emscripten 腿经其 BSD socket shim 编译，但浏览器运行时无真实监听语义，Inspector 相关用例在 wasm 构建下按 `AURORA_TEST_SKIP` 退避。回归：`utest_net_socket`（行为契约）+ `utest_inspector_client`（超时平台形态）。
 
-#### 8.8.1 底座值类型：端点与取消令牌（CHG-007 已落地部分）
+#### 8.8.1 底座值类型：端点与取消令牌（CHG-008 已落地部分）
 
 `include/aurora/net/address.h` 与 `include/aurora/net/cancellation.h` 是通用网络栈的第一批落点。两者都不引入平台 socket 头，也**不改变**上一段所述同步传输面的当前范围（`socket.h` 仍只消费回环端点；非回环连通性随后续切片开放）。
 
@@ -737,7 +737,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：`net-endpoint-invalid`（`message` 携 `detail=` 指明被拒原因）、`net-cancelled`（`retryable = true`，供重试与策略判定直接消费）。
 - 回归：`utest_net_address`（解析、规范化、校验与判等黄金判据）、`utest_net_cancellation`（含跨线程钩子落点与钩子内重入不死锁）。
 
-#### 8.8.2 事件源注册口（`aurora::app::EventSourceRegistry`，CHG-007 底座）
+#### 8.8.2 事件源注册口（`aurora::app::EventSourceRegistry`，CHG-008 底座）
 
 网络栈 L0 宿主集成层的通用就绪通知底座（`include/aurora/app/event_source_registry.h` + `src/aurora/app/event_source_registry.cpp`）：把「一个可等待句柄 + 就绪回调」并入各平台宿主等待集，供第三方非阻塞会话（libssh2、DBus 一类）与库自带的 poll 线程引擎共同复用。提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §2 与 §18 定案 1 给出各平台的**并入点**（Win32 `MsgWaitForMultipleObjectsEx` 句柄数组、X11/Wayland `poll` 数组里 DBus watch fd 的收编、Headless 自建 poll 循环、GLFW/macOS 无自有等待集时经引擎线程 + `request_wake` 桥接、wasm 报 `net-platform-unavailable`）；那些改的是**宿主侧**，本节的注册口本身平台无关。
 
@@ -749,7 +749,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 各平台**并入宿主等待集**的具体改造与真机回归（含 X11/Wayland 的 DBus fd 通道收编、Win32 64 句柄上限的显式报错）是后续切片，本切片只交付平台无关的注册口与逐值可断言的接缝契约。
 
-#### 8.8.3 事件驱动就绪基元（`aurora::net::wait_ready`，CHG-007 底座）
+#### 8.8.3 事件驱动就绪基元（`aurora::net::wait_ready`，CHG-008 底座）
 
 `include/aurora/net/poll.h` + 实现在 `src/aurora/net/socket.cpp`：给一组 `{句柄, 关注方向}` 阻塞到部分就绪或超时的**多句柄、四向（读/写/错误/挂断）事件驱动等待基元**。它是 §8.8.2 注册口 `Poller` 接缝的具体实现来源（引擎与测试都把它包成 Poller 装入），也是未来 poll 线程引擎与第三方会话共用的一条底座——刻意与 `Listener::wait_readable`（单句柄、`select`、同步回环）分工：本基元**只做等待、不碰协议语义**，不知道句柄背后是 socket、管道还是 DBus 描述符。
 
@@ -764,7 +764,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 #### 8.8.4 底座剩余（计划/待建）
 
-CHG-007 §17 底座切片仍缺：`Capabilities` + `Engine` 抽象（其 `capabilities()` 是运行期唯一真值源、随引擎落地以免先立无人填写的真相源）、自持 poll 线程与主线程完成投递（把 §8.8.3 的 `wait_ready` 包成常驻循环、复用既有 `aurora::detail::post_to_main` + `request_wake` 唤醒帧循环），以及把 §8.8.2 注册口接入各平台等待点的具体改法（Win32 `MsgWaitForMultipleObjectsEx` 句柄数组、X11/Wayland `poll` 数组里 DBus watch fd 的收编、Headless 常驻 poll 循环、GLFW/macOS 经引擎线程桥接）。就绪等待基元（§8.8.3）已交付，余下是「谁在什么线程、以什么节奏调用它」。传输族、`Url`/`Headers`、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地。
+CHG-008 §17 底座切片仍缺：`Capabilities` + `Engine` 抽象（其 `capabilities()` 是运行期唯一真值源、随引擎落地以免先立无人填写的真相源）、自持 poll 线程与主线程完成投递（把 §8.8.3 的 `wait_ready` 包成常驻循环、复用既有 `aurora::detail::post_to_main` + `request_wake` 唤醒帧循环），以及把 §8.8.2 注册口接入各平台等待点的具体改法（Win32 `MsgWaitForMultipleObjectsEx` 句柄数组、X11/Wayland `poll` 数组里 DBus watch fd 的收编、Headless 常驻 poll 循环、GLFW/macOS 经引擎线程桥接）。就绪等待基元（§8.8.3）已交付，余下是「谁在什么线程、以什么节奏调用它」。传输族、`Url`/`Headers`、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地。
 
 ---
 

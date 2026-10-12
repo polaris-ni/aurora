@@ -56,6 +56,7 @@
 #include "aurora/core/event_stream.h"
 #include "aurora/core/file_watcher.h"
 #include "aurora/core/font.h"
+#include "aurora/core/headers.h"
 #include "aurora/core/image.h"
 #include "aurora/core/literals.h"
 #include "aurora/core/log.h"

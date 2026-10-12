@@ -48,6 +48,7 @@ aurora/core/duration.h
 aurora/core/event_stream.h
 aurora/core/file_watcher.h
 aurora/core/font.h
+aurora/core/headers.h
 aurora/core/image.h
 aurora/core/literals.h
 aurora/core/log.h

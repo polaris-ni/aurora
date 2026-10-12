@@ -20,6 +20,7 @@
 | 平台与能力查询 | `platform.h`、`enums.h`、`native_surface.h` |
 | 无障碍（a11y） | `accessibility.h`（角色 / 动作 / 节点 / 事件 / 设置等纯数据类型与指针级钩子）、`a11y_types.h`（状态 / 取值域 / 选区值类型）、`a11y_provider.h`（桥抽象与注册表）、`a11y_text.h`（UTF-8 ↔ UTF-16 偏移映射） |
 | JSON 值容器 | `json.h`（公共轻头；实现位于 `src/aurora/core/json/`，契约见 §9） |
+| HTTP 头集合 | `headers.h`（大小写不敏感、同名保序多值的头表值类型，契约见 §10） |
 | 其他 | `image.h`、`font.h`、`literals.h`、`version.h` |
 
 根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`、`imperative.h`（命令式逃生舱：就地执行一段命令式代码块）。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`。）
@@ -730,3 +731,63 @@ class SaxHandler {
 
 语料根默认取仓库内 `tests/fixtures/json_test_suite`，可经环境变量 `AURORA_JSON_TEST_SUITE_DIR`
 覆盖以指向另一份 checkout；语料目录缺失时用例**失败而非跳过**——该资产随仓库分发，缺失即环境错误。
+
+---
+
+## 10 HTTP 头集合（`core/headers.h`）
+
+> 覆盖 `include/aurora/core/headers.h`（header-only 值类型，无 `.cpp`）。
+> 该类型是 CHG-008 通用网络栈的两个 `core/` 基础件之一（另一个是 `Url`，随其切片落地）；
+> HTTP / SSE / WebSocket 握手与 Inspector 的头部读写共用它，动机见
+> [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §12。
+
+### 10.1 定位与边界
+
+`aurora::Headers` 表达一组「字段名 → 值」，是纯值类型：不含句柄、无共享状态、无平台头，
+可在任意线程拷贝与比较。它之所以不能用 `std::map<std::string, std::string>` 或
+`std::unordered_map` 顶替，是因为 RFC 9110 §5 的三条语义与「按键去重的字典」直接冲突：
+
+| 语义 | 内容 | 被字典形态破坏的方式 |
+|:---|:---|:---|
+| 字段名大小写不敏感 | `Content-Type` 与 `content-type` 是同一个字段 | 大小写敏感的键使同一字段读成两个 |
+| 同名字段可重复且顺序有意义 | `Set-Cookie` 每条独立生效，多条不得合并 | 按键去重会静默丢弃第二条起的全部 Cookie |
+| 书写拼写需保留 | 序列化到线上时按写入者拼发送 | 统一小写会改变可观测的报文形态 |
+
+因此存储是**有序条目表**（`std::vector<Entry>`），名字折叠只发生在比较时；`entries()` 是遍历与
+序列化的唯一出口，给出原始拼写与插入顺序。
+
+### 10.2 接口契约
+
+| 接口 | 语义 |
+|:---|:---|
+| `set(name, value)` | 先移除**全部**同名条目，再把新条目**追加到末尾**（非原位覆盖） |
+| `append(name, value)` | 不去重，新条目置于末尾；多值字段的正确写入形态 |
+| `get(name)` | 返回**首个**匹配条目的值，无匹配为 `std::nullopt` |
+| `values(name)` | 返回全部匹配值，按写入顺序；未命中为空序列而非错误 |
+| `contains(name)` | 存在至少一个同名条目 |
+| `remove(name)` | 移除全部同名条目，返回真实条数；重复调用为 no-op（幂等） |
+| `clear()` / `size()` / `empty()` | `size()` 按**条目数**计（同名重复计多条） |
+| `entries()` | 只读条目序列：`{name, value}`，原始拼写 + 插入顺序 |
+| `operator==` | 逐条目比较：名字折叠 ASCII 大小写、值严格比较、**顺序敏感** |
+
+两条口径值得显式记录，因为它们都是「实现容易悄悄走偏」的点：
+
+- **`set` 挪到末尾**是刻意的：让同一 `Headers` 序列化出的字段次序与调用时序一致。HTTP/1.1
+  本身不依赖字段次序，但 Inspector 时间线与测试断言依赖它稳定可复现。
+- **折叠只在 ASCII 字母范围**，不做 locale 相关的 Unicode 折叠：HTTP 字段名本就是 ASCII
+  令牌（RFC 9110 §5.1），非 ASCII 名字按不相等处理；实现用逐字节 `unsigned char` 区间判断，
+  不经 `std::tolower`（后者受 locale 影响且对负值 `char` 是 UB 温床）。
+
+### 10.3 相等语义
+
+顺序敏感是**有意的严格**：折叠后内容相同但次序不同的两个头表判不等。理由是二者序列化出的
+报文不同，而该类型的使用场景（请求构造、响应快照、时间线回放）需要「相等 ⇒ 报文相同」这一
+方向的保证；反向放宽会让 Inspector 的差分把真实的报文变化读成无变化。
+
+### 10.4 层边界与回归
+
+- 只依赖标准库（`<optional>` / `<string>` / `<string_view>` / `<vector>`），由
+  `tools/check/check_core_layer_boundary.py` 守护；不引入 `net/` 任何头，避免 `core → net` 反向依赖。
+- header-only，随伞头 `aurora/aurora.h` 收录（`tools/check/umbrella_manifest.txt` 同步）。
+- 回归：`utest_core_headers`（大小写不敏感存取与原始拼写保留、`append` 保序不折叠、`set`
+  覆盖全部同名并移到末尾、`remove` 计数与幂等、逐条目相等的三个维度：名字折叠 / 值严格 / 顺序敏感）。
