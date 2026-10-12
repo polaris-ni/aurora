@@ -265,8 +265,11 @@ endif ()
 target_link_libraries(aurora PUBLIC freetype harfbuzz)
 # aurora::net（CHG-006）：核心公共 socket 层的 Windows 传输库，PUBLIC 传导给全部消费者
 # （demo/测试/工具/inspector_server），散挂点已在 cmake/AuroraTools.cmake / AuroraTests.cmake 收敛删除。
+# advapi32：注册表读取（os_color_scheme 的 Win32 分支，见 window/platform.h 与
+# src/aurora/window/win32_platform.cpp）——公共头内联函数在任何 Windows 构建里都可能
+# 引用该符号，故挂在顶层而非后端块内（后端块只在 AURORA_BACKEND_WIN32=ON 时生效）。
 if (WIN32)
-    target_link_libraries(aurora PUBLIC ws2_32)
+    target_link_libraries(aurora PUBLIC ws2_32 advapi32)
 endif ()
 
 # ---- 图片编解码器外部库（libjpeg-turbo / libwebp / wuffs）----
