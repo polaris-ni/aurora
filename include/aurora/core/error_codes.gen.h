@@ -133,6 +133,7 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     SystemDragSessionFailed = 89,  ///< system-drag-session-failed: System drag-and-drop session failed: '{detail}'
     NetEndpointInvalid = 90,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
     NetCancelled = 91,  ///< net-cancelled: Network operation was cancelled
+    NetPlatformUnavailable = 92,  ///< net-platform-unavailable
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -150,7 +151,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 92> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 93> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1282,6 +1283,19 @@ inline constexpr std::array<ErrorMeta, 92> AURORA_ERROR_TABLE = {
             .message_tpl = "Network operation was cancelled",
             .hint = "The caller cancelled this operation (or its owner went away); the completion still fires once "
                     "with this code, so drop the result only if the owner is gone",
+        },
+        {
+            .code = ErrorCode::NetPlatformUnavailable,
+            .ident = "NetPlatformUnavailable",
+            .slug = "net-platform-unavailable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "platform_capability",
+            .retryable = false,
+            .message_tpl = "This network capability is unavailable on the current platform",
+            .hint = "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait "
+                    "semantics (e.g. wasm), so there is no silent fallback by design",
         },
     },
 };

@@ -1056,3 +1056,14 @@ fix_category = "cancelled"
 retryable = true
 message = "Network operation was cancelled"
 hint = "The caller cancelled this operation (or its owner went away); the completion still fires once with this code, so drop the result only if the owner is gone"
+
+[[error]]
+enum = "NetPlatformUnavailable"
+slug = "net-platform-unavailable"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "platform_capability"
+retryable = false
+message = "This network capability is unavailable on the current platform"
+hint = "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait semantics (e.g. wasm), so there is no silent fallback by design"

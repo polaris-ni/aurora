@@ -21,6 +21,7 @@
 #include "aurora/animation/timeline.h"
 #include "aurora/app/application.h"
 #include "aurora/app/display.h"
+#include "aurora/app/event_source_registry.h"
 #include "aurora/app/file_dialog.h"
 #include "aurora/app/generate_ui.h"
 #include "aurora/app/hot_reload.h"

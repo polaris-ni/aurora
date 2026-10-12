@@ -13,6 +13,7 @@ aurora/animation/spring.h
 aurora/animation/timeline.h
 aurora/app/application.h
 aurora/app/display.h
+aurora/app/event_source_registry.h
 aurora/app/file_dialog.h
 aurora/app/generate_ui.h
 aurora/app/hot_reload.h

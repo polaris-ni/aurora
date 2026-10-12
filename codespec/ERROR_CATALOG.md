@@ -97,5 +97,6 @@
 | 89 | `SystemDragSessionFailed` | `system-drag-session-failed` | platform | error | false | resource_error | false | System drag-and-drop session failed: '{detail}' | The negotiation broke down or the source stopped providing data; treat the session as ended (action None) and surface a non-drag alternative |
 | 90 | `NetEndpointInvalid` | `net-endpoint-invalid` | io | error | false | invalid_value | false | Network endpoint is not a valid address: '{detail}' | Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use Endpoint::local for UnixSocket paths or named pipes |
 | 91 | `NetCancelled` | `net-cancelled` | io | info | false | cancelled | true | Network operation was cancelled | The caller cancelled this operation (or its owner went away); the completion still fires once with this code, so drop the result only if the owner is gone |
+| 92 | `NetPlatformUnavailable` | `net-platform-unavailable` | io | error | false | platform_capability | false | This network capability is unavailable on the current platform | Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait semantics (e.g. wasm), so there is no silent fallback by design |
 
-<!-- count: total 92 error codes -->
+<!-- count: total 93 error codes -->

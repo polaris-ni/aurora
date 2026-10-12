@@ -131,7 +131,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 | 模块 | 路径 | 职责 |
 |:---|:---|:---|
-| 应用驱动 | `app/` | `application.h` `scheduler.h` `scene.h` `clipboard.h` `file_dialog.h` `system_tray.h` `display.h` `perf_overlay.h` `menu.h` `shortcuts.h` `validate.h` `validate_ui.h` `generate_ui.h` `hot_reload.h` `window_host.h`（窗口宿主）`window_bus.h`（跨窗事件总线）`window_geometry.h`（几何持久化） |
+| 应用驱动 | `app/` | `application.h` `scheduler.h` `scene.h` `clipboard.h` `file_dialog.h` `system_tray.h` `display.h` `perf_overlay.h` `menu.h` `shortcuts.h` `validate.h` `validate_ui.h` `generate_ui.h` `hot_reload.h` `window_host.h`（窗口宿主）`window_bus.h`（跨窗事件总线）`window_geometry.h`（几何持久化）`event_source_registry.h`（`aurora::app::EventSourceRegistry`：L0 通用事件源注册口，把可等待句柄并入宿主等待集，CHG-007 底座，契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.2） |
 | 偏好配置 | `preferences/` | `preferences.h`（JSON 文件后端 + 响应式键值存储；不新增 UI 控件） |
 | 数据存储 | `storage/` | `storage.h`（`Storage` 门面） `storage_backend.h` `memory_backend.h` `fs_backend.h` `serializable.h` `storage_types.h` |
 

@@ -737,6 +737,22 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：`net-endpoint-invalid`（`message` 携 `detail=` 指明被拒原因）、`net-cancelled`（`retryable = true`，供重试与策略判定直接消费）。
 - 回归：`utest_net_address`（解析、规范化、校验与判等黄金判据）、`utest_net_cancellation`（含跨线程钩子落点与钩子内重入不死锁）。
 
+#### 8.8.2 事件源注册口（`aurora::app::EventSourceRegistry`，CHG-007 底座）
+
+网络栈 L0 宿主集成层的通用就绪通知底座（`include/aurora/app/event_source_registry.h` + `src/aurora/app/event_source_registry.cpp`）：把「一个可等待句柄 + 就绪回调」并入各平台宿主等待集，供第三方非阻塞会话（libssh2、DBus 一类）与库自带的 poll 线程引擎共同复用。提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §2 与 §18 定案 1 给出各平台的**并入点**（Win32 `MsgWaitForMultipleObjectsEx` 句柄数组、X11/Wayland `poll` 数组里 DBus watch fd 的收编、Headless 自建 poll 循环、GLFW/macOS 无自有等待集时经引擎线程 + `request_wake` 桥接、wasm 报 `net-platform-unavailable`）；那些改的是**宿主侧**，本节的注册口本身平台无关。
+
+- **平台无关且位于 `net/` 之下**：本 `.cpp` 不出现任何平台 socket/poll 头（`winsock2.h`/`poll.h` 唯一落点仍是 `src/aurora/net/socket.cpp`，CHG-006 不变量不破）。真正的「阻塞直到某些句柄就绪」经两枚可注入接缝表达——`set_poller(Poller)`（等待实现，由 net 引擎层或测试安装）与 `set_dispatcher(Dispatcher)`（主线程投递实现，缺省为就地同步执行，与 `post_to_main` 无 poster 时的口径一致）。自带等待集的宿主不装 `Poller`、改走 `sources()` 取快照 + `dispatch(ready)` 投递；无 fd 语义的腿（wasm）`register_source` 一律回 `net-platform-unavailable`，`wait_and_dispatch` 在未装 Poller 时同码，均**不忙等、不假降级**。
+- **句柄生命周期与三条竞态契约（§18-1，规范性）**：`register_source` 返回 move-only RAII 句柄 `EventSourceRegistration`，析构即注销且**幂等**、移动后源转空态、其析构不再触发二次注销。注销语义 = **停止产生新回调**：`dispatch` 在锁内只快照待投递闭包（`shared_ptr` 按值捕获令条目独立于注册表存活），**释放锁后**才逐个投递——因此已进入 `Dispatcher` 队列的一次尾批仍会抵达一次（回调载荷须由使用方以弱令牌保护宿主），但此后新的 `dispatch` 不再为该令牌产生回调。需连尾批一起作废另用 `cancel_pending()`（置条目的 `cancelled` 原子位），该调用与析构**互不隐含**：前者只作废尾批、不影响后续投递；后者只移除快照条目、不作废已入队尾批。回调内可安全再注册/注销（投递在锁外）。
+- **令牌关联**：同 `handle` 可多次登记、各自持独立令牌与回调（`next_token()` 单调、从 1 起、0 留空态）；宿主等待回来后按令牌回填 `ReadySource`，注销后重登记取新令牌、旧令牌的迟到就绪不会误触发新条目回调。
+- 错误码：复用 `net-platform-unavailable`（本次新增，`retryable = false`、`fix_category = platform_capability`；`hint` 指向 `Engine::capabilities()` 查询与能力矩阵）。
+- 回归：`utest_app_event_source_registry`（有效句柄与 `-1`/不支持腿的拒绝、就绪回调「抵达次数 == 就绪次数」、原生宿主无 Poller 走 `sources()`/`dispatch()` 的通路、`unregister` 与 `cancel_pending` 在排程 Dispatcher 下的尾批分岔、移动不双重注销、同句柄重登记取新令牌）。
+
+各平台**并入宿主等待集**的具体改造与真机回归（含 X11/Wayland 的 DBus fd 通道收编、Win32 64 句柄上限的显式报错）是后续切片，本切片只交付平台无关的注册口与逐值可断言的接缝契约。
+
+#### 8.8.3 底座剩余（计划/待建）
+
+CHG-007 §17 底座切片的剩余项：`Capabilities` + `Engine` 抽象（其 `capabilities()` 是运行期唯一真值源、随引擎落地以免先立无人填写的真相源）、自持 poll 线程与主线程完成投递（复用既有 `aurora::detail::post_to_main`），以及把上述注册口接入各平台等待点的具体改法。传输族、`Url`/`Headers`、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地。
+
 ---
 
 ### 8.9 系统拖放（跨进程）
