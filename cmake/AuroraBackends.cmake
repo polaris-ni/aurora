@@ -31,8 +31,10 @@ if (AURORA_BACKEND_WIN32)
     if (WIN32)
         # user32/gdi32：窗口与 GDI；shell32/ole32：Shell_NotifyIcon 与 COM 文件对话框；
         # uuid：CLSID/IID 常量（IFileOpenDialog 等）；imm32：IMM32 组合输入桥
-        # （ImmGetContext / ImmGetCompositionStringW / ImmSetCandidateWindow，见 window/detail/win32_ime.*）。
-        target_link_libraries(aurora PUBLIC user32 gdi32 shell32 ole32 uuid imm32)
+        # （ImmGetContext / ImmGetCompositionStringW / ImmSetCandidateWindow，见 window/detail/win32_ime.*）；
+        # dwmapi：DWM composition 探测与帧扩展（DwmIsCompositionEnabled /
+        # DwmExtendFrameIntoClientArea，见 window/detail/win32_dwm.h，CSD 投影/圆角能力判据）。
+        target_link_libraries(aurora PUBLIC user32 gdi32 shell32 ole32 uuid imm32 dwmapi)
     endif ()
 endif ()
 

@@ -83,6 +83,19 @@ class Win32Surface final : public Surface {
     /// @param title 新窗口标题（UTF-8）。
     auto set_title(const std::string &title) -> void override { win_->set_title(title); }
 
+    /// @brief 运行期更新自绘标题栏样式（转发共享宿主；下一帧重绘装饰带）。
+    /// @param style 新标题栏样式。
+    auto set_title_bar_style(const TitleBarStyle &style) -> void override { win_->set_title_bar_style(style); }
+    /// @brief 运行期更新自绘窗框样式（转发共享宿主；投影厚度即缩放热区带宽）。
+    /// @param style 新窗框样式。
+    auto set_window_frame_style(const WindowFrameStyle &style) -> void override { win_->set_window_frame_style(style); }
+    /// @brief 运行期更新标题栏图标（转发共享宿主）。
+    /// @param icon 图标像素（nullptr = 留白）。
+    auto set_title_bar_icon(const std::shared_ptr<Image> &icon) -> void override { win_->set_title_bar_icon(icon); }
+    /// @brief 自绘装饰安全区（转发共享宿主）：只报标题栏带高度，其余 0。
+    /// @return 装饰占用的内边距（逻辑 dp）。
+    [[nodiscard]] auto content_inset() const -> EdgeInsets override { return win_->content_inset(); }
+
     /// @brief 运行时更新悬停光标形状：`SetCursor` + 系统预置光标 `LoadCursor(nullptr, IDC_*)`。
     /// 映射与实现抽到 `src/aurora/window/win32_cursor.h` 的 `detail::set_win32_cursor`，与
     /// `D3D11Surface` 共用同一份（两者共用 `Win32Host` 宿主模型，映射不应重复实现）。

@@ -181,6 +181,17 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_x11_csd)
     endif ()
 
+    # ---- Win32 客户端自绘装饰（真实桌面）：WM_NCCALCSIZE 吞框几何 + WM_NCHITTEST 逐点热区
+    # 回归（SendMessage 直报，不依赖抓屏）+ DEBUG data() 像素判据（AdwaitaDark 栏带/hover/press
+    # 分层/零入侵）+ 释放触发与拖离取消 + 降级归零 + 热更 + 最大化触发与 rcWork 几何。
+    # 像素判据需 DEBUG 构建（data() 暴露帧缓冲）；期望值取库内共享层同一份函数
+    # （src/aurora/window/detail/csd_*.h），故需 src 包含目录（同 WASAPI/ALSA 探针先例）。
+    if (WIN32 AND AURORA_BACKEND_WIN32 AND AURORA_ENABLE_DEBUG)
+        aurora_add_verify_probe(aurora_verify_win32_csd "${_aurora_verify_dir}/win32_csd_live_probe.cpp")
+        target_include_directories(aurora_verify_win32_csd PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_csd)
+    endif ()
+
     # ---- X11 wgpu GPU 栅格（Linux 真实窗口 + 离屏直驱，WSLg vGPU 可验）：与 Win32 探针同段结构，
     # 宿主动态类型为 WgpuX11Surface，另加 XGetImage 截图落盘物证。需 WGPU+X11 通道编译进库。
     if (AURORA_BACKEND_GPU_WGPU AND AURORA_BACKEND_X11)

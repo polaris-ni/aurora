@@ -148,6 +148,10 @@ auto Win32Surface::present() -> Result<bool> {
     if ((hwnd != nullptr) && (painter_.data() != nullptr)) {
         const int w = painter_.width();
         const int h = painter_.height();
+        // CSD 自绘标题栏带（幂等覆绘；未激活时零开销直返）：在应用内容之上、上屏之前
+        // 绘进帧缓冲，与 X11 参考实现 present 内的 paint_decoration 同一时序——应用内容
+        // 溢出安全区的像素（阴影/浮层）被装饰带覆盖，热区与像素不会分家。
+        win_->paint_decoration(painter_);
         if (const HDC hdc = GetDC(hwnd); hdc != nullptr) {
             if (ensure_dib(w, h)) {
                 if (present_dirty_.empty()) {

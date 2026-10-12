@@ -1,6 +1,8 @@
 #include "aurora/window/win32_host.h"
 
+#include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/交互/绘制装配层
 #include "aurora/window/detail/win32_dpi.h"
+#include "aurora/window/detail/win32_dwm.h"  // DWM composition 探测 / 帧扩展
 #include "aurora/window/detail/win32_ime.h"
 #include "aurora/window/detail/win32_keymap.h"
 #include "aurora/window/detail/win32_modifiers.h"
@@ -23,12 +25,18 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "aurora/core/image.h"
+#include "aurora/core/log.h"
 #include "aurora/core/utf8.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
+#include "aurora/render/display_list.h"
+#include "aurora/render/painter.h"
+#include "aurora/window/title_bar_geometry.h"  // TitleBarGeometry / title_bar_geometry
 #include "aurora/window/window.h"
 #include "aurora/window/window_state.h"
 
@@ -101,6 +109,31 @@ namespace aurora {
     }
 }
 
+// ---- CSD 热区 → Win32 命中码映射（共享层 zone 分类的唯一消费点）----
+[[nodiscard]] static auto resize_zone_to_hit_test(csd::CsdResizeZone zone) -> LRESULT {
+    switch (zone) {
+        case csd::CsdResizeZone::Left:
+            return HTLEFT;
+        case csd::CsdResizeZone::Right:
+            return HTRIGHT;
+        case csd::CsdResizeZone::Top:
+            return HTTOP;
+        case csd::CsdResizeZone::Bottom:
+            return HTBOTTOM;
+        case csd::CsdResizeZone::TopLeft:
+            return HTTOPLEFT;
+        case csd::CsdResizeZone::TopRight:
+            return HTTOPRIGHT;
+        case csd::CsdResizeZone::BottomLeft:
+            return HTBOTTOMLEFT;
+        case csd::CsdResizeZone::BottomRight:
+            return HTBOTTOMRIGHT;
+        case csd::CsdResizeZone::None:
+            break;
+    }
+    return HTCLIENT;
+}
+
 // pimpl：全部 Win32/GDI 状态与消息处理都在这里；公共头仅持有 unique_ptr<Impl>。
 struct Win32Host::Impl {
     HWND hwnd = nullptr;
@@ -138,6 +171,26 @@ struct Win32Host::Impl {
     detail::ModifierKeyTracker mods;
     /// @brief 焦点控件的候选窗定位盒查询（由 `WindowHost` 注入；空 = 无定位，走系统默认）。
     std::function<Rect()> composition_caret_provider;
+
+    // ---- 自绘装饰（CSD）：`WindowStyleOptions::decoration` 五档策略的 Win32 语义 ----
+    //
+    // Win32 几何模型与 Wayland 的根本差异：吞掉非客户区后**客户区 = 整窗**（无外延
+    // margin 带），故绘制态 margin_dp 恒 0（投影由 DWM 在窗外缘合成，不进帧缓冲），
+    // 缩放热区是**内容区内缘带**（口径同 X11 参考实现：`classify_resize_zone` 缩进
+    // margin 后的外延环判定式），带宽 = `frame_margin_dp(frame, dwm_capable)`。
+    std::string title;  ///< 窗口标题（UTF-8；自绘标题栏文字源，随 set_title 更新）。
+    bool csd_title = false;  ///< 自绘标题栏（CsdMode::title；ClientSide）。
+    bool csd_border = false;  ///< 内缘八向缩放热区（title/border 任一开启即激活）。
+    bool csd_mod_move = false;  ///< 无标题栏时的兜底：Alt/Meta 拖拽任意处移动（Borderless/Frameless）。
+    TitleBarStyle tb_style{};  ///< 自绘标题栏样式（栏高/配色/按钮语言/显隐开关）。
+    WindowFrameStyle frame_style{};  ///< 自绘窗框样式（投影基色/模糊；厚度即热区带宽）。
+    std::shared_ptr<Image> tb_icon;  ///< 标题栏图标（nullptr = 留白，几何位保留）。
+    csd::DecorationInteraction csd_ui{};  ///< 交互状态（悬停/按压/全屏揭示）。
+    bool dwm_capable = false;  ///< DWM composition 可用（投影/圆角能力，构造期探测一次）。
+    int resize_margin_dp = 0;  ///< 缩放热区带宽（逻辑 dp；= `frame_margin_dp` 折算值，降级归零）。
+    /// @brief 装饰录制专用 Painter（GPU 路径）：不复用任何帧缓冲 Painter——app 帧录制期间
+    /// 其录制栈非空，嵌套会污染帧 DL（口径同 `WaylandSurface::Impl::deco_recorder`）。
+    Painter deco_recorder;
 
     inline static bool class_registered = false;
     inline static HBRUSH bg_brush = nullptr;  ///< 浅色背景擦除刷（消除最大化黑屏），注册时创建一次。
@@ -188,6 +241,26 @@ struct Win32Host::Impl {
     [[nodiscard]] auto handle_ime(UINT msg, WPARAM wp, LPARAM lp) const -> LRESULT;
     auto handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT;
 
+    // ---- 自绘装饰（CSD）消息分族与状态装配 ----
+    /// @brief `WM_NCCALCSIZE`：吞掉非客户区使客户区 = 整窗（最大化时拉回可见工作区）。
+    /// 仅自绘装饰档（ClientSide/Borderless）走本路径；Auto/ServerSide/Frameless 交系统默认。
+    auto handle_nccalcsize(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> LRESULT;
+    /// @brief `WM_NCHITTEST`：标题栏按钮 → HTCLIENT、标题带空白 → HTCAPTION（系统白给
+    /// 拖拽/双击最大化/Aero Snap）、内缘八向 → HTLEFT/...（判定复用共享层分类器）。
+    auto handle_nchittest(HWND hwnd_in, LPARAM lp) const -> LRESULT;
+    /// @brief CSD 标题栏指针拦截（客户区坐标）：按压置态、释放结算动作、悬停跟踪。
+    /// @return 事件被装饰层消费时 true（调用方不得再转发应用）。
+    [[nodiscard]] auto csd_handle_pointer(UINT msg, int x, int y) -> bool;
+    /// @brief 装饰态变化（悬停/按压/揭示）后请求同步重渲染：经 present_request 走
+    /// Window 的整帧重上屏（软件路径全量 blit，GPU 路径整帧重录），装饰带立即跟手。
+    auto csd_band_repaint() -> void;
+    /// @brief 装配本帧装饰绘制状态（软件光栅与 GPU 录制两条路径共用的唯一装配点）。
+    [[nodiscard]] auto decoration_state() const -> csd::TitleBarPaintState;
+    /// @brief 重算缩放热区带宽（`frame_margin_dp` 三路归零：样式关闭/负值/DWM 不可用）。
+    auto refresh_resize_margin() -> void;
+    /// @brief CSD 标题栏按钮释放结算的平台动作（关窗/最大化切换/最小化）。
+    auto csd_trigger_button(int button) const -> void;
+
     auto register_class() const -> void;
     /// @brief 重算 `scale`（宿主内**唯一**读 DPI 处），并返回本次读到的缩放因子。
     /// @param desired 建窗期的期望落位矩形（主显示器工作区）；句柄已就绪时传 nullptr 走按窗口那一级。
@@ -206,7 +279,7 @@ struct Win32Host::Impl {
 // ---- Impl 构造：窗口创建 + DPI 适配 + 类注册 + 显示 ----
 Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style,
                       WindowVisibility visibility)
-    : style(style) {
+    : style(style), title(title) {
     // DPI 感知必须早于**任何**窗口创建：`create_window` 路径已由 `make_window` 前移启用；
     // 直接构造 `Win32Host` 的消费者（不经工厂）由这处兜底。函数幂等（进程级 static 守卫），
     // 两条路径都过不会重复设置。建窗尺寸的换算基准（`scale`）在建窗前由 `refresh_scale(&wa)`
@@ -233,13 +306,31 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
     hinst = GetModuleHandleA(nullptr);
     register_class();
 
-    // 高级样式映射：无边框 WS_POPUP；不可调大小去 WS_THICKFRAME/WS_MAXIMIZEBOX。
+    // 装饰策略映射（共享层 resolve_mode；Win32 的服务端装饰 = 系统非客户区，恒可用）：
+    // Auto/ServerSide → 三项全 false（保留系统装饰，现状路径零改动）；
+    // ClientSide → 自绘标题栏；Borderless → 无标题栏保留缩放热区 + 修饰键移动；
+    // Frameless → 完全无装饰（移动同样靠修饰键拖拽）。
+    const DecorationPolicy policy = csd::normalize_policy(style.frameless, style.decoration);
+    const csd::CsdMode csd_mode = csd::resolve_mode(policy, /*ssd_available=*/true);
+    csd_title = csd_mode.title;
+    csd_border = csd_mode.border;
+    csd_mod_move = csd_mode.mod_move;
+    tb_style = style.title_bar;
+    frame_style = style.frame;
+
+    // 高级样式映射：Frameless 用 WS_POPUP（完全无装饰）；自绘装饰档撤 WS_CAPTION（无系统
+    // 标题栏）但保留 WS_THICKFRAME（可缩放边框：OS 缩放模态循环经 WM_NCHITTEST 的热区码
+    // 驱动，去掉它 HTLEFT 一族无从生效）；不可调大小再去 WS_THICKFRAME/WS_MAXIMIZEBOX。
     DWORD win_style = WS_OVERLAPPEDWINDOW;
-    if (style.frameless) {
+    if (policy == DecorationPolicy::Frameless) {
         win_style = WS_POPUP;
-    } else if (!style.resizable) {
-        win_style = static_cast<DWORD>(WS_OVERLAPPEDWINDOW) &
-                    ~(static_cast<DWORD>(WS_THICKFRAME) | static_cast<DWORD>(WS_MAXIMIZEBOX));
+    } else {
+        if (csd_title || csd_border) {
+            win_style = static_cast<DWORD>(WS_OVERLAPPEDWINDOW) & ~static_cast<DWORD>(WS_CAPTION);
+        }
+        if (!style.resizable) {
+            win_style &= ~(static_cast<DWORD>(WS_THICKFRAME) | static_cast<DWORD>(WS_MAXIMIZEBOX));
+        }
     }
     const DWORD ex_style = (style.always_on_top ? WS_EX_TOPMOST : 0U) | (style.transparent ? WS_EX_LAYERED : 0U);
 
@@ -270,6 +361,16 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
         // 句柄就绪：换成**按窗口**的真实 DPI（跨显示器时与所在屏一致），此后 `scale` 全程只读
         // 这一个成员。这是「帧 / 逻辑 / scale 三方同源」的起点。
         refresh_scale();
+        // DWM composition 能力探测（投影/圆角与缩放热区带宽的唯一判据）：自绘装饰档在能力
+        // 确认后把整窗标记为 DWM 帧区；不可用则投影厚度经共享层 `frame_margin_dp` 三路归零。
+        dwm_capable = detail::dwm_composition_enabled();
+        if ((csd_title || csd_border) && dwm_capable) {
+            (void)detail::extend_frame_into_client_area(hwnd);
+        }
+        refresh_resize_margin();
+        if (frame_style.shadow_enabled && frame_style.shadow_margin_dp > 0 && !dwm_capable) {
+            AURORA_LOG_INFO("win32-host", "DWM composition unavailable; shadow margin degraded to 0");
+        }
         // 建窗期的落位屏只是**最佳猜测**（`CW_USEDEFAULT` 下系统也可能把窗口放到另一块屏）。
         // 若真实 DPI 与建窗期不同，客户区逻辑尺寸会偏离请求的 dp，故按真实 scale **重设一次尺寸**。
         // 这一步发生在 `ShowWindow` 之前、窗口尚未进入用户视野，因此不存在「首帧与第二帧不一致」
@@ -416,6 +517,17 @@ auto Win32Host::Impl::handle_create() -> LRESULT { return 0; }
 
 // ---- 输入分族（鼠标按钮 / 移动 / 离开 / 滚轮 / 键 / 字符）----
 auto Win32Host::Impl::handle_mouse(HWND hwnd_in, UINT msg, LPARAM lp) -> LRESULT {
+    // CSD 自绘标题栏指针拦截（策略未激活时零开销直返）：被装饰层消费的事件不得再进
+    // 应用事件链（与 X11 参考实现的 break 语义一致）。捕获语义对齐 X11 隐式抓取：
+    // 按钮按下期间 SetCapture，保证「拖到窗外松手」的释放仍回到本窗口结算（拖开取消）。
+    if (csd_handle_pointer(msg, GET_X_LPARAM(lp), GET_Y_LPARAM(lp))) {
+        if (msg == WM_LBUTTONDOWN) {
+            ::SetCapture(hwnd_in);
+        } else if (msg == WM_LBUTTONUP) {
+            ::ReleaseCapture();
+        }
+        return 0;
+    }
     switch (msg) {
         case WM_LBUTTONDOWN:
             on_mouse(MouseAction::Press, MouseButton::Left, GET_X_LPARAM(lp), GET_Y_LPARAM(lp));
@@ -724,6 +836,200 @@ auto Win32Host::Impl::handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT
     return 0;
 }
 
+// ---- 自绘装饰分族（WM_NCCALCSIZE / WM_NCHITTEST / 指针拦截）----
+
+auto Win32Host::Impl::handle_nccalcsize(HWND hwnd_in, WPARAM wp, LPARAM lp) const -> LRESULT {
+    // 非自绘装饰档（Auto/ServerSide/Frameless）：系统非客户区语义原样保留（零改动）。
+    if (!(csd_title || csd_border)) {
+        return DefWindowProcA(hwnd_in, WM_NCCALCSIZE, wp, lp);
+    }
+    if (wp == TRUE) {
+        // 尺寸调整/创建形态：把客户区设为「整个窗口矩形」，系统 caption 与边框带被吞掉
+        // （不改窗口 style 二次猜测——style 仍保留 WS_THICKFRAME 供 OS 缩放模态使用）。
+        // lParam 重解为结构指针是 WM_NCCALCSIZE 协议约定；整数到指针的宽度转换是
+        // 消息参数的固有形态，无法用intptr_t 中转改善。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr)
+        auto *params = reinterpret_cast<NCCALCSIZE_PARAMS *>(lp);
+        if (IsZoomed(hwnd_in) != 0) {
+            // 最大化时 Windows 会把窗口外扩到工作区之外（经典 -8dp 边框问题）：不夹取的话
+            // CSD 标题栏会被切出屏外。客户区拉回**可见工作区**（扣除任务栏），实测与
+            // rcWork 逐值一致。显示器信息不可得时退回窗口自身矩形（不猜）。
+            MONITORINFO mi{};
+            mi.cbSize = sizeof(mi);
+            if (GetMonitorInfoA(MonitorFromWindow(hwnd_in, MONITOR_DEFAULTTONEAREST), &mi) != 0) {
+                params->rgrc[0] = mi.rcWork;
+            } else {
+                const WINDOWPOS &pos = *params->lppos;
+                params->rgrc[0] = RECT{.left = pos.x, .top = pos.y, .right = pos.x + pos.cx, .bottom = pos.y + pos.cy};
+            }
+        } else {
+            const WINDOWPOS &pos = *params->lppos;
+            params->rgrc[0] = RECT{.left = pos.x, .top = pos.y, .right = pos.x + pos.cx, .bottom = pos.y + pos.cy};
+        }
+        return 0;
+    }
+    // wParam=FALSE（创建期等）：lParam 即窗口矩形，不改写 = 整窗为客户区。
+    return 0;
+}
+
+auto Win32Host::Impl::handle_nchittest(HWND hwnd_in, LPARAM lp) const -> LRESULT {
+    // 非自绘装饰档：系统自判（含系统 caption 拖拽与边框缩放）。
+    if (!(csd_title || csd_border || csd_mod_move)) {
+        return DefWindowProcA(hwnd_in, WM_NCHITTEST, 0, lp);
+    }
+    POINT pt{.x = GET_X_LPARAM(lp), .y = GET_Y_LPARAM(lp)};
+    ScreenToClient(hwnd_in, &pt);
+    const Point local = to_logical(pt.x, pt.y);
+    const bool sizable = (mode != WindowMode::Maximized) && (mode != WindowMode::FullScreen);
+
+    // 修饰键拖拽兜底（Borderless/Frameless 无标题栏）：Alt 或 Meta 按住时任意处可移动。
+    if (csd_mod_move) {
+        const ModifierKey m = mods.get();
+        if ((m & (ModifierKey::Alt | ModifierKey::Meta)) != 0U) {
+            return HTCAPTION;
+        }
+    }
+    // 内缘八向缩放热区：判定式与 Wayland 外延 margin、X11 内缘覆盖带同源
+    // （内容坐标缩进 margin 后的外延环口径），不另写第二份八向逻辑。激活口径与 X11
+    // 参考实现逐值一致（`csd_zones = title || border`：ClientSide 撤掉系统 caption 后
+    // 同样要能八向缩放）；最大化/全屏不可缩放，跳过（否则屏幕边缘会吞掉本属应用的
+    // 指针事件）。
+    if ((csd_title || csd_border) && sizable) {
+        const int m = resize_margin_dp;
+        if (m > 0 && size.width > 2.0F * static_cast<float>(m) && size.height > 2.0F * static_cast<float>(m)) {
+            const csd::CsdResizeZone zone =
+                csd::classify_resize_zone(static_cast<double>(local.x) - static_cast<double>(m),
+                                          static_cast<double>(local.y) - static_cast<double>(m),
+                                          static_cast<double>(size.width) - (2.0 * static_cast<double>(m)),
+                                          static_cast<double>(size.height) - (2.0 * static_cast<double>(m)), m);
+            if (zone != csd::CsdResizeZone::None) {
+                return resize_zone_to_hit_test(zone);
+            }
+        }
+    }
+    // 标题栏带（全屏时标题栏退化为揭示覆盖层，不抢占指针——与 X11 参考实现同口径：
+    // 除全屏外均回报热区；最大化下空白带回报 HTCAPTION，由系统承接「拖拽还原」手势）。
+    if (csd_title && mode != WindowMode::FullScreen &&
+        csd::point_in_title_bar(static_cast<double>(local.y), tb_style.height)) {
+        const TitleBarGeometry g =
+            title_bar_geometry(size.width, tb_style, mode == WindowMode::Maximized, style.resizable);
+        if (csd::hit_button(g, static_cast<double>(local.x), static_cast<double>(local.y)) !=
+            csd::AURORA_CSD_BUTTON_NONE) {
+            return HTCLIENT;  // 按钮交互留给自绘层（客户区消息，按压/释放结算走共享状态机）
+        }
+        return HTCAPTION;  // 空白带：系统白给拖拽移动/双击最大化/Aero Snap
+    }
+    return HTCLIENT;
+}
+
+auto Win32Host::Impl::refresh_resize_margin() -> void {
+    // 三路归零集中在共享层：shadow_enabled=false / 厚度<=0 / DWM 不可用 → 0。
+    resize_margin_dp = csd::frame_margin_dp(frame_style, dwm_capable);
+}
+
+auto Win32Host::Impl::csd_band_repaint() -> void {
+    // 装饰态变化（悬停/按压/揭示）：经 Window 的同步重渲染通道立即重上屏。软件路径
+    // （set_present_dirty({}) = 全量 blit）与 GPU 路径（整帧重录回放）都由该通道内部
+    // 按 system_redraw_ 语义保证装饰带被推到屏上，无需后端各写一条上屏路径。
+    if (present_request) {
+        present_request();
+    }
+}
+
+[[nodiscard]] auto Win32Host::Impl::decoration_state() const -> csd::TitleBarPaintState {
+    // 装配口径与 Wayland/X11 参考实现逐字段对齐；唯一差异是 margin_dp 恒 0——
+    // Win32 客户区 = 整窗（无外延 margin 带），投影由 DWM 在窗外缘合成。
+    csd::DecorationInput in;
+    in.size = size;
+    in.mode = mode;
+    in.active = active;
+    in.resizable = style.resizable;
+    in.margin_dp = 0;
+    in.csd_title = csd_title;
+    in.fullscreen_revealed = csd_ui.fullscreen_revealed;
+    in.hovered_button = csd_ui.hovered_button;
+    in.pressed_button = csd_ui.pressed_button;
+    in.title = title;
+    in.icon = tb_icon;
+    in.style = tb_style;
+    in.frame = frame_style;
+    return csd::make_paint_state(std::move(in));
+}
+
+auto Win32Host::Impl::csd_trigger_button(int button) const -> void {
+    // 释放结算的平台动作（契约：动作在释放触发，勿按 Win32 直觉改成按下触发）。
+    if (hwnd == nullptr) {
+        return;
+    }
+    if (button == csd::AURORA_CSD_BUTTON_CLOSE) {
+        // 与系统关闭按钮同路径：WM_CLOSE → handle_close 置 should_close，
+        // 是否退出进程由 Application 的退出策略决定。
+        PostMessageA(hwnd, WM_CLOSE, 0, 0);
+    } else if (button == csd::AURORA_CSD_BUTTON_MAXIMIZE) {
+        PostMessageA(hwnd, WM_SYSCOMMAND, mode == WindowMode::Maximized ? SC_RESTORE : SC_MAXIMIZE, 0);
+    } else if (button == csd::AURORA_CSD_BUTTON_MINIMIZE) {
+        PostMessageA(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+    }
+}
+
+[[nodiscard]] auto Win32Host::Impl::csd_handle_pointer(UINT msg, int x, int y) -> bool {
+    if (!csd_title) {
+        return false;  // 无自绘标题栏：指针全部归应用（Borderless 的热区由 NC 侧承担）
+    }
+    const Point local = to_logical(x, y);
+    const auto lx = static_cast<double>(local.x);
+    const auto ly = static_cast<double>(local.y);
+    switch (msg) {
+        case WM_MOUSEMOVE: {
+            // 悬停跟踪 + 全屏揭示条状态机（与 X11 MotionNotify 分支同口径：先更新态、
+            // 变化才重绘；按压期间吞噬移动，拖开取消由释放结算）。
+            const int hov =
+                csd::resolve_hover(tb_style, size.width, mode == WindowMode::Maximized, style.resizable, true, lx, ly);
+            const bool reveal = csd::update_fullscreen_reveal(csd_ui.fullscreen_revealed, mode, ly, tb_style.height);
+            if (hov != csd_ui.hovered_button || reveal != csd_ui.fullscreen_revealed) {
+                csd_ui.hovered_button = hov;
+                csd_ui.fullscreen_revealed = reveal;
+                csd_band_repaint();
+            }
+            if (csd_ui.grab) {
+                return true;  // 按钮按压期间：拖开取消由释放结算，移动不转发应用
+            }
+            return false;  // 悬停态不吞事件：标题栏带外的移动仍归应用
+        }
+        case WM_LBUTTONDOWN: {
+            // 全屏标题栏不抢占（与 X11 同口径）；标题带外的按下归应用。
+            if (mode == WindowMode::FullScreen || !csd::point_in_title_bar(ly, tb_style.height)) {
+                return false;
+            }
+            const TitleBarGeometry g =
+                title_bar_geometry(size.width, tb_style, mode == WindowMode::Maximized, style.resizable);
+            const int btn = csd::hit_button(g, lx, ly);
+            if (btn == csd::AURORA_CSD_BUTTON_NONE) {
+                return false;  // 空白带：WM_NCHITTEST 已回报 HTCAPTION，走不到此处（兜底）
+            }
+            csd::begin_press(csd_ui, btn);  // 只置按压态；动作在释放结算
+            csd_band_repaint();
+            return true;
+        }
+        case WM_LBUTTONUP: {
+            if (!csd_ui.grab) {
+                return false;  // 按压不在标题栏按钮上发起：与普通客户区抬起同路
+            }
+            const TitleBarGeometry g =
+                title_bar_geometry(size.width, tb_style, mode == WindowMode::Maximized, style.resizable);
+            const int hovered_now = csd::hit_button(g, lx, ly);
+            const int act = csd::consume_press(csd_ui, hovered_now);  // 拖开即取消
+            csd_band_repaint();
+            if (act != csd::AURORA_CSD_BUTTON_NONE) {
+                csd_trigger_button(act);
+            }
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
 auto Win32Host::Impl::register_class() const -> void {
     if (class_registered) {
         return;
@@ -790,6 +1096,20 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return DefWindowProcA(hwnd, msg, wp, lp);
     }
     switch (msg) {
+        case WM_NCCALCSIZE:
+            return self->handle_nccalcsize(hwnd, wp, lp);
+        case WM_NCHITTEST:
+            return self->handle_nchittest(hwnd, lp);
+        case WM_CANCELMODE:
+            // 系统模态（Alt+Tab / 系统菜单弹出）中断指针交互：清装饰按压态并解除捕获，
+            // 否则 pressed/grab 残留会让后续指针移动被无限吞噬（按钮永远高亮）。
+            if (self->csd_ui.grab || self->csd_ui.pressed_button != csd::AURORA_CSD_BUTTON_NONE) {
+                self->csd_ui.pressed_button = csd::AURORA_CSD_BUTTON_NONE;
+                self->csd_ui.grab = false;
+                ::ReleaseCapture();
+                self->csd_band_repaint();
+            }
+            return 0;
         case WM_CREATE:
             return handle_create();
         case WM_LBUTTONDOWN:
@@ -863,6 +1183,70 @@ auto Win32Host::set_title(const std::string &title) const -> void {
     if (pimpl_->hwnd != nullptr) {
         SetWindowTextA(pimpl_->hwnd, utf8_to_acp(title).c_str());
     }
+    pimpl_->title = title;  // 自绘标题栏文字源与系统标题同步更新
+}
+
+// ---- 自绘装饰（CSD）公共 API：全部委托给 pimpl_ ----
+
+auto Win32Host::set_title_bar_style(const TitleBarStyle &style) const -> void {
+    pimpl_->tb_style = style;
+    // 标脏 → 下一帧重绘装饰带（经 Window 的同步重渲染通道；非自绘档无装饰可绘，
+    // present_request 仍安全——surface 的 paint_decoration 对未激活档零开销直返）。
+    if (pimpl_->present_request) {
+        pimpl_->present_request();
+    }
+}
+
+auto Win32Host::set_window_frame_style(const WindowFrameStyle &style) const -> void {
+    pimpl_->frame_style = style;
+    // 投影厚度 = 缩放热区带宽：样式变化只重算热区（Win32 无外延 margin 带，
+    // 表面尺寸口径不随 margin 变化，故不触发整幅重排）。
+    pimpl_->refresh_resize_margin();
+    if (pimpl_->frame_style.shadow_enabled && pimpl_->frame_style.shadow_margin_dp > 0 && !pimpl_->dwm_capable) {
+        AURORA_LOG_INFO("win32-host", "DWM composition unavailable; shadow margin degraded to 0");
+    }
+}
+
+auto Win32Host::set_title_bar_icon(const std::shared_ptr<Image> &icon) const -> void {
+    pimpl_->tb_icon = icon;
+    if (pimpl_->present_request) {
+        pimpl_->present_request();
+    }
+}
+
+auto Win32Host::content_inset() const -> EdgeInsets {
+    // 口径与 X11 逐值一致：只报标题栏带高度（top = 栏高 dp，其余 0）；最大化保留栏高，
+    // 全屏由共享层归零（揭示条不回流布局）；Auto/ServerSide 档恒零。
+    return csd::content_inset(pimpl_->csd_title, pimpl_->tb_style.height, 0, pimpl_->mode);
+}
+
+auto Win32Host::paint_decoration(Painter &p) const -> void {
+    const Impl &d = *pimpl_;
+    if (!d.csd_title || p.data() == nullptr) {
+        return;  // 策略未激活 / 缓冲未就绪：零开销直返
+    }
+    const csd::TitleBarPaintState s = d.decoration_state();
+    if (!s.paints_title_bar()) {
+        return;  // 全屏默认隐藏标题栏；揭示态由指针悬停顶边置位后重绘
+    }
+    csd::paint_title_bar(p, s);
+}
+
+auto Win32Host::record_client_decoration(DisplayList &dl) -> bool {
+    Impl &d = *pimpl_;
+    if (!d.csd_title) {
+        return false;  // 无自绘标题栏：无回放内容（Borderless 的阴影由 DWM 合成，不进 DL）
+    }
+    const csd::TitleBarPaintState s = d.decoration_state();
+    if (!s.paints_title_bar()) {
+        return false;
+    }
+    // 独立录制 Painter：调用点在外层 app 帧录制栈之上，二者互不干扰（口径同
+    // WaylandSurface::record_client_decoration）。
+    d.deco_recorder.record(dl);
+    csd::paint_title_bar(d.deco_recorder, s);
+    d.deco_recorder.stop();
+    return true;
 }
 
 [[nodiscard]] auto Win32Host::hwnd() const -> void * { return pimpl_->hwnd; }
