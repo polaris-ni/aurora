@@ -723,8 +723,8 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 三个类型：
 
 - `Session`：进程级运行时 RAII。Windows 腿引用计数配对 `WSAStartup`/`WSACleanup`（首个构造初始化、末个析构清理，嵌套/并存安全）；POSIX 腿零成本占位、`ok()` 恒真。不可拷贝/移动（纯作用域 guard）。
-- `Listener`：`listen_loopback(port, backlog)`（只绑 `127.0.0.1`；port=0 由系统分配、`port()` 回报实际值）、`wait_readable(timeout) -> Result<bool>`（select 可中断等待，`false` = 纯超时非错误，两平台 nfds 差异内部消化）、`accept() -> Result<StreamSocket>`、`close()` 先 `shutdown(both)` 再关（唤醒并终止另一线程阻塞中的等待，`InspectorServer` 停机场径）。
-- `StreamSocket`：`connect_loopback(port)`、`set_io_timeout(milliseconds)`（**毫秒统一口径**：Winsock 收 DWORD 毫秒、POSIX 收 `timeval`，形态换算封闭在实现侧——按平台字节形态误传会把 5 秒执行成 5 毫秒，本层的存在理由）、`read_some(span) -> Result<size_t>`（**0 = 对端有序关闭**，与错误态严格区分；超时落独立码 `net-recv-timeout`）、`write_all(span)`（内部 ≤1MiB 分块写满，`send` 返回值窄化一次解决）、`is_loopback_peer()`（服务端访问控制判据，127.0.0.0/8 全段）。
+- `Listener`：`listen_loopback(port, backlog)`（只绑 `127.0.0.1`；port=0 由系统分配、`port()` 回报实际值）、`wait_readable(timeout) -> Result<bool>`（select 可中断等待，`false` = 纯超时非错误，两平台 nfds 差异内部消化）、`accept() -> Result<StreamSocket>`、`native_handle()`（借出原生句柄、不转移所有权，交 `wait_ready`/事件源注册口并入等待集）、`close()` 先 `shutdown(both)` 再关（唤醒并终止另一线程阻塞中的等待，`InspectorServer` 停机场径）。
+- `StreamSocket`：`connect_loopback(port)`、`set_io_timeout(milliseconds)`（**毫秒统一口径**：Winsock 收 DWORD 毫秒、POSIX 收 `timeval`，形态换算封闭在实现侧——按平台字节形态误传会把 5 秒执行成 5 毫秒，本层的存在理由）、`read_some(span) -> Result<size_t>`（**0 = 对端有序关闭**，与错误态严格区分；超时落独立码 `net-recv-timeout`）、`write_all(span)`（内部 ≤1MiB 分块写满，`send` 返回值窄化一次解决）、`is_loopback_peer()`（服务端访问控制判据，127.0.0.0/8 全段）、`native_handle()`（借出原生句柄、不转移所有权，同 `Listener`）。
 
 链接面：`ws2_32` 随核心 `aurora` 目标在 Windows 无条件 `PUBLIC` 传导（见 `BUILD_OPTIONS.md`），各消费者不再散挂。Emscripten 腿经其 BSD socket shim 编译，但浏览器运行时无真实监听语义，Inspector 相关用例在 wasm 构建下按 `AURORA_TEST_SKIP` 退避。回归：`utest_net_socket`（行为契约）+ `utest_inspector_client`（超时平台形态）。
 
@@ -749,9 +749,22 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 各平台**并入宿主等待集**的具体改造与真机回归（含 X11/Wayland 的 DBus fd 通道收编、Win32 64 句柄上限的显式报错）是后续切片，本切片只交付平台无关的注册口与逐值可断言的接缝契约。
 
-#### 8.8.3 底座剩余（计划/待建）
+#### 8.8.3 事件驱动就绪基元（`aurora::net::wait_ready`，CHG-007 底座）
 
-CHG-007 §17 底座切片的剩余项：`Capabilities` + `Engine` 抽象（其 `capabilities()` 是运行期唯一真值源、随引擎落地以免先立无人填写的真相源）、自持 poll 线程与主线程完成投递（复用既有 `aurora::detail::post_to_main`），以及把上述注册口接入各平台等待点的具体改法。传输族、`Url`/`Headers`、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地。
+`include/aurora/net/poll.h` + 实现在 `src/aurora/net/socket.cpp`：给一组 `{句柄, 关注方向}` 阻塞到部分就绪或超时的**多句柄、四向（读/写/错误/挂断）事件驱动等待基元**。它是 §8.8.2 注册口 `Poller` 接缝的具体实现来源（引擎与测试都把它包成 Poller 装入），也是未来 poll 线程引擎与第三方会话共用的一条底座——刻意与 `Listener::wait_readable`（单句柄、`select`、同步回环）分工：本基元**只做等待、不碰协议语义**，不知道句柄背后是 socket、管道还是 DBus 描述符。
+
+- **平台 socket/poll 头唯一落点不破**：POSIX `poll` 走 `<poll.h>`、Winsock `WSAPoll`/`WSAPOLLFD` 走 `<winsock2.h>`，两者都只在 `src/aurora/net/socket.cpp` 出现（CHG-006 不变量继续成立；`<poll.h>` 本就在受限清单之外，但 `WSAPoll` 依赖 `winsock2.h` 故必须落在此 TU）。`net/poll.h` 零平台头。
+- **就绪语义定见**：返回向量与入参 `PollDescriptor` **等长同序**（第 `i` 项描述第 `i` 句柄），第 `i` 项 `handle < 0` 时该槽恒全 false 且**不进系统调用**——一个坏句柄不毁整批等待（POSIX 负 fd、Windows 传 `INVALID_SOCKET` 会 `WSAENOTSOCK` 让全批失败，故排除而非透传）。`readable`/`writable` 仅在对应方向被 `want_*` 请求时才置位（`POLLIN`/`POLLOUT` 按请求上报），`error`（含 `POLLNVAL`）与 `hangup`（`POLLHUP`）无条件上报（内核这两态不受 `events` 请求约束）。**纯超时不是错误**：无句柄就绪时返回 OK + 全 false 向量，调用方据此轮询自有停止标志；仅系统调用真失败落 `net-wait-failed`（message 携 OS 原生码）。
+- **超时口径**：`timeout` 是**单次系统调用**的上限，POSIX 被 `EINTR` 打断时以同一预算重新武装（不吞错误、不提前返回），Windows `WSAPoll` 无 `EINTR` 语义故单次调用；`timeout <= 0` 表示非阻塞立即回报当前就绪态。跨平台一致行为判据下不承诺单调时钟意义下的精确总时长。
+- **`native_handle()`（同步面新增的借用出口）**：`StreamSocket`/`Listener` 各加 `native_handle() -> std::intptr_t`（`-1` 恒无效，与 `is_valid()` 同口径），把原生句柄借给 `wait_ready`、事件源注册口或第三方库（libssh2 一类）接管。约束：**非所有权转移**，仅在本对象存活且未 `close()` 期间有效，调用方不得自行关闭（双重关闭会误伤系统复用后的新句柄）。Windows 腿为 `SOCKET`、POSIX 腿为文件描述符。
+- **Windows 前置条件**：`WSAPoll` 需活跃 Winsock 运行时，故 `wait_ready` 要求调用方持 `Session`（与所有 net 用法一致）；否则以 `WSAENETDOWN` 落 `net-wait-failed`。测试用 `WSAPoll` 历史不稳的两条路径（listener 待 `accept` 的 `POLLIN`、对端 `FD_CLOSE` 的 `POLLHUP`）不作断言判据，只锁「连接即可写 / 写入后可读 / 排空即纯超时」这三条两平台同色的语义。
+- **Headless 基线（§2「先立无 GUI 行为基线」）**：把 `wait_ready` 包成 Poller 装入 `EventSourceRegistry`、登记真实回环句柄，即可在无 GUI 单测里逐值验证「注册 → 就绪回调抵达次数 == 就绪次数 → 析构注销后 `sources()` 清空、`wait_and_dispatch` 空转且回调不再抵达」——这是 §18-1 生命周期契约在真实 fd 上的落地证据。
+- 错误码：复用既有 `net-wait-failed`，本切片无新增码。
+- 回归：`utest_net_poll`（空集合 OK、无效槽不毁批、可写→可读→空闲三态、注册口经真实 fd 的端到端事件源循环）。
+
+#### 8.8.4 底座剩余（计划/待建）
+
+CHG-007 §17 底座切片仍缺：`Capabilities` + `Engine` 抽象（其 `capabilities()` 是运行期唯一真值源、随引擎落地以免先立无人填写的真相源）、自持 poll 线程与主线程完成投递（把 §8.8.3 的 `wait_ready` 包成常驻循环、复用既有 `aurora::detail::post_to_main` + `request_wake` 唤醒帧循环），以及把 §8.8.2 注册口接入各平台等待点的具体改法（Win32 `MsgWaitForMultipleObjectsEx` 句柄数组、X11/Wayland `poll` 数组里 DBus watch fd 的收编、Headless 常驻 poll 循环、GLFW/macOS 经引擎线程桥接）。就绪等待基元（§8.8.3）已交付，余下是「谁在什么线程、以什么节奏调用它」。传输族、`Url`/`Headers`、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地。
 
 ---
 

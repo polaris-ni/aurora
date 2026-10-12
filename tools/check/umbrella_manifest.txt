@@ -97,6 +97,7 @@ aurora/navigation/router.h
 aurora/navigation/transition_layer.h
 aurora/net/address.h
 aurora/net/cancellation.h
+aurora/net/poll.h
 aurora/net/socket.h
 aurora/perf/counters.h
 aurora/perf/perf_log.h

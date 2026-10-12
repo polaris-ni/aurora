@@ -94,6 +94,14 @@ class StreamSocket {
     /// @return 未关闭且非默认构造时为 true。
     [[nodiscard]] auto is_valid() const -> bool { return handle_ != AURORA_INVALID_HANDLE; }
 
+    /// @brief 借出原生句柄（不转移所有权）：交 `wait_ready`、事件源注册口或第三方库接管。
+    ///
+    /// 返回值仅在**本对象存活且未 `close()`** 期间有效；调用方不得自行关闭它，也不得在本对象析构后
+    /// 使用（双重关闭会误伤系统复用后的新句柄）。跨平台形态：Windows 为 `SOCKET`、POSIX 为文件描述符，
+    /// 一律以 `std::intptr_t` 承载、`-1` 恒无效（与 `is_valid()` 同口径）。
+    /// @return 原生句柄的 `intptr_t` 承载值；已关闭或默认构造为 -1。
+    [[nodiscard]] auto native_handle() const -> std::intptr_t { return handle_; }
+
     /// @brief 设置收发超时（两方向同值，毫秒统一口径）。
     ///
     /// 这是本层存在的核心理由之一：`SO_RCVTIMEO`/`SO_SNDTIMEO` 在 Winsock 收 DWORD **毫秒数**、
@@ -166,6 +174,13 @@ class Listener {
     /// @brief 实际绑定端口。
     /// @return `listen_loopback` 成功时的端口（port=0 时为系统分配值）；无效态为 0。
     [[nodiscard]] auto port() const -> std::uint16_t { return port_; }
+
+    /// @brief 借出原生句柄（不转移所有权）：交 `wait_ready` 或事件源注册口做可中断等待。
+    ///
+    /// 与 `StreamSocket::native_handle()` 同口径：仅在本对象存活且未 `close()` 期间有效，调用方不得
+    /// 自行关闭；Windows 为 `SOCKET`、POSIX 为文件描述符，以 `std::intptr_t` 承载、`-1` 恒无效。
+    /// @return 监听句柄的 `intptr_t` 承载值。
+    [[nodiscard]] auto native_handle() const -> std::intptr_t { return handle_; }
 
     /// @brief 可中断地等待监听口进入可读（有连接挂起）状态。
     /// @param timeout 最长等待时长。

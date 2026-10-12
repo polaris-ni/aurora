@@ -16,14 +16,18 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
+#include <limits>
 #include <string>
+#include <vector>
 
 #include "aurora/core/platform.h"
+#include "aurora/net/poll.h"
 
 #ifdef AURORA_PLATFORM_WINDOWS
 // Winsock 引用计数会话状态需要互斥；POSIX 腿无此状态，不拉入 <mutex>。
 #include <mutex>
 // Windows: Winsock2（winsock2.h 须在 windows.h 之前——本文件不引入 windows.h）。
+// `WSAPoll` / `WSAPOLLFD` 亦声明于此头（wait_ready 的 Windows 腿）。
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
@@ -33,6 +37,7 @@
 // POSIX（含 macOS / Linux / Android / BSD / Emscripten 的 BSD socket 腿）：BSD sockets。
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -164,6 +169,43 @@ using AddrLen = int;
 #else
 using AddrLen = socklen_t;
 #endif
+
+/// @brief 依据关注方向组装 poll / WSAPoll 的事件位（两平台同名常量、同为 short）。
+/// @param descriptor 待等待句柄的关注方向。
+/// @return 事件位；未关注任何方向返回 0（该句柄只会被动回报 error/hangup）。
+auto poll_events(const PollDescriptor &descriptor) -> short {
+    short events = 0;
+    if (descriptor.want_read) {
+        events |= POLLIN;
+    }
+    if (descriptor.want_write) {
+        events |= POLLOUT;
+    }
+    return events;
+}
+
+/// @brief 把 poll / WSAPoll 的 revents 位映射成四向就绪结果。
+/// @param revents 平台 pollfd 的 revents（两平台同名常量、同为 short）。
+/// @return 就绪方向；POLLNVAL 折入 error（无效句柄是错误态，不是「什么都没等到」）。
+auto poll_outcome(short revents) -> PollOutcome {
+    PollOutcome outcome;
+    outcome.readable = (revents & POLLIN) != 0;
+    outcome.writable = (revents & POLLOUT) != 0;
+    outcome.error = (revents & (POLLERR | POLLNVAL)) != 0;
+    outcome.hangup = (revents & POLLHUP) != 0;
+    return outcome;
+}
+
+/// @brief 把毫秒超时归一到系统调用形态：非正值一律按「立即回报」（0），正值夹进 int 域。
+/// @param timeout 调用方意图的等待上限。
+/// @return 传给 poll / WSAPoll 的 int 毫秒值。
+auto poll_timeout_ms(std::chrono::milliseconds timeout) -> int {
+    const auto ms = timeout.count();
+    if (ms <= 0) {
+        return 0;
+    }
+    return static_cast<int>(std::min<decltype(ms)>(ms, std::numeric_limits<int>::max()));
+}
 
 }  // namespace
 
@@ -427,6 +469,72 @@ auto Listener::close() -> void {
     native_close(from_handle(handle_));
     handle_ = AURORA_INVALID_HANDLE;
     port_ = 0;
+}
+
+// ---- wait_ready -------------------------------------------------------------
+
+auto wait_ready(const std::vector<PollDescriptor> &descriptors, std::chrono::milliseconds timeout)
+    -> Result<std::vector<PollOutcome>> {
+    // 默认全 false：无效句柄槽位、纯超时槽位都落在此初值上（「没等到」不是错误）。
+    std::vector<PollOutcome> outcomes(descriptors.size());
+    if (descriptors.empty()) {
+        return outcomes;
+    }
+
+    // 只把有效句柄并入系统调用：一个坏句柄不该毁掉整批等待（POSIX 会因负 fd 之外的错误整体失败，
+    // Windows 传 INVALID_SOCKET 更可能直接 WSAENOTSOCK 失败）。紧凑数组下标经 slot_of 映射回原序。
+    std::vector<int> slot_of;
+    slot_of.reserve(descriptors.size());
+#ifdef AURORA_PLATFORM_WINDOWS
+    std::vector<WSAPOLLFD> fds;
+#else
+    std::vector<pollfd> fds;
+#endif
+    fds.reserve(descriptors.size());
+    for (std::size_t i = 0; i < descriptors.size(); ++i) {
+        const PollDescriptor &descriptor = descriptors[i];
+        if (descriptor.handle < 0) {
+            continue;  // -1（含任何负值）恒无效，保持全 false
+        }
+        slot_of.push_back(static_cast<int>(i));
+#ifdef AURORA_PLATFORM_WINDOWS
+        WSAPOLLFD entry{};
+        entry.fd = from_handle(descriptor.handle);
+#else
+        pollfd entry{};
+        entry.fd = static_cast<int>(descriptor.handle);
+#endif
+        entry.events = poll_events(descriptor);
+        entry.revents = 0;
+        fds.push_back(entry);
+    }
+
+    if (fds.empty()) {
+        return outcomes;  // 全为无效句柄：非错误，等价「什么都没等到」
+    }
+
+    const int timeout_ms = poll_timeout_ms(timeout);
+#ifdef AURORA_PLATFORM_WINDOWS
+    // WSAPoll 无 EINTR 语义（Windows 不被 POSIX 信号打断），单次调用即可；需要活跃的 Winsock
+    // 运行时（与所有 net 用法一致：调用方持 `Session`），否则以 WSAENETDOWN 落 net-wait-failed。
+    const int ready = ::WSAPoll(fds.data(), static_cast<ULONG>(fds.size()), static_cast<LONG>(timeout_ms));
+    if (ready == SOCKET_ERROR) {
+        return net_error(ErrorCode::NetWaitFailed, "WSAPoll");
+    }
+#else
+    int ready = 0;
+    do {
+        ready = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), timeout_ms);
+    } while (ready < 0 && errno == EINTR);  // 被信号打断：同预算重新武装，不吞错误、不提前返回
+    if (ready < 0) {
+        return net_error(ErrorCode::NetWaitFailed, "poll");
+    }
+#endif
+
+    for (std::size_t k = 0; k < fds.size(); ++k) {
+        outcomes[static_cast<std::size_t>(slot_of[k])] = poll_outcome(fds[k].revents);
+    }
+    return outcomes;
 }
 
 }  // namespace aurora::net
