@@ -423,6 +423,10 @@ auto D3D11Surface::present() -> Result<bool> {
         return make_error(ErrorCode::PlatformUnavailable, "D3D11Surface::present: swap chain not ready.", "",
                           "aurora/window/d3d11_surface.h");
     }
+    // CSD 自绘标题栏带（幂等覆绘；未激活时零开销直返）：必须在纹理上传**之前**绘进
+    // CPU 帧缓冲——上传的是 painter_ 的像素，装饰只能随缓冲一起上去（与 Win32Surface
+    // 的 present 内绘绘时序一致，仅上屏通道不同）。
+    win_->paint_decoration(painter_);
     // 增量上传：脏矩形非空时仅更新变化区，否则整帧上传。
     // 向外取整（floor/ceil）覆盖裁剪绘制触及的全部像素，与 Painter 的 ceil/floor 取整一致。
     bool upload_ok = false;

@@ -159,6 +159,19 @@ class D3D11Surface : public Surface {
     /// @param title 新窗口标题（UTF-8）。
     auto set_title(const std::string &title) -> void override { win_->set_title(title); }
 
+    /// @brief 运行期更新自绘标题栏样式（转发共享宿主；下一帧重绘装饰带）。
+    /// @param style 新标题栏样式。
+    auto set_title_bar_style(const TitleBarStyle &style) -> void override { win_->set_title_bar_style(style); }
+    /// @brief 运行期更新自绘窗框样式（转发共享宿主；投影厚度即缩放热区带宽）。
+    /// @param style 新窗框样式。
+    auto set_window_frame_style(const WindowFrameStyle &style) -> void override { win_->set_window_frame_style(style); }
+    /// @brief 运行期更新标题栏图标（转发共享宿主）。
+    /// @param icon 图标像素（nullptr = 留白）。
+    auto set_title_bar_icon(const std::shared_ptr<Image> &icon) -> void override { win_->set_title_bar_icon(icon); }
+    /// @brief 自绘装饰安全区（转发共享宿主）：只报标题栏带高度，其余 0。
+    /// @return 装饰占用的内边距（逻辑 dp）。
+    [[nodiscard]] auto content_inset() const -> EdgeInsets override { return win_->content_inset(); }
+
     /// @brief 接收本帧脏矩形（设备坐标）；present 时仅增量上传这些区域，空向量 = 全量上传。
     /// @param device_rects 本帧脏矩形列表（设备坐标）。
     auto set_present_dirty(const std::vector<Rect> &device_rects) -> void override { dirty_ = device_rects; }

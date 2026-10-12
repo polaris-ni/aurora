@@ -42,6 +42,18 @@ auto WgpuWin32Surface::Sink::begin_frame(int width, int height, float scale) -> 
     return ok;
 }
 
+auto WgpuWin32Surface::Sink::end_frame() -> void {
+    // 自绘 CSD 标题栏 overlay 合成进当帧：swapchain 独占整块窗口，内嵌宿主画进 Painter
+    // 的标题栏不会随帧缓冲上屏，故装饰只能作为命令在 app 帧之上回放开（软件路径画的是
+    // 同一份内容，两条路径共用 `csd::paint_title_bar`，见 Win32Host::record_client_decoration）。
+    // 坐标同为逻辑 dp、同用本帧 scale，与 app 帧 DL 同一变换口径，热区与像素不会错位。
+    if (owner_->win_->record_client_decoration(deco_dl_)) {
+        deco_dl_.replay(*rhi_);
+        ++owner_->deco_replays_;
+    }
+    rhi_->end_frame();
+}
+
 // ---- 构造 / 析构 ----
 
 WgpuWin32Surface::WgpuWin32Surface(int width, int height, const std::string &title, const WindowStyleOptions &style,
@@ -112,6 +124,9 @@ auto WgpuWin32Surface::present() -> Result<bool> {
 }
 
 auto WgpuWin32Surface::present_gdi() -> void {
+    // CSD 自绘标题栏带（幂等覆绘；未激活时零开销直返）：软件回退帧的 painter_ 即上屏
+    // 内容，装饰须在 swizzle 之前绘进缓冲（与 Win32Surface::present 同一时序）。
+    win_->paint_decoration(painter_);
     const int w = painter_.width();
     const int h = painter_.height();
     if (w <= 0 || h <= 0) {

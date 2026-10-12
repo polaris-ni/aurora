@@ -20,6 +20,7 @@
 
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
+#include "aurora/render/display_list.h"
 #include "aurora/render/painter.h"
 #include "aurora/render/rhi/rhi_frame_sink.h"
 #include "aurora/render/rhi/wgpu_rhi.h"
@@ -164,6 +165,18 @@ class WgpuWin32Surface final : public Surface {
     /// @brief 运行时更新窗口标题（转发给共享宿主）。
     /// @param title 新窗口标题（UTF-8）。
     auto set_title(const std::string &title) -> void override { win_->set_title(title); }
+    /// @brief 运行期更新自绘标题栏样式（转发共享宿主；下一帧重绘装饰带）。
+    /// @param style 新标题栏样式。
+    auto set_title_bar_style(const TitleBarStyle &style) -> void override { win_->set_title_bar_style(style); }
+    /// @brief 运行期更新自绘窗框样式（转发共享宿主；投影厚度即缩放热区带宽）。
+    /// @param style 新窗框样式。
+    auto set_window_frame_style(const WindowFrameStyle &style) -> void override { win_->set_window_frame_style(style); }
+    /// @brief 运行期更新标题栏图标（转发共享宿主）。
+    /// @param icon 图标像素（nullptr = 留白）。
+    auto set_title_bar_icon(const std::shared_ptr<Image> &icon) -> void override { win_->set_title_bar_icon(icon); }
+    /// @brief 自绘装饰安全区（转发共享宿主）：只报标题栏带高度，其余 0。
+    /// @return 装饰占用的内边距（逻辑 dp）。
+    [[nodiscard]] auto content_inset() const -> EdgeInsets override { return win_->content_inset(); }
     /// @brief 运行时更新悬停光标形状：与 `Win32Surface` 共用 `detail::set_win32_cursor` 下发系统预置光标。
     /// @param shape 光标语义形状，经共享映射表转为系统预置光标。
     auto set_cursor(CursorShape shape) -> void override;
@@ -208,6 +221,13 @@ class WgpuWin32Surface final : public Surface {
     /// @brief 已呈现帧数（GPU 帧与 GDI 回退帧均计数）。
     /// @return 迄今上屏（GPU 或 GDI）的总帧数。
     [[nodiscard]] auto frame_count() const -> int override { return frame_; }
+    /// @brief 装饰回放进 GPU 帧的帧数（自绘标题栏激活后 GPU 路径每帧应 > 0）。
+    ///
+    /// 口径同 `WgpuWaylandSurface::decoration_replay_count`：GPU 模式下 app 帧内容在
+    /// swapchain 侧，标题栏只能作为 DisplayList 命令在 `Sink::end_frame` 回放，本计数
+    /// 即「装饰确实进了 GPU 帧」的观测签名（软件回退路径不走本计数）。
+    /// @return 累计回放帧数。
+    [[nodiscard]] auto decoration_replay_count() const -> int { return deco_replays_; }
 
     /// @brief 宿主原生窗口句柄（测试/自检用；与 `Win32Surface::hwnd()` 同义、同宿主）。
     [[nodiscard]] auto hwnd() const -> void * { return win_->hwnd(); }
@@ -251,12 +271,16 @@ class WgpuWin32Surface final : public Surface {
         /// @param scale DPI 缩放因子（非正按 1.0 兜底）。
         /// @return GPU 帧开始成功为 true；失败为 false（本帧转软件回退）。
         [[nodiscard]] auto begin_frame(int width, int height, float scale) -> bool override;
-        /// @brief 结束 GPU 帧：转发 `WgpuRhi::end_frame`（内部 `wgpuSurfacePresent` 上屏）。
-        auto end_frame() -> void override { rhi_->end_frame(); }
+        /// @brief 结束 GPU 帧：先把自绘 CSD 标题栏录制的命令回放进当帧（swapchain 独占
+        /// 整块窗口，画进 Painter 的装饰不随帧缓冲上屏，只能作为命令在 app 帧之上回放，
+        /// 与 `WgpuWaylandSurface` 同一模式），再转发 `WgpuRhi::end_frame`
+        /// （内部 `wgpuSurfacePresent` 上屏）。
+        auto end_frame() -> void override;
 
       private:
         rhi::WgpuRhi *rhi_;
         WgpuWin32Surface *owner_;
+        DisplayList deco_dl_;  ///< 标题栏装饰录制缓冲（每帧由宿主侧 record 清空重录）
     };
 
     /// @brief 软件回退上屏：RGBA Painter 缓冲 swizzle 到 BGRA 暂存后 `SetDIBitsToDevice`。
@@ -273,6 +297,7 @@ class WgpuWin32Surface final : public Surface {
     bool gpu_dead_ = false;  ///< 运行期 GPU 失效（sink.begin_frame 返回 false，永久软件回退）
     int frame_ = 0;  ///< 已呈现帧计数
     int software_present_ = 0;  ///< GDI 软件路径上屏帧数（见 software_present_count()）
+    int deco_replays_ = 0;  ///< 装饰回放进 GPU 帧的帧数（见 decoration_replay_count()）
 };
 
 }  // namespace aurora
