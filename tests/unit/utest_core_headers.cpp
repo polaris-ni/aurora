@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/headers.h
-/// 测试说明: `Headers` 值类型行为契约回归（CHG-008 §12 基础件）：字段名 ASCII 大小写不敏感
+/// 测试说明: `Headers` 值类型行为契约回归（CHG-010 §12 基础件）：字段名 ASCII 大小写不敏感
 ///           存取（`get`/`contains`/`remove` 三处同口径）、同名字段保序不折叠（`Set-Cookie`
 ///           多条独立存活，`values` 按写入顺序返回）、`set` 覆盖全部同名并追加到末尾
 ///           （线上次序与调用时序一致）、`remove` 计数与幂等、`entries` 保留首次写入的原始

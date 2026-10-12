@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief HTTP 头集合值类型（CHG-008 §12：大小写不敏感、重复头保序的多值映射）。
+/// @brief HTTP 头集合值类型（CHG-010 §12：大小写不敏感、重复头保序的多值映射）。
 /// @file core/headers.h
 ///
 /// `Headers` 表达一组「字段名 → 值」，是 HTTP/SSE/WebSocket 握手与 Inspector 共用的基础件。

@@ -738,7 +738,7 @@ class SaxHandler {
 ## 10 HTTP 头集合（`core/headers.h`）
 
 > 覆盖 `include/aurora/core/headers.h`（header-only 值类型，无 `.cpp`）。
-> 该类型是 CHG-008 通用网络栈的两个 `core/` 基础件之一（另一个是 `Url`，契约见 §11）；
+> 该类型是 CHG-010 通用网络栈的两个 `core/` 基础件之一（另一个是 `Url`，契约见 §11）；
 > HTTP / SSE / WebSocket 握手与 Inspector 的头部读写共用它，动机见
 > [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §12。
 
@@ -798,7 +798,7 @@ class SaxHandler {
 ## 11 URL 值类型（`core/url.h`）
 
 > 覆盖 `include/aurora/core/url.h` + `src/aurora/core/url.cpp`。
-> CHG-008 §12 的两个 `core/` 基础件中的另一个（`Headers` 见 §10）；`Request` / `WebSocket::connect` /
+> CHG-010 §12 的两个 `core/` 基础件中的另一个（`Headers` 见 §10）；`Request` / `WebSocket::connect` /
 > Inspector 的 URL 读写共用它，动机见
 > [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §12。
 

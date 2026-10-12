@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief 通用事件源注册口（CHG-008 底座切片：把「一个可等待句柄 + 就绪回调」并入宿主等待集）。
+/// @brief 通用事件源注册口（CHG-010 底座切片：把「一个可等待句柄 + 就绪回调」并入宿主等待集）。
 /// @file app/event_source_registry.h
 ///
 /// 这是网络栈 L0 宿主集成层对外与对内共用的就绪通知底座：第三方非阻塞会话（libssh2、DBus
@@ -140,7 +140,7 @@ class EventSourceRegistration {
     std::shared_ptr<detail::SourceEntry> entry_;  ///< 共享条目（空态为 null）
 };
 
-/// @brief 把可等待句柄 + 就绪回调并入宿主等待集的进程级注册口（CHG-008 L0 底座）。
+/// @brief 把可等待句柄 + 就绪回调并入宿主等待集的进程级注册口（CHG-010 L0 底座）。
 /// @note Thread: thread-safe
 /// @note Side-effects: none（除触发就绪回调外无进程级副作用）
 class EventSourceRegistry {
