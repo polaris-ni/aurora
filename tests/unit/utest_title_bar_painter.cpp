@@ -270,7 +270,7 @@ AURORA_TEST_CASE(adwaita_hover_paints_circle_tint_and_close_red) {
 }
 
 AURORA_TEST_CASE(windows_layout_hovers_full_height_rect) {
-    const TitleBarStyle style = TitleBarStyle::windows_dark();
+    const TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::WindowsDark);
     const TitleBarGeometry g = title_bar_geometry(400.0F, style, false, true);
     csd::TitleBarPaintState s = plain_state();
     s.style = style;

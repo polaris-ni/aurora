@@ -13,6 +13,19 @@ enum class TitleBarButtonLayout : std::uint8_t {
     Mac,  ///< macOS「红绿灯」：圆形按钮左缘外收 8dp 垂直居中，左→右 close→min→max（macOS 惯例顺序）。
 };
 
+/// @brief CSD 标题栏预设（三套视觉语言 × 明暗两档 = 六套）。
+///
+/// 经 `TitleBarStyle::from_preset(CsdPreset)` 取值；预设只产 `TitleBarStyle`（颜色 / 布局语言 /
+/// 度量基线），显隐开关全部保持开启——显隐与几何细节属调用方的定制面，不属预设。
+enum class CsdPreset : std::uint8_t {
+    AdwaitaLight,  ///< GNOME/libadwaita 亮色 header bar（bg≈`#EBEBEB`、fg=黑、close_hover=`#E01B24`）
+    AdwaitaDark,  ///< GNOME/libadwaita 暗色 header bar（bg≈`#303030`、fg=白、close_hover=`#E01B24`）；亦是 `TitleBarStyle{}` 的默认成员值
+    WindowsLight,  ///< WinUI/Windows 11 亮色标题栏（bg≈`#F3F3F3`、fg=黑、close_hover=`#C42B1C`）
+    WindowsDark,  ///< WinUI/Windows 11 暗色标题栏（bg≈`#202020`、fg=白、close_hover=`#C42B1C`）
+    MacLight,  ///< macOS 亮色「红绿灯」标题栏（bg≈`#ECECEC`、fg=黑；红绿灯圆形底色由绘制层按语言固定）
+    MacDark,  ///< macOS 暗色「红绿灯」标题栏（bg≈`#323232`、fg=白；同上）
+};
+
 /// @brief 标题栏度量覆写值（纯数据聚合；**缺省即沿用各视觉语言的推导规则**，故默认零改动）。
 ///
 /// 为什么每个分量都有「0 = 自动」：三种按钮语言各自的盒尺寸、间距、贴边外边距原本是与栏高联动的
@@ -30,7 +43,7 @@ struct TitleBarMetrics {
 
 /// @brief CSD 自绘标题栏样式值类型（纯数据聚合，可直接 `TitleBarStyle{...}` 指定成员初始化）。
 /// 颜色按激活/失焦成对提供，由绘制层依据窗口焦点状态切换（失焦自动变暗）。
-/// 默认成员值 = `adwaita_dark()` 预设：`TitleBarStyle{}` 即得一套可直接使用的 GNOME 暗色 header bar。
+/// 默认成员值 = `from_preset(CsdPreset::AdwaitaDark)`：`TitleBarStyle{}` 即得一套可直接使用的 GNOME 暗色 header bar。
 /// 数值出处：libadwaita/GNOME 暗色 header bar（bg `#303030`/`#242424`、close_hover red3 `#E01B24`）、
 /// WinUI/Windows 11 暗色标题栏（bg ≈`#202020`、close_hover `#C42B1C`），个别 alpha 为取整微调。
 struct TitleBarStyle {
@@ -53,32 +66,69 @@ struct TitleBarStyle {
     Color pressed_tint{255, 255, 255, 56};  ///< 非关闭钮按压底色（白色 α≈0.22，强于悬停的 α32）
     Color close_pressed{0xC0, 0x1B, 0x28};  ///< 关闭钮按压底色（Adwaita red3 按下态，比悬停态更深）
 
-    /// @brief GNOME/libadwaita 暗色 header bar 预设（bg≈`#303030`/`#242424`、fg=白、close_hover=`#E01B24`）。
-    /// @return 默认构造的 TitleBarStyle——其默认成员值即本暗色预设。
-    [[nodiscard]] static constexpr auto adwaita_dark() noexcept -> TitleBarStyle { return TitleBarStyle{}; }
-    /// @brief GNOME/libadwaita 亮色 header bar 预设（bg≈`#EBEBEB`/`#E0E0E0`、fg=黑、close_hover=`#E01B24`）。
-    /// @return 亮色配色覆盖后的 TitleBarStyle（按钮布局仍为 Adwaita）。
-    [[nodiscard]] static constexpr auto adwaita_light() noexcept -> TitleBarStyle {
-        // 亮色预设的可变暂存对象：自默认成员值（暗色预设）起步，下方逐字段覆盖为亮色配色。
-        TitleBarStyle s;
-        s.bg_active = Color{0xEB, 0xEB, 0xEB};
-        s.bg_inactive = Color{0xE0, 0xE0, 0xE0};
-        s.fg_active = Color::black();
-        s.fg_inactive = Color{0x92, 0x95, 0x95};  // GTK 亮色 insensitive 前景近似值
-        s.hover_tint = Color{0, 0, 0, 32};  // 与暗色白 α32 镜像的黑 α≈0.125
-        s.close_hover = Color{0xE0, 0x1B, 0x24};
-        return s;
-    }
-    /// @brief WinUI/Windows 11 暗色标题栏预设（bg≈`#202020`、close_hover=`#C42B1C`、Windows 按钮布局）。
-    /// @return 覆盖 bg/hover/close_hover 并切换 button_layout 为 Windows 的 TitleBarStyle。
-    [[nodiscard]] static constexpr auto windows_dark() noexcept -> TitleBarStyle {
-        TitleBarStyle s;
-        s.bg_active = Color{0x20, 0x20, 0x20};
-        s.bg_inactive = Color{0x19, 0x19, 0x19};
-        s.fg_inactive = Color{0xA0, 0xA0, 0xA0};  // WinUI 失焦标题文字灰
-        s.hover_tint = Color{255, 255, 255, 26};  // Win11 悬停极淡白罩（微调值）
-        s.close_hover = Color{0xC4, 0x2B, 0x1C};  // Windows 关闭钮悬停特征红
-        s.button_layout = TitleBarButtonLayout::Windows;
+    /// @brief 按预设取一套标题栏样式。
+    /// @param p 预设枚举值（三套视觉语言 × 明暗两档）。
+    /// @return 对应预设的 `TitleBarStyle`；`CsdPreset::AdwaitaDark` 与默认构造逐值相同。
+    /// @note 预设数值出处（均为业界近似取整）：libadwaita header bar（暗 `#303030`/`#242424`、
+    ///     亮 `#EBEBEB`/`#E0E0E0`、close_hover red3 `#E01B24`）；WinUI/Win11（暗 `#202020`/`#191919`、
+    ///     亮 `#F3F3F3`、close_hover `#C42B1C`）；macOS（暗 `#323232`、亮 `#ECECEC`）。按压底色取
+    ///     「悬停罩加深一档」的近似值；Mac 布局的圆形红绿灯底色由绘制层按语言固定，预设不覆盖。
+    [[nodiscard]] static constexpr auto from_preset(CsdPreset p) noexcept -> TitleBarStyle {
+        TitleBarStyle s;  // 基准 = AdwaitaDark（默认成员值）
+        switch (p) {
+        case CsdPreset::AdwaitaDark:
+            break;
+        case CsdPreset::AdwaitaLight:
+            s.bg_active = Color{0xEB, 0xEB, 0xEB};
+            s.bg_inactive = Color{0xE0, 0xE0, 0xE0};
+            s.fg_active = Color::black();
+            s.fg_inactive = Color{0x92, 0x95, 0x95};  // GTK 亮色 insensitive 前景近似值
+            s.hover_tint = Color{0, 0, 0, 32};  // 暗色白 α32 的镜像
+            s.pressed_tint = Color{0, 0, 0, 56};
+            break;
+        case CsdPreset::WindowsDark:
+            s.bg_active = Color{0x20, 0x20, 0x20};
+            s.bg_inactive = Color{0x19, 0x19, 0x19};
+            s.fg_inactive = Color{0xA0, 0xA0, 0xA0};  // WinUI 失焦标题文字灰
+            s.hover_tint = Color{255, 255, 255, 26};  // Win11 悬停极淡白罩
+            s.close_hover = Color{0xC4, 0x2B, 0x1C};  // Windows 关闭钮悬停特征红
+            s.pressed_tint = Color{255, 255, 255, 52};
+            s.close_pressed = Color{0x99, 0x1D, 0x11};  // 悬停特征红的加深近似
+            s.button_layout = TitleBarButtonLayout::Windows;
+            break;
+        case CsdPreset::WindowsLight:
+            s.bg_active = Color{0xF3, 0xF3, 0xF3};
+            s.bg_inactive = Color{0xEE, 0xEE, 0xEE};
+            s.fg_active = Color::black();
+            s.fg_inactive = Color{0x8A, 0x8A, 0x8A};
+            s.hover_tint = Color{0, 0, 0, 26};  // 暗色白 α26 的镜像
+            s.close_hover = Color{0xC4, 0x2B, 0x1C};
+            s.pressed_tint = Color{0, 0, 0, 52};
+            s.close_pressed = Color{0x99, 0x1D, 0x11};
+            s.button_layout = TitleBarButtonLayout::Windows;
+            break;
+        case CsdPreset::MacDark:
+            s.bg_active = Color{0x32, 0x32, 0x32};
+            s.bg_inactive = Color{0x28, 0x28, 0x28};
+            s.fg_inactive = Color{0x98, 0x98, 0x98};
+            s.hover_tint = Color{255, 255, 255, 32};
+            s.close_hover = Color{255, 255, 255, 32};  // macOS 红绿灯不换底色，悬停仅加淡罩
+            s.pressed_tint = Color{255, 255, 255, 56};
+            s.close_pressed = Color{255, 255, 255, 56};
+            s.button_layout = TitleBarButtonLayout::Mac;
+            break;
+        case CsdPreset::MacLight:
+            s.bg_active = Color{0xEC, 0xEC, 0xEC};
+            s.bg_inactive = Color{0xE2, 0xE2, 0xE2};
+            s.fg_active = Color::black();
+            s.fg_inactive = Color{0x8C, 0x8C, 0x8C};
+            s.hover_tint = Color{0, 0, 0, 32};
+            s.close_hover = Color{0, 0, 0, 32};
+            s.pressed_tint = Color{0, 0, 0, 56};
+            s.close_pressed = Color{0, 0, 0, 56};
+            s.button_layout = TitleBarButtonLayout::Mac;
+            break;
+        }
         return s;
     }
 };

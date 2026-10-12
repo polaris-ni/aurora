@@ -41,7 +41,7 @@ AURORA_TEST_CASE(adwaita_icon_and_title_bands) {
 
 AURORA_TEST_CASE(windows_buttons_seamless_full_height) {
     // WinUI 布局：按钮宽 round(36*1.44)=52、整高、自右上角无缝向左排（无边距无间距）。
-    const TitleBarStyle style = TitleBarStyle::windows_dark();
+    const TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::WindowsDark);
     const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, true);
     near_rect(g.close, 748.0F, 0.0F, 52.0F, 36.0F);
     near_rect(g.maximize, 696.0F, 0.0F, 52.0F, 36.0F);
@@ -147,7 +147,7 @@ AURORA_TEST_CASE(button_side_follows_height_clamps) {
     const TitleBarGeometry large = title_bar_geometry(800.0F, adwaita, false, true);
     near_rect(large.close, 762.0F, 10.0F, 30.0F, 30.0F);  // clamp(40,22,30)=30
 
-    TitleBarStyle windows = TitleBarStyle::windows_dark();
+    TitleBarStyle windows = TitleBarStyle::from_preset(CsdPreset::WindowsDark);
     windows.height = 40.0F;
     const TitleBarGeometry win = title_bar_geometry(800.0F, windows, false, true);
     near_rect(win.close, 742.0F, 0.0F, 58.0F, 40.0F);  // round(57.6)=58
