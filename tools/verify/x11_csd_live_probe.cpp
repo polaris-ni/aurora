@@ -31,7 +31,11 @@ using namespace aurora;
 
 namespace {
 
+// 探针的通过 / 总计计数：匿名命名空间内的进程私有记账（无跨 TU 可见性、无初始化顺序问题），
+// 就地豁免非 const 全局（同 x11_cursor_live_probe 对 Xlib C ABI 裸数组的豁免先例）。
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_checks = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_pass = 0;
 
 void check(bool ok, const char *name) {
@@ -48,9 +52,12 @@ std::uint32_t pixel_at(const X11Surface &surf, int x, int y) {
     const int w = static_cast<int>(surf.size().width * surf.scale_factor());
     const std::uint8_t *d = surf.data();
     const std::size_t off =
-        (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 4U;
+        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(w)) + static_cast<std::size_t>(x)) * 4U;
+    // data() 是帧缓冲裸数组（DEBUG 构建暴露，长度 = w×h×4，X11Surface 契约定死），按偏移就地豁免。
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return static_cast<std::uint32_t>(d[off]) | (static_cast<std::uint32_t>(d[off + 1]) << 8U) |
            (static_cast<std::uint32_t>(d[off + 2]) << 16U);
+    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
 }
 
 /// @brief 绘一帧：整幅填白（应用内容），present 后由装饰层幂等覆绘标题栏带。
