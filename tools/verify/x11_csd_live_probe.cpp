@@ -22,10 +22,10 @@
 //
 // 注意：像素判据依赖 AURORA_ENABLE_DEBUG=ON 构建（data() 才暴露帧缓冲）。
 
-#include "aurora/window/x11_surface.h"
-
 #include <cmath>
 #include <cstdio>
+
+#include "aurora/window/x11_surface.h"
 
 using namespace aurora;
 
@@ -47,9 +47,10 @@ void check(bool ok, const char *name) {
 std::uint32_t pixel_at(const X11Surface &surf, int x, int y) {
     const int w = static_cast<int>(surf.size().width * surf.scale_factor());
     const std::uint8_t *d = surf.data();
-    const std::size_t off = (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 4U;
-    return static_cast<std::uint32_t>(d[off]) | (static_cast<std::uint32_t>(d[off + 1]) << 8U)
-         | (static_cast<std::uint32_t>(d[off + 2]) << 16U);
+    const std::size_t off =
+        (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)) * 4U;
+    return static_cast<std::uint32_t>(d[off]) | (static_cast<std::uint32_t>(d[off + 1]) << 8U) |
+           (static_cast<std::uint32_t>(d[off + 2]) << 16U);
 }
 
 /// @brief 绘一帧：整幅填白（应用内容），present 后由装饰层幂等覆绘标题栏带。
@@ -75,9 +76,9 @@ int main() {
             return 2;
         }
         const EdgeInsets inset = surf.content_inset();
-        std::printf("content_inset: top=%.1f left=%.1f right=%.1f bottom=%.1f\n",
-                    static_cast<double>(inset.top), static_cast<double>(inset.left),
-                    static_cast<double>(inset.right), static_cast<double>(inset.bottom));
+        std::printf("content_inset: top=%.1f left=%.1f right=%.1f bottom=%.1f\n", static_cast<double>(inset.top),
+                    static_cast<double>(inset.left), static_cast<double>(inset.right),
+                    static_cast<double>(inset.bottom));
         check(std::fabs(inset.top - 36.0F) < 0.01F && inset.left == 0.0F && inset.right == 0.0F,
               "client-side content_inset reports title bar height only");
         paint_content(surf);

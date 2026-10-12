@@ -24,10 +24,10 @@ AURORA_TEST_CASE(theme_factories_seed_semantic_and_csd_tokens) {
     // light()/dark() 播种同一套键名（语义 + csd.* 组件位）；dark 的差异只进 dark_tokens。
     const Theme light = Theme::light();
     const Theme dark = Theme::dark();
-    for (const char *key : {"surface", "surface.raised", "text", "text.muted", "accent", "border", "hover",
-                            "pressed", "danger", "csd.title_bar.bg.active", "csd.title_bar.bg.inactive",
-                            "csd.title_bar.fg.active", "csd.title_bar.fg.inactive", "csd.title_bar.hover",
-                            "csd.title_bar.pressed", "csd.title_bar.close.hover", "csd.shadow.color"}) {
+    for (const char *key : {"surface", "surface.raised", "text", "text.muted", "accent", "border", "hover", "pressed",
+                            "danger", "csd.title_bar.bg.active", "csd.title_bar.bg.inactive", "csd.title_bar.fg.active",
+                            "csd.title_bar.fg.inactive", "csd.title_bar.hover", "csd.title_bar.pressed",
+                            "csd.title_bar.close.hover", "csd.shadow.color"}) {
         AURORA_TEST_CHECK_TRUE(light.token(key).has_value());
         AURORA_TEST_CHECK_TRUE(dark.token(key).has_value());
     }

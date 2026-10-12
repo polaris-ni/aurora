@@ -89,7 +89,8 @@ namespace aurora {
 ///     `csd.shadow.color` 令牌覆写，厚度与模糊半径保持基座值——改厚度会牵动缩放
 ///     热区与 buffer 几何，属行为定制而非配色，须走显式 `WindowFrameStyle`。
 /// @return 派生样式。
-[[nodiscard]] inline auto window_frame_style_from_theme(const Theme &t, const WindowFrameStyle &base = {}) -> WindowFrameStyle {
+[[nodiscard]] inline auto window_frame_style_from_theme(const Theme &t, const WindowFrameStyle &base = {})
+    -> WindowFrameStyle {
     WindowFrameStyle f = base;
     if (auto v = t.token_for("csd.shadow.color")) {
         if (auto c = v->as<Color>()) {

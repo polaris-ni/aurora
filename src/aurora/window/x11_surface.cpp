@@ -11,8 +11,8 @@
 // `expected unqualified-id before numeric constant`。文件末尾的 `#undef None` 救不了它——
 // 那句在本头**之后**才执行；其余 aurora 头之所以无恙，只因它们早被首行的头链解析过
 // （头文件 guard 生效、宏尚未定义）。故本头必须与 atspi_bridge.h 同组前置。
-#include "aurora/window/detail/x11_modifiers.h"
 #include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/命中/绘制层
+#include "aurora/window/detail/x11_modifiers.h"
 
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
 
@@ -1070,13 +1070,14 @@ auto X11Surface::poll_platform_events() -> void {
     const auto csd_band_repaint = [&]() -> void {
         // 装饰态变化：重绘标题栏带进缓冲，标脏后立即增量上屏（不等应用下一帧，悬停/按压须跟手）。
         d.paint_decoration();
-        d.present_dirty.push_back(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
-                                       .size = Size{.width = d.size.width * d.scale,
-                                                    .height = d.tb_style.height * d.scale}});
+        d.present_dirty.push_back(
+            Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                 .size = Size{.width = d.size.width * d.scale, .height = d.tb_style.height * d.scale}});
         (void)present();
     };
     // EWMH _NET_WM_MOVERESIZE 方向码（0..7 = 八向缩放，8 = 移动）↔ 共享层热区枚举。
-    constexpr std::array<int, 9> kZoneToMoveresize{-1, 7, 3, 1, 5, 0, 2, 6, 4};  // 按枚举定义序：None/Left/Right/Top/Bottom/TL/TR/BL/BR
+    constexpr std::array<int, 9> kZoneToMoveresize{
+        -1, 7, 3, 1, 5, 0, 2, 6, 4};  // 按枚举定义序：None/Left/Right/Top/Bottom/TL/TR/BL/BR
     const auto csd_send_moveresize = [&](int direction, int x_root, int y_root) -> void {
         XClientMessageEvent m{};
         m.type = ClientMessage;
@@ -1090,7 +1091,8 @@ auto X11Surface::poll_platform_events() -> void {
         m.data.l[4] = static_cast<long>(Button1);
         const ::Window root = RootWindow(d.dpy, DefaultScreen(d.dpy));
         // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
-        XSendEvent(d.dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask, reinterpret_cast<XEvent *>(&m));
+        XSendEvent(d.dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask,
+                   reinterpret_cast<XEvent *>(&m));
         XFlush(d.dpy);
     };
     const auto csd_toggle_maximize = [&]() -> void {
@@ -1105,7 +1107,8 @@ auto X11Surface::poll_platform_events() -> void {
         m.data.l[3] = 1L;  // source indication: application
         const ::Window root = RootWindow(d.dpy, DefaultScreen(d.dpy));
         // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
-        XSendEvent(d.dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask, reinterpret_cast<XEvent *>(&m));
+        XSendEvent(d.dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask,
+                   reinterpret_cast<XEvent *>(&m));
         XFlush(d.dpy);
     };
     const auto csd_geometry_now = [&]() -> TitleBarGeometry {
@@ -1163,13 +1166,13 @@ auto X11Surface::poll_platform_events() -> void {
                         // 内缘八向缩放热区（含标题栏外的顶边，对齐 libadwaita；Frameless 无热区）。
                         const csd::CsdResizeZone zone = csd_zone_at(lx, ly);
                         if (zone != csd::CsdResizeZone::None) {
-                            csd_send_moveresize(kZoneToMoveresize[static_cast<std::size_t>(zone)],
-                                                ev.xbutton.x_root, ev.xbutton.y_root);
+                            csd_send_moveresize(kZoneToMoveresize[static_cast<std::size_t>(zone)], ev.xbutton.x_root,
+                                                ev.xbutton.y_root);
                             break;
                         }
                     }
-                    if (d.csd_title && d.mode != WindowMode::FullScreen
-                        && csd::point_in_title_bar(ly, d.tb_style.height)) {
+                    if (d.csd_title && d.mode != WindowMode::FullScreen &&
+                        csd::point_in_title_bar(ly, d.tb_style.height)) {
                         const TitleBarGeometry g = csd_geometry_now();
                         if (press) {
                             const int btn_ord = csd::hit_button(g, lx, ly);

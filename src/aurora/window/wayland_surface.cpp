@@ -465,7 +465,8 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
                 return;
             }
             if (act == csd::AURORA_CSD_BUTTON_MAXIMIZE && d.toplevel != nullptr) {
-                AURORA_LOG_INFO("window", "CSD: maximize button released (current mode=", static_cast<int>(d.mode), ")");
+                AURORA_LOG_INFO("window", "CSD: maximize button released (current mode=", static_cast<int>(d.mode),
+                                ")");
                 if (d.mode == WindowMode::Maximized) {
                     xdg_toplevel_unset_maximized(d.toplevel);
                 } else {

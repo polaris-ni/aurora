@@ -100,7 +100,6 @@ AURORA_TEST_CASE(active_inactive_pairs_dim_for_focus_loss) {
     AURORA_TEST_CHECK_TRUE(s.bg_inactive.b < s.bg_active.b);
 }
 
-
 AURORA_TEST_CASE(from_preset_adwaita_dark_equals_default_construction) {
     // 基准契约：AdwaitaDark 与默认构造逐值相同——预设迁移不会改变 TitleBarStyle{} 既有调用方。
     const TitleBarStyle def{};

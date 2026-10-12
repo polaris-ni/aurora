@@ -71,13 +71,43 @@ constexpr SnapshotRow AURORA_POLICY_SNAPSHOT[] = {
     {DecorationPolicy::ServerSide, true, {false, false, false}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}},
     // Auto / ServerSide + 无 SSD：CSD 兜底（否则窗口不可移动、不可关闭），Normal 态带 10dp 边距。
     {DecorationPolicy::Auto, false, {true, true, false}, {10, 46, 10, 10}, {0, 36, 0, 0}, {0, 0, 0, 0}, {0, 36, 0, 0}},
-    {DecorationPolicy::ServerSide, false, {true, true, false}, {10, 46, 10, 10}, {0, 36, 0, 0}, {0, 0, 0, 0}, {0, 36, 0, 0}},
+    {DecorationPolicy::ServerSide,
+     false,
+     {true, true, false},
+     {10, 46, 10, 10},
+     {0, 36, 0, 0},
+     {0, 0, 0, 0},
+     {0, 36, 0, 0}},
     // ClientSide：即便有 SSD 也自绘标题栏；边框分量交由阴影边距承担，故 border=false 而边距照旧。
-    {DecorationPolicy::ClientSide, true, {true, false, false}, {10, 46, 10, 10}, {0, 36, 0, 0}, {0, 0, 0, 0}, {0, 36, 0, 0}},
-    {DecorationPolicy::ClientSide, false, {true, false, false}, {10, 46, 10, 10}, {0, 36, 0, 0}, {0, 0, 0, 0}, {0, 36, 0, 0}},
+    {DecorationPolicy::ClientSide,
+     true,
+     {true, false, false},
+     {10, 46, 10, 10},
+     {0, 36, 0, 0},
+     {0, 0, 0, 0},
+     {0, 36, 0, 0}},
+    {DecorationPolicy::ClientSide,
+     false,
+     {true, false, false},
+     {10, 46, 10, 10},
+     {0, 36, 0, 0},
+     {0, 0, 0, 0},
+     {0, 36, 0, 0}},
     // Borderless：无标题栏故顶部分量只有边距；边距本身承担八向缩放热区。
-    {DecorationPolicy::Borderless, true, {false, true, true}, {10, 10, 10, 10}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}},
-    {DecorationPolicy::Borderless, false, {false, true, true}, {10, 10, 10, 10}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}},
+    {DecorationPolicy::Borderless,
+     true,
+     {false, true, true},
+     {10, 10, 10, 10},
+     {0, 0, 0, 0},
+     {0, 0, 0, 0},
+     {0, 0, 0, 0}},
+    {DecorationPolicy::Borderless,
+     false,
+     {false, true, true},
+     {10, 10, 10, 10},
+     {0, 0, 0, 0},
+     {0, 0, 0, 0},
+     {0, 0, 0, 0}},
     // Frameless：完全无装饰，连边距也没有；移动交给修饰键拖拽（mod_move）。
     {DecorationPolicy::Frameless, true, {false, false, true}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}},
     {DecorationPolicy::Frameless, false, {false, false, true}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}},
@@ -128,8 +158,7 @@ AURORA_TEST_CASE(content_inset_snapshot_across_geometry_states) {
 
         // Normal（未平铺）：唯一的非塌缩态，边距 = AURORA_SHADOW_MARGIN_DP。
         const int m_normal = csd::shadow_margin_dp(m.client_decorated(), WindowMode::Normal, false);
-        check_pad(tag + " normal", csd::content_inset(m.title, style.height, m_normal, WindowMode::Normal),
-                  row.normal);
+        check_pad(tag + " normal", csd::content_inset(m.title, style.height, m_normal, WindowMode::Normal), row.normal);
 
         const int m_maximized = csd::shadow_margin_dp(m.client_decorated(), WindowMode::Maximized, false);
         check_pad(tag + " maximized", csd::content_inset(m.title, style.height, m_maximized, WindowMode::Maximized),
@@ -271,8 +300,7 @@ AURORA_TEST_CASE(resolve_hover_band_and_policy_gating) {
     AURORA_TEST_CHECK_EQ(csd::resolve_hover(style, 800.0F, false, true, true, c_close.x, 36.0),
                          csd::AURORA_CSD_BUTTON_NONE);
     // 栏带内但不在任何按钮上（x 落在标题文字区）。
-    AURORA_TEST_CHECK_EQ(csd::resolve_hover(style, 800.0F, false, true, true, 8.0, 18.0),
-                         csd::AURORA_CSD_BUTTON_NONE);
+    AURORA_TEST_CHECK_EQ(csd::resolve_hover(style, 800.0F, false, true, true, 8.0, 18.0), csd::AURORA_CSD_BUTTON_NONE);
     // 非自绘标题栏：即便坐标正好压在按钮盒上也恒无悬停（本就无按钮可悬停）。
     AURORA_TEST_CHECK_EQ(csd::resolve_hover(style, 800.0F, false, true, false, c_close.x, c_close.y),
                          csd::AURORA_CSD_BUTTON_NONE);
@@ -399,10 +427,9 @@ AURORA_TEST_CASE(shadow_resize_band_follows_resolved_decoration) {
         const std::string tag = row_tag(row);
         const int normal_margin = csd::shadow_margin_dp(m.client_decorated(), WindowMode::Normal, false);
 
-        const auto left = static_cast<int>(
-            csd::classify_resize_zone(-5.0, 300.0, content_w, content_h, normal_margin));
-        const auto top_left = static_cast<int>(
-            csd::classify_resize_zone(-5.0, -5.0, content_w, content_h, normal_margin));
+        const auto left = static_cast<int>(csd::classify_resize_zone(-5.0, 300.0, content_w, content_h, normal_margin));
+        const auto top_left =
+            static_cast<int>(csd::classify_resize_zone(-5.0, -5.0, content_w, content_h, normal_margin));
         if (normal_margin > 0) {
             AURORA_TEST_CHECK_MSG(left == static_cast<int>(csd::CsdResizeZone::Left), tag + ": left edge");
             AURORA_TEST_CHECK_MSG(top_left == static_cast<int>(csd::CsdResizeZone::TopLeft), tag + ": top-left corner");
@@ -413,8 +440,8 @@ AURORA_TEST_CASE(shadow_resize_band_follows_resolved_decoration) {
 
         // 最大化无论如何都不留热区（否则会挡住最大化窗口的边缘像素）。
         const int maximized_margin = csd::shadow_margin_dp(m.client_decorated(), WindowMode::Maximized, false);
-        const auto maximized_zone = static_cast<int>(
-            csd::classify_resize_zone(-5.0, 300.0, content_w, content_h, maximized_margin));
+        const auto maximized_zone =
+            static_cast<int>(csd::classify_resize_zone(-5.0, 300.0, content_w, content_h, maximized_margin));
         AURORA_TEST_CHECK_MSG(maximized_zone == static_cast<int>(csd::CsdResizeZone::None), tag + ": maximized");
     }
 }

@@ -69,7 +69,6 @@ inline constexpr int AURORA_SHADOW_MARGIN_DP = 10;
     return frame.shadow_margin_dp;
 }
 
-
 /// @brief 整幅表面逻辑尺寸 = 内容尺寸 + 四周 margin。
 /// @param content xdg configure（window geometry）口径的内容尺寸。
 /// @param margin_dp 当前态边距厚度（逻辑 dp）。

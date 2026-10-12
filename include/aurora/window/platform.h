@@ -1,12 +1,13 @@
 #pragma once
 
-#include <fstream>
 #include <cstdlib>
+#include <fstream>
 #include <string>
+
 #include "aurora/core/platform.h"
 #include "aurora/environment/media_query.h"
-#include "aurora/window/window.h"
 #include "aurora/theming/color_scheme.h"
+#include "aurora/window/window.h"
 
 namespace aurora {
 
@@ -101,7 +102,9 @@ struct Platform {
 [[nodiscard]] inline auto os_color_scheme() -> ColorScheme {
 #if defined(AURORA_PLATFORM_LINUX)
     const char *xdg = std::getenv("XDG_CONFIG_HOME");
-    std::string base = (xdg != nullptr && xdg[0] != '\0') ? std::string(xdg) : std::string(std::getenv("HOME") == nullptr ? "" : std::getenv("HOME")) + "/.config";
+    std::string base = (xdg != nullptr && xdg[0] != '\0')
+                           ? std::string(xdg)
+                           : std::string(std::getenv("HOME") == nullptr ? "" : std::getenv("HOME")) + "/.config";
     for (const char *ver : {"gtk-4.0", "gtk-3.0"}) {
         std::ifstream in(base + "/" + ver + "/settings.ini");
         if (!in.is_open()) {

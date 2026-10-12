@@ -43,9 +43,9 @@ constexpr auto v_centered_square(float x, float bar_height, float side) noexcept
 /// @return 按钮组朝标题一侧的边缘 x 坐标。
 auto layout_right_buttons(const TitleBarStyle &style, float width, bool resizable, TitleBarGeometry &g) -> float {
     const bool windows = style.button_layout == TitleBarButtonLayout::Windows;
-    const float side = style.metrics.button_size > 0.0F
-                           ? style.metrics.button_size
-                           : (windows ? std::round(style.height * 1.44F) : std::clamp(style.height - 10.0F, 22.0F, 30.0F));
+    const float side = style.metrics.button_size > 0.0F ? style.metrics.button_size
+                                                        : (windows ? std::round(style.height * 1.44F)
+                                                                   : std::clamp(style.height - 10.0F, 22.0F, 30.0F));
     const float gap = style.metrics.button_gap > 0.0F ? style.metrics.button_gap : (windows ? 0.0F : 4.0F);
     const float margin = style.metrics.button_margin > 0.0F ? style.metrics.button_margin : (windows ? 0.0F : 8.0F);
     float cursor = width - margin;  // 下一个按钮的贴边侧外缘
@@ -73,8 +73,8 @@ auto layout_right_buttons(const TitleBarStyle &style, float width, bool resizabl
 /// @brief Mac 左侧系按钮布局：自左向右 close→min→max。
 /// @return 按钮组朝标题一侧的边缘 x 坐标。
 auto layout_left_buttons(const TitleBarStyle &style, bool resizable, TitleBarGeometry &g) -> float {
-    const float d = style.metrics.button_size > 0.0F ? style.metrics.button_size
-                                                     : std::clamp(style.height * 0.4F, 11.0F, 14.0F);
+    const float d =
+        style.metrics.button_size > 0.0F ? style.metrics.button_size : std::clamp(style.height * 0.4F, 11.0F, 14.0F);
     const float gap = style.metrics.button_gap > 0.0F ? style.metrics.button_gap : 8.0F;
     const float margin = style.metrics.button_margin > 0.0F ? style.metrics.button_margin : 8.0F;
     float cursor = margin;

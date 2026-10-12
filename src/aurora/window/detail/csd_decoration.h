@@ -25,15 +25,15 @@
 #include <memory>
 #include <string>
 
-#include "aurora/core/image.h"             // Image（标题栏图标像素）
-#include "aurora/core/types.h"             // Size / Rect / EdgeInsets
-#include "aurora/event/event.h"            // 连击判定的库级常量（单一真源）
-#include "aurora/window/detail/csd_geometry.h"        // 阴影边距 / 热区分类 / content_inset
-#include "aurora/window/detail/title_bar_painter.h"   // TitleBarPaintState（本层的产出目标）
-#include "aurora/window/surface.h"                    // DecorationPolicy
-#include "aurora/window/title_bar_geometry.h"         // TitleBarGeometry / title_bar_geometry
-#include "aurora/window/title_bar_style.h"            // TitleBarStyle
-#include "aurora/window/window_state.h"               // WindowMode
+#include "aurora/core/image.h"  // Image（标题栏图标像素）
+#include "aurora/core/types.h"  // Size / Rect / EdgeInsets
+#include "aurora/event/event.h"  // 连击判定的库级常量（单一真源）
+#include "aurora/window/detail/csd_geometry.h"  // 阴影边距 / 热区分类 / content_inset
+#include "aurora/window/detail/title_bar_painter.h"  // TitleBarPaintState（本层的产出目标）
+#include "aurora/window/surface.h"  // DecorationPolicy
+#include "aurora/window/title_bar_geometry.h"  // TitleBarGeometry / title_bar_geometry
+#include "aurora/window/title_bar_style.h"  // TitleBarStyle
+#include "aurora/window/window_state.h"  // WindowMode
 
 namespace aurora::csd {
 
