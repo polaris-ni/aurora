@@ -164,6 +164,7 @@ struct WaylandSurface::Impl {
     bool mod_move = false;  ///< 修饰键拖拽移动（无标题栏时）
     std::string title;  ///< 标题（用于 CSD 标题栏文字）
     TitleBarStyle tb_style{};  ///< CSD 标题栏样式（构造自 WindowStyleOptions::title_bar；运行期可热更）
+    WindowFrameStyle frame_style{};  ///< 窗框样式（构造自 WindowStyleOptions::frame；运行期可热更）
     std::shared_ptr<Image> tb_icon;  ///< CSD 标题栏图标（shared_ptr 共享像素；set_title_bar_icon 存入）
     bool resizable = true;  ///< 可调大小（false = 固定尺寸，最大化按钮隐藏）
     /// @brief 装饰层的交互状态（悬停序号 / 全屏揭示条 / 拖拽抓取 / 连击记账）。
@@ -342,7 +343,9 @@ struct WaylandSurface::Impl {
     /// @brief 当前态阴影边距厚度（逻辑 px；塌缩态 0），纯逻辑见 detail::csd_geometry.h。
     /// @return margin 厚度。
     [[nodiscard]] auto shadow_margin() const -> int {
-        return csd::shadow_margin_dp(csd_title || csd_border, mode, tiled);
+        // Wayland 侧恒 capable=true：wl_shm 的 ARGB8888 缓冲由客户端自己写，不依赖合成器的
+        // 投影能力（X11/Win32 则需探测 composite manager / DWM，见 csd::frame_margin_dp）。
+        return csd::shadow_margin_dp(csd_title || csd_border, mode, tiled, csd::frame_margin_dp(frame_style, true));
     }
 
     /// @brief 整幅表面逻辑尺寸（内容 + 2×margin；塌缩态等于内容尺寸）。
@@ -1414,6 +1417,7 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
     }
     d.title = title;
     d.tb_style = style.title_bar;  // CSD 标题栏样式（运行期可经 set_title_bar_style 热更）
+    d.frame_style = style.frame;  // 窗框样式（运行期可经 set_window_frame_style 热更）
     d.resizable = style.resizable;
     if (pipe2(d.wake_fd, O_NONBLOCK | O_CLOEXEC) != 0) {
         d.wake_fd[0] = d.wake_fd[1] = -1;
@@ -1601,6 +1605,7 @@ auto WaylandSurface::Impl::decoration_state() const -> csd::TitleBarPaintState {
     in.title = title;
     in.icon = tb_icon;
     in.style = tb_style;
+    in.frame = frame_style;
     return csd::make_paint_state(std::move(in));
 }
 
@@ -1738,9 +1743,9 @@ auto WaylandSurface::present() -> Result<bool> {
             const int mp = m_logical * d.scale;
             const int cwp = static_cast<int>(std::lround(d.size.width)) * d.scale;
             const int chp = static_cast<int>(std::lround(d.size.height)) * d.scale;
-            const auto blur_phys = static_cast<float>((m_logical - csd::AURORA_SHADOW_BLUR_INSET_PX) * d.scale);
+            const auto blur_phys = static_cast<float>(csd::frame_blur_dp(d.frame_style, m_logical) * d.scale);
             csd::compose_shadow_margins_bgra(slot->px, w, h, mp, mp, cwp, chp, mp, blur_phys,
-                                             csd::AURORA_SHADOW_BASE_COLOR);
+                                             d.frame_style.shadow_color);
         }
         // 可见性：Hidden 档跳过 attach + commit——表面永不进入合成器视野；帧缓冲仍照常
         // swizzle/更新，data() 读回不受影响。构造期那次「无缓冲 commit 宣告表面存在」必须保留
@@ -1923,6 +1928,18 @@ auto WaylandSurface::set_title_bar_style(const TitleBarStyle &style) -> void {
     d.tb_style = style;
     if (present_request_) {
         // 立即重绘（回调挂在基类 self 上，仿 refresh_scale() 既有模式）
+        present_request_();
+    }
+}
+
+auto WaylandSurface::set_window_frame_style(const WindowFrameStyle &style) -> void {
+    Impl &d = *impl_;
+    d.frame_style = style;
+    // 投影厚度改变的是**整幅表面尺寸**（buffer = 内容 + 四周 margin），不是装饰层内的一小块：
+    // 必须先重算 window geometry / opaque region，否则新厚度要到下一帧才生效，期间缩放热区
+    // 与 `content_inset` 仍按旧值算，会出现「热区与像素差一圈」的错位。
+    d.apply_surface_geometry();
+    if (present_request_) {
         present_request_();
     }
 }

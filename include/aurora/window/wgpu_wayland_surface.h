@@ -190,6 +190,11 @@ class WgpuWaylandSurface final : public Surface {
     /// @brief 标题栏配色注入（转发内嵌宿主；CSD 自绘路径生效，GPU 帧经装饰回放同步换色）。
     /// @param style 标题栏配色/样式。
     auto set_title_bar_style(const TitleBarStyle &style) -> void override { host_->set_title_bar_style(style); }
+    /// @brief 窗框样式注入（转发内嵌宿主；投影厚度变更会连带重算 window geometry）。
+    /// @param style 窗框样式（投影与外轮廓圆角）。
+    auto set_window_frame_style(const WindowFrameStyle &style) -> void override {
+        host_->set_window_frame_style(style);
+    }
     /// @brief 标题栏图标注入（转发内嵌宿主；仅 CSD 自绘装饰时参与回放合成）。
     /// @param icon 图标图像共享指针，nullptr 表示无图标。
     auto set_title_bar_icon(const std::shared_ptr<Image> &icon) -> void override { host_->set_title_bar_icon(icon); }

@@ -450,6 +450,15 @@ class Window {
             surface_->set_title_bar_style(style);
         }
     }
+    /// @brief 运行期更新 CSD 自绘窗框样式（透传后端；不支持的后端为空实现）。
+    ///
+    /// 投影厚度会影响窗口安全区（`content_inset`），故后端可能据此重排一帧布局。
+    /// @param style 新窗框样式。
+    auto set_window_frame_style(const WindowFrameStyle &style) const -> void {
+        if (surface_) {
+            surface_->set_window_frame_style(style);
+        }
+    }
     /// @brief 运行期更新 CSD 标题栏图标（shared_ptr 共享像素避免深拷贝；透传后端）。
     /// @param icon 图标图像（共享所有权；nullptr 清除）。
     auto set_title_bar_icon(const std::shared_ptr<Image> &icon) const -> void {

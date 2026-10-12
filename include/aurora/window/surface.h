@@ -17,6 +17,7 @@
 #include "aurora/render/painter.h"
 #include "aurora/render/png.h"
 #include "aurora/window/title_bar_style.h"
+#include "aurora/window/window_frame_style.h"
 #include "aurora/window/window_state.h"
 
 namespace aurora {
@@ -80,6 +81,7 @@ struct WindowStyleOptions {
     Size min_size{.width = 0.0F, .height = 0.0F};  ///< 最小逻辑尺寸（0 = 不限）
     Size max_size{.width = 0.0F, .height = 0.0F};  ///< 最大逻辑尺寸（0 = 不限）
     TitleBarStyle title_bar{};  ///< CSD 自绘标题栏样式（Wayland/X11 等客户端装饰后端使用）
+    WindowFrameStyle frame{};  ///< CSD 自绘窗框样式（投影厚度/基色/模糊与外轮廓圆角）
 };
 
 /// @brief 表面抽象：平台窗口/画布的绘制目标（ARCHITECTURE.md §4.3 `Surface`，<<platform impl>>）。
@@ -292,6 +294,14 @@ class Surface {
 
     /// @brief 运行期更新 CSD 自绘标题栏样式（默认空实现；Wayland 等客户端装饰后端覆写生效）。
     virtual auto set_title_bar_style(const TitleBarStyle & /*style*/) -> void {}
+
+    /// @brief 运行期更新 CSD 自绘窗框样式（默认空实现；客户端装饰后端覆写生效）。
+    ///
+    /// 与 `set_title_bar_style` 对称：投影厚度会改变整幅表面尺寸与 `content_inset`，
+    /// 故覆写方须在改动后重新同步 window geometry（Wayland 即重跑 `apply_surface_geometry`）。
+    /// 无自绘窗框的后端（Headless / Wasm / GLFW 等）保持默认空实现即可，语义为「本后端无窗框」。
+    /// @param style 目标窗框样式；探测不到合成能力时后端会自行把投影厚度降为 0。
+    virtual auto set_window_frame_style([[maybe_unused]] const WindowFrameStyle &style) -> void {}
 
     /// @brief 运行期更新 CSD 标题栏图标（默认空实现）。参数取 `std::shared_ptr<Image>`：
     /// `Image` 内嵌整幅像素缓冲（`std::vector<std::uint8_t>`，见 core/image.h）非轻拷贝，

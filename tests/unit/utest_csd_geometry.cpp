@@ -142,4 +142,53 @@ AURORA_TEST_CASE(title_bar_band_uses_content_domain) {
     AURORA_TEST_CHECK_FALSE(csd::point_in_title_bar(0.0, 0.0F));
 }
 
+AURORA_TEST_CASE(frame_margin_dp_folds_all_disable_paths_to_zero) {
+    // 三条「撤投影」路径必须都归零：显式关闭、能力不足、厚度非正。任一条漏掉都会出现
+    // 「说要撤投影却仍留一圈 margin」，进而让缩放热区与 content_inset 一起错位。
+    WindowFrameStyle on;
+    on.shadow_margin_dp = 10;
+    AURORA_TEST_CHECK_EQ(csd::frame_margin_dp(on, true), 10);
+
+    WindowFrameStyle off = on;
+    off.shadow_enabled = false;
+    AURORA_TEST_CHECK_EQ(csd::frame_margin_dp(off, true), 0);
+
+    AURORA_TEST_CHECK_EQ(csd::frame_margin_dp(on, false), 0);  // X11 无 composite / Win32 DWM 未启用
+
+    WindowFrameStyle zero = on;
+    zero.shadow_margin_dp = 0;
+    AURORA_TEST_CHECK_EQ(csd::frame_margin_dp(zero, true), 0);
+
+    WindowFrameStyle negative = on;
+    negative.shadow_margin_dp = -5;
+    AURORA_TEST_CHECK_EQ(csd::frame_margin_dp(negative, true), 0);  // 负值不得撑坏 buffer 尺寸
+}
+
+AURORA_TEST_CASE(frame_blur_dp_default_reproduces_legacy_rule) {
+    // 默认（blur=0）必须回到既有推导式「margin − AURORA_SHADOW_BLUR_INSET_PX」，
+    // 否则引入可配窗框这一件事本身就会改变既有观感。
+    const WindowFrameStyle def;
+    AURORA_TEST_CHECK_EQ(csd::frame_blur_dp(def, 10), 9.0F);  // 10 − 1
+    AURORA_TEST_CHECK_EQ(csd::frame_blur_dp(def, 1), 0.0F);  // 不越界为负
+    AURORA_TEST_CHECK_EQ(csd::frame_blur_dp(def, 0), 0.0F);  // 塌缩态无模糊
+
+    // 显式值生效，但被夹到 margin：超出 margin 的模糊会溢出 buffer 外缘留下硬边。
+    WindowFrameStyle bigger;
+    bigger.shadow_blur_radius = 20.0F;
+    AURORA_TEST_CHECK_EQ(csd::frame_blur_dp(bigger, 10), 10.0F);
+
+    WindowFrameStyle smaller;
+    smaller.shadow_blur_radius = 4.0F;
+    AURORA_TEST_CHECK_EQ(csd::frame_blur_dp(smaller, 10), 4.0F);
+}
+
+AURORA_TEST_CASE(shadow_margin_dp_default_argument_preserves_legacy_constant) {
+    // 三参调用（不传配置厚度）必须仍是既有常量：这是所有未显式配置窗框的既有代码的路径。
+    AURORA_TEST_CHECK_EQ(csd::shadow_margin_dp(true, WindowMode::Normal, false), csd::AURORA_SHADOW_MARGIN_DP);
+    AURORA_TEST_CHECK_EQ(csd::shadow_margin_dp(true, WindowMode::Maximized, false), 0);
+    // 四参调用透传配置值，但塌缩判定仍然优先（最大化不给 margin）。
+    AURORA_TEST_CHECK_EQ(csd::shadow_margin_dp(true, WindowMode::Normal, false, 24), 24);
+    AURORA_TEST_CHECK_EQ(csd::shadow_margin_dp(true, WindowMode::Maximized, false, 24), 0);
+}
+
 }  // namespace aurora::test_cases::utest_csd_geometry

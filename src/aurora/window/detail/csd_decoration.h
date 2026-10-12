@@ -254,6 +254,7 @@ struct DecorationInput {
     std::string title;  ///< 标题文字（空串或 `show_title=false` 时不绘制）
     std::shared_ptr<Image> icon;  ///< 标题栏图标（nullptr = 留白，几何位保留）
     TitleBarStyle style{};  ///< 标题栏样式（栏高 / 配色 / 按钮语言 / 显隐开关）
+    WindowFrameStyle frame{};  ///< 窗框样式（投影基色 / 模糊半径；厚度走 `margin_dp`）
 };
 
 /// @brief 装配本帧的 `TitleBarPaintState`（软件光栅与 GPU 录制两条上屏路径的唯一装配点）。
@@ -269,6 +270,8 @@ struct DecorationInput {
     s.origin_x = m;  // 内容区原点相对整幅表面的偏移 = margin（塌缩态 0）
     s.origin_y = m;
     s.shadow_margin = m;
+    s.shadow_blur = frame_blur_dp(in.frame, in.margin_dp);
+    s.shadow_color = in.frame.shadow_color;
     s.mode = in.mode;
     s.fullscreen_bar_revealed = in.fullscreen_revealed;
     s.title_bar = in.csd_title;

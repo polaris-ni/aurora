@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 
+#include "aurora/core/color.h"  // Color（阴影基色）
 #include "aurora/core/image.h"  // Image（标题栏图标像素）
 #include "aurora/core/types.h"  // Rect / Size / Point
 #include "aurora/window/title_bar_style.h"
@@ -55,6 +56,8 @@ struct TitleBarPaintState {
     /// 由 35851da 过渡实现的 `border`（可见边框带厚度）字段转型：边带绘制已删除，
     /// 本字段只承载 margin 几何（阴影范围 + underlay 录制判据），与 `content_inset()` 同口径。
     float shadow_margin = 0.0F;
+    Color shadow_color{0, 0, 0, 70};  ///< 阴影基色（含 alpha）；由 `WindowFrameStyle::shadow_color` 装配
+    float shadow_blur = 0.0F;  ///< 阴影模糊半径（逻辑 dp）；已按 `csd::frame_blur_dp` 折算并夹到 margin
 
     /// @brief 本帧标题栏 overlay 是否有内容要画（GPU overlay 路径据此跳过空回放）。
     /// 阴影 underlay 的判据独立为 `shadow_margin > 0`（Borderless 无标题栏仍有阴影）。

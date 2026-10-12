@@ -12,10 +12,13 @@
 //   应用内容、标题栏命中、Mouse 事件派发全部使用内容坐标。
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 #include "aurora/core/color.h"  // Color（阴影基色）
 #include "aurora/core/types.h"  // EdgeInsets / Size
+#include "aurora/window/window_frame_style.h"  // WindowFrameStyle（可配窗框）
 #include "aurora/window/window_state.h"  // WindowMode
 
 namespace aurora::csd {
@@ -41,10 +44,31 @@ inline constexpr int AURORA_SHADOW_MARGIN_DP = 10;
 /// @param client_decorated 本窗口是否自绘装饰。
 /// @param mode 当前窗口几何态。
 /// @param tiled 合成器平铺态。
+/// @param configured_dp 应用经 `WindowFrameStyle::shadow_margin_dp` 配置的厚度（逻辑 dp）；
+///        默认取 `AURORA_SHADOW_MARGIN_DP`，即未配置时的既有行为。后端应在传入前自行完成
+///        「能力不足降 0」的折算，本函数只做塌缩判定与透传，不二次猜测能力。
 /// @return 边距厚度（逻辑 dp）；塌缩态为 0。
-[[nodiscard]] inline auto shadow_margin_dp(bool client_decorated, WindowMode mode, bool tiled) -> int {
-    return has_shadow_margin(client_decorated, mode, tiled) ? AURORA_SHADOW_MARGIN_DP : 0;
+[[nodiscard]] inline auto shadow_margin_dp(bool client_decorated, WindowMode mode, bool tiled,
+                                           int configured_dp = AURORA_SHADOW_MARGIN_DP) -> int {
+    return has_shadow_margin(client_decorated, mode, tiled) ? configured_dp : 0;
 }
+
+/// @brief 由窗框样式折算本帧实际可用的投影厚度（`WindowFrameStyle` → margin_dp 的唯一口径）。
+///
+/// 三条折算规则集中在此，避免各后端各写一份而漂移：
+/// ① `shadow_enabled = false` → 0；② 应用配置的厚度小于 0 → 0（防御负值撑坏 buffer 尺寸）；
+/// ③ 后端探测不到合成能力（`capable = false`）→ 0（只撤投影，圆角等分量照常生效）。
+/// @param frame 当前窗框样式。
+/// @param capable 本后端这次能否真的画出带 alpha 的投影（X11 需 composite manager、
+///        Win32 需 DWM composition；Wayland 恒 true）。
+/// @return 折算后的投影厚度（逻辑 dp）。
+[[nodiscard]] inline auto frame_margin_dp(const WindowFrameStyle &frame, bool capable) -> int {
+    if (!frame.shadow_enabled || !capable || frame.shadow_margin_dp <= 0) {
+        return 0;
+    }
+    return frame.shadow_margin_dp;
+}
+
 
 /// @brief 整幅表面逻辑尺寸 = 内容尺寸 + 四周 margin。
 /// @param content xdg configure（window geometry）口径的内容尺寸。
@@ -182,6 +206,26 @@ inline constexpr int AURORA_SHADOW_BLUR_INSET_PX = 1;
     }
     const float f = 1.0F - (dist_px / blur_px);
     return f > 0.0F ? f : 0.0F;
+}
+
+/// @brief 由窗框样式折算本帧的投影模糊半径（逻辑 dp）。
+///
+/// `shadow_blur_radius = 0` 表示沿用既有推导式「margin − AURORA_SHADOW_BLUR_INSET_PX」；
+/// 显式非 0 时被夹到 [0, margin]——超出 margin 的模糊会溢出 buffer 外缘，反而在最外圈
+/// 留下一条没衰减完的硬边，与「margin 内衰减到 0」的设计前提冲突。
+/// 本函数与 `frame_margin_dp` 分列是因为它依赖下方才定义的 `AURORA_SHADOW_BLUR_INSET_PX`。
+/// @param frame 当前窗框样式。
+/// @param margin_dp 本帧实际投影厚度（逻辑 dp，已过 `frame_margin_dp` 折算）。
+/// @return 模糊半径（逻辑 dp）。
+[[nodiscard]] inline auto frame_blur_dp(const WindowFrameStyle &frame, int margin_dp) -> float {
+    if (margin_dp <= 0) {
+        return 0.0F;
+    }
+    const auto m = static_cast<float>(margin_dp);
+    if (frame.shadow_blur_radius <= 0.0F) {
+        return std::max(0.0F, m - static_cast<float>(AURORA_SHADOW_BLUR_INSET_PX));
+    }
+    return std::min(frame.shadow_blur_radius, m);
 }
 
 }  // namespace aurora::csd

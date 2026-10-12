@@ -219,6 +219,12 @@ class WaylandSurface final : public Surface {
     /// @brief 运行期更新 CSD 标题栏样式（存入 Impl 并触发重绘，下帧 draw_decoration 生效）。
     /// @param style 新的标题栏样式（配色/高度/按钮布局）。
     auto set_title_bar_style(const TitleBarStyle &style) -> void override;
+    /// @brief 运行期更新 CSD 窗框样式（存入 Impl、重算 window geometry 后触发重绘）。
+    ///
+    /// 与标题栏样式不同之处：投影厚度直接改变整幅 buffer 尺寸，故除重绘外还须同步
+    /// window geometry 与 `content_inset`，否则应用侧布局会按旧安全区排一帧。
+    /// @param style 新的窗框样式（投影开关/厚度/基色/模糊半径与外轮廓圆角）。
+    auto set_window_frame_style(const WindowFrameStyle &style) -> void override;
     /// @brief 控件发起窗口拖拽移动（Wayland：xdg_toplevel_move，须在 Press 派发栈内调用）。
     auto begin_window_move() -> void override;
     /// @brief 控件发起窗口边缘缩放（Wayland：xdg_toplevel_resize）。

@@ -30,8 +30,15 @@ auto paint_window_shadow(Painter &p, const TitleBarPaintState &s) -> void {
     // shadow_attenuation），GPU SDF 无软件 Painter 的边界行接缝，故形状不收缩。
     const Rect shape{.origin = Point{.x = s.origin_x, .y = s.origin_y},
                      .size = Size{.width = s.width, .height = s.height}};
-    p.draw_shadow(shape, 0.0F, 0.0F, s.shadow_margin - static_cast<float>(AURORA_SHADOW_BLUR_INSET_PX),
-                  AURORA_SHADOW_BASE_COLOR);
+    // 模糊半径与基色由 `WindowFrameStyle` 装配（默认值 == 既有常量，迁移零视觉变化），
+    // 折算规则见 csd::frame_blur_dp / csd::frame_margin_dp。
+    // `shadow_blur <= 0` 时的回落不是冗余分支：直接构造的 `TitleBarPaintState`（测试与
+    // 非经 `make_paint_state` 的调用方）不会带折算值，此时须沿用既有推导式「margin − 1」，
+    // 否则「新增可配模糊」这一件事本身就会把默认观感改成零衰减。
+    const float blur = s.shadow_blur > 0.0F
+                           ? s.shadow_blur
+                           : std::max(0.0F, s.shadow_margin - static_cast<float>(AURORA_SHADOW_BLUR_INSET_PX));
+    p.draw_shadow(shape, 0.0F, 0.0F, blur, s.shadow_color);
 }
 
 auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
