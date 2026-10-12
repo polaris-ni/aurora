@@ -144,7 +144,9 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     preview_policy = p;
 
     au::WindowOptions po;
-    po.size = au::Size{.width = 560.0F, .height = 440.0F};
+    // 520dp 定高：预览内容（标题 + 说明 + 读数 + 三钮 + 状态 + 关闭钮 ≈ 505dp）完整呈现，
+    // 不给「内容溢出裁断」留观感歧义——白条修复验证要看的是几何贴合，不是溢出裁剪。
+    po.size = au::Size{.width = 560.0F, .height = 520.0F};
     po.title = policy_label(p) + " preview";
     po.style.decoration = p;
     po.role = au::WindowRole::Auxiliary;

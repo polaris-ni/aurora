@@ -129,7 +129,7 @@ auto root = au::MediaQueryProvider{
 |:---|:---|:---|:---|:---|
 | Wayland | 有 `xdg-decoration` → SSD；无 → CSD（title+margin） | CSD（title+margin，即便合成器支持 SSD） | 仅 margin 带 | 无任何装饰 |
 | X11 | 保留 WM 装饰（X11 的 SSD 即 WM 原生口沿，无须协商） | `_MOTIF_WM_HINTS` 撤 WM 口沿后自绘标题栏 + 内缘八向热区 | 仅内缘热区 | 无任何装饰 |
-| Win32 | 保留 `DWM`/系统非客户区装饰 | 去 `WS_CAPTION`（保留 `WS_THICKFRAME` 系统缩放模态）+ `WM_NCCALCSIZE`（wParam=TRUE）吞非客户区使客户区 = 整窗，最大化把客户区拉回显示器工作区（经典 −8dp 边框问题修正）；`WM_NCHITTEST` 回报热区：内缘八向（复用 `csd::classify_resize_zone`，带宽 = `frame_margin_dp(frame, dwm_capable)`）→ `HTLEFT`/…、标题带空白 → `HTCAPTION`（系统白给拖拽/双击最大化/Aero Snap）、按钮 → `HTCLIENT`，修饰键（Alt/Meta）拖拽兜底 → `HTCAPTION`；标题栏自绘经 `paint_decoration` 于三表面 present 路径覆绘，按钮按压/释放结算与 X11/Wayland 共层 | 无标题栏，热区与修饰键拖拽同左（`csd_mod_move` 激活） | `WS_POPUP`，无任何装饰 |
+| Win32 | 保留 `DWM`/系统非客户区装饰 | 去 `WS_CAPTION`（保留 `WS_THICKFRAME` 系统缩放模态）+ `WM_NCCALCSIZE`（wParam=TRUE）吞非客户区使客户区 = 整窗，最大化把客户区拉回显示器工作区（经典 −8dp 边框问题修正）；`WM_NCHITTEST` 回报热区：内缘八向（复用 `csd::classify_resize_zone`，带宽 = `frame_margin_dp(frame, dwm_capable)`）→ `HTLEFT`/…、标题带空白 → `HTCAPTION`（系统白给拖拽/双击最大化/Aero Snap）、按钮 → `HTCLIENT`，修饰键（Alt/Meta）拖拽兜底 → `HTCAPTION`；标题栏自绘经 `paint_decoration` 于三表面 present 路径覆绘，按钮按压/释放结算与 X11/Wayland 共层；建窗 / `set_size` 的窗口矩形在吞框档**不做** `AdjustWindowRect` 非客户区外扩（窗口矩形 = 请求物理客户区，`DWMWA_EXTENDED_FRAME_BOUNDS` 实测 == 窗口矩形 ⇒ 整窗可见；外扩会让吞框后的客户区多出不可见边框带宽，布局视口与真实客户区错位——底部/右侧纯背景带） | 无标题栏，热区与修饰键拖拽同左（`csd_mod_move` 激活） | `WS_POPUP`，无任何装饰 |
 
 **安全区**：CSD 标题栏 / 阴影边距占用区经 `Surface::content_inset()` 暴露，由 `present_root` 的下沉壳（`ContentInsetRoot`）自动消费（见 §3.1「客户端自绘装饰的安全区」）；根注入 `MediaQuery.padding` 恒为内容区口径（已消费 ⇒ 归零）。
 

@@ -507,6 +507,14 @@ auto segment_client_side(bool capable) -> bool {
     check(std::fabs(logical.width - static_cast<float>(probe_w)) < 0.01F &&
               std::fabs(logical.height - static_cast<float>(probe_h)) < 0.01F,
           "host logical size equals the requested dp (320x200)");
+    // 物理口径（回归防线）：吞框档客户区 == 窗口矩形，若建窗期做了 AdjustWindowRect 外扩，
+    // 客户区会比请求多出不可见边框带宽（150% DPI 下每边 10px），布局视口与真实客户区错位
+    // （底部/右侧纯背景带）；而 logical 经构造尾部覆写仍会回读到请求 dp，单看逻辑值发现不了
+    // ——必须把物理客户区钉在「请求 dp × scale」上。
+    const int want_w = static_cast<int>(std::lround(static_cast<float>(probe_w) * scale));
+    const int want_h = static_cast<int>(std::lround(static_cast<float>(probe_h) * scale));
+    check(rect_w(client) == want_w && rect_h(client) == want_h,
+          "client physical size equals requested dp x scale (no NC inflation under the swallowed frame)");
     note("scale=" + std::to_string(scale) + " client=" + std::to_string(rect_w(client)) + "x" +
          std::to_string(rect_h(client)) + " logical=" + std::to_string(logical.width) + "x" +
          std::to_string(logical.height));

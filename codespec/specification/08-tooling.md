@@ -800,9 +800,13 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   空实现、尺寸缓存仅在 `begin_frame` 刷新，而 `set_size` 后无脏登记 → present 判 idle 跳帧 →
   `begin_frame` 不执行，形成 idle 死锁（hidden 与 NoActivate 均复现）；X11/Wayland 未 override
   `set_size`（虚默认空实现）。
-- resize 的 Win32 几何口径：`Win32Host::set_size` 已与构造路径同换算（逻辑 × scale → `AdjustWindowRectEx`
-  非客户区补偿 → `SetWindowPos`），保证客户区尺寸 == 请求逻辑尺寸——此前逻辑值被直接当外框尺寸传
+- resize 的 Win32 几何口径：`Win32Host::set_size` 已与构造路径同换算（逻辑 × scale → 非客户区补偿 →
+  `SetWindowPos`），保证客户区尺寸 == 请求逻辑尺寸——此前逻辑值被直接当外框尺寸传
   下去，客户区被 chrome 挤占（标题栏随 DPI 放大尤甚，150% 显示器上客户区逻辑高度可比请求值缩水近半）。
+  补偿经 `win_rect_size_for_client` 统一裁决：系统装饰档走 `AdjustWindowRectEx` 外扩；**吞框档（CSD：
+  ClientSide/Borderless）零补偿**——`WM_NCCALCSIZE` 吞框后客户区 == 窗口矩形（`DWMWA_EXTENDED_FRAME_BOUNDS`
+  实测 == 窗口矩形，整窗可见），若仍外扩，客户区反比请求多出不可见边框带宽（150% DPI 下每边 10px），
+  布局视口与真实客户区错位（底部/右侧纯背景带，拉伸窗口触发 `WM_SIZE` 重新布局后才消失）。
   **DPI 单点真值源（已修复，原 skip 守卫已解除）**：`Win32Host::Impl::scale` 曾有两处不同源的取值
   ——成员初始化列表里的 `dpi_scale()`（此时 `hwnd == nullptr`、进程 DPI 感知尚未启用，
   `GetDeviceCaps` 恒回 96 ⇒ 进程首窗 scale 恒 1.0）与 `WM_SIZE` / `WM_GETMINMAXINFO` 里的现调

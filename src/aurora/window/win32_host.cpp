@@ -33,8 +33,6 @@
 #include "aurora/core/log.h"
 #include "aurora/core/utf8.h"
 #include "aurora/event/event.h"
-#include "aurora/event/keycode.h"
-#include "aurora/render/display_list.h"
 #include "aurora/render/painter.h"
 #include "aurora/window/title_bar_geometry.h"  // TitleBarGeometry / title_bar_geometry
 #include "aurora/window/window.h"
@@ -93,6 +91,35 @@ namespace aurora {
     std::string a(static_cast<size_t>(an), '\0');
     WideCharToMultiByte(CP_ACP, 0, w.c_str(), wn, a.data(), an, nullptr, nullptr);
     return a;
+}
+
+/// @brief 请求的物理客户区尺寸 → 窗口矩形尺寸（物理 px）。
+///
+/// 自绘装饰档（`WM_NCCALCSIZE` 吞框：客户区 == 窗口矩形，且 `DWMWA_EXTENDED_FRAME_BOUNDS`
+/// 实测 == 窗口矩形，整窗可见）**不做**非客户区补偿：若按 `WS_THICKFRAME` 外扩，吞框后
+/// 客户区反而比请求多出不可见边框带宽（实测 150% DPI 下每边 10px），上层布局视口与真实
+/// 客户区错位——帧缓冲按真实客户区铺底色、内容按请求 dp 裁剪，底部/右侧留出一条纯背景
+/// 带（拉伸窗口触发 `WM_SIZE` 重新布局后才消失）。
+/// 系统装饰档保留 `AdjustWindowRectEx` 补偿：非客户区真占空间，须外扩才能保住客户区。
+/// @param physical 请求的逻辑客户区尺寸换算成的物理像素（调用方先过 `to_physical`）。
+/// @param win_style 窗口样式（建窗期用构造值，运行期读实值）。
+/// @param ex_style 扩展样式。
+/// @param has_menu 是否带菜单（`AdjustWindowRectEx` 的菜单形参）。
+/// @param csd_frame 自绘装饰档标志（`csd_title || csd_border`）。
+/// @return 窗口矩形尺寸（物理像素；建窗期即 `CreateWindowExA` 的宽高，运行期即
+///         `SetWindowPos` 的宽高）。
+[[nodiscard]] static auto win_rect_size_for_client(const Size &physical, DWORD win_style, DWORD ex_style, BOOL has_menu,
+                                                   bool csd_frame) -> Size {
+    if (csd_frame) {
+        return physical;  // 吞框档：窗口矩形即客户区，零补偿
+    }
+    RECT rect{.left = 0,
+              .top = 0,
+              .right = static_cast<int>(std::lround(physical.width)),
+              .bottom = static_cast<int>(std::lround(physical.height))};
+    AdjustWindowRectEx(&rect, win_style, has_menu, ex_style);
+    return Size{.width = static_cast<float>(rect.right - rect.left),
+                .height = static_cast<float>(rect.bottom - rect.top)};
 }
 
 // ---- 几何态/可见性态分类（创建分族与尺寸分族共用）----
@@ -227,7 +254,7 @@ struct Win32Host::Impl {
     auto handle_activate(WPARAM wp) -> LRESULT;
     /// @brief DPI 变化：先按系统给出的新矩形就位，再按 wParam 的新 DPI 更新缩放并上报。
     /// 非 static：`WM_DPICHANGED` 需要回写本窗口的 `scale` 并通知其 handler。
-    auto handle_dpi_changed(HWND hwnd, WPARAM wp, LPARAM lp) -> LRESULT;
+    auto handle_dpi_changed(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT;
     /// @brief 上报当前 DPI 缩放（由 `handle_dpi_changed` 调用）。
     auto notify_scale_changed() const -> void;
     [[nodiscard]] auto handle_getminmaxinfo(LPARAM lp) const -> LRESULT;
@@ -341,15 +368,12 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
     const float creation_scale = refresh_scale(have_work_area ? &wa : nullptr);
 
     // DPI 感知下窗口坐标即物理像素：物理窗口尺寸 = 逻辑 dp × scale。
+    // 吞框档（CSD）窗口矩形即客户区，不做非客户区补偿（`win_rect_size_for_client` 内裁决）。
     const Size logical_size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
-    const Size physical_size = to_physical(logical_size);
-    RECT rect{.left = 0,
-              .top = 0,
-              .right = static_cast<int>(std::lround(physical_size.width)),
-              .bottom = static_cast<int>(std::lround(physical_size.height))};
-    AdjustWindowRect(&rect, win_style, FALSE);
-    const int win_w = rect.right - rect.left;
-    const int win_h = rect.bottom - rect.top;
+    const Size win_size =
+        win_rect_size_for_client(to_physical(logical_size), win_style, ex_style, FALSE, csd_title || csd_border);
+    const int win_w = static_cast<int>(std::lround(win_size.width));
+    const int win_h = static_cast<int>(std::lround(win_size.height));
 
     // 标题为 UTF-8；CreateWindowExA 按进程 ANSI 代码页解释字节，故先转 UTF-8 → ACP 再传 ANSI API。
     const std::string ansi_title = utf8_to_acp(title);
@@ -376,13 +400,10 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
         // 这一步发生在 `ShowWindow` 之前、窗口尚未进入用户视野，因此不存在「首帧与第二帧不一致」
         // 的观感——它修正的是尚未被看见的那一帧。代价是一次 `SetWindowPos`（附带一条 WM_SIZE）。
         if (scale != creation_scale) {
-            RECT fix{.left = 0,
-                     .top = 0,
-                     .right = static_cast<int>(std::lround(to_physical(logical_size).width)),
-                     .bottom = static_cast<int>(std::lround(to_physical(logical_size).height))};
-            AdjustWindowRect(&fix, win_style, FALSE);
-            SetWindowPos(hwnd, nullptr, 0, 0, fix.right - fix.left, fix.bottom - fix.top,
-                         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            const Size fix_size = win_rect_size_for_client(to_physical(logical_size), win_style, ex_style, FALSE,
+                                                           csd_title || csd_border);
+            SetWindowPos(hwnd, nullptr, 0, 0, static_cast<int>(std::lround(fix_size.width)),
+                         static_cast<int>(std::lround(fix_size.height)), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
         if (style.always_on_top) {
             SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -679,9 +700,9 @@ auto Win32Host::Impl::handle_activate(WPARAM wp) -> LRESULT {
 }
 
 // ---- DPI 变化分族（WM_DPICHANGED）----
-auto Win32Host::Impl::handle_dpi_changed(HWND hwnd, [[maybe_unused]] WPARAM wp, LPARAM lp) -> LRESULT {
+auto Win32Host::Impl::handle_dpi_changed(HWND hwnd_in, [[maybe_unused]] WPARAM wp, LPARAM lp) -> LRESULT {
     const auto *pr = reinterpret_cast<RECT *>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
-    SetWindowPos(hwnd, nullptr, pr->left, pr->top, pr->right - pr->left, pr->bottom - pr->top,
+    SetWindowPos(hwnd_in, nullptr, pr->left, pr->top, pr->right - pr->left, pr->bottom - pr->top,
                  SWP_NOZORDER | SWP_NOACTIVATE);
     // 缩放更新与上报表层：由 `Window` 强制全量重排重绘（否则 logical↔physical 换算失配会内容
     // 错位 / 发虚）。取值走 `refresh_scale()`（`GetDpiForWindow`）而非 `wParam` 的 HIWORD——
@@ -885,7 +906,7 @@ auto Win32Host::Impl::handle_nchittest(HWND hwnd_in, LPARAM lp) const -> LRESULT
     // 修饰键拖拽兜底（Borderless/Frameless 无标题栏）：Alt 或 Meta 按住时任意处可移动。
     if (csd_mod_move) {
         const ModifierKey m = mods.get();
-        if ((m & (ModifierKey::Alt | ModifierKey::Meta)) != 0U) {
+        if ((m & (ModifierKey::Alt | ModifierKey::Meta)) != 0U) {  // NOLINT(*-redundant-parentheses)
             return HTCAPTION;
         }
     }
@@ -1370,15 +1391,14 @@ auto Win32Host::set_size(Size s) const -> void {
     // 逻辑 dp → 物理客户区 → 物理外框：× scale 换算后做非客户区补偿（与构造路径同一
     // 口径），保证 set_size 后客户区尺寸 == 请求的逻辑尺寸。若把逻辑值直接当外框尺寸
     // 传 SetWindowPos，客户区会被 chrome 挤占（标题栏随 DPI 放大时尤甚），几何漂移。
+    // 吞框档（CSD）例外：窗口矩形即客户区，零补偿（与构造路径同一助手裁决）。
     const auto win_style = static_cast<DWORD>(GetWindowLongPtrA(pimpl_->hwnd, GWL_STYLE));
     const auto ex_style = static_cast<DWORD>(GetWindowLongPtrA(pimpl_->hwnd, GWL_EXSTYLE));
-    RECT rect{.left = 0,
-              .top = 0,
-              .right = static_cast<int>(std::lround(pimpl_->to_physical(s).width)),
-              .bottom = static_cast<int>(std::lround(pimpl_->to_physical(s).height))};
-    AdjustWindowRectEx(&rect, win_style, GetMenu(pimpl_->hwnd) != nullptr ? TRUE : FALSE, ex_style);
-    SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
-                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    const Size win_size = win_rect_size_for_client(pimpl_->to_physical(s), win_style, ex_style,
+                                                   GetMenu(pimpl_->hwnd) != nullptr ? TRUE : FALSE,
+                                                   pimpl_->csd_title || pimpl_->csd_border);
+    SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, static_cast<int>(std::lround(win_size.width)),
+                 static_cast<int>(std::lround(win_size.height)), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 }  // namespace aurora
