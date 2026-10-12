@@ -12,6 +12,7 @@
 // 那句在本头**之后**才执行；其余 aurora 头之所以无恙，只因它们早被首行的头链解析过
 // （头文件 guard 生效、宏尚未定义）。故本头必须与 atspi_bridge.h 同组前置。
 #include "aurora/window/detail/x11_modifiers.h"
+#include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/命中/绘制层
 
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
 
@@ -178,11 +179,21 @@ struct X11Surface::Impl {
     WindowVisibility visibility = WindowVisibility::Normal;  ///< 构造期定档的可见性策略。
     WindowState state = WindowState::Visible;
     WindowMode mode = WindowMode::Normal;
+    bool resizable = true;  ///< 构造期定档（false 时最大化钮为空盒）
+    // CSD 自绘装饰：仅 ClientSide/Borderless/Frameless 策略激活（Auto/ServerSide 保持 WM 装饰）。
+    // 共享层 csd_decoration.h 持有策略/命中/绘制语义，本后端只做 X11 事件映射。
+    bool csd_title = false;  ///< 自绘标题栏（CsdMode::title）
+    bool csd_zones = false;  ///< 内缘八向缩放热区（title/border 任一开启即激活）
+    TitleBarStyle tb_style{};  ///< 标题栏样式（构造自 WindowStyleOptions::title_bar；运行期可热更）
+    WindowFrameStyle frame_style{};  ///< 窗框样式（X11 无外延阴影 margin，仅热区厚度参与）
+    csd::DecorationInteraction csd_ui{};  ///< 交互状态（悬停/按压/连击/全屏揭示）
+    Atom net_wm_moveresize = 0;  ///< EWMH _NET_WM_MOVERESIZE（拖拽移动/八向缩放请求）
     EventHandler handler;
 
     auto apply_title(const std::string &title) -> void;
     auto ensure_image(int w, int h) -> bool;
     auto query_mode() -> WindowMode;
+    auto paint_decoration() -> void;
 };
 
 /// @brief 设置窗口标题：ICCCM `XStoreName`（latin1 兜底）+ EWMH `_NET_WM_NAME`（UTF-8，现代 WM 优先读）。
@@ -232,6 +243,33 @@ static auto swizzle_rows(const std::uint32_t *src, std::uint32_t *dst, std::size
         const std::uint32_t b = (px >> 16U) & 0xFFU;
         dst[i] = (r << rs) | (g << gs) | (b << bs);  // NOLINT(*-signed-bitwise, *-pro-bounds-pointer-arithmetic)
     }
+}
+
+/// @brief 把 CSD 装饰重绘进 painter 缓冲（幂等；应用内容经安全区下沉不会侵入标题栏带）。
+/// X11 无外延阴影 margin（不假设 ARGB 视觉与合成器），margin 恒 0 → paint_window_shadow 无操作，
+/// 阴影能力自动降级为 0 与窗框样式口径一致（`frame_margin_dp(capable=false)` 同判）。
+auto X11Surface::Impl::paint_decoration() -> void {
+    Impl &d = *this;
+    if (!d.csd_title || d.painter.data() == nullptr) {
+        return;
+    }
+    if (d.mode == WindowMode::FullScreen && !d.csd_ui.fullscreen_revealed) {
+        return;  // 全屏默认隐藏标题栏；揭示态由指针悬停顶边置位后重绘
+    }
+    csd::DecorationInput in;
+    in.size = d.size;
+    in.mode = d.mode;
+    in.active = d.active;
+    in.resizable = d.resizable;
+    in.margin_dp = 0;  // 外延阴影在此后端不可达：buffer 即内容矩形，无 margin 环
+    in.csd_title = true;
+    in.fullscreen_revealed = d.csd_ui.fullscreen_revealed;
+    in.hovered_button = d.csd_ui.hovered_button;
+    in.pressed_button = d.csd_ui.pressed_button;
+    in.title = d.title;
+    in.style = d.tb_style;
+    in.frame = d.frame_style;
+    csd::paint_title_bar(d.painter, csd::make_paint_state(std::move(in)));
 }
 
 /// @brief 查询 EWMH `_NET_WM_STATE` 推导窗口几何态（Hidden/Fullscreen/Maximized/Normal）。
@@ -537,13 +575,23 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     d.net_wm_name = XInternAtom(d.dpy, "_NET_WM_NAME", 0);
     d.utf8_string = XInternAtom(d.dpy, "UTF8_STRING", 0);
     d.apply_title(title);
-    // 高级样式映射：置顶 → _NET_WM_STATE_ABOVE；无边框 → _MOTIF_WM_HINTS。
+    // 装饰策略映射：Auto/ServerSide 保留 WM 装饰（X11 的 SSD 即 WM 原生口沿，无须协商）；
+    // ClientSide/Borderless/Frameless 经 _MOTIF_WM_HINTS 撤除 WM 装饰，改由本库自绘。
+    const DecorationPolicy pol = csd::normalize_policy(style.frameless, style.decoration);
+    const csd::CsdMode csd_mode = csd::resolve_mode(pol, /*ssd_available=*/true);
+    d.csd_title = csd_mode.title;
+    d.csd_zones = csd_mode.title || csd_mode.border;
+    d.tb_style = style.title_bar;
+    d.frame_style = style.frame;
+    d.resizable = style.resizable;
+    d.net_wm_moveresize = XInternAtom(d.dpy, "_NET_WM_MOVERESIZE", 0);
+    // 高级样式映射：置顶 → _NET_WM_STATE_ABOVE；客户端装饰/无边框 → _MOTIF_WM_HINTS 撤 WM 口沿。
     if (style.always_on_top) {
         Atom above = XInternAtom(d.dpy, "_NET_WM_STATE_ABOVE", 0);
         XChangeProperty(d.dpy, d.win, d.net_wm_state, XA_ATOM, 32, PropModeAppend,
                         reinterpret_cast<unsigned char *>(&above), 1);  // NOLINT(*-pro-type-reinterpret-cast)
     }
-    if (style.frameless) {
+    if (d.csd_title || d.csd_zones || pol == DecorationPolicy::Frameless) {
         struct MotifHints {
             unsigned long flags;
             unsigned long functions;
@@ -839,6 +887,7 @@ auto X11Surface::present() -> Result<bool> {
         const int h = d.painter.height();
         if (d.ensure_image(w, h)) {
             ++d.presented;  // 只计缓冲就绪并走完 XPutImage 上屏的帧
+            d.paint_decoration();  // CSD 标题栏带（幂等覆绘；未激活时零开销直返）
             // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
             const auto *src = reinterpret_cast<const std::uint32_t *>(d.painter.data());
             if (d.present_dirty.empty()) {
@@ -920,6 +969,25 @@ auto X11Surface::set_title(const std::string &title) -> void {
     }
 }
 
+auto X11Surface::set_title_bar_style(const TitleBarStyle &style) -> void {
+    Impl &d = *impl_;
+    d.tb_style = style;
+    if (d.csd_title) {
+        d.paint_decoration();
+    }
+}
+
+auto X11Surface::set_window_frame_style(const WindowFrameStyle &style) -> void {
+    Impl &d = *impl_;
+    d.frame_style = style;
+}
+
+auto X11Surface::content_inset() const -> EdgeInsets {
+    const Impl &d = *impl_;
+    // X11 无外延 margin：只有标题栏带参与下沉；塌缩态（最大化/全屏）由共享层归零。
+    return csd::content_inset(d.csd_title, d.tb_style.height, 0, d.mode);
+}
+
 auto X11Surface::accessibility_provider() const -> a11y::Provider * { return impl_->atspi.get(); }
 
 auto X11Surface::set_accessibility_root(Widget *root) -> void {
@@ -998,6 +1066,61 @@ auto X11Surface::poll_platform_events() -> void {
         e.modifiers = detail::mods_from_x11_state(state);
         d.handler(e);
     };
+    // CSD 自绘装饰的指针拦截辅助（策略未激活时各入口零开销短路）。
+    const auto csd_band_repaint = [&]() -> void {
+        // 装饰态变化：重绘标题栏带进缓冲，标脏后立即增量上屏（不等应用下一帧，悬停/按压须跟手）。
+        d.paint_decoration();
+        d.present_dirty.push_back(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                                       .size = Size{.width = d.size.width * d.scale,
+                                                    .height = d.tb_style.height * d.scale}});
+        (void)present();
+    };
+    // EWMH _NET_WM_MOVERESIZE 方向码（0..7 = 八向缩放，8 = 移动）↔ 共享层热区枚举。
+    constexpr std::array<int, 9> kZoneToMoveresize{-1, 7, 3, 1, 5, 0, 2, 6, 4};  // 按枚举定义序：None/Left/Right/Top/Bottom/TL/TR/BL/BR
+    const auto csd_send_moveresize = [&](int direction, int x_root, int y_root) -> void {
+        XClientMessageEvent m{};
+        m.type = ClientMessage;
+        m.window = d.win;
+        m.message_type = d.net_wm_moveresize;
+        m.format = 32;
+        m.data.l[0] = static_cast<long>(d.win);  // NOLINT(*-pro-type-union-access)
+        m.data.l[1] = static_cast<long>(x_root);
+        m.data.l[2] = static_cast<long>(y_root);
+        m.data.l[3] = static_cast<long>(direction);
+        m.data.l[4] = static_cast<long>(Button1);
+        const ::Window root = RootWindow(d.dpy, DefaultScreen(d.dpy));
+        // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
+        XSendEvent(d.dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask, reinterpret_cast<XEvent *>(&m));
+        XFlush(d.dpy);
+    };
+    const auto csd_toggle_maximize = [&]() -> void {
+        XClientMessageEvent m{};
+        m.type = ClientMessage;
+        m.window = d.win;
+        m.message_type = d.net_wm_state;
+        m.format = 32;
+        m.data.l[0] = 2L;  // _NET_WM_STATE_TOGGLE
+        m.data.l[1] = static_cast<long>(d.st_max_v);  // NOLINT(*-pro-type-union-access)
+        m.data.l[2] = static_cast<long>(d.st_max_h);
+        m.data.l[3] = 1L;  // source indication: application
+        const ::Window root = RootWindow(d.dpy, DefaultScreen(d.dpy));
+        // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
+        XSendEvent(d.dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask, reinterpret_cast<XEvent *>(&m));
+        XFlush(d.dpy);
+    };
+    const auto csd_geometry_now = [&]() -> TitleBarGeometry {
+        return title_bar_geometry(d.size.width, d.tb_style, d.mode == WindowMode::Maximized, d.resizable);
+    };
+    // 内缘热区 → 共享分类器：把内容坐标缩进 margin 后按「外延环」口径分类，同一判定式
+    // 同时服务 Wayland 的外延 margin 与本后端的内缘覆盖带（不写第二份八向逻辑）。
+    const auto csd_zone_at = [&](double lx, double ly) -> csd::CsdResizeZone {
+        const int m = d.frame_style.shadow_margin_dp;
+        if (m <= 0 || d.size.width <= 2.0F * m || d.size.height <= 2.0F * m) {
+            return csd::CsdResizeZone::None;
+        }
+        return csd::classify_resize_zone(lx - m, ly - m, d.size.width - 2.0F * m, d.size.height - 2.0F * m, m);
+    };
+
     XEvent ev;
     while (XPending(d.dpy) > 0) {
         XNextEvent(d.dpy, &ev);
@@ -1033,6 +1156,51 @@ auto X11Surface::poll_platform_events() -> void {
                     }
                     break;
                 }
+                if (btn == 1U && (d.csd_title || d.csd_zones)) {
+                    const float lx = static_cast<float>(ev.xbutton.x) / d.scale;
+                    const float ly = static_cast<float>(ev.xbutton.y) / d.scale;
+                    if (press && d.csd_zones) {
+                        // 内缘八向缩放热区（含标题栏外的顶边，对齐 libadwaita；Frameless 无热区）。
+                        const csd::CsdResizeZone zone = csd_zone_at(lx, ly);
+                        if (zone != csd::CsdResizeZone::None) {
+                            csd_send_moveresize(kZoneToMoveresize[static_cast<std::size_t>(zone)],
+                                                ev.xbutton.x_root, ev.xbutton.y_root);
+                            break;
+                        }
+                    }
+                    if (d.csd_title && d.mode != WindowMode::FullScreen
+                        && csd::point_in_title_bar(ly, d.tb_style.height)) {
+                        const TitleBarGeometry g = csd_geometry_now();
+                        if (press) {
+                            const int btn_ord = csd::hit_button(g, lx, ly);
+                            if (btn_ord != csd::AURORA_CSD_BUTTON_NONE) {
+                                csd::begin_press(d.csd_ui, btn_ord);  // 只置按压态；动作在释放结算
+                                csd_band_repaint();
+                                break;
+                            }
+                            // 标题空白：双击切换最大化，单击交 WM 拖拽移动（EWMH 接管后续事件流）。
+                            if (csd::consume_double_click(d.csd_ui, ev.xbutton.time, lx, ly)) {
+                                csd_toggle_maximize();
+                            } else {
+                                csd_send_moveresize(8 /*_NET_WM_MOVERESIZE_MOVE*/, ev.xbutton.x_root,
+                                                    ev.xbutton.y_root);
+                            }
+                        } else {
+                            // 释放结算：按下与释落同钮才触发（拖开即取消）。
+                            const int hovered_now = csd::hit_button(g, lx, ly);
+                            const int act = csd::consume_press(d.csd_ui, hovered_now);
+                            csd_band_repaint();
+                            if (act == csd::AURORA_CSD_BUTTON_CLOSE) {
+                                d.close_requested = true;
+                            } else if (act == csd::AURORA_CSD_BUTTON_MAXIMIZE) {
+                                csd_toggle_maximize();
+                            } else if (act == csd::AURORA_CSD_BUTTON_MINIMIZE) {
+                                XIconifyWindow(d.dpy, d.win, DefaultScreen(d.dpy));
+                            }
+                        }
+                        break;
+                    }
+                }
                 const MouseButton mb = (btn == 3)   ? MouseButton::Right
                                        : (btn == 2) ? MouseButton::Middle
                                                     : MouseButton::Left;
@@ -1051,6 +1219,22 @@ auto X11Surface::poll_platform_events() -> void {
                         break;
                     }
                 }
+                if (d.csd_title) {
+                    const float lx = static_cast<float>(ev.xmotion.x) / d.scale;
+                    const float ly = static_cast<float>(ev.xmotion.y) / d.scale;
+                    const int hov = csd::resolve_hover(d.tb_style, d.size.width, d.mode == WindowMode::Maximized,
+                                                       d.resizable, true, lx, ly);
+                    const bool reveal =
+                        csd::update_fullscreen_reveal(d.csd_ui.fullscreen_revealed, d.mode, ly, d.tb_style.height);
+                    if (hov != d.csd_ui.hovered_button || reveal != d.csd_ui.fullscreen_revealed) {
+                        d.csd_ui.hovered_button = hov;
+                        d.csd_ui.fullscreen_revealed = reveal;
+                        csd_band_repaint();
+                    }
+                    if (d.csd_ui.grab) {
+                        break;  // 按钮按压期间吞噬指针移动（拖开取消由 Release 结算）
+                    }
+                }
                 send_mouse(MouseAction::Move, MouseButton::Left, static_cast<float>(ev.xmotion.x),
                            static_cast<float>(ev.xmotion.y), ev.xmotion.state);
                 break;
@@ -1059,6 +1243,10 @@ auto X11Surface::poll_platform_events() -> void {
                 // 光标离开窗口：合成一次远离窗口的 Move → 命中空链清除全部悬停态（对齐 WM_MOUSELEAVE）。
                 // 传 0：`XLeaveWindowEvent`（`XCrossingEvent`）**没有** `state` 字段，修饰态在此
                 // 不可知，按「不可知即 None」处理——本条事件只用于清悬停，不承载手势语义。
+                if (d.csd_title && d.csd_ui.hovered_button != csd::AURORA_CSD_BUTTON_NONE) {
+                    d.csd_ui.hovered_button = csd::AURORA_CSD_BUTTON_NONE;  // 离窗清悬停（对齐 WM_MOUSELEAVE）
+                    csd_band_repaint();
+                }
                 send_mouse(MouseAction::Move, MouseButton::Left, -10000.0F * d.scale, -10000.0F * d.scale, 0U);
                 break;
             case KeyPress: {

@@ -121,6 +121,16 @@ class X11Surface final : public Surface {
     /// @param title 新窗口标题（UTF-8）。
     auto set_title(const std::string &title) -> void override;
 
+    /// @brief 运行期热更 CSD 标题栏样式（装饰带立即重绘；仅客户端装饰策略下可见）。
+    /// @param style 新的标题栏样式。
+    auto set_title_bar_style(const TitleBarStyle &style) -> void override;
+    /// @brief 运行期热更窗框样式（X11 无外延阴影 margin，厚度只影响内缘热区宽度）。
+    /// @param style 新的窗框样式。
+    auto set_window_frame_style(const WindowFrameStyle &style) -> void override;
+    /// @brief CSD 安全区：自绘标题栏带高度经安全区上报，应用内容由框架自动下沉。
+    /// @return 四向内边距；非客户端装饰策略或塌缩态为全零。
+    [[nodiscard]] auto content_inset() const -> EdgeInsets override;
+
     /// @brief 运行时更新悬停光标形状：`XCreateFontCursor` + `XDefineCursor` + `XFlush`。
     /// 句柄按 `CursorShape` 取值序缓存在 Impl（`XCreateFontCursor` 每次调用都产生新资源，
     /// 反复悬停切换必泄漏），析构统一 `XFreeCursor`。
