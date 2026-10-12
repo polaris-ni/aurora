@@ -41,9 +41,13 @@ CHG-001 把 Wayland CSD 的几何模型收敛到「单表面 + 阴影边距」�
    - Win32 端：去 `WS_CAPTION`（保留可缩放边框）后在客户区自绘并经 `WM_NCHITTEST` 回报三档热区（标题带→`HTCAPTION`、按钮→保留给自绘、边缘→八向 `HT*`）； Snap / 系统菜单在自绘模式下不代偿，属已知边界，明确写入 `BUILD_OPTIONS.md` 的平台差异注记。
    - macOS / GLFW / Wasm 本批不铺（无真机验证环境），接口形状保持一致以便后续接入。
 4. **预设体系 6 套**：`Adwaita` / `Windows11` / `macOS` 三视觉语言 × 亮暗，各自返回一个纯值类型样式；既有 `adwaita_dark()` / `adwaita_light()` / `windows_dark()` 保留为对应工厂的兼容别名（old values 逐值不变）。新增 `TitleBarStyle::from_preset(CsdPreset)` 工厂与 `CsdPreset` 枚举；预设表以「一份数据表 + 亮暗两份配色覆盖」承载，杜绝字段级复制。
-5. **明暗三级优先**：显式样式覆盖 > `Theme` 令牌 > OS 偏好。新增 `ColorScheme{Unknown, Light, Dark}` 与 `Platform::color_scheme()`（`window/platform.h`，与 `capabilities()` 同列），OS 侧：Win32 读注册表 `AppsUseLightTheme` 并挂 `WM_SETTINGCHANGE`；Linux 优先 freedesktop appearance portal，不可用时回落 GTK 近似（`gsettings`/环境变量），探不到即 `Unknown` → 回落 `Theme`；macOS 读 `effectiveAppearance`（该分支标注未在本仓构建验证）。探到切换信号时标记装饰脏并重绘，不引入轮询定时器。
+5. **明暗三级优先 + Theme 令牌体系**：显式样式覆盖 > `Theme` 令牌 > OS 偏好。
+   - 新增 `ColorScheme{Unspecified, Light, Dark}`（`theming/color_scheme.h`；`Unspecified` 表示「该层不表态」，逐层下探而非当亮色截断）与纯函数解析 `resolve_color_scheme(explicit, theme, os)`（`theming/csd_style_bridge.h`）；
+   - `Theme` 升级为「一个主题自带明暗两套取值」：基础表 `tokens`（亮/共享）+ 暗色覆写表 `dark_tokens`，按 `scheme` 字段经 `token_for` / `token_in` 解析（Dark 先查覆写表再回落）；`light()` / `dark()` 工厂播种约 16 个语义令牌（surface / text / accent / hover / pressed / danger…，命名取 Fluent 2 alias tokens 与 Material 3 color roles 的公共子集）与 `csd.*` 组件覆写位；
+   - `Theme` → CSD 的令牌派生通道：`title_bar_style_from_theme()` / `window_frame_style_from_theme()`（`theming/csd_style_bridge.h`）——预设做基座（未覆写令牌时与 `from_preset` 逐值相同），`csd.title_bar.*` 组件令牌逐项覆盖，几何/显隐字段不参与派生；
+   - OS 侧：`Platform::color_scheme` 字段（须显式填充）+ `os_color_scheme()`（`window/platform.h`）——Linux 实测 GTK 配置文件启发式（不引 DBus 依赖），Win32/macOS 按注册表 / `NSAppearance` 契约标注未在本仓构建验证。探到档位变化时由应用重调 `set_title_bar_style` 派生口标记装饰脏并重绘，不引入轮询定时器。
 6. **AI 友好面**：6 个预设进 `aurora_api.json` 的枚举表与序列化往返（`check_api_schema_sync` + `aurora_api_json` 目标同批刷新），样式类型支持 JSON 往返以便 AI/工具链直接下发外观改动。
-7. **测试**：新增 `utest_csd_decoration`（策略表逐格断言、连击窗口常量一致性、八向分类边界、三级优先解析顺序与回落链）；既有 `utest_title_bar_painter` 的「直绘 vs 录制回放」字节比对扩到 6 套预设；`utest_csd_geometry` / `utest_csd_shadow_compose` 按新的可配参数参数化（默认值==现状，作为回归基线）；``codespec/manual-test/10-window.md`` 增补真机用例（三后端各自的标题栏按钮/拖拽/双击/明暗切换）。
+7. **测试**：新增 `utest_csd_decoration`（策略表逐格断言、连击窗口常量一致性、八向分类边界）与 `utest_theme_csd_bridge`（三级优先解析顺序与回落链、Theme 双档令牌表、派生与预设逐值一致基准、组件覆写位、窗框派生只动投影基色）；既有 `utest_title_bar_painter` 的「直绘 vs 录制回放」字节比对扩到 6 套预设；`utest_csd_geometry` / `utest_csd_shadow_compose` 按新的可配参数参数化（默认值==现状，作为回归基线）；``codespec/manual-test/10-window.md`` 增补真机用例（三后端各自的标题栏按钮/拖拽/双击/明暗切换）。
 8. **版本台账**：实施落地时同批登记变更台账（新增公共类型与枚举记入 Added，Breaking 面为空，并随 alpha 升版段一并定稿）。
 
 ## 验收判据

@@ -1,7 +1,12 @@
 #pragma once
+
+#include <fstream>
+#include <cstdlib>
+#include <string>
 #include "aurora/core/platform.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/window/window.h"
+#include "aurora/theming/color_scheme.h"
 
 namespace aurora {
 
@@ -22,6 +27,12 @@ struct Platform {
     DeviceKind device = DeviceKind::Unknown;
     /// @brief 实际可用的 Surface 后端类别；由 `platform()` 经 `auto_detect_surface()` 探测填充。
     SurfaceKind surface = SurfaceKind::Headless;
+
+    /// @brief OS 明暗偏好快照；默认 `Unspecified`，须由调用方经 `os_color_scheme()` 显式填充。
+    ///
+    /// 与本结构其余探测字段不同：读 OS 偏好有文件/注册表访问副作用，`platform()` 不代做，
+    /// 保持「显式查询，跳过探测」的口径（见 `os_color_scheme()`）。
+    ColorScheme color_scheme = ColorScheme::Unspecified;
 
     /// @brief 是否为移动形态设备。
     /// @return device 为 Mobile 或 Tablet 时 true，否则 false。
@@ -72,6 +83,55 @@ struct Platform {
     p.device = DeviceKind::Unknown;
 #endif
     return p;
+}
+
+/// @brief 显式查询 OS 明暗偏好（明暗三级优先链的最低层）。
+///
+/// 各平台实现与局限：
+/// - **Linux**：GTK 配置启发式——读 `$XDG_CONFIG_HOME/gtk-4.0/settings.ini`（缺省
+///   `~/.config/...`），`gtk-application-prefer-dark-theme=true` 或 `gtk-theme` 含
+///   `-dark` 后缀判 Dark，其余判 Light。**局限**：不查询 xdg-desktop-portal 的
+///   `org.freedesktop.appearance`（异步 DBus，库侧不引入）；非 GTK 桌面可能误报。
+/// - **Windows**：契约 = `HKCU\...\Themes\Personalize\AppsUseLightTheme`（0=Dark）。
+///   **未在本仓库无头构建内编译验证。**
+/// - **macOS**：契约 = `NSAppearance` bestMatch（Dark→Dark）。
+///   **未在本仓库无头构建内编译验证。**
+/// - 其余平台：`Unspecified`。
+/// @return OS 档位；无证据时不猜，返回 `Unspecified` 交由调用方回落。
+[[nodiscard]] inline auto os_color_scheme() -> ColorScheme {
+#if defined(AURORA_PLATFORM_LINUX)
+    const char *xdg = std::getenv("XDG_CONFIG_HOME");
+    std::string base = (xdg != nullptr && xdg[0] != '\0') ? std::string(xdg) : std::string(std::getenv("HOME") == nullptr ? "" : std::getenv("HOME")) + "/.config";
+    for (const char *ver : {"gtk-4.0", "gtk-3.0"}) {
+        std::ifstream in(base + "/" + ver + "/settings.ini");
+        if (!in.is_open()) {
+            continue;
+        }
+        std::string line;
+        bool prefer_dark = false;
+        bool dark_theme = false;
+        bool any_line = false;
+        while (std::getline(in, line)) {
+            any_line = true;
+            if (line.find("gtk-application-prefer-dark-theme") != std::string::npos &&
+                line.find("true") != std::string::npos) {
+                prefer_dark = true;
+            }
+            if (line.find("gtk-theme") != std::string::npos && line.find("-dark") != std::string::npos) {
+                dark_theme = true;
+            }
+        }
+        if (any_line) {
+            return (prefer_dark || dark_theme) ? ColorScheme::Dark : ColorScheme::Light;
+        }
+    }
+    return ColorScheme::Unspecified;
+#elif defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_MACOS)
+    // 见函数头契约注记：真机读取未在本仓库无头构建内编译验证。
+    return ColorScheme::Unspecified;
+#else
+    return ColorScheme::Unspecified;
+#endif
 }
 
 }  // namespace aurora

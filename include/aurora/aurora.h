@@ -129,6 +129,8 @@
 #include "aurora/state/subscription.h"
 #include "aurora/state/undo_stack.h"
 #include "aurora/storage/storage.h"
+#include "aurora/theming/color_scheme.h"
+#include "aurora/theming/csd_style_bridge.h"
 #include "aurora/theming/style_props.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_query.h"

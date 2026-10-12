@@ -7,6 +7,7 @@
 
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
+#include "aurora/theming/color_scheme.h"
 
 namespace aurora {
 
@@ -76,7 +77,70 @@ struct Theme {
     Font font;  ///< 正文默认字体（默认构造 Font）。
 
     /// @brief 命名令牌表：名称 → 设计令牌值（颜色/字体/尺寸）。
+    ///
+    /// 基础表（语义上对应亮色档/共享受体）；暗色差异只写进 `dark_tokens`，
+    /// 解析经 `token_for(name)`（按 `scheme` 取档）。
     std::unordered_map<std::string, TokenValue> tokens;
+
+    /// @brief 暗色档令牌覆写表：仅登记与亮/共享表不同的键。
+    ///
+    /// 一个 Theme 自带明暗两套取值（业界共识：角色名一套、明暗两列取值，见 Material 3
+    /// color roles 与 Fluent 2 alias tokens 的 light/dark variants）。解析顺序：`scheme`
+    /// 为 Dark 时先查本表、未命中回落 `tokens`；其余档位只查 `tokens`。
+    std::unordered_map<std::string, TokenValue> dark_tokens;
+
+    /// @brief 本主题的明暗归属档；`Unspecified` 表示「本主题不表态」。
+    ///
+    /// 明暗三级优先链的中间层：显式样式 > 本字段 > OS 偏好。`light()`/`dark()`
+    /// 工厂会置位；手工构造的主题保持 `Unspecified`，语义为「沿用上一优先层」。
+    ColorScheme scheme = ColorScheme::Unspecified;
+
+    /// @brief 按给定档位解析令牌：Dark 先查 `dark_tokens` 再回落 `tokens`，其余只查 `tokens`。
+    /// @param name 令牌名。
+    /// @param s 目标档位（`Unspecified` 与 `Light` 同走基础表）。
+    /// @return 命中为令牌值，未命中为 `std::nullopt`。
+    [[nodiscard]] auto token_in(std::string_view name, ColorScheme s) const -> std::optional<TokenValue> {
+        if (s == ColorScheme::Dark) {
+            const auto dit = dark_tokens.find(std::string(name));
+            if (dit != dark_tokens.end()) {
+                return dit->second;
+            }
+        }
+        return token(name);
+    }
+
+    /// @brief 按本主题归属档（`scheme`）解析令牌（`token_in` 的自档便捷形态）。
+    /// @param name 令牌名。
+    /// @return 命中为令牌值；`scheme` 为 `Unspecified` 时等价于查基础表。
+    [[nodiscard]] auto token_for(std::string_view name) const -> std::optional<TokenValue> {
+        return token_in(name, scheme);
+    }
+
+    /// @brief 按给定档位解析令牌并强转为目标类型；未命中或类型不符返回 fallback。
+    /// @tparam T 期望的令牌值类型（Color / Font / double）。
+    /// @param name 令牌名。
+    /// @param s 目标档位。
+    /// @param fallback 兜底值。
+    /// @return 命中且类型匹配为令牌值，否则为 `fallback`。
+    template <typename T>
+    [[nodiscard]] auto token_or_in(std::string_view name, ColorScheme s, T fallback) const -> T {
+        if (auto v = token_in(name, s)) {
+            if (auto *p = std::get_if<T>(&v->v)) {
+                return *p;
+            }
+        }
+        return fallback;
+    }
+
+    /// @brief 按本主题归属档解析令牌并强转为目标类型（`token_or_in` 的自档便捷形态）。
+    /// @tparam T 期望的令牌值类型（Color / Font / double）。
+    /// @param name 令牌名。
+    /// @param fallback 兜底值。
+    /// @return 命中且类型匹配为令牌值，否则为 `fallback`。
+    template <typename T>
+    [[nodiscard]] auto token_or_for(std::string_view name, T fallback) const -> T {
+        return token_or_in(name, scheme, std::move(fallback));
+    }
 
     /// @brief 生成一个浅色主题（便于示例/测试；亦是未挂 `ThemeScope` 的树经 `inherit_theme`
     /// 拿到的兜底主题）。
@@ -84,18 +148,66 @@ struct Theme {
     /// @note 与 `with_defaults()` 不同形：后者是「逐字段取声明默认值」的裸主题，不登记任何令牌。
     [[nodiscard]] static auto light() -> Theme {
         Theme t;
+        t.scheme = ColorScheme::Light;
+        seed_palette(t);
         t.set_token("focus.ring", TokenValue{Color::black()});
         return t;
+    }
+
+    /// @brief 登记语义令牌全集与 CSD 组件令牌（亮色基准；暗色差异由 `dark()` 覆写）。
+    ///
+    /// 语义令牌命名取 Fluent 2 alias tokens / Material 3 color roles 的公共子集；
+    /// `csd.*` 是组件覆写位——只有想改窗口装饰某一处时才写，未覆写的键回落语义层。
+    /// 数值基准与 `TitleBarStyle::from_preset(CsdPreset::AdwaitaLight/Dark)` 一致，
+    /// 保证「从令牌派生」与「直接取预设」两条路输出相同的默认观感。
+    /// @param t 待播种的主题（覆写同名既有令牌）。
+    static auto seed_palette(Theme &t) -> void {
+        // 语义层（亮色基准）
+        t.set_token("surface", TokenValue{Color::white()});
+        t.set_token("surface.raised", TokenValue{Color{0xF2, 0xF2, 0xF2}});
+        t.set_token("text", TokenValue{Color::black()});
+        t.set_token("text.muted", TokenValue{Color{0x92, 0x95, 0x95}});
+        t.set_token("accent", TokenValue{Color::blue()});
+        t.set_token("border", TokenValue{Color{0xDE, 0xDE, 0xDE}});
+        t.set_token("hover", TokenValue{Color{0, 0, 0, 32}});
+        t.set_token("pressed", TokenValue{Color{0, 0, 0, 56}});
+        t.set_token("danger", TokenValue{Color{0xE0, 0x1B, 0x24}});
+        // 组件覆写位（CSD；亮色基准 = AdwaitaLight）
+        t.set_token("csd.title_bar.bg.active", TokenValue{Color{0xEB, 0xEB, 0xEB}});
+        t.set_token("csd.title_bar.bg.inactive", TokenValue{Color{0xE0, 0xE0, 0xE0}});
+        t.set_token("csd.title_bar.fg.active", TokenValue{Color::black()});
+        t.set_token("csd.title_bar.fg.inactive", TokenValue{Color{0x92, 0x95, 0x95}});
+        t.set_token("csd.title_bar.hover", TokenValue{Color{0, 0, 0, 32}});
+        t.set_token("csd.title_bar.pressed", TokenValue{Color{0, 0, 0, 56}});
+        t.set_token("csd.title_bar.close.hover", TokenValue{Color{0xE0, 0x1B, 0x24}});
+        t.set_token("csd.shadow.color", TokenValue{Color{0, 0, 0, 70}});
     }
 
     /// @brief 生成一个深色主题。
     /// @return 深底（rgb 32,33,36）+ 蓝紫主色 + 白正文 + 命名令牌 `focus.ring` = 纯白的主题。
     [[nodiscard]] static auto dark() -> Theme {
         Theme t;
+        t.scheme = ColorScheme::Dark;
+        seed_palette(t);
         t.background = Color::from_rgba(32, 33, 36);
         t.primary = Color::from_rgba(90, 120, 240);
         t.text = Color::white();
         t.set_token("focus.ring", TokenValue{Color::white()});
+        // 暗色差异只进覆写表；未覆写的键（如 danger / csd.title_bar.close.hover）跨档共享。
+        t.dark_tokens["surface"] = TokenValue{Color{0x30, 0x30, 0x30}};
+        t.dark_tokens["surface.raised"] = TokenValue{Color{0x38, 0x38, 0x38}};
+        t.dark_tokens["text"] = TokenValue{Color::white()};
+        t.dark_tokens["text.muted"] = TokenValue{Color{0x9A, 0x99, 0x96}};
+        t.dark_tokens["border"] = TokenValue{Color{0x4A, 0x4A, 0x4A}};
+        t.dark_tokens["hover"] = TokenValue{Color{255, 255, 255, 32}};
+        t.dark_tokens["pressed"] = TokenValue{Color{255, 255, 255, 56}};
+        // 组件覆写位（CSD；暗色基准 = AdwaitaDark）
+        t.dark_tokens["csd.title_bar.bg.active"] = TokenValue{Color{0x30, 0x30, 0x30}};
+        t.dark_tokens["csd.title_bar.bg.inactive"] = TokenValue{Color{0x24, 0x24, 0x24}};
+        t.dark_tokens["csd.title_bar.fg.active"] = TokenValue{Color::white()};
+        t.dark_tokens["csd.title_bar.fg.inactive"] = TokenValue{Color{0x9A, 0x99, 0x96}};
+        t.dark_tokens["csd.title_bar.hover"] = TokenValue{Color{255, 255, 255, 32}};
+        t.dark_tokens["csd.title_bar.pressed"] = TokenValue{Color{255, 255, 255, 56}};
         return t;
     }
 
