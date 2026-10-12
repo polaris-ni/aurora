@@ -1,17 +1,20 @@
 /// 测试类型: integration
-/// 目标单元: include/aurora/window/window.h (detail::ContentInsetRoot / prepare_context)
+/// 目标单元: include/aurora/window/window.h (detail::ContentInsetRoot / prepare_context / hit_root)
 /// 测试说明: 集成——CSD 安全区自动下沉：Window::present_root 将应用根挂到框架私有壳下，
 ///           Surface::content_inset 经 PaddingEdges 修饰自动下沉应用内容（绘制/命中同源）；
 ///           根注入 MediaQuery 调整为内容区口径（padding 归零、size 扣除内缩）；
-///           inset 变化（模拟进出全屏归零）下一帧即生效，无需应用介入
+///           inset 变化（模拟进出全屏归零）下一帧即生效，无需应用介入；
+///           CHG-007：命中派发以壳为根时按控件实际绘制位置点击即命中（绘制/命中零漂移）
 
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "aurora/aurora.h"
 #include "aurora/environment/media_query.h"
+#include "aurora/widget/button.h"
 #include "aurora/widget/layout_builder.h"
 #include "aurora/widget/node.h"
 #include "aurora/widget/text.h"
@@ -127,6 +130,44 @@ AURORA_TEST_CASE(zero_inset_keeps_legacy_geometry) {
     AURORA_TEST_CHECK_NEAR(bounds.origin.y, 0.0F, 1e-3F);
     AURORA_TEST_CHECK_NEAR(bounds.size.width, 800.0F, 1e-3F);
     AURORA_TEST_CHECK_NEAR(bounds.size.height, 600.0F, 1e-3F);
+}
+
+AURORA_TEST_CASE(hit_dispatch_follows_inset_translation) {
+    // CHG-007：位置类事件以整窗下沉壳为命中根——按控件**实际绘制位置**点击必须命中。
+    // 修复前 `WindowHost` 以应用根（内容坐标域）为派发根，命中整体偏移 inset.top
+    // （demo_csd_gallery 的「按钮要往上一栏点」即此症状）。
+    auto win = make_window(headless_opts("inset_hit"));
+    headless_surface(*win).set_content_inset(
+        aurora::EdgeInsets{.left = 0.0F, .top = 36.0F, .right = 0.0F, .bottom = 0.0F});
+
+    int clicks = 0;
+    aurora::Button button{"hit"};
+    button.set_on_click([&clicks]() -> void { ++clicks; });
+    aurora::Node button_node{std::move(button)};
+    auto *const button_widget = &button_node.widget();
+    std::vector<aurora::Node> kids;
+    kids.emplace_back(aurora::Text{"filler"});
+    kids.emplace_back(std::move(button_node));
+    aurora::Node root{aurora::Column{aurora::ColumnProps{.children = std::move(kids)}}};
+    (void)win->present_root(root);
+
+    const aurora::Rect painted = button_widget->paint_bounds();
+    AURORA_TEST_REQUIRE_MSG(painted.origin.y >= 36.0F, "button must be painted below the inset band");
+    const aurora::Point center{.x = painted.origin.x + (painted.size.width / 2.0F),
+                               .y = painted.origin.y + (painted.size.height / 2.0F)};
+
+    aurora::Node &shell = win->hit_root();
+    aurora::MouseEvent down;
+    down.action = aurora::MouseAction::Press;
+    down.button = aurora::MouseButton::Left;
+    down.position = center;
+    AURORA_TEST_CHECK_TRUE(aurora::EventDispatcher::dispatch(shell.widget(), down, nullptr));
+    aurora::MouseEvent up;
+    up.action = aurora::MouseAction::Release;
+    up.button = aurora::MouseButton::Left;
+    up.position = center;
+    (void)aurora::EventDispatcher::dispatch(shell.widget(), up, nullptr);
+    AURORA_TEST_CHECK_EQ(clicks, 1);
 }
 
 }  // namespace aurora::test_cases::itest_content_inset_sink

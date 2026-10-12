@@ -73,6 +73,7 @@
 - **隔离语义**：焦点与指针/触控捕获**不跨窗口**，事件只在其所属宿主的作用域内派发；脏区、HUD 叠加层、窗口状态快照（`WindowState`/`WindowMode`）均为逐窗口状态。
 - **共享语义**：`Animator`/`Scheduler` 每帧只推进一次（`dt` 唯一）；快捷键与命令注册表跨窗口一致（经宿主键盘前置拦截器注入）。
 - **无头宿主**：`Window` 可为 nullptr，把「有/无窗口」统一成一条代码路径（无头构造即登记无窗宿主）。
+- **位置类事件的派发根与坐标口径**：鼠标/滚轮/触控/文件拖放/程序化指针以 `Window` 的整窗下沉壳（`Window::hit_root()`，`detail::ContentInsetRoot`）为命中与派发起点，事件坐标为**整幅表面逻辑坐标**（与 `content_inset()` 同域）；下沉平移与绘制共用壳的 `PaddingEdges` 修饰，命中/绘制零漂移（[`07-environment-modifier.md`](07-environment-modifier.md) §3.1）。无头宿主或首个 `present_root` 之前（壳未收养应用根，`hit_root_ready()` 为 false）回退场景根——后者与历史「先派发后渲染」语义等价。键盘/文本/IME 组合事件不经命中链，恒走场景根。
 - **兼容**：`window()` / `scene()` / `focus()` / `dispatch_*()` / `render_to_png` 作用于**主窗口**（首个登记的宿主），单窗口用法行为与历史完全一致。
 
 **登记与查询**

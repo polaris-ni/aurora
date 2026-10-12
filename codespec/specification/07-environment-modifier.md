@@ -65,7 +65,7 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 
 `PlatformKind` / `DeviceKind` 反映**编译目标**平台（编译期常量），非运行期 OS 探测；运行期能力探测走 `au::platform().capabilities()`（见 [`06-app-platform.md`](06-app-platform.md) §5）。
 
-**客户端自绘装饰的安全区（框架自动下沉）**：Wayland 客户端自绘装饰（CSD）标题栏 / 边框占用的区域经 `Surface::content_inset()` 暴露，由 `Window::present_root` **自动下沉**——应用根统一挂到框架私有壳 `detail::ContentInsetRoot` 下，内缩量经其 `PaddingEdges` 修饰在布局期收紧约束、绘制/命中期平移内容盒，应用树无感知。根注入的 `MediaQuery` 相应为**内容区口径**：`padding` 归零（占用区已被框架消费）、`size` 扣除内缩；应用**不应**再手动消费 `padding`（双重内缩）。需要「自绘进安全区」等特殊场景时，经 `Window::content_inset()` 读取原始占用区，并以空 `MediaQueryProvider` 覆盖根注入口径。inset 为零的后端（各后端的 SSD / 系统非客户区档与 Frameless 档）壳的修饰链为空，行为与无壳逐位一致；inset 变化（如进出全屏归零）下一帧重排生效。测试见 `tests/integration/itest_content_inset_sink.cpp`。
+**客户端自绘装饰的安全区（框架自动下沉）**：Wayland 客户端自绘装饰（CSD）标题栏 / 边框占用的区域经 `Surface::content_inset()` 暴露，由 `Window::present_root` **自动下沉**——应用根统一挂到框架私有壳 `detail::ContentInsetRoot` 下，内缩量经其 `PaddingEdges` 修饰在布局期收紧约束、绘制/命中期平移内容盒，应用树无感知。位置类事件（鼠标/滚轮/触控/文件拖放）的命中与派发根**即该壳**（`Window::hit_root()`），事件坐标为**整幅表面逻辑坐标**（与 `content_inset()` 同域），下沉平移由壳的同一条 `PaddingEdges` 修饰在命中期承担——与绘制零漂移（窗口宿主侧见 [`06-app-platform.md`](06-app-platform.md) §2.4）。根注入的 `MediaQuery` 相应为**内容区口径**：`padding` 归零（占用区已被框架消费）、`size` 扣除内缩；应用**不应**再手动消费 `padding`（双重内缩）。需要「自绘进安全区」等特殊场景时，经 `Window::content_inset()` 读取原始占用区，并以空 `MediaQueryProvider` 覆盖根注入口径。inset 为零的后端（各后端的 SSD / 系统非客户区档与 Frameless 档）壳的修饰链为空，行为与无壳逐位一致；inset 变化（如进出全屏归零）下一帧重排生效。测试见 `tests/integration/itest_content_inset_sink.cpp`。
 
 **工厂**
 
@@ -141,7 +141,7 @@ Wayland CSD 的**阴影边距模型**（单表面，libadwaita 风格；纯逻�
 | Maximized / 任意向 tiled | `{0, tb, 0, 0}`（margin 塌缩） | `{0,0,0,0}` | `{0,0,0,0}` |
 | FullScreen | `{0, tb, 0, 0}`（揭示条出现前 tb 亦不绘制） | `{0,0,0,0}` | `{0,0,0,0}` |
 
-margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙、无阴影），回 Normal 恢复；状态切换走整幅重绘。指针在进入表面的三个入口统一做「表面坐标 → 内容坐标（−margin）」映射，热区判定 `csd::classify_resize_zone` 在内容坐标域进行（表驱动纯函数，`utest_csd_geometry` 守门）。margin 厚度可经 `WindowFrameStyle::shadow_margin_dp` 显式配置（0 = 关闭；显式关闭 / 能力不足 / 非正值三路归零，见 `csd::frame_margin_dp`），默认值逐值等于既有 10dp 常量。X11 与 Win32 后端 buffer 即内容矩形（不假设 ARGB 视觉与合成器），无外延 margin 分量——外延阴影自动降级为 0，标题栏带为**内缘覆绘** + **内缘热区**（同一 `csd::classify_resize_zone` 判定式按「内容坐标缩进 margin 后的外延环」口径复用，不写第二份八向逻辑），`content_inset()` 只承载标题栏带高度；Win32 自绘档标题栏带宽 `frame_margin_dp(frame, dwm_capable)`（DWM 合成关闭时归零，探针 `aurora_verify_win32_csd` 锁降级语义）。Headless 维持零 inset 口径。
+margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙、无阴影），回 Normal 恢复；状态切换走整幅重绘。指针在进入表面的三个入口（enter / motion / button）统一做「表面坐标 → 内容坐标（−margin）」映射，热区判定 `csd::classify_resize_zone` 在内容坐标域进行（表驱动纯函数，`utest_csd_geometry` 守门；映射值仅供后端内部 CSD 判定消费）。对应用上抛的事件（悬停/按压/滚轮）则按契约转发**整幅表面坐标原值**——下沉折算统一由派发根壳承担（见 §3.1），后端不做第二份平移。margin 厚度可经 `WindowFrameStyle::shadow_margin_dp` 显式配置（0 = 关闭；显式关闭 / 能力不足 / 非正值三路归零，见 `csd::frame_margin_dp`），默认值逐值等于既有 10dp 常量。X11 与 Win32 后端 buffer 即内容矩形（不假设 ARGB 视觉与合成器），无外延 margin 分量——外延阴影自动降级为 0，标题栏带为**内缘覆绘** + **内缘热区**（同一 `csd::classify_resize_zone` 判定式按「内容坐标缩进 margin 后的外延环」口径复用，不写第二份八向逻辑），`content_inset()` 只承载标题栏带高度；Win32 自绘档标题栏带宽 `frame_margin_dp(frame, dwm_capable)`（DWM 合成关闭时归零，探针 `aurora_verify_win32_csd` 锁降级语义）。Headless 维持零 inset 口径。
 
 **程序化窗口控制**（`Surface` / `Window` 虚函数，默认空实现）：`close()`、`minimize()`、`toggle_maximize()`、`set_fullscreen(bool)`。Wayland 经 `xdg_toplevel` 协议生效，使无标题栏 / 无边框窗口也能由应用按钮驱动状态。
 

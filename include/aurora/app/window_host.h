@@ -217,6 +217,15 @@ class WindowHost {
     /// `Window::render_hud` 按 scale 变化自动重建，此处只需标脏整帧。
     auto on_scale_changed() -> void;
 
+    /// @brief 位置类事件的命中派发根：`Window::hit_root()` 整窗下沉壳（命中与绘制共用同一条
+    /// PaddingEdges 平移，CHG-007）；无头宿主（`window_ == nullptr`）或首个 `present_root`
+    /// 之前（壳未收养应用根，`hit_root_ready()` 为 false）回退场景根——后者与改动前
+    /// 「应用根未布局、命中空链」的历史行为等价，保住先派发后渲染的既有用法。
+    /// @return 作派发起点的根 widget 引用。
+    [[nodiscard]] auto hit_root() -> Widget & {
+        return (window_ != nullptr && window_->hit_root_ready()) ? window_->hit_root().widget() : scene_.root();
+    }
+
     WindowId id_;
     std::string scroll_scope_;  ///< `ScrollStorage` 作用域键（本窗口 id 的字符串形式，构造时定稿）
     WindowRole role_;

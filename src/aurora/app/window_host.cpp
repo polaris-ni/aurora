@@ -216,11 +216,15 @@ auto WindowHost::dispatch(Event &e) -> void {
     // 焦点陷阱依赖它）；子派发路径会自行保存/复原该槽位，嵌套安全。
     FocusManager *const prev_fm = current_focus_manager();
     set_current_focus_manager(&focus_);
+    // 位置类事件以整窗下沉壳为派发根（`hit_root`，CHG-007）：后端上抛的表面坐标与绘制
+    // 几何经同一条 PaddingEdges 修饰平移命中，inset 非零档（CSD 自绘）不再有「像素与点击
+    // 差一栏」的漂移；键盘/文本/组合不经命中链，仍走场景根。
     auto &root = scene_.root();
+    auto &hit = hit_root();
     if (auto *m = dynamic_cast<MouseEvent *>(&e)) {
-        mouse_.dispatch_mouse(root, *m, &focus_);
+        mouse_.dispatch_mouse(hit, *m, &focus_);
     } else if (auto *s = dynamic_cast<ScrollEvent *>(&e)) {
-        EventDispatcher::dispatch(root, *s);
+        EventDispatcher::dispatch(hit, *s);
     } else if (auto *k = dynamic_cast<KeyEvent *>(&e)) {
         // 键盘前置拦截：应用级快捷键共享于此，命中即消费，不再向本窗口焦点控件派发。
         if (key_pre_ != nullptr && key_pre_(e)) {
@@ -234,9 +238,9 @@ auto WindowHost::dispatch(Event &e) -> void {
     } else if (auto *ce = dynamic_cast<TextCompositionEvent *>(&e)) {
         EventDispatcher::dispatch(root, *ce, focus_);
     } else if (auto *te = dynamic_cast<TouchEvent *>(&e)) {
-        touch_.dispatch(root, *te, &focus_);
+        touch_.dispatch(hit, *te, &focus_);
     } else if (auto *fde = dynamic_cast<FileDropEvent *>(&e)) {
-        EventDispatcher::dispatch(root, *fde);
+        EventDispatcher::dispatch(hit, *fde);
     }
     set_current_focus_manager(prev_fm);
 }
@@ -245,7 +249,7 @@ auto WindowHost::dispatch_pointer(float x, float y, MouseAction action) -> void 
     MouseEvent e;
     e.position = Point{.x = x, .y = y};
     e.action = action;
-    mouse_.dispatch_mouse(scene_.root(), e, &focus_);
+    mouse_.dispatch_mouse(hit_root(), e, &focus_);
 }
 
 auto WindowHost::dispatch_key(KeyEvent e) -> bool {
@@ -262,14 +266,14 @@ auto WindowHost::dispatch_text(TextInputEvent e) -> bool { return EventDispatche
 auto WindowHost::dispatch_touch(const TouchEvent &e) -> void {
     // 派发器需要非 const 事件（命中链按 pointer id 缓存、is_handled_ 回写），此处构造可变副本。
     TouchEvent copy = e;
-    touch_.dispatch(scene_.root(), copy, &focus_);
+    touch_.dispatch(hit_root(), copy, &focus_);
 }
 
 auto WindowHost::dispatch_file_drop(const std::vector<std::string> &paths, float x, float y) -> void {
     FileDropEvent e;
     e.position = Point{.x = x, .y = y};
     e.paths = paths;
-    EventDispatcher::dispatch(scene_.root(), e);
+    EventDispatcher::dispatch(hit_root(), e);
 }
 
 }  // namespace aurora

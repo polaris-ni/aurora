@@ -477,6 +477,18 @@ class Window {
     /// 此时建议用空 `MediaQueryProvider` 覆盖根注入的内容区口径（`MediaQuery::padding` 已归零）。
     /// @return 各边内缩距离（透传 `Surface::content_inset`）。
     [[nodiscard]] auto content_inset() const -> EdgeInsets { return surface_->content_inset(); }
+
+    /// @brief 命中/派发根：框架私有 `detail::ContentInsetRoot` 壳节点（应用根恒挂其下）。
+    /// @note 位置类事件坐标口径 = **整幅表面逻辑坐标**（与 `content_inset()` 同域）；对壳做
+    /// 命中测试时，下沉平移由壳的 PaddingEdges 修饰给出——与绘制期同一条修饰链、零漂移
+    /// （CHG-007）。`hit_root_ready()` 为 false（首个 `present_root` 之前壳未收养应用根）时
+    /// 调用方应回落场景根。inset 恒零后端行为与直接命中应用根逐位一致。
+    /// @return 壳节点引用（生命周期与本窗口一致）。
+    [[nodiscard]] auto hit_root() -> Node & { return inset_root_; }
+
+    /// @brief 命中根（壳）是否已接线应用根：首个 `present_root` 之前为 false。
+    /// @return 壳已收养应用根时为 true。
+    [[nodiscard]] auto hit_root_ready() const -> bool { return inset_root_ready_; }
     /// @brief 程序化关闭窗口（等效于用户点 ×）。
     auto close() const -> void {
         if (surface_) {
