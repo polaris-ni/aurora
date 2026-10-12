@@ -124,12 +124,24 @@ AURORA_TEST_CASE(six_presets_table) {
         const char *name;  // 失败时定位用（测试输出须 ASCII）
     };
     const Row rows[] = {
-        {CsdPreset::AdwaitaLight, TitleBarButtonLayout::Adwaita, false, "adwaita-light"},
-        {CsdPreset::AdwaitaDark, TitleBarButtonLayout::Adwaita, true, "adwaita-dark"},
-        {CsdPreset::WindowsLight, TitleBarButtonLayout::Windows, false, "windows-light"},
-        {CsdPreset::WindowsDark, TitleBarButtonLayout::Windows, true, "windows-dark"},
-        {CsdPreset::MacLight, TitleBarButtonLayout::Mac, false, "mac-light"},
-        {CsdPreset::MacDark, TitleBarButtonLayout::Mac, true, "mac-dark"},
+        {.preset = CsdPreset::AdwaitaLight,
+         .layout = TitleBarButtonLayout::Adwaita,
+         .dark = false,
+         .name = "adwaita-light"},
+        {.preset = CsdPreset::AdwaitaDark,
+         .layout = TitleBarButtonLayout::Adwaita,
+         .dark = true,
+         .name = "adwaita-dark"},
+        {.preset = CsdPreset::WindowsLight,
+         .layout = TitleBarButtonLayout::Windows,
+         .dark = false,
+         .name = "windows-light"},
+        {.preset = CsdPreset::WindowsDark,
+         .layout = TitleBarButtonLayout::Windows,
+         .dark = true,
+         .name = "windows-dark"},
+        {.preset = CsdPreset::MacLight, .layout = TitleBarButtonLayout::Mac, .dark = false, .name = "mac-light"},
+        {.preset = CsdPreset::MacDark, .layout = TitleBarButtonLayout::Mac, .dark = true, .name = "mac-dark"},
     };
     for (const Row &r : rows) {
         const TitleBarStyle s = TitleBarStyle::from_preset(r.preset);

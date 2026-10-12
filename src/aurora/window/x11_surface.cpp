@@ -1076,7 +1076,7 @@ auto X11Surface::poll_platform_events() -> void {
         (void)present();
     };
     // EWMH _NET_WM_MOVERESIZE 方向码（0..7 = 八向缩放，8 = 移动）↔ 共享层热区枚举。
-    constexpr std::array<int, 9> kZoneToMoveresize{
+    constexpr std::array<int, 9> zone_to_moveresize{
         -1, 7, 3, 1, 5, 0, 2, 6, 4};  // 按枚举定义序：None/Left/Right/Top/Bottom/TL/TR/BL/BR
     const auto csd_send_moveresize = [&](int direction, int x_root, int y_root) -> void {
         XClientMessageEvent m{};
@@ -1085,14 +1085,14 @@ auto X11Surface::poll_platform_events() -> void {
         m.message_type = d.net_wm_moveresize;
         m.format = 32;
         m.data.l[0] = static_cast<long>(d.win);  // NOLINT(*-pro-type-union-access)
-        m.data.l[1] = static_cast<long>(x_root);
-        m.data.l[2] = static_cast<long>(y_root);
-        m.data.l[3] = static_cast<long>(direction);
-        m.data.l[4] = static_cast<long>(Button1);
+        m.data.l[1] = static_cast<long>(x_root);  // NOLINT(*-pro-type-union-access)
+        m.data.l[2] = static_cast<long>(y_root);  // NOLINT(*-pro-type-union-access)
+        m.data.l[3] = static_cast<long>(direction);  // NOLINT(*-pro-type-union-access)
+        m.data.l[4] = static_cast<long>(Button1);  // NOLINT(*-pro-type-union-access)
         const ::Window root = RootWindow(d.dpy, DefaultScreen(d.dpy));
         // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
         XSendEvent(d.dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask,
-                   reinterpret_cast<XEvent *>(&m));
+                   reinterpret_cast<XEvent *>(&m));  // NOLINT(*-pro-type-reinterpret-cast)
         XFlush(d.dpy);
     };
     const auto csd_toggle_maximize = [&]() -> void {
@@ -1101,14 +1101,14 @@ auto X11Surface::poll_platform_events() -> void {
         m.window = d.win;
         m.message_type = d.net_wm_state;
         m.format = 32;
-        m.data.l[0] = 2L;  // _NET_WM_STATE_TOGGLE
+        m.data.l[0] = 2L;  // _NET_WM_STATE_TOGGLE  // NOLINT(*-pro-type-union-access)
         m.data.l[1] = static_cast<long>(d.st_max_v);  // NOLINT(*-pro-type-union-access)
-        m.data.l[2] = static_cast<long>(d.st_max_h);
-        m.data.l[3] = 1L;  // source indication: application
+        m.data.l[2] = static_cast<long>(d.st_max_h);  // NOLINT(*-pro-type-union-access)
+        m.data.l[3] = 1L;  // source indication: application  // NOLINT(*-pro-type-union-access)
         const ::Window root = RootWindow(d.dpy, DefaultScreen(d.dpy));
         // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
         XSendEvent(d.dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask,
-                   reinterpret_cast<XEvent *>(&m));
+                   reinterpret_cast<XEvent *>(&m));  // NOLINT(*-pro-type-reinterpret-cast)
         XFlush(d.dpy);
     };
     const auto csd_geometry_now = [&]() -> TitleBarGeometry {
@@ -1118,10 +1118,10 @@ auto X11Surface::poll_platform_events() -> void {
     // 同时服务 Wayland 的外延 margin 与本后端的内缘覆盖带（不写第二份八向逻辑）。
     const auto csd_zone_at = [&](double lx, double ly) -> csd::CsdResizeZone {
         const int m = d.frame_style.shadow_margin_dp;
-        if (m <= 0 || d.size.width <= 2.0F * m || d.size.height <= 2.0F * m) {
+        if (m <= 0 || d.size.width <= 2.0 * m || d.size.height <= 2.0 * m) {
             return csd::CsdResizeZone::None;
         }
-        return csd::classify_resize_zone(lx - m, ly - m, d.size.width - 2.0F * m, d.size.height - 2.0F * m, m);
+        return csd::classify_resize_zone(lx - m, ly - m, d.size.width - (2.0 * m), d.size.height - (2.0 * m), m);
     };
 
     XEvent ev;
@@ -1166,8 +1166,8 @@ auto X11Surface::poll_platform_events() -> void {
                         // 内缘八向缩放热区（含标题栏外的顶边，对齐 libadwaita；Frameless 无热区）。
                         const csd::CsdResizeZone zone = csd_zone_at(lx, ly);
                         if (zone != csd::CsdResizeZone::None) {
-                            csd_send_moveresize(kZoneToMoveresize[static_cast<std::size_t>(zone)], ev.xbutton.x_root,
-                                                ev.xbutton.y_root);
+                            csd_send_moveresize(zone_to_moveresize.at(static_cast<std::size_t>(zone)),
+                                                ev.xbutton.x_root, ev.xbutton.y_root);
                             break;
                         }
                     }

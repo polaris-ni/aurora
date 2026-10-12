@@ -47,12 +47,11 @@ AURORA_TEST_CASE(token_resolution_prefers_dark_table_only_in_dark_scheme) {
     t.set_token("csd.title_bar.bg.active", TokenValue{Color{0xAA, 0xBB, 0xCC}});
     t.dark_tokens["csd.title_bar.bg.active"] = TokenValue{Color{0x11, 0x22, 0x33}};
 
-    const auto dark_value = t.token_in("csd.title_bar.bg.active", ColorScheme::Dark)->as<Color>();
-    const auto light_value = t.token_in("csd.title_bar.bg.active", ColorScheme::Light)->as<Color>();
-    AURORA_TEST_CHECK_TRUE(dark_value.has_value());
-    AURORA_TEST_CHECK_TRUE(light_value.has_value());
-    AURORA_TEST_CHECK_EQ(*dark_value, Color{0x11, 0x22, 0x33});
-    AURORA_TEST_CHECK_EQ(*light_value, Color{0xAA, 0xBB, 0xCC});
+    AURORA_TEST_CHECK_TRUE(t.token_in("csd.title_bar.bg.active", ColorScheme::Dark).has_value());
+    AURORA_TEST_CHECK_TRUE(t.token_in("csd.title_bar.bg.active", ColorScheme::Light).has_value());
+    AURORA_TEST_CHECK_EQ(t.token_or_in("csd.title_bar.bg.active", ColorScheme::Dark, Color{}), Color{0x11, 0x22, 0x33});
+    AURORA_TEST_CHECK_EQ(t.token_or_in("csd.title_bar.bg.active", ColorScheme::Light, Color{}),
+                         Color{0xAA, 0xBB, 0xCC});
 
     // 未进 dark_tokens 的键：Dark 档回落基础表。
     t.dark_tokens.erase("csd.title_bar.bg.active");

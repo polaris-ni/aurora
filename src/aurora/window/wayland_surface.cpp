@@ -1744,7 +1744,7 @@ auto WaylandSurface::present() -> Result<bool> {
             const int mp = m_logical * d.scale;
             const int cwp = static_cast<int>(std::lround(d.size.width)) * d.scale;
             const int chp = static_cast<int>(std::lround(d.size.height)) * d.scale;
-            const auto blur_phys = static_cast<float>(csd::frame_blur_dp(d.frame_style, m_logical) * d.scale);
+            const auto blur_phys = csd::frame_blur_dp(d.frame_style, m_logical) * static_cast<float>(d.scale);
             csd::compose_shadow_margins_bgra(slot->px, w, h, mp, mp, cwp, chp, mp, blur_phys,
                                              d.frame_style.shadow_color);
         }

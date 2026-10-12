@@ -17,10 +17,10 @@ enum class TitleBarButtonLayout : std::uint8_t {
 ///
 /// 经 `TitleBarStyle::from_preset(CsdPreset)` 取值；预设只产 `TitleBarStyle`（颜色 / 布局语言 /
 /// 度量基线），显隐开关全部保持开启——显隐与几何细节属调用方的定制面，不属预设。
+/// `TitleBarStyle{}` 的默认成员值即 `CsdPreset::AdwaitaDark` 一档。
 enum class CsdPreset : std::uint8_t {
     AdwaitaLight,  ///< GNOME/libadwaita 亮色 header bar（bg≈`#EBEBEB`、fg=黑、close_hover=`#E01B24`）
-    AdwaitaDark,  ///< GNOME/libadwaita 暗色 header bar（bg≈`#303030`、fg=白、close_hover=`#E01B24`）；亦是
-                  ///< `TitleBarStyle{}` 的默认成员值
+    AdwaitaDark,  ///< GNOME/libadwaita 暗色 header bar（bg≈`#303030`、fg=白、close_hover=`#E01B24`）
     WindowsLight,  ///< WinUI/Windows 11 亮色标题栏（bg≈`#F3F3F3`、fg=黑、close_hover=`#C42B1C`）
     WindowsDark,  ///< WinUI/Windows 11 暗色标题栏（bg≈`#202020`、fg=白、close_hover=`#C42B1C`）
     MacLight,  ///< macOS 亮色「红绿灯」标题栏（bg≈`#ECECEC`、fg=黑；红绿灯圆形底色由绘制层按语言固定）
