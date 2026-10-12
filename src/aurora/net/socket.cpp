@@ -49,38 +49,26 @@ using NativeSocket = SOCKET;
 
 /// @brief 关闭原生句柄（Winsock 专用拼写）。
 /// @param s 待关闭的原生句柄。
-auto native_close(NativeSocket s) -> void {
-    (void)::closesocket(s);
-}
+auto native_close(NativeSocket s) -> void { (void)::closesocket(s); }
 
 /// @brief 平台原生最近错误码（诊断文本用）。
 /// @return `WSAGetLastError()` 的 int 化值。
-auto native_last_error() -> int {
-    return ::WSAGetLastError();
-}
+auto native_last_error() -> int { return ::WSAGetLastError(); }
 
 /// @brief recv 超时判据：Winsock 显式回报 WSAETIMEDOUT。
 /// @param os_error `native_last_error()` 返回值。
 /// @return 等于 `WSAETIMEDOUT` 为 true。
-auto native_recv_timed_out(int os_error) -> bool {
-    return os_error == WSAETIMEDOUT;
-}
+auto native_recv_timed_out(int os_error) -> bool { return os_error == WSAETIMEDOUT; }
 #else
 using NativeSocket = int;
 
-auto native_close(NativeSocket s) -> void {
-    (void)::close(s);
-}
+auto native_close(NativeSocket s) -> void { (void)::close(s); }
 
-auto native_last_error() -> int {
-    return errno;
-}
+auto native_last_error() -> int { return errno; }
 
 // POSIX：阻塞套接字挂上 SO_RCVTIMEO 后，超时以 EAGAIN/EWOULDBLOCK 形态回报（两者是否同值随平台，
 // 故双判）。
-auto native_recv_timed_out(int os_error) -> bool {
-    return os_error == EAGAIN || os_error == EWOULDBLOCK;
-}
+auto native_recv_timed_out(int os_error) -> bool { return os_error == EAGAIN || os_error == EWOULDBLOCK; }
 #endif
 
 /// @brief Winsock `SOCKET` 宏常量各工具链形态不一，经 uint64 中转落 intptr_t 保证
@@ -262,9 +250,7 @@ auto StreamSocket::operator=(StreamSocket &&other) noexcept -> StreamSocket & {
     return *this;
 }
 
-StreamSocket::~StreamSocket() {
-    close();
-}
+StreamSocket::~StreamSocket() { close(); }
 
 auto StreamSocket::set_io_timeout(std::chrono::milliseconds timeout) const -> Result<void> {
     const auto ms = static_cast<long long>(std::max<std::int64_t>(timeout.count(), 1));
@@ -284,10 +270,10 @@ auto StreamSocket::set_io_timeout(std::chrono::milliseconds timeout) const -> Re
     // `optval` 形参两平台都只认按字节传参（POSIX `const void *`、Winsock `const char *`），
     // 取选项变量地址过界是唯一方式。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
-    const int rcv_rc =
-        ::setsockopt(from_handle(handle_), SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(option), option_size);
-    const int snd_rc =
-        ::setsockopt(from_handle(handle_), SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char *>(option), option_size);
+    const int rcv_rc = ::setsockopt(from_handle(handle_), SOL_SOCKET, SO_RCVTIMEO,
+                                    reinterpret_cast<const char *>(option), option_size);
+    const int snd_rc = ::setsockopt(from_handle(handle_), SOL_SOCKET, SO_SNDTIMEO,
+                                    reinterpret_cast<const char *>(option), option_size);
     // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     if (rcv_rc != 0 || snd_rc != 0) {
         return net_error(ErrorCode::NetTimeoutOptionFailed, "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO)");
@@ -392,9 +378,7 @@ auto Listener::operator=(Listener &&other) noexcept -> Listener & {
     return *this;
 }
 
-Listener::~Listener() {
-    close();
-}
+Listener::~Listener() { close(); }
 
 auto Listener::wait_readable(std::chrono::milliseconds timeout) const -> Result<bool> {
     const NativeSocket s = from_handle(handle_);
