@@ -1,6 +1,6 @@
 # 核心基础层（core）
 
-> 覆盖 `include/aurora/core/`（36 个头文件）与根级 `todo.h`、`commands.h`。
+> 覆盖 `include/aurora/core/`（38 个头文件）与根级 `todo.h`、`commands.h`。
 > 本文件是错误、诊断、日志、异步底座、基础几何类型与 JSON 值容器的**唯一权威**；错误码全量清单见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)（生成物），编码层面的错误写法规则见 [`CODING_STANDARDS.md`](../CODING_STANDARDS.md) §1。
 
 ---
@@ -21,6 +21,7 @@
 | 无障碍（a11y） | `accessibility.h`（角色 / 动作 / 节点 / 事件 / 设置等纯数据类型与指针级钩子）、`a11y_types.h`（状态 / 取值域 / 选区值类型）、`a11y_provider.h`（桥抽象与注册表）、`a11y_text.h`（UTF-8 ↔ UTF-16 偏移映射） |
 | JSON 值容器 | `json.h`（公共轻头；实现位于 `src/aurora/core/json/`，契约见 §9） |
 | HTTP 头集合 | `headers.h`（大小写不敏感、同名保序多值的头表值类型，契约见 §10） |
+| URL 值类型 | `url.h`（解析即规范化的 URL / 相对引用 / 百分号编解码 / 查询参数多值表，契约见 §11） |
 | 其他 | `image.h`、`font.h`、`literals.h`、`version.h` |
 
 根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`、`imperative.h`（命令式逃生舱：就地执行一段命令式代码块）。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`。）
@@ -737,7 +738,7 @@ class SaxHandler {
 ## 10 HTTP 头集合（`core/headers.h`）
 
 > 覆盖 `include/aurora/core/headers.h`（header-only 值类型，无 `.cpp`）。
-> 该类型是 CHG-008 通用网络栈的两个 `core/` 基础件之一（另一个是 `Url`，随其切片落地）；
+> 该类型是 CHG-008 通用网络栈的两个 `core/` 基础件之一（另一个是 `Url`，契约见 §11）；
 > HTTP / SSE / WebSocket 握手与 Inspector 的头部读写共用它，动机见
 > [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §12。
 
@@ -791,3 +792,110 @@ class SaxHandler {
 - header-only，随伞头 `aurora/aurora.h` 收录（`tools/check/umbrella_manifest.txt` 同步）。
 - 回归：`utest_core_headers`（大小写不敏感存取与原始拼写保留、`append` 保序不折叠、`set`
   覆盖全部同名并移到末尾、`remove` 计数与幂等、逐条目相等的三个维度：名字折叠 / 值严格 / 顺序敏感）。
+
+---
+
+## 11 URL 值类型（`core/url.h`）
+
+> 覆盖 `include/aurora/core/url.h` + `src/aurora/core/url.cpp`。
+> CHG-008 §12 的两个 `core/` 基础件中的另一个（`Headers` 见 §10）；`Request` / `WebSocket::connect` /
+> Inspector 的 URL 读写共用它，动机见
+> [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §12。
+
+### 11.1 定位与边界
+
+存在的理由是提案里的一句话——**手拼 URL 恰是 AI 生成代码的头号错误源**。因此网络栈对外的入口一律
+收 `Url`，裸字符串只能经 `Url::parse` 显式进入。`Url` 与 `QueryParams` 都是纯值类型：无句柄、
+无共享状态、无平台头，可在任意线程拷贝与比较。
+
+文法与相对解析按 RFC 3986 手写，不调用任何平台 API：Windows 的 `UrlEscape/UrlUnescape` 是 IE 依赖，
+而「哪些畸形串被谁容忍」会随 libc 漂移——两者都违反 `SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001`
+（同一输入在 Win32 / POSIX / wasm 上必须给出同一结果与同一条诊断）。
+
+### 11.2 解析即规范化
+
+存的是规范化后的分量，不是原文；`to_string()` 输出规范形态，且 `parse(x.to_string())` 必得回与
+`x` 相等的对象——**幂等是「规范化」的定义**，由黄金语料逐行兜住而不是靠单条断言。
+
+| 口径 | 内容 | 不这么做的后果 |
+|:---|:---|:---|
+| scheme 与注册名主机转小写 | `HTTPS://Example.COM` → `https://example.com` | 同一主机因拼写产生两个缓存键 |
+| 三元组大写化 + 无保留还原 | `%41`→`A`、`%7e`→`~`、`%2f`→`%2F` | 语义相同的两个 URL 判不等 |
+| `%2F` **不**还原成 `/` | 路径里 `a%2Fb` 与 `a/b` 是两个资源 | 悄悄合并不同资源 |
+| 绝对 URL 做点段消除 | `/a/../b` → `/b`（RFC 3986 §5.2.4 / §6.2.2） | 规范化不完整 |
+| 相对引用**保留**点段 | `../g` 原样存 | 提前消除会抹掉引用携带的层级（§5.2.4 定义在合并之后） |
+| 主机尾点去除 | `example.com.` ≡ `example.com` | 根标签是同一名字的另一种拼写 |
+
+`%2e%2e` / `%2e` 的归宿由「先还原无保留字符、再做点段消除」的次序决定，因此与 WHATWG 同色
+（`http://a/b/c/%2e%2e/g` → `http://a/b/g`）；`%2F` 因不属无保留集，永远不会变成新的分隔符。
+
+拒绝而非「自动修复」的输入一律返回 `net-url-invalid`，`message` 携 `detail=` 指明原因与位置：控制字节
+与空格（不做浏览器式补 `%20`——静默改写会把手抖的空格变成对端可见的资源身份）、截断或非法的百分号
+三元组、主机段的百分号转义、非点分四段 / 前导零 / 超范围的 IPv4、括号不配对或 `::` 多现的 IPv6、
+含空标签或首尾为 `-` 的注册名、`xn--` 后为空的标签、非十进制或超 65535 的端口、非法 scheme token。
+
+### 11.3 接口契约
+
+编码态与解码态的分工是这套 API 的第一规则：**分量出口恒为编码态线上形态**（`userinfo()` /
+`host()` / `path()` / `query()` / `fragment()`，`to_string()` 直接拼接它们），可读文本走
+`percent_decode()` 与 `query_params()`（解码态）。`from_parts` 与出口同口径，收**编码态**入参。
+
+| 接口 | 语义 |
+|:---|:---|
+| `parse(text)` | 绝对 URL 与相对引用都接受；引用形态 `is_absolute()` 为 false |
+| `from_parts(scheme, host, port, path, query, fragment)` | 结构化入口；裸 IPv6 自动补方括号；`nullopt` 与空串在 query / fragment 上语义不同（「无该段」vs「写了 `?` / `#`」） |
+| `resolve(reference)` | 引用带 scheme 时整体胜出（基址不参与，故 `http:g` → `http:g`）；基址无 scheme 时报错而非猜 |
+| `port()` / `effective_port()` | 前者只回答「文本里写了没有」，后者回答「连到哪」（`http`/`ws` → 80，`https`/`wss` → 443，其余 scheme 无默认值）；显式写出的默认端口原样保留，不折叠 |
+| `host()` / `host_kind()` | 主机三型显式：`Name` / `Ipv4` / `Ipv6` / `Empty`，由解析结果决定而非按字符串形态猜 |
+| `query_params()` | 查询串 → 有序多值表（键值均解码态） |
+| `is_secure()` | **只看 scheme**：`http://127.0.0.1` 依然明文，`NetPolicy` 据此拒非白名单明文，而不是靠「本机地址看起来无害」放行 |
+| `to_unicode_host()` | 显示出口：punycode 标签解回 UTF-8；字面量原样返回 |
+| `operator==` | 逐分量比较规范化后的存储形态 |
+
+`PercentSet` 四套集合的差别只在定界符，选错即改变资源身份：
+
+| 集合 | 额外保留 | 用途 |
+|:---|:---|:---|
+| `Unreserved` | 无（仅字母数字与 `-` `.` `_` `~`） | 生成不可歧义的片段 |
+| `PathSegment` | `!$&'()*+,;=` `:` `@` `/` | 路径段（RFC 3986 §3.3） |
+| `QueryParam` | 同上再加 `?`，但 `&` `=` 作定界符须转义 | 查询串里的单个键或值 |
+| `Fragment` | 同上再加 `#` | 片段 |
+
+`QueryParams` 与 §10 `Headers` 同构而口径相反：键**大小写敏感**（URL 查询串没有同键折叠惯例，
+`?a=1&A=2` 是两个键）、同键不折叠且保序、`a=` 是空串而非缺失、`&&` 的空槽不产出幽灵参数。
+
+`percent_decode()` 不把 `+` 当空格——那是 `application/x-www-form-urlencoded` 的历史约定，不外溢到
+URL 层；截断的三元组判失败而非「原样保留」，否则 `%2` 会一路走到对端再变成不可预期字节。
+
+### 11.4 主机与 IDNA
+
+注册名走**缩减版 IDNA**：逐标签处理，纯 ASCII 标签原样保留，含非 ASCII 的标签做 ASCII 小写 +
+punycode（RFC 3492 §6.3，`adapt` 见 §6.1）。参数为 base 36 / tmin 1 / tmax 26 / skew 38 / damp 700 /
+initial bias 72 / initial n 0x80，前缀 `xn--`、定界符 `-`。
+
+三条有意的限制（语料里有成对向量把差异钉成事实，见 `tests/fixtures/url_vectors/README.md`）：
+
+- **不做 Unicode 归一化**（无 NFC/NFD、无 Unicode 大小写折叠），只做 ASCII 小写。所以 `MÜNCHEN.test`
+  → `xn--mnchen-psa.test`，而浏览器先按 UTS #46 把 `Ü` 折成 `ü` 再编码，得 `xn--mnchen-3ya.test`；
+  `ß` 按码点走 `xn--zca`，与主流浏览器的 nontransitional 结果同色。取舍理由：归一化表随 Unicode
+  版本变动，而本库要求各平台逐值同色，优先级高于与浏览器判等。
+- **主机段拒绝百分号转义**（`http://m%C3%BCnchen.test/` 直接报错）：转义在 DNS 侧没有 1:1 对应，
+  且 `%2e%2e` 一类写法可被利用做前缀仿冒。
+- **非四段数字主机按注册名**（`1.2.3`、`1.2.3.4.5` 是 `Name`）：本层不做 `inet_aton` 式缩写，
+  免得同一地址有两种拼写却判不等。
+
+### 11.5 层边界与回归
+
+- 只依赖标准库与 `core/result.h`；IPv4 / IPv6 语法在本层自行校验，**不**引用 `net/`（避免
+  `core → net` 反向依赖），但口径与 `net::Endpoint` 一致（点分四段、禁前导零），由
+  `tools/check/check_core_layer_boundary.py` 守护。
+- 实现落在 `src/aurora/core/url.cpp`（非模板纯逻辑离头）；头随伞头 `aurora/aurora.h` 收录，
+  `tools/check/umbrella_manifest.txt` 同步。
+- 错误码一枚：`net-url-invalid`（`codespec/errors.toml` 登记 → 生成 `error_codes.gen.h` 与
+  [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)），全族共用，畸形细节进 `message` 的 `detail=`。
+- 回归 `utest_core_url`（14 例，纯内存、无平台分支）：规范化五口径与幂等、`port()` 与
+  `effective_port()` 的三态、四套 `PercentSet` 与解码侧 `+`、`QueryParams` 保序多值与键大小写敏感、
+  主机三型与 IDNA 往返、`from_parts` 的裸 IPv6 补括号、相等比较按规范化形态，外加两个**黄金语料驱动**
+  的用例——`tests/fixtures/url_vectors/parse.tsv`（解析 / 规范化 / 拒绝，含 IDN 与 punycode 多次插入
+  向量）与 `tests/fixtures/url_vectors/resolve.tsv`（RFC 3986 §5.4 两张示例表逐条照录）。语料的
+  来源、格式与加行方式见该目录 `README.md`。

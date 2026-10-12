@@ -121,7 +121,20 @@ PLACEHOLDERS_ASCII = {"-", "--", "TBD", "N/A", "none"}
 # ---- 白名单：存量豁免，逐项注明原因；规则只拦增量 ----------------------------
 # 每条为 (提案相对路径, 命中片段, 豁免原因)。命中片段须能定位到该条诊断文本。
 # 新增条目须写清「为何不直接修文档」；条目一旦不再命中任何诊断即判红灯，防止清单腐烂。
-EXEMPT: list = []
+#
+# 下条命中目录级诊断（文本前缀是 `codespec/changes:` 而非某个提案路径），故 doc 键取该前缀；
+# 代价是本条不受「不再命中即判红灯」的防腐保护（该检查只在 doc 等于某提案路径时生效），
+# 另一条提案归档或改号后须手工删除本条目。
+# 背景：两条互不相干的工作流在同一天各自取了 CHG-007，先立的那条（伞形提案
+# `xplat-network-stack`，其目录名按字典序排在 `zero-drift-hit-alignment` 之前）改用
+# CHG-008 解除编号重复。编号唯一性与「空洞即放弃」两项意图都仍然成立；被豁免的只是
+# 「跨目录单调性」这一条，且它要求改动另一工作流的提案才能满足——不在本仓该提案作者
+# 之外任何人的可改范围内。
+EXEMPT: list = [
+    ("codespec/changes", "change ids must ascend in directory order: CHG-008 (codespec/changes/xplat-network-stack) -> CHG-007",
+     "cross-workstream id collision: the earlier umbrella proposal moved up one number to keep ids unique; "
+     "satisfying directory monotonicity would mean renumbering another workstream's proposal, which is out of scope"),
+]
 
 
 def check_reverse_tables(errors):

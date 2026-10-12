@@ -68,6 +68,7 @@
 #include "aurora/core/time.h"
 #include "aurora/core/types.h"
 #include "aurora/core/unicode_width.h"
+#include "aurora/core/url.h"
 #include "aurora/core/version.h"
 #include "aurora/debug/debug_backend.h"
 #include "aurora/debug/debug_paint.h"

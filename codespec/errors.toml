@@ -1067,3 +1067,14 @@ fix_category = "platform_capability"
 retryable = false
 message = "This network capability is unavailable on the current platform"
 hint = "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait semantics (e.g. wasm), so there is no silent fallback by design"
+
+[[error]]
+enum = "NetUrlInvalid"
+slug = "net-url-invalid"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "URL is not a valid absolute or resolvable reference: '{detail}'"
+hint = "Pass a complete URL with scheme (e.g. https://host/path) or a reference to resolve against a base URL; percent signs must introduce a two-hex-digit escape and IPv6 literals need brackets"
