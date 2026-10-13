@@ -818,6 +818,22 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：新增 `net-proxy-config-invalid` 与 `net-proxy-unsupported`（category `io`、`retryable=false`，数据源 `codespec/errors.toml`，`ERROR_CATALOG.md` 已随生成器刷新）。§10 预留的 `net-proxy-unreachable` / `net-proxy-auth-required` 待握手切片按真实失败分支启用，本件不预支。
 - 回归：`utest_net_proxy` 十例——形态与缺省端口、七类畸形值与两码分岔、凭据解码与打印掩码、结构化工厂的入参校验、域名与端口限定匹配、字面量全等与 CIDR 前缀（含 `/0` 与 `fe80::/8` 越界样本）、封闭文法的十一类拒收与「第几条」定位、大小写优先级与变量名回报、`for_target` 的完整选择次序、`source()` 不参与判等。全用例纯逻辑，三平台一致，wasm 腿同样可跑，故无 `AURORA_TEST_SKIP`。
 
+#### 8.8.8 代理握手字节层：CONNECT 与 SOCKS5 的编码、解析与落码
+
+`src/aurora/net/detail/proxy_wire.h` + `src/aurora/net/detail/proxy_wire.cpp`（命名空间 `aurora::net::wire`，仅库实现可见，不属公共 API）把 §11 代理族的**握手字节**从传输里剥出来：零 socket、零平台头，产出待写的字节、消费已读的字节。「代理不可达绝不回退直连」这条禁令要能被逐值验证，前提就是它不依赖一个真实代理进程；反之把字节写进套接字、把结果翻成调用返回值属传输侧。六条定见：
+
+- **解析是三态而非两态**（`Result<std::optional<T>>`）：有值 = 报文完整，成功且空 = 还没读够（调用方据此继续喂字节），失败 = 报文不合文法或超出头部上限。「没读到」不是错误——一次 `read()` 返回半个应答是常态，把它报成故障会让传输层写不出正确的重试循环。
+- **状态字节到错误码的换算只有一处**（`connect_tunnel_error` / `socks5_error_for`）：CONNECT 的 `407`、SOCKS5 方法协商的 `0xFF`、用户名/密码子协商的非零状态 → `net-proxy-auth-required`；CONNECT 其余非 `2xx`、SOCKS5 的可达性类 `REP` → `net-proxy-unreachable`（同批把 §10 预留的这条码启用，**不回退直连**）；代理选用了本库不实现的形态（方法 `3` 的 TLS 协商、`REP` 8/9）→ `net-proxy-unsupported`；报文不合文法或头部块越上限 → 本件新增的 `net-proxy-protocol`。「代理拒绝建隧道」与「代理不会说话」是两类故障：前者查代理配置与上游链路，后者多半是端口上坐着一个普通 HTTP 服务或强制门户（captive portal），混成一码会让排查方向错一半，故分码。同一个非零字节在不同阶段含义不同（`3` 在方法协商是「TLS 协商」，在子协商里是「失败」），所以 SOCKS5 侧的换算入口带阶段入参。
+- **`ATYPE` 只由「解析权是否交给代理」决定**：`socks5h`（配置侧的 `resolves_via_proxy()`）走域名形态 `ATYPE=3`（长度 1..255）；未授权代理解析时本层不做 DNS，目标必须是数字字面量并按族走 `ATYPE=1` / `ATYPE=4`，给名字即 `net-endpoint-invalid`——把名字塞进一个未被授权解析的代理是不可见的行为差异，宁可当场报错。IPv6 作用域号在 SOCKS5 地址编码里没有字段可放，同样报错而不丢 zone（丢了就等于连到另一条链路上去）。
+- **凭据只出现在写出的字节里**：CONNECT 的 `Proxy-Authorization: Basic` 就地按 `RFC 4648` §4 组装 base64，SOCKS5 子协商按 `RFC 1928` §3 的 `VER=1` 长度前缀形态；两型的诊断文本一律只带代理与目标的 `host:port`。用户名或密码超出单字节长度前缀（255）落 `net-proxy-config-invalid`——凭据没处安放是配置问题，不是网络故障。
+- **头部块有上限**（`AURORA_PROXY_MAX_HEAD_BYTES = 16 KiB`）：不设上限时一个持续不发空行的对端会把读缓冲无界撑大，那是拒绝服务而不是兼容性。分行同时接受 CRLF 与裸 LF（本层只读不回写，为一条换行差异把可用代理判成畸形不值得）；原因短语可缺省。
+- **字节读取一律经无符号八位组跳转**：`std::string_view` 的元素是带符号 `char`，`static_cast<std::uint8_t>` 会把 `0x90` 符号扩展成 `0xFF90`，而端口、长度前缀与方法号正是这类字节——这是 SOCKS5 绑定端口读回 `65424` 而非 `8080` 的根因，故本文件所有字节读取共用一枚 `octet()` 出口。应答解析只吃掉自己的长度（`header_bytes` / `consumed`），其后的字节属于隧道；误食首字节会表现成「隧道建立后第一条请求随机失败」，最难排查。
+
+本层不证明「隧道真的通了」（那需要一个假代理进程与真实字节往返），该判据随传输切片兑现。
+
+- 错误码：新增 `net-proxy-protocol`（category `io`、`retryable=false`），同批启用 §10 预留的 `net-proxy-unreachable`（`retryable=true`，代理侧瞬时故障值得重试）与 `net-proxy-auth-required`（`retryable=false`，凭据缺失盲目重试只会刷对端日志）；数据源 `codespec/errors.toml`，`ERROR_CATALOG.md` 与生成头随生成器刷新。
+- 回归：`utest_net_proxy_wire` 七例——CONNECT 请求行的 authority-form 与 IPv6 补括号、Basic 凭据逐字节（含手算 base64 与「明文密码不出现在请求里」的反assertion）、应答头部块三态（未出现空行为缺失态、`header_bytes` 恰好停在隧道首字节、裸 LF 形态、缺原因短语）、九类畸形状态行与越上限（上限值进诊断文本）、SOCKS5 方法协商与子协商的逐字节形态（含版本字节与三例凭据长度越界）、`ATYPE` 由解析授权选路（域名 / IPv4 / IPv6 逐字节，名字未授权、256 字节域名、带作用域号三类拒收）、应答的可变地址长度（IPv4 尾随隧道字节仍只吃 10 字节并还原绑定端点、IPv6 22 字节、域名型不还原端点、未知 `ATYPE` 与错版本落 `net-proxy-protocol`、非零 `REP` 仍解析成功）、握手状态到三枚错误码的分岔。全用例零 socket、零平台头，三平台与 wasm 一致，故无 `AURORA_TEST_SKIP`。
+
 ---
 
 ### 8.9 系统拖放（跨进程）

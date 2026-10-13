@@ -102,9 +102,8 @@ AURORA_TEST_CASE(parse_rejects_malformed_and_reports_code) {
     AURORA_TEST_REQUIRE_FALSE(bool(socks4));
     AURORA_TEST_CHECK_EQ(socks4.error().code_enum, ErrorCode::NetProxyUnsupported);
 
-    for (const std::string_view bad : {"http://proxy:3128/upstream", "http://proxy:3128/?x=1",
-                                       "http://proxy:3128#frag", "http://:3128", "http://proxy:0",
-                                       "http://proxy:99999", "socks5://[fd00::2"}) {
+    for (const std::string_view bad : {"http://proxy:3128/upstream", "http://proxy:3128/?x=1", "http://proxy:3128#frag",
+                                       "http://:3128", "http://proxy:0", "http://proxy:99999", "socks5://[fd00::2"}) {
         const auto rejected = ProxyConfig::parse(bad);
         AURORA_TEST_REQUIRE_FALSE(bool(rejected));
         AURORA_TEST_CHECK_EQ(rejected.error().code_enum, ErrorCode::NetProxyConfigInvalid);
@@ -199,8 +198,7 @@ AURORA_TEST_CASE(no_proxy_matches_domains_and_port_scoped_rules) {
 }
 
 AURORA_TEST_CASE(no_proxy_matches_literals_exactly_and_cidr_by_prefix) {
-    const auto parsed =
-        NoProxy::parse("127.0.0.1, [::1]:8080, 10.0.0.0/8, 0.0.0.0/0, fd00::/8, *.corp.example");
+    const auto parsed = NoProxy::parse("127.0.0.1, [::1]:8080, 10.0.0.0/8, 0.0.0.0/0, fd00::/8, *.corp.example");
     AURORA_TEST_REQUIRE(bool(parsed));
     const NoProxy &list = parsed.value();
 
@@ -224,9 +222,8 @@ AURORA_TEST_CASE(no_proxy_matches_literals_exactly_and_cidr_by_prefix) {
 }
 
 AURORA_TEST_CASE(no_proxy_rejects_entries_outside_the_grammar) {
-    for (const std::string_view bad : {"10.0.0.0/33", "10.0.1.5/8", "fd00::/129", "::1", "[::1",
-                                       "[::1]x", "example.com:0", "example.com:99999", "example.com:",
-                                       "10.0.0.0/8:3128", "/8"}) {
+    for (const std::string_view bad : {"10.0.0.0/33", "10.0.1.5/8", "fd00::/129", "::1", "[::1", "[::1]x",
+                                       "example.com:0", "example.com:99999", "example.com:", "10.0.0.0/8:3128", "/8"}) {
         const auto rejected = NoProxy::parse(bad);
         AURORA_TEST_REQUIRE_FALSE(bool(rejected));
         AURORA_TEST_CHECK_EQ(rejected.error().code_enum, ErrorCode::NetProxyConfigInvalid);
@@ -238,8 +235,8 @@ AURORA_TEST_CASE(no_proxy_rejects_entries_outside_the_grammar) {
 }
 
 AURORA_TEST_CASE(environment_prefers_uppercase_and_names_the_variable) {
-    const auto both = ProxyEnvironment::from_environment(make_reader({{"HTTP_PROXY", "http://upper:1"},
-                                                                     {"http_proxy", "http://lower:2"}}));
+    const auto both = ProxyEnvironment::from_environment(
+        make_reader({{"HTTP_PROXY", "http://upper:1"}, {"http_proxy", "http://lower:2"}}));
     AURORA_TEST_REQUIRE(bool(both));
     const auto upper_hit = require_value(both.value().http);
     AURORA_TEST_CHECK_EQ(upper_hit.host(), "upper");
@@ -262,15 +259,14 @@ AURORA_TEST_CASE(environment_prefers_uppercase_and_names_the_variable) {
     AURORA_TEST_CHECK_EQ(broken.error().code_enum, ErrorCode::NetProxyConfigInvalid);
     AURORA_TEST_CHECK_TRUE(broken.error().message.find("HTTPS_PROXY") != std::string::npos);
 
-    const auto bad_exception =
-        ProxyEnvironment::from_environment(make_reader({{"NO_PROXY", "10.0.0.0/33"}}));
+    const auto bad_exception = ProxyEnvironment::from_environment(make_reader({{"NO_PROXY", "10.0.0.0/33"}}));
     AURORA_TEST_REQUIRE_FALSE(bool(bad_exception));
     AURORA_TEST_CHECK_TRUE(bad_exception.error().message.find("NO_PROXY") != std::string::npos);
 }
 
 AURORA_TEST_CASE(for_target_follows_the_documented_order) {
-    const auto both = ProxyEnvironment::from_environment(make_reader({{"HTTP_PROXY", "http://plain:3128"},
-                                                                      {"HTTPS_PROXY", "socks5h://secure:1080"}}));
+    const auto both = ProxyEnvironment::from_environment(
+        make_reader({{"HTTP_PROXY", "http://plain:3128"}, {"HTTPS_PROXY", "socks5h://secure:1080"}}));
     AURORA_TEST_REQUIRE(bool(both));
     const ProxyEnvironment &env = both.value();
 
@@ -293,8 +289,8 @@ AURORA_TEST_CASE(for_target_follows_the_documented_order) {
     AURORA_TEST_CHECK_EQ(only_all.value().for_target("a.example", 443, true).host(), "any");
 
     // 例外优先于一切代理选择。
-    const auto exempted = ProxyEnvironment::from_environment(make_reader({{"ALL_PROXY", "socks5://any:1080"},
-                                                                         {"NO_PROXY", "*.example"}}));
+    const auto exempted = ProxyEnvironment::from_environment(
+        make_reader({{"ALL_PROXY", "socks5://any:1080"}, {"NO_PROXY", "*.example"}}));
     AURORA_TEST_REQUIRE(bool(exempted));
     AURORA_TEST_CHECK_TRUE(exempted.value().for_target("a.example", 443, true).is_direct());
     AURORA_TEST_CHECK_EQ(exempted.value().for_target("other.test", 443, true).host(), "any");

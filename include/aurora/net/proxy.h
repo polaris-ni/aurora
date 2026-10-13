@@ -62,9 +62,9 @@ namespace aurora::net {
 /// @note Thread: thread-safe
 /// @note Side-effects: none
 enum class ProxyKind : std::uint8_t {
-    Direct,      ///< 不经代理，直连目标
-    HttpConnect, ///< HTTP/1.1 `CONNECT` 隧道（明文连代理）
-    Socks5,      ///< SOCKS5（`socks5://` 交 IP、`socks5h://` 交主机名给代理解析）
+    Direct,  ///< 不经代理，直连目标
+    HttpConnect,  ///< HTTP/1.1 `CONNECT` 隧道（明文连代理）
+    Socks5,  ///< SOCKS5（`socks5://` 交 IP、`socks5h://` 交主机名给代理解析）
 };
 
 /// @brief 代理认证凭据（明文形态，仅在实现侧组装握手时使用）。
@@ -177,8 +177,8 @@ class ProxyConfig {
     /// @param port 候选端口；`0` 代入该形态的缺省端口。
     /// @param credentials 凭据（原样保存，不做编码变换）。
     /// @return 成功为配置；主机或端口畸形为 `net-proxy-config-invalid`。
-    [[nodiscard]] static auto build(ProxyKind kind, bool resolve_via_proxy, std::string_view host,
-                                    std::uint16_t port, const ProxyCredentials &credentials) -> Result<ProxyConfig>;
+    [[nodiscard]] static auto build(ProxyKind kind, bool resolve_via_proxy, std::string_view host, std::uint16_t port,
+                                    const ProxyCredentials &credentials) -> Result<ProxyConfig>;
 
     ProxyKind kind_{ProxyKind::Direct};  ///< 代理形态
     bool resolve_via_proxy_{false};  ///< SOCKS5 是否交代理解析主机名
@@ -197,14 +197,14 @@ class NoProxy {
     struct Rule {
         /// @brief 规则类型。
         enum class Kind : std::uint8_t {
-            Any,      ///< `*`：匹配一切目标
-            Domain,   ///< 域名本体及其任意深层子域（可带端口限定）
+            Any,  ///< `*`：匹配一切目标
+            Domain,  ///< 域名本体及其任意深层子域（可带端口限定）
             Literal,  ///< 数字字面量主机的全等匹配（可带端口限定）
-            Cidr,     ///< 地址前缀（只对数字字面量目标生效，不带端口限定）
+            Cidr,  ///< 地址前缀（只对数字字面量目标生效，不带端口限定）
         };
 
         Kind kind{Kind::Any};  ///< 规则类型
-        std::string domain;  ///< `Domain` / `Literal` 用：规范化主机文本（域名不含前导 `.`/`*.` 与尾点，字面量的 IPv6 不含括号）
+        std::string domain;  ///< `Domain` / `Literal` 用：规范化主机文本（域名去前导点与尾点，IPv6 去括号）
         AddressFamily family{AddressFamily::IPv4};  ///< `Cidr` 用：前缀地址族
         std::array<std::uint8_t, 16> network{};  ///< `Cidr` 用：网络地址（网络序字节，非前缀位须为零）
         std::uint8_t prefix_bits{0};  ///< `Cidr` 用：前缀长度（IPv4 ≤ 32、IPv6 ≤ 128）

@@ -180,8 +180,7 @@ auto normalize_proxy_host(std::string_view host, std::string_view context) -> Re
 /// @param userinfo URL 的 userinfo 段（编码态，不含 `@`）。
 /// @param context 错误原因前缀。
 /// @return 成功为凭据（有 userinfo 段时用户名非空）；编码畸形或用户名为空为对应错误。
-auto credentials_from_userinfo(std::string_view userinfo, std::string_view context)
-    -> Result<ProxyCredentials> {
+auto credentials_from_userinfo(std::string_view userinfo, std::string_view context) -> Result<ProxyCredentials> {
     if (userinfo.empty()) {
         return ProxyCredentials{};
     }
@@ -257,9 +256,8 @@ auto normalize_target_host(std::string_view host) -> std::string {
 /// @return 该字节里属于网络前缀的比特为 1。
 constexpr auto prefix_mask(std::uint8_t prefix_bits, std::size_t index) -> std::uint8_t {
     const std::uint32_t bits = prefix_bits;
-    const std::uint32_t high = bits >= (index + 1U) * 8U
-                                   ? 8U
-                                   : (bits <= index * 8U ? 0U : bits - static_cast<std::uint32_t>(index * 8U));
+    const std::uint32_t high =
+        bits >= (index + 1U) * 8U ? 8U : (bits <= index * 8U ? 0U : bits - static_cast<std::uint32_t>(index * 8U));
     return high == 0U ? static_cast<std::uint8_t>(0x00) : static_cast<std::uint8_t>(~(0xFFU >> high));
 }
 
@@ -425,9 +423,7 @@ auto ProxyCredentials::operator==(const ProxyCredentials &other) const -> bool {
     return username == other.username && password == other.password;
 }
 
-auto ProxyConfig::direct() -> ProxyConfig {
-    return ProxyConfig{};
-}
+auto ProxyConfig::direct() -> ProxyConfig { return ProxyConfig{}; }
 
 auto ProxyConfig::parse(std::string_view text, std::string_view source) -> Result<ProxyConfig> {
     const auto trimmed = trim(text);
@@ -571,8 +567,7 @@ auto NoProxy::parse(std::string_view list) -> Result<NoProxy> {
         std::string_view host_part;
         std::uint16_t port = 0;
         if (!split_exception_entry(entry, host_part, port)) {
-            return config_error(context +
-                                " is neither a domain, a bracketed IPv6, nor a host:port pair");
+            return config_error(context + " is neither a domain, a bracketed IPv6, nor a host:port pair");
         }
         Rule rule;
         rule.port = port;
@@ -713,9 +708,7 @@ auto ProxyEnvironment::from_environment(const Reader &reader) -> Result<ProxyEnv
     return env;
 }
 
-auto ProxyEnvironment::disabled() -> ProxyEnvironment {
-    return ProxyEnvironment{};
-}
+auto ProxyEnvironment::disabled() -> ProxyEnvironment { return ProxyEnvironment{}; }
 
 auto ProxyEnvironment::for_target(std::string_view host, std::uint16_t port, bool secure) const -> ProxyConfig {
     if (exceptions.matches(host, port)) {

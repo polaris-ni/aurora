@@ -1100,3 +1100,36 @@ fix_category = "invalid_value"
 retryable = false
 message = "This proxy protocol is not supported by the current build"
 hint = "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a plaintext proxy hop"
+
+[[error]]
+enum = "NetProxyUnreachable"
+slug = "net-proxy-unreachable"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Proxy tunnel could not be established: '{detail}'"
+hint = "The proxy answered (or refused) but no tunnel was built; connect never fell back to direct on purpose, so check the proxy host/port and its own uplink rather than the target host"
+
+[[error]]
+enum = "NetProxyAuthRequired"
+slug = "net-proxy-auth-required"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Proxy rejected the supplied credentials: '{detail}'"
+hint = "The proxy demanded authentication that was absent or refused: 407 on HTTP CONNECT, or a non-zero status on the SOCKS5 username/password subnegotiation; supply credentials in the proxy URL or re-authenticate once, do not retry blindly"
+
+[[error]]
+enum = "NetProxyProtocol"
+slug = "net-proxy-protocol"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Proxy handshake is not protocol-conformant: '{detail}'"
+hint = "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server where a proxy port was expected"

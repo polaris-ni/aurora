@@ -137,6 +137,9 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetUrlInvalid = 93,  ///< net-url-invalid: URL is not a valid absolute or resolvable reference: '{detail}'
     NetProxyConfigInvalid = 94,  ///< net-proxy-config-invalid: Proxy configuration is not valid: '{detail}'
     NetProxyUnsupported = 95,  ///< net-proxy-unsupported: This proxy protocol is not supported by the current build
+    NetProxyUnreachable = 96,  ///< net-proxy-unreachable: Proxy tunnel could not be established: '{detail}'
+    NetProxyAuthRequired = 97,  ///< net-proxy-auth-required: Proxy rejected the supplied credentials: '{detail}'
+    NetProxyProtocol = 98,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -154,7 +157,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 96> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 99> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1340,6 +1343,47 @@ inline constexpr std::array<ErrorMeta, 96> AURORA_ERROR_TABLE = {
             .hint = "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected "
                     "proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a "
                     "plaintext proxy hop",
+        },
+        {
+            .code = ErrorCode::NetProxyUnreachable,
+            .ident = "NetProxyUnreachable",
+            .slug = "net-proxy-unreachable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Proxy tunnel could not be established: '{detail}'",
+            .hint = "The proxy answered (or refused) but no tunnel was built; connect never fell back to direct on "
+                    "purpose, so check the proxy host/port and its own uplink rather than the target host",
+        },
+        {
+            .code = ErrorCode::NetProxyAuthRequired,
+            .ident = "NetProxyAuthRequired",
+            .slug = "net-proxy-auth-required",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "Proxy rejected the supplied credentials: '{detail}'",
+            .hint = "The proxy demanded authentication that was absent or refused: 407 on HTTP CONNECT, or a non-zero "
+                    "status on the SOCKS5 username/password subnegotiation; supply credentials in the proxy URL or "
+                    "re-authenticate once, do not retry blindly",
+        },
+        {
+            .code = ErrorCode::NetProxyProtocol,
+            .ident = "NetProxyProtocol",
+            .slug = "net-proxy-protocol",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "Proxy handshake is not protocol-conformant: '{detail}'",
+            .hint = "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status "
+                    "line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server "
+                    "where a proxy port was expected",
         },
     },
 };
