@@ -26,7 +26,7 @@
 #include "aurora/debug/debug_runtime.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/inspector/inspector_api.h"
-#include "aurora/net/socket.h"
+#include "aurora/net/blocking.h"
 #include "aurora/state/async.h"
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/yaml.h"
@@ -41,15 +41,14 @@ struct InspectorServer::Impl {
     std::function<Surface *()> surface_getter;  // 可选：debug 端点访问运行时 Surface
     std::function<std::vector<std::uint32_t>()> window_ids_getter;  // 可选：多窗口枚举（/api/windows）
     std::function<Node(std::uint32_t)> window_tree_getter;  // 可选：按窗口 id 取树（/api/tree?window=）
-    net::Listener listener;  // 回环监听口（close = shutdown+close）
-    std::optional<net::Session> session;  // start/stop 配对的运行时会话（Windows 侧引用计数初始化）
+    net::blocking::Listener listener;  // 回环监听口（close = shutdown+close）
     std::thread worker;
     std::atomic<bool> running{false};
     std::mutex tree_mutex;  // 保护 widget 树访问
     uint16_t bound_port = 0;
 
     void accept_loop();
-    void handle_client(net::StreamSocket client);
+    void handle_client(net::blocking::StreamSocket client);
 
     /// @brief 把「取当前树根 → 遍历 → 组装 HTTP 响应」整段派发到主线程执行。
     ///
@@ -316,9 +315,9 @@ static auto query_param(const std::string &path, std::string_view key) -> std::s
 // 的启发式同源——各控件的文本属性名不统一，逐键比对字符串值，命中其一即算）。
 constexpr std::string_view AURORA_TEXT_PROP_KEYS[] = {"content", "text", "label", "value", "hint", "placeholder"};
 
-// 可靠发送：分块写满逻辑收敛在 net::StreamSocket::write_all（实现侧 ≤1MiB 分块 +
+// 可靠发送：分块写满逻辑收敛在 net::blocking::StreamSocket::write_all（实现侧 ≤1MiB 分块 +
 // 两平台返回值窄化统一），此处只保留 bool 形态供既有调用点使用。
-static auto send_all(const net::StreamSocket &client, const std::string &data) -> bool {
+static auto send_all(const net::blocking::StreamSocket &client, const std::string &data) -> bool {
     return static_cast<bool>(client.write_all(std::span<const char>(data)));
 }
 
@@ -1055,7 +1054,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
 // ---------------------------------------------------------------------------
 // 客户端连接处理
 // ---------------------------------------------------------------------------
-void InspectorServer::Impl::handle_client(net::StreamSocket client) {
+void InspectorServer::Impl::handle_client(net::blocking::StreamSocket client) {
     // 读取请求数据（简单实现：一次头部读足够处理小请求）；Socket 随作用域结束自动关闭。
     constexpr int buf_size = 8192;
     char buf[buf_size];
@@ -1179,7 +1178,7 @@ void InspectorServer::Impl::handle_client(net::StreamSocket client) {
         response = error_response(500, "internal error");
     }
     send_all(client, response);
-    // client 为按值持有的 net::StreamSocket：返回即随作用域析构关闭。
+    // client 为按值持有的 net::blocking::StreamSocket：返回即随作用域析构关闭。
 }
 
 // ---------------------------------------------------------------------------
@@ -1188,7 +1187,7 @@ void InspectorServer::Impl::handle_client(net::StreamSocket client) {
 void InspectorServer::Impl::accept_loop() {
     AURORA_LOG_INFO("inspector", "InspectorServer accept loop started on port ", bound_port);
     while (running.load()) {
-        // 可中断等待（超时 200ms 检查 running 标志）；两平台 select 形态差异由 net::Listener 消化。
+        // 可中断等待（超时 200ms 检查 running 标志）；两平台 select 形态差异由 net::blocking::Listener 消化。
         const auto ready = listener.wait_readable(std::chrono::milliseconds{200});
         if (!ready) {
             if (!running.load()) {
@@ -1247,19 +1246,12 @@ auto InspectorServer::start(uint16_t port) const -> bool {
         return false;
     }
 
-    // 初始化平台 socket 运行时（Windows 侧引用计数初始化；POSIX 零成本）
-    impl_->session.emplace();
-    if (!impl_->session->ok()) {
-        AURORA_LOG_ERROR("inspector", "socket runtime initialization failed");
-        impl_->session.reset();
-        return false;
-    }
-
-    // 绑定并监听 localhost 回环口（仅本机访问；backlog 5 与旧实现一致）
-    auto listener = net::Listener::listen_loopback(port, 5);
+    // 绑定并监听 localhost 回环口（仅本机访问；backlog 5 与旧实现一致）。平台 socket 运行时随
+    // 句柄创建自动就位（`aurora::net::blocking` 不再要求调用方自备会话），起不来时以
+    // `net-runtime-failed` 形态落在下面这条错误分支里。
+    auto listener = net::blocking::Listener::listen_loopback(port, 5);
     if (!listener) {
         AURORA_LOG_ERROR("inspector", "start failed on port ", port, ": ", listener.error().message);
-        impl_->session.reset();
         return false;
     }
     impl_->listener = std::move(listener.value());
@@ -1282,7 +1274,7 @@ void InspectorServer::stop() const {
     AURORA_LOG_INFO("inspector", "Stopping InspectorServer...");
     impl_->running.store(false);
 
-    // Listener::close = shutdown(both) + close：确保 worker 线程的 wait_readable/accept 被唤醒
+    // blocking::Listener::close = shutdown(both) + close：确保 worker 线程的 wait_readable/accept 被唤醒
     impl_->listener.close();
 
     // 等待 worker 线程退出
@@ -1290,7 +1282,6 @@ void InspectorServer::stop() const {
         impl_->worker.join();
     }
 
-    impl_->session.reset();  // 与 start() 的 emplace 配对；末个会话析构时清理运行时
     impl_->bound_port = 0;
     AURORA_LOG_INFO("inspector", "InspectorServer stopped");
 }

@@ -98,6 +98,7 @@ aurora/navigation/route.h
 aurora/navigation/router.h
 aurora/navigation/transition_layer.h
 aurora/net/address.h
+aurora/net/blocking.h
 aurora/net/cancellation.h
 aurora/net/capabilities.h
 aurora/net/datagram.h

@@ -18,7 +18,7 @@
 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
 
-#include "aurora/aurora.h"  // 伞头自带 aurora::net（传输层唯一跨平台落点，CHG-006）
+#include "aurora/aurora.h"  // 伞头自带 aurora::net::blocking（同步阻塞传输面，CHG-006 建立、CHG-010 §4 归位）
 #include "aurora/inspector/inspector_server.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
@@ -43,9 +43,8 @@ auto tree_getter() -> Node { return Node{shared_tree()}; }
 
 /// @brief 对 127.0.0.1:port 发送原始请求文本并回收完整响应（服务端 Connection: close）。
 auto http_raw(std::uint16_t port, const std::string &raw) -> std::string {
-    aurora::net::Session runtime;
-    auto connected = aurora::net::StreamSocket::connect_loopback(port);
-    if (!connected || !runtime.ok()) {
+    auto connected = aurora::net::blocking::StreamSocket::connect_loopback(port);
+    if (!connected) {
         return {};
     }
     auto sock = std::move(connected.value());

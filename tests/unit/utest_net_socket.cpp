@@ -1,12 +1,15 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/net/socket.h
-/// 测试说明: aurora::net 跨平台 socket 操作层（CHG-006）行为契约回归：临时端口监听与
+/// 目标单元: include/aurora/net/blocking.h
+/// 测试说明: aurora::net::blocking 跨平台 socket 操作层（CHG-006 建立，CHG-010 §4 将其降为
+///           仅供工具与测试宿主使用的同步阻塞面）行为契约回归：临时端口监听与
 ///           `port()` 系统分配值回报、`wait_readable` 纯超时（false 非错误）与超时后到达、
 ///           connect→accept 往返 + `write_all`/`read_some` 字节完整（1MiB+7 压分块边界）、
 ///           对端关闭以 read 返回 0 表达（与错误态严格区分）、连接失败落 `net-connect-failed`、
 ///           收发超时落独立码 `net-recv-timeout`（与 `net-recv-failed` 以 code 区分，不依赖措辞；
 ///           并核对「毫秒意图」真实生效——历史坑：Windows 上 5 秒被读成 5 毫秒）、
-///           `is_loopback_peer` 判定、`Session` 嵌套引用计数、监听口重复 bind 落 `net-bind-failed`、
+///           `is_loopback_peer` 判定、`detail::Session` 嵌套引用计数、监听口重复 bind 落
+///           `net-bind-failed`、迁移期别名 `aurora::net::{StreamSocket,Listener}` 与新类型
+///           同体（§20 时间表：别名只做转发，不改语义）、
 ///           **地址族无关面**（`connect(Endpoint)` / `bind(Endpoint, backlog)` / `peer_endpoint()`：
 ///           不合用的端点在发起系统调用前拒、IPv6 作用域号只认十进制、`[::1]` 往返与回环判定、
 ///           双栈监听口上的 `::ffff:127.0.0.1` 内嵌形态仍认回环；无 IPv6 或 v6-only 主机按环境缺失
@@ -15,6 +18,7 @@
 ///           1MiB+7 往返用例的读侧住独立线程——Windows 回环无读者时仅缓冲约 320KiB，
 ///           单线程先写后读必死锁（Linux 缓冲自动调大无此限制）。端口一律 0 =
 ///           系统分配，只连 127.0.0.1。平台差异都被本层吸收，断言两侧应同色。
+///           运行时由实现侧随句柄钉住，用例不再构造任何「会话」前置件。
 /// ⚠️ 平台分支写在**用例体内**而非包裹 `AURORA_TEST_CASE` 声明（registry_integrity 静态扫源码，
 ///    被 #ifdef 摘掉的声明在另一种构建里必然单边失踪）；wasm 无 BSD socket 语义，用例体退化
 ///    为 AURORA_TEST_SKIP。
@@ -25,12 +29,15 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
 #include "aurora/net/address.h"
+#include "aurora/net/blocking.h"
+#include "aurora/net/detail/runtime.h"
 #include "aurora/net/socket.h"
 #include "framework/aurora_test.h"
 
@@ -41,11 +48,9 @@ namespace {
 constexpr std::chrono::milliseconds AURORA_NET_POLL_TIMEOUT{80};
 
 /// @brief 在临时端口起一个回环监听口；建立失败即 REQUIRE 转红（用例的环境前提，不是被测行为）。
-/// @param session 已就绪的运行时会话（Windows 侧 WSAStartup 归属）。
 /// @return 就绪的 Listener（`port()` 为非 0 系统分配值）。
-auto make_listener(aurora::net::Session &session) -> aurora::net::Listener {
-    AURORA_TEST_REQUIRE(session.ok());
-    auto bound = aurora::net::Listener::listen_loopback(0, 4);
+auto make_listener() -> aurora::net::blocking::Listener {
+    auto bound = aurora::net::blocking::Listener::listen_loopback(0, 4);
     AURORA_TEST_REQUIRE(bound.ok());
     auto listener = std::move(bound.value());
     AURORA_TEST_REQUIRE_NE(listener.port(), std::uint16_t{0});
@@ -60,8 +65,7 @@ AURORA_TEST_CASE(listen_reports_assigned_port) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session session;
-    auto listener = make_listener(session);
+    auto listener = make_listener();
     AURORA_TEST_CHECK_TRUE(listener.is_valid());
     const std::uint16_t bound_port = listener.port();
 
@@ -75,7 +79,7 @@ AURORA_TEST_CASE(listen_reports_assigned_port) {
     moved.close();  // 幂等
     AURORA_TEST_CHECK_FALSE(moved.is_valid());
 
-    aurora::net::Listener placeholder;
+    aurora::net::blocking::Listener placeholder;
     AURORA_TEST_CHECK_FALSE(placeholder.is_valid());
     AURORA_TEST_CHECK_EQ(placeholder.port(), std::uint16_t{0});
 #endif
@@ -87,14 +91,13 @@ AURORA_TEST_CASE(wait_readable_polls_then_accepts) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session session;
-    auto listener = make_listener(session);
+    auto listener = make_listener();
 
     const auto idle = listener.wait_readable(AURORA_NET_POLL_TIMEOUT);
     AURORA_TEST_REQUIRE(idle.ok());
     AURORA_TEST_CHECK_FALSE(idle.value());  // 纯超时不是错误
 
-    auto client = aurora::net::StreamSocket::connect_loopback(listener.port());
+    auto client = aurora::net::blocking::StreamSocket::connect_loopback(listener.port());
     AURORA_TEST_REQUIRE(client.ok());
 
     const auto ready = listener.wait_readable(AURORA_NET_POLL_TIMEOUT);
@@ -107,7 +110,7 @@ AURORA_TEST_CASE(wait_readable_polls_then_accepts) {
     AURORA_TEST_CHECK_TRUE(peer.value().is_loopback_peer());
 
     // 无效句柄的查询面：默认构造 StreamSocket 既非回环对端也不报错路径乱入。
-    aurora::net::StreamSocket invalid;
+    aurora::net::blocking::StreamSocket invalid;
     AURORA_TEST_CHECK_FALSE(invalid.is_loopback_peer());
 #endif
 }
@@ -135,9 +138,8 @@ AURORA_TEST_CASE(write_all_read_some_roundtrip_exact_bytes) {
         payload[i] = static_cast<char>(1 + (i % 250));
     }
 
-    aurora::net::Session session;
-    auto listener = make_listener(session);
-    auto client = aurora::net::StreamSocket::connect_loopback(listener.port());
+    auto listener = make_listener();
+    auto client = aurora::net::blocking::StreamSocket::connect_loopback(listener.port());
     AURORA_TEST_REQUIRE(client.ok());
     auto peer = listener.accept();
     AURORA_TEST_REQUIRE(peer.ok());
@@ -145,7 +147,7 @@ AURORA_TEST_CASE(write_all_read_some_roundtrip_exact_bytes) {
     AURORA_TEST_REQUIRE(peer.value().set_io_timeout(transfer_timeout).ok());
 
     // 读满即止；读出错或对端提前关闭（0 字节）经 healthy 报告，由主线程断言。
-    auto drain_into = [](const aurora::net::StreamSocket &from, std::string &out, bool &healthy) {
+    auto drain_into = [](const aurora::net::blocking::StreamSocket &from, std::string &out, bool &healthy) {
         std::vector<char> buf(std::size_t{64} * 1024U);
         while (out.size() < payload_size) {
             const auto got = from.read_some(std::span<char>(buf));
@@ -193,9 +195,8 @@ AURORA_TEST_CASE(peer_close_surfaces_as_zero_byte_read) {
     constexpr char k_greeting[] = "hi";
     constexpr std::size_t greeting_size = sizeof(k_greeting) - 1;
 
-    aurora::net::Session session;
-    auto listener = make_listener(session);
-    auto client = aurora::net::StreamSocket::connect_loopback(listener.port());
+    auto listener = make_listener();
+    auto client = aurora::net::blocking::StreamSocket::connect_loopback(listener.port());
     AURORA_TEST_REQUIRE(client.ok());
 
     {
@@ -222,17 +223,16 @@ AURORA_TEST_CASE(connect_failure_reports_net_connect_failed) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
-    // Session 须活过随后的 connect_loopback：Windows 侧 WSAStartup 归属会话引用计数，
-    // 会话先于连接析构会令 socket() 落 WSANOTINITIALISED（net-socket-failed），
-    // 直接掩盖被测的 connect 失败路径；POSIX 侧 Session 零成本，无此约束。
-    aurora::net::Session session;
+    // 运行时随句柄创建自动钉住（Windows 侧 WSAStartup 归属实现侧），用例不再需要维持任何
+    // 「会话活过 connect」的前置条件——历史上这条约束存在时，会话先于连接析构会让 socket()
+    // 落 WSANOTINITIALISED（net-socket-failed），把被测的 connect 失败路径整个掩盖掉。
     std::uint16_t dead_port = 0;
     {
-        auto listener = make_listener(session);
+        auto listener = make_listener();
         dead_port = listener.port();
     }  // listener 出作用域析构 → shutdown+close
 
-    const auto attempt = aurora::net::StreamSocket::connect_loopback(dead_port);
+    const auto attempt = aurora::net::blocking::StreamSocket::connect_loopback(dead_port);
     if (!attempt.ok()) {
         AURORA_TEST_CHECK_EQ(attempt.error().code_enum, ErrorCode::NetConnectFailed);
         AURORA_TEST_CHECK_EQ(attempt.error().code, "net-connect-failed");
@@ -253,9 +253,8 @@ AURORA_TEST_CASE(io_timeout_reports_distinct_code) {
 #else
     constexpr auto k_timeout = std::chrono::milliseconds{250};
 
-    aurora::net::Session session;
-    auto listener = make_listener(session);
-    auto client = aurora::net::StreamSocket::connect_loopback(listener.port());
+    auto listener = make_listener();
+    auto client = aurora::net::blocking::StreamSocket::connect_loopback(listener.port());
     AURORA_TEST_REQUIRE(client.ok());
 
     AURORA_TEST_REQUIRE(client.value().set_io_timeout(k_timeout).ok());
@@ -273,21 +272,22 @@ AURORA_TEST_CASE(io_timeout_reports_distinct_code) {
 #endif
 }
 
-// Session 引用计数：嵌套/并存会话全部 ok；内层析构后外层仍可用（Windows 侧即
-// 「计数未归零不得提前 WSACleanup」——析构后仍能成功建监听口即是行为学证明；POSIX 恒 ok 同样成立）。
+// 运行时引用计数（库内细节 `net::detail::Session`，公共面已不再暴露）：嵌套/并存会话全部 ok；
+// 内层析构后外层仍可用（Windows 侧即「计数未归零不得提前 WSACleanup」——析构后仍能成功建监听口
+// 即是行为学证明；POSIX 恒 ok 同样成立）。
 AURORA_TEST_CASE(nested_sessions_stay_ok) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session outer;
+    aurora::net::detail::Session outer;
     AURORA_TEST_CHECK_TRUE(outer.ok());
     {
-        aurora::net::Session inner;
+        aurora::net::detail::Session inner;
         AURORA_TEST_CHECK_TRUE(inner.ok());
         AURORA_TEST_CHECK_TRUE(outer.ok());
     }  // inner 析构：引用计数尚未归零
     AURORA_TEST_CHECK_TRUE(outer.ok());
-    const auto listener = aurora::net::Listener::listen_loopback(0, 2);
+    const auto listener = aurora::net::blocking::Listener::listen_loopback(0, 2);
     AURORA_TEST_CHECK_TRUE(listener.ok());
 #endif
 }
@@ -298,9 +298,8 @@ AURORA_TEST_CASE(double_bind_reports_net_bind_failed) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session session;
-    auto first = make_listener(session);
-    const auto again = aurora::net::Listener::listen_loopback(first.port(), 2);
+    auto first = make_listener();
+    const auto again = aurora::net::blocking::Listener::listen_loopback(first.port(), 2);
     if (!again.ok()) {
         AURORA_TEST_CHECK_EQ(again.error().code_enum, ErrorCode::NetBindFailed);
         AURORA_TEST_CHECK_NE(again.error().message.find("os_error="), std::string::npos);
@@ -317,22 +316,19 @@ AURORA_TEST_CASE(connect_rejects_unusable_endpoints) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session session;
-    AURORA_TEST_REQUIRE(session.ok());
-
-    const auto zero_port = aurora::net::StreamSocket::connect(aurora::net::Endpoint::loopback(0));
+    const auto zero_port = aurora::net::blocking::StreamSocket::connect(aurora::net::Endpoint::loopback(0));
     AURORA_TEST_REQUIRE_FALSE(bool(zero_port));
     AURORA_TEST_CHECK_EQ(zero_port.error().code_enum, ErrorCode::NetEndpointInvalid);
 
     // 路径文本只是「本机 IPC 族」的载体，本用例不创建也不写任何文件（connect 在装配地址前就拒）。
     auto local = aurora::net::Endpoint::local("test_temp/aurora-net-probe.sock");
     AURORA_TEST_REQUIRE(bool(local));
-    const auto ipc = aurora::net::StreamSocket::connect(local.value());
+    const auto ipc = aurora::net::blocking::StreamSocket::connect(local.value());
     AURORA_TEST_REQUIRE_FALSE(bool(ipc));
     AURORA_TEST_CHECK_EQ(ipc.error().code_enum, ErrorCode::NetEndpointInvalid);
 
     const aurora::net::Endpoint placeholder;
-    const auto invalid = aurora::net::StreamSocket::connect(placeholder);
+    const auto invalid = aurora::net::blocking::StreamSocket::connect(placeholder);
     AURORA_TEST_REQUIRE_FALSE(bool(invalid));
     AURORA_TEST_CHECK_EQ(invalid.error().code_enum, ErrorCode::NetEndpointInvalid);
 #endif
@@ -345,18 +341,15 @@ AURORA_TEST_CASE(ipv6_zone_scope_rules) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session session;
-    AURORA_TEST_REQUIRE(session.ok());
-
     auto named = aurora::net::Endpoint::from_ip("fe80::1%eth0", 80);
     AURORA_TEST_REQUIRE(bool(named));
-    const auto rejected = aurora::net::StreamSocket::connect(named.value());
+    const auto rejected = aurora::net::blocking::StreamSocket::connect(named.value());
     AURORA_TEST_REQUIRE_FALSE(bool(rejected));
     AURORA_TEST_CHECK_EQ(rejected.error().code_enum, ErrorCode::NetEndpointInvalid);
 
     auto numeric = aurora::net::Endpoint::from_ip("fe80::1%1", 80);
     AURORA_TEST_REQUIRE(bool(numeric));
-    const auto attempted = aurora::net::StreamSocket::connect(numeric.value());
+    const auto attempted = aurora::net::blocking::StreamSocket::connect(numeric.value());
     if (!attempted.ok()) {
         // 只核「已通过端点校验」：链路上的不可达因机器而异，不在本用例的判据里。
         AURORA_TEST_CHECK_NE(attempted.error().code_enum, ErrorCode::NetEndpointInvalid);
@@ -371,17 +364,14 @@ AURORA_TEST_CASE(ipv6_loopback_roundtrip) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session session;
-    AURORA_TEST_REQUIRE(session.ok());
-
-    auto bound = aurora::net::Listener::bind(aurora::net::Endpoint::loopback_v6(0), 4);
+    auto bound = aurora::net::blocking::Listener::bind(aurora::net::Endpoint::loopback_v6(0), 4);
     if (!bound.ok()) {
         AURORA_TEST_SKIP("no IPv6 loopback on this host: bind([::1]:0) was refused");
     }
     auto listener = std::move(bound.value());
     AURORA_TEST_REQUIRE_NE(listener.port(), std::uint16_t{0});
 
-    auto dialed = aurora::net::StreamSocket::connect(aurora::net::Endpoint::loopback_v6(listener.port()));
+    auto dialed = aurora::net::blocking::StreamSocket::connect(aurora::net::Endpoint::loopback_v6(listener.port()));
     AURORA_TEST_REQUIRE(bool(dialed));
     auto client = std::move(dialed.value());
 
@@ -414,15 +404,12 @@ AURORA_TEST_CASE(dual_stack_listener_still_recognizes_loopback) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session session;
-    AURORA_TEST_REQUIRE(session.ok());
-
-    auto bound = aurora::net::Listener::bind(aurora::net::Endpoint::any(true, 0), 4);
+    auto bound = aurora::net::blocking::Listener::bind(aurora::net::Endpoint::any(true, 0), 4);
     if (!bound.ok()) {
         AURORA_TEST_SKIP("cannot bind the IPv6 wildcard address on this host");
     }
     auto listener = std::move(bound.value());
-    auto dialed = aurora::net::StreamSocket::connect_loopback(listener.port());
+    auto dialed = aurora::net::blocking::StreamSocket::connect_loopback(listener.port());
     if (!dialed.ok()) {
         AURORA_TEST_SKIP("wildcard listener is IPv6-only here, so 127.0.0.1 cannot reach it");
     }
@@ -438,6 +425,38 @@ AURORA_TEST_CASE(dual_stack_listener_still_recognizes_loopback) {
     // 两族之一：内嵌形态按 IPv6 回报，独立 v4 通路按 IPv4 回报，二者都算认出来了。
     const auto family = endpoint.value().family();
     AURORA_TEST_CHECK_TRUE(family == aurora::net::AddressFamily::IPv4 || family == aurora::net::AddressFamily::IPv6);
+#endif
+}
+
+// 迁移期别名：`aurora::net::{StreamSocket,Listener}` 必须与 `blocking` 同名类型是同一个类型，
+// 否则就是「旧别名还在、新面已改语义」的中间态。别名带弃用标记，故引用它的这段整体落进
+// 告警抑制窗口；别名在下一版移除时本用例一并删除。
+AURORA_TEST_CASE(deprecated_aliases_resolve_to_blocking_types) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#else
+#ifdef AURORA_COMPILER_MSVC
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    static_assert(std::is_same_v<aurora::net::StreamSocket, aurora::net::blocking::StreamSocket>);
+    static_assert(std::is_same_v<aurora::net::Listener, aurora::net::blocking::Listener>);
+    AURORA_TEST_CHECK_TRUE((std::is_same_v<aurora::net::StreamSocket, aurora::net::blocking::StreamSocket>));
+    AURORA_TEST_CHECK_TRUE((std::is_same_v<aurora::net::Listener, aurora::net::blocking::Listener>));
+
+    // 同义不只在类型上：经旧名建监听口，拿到的是同一套行为（有效句柄 + 非 0 分配端口）。
+    const auto bound = aurora::net::Listener::listen_loopback(0, 2);
+    AURORA_TEST_REQUIRE(bound.ok());
+    AURORA_TEST_CHECK_TRUE(bound.value().is_valid());
+    AURORA_TEST_CHECK_NE(bound.value().port(), std::uint16_t{0});
+#ifdef AURORA_COMPILER_MSVC
+#pragma warning(pop)
+#else
+#pragma GCC diagnostic pop
+#endif
 #endif
 }
 

@@ -80,7 +80,7 @@ class Endpoint {
     /// 入参是一段**路径文本**，两型形态都接受：文件系统路径（`/tmp/x.sock`、相对路径）与命名管道样式
     /// 的名字（裸名与 `\\.\pipe\` 全形态）。本层不据形态猜测用途，只按长度与 NUL 约束校验并原样保存
     /// （`host()` 不做规范化）；它最终落到哪条腿、以何种方式命名，由传输层的地址族决定并写在
-    /// `aurora/net/transport.h` 与 `aurora/net/socket.h` 的对应说明里。
+    /// `aurora/net/transport.h` 与 `aurora/net/blocking.h` 的对应说明里。
     /// @param path 路径或管道名；非空、不含 NUL、长度在上限内。
     /// @return 成功为端点；失败为 `net-endpoint-invalid`。
     [[nodiscard]] static auto local(std::string_view path) -> Result<Endpoint>;

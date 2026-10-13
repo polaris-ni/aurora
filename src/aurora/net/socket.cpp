@@ -4,7 +4,7 @@
 // codespec/changes/winsock-bsd-socket-layer/proposal.md 验收判据 2）。两平台差异在此一次消化：
 //   - 句柄形态：Winsock `SOCKET`（UINT_PTR，无效 = INVALID_SOCKET）vs POSIX `int`（无效 < 0），
 //     对外统一为 `std::intptr_t`（-1 = 无效）。
-//   - 运行时：Windows 须 WSAStartup/WSACleanup（`Session` 引用计数），POSIX 无此概念。
+//   - 运行时：Windows 须 WSAStartup/WSACleanup（引用计数，见本文件的 `runtime_pinned`），POSIX 无此概念。
 //   - 超时选项：SO_RCVTIMEO/SO_SNDTIMEO 在 Winsock 收 DWORD 毫秒、POSIX 收 struct timeval；
 //     误传形态在 Windows 上会把「5 秒」执行成「5 毫秒」（历史踩坑，见 CHG-006 动机）。
 //   - select 第一参：Windows 忽略、POSIX 须 max_fd+1。
@@ -13,8 +13,6 @@
 //   - 本机 IPC 地址形态：Windows 的 SDK 头不提供 `sockaddr_un`（其 AF_UNIX 腿仍按同一布局解析传入
 //     地址），POSIX 有真实的 `<sys/un.h>` 且 macOS 的 `sun_path` 比 Linux 窄；故路径容量在装配
 //     `sockaddr` 时按本腿实际宽度再判一次，而不是只靠值类型里那个最宽档的上限。
-
-#include "aurora/net/socket.h"
 
 #include <algorithm>
 #include <array>
@@ -30,8 +28,10 @@
 #include <vector>
 
 #include "aurora/core/platform.h"
+#include "aurora/net/blocking.h"
 #include "aurora/net/detail/async_io.h"
 #include "aurora/net/detail/lookup.h"
+#include "aurora/net/detail/runtime.h"
 #include "aurora/net/poll.h"
 #include "aurora/net/transport.h"
 
@@ -122,7 +122,7 @@ auto native_family_unsupported(int os_error) -> bool { return os_error == EAFNOS
 #endif
 
 /// @brief Winsock `SOCKET` 宏常量各工具链形态不一，经 uint64 中转落 intptr_t 保证
-/// `INVALID_SOCKET`（全 1）恰落 -1，与 `StreamSocket::AURORA_INVALID_HANDLE` 对齐。
+/// `INVALID_SOCKET`（全 1）恰落 -1，与 `blocking::StreamSocket::AURORA_INVALID_HANDLE` 对齐。
 /// @param s 平台原生句柄。
 /// @return `intptr_t` 承载值。
 auto to_handle(NativeSocket s) -> std::intptr_t {
@@ -134,7 +134,7 @@ auto to_handle(NativeSocket s) -> std::intptr_t {
 }
 
 /// @brief 对外 `intptr_t` 形态 → 原生句柄（`to_handle` 的逆）。
-/// @param h `StreamSocket`/`Listener` 内部承载值。
+/// @param h `blocking::StreamSocket`/`blocking::Listener` 内部承载值。
 /// @return 平台原生句柄；-1 还原为各平台无效值。
 auto from_handle(std::intptr_t h) -> NativeSocket {
 #ifdef AURORA_PLATFORM_WINDOWS
@@ -324,11 +324,62 @@ auto endpoint_from_address(const sockaddr_storage &storage) -> Result<Endpoint> 
                                                       std::to_string(static_cast<int>(storage.ss_family)) + ")");
 }
 
+// ---- 平台运行时（Windows 的 Winsock 引用计数；POSIX 无此概念）---------------------------------
+
+#ifdef AURORA_PLATFORM_WINDOWS
+// Winsock 引用计数状态：首个持有者触发 WSAStartup、末个持有者执行 WSACleanup。
+// mutex + 裸计数即可：运行时申请不是热路径，且 POSIX 腿整体不参与编译。
+auto session_state_mutex() -> std::mutex & {
+    static std::mutex m;
+    return m;
+}
+
+auto session_refs() -> int & {
+    static int refs = 0;
+    return refs;
+}
+
+/// @brief 申请 Winsock 运行时：首个活跃持有者触发 `WSAStartup`，成功后引用计数递增。
+/// @return 可用状态；初始化失败 = false（计数不递增，配对清理不欠账）。
+auto session_acquire() -> bool {
+    std::scoped_lock lock(session_state_mutex());
+    if (session_refs() == 0) {
+        WSADATA data{};
+        if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) {
+            return false;
+        }
+    }
+    ++session_refs();
+    return true;
+}
+#endif
+
+/// @brief 钉住平台运行时：本文件创建任何句柄前都先过一次。
+///
+/// 「只申请不还」是刻意的取舍而非疏漏：公共面已改由库侧持有运行时（`aurora::net::blocking` 不再要求
+/// 调用方自备会话），而退出路径上的静态析构顺序不可控——在途句柄的关闭可能晚于任何作用域会话对象的
+/// 析构，`WSACleanup` 之后再关句柄属平台层面的未定义行为（与 `app::EventSourceRegistry` 单例刻意不
+/// 析构同一条裁决）。`detail::Session` 的作用域引用仍照常计数并与本枚叠加，末次清理因此不再发生。
+/// @return 运行时可用为 true；Windows 侧 `WSAStartup` 被拒为 false；POSIX 恒 true。
+auto runtime_pinned() -> bool {
+#ifdef AURORA_PLATFORM_WINDOWS
+    static const bool PINNED = session_acquire();
+    return PINNED;
+#else
+    return true;
+#endif
+}
+
 /// @brief 创建流式套接字（TCP 与本机 IPC 共用一条出口，只差地址族与协议号）。
 /// @param family 地址族（`AF_INET` / `AF_INET6` / `AF_UNIX`）。
-/// @return 成功为原生句柄；失败为 `net-platform-unavailable`（本机 IPC 通路在本腿不存在）或
-///         `net-socket-failed`（含 OS 码）。
+/// @return 成功为原生句柄；失败为 `net-runtime-failed`（运行时起不来）/
+///         `net-platform-unavailable`（本机 IPC 通路在本腿不存在）/ `net-socket-failed`（含 OS 码）。
 auto open_socket(int family) -> Result<NativeSocket> {
+    if (!runtime_pinned()) {
+        // 先报「运行时没起来」而不是让 `socket()` 以 `WSAENETDOWN` 形态报成句柄表故障：两者排查方向
+        // 完全不同（winsock DLL / 版本请求 vs 地址族与资源上限）。
+        return make_error(ErrorCode::NetRuntimeFailed, "socket runtime unavailable");
+    }
     // AF_UNIX 没有传输协议号：填 `IPPROTO_TCP` 在 Linux 上直接 EINVAL，而两族的流式语义一致，
     // 故这里只换协议号而不换出口。
     const int protocol = family == AF_UNIX ? 0 : IPPROTO_TCP;
@@ -352,7 +403,7 @@ auto open_socket(int family) -> Result<NativeSocket> {
 /// @param endpoint 目标端点。
 /// @param allow_local 本机 IPC 形态是否可用：异步传输面为真（同一套 `socket` / `connect` / `accept`
 ///        序列换成 `AF_UNIX` 即可，状态机不变），同步阻塞面按既有裁决保持 TCP-only（口径见
-///        `StreamSocket::connect` 与 `Listener::bind` 的说明）。
+///        `blocking::StreamSocket::connect` 与 `blocking::Listener::bind` 的说明）。
 /// @return 成功为 `AF_INET` / `AF_INET6` / `AF_UNIX`；不合用为 `net-endpoint-invalid`。
 auto stream_family_of(const Endpoint &endpoint, bool allow_local) -> Result<int> {
     if (!endpoint.is_valid()) {
@@ -440,45 +491,15 @@ auto poll_timeout_ms(std::chrono::milliseconds timeout) -> int {
 
 }  // namespace
 
-// ---- Session ----------------------------------------------------------------
+// ---- detail::Session（运行时的作用域引用；公共面已不再暴露本类型）------------------------------
 
 #ifdef AURORA_PLATFORM_WINDOWS
-namespace {
-// Winsock 引用计数状态：第一个构造的会话触发 WSAStartup、最后一个析构的会话执行 WSACleanup。
-// mutex + 裸计数即可：会话构造/析构不是热路径，且 POSIX 腿整体不参与编译。
-auto session_state_mutex() -> std::mutex & {
-    static std::mutex m;
-    return m;
-}
-
-auto session_refs() -> int & {
-    static int refs = 0;
-    return refs;
-}
-
-/// @brief 申请 Winsock 运行时：首个活跃会话触发 `WSAStartup`，成功后引用计数递增。
-/// @return 可用状态；初始化失败 = false（计数不递增，配对清理不欠账）。
-auto session_acquire() -> bool {
-    std::scoped_lock lock(session_state_mutex());
-    if (session_refs() == 0) {
-        WSADATA data{};
-        if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) {
-            return false;
-        }
-    }
-    ++session_refs();
-    return true;
-}
-}  // namespace
-#endif
-
-#ifdef AURORA_PLATFORM_WINDOWS
-Session::Session() : ok_(session_acquire()) {}
+detail::Session::Session() : ok_(session_acquire()) {}
 #else
-Session::Session() : ok_(true) {}  // POSIX 无运行时初始化概念，会话恒可用
+detail::Session::Session() : ok_(true) {}  // POSIX 无运行时初始化概念，会话恒可用
 #endif
 
-Session::~Session() {
+detail::Session::~Session() {
 #ifdef AURORA_PLATFORM_WINDOWS
     if (!ok_) {
         return;
@@ -491,7 +512,9 @@ Session::~Session() {
 #endif
 }
 
-// ---- StreamSocket -----------------------------------------------------------
+// ---- blocking::StreamSocket -------------------------------------------------
+
+namespace blocking {
 
 auto StreamSocket::connect_loopback(std::uint16_t port) -> Result<StreamSocket> {
     return connect(Endpoint::loopback(port));
@@ -618,7 +641,7 @@ auto StreamSocket::close() -> void {
     }
 }
 
-// ---- Listener ---------------------------------------------------------------
+// ---- blocking::Listener -----------------------------------------------------
 
 auto Listener::listen_loopback(std::uint16_t port, int backlog) -> Result<Listener> {
     return bind(Endpoint::loopback(port), backlog);
@@ -731,6 +754,8 @@ auto Listener::close() -> void {
     port_ = 0;
 }
 
+}  // namespace blocking
+
 // ---- wait_ready -------------------------------------------------------------
 
 auto wait_ready(const std::vector<PollDescriptor> &descriptors, std::chrono::milliseconds timeout)
@@ -775,8 +800,8 @@ auto wait_ready(const std::vector<PollDescriptor> &descriptors, std::chrono::mil
 
     const int timeout_ms = poll_timeout_ms(timeout);
 #ifdef AURORA_PLATFORM_WINDOWS
-    // WSAPoll 无 EINTR 语义（Windows 不被 POSIX 信号打断），单次调用即可；需要活跃的 Winsock
-    // 运行时（与所有 net 用法一致：调用方持 `Session`），否则以 WSAENETDOWN 落 net-wait-failed。
+    // WSAPoll 无 EINTR 语义（Windows 不被 POSIX 信号打断），单次调用即可；活跃的 Winsock 运行时随
+    // 本文件里创建句柄的每一次调用钉住（见 `runtime_pinned`），因此能拿到句柄就一定能等它。
     const int ready = ::WSAPoll(fds.data(), static_cast<ULONG>(fds.size()), static_cast<LONG>(timeout_ms));
     if (ready == SOCKET_ERROR) {
         return net_error(ErrorCode::NetWaitFailed, "WSAPoll");
@@ -815,7 +840,7 @@ auto dns_failed(std::string_view host, int code) -> Error {
 }  // namespace
 
 auto detail::platform_lookup(std::string_view host, std::uint16_t port) -> Result<std::vector<Endpoint>> {
-    const Session session;  // Windows：`getaddrinfo` 要求已初始化的 Winsock 运行时
+    const detail::Session session;  // Windows：`getaddrinfo` 要求已初始化的 Winsock 运行时
     if (!session.ok()) {
         return make_error(ErrorCode::NetPlatformUnavailable, "socket runtime could not be started for name resolution");
     }
@@ -1298,10 +1323,8 @@ auto detail::local_ipc_supported() -> bool {
     // 判据是「本进程现在能建出本机 IPC 的流式套接字」而不是「编译期认得这个宏」：Windows 的 AF_UNIX
     // 随系统版本而来，编译通过不代表运行可用，而 `Capabilities` 是唯一真值源。
     static const bool SUPPORTED = [] {
-        const Session runtime;  // Windows：socket() 要求已初始化的 Winsock 运行时
-        if (!runtime.ok()) {
-            return false;
-        }
+        // 运行时不必在此自备：`open_socket` 会先钉住它，起不来就以 `net-runtime-failed` 落进下面的
+        // 失败分支，探测结论一致。
         auto opened = open_socket(AF_UNIX);
         if (!opened) {
             return false;
@@ -1478,8 +1501,11 @@ namespace {
 
 /// @brief 创建 UDP 数据报套接字。
 /// @param family 地址族（`AF_INET` / `AF_INET6`）。
-/// @return 成功为原生句柄；失败为 `net-socket-failed`（含 OS 码）。
+/// @return 成功为原生句柄；失败为 `net-runtime-failed`（运行时起不来）/ `net-socket-failed`（含 OS 码）。
 auto open_datagram_socket(int family) -> Result<NativeSocket> {
+    if (!runtime_pinned()) {
+        return make_error(ErrorCode::NetRuntimeFailed, "socket runtime unavailable");
+    }
     const NativeSocket s = ::socket(family, SOCK_DGRAM, IPPROTO_UDP);
     if (native_is_invalid(s)) {
         return net_error(ErrorCode::NetSocketFailed, "socket(SOCK_DGRAM, IPPROTO_UDP)");

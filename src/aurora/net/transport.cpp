@@ -37,8 +37,8 @@
 #include "aurora/core/result.h"
 #include "aurora/net/detail/async_io.h"
 #include "aurora/net/detail/remote_connect.h"
+#include "aurora/net/detail/runtime.h"
 #include "aurora/net/engine.h"
-#include "aurora/net/socket.h"
 #include "aurora/state/async.h"
 
 namespace aurora::net {
@@ -74,7 +74,7 @@ struct StreamState {
     auto operator=(StreamState &&) -> StreamState & = delete;
 
     std::mutex mutex;  ///< 保护以下全部字段（锁内只做非阻塞系统调用）
-    Session runtime;  ///< Winsock 运行时归属：末个持有者析构才触发 WSACleanup
+    detail::Session runtime;  ///< Winsock 运行时归属（与句柄创建处的进程级钉住叠加）
     std::intptr_t handle = -1;  ///< 原生句柄（已置非阻塞）；-1 = 已归还
     StreamOptions options;  ///< 缓冲与超时口径
     Cancellation cancellation;  ///< 本连接的取消令牌
@@ -113,7 +113,7 @@ struct ListenerState {
     auto operator=(ListenerState &&) -> ListenerState & = delete;
 
     std::mutex mutex;  ///< 保护以下全部字段
-    Session runtime;  ///< Winsock 运行时归属
+    detail::Session runtime;  ///< Winsock 运行时归属
     std::intptr_t handle = -1;  ///< 监听句柄（已置非阻塞）
     std::uint16_t port = 0;  ///< 实际绑定端口（入参 0 时为系统分配值）
     StreamOptions options;  ///< 交付给每条被接受连接的口径

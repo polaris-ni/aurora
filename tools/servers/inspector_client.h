@@ -19,7 +19,7 @@
 #include <string>
 #include <string_view>
 
-#include "aurora/net/socket.h"
+#include "aurora/net/blocking.h"
 
 namespace aurora::tools::inspector {
 
@@ -64,7 +64,7 @@ inline constexpr int AURORA_IO_TIMEOUT_MS = 5000;
 ///
 /// @return 响应；`error` 非空表示传输层失败（连不上 / 超时 / 非回环地址被拒）。
 ///
-/// @note Thread: safe（每次调用独立建连，自带 socket 运行时初始化）
+/// @note Thread: safe（每次调用独立建连；socket 运行时由库侧随句柄就位，本头不再自备会话对象）
 /// @note Side-effects: 网络 I/O（仅限 loopback）
 [[nodiscard]] inline auto http_request(std::string_view method, std::string_view host, std::uint16_t port,
                                        std::string_view target, std::string_view body = {}) -> HttpResponse {
@@ -82,20 +82,15 @@ inline constexpr int AURORA_IO_TIMEOUT_MS = 5000;
         return out;
     }
 
-    // RAII 运行时：Windows 引用计数初始化/清理，POSIX 零成本——取代逐请求手工配对。
-    aurora::net::Session runtime;
-    if (!runtime.ok()) {
-        out.error = "socket runtime initialization failed";
-        return out;
-    }
-
-    auto connected = aurora::net::StreamSocket::connect_loopback(port);
+    // 运行时不需自备：Windows 的 Winsock 初始化随句柄创建就位，起不来时以 `net-runtime-failed`
+    // 形态落在下面的 connect 分支。
+    auto connected = aurora::net::blocking::StreamSocket::connect_loopback(port);
     if (!connected) {
         // 原措辞保留：`connect() failed on 127.0.0.1:<port>` 是 e2e/单测的传输层成因白名单项。
         out.error = "connect() failed on 127.0.0.1:" + std::to_string(port);
         return out;
     }
-    aurora::net::StreamSocket sock = std::move(connected.value());
+    aurora::net::blocking::StreamSocket sock = std::move(connected.value());
 
     if (!sock.set_io_timeout(std::chrono::milliseconds{detail::AURORA_IO_TIMEOUT_MS})) {
         // 设不上超时就不在无界等待上继续走：那正是本段代码要防的事故形态，宁可显式失败。

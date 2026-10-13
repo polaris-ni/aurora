@@ -24,11 +24,11 @@
 #include "aurora/app/event_source_registry.h"
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
+#include "aurora/net/blocking.h"
 #include "aurora/net/capabilities.h"
 #include "aurora/net/detail/async_io.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/poll.h"
-#include "aurora/net/socket.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_net_engine {
@@ -44,20 +44,18 @@ constexpr std::chrono::milliseconds AURORA_TIMER_SLACK{40};
 
 /// @brief 一对已建立的回环 TCP 连接（client 发起、经 backlog 由同线程 accept 取得 server）。
 struct LoopbackPair {
-    aurora::net::StreamSocket client;
-    aurora::net::StreamSocket server;
+    aurora::net::blocking::StreamSocket client;
+    aurora::net::blocking::StreamSocket server;
 };
 
 /// @brief 在临时端口起监听、连接、接受，得到一对连通的回环流；监听口随即关闭。
-/// @param session 已就绪的运行时会话（Windows 侧 WSAStartup 归属，用例环境前提而非被测行为）。
 /// @return 连通的 client/server 对。
-auto make_connected_pair(aurora::net::Session &session) -> LoopbackPair {
-    AURORA_TEST_REQUIRE(session.ok());
-    auto bound = aurora::net::Listener::listen_loopback(0, 4);
+auto make_connected_pair() -> LoopbackPair {
+    auto bound = aurora::net::blocking::Listener::listen_loopback(0, 4);
     AURORA_TEST_REQUIRE(bound.ok());
     auto listener = std::move(bound.value());
 
-    auto connected = aurora::net::StreamSocket::connect_loopback(listener.port());
+    auto connected = aurora::net::blocking::StreamSocket::connect_loopback(listener.port());
     AURORA_TEST_REQUIRE(connected.ok());
     auto accepted = listener.accept();
     AURORA_TEST_REQUIRE(accepted.ok());
@@ -67,7 +65,7 @@ auto make_connected_pair(aurora::net::Session &session) -> LoopbackPair {
 /// @brief 向对端写入一段字节（失败即刻转红：写不出去就无法制造「就绪」这一被测前提）。
 /// @param socket 目标流。
 /// @param payload 待发送文本。
-auto write_payload(aurora::net::StreamSocket &socket, std::string_view payload) -> void {
+auto write_payload(aurora::net::blocking::StreamSocket &socket, std::string_view payload) -> void {
     auto sent = socket.write_all(std::span<const char>(payload.data(), payload.size()));
     AURORA_TEST_REQUIRE(sent.ok());
 }
@@ -221,8 +219,7 @@ AURORA_TEST_CASE(resident_loop_delivers_registered_source) {
     AURORA_TEST_SKIP("the browser runtime has no fd wait semantics; the engine reports unavailable there");
 #else
     EngineGuard guard;
-    aurora::net::Session session;
-    auto pair = make_connected_pair(session);
+    auto pair = make_connected_pair();
     auto &registry = aurora::app::EventSourceRegistry::instance();
     registry.set_dispatcher([](const std::function<void()> &fn) { fn(); });
 
@@ -263,8 +260,7 @@ AURORA_TEST_CASE(unregister_during_wait_keeps_the_loop_alive) {
     AURORA_TEST_SKIP("the browser runtime has no fd wait semantics; the engine reports unavailable there");
 #else
     EngineGuard guard;
-    aurora::net::Session session;
-    auto pair = make_connected_pair(session);
+    auto pair = make_connected_pair();
     auto &registry = aurora::app::EventSourceRegistry::instance();
     registry.set_dispatcher([](const std::function<void()> &fn) { fn(); });
     AURORA_TEST_REQUIRE(Engine::instance().post([] {}).ok());
@@ -318,8 +314,7 @@ AURORA_TEST_CASE(host_driven_registry_is_not_waited_by_engine) {
     AURORA_TEST_SKIP("the browser runtime has no fd wait semantics; the engine reports unavailable there");
 #else
     EngineGuard guard;
-    aurora::net::Session session;
-    auto pair = make_connected_pair(session);
+    auto pair = make_connected_pair();
     auto &registry = aurora::app::EventSourceRegistry::instance();
     registry.set_dispatcher([](const std::function<void()> &fn) { fn(); });
     AURORA_TEST_REQUIRE(Engine::instance().post([] {}).ok());  // 让常驻循环先在跑，否则「让位」无从谈起

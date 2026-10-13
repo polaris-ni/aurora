@@ -26,8 +26,8 @@
 #include "aurora/app/event_source_registry.h"
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
+#include "aurora/net/blocking.h"
 #include "aurora/net/poll.h"
-#include "aurora/net/socket.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_net_poll {
@@ -42,21 +42,19 @@ constexpr std::chrono::milliseconds AURORA_NET_EMPTY_TIMEOUT{20};
 /// @brief 一对已建立的回环 TCP 连接（client 发起、经 backlog 由同线程 accept 取得 server）。
 /// @note 两个 StreamSocket 均 move-only；作为返回值靠移动/RVO 落地。
 struct LoopbackPair {
-    aurora::net::StreamSocket client;
-    aurora::net::StreamSocket server;
+    aurora::net::blocking::StreamSocket client;
+    aurora::net::blocking::StreamSocket server;
 };
 
 /// @brief 在临时端口起监听、连接、接受，得到一对连通的回环流套接字后关闭监听口。
-/// @param session 已就绪的运行时会话（Windows 侧 WSAStartup 归属，用例环境前提而非被测行为）。
 /// @return 连通的 client/server 对（listener 已在函数返回时析构关闭）。
-auto make_connected_pair(aurora::net::Session &session) -> LoopbackPair {
-    AURORA_TEST_REQUIRE(session.ok());
-    auto bound = aurora::net::Listener::listen_loopback(0, 4);
+auto make_connected_pair() -> LoopbackPair {
+    auto bound = aurora::net::blocking::Listener::listen_loopback(0, 4);
     AURORA_TEST_REQUIRE(bound.ok());
     auto listener = std::move(bound.value());
     AURORA_TEST_REQUIRE_NE(listener.port(), std::uint16_t{0});
 
-    auto connected = aurora::net::StreamSocket::connect_loopback(listener.port());
+    auto connected = aurora::net::blocking::StreamSocket::connect_loopback(listener.port());
     AURORA_TEST_REQUIRE(connected.ok());
     auto client = std::move(connected.value());
 
@@ -69,7 +67,7 @@ auto make_connected_pair(aurora::net::Session &session) -> LoopbackPair {
 /// @brief 写入全部字节并在断言失败时立即转红的测试内助记（write_all 的 Result 样板收一次）。
 /// @param socket 目标流。
 /// @param payload 待发送文本。
-auto write_payload(aurora::net::StreamSocket &socket, std::string_view payload) -> void {
+auto write_payload(aurora::net::blocking::StreamSocket &socket, std::string_view payload) -> void {
     auto sent = socket.write_all(std::span<const char>(payload.data(), payload.size()));
     AURORA_TEST_REQUIRE(sent.ok());
 }
@@ -140,8 +138,7 @@ AURORA_TEST_CASE(wait_ready_invalid_slot_does_not_fail_the_batch) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no poll/WSAPoll semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session session;
-    auto pair = make_connected_pair(session);
+    auto pair = make_connected_pair();
     const std::vector<aurora::net::PollDescriptor> want{
         {.handle = static_cast<std::intptr_t>(-1), .want_read = true, .want_write = true},
         {.handle = pair.server.native_handle(), .want_read = false, .want_write = true},
@@ -164,8 +161,7 @@ AURORA_TEST_CASE(wait_ready_writable_then_readable_then_idle) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no poll/WSAPoll semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session session;
-    auto pair = make_connected_pair(session);
+    auto pair = make_connected_pair();
     const std::vector<aurora::net::PollDescriptor> both{
         {.handle = pair.server.native_handle(), .want_read = true, .want_write = true}};
 
@@ -203,8 +199,7 @@ AURORA_TEST_CASE(event_source_registry_drives_real_fd_ready) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no poll/WSAPoll semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::Session session;
-    auto pair = make_connected_pair(session);
+    auto pair = make_connected_pair();
     auto &registry = aurora::app::EventSourceRegistry::instance();
 
     int hits = 0;

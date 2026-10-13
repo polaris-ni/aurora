@@ -36,8 +36,8 @@
 #include "aurora/core/error_codes.gen.h"
 #include "aurora/core/result.h"
 #include "aurora/net/detail/async_io.h"
+#include "aurora/net/detail/runtime.h"
 #include "aurora/net/engine.h"
-#include "aurora/net/socket.h"
 #include "aurora/state/async.h"
 
 namespace aurora::net {
@@ -73,7 +73,7 @@ struct DatagramState {
     auto operator=(DatagramState &&) -> DatagramState & = delete;
 
     std::mutex mutex;  ///< 保护以下全部字段（锁内只做非阻塞系统调用）
-    Session runtime;  ///< Winsock 运行时归属：末个持有者析构才触发 WSACleanup
+    detail::Session runtime;  ///< Winsock 运行时归属（与句柄创建处的进程级钉住叠加）
     std::intptr_t handle = -1;  ///< 原生句柄（已置非阻塞）；-1 = 已归还
     std::uint64_t generation = 0;  ///< 事件源登记代数：旧登记的尾批据此作废
     std::size_t pending_send_bytes = 0;  ///< sends 里尚未整条进入内核的字节总数

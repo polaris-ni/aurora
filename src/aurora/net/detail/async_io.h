@@ -12,7 +12,7 @@
 /// 3. `would-block` 的具体 errno / WSA 值随平台而异（`EAGAIN` 与 `EWOULDBLOCK` 是否同值、Winsock 的
 ///    `WSAEALREADY` / `WSAEWOULDBLOCK` / `WSAEINPROGRESS`  trio），换算只在本头的实现里做一次。
 ///
-/// 句柄一律以 `std::intptr_t` 承载、`-1` 恒无效（与 `net::StreamSocket::native_handle()` 同口径），
+/// 句柄一律以 `std::intptr_t` 承载、`-1` 恒无效（与 `net::blocking::StreamSocket::native_handle()` 同口径），
 /// 所有权归调用方：`open_*` 得到的句柄必须由 `close_handle()` 归还一次。
 ///
 /// 本头**包含**公共头 `aurora/net/transport.h` 而不是前向声明其中的类型：`NativeOptions` 与
@@ -87,7 +87,7 @@ struct DatagramAttempt {
 
 /// @brief 创建一个**非阻塞**的监听套接字（bind + listen，地址族取自端点）。
 ///
-/// 与 `net::Listener::bind` 的分工：那条是同步阻塞面（工具与测试宿主专用），本函数服务事件驱动传输层。
+/// 与 `net::blocking::Listener::bind` 的分工：那条是同步阻塞面（工具与测试宿主专用），本函数服务事件驱动传输层。
 /// 绑到非回环地址即接受来自其它主机的连接，访问控制仍归调用方。
 /// @param endpoint 监听端点；IPv4 / IPv6 或本机 IPC 路径形态。
 /// @param backlog 挂起连接队列深度（透传 `listen(2)`）。
@@ -161,7 +161,7 @@ auto close_handle(std::intptr_t handle) -> void;
 /// @return 成功为对端端点；失败为 `net-socket-failed`。
 [[nodiscard]] auto peer_of(std::intptr_t handle) -> Result<Endpoint>;
 
-/// @brief 对端是否位于本机回环（与 `StreamSocket::is_loopback_peer()` 同一套三段判据）。
+/// @brief 对端是否位于本机回环（与 `blocking::StreamSocket::is_loopback_peer()` 同一套三段判据）。
 /// @param handle 目标句柄。
 /// @return 落在回环段为 true；查询失败或地址族不认识为 false。
 [[nodiscard]] auto peer_is_loopback(std::intptr_t handle) -> bool;

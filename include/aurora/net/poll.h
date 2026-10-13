@@ -7,7 +7,7 @@
 /// 等待集的通用事件源注册口（`app::EventSourceRegistry`）、以及第三方非阻塞会话（libssh2、DBus
 /// 一类）的就绪通知，都建立在同一条「给一组句柄 + 关注方向，阻塞到部分就绪或超时」的语义上。
 ///
-/// 与 `net::Listener::wait_readable`（单句柄、`select`、同步回环）刻意分工：本基元是**多句柄、
+/// 与 `net::blocking::Listener::wait_readable`（单句柄、`select`、同步回环）刻意分工：本基元是**多句柄、
 /// 事件驱动、读/写/错误/挂断四向**的等待形态，且**只做等待、不碰任何协议语义**——它不知道句柄背
 /// 后是 socket、管道还是 DBus 描述符。真正的平台差异（POSIX `poll` 的 `nfds`/`POLLNVAL`、Winsock
 /// `WSAPoll` 的 `SOCKET` 形态与 `SHORT` 事件位）在 `src/aurora/net/socket.cpp` 一次消化（CHG-006

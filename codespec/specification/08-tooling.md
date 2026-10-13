@@ -294,7 +294,7 @@ Column#root { bounds:[0,0,640,480]; visible:true; listeners:[on_click] }
 
 ## 5 InspectorServer（远程 HTTP）
 
-`InspectorServer`（`inspector/inspector_server.h`）是 localhost-only HTTP 服务器，暴露 REST 端点供外部 Inspector 工具远程访问运行时 widget 树。跨平台传输经核心公共层 `aurora::net`（CHG-006，契约见 [`specification/06-app-platform.md`](06-app-platform.md) §8.8；Windows 的 `ws2_32` / POSIX 的 `pthread` 分别由 `aurora` 与 `aurora_inspector_server` 目标传导），CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`（默认 OFF）。
+`InspectorServer`（`inspector/inspector_server.h`）是 localhost-only HTTP 服务器，暴露 REST 端点供外部 Inspector 工具远程访问运行时 widget 树。跨平台传输经同步阻塞工具面 `aurora::net::blocking`（CHG-006 建立，CHG-010 §4 归位为「仅供非 UI 线程的工具与测试宿主」，契约见 [`specification/06-app-platform.md`](06-app-platform.md) §8.8 与 §8.8.16；socket 运行时由库侧随句柄钉住，服务器自身不再持有任何「会话」对象；Windows 的 `ws2_32` / POSIX 的 `pthread` 分别由 `aurora` 与 `aurora_inspector_server` 目标传导），CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`（默认 OFF）。
 
 ```cpp
 InspectorServer server{ []() -> au::Node { return build_ui(); } };
@@ -364,7 +364,7 @@ server.stop();        // 停止并 join 工作线程
 - **会话发现按「方案 ③」（不落进程注册表文件）**：优先级为 ① 工具入参 `session`（`"6280"` 或 `"127.0.0.1:6280"`）
   ② 环境变量 `AURORA_INSPECTOR_PORT` ③ 默认 `6280`（与 `InspectorServer::start()` 默认值一致）。
   主机**恒被 pin 到回环**：客户端不做 DNS，只认 `127.0.0.1` / `localhost` / `::1`，且一律连到 `127.0.0.1`。
-- HTTP 客户端只落在 `tools/servers/inspector_client.h`（**不进 `include/` / `src/`**）：该头不再自带平台适配，只余 HTTP 组帧/解析——socket 传输经核心公共层 `aurora::net`（见 [`specification/06-app-platform.md`](06-app-platform.md) §8.8）。
+- HTTP 客户端只落在 `tools/servers/inspector_client.h`（**不进 `include/` / `src/`**）：该头不再自带平台适配，只余 HTTP 组帧/解析——socket 传输经同步阻塞工具面 `aurora::net::blocking`（见 [`specification/06-app-platform.md`](06-app-platform.md) §8.8 与 §8.8.16）。
 - 前提：应用需自己 opt-in 启动 `InspectorServer`（CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`）；
   未启动时 `live_*` 返回传输层错误（连不上）而非空结果。`demo_common.h` 的 `run_demo` 已内置
   该 opt-in（见 §5.5）。

@@ -106,6 +106,7 @@
 #include "aurora/navigation/router.h"
 #include "aurora/navigation/transition_layer.h"
 #include "aurora/net/address.h"
+#include "aurora/net/blocking.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/capabilities.h"
 #include "aurora/net/datagram.h"

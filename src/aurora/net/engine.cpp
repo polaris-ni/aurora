@@ -8,9 +8,9 @@
 //     `aurora::detail::post_to_main` 形态——即 §1 不变量所指「与 `Task<T>::set_main_poster`
 //     同一条投递器」，宿主已装则不改。
 //
-// 唤醒通道刻意**不引入新的平台代码**：它是一对回环 TCP 流（`Listener` + `StreamSocket`，POSIX 与
-// Winsock 皆可 poll），因此本文件不出现 `poll.h` / `winsock2.h`——CHG-006 的「平台 socket 头唯一
-// 落点是 `src/aurora/net/socket.cpp`」不变量继续成立。
+// 唤醒通道刻意**不引入新的平台代码**：它是一对回环 TCP 流（`blocking::Listener` +
+// `blocking::StreamSocket`，POSIX 与 Winsock 皆可 poll），因此本文件不出现 `poll.h` / `winsock2.h`
+// ——CHG-006 的「平台 socket 头唯一落点是 `src/aurora/net/socket.cpp`」不变量继续成立。
 
 #include "aurora/net/engine.h"
 
@@ -33,9 +33,10 @@
 #include "aurora/app/event_source_registry.h"
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
+#include "aurora/net/blocking.h"
 #include "aurora/net/detail/async_io.h"
+#include "aurora/net/detail/runtime.h"
 #include "aurora/net/poll.h"
-#include "aurora/net/socket.h"
 #include "aurora/state/async.h"
 
 namespace aurora::net {
@@ -210,13 +211,13 @@ class PollEngine final : public Engine {
             return make_error(ErrorCode::NetRuntimeFailed, "engine: platform network runtime unavailable");
         }
         // 唤醒通道 = 一对回环 TCP 流：两平台的 poll 族都认得 socket 句柄，且不需要任何新平台代码。
-        auto bound = Listener::listen_loopback(0, 4);
+        auto bound = blocking::Listener::listen_loopback(0, 4);
         if (!bound) {
             session_.reset();
             return bound.error();
         }
         auto listener = std::move(bound.value());
-        auto connector = StreamSocket::connect_loopback(listener.port());
+        auto connector = blocking::StreamSocket::connect_loopback(listener.port());
         if (!connector) {
             session_.reset();
             return connector.error();
@@ -349,9 +350,9 @@ class PollEngine final : public Engine {
     bool stop_requested_ = false;  ///< 停机请求（持锁读写）
     std::atomic<bool> running_{false};  ///< 引擎线程是否在跑（`running()` 无锁读）
     std::thread thread_;  ///< 常驻循环线程
-    std::optional<Session> session_;  ///< 平台网络运行时归属（Windows 侧 WSAStartup 引用计数）
-    StreamSocket wake_read_;  ///< 唤醒通道读端（引擎线程读）
-    StreamSocket wake_write_;  ///< 唤醒通道写端（持锁写）
+    std::optional<detail::Session> session_;  ///< 引擎生命周期内的运行时引用（Windows 侧 WSAStartup 计数）
+    blocking::StreamSocket wake_read_;  ///< 唤醒通道读端（引擎线程读）
+    blocking::StreamSocket wake_write_;  ///< 唤醒通道写端（持锁写）
     std::intptr_t wake_handle_ = -1;  ///< 读端的原生句柄值（等待集合首位，构建期写、join 后清）
 };
 

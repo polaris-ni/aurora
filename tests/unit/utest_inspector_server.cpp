@@ -6,8 +6,8 @@
 /// 以及 /api/input/{click,scroll,drag,text} 交互模拟（派发到目标控件、请求体校验、目标定位
 /// 失败与派发失败的错误映射）和 /api/find 的 key/type/text 定位（路径与寻址端点同口径）。
 /// 树端点的线程落点同样在此覆盖：装上传递器后必须换到主线程下树，无传递器时回退内联执行。
-/// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端经核心公共层
-/// `aurora::net`（CHG-006），随用例作用域关闭清理。
+/// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端经同步阻塞传输层
+/// `aurora::net::blocking`（CHG-006 建立、CHG-010 §4 归位为工具面），随用例作用域关闭清理。
 /// AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩。
 
 #include <chrono>
@@ -29,7 +29,7 @@
 
 #include "aurora/event/event.h"  // ScrollEvent
 #include "aurora/inspector/inspector_server.h"
-#include "aurora/net/socket.h"
+#include "aurora/net/blocking.h"
 #include "aurora/state/async.h"  // detail::main_poster（跨线程投递器，marshal 的落点）
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
@@ -118,13 +118,11 @@ struct QueuedPoster {
 };
 
 /// @brief 对 127.0.0.1:port 发送原始 HTTP 请求并回收完整响应（服务端 Connection: close，
-/// 读到对端关闭即完整）。`recv_timeout_ms > 0` 时给收发加超时（`aurora::net` 毫秒统一口径），
+/// 读到对端关闭即完整）。`recv_timeout_ms > 0` 时给收发加超时（`aurora::net::blocking` 毫秒统一口径），
 /// 超时按空响应失败。
 [[nodiscard]] auto http_roundtrip(std::uint16_t port, const std::string &request, int recv_timeout_ms = 0)
     -> std::string {
-    aurora::net::Session runtime;
-    AURORA_TEST_REQUIRE_TRUE(runtime.ok());
-    auto connected = aurora::net::StreamSocket::connect_loopback(port);
+    auto connected = aurora::net::blocking::StreamSocket::connect_loopback(port);
     AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(connected));
     auto client = std::move(connected.value());
     if (recv_timeout_ms > 0) {
