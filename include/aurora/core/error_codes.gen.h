@@ -135,6 +135,8 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetCancelled = 91,  ///< net-cancelled: Network operation was cancelled
     NetPlatformUnavailable = 92,  ///< net-platform-unavailable
     NetUrlInvalid = 93,  ///< net-url-invalid: URL is not a valid absolute or resolvable reference: '{detail}'
+    NetProxyConfigInvalid = 94,  ///< net-proxy-config-invalid: Proxy configuration is not valid: '{detail}'
+    NetProxyUnsupported = 95,  ///< net-proxy-unsupported: This proxy protocol is not supported by the current build
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -152,7 +154,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 94> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 96> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1310,6 +1312,34 @@ inline constexpr std::array<ErrorMeta, 94> AURORA_ERROR_TABLE = {
             .message_tpl = "URL is not a valid absolute or resolvable reference: '{detail}'",
             .hint = "Pass a complete URL with scheme (e.g. https://host/path) or a reference to resolve against a base "
                     "URL; percent signs must introduce a two-hex-digit escape and IPv6 literals need brackets",
+        },
+        {
+            .code = ErrorCode::NetProxyConfigInvalid,
+            .ident = "NetProxyConfigInvalid",
+            .slug = "net-proxy-config-invalid",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "Proxy configuration is not valid: '{detail}'",
+            .hint = "Fix the value instead of ignoring it: a proxy URL is scheme://[user[:pass]@]host[:port] with no "
+                    "path, and a NO_PROXY entry is *, a domain, a domain with :port, or an IPv4/IPv6 CIDR; a malformed "
+                    "proxy setting must never fall back to a direct connection",
+        },
+        {
+            .code = ErrorCode::NetProxyUnsupported,
+            .ident = "NetProxyUnsupported",
+            .slug = "net-proxy-unsupported",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "This proxy protocol is not supported by the current build",
+            .hint = "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected "
+                    "proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a "
+                    "plaintext proxy hop",
         },
     },
 };

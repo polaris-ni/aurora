@@ -110,6 +110,7 @@
 #include "aurora/net/capabilities.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/poll.h"
+#include "aurora/net/proxy.h"
 #include "aurora/net/socket.h"
 #include "aurora/perf/counters.h"
 #include "aurora/perf/perf_log.h"

@@ -102,6 +102,7 @@ aurora/net/cancellation.h
 aurora/net/capabilities.h
 aurora/net/engine.h
 aurora/net/poll.h
+aurora/net/proxy.h
 aurora/net/socket.h
 aurora/perf/counters.h
 aurora/perf/perf_log.h

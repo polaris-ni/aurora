@@ -1078,3 +1078,25 @@ fix_category = "invalid_value"
 retryable = false
 message = "URL is not a valid absolute or resolvable reference: '{detail}'"
 hint = "Pass a complete URL with scheme (e.g. https://host/path) or a reference to resolve against a base URL; percent signs must introduce a two-hex-digit escape and IPv6 literals need brackets"
+
+[[error]]
+enum = "NetProxyConfigInvalid"
+slug = "net-proxy-config-invalid"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Proxy configuration is not valid: '{detail}'"
+hint = "Fix the value instead of ignoring it: a proxy URL is scheme://[user[:pass]@]host[:port] with no path, and a NO_PROXY entry is *, a domain, a domain with :port, or an IPv4/IPv6 CIDR; a malformed proxy setting must never fall back to a direct connection"
+
+[[error]]
+enum = "NetProxyUnsupported"
+slug = "net-proxy-unsupported"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "This proxy protocol is not supported by the current build"
+hint = "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a plaintext proxy hop"

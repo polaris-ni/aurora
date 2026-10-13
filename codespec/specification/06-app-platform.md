@@ -787,7 +787,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 由此定下的运行期口径：**Win32 / X11 / Wayland / macOS / GLFW / Headless 一律缺省由常驻引擎线程驱动**（回调经主线程投递器回 UI 线程，唤醒走各腿既有 `request_wake`：Win32 `PostMessage`、X11/Wayland 唤醒管道、GLFW `glfwPostEmptyEvent`）；**wasm 无 fd 语义**，能力位假且注册即报 `net-platform-unavailable`。§18-1 的「64 句柄上限以运行期错误显式暴露」因此只约束**宿主驱动腿**（宿主自有等待集的规模由宿主负责），本库缺省腿不受该上限约束。AT-SPI 的 DBus watch fd 通道维持其在 window 后端的自有集成（它早于注册口，且是 main-thread-only 的无障碍关键路径），注册口的「首例消费者」改为 libssh2 一类第三方会话——那才是它的外部用途，且已用真实回环 fd 在 Headless 基线里逐值验证。
 
-传输族、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地（`Url` 与 `Headers` 两枚基础件已落地，见 [`01-core.md`](01-core.md) §10、§11）。
+传输族、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地（`Url` 与 `Headers` 两枚基础件已落地，见 [`01-core.md`](01-core.md) §10、§11；双栈首件见 §8.8.6，代理配置侧见 §8.8.7）。
 
 #### 8.8.6 地址族无关化（双栈与竞速切片首件）
 
@@ -801,6 +801,22 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 - 错误码：本件无新增码，`net-endpoint-invalid`（端点不合用：端口 0、本机 IPC 形态、无地址占位、非数字 zone）与既有的 `net-socket-failed` / `net-bind-failed` / `net-listen-failed` / `net-connect-failed` 覆盖全部失败分支。
 - 回归：`utest_net_socket` 新增四例（不合用端点在发起系统调用前即拒、数字与接口名两型 zone 的分岔、`[::1]` 往返与两侧回环判定及 `peer_endpoint()` 端口回报、双栈监听口上的内嵌形态识别）。
+
+#### 8.8.7 代理配置侧：`ProxyConfig` / `NoProxy` / `ProxyEnvironment`
+
+`include/aurora/net/proxy.h` + `src/aurora/net/proxy.cpp` 交付 §11 代理族的**配置与决策**部分：五个类型全是值语义，零 socket、零 DNS、零平台头，唯一职责是把「配置文本」变成「可判定的规则集合」。`CONNECT` 与 SOCKS5 的握手字节属传输侧，不在本件。六条定见：
+
+- **畸形即失败，绝不静默直连**：`HTTP_PROXY=http//host` 若被当作「没配代理」，症状是「在办公网能通、在客户网络不通」，且日志里无痕。故 `parse()` / `from_environment()` 返回 `Result`，且失败 message 必带**是哪个变量**或**是第几条规则**（`detail=HTTPS_PROXY: ...`、`detail=NO_PROXY entry #2 '...': ...`），运维定位不需要先复现。
+- **scheme 决定怎么连代理，不决定目标是否 TLS**：`HTTPS_PROXY=http://proxy:3128` 是合法且最常见的形态（明文连代理、代理隧道到 https 目标）。代理自身走 TLS（`https://`）与 SOCKS4 属已知但不实现，报独立的 `net-proxy-unsupported` 而非 `net-proxy-config-invalid`——调用方要能区分「用户写错了」与「本库不支持」；两者都**不退化成明文跳**，否则代理链路上的凭据会被送到错误信道。
+- **决策只有一处**：`ProxyEnvironment::for_target(host, port, secure)` 是唯一入口，次序为「例外优先 → 安全目标 `HTTPS_PROXY`→`ALL_PROXY`→直连 / 明文目标 `HTTP_PROXY`→`ALL_PROXY`→直连」。安全目标**绝不**回退到 `HTTP_PROXY`：两个变量之间的隔离是运维的契约，把它猜平等于让企业网按直觉分流。缺省端口沿用 curl / Go 口径（CONNECT 80、SOCKS5 1080），裸 `host[:port]` 按 CONNECT 处理。
+- **主机文法只有一套**：代理主机与例外项的规范化一律借 `Url::from_parts` / `Endpoint::from_ip` 的既有出口（ASCII 小写、punycode、IPv6 去括号、去尾点），本层不新造第二套主机文法，否则同一台代理会有两种拼写却判不等。
+- **`NO_PROXY` 是封闭文法**：只接受 `*`、域名（`example.com` / `.example.com` / `*.example.com` 三写法等价，匹配本体与任意深层子域）、数字字面量（**全等**匹配，不做后缀——否则 `.0.0.1` 会把无关主机卷进例外）、CIDR（`10.0.0.0/8` / `fd00::/8`，主机位非零即拒），以及上述形态后跟 `:端口` 的限定；分隔符 `,` `;` 与空白等价、空项忽略。IPv6 项必须带括号（不带括号时 `:` 无法与端口限定区分）。CIDR 只与**数字字面量**目标比较——名字型目标在本层不做解析，口径与 Go / curl 一致。
+- **凭据只在内存里**：userinfo 解析时立即百分号解码（密码里的 `%3A` 与用户名里的 `%40` 都保持原义，拆分只认第一个 `:`），`to_string()` 恒把密码替换为 `***` 且 IPv6 代理重新补括号（渲染结果必须可回解析）；诊断字段 `source()` 不参与相等比较，故「环境变量来的配置」与「代码里同值配置」判等。
+
+环境变量读取器 `ProxyEnvironment::Reader` 是本件的注入接缝：每个变量先大写后小写（`HTTP_PROXY` 然后 `http_proxy`），空串视为未设置（CI 与容器里的显式清空写法），单测因此无需真实环境变量即可覆盖全部次序与例外形态。系统代理读取（Win32 WinHTTP 查询、macOS 系统配置，且只取地址与例外、不执行 PAC）涉及新平台头与链接依赖，留作独立子步；代理自身的 TLS 属非目标。
+
+- 错误码：新增 `net-proxy-config-invalid` 与 `net-proxy-unsupported`（category `io`、`retryable=false`，数据源 `codespec/errors.toml`，`ERROR_CATALOG.md` 已随生成器刷新）。§10 预留的 `net-proxy-unreachable` / `net-proxy-auth-required` 待握手切片按真实失败分支启用，本件不预支。
+- 回归：`utest_net_proxy` 十例——形态与缺省端口、七类畸形值与两码分岔、凭据解码与打印掩码、结构化工厂的入参校验、域名与端口限定匹配、字面量全等与 CIDR 前缀（含 `/0` 与 `fe80::/8` 越界样本）、封闭文法的十一类拒收与「第几条」定位、大小写优先级与变量名回报、`for_target` 的完整选择次序、`source()` 不参与判等。全用例纯逻辑，三平台一致，wasm 腿同样可跑，故无 `AURORA_TEST_SKIP`。
 
 ---
 
