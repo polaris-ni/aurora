@@ -762,9 +762,24 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：复用既有 `net-wait-failed`，本切片无新增码。
 - 回归：`utest_net_poll`（空集合 OK、无效槽不毁批、可写→可读→空闲三态、注册口经真实 fd 的端到端事件源循环）。
 
-#### 8.8.4 底座剩余（计划/待建）
+#### 8.8.4 引擎与常驻 poll 线程（`aurora::net::Engine` / `Capabilities`，CHG-010 底座）
 
-CHG-010 §17 底座切片仍缺：`Capabilities` + `Engine` 抽象（其 `capabilities()` 是运行期唯一真值源、随引擎落地以免先立无人填写的真相源）、自持 poll 线程与主线程完成投递（把 §8.8.3 的 `wait_ready` 包成常驻循环、复用既有 `aurora::detail::post_to_main` + `request_wake` 唤醒帧循环），以及把 §8.8.2 注册口接入各平台等待点的具体改法（Win32 `MsgWaitForMultipleObjectsEx` 句柄数组、X11/Wayland `poll` 数组里 DBus watch fd 的收编、Headless 常驻 poll 循环、GLFW/macOS 经引擎线程桥接）。就绪等待基元（§8.8.3）已交付，余下是「谁在什么线程、以什么节奏调用它」。传输族、`Url`/`Headers`、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地。
+`include/aurora/net/capabilities.h` + `include/aurora/net/engine.h`（实现 `src/aurora/net/engine.cpp`）：把 §8.8.3 的基元包成**常驻循环**并接上主线程完成投递，即提案 §2 的默认形态——「谁在什么线程、以什么节奏调用基元」就此定死。
+
+- **`Capabilities` 是运行期唯一真值源**：9 枚具名 bool（`tcp` `udp` `local_ipc` `dns` `tls` `listens` `event_source` `streaming` `custom_headers`），缺省全 false。纪律：**能力位不得先于实现点亮**——本底座落地为 `tcp` / `listens` / `event_source` / `streaming` / `custom_headers` 为真（后两枚表达的是平台限制而非实现进度，native 无 `ReadableStream` / CORS 约束），`udp` / `local_ipc` / `dns` / `tls` 随各自切片置真。`event_source` 的运行期落点就是 §8.8.2 的 `event_source_supported()`，两处真相不重复登记。
+- **`Engine` 是引擎的公共面**：`instance()` / `name()` / `capabilities()` / `post()` / `post_after()` / `running()` / `shutdown()`。`name()` 回报实现名（自带引擎 `"poll"`、无 fd 语义腿 `"none"`），供 Inspector 与日志区分。查询能力**不**拉起线程；惰性启动的触发者是 `post` / `post_after`（§2「随首个需要它的对象惰性启动」）。
+- **循环节奏**：「跑已到期任务 → 快照 `sources()` → `wait_ready` → 交回 `dispatch()`」，一条线程承载任务队列与到期定时器，不为定时器另起线程。等待窗口 = `min(最早到期定时, 空闲上限 200ms)` 且**下限 1ms**（不忙等；200ms 只是「唤醒通知丢失」的延迟上界，正常路径由唤醒通道即时打断）。
+- **唤醒通道刻意不引入新平台代码**：它是一对**回环 TCP 流**（`Listener::listen_loopback` + `connect_loopback` + `accept`），两平台的 poll 族都认得 socket 句柄，因此 `engine.cpp` 不出现 `poll.h` / `winsock2.h`——CHG-006「平台 socket 头唯一落点是 `src/aurora/net/socket.cpp`」不变量继续成立。单轮只读一块（8 字节）且不计数：读只在 `POLLIN` 报可读后发生，故必不阻塞；残余字节让下一轮立刻返回可读。
+- **投递纪律（三条，规范性）**：① `Dispatcher` 只在宿主未装时补 `aurora::detail::post_to_main` 形态（与 `Task<T>::set_main_poster` 同一条投递器，§1 不变量），宿主已装则不改；② `ChangeNotify` 归常驻等待方（即本引擎），登记与**注销**都要通知——注销后宿主随即关闭句柄，滞留快照会让下一次系统调用撞上无效句柄；③ **一条事件源只由一个驱动方等待**：常驻引擎循环与宿主自带等待集（Win32/X11/Wayland）互斥，同时启用会让回调重复抵达，宿主收编注册口时须不触发惰性启动或先 `shutdown()`。
+- **瞬态等待失败不终止循环**：注销与就绪同帧发生时本轮可能正持着含已关闭句柄的快照，`wait_ready` 落 `net-wait-failed` 属预期竞态；循环丢弃本轮结果并在下一轮重取快照（`utest_net_engine` 的 `unregister_during_wait_keeps_the_loop_alive` 即此判据）。
+- **停机语义**：`shutdown()` 幂等，停止接收新任务、把**已入队任务与已到期定时跑完**再 join（不丢已承诺的工作），未到期的定时**丢弃且不执行**——静默跑一个过期续体会伪造出错误的完成时序；已投进主线程队列的完成事件由宿主退出路径排空（§2）。收敛后再次 `post` 会重新惰性启动。
+- **无 fd 语义腿**：wasm 装配 `NullEngine`（`name()=="none"`、能力全 false、`post`/`post_after` 一律 `net-platform-unavailable`），绝不假降级也不排队等位。
+- 错误码：本切片**无新增码**，直接产出的只有 `net-platform-unavailable`（无 fd 语义腿、停机竞态拒收新任务）与 `net-runtime-failed`（平台网络运行时不可用）；唤醒通道构建腿的失败码由 §8.8 的同步回环原语**原样透传**（`net-socket-failed` / `net-bind-failed` / `net-listen-failed` / `net-connect-failed` / `net-accept-failed`），引擎不自造第二套口径。
+- 回归：`utest_net_engine`（能力矩阵如实、查询不起线程、`post` 在非调用线程执行、空任务不占队列、`post_after` 不早于登记意图、常驻循环驱动真实事件源、注销同帧不毁循环、`shutdown` 幂等且可重启）。
+
+#### 8.8.5 底座剩余（计划/待建）
+
+提案 §17 底座切片仍缺**把 §8.8.2 注册口接入各平台等待点**的具体改造：Win32 `MsgWaitForMultipleObjectsEx` 句柄数组（含 §18-1「64 句柄上限以运行期错误显式暴露」）、X11/Wayland `poll` 数组里 DBus watch fd 的收编、GLFW/macOS 经引擎线程桥接。基元（§8.8.3）、注册口（§8.8.2）、常驻引擎与能力矩阵（§8.8.4）均已交付，余下是各宿主按 §8.8.4 ③ 的互斥口径二选一。传输族、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地（`Url` 与 `Headers` 两枚基础件已落地，见 [`01-core.md`](01-core.md) §10、§11）。
 
 ---
 

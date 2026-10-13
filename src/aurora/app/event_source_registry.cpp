@@ -59,6 +59,21 @@ auto EventSourceRegistry::set_dispatcher(Dispatcher dispatcher) -> void {
     dispatcher_ = std::move(dispatcher);
 }
 
+auto EventSourceRegistry::set_change_notify(ChangeNotify notify) -> void {
+    std::scoped_lock lock(mutex_);
+    change_notify_ = std::move(notify);
+}
+
+auto EventSourceRegistry::has_poller() -> bool {
+    std::scoped_lock lock(mutex_);
+    return static_cast<bool>(poller_);
+}
+
+auto EventSourceRegistry::has_dispatcher() -> bool {
+    std::scoped_lock lock(mutex_);
+    return static_cast<bool>(dispatcher_);
+}
+
 auto EventSourceRegistry::set_event_source_supported(bool supported) -> void {
     event_source_supported_.store(supported);
 }
@@ -78,26 +93,42 @@ auto EventSourceRegistry::register_source(std::intptr_t handle, WaitInterest int
         return make_error(ErrorCode::NetPlatformUnavailable, "register_source: handle -1 is not a waitable descriptor");
     }
     auto entry = std::make_shared<detail::SourceEntry>();
-    std::scoped_lock lock(mutex_);
-    entry->token = next_token();
-    entry->handle = handle;
-    entry->interest = interest;
-    entry->callback = std::move(callback);
-    entries_.push_back(entry);
+    ChangeNotify notify;
+    {
+        std::scoped_lock lock(mutex_);
+        entry->token = next_token();
+        entry->handle = handle;
+        entry->interest = interest;
+        entry->callback = std::move(callback);
+        entries_.push_back(entry);
+        notify = change_notify_;
+    }
+    if (notify) {
+        notify();  // 锁外通知：等待方据此重取快照，回调内再登记也不会死锁
+    }
     return EventSourceRegistration{this, std::move(entry)};
 }
 
 auto EventSourceRegistry::unregister_source(std::uint64_t token) -> bool {
-    std::scoped_lock lock(mutex_);
-    const auto it =
-        std::find_if(entries_.begin(), entries_.end(), [token](const auto &e) { return e->token == token; });
-    if (it == entries_.end()) {
-        return false;  // 幂等：已注销或从未登记
+    ChangeNotify notify;
+    bool removed = false;
+    {
+        std::scoped_lock lock(mutex_);
+        const auto it =
+            std::find_if(entries_.begin(), entries_.end(), [token](const auto &e) { return e->token == token; });
+        if (it == entries_.end()) {
+            return false;  // 幂等：已注销或从未登记
+        }
+        // 仅从快照移除：**不置 cancelled**——已入队的一次尾批仍会抵达（载荷由条目 shared_ptr 独立
+        // 存活），符合 §18-1「注销 = 停止产生新回调」。作废尾批是 `cancel_pending()` 的独立职责。
+        entries_.erase(it);
+        removed = true;
+        notify = change_notify_;
     }
-    // 仅从快照移除：**不置 cancelled**——已入队的一次尾批仍会抵达（载荷由条目 shared_ptr 独立
-    // 存活），符合 §18-1「注销 = 停止产生新回调」。作废尾批是 `cancel_pending()` 的独立职责。
-    entries_.erase(it);
-    return true;
+    if (notify) {
+        notify();  // 注销同样要通知：宿主随后关闭该句柄，滞留快照会让下一次系统调用撞上无效句柄
+    }
+    return removed;
 }
 
 auto EventSourceRegistry::sources() -> std::vector<WaitSource> {

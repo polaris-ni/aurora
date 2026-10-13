@@ -10,11 +10,12 @@
 ///
 /// 本层刻意**平台无关且不依赖 `net/`**：它只搬运 `std::intptr_t` 句柄与回调，绝不出现任何
 /// 平台 socket/poll 头（`winsock2.h` / `poll.h` 的仓内唯一落点是 `src/aurora/net/socket.cpp`，
-/// CHG-006 不变量）。真正的「阻塞直到某些句柄就绪」经两枚可注入接缝表达：
+/// CHG-006 不变量）。真正的「阻塞直到某些句柄就绪」经三枚可注入接缝表达：
 /// - `Poller`：把一组 `WaitSource` 等待到就绪（由 net 引擎层或测试安装；未安装时
 ///   `wait_and_dispatch()` 返回 `net-platform-unavailable`，即 wasm 那种「不提供假降级」）。
 /// - `Dispatcher`：把一次就绪回调投回主线程（缺省为就地同步执行，与 `post_to_main` 无 poster
 ///   时的口径一致；宿主可注入 `post_to_main` 形态）。
+/// - `ChangeNotify`：条目集合变动（登记/注销）后通知常驻等待方重取快照（判据见成员声明处）。
 ///
 /// 生命周期与竞态契约（提案 §18-1，规范性）：
 /// - `register_source()` 返回 move-only RAII 句柄 `EventSourceRegistration`，析构即注销且**幂等**；
@@ -155,6 +156,12 @@ class EventSourceRegistry {
         std::function<Result<std::vector<ReadySource>>(const std::vector<WaitSource> &, std::chrono::milliseconds)>;
     /// @brief 投递接缝：把一个就绪闭包投回主线程（缺省就地同步执行）。
     using Dispatcher = std::function<void(std::function<void()>)>;
+    /// @brief 表变动通知接缝：条目集合发生变化（登记成功或注销生效）后调用。
+    ///
+    /// 常驻等待方（`net::Engine` 的 poll 线程）借此立刻重取 `sources()` 快照，而不是等一个等待
+    /// 窗口才看到新增/移除的句柄；注销通知尤其要紧——宿主随后即关闭该句柄，滞留的快照会让下一次
+    /// 系统调用撞上无效句柄。通知在**锁外**执行，故回调内可安全再登记/注销。
+    using ChangeNotify = std::function<void()>;
 
     /// @brief 安装等待接缝。
     /// @param poller 就绪等待实现；空 `std::function` 表示卸载（此后 `wait_and_dispatch` 报不可用）。
@@ -163,6 +170,18 @@ class EventSourceRegistry {
     /// @brief 安装投递接缝。
     /// @param dispatcher 主线程投递实现；空 `std::function` 恢复为缺省的就地同步执行。
     auto set_dispatcher(Dispatcher dispatcher) -> void;
+
+    /// @brief 安装表变动通知接缝。
+    /// @param notify 变动通知实现；空 `std::function` 表示卸载（宿主自带等待集时的常态）。
+    auto set_change_notify(ChangeNotify notify) -> void;
+
+    /// @brief 是否已装等待接缝（引擎启动时据此判断「不覆盖宿主已装的接缝」）。
+    /// @return 已装为非空函数时为 true。
+    [[nodiscard]] auto has_poller() -> bool;
+
+    /// @brief 是否已装投递接缝（判据同 `has_poller()`）。
+    /// @return 已装时为 true；缺省的就地同步执行视为未装。
+    [[nodiscard]] auto has_dispatcher() -> bool;
 
     /// @brief 声明本腿是否具备事件源等待语义（§2 的 `capabilities().event_source` 运行期落点）。
     ///
@@ -216,10 +235,11 @@ class EventSourceRegistry {
     /// @brief 分配单调递增令牌（从 1 起；0 保留给空句柄）。
     [[nodiscard]] auto next_token() -> std::uint64_t;
 
-    std::mutex mutex_;  ///< 保护 entries_/poller_/dispatcher_
+    std::mutex mutex_;  ///< 保护 entries_/poller_/dispatcher_/change_notify_
     std::vector<std::shared_ptr<detail::SourceEntry>> entries_;  ///< 存活条目（线性表，规模小）
     Poller poller_;  ///< 等待接缝（可空）
     Dispatcher dispatcher_;  ///< 投递接缝（可空=就地执行）
+    ChangeNotify change_notify_;  ///< 表变动通知接缝（可空=不通知）
     std::uint64_t token_counter_ = 0;  ///< 令牌计数器
     std::atomic<bool> event_source_supported_{true};  ///< 本腿是否有 fd 等待语义（wasm 置假）
 };
