@@ -82,6 +82,7 @@ freeze: minor-versions-are-additive
 
 ### Fixed
 
+- **Debug 叠加层在部分裁剪帧溢出脏区、对脏区外像素二次混色**（`window/window.h` 的 `AURORA_ENABLE_DEBUG` 绘制路径）。部分裁剪帧（`plan.clip_logical` 非空）此前在 `pop_clip()` **之后**整窗叠加 `paint_debug_overlays`，半透明的布局引导框落到脏区外时会把上帧已叠加过的像素再混一次色，「脏区 == 整帧逐位一致」「脏区外零改写」两条绘制不变量全破（开启 `layout_guides` 后 `itest_dirty_clip_paint` 4 条假红）。现把叠加层调用移入 `push_clip` / `pop_clip` 裁剪域内（整帧分支无脏区边界、保持原位），并用 `debug::any_flag_enabled()` 门控零开销短路。回归 `itest_dirty_clip_paint.debug_overlay_partial_clip_matches_full_redraw`（Debug 构建下真跑；配套修复 `itest_inspector_robustness` 开启 `layout_guides` 后不还原的进程级泄漏）。
 - **Adwaita 亮色档关闭钮此前画不出来**（`window/detail/title_bar_painter.cpp` 的 Adwaita 分支）。三枚字形恒写 `Color{255,255,255,235}`，而 `AdwaitaLight` 的按钮底是 `#EBEBEB` 浅灰 ⇒ 常态下关闭钮是一块空白（与 Windows 亮色档同缺陷，本次一并收口为「常态随前景色、仅当底色被悬停 / 按压特征红替换时转白」）。同批修复 Adwaita 按钮**没有按压态反馈**的问题（此前只判 `hovered_button`，按下无任何视觉变化）。回归 `utest_title_bar_painter.adwaita_light_close_glyph_uses_fg_ink_and_leaves_padding`。
 - **CSD 标题此前没有垂直居中**（`window/detail/title_bar_painter.cpp`）。`draw_text` 的 y 是**行盒顶**（基线 = 顶 + ascent），绘制层把标题带原样传下去 ⇒ 文字贴栏的上缘：实测墨迹中心比栏高中心偏上 Adwaita 6dp、Windows 8.5dp、Mac 1.5dp（Windows 档栏高 32dp 配 9pt 标题时最明显）。现按 `FontEngine::measure_height` 把行盒摆到栏高中点，三档偏差均收敛到 ≤1.5dp。回归 `utest_title_bar_painter.title_is_vertically_centered_in_every_language`。
 - **`TitleBarStyle::center_title` 此前不生效**（`window/detail/title_bar_painter.cpp`）。几何层已在居中档给出整宽带，但绘制层从不居中——文字恒从带的左缘起排，与 macOS 红绿灯布局并置时明显偏左。现按 `FontEngine::measure_width` 实测量宽把文字摆到整宽带中点。回归 `utest_title_bar_painter.mac_preset_title_is_centered_in_full_width_band`（居中档墨迹中心 ≈200，非居中对照组 <180）。

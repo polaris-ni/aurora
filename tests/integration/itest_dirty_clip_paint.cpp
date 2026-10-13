@@ -15,6 +15,8 @@
 #include <vector>
 
 #include "aurora/aurora.h"
+#include "aurora/debug/debug_paint.h"
+#include "aurora/debug/feature_flags.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::itest_dirty_clip_paint {
@@ -79,6 +81,21 @@ auto ring_pixels_outside(const std::vector<std::uint8_t> &px, const std::vector<
     }
     return n;
 }
+
+/// @brief 调试叠层开关的用例级守卫：`set_flags` 写的是进程级全局，用例结束必须还原，
+/// 否则残留的叠层会污染后续所有像素判据（真实踩坑：inspector 用例泄漏 layout_guides）。
+class DebugFlagsGuard final {
+  public:
+    DebugFlagsGuard() : saved_(au::debug::flags()) {}
+    ~DebugFlagsGuard() { au::debug::set_flags(saved_); }
+    DebugFlagsGuard(const DebugFlagsGuard &) = delete;
+    auto operator=(const DebugFlagsGuard &) -> DebugFlagsGuard & = delete;
+    DebugFlagsGuard(const DebugFlagsGuard &&) = delete;
+    auto operator=(const DebugFlagsGuard &&) -> DebugFlagsGuard & = delete;
+
+  private:
+    au::debug::DebugPaintFlags saved_;
+};
 
 }  // namespace
 
@@ -170,6 +187,73 @@ AURORA_TEST_CASE(nested_partial_dirty_clip_matches_full_redraw) {
 
     // 脏区内确实重绘出了新颜色。
     AURORA_TEST_CHECK(count_diff(dirty, before) > 0);
+#else
+    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
+#endif
+}
+
+AURORA_TEST_CASE(debug_overlay_partial_clip_matches_full_redraw) {
+    // 回归：可视化调试叠层在**部分裁剪帧**必须画在同一裁剪域内。此前叠层在 pop_clip 之后整窗
+    // 叠加，layout_guides 的半透明品红框对脏区外的上帧像素**二次混色**，破坏「脏区重绘 ==
+    // 整帧重绘逐位一致」与「脏区外零改写」两条核心不变量（叠层开关一旦泄漏即打红全家）。
+    if (!au::debug::feature_flags().debug) {
+        AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG not enabled: the overlay code path is compiled out");
+    }
+#ifdef AURORA_BACKEND_HEADLESS
+    DebugFlagsGuard flags_guard;  // 进程级全局：用例结束必须还原
+    au::debug::DebugPaintFlags f;
+    f.layout_guides = true;
+    au::debug::set_flags(f);
+
+    constexpr int w = 320;
+    constexpr int h = 240;
+    const auto text = std::make_shared<au::Text>("stable reference line");
+    const auto chip = std::make_shared<au::Chip>();
+    chip->set_label("dirty");
+    chip->set_background(Color{0, 0, 255});
+    au::Node root{au::Column{au::Node{text}, au::Node{chip}}};
+
+    au::Window win = make_window(w, h);
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 1：首帧全绘（含叠层）
+    auto const &hs = dynamic_cast<au::HeadlessSurface &>(win.surface());
+    constexpr size_t n = static_cast<size_t>(w) * static_cast<size_t>(h) * 4U;
+    const auto before = copy_pixels(hs.data(), n);
+
+    const au::Rect cb = chip->paint_bounds();
+    AURORA_TEST_REQUIRE(cb.size.width > 0.0F && cb.size.height > 0.0F);
+    AURORA_TEST_REQUIRE(cb.size.width < static_cast<float>(w) - 1.0F);
+    AURORA_TEST_REQUIRE(cb.size.height < static_cast<float>(h) - 1.0F);
+
+    chip->set_background(Color{255, 0, 0});
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 2：部分裁剪绘制（叠层须同裁剪域）
+    const auto dirty = copy_pixels(hs.data(), n);
+
+    win.force_full_redraw();
+    AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 3：整帧重绘基准（含叠层）
+    const auto full = copy_pixels(hs.data(), n);
+
+    AURORA_TEST_CHECK(count_diff(dirty, full) == 0);  // 部分裁剪（含叠层）== 整帧重绘（含叠层）
+
+    // 脏区外零改写：叠层不得越过裁剪域二次混色（此前正是叠层整窗叠加打红本判据）。
+    const int x0 = static_cast<int>(std::floor(cb.origin.x)) - 2;
+    const int y0 = static_cast<int>(std::floor(cb.origin.y)) - 2;
+    const int x1 = static_cast<int>(std::ceil(cb.origin.x + cb.size.width)) + 2;
+    const int y1 = static_cast<int>(std::ceil(cb.origin.y + cb.size.height)) + 2;
+    size_t outside_diff = 0;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            if (x >= x0 && x < x1 && y >= y0 && y < y1) {
+                continue;
+            }
+            const size_t i = ((static_cast<size_t>(y) * static_cast<size_t>(w)) + static_cast<size_t>(x)) * 4U;
+            for (size_t k = 0; k < 4; ++k) {
+                if (dirty[i + k] != before[i + k]) {  // NOLINT 容器类型无法本地确证为顺序容器
+                    ++outside_diff;
+                }
+            }
+        }
+    }
+    AURORA_TEST_CHECK(outside_diff == 0);
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
 #endif

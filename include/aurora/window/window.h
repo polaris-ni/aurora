@@ -1278,19 +1278,28 @@ class Window {
                     p.fill_rect(plan.clip_logical, cc);
                 }
                 root.widget().paint(p, full_bounds, ctx);
+#ifdef AURORA_ENABLE_DEBUG
+                // 可视化调试叠加层必须在**同一裁剪域内**叠加：若在 pop_clip 后整窗叠加，
+                // 半透明引导框会在脏区外对上帧已叠加过的像素**二次混色**，破坏「脏区重绘 ==
+                // 整帧重绘逐位一致」不变量（itest_dirty_clip_paint 全家踩坑）。
+                if (debug::any_flag_enabled()) {
+                    debug::paint_debug_overlays(p, root.widget(),
+                                                Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = size()}, ctx);
+                }
+#endif
                 p.pop_clip();
                 p.set_skip_dl_record(false);
             } else {
                 root.widget().paint(p, full_bounds, ctx);
-            }
 #ifdef AURORA_ENABLE_DEBUG
-            // 全树绘制后统一叠加可视化调试层（layout_guides / relayout_boundaries /
-            // layer_borders / repaint_highlight / overdraw），画在 app 树之上。
-            if (debug::any_flag_enabled()) {
-                debug::paint_debug_overlays(p, root.widget(),
-                                            Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = size()}, ctx);
-            }
+                // 全树绘制后统一叠加可视化调试层（layout_guides / relayout_boundaries /
+                // layer_borders / repaint_highlight / overdraw），画在 app 树之上。
+                if (debug::any_flag_enabled()) {
+                    debug::paint_debug_overlays(p, root.widget(),
+                                                Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = size()}, ctx);
+                }
 #endif
+            }
         }
         // [性能排查] 提交本绘制帧的光栅计时快照（idle 帧不进此域，不会用零值覆盖上一绘制帧）。
         detail::commit_paint_frame(true);

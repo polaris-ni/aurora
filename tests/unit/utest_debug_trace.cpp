@@ -57,21 +57,23 @@ AURORA_TEST_CASE(record_and_query_roundtrip) {
     const Json before = why_trace();
     const auto base_count = require_field<std::size_t>(before, "count");
     const auto base_total = require_field<std::uint64_t>(before, "total_recorded");
-    // 同进程内前一个用例（record_dirty_never_throws_in_any_build）已记过条目，
-    // 故 entries 条数只能作相对断言——写死 3 会随用例执行顺序而假失败。
-    const auto base_entries = require_child(before, "entries")->size();
 
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Layout, "Text", 101, false);
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Paint, "Button", 102, true);
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Layout, "Column", 103, false);
 
     const Json after = why_trace();
-    AURORA_TEST_CHECK_EQ(require_field<std::size_t>(after, "count"), base_count + 3);
+    // 采集缓冲是 cap=256 的环形（满后 pop_front 抵消增量）：全量运行时前面的用例可能已把
+    // 缓冲灌满，count 相对增量只能落在 [0,3]；total_recorded 是无界累计，恒 +3。
+    const auto after_count = require_field<std::size_t>(after, "count");
+    AURORA_TEST_CHECK_GE(after_count, base_count);
+    AURORA_TEST_CHECK_LE(after_count - base_count, 3U);
     AURORA_TEST_CHECK_EQ(require_field<std::uint64_t>(after, "total_recorded"), base_total + 3);
 
-    // entries 最新在前：最后记录的 Column 排首位；字段逐项核对。
-    const auto *const entries = require_child(after, "entries");
-    AURORA_TEST_REQUIRE_EQ(entries->size(), base_entries + 3U);
+    // entries 最新在前：无论缓冲是否已满，小 limit 恰好取回刚记录的 3 条标记（字段逐项核对）。
+    const Json top3 = why_trace(3);
+    const auto *const entries = require_child(top3, "entries");
+    AURORA_TEST_REQUIRE_EQ(entries->size(), 3U);
     const auto *const entry0 = require_child_at(*entries, 0);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry0, "kind"), "layout");
     AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry0, "type"), "Column");
@@ -100,9 +102,16 @@ AURORA_TEST_CASE(why_trace_limit_keeps_newest_first) {
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Paint, "B", 202, false);
     aurora::debug::detail::record_dirty(aurora::debug::DirtyKind::Layout, "C", 203, false);
 
+    // count 取环形缓冲真实长度，与 limit 无关；满缓冲（全量运行时前面的用例可能已灌满 cap=256）
+    // 下记录不再使 count 增长（pop_front 抵消），故相对增量只能断言落在 [0,3]。
+    const Json fresh = why_trace();
+    const auto after_count = require_field<std::size_t>(fresh, "count");
+    AURORA_TEST_CHECK_GE(after_count, base_count);
+    AURORA_TEST_CHECK_LE(after_count - base_count, 3U);
+
     // limit=2：只取最近 2 条，仍最新在前。
     const Json limited = why_trace(2);
-    AURORA_TEST_CHECK_EQ(require_field<std::size_t>(limited, "count"), base_count + 3);  // count 不受 limit 影响
+    AURORA_TEST_CHECK_EQ(require_field<std::size_t>(limited, "count"), after_count);  // count 不受 limit 影响
     const auto *const entries = require_child(limited, "entries");
     AURORA_TEST_REQUIRE_EQ(entries->size(), 2U);
     const auto *const entry0 = require_child_at(*entries, 0);
@@ -115,7 +124,7 @@ AURORA_TEST_CASE(why_trace_limit_keeps_newest_first) {
     // limit=0：entries 为空，缓冲本身不受影响。
     const Json zero = why_trace(0);
     AURORA_TEST_CHECK_EQ(require_child(zero, "entries")->size(), 0U);
-    AURORA_TEST_CHECK_EQ(require_field<std::size_t>(zero, "count"), base_count + 3);
+    AURORA_TEST_CHECK_EQ(require_field<std::size_t>(zero, "count"), after_count);
 }
 
 AURORA_TEST_CASE(total_recorded_is_monotonic) {

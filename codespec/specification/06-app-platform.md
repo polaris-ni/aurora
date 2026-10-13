@@ -845,7 +845,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 | `DebugPaintFlags{ layout_guides, relayout_boundaries, layer_borders, repaint_highlight, overdraw }` | 运行时叠层开关（bool，默认全 false） |
 | `set_flags(...)` / `flags()` / `any_flag_enabled()` | 全局开关读写 |
 | `current_debug_frame()` / `bump_debug_frame()` | 调试帧计数（`repaint_highlight` 时序判定用） |
-| `paint_debug_overlays(Painter&, const Widget& root, const Rect& root_bounds, const BuildContext&)` | 在 `Window::present_root` 全树绘制后调用，按开启的 flag 统一绘制 5 个叠层 |
+| `paint_debug_overlays(Painter&, const Widget& root, const Rect& root_bounds, const BuildContext&)` | 在 `Window::present_root` 全树绘制后调用，按开启的 flag 统一绘制 5 个叠层。**部分裁剪帧（`plan.clip_logical` 非空）时调用点位于 `push_clip` / `pop_clip` 裁剪域之内**，叠层与脏区同域——半透明引导框若在 `pop_clip` 后整窗叠加，会在脏区外对上帧已叠加过的像素二次混色，破坏「脏区外零改写」不变量 |
 | `DebugOverlayStats` / `overlay_stats()` / `reset_overlay_stats()` | 叠层绘制计数（测试断言用） |
 | `widget_picker(root, root_bounds, ctx, screen) -> DebugPickResult` | 复用 `Widget::hit_test_chain` 解析命中链；`DebugPickResult{ chain（root→最深，元素 `DebugPickNode{type_name, bounds}`）, hit }` |
 

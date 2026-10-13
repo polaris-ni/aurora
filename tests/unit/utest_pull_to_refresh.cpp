@@ -286,16 +286,17 @@ AURORA_TEST_CASE(reduce_motion_drops_setback_without_frames) {
     AURORA_TEST_CHECK_EQ(static_cast<int>(ptr.state()), static_cast<int>(PullToRefreshState::Refreshing));
     AURORA_TEST_CHECK_TRUE(ptr.is_gliding());  // 默认走短滑动收拢
 
-    auto saved = current_accessibility_settings();
-    saved.reduce_motion = true;
-    set_accessibility_settings(saved);
+    const auto saved = current_accessibility_settings();  // 原值留作恢复源（勿污染副本）
+    auto reduced = saved;
+    reduced.reduce_motion = true;
+    set_accessibility_settings(reduced);
 
     ptr.finish_refresh();
     AURORA_TEST_CHECK_NEAR(ptr.pull_distance(), 0.0F, 1e-6F);  // 直落端点，不产生中间帧
     AURORA_TEST_CHECK_FALSE(ptr.is_gliding());
     AURORA_TEST_CHECK_EQ(static_cast<int>(ptr.state()), static_cast<int>(PullToRefreshState::Idle));
 
-    set_accessibility_settings(saved);  // 单例须自行复原
+    set_accessibility_settings(saved);  // 单例须自行复原（reduce_motion 是进程级全局，泄漏会级联打红后续文件）
 }
 
 AURORA_TEST_CASE(indicator_overlay_paints_over_content) {

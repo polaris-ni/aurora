@@ -159,6 +159,11 @@ AURORA_TEST_CASE(debug_flags_type_mismatch_returns_400) {
     {
         const auto r = http_request(server.port(), "POST", "/api/debug/flags", R"({"layout_guides":true})");
         AURORA_TEST_CHECK_EQ(status_of(r), 200);
+        // 用例末态必须复原：debug flags 是进程级全局，layout_guides 残留会让后续窗口每帧
+        // 叠画品红框（部分裁剪帧还在 pop_clip 后整窗叠加、脏区外二次混色），级联打红
+        // itest_dirty_clip_paint 的「脏区 == 整帧重绘逐位一致」像素判据。
+        const auto off = http_request(server.port(), "POST", "/api/debug/flags", R"({"layout_guides":false})");
+        AURORA_TEST_CHECK_EQ(status_of(off), 200);
     }
 #endif
 }
