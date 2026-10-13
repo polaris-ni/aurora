@@ -13,14 +13,23 @@
 ///           也照样送达，且不可达目标**恰一次**以失败抵达（永不触发的回调是这类接口最难定位的缺陷）。
 ///           除引擎那条外全部走宿主驱动形态（`set_host_driven(true)` + `sources()` / `wait_ready` /
 ///           `dispatch()`），据此把送达时刻钉在用例线程上，不必等后台线程。
+///           本机 IPC 形态走**同一条状态机**：路径端点可双向收发，地址族专属观测口各给确定答案
+///           （`peer_endpoint` 落 `net-option-conflict`、`peer_credentials` 按本腿内核是否登记身份回答、
+///           `local_port` 恒 0）；`StreamOptions::native` 在系统调用之前生效，TCP 专属选项落在本机 IPC 上
+///           是确定的冲突而不是静默忽略，尺寸或方向矛盾的选项同样在发起调用前被拒。
 /// ⚠️ 平台分支写在**用例体内**而非包裹 `AURORA_TEST_CASE` 声明（registry_integrity 静态扫源码，
 ///    被 #ifdef 摘掉的声明在另一种构建里必然单边失踪）；wasm 无 fd 等待语义，用例体退化为
 ///    AURORA_TEST_SKIP。
+/// ⚠️ 对端身份的判据要和内核登记的那一份对得上，故 POSIX 腿直接取本进程的 uid/gid/pid（`<unistd.h>`
+///    排在 `aurora/core/platform.h` 之后——那段宏正是本判据的前提，先判后定义会恒假）；这是测试侧的
+///    观测口，不属于 net 层的平台代码（socket 头的唯一落点仍是 `src/aurora/net/socket.cpp`）。
 
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <span>
@@ -38,6 +47,11 @@
 #include "aurora/net/poll.h"
 #include "aurora/net/transport.h"
 #include "framework/aurora_test.h"
+#include "framework/isolation.h"
+
+#ifndef AURORA_PLATFORM_WINDOWS
+#include <unistd.h>
+#endif
 
 namespace aurora::test_cases::utest_net_transport {
 namespace {
@@ -257,6 +271,101 @@ auto send_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &s
     AURORA_TEST_REQUIRE(pump_until(registry, [&log]() { return log.calls.load() >= 1; }));
     AURORA_TEST_REQUIRE_FALSE(log.failed);
     AURORA_TEST_REQUIRE_EQ(log.bytes.load(), payload.size());
+}
+
+/// @brief 本机 IPC 形态是否可用（该位由运行期探测给出；探测不过的用例整体跳过而不是转红）。
+/// @return 本腿能开出 AF_UNIX 流式套接字为 true。
+auto local_ipc_available() -> bool { return aurora::net::Engine::instance().capabilities().local_ipc; }
+
+/// @brief 本用例临时目录内的一个本机 IPC 名字。
+///
+/// 刻意取最短的文件名：路径总长受本腿 `sockaddr_un::sun_path` 宽度约束，而临时目录名本身已带
+/// 时间戳与序号，长名会让用例在长仓库路径的机器上无缘无故地变红。
+/// @param name 目录内的名字。
+/// @return 平台原生分隔符的完整路径；临时目录不可用时为空串。
+auto local_ipc_name(std::string_view name) -> std::string {
+    const auto &dir = aurora::testing::isolation::temp_dir();
+    if (dir.empty()) {
+        return {};
+    }
+    return (std::filesystem::path{dir} / std::filesystem::path{name}).string();
+}
+
+/// @brief 本机 IPC 形态下连通的一对端点（形态同 `HostPair`，只是端点换成路径）。
+struct LocalPair {
+    StreamListener listener;
+    StreamTransport client;
+    StreamTransport server;
+};
+
+/// @brief 绑定本机 IPC 名字、发起连接并交付服务端流，得到连通的一对。
+/// @param registry 进程级事件源注册口（须已由 `HostDriven` 置为宿主驱动）。
+/// @param name 本用例临时目录内的路径。
+/// @return 连通的一对；造不出前提即 REQUIRE 转红。
+auto make_local_pair(aurora::app::EventSourceRegistry &registry, const std::string &name) -> LocalPair {
+    const auto target = Endpoint::local(name);
+    AURORA_TEST_REQUIRE(target.ok());
+    auto bound = StreamListener::bind(target.value(), 4, host_options());
+    AURORA_TEST_REQUIRE(bound.ok());
+    LocalPair pair{.listener = std::move(bound.value())};
+
+    std::atomic<int> accepted{0};
+    pair.listener.accept([&pair, &accepted](auto result) {
+        // 口径同 `make_host_pair`：完成回调可能落在析构边界内，致命断言在那里会直接 terminate。
+        AURORA_TEST_CHECK(result.ok());
+        if (!result) {
+            return;
+        }
+        pair.server = std::move(result.value());
+        ++accepted;
+    });
+
+    std::atomic<int> connected{0};
+    StreamTransport::connect(target.value(), host_options(), Cancellation{}, [&pair, &connected](auto result) {
+        AURORA_TEST_CHECK(result.ok());
+        if (!result) {
+            return;
+        }
+        pair.client = std::move(result.value());
+        ++connected;
+    });
+
+    AURORA_TEST_REQUIRE(pump_until(registry, [&]() { return accepted.load() == 1 && connected.load() == 1; }));
+    AURORA_TEST_REQUIRE(pair.client.is_open());
+    AURORA_TEST_REQUIRE(pair.server.is_open());
+    return pair;
+}
+
+/// @brief 绑定一个监听口并回报结果码（成功为空串；失败时局部句柄随即关闭）。
+/// @param endpoint 监听端点。
+/// @param options 待验证的原生选项集合。
+/// @return 结果码文本。
+auto bind_code(const Endpoint &endpoint, const StreamOptions &options) -> std::string {
+    auto bound = StreamListener::bind(endpoint, 4, options);
+    if (bound) {
+        return {};
+    }
+    return std::string{bound.error().code};
+}
+
+/// @brief 发起一次连接并等它出结果，回报结果码（成功为空串）。
+/// @param registry 进程级事件源注册口。
+/// @param endpoint 目标端点。
+/// @param options 待验证的原生选项集合。
+/// @return 结果码文本。
+auto connect_code(aurora::app::EventSourceRegistry &registry, const Endpoint &endpoint, const StreamOptions &options)
+    -> std::string {
+    std::atomic<int> calls{0};
+    std::string code;
+    StreamTransport::connect(endpoint, options, Cancellation{}, [&](auto result) {
+        if (!result) {
+            code = std::string{result.error().code};
+        }
+        ++calls;
+    });
+    AURORA_TEST_CHECK(pump_until(registry, [&]() { return calls.load() >= 1; }));
+    AURORA_TEST_CHECK_EQ(calls.load(), 1);
+    return code;
 }
 
 }  // namespace
@@ -675,6 +784,264 @@ AURORA_TEST_CASE(engine_driven_delivery_without_host_pump) {
     const std::size_t before = registry.live_count();
     StreamTransport::connect(Endpoint::loopback(listener.local_port()), StreamOptions{}, Cancellation{}, {});
     AURORA_TEST_CHECK_EQ(registry.live_count(), before);
+#endif
+}
+
+// 本机 IPC 与 TCP 共用同一条状态机：路径端点可双向收发，地址族专属的观测口各给一个确定答案。
+// 端口在这里本就没有对应物，所以 `local_port()` 回报 0 而不是伪造一个；可移植地址形态同理落
+// `net-option-conflict`（「查询失败」会把用法不匹配说成网络故障）。
+AURORA_TEST_CASE(local_ipc_stream_round_trip_and_family_specific_answers) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no local IPC socket; the transport layer cannot bind");
+#else
+    if (!local_ipc_available()) {
+        AURORA_TEST_SKIP("this platform leg provides no AF_UNIX socket at runtime");
+    }
+    HostDriven host;
+    auto &registry = aurora::app::EventSourceRegistry::instance();
+    const auto name = local_ipc_name("s");
+    AURORA_TEST_REQUIRE_FALSE(name.empty());
+    auto pair = make_local_pair(registry, name);
+
+    AURORA_TEST_CHECK_EQ(pair.listener.local_port(), std::uint16_t{0});
+    AURORA_TEST_CHECK_NE(pair.client.native_handle(), -1);
+    const auto peer = pair.client.peer_endpoint();
+    AURORA_TEST_REQUIRE_FALSE(peer.ok());
+    AURORA_TEST_CHECK_EQ(peer.error().code, "net-option-conflict");
+    // 回环判据只回答「IP 地址是否落在回环段」；本机 IPC 的连接本就只可能在同机发生，问身份用
+    // `peer_credentials()`。
+    AURORA_TEST_CHECK_FALSE(pair.client.is_loopback_peer());
+
+    ReadLog server_read;
+    std::vector<char> inbox(64);
+    pair.server.read(std::span<char>(inbox), read_into(server_read));
+    send_payload(registry, pair.client, "local-ping");
+    AURORA_TEST_CHECK(pump_until(registry, [&server_read]() { return server_read.calls.load() == 1; }));
+    AURORA_TEST_CHECK_FALSE(server_read.failed);
+    AURORA_TEST_CHECK_EQ(std::string(inbox.data(), server_read.bytes.load()), "local-ping");
+
+    ReadLog client_read;
+    std::vector<char> echo(64);
+    pair.client.read(std::span<char>(echo), read_into(client_read));
+    send_payload(registry, pair.server, "local-pong");
+    AURORA_TEST_CHECK(pump_until(registry, [&client_read]() { return client_read.calls.load() == 1; }));
+    AURORA_TEST_CHECK_EQ(std::string(echo.data(), client_read.bytes.load()), "local-pong");
+#endif
+}
+
+// 对端身份回答的是「谁连上了我」：登记于连接建立那一刻，只有内核确实登记过的腿才给数值，其余腿以
+// `anonymous` 如实回报而不是伪造全零身份。IP 连接上问身份是形态不匹配，落 `net-option-conflict`——
+// 静默回一份空身份会把「以为做了身份校验」的授权判断变成空转。
+AURORA_TEST_CASE(local_ipc_peer_credentials_answer_only_where_the_kernel_registers_them) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no local IPC socket to read an identity from");
+#else
+    if (!local_ipc_available()) {
+        AURORA_TEST_SKIP("this platform leg provides no AF_UNIX socket at runtime");
+    }
+    HostDriven host;
+    auto &registry = aurora::app::EventSourceRegistry::instance();
+    auto pair = make_local_pair(registry, local_ipc_name("p"));
+
+    const auto credentials = pair.server.peer_credentials();
+    AURORA_TEST_REQUIRE(credentials.ok());
+#if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID)
+    // 两端同在本进程内，故内核登记的那一份必然等于本进程的标识。
+    AURORA_TEST_CHECK_FALSE(credentials.value().anonymous);
+    AURORA_TEST_CHECK_EQ(credentials.value().user_id, static_cast<std::uint32_t>(::getuid()));
+    AURORA_TEST_CHECK_EQ(credentials.value().group_id, static_cast<std::uint32_t>(::getgid()));
+    AURORA_TEST_CHECK_EQ(credentials.value().process_id, static_cast<std::uint32_t>(::getpid()));
+#else
+    AURORA_TEST_CHECK_TRUE(credentials.value().anonymous);
+#endif
+
+    auto tcp_pair = make_host_pair(registry);
+    const auto mismatched = tcp_pair.client.peer_credentials();
+    AURORA_TEST_REQUIRE_FALSE(mismatched.ok());
+    AURORA_TEST_CHECK_EQ(mismatched.error().code, "net-option-conflict");
+#endif
+}
+
+// 原生选项在发起系统调用之前生效：合法集合在 TCP 上被接受并让连接照常收发（含接受侧对新句柄的重放
+// ——内核的选项继承表两腿不同，`TCP_NODELAY` 在 Linux 上不随 accept 传下来）。
+AURORA_TEST_CASE(native_options_take_effect_before_the_syscall) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no socket options to set");
+#else
+    HostDriven host;
+    auto &registry = aurora::app::EventSourceRegistry::instance();
+
+    StreamOptions listener_options;
+    listener_options.native.reuse_address = true;
+    listener_options.native.receive_buffer_bytes = 64 * 1024;
+    listener_options.native.send_buffer_bytes = 64 * 1024;
+    listener_options.native.linger = std::chrono::milliseconds{50};
+    const auto bound = Endpoint::loopback(0);
+    AURORA_TEST_CHECK_EQ(bind_code(bound, listener_options), "");
+
+    StreamOptions client_options = host_options();
+    client_options.native.no_delay = true;
+    client_options.native.keep_alive_enabled = true;
+    client_options.native.keep_alive_idle = std::chrono::seconds{1};
+    client_options.native.keep_alive_interval = std::chrono::milliseconds{500};
+    client_options.native.source = Endpoint::loopback(0);  // 源地址只在未绑定的客户端句柄上有意义
+#if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID)
+    client_options.native.keep_alive_probes = 3;
+#endif
+    // 「只验证选项被接受」的连接另开一只监听口：`connect_code` 拿到的流随即析构，握手却留在下一只
+    // 监听口的 backlog 里，混用同一只会让后面的 accept 交付那条已销毁的连接。
+    auto probe = StreamListener::bind(Endpoint::loopback(0), 4, host_options());
+    AURORA_TEST_REQUIRE(probe.ok());
+    auto probe_listener = std::move(probe.value());
+    AURORA_TEST_CHECK_EQ(connect_code(registry, Endpoint::loopback(probe_listener.local_port()), client_options), "");
+
+    auto live = StreamListener::bind(Endpoint::loopback(0), 4, listener_options);
+    AURORA_TEST_REQUIRE(live.ok());
+    auto listener = std::move(live.value());
+
+    // 接受侧带着监听口的选项集合交付，连接本身仍要能用（重放失败会被 accept 直接拒掉）。
+    std::atomic<int> delivered{0};
+    StreamTransport server;
+    StreamTransport client;
+    listener.accept([&](auto result) {
+        if (result) {
+            server = std::move(result.value());
+        }
+        ++delivered;
+    });
+    StreamTransport::connect(Endpoint::loopback(listener.local_port()), client_options, Cancellation{},
+                             [&](auto result) {
+                                 if (result) {
+                                     client = std::move(result.value());
+                                 }
+                                 ++delivered;
+                             });
+    AURORA_TEST_CHECK(pump_until(registry, [&]() { return delivered.load() == 2; }));
+    AURORA_TEST_REQUIRE(client.is_open());
+    AURORA_TEST_REQUIRE(server.is_open());
+    ReadLog log;
+    std::vector<char> inbox(8);
+    server.read(std::span<char>(inbox), read_into(log));
+    send_payload(registry, client, "opt");
+    AURORA_TEST_CHECK(pump_until(registry, [&log]() { return log.calls.load() == 1; }));
+    AURORA_TEST_CHECK_FALSE(log.failed);
+    AURORA_TEST_CHECK_EQ(std::string(inbox.data(), log.bytes.load()), "opt");
+#endif
+}
+
+// TCP 专属选项落在本机 IPC 上是确定的冲突，不是静默忽略：后者会让「以为开了低延迟」的调用方一直
+// 等到第一次现场卡顿才发现配置没生效。缓冲窗口类选项在两族都有对应物，必须照常接受。
+AURORA_TEST_CASE(tcp_only_native_options_conflict_on_local_ipc) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has neither local IPC nor socket options");
+#else
+    if (!local_ipc_available()) {
+        AURORA_TEST_SKIP("this platform leg provides no AF_UNIX socket at runtime");
+    }
+    HostDriven host;
+    auto &registry = aurora::app::EventSourceRegistry::instance();
+    const auto target = Endpoint::local(local_ipc_name("c"));
+    AURORA_TEST_REQUIRE(target.ok());
+
+    StreamOptions nudge;
+    nudge.native.no_delay = true;
+    AURORA_TEST_CHECK_EQ(bind_code(target.value(), nudge), "net-option-conflict");
+
+    StreamOptions keepalive;
+    keepalive.connect_timeout = std::chrono::milliseconds{0};
+    keepalive.native.keep_alive_enabled = true;
+    AURORA_TEST_CHECK_EQ(connect_code(registry, target.value(), keepalive), "net-option-conflict");
+
+    StreamOptions window;
+    window.native.receive_buffer_bytes = 8192;
+    window.native.send_buffer_bytes = 8192;
+    AURORA_TEST_CHECK_EQ(bind_code(target.value(), window), "");
+#endif
+}
+
+// 尺寸或方向矛盾的选项在发起系统调用前就被拒：0 字节的缓冲窗口、负值的 linger、「显式关保活却设
+// 探活参数」这三类都没有确定含义，交给内核等于让同一份配置在两条腿上有两种结果。
+AURORA_TEST_CASE(contradictory_native_options_are_refused_before_the_syscall) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no socket options to contradict");
+#else
+    const auto bound = Endpoint::loopback(0);
+
+    StreamOptions zero_window;
+    zero_window.native.receive_buffer_bytes = 0;
+    AURORA_TEST_CHECK_EQ(bind_code(bound, zero_window), "net-option-conflict");
+
+    StreamOptions negative_window;
+    negative_window.native.send_buffer_bytes = -1;
+    AURORA_TEST_CHECK_EQ(bind_code(bound, negative_window), "net-option-conflict");
+
+    StreamOptions negative_linger;
+    negative_linger.native.linger = std::chrono::milliseconds{-1};
+    AURORA_TEST_CHECK_EQ(bind_code(bound, negative_linger), "net-option-conflict");
+
+    StreamOptions tuning_while_disabled;
+    tuning_while_disabled.native.keep_alive_enabled = false;
+    tuning_while_disabled.native.keep_alive_idle = std::chrono::seconds{1};
+    AURORA_TEST_CHECK_EQ(bind_code(bound, tuning_while_disabled), "net-option-conflict");
+
+    // 源地址需要一个尚未绑定的客户端句柄：监听口自己就是被绑定的那一侧。
+    StreamOptions source_on_listener;
+    source_on_listener.native.source = Endpoint::loopback(0);
+    AURORA_TEST_CHECK_EQ(bind_code(bound, source_on_listener), "net-option-conflict");
+
+#if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID)
+    StreamOptions zero_probes;
+    zero_probes.native.keep_alive_enabled = true;
+    zero_probes.native.keep_alive_probes = 0;
+    AURORA_TEST_CHECK_EQ(bind_code(bound, zero_probes), "net-option-conflict");
+#else
+    // 本腿没有对应的每连接旋钮：要么如实回报设置失败（Windows 的重试上限是全局的），要么整档不支持
+    // （其余腿）。两者都不是「静默按别的答案执行」。
+    StreamOptions probes;
+    probes.native.keep_alive_enabled = true;
+    probes.native.keep_alive_probes = 3;
+    probes.native.keep_alive_idle = std::chrono::seconds{1};
+    const auto code = bind_code(bound, probes);
+    AURORA_TEST_CHECK_TRUE(code.empty() || code == "net-option-failed");
+#endif
+#endif
+}
+
+// 路径长度分两档校验：值类型只按最宽一条腿的容量把关，装配 `sockaddr` 时再按本腿实际宽度判一次。
+// 108 字节的文本正好落在两档之间——它进得了值类型，却装不进任何一条腿的 `sun_path`（要留结尾 NUL）。
+AURORA_TEST_CASE(local_ipc_path_limits_are_enforced_at_the_value_type) {
+    AURORA_TEST_CHECK_FALSE(Endpoint::local(std::string_view{}).ok());
+    AURORA_TEST_CHECK_FALSE(Endpoint::local(std::string(109, 'p')).ok());
+    const auto fits_value_type = Endpoint::local(std::string(108, 'p'));
+    AURORA_TEST_REQUIRE(fits_value_type.ok());
+    AURORA_TEST_CHECK_TRUE(fits_value_type.value().is_local_path());
+}
+
+// 值类型放行但本腿装不下的路径，必须在发起系统调用之前落 `net-endpoint-invalid`；名字已被占用（上一次
+// 崩溃留下的 socket 文件，或同名的普通文件）时 bind 落 `net-bind-failed`——两条腿在这两件事上给出同一
+// 件事实，本层不自动删掉别人留下的命名键（并发启动的两个进程之间「谁有权删」无解）。
+AURORA_TEST_CASE(local_ipc_leg_capacity_and_stale_name_are_reported_by_bind) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no local IPC name to bind");
+#else
+    if (!local_ipc_available()) {
+        AURORA_TEST_SKIP("this platform leg provides no AF_UNIX socket at runtime");
+    }
+    const auto too_long_for_this_leg = Endpoint::local(std::string(108, 'p'));
+    AURORA_TEST_REQUIRE(too_long_for_this_leg.ok());
+    AURORA_TEST_CHECK_EQ(bind_code(too_long_for_this_leg.value(), StreamOptions{}), "net-endpoint-invalid");
+
+    const auto stale = local_ipc_name("stale");
+    AURORA_TEST_REQUIRE_FALSE(stale.empty());
+    const auto occupied = Endpoint::local(stale);
+    AURORA_TEST_REQUIRE(occupied.ok());
+    std::ofstream keeper{std::filesystem::path{stale}};
+    AURORA_TEST_REQUIRE(keeper.is_open());
+    keeper << "x";
+    keeper.close();
+    auto bound = StreamListener::bind(occupied.value(), 4, StreamOptions{});
+    AURORA_TEST_REQUIRE_FALSE(bound.ok());
+    AURORA_TEST_CHECK_EQ(bound.error().code, "net-bind-failed");
 #endif
 }
 

@@ -33,6 +33,7 @@
 #include "aurora/app/event_source_registry.h"
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
+#include "aurora/net/detail/async_io.h"
 #include "aurora/net/poll.h"
 #include "aurora/net/socket.h"
 #include "aurora/state/async.h"
@@ -124,7 +125,9 @@ class PollEngine final : public Engine {
         caps.event_source = app::EventSourceRegistry::instance().event_source_supported();
         caps.udp = true;  // 数据报形态随 `DatagramTransport` 落地（本机 IPC 与 TLS 仍未落地，位不先点亮）
         caps.dns = true;  // 名称解析随 `net::Resolver` 落地（同一句「能力位不得先于实现点亮」的补账）
-        // local_ipc / tls 恒 false：该形态的实现尚未落地。
+        // 本机 IPC 位由运行期探测决定：头文件提供 `AF_UNIX` 与真的能开出这个地址族是两件事，
+        // Windows 上「编译过」只说明前一件。tls 仍恒 false——该形态的实现尚未落地。
+        caps.local_ipc = detail::local_ipc_supported();
         return caps;
     }
 

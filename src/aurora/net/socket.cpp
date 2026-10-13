@@ -10,15 +10,20 @@
 //   - select 第一参：Windows 忽略、POSIX 须 max_fd+1。
 //   - recv/send 长度与返回：POSIX 为 ssize_t（64 位）、Winsock 为 int；按块上限（≤1MiB）
 //     使正返回值必落 int 区间，窄化在实现侧一次解决。
+//   - 本机 IPC 地址形态：Windows 的 SDK 头不提供 `sockaddr_un`（其 AF_UNIX 腿仍按同一布局解析传入
+//     地址），POSIX 有真实的 `<sys/un.h>` 且 macOS 的 `sun_path` 比 Linux 窄；故路径容量在装配
+//     `sockaddr` 时按本腿实际宽度再判一次，而不是只靠值类型里那个最宽档的上限。
 
 #include "aurora/net/socket.h"
 
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -35,8 +40,14 @@
 #include <mutex>
 // Windows: Winsock2（winsock2.h 须在 windows.h 之前——本文件不引入 windows.h）。
 // `WSAPoll` / `WSAPOLLFD` 亦声明于此头（wait_ready 的 Windows 腿）。
+// clang-format off
+// 顺序是硬约束而非风格：`mstcpip.h` 里的 `tcp_keepalive` 与 `SIO_KEEPALIVE_VALS` 建在 Winsock 基础类型
+// （`u_long`、`_WSAIOW`、`IOC_IN`）之上，头自身不做包含保护性回补，故必须排在 winsock2.h 之后；
+// clang-format 的 SortIncludes 会把它们按字母序换过来，因此这一段单独关掉格式化。
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <mstcpip.h>
+// clang-format on
 #if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
 #pragma comment(lib, "ws2_32.lib")
 #endif
@@ -46,10 +57,12 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/un.h>
 #include <unistd.h>
 #endif
 
@@ -73,8 +86,28 @@ auto native_last_error() -> int { return ::WSAGetLastError(); }
 /// @param os_error `native_last_error()` 返回值。
 /// @return 等于 `WSAETIMEDOUT` 为 true。
 auto native_recv_timed_out(int os_error) -> bool { return os_error == WSAETIMEDOUT; }
+
+/// @brief 「本腿不认这个地址族」判据（本机 IPC 在旧版 Windows 上即落此处）。
+/// @param os_error `native_last_error()` 返回值。
+/// @return 等于 `WSAEAFNOSUPPORT` 或 `WSAEINVAL` 时为 true。
+/// @note `WSAEINVAL` 一并收下：AF_UNIX 尚未随系统更新到位时，Winsock 对未知地址族的回报在这两种
+///       形态之间摇摆，而创建句柄这一步的 `WSAEINVAL` 除地址族外没有别的来源。
+auto native_family_unsupported(int os_error) -> bool { return os_error == WSAEAFNOSUPPORT || os_error == WSAEINVAL; }
+
+/// @brief Windows 的 SDK 头不提供 `sockaddr_un`，而其 AF_UNIX 腿解析传入地址时认的正是这一布局
+/// （前两字节是地址族，其后是路径文本），故在此按内核侧形态补齐声明并冠以库内类型名（仓内命名
+/// 纪律不允许自定义类型直接占平台标识符）。POSIX 腿一律用 `<sys/un.h>` 里的真实类型——macOS 的
+/// `sockaddr_un` 在族字段前还有一字节 `sun_len`、路径段也比这里窄，用自定义结构去拼一条 BSD 地址
+/// 会得到错位的命名键。
+struct UnixSocketAddr {
+    unsigned short sun_family;  ///< 地址族，填 `AF_UNIX`
+    char sun_path[108];  ///< 路径文本（含结尾 NUL 的本腿容量）
+};
 #else
 using NativeSocket = int;
+
+/// @brief POSIX 腿的本机 IPC 地址形态直接用内核头里的那一枚，库内不复制布局（两腿字段宽度不同）。
+using UnixSocketAddr = sockaddr_un;
 
 auto native_close(NativeSocket s) -> void { (void)::close(s); }
 
@@ -83,6 +116,9 @@ auto native_last_error() -> int { return errno; }
 // POSIX：阻塞套接字挂上 SO_RCVTIMEO 后，超时以 EAGAIN/EWOULDBLOCK 形态回报（两者是否同值随平台，
 // 故双判）。
 auto native_recv_timed_out(int os_error) -> bool { return os_error == EAGAIN || os_error == EWOULDBLOCK; }
+
+// POSIX：地址族不支持只有一个回报码（本机 IPC 通路在裸内核上没有对应物时的形态）。
+auto native_family_unsupported(int os_error) -> bool { return os_error == EAFNOSUPPORT; }
 #endif
 
 /// @brief Winsock `SOCKET` 宏常量各工具链形态不一，经 uint64 中转落 intptr_t 保证
@@ -180,16 +216,54 @@ auto scope_id_of(const sockaddr_in6 &address) -> std::uint32_t {
     return static_cast<std::uint32_t>(address.sin6_scope_id);
 }
 
-/// @brief 由端点组装平台 `sockaddr`（地址族取自端点，本层只承载 TCP 流）。
-/// @param endpoint 有效且为 IPv4 / IPv6 的端点。
+/// @brief 本机 IPC 路径能否装进本腿的 Unix 域地址（`sun_path` 的宽度是编译期事实，两腿并不相同）。
+///
+/// 值类型里的 `AURORA_NET_MAX_LOCAL_PATH` 取的是最宽一条腿，故这里必须再判一次：路径放不下时静默截断
+/// 会让两个进程各自绑到不同的名字上，现场表现是「连不上」而不是「名字太长」，那是最难查的一类缺陷。
+/// @param path 端点携带的路径文本。
+/// @return 留出结尾 NUL 后仍装得下为 OK；否则 `net-endpoint-invalid`，`detail` 写明本腿上限。
+auto check_unix_path(std::string_view path) -> Result<void> {
+    constexpr std::size_t capacity = sizeof(UnixSocketAddr::sun_path);
+    if (path.size() + 1 > capacity) {
+        return make_error(ErrorCode::NetEndpointInvalid,
+                          ErrorParams{{"detail", "local IPC path needs " + std::to_string(path.size() + 1) +
+                                                     " bytes but this platform holds at most " +
+                                                     std::to_string(capacity) + " including the terminator"}});
+    }
+    return Result<void>{};
+}
+
+/// @brief 由本机 IPC 端点组装 Unix 域地址。
+/// @param endpoint 地址族为 `LocalPath` 的有效端点。
+/// @param storage 出参：按 `AF_UNIX` 清零后填族与路径。
+/// @return 成功为地址有效长度（到路径结尾的 NUL 为止，其余字节不参与命名）；路径超出本腿容量为
+///         `net-endpoint-invalid`。
+auto make_unix_address(const Endpoint &endpoint, sockaddr_storage &storage) -> Result<AddrLen> {
+    static_assert(sizeof(UnixSocketAddr) <= sizeof(sockaddr_storage),
+                  "a unix domain address must fit in the generic socket storage");
+    if (auto fits = check_unix_path(endpoint.host()); !fits) {
+        return fits.error();
+    }
+    // `sockaddr_storage` 是「足够大以容纳任一族」的通用容器，按族擦回具体类型是标准用法。
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto *const address = reinterpret_cast<UnixSocketAddr *>(&storage);
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    *address = UnixSocketAddr{};
+    address->sun_family = AF_UNIX;
+    std::memcpy(address->sun_path, endpoint.host().data(), endpoint.host().size());
+    return static_cast<AddrLen>(offsetof(UnixSocketAddr, sun_path) + endpoint.host().size() + 1);
+}
+
+/// @brief 由端点组装平台 `sockaddr`（地址族取自端点：IPv4 / IPv6 走 TCP 形态，本机 IPC 走 `AF_UNIX`）。
+/// @param endpoint 有效端点；本机 IPC 形态的路径长度在本函数内按本腿容量再校验。
 /// @param storage 出参：按族清零后填好地址、端口与作用域号。
-/// @return 成功为 `sockaddr` 的有效长度；端点不合用时为 `net-endpoint-invalid`。
+/// @return 成功为 `sockaddr` 的有效长度；端点不合用或路径过长为 `net-endpoint-invalid`。
 auto make_address(const Endpoint &endpoint, sockaddr_storage &storage) -> Result<AddrLen> {
     if (!endpoint.is_valid()) {
         return make_error(ErrorCode::NetEndpointInvalid, "endpoint carries no address");
     }
     if (endpoint.is_local_path()) {
-        return make_error(ErrorCode::NetEndpointInvalid, "local IPC endpoint is not a TCP address");
+        return make_unix_address(endpoint, storage);
     }
     // sockaddr_storage 是「足够大以容纳任一族」的通用容器，按族擦回具体类型是标准用法。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-type-cstyle-cast)
@@ -241,29 +315,68 @@ auto endpoint_from_address(const sockaddr_storage &storage) -> Result<Endpoint> 
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
         return Endpoint::from_bytes(AddressFamily::IPv6, bytes, ntohs(address->sin6_port), zone);
     }
+    if (storage.ss_family == AF_UNIX) {
+        // 本机 IPC 连接没有「对端 IP 地址」可还原：这一族的 `getpeername` 只回报地址族，路径段是空的
+        // （内核不在双向流上登记命名键）。公共面据此把问题答成 `net-option-conflict`，此处只作兜底。
+        return make_error(ErrorCode::NetSocketFailed, "a local IPC handle has no IP address form");
+    }
     return make_error(ErrorCode::NetSocketFailed, "unknown address family in socket address (family=" +
                                                       std::to_string(static_cast<int>(storage.ss_family)) + ")");
 }
 
-/// @brief 创建 TCP 流式套接字。
-/// @param family 地址族（`AF_INET` / `AF_INET6`）。
-/// @return 成功为原生句柄；失败为 `net-socket-failed`（含 OS 码）。
+/// @brief 创建流式套接字（TCP 与本机 IPC 共用一条出口，只差地址族与协议号）。
+/// @param family 地址族（`AF_INET` / `AF_INET6` / `AF_UNIX`）。
+/// @return 成功为原生句柄；失败为 `net-platform-unavailable`（本机 IPC 通路在本腿不存在）或
+///         `net-socket-failed`（含 OS 码）。
 auto open_socket(int family) -> Result<NativeSocket> {
-    const NativeSocket s = ::socket(family, SOCK_STREAM, IPPROTO_TCP);
+    // AF_UNIX 没有传输协议号：填 `IPPROTO_TCP` 在 Linux 上直接 EINVAL，而两族的流式语义一致，
+    // 故这里只换协议号而不换出口。
+    const int protocol = family == AF_UNIX ? 0 : IPPROTO_TCP;
+    const NativeSocket s = ::socket(family, SOCK_STREAM, protocol);
     if (native_is_invalid(s)) {
-        return net_error(ErrorCode::NetSocketFailed, "socket(SOCK_STREAM, IPPROTO_TCP)");
+        const int os_error = native_last_error();
+        if (family == AF_UNIX && native_family_unsupported(os_error)) {
+            // 「本机 IPC 这条路不存在」与「socket 调用失败」是两件事：前者由 `Capabilities` 提前回答，
+            // 落在这一分支才不会被当成句柄表故障去查。
+            return make_error(
+                ErrorCode::NetPlatformUnavailable,
+                "local IPC needs a socket runtime that provides AF_UNIX (os_error=" + std::to_string(os_error) + ")");
+        }
+        return make_error(ErrorCode::NetSocketFailed,
+                          "socket(SOCK_STREAM) failed (os_error=" + std::to_string(os_error) + ")");
     }
     return s;
 }
 
-/// @brief 按端点地址族创建 TCP 流式套接字。
+/// @brief 流式套接字的地址族判据。
+/// @param endpoint 目标端点。
+/// @param allow_local 本机 IPC 形态是否可用：异步传输面为真（同一套 `socket` / `connect` / `accept`
+///        序列换成 `AF_UNIX` 即可，状态机不变），同步阻塞面按既有裁决保持 TCP-only（口径见
+///        `StreamSocket::connect` 与 `Listener::bind` 的说明）。
+/// @return 成功为 `AF_INET` / `AF_INET6` / `AF_UNIX`；不合用为 `net-endpoint-invalid`。
+auto stream_family_of(const Endpoint &endpoint, bool allow_local) -> Result<int> {
+    if (!endpoint.is_valid()) {
+        return make_error(ErrorCode::NetEndpointInvalid, "stream sockets need an IPv4 or IPv6 endpoint");
+    }
+    if (endpoint.is_local_path()) {
+        if (!allow_local) {
+            return make_error(ErrorCode::NetEndpointInvalid,
+                              "the blocking socket face carries TCP streams only; use StreamTransport for local IPC");
+        }
+        return AF_UNIX;
+    }
+    return endpoint.family() == AddressFamily::IPv4 ? AF_INET : AF_INET6;
+}
+
+/// @brief 按端点地址族创建 TCP 流式套接字（同步阻塞面入口，本机 IPC 形态在此即拒）。
 /// @param endpoint 决定 `AF_INET` 还是 `AF_INET6` 的端点。
 /// @return 成功为原生句柄；失败为 `net-endpoint-invalid` / `net-socket-failed`。
 auto open_socket_for(const Endpoint &endpoint) -> Result<NativeSocket> {
-    if (!endpoint.is_valid() || endpoint.is_local_path()) {
-        return make_error(ErrorCode::NetEndpointInvalid, "stream sockets need an IPv4 or IPv6 endpoint");
+    auto family = stream_family_of(endpoint, false);
+    if (!family) {
+        return family.error();
     }
-    return open_socket(endpoint.family() == AddressFamily::IPv4 ? AF_INET : AF_INET6);
+    return open_socket(family.value());
 }
 
 /// @brief 写完全部字节：≤1MiB 分块循环（单轮请求字节数必落 int 可表示区间，两平台返回值
@@ -833,17 +946,250 @@ auto io_failed(ErrorCode code, const std::string &op) -> detail::IoAttempt {
     return attempt;
 }
 
-}  // namespace
+/// @brief 组装「选项与套接字当前形态不合用」的冲突原因。
+/// @param detail 冲突的现场描述（进 message 模板的 `{detail}`）。
+/// @return `net-option-conflict` 错误。
+auto option_conflict(std::string_view detail) -> Error {
+    return make_error(ErrorCode::NetOptionConflict, ErrorParams{{"detail", std::string{detail}}});
+}
 
-auto detail::open_nonblocking_stream(const Endpoint &endpoint) -> Result<std::intptr_t> {
-    if (endpoint.port() == 0) {
+/// @brief 下发一枚整数形态的 socket 选项（两平台的 `optval` 宽度同名，故只有一处需要按字节豁免）。
+/// @param s 原生句柄。
+/// @param level 选项层（`SOL_SOCKET` 或 `IPPROTO_TCP`）。
+/// @param option 选项名。
+/// @param label 写进诊断文本的选项拼写。
+/// @param value 选项值。
+/// @return 成功为 OK；失败为 `net-option-failed`（含 OS 原生码）。
+auto set_int_option(NativeSocket s, int level, int option, std::string_view label, int value) -> Result<void> {
+    const char *const bytes =
+        reinterpret_cast<const char *>(&value);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::setsockopt(s, level, option, bytes, static_cast<int>(sizeof(value))) != 0) {
+        return net_error(ErrorCode::NetOptionFailed, "setsockopt(" + std::string{label} + ")");
+    }
+    return Result<void>{};
+}
+
+/// @brief 下发 TCP 层的一枚整数选项。
+/// @param s 原生句柄。
+/// @param option 选项名。
+/// @param label 写进诊断文本的选项拼写。
+/// @param value 选项值。
+/// @return 成功为 OK；失败为 `net-option-failed`（含 OS 原生码）。
+auto set_tcp_option(NativeSocket s, int option, std::string_view label, int value) -> Result<void> {
+    return set_int_option(s, IPPROTO_TCP, option, label, value);
+}
+
+/// @brief 把毫秒意图换算成一枚至少为 1 的秒数（内核的保活与时限类选项都以整秒计）。
+/// @param value 调用方置了值的毫秒数。
+/// @return 向上取整后的秒数；非正值按 1 秒处理（0 秒的「立即探活」在内核侧没有对应形态）。
+#if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID)
+auto seconds_at_least_one(std::chrono::milliseconds value) -> int {
+    const auto ms = std::max<long long>(value.count(), 1);
+    return static_cast<int>((ms + 999) / 1000);
+}
+#endif
+
+/// @brief 下发保活调参（空闲时长 / 探测间隔 / 失败次数）。
+///
+/// 两腿的拼写完全不同，故各写一条：POSIX（Linux 与 Android）是 `TCP_KEEPIDLE` / `TCP_KEEPINTVL` /
+/// `TCP_KEEPCNT` 三枚 TCP 层选项；Winsock 只有一枚 `SIO_KEEPALIVE_VALS`，一次下发前两档，且**没有**
+/// 失败次数的入口。既不支持的字段不在这里被静默吞掉——调用方要的是「这条连接多久判死」，缺一档答案
+/// 就得说缺一档。
+/// @param s 原生句柄（`SO_KEEPALIVE` 已置）。
+/// @param options 置了值的调参字段。
+/// @return 成功为 OK；本腿没有对应入口或系统调用失败为 `net-option-failed`（`detail` 写明缺哪一枚）。
+auto apply_keepalive_tuning(NativeSocket s, const NativeOptions &options) -> Result<void> {
+#ifdef AURORA_PLATFORM_WINDOWS
+    if (options.keep_alive_probes) {
+        return make_error(ErrorCode::NetOptionFailed,
+                          ErrorParams{{"detail",
+                                       "Winsock exposes no per-connection probe-count knob beside "
+                                       "SIO_KEEPALIVE_VALS (the retry limit is a system-wide one)"}});
+    }
+    // 两档都没置时不发起这次 Ioctl：只想要保活本身已由 SO_KEEPALIVE 表达，参数留给内核缺省
+    // （空闲 2 小时、间隔 1 秒），把它填成显式值等于替调用方做了一个看不见的决定。
+    if (!options.keep_alive_idle && !options.keep_alive_interval) {
+        return Result<void>{};
+    }
+    auto millis = [](const std::optional<std::chrono::milliseconds> &value, long long fallback) {
+        return static_cast<u_long>(value ? std::max<long long>(value->count(), 1) : fallback);
+    };
+    tcp_keepalive request{};
+    request.onoff = 1;
+    request.keepalivetime = millis(options.keep_alive_idle, 7200000);
+    request.keepaliveinterval = millis(options.keep_alive_interval, 1000);
+    unsigned long returned = 0;
+    // `WSAIoctl` 在不需要传回数据时按 0 长度给出空出参缓冲，这是该接线的固定形态。
+    if (::WSAIoctl(s, static_cast<DWORD>(SIO_KEEPALIVE_VALS), &request, static_cast<DWORD>(sizeof(request)), nullptr, 0,
+                   &returned, nullptr, nullptr) != 0) {
+        return net_error(ErrorCode::NetOptionFailed, "WSAIoctl(SIO_KEEPALIVE_VALS)");
+    }
+    return Result<void>{};
+#elif defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID)
+    if (options.keep_alive_idle) {
+        if (auto set = set_tcp_option(s, TCP_KEEPIDLE, "TCP_KEEPIDLE", seconds_at_least_one(*options.keep_alive_idle));
+            !set) {
+            return set.error();
+        }
+    }
+    if (options.keep_alive_interval) {
+        if (auto set =
+                set_tcp_option(s, TCP_KEEPINTVL, "TCP_KEEPINTVL", seconds_at_least_one(*options.keep_alive_interval));
+            !set) {
+            return set.error();
+        }
+    }
+    if (options.keep_alive_probes) {
+        if (*options.keep_alive_probes <= 0) {
+            return option_conflict("keep_alive_probes needs a positive retry count");
+        }
+        if (auto set = set_tcp_option(s, TCP_KEEPCNT, "TCP_KEEPCNT", *options.keep_alive_probes); !set) {
+            return set.error();
+        }
+    }
+    return Result<void>{};
+#else
+    (void)s;
+    (void)options;
+    return make_error(ErrorCode::NetOptionFailed,
+                      ErrorParams{{"detail", "this platform leg exposes no per-connection keepalive tuning"}});
+#endif
+}
+
+/// @brief 逐条应用原生选项——只在套接字创建时调用（bind / connect 之前，`SO_REUSEADDR` 与源地址绑定
+///        过了这个时点就无效，故本层不提供「建立后再改」的第二入口）。
+///
+/// 未置值的字段一条 `setsockopt` 都不发起，内核缺省原样保留。与地址族的配合：`no_delay` 与保活各档
+/// 是 TCP 专属，在本机 IPC 流上落 `net-option-conflict` 而**不是静默忽略**——静默忽略会让「以为开了
+/// 保活的长连接」等到下一次中间设备超时才现形，那时现场已经没有配置信息可查。
+/// @param s 原生句柄。
+/// @param family 本句柄的地址族。
+/// @param options 调用方置了值的字段。
+/// @param allow_source_bind 是否允许 `source`：只有尚未绑定的客户端套接字允许——监听口的绑定目标已由
+///        端点给出，已接受的连接则对端已定，两者上的 `source` 都是用不上的字段。
+/// @return 成功为 OK；不合用为 `net-option-conflict`，系统调用失败为 `net-option-failed` /
+///         `net-bind-failed`（源地址绑定）。
+auto apply_socket_options(NativeSocket s, AddressFamily family, const NativeOptions &options, bool allow_source_bind)
+    -> Result<void> {
+    const bool local_ipc = family == AddressFamily::LocalPath;
+    if (options.receive_buffer_bytes) {
+        if (*options.receive_buffer_bytes <= 0) {
+            return option_conflict("receive_buffer_bytes needs a positive byte count");
+        }
+        if (auto set = set_int_option(s, SOL_SOCKET, SO_RCVBUF, "SO_RCVBUF", *options.receive_buffer_bytes); !set) {
+            return set.error();
+        }
+    }
+    if (options.send_buffer_bytes) {
+        if (*options.send_buffer_bytes <= 0) {
+            return option_conflict("send_buffer_bytes needs a positive byte count");
+        }
+        if (auto set = set_int_option(s, SOL_SOCKET, SO_SNDBUF, "SO_SNDBUF", *options.send_buffer_bytes); !set) {
+            return set.error();
+        }
+    }
+    if (options.reuse_address) {
+        if (auto set = set_int_option(s, SOL_SOCKET, SO_REUSEADDR, "SO_REUSEADDR", *options.reuse_address ? 1 : 0);
+            !set) {
+            return set.error();
+        }
+    }
+    if (options.linger) {
+        if (options.linger->count() < 0) {
+            return option_conflict("linger needs a non-negative duration");
+        }
+        // `SO_LINGER` 的时限单位是整秒，故向上取整：请求 1 ms 的收尾窗口却按 0 秒下发，等于把「等一等」
+        // 执行成「立即 RST」，那是与调用方意图相反的两种关闭形态。置值即启用（0 是合法的「立即丢弃」）。
+        const auto seconds = static_cast<unsigned int>((std::max<long long>(options.linger->count(), 0) + 999) / 1000);
+        // 上限按最窄一条腿（Winsock 的 `unsigned short`）夹：被夹到的口径是 18 小时以上的收尾窗口，
+        // 两腿对此都没有一致行为，夹住并报同一枚结构比让某条腿溢出更可信。
+        const auto capped = static_cast<unsigned short>(
+            std::min(seconds, static_cast<unsigned int>(std::numeric_limits<unsigned short>::max())));
+        const ::linger value{.l_onoff = 1, .l_linger = capped};
+        // 选项值按结构体整体传字节，这是 `SO_LINGER` 唯一的形态。
+        const char *const bytes =
+            reinterpret_cast<const char *>(&value);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (::setsockopt(s, SOL_SOCKET, SO_LINGER, bytes, static_cast<int>(sizeof(value))) != 0) {
+            return net_error(ErrorCode::NetOptionFailed, "setsockopt(SO_LINGER)");
+        }
+    }
+    if (options.no_delay) {
+        if (local_ipc) {
+            return option_conflict("TCP_NODELAY has no counterpart on a local IPC stream");
+        }
+        if (auto set = set_tcp_option(s, TCP_NODELAY, "TCP_NODELAY", *options.no_delay ? 1 : 0); !set) {
+            return set.error();
+        }
+    }
+    const bool keepalive_tuned = options.keep_alive_idle || options.keep_alive_interval || options.keep_alive_probes;
+    if (keepalive_tuned && options.keep_alive_enabled == false) {
+        return option_conflict("keepalive tuning while keep_alive_enabled is explicitly false");
+    }
+    const bool keepalive_wanted = options.keep_alive_enabled.value_or(false) || keepalive_tuned;
+    if (keepalive_wanted || options.keep_alive_enabled == false) {
+        if (local_ipc) {
+            return option_conflict("SO_KEEPALIVE is a TCP option and has no counterpart on a local IPC stream");
+        }
+        if (auto set = set_int_option(s, SOL_SOCKET, SO_KEEPALIVE, "SO_KEEPALIVE", keepalive_wanted ? 1 : 0); !set) {
+            return set.error();
+        }
+    }
+    if (keepalive_tuned) {
+        if (auto tuned = apply_keepalive_tuning(s, options); !tuned) {
+            return tuned.error();
+        }
+    }
+    if (options.source) {
+        if (!allow_source_bind) {
+            return option_conflict("a source address needs an unbound client socket; this handle already has one");
+        }
+        if (local_ipc) {
+            return option_conflict("a local IPC stream has no IP source address to bind");
+        }
+        if (!options.source->is_valid() || options.source->is_local_path()) {
+            return make_error(ErrorCode::NetEndpointInvalid, "a source address needs an IPv4 or IPv6 endpoint");
+        }
+        if (options.source->family() != family) {
+            return option_conflict("source address family differs from the connection address family");
+        }
+        sockaddr_storage storage{};
+        auto built = make_address(*options.source, storage);
+        if (!built) {
+            return built.error();
+        }
+        const AddrLen length = built.value();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (::bind(s, reinterpret_cast<const sockaddr *>(&storage), length) != 0) {
+            return net_error(ErrorCode::NetBindFailed, "bind(source=" + options.source->to_string() + ")");
+        }
+    }
+    return Result<void>{};
+}
+
+/// @brief 创建一个非阻塞流式套接字并配好原生选项（两条异步入口共用的前半段）。
+/// @param endpoint 目标端点（IPv4 / IPv6 或本机 IPC 路径形态）。
+/// @param options 原生选项。
+/// @param allow_source_bind 是否允许 `source`（见 `apply_native_options`）。
+/// @param needs_port 是否要求端口非 0（客户端发起连接要，监听口按 `port == 0` = 系统分配）。
+/// @return 成功为已置非阻塞的句柄；失败为上述各码（失败路径已关闭句柄）。
+auto open_configured_stream(const Endpoint &endpoint, const NativeOptions &options, bool allow_source_bind,
+                            bool needs_port) -> Result<std::intptr_t> {
+    auto family = stream_family_of(endpoint, true);
+    if (!family) {
+        return family.error();
+    }
+    if (needs_port && !endpoint.is_local_path() && endpoint.port() == 0) {
         return make_error(ErrorCode::NetEndpointInvalid, "a stream client endpoint needs a non-zero port");
     }
-    auto opened = open_socket_for(endpoint);
+    auto opened = open_socket(family.value());
     if (!opened) {
         return opened.error();
     }
     const NativeSocket s = opened.value();
+    if (auto applied = apply_socket_options(s, endpoint.family(), options, allow_source_bind); !applied) {
+        native_close(s);
+        return applied.error();
+    }
     if (auto set = make_nonblocking(s); !set) {
         native_close(s);
         return set.error();
@@ -851,8 +1197,18 @@ auto detail::open_nonblocking_stream(const Endpoint &endpoint) -> Result<std::in
     return to_handle(s);
 }
 
-auto detail::open_nonblocking_listener(const Endpoint &endpoint, int backlog) -> Result<std::intptr_t> {
-    auto opened = open_socket_for(endpoint);
+}  // namespace
+
+auto detail::open_nonblocking_stream(const Endpoint &endpoint, const NativeOptions &options) -> Result<std::intptr_t> {
+    return open_configured_stream(endpoint, options, true, true);
+}
+
+auto detail::open_nonblocking_listener(const Endpoint &endpoint, int backlog, const NativeOptions &options)
+    -> Result<std::intptr_t> {
+    // 监听口的选项必须在 bind 之前下发（`SO_REUSEADDR` 过了这个时点就无效），故这里先建句柄应用选项，
+    // 再绑定与挂起。本机 IPC 形态绑到已存在的路径文件上会以 EADDRINUSE 落 `net-bind-failed`：本层
+    // 不自动 `unlink()`，删掉别人留下的命名键是一种抢占，而抢占在并发启动的两个进程之间无解。
+    auto opened = open_configured_stream(endpoint, options, false, false);
     if (!opened) {
         return opened.error();
     }
@@ -876,11 +1232,84 @@ auto detail::open_nonblocking_listener(const Endpoint &endpoint, int backlog) ->
         return err;
     }
     // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
-    if (auto set = make_nonblocking(s); !set) {
-        native_close(s);
-        return set.error();
+    return opened;
+}
+
+auto detail::apply_native_options(std::intptr_t handle, const NativeOptions &options) -> Result<void> {
+    auto family = handle_family(handle);
+    if (!family) {
+        return family.error();
     }
-    return to_handle(s);
+    // 已接受的连接没有 `source` 可言（对端已由内核定下），故这里的口径与监听口一致。
+    return apply_socket_options(from_handle(handle), family.value(), options, false);
+}
+
+auto detail::handle_family(std::intptr_t handle) -> Result<AddressFamily> {
+    sockaddr_storage local{};
+    AddrLen name_len = sizeof(local);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::getsockname(from_handle(handle), reinterpret_cast<sockaddr *>(&local), &name_len) != 0) {
+        return net_error(ErrorCode::NetSocketFailed, "getsockname");
+    }
+    if (local.ss_family == AF_UNIX) {
+        return AddressFamily::LocalPath;
+    }
+    if (local.ss_family == AF_INET) {
+        return AddressFamily::IPv4;
+    }
+    if (local.ss_family == AF_INET6) {
+        return AddressFamily::IPv6;
+    }
+    return make_error(ErrorCode::NetSocketFailed, "unknown address family on this handle (family=" +
+                                                      std::to_string(static_cast<int>(local.ss_family)) + ")");
+}
+
+auto detail::peer_identity(std::intptr_t handle) -> Result<PeerCredentials> {
+    PeerCredentials credentials;
+#if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID)
+    // 内核登记的对端凭据是三个 32 位整数（pid、uid、gid）。这里按 ABI 就地声明同形结构而不用 glibc 的
+    // `struct ucred`：那个名字只在 `_GNU_SOURCE` 下可见，而本层不能假设消费方的宏。
+    struct KernelPeerCred {
+        std::uint32_t process_id;
+        std::uint32_t user_id;
+        std::uint32_t group_id;
+    };
+    KernelPeerCred kernel{};
+    AddrLen length = sizeof(kernel);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::getsockopt(from_handle(handle), SOL_SOCKET, SO_PEERCRED, reinterpret_cast<char *>(&kernel), &length) != 0) {
+        return net_error(ErrorCode::NetOptionFailed, "getsockopt(SO_PEERCRED)");
+    }
+    credentials.anonymous = false;
+    credentials.process_id = kernel.process_id;
+    credentials.user_id = kernel.user_id;
+    credentials.group_id = kernel.group_id;
+    return credentials;
+#else
+    // 其余腿如实回报匿名：Windows 的 AF_UNIX 腿没有向用户态登记对端身份的内核通路，macOS / BSD 的
+    // `LOCAL_PEERCRED` 出参结构本轮无验证腿，按记忆猜布局会得到错位的小整数。「匿名」是可判读的事实，
+    // 调用方据此走匿名策略分支；把它报成查询失败反而掩盖了「这条腿本来就不给身份」。
+    (void)handle;
+    return credentials;
+#endif
+}
+
+auto detail::local_ipc_supported() -> bool {
+    // 判据是「本进程现在能建出本机 IPC 的流式套接字」而不是「编译期认得这个宏」：Windows 的 AF_UNIX
+    // 随系统版本而来，编译通过不代表运行可用，而 `Capabilities` 是唯一真值源。
+    static const bool SUPPORTED = [] {
+        const Session runtime;  // Windows：socket() 要求已初始化的 Winsock 运行时
+        if (!runtime.ok()) {
+            return false;
+        }
+        auto opened = open_socket(AF_UNIX);
+        if (!opened) {
+            return false;
+        }
+        native_close(opened.value());
+        return true;
+    }();
+    return SUPPORTED;
 }
 
 auto detail::close_handle(std::intptr_t handle) -> void {
@@ -1058,7 +1487,8 @@ auto open_datagram_socket(int family) -> Result<NativeSocket> {
     return s;
 }
 
-/// @brief 数据报地址的可用性判据（本机 IPC 没有数据报形态：Windows 命名管道无此语义）。
+/// @brief 数据报地址的可用性判据（本机 IPC 没有数据报形态：公共面的 `DatagramTransport` 按裁决只承载
+///        IP 数据报，路径形态没有端口，一次投递的边界语义也无从对齐）。
 /// @param endpoint 待检端点。
 /// @return 成功为 `AF_INET` / `AF_INET6`；不合用为 `net-endpoint-invalid`。
 auto datagram_family_of(const Endpoint &endpoint) -> Result<int> {

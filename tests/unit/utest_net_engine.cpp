@@ -1,8 +1,9 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/engine.h
 /// 测试说明: aurora::net 自带 poll 线程引擎（CHG-010 底座切片）的行为契约回归：能力矩阵按已落地
-///           形态如实回报（未实现的 udp / local_ipc / dns / tls 不得先于实现点亮）、`post` 触发惰性
-///           启动并把任务投到**非调用线程**执行、`post_after` 按单调钟到期投递且不早于登记意图、
+///           形态如实回报（未实现的 tls 不得先于实现点亮；本机 IPC 取决于本腿运行期是否真有该地址族，
+///           故该位与平台层探测同口径）、`post` 触发惰性启动并把任务投到**非调用线程**执行、
+///           `post_after` 按单调钟到期投递且不早于登记意图、
 ///           `shutdown` 幂等且收敛后可再次惰性启动、常驻循环真实驱动事件源（登记→对端写入→回调
 ///           抵达，全程不调 `wait_and_dispatch`，即 §2「引擎自持工作线程」的形态）、注销与就绪同帧
 ///           发生时循环不被瞬态等待失败打断且后续登记照常送达（§18-1「注销 = 停止产生新回调」）、
@@ -24,6 +25,7 @@
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
 #include "aurora/net/capabilities.h"
+#include "aurora/net/detail/async_io.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/poll.h"
 #include "aurora/net/socket.h"
@@ -103,8 +105,9 @@ struct EngineGuard {
 
 }  // namespace
 
-// 能力矩阵如实回报：本腿的事件源/字节流/监听/数据报/名称解析位为真，未落地形态（本机 IPC、TLS）恒假。
-// wasm 腿则一切为假且名为 "none"（§2「不提供假降级」）。
+// 能力矩阵如实回报：本腿的事件源/字节流/监听/数据报/名称解析位为真，未落地形态（TLS）恒假，本机 IPC
+// 位与本腿运行期探测同口径（头文件提供 `AF_UNIX` 与真能开出该地址族是两件事；「探测说能用」的行为半
+// 身在 `utest_net_transport` 的路径往返用例里）。wasm 腿则一切为假且名为 "none"（§2「不提供假降级」）。
 AURORA_TEST_CASE(capabilities_report_only_landed_forms) {
 #ifdef AURORA_PLATFORM_WASM
     const auto &engine = Engine::instance();
@@ -124,7 +127,7 @@ AURORA_TEST_CASE(capabilities_report_only_landed_forms) {
     AURORA_TEST_CHECK_TRUE(caps.event_source);
     AURORA_TEST_CHECK_TRUE(caps.udp);
     AURORA_TEST_CHECK_TRUE(caps.dns);
-    AURORA_TEST_CHECK_FALSE(caps.local_ipc);
+    AURORA_TEST_CHECK_EQ(caps.local_ipc, aurora::net::detail::local_ipc_supported());
     AURORA_TEST_CHECK_FALSE(caps.tls);
 #endif
 }

@@ -17,6 +17,11 @@
 ///   通道，不新增第三种排队形态；**完成回调一律在锁外触发**，回调内可直接再发起读写而不必担心重入死锁。
 /// - **半关闭是合法状态而不是错误**：读得 0 字节 = 对端已关闭写向（FIN），此后本端继续写仍成立；
 ///   FIN 之后再读恒返回 0，不设 `net-half-closed-*` 之类的码（提案 §18-2）。
+/// - **本机 IPC 与 TCP 同型**：同一个 `StreamTransport` / `StreamListener`，形态只由 `Endpoint` 的地址族
+///   决定（路径形态即本机 IPC），因此读写、背压、取消、半关闭、事件源驱动这一整套语义在两种形态上逐字
+///   相同——TLS 叠加后同构也是这条的推论。两点差异明写在类型成员上：本机 IPC 上 `peer_endpoint()` 无
+///   可移植的地址形态可返回（落 `net-option-conflict`），对端身份改由 `peer_credentials()` 回答；
+///   `StreamOptions::native` 里的 TCP 专属选项在本机 IPC 上同样落 `net-option-conflict`。
 ///
 /// 背压契约（提案 §11）为**拉模型**：写侧的待发字节越过高水位后，新的 `write()` 直接被拒
 /// （`net-buffer-limit`），回落到低水位才重新接受；读侧可 `pause_read()` 让字节留在内核而不进本层缓冲。
@@ -39,6 +44,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -84,6 +90,46 @@ using ReadDone = std::function<void(Result<std::size_t>)>;
 /// @brief 一次写的结果：成功携已进入内核的字节数，失败携原因。
 using WriteDone = std::function<void(Result<std::size_t>)>;
 
+/// @brief 原生选项逃生舱：少量高频 socket 选项（提案 §11 的原则是「描述符级逃生舱 + 少量高频选项」，
+/// **不封装全选项矩阵**）。
+///
+/// 每个字段都是 `std::optional`：**未置值的字段一条 `setsockopt` 都不发起**，内核缺省原样保留。
+/// 生效时机只有一个——在 `connect()` / `bind()` 发起系统调用之前（`SO_REUSEADDR` 与源地址绑定在 bind
+/// 之后再设就已无效，因此本层不提供「连接建立后再改」的第二入口）。此后要动没覆盖到的选项，就用
+/// `native_handle()` 交出描述符自行接管，那正是逃生舱的另一半。
+///
+/// 与地址族的配合：`no_delay` 与 keepalive 各档（含其总开关）是 TCP 专属，本机 IPC 流上没有对应物，请求它们落
+/// `net-option-conflict` 而**不是静默忽略**——静默忽略会让「以为开了保活的长连接」等到下一次中间
+/// 设备超时才现形，那时现场已经没有配置信息。
+/// @note Thread: thread-safe（值类型）
+struct NativeOptions {
+    std::optional<bool> no_delay;  ///< `TCP_NODELAY`：关闭 Nagle 算法（低延迟小报文场景）
+    std::optional<int> receive_buffer_bytes;  ///< `SO_RCVBUF`：内核接收缓冲请求值（须为正）
+    std::optional<int> send_buffer_bytes;  ///< `SO_SNDBUF`：内核发送缓冲请求值（须为正）
+    std::optional<bool> reuse_address;  ///< `SO_REUSEADDR`：允许绑定处于 TIME_WAIT 的本地地址
+    /// @brief `SO_LINGER`：**置值即启用**该选项（未置值时不改动内核缺省的「优雅关闭」形态）；
+    /// 正值是等待待发数据发完的时限，0 表示关闭时立即丢弃待发数据并发 RST。
+    std::optional<std::chrono::milliseconds> linger;
+    std::optional<bool> keep_alive_enabled;  ///< `SO_KEEPALIVE`：连接空闲期发探活报文
+    std::optional<std::chrono::milliseconds> keep_alive_idle;  ///< 空闲多久后开始探活（`TCP_KEEPIDLE`）
+    std::optional<std::chrono::milliseconds> keep_alive_interval;  ///< 探活报文间隔（`TCP_KEEPINTVL`）
+    std::optional<int> keep_alive_probes;  ///< 连续失败多少次判死（`TCP_KEEPCNT`）
+    std::optional<Endpoint> source;  ///< 客户端侧绑定源地址 / 网卡（多网卡与出接口选择）
+};
+
+/// @brief 本机 IPC 连接的对端身份（提案 §11：本机服务的访问控制从「只看回环地址」升级为「看对端身份」）。
+///
+/// 三枚数值只在 `anonymous` 为假时有意义。身份是**连接建立那一刻**由内核登记的快照：此后对端换了
+/// 属主（进程不会）或对端已退出而连接尚未回收，本结构都不会变，故它回答的是「谁连上了我」，不是
+/// 「它现在还活着吗」。
+/// @note Thread: thread-safe（值类型）
+struct PeerCredentials {
+    bool anonymous = true;  ///< 本平台腿不提供对端身份（Windows 的本机 IPC 腿即恒为真）
+    std::uint32_t user_id = 0;  ///< 对端进程属主用户标识
+    std::uint32_t group_id = 0;  ///< 对端进程属主组标识
+    std::uint32_t process_id = 0;  ///< 对端进程标识（连接建立时登记的内核快照）
+};
+
 /// @brief 一条流的缓冲与超时口径（全部字段可显式覆盖；缺省值是提案 §18 定案的数字）。
 /// @note Thread: thread-safe（值类型）
 struct StreamOptions {
@@ -102,6 +148,8 @@ struct StreamOptions {
     /// Eyeballs 的 RFC 8305 形态，提案 §11 定案 200 ms）。**任一候选提前失败即立刻发起下一条**，
     /// 不等这个窗口；置 0 即关掉竞速，只发偏好族的首条。
     std::chrono::milliseconds race_stagger{std::chrono::milliseconds{200}};
+    /// @brief 原生选项逃生舱：缺省全部字段未置值，即**一条 `setsockopt` 都不发起**（内核缺省原样保留）。
+    NativeOptions native;
 };
 
 /// @brief 面向字节的异步流（move-only RAII 句柄；析构即关闭连接）。
@@ -130,10 +178,10 @@ class StreamTransport {
     /// @brief 发起一条异步连接（非阻塞；结果恰一次经 `on_done` 抵达）。
     ///
     /// 失败也走回调：本函数没有返回通道，因此**不存在「既不成功也不失败」的第三种结局**——一次永不
-    /// 触发的回调是这类接口最难定位的缺陷，故连入参不合用（端口为 0、本机 IPC 形态）与引擎起不来都
+    /// 触发的回调是这类接口最难定位的缺陷，故连入参不合用（端口为 0、空 / 超长的本机路径）与引擎起不来都
     /// 以回调携带原因的形式送达。
-    /// @param endpoint 目标端点；须为 IPv4 / IPv6 且端口非 0（本机 IPC 随本机 IPC 切片接入）。
-    /// @param options 缓冲与超时口径。
+    /// @param endpoint 目标端点：IPv4 / IPv6 且端口非 0，或本机 IPC 路径形态（`Endpoint::local`）。
+    /// @param options 缓冲、超时与原生选项口径。
     /// @param cancellation 本次操作的取消令牌；`cancel()` 后回调恰一次以 `net-cancelled` 抵达。
     /// @param on_done 完成回调；成功携已连接的流。
     static auto connect(const Endpoint &endpoint, const StreamOptions &options, const Cancellation &cancellation,
@@ -181,12 +229,22 @@ class StreamTransport {
     [[nodiscard]] auto native_handle() const -> std::intptr_t;
 
     /// @brief 读出对端地址。
-    /// @return 成功为对端端点；空态、已关闭或查询失败为 `net-socket-failed`。
+    /// @return 成功为对端端点；空态、已关闭或查询失败为 `net-socket-failed`；**本机 IPC 连接**为
+    ///         `net-option-conflict`（路径形态的对端没有可移植的地址文本，身份问 `peer_credentials()`）。
     [[nodiscard]] auto peer_endpoint() const -> Result<Endpoint>;
 
     /// @brief 对端是否位于本机回环（服务端访问控制判据，含 IPv4 内嵌形态）。
-    /// @return 落在回环段为 true；查询失败或地址族不认识为 false。
+    /// @return 落在回环段为 true；查询失败或地址族不认识为 false（本机 IPC 连接恒为 false）。
     [[nodiscard]] auto is_loopback_peer() const -> bool;
+
+    /// @brief 读出本机 IPC 连接的对端身份（`SO_PEERCRED` / `LOCAL_PEERCRED` 一类的内核登记）。
+    ///
+    /// 存在的理由是把本机服务的访问控制从「只看回环地址」升级为「看对端身份」：回环段上坐着谁，单靠
+    /// 地址无法回答，而本机 IPC 的连接本就只可能在同机发生。
+    /// @return 成功为对端身份（平台腿不提供时 `anonymous` 为真）；空态或已关闭为 `net-socket-failed`；
+    ///         **非本机 IPC 连接**（IPv4 / IPv6）为 `net-option-conflict`——IP 对端没有内核登记的身份，
+    ///         这一条不是失败而是形态不匹配，静默回全零身份会把「以为做了身份校验」的授权判断变成空转。
+    [[nodiscard]] auto peer_credentials() const -> Result<PeerCredentials>;
 
     /// @brief 登记一次读请求（缓冲必须存活到本次回调抵达）。
     ///
@@ -271,12 +329,17 @@ class StreamListener {
     /// @brief 绑定监听口（不阻塞任何线程；新连接经 `accept()` 登记的回调交付）。
     ///
     /// 绑到非回环地址即接受来自其它主机的连接，访问控制由调用方在取得流之后负责（本层不做隐式本机
-    /// 拦截，否则第三方接管句柄会得到无法解释的拒绝）。
-    /// @param endpoint 监听端点；端口 0 表示由系统分配（实际值经 `local_port()` 回报）。
+    /// 拦截，否则第三方接管句柄会得到无法解释的拒绝）。本机 IPC 形态下**已存在的路径不会被本层删除**：
+    /// 残留 socket 文件的清理归调用方，误删他人正在监听的同名路径是不可逆动作，而本层无从判断它是否
+    /// 活跃（路径占用在 bind 失败的那一刻才可见）。
+    /// @param endpoint 监听端点：IPv4 / IPv6（端口 0 表示由系统分配，实际值经 `local_port()` 回报），
+    ///        或本机 IPC 路径形态（`Endpoint::local`，此时 `local_port()` 恒 0）。
     /// @param backlog 挂起连接队列深度。
-    /// @param options 交付给每条被接受连接的缓冲与超时口径。
-    /// @return 成功为就绪监听器；失败为 `net-endpoint-invalid` / `net-socket-failed` /
-    ///         `net-bind-failed` / `net-listen-failed` / `net-option-failed`。
+    /// @param options 交付给每条被接受连接的缓冲与超时口径；`options.native` 在 bind **之前**生效
+    ///        （`reuse_address` 只有这个时机有意义）。
+    /// @return 成功为就绪监听器；失败为 `net-endpoint-invalid` / `net-socket-failed` / `net-bind-failed` /
+    ///         `net-listen-failed` / `net-option-failed` / `net-option-conflict` /
+    ///         `net-platform-unavailable`（本腿没有本机 IPC 通路）。
     [[nodiscard]] static auto bind(const Endpoint &endpoint, int backlog, const StreamOptions &options)
         -> Result<StreamListener>;
 

@@ -15,6 +15,10 @@
 /// 句柄一律以 `std::intptr_t` 承载、`-1` 恒无效（与 `net::StreamSocket::native_handle()` 同口径），
 /// 所有权归调用方：`open_*` 得到的句柄必须由 `close_handle()` 归还一次。
 ///
+/// 本头**包含**公共头 `aurora/net/transport.h` 而不是前向声明其中的类型：`NativeOptions` 与
+/// `ShutdownMode` 的形态定义在公共面，实现侧按值传递它们就必须见到完整类型；内部头依赖本层公共头
+/// 不改变任何分层方向（L1 实现 → L1 公共面，与 `datagram.cpp` 同一条路）。
+///
 /// @note Thread: 与底层句柄同线程使用（本层不加锁；串行化由传输层的投递上下文负责）
 /// @note Side-effects: 系统调用（非阻塞，故不产生「等待」这一类跨线程副作用）
 
@@ -25,12 +29,7 @@
 
 #include "aurora/core/result.h"
 #include "aurora/net/address.h"
-
-namespace aurora::net {
-/// @brief 关停方向（定义在公共头 `aurora/net/transport.h`）：这里按固定底层类型前向声明，
-/// 以免内部头反向依赖公共面。
-enum class ShutdownMode : std::uint8_t;
-}  // namespace aurora::net
+#include "aurora/net/transport.h"
 
 namespace aurora::net::detail {
 
@@ -74,21 +73,29 @@ struct DatagramAttempt {
     [[nodiscard]] auto failed() const -> bool { return failure.has_value(); }
 };
 
-/// @brief 创建一个**非阻塞**的 TCP 流式套接字（地址族取自端点，未发起连接）。
-/// @param endpoint 决定地址族的目标端点；须为 IPv4 / IPv6 且端口非 0。
-/// @return 成功为句柄；失败为 `net-endpoint-invalid` / `net-socket-failed` / `net-option-failed`
-///         （非阻塞置位失败落后者）。
-[[nodiscard]] auto open_nonblocking_stream(const Endpoint &endpoint) -> Result<std::intptr_t>;
+/// @brief 创建一个**非阻塞**的流式套接字（地址族取自端点，未发起连接）。
+///
+/// 本机 IPC 形态（`Endpoint::local()`）与 TCP 走同一条通路：同一枚 `socket(2)` / `connect(2)` /
+/// `accept(2)` 序列，只是地址族换成 `AF_UNIX`。因此传输层不需要为它另起一套状态机，就绪、背压、
+/// 半关闭、取消的语义逐字复用（这也是 `StreamTransport` 敢于「TCP / 本机 IPC / TLS 同型」的根据）。
+/// @param endpoint 目标端点：IPv4 / IPv6 且端口非 0，或本机 IPC 路径形态。
+/// @param options 原生选项；在 bind / connect 之前逐条应用，未置值的字段不发起任何 `setsockopt`。
+/// @return 成功为句柄；失败为 `net-endpoint-invalid` / `net-socket-failed` / `net-option-failed` /
+///         `net-option-conflict`（选项与地址族不匹配）/ `net-platform-unavailable`（本腿无本机 IPC 通路）。
+[[nodiscard]] auto open_nonblocking_stream(const Endpoint &endpoint, const NativeOptions &options)
+    -> Result<std::intptr_t>;
 
 /// @brief 创建一个**非阻塞**的监听套接字（bind + listen，地址族取自端点）。
 ///
 /// 与 `net::Listener::bind` 的分工：那条是同步阻塞面（工具与测试宿主专用），本函数服务事件驱动传输层。
 /// 绑到非回环地址即接受来自其它主机的连接，访问控制仍归调用方。
-/// @param endpoint 监听端点；须为 IPv4 / IPv6（本机 IPC 形态在发起系统调用前即拒）。
+/// @param endpoint 监听端点；IPv4 / IPv6 或本机 IPC 路径形态。
 /// @param backlog 挂起连接队列深度（透传 `listen(2)`）。
-/// @return 成功为句柄；失败为 `net-endpoint-invalid` / `net-socket-failed` / `net-bind-failed` /
-///         `net-listen-failed` / `net-option-failed`（失败路径已关闭句柄）。
-[[nodiscard]] auto open_nonblocking_listener(const Endpoint &endpoint, int backlog) -> Result<std::intptr_t>;
+/// @param options 原生选项；`reuse_address` 必须在 bind 之前设置才有效，故在本函数内部先应用再绑定。
+/// @return 成功为句柄；失败码集合同 `open_nonblocking_stream()`，另加 `net-bind-failed` /
+///         `net-listen-failed`（失败路径已关闭句柄）。
+[[nodiscard]] auto open_nonblocking_listener(const Endpoint &endpoint, int backlog, const NativeOptions &options)
+    -> Result<std::intptr_t>;
 
 /// @brief 归还一个由本头创建的句柄（幂等：无效句柄无操作）。
 /// @param handle 原生句柄承载值。
@@ -127,6 +134,17 @@ auto close_handle(std::intptr_t handle) -> void;
 /// @return 三态结果；成功得到的对端句柄**已置为非阻塞**。
 [[nodiscard]] auto try_accept(std::intptr_t handle) -> AcceptAttempt;
 
+/// @brief 在既有句柄上应用原生选项——已接受连接的创建时刻。
+///
+/// 为什么要有这一枚：监听口的 `options.native` 若只在 `bind()` 前下发一次，被接受的连接就落到内核的
+/// 选项继承表上，而那张表在两腿上并不一致（`TCP_NODELAY` 是否随监听套接字继承，Linux 与 Windows 给出
+/// 不同答案）。同一份 `StreamOptions` 必须在两条腿上得到同一件事实，故每条被交付的连接都在自己的句柄
+/// 上重放一遍；地址族由句柄自身回报，调用方无须声明这是 TCP 还是本机 IPC。
+/// @param handle 目标句柄（已连接）。
+/// @param options 原生选项；`source` 字段在此口径下无意义，置值即落 `net-option-conflict`。
+/// @return 成功为 OK；不合用为 `net-option-conflict`，系统调用失败为 `net-option-failed`。
+[[nodiscard]] auto apply_native_options(std::intptr_t handle, const NativeOptions &options) -> Result<void>;
+
 /// @brief 单向或双向关停写/读（`shutdown`），不归还句柄。
 /// @param handle 目标句柄。
 /// @param mode 关停方向；`ShutdownMode::Read` 的效果包含「释放对该句柄可读方向的关注」的内核侧对应物。
@@ -151,8 +169,8 @@ auto close_handle(std::intptr_t handle) -> void;
 /// @brief 创建一个**非阻塞**的 UDP 数据报套接字并绑定到本地端点（地址族取自端点）。
 ///
 /// 数据报没有流式套接字的「先 bind 后 connect」次序约束：`local.port() == 0` 由系统分配实端口，
-/// 通配地址即接受发往本机任一地址的数据报。本机 IPC 形态在发起系统调用前即拒（Windows 命名管道
-/// 没有数据报语义，半边可用的形态不进公共面）。
+/// 通配地址即接受发往本机任一地址的数据报。本机 IPC 形态在发起系统调用前即拒——`DatagramTransport`
+/// 的公共口径全程带端口，路径形态没有端口可带，半边可用的类型不进公共面。
 /// @param local 本地端点；须为 IPv4 / IPv6。
 /// @return 成功为句柄；失败为 `net-endpoint-invalid` / `net-socket-failed` / `net-bind-failed` /
 ///         `net-option-failed`（失败路径已关闭句柄）。
@@ -222,5 +240,30 @@ auto close_handle(std::intptr_t handle) -> void;
 /// @param enabled 为真时允许广播发送。
 /// @return 成功为 OK；失败为 `net-option-failed`（含 OS 原生码）。
 [[nodiscard]] auto set_broadcast_allowed(std::intptr_t handle, bool enabled) -> Result<void>;
+
+/// @brief 读回句柄自身的地址族（`getsockname`，只取族而不还原地址）。
+///
+/// 存在的理由：本机 IPC 与 TCP 共用同一套流式状态机，公共面上的两处分歧（`peer_endpoint()` 与
+/// `peer_credentials()`）都必须按**这条连接实际的族**回答，而不是按调用方当初传入的端点形态猜——
+/// `StreamListener` 接受到的连接由内核给出，监听口是什么族它就是什么族。
+/// @param handle 目标句柄。
+/// @return 成功为 `IPv4` / `IPv6` / `LocalPath`；查询失败或地址族不认识为 `net-socket-failed`。
+[[nodiscard]] auto handle_family(std::intptr_t handle) -> Result<AddressFamily>;
+
+/// @brief 读出本机 IPC 连接的对端身份（`SO_PEERCRED` / `LOCAL_PEERCRED` 一类的内核登记）。
+///
+/// 直接返回公共面的 `PeerCredentials`：本头已包含 `transport.h`，中间再加一层同义结构只会让字段命名
+/// 在两处漂移。不提供该能力的腿把 `anonymous` 置真后回 OK——「查到了身份但对方是匿名的」与「这个
+/// 查询本身失败」是两件事，调用方据此分别走「按匿名策略放行 / 拒绝」与「报告错误」两条分支。
+/// @param handle 本机 IPC 流式句柄（已连接）。
+/// @return 成功为身份；查询失败为 `net-option-failed`（含 OS 原生码）。
+[[nodiscard]] auto peer_identity(std::intptr_t handle) -> Result<PeerCredentials>;
+
+/// @brief 本腿是否具备可用的本机 IPC 通路（一次性探测，进程内缓存）。
+///
+/// 判据是「能建出本机 IPC 的流式套接字」而不是「编译期认得这个宏」：Windows 的 AF_UNIX 腿随系统版本
+/// 而来，编译通过不代表运行可用，而 `Capabilities` 是唯一真值源（提案 §9）。
+/// @return 可用为 true；供 `Engine::capabilities().local_ipc` 消费。
+[[nodiscard]] auto local_ipc_supported() -> bool;
 
 }  // namespace aurora::net::detail

@@ -27,6 +27,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -566,6 +567,19 @@ auto refresh_listener_interest(const ListenerPointer &state, Tasks &tasks) -> vo
                     if (!attempt.peer) {
                         break;  // 暂无待接受连接（含 accept 被信号打断的空转）
                     }
+                    if (auto applied = detail::apply_native_options(*attempt.peer, held->options.native); !applied) {
+                        // 交付口径里的原生选项落不了地，这条连接就不交给调用方——它会以为选项已经生效。
+                        // 句柄就地归还、待交付的回调以原因收尾一次，监听口本身继续可用（口径同上面的
+                        // `attempt.failed()`）。
+                        detail::close_handle(*attempt.peer);
+                        auto done = std::move(held->pending.front());
+                        held->pending.pop_front();
+                        // 完成回调转入 Tasks（std::function），口径同 close_stream。原因按值进闭包：
+                        // `applied` 在派发之前就已析构。
+                        // NOLINTNEXTLINE(bugprone-exception-escape)
+                        fired.emplace_back([done, error = applied.error()]() { done(Result<StreamTransport>{error}); });
+                        break;
+                    }
                     auto stream = make_accepted_stream(*attempt.peer, held->options, held->owner);
                     auto done = std::move(held->pending.front());
                     held->pending.pop_front();
@@ -614,6 +628,13 @@ auto close_listener(detail::ListenerState &state, const Error &reason, Tasks &ta
         tasks.emplace_back([callback, reason]() { callback(Result<StreamTransport>{reason}); });
     }
     state.pending.clear();
+}
+
+/// @brief 构造「选项与套接字形态不合用」的失败原因（公共面两条对端查询按地址族分岔后的回报形态）。
+/// @param detail 冲突的现场描述。
+/// @return `net-option-conflict` 错误。
+auto option_conflict_reason(std::string_view detail) -> Error {
+    return make_error(ErrorCode::NetOptionConflict, ErrorParams{{"detail", std::string{detail}}});
 }
 
 /// @brief 确保本腿有驱动方在等待这些句柄（缺省引擎驱动时把引擎叫醒）。
@@ -675,7 +696,7 @@ auto StreamTransport::connect(const Endpoint &endpoint, const StreamOptions &opt
         return;
     }
     const auto target = endpoint.to_string();
-    auto opened = detail::open_nonblocking_stream(endpoint);
+    auto opened = detail::open_nonblocking_stream(endpoint, options.native);
     if (!opened) {
         fail(opened.error());
         return;
@@ -770,7 +791,34 @@ auto StreamTransport::peer_endpoint() const -> Result<Endpoint> {
     if (state_->closed) {
         return Result<Endpoint>{no_stream_reason("closed stream")};
     }
+    auto family = detail::handle_family(state_->handle);
+    if (family && family.value() == AddressFamily::LocalPath) {
+        // 本机 IPC 流上没有「对端 IP 地址」这件事实：命名键只登记在监听侧的文件系统路径上，内核不会
+        // 在双向流的两端都保留它。对端身份由 `peer_credentials()` 回答，而不是伪造成一个空端点。
+        return Result<Endpoint>{
+            option_conflict_reason("a local IPC stream has no peer IP address; ask peer_credentials() instead")};
+    }
     return detail::peer_of(state_->handle);
+}
+
+auto StreamTransport::peer_credentials() const -> Result<PeerCredentials> {
+    if (!state_) {
+        return Result<PeerCredentials>{no_stream_reason("stream")};
+    }
+    std::scoped_lock lock(state_->mutex);
+    if (state_->closed) {
+        return Result<PeerCredentials>{no_stream_reason("closed stream")};
+    }
+    auto family = detail::handle_family(state_->handle);
+    if (!family) {
+        return Result<PeerCredentials>{family.error()};
+    }
+    if (family.value() != AddressFamily::LocalPath) {
+        // 跨主机连接没有可对等的进程身份：这一问只在同机命名空间里成立。
+        return Result<PeerCredentials>{option_conflict_reason(
+            "peer credentials are only registered for a local IPC stream, not for an IP connection")};
+    }
+    return detail::peer_identity(state_->handle);
 }
 
 auto StreamTransport::is_loopback_peer() const -> bool {
@@ -1036,7 +1084,7 @@ auto StreamListener::bind(const Endpoint &endpoint, int backlog, const StreamOpt
         return Result<StreamListener>{
             make_error(ErrorCode::NetRuntimeFailed, std::string{"network runtime could not be initialised"})};
     }
-    auto opened = detail::open_nonblocking_listener(endpoint, backlog);
+    auto opened = detail::open_nonblocking_listener(endpoint, backlog, options.native);
     if (!opened) {
         return Result<StreamListener>{opened.error()};
     }

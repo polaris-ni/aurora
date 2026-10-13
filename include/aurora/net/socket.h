@@ -84,7 +84,8 @@ class StreamSocket {
     ///
     /// 与 `connect_loopback` 的分工：本函数是地址族无关的通用入口，名字→端点的转换归 `Resolver`；
     /// IPv6 上的 `%zone` 只接受**十进制作用域号**（两平台同口径，接口名→索引的查表需额外平台依赖，
-    /// 故不做），非数字 zone 与本机 IPC 端点都在发起系统调用前被拒。
+    /// 故不做），非数字 zone 在发起系统调用前即拒。本机 IPC 端点同样即拒——本同步面按裁决只承载 TCP 流
+    /// （逐字节阻塞收发没有事件源可挂），Unix 域流只经 `StreamTransport` 出口。
     /// @param endpoint 目标端点；须为有效的 IPv4 / IPv6 端点且端口非 0。
     /// @return 成功为已连接套接字；失败为 `net-endpoint-invalid`（端点不合用）/ `net-socket-failed` /
     ///         `net-connect-failed`（后两者 message 含 OS 原生码）。

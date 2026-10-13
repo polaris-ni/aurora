@@ -40,7 +40,7 @@ namespace aurora::net {
 enum class AddressFamily : std::uint8_t {
     IPv4,  ///< 32 位 IPv4 地址（点分十进制）
     IPv6,  ///< 128 位 IPv6 地址（可含 zone id）
-    LocalPath,  ///< 本机 IPC 路径（POSIX UnixSocket 路径 / Windows 命名管道名）
+    LocalPath,  ///< 本机 IPC 路径（POSIX 与 Windows 的 AF_UNIX 腿共用同一段路径文本作为命名键）
 };
 
 /// @brief 单个网络地址 + 端口（或本机 IPC 路径）的值类型。
@@ -77,8 +77,10 @@ class Endpoint {
 
     /// @brief 构造本机 IPC 端点。
     ///
-    /// POSIX 腿接受文件系统路径（长度受 `sun_path` 上限约束）；Windows 腿接受命名管道名，
-    /// 裸名与 `\\.\pipe\` 全形态都接受，`is_local_path()` 为真。
+    /// 入参是一段**路径文本**，两型形态都接受：文件系统路径（`/tmp/x.sock`、相对路径）与命名管道样式
+    /// 的名字（裸名与 `\\.\pipe\` 全形态）。本层不据形态猜测用途，只按长度与 NUL 约束校验并原样保存
+    /// （`host()` 不做规范化）；它最终落到哪条腿、以何种方式命名，由传输层的地址族决定并写在
+    /// `aurora/net/transport.h` 与 `aurora/net/socket.h` 的对应说明里。
     /// @param path 路径或管道名；非空、不含 NUL、长度在上限内。
     /// @return 成功为端点；失败为 `net-endpoint-invalid`。
     [[nodiscard]] static auto local(std::string_view path) -> Result<Endpoint>;
@@ -159,8 +161,11 @@ class Endpoint {
     std::array<std::uint8_t, 16> bytes_{};  ///< 网络序地址字节
 };
 
-/// @brief 本机 IPC 路径的长度上限（取各平台 `sockaddr_un::sun_path` 的最小可用值）。
-/// @note 超出即 `Endpoint::local()` 拒绝，不等 bind 时才报路径过长。
+/// @brief 本机 IPC 路径的长度上限（最宽一条腿的 `sockaddr_un::sun_path` 容量）。
+/// @note 超出即 `Endpoint::local()` 拒绝，不等 bind 时才报路径过长。这只是**值类型**的上限：各条腿的
+///         `sun_path` 宽度并不相同（108 与 104 两档），故发起系统调用前还会按本平台实际容量再校验一次，
+///         超出时在 bind / connect 之前落 `net-endpoint-invalid` 并在 `detail` 里写明本腿上限——
+///         静默截断路径会让两个进程各自绑到不同的名字上，表现为「连不上」而不是「名字太长」。
 inline constexpr std::size_t AURORA_NET_MAX_LOCAL_PATH = 108;
 
 }  // namespace aurora::net
