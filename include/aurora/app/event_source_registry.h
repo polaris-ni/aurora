@@ -4,9 +4,11 @@
 /// @file app/event_source_registry.h
 ///
 /// 这是网络栈 L0 宿主集成层对外与对内共用的就绪通知底座：第三方非阻塞会话（libssh2、DBus
-/// 一类）与库自带的 poll 线程引擎都以它为实现基座。各平台宿主（Win32 消息泵、X11/Wayland
-/// 的 `poll` 数组、Headless 自建 poll 循环）在各自的等待点向本注册口取「待等待的句柄集合」
-/// （`sources()`），等待返回后把就绪结果交回 `dispatch()`，回调即按 §18-1 的语义送达。
+/// 一类）与库自带的 poll 线程引擎都以它为实现基座。**缺省驱动方是 `net::Engine` 的常驻线程**
+/// （本库各平台腿的统一形态，不依赖各平台主循环的等待形态差异）；自带等待集的宿主改为自己等待
+/// 时，调 `set_host_driven(true)` 让引擎让位，再每轮取「待等待的句柄集合」（`sources()`），
+/// 等待返回后把就绪结果交回 `dispatch()`，回调即按 §18-1 的语义送达。两种形态对同一条事件源
+/// **互斥**，同时启用会让一次就绪投递两次。
 ///
 /// 本层刻意**平台无关且不依赖 `net/`**：它只搬运 `std::intptr_t` 句柄与回调，绝不出现任何
 /// 平台 socket/poll 头（`winsock2.h` / `poll.h` 的仓内唯一落点是 `src/aurora/net/socket.cpp`，
@@ -16,6 +18,9 @@
 /// - `Dispatcher`：把一次就绪回调投回主线程（缺省为就地同步执行，与 `post_to_main` 无 poster
 ///   时的口径一致；宿主可注入 `post_to_main` 形态）。
 /// - `ChangeNotify`：条目集合变动（登记/注销）后通知常驻等待方重取快照（判据见成员声明处）。
+///
+/// 无 fd 等待语义的腿（wasm）在构造期即置 `event_source_supported()` 为假：`register_source()`
+/// 一律返回 `net-platform-unavailable`，不排队等位、不静默收下永不被触发的条目。
 ///
 /// 生命周期与竞态契约（提案 §18-1，规范性）：
 /// - `register_source()` 返回 move-only RAII 句柄 `EventSourceRegistration`，析构即注销且**幂等**；
@@ -194,6 +199,19 @@ class EventSourceRegistry {
     /// @return 缺省为 true；被 wasm 之类置假后为 false。
     [[nodiscard]] auto event_source_supported() const -> bool;
 
+    /// @brief 声明「宿主自带等待集正在驱动本注册口」，据此让常驻引擎不再等待这些句柄。
+    ///
+    /// 一条事件源只由一个驱动方等待：缺省驱动方是 `net::Engine` 的常驻 poll 线程；置真后引擎只等
+    /// 自己的唤醒通道，条目由宿主每轮取 `sources()` 快照并入自有等待集、就绪后调 `dispatch()` 投递
+    /// （自带循环的宿主与第三方事件循环用这一条）。置回假则引擎重新接管。两种转变都经
+    /// `ChangeNotify` 通知常驻方重取快照，不等一个等待窗口。
+    /// @param driven true = 宿主驱动（引擎让位）；false = 交回引擎驱动（缺省）。
+    auto set_host_driven(bool driven) -> void;
+
+    /// @brief 当前驱动方是否为宿主自带等待集。
+    /// @return 宿主驱动为 true；缺省（引擎驱动）为 false。
+    [[nodiscard]] auto host_driven() const -> bool;
+
     /// @brief 登记一个事件源。
     ///
     /// 同一 `handle` 可被多次登记（各自独立令牌与回调）；登记即时生效，直到返回的句柄析构。
@@ -230,18 +248,20 @@ class EventSourceRegistry {
     [[nodiscard]] auto live_count() -> std::size_t;
 
   private:
-    EventSourceRegistry() = default;
+    /// @brief 建进程级单例：无 fd 等待语义的腿（wasm）在构造期把事件源支持位置假。
+    EventSourceRegistry();
 
     /// @brief 分配单调递增令牌（从 1 起；0 保留给空句柄）。
     [[nodiscard]] auto next_token() -> std::uint64_t;
 
-    std::mutex mutex_;  ///< 保护 entries_/poller_/dispatcher_/change_notify_
+    std::mutex mutex_;  ///< 保护 entries_/poller_/dispatcher_/change_notify_/host_driven_
     std::vector<std::shared_ptr<detail::SourceEntry>> entries_;  ///< 存活条目（线性表，规模小）
     Poller poller_;  ///< 等待接缝（可空）
     Dispatcher dispatcher_;  ///< 投递接缝（可空=就地执行）
     ChangeNotify change_notify_;  ///< 表变动通知接缝（可空=不通知）
     std::uint64_t token_counter_ = 0;  ///< 令牌计数器
-    std::atomic<bool> event_source_supported_{true};  ///< 本腿是否有 fd 等待语义（wasm 置假）
+    std::atomic<bool> event_source_supported_{true};  ///< 本腿是否有 fd 等待语义（wasm 构造期置假）
+    std::atomic<bool> host_driven_{false};  ///< 是否由宿主自带等待集驱动（net 引擎据此让位）
 };
 
 }  // namespace aurora::app

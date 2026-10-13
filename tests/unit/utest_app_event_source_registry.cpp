@@ -4,7 +4,8 @@
 ///           有效句柄登记成功、-1 与「本腿不支持」回 net-platform-unavailable（不假降级）；
 ///           就绪回调「抵达次数 == 就绪次数」；注销 = 停止产生新回调但已入队的一次尾批仍抵达
 ///           （§18-1），`cancel_pending()` 才作废尾批；移动后源句柄析构不双重注销；同句柄
-///           注销后重登记得新令牌。Poller/Dispatcher 经接缝脚本化，无需真 socket，
+///           注销后重登记得新令牌；`host_driven` 开关的两次转变都通知常驻等待方。Poller/Dispatcher
+///           经接缝脚本化，无需真 socket，
 ///           从而在无宿主事件循环下逐值断言；注册口是进程级单例，每例用作用域 guard 复位接缝。
 
 #include <chrono>
@@ -29,7 +30,7 @@ using aurora::app::WaitSource;
 
 namespace {
 
-/// @brief 每例复位进程级接缝（Poller/Dispatcher/支持位），隔离用例间的全局状态。
+/// @brief 每例复位进程级接缝（Poller/Dispatcher/变动通知/支持位/驱动方开关），隔离用例间的全局状态。
 struct SeamsGuard {
     SeamsGuard() { reset(); }
     SeamsGuard(const SeamsGuard &) = delete;
@@ -41,6 +42,8 @@ struct SeamsGuard {
         auto &r = EventSourceRegistry::instance();
         r.set_poller({});
         r.set_dispatcher({});
+        r.set_change_notify({});
+        r.set_host_driven(false);
         r.set_event_source_supported(true);
     }
 };
@@ -211,6 +214,22 @@ AURORA_TEST_CASE(re_register_same_handle_gets_new_token) {
     AURORA_TEST_REQUIRE(bool(third));
     r.dispatch({ReadySource{.token = token1, .ready = SourceReady{.readable = true}}});  // 表里已无旧令牌
     AURORA_TEST_CHECK_EQ(hits, 0);
+}
+
+// 驱动方开关缺省归引擎；置真/置假都经 `ChangeNotify` 通知常驻等待方重取快照——引擎据此让位或
+// 接管，宿主因此不需要等一个等待窗口才看到转变（一条事件源只由一个驱动方等待的落地判据）。
+AURORA_TEST_CASE(host_driven_round_trip_notifies_resident_driver) {
+    SeamsGuard guard;
+    auto &r = EventSourceRegistry::instance();
+    AURORA_TEST_CHECK_FALSE(r.host_driven());
+
+    int notices = 0;
+    r.set_change_notify([&notices] { ++notices; });
+    r.set_host_driven(true);
+    AURORA_TEST_CHECK_TRUE(r.host_driven());
+    r.set_host_driven(false);
+    AURORA_TEST_CHECK_FALSE(r.host_driven());
+    AURORA_TEST_CHECK_EQ(notices, 2);
 }
 
 }  // namespace aurora::test_cases::utest_app_event_source_registry

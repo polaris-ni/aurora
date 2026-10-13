@@ -5,7 +5,8 @@
 ///           启动并把任务投到**非调用线程**执行、`post_after` 按单调钟到期投递且不早于登记意图、
 ///           `shutdown` 幂等且收敛后可再次惰性启动、常驻循环真实驱动事件源（登记→对端写入→回调
 ///           抵达，全程不调 `wait_and_dispatch`，即 §2「引擎自持工作线程」的形态）、注销与就绪同帧
-///           发生时循环不被瞬态等待失败打断且后续登记照常送达（§18-1「注销 = 停止产生新回调」）。
+///           发生时循环不被瞬态等待失败打断且后续登记照常送达（§18-1「注销 = 停止产生新回调」）、
+///           宿主声明自带等待集时引擎让位（一条事件源只由一个驱动方等待，交回后引擎重新送达）。
 ///           事件源用例先装一枚就地执行的 `Dispatcher`，据此验证引擎「宿主已装则不改」的接缝装配纪律。
 /// ⚠️ 平台分支写在**用例体内**而非包裹 `AURORA_TEST_CASE` 声明（registry_integrity 静态扫源码，
 ///    被 #ifdef 摘掉的声明在另一种构建里必然单边失踪）；wasm 无 fd 语义，用例体退化为断言不支持形态。
@@ -17,12 +18,14 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "aurora/app/event_source_registry.h"
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
 #include "aurora/net/capabilities.h"
 #include "aurora/net/engine.h"
+#include "aurora/net/poll.h"
 #include "aurora/net/socket.h"
 #include "framework/aurora_test.h"
 
@@ -82,12 +85,15 @@ auto wait_until(const std::function<bool()> &pred, std::chrono::milliseconds bud
     return pred();
 }
 
-/// @brief 引擎与注册口接缝的守卫：析构收敛引擎并清空 Dispatcher，不把在跑线程留给同 runner 的其它用例。
+/// @brief 引擎与注册口接缝的守卫：析构收敛引擎、清 Dispatcher 并把驱动方交回引擎，
+///        不把在跑线程或「宿主驱动」开关留给同 runner 的其它用例。
 struct EngineGuard {
     EngineGuard() = default;
     ~EngineGuard() {
         Engine::instance().shutdown();
-        aurora::app::EventSourceRegistry::instance().set_dispatcher({});
+        auto &registry = aurora::app::EventSourceRegistry::instance();
+        registry.set_dispatcher({});
+        registry.set_host_driven(false);
     }
     EngineGuard(const EngineGuard &) = delete;
     auto operator=(const EngineGuard &) -> EngineGuard & = delete;
@@ -298,6 +304,53 @@ AURORA_TEST_CASE(shutdown_is_idempotent_and_restart_serves_new_work) {
 
     AURORA_TEST_REQUIRE(Engine::instance().post([&] { runs.fetch_add(1); }).ok());
     AURORA_TEST_CHECK_TRUE(wait_until([&] { return runs.load() == 2; }, AURORA_WAIT_BUDGET));
+#endif
+}
+
+// 驱动方互斥（§8.8.4 ③）：宿主声明自带等待集后，常驻引擎不再等待注册口条目——同一句柄的就绪
+// 只由宿主自己的 `sources()`/`dispatch()` 投一次；交还引擎（置回假）后引擎重新接管并送达。
+// 两边同时等待会让一次就绪投递两次，这条开关就是防它的那道闸。
+AURORA_TEST_CASE(host_driven_registry_is_not_waited_by_engine) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no fd wait semantics; the engine reports unavailable there");
+#else
+    EngineGuard guard;
+    aurora::net::Session session;
+    auto pair = make_connected_pair(session);
+    auto &registry = aurora::app::EventSourceRegistry::instance();
+    registry.set_dispatcher([](const std::function<void()> &fn) { fn(); });
+    AURORA_TEST_REQUIRE(Engine::instance().post([] {}).ok());  // 让常驻循环先在跑，否则「让位」无从谈起
+
+    std::atomic<int> hits{0};
+    registry.set_host_driven(true);
+    auto reg = registry.register_source(pair.server.native_handle(), aurora::app::WaitInterest{.read = true},
+                                        [&](const aurora::app::SourceReady &) { hits.fetch_add(1); });
+    AURORA_TEST_REQUIRE(reg.ok());
+    write_payload(pair.client, "a");
+    AURORA_TEST_CHECK_FALSE(wait_until([&] { return hits.load() > 0; }, std::chrono::milliseconds{120}));
+
+    // 宿主驱动：取快照 → 基元等待 → 按令牌回填投递，恰好一次。
+    const auto sources = registry.sources();
+    AURORA_TEST_REQUIRE_EQ(sources.size(), std::size_t{1});
+    const std::vector<aurora::net::PollDescriptor> want{aurora::net::PollDescriptor{
+        .handle = sources[0].handle, .want_read = sources[0].interest.read, .want_write = sources[0].interest.write}};
+    const auto polled = aurora::net::wait_ready(want, AURORA_WAIT_BUDGET);
+    AURORA_TEST_REQUIRE(polled.ok());
+    const auto &outcome = polled.value()[0];
+    std::vector<aurora::app::ReadySource> ready;
+    if (outcome.readable || outcome.writable || outcome.error || outcome.hangup) {
+        ready.push_back(aurora::app::ReadySource{.token = sources[0].token,
+                                                 .ready = aurora::app::SourceReady{.readable = outcome.readable,
+                                                                                   .writable = outcome.writable,
+                                                                                   .error = outcome.error,
+                                                                                   .hangup = outcome.hangup}});
+    }
+    registry.dispatch(ready);
+    AURORA_TEST_CHECK_EQ(hits.load(), 1);
+
+    // 交还引擎：句柄上的数据未被读过（电平触发仍可读），引擎重取快照后应立刻送达第二次。
+    registry.set_host_driven(false);
+    AURORA_TEST_CHECK_TRUE(wait_until([&] { return hits.load() >= 2; }, AURORA_WAIT_BUDGET));
 #endif
 }
 

@@ -739,15 +739,15 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 #### 8.8.2 事件源注册口（`aurora::app::EventSourceRegistry`，CHG-010 底座）
 
-网络栈 L0 宿主集成层的通用就绪通知底座（`include/aurora/app/event_source_registry.h` + `src/aurora/app/event_source_registry.cpp`）：把「一个可等待句柄 + 就绪回调」并入各平台宿主等待集，供第三方非阻塞会话（libssh2、DBus 一类）与库自带的 poll 线程引擎共同复用。提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §2 与 §18 定案 1 给出各平台的**并入点**（Win32 `MsgWaitForMultipleObjectsEx` 句柄数组、X11/Wayland `poll` 数组里 DBus watch fd 的收编、Headless 自建 poll 循环、GLFW/macOS 无自有等待集时经引擎线程 + `request_wake` 桥接、wasm 报 `net-platform-unavailable`）；那些改的是**宿主侧**，本节的注册口本身平台无关。
+网络栈 L0 宿主集成层的通用就绪通知底座（`include/aurora/app/event_source_registry.h` + `src/aurora/app/event_source_registry.cpp`）：把「一个可等待句柄 + 就绪回调」汇成一张待等待表，供第三方非阻塞会话（libssh2、DBus 一类）与库自带的 poll 线程引擎共同复用。**缺省驱动方是 §8.8.4 的常驻引擎线程**（本库各平台腿的统一形态）；自带等待集的宿主调 `set_host_driven(true)` 接管，引擎随即只等自己的唤醒通道。提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §2 的逐平台并入点与 §18 定案 1 的竞态契约仍然有效，但**仓内宿主不再各自并入**（理由见 §8.8.5 与提案 §16 第 12 项）。
 
-- **平台无关且位于 `net/` 之下**：本 `.cpp` 不出现任何平台 socket/poll 头（`winsock2.h`/`poll.h` 唯一落点仍是 `src/aurora/net/socket.cpp`，CHG-006 不变量不破）。真正的「阻塞直到某些句柄就绪」经两枚可注入接缝表达——`set_poller(Poller)`（等待实现，由 net 引擎层或测试安装）与 `set_dispatcher(Dispatcher)`（主线程投递实现，缺省为就地同步执行，与 `post_to_main` 无 poster 时的口径一致）。自带等待集的宿主不装 `Poller`、改走 `sources()` 取快照 + `dispatch(ready)` 投递；无 fd 语义的腿（wasm）`register_source` 一律回 `net-platform-unavailable`，`wait_and_dispatch` 在未装 Poller 时同码，均**不忙等、不假降级**。
+- **平台无关且位于 `net/` 之下**：本 `.cpp` 不出现任何平台 socket/poll 头（`winsock2.h`/`poll.h` 唯一落点仍是 `src/aurora/net/socket.cpp`，CHG-006 不变量不破）。真正的「阻塞直到某些句柄就绪」经三枚可注入接缝表达——`set_poller(Poller)`（等待实现，由 net 引擎层或测试安装）、`set_dispatcher(Dispatcher)`（主线程投递实现，缺省为就地同步执行，与 `post_to_main` 无 poster 时的口径一致）、`set_change_notify(ChangeNotify)`（表变动与驱动方转变的通知，归常驻等待方独占，判据见 §8.8.4 投递纪律 ②）。自带等待集的宿主不装 `Poller`、改走 `sources()` 取快照 + `dispatch(ready)` 投递。无 fd 语义的腿（wasm）在**构造期**把 `event_source_supported()` 置假（编译期事实只落一处，公共头维持零 `#ifdef`），此后 `register_source` 一律回 `net-platform-unavailable`，`wait_and_dispatch` 在未装 Poller 时同码，均**不忙等、不假降级**。
 - **句柄生命周期与三条竞态契约（§18-1，规范性）**：`register_source` 返回 move-only RAII 句柄 `EventSourceRegistration`，析构即注销且**幂等**、移动后源转空态、其析构不再触发二次注销。注销语义 = **停止产生新回调**：`dispatch` 在锁内只快照待投递闭包（`shared_ptr` 按值捕获令条目独立于注册表存活），**释放锁后**才逐个投递——因此已进入 `Dispatcher` 队列的一次尾批仍会抵达一次（回调载荷须由使用方以弱令牌保护宿主），但此后新的 `dispatch` 不再为该令牌产生回调。需连尾批一起作废另用 `cancel_pending()`（置条目的 `cancelled` 原子位），该调用与析构**互不隐含**：前者只作废尾批、不影响后续投递；后者只移除快照条目、不作废已入队尾批。回调内可安全再注册/注销（投递在锁外）。
 - **令牌关联**：同 `handle` 可多次登记、各自持独立令牌与回调（`next_token()` 单调、从 1 起、0 留空态）；宿主等待回来后按令牌回填 `ReadySource`，注销后重登记取新令牌、旧令牌的迟到就绪不会误触发新条目回调。
 - 错误码：复用 `net-platform-unavailable`（本次新增，`retryable = false`、`fix_category = platform_capability`；`hint` 指向 `Engine::capabilities()` 查询与能力矩阵）。
-- 回归：`utest_app_event_source_registry`（有效句柄与 `-1`/不支持腿的拒绝、就绪回调「抵达次数 == 就绪次数」、原生宿主无 Poller 走 `sources()`/`dispatch()` 的通路、`unregister` 与 `cancel_pending` 在排程 Dispatcher 下的尾批分岔、移动不双重注销、同句柄重登记取新令牌）。
+- 回归：`utest_app_event_source_registry`（有效句柄与 `-1`/不支持腿的拒绝、就绪回调「抵达次数 == 就绪次数」、原生宿主无 Poller 走 `sources()`/`dispatch()` 的通路、`unregister` 与 `cancel_pending` 在排程 Dispatcher 下的尾批分岔、移动不双重注销、同句柄重登记取新令牌、`host_driven` 两次转变都通知常驻方）。引擎侧的互斥落地判据见 §8.8.4 的 `utest_net_engine`。
 
-各平台**并入宿主等待集**的具体改造与真机回归（含 X11/Wayland 的 DBus fd 通道收编、Win32 64 句柄上限的显式报错）是后续切片，本切片只交付平台无关的注册口与逐值可断言的接缝契约。
+**逐平台等待集并入 = 宿主可选项，仓内宿主一律走引擎线程**（裁决与理由见 §8.8.5；提案 §16 第 12 项）：本注册口对外提供的就是这条可选项——自带循环的宿主（含嵌入本库的第三方事件循环）装 `set_host_driven(true)` 后自行 `sources()`/`dispatch()`，其余腿由常驻引擎驱动，回调一律经主线程投递器回到 UI 线程。
 
 #### 8.8.3 事件驱动就绪基元（`aurora::net::wait_ready`，CHG-010 底座）
 
@@ -770,16 +770,24 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - **`Engine` 是引擎的公共面**：`instance()` / `name()` / `capabilities()` / `post()` / `post_after()` / `running()` / `shutdown()`。`name()` 回报实现名（自带引擎 `"poll"`、无 fd 语义腿 `"none"`），供 Inspector 与日志区分。查询能力**不**拉起线程；惰性启动的触发者是 `post` / `post_after`（§2「随首个需要它的对象惰性启动」）。
 - **循环节奏**：「跑已到期任务 → 快照 `sources()` → `wait_ready` → 交回 `dispatch()`」，一条线程承载任务队列与到期定时器，不为定时器另起线程。等待窗口 = `min(最早到期定时, 空闲上限 200ms)` 且**下限 1ms**（不忙等；200ms 只是「唤醒通知丢失」的延迟上界，正常路径由唤醒通道即时打断）。
 - **唤醒通道刻意不引入新平台代码**：它是一对**回环 TCP 流**（`Listener::listen_loopback` + `connect_loopback` + `accept`），两平台的 poll 族都认得 socket 句柄，因此 `engine.cpp` 不出现 `poll.h` / `winsock2.h`——CHG-006「平台 socket 头唯一落点是 `src/aurora/net/socket.cpp`」不变量继续成立。单轮只读一块（8 字节）且不计数：读只在 `POLLIN` 报可读后发生，故必不阻塞；残余字节让下一轮立刻返回可读。
-- **投递纪律（三条，规范性）**：① `Dispatcher` 只在宿主未装时补 `aurora::detail::post_to_main` 形态（与 `Task<T>::set_main_poster` 同一条投递器，§1 不变量），宿主已装则不改；② `ChangeNotify` 归常驻等待方（即本引擎），登记与**注销**都要通知——注销后宿主随即关闭句柄，滞留快照会让下一次系统调用撞上无效句柄；③ **一条事件源只由一个驱动方等待**：常驻引擎循环与宿主自带等待集（Win32/X11/Wayland）互斥，同时启用会让回调重复抵达，宿主收编注册口时须不触发惰性启动或先 `shutdown()`。
+- **投递纪律（三条，规范性）**：① `Dispatcher` 只在宿主未装时补 `aurora::detail::post_to_main` 形态（与 `Task<T>::set_main_poster` 同一条投递器，§1 不变量），宿主已装则不改；② `ChangeNotify` 归常驻等待方（即本引擎），登记与**注销**都要通知——注销后宿主随即关闭句柄，滞留快照会让下一次系统调用撞上无效句柄；③ **一条事件源只由一个驱动方等待**：常驻引擎循环与宿主自带等待集互斥，同时启用会让一次就绪投递两次。开关就是注册口的 `set_host_driven(bool)`（缺省假 = 引擎驱动），引擎每轮等待都读它，置真即让位、置回假即接管，两种转变都经 ② 的通知立刻生效，不必等一个等待窗口或先 `shutdown()`。本库各平台腿缺省全部走引擎驱动（宿主并改为可选项，理由见 §8.8.5）。
 - **瞬态等待失败不终止循环**：注销与就绪同帧发生时本轮可能正持着含已关闭句柄的快照，`wait_ready` 落 `net-wait-failed` 属预期竞态；循环丢弃本轮结果并在下一轮重取快照（`utest_net_engine` 的 `unregister_during_wait_keeps_the_loop_alive` 即此判据）。
 - **停机语义**：`shutdown()` 幂等，停止接收新任务、把**已入队任务与已到期定时跑完**再 join（不丢已承诺的工作），未到期的定时**丢弃且不执行**——静默跑一个过期续体会伪造出错误的完成时序；已投进主线程队列的完成事件由宿主退出路径排空（§2）。收敛后再次 `post` 会重新惰性启动。
 - **无 fd 语义腿**：wasm 装配 `NullEngine`（`name()=="none"`、能力全 false、`post`/`post_after` 一律 `net-platform-unavailable`），绝不假降级也不排队等位。
 - 错误码：本切片**无新增码**，直接产出的只有 `net-platform-unavailable`（无 fd 语义腿、停机竞态拒收新任务）与 `net-runtime-failed`（平台网络运行时不可用）；唤醒通道构建腿的失败码由 §8.8 的同步回环原语**原样透传**（`net-socket-failed` / `net-bind-failed` / `net-listen-failed` / `net-connect-failed` / `net-accept-failed`），引擎不自造第二套口径。
-- 回归：`utest_net_engine`（能力矩阵如实、查询不起线程、`post` 在非调用线程执行、空任务不占队列、`post_after` 不早于登记意图、常驻循环驱动真实事件源、注销同帧不毁循环、`shutdown` 幂等且可重启）。
+- 回归：`utest_net_engine`（能力矩阵如实、查询不起线程、`post` 在非调用线程执行、空任务不占队列、`post_after` 不早于登记意图、常驻循环驱动真实事件源、注销同帧不毁循环、`shutdown` 幂等且可重启、`host_driven` 置真时引擎不再等待注册口条目而宿主自投一次、交回后引擎重新送达）。
 
-#### 8.8.5 底座剩余（计划/待建）
+#### 8.8.5 逐平台驱动形态（底座收口裁决）
 
-提案 §17 底座切片仍缺**把 §8.8.2 注册口接入各平台等待点**的具体改造：Win32 `MsgWaitForMultipleObjectsEx` 句柄数组（含 §18-1「64 句柄上限以运行期错误显式暴露」）、X11/Wayland `poll` 数组里 DBus watch fd 的收编、GLFW/macOS 经引擎线程桥接。基元（§8.8.3）、注册口（§8.8.2）、常驻引擎与能力矩阵（§8.8.4）均已交付，余下是各宿主按 §8.8.4 ③ 的互斥口径二选一。传输族、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地（`Url` 与 `Headers` 两枚基础件已落地，见 [`01-core.md`](01-core.md) §10、§11）。
+底座四件均已交付：值类型（§8.8.1）、事件源注册口（§8.8.2）、就绪基元（§8.8.3）、常驻引擎与能力矩阵（§8.8.4）。原列在 §17 底座里的「把注册口**并入各平台宿主等待集**」不再作为仓内宿主的改造项，改为宿主可选项——`set_host_driven(true)` 之后自行 `sources()`/`dispatch()`。三条理由：
+
+- **分层方向**：注册口属 L0 `app`，提案 §1 只许可 L1 `net` 消费它（「L0 投递口」）。X11/Wayland 的 `poll` 数组与 AT-SPI 桥都在 window 后端，让后端回头消费 `app` 会形成 app↔window 双向依赖；要保住方向就得在公共 `Surface` 面上加一枚由 app 注入的「额外待等待 fd + 就绪回填」钩子——换来的是省掉一次微秒级跨线程投递，代价是公共 API 面扩大。
+- **Win32 形态冲突**：`MsgWaitForMultipleObjectsEx` 只等内核对象，socket 要进句柄数组须经 `WSAEventSelect`，而该调用把套接字置入**事件态**，与 CHG-006 既有的同步收发面（同一句柄上的阻塞 `recv`/`send`）互斥；64 句柄上限还会把宿主等待集的规模变成注册口的容量约束。引擎腿用 `WSAPoll`，两处耦合都不存在。
+- **一致性本就是默认形态**：提案 §2 写明自带引擎的默认形态是「引擎自持工作线程……不依赖各平台主循环的等待形态差异」，逐平台并入只是同一能力的第二种实现，不是新增能力。
+
+由此定下的运行期口径：**Win32 / X11 / Wayland / macOS / GLFW / Headless 一律缺省由常驻引擎线程驱动**（回调经主线程投递器回 UI 线程，唤醒走各腿既有 `request_wake`：Win32 `PostMessage`、X11/Wayland 唤醒管道、GLFW `glfwPostEmptyEvent`）；**wasm 无 fd 语义**，能力位假且注册即报 `net-platform-unavailable`。§18-1 的「64 句柄上限以运行期错误显式暴露」因此只约束**宿主驱动腿**（宿主自有等待集的规模由宿主负责），本库缺省腿不受该上限约束。AT-SPI 的 DBus watch fd 通道维持其在 window 后端的自有集成（它早于注册口，且是 main-thread-only 的无障碍关键路径），注册口的「首例消费者」改为 libssh2 一类第三方会话——那才是它的外部用途，且已用真实回环 fd 在 Headless 基线里逐值验证。
+
+传输族、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地（`Url` 与 `Headers` 两枚基础件已落地，见 [`01-core.md`](01-core.md) §10、§11）。
 
 ---
 

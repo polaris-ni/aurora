@@ -302,7 +302,9 @@ class PollEngine final : public Engine {
     /// @param window 本轮等待上限。
     auto poll_once(std::chrono::milliseconds window) -> void {
         auto &registry = app::EventSourceRegistry::instance();
-        const auto sources = registry.sources();
+        // 宿主自带等待集在驱动时本引擎让位（§8.8.4 投递纪律 ③：一条事件源只由一个驱动方等待），
+        // 否则同一次就绪会被两边各投一次。此处只等唤醒通道，任务与定时器照常按窗口推进。
+        const auto sources = registry.host_driven() ? std::vector<app::WaitSource>{} : registry.sources();
 
         std::vector<PollDescriptor> want;
         want.reserve(sources.size() + 1);

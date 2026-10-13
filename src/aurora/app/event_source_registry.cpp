@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "aurora/core/platform.h"
+
 namespace aurora::app {
 
 // ---- EventSourceRegistration ------------------------------------------------
@@ -39,6 +41,15 @@ auto EventSourceRegistration::unregister() -> void {
 }
 
 // ---- EventSourceRegistry ----------------------------------------------------
+
+// 建进程级单例：无 fd 等待语义的腿在此把支持位置假（判据见 `event_source_supported()` 的声明处）。
+// 置假落在构造期而非公共头，是为了让「本腿有没有 fd 语义」这一编译期事实只出现一处，
+// 公共 API 面维持零 `#ifdef`（提案 §1 不变量）。
+EventSourceRegistry::EventSourceRegistry() {
+#ifdef AURORA_PLATFORM_WASM
+    event_source_supported_.store(false);
+#endif
+}
 
 auto EventSourceRegistry::instance() -> EventSourceRegistry & {
     // 函数内 static：首次调用才建，规避跨 TU 静态初始化顺序问题（与 async.h 投递器同口径）。
@@ -77,6 +88,20 @@ auto EventSourceRegistry::has_dispatcher() -> bool {
 auto EventSourceRegistry::set_event_source_supported(bool supported) -> void {
     event_source_supported_.store(supported);
 }
+
+auto EventSourceRegistry::set_host_driven(bool driven) -> void {
+    ChangeNotify notify;
+    {
+        std::scoped_lock lock(mutex_);
+        host_driven_.store(driven);
+        notify = change_notify_;  // 让位/接管都要常驻方立刻重取快照，故与表变动同一条通知
+    }
+    if (notify) {
+        notify();
+    }
+}
+
+auto EventSourceRegistry::host_driven() const -> bool { return host_driven_.load(); }
 
 auto EventSourceRegistry::event_source_supported() const -> bool { return event_source_supported_.load(); }
 
