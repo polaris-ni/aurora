@@ -256,8 +256,8 @@ auto Framer::until(std::string_view delimiter, FrameOptions options) -> Result<F
     if (delimiter.size() > options.max_frame_bytes) {
         return config_invalid("delimiter is longer than max_frame_bytes");
     }
-    return Framer{std::make_unique<detail::FramerState>(detail::FramerKind::Delimiter, options,
-                                                        std::string(delimiter))};
+    return Framer{
+        std::make_unique<detail::FramerState>(detail::FramerKind::Delimiter, options, std::string(delimiter))};
 }
 
 auto Framer::length_prefixed(FrameOptions options) -> Result<Framer> {
@@ -267,8 +267,7 @@ auto Framer::length_prefixed(FrameOptions options) -> Result<Framer> {
     if (options.length_field_bytes < 1 || options.length_field_bytes > 8) {
         return config_invalid("length_field_bytes is outside 1..8");
     }
-    return Framer{
-        std::make_unique<detail::FramerState>(detail::FramerKind::LengthPrefixed, options, std::string{})};
+    return Framer{std::make_unique<detail::FramerState>(detail::FramerKind::LengthPrefixed, options, std::string{})};
 }
 
 Framer::Framer(std::unique_ptr<detail::FramerState> state) : state_(std::move(state)) {}
