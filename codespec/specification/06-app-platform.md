@@ -960,6 +960,19 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：本切片**无新增码**，`net-runtime-failed` 获得新落点（此前只在会话构造失败时产生，现在句柄创建点即可能产出）。
 - 回归：Windows（MinGW）与 WSL（POSIX）两条验证腿上，上述六个套件全绿；Windows 腿的 IPv6 双栈用例因本机 v6-only 而 `AURORA_TEST_SKIP`（环境缺失，非行为差异）。1MiB+7 往返用例的读线程结构与「对端关闭 = `read_some` 返回 0」口径均未改动，是「别名只做转发、语义零漂移」的主要证据。
 
+#### 8.8.17 测试替身与等待辅助：脚本化时钟、脚本化对端与共用泵（CHG-010 测试替身切片）
+
+提案 §14 承诺的「离线可验证」在本切片落地：故障现场不再靠真实网络与真实时钟碰运气，等待口径不再逐文件复制。设施全在 `tests/framework/`（仓库私有，不进 `include/`、不进 `aurora_api.json`），公共 API 与库行为除下述一处缺陷修正外零改动。
+
+- **落点四份头 + 一枚库内接缝**：`async_wait.h`（条件等待与超时自报）、`net_wait.h`（宿主驱动泵）、`fake_engine.h`（脚本化时钟的 `net::Engine` 替身与作用域守卫）、`scripted_peer.h`（按脚本应答的回环监听口，用于代理握手与隧道类故障）。替身时钟接进库的路径是 `src/aurora/net/detail/engine_override.h` 的进程级 `Engine*` 覆盖接缝（内部头，`Engine::instance()` 先查它再回落单例）——**公共面不提供「换掉引擎」的开关**，那等于把完成投递线程的所有权交给调用方。
+- **三类职责互不重叠**：`FakeEngine` 只管**时间**（到期任务由用例显式推进），`ScriptedPeer` 只管**对端字节**，`net_wait.h` 只管**就绪泵**。缺任何一条都会红成别的故障：`Engine::post` 的立即任务（名字解析、竞速交错）在脚本化时钟下没人跑，用例就一直睡到预算耗尽，报「超时」而不是「忘了推时钟」——故 `FakeEngineScope` 安装替身时同步把 `run_pending` 挂进泵尾巴（`pump_tail_slot()`），拆除时先摘尾巴再交回引擎入口，次序与安装相反。
+- **等待口径收拢**：`wait_ready` 窗口 20 ms、预算 3 s、`HostDriven` / `EngineGuard` / `pump_once` 此前在 `utest_net_transport` / `utest_net_remote_connect` / `utest_net_datagram` / `utest_net_engine` 四份文件里各写一遍（预算还 2 s / 3 s / 1 s 不一），现一律取自这两份框架头；文件内只留把共用形态接回既有调用点的薄转发。**转发返回静默 `bool`**：竞速用例把 `pump_until` 的结果当分支条件用，替身目录里「这段时间里不该发生」的判据用负向断言，转发若自带断言会把正常分支与负向判据反着报成红灯。口径正文见 [`CODING_STANDARDS.md`](../CODING_STANDARDS.md) §3.7。
+- **故障目录覆盖度**：`utest_net_test_double` 13 例覆盖七类里的六类——超时、取消、半关闭、乱序（在流上表现为**分帧边界错位**而不是丢包）、超大帧、代理不可达，另加慢连接（握手停在半路）；每类都断言「结局码 + 恰一次交付 + 事件源已释放」。第七类 **TLS 握手失败**在本提案里造不出脚本（TLS 尚未落地），先以「连上了但握手永不完成」的超时形态兑现，TLS-失败那一枚随 TLS 切片同批补进目录（记入提案 §16 追加裁决）。
+- **零出站是构造性成立而非环境假设**：用例只连回环；「端口上没有服务」经「绑定即关闭」取得而不写死端口号；每条连接都断言 `is_loopback_peer()`，故禁网 CI 上不存在可达的外呼路径，判据 12 的「CI 无出站」前提由此可证伪而不是靠约定。
+- **库内缺陷修正（一处）**：`connect_via_proxy` 的时限回调改为**先落超时结局、再关在途的那条腿**。原先次序相反，`close()` 让未完成的握手读以「已取消」再回一次并先占住结局，调用方看到的失败原因就是 `net-cancelled` 而不是 `net-connect-timeout`——同一件事实的两种说法必须留下成因那一种。判据为替身目录的「静默代理」用例（红时正是报成取消）。
+- 错误码：本切片**无新增码**，也未启用新落点。
+- 回归：net 与基础件相关共 **15 个套件 147 例**两腿同口径复跑。Windows（MinGW）腿 146 通过 + 1 跳过（`utest_net_socket` 的 IPv6 双栈用例因本机 v6-only，属环境缺失非行为差异），其中 `utest_net_test_double` 13 / `utest_net_transport` 17 / `utest_net_remote_connect` 11 / `utest_net_datagram` 9 / `utest_net_engine` 9 / `utest_framework_async_wait` 8；WSL（POSIX）腿同 15 套 **147 例全通过**（`utest_net_socket` 13 例含 IPv6 两例，逐值与 Windows 腿一致）。`utest_net_remote_connect` 在两腿同为 11 例，WSL 腿实测合计 2593 ms（最慢一条是竞速窗口本身，非等待预算撑大）。
+
 ---
 
 ### 8.9 系统拖放（跨进程）

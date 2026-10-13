@@ -40,7 +40,9 @@
 #include "aurora/net/poll.h"
 #include "aurora/net/proxy.h"
 #include "aurora/net/transport.h"
+#include "framework/async_wait.h"
 #include "framework/aurora_test.h"
+#include "framework/net_wait.h"
 
 namespace aurora::test_cases::utest_net_remote_connect {
 namespace {
@@ -52,12 +54,9 @@ using aurora::net::ProxyCredentials;
 using aurora::net::StreamListener;
 using aurora::net::StreamOptions;
 using aurora::net::StreamTransport;
-
-/// @brief 有界等待预算：覆盖回环往返、解析排队与宿主轮询。
-constexpr std::chrono::milliseconds AURORA_WAIT_BUDGET{3000};
-
-/// @brief 单次宿主等待的窗口。
-constexpr std::chrono::milliseconds AURORA_PUMP_WINDOW{20};
+using aurora::test::AURORA_WAIT_BUDGET;
+using aurora::test::net::EngineGuard;
+using aurora::test::net::HostDriven;
 
 /// @brief 「第二条候选根本不该发起」的观察窗：明显大于交错窗口，又不把挂死伪装成慢。
 constexpr std::chrono::milliseconds AURORA_GRACE_WINDOW{600};
@@ -69,29 +68,8 @@ constexpr std::string_view AURORA_TUNNEL_MARKER{"TUNNELDATA"};
 ///        用全预算去确认这件事会把每轮都拖成一次超时。
 constexpr std::chrono::milliseconds AURORA_STEP_WINDOW{300};
 
-/// @brief 宿主驱动形态守卫：退出时把驱动方交回引擎。
-struct HostDriven {
-    HostDriven() { aurora::app::EventSourceRegistry::instance().set_host_driven(true); }
-    ~HostDriven() { aurora::app::EventSourceRegistry::instance().set_host_driven(false); }
-    HostDriven(const HostDriven &) = delete;
-    auto operator=(const HostDriven &) -> HostDriven & = delete;
-    HostDriven(HostDriven &&) = delete;
-    auto operator=(HostDriven &&) -> HostDriven & = delete;
-};
-
-/// @brief 引擎生命周期 + 驱动方守卫：解析腿总在引擎线程执行，用例结束后收敛常驻线程。
-struct EngineGuard {
-    EngineGuard() = default;
-    ~EngineGuard() {
-        aurora::net::Engine::instance().shutdown();
-        aurora::app::EventSourceRegistry::instance().set_dispatcher({});
-        aurora::app::EventSourceRegistry::instance().set_host_driven(false);
-    }
-    EngineGuard(const EngineGuard &) = delete;
-    auto operator=(const EngineGuard &) -> EngineGuard & = delete;
-    EngineGuard(EngineGuard &&) = delete;
-    auto operator=(EngineGuard &&) -> EngineGuard & = delete;
-};
+/// @brief 本文件宿主等待的主题名：超时文本据此指明是竞速腿、握手段还是隧道没出结果。
+constexpr std::string_view AURORA_PUMP_SUBJECT = "net-remote-connect-host-pump";
 
 /// @brief 查表钩子守卫：退出即清除，钩子是进程级状态，不得留给同 runner 的其它用例。
 ///
@@ -130,67 +108,26 @@ auto host_options(std::chrono::milliseconds stagger = std::chrono::milliseconds{
     return options;
 }
 
-/// @brief 取一次宿主等待并把就绪集合交回注册口。
-/// @param registry 进程级事件源注册口。
-auto pump_once(aurora::app::EventSourceRegistry &registry) -> void {
-    const auto sources = registry.sources();
-    if (sources.empty()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds{1});
-        return;
-    }
-    std::vector<aurora::net::PollDescriptor> descriptors;
-    descriptors.reserve(sources.size());
-    for (const auto &source : sources) {
-        descriptors.push_back(aurora::net::PollDescriptor{
-            .handle = source.handle, .want_read = source.interest.read, .want_write = source.interest.write});
-    }
-    const auto outcomes = aurora::net::wait_ready(descriptors, AURORA_PUMP_WINDOW);
-    if (!outcomes) {
-        return;
-    }
-    const auto &values = outcomes.value();
-    std::vector<aurora::app::ReadySource> ready;
-    for (std::size_t i = 0; i < values.size() && i < sources.size(); ++i) {
-        const auto &outcome = values[i];
-        if (!outcome.readable && !outcome.writable && !outcome.error && !outcome.hangup) {
-            continue;
-        }
-        ready.push_back(aurora::app::ReadySource{
-            .token = sources[i].token,
-            .ready = aurora::app::SourceReady{.readable = outcome.readable,
-                                              .writable = outcome.writable,
-                                              .error = outcome.error,
-                                              .hangup = outcome.hangup},
-        });
-    }
-    registry.dispatch(ready);
-}
-
-/// @brief 轮询宿主等待直到谓词成立或预算耗尽。
-/// @param registry 进程级事件源注册口。
+/// @brief 轮询宿主等待直到谓词成立或预算耗尽（转发到共用口径）。
+///
+/// 返回值是**静默** bool：本文件有把它当条件用的调用点（「这一步出结果就走另一条」），在转发里自带
+/// 断言会把正常的分支判成红灯。超时现场由共用辅助记录，红时看 `AURORA_PUMP_SUBJECT` 指认阶段。
+/// @param registry 进程级事件源注册口（形参为维持调用点形态而留，泵自取进程级单例）。
 /// @param pred 目标条件。
 /// @param budget 预算；缺省是「这一步必须出结果」的全预算，中间轮次应显式改短。
 /// @return 预算内成立为 true。
 auto pump_until(aurora::app::EventSourceRegistry &registry, const std::function<bool()> &pred,
                 std::chrono::milliseconds budget = AURORA_WAIT_BUDGET) -> bool {
-    const auto deadline = std::chrono::steady_clock::now() + budget;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (pred()) {
-            return true;
-        }
-        pump_once(registry);
-    }
-    return pred();
+    (void)registry;  // NOLINT(bugprone-unused-parameter) 形参为维持调用点形态而留
+    return aurora::test::net::drive_until(AURORA_PUMP_SUBJECT, pred, budget).satisfied;
 }
 
 /// @brief 让宿主空转一段有界时间（「不该发生的事」只能靠窗口观察，不能靠谓词等）。
-/// @param registry 进程级事件源注册口。
+/// @param registry 进程级事件源注册口（同上，泵自取进程级单例）。
 /// @param window 窗口长度。
 auto spin(aurora::app::EventSourceRegistry &registry, std::chrono::milliseconds window) -> void {
-    const auto deadline = std::chrono::steady_clock::now() + window;
-    while (std::chrono::steady_clock::now() < deadline) {
-        pump_once(registry);
-    }
+    (void)registry;  // NOLINT(bugprone-unused-parameter) 形参为维持调用点形态而留
+    aurora::test::net::pump_idle(window);
 }
 
 /// @brief 一次连接完成的观测记录（回调可能落在引擎线程，故字段一律加锁读写）。

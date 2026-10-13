@@ -538,12 +538,14 @@ auto connect_via_proxy(const ProxyConfig &proxy, std::string_view host, std::uin
                 if (held->claimed) {
                     return;
                 }
-                if (held->stream) {
-                    held->stream->close();
-                }
+                // 超时裁决先落，再关腿：`close()` 会让在途的握手读以「已取消」再回一次，若让它先占住
+                // 结局，调用方看到的失败原因就是取消而不是超时——同一件事实的两种说法必须留下成因那一种。
                 finish_tunnel(
                     held, Result<StreamTransport>{make_error(ErrorCode::NetConnectTimeout,
                                                              ErrorParams{{"detail", "proxy tunnel to " + target}})});
+                if (held->stream) {
+                    held->stream->close();
+                }
             });
         });
         if (!armed) {

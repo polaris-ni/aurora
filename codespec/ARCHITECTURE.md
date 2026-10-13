@@ -518,6 +518,8 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 
 **真实后端 E2E（`tests/e2e/etest_*.cpp`）**：在真实 OS 窗口 + 真实上屏链路上验证（受 `AURORA_BUILD_E2E` 门控，Emscripten 下排除；CTest 侧打 `LABELS e2e` 供 `ctest -L e2e` 分层编排）。架构三层：**场景层**（`examples/demos/scenes/` header-only 场景头，与 demo 同源单一来源，禁止复制 demo UI）→ **进程内驱动内核**（`tools/include/e2e/harness.h`：建窗 / 帧推进 / 像素读回 / 事件派发，系既有真实后端测试代码的抽取与统一）→ **进程外客户端**（`tools/e2e/e2e_client.cpp` 经 `InspectorServer` REST 驱动任意 demo）。可用后端面按编译面逐环境声明（`AURORA_E2E_EXPECT`，CI 逐作业口径见 `specification/08-tooling.md` §8.2）。**真机增强层**（OS 级输入注入，`AURORA_E2E_OS_INPUT` opt-in）必须独占执行：注入劫持的是 OS 全局输入与前台焦点，与一切并发 UI 测试互斥——独占由真机会话人工保证、不进 CI，也不为此恢复 `RUN_SERIAL`（进程隔离 + 用例边界资源虚拟化的并行模型不回退，见 §14.3）。契约、判据与逐作业期望集表见 `specification/08-tooling.md` §8.2。
 
+**异步等待与测试替身（`tests/framework/`）**：被测对象在别的线程或别的时钟上时，用例经四件共用设施等待，而不是各文件自写轮询圈——`async_wait.h`（条件等待与超时自报）、`net_wait.h`（宿主驱动的就绪泵：`HostDriven` / `EngineGuard` / `pump_once` / `drive_until` / `pump_idle`）、`fake_engine.h`（脚本化时钟的 `net::Engine` 替身）、`scripted_peer.h`（按脚本应答的回环监听口）。三类职责互不重叠：**时间**归替身时钟、**对端字节**归脚本化监听口、**就绪泵**归 `net_wait.h`；把故障现场（超时、取消、半关闭、分帧边界错位、超大帧、代理不可达、慢连接）做成可脚本化的输入，是网络栈「CI 内零出站」的前提。等待纪律见 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §3.7，形态与理由见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.17。
+
 **性能基准**：见 §10 与 [`specification/06-app-platform.md`](specification/06-app-platform.md) §10。
 
 ### 14.3 组织约定

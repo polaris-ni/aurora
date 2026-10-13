@@ -29,18 +29,22 @@
 #include "aurora/net/detail/async_io.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/poll.h"
+#include "framework/async_wait.h"
 #include "framework/aurora_test.h"
+#include "framework/net_wait.h"
 
 namespace aurora::test_cases::utest_net_engine {
 namespace {
 
 using aurora::net::Engine;
-
-/// @brief 有界等待预算：覆盖引擎线程唤醒与内核回环往返，又不至于把挂死伪装成慢。
-constexpr std::chrono::milliseconds AURORA_WAIT_BUDGET{1000};
+using aurora::test::AURORA_WAIT_BUDGET;
+using aurora::test::net::EngineGuard;
 
 /// @brief 定时用例的下界余量（Windows 等待粒度可比毫秒粗，故只断言「不早得多」而非精确）。
 constexpr std::chrono::milliseconds AURORA_TIMER_SLACK{40};
+
+/// @brief 本文件等待的主题名：超时文本据此指明是引擎线程那一腿没跑到位。
+constexpr std::string_view AURORA_ENGINE_SUBJECT = "net-engine-wait";
 
 /// @brief 一对已建立的回环 TCP 连接（client 发起、经 backlog 由同线程 accept 取得 server）。
 struct LoopbackPair {
@@ -70,36 +74,16 @@ auto write_payload(aurora::net::blocking::StreamSocket &socket, std::string_view
     AURORA_TEST_REQUIRE(sent.ok());
 }
 
-/// @brief 有界轮询等待谓词成立（被测工作在引擎线程发生，同线程不可能同步断言）。
+/// @brief 有界等待谓词成立（被测工作在引擎线程发生，同线程不可能同步断言）。
+///
+/// 转发到共用口径，返回值是**静默** bool：本文件既有正向 `CHECK_TRUE` 也有负向 `CHECK_FALSE`
+/// （「这段时间里不该发生」），转发里自带断言会把负向判据反着报成红灯。
 /// @param pred 目标条件。
-/// @param budget 最长等待时长。
+/// @param budget 最长等待时长；负向观察窗一律显式给短值。
 /// @return 预算内成立为 true。
-auto wait_until(const std::function<bool()> &pred, std::chrono::milliseconds budget) -> bool {
-    const auto deadline = std::chrono::steady_clock::now() + budget;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (pred()) {
-            return true;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds{2});
-    }
-    return pred();
+auto wait_until(const std::function<bool()> &pred, std::chrono::milliseconds budget = AURORA_WAIT_BUDGET) -> bool {
+    return aurora::test::wait_until(AURORA_ENGINE_SUBJECT, pred, budget).satisfied;
 }
-
-/// @brief 引擎与注册口接缝的守卫：析构收敛引擎、清 Dispatcher 并把驱动方交回引擎，
-///        不把在跑线程或「宿主驱动」开关留给同 runner 的其它用例。
-struct EngineGuard {
-    EngineGuard() = default;
-    ~EngineGuard() {
-        Engine::instance().shutdown();
-        auto &registry = aurora::app::EventSourceRegistry::instance();
-        registry.set_dispatcher({});
-        registry.set_host_driven(false);
-    }
-    EngineGuard(const EngineGuard &) = delete;
-    auto operator=(const EngineGuard &) -> EngineGuard & = delete;
-    EngineGuard(EngineGuard &&) = delete;
-    auto operator=(EngineGuard &&) -> EngineGuard & = delete;
-};
 
 }  // namespace
 

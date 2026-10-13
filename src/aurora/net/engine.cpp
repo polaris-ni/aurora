@@ -35,6 +35,7 @@
 #include "aurora/core/result.h"
 #include "aurora/net/blocking.h"
 #include "aurora/net/detail/async_io.h"
+#include "aurora/net/detail/engine_override.h"
 #include "aurora/net/detail/runtime.h"
 #include "aurora/net/poll.h"
 #include "aurora/state/async.h"
@@ -395,6 +396,32 @@ auto shared_engine() -> Engine & {
 
 }  // namespace
 
-auto Engine::instance() -> Engine & { return shared_engine(); }
+namespace detail {
+
+/// @brief 替身指针的存储位（进程级单点；纪律见 `detail/engine_override.h`）。
+/// @note 用 `nullptr` 表示「未装」，故读取一次即得到当时的完整事实，不需要与别处对齐。
+///       函数局部静态与 `detail::main_poster_mutex()` 同形态：`std::atomic<Engine *>` 平凡可析构，
+///       既无退出期顺序问题，也不留文件级可变全局。
+auto engine_override_slot() -> std::atomic<Engine *> & {
+    static std::atomic<Engine *> slot{nullptr};
+    return slot;
+}
+
+auto set_engine_override(Engine *engine) -> void { engine_override_slot().store(engine, std::memory_order_release); }
+
+auto clear_engine_override() -> void { engine_override_slot().store(nullptr, std::memory_order_release); }
+
+auto engine_override() -> Engine * { return engine_override_slot().load(std::memory_order_acquire); }
+
+}  // namespace detail
+
+auto Engine::instance() -> Engine & {
+    // 替身优先：测试装了脚本化引擎时，本层所有走 `instance()` 的路径（连接时限、竞速交错定时器、
+    // 唤醒投递、解析排队）都改由用例推进；未装时代价只有一次原子加载。
+    if (auto *replacement = detail::engine_override(); replacement != nullptr) {
+        return *replacement;
+    }
+    return shared_engine();
+}
 
 }  // namespace aurora::net

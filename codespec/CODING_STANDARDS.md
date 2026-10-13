@@ -183,6 +183,16 @@
 - 只测拓扑校验 / 非法参数路径的用例同样显式注入，别把「碰巧没声卡」当成通过条件。
 - 确需真实设备的验证不进单测：放 `tools/verify/` 真机探针（条件构建、不进 CTest），见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §2.4 的 `aurora_verify_*`。
 
+### 3.7 异步等待与测试替身口径
+
+被测对象在别的线程或别的时钟上时，用例只允许通过 `tests/framework/` 里的两份辅助等待，不得再各自手写轮询圈。这条与 §3.5 golden 基线的收敛同源：同一段设施曾在多个文件里各抄一份，任何改进都要改多处。
+
+- **等一个条件**用 `tests/framework/async_wait.h` 的 `wait_until(subject, pred, budget)`；缺省预算取该头的 `AURORA_WAIT_BUDGET`（单一真值，勿在文件内另立数值）。等待是通知驱动或有界轮询，**禁止忙等**（无条件空转的 `while` 圈）、禁止 `sleep_for` 一把然后直接断言、禁止无界等待。
+- **超时必须自报**：`WaitOutcome` 带 `subject` / `elapsed` / `budget` / `polls`，正向判据用 `AURORA_TEST_WAIT_UNTIL(outcome)` 把现场写进红灯文本。辅助本身**不得替调用方判定正反**——凡转发给既有断言点的辅助（`CHECK` / `REQUIRE` / `CHECK_FALSE` 三向都可能），一律返回静默 `bool`，否则「这段时间里不该发生」的负向判据会被反着报成红灯。
+- **等的时候谁来泵**用 `tests/framework/net_wait.h`：宿主驱动形态取 `HostDriven` + `pump_once` / `drive_until` / `pump_idle`，引擎驱动形态取 `EngineGuard`（析构把常驻线程、投递接缝与驱动方开关一并交回缺省态，见 §3.1「用例不得依赖进程隔离兜住全局副作用」）。同一枚事件源不得由引擎与宿主同时等待（[`06-app-platform.md`](specification/06-app-platform.md) §8.8.4 的互斥口径）。
+- **三类替身各司其职**：`tests/framework/fake_engine.h` 的 `FakeEngine` 只管**时间**（脚本化到期任务），`tests/framework/scripted_peer.h` 的 `ScriptedPeer` 只管**对端字节**，`net_wait.h` 只管**就绪泵**；`FakeEngineScope` 安装替身时钟时同步将 `run_pending` 挂进泵尾巴，否则 `Engine::post` 的立即任务（名字解析、竞速交错）在脚本化时钟下永不推进，红成「超时」而不是「忘了跑」。
+- **零出站**：网络用例只连回环，未监听的端口经「绑定即关闭」取得，并对端做回环校验；用例必须在无出站网络的 CI 上跑通。
+
 ## 4 元数据与可观测
 
 - **错误可机读**：`Error::to_json()` 输出结构化错误（`code` / `message` / `suggestion` / `docs` / `where`），供 AI 解析。
