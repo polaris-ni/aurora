@@ -103,7 +103,7 @@ struct EngineGuard {
 
 }  // namespace
 
-// 能力矩阵如实回报：本腿的事件源/字节流/监听位为真，未落地形态（udp、本机 IPC、DNS、TLS）恒假。
+// 能力矩阵如实回报：本腿的事件源/字节流/监听/数据报/名称解析位为真，未落地形态（本机 IPC、TLS）恒假。
 // wasm 腿则一切为假且名为 "none"（§2「不提供假降级」）。
 AURORA_TEST_CASE(capabilities_report_only_landed_forms) {
 #ifdef AURORA_PLATFORM_WASM
@@ -122,9 +122,9 @@ AURORA_TEST_CASE(capabilities_report_only_landed_forms) {
     AURORA_TEST_CHECK_TRUE(caps.streaming);
     AURORA_TEST_CHECK_TRUE(caps.custom_headers);
     AURORA_TEST_CHECK_TRUE(caps.event_source);
-    AURORA_TEST_CHECK_FALSE(caps.udp);
+    AURORA_TEST_CHECK_TRUE(caps.udp);
+    AURORA_TEST_CHECK_TRUE(caps.dns);
     AURORA_TEST_CHECK_FALSE(caps.local_ipc);
-    AURORA_TEST_CHECK_FALSE(caps.dns);
     AURORA_TEST_CHECK_FALSE(caps.tls);
 #endif
 }

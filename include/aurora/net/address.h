@@ -129,6 +129,13 @@ class Endpoint {
     /// @return 有效的 IPv4 `0.0.0.0` 或 IPv6 `::` 时为 true；无效占位为 false。
     [[nodiscard]] auto is_unspecified() const -> bool;
 
+    /// @brief 是否为组播地址。
+    /// @return IPv4 落在 `224.0.0.0/4`（`RFC 5771` §2）、或 IPv6 首字节为 `0xFF`（`RFC 4291` §2.7）
+    ///         时为 true；本机 IPC、无效占位与单播 / 广播地址为 false。
+    /// @note 判据取解析后的地址族与二进制值，与 `is_loopback()` 同源；广播地址（如
+    ///       `255.255.255.255`）**不是**组播，本函数对它返回 false。
+    [[nodiscard]] auto is_multicast() const -> bool;
+
     /// @brief 是否为本机 IPC 端点。
     /// @return 地址族为 `LocalPath` 时为 true。
     [[nodiscard]] auto is_local_path() const -> bool { return family_ == AddressFamily::LocalPath; }

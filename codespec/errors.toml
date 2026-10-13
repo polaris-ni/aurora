@@ -1210,3 +1210,14 @@ fix_category = "invalid_value"
 retryable = false
 message = "Invalid framer configuration: '{detail}'"
 hint = "A Framer factory was given a limit of 0, an empty or oversized delimiter, or a length field width outside 1..8 bytes; framing must be configured before it is used, because a silent default here would either accept unbounded frames or split messages at the wrong place"
+
+[[error]]
+enum = "NetOptionConflict"
+slug = "net-option-conflict"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Socket option conflicts with the current configuration: '{detail}'"
+hint = "Two settings cannot both hold on one socket (a connected UDP socket receives only from its peer, so joining a multicast group there would configure a socket that can never receive the group); use a second socket for the other form rather than reordering the calls"

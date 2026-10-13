@@ -18,29 +18,29 @@ using ErrorParams = std::unordered_map<std::string, std::string>;
 
 /// @brief error domain of a code; the declaration order is the underlying value order.
 enum class ErrorCategory : std::uint8_t {
-    General = 0,  ///< uncategorized error domain
-    Layout = 1,  ///< layout measurement and constraint errors
-    Widget = 2,  ///< widget contract and property errors
-    Render = 3,  ///< painter, font and bitmap rendering errors
-    Io = 4,  ///< file and stream read/write errors
-    Validation = 5,  ///< input and configuration validation errors
-    Navigation = 6,  ///< page stack and routing errors
-    Platform = 7,  ///< platform backend and OS integration errors
-    Runtime = 8,  ///< runtime environment and lifecycle state errors
-    Generation = 9,  ///< UI generation (generate_ui) errors
-    Diagnostic = 10,  ///< diagnostics, self-check and degradation errors
+    General = 0,   ///< uncategorized error domain
+    Layout = 1,   ///< layout measurement and constraint errors
+    Widget = 2,   ///< widget contract and property errors
+    Render = 3,   ///< painter, font and bitmap rendering errors
+    Io = 4,   ///< file and stream read/write errors
+    Validation = 5,   ///< input and configuration validation errors
+    Navigation = 6,   ///< page stack and routing errors
+    Platform = 7,   ///< platform backend and OS integration errors
+    Runtime = 8,   ///< runtime environment and lifecycle state errors
+    Generation = 9,   ///< UI generation (generate_ui) errors
+    Diagnostic = 10,   ///< diagnostics, self-check and degradation errors
 };
 
 /// @brief severity as declared in codespec/errors.toml (diagnostics logs Error verbatim, everything else as Warn).
 enum class ErrorSeverity : std::uint8_t {
-    Info = 0,  ///< reserved level; no codespec/errors.toml entry declares it
-    Warning = 1,  ///< degraded condition, logged as LogLevel::Warn
-    Error = 2,  ///< failed operation, logged as LogLevel::Error
-    Fatal = 3,  ///< reserved level; no codespec/errors.toml entry declares it
+    Info = 0,    ///< reserved level; no codespec/errors.toml entry declares it
+    Warning = 1,    ///< degraded condition, logged as LogLevel::Warn
+    Error = 2,    ///< failed operation, logged as LogLevel::Error
+    Fatal = 3,    ///< reserved level; no codespec/errors.toml entry declares it
 };
 
 /// @brief one enumerator per entry of codespec/errors.toml; the numeric value is the row index in AURORA_ERROR_TABLE.
-enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
+enum class ErrorCode : std::uint16_t { // NOLINT(*-enum-size)
     GeneralUnknown = 0,  ///< general-unknown: An unknown error occurred
     GeneralInvalidArgument = 1,  ///< general-invalid-argument: Invalid argument supplied
     GeneralNotSupported = 2,  ///< general-not-supported: Operation not supported
@@ -129,7 +129,6 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetSendFailed = 85,  ///< net-send-failed: Socket send failed
     NetRecvFailed = 86,  ///< net-recv-failed: Socket receive failed
     NetRecvTimeout = 87,  ///< net-recv-timeout: Socket receive timed out
-<<<<<<< HEAD
     SystemDragNotSupported = 88,  ///< system-drag-not-supported: System drag-and-drop unavailable: '{detail}'
     SystemDragSessionFailed = 89,  ///< system-drag-session-failed: System drag-and-drop session failed: '{detail}'
     NetEndpointInvalid = 90,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
@@ -146,42 +145,27 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetOptionFailed = 101,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
     NetConnectTimeout = 102,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
     NetBufferLimit = 103,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
-=======
-    NetEndpointInvalid = 88,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
-    NetCancelled = 89,  ///< net-cancelled: Network operation was cancelled
-    NetPlatformUnavailable = 90,  ///< net-platform-unavailable
-    NetUrlInvalid = 91,  ///< net-url-invalid: URL is not a valid absolute or resolvable reference: '{detail}'
-    NetProxyConfigInvalid = 92,  ///< net-proxy-config-invalid: Proxy configuration is not valid: '{detail}'
-    NetProxyUnsupported = 93,  ///< net-proxy-unsupported: This proxy protocol is not supported by the current build
-    NetProxyUnreachable = 94,  ///< net-proxy-unreachable: Proxy tunnel could not be established: '{detail}'
-    NetProxyAuthRequired = 95,  ///< net-proxy-auth-required: Proxy rejected the supplied credentials: '{detail}'
-    NetProxyProtocol = 96,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
-    NetDnsFailed = 97,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
-    NetProxyConfigUnreadable = 98,  ///< net-proxy-config-unreadable
-    NetOptionFailed = 99,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
-    NetConnectTimeout = 100,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
-    NetBufferLimit = 101,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
-    NetFramerOverflow = 102,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
-    NetFramerConfigInvalid = 103,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
->>>>>>> db735173 (feat(net): 落地 CHG-010 名字连接与代理隧道编排及 net::Framer 三型分帧)
+    NetFramerOverflow = 104,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
+    NetFramerConfigInvalid = 105,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
+    NetOptionConflict = 106,  ///< net-option-conflict
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
 struct ErrorMeta {
-    ErrorCode code;  ///< enumerator of this row
-    std::string_view ident;  ///< C++ identifier, e.g. "NavDepthExceeded" (debug use)
-    std::string_view slug;  ///< frozen external code, e.g. "nav-depth-exceeded"
-    ErrorCategory category;  ///< error domain
-    ErrorSeverity severity;  ///< declared severity
-    bool auto_fixable;  ///< whether a fixer may rewrite the offending source
+    ErrorCode code;                 ///< enumerator of this row
+    std::string_view ident;         ///< C++ identifier, e.g. "NavDepthExceeded" (debug use)
+    std::string_view slug;          ///< frozen external code, e.g. "nav-depth-exceeded"
+    ErrorCategory category;         ///< error domain
+    ErrorSeverity severity;         ///< declared severity
+    bool auto_fixable;              ///< whether a fixer may rewrite the offending source
     std::string_view fix_category;  ///< fixer bucket, empty when auto_fixable is false
-    bool retryable;  ///< whether re-running the operation may succeed
-    std::string_view message_tpl;  ///< contains {placeholder}
-    std::string_view hint;  ///< remediation advice, empty when none is declared
+    bool retryable;                 ///< whether re-running the operation may succeed
+    std::string_view message_tpl;   ///< contains {placeholder}
+    std::string_view hint;          ///< remediation advice, empty when none is declared
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 107> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -553,8 +537,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "OS global hotkey registration failed: '{detail}'",
-            .hint = "The key combination may already be grabbed by another process, unsupported on this platform, or "
-                    "the platform backend is unavailable",
+            .hint = "The key combination may already be grabbed by another process, unsupported on this platform, or the platform backend is unavailable",
         },
         {
             .code = ErrorCode::NotificationPostFailed,
@@ -566,8 +549,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "System notification could not be posted: '{detail}'",
-            .hint = "The desktop notification service may be unavailable, or the platform backend does not support "
-                    "notifications",
+            .hint = "The desktop notification service may be unavailable, or the platform backend does not support notifications",
         },
         {
             .code = ErrorCode::RuntimeCoroutineException,
@@ -627,8 +609,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Requested render backend is unavailable",
-            .hint = "Check the backend compile switch (AURORA_BACKEND_D3D11) or fall back to software rendering "
-                    "(RendererPreference::Auto/Software)",
+            .hint = "Check the backend compile switch (AURORA_BACKEND_D3D11) or fall back to software rendering (RendererPreference::Auto/Software)",
         },
         {
             .code = ErrorCode::PrefsNotPersistent,
@@ -688,8 +669,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "layout_conflict",
             .retryable = false,
             .message_tpl = "Widget tree depth exceeded the limit (default 64)",
-            .hint = "Usually caused by infinitely recursive Repeater / self-referencing Provider; check rebuild "
-                    "conditions or set_max_depth()",
+            .hint = "Usually caused by infinitely recursive Repeater / self-referencing Provider; check rebuild conditions or set_max_depth()",
         },
         {
             .code = ErrorCode::RenderDegraded,
@@ -713,8 +693,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Requested font unavailable, fell back to built-in Bitmap font",
-            .hint = "On non-Windows platforms the GDI font fallback chain may differ; ensure the font is registered or "
-                    "use the built-in font",
+            .hint = "On non-Windows platforms the GDI font fallback chain may differ; ensure the font is registered or use the built-in font",
         },
         {
             .code = ErrorCode::SurfaceLost,
@@ -726,8 +705,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Surface lost (e.g. window destroyed/device reset)",
-            .hint = "Need to rebuild the Surface to continue rendering; in most cases the framework auto-recovers on "
-                    "next present",
+            .hint = "Need to rebuild the Surface to continue rendering; in most cases the framework auto-recovers on next present",
         },
         {
             .code = ErrorCode::NotRestorable,
@@ -739,8 +717,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "unknown",
             .retryable = false,
             .message_tpl = "Widget not restorable (skipped during serialization/deserialization)",
-            .hint = "Widgets relying on runtime callbacks such as Repeater / Canvas cannot be restored from JSON; use "
-                    "a named factory or State injection",
+            .hint = "Widgets relying on runtime callbacks such as Repeater / Canvas cannot be restored from JSON; use a named factory or State injection",
         },
         {
             .code = ErrorCode::JsonParseError,
@@ -800,8 +777,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Storage backend unavailable (directory not writable or media open failed)",
-            .hint = "Check storage path permissions; when a cross-process lock is held, wait or close the occupying "
-                    "process",
+            .hint = "Check storage path permissions; when a cross-process lock is held, wait or close the occupying process",
         },
         {
             .code = ErrorCode::StorageRecordNotFound,
@@ -849,8 +825,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "Serialized wire format mismatch",
-            .hint = "Record stored as binary but type T only supports JSON (or vice versa); use get_value or fix T's "
-                    "serialization concept",
+            .hint = "Record stored as binary but type T only supports JSON (or vice versa); use get_value or fix T's serialization concept",
         },
         {
             .code = ErrorCode::StorageIoError,
@@ -910,8 +885,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Invalid audio parameter automation ({reason})",
-            .hint =
-                "Check times (non-negative, non-decreasing), exponential ramp must not cross zero, time_constant > 0",
+            .hint = "Check times (non-negative, non-decreasing), exponential ramp must not cross zero, time_constant > 0",
         },
         {
             .code = ErrorCode::AudioBufferInvalid,
@@ -935,8 +909,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Audio device unavailable ({reason}); running in silent mode",
-            .hint = "The audio graph keeps running and drops samples; build with AURORA_ENABLE_AUDIO and check the "
-                    "platform device",
+            .hint = "The audio graph keeps running and drops samples; build with AURORA_ENABLE_AUDIO and check the platform device",
         },
         {
             .code = ErrorCode::AudioRecordingFailed,
@@ -948,8 +921,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Audio recording failed: {reason}",
-            .hint = "Check the output path and permissions; capture device availability is reported separately as "
-                    "audio-device-unavailable",
+            .hint = "Check the output path and permissions; capture device availability is reported separately as audio-device-unavailable",
         },
         {
             .code = ErrorCode::CliSpecInvalid,
@@ -961,8 +933,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Invalid command spec: {reason}",
-            .hint = "Fix the CommandSpec/OptionSchema declaration: names must be non-empty and unique, enum kinds must "
-                    "list choices",
+            .hint = "Fix the CommandSpec/OptionSchema declaration: names must be non-empty and unique, enum kinds must list choices",
         },
         {
             .code = ErrorCode::CliUnknownOption,
@@ -1010,8 +981,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "missing_prop",
             .retryable = false,
             .message_tpl = "Option '{option}' requires a value",
-            .hint = "Pass the value inline as --name=value or as a following token; flags that take no value must be "
-                    "declared Bool with arity 0",
+            .hint = "Pass the value inline as --name=value or as a following token; flags that take no value must be declared Bool with arity 0",
         },
         {
             .code = ErrorCode::CliInvalidValue,
@@ -1083,8 +1053,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Too many positional arguments for command '{command}': unexpected extra '{value}'",
-            .hint =
-                "Declare the extra slot in the positional schema, or pass it after '--' to treat it as trailing input",
+            .hint = "Declare the extra slot in the positional schema, or pass it after '--' to treat it as trailing input",
         },
         {
             .code = ErrorCode::CliConflictViolated,
@@ -1108,8 +1077,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "System clipboard is inaccessible: '{detail}'",
-            .hint = "Another thread/process may own the clipboard (retry once it is released), the OS helper may be "
-                    "missing (install xclip or xsel on Linux), or the stored payload failed validation",
+            .hint = "Another thread/process may own the clipboard (retry once it is released), the OS helper may be missing (install xclip or xsel on Linux), or the stored payload failed validation",
         },
         {
             .code = ErrorCode::ClipboardWriteFailed,
@@ -1121,8 +1089,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Clipboard payload could not be committed: '{detail}'",
-            .hint = "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free "
-                    "memory or retry the copy",
+            .hint = "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free memory or retry the copy",
         },
         {
             .code = ErrorCode::NetRuntimeFailed,
@@ -1134,8 +1101,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Socket runtime initialization failed",
-            .hint = "Winsock startup was rejected (WSAStartup); check winsock DLL availability and version request, "
-                    "then retry",
+            .hint = "Winsock startup was rejected (WSAStartup); check winsock DLL availability and version request, then retry",
         },
         {
             .code = ErrorCode::NetSocketFailed,
@@ -1183,8 +1149,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Socket accept failed",
-            .hint = "accept() returned an error (listener closed concurrently or fd limit); re-check the running flag "
-                    "before retrying",
+            .hint = "accept() returned an error (listener closed concurrently or fd limit); re-check the running flag before retrying",
         },
         {
             .code = ErrorCode::NetConnectFailed,
@@ -1196,8 +1161,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Connect to loopback endpoint failed",
-            .hint = "No listener on 127.0.0.1:{port} (service not started) or the local firewall refused the loopback "
-                    "connect",
+            .hint = "No listener on 127.0.0.1:{port} (service not started) or the local firewall refused the loopback connect",
         },
         {
             .code = ErrorCode::NetTimeoutOptionFailed,
@@ -1209,8 +1173,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Socket timeout option could not be set",
-            .hint = "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO) failed; do not continue into an unbounded wait, close and "
-                    "reopen the socket",
+            .hint = "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO) failed; do not continue into an unbounded wait, close and reopen the socket",
         },
         {
             .code = ErrorCode::NetWaitFailed,
@@ -1222,8 +1185,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Socket readiness wait failed",
-            .hint =
-                "select() returned an error (fd set invalid or interrupted); re-check the running flag before retrying",
+            .hint = "select() returned an error (fd set invalid or interrupted); re-check the running flag before retrying",
         },
         {
             .code = ErrorCode::NetSendFailed,
@@ -1259,8 +1221,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "timeout",
             .retryable = true,
             .message_tpl = "Socket receive timed out",
-            .hint = "SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat "
-                    "this as 'no more data now'",
+            .hint = "SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat this as 'no more data now'",
         },
         {
             .code = ErrorCode::SystemDragNotSupported,
@@ -1272,8 +1233,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "System drag-and-drop unavailable: '{detail}'",
-            .hint = "The platform/backend has no system drag-and-drop mechanism yet, or the capability bit is false; "
-                    "retrying cannot create the mechanism - fall back to a non-drag path (paste, file dialog)",
+            .hint = "The platform/backend has no system drag-and-drop mechanism yet, or the capability bit is false; retrying cannot create the mechanism - fall back to a non-drag path (paste, file dialog)",
         },
         {
             .code = ErrorCode::SystemDragSessionFailed,
@@ -1285,8 +1245,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "System drag-and-drop session failed: '{detail}'",
-            .hint = "The negotiation broke down or the source stopped providing data; treat the session as ended "
-                    "(action None) and surface a non-drag alternative",
+            .hint = "The negotiation broke down or the source stopped providing data; treat the session as ended (action None) and surface a non-drag alternative",
         },
         {
             .code = ErrorCode::NetEndpointInvalid,
@@ -1298,8 +1257,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Network endpoint is not a valid address: '{detail}'",
-            .hint = "Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use "
-                    "Endpoint::local for UnixSocket paths or named pipes",
+            .hint = "Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use Endpoint::local for UnixSocket paths or named pipes",
         },
         {
             .code = ErrorCode::NetCancelled,
@@ -1311,8 +1269,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "cancelled",
             .retryable = true,
             .message_tpl = "Network operation was cancelled",
-            .hint = "The caller cancelled this operation (or its owner went away); the completion still fires once "
-                    "with this code, so drop the result only if the owner is gone",
+            .hint = "The caller cancelled this operation (or its owner went away); the completion still fires once with this code, so drop the result only if the owner is gone",
         },
         {
             .code = ErrorCode::NetPlatformUnavailable,
@@ -1324,8 +1281,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "platform_capability",
             .retryable = false,
             .message_tpl = "This network capability is unavailable on the current platform",
-            .hint = "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait "
-                    "semantics (e.g. wasm), so there is no silent fallback by design",
+            .hint = "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait semantics (e.g. wasm), so there is no silent fallback by design",
         },
         {
             .code = ErrorCode::NetUrlInvalid,
@@ -1337,8 +1293,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "URL is not a valid absolute or resolvable reference: '{detail}'",
-            .hint = "Pass a complete URL with scheme (e.g. https://host/path) or a reference to resolve against a base "
-                    "URL; percent signs must introduce a two-hex-digit escape and IPv6 literals need brackets",
+            .hint = "Pass a complete URL with scheme (e.g. https://host/path) or a reference to resolve against a base URL; percent signs must introduce a two-hex-digit escape and IPv6 literals need brackets",
         },
         {
             .code = ErrorCode::NetProxyConfigInvalid,
@@ -1350,9 +1305,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Proxy configuration is not valid: '{detail}'",
-            .hint = "Fix the value instead of ignoring it: a proxy URL is scheme://[user[:pass]@]host[:port] with no "
-                    "path, and a NO_PROXY entry is *, a domain, a domain with :port, or an IPv4/IPv6 CIDR; a malformed "
-                    "proxy setting must never fall back to a direct connection",
+            .hint = "Fix the value instead of ignoring it: a proxy URL is scheme://[user[:pass]@]host[:port] with no path, and a NO_PROXY entry is *, a domain, a domain with :port, or an IPv4/IPv6 CIDR; a malformed proxy setting must never fall back to a direct connection",
         },
         {
             .code = ErrorCode::NetProxyUnsupported,
@@ -1364,9 +1317,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "This proxy protocol is not supported by the current build",
-            .hint = "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected "
-                    "proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a "
-                    "plaintext proxy hop",
+            .hint = "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a plaintext proxy hop",
         },
         {
             .code = ErrorCode::NetProxyUnreachable,
@@ -1378,8 +1329,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Proxy tunnel could not be established: '{detail}'",
-            .hint = "The proxy answered (or refused) but no tunnel was built; connect never fell back to direct on "
-                    "purpose, so check the proxy host/port and its own uplink rather than the target host",
+            .hint = "The proxy answered (or refused) but no tunnel was built; connect never fell back to direct on purpose, so check the proxy host/port and its own uplink rather than the target host",
         },
         {
             .code = ErrorCode::NetProxyAuthRequired,
@@ -1391,9 +1341,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Proxy rejected the supplied credentials: '{detail}'",
-            .hint = "The proxy demanded authentication that was absent or refused: 407 on HTTP CONNECT, or a non-zero "
-                    "status on the SOCKS5 username/password subnegotiation; supply credentials in the proxy URL or "
-                    "re-authenticate once, do not retry blindly",
+            .hint = "The proxy demanded authentication that was absent or refused: 407 on HTTP CONNECT, or a non-zero status on the SOCKS5 username/password subnegotiation; supply credentials in the proxy URL or re-authenticate once, do not retry blindly",
         },
         {
             .code = ErrorCode::NetProxyProtocol,
@@ -1405,9 +1353,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Proxy handshake is not protocol-conformant: '{detail}'",
-            .hint = "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status "
-                    "line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server "
-                    "where a proxy port was expected",
+            .hint = "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server where a proxy port was expected",
         },
         {
             .code = ErrorCode::NetDnsFailed,
@@ -1419,9 +1365,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Host name could not be resolved: '{detail}'",
-            .hint =
-                "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form "
-                "or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test",
+            .hint = "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test",
         },
         {
             .code = ErrorCode::NetProxyConfigUnreadable,
@@ -1433,9 +1377,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Operating-system proxy settings could not be read: '{detail}'",
-            .hint = "The channel exists on this platform but the read was refused (registry access, dynamic-store "
-                    "failure); this is distinct from a machine that simply has no proxy configured, and the library "
-                    "never treats the two as the same outcome",
+            .hint = "The channel exists on this platform but the read was refused (registry access, dynamic-store failure); this is distinct from a machine that simply has no proxy configured, and the library never treats the two as the same outcome",
         },
         {
             .code = ErrorCode::NetOptionFailed,
@@ -1447,9 +1389,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Socket option or shutdown call failed: '{detail}'",
-            .hint = "setsockopt / getsockopt / shutdown returned an error (bad handle state, unsupported option, or "
-                    "the peer already reset the connection); the native code is in the message, check the option name "
-                    "and whether the socket is still connected",
+            .hint = "setsockopt / getsockopt / shutdown returned an error (bad handle state, unsupported option, or the peer already reset the connection); the native code is in the message, check the option name and whether the socket is still connected",
         },
         {
             .code = ErrorCode::NetConnectTimeout,
@@ -1461,9 +1401,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "timeout",
             .retryable = true,
             .message_tpl = "Connection attempt timed out: '{detail}'",
-            .hint = "The non-blocking connect did not produce a result within the configured deadline; a black-holed "
-                    "peer or an unreachable route looks identical to a slow one from here, so retry with a longer "
-                    "StreamOptions::connect_timeout or fall back to another candidate address",
+            .hint = "The non-blocking connect did not produce a result within the configured deadline; a black-holed peer or an unreachable route looks identical to a slow one from here, so retry with a longer StreamOptions::connect_timeout or fall back to another candidate address",
         },
         {
             .code = ErrorCode::NetBufferLimit,
@@ -1475,9 +1413,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Transfer buffer limit exceeded: '{detail}'",
-            .hint = "Backpressure fired: pending bytes reached the high-water mark, pending reads exceeded the "
-                    "read-buffer cap, or a framed message overflowed its limit; slow the producer down or raise the "
-                    "matching StreamOptions field rather than dropping data",
+            .hint = "Backpressure fired: pending bytes reached the high-water mark, pending reads exceeded the read-buffer cap, or a framed message overflowed its limit; slow the producer down or raise the matching StreamOptions field rather than dropping data",
         },
         {
             .code = ErrorCode::NetFramerOverflow,
@@ -1489,10 +1425,7 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Framed message exceeds its configured limit: '{detail}'",
-            .hint = "The stream produced a single message larger than FrameOptions::max_frame_bytes, or a length "
-                    "prefix declaring more bytes than the limit allows; raise the limit only for a protocol that "
-                    "genuinely carries such frames, otherwise treat the stream as malformed and close it rather than "
-                    "resynchronising inside an oversized frame",
+            .hint = "The stream produced a single message larger than FrameOptions::max_frame_bytes, or a length prefix declaring more bytes than the limit allows; raise the limit only for a protocol that genuinely carries such frames, otherwise treat the stream as malformed and close it rather than resynchronising inside an oversized frame",
         },
         {
             .code = ErrorCode::NetFramerConfigInvalid,
@@ -1504,11 +1437,21 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Invalid framer configuration: '{detail}'",
-            .hint = "A Framer factory was given a limit of 0, an empty or oversized delimiter, or a length field width "
-                    "outside 1..8 bytes; framing must be configured before it is used, because a silent default here "
-                    "would either accept unbounded frames or split messages at the wrong place",
+            .hint = "A Framer factory was given a limit of 0, an empty or oversized delimiter, or a length field width outside 1..8 bytes; framing must be configured before it is used, because a silent default here would either accept unbounded frames or split messages at the wrong place",
         },
-    },
+        {
+            .code = ErrorCode::NetOptionConflict,
+            .ident = "NetOptionConflict",
+            .slug = "net-option-conflict",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "Socket option conflicts with the current configuration: '{detail}'",
+            .hint = "Two settings cannot both hold on one socket (a connected UDP socket receives only from its peer, so joining a multicast group there would configure a socket that can never receive the group); use a second socket for the other form rather than reordering the calls",
+        },
+  },
 };
 
 /// @brief number of declared error codes.
@@ -1518,7 +1461,9 @@ constexpr auto error_count() -> std::size_t { return std::size(AURORA_ERROR_TABL
 /// @brief frozen external code of an error.
 /// @param[in] c error code to look up.
 /// @return slug as declared in errors.toml.
-constexpr auto slug(ErrorCode c) -> std::string_view { return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).slug; }
+constexpr auto slug(ErrorCode c) -> std::string_view {
+    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).slug;
+}
 /// @brief error domain of an error code.
 /// @param[in] c error code to look up.
 /// @return declared category.
@@ -1546,7 +1491,9 @@ constexpr auto fix_category_of(ErrorCode c) -> std::string_view {
 /// @brief whether re-running the failed operation may succeed.
 /// @param[in] c error code to look up.
 /// @return declared retryable flag.
-constexpr auto retryable(ErrorCode c) -> bool { return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).retryable; }
+constexpr auto retryable(ErrorCode c) -> bool {
+    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).retryable;
+}
 /// @brief remediation advice of an error code.
 /// @param[in] c error code to look up.
 /// @return hint text, empty when none is declared.
@@ -1565,28 +1512,17 @@ constexpr auto to_string(ErrorCode c) -> std::string_view {
 /// @return declared category name, "unknown" for a value outside the enum.
 constexpr auto to_string(ErrorCategory c) -> std::string_view {
     switch (c) {
-        case ErrorCategory::General:
-            return "general";
-        case ErrorCategory::Layout:
-            return "layout";
-        case ErrorCategory::Widget:
-            return "widget";
-        case ErrorCategory::Render:
-            return "render";
-        case ErrorCategory::Io:
-            return "io";
-        case ErrorCategory::Validation:
-            return "validation";
-        case ErrorCategory::Navigation:
-            return "navigation";
-        case ErrorCategory::Platform:
-            return "platform";
-        case ErrorCategory::Runtime:
-            return "runtime";
-        case ErrorCategory::Generation:
-            return "generation";
-        case ErrorCategory::Diagnostic:
-            return "diagnostic";
+        case ErrorCategory::General: return "general";
+        case ErrorCategory::Layout: return "layout";
+        case ErrorCategory::Widget: return "widget";
+        case ErrorCategory::Render: return "render";
+        case ErrorCategory::Io: return "io";
+        case ErrorCategory::Validation: return "validation";
+        case ErrorCategory::Navigation: return "navigation";
+        case ErrorCategory::Platform: return "platform";
+        case ErrorCategory::Runtime: return "runtime";
+        case ErrorCategory::Generation: return "generation";
+        case ErrorCategory::Diagnostic: return "diagnostic";
     }
     return "unknown";
 }
@@ -1596,14 +1532,10 @@ constexpr auto to_string(ErrorCategory c) -> std::string_view {
 /// @return declared severity name, "error" for a value outside the enum.
 constexpr auto to_string(ErrorSeverity s) -> std::string_view {
     switch (s) {
-        case ErrorSeverity::Info:
-            return "info";
-        case ErrorSeverity::Warning:
-            return "warning";
-        case ErrorSeverity::Error:
-            return "error";
-        case ErrorSeverity::Fatal:
-            return "fatal";
+        case ErrorSeverity::Info: return "info";
+        case ErrorSeverity::Warning: return "warning";
+        case ErrorSeverity::Error: return "error";
+        case ErrorSeverity::Fatal: return "fatal";
     }
     return "error";
 }
@@ -1612,7 +1544,7 @@ constexpr auto to_string(ErrorSeverity s) -> std::string_view {
 /// @param[in] tpl message template as declared in errors.toml.
 /// @param[in] params key-value table supplying the substitutions.
 /// @return rendered text; a {key} missing from params is kept verbatim.
-inline auto format_message(std::string_view tpl, const ErrorParams &params) -> std::string {
+inline auto format_message(std::string_view tpl, const ErrorParams& params) -> std::string {
     std::string out;
     out.reserve(tpl.size());
     for (std::size_t i = 0; i < tpl.size(); ++i) {
@@ -1633,4 +1565,4 @@ inline auto format_message(std::string_view tpl, const ErrorParams &params) -> s
     return out;
 }
 
-}  // namespace aurora
+} // namespace aurora

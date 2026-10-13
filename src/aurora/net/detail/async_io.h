@@ -59,6 +59,21 @@ struct AcceptAttempt {
     [[nodiscard]] auto failed() const -> bool { return failure.has_value(); }
 };
 
+/// @brief 单次非阻塞收取数据报的结果三态。
+///
+/// 与 `IoAttempt` 的分工：数据报是**消息**边界，一次成功必然带着来源地址，故这里放 `source` 而不是
+/// 让调用方再问一次（`getpeername` 在未连接的套接字上根本不可用）。
+struct DatagramAttempt {
+    std::size_t bytes = 0;  ///< 本次收到的字节数（一条数据报的全部载荷）
+    bool blocked = false;  ///< 内核暂无数据报，不是错误
+    std::optional<Endpoint> source;  ///< 来源端点；未连接套接字由 `recvfrom` 填出，已连接套接字等于该对端
+    std::optional<Error> failure;  ///< 失败原因；空值 = 未失败
+
+    /// @brief 是否失败。
+    /// @return `failure` 已置值时为 true。
+    [[nodiscard]] auto failed() const -> bool { return failure.has_value(); }
+};
+
 /// @brief 创建一个**非阻塞**的 TCP 流式套接字（地址族取自端点，未发起连接）。
 /// @param endpoint 决定地址族的目标端点；须为 IPv4 / IPv6 且端口非 0。
 /// @return 成功为句柄；失败为 `net-endpoint-invalid` / `net-socket-failed` / `net-option-failed`
@@ -132,5 +147,80 @@ auto close_handle(std::intptr_t handle) -> void;
 /// @param handle 目标句柄。
 /// @return 落在回环段为 true；查询失败或地址族不认识为 false。
 [[nodiscard]] auto peer_is_loopback(std::intptr_t handle) -> bool;
+
+/// @brief 创建一个**非阻塞**的 UDP 数据报套接字并绑定到本地端点（地址族取自端点）。
+///
+/// 数据报没有流式套接字的「先 bind 后 connect」次序约束：`local.port() == 0` 由系统分配实端口，
+/// 通配地址即接受发往本机任一地址的数据报。本机 IPC 形态在发起系统调用前即拒（Windows 命名管道
+/// 没有数据报语义，半边可用的形态不进公共面）。
+/// @param local 本地端点；须为 IPv4 / IPv6。
+/// @return 成功为句柄；失败为 `net-endpoint-invalid` / `net-socket-failed` / `net-bind-failed` /
+///         `net-option-failed`（失败路径已关闭句柄）。
+[[nodiscard]] auto open_nonblocking_datagram(const Endpoint &local) -> Result<std::intptr_t>;
+
+/// @brief 给数据报套接字固定对端（`connect(2)`，**不产生任何网络往返**）。
+///
+/// 连接后的内核语义是「只收该对端的数据报」，故组播关注与本调用互斥（裁决见提案 §18-3），换算由
+/// 上层做；本函数只管系统调用结果。
+/// @param handle `open_nonblocking_datagram()` 得到的句柄。
+/// @param peer 目标端点；须为 IPv4 / IPv6 且端口非 0。
+/// @return 成功为 OK；失败为 `net-endpoint-invalid` / `net-connect-failed`（含 OS 原生码）。
+[[nodiscard]] auto associate_datagram_peer(std::intptr_t handle, const Endpoint &peer) -> Result<void>;
+
+/// @brief 非阻塞发送一条完整数据报到指定目标（`sendto`）。
+///
+/// 数据报不可拆分：内核要么整条接受、要么回报「暂无进展」，故 `bytes` 只可能是 `data.size()` 或 0。
+/// 已固定对端的套接字**不能**走本出口：Linux 让带地址的 `sendto` 在已连接的数据报套接字上直接以
+/// `EISCONN` 失败，Windows 却忽略该地址——同一调用在两条腿上有两种结局，故那种形态改走
+/// `try_send_datagram()`。
+/// @param handle 数据报句柄。
+/// @param data 一条数据报的载荷；空 span 是一条**合法的零长数据报**，照样发起系统调用。
+/// @param target 目标端点；须与句柄同族且端口非 0。
+/// @return 三态结果（`blocked` = 内核发送缓冲满，等下一次可写就绪）。
+[[nodiscard]] auto try_send_to(std::intptr_t handle, std::span<const char> data, const Endpoint &target) -> IoAttempt;
+
+/// @brief 非阻塞发送一条完整数据报给固定对端（`send`，即已连接形态的唯一发送出口）。
+///
+/// 与 `try_write()` 的区别只有一处：`try_write` 把空 span 判为「无事可做」，而空载荷在数据报侧是
+/// 一条合法消息，必须真的落到系统调用上。已连接套接字的接收侧仍可复用 `try_receive_datagram()`。
+/// @param handle 已 `associate_datagram_peer()` 的数据报句柄。
+/// @param data 一条数据报的载荷（可为空 span）。
+/// @return 三态结果（判读次序同 `try_send_to()`）。
+[[nodiscard]] auto try_send_datagram(std::intptr_t handle, std::span<const char> data) -> IoAttempt;
+
+/// @brief 非阻塞收取一条完整数据报（`recvfrom`）。
+///
+/// 缓冲由调用方给出且**必须装得下一条完整数据报**（本层按 UDP 载荷上界配缓冲），故不存在「一条报
+/// 分两轮投递」的形态；Windows 在缓冲不足时会让 `recvfrom` 直接失败并**丢弃该数据报**，POSIX 则静默
+/// 截断——两条腿都不允许出现，故截断判定收在上层（按调用方缓冲长度裁剪并显式回报）。
+/// @note `bytes == 0` 在这里是**一条零长数据报**（UDP 合法消息），不是流式读的那个 EOF：暂无数据报一律
+///       走 `blocked` 分支，因此上层可以按「成功且 0 字节」投递一条空消息而不必猜是否对端已收摊。
+/// @param handle 数据报句柄。
+/// @param buffer 目标缓冲；空 span 回「无进展」。
+/// @return 三态结果，成功时携来源端点。
+[[nodiscard]] auto try_receive_datagram(std::intptr_t handle, std::span<char> buffer) -> DatagramAttempt;
+
+/// @brief 加入或离开一个组播组（`IP_ADD_MEMBERSHIP` / `IP_DROP_MEMBERSHIP` 及其 IPv6 对应项）。
+///
+/// 不指定接收网卡：`imr_interface` 取通配值，由内核按路由选择——把「用哪张网卡」做成公共选项会让
+/// 每条腿的默认值都不一样，而本层今天没有跨腿一致的网卡枚举形态。
+/// @param handle 数据报句柄（须已绑定）。
+/// @param group 组播组地址；族须与句柄一致（`Endpoint::is_multicast()` 由调用方先判）。
+/// @param joining 为真时加入，为假时离开。
+/// @return 成功为 OK；失败为 `net-endpoint-invalid`（族不符 / 非组播地址）或 `net-option-failed`
+///         （含 OS 原生码；重复加入与未加入即离开都由内核回报）。
+[[nodiscard]] auto set_multicast_membership(std::intptr_t handle, const Endpoint &group, bool joining) -> Result<void>;
+
+/// @brief 组播回环开关（`IP_MULTICAST_LOOP` / `IPV6_MULTICAST_LOOP`）：本端发出的组播报是否回投给本端。
+/// @param handle 数据报句柄。
+/// @param enabled 为真时回投（内核缺省值），为假时不回投。
+/// @return 成功为 OK；失败为 `net-option-failed`（含 OS 原生码）。
+[[nodiscard]] auto set_multicast_loopback(std::intptr_t handle, bool enabled) -> Result<void>;
+
+/// @brief 广播允许位（`SO_BROADCAST`）：未置位时向广播地址发送由内核拒绝。
+/// @param handle 数据报句柄。
+/// @param enabled 为真时允许广播发送。
+/// @return 成功为 OK；失败为 `net-option-failed`（含 OS 原生码）。
+[[nodiscard]] auto set_broadcast_allowed(std::intptr_t handle, bool enabled) -> Result<void>;
 
 }  // namespace aurora::net::detail

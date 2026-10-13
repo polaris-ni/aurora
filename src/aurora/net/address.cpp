@@ -478,6 +478,19 @@ auto Endpoint::is_unspecified() const -> bool {
     return false;
 }
 
+auto Endpoint::is_multicast() const -> bool {
+    if (!valid_) {
+        return false;
+    }
+    if (family_ == AddressFamily::IPv4) {
+        return bytes_.at(0) >= 224 && bytes_.at(0) <= 239;  // RFC 5771 §2：224.0.0.0/4
+    }
+    if (family_ == AddressFamily::IPv6) {
+        return bytes_.at(0) == 0xFF;  // RFC 4291 §2.7：ff00::/8
+    }
+    return false;
+}
+
 auto Endpoint::to_string() const -> std::string {
     if (!valid_) {
         return {};

@@ -122,7 +122,9 @@ class PollEngine final : public Engine {
         caps.streaming = true;  // native 不受 ReadableStream 支持度约束（§18-6 的平台限制位）
         caps.custom_headers = true;  // native 无 CORS 预检约束
         caps.event_source = app::EventSourceRegistry::instance().event_source_supported();
-        // udp / local_ipc / dns / tls 恒 false：该形态的实现尚未落地，能力位不得先于实现点亮。
+        caps.udp = true;  // 数据报形态随 `DatagramTransport` 落地（本机 IPC 与 TLS 仍未落地，位不先点亮）
+        caps.dns = true;  // 名称解析随 `net::Resolver` 落地（同一句「能力位不得先于实现点亮」的补账）
+        // local_ipc / tls 恒 false：该形态的实现尚未落地。
         return caps;
     }
 

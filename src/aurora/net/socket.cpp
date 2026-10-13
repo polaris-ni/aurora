@@ -1043,4 +1043,291 @@ auto detail::peer_is_loopback(std::intptr_t handle) -> bool {
     return peer && peer.value().is_loopback();
 }
 
+// ---- 数据报（UDP）腿：非阻塞收发与组播口径（CHG-010 传输切片） -----------------------------------
+
+namespace {
+
+/// @brief 创建 UDP 数据报套接字。
+/// @param family 地址族（`AF_INET` / `AF_INET6`）。
+/// @return 成功为原生句柄；失败为 `net-socket-failed`（含 OS 码）。
+auto open_datagram_socket(int family) -> Result<NativeSocket> {
+    const NativeSocket s = ::socket(family, SOCK_DGRAM, IPPROTO_UDP);
+    if (native_is_invalid(s)) {
+        return net_error(ErrorCode::NetSocketFailed, "socket(SOCK_DGRAM, IPPROTO_UDP)");
+    }
+    return s;
+}
+
+/// @brief 数据报地址的可用性判据（本机 IPC 没有数据报形态：Windows 命名管道无此语义）。
+/// @param endpoint 待检端点。
+/// @return 成功为 `AF_INET` / `AF_INET6`；不合用为 `net-endpoint-invalid`。
+auto datagram_family_of(const Endpoint &endpoint) -> Result<int> {
+    if (!endpoint.is_valid() || endpoint.is_local_path()) {
+        return make_error(ErrorCode::NetEndpointInvalid, "datagram sockets need an IPv4 or IPv6 endpoint");
+    }
+    return endpoint.family() == AddressFamily::IPv4 ? AF_INET : AF_INET6;
+}
+
+/// @brief 读回套接字自身的地址族（组播选项的两种结构体形态由此分岔，公共面不必带族参数）。
+/// @param handle 目标句柄。
+/// @return 成功为族；查询失败或地址族不认识为 `net-socket-failed`。
+auto socket_family_of(std::intptr_t handle) -> Result<AddressFamily> {
+    sockaddr_storage local{};
+    AddrLen name_len = sizeof(local);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::getsockname(from_handle(handle), reinterpret_cast<sockaddr *>(&local), &name_len) != 0) {
+        return net_error(ErrorCode::NetSocketFailed, "getsockname");
+    }
+    auto resolved = endpoint_from_address(local);
+    if (!resolved) {
+        return resolved.error();
+    }
+    return resolved.value().family();
+}
+
+/// @brief 下发组播回环开关（IPv4 收 1 字节、IPv6 收 4 字节，两平台同名常量）。
+/// @param s 原生句柄。
+/// @param family 套接字地址族。
+/// @param enabled 是否把本端发出的组播报回投给本端。
+/// @return 成功为 OK；失败为 `net-option-failed`（含 OS 原生码）。
+auto set_multicast_loop_option(NativeSocket s, AddressFamily family, bool enabled) -> Result<void> {
+    // 选项值宽度按族分岔是内核口径而非平台口径，故只有 `reinterpret_cast` 需要豁免。
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (family == AddressFamily::IPv4) {
+        auto value = static_cast<unsigned char>(enabled ? 1 : 0);
+        if (::setsockopt(s, IPPROTO_IP, IP_MULTICAST_LOOP, reinterpret_cast<const char *>(&value),
+                         static_cast<int>(sizeof(value))) != 0) {
+            return net_error(ErrorCode::NetOptionFailed, "setsockopt(IP_MULTICAST_LOOP)");
+        }
+        return Result<void>{};
+    }
+    auto value = static_cast<unsigned int>(enabled ? 1 : 0);
+    if (::setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, reinterpret_cast<const char *>(&value),
+                     static_cast<int>(sizeof(value))) != 0) {
+        return net_error(ErrorCode::NetOptionFailed, "setsockopt(IPV6_MULTICAST_LOOP)");
+    }
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    return Result<void>{};
+}
+
+/// @brief 单条数据报载荷的可读首地址。
+///
+/// 空载荷是一条合法的零长数据报，照样要发起系统调用，而 `std::span::data()` 对空 span 合法地返回空指针，
+/// 长度 0 时把空指针交给 `send` / `sendto` 在 Winsock 上属未定义用法。
+/// @param data 待发送载荷。
+/// @return 指向载荷首字节；载荷为空时指向静态零值字节。
+auto datagram_payload_pointer(std::span<const char> data) -> const char * { return data.empty() ? "" : data.data(); }
+
+/// @brief 数据报发送结果的统一换算：整条接受、暂无进展、失败（两种发送出口共用一段）。
+/// @param n `send` / `sendto` 的返回值。
+/// @param operation 失败时写进 message 的操作文本。
+/// @return 三态结果。
+auto datagram_send_attempt(std::ptrdiff_t n, const std::string &operation) -> detail::IoAttempt {
+    if (n >= 0) {
+        detail::IoAttempt attempt;
+        attempt.bytes = static_cast<std::size_t>(n);  // 0 = 一条零长数据报已整条进入内核
+        return attempt;
+    }
+    if (native_would_block(native_last_error())) {
+        detail::IoAttempt attempt;
+        attempt.blocked = true;  // 内核发送缓冲满：等下一次可写就绪，不是失败
+        return attempt;
+    }
+    return io_failed(ErrorCode::NetSendFailed, operation);
+}
+
+/// @brief 越过内核载荷上界的数据报：两种发送出口共用同一条拒收（不截断、不分片）。
+/// @return 三态结果，只填了 `failure`。
+auto datagram_too_large_attempt() -> detail::IoAttempt {
+    detail::IoAttempt attempt;
+    attempt.failure = make_error(ErrorCode::NetBufferLimit,
+                                 ErrorParams{{"detail", "datagram exceeds the 65535-byte UDP payload bound"}});
+    return attempt;
+}
+
+}  // namespace
+
+auto detail::open_nonblocking_datagram(const Endpoint &local) -> Result<std::intptr_t> {
+    auto family = datagram_family_of(local);
+    if (!family) {
+        return family.error();
+    }
+    auto opened = open_datagram_socket(family.value());
+    if (!opened) {
+        return opened.error();
+    }
+    const NativeSocket s = opened.value();
+    sockaddr_storage storage{};
+    auto built = make_address(local, storage);
+    if (!built) {
+        native_close(s);
+        return built.error();
+    }
+    const AddrLen address_length = built.value();
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::bind(s, reinterpret_cast<const sockaddr *>(&storage), address_length) != 0) {
+        auto err = net_error(ErrorCode::NetBindFailed, "bind(" + local.to_string() + ")");
+        native_close(s);
+        return err;
+    }
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (auto set = make_nonblocking(s); !set) {
+        native_close(s);
+        return set.error();
+    }
+    return to_handle(s);
+}
+
+auto detail::associate_datagram_peer(std::intptr_t handle, const Endpoint &peer) -> Result<void> {
+    if (peer.port() == 0) {
+        return make_error(ErrorCode::NetEndpointInvalid, "a datagram peer endpoint needs a non-zero port");
+    }
+    auto family = datagram_family_of(peer);
+    if (!family) {
+        return family.error();
+    }
+    sockaddr_storage storage{};
+    auto built = make_address(peer, storage);
+    if (!built) {
+        return built.error();
+    }
+    const AddrLen address_length = built.value();
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::connect(from_handle(handle), reinterpret_cast<const sockaddr *>(&storage), address_length) != 0) {
+        return net_error(ErrorCode::NetConnectFailed, "connect(" + peer.to_string() + ")");
+    }
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    return Result<void>{};
+}
+
+auto detail::try_send_to(std::intptr_t handle, std::span<const char> data, const Endpoint &target) -> IoAttempt {
+    // 一条数据报不可拆分，故越界的长度不做静默截断而是原样拒收（内核上界 65535 字节）。
+    if (data.size() > std::size_t{65535}) {
+        return datagram_too_large_attempt();
+    }
+    sockaddr_storage storage{};
+    auto built = make_address(target, storage);
+    if (!built) {
+        IoAttempt attempt;
+        attempt.failure = built.error();
+        return attempt;
+    }
+    const AddrLen address_length = built.value();
+    const int len = static_cast<int>(data.size());
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto n = static_cast<std::ptrdiff_t>(::sendto(from_handle(handle), datagram_payload_pointer(data), len, 0,
+                                                        reinterpret_cast<const sockaddr *>(&storage), address_length));
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    return datagram_send_attempt(n, "sendto(" + target.to_string() + ")");
+}
+
+auto detail::try_send_datagram(std::intptr_t handle, std::span<const char> data) -> IoAttempt {
+    if (data.size() > std::size_t{65535}) {
+        return datagram_too_large_attempt();
+    }
+    const int len = static_cast<int>(data.size());
+    const auto n = static_cast<std::ptrdiff_t>(::send(from_handle(handle), datagram_payload_pointer(data), len, 0));
+    return datagram_send_attempt(n, "send(connected datagram)");
+}
+
+auto detail::try_receive_datagram(std::intptr_t handle, std::span<char> buffer) -> DatagramAttempt {
+    if (buffer.empty()) {
+        DatagramAttempt attempt;
+        attempt.blocked = true;
+        return attempt;
+    }
+    sockaddr_storage source{};
+    AddrLen source_len = sizeof(source);
+    // 收侧按数据报上界给长度：多出来的缓冲永远用不上，而 65535 之内两平台都落 int 域。
+    const int len = static_cast<int>(std::min<std::size_t>(buffer.size(), std::size_t{65535}));
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto n = static_cast<std::ptrdiff_t>(
+        ::recvfrom(from_handle(handle), buffer.data(), len, 0, reinterpret_cast<sockaddr *>(&source), &source_len));
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (n >= 0) {
+        auto resolved = endpoint_from_address(source);
+        DatagramAttempt attempt;
+        if (!resolved) {
+            attempt.failure = resolved.error();  // 认不出的来源族不交出一条没有来源的数据报
+            return attempt;
+        }
+        attempt.bytes = static_cast<std::size_t>(n);  // 0 = 一条零长数据报（UDP 合法消息，不是 EOF）
+        attempt.source = resolved.value();
+        return attempt;
+    }
+    const int os_error = native_last_error();
+    if (native_would_block(os_error)) {
+        DatagramAttempt attempt;
+        attempt.blocked = true;
+        return attempt;
+    }
+    DatagramAttempt attempt;
+    attempt.failure = net_error(ErrorCode::NetRecvFailed, "recvfrom");
+    return attempt;
+}
+
+auto detail::set_multicast_membership(std::intptr_t handle, const Endpoint &group, bool joining) -> Result<void> {
+    if (!group.is_multicast()) {
+        return make_error(ErrorCode::NetEndpointInvalid,
+                          "multicast membership needs a group address (got " + group.to_string() + ")");
+    }
+    auto family = socket_family_of(handle);
+    if (!family) {
+        return family.error();
+    }
+    if (group.family() != family.value()) {
+        return make_error(ErrorCode::NetEndpointInvalid, "multicast group family differs from the socket family");
+    }
+    const NativeSocket s = from_handle(handle);
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (family.value() == AddressFamily::IPv4) {
+        const char *const option = joining ? "IP_ADD_MEMBERSHIP" : "IP_DROP_MEMBERSHIP";
+        ip_mreq membership{};
+        std::memcpy(&membership.imr_multiaddr.s_addr, group.address_bytes().data(),
+                    sizeof(membership.imr_multiaddr.s_addr));
+        // 接收网卡取通配值，由内核按路由选择：把网卡做成公共选项会让每条腿的默认值都不一样。
+        membership.imr_interface.s_addr = INADDR_ANY;
+        if (::setsockopt(s, IPPROTO_IP, joining ? IP_ADD_MEMBERSHIP : IP_DROP_MEMBERSHIP,
+                         reinterpret_cast<const char *>(&membership), static_cast<int>(sizeof(membership))) != 0) {
+            return net_error(ErrorCode::NetOptionFailed, std::string{"setsockopt("} + option + ")");
+        }
+        return Result<void>{};
+    }
+    const char *const option = joining ? "IPV6_JOIN_GROUP" : "IPV6_LEAVE_GROUP";
+    ipv6_mreq membership{};
+    std::memcpy(&membership.ipv6mr_multiaddr, group.address_bytes().data(), sizeof(membership.ipv6mr_multiaddr));
+    // IPv6 组播的作用域号即网卡索引；`Endpoint::zone()` 只认十进制作用域号，故可直接落位而不查表。
+    auto scope = zone_to_scope_id(group.zone());
+    if (!scope) {
+        return scope.error();
+    }
+    membership.ipv6mr_interface = scope.value();
+    if (::setsockopt(s, IPPROTO_IPV6, joining ? IPV6_JOIN_GROUP : IPV6_LEAVE_GROUP,
+                     reinterpret_cast<const char *>(&membership), static_cast<int>(sizeof(membership))) != 0) {
+        return net_error(ErrorCode::NetOptionFailed, std::string{"setsockopt("} + option + ")");
+    }
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    return Result<void>{};
+}
+
+auto detail::set_multicast_loopback(std::intptr_t handle, bool enabled) -> Result<void> {
+    auto family = socket_family_of(handle);
+    if (!family) {
+        return family.error();
+    }
+    return set_multicast_loop_option(from_handle(handle), family.value(), enabled);
+}
+
+auto detail::set_broadcast_allowed(std::intptr_t handle, bool enabled) -> Result<void> {
+    auto value = enabled ? 1 : 0;
+    // 选项值取 int 是两平台同名宽度（Winsock 的 BOOL 即 int），故只需豁免地址的按字节传参。
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::setsockopt(from_handle(handle), SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char *>(&value),
+                     static_cast<int>(sizeof(value))) != 0) {
+        return net_error(ErrorCode::NetOptionFailed, "setsockopt(SO_BROADCAST)");
+    }
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    return Result<void>{};
+}
+
 }  // namespace aurora::net
