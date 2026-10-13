@@ -166,17 +166,22 @@ AURORA_TEST_CASE(wait_ready_writable_then_readable_then_idle) {
 #else
     aurora::net::Session session;
     auto pair = make_connected_pair(session);
-    const std::vector<aurora::net::PollDescriptor> want{
+    const std::vector<aurora::net::PollDescriptor> both{
         {.handle = pair.server.native_handle(), .want_read = true, .want_write = true}};
 
-    const auto before = aurora::net::wait_ready(want, AURORA_NET_POLL_TIMEOUT);
+    const auto before = aurora::net::wait_ready(both, AURORA_NET_POLL_TIMEOUT);
     AURORA_TEST_REQUIRE(before.ok());
     AURORA_TEST_REQUIRE_EQ(before.value().size(), std::size_t{1});
     AURORA_TEST_CHECK_FALSE(before.value()[0].readable);
     AURORA_TEST_CHECK_TRUE(before.value()[0].writable);
 
+    // 后两段只关注可读：Linux 回环上数据落地可以晚于发送返回，而可写位当场就成立，混在一起会让
+    // `wait_ready` 立刻带著「不可读」返回，把内核往返时间从等待窗口里挤掉（Windows 同步投递掩盖了这点）。
+    const std::vector<aurora::net::PollDescriptor> read_only{
+        {.handle = pair.server.native_handle(), .want_read = true, .want_write = false}};
+
     write_payload(pair.client, "hello");
-    const auto arrived = aurora::net::wait_ready(want, AURORA_NET_POLL_TIMEOUT);
+    const auto arrived = aurora::net::wait_ready(read_only, AURORA_NET_POLL_TIMEOUT);
     AURORA_TEST_REQUIRE(arrived.ok());
     AURORA_TEST_CHECK_TRUE(arrived.value()[0].readable);
 
@@ -185,7 +190,7 @@ AURORA_TEST_CASE(wait_ready_writable_then_readable_then_idle) {
     AURORA_TEST_REQUIRE(got.ok());
     AURORA_TEST_CHECK_EQ(got.value(), std::size_t{5});
 
-    const auto idle = aurora::net::wait_ready(want, AURORA_NET_EMPTY_TIMEOUT);
+    const auto idle = aurora::net::wait_ready(read_only, AURORA_NET_EMPTY_TIMEOUT);
     AURORA_TEST_REQUIRE(idle.ok());
     AURORA_TEST_CHECK_FALSE(idle.value()[0].readable);
 #endif

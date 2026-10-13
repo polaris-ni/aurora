@@ -42,7 +42,8 @@ namespace {
            static_cast<int>(au::KeyCode::F12) + static_cast<int>(au::DrawerSide::Right) +
            static_cast<int>(au::Orientation::Vertical) + static_cast<int>(au::SplitterOrientation::Horizontal) +
            static_cast<int>(au::ToastPosition::Top) + static_cast<int>(au::LegendPosition::Right) +
-           static_cast<int>(aurora::net::AddressFamily::LocalPath) + static_cast<int>(aurora::net::ProxyKind::Socks5) +
+           static_cast<int>(aurora::net::AddressFamily::LocalPath) +
+           static_cast<int>(aurora::net::LengthByteOrder::Little) + static_cast<int>(aurora::net::ProxyKind::Socks5) +
            static_cast<int>(aurora::net::ShutdownMode::Both);
 }
 

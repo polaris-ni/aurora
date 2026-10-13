@@ -3,7 +3,8 @@
 /// 测试说明: aurora::net::Endpoint 值类型的解析与校验判据（CHG-010 底座切片）：IPv4 四段与
 ///           前导零 / 越界 / 段数畸形拒绝、IPv6 的 `::` 压缩与 RFC 5952 规范化（小写、去前导零、
 ///           最左最长游程）、内嵌 IPv4 尾段落位、方括号形态与「端口不得内嵌」拒绝、zone id 只在
-///           link-local 上合法、回环与通配判定按地址族而非字符串、规范化等价性（不同写法判等）、
+///           link-local 上合法、回环与通配判定按地址族而非字符串（含 IPv4-mapped 形态跟随内嵌段）、
+///           规范化等价性（不同写法判等）、
 ///           本机 IPC 路径的长度与 NUL 约束、默认构造的无效占位语义、`to_string()` 三族形态。
 ///           解析器为仓内手写、不依赖 libc（`inet_pton`），故三平台必须逐值同色，用例不设平台分支。
 
@@ -132,6 +133,18 @@ AURORA_TEST_CASE(ipv6_loopback_and_unspecified) {
     AURORA_TEST_CHECK_TRUE(wildcard.is_unspecified());
     AURORA_TEST_CHECK_FALSE(wildcard.is_loopback());
     AURORA_TEST_CHECK_EQ(wildcard.to_string(), std::string("[::]:0"));
+}
+
+// IPv4-mapped 形态（RFC 4291 §2.5.5）：双栈监听口上的同机连接常把对端回报成 `::ffff:127.x.x.x`，
+// 回环语义必须跟随内嵌 IPv4 段，否则本机连接会被判成远端。
+AURORA_TEST_CASE(ipv4_mapped_follows_embedded_loopback) {
+    AURORA_TEST_CHECK_TRUE(must_parse("::ffff:127.0.0.1", 1).is_loopback());
+    AURORA_TEST_CHECK_TRUE(must_parse("::ffff:7f00:1", 1).is_loopback());  // 同一字节的十六进制尾段写法
+    AURORA_TEST_CHECK_FALSE(must_parse("::ffff:10.0.0.1", 1).is_loopback());
+    // 只认 `::ffff:` 前缀：普通 IPv6 的尾两字节落在 127 上不构成回环。
+    AURORA_TEST_CHECK_FALSE(must_parse("2001:db8::7f00:1", 1).is_loopback());
+    const auto mapped = must_parse("::ffff:127.0.0.1", 1);
+    AURORA_TEST_CHECK_EQ(mapped.to_string(), std::string("[::ffff:7f00:1]:1"));
 }
 
 // 规范化等价性：同一地址的多种写法必须判等，否则缓存键与连接池键会分裂。

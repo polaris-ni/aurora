@@ -882,6 +882,8 @@ au::Button(au::ButtonProps{ .label = "OK" });
 | 用 `#ifdef` 包住整个虚函数/成员**定义** | 定义无条件写、分支放进函数体——否则 Release vtable 悬空引用 |
 | `#if` 包住 `AURORA_TEST_CASE` 声明 | 条件编译只能在**用例体内**，声明须无条件可见，否则 `registry_integrity` 单边失踪（§3.1） |
 | 测试文件里自己写 `main()` | `main` 由 `tests/framework/test_main.cpp` 唯一提供（§3.1） |
+| 用 `std::string_view` 或 `"\x03abc"` 形态的字面量承载含 `\0` 的二进制测试输入 | 两条坑叠加：`std::string_view` 从 `const char*` 构造会在首个 `\0` 截断（长度变成 0 而不是预期字节数），而 `\x` 转义**贪婪吞掉后续十六进制数字**（`"\x03abc"` 是一个越界转义，不是「`0x03` 后跟 `abc`」）。二进制输入一律显式带长度（`std::span<const char>(literal, N - 1)` 形态的helper），并把转义与其后的可打印字节用相邻字面量拼接隔开：`"\x03" "abc"` |
+| 在完成回调里写致命断言（`AURORA_TEST_REQUIRE*`） | 回调可能在**析构边界内**派发（如 `~StreamListener` → `close()` → 交付尾批），致命断言抛出的 `CaseAbort` 穿过 `noexcept` 即 `std::terminate`，整条测试进程连带消失、报告里看不见失败原因；回调内只用非致命断言记录失败（[`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.11） |
 | 新增 `std::cout` / `printf` / `puts` | 走 `AURORA_LOG_*`（stderr）/ `AURORA_LOG_RAW`（stdout 产品输出）/ 测试与工具里的 `AURORA_TEST_PRINTF*`（§4.1） |
 | 字符串字面量里写中文 | 字面量写英文 + ASCII 标点；确属功能必需中文时就地 `CJK-LITERAL: <类别> - <原因>`（§14） |
 | 只写 `@brief` 就交差 | 按 §13.5.2「命令必选矩阵」补齐 `@param[in/out]`、`@return`、`@tparam`、枚举项/常量说明 |

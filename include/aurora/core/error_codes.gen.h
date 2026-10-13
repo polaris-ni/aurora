@@ -129,6 +129,7 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetSendFailed = 85,  ///< net-send-failed: Socket send failed
     NetRecvFailed = 86,  ///< net-recv-failed: Socket receive failed
     NetRecvTimeout = 87,  ///< net-recv-timeout: Socket receive timed out
+<<<<<<< HEAD
     SystemDragNotSupported = 88,  ///< system-drag-not-supported: System drag-and-drop unavailable: '{detail}'
     SystemDragSessionFailed = 89,  ///< system-drag-session-failed: System drag-and-drop session failed: '{detail}'
     NetEndpointInvalid = 90,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
@@ -145,6 +146,24 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetOptionFailed = 101,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
     NetConnectTimeout = 102,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
     NetBufferLimit = 103,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
+=======
+    NetEndpointInvalid = 88,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
+    NetCancelled = 89,  ///< net-cancelled: Network operation was cancelled
+    NetPlatformUnavailable = 90,  ///< net-platform-unavailable
+    NetUrlInvalid = 91,  ///< net-url-invalid: URL is not a valid absolute or resolvable reference: '{detail}'
+    NetProxyConfigInvalid = 92,  ///< net-proxy-config-invalid: Proxy configuration is not valid: '{detail}'
+    NetProxyUnsupported = 93,  ///< net-proxy-unsupported: This proxy protocol is not supported by the current build
+    NetProxyUnreachable = 94,  ///< net-proxy-unreachable: Proxy tunnel could not be established: '{detail}'
+    NetProxyAuthRequired = 95,  ///< net-proxy-auth-required: Proxy rejected the supplied credentials: '{detail}'
+    NetProxyProtocol = 96,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
+    NetDnsFailed = 97,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
+    NetProxyConfigUnreadable = 98,  ///< net-proxy-config-unreadable
+    NetOptionFailed = 99,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
+    NetConnectTimeout = 100,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
+    NetBufferLimit = 101,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
+    NetFramerOverflow = 102,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
+    NetFramerConfigInvalid = 103,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
+>>>>>>> db735173 (feat(net): 落地 CHG-010 名字连接与代理隧道编排及 net::Framer 三型分帧)
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -1459,6 +1478,35 @@ inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
             .hint = "Backpressure fired: pending bytes reached the high-water mark, pending reads exceeded the "
                     "read-buffer cap, or a framed message overflowed its limit; slow the producer down or raise the "
                     "matching StreamOptions field rather than dropping data",
+        },
+        {
+            .code = ErrorCode::NetFramerOverflow,
+            .ident = "NetFramerOverflow",
+            .slug = "net-framer-overflow",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Framed message exceeds its configured limit: '{detail}'",
+            .hint = "The stream produced a single message larger than FrameOptions::max_frame_bytes, or a length "
+                    "prefix declaring more bytes than the limit allows; raise the limit only for a protocol that "
+                    "genuinely carries such frames, otherwise treat the stream as malformed and close it rather than "
+                    "resynchronising inside an oversized frame",
+        },
+        {
+            .code = ErrorCode::NetFramerConfigInvalid,
+            .ident = "NetFramerConfigInvalid",
+            .slug = "net-framer-config-invalid",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "Invalid framer configuration: '{detail}'",
+            .hint = "A Framer factory was given a limit of 0, an empty or oversized delimiter, or a length field width "
+                    "outside 1..8 bytes; framing must be configured before it is used, because a silent default here "
+                    "would either accept unbounded frames or split messages at the wrong place",
         },
     },
 };

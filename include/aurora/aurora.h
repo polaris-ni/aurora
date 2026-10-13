@@ -109,6 +109,7 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/capabilities.h"
 #include "aurora/net/engine.h"
+#include "aurora/net/framer.h"
 #include "aurora/net/poll.h"
 #include "aurora/net/proxy.h"
 #include "aurora/net/resolver.h"

@@ -36,9 +36,10 @@ constexpr std::uint8_t AURORA_SOCKS_METHOD_CHALLENGE_HANDSHAKE = 3;
 constexpr std::uint8_t AURORA_SOCKS_AUTH_VERSION = 1;
 constexpr std::uint8_t AURORA_SOCKS_MAX_ID_OCTETS = 0xFF;
 
-/// @brief SOCKS5 的 REP 里属「代理自身形态不支持」的两值。
-constexpr std::uint8_t AURORA_SOCKS_REP_COMMAND_NOT_SUPPORTED = 8;
-constexpr std::uint8_t AURORA_SOCKS_REP_ADDRESS_TYPE_NOT_SUPPORTED = 9;
+/// @brief SOCKS5 的 REP 里属「代理自身形态不支持」的两值（`RFC 1928` §6 逐值枚举：`X'07'` 命令不支持、
+///        `X'08'` 地址类型不支持；其余非零值是对端/链路的瞬时失败，归可达性码）。
+constexpr std::uint8_t AURORA_SOCKS_REP_COMMAND_NOT_SUPPORTED = 7;
+constexpr std::uint8_t AURORA_SOCKS_REP_ADDRESS_TYPE_NOT_SUPPORTED = 8;
 
 /// @brief 构造「报文不合文法」错误（本层的畸形一律落此码，不与可达性失败混同）。
 /// @param detail 现场细节（含阶段与实际字节 / 文本）。

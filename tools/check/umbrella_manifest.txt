@@ -101,6 +101,7 @@ aurora/net/address.h
 aurora/net/cancellation.h
 aurora/net/capabilities.h
 aurora/net/engine.h
+aurora/net/framer.h
 aurora/net/poll.h
 aurora/net/proxy.h
 aurora/net/resolver.h

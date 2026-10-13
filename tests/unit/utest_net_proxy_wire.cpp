@@ -280,12 +280,14 @@ AURORA_TEST_CASE(handshake_status_maps_to_the_documented_error_codes) {
                          ErrorCode::NetProxyUnsupported);
     AURORA_TEST_CHECK_EQ(wire::socks5_error_for(0x01, wire::Socks5Phase::Authentication, "p:1080").code_enum,
                          ErrorCode::NetProxyAuthRequired);
+    // `RFC 1928` §6：`X'07'` 命令不支持、`X'08'` 地址类型不支持是「代理形态缺口」；逐值写死才不会把
+    // 一次真实的「本代理不服务 CONNECT」读成「代理不可达」而让调用方去重试一个永远不通的目标。
+    AURORA_TEST_CHECK_EQ(wire::socks5_error_for(0x07, wire::Socks5Phase::Tunnel, "p:1080").code_enum,
+                         ErrorCode::NetProxyUnsupported);
     AURORA_TEST_CHECK_EQ(wire::socks5_error_for(0x08, wire::Socks5Phase::Tunnel, "p:1080").code_enum,
                          ErrorCode::NetProxyUnsupported);
-    AURORA_TEST_CHECK_EQ(wire::socks5_error_for(0x09, wire::Socks5Phase::Tunnel, "p:1080").code_enum,
-                         ErrorCode::NetProxyUnsupported);
-    // 其余 REP 一律可达性失败：本库不静默回退直连，调用方据此报错即可。
-    for (const std::uint8_t rep : {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07}) {
+    // 其余 REP（含 `X'09'` 这类未定义值）一律可达性失败：本库不静默回退直连，调用方据此报错即可。
+    for (const std::uint8_t rep : {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x09}) {
         AURORA_TEST_CHECK_EQ(wire::socks5_error_for(rep, wire::Socks5Phase::Tunnel, "p:1080").code_enum,
                              ErrorCode::NetProxyUnreachable);
     }

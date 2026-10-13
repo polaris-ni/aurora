@@ -215,18 +215,6 @@ auto make_address(const Endpoint &endpoint, sockaddr_storage &storage) -> Result
     return static_cast<AddrLen>(sizeof(sockaddr_in6));
 }
 
-/// @brief IPv4 内嵌 IPv6 地址（`::ffff:x.x.x.x`）的前十字节全零判据。
-/// @param bytes 16 字节网络序地址。
-/// @return 前十字节全为 0 时为 true（配合 `0xff 0xff` 前缀即内嵌形态）。
-auto first_ten_bytes_zero(const std::array<std::uint8_t, 16> &bytes) -> bool {
-    for (std::size_t i = 0; i < 10; ++i) {
-        if (bytes.at(i) != 0) {
-            return false;
-        }
-    }
-    return true;
-}
-
 /// @brief 把平台 `sockaddr` 还原为端点值类型（与 `make_address` 互逆）。
 /// @param storage 由 `getpeername` / `getsockname` 填好的地址。
 /// @return 成功为端点；不认识的地址族为 `net-socket-failed`。
@@ -507,19 +495,7 @@ auto StreamSocket::peer_endpoint() const -> Result<Endpoint> {
 
 auto StreamSocket::is_loopback_peer() const -> bool {
     auto peer = peer_endpoint();
-    if (!peer) {
-        return false;
-    }
-    const Endpoint &endpoint = peer.value();
-    if (endpoint.is_loopback()) {
-        return true;
-    }
-    // 双栈机上「连到 ::1 的监听口」常回报成 IPv4 内嵌形态（::ffff:127.0.0.1），按其内嵌 IPv4 判。
-    const auto &bytes = endpoint.address_bytes();
-    if (endpoint.family() != AddressFamily::IPv6) {
-        return false;
-    }
-    return first_ten_bytes_zero(bytes) && bytes.at(10) == 0xFF && bytes.at(11) == 0xFF && bytes.at(12) == 127;
+    return peer && peer.value().is_loopback();
 }
 
 auto StreamSocket::close() -> void {
@@ -1064,16 +1040,7 @@ auto detail::peer_of(std::intptr_t handle) -> Result<Endpoint> {
 
 auto detail::peer_is_loopback(std::intptr_t handle) -> bool {
     auto peer = peer_of(handle);
-    if (!peer) {
-        return false;
-    }
-    const Endpoint &endpoint = peer.value();
-    if (endpoint.is_loopback()) {
-        return true;
-    }
-    const auto &bytes = endpoint.address_bytes();
-    return endpoint.family() == AddressFamily::IPv6 && first_ten_bytes_zero(bytes) && bytes.at(10) == 0xFF &&
-           bytes.at(11) == 0xFF && bytes.at(12) == 127;
+    return peer && peer.value().is_loopback();
 }
 
 }  // namespace aurora::net

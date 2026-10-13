@@ -172,7 +172,12 @@ auto make_host_pair(aurora::app::EventSourceRegistry &registry) -> HostPair {
 
     std::atomic<int> accepted{0};
     pair.listener.accept([&pair, &accepted](auto result) {
-        AURORA_TEST_REQUIRE(result.ok());
+        // 完成回调可能由 `~StreamListener` 在析构边界内派发，致命断言抛出的 CaseAbort 穿过该边界即
+        // `std::terminate`；这里只记录失败，前提是否成立由下面的 `pump_until` 断言负责转红。
+        AURORA_TEST_CHECK(result.ok());
+        if (!result) {
+            return;
+        }
         pair.server = std::move(result.value());
         ++accepted;
     });
@@ -180,7 +185,11 @@ auto make_host_pair(aurora::app::EventSourceRegistry &registry) -> HostPair {
     std::atomic<int> connected{0};
     StreamTransport::connect(Endpoint::loopback(pair.listener.local_port()), host_options(), Cancellation{},
                              [&pair, &connected](auto result) {
-                                 AURORA_TEST_REQUIRE(result.ok());
+                                 // 口径同上：connect 的失败派发同样可能落在析构路径内。
+                                 AURORA_TEST_CHECK(result.ok());
+                                 if (!result) {
+                                     return;
+                                 }
                                  pair.client = std::move(result.value());
                                  ++connected;
                              });
@@ -555,13 +564,12 @@ AURORA_TEST_CASE(cancelling_in_flight_connect_releases_registration) {
 
     // 已取消的令牌再发起连接：登记钩子时就地执行，连接根本不建立，仍恰一次出结果。
     std::atomic<int> late_calls{0};
-    StreamTransport::connect(Endpoint::loopback(listener.local_port()), host_options(), token,
-                             [&](auto result) {
-                                 if (!result) {
-                                     code = std::string{result.error().code};
-                                 }
-                                 ++late_calls;
-                             });
+    StreamTransport::connect(Endpoint::loopback(listener.local_port()), host_options(), token, [&](auto result) {
+        if (!result) {
+            code = std::string{result.error().code};
+        }
+        ++late_calls;
+    });
     AURORA_TEST_CHECK_EQ(late_calls.load(), 1);
     AURORA_TEST_CHECK_EQ(code, "net-cancelled");
     AURORA_TEST_CHECK_EQ(registry.live_count(), baseline);

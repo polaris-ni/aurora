@@ -40,10 +40,12 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <string_view>
 
 #include "aurora/core/result.h"
 #include "aurora/net/address.h"
 #include "aurora/net/cancellation.h"
+#include "aurora/net/proxy.h"
 
 namespace aurora::net {
 
@@ -59,9 +61,18 @@ class StreamListener;
 class StreamTransport;
 
 namespace detail {
-struct StreamState;    ///< 一条异步连接的状态（字段与依赖全部留在实现侧，公共头不暴露）
+struct StreamState;  ///< 一条异步连接的状态（字段与依赖全部留在实现侧，公共头不暴露）
 struct ListenerState;  ///< 一个监听口的状态（同上）
 class TransportFactory;  ///< 实现侧工厂：唯一能以状态指针构造上述两个公共句柄的类型
+
+/// @brief 实现侧接缝：把应用侧已经读到的字节接到该流的读队列前端，先于内核字节投递。
+///
+/// 存在的理由只有一处：代理隧道握手必须一次读满一个不定长的头部块，读多的那段字节属于隧道，若不接回
+/// 队列前端就会凭空丢在应用侧（表现为「 CONNECT 建好后首包随机缺字节」）。它不属公共 API：调用方没有
+/// 理由手工伪造「内核之前的字节」，那会破坏「读到的字节恒等于线上字节」这条不变量。
+/// @param stream 目标流；空态即空操作。
+/// @param bytes 待接回的字节（就地复制，调用方保留自身缓冲的所有权）。
+auto seed_read(StreamTransport &stream, std::span<const char> bytes) -> void;
 }  // namespace detail
 
 /// @brief 一次连接尝试的结果：成功携已建立的流，失败携原因（含 `net-cancelled` / `net-connect-timeout`）。
@@ -87,6 +98,10 @@ struct StreamOptions {
     std::size_t write_low_water_bytes = std::size_t{64} * 1024;
     /// @brief 连接尝试的时限；非正值表示不设时限（由对端或路由决定何时出结果）。
     std::chrono::milliseconds connect_timeout{std::chrono::milliseconds{5000}};
+    /// @brief 双栈竞速的交错窗口：首条候选立即发起，其后每条在上条发起后隔这么久才发起（Happy
+    /// Eyeballs 的 RFC 8305 形态，提案 §11 定案 200 ms）。**任一候选提前失败即立刻发起下一条**，
+    /// 不等这个窗口；置 0 即关掉竞速，只发偏好族的首条。
+    std::chrono::milliseconds race_stagger{std::chrono::milliseconds{200}};
 };
 
 /// @brief 面向字节的异步流（move-only RAII 句柄；析构即关闭连接）。
@@ -123,6 +138,36 @@ class StreamTransport {
     /// @param on_done 完成回调；成功携已连接的流。
     static auto connect(const Endpoint &endpoint, const StreamOptions &options, const Cancellation &cancellation,
                         ConnectDone on_done) -> void;
+
+    /// @brief 按主机名发起异步连接：解析 → 双栈竞速 → 交出最先建成的那条流。
+    ///
+    /// 与端点形态的分工：本入口持的是**主机文本**，字面量的接受形态与 `Endpoint::from_ip` 一致（IPv6
+    /// 可带方括号与作用域号），数字字面量在解析层短路而不查 DNS。竞速次序与交错窗口见
+    /// `StreamOptions::race_stagger`；解析成功但零条可用记录落 `net-dns-failed`（与 `net::Resolver`
+    /// 同码，不在这里另造一套分岔）。
+    /// @param host 目标主机文本；空串是用法错误，落 `net-endpoint-invalid`。
+    /// @param port 目标端口（主机序）；0 落 `net-endpoint-invalid`。
+    /// @param options 缓冲、超时与竞速口径。
+    /// @param cancellation 本次操作的取消令牌；`cancel()` 后未落地的候选全部收尾。
+    /// @param on_done 完成回调；恰一次抵达。
+    static auto connect(std::string_view host, std::uint16_t port, const StreamOptions &options,
+                        const Cancellation &cancellation, ConnectDone on_done) -> void;
+
+    /// @brief 经代理建立到 `host:port` 的隧道，产出即隧道里的流（对上层与直连同构）。
+    ///
+    /// `ProxyKind::Direct` 等价于走直连入口——显式关闭代理就是直连，不是「还没决定」。隧道只在握手
+    /// 成功时成立：**代理不可达、被拒或不会说话一律以失败收尾，绝不回退直连**（提案 §11），诊断文本
+    /// 只带代理与目标的 `host:port` 而不带凭据。握手期间读过头部块之后的字节属于隧道，本层把它们接回
+    /// 读队列前端，不会因为「一次读多了」而丢字节。
+    /// @param proxy 代理配置；由调用方经 `ProxyEnvironment::for_target` 决定（本层不读环境变量）。
+    /// @param host 目标主机文本；`socks5`（非 `h`）形态下必须是数字字面量，否则落 `net-endpoint-invalid`。
+    /// @param port 目标端口（主机序）。
+    /// @param options 缓冲、超时与竞速口径；`connect_timeout` 在此覆盖「直到隧道可用」的整体时限。
+    /// @param cancellation 本次操作的取消令牌。
+    /// @param on_done 完成回调；恰一次抵达，失败携 `net-proxy-*` 系列原因或连接类原因。
+    static auto connect_via(const ProxyConfig &proxy, std::string_view host, std::uint16_t port,
+                            const StreamOptions &options, const Cancellation &cancellation, ConnectDone on_done)
+        -> void;
 
     /// @brief 连接是否仍开着。
     /// @return 已建立且未 `close()` 时为 true（半关闭不影响本判据：停写方向仍算开着）。
@@ -194,6 +239,7 @@ class StreamTransport {
 
   private:
     friend class detail::TransportFactory;
+    friend auto detail::seed_read(StreamTransport &stream, std::span<const char> bytes) -> void;
 
     /// @brief 以既有状态接管（仅实现侧工厂与 `detail::TransportFactory` 使用）。
     /// @param state 已建立的连接状态；空指针即空态。

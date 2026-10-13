@@ -1188,3 +1188,25 @@ fix_category = "resource_error"
 retryable = true
 message = "Transfer buffer limit exceeded: '{detail}'"
 hint = "Backpressure fired: pending bytes reached the high-water mark, pending reads exceeded the read-buffer cap, or a framed message overflowed its limit; slow the producer down or raise the matching StreamOptions field rather than dropping data"
+
+[[error]]
+enum = "NetFramerOverflow"
+slug = "net-framer-overflow"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "Framed message exceeds its configured limit: '{detail}'"
+hint = "The stream produced a single message larger than FrameOptions::max_frame_bytes, or a length prefix declaring more bytes than the limit allows; raise the limit only for a protocol that genuinely carries such frames, otherwise treat the stream as malformed and close it rather than resynchronising inside an oversized frame"
+
+[[error]]
+enum = "NetFramerConfigInvalid"
+slug = "net-framer-config-invalid"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Invalid framer configuration: '{detail}'"
+hint = "A Framer factory was given a limit of 0, an empty or oversized delimiter, or a length field width outside 1..8 bytes; framing must be configured before it is used, because a silent default here would either accept unbounded frames or split messages at the wrong place"

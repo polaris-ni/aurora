@@ -221,6 +221,13 @@ auto first_bytes_zero(const std::array<std::uint8_t, 16> &bytes, std::size_t cou
     return std::ranges::all_of(bytes | std::views::take(count), [](std::uint8_t byte) -> bool { return byte == 0; });
 }
 
+/// @brief 判断地址是否为 IPv4-mapped 形态 `::ffff:a.b.c`（RFC 4291 §2.5.5）。
+/// @param bytes 16 字节网络序地址。
+/// @return 前 10 字节全零且第 11、12 字节为 `0xff` 时为 true。
+auto is_ipv4_mapped(const std::array<std::uint8_t, 16> &bytes) -> bool {
+    return first_bytes_zero(bytes, 10) && bytes.at(10) == 0xFF && bytes.at(11) == 0xFF;
+}
+
 /// @brief 判断 16 字节是否全零。
 /// @param bytes 16 字节网络序地址。
 /// @return 全零为 true。
@@ -449,7 +456,11 @@ auto Endpoint::is_loopback() const -> bool {
         return bytes_.at(0) == 127;
     }
     if (family_ == AddressFamily::IPv6) {
-        return first_bytes_zero(bytes_, bytes_.size() - 1) && bytes_.at(bytes_.size() - 1) == 1;
+        if (first_bytes_zero(bytes_, bytes_.size() - 1) && bytes_.at(bytes_.size() - 1) == 1) {
+            return true;  // `::1`
+        }
+        // RFC 4291 §2.5.5：IPv4-mapped 地址的回环语义跟随内嵌 IPv4 段（双栈监听口上的 127.x.x.x peer）
+        return is_ipv4_mapped(bytes_) && bytes_.at(12) == 127;
     }
     return false;
 }

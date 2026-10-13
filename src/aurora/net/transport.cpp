@@ -35,6 +35,7 @@
 #include "aurora/core/error_codes.gen.h"
 #include "aurora/core/result.h"
 #include "aurora/net/detail/async_io.h"
+#include "aurora/net/detail/remote_connect.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/socket.h"
 #include "aurora/state/async.h"
@@ -82,6 +83,7 @@ struct StreamState {
     app::WaitInterest interest{};  ///< 当前登记的关注方向
     std::deque<PendingRead> reads;  ///< 待满足的读请求（FIFO）
     std::deque<PendingWrite> writes;  ///< 待发写请求（FIFO）
+    std::deque<char> read_ahead;  ///< 应用侧接回、须先于内核字节投递的字节（代理隧道握手留下的尾批）
     std::size_t pending_read_bytes = 0;  ///< reads 各缓冲容量之和（与 max_pending_bytes 对照）
     std::size_t pending_write_bytes = 0;  ///< writes 里尚未进入内核的字节总数
     std::size_t write_low_water_bytes = StreamOptions{}.write_low_water_bytes;  ///< 由高水位派生
@@ -235,7 +237,7 @@ auto close_stream(detail::StreamState &state, const Error &reason, Tasks &tasks)
     state.closed = true;
     state.connecting = false;
     state.registration.reset();  // 注销 = 停止产生新回调（§18-1）
-    drop_connecting(&state);     // 在途连接的强所有权随结果落地而解除
+    drop_connecting(&state);  // 在途连接的强所有权随结果落地而解除
     detail::close_handle(state.handle);
     state.handle = -1;
     // 以下三处把「以同一原因收尾」写成转入 Tasks（`std::function`）的可调用对象：本检查对任何无
@@ -267,9 +269,7 @@ auto close_stream(detail::StreamState &state, const Error &reason, Tasks &tasks)
 /// @param pending 尚未进入内核的字节数。
 /// @param high 高水位。
 /// @return 越界为 true。
-auto above_high_water(std::size_t pending, std::size_t high) -> bool {
-    return pending > 0 && pending >= high;
-}
+auto above_high_water(std::size_t pending, std::size_t high) -> bool { return pending > 0 && pending >= high; }
 
 /// @brief 刷新写闩锁：越过高水位即锁，回落到低于等于低水位才解锁（成对出现，避免阈值抖动）。
 /// @param state 连接状态（调用方持锁）。
@@ -279,6 +279,35 @@ auto refresh_write_latch(detail::StreamState &state) -> void {
     } else if (state.pending_write_bytes <= state.write_low_water_bytes) {
         state.write_blocked = false;
     }
+}
+
+/// @brief 释放一枚已出队的读请求占用的额度（按**登记时的容量**而非实收字节）。
+///
+/// 短读是常态（内核给多少算多少），若按实收字节扣，队列里就会攒出凭空占着的额度，攒到 `max_pending_bytes`
+/// 之后新读会被误判成越限拒收——那是记账错位而不是背压。
+/// @param state 连接状态（调用方持锁）。
+/// @param capacity 出队请求的缓冲容量。
+auto release_read_slot(detail::StreamState &state, std::size_t capacity) -> void {
+    state.pending_read_bytes = state.pending_read_bytes > capacity ? state.pending_read_bytes - capacity : 0;
+}
+
+/// @brief 从应用侧接回的前端缓冲里满足排队读（先于内核字节，保证线上次序不被打乱）。
+/// @param state 连接状态（调用方持锁）。
+/// @param tasks 出参：收集待触发的回调。
+/// @return true = 本轮满足了队首请求，调用方应继续循环。
+auto satisfy_reads_from_ahead(detail::StreamState &state, Tasks &tasks) -> bool {
+    if (state.reads.empty() || state.read_ahead.empty()) {
+        return false;
+    }
+    auto &front = state.reads.front();
+    const std::size_t limit = std::min(front.buffer.size(), state.read_ahead.size());
+    std::copy_n(state.read_ahead.begin(), limit, front.buffer.begin());
+    state.read_ahead.erase(state.read_ahead.begin(), state.read_ahead.begin() + static_cast<std::ptrdiff_t>(limit));
+    auto done = std::move(front.done);
+    release_read_slot(state, front.buffer.size());
+    state.reads.pop_front();
+    tasks.emplace_back([done, bytes = limit]() { done(Result<std::size_t>{bytes}); });
+    return true;
 }
 
 /// @brief 以对端 FIN 的形态满足全部排队读（0 字节、OK，不是错误）。
@@ -304,6 +333,9 @@ auto drive_read(detail::StreamState &state, Tasks &tasks) -> void {
         return;
     }
     while (!state.reads.empty()) {
+        if (satisfy_reads_from_ahead(state, tasks)) {
+            continue;  // 接回的尾批先于内核字节，否则隧道握手多读的那段会凭空消失
+        }
         if (state.peer_eof) {
             satisfy_reads_with_eof(state, tasks);
             return;
@@ -323,7 +355,7 @@ auto drive_read(detail::StreamState &state, Tasks &tasks) -> void {
             continue;  // 尾批排队请求同批以 0 收尾
         }
         auto done = std::move(front.done);
-        state.pending_read_bytes -= std::min(state.pending_read_bytes, attempt.bytes);
+        release_read_slot(state, front.buffer.size());
         state.reads.pop_front();
         tasks.emplace_back([done, bytes = attempt.bytes]() { done(Result<std::size_t>{bytes}); });
     }
@@ -478,8 +510,7 @@ auto stream_closed(const StreamPointer &state) -> bool {
 /// @param options 交付口径。
 /// @param owner 完成回调的目标线程。
 /// @return 新建的共享状态。
-auto make_accepted_stream(std::intptr_t handle, const StreamOptions &options, std::thread::id owner)
-    -> StreamPointer {
+auto make_accepted_stream(std::intptr_t handle, const StreamOptions &options, std::thread::id owner) -> StreamPointer {
     auto state = std::make_shared<detail::StreamState>();
     state->handle = handle;
     state->options = options;
@@ -691,10 +722,9 @@ auto StreamTransport::connect(const Endpoint &endpoint, const StreamOptions &opt
                 if (held->closed || !held->connecting) {
                     return;
                 }
-                close_stream(*held,
-                             make_error(ErrorCode::NetConnectTimeout,
-                                        ErrorParams{{"detail", "connect(" + target + ")"}}),
-                             fired);
+                close_stream(
+                    *held, make_error(ErrorCode::NetConnectTimeout, ErrorParams{{"detail", "connect(" + target + ")"}}),
+                    fired);
             }
             deliver(std::move(fired), held->owner);
         });
@@ -703,6 +733,17 @@ auto StreamTransport::connect(const Endpoint &endpoint, const StreamOptions &opt
             fail(timed.error());
         }
     }
+}
+
+auto StreamTransport::connect(std::string_view host, std::uint16_t port, const StreamOptions &options,
+                              const Cancellation &cancellation, ConnectDone on_done) -> void {
+    detail::connect_by_name(host, port, options, cancellation, std::move(on_done));
+}
+
+auto StreamTransport::connect_via(const ProxyConfig &proxy, std::string_view host, std::uint16_t port,
+                                  const StreamOptions &options, const Cancellation &cancellation, ConnectDone on_done)
+    -> void {
+    detail::connect_via_proxy(proxy, host, port, options, cancellation, std::move(on_done));
 }
 
 auto StreamTransport::is_open() const -> bool {
@@ -753,8 +794,8 @@ auto StreamTransport::read(std::span<char> buffer, ReadDone on_done) -> void {
     }
     if (buffer.empty()) {
         // 0 字节留给「对端已关闭写向」这一个含义，空缓冲只能是用法错误。
-        on_done(Result<std::size_t>{make_error(
-            ErrorCode::NetBufferLimit, ErrorParams{{"detail", "read target buffer is empty"}})});
+        on_done(Result<std::size_t>{
+            make_error(ErrorCode::NetBufferLimit, ErrorParams{{"detail", "read target buffer is empty"}})});
         return;
     }
     Tasks fired;
@@ -812,15 +853,13 @@ auto StreamTransport::write(std::span<const char> data, WriteDone on_done) -> vo
         } else if (state_->write_shut) {
             const auto detail_text = std::string{"stream write side is shut down"};
             fired.emplace_back([done = std::move(on_done), detail_text]() {
-                done(Result<std::size_t>{make_error(ErrorCode::NetOptionFailed,
-                                                    ErrorParams{{"detail", detail_text}})});
+                done(Result<std::size_t>{make_error(ErrorCode::NetOptionFailed, ErrorParams{{"detail", detail_text}})});
             });
         } else if (state_->write_blocked) {
             const auto size = std::to_string(state_->options.write_high_water_bytes);
             fired.emplace_back([done = std::move(on_done), size]() {
-                done(Result<std::size_t>{
-                    make_error(ErrorCode::NetBufferLimit,
-                               ErrorParams{{"detail", "write high-water " + size + " exceeded"}})});
+                done(Result<std::size_t>{make_error(
+                    ErrorCode::NetBufferLimit, ErrorParams{{"detail", "write high-water " + size + " exceeded"}})});
             });
         } else {
             auto request = detail::StreamState::PendingWrite{
@@ -984,9 +1023,7 @@ auto StreamTransport::operator=(StreamTransport &&other) noexcept -> StreamTrans
     return *this;
 }
 
-StreamTransport::~StreamTransport() {
-    close();
-}
+StreamTransport::~StreamTransport() { close(); }
 // NOLINTEND(bugprone-exception-escape)
 
 // ---- StreamListener -------------------------------------------------------------------
@@ -1085,9 +1122,30 @@ auto StreamListener::operator=(StreamListener &&other) noexcept -> StreamListene
     return *this;
 }
 
-StreamListener::~StreamListener() {
-    close();
-}
+StreamListener::~StreamListener() { close(); }
 // NOLINTEND(bugprone-exception-escape)
+
+namespace detail {
+
+auto seed_read(StreamTransport &stream, std::span<const char> bytes) -> void {
+    if (!stream.state_ || bytes.empty()) {
+        return;  // 空态与零字节都不构成一次投递
+    }
+    Tasks fired;
+    {
+        std::scoped_lock lock(stream.state_->mutex);
+        if (stream.state_->closed) {
+            return;  // 已关闭的流没有读队列可接：未完成的读已由 close_stream 各收尾一次
+        }
+        stream.state_->read_ahead.insert(stream.state_->read_ahead.end(), bytes.begin(), bytes.end());
+        drive_read(*stream.state_, fired);
+        if (!stream.state_->closed) {
+            refresh_stream_interest(stream.state_, fired);
+        }
+    }
+    deliver(std::move(fired), stream.state_->owner);
+}
+
+}  // namespace detail
 
 }  // namespace aurora::net
