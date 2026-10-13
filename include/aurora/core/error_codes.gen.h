@@ -141,6 +141,7 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetProxyAuthRequired = 97,  ///< net-proxy-auth-required: Proxy rejected the supplied credentials: '{detail}'
     NetProxyProtocol = 98,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
     NetDnsFailed = 99,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
+    NetProxyConfigUnreadable = 100,  ///< net-proxy-config-unreadable
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -158,7 +159,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 100> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 101> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1399,6 +1400,20 @@ inline constexpr std::array<ErrorMeta, 100> AURORA_ERROR_TABLE = {
             .hint =
                 "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form "
                 "or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test",
+        },
+        {
+            .code = ErrorCode::NetProxyConfigUnreadable,
+            .ident = "NetProxyConfigUnreadable",
+            .slug = "net-proxy-config-unreadable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Operating-system proxy settings could not be read: '{detail}'",
+            .hint = "The channel exists on this platform but the read was refused (registry access, dynamic-store "
+                    "failure); this is distinct from a machine that simply has no proxy configured, and the library "
+                    "never treats the two as the same outcome",
         },
     },
 };

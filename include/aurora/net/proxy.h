@@ -201,6 +201,7 @@ class NoProxy {
             Domain,  ///< 域名本体及其任意深层子域（可带端口限定）
             Literal,  ///< 数字字面量主机的全等匹配（可带端口限定）
             Cidr,  ///< 地址前缀（只对数字字面量目标生效，不带端口限定）
+            SingleLabel,  ///< `<local>`：无限定域主机名（名字里无 `.`）
         };
 
         Kind kind{Kind::Any};  ///< 规则类型
@@ -214,7 +215,10 @@ class NoProxy {
     /// @brief 解析一段例外列表。
     ///
     /// 分隔符 `,`、`;` 与空白等价，空项忽略（`,` 收尾与 `A,,B` 都合法）。大小写不敏感，
-    /// 尾点视作根区限定符并去除。
+    /// 尾点视作根区限定符并去除。除 `*` 外另认两枚系统代理写法的令牌：`<local>`（无限定域的
+    /// 主机名例外，即名字里没有 `.` 的目标）与 `<-loopback>`（回环地址例外）——二者是 Windows
+    /// 与 macOS 系统设置里「不为本地地址使用代理」那条勾选的实际存储形态，按不认识的项报错会让
+    /// 默认配置直接读不出代理，而静默忽略又会让内网流量绕过代理，故在文法里如实表达。
     /// @param list 例外列表原文，如 `localhost, .internal, 10.0.0.0/8, api.example.com:8080`。
     /// @return 成功为规则集合（空文本得空集合，匹配不到任何目标）；
     ///         某条形如规则但不合法（`10.0.0.0/33`、`[::1]x`、CIDR 带端口）为
@@ -288,6 +292,33 @@ struct ProxyEnvironment {
     /// @brief 构造「整体关闭环境代理」的空集合。
     /// @return 无代理、无例外的集合，`for_target()` 对任何目标都返回直连。
     [[nodiscard]] static auto disabled() -> ProxyEnvironment;
+
+    /// @brief 读取**操作系统**的代理设置（Windows 走 WinHTTP 的用户级配置，macOS 走系统代理偏好）。
+    ///
+    /// 只取地址与例外两件事，**绝不执行自动配置脚本**（PAC / WPAD 属非目标）。据此有两条必须
+    /// 分岔的回报：机器上确实没配代理是正常状态，回空集合（一切直连）；配了 PAC 或开了自动探测
+    /// 却回空集合，等于让企业网流量静默绕过代理——那正是本库最难排查的一类故障，故回
+    /// `net-proxy-unsupported` 而不降级。本腿没有系统代理通道（Linux 与浏览器腿的通道就是环境变量）
+    /// 时回 `net-platform-unavailable`，让「读不到」与「没配」在类型上就是两件事。
+    /// @return 成功为集合（各配置的 `source()` 为 `system:<槽位令牌>`，如 `system:socks5`）；
+    ///         畸形项为 `net-proxy-config-invalid`（`detail=` 指到第几项），PAC/WPAD/SOCKS4
+    ///         形态为 `net-proxy-unsupported`，本腿无通道为 `net-platform-unavailable`，
+    ///         通道在而读取被拒为 `net-proxy-config-unreadable`。
+    /// @note Side-effects: 读取操作系统配置（Windows 注册表用户分区 / macOS 动态存储），不写不回网
+    [[nodiscard]] static auto from_system() -> Result<ProxyEnvironment>;
+
+    /// @brief 按「环境变量优先，缺则系统设置」组装集合（桌面机上的缺省读取口径）。
+    ///
+    /// 次序是运维契约：显式设过 `HTTP_PROXY` 的机器（容器、CI、代理调试现场）以环境变量为准，
+    /// 系统设置只在环境变量一枚都没设时参与。系统腿报 `net-platform-unavailable`（本腿没有该
+    /// 通道）时等价于只有环境变量，不报错——Linux 上这就是一次正常的环境变量读取。
+    /// @return 成功为集合；任一被采纳的来源里有畸形值为对应 `net-proxy-*` 码（不静默丢弃该来源）。
+    [[nodiscard]] static auto from_environment_or_system() -> Result<ProxyEnvironment>;
+
+    /// @brief 用注入的读取器组装两来源集合（测试与非环境变量来源）。
+    /// @param reader 变量读取器；口径同 `from_environment(const Reader &)`。
+    /// @return 口径同 `from_environment_or_system()`。
+    [[nodiscard]] static auto from_environment_or_system(const Reader &reader) -> Result<ProxyEnvironment>;
 
     /// @brief 唯一的代理决策入口：给定目标，返回该走的代理或直连。
     ///

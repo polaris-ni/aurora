@@ -26,6 +26,7 @@
 #include "aurora/core/result.h"
 #include "aurora/core/url.h"
 #include "aurora/net/address.h"
+#include "aurora/net/detail/system_proxy.h"
 
 namespace aurora::net {
 namespace {
@@ -417,6 +418,32 @@ auto load_proxy_variable(const ProxyEnvironment::Reader &reader, std::string_vie
     return std::optional<ProxyConfig>{parsed.value()};
 }
 
+/// @brief 进程环境变量的默认读取器。
+/// @return 读取器：变量不存在或值为空时返回 `nullopt`（空串按未设置处理是 curl / Go 的共同口径）。
+auto default_reader() -> ProxyEnvironment::Reader {
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
+#pragma warning(push)
+#pragma warning(disable : 4996)  // getenv 在 MSVC/clang-cl 下被标为"不安全"，但它是标准可移植接口
+#endif
+    return [](std::string_view name) -> std::optional<std::string> {
+        const auto *raw = std::getenv(std::string(name).c_str());
+        if (raw == nullptr) {
+            return std::nullopt;
+        }
+        return std::string(raw);
+    };
+#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
+#pragma warning(pop)
+#endif
+}
+
+/// @brief 判断集合是否已经由环境变量表达过代理意图（任一代理类变量存在即为「接管」）。
+/// @param env 环境变量读出的集合。
+/// @return `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 任一有值为 true。
+auto takes_over(const ProxyEnvironment &env) -> bool {
+    return env.http.has_value() || env.https.has_value() || env.all.has_value();
+}
+
 }  // namespace
 
 auto ProxyCredentials::operator==(const ProxyCredentials &other) const -> bool {
@@ -549,11 +576,30 @@ auto NoProxy::parse(std::string_view list) -> Result<NoProxy> {
             return Result<void>{};  // 空项忽略：`,` 收尾与 `A,,B` 都是合法书写
         }
         ++ordinal;
-        const std::string context = "NO_PROXY entry #" + std::to_string(ordinal) + " '" + std::string(entry) + "'";
+        const std::string context = "exception entry #" + std::to_string(ordinal) + " '" + std::string(entry) + "'";
         if (entry == "*") {
             Rule rule;
             rule.kind = Rule::Kind::Any;
             rules.push_back(rule);
+            return Result<void>{};
+        }
+        // 两枚尖括号令牌来自系统代理的例外列表（IE / WinHTTP 与 macOS 系统配置共用这套写法），
+        // 它们不是主机名，必须在本层建模——丢了 `<local>` 等于让无边局域网主机静默走代理。
+        const auto token = lower_copy(entry);
+        if (token == "<local>") {
+            Rule rule;
+            rule.kind = Rule::Kind::SingleLabel;
+            rules.push_back(rule);
+            return Result<void>{};
+        }
+        if (token == "<-loopback>") {
+            for (const std::string_view cidr : {"127.0.0.0/8", "::1/128"}) {
+                auto rule = parse_cidr_entry(cidr);
+                if (!rule) {
+                    return config_error_from(rule.error(), context);
+                }
+                rules.push_back(rule.value());
+            }
             return Result<void>{};
         }
         if (entry.find('/') != std::string_view::npos) {
@@ -620,6 +666,8 @@ auto NoProxy::matches(std::string_view host, std::uint16_t port) const -> bool {
     if (target.empty()) {
         return false;
     }
+    std::string scratch;  // 数字字面量判定的复用缓冲（循环内反复问同一目标，没必要反复分配）
+    const bool single_label = target.find('.') == std::string::npos && !as_numeric_literal(target, scratch);
     for (const Rule &rule : rules_) {
         const bool port_open = rule.port == 0 || rule.port == port;
         switch (rule.kind) {
@@ -632,6 +680,13 @@ auto NoProxy::matches(std::string_view host, std::uint16_t port) const -> bool {
                 break;
             case Rule::Kind::Literal:
                 if (port_open && rule.domain == target) {
+                    return true;
+                }
+                break;
+            case Rule::Kind::SingleLabel:
+                // 无限定域主机名：名字里既没有点、又不是数字字面量。`<local>` 的意图是
+                // 「这台机器所在的无边局域网」，而无限定域名只在局域网里解析得开。
+                if (port_open && single_label) {
                     return true;
                 }
                 break;
@@ -660,22 +715,7 @@ auto NoProxy::operator==(const NoProxy &other) const -> bool {
     return true;
 }
 
-auto ProxyEnvironment::from_environment() -> Result<ProxyEnvironment> {
-#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
-#pragma warning(push)
-#pragma warning(disable : 4996)  // getenv 在 MSVC/clang-cl 下被标为"不安全"，但它是标准可移植接口
-#endif
-    return from_environment([](std::string_view name) -> std::optional<std::string> {
-        const auto *raw = std::getenv(std::string(name).c_str());
-        if (raw == nullptr) {
-            return std::nullopt;
-        }
-        return std::string(raw);
-    });
-#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
-#pragma warning(pop)
-#endif
-}
+auto ProxyEnvironment::from_environment() -> Result<ProxyEnvironment> { return from_environment(default_reader()); }
 
 auto ProxyEnvironment::from_environment(const Reader &reader) -> Result<ProxyEnvironment> {
     auto http = load_proxy_variable(reader, "HTTP_PROXY", "http_proxy");
@@ -709,6 +749,48 @@ auto ProxyEnvironment::from_environment(const Reader &reader) -> Result<ProxyEnv
 }
 
 auto ProxyEnvironment::disabled() -> ProxyEnvironment { return ProxyEnvironment{}; }
+
+auto ProxyEnvironment::from_system() -> Result<ProxyEnvironment> {
+    // 钩子优先：系统采集在单测里不可控（它读的是当前用户/机器的真实配置），装钩子后本入口的
+    // 全部判据都能逐值断言，口径同 `Resolver` 的解析钩子。
+    const auto &hook = detail::system_proxy_hook();
+    Result<std::optional<detail::SystemProxySnapshot>> snapshot = hook ? hook() : detail::platform_system_proxy();
+    if (!snapshot) {
+        return snapshot.error();
+    }
+    const auto &raw = snapshot.value();
+    if (!raw) {
+        // 「本腿没有系统代理通道」与「通道在但机器没配」是两件事：前者该由调用方回退到
+        // 环境变量口径，后者就是一次成功的空读取。压成同一回报会让 Linux 腿看起来在报错。
+        return make_error(ErrorCode::NetPlatformUnavailable,
+                          "detail=this platform leg exposes no system proxy setting; read the environment instead");
+    }
+    return detail::system_proxy_from_snapshot(*raw);
+}
+
+auto ProxyEnvironment::from_environment_or_system() -> Result<ProxyEnvironment> {
+    return from_environment_or_system(default_reader());
+}
+
+auto ProxyEnvironment::from_environment_or_system(const Reader &reader) -> Result<ProxyEnvironment> {
+    auto env = from_environment(reader);
+    if (!env) {
+        return env.error();
+    }
+    if (takes_over(env.value())) {
+        // 显式设过任一代理变量 = 接管：系统设置不参与，也不做逐槽位合并。容器 / CI / 代理调试
+        // 现场全靠这条覆盖机器级配置，合并会让「设了却没生效」变成新的排查黑洞。
+        return env;
+    }
+    auto system = from_system();
+    if (!system) {
+        if (system.error().code_enum == ErrorCode::NetPlatformUnavailable) {
+            return env;  // 本腿没有系统通道：这次读取的全部含义就是环境变量，不是故障
+        }
+        return system.error();
+    }
+    return system;
+}
 
 auto ProxyEnvironment::for_target(std::string_view host, std::uint16_t port, bool secure) const -> ProxyConfig {
     if (exceptions.matches(host, port)) {

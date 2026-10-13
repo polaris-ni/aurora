@@ -268,8 +268,14 @@ target_link_libraries(aurora PUBLIC freetype harfbuzz)
 # advapi32：注册表读取（os_color_scheme 的 Win32 分支，见 window/platform.h 与
 # src/aurora/window/win32_platform.cpp）——公共头内联函数在任何 Windows 构建里都可能
 # 引用该符号，故挂在顶层而非后端块内（后端块只在 AURORA_BACKEND_WIN32=ON 时生效）。
+# winhttp：系统代理采集腿（src/aurora/net/system_proxy.cpp 的 Win32 分支）读用户级 IE 代理设置。
 if (WIN32)
-    target_link_libraries(aurora PUBLIC ws2_32 advapi32)
+    target_link_libraries(aurora PUBLIC ws2_32 advapi32 winhttp)
+endif ()
+# SystemConfiguration / CoreFoundation：同一采集腿的 macOS 分支读动态存储里的系统代理，
+# 与后端无关（AURORA_BACKEND_MACOS 关闭时该腿照样编译），故挂在顶层。
+if (APPLE)
+    target_link_libraries(aurora PUBLIC "-framework SystemConfiguration" "-framework CoreFoundation")
 endif ()
 
 # ---- 图片编解码器外部库（libjpeg-turbo / libwebp / wuffs）----

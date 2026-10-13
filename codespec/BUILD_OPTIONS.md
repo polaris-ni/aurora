@@ -771,7 +771,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 | `freetype` | 随附 FreeType 静态库 |
 | `harfbuzz` | 随附 HarfBuzz 静态库 |
 
-`Aurora::aurora` 自动传递链接：`freetype` + `harfbuzz` + zlib（FreeType 解压字体表需要，尽力定位；找不到则跳过）+ `winpthread` / `pthread`（HarfBuzz 内部互斥，MinGW 下为 `winpthread`）+ Win32 系统库（`user32 gdi32 shell32 ole32 uuid imm32 dwmapi advapi32`，仅 `WIN32`；`dwmapi`/`advapi32` 供 CSD 能力探测与 `os_color_scheme` 注册表读取）。消费者**无需**手动 `find_package(FreeType)` / `find_package(HarfBuzz)`。
+`Aurora::aurora` 自动传递链接：`freetype` + `harfbuzz` + zlib（FreeType 解压字体表需要，尽力定位；找不到则跳过）+ `winpthread` / `pthread`（HarfBuzz 内部互斥，MinGW 下为 `winpthread`）+ Win32 系统库（`user32 gdi32 shell32 ole32 uuid imm32 dwmapi advapi32`，仅 `WIN32`；`dwmapi`/`advapi32` 供 CSD 能力探测与 `os_color_scheme` 注册表读取）+ 网络系统库（`WIN32`：`ws2_32` 供 `aurora::net` 传输层、`winhttp` 供系统代理采集腿；`APPLE`：`-framework SystemConfiguration` 与 `-framework CoreFoundation` 供同一采集腿的动态存储读取，与后端开关无关）。消费者**无需**手动 `find_package(FreeType)` / `find_package(HarfBuzz)`。
 
 ### 9.3 feature 宏导出约定
 

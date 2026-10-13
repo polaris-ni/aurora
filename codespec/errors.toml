@@ -1144,3 +1144,14 @@ fix_category = "resource_error"
 retryable = true
 message = "Host name could not be resolved: '{detail}'"
 hint = "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test"
+
+[[error]]
+enum = "NetProxyConfigUnreadable"
+slug = "net-proxy-config-unreadable"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Operating-system proxy settings could not be read: '{detail}'"
+hint = "The channel exists on this platform but the read was refused (registry access, dynamic-store failure); this is distinct from a machine that simply has no proxy configured, and the library never treats the two as the same outcome"
