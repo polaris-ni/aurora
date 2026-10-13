@@ -115,13 +115,12 @@ auto Resolver::resolve(std::string_view host, std::uint16_t port, ResolveDone on
         return;  // 空回调即「不想知道结果」，此时连查表都不发起，比查完再丢弃更诚实
     }
     auto slot = std::make_shared<ResolveDone>(std::move(on_done));
-    auto queued = Engine::instance().post([host_text = std::string(host), port, slot] {
-        deliver(slot, Resolver::lookup(host_text, port));
-    });
+    auto queued = Engine::instance().post(
+        [host_text = std::string(host), port, slot] { deliver(slot, Resolver::lookup(host_text, port)); });
     if (!queued) {
         // 不静默悬挂：把引擎的失败原因原样带进回调，并标明是排队失败而非解析失败。
-        deliver(slot, make_error(queued.error().code_enum,
-                                 "name resolution could not be queued: " + queued.error().message));
+        deliver(slot,
+                make_error(queued.error().code_enum, "name resolution could not be queued: " + queued.error().message));
     }
 }
 

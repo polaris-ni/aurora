@@ -105,6 +105,7 @@ aurora/net/poll.h
 aurora/net/proxy.h
 aurora/net/resolver.h
 aurora/net/socket.h
+aurora/net/transport.h
 aurora/perf/counters.h
 aurora/perf/perf_log.h
 aurora/perf/perf_session.h

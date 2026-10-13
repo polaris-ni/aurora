@@ -113,6 +113,7 @@
 #include "aurora/net/proxy.h"
 #include "aurora/net/resolver.h"
 #include "aurora/net/socket.h"
+#include "aurora/net/transport.h"
 #include "aurora/perf/counters.h"
 #include "aurora/perf/perf_log.h"
 #include "aurora/perf/perf_session.h"

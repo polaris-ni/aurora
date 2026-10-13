@@ -142,6 +142,9 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetProxyProtocol = 98,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
     NetDnsFailed = 99,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
     NetProxyConfigUnreadable = 100,  ///< net-proxy-config-unreadable
+    NetOptionFailed = 101,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
+    NetConnectTimeout = 102,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
+    NetBufferLimit = 103,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -159,7 +162,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 101> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 104> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1414,6 +1417,48 @@ inline constexpr std::array<ErrorMeta, 101> AURORA_ERROR_TABLE = {
             .hint = "The channel exists on this platform but the read was refused (registry access, dynamic-store "
                     "failure); this is distinct from a machine that simply has no proxy configured, and the library "
                     "never treats the two as the same outcome",
+        },
+        {
+            .code = ErrorCode::NetOptionFailed,
+            .ident = "NetOptionFailed",
+            .slug = "net-option-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Socket option or shutdown call failed: '{detail}'",
+            .hint = "setsockopt / getsockopt / shutdown returned an error (bad handle state, unsupported option, or "
+                    "the peer already reset the connection); the native code is in the message, check the option name "
+                    "and whether the socket is still connected",
+        },
+        {
+            .code = ErrorCode::NetConnectTimeout,
+            .ident = "NetConnectTimeout",
+            .slug = "net-connect-timeout",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Warning,
+            .auto_fixable = false,
+            .fix_category = "timeout",
+            .retryable = true,
+            .message_tpl = "Connection attempt timed out: '{detail}'",
+            .hint = "The non-blocking connect did not produce a result within the configured deadline; a black-holed "
+                    "peer or an unreachable route looks identical to a slow one from here, so retry with a longer "
+                    "StreamOptions::connect_timeout or fall back to another candidate address",
+        },
+        {
+            .code = ErrorCode::NetBufferLimit,
+            .ident = "NetBufferLimit",
+            .slug = "net-buffer-limit",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Warning,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Transfer buffer limit exceeded: '{detail}'",
+            .hint = "Backpressure fired: pending bytes reached the high-water mark, pending reads exceeded the "
+                    "read-buffer cap, or a framed message overflowed its limit; slow the producer down or raise the "
+                    "matching StreamOptions field rather than dropping data",
         },
     },
 };

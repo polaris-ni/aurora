@@ -864,6 +864,25 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：新增 `net-proxy-config-unreadable`（category `io`、`retryable = true`、`fix_category = resource_error`）。链接依赖随之扩面：Windows 加 `winhttp`、Apple 加 `-framework SystemConfiguration -framework CoreFoundation`（均 `PUBLIC` 传导，见根 `CMakeLists.txt`；口径记于 `BUILD_OPTIONS.md`）。macOS 腿在本机不可运行验证，由 CI 的 `macos-clang` 作业做编译验证。
 - 回归：`utest_net_system_proxy` 八例——PAC/WPAD/两者并存三类都判成 `net-proxy-unsupported` 且诊断带脚本 URL、没配代理是成功的空集合（带例外清单时例外仍解析）、四类 scheme 令牌落四个槽（`source()` 为 `system:<令牌>`）、裸项归 `all` 且 `ftp=`/`gopher=` 略过（缺省端口沿用配置侧口径）、六类歧义与畸形条目分岔到两码（含 SOCKS4、TLS-to-proxy、同槽重复、`=` 位置颠倒）、`<local>` 与 `<-loopback>` 的匹配面（无限定域名命中、带点与数字字面量不命中、`127.9.9.9` 与 `::1` 命中）、采集钩子三条回报（快照 / 畸形 / 空快照判成 `net-platform-unavailable`）、合并次序四态（接管时系统腿调用次数为 0、无变量时采纳快照、无通道等价环境变量、读失败原样上抛）。全用例零平台 API、零真实环境变量，三平台与 wasm 一致，故无 `AURORA_TEST_SKIP`。
 
+#### 8.8.11 异步流传输：`StreamTransport` / `StreamListener`（CHG-010 传输族首件）
+
+`include/aurora/net/transport.h` + `src/aurora/net/transport.cpp` 把 §8.8.3 的就绪基元、§8.8.4 的常驻引擎与 §8.8.2 的事件源注册口编排成「面向字节的异步流」：公共面只有 `ShutdownMode`、`StreamOptions`、四枚完成别名（`ConnectDone` / `AcceptDone` / `ReadDone` / `WriteDone`）、`StreamTransport`（`connect` / `read` / `write` / `shutdown` / `close` / `pause_read` / `resume_read` / `set_high_water_mark` / `pending_write_bytes` / `native_handle` / `peer_endpoint` / `is_loopback_peer` / `cancellation` / `is_open`）与 `StreamListener`（`bind` / `accept` / `local_port` / `native_handle` / `is_valid` / `close`），**全部异步出口都是回调形态**（L1 不得反向依赖 L4 的 `Task` / 协程，同 §8.8.9 的分层方向裁决）。非阻塞系统调用的唯一平台腿是 `src/aurora/net/detail/async_io.h` 的七个出口（建套接字并置非阻塞、发起连接、取连接错误、读、写、接受、关停，加绑定端口与对端还原），实现仍落在 `src/aurora/net/socket.cpp`——CHG-006 的「平台 socket 头唯一落点」不变量继续成立，`transport.cpp` 里一枚平台头都没有。连接与监听的状态（`detail::StreamState` / `ListenerState`）字段全在实现侧，公共头只有前向声明与一枚实现侧工厂 `detail::TransportFactory`（两个公共句柄的私有构造只对它敞开，因此**外部代码造不出伪句柄**）。九条定见：
+
+- **完成恒回到发起线程**：每连接一枚互斥量（引擎定时器与跨线程 `cancel()` 都是真实入口，无锁即无正确性）；锁内只收集待触发的回调、**一律在锁外触发**（回调里再调本层方法不得自锁）；求得的完成结果若不在发起线程就经 `aurora::detail::post_to_main` 投回，与 `Task<T>` 共用同一条主线程通道，不新增第三种排队形态。
+- **「还没法做」不是错误**：内部腿返回三态（`IoAttempt{bytes,blocked,failure}` / `AcceptAttempt{peer,blocked,failure}`），`EWOULDBLOCK` 与 `EINTR` 一类的可重试态**不消耗错误码**——把 would-block 报成 `net-recv-failed` 会让上层在正常轮询路径上分支一个不存在的故障。
+- **半关闭用 0 字节表达，不新增码**（§18 第 2 项）：读得 0 = 对端 FIN，此后每次读恒 0 且反向仍可继续写；`shutdown(ShutdownMode::Read)` 复用同一条 EOF 口——已排队的读恰一次得 0，本层此后不再注册可读关注。停写方向上「已排队的写」以 `net-cancelled` 收尾，其后 `write()` 落 `net-option-failed`。
+- **一次在途连接必须有强所有权**：非阻塞 `connect()` 从登记事件源到结果落地之间，状态的唯一持有者若是事件源闭包里的 `shared_ptr`，就形成「状态 → 登记 → 闭包 → 状态」的环，移动赋值与析构都救不了它（实测表现是 fd 泄漏且回调永不抵达）。故本层设**在途连接表**：发起时入表、结果落地即出表，事件源闭包只持 `weak_ptr` 见证；注销与关句柄的次序恒为**先注销、后关句柄**（§18 第 1 项），否则同一句柄可能已被别的源复用。
+- **关注方向按拉模型计算**：没有排队读请求就不注册可读，没有待发字节就不注册可写，没有待交付的 accept 回调就不注册监听口（连接留在内核 backlog 里，等宿主想收时再收）。任何关注变化都 `++generation` 并重新登记，旧登记的尾批据此作废——这既挡住「注销后仍有事件」的悬垂访问，也让「同一句柄反复改关注」不会攒出多份投递。
+- **背压是显式契约而非节流暗示**：待发字节越过高水位后新的 `write()` 直接被拒（`net-buffer-limit`），回落到 `write_low_water_bytes` 以下才重新接受（成对阈值避免在临界点上抖动）；`set_high_water_mark()` 会按新高水位重算低水位。**单次写允许越界至多一枚请求**，否则正文大于高水位的写永远发不出去。读侧同样有上限（`max_pending_bytes` 约束排队读缓冲总量），`read_chunk_bytes` 决定一轮投递多少字节——内核里多于它就分轮投递，故调用方缓冲可以比它小。
+- **驱动方可切换**：`connect()` / `bind()` 先经 `ensure_driver()` 叫醒驱动方——宿主已声明自带等待集（`host_driven()`）时**不投引擎**，否则同一句柄会被两边等待。本层不自己开线程。
+- **空态是合法值**：默认构造或移动后的句柄调用成员不崩、不悬挂，以 `net-socket-failed` 形态送达；入参不合用（空缓冲、空回调、端口 0）同样走回调，**没有「既不成功也不失败」的第三种结局**。`connect_timeout` 由引擎定时器投递 `net-connect-timeout`，置 0 即不设时限。
+- **取消即恰一次收尾**：`Cancellation` 钩子在锁外登记（「登记时已取消」会在调用线程就地执行钩子，锁内登记即自锁）；取消后未完成的读写各以 `net-cancelled` 抵达一次，句柄归还与注销同批完成。
+
+- 错误码：`net-option-failed`（停写后再写、连接期参数不合用）与 `net-buffer-limit`（读写两侧缓冲越限）都在原规划清单内；**`net-connect-timeout` 是原规划未列、本切片补入的一枚**（`severity=warning`、`retryable=true`、`fix_category=timeout`）——连接超时与「连不上」的排查方向不同（前者多半是黑洞路由或防火墙丢包，后者是端口上没有服务），与 `net-proxy-protocol` 同类的分岔理由。
+- 工具链面：`ShutdownMode` 与同批补齐的 `AddressFamily` / `ProxyKind` 登记进 `tools/include/known_enums.h`（`aurora_api.json` 的 `enums` 段随之刷新），`itest_known_enums` 加编译期锚点，改名即编译失败。
+- 回归：`utest_net_transport` 十例——连接与接受各恰一次送达且三条观测口（`is_open` / `native_handle` / `peer_endpoint` / `is_loopback_peer`）如实回报、半关闭后本端读得 0 而反向仍可收发、`shutdown(Read)` 以 0 字节收尾已排队的读、写背压拒收后回落重受（含「至多越界一枚」的上界断言）、`pause_read` 把字节留在内核直至 `resume_read`、取消在途读恰一次送达、参数与空态契约、取消在途连接后事件源登记数归零（不泄漏句柄也不泄漏登记）、关闭监听口后待交付 accept 恰一次失败、以及**引擎驱动**形态下不碰 `dispatch()` 也能收满（`host_driven()` 为假时由常驻线程投递）。宿主驱动用例以 RAII 守卫进出 `set_host_driven(true)`，用 `wait_ready` + `dispatch` 自建轮询循环，故等待时刻与线程归属都可同线程断言；wasm 腿无 fd 等待语义，用例体内 `AURORA_TEST_SKIP`。本机验证腿：Win32（Winsock `WSAPoll`）与 WSL（POSIX `poll`）同口径。
+
+
 ---
 
 ### 8.9 系统拖放（跨进程）

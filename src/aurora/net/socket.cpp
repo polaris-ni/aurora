@@ -25,8 +25,10 @@
 #include <vector>
 
 #include "aurora/core/platform.h"
+#include "aurora/net/detail/async_io.h"
 #include "aurora/net/detail/lookup.h"
 #include "aurora/net/poll.h"
+#include "aurora/net/transport.h"
 
 #ifdef AURORA_PLATFORM_WINDOWS
 // Winsock 引用计数会话状态需要互斥；POSIX 腿无此状态，不拉入 <mutex>。
@@ -41,6 +43,7 @@
 #else
 // POSIX（含 macOS / Linux / Android / BSD / Emscripten 的 BSD socket 腿）：BSD sockets。
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -763,6 +766,314 @@ auto detail::platform_lookup(std::string_view host, std::uint16_t port) -> Resul
         return make_error(ErrorCode::NetDnsFailed, "host=" + name + ", resolver returned no usable address record");
     }
     return out;
+}
+
+// ---- 非阻塞出口（`net/detail/async_io.h`；传输层的平台腿） ----------------------------------
+
+namespace {
+
+/// @brief 把原生句柄置为非阻塞模式。
+///
+/// 两平台拼写完全不同：Winsock 走 `ioctlsocket(FIONBIO)`、POSIX 走 `fcntl(F_SETFL, O_NONBLOCK)`。
+/// POSIX 侧必须先读回现有标志再按位或——直接 `F_SETFL(O_NONBLOCK)` 会把 `O_APPEND` 之类既有标志清掉。
+/// @param s 目标原生句柄。
+/// @return 成功为 OK；失败为 `net-option-failed`（含 OS 原生码）。
+auto make_nonblocking(NativeSocket s) -> Result<void> {
+#ifdef AURORA_PLATFORM_WINDOWS
+    u_long mode = 1;
+    if (::ioctlsocket(s, FIONBIO, &mode) != 0) {
+        return net_error(ErrorCode::NetOptionFailed, "ioctlsocket(FIONBIO)");
+    }
+#else
+    const int current = ::fcntl(s, F_GETFL, 0);
+    if (current < 0) {
+        return net_error(ErrorCode::NetOptionFailed, "fcntl(F_GETFL)");
+    }
+    if (::fcntl(s, F_SETFL, current | O_NONBLOCK) < 0) {
+        return net_error(ErrorCode::NetOptionFailed, "fcntl(F_SETFL, O_NONBLOCK)");
+    }
+#endif
+    return Result<void>{};
+}
+
+/// @brief 最近错误是否「内核暂无进展」（读空 / 写满）。
+/// @param os_error `native_last_error()` 返回值。
+/// @return Winsock `WSAEWOULDBLOCK`、POSIX `EAGAIN`/`EWOULDBLOCK` 时为 true（两者是否同值随平台）。
+auto native_would_block(int os_error) -> bool {
+#ifdef AURORA_PLATFORM_WINDOWS
+    return os_error == WSAEWOULDBLOCK;
+#else
+    return os_error == EAGAIN || os_error == EWOULDBLOCK;
+#endif
+}
+
+/// @brief 非阻塞 connect 的「正在进行中」判据。
+///
+/// Winsock 在一次未完成的异步连接上重复调用 `connect` 会回报 `WSAEALREADY`，首次则多为
+/// `WSAEWOULDBLOCK`；POSIX 是 `EINPROGRESS`/`EALREADY`，另加 `EINTR`——被信号打断的 connect
+/// 连接仍在后台推进，按「进行中」处理才不会把一次合法的异步连接误报成失败。
+/// @param os_error `native_last_error()` 返回值。
+/// @return 属「进行中」集合时为 true。
+auto native_connect_in_progress(int os_error) -> bool {
+#ifdef AURORA_PLATFORM_WINDOWS
+    return os_error == WSAEALREADY || os_error == WSAEWOULDBLOCK || os_error == WSAEINPROGRESS;
+#else
+    return os_error == EINPROGRESS || os_error == EALREADY || os_error == EINTR;
+#endif
+}
+
+/// @brief 「其实早已连接」判据（重复发起 connect 或竞态下可出现，等价于成功）。
+/// @param os_error `native_last_error()` 返回值。
+/// @return Winsock `WSAEISCONN`、POSIX `EISCONN` 时为 true。
+auto native_already_connected(int os_error) -> bool {
+#ifdef AURORA_PLATFORM_WINDOWS
+    return os_error == WSAEISCONN;
+#else
+    return os_error == EISCONN;
+#endif
+}
+
+/// @brief `accept` 的瞬态空回报判据：无新连接，或挂起连接在被接受前已被对端撤掉/被信号打断。
+///
+/// `ECONNABORTED` 在 POSIX 与 Winsock 都是「完成三次握手后连接被中止」，是 backlog 的正常损耗，
+/// 不是监听口的错误——把它报成失败会让一个客户端刷新页面就打挂服务端。
+/// @param os_error `native_last_error()` 返回值。
+/// @return 属瞬态空回报集合时为 true。
+auto native_accept_empty(int os_error) -> bool {
+#ifdef AURORA_PLATFORM_WINDOWS
+    return os_error == WSAEWOULDBLOCK || os_error == WSAECONNABORTED || os_error == WSAEINTR;
+#else
+    return os_error == EAGAIN || os_error == EWOULDBLOCK || os_error == ECONNABORTED || os_error == EINTR;
+#endif
+}
+
+/// @brief 组装 `IoAttempt` 的失败分支（带 OS 原生码与操作名）。
+/// @param code 失败落点码。
+/// @param op 失败的调用描述。
+/// @return 只填了 `failure` 的三态结果。
+auto io_failed(ErrorCode code, const std::string &op) -> detail::IoAttempt {
+    detail::IoAttempt attempt;
+    attempt.failure = net_error(code, op);
+    return attempt;
+}
+
+}  // namespace
+
+auto detail::open_nonblocking_stream(const Endpoint &endpoint) -> Result<std::intptr_t> {
+    if (endpoint.port() == 0) {
+        return make_error(ErrorCode::NetEndpointInvalid, "a stream client endpoint needs a non-zero port");
+    }
+    auto opened = open_socket_for(endpoint);
+    if (!opened) {
+        return opened.error();
+    }
+    const NativeSocket s = opened.value();
+    if (auto set = make_nonblocking(s); !set) {
+        native_close(s);
+        return set.error();
+    }
+    return to_handle(s);
+}
+
+auto detail::open_nonblocking_listener(const Endpoint &endpoint, int backlog) -> Result<std::intptr_t> {
+    auto opened = open_socket_for(endpoint);
+    if (!opened) {
+        return opened.error();
+    }
+    const NativeSocket s = opened.value();
+    sockaddr_storage storage{};
+    auto built = make_address(endpoint, storage);
+    if (!built) {
+        native_close(s);
+        return built.error();
+    }
+    const AddrLen address_length = built.value();
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::bind(s, reinterpret_cast<const sockaddr *>(&storage), address_length) != 0) {
+        auto err = net_error(ErrorCode::NetBindFailed, "bind(" + endpoint.to_string() + ")");
+        native_close(s);
+        return err;
+    }
+    if (::listen(s, backlog) != 0) {
+        auto err = net_error(ErrorCode::NetListenFailed, "listen(backlog=" + std::to_string(backlog) + ")");
+        native_close(s);
+        return err;
+    }
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (auto set = make_nonblocking(s); !set) {
+        native_close(s);
+        return set.error();
+    }
+    return to_handle(s);
+}
+
+auto detail::close_handle(std::intptr_t handle) -> void {
+    if (handle != static_cast<std::intptr_t>(-1)) {
+        native_close(from_handle(handle));
+    }
+}
+
+auto detail::start_connect(std::intptr_t handle, const Endpoint &endpoint) -> Result<void> {
+    const NativeSocket s = from_handle(handle);
+    sockaddr_storage storage{};
+    auto built = make_address(endpoint, storage);
+    if (!built) {
+        return built.error();
+    }
+    const AddrLen address_length = built.value();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::connect(s, reinterpret_cast<const sockaddr *>(&storage), address_length) == 0) {
+        return Result<void>{};  // 即时建立（回环上可发生）；结果仍由 take_connect_error 复核
+    }
+    const int os_error = native_last_error();
+    if (native_connect_in_progress(os_error) || native_already_connected(os_error)) {
+        return Result<void>{};  // 进行中与「已连接」都由可写就绪后的取错口裁决
+    }
+    return make_error(ErrorCode::NetConnectFailed,
+                      "connect(" + endpoint.to_string() + ") failed (os_error=" + std::to_string(os_error) + ")");
+}
+
+auto detail::take_connect_error(std::intptr_t handle) -> Result<void> {
+    int option = 0;
+    AddrLen option_len = sizeof(option);
+    const NativeSocket s = from_handle(handle);
+    // `getsockopt` 的 optval 是「按字节写出」的出参，两平台都只接受非 const void*/char*。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&option), &option_len) != 0) {
+        return net_error(ErrorCode::NetConnectFailed, "getsockopt(SO_ERROR)");
+    }
+    if (option == 0) {
+        return Result<void>{};
+    }
+    // 可写就绪却仍带错误码：`EALREADY`/`WSAEALREADY` 一类的「还在进行」在这一刻已是平台缺陷，
+    // 报同一枚 connect 失败码而不新造码——调用方的动作（换候选地址）在两种情形下完全一致。
+    return make_error(ErrorCode::NetConnectFailed, "connect completed with os_error=" + std::to_string(option));
+}
+
+auto detail::try_read(std::intptr_t handle, std::span<char> buffer) -> IoAttempt {
+    if (buffer.empty()) {
+        IoAttempt attempt;
+        attempt.blocked = true;
+        return attempt;
+    }
+    const int len = static_cast<int>(std::min<std::size_t>(buffer.size(), 1U << 20U));
+    const auto n = static_cast<std::ptrdiff_t>(::recv(from_handle(handle), buffer.data(), len, 0));
+    if (n > 0) {
+        IoAttempt attempt;
+        attempt.bytes = static_cast<std::size_t>(n);
+        return attempt;
+    }
+    if (n == 0) {
+        return IoAttempt{};  // 对端 FIN：零字节且未失败，语义在声明处（读方向的 EOF）
+    }
+    const int os_error = native_last_error();
+    if (native_would_block(os_error)) {
+        IoAttempt attempt;
+        attempt.blocked = true;
+        return attempt;
+    }
+    return io_failed(ErrorCode::NetRecvFailed, "recv");
+}
+
+auto detail::try_write(std::intptr_t handle, std::span<const char> data) -> IoAttempt {
+    if (data.empty()) {
+        IoAttempt attempt;
+        attempt.blocked = true;
+        return attempt;
+    }
+    const int len = static_cast<int>(std::min<std::size_t>(data.size(), 1U << 20U));
+    const auto n = static_cast<std::ptrdiff_t>(::send(from_handle(handle), data.data(), len, 0));
+    if (n > 0) {
+        IoAttempt attempt;
+        attempt.bytes = static_cast<std::size_t>(n);
+        return attempt;
+    }
+    const int os_error = native_last_error();
+    if (native_would_block(os_error)) {
+        IoAttempt attempt;
+        attempt.blocked = true;
+        return attempt;
+    }
+    if (n == 0) {
+        return io_failed(ErrorCode::NetSendFailed, "send returned zero without would-block");
+    }
+    return io_failed(ErrorCode::NetSendFailed, "send");
+}
+
+auto detail::try_accept(std::intptr_t handle) -> AcceptAttempt {
+    const NativeSocket s = from_handle(handle);
+    sockaddr_storage peer{};
+    AddrLen peer_len = sizeof(peer);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    const NativeSocket accepted = ::accept(s, reinterpret_cast<sockaddr *>(&peer), &peer_len);
+    if (!native_is_invalid(accepted)) {
+        if (auto set = make_nonblocking(accepted); !set) {
+            native_close(accepted);
+            AcceptAttempt attempt;
+            attempt.failure = set.error();
+            return attempt;
+        }
+        AcceptAttempt attempt;
+        attempt.peer = to_handle(accepted);
+        return attempt;
+    }
+    const int os_error = native_last_error();
+    if (native_accept_empty(os_error)) {
+        AcceptAttempt attempt;
+        attempt.blocked = true;  // 无新连接 / 挂起连接在 accept 前被对端撤掉，都不是监听口的错误
+        return attempt;
+    }
+    AcceptAttempt attempt;
+    attempt.failure = net_error(ErrorCode::NetAcceptFailed, "accept");
+    return attempt;
+}
+
+auto detail::shutdown_handle(std::intptr_t handle, ShutdownMode mode) -> Result<void> {
+    int how = 0;
+#ifdef AURORA_PLATFORM_WINDOWS
+    how = mode == ShutdownMode::Read ? SD_RECEIVE : (mode == ShutdownMode::Write ? SD_SEND : SD_BOTH);
+#else
+    how = mode == ShutdownMode::Read ? SHUT_RD : (mode == ShutdownMode::Write ? SHUT_WR : SHUT_RDWR);
+#endif
+    if (::shutdown(from_handle(handle), how) != 0) {
+        return net_error(ErrorCode::NetOptionFailed, "shutdown");
+    }
+    return Result<void>{};
+}
+
+auto detail::bound_port(std::intptr_t handle) -> std::uint16_t {
+    sockaddr_storage bound{};
+    AddrLen name_len = sizeof(bound);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::getsockname(from_handle(handle), reinterpret_cast<sockaddr *>(&bound), &name_len) != 0) {
+        return 0;
+    }
+    auto resolved = endpoint_from_address(bound);
+    return resolved ? resolved.value().port() : 0;
+}
+
+auto detail::peer_of(std::intptr_t handle) -> Result<Endpoint> {
+    sockaddr_storage peer{};
+    AddrLen name_len = sizeof(peer);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (::getpeername(from_handle(handle), reinterpret_cast<sockaddr *>(&peer), &name_len) != 0) {
+        return net_error(ErrorCode::NetSocketFailed, "getpeername");
+    }
+    return endpoint_from_address(peer);
+}
+
+auto detail::peer_is_loopback(std::intptr_t handle) -> bool {
+    auto peer = peer_of(handle);
+    if (!peer) {
+        return false;
+    }
+    const Endpoint &endpoint = peer.value();
+    if (endpoint.is_loopback()) {
+        return true;
+    }
+    const auto &bytes = endpoint.address_bytes();
+    return endpoint.family() == AddressFamily::IPv6 && first_ten_bytes_zero(bytes) && bytes.at(10) == 0xFF &&
+           bytes.at(11) == 0xFF && bytes.at(12) == 127;
 }
 
 }  // namespace aurora::net

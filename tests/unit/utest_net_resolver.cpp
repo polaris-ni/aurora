@@ -116,8 +116,8 @@ AURORA_TEST_CASE(empty_host_is_a_usage_error_not_a_dns_failure) {
 AURORA_TEST_CASE(answers_are_deduplicated_in_first_seen_order) {
     HookScope scope([](std::string_view, std::uint16_t) -> Result<std::vector<Endpoint>> {
         return std::vector<Endpoint>{literal("203.0.113.1", 80), literal("2001:db8::1", 80),
-                                     literal("203.0.113.1", 80),      // 同族同址同端口：重复
-                                     literal("203.0.113.1", 8080)};   // 同址不同端口：独立条目
+                                     literal("203.0.113.1", 80),  // 同族同址同端口：重复
+                                     literal("203.0.113.1", 8080)};  // 同址不同端口：独立条目
     });
 
     const auto result = Resolver::lookup("example.com", 80);
@@ -136,9 +136,8 @@ AURORA_TEST_CASE(resolver_failure_and_empty_answer_both_fail_as_dns) {
     AURORA_TEST_REQUIRE_FALSE(bool(failed));
     AURORA_TEST_CHECK_EQ(failed.error().code_enum, ErrorCode::NetDnsFailed);
 
-    HookScope empty([](std::string_view, std::uint16_t) -> Result<std::vector<Endpoint>> {
-        return std::vector<Endpoint>{};
-    });
+    HookScope empty(
+        [](std::string_view, std::uint16_t) -> Result<std::vector<Endpoint>> { return std::vector<Endpoint>{}; });
     const auto no_answer = Resolver::lookup("gone.example", 443);
     AURORA_TEST_REQUIRE_FALSE(bool(no_answer));
     AURORA_TEST_CHECK_EQ(no_answer.error().code_enum, ErrorCode::NetDnsFailed);

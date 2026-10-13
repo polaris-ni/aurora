@@ -162,6 +162,11 @@ namespace aurora::tools {
     enums["ColorPalette"] = {"AURORA_WHITE", "AURORA_BLACK", "AURORA_BLUE",   "AURORA_RED",
                              "AURORA_GREEN", "AURORA_GRAY",  "AURORA_YELLOW", "AURORA_TRANSPARENT"};
 
+    // ---- network (aurora::net public enums; not widget property types, but AI-enumerable API surface) ----
+    enums["AddressFamily"] = {"IPv4", "IPv6", "LocalPath"};
+    enums["ProxyKind"] = {"Direct", "HttpConnect", "Socks5"};
+    enums["ShutdownMode"] = {"Read", "Write", "Both"};
+
     return enums;
 }
 
