@@ -157,9 +157,7 @@ auto head_block_end(std::string_view bytes) -> std::size_t {
 /// @return 成功为 true；不合文法为 false（错误由调用方统一落码，避免两处文案漂移）。
 auto parse_status_line(std::string_view line, ConnectHead &head) -> bool {
     const auto is_digit = [](char c) { return c >= '0' && c <= '9'; };
-    const auto all_digits = [&](std::string_view text) {
-        return !text.empty() && std::ranges::all_of(text, is_digit);
-    };
+    const auto all_digits = [&](std::string_view text) { return !text.empty() && std::ranges::all_of(text, is_digit); };
     if (!line.starts_with("HTTP/")) {
         return false;
     }
@@ -169,14 +167,14 @@ auto parse_status_line(std::string_view line, ConnectHead &head) -> bool {
     }
     const auto version = line.substr(5, version_end - 5);
     const auto dot = version.find('.');
-    if (dot == std::string_view::npos || !all_digits(version.substr(0, dot)) ||
-        !all_digits(version.substr(dot + 1))) {
+    if (dot == std::string_view::npos || !all_digits(version.substr(0, dot)) || !all_digits(version.substr(dot + 1))) {
         return false;
     }
     const auto status_start = version_end + 1;
     const auto status_end = line.find(' ', status_start);
-    const auto status_text = status_end == std::string_view::npos ? line.substr(status_start)
-                                                                  : line.substr(status_start, status_end - status_start);
+    const auto status_text = status_end == std::string_view::npos
+                                 ? line.substr(status_start)
+                                 : line.substr(status_start, status_end - status_start);
     if (status_text.size() != 3 || !all_digits(status_text)) {
         return false;
     }
@@ -249,8 +247,8 @@ auto append_numeric_address(std::string_view host, std::uint16_t port, std::vect
                             std::string &out_detail) -> bool {
     const auto parsed = Endpoint::from_ip(host, port);
     if (!parsed) {
-        out_detail = "SOCKS5 without proxy-side resolution needs a numeric target address, got '" +
-                     std::string{host} + "'";
+        out_detail =
+            "SOCKS5 without proxy-side resolution needs a numeric target address, got '" + std::string{host} + "'";
         return false;
     }
     const auto &endpoint = parsed.value();
@@ -290,15 +288,14 @@ auto make_connect_request(std::string_view host, std::uint16_t port, const Proxy
     std::string out = "CONNECT " + target + " HTTP/1.1\r\n";
     out += "Host: " + target + "\r\n";
     if (!credentials.empty()) {
-        out += "Proxy-Authorization: Basic " + base64_encode(credentials.username + ":" + credentials.password) +
-               "\r\n";
+        out +=
+            "Proxy-Authorization: Basic " + base64_encode(credentials.username + ":" + credentials.password) + "\r\n";
     }
     out += "\r\n";
     return out;
 }
 
-auto parse_connect_response(std::string_view bytes, std::size_t max_head_bytes)
-    -> Result<std::optional<ConnectHead>> {
+auto parse_connect_response(std::string_view bytes, std::size_t max_head_bytes) -> Result<std::optional<ConnectHead>> {
     const auto end = head_block_end(bytes);
     if (end == std::string_view::npos) {
         if (bytes.size() > max_head_bytes) {
@@ -458,8 +455,8 @@ auto parse_socks5_reply(std::string_view bytes, std::size_t max_head_bytes) -> R
         return std::optional<Socks5Reply>{reply};
     }
     const auto family = atype == AURORA_SOCKS_ATYPE_IPV4 ? AddressFamily::IPv4 : AddressFamily::IPv6;
-    auto bound = Endpoint::from_bytes(family, copy_address(bytes, address_start, address_length),
-                                      read_port(bytes, total - 2));
+    auto bound =
+        Endpoint::from_bytes(family, copy_address(bytes, address_start, address_length), read_port(bytes, total - 2));
     if (!bound) {
         return protocol_error("SOCKS5 CONNECT reply carries a bound address that is not a valid endpoint");
     }
@@ -486,16 +483,18 @@ auto socks5_error_for(std::uint8_t status, Socks5Phase phase, std::string_view p
                                       " - this build offers only no-auth and username/password");
             }
             if (status == AURORA_SOCKS_METHOD_CHALLENGE_HANDSHAKE) {
-                return make_error(ErrorCode::NetProxyUnsupported,
-                                  "SOCKS5 method selection picked the IETF reserved challenge-handshake method for " +
-                                      context);
+                return make_error(
+                    ErrorCode::NetProxyUnsupported,
+                    "SOCKS5 method selection picked the IETF reserved challenge-handshake method for " + context);
             }
-            return make_error(ErrorCode::NetProxyUnreachable, "unexpected SOCKS5 method selection reply from " + context);
+            return make_error(ErrorCode::NetProxyUnreachable,
+                              "unexpected SOCKS5 method selection reply from " + context);
         case Socks5Phase::Authentication:
             return make_error(ErrorCode::NetProxyAuthRequired,
                               "SOCKS5 username/password subnegotiation was refused by " + context);
         case Socks5Phase::Tunnel:
-            if (status == AURORA_SOCKS_REP_COMMAND_NOT_SUPPORTED || status == AURORA_SOCKS_REP_ADDRESS_TYPE_NOT_SUPPORTED) {
+            if (status == AURORA_SOCKS_REP_COMMAND_NOT_SUPPORTED ||
+                status == AURORA_SOCKS_REP_ADDRESS_TYPE_NOT_SUPPORTED) {
                 return make_error(ErrorCode::NetProxyUnsupported, "SOCKS5 CONNECT cannot be served by " + context);
             }
             return make_error(ErrorCode::NetProxyUnreachable, "SOCKS5 CONNECT was refused by " + context);

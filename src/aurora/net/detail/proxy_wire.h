@@ -60,8 +60,8 @@ enum class Socks5Phase : std::uint8_t {
 /// @param port 目标端口（主机序）。
 /// @param credentials 代理凭据；`empty()` 时不发 `Proxy-Authorization`。
 /// @return 可直接写入套接字的 UTF-8/Latin-1 字节串（以 CRLF 结尾的空行收束）。
-[[nodiscard]] auto make_connect_request(std::string_view host, std::uint16_t port,
-                                        const ProxyCredentials &credentials) -> std::string;
+[[nodiscard]] auto make_connect_request(std::string_view host, std::uint16_t port, const ProxyCredentials &credentials)
+    -> std::string;
 
 /// @brief 解析代理就 CONNECT 回报的头部块。
 ///
@@ -110,8 +110,7 @@ enum class Socks5Phase : std::uint8_t {
 /// @param bytes 已读到的字节（可含隧道首字节）。
 /// @param max_head_bytes 应答上限（域名型 ATYPE 单条最长 262 字节，正常应答远小于此）。
 /// @return 三态；成功且有值时给出 REP 原值与可还原的绑定端点。
-[[nodiscard]] auto parse_socks5_reply(std::string_view bytes,
-                                      std::size_t max_head_bytes = AURORA_PROXY_MAX_HEAD_BYTES)
+[[nodiscard]] auto parse_socks5_reply(std::string_view bytes, std::size_t max_head_bytes = AURORA_PROXY_MAX_HEAD_BYTES)
     -> Result<std::optional<Socks5Reply>>;
 
 /// @brief 把 CONNECT 的非 2xx 状态码换算成隧道失败错误（2xx 由调用方判成成功、不来此处）。
@@ -119,8 +118,7 @@ enum class Socks5Phase : std::uint8_t {
 /// @param proxy 代理的 `host:port` 文本（诊断用，绝不含凭据）。
 /// @param target 目标的 `host:port` 文本（诊断用）。
 /// @return 407 → `net-proxy-auth-required`；其余非 2xx → `net-proxy-unreachable`（均不回退直连）。
-[[nodiscard]] auto connect_tunnel_error(std::uint16_t status, std::string_view proxy, std::string_view target)
-    -> Error;
+[[nodiscard]] auto connect_tunnel_error(std::uint16_t status, std::string_view proxy, std::string_view target) -> Error;
 
 /// @brief 把 SOCKS5 的非零状态字节换算成握手失败错误（按阶段分岔，同字节不同义）。
 /// @param status 该阶段回报的状态字节原值。

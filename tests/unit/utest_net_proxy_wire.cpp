@@ -51,9 +51,7 @@ auto hex(const std::vector<std::uint8_t> &bytes) -> std::string {
 /// @brief 把字节向量变成文本，喂给只收 `string_view` 的解析入口（含零字节也原样保留）。
 /// @param bytes 握手中读到的字节。
 /// @return 等长文本，不做任何转码。
-auto raw(std::vector<std::uint8_t> bytes) -> std::string {
-    return std::string{bytes.begin(), bytes.end()};
-}
+auto raw(std::vector<std::uint8_t> bytes) -> std::string { return std::string{bytes.begin(), bytes.end()}; }
 
 /// @brief 取三态解析产出的报文：还没读够与畸形是两回事，此处缺失即致命失败。
 /// @param parsed 解析结果（`Result<optional<T>>`）。
@@ -134,11 +132,11 @@ AURORA_TEST_CASE(connect_response_head_is_three_state) {
 }
 
 AURORA_TEST_CASE(connect_response_rejects_non_http_malformed_and_oversized) {
-    for (const std::string_view bad : {"SOCKS5 reply is not HTTP\r\n\r\n", "HTTP/1.1 20 OK\r\n\r\n",
-                                       "HTTP/1.1 2000 OK\r\n\r\n", "HTTP 200 OK\r\n\r\n", "HTTP/1.1\r\n\r\n",
-                                       "HTTP/1.1 200 OK\r\ngarbage\r\n\r\n", "HTTP/1.1 200 OK\r\nX A: 1\r\n\r\n",
-                                       "HTTP/1.1 200 OK\r\n: no-name\r\n\r\n",
-                                       "HTTP/1.1 200 OK\r\nX-A: 1\r\n  folded\r\n\r\n"}) {
+    for (const std::string_view bad :
+         {"SOCKS5 reply is not HTTP\r\n\r\n", "HTTP/1.1 20 OK\r\n\r\n", "HTTP/1.1 2000 OK\r\n\r\n",
+          "HTTP 200 OK\r\n\r\n", "HTTP/1.1\r\n\r\n", "HTTP/1.1 200 OK\r\ngarbage\r\n\r\n",
+          "HTTP/1.1 200 OK\r\nX A: 1\r\n\r\n", "HTTP/1.1 200 OK\r\n: no-name\r\n\r\n",
+          "HTTP/1.1 200 OK\r\nX-A: 1\r\n  folded\r\n\r\n"}) {
         const auto rejected = wire::parse_connect_response(bad);
         AURORA_TEST_REQUIRE_FALSE(bool(rejected));
         AURORA_TEST_CHECK_EQ(rejected.error().code_enum, ErrorCode::NetProxyProtocol);
@@ -232,8 +230,8 @@ AURORA_TEST_CASE(socks5_reply_parsing_tracks_variable_address_length) {
     AURORA_TEST_CHECK_TRUE(!pending.value().has_value());
 
     // 应答后面紧跟隧道首字节：解析只吃掉 10 字节，其余留给传输切片。
-    const auto v4 = completed(wire::parse_socks5_reply(
-        raw({0x05, 0x00, 0x00, 0x01, 203, 0, 113, 1, 0x1F, 0x90, 't', 'u'})));
+    const auto v4 =
+        completed(wire::parse_socks5_reply(raw({0x05, 0x00, 0x00, 0x01, 203, 0, 113, 1, 0x1F, 0x90, 't', 'u'})));
     AURORA_TEST_CHECK_EQ(v4.status, 0);
     AURORA_TEST_CHECK_EQ(v4.consumed, std::size_t{10});
     AURORA_TEST_CHECK_EQ(bound_text(v4), "203.0.113.1:8080");
@@ -261,8 +259,8 @@ AURORA_TEST_CASE(socks5_reply_parsing_tracks_variable_address_length) {
     AURORA_TEST_CHECK_EQ(wrong_version.error().code_enum, ErrorCode::NetProxyProtocol);
 
     // 非零 REP 照样解析成功：状态字节到错误码的换算是另一件事（见下面的分岔判据）。
-    AURORA_TEST_CHECK_EQ(
-        completed(wire::parse_socks5_reply(raw({0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0}))).status, std::uint8_t{5});
+    AURORA_TEST_CHECK_EQ(completed(wire::parse_socks5_reply(raw({0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0}))).status,
+                         std::uint8_t{5});
 }
 
 AURORA_TEST_CASE(handshake_status_maps_to_the_documented_error_codes) {

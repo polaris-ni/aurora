@@ -21,9 +21,11 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "aurora/core/platform.h"
+#include "aurora/net/detail/lookup.h"
 #include "aurora/net/poll.h"
 
 #ifdef AURORA_PLATFORM_WINDOWS
@@ -39,6 +41,7 @@
 #else
 // POSIX（含 macOS / Linux / Android / BSD / Emscripten 的 BSD socket 腿）：BSD sockets。
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/select.h>
@@ -700,6 +703,66 @@ auto wait_ready(const std::vector<PollDescriptor> &descriptors, std::chrono::mil
         outcomes[static_cast<std::size_t>(slot_of[k])] = poll_outcome(fds[k].revents);
     }
     return outcomes;
+}
+
+// ---- 平台查表腿（`getaddrinfo` 的仓内唯一调用点） -----------------------------------------
+
+namespace {
+
+/// @brief 组装 `net-dns-failed`：只带主机名与平台回报的数字码。
+///
+/// 不带 `gai_strerror` 文本：那串消息随 locale 与代码页漂移（Windows 上还会给出非 ASCII 形态），
+/// 而数字码在 man 页与 MSDN 里各有确定含义——诊断文本要能跨机器比对，不能由现场语言决定。
+/// @param host 被查询的主机名文本。
+/// @param code 平台回报码。
+/// @return `net-dns-failed` 错误。
+auto dns_failed(std::string_view host, int code) -> Error {
+    return make_error(ErrorCode::NetDnsFailed, "host=" + std::string{host} + ", resolver code=" + std::to_string(code));
+}
+
+}  // namespace
+
+auto detail::platform_lookup(std::string_view host, std::uint16_t port) -> Result<std::vector<Endpoint>> {
+    const Session session;  // Windows：`getaddrinfo` 要求已初始化的 Winsock 运行时
+    if (!session.ok()) {
+        return make_error(ErrorCode::NetPlatformUnavailable, "socket runtime could not be started for name resolution");
+    }
+    const std::string name(host);
+    const std::string service = std::to_string(port);
+    addrinfo hints{};
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    // AI_NUMERICSERV：端口按数字给。服务名查表会让 `/etc/services` 参与结果（同一端口在两台机器
+    // 上给出两个服务名），而本层只需要族与地址；填回的端口本就是入参那个。
+    hints.ai_flags = AI_NUMERICSERV;
+    addrinfo *records = nullptr;
+    const int code = ::getaddrinfo(name.c_str(), service.c_str(), &hints, &records);
+    if (code != 0 || records == nullptr) {
+        return dns_failed(name, code);
+    }
+    std::vector<Endpoint> out;
+    for (const addrinfo *node = records; node != nullptr; node = node->ai_next) {
+        if (node->ai_family != AF_INET && node->ai_family != AF_INET6) {
+            continue;  // 其余族（链路层等）本库不承载
+        }
+        if (node->ai_addr == nullptr || node->ai_addrlen == 0 || node->ai_addrlen > sizeof(sockaddr_storage)) {
+            continue;  // 长度不合结构即不可信：宁可少一条，也不从越界形态里读字节
+        }
+        sockaddr_storage storage{};
+        std::memset(&storage, 0, sizeof(storage));
+        std::memcpy(&storage, node->ai_addr, node->ai_addrlen);
+        // 地址族的原点在两型结构里都是首字段，故上面的整块拷贝已把 `ss_family` 带到位。
+        auto built = endpoint_from_address(storage);
+        if (built) {
+            out.push_back(std::move(built.value()));
+        }
+    }
+    ::freeaddrinfo(records);
+    if (out.empty()) {
+        // 「查表成功但零条可用记录」等同不可用：空列表会让调用方去猜这是 DNS 空段还是本库筛掉了。
+        return make_error(ErrorCode::NetDnsFailed, "host=" + name + ", resolver returned no usable address record");
+    }
+    return out;
 }
 
 }  // namespace aurora::net

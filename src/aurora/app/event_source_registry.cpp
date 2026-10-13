@@ -53,8 +53,14 @@ EventSourceRegistry::EventSourceRegistry() {
 
 auto EventSourceRegistry::instance() -> EventSourceRegistry & {
     // 函数内 static：首次调用才建，规避跨 TU 静态初始化顺序问题（与 async.h 投递器同口径）。
+    //
+    // 刻意不析构（泄漏一枚永不归还的对象）：本注册表的存续期必须覆盖**整个静态析构阶段**。自带
+    // 引擎是「先构造完自己、再由 `ensure_started()` 首次触到本表」，按「构造完成逆序析构」的口径
+    // 本表反而先死；而 `~PollEngine` 在退出路径上收敛线程时要经 `set_change_notify` 回收接缝，
+    // 于是一把已析构的 mutex 被加锁（实测在 MinGW 上直接段错误退出）。表里只有 `std::function`
+    // 与计数，没有任何需要归还给操作系统的资源，故泄漏没有代价；把顺序寄托在「谁先被碰到」上才是代价。
     // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
-    static EventSourceRegistry registry;
+    static auto &registry = *new EventSourceRegistry();
     return registry;
 }
 

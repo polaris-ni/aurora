@@ -1133,3 +1133,14 @@ fix_category = "invalid_value"
 retryable = false
 message = "Proxy handshake is not protocol-conformant: '{detail}'"
 hint = "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server where a proxy port was expected"
+
+[[error]]
+enum = "NetDnsFailed"
+slug = "net-dns-failed"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = true
+message = "Host name could not be resolved: '{detail}'"
+hint = "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test"

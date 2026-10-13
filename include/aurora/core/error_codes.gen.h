@@ -140,6 +140,7 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetProxyUnreachable = 96,  ///< net-proxy-unreachable: Proxy tunnel could not be established: '{detail}'
     NetProxyAuthRequired = 97,  ///< net-proxy-auth-required: Proxy rejected the supplied credentials: '{detail}'
     NetProxyProtocol = 98,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
+    NetDnsFailed = 99,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -157,7 +158,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 99> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 100> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1384,6 +1385,20 @@ inline constexpr std::array<ErrorMeta, 99> AURORA_ERROR_TABLE = {
             .hint = "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status "
                     "line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server "
                     "where a proxy port was expected",
+        },
+        {
+            .code = ErrorCode::NetDnsFailed,
+            .ident = "NetDnsFailed",
+            .slug = "net-dns-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = true,
+            .message_tpl = "Host name could not be resolved: '{detail}'",
+            .hint =
+                "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form "
+                "or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test",
         },
     },
 };

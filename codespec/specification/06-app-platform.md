@@ -744,6 +744,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - **平台无关且位于 `net/` 之下**：本 `.cpp` 不出现任何平台 socket/poll 头（`winsock2.h`/`poll.h` 唯一落点仍是 `src/aurora/net/socket.cpp`，CHG-006 不变量不破）。真正的「阻塞直到某些句柄就绪」经三枚可注入接缝表达——`set_poller(Poller)`（等待实现，由 net 引擎层或测试安装）、`set_dispatcher(Dispatcher)`（主线程投递实现，缺省为就地同步执行，与 `post_to_main` 无 poster 时的口径一致）、`set_change_notify(ChangeNotify)`（表变动与驱动方转变的通知，归常驻等待方独占，判据见 §8.8.4 投递纪律 ②）。自带等待集的宿主不装 `Poller`、改走 `sources()` 取快照 + `dispatch(ready)` 投递。无 fd 语义的腿（wasm）在**构造期**把 `event_source_supported()` 置假（编译期事实只落一处，公共头维持零 `#ifdef`），此后 `register_source` 一律回 `net-platform-unavailable`，`wait_and_dispatch` 在未装 Poller 时同码，均**不忙等、不假降级**。
 - **句柄生命周期与三条竞态契约（§18-1，规范性）**：`register_source` 返回 move-only RAII 句柄 `EventSourceRegistration`，析构即注销且**幂等**、移动后源转空态、其析构不再触发二次注销。注销语义 = **停止产生新回调**：`dispatch` 在锁内只快照待投递闭包（`shared_ptr` 按值捕获令条目独立于注册表存活），**释放锁后**才逐个投递——因此已进入 `Dispatcher` 队列的一次尾批仍会抵达一次（回调载荷须由使用方以弱令牌保护宿主），但此后新的 `dispatch` 不再为该令牌产生回调。需连尾批一起作废另用 `cancel_pending()`（置条目的 `cancelled` 原子位），该调用与析构**互不隐含**：前者只作废尾批、不影响后续投递；后者只移除快照条目、不作废已入队尾批。回调内可安全再注册/注销（投递在锁外）。
 - **令牌关联**：同 `handle` 可多次登记、各自持独立令牌与回调（`next_token()` 单调、从 1 起、0 留空态）；宿主等待回来后按令牌回填 `ReadySource`，注销后重登记取新令牌、旧令牌的迟到就绪不会误触发新条目回调。
+- **进程级单例刻意不析构**：本表的存续期必须覆盖**整个静态析构阶段**。常驻引擎先构造完自己、再在 `ensure_started()` 里首次触到本表，按「构造完成逆序析构」的口径本表反而先死，而 `~PollEngine` 在退出路径上收敛线程时要经 `set_change_notify` 回收接缝——给一枚已析构的 `mutex` 加锁即未定义行为（MinGW 腿实测为退出时段错误）。表里只有 `std::function` 与计数，没有任何需要归还给操作系统的资源，故泄漏没有代价；把正确性寄托在「谁先被碰到」上才有代价。
 - 错误码：复用 `net-platform-unavailable`（本次新增，`retryable = false`、`fix_category = platform_capability`；`hint` 指向 `Engine::capabilities()` 查询与能力矩阵）。
 - 回归：`utest_app_event_source_registry`（有效句柄与 `-1`/不支持腿的拒绝、就绪回调「抵达次数 == 就绪次数」、原生宿主无 Poller 走 `sources()`/`dispatch()` 的通路、`unregister` 与 `cancel_pending` 在排程 Dispatcher 下的尾批分岔、移动不双重注销、同句柄重登记取新令牌、`host_driven` 两次转变都通知常驻方）。引擎侧的互斥落地判据见 §8.8.4 的 `utest_net_engine`。
 
@@ -833,6 +834,20 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 - 错误码：新增 `net-proxy-protocol`（category `io`、`retryable=false`），同批启用 §10 预留的 `net-proxy-unreachable`（`retryable=true`，代理侧瞬时故障值得重试）与 `net-proxy-auth-required`（`retryable=false`，凭据缺失盲目重试只会刷对端日志）；数据源 `codespec/errors.toml`，`ERROR_CATALOG.md` 与生成头随生成器刷新。
 - 回归：`utest_net_proxy_wire` 七例——CONNECT 请求行的 authority-form 与 IPv6 补括号、Basic 凭据逐字节（含手算 base64 与「明文密码不出现在请求里」的反assertion）、应答头部块三态（未出现空行为缺失态、`header_bytes` 恰好停在隧道首字节、裸 LF 形态、缺原因短语）、九类畸形状态行与越上限（上限值进诊断文本）、SOCKS5 方法协商与子协商的逐字节形态（含版本字节与三例凭据长度越界）、`ATYPE` 由解析授权选路（域名 / IPv4 / IPv6 逐字节，名字未授权、256 字节域名、带作用域号三类拒收）、应答的可变地址长度（IPv4 尾随隧道字节仍只吃 10 字节并还原绑定端点、IPv6 22 字节、域名型不还原端点、未知 `ATYPE` 与错版本落 `net-proxy-protocol`、非零 `REP` 仍解析成功）、握手状态到三枚错误码的分岔。全用例零 socket、零平台头，三平台与 wasm 一致，故无 `AURORA_TEST_SKIP`。
+
+#### 8.8.9 主机名解析：`aurora::net::Resolver`（双栈与竞速切片第二件）
+
+`include/aurora/net/resolver.h` + `src/aurora/net/resolver.cpp` 把「一个主机名 + 一个端口」变成「一组可直接连接的 `Endpoint`」：`lookup()` 是同步形状（供引擎线程与测试逐值断言），`resolve(host, port, ResolveDone)` 是面向使用者的异步形状——阻塞式 `getaddrinfo` 发生在 §8.8.4 的常驻引擎线程上，完成经 `aurora::detail::post_to_main` 回到主线程。平台查表的唯一落点仍在 `src/aurora/net/socket.cpp`（`net::detail::platform_lookup`，CHG-006 的「平台 socket 头唯一落点」不变量继续成立；`<netdb.h>` 与 `getaddrinfo` 不新增受限头之外的落点）。六条定见：
+
+- **数字字面量永不查 DNS，且短路点在注入接缝之前**：`Endpoint::from_ip()` 认得的形态（IPv4 点分、带括号 IPv6、含 zone id）直接产出单条答案，既不让一次网络往返去解析一个自足的字面量，也让测试能同时证明「字面量这条路没走 DNS」——接缝装在短路之后就证不出这一点。
+- **异步形状用回调而不是 `Task<Result<…>>`**：解析器在 L1，`Task` / 协程在 L4（`state/async.h`），把 `Task` 写进 `net/` 公共头会让下层反向依赖上层。因此公共头只带 `ResolveDone`，`state/async.h` 的引用只出现在 `resolver.cpp`（实现侧消费 `post_to_main`，与 `Task<T>` 同一条主线程通道，不新增第三种排队形态）。协程包装随绑定层（`Resource`）在上层给出。
+- **查表参数只认数字，且不做「本机才有」的过滤**：`AI_NUMERICSERV` 让服务名不参与解析（`/etc/services` 的名字表按机器而异，把它牵进来会让同一份代码给出不同端口）；**不启用 `AI_ADDRCONFIG`**——该标志按「本机当前是否有 IPv6 地址」过滤回报，于是同一份代码在纯 v4 与双栈机器上拿到不同次序与条数，与跨平台一致行为判据冲突；一族实际不可达由连接尝试本身暴露（竞速切片据此换族）。回报也不做排序：地址族偏好属连接策略（Happy Eyeballs 的 200 ms 交错随竞速切片落地），解析层排序会把那个策略拆成两处。缓存同样不在本层——一份带 TTL 的地址缓存是另一个子系统的职责，本层留 `lookup()` 这个无状态出口给它复用。
+- **产出恒规范化且去重**：结果经 `endpoint_from_address()` → `Endpoint::from_bytes()`，与文本形态共用同一套 RFC 5952 规范化渲染（不经 `inet_ntop`）；「同族同地址同端口」只留首次出现的一条，且**保持首次出现次序**——列表规模恒为个位数，故用线性判重而非哈希，哈希会把这条唯一事实变成不确定项。
+- **三枚码的分岔是排查方向的分岔**：空主机名落 `net-endpoint-invalid`（用法错误不得报成网络故障，否则 `net-dns-failed` 的 `hint` 会让调用方去重试一个永远不会成功的入参）；查表失败与「查成功但零条可用记录」都落 `net-dns-failed`（后者等同不可用，message 必带主机名）；异步排队失败（引擎起不来）把引擎的原因原样带进回调并冠以排队说明，**不静默悬挂**——一次永不触发的回调是本类最难定位的缺陷。
+- **接缝只存在于库内**：`net::detail::lookup.h` 的 `set_lookup_hook()` 让全部次序与形态判据在无 DNS、无网络的环境下逐值可断言；它刻意不进公共 API，因为「一个会改变解析结果的公开开关」本身是安全隐患（`getaddrinfo` 结果被替换等于替换了目标主机）。真实平台腿仍有一例：`*.invalid` 是 RFC 6761 保留域，合规解析器必须回 NXDOMAIN，而完全离线的机器同样回失败，故该判据不依赖网络可达性，也不需要 `AURORA_TEST_SKIP`。
+
+- 错误码：新增 `net-dns-failed`（category `io`、`retryable = true`、`fix_category = resource_error`；`hint` 指明数字字面量永不到达本码，故 DNS 本身是被测对象时直接用字面量）。
+- 回归：`utest_net_resolver` 七例——字面量在钩子之前短路（v4 / `[::1]` / 带 zone 的 `fe80::1%2`，钩子调用次数须保持 0）、空主机名判成用法错误、去重且保首次次序（同址不同端口算独立条目）、查表失败与空回报同为 `net-dns-failed`（后者诊断含主机名）、真实平台腿对保留域失败、异步完成恰一次且查表腿与回调都不在调用线程上、空回调连查表都不发起。异步用例以 RAII 收敛引擎（`Engine::shutdown()` 幂等），不把在跑的线程留给同 runner 的后续用例——常驻循环与用例自有的事件源驱动方同时等同一注册口会造成二次投递。
 
 ---
 
