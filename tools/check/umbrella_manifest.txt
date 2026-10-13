@@ -131,6 +131,7 @@ aurora/state/coroutine.h
 aurora/state/effect.h
 aurora/state/immutable.h
 aurora/state/reactive.h
+aurora/state/resource.h
 aurora/state/signal_view.h
 aurora/state/state.h
 aurora/state/state_graph.h

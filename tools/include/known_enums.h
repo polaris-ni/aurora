@@ -168,6 +168,10 @@ namespace aurora::tools {
     enums["ProxyKind"] = {"Direct", "HttpConnect", "Socks5"};
     enums["ShutdownMode"] = {"Read", "Write", "Both"};
 
+    // ---- declarative binding (aurora::Resource / aurora::StreamResource, state/resource.h) ----
+    enums["ResourcePhase"] = {"Loading", "Ready", "Failed"};
+    enums["StreamPolicy"] = {"Append", "Replace"};
+
     return enums;
 }
 

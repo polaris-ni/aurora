@@ -139,6 +139,7 @@
 #include "aurora/state/effect.h"
 #include "aurora/state/immutable.h"
 #include "aurora/state/reactive.h"
+#include "aurora/state/resource.h"
 #include "aurora/state/signal_view.h"
 #include "aurora/state/state.h"
 #include "aurora/state/state_graph.h"

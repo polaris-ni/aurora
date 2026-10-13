@@ -1,6 +1,6 @@
 # 响应式状态与异步（state）
 
-> 覆盖 `include/aurora/state/`（14 个头文件）。本文件是信号原语、订阅生命周期、`Store` 与异步编程序的**唯一权威**。
+> 覆盖 `include/aurora/state/`（15 个头文件）。本文件是信号原语、订阅生命周期、`Store` 与异步编程序的**唯一权威**。
 > 线程模型与所有权不变量见 [`ARCHITECTURE.md`](../ARCHITECTURE.md) §组件树；错误与结果类型见 [`01-core.md`](01-core.md) §3。
 
 ---
@@ -16,6 +16,7 @@
 | 订阅句柄 | `subscription.h` |
 | 类 Redux 单向流 | `store.h` |
 | 异步任务 | `async.h`、`coroutine.h` |
+| 三态资源绑定 | `resource.h`（`Resource<T>` 一次性落定 / `StreamResource<T>` 持续流） |
 | 依赖图与撤销 | `state_graph.h`、`undo_stack.h`、`state_registry.h` |
 
 ---
@@ -191,6 +192,49 @@ au::launch(load());
 - 异步错误通过 `Result<T>` 传递，回调必须处理成功与失败两个分支。
 - 定时与周期任务**不属于**本模块，由 `Scheduler` / `Timer` 承担，见 [`06-app-platform.md`](06-app-platform.md)。
 
+### 5.4 三态资源绑定 `Resource<T>` 与 `StreamResource<T>`
+
+`resource.h` 把「一个会异步落定的结果」变成 widget 可直接读的信号：三态 `Loading / Ready(T) / Failed(Error)`，读取即登记依赖、落定即定点刷新（对位业界 `FutureBuilder`）。它只依赖「可取消 + 完成回投」这一既有抽象（`Task<T>`），**不认识网络**——异步计算、文件读取、进程间调用同样能产出 `Resource`，故 `net/` 不进 `state/` 的依赖图。
+
+| 成员 | 签名 / 说明 |
+|:---|:---|
+| `Resource<T>::from(Task<T> job, opts = {})` | 由**已启动作业**创建并立即等待其结果（`au::async(fn)` 的产物；`fn` 返回 `T` 或 `Result<T>`，值类型由 `Task<T>` 萃取）。该形态没有可重发来源，`reload()` 只复位到 `Loading` 并重新等待**同一**作业 |
+| `Resource<T>::from(std::function<Task<T>()> producer, opts = {})` | 由**作业来源**创建并立即发送第一条作业；每次发送调 `producer` 产出新作业，故 `reload()` 是真重发并取消前序。`producer` 在簿记锁内被调用，不得回调回本资源 |
+| `reload()` | 重发；去抖窗口非 0 时窗口内的多次调用合并为一次发送（最后一次生效），窗口内不改动状态 |
+| `phase()` | `-> ResourcePhase`，读取即登记依赖 |
+| `value()` | `-> const T *`；未就绪（`Loading` / `Failed`）为 `nullptr`，指向内部存储，下一次状态写入后失效 |
+| `error()` | `-> std::optional<Error>`；仅 `Failed` 有值 |
+| `StreamResource<T>::open(opts = {})` | 打开等待写入的流槽位（初始 `Loading`） |
+| `StreamResource<T>::push(item, wire_bytes = 0)` | 写入端交付一条数据并计入在途批次；`wire_bytes` 供 `batch_bytes()` 累计，非线上流传 0 |
+| `StreamResource<T>::fail(err)` | 报错终止：丢弃未提交批次，状态进 `Failed`，已提交数据保留；终态之后的 `push()` 被丢弃（续用请另开一个流资源） |
+| `items()` / `batch_bytes()` | 已提交列表的只读引用（下一次提交后失效）/ 最近一次提交批次的累计线上字节数 |
+| `ResourceOptions` | `{ timeout = 30s, debounce = 0 }`；`timeout <= 0` = 不设超时。默认值在声明处可见（`SPEC.API.SENSIBLE-DEFAULTS.001`） |
+| `StreamOptions` | `{ policy = StreamPolicy::Append }`；`Append` 累计、`Replace` 只留最新一条 |
+
+四条不变量：
+
+- **一个资源 = 一个信号源**：阶段、值、错误打包成一份快照写进同一个 `State<...>`，一次落定只通知一次——三分支渲染必然同时读这三者，拆成三个信号只会让每次迁移多跑一轮重建；粒度因此收在「每个资源一个信号」，不同资源之间依旧互不牵连。
+- **结果不串台**：每次发送推进一个代次（generation），完成回调只认自己那一代。`Task::cancel()` 只能让尚未投递的结果闭嘴，**已排进主线程队列的那次投递照样抵达**，故 `reload()` 之后前序作业的迟到结果由代次守卫丢弃，不覆盖新状态。
+- **与作用域联动**：句柄可自由拷贝、全部拷贝共享同一内核；最后一个句柄放手（宿主 widget 卸载或资源被重新赋值）触发内核析构，析构里取消前序未完成作业；完成回调持内核弱引用，内核已亡即丢弃——两条路径都不产生悬垂访问。限制照搬 `Task`：取消无法中断作业体本身，只改变结果的投递去向。
+- **帧内合并（流式）**：`push()` 只累加批次，并把「提交」经主线程投递器排队；队列排空前到达的全部交付合并成**一次**状态写入。故宿主卡顿期间的多次交付损失的是提交次数，不是数据——`batch_bytes()` 给出的是该批累计量，不是末条大小。
+
+`timeout` 复用 `Task<T>::with_timeout` 的两条分流（worker 池下是睡 `d` 的池任务；deferred 下登记到期看守、由帧尾扫描触发），去抖延时的通道与之相同，精度口径同 §5.1。
+
+**必须先安装主线程投递器**（`Task<T>::set_main_poster`，真实事件循环已装）：状态写入发生在完成回调所在线程，未装投递器时回调在承接作业的 worker 线程直调，写 `State` 即违反「main-thread only」。deferred（无 pthreads）构建下承载线程就是宿主泵任务的线程，自装与否都不越约定。
+
+```cpp
+auto user = au::Resource<Profile>::from(
+    [] { return au::async([] { return fetch_profile(id); }); },   // 作业来源形态：reload() 真重发
+    au::ResourceOptions{.timeout = std::chrono::seconds{5}});
+
+// widget 侧：三分支读取，读取即订阅
+if (user.phase() == au::ResourcePhase::Loading) { /* 骨架 */ }
+else if (const Profile *p = user.value()) { /* 数据 */ }
+else { /* 失败：user.error()->message */ }
+
+user.reload();  // 前序请求自动取消；旧结果不会盖住新状态
+```
+
 ---
 
 ## 6 依赖图与撤销栈
@@ -258,3 +302,15 @@ au::Column(au::ColumnProps{
 **验收标准：** 全部后台工作都可在无 GUI 环境（headless）下完成并回到主线程；`ThreadPool` 存活期间不出现新建的游离 `std::thread`；超时与取消路径只改变结果的投递去向，绝不中断用户函数。
 
 > 内存与所有权侧的所有权模型见 [`01-core.md`](01-core.md) §8.1（SPEC.QUALITY.CORE.MEMORY-SAFETY.001）；跨线程回投与帧循环唤醒见 [`06-app-platform.md`](06-app-platform.md)。
+
+### 7.3 SPEC.FEAT.NET.DECLARATIVE-BINDING.001 异步结果三态响应式绑定
+
+**核心目标：** AI 少写胶水——请求即状态来源。
+
+**需求陈述：** 一次异步作业（网络请求、文件读取、进程间调用）可以直接退化成一个 widget 可读的三态信号源：`loading / ready / failed` 定点刷新，重发自动取消前序且旧结果不覆盖新状态，宿主失效后回调被丢弃。绑定层不认识网络，故 `net/` 不进入 `state/` 的依赖图。
+
+**API 与不变量：** 见 §5.4（`au::Resource<T>` / `au::StreamResource<T>` / `ResourcePhase` / `StreamPolicy` / `ResourceOptions` / `StreamOptions`）。
+
+**验收标准：** ① 一次落定只通知一次；② `reload()` 取消前序作业，且其迟到结果不覆盖新状态；③ 宿主析构后抵达的回调被丢弃，无悬垂访问；④ `StreamResource` 的 `Append` / `Replace` 两策略与帧内合并批次（`batch_bytes()` 为累计量）；⑤ 默认超时 30 s、`reload()` 不去抖，默认值在声明处可见。单测见 `tests/unit/utest_state_resource.cpp`。
+
+**约束：** 状态写入限主线程（须先装主线程投递器）；取消只改结果的投递去向，不中断作业体；去抖与超时复用 `Task<T>` 的既有通道，精度口径随其构建模式（见 §5.1）。
