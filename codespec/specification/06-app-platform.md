@@ -718,13 +718,13 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 ### 8.8 Socket 操作层（`aurora::net`）
 
-`include/aurora/net/socket.h` + `src/aurora/net/socket.cpp` 是全仓**唯一**的 Winsock2 / BSD socket 适配落点（CHG-006）：公共头零平台 socket 头，`#include <winsock2.h>` / `<sys/socket.h>` 只允许出现在该 `.cpp`（验收 grep 判据见 [`changes/winsock-bsd-socket-layer/proposal.md`](../changes/winsock-bsd-socket-layer/proposal.md)）。范围收敛为「Inspector 工具链 + 本机 AI 交互」所需：仅 IPv4 回环（127.0.0.1，不经 DNS）、同步阻塞 + 显式超时、失败一律 `Result<T>` + 表驱动 `net-*` 错误码（`ERROR_CATALOG.md`，message 携带 OS 原生码）。
+`include/aurora/net/socket.h` + `src/aurora/net/socket.cpp` 是全仓**唯一**的 Winsock2 / BSD socket 适配落点（CHG-006）：公共头零平台 socket 头，`#include <winsock2.h>` / `<sys/socket.h>` 只允许出现在该 `.cpp`（验收 grep 判据见 [`changes/winsock-bsd-socket-layer/proposal.md`](../changes/winsock-bsd-socket-layer/proposal.md)）。范围收敛为「Inspector 工具链 + 本机 AI 交互」所需：**地址族由 `Endpoint` 决定**（IPv4 / IPv6 同一条 `connect` / `bind` 通路，`*_loopback` 两枚工厂仍固定绑 `127.0.0.1`，都不经 DNS）、同步阻塞 + 显式超时、失败一律 `Result<T>` + 表驱动 `net-*` 错误码（`ERROR_CATALOG.md`，message 携带 OS 原生码）。
 
 三个类型：
 
 - `Session`：进程级运行时 RAII。Windows 腿引用计数配对 `WSAStartup`/`WSACleanup`（首个构造初始化、末个析构清理，嵌套/并存安全）；POSIX 腿零成本占位、`ok()` 恒真。不可拷贝/移动（纯作用域 guard）。
-- `Listener`：`listen_loopback(port, backlog)`（只绑 `127.0.0.1`；port=0 由系统分配、`port()` 回报实际值）、`wait_readable(timeout) -> Result<bool>`（select 可中断等待，`false` = 纯超时非错误，两平台 nfds 差异内部消化）、`accept() -> Result<StreamSocket>`、`native_handle()`（借出原生句柄、不转移所有权，交 `wait_ready`/事件源注册口并入等待集）、`close()` 先 `shutdown(both)` 再关（唤醒并终止另一线程阻塞中的等待，`InspectorServer` 停机场径）。
-- `StreamSocket`：`connect_loopback(port)`、`set_io_timeout(milliseconds)`（**毫秒统一口径**：Winsock 收 DWORD 毫秒、POSIX 收 `timeval`，形态换算封闭在实现侧——按平台字节形态误传会把 5 秒执行成 5 毫秒，本层的存在理由）、`read_some(span) -> Result<size_t>`（**0 = 对端有序关闭**，与错误态严格区分；超时落独立码 `net-recv-timeout`）、`write_all(span)`（内部 ≤1MiB 分块写满，`send` 返回值窄化一次解决）、`is_loopback_peer()`（服务端访问控制判据，127.0.0.0/8 全段）、`native_handle()`（借出原生句柄、不转移所有权，同 `Listener`）。
+- `Listener`：`listen_loopback(port, backlog)`（只绑 `127.0.0.1`；port=0 由系统分配、`port()` 回报实际值）、`bind(endpoint, backlog)`（地址族取自 `Endpoint`，绑非回环地址即接受跨机连接，**访问控制交回调用方**）、`wait_readable(timeout) -> Result<bool>`（select 可中断等待，`false` = 纯超时非错误，两平台 nfds 差异内部消化）、`accept() -> Result<StreamSocket>`、`native_handle()`（借出原生句柄、不转移所有权，交 `wait_ready`/事件源注册口并入等待集）、`close()` 先 `shutdown(both)` 再关（唤醒并终止另一线程阻塞中的等待，`InspectorServer` 停机场径）。
+- `StreamSocket`：`connect_loopback(port)`、`connect(endpoint)`（地址族取自 `Endpoint`；端口 0、本机 IPC 形态、无地址占位都在发起系统调用前落 `net-endpoint-invalid`）、`set_io_timeout(milliseconds)`（**毫秒统一口径**：Winsock 收 DWORD 毫秒、POSIX 收 `timeval`，形态换算封闭在实现侧——按平台字节形态误传会把 5 秒执行成 5 毫秒，本层的存在理由）、`read_some(span) -> Result<size_t>`（**0 = 对端有序关闭**，与错误态严格区分；超时落独立码 `net-recv-timeout`）、`write_all(span)`（内部 ≤1MiB 分块写满，`send` 返回值窄化一次解决）、`is_loopback_peer()`（服务端访问控制判据：`127.0.0.0/8` 全段 + `::1` + IPv4 内嵌形态 `::ffff:127.x`）、`peer_endpoint() -> Result<Endpoint>`（`getpeername` 还原为值类型，地址族与端口都带回来）、`native_handle()`（借出原生句柄、不转移所有权，同 `Listener`）。
 
 链接面：`ws2_32` 随核心 `aurora` 目标在 Windows 无条件 `PUBLIC` 传导（见 `BUILD_OPTIONS.md`），各消费者不再散挂。Emscripten 腿经其 BSD socket shim 编译，但浏览器运行时无真实监听语义，Inspector 相关用例在 wasm 构建下按 `AURORA_TEST_SKIP` 退避。回归：`utest_net_socket`（行为契约）+ `utest_inspector_client`（超时平台形态）。
 
@@ -788,6 +788,19 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 由此定下的运行期口径：**Win32 / X11 / Wayland / macOS / GLFW / Headless 一律缺省由常驻引擎线程驱动**（回调经主线程投递器回 UI 线程，唤醒走各腿既有 `request_wake`：Win32 `PostMessage`、X11/Wayland 唤醒管道、GLFW `glfwPostEmptyEvent`）；**wasm 无 fd 语义**，能力位假且注册即报 `net-platform-unavailable`。§18-1 的「64 句柄上限以运行期错误显式暴露」因此只约束**宿主驱动腿**（宿主自有等待集的规模由宿主负责），本库缺省腿不受该上限约束。AT-SPI 的 DBus watch fd 通道维持其在 window 后端的自有集成（它早于注册口，且是 main-thread-only 的无障碍关键路径），注册口的「首例消费者」改为 libssh2 一类第三方会话——那才是它的外部用途，且已用真实回环 fd 在 Headless 基线里逐值验证。
 
 传输族、`Resource` 绑定、`FakeEngine`、TLS、HTTP、可观测性、SSE、WebSocket 依 §17 顺序在后续切片落地（`Url` 与 `Headers` 两枚基础件已落地，见 [`01-core.md`](01-core.md) §10、§11）。
+
+#### 8.8.6 地址族无关化（双栈与竞速切片首件）
+
+`AF_INET` 的硬编码构造点（`socket()` 与两处地址组装）整体改为**地址族取自 `Endpoint`**，这是双栈与竞速的前置条件——`Resolver` 同查 A / AAAA 之后，连接侧必须能把 IPv6 端点变成 `sockaddr_in6`，否则解析结果无处可去。三条定见：
+
+- **组装与还原只有一条通路**：`make_address(Endpoint) → sockaddr_storage`（按族清零后填族字段、端口、地址字节与作用域号）与 `endpoint_from_address(sockaddr_storage) → Result<Endpoint>` 互为逆映射。为此 `Endpoint` 增加 `from_bytes(family, bytes, port, zone)` 工厂——二进制地址的规范化渲染与 `from_ip()` 共用同一套实现，因此 `getaddrinfo` 的字节序结果不会另产生一种写法（`from_bytes(...) == from_ip(host(), port())` 对无 zone 地址成立）。平台 DNS 与 `getpeername` 的出参从此不经任何 libc 文本转换，跨平台一致行为判据不因 `inet_ntop` 的差异漂移。
+- **IPv6 作用域号只认十进制**：`sin6_scope_id` 是数字，`Endpoint` 的 zone 却是文本，中间那步「接口名→索引」在 POSIX 是 `if_nametoindex`、在 Winsock 属 iphlpapi 的 `if_nameindex`，两条腿的可达性不同。与其让同一个 `[fe80::1%eth0]` 在一台机器上能连、另一台上报错，一律按**十进制作用域号**判：非数字 zone 在发起系统调用前落 `net-endpoint-invalid`（数字 zone 则照常装配，链路可达性交网络层回报）。
+- **回环判定升级为三段**：`is_loopback_peer()` 不再只看 `127.0.0.0/8`，另认 `::1` 与 IPv4 内嵌形态 `::ffff:127.0.0.1`——后者是双栈机上「v4 客户端接入 `::` 监听口」时 `getpeername` 的常见回报，漏判会把本机连接误认成外部连接。`peer_endpoint()` 同时把对端地址族与端口作为值类型交回，服务端访问控制从此可按地址族分别决策。
+
+访问控制口径不变：`listen_loopback` / `connect_loopback` 固定绑 `127.0.0.1`，Inspector 工具链的信任模型逐值不动；新增的 `bind(endpoint, backlog)` 与 `connect(endpoint)` 是通用入口，**绑到非回环地址即接受跨机连接，访问控制由调用方负责**（本层不做「只允许本机」的隐式拦截，否则第三方库接管句柄时会得到无法解释的拒绝）。Windows 的 IPv6 套接字缺省是 v6-only（`IPV6_V6ONLY` 由注册表决定），因此「`::` 监听口收 127.0.0.1 接入并回报内嵌形态」这条判据在 POSIX 腿兑现、Windows 腿按环境缺失 `AURORA_TEST_SKIP`；显式清 `IPV6_V6ONLY` 属原生选项逃生舱（§11），不在本件里预支。
+
+- 错误码：本件无新增码，`net-endpoint-invalid`（端点不合用：端口 0、本机 IPC 形态、无地址占位、非数字 zone）与既有的 `net-socket-failed` / `net-bind-failed` / `net-listen-failed` / `net-connect-failed` 覆盖全部失败分支。
+- 回归：`utest_net_socket` 新增四例（不合用端点在发起系统调用前即拒、数字与接口名两型 zone 的分岔、`[::1]` 往返与两侧回环判定及 `peer_endpoint()` 端口回报、双栈监听口上的内嵌形态识别）。
 
 ---
 

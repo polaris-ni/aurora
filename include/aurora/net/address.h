@@ -83,10 +83,22 @@ class Endpoint {
     /// @return 成功为端点；失败为 `net-endpoint-invalid`。
     [[nodiscard]] static auto local(std::string_view path) -> Result<Endpoint>;
 
+    /// @brief 由二进制地址还原端点（`sockaddr` 出参与 `getaddrinfo` 结果的统一入口）。
+    ///
+    /// 与 `from_ip()` 共用同一套规范化渲染，因此二进制形态与文本形态得到同一个 `Endpoint`
+    /// （`from_bytes(... ) == from_ip(host(), port())` 对无 zone 地址成立），平台 DNS 返回的
+    /// 字节序结果不会另产生一种写法。
+    /// @param family 地址族；只接受 `IPv4` / `IPv6`（本机 IPC 没有二进制地址形态）。
+    /// @param bytes 网络序地址字节：`IPv4` 取前 4 字节（其余忽略），`IPv6` 取满 16 字节。
+    /// @param port 主机序端口；`0` 的语境合法性由使用方判。
+    /// @param zone IPv6 作用域文本；空 = 无作用域。非 link-local 地址或 `IPv4` 上带 zone 一律拒。
+    /// @return 成功为规范化后的端点；失败为 `net-endpoint-invalid`。
+    [[nodiscard]] static auto from_bytes(AddressFamily family, const std::array<std::uint8_t, 16> &bytes,
+                                         std::uint16_t port, std::string_view zone = {}) -> Result<Endpoint>;
+
     /// @brief 地址族。
     /// @return 构造时解析确定的族；默认构造为 `IPv4`（配 `is_valid()` 为 false）。
     [[nodiscard]] auto family() const -> AddressFamily { return family_; }
-
     /// @brief 是否携带有效地址。
     /// @return 经任一工厂成功构造时为 true；默认构造为 false。
     [[nodiscard]] auto is_valid() const -> bool { return valid_; }

@@ -14,10 +14,13 @@
 #include "aurora/net/socket.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "aurora/core/platform.h"
@@ -119,25 +122,154 @@ auto net_error(ErrorCode code, const std::string &op) -> Error {
     return make_error(code, op + " failed (os_error=" + std::to_string(os_error) + ")");
 }
 
-/// @brief 组装 IPv4 回环地址（127.0.0.1:port）。
-/// @param port 主机序端口。
-/// @return 填好的 `sockaddr_in`（族 = AF_INET，地址 = htonl(INADDR_LOOPBACK)）。
-auto loopback_addr(std::uint16_t port) -> sockaddr_in {
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(port);
-    return addr;
+/// @brief `getpeername`/`getsockname` 的 addrlen 出参在两平台的声明类型（Windows `int`、
+/// POSIX `socklen_t`）；按平台形态声明后直接取址传参，无需任何 cast 垫片。
+#ifdef AURORA_PLATFORM_WINDOWS
+using AddrLen = int;
+#else
+using AddrLen = socklen_t;
+#endif
+
+/// @brief 把 `Endpoint` 的 zone 文本换算成 IPv6 作用域号（`sin6_scope_id`）。
+///
+/// 只接受**十进制作用域号**：接口名→索引的查表在 POSIX 是 `if_nametoindex`、在 Winsock 属
+/// iphlpapi，两平台的可达性不同，与其让「同名输入在一条腿上可用」漂移，一律按数字口径判。
+/// @param zone zone 文本；空 = 无作用域。
+/// @return 成功为作用域号（空文本为 0）；非数字或超 `std::uint32_t` 为 `net-endpoint-invalid`。
+auto zone_to_scope_id(std::string_view zone) -> Result<std::uint32_t> {
+    if (zone.empty()) {
+        return std::uint32_t{0};
+    }
+    std::uint64_t value = 0;
+    for (const char digit : zone) {
+        if (digit < '0' || digit > '9') {
+            return make_error(ErrorCode::NetEndpointInvalid,
+                              "IPv6 zone must be a decimal scope id (interface names are not resolved)");
+        }
+        value = (value * 10U) + static_cast<std::uint64_t>(digit - '0');
+        if (value > std::numeric_limits<std::uint32_t>::max()) {
+            return make_error(ErrorCode::NetEndpointInvalid, "IPv6 zone scope id is out of range");
+        }
+    }
+    return static_cast<std::uint32_t>(value);
+}
+
+/// @brief 写入 IPv6 作用域号。
+///
+/// Winsock 的 `sockaddr_in6::sin6_scope_id` 位于一枚匿名 union 里（与内核侧 `SCOPE_ID` 同形，
+/// 高位字节是接口 LUID），POSIX 则是普通成员；两平台都写这一个名字，故把 union 访问收在
+/// 本函数里，豁免只在这一处生效而不散落。
+/// @param address 已按族清零的 IPv6 地址。
+/// @param scope 作用域号。
+auto set_scope_id(sockaddr_in6 &address, std::uint32_t scope) -> void {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access): 平台结构体形态如此，POSIX 腿同名普通成员
+    address.sin6_scope_id = static_cast<decltype(address.sin6_scope_id)>(scope);
+}
+
+/// @brief 读出 IPv6 作用域号（与 `set_scope_id` 对称，union 访问同样收在此处）。
+/// @param address 由系统填好的 IPv6 地址。
+/// @return 作用域号；0 表示无作用域。
+auto scope_id_of(const sockaddr_in6 &address) -> std::uint32_t {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access): 平台结构体形态如此，POSIX 腿同名普通成员
+    return static_cast<std::uint32_t>(address.sin6_scope_id);
+}
+
+/// @brief 由端点组装平台 `sockaddr`（地址族取自端点，本层只承载 TCP 流）。
+/// @param endpoint 有效且为 IPv4 / IPv6 的端点。
+/// @param storage 出参：按族清零后填好地址、端口与作用域号。
+/// @return 成功为 `sockaddr` 的有效长度；端点不合用时为 `net-endpoint-invalid`。
+auto make_address(const Endpoint &endpoint, sockaddr_storage &storage) -> Result<AddrLen> {
+    if (!endpoint.is_valid()) {
+        return make_error(ErrorCode::NetEndpointInvalid, "endpoint carries no address");
+    }
+    if (endpoint.is_local_path()) {
+        return make_error(ErrorCode::NetEndpointInvalid, "local IPC endpoint is not a TCP address");
+    }
+    // sockaddr_storage 是「足够大以容纳任一族」的通用容器，按族擦回具体类型是标准用法。
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-type-cstyle-cast)
+    if (endpoint.family() == AddressFamily::IPv4) {
+        auto *const address = reinterpret_cast<sockaddr_in *>(&storage);
+        *address = sockaddr_in{};
+        address->sin_family = AF_INET;
+        address->sin_port = htons(endpoint.port());
+        std::memcpy(&address->sin_addr.s_addr, endpoint.address_bytes().data(), sizeof(address->sin_addr.s_addr));
+        return static_cast<AddrLen>(sizeof(sockaddr_in));
+    }
+    auto scope = zone_to_scope_id(endpoint.zone());
+    if (!scope) {
+        return scope.error();
+    }
+    auto *const address = reinterpret_cast<sockaddr_in6 *>(&storage);
+    *address = sockaddr_in6{};
+    address->sin6_family = AF_INET6;
+    address->sin6_port = htons(endpoint.port());
+    set_scope_id(*address, scope.value());
+    std::memcpy(&address->sin6_addr, endpoint.address_bytes().data(), sizeof(address->sin6_addr));
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-type-cstyle-cast)
+    return static_cast<AddrLen>(sizeof(sockaddr_in6));
+}
+
+/// @brief IPv4 内嵌 IPv6 地址（`::ffff:x.x.x.x`）的前十字节全零判据。
+/// @param bytes 16 字节网络序地址。
+/// @return 前十字节全为 0 时为 true（配合 `0xff 0xff` 前缀即内嵌形态）。
+auto first_ten_bytes_zero(const std::array<std::uint8_t, 16> &bytes) -> bool {
+    for (std::size_t i = 0; i < 10; ++i) {
+        if (bytes.at(i) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// @brief 把平台 `sockaddr` 还原为端点值类型（与 `make_address` 互逆）。
+/// @param storage 由 `getpeername` / `getsockname` 填好的地址。
+/// @return 成功为端点；不认识的地址族为 `net-socket-failed`。
+auto endpoint_from_address(const sockaddr_storage &storage) -> Result<Endpoint> {
+    std::array<std::uint8_t, 16> bytes{};
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto *const base = reinterpret_cast<const sockaddr *>(&storage);
+    if (storage.ss_family == AF_INET) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        const auto *const address = reinterpret_cast<const sockaddr_in *>(base);
+        std::memcpy(bytes.data(), &address->sin_addr.s_addr, sizeof(address->sin_addr.s_addr));
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
+        return Endpoint::from_bytes(AddressFamily::IPv4, bytes, ntohs(address->sin_port));
+    }
+    if (storage.ss_family == AF_INET6) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        const auto *const address = reinterpret_cast<const sockaddr_in6 *>(base);
+        std::memcpy(bytes.data(), &address->sin6_addr, sizeof(address->sin6_addr));
+        std::string zone;
+        const std::uint32_t scope = scope_id_of(*address);
+        if (scope != 0) {
+            zone = std::to_string(static_cast<unsigned long>(scope));
+        }
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
+        return Endpoint::from_bytes(AddressFamily::IPv6, bytes, ntohs(address->sin6_port), zone);
+    }
+    return make_error(ErrorCode::NetSocketFailed, "unknown address family in socket address (family=" +
+                                                      std::to_string(static_cast<int>(storage.ss_family)) + ")");
 }
 
 /// @brief 创建 TCP 流式套接字。
+/// @param family 地址族（`AF_INET` / `AF_INET6`）。
 /// @return 成功为原生句柄；失败为 `net-socket-failed`（含 OS 码）。
-auto open_socket() -> Result<NativeSocket> {
-    const NativeSocket s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+auto open_socket(int family) -> Result<NativeSocket> {
+    const NativeSocket s = ::socket(family, SOCK_STREAM, IPPROTO_TCP);
     if (native_is_invalid(s)) {
-        return net_error(ErrorCode::NetSocketFailed, "socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)");
+        return net_error(ErrorCode::NetSocketFailed, "socket(SOCK_STREAM, IPPROTO_TCP)");
     }
     return s;
+}
+
+/// @brief 按端点地址族创建 TCP 流式套接字。
+/// @param endpoint 决定 `AF_INET` 还是 `AF_INET6` 的端点。
+/// @return 成功为原生句柄；失败为 `net-endpoint-invalid` / `net-socket-failed`。
+auto open_socket_for(const Endpoint &endpoint) -> Result<NativeSocket> {
+    if (!endpoint.is_valid() || endpoint.is_local_path()) {
+        return make_error(ErrorCode::NetEndpointInvalid, "stream sockets need an IPv4 or IPv6 endpoint");
+    }
+    return open_socket(endpoint.family() == AddressFamily::IPv4 ? AF_INET : AF_INET6);
 }
 
 /// @brief 写完全部字节：≤1MiB 分块循环（单轮请求字节数必落 int 可表示区间，两平台返回值
@@ -161,14 +293,6 @@ auto write_all_native(NativeSocket s, std::span<const char> data) -> Result<void
     }
     return Result<void>{};
 }
-
-/// @brief `getpeername`/`getsockname` 的 addrlen 出参在两平台的声明类型（Windows `int`、
-/// POSIX `socklen_t`）；按平台形态声明后直接取址传参，无需任何 cast 垫片。
-#ifdef AURORA_PLATFORM_WINDOWS
-using AddrLen = int;
-#else
-using AddrLen = socklen_t;
-#endif
 
 /// @brief 依据关注方向组装 poll / WSAPoll 的事件位（两平台同名常量、同为 short）。
 /// @param descriptor 待等待句柄的关注方向。
@@ -263,16 +387,29 @@ Session::~Session() {
 // ---- StreamSocket -----------------------------------------------------------
 
 auto StreamSocket::connect_loopback(std::uint16_t port) -> Result<StreamSocket> {
-    auto opened = open_socket();
+    return connect(Endpoint::loopback(port));
+}
+
+auto StreamSocket::connect(const Endpoint &endpoint) -> Result<StreamSocket> {
+    if (endpoint.port() == 0) {
+        return make_error(ErrorCode::NetEndpointInvalid, "connect needs a non-zero port");
+    }
+    auto opened = open_socket_for(endpoint);
     if (!opened) {
         return opened.error();
     }
     const NativeSocket s = opened.value();
-    const sockaddr_in addr = loopback_addr(port);
-    // socket API 契约：sockaddr_in 须擦除为通用 sockaddr 指针（协议族字段即运行期判别依据）。
+    sockaddr_storage storage{};
+    auto built = make_address(endpoint, storage);
+    if (!built) {
+        native_close(s);
+        return built.error();
+    }
+    const AddrLen address_length = built.value();
+    // socket API 契约：具体族的 sockaddr 须擦除为通用 sockaddr 指针（族字段即运行期判别依据）。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    if (::connect(s, reinterpret_cast<const sockaddr *>(&addr), static_cast<int>(sizeof(addr))) != 0) {
-        auto err = net_error(ErrorCode::NetConnectFailed, "connect(127.0.0.1:" + std::to_string(port) + ")");
+    if (::connect(s, reinterpret_cast<const sockaddr *>(&storage), address_length) != 0) {
+        auto err = net_error(ErrorCode::NetConnectFailed, "connect(" + endpoint.to_string() + ")");
         native_close(s);
         return err;
     }
@@ -349,18 +486,34 @@ auto StreamSocket::write_all(std::span<const char> data) const -> Result<void> {
     return write_all_native(from_handle(handle_), data);
 }
 
-auto StreamSocket::is_loopback_peer() const -> bool {
+auto StreamSocket::peer_endpoint() const -> Result<Endpoint> {
     if (!is_valid()) {
-        return false;
+        return make_error(ErrorCode::NetSocketFailed, "getpeername on an invalid handle");
     }
-    sockaddr_in peer{};
+    sockaddr_storage peer{};
     AddrLen name_len = sizeof(peer);
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     if (::getpeername(from_handle(handle_), reinterpret_cast<sockaddr *>(&peer), &name_len) != 0) {
+        return net_error(ErrorCode::NetSocketFailed, "getpeername");
+    }
+    return endpoint_from_address(peer);
+}
+
+auto StreamSocket::is_loopback_peer() const -> bool {
+    auto peer = peer_endpoint();
+    if (!peer) {
         return false;
     }
-    // 127.0.0.0/8 全段视为回环（htonl 后首字节 0x7F）。
-    return (ntohl(peer.sin_addr.s_addr) & UINT32_C(0xFF000000)) == UINT32_C(0x7F000000);
+    const Endpoint &endpoint = peer.value();
+    if (endpoint.is_loopback()) {
+        return true;
+    }
+    // 双栈机上「连到 ::1 的监听口」常回报成 IPv4 内嵌形态（::ffff:127.0.0.1），按其内嵌 IPv4 判。
+    const auto &bytes = endpoint.address_bytes();
+    if (endpoint.family() != AddressFamily::IPv6) {
+        return false;
+    }
+    return first_ten_bytes_zero(bytes) && bytes.at(10) == 0xFF && bytes.at(11) == 0xFF && bytes.at(12) == 127;
 }
 
 auto StreamSocket::close() -> void {
@@ -373,15 +526,25 @@ auto StreamSocket::close() -> void {
 // ---- Listener ---------------------------------------------------------------
 
 auto Listener::listen_loopback(std::uint16_t port, int backlog) -> Result<Listener> {
-    auto opened = open_socket();
+    return bind(Endpoint::loopback(port), backlog);
+}
+
+auto Listener::bind(const Endpoint &endpoint, int backlog) -> Result<Listener> {
+    auto opened = open_socket_for(endpoint);
     if (!opened) {
         return opened.error();
     }
     const NativeSocket s = opened.value();
-    const sockaddr_in addr = loopback_addr(port);
+    sockaddr_storage storage{};
+    auto built = make_address(endpoint, storage);
+    if (!built) {
+        native_close(s);
+        return built.error();
+    }
+    const AddrLen address_length = built.value();
     // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
-    if (::bind(s, reinterpret_cast<const sockaddr *>(&addr), static_cast<int>(sizeof(addr))) != 0) {
-        auto err = net_error(ErrorCode::NetBindFailed, "bind(127.0.0.1:" + std::to_string(port) + ")");
+    if (::bind(s, reinterpret_cast<const sockaddr *>(&storage), address_length) != 0) {
+        auto err = net_error(ErrorCode::NetBindFailed, "bind(" + endpoint.to_string() + ")");
         native_close(s);
         return err;
     }
@@ -391,11 +554,13 @@ auto Listener::listen_loopback(std::uint16_t port, int backlog) -> Result<Listen
         return err;
     }
     // 实际端口回报（port=0 时为系统分配值）；查询失败按入参回落（与旧 server 行为一致）。
-    sockaddr_in bound{};
+    std::uint16_t actual_port = endpoint.port();
+    sockaddr_storage bound{};
     AddrLen name_len = sizeof(bound);
-    std::uint16_t actual_port = port;
     if (::getsockname(s, reinterpret_cast<sockaddr *>(&bound), &name_len) == 0) {
-        actual_port = ntohs(bound.sin_port);
+        if (auto resolved = endpoint_from_address(bound)) {
+            actual_port = resolved.value().port();
+        }
     }
     // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     Listener listener;
@@ -445,7 +610,7 @@ auto Listener::wait_readable(std::chrono::milliseconds timeout) const -> Result<
 }
 
 auto Listener::accept() const -> Result<StreamSocket> {
-    sockaddr_in peer{};
+    sockaddr_storage peer{};
     AddrLen name_len = sizeof(peer);
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     const NativeSocket client = ::accept(from_handle(handle_), reinterpret_cast<sockaddr *>(&peer), &name_len);

@@ -6,7 +6,11 @@
 ///           对端关闭以 read 返回 0 表达（与错误态严格区分）、连接失败落 `net-connect-failed`、
 ///           收发超时落独立码 `net-recv-timeout`（与 `net-recv-failed` 以 code 区分，不依赖措辞；
 ///           并核对「毫秒意图」真实生效——历史坑：Windows 上 5 秒被读成 5 毫秒）、
-///           `is_loopback_peer` 判定、`Session` 嵌套引用计数、监听口重复 bind 落 `net-bind-failed`。
+///           `is_loopback_peer` 判定、`Session` 嵌套引用计数、监听口重复 bind 落 `net-bind-failed`、
+///           **地址族无关面**（`connect(Endpoint)` / `bind(Endpoint, backlog)` / `peer_endpoint()`：
+///           不合用的端点在发起系统调用前拒、IPv6 作用域号只认十进制、`[::1]` 往返与回环判定、
+///           双栈监听口上的 `::ffff:127.0.0.1` 内嵌形态仍认回环；无 IPv6 或 v6-only 主机按环境缺失
+///           跳过）。
 ///           全程同线程即可（TCP 握手由内核 backlog 完成，无需 accept 线程）；唯一例外是
 ///           1MiB+7 往返用例的读侧住独立线程——Windows 回环无读者时仅缓冲约 320KiB，
 ///           单线程先写后读必死锁（Linux 缓冲自动调大无此限制）。端口一律 0 =
@@ -19,12 +23,14 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
+#include "aurora/net/address.h"
 #include "aurora/net/socket.h"
 #include "framework/aurora_test.h"
 
@@ -301,6 +307,137 @@ AURORA_TEST_CASE(double_bind_reports_net_bind_failed) {
     } else {
         AURORA_TEST_CHECK_TRUE(again.value().is_valid());
     }
+#endif
+}
+
+// 不合用的端点在发起系统调用前就被拒：端口 0（connect 的目的地必须确定）、本机 IPC 形态
+// （不是 TCP 地址）、默认构造占位（无地址）三条都落 `net-endpoint-invalid`，不得退化成
+// 「connect 失败」这种把用法错误报成网络错误的形态。
+AURORA_TEST_CASE(connect_rejects_unusable_endpoints) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#else
+    aurora::net::Session session;
+    AURORA_TEST_REQUIRE(session.ok());
+
+    const auto zero_port = aurora::net::StreamSocket::connect(aurora::net::Endpoint::loopback(0));
+    AURORA_TEST_REQUIRE_FALSE(bool(zero_port));
+    AURORA_TEST_CHECK_EQ(zero_port.error().code_enum, ErrorCode::NetEndpointInvalid);
+
+    // 路径文本只是「本机 IPC 族」的载体，本用例不创建也不写任何文件（connect 在装配地址前就拒）。
+    auto local = aurora::net::Endpoint::local("test_temp/aurora-net-probe.sock");
+    AURORA_TEST_REQUIRE(bool(local));
+    const auto ipc = aurora::net::StreamSocket::connect(local.value());
+    AURORA_TEST_REQUIRE_FALSE(bool(ipc));
+    AURORA_TEST_CHECK_EQ(ipc.error().code_enum, ErrorCode::NetEndpointInvalid);
+
+    const aurora::net::Endpoint placeholder;
+    const auto invalid = aurora::net::StreamSocket::connect(placeholder);
+    AURORA_TEST_REQUIRE_FALSE(bool(invalid));
+    AURORA_TEST_CHECK_EQ(invalid.error().code_enum, ErrorCode::NetEndpointInvalid);
+#endif
+}
+
+// IPv6 作用域号口径：数字 zone 被接受并进入系统调用（失败也只能是网络层的失败），接口名
+// zone 在两平台上都直接拒——POSIX 能查表而 Winsock 需额外依赖，容忍单边可用等于让同一输入
+// 有两种结果。
+AURORA_TEST_CASE(ipv6_zone_scope_rules) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#else
+    aurora::net::Session session;
+    AURORA_TEST_REQUIRE(session.ok());
+
+    auto named = aurora::net::Endpoint::from_ip("fe80::1%eth0", 80);
+    AURORA_TEST_REQUIRE(bool(named));
+    const auto rejected = aurora::net::StreamSocket::connect(named.value());
+    AURORA_TEST_REQUIRE_FALSE(bool(rejected));
+    AURORA_TEST_CHECK_EQ(rejected.error().code_enum, ErrorCode::NetEndpointInvalid);
+
+    auto numeric = aurora::net::Endpoint::from_ip("fe80::1%1", 80);
+    AURORA_TEST_REQUIRE(bool(numeric));
+    const auto attempted = aurora::net::StreamSocket::connect(numeric.value());
+    if (!attempted.ok()) {
+        // 只核「已通过端点校验」：链路上的不可达因机器而异，不在本用例的判据里。
+        AURORA_TEST_CHECK_NE(attempted.error().code_enum, ErrorCode::NetEndpointInvalid);
+    }
+#endif
+}
+
+// IPv6 回环往返：`bind([::1]:0)` → `connect([::1]:port)` → 双向字节完整，且两侧 `peer_endpoint()`
+// 都回报 `::1`、`is_loopback_peer()` 均为真（回环判定不再只看 127/8）。主机无 IPv6 时按
+// 环境缺失跳过，不假绿也不误红。
+AURORA_TEST_CASE(ipv6_loopback_roundtrip) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#else
+    aurora::net::Session session;
+    AURORA_TEST_REQUIRE(session.ok());
+
+    auto bound = aurora::net::Listener::bind(aurora::net::Endpoint::loopback_v6(0), 4);
+    if (!bound.ok()) {
+        AURORA_TEST_SKIP("no IPv6 loopback on this host: bind([::1]:0) was refused");
+    }
+    auto listener = std::move(bound.value());
+    AURORA_TEST_REQUIRE_NE(listener.port(), std::uint16_t{0});
+
+    auto dialed = aurora::net::StreamSocket::connect(aurora::net::Endpoint::loopback_v6(listener.port()));
+    AURORA_TEST_REQUIRE(bool(dialed));
+    auto client = std::move(dialed.value());
+
+    const std::string_view payload = "dual-stack";
+    AURORA_TEST_REQUIRE(client.write_all(payload).ok());
+    auto peer = listener.accept();
+    AURORA_TEST_REQUIRE(bool(peer));
+    auto server = std::move(peer.value());
+
+    char buffer[16]{};
+    const auto read = server.read_some(std::span<char>(buffer, payload.size()));
+    AURORA_TEST_REQUIRE(bool(read));
+    AURORA_TEST_CHECK_EQ(read.value(), payload.size());
+    AURORA_TEST_CHECK_EQ(std::string_view(buffer, payload.size()), payload);
+    AURORA_TEST_CHECK_TRUE(server.is_loopback_peer());
+    AURORA_TEST_CHECK_TRUE(client.is_loopback_peer());
+
+    auto client_peer = client.peer_endpoint();
+    AURORA_TEST_REQUIRE(bool(client_peer));
+    AURORA_TEST_CHECK_EQ(client_peer.value().family(), aurora::net::AddressFamily::IPv6);
+    AURORA_TEST_CHECK_EQ(client_peer.value().port(), listener.port());
+    AURORA_TEST_CHECK(client_peer.value().is_loopback());
+#endif
+}
+
+// 双栈监听口上的 IPv4 对端：绑 `::` 后由 127.0.0.1 接入，`getpeername` 可能回报 IPv4 内嵌形态
+// （`::ffff:127.0.0.1`），回环判定须照样为真——这是本层从「只看 127/8」升级来的第二条判据。
+// 主机把 IPv6 套接字设成 v6-only 时该通路不存在，按环境缺失跳过。
+AURORA_TEST_CASE(dual_stack_listener_still_recognizes_loopback) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#else
+    aurora::net::Session session;
+    AURORA_TEST_REQUIRE(session.ok());
+
+    auto bound = aurora::net::Listener::bind(aurora::net::Endpoint::any(true, 0), 4);
+    if (!bound.ok()) {
+        AURORA_TEST_SKIP("cannot bind the IPv6 wildcard address on this host");
+    }
+    auto listener = std::move(bound.value());
+    auto dialed = aurora::net::StreamSocket::connect_loopback(listener.port());
+    if (!dialed.ok()) {
+        AURORA_TEST_SKIP("wildcard listener is IPv6-only here, so 127.0.0.1 cannot reach it");
+    }
+    auto client = std::move(dialed.value());
+    auto peer = listener.accept();
+    AURORA_TEST_REQUIRE(bool(peer));
+    auto server = std::move(peer.value());
+
+    AURORA_TEST_CHECK_TRUE(server.is_loopback_peer());
+    auto endpoint = server.peer_endpoint();
+    AURORA_TEST_REQUIRE(bool(endpoint));
+    AURORA_TEST_CHECK_TRUE(endpoint.value().is_loopback());
+    // 两族之一：内嵌形态按 IPv6 回报，独立 v4 通路按 IPv4 回报，二者都算认出来了。
+    const auto family = endpoint.value().family();
+    AURORA_TEST_CHECK_TRUE(family == aurora::net::AddressFamily::IPv4 || family == aurora::net::AddressFamily::IPv6);
 #endif
 }
 

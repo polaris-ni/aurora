@@ -409,6 +409,38 @@ auto Endpoint::local(std::string_view path) -> Result<Endpoint> {
     return endpoint;
 }
 
+auto Endpoint::from_bytes(AddressFamily family, const std::array<std::uint8_t, 16> &bytes, std::uint16_t port,
+                          std::string_view zone) -> Result<Endpoint> {
+    if (!zone.empty() && !is_valid_zone(zone)) {
+        return endpoint_error("zone id has unsupported characters");
+    }
+    Endpoint endpoint;
+    if (family == AddressFamily::IPv4) {
+        if (!zone.empty()) {
+            return endpoint_error("zone id is not meaningful for IPv4");
+        }
+        std::array<std::uint8_t, 4> octets{};
+        for (std::size_t i = 0; i < octets.size(); ++i) {
+            octets.at(i) = bytes.at(i);
+        }
+        endpoint.family_ = AddressFamily::IPv4;
+        endpoint.host_ = format_ipv4(octets);
+    } else if (family == AddressFamily::IPv6) {
+        if (!zone.empty() && !is_link_local(bytes)) {
+            return endpoint_error("zone id is only meaningful on link-local IPv6 (fe80::/10)");
+        }
+        endpoint.family_ = AddressFamily::IPv6;
+        endpoint.host_ = format_ipv6(bytes);
+    } else {
+        return endpoint_error("binary addresses have no local IPC form");
+    }
+    endpoint.zone_ = std::string(zone);
+    endpoint.port_ = port;
+    endpoint.bytes_ = bytes;
+    endpoint.valid_ = true;
+    return endpoint;
+}
+
 auto Endpoint::is_loopback() const -> bool {
     if (!valid_) {
         return false;  // 无效占位不是地址，全零字节不代表任何语义

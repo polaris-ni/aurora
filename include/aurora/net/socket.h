@@ -9,9 +9,10 @@
 /// DWORD 毫秒、POSIX 收 `struct timeval`）等差异全部在实现侧一次消化。
 ///
 /// 范围刻意收敛为「本仓 Inspector 工具链 + 后续本机 AI 交互」所需：
-/// - **仅 IPv4 回环**（127.0.0.1）：连接与监听都不经 DNS、不接受非回环地址，
-///   与 `tools/servers/inspector_client.h` 的信任模型同源（把运行中的 UI 交给 AI
-///   操作的边界绝不允许离开本机）。
+/// - **地址族由 `Endpoint` 决定**（IPv4 / IPv6 都走同一条 `connect` / `bind`）：不经 DNS，
+///   名字解析是 `Resolver` 的职责。`*_loopback` 两枚工厂固定绑 `127.0.0.1`，
+///   与 `tools/servers/inspector_client.h` 的信任模型同源（把运行中的 UI 交给 AI 操作的边界
+///   绝不允许离开本机）；`bind(任意端点)` 把访问控制交回调用方。
 /// - 同步阻塞语义 + 显式超时/可中断等待，无事件循环、无异步回调。
 /// - 失败一律 `Result<T>` + 表驱动 `Error`（`net-*` 码，`ERROR_CATALOG.md`），
 ///   OS 原生错误码（`WSAGetLastError`/`errno`）写入 `message`。
@@ -31,6 +32,7 @@
 #include <span>
 
 #include "aurora/core/result.h"
+#include "aurora/net/address.h"
 
 namespace aurora::net {
 
@@ -78,6 +80,16 @@ class StreamSocket {
     /// @return 成功为已连接套接字；失败为 `net-socket-failed` / `net-connect-failed`（message 含 OS 原生码）。
     [[nodiscard]] static auto connect_loopback(std::uint16_t port) -> Result<StreamSocket>;
 
+    /// @brief 连接一个 TCP 端点（地址族取自端点，IPv4 / IPv6 同一条通路，不经 DNS）。
+    ///
+    /// 与 `connect_loopback` 的分工：本函数是地址族无关的通用入口，名字→端点的转换归 `Resolver`；
+    /// IPv6 上的 `%zone` 只接受**十进制作用域号**（两平台同口径，接口名→索引的查表需额外平台依赖，
+    /// 故不做），非数字 zone 与本机 IPC 端点都在发起系统调用前被拒。
+    /// @param endpoint 目标端点；须为有效的 IPv4 / IPv6 端点且端口非 0。
+    /// @return 成功为已连接套接字；失败为 `net-endpoint-invalid`（端点不合用）/ `net-socket-failed` /
+    ///         `net-connect-failed`（后两者 message 含 OS 原生码）。
+    [[nodiscard]] static auto connect(const Endpoint &endpoint) -> Result<StreamSocket>;
+
     StreamSocket(const StreamSocket &) = delete;
     auto operator=(const StreamSocket &) -> StreamSocket & = delete;
     /// @brief 移动构造：句柄所有权移交，源对象转为无效态。
@@ -123,8 +135,16 @@ class StreamSocket {
     [[nodiscard]] auto write_all(std::span<const char> data) const -> Result<void>;
 
     /// @brief 对端是否位于本机回环（服务端访问控制判据）。
-    /// @return `getpeername` 报告的地址为 127.0.0.0/8 时为 true；句柄无效或查询失败为 false。
+    ///
+    /// 两族都判：IPv4 取 `127.0.0.0/8` 全段，IPv6 取 `::1`，另把 IPv4 内嵌的 IPv6 形态
+    /// （`::ffff:127.0.0.1`，双栈机上回环连接的常见回报形态）按其内嵌 IPv4 判。
+    /// @return 对端地址落在回环段时为 true；句柄无效、查询失败或地址族不认识时为 false。
     [[nodiscard]] auto is_loopback_peer() const -> bool;
+
+    /// @brief 读出对端地址（`getpeername`，地址族与端口都还原为值类型）。
+    /// @return 成功为对端端点（IPv4 / IPv6）；句柄无效、查询失败或地址族不认识时为 `net-socket-failed`
+    ///         （message 含 OS 原生码）。
+    [[nodiscard]] auto peer_endpoint() const -> Result<Endpoint>;
 
     /// @brief 立即关闭套接字（幂等）。
     auto close() -> void;
@@ -154,6 +174,17 @@ class Listener {
     /// @return 成功为就绪监听器；失败为 `net-socket-failed` / `net-bind-failed` / `net-listen-failed`
     /// （失败时句柄已在实现侧关闭）。
     [[nodiscard]] static auto listen_loopback(std::uint16_t port, int backlog) -> Result<Listener>;
+
+    /// @brief 在指定端点上监听（地址族取自端点；IPv4 / IPv6 通配与具体地址都接受）。
+    ///
+    /// 与 `listen_loopback` 的分工：本函数不做任何本机性校验——绑到非回环地址意味着接受来自其它主机的
+    /// 连接，访问控制（回环判定、凭据核验）由调用方在 `accept()` 之后负责。已绑定地址经
+    /// `Endpoint` 语义表达，`port=0` 时实际端口由 `port()` 回报。
+    /// @param endpoint 监听端点；须为有效的 IPv4 / IPv6 端点且非本机 IPC 形态。
+    /// @param backlog 挂起连接队列深度（透传 `listen(2)`）。
+    /// @return 成功为就绪监听器（句柄已在失败路径关闭）；失败为 `net-endpoint-invalid` /
+    ///         `net-socket-failed` / `net-bind-failed` / `net-listen-failed`。
+    [[nodiscard]] static auto bind(const Endpoint &endpoint, int backlog) -> Result<Listener>;
 
     Listener(const Listener &) = delete;
     auto operator=(const Listener &) -> Listener & = delete;
