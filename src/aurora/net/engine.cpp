@@ -113,7 +113,8 @@ class PollEngine final : public Engine {
     PollEngine(PollEngine &&) = delete;
     auto operator=(PollEngine &&) -> PollEngine & = delete;
 
-    /// @brief 析构：等价一次 `shutdown()`——单例在进程退出路径上收敛自有线程与句柄。
+    /// @brief 析构：等价一次 `shutdown()`——**仅显式停机路径会走到这里**，单例存储刻意不析构（见
+    ///        `shared_engine()`），故静态拆除阶段不会执行线程 join 与句柄回收。
     ~PollEngine() override { shutdown(); }
 
     [[nodiscard]] auto name() const -> std::string_view override { return "poll"; }
@@ -383,13 +384,20 @@ class NullEngine final : public Engine {
 
 /// @brief 进程级引擎单例存储。
 /// @return 本腿的引擎实例（native 为常驻 poll 线程引擎，无 fd 语义腿为不支持形态）。
+///
+/// 刻意不析构（泄漏一枚永不归还的对象），与 `app::EventSourceRegistry::instance()` 同口径：常驻线程
+/// 的收敛要加锁、join、关唤醒 socket，而静态析构阶段这些原语已经不可依赖——winpthread 的互斥体与
+/// 条件变量属它自己的静态区，可能先于本单例拆除。实测（MinGW，仅 `post` 一次即退出）在
+/// `PollEngine::shutdown()` → `detail::Session::~Session()` 的加锁处直接段错误。泄漏的代价是一次
+/// 未回收的进程内分配与一条随进程终止的线程；需要确定性收敛的调用方（宿主、探针、用例）显式调
+/// `shutdown()`，该路径不依赖拆除次序。
 auto shared_engine() -> Engine & {
 #ifdef AURORA_PLATFORM_WASM
     // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
-    static NullEngine engine;
+    static auto &engine = *new NullEngine();
 #else
     // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
-    static PollEngine engine;
+    static auto &engine = *new PollEngine();
 #endif
     return engine;
 }

@@ -8,9 +8,12 @@
 /// 行为**不依赖各平台主循环的等待形态差异**（Win32 消息泵、X11/Wayland `poll`、GLFW 事件等待、
 /// macOS run loop、wasm rAF 形态各异），代价是每操作多一次跨线程投递（微秒级，与 `Task<T>` 同量级）。
 ///
-/// 三条契约（规范性，落码与文档回写以此为准）：
+/// 四条契约（规范性，落码与文档回写以此为准）：
 /// - **惰性启动**：引擎线程随首次需要它的调用（`post` / `post_after`）启动；`shutdown()` 幂等，
 ///   停止接收新任务并收敛线程，此后再次 `post` 会重新惰性启动。
+/// - **退出收敛是显式的**：进程退出路径不自动收敛（单例刻意泄漏，理由见 `src/aurora/net/engine.cpp`
+///   的 `shared_engine()`）——静态析构阶段的加锁与线程 join 已不可依赖，实测会在拆除路径上段错误。
+///   需要确定性收敛的宿主（应用关闭流程、真机探针、集成用例）自己调 `shutdown()`。
 /// - **投递恒回主线程**：引擎线程绝不触碰 widget / `State`；就绪回调经
 ///   `app::EventSourceRegistry` 的 `Dispatcher` 接缝投递，引擎启动时装入
 ///   `aurora::detail::post_to_main` 形态（宿主已装则不改，见 §8.8.2）。
@@ -54,7 +57,8 @@ class Engine {
     /// @brief 移动赋值禁用：同 `Engine(Engine &&)`。
     auto operator=(Engine &&) -> Engine & = delete;
 
-    /// @brief 析构：实现侧负责收敛自有线程与句柄（进程级单例在退出路径上经 `shutdown()` 收敛）。
+    /// @brief 析构：实现侧负责收敛自有线程与句柄；进程级单例刻意不析构，故本析构只在调用方自己
+    ///        持有的引擎实例（用例替身、宿主接管形态）上发生。
     virtual ~Engine() = default;
 
     /// @brief 引擎种类名（运行期可观测，供 Inspector / 日志区分实现）。
