@@ -13,12 +13,18 @@ AURORA_TEST_CASE(default_style_equals_adwaita_dark_preset) {
     constexpr TitleBarStyle def{};
     constexpr TitleBarStyle preset = TitleBarStyle::from_preset(CsdPreset::AdwaitaDark);
     AURORA_TEST_CHECK_NEAR(def.height, 36.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(def.bg_active, Color{0x30, 0x30, 0x30});
-    AURORA_TEST_CHECK_EQ(def.bg_inactive, Color{0x24, 0x24, 0x24});
+    AURORA_TEST_CHECK_EQ(def.bg_active, Color{0x2E, 0x2E, 0x32});
+    AURORA_TEST_CHECK_EQ(def.bg_inactive, Color{0x22, 0x22, 0x26});
     AURORA_TEST_CHECK_EQ(def.fg_active, Color{255, 255, 255});
-    AURORA_TEST_CHECK_EQ(def.fg_inactive, Color{0x9A, 0x99, 0x96});
-    AURORA_TEST_CHECK_EQ(def.hover_tint, Color{255, 255, 255, 32});
+    AURORA_TEST_CHECK_EQ(def.fg_inactive, Color{0x91, 0x91, 0x93});
+    AURORA_TEST_CHECK_EQ(def.hover_tint, Color{255, 255, 255, 38});
     AURORA_TEST_CHECK_EQ(def.close_hover, Color{0xE0, 0x1B, 0x24});
+    // 原生观感修复（CHG-010）：窗口控制圆底常态底色、标题栏底缘分隔线、按压底色均取 libadwaita
+    // 现行口径（暗色档）。
+    AURORA_TEST_CHECK_EQ(def.button_tint, Color{255, 255, 255, 26});
+    AURORA_TEST_CHECK_EQ(def.separator, Color{0x1D, 0x1D, 0x20});
+    AURORA_TEST_CHECK_EQ(def.pressed_tint, Color{255, 255, 255, 77});
+    AURORA_TEST_CHECK_EQ(def.close_pressed, Color{0xC0, 0x1B, 0x28});
     AURORA_TEST_CHECK_EQ(def.button_layout, TitleBarButtonLayout::Adwaita);
     AURORA_TEST_CHECK_EQ(preset.bg_active, def.bg_active);
     AURORA_TEST_CHECK_EQ(preset.button_layout, def.button_layout);
@@ -27,13 +33,17 @@ AURORA_TEST_CASE(default_style_equals_adwaita_dark_preset) {
 
 AURORA_TEST_CASE(adwaita_light_preset_values) {
     constexpr TitleBarStyle s = TitleBarStyle::from_preset(CsdPreset::AdwaitaLight);
-    AURORA_TEST_CHECK_EQ(s.bg_active, Color{0xEB, 0xEB, 0xEB});
-    AURORA_TEST_CHECK_EQ(s.bg_inactive, Color{0xE0, 0xE0, 0xE0});
-    AURORA_TEST_CHECK_EQ(s.fg_active, Color::black());
-    AURORA_TEST_CHECK_EQ(s.fg_inactive, Color{0x92, 0x95, 0x95});
-    // 亮色悬停罩是暗色白 α32 的镜像：黑 α32。
-    AURORA_TEST_CHECK_EQ(s.hover_tint, Color{0, 0, 0, 32});
+    AURORA_TEST_CHECK_EQ(s.bg_active, Color{0xFF, 0xFF, 0xFF});
+    AURORA_TEST_CHECK_EQ(s.bg_inactive, Color{0xFA, 0xFA, 0xFB});
+    AURORA_TEST_CHECK_EQ(s.fg_active, Color{0x33, 0x33, 0x34});
+    AURORA_TEST_CHECK_EQ(s.fg_inactive, Color{0x7D, 0x7D, 0x80});
+    // 亮色悬停罩是暗色白 α38 的镜像：黑 α38（libadwaita `$button_hover_color` = currentColor 15%）。
+    AURORA_TEST_CHECK_EQ(s.hover_tint, Color{0, 0, 0, 38});
     AURORA_TEST_CHECK_EQ(s.close_hover, Color{0xE0, 0x1B, 0x24});
+    // 原生观感修复（CHG-010）：圆底常态底色 = currentColor 10%、按压底色 = 30%、底缘 shade 线。
+    AURORA_TEST_CHECK_EQ(s.button_tint, Color{0, 0, 0, 26});
+    AURORA_TEST_CHECK_EQ(s.pressed_tint, Color{0, 0, 0, 77});
+    AURORA_TEST_CHECK_EQ(s.separator, Color{0xE0, 0xE0, 0xE0});
     AURORA_TEST_CHECK_EQ(s.button_layout, TitleBarButtonLayout::Adwaita);
     // 标题字重取 libadwaita `.title { font-weight: bold }` 的 700（走默认成员值，不钉 metrics）。
     AURORA_TEST_CHECK_EQ(s.metrics.title_font_weight, 700);
@@ -147,7 +157,7 @@ AURORA_TEST_CASE(designated_initialization_overrides_selected_fields_only) {
     AURORA_TEST_CHECK_TRUE(ordered.center_title);
     AURORA_TEST_CHECK_EQ(ordered.button_layout, TitleBarButtonLayout::Mac);
     // 未列出的字段回落默认（AdwaitaDark 基准）。
-    AURORA_TEST_CHECK_EQ(ordered.bg_active, Color{0x30, 0x30, 0x30});
+    AURORA_TEST_CHECK_EQ(ordered.bg_active, Color{0x2E, 0x2E, 0x32});
     AURORA_TEST_CHECK_EQ(ordered.close_hover, Color{0xE0, 0x1B, 0x24});
     AURORA_TEST_CHECK_TRUE(ordered.show_minimize);
     AURORA_TEST_CHECK_TRUE(ordered.show_close);
@@ -241,9 +251,15 @@ AURORA_TEST_CASE(six_presets_table) {
         AURORA_TEST_CHECK_TRUE(s.show_title);
         // 明暗档位：暗色档背景暗于亮色档背景（逐通道单调），前景黑白相应反转。
         AURORA_TEST_CHECK_TRUE(s.bg_active.r >= (r.dark ? 0x20U : 0xE0U));
-        AURORA_TEST_CHECK_TRUE(s.bg_active.r <= (r.dark ? 0x40U : 0xF5U));
-        AURORA_TEST_CHECK_EQ(s.fg_active.r, r.dark ? 255U : 0U);
-        AURORA_TEST_CHECK_EQ(s.fg_active.g, r.dark ? 255U : 0U);
+        AURORA_TEST_CHECK_TRUE(s.bg_active.r <= (r.dark ? 0x40U : 0xFFU));
+        // 明暗档位：暗色档前景纯白；亮色档前景近黑（AdwaitaLight 取真机灰 0x333334 而非纯黑）。
+        if (r.dark) {
+            AURORA_TEST_CHECK_EQ(s.fg_active, Color{255, 255, 255});
+        } else {
+            AURORA_TEST_CHECK_TRUE(s.fg_active.r <= 0x40U);
+            AURORA_TEST_CHECK_TRUE(s.fg_active.g <= 0x40U);
+            AURORA_TEST_CHECK_TRUE(s.fg_active.b <= 0x40U);
+        }
         // 按压强于悬停（同色相下 alpha 单调）：非关闭钮与关闭钮各自成对。
         AURORA_TEST_CHECK_TRUE(s.pressed_tint.a >= s.hover_tint.a);
         AURORA_TEST_CHECK_TRUE(s.close_pressed.a >= s.close_hover.a);

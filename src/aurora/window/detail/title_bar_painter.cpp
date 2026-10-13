@@ -20,16 +20,47 @@ auto shift_to_surface(const Rect &r, float ox, float oy) -> Rect {
 }
 
 // 三套语言的标题栏字形一律走**固定设计网格**而非按钮盒比例：原生符号尺寸与按钮盒无关
-// ——Windows 是 10×10 epx（Segoe Fluent Icons）、GNOME 是 16×16 的 symbolic 图标、
-// macOS 红绿灯内符号约 6pt（直径 12pt 的圆里占一半）。早前统一按「盒宽 / 3」推导，使字形随
+// ——Windows 是 10×10 epx（Segoe Fluent Icons）、GNOME 是 16×16 symbolic 画布（四周各留 2dp，
+// 符号实际占 12×12）、macOS 红绿灯内符号按真机 8px 跨度。早前统一按「盒宽 / 3」推导，使字形随
 // 盒放大（Windows 档实测占盒宽 2/3、Mac 档占圆直径 2/3），与真机差距显著且相邻字形互相挤在
 // 一起，故按各自的设计网格重写。
 constexpr float AURORA_WIN_GLYPH_HALF_DP = 5.0F;  // 设计网格半宽（10×10 格）
 constexpr float AURORA_WIN_GLYPH_STROKE_DP = 1.0F;  // 单线线宽（真机 1px @100% DPI）
-constexpr float AURORA_ADWAITA_GLYPH_HALF_DP = 8.0F;  // 16×16 symbolic 网格半宽
-constexpr float AURORA_ADWAITA_GLYPH_STROKE_DP = 1.5F;  // symbolic 单线线宽（沿用既有观感）
-constexpr float AURORA_MAC_GLYPH_HALF_DP = 3.0F;  // 6pt 符号半宽（12pt 圆内占一半）
+constexpr float AURORA_ADWAITA_GLYPH_HALF_DP = 6.0F;  // 16×16 symbolic 画布内 12×12 符号的半宽
+constexpr float AURORA_ADWAITA_GLYPH_STROKE_DP = 1.5F;  // symbolic 单线线宽
+// libadwaita 的悬停圆底画在 `windowcontrols > button > image` 上，恒为「16dp 图标 + 3dp 内边距」
+// = 22dp，**与按钮盒宽解耦**（盒在 `.default-decoration` 下是 30dp，圆的直径仍是 22dp）。
+constexpr float AURORA_ADWAITA_DISC_DP = 22.0F;
+constexpr float AURORA_MAC_GLYPH_MIN_HALF_DP = 4.0F;  // 真机最小化横线 8px 宽
+constexpr float AURORA_MAC_GLYPH_CLOSE_HALF_DP = 2.8F;  // 真机 ✕ 臂长 8px ⇒ 投影半宽 8/√2≈2.83
+constexpr float AURORA_MAC_GLYPH_FULLSCREEN_HALF_DP = 4.0F;  // 真机全屏双向箭头跨度 8px
 constexpr float AURORA_MAC_GLYPH_STROKE_DP = 1.0F;  // 圆内符号线宽
+constexpr float AURORA_MAC_BORDER_DP = 1.0F;  // 红绿灯描边宽（真机 1px）
+
+// macOS 红绿灯取色（真机取色表：`macos-traffic-light-buttons-as-SVG` 的 README；填色另参 Apple
+// 语义色 `#FF5F57`/`#FEBC2E`/`#28C840`）。每枚圆点都有一圈比填色深一档的描边——这圈描边是圆点
+// 立体感的来源，早前画的是纯色圆盘，看上去是「三个扁平色块」。
+constexpr Color AURORA_MAC_CLOSE_FILL{0xFF, 0x5F, 0x57, 255};
+constexpr Color AURORA_MAC_CLOSE_BORDER{0xE2, 0x4B, 0x41, 255};
+constexpr Color AURORA_MAC_CLOSE_SYMBOL{0x46, 0x08, 0x04, 255};
+constexpr Color AURORA_MAC_CLOSE_FILL_PRESSED{0xB1, 0x50, 0x48, 255};
+constexpr Color AURORA_MAC_CLOSE_BORDER_PRESSED{0xA1, 0x42, 0x39, 255};
+constexpr Color AURORA_MAC_CLOSE_SYMBOL_PRESSED{0x17, 0x01, 0x01, 255};
+constexpr Color AURORA_MAC_MIN_FILL{0xFE, 0xBC, 0x2E, 255};
+constexpr Color AURORA_MAC_MIN_BORDER{0xE1, 0xA7, 0x3E, 255};
+constexpr Color AURORA_MAC_MIN_SYMBOL{0x90, 0x59, 0x1D, 255};
+constexpr Color AURORA_MAC_MIN_FILL_PRESSED{0xB8, 0x92, 0x3B, 255};
+constexpr Color AURORA_MAC_MIN_BORDER_PRESSED{0xA6, 0x7F, 0x36, 255};
+constexpr Color AURORA_MAC_MIN_SYMBOL_PRESSED{0x53, 0x2A, 0x0A, 255};
+constexpr Color AURORA_MAC_MAX_FILL{0x28, 0xC8, 0x40, 255};
+constexpr Color AURORA_MAC_MAX_BORDER{0x2D, 0xAC, 0x2F, 255};
+constexpr Color AURORA_MAC_MAX_SYMBOL{0x2A, 0x62, 0x18, 255};
+constexpr Color AURORA_MAC_MAX_FILL_PRESSED{0x4A, 0x97, 0x41, 255};
+constexpr Color AURORA_MAC_MAX_BORDER_PRESSED{0x42, 0x82, 0x34, 255};
+constexpr Color AURORA_MAC_MAX_SYMBOL_PRESSED{0x11, 0x31, 0x07, 255};
+// 失焦（窗口非活动）：真机三枚统一变浅灰且不显符号。
+constexpr Color AURORA_MAC_INACTIVE_FILL{0xDD, 0xDD, 0xDD, 255};
+constexpr Color AURORA_MAC_INACTIVE_BORDER{0xD1, 0xD0, 0xD2, 255};
 }  // namespace
 
 auto paint_window_shadow(Painter &p, const TitleBarPaintState &s) -> void {
@@ -85,6 +116,15 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
         p.fill_rect(Rect{.origin = Point{.x = ox + w - cr, .y = oy}, .size = Size{.width = cr, .height = cr}}, bg);
     } else {
         p.fill_rect(bg_rect, bg);
+    }
+
+    // 底缘分隔线（libadwaita `headerbar` 的 `box-shadow: inset 0 -1px var(--headerbar-shade-color)`；
+    // 亮色 = 12% 黑、暗色 = 36% 黑，预设里存的是已叠加的实色）。只有 Adwaita 两档给值——
+    // Win11 与 macOS 的标题栏底缘都没有这条线，`separator` 全透明时整段跳过。
+    if (s.style.separator.a > 0) {
+        p.fill_rect(
+            Rect{.origin = Point{.x = ox, .y = oy + s.style.height - 1.0F}, .size = Size{.width = w, .height = 1.0F}},
+            s.style.separator);
     }
 
     // 图标槽（set_title_bar_icon 注入后显示；无图标留白，几何预留位不变）。
@@ -169,13 +209,51 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
         stroke(m.x - half, m.y - half, m.x + half, m.y + half, lw, c);
         stroke(m.x + half, m.y - half, m.x - half, m.y + half, lw, c);
     };
+    // macOS 绿钮（zoom / 全屏）符号：真机是**双向对角箭头**——未最大化时箭头朝外（进入全屏），
+    // 已最大化时朝内（退出全屏），而不是通用的空心方框（方框既不还原观感，也与绿钮的语义不符）。
+    // 每条箭头 = 一条对角干 + 尖端两条沿轴回折的短须（12pt 圆内的箭头无须三角填充）。
+    const auto glyph_fullscreen_at = [&](const Rect &r, float half, float lw, const Color &c, bool inward) -> void {
+        const Point m = center_of(r);
+        const float head = half * 0.55F;  // 短须长
+        const float tip = inward ? half * 0.35F : half;  // 箭尖（对角干的末端）
+        const float tail = inward ? half : half * 0.35F;  // 对角干的起点
+        const auto arrow = [&](float sx, float sy) -> void {
+            stroke(m.x + (sx * tail), m.y + (sy * tail), m.x + (sx * tip), m.y + (sy * tip), lw, c);
+            stroke(m.x + (sx * tip), m.y + (sy * tip), m.x + (sx * tip) - (sx * head), m.y + (sy * tip), lw, c);
+            stroke(m.x + (sx * tip), m.y + (sy * tip), m.x + (sx * tip), m.y + (sy * tip) - (sy * head), lw, c);
+        };
+        arrow(1.0F, 1.0F);
+        arrow(-1.0F, -1.0F);
+    };
+    // Adwaita 的悬停圆底：直径恒 22dp（16dp symbolic 图标 + 3dp 内边距），**与按钮盒宽解耦**
+    // ——盒被覆写成任意宽时圆不变、仍居中。早前直接取「盒内切圆」，盒 26dp 时圆即 26dp，偏大。
+    const auto adwaita_disc = [&](const Rect &r, const Color &c) -> void {
+        const Point m = center_of(r);
+        const float h = AURORA_ADWAITA_DISC_DP * 0.5F;
+        p.fill_rounded_rect(Rect{.origin = Point{.x = m.x - h, .y = m.y - h},
+                                 .size = Size{.width = AURORA_ADWAITA_DISC_DP, .height = AURORA_ADWAITA_DISC_DP}},
+                            h, c);
+    };
+    // 红绿灯圆盘：填色 + 一圈比填色深一档的 1px 描边；失焦整组变灰。
+    const auto mac_dot = [&](const Rect &r, bool pressed, const Color &fill, const Color &border,
+                             const Color &fill_pressed, const Color &border_pressed) -> void {
+        if (!s.active) {
+            p.fill_rounded_rect(r, r.size.width * 0.5F, AURORA_MAC_INACTIVE_FILL);
+            p.draw_rounded_border(r, r.size.width * 0.5F, AURORA_MAC_BORDER_DP, AURORA_MAC_INACTIVE_BORDER);
+            return;
+        }
+        p.fill_rounded_rect(r, r.size.width * 0.5F, pressed ? fill_pressed : fill);
+        p.draw_rounded_border(r, r.size.width * 0.5F, AURORA_MAC_BORDER_DP, pressed ? border_pressed : border);
+    };
 
     // 各语言的「半宽 / 线宽」常量对（取值与理由见文件顶部）。
     constexpr float wh = AURORA_WIN_GLYPH_HALF_DP;
     constexpr float wlw = AURORA_WIN_GLYPH_STROKE_DP;
     constexpr float ah = AURORA_ADWAITA_GLYPH_HALF_DP;
     constexpr float alw = AURORA_ADWAITA_GLYPH_STROKE_DP;
-    constexpr float mh = AURORA_MAC_GLYPH_HALF_DP;
+    constexpr float mnh = AURORA_MAC_GLYPH_MIN_HALF_DP;
+    constexpr float mch = AURORA_MAC_GLYPH_CLOSE_HALF_DP;
+    constexpr float mfh = AURORA_MAC_GLYPH_FULLSCREEN_HALF_DP;
     constexpr float mlw = AURORA_MAC_GLYPH_STROKE_DP;
     // Windows 的还原态与另两套不同：真机是「8×8 主框居左下 + 副框只露顶边与右边」，不是通用
     // 双框，故单列一份（最大化态仍与另两套同形）。
@@ -206,28 +284,31 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
     // （等于关闭按钮画不出来），故常态须随前景色；底色换成悬停 / 按压的特征红后则须转白，
     // 红底上的深色符号同样不可读。两侧是同一个判据。
     if (s.style.button_layout == TitleBarButtonLayout::Adwaita) {
-        // Adwaita：扁平单色符号（16×16 symbolic 网格），悬停浮出圆形底（关闭钮红底为其视觉签名）。
-        // 按压态此前未被消费（只判 hovered_button），按下时没有任何反馈，故与 Windows 档一样
-        // 统一走 button_fill（按压 > 悬停）。
+        // Adwaita：扁平单色符号（16×16 symbolic 画布内 12×12），圆底**常态就有**——libadwaita
+        // 把圆画在 `windowcontrols > button > image` 上且 `background-color: $button_color`
+        // （currentColor 10%），悬停 15% / 按压 30% 只是把它加深，不是「悬停才浮出」。
+        // 按压态此前未被消费（只判 hovered_button），按下时没有任何反馈，故统一走 button_fill。
         if (g.minimize.size.width > 0.0F) {
-            Color fill;
-            if (button_fill(0, s.style.hover_tint, s.style.pressed_tint, fill)) {
-                p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5F, fill);
+            Color fill = s.style.button_tint;
+            button_fill(0, s.style.hover_tint, s.style.pressed_tint, fill);
+            if (fill.a > 0) {
+                adwaita_disc(g.minimize, fill);
             }
             glyph_min_at(g.minimize, ah, alw, fg);
         }
         if (g.maximize.size.width > 0.0F) {
-            Color fill;
-            if (button_fill(1, s.style.hover_tint, s.style.pressed_tint, fill)) {
-                p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5F, fill);
+            Color fill = s.style.button_tint;
+            button_fill(1, s.style.hover_tint, s.style.pressed_tint, fill);
+            if (fill.a > 0) {
+                adwaita_disc(g.maximize, fill);
             }
             glyph_max_at(g.maximize, ah, alw, fg);
         }
         if (g.close.size.width > 0.0F) {
-            Color fill;
+            Color fill = s.style.button_tint;
             const bool filled = button_fill(2, s.style.close_hover, s.style.close_pressed, fill);
-            if (filled) {
-                p.fill_rounded_rect(g.close, g.close.size.width * 0.5F, fill);
+            if (fill.a > 0) {
+                adwaita_disc(g.close, fill);
             }
             glyph_close_at(g.close, ah, alw, filled ? Color{255, 255, 255, 235} : fg);
         }
@@ -256,26 +337,35 @@ auto paint_title_bar(Painter &p, const TitleBarPaintState &s) -> void {
             glyph_close_at(g.close, wh, wlw, filled ? Color{255, 255, 255, 235} : fg);
         }
     } else {
-        // macOS：常显三色圆点，悬停浮现深色符号（close/min/max 左→右序由几何层保证）；
-        // 符号按 6pt 设计网格绘制——红绿灯恒 12pt，符号占圆的一半，与盒解耦。
-        constexpr Color sym{0x3D, 0x3D, 0x3D, 210};
+        // macOS 红绿灯：三枚圆点常显且不依赖悬停；符号则是**整组同时浮现**（`NSWindow` 的 group
+        // hover 语义——指针进入红绿灯组即三枚符号一起出现，而不是只显被指到的那一枚）；
+        // 窗口失焦时三枚统一变浅灰且不显任何符号；按下即整枚（填色 + 描边 + 符号）一起加深，
+        // 真机并不叠白罩。绿钮是「进入全屏」，符号为双向对角箭头（最大化态转内向）。
+        const bool show_symbols = s.active && ((hb >= 0) || (s.pressed_button >= 0));
+        if (g.close.size.width > 0.0F) {
+            const bool pressed = s.pressed_button == 2;
+            mac_dot(g.close, pressed, AURORA_MAC_CLOSE_FILL, AURORA_MAC_CLOSE_BORDER, AURORA_MAC_CLOSE_FILL_PRESSED,
+                    AURORA_MAC_CLOSE_BORDER_PRESSED);
+            if (show_symbols) {
+                glyph_close_at(g.close, mch, mlw, pressed ? AURORA_MAC_CLOSE_SYMBOL_PRESSED : AURORA_MAC_CLOSE_SYMBOL);
+            }
+        }
         if (g.minimize.size.width > 0.0F) {
-            p.fill_rounded_rect(g.minimize, g.minimize.size.width * 0.5F, Color{0xFE, 0xBC, 0x2E, 255});
-            // macOS 红绿灯常显：悬停或按压都只浮现深色符号，不换底色。
-            if (hb == 0 || s.pressed_button == 0) {
-                glyph_min_at(g.minimize, mh, mlw, sym);
+            const bool pressed = s.pressed_button == 0;
+            mac_dot(g.minimize, pressed, AURORA_MAC_MIN_FILL, AURORA_MAC_MIN_BORDER, AURORA_MAC_MIN_FILL_PRESSED,
+                    AURORA_MAC_MIN_BORDER_PRESSED);
+            if (show_symbols) {
+                glyph_min_at(g.minimize, mnh, mlw, pressed ? AURORA_MAC_MIN_SYMBOL_PRESSED : AURORA_MAC_MIN_SYMBOL);
             }
         }
         if (g.maximize.size.width > 0.0F) {
-            p.fill_rounded_rect(g.maximize, g.maximize.size.width * 0.5F, Color{0x28, 0xC8, 0x40, 255});
-            if (hb == 1 || s.pressed_button == 1) {
-                glyph_max_at(g.maximize, mh, mlw, sym);
-            }
-        }
-        if (g.close.size.width > 0.0F) {
-            p.fill_rounded_rect(g.close, g.close.size.width * 0.5F, Color{0xFF, 0x5F, 0x57, 255});
-            if (hb == 2 || s.pressed_button == 2) {
-                glyph_close_at(g.close, mh, mlw, sym);
+            const bool pressed = s.pressed_button == 1;
+            mac_dot(g.maximize, pressed, AURORA_MAC_MAX_FILL, AURORA_MAC_MAX_BORDER, AURORA_MAC_MAX_FILL_PRESSED,
+                    AURORA_MAC_MAX_BORDER_PRESSED);
+            if (show_symbols) {
+                glyph_fullscreen_at(g.maximize, mfh, mlw,
+                                    pressed ? AURORA_MAC_MAX_SYMBOL_PRESSED : AURORA_MAC_MAX_SYMBOL,
+                                    s.mode == WindowMode::Maximized);
             }
         }
     }

@@ -172,13 +172,14 @@ struct Theme {
         t.set_token("hover", TokenValue{Color{0, 0, 0, 32}});
         t.set_token("pressed", TokenValue{Color{0, 0, 0, 56}});
         t.set_token("danger", TokenValue{Color{0xE0, 0x1B, 0x24}});
-        // 组件覆写位（CSD；亮色基准 = AdwaitaLight）
-        t.set_token("csd.title_bar.bg.active", TokenValue{Color{0xEB, 0xEB, 0xEB}});
-        t.set_token("csd.title_bar.bg.inactive", TokenValue{Color{0xE0, 0xE0, 0xE0}});
-        t.set_token("csd.title_bar.fg.active", TokenValue{Color::black()});
-        t.set_token("csd.title_bar.fg.inactive", TokenValue{Color{0x92, 0x95, 0x95}});
-        t.set_token("csd.title_bar.hover", TokenValue{Color{0, 0, 0, 32}});
-        t.set_token("csd.title_bar.pressed", TokenValue{Color{0, 0, 0, 56}});
+        // 组件覆写位（CSD；亮色基准 = AdwaitaLight）：取值与 TitleBarStyle::from_preset(AdwaitaLight)
+        // 共用同一组数字——保证「从 Theme 派生」与「直接取预设」逐值相同的契约（CHG-010 取色口径更新）。
+        t.set_token("csd.title_bar.bg.active", TokenValue{Color{0xFF, 0xFF, 0xFF}});
+        t.set_token("csd.title_bar.bg.inactive", TokenValue{Color{0xFA, 0xFA, 0xFB}});
+        t.set_token("csd.title_bar.fg.active", TokenValue{Color{0x33, 0x33, 0x34}});
+        t.set_token("csd.title_bar.fg.inactive", TokenValue{Color{0x7D, 0x7D, 0x80}});
+        t.set_token("csd.title_bar.hover", TokenValue{Color{0, 0, 0, 38}});
+        t.set_token("csd.title_bar.pressed", TokenValue{Color{0, 0, 0, 77}});
         t.set_token("csd.title_bar.close.hover", TokenValue{Color{0xE0, 0x1B, 0x24}});
         t.set_token("csd.shadow.color", TokenValue{Color{0, 0, 0, 70}});
     }
@@ -201,13 +202,14 @@ struct Theme {
         t.dark_tokens["border"] = TokenValue{Color{0x4A, 0x4A, 0x4A}};
         t.dark_tokens["hover"] = TokenValue{Color{255, 255, 255, 32}};
         t.dark_tokens["pressed"] = TokenValue{Color{255, 255, 255, 56}};
-        // 组件覆写位（CSD；暗色基准 = AdwaitaDark）
-        t.dark_tokens["csd.title_bar.bg.active"] = TokenValue{Color{0x30, 0x30, 0x30}};
-        t.dark_tokens["csd.title_bar.bg.inactive"] = TokenValue{Color{0x24, 0x24, 0x24}};
+        // 组件覆写位（CSD；暗色基准 = AdwaitaDark）：取值与 TitleBarStyle::from_preset(AdwaitaDark)
+        // 共用同一组数字——保证「从 Theme 派生」与「直接取预设」逐值相同的契约（CHG-010 取色口径更新）。
+        t.dark_tokens["csd.title_bar.bg.active"] = TokenValue{Color{0x2E, 0x2E, 0x32}};
+        t.dark_tokens["csd.title_bar.bg.inactive"] = TokenValue{Color{0x22, 0x22, 0x26}};
         t.dark_tokens["csd.title_bar.fg.active"] = TokenValue{Color::white()};
-        t.dark_tokens["csd.title_bar.fg.inactive"] = TokenValue{Color{0x9A, 0x99, 0x96}};
-        t.dark_tokens["csd.title_bar.hover"] = TokenValue{Color{255, 255, 255, 32}};
-        t.dark_tokens["csd.title_bar.pressed"] = TokenValue{Color{255, 255, 255, 56}};
+        t.dark_tokens["csd.title_bar.fg.inactive"] = TokenValue{Color{0x91, 0x91, 0x93}};
+        t.dark_tokens["csd.title_bar.hover"] = TokenValue{Color{255, 255, 255, 38}};
+        t.dark_tokens["csd.title_bar.pressed"] = TokenValue{Color{255, 255, 255, 77}};
         return t;
     }
 

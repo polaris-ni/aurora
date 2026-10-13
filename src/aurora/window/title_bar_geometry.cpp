@@ -9,12 +9,13 @@ namespace aurora {
 // 标题栏尺寸规则（唯一权威来源；绘制层与命中测试层一律消费
 // title_bar_geometry() 的输出，不得各自再推几何）：
 //
-// - Adwaita：按钮为正方形，边长 btn = clamp(height-10, 22, 30)，垂直居中；
-//   间距 6；右缘外边距 6。从右往左顺序 close→max→min。
-//   悬停圆即该正方形的内切圆（绘制层取盒即可）。
-//   间距与外边距同为 6 出自 libadwaita：`.toolbar`（AdwHeaderBar 自动带该类）
-//   「ensures 6px margins and spacing between widgets」，`headerbar` 另有 `padding: 0 6px`；
-//   旧值 4 / 8 是把 GTK 的 6px 与窗口内边距混记的结果。
+// - Adwaita：按钮为正方形，边长 btn = clamp(height-6, 26, 34)，垂直居中；
+//   间距 3；右缘外边距 6。从右往左顺序 close→max→min。
+//   盒宽 30（栏高 36 时）= libadwaita `.default-decoration` 的「22dp 内容 + 4dp 外边距」：
+//   `windowcontrols > button { min-width: 22px; padding: 4px }`，而内容即 `> image`
+//   （16dp symbolic 图标 + 3dp 内边距 = 22dp）。间距 3 出自 `windowcontrols { border-spacing: 3px }`。
+//   ⚠️ 悬停圆**不是**盒的内切圆（那会给 30dp）：圆画在 image 上，恒 22dp 居中，由绘制层按
+//   语言常量给出，与盒宽解耦（盒被覆写时圆不变）。
 // - Windows：按钮矩形宽 = round(height*1.44)、高 = height 整高，
 //   从右上角无缝向左排（无外边距、无间距），顺序同上。
 // - Mac：圆形直径 d = clamp(height*0.4, 11, 14)，位于左侧，左缘外边距 8，
@@ -50,10 +51,10 @@ auto layout_right_buttons(const TitleBarStyle &style, float width, bool resizabl
     const bool windows = style.button_layout == TitleBarButtonLayout::Windows;
     const float side = style.metrics.button_size > 0.0F ? style.metrics.button_size
                                                         : (windows ? std::round(style.height * 1.44F)
-                                                                   : std::clamp(style.height - 10.0F, 22.0F, 30.0F));
-    // 未钉值时 Adwaita 的间距 / 外边距同为 6dp（libadwaita `.toolbar` 口径，见文件头注释块）；
-    // Windows 恒 0（无缝整高排布）。
-    const float gap = style.metrics.button_gap > 0.0F ? style.metrics.button_gap : (windows ? 0.0F : 6.0F);
+                                                                   : std::clamp(style.height - 6.0F, 26.0F, 34.0F));
+    // 未钉值时 Adwaita 的间距为 3dp（libadwaita `windowcontrols { border-spacing: 3px }`）、
+    // 右缘外边距 6dp（见文件头注释块）；Windows 恒 0（无缝整高排布）。
+    const float gap = style.metrics.button_gap > 0.0F ? style.metrics.button_gap : (windows ? 0.0F : 3.0F);
     const float margin = style.metrics.button_margin > 0.0F ? style.metrics.button_margin : (windows ? 0.0F : 6.0F);
     float cursor = width - margin;  // 下一个按钮的贴边侧外缘
     float group_inner_edge = width - margin;

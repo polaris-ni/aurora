@@ -525,17 +525,17 @@ AURORA_TEST_CASE(pressed_state_reaches_paint_state) {
 AURORA_TEST_CASE(default_metrics_reproduce_legacy_geometry) {
     // 度量覆写引入后 `TitleBarStyle{}`（= 默认 Adwaita）的几何基线必须显式钉住，否则改动
     // 推导式会一次性改坏三套既有预设的观感。期望值全部手写推算（Adwaita，width=800，栏高 36）：
-    //   按钮边长 clamp(36-10, 22, 30)=26，间距 6，右缘外边距 6；图标 min(16, 36-20)=16 @ x=12。
-    // ⚠️ 间距 / 外边距原为 4 / 8（close 766 / min 706 / 标题 662），CHG-009 按 libadwaita
-    //   `.toolbar` 的「6px margins and spacing」改为 6 / 6，本用例基线随之更新。
+    //   按钮边长 clamp(36-6, 26, 34)=30，间距 3，右缘外边距 6；图标 min(16, 36-20)=16 @ x=12。
+    //   CHG-010 把盒宽改成 libadwaita `.default-decoration` 的「22dp 内容 + 4dp 外边距」(30dp)、
+    //   间距按 `windowcontrols { border-spacing: 3px }` 改为 3，本用例基线随之更新。
     const TitleBarStyle style = sample_style();
     const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, true);
 
-    AURORA_TEST_CHECK_EQ(g.close.origin.x, 768.0F);
-    AURORA_TEST_CHECK_EQ(g.close.origin.y, 5.0F);
-    AURORA_TEST_CHECK_EQ(g.close.size.width, 26.0F);
-    AURORA_TEST_CHECK_EQ(g.maximize.origin.x, 736.0F);
-    AURORA_TEST_CHECK_EQ(g.minimize.origin.x, 704.0F);
+    AURORA_TEST_CHECK_EQ(g.close.origin.x, 764.0F);
+    AURORA_TEST_CHECK_EQ(g.close.origin.y, 3.0F);
+    AURORA_TEST_CHECK_EQ(g.close.size.width, 30.0F);
+    AURORA_TEST_CHECK_EQ(g.maximize.origin.x, 731.0F);
+    AURORA_TEST_CHECK_EQ(g.minimize.origin.x, 698.0F);
 
     AURORA_TEST_CHECK_EQ(g.icon.origin.x, 12.0F);
     AURORA_TEST_CHECK_EQ(g.icon.size.width, 16.0F);
