@@ -29,6 +29,7 @@ auto WindowHost::teardown() -> void {
         sf.set_event_handler({});
         sf.set_window_state_handler({});
         sf.set_window_mode_handler({});
+        sf.set_scale_change_handler({});  // 同上：WM_DPICHANGED（多显示器/系统缩放变更）随时可到
         sf.set_composition_caret_provider({});  // 同样捕获 this，须解绑
     }
     key_pre_ = nullptr;

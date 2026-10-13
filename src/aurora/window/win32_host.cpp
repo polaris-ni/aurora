@@ -449,6 +449,7 @@ Win32Host::Impl::~Impl() {
     window_state_handler = nullptr;
     window_mode_handler = nullptr;
     present_request = nullptr;
+    scale_handler = nullptr;  // 兜底：不经 teardown 的析构路径，WM_DPICHANGED 仍可同步到达
     composition_caret_provider = nullptr;
     ime = nullptr;  // 桥的 hooks 捕获本 Impl，须在 DestroyWindow 前先散
     if (hwnd != nullptr) {

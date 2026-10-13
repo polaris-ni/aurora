@@ -2,6 +2,7 @@
 /// 目标单元: include/aurora/app/window_host.h, include/aurora/window/surface.h
 /// 测试说明: 窗口外壳能力（specification/06-app-platform.md §2.4）——模态窗口对 owner 的输入屏蔽与
 /// 恢复、OS 层 owner 从属关系、z 序提升/激活转发、所在显示器 id 透传、DPI 缩放变化触发整帧重排重绘、
+/// teardown 解绑 DPI 缩放回调（宿主析构后 WM_DPICHANGED 的 use-after-free 回归）、
 /// 无窗口宿主的显示器迁移安全 no-op。全部以 Headless 多实例驱动（seam 记录调用而非产生副作用）。
 
 #include <cstddef>
@@ -142,6 +143,29 @@ AURORA_TEST_CASE(scale_change_marks_window_for_full_redraw) {
     // DPI 变化必须触发整帧重排重绘：否则沿用旧布局缓存/帧缓冲会内容错位或发虚。
     surface->emit_scale_change(2.0F);
     AURORA_TEST_CHECK_TRUE(host->window()->has_pending_dirty());
+}
+
+AURORA_TEST_CASE(teardown_unbinds_scale_change_handler) {
+    const auto oa = make_opts("A");
+    Application app{make_scene("A"), make_window(oa), oa};
+    WindowHost *const host = app.windows().front();
+    HeadlessSurface *const surface = surface_of(host);
+    AURORA_TEST_REQUIRE_NOT_NULL(surface);
+
+    (void)host->render_frame(0.016);  // 先渲染一帧，使脏区状态进入稳定态
+    // 接线态判据先自证：DPI 变化必须置脏。缺了这一步，「解绑后无脏」无法区分
+    // 「已解绑」与「从未接线」两种情形，判据会空转。
+    surface->emit_scale_change(2.0F);
+    AURORA_TEST_REQUIRE_TRUE(host->window()->has_pending_dirty());
+    (void)host->render_frame(0.016);  // 再渲染一帧消费脏区，回到无脏稳态
+
+    // 宿主回收路径（`Application::reap_closed`）先 teardown 再释放宿主。DPI 缩放回调
+    // 捕获 `this`：宿主析构后消息泵仍在排 WM_DPICHANGED（多显示器 / 系统缩放变更、
+    // 预览窗关闭重建），未解绑即 use-after-free（demo_csd_gallery 切 Frameless 策略
+    // 时 0xC0000005）。
+    host->teardown();
+    surface->emit_scale_change(2.0F);
+    AURORA_TEST_CHECK_FALSE(host->window()->has_pending_dirty());
 }
 
 AURORA_TEST_CASE(headless_host_shell_calls_are_safe) {
