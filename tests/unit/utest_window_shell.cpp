@@ -3,6 +3,7 @@
 /// 测试说明: 窗口外壳能力（specification/06-app-platform.md §2.4）——模态窗口对 owner 的输入屏蔽与
 /// 恢复、OS 层 owner 从属关系、z 序提升/激活转发、所在显示器 id 透传、DPI 缩放变化触发整帧重排重绘、
 /// teardown 解绑 DPI 缩放回调（宿主析构后 WM_DPICHANGED 的 use-after-free 回归）、
+/// teardown 解绑同步重渲染回调（析构级联中 Window 成员先亡的 use-after-free 回归）、
 /// 无窗口宿主的显示器迁移安全 no-op。全部以 Headless 多实例驱动（seam 记录调用而非产生副作用）。
 
 #include <cstddef>
@@ -166,6 +167,30 @@ AURORA_TEST_CASE(teardown_unbinds_scale_change_handler) {
     host->teardown();
     surface->emit_scale_change(2.0F);
     AURORA_TEST_CHECK_FALSE(host->window()->has_pending_dirty());
+}
+
+AURORA_TEST_CASE(teardown_unbinds_present_request) {
+    const auto oa = make_opts("A");
+    Application app{make_scene("A"), make_window(oa), oa};
+    WindowHost *const host = app.windows().front();
+    HeadlessSurface *const surface = surface_of(host);
+    AURORA_TEST_REQUIRE_NOT_NULL(surface);
+
+    (void)host->render_frame(0.016);  // 首帧：wire_present_request_once 接线并消费脏区
+    // 接线态判据先自证：系统重绘请求（Win32 的 WM_SIZE/WM_PAINT）必须触发一次同步重渲染
+    // （Headless 以 present 帧计数为 seam）。缺了这一步，「解绑后无新帧」无法区分
+    // 「已解绑」与「从未接线」两种情形，判据会空转。
+    const int wired_frames = surface->frame_count();
+    surface->simulate_present_request();
+    AURORA_TEST_REQUIRE_EQ(surface->frame_count(), wired_frames + 1);
+
+    // 宿主回收路径（`Application::reap_closed`）先 teardown 再释放宿主。present_request
+    // 捕获 `Window*`：析构级联里 Window 的成员（cached_root_/presenting_ 等）先于
+    // surface_ 析构，Win32 的 DestroyWindow 同步派发（WM_DPICHANGED → SetWindowPos →
+    // WM_SIZE）或回收间隙的消息泵仍可触发同步重渲染，未解绑即 use-after-free。
+    host->teardown();
+    surface->simulate_present_request();
+    AURORA_TEST_CHECK_EQ(surface->frame_count(), wired_frames + 1);
 }
 
 AURORA_TEST_CASE(headless_host_shell_calls_are_safe) {

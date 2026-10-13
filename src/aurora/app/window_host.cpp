@@ -31,6 +31,12 @@ auto WindowHost::teardown() -> void {
         sf.set_window_mode_handler({});
         sf.set_scale_change_handler({});  // 同上：WM_DPICHANGED（多显示器/系统缩放变更）随时可到
         sf.set_composition_caret_provider({});  // 同样捕获 this，须解绑
+        // `Window::wire_present_request_once` 注册（非 attach_surface）：捕获 `Window*`。
+        // 宿主回收（teardown → 析构级联）中 Window 的其他成员先于 surface_ 析构，而 Win32 的
+        // DestroyWindow 同步派发可经 WM_DPICHANGED → SetWindowPos → WM_SIZE 触发同步重渲染，
+        // 回调打到半亡窗口即 use-after-free。Win32 `Impl::~Impl` 已有兜底置空（仅该后端），
+        // 此处按同一清单在正常路径收敛，三后端经虚派发一并生效。
+        sf.set_present_request({});
     }
     key_pre_ = nullptr;
     state_sink_ = nullptr;
