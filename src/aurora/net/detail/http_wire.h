@@ -137,4 +137,87 @@ class ChunkedDecoder {
     bool done_{false};  ///< 是否已见终止块（长度为 0 的块）
 };
 
+/// @brief 把「一段段读到的原始字节」装配成一条完整应答的接收侧状态机。
+///
+/// 它把本文件已有的三件（`parse_response_head` 的三态头部解析、`framing_of` 的分帧判定、
+/// `ChunkedDecoder` 的分块解码）按线上次序串起来，只回答发起侧最关心的三问：
+/// - **头部块全了吗**：未全前收到的字节都归头部缓冲（含 body 起始那一段，它可能和头部同批抵达）。
+/// - **体分帧是什么**：头部一全即由 `framing_of` 定形态，`HEAD` / 1xx / 204 / 304 恒无体。
+/// - **体读全了吗**：`Length` 按声明长度、`Chunked` 按终止块、`UntilClose` 按对端 FIN（经
+///   `peer_closed()` 告知），任一形态触达上限即 `http-body-too-large`。
+///
+/// **范围是「一条应答」**：HTTP/1.1 流水线（pipelining）不在本库面内（见提案 §15），故一条连接上
+/// 每个请求周期只装配一条应答，完整之后再收到字节即判畸形——与 `ChunkedDecoder`「终止块之后不收字节」
+/// 是同一条纪律，把「读过头把下一条的开头吃进本条」这类分帧错位挡在本层。
+///
+/// 只做接收侧，不做发送侧、不碰套接字：故可在零网络下逐值断言畸形、越限与分帧错位。
+/// @note Thread: single-threaded（每连接一个实例，随该连接的读回调串行使用）
+/// @note Side-effects: none（全部状态在本对象内）
+class ResponseAssembler {
+  public:
+    /// @brief 构造。
+    /// @param max_body_bytes 物化正文上限（`std::nullopt` = 不设上限）；越限落 `http-body-too-large`。
+    /// @param request_is_head 对应请求是否为 `HEAD`（决定应答恒无体的判定）。
+    ResponseAssembler(std::optional<std::uint64_t> max_body_bytes, bool request_is_head);
+
+    /// @brief 送入一段读到的原始字节并推进装配。
+    /// @param bytes 新读到的连续字节（可只覆盖头部块中途、或同时覆盖头部尾与体首段）。
+    /// @return 成功 = 仍可继续；失败 = 文法不合、分帧歧义、体越上限、或完整之后又收到字节。
+    [[nodiscard]] auto push(std::string_view bytes) -> Result<void>;
+
+    /// @brief 告知对端已关闭写向（FIN）：`UntilClose` 形态据此判定体已读全。
+    /// @return 恒成功（除 `UntilClose` 外的形态下它是空操作）。
+    [[nodiscard]] auto peer_closed() -> Result<void>;
+
+    /// @brief 应答是否已装配完整（头部 + 按分帧的体全部到位）。
+    /// @return 完整为真；此时 `head()` 与已解码体可取。
+    [[nodiscard]] auto complete() const -> bool { return complete_; }
+
+    /// @brief 已解析的头部块（仅 `head_ready()` 为真时有意义）。
+    /// @return 头部块只读引用。
+    [[nodiscard]] auto head() const -> const ResponseHead & { return head_; }
+
+    /// @brief 头部块是否已解析完成。
+    /// @return 已定为真。
+    [[nodiscard]] auto head_ready() const -> bool { return head_ready_; }
+
+    /// @brief 已确定的消息体分帧形态（`head_ready()` 之前为 `None`）。
+    /// @return 分帧形态。
+    [[nodiscard]] auto framing() const -> BodyFraming { return framing_; }
+
+    /// @brief 取走已解码的明文体（取完即从内部移除，不重复交付）。
+    /// @param out 追加目标；只追加、不清空调用方缓冲。
+    auto drain_body(std::vector<char> &out) -> void;
+
+  private:
+    /// @brief 装配阶段。
+    enum class Phase : std::uint8_t {
+        Head,  ///< 仍在收集 / 解析头部块
+        Body,  ///< 按分帧形态收集消息体
+        Ended,  ///< 本条消息完整
+    };
+
+    /// @brief 头部块解析完成后，按分帧初始化体收集态并就地消费缓冲里已有的体字节。
+    /// @return 分帧判定或上限核算的失败；成功为可继续。
+    [[nodiscard]] auto enter_body_phase() -> Result<void>;
+
+    /// @brief 把一段明文体并入交付缓冲并做累计上限核算。
+    /// @param bytes 本段明文。
+    /// @return 越限为 `http-body-too-large`；否则成功。
+    [[nodiscard]] auto absorb(std::string_view bytes) -> Result<void>;
+
+    std::optional<std::uint64_t> max_body_bytes_;  ///< 物化上限（nullopt = 不限）
+    bool request_is_head_{false};  ///< HEAD 请求判定
+    Phase phase_{Phase::Head};  ///< 当前阶段
+    bool head_ready_{false};  ///< 头部块是否已解析
+    bool complete_{false};  ///< 整条应答是否已装配完整
+    std::string buffer_;  ///< 原始字节累积（头部未全前不喂解码器）
+    ResponseHead head_;  ///< 已解析头部
+    BodyFraming framing_{BodyFraming::None};  ///< 头部解析后确定的分帧形态
+    ChunkedDecoder chunked_;  ///< Chunked 形态的解码器
+    std::vector<char> pending_;  ///< 已解码、待 `drain_body()` 取走的明文
+    std::uint64_t content_remaining_{0};  ///< Length 形态还剩多少体字节
+    std::uint64_t produced_{0};  ///< 本条已解码的累计明文（上限核算唯一计数，不随 drain 回落）
+};
+
 }  // namespace aurora::net::wire

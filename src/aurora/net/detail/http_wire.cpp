@@ -558,4 +558,172 @@ auto ChunkedDecoder::drain(std::vector<char> &out) -> void {
     pending_.clear();
 }
 
+namespace {
+
+/// @brief 构造「物化正文越限」错误（本层唯一的资源型拒绝，不与文法 / 请求写法错误混同）。
+/// @param limit 生效的字节上限。
+/// @param actual 越限时的已累计明文字节数。
+/// @return `http-body-too-large` 错误。
+auto body_too_large_error(std::uint64_t limit, std::uint64_t actual) -> Error {
+    return make_error(ErrorCode::HttpBodyTooLarge, "response body of " + std::to_string(actual) +
+                                                       " bytes exceeds the configured limit of " +
+                                                       std::to_string(limit) + " bytes");
+}
+
+/// @brief 把已判定合法的 `Content-Length` 十进制文本转成整数（`framing_of` 已保证非负且可解析）。
+/// @param text 十进制数字文本。
+/// @return 转换值；溢出夹到 `UINT64_MAX`（越限判定随后由上限核算完成）。
+auto parse_decimal(std::string_view text) -> std::uint64_t {
+    std::uint64_t value = 0;
+    for (const char c : text) {
+        if (value > (std::numeric_limits<std::uint64_t>::max() - static_cast<std::uint64_t>(c - '0')) / 10U) {
+            return std::numeric_limits<std::uint64_t>::max();  // 夹住，交给后续上限核算拒绝
+        }
+        value = (value * 10U) + static_cast<std::uint64_t>(c - '0');
+    }
+    return value;
+}
+
+}  // namespace
+
+ResponseAssembler::ResponseAssembler(std::optional<std::uint64_t> max_body_bytes, bool request_is_head)
+    : max_body_bytes_{max_body_bytes}, request_is_head_{request_is_head} {}
+
+auto ResponseAssembler::absorb(std::string_view bytes) -> Result<void> {
+    pending_.insert(pending_.end(), bytes.begin(), bytes.end());
+    produced_ += bytes.size();
+    if (max_body_bytes_.has_value() && produced_ > *max_body_bytes_) {
+        return Result<void>{body_too_large_error(*max_body_bytes_, produced_)};
+    }
+    return Result<void>{};
+}
+
+auto ResponseAssembler::enter_body_phase() -> Result<void> {
+    switch (framing_) {
+        case BodyFraming::None:
+            complete_ = true;
+            phase_ = Phase::Ended;
+            return Result<void>{};
+        case BodyFraming::Length: {
+            const auto length = head_.headers.get("Content-Length");
+            if (!length.has_value()) {
+                return Result<void>{protocol_error("framing is Content-Length but the header is absent")};
+            }
+            content_remaining_ = parse_decimal(*length);
+            if (content_remaining_ == 0) {
+                complete_ = true;
+                phase_ = Phase::Ended;
+            }
+            return Result<void>{};
+        }
+        case BodyFraming::Chunked:
+        case BodyFraming::UntilClose:
+            return Result<void>{};
+    }
+    return Result<void>{};
+}
+
+auto ResponseAssembler::push(std::string_view bytes) -> Result<void> {
+    if (phase_ == Phase::Ended) {
+        if (!bytes.empty()) {
+            return Result<void>{protocol_error(
+                "bytes after a complete response belong to the next message, which this assembler does not consume")};
+        }
+        return Result<void>{};
+    }
+
+    buffer_.append(bytes);
+
+    if (phase_ == Phase::Head) {
+        const std::string_view view{buffer_.data(), buffer_.size()};
+        auto parsed = parse_response_head(view);
+        if (!parsed) {
+            return Result<void>{parsed.error()};
+        }
+        if (!parsed.value().has_value()) {
+            return Result<void>{};  // 头部块还没读够
+        }
+        head_ = std::move(*parsed.value());
+        head_ready_ = true;
+        auto framing = framing_of(head_, request_is_head_);
+        if (!framing) {
+            return Result<void>{framing.error()};
+        }
+        framing_ = framing.value();
+        // 头部之后（若有）的字节属于消息体，留在缓冲里交给本轮的体处理。
+        buffer_.erase(0, head_.header_bytes);
+        phase_ = Phase::Body;
+        auto entered = enter_body_phase();
+        if (!entered || phase_ != Phase::Body) {
+            return entered;
+        }
+    }
+
+    // 到这里 phase_ == Body：按分帧形态消费缓冲里的体字节。
+    switch (framing_) {
+        case BodyFraming::Length: {
+            const std::size_t take = static_cast<std::size_t>(
+                std::min<std::uint64_t>(content_remaining_, static_cast<std::uint64_t>(buffer_.size())));
+            if (take > 0) {
+                auto ok = absorb(std::string_view{buffer_.data(), take});
+                if (!ok) {
+                    return ok;
+                }
+                buffer_.erase(0, take);
+                content_remaining_ -= take;
+            }
+            if (content_remaining_ == 0) {
+                complete_ = true;
+                phase_ = Phase::Ended;
+            }
+            return Result<void>{};
+        }
+        case BodyFraming::Chunked: {
+            const std::string_view body{buffer_.data(), buffer_.size()};
+            auto pushed = chunked_.push(body);
+            buffer_.clear();  // 分块解码器自持缓冲，本层不再留原件
+            if (!pushed) {
+                return pushed;
+            }
+            std::vector<char> decoded;
+            chunked_.drain(decoded);
+            auto ok = absorb(std::string_view{decoded.data(), decoded.size()});
+            if (!ok) {
+                return ok;
+            }
+            if (chunked_.complete()) {
+                complete_ = true;
+                phase_ = Phase::Ended;
+            }
+            return Result<void>{};
+        }
+        case BodyFraming::UntilClose: {
+            if (!buffer_.empty()) {
+                auto ok = absorb(std::string_view{buffer_.data(), buffer_.size()});
+                buffer_.clear();
+                if (!ok) {
+                    return ok;
+                }
+            }
+            return Result<void>{};  // 只在对端 FIN 后才算完整
+        }
+        case BodyFraming::None:
+            return Result<void>{};  // enter_body_phase 已置完整
+    }
+    return Result<void>{};
+}
+
+auto ResponseAssembler::peer_closed() -> Result<void> {
+    if (phase_ == Phase::Body && framing_ == BodyFraming::UntilClose) {
+        complete_ = true;
+        phase_ = Phase::Ended;
+    }
+    return Result<void>{};
+}
+
+auto ResponseAssembler::drain_body(std::vector<char> &out) -> void {
+    out.insert(out.end(), pending_.begin(), pending_.end());
+    pending_.clear();
+}
+
 }  // namespace aurora::net::wire

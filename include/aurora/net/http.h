@@ -95,8 +95,8 @@ class Request {
     /// @brief 生成 `DELETE` 请求。
     /// @param url 目标 URL 文本。
     /// @return 请求值（方法 `Delete`）。
-    // NOLINTNEXTLINE(readability-identifier-naming)：`delete` 是关键字，尾下划线是与其它同名工厂对齐的既定拼写
-    [[nodiscard]] static auto delete_(std::string_view url) -> Request;
+    /// @note 名字尾下划线是因为 `delete` 是 C++ 关键字，无法直接作为工厂名。
+    [[nodiscard]] static auto delete_(std::string_view url) -> Request;  // NOLINT(readability-identifier-naming)
 
     /// @brief 方法。
     /// @return 构造时确定的方法枚举。

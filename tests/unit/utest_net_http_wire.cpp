@@ -7,7 +7,10 @@
 ///           1xx/204/304 与 HEAD 恒无体、多个不一致 `Content-Length` 判歧义）；请求序列化的三处校验两处
 ///           补齐（方法须为 token、字段名须为 token、字段值不得含 CR/LF 即头部注入入口，缺 `Host` 按
 ///           目标 URL 补齐含非缺省端口、空 path 补 `/`、IPv6 补方括号）；分块解码状态机的跨投递累积、
-///           块扩展忽略、终止块与 trailer、长度字段溢出与越上限、缺 CRLF、终止后余字节的分岔。
+///           块扩展忽略、终止块与 trailer、长度字段溢出与越上限、缺 CRLF、终止后余字节的分岔；应答装配
+///           状态机（`ResponseAssembler`）把上述三件按线上次序串起：跨投递物化 `Content-Length` 与
+///           chunked 体、HEAD 应答恒无体、`UntilClose` 只在对端 FIN 后完整、体累计越限落
+///           `http-body-too-large`、完整之后再喂字节判畸形（流水线不在本库面内）。
 /// 全用例零 socket、零 DNS、不读环境变量，故三平台行为一致、wasm 腿同样可跑，无需 `AURORA_TEST_SKIP`。
 
 #include <cstddef>
@@ -290,6 +293,85 @@ AURORA_TEST_CASE(chunked_decoder_rejects_malformed) {
     const auto terminator = trailing_bytes.push("0\r\n\r\n");
     AURORA_TEST_REQUIRE_MSG(bool(terminator), terminator ? std::string{} : terminator.error().message);
     AURORA_TEST_CHECK_FALSE(bool(trailing_bytes.push("GET / HTTP/1.1")));
+}
+
+namespace {
+
+/// @brief 取走装配器已解码的明文体并转成字符串。
+/// @param assembler 已装配的应答装配器。
+/// @return 明文体文本。
+[[nodiscard]] auto assembled_body(wire::ResponseAssembler &assembler) -> std::string {
+    std::vector<char> out;
+    assembler.drain_body(out);
+    return std::string{out.begin(), out.end()};
+}
+
+/// @brief 逐段送入字节，任一段失败即致命失败（把「不该畸形」写成断言前置）。
+/// @param assembler 装配器。
+/// @param segments 字节分段。
+auto feed(wire::ResponseAssembler &assembler, const std::vector<std::string> &segments) -> void {
+    for (const auto &segment : segments) {
+        const auto pushed = assembler.push(segment);
+        AURORA_TEST_REQUIRE_MSG(bool(pushed), pushed ? std::string{} : pushed.error().message);
+    }
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(assembler_materializes_content_length_across_splits) {
+    wire::ResponseAssembler assembler{std::nullopt, false};
+    // 头部块与体首段同批抵达，余下体分两次到：装配必须跨投递累积。
+    feed(assembler, {"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhe", "ll", "o"});
+    AURORA_TEST_REQUIRE(assembler.head_ready());
+    AURORA_TEST_CHECK_EQ(assembler.head().status, std::uint16_t{200});
+    AURORA_TEST_CHECK(assembler.framing() == wire::BodyFraming::Length);
+    AURORA_TEST_CHECK_TRUE(assembler.complete());
+    AURORA_TEST_CHECK_EQ(assembled_body(assembler), "hello");
+}
+
+AURORA_TEST_CASE(assembler_materializes_chunked_body) {
+    wire::ResponseAssembler assembler{std::nullopt, false};
+    feed(assembler, {"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nab", "c\r\n2\r\nde\r\n", "0\r\n\r\n"});
+    AURORA_TEST_CHECK(assembler.framing() == wire::BodyFraming::Chunked);
+    AURORA_TEST_CHECK_TRUE(assembler.complete());
+    AURORA_TEST_CHECK_EQ(assembled_body(assembler), "abcde");
+}
+
+AURORA_TEST_CASE(assembler_head_response_carries_no_body) {
+    wire::ResponseAssembler assembler{std::nullopt, true};
+    // HEAD 请求的应答即便带 Content-Length 也恒无体：整条应答在头部块到位即完整。
+    feed(assembler, {"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n"});
+    AURORA_TEST_CHECK(assembler.framing() == wire::BodyFraming::None);
+    AURORA_TEST_CHECK_TRUE(assembler.complete());
+    AURORA_TEST_CHECK_EQ(assembled_body(assembler), "");
+}
+
+AURORA_TEST_CASE(assembler_enforces_body_limit) {
+    wire::ResponseAssembler assembler{std::uint64_t{4}, false};
+    const auto pushed = assembler.push("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello");
+    AURORA_TEST_REQUIRE_FALSE(bool(pushed));
+    AURORA_TEST_CHECK_EQ(pushed.error().code_enum, aurora::ErrorCode::HttpBodyTooLarge);
+    AURORA_TEST_CHECK_TRUE(!assembler.complete());
+}
+
+AURORA_TEST_CASE(assembler_until_close_needs_peer_closed) {
+    wire::ResponseAssembler assembler{std::nullopt, false};
+    // 既无 Content-Length 又非 chunked 的 200：体到对端关闭为止。
+    feed(assembler, {"HTTP/1.1 200 OK\r\n\r\nbo", "dy"});
+    AURORA_TEST_CHECK(assembler.framing() == wire::BodyFraming::UntilClose);
+    AURORA_TEST_CHECK_TRUE(!assembler.complete());
+    const auto closed = assembler.peer_closed();
+    AURORA_TEST_REQUIRE(bool(closed));
+    AURORA_TEST_CHECK_TRUE(assembler.complete());
+    AURORA_TEST_CHECK_EQ(assembled_body(assembler), "body");
+}
+
+AURORA_TEST_CASE(assembler_rejects_bytes_after_complete) {
+    wire::ResponseAssembler assembler{std::nullopt, false};
+    feed(assembler, {"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nab"});
+    AURORA_TEST_REQUIRE(assembler.complete());
+    // 完整之后再喂字节属下一条消息（流水线不在本库面内），本层判畸形而不是悄悄吞下。
+    AURORA_TEST_CHECK_FALSE(bool(assembler.push("HTTP/1.1 204 No Content\r\n\r\n")));
 }
 
 }  // namespace aurora::test_cases::utest_net_http_wire
