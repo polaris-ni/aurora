@@ -4751,6 +4751,14 @@
   ],
   "enums": [
     {
+      "name": "AddressFamily",
+      "values": [
+        "IPv4",
+        "IPv6",
+        "LocalPath"
+      ]
+    },
+    {
       "name": "Alignment",
       "values": [
         "TopLeft",
@@ -4787,6 +4795,14 @@
         "AURORA_GRAY",
         "AURORA_YELLOW",
         "AURORA_TRANSPARENT"
+      ]
+    },
+    {
+      "name": "CompressionFormat",
+      "values": [
+        "Gzip",
+        "Zlib",
+        "Deflate"
       ]
     },
     {
@@ -4977,6 +4993,13 @@
       ]
     },
     {
+      "name": "LengthByteOrder",
+      "values": [
+        "Big",
+        "Little"
+      ]
+    },
+    {
       "name": "LengthKind",
       "values": [
         "WrapContent",
@@ -5022,11 +5045,35 @@
       ]
     },
     {
+      "name": "ProxyKind",
+      "values": [
+        "Direct",
+        "HttpConnect",
+        "Socks5"
+      ]
+    },
+    {
+      "name": "ResourcePhase",
+      "values": [
+        "Loading",
+        "Ready",
+        "Failed"
+      ]
+    },
+    {
       "name": "ScrollSnapAlignment",
       "values": [
         "Start",
         "Center",
         "End"
+      ]
+    },
+    {
+      "name": "ShutdownMode",
+      "values": [
+        "Read",
+        "Write",
+        "Both"
       ]
     },
     {
@@ -5042,6 +5089,13 @@
         "Loose",
         "Expand",
         "Passthrough"
+      ]
+    },
+    {
+      "name": "StreamPolicy",
+      "values": [
+        "Append",
+        "Replace"
       ]
     },
     {
@@ -5077,6 +5131,15 @@
         "Clip",
         "Ellipsis",
         "Fade"
+      ]
+    },
+    {
+      "name": "TlsVersion",
+      "values": [
+        "Tls10",
+        "Tls11",
+        "Tls12",
+        "Tls13"
       ]
     },
     {
@@ -5742,6 +5805,39 @@
       "hint": "JSON has no textual form for NaN/Inf; replace the value or drop it"
     },
     {
+      "enum": "CompressionDataCorrupt",
+      "slug": "compression-data-corrupt",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Compressed stream is corrupt or truncated: '{detail}'",
+      "hint": "The bytes do not form a valid gzip/zlib/deflate stream (bad magic, truncated mid-symbol, or trailing checksum mismatch). Verify the payload was not cut in transit; retrying the same bytes reproduces the same rejection, so this is a data problem rather than a transient one"
+    },
+    {
+      "enum": "CompressionOutputTooLarge",
+      "slug": "compression-output-too-large",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "Decompressed output exceeds the configured limit: '{detail}'",
+      "hint": "The stream is valid but its decompressed size crossed DecompressOptions::max_output_bytes, the decompression-bomb guard. Raise the limit if the payload is legitimately large, or stream it with Decompressor and process chunks as they arrive instead of materializing everything"
+    },
+    {
+      "enum": "CompressionUnavailable",
+      "slug": "compression-unavailable",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "Compression operation unavailable in this build: '{detail}'",
+      "hint": "Either the format is not compiled in (the AURORA_ENABLE_COMPRESSION build option gates gzip/zlib/deflate decompression) or the direction is not implemented (this batch ships decompression only; the compress entry point is designed but returns this error until an encoder lands). Decompressing with AURORA_ENABLE_COMPRESSION=ON is the available path"
+    },
+    {
       "enum": "StorageBackendUnavailable",
       "slug": "storage-backend-unavailable",
       "category": "io",
@@ -6191,6 +6287,336 @@
       "retryable": false,
       "message": "Clipboard format unsupported on this platform: '{mime}'",
       "hint": "This platform exposes no mechanism for the requested MIME type; query available_formats() first, or fall back to text/plain"
+    },
+    {
+      "enum": "NetEndpointInvalid",
+      "slug": "net-endpoint-invalid",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Network endpoint is not a valid address: '{detail}'",
+      "hint": "Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use Endpoint::local for UnixSocket paths or named pipes"
+    },
+    {
+      "enum": "NetCancelled",
+      "slug": "net-cancelled",
+      "category": "io",
+      "severity": "info",
+      "auto_fixable": false,
+      "fix_category": "cancelled",
+      "retryable": true,
+      "message": "Network operation was cancelled",
+      "hint": "The caller cancelled this operation (or its owner went away); the completion still fires once with this code, so drop the result only if the owner is gone"
+    },
+    {
+      "enum": "NetPlatformUnavailable",
+      "slug": "net-platform-unavailable",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "platform_capability",
+      "retryable": false,
+      "message": "This network capability is unavailable on the current platform",
+      "hint": "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait semantics (e.g. wasm), so there is no silent fallback by design"
+    },
+    {
+      "enum": "NetUrlInvalid",
+      "slug": "net-url-invalid",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "URL is not a valid absolute or resolvable reference: '{detail}'",
+      "hint": "Pass a complete URL with scheme (e.g. https://host/path) or a reference to resolve against a base URL; percent signs must introduce a two-hex-digit escape and IPv6 literals need brackets"
+    },
+    {
+      "enum": "NetProxyConfigInvalid",
+      "slug": "net-proxy-config-invalid",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Proxy configuration is not valid: '{detail}'",
+      "hint": "Fix the value instead of ignoring it: a proxy URL is scheme://[user[:pass]@]host[:port] with no path, and a NO_PROXY entry is *, a domain, a domain with :port, or an IPv4/IPv6 CIDR; a malformed proxy setting must never fall back to a direct connection"
+    },
+    {
+      "enum": "NetProxyUnsupported",
+      "slug": "net-proxy-unsupported",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "This proxy protocol is not supported by the current build",
+      "hint": "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a plaintext proxy hop"
+    },
+    {
+      "enum": "NetProxyUnreachable",
+      "slug": "net-proxy-unreachable",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": true,
+      "message": "Proxy tunnel could not be established: '{detail}'",
+      "hint": "The proxy answered (or refused) but no tunnel was built; connect never fell back to direct on purpose, so check the proxy host/port and its own uplink rather than the target host"
+    },
+    {
+      "enum": "NetProxyAuthRequired",
+      "slug": "net-proxy-auth-required",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Proxy rejected the supplied credentials: '{detail}'",
+      "hint": "The proxy demanded authentication that was absent or refused: 407 on HTTP CONNECT, or a non-zero status on the SOCKS5 username/password subnegotiation; supply credentials in the proxy URL or re-authenticate once, do not retry blindly"
+    },
+    {
+      "enum": "NetProxyProtocol",
+      "slug": "net-proxy-protocol",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Proxy handshake is not protocol-conformant: '{detail}'",
+      "hint": "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server where a proxy port was expected"
+    },
+    {
+      "enum": "NetDnsFailed",
+      "slug": "net-dns-failed",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": true,
+      "message": "Host name could not be resolved: '{detail}'",
+      "hint": "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test"
+    },
+    {
+      "enum": "NetProxyConfigUnreadable",
+      "slug": "net-proxy-config-unreadable",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": true,
+      "message": "Operating-system proxy settings could not be read: '{detail}'",
+      "hint": "The channel exists on this platform but the read was refused (registry access, dynamic-store failure); this is distinct from a machine that simply has no proxy configured, and the library never treats the two as the same outcome"
+    },
+    {
+      "enum": "NetOptionFailed",
+      "slug": "net-option-failed",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "Socket option or shutdown call failed: '{detail}'",
+      "hint": "setsockopt / getsockopt / shutdown returned an error (bad handle state, unsupported option, or the peer already reset the connection); the native code is in the message, check the option name and whether the socket is still connected"
+    },
+    {
+      "enum": "NetConnectTimeout",
+      "slug": "net-connect-timeout",
+      "category": "io",
+      "severity": "warning",
+      "auto_fixable": false,
+      "fix_category": "timeout",
+      "retryable": true,
+      "message": "Connection attempt timed out: '{detail}'",
+      "hint": "The non-blocking connect did not produce a result within the configured deadline; a black-holed peer or an unreachable route looks identical to a slow one from here, so retry with a longer StreamOptions::connect_timeout or fall back to another candidate address"
+    },
+    {
+      "enum": "NetBufferLimit",
+      "slug": "net-buffer-limit",
+      "category": "io",
+      "severity": "warning",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": true,
+      "message": "Transfer buffer limit exceeded: '{detail}'",
+      "hint": "Backpressure fired: pending bytes reached the high-water mark, pending reads exceeded the read-buffer cap, or a framed message overflowed its limit; slow the producer down or raise the matching StreamOptions field rather than dropping data"
+    },
+    {
+      "enum": "NetFramerOverflow",
+      "slug": "net-framer-overflow",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "Framed message exceeds its configured limit: '{detail}'",
+      "hint": "The stream produced a single message larger than FrameOptions::max_frame_bytes, or a length prefix declaring more bytes than the limit allows; raise the limit only for a protocol that genuinely carries such frames, otherwise treat the stream as malformed and close it rather than resynchronising inside an oversized frame"
+    },
+    {
+      "enum": "NetFramerConfigInvalid",
+      "slug": "net-framer-config-invalid",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Invalid framer configuration: '{detail}'",
+      "hint": "A Framer factory was given a limit of 0, an empty or oversized delimiter, or a length field width outside 1..8 bytes; framing must be configured before it is used, because a silent default here would either accept unbounded frames or split messages at the wrong place"
+    },
+    {
+      "enum": "NetOptionConflict",
+      "slug": "net-option-conflict",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Socket option conflicts with the current configuration: '{detail}'",
+      "hint": "Two settings cannot both hold on one socket (a connected UDP socket receives only from its peer, so joining a multicast group there would configure a socket that can never receive the group); use a second socket for the other form rather than reordering the calls"
+    },
+    {
+      "enum": "NetTlsHandshakeFailed",
+      "slug": "net-tls-handshake-failed",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "TLS handshake failed: '{detail}'",
+      "hint": "The peer aborted or refused the negotiation (unsupported cipher suite, alert from the server, truncated handshake, or a plaintext endpoint answering on a TLS port); the transport is unusable after this and must be closed. Reproduce with the peer's TLS logs before changing TlsContext, because retrying the same parameters only reproduces the same alert"
+    },
+    {
+      "enum": "NetTlsCertRejected",
+      "slug": "net-tls-cert-rejected",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "TLS certificate rejected: '{detail}'",
+      "hint": "Chain verification failed (unknown issuer, expired or not-yet-valid leaf, hostname mismatch, or a policy constraint). Install the issuing CA into the trust root used by this TlsContext, or point TlsContext::add_trusted_certificate at the right PEM; do not reach for allow_insecure_certificate, which turns a real man-in-the-middle signal off for the whole transport"
+    },
+    {
+      "enum": "NetTlsVersionMismatch",
+      "slug": "net-tls-version-mismatch",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "TLS protocol version mismatch: '{detail}'",
+      "hint": "TlsContext::min_version rules out every version the peer is willing to speak (commonly a TLS 1.3-only floor against a 1.2 endpoint). Lower the floor deliberately and record why, rather than mirroring the peer automatically: the floor is the negotiated security baseline"
+    },
+    {
+      "enum": "NetTlsEngineUnavailable",
+      "slug": "net-tls-engine-unavailable",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "No TLS backend available: '{detail}'",
+      "hint": "This platform has no system TLS stack that Aurora drives, and the build supplied no provider, so net::Engine::capabilities().tls is false. Configure AURORA_NET_TLS_PROVIDER=<static|shared>:<prefix> with an OpenSSL or mbedTLS installation, or run the request over plain transport on a trusted network; linking TLS sources into the library is not a supported route"
+    },
+    {
+      "enum": "NetTlsPinMismatch",
+      "slug": "net-tls-pin-mismatch",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "TLS certificate pin mismatch: '{detail}'",
+      "hint": "The peer's certificate does not carry any pinned public key, so the pinned identity changed (key rotation, reissued certificate, or an interception proxy). Update the pinned SPKI digests from an out-of-band source you trust and rotate them in lockstep with the service; never fall back to allow_insecure_certificate, which defeats the pin entirely"
+    },
+    {
+      "enum": "HttpRequestInvalid",
+      "slug": "http-request-invalid",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "HTTP request cannot be sent as written: '{detail}'",
+      "hint": "The request violates the message grammar before any byte is written (unknown method text, a header name outside the token charset, a header value containing CR or LF, or a target URL without a host). Fix the request at the call site; the peer never sees it, so retrying with the same fields reproduces the same rejection"
+    },
+    {
+      "enum": "HttpTimeout",
+      "slug": "http-timeout",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "timeout",
+      "retryable": true,
+      "message": "HTTP request timed out: '{detail}'",
+      "hint": "The detail names which of the three stages expired (connect, read_idle or total), and they mean different things: connect says nothing answered, read_idle says the body stalled mid-flight, total says the whole exchange overran. Raise only the stage that fired - a blanket total budget turns slow-but-healthy transfers into failures"
+    },
+    {
+      "enum": "HttpRedirectLimit",
+      "slug": "http-redirect-limit",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "HTTP redirect chain exceeded the configured limit: '{detail}'",
+      "hint": "Either the peer is bouncing between targets or the limit is genuinely too small for this endpoint's chain. Inspect the Location sequence in the diagnostics before raising the limit, because following a cycle also leaks credentials to each hop it revisits"
+    },
+    {
+      "enum": "HttpBodyTooLarge",
+      "slug": "http-body-too-large",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "HTTP response body exceeds the configured limit: '{detail}'",
+      "hint": "The guard is what keeps a wrong URL (a video behind a shortened link) from exhausting memory. The detail says which ceiling was crossed: max_body_bytes bounds the bytes that arrived on the wire, max_decompressed_bytes bounds the transparently decompressed payload (the decompression-bomb guard). Raise the one that fired if the payload is legitimately large, or switch to open_stream so the body is delivered in bounded chunks instead of materialized"
+    },
+    {
+      "enum": "HttpCharsetUnsupported",
+      "slug": "http-charset-unsupported",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "HTTP response charset is not supported: '{detail}'",
+      "hint": "Response::text() decodes only UTF-8 and Latin-1 in this batch, so a body labelled with any other charset cannot be turned into text here. The undecoded bytes are always reachable through body(), so transcoding is the caller's to do; do not silently substitute U+FFFD or reinterpret the bytes as UTF-8, which would corrupt the payload"
+    },
+    {
+      "enum": "HttpProtocolError",
+      "slug": "http-protocol-error",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "HTTP peer violated the message grammar: '{detail}'",
+      "hint": "The response is not parseable as HTTP/1.1 (bad status line, a chunk size that is not hexadecimal, framing that declares both Content-Length and an unknown Transfer-Encoding, or a body longer than its declared length). Close the connection and re-issue on a fresh one, because the byte stream is now misaligned and no later response on it can be trusted"
+    },
+    {
+      "enum": "HttpContentEncodingUnsupported",
+      "slug": "http-content-encoding-unsupported",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "HTTP response content encoding is not supported: '{detail}'",
+      "hint": "The peer applied a content coding this client cannot undo - either the coding name is outside the advertised set (brotli and zstd are not built here) or the build was configured with AURORA_ENABLE_COMPRESSION=OFF, in which case no decoder exists and the request deliberately never advertised Accept-Encoding. Re-request with an encoding you can decode (Request::header sets Accept-Encoding; an identity body always arrives undecoded); never reinterpret the compressed bytes as text, which would hand the caller garbage"
+    },
+    {
+      "enum": "HttpBodyCorrupt",
+      "slug": "http-body-corrupt",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "HTTP response body cannot be decoded: '{detail}'",
+      "hint": "The message framed cleanly but its payload did not survive the declared content coding: the gzip/zlib/deflate stream is corrupt, truncated mid-symbol, or fails its trailing checksum. This is a data defect (at the peer, or in the encoding chain it declared), not a transport fault - the bytes arrived whole, so retrying the same target only re-fetches the same broken payload; check the declared Content-Encoding chain before suspecting the link"
     }
   ],
   "debug": [
