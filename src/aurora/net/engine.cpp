@@ -37,6 +37,7 @@
 #include "aurora/net/detail/async_io.h"
 #include "aurora/net/detail/engine_override.h"
 #include "aurora/net/detail/runtime.h"
+#include "aurora/net/detail/tls_backend.h"
 #include "aurora/net/poll.h"
 #include "aurora/state/async.h"
 
@@ -126,11 +127,14 @@ class PollEngine final : public Engine {
         caps.streaming = true;  // native 不受 ReadableStream 支持度约束（§18-6 的平台限制位）
         caps.custom_headers = true;  // native 无 CORS 预检约束
         caps.event_source = app::EventSourceRegistry::instance().event_source_supported();
-        caps.udp = true;  // 数据报形态随 `DatagramTransport` 落地（本机 IPC 与 TLS 仍未落地，位不先点亮）
+        caps.udp = true;  // 数据报形态随 `DatagramTransport` 落地（能力位不先于实现点亮）
         caps.dns = true;  // 名称解析随 `net::Resolver` 落地（同一句「能力位不得先于实现点亮」的补账）
         // 本机 IPC 位由运行期探测决定：头文件提供 `AF_UNIX` 与真的能开出这个地址族是两件事，
-        // Windows 上「编译过」只说明前一件。tls 仍恒 false——该形态的实现尚未落地。
+        // Windows 上「编译过」只说明前一件。
         caps.local_ipc = detail::local_ipc_supported();
+        // TLS 位与「`handshake()` 真的能成功」同源：由被编译进来的那个后端 TU 定义探测口，
+        // 没有后端时 `tls_unavailable.cpp` 答 false，调用方据此降级而不必去分支一条不存在的路径。
+        caps.tls = detail::tls_backend_available();
         return caps;
     }
 

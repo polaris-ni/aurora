@@ -167,6 +167,7 @@ namespace aurora::tools {
     enums["LengthByteOrder"] = {"Big", "Little"};
     enums["ProxyKind"] = {"Direct", "HttpConnect", "Socks5"};
     enums["ShutdownMode"] = {"Read", "Write", "Both"};
+    enums["TlsVersion"] = {"Tls10", "Tls11", "Tls12", "Tls13"};
 
     // ---- declarative binding (aurora::Resource / aurora::StreamResource, state/resource.h) ----
     enums["ResourcePhase"] = {"Loading", "Ready", "Failed"};

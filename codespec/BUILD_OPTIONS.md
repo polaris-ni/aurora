@@ -39,6 +39,30 @@
 | `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元，另可按 `AURORA_LINT_SHARD` 分片；须在全部目标定义之后 include） |
 | `cmake/AuroraFormat.cmake` | `AURORA_ENABLE_CLANG_FORMAT`（`format` / `format-check` 聚合目标，经 `tools/check/run_clang_format.py` 并行校验 / 重写非 third_party 源文件；与目标定义无关，放最后 include 亦可） |
 | `cmake/AuroraCheckTestRegistry.cmake` | **遗留模块**：当前无 CMake `include()` 引用（`registry_integrity` 已改由 `AuroraTests.cmake` 直接注册 python 脚本 `check_test_registry.py`）；保留仅供手工 / 历史参考，不计入常规构建 |
+| `cmake/AuroraNetTls.cmake` | TLS 后端装配的**唯一决策点**（CHG-010 TLS 切片）：`AURORA_NET_TLS_PROVIDER` 缓存变量、系统栈缺省装配、provider 头/库探测、引擎宏推导、导入目标 `aurora::net::tls`。细则见 §1.2 |
+
+### 1.2 TLS 后端引擎宏与 `AURORA_NET_TLS_PROVIDER`（CHG-010，第四族命名）
+
+`aurora::net` 的事件引擎、事件源注册口与传输族**没有开关**：公共 API 恒在（提案 §8 的第一句裁决），裁剪面只落在「哪个 TLS 引擎被编进来」这一处，因此 `AURORA_ENABLE_NET` / `AURORA_NET_ENGINE_POLL` / `AURORA_NET_EVENT_SOURCE` / `AURORA_NET_HTTP_FETCH` 四枚原规划宏**不属首批落地面**（提案 §8 的宏表按本条读取，「平台 HTTP 引擎与 wasm `fetch`」本就是 §16 的非目标）。
+
+| 宏 | 默认 | 语义 |
+|:---|:---|:---|
+| `AURORA_NET_TLS_SCHANNEL` | Windows 且未给 provider 时 `ON` | 系统栈 TLS 引擎（零依赖，随 servicing 打补丁） |
+| `AURORA_NET_TLS_SECURE_TRANSPORT` | macOS 且未给 provider 时 `ON` | 系统栈 TLS 引擎 |
+| `AURORA_NET_TLS_OPENSSL` / `AURORA_NET_TLS_MBEDTLS` | **由探测推导，不接受手工设置**（`-DAURORA_NET_TLS_OPENSSL=ON` 一类不认） | provider 库适配引擎 |
+
+四枚都是 **`PRIVATE` 作用域**：公共头零 `#ifdef`（`SPEC.PLATFORM.ZERO-IFDEF.001`），消费者编译不需要它们，故也不 `EXPORT`——导出会让安装侧出现「头里没有、宏却有」的剪裁不一致，也不进 `aurora::debug::feature_flags()`。运行期真值另有唯一入口：`Engine::capabilities().tls` 由被编译进来的那个后端 TU 定义的 `detail::tls_backend_available()` 回答，因此能力位与「调用真的能成功」严格同源（见 `specification/06-app-platform.md` §8.8.18）。Linux / 其它 POSIX 腿**没有缺省系统栈**：未给 provider 即编译 `tls_unavailable.cpp`，`capabilities().tls` 为 false、TLS 构造报 `net-tls-engine-unavailable`，不存在退回明文的通路。
+
+`AURORA_NET_TLS_PROVIDER`（缓存变量，非宏）值形如 `<static|shared>:<prefix>`：
+
+- `prefix` **只接受安装根**（含 `include/` 与 `lib/`，形如 `static:/opt/mbedtls`、`shared:/usr/local`），不做向上猜测或递归搜索；写错路径时诊断打印实际检查过的组合。分隔符只按第一个冒号切分，故 Windows 安装根的盘符冒号（`C:\openssl`）合法。
+- 引擎种类由头探测推导：`<prefix>/include/openssl/ssl.h` → OpenSSL，`<prefix>/include/mbedtls/ssl.h` → mbedTLS；**两者皆无即 configure 期硬失败**（不静默降级为「无 TLS」），多命中时 OpenSSL 优先并在配置日志显式记录。
+- 库定位只在 `<prefix>/lib` 及其 multiarch 子目录（`lib/<三元组>`，Debian 系的实际位置）查找，找不到对应库同样 configure 期硬失败；mbedTLS 额外要求 `mbedx509`（证书链解析在 TLS 记录层之外）。
+- 探测通过后生成导入目标 `aurora::net::tls`（本体 / 测试 / 工具共用同一份 include 与库路径）；`shared` 的运行期寻址交宿主部署负责，本模块不写 RPATH、不拷 DLL。
+- 仓库**不自带任何 TLS 源码**：`third_party/` 无新增、`THIRD_PARTY_LICENSES.md` 不变（许可证由 provider 提供方自负）、「断网可构建」不变。
+- CI 为此新增 `tls-providers` 作业（三枚矩阵项：Linux `static:/usr` 指向 mbedTLS、Windows `shared:` 指向作业自建 vcpkg 根的 OpenSSL、macOS 系统栈），保证两套 provider 适配与系统栈缺省装配都有真编译覆盖；作业清单见 `.github/workflows/ci.yml` 头注释第 3b 项。
+- **静态 mbedTLS 的归档次序由本模块负责**：链接面按 `mbedtls → mbedx509 → mbedcrypto` 给出（x509 必须排在 crypto **之前**，否则 GNU ld 的单遍扫描会把 x509 对 crypto 的引用留在已收档的 crypto 之后而未解析）。次序写在 `cmake/AuroraNetTls.cmake` 的导入目标里，使用方不需要在自己一侧再排一遍，也不需要 `--start-group` 一类的兜底。
+- **macOS 系统栈腿的版本口径**：`SecureTransport` 整族自 macOS 10.15 起弃用，该 TU 因此整段关闭 `-Wdeprecated-declarations`（只圈本文件，不外溢到其他源）；所选 API 组合把**运行期下限留在 macOS 10.14**（`SecTrustEvaluateWithError` 是其中下限最高的一枚，ALPN 两枚访问器自 10.13、取链访问器自 10.7）。本仓不设 `CMAKE_OSX_DEPLOYMENT_TARGET`，故这是「本库能在哪个版本上跑起来」的下限声明，不改变使用方自己的部署目标。
 
 ---
 
@@ -771,7 +795,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 | `freetype` | 随附 FreeType 静态库 |
 | `harfbuzz` | 随附 HarfBuzz 静态库 |
 
-`Aurora::aurora` 自动传递链接：`freetype` + `harfbuzz` + zlib（FreeType 解压字体表需要，尽力定位；找不到则跳过）+ `winpthread` / `pthread`（HarfBuzz 内部互斥，MinGW 下为 `winpthread`）+ Win32 系统库（`user32 gdi32 shell32 ole32 uuid imm32 dwmapi advapi32`，仅 `WIN32`；`dwmapi`/`advapi32` 供 CSD 能力探测与 `os_color_scheme` 注册表读取）+ 网络系统库（`WIN32`：`ws2_32` 供 `aurora::net` 传输层、`winhttp` 供系统代理采集腿；`APPLE`：`-framework SystemConfiguration` 与 `-framework CoreFoundation` 供同一采集腿的动态存储读取，与后端开关无关）。消费者**无需**手动 `find_package(FreeType)` / `find_package(HarfBuzz)`。
+`Aurora::aurora` 自动传递链接：`freetype` + `harfbuzz` + zlib（FreeType 解压字体表需要，尽力定位；找不到则跳过）+ `winpthread` / `pthread`（HarfBuzz 内部互斥，MinGW 下为 `winpthread`）+ Win32 系统库（`user32 gdi32 shell32 ole32 uuid imm32 dwmapi advapi32`，仅 `WIN32`；`dwmapi`/`advapi32` 供 CSD 能力探测与 `os_color_scheme` 注册表读取）+ 网络系统库（`WIN32`：`ws2_32` 供 `aurora::net` 传输层、`winhttp` 供系统代理采集腿、`secur32 crypt32 bcrypt` 供 Schannel TLS 后端（握手与记录层 / 证书链与 DN 文本 / SPKI 摘要），三枚只在「系统栈缺省装配」时挂上，provider 形态改由导入目标 `aurora::net::tls` 传导；`APPLE`：`-framework SystemConfiguration` 与 `-framework CoreFoundation` 供同一采集腿的动态存储读取、`-framework Security` 与 `-framework CoreFoundation` 供 SecureTransport TLS 后端，均与渲染后端开关无关）。消费者**无需**手动 `find_package(FreeType)` / `find_package(HarfBuzz)`。
 
 ### 9.3 feature 宏导出约定
 

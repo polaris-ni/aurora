@@ -148,6 +148,11 @@ enum class ErrorCode : std::uint16_t { // NOLINT(*-enum-size)
     NetFramerOverflow = 104,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
     NetFramerConfigInvalid = 105,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
     NetOptionConflict = 106,  ///< net-option-conflict
+    NetTlsHandshakeFailed = 107,  ///< net-tls-handshake-failed: TLS handshake failed: '{detail}'
+    NetTlsCertRejected = 108,  ///< net-tls-cert-rejected: TLS certificate rejected: '{detail}'
+    NetTlsVersionMismatch = 109,  ///< net-tls-version-mismatch: TLS protocol version mismatch: '{detail}'
+    NetTlsEngineUnavailable = 110,  ///< net-tls-engine-unavailable: No TLS backend available: '{detail}'
+    NetTlsPinMismatch = 111,  ///< net-tls-pin-mismatch: TLS certificate pin mismatch: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -165,7 +170,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 107> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 112> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1450,6 +1455,66 @@ inline constexpr std::array<ErrorMeta, 107> AURORA_ERROR_TABLE = {
             .retryable = false,
             .message_tpl = "Socket option conflicts with the current configuration: '{detail}'",
             .hint = "Two settings cannot both hold on one socket (a connected UDP socket receives only from its peer, so joining a multicast group there would configure a socket that can never receive the group); use a second socket for the other form rather than reordering the calls",
+        },
+        {
+            .code = ErrorCode::NetTlsHandshakeFailed,
+            .ident = "NetTlsHandshakeFailed",
+            .slug = "net-tls-handshake-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "TLS handshake failed: '{detail}'",
+            .hint = "The peer aborted or refused the negotiation (unsupported cipher suite, alert from the server, truncated handshake, or a plaintext endpoint answering on a TLS port); the transport is unusable after this and must be closed. Reproduce with the peer's TLS logs before changing TlsContext, because retrying the same parameters only reproduces the same alert",
+        },
+        {
+            .code = ErrorCode::NetTlsCertRejected,
+            .ident = "NetTlsCertRejected",
+            .slug = "net-tls-cert-rejected",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "TLS certificate rejected: '{detail}'",
+            .hint = "Chain verification failed (unknown issuer, expired or not-yet-valid leaf, hostname mismatch, or a policy constraint). Install the issuing CA into the trust root used by this TlsContext, or point TlsContext::add_trusted_certificate at the right PEM; do not reach for allow_insecure_certificate, which turns a real man-in-the-middle signal off for the whole transport",
+        },
+        {
+            .code = ErrorCode::NetTlsVersionMismatch,
+            .ident = "NetTlsVersionMismatch",
+            .slug = "net-tls-version-mismatch",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "TLS protocol version mismatch: '{detail}'",
+            .hint = "TlsContext::min_version rules out every version the peer is willing to speak (commonly a TLS 1.3-only floor against a 1.2 endpoint). Lower the floor deliberately and record why, rather than mirroring the peer automatically: the floor is the negotiated security baseline",
+        },
+        {
+            .code = ErrorCode::NetTlsEngineUnavailable,
+            .ident = "NetTlsEngineUnavailable",
+            .slug = "net-tls-engine-unavailable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "No TLS backend available: '{detail}'",
+            .hint = "This platform has no system TLS stack that Aurora drives, and the build supplied no provider, so net::Engine::capabilities().tls is false. Configure AURORA_NET_TLS_PROVIDER=<static|shared>:<prefix> with an OpenSSL or mbedTLS installation, or run the request over plain transport on a trusted network; linking TLS sources into the library is not a supported route",
+        },
+        {
+            .code = ErrorCode::NetTlsPinMismatch,
+            .ident = "NetTlsPinMismatch",
+            .slug = "net-tls-pin-mismatch",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "TLS certificate pin mismatch: '{detail}'",
+            .hint = "The peer's certificate does not carry any pinned public key, so the pinned identity changed (key rotation, reissued certificate, or an interception proxy). Update the pinned SPKI digests from an out-of-band source you trust and rotate them in lockstep with the service; never fall back to allow_insecure_certificate, which defeats the pin entirely",
         },
   },
 };

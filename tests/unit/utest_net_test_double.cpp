@@ -6,10 +6,10 @@
 ///   定时器**只登记不自己走**，时钟由用例推进；同到期时刻按登记序稳定执行；停机丢弃未到期登记（与
 ///   真实引擎同口径）；拒绝投递回 `net-platform-unavailable`（无引擎腿的同一条码）；能力位可改写，
 ///   于是上层「能力缺失即降级」的分支今天就能被脚本命中。
-///   故障目录面：超时、取消、半关闭、乱序、超大帧、代理不可达、慢连接七类各一条，全部跑在**真连接**
-///   （回环）+ **脚本对端** + **脚本时钟**上，零出站。TLS 握手失败这一类在本切片只有「连上了但握手
-///   永不完成」的可证形态（即超时那条），真正的 `net-tls-*` 分支要等 TLS provider 落地才有对应物，
-///   届时目录里补一条而不是现在伪造一条。
+///   故障目录面：超时、取消、半关闭、乱序、超大帧、代理不可达、慢连接七类各一条，加上 TLS 对端致命
+///   告警一条，全部跑在**真连接**（回环）+ **脚本对端**（+ 脚本时钟）上，零出站。TLS 的第七类故障
+///   （`a_peer_fatal_alert_settles_the_handshake_exactly_once`）是提案 §16 第 17 项留给 TLS 切片的那枚，
+///   随该切片补齐：告警字节是脚本，握手状态机与结局码是真的；没有 TLS 后端的腿报成缺项而不是伪造一条。
 ///   等待辅助面：宿主驱动 pump 与预算口径收在 `framework/net_wait.h` 一处，本文件即是它的使用方。
 /// ⚠️ 平台分支写在**用例体内**而非包裹 `AURORA_TEST_CASE` 声明（registry_integrity 静态扫源码）；
 ///    需要 socket 与线程的故障用例在 wasm 腿退化为 AURORA_TEST_SKIP。
@@ -33,9 +33,11 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/capabilities.h"
 #include "aurora/net/detail/engine_override.h"
+#include "aurora/net/detail/tls_backend.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/framer.h"
 #include "aurora/net/proxy.h"
+#include "aurora/net/tls.h"
 #include "aurora/net/transport.h"
 #include "framework/async_wait.h"
 #include "framework/aurora_test.h"
@@ -588,6 +590,63 @@ AURORA_TEST_CASE(a_slow_peer_is_scriptable_and_every_scenario_stays_on_loopback)
         // 禁网证据：这条连接的 peer 就是 127.0.0.1，本文件的场景没有一条能出局外。
         AURORA_TEST_CHECK(log.stream.is_loopback_peer());
     }
+#endif
+}
+
+AURORA_TEST_CASE(a_peer_fatal_alert_settles_the_handshake_exactly_once) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no loopback peer");
+#else
+    if (!aurora::net::detail::tls_backend_available()) {
+        AURORA_TEST_SKIP("this build carries no TLS backend, so there is no alert branch to reach");
+    }
+    AURORA_TEST_REQUIRE_THREADS();
+    const HostDriven driven;
+    auto &registry = aurora::app::EventSourceRegistry::instance();
+    const std::size_t baseline = registry.sources().size();
+
+    // 目录里的第七类：对端在 ClientHello 之后回一条**致命告警**（提案 §16 第 17 项留给本切片的那枚）。
+    // 字节是脚本、连接是真的（回环），故禁网 CI 零出站也能命中该分支。这条记录是未加密的 alert 记录：
+    // 型 21 = alert、版本 3.3、长度 2、级别 2 = fatal、描述 40 = handshake_failure。
+    const std::string alert{"\x15\x03\x03\x00\x02\x02\x28", 7};
+    ScriptedPeer peer{reply_after_reading(5, alert)};
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    ConnectLog plain;
+    StreamTransport::connect(Endpoint::loopback(peer.port()), scripted_options(), Cancellation{}, connect_into(plain));
+    AURORA_TEST_WAIT_UNTIL(drive_until("connected", [&plain]() -> bool { return calls_of(plain) >= 1; }));
+    AURORA_TEST_REQUIRE_EQ(calls_of(plain), 1);
+    AURORA_TEST_REQUIRE_FALSE(plain.failed);
+
+    aurora::net::TlsContext context;
+    struct Verdict {
+        std::atomic<int> calls{0};
+        bool opened = false;
+        std::string code;
+        std::string detail;  ///< 失败原因文本（红时靠它指认阶段）
+    } verdict;
+    // 服务器名只作 SNI 输入：本对端不会解析它，也不会有证书可校验。
+    aurora::net::TlsTransport::handshake(std::move(plain.stream), "alert.invalid", context, Cancellation{},
+                                         [&verdict](auto result) {
+                                             verdict.opened = result.ok();
+                                             if (!result) {
+                                                 verdict.code = std::string{result.error().code};
+                                                 verdict.detail = result.error().message;
+                                             }
+                                             ++verdict.calls;
+                                         });
+    AURORA_TEST_WAIT_UNTIL(
+        drive_until("handshake-verdict", [&verdict]() -> bool { return verdict.calls.load() >= 1; }));
+
+    AURORA_TEST_CHECK_EQ(verdict.calls.load(), 1);
+    AURORA_TEST_CHECK_FALSE(verdict.opened);
+    // 三条腿都把对端致命告警归到这一枚码（本目录没有 `net-tls-alert-received` 这种码，见 ERROR_CATALOG 的
+    // net-tls 段），成因写在 message 里。
+    AURORA_TEST_CHECK_EQ(verdict.code, std::string{"net-tls-handshake-failed"});
+    // 恰一次 + 句柄归还：告警之后不再有第二种结局，该连接的事件源也必须交回注册口。
+    pump_idle(AURORA_GRACE_WINDOW);
+    AURORA_TEST_CHECK_EQ(verdict.calls.load(), 1);
+    AURORA_TEST_CHECK_EQ(registry.sources().size(), baseline);
 #endif
 }
 

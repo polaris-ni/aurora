@@ -27,6 +27,7 @@
 #include "aurora/net/blocking.h"
 #include "aurora/net/capabilities.h"
 #include "aurora/net/detail/async_io.h"
+#include "aurora/net/detail/tls_backend.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/poll.h"
 #include "framework/async_wait.h"
@@ -87,8 +88,8 @@ auto wait_until(const std::function<bool()> &pred, std::chrono::milliseconds bud
 
 }  // namespace
 
-// 能力矩阵如实回报：本腿的事件源/字节流/监听/数据报/名称解析位为真，未落地形态（TLS）恒假，本机 IPC
-// 位与本腿运行期探测同口径（头文件提供 `AF_UNIX` 与真能开出该地址族是两件事；「探测说能用」的行为半
+// 能力矩阵如实回报：本腿的事件源/字节流/监听/数据报/名称解析位为真，TLS 位与被编译进来的后端同源，
+// 本机 IPC 位与本腿运行期探测同口径（头文件提供 `AF_UNIX` 与真能开出该地址族是两件事；「探测说能用」的行为半
 // 身在 `utest_net_transport` 的路径往返用例里）。wasm 腿则一切为假且名为 "none"（§2「不提供假降级」）。
 AURORA_TEST_CASE(capabilities_report_only_landed_forms) {
 #ifdef AURORA_PLATFORM_WASM
@@ -98,6 +99,7 @@ AURORA_TEST_CASE(capabilities_report_only_landed_forms) {
     AURORA_TEST_CHECK_FALSE(caps.tcp);
     AURORA_TEST_CHECK_FALSE(caps.listens);
     AURORA_TEST_CHECK_FALSE(caps.event_source);
+    AURORA_TEST_CHECK_FALSE(caps.tls);
 #else
     const auto &engine = Engine::instance();
     AURORA_TEST_CHECK_EQ(engine.name(), "poll");
@@ -110,7 +112,10 @@ AURORA_TEST_CASE(capabilities_report_only_landed_forms) {
     AURORA_TEST_CHECK_TRUE(caps.udp);
     AURORA_TEST_CHECK_TRUE(caps.dns);
     AURORA_TEST_CHECK_EQ(caps.local_ipc, aurora::net::detail::local_ipc_supported());
-    AURORA_TEST_CHECK_FALSE(caps.tls);
+    // TLS 位不由平台宏推导，而由被装配进来的那个后端 TU 的探测口回报（无后端时 `tls_unavailable.cpp`
+    // 答 false）。本条只证「能力位与探测口同源、不是硬编码」；「答 true 的腿真能握手」的行为半身
+    // 在 `utest_net_tls` 与真机探针 `tools/verify/tls_live_probe.cpp` 里。
+    AURORA_TEST_CHECK_EQ(caps.tls, aurora::net::detail::tls_backend_available());
 #endif
 }
 

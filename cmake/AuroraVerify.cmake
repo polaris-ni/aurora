@@ -255,6 +255,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         target_include_directories(aurora_verify_alsa_audio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         list(APPEND _aurora_verify_targets aurora_verify_alsa_audio)
     endif ()
+    # ---- TLS 通道（任意有出站通路的路）：真实公网证书链 / SNI / ALPN 回选 / 记录级收发 / SPKI pin ----
+    # 自动段核对能力位、缺省口径握手、证书摘要形态、ALPN 两态回报、GET 往返与 pin 反向判据；
+    # 「这张证书确实是这个站点的那张」只有人能判，故该项在 --interactive 人工段。本探针是唯一出站
+    # 的真机面：CI runner 禁网且全部用例按零出站纪律构造，因此它不进 CTest，只在人工验收时运行。
+    # 本腿没有 TLS 后端（POSIX 未给 AURORA_NET_TLS_PROVIDER）时自动段以退出码 2 报 ENV-UNAVAILABLE。
+    if (NOT EMSCRIPTEN)
+        aurora_add_verify_probe(aurora_verify_tls_live "${_aurora_verify_dir}/tls_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_tls_live)
+    endif ()
     # ---- WASM rAF 帧循环（浏览器）：Application::run() 经 requestAnimationFrame 真实驱动帧环，
     # 一次验收渲染上屏 / DOM 事件 / deferred 线程池帧尾排空三条接线（期望项见源文件头注释）。
     # 产物为 .html+.js+.wasm，须经 HTTP 静态服务器打开（emrun 最省事）；有意**不进**聚合
