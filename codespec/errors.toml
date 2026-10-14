@@ -1321,6 +1321,17 @@ message = "HTTP response body exceeds the configured limit: '{detail}'"
 hint = "The guard is what keeps a wrong URL (a video behind a shortened link) from exhausting memory. Raise max_body_bytes if the payload is legitimately large, or switch to open_stream so the body is delivered in bounded chunks instead of materialized"
 
 [[error]]
+enum = "HttpCharsetUnsupported"
+slug = "http-charset-unsupported"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "HTTP response charset is not supported: '{detail}'"
+hint = "Response::text() decodes only UTF-8 and Latin-1 in this batch, so a body labelled with any other charset cannot be turned into text here. The undecoded bytes are always reachable through body(), so transcoding is the caller's to do; do not silently substitute U+FFFD or reinterpret the bytes as UTF-8, which would corrupt the payload"
+
+[[error]]
 enum = "HttpProtocolError"
 slug = "http-protocol-error"
 category = "io"

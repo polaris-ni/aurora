@@ -113,8 +113,9 @@ AURORA_TEST_CASE(head_request_drops_body_and_setter_chains) {
     AURORA_TEST_CHECK_TRUE(!request.timeout().has_value());
     AURORA_TEST_CHECK_EQ(request.max_redirects(), 10);
     request.timeout(std::chrono::milliseconds{2500}).max_redirects(0);
-    AURORA_TEST_CHECK_TRUE(request.timeout().has_value());
-    AURORA_TEST_CHECK_EQ(request.timeout()->count(), std::int64_t{2500});
+    const auto pending_timeout = request.timeout();
+    AURORA_TEST_CHECK_TRUE(pending_timeout.has_value());
+    AURORA_TEST_CHECK_EQ(pending_timeout.value_or(std::chrono::milliseconds{}).count(), std::int64_t{2500});
     AURORA_TEST_CHECK_EQ(request.max_redirects(), 0);
 }
 
@@ -132,7 +133,58 @@ AURORA_TEST_CASE(response_value_accessors) {
     AURORA_TEST_CHECK_TRUE(!response.header("X-Missing").has_value());
     AURORA_TEST_CHECK_EQ(response.headers().values("set-cookie").size(), std::size_t{2});
     AURORA_TEST_CHECK_EQ(response.body().size(), std::size_t{2});
-    AURORA_TEST_CHECK_EQ(response.text(), "AB");
+    // 无 charset 的 Content-Type（application/json）按 UTF-8 缺省解码；text() 现返回 Result。
+    const auto text = response.text();
+    AURORA_TEST_REQUIRE(bool(text));
+    AURORA_TEST_CHECK_EQ(text.value(), "AB");
+}
+
+AURORA_TEST_CASE(response_text_decodes_by_charset) {
+    // UTF-8：剥去前导 BOM 后原样直传。
+    Headers utf8;
+    utf8.set("Content-Type", "text/plain; charset=UTF-8");
+    const Response with_bom{200, "OK", utf8, std::vector<char>{'\xEF', '\xBB', '\xBF', 'A', 'B'}};
+    const auto bom = with_bom.text();
+    AURORA_TEST_REQUIRE(bool(bom));
+    AURORA_TEST_CHECK_EQ(bom.value(), "AB");
+
+    // 非法 UTF-8 序列不报错也不替换：字节原样抵达（§12「绝不静默替换非法序列」）。
+    const Response raw_illegal{200, "OK", utf8, std::vector<char>{'\xFF', 'X'}};
+    const auto illegal = raw_illegal.text();
+    AURORA_TEST_REQUIRE(bool(illegal));
+    const std::string expected_illegal{'\xFF', 'X'};
+    AURORA_TEST_CHECK_EQ(illegal.value(), expected_illegal);
+
+    // Latin-1：0xE9（é）逐字节转码成 UTF-8 两字节序列。
+    Headers latin;
+    latin.set("Content-Type", "text/html; charset=iso-8859-1");
+    const Response l1{200, "OK", latin, std::vector<char>{'\xE9'}};
+    const auto l1_text = l1.text();
+    AURORA_TEST_REQUIRE(bool(l1_text));
+    AURORA_TEST_CHECK_EQ(l1_text.value(), "\xC3\xA9");
+
+    // charset 令牌大小写不敏感、可带双引号、可省连字符：latin1 / "latin1" 都能识别。
+    Headers quoted;
+    quoted.set("Content-Type", "text/plain; charset=\"latin1\"");
+    const Response q{200, "OK", quoted, std::vector<char>{'\xE9'}};
+    const auto quoted_text = q.text();
+    AURORA_TEST_REQUIRE(bool(quoted_text));
+    AURORA_TEST_CHECK_EQ(quoted_text.value(), "\xC3\xA9");
+
+    // 无 Content-Type：按 UTF-8 缺省。
+    const Response no_ct{200, "OK", Headers{}, std::vector<char>{'A', 'B'}};
+    const auto no_ct_text = no_ct.text();
+    AURORA_TEST_REQUIRE(bool(no_ct_text));
+    AURORA_TEST_CHECK_EQ(no_ct_text.value(), "AB");
+
+    // 不支持的 charset：报 http-charset-unsupported，原始字节仍可经 body() 取回。
+    Headers gbk;
+    gbk.set("Content-Type", "text/plain; charset=gbk");
+    const Response chinese{200, "OK", gbk, std::vector<char>{'\xC4', '\xE3'}};
+    const auto failed = chinese.text();
+    AURORA_TEST_REQUIRE_FALSE(bool(failed));
+    AURORA_TEST_CHECK_EQ(failed.error().code_enum, aurora::ErrorCode::HttpCharsetUnsupported);
+    AURORA_TEST_CHECK_EQ(chinese.body().size(), std::size_t{2});
 }
 
 }  // namespace aurora::test_cases::utest_net_http

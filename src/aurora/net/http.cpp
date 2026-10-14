@@ -16,6 +16,7 @@
 #include "aurora/core/headers.h"
 #include "aurora/core/result.h"
 #include "aurora/core/url.h"
+#include "aurora/core/utf8.h"
 #include "aurora/net/detail/http_wire.h"
 
 namespace aurora::net::http {
@@ -33,6 +34,77 @@ constexpr std::array<std::pair<Method, std::string_view>, 6> AURORA_HTTP_METHOD_
         {Method::Delete, "DELETE"},
     },
 };
+
+/// @brief ASCII 单字节小写化；非大写字母原样返回（规避 locale 与负值 `char` 相关的 UB）。
+auto to_lower_ascii(char c) -> char {
+    const auto raw = static_cast<unsigned char>(c);
+    if (raw >= static_cast<unsigned char>('A') && raw <= static_cast<unsigned char>('Z')) {
+        return static_cast<char>(raw + static_cast<unsigned char>('a' - 'A'));
+    }
+    return c;
+}
+
+/// @brief 整串 ASCII 小写化（用于比较参数名一类应当大小写不敏感的令牌）。
+[[nodiscard]] auto to_lower_ascii_str(std::string_view s) -> std::string {
+    std::string out{s};
+    for (char &c : out) {
+        c = to_lower_ascii(c);
+    }
+    return out;
+}
+
+/// @brief 裁去首尾 OWS 空白（空格 / 水平制表）。
+[[nodiscard]] auto trim_ows(std::string_view s) -> std::string_view {
+    const auto is_space = [](char c) { return c == ' ' || c == '\t'; };
+    while (!s.empty() && is_space(s.front())) {
+        s.remove_prefix(1);
+    }
+    while (!s.empty() && is_space(s.back())) {
+        s.remove_suffix(1);
+    }
+    return s;
+}
+
+/// @brief 归一化 charset 令牌：转小写并丢弃 `-` 与 `_`，让 `UTF-8` / `utf_8` / `utf8` 收敛到同一判定。
+[[nodiscard]] auto normalize_charset(std::string_view raw) -> std::string {
+    std::string out;
+    out.reserve(raw.size());
+    for (const char c : raw) {
+        if (c != '-' && c != '_') {
+            out.push_back(to_lower_ascii(c));
+        }
+    }
+    return out;
+}
+
+/// @brief 从 `Content-Type` 值中抠出 `charset` 参数并归一化。
+///
+/// 只认 `charset=` 参数（键 ASCII 大小写不敏感），其值可带双引号；参数以 `;` 分隔。找不到时返回空串，
+/// 交由调用方按「缺省即 UTF-8」处理。这里只做提取与归一化，不判定 charset 是否受支持。
+[[nodiscard]] auto charset_of(std::string_view content_type) -> std::string {
+    std::size_t pos = 0;
+    while (pos <= content_type.size()) {
+        const auto semi = content_type.find(';', pos);
+        const auto segment =
+            (semi == std::string_view::npos) ? content_type.substr(pos) : content_type.substr(pos, semi - pos);
+        const auto eq = segment.find('=');
+        if (eq != std::string_view::npos && to_lower_ascii_str(trim_ows(segment.substr(0, eq))) == "charset") {
+            auto value = trim_ows(segment.substr(eq + 1));
+            if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+                value = value.substr(1, value.size() - 2);
+            }
+            return normalize_charset(value);
+        }
+        if (semi == std::string_view::npos) {
+            break;
+        }
+        pos = semi + 1;
+    }
+    return {};
+}
+
+/// @brief UTF-8 字节序标记（BOM）：`text()` 在 UTF-8 路径上剥去前导三字节。
+constexpr std::string_view AURORA_UTF8_BOM{"\xEF\xBB\xBF", 3};
 
 }  // namespace
 
@@ -115,5 +187,34 @@ Response::Response(std::uint16_t status, std::string reason, Headers headers, st
     : status_{status}, reason_{std::move(reason)}, headers_{std::move(headers)}, body_{std::move(body)} {}
 
 auto Response::header(std::string_view name) const -> std::optional<std::string> { return headers_.get(name); }
+
+auto Response::text() const -> Result<std::string> {
+    std::string charset;
+    if (const auto content_type = headers_.get("Content-Type"); content_type.has_value()) {
+        charset = charset_of(content_type.value());
+    }
+
+    // 无 `Content-Type` 或未标 `charset`：按现代缺省视作 UTF-8（RFC 9231 口径）。
+    if (charset.empty() || charset == "utf8") {
+        std::string_view bytes{body_.data(), body_.size()};
+        if (bytes.starts_with(AURORA_UTF8_BOM)) {
+            bytes.remove_prefix(AURORA_UTF8_BOM.size());  // 剥 UTF-8 BOM，勿把 EF BB BF 混进文本
+        }
+        // 非法 UTF-8 序列一律原样直传、绝不替换（§12③）：std::string 本就是字节容器，交由调用方校验。
+        return Result<std::string>{std::string{bytes}};
+    }
+
+    if (charset == "iso88591" || charset == "latin1") {
+        std::string out;
+        out.reserve(body_.size());
+        for (const char byte : body_) {
+            out += utf8_encode(static_cast<unsigned char>(byte));  // Latin-1 每字节恰为码点 U+0000..U+00FF
+        }
+        return Result<std::string>{std::move(out)};
+    }
+
+    return Result<std::string>{
+        make_error(ErrorCode::HttpCharsetUnsupported, "unsupported response charset: '" + charset + "'")};
+}
 
 }  // namespace aurora::net::http

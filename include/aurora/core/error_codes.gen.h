@@ -157,7 +157,8 @@ enum class ErrorCode : std::uint16_t { // NOLINT(*-enum-size)
     HttpTimeout = 113,  ///< http-timeout: HTTP request timed out: '{detail}'
     HttpRedirectLimit = 114,  ///< http-redirect-limit: HTTP redirect chain exceeded the configured limit: '{detail}'
     HttpBodyTooLarge = 115,  ///< http-body-too-large: HTTP response body exceeds the configured limit: '{detail}'
-    HttpProtocolError = 116,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
+    HttpCharsetUnsupported = 116,  ///< http-charset-unsupported: HTTP response charset is not supported: '{detail}'
+    HttpProtocolError = 117,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -175,7 +176,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 117> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 118> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1568,6 +1569,18 @@ inline constexpr std::array<ErrorMeta, 117> AURORA_ERROR_TABLE = {
             .retryable = false,
             .message_tpl = "HTTP response body exceeds the configured limit: '{detail}'",
             .hint = "The guard is what keeps a wrong URL (a video behind a shortened link) from exhausting memory. Raise max_body_bytes if the payload is legitimately large, or switch to open_stream so the body is delivered in bounded chunks instead of materialized",
+        },
+        {
+            .code = ErrorCode::HttpCharsetUnsupported,
+            .ident = "HttpCharsetUnsupported",
+            .slug = "http-charset-unsupported",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "HTTP response charset is not supported: '{detail}'",
+            .hint = "Response::text() decodes only UTF-8 and Latin-1 in this batch, so a body labelled with any other charset cannot be turned into text here. The undecoded bytes are always reachable through body(), so transcoding is the caller's to do; do not silently substitute U+FFFD or reinterpret the bytes as UTF-8, which would corrupt the payload",
         },
         {
             .code = ErrorCode::HttpProtocolError,

@@ -175,7 +175,10 @@ class Request {
     int max_redirects_{10};  ///< 重定向跟随上限
 };
 
-/// @brief 一次 HTTP 应答：状态行 + 字段 + 已物化的消息体。
+/// @brief 一次 HTTP 应答：状态行 + 字段 + 已物化（解压完毕）的消息体。
+///
+/// `body()` 交出的是未解码的原始字节，`text()` 才按 `Content-Type` 的 `charset` 现地解码为文本；
+/// 二者对同一份体各表一层，故 charset 不支持时仍可回退到 `body()` 自处。
 /// @note Thread: thread-safe（值类型，无共享状态）
 /// @note Side-effects: none
 class Response {
@@ -184,7 +187,8 @@ class Response {
     /// @param status 三位状态码。
     /// @param reason 原因短语（原样，可为空）。
     /// @param headers 应答字段。
-    /// @param body 消息体字节（透明解压 / charset 解码在物化之前完成）。
+    /// @param body 已解压的消息体字节（`Content-Encoding` 的透明解压在物化之前完成；`charset` 解码留给
+    /// `text()` 按 `Content-Type` 现场执行，故 `body()` 恒给出未解码的原始字节）。
     Response(std::uint16_t status, std::string reason, Headers headers, std::vector<char> body);
 
     /// @brief 状态码。
@@ -208,9 +212,14 @@ class Response {
     /// @return 体字节的只读引用。
     [[nodiscard]] auto body() const -> const std::vector<char> & { return body_; }
 
-    /// @brief 消息体的文本形态（按原字节直接转换，不做 charset 解码）。
-    /// @return 体的文本；charset / 解压在物化阶段处理，这里只反映已物化的字节。
-    [[nodiscard]] auto text() const -> std::string { return std::string{body_.begin(), body_.end()}; }
+    /// @brief 消息体的文本形态（按 `Content-Type` 的 `charset` 解码为 UTF-8 文本）。
+    ///
+    /// 首批只解 `charset` 为 UTF-8（剥前导 BOM）与 Latin-1（`iso-8859-1` / `latin-1`）两族；字段缺失
+    /// 或无 `charset` 参数时按 UTF-8 处理（现代缺省）。其余 charset 报 `http-charset-unsupported`——
+    /// 原始字节恒可经 `body()` 取回，本函数绝不把非法字节序列静默替换成 U+FFFD 或另作他解。透明
+    /// 解压（`Content-Encoding`）不在此处：进入 `body_` 的字节已由发起侧物化管线解压完毕。
+    /// @return 解码后的 UTF-8 文本；charset 不支持时为 `http-charset-unsupported`。
+    [[nodiscard]] auto text() const -> Result<std::string>;
 
   private:
     std::uint16_t status_{0};  ///< 状态码
