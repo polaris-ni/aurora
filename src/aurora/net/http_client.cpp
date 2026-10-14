@@ -1,8 +1,10 @@
 // http_client.cpp —— HTTP 发起侧客户端的 send 核心闭环（CHG-010 §6 / §12）。
 //
 // 落在这里的是「把回调式传输按 HTTP 线上次序编排成一条协程」：连接（http 直连 / https 先握手）、
-// 写出 render_head() + 体、逐段喂接收侧装配器物化应答、按 Location 跟随重定向、并施加整请求时限。
-// 协程出口 `CoroTask<Result<Response>>` 的成败一律以 Result 表达，绝不抛异常穿过协程帧（§18-4）。
+// 写出 render_head() + 体、逐段喂接收侧装配器物化应答、按 Content-Encoding 透明还原消息体、按 Location
+// 跟随重定向、并施加整请求时限。协程出口 `CoroTask<Result<Response>>` 的成败一律以 Result 表达，绝不抛
+// 异常穿过协程帧（§18-4）。编码链的文法与逐层解压不在本文件——那是 `detail/http_encoding.h` 的纯逻辑，
+// 本件只负责在物化之后调用它，并决定宣告什么、限到什么字节。
 #include "aurora/net/http_client.h"
 
 #include <array>
@@ -23,6 +25,7 @@
 #include "aurora/core/url.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/detail/http_await.h"
+#include "aurora/net/detail/http_encoding.h"
 #include "aurora/net/detail/http_wire.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/http.h"
@@ -164,11 +167,69 @@ class StageTimer {
     return Result<Request>{std::move(redirected)};
 }
 
+/// @brief 缺省时补上 `Accept-Encoding` 宣告：宣告与解码能力同源，未编入能力时连宣告都不发。
+///
+/// 调用方已自带该字段（任意大小写拼写，`Headers` 的比较本就不敏感）时**原样保留**——协商是调用方的表达，
+/// 本件只在缺省处补一枚与自己支持集等长的宣告，既不覆盖也不重复追加。
+/// @param request 待补宣告的请求（就地修改）。
+auto advertise_accept_encoding(Request &request) -> void {
+    if (!detail::compression_available() || request.headers().contains("Accept-Encoding")) {
+        return;
+    }
+    request.header("Accept-Encoding", detail::AURORA_HTTP_ACCEPT_ENCODING);
+}
+
+/// @brief 按应答的 `Content-Encoding` 链把已物化的消息体还原成原始字节（就地替换）。
+///
+/// 分帧解出的仍是编码字节，还原必须在物化之后、`Response` 交出之前完成，`Response::body()` 才是调用方可
+/// 直接消费的字节。`BodyFraming::None`（HEAD / 1xx / 204 / 304）恒无体，也就不校验编码名——那类应答本来就
+/// 没有可解的载荷，中间层却常照抄 `Content-Encoding`。字段缺席与 `identity` 都是恒等环节，直交原始字节。
+/// @param head 已装配的头部块（提供字段原文）。
+/// @param framing 已判定的消息体分帧形态。
+/// @param body 已物化的线上字节；成功时换成还原后的字节，失败时保持原样不被半途写坏。
+/// @param max_output_bytes 解压产物字节上限（`nullopt` = 不设限）；越限落 `http-body-too-large`。
+/// @return 成功为 `Result<void>{}`；失败携 `http-content-encoding-unsupported` / `http-body-corrupt` /
+///         `http-body-too-large` / `http-protocol-error` 之一。
+auto materialize_content_encoding(const wire::ResponseHead &head, wire::BodyFraming framing, std::vector<char> &body,
+                                  std::optional<std::uint64_t> max_output_bytes) -> Result<void> {
+    if (framing == wire::BodyFraming::None) {
+        return Result<void>{};
+    }
+    std::string list;
+    for (const auto &line : head.headers.values("Content-Encoding")) {
+        if (!list.empty()) {
+            list += ',';
+        }
+        list += line;
+    }
+    if (list.empty()) {
+        return Result<void>{};
+    }
+    const auto chain = detail::parse_content_encoding(list);
+    if (!chain) {
+        return Result<void>{chain.error()};
+    }
+    if (chain.value().empty()) {
+        return Result<void>{};  // identity / 空值：没有环节要解
+    }
+    auto decoded = detail::decode_content_encoding(chain.value(), std::span<const char>{body}, max_output_bytes);
+    if (!decoded) {
+        return Result<void>{decoded.error()};
+    }
+    body = std::move(decoded.value());
+    return Result<void>{};
+}
+
 }  // namespace
 
 auto Client::send(Request request) const -> CoroTask<Result<Response>> {
     Cancellation token;
     Request current = std::move(request);
+    advertise_accept_encoding(current);  // 缺省宣告与解码能力同源；调用方已自带则不动
+    // 解压产物上限缺省跟随线上体上限：两枚旋钮各管一段字节，未显式收紧即「压缩不该让物化结果更多」。
+    // 跟随的是「设了没有」而非数值——两枚都未设即恒不设限（`nullopt`）。
+    const std::optional<std::uint64_t> decompressed_limit =
+        max_decompressed_bytes_.has_value() ? max_decompressed_bytes_ : max_body_bytes_;
     const Timeouts timeouts = current.timeouts();
     const int limit = current.max_redirects();
     int hops = 0;
@@ -283,6 +344,12 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         assembler.drain_body(body);
 
         const auto &response_head = assembler.head();
+        // 透明解压：分帧给出的仍是编码字节，还原完才交给 `Response`；失败与传输失败分道（字节已完整到达）。
+        auto decoded = materialize_content_encoding(response_head, assembler.framing(), body, decompressed_limit);
+        if (!decoded) {
+            outcome = Result<Response>{decoded.error()};
+            break;
+        }
         outcome = Result<Response>{
             Response{response_head.status, response_head.reason, response_head.headers, std::move(body)}};
 

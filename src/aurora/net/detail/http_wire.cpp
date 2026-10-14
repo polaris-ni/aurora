@@ -257,11 +257,14 @@ auto scan_transfer_encoding(const std::vector<std::string> &values, bool &out_ch
     out_chunked = false;
     out_other = false;
     for (const auto &raw : values) {
+        // 切段一律从 `raw` 的视图上做：`raw.substr()` 产出的是临时 `std::string`，而 `trim_ows` 返回视图，
+        // 直接套上去会得到一枚指向已析构临时量的悬空视图（同一份逻辑在此处曾在两腿给出不同裁决）。
+        const std::string_view text{raw};
         std::size_t start = 0;
-        while (start <= raw.size()) {
-            const auto comma = raw.find(',', start);
+        while (start <= text.size()) {
+            const std::size_t stop = text.find(',', start);
             const auto token =
-                trim_ows(raw.substr(start, comma == std::string_view::npos ? std::string_view::npos : comma - start));
+                trim_ows(text.substr(start, stop == std::string_view::npos ? std::string_view::npos : stop - start));
             if (!token.empty()) {
                 std::string lowered;
                 lowered.reserve(token.size());
@@ -275,10 +278,10 @@ auto scan_transfer_encoding(const std::vector<std::string> &values, bool &out_ch
                     out_other = true;
                 }
             }
-            if (comma == std::string_view::npos) {
+            if (stop == std::string_view::npos) {
                 break;
             }
-            start = comma + 1;
+            start = stop + 1;
         }
     }
 }

@@ -909,7 +909,7 @@ initial bias 72 / initial n 0x80，前缀 `xn--`、定界符 `-`。
 三条形态约束：
 
 - **格式显式入参，不做内容嗅探**：`CompressionFormat{Gzip, Zlib, Deflate}` 精确对应线上包装——`Gzip` = RFC 1952 包装、`Zlib` = RFC 1950 包装、`Deflate` = RFC 1951 裸 DEFLATE。HTTP 的 `Content-Encoding: deflate` 名义上是 zlib 格式但存在历史服务器发裸流的歧义，该歧义的消解（先试 `Zlib`、失败回落 `Deflate`）属 HTTP 层编排，不进本通用 API。
-- **解压炸弹防护是调用方的显式限额**：`DecompressOptions::max_output_bytes` 缺省不限；越限落 `compression-output-too-large`。知道业务上限的调用方（HTTP 发起侧的物化体上限）恒设此值。
+- **解压炸弹防护是调用方的显式限额**：`DecompressOptions::max_output_bytes` 缺省不限；越限落 `compression-output-too-large`。知道业务上限的调用方恒设此值（HTTP 发起侧传的是它自己的 `Client::max_decompressed_bytes()`，未设则跟随 `max_body_bytes`，见 `06-app-platform.md` §8.8.20）。
 - **压缩方向只设计不实现**：`compress()` 恒落 `compression-unavailable`。仓内复用件 wuffs 对压缩格式只提供解码器（无任何编码器符号），本批不引入新 vendored 编码库、亦不手写 deflate 压缩机；待出现真实消费者时另立提案补齐。接口先立是为了让调用点形状稳定。
 
 构建开关 `AURORA_ENABLE_COMPRESSION`（默认 ON）门控本能力（见 `BUILD_OPTIONS.md`）；关闭时全部入口恒落 `compression-unavailable`（诚实降级，不静默把压缩字节当明文交出）。
