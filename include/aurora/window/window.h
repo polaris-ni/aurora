@@ -30,6 +30,7 @@
 #include "aurora/render/painter.h"
 #include "aurora/render/rhi/rhi_frame_sink.h"
 #include "aurora/state/async.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/widget.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/window_chrome.h"
@@ -542,6 +543,21 @@ class Window {
     /// @param m 新的几何态快照。
     auto set_window_mode(WindowMode m) -> void { window_mode_ = m; }
 
+    /// @brief 显式设定本窗根主题（应用换肤/固定主题，最高优先）。
+    ///
+    /// 未调用时窗口按三级优先链 `os_color_scheme`（由 `Application` 经 `set_os_color_scheme` 推入）
+    /// → 明色 解析默认主题；本 setter 一旦设定即覆盖该默认，`prepare_context` 每帧注入之。
+    /// @param t 生效主题（其 `scheme` 即最终档）。
+    auto set_theme(Theme t) -> void { theme_ = std::move(t); }
+    /// @brief 当前显式设定的根主题（未设定为空）。
+    /// @return 最近一次 `set_theme` 的值；从未显式设定时为 `std::nullopt`。
+    [[nodiscard]] auto theme() const -> const std::optional<Theme> & { return theme_; }
+    /// @brief 推入 OS 明暗偏好快照（由 `Application` 在窗口创建、以及收到系统外观变更
+    ///        通知——如 Win32 `WM_SETTINGCHANGE`——时调用；`Window` 自身不直读系统以免
+    ///        公共头反向依赖平台层）。仅当应用未 `set_theme` 时参与默认主题解析。
+    /// @param s OS 档位（`Unspecified` 表示未表态，按明色回落）。
+    auto set_os_color_scheme(ColorScheme s) -> void { os_scheme_ = s; }
+
     /// @brief pump 平台事件（→ 经 Surface::set_event_handler 上抛给 Application
     /// 集中派发，specification/06-app-platform.md §3.1）。
     auto pump_events() const -> void { surface_->poll_platform_events(); }
@@ -922,6 +938,8 @@ class Window {
         root_env_;  ///< 每帧原地更新注入值（对象本身不重建）的根 MediaQuery 注入环境（地址恒定）；present_root 注入。
     WindowState window_state_ = WindowState::Visible;  ///< 当前窗口可见性快照（由 Application 设置）。
     WindowMode window_mode_ = WindowMode::Normal;  ///< 当前窗口几何态快照（由 Application 设置）。
+    std::optional<Theme> theme_;  ///< 应用显式设定的根主题；空表示交由默认解析链。
+    ColorScheme os_scheme_ = ColorScheme::Unspecified;  ///< OS 明暗偏好快照（由 Application 推入）。
     DirtyRegionTracker dirty_;  ///< 绘制脏追踪器（specification/06-app-platform.md §3.2）。
     bool dirty_tracking_ = true;  ///< 脏追踪开关（默认开启：idle 跳帧 + layout/paint 分离）。
     bool layout_dirty_ = true;  ///< 布局脏：尺寸/结构/约束变化或 mark_needs_layout 触发，下一帧需重排。
@@ -1138,6 +1156,16 @@ class Window {
         return Result<bool>{true};
     }
 
+    /// @brief 解析本窗当前应注入根 BuildContext 的主题（三级优先链）。
+    /// @return 显式 `theme_`（若有，原样，其 `scheme` 即最终档）；否则按 OS 档取 `Theme::dark()` /
+    ///         `Theme::light()`（OS 未表态 `Unspecified` ≡ 明色，与 `token_in`/CSD 桥同口径）。
+    [[nodiscard]] auto resolved_root_theme() const -> Theme {
+        if (theme_.has_value()) {
+            return *theme_;
+        }
+        return (os_scheme_ == ColorScheme::Dark) ? Theme::dark() : Theme::light();
+    }
+
     /// @brief 构建根 BuildContext 并挂载/安装脏汇聚点（如需要）。
     /// @param root 当前根节点（挂载与脏汇聚安装对象）。
     /// @param root_changed 根是否变化（变化则重新 mount 接线订阅）。
@@ -1160,6 +1188,10 @@ class Window {
         // 注入窗口级生命周期快照：子树可 ctx.env->get<WindowState>() / ctx.env->get<WindowMode>() 读取。
         root_env_.set<WindowState>(window_state_);
         root_env_.set<WindowMode>(window_mode_);
+        // 注入根主题（默认根注入）：子树无 `ThemeScope` 时经 `inherit_theme(ctx)` 读到此值；
+        // 三级优先链 = 显式 set_theme > set_os_color_scheme 推入的 OS 档 > 明色。子树自建
+        // `ThemeScope` 仍按「最近祖先优先」覆盖此默认。
+        root_env_.set<Theme>(resolved_root_theme());
         // 注入窗口 chrome 服务（与状态快照同源，同一 Surface；此处 surface_ 已解引用必非空）：
         // 子树控件经 ctx.env->get<WindowChrome>() 驱动移动/缩放/最小化/最大化/全屏/关闭。
         root_env_.set<WindowChrome>(WindowChrome{&*surface_});

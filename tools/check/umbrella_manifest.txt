@@ -124,10 +124,15 @@ aurora/state/store.h
 aurora/state/subscription.h
 aurora/state/undo_stack.h
 aurora/storage/storage.h
-aurora/theming/style_props.h
+aurora/theming/color_roles.h
+aurora/theming/color_scheme.h
+aurora/theming/csd_roles.h
+aurora/theming/csd_style_bridge.h
 aurora/theming/theme.h
+aurora/theming/theme_extension.h
 aurora/theming/theme_query.h
 aurora/theming/theme_scope.h
+aurora/theming/type_scale.h
 aurora/todo.h
 aurora/ui/factories.h
 aurora/widget/a11y_diff.h

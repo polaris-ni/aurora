@@ -218,6 +218,12 @@ class WindowHost {
     /// `Window::render_hud` 按 scale 变化自动重建，此处只需标脏整帧。
     auto on_scale_changed() -> void;
 
+    /// @brief OS 明暗偏好变化：推入 Window 快照后强制全量重排重绘。
+    /// 系统深浅色切换（Win32 `WM_SETTINGCHANGE`）经 Surface 句柄到达；应用未显式
+    /// `Window::set_theme` 时，默认根主题随之翻转，控件取色下一帧生效。
+    /// @param s 新的 OS 档位。
+    auto on_os_color_scheme(ColorScheme s) -> void;
+
     /// @brief 位置类事件的命中派发根：`Window::hit_root()` 整窗下沉壳（命中与绘制共用同一条
     /// PaddingEdges 平移，CHG-007）；无头宿主（`window_ == nullptr`）或首个 `present_root`
     /// 之前（壳未收养应用根，`hit_root_ready()` 为 false）回退场景根——后者与改动前

@@ -5,6 +5,7 @@
 #include "aurora/app/display.h"
 #include "aurora/app/scroll_storage.h"
 #include "aurora/window/frame_pacing.h"
+#include "aurora/window/platform.h"
 
 namespace aurora {
 
@@ -30,6 +31,7 @@ auto WindowHost::teardown() -> void {
         sf.set_window_state_handler({});
         sf.set_window_mode_handler({});
         sf.set_scale_change_handler({});  // 同上：WM_DPICHANGED（多显示器/系统缩放变更）随时可到
+        sf.set_os_color_scheme_handler({});  // 同上：WM_SETTINGCHANGE（系统深浅色切换）随时可到
         sf.set_composition_caret_provider({});  // 同样捕获 this，须解绑
         // `Window::wire_present_request_once` 注册（非 attach_surface）：捕获 `Window*`。
         // 宿主回收（teardown → 析构级联）中 Window 的其他成员先于 surface_ 析构，而 Win32 的
@@ -67,6 +69,9 @@ auto WindowHost::attach_surface() -> void {
     });
     // DPI 缩放变化：窗口被拖到不同缩放比的显示器 / 系统缩放变更 → 强制全量重排重绘。
     sf.set_scale_change_handler([this](float /*scale*/) -> void { on_scale_changed(); });
+    // OS 明暗偏好变化：系统深浅色切换（Win32 WM_SETTINGCHANGE）→ 推入 Window 快照并重排重绘
+    // （默认根主题每帧经 prepare_context 解析注入，应用未显式 set_theme 时下一帧即跟随）。
+    sf.set_os_color_scheme_handler([this](ColorScheme s) -> void { on_os_color_scheme(s); });
     // IME 候选窗定位：后端桥据此将候选列表摆到当前焦点控件的插入点旁（逻辑 dp，桥内换算像素）。
     // 只对**可编辑文本**角色给出（Wayland text-input-v3 的 enable/disable 判据即「当前是否有
     // 文本录入焦点」，基类 composition_caret_bounds 的 focus_bounds_ 兜底会让按钮也返回非零盒）；
@@ -81,6 +86,10 @@ auto WindowHost::attach_surface() -> void {
     // per-window 帧统计：默认仍写全局单例（单窗口用法零回归），多窗口下已由
     // `own_frame_stats()` 切到自有实例后再接线。
     window_->set_frame_stats(*active_stats_);
+    // 默认根主题注入的 OS 档：窗口创建时读一次系统明暗偏好并推给 Window（`Window` 自身不直读
+    // 注册表/配置文件，避免公共头反向依赖平台层）。系统外观实时变更的再推送属后续生产钩子
+    // （见 CHG-011 提案「OS 偏好读取口径」）；应用亦可 `Window::set_theme` 显式接管最高优先。
+    window_->set_os_color_scheme(os_color_scheme());
     if (opts_.max_fps > 0) {
         stats_.set_frame_budget_ms(1000.0 / static_cast<double>(opts_.max_fps));
         active_stats_->set_frame_budget_ms(1000.0 / static_cast<double>(opts_.max_fps));
@@ -90,6 +99,15 @@ auto WindowHost::attach_surface() -> void {
 auto WindowHost::on_scale_changed() -> void {
     if (window_ != nullptr) {
         // 逻辑↔物理换算已变：整帧标脏重排重绘（HUD 离屏缓冲按 scale 变化自动重建）。
+        window_->force_full_redraw();
+    }
+}
+
+auto WindowHost::on_os_color_scheme(ColorScheme s) -> void {
+    if (window_ != nullptr) {
+        // OS 档位快照推入 Window（未显式 set_theme 时参与默认根主题解析）；主题面取色全变，
+        // 整帧标脏重排重绘。应用显式 set_theme 后本推送不参与解析，重绘一次无副作用。
+        window_->set_os_color_scheme(s);
         window_->force_full_redraw();
     }
 }

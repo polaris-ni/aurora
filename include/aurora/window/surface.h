@@ -16,6 +16,7 @@
 #include "aurora/event/event.h"
 #include "aurora/render/painter.h"
 #include "aurora/render/png.h"
+#include "aurora/theming/color_scheme.h"
 #include "aurora/window/title_bar_style.h"
 #include "aurora/window/window_frame_style.h"
 #include "aurora/window/window_state.h"
@@ -254,6 +255,16 @@ class Surface {
     /// @param h 几何态回调；按值接收并移动入成员。
     virtual auto set_window_mode_handler(WindowModeHandler h) -> void { window_mode_handler_ = std::move(h); }
 
+    /// @brief OS 明暗偏好变化上报句柄：系统深浅色切换时触发（Win32 后端经 `WM_SETTINGCHANGE`
+    /// 探测；其余后端当前不产生该通知，接口预留同构扩展点）。
+    using OsColorSchemeHandler = std::function<void(ColorScheme)>;
+    /// @brief 注册 OS 明暗偏好变化上报句柄（默认存入 `os_color_scheme_handler_`；
+    /// 真实后端可覆盖以叠加本地状态记录）。
+    /// @param h 档位回调；按值接收并移动入成员。
+    virtual auto set_os_color_scheme_handler(OsColorSchemeHandler h) -> void {
+        os_color_scheme_handler_ = std::move(h);
+    }
+
     /// @brief 立即重绘请求回调。
     /// 后端在窗口几何变化/系统要求重绘（如 Win32 `WM_SIZE`/`WM_PAINT`）时调用，
     /// 由 `Window` 接为「对当前缓存根再渲染一帧」，使帧缓冲在 DWM 合成前已为新尺寸内容，
@@ -461,6 +472,14 @@ class Surface {
         }
     }
 
+    /// @brief 上报 OS 明暗偏好变化（由真实后端在 `WM_SETTINGCHANGE` 等时机调用）。
+    /// @param scheme 新的 OS 档位（`Unspecified` 表示探测不到偏好，按明色回落）。
+    auto notify_os_color_scheme_change(ColorScheme scheme) const -> void {
+        if (os_color_scheme_handler_) {
+            os_color_scheme_handler_(scheme);
+        }
+    }
+
     /// @brief 窗口可见性状态上报句柄（子类经 set_* 注册）。
     WindowStateHandler window_state_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
     /// @brief 窗口几何态上报句柄（子类经 set_* 注册）。
@@ -469,6 +488,8 @@ class Surface {
     PresentRequest present_request_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
     /// @brief DPI 缩放变化上报句柄（子类经 set_scale_change_handler 注册）。
     ScaleChangeHandler scale_change_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+    /// @brief OS 明暗偏好变化上报句柄（子类经 set_os_color_scheme_handler 注册）。
+    OsColorSchemeHandler os_color_scheme_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 };
 
 #ifdef AURORA_BACKEND_HEADLESS
@@ -625,6 +646,12 @@ class HeadlessSurface : public Surface {
     /// @brief 测试 seams：模拟 DPI 缩放变化（窗口被拖到不同缩放比的显示器）。
     /// @param scale 模拟的新缩放因子（经 notify_scale_change 触发回调）。
     auto emit_scale_change(float scale) const -> void { notify_scale_change(scale); }
+
+    /// @brief 测试 seam：模拟 OS 明暗偏好变化（系统深浅色切换）。
+    /// @param scheme 模拟的 OS 档位（经 notify_os_color_scheme_change 触发回调）。
+    auto emit_os_color_scheme_change(ColorScheme scheme) const -> void {
+        notify_os_color_scheme_change(scheme);
+    }
 
     /// @brief 测试 seam：设置 CSD 安全区内边距（模拟 Wayland 自绘装饰的预留区）。
     /// @param insets 模拟的各边内缩距离（经 `content_inset()` 上报给 `Window` 的自动下沉壳）。

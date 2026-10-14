@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cwchar>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -37,6 +38,7 @@
 #include "aurora/core/utf8.h"
 #include "aurora/event/event.h"
 #include "aurora/render/painter.h"
+#include "aurora/window/platform.h"  // win32_os_color_scheme（注册表读取，独立 TU 实现）
 #include "aurora/window/title_bar_geometry.h"  // TitleBarGeometry / title_bar_geometry
 #include "aurora/window/window.h"
 #include "aurora/window/window_state.h"
@@ -188,6 +190,8 @@ struct Win32Host::Impl {
     WindowModeHandler window_mode_handler;
     PresentRequest present_request;
     std::function<void(float)> scale_handler;  ///< DPI 缩放变化上报（`WM_DPICHANGED` 后触发）。
+    Surface::OsColorSchemeHandler os_scheme_handler;  ///< OS 明暗偏好变化上报（`WM_SETTINGCHANGE` 探测到切换后触发）。
+    ColorScheme os_scheme_cache = ColorScheme::Unspecified;  ///< 上次推送的 OS 档位（去重：相同档位不重复上报）。
     /// @brief 无障碍桥（由窗口宿主持有，GDI / D3D11 两个 Surface 共用同一实例）。
     std::unique_ptr<detail::Win32UiaBridge> a11y;
     /// @brief 宿主接管 `WM_GETOBJECT` 的钩子（默认空 → 走内置桥）。
@@ -260,6 +264,9 @@ struct Win32Host::Impl {
     auto handle_dpi_changed(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT;
     /// @brief 上报当前 DPI 缩放（由 `handle_dpi_changed` 调用）。
     auto notify_scale_changed() const -> void;
+    /// @brief `WM_SETTINGCHANGE`：系统外观（深浅色）变更时重读注册表并上报新 OS 档位。
+    /// 非 static：需读本宿主的 `os_scheme_cache` 去重、触发 `os_scheme_handler`。
+    auto handle_setting_change(WPARAM wp, LPARAM lp) -> LRESULT;
     [[nodiscard]] auto handle_getminmaxinfo(LPARAM lp) const -> LRESULT;
     auto handle_close() -> LRESULT;
     auto handle_destroy() -> LRESULT;
@@ -309,7 +316,9 @@ struct Win32Host::Impl {
 // ---- Impl 构造：窗口创建 + DPI 适配 + 类注册 + 显示 ----
 Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style,
                       WindowVisibility visibility)
-    : style(style), title(title) {
+    : style(style), title(title), os_scheme_cache(detail::win32_os_color_scheme()) {
+    // OS 明暗偏好基线（见上方注释）：构造期读一次注册表，之后 WM_SETTINGCHANGE 只上报
+    // 「相对本基线的变化」——否则首条消息会把 attach_surface 已推入的档位当新变化重复上报。
     // DPI 感知必须早于**任何**窗口创建：`create_window` 路径已由 `make_window` 前移启用；
     // 直接构造 `Win32Host` 的消费者（不经工厂）由这处兜底。函数幂等（进程级 static 守卫），
     // 两条路径都过不会重复设置。建窗尺寸的换算基准（`scale`）在建窗前由 `refresh_scale(&wa)`
@@ -724,6 +733,28 @@ auto Win32Host::Impl::notify_scale_changed() const -> void {
     if (scale_handler) {
         scale_handler(scale);
     }
+}
+
+// ---- OS 明暗偏好变化分族（WM_SETTINGCHANGE）----
+auto Win32Host::Impl::handle_setting_change([[maybe_unused]] WPARAM wp, LPARAM lp) -> LRESULT {
+    // 系统广播的设置变化里，明暗外观切换以 `ImmersiveColorSet` 标识（lParam 指向该宽串）；
+    // lParam 为空表示未指明哪项变化，保守重读。注册表成本仅一次开键+查询，可忽略，
+    // 而「错过一次切换」的代价（界面停在旧档直到重建窗口）远大于多重读。
+    if (lp != 0) {
+        const auto *area =
+            reinterpret_cast<const wchar_t *>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
+        if (std::wcscmp(area, L"ImmersiveColorSet") != 0) {
+            return 0;  // 与明暗无关的设置变化：不重读、不上报
+        }
+    }
+    const ColorScheme fresh = detail::win32_os_color_scheme();
+    if (fresh != os_scheme_cache) {
+        os_scheme_cache = fresh;
+        if (os_scheme_handler) {
+            os_scheme_handler(fresh);
+        }
+    }
+    return 0;
 }
 
 // ---- 尺寸限制分族（WM_GETMINMAXINFO）----
@@ -1180,6 +1211,8 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return self->handle_activate(wp);
         case WM_DPICHANGED:
             return self->handle_dpi_changed(hwnd, wp, lp);
+        case WM_SETTINGCHANGE:
+            return self->handle_setting_change(wp, lp);
         case WM_GETMINMAXINFO:
             return self->handle_getminmaxinfo(lp);
         case WM_CLOSE:
@@ -1374,6 +1407,10 @@ auto Win32Host::display_id() const -> int {
 
 auto Win32Host::set_scale_change_handler(std::function<void(float)> h) const -> void {
     pimpl_->scale_handler = std::move(h);
+}
+
+auto Win32Host::set_os_color_scheme_handler(Surface::OsColorSchemeHandler h) const -> void {
+    pimpl_->os_scheme_handler = std::move(h);
 }
 
 // ---- 窗口几何（多窗口：几何持久化的读写端）----

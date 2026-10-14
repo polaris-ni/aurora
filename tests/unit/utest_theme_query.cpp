@@ -20,16 +20,16 @@ AURORA_TEST_CASE(resolve_theme_without_injection_returns_defaults) {
     // 树中无 ThemeProvider → 兜底根主题 Theme::with_defaults()。
     Node root{Placeholder{}};
     const Theme resolved = resolve_theme(root);
-    AURORA_TEST_CHECK_EQ(resolved.background, Theme::with_defaults().background);
-    AURORA_TEST_CHECK_EQ(resolved.primary, Theme::with_defaults().primary);
-    AURORA_TEST_CHECK_EQ(resolved.text, Theme::with_defaults().text);
+    AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::with_defaults().roles.surface);
+    AURORA_TEST_CHECK_EQ(resolved.roles.primary, Theme::with_defaults().roles.primary);
+    AURORA_TEST_CHECK_EQ(resolved.roles.on_surface, Theme::with_defaults().roles.on_surface);
 }
 
 AURORA_TEST_CASE(resolve_theme_at_root_scope) {
     Node root{ThemeScope{Theme::dark(), Placeholder{}}};
     const Theme resolved = resolve_theme(root);
-    AURORA_TEST_CHECK_EQ(resolved.background, Theme::dark().background);
-    AURORA_TEST_CHECK_EQ(resolved.text, Theme::dark().text);
+    AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::dark().roles.surface);
+    AURORA_TEST_CHECK_EQ(resolved.roles.on_surface, Theme::dark().roles.on_surface);
 }
 
 AURORA_TEST_CASE(resolve_theme_prefers_nearest_ancestor_scope) {
@@ -38,10 +38,10 @@ AURORA_TEST_CASE(resolve_theme_prefers_nearest_ancestor_scope) {
     Node root{ThemeScope{Theme::light(), Node{inner}}};
 
     const Theme root_theme = resolve_theme(root);
-    AURORA_TEST_CHECK_EQ(root_theme.background, Theme::light().background);
+    AURORA_TEST_CHECK_EQ(root_theme.roles.surface, Theme::light().roles.surface);
 
     const Theme inner_theme = resolve_theme(root, *inner);
-    AURORA_TEST_CHECK_EQ(inner_theme.background, Theme::dark().background);
+    AURORA_TEST_CHECK_EQ(inner_theme.roles.surface, Theme::dark().roles.surface);
 }
 
 AURORA_TEST_CASE(resolve_theme_descendant_inherits_ancestor) {
@@ -50,8 +50,8 @@ AURORA_TEST_CASE(resolve_theme_descendant_inherits_ancestor) {
     Node root{ThemeScope{Theme::dark(), Node{leaf}}};
 
     const Theme resolved = resolve_theme(root, *leaf);
-    AURORA_TEST_CHECK_EQ(resolved.background, Theme::dark().background);
-    AURORA_TEST_CHECK_EQ(resolved.primary, Theme::dark().primary);
+    AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::dark().roles.surface);
+    AURORA_TEST_CHECK_EQ(resolved.roles.primary, Theme::dark().roles.primary);
 }
 
 AURORA_TEST_CASE(resolve_theme_target_outside_tree_falls_back) {
@@ -59,7 +59,7 @@ AURORA_TEST_CASE(resolve_theme_target_outside_tree_falls_back) {
     Node root{ThemeScope{Theme::dark(), Placeholder{}}};
     const Placeholder outsider;
     const Theme resolved = resolve_theme(root, outsider);
-    AURORA_TEST_CHECK_EQ(resolved.background, Theme::with_defaults().background);
+    AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::with_defaults().roles.surface);
 }
 
 }  // namespace aurora::test_cases::utest_theme_query

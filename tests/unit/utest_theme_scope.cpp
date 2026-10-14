@@ -25,9 +25,9 @@ AURORA_TEST_CASE(theme_scope_type_name_is_domain_named) {
 AURORA_TEST_CASE(theme_scope_exposes_injected_value) {
     const Theme expected = Theme::dark();
     const ThemeScope scope{expected, Placeholder{}};
-    AURORA_TEST_CHECK_EQ(scope.value().background, expected.background);
-    AURORA_TEST_CHECK_EQ(scope.value().primary, expected.primary);
-    AURORA_TEST_CHECK_EQ(scope.value().text, expected.text);
+    AURORA_TEST_CHECK_EQ(scope.value().roles.surface, expected.roles.surface);
+    AURORA_TEST_CHECK_EQ(scope.value().roles.primary, expected.roles.primary);
+    AURORA_TEST_CHECK_EQ(scope.value().roles.on_surface, expected.roles.on_surface);
 }
 
 AURORA_TEST_CASE(theme_scope_is_a_theme_provider) {
@@ -35,7 +35,7 @@ AURORA_TEST_CASE(theme_scope_is_a_theme_provider) {
     const ThemeScope scope{Theme::dark(), Placeholder{}};
     const Provider<Theme> *as_provider = &scope;
     AURORA_TEST_CHECK_NOT_NULL(as_provider);
-    AURORA_TEST_CHECK_EQ(as_provider->value().background, Theme::dark().background);
+    AURORA_TEST_CHECK_EQ(as_provider->value().roles.surface, Theme::dark().roles.surface);
 }
 
 AURORA_TEST_CASE(theme_scope_from_shared_state_tracks_updates) {
@@ -43,17 +43,17 @@ AURORA_TEST_CASE(theme_scope_from_shared_state_tracks_updates) {
     auto state = std::make_shared<State<Theme>>(Theme::light());
     const ThemeScope scope{state, Placeholder{}};
 
-    AURORA_TEST_CHECK_EQ(scope.value().background, Theme::light().background);
+    AURORA_TEST_CHECK_EQ(scope.value().roles.surface, Theme::light().roles.surface);
     state->set(Theme::dark());
-    AURORA_TEST_CHECK_EQ(scope.value().background, Theme::dark().background);
+    AURORA_TEST_CHECK_EQ(scope.value().roles.surface, Theme::dark().roles.surface);
 }
 
 AURORA_TEST_CASE(inherit_theme_falls_back_to_light_without_injection) {
     // 未注入主题时返回浅色主题，保证绘制路径永不因缺主题而崩溃。
     constexpr BuildContext ctx;
     const Theme inherited = inherit_theme(ctx);
-    AURORA_TEST_CHECK_EQ(inherited.background, Theme::light().background);
-    AURORA_TEST_CHECK_EQ(inherited.text, Theme::light().text);
+    AURORA_TEST_CHECK_EQ(inherited.roles.surface, Theme::light().roles.surface);
+    AURORA_TEST_CHECK_EQ(inherited.roles.on_surface, Theme::light().roles.on_surface);
 }
 
 }  // namespace aurora::test_cases::utest_theme_scope

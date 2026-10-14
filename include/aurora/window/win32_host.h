@@ -182,6 +182,9 @@ class Win32Host {
     /// @brief 注册 DPI 缩放变化回调：`WM_DPICHANGED` 处理后上报新的 `scale_factor`。
     /// @param h 缩放变化处理器，参数为新的缩放因子。
     auto set_scale_change_handler(std::function<void(float)> h) const -> void;
+    /// @brief 注册 OS 明暗偏好变化回调：`WM_SETTINGCHANGE` 探测到系统深浅色切换后上报新档位。
+    /// @param h 档位处理器，参数为新的 OS 档位（`Unspecified` = 探测不到偏好）。
+    auto set_os_color_scheme_handler(Surface::OsColorSchemeHandler h) const -> void;
 
     // ---- 无障碍桥 ----
 
