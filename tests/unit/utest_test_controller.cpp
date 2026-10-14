@@ -15,7 +15,6 @@
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
-#include "aurora/window/window.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_test_controller {

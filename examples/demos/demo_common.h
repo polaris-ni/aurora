@@ -17,7 +17,6 @@
 
 #include <chrono>
 #include <filesystem>
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -186,7 +185,7 @@ class GradientTitle : public au::LeafWidget {
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
 /// @brief 设了 `AURORA_INSPECTOR_PORT` 即在回环端口起 InspectorServer，未设/起不来返回 nullptr。
 /// @param get_root   取当前 UI 树根（HTTP 工作线程内调用，实现方须自证安全——稳定根最安全）。
-/// @param get_surface 可选，取后端 Surface（`/api/debug/*` 与截图端点需要）。
+/// @param get_surface 可选，取后端 Surface（`"/api/debug/*"` 与截图端点需要）。
 /// @param get_windows 可选，枚举窗口 id（多窗口载体用，注册后 `/api/windows` 与 `?window=` 可用）。
 /// @param get_window_root 可选，按窗口 id 取该窗树根（无效 id 返回空 Node）。
 /// @note 端口解析与客户端侧同口径：值须全串十进制 1..65535，脏值回落默认 6280（BUILD_OPTIONS.md §5）。

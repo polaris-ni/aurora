@@ -8,7 +8,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <cstddef>
 #include <future>
 #include <memory>
 #include <stdexcept>
@@ -18,7 +17,6 @@
 #include "aurora/app/application.h"
 #include "aurora/core/thread_pool.h"
 #include "aurora/widget/text.h"
-#include "aurora/window/surface.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_thread_pool {

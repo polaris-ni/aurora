@@ -6,8 +6,6 @@
 /// 逻辑快照基准（logical_snapshots.json，11 场景逐值比对）
 
 #include <algorithm>
-#include <charconv>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -18,7 +16,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
-#include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
 #include "framework/json_access.h"

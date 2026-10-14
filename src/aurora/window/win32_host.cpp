@@ -38,8 +38,8 @@
 #include "aurora/core/utf8.h"
 #include "aurora/event/event.h"
 #include "aurora/render/painter.h"
-#include "aurora/window/platform.h"  // win32_os_color_scheme（注册表读取，独立 TU 实现）
-#include "aurora/window/title_bar_geometry.h"  // TitleBarGeometry / title_bar_geometry
+#include "aurora/window/platform.h"
+#include "aurora/window/title_bar_geometry.h"
 #include "aurora/window/window.h"
 #include "aurora/window/window_state.h"
 
@@ -290,7 +290,7 @@ struct Win32Host::Impl {
     [[nodiscard]] auto csd_handle_pointer(UINT msg, int x, int y) -> bool;
     /// @brief 装饰态变化（悬停/按压/揭示）后请求同步重渲染：经 present_request 走
     /// Window 的整帧重上屏（软件路径全量 blit，GPU 路径整帧重录），装饰带立即跟手。
-    auto csd_band_repaint() -> void;
+    auto csd_band_repaint() const -> void;
     /// @brief 装配本帧装饰绘制状态（软件光栅与 GPU 录制两条路径共用的唯一装配点）。
     [[nodiscard]] auto decoration_state() const -> csd::TitleBarPaintState;
     /// @brief 重算缩放热区带宽（`frame_margin_dp` 三路归零：样式关闭/负值/DWM 不可用）。
@@ -316,7 +316,7 @@ struct Win32Host::Impl {
 // ---- Impl 构造：窗口创建 + DPI 适配 + 类注册 + 显示 ----
 Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style,
                       WindowVisibility visibility)
-    : style(style), title(title), os_scheme_cache(detail::win32_os_color_scheme()) {
+    : style(style), os_scheme_cache(detail::win32_os_color_scheme()), title(title) {
     // OS 明暗偏好基线（见上方注释）：构造期读一次注册表，之后 WM_SETTINGCHANGE 只上报
     // 「相对本基线的变化」——否则首条消息会把 attach_surface 已推入的档位当新变化重复上报。
     // DPI 感知必须早于**任何**窗口创建：`create_window` 路径已由 `make_window` 前移启用；
@@ -808,7 +808,7 @@ auto Win32Host::Impl::handle_destroy() -> LRESULT {
 auto Win32Host::Impl::handle_get_object(WPARAM wp, LPARAM lp) -> std::optional<LRESULT> {
     if (a11y_hook) {
         // 公共签名用指针宽度整数（避免公共头引入 <windows.h>），此处还原为原生类型。
-        if (auto answered = a11y_hook(static_cast<std::uintptr_t>(wp), static_cast<std::intptr_t>(lp));
+        if (const auto answered = a11y_hook(static_cast<std::uintptr_t>(wp), static_cast<std::intptr_t>(lp));
             answered.has_value()) {
             return static_cast<LRESULT>(*answered);  // 宿主接管
         }
@@ -992,7 +992,7 @@ auto Win32Host::Impl::refresh_resize_margin() -> void {
     resize_margin_dp = csd::frame_margin_dp(frame_style, dwm_capable);
 }
 
-auto Win32Host::Impl::csd_band_repaint() -> void {
+auto Win32Host::Impl::csd_band_repaint() const -> void {
     // 装饰态变化（悬停/按压/揭示）：经 Window 的同步重渲染通道立即重上屏。软件路径
     // （set_present_dirty({}) = 全量 blit）与 GPU 路径（整帧重录回放）都由该通道内部
     // 按 system_redraw_ 语义保证装饰带被推到屏上，无需后端各写一条上屏路径。
@@ -1299,7 +1299,7 @@ auto Win32Host::paint_decoration(Painter &p) const -> void {
     csd::paint_title_bar(p, s);
 }
 
-auto Win32Host::record_client_decoration(DisplayList &dl) -> bool {
+auto Win32Host::record_client_decoration(DisplayList &dl) const -> bool {
     Impl &d = *pimpl_;
     if (!d.csd_title) {
         return false;  // 无自绘标题栏：无回放内容（Borderless 的阴影由 DWM 合成，不进 DL）

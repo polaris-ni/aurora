@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -117,7 +116,7 @@ class Win32Host {
     /// `csd::paint_title_bar`，绘制内容同源。
     /// @param dl 帧命令缓冲（录制前清空，回放侧为 RHI）。
     /// @return 本帧有标题栏内容要回放时 true（调用方据此跳过空回放）。
-    auto record_client_decoration(DisplayList &dl) -> bool;
+    auto record_client_decoration(DisplayList &dl) const -> bool;
 
     /// @brief 原生窗口句柄（`HWND`），以 `void*` 暴露以避免公共头引入 <windows.h>。
     [[nodiscard]] auto hwnd() const -> void *;

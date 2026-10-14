@@ -4,7 +4,6 @@
 /// @file keycode.h
 
 #include <array>
-#include <cstddef>
 #include <optional>
 #include <string_view>
 #include <utility>

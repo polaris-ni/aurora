@@ -77,7 +77,7 @@ class Scheduler {
     /// @param cb 到期回调（主线程、`tick` 内触发；可为空函数）。
     /// @return 可取消句柄；任务触发后自动剪除，句柄随即失效。
     auto set_timeout(Duration d, std::function<void()> cb) -> TimerHandle {
-        auto e = std::make_shared<detail::TimerEntry>();
+        const auto e = std::make_shared<detail::TimerEntry>();
         e->deadline = elapsed_ + d;
         e->period = Duration::zero();
         e->callback = std::move(cb);
@@ -92,7 +92,7 @@ class Scheduler {
     /// @param cb 到期回调（主线程、`tick` 内触发；可为空函数）。
     /// @return 可取消句柄；`cancel()` 后条目在下一次 `tick` 的剪除阶段移除。
     auto set_interval(Duration period, std::function<void()> cb) -> TimerHandle {
-        auto e = std::make_shared<detail::TimerEntry>();
+        const auto e = std::make_shared<detail::TimerEntry>();
         e->deadline = elapsed_ + period;
         e->period = period;
         e->callback = std::move(cb);
@@ -113,7 +113,7 @@ class Scheduler {
                 due.push_back(e);
             }
         }
-        for (auto &e : due) {
+        for (const auto &e : due) {
             if (e->cancelled) {
                 continue;
             }
@@ -134,7 +134,7 @@ class Scheduler {
 
     /// @brief 取消全部任务（含周期任务）并清空。
     auto clear() -> void {
-        for (auto &e : entries_) {
+        for (const auto &e : entries_) {
             e->cancelled = true;
         }
         entries_.clear();

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -127,7 +126,7 @@ class ProviderRegistry {
 
     /// @brief 广播一条事件给全部已激活桥（宿主处理器由事件通道独立调用，与本表无关）。
     /// @param e 到达的语义事件（每个目标桥先置脏再交即时处理）。
-    auto broadcast(const AccessibilityEvent &e) -> void {
+    auto broadcast(const AccessibilityEvent &e) const -> void {
         for (Provider *p : providers_) {
             if (p != nullptr && p->is_active()) {
                 p->mark_dirty();
@@ -140,7 +139,7 @@ class ProviderRegistry {
     /// 与 `broadcast()` 的差别：**不置脏**。销毁通知的语义是「切断，不是重建」——桥收到后
     /// 应立即失效其根，任何随后由结构事件置起的脏标记都会在 `rebuild()` 里被空根短路。
     /// @param w 即将析构的控件实例（各桥不得保存该指针）。
-    auto broadcast_widget_destroying(const Widget *w) -> void {
+    auto broadcast_widget_destroying(const Widget *w) const -> void {
         for (Provider *p : providers_) {
             if (p != nullptr && p->is_active()) {
                 p->on_widget_destroying(w);

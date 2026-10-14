@@ -3,7 +3,6 @@
 /// @brief GPU 栅格后端声明：GL 3.3 core 函数表 `GLFn`、加载器 `load_gl` 与 `DisplayList` 消费者 `GpuGlRhi`。
 /// @file gpu_gl_rhi.h
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string_view>

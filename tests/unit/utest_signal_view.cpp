@@ -50,7 +50,7 @@ AURORA_TEST_CASE(signal_view_base_default_anchor_is_null) {
     CountingView v{1};
     SignalViewBase &base = v;
     AURORA_TEST_CHECK(base.anchor() == nullptr);
-    AURORA_TEST_CHECK(v.SignalView<int>::anchor() == nullptr);
+    AURORA_TEST_CHECK(v.SignalView::anchor() == nullptr);
 }
 
 AURORA_TEST_CASE(signal_view_subscribe_dispatches_through_base) {

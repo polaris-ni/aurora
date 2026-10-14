@@ -346,7 +346,7 @@ class TextInput : public LeafWidget {
         if (read_only_ || !enabled_) {
             return;
         }
-        std::string v = value_.get();
+        const std::string v = value_.get();
         const std::size_t a = std::min(start, v.size());
         const std::size_t b = std::clamp(end, a, v.size());
         std::string next = v.substr(0, a);

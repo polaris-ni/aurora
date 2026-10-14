@@ -4,7 +4,6 @@
 /// 全枚举映射、查表辅助函数一致性、format_message 渲染及边界、查表函数 constexpr 可用性（连带覆盖 error_codes.gen.h
 /// 可观测行为）
 
-#include <cstddef>
 #include <set>
 #include <string>
 #include <string_view>

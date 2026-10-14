@@ -16,11 +16,9 @@
 #include "aurora/core/json.h"
 #include "value_print.h"
 
-namespace aurora::testing {
-
 /// @brief `json::Value` 定制打印：紧凑 JSON 文本；含非有限 Double 时给出说明性文本。
 template <>
-struct ValuePrinter<aurora::json::Value> {
+struct aurora::testing::ValuePrinter<aurora::json::Value> {
     static auto print(const aurora::json::Value &value) -> std::string {
         auto text = aurora::json::dump(value);
         if (!text.ok()) {
@@ -28,6 +26,4 @@ struct ValuePrinter<aurora::json::Value> {
         }
         return std::move(text).value();
     }
-};
-
-}  // namespace aurora::testing
+};  // namespace aurora::testing

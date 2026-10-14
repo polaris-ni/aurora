@@ -20,7 +20,7 @@ const std::vector<float> AURORA_EMPTY_FLOATS;
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization): 同上
 const Font AURORA_DEFAULT_FONT{};
 const Image AURORA_DEFAULT_IMAGE{};
-const Matrix2D AURORA_IDENTITY_MATRIX;
+constexpr Matrix2D AURORA_IDENTITY_MATRIX;
 const std::vector<Point> AURORA_EMPTY_POINTS;
 
 // 进程级全局软件层存储：GPU 录制的 DL 可能回放至软件（begin_frame 失败回退 / 离屏

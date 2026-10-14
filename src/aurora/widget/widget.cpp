@@ -166,7 +166,7 @@ Node::~Node() {
     // 唯一持有者——`use_count()` 对「临时副本」与「父先亡」取值相同，分不开。
 }
 
-void Widget::detach_child_layout_parent(Widget *child) {
+void Widget::detach_child_layout_parent(Widget *child) const {
     if (child == nullptr) {
         return;
     }
@@ -604,7 +604,7 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
                 }
             }
         }
-        const float out = ring_gap + ring_thickness;
+        constexpr float out = ring_gap + ring_thickness;
         const Rect ring{
             .origin = Point{.x = ring_box.origin.x - out, .y = ring_box.origin.y - out},
             .size = Size{.width = ring_box.size.width + (2.0F * out), .height = ring_box.size.height + (2.0F * out)}};
@@ -904,7 +904,7 @@ auto Widget::window_bounds() const -> std::optional<Rect> {
         // （无内容控件、布局单测的探针桩）同样有确定的位置，它的窗口盒是有效答案而非空值。
         return std::nullopt;
     }
-    const Widget *child = this;
+    auto child = this;
     const Widget *parent = layout_parent_;
     if (parent == nullptr) {
         // 自身即根：根的窗口盒原点取**最近一次绘制实际使用的根盒**——`Window::run_paint` 以

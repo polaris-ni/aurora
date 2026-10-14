@@ -298,11 +298,13 @@ class Application {
     /// @brief 发送一条系统通知（Win32 托盘气球 / Linux XDG 桌面通知 / Headless 记录）。
     /// @param notification 通知内容（`title` / `body` / `tag` / `urgency` / `timeout_ms`）。
     /// @return 成功为 `Ok`；本平台无可用后端或投递失败为 `NotificationPostFailed`。
-    auto notify(const Notification &notification) -> Result<void> { return NotificationCenter::notify(notification); }
+    static auto notify(const Notification &notification) -> Result<void> {
+        return NotificationCenter::notify(notification);
+    }
 
     /// @brief 注册通知被用户点击（激活）时的回调。
     /// @param callback 回调；形参是被点击通知的 `tag`。传空回调即注销。
-    auto set_on_notification_activated(std::function<void(std::string tag)> callback) -> void {
+    static auto set_on_notification_activated(std::function<void(std::string tag)> callback) -> void {
         NotificationCenter::set_on_notification_activated(std::move(callback));
     }
 
@@ -622,7 +624,7 @@ class Application {
     /// `force_deferred`）下任务只在被泵时才跑，`with_timeout` 也因此不能是睡在任务里的看守。
     /// 排空在前、扫描在后：本帧来得及跑完的任务先出结果，看守只对确实没跑完的改道。
     /// 非 deferred 构建下 `pump()` 立即返回 0、看守表恒空，本步等价 no-op（不为浏览器单开分支）。
-    auto pump_deferred_work() -> void {
+    static auto pump_deferred_work() -> void {
         static_cast<void>(ThreadPool::default_pool().pump());  // 预算 = 进入时已入队任务，续命任务留下帧
         static_cast<void>(detail::sweep_due_timeouts(std::chrono::steady_clock::now()));
     }

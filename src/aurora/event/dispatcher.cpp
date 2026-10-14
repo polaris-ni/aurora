@@ -100,11 +100,11 @@ auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
     }
 }
 
-auto EventDispatcher::resolve_cursor(const std::vector<HitNode> &chain) const -> CursorShape {
+auto EventDispatcher::resolve_cursor(const std::vector<HitNode> &chain) -> CursorShape {
     // 自最深（链尾）向根（链头）回溯：内层控件的光标声明覆盖外层容器。
     // 优先级：修饰链 CursorNode > Widget::cursor_shape() 虚钩子 > 含 Clickable → PointingHand。
     for (const auto &it : std::views::reverse(chain)) {
-        Widget *sp = it.get();
+        const Widget *sp = it.get();
         if (sp == nullptr) {
             continue;  // 弱引用已回收，安全跳过
         }
@@ -511,7 +511,7 @@ auto EventDispatcher::dispatch(Widget &root, ScrollEvent &e) -> bool {
     std::vector<HitNode> chain =
         root.hit_test_chain(e.position, Rect{.origin = Point{}, .size = root.size()}, BuildContext{});
     bool has_scrollable = false;
-    for (auto &it : std::views::reverse(chain)) {
+    for (const auto &it : std::views::reverse(chain)) {
         auto *w = it.ptr;
         if (w == nullptr || !w->wants_scroll()) {
             continue;

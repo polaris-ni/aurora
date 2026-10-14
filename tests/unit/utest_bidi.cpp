@@ -12,9 +12,6 @@
 ///     RichTextEdit RTL 右对齐与指针命中（含 hit_test 入口 x≤0 的 RTL 语义回归）。
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdio>
-#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <utility>

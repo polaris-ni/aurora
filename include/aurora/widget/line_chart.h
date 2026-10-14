@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -244,12 +243,12 @@ class LineChart : public LeafWidget, public LineChartProps {
     /// @param g 布局期几何。
     /// @param i 点索引。
     /// @return 像素位置（局部坐标）。
-    [[nodiscard]] auto point_x(const Geometry &g, std::size_t i) const -> float;
+    [[nodiscard]] static auto point_x(const Geometry &g, std::size_t i) -> float;
     /// @brief 反查命中的图例项（命中区与绘制同源于 geom_.legend_rects）。
     /// @param g 布局期几何。
     /// @param local 控件局部坐标。
     /// @return 图例项索引；未命中为 `std::nullopt`。
-    [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
+    [[nodiscard]] static auto legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t>;
     /// @brief 最近数据点命中：遍历全部系列求欧氏距离，阈值 = dot_radius + 8dp。
     /// @param g 布局期几何。
     /// @param local 控件局部坐标。
@@ -331,7 +330,7 @@ inline auto LineChart::compute_y_scale() const -> LinearScale {
     return LinearScale::from_domain(lo, hi, axis_y.tick_count);
 }
 
-inline auto LineChart::point_x(const Geometry &g, std::size_t i) const -> float {
+inline auto LineChart::point_x(const Geometry &g, std::size_t i) -> float {
     if (g.point_count <= 1U) {
         return g.plot.origin.x + (g.plot.size.width * 0.5F);
     }
@@ -438,7 +437,7 @@ inline auto LineChart::on_layout(const Constraints &c, const BuildContext &ctx) 
 }
 
 // 对 legend_rects 逐项做矩形包含判断。
-inline auto LineChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
+inline auto LineChart::legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
         const Rect &r = g.legend_rects[i];
         if (local.x >= r.origin.x && local.x <= r.right() && local.y >= r.origin.y && local.y <= r.bottom()) {

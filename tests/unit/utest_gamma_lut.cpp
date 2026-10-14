@@ -5,8 +5,6 @@
 /// source-over 黄金混合，alpha=0/1 两极端与不透明中间值）。
 /// 判据：端点到端正确（0<->0、255<->1）、clamp 把越界线性值夹到 [0,255]、blend 两端退化为 dst/src。
 
-#include <cmath>
-
 #include "aurora/render/detail/gamma_lut.h"
 #include "framework/aurora_test.h"
 

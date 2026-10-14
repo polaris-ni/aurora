@@ -4,12 +4,10 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "aurora/app/perf_overlay.h"
 #include "aurora/app/scene.h"
 #include "aurora/core/result.h"
-#include "aurora/core/types.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/event.h"
 #include "aurora/event/focus.h"

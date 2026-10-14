@@ -11,7 +11,6 @@
 /// 探针取点纪律：浮层矩形按**控件外契约**独立重建（栏高 / 行高 26 / 浮层宽 180 / 菜单项数），
 /// 并与公开的 `dropdown_bounds()` 对账（两者分叉即报警）；取点前先断言该点在栏的布局盒之外。
 
-#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
@@ -143,7 +142,7 @@ AURORA_TEST_CASE(flyout_point_reaches_menu_bar_in_column_host) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -170,7 +169,7 @@ AURORA_TEST_CASE(flyout_press_triggers_menu_item_via_real_dispatch) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -216,7 +215,7 @@ AURORA_TEST_CASE(closed_menu_bar_does_not_claim_flyout_area) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -241,7 +240,7 @@ AURORA_TEST_CASE(compat_entry_and_dispatch_entry_agree_pointwise) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
     LayoutEngine::layout(*root, host_constraints());
     bar->open(0);
 
@@ -290,7 +289,7 @@ AURORA_TEST_CASE(bar_empty_click_closes) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
     LayoutEngine::layout(*root, host_constraints());
     bar->open(1);
 
@@ -311,7 +310,7 @@ AURORA_TEST_CASE(add_menu_appends_and_relayouts) {
     extra.title = "Edit";
     MenuItem cut;
     cut.label = "Cut";
-    cut.on_click = [&hits, &last]() {
+    cut.on_click = [&hits, &last] {
         ++hits;
         last = 7;
     };
@@ -369,8 +368,8 @@ AURORA_TEST_CASE(paint_dropdown_with_separator_checkable_shortcut) {
     bar->open(0);
 
     Painter painter;
-    const Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F},
-                      .size = Size{.width = AURORA_HOST_WIDTH, .height = AURORA_HOST_HEIGHT}};
+    constexpr Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F},
+                          .size = Size{.width = AURORA_HOST_WIDTH, .height = AURORA_HOST_HEIGHT}};
     bar->paint(painter, bounds, BuildContext{});  // 分隔符 + 勾选前缀 + 快捷键右对齐 + 禁用灰显
 }
 
@@ -379,7 +378,7 @@ AURORA_TEST_CASE(non_press_event_falls_through_to_base) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    BuildContext ctx;
+    constexpr BuildContext ctx;
     bar->mount(ctx);
     LayoutEngine::layout(*bar, host_constraints());
 
@@ -395,7 +394,7 @@ AURORA_TEST_CASE(non_press_event_falls_through_to_base) {
 
 /// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
 /// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
-auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+static auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
     auto env = std::make_shared<Environment>();
     env->set_local(t);
     BuildContext ctx;
@@ -405,8 +404,8 @@ auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, Build
 
 AURORA_TEST_CASE(menu_bar_colors_follow_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
-    const BuildContext bare;  // 无注入：inherit_theme 回落 light
-    MenuBar bar;
+    constexpr BuildContext bare;  // 无注入：inherit_theme 回落 light
+    const MenuBar bar;
     // 启用项文字 → on_surface；禁用项 → on_surface_variant。
     AURORA_TEST_CHECK(bar.resolve_item_text_color(bare, true) == Color{0, 0, 0});  // light on_surface
     AURORA_TEST_CHECK(bar.resolve_item_text_color(bare, false) == Color(71, 71, 71));  // light on_surface_variant

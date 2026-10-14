@@ -242,7 +242,7 @@ AURORA_TEST_CASE(dtd_release_below_threshold_springs_back_silently) {
     DragToDismiss dtd(DragAxis::Horizontal, 100.0, SpringDescription{});
     dtd.recognizer_slop_for_test(5.0);
     int dismissed = 0;
-    dtd.on_dismissed([&dismissed]() { ++dismissed; });
+    dtd.on_dismissed([&dismissed] { ++dismissed; });
 
     // 拖到 0.3（< 阈值 0.5）松手：spring 回 0，不触发 dismissed。
     dtd.on_mouse(make_mouse(MouseAction::Press, Point{.x = 0.0F, .y = 0.0F}));
@@ -264,7 +264,7 @@ AURORA_TEST_CASE(dtd_release_above_threshold_flies_out_and_fires_dismissed) {
     DragToDismiss dtd(DragAxis::Horizontal, 100.0, SpringDescription{});
     dtd.recognizer_slop_for_test(5.0);
     int dismissed = 0;
-    dtd.on_dismissed([&dismissed]() { ++dismissed; });
+    dtd.on_dismissed([&dismissed] { ++dismissed; });
 
     // 拖到 0.7（≥ 阈值）松手：spring 飞 1，触发 dismissed。
     dtd.on_mouse(make_mouse(MouseAction::Press, Point{.x = 0.0F, .y = 0.0F}));
@@ -285,7 +285,7 @@ AURORA_TEST_CASE(dtd_release_above_threshold_flies_out_and_fires_dismissed) {
 AURORA_TEST_CASE(dtd_velocity_estimated_along_axis_into_spring) {
     // 快速甩动（两帧 60dp）后松手在低进度：速度方向正 → 初速度进 spring。
     // 通过构造欠阻尼 spring 观察超调验证速度被采纳（无速度时 0.3→0 单调不超调）。
-    SpringDescription bouncy{.stiffness = 100.0, .damping = 8.0, .mass = 1.0};  // 欠阻尼
+    constexpr SpringDescription bouncy{.stiffness = 100.0, .damping = 8.0, .mass = 1.0};  // 欠阻尼
     DragToDismiss dtd(DragAxis::Horizontal, 100.0, bouncy);
     dtd.recognizer_slop_for_test(5.0);
     dtd.on_mouse(make_mouse(MouseAction::Press, Point{.x = 0.0F, .y = 0.0F}));

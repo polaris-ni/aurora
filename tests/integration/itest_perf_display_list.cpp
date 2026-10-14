@@ -7,7 +7,6 @@
 ///           tools/check/perf_gates.json）由 tests/unit/utest_scroll.cpp 的
 ///           scroll_regression_counter_gates 用例锁定，本文件不与之重复。
 
-#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -40,7 +39,7 @@ class FillLeaf : public LeafWidget {
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         // 叶控件固定边长：仅此函数使用，局部化以符合命名规范。
-        const float side = 8.0F;
+        constexpr float side = 8.0F;
         return c.constrain(Size{.width = side, .height = side});
     }
     auto on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) -> void override {
@@ -61,7 +60,7 @@ auto build_tree(int n) -> Node {
 
 // 走完整 mount → layout → record paint 流水线，返回录制出的命令条数。
 auto record_cmd_count(Node root, float w, float h) -> std::size_t {
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     root->mount(ctx);
     Constraints c;
     c.min = Size{.width = 0.0F, .height = 0.0F};

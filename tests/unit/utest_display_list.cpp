@@ -3,7 +3,6 @@
 /// 测试说明: 覆盖 DisplayList 的命令与数据池：空态判定、各池 add_* 的索引递增与独立编号、push_cmd 记账、
 /// clear 全池复位，以及 replay 到 Painter 的像素等价性与空列表回放的无副作用
 
-#include <cstdint>
 #include <string>
 #include <vector>
 

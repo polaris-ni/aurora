@@ -169,7 +169,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         note->set(au::LocalizedString{"preview creation failed: " + wr.error().message});
         return;
     }
-    auto sid = std::make_shared<au::WindowId>(au::AURORA_INVALID_WINDOW_ID);
+    const auto sid = std::make_shared<au::WindowId>(au::AURORA_INVALID_WINDOW_ID);
     *sid = app.open_window(std::move(wr.value()), au::Scene{build_preview_ui(app, sid, p, preview_info, note)}, po);
     *preview_id = *sid;
     preview_info->set(au::LocalizedString{std::string(policy_label(p)) + " | opening…"});
@@ -210,7 +210,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         au::Button shadow_btn{au::ButtonProps{.label = "Toggle window frame shadow"}};
         shadow_btn.on_click = [self_id, &app, shadow_on, note]() -> void {
             *shadow_on = !*shadow_on;
-            if (auto *w = resolve_preview(app, self_id)) {
+            if (const auto *w = resolve_preview(app, self_id)) {
                 w->set_window_frame_style(au::WindowFrameStyle{.shadow_enabled = *shadow_on, .shadow_margin_dp = 10});
                 note->set(au::LocalizedString{std::string("window frame shadow → ") + (*shadow_on ? "on" : "off")});
             }
@@ -221,7 +221,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         au::Button icon_btn{au::ButtonProps{.label = "Toggle title-bar icon"}};
         icon_btn.on_click = [self_id, &app, icon_on, note]() -> void {
             *icon_on = !*icon_on;
-            if (auto *w = resolve_preview(app, self_id)) {
+            if (const auto *w = resolve_preview(app, self_id)) {
                 w->set_title_bar_icon(*icon_on ? make_demo_icon() : nullptr);
                 note->set(au::LocalizedString{std::string("title-bar icon → ") + (*icon_on ? "set" : "cleared")});
             }
@@ -306,9 +306,9 @@ auto main() -> int {
     au::init_console();
 
     auto preview_id = std::make_shared<au::WindowId>(au::AURORA_INVALID_WINDOW_ID);
-    au::DecorationPolicy preview_policy = au::DecorationPolicy::Auto;
+    auto preview_policy = au::DecorationPolicy::Auto;
     auto preview_info = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"Preview: none"});
-    auto note =
+    const auto note =
         std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"Pick a policy above to open a preview."});
 
     au::WindowOptions opts;

@@ -9,7 +9,6 @@
 
 #include "framework/aurora_test.h"
 #include "framework/json_literals.h"
-#include "framework/json_value_printer.h"
 
 #ifdef AURORA_ENABLE_STORAGE_SQLITE
 

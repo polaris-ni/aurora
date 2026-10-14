@@ -7,12 +7,10 @@
 ///           tools/verify 探针把关）
 
 #include <cstdlib>
-#include <memory>
 #include <string_view>
 #include <vector>
 
 #include "aurora/core/platform.h"
-#include "aurora/window/detail/atspi_bridge.h"
 #include "framework/aurora_test.h"
 
 #if defined(AURORA_PLATFORM_LINUX) && (defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))

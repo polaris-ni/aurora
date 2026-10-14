@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <charconv>
 #include <condition_variable>
-#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>

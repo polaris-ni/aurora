@@ -5,9 +5,9 @@
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    auto light = au::Theme::light();
-    auto zh = au::Locale{.language = "zh", .region = "CN"};
-    auto mq = au::MediaQuery::of(2.0);
+    const auto light = au::Theme::light();
+    const auto zh = au::Locale{.language = "zh", .region = "CN"};
+    const auto mq = au::MediaQuery::of(2.0);
 
     au::Node content = au::Column{
         GradientTitle{"Provider trio"},

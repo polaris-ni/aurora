@@ -12,7 +12,6 @@
 /// 类本身仍参与编译与链接，便于单测直接驱动。
 ///
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>

@@ -44,6 +44,8 @@ class LeafProbe final : public Widget {
     int unmounts = 0;
     [[nodiscard]] auto type_name() const -> const char * override { return "LeafProbe"; }
     auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { (void)out; }
+
+  protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = 10.0F, .height = 10.0F});
     }
@@ -98,8 +100,8 @@ AURORA_TEST_CASE(api_surface_and_open_close) {
 }
 
 AURORA_TEST_CASE(pointer_event_closes_when_click_outside_panel) {
-    auto content = std::make_shared<LeafProbe>();
-    auto panel = std::make_shared<LeafProbe>();
+    const auto content = std::make_shared<LeafProbe>();
+    const auto panel = std::make_shared<LeafProbe>();
     Drawer d{Node{content}, Node{panel}, DrawerSide::Left, 240.0F};
     d.set_open(true);  // 打开态
 
@@ -120,7 +122,8 @@ AURORA_TEST_CASE(pointer_event_closes_when_click_outside_panel) {
 }
 
 AURORA_TEST_CASE(right_side_panel_rect_branch) {
-    Drawer right{Node{std::make_shared<LeafProbe>()}, Node{std::make_shared<LeafProbe>()}, DrawerSide::Right, 200.0F};
+    const Drawer right{Node{std::make_shared<LeafProbe>()}, Node{std::make_shared<LeafProbe>()}, DrawerSide::Right,
+                       200.0F};
     // 右停靠分支（size_ 默认 0 → 面板贴右但宽度夹为 0，仅覆盖分支）。
     const Rect r = right.panel_rect();
     (void)r;
@@ -151,10 +154,10 @@ AURORA_TEST_CASE(serialize_and_deserialize_roundtrip) {
 }
 
 AURORA_TEST_CASE(mount_unmount_tick_forwards_to_children) {
-    auto content = std::make_shared<LeafProbe>();
-    auto panel = std::make_shared<LeafProbe>();
+    const auto content = std::make_shared<LeafProbe>();
+    const auto panel = std::make_shared<LeafProbe>();
     Drawer d{Node{content}, Node{panel}};
-    BuildContext ctx;
+    constexpr BuildContext ctx;
     d.mount(ctx);
     AURORA_TEST_CHECK_EQ(content->mounts, 1);
     AURORA_TEST_CHECK_EQ(panel->mounts, 1);
@@ -204,7 +207,7 @@ AURORA_TEST_CASE(progress_dialog_cancel_paths) {
     // 可取消：cancel() 关对话框 + 触发回调。
     ProgressDialog pd{"x", true};
     int cancelled = 0;
-    pd.set_on_cancel([&cancelled]() { ++cancelled; });
+    pd.set_on_cancel([&cancelled] { ++cancelled; });
     pd.show();
     pd.cancel();
     AURORA_TEST_CHECK_EQ(pd.is_open(), false);
@@ -213,7 +216,7 @@ AURORA_TEST_CASE(progress_dialog_cancel_paths) {
     // 不可取消：cancel() 整体 no-op（open_ 不变、回调不触发）。
     ProgressDialog locked{"y", false};
     int c2 = 0;
-    locked.set_on_cancel([&c2]() { ++c2; });
+    locked.set_on_cancel([&c2] { ++c2; });
     locked.show();
     locked.cancel();
     AURORA_TEST_CHECK_EQ(locked.is_open(), true);
@@ -400,9 +403,9 @@ AURORA_TEST_CASE(page_view_serialize_roundtrip) {
 }
 
 AURORA_TEST_CASE(drawer_layout_and_paint_branches) {
-    auto content = std::make_shared<LeafProbe>();
-    auto panel = std::make_shared<LeafProbe>();
-    BuildContext ctx;
+    const auto content = std::make_shared<LeafProbe>();
+    const auto panel = std::make_shared<LeafProbe>();
+    constexpr BuildContext ctx;
     Painter painter;
 
     // 左停靠 + 打开：面板可见、内容占满、面板宽 240 贴左、绘制遮罩+阴影+面板+内容。
@@ -438,27 +441,27 @@ AURORA_TEST_CASE(drawer_layout_and_paint_branches) {
 }
 
 AURORA_TEST_CASE(drawer_hit_test_branches) {
-    auto content = std::make_shared<LeafProbe>();
-    auto panel = std::make_shared<LeafProbe>();
-    BuildContext ctx;
+    const auto content = std::make_shared<LeafProbe>();
+    const auto panel = std::make_shared<LeafProbe>();
+    constexpr BuildContext ctx;
     Drawer d{Node{content}, Node{panel}, DrawerSide::Left, 240.0F};
     d.set_open(true);
     LayoutEngine::layout(d, bounded(800.0F, 600.0F));
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = d.size()};
 
     // 面板内点击 → 命中（面板子树或自身）。
-    Widget *in_panel = d.hit_test(Point{.x = 10.0F, .y = 10.0F}, box, ctx);
+    const Widget *in_panel = d.hit_test(Point{.x = 10.0F, .y = 10.0F}, box, ctx);
     AURORA_TEST_CHECK_TRUE(in_panel != nullptr);
     // 内容区点击 → 命中内容子树。
-    Widget *in_content = d.hit_test(Point{.x = 400.0F, .y = 300.0F}, box, ctx);
+    const Widget *in_content = d.hit_test(Point{.x = 400.0F, .y = 300.0F}, box, ctx);
     AURORA_TEST_CHECK_TRUE(in_content != nullptr);
 
     // 空内容 + 打开：点击遮罩区（不在面板内）→ 返回自身（模态关闭语义）。
     Drawer scrim{Node{}, Node{std::make_shared<LeafProbe>()}, DrawerSide::Left, 240.0F};
     scrim.set_open(true);
     LayoutEngine::layout(scrim, bounded(800.0F, 600.0F));
-    Widget *on_scrim = scrim.hit_test(Point{.x = 400.0F, .y = 300.0F},
-                                      Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = scrim.size()}, ctx);
+    const Widget *on_scrim = scrim.hit_test(Point{.x = 400.0F, .y = 300.0F},
+                                            Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = scrim.size()}, ctx);
     AURORA_TEST_CHECK_TRUE(on_scrim != nullptr);
 
     // 关闭且空：无命中。
@@ -472,7 +475,7 @@ AURORA_TEST_CASE(drawer_hit_test_branches) {
 AURORA_TEST_CASE(progress_dialog_layout_paint_hit_test) {
     BuildContext ctx;
     Painter p;
-    const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
+    constexpr Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
 
     // 打开 + 确定进度：布局算盒 + 绘制进度填充 + 取消按钮。
     ProgressDialog pd{"working", true};
@@ -525,10 +528,10 @@ AURORA_TEST_CASE(progress_dialog_layout_paint_hit_test) {
 }
 
 AURORA_TEST_CASE(page_view_layout_paint_hit_test) {
-    auto a = std::make_shared<LeafProbe>();
-    auto b = std::make_shared<LeafProbe>();
-    auto c = std::make_shared<LeafProbe>();
-    BuildContext ctx;
+    const auto a = std::make_shared<LeafProbe>();
+    const auto b = std::make_shared<LeafProbe>();
+    const auto c = std::make_shared<LeafProbe>();
+    constexpr BuildContext ctx;
     Painter p;
 
     // 多页 + 指示器：当前页绘制 + 圆点(active=0, 其余 inactive)。
@@ -537,7 +540,7 @@ AURORA_TEST_CASE(page_view_layout_paint_hit_test) {
     LayoutEngine::layout(pv, bounded(400.0F, 300.0F));
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = pv.size()};
     pv.paint(p, box, ctx);  // 293-298 + 301-314
-    Widget *hit = pv.hit_test(Point{.x = 200.0F, .y = 150.0F}, box, ctx);
+    const Widget *hit = pv.hit_test(Point{.x = 200.0F, .y = 150.0F}, box, ctx);
     AURORA_TEST_CHECK_TRUE(hit != nullptr);  // 当前页命中
 
     // 单页：指示器跳过（>1 不成立）。

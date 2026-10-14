@@ -1,7 +1,6 @@
 #include "isolation.h"
 
 #include <chrono>
-#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <string>

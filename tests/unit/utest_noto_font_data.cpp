@@ -3,9 +3,6 @@
 /// 测试说明: 覆盖内嵌 Noto Sans 数据的可访问性：span 非空且规模符合整包字体、sfnt 魔数为合法 TrueType 标识、
 /// 多次调用返回同一数据视图（单一定义、不产生 TU 副本）
 
-#include <cstddef>
-#include <cstdint>
-
 #include "aurora/render/noto_font_data.h"
 #include "framework/aurora_test.h"
 

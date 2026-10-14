@@ -318,7 +318,7 @@ constexpr std::string_view AURORA_TEXT_PROP_KEYS[] = {"content", "text", "label"
 
 // 可靠发送：分块写满逻辑收敛在 net::StreamSocket::write_all（实现侧 ≤1MiB 分块 +
 // 两平台返回值窄化统一），此处只保留 bool 形态供既有调用点使用。
-static auto send_all(net::StreamSocket &client, const std::string &data) -> bool {
+static auto send_all(const net::StreamSocket &client, const std::string &data) -> bool {
     return static_cast<bool>(client.write_all(std::span<const char>(data)));
 }
 
@@ -489,7 +489,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         }
         try {
             return on_tree(
-                [](Node &root) -> std::string { return json_response(200, "OK", aurora::debug::widget_tree(root)); });
+                [](const Node &root) -> std::string { return json_response(200, "OK", aurora::debug::widget_tree(root)); });
         } catch (const std::exception &e) {
             return error_response(500, std::string("widget_tree failed: ") + e.what());
         }
@@ -630,7 +630,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         }
         // 回退：主窗口（构造时注入的 root_getter），向后兼容既有 /api/tree。
         return on_tree(
-            [](Node &root) -> std::string { return json_response(200, "OK", Inspector::tree_json_full(root)); });
+            [](const Node &root) -> std::string { return json_response(200, "OK", Inspector::tree_json_full(root)); });
     }
 
     // GET /api/widget/{path} — 单 widget 属性
@@ -1004,7 +1004,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         if (method != "GET") {
             return error_response(405, "Method not allowed for /api/yaml");
         }
-        return on_tree([](Node &root) -> std::string {
+        return on_tree([](const Node &root) -> std::string {
             const Json tree = Inspector::tree_json_full(root);
             const std::string yaml = aurora::serialization::to_yaml(tree);
             return make_response(200, "OK", "text/yaml", yaml);

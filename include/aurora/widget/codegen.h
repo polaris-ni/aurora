@@ -455,7 +455,7 @@ struct PropDescriptor {
         return {};
     }
     const auto same_ignore_case = [](const std::string &a, const std::string &b) {
-        return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](const char x, const char y) {
+        return std::ranges::equal(a, b, [](const char x, const char y) {
             return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
         });
     };
@@ -763,7 +763,7 @@ struct PropEmit {
     -> std::vector<PropEmit> {
     std::vector<PropEmit> out{};  // 发射序列累加容器（过滤后按成员声明序稳定排序）
     for (const auto &e : props.entries()) {
-        const std::string key = std::string(e.key);
+        const auto key = std::string(e.key);
         std::string expr = emit_prop_value(key, e.value, type);
         if (expr == "/* unknown */") {
             continue;
@@ -785,9 +785,8 @@ struct PropEmit {
         out.push_back(
             {.key = key, .lhs = std::string{target.lhs}, .expr = std::move(expr), .via_setter = target.via_setter});
     }
-    std::stable_sort(
-        out.begin(), out.end(),
-        [&](const PropEmit &a, const PropEmit &b) {  // 按 *Props 成员声明序稳定排序，未登记键保持 JSON 原序
+    std::ranges::stable_sort(
+        out, [&](const PropEmit &a, const PropEmit &b) {  // 按 *Props 成员声明序稳定排序，未登记键保持 JSON 原序
             return prop_order(type, a.key) < prop_order(type, b.key);
         });
     return out;

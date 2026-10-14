@@ -3,7 +3,6 @@
 /// 测试说明: 内置 PNG 编码器（write_png）与 Image::load 解码链路集成——4x4 RGBA 编码写入
 ///           用例临时目录后解码往返保真（尺寸与像素值）、零尺寸/空指针输入返回结构化错误
 
-#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>

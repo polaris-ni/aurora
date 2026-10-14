@@ -32,6 +32,12 @@
 
 namespace aurora {
 
+// `AudioContext` 的完整定义在本文末（图与设备管理端），而节点/后端接口在中间就要按引用
+// 提及它。C++ 的 `friend class X;` **不会**把 X 交给普通名字查找（只经 ADL 可见），故此处
+// 必须显式前置声明——否则只 include 本头、不先 include `video_player.h`（它另有该前置声明）
+// 的 TU 会在 `AudioContext &` 处硬错。
+class AudioContext;
+
 // ---- 值类型 ----
 
 /// @brief 音频缓冲（一次性播放/循环音效的样本载体；图内统一 float32 交错存储）。
@@ -342,8 +348,6 @@ class AudioParam {
 };
 
 // ---- 节点 ----
-
-class AudioContext;
 
 /// @brief 音频节点基类（图内处理单元；只能经 AudioContext 工厂创建）。
 /// 图内固定 stereo（2 声道）处理：单声道源在上游混音时复制到双声道。节点有唯一的

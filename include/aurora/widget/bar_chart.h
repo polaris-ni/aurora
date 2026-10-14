@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -262,7 +261,7 @@ class BarChart : public LeafWidget, public BarChartProps {
     /// @param g 布局期几何。
     /// @param local 控件局部坐标。
     /// @return 图例项索引；未命中为 `std::nullopt`。
-    [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
+    [[nodiscard]] static auto legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t>;
     /// @brief 安全取数据点值：系列 / 类目越界或非有限值（NaN / Inf）回退 0.0。
     /// @param series_idx 系列索引。
     /// @param cat_idx 类目索引。
@@ -272,7 +271,7 @@ class BarChart : public LeafWidget, public BarChartProps {
     /// @param g 布局期几何。
     /// @param cat_idx 类目索引。
     /// @return 带中心像素位置。
-    [[nodiscard]] auto category_center(const Geometry &g, std::size_t cat_idx) const -> float;
+    [[nodiscard]] static auto category_center(const Geometry &g, std::size_t cat_idx) -> float;
 
     Geometry geom_;  ///< 布局期算定的绘图几何缓存（on_layout 写入，绘制 / 命中反查复用）
     ChartGrowIn grow_;  ///< grow-in 入场动画状态（on_mount 接入帧循环；数据变更时重放）
@@ -455,12 +454,12 @@ inline auto BarChart::compute_geometry(const Size &size, const Font &font) const
 }
 
 // 供十字准线吸附与类目标签居中使用。
-inline auto BarChart::category_center(const Geometry &g, std::size_t cat_idx) const -> float {
+inline auto BarChart::category_center(const Geometry &g, std::size_t cat_idx) -> float {
     return g.x_band.band_center_px(cat_idx, g.plot.origin.x, g.plot.right());
 }
 
 // 对 legend_rects 逐项做矩形包含判断。
-inline auto BarChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
+inline auto BarChart::legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
         const Rect &r = g.legend_rects[i];
         if (local.x >= r.origin.x && local.x <= r.right() && local.y >= r.origin.y && local.y <= r.bottom()) {

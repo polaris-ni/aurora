@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <optional>
 
 #include "aurora/core/color.h"

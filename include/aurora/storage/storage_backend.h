@@ -62,7 +62,7 @@ class StorageBackend {
     /// @param id 记录主键。
     /// @return 存在为 true；不存在为 false；其他 IO 错误返回错误。
     [[nodiscard]] virtual auto contains(const std::string &id) -> Result<bool> {
-        auto r = get_record(id);
+        const auto r = get_record(id);
         if (r) {
             return Result<bool>{true};
         }

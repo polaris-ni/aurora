@@ -6,9 +6,7 @@
 /// 异步 URL 源三态（占位→加载→成功/失败）与缓存命中、未注入 fetcher 优雅降级
 
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
-#include <future>
 #include <memory>
 #include <mutex>
 #include <string>

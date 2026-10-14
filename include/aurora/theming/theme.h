@@ -88,7 +88,7 @@ struct Theme {
     /// @return 已注册则指向其只读实例，否则 `nullptr`。
     template <ThemeExtension T>
     [[nodiscard]] auto extension() const -> const std::remove_cvref_t<T> * {
-        return extensions.template get<T>();
+        return extensions.get<T>();
     }
 
     /// @brief 移除类型 T 的扩展。

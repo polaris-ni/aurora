@@ -3,7 +3,6 @@
 // 本文件**不含**任何词法逻辑：解析全部委托给 sax.cpp 的字符级引擎，这里只提供把它的事件
 // 装配成 Value 树的 `DomBuilder`。两套出口共用单一引擎，故 parse 与 parse_sax 的行为不可能分叉。
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -200,7 +199,7 @@ class ScatterChart : public LeafWidget, public ScatterChartProps {
     /// @param g 几何快照
     /// @param local 本地坐标
     /// @return 命中图例项序号，无命中为 nullopt
-    [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
+    [[nodiscard]] static auto legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t>;
     /// @brief 最近数据点命中：比例尺映射后按各系列阈值 dot_radius + 4dp 比较欧氏距离，命中多个时取最近。
     /// @param g 几何快照
     /// @param local 本地坐标
@@ -347,7 +346,7 @@ inline auto ScatterChart::on_layout(const Constraints &c, const BuildContext &ct
 }
 
 // 顺序扫描 legend_rects，首个包含该点的矩形即命中。
-inline auto ScatterChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
+inline auto ScatterChart::legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
         const Rect &r = g.legend_rects[i];
         if (local.x >= r.origin.x && local.x <= r.right() && local.y >= r.origin.y && local.y <= r.bottom()) {
@@ -628,7 +627,7 @@ inline auto ScatterChart::on_paint(Painter &p, const Rect &bounds, const BuildCo
             p.draw_line(Point{.x = origin.x + plot.origin.x, .y = origin.y + hovered_px->y},
                         Point{.x = origin.x + plot.right(), .y = origin.y + hovered_px->y}, 1.0F, grid);
         }
-        const float d = 12.0F;
+        constexpr float d = 12.0F;
         const Rect ring{
             .origin = Point{.x = origin.x + hovered_px->x - (d * 0.5F), .y = origin.y + hovered_px->y - (d * 0.5F)},
             .size = Size{.width = d, .height = d}};

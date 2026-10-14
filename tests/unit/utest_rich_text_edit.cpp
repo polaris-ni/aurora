@@ -7,7 +7,6 @@
 /// 选区高亮镜像、聚焦光标落右缘像素
 
 #include <algorithm>
-#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>
@@ -314,7 +313,7 @@ AURORA_TEST_CASE(rtl_block_right_aligns_within_line) {
         LayoutEngine::layout(t, bounded(300.0F, 300.0F));
         Painter p;
         p.begin(308, static_cast<int>(t.size().height) + 4);
-        const BuildContext ctx;
+        constexpr BuildContext ctx;
         t.paint(p, Rect{.origin = Point{.x = 2.0F, .y = 2.0F}, .size = t.size()}, ctx);
         const int y0 = 2 + static_cast<int>(t.size().height / 2.0F);
         for (int x = 0; x < 308; ++x) {
@@ -352,7 +351,7 @@ AURORA_TEST_CASE(rtl_selection_highlight_mirrors_to_right) {
 
         Painter p;
         p.begin(308, static_cast<int>(t.size().height) + 4);
-        const BuildContext ctx;
+        constexpr BuildContext ctx;
         t.paint(p, Rect{.origin = Point{.x = 2.0F, .y = 2.0F}, .size = t.size()}, ctx);
         const int y0 = 2 + static_cast<int>(t.size().height / 2.0F);
         float lo = 1e9F;
@@ -387,7 +386,7 @@ AURORA_TEST_CASE(rtl_focused_caret_paints_at_right_edge) {
 
         Painter p;
         p.begin(308, static_cast<int>(t.size().height) + 4);
-        const BuildContext ctx;
+        constexpr BuildContext ctx;
         t.paint(p, Rect{.origin = Point{.x = 2.0F, .y = 2.0F}, .size = t.size()}, ctx);
         const int y0 = 2 + static_cast<int>(t.size().height / 2.0F);
         for (int x = 0; x < 308; ++x) {
@@ -761,7 +760,7 @@ AURORA_TEST_CASE(paint_selection_underline_preedit_and_cursor) {
     paint(edit, 120.0F, 40.0F);
 
     // composition_caret_bounds：组合 + preedit_cursor_ > 0 → 候选窗 = 文档光标 + preedit 前缀宽。
-    edit.caret();  // 触发惰性断言无副作用；仅保持调用形态
+    (void)edit.caret();  // 触发惰性断言无副作用；仅保持调用形态
     const Rect bounds = edit.composition_caret_bounds();
     AURORA_TEST_CHECK_TRUE(bounds.size.width >= 0.0F);
     AURORA_TEST_CHECK_TRUE(bounds.size.height >= 0.0F);
@@ -784,8 +783,8 @@ AURORA_TEST_CASE(paint_selection_underline_preedit_and_cursor) {
 AURORA_TEST_CASE(rich_text_edit_color_follows_theme_when_unset) {
     // 未显式设置当前输入色时，resolve_text_color 经 ctx 取主题 on_surface：
     // 裸 ctx 回落 light（黑），注入 dark 主题翻面为白。
-    const BuildContext bare;
-    RichTextEdit edit;
+    constexpr BuildContext bare;
+    const RichTextEdit edit;
     AURORA_TEST_CHECK_FALSE(edit.current_color().has_value());
     AURORA_TEST_CHECK(edit.resolve_text_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
 

@@ -3,7 +3,6 @@
 #include <cmath>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "aurora/i18n/locale.h"
 
@@ -120,7 +119,7 @@ struct CurrencyInfo {
         }
     }
 
-    std::string ip_str = std::to_string(ip);
+    const std::string ip_str = std::to_string(ip);
     std::string grouped;
     const int len = static_cast<int>(ip_str.size());
     for (int k = 0; k < len; ++k) {

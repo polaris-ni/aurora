@@ -4,7 +4,6 @@
 /// degraded 记录、explain 兜底、修复建议收集与应用、注册表与 auto_fix_all、to_json_line 形态、recent 环形缓冲
 
 #include <array>
-#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>

@@ -4,7 +4,6 @@
 /// 容差阈值吸收微小差值、差异可视化图的红/淡化着色，以及空图（0×0）的除零保护；
 /// 后段覆盖 cluster_diff_regions 的空间聚合（网格归并、连通跨格、碎块过滤、网格边长只改精度不改区域数）
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>

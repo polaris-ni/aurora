@@ -41,8 +41,8 @@ class ThemedBox : public au::LeafWidget {
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    auto light = au::Theme::light();
-    auto dark = au::Theme::dark();
+    const auto light = au::Theme::light();
+    const auto dark = au::Theme::dark();
 
     au::Node root = au::Column{
         GradientTitle{"Theme"},

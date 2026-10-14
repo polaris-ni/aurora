@@ -47,12 +47,16 @@ using aurora::detail::gradient_radial_fill;
 using aurora::detail::init_gamma_tables;
 using aurora::detail::linear_to_srgb;
 
+namespace {
+
 // [性能排查] 各光栅热点耗时累加器（结构/计时器/访问器见 detail/paint_timing.h）。
 // 性能排查累加器为跨函数共享的可变模块状态，设计为有意的命名空间级全局；见 paint_timing()/paint_timing_last()。
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 detail::PaintTiming g_pt;  // 当前帧累加器（aurora::g_pt）
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 detail::PaintTiming g_pt_last;  // 上一完成绘制帧快照
+
+}  // namespace
 
 auto detail::paint_timing() -> detail::PaintTiming & { return g_pt; }
 auto detail::paint_timing_last() -> const detail::PaintTiming & { return g_pt_last; }
@@ -764,9 +768,9 @@ auto Painter::draw_text(const Rect &r, const std::string &s, const Font &f, Colo
     AURORA_PROFILE_COUNT(draw_texts, 1);
     // 委托给 FontEngine：唯一字体内核为 FreeType（HarfBuzz 做 shaping），无 GDI 文本路径。
     // 原点换算为物理像素（FontEngine 以物理分辨率光栅字形并逐物理像素写入，不再乘 scale）。
-    const float sc = scale_;
-    const Rect pr{.origin = Point{.x = r.origin.x * sc, .y = r.origin.y * sc}, .size = r.size};
     {
+        const float sc = scale_;
+        const Rect pr{.origin = Point{.x = r.origin.x * sc, .y = r.origin.y * sc}, .size = r.size};
         detail::PaintTimer guard{&g_pt.text};
         render::FontEngine::draw_text(*this, pr, s, f, c);
     }
@@ -780,9 +784,9 @@ auto Painter::draw_text(const Rect &r, const std::string &s, const Font &f, Colo
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(draw_texts, 1);
-    const float sc = scale_;
-    const Rect pr{.origin = Point{.x = r.origin.x * sc, .y = r.origin.y * sc}, .size = r.size};
     {
+        const float sc = scale_;
+        const Rect pr{.origin = Point{.x = r.origin.x * sc, .y = r.origin.y * sc}, .size = r.size};
         detail::PaintTimer guard{&g_pt.text};
         render::FontEngine::draw_text(*this, pr, s, f, c, opts);
     }
@@ -796,9 +800,9 @@ auto Painter::draw_text(const Rect &r, const std::string &s, const Font &f, Colo
     }
     AURORA_PROFILE_COUNT(draw_calls, 1);
     AURORA_PROFILE_COUNT(draw_texts, 1);
-    const float sc = scale_;
-    const Rect pr{.origin = Point{.x = r.origin.x * sc, .y = r.origin.y * sc}, .size = r.size};
     {
+        const float sc = scale_;
+        const Rect pr{.origin = Point{.x = r.origin.x * sc, .y = r.origin.y * sc}, .size = r.size};
         detail::PaintTimer guard{&g_pt.text};
         render::FontEngine::draw_text(*this, pr, s, f, c, aa_mode, opts);
     }
@@ -1036,7 +1040,7 @@ auto Painter::mark_recording_dynamic() -> void {
 }
 
 auto Painter::record_text_cmd(const Rect &r, const std::string &s, const Font &f, Color c, render::TextAAMode aa,
-                              const render::TextLayoutOpts &opts) -> void {
+                              const render::TextLayoutOpts &opts) const -> void {
     DrawCmd cmd;
     cmd.kind = CmdKind::DrawText;
     cmd.bounds = r;
@@ -1302,7 +1306,7 @@ auto Painter::set_alpha(double a) -> void {
 
 // ---- GPU 层缓存命令（仅录制模式；Direct 模式 no-op——软件直绘走 paint_cache_ 位图路径）----
 
-auto Painter::begin_layer(std::uint64_t key, const Size &size) -> void {
+auto Painter::begin_layer(std::uint64_t key, const Size &size) const -> void {
     if (!is_recording()) {
         return;
     }
@@ -1313,7 +1317,7 @@ auto Painter::begin_layer(std::uint64_t key, const Size &size) -> void {
     recording_stack_.back()->push_cmd(cmd);
 }
 
-auto Painter::end_layer() -> void {
+auto Painter::end_layer() const -> void {
     if (!is_recording()) {
         return;
     }
@@ -1322,7 +1326,7 @@ auto Painter::end_layer() -> void {
     recording_stack_.back()->push_cmd(cmd);
 }
 
-auto Painter::draw_layer(std::uint64_t key, const Matrix2D &matrix, float src_scale) -> void {
+auto Painter::draw_layer(std::uint64_t key, const Matrix2D &matrix, float src_scale) const -> void {
     if (!is_recording()) {
         return;
     }
@@ -1395,7 +1399,7 @@ auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float s
     int miny = height_;
     int maxx = 0;
     int maxy = 0;
-    for (auto corner : corners) {
+    for (const auto corner : corners) {
         Point p = matrix.apply_to_point(corner);
         p.x *= scale_;
         p.y *= scale_;
@@ -1436,8 +1440,8 @@ auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float s
         !has_rounded_clip_ && global_alpha_ == 1.0) {
         init_gamma_tables();  // set_pixel 每次调用前置；快路径直接混合，须自行确保 LUT 就绪
         // 单线程 UI 每帧复用，避免逐帧分配（表长 = 目标遍历宽/高，量级为视口尺寸）。
-        static thread_local std::vector<int> sx_map;
-        static thread_local std::vector<int> sy_map;
+        thread_local std::vector<int> sx_map;
+        thread_local std::vector<int> sy_map;
         sx_map.resize(static_cast<std::size_t>(maxx) - static_cast<std::size_t>(minx) + 1U);
         sy_map.resize(static_cast<std::size_t>(maxy) - static_cast<std::size_t>(miny) + 1U);
         for (int x = minx; x <= maxx; ++x) {
@@ -1515,7 +1519,7 @@ auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float s
 
 namespace {
 /// 在色标数组中按 t∈[0,1] 线性插值 RGBA。
-inline auto sample_gradient(const std::vector<Color> &colors, const std::vector<float> &stops, float t) -> Color {
+auto sample_gradient(const std::vector<Color> &colors, const std::vector<float> &stops, float t) -> Color {
     if (colors.empty()) {
         return Color{};
     }
@@ -1663,7 +1667,6 @@ auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, con
                     p[2] = c.b;
                     p[3] = 255;
                 } else if (ca_c <= 0) {
-                    continue;
                 } else {
                     const float a = static_cast<float>(ca_c) / 255.0F;
                     blend_srgb_over_region(p, c.r, c.g, c.b, a, a, a, 1);
@@ -1783,7 +1786,6 @@ auto Painter::draw_radial_gradient(const Rect &area, Point center, float radius,
                     p[2] = c.b;
                     p[3] = 255;
                 } else if (ca_c <= 0) {
-                    continue;
                 } else {
                     const float a = static_cast<float>(ca_c) / 255.0F;
                     blend_srgb_over_region(p, c.r, c.g, c.b, a, a, a, 1);

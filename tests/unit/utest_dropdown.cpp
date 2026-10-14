@@ -13,7 +13,6 @@
 /// 探针取点纪律：面板矩形由**公开状态实测**重建（主框高 / 行高 / 选项数 / 布局宽），不读私有
 /// 成员；取点前先断言「该点确实在布局盒之外」，否则覆盖区前提不成立、判据会退化成空转。
 
-#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>

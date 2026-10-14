@@ -5,8 +5,6 @@
 #include "aurora/cli/command.h"
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -25,8 +23,7 @@ namespace {
     if (name.empty() || name.front() == '-') {
         return false;
     }
-    return std::none_of(name.begin(), name.end(),
-                        [](char c) { return c == ' ' || c == '=' || c == '\t' || c == '\n'; });
+    return std::ranges::none_of(name, [](char c) { return c == ' ' || c == '=' || c == '\t' || c == '\n'; });
 }
 
 [[nodiscard]] auto default_value_hint(const OptionSchema &option) -> std::string {
@@ -34,8 +31,7 @@ namespace {
         return option.value_hint;
     }
     std::string hint = option.long_name;
-    std::transform(hint.begin(), hint.end(), hint.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    std::ranges::transform(hint, hint.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
     return hint;
 }
 
@@ -128,8 +124,7 @@ struct HelpEntry {
     -> std::vector<std::pair<std::string, std::vector<HelpEntry>>> {
     std::vector<std::pair<std::string, std::vector<HelpEntry>>> groups;
     for (auto &entry : entries) {
-        const auto hit =
-            std::find_if(groups.begin(), groups.end(), [&](const auto &pair) { return pair.first == entry.group; });
+        const auto hit = std::ranges::find_if(groups, [&](const auto &pair) { return pair.first == entry.group; });
         if (hit == groups.end()) {
             groups.emplace_back(entry.group, std::vector<HelpEntry>{});
             groups.back().second.push_back(std::move(entry));
@@ -137,7 +132,7 @@ struct HelpEntry {
             hit->second.push_back(std::move(entry));
         }
     }
-    std::stable_partition(groups.begin(), groups.end(), [](const auto &pair) { return pair.first != "Help"; });
+    std::ranges::stable_partition(groups, [](const auto &pair) { return pair.first != "Help"; });
     return groups;
 }
 
@@ -172,7 +167,7 @@ struct HelpEntry {
     if (!converted) {
         return spec_invalid(owner + ": default value '" + literal + "' is not a valid " + std::string{to_string(kind)});
     }
-    if (!choices.empty() && std::find(choices.begin(), choices.end(), literal) == choices.end()) {
+    if (!choices.empty() && std::ranges::find(choices, literal) == choices.end()) {
         return spec_invalid(owner + ": default value '" + literal + "' is not in the choices list");
     }
     if (const auto number = converted.value().as<double>(); number && (minimum || maximum)) {
@@ -200,13 +195,13 @@ struct HelpEntry {
         if (!is_valid_long_name(option.long_name)) {
             return spec_invalid(owner + ": long name must be non-empty, must not start with '-' or contain blanks/'='");
         }
-        if (std::find(long_names.begin(), long_names.end(), option.long_name) != long_names.end()) {
+        if (std::ranges::find(long_names, option.long_name) != long_names.end()) {
             return spec_invalid(owner + ": duplicate long name");
         }
         long_names.push_back(option.long_name);
         if (option.short_name != '\0') {
             const std::string short_name(1, option.short_name);
-            if (std::find(short_names.begin(), short_names.end(), short_name) != short_names.end()) {
+            if (std::ranges::find(short_names, short_name) != short_names.end()) {
                 std::string message{owner};
                 message += ": duplicate short name -";
                 message += short_name;
@@ -255,10 +250,10 @@ struct HelpEntry {
         if (slot.name.empty() || slot.name.front() == '-') {
             return spec_invalid(owner + ": positional name must be non-empty and must not start with '-'");
         }
-        if (std::find(positional_names.begin(), positional_names.end(), slot.name) != positional_names.end()) {
+        if (std::ranges::find(positional_names, slot.name) != positional_names.end()) {
             return spec_invalid(owner + ": duplicate positional name");
         }
-        if (std::find(long_names.begin(), long_names.end(), slot.name) != long_names.end()) {
+        if (std::ranges::find(long_names, slot.name) != long_names.end()) {
             return spec_invalid(owner + ": positional name collides with option '--" + slot.name + "'");
         }
         positional_names.push_back(slot.name);
@@ -281,7 +276,7 @@ struct HelpEntry {
         if (sub.name.empty() || !is_valid_long_name(sub.name)) {
             return spec_invalid(command + ": subcommand name must be non-empty and free of blanks");
         }
-        if (std::find(sub_names.begin(), sub_names.end(), sub.name) != sub_names.end()) {
+        if (std::ranges::find(sub_names, sub.name) != sub_names.end()) {
             return spec_invalid(command + ": duplicate subcommand '" + sub.name + "'");
         }
         sub_names.push_back(sub.name);

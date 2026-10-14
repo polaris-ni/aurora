@@ -87,7 +87,7 @@ auto Animator::tick(double dt_seconds) const -> void {
 
 TimelinePlayer::TimelinePlayer(TimelineResolved spec) : m_(std::make_shared<Payload>(std::move(spec))) {}
 
-auto TimelinePlayer::bind_track(std::size_t slot, Track t) -> void {
+auto TimelinePlayer::bind_track(std::size_t slot, Track t) const -> void {
     if (slot >= m_->spec.slot_count()) {
         return;  // 越界槽位：无操作（防御式，同 interval() 的全区间哨兵）
     }
@@ -111,7 +111,7 @@ auto TimelinePlayer::apply_all(const std::vector<Track> &tracks, double master_t
     }
 }
 
-auto TimelinePlayer::forward(double from) -> void {
+auto TimelinePlayer::forward(double from) const -> void {
     m_->master.forward(from);
     if (from == 0.0) {
         // 起播瞬间：全部轨道统一初始化到 begin 值（消除「未播轨道保持旧值」）。
@@ -119,9 +119,9 @@ auto TimelinePlayer::forward(double from) -> void {
     }
 }
 
-auto TimelinePlayer::reverse() -> void { m_->master.reverse(); }
+auto TimelinePlayer::reverse() const -> void { m_->master.reverse(); }
 
-auto TimelinePlayer::stop() -> void { m_->master.stop(); }
+auto TimelinePlayer::stop() const -> void { m_->master.stop(); }
 
 auto TimelinePlayer::progress() const -> double { return m_->master.value(); }
 
@@ -131,9 +131,9 @@ auto TimelinePlayer::is_completed() const -> bool { return m_->master.is_complet
 
 auto TimelinePlayer::is_animating() const -> bool { return m_->master.is_animating(); }
 
-auto TimelinePlayer::on_completed(std::function<void()> cb) -> void { m_->on_completed = std::move(cb); }
+auto TimelinePlayer::on_completed(std::function<void()> cb) const -> void { m_->on_completed = std::move(cb); }
 
-auto TimelinePlayer::attach(Animator &a) -> void {
+auto TimelinePlayer::attach(Animator &a) const -> void {
     a.drive(m_->master);
     const auto p = m_;  // binding 持载荷副本：句柄析构后帧循环仍安全驱动（同 AnimatedValue）
     a.add_binding([p]() -> void {
@@ -149,7 +149,7 @@ auto TimelinePlayer::attach(Animator &a) -> void {
     });
 }
 
-auto TimelinePlayer::tick(double dt_seconds) -> void {
+auto TimelinePlayer::tick(double dt_seconds) const -> void {
     m_->master.tick(dt_seconds);
     if (m_->master.dirty()) {
         apply_all(m_->tracks, m_->master.value());

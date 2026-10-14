@@ -120,7 +120,7 @@ struct Arity {
     /// @return max 的十进制文本；max 为 AURORA_UNBOUNDED 时为 "∞"。
     [[nodiscard]] auto max_text() const -> std::string;
 
-    /// @brief 渲染为帮助/usage 里的占位片段（如 `<VALUE>` / `<VALUE>...` / 空串）。
+    /// @brief 渲染为帮助/usage 里的占位片段（如 `"<VALUE>"` / `"<VALUE>"...` / 空串）。
     /// @param value_hint 尖括号内的占位词（通常为 metavar 或类型线名）。
     /// @return max==0（旗标）时为空串；无界时渲染 `<hint>...`（可缺省）或 `<hint> <hint>...`（必带）；
     /// 至多吞一个值时只渲染单个 `<hint>`。
@@ -178,6 +178,9 @@ class Value {
             static_assert(sizeof(T) == 0,
                           "aurora::cli::Value::as<T>: unsupported T; the supported set is "
                           "bool, int, int64_t, double, std::string, Length, Color, LogLevel");
+            return make_error(ErrorCode::CliInvalidValue,
+                              "aurora::cli::Value::as<T>: unsupported T; the supported set is "
+                              "bool, int, int64_t, double, std::string, Length, Color, LogLevel");
         }
     }
 
@@ -231,7 +234,7 @@ class Arguments {
         if (!single) {
             return single.error();
         }
-        return single.value().template as<T>();
+        return single.value().as<T>();
     }
 
     /// @brief Bool/flag 是否生效（含 `[--flag=false]` 显式关闭）；未声明的长名返回 false。

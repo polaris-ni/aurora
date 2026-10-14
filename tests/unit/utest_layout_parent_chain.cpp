@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <memory>
-#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -27,7 +26,6 @@
 #include "aurora/core/log.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/containers.h"
-#include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_layout_parent_chain {

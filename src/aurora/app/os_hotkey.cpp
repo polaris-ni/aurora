@@ -192,10 +192,10 @@ struct OsHotkeyRegistry::Impl {
     /// @param id 待注册的热键 ID（同时是 `WM_HOTKEY` 的 wParam）。
     /// @param combo 键组合。
     /// @return 注册成功为真。
-    auto register_native(std::uint32_t id, const KeyCombo &combo) -> bool;
+    static auto register_native(std::uint32_t id, const KeyCombo &combo) -> bool;
     /// @brief 从 OS 注销热键（与 `register_native` 成对）。
     /// @param id 热键 ID。
-    auto unregister_native(std::uint32_t id) -> void;
+    static auto unregister_native(std::uint32_t id) -> void;
 
     /// @brief 收到一条 `WM_HOTKEY`：只做「确认归属 + 入队」，不执行动作。
     /// @param id 命中 ID（`wParam`）。
@@ -297,7 +297,7 @@ OsHotkeyRegistry::~OsHotkeyRegistry() {
 #endif
 }
 
-auto OsHotkeyRegistry::add(const KeyCombo &combo, std::function<void()> action) -> Result<OsHotkeyHandle> {
+auto OsHotkeyRegistry::add(const KeyCombo &combo, std::function<void()> action) const -> Result<OsHotkeyHandle> {
     if (!platform_supported()) {
         return register_error("no OS global hotkey backend on this platform");
     }
@@ -315,7 +315,7 @@ auto OsHotkeyRegistry::add(const KeyCombo &combo, std::function<void()> action) 
     return OsHotkeyHandle{id};
 }
 
-auto OsHotkeyRegistry::remove(OsHotkeyHandle h) -> bool {
+auto OsHotkeyRegistry::remove(OsHotkeyHandle h) const -> bool {
     if ((impl_ == nullptr) || (h.id == 0U)) {
         return false;
     }
@@ -341,7 +341,7 @@ auto OsHotkeyRegistry::remove(OsHotkeyHandle h) -> bool {
     return false;
 }
 
-auto OsHotkeyRegistry::clear() -> void {
+auto OsHotkeyRegistry::clear() const -> void {
     if (impl_ == nullptr) {
         return;
     }
@@ -355,7 +355,7 @@ auto OsHotkeyRegistry::clear() -> void {
     impl_->pending.clear();
 }
 
-auto OsHotkeyRegistry::drain_pending() -> std::size_t {
+auto OsHotkeyRegistry::drain_pending() const -> std::size_t {
     if (impl_ == nullptr) {
         return 0;
     }
@@ -377,7 +377,7 @@ auto OsHotkeyRegistry::drain_pending() -> std::size_t {
     return fired;
 }
 
-auto OsHotkeyRegistry::enabled() const -> bool { return platform_supported(); }
+auto OsHotkeyRegistry::enabled() -> bool { return platform_supported(); }
 
 auto OsHotkeyRegistry::count() const -> std::size_t { return (impl_ == nullptr) ? 0U : impl_->entries.size(); }
 

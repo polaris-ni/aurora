@@ -10,7 +10,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/core/platform.h"
-#include "aurora/widget/spacer.h"
 #include "aurora/window/window.h"
 #include "framework/aurora_test.h"
 

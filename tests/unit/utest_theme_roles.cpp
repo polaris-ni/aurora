@@ -4,8 +4,6 @@
 /// (2) 已消费角色取现行主题基准值（观感不变），暗色 primary/on_primary 为 WCAG 修正对；
 /// 并断言明暗两列取向相反（暗色表面族显著深于亮色）。
 
-#include <cmath>
-
 #include "aurora/theming/color_roles.h"
 #include "framework/aurora_test.h"
 

@@ -151,7 +151,7 @@ struct WidgetPatchOp {
             }
             keys.emplace_back(e.key);
         }
-        std::sort(keys.begin(), keys.end());  // 确定性：与 JSON 的对象序无关
+        std::ranges::sort(keys);  // 确定性：与 JSON 的对象序无关
 
         for (const std::string &key : keys) {
             const auto *before_val = old_props.at(key);
@@ -382,12 +382,12 @@ struct WidgetPatchOp {
         if (!cur->is_array() || idx >= cur->size()) {
             return false;
         }
-        cur = (*cur).at(idx);
+        cur = cur->at(idx);
     } else {
         if (!cur->is_object() || !cur->contains(std::string(key))) {
             return false;
         }
-        cur = (*cur).at(std::string(key));
+        cur = cur->at(std::string(key));
     }
     return true;
 }

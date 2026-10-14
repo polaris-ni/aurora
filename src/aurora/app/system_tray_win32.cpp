@@ -186,7 +186,7 @@ void SystemTray::set_context_menu(std::vector<MenuItem> items) { context_menu_it
 // NOLINTBEGIN(*-pro-bounds-*, *-pro-type-*, performance-no-int-to-ptr)
 
 auto SystemTray::Impl::create_window() -> bool {
-    static constexpr const wchar_t *AURORA_TRAY_CLASS = L"AuroraSystemTrayClass";
+    static constexpr auto AURORA_TRAY_CLASS = L"AuroraSystemTrayClass";
     static bool registered = false;
     if (!registered) {
         WNDCLASSEXW wc{};

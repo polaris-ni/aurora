@@ -66,8 +66,8 @@ class StickyHeader : public SingleChild {
             self = Size{.width = 320.0F, .height = 48.0F};
         }
         if (child_) {
-            Constraints inner{.min = Size{.width = self.width, .height = 0.0F},
-                              .max = Size{.width = self.width, .height = Size::infinity().height}};
+            const Constraints inner{.min = Size{.width = self.width, .height = 0.0F},
+                                    .max = Size{.width = self.width, .height = Size::infinity().height}};
             const Size kid = child_.widget().layout(inner, ctx);
             self = Size{.width = self.width, .height = kid.height};
         }

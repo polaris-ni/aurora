@@ -173,7 +173,7 @@ class EventDispatcher {
 
     /// @brief 悬停光标解析：自命中链最深（链尾）向根（链头）回溯，第一个声明者生效；
     ///       无任何声明返回 `CursorShape::Arrow`。链中弱引用失效的控件安全跳过。
-    [[nodiscard]] auto resolve_cursor(const std::vector<HitNode> &chain) const -> CursorShape;
+    [[nodiscard]] static auto resolve_cursor(const std::vector<HitNode> &chain) -> CursorShape;
 
     /// @brief 按指针 ID 缓存的命中链（指针捕获表）。Press 命中后写入，Release 清除；
     ///       活跃期 Move/Release 复用该链（即使光标移出根/窗口外或落入重叠兄弟控件），

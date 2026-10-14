@@ -4,8 +4,6 @@
 ///           letter/word 间距对 measure_width 的加法效应、带间距与斜体时
 ///           caret_x ↔ hit_test_char 一致性、带 opts 绘制产出像素、斜体与正体像素可分。
 
-#include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>

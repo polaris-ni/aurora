@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 
-#include "aurora/app/mime_types.h"
 #include "aurora/core/image.h"
 #include "aurora/core/result.h"
 

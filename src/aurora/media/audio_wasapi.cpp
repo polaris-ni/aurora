@@ -603,7 +603,7 @@ auto WasapiCaptureBackend::failed() const -> bool { return impl_->device_failed.
 
 namespace aurora {
 
-struct WasapiDeviceBackend::Impl {};  // 桩无状态（pimpl 完整定义供 ctor/dtor 实例化）
+struct [[maybe_unused]] WasapiDeviceBackend::Impl {};  // 桩无状态（pimpl 完整定义供 ctor/dtor 实例化）
 
 WasapiDeviceBackend::WasapiDeviceBackend() = default;
 
@@ -615,7 +615,7 @@ auto WasapiDeviceBackend::start(RenderFn /*render_block*/) -> bool { return fals
 
 auto WasapiDeviceBackend::stop() -> void {}
 
-struct WasapiCaptureBackend::Impl {};  // 桩无状态（start 恒 false → 录制显式报错）
+struct [[maybe_unused]] WasapiCaptureBackend::Impl {};  // 桩无状态（start 恒 false → 录制显式报错）
 
 WasapiCaptureBackend::WasapiCaptureBackend() = default;
 
@@ -625,7 +625,7 @@ auto WasapiCaptureBackend::start(CaptureFn /*on_pcm*/) -> bool { return false; }
 
 auto WasapiCaptureBackend::stop() -> void {}
 
-auto WasapiCaptureBackend::failed() const -> bool { return false; }  // 桩无采集线程
+auto WasapiCaptureBackend::failed() -> bool { return false; }  // 桩无采集线程
 
 }  // namespace aurora
 

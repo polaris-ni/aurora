@@ -7,7 +7,6 @@
 /// Ctrl+X 在剪贴板写入失败时不删选区且留诊断
 
 #include <algorithm>
-#include <cstddef>
 #include <memory>
 #include <string>
 

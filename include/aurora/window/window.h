@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "aurora/app/perf_overlay.h"
-#include "aurora/core/a11y_provider.h"
 #include "aurora/core/aurora_assert.h"
 #include "aurora/core/log.h"
 #include "aurora/core/result.h"
@@ -377,6 +376,7 @@ class ContentInsetRoot final : public SingleChild {
     /// @return 恒为 "ContentInsetRoot"。
     [[nodiscard]] auto type_name() const -> const char * override { return "ContentInsetRoot"; }
 
+  protected:
     /// @brief 内容区布局：c 已被 PaddingEdges 收紧，直接测子并把子 bounds 写回内容区原点。
     /// @param c 修饰收紧后的内容区约束。
     /// @param ctx 构建上下文。
@@ -424,7 +424,7 @@ class Window {
 
     /// @brief 设置 RTL 标志（#5：应用侧按自身方向决策推送；默认转发到 Surface）。
     /// @param rtl true 右到左排版，false 左到右。
-    auto set_accessibility_rtl(bool rtl) -> void {
+    auto set_accessibility_rtl(bool rtl) const -> void {
         if (surface_) {
             surface_->set_accessibility_rtl(rtl);
         }
@@ -1270,7 +1270,7 @@ class Window {
                 }
             }
         }
-        auto t_layout_end = std::chrono::steady_clock::now();
+        const auto t_layout_end = std::chrono::steady_clock::now();
         return std::chrono::duration<double, std::milli>(t_layout_end - t_layout_start).count();
     }
 

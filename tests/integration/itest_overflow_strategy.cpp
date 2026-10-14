@@ -90,9 +90,9 @@ auto paint_overflow_scenario(OverflowStrategy strategy) -> Size {
     col.modifier.set(Modifier{}.size(100.0F, 50.0F).background(Color{0, 255, 0, 255}));
     col.overflow_strategy(strategy);
 
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     col.mount(ctx);
-    const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 50.0F}};
+    constexpr Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 50.0F}};
     col.layout(cc, ctx);
 
     Painter p;
@@ -134,9 +134,9 @@ auto make_scroll_column() -> Column {
     col.modifier.set(Modifier{}.size(100.0F, 50.0F).background(Color{0, 255, 0, 255}));
     col.overflow_strategy(OverflowStrategy::Scroll);
 
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     col.mount(ctx);
-    const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 50.0F}};
+    constexpr Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 50.0F}};
     col.layout(cc, ctx);
     return col;
 }
@@ -190,9 +190,9 @@ AURORA_TEST_CASE(overflow_scroll_paint_translates_content) {
     col.modifier.set(Modifier{}.size(100.0F, 50.0F).background(Color{0, 0, 255, 255}));
     col.overflow_strategy(OverflowStrategy::Scroll);
 
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     col.mount(ctx);
-    const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 50.0F}};
+    constexpr Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 50.0F}};
     col.layout(cc, ctx);
 
     Painter p0;
@@ -229,9 +229,10 @@ AURORA_TEST_CASE(scroll_dispatch_nearest_scrollable_ancestor_wins) {
     outer.modifier.set(Modifier{}.size(100.0F, 120.0F));
     outer.overflow_strategy(OverflowStrategy::Scroll);
 
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     outer.mount(ctx);
-    const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 120.0F}};
+    constexpr Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
+                             .max = Size{.width = 100.0F, .height = 120.0F}};
     outer.layout(cc, ctx);
 
     // ① 滚轮落在内层真实 Scroll 上：内层滚动（最深滚动者优先），外层不动。

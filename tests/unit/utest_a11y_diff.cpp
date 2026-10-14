@@ -6,7 +6,6 @@
 ///           引用式标签失效（目标改名 ⇒ 引用者 Name 同步上报）
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>

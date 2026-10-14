@@ -10,7 +10,6 @@
 
 #include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
-#include "aurora/render/display_list.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/rhi/rhi_backend.h"
 #include "aurora/theming/theme.h"

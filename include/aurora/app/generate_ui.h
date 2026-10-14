@@ -64,7 +64,7 @@ inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES 
     };
 
     // ── 别名表：口语词 → 类型。仅在精确匹配阶段使用，故不会误伤子串 ──
-    static const std::array<std::pair<std::string_view, std::string_view>, 4> AURORA_UI_KEYWORD_ALIASES = {{
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 4> AURORA_UI_KEYWORD_ALIASES = {{
         {"label", "Text"},
         {"btn", "Button"},
         {"pic", "ImageView"},
@@ -75,7 +75,7 @@ inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES 
 
     std::vector<std::string> hits;
     auto remember = [&hits](const std::string &type) -> void {
-        if (std::find(hits.begin(), hits.end(), type) == hits.end()) {
+        if (std::ranges::find(hits, type) == hits.end()) {
             hits.push_back(type);
         }
     };

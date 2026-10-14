@@ -16,7 +16,6 @@
 #include "aurora/core/color.h"
 #include "aurora/event/event.h"
 #include "aurora/layout/layout_engine.h"
-#include "aurora/widget/provider.h"
 #include "aurora/widget/tab_bar.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"

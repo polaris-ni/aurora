@@ -4,12 +4,10 @@
 ///           Click/Invoke 走同口径命中测试 + press/release 两段派发、Scroll* 转滚轮增量、
 ///           语义强相关动作（Toggle/Value/Select）基类不支持；以及无焦点管理器时的降级
 
-#include <cstdint>
 #include <memory>
 #include <utility>
 
 #include "aurora/core/accessibility.h"
-#include "aurora/event/dispatcher.h"
 #include "aurora/event/focus.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"
@@ -22,12 +20,6 @@ namespace {
 class ActionProbe final : public LeafWidget {
   public:
     [[nodiscard]] auto type_name() const -> const char * override { return "ActionProbe"; }
-
-    auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override {
-        size_ = Size{.width = 100.0F, .height = 40.0F};
-        return size_;
-    }
-    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 
     auto on_pointer_event(MouseEvent &e) -> void override {
         if (e.action == MouseAction::Press) {
@@ -56,6 +48,13 @@ class ActionProbe final : public LeafWidget {
     int gained = 0;
     float last_delta_y = 0.0F;
     float last_delta_x = 0.0F;
+
+  protected:
+    auto on_layout(const Constraints & /*c*/, const BuildContext & /*ctx*/) -> Size override {
+        size_ = Size{.width = 100.0F, .height = 40.0F};
+        return size_;
+    }
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 };
 
 /// @brief 零尺寸控件桩：几何退化 → 命中测试恒空、滚动量恒零（动作应被拒）。

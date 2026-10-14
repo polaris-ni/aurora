@@ -14,7 +14,6 @@
 /// Column 子项之间有 gap，内容盒中心可能落在间隙里（与被测行为无关）。同理不硬编码任何
 /// 坐标：字体度量按平台不同，只断言「点在该按钮盒内 ⇒ 命中该按钮」这一关系。
 
-#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>

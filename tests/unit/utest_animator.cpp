@@ -295,7 +295,7 @@ AURORA_TEST_CASE(timeline_player_forward_initializes_and_advances) {
 
     // 推到端点：completed + 一次性回调。
     int completed_count = 0;
-    player.on_completed([&completed_count]() { ++completed_count; });
+    player.on_completed([&completed_count] { ++completed_count; });
     player.tick(0.25);
     AURORA_TEST_CHECK_TRUE(player.is_completed());
     AURORA_TEST_CHECK_NEAR(b.get(), 1.0, 1e-9);

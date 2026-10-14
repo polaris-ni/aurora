@@ -6,7 +6,6 @@
 ///           有显示也不把窗口推入用户视野）；自动检测落到浏览器画布后端时该例如实跳过
 ///           （需 DOM 宿主，node 驱动下无从建窗）。
 
-#include <cstddef>
 #include <string>
 #include <vector>
 

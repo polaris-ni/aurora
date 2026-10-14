@@ -4,7 +4,6 @@
 /// 响应式初值）、子系统句柄（scene/focus/scheduler/shortcuts）、快捷键优先派发（消费/落空/禁用）、
 /// 空场景同步派发安全性与 App 流式构建器链式配置（不进入真实帧循环）
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>

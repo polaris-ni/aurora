@@ -6,7 +6,6 @@
 ///           探测，未构建则 SKIP
 /// 覆盖说明: aurora_mcp 是独立可执行（tools/servers/），e2e 仅验证进程可运行
 
-#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <string>

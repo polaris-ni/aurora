@@ -3,7 +3,6 @@
 /// 测试说明: 覆盖 ImageCache 单例的命中/未命中路径、失败结果不入缓存、条目移除与清空、字节账目、
 /// LRU 提升顺序与超限淘汰，以及单图超过总上限时不入缓存的降级
 
-#include <cstddef>
 #include <string>
 
 #include "aurora/core/image.h"

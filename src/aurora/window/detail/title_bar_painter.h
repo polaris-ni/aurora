@@ -15,9 +15,8 @@
 #include <memory>
 #include <string>
 
-#include "aurora/core/color.h"  // Color（阴影基色）
-#include "aurora/core/image.h"  // Image（标题栏图标像素）
-#include "aurora/core/types.h"  // Rect / Size / Point
+#include "aurora/core/color.h"  // Color
+#include "aurora/core/image.h"  // Image
 #include "aurora/window/title_bar_style.h"
 #include "aurora/window/window_state.h"  // WindowMode
 

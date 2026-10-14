@@ -23,8 +23,6 @@
 #ifdef AURORA_WIN32_DPI_AVAILABLE
 #include <windows.h>
 
-#include <cstdint>
-
 #include "aurora/window/detail/win32_dpi.h"
 #endif
 

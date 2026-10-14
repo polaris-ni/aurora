@@ -2,8 +2,6 @@
 /// 目标单元: include/aurora/environment/media_query.h
 /// 测试说明: MediaQuery 纯逻辑部分——默认值、of(scale) 便捷构造、经 BuildContext 环境链的读取与无 Provider 降级
 
-#include <cstdint>
-
 #include "aurora/environment/build_context.h"
 #include "aurora/environment/environment.h"
 #include "aurora/environment/media_query.h"

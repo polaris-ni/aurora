@@ -321,7 +321,7 @@ class DragToDismiss {
     /// @param axis [in] 消除主轴（水平或垂直）。
     /// @param travel_distance_dp [in] 消除行程；非正值夹取为 1.0 防除零。
     /// @param spring [in] 松手后 spring 模拟使用的参数。
-    DragToDismiss(DragAxis axis, double travel_distance_dp, SpringDescription spring)
+    DragToDismiss(DragAxis axis, double travel_distance_dp, const SpringDescription &spring)
         : axis_(axis), travel_(travel_distance_dp > 0.0 ? travel_distance_dp : 1.0), spring_desc_(spring) {}
 
     /// @brief 更新消除行程（如布局后按主轴向尺寸校准；非正值夹取 1.0 防除零）。
@@ -421,7 +421,7 @@ class DragToDismiss {
     auto recognizer_slop_for_test(double slop_dp) -> void { recognizer_.slop = slop_dp; }
 
   private:
-    auto fire_dismissed_if_needed() -> void {
+    auto fire_dismissed_if_needed() const -> void {
         if (spring_end_ >= 1.0 && on_dismissed_) {
             on_dismissed_();
         }

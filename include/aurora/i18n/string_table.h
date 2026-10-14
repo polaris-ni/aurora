@@ -72,7 +72,7 @@ class StringTable {
         if (!ls.localize) {
             return ls.text;
         }
-        auto r = lookup(ls.key, loc);
+        const auto r = lookup(ls.key, loc);
         if (!r) {
             return ls.text;  // 查表失败回退字面量
         }

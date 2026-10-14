@@ -3,8 +3,6 @@
 /// 测试说明: 覆盖 Display 信息结构的默认值与不变量、primary_display/list_displays 的
 /// 主屏标记与一致性、display_containing 的包含判定与主屏回退（只读枚举，不创建 OS 资源）
 
-#include <cstddef>
-
 #include "aurora/app/display.h"
 #include "framework/aurora_test.h"
 

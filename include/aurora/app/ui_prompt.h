@@ -53,7 +53,7 @@ struct UiPromptOptions {
         }
         // 未注册类型直接跳过。判据必须是**注册表成员表**：`component_schema` 会无条件写入
         // `w["type"] = name`，故「返回对象里有 type」不代表该类型存在。
-        if (std::find(registered_types.begin(), registered_types.end(), type) == registered_types.end()) {
+        if (std::ranges::find(registered_types, type) == registered_types.end()) {
             continue;
         }
         const Json schema = aurora::describe_component(type);
@@ -128,7 +128,7 @@ struct UiPromptOptions {
 [[nodiscard]] inline auto ui_prompt_for(const std::string &description) -> std::string {
     std::vector<std::string> types;
     auto remember = [&types](const std::string &t) -> void {
-        if (std::find(types.begin(), types.end(), t) == types.end()) {
+        if (std::ranges::find(types, t) == types.end()) {
             types.push_back(t);
         }
     };
@@ -150,7 +150,7 @@ struct UiPromptOptions {
         remember(std::string(base));
     }
 
-    std::sort(types.begin(), types.end());
+    std::ranges::sort(types);
     return build_ui_prompt(types);
 }
 
@@ -233,7 +233,7 @@ namespace detail {
 /// @return 已注册为 true；未注册为 false
 [[nodiscard]] inline auto ui_is_registered(const std::string &type) -> bool {
     const std::vector<std::string> &types = ui_registered_types();
-    return std::find(types.begin(), types.end(), type) != types.end();
+    return std::ranges::find(types, type) != types.end();
 }
 
 /// @brief 大小写不敏感的**最佳**类型名修正：先精确（忽略大小写），再取唯一的子串命中。

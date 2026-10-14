@@ -3,8 +3,6 @@
 /// 测试说明: 覆盖 DirtyRegionTracker 的空/整帧状态机、零面积矩形忽略、重叠合并为并集、相邻不合并、
 /// 超限退化为整帧、上限可调与 clear 复位；全程经 fixture 保存/还原静态上限（避免跨用例污染）
 
-#include <cstddef>
-
 #include "aurora/core/types.h"
 #include "aurora/render/dirty_region.h"
 #include "framework/aurora_test.h"

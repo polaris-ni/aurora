@@ -21,7 +21,7 @@ namespace aurora {
 /// @endcode
 ///
 /// @tparam T 列表项类型（须可拷贝）。
-/// @param T 列表项类型（模板形参，与 @tparam 同值）。
+/// @param T 列表项类型（模板形参，与 tparam 同值）。
 template <typename T>
 class Repeater : public Container {
   public:

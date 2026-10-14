@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -1217,7 +1215,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @param child 待摘除的子控件（非空，且其 `layout_parent()` 确为 `this`）。
     /// @note Side-effects: 写 `child->layout_parent_`（清零）；子控件仍存活，不触及其析构。
     /// @note Thread: main-thread only
-    void detach_child_layout_parent(Widget *child);
+    void detach_child_layout_parent(Widget *child) const;
 
     /// @brief 摘除全部直接子节点的布局父指针（父先亡那一半的悬垂防护）。
     ///
@@ -1634,7 +1632,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
         if (!focus_ring_shown() && !painted_focus_ring_) {
             return box;
         }
-        const float out = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
+        constexpr float out = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
         return Rect{.origin = Point{.x = box.origin.x - out, .y = box.origin.y - out},
                     .size = Size{.width = box.size.width + (2.0F * out), .height = box.size.height + (2.0F * out)}};
     }
@@ -2219,7 +2217,6 @@ class SingleChild : public Widget {
         return Widget::layout(c, ctx);
     }
 
-  protected:
     /// @brief 可写子节点视图（`SingleChild` 实现）：返回与 `child_` 同步的单元素可写表。
     ///
     /// **不可**复用 `child_nodes()` 的 `child_view_` 缓存：那是一份**拷贝**，对它取可写引用
@@ -2238,6 +2235,7 @@ class SingleChild : public Widget {
         return child_view_mut_;
     }
 
+  protected:
     /// @brief 自身持有份数（`SingleChild` 实现）：`child_` + 可能已建的 `child_view_mut_`
     ///        + 可能已建且有效的 `child_view_`。
     ///

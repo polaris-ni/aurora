@@ -6,8 +6,6 @@
 /// 全程**不注册真实系统热键**：受支持的平台上改走进程内 inert 测试后端
 /// （AURORA_ENABLE_DEBUG + AURORA_ENABLE_TEST_HOOKS 双宏齐备时可用），CI 上不干扰系统。
 
-#include <cstddef>
-#include <cstdint>
 #include <string>
 
 #include "aurora/app/os_hotkey.h"

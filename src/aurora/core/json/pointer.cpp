@@ -4,9 +4,6 @@
 // （后两者服务 RFC 6902 补丁的写路径）。不含 URI fragment 形态与相对 pointer。
 
 #include <charconv>
-#include <cstddef>
-#include <cstdint>
-#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -42,7 +39,9 @@ namespace {
 }
 
 /// @brief 取 pointer 的下一段原始文本（**未反转义**）。
+/// @param pointer 待解析的 pointer 全文；只读，段文本经 token 以视图形式切出，不做拷贝。
 /// @param pos 入口指向一个 `/`；出口指向下一段的 `/` 或 `pointer.size()`。
+/// @param token 输出参数，本段原始文本；已无段可取（返回 false）时不修改。
 /// @return false = 已无段可取。
 [[nodiscard]] auto next_token(std::string_view pointer, std::size_t &pos, std::string_view &token) noexcept -> bool {
     if (pos >= pointer.size() || pointer[pos] != '/') {

@@ -5,9 +5,7 @@
 /// 空数据与 NaN 点跳过，以及像素 golden 基线（chart_scatter.png，受 AURORA_UPDATE_GOLDEN 控制）
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -17,7 +15,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
-#include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
 #include "framework/json_access.h"

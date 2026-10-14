@@ -3,7 +3,6 @@
 /// 测试说明: 注册表条目结构、register_state/register_effect 的追加语义与锚点身份回传、State
 /// 构造自注册，以及析构后陈旧条目的过期探测与不查重追加
 
-#include <cstddef>
 #include <memory>
 
 #include "aurora/state/effect.h"

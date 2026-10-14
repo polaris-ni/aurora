@@ -10,7 +10,6 @@
 #include <cmath>
 #include <ranges>
 #include <string>
-#include <type_traits>
 #include <unordered_map>
 
 #include "aurora/core/log.h"
@@ -49,7 +48,7 @@ void main() {
 // 裁剪不用 scissor：矩形/圆角统一 SDF alpha（float 精度、与软件路径逐像素交叠语义同源）；
 // 不 discard——alpha=0 经 blend 写 dst=dst，语义等价且保留 early-z 之外的路径简单性。
 // CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
-constexpr const char *AURORA_GLSL_SOLID = R"(#version 330 core
+constexpr auto AURORA_GLSL_SOLID = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
@@ -75,7 +74,7 @@ void main() {
 // 圆角描边带（RoundedBorder）：外缘 d=0、内缘 d=-thickness（向内描边）、两侧 0.5px 羽化，
 // 与软件 painter::draw_rounded_border 的覆盖度语义逐项对齐。
 // CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
-constexpr const char *AURORA_GLSL_BORDER = R"(#version 330 core
+constexpr auto AURORA_GLSL_BORDER = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
@@ -109,7 +108,7 @@ void main() {
 // sample_gradient 的 front 回退）；radial = |P-c|/r。1D 采样做半像素对齐（t*255+0.5)/256，
 // 保证 t=0/1 精确落在端点 texel。全局 alpha 经 v_color.a 烘焙进片元，与实心管线同源。
 // CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
-constexpr const char *AURORA_GLSL_GRAD = R"(#version 330 core
+constexpr auto AURORA_GLSL_GRAD = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
@@ -152,7 +151,7 @@ void main() {
 // PMA 语义整体缩放（rgb 与 a 同乘全局 alpha × 裁剪 coverage），混合走 ONE/ONE_MINUS_SRC_ALPHA。
 // u_pma = 1：直色纹理（常驻流式通道上传未预乘像素），片元内一乘做 PMA（`t.rgb *= t.a`）——
 // 视频逐帧更新免全帧 CPU 预乘副本；静态图保持 u_pma = 0（上传期预乘，行为不变）。
-constexpr const char *AURORA_GLSL_IMAGE = R"(#version 330 core
+constexpr auto AURORA_GLSL_IMAGE = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
@@ -185,7 +184,7 @@ void main() {
 // 灰度路径同源。字形位图按物理像素 1:1 对齐（原点与行基线均 snap 整数物理像素，同软件
 // 路径），采样点恒落 texel 中心，NEAREST 即逐位精确。LCD 子像素在 GPU 路径降级灰度
 // （发射桥强制 Supersample，设计容差决策），故无 RGB 分量分支。
-constexpr const char *AURORA_GLSL_TEXT = R"(#version 330 core
+constexpr auto AURORA_GLSL_TEXT = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
@@ -216,7 +215,7 @@ void main() {
 // 的 sqrt(dx²+dy²) 逐项同构（内部 = 0 → 因子 1 = fill），blur 半径逻辑/物理换算后
 // scale 相消，直接用逻辑 dp 计算。硬阴影（blur ≤ 0）不走本管线，翻译期退化为实心 quad。
 // CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
-constexpr const char *AURORA_GLSL_SHADOW = R"(#version 330 core
+constexpr auto AURORA_GLSL_SHADOW = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
@@ -249,7 +248,7 @@ void main() {
 // 整数和除 n 截断。texel 值经 unorm 往返需先 ×255 取整还原成整数域再做整数平均（截断
 // floor），写回时 /255 由 GL unorm 转换逐字节精确复原。区域坐标全部为设备像素。
 // CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
-constexpr const char *AURORA_GLSL_BLUR = R"(#version 330 core
+constexpr auto AURORA_GLSL_BLUR = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
@@ -282,7 +281,7 @@ void main() {
 // 子集）。软件 blend_region 全程整数运算（乘除 255 截断、强度回插向零截断），GPU 在浮点域
 // 近似（归一化乘法 / mix），逐通道偏差 ≤ 1 LSB——设计容差内。alpha 通道不参与（软件只写 RGB）。
 // CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
-constexpr const char *AURORA_GLSL_BLEND = R"(#version 330 core
+constexpr auto AURORA_GLSL_BLEND = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
@@ -324,7 +323,7 @@ void main() {
 // 与软件 mask_region 同构：因子基于区域内像素索引（整数域），radial 中心/最大半径按区域
 // 设备像素尺寸计算，factor = 1 - strength*(1-base)，alpha 通道不变。
 // CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
-constexpr const char *AURORA_GLSL_MASK = R"(#version 330 core
+constexpr auto AURORA_GLSL_MASK = R"(#version 330 core
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
@@ -514,9 +513,11 @@ auto load_gl(void *(*proc)(const char *name)) -> GLFn {
     if (proc == nullptr) {
         return fn;
     }
-    const auto load = [proc](const char *name, auto &dst) {
+    // 泛型 lambda 走显式模板形参（C++20）：FnPtr 直接就是 GLFn 成员的函数指针类型，
+    // 无需再从 decltype(dst) 反解，形参类型在签名里即可读。
+    const auto load = [proc]<typename FnPtr>(const char *name, FnPtr &dst) {
         // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
-        dst = reinterpret_cast<std::remove_reference_t<decltype(dst)>>(proc(name));
+        dst = reinterpret_cast<FnPtr>(proc(name));
     };
     // 着色器与程序
     load("glCreateShader", fn.create_shader);
@@ -804,8 +805,7 @@ struct GpuGlRhi::Impl {
         }
         // 版本门槛：核心版本 ≥ 3.3。数字解析 major.minor（兼容 "4.5.0 - build 27" /
         // "10.1 ..." 等驱动形态；非数字开头解析失败即拒绝）。
-        const char *ver =
-            reinterpret_cast<const char *>(gl.get_string(VERSION));  // NOLINT(*-pro-type-reinterpret-cast)
+        auto ver = reinterpret_cast<const char *>(gl.get_string(VERSION));  // NOLINT(*-pro-type-reinterpret-cast)
         int major = 0;
         int minor = 0;
         bool parsed = false;
@@ -1541,9 +1541,9 @@ struct GpuGlRhi::Impl {
             return;
         }
         const std::uint32_t want = quads * 2 < 4096 ? 4096 : quads * 2;
-        // 增量追加：thread_local 模式跨帧保留，只补新生 quad 段（整体重传 buffer_data，
-        // 孤儿化重分配，流式用法标准姿势）。
-        static thread_local std::vector<GLuint_> pattern;
+        // 增量追加：thread_local 模式跨帧保留，只补新生 quad 段（整体重传
+        // buffer_data，孤儿化重分配，流式用法标准姿势）。
+        thread_local std::vector<GLuint_> pattern;
         pattern.reserve(static_cast<std::size_t>(want) * 6);
         for (std::uint32_t q = ibo_quads; q < want; ++q) {
             const GLuint_ b = q * 4;

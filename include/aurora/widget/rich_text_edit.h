@@ -275,7 +275,7 @@ class RichTextEdit : public LeafWidget {
     ///       （三桥的文本编辑通道都只传纯文本，无样式信息）。
     /// @note Side-effects: mutates document
     auto accessibility_replace_text(std::size_t start, std::size_t end, std::string_view utf8) -> void override {
-        std::string next = plain_text();
+        const std::string next = plain_text();
         const std::size_t a = std::min(start, next.size());
         const std::size_t b = std::clamp(end, a, next.size());
         std::string rebuilt = next.substr(0, a);
@@ -470,7 +470,7 @@ class RichTextEdit : public LeafWidget {
     /// @param base 该行的段落基准方向（显式方向优先，否则按内容 guess）。
     /// @param bounds 布局参照盒（LTR 自左缘起排，RTL 以其右缘为锚）。
     /// @return 按视觉顺序排列的层级 run（含 x/w/begin/end/dir）。
-    auto compute_line_runs(const Line &line, TextDirection base, const Rect &bounds) const -> std::vector<RunLayout>;
+    static auto compute_line_runs(const Line &line, TextDirection base, const Rect &bounds) -> std::vector<RunLayout>;
 
     /// @brief 计算给定行内、逻辑下标 `caret_local` 处光标的视觉 x（相对 bounds 左缘）。
     ///        RTL 下 `FontEngine::caret_x` 返回逻辑 0 在右缘的视觉偏移，调用方无需再镜像。
@@ -479,7 +479,7 @@ class RichTextEdit : public LeafWidget {
     /// @param caret_local 行内逻辑下标（0..chars.size()，即光标插入点列）。
     /// @param bounds run 布局参照盒（RTL 右对齐基准）。
     /// @return 光标视觉 x；没有任何 run 覆盖该下标时返回 -1.0F（调用侧视为无效）。
-    auto caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local, const Rect &bounds) const
+    static auto caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local, const Rect &bounds)
         -> float;
 
     // ---- 编辑操作（带 UndoStack 集成）----

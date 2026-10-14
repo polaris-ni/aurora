@@ -344,8 +344,8 @@ struct XResult {
 
     // ---- W 阶段 ----
     // W2/W7 的「最近强类型」（W2: AL 使 EN→AN；W7: L 使 EN→L）。
-    Bc last_strong = Bc::L;  // sor 语义：段落层级偶 → L、奇 → R（由调用方 base_level 决定不了，
-                             // 这里以首字符 embedding 方向近似，对无显式控制的常规文本等价）。
+    auto last_strong = Bc::L;  // sor 语义：段落层级偶 → L、奇 → R（由调用方 base_level 决定不了，
+                               // 这里以首字符 embedding 方向近似，对无显式控制的常规文本等价）。
     last_strong = x.rtl_embedding[0] ? Bc::R : Bc::L;
     // W2：EN 若最近强类型为 AL → AN（先做，W3 才把 AL 变 R）。
     for (std::size_t i = 0; i < n; ++i) {
@@ -646,8 +646,8 @@ auto uba_visual_order(const std::vector<std::uint8_t> &levels) -> std::vector<st
     if (n == 0U) {
         return order;
     }
-    const auto max_it = std::max_element(levels.begin(), levels.end());
-    int top = static_cast<int>(*max_it);
+    const auto max_it = std::ranges::max_element(levels);
+    const int top = static_cast<int>(*max_it);
     // L2：从最高层降到最低奇数层（≥1），逐层反转所有「层级 ≥ L」的连续区段。
     // 反转基于当前序列位置处的元素层级（order 变化后查 levels[order[i]]）。
     for (int lv = top; lv >= 1; --lv) {

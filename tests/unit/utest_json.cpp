@@ -6,7 +6,6 @@
 /// 类型判别与内部存储的同构、封闭读类型集、保真数字不参与数值转换、严格相等语义、容器读写与迭代视图、
 /// 以及序列化的转义 / ASCII 化 / 缩进 / 非有限值拒绝
 
-#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>

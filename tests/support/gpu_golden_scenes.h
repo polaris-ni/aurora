@@ -16,7 +16,6 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <utility>
 #include <vector>
 
 #include "aurora/aurora.h"

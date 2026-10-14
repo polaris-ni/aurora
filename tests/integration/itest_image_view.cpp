@@ -3,8 +3,6 @@
 /// 测试说明: ImageView 控件与布局引擎/解码链路集成——位图自然尺寸与约束钳制、固定宽高覆盖、
 ///           0x0 占位回退、from_file 失败安全、source 序列化、真实 golden PNG 文件解码进控件
 
-#include <cstddef>
-#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>

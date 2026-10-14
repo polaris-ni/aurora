@@ -17,8 +17,6 @@
 ///           帧；与 wgpu 侧共用 `support/gpu_golden_scenes.h` 的场景与帧装配、共用
 ///           `golden::compare_gpu_tolerance` 判据，已是单源。
 
-#include <cstddef>
-
 #include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
 

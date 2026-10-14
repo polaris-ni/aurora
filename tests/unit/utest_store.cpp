@@ -3,7 +3,6 @@
 /// 测试说明: Action 的类型擦除载荷存取、Store 经 reducer 的单向数据流（状态更新/新值旧值通知/订阅与退订/as_signal
 /// 信号视图）与 make_store 共享所有权
 
-#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>

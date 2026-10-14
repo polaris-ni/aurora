@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstddef>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -111,7 +110,7 @@ class LinearScale {
     /// @param tick_count 期望刻度数（内部 clamp ≥ 1，用于推导原始步长）。
     /// @return nice 化后的比例尺（域端点向 step 对齐，步长为 nice 数）。
     [[nodiscard]] static auto from_domain(double d0, double d1, int tick_count) -> LinearScale {
-        double lo = std::min(d0, d1);  // 域两端排序后的下界。
+        const double lo = std::min(d0, d1);  // 域两端排序后的下界。
         double hi = std::max(d0, d1);  // 域两端排序后的上界。
         if (!std::isfinite(lo) || !std::isfinite(hi)) {
             return LinearScale{0.0, 1.0, 1.0};

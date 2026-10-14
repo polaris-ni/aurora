@@ -14,11 +14,11 @@
 
 namespace {
 
-constexpr const char *AURORA_UI_FILE = "ui.json";
+constexpr auto AURORA_UI_FILE = "ui.json";
 
 // 只用已注册的控件类型（Text / TextInput）：from_json 的工厂不认 demo 私有控件。
 // TextInput 刻意不带 "value" —— 它正是「JSON 未声明、故按树路径保留」的那个属性。
-constexpr const char *AURORA_DEFAULT_UI = R"JSON({
+constexpr auto AURORA_DEFAULT_UI = R"JSON({
   "type": "Column",
   "props": {},
   "children": [
@@ -36,7 +36,7 @@ constexpr const char *AURORA_DEFAULT_UI = R"JSON({
 
 /// @brief 首次运行时写入默认 ui.json（返回是否真的写入），使载体不依赖外部夹具。
 auto ensure_default_ui(const std::string &path) -> bool {
-    std::ifstream probe(path);
+    const std::ifstream probe(path);
     if (probe.good()) {
         return false;
     }
@@ -51,7 +51,7 @@ auto ensure_default_ui(const std::string &path) -> bool {
 /// @brief 用热重载产出的新树替换场景根，并同步焦点根。
 /// 替换走 `scene().root_node()` 赋值（`Node` 移动语义），不销毁 `Node` 对象本身，
 /// 故窗口侧持有的根引用不失效。
-auto apply_tree(au::Application &app, std::shared_ptr<au::Widget> tree) -> void {
+auto apply_tree(const au::Application &app, std::shared_ptr<au::Widget> tree) -> void {
     app.scene().root_node() = au::Node{std::move(tree)};
     app.focus().set_root(&app.scene().root());
 }
@@ -96,7 +96,7 @@ auto main() -> int {
         AURORA_LOG_ERROR("demo", "[hot_reload] initial load failed -- check ", ui_path, " syntax");
     }
 
-    app.set_on_frame([&app, &reloader, &publish]() -> void {
+    app.set_on_frame([&reloader, &publish]() -> void {
         if (auto tree = reloader.try_sync()) {
             publish(std::move(tree));
             AURORA_LOG_INFO("demo", "[hot_reload] tree rebuilt from ", AURORA_UI_FILE);

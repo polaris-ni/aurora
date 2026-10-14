@@ -5,7 +5,6 @@
 /// Button::paint_border 禁用态(圆角/直角)与启用态。
 
 #include <string>
-#include <vector>
 
 #include "aurora/environment/build_context.h"
 #include "aurora/event/event.h"

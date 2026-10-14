@@ -186,7 +186,7 @@ auto Modifier::on_pointer_event(const TouchEvent &e) const -> void {
 
 auto Modifier::tick_tooltip(std::chrono::steady_clock::time_point now) const -> void {
     for (const auto &n : nodes_) {
-        if (auto *tt = dynamic_cast<TooltipNode *>(n.get())) {
+        if (const auto *tt = dynamic_cast<TooltipNode *>(n.get())) {
             tt->tick(now);
         }
     }

@@ -121,7 +121,7 @@ auto main() -> int {
             if (!app.window()) {
                 return;
             }
-            auto r = au::debug::capture(app.window()->surface(), "google_play_framebuffer.png");
+            const auto r = au::debug::capture(app.window()->surface(), "google_play_framebuffer.png");
             auto msg =
                 r ? std::string("OK -> aurora_debug/google_play_framebuffer.png") : std::string(r.error().message);
             AURORA_LOG_RAW("demo", "capture(framebuffer): ", msg, "\n");

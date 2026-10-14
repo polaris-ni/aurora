@@ -494,7 +494,7 @@ auto RichTextEdit::pos_from_line_col(size_t line_idx, size_t col) const -> size_
     return doc_.size();
 }
 
-auto RichTextEdit::compute_line_runs(const Line &line, TextDirection base, const Rect &bounds) const
+auto RichTextEdit::compute_line_runs(const Line &line, TextDirection base, const Rect &bounds)
     -> std::vector<RunLayout> {
     using aurora::render::detail::guess_paragraph_direction;
     std::vector<RunLayout> runs;
@@ -617,8 +617,8 @@ auto RichTextEdit::compute_line_runs(const Line &line, TextDirection base, const
     return level_runs;
 }
 
-auto RichTextEdit::caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local,
-                                  const Rect &bounds) const -> float {
+auto RichTextEdit::caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local, const Rect &bounds)
+    -> float {
     const auto runs = compute_line_runs(line, base, bounds);
     for (const auto &r : runs) {
         if (caret_local >= r.begin && caret_local <= r.end) {

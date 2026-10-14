@@ -4,7 +4,6 @@
 /// 翻月回卷、网格映射、指针交互）、TimePicker（回卷调节、四象限点击）、ColorPicker（默认/自定义
 /// 色板、点击选色）的构造契约、属性读写、自描述、序列化往返与无头布局/绘制
 
-#include <memory>
 #include <string>
 #include <type_traits>
 #include <vector>

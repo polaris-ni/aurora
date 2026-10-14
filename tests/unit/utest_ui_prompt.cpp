@@ -4,7 +4,6 @@
 ///           未知类型跳过），以及自修复环（确定性机修：未知类型修正 / 缺属性回填 / children 策略裁剪；
 ///           LLM 由外部注入，本库从不发起网络请求；无 LLM 时仍自洽且不空转）
 
-#include <cstddef>
 #include <set>
 #include <string>
 #include <vector>

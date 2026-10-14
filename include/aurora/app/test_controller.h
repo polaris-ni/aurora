@@ -14,7 +14,6 @@
 
 #ifdef AURORA_BACKEND_HEADLESS
 
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>

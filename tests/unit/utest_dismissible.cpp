@@ -14,7 +14,6 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/event.h"
-#include "aurora/widget/containers.h"
 #include "aurora/widget/dismissible.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
@@ -60,6 +59,7 @@ class TestRow final : public aurora::Container {
   public:
     auto type_name() const -> const char * override { return "TestRow"; }
 
+  protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         float x = 0.0F;
         for (Node &ch : children_) {
@@ -124,7 +124,7 @@ AURORA_TEST_CASE(dtd_reduce_motion_short_circuits_to_endpoint) {
     DragToDismiss dtd(DragAxis::Horizontal, 100.0, SpringDescription{});
     dtd.recognizer_slop_for_test(5.0);
     int dismissed = 0;
-    dtd.on_dismissed([&dismissed]() { ++dismissed; });
+    dtd.on_dismissed([&dismissed] { ++dismissed; });
     dtd.on_mouse(make_mouse(MouseAction::Press, Point{.x = 0.0F, .y = 0.0F}));
     dtd.on_mouse(make_mouse(MouseAction::Move, Point{.x = 70.0F, .y = 0.0F}));
     dtd.on_release();
@@ -138,7 +138,7 @@ AURORA_TEST_CASE(dtd_reduce_motion_short_circuits_to_endpoint) {
     DragToDismiss back(DragAxis::Horizontal, 100.0, SpringDescription{});
     back.recognizer_slop_for_test(5.0);
     int back_dismissed = 0;
-    back.on_dismissed([&back_dismissed]() { ++back_dismissed; });
+    back.on_dismissed([&back_dismissed] { ++back_dismissed; });
     back.on_mouse(make_mouse(MouseAction::Press, Point{.x = 0.0F, .y = 0.0F}));
     back.on_mouse(make_mouse(MouseAction::Move, Point{.x = 30.0F, .y = 0.0F}));
     back.on_release();
@@ -257,13 +257,13 @@ AURORA_TEST_CASE(dismissible_release_above_threshold_removes_self_from_container
 }
 
 AURORA_TEST_CASE(dismissible_custom_callback_overrides_default_removal) {
-    auto dis = std::make_shared<Dismissible>(fixed_box());
+    const auto dis = std::make_shared<Dismissible>(fixed_box());
     TestRow row;
     row.add(Node{dis});
     row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, BuildContext{});
 
     int dismissed = 0;
-    dis->on_dismissed([&dismissed]() { ++dismissed; });  // 覆盖默认摘除
+    dis->on_dismissed([&dismissed] { ++dismissed; });  // 覆盖默认摘除
 
     EventDispatcher dispatcher;
     MouseEvent press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
@@ -284,7 +284,7 @@ AURORA_TEST_CASE(dismissible_custom_callback_overrides_default_removal) {
 
 AURORA_TEST_CASE(dismissible_paint_progress_zero_and_in_flight) {
     Painter painter;
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
 
     // progress = 0：直接绘制子节点（无位移/渐隐）。
     Dismissible rest{fixed_box()};
@@ -292,7 +292,7 @@ AURORA_TEST_CASE(dismissible_paint_progress_zero_and_in_flight) {
     rest.paint(painter, Rect{.origin = Point{}, .size = rest.size()}, ctx);
 
     // progress > 0：paint 期平移 + 渐隐（须先驱动拖动再绘制；动画不改布局盒）。
-    auto dis = std::make_shared<Dismissible>(fixed_box());
+    const auto dis = std::make_shared<Dismissible>(fixed_box());
     TestRow row;
     row.add(Node{dis});
     row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, ctx);

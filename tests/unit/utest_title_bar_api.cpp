@@ -148,11 +148,11 @@ AURORA_TEST_CASE(control_button_press_without_chrome_is_safe) {
 
 AURORA_TEST_CASE(action_chip_press_fires_callback) {
     // 关闭控制钮以隔离：动作 chip 从右缘起排，命中即触发 on_click。
-    auto bar = std::make_shared<TitleBar>();
+    const auto bar = std::make_shared<TitleBar>();
     bar->set_window_controls(false);
     int hits = 0;
-    bar->add_action(TitleBarAction{.label = "Foo", .on_click = [&hits]() { ++hits; }});
-    BuildContext ctx;
+    bar->add_action(TitleBarAction{.label = "Foo", .on_click = [&hits] { ++hits; }});
+    constexpr BuildContext ctx;
     bar->mount(ctx);
     LayoutEngine::layout(*bar, host_constraints());
 
@@ -169,9 +169,9 @@ AURORA_TEST_CASE(action_chip_press_fires_callback) {
 
 AURORA_TEST_CASE(blank_area_double_click_branch_reaches_chrome_guard) {
     // 空白区两次 Press（<300ms、<5px）：dbl 为真，chrome 缺失跳过——覆盖 dbl 分支。
-    auto bar = std::make_shared<TitleBar>();
+    const auto bar = std::make_shared<TitleBar>();
     bar->set_window_controls(false);  // 无控制钮/动作，点落在空白
-    BuildContext ctx;
+    constexpr BuildContext ctx;
     bar->mount(ctx);
     LayoutEngine::layout(*bar, host_constraints());
 

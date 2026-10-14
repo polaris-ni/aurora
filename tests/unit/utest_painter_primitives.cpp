@@ -6,18 +6,12 @@
 /// 无操作，以及两张原语级像素 golden 基线（painter_polyline.png / painter_sector.png，
 /// 受 AURORA_GOLDEN_DIR / MAX_DIFF / MAX_PIXELS / UPDATE_GOLDEN 控制）
 
-#include <charconv>
-#include <cstdlib>
-#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "aurora/core/image.h"
 #include "aurora/render/display_list.h"
 #include "aurora/render/painter.h"
-#include "aurora/render/png.h"
-#include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
 

@@ -5,7 +5,6 @@
 /// 以及基线上沿度量落在行高之内（基线对齐的合成基线依赖该不变量）
 
 #include <array>
-#include <cstddef>
 #include <string>
 
 #include "aurora/render/bitmap_font.h"

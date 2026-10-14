@@ -49,7 +49,7 @@ AURORA_TEST_CASE(zero_overhead_specialization_behaves_identically) {
     AURORA_TEST_CHECK_EQ(view.get(), 8);
 
     // Check=false 不存储 owner 线程：不得大于开启检查的形态。
-    AURORA_TEST_CHECK_LE(sizeof(aurora::MainThreadOnly<int, false>), sizeof(aurora::MainThreadOnly<int, true>));
+    AURORA_TEST_CHECK_LE(sizeof(aurora::MainThreadOnly<int, false>), sizeof(aurora::MainThreadOnly<int>));
 }
 
 AURORA_TEST_CASE(owner_is_constructing_thread) {

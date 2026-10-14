@@ -17,7 +17,6 @@
 /// 期望集外跳过）。像素采样点按帧尺寸/逻辑尺寸比例映射（DPI 缩放环境下仍取纯色区域内部，
 /// 不依赖逐位口径），无 glyph 采样。
 
-#include <cmath>
 #include <memory>
 #include <string>
 #include <utility>
@@ -37,16 +36,16 @@ namespace {
 
 // ---- 场景配色（编译期常量，纯色区域内部采样，无 glyph / AA 边）----
 
-constexpr au::Color AURORA_SCENE_BG = au::Color{255, 255, 255, 255};
-constexpr au::Color AURORA_BLOCK_0 = au::Color{255, 120, 120, 255};
-constexpr au::Color AURORA_BLOCK_1 = au::Color{120, 200, 120, 255};
-constexpr au::Color AURORA_BLOCK_2 = au::Color{120, 120, 255, 255};
-constexpr au::Color AURORA_SWITCH_OFF = au::Color{180, 180, 180, 255};
-constexpr au::Color AURORA_SWITCH_ON = au::Color{30, 140, 255, 255};
-constexpr au::Color AURORA_SLIDER_OFF = au::Color{210, 210, 210, 255};
-constexpr au::Color AURORA_SLIDER_ON = au::Color{30, 140, 255, 255};
-constexpr au::Color AURORA_KNOB = au::Color{255, 255, 255, 255};
-constexpr au::Color AURORA_INPUT_FOCUSED = au::Color{255, 248, 220, 255};
+constexpr auto AURORA_SCENE_BG = au::Color{255, 255, 255, 255};
+constexpr auto AURORA_BLOCK_0 = au::Color{255, 120, 120, 255};
+constexpr auto AURORA_BLOCK_1 = au::Color{120, 200, 120, 255};
+constexpr auto AURORA_BLOCK_2 = au::Color{120, 120, 255, 255};
+constexpr auto AURORA_SWITCH_OFF = au::Color{180, 180, 180, 255};
+constexpr auto AURORA_SWITCH_ON = au::Color{30, 140, 255, 255};
+constexpr auto AURORA_SLIDER_OFF = au::Color{210, 210, 210, 255};
+constexpr auto AURORA_SLIDER_ON = au::Color{30, 140, 255, 255};
+constexpr auto AURORA_KNOB = au::Color{255, 255, 255, 255};
+constexpr auto AURORA_INPUT_FOCUSED = au::Color{255, 248, 220, 255};
 
 /// @brief 后端矩阵取值表：全部真实窗口后端（语义与 etest_smoke_render 一致，Headless 不在表内）。
 [[nodiscard]] auto flow_backend_values() -> std::vector<e2e::Backend> {
@@ -109,7 +108,7 @@ auto expect_pixel(const e2e::Frame &frame, const e2e::WindowSpec &spec, float lo
 
 /// @brief 纯色块（滚动内容的最小单元）。
 [[nodiscard]] auto color_block(float width, float height, au::Color color) -> au::Node {
-    auto block = std::make_shared<au::Row>();
+    const auto block = std::make_shared<au::Row>();
     block->modifier.set(au::Modifier{}.size(width, height).background(color));
     return au::Node{block};
 }
@@ -150,7 +149,7 @@ struct FlowScene {
     auto scroller = std::make_shared<au::Scroll>(au::ScrollProps{.child = build_scroll_content()});
 
     auto clicks = std::make_shared<int>(0);
-    btn->on_click = [sw, clicks]() {
+    btn->on_click = [sw, clicks] {
         ++(*clicks);
         sw->set_value(!sw->value());
     };
@@ -180,7 +179,7 @@ struct FocusScene {
 
 /// @brief 构建用例 2 场景：320×80 单行。
 [[nodiscard]] auto build_focus_scene() -> FocusScene {
-    auto input = std::make_shared<au::TextInput>();
+    const auto input = std::make_shared<au::TextInput>();
     input->set_value("ab").set_focused_background(AURORA_INPUT_FOCUSED);
     input->modifier.set(au::Modifier{}.size(160.0F, 32.0F));
     au::Node row{au::Row{au::Node{input}}};
@@ -198,9 +197,9 @@ struct GlideScene {
 
 /// @brief 构建用例 3 场景：320×176（行 A 36 + 行 C 140）。
 [[nodiscard]] auto build_glide_scene() -> GlideScene {
-    auto btn = std::make_shared<au::Button>("jump");
+    const auto btn = std::make_shared<au::Button>("jump");
     auto scroller = std::make_shared<au::Scroll>(au::ScrollProps{.child = build_scroll_content()});
-    btn->on_click = [scroller]() {
+    btn->on_click = [scroller] {
         (void)scroller->scroll_to(10000.0F, true);  // 目标越界：内部夹取到内容底部
     };
     au::Node row_a{au::Row{au::Node{btn}}};

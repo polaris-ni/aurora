@@ -19,7 +19,6 @@
 #include "aurora/storage/storage.h"
 #include "framework/aurora_test.h"
 #include "framework/json_literals.h"
-#include "framework/json_value_printer.h"
 
 namespace aurora::test_cases::utest_storage {
 
@@ -37,11 +36,11 @@ struct PlayerState {
     int score = 0;
 };
 
-inline auto to_storage_json(const PlayerState &p) -> aurora::json::Value {
+[[maybe_unused]] auto to_storage_json(const PlayerState &p) -> aurora::json::Value {
     return testing::json_obj({{"name", p.name}, {"score", p.score}});
 }
 
-inline auto from_storage_json(PlayerState &p, const aurora::json::Value &j) -> Result<void> {
+[[maybe_unused]] auto from_storage_json(PlayerState &p, const aurora::json::Value &j) -> Result<void> {
     if (!j.contains("name") || !j.contains("score")) {
         return Result<void>{make_error(ErrorCode::StorageRecordCorrupt, "player fields missing")};
     }
@@ -55,13 +54,13 @@ struct Blob {
     std::vector<std::byte> data;
 };
 
-inline auto to_storage_bytes(const Blob &b) -> aus::StorageBytes {
+[[maybe_unused]] auto to_storage_bytes(const Blob &b) -> aus::StorageBytes {
     aus::StorageBytes out = b.data;
     out.push_back(static_cast<std::byte>(b.data.size()));
     return out;
 }
 
-inline auto from_storage_bytes(Blob &b, const aus::StorageBytes &bytes) -> Result<void> {
+[[maybe_unused]] auto from_storage_bytes(Blob &b, const aus::StorageBytes &bytes) -> Result<void> {
     if (bytes.empty()) {
         return Result<void>{make_error(ErrorCode::StorageRecordCorrupt, "blob payload empty")};
     }
@@ -75,11 +74,11 @@ struct MigratingDoc {
     int level = 0;
 };
 
-inline auto to_storage_json(const MigratingDoc &d) -> aurora::json::Value {
+[[maybe_unused]] auto to_storage_json(const MigratingDoc &d) -> aurora::json::Value {
     return testing::json_obj({{"name", d.name}, {"level", d.level}});
 }
 
-inline auto from_storage_json(MigratingDoc &d, const aurora::json::Value &j) -> Result<void> {
+[[maybe_unused]] auto from_storage_json(MigratingDoc &d, const aurora::json::Value &j) -> Result<void> {
     if (!j.contains("name")) {
         return Result<void>{make_error(ErrorCode::StorageRecordCorrupt, "doc missing name")};
     }
@@ -89,10 +88,10 @@ inline auto from_storage_json(MigratingDoc &d, const aurora::json::Value &j) -> 
 }
 
 /// @brief 用户命名空间覆盖版本号：带 tag 指针实参（ADL 定制点约定），使 MigratingDoc 当前版本为 2。
-inline auto storage_version(const MigratingDoc * /*doc*/) -> std::uint32_t { return 2; }
+[[maybe_unused]] auto storage_version(const MigratingDoc * /*doc*/) -> std::uint32_t { return 2; }
 
 /// @brief 迁移钩子：v1 记录缺 level 字段，迁移时补默认值 1。
-inline auto migrate_storage(std::uint32_t old_version, const MigratingDoc * /*doc*/, aurora::json::Value j)
+[[maybe_unused]] auto migrate_storage(std::uint32_t old_version, const MigratingDoc * /*doc*/, aurora::json::Value j)
     -> Result<aurora::json::Value> {
     if (old_version < 2 && !j.contains("level")) {
         j.set("level", 1);
@@ -105,11 +104,11 @@ struct MigratingBlob {
     std::vector<std::byte> data;
 };
 
-inline auto storage_version(const MigratingBlob * /*doc*/) -> std::uint32_t { return 2; }
+[[maybe_unused]] auto storage_version(const MigratingBlob * /*doc*/) -> std::uint32_t { return 2; }
 
-inline auto to_storage_bytes(const MigratingBlob &b) -> aus::StorageBytes { return b.data; }
+[[maybe_unused]] auto to_storage_bytes(const MigratingBlob &b) -> aus::StorageBytes { return b.data; }
 
-inline auto from_storage_bytes(MigratingBlob &b, const aus::StorageBytes &bytes) -> Result<void> {
+[[maybe_unused]] auto from_storage_bytes(MigratingBlob &b, const aus::StorageBytes &bytes) -> Result<void> {
     if (bytes.empty()) {
         return Result<void>{make_error(ErrorCode::StorageRecordCorrupt, "migrating blob payload empty")};
     }
@@ -118,7 +117,7 @@ inline auto from_storage_bytes(MigratingBlob &b, const aus::StorageBytes &bytes)
 }
 
 /// @brief 迁移钩子：v0 记录判损坏（覆盖迁移失败透传分支）；v1 追加 v2 标记字节。
-inline auto migrate_storage(std::uint32_t old_version, const MigratingBlob * /*doc*/, aus::StorageBytes bytes)
+[[maybe_unused]] auto migrate_storage(std::uint32_t old_version, const MigratingBlob * /*doc*/, aus::StorageBytes bytes)
     -> Result<aus::StorageBytes> {
     if (old_version == 0) {
         return Result<aus::StorageBytes>{make_error(ErrorCode::StorageRecordCorrupt, "version 0 not migratable")};

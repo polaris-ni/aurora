@@ -3,7 +3,6 @@
 #include "test_selftest.h"
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>

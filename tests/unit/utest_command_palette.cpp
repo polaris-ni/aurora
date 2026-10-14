@@ -7,7 +7,6 @@
 /// （未登记回退英文字面量、随 `ctx` 注入的 locale 变化）、文本覆盖优先于查表、自定义 key 仍走 i18n、
 /// 空态提示确实进入绘制、以及属性序列化往返保留 i18n 语义。
 
-#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>

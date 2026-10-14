@@ -6,7 +6,6 @@
 /// FocusManager 直跑）、序列化往返、自描述；OverlayHost——空宿主 add_overlay 拒收、
 /// 浮层增删计数、z-order 绘制与命中、顶层浮层外部点击关闭。
 
-#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>
@@ -15,7 +14,6 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
-#include "aurora/widget/containers.h"
 #include "aurora/widget/popup.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
@@ -32,7 +30,7 @@ auto bounded(float w, float h) -> Constraints {
 
 /// 80x40 固定尺寸弹出内容（px 意图尺寸，与字体度量无关）。
 auto make_menu() -> Node {
-    auto t = std::make_shared<Text>("menu");
+    const auto t = std::make_shared<Text>("menu");
     t->width(aurora::px(80.0F));
     t->height(aurora::px(40.0F));
     return Node{t};
@@ -62,7 +60,7 @@ AURORA_TEST_CASE(popup_defaults_and_descriptor) {
 
 AURORA_TEST_CASE(popup_open_close_lifecycle_and_paint) {
     Painter painter;
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
 
     // 关闭态：绘制早返回、内容盒零尺寸。
     Popup closed{make_menu()};
@@ -73,7 +71,7 @@ AURORA_TEST_CASE(popup_open_close_lifecycle_and_paint) {
     // 打开：无 FocusManager 时 open_at 安全直跑（跳过焦点作用域）。
     int close_calls = 0;
     Popup popup{make_menu()};
-    popup.set_on_close([&close_calls]() { ++close_calls; });
+    popup.set_on_close([&close_calls] { ++close_calls; });
     popup.open_at(Point{.x = 100.0F, .y = 50.0F});
     AURORA_TEST_CHECK_TRUE(popup.is_open());
     AURORA_TEST_CHECK_EQ(popup.anchor().x, 100.0F);
@@ -97,8 +95,8 @@ AURORA_TEST_CASE(popup_hit_test_remaps_to_anchor_content) {
     Popup popup{make_menu()};
     popup.open_at(Point{.x = 100.0F, .y = 50.0F});
     LayoutEngine::layout(popup, bounded(400.0F, 300.0F));
-    const BuildContext ctx;
-    const Rect self_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 0.0F, .height = 0.0F}};
+    constexpr BuildContext ctx;
+    constexpr Rect self_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 0.0F, .height = 0.0F}};
 
     // local (100,50) → 全局 (100,50) 落在内容盒 [100,180)x[50,90) 内 → 命中内容。
     Widget *inside = popup.hit_test(Point{.x = 100.0F, .y = 50.0F}, self_box, ctx);

@@ -6,7 +6,6 @@
 ///           响应且进程存活，绝不 std::terminate。真实 loopback HTTP 往返驱动。
 ///           AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -23,7 +22,6 @@
 #include "aurora/inspector/inspector_server.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
-#include "aurora/window/surface.h"
 #endif
 
 namespace aurora::test_cases::itest_inspector_robustness {

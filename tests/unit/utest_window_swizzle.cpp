@@ -4,7 +4,6 @@
 /// alpha=0（阴影外缘）RGB 归零、alpha=255（内容区）与旧 XRGB 直转逐值恒等、半透明按
 /// c*a/255 预乘且字节序为小端 B,G,R,A。纯内存转换，无平台依赖。
 
-#include <cstddef>
 #include <cstdint>
 
 #include "aurora/window/swizzle.h"  // 内部头：测试 TU 以 src/ 为附加包含根

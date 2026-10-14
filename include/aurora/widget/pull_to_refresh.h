@@ -2,10 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <functional>
 #include <optional>
-#include <string>
 #include <utility>
 
 #include "aurora/core/accessibility.h"
@@ -270,24 +268,6 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     /// @return 恒为 true：滚轮派发时本控件是可滚动目标。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
-  protected:
-    /// @brief 视口透传布局：子树取本容器盒尺寸（滚动子树自管内滚偏移）。
-    /// @param c 父级传入的布局约束。
-    /// @param ctx 构建上下文（透传给子树）。
-    /// @return 夹取后的容器尺寸（子树占满）。
-    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        Size self = c.max;  // 默认吃满父约束上限（视口透传）
-        if (!c.max.is_finite()) {
-            self = Size{.width = 320.0F, .height = 480.0F};
-        }
-        if (child_) {
-            const Constraints inner{.min = Size{.width = 0.0F, .height = 0.0F}, .max = self};
-            child_.widget().layout(inner, ctx);
-            child_.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = self});
-        }
-        return c.constrain(self);
-    }
-
     /// @brief 指针拖拽通道：垂直下拉手势经橡皮筋映射为下拉距离；劫持期内吞掉事件，
     ///        松手按阈值裁决（触发刷新或回弹归零）；未劫持时修饰链照常下发子树。
     /// @param e 鼠标事件；劫持/刷新期置 `is_handled`。
@@ -334,6 +314,24 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     auto on_pointer_event(TouchEvent &e) -> void override {
         drag_.on_touch(e);
         SingleChild::on_pointer_event(e);  // 修饰链照常下发子树
+    }
+
+  protected:
+    /// @brief 视口透传布局：子树取本容器盒尺寸（滚动子树自管内滚偏移）。
+    /// @param c 父级传入的布局约束。
+    /// @param ctx 构建上下文（透传给子树）。
+    /// @return 夹取后的容器尺寸（子树占满）。
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        Size self = c.max;  // 默认吃满父约束上限（视口透传）
+        if (!c.max.is_finite()) {
+            self = Size{.width = 320.0F, .height = 480.0F};
+        }
+        if (child_) {
+            const Constraints inner{.min = Size{.width = 0.0F, .height = 0.0F}, .max = self};
+            child_.widget().layout(inner, ctx);
+            child_.set_bounds(Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = self});
+        }
+        return c.constrain(self);
     }
 
     /// @brief 子树之上叠加顶部下拉指示器带：半透明底 + 按进度扫过的弧线 spinner，刷新中附提示文案。

@@ -60,7 +60,7 @@ class HotReload {
     /// @note `id` 不经 JSON 往返，按 id 保留状态在热重载下无法成立。
     /// @param key 原「按 id 保留状态」的键名；本接口为空实现，不消费该参数。
     /// @note 形参取 const 引用：空实现（仅兼容占位），按值传 std::string 徒增一次拷贝。
-    void set_state_key([[maybe_unused]] const std::string &key) {}
+    static void set_state_key([[maybe_unused]] const std::string &key) {}
 
     /// @brief 检查文件时间戳；如有更新则从 JSON 重建树。
     /// @return 新根节点（共享指针所有权），无变化或重建失败返回 nullptr。
@@ -128,7 +128,7 @@ class HotReload {
     /// @param node 当前遍历到的控件节点。
     /// @param path 该节点的树路径（根为空串）。
     void collect_state(Node node, const std::string &path) {
-        Widget &w = node.widget();
+        const Widget &w = node.widget();
         Json props = Json::object();
         w.serialize_props(props);
         if (!props.empty()) {

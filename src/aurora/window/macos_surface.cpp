@@ -12,7 +12,7 @@
 //
 // 本文件为骨架，全部方法在 macOS 环境实写后替换 stub。
 
-#include "aurora/core/platform.h"
+#include "aurora/core/platform.h"  // NOLINT
 #if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
 
 #include "aurora/core/log.h"

@@ -9,7 +9,6 @@
 ///           静止用例同理：跨越两个刷新周期后断言像素有变化。
 
 #include <chrono>
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <thread>

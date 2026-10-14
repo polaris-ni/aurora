@@ -44,7 +44,7 @@ auto main() -> int {
 
     // 主窗回显最近一次气泡正文（托盘点击后无需切回窗口即可看到结果）。
     auto last_msg = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"(no balloon yet)"});
-    auto show_balloon = [&app, &last_msg](au::SystemTray &tray, const char *msg) -> void {
+    auto show_balloon = [&last_msg](au::SystemTray &tray, const char *msg) -> void {
         tray.show_balloon("Aurora", msg);
         last_msg->set(au::LocalizedString{tray.last_balloon_message()});
         AURORA_LOG_INFO("demo", "[tray] balloon shown");

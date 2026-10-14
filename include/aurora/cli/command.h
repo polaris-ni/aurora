@@ -15,7 +15,6 @@
 // 「内建」与「用户声明一个会打印 schema 的旗标」走的是同一条 `early_view` 通道。
 // ============================================================================
 
-#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>

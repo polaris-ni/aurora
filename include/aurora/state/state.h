@@ -122,7 +122,7 @@ class State : public SignalView<T>,  // NOLINT(bugprone-exception-escape)
             }
             ++it;
         }
-        auto conn = make_connection();
+        const auto conn = make_connection();
         conn->effect = e.anchor();
         conn->effect_raw = &e;
         conn->state = this->anchor();
@@ -135,7 +135,7 @@ class State : public SignalView<T>,  // NOLINT(bugprone-exception-escape)
     /// @note 调用者须确保 State 由 shared_ptr 管理（否则行为未定义）。
     /// @note Thread: main-thread only
     /// @note Side-effects: none
-    [[nodiscard]] auto shared() -> std::shared_ptr<State<T>> { return this->shared_from_this(); }
+    [[nodiscard]] auto shared() -> std::shared_ptr<State> { return this->shared_from_this(); }
 
   private:
     T value_;

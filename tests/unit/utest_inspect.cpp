@@ -3,7 +3,6 @@
 /// 测试说明: 覆盖 collect_widget_boxes —— 空节点返回空表、先序遍历顺序与索引路径格式、
 ///           嵌套层级的路径拼装、根盒落定，以及结果与 render_to_logical_snapshot 的树同构
 
-#include <cmath>
 #include <string>
 #include <vector>
 

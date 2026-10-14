@@ -22,7 +22,6 @@
 /// 作为可达框基准——这条通路与 `window_bounds()` 完全独立，两者相符才说明读数与派发同源。
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>

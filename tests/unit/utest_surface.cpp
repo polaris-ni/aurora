@@ -4,7 +4,6 @@
 /// HeadlessSurface 帧生命周期、PNG 落盘、状态/重绘 seam（Headless 部分受 AURORA_BACKEND_HEADLESS 门控）
 
 #include <chrono>
-#include <cstddef>
 #include <filesystem>
 #include <system_error>
 #include <type_traits>

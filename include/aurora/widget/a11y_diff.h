@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
@@ -147,7 +146,7 @@ inline auto flatten_snapshot(const Widget &w, const AccessibilityNode &n, std::u
         }
     }
     // 回溯按逆序收集，此处就地翻正为 LCS 正序结果。
-    std::reverse(seq.begin(), seq.end());
+    std::ranges::reverse(seq);
     return seq;
 }
 

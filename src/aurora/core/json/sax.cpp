@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <charconv>
-#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <memory>
@@ -41,8 +40,8 @@ namespace {
 /// @brief 构造 json-parse-error：自定义 message（含行/列/偏移），hint 附 ≤24 字节上下文片段。
 [[nodiscard]] auto parse_error_at(std::string_view input, std::size_t offset, std::string_view detail) -> Error {
     const auto [line, col] = line_col_of(input, offset);
-    std::string msg = "JSON parse failed at line " + std::to_string(line) + ", column " + std::to_string(col) +
-                      " (offset " + std::to_string(offset) + "): " + std::string(detail);
+    const std::string msg = "JSON parse failed at line " + std::to_string(line) + ", column " + std::to_string(col) +
+                            " (offset " + std::to_string(offset) + "): " + std::string(detail);
     std::string hint;
     if (offset < input.size()) {
         std::size_t len = input.size() - offset;
@@ -521,7 +520,7 @@ class SaxCore {
 
     /// @brief 数字分派：整数字面量先 int64 再 uint64，溢出保真；小数字面量经 from_chars，
     ///        往返失真或域外一律落 RawNumber。
-    [[nodiscard]] auto dispatch_number(std::string_view token, bool is_float) -> Result<bool> {
+    [[nodiscard]] auto dispatch_number(std::string_view token, bool is_float) const -> Result<bool> {
         const char *first = token.data();
         const char *last = std::to_address(token.end());
         if (!is_float) {

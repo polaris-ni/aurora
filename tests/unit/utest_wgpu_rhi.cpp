@@ -16,13 +16,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <vector>
 
-#include "aurora/core/image.h"
-#include "aurora/core/native_surface.h"
 #include "framework/aurora_test.h"
 
 #ifdef AURORA_BACKEND_GPU_WGPU

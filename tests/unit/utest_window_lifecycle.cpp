@@ -4,7 +4,6 @@
 /// quit() 的强制退出、主窗口切换与访问器跟随、Transient 从属窗口随 owner 连带关闭、关闭回调触发。
 /// 全部以 Headless 多实例驱动（无 OS 窗口），不依赖任何真实后端。
 
-#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>
@@ -12,7 +11,6 @@
 
 #include "aurora/app/application.h"
 #include "aurora/widget/text.h"
-#include "aurora/window/surface.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_window_lifecycle {

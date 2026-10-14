@@ -3,7 +3,6 @@
 /// 测试说明: 覆盖码点↔UTF-8 编码（ASCII/2/3/4 字节与代理区/越界拒绝）、序列长度判定、码点计数与切片，以及 Win32
 /// 宽串往返
 
-#include <cstdint>
 #include <string>
 
 #include "aurora/core/utf8.h"

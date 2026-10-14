@@ -6,7 +6,6 @@
 /// teardown 解绑同步重渲染回调（析构级联中 Window 成员先亡的 use-after-free 回归）、
 /// 无窗口宿主的显示器迁移安全 no-op。全部以 Headless 多实例驱动（seam 记录调用而非产生副作用）。
 
-#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>

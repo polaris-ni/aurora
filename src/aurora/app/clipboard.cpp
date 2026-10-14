@@ -4,7 +4,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -337,7 +337,7 @@ auto Clipboard::set_image(const Image &img) -> Result<bool> {
         return make_error(ErrorCode::ClipboardWriteFailed, ErrorParams{{"detail", win_detail("GlobalLock")}});
     }
     auto *bi = reinterpret_cast<BITMAPINFOHEADER *>(p);
-    std::memset(bi, 0, sizeof(BITMAPINFOHEADER));
+    *bi = {};
     bi->biSize = sizeof(BITMAPINFOHEADER);
     bi->biWidth = w;
     bi->biHeight = -h;  // 负值 = 自顶向下（origin 左上），避免翻转
@@ -493,13 +493,13 @@ auto Clipboard::available_formats() -> Result<std::vector<std::string>> {
             }
             std::vector<std::string> keys;
             keys.reserve(backend.payloads.size());
-            for (const auto &entry : backend.payloads) {
-                keys.emplace_back(entry.first);
+            for (const auto &key : backend.payloads | std::views::keys) {
+                keys.emplace_back(key);
             }
             // 排序只为给出稳定的清单顺序：unordered_map 的迭代序不确定，而调用方（含单测）会按序比对。
-            std::sort(keys.begin(), keys.end());
+            std::ranges::sort(keys);
             for (auto &key : keys) {
-                if (std::find(formats.begin(), formats.end(), key) == formats.end()) {
+                if (std::ranges::find(formats, key) == formats.end()) {
                     formats.push_back(std::move(key));
                 }
             }

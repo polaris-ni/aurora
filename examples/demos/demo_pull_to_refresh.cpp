@@ -41,7 +41,7 @@ auto main() -> int {
         // CJK-LITERAL: on-screen-demo - painted window text, not console output
         status->set(au::LocalizedString{"刷新中…（异步取数）"});
         auto finish = [status, weak_pull]() -> void {
-            if (auto p = weak_pull.lock()) {
+            if (const auto p = weak_pull.lock()) {
                 p->finish_refresh();  // 指示器收拢回弹
             }
             // CJK-LITERAL: on-screen-demo - painted window text, not console output

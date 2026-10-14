@@ -1,7 +1,6 @@
 // swizzle.h —— 内部共享像素 swizzle 辅助（仅库实现可见，不属公共 API）。
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 
 namespace aurora {

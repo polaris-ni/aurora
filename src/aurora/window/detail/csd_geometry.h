@@ -13,7 +13,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 
 #include "aurora/core/color.h"  // Color（阴影基色）

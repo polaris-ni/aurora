@@ -463,13 +463,13 @@ class TimelinePlayer {
 
     /// @brief 正向播放（可选从 from∈[0,1] 起步；-1 哨兵 = 从当前进度续播）。
     /// @param from 起步进度；恰为 0.0 时先把全部轨道初始化到各自 begin 值（消除未播轨道的旧值）。
-    auto forward(double from = -1.0) -> void;
+    auto forward(double from = -1.0) const -> void;
 
     /// @brief 反向播放：沿时间轴镜像倒放（从当前进度倒退）。
-    auto reverse() -> void;
+    auto reverse() const -> void;
 
     /// @brief 停止：保持当前进度（方向切换/手势接管用），静止于最近端点语义。
-    auto stop() -> void;
+    auto stop() const -> void;
 
     /// @brief 主进度（0..1，主控制器原始输出）。
     /// @return 主控制器当前归一化进度。
@@ -489,15 +489,15 @@ class TimelinePlayer {
 
     /// @brief 到达终点（Completed）的一次性回调（同 `AnimatedValue` 语义）。
     /// @param cb 回调（覆写式登记；传空 std::function 即清除）。
-    auto on_completed(std::function<void()> cb) -> void;
+    auto on_completed(std::function<void()> cb) const -> void;
 
     /// @brief 接入 Animator 帧循环（载荷 shared_ptr 自持，句柄可离开作用域）。
     /// @param a 目标 Animator（其帧循环持载荷副本）。
-    auto attach(Animator &a) -> void;
+    auto attach(Animator &a) const -> void;
 
     /// @brief 无 Animator 时手动推进一帧：推进主控制器 → 应用全部轨道 → completed。
     /// @param dt_seconds 帧时间步长（秒）。
-    auto tick(double dt_seconds) -> void;
+    auto tick(double dt_seconds) const -> void;
 
   private:
     // 轨道：区间 + 类型擦除载荷（Tween<T> 存 TrackBody<T>，apply 内窄化，不泄漏公共 API）。
@@ -533,7 +533,7 @@ class TimelinePlayer {
     /// @brief 把已构造的轨道登记进载荷表（越界槽位无操作；同区间同目标覆盖旧绑定）。
     /// @param slot 槽位号。
     /// @param t 已填好区间/载荷/目标/apply 的轨道。
-    auto bind_track(std::size_t slot, Track t) -> void;
+    auto bind_track(std::size_t slot, Track t) const -> void;
 
     /// @brief 按绑定序把主进度映射写入全部轨道目标。
     /// @param tracks 轨道表。

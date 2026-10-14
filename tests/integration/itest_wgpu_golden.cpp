@@ -15,8 +15,6 @@
 ///           ——两者是不同层的读回通道；本 TU 与 GL 侧共用 `support/gpu_golden_scenes.h` 的场景
 ///           与帧装配、共用 `golden::compare_gpu_tolerance` 判据，已是单源。
 
-#include <cstddef>
-
 #include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
 

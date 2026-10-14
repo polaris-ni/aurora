@@ -4,7 +4,6 @@
 /// 无前缀通道、日志行格式（前缀/模块/file:line/换行）、log_concat 变参拼接、sink 恢复与重捕获、init_console 可调用性
 
 #include <cctype>
-#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>

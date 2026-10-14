@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -207,7 +206,7 @@ class PieChart : public LeafWidget, public PieChartProps {
     /// @param g 几何快照
     /// @param local 本地坐标
     /// @return 命中图例项序号，无命中为 nullopt
-    [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
+    [[nodiscard]] static auto legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t>;
 
     Geometry geom_;  ///< 当前几何（每次 on_layout 重算）
     ChartGrowIn grow_;  ///< grow-in 动画器（on_mount 接入帧循环）
@@ -220,7 +219,7 @@ inline auto PieChart::compute_geometry(const Size &size, const Font &font) const
     Geometry g;
     g.ratios = pie_section_ratios(sections);
     const float line_h = render::FontEngine::measure_height(font) + 4.0F;
-    float left = padding.left;
+    const float left = padding.left;
     float top = padding.top;
     float right = std::max(padding.left, size.width - padding.right);
     float bottom = std::max(padding.top, size.height - padding.bottom);
@@ -294,7 +293,7 @@ inline auto PieChart::on_layout(const Constraints &c, const BuildContext &ctx) -
 }
 
 // 顺序扫描 legend_rects，首个包含该点的矩形即命中。
-inline auto PieChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
+inline auto PieChart::legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
         const Rect &r = g.legend_rects[i];
         if (local.x >= r.origin.x && local.x <= r.right() && local.y >= r.origin.y && local.y <= r.bottom()) {

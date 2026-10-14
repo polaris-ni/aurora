@@ -46,7 +46,7 @@ struct Image {
     [[nodiscard]] auto content_hash() const -> std::uint64_t;
 
     /// @brief 使摘要缓存失效（直接改写 `pixels` 后调用，见 `content_hash` 注释）。
-    auto invalidate_content_hash() -> void { content_hash_valid_ = false; }
+    auto invalidate_content_hash() const -> void { content_hash_valid_ = false; }
 
     /// @brief 从文件加载。
     /// 分发策略：未压缩 24 位 BMP 走内置解码；PNG/JPG/GIF/TGA/HDR 等走 vendored

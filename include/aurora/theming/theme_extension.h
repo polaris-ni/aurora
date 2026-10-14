@@ -143,7 +143,7 @@ class ThemeExtensions {
 
     /// @brief 释放全部项并清空。
     auto clear() -> void {
-        for (auto &e : entries_) {
+        for (const auto &e : entries_) {
             if (e.drop != nullptr) {
                 e.drop(e.obj);
             }
