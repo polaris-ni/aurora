@@ -33,7 +33,11 @@ auto WindowHost::teardown() -> void {
             a11y->deactivate();
         }
         // 清空根 widget 的脏传播回调：lambda 捕获 Window* this，Window 析构后悬垂。
-        scene_.root().on_subtree_dirty = {};
+        // 仅当场景已挂载（根控件存在）时才有此回调可清；未挂载（如仅 open 未 mount）根节点
+        // 为空，`Scene::root()` 会解引用空 widget 指针。
+        if (scene_.root_node()) {
+            scene_.root().on_subtree_dirty = {};
+        }
         // 解绑捕获 `this` 的后端回调：同一消息泵不停，宿主析构后回调会打到已释放对象。
         auto &sf = window_->surface();
         sf.set_accessibility_root(nullptr);  // 抹掉桥侧根指针，防 RPC 线程重入拿悬垂根重建
