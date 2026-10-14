@@ -12,7 +12,7 @@
 |:---|:---|
 | 环境与构建上下文 | `environment/environment.h`、`environment/build_context.h` |
 | 媒体查询 | `environment/media_query.h` |
-| 主题 | `theming/theme.h`、`theming/theme_scope.h`、`theming/theme_query.h`、`theming/style_props.h` |
+| 主题 | `theming/theme.h`（聚合）、`theming/color_roles.h`、`theming/type_scale.h`、`theming/csd_roles.h`、`theming/csd_style_bridge.h`、`theming/theme_scope.h`、`theming/theme_query.h`、`theming/theme_extension.h`、`theming/color_scheme.h` |
 | 国际化 | `i18n/localized_string.h`、`i18n/string_table.h`、`i18n/locale.h` |
 | 修饰符 | `modifier/modifier.h`、`modifier/modifier_base.h`、`modifier/modifier_layout.h`、`modifier/modifier_paint.h`、`modifier/modifier_input.h`、`modifier/modifier_transform.h` |
 
@@ -191,41 +191,55 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 ## 5 主题
 
-### 5.1 Theme
+### 5.1 主题值对象与角色集
 
-`Theme`（`theming/theme.h`）是扁平设计令牌：`Theme{ .background, .primary, .on_primary, .text, .font }`；`Theme::light()` / `Theme::dark()` 提供默认主题。经 `ThemeProvider` 注入，组件用 `ctx.environment<Theme>()` 读取。
+`Theme`（`theming/theme.h`）是角色化主题值对象，结构为 `Theme{ roles, type_scale, csd, scheme }` 加一张 `ThemeExtension<T>` 注册表；`Theme::light()` / `Theme::dark()` 是两个内置档位，`with_defaults()` 返回 light 基准列（`scheme` 保持 `Unspecified`）。经 `ThemeProvider` / `ThemeScope` 注入，组件用 `inherit_theme(ctx)` 读取。
 
-**命名令牌层**（叠加于扁平字段，不改注入机制）：
+**色角色层 `ColorRoles`**（`theming/color_roles.h`，纯值 struct，snake_case 字段名一套、明暗两列取值，命名对标 Material 3 `ColorScheme` 全集）：
 
-| 成员 | 说明 |
-|:---|:---|
-| `Theme::set_token(name, TokenValue)` | 登记命名令牌。`TokenValue` 可承载 `Color` / `Font` / `double`（dp）三态之一 |
-| `Theme::token(name)` | 返回 `std::optional<TokenValue>` |
-| `Theme::token_or<T>(name, fallback)` | 强转目标类型，缺失或类型不匹配时回退 |
+- 主色四组：`primary` / `on_primary` / `primary_container` / `on_primary_container`，`secondary` / `on_secondary` / `secondary_container` / `on_secondary_container`，`tertiary` / `on_tertiary` / `tertiary_container` / `on_tertiary_container`，`error` / `on_error` / `error_container` / `on_error_container`
+- 表面族：`surface` / `surface_dim` / `surface_bright` / `surface_container_lowest` / `surface_container_low` / `surface_container` / `surface_container_high` / `surface_container_highest` / `on_surface` / `on_surface_variant` / `surface_variant`
+- 描边族：`outline` / `outline_variant`
+- 反转族：`inverse_surface` / `inverse_on_surface` / `inverse_primary`
+- 其他：`scrim` / `shadow` / `surface_tint`
+- Aurora 扩展角色（Material 3 无对应）：`focus_ring`（焦点环极性色，light 纯黑 / dark 纯白）、`hover` / `pressed`（交互态配色的收纳位）
+- 取舍：Material 3 的 `background` / `on_background` 折叠进 `surface` / `on_surface`（M3 新版 `ColorScheme` 亦移除 background，本库跟随）
 
-令牌随 `ThemeProvider` 注入整体传递，后代经 `environment<Theme>()` 读到的 `Theme` 即含令牌表。
+每个 `on_*` 角色与配对容器角色的 WCAG AA 对比度 ≥ 4.5:1 由 `utest_theme_roles` 断言；角色基准值即预设取值（dark `primary` 为达标修正后的取值，理由见 `CHANGELOG.md` 破坏性条目）。
 
-**明暗双档取值**（一个主题自带两套，角色名一套、明暗两列——Material 3 color roles / Fluent 2 alias tokens 同构）：`Theme::scheme`（`ColorScheme{Unspecified, Light, Dark}`，`light()` / `dark()` 工厂自动置位）+ 暗色覆写表 `dark_tokens`；解析经 `token_for(name)` / `token_in(name, scheme)`——Dark 档先查覆写表、未命中回落基础表 `tokens`，其余档位只查基础表。`light()` / `dark()` 播种约 16 个语义令牌（`surface` / `surface.raised` / `text` / `text.muted` / `accent` / `border` / `hover` / `pressed` / `danger`，命名取两家公共子集）与 `csd.*` 组件覆写位；`csd.*` 数值基准与 `CsdPreset::AdwaitaLight/Dark` 一致，保证「从令牌派生」与「直接取预设」两条路输出相同的默认观感。
+**排版角色层 `TypeScale`**（`theming/type_scale.h`）：Material 3 排版 15 档（`display` / `headline` / `title` / `body` / `label` 各 large/medium/small）的 `Font` 字段；图表族经 `compute_geometry` 读取的字阶语义由 `type_scale.body_medium` 承接。
 
-**明暗三级优先链**（`theming/csd_style_bridge.h` 的 `resolve_color_scheme(explicit, theme, os)` 纯函数）：显式样式覆盖 > `Theme::scheme` > OS 偏好；各层以 `Unspecified` 表示「不表态」逐层下探，全链未指定时由调用方回落 `AdwaitaDark`。OS 层经 `os_color_scheme()`（`window/platform.h`）显式查询——Linux 读 GTK 配置文件启发式（不引 DBus 依赖），Win32 读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` 的 `AppsUseLightTheme`（REG_DWORD，0 = Dark；键在值缺 = Light；键打不开 = Unspecified，实现独立 TU `win32_platform.cpp` 避免公共头引入 `<windows.h>`），macOS 按 `NSAppearance` 契约标注未在本仓库无头构建内编译验证；`Platform::color_scheme` 字段须由调用方填充（`platform()` 不代做——读偏好有文件 / 注册表访问副作用）。
+**类型安全扩展 `ThemeExtension<T>`**（`theming/theme_extension.h`）：应用自定义令牌面以类型为键注册——概念基类 + 模板模型（值语义深拷贝，与 `Theme` 随控件回调网被值拷贝的现状一致）；`Theme::extension<T>()` 返回 `const T*`，未注册返回 `nullptr`（调用方显式判空，无字符串拼写静默回落）。典型用途是图表色板（`ChartPalette` 扩展）。扩展**不参与** JSON 自动序列化，由应用自行负责。
 
-**Theme → CSD 派生通道**：`title_bar_style_from_theme(theme)` / `window_frame_style_from_theme(theme, base)`（`csd_style_bridge.h`）——预设做基座，`csd.title_bar.*` 组件令牌逐项覆盖，几何 / 显隐 / 度量字段不参与派生（属定制面）；应用在主题变化时重调 `set_title_bar_style(派生结果)` 即完成运行期明暗切换（装饰重绘下一帧生效），不引入轮询。测试见 `utest_theme_csd_bridge`。
+**窗口装饰角色组 `CsdRoles`**（`theming/csd_roles.h`）：`Theme` 的库自有字段（与 `roles` / `type_scale` 同层，不经 `ThemeExtension<T>`——窗口装饰配色是框架资产且必须在渲染路径零分配），8 个字段与标题栏/窗框配色一一对应（`title_bar_bg_active` / `title_bar_bg_inactive` / `title_bar_fg_active` / `title_bar_fg_inactive` / `title_bar_hover_tint` / `title_bar_pressed_tint` / `title_bar_close_hover` / `shadow_color`）。取值来源见「CSD 派生通道」。
 
-**内置主题登记的令牌**（`Theme::light()` / `Theme::dark()` 各自 `set_token`，`Theme::with_defaults()` 与裸 `Theme{}` 不登记任何令牌）：
+### 5.2 默认根注入与 OS 跟随
 
-| 令牌名 | 浅色 | 深色 | 消费方 | 未登记时的回退 |
-|:---|:---|:---|:---|:---|
-| `focus.ring` | 纯黑 | 纯白 | `Widget::paint_content` 的统一焦点环（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4） | `primary` |
+`Window`（`window/window.h`）持有主题状态，暴露 `set_theme(const Theme&)`（应用显式设置，最高优先）、`theme()` 与 `set_os_color_scheme(ColorScheme)`（供宿主推入 OS 档位的设定器）。`prepare_context` 每帧向根 `BuildContext` 注入 `Theme`（`root_env_.set<Theme>(resolved_root_theme())`），与 `MediaQuery` / `WindowState` / `WindowMode` / `WindowChrome` 同址注入，机制完全对称——子树无 `ThemeScope` 时经 `inherit_theme(ctx)` 读到此值。
 
-回退语义是刻意的：环色改由令牌驱动后，未登记该令牌的自定义主题仍画 `primary`，行为与改动前逐位一致，不构成未经请求的视觉变更。
+**三级优先链**（应用未显式设置时）：显式 `set_theme` > OS 档（经 `set_os_color_scheme` 推入）> 明色。OS 未表态（`Unspecified`，headless/CI 常见）回落明色，故「`Unspecified` ≡ 明色列」是全系统单一口径：根注入链底、CSD 桥基座（见 5.3）与 `inherit_theme` 的无注入兜底（`Theme::light()`，`theming/theme_scope.h`）同解。注入的主题 `scheme` 携带解析后的最终档（`Light` / `Dark`，不为 `Unspecified`）。
 
-### 5.2 StyleProps
+**OS 偏好的推入路径**：`platform.h` 反向依赖 `window.h`，故 `Window` 不直读 `os_color_scheme()`；由 `WindowHost`（app 层）在 `attach_surface` 创建窗口时推入 `set_os_color_scheme(os_color_scheme())`，与 `set_window_state` / `set_window_mode` 的同位推送同构。读取口径：注册表 / 配置文件访问有副作用，**不在每帧直读**——创建时读一次。运行期变更：Win32 后端在 `WndProc` 捕获 `WM_SETTINGCHANGE`（明暗外观切换以 `ImmersiveColorSet` 标识；宿主构造期播种一次档位基线，只上报相对基线的变化，避免把已推入档位当新变化重报），经 `Surface::set_os_color_scheme_handler`（与 `set_scale_change_handler` 同构的基类 seam）上抛 `WindowHost`，转发为 `Window::set_os_color_scheme` + 强制整帧重排重绘——「跟随系统深浅色」下一帧生效，无轮询。`WindowHost::teardown` 同步解绑该句柄（消息泵在宿主回收后仍可收到 `WM_SETTINGCHANGE`，捕获 `this` 未解绑即 use-after-free）。Linux / macOS 无对等系统信号，策略文档化为「创建时读 + 应用可随时 `set_theme` 显式接管」，不假装实时。
 
-`StyleProps`（`theming/style_props.h`）是轻量样式叠加结构，字段（`background` / `foreground` / `font` / `corner_radius` / `padding`）均为 `TokenOr<T>` 两态——可填「具体值」或「令牌名」。
+`os_color_scheme()`（`window/platform.h`）的探测细节：Linux 读 GTK 配置文件启发式（不引 DBus 依赖），Win32 读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` 的 `AppsUseLightTheme`（REG_DWORD，0 = Dark；键在值缺 = Light；键打不开 = Unspecified，实现位于独立 TU 避免公共头引入 `<windows.h>`），macOS 按 `NSAppearance` 契约标注未在本仓库无头构建内编译验证。`Platform::color_scheme` 字段须由调用方经 `os_color_scheme()` 显式填充（`platform()` 不代做——读偏好有文件 / 注册表访问副作用）。
 
-`StyleProps::resolve(theme)` 把全部两态字段解析为 `ResolvedStyle` 具体值：令牌名经 `Theme` 查询且类型匹配则返回，否则回退 fallback。组件可在绘制前用最近祖先 `Theme` 解析 `StyleProps`，实现「令牌驱动的样式」而无需逐一手写扁平字段读取。
+**测试约定（防 CI 档位漂移）**：经 `Window` 呈现主题消费控件、且做绝对色像素断言的测试，必须显式固定主题档（`set_theme` 或 `set_os_color_scheme`）——否则其观感随 runner 的 OS 档位漂移。「跟随 OS」的正向验证经 seam 打桩完成（`set_os_color_scheme` 推入反转档位断言注入翻转），不依赖真机档位，见 `itest_theme_root_injection`。
 
-`theming/theme_scope.h` 与 `theming/theme_query.h` 分别提供换肤 scope 与主题查询辅助。
+### 5.3 CSD 派生通道（typed）
+
+`title_bar_style_from_theme(theme)` / `window_frame_style_from_theme(theme, base)`（`theming/csd_style_bridge.h`）签名保留，实现为「预设基座 + CSD 角色组派生」：基座按 `theme.scheme` 取 `CsdPreset::AdwaitaLight` / `AdwaitaDark`（几何 / 显隐 / 度量字段不参与派生，属定制面——维持 CHG-004 口径；CHG-008 / CHG-009 钉住的原生机度与字形口径不动），配色字段从 `csd` 角色组逐项派生（`bg_active` ← `title_bar_bg_active`、`fg_active` ← `title_bar_fg_active`、`close_hover` ← `title_bar_close_hover`、窗框投影色 ← `shadow_color` 等）。`Unspecified` 按 5.2 单一口径取明色列。
+
+**逐值不变量**：`title_bar_style_from_theme(Theme::light())` 与 `from_preset(CsdPreset::AdwaitaLight)`、`Theme::dark()` 与 `from_preset(CsdPreset::AdwaitaDark)` 的配色字段逐值相同（`Theme::light()` / `dark()` 用预设 pinned 值播种 `csd` 组），由 `utest_theme_csd_bridge` 钉死。**`from_bare` 口径**：`with_defaults()` 即 light 基准列，故 `title_bar_style_from_theme(Theme::with_defaults())` ≡ `from_preset(CsdPreset::AdwaitaLight)`——裸主题不再解析出暗色标题栏，这是随角色化重构落地的有意行为变化（迁移路径见 `CHANGELOG.md`）。
+
+**为什么不从通用角色派生**：现预设 CSD 值与通用角色值存在差集——light `title_bar_fg_active` = 0x333334 而 `text` 角色为纯黑；dark `title_bar_bg_active` = 0x2E2E32 而 `surface` = 0x303030、`title_bar_fg_inactive` = 0x919193 而 `text.muted` 口径的 `on_surface_variant` = 0x9A9996。从通用角色派生要么砸掉逐值不变量，要么把通用角色改成 CSD 专用值（污染所有读 `surface` 的控件）。CSD 配色本就是组件级覆写面，类型化后继续单列；应用逐字段定制直接改派生结果的 `TitleBarStyle` 字段（或直接 `set_title_bar_style`）。
+
+### 5.4 作用域、查询与废除面
+
+**保留面**：`ThemeScope`（`theming/theme_scope.h`，`Provider<Theme>` 子类，支持经共享 `State<Theme>` 运行时换肤，值变化即子树重渲染）、`inherit_theme(ctx)`、`resolve_theme(root, target)` 查询（`theming/theme_query.h`）、`resolve_color_scheme(explicit, theme, os)` 纯函数（`theming/csd_style_bridge.h`，三级链各层以 `Unspecified` 表示不表态逐层下探）。
+
+**废除面**（随角色化重构退场，迁移路径见 `CHANGELOG.md`）：`Theme` 扁平字段 `background` / `primary` / `on_primary` / `text` / `font`；`TokenValue`；`tokens` / `dark_tokens` 命名令牌表及全部 `token*` / `set_token` 成员（含 `token_for` / `token_in` 解析入口与 `csd.*` / `focus.ring` / `chart.palette.*` 字符串令牌层）；`StyleProps` / `TokenOr<T>` / `ResolvedStyle`（theming 目录下 style_props.h 头无生产消费方，文件本体与测试 `utest_style_props` 已随 CHG-011 收束批删除）。控件取色统一为两态：显式属性值 > 主题角色（未显式设置时角色必有值，无第三态回落），映射表见 [`04-widget.md`](04-widget.md)。
+
+**主题 JSON 重建面**：角色集（roles + type_scale + csd + scheme）经 `to_json` / `from_json` 进出，JSON 键名即角色名——stringly 只允许存在于这个序列化边界，不进渲染路径；`ThemeExtension<T>` 不参与自动序列化。
 
 ---
 

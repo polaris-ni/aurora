@@ -17,19 +17,7 @@
         "height": "auto",
         "show": true,
         "overflow": "Visible",
-        "count": 0,
-        "badge_color": [
-          255,
-          0,
-          0,
-          255
-        ],
-        "text_color": [
-          255,
-          255,
-          255,
-          255
-        ]
+        "count": 0
       },
       "prop_descriptors": [
         {
@@ -44,17 +32,17 @@
         {
           "name": "badge_color",
           "type": "Color",
-          "default": "Color(255,0,0)",
+          "default": "\"theme.error\"",
           "required": false,
-          "note": "Badge background color",
+          "note": "Badge background color (follows theme error when unset)",
           "json_type": "array"
         },
         {
           "name": "text_color",
           "type": "Color",
-          "default": "Color::white()",
+          "default": "\"theme.on_error\"",
           "required": false,
-          "note": "Badge text color",
+          "note": "Badge text color (follows theme on_error when unset)",
           "json_type": "array"
         },
         {
@@ -93,13 +81,13 @@
         },
         "badge_color": {
           "type": "array",
-          "default": "Color(255,0,0)",
-          "description": "Badge background color"
+          "default": "\"theme.error\"",
+          "description": "Badge background color (follows theme error when unset)"
         },
         "text_color": {
           "type": "array",
-          "default": "Color::white()",
-          "description": "Badge text color"
+          "default": "\"theme.on_error\"",
+          "description": "Badge text color (follows theme on_error when unset)"
         },
         "width": {
           "type": "array",
@@ -119,9 +107,7 @@
         "height",
         "show",
         "overflow",
-        "count",
-        "badge_color",
-        "text_color"
+        "count"
       ]
     },
     {
@@ -397,6 +383,46 @@
           "default": "64.0",
           "required": false,
           "note": "Bar height (px)"
+        },
+        {
+          "name": "background_color",
+          "type": "Color",
+          "default": "\"theme.surface\"",
+          "required": false,
+          "note": "Bar background (follows theme surface when unset)",
+          "json_type": "array"
+        },
+        {
+          "name": "divider_color",
+          "type": "Color",
+          "default": "\"theme.outline_variant\"",
+          "required": false,
+          "note": "Top divider line (follows theme outline_variant when unset)",
+          "json_type": "array"
+        },
+        {
+          "name": "selected_color",
+          "type": "Color",
+          "default": "\"theme.primary\"",
+          "required": false,
+          "note": "Selected item text/accent (follows theme primary when unset)",
+          "json_type": "array"
+        },
+        {
+          "name": "unselected_color",
+          "type": "Color",
+          "default": "\"theme.on_surface_variant\"",
+          "required": false,
+          "note": "Unselected item text (follows theme on_surface_variant when unset)",
+          "json_type": "array"
+        },
+        {
+          "name": "pill_color",
+          "type": "Color",
+          "default": "\"theme.secondary_container\"",
+          "required": false,
+          "note": "Selected pill background (follows theme secondary_container when unset)",
+          "json_type": "array"
         }
       ],
       "events": [
@@ -416,6 +442,31 @@
         "bar_height": {
           "default": "64.0",
           "description": "Bar height (px)"
+        },
+        "background_color": {
+          "type": "array",
+          "default": "\"theme.surface\"",
+          "description": "Bar background (follows theme surface when unset)"
+        },
+        "divider_color": {
+          "type": "array",
+          "default": "\"theme.outline_variant\"",
+          "description": "Top divider line (follows theme outline_variant when unset)"
+        },
+        "selected_color": {
+          "type": "array",
+          "default": "\"theme.primary\"",
+          "description": "Selected item text/accent (follows theme primary when unset)"
+        },
+        "unselected_color": {
+          "type": "array",
+          "default": "\"theme.on_surface_variant\"",
+          "description": "Unselected item text (follows theme on_surface_variant when unset)"
+        },
+        "pill_color": {
+          "type": "array",
+          "default": "\"theme.secondary_container\"",
+          "description": "Selected pill background (follows theme secondary_container when unset)"
         }
       },
       "props": [
@@ -520,18 +571,6 @@
         "show": true,
         "overflow": "Visible",
         "label": "",
-        "color": [
-          0,
-          0,
-          255,
-          255
-        ],
-        "on_color": [
-          255,
-          255,
-          255,
-          255
-        ],
         "font_size": 14.0,
         "corner_radius": 6.0,
         "padding": {
@@ -554,17 +593,17 @@
         {
           "name": "color",
           "type": "Color",
-          "default": "Color::blue()",
+          "default": "\"theme.primary\"",
           "required": false,
-          "note": "Background color",
+          "note": "Background color (follows theme primary when unset)",
           "json_type": "array"
         },
         {
           "name": "on_color",
           "type": "Color",
-          "default": "Color::white()",
+          "default": "\"theme.on_primary\"",
           "required": false,
-          "note": "Text color",
+          "note": "Text color (follows theme on_primary when unset)",
           "json_type": "array"
         },
         {
@@ -708,13 +747,13 @@
         },
         "color": {
           "type": "array",
-          "default": "Color::blue()",
-          "description": "Background color"
+          "default": "\"theme.primary\"",
+          "description": "Background color (follows theme primary when unset)"
         },
         "on_color": {
           "type": "array",
-          "default": "Color::white()",
-          "description": "Text color"
+          "default": "\"theme.on_primary\"",
+          "description": "Text color (follows theme on_primary when unset)"
         },
         "font_size": {
           "type": "number",
@@ -800,8 +839,6 @@
         "show",
         "overflow",
         "label",
-        "color",
-        "on_color",
         "font_size",
         "corner_radius",
         "padding",
@@ -1034,24 +1071,6 @@
         "show": true,
         "overflow": "Visible",
         "label": "",
-        "background": [
-          230,
-          230,
-          230,
-          255
-        ],
-        "text_color": [
-          0,
-          0,
-          0,
-          255
-        ],
-        "delete_color": [
-          128,
-          128,
-          128,
-          255
-        ],
         "font_size": 13.0,
         "corner_radius": -1.0
       },
@@ -1075,25 +1094,25 @@
         {
           "name": "background",
           "type": "Color",
-          "default": "Color(230,230,230)",
+          "default": "\"theme.surface_variant\"",
           "required": false,
-          "note": "Background color",
+          "note": "Background color (follows theme surface_variant when unset)",
           "json_type": "array"
         },
         {
           "name": "text_color",
           "type": "Color",
-          "default": "Color::black()",
+          "default": "\"theme.on_surface\"",
           "required": false,
-          "note": "Text color",
+          "note": "Text color (follows theme on_surface when unset)",
           "json_type": "array"
         },
         {
           "name": "delete_color",
           "type": "Color",
-          "default": "{128,128,128,255}",
+          "default": "\"theme.on_surface_variant\"",
           "required": false,
-          "note": "Delete button color",
+          "note": "Delete button color (follows theme on_surface_variant when unset)",
           "json_type": "array"
         },
         {
@@ -1155,18 +1174,18 @@
         },
         "background": {
           "type": "array",
-          "default": "Color(230,230,230)",
-          "description": "Background color"
+          "default": "\"theme.surface_variant\"",
+          "description": "Background color (follows theme surface_variant when unset)"
         },
         "text_color": {
           "type": "array",
-          "default": "Color::black()",
-          "description": "Text color"
+          "default": "\"theme.on_surface\"",
+          "description": "Text color (follows theme on_surface when unset)"
         },
         "delete_color": {
           "type": "array",
-          "default": "{128,128,128,255}",
-          "description": "Delete button color"
+          "default": "\"theme.on_surface_variant\"",
+          "description": "Delete button color (follows theme on_surface_variant when unset)"
         },
         "font_size": {
           "type": "number",
@@ -1198,9 +1217,6 @@
         "show",
         "overflow",
         "label",
-        "background",
-        "text_color",
-        "delete_color",
         "font_size",
         "corner_radius"
       ]
@@ -1233,6 +1249,14 @@
           "required": false,
           "note": "Selection color",
           "json_type": "array"
+        },
+        {
+          "name": "accent_color",
+          "type": "Color",
+          "default": "\"theme.primary\"",
+          "required": false,
+          "note": "Accent color (selected swatch highlight)",
+          "json_type": "array"
         }
       ],
       "events": [
@@ -1247,6 +1271,11 @@
           "type": "array",
           "default": "black",
           "description": "Selection color"
+        },
+        "accent_color": {
+          "type": "array",
+          "default": "\"theme.primary\"",
+          "description": "Accent color (selected swatch highlight)"
         }
       },
       "props": [
@@ -1566,6 +1595,38 @@
           "json_type": "integer",
           "minimum": "1",
           "maximum": "31"
+        },
+        {
+          "name": "accent_color",
+          "type": "Color",
+          "default": "\"theme.primary\"",
+          "required": false,
+          "note": "Accent color (selected highlight, nav arrows, selected day)",
+          "json_type": "array"
+        },
+        {
+          "name": "text_color",
+          "type": "Color",
+          "default": "\"theme.on_surface\"",
+          "required": false,
+          "note": "Text color (title, unselected days)",
+          "json_type": "array"
+        },
+        {
+          "name": "background_color",
+          "type": "Color",
+          "default": "\"theme.surface\"",
+          "required": false,
+          "note": "Control background",
+          "json_type": "array"
+        },
+        {
+          "name": "border_color",
+          "type": "Color",
+          "default": "\"theme.on_surface_variant\"",
+          "required": false,
+          "note": "Control border",
+          "json_type": "array"
         }
       ],
       "events": [
@@ -1594,6 +1655,26 @@
           "maximum": "31",
           "default": "1",
           "description": "Selected day"
+        },
+        "accent_color": {
+          "type": "array",
+          "default": "\"theme.primary\"",
+          "description": "Accent color (selected highlight, nav arrows, selected day)"
+        },
+        "text_color": {
+          "type": "array",
+          "default": "\"theme.on_surface\"",
+          "description": "Text color (title, unselected days)"
+        },
+        "background_color": {
+          "type": "array",
+          "default": "\"theme.surface\"",
+          "description": "Control background"
+        },
+        "border_color": {
+          "type": "array",
+          "default": "\"theme.on_surface_variant\"",
+          "description": "Control border"
         }
       },
       "invariants": [
@@ -1668,12 +1749,6 @@
         "overflow": "Visible",
         "orientation": "horizontal",
         "thickness": 1.0,
-        "color": [
-          200,
-          200,
-          200,
-          255
-        ],
         "indent": 0.0,
         "end_indent": 0.0
       },
@@ -1702,9 +1777,9 @@
         {
           "name": "color",
           "type": "Color",
-          "default": "{200,200,200,255}",
+          "default": "theme.outline_variant",
           "required": false,
-          "note": "Color",
+          "note": "Line color (follows theme outline_variant when unset)",
           "json_type": "array"
         },
         {
@@ -1771,8 +1846,8 @@
         },
         "color": {
           "type": "array",
-          "default": "{200,200,200,255}",
-          "description": "Color"
+          "default": "theme.outline_variant",
+          "description": "Line color (follows theme outline_variant when unset)"
         },
         "indent": {
           "type": "number",
@@ -1806,7 +1881,6 @@
         "overflow",
         "orientation",
         "thickness",
-        "color",
         "indent",
         "end_indent"
       ]
@@ -3501,6 +3575,14 @@
           "required": false,
           "note": "Currently open menu index (-1 = none)",
           "json_type": "integer"
+        },
+        {
+          "name": "text_color",
+          "type": "Color",
+          "default": "\"theme.on_surface\"",
+          "required": false,
+          "note": "Menu item text color (follows theme on_surface when enabled, on_surface_variant when disabled; explicit value wins)",
+          "json_type": "array"
         }
       ],
       "events": [],
@@ -3519,6 +3601,11 @@
           "type": "integer",
           "default": "-1",
           "description": "Currently open menu index (-1 = none)"
+        },
+        "text_color": {
+          "type": "array",
+          "default": "\"theme.on_surface\"",
+          "description": "Menu item text color (follows theme on_surface when enabled, on_surface_variant when disabled; explicit value wins)"
         }
       },
       "props": [
@@ -3881,25 +3968,7 @@
         "height": "auto",
         "show": true,
         "overflow": "Visible",
-        "message": "",
-        "background_color": [
-          242,
-          242,
-          242,
-          255
-        ],
-        "border_color": [
-          192,
-          57,
-          43,
-          255
-        ],
-        "text_color": [
-          85,
-          85,
-          85,
-          255
-        ]
+        "message": ""
       },
       "prop_descriptors": [
         {
@@ -3913,25 +3982,25 @@
         {
           "name": "background_color",
           "type": "Color",
-          "default": "{242,242,242,255}",
+          "default": "\"theme.surface\"",
           "required": false,
-          "note": "Background color",
+          "note": "Background color (follows theme surface when unset)",
           "json_type": "array"
         },
         {
           "name": "border_color",
           "type": "Color",
-          "default": "{192,57,43,255}",
+          "default": "\"theme.error\"",
           "required": false,
-          "note": "Border color",
+          "note": "Border color (follows theme error when unset)",
           "json_type": "array"
         },
         {
           "name": "text_color",
           "type": "Color",
-          "default": "{85,85,85,255}",
+          "default": "\"theme.on_surface_variant\"",
           "required": false,
-          "note": "Text color",
+          "note": "Text color (follows theme on_surface_variant when unset)",
           "json_type": "array"
         },
         {
@@ -3969,18 +4038,18 @@
         },
         "background_color": {
           "type": "array",
-          "default": "{242,242,242,255}",
-          "description": "Background color"
+          "default": "\"theme.surface\"",
+          "description": "Background color (follows theme surface when unset)"
         },
         "border_color": {
           "type": "array",
-          "default": "{192,57,43,255}",
-          "description": "Border color"
+          "default": "\"theme.error\"",
+          "description": "Border color (follows theme error when unset)"
         },
         "text_color": {
           "type": "array",
-          "default": "{85,85,85,255}",
-          "description": "Text color"
+          "default": "\"theme.on_surface_variant\"",
+          "description": "Text color (follows theme on_surface_variant when unset)"
         },
         "width": {
           "type": "array",
@@ -4000,10 +4069,7 @@
         "height",
         "show",
         "overflow",
-        "message",
-        "background_color",
-        "border_color",
-        "text_color"
+        "message"
       ]
     },
     {
@@ -4393,6 +4459,27 @@
           "default": "128.0",
           "required": false,
           "note": "Rubber-band pull limit (dp)"
+        },
+        {
+          "name": "indicator_color",
+          "type": "Color",
+          "default": "\"theme.primary\"",
+          "required": false,
+          "note": "Pull indicator accent (follows theme primary when unset)"
+        },
+        {
+          "name": "band_color",
+          "type": "Color",
+          "default": "\"theme.surface\"",
+          "required": false,
+          "note": "Top overlay band background (follows theme surface when unset)"
+        },
+        {
+          "name": "refreshing_text_color",
+          "type": "Color",
+          "default": "\"theme.on_surface_variant\"",
+          "required": false,
+          "note": "Refreshing hint text color (follows theme on_surface_variant when unset)"
         }
       ],
       "events": [
@@ -4410,6 +4497,18 @@
         "max_pull": {
           "default": "128.0",
           "description": "Rubber-band pull limit (dp)"
+        },
+        "indicator_color": {
+          "default": "\"theme.primary\"",
+          "description": "Pull indicator accent (follows theme primary when unset)"
+        },
+        "band_color": {
+          "default": "\"theme.surface\"",
+          "description": "Top overlay band background (follows theme surface when unset)"
+        },
+        "refreshing_text_color": {
+          "default": "\"theme.on_surface_variant\"",
+          "description": "Refreshing hint text color (follows theme on_surface_variant when unset)"
         }
       },
       "props": [
@@ -4678,6 +4777,14 @@
           "json_type": "string"
         },
         {
+          "name": "text_color",
+          "type": "Color",
+          "default": "\"theme.on_surface\"",
+          "required": false,
+          "note": "Default text color (follows theme on_surface when unset)",
+          "json_type": "array"
+        },
+        {
           "name": "width",
           "type": "Length",
           "default": "auto",
@@ -4709,6 +4816,11 @@
           "type": "string",
           "default": "\"\"",
           "description": "Plain text content (for serialization)"
+        },
+        "text_color": {
+          "type": "array",
+          "default": "\"theme.on_surface\"",
+          "description": "Default text color (follows theme on_surface when unset)"
         },
         "width": {
           "type": "array",
@@ -4783,6 +4895,14 @@
           "required": false,
           "note": "Text direction (auto = inherit from environment)",
           "json_type": "string"
+        },
+        {
+          "name": "current_color",
+          "type": "Color",
+          "default": "\"theme.on_surface\"",
+          "required": false,
+          "note": "Current input color (follows theme on_surface when unset)",
+          "json_type": "array"
         }
       ],
       "events": [
@@ -4815,6 +4935,11 @@
           "type": "string",
           "default": "\"auto\"",
           "description": "Text direction (auto = inherit from environment)"
+        },
+        "current_color": {
+          "type": "array",
+          "default": "\"theme.on_surface\"",
+          "description": "Current input color (follows theme on_surface when unset)"
         }
       },
       "props": [
@@ -5597,18 +5722,6 @@
         "height": 16.0,
         "show": true,
         "overflow": "Visible",
-        "color": [
-          220,
-          220,
-          220,
-          255
-        ],
-        "highlight": [
-          255,
-          255,
-          255,
-          255
-        ],
         "duration": 1.5
       },
       "prop_descriptors": [
@@ -5629,16 +5742,16 @@
         {
           "name": "color",
           "type": "Color",
-          "default": "{220,220,220,255}",
+          "default": "\"theme.surface_variant\"",
           "required": false,
-          "note": "Base color"
+          "note": "Base color (follows theme surface_variant when unset)"
         },
         {
           "name": "highlight",
           "type": "Color",
-          "default": "{255,255,255,255}",
+          "default": "\"theme.surface_container_lowest\"",
           "required": false,
-          "note": "Highlight band color"
+          "note": "Highlight band color (follows theme surface_container_lowest when unset)"
         },
         {
           "name": "duration",
@@ -5663,12 +5776,12 @@
           "description": "Placeholder height"
         },
         "color": {
-          "default": "{220,220,220,255}",
-          "description": "Base color"
+          "default": "\"theme.surface_variant\"",
+          "description": "Base color (follows theme surface_variant when unset)"
         },
         "highlight": {
-          "default": "{255,255,255,255}",
-          "description": "Highlight band color"
+          "default": "\"theme.surface_container_lowest\"",
+          "description": "Highlight band color (follows theme surface_container_lowest when unset)"
         },
         "duration": {
           "default": "1.5",
@@ -5680,8 +5793,6 @@
         "height",
         "show",
         "overflow",
-        "color",
-        "highlight",
         "duration"
       ]
     },
@@ -6696,6 +6807,22 @@
           "minimum": "0"
         },
         {
+          "name": "active_color",
+          "type": "Color",
+          "default": "\"theme.primary\"",
+          "required": false,
+          "note": "Active step accent color (follows theme primary when unset)",
+          "json_type": "array"
+        },
+        {
+          "name": "inactive_color",
+          "type": "Color",
+          "default": "\"theme.on_surface_variant\"",
+          "required": false,
+          "note": "Inactive step color (follows theme on_surface_variant when unset)",
+          "json_type": "array"
+        },
+        {
           "name": "step_count",
           "type": "int",
           "default": "0",
@@ -6740,6 +6867,16 @@
           "minimum": "0",
           "default": "0",
           "description": "Current step index"
+        },
+        "active_color": {
+          "type": "array",
+          "default": "\"theme.primary\"",
+          "description": "Active step accent color (follows theme primary when unset)"
+        },
+        "inactive_color": {
+          "type": "array",
+          "default": "\"theme.on_surface_variant\"",
+          "description": "Inactive step color (follows theme on_surface_variant when unset)"
         },
         "step_count": {
           "type": "integer",
@@ -7243,12 +7380,6 @@
         "overflow": "Clip",
         "content": "",
         "font_size": 14.0,
-        "color": [
-          0,
-          0,
-          0,
-          255
-        ],
         "text_align": "Left",
         "max_lines": 0,
         "soft_wrap": true,
@@ -7259,12 +7390,6 @@
         "font_style": "Normal",
         "decoration": [
           "None"
-        ],
-        "decoration_color": [
-          0,
-          0,
-          0,
-          255
         ],
         "background_color": [
           0,
@@ -7294,9 +7419,9 @@
         {
           "name": "color",
           "type": "Color",
-          "default": "Color::black()",
+          "default": "\"theme.on_surface\"",
           "required": false,
-          "note": "Text color",
+          "note": "Text color (follows theme on_surface when unset)",
           "json_type": "array"
         },
         {
@@ -7430,9 +7555,9 @@
         {
           "name": "decoration_color",
           "type": "Color",
-          "default": "Color::black()",
+          "default": "\"theme.on_surface\"",
           "required": false,
-          "note": "Decoration color",
+          "note": "Decoration color (follows text color when unset)",
           "json_type": "array"
         },
         {
@@ -7485,8 +7610,8 @@
         },
         "color": {
           "type": "array",
-          "default": "Color::black()",
-          "description": "Text color"
+          "default": "\"theme.on_surface\"",
+          "description": "Text color (follows theme on_surface when unset)"
         },
         "text_align": {
           "type": "string",
@@ -7585,8 +7710,8 @@
         },
         "decoration_color": {
           "type": "array",
-          "default": "Color::black()",
-          "description": "Decoration color"
+          "default": "\"theme.on_surface\"",
+          "description": "Decoration color (follows text color when unset)"
         },
         "background_color": {
           "type": "array",
@@ -7613,7 +7738,6 @@
         "overflow",
         "content",
         "font_size",
-        "color",
         "text_align",
         "max_lines",
         "soft_wrap",
@@ -7623,7 +7747,6 @@
         "font_weight",
         "font_style",
         "decoration",
-        "decoration_color",
         "background_color"
       ]
     },
@@ -8097,6 +8220,30 @@
           "json_type": "integer",
           "minimum": "0",
           "maximum": "59"
+        },
+        {
+          "name": "background_color",
+          "type": "Color",
+          "default": "\"theme.surface\"",
+          "required": false,
+          "note": "Control background",
+          "json_type": "array"
+        },
+        {
+          "name": "border_color",
+          "type": "Color",
+          "default": "\"theme.on_surface_variant\"",
+          "required": false,
+          "note": "Control border",
+          "json_type": "array"
+        },
+        {
+          "name": "text_color",
+          "type": "Color",
+          "default": "\"theme.on_surface\"",
+          "required": false,
+          "note": "Text color (time text)",
+          "json_type": "array"
         }
       ],
       "events": [
@@ -8120,6 +8267,21 @@
           "maximum": "59",
           "default": "0",
           "description": "Minute (0..59)"
+        },
+        "background_color": {
+          "type": "array",
+          "default": "\"theme.surface\"",
+          "description": "Control background"
+        },
+        "border_color": {
+          "type": "array",
+          "default": "\"theme.on_surface_variant\"",
+          "description": "Control border"
+        },
+        "text_color": {
+          "type": "array",
+          "default": "\"theme.on_surface\"",
+          "description": "Text color (time text)"
         }
       },
       "invariants": [

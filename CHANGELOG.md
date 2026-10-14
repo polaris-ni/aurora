@@ -23,6 +23,29 @@ freeze: minor-versions-are-additive
 
 ### Breaking
 
+- **主题体系角色化重构（CHG-011）**：`Theme` 由「扁平字段 + stringly 命名令牌表」改为「强类型角色结构 + 类型安全扩展」，对标 Material 3 色角色集与 Flutter `ThemeData` / `ThemeExtension<T>`：
+  - **废除面**：扁平字段 `background` / `primary` / `on_primary` / `text` / `font`；`TokenValue`；`tokens` / `dark_tokens` 命名令牌表及全部 `token*` / `set_token` 成员（含 `token_for` / `token_in` 解析入口与 `csd.*` / `focus.ring` / `chart.palette.*` 字符串令牌层）；`StyleProps` / `TokenOr<T>` / `ResolvedStyle`（无生产消费方，`theming/style_props.h` 与测试 `utest_style_props` 已删除）。
+  - **新结构**：`Theme{ roles, type_scale, csd, scheme, extensions }`——`ColorRoles`（Material 3 约 34 个色角色 + Aurora 扩展 `focus_ring` / `hover` / `pressed`）、`TypeScale`（15 档）、`CsdRoles`（CSD 组件级配色 8 字段，与通用角色解耦）、`ThemeExtensions`（`std::type_index` 为键、线性扫描、空表零分配；未注册返回 `nullptr`，无字符串回落）。渲染路径读角色为直接字段访问，无哈希、无堆分配——根治旧 `token()` 每次查找构造 `std::string`（`csd.*` 长名超 SSO ⇒ 渲染热路径堆分配）与令牌名拼错静默回退、改名不破坏编译三个缺陷。
+  - **`with_defaults()` / 裸 `Theme{}` 语义变化**：由「无色空壳」变为「light 基准列」（`scheme` 仍为 `Unspecified`）。连带 `resolve_theme` 兜底与 CSD 桥 `from_bare` 预期由暗转明（`title_bar_style_from_theme(Theme::with_defaults())` 现 ≡ `from_preset(CsdPreset::AdwaitaLight)`；此前裸主题解析出暗色标题栏）。
+  - **CSD 派生通道 typed 化**：`title_bar_style_from_theme` / `window_frame_style_from_theme` 的配色字段改从 `CsdRoles` 组件角色组派生（基座仍按 `scheme` 取预设，几何/显隐/度量不参与派生）。不变量保持：`title_bar_style_from_theme(Theme::light())` 与 `from_preset(CsdPreset::AdwaitaLight)`、`Theme::dark()` 与 `from_preset(CsdPreset::AdwaitaDark)` 配色逐值相同（单测钉死）。不从通用角色派生的理由：现预设 CSD 值与通用角色存在差集（light 标题栏前景 `0x333334` vs `text` 黑；dark 标题栏底 `0x2E2E32` vs `surface` `0x303030`、非活跃前景 `0x919193` vs `text.muted` `0x9A9996`），从通用角色派生会同时砸掉逐值契约或污染所有读 `surface` 的控件。
+  - **默认观感变化（行为破坏）**：无 `ThemeScope` 的应用，根主题由「恒 `Theme::light()`」改为「随 OS 明暗偏好」——`Window::prepare_context` 每帧经三级优先链 `显式 set_theme > OS 档 > 明色` 解析并注入（与 `MediaQuery` 的自动根注入对称；OS 未表态回落明色，全系统单一口径「`Unspecified` ≡ 明色列」）。要固定观感的应用显式 `Window::set_theme` 或包 `ThemeScope`。**测试约定**：经 `Window` 呈现主题消费控件且做绝对色像素断言的测试，必须显式固定主题档（`set_theme` 或 `set_os_color_scheme`）。
+- **暗色主色 WCAG 修正（CHG-011，唯一有意的观感变化）**：`ColorRoles::dark()` 的 `primary` 由 `(90,120,240)` 提亮为 `(192,193,255)`（M3 tone-80），`on_primary` 由白改为 `(0,43,115)`（M3 tone-20）——原配对对比度 ≈3.9:1 不达 WCAG AA 1.4.3 正文标准（4.5:1），修正后 7.73:1。影响面：暗色作用域下消费 `primary` 的 12 个文件（13 个 primary 兜底面中 `widget.cpp` 读 primary 仅为 `focus.ring` 令牌兜底位、迁移后独立成 `roles.focus_ring`，实际不受影响）。每个 `on_*`/容器角色对 ≥4.5:1 由单测断言。
+
+### Added
+
+- **默认根主题注入与 OS 实时跟随（CHG-011）**：`Window::set_theme(Theme)` / `theme()` / `set_os_color_scheme(ColorScheme)` 三个设定器；`prepare_context` 每帧向根环境注入解析后的 `Theme`（注入主题 `scheme` 携带最终档，非 `Unspecified`）。Win32 后端经 `WndProc` 捕获 `WM_SETTINGCHANGE`（明暗切换以 `ImmersiveColorSet` 标识；宿主构造期播种档位基线，只上报相对基线的变化）→ 经 `Surface::set_os_color_scheme_handler`（与 `set_scale_change_handler` 同构的基类 seam）上抛 `WindowHost` → `Window::set_os_color_scheme` + 强制整帧重排重绘：「跟随系统深浅色」下一帧生效，无轮询；`WindowHost::teardown` 同步解绑。Linux / macOS 无对等系统信号，策略为「创建时读 + 应用可 `set_theme` 显式接管」。
+- `Surface::set_os_color_scheme_handler(OsColorSchemeHandler)` + `notify_os_color_scheme_change(ColorScheme)`（`window/surface.h`，跨后端 seam；`HeadlessSurface` 另供测试 seam `emit_os_color_scheme_change`）。
+
+### Migration
+
+- 字段读取机械替换：`theme.primary` → `theme.roles.primary`；`theme.background` / `theme.surface` → `theme.roles.surface`；`theme.text` → `theme.roles.on_surface`；`theme.font` → `theme.type_scale.body_medium`。
+- 命名令牌迁移：`set_token("focus.ring", …)` → `roles.focus_ring = …`；`csd.*` 令牌 → `csd` 角色组字段（或直接改 `title_bar_style_from_theme` 派生结果的 `TitleBarStyle` 字段）；应用自定义令牌面 → `extensions.set<T>(value)` / `extensions.get<T>()`（返回指针，未注册为 `nullptr`，须判空）。
+- `StyleProps sp; sp.background = "color.brand"; … sp.resolve(theme)` 的写法废止：声明式场景直接写具体值；需要「按主题解析的令牌面」用 `ThemeExtension<T>` 类型安全扩展。
+- `ThemeScope` / `inherit_theme(ctx)` / `resolve_theme` / `os_color_scheme()` / `Platform::color_scheme` 签名与语义不变（`inherit_theme` 无注入兜底仍为 `Theme::light()`）。
+- 既有 18 个主题消费控件（13 个 primary 兜底 + 5 个图表族）已完成机械迁移，角色基准值取旧默认值（WCAG 修正对除外），明色作用域观感逐位不变；golden 基线零翻面（现有像素基线无暗色作用域消费）。
+- **`Button` 接入主题（CHG-011 迁移批首个控件）**：`ButtonProps::color` 由 `Reactive<Color>`（默认 `Color::blue()`）改为 `Reactive<std::optional<Color>>`（空 = 跟随 `roles.primary`）、`on_color` 由 `Color` 改为 `std::optional<Color>`（空 = 跟随 `roles.on_primary`）——light 档 primary 恰为 `(0,0,255)`、on_primary 为白，默认观感逐位不变。`.color = red` / `background(red)` 源码形态不变（`optional` 隐式转换）；读 `color.get()` 的调用方改为判 `has_value()`。protected 虚扩展点 `resolve_background()` / `resolve_text_color()` 增加 `BuildContext` 形参（子类覆写须同步）；`serialize_props` 对两色改为「显式设置才输出」（与 Checkbox 同口径，`from_json` 往返不丢失「跟随主题」意图）。
+- **`ChartPalette` 接入主题（CHG-011 迁移批图表族收尾）**：图表系列色板由「stringly `chart.palette.*` 令牌」收敛为强类型 `ThemeExtension<T>` 值类型 `ChartPalette`（`widget/chart_common.h`，对标 Flutter），8 色循环色板与旧内置 `chart_palette` 同值，故未注册时观感逐位不变。`resolve_series_color` 取色优先级改为「显式 `series.color` > 注册 `ChartPalette` 扩展 > 内置 `chart_palette` 兜底」；应用可在根主题播种 `Theme::light().with_extension(ChartPalette::light())`，经 `inherit_theme(ctx)` 透传后图表即消费主题色板（未播种回落内置色板，行为不变）。`Theme` 新增 `with_extension<T>()`（返回带扩展的副本，不修改自身）。`04-widget.md` §3.8 同步更新为「已落地」。
+
 - `Button::paint_label` 增加一个形参：`virtual auto paint_label(Painter &p, const Rect &bounds, Color text_color, const std::string &display) -> void`（protected 虚扩展点）。新增的 `display` 是**本帧应绘制的显示串**（= `resolved_label(ctx)` 的同一份副本），量宽与 `draw_text` 都取它，故二者不会因同帧内 locale 变化而分叉。子类覆写须改用该串，不要再自行解析 `label`。
 - `OverlayHost::add_overlay` 返回类型由 `std::size_t` 改为 `std::optional<std::size_t>`：宿主尚无基础内容时，此前返回 0，而 `remove_overlay` **拒收 0**（0 是「基础内容」槽位、不可移除）⇒ 调用方拿到一个永远删不掉的序号（浮层泄漏，且无任何报错）。现该情形返回 `std::nullopt`，由类型本身表达「本次追加未产生可移除浮层」。有基础内容时返回值逐位不变（序号自 1 起）。
 - 连击判定常量改名（`readability-identifier-naming` 要求全局常量 `AURORA_` 前缀 + 全大写）：`kDefaultClickWindowMs` → `AURORA_DEFAULT_CLICK_WINDOW_MS`、`kDefaultClickRadiusDp` → `AURORA_DEFAULT_CLICK_RADIUS_DP`、`kMaxClickCount` → `AURORA_MAX_CLICK_COUNT`（均位于 `event/event.h`）。纯符号重命名，无行为变化（MAJOR 级）。
