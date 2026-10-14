@@ -415,7 +415,7 @@ class Dropdown : public Widget {
         Font f;
         f.size_pt = font_size_;
         // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
-        Color accent = accent_color_.value_or(inherit_theme(ctx).primary);
+        Color accent = accent_color_.value_or(inherit_theme(ctx).roles.primary);
         Color box = box_color_;
         Color border = border_color_;
         Color text = text_color_;

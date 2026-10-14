@@ -8,8 +8,10 @@
 #include <vector>
 
 #include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/stepper.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -33,6 +35,21 @@ auto press_at(float x, float y) -> MouseEvent {
     e.button = MouseButton::Left;
     e.local_position = Point{.x = x, .y = y};
     return e;
+}
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用
+/// （调用方持有 holder 即保证环境存活；BuildContext 本就只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
+auto two_steps() -> std::vector<StepperStep> {
+    return {StepperStep{.label = "Alpha"}, StepperStep{.label = "Beta"}};
 }
 
 }  // namespace
@@ -196,6 +213,31 @@ AURORA_TEST_CASE(paint_covers_indicator_content_and_button_labels) {
     std::vector<SignalViewBase *> sigs;
     s.collect_signals(sigs);
     AURORA_TEST_CHECK_EQ(sigs.size(), 0U);  // Stepper 无外露信号
+}
+
+// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+
+AURORA_TEST_CASE(stepper_colors_follow_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    // 同时构造「当前步 / 非当前步」场景各取一次 resolve 值断言（resolve 仅依赖字段与 ctx）。
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
+    Stepper s{two_steps(), 0};  // current=0 → 第 0 步为当前步，第 1 步为非当前步
+    AURORA_TEST_CHECK(s.resolve_active_color(bare) == Color::blue());        // light primary = (0,0,255)
+    AURORA_TEST_CHECK(s.resolve_inactive_color(bare) == Color(0x47, 0x47, 0x47));  // light on_surface_variant
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(s.resolve_active_color(dark) == Color(0xC0, 0xC1, 0xFF));  // dark primary（WCAG 修正对）
+    AURORA_TEST_CHECK(s.resolve_inactive_color(dark) == Color(0xC6, 0xC6, 0xC6));  // dark on_surface_variant
+}
+
+AURORA_TEST_CASE(stepper_explicit_colors_override_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    Stepper s{two_steps(), 0};
+    s.set_active_color(Color{0xE0, 0x1B, 0x24});   // error 红，刻意区别于两档 primary
+    s.set_inactive_color(Color{0x12, 0x34, 0x56});
+    AURORA_TEST_CHECK(s.resolve_active_color(dark) == Color(0xE0, 0x1B, 0x24));
+    AURORA_TEST_CHECK(s.resolve_inactive_color(dark) == Color(0x12, 0x34, 0x56));
 }
 
 }  // namespace aurora::test_cases::utest_stepper

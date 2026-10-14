@@ -388,7 +388,7 @@ class Slider : public LeafWidget {
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
-        Color active = active_color_.value_or(inherit_theme(ctx).primary);
+        Color active = active_color_.value_or(inherit_theme(ctx).roles.primary);
         Color inactive = inactive_color_;
         Color thumb = thumb_color_.value_or(active);
         if (!enabled_) {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <optional>
 #include <vector>
 
 #include "aurora/core/color.h"
@@ -10,6 +11,8 @@
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
+#include "aurora/widget/props_io.h"  // color_to_json / json_to_color
 #include "aurora/widget/text.h"
 #include "aurora/widget/widget.h"
 
@@ -38,6 +41,16 @@ struct BottomNavBarProps {
     std::function<void(int)> on_select;
     /// @brief 栏高度(px)，默认 64；布局时与可用高度取小。
     float bar_height = 64.0F;
+    /// @brief 栏背景色；空 = 跟随主题 `surface`（ThemeScope 换肤即生效）。
+    std::optional<Color> background_color;
+    /// @brief 顶部分隔线色；空 = 跟随主题 `outline_variant`。
+    std::optional<Color> divider_color;
+    /// @brief 选中项文字/强调色；空 = 跟随主题 `primary`。
+    std::optional<Color> selected_color;
+    /// @brief 未选中项文字色；空 = 跟随主题 `on_surface_variant`。
+    std::optional<Color> unselected_color;
+    /// @brief 选中项 pill 背景色；空 = 跟随主题 `secondary_container`。
+    std::optional<Color> pill_color;
 };
 
 /// @brief 底部导航栏（Material 风格）：等分宽度的若干 tab，选中态高亮。
@@ -94,6 +107,36 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
                      .default_value = "64.0",
                      .required = false,
                      .note = "Bar height (px)"},
+                    {.name = "background_color",
+                     .type = "Color",
+                     .default_value = R"("theme.surface")",
+                     .required = false,
+                     .note = "Bar background (follows theme surface when unset)",
+                     .json_type = "array"},
+                    {.name = "divider_color",
+                     .type = "Color",
+                     .default_value = R"("theme.outline_variant")",
+                     .required = false,
+                     .note = "Top divider line (follows theme outline_variant when unset)",
+                     .json_type = "array"},
+                    {.name = "selected_color",
+                     .type = "Color",
+                     .default_value = R"("theme.primary")",
+                     .required = false,
+                     .note = "Selected item text/accent (follows theme primary when unset)",
+                     .json_type = "array"},
+                    {.name = "unselected_color",
+                     .type = "Color",
+                     .default_value = R"("theme.on_surface_variant")",
+                     .required = false,
+                     .note = "Unselected item text (follows theme on_surface_variant when unset)",
+                     .json_type = "array"},
+                    {.name = "pill_color",
+                     .type = "Color",
+                     .default_value = R"("theme.secondary_container")",
+                     .required = false,
+                     .note = "Selected pill background (follows theme secondary_container when unset)",
+                     .json_type = "array"},
                 },
             .events = {{"on_select", "void(int)", "Callback when an item is clicked (argument is the index)"}},
             .children_policy = "none",
@@ -111,9 +154,25 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
         Widget::serialize_props(props);
         props.set("selected_index", selected_index);  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
         props.set("bar_height", bar_height);
+        // 展示色仅在显式设置时输出：保留「跟随主题角色」语义（CHG-011 迁移批）。
+        if (background_color.has_value()) {
+            props.set("background_color", color_to_json(*background_color));
+        }
+        if (divider_color.has_value()) {
+            props.set("divider_color", color_to_json(*divider_color));
+        }
+        if (selected_color.has_value()) {
+            props.set("selected_color", color_to_json(*selected_color));
+        }
+        if (unselected_color.has_value()) {
+            props.set("unselected_color", color_to_json(*unselected_color));
+        }
+        if (pill_color.has_value()) {
+            props.set("pill_color", color_to_json(*pill_color));
+        }
     }
 
-    /// @brief 反序列化专有属性：selected_index/bar_height 存在才覆盖。
+    /// @brief 反序列化专有属性：selected_index/bar_height 存在才覆盖；展示色读入 optional。
     /// @param props 源 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
@@ -122,6 +181,21 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
         }
         if (props.contains("bar_height")) {
             bar_height = props.at("bar_height")->as_or<float>(0.0F);
+        }
+        if (props.contains("background_color")) {
+            background_color = json_to_color(*props.at("background_color"));
+        }
+        if (props.contains("divider_color")) {
+            divider_color = json_to_color(*props.at("divider_color"));
+        }
+        if (props.contains("selected_color")) {
+            selected_color = json_to_color(*props.at("selected_color"));
+        }
+        if (props.contains("unselected_color")) {
+            unselected_color = json_to_color(*props.at("unselected_color"));
+        }
+        if (props.contains("pill_color")) {
+            pill_color = json_to_color(*props.at("pill_color"));
         }
     }
 
@@ -157,6 +231,78 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
         return *this;
     }
 
+    /// @brief 设置栏背景色（链式）。
+    /// @param c 背景色，写入 `background_color`；显式设置后不再跟随主题。
+    /// @return *this（链式）。
+    auto set_background_color(Color c) -> BottomNavBar & {
+        background_color = c;
+        mark_needs_paint();
+        return *this;
+    }
+    /// @brief 设置顶部分隔线色（链式）。
+    /// @param c 分隔线色，写入 `divider_color`；显式设置后不再跟随主题。
+    /// @return *this（链式）。
+    auto set_divider_color(Color c) -> BottomNavBar & {
+        divider_color = c;
+        mark_needs_paint();
+        return *this;
+    }
+    /// @brief 设置选中项强调/文字色（链式）。
+    /// @param c 强调色，写入 `selected_color`；显式设置后不再跟随主题。
+    /// @return *this（链式）。
+    auto set_selected_color(Color c) -> BottomNavBar & {
+        selected_color = c;
+        mark_needs_paint();
+        return *this;
+    }
+    /// @brief 设置未选中项文字色（链式）。
+    /// @param c 文字色，写入 `unselected_color`；显式设置后不再跟随主题。
+    /// @return *this（链式）。
+    auto set_unselected_color(Color c) -> BottomNavBar & {
+        unselected_color = c;
+        mark_needs_paint();
+        return *this;
+    }
+    /// @brief 设置选中 pill 背景色（链式）。
+    /// @param c pill 背景色，写入 `pill_color`；显式设置后不再跟随主题。
+    /// @return *this（链式）。
+    auto set_pill_color(Color c) -> BottomNavBar & {
+        pill_color = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 解析生效栏背景色：未显式设色时经 ctx 取主题 `surface`（ThemeScope 换肤即生效），显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效背景色。
+    [[nodiscard]] auto resolve_background(const BuildContext &ctx) const -> Color {
+        return background_color.value_or(inherit_theme(ctx).roles.surface);
+    }
+    /// @brief 解析生效顶部分隔线色：未显式设色时经 ctx 取主题 `outline_variant`，显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效分隔线色。
+    [[nodiscard]] auto resolve_divider(const BuildContext &ctx) const -> Color {
+        return divider_color.value_or(inherit_theme(ctx).roles.outline_variant);
+    }
+    /// @brief 解析生效选中项强调/文字色：未显式设色时经 ctx 取主题 `primary`，显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效选中项色。
+    [[nodiscard]] auto resolve_selected_color(const BuildContext &ctx) const -> Color {
+        return selected_color.value_or(inherit_theme(ctx).roles.primary);
+    }
+    /// @brief 解析生效未选中项文字色：未显式设色时经 ctx 取主题 `on_surface_variant`，显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效未选中项色。
+    [[nodiscard]] auto resolve_unselected_color(const BuildContext &ctx) const -> Color {
+        return unselected_color.value_or(inherit_theme(ctx).roles.on_surface_variant);
+    }
+    /// @brief 解析生效选中 pill 背景色：未显式设色时经 ctx 取主题 `secondary_container`，显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效 pill 背景色。
+    [[nodiscard]] auto resolve_pill_color(const BuildContext &ctx) const -> Color {
+        return pill_color.value_or(inherit_theme(ctx).roles.secondary_container);
+    }
+
     /// @brief Press 命中按等分格宽换算下标：有效则触发 on_select 并置 is_handled。
     /// @param e 鼠标事件（读 local_position，写 is_handled）。
     auto on_pointer_event(MouseEvent &e) -> void override {
@@ -180,12 +326,11 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         p.push_clip(bounds);
-        // 背景条
-        p.fill_rect(bounds, Color{0xFF, 0xFF, 0xFF, 0xFF});
-        // 顶部发丝分隔线
+        // 背景条（跟随主题 surface；显式设色优先）
+        p.fill_rect(bounds, resolve_background(ctx));
+        // 顶部发丝分隔线（跟随主题 outline_variant）
         p.draw_line(Point{.x = bounds.origin.x, .y = bounds.origin.y},
-                    Point{.x = bounds.origin.x + bounds.size.width, .y = bounds.origin.y}, 1.0F,
-                    Color{0xDA, 0xDC, 0xE0, 0xFF});
+                    Point{.x = bounds.origin.x + bounds.size.width, .y = bounds.origin.y}, 1.0F, resolve_divider(ctx));
 
         const int n = static_cast<int>(items.size());
         if (n == 0) {
@@ -193,9 +338,6 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
             return;
         }
         const float cell_w = bounds.size.width / static_cast<float>(n);
-        constexpr Color color_blue{0x1A, 0x73, 0xE8, 0xFF};
-        constexpr Color color_gray{0x5F, 0x63, 0x68, 0xFF};
-        constexpr Color color_pill{0xE8, 0xF0, 0xFE, 0xFF};
 
         for (int i = 0; i < n; ++i) {
             const bool sel = i == selected_index;
@@ -205,7 +347,8 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
             if (sel) {
                 const Rect pill{.origin = Point{.x = cell.origin.x + (cell_w * 0.15F), .y = cell.origin.y + 8.0F},
                                 .size = Size{.width = cell_w * 0.70F, .height = cell.size.height - 16.0F}};
-                p.fill_rounded_rect(pill, 16.0F, color_pill);
+                // 选中 pill 背景（跟随主题 secondary_container）
+                p.fill_rounded_rect(pill, 16.0F, resolve_pill_color(ctx));
             }
             // 图标区（顶部居中）
             const Rect icon_rect{
@@ -215,12 +358,12 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
                 items[i].icon(p, icon_rect, sel);
             }
 
-            // 文案（图标下方居中）
+            // 文案（图标下方居中）：选中→primary，未选中→on_surface_variant（均跟随主题）。
             const Rect label_rect{
                 .origin = Point{.x = cell.origin.x + 4.0F, .y = cell.origin.y + cell.size.height - 22.0F},
                 .size = Size{.width = cell_w - 8.0F, .height = 16.0F}};
             auto label = std::make_shared<Text>(items[i].label);
-            label->text_color = sel ? color_blue : color_gray;
+            label->text_color = sel ? resolve_selected_color(ctx) : resolve_unselected_color(ctx);
             label->font.size_pt = 12.0F;
             label->text_align = TextAlign::Center;
             Node ln{label};

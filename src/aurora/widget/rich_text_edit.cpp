@@ -13,6 +13,7 @@
 #include "aurora/event/keycode.h"
 #include "aurora/render/bidi.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/widget/props_io.h"  // color_to_json / json_to_color
 
 namespace aurora {
 
@@ -63,6 +64,12 @@ auto RichTextEdit::describe_static() -> WidgetDescriptor {
                  .required = false,
                  .note = "Text direction (auto = inherit from environment)",
                  .json_type = "string"},
+                {.name = "current_color",
+                 .type = "Color",
+                 .default_value = "\"theme.on_surface\"",
+                 .required = false,
+                 .note = "Current input color (follows theme on_surface when unset)",
+                 .json_type = "array"},
             },
         .events = {"on_text_input", "on_text_composition"},
         .children_policy = "none",
@@ -83,11 +90,12 @@ auto RichTextEdit::on_layout(const Constraints &c, const BuildContext &ctx) -> S
     return c.constrain(Size{.width = c.max.width, .height = std::max(h, line_height_)});
 }
 
-auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void {
+auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     if (lines_.empty()) {
         relayout_lines(bounds.size.width);
     }
     const float line_h = line_height_;
+    const Color fg = resolve_text_color(ctx);  // 未显式设色的 run 回落此值（再回落主题 on_surface）
     std::size_t doc_idx = 0;
     float y = bounds.origin.y;
     for (const auto &line : lines_) {
@@ -116,9 +124,10 @@ auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext &
         for (const auto &r : runs) {
             const TextDirection run_dir = r.dir;  // UBA 层级奇偶（compute_line_runs 预解析）
             const render::TextLayoutOpts ropts{.direction = run_dir};
+            const Color c = r.color.value_or(fg);  // run 显式色优先于控件默认色
             render::FontEngine::draw_text(
                 p, Rect{.origin = Point{.x = r.x, .y = y}, .size = Size{.width = r.w, .height = line_h}}, r.text,
-                r.font, r.color, ropts);
+                r.font, c, ropts);
             // 逐字下划线（仅带 underline 者；caret_x 返回视觉偏移，RTL 下仍正确）。
             for (std::size_t k = 0; k < r.text.size(); ++k) {
                 if (r.underline[k] == 0) {
@@ -131,7 +140,7 @@ auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext &
                 if (x_r > x_l) {
                     p.fill_rect(Rect{.origin = Point{.x = x_l, .y = y + line_h - 2.0F},
                                      .size = Size{.width = x_r - x_l, .height = 1.0F}},
-                                r.color);
+                                c);
                 }
             }
         }
@@ -140,7 +149,7 @@ auto RichTextEdit::on_paint(Painter &p, const Rect &bounds, const BuildContext &
         if (is_composing() && caret_ >= line_begin && caret_ <= line_end) {
             const float cx = caret_visual_x(line, base, caret_ - line_begin, bounds);
             if (cx >= 0.0F) {
-                paint_preedit(p, cx, y);
+                paint_preedit(p, cx, y, ctx);
             }
         }
 
@@ -415,6 +424,10 @@ auto RichTextEdit::serialize_props(Json &props) const -> void {
     if (direction_.has_value()) {
         props.set("direction", (*direction_ == TextDirection::RTL) ? "RTL" : "LTR");
     }
+    // 当前输入色仅在显式设置时输出：保留「跟随主题 on_surface」语义。
+    if (cur_color_.has_value()) {
+        props.set("current_color", color_to_json(*cur_color_));
+    }
 }
 
 auto RichTextEdit::deserialize_props(const Json &props) -> void {
@@ -435,6 +448,10 @@ auto RichTextEdit::deserialize_props(const Json &props) -> void {
     // 书写方向反序列化（仅当显式提供）。auto/继承环境由运行期 Directionality 注入决定。
     if (props.contains("direction") && props.at("direction")->is_string()) {
         direction_ = props.at("direction")->as_or<std::string>("") == "RTL" ? TextDirection::RTL : TextDirection::LTR;
+    }
+    // 当前输入色反序列化（仅当显式提供）；缺省保留 nullopt → 跟随主题 on_surface。
+    if (props.contains("current_color")) {
+        cur_color_ = json_to_color(*props.at("current_color"));
     }
 }
 
@@ -715,11 +732,12 @@ auto RichTextEdit::paint_selection_highlight(Painter &p, const Rect &bounds) con
     }
 }
 
-auto RichTextEdit::paint_preedit(Painter &p, float x, float y) const -> float {
+auto RichTextEdit::paint_preedit(Painter &p, float x, float y, const BuildContext &ctx) const -> float {
     constexpr Color preedit_underline{30, 110, 220, 255};
     constexpr Color preedit_selection{255, 200, 80, 140};
     const float w = render::FontEngine::measure_width(preedit_, cur_font_);
     const std::size_t pn = utf8_cp_count(preedit_);
+    const Color fg = resolve_text_color(ctx);  // 未显式设色时经 ctx 取主题 on_surface
 
     // ① preedit 内选区（输入法高亮「待转换片段」）
     if (preedit_sel_end_ != AURORA_NO_PREEDIT_SELECTION) {
@@ -736,7 +754,7 @@ auto RichTextEdit::paint_preedit(Painter &p, float x, float y) const -> float {
 
     // ② preedit 文本 + 组合下划线（区别于正式文本）
     p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = w, .height = line_height_}}, preedit_,
-                cur_font_, cur_color_);
+                cur_font_, cur_color_.value_or(fg));
     p.fill_rect(Rect{.origin = Point{.x = x, .y = y + line_height_ - 2.0F}, .size = Size{.width = w, .height = 2.0F}},
                 preedit_underline);
 

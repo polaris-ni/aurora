@@ -11,6 +11,7 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/event/gesture.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/core/color.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/descriptor.h"
@@ -93,6 +94,21 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
                      .default_value = "128.0",
                      .required = false,
                      .note = "Rubber-band pull limit (dp)"},
+                    {.name = "indicator_color",
+                     .type = "Color",
+                     .default_value = "\"theme.primary\"",
+                     .required = false,
+                     .note = "Pull indicator accent (follows theme primary when unset)"},
+                    {.name = "band_color",
+                     .type = "Color",
+                     .default_value = "\"theme.surface\"",
+                     .required = false,
+                     .note = "Top overlay band background (follows theme surface when unset)"},
+                    {.name = "refreshing_text_color",
+                     .type = "Color",
+                     .default_value = "\"theme.on_surface_variant\"",
+                     .required = false,
+                     .note = "Refreshing hint text color (follows theme on_surface_variant when unset)"},
                 },
             .events = {"on_refresh"},
             .children_policy = "single",
@@ -113,6 +129,55 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     auto on_refresh(std::function<void()> cb) -> PullToRefresh & {
         on_refresh_ = std::move(cb);
         return *this;
+    }
+
+    /// @brief 设置下拉指示器强调色（链式）；未设置时跟随主题 `roles.primary`（ThemeScope 换肤即生效）。
+    /// @param c 强调色（spinner 弧线）；写入 `indicator_color_`。
+    /// @return 自身引用，便于链式调用。
+    auto indicator_color(Color c) -> PullToRefresh & {
+        indicator_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 设置顶部覆盖层背景色（链式）；未设置时跟随主题 `roles.surface`。
+    /// @param c 覆盖层带背景色；写入 `band_color_`。
+    /// @return 自身引用，便于链式调用。
+    auto band_color(Color c) -> PullToRefresh & {
+        band_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 设置「刷新中…」提示文字色（链式）；未设置时跟随主题 `roles.on_surface_variant`。
+    /// @param c 提示文字色；写入 `refreshing_text_color_`。
+    /// @return 自身引用，便于链式调用。
+    auto refreshing_text_color(Color c) -> PullToRefresh & {
+        refreshing_text_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 解析下拉指示器强调色：未显式设色时取主题 `roles.primary`（ThemeScope 换肤即生效），
+    ///        显式设色优先。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效强调色。
+    [[nodiscard]] auto resolve_indicator_color(const BuildContext &ctx) const -> Color {
+        return indicator_color_.value_or(inherit_theme(ctx).roles.primary);
+    }
+
+    /// @brief 解析顶部覆盖层背景色：未显式设色时取主题 `roles.surface`。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效覆盖层背景色。
+    [[nodiscard]] auto resolve_band_color(const BuildContext &ctx) const -> Color {
+        return band_color_.value_or(inherit_theme(ctx).roles.surface);
+    }
+
+    /// @brief 解析「刷新中…」提示文字色：未显式设色时取主题 `roles.on_surface_variant`。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效提示文字色。
+    [[nodiscard]] auto resolve_refreshing_text_color(const BuildContext &ctx) const -> Color {
+        return refreshing_text_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
     }
 
     /// @brief 结束刷新态：指示器收拢回弹（reduce-motion 下直落 0）。数据加载完成后调用。
@@ -143,6 +208,16 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
         Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
         props.set("threshold", threshold);
         props.set("max_pull", max_pull);
+        // 三处主题色仅在显式设置时输出：保留「跟随主题」语义（与 Button/Text 同口径）。
+        if (indicator_color_.has_value()) {
+            props.set("indicator_color", color_to_json(*indicator_color_));
+        }
+        if (band_color_.has_value()) {
+            props.set("band_color", color_to_json(*band_color_));
+        }
+        if (refreshing_text_color_.has_value()) {
+            props.set("refreshing_text_color", color_to_json(*refreshing_text_color_));
+        }
     }
     /// @brief 反序列化：恢复通用属性与 threshold/max_pull（缺失键保持当前值）。
     /// @param props 源 JSON 对象。
@@ -153,6 +228,16 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
         }
         if (props.contains("max_pull")) {
             max_pull = props.at("max_pull")->as_or<float>(0.0F);
+        }
+        // 主题覆盖色仅在显式出现时读入 optional（缺失键保留「跟随主题」默认）。
+        if (props.contains("indicator_color")) {
+            indicator_color_ = json_to_color(*props.at("indicator_color"));
+        }
+        if (props.contains("band_color")) {
+            band_color_ = json_to_color(*props.at("band_color"));
+        }
+        if (props.contains("refreshing_text_color")) {
+            refreshing_text_color_ = json_to_color(*props.at("refreshing_text_color"));
         }
     }
 
@@ -261,12 +346,12 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
             return;
         }
         // 顶部覆盖层带：半透明底 + 旋转弧线 spinner（不动布局盒）。
-        const Color accent = inherit_theme(ctx).primary;
+        const Color accent = resolve_indicator_color(ctx);
         const Rect band{.origin = Point{.x = bounds.origin.x, .y = bounds.origin.y},
                         .size = Size{.width = bounds.size.width, .height = pull_}};
         const double prev_alpha = p.global_alpha();
         p.set_alpha(prev_alpha * 0.92);
-        p.fill_rect(band, Color{255, 255, 255, 255});
+        p.fill_rect(band, resolve_band_color(ctx));
         p.set_alpha(prev_alpha);
         const float angle = spin_angle_;
         p.stroke_arc(
@@ -277,7 +362,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
             // CJK-LITERAL: on-screen-demo - 刷新中 提示绘制在下拉带上，属上屏文案，不经控制台输出
             p.draw_text(Rect{.origin = Point{.x = band.origin.x, .y = band.origin.y + pull_ - th - 4.0F},
                              .size = Size{.width = band.size.width, .height = th}},
-                        "刷新中…", Font{.size_pt = 11.0F}, Color{120, 120, 120, 255});
+                        "刷新中…", Font{.size_pt = 11.0F}, resolve_refreshing_text_color(ctx));
         }
     }
 
@@ -382,6 +467,12 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     }
 
     std::function<void()> on_refresh_;
+    /// @brief 下拉指示器强调色（spinner 弧线）；空 = 跟随主题 primary（CHG-011 迁移批：ThemeScope 换肤即生效）。
+    std::optional<Color> indicator_color_;
+    /// @brief 顶部覆盖层背景色；空 = 跟随主题 surface。
+    std::optional<Color> band_color_;
+    /// @brief 「刷新中…」提示文字色；空 = 跟随主题 on_surface_variant。
+    std::optional<Color> refreshing_text_color_;
     DragRecognizer drag_;
     bool drag_consumed_ = false;  ///< 本手势已被下拉劫持（子级点击不再参与）
     PullToRefreshState state_ = PullToRefreshState::Idle;

@@ -235,7 +235,7 @@ class ProgressIndicator : public LeafWidget {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        const Color fill = color_.value_or(inherit_theme(ctx).primary);
+        const Color fill = color_.value_or(inherit_theme(ctx).roles.primary);
         const float radius = corner_radius_ >= 0.0F ? corner_radius_ : bounds.size.height * 0.5F;
         paint_track(p, bounds, track_color_, radius);
         paint_fill(p, bounds, fill, radius);

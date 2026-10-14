@@ -8,8 +8,10 @@
 #include <string>
 #include <vector>
 
+#include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/chip.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
@@ -35,6 +37,17 @@ auto press_at(float x, float y) -> MouseEvent {
     return e;
 }
 
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用
+/// （调用方持有 holder 即保证环境存活；BuildContext 本就只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
 }  // namespace
 
 AURORA_TEST_CASE(default_and_labeled_construction) {
@@ -49,7 +62,10 @@ AURORA_TEST_CASE(default_and_labeled_construction) {
     tagged.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "label"), "Tag");
     AURORA_TEST_CHECK_FALSE(props.contains("avatar"));  // 空头像不落盘
-    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "background"), 0)->as<int>().value(), 230);
+    // CHG-011 迁移批：未显式设色不落盘，绘制时跟随主题 surface_variant（不再钉 230）。
+    AURORA_TEST_CHECK_FALSE(props.contains("background"));
+    AURORA_TEST_CHECK_FALSE(props.contains("text_color"));
+    AURORA_TEST_CHECK_FALSE(props.contains("delete_color"));
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "font_size"), 13.0F, 1e-4F);
 }
 
@@ -215,6 +231,63 @@ AURORA_TEST_CASE(badge_setters_serialize_and_describe) {
     const auto d = Badge::describe_static();
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Badge");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "single");
+}
+
+// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+
+AURORA_TEST_CASE(chip_colors_follow_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
+    const Chip c("Tag");
+    // light 档：背景=surface_variant{226,226,226}、文字=on_surface 黑、删除=on_surface_variant{71,71,71}
+    AURORA_TEST_CHECK(c.resolve_background(bare) == Color{0xE2, 0xE2, 0xE2});
+    AURORA_TEST_CHECK(c.resolve_text_color(bare) == Color{0x00, 0x00, 0x00});
+    AURORA_TEST_CHECK(c.resolve_delete_color(bare) == Color{0x47, 0x47, 0x47});
+
+    // dark 档：背景=surface_variant{71,71,71}、文字=on_surface 白、删除=on_surface_variant{198,198,198}
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    (void)env;
+    AURORA_TEST_CHECK(c.resolve_background(dark) == Color{0x47, 0x47, 0x47});
+    AURORA_TEST_CHECK(c.resolve_text_color(dark) == Color{0xFF, 0xFF, 0xFF});
+    AURORA_TEST_CHECK(c.resolve_delete_color(dark) == Color{0xC6, 0xC6, 0xC6});
+}
+
+AURORA_TEST_CASE(chip_explicit_colors_override_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    (void)env;
+    Chip c("Tag");
+    c.set_background(Color{0xE0, 0x1B, 0x24});  // error 红，刻意区别于两档 surface_variant
+    c.set_text_color(Color{0x12, 0x34, 0x56});
+    c.set_delete_color(Color{0xAA, 0xBB, 0xCC});
+    AURORA_TEST_CHECK(c.resolve_background(dark) == Color{0xE0, 0x1B, 0x24});
+    AURORA_TEST_CHECK(c.resolve_text_color(dark) == Color{0x12, 0x34, 0x56});
+    AURORA_TEST_CHECK(c.resolve_delete_color(dark) == Color{0xAA, 0xBB, 0xCC});
+}
+
+AURORA_TEST_CASE(badge_colors_follow_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light
+    const Badge b(3);
+    // light 档：徽章底=error{224,27,36}、文字=on_error 白（明暗 error/on_error 同值）
+    AURORA_TEST_CHECK(b.resolve_badge_color(bare) == Color{0xE0, 0x1B, 0x24});
+    AURORA_TEST_CHECK(b.resolve_text_color(bare) == Color{0xFF, 0xFF, 0xFF});
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    (void)env;
+    AURORA_TEST_CHECK(b.resolve_badge_color(dark) == Color{0xE0, 0x1B, 0x24});
+    AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color{0xFF, 0xFF, 0xFF});
+}
+
+AURORA_TEST_CASE(badge_explicit_colors_override_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    (void)env;
+    Badge b(3);
+    b.set_badge_color(Color{0x12, 0x34, 0x56});
+    b.set_text_color(Color{0xAA, 0xBB, 0xCC});
+    AURORA_TEST_CHECK(b.resolve_badge_color(dark) == Color{0x12, 0x34, 0x56});
+    AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color{0xAA, 0xBB, 0xCC});
 }
 
 }  // namespace aurora::test_cases::utest_chip

@@ -3,11 +3,17 @@
 /// 测试说明: 覆盖 Text——默认属性不变量、链式 setter 落盘、非正字号降级与 validate_props、
 /// 布局尺寸来自文本度量（折行填满、行高倍数、max_lines 截断、紧约束钳制）、序列化往返与 describe
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/display_list.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/render/rhi/rhi_backend.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -41,10 +47,8 @@ AURORA_TEST_CASE(default_text_state_and_type_name) {
     AURORA_TEST_CHECK_EQ(require_field<int>(props, "max_lines"), 0);  // 0 = 不限
     AURORA_TEST_CHECK_EQ(require_field<bool>(props, "soft_wrap"), true);
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "line_height"), 1.0F, 1e-4F);
-    // 默认文字色 = 黑 {0,0,0,255}。
-    const auto &color = *require_child(props, "color");
-    AURORA_TEST_CHECK_EQ(require_child_at(color, 0)->as_or<int>(-1), 0);
-    AURORA_TEST_CHECK_EQ(require_child_at(color, 3)->as_or<int>(-1), 255);
+    // 默认未显式设色 ⇒ 跟随主题 on_surface，「显式才输出」语义下 color 键不落盘。
+    AURORA_TEST_CHECK_FALSE(props.contains("color"));
 }
 
 AURORA_TEST_CASE(chain_setters_update_serialized_props) {
@@ -265,6 +269,35 @@ AURORA_TEST_CASE(text_start_end_alignment_follows_direction) {
     // 大于 RTL 左缘）表达镜像语义，避免对绝对像素坐标（受字体 hinting/内边距抖动影响）
     // 做零容差约束——对齐项目既有像素测试的跨平台稳健约定。
     AURORA_TEST_CHECK_TRUE(ltr_left > rtl_left + 10.0F);
+}
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用
+/// （调用方持有 holder 即保证环境存活；BuildContext 本就只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
+AURORA_TEST_CASE(text_color_follows_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题 on_surface；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
+    Text t("hello");
+    AURORA_TEST_CHECK(t.resolve_text_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(t.resolve_text_color(dark) == Color{0xFF, 0xFF, 0xFF});  // dark on_surface = 白
+}
+
+AURORA_TEST_CASE(text_explicit_color_overrides_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    Text t("hello");
+    t.color(Color{0xE0, 0x1B, 0x24});  // error 红，刻意区别于两档 on_surface
+    AURORA_TEST_CHECK(t.resolve_text_color(dark) == Color{0xE0, 0x1B, 0x24});
 }
 
 }  // namespace aurora::test_cases::utest_text

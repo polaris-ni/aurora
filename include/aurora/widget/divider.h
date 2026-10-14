@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -18,7 +20,7 @@ enum class Orientation : std::uint8_t {
 struct DividerProps {
     Orientation orientation = Orientation::Horizontal;  ///< 分隔线方向，默认横向。
     float thickness = 1.0F;  ///< 线厚（dp），默认 1.0。
-    Color color = Color{200, 200, 200, 255};  ///< 线颜色，默认不透明浅灰。
+    std::optional<Color> color = std::nullopt;  ///< 线颜色；空 = 跟随主题 outline_variant（ThemeScope 换肤即生效）。
     float indent = 0.0F;  ///< 起点缩进 dp（横向为左缩进，纵向为上缩进）
     float end_indent = 0.0F;  ///< 终点缩进 dp（横向为右缩进，纵向为下缩进）
 };
@@ -35,7 +37,7 @@ class Divider : public LeafWidget, public DividerProps {
     ///        才可聚焦（覆写基类 public virtual；分级默认见 specification/05 §4.2）。
     /// @return 具备输入语义时为 true，否则 false。
     [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
-    /// @brief 默认构造：横向、1.0 dp 厚、浅灰色、无缩进。
+    /// @brief 默认构造：横向、1.0 dp 厚、未设色（跟随主题 outline_variant）、无缩进。
     Divider() = default;
     /// @brief 配置块构造（specification/04-widget.md §2.5）。
     /// @param props 分隔线属性块，整份拷入 DividerProps 基类字段。
@@ -54,6 +56,14 @@ class Divider : public LeafWidget, public DividerProps {
     auto set_end_indent(float v) -> Divider & {
         end_indent = v;
         return *this;
+    }
+
+    /// @brief 解析生效线颜色：未显式设色时经 ctx 取主题 `outline_variant`（ThemeScope 换肤即生效），
+    ///        显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light（与 OS 未表态同口径）。
+    /// @return 生效线颜色。
+    [[nodiscard]] auto resolve_color(const BuildContext &ctx) const -> Color {
+        return color.value_or(inherit_theme(ctx).roles.outline_variant);
     }
 
     /// @brief 类型名，供序列化与运行时自描述使用。
@@ -84,9 +94,9 @@ class Divider : public LeafWidget, public DividerProps {
                      .min_value = "0"},
                     {.name = "color",
                      .type = "Color",
-                     .default_value = "{200,200,200,255}",
+                     .default_value = "theme.outline_variant",
                      .required = false,
-                     .note = "Color",
+                     .note = "Line color (follows theme outline_variant when unset)",
                      .json_type = "array"},
                     {.name = "indent",
                      .type = "float",
@@ -142,7 +152,10 @@ class Divider : public LeafWidget, public DividerProps {
         Widget::serialize_props(props);
         props.set("orientation", orientation == Orientation::Vertical ? "vertical" : "horizontal");
         props.set("thickness", thickness);
-        props.set("color", color_to_json(color));
+        // 线颜色仅在显式设置时输出：保留「跟随主题」语义（与 Button/Text 同口径）。
+        if (color.has_value()) {
+            props.set("color", color_to_json(*color));
+        }
         props.set("indent", indent);
         props.set("end_indent", end_indent);
     }
@@ -177,14 +190,15 @@ class Divider : public LeafWidget, public DividerProps {
         return c.constrain(Size{.width = c.max.width, .height = thickness});
     }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        const Color line = resolve_color(ctx);  // 未显式设色 → 跟随主题 outline_variant
         if (orientation == Orientation::Vertical) {
             const float y0 = bounds.origin.y + indent;
             const float h = bounds.size.height - indent - end_indent;
             if (h > 0.0F) {
                 const Rect r{.origin = Point{.x = bounds.origin.x, .y = y0},
                              .size = Size{.width = thickness, .height = h}};
-                p.fill_rect(r, color);
+                p.fill_rect(r, line);
             }
         } else {
             const float x0 = bounds.origin.x + indent;
@@ -192,7 +206,7 @@ class Divider : public LeafWidget, public DividerProps {
             if (w > 0.0F) {
                 const Rect r{.origin = Point{.x = x0, .y = bounds.origin.y},
                              .size = Size{.width = w, .height = thickness}};
-                p.fill_rect(r, color);
+                p.fill_rect(r, line);
             }
         }
     }

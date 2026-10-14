@@ -1,10 +1,12 @@
 #pragma once
 
+#include <optional>
 #include <string>
 
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -83,21 +85,21 @@ class Placeholder : public Widget {
                      .json_type = "string"},
                     {.name = "background_color",
                      .type = "Color",
-                     .default_value = "{242,242,242,255}",
+                     .default_value = "\"theme.surface\"",
                      .required = false,
-                     .note = "Background color",
+                     .note = "Background color (follows theme surface when unset)",
                      .json_type = "array"},
                     {.name = "border_color",
                      .type = "Color",
-                     .default_value = "{192,57,43,255}",
+                     .default_value = "\"theme.error\"",
                      .required = false,
-                     .note = "Border color",
+                     .note = "Border color (follows theme error when unset)",
                      .json_type = "array"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = "{85,85,85,255}",
+                     .default_value = "\"theme.on_surface_variant\"",
                      .required = false,
-                     .note = "Text color",
+                     .note = "Text color (follows theme on_surface_variant when unset)",
                      .json_type = "array"},
                     {.name = "width",
                      .type = "Length",
@@ -127,6 +129,28 @@ class Placeholder : public Widget {
     /// @return Placeholder 的控件描述符（文字/三色/尺寸属性，无事件、无子项）。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
+    /// @brief 解析生效背景色：未显式设色时经 ctx 取主题 `roles.surface`（ThemeScope 换肤即生效），
+    ///        显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light（与 OS 未表态同口径）。
+    /// @return 生效背景色。
+    [[nodiscard]] auto resolve_background(const BuildContext &ctx) const -> Color {
+        return background_.value_or(inherit_theme(ctx).roles.surface);
+    }
+
+    /// @brief 解析生效边框（警示）色：未显式设色时经 ctx 取主题 `roles.error`，显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效边框色。
+    [[nodiscard]] auto resolve_border(const BuildContext &ctx) const -> Color {
+        return border_.value_or(inherit_theme(ctx).roles.error);
+    }
+
+    /// @brief 解析生效文字色：未显式设色时经 ctx 取主题 `roles.on_surface_variant`，显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效文字色。
+    [[nodiscard]] auto resolve_text(const BuildContext &ctx) const -> Color {
+        return text_.value_or(inherit_theme(ctx).roles.on_surface_variant);
+    }
+
     /// @brief 收集本控件的可订阅信号视图。
     /// @param out 输出参数，收集 SignalViewBase 指针；Placeholder 无信号，恒不写入。
     auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
@@ -136,9 +160,16 @@ class Placeholder : public Widget {
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props.set("message", message_);
-        props.set("background_color", color_to_json(background_));
-        props.set("border_color", color_to_json(border_));
-        props.set("text_color", color_to_json(text_));
+        // 三色仅在显式设置时输出：保留「跟随主题角色」语义（CHG-011 迁移批；与 Button/Text 同口径）。
+        if (background_.has_value()) {
+            props.set("background_color", color_to_json(*background_));
+        }
+        if (border_.has_value()) {
+            props.set("border_color", color_to_json(*border_));
+        }
+        if (text_.has_value()) {
+            props.set("text_color", color_to_json(*text_));
+        }
     }
 
     /// @brief 反序列化占位属性：按存在的键逐一还原文字与三色，缺键保持当前值。
@@ -168,19 +199,20 @@ class Placeholder : public Widget {
         return c.constrain(Size{.width = w, .height = h});
     }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
-        p.fill_rect(bounds, background_);
-        p.draw_rect(bounds, border_);
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        // 三色：未显式设色时经 ctx 取主题角色（CHG-011 迁移批；ThemeScope 换肤即生效）。
+        p.fill_rect(bounds, resolve_background(ctx));
+        p.draw_rect(bounds, resolve_border(ctx));
         const Rect inner{.origin = Point{.x = bounds.origin.x + 6.0F, .y = bounds.origin.y + 6.0F},
                          .size = Size{.width = bounds.size.width - 12.0F, .height = bounds.size.height - 12.0F}};
-        p.draw_text(inner, message_.empty() ? "(placeholder)" : message_, Font{.size_pt = 14.0F}, text_);
+        p.draw_text(inner, message_.empty() ? "(placeholder)" : message_, Font{.size_pt = 14.0F}, resolve_text(ctx));
     }
 
   private:
     std::string message_;
-    Color background_ = Color{0xF2U, 0xF2U, 0xF2U, 0xFFU};  // 浅灰底
-    Color border_ = Color{0xC0U, 0x39U, 0x2BU, 0xFFU};  // 警示红
-    Color text_ = Color{0x55U, 0x55U, 0x55U, 0xFFU};  // 深灰字
+    std::optional<Color> background_;  ///< 背景色；空 = 跟随主题 surface（ThemeScope 换肤即生效）
+    std::optional<Color> border_;  ///< 边框（警示）色；空 = 跟随主题 error
+    std::optional<Color> text_;  ///< 文字色；空 = 跟随主题 on_surface_variant
 };
 
 }  // namespace aurora

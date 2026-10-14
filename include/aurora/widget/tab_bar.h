@@ -430,7 +430,7 @@ class TabBar : public Widget {
         p.fill_rect(bar, bar_background_);
 
         // 选中色：显式设置优先，否则跟随主题 primary（ThemeScope 换肤即生效）。
-        const Color accent = active_color_.value_or(inherit_theme(ctx).primary);
+        const Color accent = active_color_.value_or(inherit_theme(ctx).roles.primary);
         Font label_font;
         label_font.size_pt = font_size_;
 

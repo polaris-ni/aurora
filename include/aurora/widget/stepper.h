@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -9,6 +10,8 @@
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
+#include "aurora/widget/props_io.h"  // color_to_json / json_to_color
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -105,6 +108,39 @@ class Stepper : public LeafWidget {
     /// @return `current + 1 >= steps.size()`；无步骤时为 true。
     [[nodiscard]] auto is_last_step() const -> bool { return current_ + 1 >= static_cast<int>(steps_.size()); }
 
+    /// @brief 设置当前步强调色（链式）：未显式设置时回落主题 `roles.primary`（ThemeScope 换肤即生效）。
+    /// @param c 当前步文字强调色，写入 `active_color_`（强类型角色回退字段）。
+    /// @return 自身引用，便于链式调用。
+    auto set_active_color(Color c) -> Stepper & {
+        active_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+    /// @brief 设置普通步（非当前步）颜色（链式）：未显式设置时回落主题 `roles.on_surface_variant`
+    ///        （ThemeScope 换肤即生效）。
+    /// @param c 非当前步文字色，写入 `inactive_color_`（强类型角色回退字段）。
+    /// @return 自身引用，便于链式调用。
+    auto set_inactive_color(Color c) -> Stepper & {
+        inactive_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 解析生效的当前步强调色：未显式设色时经 ctx 取主题 `roles.primary`
+    ///        （ThemeScope 换肤即生效），显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light（与 OS 未表态同口径）。
+    /// @return 生效当前步强调色。
+    [[nodiscard]] auto resolve_active_color(const BuildContext &ctx) const -> Color {
+        return active_color_.value_or(inherit_theme(ctx).roles.primary);
+    }
+    /// @brief 解析生效的普通步（非当前步）颜色：未显式设色时经 ctx 取主题 `roles.on_surface_variant`
+    ///        （ThemeScope 换肤即生效），显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light（与 OS 未表态同口径）。
+    /// @return 生效普通步颜色。
+    [[nodiscard]] auto resolve_inactive_color(const BuildContext &ctx) const -> Color {
+        return inactive_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
+    }
+
     /// @brief 静态属性描述符：current/step_count 等可序列化属性与事件声明。
     /// @return 名为 "Stepper"、子策略为 none 的完整描述符。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
@@ -120,6 +156,18 @@ class Stepper : public LeafWidget {
                      .json_type = "integer",
                      .enum_values = {},
                      .min_value = "0"},
+                    {.name = "active_color",
+                     .type = "Color",
+                     .default_value = "\"theme.primary\"",
+                     .required = false,
+                     .note = "Active step accent color (follows theme primary when unset)",
+                     .json_type = "array"},
+                    {.name = "inactive_color",
+                     .type = "Color",
+                     .default_value = "\"theme.on_surface_variant\"",
+                     .required = false,
+                     .note = "Inactive step color (follows theme on_surface_variant when unset)",
+                     .json_type = "array"},
                     {.name = "step_count",
                      .type = "int",
                      .default_value = "0",
@@ -187,6 +235,13 @@ class Stepper : public LeafWidget {
         Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
         props.set("current", current_);
         props.set("step_count", static_cast<int>(steps_.size()));
+        // active/inactive 颜色仅在显式设置时输出：保留「跟随主题角色」语义（CHG-011 迁移批）。
+        if (active_color_.has_value()) {
+            props.set("active_color", color_to_json(*active_color_));
+        }
+        if (inactive_color_.has_value()) {
+            props.set("inactive_color", color_to_json(*inactive_color_));
+        }
     }
 
     /// @brief 反序列化：恢复通用属性与 current（缺失键保持当前值）。
@@ -195,6 +250,12 @@ class Stepper : public LeafWidget {
         Widget::deserialize_props(props);  // 先由基类恢复通用属性
         if (props.contains("current")) {
             current_ = props.at("current")->as_or<std::int32_t>(0);
+        }
+        if (props.contains("active_color")) {
+            active_color_ = json_to_color(*props.at("active_color"));
+        }
+        if (props.contains("inactive_color")) {
+            inactive_color_ = json_to_color(*props.at("inactive_color"));
         }
     }
 
@@ -216,7 +277,8 @@ class Stepper : public LeafWidget {
     /// @brief 绘制步骤指示器（当前高亮、已完成打勾）、分隔线、内容占位文本与 Cancel/Next-Done 按钮。
     /// @param p 目标画笔。
     /// @param bounds 本控件的绘制矩形（相对坐标系）。
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    /// @param ctx 构建上下文：供主题取色（未显式设色时回落对应角色）。
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         const Font f{.size_pt = 14.0F};
         const Font f_bold{.size_pt = 14.0F, .weight = 700};
         constexpr float step_h = 40.0F;
@@ -226,8 +288,8 @@ class Stepper : public LeafWidget {
         for (size_t i = 0; i < steps_.size(); ++i) {
             const bool is_current = std::cmp_equal(i, current_);
             const bool is_done = std::cmp_less(i, current_);
-            const Color pending_color = is_done ? Color{100, 100, 100} : Color{180, 180, 180};
-            const Color text_color = is_current ? Color{66, 133, 244} : pending_color;
+            // 当前步强调色 / 普通步色：未显式设色时回落主题角色（CHG-011 迁移批）。
+            const Color text_color = is_current ? resolve_active_color(ctx) : resolve_inactive_color(ctx);
             const std::string prefix = is_done ? "✓ " : (std::to_string(i + 1) + std::string{". "});
             p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + 12.0F, .y = y + 10.0F},
                              .size = Size{.width = 300.0F, .height = step_h}},
@@ -272,6 +334,10 @@ class Stepper : public LeafWidget {
     int current_ = 0;
     std::function<void()> on_complete_;
     std::function<void()> on_cancel_;
+    /// @brief 当前步强调色；空 = 跟随主题 `roles.primary`（ThemeScope 换肤即生效）。
+    std::optional<Color> active_color_;
+    /// @brief 普通步（非当前步）颜色；空 = 跟随主题 `roles.on_surface_variant`（ThemeScope 换肤即生效）。
+    std::optional<Color> inactive_color_;
 };
 
 }  // namespace aurora

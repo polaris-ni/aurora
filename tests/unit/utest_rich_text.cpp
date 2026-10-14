@@ -4,10 +4,14 @@
 /// 布局尺寸来自 span 度量且与 measure_rich_text 一致、窄约束确定性换行、
 /// 序列化拼接文本往返与 split_words 纯函数行为
 
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/rich_text.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -19,6 +23,17 @@ namespace {
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用
+/// （调用方持有 holder 即保证环境存活；BuildContext 本就只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 }  // namespace
@@ -127,6 +142,25 @@ AURORA_TEST_CASE(serialize_concatenates_and_deserialize_reloads) {
     Json back = Json::object();
     dst.serialize_props(back);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(back, "text"), "Hello");
+}
+
+AURORA_TEST_CASE(rich_text_colors_follow_theme_when_unset) {
+    // 未显式设置 text_color 时，resolve_text_color 经 ctx 取主题 on_surface：
+    // 裸 ctx 回落 light（黑），注入 dark 主题翻面为白。
+    const BuildContext bare;
+    RichText rt;
+    AURORA_TEST_CHECK(rt.resolve_text_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(rt.resolve_text_color(dark) == Color{0xFF, 0xFF, 0xFF});  // dark on_surface = 白
+}
+
+AURORA_TEST_CASE(rich_text_explicit_colors_override_theme) {
+    // 显式设置 text_color 后，resolve_text_color 忽略主题（即便注入 dark）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    RichText rt;
+    rt.text_color(Color{0xE0, 0x1B, 0x24});
+    AURORA_TEST_CHECK(rt.resolve_text_color(dark) == Color{0xE0, 0x1B, 0x24});
 }
 
 AURORA_TEST_CASE(split_words_collapses_repeated_spaces) {

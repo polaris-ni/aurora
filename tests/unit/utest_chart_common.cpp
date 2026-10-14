@@ -110,10 +110,32 @@ AURORA_TEST_CASE(palette_wraps_and_resolve_prefers_explicit) {
     AURORA_TEST_CHECK_TRUE(resolve_series_color(2, custom, theme) == custom);
     AURORA_TEST_CHECK_TRUE(resolve_series_color(2, std::nullopt, theme) == chart_palette(2));
 
-    Theme themed{};
-    themed.set_token("chart.palette.2", TokenValue{Color{9, 9, 9, 255}});
-    AURORA_TEST_CHECK_TRUE(resolve_series_color(2, std::nullopt, themed) == Color{9, 9, 9, 255});
-    AURORA_TEST_CHECK_TRUE(resolve_series_color(2, custom, themed) == custom);  // 显式仍优先
+    // 类型化后 `chart.palette.*` 令牌面退场：系列色恒取内置色板（自定义扩展版 ChartPalette
+    // ThemeExtension 随迁移批接入）。显式色仍优先。
+    AURORA_TEST_CHECK_TRUE(resolve_series_color(2, std::nullopt, Theme::dark()) == chart_palette(2));
+    AURORA_TEST_CHECK_TRUE(resolve_series_color(2, custom, Theme::dark()) == custom);
+}
+
+AURORA_TEST_CASE(resolve_series_color_uses_chart_palette_extension) {
+    // 主题扩展路径：根主题播种 ChartPalette 后，未显式设色的系列取扩展色板。
+    const Theme themed = Theme::light().with_extension(ChartPalette::light());
+    AURORA_TEST_CHECK_TRUE(resolve_series_color(0, std::nullopt, themed) == ChartPalette::light().palette.at(0));
+    AURORA_TEST_CHECK_TRUE(resolve_series_color(2, std::nullopt, themed) == ChartPalette::light().palette.at(2));
+    AURORA_TEST_CHECK_TRUE(resolve_series_color(8, std::nullopt, themed) == ChartPalette::light().palette.at(0));  // 取模
+
+    // 显式色仍优先于扩展色板。
+    const Color custom{1, 2, 3, 255};
+    AURORA_TEST_CHECK_TRUE(resolve_series_color(0, custom, themed) == custom);
+
+    // 未注册扩展时回落内置色板（与既有用例同口径）。
+    AURORA_TEST_CHECK_TRUE(resolve_series_color(2, std::nullopt, Theme{}) == chart_palette(2));
+
+    // 判别性用例：自定义扩展色板（改写单色）必须被消费，而非回落内置兜底——
+    // 该断言是「扩展读取分支」的变异自证锚点（删扩展读取 ⇒ 返回内置蓝而非 9,9,9）。
+    ChartPalette overridden = ChartPalette::light();
+    overridden.palette.at(0) = Color{9, 9, 9, 255};
+    const Theme themed2 = Theme::light().with_extension(overridden);
+    AURORA_TEST_CHECK_TRUE(resolve_series_color(0, std::nullopt, themed2) == Color{9, 9, 9, 255});
 }
 
 AURORA_TEST_CASE(json_roundtrip_double_vector) {

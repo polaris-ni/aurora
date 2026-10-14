@@ -4,7 +4,9 @@
 /// 禁用态不触发回调、min_size 布局与约束钳制、自描述元数据、属性序列化往返、
 /// 标签 i18n（绘制 / 无障碍 / 自然宽同源，字面档输出不变）
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "aurora/environment/environment.h"
@@ -131,9 +133,10 @@ AURORA_TEST_CASE(button_defaults_and_type_name) {
     AURORA_TEST_CHECK_NEAR(d.corner_radius, 6.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(d.min_width, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(d.min_height, 0.0F, 1e-4F);
-    // 默认背景色为 blue，文字色为 white。
-    AURORA_TEST_CHECK_TRUE(d.color.get() == Color::blue());
-    AURORA_TEST_CHECK_TRUE(d.on_color == Color::white());
+    // 默认背景/文字色未显式设置：跟随主题（roles.primary / roles.on_primary），
+    // 不再钉具体色值——换肤即生效（CHG-011 迁移批）。
+    AURORA_TEST_CHECK_FALSE(d.color.get().has_value());
+    AURORA_TEST_CHECK_FALSE(d.on_color.has_value());
 }
 
 AURORA_TEST_CASE(button_label_and_activate_fires_on_click) {
@@ -288,9 +291,10 @@ AURORA_TEST_CASE(button_tr_label_draws_string_table_text) {
     Button inked;
     inked.label = LocalizedString::tr(key);
     inked.set_corner_radius(0.0F);
+    inked.background(Color::blue());  // 显式设色：不依赖主题回退，背景参数与之一致
     LayoutEngine::layout(inked, bounded(300.0F, 80.0F));
     const Rect ink_box{.origin = Point{}, .size = inked.size()};
-    AURORA_TEST_CHECK_GT(count_ink_outside_background(inked, ink_box, ctx, inked.color.get()), 0);
+    AURORA_TEST_CHECK_GT(count_ink_outside_background(inked, ink_box, ctx, Color::blue()), 0);
 }
 
 AURORA_TEST_CASE(button_accessibility_label_equals_drawn_text) {
@@ -428,6 +432,48 @@ AURORA_TEST_CASE(cursor_shape_hook_defaults_to_pointing_hand) {
     // Button 悬停默认 PointingHand（控件级虚钩子）；修饰链显式声明在派发器解析时优先。
     Button b;
     AURORA_TEST_CHECK(b.cursor_shape() == std::optional{CursorShape::PointingHand});
+}
+
+// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+
+/// 探针：把 protected 的 resolve_* 钩子提到 public（行为与生产路径同一条函数）。
+class ThemeProbe final : public Button {
+  public:
+    using Button::resolve_background;
+    using Button::resolve_text_color;
+};
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用
+/// （调用方持有 holder 即保证环境存活；BuildContext 本就只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
+AURORA_TEST_CASE(button_colors_follow_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
+    ThemeProbe b;
+    AURORA_TEST_CHECK(b.resolve_background(bare) == Color::blue());  // light primary = (0,0,255)
+    AURORA_TEST_CHECK(b.resolve_text_color(bare) == Color::white());  // light on_primary
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(b.resolve_background(dark) == Color(0xC0, 0xC1, 0xFF));  // dark primary（WCAG 修正对）
+    AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color(0x00, 0x2B, 0x73));   // dark on_primary
+}
+
+AURORA_TEST_CASE(button_explicit_colors_override_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    ThemeProbe b;
+    b.background(Color{0xE0, 0x1B, 0x24});  // error 红，刻意区别于两档 primary
+    b.text_color(Color{0x12, 0x34, 0x56});
+    AURORA_TEST_CHECK(b.resolve_background(dark) == Color(0xE0, 0x1B, 0x24));
+    AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color(0x12, 0x34, 0x56));
 }
 
 }  // namespace aurora::test_cases::utest_button

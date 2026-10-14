@@ -11,8 +11,10 @@
 #include <utility>
 
 #include "aurora/core/accessibility.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/pull_to_refresh.h"
 #include "aurora/widget/scroll.h"
 #include "framework/aurora_test.h"
@@ -89,6 +91,16 @@ auto wheel(PullToRefresh &ptr, float delta_y) -> ScrollEvent {
     e.delta_y = delta_y;
     ptr.on_scroll(e);
     return e;
+}
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 }  // namespace
@@ -326,6 +338,36 @@ AURORA_TEST_CASE(indicator_overlay_paints_over_content) {
     const Color below = covered.get_pixel(100, 150);
     AURORA_TEST_CHECK_EQ(static_cast<int>(below.r), 255);
     AURORA_TEST_CHECK_EQ(static_cast<int>(below.g), 0);
+}
+
+// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+
+AURORA_TEST_CASE(pull_to_refresh_colors_follow_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
+    PullToRefresh ptr{PullToRefreshProps{.child = Node{std::make_shared<RedBox>()}}};
+    AURORA_TEST_CHECK(ptr.resolve_indicator_color(bare) == Color::blue());  // light primary = (0,0,255)
+    AURORA_TEST_CHECK(ptr.resolve_band_color(bare) == Color::white());  // light surface = white
+    AURORA_TEST_CHECK(ptr.resolve_refreshing_text_color(bare) ==
+                      Color{0x47, 0x47, 0x47});  // light on_surface_variant
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(ptr.resolve_indicator_color(dark) == Color{0xC0, 0xC1, 0xFF});  // dark primary
+    AURORA_TEST_CHECK(ptr.resolve_band_color(dark) == Color{0x20, 0x21, 0x24});  // dark surface
+    AURORA_TEST_CHECK(ptr.resolve_refreshing_text_color(dark) ==
+                      Color{0xC6, 0xC6, 0xC6});  // dark on_surface_variant
+}
+
+AURORA_TEST_CASE(pull_to_refresh_explicit_colors_override_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    PullToRefresh ptr{PullToRefreshProps{.child = Node{std::make_shared<RedBox>()}}};
+    ptr.indicator_color(Color{0xE0, 0x1B, 0x24});  // error 红，刻意区别于两档 primary
+    ptr.band_color(Color{0x12, 0x34, 0x56});
+    ptr.refreshing_text_color(Color{0x77, 0x88, 0x99});
+    AURORA_TEST_CHECK(ptr.resolve_indicator_color(dark) == Color{0xE0, 0x1B, 0x24});
+    AURORA_TEST_CHECK(ptr.resolve_band_color(dark) == Color{0x12, 0x34, 0x56});
+    AURORA_TEST_CHECK(ptr.resolve_refreshing_text_color(dark) == Color{0x77, 0x88, 0x99});
 }
 
 }  // namespace aurora::test_cases::utest_pull_to_refresh

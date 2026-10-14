@@ -356,7 +356,7 @@ class RadioGroup : public Widget {
         Font f;
         f.size_pt = font_size_;
         // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
-        Color accent = active_color_.value_or(inherit_theme(ctx).primary);
+        Color accent = active_color_.value_or(inherit_theme(ctx).roles.primary);
         Color idle = border_color_;
         Color text = text_color_;
         if (!enabled_) {

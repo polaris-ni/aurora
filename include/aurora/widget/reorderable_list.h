@@ -1053,7 +1053,7 @@ class ReorderableList : public Container {
         const Rect global{.origin = bounds.origin + local.origin, .size = local.size};
         p.draw_rounded_border(global, AURORA_CURSOR_RING_RADIUS,
                               keyboard_grabbed_ ? AURORA_CURSOR_GRABBED_THICKNESS : AURORA_CURSOR_THICKNESS,
-                              inherit_theme(ctx).primary);
+                              inherit_theme(ctx).roles.primary);
     }
 
     /// @brief 相对移动光标；未定位时 `+1` 落到首项、`-1` 落到末项（与列表类控件的键盘习惯一致）。

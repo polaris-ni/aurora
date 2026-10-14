@@ -50,6 +50,11 @@ auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
+// ⚠️ clang-analyzer 假告警族（clang 22 + MSVC STL）：make_shared 控制块（_Rep）经 Tab 移动、
+// TabBar::add_tab 转移入 vector 后，析构侧 decref 在 Node/容器内联路径上不可见，
+// 于是一批 add_tab 调用点被误判 NewDeleteLeaks、按值返回 TabBar 被误判 StackAddressEscape。
+// 实际生命周期由 Node 的 RAII 持有保证（同 registry.cpp 的同族误报先例），
+// 各调用点以行尾豁免标注；改动本文件后请复跑 scoped tidy 确认豁免与告警行一一对齐。
 auto make_tab(const std::string &label, bool closable = false) -> Tab {
     return Tab{.label = label, .content = Node{std::make_shared<LeafProbe>()}, .closable = closable};
 }
@@ -77,9 +82,9 @@ AURORA_TEST_CASE(constructor_clamps_initial_selection) {
 
 AURORA_TEST_CASE(select_invokes_change_and_skips_noop) {
     TabBar bar;
-    bar.add_tab(make_tab("A"));
-    bar.add_tab(make_tab("B"));
-    bar.add_tab(make_tab("C"));
+    bar.add_tab(make_tab("A"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    bar.add_tab(make_tab("B"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    bar.add_tab(make_tab("C"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     int changes = 0;
     int last = -1;
     bar.set_on_change([&changes, &last](int i) {
@@ -109,14 +114,14 @@ AURORA_TEST_CASE(close_tab_removes_and_fixes_selection) {
     int closed_idx = -1;
     auto build = [&closed, &closed_idx]() -> TabBar {
         TabBar bar;
-        bar.add_tab(make_tab("A"));
-        bar.add_tab(make_tab("B"));
-        bar.add_tab(make_tab("C"));
+        bar.add_tab(make_tab("A"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+        bar.add_tab(make_tab("B"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+        bar.add_tab(make_tab("C"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
         bar.set_on_close([&closed, &closed_idx](int i) {
             ++closed;
             closed_idx = i;
         });
-        return bar;
+        return bar;  // NOLINT(clang-analyzer-core.StackAddressEscape)
     };
 
     // 删除选中项之前：选中前移。
@@ -163,8 +168,8 @@ AURORA_TEST_CASE(close_tab_removes_and_fixes_selection) {
 
 AURORA_TEST_CASE(tab_label_and_count) {
     TabBar bar;
-    bar.add_tab(make_tab("Alpha"));
-    bar.add_tab(make_tab("Beta"));
+    bar.add_tab(make_tab("Alpha"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    bar.add_tab(make_tab("Beta"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     AURORA_TEST_CHECK_EQ(bar.tab_count(), 2U);
     AURORA_TEST_CHECK_EQ(bar.tab_label(0), "Alpha");
     AURORA_TEST_CHECK_EQ(bar.tab_label(1), "Beta");
@@ -204,8 +209,8 @@ AURORA_TEST_CASE(setters_chain_and_store) {
 
 AURORA_TEST_CASE(pointer_event_selects_and_closes_tab) {
     TabBar bar;
-    auto a = make_tab("A");
-    auto b = make_tab("B", true);  // 可关闭
+    auto a = make_tab("A");  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    auto b = make_tab("B", true);  // 可关闭  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     bar.add_tab(a);
     bar.add_tab(b);
     bar.set_active_color(Color{1, 2, 3, 255});  // 避免 on_paint 走 inherit_theme
@@ -235,7 +240,7 @@ AURORA_TEST_CASE(pointer_event_selects_and_closes_tab) {
 
 AURORA_TEST_CASE(pointer_event_content_area_falls_through) {
     TabBar bar;
-    bar.add_tab(make_tab("A"));  // 内容区 y >= 栏高
+    bar.add_tab(make_tab("A"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks) 内容区 y >= 栏高
     BuildContext ctx;
     bar.mount(ctx);
     LayoutEngine::layout(bar, bounded(320.0F, 240.0F));
@@ -252,8 +257,8 @@ AURORA_TEST_CASE(pointer_event_content_area_falls_through) {
 AURORA_TEST_CASE(serialize_roundtrip_and_active_color_omission) {
     // 全字段设置 → 序列化包含 active_color；反序列化还原。
     TabBar bar;
-    bar.add_tab(make_tab("A"));
-    bar.add_tab(make_tab("B"));
+    bar.add_tab(make_tab("A"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    bar.add_tab(make_tab("B"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     bar.select(1);
     bar.set_tab_height(40.0F);
     bar.set_active_color(Color{200, 100, 50, 255});
@@ -284,7 +289,7 @@ AURORA_TEST_CASE(serialize_roundtrip_and_active_color_omission) {
 
     // 未设置 active_color 的栏：序列化省略该键（保留「跟随主题」语义）。
     TabBar plain;
-    plain.add_tab(make_tab("X"));
+    plain.add_tab(make_tab("X"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     Json p2 = Json::object();
     plain.serialize_props(p2);
     AURORA_TEST_CHECK_FALSE(p2.contains("active_color"));
@@ -292,8 +297,8 @@ AURORA_TEST_CASE(serialize_roundtrip_and_active_color_omission) {
 
 AURORA_TEST_CASE(paint_and_hit_test_exercise_render_paths) {
     TabBar bar;
-    bar.add_tab(make_tab("A"));
-    bar.add_tab(make_tab("B"));
+    bar.add_tab(make_tab("A"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    bar.add_tab(make_tab("B"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     bar.set_active_color(Color{200, 100, 50, 255});
     bar.set_indicator_thickness(2.0F);
     BuildContext ctx;

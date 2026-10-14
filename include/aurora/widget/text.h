@@ -14,6 +14,7 @@
 #include "aurora/i18n/localized_string.h"
 #include "aurora/i18n/string_table.h"
 #include "aurora/state/reactive.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -22,7 +23,7 @@ namespace aurora {
 struct TextProps {
     Reactive<LocalizedString> content;  ///< 文本内容（可由字符串隐式构造）
     Font font = Font{};  ///< 字体（默认 14pt）
-    Color text_color = Color::black();  ///< 文字色（默认黑）
+    std::optional<Color> text_color;  ///< 文字色；空 = 跟随主题 on_surface（ThemeScope 换肤即生效）
 
     /// @brief 以下至 `background_color` 为文本排版属性组（参考 Flutter TextStyle / Text）。
     TextAlign text_align = TextAlign::Left;  ///< 水平对齐
@@ -38,7 +39,7 @@ struct TextProps {
     float word_spacing = 0.0F;  ///< 词间距（FontEngine 暂不支持 → 优雅降级）
     FontStyle font_style = FontStyle::Normal;  ///< 字形风格（Italic 暂降级为 Normal）
     TextDecoration decoration = TextDecoration::None;  ///< 装饰线（可按位组合）
-    Color decoration_color = Color::black();  ///< 装饰线颜色（默认同文字色）
+    std::optional<Color> decoration_color;  ///< 装饰线颜色；空 = 同文字色（解析后）
     Color background_color = Color{0, 0, 0, 0};  ///< 文本底色（alpha=0 表示无）
 
     /// @brief 逐控件抗锯齿覆写：nullopt = 用进程级 `text_aa_mode()`（默认 ClearType）；
@@ -236,6 +237,14 @@ class Text : public LeafWidget, public TextProps {
     [[nodiscard]] auto resolved_text(const BuildContext &ctx) const -> std::string {
         const auto *lp = ctx.environment<Locale>();
         return content.get().resolve(&default_string_table(), (lp != nullptr) ? *lp : Locale{});
+    }
+
+    /// @brief 解析生效文字色：未显式设色时经 ctx 取主题 `on_surface`（ThemeScope 换肤即生效），
+    ///        显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light（与 OS 未表态同口径）。
+    /// @return 生效文字色。
+    [[nodiscard]] auto resolve_text_color(const BuildContext &ctx) const -> Color {
+        return text_color.value_or(inherit_theme(ctx).roles.on_surface);
     }
 
     /// @brief 收集响应式信号：仅文本内容 `content`。

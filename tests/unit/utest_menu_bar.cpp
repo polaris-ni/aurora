@@ -19,8 +19,10 @@
 
 #include "aurora/app/menu.h"
 #include "aurora/event/dispatcher.h"
+#include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/menu_bar.h"
@@ -387,6 +389,39 @@ AURORA_TEST_CASE(non_press_event_falls_through_to_base) {
     move.local_position = Point{.x = 10.0F, .y = 5.0F};
     bar->on_pointer_event(move);  // Move != Press → 下沉基类，不消费、不触发菜单项
     AURORA_TEST_CHECK_EQ(hits, 0);
+}
+
+// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
+AURORA_TEST_CASE(menu_bar_colors_follow_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light
+    MenuBar bar;
+    // 启用项文字 → on_surface；禁用项 → on_surface_variant。
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(bare, true) == Color{0, 0, 0});        // light on_surface
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(bare, false) == Color(71, 71, 71));    // light on_surface_variant
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(dark, true) == Color{255, 255, 255});  // dark on_surface
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(dark, false) == Color(198, 198, 198));  // dark on_surface_variant
+}
+
+AURORA_TEST_CASE(menu_bar_explicit_colors_override_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    MenuBar bar;
+    bar.set_text_color(Color(0xE0, 0x1B, 0x24));  // error 红，刻意区别于两档角色
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(dark, true) == Color(0xE0, 0x1B, 0x24));
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(dark, false) == Color(0xE0, 0x1B, 0x24));
 }
 
 }  // namespace aurora::test_cases::utest_menu_bar

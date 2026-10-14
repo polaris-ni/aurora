@@ -8,14 +8,17 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/keycode.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/rich_text_edit.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -29,6 +32,16 @@ namespace {
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 }  // namespace
@@ -766,6 +779,26 @@ AURORA_TEST_CASE(paint_selection_underline_preedit_and_cursor) {
     tiny.set_current_font(Font{.size_pt = 0.0F});
     const Size sz = tiny.layout(bounded(100.0F, 100.0F), BuildContext{});
     AURORA_TEST_CHECK_TRUE(sz.height >= 1.0F);
+}
+
+AURORA_TEST_CASE(rich_text_edit_color_follows_theme_when_unset) {
+    // 未显式设置当前输入色时，resolve_text_color 经 ctx 取主题 on_surface：
+    // 裸 ctx 回落 light（黑），注入 dark 主题翻面为白。
+    const BuildContext bare;
+    RichTextEdit edit;
+    AURORA_TEST_CHECK_FALSE(edit.current_color().has_value());
+    AURORA_TEST_CHECK(edit.resolve_text_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(edit.resolve_text_color(dark) == Color{0xFF, 0xFF, 0xFF});  // dark on_surface = 白
+}
+
+AURORA_TEST_CASE(rich_text_edit_explicit_color_overrides_theme) {
+    // 显式设置当前输入色后，resolve_text_color 忽略主题（即便注入 dark）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    RichTextEdit edit;
+    edit.set_current_color(Color{0xE0, 0x1B, 0x24});
+    AURORA_TEST_CHECK(edit.resolve_text_color(dark) == Color{0xE0, 0x1B, 0x24});
 }
 
 }  // namespace aurora::test_cases::utest_rich_text_edit

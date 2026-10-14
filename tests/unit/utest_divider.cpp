@@ -3,9 +3,12 @@
 /// 测试说明: 覆盖 Divider——默认属性、水平/垂直方向的布局尺寸（填满主轴、厚度作交叉轴）、
 /// 厚度与紧约束钳制、缩进链式 setter、序列化往返与 describe 元数据
 
+#include <memory>
 #include <string>
 
+#include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/divider.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -22,6 +25,17 @@ auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用
+/// （调用方持有 holder 即保证环境存活；BuildContext 本就只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
 }  // namespace
 
 AURORA_TEST_CASE(default_state_and_type_name) {
@@ -32,8 +46,8 @@ AURORA_TEST_CASE(default_state_and_type_name) {
     d.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "orientation"), "horizontal");
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "thickness"), 1.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "color"), 0)->as<int>().value(), 200);
-    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "color"), 3)->as<int>().value(), 255);
+    // 默认未显式设色：color 键不输出（遵循「跟随主题 outline_variant」语义，与 Button/Text 同口径）。
+    AURORA_TEST_CHECK_FALSE(props.contains("color"));
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "indent"), 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "end_indent"), 0.0F, 1e-4F);
 }
@@ -126,6 +140,26 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_TRUE(has_orientation);
     AURORA_TEST_CHECK_TRUE(has_thickness);
     AURORA_TEST_CHECK_TRUE(has_indent);
+}
+
+// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+
+AURORA_TEST_CASE(divider_color_follows_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题 outline_variant；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
+    const Divider d;
+    AURORA_TEST_CHECK(d.resolve_color(bare) == Color(0xC6, 0xC6, 0xC6));  // light outline_variant
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(d.resolve_color(dark) == Color(0x47, 0x47, 0x47));  // dark outline_variant
+}
+
+AURORA_TEST_CASE(divider_explicit_color_overrides_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    Divider d;
+    d.color = Color{10, 20, 30, 40};  // 刻意区别于两档 outline_variant
+    AURORA_TEST_CHECK(d.resolve_color(dark) == Color(10, 20, 30, 40));
 }
 
 }  // namespace aurora::test_cases::utest_divider

@@ -12,16 +12,18 @@
 #include "aurora/i18n/string_table.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/state/reactive.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/widget.h"
 
 namespace aurora {
 
 /// @brief Button 属性（聚合）。未显式设置的 optional 颜色按状态自动派生（hover/pressed
-/// 由背景色调暗得到，禁用态用统一灰化），与 Checkbox 「缺省跟随主题」语义一致。
+/// 由背景色调暗得到，禁用态用统一灰化）；背景色 / 文字色未显式设置时跟随主题
+/// （`roles.primary` / `roles.on_primary`），与 Checkbox 「缺省跟随主题」语义一致。
 struct ButtonProps {
     Reactive<LocalizedString> label;  ///< 按钮文字
-    Reactive<Color> color = Color::blue();  ///< 背景色
-    Color on_color = Color::white();  ///< 文字色
+    Reactive<std::optional<Color>> color;  ///< 背景色；空 = 跟随主题 primary（ThemeScope 换肤即生效）
+    std::optional<Color> on_color;  ///< 文字色；空 = 跟随主题 on_primary
     Font font = Font{};  ///< 字体
     float corner_radius = 6.0F;  ///< 圆角半径（dp），>0 时背景与圆角裁剪
     EdgeInsets padding =
@@ -230,15 +232,15 @@ class Button : public LeafWidget, public ButtonProps {
                      .json_type = "string"},
                     {.name = "color",
                      .type = "Color",
-                     .default_value = "Color::blue()",
+                     .default_value = "\"theme.primary\"",
                      .required = false,
-                     .note = "Background color",
+                     .note = "Background color (follows theme primary when unset)",
                      .json_type = "array"},
                     {.name = "on_color",
                      .type = "Color",
-                     .default_value = "Color::white()",
+                     .default_value = "\"theme.on_primary\"",
                      .required = false,
-                     .note = "Text color",
+                     .note = "Text color (follows theme on_primary when unset)",
                      .json_type = "array"},
                     {.name = "font_size",
                      .type = "float",
@@ -361,8 +363,13 @@ class Button : public LeafWidget, public ButtonProps {
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入 width/height/show 等通用属性
         props.set("label", label.get().text);
-        props.set("color", color_to_json(color.get()));
-        props.set("on_color", color_to_json(on_color));
+        // 背景色/文字色仅在显式设置时输出：保留「跟随主题」语义（与 Checkbox 同口径）
+        if (const auto &c = color.get(); c.has_value()) {
+            props.set("color", color_to_json(*c));
+        }
+        if (on_color.has_value()) {
+            props.set("on_color", color_to_json(*on_color));
+        }
         props.set("font_size", font.size_pt);
         props.set("corner_radius", corner_radius);
         props.set("padding", edge_insets_to_json(padding));
@@ -499,12 +506,13 @@ class Button : public LeafWidget, public ButtonProps {
     // ---- 继承扩展点：子类可单独覆盖某个绘制阶段，无需重写整个 on_paint ----
 
     /// @brief 解析当前状态（enabled/pressed/hover）下的背景色。
+    /// @param ctx 构建上下文：提供主题作用域，未显式设置 `color` 时取 `inherit_theme(ctx).roles.primary`。
     /// @return 启用态按 pressed/hover 取按下色/悬停色（缺省为基色加深），禁用态取禁用色（缺省浅灰）。
-    [[nodiscard]] virtual auto resolve_background() const -> Color {
+    [[nodiscard]] virtual auto resolve_background(const BuildContext &ctx) const -> Color {
         if (!enabled) {
             return disabled_color.value_or(Color{200, 200, 200, 255});
         }
-        const Color bg = color.get();
+        const Color bg = color.get().value_or(inherit_theme(ctx).roles.primary);
         if (pressed_) {
             return pressed_color.value_or(bg.shaded(0.80F));
         }
@@ -515,9 +523,11 @@ class Button : public LeafWidget, public ButtonProps {
     }
 
     /// @brief 解析当前状态下的文字色。
-    /// @return 启用态取 on_color；禁用态取禁用文字色（缺省中灰）。
-    [[nodiscard]] virtual auto resolve_text_color() const -> Color {
-        return enabled ? on_color : disabled_text_color.value_or(Color{130, 130, 130, 255});
+    /// @param ctx 构建上下文：提供主题作用域，未显式设置 `on_color` 时取 `inherit_theme(ctx).roles.on_primary`。
+    /// @return 启用态取 on_color（或其主题回退）；禁用态取禁用文字色（缺省中灰）。
+    [[nodiscard]] virtual auto resolve_text_color(const BuildContext &ctx) const -> Color {
+        return enabled ? on_color.value_or(inherit_theme(ctx).roles.on_primary)
+                       : disabled_text_color.value_or(Color{130, 130, 130, 255});
     }
 
     /// @brief 绘制背景（圆角填充）。

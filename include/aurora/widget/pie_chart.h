@@ -289,7 +289,7 @@ inline auto PieChart::on_layout(const Constraints &c, const BuildContext &ctx) -
     }
     s.width = std::max(s.width, 0.0F);
     s.height = std::max(s.height, 0.0F);
-    geom_ = compute_geometry(s, inherit_theme(ctx).font);
+    geom_ = compute_geometry(s, inherit_theme(ctx).type_scale.body_medium);
     return s;
 }
 
@@ -495,12 +495,12 @@ inline auto PieChart::deserialize_props(const Json &props) -> void {
 // 绘制顺序：扇区与扇内百分比标签 → 图例色块与名称 → 悬停值框（居中偏上并夹进控件边界）。
 inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     const Theme theme = inherit_theme(ctx);
-    const Font &font = theme.font;
+    const Font &font = theme.type_scale.body_medium;
     const Point origin = bounds.origin;
     const Geometry &g = geom_;
     const float line_h = render::FontEngine::measure_height(font) + 4.0F;
-    const Color grid = Color{theme.text.r, theme.text.g, theme.text.b, 31};
-    const Color axis = Color{theme.text.r, theme.text.g, theme.text.b, 160};
+    const Color grid = Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 31};
+    const Color axis = Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 160};
 
     constexpr float two_pi = 6.28318530717958647692F;
     constexpr float deg = 0.01745329251994329577F;
@@ -527,7 +527,7 @@ inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
         p.fill_sector(Point{.x = origin.x + g.center.x, .y = origin.y + g.center.y}, g.outer, g.inner, a0, a1, c);
         if (hovered_section_.has_value() && std::cmp_equal(*hovered_section_, i)) {
             p.stroke_arc(Point{.x = origin.x + g.center.x, .y = origin.y + g.center.y}, (g.outer + g.inner) * 0.5F,
-                         std::max(1.0F, g.outer - g.inner), a0, a1, theme.text);
+                         std::max(1.0F, g.outer - g.inner), a0, a1, theme.roles.on_surface);
         }
         if (show_percentage_labels && g.ratios[i] > 0.0F) {
             const float mid = (a0 + a1) * 0.5F;
@@ -574,11 +574,11 @@ inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
         const float bx = std::clamp(g.center.x + (g.outer * 0.5F), 0.0F, std::max(0.0F, bounds.size.width - w));
         const float by = std::clamp(g.center.y - g.outer - h - 4.0F, 0.0F, std::max(0.0F, bounds.size.height - h));
         const Rect box{.origin = Point{.x = origin.x + bx, .y = origin.y + by}, .size = Size{.width = w, .height = h}};
-        p.fill_rounded_rect(box, 4.0F, Color{theme.background.r, theme.background.g, theme.background.b, 242});
+        p.fill_rounded_rect(box, 4.0F, Color{theme.roles.surface.r, theme.roles.surface.g, theme.roles.surface.b, 242});
         p.draw_rounded_border(box, 4.0F, 1.0F, grid);
         const Rect text_box{.origin = Point{.x = origin.x + bx + 8.0F, .y = origin.y + by + 4.0F},
                             .size = Size{.width = w - 16.0F, .height = line_h}};
-        p.draw_text(text_box, text, font, theme.text);
+        p.draw_text(text_box, text, font, theme.roles.on_surface);
     }
 }
 

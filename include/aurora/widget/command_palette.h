@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "aurora/commands.h"
+#include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/core/log.h"
 #include "aurora/core/types.h"
@@ -24,6 +25,7 @@
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/descriptor.h"
+#include "aurora/widget/props_io.h"
 #include "aurora/widget/text_input.h"
 #include "aurora/widget/widget.h"
 
@@ -133,6 +135,42 @@ class CommandPalette : public Container {
                      .required = false,
                      .note = "i18n key for the empty-state text; setting it clears any text override",
                      .json_type = "string"},
+                    {.name = "surface_color",
+                     .type = "Color",
+                     .default_value = "\"theme.surface\"",
+                     .required = false,
+                     .note = "Card surface (follows theme surface when unset)",
+                     .json_type = "array"},
+                    {.name = "scrim_color",
+                     .type = "Color",
+                     .default_value = "\"theme.scrim\"",
+                     .required = false,
+                     .note = "Modal scrim tint (follows theme scrim when unset)",
+                     .json_type = "array"},
+                    {.name = "divider_color",
+                     .type = "Color",
+                     .default_value = "\"theme.outline_variant\"",
+                     .required = false,
+                     .note = "Divider tint (follows theme outline_variant when unset)",
+                     .json_type = "array"},
+                    {.name = "selected_color",
+                     .type = "Color",
+                     .default_value = "\"theme.primary\"",
+                     .required = false,
+                     .note = "Selected-row highlight (follows theme primary when unset)",
+                     .json_type = "array"},
+                    {.name = "text_color",
+                     .type = "Color",
+                     .default_value = "\"theme.on_surface\"",
+                     .required = false,
+                     .note = "Title text color (follows theme on_surface when unset)",
+                     .json_type = "array"},
+                    {.name = "muted_color",
+                     .type = "Color",
+                     .default_value = "\"theme.on_surface_variant\"",
+                     .required = false,
+                     .note = "Secondary/empty/hint text (follows theme on_surface_variant when unset)",
+                     .json_type = "array"},
                 },
             .events = {"on_execute", "on_close"},
             .children_policy = "none",
@@ -161,6 +199,25 @@ class CommandPalette : public Container {
         }
         if (empty_message_override_.has_value()) {
             props.set("empty_message", *empty_message_override_);
+        }
+        // 六处主题色仅在显式设置时输出：保留「跟随主题」语义（与 Button/Text 同口径）。
+        if (surface_color_.has_value()) {
+            props.set("surface_color", color_to_json(*surface_color_));
+        }
+        if (scrim_color_.has_value()) {
+            props.set("scrim_color", color_to_json(*scrim_color_));
+        }
+        if (divider_color_.has_value()) {
+            props.set("divider_color", color_to_json(*divider_color_));
+        }
+        if (selected_color_.has_value()) {
+            props.set("selected_color", color_to_json(*selected_color_));
+        }
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));
+        }
+        if (muted_color_.has_value()) {
+            props.set("muted_color", color_to_json(*muted_color_));
         }
     }
 
@@ -192,6 +249,25 @@ class CommandPalette : public Container {
         }
         if (const auto *v = props.at("empty_message"); v != nullptr) {
             set_empty_message(v->as_or<std::string>(""));
+        }
+        // 主题覆盖色仅在显式出现时读入 optional（缺失键保留「跟随主题」默认）。
+        if (const auto *v = props.at("surface_color"); v != nullptr) {
+            surface_color_ = json_to_color(*v);
+        }
+        if (const auto *v = props.at("scrim_color"); v != nullptr) {
+            scrim_color_ = json_to_color(*v);
+        }
+        if (const auto *v = props.at("divider_color"); v != nullptr) {
+            divider_color_ = json_to_color(*v);
+        }
+        if (const auto *v = props.at("selected_color"); v != nullptr) {
+            selected_color_ = json_to_color(*v);
+        }
+        if (const auto *v = props.at("text_color"); v != nullptr) {
+            text_color_ = json_to_color(*v);
+        }
+        if (const auto *v = props.at("muted_color"); v != nullptr) {
+            muted_color_ = json_to_color(*v);
         }
     }
 
@@ -287,6 +363,102 @@ class CommandPalette : public Container {
     /// @brief 关闭回调：Esc、点击遮罩、执行后均触发。
     /// @param cb 无参回调；覆盖既有值，传空 `std::function` 即取消回调。
     auto set_on_close(std::function<void()> cb) -> void { on_close_ = std::move(cb); }
+
+    /// @brief 设置卡片背景色（链式）；未设置时跟随主题 `roles.surface`（ThemeScope 换肤即生效）。
+    /// @param c 卡片背景色；写入 `surface_color_`。
+    /// @return 自身引用，便于链式调用。
+    auto surface_color(Color c) -> CommandPalette & {
+        surface_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 设置遮罩层色（链式）；未设置时跟随主题 `roles.scrim`（ThemeScope 换肤即生效）。
+    /// @param c 遮罩层色；写入 `scrim_color_`。
+    /// @return 自身引用，便于链式调用。
+    auto scrim_color(Color c) -> CommandPalette & {
+        scrim_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 设置分隔线色调（链式）；未设置时跟随主题 `roles.outline_variant`（ThemeScope 换肤即生效）。
+    /// @param c 分隔线色；写入 `divider_color_`。
+    /// @return 自身引用，便于链式调用。
+    auto divider_color(Color c) -> CommandPalette & {
+        divider_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 设置选中行高亮色（链式）；未设置时跟随主题 `roles.primary`（ThemeScope 换肤即生效）。
+    /// @param c 高亮色；写入 `selected_color_`。
+    /// @return 自身引用，便于链式调用。
+    auto selected_color(Color c) -> CommandPalette & {
+        selected_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 设置标题文字色（链式）；未设置时跟随主题 `roles.on_surface`（ThemeScope 换肤即生效）。
+    /// @param c 标题文字色；写入 `text_color_`。
+    /// @return 自身引用，便于链式调用。
+    auto text_color(Color c) -> CommandPalette & {
+        text_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 设置次要/空态/提示文字色（链式）；未设置时跟随主题 `roles.on_surface_variant`。
+    /// @param c 次要文字色；写入 `muted_color_`。
+    /// @return 自身引用，便于链式调用。
+    auto muted_color(Color c) -> CommandPalette & {
+        muted_color_ = c;
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 解析卡片背景色：未显式设色时取主题 `roles.surface`，显式设色优先。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效卡片背景色。
+    [[nodiscard]] auto resolve_surface_color(const BuildContext &ctx) const -> Color {
+        return surface_color_.value_or(inherit_theme(ctx).roles.surface);
+    }
+
+    /// @brief 解析遮罩层色：未显式设色时取主题 `roles.scrim`，显式设色优先。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效遮罩层色。
+    [[nodiscard]] auto resolve_scrim_color(const BuildContext &ctx) const -> Color {
+        return scrim_color_.value_or(inherit_theme(ctx).roles.scrim);
+    }
+
+    /// @brief 解析分隔线色调：未显式设色时取主题 `roles.outline_variant`，显式设色优先。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效分隔线色。
+    [[nodiscard]] auto resolve_divider_color(const BuildContext &ctx) const -> Color {
+        return divider_color_.value_or(inherit_theme(ctx).roles.outline_variant);
+    }
+
+    /// @brief 解析选中行高亮色：未显式设色时取主题 `roles.primary`，显式设色优先。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效高亮色。
+    [[nodiscard]] auto resolve_selected_color(const BuildContext &ctx) const -> Color {
+        return selected_color_.value_or(inherit_theme(ctx).roles.primary);
+    }
+
+    /// @brief 解析标题文字色：未显式设色时取主题 `roles.on_surface`，显式设色优先。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效标题文字色。
+    [[nodiscard]] auto resolve_text_color(const BuildContext &ctx) const -> Color {
+        return text_color_.value_or(inherit_theme(ctx).roles.on_surface);
+    }
+
+    /// @brief 解析次要文字色：未显式设色时取主题 `roles.on_surface_variant`，显式设色优先。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效次要文字色。
+    [[nodiscard]] auto resolve_muted_color(const BuildContext &ctx) const -> Color {
+        return muted_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
+    }
 
     /// @brief 打开面板：压入焦点作用域、清空查询、重建结果并安装键位绑定（已打开时为 no-op）。
     auto open() -> void {
@@ -452,30 +624,29 @@ class CommandPalette : public Container {
             return;
         }
         refresh_localized_texts(ctx);  // 绘制期按 ctx 的 locale 定稿文案（布局可能未跑或 locale 已变）
-        const Theme &theme = inherit_theme(ctx);
         const Rect card = to_global(card_box_, bounds);
 
-        // ① 半透明遮罩（与 Dialog 同款，视觉统一）
-        p.fill_rect(bounds, Color{0, 0, 0, 128});
+        // ① 半透明遮罩（与 Dialog 同款，视觉统一）：未显式设色时跟随主题 scrim（明暗两档均黑，观感不变）。
+        p.fill_rect(bounds, resolve_scrim_color(ctx).with_alpha(128));
 
-        // ② 居中圆角卡片
-        p.fill_rounded_rect(card, AURORA_CORNER_RADIUS, theme.background);
+        // ② 居中圆角卡片：未显式设色时跟随主题 surface（ThemeScope 换肤即生效）。
+        p.fill_rounded_rect(card, AURORA_CORNER_RADIUS, resolve_surface_color(ctx));
 
         // ③ 搜索框（子控件自绘）
         if (field_raw_ != nullptr) {
             field_raw_->paint(p, to_global(field_box(), bounds), ctx);
         }
 
-        // ④ 分隔线
+        // ④ 分隔线：未显式设色时跟随主题 outline_variant（ThemeScope 换肤即生效）。
         const float divider_y = card.origin.y + AURORA_CARD_PADDING + AURORA_FIELD_HEIGHT + (AURORA_GAP * 0.5F);
         p.fill_rect(Rect{.origin = Point{.x = card.origin.x, .y = divider_y},
                          .size = Size{.width = card.size.width, .height = 1.0F}},
-                    Color{0, 0, 0, 40});
+                    resolve_divider_color(ctx).with_alpha(40));
 
         // ⑤ 结果列表 / 空态
         const Font row_font{.size_pt = AURORA_ROW_FONT_SIZE};
         const float list_top = card.origin.y + AURORA_CARD_PADDING + AURORA_FIELD_HEIGHT + AURORA_GAP;
-        constexpr Color muted{150, 150, 152, 255};
+        const Color muted = resolve_muted_color(ctx);
         if (results_.empty()) {
             p.draw_text(Rect{.origin = Point{.x = card.origin.x + AURORA_CARD_PADDING, .y = list_top},
                              .size = Size{.width = card.size.width - (AURORA_CARD_PADDING * 2.0F),
@@ -490,11 +661,11 @@ class CommandPalette : public Container {
                     p.fill_rounded_rect(
                         Rect{.origin = Point{.x = card.origin.x + (AURORA_CARD_PADDING * 0.5F), .y = row_y},
                              .size = Size{.width = card.size.width - AURORA_CARD_PADDING, .height = AURORA_ROW_HEIGHT}},
-                        AURORA_ROW_CORNER_RADIUS, theme.primary.with_alpha(48));
+                        AURORA_ROW_CORNER_RADIUS, resolve_selected_color(ctx).with_alpha(48));
                 }
                 const Command &cmd = *results_[i];
                 const float text_y = row_y + ((AURORA_ROW_HEIGHT - text_h) * 0.5F);
-                const Color title_color = cmd.action ? theme.text : muted;
+                const Color title_color = cmd.action ? resolve_text_color(ctx) : muted;
                 p.draw_text(
                     Rect{.origin = Point{.x = card.origin.x + AURORA_CARD_PADDING, .y = text_y},
                          .size = Size{.width = (card.size.width * 0.7F) - AURORA_CARD_PADDING, .height = text_h}},
@@ -686,6 +857,14 @@ class CommandPalette : public Container {
     std::vector<int> key_bindings_;  ///< 打开期临时快捷键绑定 id
     std::function<void(const std::string &)> on_execute_;  ///< 执行回调
     std::function<void()> on_close_;  ///< 关闭回调
+
+    /// @brief 主题跟随色（CHG-011 迁移批）：未显式设色时经 `resolve_*` 回落对应主题角色，显式设色优先。
+    std::optional<Color> surface_color_;  ///< 卡片背景；空 = 跟随主题 surface
+    std::optional<Color> scrim_color_;  ///< 遮罩层；空 = 跟随主题 scrim
+    std::optional<Color> divider_color_;  ///< 分隔线；空 = 跟随主题 outline_variant
+    std::optional<Color> selected_color_;  ///< 选中行高亮；空 = 跟随主题 primary
+    std::optional<Color> text_color_;  ///< 标题文字；空 = 跟随主题 on_surface
+    std::optional<Color> muted_color_;  ///< 次要/空态/提示文字；空 = 跟随主题 on_surface_variant
 };
 
 }  // namespace aurora
