@@ -444,7 +444,7 @@ AURORA_TEST_CASE(codegen_from_widget_snapshot_compiles_shape) {
 
 AURORA_TEST_CASE(codegen_designated_initializers_follow_declaration_order) {
     // GCC 的 C++ 指定初始化器必须按成员**声明序**书写，而快照 JSON 的键序无字典序保证（插入序即存储序）。
-    // 属性顺序取自 `describe` 的 `prop_descriptors`（即 `*Props` 的声明序），乱序产物直接编译失败。
+    // 属性顺序取自 `describe` 的 `props` 表（即 `*Props` 的声明序），乱序产物直接编译失败。
     const au::Json props = testing::json_obj(
         {{"enabled", au::Json{false}},
          {"padding", testing::json_obj({{"top", 6.0F}, {"right", 12.0F}, {"bottom", 6.0F}, {"left", 12.0F}})},
@@ -470,7 +470,7 @@ AURORA_TEST_CASE(codegen_designated_initializers_follow_declaration_order) {
 
 AURORA_TEST_CASE(codegen_enum_values_canonicalized_from_self_description) {
     // 快照里的枚举取值可能来自手改 JSON 或外部 LLM（`"center"`），而声明是 `TextAlign::Center`：
-    // 按 `prop_descriptors[].enum` 忽略大小写规范化，产物才写得出真实的枚举项名。
+    // 按 `props[].enum` 忽略大小写规范化，产物才写得出真实的枚举项名。
     const std::string lower = to_code(make_text(testing::json_obj({{"content", "Hi"}, {"text_align", "center"}})));
     AURORA_TEST_CHECK_MSG(lower.find("au::TextAlign::Center") != std::string::npos,
                           "canonicalize: lowercase enum value → declared name");
@@ -503,7 +503,7 @@ AURORA_TEST_CASE(codegen_font_weight_and_enum_numeric_forms) {
 }
 
 AURORA_TEST_CASE(codegen_bare_number_for_length_prop_becomes_px) {
-    // `describe` 的 `default_props` 用裸数字承载 Length（`Skeleton.height: 16.0`），手写 JSON 也常这么写；
+    // `describe` 的 `props` 表用裸数字承载 Length（`Skeleton.height: 16.0`），手写 JSON 也常这么写；
     // `Length` 不可由 float 隐式转换，必须包成 `au::px(...)`。
     const std::string step =
         to_code(make_node("Stack", testing::json_obj({{"width", 240.0F}, {"height", 60.0F}})), CodeStyle::StepByStep);

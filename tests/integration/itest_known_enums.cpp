@@ -125,7 +125,7 @@ AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {
     std::vector<std::string> uncovered;
     std::size_t checked = 0;
     for (const auto &s : schemas) {
-        const auto *descriptors = s.find("prop_descriptors");
+        const auto *descriptors = s.find("props");
         if (descriptors == nullptr || !descriptors->is_array()) {
             continue;
         }

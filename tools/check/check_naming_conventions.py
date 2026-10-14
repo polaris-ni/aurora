@@ -74,15 +74,10 @@ def main():
         owner = w.get("type", "<unknown widget>")
         widget_count += 1
         check_name("widget type", owner, w.get("type"), PASCAL_RE, violations)
-        for k in (w.get("default_props") or {}):
-            prop_keys.add(k)
-        for k in w.get("props") or []:
-            prop_keys.add(k)
-        for k in (w.get("props_schema") or {}):
-            prop_keys.add(k)
-        for d in w.get("prop_descriptors") or []:
-            if isinstance(d, dict) and d.get("name"):
-                prop_keys.add(d["name"])
+        # 属性键取自单一权威表 props[].name
+        for p in w.get("props") or []:
+            if isinstance(p, dict) and p.get("name"):
+                prop_keys.add(p["name"])
         # events 序列化为扁平字符串序列，每三项一组：(name, signature, description)，
         # 如 ["on_select", "void(int)", "点击某项时回调…"]；事件名统一为 on_ 前缀 snake_case。
         for ev in w.get("events") or []:
