@@ -173,9 +173,9 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 `emit_props` 的每个键都要先经 **「类型自描述 + 落点登记表」** 换算成真实写入路径，才决定发射还是省略：
 
-1. **取值形态分派**（`emit_prop_value`）：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（字符串形态命中 string 分支）/ `Color`（`[r,g,b,a]`）/ `Length`（`["px",N]`、`["percent",N]`、`{"value","unit"}` 旧格式、`"auto"`/`"fill"`，以及 `describe` 的 `default_props` 里那种**裸数字**——按 px 语义包成 `au::px(N)`，因为 `Length` 不可由 `float` 隐式转换）/ `EdgeInsets` / 枚举（含 `font_weight`、`text_decoration` 专用分支）。产物一律 `au::` 限定，使代码在任意命名空间可编译。
-2. **枚举还原优先走自描述**（`descriptor_enum_expression`）：`prop_descriptors[].type` 给 C++ 枚举类型名、`prop_descriptors[].enum` 给合法取值名，取值按列表**忽略大小写规范化**（`"center"` → `au::TextAlign::Center`）。这消掉了旧登记表的两类错误：同名键跨类型的歧义（`fit`/`orientation`）与大小写不符声明的取值（`au::Orientation::horizontal`）。列表里没有该取值时保留原样输出，交由产物编译体检暴露。取值名不是合法标识符时（`FontWeight` 的 `"400"`，落点 `Font::weight` 本就是 int）不拼枚举项名。自描述未给取值集的类型仍回落 `enum_type_for_key` 键名登记表。
-3. **声明序**：指定初始化器必须按 `*Props` 的成员**声明序**书写（乱序 GCC 直接报 `designator order … does not match declaration order`），而快照 JSON 的键是字典序，故发射前按 `prop_descriptors` 的下标稳定排序；子节点槽排最前。StepByStep 无此约束，但沿用同一顺序便于两风格逐行对照。
+1. **取值形态分派**（`emit_prop_value`）：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（字符串形态命中 string 分支）/ `Color`（`[r,g,b,a]`）/ `Length`（`["px",N]`、`["percent",N]`、`{"value","unit"}` 旧格式、`"auto"`/`"fill"`，以及 schema `props` 表 `default` 里那种**裸数字**——按 px 语义包成 `au::px(N)`，因为 `Length` 不可由 `float` 隐式转换）/ `EdgeInsets` / 枚举（含 `font_weight`、`text_decoration` 专用分支）。产物一律 `au::` 限定，使代码在任意命名空间可编译。
+2. **枚举还原优先走自描述**（`descriptor_enum_expression`）：`props[].type` 给 C++ 枚举类型名、`props[].enum` 给合法取值名，取值按列表**忽略大小写规范化**（`"center"` → `au::TextAlign::Center`）。这消掉了旧登记表的两类错误：同名键跨类型的歧义（`fit`/`orientation`）与大小写不符声明的取值（`au::Orientation::horizontal`）。列表里没有该取值时保留原样输出，交由产物编译体检暴露。取值名不是合法标识符时（`FontWeight` 的 `"400"`，落点 `Font::weight` 本就是 int）不拼枚举项名。自描述未给取值集的类型仍回落 `enum_type_for_key` 键名登记表。
+3. **声明序**：指定初始化器必须按 `*Props` 的成员**声明序**书写（乱序 GCC 直接报 `designator order … does not match declaration order`），而快照 JSON 的键是字典序，故发射前按 `props` 表的数组下标（即声明序）稳定排序；子节点槽排最前。StepByStep 无此约束，但沿用同一顺序便于两风格逐行对照。
 4. **落点换算**：`prop_target` 登记表给出「键 → 成员路径 / 嵌套路径 / setter 名」，未登记时默认为同名成员；基类键走 `base_target`。`no_write_path` 显式登记「确认无写入通道」的键（`Scroll.offset`/`LazyRow.offset` 是运行态、`Image.image_width`/`image_height` 是解码派生值、`Skeleton.width`/`height` 需成对的 `set_size()`），`is_base_key` 则处理**同名遮蔽**：`Text` 的 `overflow`、`Skeleton` 的 `width`/`height`、`TitleBar` 的 `height` 都是控件自己的键（`serialize_props` 覆写了基类写入），不得按基类 `Length`/`OverflowStrategy` 发射。
 
 ### 2.5.2 能力边界：宁缺不伪
@@ -184,7 +184,7 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 - **类型没有通用构造入口**（`is_bespoke_ctor`，21 项）：位置参数构造（`Badge(count, child)`、`Drawer(content, panel, side, width)`、`Splitter`、`TabBar`、`PageView`、`Show`、`Timer`、`VideoPlayer`…）、类模板需实参（`Provider`/`Repeater`/`ReorderableList` 及其三个 `*Provider` 别名）、不在 `aurora` 命名空间下（`BreakpointBuilder`）、或子项本就惰性构建（`LazyRow`，`children_policy = "virtual"`）。对它们只生成空构造，**告警丢弃子节点**——硬编位置参数实参等于臆造 API。
 - **连空构造都不存在**（`is_unconstructible`，8 项：`BreakpointBuilder`/`Hero`/`LocaleProvider`/`MediaQueryProvider`/`Provider`/`ReorderableList`/`Repeater`/`ThemeProvider`）：产物按真实类型名发射 `au::T{}` 并告警点名「须手工补构造实参」，不改写成别的控件（替换比报错更难发现）。
-- **字段为 protected 且未登记 setter** 的类型（`Slider`/`Checkbox`/`Chip`/`Popup`…）：StepByStep 省略该属性并告警。全量类型体检（73 类型 × `default_props` 的 550 条属性）中，StepByStep 发射 342 条、告警省略 208 条；把 208 条补齐需要逐类型登记真实 setter，属可选增强，不影响产物可编译性。
+- **字段为 protected 且未登记 setter** 的类型（`Slider`/`Checkbox`/`Chip`/`Popup`…）：StepByStep 省略该属性并告警。全量类型体检（73 类型 × 550 条默认属性）中，StepByStep 发射 342 条、告警省略 208 条；把 208 条补齐需要逐类型登记真实 setter，属可选增强，不影响产物可编译性。
 - **取值形态无法还原**（如枚举属性给了数字、或命中 `Image`/`FlexWeight`/`Flex`/`Json` 这 4 类无专用分支的形态）：告警省略，不再静默。
 
 多子扁平容器（`Column` / `Row` / `Stack` / `Grid` / `Scroll` / `Card`）走免 `Props` 包裹的罗列形式。
@@ -205,7 +205,7 @@ std::string code = au::serialization::to_code(json, au::serialization::CodeStyle
 |:---|:---|:---|
 | 确定性生成 | `generate_ui(description) -> Result<Json>`<br>`validate_generate_ui(description) -> bool`（`generate_ui.h`） | 关键词匹配（**不依赖 LLM**）。覆盖面由 `serialization::list_all_components()` 派生 —— 新增控件无需改代码即可被识别；另有口语别名表。文案属性写**控件真实读的键**（`Text`→`content`、`Button`→`label`），不再硬编码 `text` |
 | prompt 投影 | `build_ui_prompt(types, opt) -> std::string`<br>`ui_prompt_for(description) -> std::string`（`ui_prompt.h`） | 把 schema 压缩成一段紧凑文本供外部 LLM 消费。`UiPromptOptions{include_children_policy, include_defaults, include_examples, max_types}`。`ui_prompt_for` 先用关键词探测相关类型、再补上 `Stack`/`Column`/`Row`/`Text`，避免把全量 schema 塞进上下文 |
-| 自修复环 | `repair_ui_tree(tree) -> Json`<br>`generate_ui_repair(description, llm = {}, max_attempts = 3) -> UiRepairResult`（`ui_prompt.h`） | 机修 + 重试。**机修优先**：未知类型（大小写/拼写）、缺属性（按 `default_props` 回填）、`children_policy=none` 却带子节点（丢弃）三类可确定性修好，不浪费一次 LLM 往返。修不了的才把 `ValidationError{path,message,suggestion}` 拼进 prompt 让 LLM 重来 |
+| 自修复环 | `repair_ui_tree(tree) -> Json`<br>`generate_ui_repair(description, llm = {}, max_attempts = 3) -> UiRepairResult`（`ui_prompt.h`） | 机修 + 重试。**机修优先**：未知类型（大小写/拼写）、缺属性（按 schema `props` 表的 `default` 回填）、`children_policy=none` 却带子节点（丢弃）三类可确定性修好，不浪费一次 LLM 往返。修不了的才把 `ValidationError{path,message,suggestion}` 拼进 prompt 让 LLM 重来 |
 
 `GenerateUiFn = std::function<Json(const std::string &prompt, const std::vector<ValidationError> &errors)>`
 由调用方注入；**不注入时只用关键词生成 + 机修**，仍然自洽可测。`UiRepairResult` 带逐轮 `history`
@@ -416,7 +416,7 @@ stdout（`AURORA_LOG_RAW`，无前缀）；失败行以 `[transport-error]` / `[
 
 | API | 说明 |
 |:---|:---|
-| `component_schema(type)` | 返回完整 JSON schema，含 `prop_descriptors`、`events`、`children_policy`、`examples` 增强字段（向后兼容原有 `props` / `default_props`） |
+| `component_schema(type)` | 返回完整 JSON schema，含单一 `props` 属性表（声明序、带类型/默认值/枚举等元数据）与 `events`、`children_policy`、`examples` 增强字段 |
 | `list_all_schemas()` | 返回所有已注册组件的完整 schema 列表（`std::vector<Json>`） |
 | `describe_component(type)` | 同 `component_schema`，公共别名 |
 | `search_components(keyword)` | 按名称模糊搜索已注册组件 |

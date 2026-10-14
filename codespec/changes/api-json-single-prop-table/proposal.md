@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-016 |
 | 提出日期 | 2026-10-14 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PERF.API.TOKEN-EFFICIENCY.001 |
 | 影响面 | 库内 describe 发射层（src/aurora/widget/serialization.cpp）与五个库内消费端（src/aurora/app/validate_ui.cpp、include/aurora/app/ui_prompt.h、include/aurora/app/generate_ui.h、include/aurora/widget/codegen.h 的 descriptors_for()、tools/servers/aurora_lsp.cpp）、error_codes 生成器（tools/gen/gen_error_codes.cpp）、两个门禁（tools/check/check_api_schema_sync.py、tools/check/check_naming_conventions.py）、五个测试文件（tests/integration/itest_cli.cpp、itest_mcp.cpp、itest_known_enums.cpp、itest_to_code.cpp、tests/unit/utest_ui_prompt.cpp）、codespec 文档与 manual-test 22-inspector；aurora_api.json 由生成器重建，不手改 |
 

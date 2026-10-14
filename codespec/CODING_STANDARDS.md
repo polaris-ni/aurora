@@ -359,7 +359,7 @@
 
 每个控件实现静态 `describe_static()`（注册表 / 工具链消费的完整 `WidgetDescriptor`，含属性 / 事件 / 子节点策略 / 示例）与必写的 `type_name()`；`describe()` 现由 `Widget` 提供默认实现（无富描述控件可省略 override），仅当需要额外 properties / events / children_policy 时才覆写。
 
-`component_schema()` 消费 `describe()` 输出并增强 `prop_descriptors` / `events` / `children_policy` / `examples` 字段；`list_all_schemas()` 批量返回全部已注册组件 schema；`aurora_api.json` 自动包含新字段。
+`component_schema()` 消费 `describe()` 输出并增强 `props`（单一属性表，含类型/默认值/枚举等元数据） / `events` / `children_policy` / `examples` 字段；`list_all_schemas()` 批量返回全部已注册组件 schema；`aurora_api.json` 自动包含新字段。
 
 ### 6.13 评分方法
 
