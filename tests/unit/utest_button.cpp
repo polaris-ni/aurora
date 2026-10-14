@@ -463,7 +463,7 @@ AURORA_TEST_CASE(button_colors_follow_theme_when_unset) {
 
     const auto [env, dark] = themed_ctx(Theme::dark());
     AURORA_TEST_CHECK(b.resolve_background(dark) == Color(0xC0, 0xC1, 0xFF));  // dark primary（WCAG 修正对）
-    AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color(0x00, 0x2B, 0x73));   // dark on_primary
+    AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color(0x00, 0x2B, 0x73));  // dark on_primary
 }
 
 AURORA_TEST_CASE(button_explicit_colors_override_theme) {

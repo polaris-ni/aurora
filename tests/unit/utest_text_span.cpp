@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "aurora/environment/environment.h"
 #include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/theming/theme.h"
 #include "aurora/widget/text_span.h"
 #include "framework/aurora_test.h"

@@ -121,7 +121,8 @@ AURORA_TEST_CASE(resolve_series_color_uses_chart_palette_extension) {
     const Theme themed = Theme::light().with_extension(ChartPalette::light());
     AURORA_TEST_CHECK_TRUE(resolve_series_color(0, std::nullopt, themed) == ChartPalette::light().palette.at(0));
     AURORA_TEST_CHECK_TRUE(resolve_series_color(2, std::nullopt, themed) == ChartPalette::light().palette.at(2));
-    AURORA_TEST_CHECK_TRUE(resolve_series_color(8, std::nullopt, themed) == ChartPalette::light().palette.at(0));  // 取模
+    AURORA_TEST_CHECK_TRUE(resolve_series_color(8, std::nullopt, themed) ==
+                           ChartPalette::light().palette.at(0));  // 取模
 
     // 显式色仍优先于扩展色板。
     const Color custom{1, 2, 3, 255};

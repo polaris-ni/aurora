@@ -48,9 +48,7 @@ auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, Build
     return {std::move(env), ctx};
 }
 
-auto two_steps() -> std::vector<StepperStep> {
-    return {StepperStep{.label = "Alpha"}, StepperStep{.label = "Beta"}};
-}
+auto two_steps() -> std::vector<StepperStep> { return {StepperStep{.label = "Alpha"}, StepperStep{.label = "Beta"}}; }
 
 }  // namespace
 
@@ -222,7 +220,7 @@ AURORA_TEST_CASE(stepper_colors_follow_theme_when_unset) {
     // 同时构造「当前步 / 非当前步」场景各取一次 resolve 值断言（resolve 仅依赖字段与 ctx）。
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
     Stepper s{two_steps(), 0};  // current=0 → 第 0 步为当前步，第 1 步为非当前步
-    AURORA_TEST_CHECK(s.resolve_active_color(bare) == Color::blue());        // light primary = (0,0,255)
+    AURORA_TEST_CHECK(s.resolve_active_color(bare) == Color::blue());  // light primary = (0,0,255)
     AURORA_TEST_CHECK(s.resolve_inactive_color(bare) == Color(0x47, 0x47, 0x47));  // light on_surface_variant
 
     const auto [env, dark] = themed_ctx(Theme::dark());
@@ -234,7 +232,7 @@ AURORA_TEST_CASE(stepper_explicit_colors_override_theme) {
     // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
     const auto [env, dark] = themed_ctx(Theme::dark());
     Stepper s{two_steps(), 0};
-    s.set_active_color(Color{0xE0, 0x1B, 0x24});   // error 红，刻意区别于两档 primary
+    s.set_active_color(Color{0xE0, 0x1B, 0x24});  // error 红，刻意区别于两档 primary
     s.set_inactive_color(Color{0x12, 0x34, 0x56});
     AURORA_TEST_CHECK(s.resolve_active_color(dark) == Color(0xE0, 0x1B, 0x24));
     AURORA_TEST_CHECK(s.resolve_inactive_color(dark) == Color(0x12, 0x34, 0x56));

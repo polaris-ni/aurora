@@ -1,5 +1,3 @@
-#include "aurora/event/event.h"
-
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -11,6 +9,7 @@
 #include "aurora/app/uri_list.h"
 #include "aurora/core/error_codes.h"
 #include "aurora/core/result.h"
+#include "aurora/event/event.h"
 #include "aurora/image/image_codec.h"
 
 #if defined(AURORA_ENABLE_DEBUG) && defined(AURORA_ENABLE_TEST_HOOKS)
@@ -67,9 +66,9 @@ auto DragPayload::files() const -> Result<std::vector<std::string>> {
     }
     // 解码只留可映射为本地路径的条目：非 file scheme 的行（http:// 等）静默跳过，
     // 完整原始行仍可经 bytes(uri-list) 取得。
-    return uri_list::decode(std::string_view(
-        reinterpret_cast<const char *>(raw.value().data()),  // NOLINT(*-pro-type-reinterpret-cast)
-        raw.value().size()));
+    return uri_list::decode(
+        std::string_view(reinterpret_cast<const char *>(raw.value().data()),  // NOLINT(*-pro-type-reinterpret-cast)
+                         raw.value().size()));
 }
 
 auto DragPayload::text() const -> Result<std::string> {
@@ -145,7 +144,8 @@ struct SystemDragTestBackend {
 auto system_drag::begin(const DragOffer &offer) -> Result<DragAction> {
     // 要约不合法是调用方参数问题，与「平台没有机制」是两类失败，分开报。
     if (offer.formats.empty() || !offer.provide) {
-        return make_error(ErrorCode::GeneralInvalidArgument, "system_drag::begin: empty formats or no provide callback");
+        return make_error(ErrorCode::GeneralInvalidArgument,
+                          "system_drag::begin: empty formats or no provide callback");
     }
 #ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
     {

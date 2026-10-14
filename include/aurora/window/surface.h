@@ -649,9 +649,7 @@ class HeadlessSurface : public Surface {
 
     /// @brief 测试 seam：模拟 OS 明暗偏好变化（系统深浅色切换）。
     /// @param scheme 模拟的 OS 档位（经 notify_os_color_scheme_change 触发回调）。
-    auto emit_os_color_scheme_change(ColorScheme scheme) const -> void {
-        notify_os_color_scheme_change(scheme);
-    }
+    auto emit_os_color_scheme_change(ColorScheme scheme) const -> void { notify_os_color_scheme_change(scheme); }
 
     /// @brief 测试 seam：设置 CSD 安全区内边距（模拟 Wayland 自绘装饰的预留区）。
     /// @param insets 模拟的各边内缩距离（经 `content_inset()` 上报给 `Window` 的自动下沉壳）。

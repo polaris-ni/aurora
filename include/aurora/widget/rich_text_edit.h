@@ -14,9 +14,9 @@
 #include "aurora/core/utf8.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/undo_stack.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/text_span.h"
 #include "aurora/widget/widget.h"
-#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 
 namespace aurora {
 

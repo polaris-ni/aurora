@@ -9,9 +9,9 @@
 #include <utility>
 
 #include "aurora/core/accessibility.h"
+#include "aurora/core/color.h"
 #include "aurora/event/gesture.h"
 #include "aurora/render/font_engine.h"
-#include "aurora/core/color.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/descriptor.h"

@@ -40,8 +40,8 @@ AURORA_TEST_CASE(default_follows_theme_roles_when_colors_unset) {
     // 裸 ctx（无主题注入）→ 回落 light 角色。
     const BuildContext bare;
     AURORA_TEST_CHECK(p.resolve_background(bare) == Color{0xFF, 0xFF, 0xFF});  // light surface
-    AURORA_TEST_CHECK(p.resolve_border(bare) == Color{0xE0, 0x1B, 0x24});      // light error
-    AURORA_TEST_CHECK(p.resolve_text(bare) == Color{0x47, 0x47, 0x47});        // light on_surface_variant
+    AURORA_TEST_CHECK(p.resolve_border(bare) == Color{0xE0, 0x1B, 0x24});  // light error
+    AURORA_TEST_CHECK(p.resolve_text(bare) == Color{0x47, 0x47, 0x47});  // light on_surface_variant
 }
 
 AURORA_TEST_CASE(chain_setters_update_state) {
@@ -142,13 +142,13 @@ AURORA_TEST_CASE(placeholder_colors_follow_theme_when_unset) {
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
     Placeholder p;
     AURORA_TEST_CHECK(p.resolve_background(bare) == Color{0xFF, 0xFF, 0xFF});  // light surface
-    AURORA_TEST_CHECK(p.resolve_border(bare) == Color{0xE0, 0x1B, 0x24});      // light error
-    AURORA_TEST_CHECK(p.resolve_text(bare) == Color{0x47, 0x47, 0x47});        // light on_surface_variant
+    AURORA_TEST_CHECK(p.resolve_border(bare) == Color{0xE0, 0x1B, 0x24});  // light error
+    AURORA_TEST_CHECK(p.resolve_text(bare) == Color{0x47, 0x47, 0x47});  // light on_surface_variant
 
     const auto [env, dark] = themed_ctx(Theme::dark());
     AURORA_TEST_CHECK(p.resolve_background(dark) == Color{0x20, 0x21, 0x24});  // dark surface
-    AURORA_TEST_CHECK(p.resolve_border(dark) == Color{0xE0, 0x1B, 0x24});      // dark error（明暗同值）
-    AURORA_TEST_CHECK(p.resolve_text(dark) == Color{0xC6, 0xC6, 0xC6});        // dark on_surface_variant
+    AURORA_TEST_CHECK(p.resolve_border(dark) == Color{0xE0, 0x1B, 0x24});  // dark error（明暗同值）
+    AURORA_TEST_CHECK(p.resolve_text(dark) == Color{0xC6, 0xC6, 0xC6});  // dark on_surface_variant
 }
 
 AURORA_TEST_CASE(placeholder_explicit_colors_override_theme) {

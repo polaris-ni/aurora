@@ -18,8 +18,8 @@
 #include <vector>
 
 #include "aurora/app/menu.h"
-#include "aurora/event/dispatcher.h"
 #include "aurora/environment/environment.h"
+#include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme.h"
@@ -408,8 +408,8 @@ AURORA_TEST_CASE(menu_bar_colors_follow_theme_when_unset) {
     const BuildContext bare;  // 无注入：inherit_theme 回落 light
     MenuBar bar;
     // 启用项文字 → on_surface；禁用项 → on_surface_variant。
-    AURORA_TEST_CHECK(bar.resolve_item_text_color(bare, true) == Color{0, 0, 0});        // light on_surface
-    AURORA_TEST_CHECK(bar.resolve_item_text_color(bare, false) == Color(71, 71, 71));    // light on_surface_variant
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(bare, true) == Color{0, 0, 0});  // light on_surface
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(bare, false) == Color(71, 71, 71));  // light on_surface_variant
     const auto [env, dark] = themed_ctx(Theme::dark());
     AURORA_TEST_CHECK(bar.resolve_item_text_color(dark, true) == Color{255, 255, 255});  // dark on_surface
     AURORA_TEST_CHECK(bar.resolve_item_text_color(dark, false) == Color(198, 198, 198));  // dark on_surface_variant

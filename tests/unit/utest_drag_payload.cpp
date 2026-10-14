@@ -161,7 +161,7 @@ AURORA_TEST_CASE(system_drag_test_backend_lifecycle) {
 AURORA_TEST_CASE(capability_bits_for_system_drag_are_false_until_backends_land) {
     // 立骨期锚定：后端尚未接线，任何 SurfaceKind 下都不得声称支持系统拖放。
     // 接线后会翻位，届时本用例由接线方按实测替换（它是过渡锚点，不是永久契约）。
-    const SurfaceKind kinds[] = {SurfaceKind::Headless, SurfaceKind::Win32,   SurfaceKind::Glfw, SurfaceKind::D3D11,
+    const SurfaceKind kinds[] = {SurfaceKind::Headless, SurfaceKind::Win32,   SurfaceKind::Glfw,  SurfaceKind::D3D11,
                                  SurfaceKind::X11,      SurfaceKind::Wayland, SurfaceKind::MacOS, SurfaceKind::Wasm};
     for (const SurfaceKind kind : kinds) {
         Platform p;

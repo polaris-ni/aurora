@@ -51,7 +51,8 @@ AURORA_TEST_CASE(roundtrip_preserves_utf8_multibyte_paths) {
 // 变异自证：把 `has_file_scheme` 的 scheme 比对删掉（改成「整行百分号解码」），`http://` 行会被
 // 当成路径返回，本用例的条数与取值断言同时转红。
 AURORA_TEST_CASE(decode_keeps_only_file_scheme_lines) {
-    const std::string payload = "file:///srv/aurora/one.txt\r\nhttp://example.com/two.txt\r\nfile:///srv/aurora/three.txt\r\n";
+    const std::string payload =
+        "file:///srv/aurora/one.txt\r\nhttp://example.com/two.txt\r\nfile:///srv/aurora/three.txt\r\n";
     const std::vector<std::string> expected{"/srv/aurora/one.txt", "/srv/aurora/three.txt"};
     AURORA_TEST_CHECK_EQ(decode(payload), expected);
 }
@@ -83,7 +84,8 @@ AURORA_TEST_CASE(encode_emits_one_file_uri_per_crlf_terminated_line) {
     AURORA_TEST_CHECK_STREQ(encode({"/srv/aurora/100%.txt"}), "file:///srv/aurora/100%25.txt\r\n");
     // 盘符路径不以 `/` 开头，编码侧补出空 authority 的第三个斜杠：`file:///C:%5Ca%20b.txt`。
     AURORA_TEST_CHECK_STREQ(encode({"C:\\a b.txt"}), "file:///C:%5Ca%20b.txt\r\n");
-    AURORA_TEST_CHECK_STREQ(encode({"/srv/aurora/one.txt", "/srv/aurora/two.txt"}), "file:///srv/aurora/one.txt\r\nfile:///srv/aurora/two.txt\r\n");
+    AURORA_TEST_CHECK_STREQ(encode({"/srv/aurora/one.txt", "/srv/aurora/two.txt"}),
+                            "file:///srv/aurora/one.txt\r\nfile:///srv/aurora/two.txt\r\n");
 }
 
 // 空清单编解码为空：空内容不是失败，也不该产生任何条目。

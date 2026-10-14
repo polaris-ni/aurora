@@ -574,22 +574,18 @@ AURORA_TEST_CASE(command_palette_colors_follow_theme_when_unset) {
     CommandPalette b{nullptr};
     AURORA_TEST_CHECK(b.resolve_surface_color(bare) == Color::white());  // light surface = white
     AURORA_TEST_CHECK(b.resolve_scrim_color(bare) == Color{0, 0, 0});  // light scrim = black
-    AURORA_TEST_CHECK(b.resolve_divider_color(bare) ==
-                      Color{0xC6, 0xC6, 0xC6});  // light outline_variant
+    AURORA_TEST_CHECK(b.resolve_divider_color(bare) == Color{0xC6, 0xC6, 0xC6});  // light outline_variant
     AURORA_TEST_CHECK(b.resolve_selected_color(bare) == Color::blue());  // light primary
     AURORA_TEST_CHECK(b.resolve_text_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
-    AURORA_TEST_CHECK(b.resolve_muted_color(bare) ==
-                      Color{0x47, 0x47, 0x47});  // light on_surface_variant
+    AURORA_TEST_CHECK(b.resolve_muted_color(bare) == Color{0x47, 0x47, 0x47});  // light on_surface_variant
 
     const auto [env, dark] = themed_ctx(Theme::dark());
     AURORA_TEST_CHECK(b.resolve_surface_color(dark) == Color{0x20, 0x21, 0x24});  // dark surface
     AURORA_TEST_CHECK(b.resolve_scrim_color(dark) == Color{0, 0, 0});  // dark scrim = black
-    AURORA_TEST_CHECK(b.resolve_divider_color(dark) ==
-                      Color{0x47, 0x47, 0x47});  // dark outline_variant
+    AURORA_TEST_CHECK(b.resolve_divider_color(dark) == Color{0x47, 0x47, 0x47});  // dark outline_variant
     AURORA_TEST_CHECK(b.resolve_selected_color(dark) == Color{0xC0, 0xC1, 0xFF});  // dark primary
     AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color{0xFF, 0xFF, 0xFF});  // dark on_surface = 白
-    AURORA_TEST_CHECK(b.resolve_muted_color(dark) ==
-                      Color{0xC6, 0xC6, 0xC6});  // dark on_surface_variant
+    AURORA_TEST_CHECK(b.resolve_muted_color(dark) == Color{0xC6, 0xC6, 0xC6});  // dark on_surface_variant
 }
 
 AURORA_TEST_CASE(command_palette_explicit_colors_override_theme) {

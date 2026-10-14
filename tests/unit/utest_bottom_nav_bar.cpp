@@ -118,17 +118,17 @@ AURORA_TEST_CASE(bottom_nav_bar_colors_follow_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
     const BuildContext bare;  // 无注入：inherit_theme 回落 light
     BottomNavBar bar;
-    AURORA_TEST_CHECK(bar.resolve_background(bare) == Color(255, 255, 255));       // light surface
-    AURORA_TEST_CHECK(bar.resolve_divider(bare) == Color(198, 198, 198));         // light outline_variant
-    AURORA_TEST_CHECK(bar.resolve_selected_color(bare) == Color(0, 0, 255));      // light primary
-    AURORA_TEST_CHECK(bar.resolve_unselected_color(bare) == Color(71, 71, 71));   // light on_surface_variant
-    AURORA_TEST_CHECK(bar.resolve_pill_color(bare) == Color(225, 224, 251));      // light secondary_container
+    AURORA_TEST_CHECK(bar.resolve_background(bare) == Color(255, 255, 255));  // light surface
+    AURORA_TEST_CHECK(bar.resolve_divider(bare) == Color(198, 198, 198));  // light outline_variant
+    AURORA_TEST_CHECK(bar.resolve_selected_color(bare) == Color(0, 0, 255));  // light primary
+    AURORA_TEST_CHECK(bar.resolve_unselected_color(bare) == Color(71, 71, 71));  // light on_surface_variant
+    AURORA_TEST_CHECK(bar.resolve_pill_color(bare) == Color(225, 224, 251));  // light secondary_container
     const auto [env, dark] = themed_ctx(Theme::dark());
-    AURORA_TEST_CHECK(bar.resolve_background(dark) == Color(32, 33, 36));         // dark surface
-    AURORA_TEST_CHECK(bar.resolve_divider(dark) == Color(71, 71, 71));            // dark outline_variant
+    AURORA_TEST_CHECK(bar.resolve_background(dark) == Color(32, 33, 36));  // dark surface
+    AURORA_TEST_CHECK(bar.resolve_divider(dark) == Color(71, 71, 71));  // dark outline_variant
     AURORA_TEST_CHECK(bar.resolve_selected_color(dark) == Color(192, 193, 255));  // dark primary
     AURORA_TEST_CHECK(bar.resolve_unselected_color(dark) == Color(198, 198, 198));  // dark on_surface_variant
-    AURORA_TEST_CHECK(bar.resolve_pill_color(dark) == Color(68, 69, 91));         // dark secondary_container
+    AURORA_TEST_CHECK(bar.resolve_pill_color(dark) == Color(68, 69, 91));  // dark secondary_container
 }
 
 AURORA_TEST_CASE(bottom_nav_bar_explicit_colors_override_theme) {
