@@ -899,3 +899,34 @@ initial bias 72 / initial n 0x80，前缀 `xn--`、定界符 `-`。
   的用例——`tests/fixtures/url_vectors/parse.tsv`（解析 / 规范化 / 拒绝，含 IDN 与 punycode 多次插入
   向量）与 `tests/fixtures/url_vectors/resolve.tsv`（RFC 3986 §5.4 两张示例表逐条照录）。语料的
   来源、格式与加行方式见该目录 `README.md`。
+
+## 12 通用解压能力（`core/compression.h`）
+
+### 12.1 定位与边界
+
+`aurora::compression` 回答一个问题：**「把一份按某种格式压缩的字节流还原成原始字节」**。它是 core 层共用基础件（与 `Headers` / `Url` 同格局），首个消费者是网络栈 HTTP 发起侧的 `Content-Encoding` 透明解压（见 `06-app-platform.md` §8.8.19 / §8.8.20）；任何需要「按格式解压」的模块复用本能力，不各自 vendored 一份 inflate。
+
+三条形态约束：
+
+- **格式显式入参，不做内容嗅探**：`CompressionFormat{Gzip, Zlib, Deflate}` 精确对应线上包装——`Gzip` = RFC 1952 包装、`Zlib` = RFC 1950 包装、`Deflate` = RFC 1951 裸 DEFLATE。HTTP 的 `Content-Encoding: deflate` 名义上是 zlib 格式但存在历史服务器发裸流的歧义，该歧义的消解（先试 `Zlib`、失败回落 `Deflate`）属 HTTP 层编排，不进本通用 API。
+- **解压炸弹防护是调用方的显式限额**：`DecompressOptions::max_output_bytes` 缺省不限；越限落 `compression-output-too-large`。知道业务上限的调用方（HTTP 发起侧的物化体上限）恒设此值。
+- **压缩方向只设计不实现**：`compress()` 恒落 `compression-unavailable`。仓内复用件 wuffs 对压缩格式只提供解码器（无任何编码器符号），本批不引入新 vendored 编码库、亦不手写 deflate 压缩机；待出现真实消费者时另立提案补齐。接口先立是为了让调用点形状稳定。
+
+构建开关 `AURORA_ENABLE_COMPRESSION`（默认 ON）门控本能力（见 `BUILD_OPTIONS.md`）；关闭时全部入口恒落 `compression-unavailable`（诚实降级，不静默把压缩字节当明文交出）。
+
+### 12.2 接口契约
+
+- `decompress(format, input, options) -> Result<std::vector<char>>`：一次性物化，内部 create → push 全量 → finish 收集。
+- `class Decompressor`：流式，大文件全程不物化。生命周期 create → 若干次 push → 一次 finish；`push` 空跨段合法（允许把一条流切成任意切分喂入）；单条流作用域——`finish` 后再 `push`、流完整后再来字节（trailing garbage）均落 `compression-data-corrupt`，与 `wire::ResponseAssembler` 同纪律。实例 move-only（持 wuffs 解码器句柄）。
+- `DecompressSink`：解压产物消费回调（`std::function<void(std::span<const char>)>`），同步调用。
+
+### 12.3 wuffs 驱动口径（跨轮协程）
+
+实现对三方件 wuffs（`third_party/wuffs`，单文件 C 库）的复用：`wuffs_{gzip,zlib,deflate}__decoder` 经 `transform_io` 从 src 压缩字节向 dst 产出解压字节。**wuffs 的 io_transformer 是可恢复协程**：每次调用从 `a_dst->meta.wi` 重建续写指针，并在挂起点把新产产物快照进内部 32 KiB 窗口。故驱动循环必须**保留 dst 写位置、消费只推进 `meta.ri`、缓冲满时 `compact`**；轮次间把 `meta.wi` 重置为 0 会令写位置回退、内部历史计数与缓冲区内容错位，表现为伪 `#deflate: bad distance`（小载荷单轮完成不触发，大载荷跨轮必触发——本批由 `utest_core_compression` 的三格式大夹具对拍钉死）。
+
+### 12.4 层边界与回归
+
+- 公共头只依赖标准库与 `core/result.h`；wuffs 只在实现 `src/aurora/core/compression.cpp` 出现（对齐 `core/image.cpp` 桥接编解码器的先例），`tools/check/check_core_layer_boundary.py` 守护头层不反向依赖。
+- 头随伞头 `aurora/aurora.h` 收录，`tools/check/umbrella_manifest.txt` 同步；`CompressionFormat` 登记 `tools/include/known_enums.h` 并在 `tests/integration/itest_known_enums.cpp` 加编译期锚点。
+- 错误码三枚（`codespec/errors.toml` 登记 → 生成 `error_codes.gen.h` 与 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）：`compression-data-corrupt`（流损坏 / 截断 / trailing garbage）、`compression-output-too-large`（越 `max_output_bytes`）、`compression-unavailable`（格式未编入——宏关；或压缩方向未实现——detail 注明）。
+- 回归 `utest_core_compression`（12 例，纯内存、零网络零平台分支）：三格式小载荷逐值往返、截断与中部损坏落 corrupt、炸弹上限差一字节即拒（等于即放）、流式逐字节喂入与一次性对拍且大产物经 Sink 多段交出（三格式大载荷各一遍）、trailing garbage 与 finish 后再 push 落 corrupt、finish 幂等、移动后使用源实例报错、`compress` 恒 unsupported、空输入落 corrupt。`AURORA_ENABLE_COMPRESSION` 关闭时全部用例按 TEST-R6 纪律恒注册体内 SKIP。

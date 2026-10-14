@@ -230,6 +230,11 @@ if (AURORA_BUILD_TESTS)
                 target_compile_options(${tgt} PRIVATE /fp:precise)
             endif ()
         endif ()
+        # 压缩能力宏在 aurora 上为 PRIVATE（消费者不可见，见 AuroraCompression.cmake）；
+        # 测试 TU 与库 TU 必须同口径，故按选项向 runner 同步注入（对齐上方 SIMD 的处理）。
+        if (AURORA_ENABLE_COMPRESSION)
+            target_compile_definitions(${tgt} PRIVATE AURORA_ENABLE_COMPRESSION)
+        endif ()
         if (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
             # /STACK：MSVC 系链接器（link.exe / lld-link）默认栈保留仅 1MB，而 JSON 解析器是
             # 递归下降（parse_value → parse_object/parse_array → parse_value），max_depth=512

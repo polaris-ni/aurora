@@ -91,74 +91,77 @@ enum class ErrorCode : std::uint16_t { // NOLINT(*-enum-size)
     JsonDepthExceeded = 47,  ///< json-depth-exceeded
     JsonTypeMismatch = 48,  ///< json-type-mismatch: JSON type mismatch: expected {expected}, got {actual}
     JsonValueNotSerializable = 49,  ///< json-value-not-serializable: Value cannot be serialized to JSON: {detail}
-    StorageBackendUnavailable = 50,  ///< storage-backend-unavailable
-    StorageRecordNotFound = 51,  ///< storage-record-not-found: Storage record does not exist
-    StorageRecordCorrupt = 52,  ///< storage-record-corrupt
-    StorageTypeMismatch = 53,  ///< storage-type-mismatch: Typed read type mismatch
-    StorageEncodingMismatch = 54,  ///< storage-encoding-mismatch: Serialized wire format mismatch
-    StorageIoError = 55,  ///< storage-io-error: Storage underlying I/O failed
-    AudioGraphCycle = 56,  ///< audio-graph-cycle: Audio graph connection would create a cycle ({src} -> {dst})
-    AudioEdgeNotFound = 57,  ///< audio-edge-not-found: Audio connection does not exist and cannot be disconnected
-    AudioContextClosed = 58,  ///< audio-context-closed
-    AudioParamInvalid = 59,  ///< audio-param-invalid: Invalid audio parameter automation ({reason})
-    AudioBufferInvalid = 60,  ///< audio-buffer-invalid: Invalid audio buffer ({reason})
-    AudioDeviceUnavailable = 61,  ///< audio-device-unavailable
-    AudioRecordingFailed = 62,  ///< audio-recording-failed: Audio recording failed: {reason}
-    CliSpecInvalid = 63,  ///< cli-spec-invalid: Invalid command spec: {reason}
-    CliUnknownOption = 64,  ///< cli-unknown-option: Unknown option '{option}' for command '{command}'
-    CliUnknownSubcommand = 65,  ///< cli-unknown-subcommand: Unknown subcommand '{subcommand}' for command '{command}'
-    CliMissingSubcommand = 66,  ///< cli-missing-subcommand: Command '{command}' requires a subcommand
-    CliMissingValue = 67,  ///< cli-missing-value: Option '{option}' requires a value
-    CliInvalidValue = 68,  ///< cli-invalid-value: Value '{value}' is not a valid {kind} for option '{option}'
-    CliChoiceInvalid = 69,  ///< cli-choice-invalid
-    CliRangeViolated = 70,  ///< cli-range-violated: Value '{value}' for option '{option}' is outside [{min}, {max}]
-    CliArityViolated = 71,  ///< cli-arity-violated
-    CliMissingRequired = 72,  ///< cli-missing-required: Required option '{option}' is missing for command '{command}'
-    CliTooManyPositionals = 73,  ///< cli-too-many-positionals
-    CliConflictViolated = 74,  ///< cli-conflict-violated: Options '{option}' and '{conflict}' cannot be used together
-    ClipboardAccessFailed = 75,  ///< clipboard-access-failed: System clipboard is inaccessible: '{detail}'
-    ClipboardWriteFailed = 76,  ///< clipboard-write-failed: Clipboard payload could not be committed: '{detail}'
-    NetRuntimeFailed = 77,  ///< net-runtime-failed: Socket runtime initialization failed
-    NetSocketFailed = 78,  ///< net-socket-failed: Socket creation failed
-    NetBindFailed = 79,  ///< net-bind-failed: Socket bind on loopback failed
-    NetListenFailed = 80,  ///< net-listen-failed: Socket listen failed
-    NetAcceptFailed = 81,  ///< net-accept-failed: Socket accept failed
-    NetConnectFailed = 82,  ///< net-connect-failed: Connect to loopback endpoint failed
-    NetTimeoutOptionFailed = 83,  ///< net-timeout-option-failed: Socket timeout option could not be set
-    NetWaitFailed = 84,  ///< net-wait-failed: Socket readiness wait failed
-    NetSendFailed = 85,  ///< net-send-failed: Socket send failed
-    NetRecvFailed = 86,  ///< net-recv-failed: Socket receive failed
-    NetRecvTimeout = 87,  ///< net-recv-timeout: Socket receive timed out
-    SystemDragNotSupported = 88,  ///< system-drag-not-supported: System drag-and-drop unavailable: '{detail}'
-    SystemDragSessionFailed = 89,  ///< system-drag-session-failed: System drag-and-drop session failed: '{detail}'
-    NetEndpointInvalid = 90,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
-    NetCancelled = 91,  ///< net-cancelled: Network operation was cancelled
-    NetPlatformUnavailable = 92,  ///< net-platform-unavailable
-    NetUrlInvalid = 93,  ///< net-url-invalid: URL is not a valid absolute or resolvable reference: '{detail}'
-    NetProxyConfigInvalid = 94,  ///< net-proxy-config-invalid: Proxy configuration is not valid: '{detail}'
-    NetProxyUnsupported = 95,  ///< net-proxy-unsupported: This proxy protocol is not supported by the current build
-    NetProxyUnreachable = 96,  ///< net-proxy-unreachable: Proxy tunnel could not be established: '{detail}'
-    NetProxyAuthRequired = 97,  ///< net-proxy-auth-required: Proxy rejected the supplied credentials: '{detail}'
-    NetProxyProtocol = 98,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
-    NetDnsFailed = 99,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
-    NetProxyConfigUnreadable = 100,  ///< net-proxy-config-unreadable
-    NetOptionFailed = 101,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
-    NetConnectTimeout = 102,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
-    NetBufferLimit = 103,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
-    NetFramerOverflow = 104,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
-    NetFramerConfigInvalid = 105,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
-    NetOptionConflict = 106,  ///< net-option-conflict
-    NetTlsHandshakeFailed = 107,  ///< net-tls-handshake-failed: TLS handshake failed: '{detail}'
-    NetTlsCertRejected = 108,  ///< net-tls-cert-rejected: TLS certificate rejected: '{detail}'
-    NetTlsVersionMismatch = 109,  ///< net-tls-version-mismatch: TLS protocol version mismatch: '{detail}'
-    NetTlsEngineUnavailable = 110,  ///< net-tls-engine-unavailable: No TLS backend available: '{detail}'
-    NetTlsPinMismatch = 111,  ///< net-tls-pin-mismatch: TLS certificate pin mismatch: '{detail}'
-    HttpRequestInvalid = 112,  ///< http-request-invalid: HTTP request cannot be sent as written: '{detail}'
-    HttpTimeout = 113,  ///< http-timeout: HTTP request timed out: '{detail}'
-    HttpRedirectLimit = 114,  ///< http-redirect-limit: HTTP redirect chain exceeded the configured limit: '{detail}'
-    HttpBodyTooLarge = 115,  ///< http-body-too-large: HTTP response body exceeds the configured limit: '{detail}'
-    HttpCharsetUnsupported = 116,  ///< http-charset-unsupported: HTTP response charset is not supported: '{detail}'
-    HttpProtocolError = 117,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
+    CompressionDataCorrupt = 50,  ///< compression-data-corrupt: Compressed stream is corrupt or truncated: '{detail}'
+    CompressionOutputTooLarge = 51,  ///< compression-output-too-large
+    CompressionUnavailable = 52,  ///< compression-unavailable
+    StorageBackendUnavailable = 53,  ///< storage-backend-unavailable
+    StorageRecordNotFound = 54,  ///< storage-record-not-found: Storage record does not exist
+    StorageRecordCorrupt = 55,  ///< storage-record-corrupt
+    StorageTypeMismatch = 56,  ///< storage-type-mismatch: Typed read type mismatch
+    StorageEncodingMismatch = 57,  ///< storage-encoding-mismatch: Serialized wire format mismatch
+    StorageIoError = 58,  ///< storage-io-error: Storage underlying I/O failed
+    AudioGraphCycle = 59,  ///< audio-graph-cycle: Audio graph connection would create a cycle ({src} -> {dst})
+    AudioEdgeNotFound = 60,  ///< audio-edge-not-found: Audio connection does not exist and cannot be disconnected
+    AudioContextClosed = 61,  ///< audio-context-closed
+    AudioParamInvalid = 62,  ///< audio-param-invalid: Invalid audio parameter automation ({reason})
+    AudioBufferInvalid = 63,  ///< audio-buffer-invalid: Invalid audio buffer ({reason})
+    AudioDeviceUnavailable = 64,  ///< audio-device-unavailable
+    AudioRecordingFailed = 65,  ///< audio-recording-failed: Audio recording failed: {reason}
+    CliSpecInvalid = 66,  ///< cli-spec-invalid: Invalid command spec: {reason}
+    CliUnknownOption = 67,  ///< cli-unknown-option: Unknown option '{option}' for command '{command}'
+    CliUnknownSubcommand = 68,  ///< cli-unknown-subcommand: Unknown subcommand '{subcommand}' for command '{command}'
+    CliMissingSubcommand = 69,  ///< cli-missing-subcommand: Command '{command}' requires a subcommand
+    CliMissingValue = 70,  ///< cli-missing-value: Option '{option}' requires a value
+    CliInvalidValue = 71,  ///< cli-invalid-value: Value '{value}' is not a valid {kind} for option '{option}'
+    CliChoiceInvalid = 72,  ///< cli-choice-invalid
+    CliRangeViolated = 73,  ///< cli-range-violated: Value '{value}' for option '{option}' is outside [{min}, {max}]
+    CliArityViolated = 74,  ///< cli-arity-violated
+    CliMissingRequired = 75,  ///< cli-missing-required: Required option '{option}' is missing for command '{command}'
+    CliTooManyPositionals = 76,  ///< cli-too-many-positionals
+    CliConflictViolated = 77,  ///< cli-conflict-violated: Options '{option}' and '{conflict}' cannot be used together
+    ClipboardAccessFailed = 78,  ///< clipboard-access-failed: System clipboard is inaccessible: '{detail}'
+    ClipboardWriteFailed = 79,  ///< clipboard-write-failed: Clipboard payload could not be committed: '{detail}'
+    NetRuntimeFailed = 80,  ///< net-runtime-failed: Socket runtime initialization failed
+    NetSocketFailed = 81,  ///< net-socket-failed: Socket creation failed
+    NetBindFailed = 82,  ///< net-bind-failed: Socket bind on loopback failed
+    NetListenFailed = 83,  ///< net-listen-failed: Socket listen failed
+    NetAcceptFailed = 84,  ///< net-accept-failed: Socket accept failed
+    NetConnectFailed = 85,  ///< net-connect-failed: Connect to loopback endpoint failed
+    NetTimeoutOptionFailed = 86,  ///< net-timeout-option-failed: Socket timeout option could not be set
+    NetWaitFailed = 87,  ///< net-wait-failed: Socket readiness wait failed
+    NetSendFailed = 88,  ///< net-send-failed: Socket send failed
+    NetRecvFailed = 89,  ///< net-recv-failed: Socket receive failed
+    NetRecvTimeout = 90,  ///< net-recv-timeout: Socket receive timed out
+    SystemDragNotSupported = 91,  ///< system-drag-not-supported: System drag-and-drop unavailable: '{detail}'
+    SystemDragSessionFailed = 92,  ///< system-drag-session-failed: System drag-and-drop session failed: '{detail}'
+    NetEndpointInvalid = 93,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
+    NetCancelled = 94,  ///< net-cancelled: Network operation was cancelled
+    NetPlatformUnavailable = 95,  ///< net-platform-unavailable
+    NetUrlInvalid = 96,  ///< net-url-invalid: URL is not a valid absolute or resolvable reference: '{detail}'
+    NetProxyConfigInvalid = 97,  ///< net-proxy-config-invalid: Proxy configuration is not valid: '{detail}'
+    NetProxyUnsupported = 98,  ///< net-proxy-unsupported: This proxy protocol is not supported by the current build
+    NetProxyUnreachable = 99,  ///< net-proxy-unreachable: Proxy tunnel could not be established: '{detail}'
+    NetProxyAuthRequired = 100,  ///< net-proxy-auth-required: Proxy rejected the supplied credentials: '{detail}'
+    NetProxyProtocol = 101,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
+    NetDnsFailed = 102,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
+    NetProxyConfigUnreadable = 103,  ///< net-proxy-config-unreadable
+    NetOptionFailed = 104,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
+    NetConnectTimeout = 105,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
+    NetBufferLimit = 106,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
+    NetFramerOverflow = 107,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
+    NetFramerConfigInvalid = 108,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
+    NetOptionConflict = 109,  ///< net-option-conflict
+    NetTlsHandshakeFailed = 110,  ///< net-tls-handshake-failed: TLS handshake failed: '{detail}'
+    NetTlsCertRejected = 111,  ///< net-tls-cert-rejected: TLS certificate rejected: '{detail}'
+    NetTlsVersionMismatch = 112,  ///< net-tls-version-mismatch: TLS protocol version mismatch: '{detail}'
+    NetTlsEngineUnavailable = 113,  ///< net-tls-engine-unavailable: No TLS backend available: '{detail}'
+    NetTlsPinMismatch = 114,  ///< net-tls-pin-mismatch: TLS certificate pin mismatch: '{detail}'
+    HttpRequestInvalid = 115,  ///< http-request-invalid: HTTP request cannot be sent as written: '{detail}'
+    HttpTimeout = 116,  ///< http-timeout: HTTP request timed out: '{detail}'
+    HttpRedirectLimit = 117,  ///< http-redirect-limit: HTTP redirect chain exceeded the configured limit: '{detail}'
+    HttpBodyTooLarge = 118,  ///< http-body-too-large: HTTP response body exceeds the configured limit: '{detail}'
+    HttpCharsetUnsupported = 119,  ///< http-charset-unsupported: HTTP response charset is not supported: '{detail}'
+    HttpProtocolError = 120,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -176,7 +179,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 118> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 121> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -777,6 +780,42 @@ inline constexpr std::array<ErrorMeta, 118> AURORA_ERROR_TABLE = {
             .retryable = false,
             .message_tpl = "Value cannot be serialized to JSON: {detail}",
             .hint = "JSON has no textual form for NaN/Inf; replace the value or drop it",
+        },
+        {
+            .code = ErrorCode::CompressionDataCorrupt,
+            .ident = "CompressionDataCorrupt",
+            .slug = "compression-data-corrupt",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "Compressed stream is corrupt or truncated: '{detail}'",
+            .hint = "The bytes do not form a valid gzip/zlib/deflate stream (bad magic, truncated mid-symbol, or trailing checksum mismatch). Verify the payload was not cut in transit; retrying the same bytes reproduces the same rejection, so this is a data problem rather than a transient one",
+        },
+        {
+            .code = ErrorCode::CompressionOutputTooLarge,
+            .ident = "CompressionOutputTooLarge",
+            .slug = "compression-output-too-large",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Decompressed output exceeds the configured limit: '{detail}'",
+            .hint = "The stream is valid but its decompressed size crossed DecompressOptions::max_output_bytes, the decompression-bomb guard. Raise the limit if the payload is legitimately large, or stream it with Decompressor and process chunks as they arrive instead of materializing everything",
+        },
+        {
+            .code = ErrorCode::CompressionUnavailable,
+            .ident = "CompressionUnavailable",
+            .slug = "compression-unavailable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Compression operation unavailable in this build: '{detail}'",
+            .hint = "Either the format is not compiled in (the AURORA_ENABLE_COMPRESSION build option gates gzip/zlib/deflate decompression) or the direction is not implemented (this batch ships decompression only; the compress entry point is designed but returns this error until an encoder lands). Decompressing with AURORA_ENABLE_COMPRESSION=ON is the available path",
         },
         {
             .code = ErrorCode::StorageBackendUnavailable,

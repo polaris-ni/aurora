@@ -283,6 +283,9 @@ endif ()
 # 把各 codec 的 OBJECT 库链入 aurora，若 aurora 目标尚未创建会报 "not built by this project"。
 # feature 宏单一入口（aurora_define_feature）须先于首个调用点加载。
 include(AuroraFeatures)
+# 压缩能力须先于图片编解码：wuffs OBJECT 库由 AuroraCompression 统一持有（并集条件），
+# AuroraImageCodecs 的 PNG 块只保留宏注入，不再自建 OBJECT 库。
+include(AuroraCompression)
 include(AuroraImageCodecs)
 
 # ---- PCH 门控决策（库自身与消费者共用单一真相变量 AURORA_PCH_ENABLED） ----

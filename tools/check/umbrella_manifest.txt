@@ -42,6 +42,7 @@ aurora/core/accessibility.h
 aurora/core/aurora_assert.h
 aurora/core/color.h
 aurora/core/color_space.h
+aurora/core/compression.h
 aurora/core/debug.h
 aurora/core/diagnostics.h
 aurora/core/duration.h

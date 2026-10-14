@@ -583,6 +583,39 @@ message = "Value cannot be serialized to JSON: {detail}"
 hint = "JSON has no textual form for NaN/Inf; replace the value or drop it"
 
 [[error]]
+enum = "CompressionDataCorrupt"
+slug = "compression-data-corrupt"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Compressed stream is corrupt or truncated: '{detail}'"
+hint = "The bytes do not form a valid gzip/zlib/deflate stream (bad magic, truncated mid-symbol, or trailing checksum mismatch). Verify the payload was not cut in transit; retrying the same bytes reproduces the same rejection, so this is a data problem rather than a transient one"
+
+[[error]]
+enum = "CompressionOutputTooLarge"
+slug = "compression-output-too-large"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "Decompressed output exceeds the configured limit: '{detail}'"
+hint = "The stream is valid but its decompressed size crossed DecompressOptions::max_output_bytes, the decompression-bomb guard. Raise the limit if the payload is legitimately large, or stream it with Decompressor and process chunks as they arrive instead of materializing everything"
+
+[[error]]
+enum = "CompressionUnavailable"
+slug = "compression-unavailable"
+category = "io"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "Compression operation unavailable in this build: '{detail}'"
+hint = "Either the format is not compiled in (the AURORA_ENABLE_COMPRESSION build option gates gzip/zlib/deflate decompression) or the direction is not implemented (this batch ships decompression only; the compress entry point is designed but returns this error until an encoder lands). Decompressing with AURORA_ENABLE_COMPRESSION=ON is the available path"
+
+[[error]]
 enum = "StorageBackendUnavailable"
 slug = "storage-backend-unavailable"
 category = "io"

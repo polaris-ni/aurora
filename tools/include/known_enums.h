@@ -170,6 +170,9 @@ namespace aurora::tools {
     enums["ShutdownMode"] = {"Read", "Write", "Both"};
     enums["TlsVersion"] = {"Tls10", "Tls11", "Tls12", "Tls13"};
 
+    // ---- compression (aurora::CompressionFormat, core/compression.h) ----
+    enums["CompressionFormat"] = {"Gzip", "Zlib", "Deflate"};
+
     // ---- declarative binding (aurora::Resource / aurora::StreamResource, state/resource.h) ----
     enums["ResourcePhase"] = {"Loading", "Ready", "Failed"};
     enums["StreamPolicy"] = {"Append", "Replace"};

@@ -46,7 +46,7 @@ namespace {
            static_cast<int>(aurora::net::LengthByteOrder::Little) + static_cast<int>(aurora::net::ProxyKind::Socks5) +
            static_cast<int>(aurora::net::ShutdownMode::Both) + static_cast<int>(aurora::net::TlsVersion::Tls13) +
            static_cast<int>(aurora::net::http::Method::Delete) + static_cast<int>(aurora::ResourcePhase::Failed) +
-           static_cast<int>(aurora::StreamPolicy::Replace);
+           static_cast<int>(aurora::StreamPolicy::Replace) + static_cast<int>(aurora::CompressionFormat::Deflate);
 }
 
 /// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。

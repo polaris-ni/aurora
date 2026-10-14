@@ -157,21 +157,12 @@ endif ()
 
 # ---------------------------------------------------------------------------
 # PNG / GIF (wuffs) —— 单文件 C 库，最易接入
+# wuffs OBJECT 库（aurora_wuffs）已上移 AuroraCompression.cmake 统一持有，创建条件为
+# 「PNG ∨ COMPRESSION」并集（压缩能力与图片编解码共用同一份编译产物，避免双份符号
+# 链接冲突）；本块只保留能力宏注入，codec TU 经 AURORA_ENABLE_IMAGE_PNG 门控，
+# OFF 时该 TU 为空、不会引入悬空引用。
 # ---------------------------------------------------------------------------
 if (AURORA_ENABLE_IMAGE_PNG)
     # PRIVATE 注入且不导出：编解码能力属库内部，消费者与安装后口径一致（无该宏）。
     aurora_define_feature(AURORA_ENABLE_IMAGE_PNG SCOPE PRIVATE)
-    set(_WUFFS_C ${AURORA_SOURCE_DIR}/third_party/wuffs/release/c/wuffs-v0.3.c)
-    add_library(aurora_wuffs OBJECT ${_WUFFS_C})
-    set_source_files_properties(${_WUFFS_C} PROPERTIES LANGUAGE C)
-    target_compile_definitions(aurora_wuffs PRIVATE WUFFS_IMPLEMENTATION)
-    # -std=c99 为 GCC/Clang 专属；MSVC 对 C 目标用默认标准即可。
-    if (MSVC)
-        target_compile_options(aurora_wuffs PRIVATE /w)
-    else ()
-        target_compile_options(aurora_wuffs PRIVATE -std=c99 -w)
-    endif ()
-    target_include_directories(aurora_wuffs PRIVATE ${AURORA_SOURCE_DIR}/third_party/wuffs/release/c)
-    target_include_directories(aurora PRIVATE ${AURORA_SOURCE_DIR}/third_party)
-    target_link_libraries(aurora PRIVATE aurora_wuffs)
 endif ()

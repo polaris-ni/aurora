@@ -50,6 +50,7 @@
 #include "aurora/core/aurora_assert.h"
 #include "aurora/core/color.h"
 #include "aurora/core/color_space.h"
+#include "aurora/core/compression.h"
 #include "aurora/core/debug.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/duration.h"
