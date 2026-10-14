@@ -537,12 +537,33 @@ auto EventDispatcher::dispatch(Widget &root, ScrollEvent &e) -> bool {
     return true;
 }
 
-auto EventDispatcher::dispatch(Widget &root, FileDropEvent &e) -> bool {
+namespace {
+/// @brief 把「源建议动作」与「目标接受动作」求交：两侧都是单动作枚举，交集要么是该动作、要么是 None。
+/// @param proposed 源建议的动作（`None` = 源未表态，此时以目标为准）。
+/// @param accepted 目标接受的动作（`None` = 不接受）。
+/// @return 交集动作；任一侧不接受、或两侧表态冲突时为 `DragAction::None`。
+[[nodiscard]] auto intersect_drag_action(DragAction proposed, DragAction accepted) -> DragAction {
+    if (accepted == DragAction::None) {
+        return DragAction::None;  // 目标不接受：无论源建议什么都无从执行
+    }
+    if (proposed == DragAction::None) {
+        return accepted;  // 源未表态：目标的意愿即结果
+    }
+    return (proposed == accepted) ? accepted : DragAction::None;  // 两侧表态冲突：无共同动作
+}
+}  // namespace
+
+auto EventDispatcher::dispatch(Widget &root, SystemDropEvent &e) -> bool {
     Widget *target = hit_test(root, e.position);
     if (target == nullptr) {
         return false;
     }
-    target->on_file_drop(e);
+    // enter / over 是「询问」态：先问目标接不接受，把结果折进 allowed 供宿主决定 OS 光标反馈。
+    // 该查询在 over 态按指针采样频率发生，故只做这一次调用、不触碰布局。
+    if (e.phase == SystemDropPhase::Enter || e.phase == SystemDropPhase::Over) {
+        e.allowed = intersect_drag_action(e.proposed, target->query_system_drag_accept(e.formats));
+    }
+    target->on_system_drop(e);
     return e.is_handled;
 }
 

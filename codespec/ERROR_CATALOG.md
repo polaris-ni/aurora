@@ -93,5 +93,8 @@
 | 85 | `NetSendFailed` | `net-send-failed` | io | error | false | resource_error | false | Socket send failed | send() returned <= 0 mid-write (peer closed or timeout); the byte stream is no longer reliable |
 | 86 | `NetRecvFailed` | `net-recv-failed` | io | error | false | resource_error | false | Socket receive failed | recv() returned an error (peer reset or socket closed) |
 | 87 | `NetRecvTimeout` | `net-recv-timeout` | io | warning | false | timeout | true | Socket receive timed out | SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat this as 'no more data now' |
+| 88 | `SystemDragNotSupported` | `system-drag-not-supported` | platform | error | false | resource_error | false | System drag-and-drop unavailable: '{detail}' | The platform/backend has no system drag-and-drop mechanism yet, or the capability bit is false; retrying cannot create the mechanism - fall back to a non-drag path (paste, file dialog) |
+| 89 | `SystemDragSessionFailed` | `system-drag-session-failed` | platform | error | false | resource_error | false | System drag-and-drop session failed: '{detail}' | The negotiation broke down or the source stopped providing data; treat the session as ended (action None) and surface a non-drag alternative |
+| 90 | `ClipboardFormatUnsupported` | `clipboard-format-unsupported` | platform | error | false | resource_error | false | Clipboard format unsupported on this platform: '{mime}' | This platform exposes no mechanism for the requested MIME type; query available_formats() first, or fall back to text/plain |
 
-<!-- count: total 88 error codes -->
+<!-- count: total 91 error codes -->

@@ -495,7 +495,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 8. **单向 / 纯函数**：状态变更单向；`Computed` 为纯函数派生值，无副作用，可安全重算。
 9. **扁平组合**：以 `Modifier` 包裹 + 容器组合替代深层继承嵌套。
 10. **布局代数**：布局以可组合的 `Constraints` + 对齐参数表达，避免魔法数字。
-11. **事件模型**：统一事件类型（`MouseEvent` / `KeyEvent` / `ScrollEvent` / `TextInputEvent` / `TextCompositionEvent` / `TouchEvent` / `FileDropEvent`）+ 冒泡协议；事件坐标在 `e.position` 而非 `e.x` / `e.y`。
+11. **事件模型**：统一事件类型（`MouseEvent` / `KeyEvent` / `ScrollEvent` / `TextInputEvent` / `TextCompositionEvent` / `TouchEvent` / `SystemDropEvent`）+ 冒泡协议；事件坐标在 `e.position` 而非 `e.x` / `e.y`。
 12. **状态作用域**：状态作用域显式——局部 `State` 由组件持有，全局 `Store` 由应用持有并通过 `Environment` 注入；`Binding<T>` 为非拥有引用，上游生命周期须更长。
 
 ---

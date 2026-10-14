@@ -5,11 +5,15 @@
 /// 空场景同步派发安全性与 App 流式构建器链式配置（不进入真实帧循环）
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "aurora/app/application.h"
+#include "aurora/app/mime_types.h"
 #include "aurora/widget/text.h"
 #include "aurora/window/surface.h"
 #include "framework/aurora_test.h"
@@ -163,8 +167,15 @@ AURORA_TEST_CASE(plain_scene_dispatches_are_safe_noops) {
     AURORA_TEST_CHECK_NO_THROW(app.dispatch_pointer(6.0F, 6.0F, MouseAction::Move));
     AURORA_TEST_CHECK_NO_THROW(app.tick());
     // TEST_TEMP_EXEMPT: 模拟拖入的假路径字符串，非真实临时目录。
-    const std::vector<std::string> dropped_paths{"C:/tmp/a.txt"};
-    AURORA_TEST_CHECK_NO_THROW(app.dispatch_file_drop(dropped_paths, 1.0F, 2.0F));
+    std::unordered_map<std::string, std::vector<std::uint8_t>> entries;
+    const std::string uri_text = "file:///C:/docs/a.txt\r\n";
+    entries.emplace(std::string(AURORA_MIME_URI_LIST), std::vector<std::uint8_t>(uri_text.begin(), uri_text.end()));
+    SystemDropEvent drop;
+    drop.phase = SystemDropPhase::Drop;
+    drop.position = Point{.x = 1.0F, .y = 2.0F};
+    drop.formats.emplace_back(AURORA_MIME_URI_LIST);
+    drop.payload = DragPayload::from_bytes(std::move(entries));
+    AURORA_TEST_CHECK_NO_THROW(app.dispatch_system_drop(drop));
 
     // 文本输入无人处理 → 返回 false。
     TextInputEvent text;

@@ -712,10 +712,51 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @return 候选窗定位盒（绝对窗口逻辑 dp）：基类回退 `focus_bounds_`（整个控件盒），从未绘制过时为零盒。
     [[nodiscard]] virtual auto composition_caret_bounds() const -> Rect { return focus_bounds_; }
 
-    /// @brief 操作系统文件拖放落在本控件时触发；消费时置 `e.is_handled` 阻止继续。
-    /// 默认不处理（交给命中目标自身）。
-    /// @param e 文件拖放事件（携带落点与文件列表）；默认实现不消费、不回写 `is_handled`。
-    virtual auto on_file_drop(FileDropEvent &e) -> void { (void)e; }
+    /// @brief 系统拖放（跨进程）落在本控件时触发；四个阶段共用本入口，消费时置 `e.is_handled`。
+    ///
+    /// 默认不处理（不消费、不回写 `is_handled`）。四态一律不冒泡、只交给命中目标，故本入口
+    /// 每次会话可能收到多次（`Enter` / `Over` 按指针采样频率，`Drop` 至多一次）。
+    /// **只有 `Drop` 态保证带载荷**：`Enter` / `Over` 读载荷按空口径返回，不得假定有数据。
+    /// @param e 系统拖放事件（阶段、落点、可用格式、动作与载荷句柄）。
+    virtual auto on_system_drop(SystemDropEvent &e) -> void { (void)e; }
+
+    /// @brief 查询本控件是否接受这批格式的拖入，以及接受哪个动作（accept 语义的**唯一真值源**）。
+    ///
+    /// 宿主在 `Enter` / `Over` 态调用它以决定 OS 光标反馈（例如「可复制」与「禁止放置」），
+    /// 派发器据此与源建议动作求交后写入 `SystemDropEvent::allowed`。基类默认 `DragAction::None`
+    /// = 不接受；**返回值不是「建议」而是「本控件会执行什么」**，故与 `Drop` 态的实际处理须一致。
+    ///
+    /// 实现须常量级：本调用发生在 `Over` 态（按指针采样频率到达），**禁止在此触发重布局**；
+    /// 格式匹配走预编译的格式表，不做线性外查找以外的任何工作。
+    /// @param formats 本次拖放可用格式的 MIME 清单（与 `SystemDropEvent::formats` 同内容）。
+    /// @return 接受时返回 `Copy` / `Move` / `Link`；不接受返回 `DragAction::None`（基类默认）。
+    [[nodiscard]] virtual auto query_system_drag_accept(const std::vector<std::string> &formats) -> DragAction {
+        (void)formats;
+        return DragAction::None;
+    }
+
+    /// @brief 声明本控件可拖出的数据（拖出要约）；默认不提供（该控件不可作为拖出源）。
+    ///
+    /// 与 `on_system_drop`（拖入）分工：本入口只描述「我能给出什么」，会话发起走
+    /// `begin_system_drag()`。返回 `std::nullopt` 即不可拖出。
+    /// @return 拖出要约（格式清单 + 按 MIME 取字节的回调）；基类默认 `std::nullopt`。
+    [[nodiscard]] virtual auto on_provide_drag() -> std::optional<DragOffer> { return std::nullopt; }
+
+    /// @brief 以 `on_provide_drag()` 的要约发起一次系统拖出会话。
+    ///
+    /// **动作口径**：会话成功回 `Copy` / `Move` / `Link`；被取消、被拒绝或建立失败回 `None`——
+    /// `None` **不是成功**，调用方不得把它当作「拖出完成」。当前各平台后端尚未接线，无测试后端时
+    /// 返回 `system-drag-not-supported`（机制缺失是稳态，错误码 `retryable = false`，不该重试）。
+    /// @return 协商出的动作；无要约或无后端时为结构化 `Error`。
+    [[nodiscard]] auto begin_system_drag() -> Result<DragAction>;
+
+    /// @brief 系统拖出会话结束回调：告知本控件最终动作（成功动作为 `Copy` / `Move` / `Link`，
+    ///        取消 / 被拒 / 失败为 `None`）。
+    ///
+    /// 与进程内拖拽的 `on_drag_end` **刻意分名**：同一控件上两套拖拽语义不共名，避免覆写时
+    /// 误接另一条路径。基类默认为空实现（不消费、不重绘）。
+    /// @param action 会话结束时的动作。
+    virtual auto on_system_drag_end(DragAction action) -> void { (void)action; }
 
     /// @brief 焦点变更通知（获焦 focus=true / 失焦 focus=false）。
     /// 基类默认维护 `is_focused_` 以便 `is_focused()` 正确；子类可覆写以更新聚焦态绘制。

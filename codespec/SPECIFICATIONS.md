@@ -75,7 +75,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 ---
 
-## 5 特性清单（需求 ID 体系，30 条）
+## 5 特性清单（需求 ID 体系，34 条）
 
 需求 ID 形如 `SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`：全大写、点分割、层级不限，短名多词用连字符。
 类目封闭 6 类（`API` 语言与接口设计原则 / `FEAT` 面向使用者的功能能力 / `QUALITY` 质量不变量与保证 /
@@ -117,6 +117,10 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.FEAT.WIDGET.DATA.LIST-REORDER.001 | 列表拖拽重排（`ReorderableList`） | 用户可拖动条目换位：跟手 / 让位 / 近边缘自动滚动 / 落位动画，数据由控件改写 | [`04-widget.md`](specification/04-widget.md) §3.4、[`GUIDELINE.md`](GUIDELINE.md) §36 |
 | SPEC.FEAT.WIDGET.SCROLL-INTERACTION.001 | 滚动交互增强（`ScrollSnap` / `PullToRefresh` / `StickyHeader` / `offset_signal`） | 轮播整页对齐、分组头部钉顶、到顶下拉即刷新、嵌套滚动余量移交，且全程尊重 reduce-motion | [`04-widget.md`](specification/04-widget.md) §3.3、[`05-event-navigation.md`](specification/05-event-navigation.md) §3.3、[`GUIDELINE.md`](GUIDELINE.md) §38 |
 | SPEC.FEAT.CORE.JSON.001 | 自研 JSON 值容器与编解码器（`au::json`） | AI 可在无第三方 JSON 依赖下解析（DOM / SAX 双出口）/ 构造 / 序列化，按 RFC 6901 路径寻址读写删，读缺失键不隐式变更文档，并通过外部语料的 RFC 8259 合规验收 | [`01-core.md`](specification/01-core.md) §9、[`GUIDELINE.md`](GUIDELINE.md) §42 |
+| SPEC.FEAT.APP.SYSTEM-DRAG-DROP.001 | 系统级拖放（OS↔应用跨进程互操作：enter / over / leave / drop 四态事件族、MIME 载荷、Copy / Move / Link 动作协商、拖入反馈与拖出发起） | AI 可让应用与资源管理器 / 其他应用互拖文件与文本，拖入反馈与动作协商跨后端一致 | [`05-event-navigation.md`](specification/05-event-navigation.md) §5.2、[`06-app-platform.md`](specification/06-app-platform.md) §5、§8 |
+| SPEC.FEAT.APP.CLIPBOARD-RICH-FORMATS.001 | 剪贴板富格式（files / uri-list / HTML / 自定义 MIME） | AI 可实现文件清单与富文本的剪贴板交互；MIME 词汇与空口径同系统拖放一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8.2 |
+| SPEC.FEAT.APP.NATIVE-MENU-BAR.001 | 原生菜单栏（MenuModel 单一真源 + Win32 / macOS / Linux 原生渲染桥） | AI 声明一次菜单即获原生渲染，自绘与原生二显一存、不建平行菜单 API | [`06-app-platform.md`](specification/06-app-platform.md) §8 |
+| SPEC.FEAT.APP.RECENT-DOCUMENTS.001 | 最近文档列表（应用内 store 持久化 + OS 级投影） | AI 可实现跨重启的最近文档；OS 级缺位时应用内列表全平台行为一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8 |
 
 ---
 

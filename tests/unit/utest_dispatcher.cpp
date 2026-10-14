@@ -58,6 +58,15 @@ class TestBox final : public LeafWidget {
     int text_count = 0;
     int composition_count = 0;
     int drop_count = 0;
+    /// 最近一次系统拖放事件的阶段（供四态用例逐态断言）。
+    SystemDropPhase last_drop_phase = SystemDropPhase::Drop;
+    /// 最近一次系统拖放事件携带的格式清单（断言派发器透传而非改写）。
+    std::vector<std::string> last_drop_formats;
+    /// accept 查询命中次数与最近一次传入的 formats 快照（enter / over 各态被调用即 +1）。
+    int accept_query_count = 0;
+    std::vector<std::string> last_accept_formats;
+    /// `query_system_drag_accept` 的返回值（默认 `None` = 不接受，即基类默认语义）。
+    DragAction accept_action = DragAction::None;
     Point last_local{};
     std::optional<int> last_pointer_id;
     std::optional<CursorShape> cursor_hook;  // 非 nullopt 时作为 cursor_shape() 虚钩子返回
@@ -131,11 +140,19 @@ class TestBox final : public LeafWidget {
         Widget::on_text_composition(e);  // 默认消费
     }
 
-    auto on_file_drop(FileDropEvent &e) -> void override {
+    auto on_system_drop(SystemDropEvent &e) -> void override {
         ++drop_count;
+        last_drop_phase = e.phase;
+        last_drop_formats = e.formats;
         if (consume_drop) {
             e.is_handled = true;
         }
+    }
+
+    [[nodiscard]] auto query_system_drag_accept(const std::vector<std::string> &formats) -> DragAction override {
+        ++accept_query_count;
+        last_accept_formats = formats;
+        return accept_action;
     }
 
     [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return cursor_hook; }
@@ -894,24 +911,110 @@ AURORA_TEST_CASE(scroll_text_input_and_file_drop_route_to_target) {
     AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, no_focus_composition, fm));
     AURORA_TEST_CHECK_EQ(tree.box1->composition_count, 1);
 
-    // 文件拖放：命中即调用 on_file_drop；返回值 = 是否被消费
-    FileDropEvent drop;
+    // 系统拖放（drop 态）：命中即调用 on_system_drop；返回值 = 是否被消费
+    SystemDropEvent drop;
+    drop.phase = SystemDropPhase::Drop;
     drop.position = Point{.x = 20.0F, .y = 20.0F};
-    drop.paths = {"a.txt"};
+    drop.formats = {"text/uri-list"};
     AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, drop));  // 未消费
     AURORA_TEST_CHECK_EQ(tree.box1->drop_count, 1);
 
     tree.box1->consume_drop = true;
-    FileDropEvent drop2;
+    SystemDropEvent drop2;
+    drop2.phase = SystemDropPhase::Drop;
     drop2.position = Point{.x = 20.0F, .y = 20.0F};
-    drop2.paths = {"b.txt"};
+    drop2.formats = {"text/uri-list"};
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, drop2));
     AURORA_TEST_CHECK_EQ(tree.box1->drop_count, 2);
 
-    FileDropEvent blank_drop;
+    SystemDropEvent blank_drop;
+    blank_drop.phase = SystemDropPhase::Drop;
     blank_drop.position = Point{.x = 500.0F, .y = 500.0F};
     AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, blank_drop));
     AURORA_TEST_CHECK_EQ(tree.box1->drop_count, 2);
+}
+
+AURORA_TEST_CASE(system_drop_dispatches_each_phase_to_the_hit_target) {
+    auto tree = make_tree();
+    tree.box1->consume_drop = false;
+
+    // 四态各自派发一次：每一态都只交给命中目标（不冒泡），故每次 drop_count +1。
+    const SystemDropPhase phases[] = {SystemDropPhase::Enter, SystemDropPhase::Over, SystemDropPhase::Leave,
+                                      SystemDropPhase::Drop};
+    for (const SystemDropPhase phase : phases) {
+        SystemDropEvent e;
+        e.phase = phase;
+        e.position = Point{.x = 20.0F, .y = 20.0F};
+        AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, e));
+        AURORA_TEST_CHECK_EQ(tree.box1->last_drop_phase, phase);
+    }
+    AURORA_TEST_CHECK_EQ(tree.box1->drop_count, 4);
+
+    // 目标之外（空白区）不派发：四态一律要求命中。
+    for (const SystemDropPhase phase : phases) {
+        SystemDropEvent miss;
+        miss.phase = phase;
+        miss.position = Point{.x = 500.0F, .y = 500.0F};
+        AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, miss));
+    }
+    AURORA_TEST_CHECK_EQ(tree.box1->drop_count, 4);
+}
+
+AURORA_TEST_CASE(system_drop_accept_query_is_the_single_source_of_allowed) {
+    auto tree = make_tree();
+
+    // 基类语义：默认不接受 ⇒ enter / over 两态查询后 allowed 恒 None，且与 proposed 无关。
+    // 变异自证：把 Widget::query_system_drag_accept 的默认返回值从 None 改成 Copy，本段必须转红。
+    SystemDropEvent enter;
+    enter.phase = SystemDropPhase::Enter;
+    enter.position = Point{.x = 20.0F, .y = 20.0F};
+    enter.formats = {"text/uri-list", "text/plain"};
+    enter.proposed = DragAction::Copy;
+    AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, enter));
+    AURORA_TEST_CHECK_EQ(tree.box1->accept_query_count, 1);
+    AURORA_TEST_CHECK_EQ(tree.box1->last_accept_formats, enter.formats);
+    AURORA_TEST_CHECK_EQ(enter.allowed, DragAction::None);
+
+    // 覆写为接受 Copy ⇒ 与 proposed 求交后 allowed = Copy；查询在每个 enter / over 态各发生一次。
+    tree.box1->accept_action = DragAction::Copy;
+    SystemDropEvent over;
+    over.phase = SystemDropPhase::Over;
+    over.position = Point{.x = 20.0F, .y = 20.0F};
+    over.formats = {"text/uri-list"};
+    over.proposed = DragAction::Copy;
+    AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, over));
+    AURORA_TEST_CHECK_EQ(tree.box1->accept_query_count, 2);
+    AURORA_TEST_CHECK_EQ(over.allowed, DragAction::Copy);
+
+    // 两侧表态冲突（源要 Move、目标只接受 Copy）⇒ 无共同动作。
+    SystemDropEvent conflict;
+    conflict.phase = SystemDropPhase::Over;
+    conflict.position = Point{.x = 20.0F, .y = 20.0F};
+    conflict.proposed = DragAction::Move;
+    AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, conflict));
+    AURORA_TEST_CHECK_EQ(conflict.allowed, DragAction::None);
+
+    // drop 态不查询（该态只管放置），allowed 保持调用方原值。
+    const int queries_before_drop = tree.box1->accept_query_count;
+    SystemDropEvent drop;
+    drop.phase = SystemDropPhase::Drop;
+    drop.position = Point{.x = 20.0F, .y = 20.0F};
+    drop.allowed = DragAction::Copy;
+    AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, drop));
+    AURORA_TEST_CHECK_EQ(tree.box1->accept_query_count, queries_before_drop);
+    AURORA_TEST_CHECK_EQ(drop.allowed, DragAction::Copy);
+}
+
+AURORA_TEST_CASE(system_drop_consumed_target_reports_handled) {
+    auto tree = make_tree();
+    tree.box1->consume_drop = true;
+
+    // 消费后派发返回 true（取 e.is_handled），与旧文件拖放用例的返回值口径逐条对应。
+    SystemDropEvent drop;
+    drop.phase = SystemDropPhase::Drop;
+    drop.position = Point{.x = 20.0F, .y = 20.0F};
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, drop));
+    AURORA_TEST_CHECK_EQ(tree.box1->drop_count, 1);
 }
 
 AURORA_TEST_CASE(touch_dispatcher_captures_and_synthesizes_per_pointer) {

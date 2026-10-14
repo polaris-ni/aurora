@@ -17,9 +17,11 @@ aurora/app/file_dialog.h
 aurora/app/generate_ui.h
 aurora/app/hot_reload.h
 aurora/app/menu.h
+aurora/app/mime_types.h
 aurora/app/notification.h
 aurora/app/os_hotkey.h
 aurora/app/perf_overlay.h
+aurora/app/recent_documents.h
 aurora/app/scene.h
 aurora/app/scheduler.h
 aurora/app/scroll_storage.h

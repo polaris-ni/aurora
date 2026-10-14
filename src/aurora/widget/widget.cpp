@@ -8,7 +8,9 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/core/debug.h"
 #include "aurora/core/diagnostics.h"
+#include "aurora/core/error_codes.h"
 #include "aurora/core/log.h"
+#include "aurora/core/result.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/focus.h"
 #include "aurora/modifier/modifier.h"
@@ -1058,6 +1060,20 @@ auto Widget::request_focus() -> void {
     if (FocusManager *fm = current_focus_manager()) {
         fm->request_focus(this);
     }
+}
+
+auto Widget::begin_system_drag() -> Result<DragAction> {
+    // 要约由控件自己声明（on_provide_drag），会话本身交给 system_drag 入口——控件层不认识
+    // 平台后端，也不持有宿主句柄，这层只做「有数据才发起」的判据。
+    const std::optional<DragOffer> offer = on_provide_drag();
+    if (!offer.has_value()) {
+        return make_error(ErrorCode::SystemDragNotSupported,
+                          "begin_system_drag: the widget provides no drag offer (on_provide_drag returned nullopt)");
+    }
+    const Result<DragAction> action = system_drag::begin(*offer);
+    // 无论成功与否都回报控件：会话结束是控件清理拖出态的唯一时机，失败同样要收尾。
+    on_system_drag_end(action ? action.value() : DragAction::None);
+    return action;
 }
 
 auto Widget::collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void {}

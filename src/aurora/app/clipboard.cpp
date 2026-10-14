@@ -1,11 +1,18 @@
 #include "aurora/app/clipboard.h"
 
+#include <algorithm>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
+#include "aurora/app/mime_types.h"
+#include "aurora/app/uri_list.h"
 #include "aurora/core/image.h"
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
@@ -42,9 +49,10 @@ namespace {
 /// 供测试框架在并行（CTest 进程隔离 + 用例边界复位）下隔离系统剪贴板；
 /// 进程全局单例 + 互斥保护。未安装（active 为假）时一切走平台实现，零行为差异。
 struct TestBackend {
-    std::mutex mutex;  ///< 保护以下三个成员（死亡测试子进程与主进程各自持有独立实例）
+    std::mutex mutex;  ///< 保护以下四个成员（死亡测试子进程与主进程各自持有独立实例）
     std::string text;  ///< memory 后端的文本载荷（UTF-8）
     Image image;  ///< memory 后端的图像载荷（RGBA8）
+    std::unordered_map<std::string, std::vector<std::uint8_t>> payloads;  ///< 富格式载荷（MIME → 原始字节）
     bool active = false;  ///< 后端是否已安装
 };
 
@@ -53,8 +61,26 @@ struct TestBackend {
     static TestBackend backend;
     return backend;
 }
+
+/// @brief 文本 → 字节载荷（富格式通道一律按字节存，与平台剪贴板的跨进程字节口径一致）。
+[[nodiscard]] auto to_bytes(const std::string &text) -> std::vector<std::uint8_t> { return {text.begin(), text.end()}; }
+
+/// @brief 字节载荷 → 文本（uri-list / html 读取侧的还原；字节本身由本进程写入，无非法编码风险）。
+[[nodiscard]] auto to_text(const std::vector<std::uint8_t> &bytes) -> std::string {
+    return {bytes.begin(), bytes.end()};
+}
 }  // namespace
 #endif
+
+namespace {
+/// @brief 本平台缺少指定 MIME 的读写机制（立骨期富格式平台路径的统一失败）。
+///
+/// 机制缺失是**稳态**：`clipboard-format-unsupported` 的 `retryable` 为 false，调用方应改走
+/// `available_formats` 已列的通道，而不是退避重试。
+[[nodiscard]] auto format_unsupported(std::string_view mime) -> Error {
+    return make_error(ErrorCode::ClipboardFormatUnsupported, ErrorParams{{"mime", std::string{mime}}});
+}
+}  // namespace
 
 #ifdef AURORA_PLATFORM_WINDOWS
 namespace {
@@ -452,6 +478,155 @@ auto Clipboard::get_image() -> Result<Image> {
 #endif
 }  // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-pro-type-reinterpret-cast)
 
+auto Clipboard::available_formats() -> Result<std::vector<std::string>> {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            std::vector<std::string> formats;
+            if (!backend.text.empty()) {
+                formats.emplace_back(AURORA_MIME_TEXT_PLAIN);
+            }
+            if (backend.image.width > 0 && backend.image.height > 0) {
+                formats.emplace_back(AURORA_MIME_IMAGE_PNG);
+            }
+            std::vector<std::string> keys;
+            keys.reserve(backend.payloads.size());
+            for (const auto &entry : backend.payloads) {
+                keys.emplace_back(entry.first);
+            }
+            // 排序只为给出稳定的清单顺序：unordered_map 的迭代序不确定，而调用方（含单测）会按序比对。
+            std::sort(keys.begin(), keys.end());
+            for (auto &key : keys) {
+                if (std::find(formats.begin(), formats.end(), key) == formats.end()) {
+                    formats.push_back(std::move(key));
+                }
+            }
+            return formats;
+        }
+    }
+#endif
+    // 平台路径**如实**列出既有机制覆盖的格式：新 API 已声明不等于格式已可用，故富格式一律不入列。
+#ifdef AURORA_PLATFORM_WINDOWS
+    return std::vector<std::string>{std::string{AURORA_MIME_TEXT_PLAIN}, std::string{AURORA_MIME_IMAGE_PNG}};
+#elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
+    return std::vector<std::string>{std::string{AURORA_MIME_TEXT_PLAIN}};
+#elif defined(AURORA_PLATFORM_MACOS)
+    return std::vector<std::string>{std::string{AURORA_MIME_TEXT_PLAIN}};
+#else
+    return make_error(ErrorCode::GeneralNotSupported,
+                      "available_formats: this platform has no clipboard implementation");
+#endif
+}
+
+auto Clipboard::set_payload(const std::string &mime, const std::vector<std::uint8_t> &bytes) -> Result<bool> {
+    if (mime.empty()) {
+        return make_error(ErrorCode::GeneralInvalidArgument, "set_payload: mime must not be empty");
+    }
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            if (bytes.empty()) {
+                return Result<bool>{true};  // 契约：空载荷 no-op，保留既有内容
+            }
+            backend.payloads[mime] = bytes;
+            return Result<bool>{true};
+        }
+    }
+#endif
+    return format_unsupported(mime);
+}
+
+auto Clipboard::get_payload(const std::string &mime) -> Result<std::vector<std::uint8_t>> {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            const auto it = backend.payloads.find(mime);
+            if (it == backend.payloads.end()) {
+                return std::vector<std::uint8_t>{};  // 格式未写入 = Ok(空)：空内容不是失败
+            }
+            return it->second;
+        }
+    }
+#endif
+    return format_unsupported(mime);
+}
+
+auto Clipboard::set_files(const std::vector<std::string> &paths) -> Result<bool> {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            if (paths.empty()) {
+                return Result<bool>{true};  // 契约：空清单 no-op，保留既有内容
+            }
+            // 编码只认本地路径；URL 类内容由调用方改走 set_payload 给原始字节。
+            backend.payloads[std::string{AURORA_MIME_URI_LIST}] = to_bytes(uri_list::encode(paths));
+            return Result<bool>{true};
+        }
+    }
+#endif
+    return format_unsupported(AURORA_MIME_URI_LIST);
+}
+
+auto Clipboard::get_files() -> Result<std::vector<std::string>> {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            const auto it = backend.payloads.find(std::string{AURORA_MIME_URI_LIST});
+            if (it == backend.payloads.end()) {
+                return std::vector<std::string>{};  // 无该格式 = Ok(空清单)
+            }
+            // 解码只留可映射为本地路径的条目：非 file scheme 的行静默跳过，全被跳过即空清单。
+            return uri_list::decode(to_text(it->second));
+        }
+    }
+#endif
+    return format_unsupported(AURORA_MIME_URI_LIST);
+}
+
+auto Clipboard::set_html(const std::string &html) -> Result<bool> {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            if (html.empty()) {
+                return Result<bool>{true};  // 契约：空串 no-op，保留既有内容
+            }
+            backend.payloads[std::string{AURORA_MIME_TEXT_HTML}] = to_bytes(html);
+            return Result<bool>{true};
+        }
+    }
+#endif
+    return format_unsupported(AURORA_MIME_TEXT_HTML);
+}
+
+auto Clipboard::get_html() -> Result<std::string> {
+#ifdef AURORA_CLIPBOARD_TEST_BACKEND
+    {
+        auto &backend = test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            const auto it = backend.payloads.find(std::string{AURORA_MIME_TEXT_HTML});
+            if (it == backend.payloads.end()) {
+                return std::string{};  // 无该格式 = Ok("")：空内容不是失败
+            }
+            return to_text(it->second);
+        }
+    }
+#endif
+    return format_unsupported(AURORA_MIME_TEXT_HTML);
+}
+
 // ---- 测试注入点（test-only）------------------------------------------------
 // 双宏（AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS）齐备时操作进程内 memory
 // 后端；任一关闭时返回 false / no-op（消费端调用始终可编译，平台行为不变）。
@@ -462,6 +637,7 @@ auto Clipboard::install_test_backend() -> bool {
     const std::scoped_lock lock{backend.mutex};
     backend.text.clear();
     backend.image = Image{};
+    backend.payloads.clear();
     backend.active = true;
     return true;
 #else
@@ -475,6 +651,7 @@ auto Clipboard::reset_test_backend() -> void {
     const std::scoped_lock lock{backend.mutex};
     backend.text.clear();
     backend.image = Image{};
+    backend.payloads.clear();
 #endif
 }
 
@@ -486,6 +663,7 @@ auto Clipboard::remove_test_backend() -> bool {
     backend.active = false;
     backend.text.clear();
     backend.image = Image{};
+    backend.payloads.clear();
     return was_active;
 #else
     return false;

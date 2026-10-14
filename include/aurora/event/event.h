@@ -3,10 +3,15 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+#include "aurora/core/image.h"
+#include "aurora/core/result.h"
 #include "aurora/core/types.h"
 
 namespace aurora {
@@ -213,11 +218,168 @@ struct TextCompositionEvent : Event {
     [[nodiscard]] auto has_preedit_selection() const -> bool { return sel_end != AURORA_NO_SELECTION; }
 };
 
-/// @brief 操作系统文件拖放事件（窗口级；位置为窗口逻辑坐标，specification/05-event-navigation.md §2.2）。
-struct FileDropEvent : Event {
-    Point position;  ///< 落点（窗口逻辑坐标）
-    std::vector<std::string> paths;  ///< 被拖入的文件/目录绝对路径
+/// @brief 系统拖放动作：源与目标之间协商出的「这一次拖放要做什么」。
+///
+/// 对标 Qt `Qt::DropAction` / GTK4 `GdkDragAction` / X11 Xdnd 的 action 三态：`None` 是**不接受**
+/// （也是默认值与「会话被取消 / 建立失败」的返回值），其余三态是真实动作。**调用方不得把 `None`
+/// 当作成功**：拖出会话被取消、被目标拒绝或建立失败一律回 `None`。
+enum class DragAction : std::uint8_t {
+    None,  ///< 不接受 / 无动作（默认；取消与失败也归此态）
+    Copy,  ///< 复制（源保留其数据）
+    Move,  ///< 移动（源在放置后移除其数据）
+    Link,  ///< 建立链接 / 快捷方式
 };
+
+/// @brief 系统拖放的四个阶段（specification/05-event-navigation.md §5.2）。
+///
+/// 四态共用同一个事件结构（与 `MouseEvent` / `MouseAction` 同款惯例，不造四个事件类型）：
+/// `Enter` 指针携带数据首次进入窗口、`Over` 在其上移动、`Leave` 离开或未放置即结束、`Drop` 落下。
+/// **只有 `Drop` 态保证带载荷**：`Enter` / `Over` 的载荷句柄可为空（数据延迟到 drop 才读取），
+/// 控件不得在非 drop 态假定有数据。
+enum class SystemDropPhase : std::uint8_t {
+    Enter,  ///< 进入：指针携带数据首次进入窗口
+    Over,  ///< 悬停：在窗口内移动（按指针采样频率到达，处理须轻量）
+    Leave,  ///< 离开：移出窗口或会话被放弃（不产生放置）
+    Drop,  ///< 落下：用户放下数据（唯一保证带载荷的态）
+};
+
+/// @brief 系统拖放载荷：按 MIME 取原始字节的**只读句柄**（pimpl，实现藏于 `src/aurora/event/`）。
+///
+/// 形态上刻意「只暴露读取面」：数据的真实来源是平台会话（Win32 `IDataObject`、X11 Xdnd、
+/// Wayland `wl_data_offer`、macOS dragging pasteboard），落到本库时要么已全部读入内存、要么仍
+/// 挂在会话上按需拉取——把「怎么取」藏进实现，事件与控件只认「按 MIME 取字节」这一条契约。
+///
+/// **空口径（与 `Clipboard` 同款）**：格式不存在 = `Ok` 空值，**空内容不是失败**；只有「读取这个
+/// 动作本身失败」（会话已失效、字节不可得）才是 `Error`。
+/// @note Thread: main-thread only（载荷随会话，会话在派发线程上）
+/// @note Side-effects: 读取可能触发平台会话 IO（`from_bytes` 构造的内存载荷除外）
+class DragPayload {
+  public:
+    /// @brief 由内存字节表构造载荷：平台后端把会话数据一次性读入时的唯一工厂，也是无头测试的注入口。
+    /// @param data MIME → 原始字节的映射（键为 MIME 字符串，空键被丢弃）。
+    /// @return 只读载荷句柄；`data` 为空时同样返回非空句柄（读取任何格式都得 `Ok` 空值）。
+    [[nodiscard]] static auto from_bytes(std::unordered_map<std::string, std::vector<std::uint8_t>> data)
+        -> std::shared_ptr<const DragPayload>;
+
+    /// @brief 是否持有指定 MIME 的载荷。
+    /// @param mime 待查询的 MIME（如 "text/plain"）。
+    /// @return 该格式存在时 true；否则 false（含载荷句柄为空时）。
+    [[nodiscard]] auto has(const std::string &mime) const -> bool;
+
+    /// @brief 按 MIME 读取原始字节（通用入口）。
+    /// @param mime 待读取的 MIME。
+    /// @return `Ok(字节)`——格式不存在时为 `Ok(空)`（空内容不是失败）；会话失效等读取失败为结构化 `Error`。
+    [[nodiscard]] auto bytes(const std::string &mime) const -> Result<std::vector<std::uint8_t>>;
+
+    /// @brief 便利读取：文件清单（解码 `text/uri-list`，只返回可映射为本地路径的条目）。
+    /// @return `Ok(路径清单)`；无该格式时为 `Ok(空清单)`。非 `file` scheme 的行静默跳过
+    ///         （完整原始行经 `bytes("text/uri-list")` 取得）。
+    [[nodiscard]] auto files() const -> Result<std::vector<std::string>>;
+
+    /// @brief 便利读取：纯文本（读 `text/plain` 并按 UTF-8 原样返回）。
+    /// @return `Ok(文本)`；无该格式时为 `Ok("")`。
+    [[nodiscard]] auto text() const -> Result<std::string>;
+
+    /// @brief 便利读取：图像（读 `image/png` 字节并解码为 RGBA8）。
+    /// @return `Ok(图像)`；无该格式时为 `Ok(空 Image)`（width == 0）；字节存在但解码失败为结构化 `Error`。
+    [[nodiscard]] auto image() const -> Result<Image>;
+
+    /// @brief 析构（pimpl：在 `src/aurora/event/` 中定义，避免实现体进入公共头）。
+    ~DragPayload();
+
+    /// @brief 禁止拷贝：载荷以 `shared_ptr<const ...>` 共享，拷贝一个句柄没有语义。
+    DragPayload(const DragPayload &) = delete;
+    /// @brief 禁止拷贝赋值（理由同拷贝构造）。
+    /// @return 恒不返回（已 delete）。
+    auto operator=(const DragPayload &) -> DragPayload & = delete;
+    /// @brief 禁止移动（理由同拷贝构造）。
+    DragPayload(DragPayload &&) = delete;
+    /// @brief 禁止移动赋值（理由同拷贝构造）。
+    /// @return 恒不返回（已 delete）。
+    auto operator=(DragPayload &&) -> DragPayload & = delete;
+
+  private:
+    /// @brief 私有构造：实例只能经 `from_bytes` 产出（实现体内填充）。
+    DragPayload();
+
+    /// @brief pimpl 实现体（定义在 `src/aurora/event/drag_payload.cpp`）。
+    struct Impl;
+    std::unique_ptr<Impl> impl_;  ///< 实现体（唯一所有权）
+};
+
+/// @brief 拖出要约：控件声明「我能提供哪些格式、按 MIME 怎么取字节」。
+///
+/// 与拖入侧的 `DragPayload` 对称：那边是**读**（会话推送后按需取），这边是**提供**（会话期内由源
+/// 按需回调）。`provide` 为空回调而 `formats` 非空 = 声明了格式却给不出数据，会话按失败处理。
+struct DragOffer {
+    std::vector<std::string> formats;  ///< 可提供的 MIME 清单（顺序即优先级）
+    /// @brief 按 MIME 提供字节的回调；返回 `Error` 视为该次提供失败（会话按失败结束）。
+    std::function<Result<std::vector<std::uint8_t>>(const std::string &mime)> provide;
+};
+
+/// @brief 系统拖放事件：跨进程拖放的四个阶段共用一个结构（specification/05-event-navigation.md §5.2）。
+///
+/// 与既有应用内拖拽（`event/drag_drop.h`）分工：那条是进程内控件重排 / 手势，本条是**跨出进程边界**
+/// 的 OS 拖放（资源管理器 ↔ 应用）。坐标契约沿用「位置类事件一律整幅表面逻辑坐标」。
+///
+/// `formats` 用裸 `std::string` 而非 MIME 常量表：`event/` 不依赖 `app/`；MIME 词汇的单一真源在
+/// `app/mime_types.h`，两侧取值一致由该表的常量保证。
+///
+/// **派发规则**：四态一律不冒泡、只交给命中目标（既有文件拖放派发规则原样延续）；消费时置
+/// `e.is_handled`。`allowed` 由派发器在 `Enter` / `Over` 态按命中目标的 accept 查询与 `proposed`
+/// 求交后写定，宿主据此决定 OS 光标反馈。
+struct SystemDropEvent : Event {
+    SystemDropPhase phase = SystemDropPhase::Drop;  ///< 阶段（默认 `Drop`，便于程序化构造落放事件）
+    Point position;  ///< 落点（整幅表面逻辑坐标，契约见 CHG-007 收口后的位置类事件口径）
+    std::vector<std::string> formats;  ///< 本次拖放可用格式的 MIME 清单
+    DragAction proposed = DragAction::None;  ///< 源建议的动作
+    DragAction allowed = DragAction::None;  ///< 目标允许的动作（派发器按 accept 查询与 proposed 求交后写定）
+    /// @brief 载荷句柄；`Enter` / `Over` / `Leave` 可为空（数据延迟到 drop 才读取）。
+    std::shared_ptr<const DragPayload> payload;
+
+    /// @brief 便利读取：文件清单（委托 `DragPayload::files`；无载荷时为空清单）。
+    /// @return `Ok(路径清单)`；无载荷或无该格式时为 `Ok(空清单)`。
+    [[nodiscard]] auto files() const -> Result<std::vector<std::string>>;
+
+    /// @brief 便利读取：纯文本（委托 `DragPayload::text`；无载荷时为空串）。
+    /// @return `Ok(文本)`；无载荷或无该格式时为 `Ok("")`。
+    [[nodiscard]] auto text() const -> Result<std::string>;
+
+    /// @brief 便利读取：图像（委托 `DragPayload::image`；无载荷时为空 `Image`）。
+    /// @return `Ok(图像)`；无载荷或无该格式时为 `Ok(空 Image)`。
+    [[nodiscard]] auto image() const -> Result<Image>;
+
+    /// @brief 便利读取：按 MIME 取原始字节（委托 `DragPayload::bytes`；无载荷时为空）。
+    /// @param mime 待读取的 MIME。
+    /// @return `Ok(字节)`；无载荷或无该格式时为 `Ok(空)`。
+    [[nodiscard]] auto bytes(const std::string &mime) const -> Result<std::vector<std::uint8_t>>;
+};
+
+/// @brief 系统**拖出**会话入口：把控件给出的 `DragOffer` 交给 OS 拖放会话，返回协商结果动作。
+///
+/// 立骨期各后端均未接线：无测试后端时一律返回 `system-drag-not-supported`（**机制缺失是稳态**，
+/// 错误码 `retryable = false`，调用方不该重试）。`begin` 不引入任何嵌套消息泵——Win32 `DoDragDrop`
+/// 的嵌套泵与重入 guard 属接线程设计项。
+///
+/// **动作口径**：会话成功回 `Copy` / `Move` / `Link`；被取消、被拒绝或建立失败回 `None`
+/// （`None` 不是成功）。
+namespace system_drag {
+/// @brief 发起一次系统拖出会话。
+/// @param offer 控件提供的格式与取字节回调；`formats` 为空或 `provide` 为空回调视为不可拖出。
+/// @return `Ok(协商出的动作)`；无后端 / 能力位为 false / 要约不合法时为结构化 `Error`。
+[[nodiscard]] auto begin(const DragOffer &offer) -> Result<DragAction>;
+
+/// @brief 安装进程内 inert 后端：此后 `begin` 不触碰平台、直接回 `DragAction::Copy`（成功动作）。
+/// @return 注入是否生效（双宏 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 未齐备时为 false）。
+[[nodiscard]] auto install_test_backend() -> bool;
+
+/// @brief 复位 inert 后端（清记录；未安装时为 no-op）。
+auto reset_test_backend() -> void;
+
+/// @brief 卸载 inert 后端，恢复「无后端」语义。
+/// @return 是否确有后端被卸载（双宏未齐备时为 false）。
+[[nodiscard]] auto remove_test_backend() -> bool;
+}  // namespace system_drag
 
 /// @brief 单个触点（多点触控）。
 struct TouchPoint {

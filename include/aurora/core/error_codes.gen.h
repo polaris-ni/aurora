@@ -129,6 +129,9 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetSendFailed = 85,  ///< net-send-failed: Socket send failed
     NetRecvFailed = 86,  ///< net-recv-failed: Socket receive failed
     NetRecvTimeout = 87,  ///< net-recv-timeout: Socket receive timed out
+    SystemDragNotSupported = 88,  ///< system-drag-not-supported: System drag-and-drop unavailable: '{detail}'
+    SystemDragSessionFailed = 89,  ///< system-drag-session-failed: System drag-and-drop session failed: '{detail}'
+    ClipboardFormatUnsupported = 90,  ///< clipboard-format-unsupported
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -146,7 +149,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 88> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 91> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1226,6 +1229,45 @@ inline constexpr std::array<ErrorMeta, 88> AURORA_ERROR_TABLE = {
             .message_tpl = "Socket receive timed out",
             .hint = "SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat "
                     "this as 'no more data now'",
+        },
+        {
+            .code = ErrorCode::SystemDragNotSupported,
+            .ident = "SystemDragNotSupported",
+            .slug = "system-drag-not-supported",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "System drag-and-drop unavailable: '{detail}'",
+            .hint = "The platform/backend has no system drag-and-drop mechanism yet, or the capability bit is false; "
+                    "retrying cannot create the mechanism - fall back to a non-drag path (paste, file dialog)",
+        },
+        {
+            .code = ErrorCode::SystemDragSessionFailed,
+            .ident = "SystemDragSessionFailed",
+            .slug = "system-drag-session-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "System drag-and-drop session failed: '{detail}'",
+            .hint = "The negotiation broke down or the source stopped providing data; treat the session as ended "
+                    "(action None) and surface a non-drag alternative",
+        },
+        {
+            .code = ErrorCode::ClipboardFormatUnsupported,
+            .ident = "ClipboardFormatUnsupported",
+            .slug = "clipboard-format-unsupported",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Clipboard format unsupported on this platform: '{mime}'",
+            .hint = "This platform exposes no mechanism for the requested MIME type; query available_formats() first, "
+                    "or fall back to text/plain",
         },
     },
 };

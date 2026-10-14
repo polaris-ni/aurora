@@ -451,14 +451,10 @@ class Application {
     /// @param e 触控事件（含全部触点）。
     auto dispatch_touch(const TouchEvent &e) const -> void;
 
-    /// @brief 同步派发操作系统文件拖放事件到命中控件（窗口逻辑坐标）。
-    /// 经 `EventDispatcher` 路径触发 `on_file_drop`（specification/06-app-platform.md §8 平台 Shell）。
-    /// @param paths 拖放的文件路径列表。
-    /// @param x 投放点的窗口逻辑坐标 X。
-    /// @param y 投放点的窗口逻辑坐标 Y。
-    auto dispatch_file_drop(const std::vector<std::string> &paths, float x, float y) const -> void {
-        main_host_->dispatch_file_drop(paths, x, y);
-    }
+    /// @brief 同步派发系统拖放事件到命中控件（四态统一程序化入口）。
+    /// 经 `EventDispatcher` 路径触发 `on_system_drop`（specification/06-app-platform.md §8 平台 Shell）。
+    /// @param e 待派发的系统拖放事件（阶段由调用方给定；坐标为整幅表面逻辑坐标）。
+    auto dispatch_system_drop(SystemDropEvent &e) const -> void { main_host_->dispatch_system_drop(e); }
 
   private:
     // ---- 宿主登记 ----

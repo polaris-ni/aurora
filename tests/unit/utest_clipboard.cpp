@@ -3,11 +3,18 @@
 /// 测试说明: 经进程内 memory 测试后端（install/reset/remove 注入点）覆盖文本读写往返、
 /// 覆盖写、空文本、图像 RGBA8 往返与清空语义；失败口径另设两条平台路径用例
 /// （非法 UTF-8 载荷 → ClipboardWriteFailed 且不动既有内容；图像参数非法 → GeneralInvalidArgument），
-/// 其余路径全程不写系统剪贴板（后端不可用时 SKIP）
+/// 其余路径全程不写系统剪贴板（后端不可用时 SKIP）；
+/// 富格式段覆盖自定义 MIME 载荷、files / html 便利封装、available_formats 如实反映已写格式、
+/// 空值与空写口径、以及立骨期平台路径的 clipboard-format-unsupported
 
+#include <algorithm>
+#include <cstdint>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "aurora/app/clipboard.h"
+#include "aurora/app/mime_types.h"
 #include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
 
@@ -172,6 +179,217 @@ AURORA_TEST_CASE(bad_image_argument_is_not_silent) {
     // 非 Windows 没有 CF_DIB 通路，先撞上「本平台无图像剪贴板实现」——同样是机器可见的失败。
     AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::GeneralNotSupported);
 #endif
+}
+
+// ---- 富格式段（自定义 MIME / files / html / available_formats）----
+
+namespace {
+
+/// @brief 文本 → 字节载荷：富格式通道按字节读写，测试侧需与被测同一份折法。
+auto to_bytes(const std::string &text) -> std::vector<std::uint8_t> { return {text.begin(), text.end()}; }
+
+/// @brief 字节载荷 → 文本（uri-list / html 读取侧的还原）。
+auto to_text(const std::vector<std::uint8_t> &bytes) -> std::string { return {bytes.begin(), bytes.end()}; }
+
+/// @brief 判定格式清单里是否含有某个 MIME。
+auto has_format(const std::vector<std::string> &formats, std::string_view mime) -> bool {
+    return std::find(formats.begin(), formats.end(), mime) != formats.end();
+}
+
+/// @brief 立骨期富格式在平台路径上的统一失败（memory 后端已卸载时走此路）。
+auto expect_format_unsupported(const Error &err, std::string_view mime) -> void {
+    AURORA_TEST_CHECK_EQ(err.code_enum, ErrorCode::ClipboardFormatUnsupported);
+    AURORA_TEST_CHECK_EQ(err.code, std::string{"clipboard-format-unsupported"});
+    AURORA_TEST_CHECK_FALSE(err.retryable);  // 机制缺失是稳态，重试无益
+    AURORA_TEST_CHECK_FALSE(err.message.empty());
+    AURORA_TEST_CHECK_TRUE(err.message.find(std::string{mime}) != std::string::npos);  // 失败点名是哪个 MIME
+}
+
+}  // namespace
+
+// 自定义 MIME 走通用字节通道：写入什么字节就读回什么字节，且如实进入 available_formats。
+// 变异自证：把 `set_payload` 的存储键改成写死 `text/plain`，或把 `get_payload` 的查表改成
+// 无视 MIME 直接返回首个条目，本用例即转红。
+AURORA_TEST_CASE(payload_roundtrip_for_custom_mime) {
+    require_test_backend();
+
+    const std::string mime = "application/x-aurora-probe";
+    const std::vector<std::uint8_t> payload{0xDEU, 0xADU, 0xBEU, 0xEFU, 0x00U, 0x7FU};
+    AURORA_TEST_REQUIRE(Clipboard::set_payload(mime, payload).ok());
+
+    const auto out = Clipboard::get_payload(mime);
+    AURORA_TEST_REQUIRE(out.ok());
+    AURORA_TEST_CHECK_EQ(out.value(), payload);
+
+    const auto formats = Clipboard::available_formats();
+    AURORA_TEST_REQUIRE(formats.ok());
+    AURORA_TEST_CHECK_TRUE(has_format(formats.value(), mime));
+}
+
+// set_files / get_files 是 `text/uri-list` 的便利封装：这里同时经 `get_payload` 读原始载荷，
+// 用常量取值去索引——若实现里改成硬编码字面量而常量表被改，本用例即刻转红（常量表治理）。
+// 变异自证（已实测）：把 `set_files` 的存储键从 `AURORA_MIME_URI_LIST` 换成 `AURORA_MIME_TEXT_PLAIN`，
+// `get_payload(AURORA_MIME_URI_LIST)` 与 `get_files()` 会同时落空，本用例转红。
+AURORA_TEST_CASE(files_roundtrip_via_uri_list_constant) {
+    require_test_backend();
+
+    const std::vector<std::string> paths{"/srv/aurora/aurora dir/one.txt", "/srv/aurora/two.txt"};
+    AURORA_TEST_REQUIRE(Clipboard::set_files(paths).ok());
+
+    const auto files = Clipboard::get_files();
+    AURORA_TEST_REQUIRE(files.ok());
+    AURORA_TEST_CHECK_EQ(files.value(), paths);
+
+    // 原始载荷经常量索引可读回：证明两端共用同一张 MIME 表，而非各写一份字面量。
+    const auto raw = Clipboard::get_payload(std::string{AURORA_MIME_URI_LIST});
+    AURORA_TEST_REQUIRE(raw.ok());
+    AURORA_TEST_CHECK_TRUE(to_text(raw.value()).starts_with("file:///srv/aurora/aurora%20dir/one.txt"));
+
+    const auto formats = Clipboard::available_formats();
+    AURORA_TEST_REQUIRE(formats.ok());
+    AURORA_TEST_CHECK_TRUE(has_format(formats.value(), AURORA_MIME_URI_LIST));
+}
+
+// 非 file scheme 的行不映射为路径：全被跳过时是 `Ok(空清单)`，而不是失败。
+// 变异自证：把 `get_files` 的解码换成「整行百分号解码后一律当路径」，本用例即转红。
+AURORA_TEST_CASE(get_files_skips_non_file_scheme_lines) {
+    require_test_backend();
+
+    const std::string payload = "http://example.com/a.txt\r\nfile:///srv/aurora/kept.txt\r\n";
+    AURORA_TEST_REQUIRE(Clipboard::set_payload(std::string{AURORA_MIME_URI_LIST}, to_bytes(payload)).ok());
+
+    const auto files = Clipboard::get_files();
+    AURORA_TEST_REQUIRE(files.ok());
+    AURORA_TEST_CHECK_EQ(files.value(), std::vector<std::string>{"/srv/aurora/kept.txt"});
+
+    // 全部条目都不可映射为路径时同样是 Ok(空清单)：空内容不是失败。
+    AURORA_TEST_REQUIRE(Clipboard::set_payload(std::string{AURORA_MIME_URI_LIST}, to_bytes("http://a/b\r\n")).ok());
+    const auto none = Clipboard::get_files();
+    AURORA_TEST_REQUIRE(none.ok());
+    AURORA_TEST_CHECK_EQ(none.value(), std::vector<std::string>{});
+}
+
+// html 便利封装映射 `AURORA_MIME_TEXT_HTML`，与 `get_payload` 的字节视图同源。
+// 变异自证：把 `set_html` 的存储键换成 `AURORA_MIME_TEXT_PLAIN`，两条读取通道即分叉转红。
+AURORA_TEST_CASE(html_roundtrip_via_text_html_constant) {
+    require_test_backend();
+
+    const std::string html = "<b>bold</b> &amp; <i>italic</i>";
+    AURORA_TEST_REQUIRE(Clipboard::set_html(html).ok());
+
+    const auto out = Clipboard::get_html();
+    AURORA_TEST_REQUIRE(out.ok());
+    AURORA_TEST_CHECK_STREQ(out.value(), html);
+
+    const auto raw = Clipboard::get_payload(std::string{AURORA_MIME_TEXT_HTML});
+    AURORA_TEST_REQUIRE(raw.ok());
+    AURORA_TEST_CHECK_EQ(raw.value(), to_bytes(html));
+}
+
+// available_formats 如实反映「此刻写进了什么」：reset 后为空，写了才在列，且不谎报未写入的格式。
+// 变异自证：把 available_formats 改成「无条件返回全表常量」，未写入格式的断言即转红。
+AURORA_TEST_CASE(available_formats_reflects_written_formats) {
+    require_test_backend();
+
+    // 刚安装（内容清空）：一个格式都不在列。
+    const auto empty = Clipboard::available_formats();
+    AURORA_TEST_REQUIRE(empty.ok());
+    AURORA_TEST_CHECK_EQ(empty.value(), std::vector<std::string>{});
+
+    AURORA_TEST_REQUIRE(Clipboard::set_text("plain text").ok());
+    AURORA_TEST_REQUIRE(Clipboard::set_html("<p>p</p>").ok());
+    AURORA_TEST_REQUIRE(Clipboard::set_payload("application/x-probe", to_bytes("x")).ok());
+
+    const auto formats = Clipboard::available_formats();
+    AURORA_TEST_REQUIRE(formats.ok());
+    AURORA_TEST_CHECK_TRUE(has_format(formats.value(), AURORA_MIME_TEXT_PLAIN));
+    AURORA_TEST_CHECK_TRUE(has_format(formats.value(), AURORA_MIME_TEXT_HTML));
+    AURORA_TEST_CHECK_TRUE(has_format(formats.value(), "application/x-probe"));
+    // 立骨期富格式未写入即不入列：新 API 已声明不等于格式已可用。
+    AURORA_TEST_CHECK_FALSE(has_format(formats.value(), AURORA_MIME_URI_LIST));
+    AURORA_TEST_CHECK_FALSE(has_format(formats.value(), AURORA_MIME_IMAGE_PNG));
+
+    Clipboard::reset_test_backend();
+    const auto cleared = Clipboard::available_formats();
+    AURORA_TEST_REQUIRE(cleared.ok());
+    AURORA_TEST_CHECK_EQ(cleared.value(), std::vector<std::string>{});
+}
+
+// 空口径：读不存在的格式 = Ok(空值)，写空值 = no-op 且保留既有内容。两条都要 machine-visible 地区分开
+// 「空」与「失败」——把 `Ok(空)` 改成 `ClipboardFormatUnsupported` 或用空写把既有内容清掉，本用例即转红。
+AURORA_TEST_CASE(empty_values_and_empty_writes_follow_the_documented_contract) {
+    require_test_backend();
+
+    // 读：什么都没写过 → Ok(空值)，不是 Error。
+    const auto missing = Clipboard::get_payload("application/x-never-written");
+    AURORA_TEST_REQUIRE(missing.ok());
+    AURORA_TEST_CHECK_EQ(missing.value(), std::vector<std::uint8_t>{});
+    const auto no_files = Clipboard::get_files();
+    AURORA_TEST_REQUIRE(no_files.ok());
+    AURORA_TEST_CHECK_EQ(no_files.value(), std::vector<std::string>{});
+    const auto no_html = Clipboard::get_html();
+    AURORA_TEST_REQUIRE(no_html.ok());
+    AURORA_TEST_CHECK_EQ(no_html.value(), std::string{});
+
+    // 写：空字节 / 空清单 / 空串全是 no-op，既有内容必须留下。
+    const std::vector<std::string> paths{"/srv/aurora/keep.txt"};
+    const std::string html = "<p>keep</p>";
+    const std::vector<std::uint8_t> bytes{0x01U, 0x02U};
+    AURORA_TEST_REQUIRE(Clipboard::set_files(paths).ok());
+    AURORA_TEST_REQUIRE(Clipboard::set_html(html).ok());
+    AURORA_TEST_REQUIRE(Clipboard::set_payload("application/x-probe", bytes).ok());
+
+    AURORA_TEST_REQUIRE(Clipboard::set_files({}).ok());
+    AURORA_TEST_REQUIRE(Clipboard::set_html("").ok());
+    AURORA_TEST_REQUIRE(Clipboard::set_payload("application/x-probe", {}).ok());
+
+    AURORA_TEST_CHECK_EQ(Clipboard::get_files().value(), paths);
+    AURORA_TEST_CHECK_EQ(Clipboard::get_html().value(), html);
+    AURORA_TEST_CHECK_EQ(Clipboard::get_payload("application/x-probe").value(), bytes);
+}
+
+// 立骨期：富格式 API 在平台路径上（测试后端已卸载）一律报「本平台无该格式机制」，
+// 且该错误码的 retryable 为 false——机制缺失是稳态，调用方该改走别的通道而不是重试。
+// 变异自证：把平台路径的返回改成 `Ok(空值)`（谎称成功）或沿用 `GeneralNotSupported`，
+// 本用例的 code_enum 断言即转红。
+AURORA_TEST_CASE(rich_formats_report_unsupported_on_platform_path) {
+    (void)Clipboard::remove_test_backend();  // 走平台路径
+
+    const auto set_payload = Clipboard::set_payload("application/x-probe", to_bytes("x"));
+    AURORA_TEST_REQUIRE_FALSE(set_payload.ok());
+    expect_format_unsupported(set_payload.error(), "application/x-probe");
+
+    const auto get_payload = Clipboard::get_payload(std::string{AURORA_MIME_URI_LIST});
+    AURORA_TEST_REQUIRE_FALSE(get_payload.ok());
+    expect_format_unsupported(get_payload.error(), AURORA_MIME_URI_LIST);
+
+    const auto set_files = Clipboard::set_files({"/srv/aurora/a.txt"});
+    AURORA_TEST_REQUIRE_FALSE(set_files.ok());
+    expect_format_unsupported(set_files.error(), AURORA_MIME_URI_LIST);
+
+    const auto get_files = Clipboard::get_files();
+    AURORA_TEST_REQUIRE_FALSE(get_files.ok());
+    expect_format_unsupported(get_files.error(), AURORA_MIME_URI_LIST);
+
+    const auto set_html = Clipboard::set_html("<p>p</p>");
+    AURORA_TEST_REQUIRE_FALSE(set_html.ok());
+    expect_format_unsupported(set_html.error(), AURORA_MIME_TEXT_HTML);
+
+    const auto get_html = Clipboard::get_html();
+    AURORA_TEST_REQUIRE_FALSE(get_html.ok());
+    expect_format_unsupported(get_html.error(), AURORA_MIME_TEXT_HTML);
+
+    // 末尾恢复测试后端：本用例卸载了它，不能把「已卸载」这一状态泄漏给同进程的后继用例。
+    (void)Clipboard::install_test_backend();
+}
+
+// MIME 为空不是「空内容」，而是调用方参数错：空串无法作为存储键，静默接受等于留下一个读不回来的格式。
+AURORA_TEST_CASE(empty_mime_payload_is_an_argument_error) {
+    require_test_backend();
+
+    const auto result = Clipboard::set_payload("", to_bytes("x"));
+    AURORA_TEST_REQUIRE_FALSE(result.ok());
+    AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::GeneralInvalidArgument);
 }
 
 }  // namespace aurora::test_cases::utest_clipboard

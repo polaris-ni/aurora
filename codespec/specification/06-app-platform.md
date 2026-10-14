@@ -318,7 +318,9 @@ au::App().window(win ? std::move(win.value()) : nullptr)
 
 `au::platform()` 是显式运行时平台查询，跳过后端探测。返回 `Platform{ PlatformKind kind, DeviceKind device, SurfaceKind surface }`，含 `is_mobile()` / `is_desktop()` / `capabilities()`。
 
-`PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`。
+`PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`、`system_drag_in`、`system_drag_out`。
+
+后两位表「**机制是否存在**」：支持接收系统拖入 / 支持发起系统拖出。**当前恒为 false**——系统拖放后端尚未接线，能力位不预先声称支持（接线后按各后端实测翻位，并由单测锚定）。能力位与运行期失败**不互相替代**：机制存在但会话建立失败、源中断等仍走 `Result` 错误（`system-drag-*` 码，`retryable = false`，机制缺失是稳态）。
 
 ```cpp
 const au::Platform p = au::platform();
@@ -496,7 +498,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 ### 8.2 剪贴板
 
-`Clipboard`（`app/clipboard.h`）提供四个静态自由函数，**一律返回 `Result<...>`**，失败必机器可见（不再以空串 / 静默 no-op 冒充成功）：
+`Clipboard`（`app/clipboard.h`）是同址的一个类（文本 / 图像 / 富格式三族都在它上面，不另开门面类），全部静态接口**一律返回 `Result<...>`**，失败必机器可见（不再以空串 / 静默 no-op 冒充成功）：
 
 | 接口 | 签名 | 说明 |
 |:---|:---|:---|
@@ -513,11 +515,20 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 | 已打开但载荷提交失败（`GlobalAlloc` / `GlobalLock` / `SetClipboardData`）/ 入参文本不是合法 UTF-8 | `ClipboardWriteFailed` | ❌ |
 | 本平台无剪贴板实现 | `GeneralNotSupported` | ❌ |
 | 图像尺寸超限或像素缓冲与维度不一致（调用方参数错） | `GeneralInvalidArgument` | ❌ |
+| 本平台无该 MIME 的读写机制（富格式族） | `ClipboardFormatUnsupported` | ❌（机制缺失是稳态） |
 
 - **空内容不是失败**：「可访问但当前没有文本/图像」是正常态，返回 `Ok`，不得与「读不到」混为一谈。
 - **空写入是契约内 no-op**：空文本 / 空图像不触碰剪贴板、**保留既有内容**，返回 `Ok`。
 - **Windows 写文本先转码后开剪贴板**：`MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, ...)` 在 `EmptyClipboard` **之前**校验，非法 UTF-8 那一笔被拒时不会把用户原本复制的内容清掉；同理 `SetClipboardData` 失败意味着所有权未转移，须 `GlobalFree` 归还，不泄漏句柄。
 - 声明与迁移：四函数由「`void` / `std::string` 静默返回」改为 `Result`，属预览期破坏性收敛（semver 记录随版本收口批量落 `CHANGELOG.md`）；消费端把原 `std::string` 返回值改 `.value()` 即可保持旧行为，但**建议检查 `error()`**，否则又回到静默吞失败。
+
+**富格式族（files / uri-list / HTML / 自定义 MIME）**：`available_formats()`、`set_payload(mime, bytes)` / `get_payload(mime)`、`set_files(paths)` / `get_files()`、`set_html(html)` / `get_html()`。要点：
+
+- **MIME 词汇表单一真源**是 `app/mime_types.h` 的常量表（`AURORA_MIME_*`，命名空间作用域 `constexpr std::string_view`）：`text/plain`、`text/uri-list`、`image/png`、`text/html`、`aurora/widget`（应用内拖拽既有词汇），另附 `is_known_mime()`。剪贴板侧与**系统拖放**侧同引此表（拖放事件结构本身用裸 `std::string`，因为 `event/` 不依赖 `app/`；两侧取值一致由常量表保证），各处禁止就地硬编码 MIME 串。
+- **`available_formats()` 如实反映此刻能读到什么**：平台路径上是各平台既有机制覆盖的格式（文本三平台恒在列、`image/png` 仅 Windows 在列），富格式待平台机制落地后才入列；memory 测试后端下反映实际写入的格式。**不因「API 已声明」就谎报可用**。
+- **`text/uri-list` 编解码是纯逻辑**（`src/aurora/app/uri_list.h`，无平台依赖）：编码逐条路径产出 `file://` URI（空 authority 的第三个斜杠按需补出，空格等保留字符 `%XX` 大写十六进制），行以 CRLF 结尾；解码容错 CRLF / LF / CR 三种分隔符、忽略空行、`file://` 行百分号解码为本地路径并还原盘符形态（`file:///C:/x` → `C:/x`；POSIX 绝对路径的前导 `/` 保留）。**非 `file` scheme 的行（`http://` 等）不映射为路径、静默跳过**——`get_files()` 只返回可映射为本地路径的条目，完整原始行经 `get_payload(AURORA_MIME_URI_LIST)` 取得；全部条目被跳过时是 `Ok(空清单)`。`set_files` **只接受本地路径**（URL 类内容走 `set_payload`），与解码侧口径对称。
+- **空口径沿旧约**：格式不存在 = `Ok` 空值（空内容不是失败）；空串 / 空清单 / 空字节写入 = no-op，**保留既有内容**；`mime` 为空串是调用方参数错（`GeneralInvalidArgument`）。
+- **平台实现不在本批**：Win32 既有 text / image 两族零改动；富格式的平台后端（`CF_HDROP` / "HTML Format" / `RegisterClipboardFormat`、X11 / Wayland selection 目标协商、macOS `NSPasteboard`）随后续批次落地，落地前非测试路径按 `ClipboardFormatUnsupported` 报错。memory 测试后端已覆盖富格式往返。
 
 **控件层（`TextInput` / `Text` / `RichTextEdit` 的 Ctrl+C/X/V）**：这些快捷键路径无 `Result` 出口（`on_key_event` 返回 `void`），故失败经 `Diagnostics::warn(msg, where, code)` 上报——桥接 Logger 且进 `Diagnostics::report()` 收集，机器可读，与 `widget.cpp` / `timer.h` 既有口径一致。同时快捷键语义随失败收紧：
 
@@ -552,6 +563,13 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 | `app/display.h` | 显示设备与 DPI 查询 |
 
 **命令是唯一真源**：`CommandRegistry`（`commands.h`）持 `Command{ id, title, icon, category, action, default_binding, scope, enabled, when_label }`。`bind_shortcuts(ShortcutRegistry&)` 与 `to_menu_items()` 是它面向快捷键与菜单的两个**投影**，命令面板是第三个消费方；三者共用 `invoke(id)` 出口，故启用条件与空动作判定单点生效。启用条件为两段式：`enabled` 谓词承担运行期判定（空 = 恒启用），`when_label` 仅作展示 / 序列化标签（**不参与求值**，也不解析条件 DSL）。`to_json()` 产出 `{"commands":[…]}` 自描述信封供工具面枚举；`search()` 与工具面共用 `command_fuzzy_score()`，故 AI 检索与用户检索次序一致。
+
+**菜单数据模型的单一真源（`MenuModel`）**：菜单数据此前与行为、渲染提示混装在同两个结构里——`MenuItem`（`app/menu.h`）装 `on_click` 行为 + 数据 + `shortcut_text` / `icon` 渲染提示，`Menu`（`widget/menu_bar.h`）装顶级菜单名与下拉项，二者被自绘 `MenuBar`、`Modifier` 层的 `ContextMenuNode` 与 `SystemTray` 三方共用。原生菜单桥（Win32 `HMENU` / macOS `NSMenu` / Linux appmenu）需要的不是「再抄一份菜单 API」，而是**同一个模型的多投影**（与 `CommandRegistry` 的「单一真源 + 快捷键 / 菜单 / 命令面板三投影」同款范式），因此提取纯数据模型：
+
+- `MenuModel`（`app/menu.h`）只承载数据：`id`（稳定标识，可空）、`label`、`enabled`、`checkable`、`checked`、`shortcut_text`、`separator`、`children`。**不含** `on_click`（行为留在 `MenuItem`）与 `icon`（渲染提示留在 `MenuItem`）。顶级菜单与菜单项**共用一套模型**：顶级菜单标题落在 `label`、其下拉项落在 `children`。
+- 投影函数（`app/menu.h` 声明）：`to_menu_model(const MenuItem &)`、`to_menu_model(const Menu &)`（`title` → `label`、`items` → `children` 递归）、`to_menu_models(const std::vector<Menu> &)`（菜单栏整体投影，顺序逐位保真）、`from_menu_model(const MenuModel &)`（回转，`on_click` / `icon` 为空——供原生桥按 `id` 反查命令后自行接线行为）。四者均为无副作用纯函数。
+- **`id` 是原生桥的前置条件**：自绘路径靠指针身份路由点击即可，原生路径跨菜单重建只能靠稳定标识，故 `MenuItem` 与 `Menu` 各增一个 `id` 字段（默认空串，自绘路径忽略、零参与）。
+- 自绘路径**零改动**：`MenuBar` / `ContextMenuNode` / `SystemTray` 的既有字段、构造与绘制命中逻辑一行不动，`MenuModel` 投影是新增加的消费路径。自绘与原生「二显一存」——同一份模型，任一时刻只有一条渲染路径生效。
 
 **接线**：`Application::commands()` 返回注册表；`app.commands().bind_shortcuts(app.shortcuts())` 一行把默认快捷键接入。绑定为**显式**而非 `run()` 内自动执行——否则 `run()` 之后注册的命令会静默失效。`Application` 在 `dispatch*` 入口统一暴露「当前焦点管理器」（`current_focus_manager()`），快捷键动作与控件回调内同样可取到，模态弹层据此完成焦点陷阱。原「命令式逃生舱」`aurora::imperative::run_raw`（`imperative.h`）与命令系统无关。
 
@@ -709,6 +727,37 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - `StreamSocket`：`connect_loopback(port)`、`set_io_timeout(milliseconds)`（**毫秒统一口径**：Winsock 收 DWORD 毫秒、POSIX 收 `timeval`，形态换算封闭在实现侧——按平台字节形态误传会把 5 秒执行成 5 毫秒，本层的存在理由）、`read_some(span) -> Result<size_t>`（**0 = 对端有序关闭**，与错误态严格区分；超时落独立码 `net-recv-timeout`）、`write_all(span)`（内部 ≤1MiB 分块写满，`send` 返回值窄化一次解决）、`is_loopback_peer()`（服务端访问控制判据，127.0.0.0/8 全段）。
 
 链接面：`ws2_32` 随核心 `aurora` 目标在 Windows 无条件 `PUBLIC` 传导（见 `BUILD_OPTIONS.md`），各消费者不再散挂。Emscripten 腿经其 BSD socket shim 编译，但浏览器运行时无真实监听语义，Inspector 相关用例在 wasm 构建下按 `AURORA_TEST_SKIP` 退避。回归：`utest_net_socket`（行为契约）+ `utest_inspector_client`（超时平台形态）。
+
+---
+
+### 8.9 系统拖放（跨进程）
+
+事件族与控件契约见 [`05-event-navigation.md`](05-event-navigation.md) §5.2；本节只记**平台 Shell 侧**的入口、注入点与错误口径。
+
+- **程序化派发入口**：`Application::dispatch_system_drop(SystemDropEvent &)` / `WindowHost::dispatch_system_drop(SystemDropEvent &)`，四态共用，阶段由调用方给定。位置类事件同款：派发根为整窗下沉壳，坐标为整幅表面逻辑坐标。无头环境与单测经它完整走通四态派发，**不依赖任何真实窗口**。
+- **平台后端接入点**：后端把 OS 会话翻译成事件后交 `WindowHost` 的事件处理器（Win32 `WM_DROPFILES` 路径已按此换型，HDROP 解析与坐标换算原样保留）。其余后端的 OLE / Xdnd / `wl_data_device` / dragging session 属后续接线范围。
+- **拖出**：`system_drag::begin(DragOffer)` 是会话入口。当前无后端接线时返回 `system-drag-not-supported`；控件侧入口为 `Widget::begin_system_drag()`（取 `on_provide_drag()` 的要约），结束回 `on_system_drag_end(DragAction)`。**不引入嵌套消息泵**（Win32 `DoDragDrop` 的嵌套泵与重入 guard 属接线期设计项）。
+- **错误口径**（`ERROR_CATALOG.md`）：`system-drag-not-supported`（无机制 / 能力位为 false；`retryable = false`，机制缺失是稳态，重试无意义）与 `system-drag-session-failed`（会话建立或进行期失败：协商破裂、源数据中断；同样按稳态定稿，瞬态重试由调用方按 hint 自行决策）。要约不合法（空 `formats` / 空 `provide`）是调用方参数问题，走 `general-invalid-argument`，与「平台没机制」分开报。
+- **测试注入**：`system_drag::install_test_backend()` / `reset_test_backend()` / `remove_test_backend()` 三件套（同 `Clipboard::install_test_backend` 范式，`AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release 下零副作用）。安装后 `begin` 不触碰平台、直接回成功动作 `Copy`，使拖出分支在无头环境可测。载荷侧由 `DragPayload::from_bytes` 直接构造内存载荷，drop 态的往返不依赖平台。
+- **热路径与无障碍**：`Over` 态按指针采样频率到达，accept 查询须常量级、禁在拖放路径触发重布局；拖放不是唯一路径，粘贴 / 文件对话框等非拖拽入口在 UI 上须可达，放置反馈不得只靠光标形态。
+
+回归：`utest_drag_payload`（载荷往返、空口径、inert 后端、能力位锚定）+ `utest_dispatcher`（四态派发与 accept 查询）+ `utest_event` / `utest_application`（默认构造与程序化入口）。
+
+---
+
+### 8.10 最近文档（`app/recent_documents.h`）
+
+`RecentDocuments` 是应用级「新 → 旧」有序集合，供「文件 → 最近打开」类菜单消费；形态与 `ScrollStorage`（§9.3）同构——进程级单例 + `Preferences` attach / detach + 内存优先懒回读，**但不引入 `Scope`**：最近文档是应用级全局语义（多窗口共享同一列表），不是窗口作用域状态。
+
+- `instance()`（进程级单例，懒构造）、`AURORA_MAX_ENTRIES = 16`（容量上限，声明处可见；**无运行期 setter**，避免「设置与容量不一致」的第二真源）、`AURORA_GROUP_NAME = "recent_documents"`（持久化分组名）。
+- 会话内读写：`add(path)`（同路径去重并置顶、超容量淘汰最旧；空路径 no-op）、`list()`（新 → 旧序值拷贝）、`clear()`（清内存并打墓碑）、`size()`、`clear_all()`（测试与重置用）。
+- **路径口径：只做字符串级存取**——不校验文件是否存在、不做路径规范化（`..` / 相对路径 / 大小写差异一律按原样字符串比较）。理由：本类在主线程且不触碰文件系统，读存在性会引入不可测的 IO 副作用与竞态；「最近文档里留着已删文件要不要显示」是应用侧决策。
+- **持久化信封**：分组下单键 JSON 数组 `{"documents":[...]}`。与 `ScrollStorage` 的「每键一条目」是**有意分歧**：最近文档是有序集合、顺序即语义，用索引当键会把顺序编码进键名，墓碑与重排逻辑都不必要地复杂。`sync()` 只写 `Preferences` 内存并通知订阅者，**落盘由 `App` 的 `flush()` 决定**（与 `ScrollStorage` 同口径）；读取懒回读，不做全量预热。
+- **宽容降级**：读缺失或信封损坏（值非数组、元素非字符串）得到空列表，不抛错、不清除用户数据。
+- **无内置变更通知**：本类只管存取，菜单刷新由调用方在 `add` / `clear` 后自行驱动（同 `ScrollStorage` 口径，避免引入第二套通知机制）。
+- **OS 级投影不在本批**：Windows JumpList / macOS `NSDocumentController` 消费 `list()`，Linux 无 OS 级机制（能力位申报同属后续批次）；落地前应用内列表已全平台一致。
+
+回归：`utest_recent_documents`（去重置顶 / 容量淘汰 / 顺序 / 持久化往返 / 空口径 / 损坏信封降级）。
 
 ---
 

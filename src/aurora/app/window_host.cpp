@@ -246,8 +246,9 @@ auto WindowHost::dispatch(Event &e) -> void {
         EventDispatcher::dispatch(root, *ce, focus_);
     } else if (auto *te = dynamic_cast<TouchEvent *>(&e)) {
         touch_.dispatch(hit, *te, &focus_);
-    } else if (auto *fde = dynamic_cast<FileDropEvent *>(&e)) {
-        EventDispatcher::dispatch(hit, *fde);
+    } else if (auto *sde = dynamic_cast<SystemDropEvent *>(&e)) {
+        // 系统拖放同样是位置类事件：走整窗下沉壳，与绘制共用同一条平移。
+        EventDispatcher::dispatch(hit, *sde);
     }
     set_current_focus_manager(prev_fm);
 }
@@ -276,11 +277,6 @@ auto WindowHost::dispatch_touch(const TouchEvent &e) -> void {
     touch_.dispatch(hit_root(), copy, &focus_);
 }
 
-auto WindowHost::dispatch_file_drop(const std::vector<std::string> &paths, float x, float y) -> void {
-    FileDropEvent e;
-    e.position = Point{.x = x, .y = y};
-    e.paths = paths;
-    EventDispatcher::dispatch(hit_root(), e);
-}
+auto WindowHost::dispatch_system_drop(SystemDropEvent &e) -> void { EventDispatcher::dispatch(hit_root(), e); }
 
 }  // namespace aurora

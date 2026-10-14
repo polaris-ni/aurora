@@ -17,6 +17,14 @@ struct PlatformCapabilities {
     bool high_frequency_pointer = false;  ///< 高频率指针采样（Win32/Glfw 为 true）。
     bool desktop = false;  ///< 桌面形态。
     bool mobile = false;  ///< 移动形态（Mobile/Tablet）。
+    /// @brief 支持接收系统拖入（跨进程拖放进应用）。
+    ///
+    /// 能力位只表「机制是否存在」：运行期不可用（会话建立失败、权限不足等）仍走 `Result` 错误，
+    /// 二者不互相替代。**当前恒为 false**——系统拖放后端尚未接线，此处不预先声称支持；接线后按各
+    /// 后端实测翻位。
+    bool system_drag_in = false;
+    /// @brief 支持发起系统拖出（从应用拖到其它进程）。语义同上，**当前恒为 false**。
+    bool system_drag_out = false;
 };
 
 /// @brief 平台与运行环境快照（显式查询，跳过 Surface 探测，specification/06-app-platform.md §5）。
@@ -46,7 +54,8 @@ struct Platform {
 
     /// @brief 由设备形态与 Surface 后端类别推导平台能力标志。
     /// @return 聚合结果：desktop/mobile 按 DeviceKind 判定；multitouch 与 high_frequency_pointer
-    /// 在 Win32/Glfw/X11/Wayland/MacOS 五类真实显示 Surface 下为 true。
+    /// 在 Win32/Glfw/X11/Wayland/MacOS 五类真实显示 Surface 下为 true；system_drag_in /
+    /// system_drag_out 恒为 false（系统拖放后端尚未接线，保持默认值即「不声称支持」）。
     [[nodiscard]] auto capabilities() const -> PlatformCapabilities {
         // 待填充的能力标志聚合：默认值起步，先按设备形态、再按 SurfaceKind 逐项置位。
         PlatformCapabilities c;

@@ -60,7 +60,7 @@ class ClickTracker {
 /// 者派发（最近可滚动祖先；嵌套时最深滚动者优先）。
 /// - `dispatch(TextInputEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextInput`（不冒泡）。
 /// - `dispatch(TextCompositionEvent, FocusManager)`：派发到当前焦点 widget 的 `onTextComposition`（不冒泡）。
-/// - `dispatch(FileDropEvent)`：派发到命中目标 widget（不冒泡）。
+/// - `dispatch(SystemDropEvent)`：系统拖放四态派发到命中目标 widget（不冒泡；enter/over 附带 accept 查询）。
 ///
 /// 冒泡并不依赖 widget 父链指针：`hit_test_chain` 在命中时已把整条祖先链一并返回，
 /// `deliver_chain` 直接沿该链自最深（链尾）向根（链头）派发并 stop-on-handled。
@@ -127,11 +127,16 @@ class EventDispatcher {
     /// @return 是否命中到可滚动目标（或点命中目标）。
     static auto dispatch(Widget &root, ScrollEvent &e) -> bool;
 
-    /// @brief 同步派发文件拖放事件到命中目标；返回是否命中（is_handled 由 widget 写入 e）。
+    /// @brief 同步派发系统拖放事件到命中目标；返回是否命中（is_handled 由 widget 写入 e）。
+    ///
+    /// 四个阶段（`Enter` / `Over` / `Leave` / `Drop`）一律不冒泡、仅交给命中目标，落点坐标沿用
+    /// 「位置类事件一律整幅表面逻辑坐标」。`Enter` / `Over` 两态在派发前额外调用命中目标的
+    /// `query_system_drag_accept`，与源建议动作求交后写入 `e.allowed`（宿主据此决定 OS 光标反馈），
+    /// 故这两个入口在 `Over` 态按指针采样频率被调用，实现须常量级。
     /// @param root 派发起点（根 widget）；在其子树内按落点坐标做命中测试。
-    /// @param e    待派发的文件拖放事件（不冒泡，仅交给命中目标）。
+    /// @param e    待派发的系统拖放事件（不冒泡，仅交给命中目标）；`allowed` 会被就地写定。
     /// @return 事件是否被目标控件消费（取 `e.is_handled`）。
-    static auto dispatch(Widget &root, FileDropEvent &e) -> bool;
+    static auto dispatch(Widget &root, SystemDropEvent &e) -> bool;
 
     /// @brief 同步派发文本输入事件到焦点 widget；无焦点则返回 false。
     /// @param root 派发起点（根 widget）；文本输入只路由到焦点控件，不经命中链。

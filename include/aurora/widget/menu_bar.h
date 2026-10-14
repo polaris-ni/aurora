@@ -21,6 +21,7 @@ namespace aurora {
 struct Menu {
     std::string title;  ///< 顶级菜单名（如 "File"）
     std::vector<MenuItem> items;  ///< 下拉菜单项
+    std::string id;  ///< 稳定标识（可空；自绘路径忽略，供原生菜单桥按标识路由点击）
 };
 
 /// @brief 声明式菜单栏：自绘跨平台实现。

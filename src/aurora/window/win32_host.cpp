@@ -26,9 +26,12 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "aurora/app/mime_types.h"
+#include "aurora/app/uri_list.h"
 #include "aurora/core/image.h"
 #include "aurora/core/log.h"
 #include "aurora/core/utf8.h"
@@ -849,11 +852,20 @@ auto Win32Host::Impl::handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT
     DragQueryPoint(hdrop, &pt);
     ScreenToClient(hwnd_in, &pt);  // 屏幕坐标 → 客户区坐标
     DragFinish(hdrop);
-    FileDropEvent fde;
-    fde.position = to_logical(pt.x, pt.y);
-    fde.paths = std::move(paths);
+
+    // 立骨期只走「文件清单」这一条既有通路：把它装进四态事件的 drop 态 + uri-list 载荷，
+    // 坐标换算（屏幕 → 客户区 → 逻辑）与 HDROP 解析一字不动。
+    SystemDropEvent sde;
+    sde.phase = SystemDropPhase::Drop;
+    sde.position = to_logical(pt.x, pt.y);
+    sde.formats.emplace_back(AURORA_MIME_URI_LIST);
+    sde.proposed = DragAction::Copy;  // 资源管理器拖入的既有语义是复制（不移动源文件）
+    const std::string uri_text = uri_list::encode(paths);
+    std::unordered_map<std::string, std::vector<std::uint8_t>> entries;
+    entries.emplace(std::string(AURORA_MIME_URI_LIST), std::vector<std::uint8_t>(uri_text.begin(), uri_text.end()));
+    sde.payload = DragPayload::from_bytes(std::move(entries));
     if (handler) {
-        handler(fde);
+        handler(sde);
     }
     return 0;
 }

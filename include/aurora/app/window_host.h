@@ -200,11 +200,12 @@ class WindowHost {
     /// @brief 派发多点触控事件（按 pointer id 在本宿主捕获表内路由）。
     /// @param e 触控事件（含全部触点）。
     auto dispatch_touch(const TouchEvent &e) -> void;
-    /// @brief 派发文件拖放事件到命中控件（窗口逻辑坐标）。
-    /// @param paths 拖放的文件路径列表。
-    /// @param x 投放点逻辑坐标 X。
-    /// @param y 投放点逻辑坐标 Y。
-    auto dispatch_file_drop(const std::vector<std::string> &paths, float x, float y) -> void;
+    /// @brief 派发系统拖放事件到命中控件（四态统一程序化入口）。
+    ///
+    /// 与其余位置类派发入口同款：派发起点是整窗下沉壳（`hit_root()`），事件坐标按「位置类事件
+    /// 一律整幅表面逻辑坐标」契约，命中与绘制共用同一条平移、结构上不可漂移。
+    /// @param e 待派发的系统拖放事件（阶段由调用方给定）。
+    auto dispatch_system_drop(SystemDropEvent &e) -> void;
 
   private:
     /// @brief 窗口可见性状态上报：更新 Window 快照后转交 sink（`Application` 聚合）。
