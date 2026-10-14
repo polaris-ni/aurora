@@ -153,6 +153,11 @@ enum class ErrorCode : std::uint16_t { // NOLINT(*-enum-size)
     NetTlsVersionMismatch = 109,  ///< net-tls-version-mismatch: TLS protocol version mismatch: '{detail}'
     NetTlsEngineUnavailable = 110,  ///< net-tls-engine-unavailable: No TLS backend available: '{detail}'
     NetTlsPinMismatch = 111,  ///< net-tls-pin-mismatch: TLS certificate pin mismatch: '{detail}'
+    HttpRequestInvalid = 112,  ///< http-request-invalid: HTTP request cannot be sent as written: '{detail}'
+    HttpTimeout = 113,  ///< http-timeout: HTTP request timed out: '{detail}'
+    HttpRedirectLimit = 114,  ///< http-redirect-limit: HTTP redirect chain exceeded the configured limit: '{detail}'
+    HttpBodyTooLarge = 115,  ///< http-body-too-large: HTTP response body exceeds the configured limit: '{detail}'
+    HttpProtocolError = 116,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -170,7 +175,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 112> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 117> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1515,6 +1520,66 @@ inline constexpr std::array<ErrorMeta, 112> AURORA_ERROR_TABLE = {
             .retryable = false,
             .message_tpl = "TLS certificate pin mismatch: '{detail}'",
             .hint = "The peer's certificate does not carry any pinned public key, so the pinned identity changed (key rotation, reissued certificate, or an interception proxy). Update the pinned SPKI digests from an out-of-band source you trust and rotate them in lockstep with the service; never fall back to allow_insecure_certificate, which defeats the pin entirely",
+        },
+        {
+            .code = ErrorCode::HttpRequestInvalid,
+            .ident = "HttpRequestInvalid",
+            .slug = "http-request-invalid",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "HTTP request cannot be sent as written: '{detail}'",
+            .hint = "The request violates the message grammar before any byte is written (unknown method text, a header name outside the token charset, a header value containing CR or LF, or a target URL without a host). Fix the request at the call site; the peer never sees it, so retrying with the same fields reproduces the same rejection",
+        },
+        {
+            .code = ErrorCode::HttpTimeout,
+            .ident = "HttpTimeout",
+            .slug = "http-timeout",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "timeout",
+            .retryable = true,
+            .message_tpl = "HTTP request timed out: '{detail}'",
+            .hint = "The detail names which of the three stages expired (connect, read_idle or total), and they mean different things: connect says nothing answered, read_idle says the body stalled mid-flight, total says the whole exchange overran. Raise only the stage that fired - a blanket total budget turns slow-but-healthy transfers into failures",
+        },
+        {
+            .code = ErrorCode::HttpRedirectLimit,
+            .ident = "HttpRedirectLimit",
+            .slug = "http-redirect-limit",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "HTTP redirect chain exceeded the configured limit: '{detail}'",
+            .hint = "Either the peer is bouncing between targets or the limit is genuinely too small for this endpoint's chain. Inspect the Location sequence in the diagnostics before raising the limit, because following a cycle also leaks credentials to each hop it revisits",
+        },
+        {
+            .code = ErrorCode::HttpBodyTooLarge,
+            .ident = "HttpBodyTooLarge",
+            .slug = "http-body-too-large",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "HTTP response body exceeds the configured limit: '{detail}'",
+            .hint = "The guard is what keeps a wrong URL (a video behind a shortened link) from exhausting memory. Raise max_body_bytes if the payload is legitimately large, or switch to open_stream so the body is delivered in bounded chunks instead of materialized",
+        },
+        {
+            .code = ErrorCode::HttpProtocolError,
+            .ident = "HttpProtocolError",
+            .slug = "http-protocol-error",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "HTTP peer violated the message grammar: '{detail}'",
+            .hint = "The response is not parseable as HTTP/1.1 (bad status line, a chunk size that is not hexadecimal, framing that declares both Content-Length and an unknown Transfer-Encoding, or a body longer than its declared length). Close the connection and re-issue on a fresh one, because the byte stream is now misaligned and no later response on it can be trusted",
         },
   },
 };
