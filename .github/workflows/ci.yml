@@ -64,7 +64,7 @@
 #   clang-format-22，不重复 `apt-get update`。Windows / macOS 未纳入：无 apt，且这两侧从未因
 #   该探测红过。
 #
-# 编译缓存（ccache-action）：core（Linux/macOS/MinGW）、backends（Linux/macOS）、
+# 编译缓存（ccache-action）：core（Linux/macOS/MinGW/clang-cl）、backends（Linux/macOS）、
 #   toggles、asan、coverage、install 各 job 接入，key 按 job/矩阵名分桶；
 #   口径（SLOPPINESS / BASEDIR / NOHASHDIR / 压缩）统一由 cmake/AuroraCcache.cmake
 #   经编译器启动器注入，与本地构建共享同一缓存语义。windows-msvc 两 job 走默认
@@ -156,6 +156,7 @@ jobs:
             build-type: Debug
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DAURORA_ENABLE_LLD=ON
             build-demos: true
+            ccache: true # clang-cl 的 compiler id 为 Clang（非 MSVC），AuroraCcache.cmake 会自动接管启动器
             e2e-expect: "win32"
           - name: macos-clang
             os: macos-latest
@@ -189,7 +190,7 @@ jobs:
         run: sudo apt-get update -y && sudo apt-get install -y ${{ matrix.apt-pkgs }}
 
       - name: Setup ccache
-        if: runner.os == 'Linux' || runner.os == 'macOS' || matrix.mingw
+        if: runner.os == 'Linux' || runner.os == 'macOS' || matrix.mingw || matrix.ccache
         uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: core-${{ matrix.name }}
@@ -209,7 +210,7 @@ jobs:
 
       # 收束期可观测性：ccache 命中率纳入 CI 输出（hendrikmuhs/ccache-action 已注入 PATH）
       - name: ccache stats
-        if: runner.os == 'Linux' || runner.os == 'macOS' || matrix.mingw
+        if: runner.os == 'Linux' || runner.os == 'macOS' || matrix.mingw || matrix.ccache
         run: ccache --show-stats --verbose || ccache --show-stats
 
       # demos 不进默认构建（EXCLUDE_FROM_ALL），单独拉起聚合目标确保持续可编译
