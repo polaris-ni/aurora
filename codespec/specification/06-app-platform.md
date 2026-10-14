@@ -999,6 +999,20 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 ---
 
+#### 8.8.19 HTTP 发起侧值类型：`Method` / `Request` / `Response`（CHG-010 HTTP 切片·值层）
+
+新增公共头 `include/aurora/net/http.h`（命名空间 `aurora::net::http`）与实现 `src/aurora/net/http.cpp`（实现离头）。本小节只落 §6 草图的**值层**——一次 HTTP 交换的输入（方法、目标、字段、消息体、发起侧选项）与输出（状态行、字段、已物化消息体）——它是发起侧 `Client` 组装的对象，也是把字节层 `net/detail/http_wire.h` 接给调用方的最后一层纯逻辑。零 socket、零 DNS、零平台头，故三平台逐值一致、wasm 腿同样可跑。
+
+四条落码口径：
+
+- **字符串只能经显式解析进入**：`Request` 的六枚同名工厂（`get` / `head` / `post` / `put` / `patch` / `delete_`）在构造时即 `Url::parse` 目标文本；工厂返回 `Request` 而非 `Result`，解析失败被暂存进对象、到 `render_head()` 才以 `net-url-invalid` 原样交出。这一条把 §12「手拼 URL 是 AI 生成代码的头号错误源」的判据落到最早可确定的位置。`delete_` 的尾下划线是 `delete` 为关键字下的既定拼写（clang-tidy 明示不可自动修复，逐名豁免）。
+- **方法令牌与线上文本一一对应且大小写敏感**：`method_text()` 给出 `RFC 9110 §9` 的大写规范拼写，`method_from_text()` 是其逆、只认这六枚（往返一致），小写与自定义方法（`PROPFIND` 一类）一律 `http-request-invalid`——自定义方法本批次不提供，静默接受会让 `Content-Length` 的取舍失据。换算表是文件内唯一真值源（`AURORA_HTTP_METHOD_TABLE`）。
+- **`Content-Length` 只在有体且未自声明时补齐**：`render_head()` 复制字段表，体非空且既无 `Content-Length` 又无 `Transfer-Encoding` 时按体长度补一枚，其余（含 `Content-Length: 42` 显式声明）不改写；`Host` 的补齐仍由字节层按目标 URL 执行（含非缺省端口）。`HEAD` 请求丢弃消息体（`body()` 对 `Head` 无效），应答无体的判定经 `is_head()` 交给 `wire::framing_of`。
+- **链式字段的两种语义**：`header()` 追加保序、同名可多条（对齐 `Headers` 不折叠口径），`set_header()` 清同名后追加到末尾；`timeout()` / `max_redirects()` 是发起侧选项，前者缺省 `nullopt`、后者缺省 `10`。`Response` 是已物化值的纯载体（`status` / `reason` / 大小写不敏感 `header()` / `body()` / `text()`），透明解压与 charset 解码属物化之前的阶段，不在值类型里做。
+
+工具链面：伞头 `aurora/aurora.h` 与 `tools/check/umbrella_manifest.txt` 收录 `net/http.h`；`Method` 登记 `tools/include/known_enums.h` 并在 `itest_known_enums` 加编译期锚点、刷新 `aurora_api.json` 的 `enums` 段；**无新增错误码**（复用切片首件已落的 `http-request-invalid` 与既有 `net-url-invalid`）。配套 `utest_net_http`（5 例：方法换算往返、目标解析失败延后到 `render_head`、`Host` / `Content-Length` 补齐、`HEAD` 弃体与链式字段 / 选项、应答取值口径）。
+
+**待建（本切片其余部分，随后续实现）**：§6 的发起侧 `Client`（`send` / `open_stream` / `open_sse`、`use(hook)`、`Session` 的 Cookie Jar 与连接池）与 §12 的语义补齐件——流式与进度节流、gzip / deflate 透明解压（复用 wuffs）、条件请求与 RFC 9111 缓存校验、分段超时、`MultipartWriter` 与 Range、`Bearer` / `Basic` 与 `Authenticator`、`X-Request-Id`、`RetryPolicy` / `NetPolicy`、charset 解码——均未落地；两枚 §10 码 `http-charset-unsupported` / `http-content-encoding-unsupported` 待对应件启用。契约引用提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §6 / §10 / §12 / §17。
 ### 8.9 系统拖放（跨进程）
 
 事件族与控件契约见 [`05-event-navigation.md`](05-event-navigation.md) §5.2；本节只记**平台 Shell 侧**的入口、注入点与错误口径。

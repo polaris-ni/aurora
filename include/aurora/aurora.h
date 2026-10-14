@@ -112,6 +112,7 @@
 #include "aurora/net/datagram.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/framer.h"
+#include "aurora/net/http.h"
 #include "aurora/net/poll.h"
 #include "aurora/net/proxy.h"
 #include "aurora/net/resolver.h"

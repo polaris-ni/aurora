@@ -104,6 +104,7 @@ aurora/net/capabilities.h
 aurora/net/datagram.h
 aurora/net/engine.h
 aurora/net/framer.h
+aurora/net/http.h
 aurora/net/poll.h
 aurora/net/proxy.h
 aurora/net/resolver.h

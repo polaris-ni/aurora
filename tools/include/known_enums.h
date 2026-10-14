@@ -165,6 +165,7 @@ namespace aurora::tools {
     // ---- network (aurora::net public enums; not widget property types, but AI-enumerable API surface) ----
     enums["AddressFamily"] = {"IPv4", "IPv6", "LocalPath"};
     enums["LengthByteOrder"] = {"Big", "Little"};
+    enums["Method"] = {"Get", "Head", "Post", "Put", "Patch", "Delete"};
     enums["ProxyKind"] = {"Direct", "HttpConnect", "Socks5"};
     enums["ShutdownMode"] = {"Read", "Write", "Both"};
     enums["TlsVersion"] = {"Tls10", "Tls11", "Tls12", "Tls13"};

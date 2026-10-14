@@ -5004,6 +5004,17 @@
       ]
     },
     {
+      "name": "Method",
+      "values": [
+        "Get",
+        "Head",
+        "Post",
+        "Put",
+        "Patch",
+        "Delete"
+      ]
+    },
+    {
       "name": "Orientation",
       "values": [
         "Horizontal",
