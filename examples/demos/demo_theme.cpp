@@ -19,9 +19,9 @@ class ThemedBox : public au::LeafWidget {
 
     void on_paint(au::Painter &p, const au::Rect &b, const au::BuildContext &ctx) override {
         const auto *t = ctx.environment<au::Theme>();
-        const au::Color bg = (t != nullptr) ? t->background : au::Color{255, 255, 255};
-        const au::Color fg = (t != nullptr) ? t->text : au::Color{17, 24, 39};
-        const au::Color primary = (t != nullptr) ? t->primary : au::Color{37, 99, 235};
+        const au::Color bg = (t != nullptr) ? t->roles.surface : au::Color{255, 255, 255};
+        const au::Color fg = (t != nullptr) ? t->roles.on_surface : au::Color{17, 24, 39};
+        const au::Color primary = (t != nullptr) ? t->roles.primary : au::Color{37, 99, 235};
         constexpr au::Color border = pal::AURORA_BORDER;
         p.fill_rect(b, bg);
         p.fill_rect(au::Rect{.origin = b.origin, .size = au::Size{.width = b.size.width, .height = 10.0F}}, primary);

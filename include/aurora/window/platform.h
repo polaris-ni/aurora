@@ -125,9 +125,9 @@ namespace detail {
     return detail::win32_os_color_scheme();
 #elif defined(AURORA_PLATFORM_LINUX)
     const char *xdg = std::getenv("XDG_CONFIG_HOME");
-    std::string base = (xdg != nullptr && *xdg != '\0')
-                           ? std::string(xdg)
-                           : std::string(std::getenv("HOME") == nullptr ? "" : std::getenv("HOME")) + "/.config";
+    const char *home = std::getenv("HOME");
+    std::string base =
+        (xdg != nullptr && *xdg != '\0') ? std::string(xdg) : std::string(home == nullptr ? "" : home) + "/.config";
     for (const char *ver : {"gtk-4.0", "gtk-3.0"}) {
         std::ifstream in(base + "/" + ver + "/settings.ini");
         if (!in.is_open()) {
