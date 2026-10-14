@@ -142,7 +142,7 @@ auto decode(std::string_view payload) -> std::vector<std::string> {
             path.push_back(line[i]);
         }
         // 盘符路径还原：`file:///C:/x` 剥掉 scheme 后是 `/C:/x`，那一个前导 `/` 是空 authority 的
-        // 产物而非路径的一部分，剥掉它才回到 `C:/x`；POSIX 绝对路径 `/home/u` 的前导 `/` 是真路径，保留。
+        // 产物而非路径的一部分，剥掉它才回到 `C:/x`；POSIX 绝对路径（「/」开头且非盘符形）的前导 `/` 是真路径，保留。
         if (path.size() >= 3U && path[0] == '/' && path[2] == ':' &&
             ((path[1] >= 'A' && path[1] <= 'Z') || (path[1] >= 'a' && path[1] <= 'z'))) {
             path.erase(path.begin());
