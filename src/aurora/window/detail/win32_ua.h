@@ -186,6 +186,13 @@ class Win32UiaBridge final : public a11y::Provider {
     ///          都返回 `R{}`，调用方据此统一降级为 `UIA_E_ELEMENTNOTAVAILABLE`。
     template <typename R>
     [[nodiscard]] auto eval_on_main(std::function<R()> fn, unsigned long timeout_ms) -> R {
+        // 拆除门闩短路：桥正处于 `disconnect_all` → `release_platform_providers` 析构链上时，
+        // `wait_on_main` 会解引用 `this->alive_`（use-after-free）、闭包会解引用 `this->snap_` 等。
+        // 门闩在 `disconnect_all` 首行被立起（先于任何 `UiaDisconnectProvider` 调用），此处
+        // 据此零开销降级为 `R{}`（调用方统一映射为「元素不可用」），不碰 `this` 成员。
+        if (tearing_down_.load(std::memory_order_acquire)) {
+            return R{};
+        }
         auto slot = std::make_shared<R>();
         auto abandoned = std::make_shared<std::atomic<bool>>(false);
         const bool ran = wait_on_main(
@@ -273,6 +280,14 @@ class Win32UiaBridge final : public a11y::Provider {
     /// @brief 是否有客户端在监听（无监听者时整批丢弃）。
     /// 计数由 RPC 线程上的连接点增删、由主人线程的派发读，故用原子量。
     [[nodiscard]] auto has_listeners() const -> bool { return listener_count_.load(std::memory_order_relaxed) > 0; }
+    /// @brief 拆除门闩探针（任意线程可读）。
+    ///
+    /// 绝大多数 provider 回调路径经 `eval_on_main` 回投主人线程，该模板内置了门闩短路
+    /// （`tearing_down_` 为真时直接返回 `R{}`，不碰 `this->alive_`），无需 provider 侧逐个判。
+    /// 唯一例外是 `UiaRootProvider::get_HostRawElementProvider`：它不经 `eval_on_main`
+    /// （只读 `host_provider_` 成员），而析构期 `~Win32UiaBridge` 会在 `disconnect_all` 之后
+    /// `host_provider_->Release()`，故该处须显式调本探针拦截。
+    [[nodiscard]] auto tearing_down() const -> bool { return tearing_down_.load(std::memory_order_acquire); }
     auto note_listener_added() -> void { listener_count_.fetch_add(1, std::memory_order_relaxed); }
     auto note_listener_removed() -> void {
         // 与原「> 0 才减」逐位等价；CAS 是为「RPC 线程增删 + 主人线程读」并存准备的。
@@ -337,7 +352,10 @@ class Win32UiaBridge final : public a11y::Provider {
     /// `root_` 已悬垂 —— 若重入路径仍走拉取式重建，就会解引用已释放内存（实机 SIGSEGV，
     /// 栈：`UiaDisconnectProvider → GetPropertyValue → node() → rebuild() → build_accessibility_node`）。
     /// 立闩后重入只读旧快照、永不重建。
-    bool tearing_down_ = false;
+    ///
+    /// 原子量：`disconnect_all` 在主人线程写，provider 回调（`UiaDisconnectProvider` 重入）
+    /// 在 RPC 线程经 `tearing_down()` 读 —— 跨线程读普通 `bool` 是数据竞争。
+    std::atomic<bool> tearing_down_{false};
     /// @brief RTL 标志（#5）：影响 Navigate 遍历顺序；由应用侧 `Window::set_accessibility_rtl` 推送。
     /// RPC 线程会读（Navigate 的翻转判据），故原子。
     std::atomic<bool> rtl_{false};

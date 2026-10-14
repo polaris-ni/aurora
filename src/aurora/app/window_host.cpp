@@ -25,8 +25,18 @@ auto WindowHost::teardown() -> void {
     }
     torn_down_ = true;
     if (window_ != nullptr) {
+        // 先断开无障碍桥：UIA RPC 线程可在非主线程经 provider 回调进桥（provider 持桥裸指针），
+        // 而析构序列中 widget 树先亡、桥后亡（~Impl → DestroyWindow → handle_destroy 才断 a11y），
+        // 此窗口期内 RPC 线程访问已析构桥即 use-after-free（0xC0000005，实测崩于 wait_on_main
+        // 拷贝 alive_ 成员）。在 widget 树析构前 deactivate 即同步断连全部 provider 并注销注册表。
+        if (auto *a11y = window_->surface().accessibility_provider()) {
+            a11y->deactivate();
+        }
+        // 清空根 widget 的脏传播回调：lambda 捕获 Window* this，Window 析构后悬垂。
+        scene_.root().on_subtree_dirty = {};
         // 解绑捕获 `this` 的后端回调：同一消息泵不停，宿主析构后回调会打到已释放对象。
         auto &sf = window_->surface();
+        sf.set_accessibility_root(nullptr);  // 抹掉桥侧根指针，防 RPC 线程重入拿悬垂根重建
         sf.set_event_handler({});
         sf.set_window_state_handler({});
         sf.set_window_mode_handler({});
