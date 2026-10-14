@@ -26,6 +26,7 @@ namespace {
 using aurora::net::http::Method;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
+using aurora::net::http::Timeouts;
 
 /// @brief 断言请求序列化成功并返回其文本（畸形即致命失败）。
 /// @param request 待序列化的请求。
@@ -185,6 +186,36 @@ AURORA_TEST_CASE(response_text_decodes_by_charset) {
     AURORA_TEST_REQUIRE_FALSE(bool(failed));
     AURORA_TEST_CHECK_EQ(failed.error().code_enum, aurora::ErrorCode::HttpCharsetUnsupported);
     AURORA_TEST_CHECK_EQ(chinese.body().size(), std::size_t{2});
+}
+
+AURORA_TEST_CASE(request_timeouts_have_three_stages) {
+    const auto zero = std::chrono::milliseconds{0};
+
+    // 旧 timeout() 只写 total 档，connect / read_idle 保持不设。
+    const auto legacy = Request::get("https://example.com/").timeout(std::chrono::milliseconds{1500});
+    AURORA_TEST_CHECK_TRUE(legacy.timeout().has_value());
+    AURORA_TEST_CHECK_EQ(legacy.timeout().value_or(zero).count(), std::int64_t{1500});
+    AURORA_TEST_CHECK_EQ(legacy.timeouts().total.value_or(zero).count(), std::int64_t{1500});
+    AURORA_TEST_CHECK_TRUE(!legacy.timeouts().connect.has_value());
+    AURORA_TEST_CHECK_TRUE(!legacy.timeouts().read_idle.has_value());
+
+    // timeouts() 三档独立；total 仍可从旧 timeout() 读到（向后兼容）。
+    const auto staged = Request::get("https://example.com/")
+                            .timeouts(Timeouts{
+                                .connect = std::chrono::milliseconds{500},
+                                .read_idle = std::chrono::milliseconds{800},
+                                .total = std::chrono::milliseconds{3000},
+                            });
+    AURORA_TEST_CHECK_EQ(staged.timeouts().connect.value_or(zero).count(), std::int64_t{500});
+    AURORA_TEST_CHECK_EQ(staged.timeouts().read_idle.value_or(zero).count(), std::int64_t{800});
+    AURORA_TEST_CHECK_EQ(staged.timeouts().total.value_or(zero).count(), std::int64_t{3000});
+    AURORA_TEST_CHECK_EQ(staged.timeout().value_or(zero).count(), std::int64_t{3000});
+
+    // 缺省三档全不设。
+    const auto bare = Request::get("https://example.com/");
+    AURORA_TEST_CHECK_TRUE(!bare.timeouts().connect.has_value());
+    AURORA_TEST_CHECK_TRUE(!bare.timeouts().read_idle.has_value());
+    AURORA_TEST_CHECK_TRUE(!bare.timeouts().total.has_value());
 }
 
 }  // namespace aurora::test_cases::utest_net_http

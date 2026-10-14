@@ -161,7 +161,12 @@ auto Request::body(std::vector<char> body) -> Request & {
 }
 
 auto Request::timeout(std::chrono::milliseconds value) -> Request & {
-    timeout_ = value;
+    timeouts_.total = value;
+    return *this;
+}
+
+auto Request::timeouts(Timeouts value) -> Request & {
+    timeouts_ = value;
     return *this;
 }
 

@@ -67,6 +67,20 @@ enum class Method {
 /// @return 成功为对应枚举；失败为 `http-request-invalid`。
 [[nodiscard]] auto method_from_text(std::string_view text) -> Result<Method>;
 
+/// @brief HTTP 请求的三档超时；各档独立，`nullopt` 或非正值 = 该档不设时限。
+///
+/// 单一时限无法分别表达「连不上」（`connect`）与「Body 慢」（`read_idle`），故拆三档：`connect` 覆盖建连
+/// （含 TLS 握手），`read_idle` 是相邻两次交付之间的空闲上限（滑动，每读到字节即重置），`total` 是整请求
+/// 时限（跨连接 / 读写 / 全部重定向）。任一档到点，发起侧一律落 `http-timeout`，`message` 的 detail 标明
+/// 是哪一档，使「查服务起没起」与「查 Body 卡在哪」不至混为一谈。
+/// @note Thread: thread-safe（值类型）
+/// @note Side-effects: none
+struct Timeouts {
+    std::optional<std::chrono::milliseconds> connect;  ///< 建连（含 TLS 握手）时限
+    std::optional<std::chrono::milliseconds> read_idle;  ///< 相邻两次读之间的空闲时限
+    std::optional<std::chrono::milliseconds> total;  ///< 整请求时限
+};
+
 /// @brief 一次 HTTP 请求：方法 + 目标 + 字段 + 消息体 + 发起侧选项。
 /// @note Thread: thread-safe（值类型，无共享状态；`render_head()` 只读）
 /// @note Side-effects: none
@@ -135,14 +149,23 @@ class Request {
     /// @return 体字节的只读引用；无体时为空。
     [[nodiscard]] auto body() const -> const std::vector<char> & { return body_; }
 
-    /// @brief 设定整请求时限（连接 + 读 + 总耗时的上限，缺省由发起侧兜底）。
+    /// @brief 设定整请求时限（`total` 档的便捷入口；要分档控制用 `timeouts()`）。
     /// @param value 时限。
     /// @return 自身引用，便于链式调用。
     auto timeout(std::chrono::milliseconds value) -> Request &;
 
-    /// @brief 查看整请求时限。
+    /// @brief 查看整请求时限（等价 `timeouts().total`）。
     /// @return 已设定则返回之；未设定为 `nullopt`。
-    [[nodiscard]] auto timeout() const -> std::optional<std::chrono::milliseconds> { return timeout_; }
+    [[nodiscard]] auto timeout() const -> std::optional<std::chrono::milliseconds> { return timeouts_.total; }
+
+    /// @brief 设定三档超时（连接 / 读空闲 / 总耗时）。
+    /// @param value 超时集合。
+    /// @return 自身引用，便于链式调用。
+    auto timeouts(Timeouts value) -> Request &;
+
+    /// @brief 查看三档超时。
+    /// @return 超时集合的只读引用。
+    [[nodiscard]] auto timeouts() const -> const Timeouts & { return timeouts_; }
 
     /// @brief 设定重定向跟随上限（`0` 表示不跟随）。缺省 10。
     /// @param value 上限次数。
@@ -171,7 +194,7 @@ class Request {
     std::optional<Error> url_error_;  ///< 解析失败的载荷；仅在 url_ 为空时有意义
     Headers headers_;  ///< 请求字段（不含补齐项）
     std::vector<char> body_;  ///< 消息体
-    std::optional<std::chrono::milliseconds> timeout_;  ///< 整请求时限
+    Timeouts timeouts_;  ///< 三档超时（connect / read_idle / total），缺省全不设
     int max_redirects_{10};  ///< 重定向跟随上限
 };
 

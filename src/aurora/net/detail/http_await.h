@@ -18,9 +18,9 @@
 // @note Thread: single-threaded（每个 awaiter 随一条协程帧串行使用，无共享状态）
 // @note Side-effects: 触发一次异步传输发起；恢复经主线程投递器
 
+#include <coroutine>
 #include <cstddef>
 #include <cstdint>
-#include <coroutine>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -80,7 +80,7 @@ class CallbackAwaiter {
 
   private:
     std::function<void(Sink)> start_;  ///< 发起器（含目标句柄/参数副本，await_suspend 时调一次）
-    std::coroutine_handle<> handle_;   ///< 被挂起、待恢复的续体
+    std::coroutine_handle<> handle_;  ///< 被挂起、待恢复的续体
     std::optional<Result<T>> result_;  ///< 完成结果；resume 前必有值
 };
 

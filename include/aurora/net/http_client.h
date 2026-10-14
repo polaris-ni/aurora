@@ -79,7 +79,7 @@ class Client {
 
   private:
     std::optional<std::uint64_t> max_body_bytes_;  ///< 物化体上限（nullopt = 不限）
-    TlsContext tls_;                                ///< https 握手口径
+    TlsContext tls_;  ///< https 握手口径
 };
 
 }  // namespace aurora::net::http

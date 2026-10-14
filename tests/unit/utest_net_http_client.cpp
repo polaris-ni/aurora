@@ -25,16 +25,18 @@
 namespace aurora::test_cases::utest_net_http_client {
 namespace {
 
+using aurora::CoroTask;
+using aurora::Result;
 using aurora::net::http::Client;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
+using aurora::net::http::Timeouts;
 using aurora::test::FakeEngine;
 using aurora::test::FakeEngineScope;
+using aurora::test::ScriptedPeer;
 using aurora::test::scripts::reply_after_reading;
 using aurora::test::scripts::silent;
-using aurora::test::ScriptedPeer;
-using aurora::CoroTask;
-using aurora::Result;
+using aurora::test::scripts::write_then_hold;
 
 /// @brief 拼一个指向回环端口的 GET 目标。
 [[nodiscard]] auto loopback_url(std::uint16_t port, std::string_view path = "/") -> std::string {
@@ -52,8 +54,8 @@ using aurora::Result;
 
 AURORA_TEST_CASE(send_materializes_content_length) {
     Client client;
-    ScriptedPeer peer(reply_after_reading(
-        1, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"));
+    ScriptedPeer peer(
+        reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"));
     AURORA_TEST_REQUIRE(peer.valid());
     const aurora::test::net::HostDriven host;
 
@@ -111,8 +113,7 @@ AURORA_TEST_CASE(send_follows_redirect_across_peers) {
 AURORA_TEST_CASE(send_stops_at_redirect_limit) {
     Client client;
     // 每跳都回 302 指向自身路径：跟随必然撞到上限而不是收敛。
-    ScriptedPeer peer(
-        reply_after_reading(1, "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"));
+    ScriptedPeer peer(reply_after_reading(1, "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"));
     AURORA_TEST_REQUIRE(peer.valid());
     const aurora::test::net::HostDriven host;
 
@@ -137,13 +138,57 @@ AURORA_TEST_CASE(send_times_out_whole_request) {
 
     auto task = client.send(Request::get(loopback_url(peer.port())).timeout(std::chrono::milliseconds{50}));
     // 先泵到连接与写出落地（对端已 accept、读请求挂起）。
-    AURORA_TEST_CHECK(aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; })
-                          .satisfied);
+    AURORA_TEST_CHECK(
+        aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; }).satisfied);
     // 推进脚本化时钟到整请求时限：到期取消令牌，挂起的读以 net-cancelled 收尾，收尾据 timed_out 改道。
     engine.advance(std::chrono::milliseconds{50});
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
+                          .satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpTimeout);
+}
+
+AURORA_TEST_CASE(send_times_out_read_idle) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    Client client;
+    // 对端只写头部（声明 100 字节体却不再给）后静默：读体阶段挂起，read_idle 到点。
+    ScriptedPeer peer(write_then_hold("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n"));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    auto task = client.send(
+        Request::get(loopback_url(peer.port())).timeouts(Timeouts{.read_idle = std::chrono::milliseconds{50}}));
     AURORA_TEST_CHECK(
-        aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
-            .satisfied);
+        aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; }).satisfied);
+    engine.advance(std::chrono::milliseconds{50});
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
+                          .satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpTimeout);
+}
+
+AURORA_TEST_CASE(send_times_out_connect) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    Client client;
+    ScriptedPeer peer(silent());
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    // 不 pump：让 connect 始终不落地，直接推进时钟触发 connect 档。
+    auto task = client.send(
+        Request::get(loopback_url(peer.port())).timeouts(Timeouts{.connect = std::chrono::milliseconds{50}}));
+    engine.advance(std::chrono::milliseconds{50});
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
+                          .satisfied);
 
     const auto response = inner(task);
     AURORA_TEST_REQUIRE_FALSE(bool(response));
