@@ -156,9 +156,9 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
     const auto *props_ptr = node.at("props");
     const Json &props = props_ptr != nullptr ? *props_ptr : empty_props;
 
-    // 3a. 检查必填属性
-    if (schema->contains("prop_descriptors") && schema->at("prop_descriptors")->is_array()) {
-        const Json &descriptors = *schema->at("prop_descriptors");
+    // 3a. 检查必填属性与类型匹配（单一权威 props 表：required 仅 true 时输出，缺省读作 false）
+    if (schema->contains("props") && schema->at("props")->is_array()) {
+        const Json &descriptors = *schema->at("props");
         for (const auto &descriptor : descriptors) {
             const auto p_name = descriptor.as_or<std::string>("name", "");
             const bool required = descriptor.as_or<bool>("required", false);

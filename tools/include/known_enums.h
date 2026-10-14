@@ -13,7 +13,7 @@
 // which would make the LSP / MCP suggest names that do not compile.
 //
 // Maintenance rules:
-// 1. Key = the type name appearing in property descriptors (`prop_descriptors[].type`), or a
+// 1. Key = the type name appearing in property descriptors (`props[].type`), or a
 //    public-module enum exposed for AI enumeration (e.g. `JsonType` from aurora/core/json.h),
 //    not an arbitrary name; `Curve` is `class Curve` (easing.h:39), whose values come from the
 //    discriminating enum `CurveKind`. `ColorPalette` is a set of named constants under

@@ -1,6 +1,9 @@
 #include "aurora/widget/serialization.h"
 
+#include <algorithm>
+#include <array>
 #include <cctype>
+#include <string_view>
 #include <tuple>
 
 #include "aurora/app/perf_overlay.h"
@@ -409,113 +412,149 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void {
 }
 
 namespace {
+
 auto is_container_type(const std::string &t) -> bool {
     return t == "Column" || t == "Row" || t == "Stack" || t == "Grid" || t == "Scroll" || t == "PullToRefresh" ||
            t == "StickyHeader";
 }
+
+/// @brief 布局公共属性的语义类型：仅补录 `serialize_props` 写出而 `describe()` 未收录的键。
+///
+/// 十个已知键取控件侧**真实成员类型**——`Widget::width_` / `height_` 是 `Length`、`show` 是
+/// `Reactive<bool>`、基类 `overflow_` 序列化为字符串、滚动 `offset` 是 float、清单字段是
+/// `std::vector<std::string>`——与 `PropDescriptor::type` 同一词汇表，消费者无需再学一套表示。
+/// 未知键（未来新增的序列化键）按取值 JSON 类型派生、容器类归 `"Json"`，保证新键不会
+/// **静默掉出** schema（宁可给个保守类型，也不要让属性对 AI 隐身）。
+/// @param key 快照属性键名。
+/// @param value 该键在 `serialize_props` 输出里的取值（仅未知键派生时读取）。
+/// @return 语义类型名；永不为空。
+[[nodiscard]] auto layout_prop_type(std::string_view key, const Json &value) -> std::string {
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 10> SEMANTIC_TYPES = {
+        std::pair{"width", "Length"},
+        std::pair{"height", "Length"},
+        std::pair{"show", "bool"},
+        std::pair{"overflow", "string"},
+        std::pair{"offset", "float"},
+        std::pair{"menu_titles", "std::vector<std::string>"},
+        std::pair{"segments", "std::vector<std::string>"},
+        std::pair{"tab_labels", "std::vector<std::string>"},
+        std::pair{"snap_action_count", "int"},
+        std::pair{"visible_count", "int"},
+    };
+    for (const auto &[known, type] : SEMANTIC_TYPES) {
+        if (key == known) {
+            return std::string{type};
+        }
+    }
+    if (value.is_bool()) {
+        return "bool";
+    }
+    if (value.is_int() || value.is_uint()) {
+        return "int";
+    }
+    if (value.is_double() || value.is_raw_number()) {
+        return "float";
+    }
+    if (value.is_string()) {
+        return "string";
+    }
+    return "Json";  // array / object / null：不猜元素类型，按不透明 JSON 收录
+}
+
 }  // namespace
 
+/// @brief 组件自描述 schema（`describe_component` / `list_all_schemas` / `aurora_api.json` 的数据源）。
+///
+/// 属性面是**单一权威表** `props`（数组，非对象：代码生成依赖 `*Props` 声明序，对象键序不可依赖）：
+/// 先按 `describe()` 的 `properties` 声明序输出描述符条目，再把 `serialize_props` 写出而描述符
+/// 未收录的布局公共条目按序列化序追加——两源取并集，同一批属性在 schema 里只存这一份。
+/// `default` 一律为 `serialize_props` 的
+/// **原生 JSON 值**（修复回填与 prompt 投影的可信源）；描述符里 C++ 风格的显示串（`auto` /
+/// `theme.primary` / `{8,8,8,8}`…）只在无原生值可依时以 `default_expr` 落盘。
 auto component_schema(const std::string &name) -> Json {
     Json w = Json::object();
     w.set("type", name);
-    w.set("container", Json{is_container_type(name)});
-    w.set("is_container", Json{is_container_type(name)});
-    w.set("is_layout", Json{is_container_type(name)});  // 多子布局容器即 layout 型
-    w.set("is_clickable", Json{name == "Button"});
-    w.set("dynamic_children", Json{name == "Repeater" || name == "Canvas"});
-    w.set("thread", "main");
-    Json props = Json::object();
-    auto inst = WidgetRegistry::instance().make(name, Json::object());
-    if (inst) {
-        inst.value()->serialize_props(props);
-        w.set("default_props", props);  // serialize_props 已写入含默认值的属性对象
+    // 稀疏布尔：恒 false 与恒同值的键不再逐控件输出（读取侧 as_or 默认 false 语义不变）。
+    if (is_container_type(name)) {
+        w.set("container", Json{true});
+    }
+    if (name == "Button") {
+        w.set("is_clickable", Json{true});
+    }
+    if (name == "Repeater" || name == "Canvas") {
+        w.set("dynamic_children", Json{true});
+    }
 
-        // 附录 B 自描述元数据
-        const WidgetDescriptor desc = inst.value()->describe();
-        Json prop_desc = Json::array();
-        for (const auto &pd : desc.properties) {
-            prop_desc.push_back(descriptor_to_json(pd));
-        }
-        w.set("prop_descriptors", prop_desc);
-        Json events = Json::array();
-        for (const auto &e : desc.events) {
-            events.push_back(e);
-        }
-        w.set("events", events);
-        w.set("children_policy", desc.children_policy);
-        Json examples = Json::array();
-        for (const auto &ex : desc.examples) {
-            examples.push_back(ex);
-        }
-        w.set("examples", examples);
+    Json serialized = Json::object();  // serialize_props 实测输出：原生默认值 + 布局公共键
+    WidgetDescriptor desc;  // 默认：无描述（未注册类型走既有的空段口径）
+    bool registered = false;
+    if (auto inst = WidgetRegistry::instance().make(name, Json::object()); inst) {
+        registered = true;
+        inst.value()->serialize_props(serialized);
+        desc = inst.value()->describe();
+    }
 
-        // ---- Schema 扩展：props_schema / children_types / constraints ----
-        Json props_schema = Json::object();
-        Json constraints = Json::array();
-        for (const auto &pd : desc.properties) {
-            Json ps = Json::object();
-            if (!pd.json_type.empty()) {
-                ps.set("type", pd.json_type);
-            }
-            if (!pd.enum_values.empty()) {
-                Json ev = Json::array();
-                for (const auto &v : pd.enum_values) {
-                    ev.push_back(v);
-                }
-                ps.set("enum", ev);
-            }
-            if (!pd.min_value.empty()) {
-                ps.set("minimum", pd.min_value);
-            }
-            if (!pd.max_value.empty()) {
-                ps.set("maximum", pd.max_value);
-            }
+    // ---- 单一权威属性表：descriptors 声明序在前，布局公共条目按 serialize_props 序追加 ----
+    Json table = Json::array();
+    for (const auto &pd : desc.properties) {
+        Json entry = descriptor_to_json(pd);
+        entry.erase("json_type");  // 除命名门禁读键名外无语义消费端；cpp type 一词表对外足够
+        if (!pd.required) {
+            entry.erase("required");  // 稀疏：仅必填项显式输出
+        }
+        if (const auto *native = serialized.at(pd.name); native != nullptr) {
+            entry.set("default", *native);  // 原生值（实测序列化）覆盖描述符显示串
+        } else {
+            // 无原生默认值可依（主题角色色、运行态项等）：显示串是该属性唯一的默认信息。
+            entry.erase("default");
             if (!pd.default_value.empty()) {
-                ps.set("default", pd.default_value);
-            }
-            if (!pd.note.empty()) {
-                ps.set("description", pd.note);
-            }
-            if (!pd.constraint.empty()) {
-                ps.set("constraint", pd.constraint);
-                constraints.push_back(pd.constraint);
-            }
-            if (!ps.empty()) {
-                props_schema.set(pd.name, ps);
+                entry.set("default_expr", pd.default_value);
             }
         }
-        w.set("props_schema", props_schema);
-        if (!constraints.empty()) {
-            w.set("constraints", constraints);
-        }
-
-        Json children_types = Json::array();
-        for (const auto &ct : desc.allowed_child_types) {
-            children_types.push_back(ct);
-        }
-        if (!children_types.empty()) {
-            w.set("children_types", children_types);
-        }
-
-        Json invariants = Json::array();
-        for (const auto &inv : desc.invariants) {
-            invariants.push_back(inv);
-        }
-        if (!invariants.empty()) {
-            w.set("invariants", invariants);
-        }
-    } else {
-        w.set("default_props", Json::object());
-        w.set("prop_descriptors", Json::array());
-        w.set("events", Json::array());
-        w.set("children_policy", "none");
-        w.set("examples", Json::array());
+        table.push_back(std::move(entry));
     }
-    Json prop_keys = Json::array();
-    for (const auto &e : props.entries()) {
-        prop_keys.push_back(e.key);
+    for (const auto &e : serialized.entries()) {
+        const auto known =
+            std::ranges::find_if(desc.properties, [&e](const PropDescriptor &pd) { return pd.name == e.key; });
+        if (known != desc.properties.end()) {
+            continue;  // 已按描述符条目输出（含其约束元数据）
+        }
+        Json entry = Json::object();
+        entry.set("name", e.key);
+        entry.set("type", layout_prop_type(e.key, e.value));
+        entry.set("default", e.value);
+        table.push_back(std::move(entry));
     }
-    w.set("props", prop_keys);
+    w.set("props", std::move(table));
+
+    Json events = Json::array();
+    for (const auto &e : desc.events) {
+        events.push_back(e);
+    }
+    w.set("events", std::move(events));
+    // 未注册类型（Canvas / Repeater / Provider 系）无自描述，按既有口径落 "none"。
+    w.set("children_policy", registered ? desc.children_policy : std::string{"none"});
+    Json examples = Json::array();
+    for (const auto &ex : desc.examples) {
+        examples.push_back(ex);
+    }
+    w.set("examples", std::move(examples));
+
+    Json children_types = Json::array();
+    for (const auto &ct : desc.allowed_child_types) {
+        children_types.push_back(ct);
+    }
+    if (!children_types.empty()) {
+        w.set("children_types", std::move(children_types));
+    }
+
+    Json invariants = Json::array();
+    for (const auto &inv : desc.invariants) {
+        invariants.push_back(inv);
+    }
+    if (!invariants.empty()) {
+        w.set("invariants", std::move(invariants));
+    }
     return w;
 }
 

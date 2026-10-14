@@ -419,11 +419,12 @@ auto gen_catalog(const std::vector<ErrorEntry> &e) -> std::string {
 }
 
 auto gen_api_json(const std::vector<ErrorEntry> &e) -> Json {
+    // 不输出 index：它恒等于数组下标（91/91），消费者按位置派生即可。
+    // slug 保留：它不是机械可推导的（RuntimeAsyncTimeout→async-timeout、GenerateUiEmpty→
+    // generation-ui-empty 两处为语义改写），且是冻结外部契约（见 gen_catalog 头注）。
     Json arr = Json::array();
-    for (size_t i = 0; i < e.size(); ++i) {
-        const auto &x = e.at(i);
+    for (const auto &x : e) {
         Json o = Json::object();
-        o.set("index", i);
         o.set("enum", x.enum_name);
         o.set("slug", x.slug);
         o.set("category", x.category);

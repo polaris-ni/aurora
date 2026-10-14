@@ -115,11 +115,19 @@ inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES 
         node.set("type", type);
 
         // 该类型若有文案类属性，填入类型名作为占位文案（与旧行为一致：Button→"Button"）。
+        // 存在性判据走单一权威 props 表的键集（三个候选键均不在「仅描述符收录」集合内，
+        // 与「serialize_props 写出的键」口径等价）。
         const Json schema = aurora::describe_component(type);
-        if (schema.contains("default_props")) {
-            const Json &defaults = *schema.at("default_props");
+        if (const auto *props_ptr = schema.at("props"); props_ptr != nullptr && props_ptr->is_array()) {
             for (const std::string_view key : AURORA_UI_TEXT_PROP_CANDIDATES) {
-                if (defaults.contains(std::string(key))) {
+                bool present = false;
+                for (const auto &entry : *props_ptr) {
+                    if (entry.as_or<std::string>("name", "") == key) {
+                        present = true;
+                        break;
+                    }
+                }
+                if (present) {
                     if (node.at("props") == nullptr) {
                         node.set("props", Json::object());
                     }
