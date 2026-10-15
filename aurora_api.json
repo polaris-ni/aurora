@@ -5045,6 +5045,13 @@
       ]
     },
     {
+      "name": "ProgressPhase",
+      "values": [
+        "Upload",
+        "Download"
+      ]
+    },
+    {
       "name": "ProxyKind",
       "values": [
         "Direct",

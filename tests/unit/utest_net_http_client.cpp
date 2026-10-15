@@ -7,7 +7,10 @@
 ///           缺省补齐（调用方已自带则原样保留、不覆盖不重复追加）、已声明环节的透明还原（gzip 与 `deflate`
 ///           的 zlib→裸流回落、`gzip, deflate` 链反序解）、`max_decompressed_bytes()` 越限落
 ///           `http-body-too-large` 且 detail 点名该旋钮、`br` 落 `http-content-encoding-unsupported`、HEAD
-///           应答无体时不校验编码名；能力开关缺席的腿验「连宣告都不发」并把编码应答落 unsupported。
+///           应答无体时不校验编码名；能力开关缺席的腿验「连宣告都不发」并把编码应答落 unsupported。进度节流
+///           （§12「进度节流」）验上传按 64 KiB 分块推进且末值恰一次、注入帧号源后每方向收敛到「首发 + 末值
+///           两笔」、无请求体不发上传、chunked 下载把总量如实报成未知，并以对端收到的请求全文证明「挂了回调
+///           才分块写、线上字节序列与一次写完逐字节相同」以及「没挂回调者零行为改动」。
 /// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
 
 #include <chrono>
@@ -37,6 +40,8 @@ namespace {
 using aurora::CoroTask;
 using aurora::Result;
 using aurora::net::http::Client;
+using aurora::net::http::Progress;
+using aurora::net::http::ProgressPhase;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
 using aurora::net::http::Timeouts;
@@ -163,6 +168,116 @@ const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0, 
         }
     }
     return out;
+}
+
+/// @brief 取出某一方向的发射序列（上传与下载共用一枚回调，频次判据必须分方向看）。
+/// @param seen 全部发射。
+/// @param phase 方向。
+/// @return 该方向的发射副本（保持发射次序）。
+[[nodiscard]] auto phases_of(const std::vector<Progress> &seen, ProgressPhase phase) -> std::vector<Progress> {
+    std::vector<Progress> out;
+    for (const Progress &progress : seen) {
+        if (progress.phase == phase) {
+            out.push_back(progress);
+        }
+    }
+    return out;
+}
+
+/// @brief 数一带「收摊」事实的发射（末值恒发一次的判据：不多发也不缺发）。
+/// @param seen 全部发射。
+/// @return `finished` 为真的枚数。
+[[nodiscard]] auto settled_count(const std::vector<Progress> &seen) -> std::size_t {
+    std::size_t hits = 0;
+    for (const Progress &progress : seen) {
+        if (progress.finished) {
+            ++hits;
+        }
+    }
+    return hits;
+}
+
+/// @brief 该方向的累计字节是否单调不降（合流不能把进度倒回去，倒回去的进度条是坏掉的进度条）。
+/// @param seen 单方向发射序列。
+/// @return 单调不降为真。
+[[nodiscard]] auto monotonic(const std::vector<Progress> &seen) -> bool {
+    for (std::size_t i = 1; i < seen.size(); ++i) {
+        if (seen.at(i).transferred_bytes < seen.at(i - 1).transferred_bytes) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// @brief 从已收到的请求字节里取 `Content-Length`（大小写不敏感；缺失或畸形一律按「无体」处理）。
+/// @param head_block 到头部块结尾（含 `\r\n\r\n`）为止的文本。
+/// @return 请求自己声明的消息体字节数。
+[[nodiscard]] auto declared_body_bytes(std::string_view head_block) -> std::size_t {
+    const std::string folded = lowered(head_block);
+    constexpr std::string_view key = "content-length:";
+    const auto at = folded.find(std::string{key});
+    if (at == std::string::npos) {
+        return 0;
+    }
+    std::size_t pos = at + key.size();
+    while (pos < folded.size() && (folded[pos] == ' ' || folded[pos] == '\t')) {
+        ++pos;
+    }
+    std::uint64_t value = 0;
+    std::size_t digits = 0;
+    while (pos + digits < folded.size()) {
+        const char digit = folded[pos + digits];
+        if (digit < '0' || digit > '9') {
+            break;  // 值后面的 `\r` 是分隔符而非畸形：取已读到的数字即算成功
+        }
+        value = (value * 10) + static_cast<std::uint64_t>(digit - '0');
+        ++digits;
+    }
+    if (digits == 0) {
+        return 0;
+    }
+    return static_cast<std::size_t>(value);
+}
+
+/// @brief 读满一整条请求（长度取请求自己声明的 `Content-Length`）、把收到的字节留档，然后应答。
+///
+/// 「挂了回调才分块写、线上字节序列与一次写完逐字节相同」这条只能看对端收到的字节：分块影响的是本库内部
+/// 的完成次数，对端无从分辨。期望长度必须从请求头里读而不是用例另算——回环端口是五位数字，任何按占位 URL
+/// 算出的头部长度都与真实请求差几位，差出来的那段会让脚本一直读到 I/O 超时。脚本线程写、用例线程读，用
+/// 互斥量交接。
+/// @param payload 读满请求后写出的应答字节。
+/// @param recorded 交接缓冲（脚本线程写入）。
+/// @param guard 交接缓冲的锁。
+/// @return 对端脚本。
+[[nodiscard]] auto record_request_then_reply(std::string payload, std::string &recorded, std::mutex &guard)
+    -> PeerScript {
+    return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
+                                                             PeerStop &stop) -> void {
+        (void)socket.set_io_timeout(std::chrono::milliseconds{500});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        std::size_t want = 0;
+        bool sized = false;
+        while (!stop.load() && (!sized || seen.size() < want)) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;
+            }
+            seen.append(buffer.data(), read.value());
+            if (!sized) {
+                const auto end = seen.find("\r\n\r\n");
+                if (end != std::string::npos) {
+                    want = end + 4 + declared_body_bytes(std::string_view{seen}.substr(0, end + 4));
+                    sized = true;
+                }
+            }
+        }
+        {
+            const std::scoped_lock held(guard);
+            recorded = seen;
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+    };
 }
 
 }  // namespace
@@ -575,6 +690,180 @@ AURORA_TEST_CASE(send_skips_coding_validation_for_a_head_response) {
     const auto response = inner(task);
     AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().body().size(), std::size_t{0});
+}
+
+AURORA_TEST_CASE(progress_reports_upload_bytes_and_always_ends_with_a_settled_value) {
+    // 上传侧分块写的节拍判据（64 KiB 一块，200000 字节 = 三整块 + 一尾块）：进度必须不止一笔、按字节单调
+    // 不降、末值恰发一次且给出「总量已知」。同时验「分块只为节拍、线上字节序列与一次写完逐字节相同」——
+    // 判据落在对端收到的请求全文上，那是本库外部唯一能看的事实。
+    Client client;
+    std::string recorded;
+    std::mutex guard;
+    ScriptedPeer peer(record_request_then_reply("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    const std::string payload_body(200000, 'a');
+    auto request = Request::post(loopback_url(peer.port()));
+    request.header("Accept-Encoding", "identity");  // 显式设定即锁定头部字节，缺省宣告不再注入
+    request.body(std::vector<char>{payload_body.begin(), payload_body.end()});
+    const auto rendered = request.render_head();
+    AURORA_TEST_REQUIRE(bool(rendered));
+
+    std::vector<Progress> seen;  // 回调在续体线程（宿主驱动即用例线程）上被调用，无需加锁
+    request.on_progress([&seen](const Progress &progress) -> void { seen.push_back(progress); });
+
+    auto task = client.send(request);  // 传副本：原请求留着算出该出现在线上的字节
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{4000})
+                          .satisfied);
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+
+    const auto uploads = phases_of(seen, ProgressPhase::Upload);
+    AURORA_TEST_REQUIRE_GT(uploads.size(), std::size_t{1});
+    AURORA_TEST_CHECK_TRUE(monotonic(uploads));
+    AURORA_TEST_CHECK_EQ(settled_count(uploads), std::size_t{1});
+    AURORA_TEST_CHECK_TRUE(uploads.back().finished);
+    AURORA_TEST_CHECK_EQ(uploads.back().transferred_bytes, static_cast<std::uint64_t>(payload_body.size()));
+    AURORA_TEST_CHECK_TRUE(uploads.back().total_known);
+    AURORA_TEST_CHECK_EQ(uploads.back().total_bytes, static_cast<std::uint64_t>(payload_body.size()));
+    AURORA_TEST_CHECK_EQ(uploads.front().transferred_bytes, static_cast<std::uint64_t>(65536));
+
+    const auto downloads = phases_of(seen, ProgressPhase::Download);
+    AURORA_TEST_REQUIRE(!downloads.empty());
+    AURORA_TEST_CHECK_EQ(settled_count(downloads), std::size_t{1});
+    AURORA_TEST_CHECK_TRUE(downloads.back().finished);
+    AURORA_TEST_CHECK_EQ(downloads.back().transferred_bytes, std::uint64_t{5});
+
+    const auto received = recorded_request(recorded, guard);
+    const std::string expected = rendered.value() + payload_body;
+    AURORA_TEST_CHECK_EQ(received.size(), expected.size());
+    AURORA_TEST_CHECK_TRUE(received == expected);  // 比布尔值而非比串：失败时不该把 200 KB 打进报告
+}
+
+AURORA_TEST_CASE(a_frame_gate_holds_progress_to_one_emission_per_frame_plus_the_last) {
+    // 帧号恒定 = 整趟交换只算一帧：此时每方向至多「首发 + 末值」两笔。回合闸下同样的载荷会有多笔首发，
+    // 这条判据把「合流发生在源头」写实，而不是留给调用方自己去限频。
+    Client client;
+    std::uint64_t frame = 1;
+    client.progress_frame_source([&frame]() -> std::uint64_t { return frame; });
+
+    std::string recorded;
+    std::mutex guard;
+    ScriptedPeer peer(record_request_then_reply("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    const std::string payload_body(300000, 'b');  // 五块：4 × 64 KiB + 一尾块
+    auto request = Request::post(loopback_url(peer.port()));
+    request.header("Accept-Encoding", "identity");
+    request.body(std::vector<char>{payload_body.begin(), payload_body.end()});
+    std::vector<Progress> seen;
+    request.on_progress([&seen](const Progress &progress) -> void { seen.push_back(progress); });
+
+    auto task = client.send(request);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{4000})
+                          .satisfied);
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+
+    const auto uploads = phases_of(seen, ProgressPhase::Upload);
+    AURORA_TEST_REQUIRE_EQ(uploads.size(), std::size_t{2});  // 首发 + 末值，中间三块并进了末值
+    AURORA_TEST_CHECK_FALSE(uploads.front().finished);
+    AURORA_TEST_CHECK_EQ(uploads.front().transferred_bytes, static_cast<std::uint64_t>(65536));
+    AURORA_TEST_CHECK_TRUE(uploads.back().finished);
+    AURORA_TEST_CHECK_EQ(uploads.back().transferred_bytes, static_cast<std::uint64_t>(payload_body.size()));
+    // 闸读的就是注入的那枚帧号源：换帧即换机会，不是「整趟只许两笔」的写死额度。
+    frame = 2;
+    AURORA_TEST_CHECK_EQ(client.progress_frame_source()(), std::uint64_t{2});
+    // 线上字节仍与一次写完同型（分块只改本库内部的完成次数）。
+    const auto rendered = request.render_head();
+    AURORA_TEST_REQUIRE(bool(rendered));
+    const auto received = recorded_request(recorded, guard);
+    AURORA_TEST_CHECK_EQ(received.size(), rendered.value().size() + payload_body.size());
+}
+
+AURORA_TEST_CASE(an_unarmed_request_delivers_the_same_wire_bytes_as_an_armed_one) {
+    // 没挂回调的请求不走分块写路径，线上字节仍须与挂了回调的那条逐字节相同——判据落在对端收到的全文上，
+    // 那是「观测口对无需求者零行为改动」这条口径唯一的外部证据。
+    Client client;
+    std::string recorded;
+    std::mutex guard;
+    ScriptedPeer peer(record_request_then_reply("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    const std::string payload_body(200000, 'a');
+    auto request = Request::post(loopback_url(peer.port()));
+    request.header("Accept-Encoding", "identity");
+    request.body(std::vector<char>{payload_body.begin(), payload_body.end()});
+    const auto rendered = request.render_head();
+    AURORA_TEST_REQUIRE(bool(rendered));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(request.on_progress()));  // 未挂回调：闸整个不工作
+
+    auto task = client.send(request);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{4000})
+                          .satisfied);
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+
+    const auto received = recorded_request(recorded, guard);
+    const std::string expected = rendered.value() + payload_body;
+    AURORA_TEST_CHECK_EQ(received.size(), expected.size());
+    AURORA_TEST_CHECK_TRUE(received == expected);
+}
+
+AURORA_TEST_CASE(a_get_without_a_request_body_reports_no_upload_progress) {
+    // 无上传体即不报上传：进度是「这一趟真搬了多少字节」的事实，凑一笔 0/0 只是让调用方多写一个分支。
+    Client client;
+    ScriptedPeer peer(reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello"));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    auto request = Request::get(loopback_url(peer.port()));
+    std::vector<Progress> seen;
+    request.on_progress([&seen](const Progress &progress) -> void { seen.push_back(progress); });
+
+    auto task = client.send(std::move(request));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+
+    AURORA_TEST_CHECK_EQ(phases_of(seen, ProgressPhase::Upload).size(), std::size_t{0});
+    const auto downloads = phases_of(seen, ProgressPhase::Download);
+    AURORA_TEST_REQUIRE(!downloads.empty());
+    AURORA_TEST_CHECK_TRUE(downloads.back().finished);
+    AURORA_TEST_CHECK_EQ(downloads.back().transferred_bytes, std::uint64_t{5});
+}
+
+AURORA_TEST_CASE(a_chunked_body_reports_download_progress_without_a_known_total) {
+    // chunked 分帧给不出体总量：进度必须诚实报「未知」，而不是把已到达的字节数当总量冒充 100%。
+    Client client;
+    ScriptedPeer peer(reply_after_reading(
+        1, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    auto request = Request::get(loopback_url(peer.port()));
+    std::vector<Progress> seen;
+    request.on_progress([&seen](const Progress &progress) -> void { seen.push_back(progress); });
+
+    auto task = client.send(std::move(request));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+
+    const auto downloads = phases_of(seen, ProgressPhase::Download);
+    AURORA_TEST_REQUIRE(!downloads.empty());
+    for (const Progress &progress : downloads) {
+        AURORA_TEST_CHECK_FALSE(progress.total_known);
+        AURORA_TEST_CHECK_EQ(progress.total_bytes, std::uint64_t{0});
+    }
+    AURORA_TEST_CHECK_TRUE(downloads.back().finished);
+    AURORA_TEST_CHECK_EQ(downloads.back().transferred_bytes, std::uint64_t{11});
 }
 
 }  // namespace aurora::test_cases::utest_net_http_client

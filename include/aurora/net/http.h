@@ -29,6 +29,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -80,6 +81,37 @@ struct Timeouts {
     std::optional<std::chrono::milliseconds> read_idle;  ///< 相邻两次读之间的空闲时限
     std::optional<std::chrono::milliseconds> total;  ///< 整请求时限
 };
+
+/// @brief 进度所属方向；一次交换里两侧各报一段，回调需据此分流。
+///
+/// 上传在请求体被传输层接受时推进，下载在应答体到达时推进。二者共用一枚回调是刻意的：调用方通常只关心
+/// 「这件事进行到哪了」，而方向是载荷自带的属性，不该逼调用方挂两个口。
+/// @note Thread: thread-safe（值类型）
+/// @note Side-effects: none
+enum class ProgressPhase : std::uint8_t {
+    Upload,  ///< 请求侧：已交出的消息体字节（含请求头部之外的部分）
+    Download,  ///< 应答侧：已到达的消息体线上字节（透明解压的还原量不计入，见 `Progress`）
+};
+
+/// @brief 一次进度发射所携带的事实（合流口径见 `Request::on_progress()`）。
+///
+/// 字节口径只有一处需要留意：下载侧计的是**分帧解出后的线上字节**，不是透明解压之后的字节。透明解压在
+/// 物化路径上发生在收完之后，中途无法给出还原量；流式路径若要拿「实际交出去的还原字节」，看该路径自己的
+/// 完成事实而非进度值。
+/// @note Thread: 回调内只读（值随每次发射新建）
+/// @note Side-effects: none
+struct Progress {
+    ProgressPhase phase{ProgressPhase::Upload};  ///< 方向
+    std::uint64_t transferred_bytes{0};  ///< 该方向已累计交付的字节数；重定向的每一跳各自重新计数
+    std::uint64_t total_bytes{0};  ///< 该方向总量；`total_known` 为假时无意义
+    bool total_known{false};  ///< 总量是否已知（上传恒真；下载取决于分帧是否给出长度）
+    bool finished{false};  ///< 该方向是否已收摊（成功与失败都算收摊；成败由发起侧的出口值表达，不由本字段表达）
+};
+
+/// @brief 进度回调：在发起侧的发射时机被调用（线程与频次约束见 `Request::on_progress()`）。
+/// @note Thread: 恒在主线程同步调用（无主线程投递器时即在承接线程）
+/// @note Side-effects: 由回调实现决定
+using ProgressHandler = std::function<void(const Progress &)>;
 
 /// @brief 一次 HTTP 请求：方法 + 目标 + 字段 + 消息体 + 发起侧选项。
 /// @note Thread: thread-safe（值类型，无共享状态；`render_head()` 只读）
@@ -176,6 +208,24 @@ class Request {
     /// @return 上限次数。
     [[nodiscard]] auto max_redirects() const -> int { return max_redirects_; }
 
+    /// @brief 设定进度回调（覆盖既有；传空回调即取消）。
+    ///
+    /// 发起侧把两侧进度**在源头合流**后再发射：字节到达只更新一枚「最新值」槽，发射发生在每一次可发射
+    /// 的机会（宿主回合）上，且**同一机会至多一次**——挂了回调的下载不会因为对端切得碎就每包写一次状态。
+    /// 本库是响应式框架，每次回调都可能落到一个信号写入上，按 chunk 发射会把它放大成重绘风暴。装可注入的
+    /// 帧号源（`Client::progress_frame_source()`）时改用帧号作闸，严格「每帧至多一次」；未装即以宿主回合
+    /// 为闸（一次可发射机会即一回合）。两相都有一个例外：**每个方向的末值恒发一次**，否则调用方无法靠回调
+    /// 判定「收了摊」。
+    ///
+    /// 回调恒在主线程同步调用（续体经主线程投递器恢复）；它只用于观测，其返回值与耗时都不参与协议判定。
+    /// @param handler 回调；空回调 = 不设。
+    /// @return 自身引用，便于链式调用。
+    auto on_progress(ProgressHandler handler) -> Request &;
+
+    /// @brief 查看进度回调。
+    /// @return 已设则返回之；否则空回调。
+    [[nodiscard]] auto on_progress() const -> const ProgressHandler & { return on_progress_; }
+
     /// @brief 序列化请求行与请求字段（不含消息体）。
     ///
     /// 补齐两处：无 `Host` 时按目标 URL 补；有消息体且未声明 `Content-Length` / `Transfer-Encoding`
@@ -196,6 +246,7 @@ class Request {
     std::vector<char> body_;  ///< 消息体
     Timeouts timeouts_;  ///< 三档超时（connect / read_idle / total），缺省全不设
     int max_redirects_{10};  ///< 重定向跟随上限
+    ProgressHandler on_progress_;  ///< 进度回调（空 = 不报）；发起侧负责合流后再调用
 };
 
 /// @brief 一次 HTTP 应答：状态行 + 字段 + 已物化（解压完毕）的消息体。

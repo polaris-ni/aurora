@@ -175,6 +175,11 @@ auto Request::max_redirects(int value) -> Request & {
     return *this;
 }
 
+auto Request::on_progress(ProgressHandler handler) -> Request & {
+    on_progress_ = std::move(handler);
+    return *this;
+}
+
 auto Request::render_head() const -> Result<std::string> {
     if (!url_.has_value()) {
         // 目标解析失败在工厂就已定案，这里只是把那条错误原样交出去，不再另编一句。

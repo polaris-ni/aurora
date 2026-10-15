@@ -7,8 +7,10 @@
 // 本件只负责在物化之后调用它，并决定宣告什么、限到什么字节。
 #include "aurora/net/http_client.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -26,6 +28,7 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/detail/http_await.h"
 #include "aurora/net/detail/http_encoding.h"
+#include "aurora/net/detail/http_progress.h"
 #include "aurora/net/detail/http_wire.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/http.h"
@@ -38,6 +41,12 @@ namespace {
 
 /// @brief 单段读取的投喂缓冲字节数：足够让常见的头部 + 首块一次到位，又不无界占用栈帧。
 constexpr std::size_t AURORA_READ_CHUNK = std::size_t{16} * 1024;
+
+/// @brief 挂了进度回调时请求体的分块写出粒度：每块一次完成回调，上传进度与写侧背压都以块为节拍。
+///
+/// 取 64 KiB 是「一次系统调用值得发的量」与「进度不碎成每 16 KiB 一跳」之间的折中；它只影响本库内部的
+/// 完成次数，线上字节序列与不分块时逐字节相同，故对端无从分辨。
+constexpr std::size_t AURORA_WRITE_CHUNK = std::size_t{64} * 1024;
 
 /// @brief 三档超时的档号：写进 `TimeoutState::fired`，收尾据此拼 `http-timeout` 的 detail。
 enum class TimeoutStage : std::uint8_t {
@@ -220,6 +229,37 @@ auto materialize_content_encoding(const wire::ResponseHead &head, wire::BodyFram
     return Result<void>{};
 }
 
+/// @brief 从已装配的头部块取 `Content-Length` 的十进制值，供下载进度当「总量」。
+///
+/// 只在 `BodyFraming::Length` 形态下调用，故取首个同名值即可（分帧判定已由字节层把关，同名多值那种歧义
+/// 形态在那一层就已被拒）。值畸形一律当「总量未知」而不是另造一枚错误：进度是观测口，它没有资格改变一次
+/// 交换的成败判定。
+/// @param head 已装配的头部块。
+/// @return 解析出的字节数；无字段或非纯十进制时为 `nullopt`。
+[[nodiscard]] auto announced_length(const wire::ResponseHead &head) -> std::optional<std::uint64_t> {
+    for (const auto &line : head.headers.values("Content-Length")) {
+        std::string_view text{line};
+        while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) {
+            text.remove_prefix(1);
+        }
+        while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) {
+            text.remove_suffix(1);
+        }
+        std::uint64_t value = 0;
+        // 取 `[first, last)` 两枚指针即「带长度信息」的正规形态：`data()` 的返回值不假定以 NUL 结尾，
+        // 尾指针由长度算出，判「整段都是数字」比的是尾指针而非某个哨兵。
+        const char *const first = text.data();
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): from_chars 需要 [first, last)
+        const char *const last = first + text.size();
+        const auto parsed = std::from_chars(first, last, value);
+        if (parsed.ec == std::errc{} && parsed.ptr == last) {
+            return value;
+        }
+        return std::nullopt;  // 首个同名值即不可解析：不再往后猜
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 auto Client::send(Request request) const -> CoroTask<Result<Response>> {
@@ -235,6 +275,17 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
     int hops = 0;
     Result<Response> outcome{make_error(ErrorCode::HttpProtocolError, "send produced no outcome")};
     const StreamOptions options;
+
+    // 进度闸随协程帧存活；回调取自首跳请求，重定向后的各跳沿用同一份观测口（与 `timeouts` / 上限同纪律：
+    // 发起侧选项在入口取一次，逐跳不重读）。下面几枚计数是**本跳**口径，每跳开头重置。
+    detail::ProgressGate gate(current.on_progress(), progress_frame_source_);
+    std::uint64_t wire_seen = 0;  // 本跳已 drain 的线上体字节（解压前口径）
+    std::optional<std::uint64_t> announced_total;  // Length 分帧声明的体总量；其余形态未知
+    std::uint64_t uploaded = 0;  // 本跳已写出的请求体字节
+    std::uint64_t upload_total = 0;  // 本跳请求体总量（分块写时才有意义）
+    bool head_seen = false;  // 本跳是否已见到头部（决定要不要报下载末值）
+    bool upload_running = false;  // 本跳是否走了分块写路径
+    bool upload_settled = false;  // 上传末值是否已在写环里发过（避免收尾重发同一事实）
 
     // 三档超时共享一枚触发状态：total 全程登记一次，connect / read_idle 在各自阶段前登记、结束即停表。
     auto tstate = std::make_shared<TimeoutState>();
@@ -253,8 +304,14 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
             break;
         }
         const Url &target = url_slot.value();
-        std::string payload = head.value();
-        payload.insert(payload.end(), current.body().begin(), current.body().end());
+        // 本跳的进度计数重置：跨跳不累计，下一跳的总量在到达前无从得知。
+        wire_seen = 0;
+        announced_total.reset();
+        uploaded = 0;
+        upload_total = 0;
+        head_seen = false;
+        upload_running = false;
+        upload_settled = false;
 
         const auto port = target.effective_port();
         if (!port.has_value()) {
@@ -293,11 +350,51 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         }
         connect_timer.stop();  // 建连（含握手）完成，connect 档停表，不误伤后续读写
 
-        // ── 发出请求。
-        auto written = co_await write_one(std::span<const char>{payload});
-        if (!written) {
-            outcome = Result<Response>{written.error()};
-            break;
+        // ── 发出请求。挂了进度回调且带请求体时才分块写出：分块只为给上传进度与写侧背压提供节拍，线上字节
+        //    序列与一次写完逐字节相同，对端无从分辨。无回调恒一次写完，本切片的观测口对无需求者零改动。
+        if (gate.armed() && !current.body().empty()) {
+            const std::span<const char> body_view{current.body()};
+            upload_total = body_view.size();
+            upload_running = true;
+            auto written_head = co_await write_one(std::span<const char>{head.value()});
+            bool write_failed = !written_head;
+            if (write_failed) {
+                outcome = Result<Response>{written_head.error()};
+            }
+            while (!write_failed) {
+                const std::size_t take = std::min<std::size_t>(AURORA_WRITE_CHUNK, body_view.size() - uploaded);
+                auto written = co_await write_one(body_view.subspan(uploaded, take));
+                if (!written) {
+                    outcome = Result<Response>{written.error()};
+                    write_failed = true;
+                    break;
+                }
+                // 契约：`write` 成功即整段进入内核（`net/transport.h` 的「全部字节都进入内核或明确失败才算
+                // 完成」），故计数按块长推进、不回读交付数——交付数在这里没有第二种可能的取值。
+                uploaded += take;
+                const bool settled = uploaded >= upload_total;
+                gate.observe(Progress{.phase = ProgressPhase::Upload,
+                                      .transferred_bytes = uploaded,
+                                      .total_bytes = upload_total,
+                                      .total_known = true,
+                                      .finished = settled});
+                gate.flush();
+                upload_settled = upload_settled || settled;
+                if (settled) {
+                    break;
+                }
+            }
+            if (write_failed) {
+                break;
+            }
+        } else {
+            std::string payload = head.value();
+            payload.insert(payload.end(), current.body().begin(), current.body().end());
+            auto written = co_await write_one(std::span<const char>{payload});
+            if (!written) {
+                outcome = Result<Response>{written.error()};
+                break;
+            }
         }
 
         // ── 逐段装配应答：喂 ResponseAssembler，按分帧物化体，直到 complete 或对端收摊。
@@ -305,6 +402,24 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         std::vector<char> body;
         std::array<char, AURORA_READ_CHUNK> chunk{};
         bool halted = false;
+        // 下载进度的记账口：每次 `drain_body` 之后按「新到多少线上字节」记一笔，再冲一次闸。闸由每一次读
+        // 恢复推动，故一次交付至多一发；总量只有 `Length` 形态给得出，chunked / until-close 一律报未知。
+        auto note_download = [&]() -> void {
+            if (!head_seen && assembler.head_ready()) {
+                head_seen = true;
+                announced_total = assembler.framing() == wire::BodyFraming::Length ? announced_length(assembler.head())
+                                                                                   : std::optional<std::uint64_t>{};
+            }
+            if (body.size() > wire_seen) {
+                wire_seen = body.size();
+                gate.observe(Progress{.phase = ProgressPhase::Download,
+                                      .transferred_bytes = wire_seen,
+                                      .total_bytes = announced_total.value_or(0),
+                                      .total_known = announced_total.has_value(),
+                                      .finished = false});
+            }
+            gate.flush();
+        };
         while (!assembler.complete()) {
             StageTimer read_timer(timeouts.read_idle, TimeoutStage::ReadIdle, token, tstate);
             auto read = co_await read_one(std::span<char>{chunk});
@@ -337,11 +452,13 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                 break;
             }
             assembler.drain_body(body);
+            note_download();
         }
         if (halted) {
             break;
         }
         assembler.drain_body(body);
+        note_download();
 
         const auto &response_head = assembler.head();
         // 透明解压：分帧给出的仍是编码字节，还原完才交给 `Response`；失败与传输失败分道（字节已完整到达）。
@@ -386,6 +503,27 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                 break;
         }
     }
+
+    // 进度收尾：两个方向的末值各发一次，不看闸号。成败由 `outcome` 表达，这一发只宣告「这一趟到此收摊」，
+    // 让挂着回调的响应式状态落到确定值而不是停在一个半途数字上。写环里已发过上传末值的不重复发。
+    if (gate.armed()) {
+        if (upload_running && !upload_settled) {
+            gate.observe(Progress{.phase = ProgressPhase::Upload,
+                                  .transferred_bytes = uploaded,
+                                  .total_bytes = upload_total,
+                                  .total_known = true,
+                                  .finished = true});
+        }
+        if (head_seen) {
+            gate.observe(Progress{.phase = ProgressPhase::Download,
+                                  .transferred_bytes = wire_seen,
+                                  .total_bytes = announced_total.value_or(0),
+                                  .total_known = announced_total.has_value(),
+                                  .finished = true});
+        }
+    }
+    gate.finish();
+
     co_return outcome;
 }
 

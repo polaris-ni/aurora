@@ -28,6 +28,13 @@
 /// - **解压产物另有上限**：`max_decompressed_bytes()` 缺省跟随 `max_body_bytes()`，越限落
 ///   `http-body-too-large` 且在 detail 点名越的是哪一枚旋钮（炸弹防护护的是解压产物，不是线上字节）。
 ///
+/// 进度观测（`Request::on_progress()`）同样在本件源头合流，三条口径与内容编码并列成立：
+/// - **每方向在一次可发射机会里至多一发**：字节到达只更新槽值，发射发生在协程恢复出的宿主回合上；装了
+///   `progress_frame_source()` 即以帧号为闸，严格「每帧至多一次」。按 chunk 发射会把响应式绑定放大成重绘风暴。
+/// - **每方向的末值恒发一次**：合流不能把「收了摊」这一事实合掉，否则调用方只能靠比字节数猜完成。
+/// - **挂了回调才分块写请求体**：上传进度要有可观测的节拍，故带体的请求按块写出、每块一次完成回调；未挂
+///   回调时恒一次写完，线上字节序列两型完全相同（分块只影响本库内部的完成次数，不影响对端所见）。
+///
 /// @code
 /// aurora::net::http::Client client;
 /// auto task = client.send(aurora::net::http::Request::get("https://example.com/api"));
@@ -38,6 +45,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 
 #include "aurora/core/result.h"
@@ -97,6 +105,26 @@ class Client {
     /// @return 上下文的只读引用。
     [[nodiscard]] auto tls_context() const -> const TlsContext & { return tls_; }
 
+    /// @brief 装帧号源，把进度发射的闸门从「宿主回合」改判为「帧」（配合 `Request::on_progress()`）。
+    ///
+    /// 发起侧的进度恒是合流后的（每方向在一次可发射的机会里至多一发）。缺省的机会是宿主回合——每次协程经
+    /// 主线程投递器恢复算一次；本应用有帧循环时，宿主在此给出单调递增的帧号，同一帧内的多次恢复就只发第一
+    /// 发，语义严格等于「每帧至多一次」。传空函数即退回回合闸。
+    ///
+    /// 帧号源在每次发射判定时被调用一次，故它应当是廉价的读计数器而非计算式；它不触发任何网络动作。
+    /// @param source 返回当前帧号的可调用体；空 = 用回合闸（缺省）。
+    /// @return 自身引用，便于链式调用。
+    auto progress_frame_source(std::function<std::uint64_t()> source) -> Client & {
+        progress_frame_source_ = std::move(source);
+        return *this;
+    }
+
+    /// @brief 查看已装的帧号源。
+    /// @return 已装则返回之；否则空函数（表示用回合闸，不表示关掉进度）。
+    [[nodiscard]] auto progress_frame_source() const -> const std::function<std::uint64_t()> & {
+        return progress_frame_source_;
+    }
+
     /// @brief 发送一次请求并物化应答：连接 → 写出 → 逐段装配 → 透明解压 → 按 `Location` 跟随重定向。
     ///
     /// 全程受 `Request::timeout()` 的整请求时限约束（到点落 `http-timeout`）；重定向次数超过
@@ -112,6 +140,7 @@ class Client {
     std::optional<std::uint64_t> max_body_bytes_;  ///< 物化体上限（nullopt = 不限）
     std::optional<std::uint64_t> max_decompressed_bytes_;  ///< 解压产物上限（nullopt = 跟随上一行）
     TlsContext tls_;  ///< https 握手口径
+    std::function<std::uint64_t()> progress_frame_source_;  ///< 进度发射的帧号源（空 = 回合闸）
 };
 
 }  // namespace aurora::net::http
