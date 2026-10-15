@@ -487,8 +487,9 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             return error_response(405, "Method not allowed for /api/debug/tree");
         }
         try {
-            return on_tree(
-                [](const Node &root) -> std::string { return json_response(200, "OK", aurora::debug::widget_tree(root)); });
+            return on_tree([](const Node &root) -> std::string {
+                return json_response(200, "OK", aurora::debug::widget_tree(root));
+            });
         } catch (const std::exception &e) {
             return error_response(500, std::string("widget_tree failed: ") + e.what());
         }
