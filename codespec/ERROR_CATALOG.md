@@ -140,5 +140,6 @@
 | 132 | `IconNameNotRegistered` | `icon-name-not-registered` | validation | error | false | invalid_value | false | Icon name '{name}' is not registered: {detail} | Register the semantic name through IconRegistry before referencing it, or pick one of the registered names reported alongside this error |
 | 133 | `IconGlyphUnavailable` | `icon-glyph-unavailable` | widget | error | false | missing_prop | false | Icon glyph unavailable: {detail} | Register the icon font through FontEngine::register_font (or register_font_from_memory) and make sure the code point exists in that face |
 | 134 | `IconSvgUnsupported` | `icon-svg-unsupported` | render | warning | false | invalid_value | false | Icon SVG source uses unsupported features: {detail} | The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside the library and supply the bitmap |
+| 135 | `HttpBodyNotReplayable` | `http-body-not-replayable` | io | error | false | resource_error | false | HTTP request body cannot be sent a second time: '{detail}' | A 307 or 308 redirect must replay the message body, and the streaming body said it cannot return to its starting point, so resending it would ship a half-consumed payload. Either hand the payload over as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note that a body which cannot restart also opts this request out of the retry policy on purpose |
 
-<!-- count: total 135 error codes -->
+<!-- count: total 136 error codes -->

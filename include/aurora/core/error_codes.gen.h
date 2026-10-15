@@ -176,6 +176,7 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     IconNameNotRegistered = 132,  ///< icon-name-not-registered: Icon name '{name}' is not registered: {detail}
     IconGlyphUnavailable = 133,  ///< icon-glyph-unavailable: Icon glyph unavailable: {detail}
     IconSvgUnsupported = 134,  ///< icon-svg-unsupported: Icon SVG source uses unsupported features: {detail}
+    HttpBodyNotReplayable = 135,  ///< http-body-not-replayable
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -193,7 +194,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 135> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 136> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1935,6 +1936,22 @@ inline constexpr std::array<ErrorMeta, 135> AURORA_ERROR_TABLE = {
             .message_tpl = "Icon SVG source uses unsupported features: {detail}",
             .hint = "The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside "
                     "the library and supply the bitmap",
+        },
+        {
+            .code = ErrorCode::HttpBodyNotReplayable,
+            .ident = "HttpBodyNotReplayable",
+            .slug = "http-body-not-replayable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "HTTP request body cannot be sent a second time: '{detail}'",
+            .hint =
+                "A 307 or 308 redirect must replay the message body, and the streaming body said it cannot return to "
+                "its starting point, so resending it would ship a half-consumed payload. Either hand the payload over "
+                "as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note "
+                "that a body which cannot restart also opts this request out of the retry policy on purpose",
         },
     },
 };

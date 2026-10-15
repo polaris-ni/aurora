@@ -10,7 +10,8 @@
 ///           块扩展忽略、终止块与 trailer、长度字段溢出与越上限、缺 CRLF、终止后余字节的分岔；应答装配
 ///           状态机（`ResponseAssembler`）把上述三件按线上次序串起：跨投递物化 `Content-Length` 与
 ///           chunked 体、HEAD 应答恒无体、`UntilClose` 只在对端 FIN 后完整、体累计越限落
-///           `http-body-too-large`、完整之后再喂字节判畸形（流水线不在本库面内）。
+///           `http-body-too-large`、完整之后再喂字节判畸形（流水线不在本库面内）、1xx 按「非最终应答」收进
+///           待取队列并回到头部阶段继续读（`101` 除外，它当场落协议错）、请求侧分块编码与分块解码器对偶。
 /// 全用例零 socket、零 DNS、不读环境变量，故三平台行为一致、wasm 腿同样可跑，无需 `AURORA_TEST_SKIP`。
 
 #include <cstddef>
@@ -372,6 +373,83 @@ AURORA_TEST_CASE(assembler_rejects_bytes_after_complete) {
     AURORA_TEST_REQUIRE(assembler.complete());
     // 完整之后再喂字节属下一条消息（流水线不在本库面内），本层判畸形而不是悄悄吞下。
     AURORA_TEST_CHECK_FALSE(bool(assembler.push("HTTP/1.1 204 No Content\r\n\r\n")));
+}
+
+AURORA_TEST_CASE(assembler_keeps_reading_after_an_informational_response) {
+    wire::ResponseAssembler assembler{std::nullopt, false};
+    // 单独一条 100：它说完了自己的头部块，但本条消息远没结束——`complete()` 说的恒是最终应答。
+    feed(assembler, {"HTTP/1.1 100 Continue\r\n\r\n"});
+    AURORA_TEST_REQUIRE(assembler.has_informational());
+    AURORA_TEST_CHECK_TRUE(!assembler.complete());
+    AURORA_TEST_CHECK_TRUE(!assembler.head_ready());
+    const auto announced = assembler.take_informational();
+    AURORA_TEST_CHECK_EQ(require_value(announced).status, std::uint16_t{100});
+    // 取完即从内部移除：同一条信息应答不会被交出去两次，否则发起侧会以为对端又授权了一次。
+    AURORA_TEST_CHECK_TRUE(!assembler.has_informational());
+    AURORA_TEST_CHECK_FALSE(assembler.take_informational().has_value());
+
+    feed(assembler, {"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"});
+    AURORA_TEST_REQUIRE(assembler.head_ready());
+    AURORA_TEST_CHECK_EQ(assembler.head().status, std::uint16_t{200});
+    AURORA_TEST_CHECK_TRUE(assembler.complete());
+    AURORA_TEST_CHECK_EQ(assembled_body(assembler), "ok");
+}
+
+AURORA_TEST_CASE(assembler_splits_informational_and_final_within_one_delivery) {
+    wire::ResponseAssembler assembler{std::nullopt, false};
+    // 同一批字节里装着「100 + 最终应答 + 体首段」：一次 push 既要交出信息应答，又要把最终应答装配到位。
+    feed(assembler, {"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\nContent-Length: 3\r\n\r\nab", "c"});
+    const auto announced = assembler.take_informational();
+    AURORA_TEST_CHECK_EQ(require_value(announced).status, std::uint16_t{100});
+    AURORA_TEST_CHECK_EQ(assembler.head().status, std::uint16_t{201});
+    AURORA_TEST_CHECK_TRUE(assembler.complete());
+    AURORA_TEST_CHECK_EQ(assembled_body(assembler), "abc");
+
+    // 多条信息应答按线上次序排队交出（`103 Early Hints` 之后才来 `100` 是现实里出现过的次序）。
+    wire::ResponseAssembler queued{std::nullopt, false};
+    feed(queued, {"HTTP/1.1 103 Early Hints\r\nLink: </s.css>; rel=preload\r\n\r\n"
+                  "HTTP/1.1 100 Continue\r\n\r\n"
+                  "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"});
+    AURORA_TEST_REQUIRE(queued.has_informational());
+    const auto hint = require_value(queued.take_informational());
+    AURORA_TEST_CHECK_EQ(hint.status, std::uint16_t{103});
+    AURORA_TEST_CHECK_EQ(hint.headers.get("Link").value_or(""), "</s.css>; rel=preload");
+    const auto go_ahead = require_value(queued.take_informational());
+    AURORA_TEST_CHECK_EQ(go_ahead.status, std::uint16_t{100});
+    AURORA_TEST_CHECK_TRUE(queued.complete());
+    AURORA_TEST_CHECK_EQ(queued.head().status, std::uint16_t{200});
+}
+
+AURORA_TEST_CASE(assembler_refuses_a_protocol_upgrade) {
+    wire::ResponseAssembler assembler{std::nullopt, false};
+    // 101 要求这条连接此后改说另一套协议（WebSocket 的升级形态），HTTP 客户端收下它就等于拿两套文法读一条流。
+    const auto pushed = assembler.push("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n");
+    AURORA_TEST_REQUIRE_FALSE(bool(pushed));
+    AURORA_TEST_CHECK_EQ(pushed.error().code_enum, aurora::ErrorCode::HttpProtocolError);
+    // 它是被**拒**的，不是被当成信息应答交出的：否则发起侧会据它发体，而那正是升级后不该再发的东西。
+    AURORA_TEST_CHECK_TRUE(!assembler.has_informational());
+    AURORA_TEST_CHECK_TRUE(!assembler.head_ready());
+}
+
+AURORA_TEST_CASE(render_request_chunk_is_the_minimal_framing) {
+    // 长度行是小写十六进制、无块扩展参数，数据之后一对 CRLF；`RFC 9112 §7.1` 的最小写法。
+    AURORA_TEST_CHECK_EQ(wire::render_request_chunk("hello"), "5\r\nhello\r\n");
+    AURORA_TEST_CHECK_EQ(wire::render_request_chunk("abcdefghij"), "a\r\nabcdefghij\r\n");
+    // 10 以上走两位小写十六进制（`10` 是 16 而不是十进制的 10，与本层的严格十六进制解析同口径）。
+    AURORA_TEST_CHECK_EQ(wire::render_request_chunk(std::string(255, 'x')), "ff\r\n" + std::string(255, 'x') + "\r\n");
+    // 空段即终止块：`0\r\n\r\n`，其后不挂 trailer（本库发出侧不产 trailer）。
+    AURORA_TEST_CHECK_EQ(wire::render_request_chunk(""), "0\r\n\r\n");
+
+    // 产出与解码器对偶：泵出的块喂回 `ChunkedDecoder` 必须原样收回明文，终止块判完。
+    wire::ChunkedDecoder decoder;
+    AURORA_TEST_REQUIRE(bool(decoder.push(wire::render_request_chunk("abc"))));
+    AURORA_TEST_REQUIRE(bool(decoder.push(wire::render_request_chunk("de"))));
+    AURORA_TEST_REQUIRE(bool(decoder.push(wire::render_request_chunk(""))));
+    std::vector<char> out;
+    decoder.drain(out);
+    const std::string round_trip{out.begin(), out.end()};
+    AURORA_TEST_CHECK_EQ(round_trip, "abcde");
+    AURORA_TEST_CHECK_TRUE(decoder.complete());
 }
 
 }  // namespace aurora::test_cases::utest_net_http_wire

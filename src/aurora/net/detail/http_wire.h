@@ -8,7 +8,7 @@
 // - 头部注入（值里带 CR/LF）这类安全判据落在这里才谈得上「发出之前就已拦住」，落到套接字层
 //   就只能事后解释。
 //
-// 四条口径：
+// 五条口径（规范性，落码与文档回写以此为准）：
 // - 解析产出沿用 `proxy_wire.h` 的三态：成功且有值 = 报文完整、成功且空 = 还没读够（那不是错误，
 //   调用方据此继续喂字节）、失败 = 不合文法或超出上限。
 // - **上限恒在**：头部块与单块长度都有硬上限，超限即判畸形而不是继续长（无界缓冲不是兼容性，
@@ -18,6 +18,8 @@
 //   本库不猜，直接断开。
 // - 字段名的原始拼写在解析时保留、比较时按 ASCII 大小写不敏感（`Headers` 的既有口径），序列化时
 //   不改写调用方给的拼写——「发出去的头和写下来的头长得一样」是对端排查的前提。
+// - **1xx 是「话还没说完」，不是一条答完的应答**：装配器把它收进待取队列、回到头部阶段继续读最终应答，
+//   `complete()` 永不会因为一条 `100` 就变真；`101` 是唯一例外（协议升级不属本层，见 `ResponseAssembler`）。
 #pragma once
 
 #include <cstddef>
@@ -60,6 +62,18 @@ enum class BodyFraming : std::uint8_t {
     Chunked,  ///< `Transfer-Encoding: chunked`，分块解码后长度未知
     UntilClose,  ///< 既无长度也非分块：体到对端关闭写向为止（HTTP/1.0 形态）
 };
+
+/// @brief 分块传输（`Transfer-Encoding: chunked`）的**编码**：把一段明文写成线上的一个数据块。
+///
+/// 发起侧的流式请求体在总量未知时只能走分块（`RFC 9112 §7.1`），本函数是那条路上唯一的产字节处。
+/// 形态取同一节的最小写法：小写十六进制长度 + CRLF + 数据 + CRLF，不带块扩展。
+/// 终止块由 `data` 为空产出（`0\r\n\r\n`，不含 trailer 行）。
+///
+/// 这里**不校验单块长度上限**：调用方是库内体泵，它按固定段长切分，恒远低于
+/// `AURORA_HTTP_MAX_CHUNK_BYTES`；上限是**接收侧**对陌生对端的防线，不该反过来成为发出侧的失败分支。
+/// @param data 本段明文；空段即终止块。
+/// @return 该段的线上形态字节（含长度行与收尾 CRLF）。
+[[nodiscard]] auto render_request_chunk(std::string_view data) -> std::string;
 
 /// @brief 解析应答头部块（状态行 + 字段 + 空行）。
 ///
@@ -147,13 +161,20 @@ class ChunkedDecoder {
 /// 它把本文件已有的三件（`parse_response_head` 的三态头部解析、`framing_of` 的分帧判定、
 /// `ChunkedDecoder` 的分块解码）按线上次序串起来，只回答发起侧最关心的三问：
 /// - **头部块全了吗**：未全前收到的字节都归头部缓冲（含 body 起始那一段，它可能和头部同批抵达）。
-/// - **体分帧是什么**：头部一全即由 `framing_of` 定形态，`HEAD` / 1xx / 204 / 304 恒无体。
+/// - **体分帧是什么**：最终头部一全即由 `framing_of` 定形态，`HEAD` / 1xx / 204 / 304 恒无体（1xx 在定形态
+///   之前先走「非最终应答」那一支，见下）。
 /// - **体读全了吗**：`Length` 按声明长度、`Chunked` 按终止块、`UntilClose` 按对端 FIN（经
 ///   `peer_closed()` 告知），任一形态触达上限即 `http-body-too-large`。
 ///
-/// **范围是「一条应答」**：HTTP/1.1 流水线（pipelining）不在本库面内（见提案 §15），故一条连接上
-/// 每个请求周期只装配一条应答，完整之后再收到字节即判畸形——与 `ChunkedDecoder`「终止块之后不收字节」
-/// 是同一条纪律，把「读过头把下一条的开头吃进本条」这类分帧错位挡在本层。
+/// **范围是「一条最终应答，加上它之前的信息应答」**：HTTP/1.1 流水线（pipelining）不在本库面内（见提案 §15），
+/// 故一条连接上每个请求周期只装配一条最终应答，完整之后再收到字节即判畸形——与 `ChunkedDecoder`「终止块之后
+/// 不收字节」是同一条纪律，把「读过头把下一条的开头吃进本条」这类分帧错位挡在本层。
+///
+/// **1xx 不是最终应答**（`RFC 9110 §15.2`）：`100` / `102` / `103` 这类信息应答恒无体，其后紧跟的才是真正
+/// 的答案。装配器把它们收进待取队列并**回到头部阶段继续读**，`head()` 与 `complete()` 说的始终是最终那一条；
+/// 发起侧的 `Expect: 100-continue` 窗口就靠这一次取用判定「能不能开始发体」。`101 Switching Protocols` 是
+/// 唯一被拒的 1xx：它要求本连接换一套协议（WebSocket 的升级形态），而「升级之后这条连接归谁」不属 HTTP
+/// 客户端的判定，故当场落 `http-protocol-error`，留给 WebSocket 切片。
 ///
 /// 只做接收侧，不做发送侧、不碰套接字：故可在零网络下逐值断言畸形、越限与分帧错位。
 /// @note Thread: single-threaded（每连接一个实例，随该连接的读回调串行使用）
@@ -190,6 +211,14 @@ class ResponseAssembler {
     /// @return 分帧形态。
     [[nodiscard]] auto framing() const -> BodyFraming { return framing_; }
 
+    /// @brief 是否有一条尚未取走的信息应答（1xx，`101` 除外）。
+    /// @return 有为真；发起侧据此问「对端是否已授权我发体」。
+    [[nodiscard]] auto has_informational() const -> bool { return !informationals_.empty(); }
+
+    /// @brief 取走最早那条尚未交出的信息应答头部块（取完即从内部移除，不重复交付）。
+    /// @return 有待取条目时返回其头部块；队列为空时为 `nullopt`。
+    [[nodiscard]] auto take_informational() -> std::optional<ResponseHead>;
+
     /// @brief 取走已解码的明文体（取完即从内部移除，不重复交付）。
     /// @param out 追加目标；只追加、不清空调用方缓冲。
     auto drain_body(std::vector<char> &out) -> void;
@@ -221,6 +250,7 @@ class ResponseAssembler {
     BodyFraming framing_{BodyFraming::None};  ///< 头部解析后确定的分帧形态
     ChunkedDecoder chunked_;  ///< Chunked 形态的解码器
     std::vector<char> pending_;  ///< 已解码、待 `drain_body()` 取走的明文
+    std::vector<ResponseHead> informationals_;  ///< 已装配、待取走的信息应答（1xx，最终应答之前的那几段）
     std::uint64_t content_remaining_{0};  ///< Length 形态还剩多少体字节
     std::uint64_t produced_{0};  ///< 本条已解码的累计明文（上限核算唯一计数，不随 drain 回落）
 };

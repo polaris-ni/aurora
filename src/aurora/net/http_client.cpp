@@ -33,6 +33,7 @@
 #include "aurora/core/url.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/detail/http_await.h"
+#include "aurora/net/detail/http_body.h"
 #include "aurora/net/detail/http_cache.h"
 #include "aurora/net/detail/http_encoding.h"
 #include "aurora/net/detail/http_progress.h"
@@ -51,11 +52,14 @@ namespace {
 /// @brief 单段读取的投喂缓冲字节数：足够让常见的头部 + 首块一次到位，又不无界占用栈帧。
 constexpr std::size_t AURORA_READ_CHUNK = std::size_t{16} * 1024;
 
-/// @brief 挂了进度回调时请求体的分块写出粒度：每块一次完成回调，上传进度与写侧背压都以块为节拍。
+/// @brief 「先问再发体」（`Expect: 100-continue`）那一段等待的窗口时长。
 ///
-/// 取 64 KiB 是「一次系统调用值得发的量」与「进度不碎成每 16 KiB 一跳」之间的折中；它只影响本库内部的
-/// 完成次数，线上字节序列与不分块时逐字节相同，故对端无从分辨。
-constexpr std::size_t AURORA_WRITE_CHUNK = std::size_t{64} * 1024;
+/// 它是库内置常量而非 `Timeouts` 的任何一档，理由是它管的事与三档都不同：三档到点都是失败（取消在途操作、
+/// 落 `http-timeout`），而本窗口到点是**成功路径的另一条腿**——多数中间层压根不回 `100`，盲发是 `RFC 9110
+/// §10.1.1` 明确允许的形态。把它做成一档超时会把「没人应话」误报成超时，而它其实只是走了另一条腿。
+/// 取 300 ms 是「诚实的服务器多半在这之内回话」与「不该让整条请求为一次大概无疾而终的问询买单」之间的
+/// 折中；它只加在挂过 `expect_continue()` 且本次确有体的请求上。
+constexpr std::chrono::milliseconds AURORA_EXPECT_WINDOW{300};
 
 /// @brief 三档超时的档号：写进 `TimeoutState::fired`，收尾据此拼 `http-timeout` 的 detail。
 ///
@@ -148,6 +152,12 @@ class StageTimer {
 }
 
 /// @brief 依 `Location` 与状态码算出重定向的下一跳请求（方法/体的改写按 RFC 9110 §15.4 惯例）。
+///
+/// 保留体的那几条（307 / 308，以及非 POST 的 301/302/303）会把体连同三枚现地补字段的旋钮一起带到下一跳，
+/// 并在带走流式体时先把它放回原点——放不回即落 `http-body-not-replayable`，因为下一跳注定要整份重发。
+/// @param current 本跳请求。
+/// @param response 本跳拿到的重定向应答。
+/// @return 下一跳请求；无 `Location`、目标解不出、或体不可重放时为对应错误。
 [[nodiscard]] auto follow(const Request &current, const Response &response) -> Result<Request> {
     const auto location = response.header("Location");
     if (!location.has_value()) {
@@ -183,8 +193,30 @@ class StageTimer {
     for (const auto &entry : current.headers().entries()) {
         redirected.header(entry.name, entry.value);
     }
-    if (keep_body && !current.body().empty()) {
-        redirected.body(current.body());
+    if (keep_body) {
+        // 体的两种交法都跟着跳走：内存体是值拷贝，流式体是**同一枚源**（`Request` 只借引用，见 net/http.h）。
+        // 源在这里必须回到原点——下一跳要把它整份重发一遍，接着半截往下发等于交付一份损坏的请求体。
+        // `restart()` 的答案就是重放资格的唯一判据（同 `RetryPolicy` 那一闸），答「回不去」即这一跳跳不动：
+        // 与其发出一份注定错误的体，不如把失败如实交回调用方。
+        if (auto *source = current.body_source(); source != nullptr) {
+            if (!source->restart()) {
+                return Result<Request>{make_error(ErrorCode::HttpBodyNotReplayable,
+                                                  "a streaming request body cannot be replayed for the next hop of a "
+                                                  "redirect that preserves it")};
+            }
+            redirected.body(*source);
+        } else if (!current.body().empty()) {
+            redirected.body(current.body());
+        }
+        // 三枚旋钮都靠 `render_head()` 现地补成字段，故它们不在上面的字段拷贝里；不带过来，第二跳就会悄悄
+        // 变成「整份资源 + 直接发体」——那是把调用方的请求改写成了另一件事。
+        if (const auto &value = current.range(); value.has_value()) {
+            redirected.range(*value);
+            if (const auto &validator = current.if_range(); validator.has_value()) {
+                redirected.if_range(*validator);
+            }
+        }
+        redirected.expect_continue(current.expect_continue());
     }
     return Result<Request>{std::move(redirected)};
 }
@@ -414,8 +446,15 @@ struct CacheOpening {
 
 /// @brief 缓存起手式：命中新鲜副本即交出，命中陈旧副本则把两枚条件头挂到请求上（原地改）。
 ///
-/// 只在「开关开着 + 本请求没 `no_cache()` + 方法可缓存 + URL 解析成功」四件同时成立时才问表，缺一即整段
-/// 跳过——跳过的形态与缓存从未存在时逐字节相同（连一次内存查找都不做）。
+/// 只在「开关开着 + 本请求没 `no_cache()` + 方法可缓存 + 没带字节范围 + URL 解析成功」五件同时成立时才问
+/// 表，缺一即整段跳过——跳过的形态与缓存从未存在时逐字节相同（连一次内存查找都不做）。
+///
+/// 带 `range()` 的请求整段不参与缓存是刻意的：表按「方法 + URL」建键，同一 URL 的整份副本绝不能被拿来
+/// 充当一个分段应答（那会把资源的前半截当成 `bytes=500-999` 的答案交出去），反向也一样——所以对端回来的
+/// 那份 206 也不许进表。两半各有一道闸：起手这一段认出 `range()` 就把键留空，`settle_cache` 见键空即整段
+/// 不收；即便范围是以裸 `Range` 头上来的（本件认不出，键照建、表照问），收尾时也由
+/// `detail::is_cacheable_status()` 把 206 挡在表外。代价是范围请求一律不享缓存，以及裸头写法下前一半闸
+/// 失效、整份副本会被当成对分段请求的答复交出——用 `range()` 而不是裸头是这层的约定。
 ///
 /// 请求侧的 `Cache-Control` 在这里也有一票，与表内写入侧同口径：`no-store` 连查都不查（那条既不许存也不许
 /// 复用），`no-cache` 则只挡「不经核对就交付」这一种命中，条目带着校验子时照样挂头去验证——那是
@@ -427,7 +466,8 @@ struct CacheOpening {
 [[nodiscard]] auto open_from_cache(const std::shared_ptr<detail::HttpResponseCache> &cache, const CacheOptions &options,
                                    Request &request) -> CacheOpening {
     CacheOpening out;
-    if (!options.enabled || request.no_cache() || !detail::is_cacheable_method(request.method()) || !cache) {
+    if (!options.enabled || request.no_cache() || request.range().has_value() ||
+        !detail::is_cacheable_method(request.method()) || !cache) {
         return out;
     }
     const auto target = request.url();
@@ -601,7 +641,11 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
     if (opening.fresh.has_value()) {
         co_return Result<Response>{std::move(*opening.fresh)};
     }
-    const bool loop_open = detail::retry_enabled(policy) && detail::is_idempotent_method(origin.method());
+    // 重试环的资格有三道判据：策略开着、方法幂等、体可回放到原点。第三道只挂在流式体上——内存体天然能重发，
+    // 而 `restart()` 是流式体重放资格的唯一判据（口径见 `BodySource`）：一次 `restart()` 在此问清，此后本交换
+    // 再不问第二遍。半截体重发等于交付一份数据损坏的请求，且这个代价在失败现场无从判定，故本库不为此开旋钮。
+    const bool replayable = origin.body_source() == nullptr || origin.body_source()->restart();
+    const bool loop_open = detail::retry_enabled(policy) && detail::is_idempotent_method(origin.method()) && replayable;
 
     // 跨全部尝试（含退避等待）的墙登记在这一枚令牌上；每一次尝试各拿一份自己的令牌与 `total` 看门狗，
     // 故 `Timeouts::total` 天然逐尝试重新计时——这正是它与 `RetryPolicy::budget` 分家的落点。
@@ -620,6 +664,16 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         // 墙到点即掐掉在途的这一次尝试（`Cancellation` 契约：钩子至多触发一次），随后本环据 `is_cancelled()` 收摊。
         sequence.on_cancel([token]() mutable { token.cancel(); });
         Request current = origin;  // 每次尝试都从原始请求重新发起：重定向与重放都会改写它
+        if (attempt > 1) {
+            // 上一次尝试把流式体读到了半途，本次须从原点重发。入口已判过资格的源在这里回退失败，说明它对
+            // 「能否回到原点」给了两个答案——按不可重放收摊，绝不把半截体写上线。
+            if (auto *source = current.body_source(); source != nullptr && !source->restart()) {
+                outcome = Result<Response>{make_error(
+                    ErrorCode::HttpBodyNotReplayable,
+                    "a streaming request body refused to return to its starting point before a retry attempt")};
+                break;
+            }
+        }
         advertise_accept_encoding(current);  // 缺省宣告与解码能力同源；调用方已自带则不动
         // 解压产物上限缺省跟随线上体上限：两枚旋钮各管一段字节，未显式收紧即「压缩不该让物化结果更多」。
         // 跟随的是「设了没有」而非数值——两枚都未设即恒不设限（`nullopt`）。
@@ -637,7 +691,8 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         std::uint64_t wire_seen = 0;  // 本跳已 drain 的线上体字节（解压前口径）
         std::optional<std::uint64_t> announced_total;  // Length 分帧声明的体总量；其余形态未知
         std::uint64_t uploaded = 0;  // 本跳已写出的请求体字节
-        std::uint64_t upload_total = 0;  // 本跳请求体总量（分块写时才有意义）
+        std::uint64_t upload_total = 0;  // 本跳请求体总量（长度给得出时才有意义）
+        bool upload_total_known = false;  // 本跳的请求体总量是否给得出（分块形态给不出）
         bool head_seen = false;  // 本跳是否已见到头部（决定要不要报下载末值）
         bool upload_running = false;  // 本跳是否走了分块写路径
         bool upload_settled = false;  // 上传末值是否已在写环里发过（避免收尾重发同一事实）
@@ -661,6 +716,7 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
             announced_total.reset();
             uploaded = 0;
             upload_total = 0;
+            upload_total_known = false;
             head_seen = false;
             upload_running = false;
             upload_settled = false;
@@ -688,8 +744,14 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
             const std::string host{target.host()};
 
             // ── 建连并统一读写口：明文 / TLS 两条流经捕获 shared_ptr 的类型擦除闭包收敛到同一对 awaiter。
+            //    第三枚是「带窗口的读」，只服务 `Expect: 100-continue` 那一段问询。`late` 是那一段里被放弃
+            //    那次读的落点：传输层按 FIFO 交付回调，故它后来到达的字节恒排在下一次读之前，装配前先清它
+            //    （口径见 `detail::await_read_within`）。
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<char>)> read_one;
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
+            std::function<detail::CallbackAwaiter<detail::WindowedRead>(std::size_t, std::chrono::milliseconds)>
+                read_within_one;
+            auto late = std::make_shared<std::vector<char>>();
             StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
             if (target.is_secure()) {
                 auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
@@ -706,6 +768,9 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                 auto holder = std::make_shared<TlsTransport>(std::move(secure.value()));
                 read_one = [holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
                 write_one = [holder](std::span<const char> data) { return detail::await_write(*holder, data); };
+                read_within_one = [holder, late](std::size_t capacity, std::chrono::milliseconds window) {
+                    return detail::await_read_within(*holder, capacity, window, late);
+                };
             } else {
                 auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
                                                                 options, token);
@@ -716,57 +781,16 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                 auto holder = std::make_shared<StreamTransport>(std::move(plain.value()));
                 read_one = [holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
                 write_one = [holder](std::span<const char> data) { return detail::await_write(*holder, data); };
+                read_within_one = [holder, late](std::size_t capacity, std::chrono::milliseconds window) {
+                    return detail::await_read_within(*holder, capacity, window, late);
+                };
             }
             connect_timer.stop();  // 建连（含握手）完成，connect 档停表，不误伤后续读写
 
-            // ── 发出请求。挂了进度回调且带请求体时才分块写出：分块只为给上传进度与写侧背压提供节拍，线上字节
-            //    序列与一次写完逐字节相同，对端无从分辨。无回调恒一次写完，本切片的观测口对无需求者零改动。
-            if (gate.armed() && !current.body().empty()) {
-                const std::span<const char> body_view{current.body()};
-                upload_total = body_view.size();
-                upload_running = true;
-                auto written_head = co_await write_one(std::span<const char>{head.value()});
-                bool write_failed = !written_head;
-                if (write_failed) {
-                    one = Result<Response>{written_head.error()};
-                }
-                while (!write_failed) {
-                    const std::size_t take = std::min<std::size_t>(AURORA_WRITE_CHUNK, body_view.size() - uploaded);
-                    auto written = co_await write_one(body_view.subspan(uploaded, take));
-                    if (!written) {
-                        one = Result<Response>{written.error()};
-                        write_failed = true;
-                        break;
-                    }
-                    // 契约：`write` 成功即整段进入内核（`net/transport.h` 的「全部字节都进入内核或明确失败才算
-                    // 完成」），故计数按块长推进、不回读交付数——交付数在这里没有第二种可能的取值。
-                    uploaded += take;
-                    const bool settled = uploaded >= upload_total;
-                    gate.observe(Progress{.phase = ProgressPhase::Upload,
-                                          .transferred_bytes = uploaded,
-                                          .total_bytes = upload_total,
-                                          .total_known = true,
-                                          .finished = settled});
-                    gate.flush();
-                    upload_settled = upload_settled || settled;
-                    if (settled) {
-                        break;
-                    }
-                }
-                if (write_failed) {
-                    break;
-                }
-            } else {
-                std::string payload = head.value();
-                payload.insert(payload.end(), current.body().begin(), current.body().end());
-                auto written = co_await write_one(std::span<const char>{payload});
-                if (!written) {
-                    one = Result<Response>{written.error()};
-                    break;
-                }
-            }
-
-            // ── 逐段装配应答：喂 ResponseAssembler，按分帧物化体，直到 complete 或对端收摊。
+            // ── 发出请求。写出形态由 `detail::plan_request_body()` 裁决——那是 `render_head()` 已经用过的同一份
+            //    事实，两处各问一次即不可能分岔（四条口径见 `detail/http_body.h`）。装配器与它的记账口先于写出
+            //    就位，因为「先问再发体」要在发出请求体之前就把那条 1xx 喂进装配器。
+            // ── 逐段装配应答的准备：喂 ResponseAssembler，按分帧物化体，直到 complete 或对端收摊。
             wire::ResponseAssembler assembler(max_body_bytes_, current.is_head());
             std::vector<char> body;
             std::array<char, AURORA_READ_CHUNK> chunk{};
@@ -790,6 +814,122 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                 }
                 gate.flush();
             };
+            // 把一段线上字节喂进装配器并记一次下载账；失败原样交出（体越上限 / 文法不合 / 完整后又来字节）。
+            auto feed = [&](std::span<const char> bytes) -> Result<void> {
+                if (bytes.empty()) {
+                    return Result<void>{};
+                }
+                auto pushed = assembler.push(std::string_view{bytes.data(), bytes.size()});
+                if (!pushed) {
+                    return Result<void>{pushed.error()};
+                }
+                assembler.drain_body(body);
+                note_download();
+                return Result<void>{};
+            };
+
+            auto plan = detail::plan_request_body(current);
+            if (!plan) {
+                // `render_head()` 已按同一份判定在此前交出过失败，走到这里只可能是两处判据分岔；仍照畸形请求
+                // 交出那枚错误，绝不留「头部里声明一套、线上写出另一套」的余地。
+                one = Result<Response>{plan.error()};
+                break;
+            }
+            const bool await_continue = current.expect_continue() && plan.value().has_body;
+            // 快路成立的四件：没挂进度回调、不等 100、形态不是分块、体在内存。缺一即走泵路——快路的意义是
+            // 「无需求者逐字节与本切片的观测口从未存在时同型」，泵路在线上等价但要多问源几次。
+            const bool one_shot = !gate.armed() && !await_continue &&
+                                  plan.value().framing != detail::RequestBodyFraming::Chunked &&
+                                  current.body_source() == nullptr;
+            bool send_body = true;  // 是否获准发体：不等 100 时恒真，等了却没等到回话才可能关死
+            if (one_shot) {
+                std::string payload = head.value();
+                payload.insert(payload.end(), current.body().begin(), current.body().end());
+                auto written = co_await write_one(std::span<const char>{payload});
+                if (!written) {
+                    one = Result<Response>{written.error()};
+                    break;
+                }
+            } else {
+                bool write_failed = false;
+                auto written_head = co_await write_one(std::span<const char>{head.value()});
+                if (!written_head) {
+                    one = Result<Response>{written_head.error()};
+                    write_failed = true;
+                }
+                if (!write_failed && await_continue) {
+                    // 窗口里那条 1xx 不是最终应答：它排在最终应答之前被装配器收下，不改写后者的分帧与判定；
+                    // 一条 101 在 `push()` 里当场落 `http-protocol-error`。故本处只问「对端回过话没有」。
+                    auto handed = co_await read_within_one(AURORA_READ_CHUNK, AURORA_EXPECT_WINDOW);
+                    const auto &probe = handed.value();  // awaiter 恒以成功 `Result` 交出结局，失败在载荷里
+                    if (probe.outcome == detail::WindowedRead::Outcome::Failure) {
+                        one = Result<Response>{*probe.error};
+                        write_failed = true;
+                    }
+                    if (!write_failed) {
+                        auto queued = feed(std::span<const char>{probe.bytes});
+                        if (!queued) {
+                            one = Result<Response>{queued.error()};
+                            write_failed = true;
+                        }
+                    }
+                    if (!write_failed) {
+                        // 只有「对端把最终应答整个交出来了且它不是 1xx」才关死发体：那是 417（或任何直接作答的
+                        // 状态码），体再发下去只是让对端多读一段它不打算读的字节。窗口里只到半条应答、或一条
+                        // 1xx 与最终应答同批抵达时照发——前者无从判定对端的意思，后者正是本条问询要的答案。
+                        send_body = !assembler.head_ready() || assembler.has_informational();
+                    }
+                }
+                if (!write_failed && send_body) {
+                    detail::RequestBodyPump pump{current, plan.value()};
+                    // 总长只有定长形态给得出：分块形态是源自报「我说不清这体多大」，此时上传进度只能报未知。
+                    const bool length_known =
+                        plan.value().framing != detail::RequestBodyFraming::Chunked && plan.value().length.has_value();
+                    upload_total_known = length_known;
+                    // 声明了多长就得按多长收摊：`upload_total` 是写出侧的停止条件，与挂没挂进度回调无关。
+                    // 只在挂了回调时赋值，会让无回调的定长流式体在第一段之后就自认写完（体只剩半截）。
+                    upload_total = plan.value().length.value_or(0);
+                    if (gate.armed() && pump.has_body()) {
+                        upload_running = true;
+                    }
+                    while (!pump.done()) {
+                        auto segment = pump.next_segment();
+                        if (!segment) {
+                            one = Result<Response>{segment.error()};  // 源读失败：原样上抛，不替它编原因
+                            write_failed = true;
+                            break;
+                        }
+                        if (segment.value().empty()) {
+                            break;  // 已交完（分块终止块也已在上一轮随段交出），零长写没有语义
+                        }
+                        auto written = co_await write_one(std::span<const char>{segment.value()});
+                        if (!written) {
+                            one = Result<Response>{written.error()};
+                            write_failed = true;
+                            break;
+                        }
+                        // 契约：`write` 成功即整段进入内核（`net/transport.h` 的「全部字节都进入内核或明确失败
+                        // 才算完成」），故计数按泵交出的正文推进、不回读交付数——交付数在这里没有第二种取值。
+                        uploaded = pump.payload_bytes();
+                        const bool settled = length_known ? uploaded >= upload_total : pump.done();
+                        if (gate.armed()) {
+                            gate.observe(Progress{.phase = ProgressPhase::Upload,
+                                                  .transferred_bytes = uploaded,
+                                                  .total_bytes = upload_total,
+                                                  .total_known = length_known,
+                                                  .finished = settled});
+                            gate.flush();
+                        }
+                        upload_settled = upload_settled || settled;
+                        if (settled) {
+                            break;
+                        }
+                    }
+                }
+                if (write_failed) {
+                    break;
+                }
+            }
             while (!assembler.complete()) {
                 StageTimer read_timer(timeouts.read_idle, TimeoutStage::ReadIdle, token, tstate);
                 auto read = co_await read_one(std::span<char>{chunk});
@@ -798,6 +938,18 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                     one = Result<Response>{read.error()};
                     halted = true;
                     break;
+                }
+                // 被放弃那次「带窗口的读」若后来到过字节，它们排在本次读之前（传输层的 FIFO 口径），故先兑现
+                // 它的线上次序再判本轮结局——结局即便是「对端已关」也一样：那批字节可能正是最后一段应答，而
+                // 关闭事实总是可以在一条已完整的报文之后再观察到的。队列只可能被填一次，喂完即清。
+                if (!late->empty()) {
+                    auto queued = feed(std::span<const char>{late->data(), late->size()});
+                    late->clear();
+                    if (!queued) {
+                        one = Result<Response>{queued.error()};
+                        halted = true;
+                        break;
+                    }
                 }
                 const std::size_t got = read.value();
                 if (got == 0) {  // 对端 FIN：UntilClose 据此判全，其余形态提前收摊即协议错位
@@ -815,14 +967,15 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                     }
                     break;
                 }
-                auto pushed = assembler.push(std::string_view{chunk.data(), got});
+                if (assembler.complete()) {
+                    break;  // 暂存那批字节已把这条报文交完：本轮新读的字节属下一条报文，不灌进装配器
+                }
+                auto pushed = feed(std::span<const char>{chunk.data(), got});
                 if (!pushed) {
                     one = Result<Response>{pushed.error()};
                     halted = true;
                     break;
                 }
-                assembler.drain_body(body);
-                note_download();
             }
             if (halted) {
                 break;
@@ -882,7 +1035,7 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                 gate.observe(Progress{.phase = ProgressPhase::Upload,
                                       .transferred_bytes = uploaded,
                                       .total_bytes = upload_total,
-                                      .total_known = true,
+                                      .total_known = upload_total_known,
                                       .finished = true});
             }
             if (head_seen) {
@@ -946,7 +1099,10 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
             make_error(ErrorCode::NetPlatformUnavailable, "open_stream: this leg has no streaming response body")};
     }
 
-    const bool loop_open = detail::retry_enabled(policy) && detail::is_idempotent_method(request.method());
+    // 三道资格与 `send` 同判据：策略开着、方法幂等、体可回放到原点（`restart()` 是流式体唯一的重放判据）。
+    const bool replayable = request.body_source() == nullptr || request.body_source()->restart();
+    const bool loop_open =
+        detail::retry_enabled(policy) && detail::is_idempotent_method(request.method()) && replayable;
 
     // 跨全部尝试（含退避等待）的墙登记在这一枚令牌上；每一次尝试各拿一份自己的令牌与 `total` 看门狗，
     // 故 `Timeouts::total` 天然逐尝试重新计时——这正是它与 `RetryPolicy::budget` 分家的落点。
@@ -987,6 +1143,15 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
         // 墙到点即掐掉在途的这一次尝试（`Cancellation` 契约：钩子至多触发一次），随后本环据 `is_cancelled()` 收摊。
         sequence.on_cancel([token]() mutable { token.cancel(); });
         Request current = origin;
+        if (attempt > 1) {
+            // 上一次尝试把流式体读到了半途，本次须从原点重发；回退失败即按不可重放收摊（与 `send` 同判据）。
+            if (auto *source = current.body_source(); source != nullptr && !source->restart()) {
+                outcome = Result<StreamOutcome>{make_error(
+                    ErrorCode::HttpBodyNotReplayable,
+                    "a streaming request body refused to return to its starting point before a retry attempt")};
+                break;
+            }
+        }
         advertise_accept_encoding(current);  // 缺省宣告与解码能力同源；调用方已自带则不动
         // 解压产物上限**只取 `max_decompressed_bytes()`**，不像 `send` 那样缺省跟随 `max_body_bytes()`：后者是
         // 物化路径的内存闸，流式路径不物化，拿它当解压上限会让「流式下载一个大压缩包」必须去调大一枚与内存无关
@@ -1009,6 +1174,7 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
         std::optional<std::uint64_t> announced_total;
         std::uint64_t uploaded = 0;
         std::uint64_t upload_total = 0;
+        bool upload_total_known = false;  // 请求体总量给得出否（分块形态给不出）
         bool head_seen = false;
         bool upload_running = false;
         bool upload_settled = false;
@@ -1029,6 +1195,7 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
             announced_total.reset();
             uploaded = 0;
             upload_total = 0;
+            upload_total_known = false;
             head_seen = false;
             upload_running = false;
             upload_settled = false;
@@ -1054,9 +1221,13 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
             // TLS 握手与证书校验的对象恒是目标主机（隧道之上再握手），代理看不见这些。
             const std::string host{target.host()};
 
-            // ── 建连并统一读写口：明文 / TLS 两条流经捕获 shared_ptr 的类型擦除闭包收敛到同一对 awaiter。
+            // ── 建连并统一读写口：明文 / TLS 两条流经捕获 shared_ptr 的类型擦除闭包收敛到同一对 awaiter，
+            //    第三枚「带窗口的读」只服务 `Expect: 100-continue`（与 `send` 同形态，见那里的说明）。
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<char>)> read_one;
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
+            std::function<detail::CallbackAwaiter<detail::WindowedRead>(std::size_t, std::chrono::milliseconds)>
+                read_within_one;
+            auto late = std::make_shared<std::vector<char>>();
             StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
             if (target.is_secure()) {
                 auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
@@ -1073,6 +1244,9 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                 auto holder = std::make_shared<TlsTransport>(std::move(secure.value()));
                 read_one = [holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
                 write_one = [holder](std::span<const char> data) { return detail::await_write(*holder, data); };
+                read_within_one = [holder, late](std::size_t capacity, std::chrono::milliseconds window) {
+                    return detail::await_read_within(*holder, capacity, window, late);
+                };
             } else {
                 auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
                                                                 options, token);
@@ -1083,52 +1257,14 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                 auto holder = std::make_shared<StreamTransport>(std::move(plain.value()));
                 read_one = [holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
                 write_one = [holder](std::span<const char> data) { return detail::await_write(*holder, data); };
+                read_within_one = [holder, late](std::size_t capacity, std::chrono::milliseconds window) {
+                    return detail::await_read_within(*holder, capacity, window, late);
+                };
             }
             connect_timer.stop();
 
-            if (gate.armed() && !current.body().empty()) {
-                const std::span<const char> body_view{current.body()};
-                upload_total = body_view.size();
-                upload_running = true;
-                auto written_head = co_await write_one(std::span<const char>{head.value()});
-                bool write_failed = !written_head;
-                if (write_failed) {
-                    one = Result<StreamOutcome>{written_head.error()};
-                }
-                while (!write_failed) {
-                    const std::size_t take = std::min<std::size_t>(AURORA_WRITE_CHUNK, body_view.size() - uploaded);
-                    auto written = co_await write_one(body_view.subspan(uploaded, take));
-                    if (!written) {
-                        one = Result<StreamOutcome>{written.error()};
-                        write_failed = true;
-                        break;
-                    }
-                    uploaded += take;
-                    const bool settled = uploaded >= upload_total;
-                    gate.observe(Progress{.phase = ProgressPhase::Upload,
-                                          .transferred_bytes = uploaded,
-                                          .total_bytes = upload_total,
-                                          .total_known = true,
-                                          .finished = settled});
-                    gate.flush();
-                    upload_settled = upload_settled || settled;
-                    if (settled) {
-                        break;
-                    }
-                }
-                if (write_failed) {
-                    break;
-                }
-            } else {
-                std::string payload = head.value();
-                payload.insert(payload.end(), current.body().begin(), current.body().end());
-                auto written = co_await write_one(std::span<const char>{payload});
-                if (!written) {
-                    one = Result<StreamOutcome>{written.error()};
-                    break;
-                }
-            }
-
+            // ── 发出请求：三条腿（快路一次写出 / 体泵逐段 / 先问再发体）与 `send` 同判据，理由见那里。
+            //    装配器与还原链先于写出就位，因为窗口里那条 1xx 要在发出请求体之前喂进装配器。
             // ── 逐段装配并交付：装配器**不设线上体上限**（物化路径的内存闸在这里没有对应的内存可闸），
             //    每段解出的明文喂进流式还原链，链末直交宿主。
             wire::ResponseAssembler assembler{std::nullopt, current.is_head()};
@@ -1147,36 +1283,161 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                                                                        : detail::EmitFlow::Continue};
             };
 
-            while (!assembler.complete()) {
-                StageTimer read_timer(timeouts.read_idle, TimeoutStage::ReadIdle, token, tstate);
-                auto read = co_await read_one(std::span<char>{chunk});
-                read_timer.stop();
-                if (!read) {
-                    one = Result<StreamOutcome>{read.error()};
-                    halted = true;
+            auto plan = detail::plan_request_body(current);
+            if (!plan) {
+                // 与 `send` 同理：`render_head()` 已按同一份判定交出过失败，这里只堵「声明与字节分岔」那一条路。
+                one = Result<StreamOutcome>{plan.error()};
+                break;
+            }
+            const bool await_continue = current.expect_continue() && plan.value().has_body;
+            const bool one_shot = !gate.armed() && !await_continue &&
+                                  plan.value().framing != detail::RequestBodyFraming::Chunked &&
+                                  current.body_source() == nullptr;
+            bool send_body = true;  // 是否获准发体：不等 100 时恒真
+            bool carried = false;  // 窗口那批字节已喂进装配器：本环第一轮不再读，只补头部判定与交付
+            if (one_shot) {
+                std::string payload = head.value();
+                payload.insert(payload.end(), current.body().begin(), current.body().end());
+                auto written = co_await write_one(std::span<const char>{payload});
+                if (!written) {
+                    one = Result<StreamOutcome>{written.error()};
                     break;
                 }
-                const std::size_t got = read.value();
-                if (got == 0) {  // 对端 FIN：UntilClose 据此判全，其余形态提前收摊即协议错位
-                    auto closed = assembler.peer_closed();
-                    if (!closed) {
-                        one = Result<StreamOutcome>{closed.error()};
+            } else {
+                bool write_failed = false;
+                auto written_head = co_await write_one(std::span<const char>{head.value()});
+                if (!written_head) {
+                    one = Result<StreamOutcome>{written_head.error()};
+                    write_failed = true;
+                }
+                if (!write_failed && await_continue) {
+                    // 那条 1xx 只喂进装配器、不做判定也不交付：头部判定在环内统一走，本处只要「对端回过话没有」
+                    // 这一个答案。一条 101 在 `push()` 里当场落 `http-protocol-error`，与环内同形。
+                    auto handed = co_await read_within_one(AURORA_READ_CHUNK, AURORA_EXPECT_WINDOW);
+                    const auto &probe = handed.value();  // awaiter 恒以成功 `Result` 交出结局，失败在载荷里
+                    if (probe.outcome == detail::WindowedRead::Outcome::Failure) {
+                        one = Result<StreamOutcome>{*probe.error};
+                        write_failed = true;
+                    }
+                    if (!write_failed && !probe.bytes.empty()) {
+                        auto queued = assembler.push(std::string_view{probe.bytes.data(), probe.bytes.size()});
+                        if (!queued) {
+                            one = Result<StreamOutcome>{queued.error()};
+                            write_failed = true;
+                        } else {
+                            carried = true;
+                        }
+                    }
+                    if (!write_failed) {
+                        // 只有对端把最终应答整个交出来、且它不是 1xx 才关死发体（那是 417 一类的直接作答）。
+                        send_body = !assembler.head_ready() || assembler.has_informational();
+                    }
+                }
+                if (!write_failed && send_body) {
+                    detail::RequestBodyPump pump{current, plan.value()};
+                    const bool length_known =
+                        plan.value().framing != detail::RequestBodyFraming::Chunked && plan.value().length.has_value();
+                    upload_total_known = length_known;
+                    // 与 `send` 同一条口径：写出侧的停止条件不看进度回调挂没挂。
+                    upload_total = plan.value().length.value_or(0);
+                    if (gate.armed() && pump.has_body()) {
+                        upload_running = true;
+                    }
+                    while (!pump.done()) {
+                        auto segment = pump.next_segment();
+                        if (!segment) {
+                            one = Result<StreamOutcome>{segment.error()};
+                            write_failed = true;
+                            break;
+                        }
+                        if (segment.value().empty()) {
+                            break;  // 已交完（分块终止块也已在上一轮随段交出）
+                        }
+                        auto written = co_await write_one(std::span<const char>{segment.value()});
+                        if (!written) {
+                            one = Result<StreamOutcome>{written.error()};
+                            write_failed = true;
+                            break;
+                        }
+                        uploaded = pump.payload_bytes();
+                        const bool settled = length_known ? uploaded >= upload_total : pump.done();
+                        if (gate.armed()) {
+                            gate.observe(Progress{.phase = ProgressPhase::Upload,
+                                                  .transferred_bytes = uploaded,
+                                                  .total_bytes = upload_total,
+                                                  .total_known = length_known,
+                                                  .finished = settled});
+                            gate.flush();
+                        }
+                        upload_settled = upload_settled || settled;
+                        if (settled) {
+                            break;
+                        }
+                    }
+                }
+                if (write_failed) {
+                    break;
+                }
+            }
+
+            while (!assembler.complete() || carried) {
+                if (carried) {
+                    carried = false;  // 窗口里那批字节已在装配器内，本轮直接从判定与交付走
+                } else if (!late->empty()) {
+                    // 被放弃那次「带窗口的读」后来到过的字节排在本次读之前（传输层的 FIFO 口径），先兑现它的
+                    // 线上次序。队列只可能被填一次，喂完即清。
+                    auto queued = assembler.push(std::string_view{late->data(), late->size()});
+                    late->clear();
+                    if (!queued) {
+                        one = Result<StreamOutcome>{queued.error()};
                         halted = true;
                         break;
                     }
-                    if (!assembler.complete()) {
-                        one = Result<StreamOutcome>{
-                            make_error(ErrorCode::HttpProtocolError, "peer closed before the body was complete")};
+                } else {
+                    StageTimer read_timer(timeouts.read_idle, TimeoutStage::ReadIdle, token, tstate);
+                    auto read = co_await read_one(std::span<char>{chunk});
+                    read_timer.stop();
+                    if (!read) {
+                        one = Result<StreamOutcome>{read.error()};
                         halted = true;
                         break;
                     }
-                    break;
-                }
-                auto pushed = assembler.push(std::string_view{chunk.data(), got});
-                if (!pushed) {
-                    one = Result<StreamOutcome>{pushed.error()};
-                    halted = true;
-                    break;
+                    // 被放弃那次「带窗口的读」后来到过的字节排在本次读之前（传输层的 FIFO 口径），先兑现它的
+                    // 线上次序再判本轮结局——结局即便是「对端已关」也一样：那批字节可能正是完整的一条应答。
+                    // 队列只可能被填一次，喂完即清。
+                    if (!late->empty()) {
+                        auto queued = assembler.push(std::string_view{late->data(), late->size()});
+                        late->clear();
+                        if (!queued) {
+                            one = Result<StreamOutcome>{queued.error()};
+                            halted = true;
+                            break;
+                        }
+                    }
+                    const std::size_t got = read.value();
+                    if (got == 0) {  // 对端 FIN：UntilClose 据此判全，其余形态提前收摊即协议错位
+                        auto closed = assembler.peer_closed();
+                        if (!closed) {
+                            one = Result<StreamOutcome>{closed.error()};
+                            halted = true;
+                            break;
+                        }
+                        if (!assembler.complete()) {
+                            one = Result<StreamOutcome>{
+                                make_error(ErrorCode::HttpProtocolError, "peer closed before the body was complete")};
+                            halted = true;
+                            break;
+                        }
+                        // 不在这里 break：本轮可能就是「头部与整段体都出自暂存字节」的那一轮，宿主的
+                        // `on_head` → `on_data` 次序得跟着走完，之后 `while` 的条件自然收场。
+                    } else if (!assembler.complete()) {
+                        auto pushed = assembler.push(std::string_view{chunk.data(), got});
+                        if (!pushed) {
+                            one = Result<StreamOutcome>{pushed.error()};
+                            halted = true;
+                            break;
+                        }
+                    }
                 }
                 scratch.clear();
                 assembler.drain_body(scratch);
@@ -1373,7 +1634,7 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                 gate.observe(Progress{.phase = ProgressPhase::Upload,
                                       .transferred_bytes = uploaded,
                                       .total_bytes = upload_total,
-                                      .total_known = true,
+                                      .total_known = upload_total_known,
                                       .finished = true});
             }
             if (head_seen) {

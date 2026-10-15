@@ -18,6 +18,11 @@
 ///   当成「某种自定义方法」——自定义方法本批次不提供，静默接受只会让 `Content-Length` 的取舍失据。
 /// - **`HEAD` 的请求恒不携带消息体、其应答恒无体**：`body()` 对 `HEAD` 请求无效，应答分帧由
 ///   `wire::framing_of(head, request_is_head)` 判定，本类型只提供 `is_head()` 这一枚事实来源。
+/// - **消息体有两种交法，三枚协议旋钮不进字段表**：体可以是一份已在内存的字节
+///   （`body(std::vector<char>)`），也可以是一枚按需推进的 `BodySource`——大文件与 multipart 惰性部件
+///   靠后者才不必先整份读进内存。`Range` / `If-Range` / `Expect` 由专用旋钮表达，只在 `render_head()`
+///   现地补进线上字段，故 `headers()` 恒看不到它们：发起侧要据此判定线上形态、重放资格与是否先等一个
+///   `1xx`，把这些判定输入留在字段表之外才会多出「读 `headers()` 以为这次没分段」的第二份真值源。
 ///
 /// @code
 /// auto req = aurora::net::http::Request::get("https://example.com/api?q=1");
@@ -176,6 +181,93 @@ struct Progress {
 /// @note Side-effects: 由回调实现决定
 using ProgressHandler = std::function<void(const Progress &)>;
 
+/// @brief 一段字节范围请求（`RFC 9110 §14.2` 的 `Range` 字段），三型之一；由 `Request::range()` 设定。
+///
+/// 三型对应线上三种写法，`first` / `last` 的取值组合本身就是形态：
+/// - `between(f, l)` → `bytes=f-l`，两端都含；
+/// - `from(f)` → `bytes=f-`，到资源当前长度为止；
+/// - `suffix(n)` → `bytes=-n`，取末尾 `n` 字节——此时 `last` 装的是**长度**而不是偏移，这是本类型唯一一处
+///   字段名与语义不同名的地方，故换算交给工厂与 `to_header_value()`，调用方不必自己记偏移。
+///
+/// 只表达一个区间：`RFC 9110 §14.2` 允许多区间，但多区间的应答是多部分体（`multipart/byteranges`），
+/// 本库不装配那种形态，故也不给出「静默丢掉第二个区间」的口子。越界一律不裁剪（`Range: bytes=900-999`
+/// 打一条 500 字节的资源拿到 416 是协议的正确说法）；形态非法（两端皆空、后缀长度为零、`last < first`）
+/// 由 `render_head()` 落 `http-request-invalid`，因为那是一句要上线的话，不是一次查询。
+/// @note Thread: thread-safe（值类型，无共享状态）
+/// @note Side-effects: none
+struct ByteRange {
+    std::optional<std::uint64_t> first;  ///< 段起点（含）；`nullopt` = 后缀形态
+    std::optional<std::uint64_t> last;  ///< 段终点（含）；后缀形态下装「末尾多少字节」
+
+    /// @brief 从某偏移直到资源末尾（`bytes=first-`）。
+    /// @param first 段起点（含），零基偏移。
+    /// @return 开放尾端的范围。
+    [[nodiscard]] static auto from(std::uint64_t first) -> ByteRange {
+        return ByteRange{.first = first, .last = std::nullopt};
+    }
+
+    /// @brief 闭合区间（`bytes=first-last`）。
+    /// @param first 段起点（含），零基偏移。
+    /// @param last 段终点（含），须不小于 `first`。
+    /// @return 两端都定的范围。
+    [[nodiscard]] static auto between(std::uint64_t first, std::uint64_t last) -> ByteRange {
+        return ByteRange{.first = first, .last = last};
+    }
+
+    /// @brief 末尾若干字节（`bytes=-length`）。
+    /// @param length 长度，须为正数；长度超过资源本身时对端交出整份（`RFC 9110 §14.2` 的口径）。
+    /// @return 后缀范围。
+    [[nodiscard]] static auto suffix(std::uint64_t length) -> ByteRange {
+        return ByteRange{.first = std::nullopt, .last = length};
+    }
+
+    /// @brief 形态是否可作为一句 `Range` 字段上线。
+    /// @return 三型之一且数字关系成立为 true。
+    [[nodiscard]] auto is_valid() const -> bool;
+
+    /// @brief 折算为字段值文本（不含字段名）。
+    /// @return `bytes=` 开头且带单位令牌的字段值；`is_valid()` 为假时为空串。
+    [[nodiscard]] auto to_header_value() const -> std::string;
+};
+
+/// @brief 流式请求体的推送口：被逐段问出一段明文，由发起侧的体泵按线上形态写出。
+///
+/// 它存在的原因是「先把整份文件读进 `std::vector<char>` 再交出去」不是上传大文件的形态：体要在写出那一刻
+/// 才被读，读过的段不再回来。三条纪律：
+/// - **空段即结束**：`next_chunk()` 交出成功且长度为零的段表示体已发完，终止块由发起侧补齐。这里不用
+///   `std::optional`，因为「本段为空但后面还有段」在线上根本没有对应形态，留着只会多一条测不到的分支。
+/// - **同步、被逐段问、不阻塞**：本接口没有回调也没有协程出口，段长上限由实现自定（本库内置件取一节的
+///   写块上限）；一次 `next_chunk()` 不得等待外部事件，它跑在续体恢复所在的那条线程上（缺省即主线程）。
+/// - **`restart()` 是重放资格的唯一判据**：`RetryPolicy` 的白名单与「重定向还带不带体」都只问这一句。
+///   回到不了原点的体被自动挡在重试之外——重放半截体等于交付一份数据损坏的请求，且这个代价在失败现场
+///   无从判定，故本库不为此再开一枚旋钮。
+///
+/// 拷贝与移动一律删除：`Request` 持的是引用，搬动一枚已挂上的源会让那次搬运无人知晓。
+/// @note Thread: 由发起侧在单条协程帧内串行调用；实现自身若无共享状态即随该帧线程约束
+/// @note Side-effects: 由实现决定（内置件读文件）
+class BodySource {
+  public:
+    BodySource() = default;
+    BodySource(const BodySource &) = delete;
+    auto operator=(const BodySource &) -> BodySource & = delete;
+    BodySource(BodySource &&) = delete;
+    auto operator=(BodySource &&) -> BodySource & = delete;
+    virtual ~BodySource() = default;
+
+    /// @brief 交出下一段明文并推进内部游标。
+    /// @return 成功且非空 = 本段体字节；成功且为空 = 体已发完；失败 = 读取失败，发起侧当场中止本次交换。
+    [[nodiscard]] virtual auto next_chunk() -> Result<std::vector<char>> = 0;
+
+    /// @brief 体的总长度，供发起侧决定线上形态并补齐 `Content-Length`。
+    /// @return 已知则返回字节数；`nullopt` = 未知，本次走 `Transfer-Encoding: chunked`。
+    [[nodiscard]] virtual auto total_size() const -> std::optional<std::uint64_t> = 0;
+
+    /// @brief 把游标放回原点（重放前的准备动作）。
+    /// @return 回到原点为 true；不可回退（管道、一次性流、已被丢掉的段）为 false，此时本次交换不进重试环、
+    ///         重定向也不带体重发。
+    virtual auto restart() -> bool = 0;
+};
+
 /// @brief 一次 HTTP 请求：方法 + 目标 + 字段 + 消息体 + 发起侧选项。
 /// @note Thread: thread-safe（值类型，无共享状态；`render_head()` 只读）
 /// @note Side-effects: none
@@ -231,7 +323,8 @@ class Request {
     /// @return 自身引用，便于链式调用。
     auto set_header(std::string_view name, std::string_view value) -> Request &;
 
-    /// @brief 查看请求字段（不含 `render_head()` 补齐的 `Host` 与 `Content-Length`）。
+    /// @brief 查看请求字段（不含 `render_head()` 补齐的 `Host` 与体形态字段，也不含 `Range` / `If-Range` /
+    /// `Expect` 三枚由专用旋钮表达的字段）。
     /// @return 字段表的只读引用。
     [[nodiscard]] auto headers() const -> const Headers & { return headers_; }
 
@@ -249,14 +342,72 @@ class Request {
     /// @return 已设定则返回之（空串 = 明确不带）；`nullopt` = 跟随 `Client::request_id()` 的缺省。
     [[nodiscard]] auto request_id() const -> const std::optional<std::string> & { return request_id_; }
 
-    /// @brief 设定消息体（覆盖既有）。`HEAD` 请求忽略之（应答无体、请求不得带体）。
+    /// @brief 设定内存消息体（覆盖既有，含已挂上的流式体）。`HEAD` 请求忽略之（应答无体、请求不得带体）。
     /// @param body 体字节。
     /// @return 自身引用，便于链式调用。
     auto body(std::vector<char> body) -> Request &;
 
     /// @brief 查看消息体。
-    /// @return 体字节的只读引用；无体时为空。
+    /// @return 体字节的只读引用；无体时为空。流式体（`body(BodySource &)`）恒不体现在此返回值上，看
+    ///         `body_source()`。
     [[nodiscard]] auto body() const -> const std::vector<char> & { return body_; }
+
+    /// @brief 设定流式消息体（覆盖既有；与 `body(std::vector<char>)` 互斥，后设者生效）。
+    ///
+    /// `Request` 只持引用，不接管所有权：源的存活期须覆盖整次交换，含重定向的每一跳与重试的每一次尝试——
+    /// 体泵在协程下一次恢复时还要问它要第二段。`HEAD` 请求忽略之（与 `body(std::vector<char>)` 同口径，
+    /// 请求不得带体）。线上形态、分段与终止块都由发起侧的体泵负责，语义约束见 `BodySource`。
+    /// @param source 体的推送口。
+    /// @return 自身引用，便于链式调用。
+    auto body(BodySource &source) -> Request &;
+
+    /// @brief 查看流式消息体。
+    /// @return 已挂上的源；未挂为 `nullptr`。
+    [[nodiscard]] auto body_source() const -> BodySource * { return body_source_; }
+
+    /// @brief 设定本次请求的字节范围（现地补进 `Range` 请求字段，`headers()` 里看不到它）。
+    ///
+    /// 本库是唯一会发出范围请求的一方，故只存一型、由本方法负责字段拼写；越界不裁剪（对端用 416 说是它
+    /// 的事）。形态非法在 `render_head()` 落 `http-request-invalid`。带范围的请求不参与内存缓存——同一
+    /// URL 的整份副本绝不能被拿来充当一个分段应答。
+    /// @param value 字节范围。
+    /// @return 自身引用，便于链式调用。
+    auto range(ByteRange value) -> Request &;
+
+    /// @brief 查看字节范围。
+    /// @return 已设定则返回之；`nullopt` = 本次请求整份资源。
+    [[nodiscard]] auto range() const -> const std::optional<ByteRange> & { return range_; }
+
+    /// @brief 设定 `If-Range` 校验子（续传用；现地补进请求字段，`headers()` 里看不到它）。
+    ///
+    /// 取值为已持有副本的校验子（`ETag`）或其 `Last-Modified` 文本，两形态都由 `RFC 9110 §13.1.5` 承认，
+    /// 本库不校验形状、原样写出。断点续传的正确写法是「带 `range()` + 带本校验子」：对端确认资源自持副本
+    /// 以来未变才回 206，否则回 200 交整份，调用方据此丢弃已落盘的半截。只在同时设有 `range()` 时才上线
+    /// ——没有可修饰的分段请求时，这条字段只是一次无谓的往返。
+    /// @param value 校验子文本；空串与未设同义（不发该字段）。
+    /// @return 自身引用，便于链式调用。
+    auto if_range(std::string value) -> Request &;
+
+    /// @brief 查看 `If-Range` 校验子。
+    /// @return 已设定则返回之；`nullopt` = 未设。
+    [[nodiscard]] auto if_range() const -> const std::optional<std::string> & { return if_range_; }
+
+    /// @brief 设定是否「先问再发体」（`Expect: 100-continue`）；**缺省关闭**。
+    ///
+    /// 开着且本次确实有体时，头部写完后先等一小段（长度是库内置常量，不占 `Timeouts` 任何一档）：对端或
+    /// 中间层回 `1xx` 就立刻发体，窗口到点没人应就盲发——后者是 `RFC 9110 §10.1.1` 明确允许的形态，且是
+    /// 现实里的常见路径（多数中间层压根不回 `100`）。关掉时逐字节与「本功能从未存在」同型：头部与体连着发。
+    /// 无体的请求设了也不写 `Expect` 字段：问了也没有待发的体，只会让对端多等一个判定。
+    ///
+    /// 窗口里那条 `1xx` 不是最终应答，它排在最终应答之前被装配器收下，不改写最终应答的分帧与判定；
+    /// 一条 `101` 落 `http-protocol-error`（协议升级不属本层）。
+    /// @param value 开启为 true。
+    /// @return 自身引用，便于链式调用。
+    auto expect_continue(bool value) -> Request &;
+
+    /// @brief 查看是否「先问再发体」。
+    /// @return 开启为 true；缺省假。
+    [[nodiscard]] auto expect_continue() const -> bool { return expect_continue_; }
 
     /// @brief 设定整请求时限（`total` 档的便捷入口；要分档控制用 `timeouts()`）。
     /// @param value 时限。
@@ -330,15 +481,20 @@ class Request {
 
     /// @brief 序列化请求行与请求字段（不含消息体）。
     ///
-    /// 补齐两处：无 `Host` 时按目标 URL 补；有消息体且未声明 `Content-Length` / `Transfer-Encoding`
-    /// 时按体长度补。校验（方法令牌、字段名 token、字段值无 CR / LF、URL 含主机）由字节层执行。
+    /// 补齐四处：无 `Host` 时按目标 URL 补；体形态按 `Content-Length` / `Transfer-Encoding: chunked` 二者
+    /// 之一补（判据与发起侧体泵共用同一份计划，见 `detail::plan_request_body()`，故线上声明与实际写出的
+    /// 字节不会分岔）；设有 `range()` 时补 `Range`，并连带设有 `if_range()` 时补 `If-Range`；开着
+    /// `expect_continue()` 且有待发的体时补 `Expect: 100-continue`。四处的通例都是**调用方自己写过的同名
+    /// 字段永远优先**。校验（方法令牌、字段名 token、字段值无 CR / LF、URL 含主机、范围形态）由本函数与
+    /// 字节层执行，越界与歧义一律落 `http-request-invalid`。
     ///
     /// 请求目标默认写成 origin-form（`/path?query`），即「这条请求发往目标本身」。`absolute_form` 为真时
     /// 改写成绝对形态（`http://host:port/path?query`）——那是**明文经转发代理**时代理要的写法（`RFC 9112
     /// §3.2.2`），它据此决定把请求递给谁；`Host` 仍按目标 URL 补，代理不改写这条。发起侧只在路由判出
     /// 「本跳的对端是转发代理而非目标」时置真，调用方一般不必自己碰它。
     /// @param absolute_form 请求目标是否写成绝对形态；假 = origin-form（缺省）。
-    /// @return 请求头部字节（以空行收尾）；URL 解析失败或文法不合时为错误（`http-request-invalid`）。
+    /// @return 请求头部字节（以空行收尾）；URL 解析失败、范围形态非法或字段文法不合时为错误
+    ///         （`http-request-invalid`）。
     [[nodiscard]] auto render_head(bool absolute_form = false) const -> Result<std::string>;
 
   private:
@@ -352,7 +508,11 @@ class Request {
     std::optional<Error> url_error_;  ///< 解析失败的载荷；仅在 url_ 为空时有意义
     Headers headers_;  ///< 请求字段（不含补齐项）
     std::optional<std::string> request_id_;  ///< 链路标识设定；nullopt = 跟随 Client 缺省，空串 = 明确不发
-    std::vector<char> body_;  ///< 消息体
+    std::vector<char> body_;  ///< 内存消息体；与 body_source_ 互斥（后设者清前者）
+    BodySource *body_source_{nullptr};  ///< 流式消息体（借用，不接管所有权）；nullptr = 无
+    std::optional<ByteRange> range_;  ///< 字节范围；有值即在 render_head() 现地补 `Range`
+    std::optional<std::string> if_range_;  ///< `If-Range` 校验子；只在同时设有 range_ 时上线
+    bool expect_continue_{false};  ///< 是否先问再发体（`Expect: 100-continue`），缺省关
     Timeouts timeouts_;  ///< 三档超时（connect / read_idle / total），缺省全不设
     std::optional<RetryPolicy> retry_policy_;  ///< 本请求的重试策略覆盖；nullopt = 跟随 Client 的缺省
     bool no_cache_{false};  ///< 本次交换是否绕过缓存（既不读也不写）
@@ -360,10 +520,24 @@ class Request {
     ProgressHandler on_progress_;  ///< 进度回调（空 = 不报）；发起侧负责合流后再调用
 };
 
+/// @brief 一段部分应答所覆盖的范围（`RFC 9110 §14.4` 的 `Content-Range` 字段）。
+///
+/// 三个字段都可缺：对端用 `*` 表达的「范围未知」（`bytes */1234`）折成 `first` / `last` 皆空、`total` 有值，
+/// 总长未知则 `total` 为空。它们是同一枚字段的不同缺项，故用 `nullopt` 而非零值——把「未知」写成 `0` 会让
+/// 续传逻辑以为资源是空的。
+/// @note Thread: thread-safe（值类型，无共享状态）
+/// @note Side-effects: none
+struct ContentRange {
+    std::optional<std::uint64_t> first;  ///< 本段起点（含）；`*` 形态为空
+    std::optional<std::uint64_t> last;  ///< 本段终点（含）；`*` 形态为空
+    std::optional<std::uint64_t> total;  ///< 完整表示体的总长；对端未知时为空
+};
+
 /// @brief 一次 HTTP 应答：状态行 + 字段 + 已物化（解压完毕）的消息体。
 ///
 /// `body()` 交出的是未解码的原始字节，`text()` 才按 `Content-Type` 的 `charset` 现地解码为文本；
-/// 二者对同一份体各表一层，故 charset 不支持时仍可回退到 `body()` 自处。
+/// 二者对同一份体各表一层，故 charset 不支持时仍可回退到 `body()` 自处。分段应答由 `is_partial()` 与
+/// `content_range()` 两枚说出：本类型不裁剪、不合并、不缓存拼接，把对端说的那段范围原样交回调用方。
 /// @note Thread: thread-safe（值类型，无共享状态）
 /// @note Side-effects: none
 class Response {
@@ -395,6 +569,21 @@ class Response {
     /// @param name 字段名；ASCII 大小写不敏感。
     /// @return 首个匹配值；无匹配为 `nullopt`。
     [[nodiscard]] auto header(std::string_view name) const -> std::optional<std::string>;
+
+    /// @brief 解析应答的 `Content-Range` 字段（`RFC 9110 §14.4`）。
+    ///
+    /// 每次调用现解，不给 `Response` 加字段：它是纯值类型，且绝大多数应答永远不会被问到这一枚。只认
+    /// `bytes` 单位的三种形态（`0-499/1234`、`500-1234/1234`、`*/1234`）——本库是唯一会发出范围请求的一方，
+    /// 其余单位走不到这层。字段缺失、文法不合、数字超出可表示范围一律回 `nullopt`：与 `body()` 一样，
+    /// 本函数不替对端的畸形报文编造事实，也不报错（一条坏 `Content-Range` 附着的仍是一份要交出的应答）。
+    /// @return 解析出的范围；无可解字段为 `nullopt`。
+    [[nodiscard]] auto content_range() const -> std::optional<ContentRange>;
+
+    /// @brief 本次应答是否为部分应答。
+    /// @return 状态码 `206` 为 true。判定只看状态码而不看 `content_range()` 是否可解：一条带着坏字段的 206
+    ///         仍然是「对端说了部分」这一事实，把字段解析失败折成「完整应答」会把它抹掉；续传要落盘的调用方
+    ///         两枚都该问一遍，缺任何一枚都不该往既有文件尾部接。
+    [[nodiscard]] auto is_partial() const -> bool { return status_ == 206; }
 
     /// @brief 消息体原始字节。
     /// @return 体字节的只读引用。
@@ -430,7 +619,7 @@ class Response {
 /// 本档只回答**归因层**，不回答**能不能重试**——后者由 `Error::retryable`（与 `codespec/errors.toml`
 /// 逐码同源）给出，两枚正交：`Timeout` 且可重试是「再来一次」，`Proxy` 且可重试
 /// （`net-proxy-config-unreadable`）是「读系统配置的时机不对」，压进同一枚枚举只会让调用方靠猜分工。
-/// 之所以还要第三枚分类而不是直接用生成表的 `ErrorCategory`：那是**全库**粗分类，本族 42 枚全落在
+/// 之所以还要第三枚分类而不是直接用生成表的 `ErrorCategory`：那是**全库**粗分类，本族 43 枚全落在
 /// `io` 下，分不出「名字解析不了」与「对端把字节写坏了」这两种相反的排查方向。
 ///
 /// 九档按「先具体后兜底」归一，同一枚码恒只进一档：`Cancelled` 优先于一切（调用方主动收摊，不再看
@@ -454,7 +643,7 @@ enum class HttpErrorClass : std::uint8_t {
 
 /// @brief 把一枚错误码归入 HTTP 失败分型档（全函数：任意 `ErrorCode` 都有档可归）。
 ///
-/// 逐码映射以本函数为唯一真值源，覆盖 `net-*` 与 `http-*` 两族全部 42 枚（含发起侧用不到的服务端面码，
+/// 逐码映射以本函数为唯一真值源，覆盖 `net-*` 与 `http-*` 两族全部 43 枚（含发起侧用不到的服务端面码，
 /// 同样给出档）；其余族的码（`general-*` / `widget-*` 之类）不是网络交换的产物，一律落 `Invalid` 而
 /// **不**报错——分型是观测口，不是校验口。两处值得点名的归类：`http-redirect-limit` 归 `Protocol`
 /// （对端把重定向写成了环，改不了它就得改跟随策略），`http-body-too-large` 归 `Invalid`（越的是本库

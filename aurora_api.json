@@ -6970,6 +6970,17 @@
       "retryable": false,
       "message": "Icon SVG source uses unsupported features: {detail}",
       "hint": "The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside the library and supply the bitmap"
+    },
+    {
+      "enum": "HttpBodyNotReplayable",
+      "slug": "http-body-not-replayable",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "HTTP request body cannot be sent a second time: '{detail}'",
+      "hint": "A 307 or 308 redirect must replay the message body, and the streaming body said it cannot return to its starting point, so resending it would ship a half-consumed payload. Either hand the payload over as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note that a body which cannot restart also opts this request out of the retry policy on purpose"
     }
   ],
   "debug": [

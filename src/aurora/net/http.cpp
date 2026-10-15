@@ -1,11 +1,14 @@
 // http.cpp —— HTTP 请求 / 应答值类型与方法的线上文本。
 //
-// 落在这里的都是「不需要套接字就能定案」的部分：方法令牌的双向换算、目标 URL 的当场解析、
-// 请求头部序列化前对 `Content-Length` 的补齐。真正的收发在发起侧（Client），它复用字节层
-// `net/detail/http_wire.h`，本文件同样经它把请求行与字段落成字节。
+// 落在这里的都是「不需要套接字就能定案」的部分：方法令牌的双向换算、目标 URL 的当场解析、字节范围与
+// `Content-Range` 的双向折算、请求头部序列化时对体形态与 `Range` / `If-Range` / `Expect` 的补齐。体形态
+// 的判定不在本文件自成一个分支——它跟「写完头部之后到底往外泵什么字节」是同一件事，故收在
+// `net/detail/http_body.h` 里由 `plan_request_body()` 单点裁决，本文件与发起侧的体泵各问一次。真正的收发
+// 在发起侧（Client），它复用字节层 `net/detail/http_wire.h`，本文件同样经它把请求行与字段落成字节。
 #include "aurora/net/http.h"
 
 #include <array>
+#include <charconv>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -17,6 +20,7 @@
 #include "aurora/core/result.h"
 #include "aurora/core/url.h"
 #include "aurora/core/utf8.h"
+#include "aurora/net/detail/http_body.h"
 #include "aurora/net/detail/http_wire.h"
 
 namespace aurora::net::http {
@@ -106,6 +110,51 @@ auto to_lower_ascii(char c) -> char {
 /// @brief UTF-8 字节序标记（BOM）：`text()` 在 UTF-8 路径上剥去前导三字节。
 constexpr std::string_view AURORA_UTF8_BOM{"\xEF\xBB\xBF", 3};
 
+/// @brief 解析一段纯十进制非负整数（首尾空白已由 `trim_ows` 裁过；任一字符非数字即整体失败）。
+///
+/// 溢出与带符号都归「解不出」：字节偏移在线上是没有符号也没有进位的十进制串，能解析出别的东西只说明
+/// 那句话本就不是一个偏移。范围两端的数字都可以任意大（`RFC 9110 §14.1.2` 明确要求接收方预备大数），
+/// 故超出 `std::uint64_t` 时同样回空而非裁到上限——裁出来的偏移比一句「看不懂」更容易被当成事实。
+/// @param text 待解析文本。
+/// @return 解析出的值；文法不合或超出可表示范围为 `nullopt`。
+[[nodiscard]] auto parse_decimal(std::string_view text) -> std::optional<std::uint64_t> {
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    std::uint64_t value = 0;
+    const char *const first = text.data();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): from_chars 要 [first, last) 两端
+    const char *const last = first + text.size();
+    const auto parsed = std::from_chars(first, last, value);
+    if (parsed.ec != std::errc{} || parsed.ptr != last) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+/// @brief ASCII 大小写不敏感地判断前缀（用于 `bytes` 这类单位令牌）。
+/// @param text 待判文本。
+/// @param prefix 前缀；本身应全是小写字母。
+/// @return 以该前缀开头为真。
+[[nodiscard]] auto starts_with_ci(std::string_view text, std::string_view prefix) -> bool {
+    if (text.size() < prefix.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < prefix.size(); ++i) {
+        if (to_lower_ascii(text[i]) != prefix[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// @brief 一句「请求方的声明本身有问题」的载荷（越界范围之类，起手即拒，不留到线上）。
+/// @param detail 点名是哪一枚旋钮、为什么不能用。
+/// @return `http-request-invalid` 的错误对象。
+[[nodiscard]] auto request_form_invalid(const std::string &detail) -> Error {
+    return make_error(ErrorCode::HttpRequestInvalid, detail);
+}
+
 }  // namespace
 
 auto method_text(Method method) -> std::string_view {
@@ -125,6 +174,33 @@ auto method_from_text(std::string_view text) -> Result<Method> {
     }
     return Result<Method>{
         make_error(ErrorCode::HttpRequestInvalid, "unknown HTTP method text: '" + std::string{text} + "'")};
+}
+
+auto ByteRange::is_valid() const -> bool {
+    if (!first.has_value()) {
+        // 后缀形态：`last` 装的是长度，零长度后缀不可满足（`RFC 9110 §14.1.2` 把「非零后缀长度」列为
+        // 唯一可满足形态），写上线只会换来一句 416。
+        return last.has_value() && last.value() > 0;
+    }
+    if (last.has_value() && last.value() < first.value()) {
+        return false;  // 终点在起点之前：没有这样的区间
+    }
+    return true;
+}
+
+auto ByteRange::to_header_value() const -> std::string {
+    if (!is_valid()) {
+        return {};
+    }
+    if (!first.has_value()) {
+        // `is_valid()` 已保证后缀形态带着长度；这里再问一次只为让静态检查也看见同一件事。
+        return last.has_value() ? "bytes=-" + std::to_string(*last) : std::string{};
+    }
+    std::string out = "bytes=" + std::to_string(first.value()) + "-";  // 开放尾端以此为止
+    if (last.has_value()) {
+        out += std::to_string(last.value());
+    }
+    return out;
 }
 
 Request::Request(Method method, std::string_view url) : method_{method} {
@@ -162,7 +238,36 @@ auto Request::body(std::vector<char> body) -> Request & {
     // HEAD 请求不得携带消息体：忽略之，而不是让字节层去拒绝一条本不该存在的请求。
     if (!is_head()) {
         body_ = std::move(body);
+        body_source_ = nullptr;  // 两种交法互斥，后设者生效
     }
+    return *this;
+}
+
+auto Request::body(BodySource &source) -> Request & {
+    if (!is_head()) {
+        body_source_ = &source;
+        body_.clear();  // 与内存体互斥：同时挂着会让体形态判定有两个输入，见 detail::plan_request_body
+    }
+    return *this;
+}
+
+auto Request::range(ByteRange value) -> Request & {
+    range_ = value;
+    return *this;
+}
+
+auto Request::if_range(std::string value) -> Request & {
+    // 空串与未设同义：一条空值的 `If-Range` 字段线上不携带任何条件，留着只多一次往返与一处歧义。
+    if (value.empty()) {
+        if_range_.reset();
+    } else {
+        if_range_ = std::move(value);
+    }
+    return *this;
+}
+
+auto Request::expect_continue(bool value) -> Request & {
+    expect_continue_ = value;
     return *this;
 }
 
@@ -202,9 +307,39 @@ auto Request::render_head(bool absolute_form) const -> Result<std::string> {
         return Result<std::string>{*url_error_};
     }
     Headers fields = headers_;
-    // 有体且调用方未自行声明长度或分帧时，按体长度补 `Content-Length`；HEAD 恒无体，不补。
-    if (!body_.empty() && !fields.contains("Content-Length") && !fields.contains("Transfer-Encoding")) {
-        fields.set("Content-Length", std::to_string(body_.size()));
+    auto plan = detail::plan_request_body(*this);
+    if (!plan) {
+        return Result<std::string>{plan.error()};
+    }
+    // 体形态：调用方声明过就原样保留（那份声明与体泵读到的计划是同一份，见 detail::http_body.h）；没声明
+    // 才按推定补一句。无体形态不补任何字段。
+    if (!plan.value().declared) {
+        switch (plan.value().framing) {
+            case detail::RequestBodyFraming::None:
+                break;
+            case detail::RequestBodyFraming::Length:
+                fields.set("Content-Length", std::to_string(plan.value().length.value_or(0)));
+                break;
+            case detail::RequestBodyFraming::Chunked:
+                fields.set("Transfer-Encoding", "chunked");
+                break;
+        }
+    }
+    // 分段请求：设有 `range()` 才上线，`If-Range` 是它的附属（没有待修饰的分段请求时它只是一次无谓往返）。
+    if (range_.has_value()) {
+        if (!range_->is_valid()) {
+            return Result<std::string>{request_form_invalid(
+                "malformed byte range: a range needs a first byte offset, or a non-zero suffix length, and its "
+                "last byte must not precede its first")};
+        }
+        fields.set("Range", range_->to_header_value());
+        if (if_range_.has_value()) {
+            fields.set("If-Range", *if_range_);
+        }
+    }
+    // 先问再发体：无体可发时这条字段没有意义，且调用方自己写过的 `Expect` 永远优先。
+    if (expect_continue_ && plan.value().has_body && !fields.contains("Expect")) {
+        fields.set("Expect", "100-continue");
     }
     return wire::render_request_head(method_text(method_), *url_, fields, absolute_form);
 }
@@ -214,6 +349,51 @@ Response::Response(std::uint16_t status, std::string reason, Headers headers, st
       from_cache_{from_cache} {}
 
 auto Response::header(std::string_view name) const -> std::optional<std::string> { return headers_.get(name); }
+
+auto Response::content_range() const -> std::optional<ContentRange> {
+    const auto field = headers_.get("Content-Range");
+    if (!field.has_value()) {
+        return std::nullopt;
+    }
+    // 文法（`RFC 9110 §14.4`）三种：`bytes 0-499/1234`、`bytes 500-1234/1234`、`bytes */1234`。本库是唯一
+    // 会发出范围请求的一方，故只认 `bytes` 单位；解不出的形态一律回空而不报错——那是观测口，把「对端把这条
+    // 字段写坏了」折成一次失败会掩盖真正要交的应答。
+    constexpr std::string_view unit{"bytes"};
+    auto value = trim_ows(*field);
+    if (!starts_with_ci(value, unit)) {
+        return std::nullopt;
+    }
+    value = trim_ows(value.substr(unit.size()));
+    const auto slash = value.find('/');
+    if (slash == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const auto spec = trim_ows(value.substr(0, slash));
+    const auto total_text = trim_ows(value.substr(slash + 1));
+    ContentRange out;
+    if (total_text != "*" && !total_text.empty()) {
+        const auto total = parse_decimal(total_text);
+        if (!total.has_value()) {
+            return std::nullopt;
+        }
+        out.total = total;
+    }
+    if (spec == "*") {
+        return out;  // 范围未知（`incomplete-range`）：只有总长，或连总长也用 `*` 表达
+    }
+    const auto dash = spec.find('-');
+    if (dash == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const auto first = parse_decimal(trim_ows(spec.substr(0, dash)));
+    const auto last = parse_decimal(trim_ows(spec.substr(dash + 1)));
+    if (!first.has_value() || !last.has_value()) {
+        return std::nullopt;
+    }
+    out.first = first;
+    out.last = last;
+    return out;
+}
 
 auto Response::text() const -> Result<std::string> {
     std::string charset;
@@ -281,13 +461,13 @@ auto error_class_of(ErrorCode code) -> HttpErrorClass {
         case ErrorCode::HttpRedirectLimit:  // 对端把重定向写成了环
             return HttpErrorClass::Protocol;
         default:
-            // 兜底档覆盖两类：本族里「动作在代码或配置里而不在网络上」的 17 枚（`net-url-invalid` /
+            // 兜底档覆盖两类：本族里「动作在代码或配置里而不在网络上」的 18 枚（`net-url-invalid` /
             // `http-request-invalid` / `net-endpoint-invalid` / `net-platform-unavailable` /
             // `net-tls-engine-unavailable` / `net-option-failed` / `net-option-conflict` /
             // `net-timeout-option-failed` / `net-proxy-config-invalid` / `net-proxy-unsupported` /
             // `net-framer-config-invalid` / `net-buffer-limit` / `net-framer-overflow` /
             // `net-policy-violated` / `http-body-too-large` / `http-charset-unsupported` /
-            // `http-content-encoding-unsupported`），
+            // `http-content-encoding-unsupported` / `http-body-not-replayable`），
             // 以及压根不属于网络交换的其它族码。逐码清单以 `specification/06-app-platform.md` §8.8.22 与
             // `utest_net_http` 的期望表为准（本 switch 与那两处同批改）；分型是观测口而非校验口，故不报错、只归档。
             return HttpErrorClass::Invalid;

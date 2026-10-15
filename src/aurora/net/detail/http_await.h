@@ -29,6 +29,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "aurora/core/result.h"
 #include "aurora/net/cancellation.h"
@@ -138,6 +139,103 @@ template <typename Stream>
 auto await_read(Stream &stream, std::span<char> buffer) -> CallbackAwaiter<std::size_t> {
     return CallbackAwaiter<std::size_t>(
         [&stream, buffer](CallbackAwaiter<std::size_t>::Sink on_done) { stream.read(buffer, std::move(on_done)); });
+}
+
+/// @brief 一次「带窗口的读」的结局：`Expect: 100-continue` 那条等待路上唯一能交回协程的事实。
+///
+/// 它不解释读到的字节是什么——那是装配器的事。本层只回答三问之一：字节到了（`Bytes`）、窗口到点或对端
+/// 已关写向（`WaitElapsed`）、这次读本身失败（`Failure`）。三者都不带「这是一条 1xx」的判断，因为把
+/// 协议语义放进等待体就会让同一份字节在两处被解释。
+/// @note Thread: single-threaded（随一条协程帧使用）
+/// @note Side-effects: none
+struct WindowedRead {
+    /// @brief 结局形态。
+    enum class Outcome : std::uint8_t {
+        Bytes,  ///< 窗口内读到至少一字节（`bytes` 非空）
+        WaitElapsed,  ///< 窗口到点没等到字节；对端提前关闭写向也归这里（照走「不再等」那条路）
+        Failure,  ///< 这次读本身失败（含被取消：`net-cancelled`），载荷在 `error`
+    };
+
+    Outcome outcome{Outcome::WaitElapsed};  ///< 结局形态
+    std::vector<char> bytes;  ///< `Bytes` 时读到的线上字节，其余形态为空
+    std::optional<Error> error;  ///< `Failure` 时的载荷，其余形态为空
+};
+
+/// @brief 在任意具备 read 的流上登记一次「带窗口的读」：字节先到就交字节，窗口先到就交「不再等」。
+///
+/// 存在的理由是 `Expect: 100-continue` 那一段等待**不能借用本次交换的取消令牌**：令牌的 `cancel()` 会
+/// 顺带掐掉这条连接（它是连接级的，见 `StreamTransport::cancellation()`），而「对端没回 100」是一条可以
+/// 继续往下走的事实，不是一次取消。也不能借用 `StageTimer` 那类超时壳——同理，它到点就是取消。
+/// 于是这里让两路各跑各的、由一枚原子闸裁决：
+/// - **先到者承接结局**：另一路只把字节交给 `late` 暂存、绝不触碰协程帧与 awaiter（awaiter 可能在先到者
+///   恢复协程后已经销毁，这是唯一安全的失者动作）。
+/// - **放弃的那次读不会丢字节**：传输层的读请求按 FIFO 排队（`StreamTransport` 的队列口径），故被放弃那次
+///   的回调必然早于后续那次读的回调落地，`late` 里的字节总在下一批之前已就位，发起侧每轮先清 `late` 即可
+///   保持线上次序。
+/// - **放弃的那次读若以失败收场，那份失败就地丢弃**：FIN 是可重复观察的（后续读继续交出关闭事实），其余
+///   错误以下一次的结局为准——本层不去补救一条已经被判定「不必再等」的连接。
+/// @param stream 待读的流（明文或 TLS，须比 awaiter 活得更久）。
+/// @param capacity 本次读的缓冲上限（一节的读块大小即可）。
+/// @param window 等待时长；非正值等价于「不读、直接交 `WaitElapsed`」（连队列都不占）。
+/// @param late 失者字段的暂存处（调用方持有、并在每轮读之前清空的队列）。
+/// @return 可等待体，求得一次 `WindowedRead`。
+template <typename Stream>
+auto await_read_within(Stream &stream, std::size_t capacity, std::chrono::milliseconds window,
+                       const std::shared_ptr<std::vector<char>> &late) -> CallbackAwaiter<WindowedRead> {
+    return CallbackAwaiter<WindowedRead>(
+        // 同 await_connect_via：发起器经 std::function 类型擦除转入触发的系统性假告警面；本发起器只做登记
+        // 与一次原子写，结局一律以 Result 交付、不抛出穿越协程帧。
+        // NOLINTNEXTLINE(bugprone-exception-escape)
+        [&stream, capacity, window, late](CallbackAwaiter<WindowedRead>::Sink on_done) mutable {
+            // NewDeleteLeaks 也属上面那一片假告警面：分析器把「共享对象 → std::function 的 _Rep」当作分配点，
+            // 之后追不到 awaiter 随协程帧销毁的那次释放（同一构造形态在 `await_connect_via` / `await_handshake`
+            // 上只是没被走到）。本发起器交出的每一枚对象都由回调链持有，`claim` 那一枚原子闸保证只析构一次。
+            // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+            auto claim = [fired = std::make_shared<std::atomic<bool>>(false)]() -> bool {
+                auto expected = false;
+                return fired->compare_exchange_strong(expected, true);
+            };
+            // 完成回调移入 `deliver` 持有：发起器只被调一次，之后再复制的都是这份持有而非再拷一次参数。
+            // `deliver` 是这条路上唯一的「恰好一次」闸，返回值即胜负：读侧据此决定没胜出的字节要不要转交
+            // 暂存队列（两处若各调一次 Sink，后到那次会踩在已销毁的协程帧上）。
+            auto deliver = [claim, on_done = std::move(on_done)](WindowedRead outcome) mutable -> bool {
+                if (!claim()) {
+                    return false;
+                }
+                on_done(Result<WindowedRead>{std::move(outcome)});
+                return true;
+            };
+            if (window.count() <= 0) {
+                deliver(WindowedRead{});  // 不等待：连一次读登记都不做，别占住那条 FIFO 队列
+                return;
+            }
+            auto buffer = std::make_shared<std::vector<char>>(capacity);
+            stream.read(std::span<char>{buffer->data(), capacity},
+                        [buffer, late, deliver](Result<std::size_t> counted) mutable -> void {
+                            WindowedRead out;
+                            if (!counted) {
+                                out.outcome = WindowedRead::Outcome::Failure;
+                                out.error = counted.error();
+                            } else if (counted.value() == 0) {
+                                out.outcome = WindowedRead::Outcome::WaitElapsed;  // 对端关写向：与到点同处理
+                            } else {
+                                out.outcome = WindowedRead::Outcome::Bytes;
+                                const std::span<const char> arrived{buffer->data(), counted.value()};
+                                out.bytes.assign(arrived.begin(), arrived.end());
+                            }
+                            if (deliver(std::move(out))) {
+                                return;
+                            }
+                            // 窗口先到：字节交给调用方的暂存队列，其余一律不碰（awaiter 可能已随协程帧销毁）。
+                            if (counted && counted.value() > 0) {
+                                const std::span<const char> arrived{buffer->data(), counted.value()};
+                                late->insert(late->end(), arrived.begin(), arrived.end());
+                            }
+                        });
+            if (!Engine::instance().post_after(window, [deliver]() mutable { deliver(WindowedRead{}); })) {
+                deliver(WindowedRead{});  // 登记不成（本腿无引擎语义）也必须放行：悬着比不等更糟
+            }
+        });
 }
 
 /// @brief 等待一段时间（重试退避用）；到期与取消谁先到就当场放行，二者都求得一次 `Result<void>`。

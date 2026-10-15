@@ -29,9 +29,36 @@ constexpr std::size_t AURORA_HTTP_MAX_LINE_BYTES = std::size_t{8} * 1024;
 /// 1xx 信息应答的状态码下界（`1xx` 到 `199` 恒无消息体，`RFC 9112 §6.4`）。
 constexpr std::uint16_t AURORA_HTTP_STATUS_1XX_MIN = 100;
 constexpr std::uint16_t AURORA_HTTP_STATUS_1XX_MAX = 199;
+/// 协议升级（`101 Switching Protocols`）：唯一**不**按「非最终应答」处理的 1xx——它宣告这条连接此后不再说
+/// HTTP/1.1，而「换成说什么」属 WebSocket 切片，HTTP 客户端收下它只会让本层拿着两套文法读一条流。
+constexpr std::uint16_t AURORA_HTTP_STATUS_SWITCHING_PROTOCOLS = 101;
 /// 无体状态码（204 No Content 与 304 Not Modified）；304 的应答头描述的是被缓存的表示，不带体。
 constexpr std::uint16_t AURORA_HTTP_STATUS_NO_CONTENT = 204;
+/// 分块长度行的十六进制字符表（小写线上形态；文件作用域而非函数内，是为了让 `AURORA_` 常量命名口径统一）。
+constexpr std::string_view AURORA_HEX_DIGITS = "0123456789abcdef";
 constexpr std::uint16_t AURORA_HTTP_STATUS_NOT_MODIFIED = 304;
+
+/// @brief 该状态码是否为「还没说完话」的信息应答（`RFC 9110 §15.2`：1xx 恒无体，其后紧跟最终应答）。
+/// @param status 应答状态码。
+/// @return 属 1xx 且不是 `101` 时为 true。
+constexpr auto is_informational(std::uint16_t status) -> bool {
+    return status >= AURORA_HTTP_STATUS_1XX_MIN && status <= AURORA_HTTP_STATUS_1XX_MAX &&
+           status != AURORA_HTTP_STATUS_SWITCHING_PROTOCOLS;
+}
+
+/// @brief 把无符号整数写成小写十六进制（分块长度行的线上形态；不用 `<format>`，与本仓其余产字节处同型）。
+/// @param value 待写数值。
+/// @return 至少一位、无前导零的小写十六进制文本。
+auto to_lower_hex(std::uint64_t value) -> std::string {
+    std::string text;
+    do {
+        // 逐位从低位起取，末尾整体反转：`substr().front()` 而非下标取值，是为了不在非常量下标上开口子。
+        text.push_back(AURORA_HEX_DIGITS.substr(static_cast<std::size_t>(value % 16U), 1).front());
+        value /= 16U;
+    } while (value != 0);
+    std::ranges::reverse(text);
+    return text;
+}
 
 /// @brief 构造「报文不合文法」错误（本层的畸形一律落此码，不与体上限 / 请求写法错误混同）。
 /// @param detail 现场细节（含实际字节文本与所在阶段）。
@@ -480,6 +507,15 @@ auto render_request_head(std::string_view method_text, const Url &target, const 
     return out;
 }
 
+auto render_request_chunk(std::string_view data) -> std::string {
+    // 长度行 + 数据 + 收尾 CRLF；空段即终止块，其后不再挂 trailer 行（本库发出侧不产 trailer）。
+    std::string out = to_lower_hex(static_cast<std::uint64_t>(data.size()));
+    out.append("\r\n");
+    out.append(data);
+    out.append("\r\n");
+    return out;
+}
+
 auto ChunkedDecoder::push(std::string_view bytes) -> Result<void> {
     buffer_.insert(buffer_.end(), bytes.begin(), bytes.end());
     while (true) {
@@ -658,27 +694,45 @@ auto ResponseAssembler::push(std::string_view bytes) -> Result<void> {
     buffer_.append(bytes);
 
     if (phase_ == Phase::Head) {
-        const std::string_view view{buffer_.data(), buffer_.size()};
-        auto parsed = parse_response_head(view);
-        if (!parsed) {
-            return Result<void>{parsed.error()};
-        }
-        if (!parsed.value().has_value()) {
-            return Result<void>{};  // 头部块还没读够
-        }
-        head_ = std::move(*parsed.value());
-        head_ready_ = true;
-        auto framing = framing_of(head_, request_is_head_);
-        if (!framing) {
-            return Result<void>{framing.error()};
-        }
-        framing_ = framing.value();
-        // 头部之后（若有）的字节属于消息体，留在缓冲里交给本轮的体处理。
-        buffer_.erase(0, head_.header_bytes);
-        phase_ = Phase::Body;
-        auto entered = enter_body_phase();
-        if (!entered || phase_ != Phase::Body) {
-            return entered;
+        // 一轮投递里可能同时装着「一条信息应答 + 最终应答」（`100 Continue` 与它后面的 `200 OK` 常在
+        // 同一批字节里到），故这里是一个循环而不是单次解析：1xx 收进待取队列、吃掉它自己的头部字节、
+        // 留在 Head 阶段接着看下一段；只有非 1xx 才把本条消息推到体阶段。
+        for (;;) {
+            const std::string_view view{buffer_.data(), buffer_.size()};
+            auto parsed = parse_response_head(view);
+            if (!parsed) {
+                return Result<void>{parsed.error()};
+            }
+            if (!parsed.value().has_value()) {
+                return Result<void>{};  // 头部块还没读够
+            }
+            ResponseHead candidate = std::move(*parsed.value());
+            if (candidate.status == AURORA_HTTP_STATUS_SWITCHING_PROTOCOLS) {
+                return Result<void>{protocol_error(
+                    "response is 101 Switching Protocols: this client does not change protocol mid-connection "
+                    "(protocol upgrade belongs to the WebSocket surface)")};
+            }
+            if (is_informational(candidate.status)) {
+                const std::size_t consumed = candidate.header_bytes;
+                informationals_.push_back(std::move(candidate));
+                buffer_.erase(0, consumed);
+                continue;
+            }
+            head_ = std::move(candidate);
+            head_ready_ = true;
+            auto framing = framing_of(head_, request_is_head_);
+            if (!framing) {
+                return Result<void>{framing.error()};
+            }
+            framing_ = framing.value();
+            // 头部之后（若有）的字节属于消息体，留在缓冲里交给本轮的体处理。
+            buffer_.erase(0, head_.header_bytes);
+            phase_ = Phase::Body;
+            auto entered = enter_body_phase();
+            if (!entered || phase_ != Phase::Body) {
+                return entered;
+            }
+            break;
         }
     }
 
@@ -742,6 +796,15 @@ auto ResponseAssembler::peer_closed() -> Result<void> {
         phase_ = Phase::Ended;
     }
     return Result<void>{};
+}
+
+auto ResponseAssembler::take_informational() -> std::optional<ResponseHead> {
+    if (informationals_.empty()) {
+        return std::optional<ResponseHead>{};
+    }
+    std::optional<ResponseHead> taken{std::move(informationals_.front())};
+    informationals_.erase(informationals_.begin());
+    return taken;
 }
 
 auto ResponseAssembler::drain_body(std::vector<char> &out) -> void {

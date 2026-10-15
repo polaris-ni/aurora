@@ -117,6 +117,7 @@
 #include "aurora/net/framer.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
+#include "aurora/net/http_multipart.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/net/policy.h"
 #include "aurora/net/poll.h"

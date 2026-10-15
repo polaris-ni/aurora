@@ -22,6 +22,18 @@
 ///           `Request::no_cache()`（既不读也不写）、提交类方法的应答、开关未开这四条各自把交换挡回线上。
 ///           这一组用真实时钟——新鲜度算的是 `system_clock` 的账，推虚拟时钟推不动它，而「触没触网」由对端的
 ///           `accepts()` 直接读出。
+///           上传侧（§12「请求体来源」与「100-continue」）验流式源的三种线上形态：自报总长走 `Content-Length`、
+///           未知总长走分块帧（终止块随末段一起交出）、调用方声明的分帧头一律压过本库的推断；
+///           `Expect: 100-continue` 的窗口拆成三条各自成立——对端先开口才发体、对端直接以终态作答（417）就把体
+///           按下不发（「没发」只能由答后仍持续观察的留档证，只读头就收摊的脚本恒真）、对端压根不说才盲发；
+///           `MultipartWriter` 的两个部件（文本 + 字节）在线上就是那一段连续流，边界钉成定值才能逐字节断言。
+///           重放闸以 `BodySource::restart()` 为唯一判据，三处各验一条：入口答否即整段不参与重试（一条连接、
+///           交出对端那句 503）、入口放行而重试环再问时改口答否即落 `http-body-not-replayable` 且第二条连接不
+///           发起、保留方法的 307 遇上不可回退的源同样落该错（目标端一条连接都不发起）。
+///           字节范围与缓存分两道闸验：带 `range()` 的请求整段不碰表（既不拿整份副本充当分段应答，回来的那份
+///           206 也不进表）；以裸 `Range` 头上线的请求本件认不出是分段问，只剩状态码那一闸——半截进了表，
+///           下一次整份取回就会被它冒充。链路标识的两条（盖与不盖）也在本件，三级取定的细则在
+///           `utest_net_http_request_id.cpp`。
 /// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
 
 #include <atomic>
@@ -30,6 +42,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -41,6 +54,7 @@
 #include "aurora/net/detail/http_request_id.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
+#include "aurora/net/http_multipart.h"
 #include "aurora/net/policy.h"
 #include "aurora/state/coroutine.h"
 #include "framework/async_wait.h"
@@ -55,10 +69,12 @@ namespace {
 using aurora::CoroTask;
 using aurora::Result;
 using aurora::net::NetPolicy;
+using aurora::net::http::ByteRange;
 using aurora::net::http::CacheOptions;
 using aurora::net::http::Client;
 using aurora::net::http::error_class_of;
 using aurora::net::http::HttpErrorClass;
+using aurora::net::http::MultipartWriter;
 using aurora::net::http::Progress;
 using aurora::net::http::ProgressPhase;
 using aurora::net::http::Request;
@@ -180,6 +196,21 @@ const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0, 
 [[nodiscard]] auto recorded_request(const std::string &recorded, std::mutex &guard) -> std::string {
     const std::scoped_lock held(guard);
     return recorded;
+}
+
+/// @brief 等到对端脚本把整份请求档案交回。
+///
+/// 脚本按「读完（或读到收摊）之后一次性落档」的形态写档案，而落档发生在脚本线程：Linux 回环上客户端能在
+/// 2 ms 内收尾，脚本那边还停在 150 ms 的读超时里，此时取到的档案是空串。空串既会让「该上线的字段没上线」
+/// 假红，更会让「不该上线的体没上线」恒真——后者测的是脚本的时序而不是实现。故凡以 `answer_then_watch`
+/// 的留档作判据的用例，都先等档案就位再取。
+/// @param recorded 交接缓冲。
+/// @param guard 交接缓冲的锁。
+/// @return 档案已就位为 true（到预算仍未落档即由用例侧的致命断言暴露）。
+[[nodiscard]] auto await_recorded(std::string &recorded, std::mutex &guard) -> bool {
+    return aurora::test::net::drive_until("peer filed the request",
+                                          [&recorded, &guard] { return !recorded_request(recorded, guard).empty(); })
+        .satisfied;
 }
 
 /// @brief 从已小写化的请求字节里取 `x-request-id` 的字段值。
@@ -416,6 +447,153 @@ auto allow_test_cleartext(Client &client) -> void {
     permissive.allow_cleartext_hosts = {"127.0.0.1"};
     client.policy(std::move(permissive));
 }
+
+/// @brief 读完头部就立即给出应答、随后**继续观察**一段窗口内还到达过什么字节，最后把全部收到的字节留档。
+///
+/// 「体有没有上线」这条判据不能用只读头就收摊的脚本：那种留档停在应答之前，即使本库把体盲发上线，档案里
+/// 也看不见它——于是断言恒真、测的是脚本而不是实现。本脚本在答完之后仍接着读，答与读之间的窗口足以接住
+/// 一次盲发（客户端的体就在写完头部那一刻发得出），而正确实现下那里什么都不会来。
+/// @param payload 读完头部块后写出的应答字节。
+/// @param recorded 交接缓冲（脚本线程写入）。
+/// @param guard 交接缓冲的锁。
+/// @return 对端脚本。
+[[nodiscard]] auto answer_then_watch(std::string payload, std::string &recorded, std::mutex &guard) -> PeerScript {
+    return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
+                                                             PeerStop &stop) -> void {
+        (void)socket.set_io_timeout(std::chrono::milliseconds{150});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;
+            }
+            seen.append(buffer.data(), read.value());
+            if (seen.find("\r\n\r\n") != std::string::npos) {
+                break;
+            }
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+        while (!stop.load()) {  // 答完之后接着看：盲发的体在这里会被读到并进入留档
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;  // 读不动（含超时）即本端收摊
+            }
+            seen.append(buffer.data(), read.value());
+        }
+        {
+            const std::scoped_lock held(guard);
+            recorded = seen;
+        }
+    };
+}
+
+/// @brief 按脚本服务一条完整请求：可选先回一条信息应答，再读满整条请求（`Content-Length` 与分块帧各自读到
+///        该停的地方），把收到的字节留档，最后写出应答。
+///
+/// 三条判据都只能看对端收到的字节：`Expect` 窗口里到底发没发体、流式体有没有被泵成合法的分块帧、重放闸有
+/// 没有替调用方做决定——这些在本库的返回值里都不存在。长度取请求自己声明的那句，与
+/// `record_request_then_reply()` 同理由（回环端口位数不定）。
+/// @param informational 读完头部块后先写出的信息应答；空串 = 不说。
+/// @param payload 最后写出的应答字节。
+/// @param recorded 交接缓冲（脚本线程写入）。
+/// @param guard 交接缓冲的锁。
+/// @return 对端脚本。
+[[nodiscard]] auto serve_request(std::string informational, std::string payload, std::string &recorded,
+                                 std::mutex &guard) -> PeerScript {
+    return [&recorded, &guard, informational = std::move(informational), payload = std::move(payload)](
+               aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
+        (void)socket.set_io_timeout(std::chrono::milliseconds{500});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        std::size_t head_end = std::string::npos;
+        std::size_t want = 0;
+        bool chunked = false;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;  // 读不动即收摊：本端已把看到的部分留档
+            }
+            seen.append(buffer.data(), read.value());
+            if (head_end == std::string::npos) {
+                const auto at = seen.find("\r\n\r\n");
+                if (at == std::string::npos) {
+                    continue;
+                }
+                head_end = at + 4;
+                const std::string head = lowered(seen.substr(0, head_end));
+                chunked = head.find("transfer-encoding: chunked") != std::string::npos;
+                want = head_end + declared_body_bytes(std::string_view{seen}.substr(0, head_end));
+                if (!informational.empty()) {
+                    (void)socket.write_all(std::span<const char>{informational});
+                }
+            }
+            // 分块体读到终止块才算读满；载荷本身不含那串，本套件的正文都是短词。
+            if (chunked ? seen.find("\r\n0\r\n\r\n", head_end) != std::string::npos : seen.size() >= want) {
+                break;
+            }
+        }
+        {
+            const std::scoped_lock held(guard);
+            recorded = seen;
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+    };
+}
+
+/// @brief 一只可回退、按脚本交段的推送源：流式上传的线上形态与逐段节拍都靠它喂。
+///
+/// 与 `utest_net_http_body` 里那只判定用的桩不同，本只源的段列真会被发起侧的泵逐段取走并写上线，故它自带
+/// 「被取了几段」的观测口。`rewindable` 答假时 `restart()` 直接拒绝——重放闸与「重定向不给回退」两条判据的
+/// 失败侧就靠它，无须另立一类。
+class ScriptedBody final : public aurora::net::http::BodySource {
+  public:
+    /// @brief 以段列、自报总长与可回退性构造。
+    /// @param pieces 逐段交出的正文文本。
+    /// @param total `total_size()` 的回答；`nullopt` = 未知（本次该走分块）。
+    /// @param rewindable `restart()` 的回答。
+    ScriptedBody(std::vector<std::string> pieces, std::optional<std::uint64_t> total, bool rewindable)
+        : pieces_(std::move(pieces)), total_(total), rewindable_(rewindable) {}
+
+    [[nodiscard]] auto next_chunk() -> Result<std::vector<char>> override {
+        if (cursor_ >= pieces_.size()) {
+            return Result<std::vector<char>>{std::vector<char>{}};  // 段列交完 = 体已发完
+        }
+        const std::string &piece = pieces_.at(cursor_++);
+        return Result<std::vector<char>>{std::vector<char>{piece.begin(), piece.end()}};
+    }
+    [[nodiscard]] auto total_size() const -> std::optional<std::uint64_t> override { return total_; }
+    auto restart() -> bool override {
+        if (!rewindable_ || restarts_ >= cap_) {
+            return false;
+        }
+        cursor_ = 0;
+        ++restarts_;
+        return true;
+    }
+
+    /// @brief 已交出的段数（成功回退后归零）。
+    /// @return 段数。
+    [[nodiscard]] auto pulls() const -> std::size_t { return cursor_; }
+    /// @brief 成功回到原点的次数。
+    /// @return 次数。
+    [[nodiscard]] auto restarts() const -> std::size_t { return restarts_; }
+    /// @brief 让源改口：前 `n` 次 `restart()` 答「回得去」，此后再问一律答否——入口放行、重试环再问却回不去
+    ///        原点的源就是这么造出来的（`rewindable` 恒真的源测不到重试环那一闸）。
+    /// @param n 成功回退的次数上限。
+    auto refuse_after(std::size_t n) -> ScriptedBody & {
+        cap_ = n;
+        return *this;
+    }
+
+  private:
+    std::vector<std::string> pieces_;  ///< 脚本段列
+    std::optional<std::uint64_t> total_;  ///< 自报总长
+    bool rewindable_;  ///< 可否回到原点
+    std::size_t cursor_ = 0;  ///< 已交出的段下标
+    std::size_t restarts_ = 0;  ///< 成功回到原点的次数
+    std::size_t cap_ = static_cast<std::size_t>(-1);  ///< 成功回退的次数上限
+};
 
 }  // namespace
 
@@ -1766,6 +1944,361 @@ AURORA_TEST_CASE(every_hop_of_a_redirect_chain_carries_one_identifier) {
     AURORA_TEST_CHECK_EQ(origin_id, target_id);
     AURORA_TEST_CHECK_EQ(count_occurrences(lowered(recorded_request(target_recorded, guard)), "x-request-id:"),
                          std::size_t{1});
+}
+
+AURORA_TEST_CASE(expect_continue_sends_the_body_after_the_peer_opens_the_gate) {
+    std::mutex guard;
+    std::string recorded;
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    // 对端先回一条 `100 Continue` 再读体：本库要把体送上线，必须以这条信息应答为令。
+    ScriptedPeer peer(serve_request("HTTP/1.1 100 Continue\r\n\r\n", service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    auto task = client.send(Request::post(loopback_url(peer.port()))
+                                .body(std::vector<char>{'a', 'b', 'c', 'd', 'e'})
+                                .expect_continue(true));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    // 信息应答不是调用方该看见的结局：交出的仍是那份 200，`100` 连状态码都没露出来。
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(as_body_text(response.value()), std::string{"ok"});
+
+    const auto sent = recorded_request(recorded, guard);
+    AURORA_TEST_CHECK_NE(sent.find("Expect: 100-continue"), std::string::npos);
+    AURORA_TEST_CHECK_NE(sent.find("abcde"), std::string::npos);
+}
+
+AURORA_TEST_CASE(expect_continue_holds_the_body_back_when_the_peer_answers_with_a_final_status) {
+    std::mutex guard;
+    std::string recorded;
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    // 对端读完头部就回 417（`Expect` 它不支持）：本库据此应当**不发体**，白省一份载荷。
+    ScriptedPeer peer(
+        answer_then_watch("HTTP/1.1 417 Expectation Failed\r\nContent-Length: 0\r\n\r\n", recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    auto task = client.send(Request::post(loopback_url(peer.port()))
+                                .body(std::vector<char>{'a', 'b', 'c', 'd', 'e'})
+                                .expect_continue(true));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{417});
+
+    AURORA_TEST_REQUIRE(await_recorded(recorded, guard));
+    const auto sent = recorded_request(recorded, guard);
+    AURORA_TEST_CHECK_NE(sent.find("Expect: 100-continue"), std::string::npos);
+    // 这条是本用例的全部意义：体一个字节都没上线。若窗口到点就盲发，这里就会看见 `abcde`。
+    AURORA_TEST_CHECK_EQ(sent.find("abcde"), std::string::npos);
+}
+
+AURORA_TEST_CASE(expect_continue_sends_the_body_when_the_peer_stays_silent) {
+    std::mutex guard;
+    std::string recorded;
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    // 对端不说信息应答、只等体：窗口到点必须盲发，否则这条交换永远走不下去（对端也在等）。
+    ScriptedPeer peer(serve_request("", service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    auto task = client.send(Request::post(loopback_url(peer.port()))
+                                .body(std::vector<char>{'a', 'b', 'c', 'd', 'e'})
+                                .expect_continue(true));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_NE(recorded_request(recorded, guard).find("abcde"), std::string::npos);
+}
+
+AURORA_TEST_CASE(a_streaming_body_with_an_unknown_total_goes_out_as_chunk_frames) {
+    std::mutex guard;
+    std::string recorded;
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(serve_request("", service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    ScriptedBody source{{"abcde", "fgh"}, std::nullopt, true};
+    auto task = client.send(Request::post(loopback_url(peer.port())).body(source));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+
+    const auto sent = lowered(recorded_request(recorded, guard));
+    AURORA_TEST_CHECK_NE(sent.find("transfer-encoding: chunked"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(sent.find("content-length:"), std::string::npos);
+    // 逐段各成一帧、末尾补终止块：泵一段写一段，正文不必整份进内存，段界也不会糊成一帧。
+    AURORA_TEST_CHECK_NE(sent.find("5\r\nabcde\r\n3\r\nfgh\r\n0\r\n\r\n"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(source.restarts(), std::size_t{1});  // 起手那道重放闸把源归了零
+}
+
+AURORA_TEST_CASE(a_streaming_body_that_knows_its_total_goes_out_with_a_length) {
+    std::mutex guard;
+    std::string recorded;
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(serve_request("", service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    // 源自报总长 8：本库不改写成 `chunked`（那会改变中间层的转发行为），体按原样连续流出。
+    ScriptedBody source{{"abcde", "fgh"}, std::optional<std::uint64_t>{std::uint64_t{8}}, true};
+    auto task = client.send(Request::post(loopback_url(peer.port())).body(source));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+
+    const auto sent = lowered(recorded_request(recorded, guard));
+    AURORA_TEST_CHECK_NE(sent.find("content-length: 8"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(sent.find("transfer-encoding:"), std::string::npos);
+    AURORA_TEST_CHECK_NE(sent.find("\r\n\r\nabcdefgh"), std::string::npos);
+}
+
+AURORA_TEST_CASE(a_streaming_body_that_cannot_rewind_closes_the_retry_loop) {
+    std::mutex guard;
+    std::string first;
+    std::string second;
+    // 同一条监听口先 503 后 200：第二次连接是否发生，就是重放闸开没开的直接读数。带体的请求必须用
+    // `record_request_then_reply()` 收满整条再答——`reply_after_reading()` 读够头就收摊，客户端还在写体，
+    // 那条关闭会把应答连同 RST 一起冲掉（实测 10054 翻脸）。
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(per_connection({record_request_then_reply(service_busy(), first, guard),
+                                      record_request_then_reply(service_ok(), second, guard)}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.retry_policy(RetryPolicy{.attempts = 3,
+                                    .base = std::chrono::milliseconds{50},
+                                    .max_backoff = std::chrono::milliseconds{60},
+                                    .jitter = 0.0});
+    ScriptedBody source{{"abcde"}, std::optional<std::uint64_t>{std::uint64_t{5}}, false};
+    // `PUT` 在幂等表里（方法本身可重放），拦下重放的是「这枚源回不去原点」那一条。
+    auto task = client.send(Request::put(loopback_url(peer.port())).body(source));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    // 尝试耗尽交出的仍是最后那份 503，而不是新造的「不可重放」错误：调用方要的是对端说的那句话。
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{503});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+}
+
+AURORA_TEST_CASE(a_rewindable_streaming_body_stays_in_the_retry_loop) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    std::mutex guard;
+    std::string first;
+    std::string second;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(per_connection({record_request_then_reply(service_busy(), first, guard),
+                                      record_request_then_reply(service_ok(), second, guard)}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    client.retry_policy(RetryPolicy{.attempts = 3,
+                                    .base = std::chrono::milliseconds{50},
+                                    .max_backoff = std::chrono::milliseconds{60},
+                                    .jitter = 0.0});
+    ScriptedBody source{{"abcde"}, std::optional<std::uint64_t>{std::uint64_t{5}}, true};
+    auto task = client.send(Request::put(loopback_url(peer.port())).body(source));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+    // 两次尝试线上都是完整的五个字节：回退确实发生了，不是把上一次的半截接着往下发。
+    AURORA_TEST_CHECK_NE(lowered(recorded_request(first, guard)).find("content-length: 5\r\n\r\nabcde"),
+                         std::string::npos);
+    AURORA_TEST_CHECK_NE(lowered(recorded_request(second, guard)).find("content-length: 5\r\n\r\nabcde"),
+                         std::string::npos);
+    AURORA_TEST_CHECK_EQ(source.restarts(), std::size_t{2});  // 起手一次 + 第二次尝试前一次
+}
+
+AURORA_TEST_CASE(a_source_that_changes_its_mind_about_rewinding_stops_the_retry_loop) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    std::mutex guard;
+    std::string first;
+    std::string second;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(per_connection({record_request_then_reply(service_busy(), first, guard),
+                                      record_request_then_reply(service_ok(), second, guard)}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    client.retry_policy(RetryPolicy{.attempts = 3,
+                                    .base = std::chrono::milliseconds{50},
+                                    .max_backoff = std::chrono::milliseconds{60},
+                                    .jitter = 0.0});
+    // 起手答「回得去」（入口那道闸放行）、重试前答「回不去」：这一对矛盾说法只能由重试环自己拦下，否则会
+    // 把上一次尝试留在半途的体接着往下发——线上就是一条声明五字节却只交了两字节的请求。
+    ScriptedBody source{{"abcde"}, std::optional<std::uint64_t>{std::uint64_t{5}}, true};
+    source.refuse_after(1);
+    auto task = client.send(Request::put(loopback_url(peer.port())).body(source));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(!response, "a source that refuses the second rewind must end in an error");
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpBodyNotReplayable);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 第二次连接根本没发起
+    AURORA_TEST_CHECK_EQ(source.restarts(), std::size_t{1});
+}
+
+AURORA_TEST_CASE(a_body_preserving_redirect_refuses_a_source_that_cannot_rewind) {
+    std::mutex guard;
+    std::string origin_recorded;
+    std::string target_recorded;
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer target(record_then_reply(target_recorded, guard, service_ok()));
+    AURORA_TEST_REQUIRE(target.valid());
+    const std::string redirect =
+        "HTTP/1.1 307 Temporary Redirect\r\nLocation: " + loopback_url(target.port()) + "\r\nContent-Length: 0\r\n\r\n";
+    ScriptedPeer origin(record_request_then_reply(redirect, origin_recorded, guard));
+    AURORA_TEST_REQUIRE(origin.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedBody source{{"abcde"}, std::optional<std::uint64_t>{std::uint64_t{5}}, false};
+    auto task = client.send(Request::post(loopback_url(origin.port())).body(source));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpBodyNotReplayable);
+    // 拒在发起之前：下一跳一条连接都没来，体也不会以半截的形态出现在线上。
+    AURORA_TEST_CHECK_EQ(origin.accepts(), 1);
+    AURORA_TEST_CHECK_EQ(target.accepts(), 0);
+}
+
+AURORA_TEST_CASE(a_range_request_neither_reads_nor_writes_the_table) {
+    std::mutex guard;
+    std::string whole;
+    std::string partial;
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(per_connection(
+        {record_request_then_reply(length_framed("Cache-Control: max-age=600\r\n", body_of("full")), whole, guard),
+         // 半截正文写成与整份不同的字串：若它违规进表，第三次整份取回就会拿到 `part`，判据立刻可见。
+         record_request_then_reply("HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/100\r\n"
+                                   "Cache-Control: max-age=600\r\nContent-Length: 4\r\n\r\npart",
+                                   partial, guard)}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    const auto first = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_CHECK_FALSE(first.value().from_cache());
+
+    // 表按「方法 + URL」建键：同一 URL 的整份副本拿来充一段范围是错的答复，故带 `range()` 的请求一律触网。
+    const auto second = send_and_drive(client, Request::get(url).range(ByteRange::between(0, 3)));
+    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_CHECK_FALSE(second.value().from_cache());
+    AURORA_TEST_CHECK_EQ(second.value().status(), std::uint16_t{206});
+    AURORA_TEST_CHECK_NE(lowered(recorded_request(partial, guard)).find("range: bytes=0-3"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+
+    // 那份 206 不许进表：第三次整份取回拿到的仍是第一次存的整份，而不是半截。
+    const auto third = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(third));
+    AURORA_TEST_CHECK(third.value().from_cache());
+    AURORA_TEST_CHECK_EQ(as_body_text(third.value()), std::string{"full"});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(a_partial_answer_never_enters_the_table) {
+    std::mutex guard;
+    std::string partial;
+    std::string whole;
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(per_connection(
+        {record_request_then_reply("HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/100\r\n"
+                                   "Cache-Control: max-age=600\r\nContent-Length: 4\r\n\r\npart",
+                                   partial, guard),
+         record_request_then_reply(length_framed("Cache-Control: max-age=600\r\n", body_of("full")), whole, guard)}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    // 这一条把范围写成裸头而不是 `range()` 旋钮：缓存不认识裸头，于是照常建键、照常收尾进表——拦住那份
+    // 206 的只剩「状态码可不可存」这一条，也就是 `settle_cache` 承诺的另一道闸（表此刻还是空的，起手问不到东西）。
+    const auto first = send_and_drive(client, Request::get(url).set_header("Range", "bytes=0-3"));
+    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_CHECK_EQ(first.value().status(), std::uint16_t{206});
+    AURORA_TEST_CHECK_NE(lowered(recorded_request(partial, guard)).find("range: bytes=0-3"), std::string::npos);
+
+    // 半截没进表：整份取回仍得触网，拿到的仍是整份，而不是被那条 206 冒充的副本。
+    const auto second = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_CHECK_FALSE(second.value().from_cache());
+    AURORA_TEST_CHECK_EQ(as_body_text(second.value()), std::string{"full"});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(a_multipart_form_goes_out_as_one_streaming_body) {
+    std::mutex guard;
+    std::string recorded;
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(serve_request("", service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    // 边界钉成定值：线上形态要能逐字节断言，而缺省边界每请求现生成、写不进判据。
+    MultipartWriter form;
+    form.boundary("edge-test");
+    form.field("note", "hello");
+    form.bytes("blob", body_of("XYZ"), "blob.bin", "application/octet-stream");
+
+    auto request = Request::post(loopback_url(peer.port()));
+    form.apply_to(request);
+    auto task = client.send(std::move(request));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+
+    const auto sent = recorded_request(recorded, guard);
+    AURORA_TEST_CHECK_NE(sent.find("Content-Type: multipart/form-data; boundary=edge-test"), std::string::npos);
+    // 惰性部件在线上就是普通部件：边界行、部件头、正文、收尾边界，全在这条连续流里，没有第二次的往返。
+    AURORA_TEST_CHECK_NE(sent.find("--edge-test\r\n"
+                                   "Content-Disposition: form-data; name=\"note\"\r\n"
+                                   "\r\n"
+                                   "hello\r\n"
+                                   "--edge-test\r\n"
+                                   "Content-Disposition: form-data; name=\"blob\"; filename=\"blob.bin\"\r\n"
+                                   "Content-Type: application/octet-stream\r\n"
+                                   "\r\n"
+                                   "XYZ\r\n"
+                                   "--edge-test--\r\n"),
+                         std::string::npos);
+    // 两个部件的长度都取得到，故这次上传走 `Content-Length` 而不是分块（口径见 `detail::plan_request_body`）。
+    AURORA_TEST_CHECK_NE(sent.find("Content-Length: "), std::string::npos);
+    AURORA_TEST_CHECK_EQ(sent.find("Transfer-Encoding"), std::string::npos);
 }
 
 AURORA_TEST_CASE(a_stamped_identifier_does_not_disturb_the_table) {

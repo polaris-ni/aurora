@@ -23,6 +23,13 @@
 ///             `response.from_cache()` 为真）；本入口**只读不写**，于是两次流式交换之间表里什么都没留下（第二次
 ///             照旧触网）；表里那条由物化路径灌入的陈旧条目会被带着校验子去问，拿回的 304 不进宿主——交出的
 ///             头部是已存那份 200、体是已存那段字节，并完的那一份重新获得新鲜度，第三次不再触网。
+///           上传侧（§12「请求体来源」与「100-continue」）验本入口的写侧与物化路径同判据：自报总长的流式源整份
+///             上线（写出侧的停止条件取自声明长度，不是「交了第一段就算完」）；`Expect` 的窗口里对端先开口才发体、
+///             直接以 417 作答就把体按下不发且那枚终态照常交给宿主（不是错误结局）；对端把「100 + 200 + 体」一次
+///             写完时，报文已在装配器里收满，宿主的 `on_head` / `on_data` / `on_end` 仍欠着——少一次强制过环，宿主
+///             就收到一个零次交头的结局。重放闸那条要把失败安排在**交头之前**（静默对端 + `total` 到点），否则
+///             头已 hand-off 这件事本身就关门，问不出闸的资格。链路标识的两条也在本件，细则在
+///             `utest_net_http_request_id.cpp`。
 /// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
 
 #include <chrono>
@@ -263,6 +270,10 @@ const unsigned char AURORA_ZLIB_HELLO[] = {120, 156, 203, 72, 205, 201, 201, 87,
     return out;
 }
 
+/// @brief 拼一份 200 应答：体已上线、交换正常收尾那一侧的对照。
+/// @return 带 2 字节体 `ok` 的应答字节。
+[[nodiscard]] auto service_ok() -> std::string { return length_framed("", {'o', 'k'}); }
+
 /// @brief 取出下载方向的发射序列（频次与末值判据都要分方向看）。
 /// @param seen 全部发射。
 /// @return 下载发射副本（保持次序）。
@@ -342,6 +353,200 @@ auto allow_test_cleartext(Client &client) -> void {
     const auto end = lowered.find("\r\n", cursor);
     return text.substr(cursor, end == std::string::npos ? std::string::npos : end - cursor);
 }
+
+/// @brief 把文本里的字节按 ASCII 小写化（比对头部字段时不依赖拼写大小写）。
+/// @param text 原文。
+/// @return 小写副本。
+[[nodiscard]] auto lowered(std::string_view text) -> std::string {
+    std::string out{text};
+    for (char &unit : out) {
+        if (unit >= 'A' && unit <= 'Z') {
+            unit = static_cast<char>(static_cast<unsigned char>(unit) + 32);
+        }
+    }
+    return out;
+}
+
+/// @brief 从请求头部块里取它自己声明的体长（无 `Content-Length` 即零）。
+///
+/// 长度必须从请求现地读而不是用例另算：回环端口是五位数字，按占位 URL 算出的头部长度与真实请求差几位，
+/// 差出来的那段会让脚本一直读到 I/O 超时。
+/// @param head_block 头部块（含收尾的空行）。
+/// @return 声明的字节数。
+[[nodiscard]] auto declared_body_bytes(std::string_view head_block) -> std::size_t {
+    const std::string folded = lowered(head_block);
+    constexpr std::string_view key = "content-length:";
+    const auto at = folded.find(std::string{key});
+    if (at == std::string::npos) {
+        return 0;
+    }
+    std::size_t pos = at + key.size();
+    while (pos < folded.size() && (folded[pos] == ' ' || folded[pos] == '\t')) {
+        ++pos;
+    }
+    std::size_t value = 0;
+    while (pos < folded.size() && folded[pos] >= '0' && folded[pos] <= '9') {
+        value = (value * 10) + static_cast<std::size_t>(folded[pos] - '0');
+        ++pos;
+    }
+    return value;
+}
+
+/// @brief 按脚本服务一条完整请求：可选先回一条信息应答，再读满整条请求（`Content-Length` 与分块帧各自读到
+///        该停的地方），把收到的字节留档，最后写出应答。
+/// @param informational 读完头部块后先写出的信息应答；空串 = 不说。
+/// @param payload 最后写出的应答字节。
+/// @param recorded 交接缓冲（脚本线程写入）。
+/// @param guard 交接缓冲的锁。
+/// @return 对端脚本。
+[[nodiscard]] auto serve_request(std::string informational, std::string payload, std::string &recorded,
+                                 std::mutex &guard) -> PeerScript {
+    return [&recorded, &guard, informational = std::move(informational), payload = std::move(payload)](
+               aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
+        (void)socket.set_io_timeout(std::chrono::milliseconds{500});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        std::size_t head_end = std::string::npos;
+        std::size_t want = 0;
+        bool chunked = false;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;  // 读不动即收摊：本端已把看到的部分留档
+            }
+            seen.append(buffer.data(), read.value());
+            if (head_end == std::string::npos) {
+                const auto at = seen.find("\r\n\r\n");
+                if (at == std::string::npos) {
+                    continue;
+                }
+                head_end = at + 4;
+                const std::string head = lowered(seen.substr(0, head_end));
+                chunked = head.find("transfer-encoding: chunked") != std::string::npos;
+                want = head_end + declared_body_bytes(std::string_view{seen}.substr(0, head_end));
+                if (!informational.empty()) {
+                    (void)socket.write_all(std::span<const char>{informational});
+                }
+            }
+            // 分块体读到终止块才算读满；本套件的正文都是短词，终止串不会与正文相撞。
+            if (chunked ? seen.find("\r\n0\r\n\r\n", head_end) != std::string::npos : seen.size() >= want) {
+                break;
+            }
+        }
+        {
+            const std::scoped_lock held(guard);
+            recorded = seen;
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+    };
+}
+
+/// @brief 读完头部就立即给出应答、随后**继续观察**一段窗口内还到达过什么字节，最后把全部收到的字节留档。
+///
+/// 「体有没有上线」这条判据不能用只读头就收摊的脚本：那种留档停在应答之前，即使本库把体盲发上线，档案里
+/// 也看不见它——于是断言恒真、测的是脚本而不是实现。
+/// @param payload 读完头部块后写出的应答字节。
+/// @param recorded 交接缓冲（脚本线程写入）。
+/// @param guard 交接缓冲的锁。
+/// @return 对端脚本。
+[[nodiscard]] auto answer_then_watch(std::string payload, std::string &recorded, std::mutex &guard) -> PeerScript {
+    return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
+                                                             PeerStop &stop) -> void {
+        (void)socket.set_io_timeout(std::chrono::milliseconds{150});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;
+            }
+            seen.append(buffer.data(), read.value());
+            if (seen.find("\r\n\r\n") != std::string::npos) {
+                break;
+            }
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+        while (!stop.load()) {  // 答完之后接着看：盲发的体在这里会被读到并进入留档
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;  // 读不动（含超时）即本端收摊
+            }
+            seen.append(buffer.data(), read.value());
+        }
+        {
+            const std::scoped_lock held(guard);
+            recorded = seen;
+        }
+    };
+}
+
+/// @brief 取记录到的请求字节副本。
+/// @param recorded 交接缓冲。
+/// @param guard 交接缓冲的锁。
+/// @return 请求字节副本。
+[[nodiscard]] auto recorded_request(const std::string &recorded, std::mutex &guard) -> std::string {
+    const std::scoped_lock held(guard);
+    return recorded;
+}
+
+/// @brief 等到对端脚本把整份请求档案交回。
+///
+/// 脚本按「读完（或读到收摊）之后一次性落档」的形态写档案，而落档发生在脚本线程：Linux 回环上客户端能在
+/// 2 ms 内收尾，脚本那边还停在 150 ms 的读超时里，此时取到的档案是空串。空串既会让「该上线的字段没上线」
+/// 假红，更会让「不该上线的体没上线」恒真——后者测的是脚本的时序而不是实现。故凡以 `answer_then_watch`
+/// 的留档作判据的用例，都先等档案就位再取。
+/// @param recorded 交接缓冲。
+/// @param guard 交接缓冲的锁。
+/// @return 档案已就位为 true（到预算仍未落档即由用例侧的致命断言暴露）。
+[[nodiscard]] auto await_recorded(std::string &recorded, std::mutex &guard) -> bool {
+    return aurora::test::net::drive_until("peer filed the request",
+                                          [&recorded, &guard] { return !recorded_request(recorded, guard).empty(); })
+        .satisfied;
+}
+
+/// @brief 一只可回退、按脚本交段的推送源：流式上传的线上形态与逐段节拍都靠它喂。
+///
+/// `rewindable` 答假时 `restart()` 直接拒绝——重放闸在流式入口那一侧的失败判据就靠它。
+class ScriptedBody final : public aurora::net::http::BodySource {
+  public:
+    /// @brief 以段列、自报总长与可回退性构造。
+    /// @param pieces 逐段交出的正文文本。
+    /// @param total `total_size()` 的回答；`nullopt` = 未知（本次该走分块）。
+    /// @param rewindable `restart()` 的回答。
+    ScriptedBody(std::vector<std::string> pieces, std::optional<std::uint64_t> total, bool rewindable)
+        : pieces_(std::move(pieces)), total_(total), rewindable_(rewindable) {}
+
+    [[nodiscard]] auto next_chunk() -> Result<std::vector<char>> override {
+        if (cursor_ >= pieces_.size()) {
+            return Result<std::vector<char>>{std::vector<char>{}};  // 段列交完 = 体已发完
+        }
+        const std::string &piece = pieces_.at(cursor_++);
+        return Result<std::vector<char>>{std::vector<char>{piece.begin(), piece.end()}};
+    }
+    [[nodiscard]] auto total_size() const -> std::optional<std::uint64_t> override { return total_; }
+    auto restart() -> bool override {
+        if (!rewindable_) {
+            return false;
+        }
+        cursor_ = 0;
+        ++restarts_;
+        return true;
+    }
+
+    /// @brief 已交出的段数（成功回退后归零）。
+    /// @return 段数。
+    [[nodiscard]] auto pulls() const -> std::size_t { return cursor_; }
+    /// @brief 成功回到原点的次数。
+    /// @return 次数。
+    [[nodiscard]] auto restarts() const -> std::size_t { return restarts_; }
+
+  private:
+    std::vector<std::string> pieces_;  ///< 脚本段列
+    std::optional<std::uint64_t> total_;  ///< 自报总长
+    bool rewindable_;  ///< 可否回到原点
+    std::size_t cursor_ = 0;  ///< 已交出的段下标
+    std::size_t restarts_ = 0;  ///< 成功回到原点的次数
+};
 
 }  // namespace
 
@@ -965,6 +1170,138 @@ AURORA_TEST_CASE(stream_carries_a_request_level_identifier_and_respects_the_swit
     RecordingSink off_sink;
     AURORA_TEST_REQUIRE(bool(open_and_drive(client, Request::get(loopback_url(third.port())), off_sink)));
     AURORA_TEST_CHECK_EQ(recorded_identifier(off, guard), std::string{});
+}
+
+AURORA_TEST_CASE(stream_sends_the_body_after_the_peer_opens_the_gate) {
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(serve_request("HTTP/1.1 100 Continue\r\n\r\n", service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    ScriptedBody source{{"abcde", "fgh"}, std::nullopt, true};
+    RecordingSink sink;
+    const auto outcome =
+        open_and_drive(client, Request::post(loopback_url(peer.port())).body(source).expect_continue(true), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    // 信息应答既不进宿主的 `on_head`，也不改变交出的状态码：宿主看见的只有那份 200。
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{"ok"});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+
+    const auto sent = recorded_request(recorded, guard);
+    AURORA_TEST_CHECK_NE(sent.find("Expect: 100-continue"), std::string::npos);
+    // 体是在窗口里收到 1xx 之后才写上线的：对端把整条请求读满了才有这份留档。
+    AURORA_TEST_CHECK_NE(sent.find("5\r\nabcde\r\n3\r\nfgh\r\n0\r\n\r\n"), std::string::npos);
+}
+
+AURORA_TEST_CASE(stream_delivers_an_answer_that_arrived_inside_the_expect_window) {
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    // 一次性写出的「100 + 200 + 体」大概率被窗口里那一次读整个捞回：此时报文已在装配器里收满，读环的
+    // 续跑条件（`!complete()`）本不成立，宿主的 `on_head`/`on_data`/`on_end` 却仍欠着。这条就是那一批字节的
+    // 交付判据——少一次强制过环，宿主就会在毫不知情的情况下收到一个零次交头的结局。
+    ScriptedPeer peer(answer_then_watch("HTTP/1.1 100 Continue\r\n\r\n" + service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    ScriptedBody source{{"abcde"}, std::optional<std::uint64_t>{std::uint64_t{5}}, true};
+    RecordingSink sink;
+    const auto outcome =
+        open_and_drive(client, Request::post(loopback_url(peer.port())).body(source).expect_continue(true), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{"ok"});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, std::uint64_t{2});
+    // 闸门已开：体照发，对端在答后继续观察的那段窗口里应当读到它。
+    AURORA_TEST_REQUIRE(await_recorded(recorded, guard));
+    const auto sent = recorded_request(recorded, guard);
+    AURORA_TEST_CHECK_NE(sent.find("abcde"), std::string::npos);
+}
+
+AURORA_TEST_CASE(stream_holds_the_body_back_when_the_expectation_gets_a_final_answer) {
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    // 对端读完头部直接回 417：流式入口同样得把体按下不发，并把这枚最终状态正常交给宿主（不是错误结局）。
+    ScriptedPeer peer(
+        answer_then_watch("HTTP/1.1 417 Expectation Failed\r\nContent-Length: 0\r\n\r\n", recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    ScriptedBody source{{"abcde"}, std::optional<std::uint64_t>{std::uint64_t{5}}, true};
+    RecordingSink sink;
+    const auto outcome =
+        open_and_drive(client, Request::post(loopback_url(peer.port())).body(source).expect_continue(true), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{417});
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, std::uint64_t{0});
+    AURORA_TEST_REQUIRE(await_recorded(recorded, guard));
+    const auto sent = recorded_request(recorded, guard);
+    AURORA_TEST_CHECK_NE(sent.find("Expect: 100-continue"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(sent.find("abcde"), std::string::npos);
+}
+
+AURORA_TEST_CASE(stream_uploads_a_body_source_that_knows_its_total) {
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(serve_request("", service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    // 定长形态的流式体必须整份上线：写出侧的停止条件取自声明长度，而不是「交了第一段就算完」。
+    ScriptedBody source{{"abcde", "fgh"}, std::optional<std::uint64_t>{std::uint64_t{8}}, true};
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::post(loopback_url(peer.port())).body(source), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{"ok"});
+
+    const auto sent = lowered(recorded_request(recorded, guard));
+    AURORA_TEST_CHECK_NE(sent.find("content-length: 8"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(sent.find("transfer-encoding:"), std::string::npos);
+    AURORA_TEST_CHECK_NE(sent.find("\r\n\r\nabcdefgh"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(source.pulls(), std::size_t{2});
+}
+
+AURORA_TEST_CASE(stream_closes_the_retry_loop_on_a_body_that_cannot_rewind) {
+    // 头已经交给宿主的失败在流式路径本来就不可重放（`stream_does_not_replay_after_the_head_is_handed`），
+    // 所以这一条要把失败安排在**交头之前**才问得出「重放闸有没有因不可回退的体而关门」：静默的对端 + `total`
+    // 时限到点，头一次都没交出去，重放资格只剩闸这一道判据。判据看虚拟时长与错误码：门开着就要跑满三扇窗口
+    // （兄弟用例的 `>= 150`），门关了只烧一扇；而中途回不了原点会改报 `http-body-not-replayable`，那是闸自己
+    // 掐错了尝试，不是调用方该看见的结局。
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(silent());
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
+    ScriptedBody source{{"abcde"}, std::optional<std::uint64_t>{std::uint64_t{5}}, false};
+    RecordingSink sink;
+    auto task = client.open_stream(
+        Request::put(loopback_url(peer.port())).body(source).timeouts(Timeouts{.total = std::chrono::milliseconds{50}}),
+        sink);
+    AURORA_TEST_REQUIRE(pump_stream(engine, task));
+
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
+    AURORA_TEST_CHECK_LT(engine.now().count(), std::int64_t{100});  // 只烧了一扇 50 ms 窗口
+    AURORA_TEST_CHECK_EQ(sink.heads, 0);
+    AURORA_TEST_CHECK_EQ(source.restarts(), std::size_t{0});  // 答假的源不会被反复拧回原点
 }
 
 }  // namespace aurora::test_cases::utest_net_http_stream
