@@ -152,6 +152,12 @@ auto Request::set_header(std::string_view name, std::string_view value) -> Reque
     return *this;
 }
 
+auto Request::request_id(std::string value) -> Request & {
+    // 空串是有意义的一档（「这次不要标识」），故原样存下，不折叠成 `nullopt`——`nullopt` 说的是「跟随缺省」。
+    request_id_ = std::move(value);
+    return *this;
+}
+
 auto Request::body(std::vector<char> body) -> Request & {
     // HEAD 请求不得携带消息体：忽略之，而不是让字节层去拒绝一条本不该存在的请求。
     if (!is_head()) {

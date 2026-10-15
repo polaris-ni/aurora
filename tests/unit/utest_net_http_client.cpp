@@ -38,6 +38,7 @@
 #include "aurora/core/error_codes.h"
 #include "aurora/core/result.h"
 #include "aurora/net/blocking.h"
+#include "aurora/net/detail/http_request_id.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
 #include "aurora/net/policy.h"
@@ -179,6 +180,23 @@ const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0, 
 [[nodiscard]] auto recorded_request(const std::string &recorded, std::mutex &guard) -> std::string {
     const std::scoped_lock held(guard);
     return recorded;
+}
+
+/// @brief 从已小写化的请求字节里取 `x-request-id` 的字段值。
+/// @param lowered_text 请求字节的小写副本。
+/// @return 字段值；没这条字段时为空串（用例据此把「不发」与「发了空值」分开）。
+[[nodiscard]] auto recorded_identifier(std::string_view lowered_text) -> std::string {
+    constexpr std::string_view field = "x-request-id: ";
+    const auto begin = lowered_text.find(field);
+    if (begin == std::string_view::npos) {
+        return {};
+    }
+    const auto cursor = begin + field.size();
+    const auto end = lowered_text.find("\r\n", cursor);
+    if (end == std::string_view::npos) {
+        return std::string{lowered_text.substr(cursor)};
+    }
+    return std::string{lowered_text.substr(cursor, end - cursor)};
 }
 
 /// @brief 统计子串出现次数：宣告字段「只补一次、不重复追加」的判据要用它。
@@ -911,6 +929,9 @@ AURORA_TEST_CASE(progress_reports_upload_bytes_and_always_ends_with_a_settled_va
     // 判据落在对端收到的请求全文上，那是本库外部唯一能看的事实。
     Client client;
     allow_test_cleartext(client);
+    // 本判据比的是「分块写出的线上字节与一次写完逐字节相同」：链路标识与此无关，关掉它才不会把
+    // 比较拖进一枚每次现取的字段里（判据本身仍由 `x-request-id` 那组用例负责）。
+    client.request_id(false);
     std::string recorded;
     std::mutex guard;
     ScriptedPeer peer(record_request_then_reply("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", recorded, guard));
@@ -964,6 +985,9 @@ AURORA_TEST_CASE(a_frame_gate_holds_progress_to_one_emission_per_frame_plus_the_
     // 这条判据把「合流发生在源头」写实，而不是留给调用方自己去限频。
     Client client;
     allow_test_cleartext(client);
+    // 本判据比的是「分块写出的线上字节与一次写完逐字节相同」：链路标识与此无关，关掉它才不会把
+    // 比较拖进一枚每次现取的字段里（判据本身仍由 `x-request-id` 那组用例负责）。
+    client.request_id(false);
     std::uint64_t frame = 1;
     client.progress_frame_source([&frame]() -> std::uint64_t { return frame; });
 
@@ -1011,6 +1035,9 @@ AURORA_TEST_CASE(an_unarmed_request_delivers_the_same_wire_bytes_as_an_armed_one
     // 那是「观测口对无需求者零行为改动」这条口径唯一的外部证据。
     Client client;
     allow_test_cleartext(client);
+    // 本判据比的是「分块写出的线上字节与一次写完逐字节相同」：链路标识与此无关，关掉它才不会把
+    // 比较拖进一枚每次现取的字段里（判据本身仍由 `x-request-id` 那组用例负责）。
+    client.request_id(false);
     std::string recorded;
     std::mutex guard;
     ScriptedPeer peer(record_request_then_reply("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", recorded, guard));
@@ -1592,6 +1619,174 @@ AURORA_TEST_CASE(vary_makes_the_second_request_a_different_request) {
     // 两次请求都带着自己那枚 `Accept`：命中与否的差别只在表里的 `Vary` 比对，不在线上。
     AURORA_TEST_CHECK_NE(recorded_request(first_request, guard).find("Accept: application/json"), std::string::npos);
     AURORA_TEST_CHECK_NE(recorded_request(second_request, guard).find("Accept: application/xml"), std::string::npos);
+}
+
+AURORA_TEST_CASE(send_stamps_a_request_id_on_every_exchange) {
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", {})));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    // 缺省开：一条字段、形状是 UUIDv4 的小写文本形态（判据用库内那一枚，与发起侧共用唯一真值源）。
+    const auto request_text = lowered(recorded_request(recorded, guard));
+    AURORA_TEST_CHECK_EQ(count_occurrences(request_text, "x-request-id:"), std::size_t{1});
+    const auto announced = recorded_identifier(request_text);
+    AURORA_TEST_CHECK_EQ(aurora::net::detail::is_request_id_shape(announced), true);
+}
+
+AURORA_TEST_CASE(send_sends_no_identifier_when_the_default_is_off) {
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    client.request_id(false);
+    ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", {})));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    // 关掉即一个字节都不多发：不是「发一枚空值」，也不是「发一枚全 0 的占位」。
+    const auto request_text = lowered(recorded_request(recorded, guard));
+    AURORA_TEST_CHECK_EQ(count_occurrences(request_text, "x-request-id:"), std::size_t{0});
+    AURORA_TEST_CHECK_EQ(recorded_identifier(request_text), std::string{});
+}
+
+AURORA_TEST_CASE(send_carries_a_request_level_identifier_verbatim) {
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", {})));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    // 业务键形态的标识照原样上线：本件不校验调用方自填值的形状（校验只会把「对端认得的关联值」改成拒发）。
+    auto task = client.send(Request::get(loopback_url(peer.port())).request_id("trace-42"));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto request_text = lowered(recorded_request(recorded, guard));
+    AURORA_TEST_CHECK_EQ(count_occurrences(request_text, "x-request-id:"), std::size_t{1});
+    AURORA_TEST_CHECK_EQ(recorded_identifier(request_text), std::string{"trace-42"});
+}
+
+AURORA_TEST_CASE(send_sends_no_identifier_for_an_empty_declaration) {
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);  // 缺省开着，靠请求级空声明关掉这一次
+    ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", {})));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    auto task = client.send(Request::get(loopback_url(peer.port())).request_id(""));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    // 空串说的是「这次不要」，与 `nullopt` 的「跟随缺省」分居两档；这里必须落在前者。
+    AURORA_TEST_CHECK_EQ(count_occurrences(lowered(recorded_request(recorded, guard)), "x-request-id:"),
+                         std::size_t{0});
+}
+
+AURORA_TEST_CASE(send_never_overwrites_an_identifier_the_caller_wrote) {
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", {})));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    // 三级取定的最上一级：字段是调用方写的就永远归调用方——不覆盖，也不因为「值不像 UUID」补一枚。
+    auto task = client.send(
+        Request::get(loopback_url(peer.port())).header("X-Request-Id", "mine").request_id("would-be-ignored"));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto request_text = lowered(recorded_request(recorded, guard));
+    AURORA_TEST_CHECK_EQ(count_occurrences(request_text, "x-request-id:"), std::size_t{1});
+    AURORA_TEST_CHECK_EQ(recorded_identifier(request_text), std::string{"mine"});
+}
+
+AURORA_TEST_CASE(every_attempt_of_a_retry_sequence_carries_one_identifier) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::string first_recorded;
+    std::string second_recorded;
+    // 同一条监听口两种说法（第一条 503、第二条 200），两头的请求字节各记一份才能比标识。
+    ScriptedPeer peer(per_connection({record_then_reply(first_recorded, guard, service_busy()),
+                                      record_then_reply(second_recorded, guard, service_ok())}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.retry_policy(RetryPolicy{.attempts = 3,
+                                    .base = std::chrono::milliseconds{10},
+                                    .max_backoff = std::chrono::milliseconds{100},
+                                    .jitter = 0.0});
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    // 重放的两次往来是**同一次交换**：换 id 就等于在对端日志里把它裂成两条互不相干的交换。
+    const auto first_id = recorded_identifier(lowered(recorded_request(first_recorded, guard)));
+    const auto second_id = recorded_identifier(lowered(recorded_request(second_recorded, guard)));
+    AURORA_TEST_REQUIRE(!first_id.empty());
+    AURORA_TEST_CHECK_EQ(first_id, second_id);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(every_hop_of_a_redirect_chain_carries_one_identifier) {
+    std::mutex guard;
+    std::string origin_recorded;
+    std::string target_recorded;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer target(record_then_reply(target_recorded, guard, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nZ"));
+    AURORA_TEST_REQUIRE(target.valid());
+    const std::string redirect =
+        "HTTP/1.1 302 Found\r\nLocation: " + loopback_url(target.port()) + "\r\nContent-Length: 0\r\n\r\n";
+    ScriptedPeer origin(record_then_reply(origin_recorded, guard, redirect));
+    AURORA_TEST_REQUIRE(origin.valid());
+    const aurora::test::net::HostDriven host;
+
+    auto task = client.send(Request::get(loopback_url(origin.port())));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    // 每一跳各发一次、值是同一枚：跟随重定向是一次交换的继续，不是第二次交换。
+    const auto origin_id = recorded_identifier(lowered(recorded_request(origin_recorded, guard)));
+    const auto target_id = recorded_identifier(lowered(recorded_request(target_recorded, guard)));
+    AURORA_TEST_REQUIRE(!origin_id.empty());
+    AURORA_TEST_CHECK_EQ(origin_id, target_id);
+    AURORA_TEST_CHECK_EQ(count_occurrences(lowered(recorded_request(target_recorded, guard)), "x-request-id:"),
+                         std::size_t{1});
+}
+
+AURORA_TEST_CASE(a_stamped_identifier_does_not_disturb_the_table) {
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("first"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    // 标识在查表之前落上、且每次现取一枚新值：若它进了缓存键，第二次就永远不命中。表键只认 `Vary` 点名的
+    // 字段（`utest_net_http_cache` 的口径），本用例把这条边界钉在发起侧：换了 id 仍是同一个请求。
+    const auto first = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_CHECK_FALSE(first.value().from_cache());
+    const auto second = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_CHECK(second.value().from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 }
 
 }  // namespace aurora::test_cases::utest_net_http_client

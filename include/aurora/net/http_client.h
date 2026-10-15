@@ -198,6 +198,26 @@ class Client {
     /// @return 策略的只读引用。
     [[nodiscard]] auto retry_policy() const -> const RetryPolicy & { return retry_; }
 
+    /// @brief 装本客户端的链路标识缺省：是否自动补写 `X-Request-Id` 请求字段（缺省**开**）。
+    ///
+    /// 一次交换取一枚标识，重定向的每一跳与重试的每一次尝试都带同一串——它是「这条请求在对端日志里是哪
+    /// 一条」的唯一线索，也是本库把一次逻辑交换与若干次物理往来对上的锚点。取值形态是 `RFC 9562` UUIDv4
+    /// 的小写文本形态，熵取库内置的非密码学序列（进程内不重复、跨进程不相关，但**不是安全边界**：需要
+    /// 不可预测的关联值请由 `Request::request_id()` 自带）。
+    ///
+    /// 补齐只发生在「调用方没写过这枚字段」的时候：自己写了 `X-Request-Id` 的请求，本旋钮与请求级旋钮都
+    /// 不覆盖它（与 `Accept-Encoding` 的缺省补齐同一纪律）。关掉本旋钮即一个字节都不多发。
+    /// @param value 自动补齐为 true；假 = 除非请求自带，否则不发链路标识。
+    /// @return 自身引用，便于链式调用。
+    auto request_id(bool value) -> Client & {
+        request_id_ = value;
+        return *this;
+    }
+
+    /// @brief 查看链路标识缺省是否开着。
+    /// @return 开着为 true（缺省即 true）。
+    [[nodiscard]] auto request_id() const -> bool { return request_id_; }
+
     /// @brief 装本客户端的代理集合（缺省 `ProxyEnvironment::disabled()`：一切目标直连）。
     ///
     /// 每一跳按 `ProxyEnvironment::for_target(host, port, secure)` 现算代理，之后按本头「代理」条的两种交付
@@ -316,6 +336,7 @@ class Client {
     std::optional<NetPolicy> policy_;  ///< 已设的安全策略（未设 = 跟随进程级默认与保守缺省）
     std::function<std::uint64_t()> progress_frame_source_;  ///< 进度发射的帧号源（空 = 回合闸）
     RetryPolicy retry_;  ///< 缺省重试策略（attempts=1 即关闭）；逐请求由 `Request::retry_policy()` 覆盖
+    bool request_id_{true};  ///< 链路标识缺省：自动补 `X-Request-Id`（逐请求由 `Request::request_id()` 定）
     CacheOptions cache_options_;  ///< 缓存口径（缺省关）；逐请求由 `Request::no_cache()` 越
     std::shared_ptr<detail::HttpResponseCache> cache_;  ///< 共享的缓存表；拷贝的 Client 共用同一张
 };

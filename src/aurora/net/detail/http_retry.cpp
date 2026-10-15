@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
@@ -17,6 +16,7 @@
 
 #include "aurora/core/error_codes.h"
 #include "aurora/core/result.h"
+#include "aurora/net/detail/noncrypto_random.h"
 #include "aurora/net/http.h"
 
 namespace aurora::net::detail {
@@ -40,26 +40,11 @@ constexpr std::array<std::uint16_t, 6> AURORA_TRANSIENT_STATUS{408, 429, 500, 50
     return std::min(value, cap);
 }
 
-/// @brief 抖动序列的推进体：一颗非密码学的线性同余（`PCG` 一族之前的教科书参数，够打散节奏即可）。
+/// @brief 抖动序列的推进体：转发到库内置的非密码学序列（口径与选型理由见 `detail/noncrypto_random.h`）。
 ///
-/// 状态是函数内静态量，首次使用时以单调时钟播种（进程内一次性、线程安全的静态初始化），此后逐次推进。
-/// 刻意不取 `std::random_device`：它在 MinGW 腿是确定性伪随机、在 wasm 腿可能直接抛，两个结果都让单测无法
-/// 陈述「jitter=0 时恒等于算得值」这条真值；而抖动本身的用途（打散同批重试）不需要不可预测性。
-[[nodiscard]] auto jitter_unit() -> double {
-    constexpr std::uint64_t multiplier = UINT64_C(6364136223846793005);  // Knuth MMIX 的 LCG 参数
-    constexpr std::uint64_t increment = UINT64_C(1442695040888963407);
-    static std::atomic<std::uint64_t> state{
-        static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()) ^
-        UINT64_C(0x9E3779B97F4A7C15)};
-    auto current = state.load(std::memory_order_relaxed);
-    for (;;) {
-        const auto next = (current * multiplier) + increment;
-        if (state.compare_exchange_weak(current, next, std::memory_order_relaxed)) {
-            // 高 31 位折算到 [0, 1)：低数位是 LCG 的弱位，故弃之。
-            return static_cast<double>(next >> 33) * (1.0 / 4294967296.0);
-        }
-    }
-}
+/// 本文件不再自带状态与参数：抖动与链路标识要的只是同一件事——「不必安全，但必须散得开」，故共用一份
+/// 进程内序列。这里保留一层转发的名字，是让下方 `wait_delay` 的读法仍指向「抖动的一个单位」这一语义。
+[[nodiscard]] auto jitter_unit() -> double { return noncrypto_unit(); }
 
 /// @brief 跳过首尾的空白（`OWS` = 空格与水平制表）。
 [[nodiscard]] auto trim_ows(std::string_view text) -> std::string_view {

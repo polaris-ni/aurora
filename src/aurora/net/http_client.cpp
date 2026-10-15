@@ -36,6 +36,7 @@
 #include "aurora/net/detail/http_cache.h"
 #include "aurora/net/detail/http_encoding.h"
 #include "aurora/net/detail/http_progress.h"
+#include "aurora/net/detail/http_request_id.h"
 #include "aurora/net/detail/http_retry.h"
 #include "aurora/net/detail/http_wire.h"
 #include "aurora/net/engine.h"
@@ -198,6 +199,47 @@ auto advertise_accept_encoding(Request &request) -> void {
         return;
     }
     request.header("Accept-Encoding", detail::AURORA_HTTP_ACCEPT_ENCODING);
+}
+
+/// @brief 把链路标识按三级取定落到请求字段上：已写字段 → 请求级取值 → 客户端缺省补齐。
+///
+/// 只落在**原始请求**上，一次交换落一次：重试环的每一次尝试都从 `origin` 重新拷一份、重定向的每一跳又从
+/// 当前请求复制字段，故这一枚 id 天然穿过全部跳与全部尝试不变——那正是它存在的理由（对端与中间层据同一串
+/// 把一条逻辑交换的若干次物理往来对上）。落在逐尝试副本上会让第二次尝试换一个 id，把同一次重放在日志里裂成
+/// 两条互不相干的交换。
+/// @param request 待落标识的请求（就地修改）。
+/// @param enabled `Client::request_id()` 的缺省开关：关掉后除非请求自带，否则一个字节都不多发。
+auto stamp_request_id(Request &request, bool enabled) -> void {
+    if (request.headers().contains(detail::AURORA_HTTP_REQUEST_ID)) {
+        return;  // 调用方自己写的永远优先（与 `Accept-Encoding` 的缺省补齐同一纪律）
+    }
+    if (const auto &declared = request.request_id(); declared.has_value()) {
+        if (!declared->empty()) {
+            request.header(detail::AURORA_HTTP_REQUEST_ID, *declared);
+        }
+        return;  // 空串 = 这条请求明确不要标识，缺省补齐就此打住
+    }
+    if (enabled) {
+        request.header(detail::AURORA_HTTP_REQUEST_ID, detail::make_request_id());
+    }
+}
+
+/// @brief 起手把这次交换的身份记一行 debug：标识 + 方法 + 主机。
+///
+/// 恒不含鉴权字段与请求体——本行是给「拿 id 去对端日志找那条请求」用的，写得越少越不会被误当成凭据来源。
+/// 只在字段真的落上了时记：关着缺省又没自带的请求，本行没有可报的事实。
+/// @param request 已落标识的原始请求。
+auto log_exchange_identity(const Request &request) -> void {
+    const auto announced = request.headers().get(detail::AURORA_HTTP_REQUEST_ID);
+    if (!announced.has_value()) {
+        return;
+    }
+    std::string_view host;
+    if (const auto &target = request.url(); target.has_value()) {
+        host = target.value().host();
+    }
+    AURORA_LOG_DEBUG("net", "http exchange: id=", *announced, " method=", method_text(request.method()),
+                     " host=", host);
 }
 
 /// @brief 一跳的建连事实：连到谁、以哪种形态连、请求行写成什么形态。
@@ -541,6 +583,10 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         co_return Result<Response>{*invalid};
     }
     Request origin = std::move(request);
+    // 链路标识在原始请求上落一次（口径见 `stamp_request_id`）：落在这里，重定向的每一跳与重试的每一次尝试
+    // 都带着同一串出去，缓存键也据此在同一枚 id 上稳定命中。
+    stamp_request_id(origin, request_id_);
+    log_exchange_identity(origin);
     // 策略在发起那一刻读定：本次交换的每一跳与缓存命中都问这一份，之后改 `Client::policy()` 或进程级默认
     // 都不影响已在途的交换（判定用的是「出发时」的策略，不是「回投时」的策略）。
     const NetPolicy security = effective_policy(policy_);
@@ -910,6 +956,9 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
     StageTimer budget_timer(loop_open ? policy.budget : std::optional<std::chrono::milliseconds>{},
                             TimeoutStage::Budget, sequence, wall);
     Request origin = std::move(request);
+    // 链路标识与 `send` 同一处落一次：本入口的每一跳与每一次尝试都带同一串出去。
+    stamp_request_id(origin, request_id_);
+    log_exchange_identity(origin);
     // 策略读定与起手闸同 `send`：发起那一刻取一份，逐跳共用；闸排在查表之前，缓存命中同样是交付。
     const NetPolicy security = effective_policy(policy_);
     if (const auto verdict = gate_origin(proxy_, tls_, security, origin); !verdict) {

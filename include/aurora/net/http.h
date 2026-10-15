@@ -235,6 +235,20 @@ class Request {
     /// @return 字段表的只读引用。
     [[nodiscard]] auto headers() const -> const Headers & { return headers_; }
 
+    /// @brief 为本次交换指定链路标识（写进 `X-Request-Id` 请求字段）。
+    ///
+    /// 三级取定与 `Accept-Encoding` 的缺省补齐同一纪律：**调用方自己写过的 `X-Request-Id` 永远优先**（本旋钮
+    /// 与 `Client::request_id()` 都不覆盖它）；其次才是本旋钮给定的值；两者都没设而客户端缺省开着时，由发起侧
+    /// 现取一枚 `RFC 9562` UUIDv4 小写文本形态的标识。一次交换只取一枚：重定向的每一跳与重试的每一次尝试都带
+    /// 同一串，对端与中间层的日志才据此把一条逻辑交换的若干次物理往来串起来。
+    /// @param value 标识文本，原样写上线（本库不校验形状）；空串 = 明确声明本次交换不带链路标识（不是「跟随缺省」）。
+    /// @return 自身引用，便于链式调用。
+    auto request_id(std::string value) -> Request &;
+
+    /// @brief 查看本次交换的链路标识设定。
+    /// @return 已设定则返回之（空串 = 明确不带）；`nullopt` = 跟随 `Client::request_id()` 的缺省。
+    [[nodiscard]] auto request_id() const -> const std::optional<std::string> & { return request_id_; }
+
     /// @brief 设定消息体（覆盖既有）。`HEAD` 请求忽略之（应答无体、请求不得带体）。
     /// @param body 体字节。
     /// @return 自身引用，便于链式调用。
@@ -337,6 +351,7 @@ class Request {
     std::optional<Url> url_;  ///< 已解析目标；nullopt = 解析失败（错误暂存于 url_error_）
     std::optional<Error> url_error_;  ///< 解析失败的载荷；仅在 url_ 为空时有意义
     Headers headers_;  ///< 请求字段（不含补齐项）
+    std::optional<std::string> request_id_;  ///< 链路标识设定；nullopt = 跟随 Client 缺省，空串 = 明确不发
     std::vector<char> body_;  ///< 消息体
     Timeouts timeouts_;  ///< 三档超时（connect / read_idle / total），缺省全不设
     std::optional<RetryPolicy> retry_policy_;  ///< 本请求的重试策略覆盖；nullopt = 跟随 Client 的缺省

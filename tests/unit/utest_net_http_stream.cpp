@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -40,6 +41,7 @@
 #include "aurora/core/result.h"
 #include "aurora/net/blocking.h"
 #include "aurora/net/capabilities.h"
+#include "aurora/net/detail/http_request_id.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
 #include "aurora/net/http_stream.h"
@@ -71,6 +73,8 @@ using aurora::net::http::StreamOutcome;
 using aurora::net::http::Timeouts;
 using aurora::test::FakeEngine;
 using aurora::test::FakeEngineScope;
+using aurora::test::PeerScript;
+using aurora::test::PeerStop;
 using aurora::test::ScriptedPeer;
 using aurora::test::scripts::per_connection;
 using aurora::test::scripts::reply_after_reading;
@@ -282,6 +286,61 @@ auto allow_test_cleartext(Client &client) -> void {
     NetPolicy permissive;
     permissive.allow_cleartext_hosts = {"127.0.0.1"};
     client.policy(std::move(permissive));
+}
+
+/// @brief 记录被写出的请求头部块、随后按给定应答收摊的对端脚本（流式入口的标识判据要看写出的字节）。
+/// @param recorded 交接缓冲（脚本线程写入）。
+/// @param guard 交接缓冲的锁。
+/// @param payload 读满一个头部块后写出的应答字节。
+/// @return 对端脚本。
+[[nodiscard]] auto record_then_reply(std::string &recorded, std::mutex &guard, std::string payload) -> PeerScript {
+    return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
+                                                             PeerStop &stop) -> void {
+        (void)socket.set_io_timeout(std::chrono::milliseconds{200});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;
+            }
+            seen.append(buffer.data(), read.value());
+            if (seen.find("\r\n\r\n") != std::string::npos) {
+                break;  // 头部块到位即应答（GET 无体，再读只会挂到超时）
+            }
+        }
+        {
+            const std::scoped_lock held(guard);
+            recorded = seen;
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+    };
+}
+
+/// @brief 取记录到的请求字节里 `X-Request-Id` 的字段值（大小写不敏感找字段名，取第一条）。
+/// @param recorded 交接缓冲。
+/// @param guard 交接缓冲的锁。
+/// @return 字段值；没这条字段时为空串。
+[[nodiscard]] auto recorded_identifier(std::string &recorded, std::mutex &guard) -> std::string {
+    std::string text;
+    {
+        const std::scoped_lock held(guard);
+        text = recorded;
+    }
+    const std::string_view head{"x-request-id: "};
+    // 字段名按不敏感匹配：发起侧写的是规范拼写，但判据不该被拼写绑住。
+    std::string lowered;
+    lowered.reserve(text.size());
+    for (const char unit : text) {
+        lowered.push_back(unit >= 'A' && unit <= 'Z' ? static_cast<char>(unit + 32) : unit);
+    }
+    const auto begin = lowered.find(head);
+    if (begin == std::string::npos) {
+        return {};
+    }
+    const auto cursor = begin + head.size();
+    const auto end = lowered.find("\r\n", cursor);
+    return text.substr(cursor, end == std::string::npos ? std::string::npos : end - cursor);
 }
 
 }  // namespace
@@ -859,6 +918,53 @@ AURORA_TEST_CASE(a_stale_entry_revalidates_and_streams_the_stored_body) {
     AURORA_TEST_CHECK(again.value().response.from_cache());
     AURORA_TEST_CHECK_EQ(third.text, std::string{"stored"});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(stream_stamps_a_request_id_on_every_exchange) {
+    Client client;
+    allow_test_cleartext(client);
+    std::mutex guard;
+    std::string recorded;
+    ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", long_body(40000))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    // 标识的落位与 `send` 同处（协程体外、原始请求那一次）：本入口每跳与每次尝试都从它拷一份，挂上即全程同值。
+    AURORA_TEST_CHECK_EQ(aurora::net::detail::is_request_id_shape(recorded_identifier(recorded, guard)), true);
+}
+
+AURORA_TEST_CASE(stream_carries_a_request_level_identifier_and_respects_the_switch) {
+    Client client;
+    allow_test_cleartext(client);
+    std::mutex guard;
+    std::string recorded;
+    ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", long_body(200))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto declared = open_and_drive(client, Request::get(loopback_url(peer.port())).request_id("trace-42"), sink);
+    AURORA_TEST_REQUIRE(bool(declared));
+    AURORA_TEST_CHECK_EQ(recorded_identifier(recorded, guard), std::string{"trace-42"});
+
+    // 请求级空声明与客户端总开关都关掉这一次：与物化路径同一套三级取定，两个入口不说两种话。
+    std::string quiet;
+    ScriptedPeer second(record_then_reply(quiet, guard, length_framed("", long_body(200))));
+    AURORA_TEST_REQUIRE(second.valid());
+    RecordingSink next_sink;
+    const auto omitted = open_and_drive(client, Request::get(loopback_url(second.port())).request_id(""), next_sink);
+    AURORA_TEST_REQUIRE(bool(omitted));
+    AURORA_TEST_CHECK_EQ(recorded_identifier(quiet, guard), std::string{});
+
+    client.request_id(false);
+    std::string off;
+    ScriptedPeer third(record_then_reply(off, guard, length_framed("", long_body(200))));
+    AURORA_TEST_REQUIRE(third.valid());
+    RecordingSink off_sink;
+    AURORA_TEST_REQUIRE(bool(open_and_drive(client, Request::get(loopback_url(third.port())), off_sink)));
+    AURORA_TEST_CHECK_EQ(recorded_identifier(off, guard), std::string{});
 }
 
 }  // namespace aurora::test_cases::utest_net_http_stream
