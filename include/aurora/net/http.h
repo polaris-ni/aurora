@@ -1,12 +1,12 @@
 #pragma once
 
-/// @brief HTTP/1.1 客户端的请求 / 应答值类型与方法令牌（CHG-010 §6、§12）。
+/// @brief HTTP/1.1 客户端的请求 / 应答值类型、方法令牌与失败分型（CHG-010 §6、§12）。
 /// @file net/http.h
 ///
-/// 本头只回答一个问题：**「一次 HTTP 交换的输入与输出长什么样」**——方法是哪个、目标 URL、
-/// 请求字段与消息体、以及一份已物化的应答。它同样是纯值类型：不含句柄、不含 socket、不含任何
-/// 平台头，可在任意线程拷贝与比较。真正的「连上去、把 `render_head()` 写出去、把应答读回来」
-/// 属发起侧（`net::http::Client`，建在传输与 TLS 之上），不在这里。
+/// 本头只回答一个问题：**「一次 HTTP 交换的输入、输出与失败长什么样」**——方法是哪个、目标 URL、
+/// 请求字段与消息体、一份已物化的应答、以及一枚失败该往哪儿归因。它同样是纯值类型：不含句柄、不含
+/// socket、不含任何平台头，可在任意线程拷贝与比较。真正的「连上去、把 `render_head()` 写出去、把应答
+/// 读回来」属发起侧（`net::http::Client`，建在传输与 TLS 之上），不在这里。
 ///
 /// 三条设计约束值得在写代码前知道：
 ///
@@ -301,5 +301,59 @@ class Response {
     Headers headers_;  ///< 应答字段
     std::vector<char> body_;  ///< 已物化消息体
 };
+
+/// @brief 一次 HTTP 失败的归因档：把「该往哪儿排查」这一件事从错误码里提出来。
+///
+/// 本档只回答**归因层**，不回答**能不能重试**——后者由 `Error::retryable`（与 `codespec/errors.toml`
+/// 逐码同源）给出，两枚正交：`Timeout` 且可重试是「再来一次」，`Proxy` 且可重试
+/// （`net-proxy-config-unreadable`）是「读系统配置的时机不对」，压进同一枚枚举只会让调用方靠猜分工。
+/// 之所以还要第三枚分类而不是直接用生成表的 `ErrorCategory`：那是**全库**粗分类，本族 41 枚全落在
+/// `io` 下，分不出「名字解析不了」与「对端把字节写坏了」这两种相反的排查方向。
+///
+/// 九档按「先具体后兜底」归一，同一枚码恒只进一档：`Cancelled` 优先于一切（调用方主动收摊，不再看
+/// 链路）；`Timeout` 看的是**时限**而不是阶段（HTTP 三档超时与裸传输空闲超时同归此档）；`Dns` / `Proxy` /
+/// `Tls` 按**失败发生在哪一跳**归类；`Unreachable` 是「链路断了，但没有更具体的档可归」；`Protocol` 只指
+/// **对端把报文写坏了**；`Status` 指「应答已收到、状态码本身即失败」；`Invalid` 是兜底，涵盖调用点写错、
+/// 本构建缺能力、本库旋钮设限这三类「动作在代码或配置里而不在网络上」的情形。
+/// @note Thread: thread-safe（值类型）
+/// @note Side-effects: none
+enum class HttpErrorClass : std::uint8_t {
+    Invalid = 0,  ///< 兜底档：调用点 / 本构建能力 / 本库上限（要改的是代码与旋钮，不是网络）
+    Dns,  ///< 名字解析不了
+    Unreachable,  ///< 链路断了：建连、读写、事件循环侧的失败
+    Proxy,  ///< 代理这一跳给的答案：不可达、要认证、握手字节不合、系统配置读不到
+    Tls,  ///< 安全通道本身：握手、证书、版本、pin
+    Timeout,  ///< 时限到点
+    Protocol,  ///< 对端把报文写坏了：状态行、字段、分帧、编码后的字节
+    Status,  ///< 应答已收到且状态码本身即失败（4xx / 5xx）
+    Cancelled,  ///< 调用方取消
+};
+
+/// @brief 把一枚错误码归入 HTTP 失败分型档（全函数：任意 `ErrorCode` 都有档可归）。
+///
+/// 逐码映射以本函数为唯一真值源，覆盖 `net-*` 与 `http-*` 两族全部 41 枚（含发起侧用不到的服务端面码，
+/// 同样给出档）；其余族的码（`general-*` / `widget-*` 之类）不是网络交换的产物，一律落 `Invalid` 而
+/// **不**报错——分型是观测口，不是校验口。两处值得点名的归类：`http-redirect-limit` 归 `Protocol`
+/// （对端把重定向写成了环，改不了它就得改跟随策略），`http-body-too-large` 归 `Invalid`（越的是本库
+/// 上限旋钮，动作在调用方而不在对端）。
+/// @param code 错误码（取自 `Error::code_enum`）。
+/// @return 该码的归因档。
+[[nodiscard]] auto error_class_of(ErrorCode code) -> HttpErrorClass;
+
+/// @brief 由应答状态码折算归因档（状态码是数据不是错误，故这条映射不在错误码表里）。
+///
+/// `send` 与 `open_stream` 对非 2xx 交出的仍是**成功** `Result`：一份 404 的应答同样是完整的事实，把它
+/// 折算成错误就丢掉了状态码本身。于是「这次算不算状态码类失败」由调用方判，本函数给出判完之后的档，
+/// 使 `Status` 这一档有唯一产出点而不是枚举里的死项。
+/// @param status 应答状态码（`Response::status()`）。
+/// @return `>= 400` 恒为 `Status`；`< 400` 回 `Invalid`，此处语义退化为「没有状态码类失败可归因」，
+///         不代表这次交换出错。
+[[nodiscard]] auto error_class_of_status(std::uint16_t status) -> HttpErrorClass;
+
+/// @brief 分型档的稳定小写令牌（日志与 Inspector 用；跨进程只认这枚文本，改名不影响它）。
+/// @param error_class 归因档。
+/// @return `"invalid"` / `"dns"` / `"unreachable"` / `"proxy"` / `"tls"` / `"timeout"` / `"protocol"` /
+///         `"status"` / `"cancelled"` 之一，恒非空。
+[[nodiscard]] auto error_class_text(HttpErrorClass error_class) -> std::string_view;
 
 }  // namespace aurora::net::http

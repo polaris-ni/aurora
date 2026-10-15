@@ -4888,6 +4888,20 @@
       ]
     },
     {
+      "name": "HttpErrorClass",
+      "values": [
+        "Invalid",
+        "Dns",
+        "Unreachable",
+        "Proxy",
+        "Tls",
+        "Timeout",
+        "Protocol",
+        "Status",
+        "Cancelled"
+      ]
+    },
+    {
       "name": "JsonType",
       "values": [
         "Null",

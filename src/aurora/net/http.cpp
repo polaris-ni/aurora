@@ -227,4 +227,83 @@ auto Response::text() const -> Result<std::string> {
         make_error(ErrorCode::HttpCharsetUnsupported, "unsupported response charset: '" + charset + "'")};
 }
 
+auto error_class_of(ErrorCode code) -> HttpErrorClass {
+    // 归因档按「失败发生在哪一跳」定，动作（能不能重试）留给 `Error::retryable`：同一档里可重试与
+    // 不可重试的码并存是刻意的，把动作折进档位就得为每枚码再造一枚枚举，反而没人敢改。
+    switch (code) {
+        case ErrorCode::NetCancelled:  // 调用方主动收摊：链路事实一律让位
+            return HttpErrorClass::Cancelled;
+        case ErrorCode::HttpTimeout:
+        case ErrorCode::NetRecvTimeout:
+        case ErrorCode::NetConnectTimeout:
+            return HttpErrorClass::Timeout;
+        case ErrorCode::NetDnsFailed:  // 名字解析不了，还没走到链路
+            return HttpErrorClass::Dns;
+        case ErrorCode::NetTlsHandshakeFailed:
+        case ErrorCode::NetTlsCertRejected:
+        case ErrorCode::NetTlsVersionMismatch:
+        case ErrorCode::NetTlsPinMismatch:
+            return HttpErrorClass::Tls;
+        case ErrorCode::NetProxyUnreachable:
+        case ErrorCode::NetProxyAuthRequired:
+        case ErrorCode::NetProxyProtocol:
+        case ErrorCode::NetProxyConfigUnreadable:  // 「读不到系统代理」是代理这一跳的事，不是调用点写错
+            return HttpErrorClass::Proxy;
+        case ErrorCode::NetConnectFailed:
+        case ErrorCode::NetSocketFailed:
+        case ErrorCode::NetRuntimeFailed:
+        case ErrorCode::NetWaitFailed:
+        case ErrorCode::NetSendFailed:
+        case ErrorCode::NetRecvFailed:
+        case ErrorCode::NetBindFailed:  // 服务端面：发起侧不产出，仍给出档而非「未知」
+        case ErrorCode::NetListenFailed:  // 同上
+        case ErrorCode::NetAcceptFailed:  // 同上
+            return HttpErrorClass::Unreachable;
+        case ErrorCode::HttpProtocolError:
+        case ErrorCode::HttpBodyCorrupt:
+        case ErrorCode::HttpRedirectLimit:  // 对端把重定向写成了环
+            return HttpErrorClass::Protocol;
+        default:
+            // 兜底档覆盖两类：本族里「动作在代码或配置里而不在网络上」的 16 枚（`net-url-invalid` /
+            // `http-request-invalid` / `net-endpoint-invalid` / `net-platform-unavailable` /
+            // `net-tls-engine-unavailable` / `net-option-failed` / `net-option-conflict` /
+            // `net-timeout-option-failed` / `net-proxy-config-invalid` / `net-proxy-unsupported` /
+            // `net-framer-config-invalid` / `net-buffer-limit` / `net-framer-overflow` /
+            // `http-body-too-large` / `http-charset-unsupported` / `http-content-encoding-unsupported`），
+            // 以及压根不属于网络交换的其它族码。逐码清单以 `specification/06-app-platform.md` §8.8.22 与
+            // `utest_net_http` 的期望表为准（本 switch 与那两处同批改）；分型是观测口而非校验口，故不报错、只归档。
+            return HttpErrorClass::Invalid;
+    }
+}
+
+auto error_class_of_status(std::uint16_t status) -> HttpErrorClass {
+    // 400 起才算「状态码本身即失败」：3xx 的重定向由发起侧按 Location 处理完才交出最终应答，2xx 与
+    // 1xx 走到这里时没有失败可归因。
+    return status >= 400 ? HttpErrorClass::Status : HttpErrorClass::Invalid;
+}
+
+auto error_class_text(HttpErrorClass error_class) -> std::string_view {
+    switch (error_class) {
+        case HttpErrorClass::Invalid:
+            return "invalid";
+        case HttpErrorClass::Dns:
+            return "dns";
+        case HttpErrorClass::Unreachable:
+            return "unreachable";
+        case HttpErrorClass::Proxy:
+            return "proxy";
+        case HttpErrorClass::Tls:
+            return "tls";
+        case HttpErrorClass::Timeout:
+            return "timeout";
+        case HttpErrorClass::Protocol:
+            return "protocol";
+        case HttpErrorClass::Status:
+            return "status";
+        case HttpErrorClass::Cancelled:
+            return "cancelled";
+    }
+    return "invalid";  // 越界值（非本枚举的合法档）折回兜底档，与 error_class_of 的 default 同一口径
+}
+
 }  // namespace aurora::net::http

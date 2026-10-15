@@ -5,9 +5,12 @@
 ///           当场解析与「解析失败延后到 render_head 才报错」的口径；请求序列化的两处补齐（有体且未声明
 ///           `Content-Length` / `Transfer-Encoding` 时按体长度补、缺 `Host` 由字节层按目标补）与 HEAD
 ///           请求丢弃消息体；链式字段追加保序、`set_header` 清同名后追加；应答值类型的状态码 / 原因 /
-///           大小写不敏感取值 / 原始字节与文本形态。
+///           大小写不敏感取值 / 原始字节与文本形态；失败分型 `HttpErrorClass` 的逐码归档（以生成表做完整性
+///           断言：每一枚 `net-*` / `http-*` 都必须被点名，非网络族码落兜底档）、档位与 `retryable` 的正交
+///           关系、`error_class_of_status` 的 400 边界，以及 `error_class_text` 的九枚小写稳定令牌。
 /// 全用例零 socket、零 DNS、不读环境变量，故三平台行为一致、wasm 腿同样可跑，无需 `AURORA_TEST_SKIP`。
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -23,6 +26,10 @@
 namespace aurora::test_cases::utest_net_http {
 namespace {
 
+using aurora::net::http::error_class_of;
+using aurora::net::http::error_class_of_status;
+using aurora::net::http::error_class_text;
+using aurora::net::http::HttpErrorClass;
 using aurora::net::http::Method;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
@@ -43,6 +50,84 @@ using aurora::net::http::Timeouts;
 /// @return 出现为真。
 [[nodiscard]] auto contains(std::string_view haystack, std::string_view needle) -> bool {
     return haystack.find(needle) != std::string_view::npos;
+}
+
+/// @brief 一枚网络码的期望归因档（逐码列全：新增码没进本表就会被完整性用例拦下，而不是静默落兜底档）。
+struct ClassExpectation {
+    aurora::ErrorCode code;  ///< 生成表里的错误码
+    HttpErrorClass expected;  ///< 期望归入的档
+};
+
+/// @brief `net-*` 与 `http-*` 两族全部 41 枚的期望归因档（按档分组，便于逐条读判定依据）。
+constexpr std::array<ClassExpectation, 41> AURORA_HTTP_ERROR_CLASS_TABLE{{
+    // 名字解析不了：还没走到链路。
+    {.code = aurora::ErrorCode::NetDnsFailed, .expected = HttpErrorClass::Dns},
+    // 链路断了且没有更具体的档可归：含服务端面三枚（发起侧不产出，但同样给出档而非「未知」）。
+    {.code = aurora::ErrorCode::NetConnectFailed, .expected = HttpErrorClass::Unreachable},
+    {.code = aurora::ErrorCode::NetSocketFailed, .expected = HttpErrorClass::Unreachable},
+    {.code = aurora::ErrorCode::NetRuntimeFailed, .expected = HttpErrorClass::Unreachable},
+    {.code = aurora::ErrorCode::NetWaitFailed, .expected = HttpErrorClass::Unreachable},
+    {.code = aurora::ErrorCode::NetSendFailed, .expected = HttpErrorClass::Unreachable},
+    {.code = aurora::ErrorCode::NetRecvFailed, .expected = HttpErrorClass::Unreachable},
+    {.code = aurora::ErrorCode::NetBindFailed, .expected = HttpErrorClass::Unreachable},
+    {.code = aurora::ErrorCode::NetListenFailed, .expected = HttpErrorClass::Unreachable},
+    {.code = aurora::ErrorCode::NetAcceptFailed, .expected = HttpErrorClass::Unreachable},
+    // 代理这一跳给的答案：注意「配置读不到」归此档而「配置写错了」归兜底档——前者的动作在环境，后者在调用点。
+    {.code = aurora::ErrorCode::NetProxyUnreachable, .expected = HttpErrorClass::Proxy},
+    {.code = aurora::ErrorCode::NetProxyAuthRequired, .expected = HttpErrorClass::Proxy},
+    {.code = aurora::ErrorCode::NetProxyProtocol, .expected = HttpErrorClass::Proxy},
+    {.code = aurora::ErrorCode::NetProxyConfigUnreadable, .expected = HttpErrorClass::Proxy},
+    // 安全通道本身（引擎不提供 TLS 属本构建能力，落兜底档）。
+    {.code = aurora::ErrorCode::NetTlsHandshakeFailed, .expected = HttpErrorClass::Tls},
+    {.code = aurora::ErrorCode::NetTlsCertRejected, .expected = HttpErrorClass::Tls},
+    {.code = aurora::ErrorCode::NetTlsVersionMismatch, .expected = HttpErrorClass::Tls},
+    {.code = aurora::ErrorCode::NetTlsPinMismatch, .expected = HttpErrorClass::Tls},
+    // 时限到点：三档 HTTP 超时与裸传输空闲超时同归此档，档位不分阶段。
+    {.code = aurora::ErrorCode::HttpTimeout, .expected = HttpErrorClass::Timeout},
+    {.code = aurora::ErrorCode::NetConnectTimeout, .expected = HttpErrorClass::Timeout},
+    {.code = aurora::ErrorCode::NetRecvTimeout, .expected = HttpErrorClass::Timeout},
+    // 对端把报文写坏了：含「把重定向写成了环」。
+    {.code = aurora::ErrorCode::HttpProtocolError, .expected = HttpErrorClass::Protocol},
+    {.code = aurora::ErrorCode::HttpBodyCorrupt, .expected = HttpErrorClass::Protocol},
+    {.code = aurora::ErrorCode::HttpRedirectLimit, .expected = HttpErrorClass::Protocol},
+    // 调用方主动收摊优先于一切链路事实。
+    {.code = aurora::ErrorCode::NetCancelled, .expected = HttpErrorClass::Cancelled},
+    // 兜底档：调用点写错 / 本构建缺能力 / 本库旋钮设限——动作在代码与配置里，不在网络上。
+    {.code = aurora::ErrorCode::NetUrlInvalid, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::HttpRequestInvalid, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetEndpointInvalid, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetPlatformUnavailable, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetTlsEngineUnavailable, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetOptionFailed, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetOptionConflict, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetTimeoutOptionFailed, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetProxyConfigInvalid, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetProxyUnsupported, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetFramerConfigInvalid, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetBufferLimit, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::NetFramerOverflow, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::HttpBodyTooLarge, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::HttpCharsetUnsupported, .expected = HttpErrorClass::Invalid},
+    {.code = aurora::ErrorCode::HttpContentEncodingUnsupported, .expected = HttpErrorClass::Invalid},
+}};
+
+/// @brief 查期望表里某枚码的归档；不在表里回 `nullptr`。
+/// @param code 待查的错误码。
+/// @return 期望档的只读指针，未列即空。
+[[nodiscard]] auto expected_class_of(aurora::ErrorCode code) -> const HttpErrorClass * {
+    for (const auto &entry : AURORA_HTTP_ERROR_CLASS_TABLE) {
+        if (entry.code == code) {
+            return &entry.expected;
+        }
+    }
+    return nullptr;
+}
+
+/// @brief 判断 slug 属于网络两族（`net-*` / `http-*`）。
+/// @param slug 生成表里的冻结 slug。
+/// @return 属于两族为真。
+[[nodiscard]] auto is_network_slug(std::string_view slug) -> bool {
+    return slug.starts_with("net-") || slug.starts_with("http-");
 }
 
 }  // namespace
@@ -216,6 +301,105 @@ AURORA_TEST_CASE(request_timeouts_have_three_stages) {
     AURORA_TEST_CHECK_TRUE(!bare.timeouts().connect.has_value());
     AURORA_TEST_CHECK_TRUE(!bare.timeouts().read_idle.has_value());
     AURORA_TEST_CHECK_TRUE(!bare.timeouts().total.has_value());
+}
+
+AURORA_TEST_CASE(error_class_maps_every_net_and_http_code) {
+    // 正向：期望表里逐码比对实现给出的档。
+    for (const auto &entry : AURORA_HTTP_ERROR_CLASS_TABLE) {
+        AURORA_TEST_CHECK_EQ(error_class_of(entry.code), entry.expected);
+    }
+
+    // 完整性：生成表里每一枚 `net-*` / `http-*` 都必须在期望表里被点名。新增一枚网络码若忘了归档，
+    // 它会静默落进兜底档、让「该不该给重试按钮」的判定悄悄变形——这条断言把那种漂移挡在测试里。
+    std::size_t seen = 0;
+    for (const auto &meta : AURORA_ERROR_TABLE) {
+        if (!is_network_slug(meta.slug)) {
+            continue;
+        }
+        ++seen;
+        const auto *expected = expected_class_of(meta.code);
+        AURORA_TEST_REQUIRE_MSG(expected != nullptr, std::string{meta.slug} + " is an unclassified network code");
+        AURORA_TEST_CHECK_MSG(error_class_of(meta.code) == *expected,
+                              std::string{"class drift for: "} + std::string{meta.slug});
+    }
+    AURORA_TEST_CHECK_EQ(seen, AURORA_HTTP_ERROR_CLASS_TABLE.size());
+    AURORA_TEST_CHECK_EQ(seen, std::size_t{41});
+
+    // `Status` 档没有码可映射（非 2xx 是成功 Result，状态码是数据不是错误），它的唯一产出点是下面那枚
+    // 按状态码折算的函数——本断言把「码表里不该出现 Status」钉成一条事实，免得日后误加。
+    for (const auto &entry : AURORA_HTTP_ERROR_CLASS_TABLE) {
+        AURORA_TEST_CHECK_TRUE(entry.expected != HttpErrorClass::Status);
+    }
+}
+
+AURORA_TEST_CASE(error_class_of_a_non_network_code_falls_back_to_invalid) {
+    // 分型是观测口而非校验口：不属于网络交换的码照样给出兜底档，调用方无需先判「这枚码该不该问」。
+    AURORA_TEST_CHECK_EQ(error_class_of(aurora::ErrorCode::GeneralUnknown), HttpErrorClass::Invalid);
+    AURORA_TEST_CHECK_EQ(error_class_of(aurora::ErrorCode::LayoutDepthExceeded), HttpErrorClass::Invalid);
+    AURORA_TEST_CHECK_EQ(error_class_of(aurora::ErrorCode::WidgetUnknownType), HttpErrorClass::Invalid);
+}
+
+AURORA_TEST_CASE(error_class_is_orthogonal_to_retryable) {
+    // 同一档里可重试与不可重试并存是刻意的：档位回答「往哪儿排查」，`retryable` 回答「要不要再来一次」。
+    // 若两者折成一枚，`net-send-failed`（链路断了但重发无益）与 `net-connect-failed`（换一次就可能通）
+    // 就得各占一档，档位数量会被重试口径牵着走。
+    AURORA_TEST_CHECK_EQ(error_class_of(aurora::ErrorCode::NetConnectFailed), HttpErrorClass::Unreachable);
+    AURORA_TEST_CHECK_EQ(error_class_of(aurora::ErrorCode::NetSendFailed), HttpErrorClass::Unreachable);
+    AURORA_TEST_CHECK_TRUE(aurora::retryable(aurora::ErrorCode::NetConnectFailed));
+    AURORA_TEST_CHECK_FALSE(aurora::retryable(aurora::ErrorCode::NetSendFailed));
+
+    // 反方向同样成立：同一枚 `retryable` 值散落在不同档里。
+    AURORA_TEST_CHECK_TRUE(aurora::retryable(aurora::ErrorCode::NetDnsFailed));
+    AURORA_TEST_CHECK_TRUE(aurora::retryable(aurora::ErrorCode::NetProxyConfigUnreadable));
+    AURORA_TEST_CHECK_EQ(error_class_of(aurora::ErrorCode::NetDnsFailed), HttpErrorClass::Dns);
+    AURORA_TEST_CHECK_EQ(error_class_of(aurora::ErrorCode::NetProxyConfigUnreadable), HttpErrorClass::Proxy);
+
+    // 「读不到系统代理」与「代理配置写错了」的排查方向相反：前者问环境，后者改调用点。
+    AURORA_TEST_CHECK_EQ(error_class_of(aurora::ErrorCode::NetProxyConfigInvalid), HttpErrorClass::Invalid);
+}
+
+AURORA_TEST_CASE(error_class_of_status_folds_only_4xx_and_5xx) {
+    for (const std::uint16_t status :
+         {std::uint16_t{400}, std::uint16_t{404}, std::uint16_t{429}, std::uint16_t{500}, std::uint16_t{503}}) {
+        AURORA_TEST_CHECK_EQ(error_class_of_status(status), HttpErrorClass::Status);
+    }
+    // 1xx / 2xx / 3xx 没有「状态码即失败」这回事：兜底档在此的含义退化为「无可归因的状态码类失败」。
+    for (const std::uint16_t status :
+         {std::uint16_t{100}, std::uint16_t{200}, std::uint16_t{204}, std::uint16_t{302}, std::uint16_t{399}}) {
+        AURORA_TEST_CHECK_EQ(error_class_of_status(status), HttpErrorClass::Invalid);
+    }
+    // 边界钉在 400：399 与 400 之间不许有第三种解释。
+    AURORA_TEST_CHECK_EQ(error_class_of_status(std::uint16_t{399}), HttpErrorClass::Invalid);
+    AURORA_TEST_CHECK_EQ(error_class_of_status(std::uint16_t{400}), HttpErrorClass::Status);
+}
+
+AURORA_TEST_CASE(error_class_text_is_a_stable_lowercase_token) {
+    constexpr std::array<HttpErrorClass, 9> all_classes{
+        HttpErrorClass::Invalid,  HttpErrorClass::Dns,    HttpErrorClass::Unreachable,
+        HttpErrorClass::Proxy,    HttpErrorClass::Tls,    HttpErrorClass::Timeout,
+        HttpErrorClass::Protocol, HttpErrorClass::Status, HttpErrorClass::Cancelled,
+    };
+    constexpr std::array<std::string_view, 9> expected_texts{"invalid", "dns",      "unreachable", "proxy",    "tls",
+                                                             "timeout", "protocol", "status",      "cancelled"};
+
+    for (std::size_t index = 0; index < all_classes.size(); ++index) {
+        const auto text = error_class_text(all_classes.at(index));
+        AURORA_TEST_CHECK_EQ(text, expected_texts.at(index));
+        AURORA_TEST_CHECK_TRUE(!text.empty());
+        // 令牌恒小写下划线族：日志与 Inspector 只认这枚文本，大小写漂了就成两条真值。
+        for (const char c : text) {
+            AURORA_TEST_CHECK_TRUE(c >= 'a' && c <= 'z');
+        }
+        // 九档令牌两两不同（可枚举性：进程外消费者靠它区分档位）。
+        for (std::size_t other = 0; other < all_classes.size(); ++other) {
+            if (other != index) {
+                AURORA_TEST_CHECK_TRUE(text != expected_texts.at(other));
+            }
+        }
+    }
+    // 兜底档是枚举的零值：默认构造出来的档位与 `error_class_of` 的兜底口径同为 `Invalid`。
+    AURORA_TEST_CHECK_EQ(static_cast<int>(HttpErrorClass{}), static_cast<int>(HttpErrorClass::Invalid));
+    AURORA_TEST_CHECK_EQ(error_class_text(HttpErrorClass{}), "invalid");
 }
 
 }  // namespace aurora::test_cases::utest_net_http
