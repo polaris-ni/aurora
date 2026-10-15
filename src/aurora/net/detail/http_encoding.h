@@ -1,4 +1,4 @@
-// http_encoding.h —— HTTP 应答 `Content-Encoding` 的发起侧解压管线（CHG-010 §12「内容编码」的 HTTP 接入；
+// http_encoding.h —— HTTP 应答 `Content-Encoding` 的发起侧解压管线（CHG-018 §12「内容编码」的 HTTP 接入；
 // 仅库实现可见，不属公共 API）。
 //
 // 为何单列：本文件里是三条各自有独立判据的纯逻辑——**编码名的文法与支持集的判定**（一个字节都不碰）、

@@ -1,4 +1,4 @@
-// system_proxy.cpp —— 系统代理设置的平台采集腿（CHG-010 §11「系统代理读取」的唯一平台 API 落点）。
+// system_proxy.cpp —— 系统代理设置的平台采集腿（CHG-018 §11「系统代理读取」的唯一平台 API 落点）。
 //
 // 本文件把「操作系统里配了什么」压成 `net::detail::SystemProxySnapshot` 的几个文本字段，
 // 判据一律不在这里：文法、槽位、PAC/WPAD 分岔全部由 `net/detail/system_proxy.cpp` 的纯换算承担，

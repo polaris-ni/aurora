@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief 引擎替身安装口（CHG-010 测试替身切片的库内接缝）。
+/// @brief 引擎替身安装口（CHG-018 测试替身切片的库内接缝）。
 /// @file net/detail/engine_override.h
 ///
 /// **仅供测试设施使用，不占公共 API 预算。**存在理由：`Engine` 把「什么时候执行、什么时候到期」

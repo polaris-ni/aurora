@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/http_client.h + src/aurora/net/http_client.cpp
-/// 测试说明: HTTP 发起侧 send 核心闭环的离线回归（CHG-010 §6 / §12）。以 ScriptedPeer 在回环上按脚本
+/// 测试说明: HTTP 发起侧 send 核心闭环的离线回归（CHG-018 §6 / §12）。以 ScriptedPeer 在回环上按脚本
 ///           应答真实字节，覆盖 Content-Length 与 Chunked 两种分帧的物化、302 重定向跟随（跨到第二个对端）
 ///           与超限落 `http-redirect-limit`；整请求超时用 FakeEngine 脚本化时钟（连上但静默的对端 + 推进到
 ///           时限）验 `http-timeout`。内容编码接入（§12「内容编码」的 HTTP 侧）验 `Accept-Encoding` 由

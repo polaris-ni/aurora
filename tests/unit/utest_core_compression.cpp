@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/compression.h + src/aurora/core/compression.cpp
-/// 测试说明: 通用解压能力契约回归（CHG-010 §12「内容编码」的 core 级落地）：三格式
+/// 测试说明: 通用解压能力契约回归（CHG-018 §12「内容编码」的 core 级落地）：三格式
 ///           （gzip / zlib / deflate raw）解压逐值一致；截断与中部损坏落
 ///           `compression-data-corrupt`；`max_output_bytes` 越限落
 ///           `compression-output-too-large`（解压炸弹防护，差一字节即拒）；流式

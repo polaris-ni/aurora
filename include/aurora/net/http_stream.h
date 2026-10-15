@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief HTTP/1.1 发起侧的流式接收面：`DataSink` 抽象、逐段交付与 `StreamOutcome` 完成事实（CHG-010 §6 / §12）。
+/// @brief HTTP/1.1 发起侧的流式接收面：`DataSink` 抽象、逐段交付与 `StreamOutcome` 完成事实（CHG-018 §6 / §12）。
 /// @file net/http_stream.h
 ///
 /// 本头只回答一个问题：**「应答体还在路上时，把字节一段段交给宿主，并且整条消息不必同时存在于内存里」**。

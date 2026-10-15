@@ -1,4 +1,4 @@
-// Aurora net — SecureTransport 系统栈后端（CHG-010 TLS 切片：macOS 缺省装配，提案 §5 平台矩阵）。
+// Aurora net — SecureTransport 系统栈后端（CHG-018 TLS 切片：macOS 缺省装配，提案 §5 平台矩阵）。
 //
 // 与 Schannel 腿同一套取舍：用系统栈而不是自带 TLS 源码，零依赖、随系统 servicing 打补丁，记录保护
 // 与版本降级策略由系统承担；本层只做三件系统做不了或做不对的事——把字节流换成内存推拉、把信任判定

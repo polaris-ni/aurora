@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/app/event_source_registry.h
-/// 测试说明: aurora::app::EventSourceRegistry 的平台无关就绪契约（CHG-010 底座切片）：
+/// 测试说明: aurora::app::EventSourceRegistry 的平台无关就绪契约（CHG-018 底座切片）：
 ///           有效句柄登记成功、-1 与「本腿不支持」回 net-platform-unavailable（不假降级）；
 ///           就绪回调「抵达次数 == 就绪次数」；注销 = 停止产生新回调但已入队的一次尾批仍抵达
 ///           （§18-1），`cancel_pending()` 才作废尾批；移动后源句柄析构不双重注销；同句柄

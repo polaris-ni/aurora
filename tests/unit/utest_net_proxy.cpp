@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/proxy.h
-/// 测试说明: 代理配置层的文本契约与决策契约回归（CHG-010 §11 配置侧）：形态与缺省端口（裸
+/// 测试说明: 代理配置层的文本契约与决策契约回归（CHG-018 §11 配置侧）：形态与缺省端口（裸
 ///           `host[:port]` 按 HTTP CONNECT、SOCKS5 缺省 1080、`socks5h` 把解析权交给代理）、
 ///           userinfo 的百分号解码与 `to_string()` 的密码掩码（凭据不得从可打印形态泄漏）、
 ///           已知但不支持的 scheme 走独立错误码而非退化成明文跳（`net-proxy-unsupported`）、

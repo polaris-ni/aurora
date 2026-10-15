@@ -1,4 +1,4 @@
-// http_cache.h —— 内存缓存的判定与表（CHG-010 §12「条件请求与缓存校验」；仅库实现可见，不属公共 API）。
+// http_cache.h —— 内存缓存的判定与表（CHG-018 §12「条件请求与缓存校验」；仅库实现可见，不属公共 API）。
 //
 // 为何单列：一次应答「能不能存、存多久、什么时候必须问对端、304 回来之后怎么并」是 `RFC 9111` 的一套独立
 // 算式，与「怎么把字节读回来」（`wire::ResponseAssembler`）、「该不该再打一遍」（`http_retry.h`）都无关。
@@ -187,8 +187,8 @@ class HttpResponseCache final {
     /// @return 进了表为 true；不可存（`no-store` / `Vary: *` / 方法或状态码不可缓存 / 无有效期又无校验子）
     ///         为 false，表保持原样。
     [[nodiscard]] auto store(aurora::net::http::Method method, const std::string &url,
-                             const aurora::Headers &request_headers,
-                             const aurora::net::http::Response &response, CacheTime now) -> bool;
+                             const aurora::Headers &request_headers, const aurora::net::http::Response &response,
+                             CacheTime now) -> bool;
 
     /// @brief 重验证成功（拿到 304）：并头部、重新折算新鲜度、换回一份可直接交付的应答。
     /// @param method 请求方法。

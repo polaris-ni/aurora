@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/url.h
-/// 测试说明: `Url` / `QueryParams` 值类型行为契约回归（CHG-010 §12 基础件）：解析即规范化
+/// 测试说明: `Url` / `QueryParams` 值类型行为契约回归（CHG-018 §12 基础件）：解析即规范化
 ///           （scheme 与主机小写、主机尾点去除、百分号三元组大写化且还原无保留字符、绝对 URL
 ///           点段消除、裸非 ASCII 字节转义）、RFC 3986 §5.4 相对解析表与解析规范化用例集由
 ///           `tests/fixtures/url_vectors/*.tsv` 黄金语料驱动（来源与口径见该目录 README）、四套百分号

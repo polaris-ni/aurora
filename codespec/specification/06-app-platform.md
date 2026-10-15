@@ -730,7 +730,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 链接面：`ws2_32` 随核心 `aurora` 目标在 Windows 无条件 `PUBLIC` 传导（见 `BUILD_OPTIONS.md`），各消费者不再散挂。Emscripten 腿经其 BSD socket shim 编译，但浏览器运行时无真实监听语义，Inspector 相关用例在 wasm 构建下按 `AURORA_TEST_SKIP` 退避。回归：`utest_net_socket`（行为契约 + 迁移期别名同体）+ `utest_inspector_client`（超时平台形态）。
 
-#### 8.8.1 底座值类型：端点与取消令牌（CHG-010 已落地部分）
+#### 8.8.1 底座值类型：端点与取消令牌（CHG-018 已落地部分）
 
 `include/aurora/net/address.h` 与 `include/aurora/net/cancellation.h` 是通用网络栈的第一批落点。两者都不引入平台 socket 头，也**不改变**上一段所述同步传输面的当前范围（`*_loopback` 两枚工厂仍固定绑回环；地址族无关的 `connect` / `bind` 通路见 §8.8.6）。
 
@@ -739,7 +739,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：`net-endpoint-invalid`（`message` 携 `detail=` 指明被拒原因）、`net-cancelled`（`retryable = true`，供重试与策略判定直接消费）。
 - 回归：`utest_net_address`（解析、规范化、校验与判等黄金判据）、`utest_net_cancellation`（含跨线程钩子落点与钩子内重入不死锁）。
 
-#### 8.8.2 事件源注册口（`aurora::app::EventSourceRegistry`，CHG-010 底座）
+#### 8.8.2 事件源注册口（`aurora::app::EventSourceRegistry`，CHG-018 底座）
 
 网络栈 L0 宿主集成层的通用就绪通知底座（`include/aurora/app/event_source_registry.h` + `src/aurora/app/event_source_registry.cpp`）：把「一个可等待句柄 + 就绪回调」汇成一张待等待表，供第三方非阻塞会话（libssh2、DBus 一类）与库自带的 poll 线程引擎共同复用。**缺省驱动方是 §8.8.4 的常驻引擎线程**（本库各平台腿的统一形态）；自带等待集的宿主调 `set_host_driven(true)` 接管，引擎随即只等自己的唤醒通道。提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §2 的逐平台并入点与 §18 定案 1 的竞态契约仍然有效，但**仓内宿主不再各自并入**（理由见 §8.8.5 与提案 §16 第 12 项）。
 
@@ -752,7 +752,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 **逐平台等待集并入 = 宿主可选项，仓内宿主一律走引擎线程**（裁决与理由见 §8.8.5；提案 §16 第 12 项）：本注册口对外提供的就是这条可选项——自带循环的宿主（含嵌入本库的第三方事件循环）装 `set_host_driven(true)` 后自行 `sources()`/`dispatch()`，其余腿由常驻引擎驱动，回调一律经主线程投递器回到 UI 线程。
 
-#### 8.8.3 事件驱动就绪基元（`aurora::net::wait_ready`，CHG-010 底座）
+#### 8.8.3 事件驱动就绪基元（`aurora::net::wait_ready`，CHG-018 底座）
 
 `include/aurora/net/poll.h` + 实现在 `src/aurora/net/socket.cpp`：给一组 `{句柄, 关注方向}` 阻塞到部分就绪或超时的**多句柄、四向（读/写/错误/挂断）事件驱动等待基元**。它是 §8.8.2 注册口 `Poller` 接缝的具体实现来源（引擎与测试都把它包成 Poller 装入），也是未来 poll 线程引擎与第三方会话共用的一条底座——刻意与 `blocking::Listener::wait_readable`（单句柄、`select`、同步回环）分工：本基元**只做等待、不碰协议语义**，不知道句柄背后是 socket、管道还是 DBus 描述符。
 
@@ -766,7 +766,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：复用既有 `net-wait-failed`，本切片无新增码。
 - 回归：`utest_net_poll`（空集合 OK、无效槽不毁批、可写→可读→空闲三态、注册口经真实 fd 的端到端事件源循环）。
 
-#### 8.8.4 引擎与常驻 poll 线程（`aurora::net::Engine` / `Capabilities`，CHG-010 底座）
+#### 8.8.4 引擎与常驻 poll 线程（`aurora::net::Engine` / `Capabilities`，CHG-018 底座）
 
 `include/aurora/net/capabilities.h` + `include/aurora/net/engine.h`（实现 `src/aurora/net/engine.cpp`）：把 §8.8.3 的基元包成**常驻循环**并接上主线程完成投递，即提案 §2 的默认形态——「谁在什么线程、以什么节奏调用基元」就此定死。
 
@@ -868,7 +868,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：新增 `net-proxy-config-unreadable`（category `io`、`retryable = true`、`fix_category = resource_error`）。链接依赖随之扩面：Windows 加 `winhttp`、Apple 加 `-framework SystemConfiguration -framework CoreFoundation`（均 `PUBLIC` 传导，见根 `CMakeLists.txt`；口径记于 `BUILD_OPTIONS.md`）。macOS 腿在本机不可运行验证，由 CI 的 `macos-clang` 作业做编译验证。
 - 回归：`utest_net_system_proxy` 八例——PAC/WPAD/两者并存三类都判成 `net-proxy-unsupported` 且诊断带脚本 URL、没配代理是成功的空集合（带例外清单时例外仍解析）、四类 scheme 令牌落四个槽（`source()` 为 `system:<令牌>`）、裸项归 `all` 且 `ftp=`/`gopher=` 略过（缺省端口沿用配置侧口径）、六类歧义与畸形条目分岔到两码（含 SOCKS4、TLS-to-proxy、同槽重复、`=` 位置颠倒）、`<local>` 与 `<-loopback>` 的匹配面（无限定域名命中、带点与数字字面量不命中、`127.9.9.9` 与 `::1` 命中）、采集钩子三条回报（快照 / 畸形 / 空快照判成 `net-platform-unavailable`）、合并次序四态（接管时系统腿调用次数为 0、无变量时采纳快照、无通道等价环境变量、读失败原样上抛）。全用例零平台 API、零真实环境变量，三平台与 wasm 一致，故无 `AURORA_TEST_SKIP`。
 
-#### 8.8.11 异步流传输：`StreamTransport` / `StreamListener`（CHG-010 传输族首件）
+#### 8.8.11 异步流传输：`StreamTransport` / `StreamListener`（CHG-018 传输族首件）
 
 `include/aurora/net/transport.h` + `src/aurora/net/transport.cpp` 把 §8.8.3 的就绪基元、§8.8.4 的常驻引擎与 §8.8.2 的事件源注册口编排成「面向字节的异步流」：公共面只有 `ShutdownMode`、`StreamOptions`、四枚完成别名（`ConnectDone` / `AcceptDone` / `ReadDone` / `WriteDone`）、`StreamTransport`（`connect` / `read` / `write` / `shutdown` / `close` / `pause_read` / `resume_read` / `set_high_water_mark` / `pending_write_bytes` / `native_handle` / `peer_endpoint` / `is_loopback_peer` / `cancellation` / `is_open`）与 `StreamListener`（`bind` / `accept` / `local_port` / `native_handle` / `is_valid` / `close`），**全部异步出口都是回调形态**（L1 不得反向依赖 L4 的 `Task` / 协程，同 §8.8.9 的分层方向裁决）。非阻塞系统调用的唯一平台腿是 `src/aurora/net/detail/async_io.h` 的七个出口（建套接字并置非阻塞、发起连接、取连接错误、读、写、接受、关停，加绑定端口与对端还原），实现仍落在 `src/aurora/net/socket.cpp`——CHG-006 的「平台 socket 头唯一落点」不变量继续成立，`transport.cpp` 里一枚平台头都没有。连接与监听的状态（`detail::StreamState` / `ListenerState`）字段全在实现侧，公共头只有前向声明与一枚实现侧工厂 `detail::TransportFactory`（两个公共句柄的私有构造只对它敞开，因此**外部代码造不出伪句柄**）。九条定见：
 
@@ -903,7 +903,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 回归：`utest_net_remote_connect` 十一例——`race_preference` 的两族交替与「不增不减 / 剔除本机 IPC 形态」、快败立即让位（交错窗口置 0 时第二条只可能由第一条的失败发出来，交付的是建成那条而非列表首条，且一次名字连接只查一次表）、首个成功独占交付而后来者**根本没开始**（窗口置 200 ms 后另起宽限窗，第二个监听口的 accept 计数保持 0，这条比「落败者已关闭」更强）、全败恰一次且携连接类原因、入参不合用与字面量都不查解析器且空回调不发起任何登记、HTTP CONNECT 隧道把 leftover 逐字节交回上层、CONNECT 拒绝按状态分码（`407` → 认证码，`403`/`502` → 不可达码）、SOCKS5 三阶段逐段走完并保留 leftover（含逐字节的方法协商问候与 CONNECT 请求形态）、SOCKS5 各阶段状态字节逐段分码（方法 `0xFF` 与子协商非零 → 认证码，`REP` 非零按 §8.8.8 分岔）、`Direct` 配置等价于直连且不开隧道、代理端口上没有服务时以失败收尾且 `watch` 侧 accept 计数为 0（**证明没有回退直连**）。除 `race_preference` 一例外全部在 wasm 腿 `AURORA_TEST_SKIP`（浏览器运行时既没有可失败又可恢复的套接字，也没有可竞速的套接字）。本机验证腿：Win32 与 WSL 同口径；「代理不在监听」一例在 Win32 上约 2 s（回环端口上的拒绝要等内核重试到点），非缺陷。WSL 腿补出一条时序裁决：`connect()` 成功只是把连接放进内核 backlog，监听口侧的 accept 交付**晚一轮泵**，故凡断言「对端已收到这条连接」的用例都必须同时等到 accept 计数就位（只等连接结果会把断言变成竞态，Linux 上稳定转红而 Windows 上掩盖着）；`utest_net_remote_connect` 的竞速两例与 `direct_proxy_config` 一例据此把等待谓词改成「连接出结果 **且** 监听口已交付」。
 
 
-#### 8.8.13 分帧器：`net::Framer` 的三型形态与拉模型背压（CHG-010 传输族）
+#### 8.8.13 分帧器：`net::Framer` 的三型形态与拉模型背压（CHG-018 传输族）
 
 `include/aurora/net/framer.h` + `src/aurora/net/framer.cpp`：把 §8.8.11 交付的「这次读到了若干字节」切成「一条完整消息」，**只做这一件事**——没有 socket、没有平台头、没有线程，因此全部判据在零网络条件下逐值可断言（`StreamTransport` 只是它的字节来源之一）。公共面只有 `LengthByteOrder`、`Frame`、`FrameSink`、`FrameOptions`、`FeedReport`、`FinishReport` 与 `Framer`（三型工厂 `lines` / `until` / `length_prefixed` 加 `feed` / `finish` / `reset` / `buffered_bytes`），状态（`detail::FramerState`：型别、口径、一件缓冲、搜索起点、终态错误）全在实现侧，公共头只有前向声明。判据如下（提案 §11 把它拆成七条，本节的①同时给出「三型边界」与「空帧是语义而非噪声」两条口径、④同时给出「上限终态」与「工厂期校验」两条，内容不增不减）：
 
@@ -916,7 +916,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 工具链面：`LengthByteOrder` 登记进 `tools/include/known_enums.h`，`itest_known_enums` 加编译期锚点；`aurora_api.json` 与 `codespec/ERROR_CATALOG.md` 由 `errors.toml` 一次生成刷新。伞头 `aurora/aurora.h` 与 `tools/check/umbrella_manifest.txt` 同步收录 `net/framer.h`。
 - 回归：`utest_net_framer` 十三例——LF/CRLF 双终止与跨 `feed()` 拼装、空行是空帧、裸 CR 归帧体、分隔符跨 feed 命中与空帧、暂停-续投不重复（含空回调惰性形态）、单帧超限到 `reset()` 复原的终态链、慢消费者越缓冲上限、长度前缀大小端与「字段拆成两次投递」、声明值含自身宽度与不足宽度的非法、声明超上限即拒、`finish()` 的型别分歧（补尾 vs 丢弃并报数）、五类工厂口径拒绝与 8 字节宽度上界合法、移动后落点惰性。分帧器无 fd 语义，故 wasm 腿无需跳过；本机验证腿：Win32 与 WSL 同口径（纯逻辑，两侧应逐值一致）。
 
-#### 8.8.14 数据报传输：`DatagramTransport` 的消息边界、connect 过滤与组播 / 广播（CHG-010 传输族）
+#### 8.8.14 数据报传输：`DatagramTransport` 的消息边界、connect 过滤与组播 / 广播（CHG-018 传输族）
 
 `include/aurora/net/datagram.h` + `src/aurora/net/datagram.cpp` 把 §8.8.3 的就绪基元、§8.8.4 的常驻引擎与 §8.8.2 的事件源注册口编排成「面向消息的异步数据报」，与 §8.8.11 的流传输**并列而非包含**：流面向字节、没有消息分界，数据报一条一条、每条自带边界与来源地址。公共面只有 `Datagram`、两枚完成别名（`DatagramSendDone` / `DatagramDone`）、`DatagramOptions` 与 `DatagramTransport`（工厂 `bind` / `connect`，操作 `send_to` / `send` / `receive` / `join_multicast_group` / `leave_multicast_group` / `set_multicast_loopback` / `set_broadcast_allowed` / `close`，观测 `is_open` / `native_handle` / `local_port` / `peer` / `pending_send_bytes` / `multicast_loopback()` / `broadcast_allowed()` / `cancellation`），**全部异步出口都是回调形态**（分层方向同 §8.8.11）。状态 `detail::DatagramState`（句柄、收发两条队列、事件源登记、代数、组播组记录、互斥量）字段全在实现侧，公共头只有前向声明与一枚实现侧工厂 `detail::DatagramFactory`。平台系统调用仍只有 `src/aurora/net/socket.cpp` 一处落点（CHG-006 不变量），`datagram.cpp` 经 §8.8.11 的 `src/aurora/net/detail/async_io.h` 接缝借出新增出口：建数据报套接字并绑定、固定对端、`sendto` / `send` / `recvfrom` 的三态形态、组播成员与回环、`SO_BROADCAST`。判据（前三条是**消息语义**，第四条起是**形态裁决**）：
 
@@ -937,7 +937,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 工具链面：`aurora_api.json` 与 `codespec/ERROR_CATALOG.md` 由 `errors.toml` 一次生成刷新；伞头 `aurora/aurora.h` 与 `tools/check/umbrella_manifest.txt` 同步收录 `net/datagram.h`。
 - 回归：`utest_net_datagram` 九例——回环数据报往返且 `source` 如实回报来源端口（双向各一次）、零长数据报是消息且其后一条照常送达、截断置位而下一槽拿的是下一条消息（含合同口径收紧的第二次裁剪）、connect 形态过滤第三方数据报且 `send_to` 报互斥 / `send` 走通、组播的互斥与校验分支及加入—离开—再离开的记录一致性（内核拒绝加入时整条用例判 `AURORA_TEST_SKIP`，因为那需要本机有可组播的路由，悄悄放行会让强断言永不执行）、广播允许位如实记录且**缺它时那条发送失败只作废那一条**（随后同一套接字的单播照常送达）、口径与高水位在发起系统调用前即拒（含 `bind()` 期的三类非法口径与本机 IPC 形态）、取消与关闭各恰一次收尾且登记数归零（含空态句柄与空回调）、引擎驱动形态不碰 `dispatch()` 也能收满。宿主驱动用例以 RAII 守卫进出 `set_host_driven(true)`，形态与纪律同 §8.8.11（完成回调里只用非致命断言）；wasm 腿无 fd 等待语义，用例体内 `AURORA_TEST_SKIP`。本机验证腿：Win32（Winsock）与 WSL（POSIX）同口径。
 
-#### 8.8.15 本机 IPC 流与原生选项：`Endpoint::local` 上的同型传输（CHG-010 传输族）
+#### 8.8.15 本机 IPC 流与原生选项：`Endpoint::local` 上的同型传输（CHG-018 传输族）
 
 `src/aurora/net/socket.cpp` 把 §8.8.11 的异步流打通到本机 IPC 地址族上，公共面只在 `include/aurora/net/transport.h` 补一枚 `StreamTransport::peer_credentials()` 与两枚值类型（`NativeOptions` / `PeerCredentials`）。四条定见：
 
@@ -950,7 +950,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 工具链面：本切片**无新枚举**，故 `tools/include/known_enums.h` 与 `aurora_api.json` 的 `enums` 段零条目变化（`NativeOptions` / `PeerCredentials` 是值类型，schema 生成面只枚举控件、属性键与具名枚举，值类型不进该面），`check_api_budget` 与 `check_api_schema_sync` 同批复核为绿。公共头没有新增文件，伞头与 `tools/check/umbrella_manifest.txt` 因此无需收录动作。
 - 回归：`utest_net_transport` 新增七例——路径端点上双向收发且三条观测口各给确定答案、对端身份只在登记过的腿给数值（IP 连接上问身份必冲突）、合法选项集合在系统调用前生效且接受侧重放后连接照常收发、TCP 专属项落在本机 IPC 上必冲突而缓冲窗口类两族通用、尺寸与方向矛盾的集合逐条在发起调用前被拒、路径长度的值类型那一档闸（空串 / 超最宽腿容量 / 恰等于容量的三态）、值类型放行但本腿装不下时在系统调用前落 `net-endpoint-invalid` 且「名字已被占用」的 bind 两腿同报 `net-bind-failed`。探测不过的腿整体 `AURORA_TEST_SKIP` 而非转红；wasm 无本机 IPC 语义，用例体内退避。本机验证腿：Win32（Winsock `AF_UNIX`）与 WSL（POSIX `AF_UNIX`）同口径，身份数值仅 Linux 腿强断言。
 
-#### 8.8.16 同步阻塞面归位 `aurora::net::blocking` 与迁移期别名（CHG-010 传输族收口）
+#### 8.8.16 同步阻塞面归位 `aurora::net::blocking` 与迁移期别名（CHG-018 传输族收口）
 
 提案 §4 对旧三类型的处置在本切片落地，公共头换名而行为语义**逐值不动**：
 
@@ -961,7 +961,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：本切片**无新增码**，`net-runtime-failed` 获得新落点（此前只在会话构造失败时产生，现在句柄创建点即可能产出）。
 - 回归：Windows（MinGW）与 WSL（POSIX）两条验证腿上，上述六个套件全绿；Windows 腿的 IPv6 双栈用例因本机 v6-only 而 `AURORA_TEST_SKIP`（环境缺失，非行为差异）。1MiB+7 往返用例的读线程结构与「对端关闭 = `read_some` 返回 0」口径均未改动，是「别名只做转发、语义零漂移」的主要证据。
 
-#### 8.8.17 测试替身与等待辅助：脚本化时钟、脚本化对端与共用泵（CHG-010 测试替身切片）
+#### 8.8.17 测试替身与等待辅助：脚本化时钟、脚本化对端与共用泵（CHG-018 测试替身切片）
 
 提案 §14 承诺的「离线可验证」在本切片落地：故障现场不再靠真实网络与真实时钟碰运气，等待口径不再逐文件复制。设施全在 `tests/framework/`（仓库私有，不进 `include/`、不进 `aurora_api.json`），公共 API 与库行为除下述一处缺陷修正外零改动。
 
@@ -974,7 +974,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - 错误码：本切片**无新增码**，也未启用新落点。
 - 回归：net 与基础件相关共 **15 个套件 147 例**两腿同口径复跑。Windows（MinGW）腿 146 通过 + 1 跳过（`utest_net_socket` 的 IPv6 双栈用例因本机 v6-only，属环境缺失非行为差异），其中 `utest_net_test_double` 13 / `utest_net_transport` 17 / `utest_net_remote_connect` 11 / `utest_net_datagram` 9 / `utest_net_engine` 9 / `utest_framework_async_wait` 8；WSL（POSIX）腿同 15 套 **147 例全通过**（`utest_net_socket` 13 例含 IPv6 两例，逐值与 Windows 腿一致）。`utest_net_remote_connect` 在两腿同为 11 例，WSL 腿实测合计 2593 ms（最慢一条是竞速窗口本身，非等待预算撑大）。
 
-#### 8.8.18 TLS 通道：`TlsTransport` 会话状态机与系统栈后端（CHG-010 TLS 切片）
+#### 8.8.18 TLS 通道：`TlsTransport` 会话状态机与系统栈后端（CHG-018 TLS 切片）
 
 公共头 `include/aurora/net/tls.h`（`TlsContext` / `TlsVersion` / `PeerCertificate` / `TlsTransport` / `TlsHandshakeDone`）+ 平台无关实现 `src/aurora/net/tls.cpp` + 库内接缝 `src/aurora/net/detail/tls_backend.h` + 后端 TU（四枚文件恒在源列表里、每枚整体自罩在自己的引擎宏下，故**每次构建生效的后端恰好一枚**：Windows `tls_schannel.cpp`、macOS `tls_securetransport.cpp`、provider 形态 `tls_openssl.cpp` / `tls_mbedtls.cpp`；未选任何后端时由 `tls_unavailable.cpp` 给出那两枚符号）+ 装配唯一决策点 `cmake/AuroraNetTls.cmake`。**只有客户端**：没有 `TlsListener`，本库的监听腿是本机 IPC 与 Inspector 回路，不构成公网服务端场景。握手成功之后与 §8.8.11 的流**逐字同构**（读队列按登记次序满足、0 字节 = 对端关闭写向、写高水位背压、暂停读、取消、半关闭），故 L3 协议引擎不需要知道底下是否加密。公共头**零平台宏**（`SPEC.PLATFORM.ZERO-IFDEF.001`），也没有第二个「TLS 是否可用」的查询入口。
 
@@ -999,7 +999,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 ---
 
-#### 8.8.19 HTTP 发起侧值类型：`Method` / `Request` / `Response`（CHG-010 HTTP 切片·值层）
+#### 8.8.19 HTTP 发起侧值类型：`Method` / `Request` / `Response`（CHG-018 HTTP 切片·值层）
 
 新增公共头 `include/aurora/net/http.h`（命名空间 `aurora::net::http`）与实现 `src/aurora/net/http.cpp`（实现离头）。本小节只落 §6 草图的**值层**——一次 HTTP 交换的输入（方法、目标、字段、消息体、发起侧选项）与输出（状态行、字段、已物化消息体）——它是发起侧 `Client` 组装的对象，也是把字节层 `net/detail/http_wire.h` 接给调用方的最后一层纯逻辑。零 socket、零 DNS、零平台头，故三平台逐值一致、wasm 腿同样可跑。
 
@@ -1014,7 +1014,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 **待建（本切片其余部分，随后续实现）**：§6 发起侧 `Client` 的 `open_sse`、`use(hook)` 与 `Session` 的 Cookie Jar 与连接池（`send` 核心闭环已落地，见 §8.8.20）与 §12 的语义补齐件——`MultipartWriter` 与 Range、`Bearer` / `Basic` 与 `Authenticator`、`X-Request-Id`、`NetPolicy`——仍未落地（§12 进度节流已随 `Client::send` 落地，见 §8.8.20；§12 charset 解码已随 `Response::text()` 落地并启用 `http-charset-unsupported`；内容编码已升级为 core 级通用能力 `aurora::compression` 落地，见 [`01-core.md`](01-core.md) §12，并由 HTTP 物化管线接入、`http-content-encoding-unsupported` 随之启用，见 §8.8.20）；分段超时已落地（见 §8.8.20）；流式接收已随 `Client::open_stream` 落地（见 §8.8.21）；条件请求与 `RFC 9111` 最小集缓存校验已随 `Client::cache()` 落地（见 §8.8.24）。契约引用提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §6 / §10 / §12 / §17。
 
-#### 8.8.20 HTTP 发起侧客户端：`Client::send`（CHG-010 §6 / §12 发起侧·核心闭环）
+#### 8.8.20 HTTP 发起侧客户端：`Client::send`（CHG-018 §6 / §12 发起侧·核心闭环）
 
 新增公共头 `include/aurora/net/http_client.h`（命名空间 `aurora::net::http`）与实现 `src/aurora/net/http_client.cpp`，回调→协程桥接落库内 `src/aurora/net/detail/http_await.h`（不占公共 API、不进伞头）。`Client` 把一份 `Request` 送出去、拿回物化的 `Response`：`http://` 直连 `StreamTransport`、`https://` 先在流上 `TlsTransport::handshake()` 再套读写（L3 对底下是否加密无感），写出 `render_head()` + 体、逐段喂 §8.8.19 的接收侧 `wire::ResponseAssembler` 按分帧物化，物化完毕再按 `Content-Encoding` 透明解压，按 `Location` 跟随重定向，三档超时（`Timeouts{connect, read_idle, total}`）任一到点落 `http-timeout`。落码口径：
 
@@ -1031,7 +1031,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 工具链面：伞头与 `tools/check/umbrella_manifest.txt` 收录 `net/http_client.h`，`aurora_api.json` 随生成器刷新；`ProgressPhase` 登记 `tools/include/known_enums.h` 并在 `itest_known_enums` 加编译期锚点（`enums` 段 +1），进度闸本体落库内不进伞头；本切片**新增两枚错误码**（`http-content-encoding-unsupported`、`http-body-corrupt`，均 `retryable = false`），其余复用 `http-timeout` / `http-redirect-limit` / `http-body-too-large` / `http-protocol-error` 与既有 `net-*` / `net-url-invalid`。配套 `utest_net_http_client`（22 例：Content-Length 与 Chunked 两形态物化、跨对端 `302` 跟随、超限落 `http-redirect-limit`、`FakeEngine` 脚本化时钟分验 `total` / `read_idle` / `connect` 三档 `http-timeout`、gzip 体透明解压、`deflate` 裸流回落、多段链反序还原、`max_decompressed_bytes` 越限、缺省注入与不覆盖调用方 `Accept-Encoding`、`br` 落不支持、声明编码却解不开落 `http-body-corrupt`、`HEAD` 无体应答跳过编码校验、200 KB PUT 的上传按 64 KiB 节拍多笔推进且末值恰一次、注入恒定帧号后每方向收敛到「首发 + 末值」两笔、未挂回调与挂了回调两条对端收到的请求全文逐字节相同、无请求体不发上传、chunked 下载把总量如实报成未知；另 `build_advertises_and_decodes_only_when_compression_is_compiled_in` 与 `send_refuses_a_body_that_fails_its_declared_coding` 两例外壳两腿同名、体内按宏分岔断言（后者在解码器在场的腿是「流损坏」、缺席的腿是「环节解不了」——同一份「绝不回吐压缩字节」的拒绝姿态，两种成因），`AURORA_ENABLE_COMPRESSION=OFF` 腿把只在解码器在场时才成立的六例按 TEST-R6 纪律登记成同名 `AURORA_TEST_SKIP`，故两腿用例数逐名可比），全用例走 `ScriptedPeer` 只绑 `127.0.0.1`、零出站，宿主驱动 pump 推进协程；编码层另配套 `utest_net_http_encoding`（15 例，纯内存零网络：宣告集与支持集同源、链文法的大小写 / OWS / `identity` / 空成员 / `;q=`、应用次序保序、不支持编码点名、无环节直传、gzip 单层、`deflate` 两试、反序多段、空载荷非损坏、上限口径点名新旋钮、core 三码到 `http-*` 的逐条映射、能力关闭时拒发）；进度闸本体另配套 `utest_net_http_progress`（9 例，纯内存零 socket 零时钟零线程：只写入不发射、同一回合每方向至多一笔且必为最新值、干净槽不被下一次机会重复发射、帧号源在场时以帧号为闸且同帧多次机会只发首发、回合闸每 `flush` 推进一号、`finish` 无视闸号发末值、机会从未到来也要结末值、两方向槽位互不覆盖、空回调时闸零作为连闸号都不推进）。两腿四组构建同口径回归（本机 Win32 / MinGW 与 WSL / GCC 15 各一腿，`AURORA_ENABLE_COMPRESSION` 取 ON / OFF 各一组）：`=ON` 时 `utest_net_http_encoding` 15 例 + `utest_net_http_client` 22 例 + `utest_net_http_wire` 12 例 + `utest_net_http_progress` 9 例 + `utest_net_http` 7 例 + `itest_known_enums` 4 例逐腿全绿；`=OFF` 的单独构建树里同两套件各 9 通过 + 6 跳过、16 通过 + 6 跳过（跳的正是依赖解码器的那六例，两腿逐名相同），`utest_net_http_wire` / `utest_net_http_progress` / `utest_net_http` / `itest_known_enums` 四套件不随开关转跳、照常 12 + 9 + 7 + 4 全通过，另 `utest_core_compression` 0 通过 + 12 跳过；四组名册逐名可比（encoding + client + progress 三套件共 46 名），跨腿无逐值差异。**待建（随后续切片）**：`open_sse`、`Session` 与连接池，以及 §12 其余语义件（见 §8.8.19 待建）。契约引用提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §6 / §12 / §17。
 
-#### 8.8.21 HTTP 发起侧流式接收：`Client::open_stream` 与 `DataSink`（CHG-010 §6 / §12 发起侧·流式形态）
+#### 8.8.21 HTTP 发起侧流式接收：`Client::open_stream` 与 `DataSink`（CHG-018 §6 / §12 发起侧·流式形态）
 
 新增公共头 `include/aurora/net/http_stream.h`（`SinkFlow` / `DataSink` / `StreamOutcome`，命名空间 `aurora::net::http`）与 `Client::open_stream(Request, DataSink &) -> CoroTask<Result<StreamOutcome>>`；同一批把 §8.8.20 那条「流式路径仍待建」的口径落地：库内 `src/aurora/net/detail/http_encoding.{h,cpp}` 新增 `StreamingDecoder`，把 core 的 `aurora::Decompressor` 按 `Content-Encoding` 链**反序逐环串联**，末环经 `StreamingEmit` 直交宿主。与物化路径共用的协议语义不再重述（宣告同源、链反序、`Location` 跟随、三档超时、进度合流同判据），此节只记四条只有逐段交付才成立的口径与两条实现裁决：
 
@@ -1047,7 +1047,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 工具链面：伞头与 `tools/check/umbrella_manifest.txt` 收录 `net/http_stream.h`；`SinkFlow` 登记 `tools/include/known_enums.h` 并在 `itest_known_enums` 加编译期锚点（`enums` 段 +1，`aurora_api.json` 的 `enums` 随生成器新增 `SinkFlow{Continue, Stop}`）；`DataSink` / `StreamOutcome` 与 `Client` 同为类与结构体，不进 `enums` 段；本切片**不新增错误码**，复用 `http-body-too-large` / `http-body-corrupt` / `http-content-encoding-unsupported` / `http-timeout` / `http-redirect-limit` / `http-protocol-error` / `general-invalid-argument` 与 `net-platform-unavailable`。配套 `utest_net_http_stream`（15 例，走 `ScriptedPeer` 只绑 `127.0.0.1`、零出站：40 KB 体按 16 KiB 读块逐段交付且段数大于 1、chunked 交付、`HEAD` 无体应答零段并跳过编码校验、体第二段收摊后段数停在 2 而 `on_end` 仍一次、头部即收摊时零段交付、跨对端 `302` 弃中间跳的体并把两枚计数钉成 4 与 1、超上限落 `http-redirect-limit` 且不宣告收摊、`max_body_bytes` 对入口零约束、`br` 在建链处拒且一段不交、`read_idle` 到点改道 `http-timeout`、下载进度以线上字节计且末值恰一次、`streaming` 位为假落 `net-platform-unavailable`；另 gzip 双计数、`deflate` 两型各锁一次、解压越限三条只在 `AURORA_ENABLE_COMPRESSION=ON` 的腿成立，`=OFF` 腿按 TEST-R6 登记成同名 `AURORA_TEST_SKIP`）。流式链本体另在 `utest_net_http_encoding` 补 10 例（两腿同名的三条：空链直通、缺产出出口落 `general-invalid-argument`、宿主 `Stop` 后链停住且不再打扰宿主；只在解码器在场的腿成立的七条：一枚字节一枚字节喂完 gzip、`deflate` 按头锁定两型、判定前按住首字节且锁定后补交、多段链反序、上限点名 `max_decompressed_bytes`、损坏与截断分别显形于 `push` / `finish`、停读发生在链中段时后续段不交），缺席腿同样登记同名 `AURORA_TEST_SKIP`；该套件在缺席腿另有**一枚只在能力关闭时成立**的 `stream_building_a_chain_without_the_capability_fails_at_create`（建链即拒，故 ON 腿无此名），因此 OFF 腿比 ON 腿多一例、共 26 名，其余 25 名逐名可比。判据非空转已变异自证：把出口构造里的 `wire_bytes` / `stopped_by_sink` 换成 `delivered_bytes` / `false` 后，`utest_net_http_stream` 四条同时转红（两条停读、跨跳计数、gzip 双计数），还原后即恢复全绿。两腿四组构建同口径回归见 §8.8.20 末段口径（`AURORA_ENABLE_COMPRESSION` ON / OFF × 本机 Win32 / MinGW 与 WSL / POSIX）。裁决与形态来源见提案 §16 第 26 项。
 
-#### 8.8.22 HTTP 失败分型：`HttpErrorClass` 与两枚归因函数（CHG-010 §12 错误分型切片）
+#### 8.8.22 HTTP 失败分型：`HttpErrorClass` 与两枚归因函数（CHG-018 §12 错误分型切片）
 
 新增公共面全部落在 §8.8.19 的值层头 `include/aurora/net/http.h`（映射表在 `src/aurora/net/http.cpp`）：`enum class HttpErrorClass : std::uint8_t`（九档，`Invalid = 0`）、`error_class_of(ErrorCode) -> HttpErrorClass`、`error_class_of_status(std::uint16_t) -> HttpErrorClass`、`error_class_text(HttpErrorClass) -> std::string_view`。它回答的是「这次失败该往哪儿排查」，与「能不能重试」分属两枚事实。
 
@@ -1060,7 +1060,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 工具链面：`HttpErrorClass` 登记 `tools/include/known_enums.h` 并在 `itest_known_enums` 加编译期锚点，`aurora_api.json` 的 `enums` 段随生成器新增该枚；本切片**不新增错误码**、不改任何既有签名（纯增量）。配套 `utest_net_http` 由 7 例增至 12 例（逐码归档 + 完整性断言、非网络族码落兜底、档位与 `retryable` 的正交、`error_class_of_status` 的 399/400 边界、九枚令牌的唯一小写），全用例零 socket、零 DNS，两腿同名可跑。判据非空转已变异自证：把 `http-redirect-limit` 改归 `Invalid` 后完整性用例即转红，还原即恢复全绿。裁决与形态来源见提案 §16 第 27 项。
 
-#### 8.8.23 HTTP 重试策略：`RetryPolicy` 与 `Retry-After` 尊重（CHG-010 §12 重试策略切片）
+#### 8.8.23 HTTP 重试策略：`RetryPolicy` 与 `Retry-After` 尊重（CHG-018 §12 重试策略切片）
 
 公共面新增三处、全部为增量：值类型 `RetryPolicy{attempts, base, max_backoff, jitter, budget}` 落 §8.8.19 的值层头 `include/aurora/net/http.h`（缺省 `1 / 200ms / 30s / 0.2 / 不设`，即**缺省不重试**）、`Client::retry_policy([RetryPolicy])` 作客户端缺省、`Request::retry_policy([RetryPolicy])` 作逐请求覆盖（槽位是 `std::optional`：`nullopt` = 跟随 Client，设 `RetryPolicy{}` = 本条关掉，两种意思必须可区分）。判定与算式全部落库内 `src/aurora/net/detail/http_retry.{h,cpp}`（`aurora::net::detail`，零 socket、零时钟、日期基准由参数注入），发起侧只在三处各问一声：起手校验形态、拿到结局问该不该重放、决定重放前问该等多久。两条款式与四处定案记此（§16 第 28 项）：
 
@@ -1072,7 +1072,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 工具链面：`RetryPolicy` 与 `Timeouts` 同为结构体，不进 `tools/include/known_enums.h` 也不进 `aurora_api.json`（该文件本切片零变化，`check_api_schema_sync` 复核为绿）；新增实现 TU `http_retry.cpp` 由 `CONFIGURE_DEPENDS` 源列表自动纳入，伞头无需改（`net/http.h` 已在列）。配套四套同源判据：新增 `utest_net_http_retry`（11 例，纯算式——越界点名、白名单、交集准入、瞬时状态族、逐次翻倍与封顶、`jitter=0` 恒等算得值 / `jitter=1` 落在 `[raw, 2*raw]`、`Retry-After` 两形态与封顶）；`utest_net_http_client` 由 22 例增至 33 例（退避真的等满才回头、`Retry-After` 的秒数压过算式并被 `max_backoff` 夹住、耗尽交出的是最后那份 503、非幂等方法与表上 `retryable=false` 的失败一律不重放、协议档不重放、`total` 逐尝试重计时而 `budget` 到点收摊、越界策略零连接）；`utest_net_http_stream` 由 15 例增至 18 例；`utest_net_http` 由 12 例增至 13 例（`RetryPolicy` 槽位的两级语义与整份替换）。**三条测试设施侧的事实同批记此**，它们是判据形态的约束来源：① `ScriptedPeer::serve()` 串行服务连接，而占住时限的那条连接必须由脚本自己放手才有第二次连接可连，放手又会在客户仍持有的 socket 上产生 hangup——真实睡眠与虚拟时限赛跑的输赢随机器负载而变，故流式重放不钉 `accepts()` 数值，改钉**虚拟时钟跑满几扇窗口**（三扇 ≥150 ms 对比一扇 ≤90 ms），两侧用例互为一组正反对偶；② 被拒的回环 connect 在 `FakeEngine` + `HostDriven` 下 40 轮泵内从不落地（既有设施限制，非产品缺陷），故端到端腿只覆盖 `Timeout` 档，`Dns` / `Unreachable` 两档的准入由 `utest_net_http_retry` 的表侧断言承担；③ 对端「写完就 `close()`」交给读侧的结局**不由剧本决定**——接收缓冲里压着没被读走的请求字节时，Winsock 可把这次关闭改成异常断开，同一份用例在高负载机器上时而落 `net-recv-failed`、时而落 `http-protocol-error`（实测翻脸），后者同样是不可重试码，用例看着像过却换了判据来源。要钉住 `Unreachable` 档就必须把关闭形态钉死，故 `ScriptedPeer` 新增 `write_then_reset()`（`SO_LINGER` 时限 0 后再关，两腿同形地发 RST），`send_refuses_to_replay_a_failure_the_table_marks_non_retryable` 按它改写，并把断言从「具体哪一枚码」收稳到「档位 + 标志 + 不重放」三件恒同时。判据非空转已五处变异自证：把瞬时状态族去掉 503、把准入改成只读 `retryable`、把 `Retry-After` 的封顶去掉，三处各自只让对应用例转红（`status_admits_only_the_transient_family` / `retry_admission_is_the_intersection_of_flag_and_class` / `retry_after_beats_the_backoff_and_skips_the_jitter`，第三处另让发起侧的 `send_clamps_a_retry_after_to_the_backoff_ceiling` 同因转红，即封顶在算式侧与协程侧各有一道口径）；另在发起侧摘掉 `!guard.handed_off()` 一条后 `stream_does_not_replay_after_the_head_is_handed` 转红，把流式用例的 `attempts` 改成 1 后 `stream_replays_a_timeout_raised_before_any_head_is_handed` 转红；第五处把准入改成**只读档位**（摘掉 `retryable` 那半），端到端的 `send_refuses_to_replay_a_failure_the_table_marks_non_retryable` 以 `accepts()` 3 比 1 转红——这条与第二处一正一反，恰好把「交集」的两半边各自钉在一条会转红的用例上，只写表侧断言时端到端腿是不可证的。两腿回归与门禁口径同 §8.8.20 末段（本机 Win32 / MinGW + WSL / POSIX 同口径逐名比对）。本切片改动的 13 枚 TU 以 `clang-tidy` 逐点收口至零 findings，其中两处值得记名：`jitter` 的越界判定写作 `!(jitter >= 0 && jitter <= 1)` 并带**点名理由的豁免**——DeMorgan 改写后对 NaN 判假，会把「NaN 也是越界」这条定案漏掉；`RetryExpectation` 表与两处可选值读取按仓内既有口径改为具名字段初始化与 `require_value()`，避免用豁免掩盖形态问题。裁决与形态来源见提案 §16 第 28 项。
 
-#### 8.8.24 HTTP 条件请求与内存缓存：`CacheOptions` / `no_cache` / `from_cache`（CHG-010 §12 缓存校验切片）
+#### 8.8.24 HTTP 条件请求与内存缓存：`CacheOptions` / `no_cache` / `from_cache`（CHG-018 §12 缓存校验切片）
 
 公共面新增四处、全部为增量：值类型 `CacheOptions{enabled, max_entries}` 落 §8.8.19 的值层头 `include/aurora/net/http.h`（缺省 `false / 64`，即**缺省关**）、`Client::cache([CacheOptions])` 作客户端开关与只读口、`Request::no_cache([bool])` 作逐请求绕过、`Response::from_cache()` 作载荷出处（其构造尾随一枚带缺省值的 `bool` 形参，既有构造点零改动）。判定与表全部落库内 `src/aurora/net/detail/http_cache.{h,cpp}`（命名空间 `aurora::net::detail`，**零新增公共头、不进伞头、不占公共 API 预算**，零 socket、零 DNS、零平台分支，新鲜度基准时刻由参数注入），因此「能不能存、存多久、什么时候必须问对端、304 到手怎么并」这套 `RFC 9111` 算式在零网络下可逐值断言且三腿同值；发起侧只在三处各问一声：起手查表（`open_from_cache`）、拿到结局问进不进表（`settle_cache`）、304 到手要一份合并后的应答。九条定案记此（§16 第 29 项）：
 

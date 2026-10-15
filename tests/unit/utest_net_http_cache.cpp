@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: src/aurora/net/detail/http_cache.h + src/aurora/net/detail/http_cache.cpp
-/// 测试说明: 内存缓存的判定与表的逐值回归（CHG-010 §12「条件请求与缓存校验」的算式侧）。这套判据刻意从
+/// 测试说明: 内存缓存的判定与表的逐值回归（CHG-018 §12「条件请求与缓存校验」的算式侧）。这套判据刻意从
 ///           发起侧的协程体里拆出来，零 socket、判定时刻全部由参数注入，故三腿同值、wasm 腿同样可跑：
 ///           `Cache-Control` 文法只收本库认得的那四枚（指令名大小写不敏感、OWS 与引号内的逗号都不影响
 ///           切分、同份两枚 `max-age` 取后写的、不可解析的值当「没给」而不是报错、`s-maxage` 与其余外来
@@ -58,9 +58,9 @@ using Fields = std::vector<std::pair<std::string, std::string>>;
 // `RFC 9110 §5.6.7` 的规范样例时刻：1994-11-06 08:49:37 GMT = epoch 秒 784111777。日期一律写成 IMF-fixdate
 // 再折算成时刻，比的是同一套纯日历算术，故用例不依赖本机时区、也不依赖 `<ctime>` 的平台分支。
 constexpr std::string_view AURORA_FIXDATE = "Sun, 06 Nov 1994 08:49:37 GMT";
-constexpr std::string_view AURORA_LATER = "Sun, 06 Nov 1994 09:49:37 GMT";       // 基准 + 1 h
-constexpr std::string_view AURORA_EARLIER = "Sun, 06 Nov 1994 08:44:37 GMT";     // 基准 - 5 min
-constexpr std::string_view AURORA_NEXT_DAY = "Mon, 07 Nov 1994 08:49:37 GMT";    // 基准 + 1 d
+constexpr std::string_view AURORA_LATER = "Sun, 06 Nov 1994 09:49:37 GMT";  // 基准 + 1 h
+constexpr std::string_view AURORA_EARLIER = "Sun, 06 Nov 1994 08:44:37 GMT";  // 基准 - 5 min
+constexpr std::string_view AURORA_NEXT_DAY = "Mon, 07 Nov 1994 08:49:37 GMT";  // 基准 + 1 d
 
 /// @brief 把 IMF-fixdate 折成判定基准时刻。
 /// @param fixdate 日期文本。
@@ -72,9 +72,7 @@ constexpr std::string_view AURORA_NEXT_DAY = "Mon, 07 Nov 1994 08:49:37 GMT";   
 /// @brief 秒的字面量写法（本仓的测试与实现一律写全称，不开 `chrono_literals` 这第二个口径）。
 /// @param value 秒数。
 /// @return 对应时长。
-[[nodiscard]] constexpr auto secs(std::int64_t value) -> std::chrono::seconds {
-    return std::chrono::seconds{value};
-}
+[[nodiscard]] constexpr auto secs(std::int64_t value) -> std::chrono::seconds { return std::chrono::seconds{value}; }
 
 /// @brief 把时刻折成「自 epoch 起的秒」，使时间点的相等性比的是一个可打印的整数。
 /// @param when 待折算的时刻。
@@ -128,16 +126,14 @@ constexpr std::string_view AURORA_NEXT_DAY = "Mon, 07 Nov 1994 08:49:37 GMT";   
 /// 取函数形态而不是文件级常量：`HttpResponseCache` 的入口收 `const std::string &`，而 `bugprone-throwing-
 /// static-initialization` 不许命名空间作用域上放一枚可能抛出的 `std::string`（静态初始化期抛出的异常无人接）。
 /// @return 建键用的 URL 文本。
-[[nodiscard]] auto cache_url() -> std::string {
-    return std::string{"http://127.0.0.1/cache"};
-}
+[[nodiscard]] auto cache_url() -> std::string { return std::string{"http://127.0.0.1/cache"}; }
 
 /// @brief 一份必可进表的新鲜应答：`max-age` 600 秒、`Date` 与抵达时刻同值（初始年龄 0）。
 /// @param body 体文本。
 /// @return 应答。
 [[nodiscard]] auto fresh(std::string_view body = "ok") -> Response {
-    return replied(std::uint16_t{200},
-                   Fields{{"Cache-Control", "max-age=600"}, {"Date", std::string{AURORA_FIXDATE}}}, body);
+    return replied(std::uint16_t{200}, Fields{{"Cache-Control", "max-age=600"}, {"Date", std::string{AURORA_FIXDATE}}},
+                   body);
 }
 
 /// @brief 造一张开着的表。
@@ -215,15 +211,15 @@ AURORA_TEST_CASE(only_get_and_head_may_be_stored) {
 }
 
 AURORA_TEST_CASE(the_cacheable_status_family_is_a_dead_set) {
-    for (const std::uint16_t status : {std::uint16_t{200}, std::uint16_t{203}, std::uint16_t{300},
-                                       std::uint16_t{301}, std::uint16_t{404}, std::uint16_t{405},
-                                       std::uint16_t{410}, std::uint16_t{414}, std::uint16_t{501}}) {
+    for (const std::uint16_t status :
+         {std::uint16_t{200}, std::uint16_t{203}, std::uint16_t{300}, std::uint16_t{301}, std::uint16_t{404},
+          std::uint16_t{405}, std::uint16_t{410}, std::uint16_t{414}, std::uint16_t{501}}) {
         AURORA_TEST_CHECK(is_cacheable_status(status));
     }
     // `5xx` 里除 501 都不进：服务器此刻不行了，不代表这个资源长这样。
-    for (const std::uint16_t status : {std::uint16_t{201}, std::uint16_t{204}, std::uint16_t{302},
-                                       std::uint16_t{400}, std::uint16_t{401}, std::uint16_t{429},
-                                       std::uint16_t{500}, std::uint16_t{502}, std::uint16_t{503}}) {
+    for (const std::uint16_t status :
+         {std::uint16_t{201}, std::uint16_t{204}, std::uint16_t{302}, std::uint16_t{400}, std::uint16_t{401},
+          std::uint16_t{429}, std::uint16_t{500}, std::uint16_t{502}, std::uint16_t{503}}) {
         AURORA_TEST_CHECK_FALSE(is_cacheable_status(status));
     }
     // 304 是更新已有条目的输入，不是一条新条目。
@@ -249,8 +245,8 @@ AURORA_TEST_CASE(a_wildcard_vary_is_not_the_same_as_no_vary) {
 
 AURORA_TEST_CASE(repeated_lines_join_before_anything_is_parsed) {
     // `Cache-Control` 与 `Vary` 都允许分行给；只取第一行会把「`no-store` 写在第二行」读成普通应答。
-    const aurora::Headers headers = requested(Fields{
-        {"Cache-Control", "max-age=30"}, {"cache-control", "no-store"}, {"Vary", "Accept"}, {"Vary", "Age"}});
+    const aurora::Headers headers = requested(
+        Fields{{"Cache-Control", "max-age=30"}, {"cache-control", "no-store"}, {"Vary", "Accept"}, {"Vary", "Age"}});
     const auto directives = parse_cache_control(joined_field(headers, "Cache-Control"));
     AURORA_TEST_CHECK(directives.no_store);
     AURORA_TEST_REQUIRE(directives.max_age.has_value());
@@ -269,43 +265,37 @@ AURORA_TEST_CASE(repeated_lines_join_before_anything_is_parsed) {
 AURORA_TEST_CASE(freshness_prefers_max_age_over_expires) {
     const auto arrived = at(AURORA_FIXDATE);
 
-    const auto by_max_age = replied(std::uint16_t{200},
-                                    Fields{{"Cache-Control", "max-age=60"},
-                                           {"Expires", std::string{AURORA_NEXT_DAY}}},
-                                    "ok");
+    const auto by_max_age = replied(
+        std::uint16_t{200}, Fields{{"Cache-Control", "max-age=60"}, {"Expires", std::string{AURORA_NEXT_DAY}}}, "ok");
     const auto max_age = freshness_of(by_max_age, arrived);
     AURORA_TEST_CHECK_EQ(max_age.lifetime, secs(60));  // `max-age` 说话时 `Expires` 让位
     AURORA_TEST_CHECK_EQ(max_age.initial_age, std::int64_t{0});  // 没有 `Date` 也没有 `Age`：无从得知它旧
     AURORA_TEST_CHECK_EQ(epoch_seconds(max_age.arrived), epoch_seconds(arrived));
 
     // 只有 `Expires` 时按它减基准时刻；有 `Date` 就以 `Date` 为基准（那是「何时起算」的答案）。
-    const auto by_expires = replied(std::uint16_t{200},
-                                    Fields{{"Date", std::string{AURORA_FIXDATE}},
-                                           {"Expires", std::string{AURORA_LATER}}},
-                                    "ok");
+    const auto by_expires =
+        replied(std::uint16_t{200},
+                Fields{{"Date", std::string{AURORA_FIXDATE}}, {"Expires", std::string{AURORA_LATER}}}, "ok");
     AURORA_TEST_CHECK_EQ(freshness_of(by_expires, arrived).lifetime, secs(3600));
 
     // 过期的 `Expires` 折成零寿命而不是负数：即刻过期意味着「必须先问对端」，不意味着「永远别交付」。
-    const auto expired_expires = replied(std::uint16_t{200},
-                                         Fields{{"Date", std::string{AURORA_FIXDATE}},
-                                                {"Expires", std::string{AURORA_EARLIER}}},
-                                         "ok");
+    const auto expired_expires =
+        replied(std::uint16_t{200},
+                Fields{{"Date", std::string{AURORA_FIXDATE}}, {"Expires", std::string{AURORA_EARLIER}}}, "ok");
     AURORA_TEST_CHECK_EQ(freshness_of(expired_expires, arrived).lifetime, secs(0));
 
     // 没有 `Date` 时以抵达时刻为基准（`RFC 9111 §4.2.1` 的「已知基准就用基准」）。
-    const auto only_expires =
-        replied(std::uint16_t{200}, Fields{{"Expires", std::string{AURORA_LATER}}}, "ok");
+    const auto only_expires = replied(std::uint16_t{200}, Fields{{"Expires", std::string{AURORA_LATER}}}, "ok");
     AURORA_TEST_CHECK_EQ(freshness_of(only_expires, arrived).lifetime, secs(3600));
 
     // 日期文法不合即当「没给」：一条畸形 `Date` 不该把一份本来能缓存的应答变成永远不新鲜。
-    const auto junk_date = replied(std::uint16_t{200},
-                                   Fields{{"Cache-Control", "max-age=5"}, {"Date", "not an http date"}}, "ok");
+    const auto junk_date =
+        replied(std::uint16_t{200}, Fields{{"Cache-Control", "max-age=5"}, {"Date", "not an http date"}}, "ok");
     AURORA_TEST_CHECK_EQ(freshness_of(junk_date, arrived).lifetime, secs(5));
     AURORA_TEST_CHECK_EQ(freshness_of(junk_date, arrived).initial_age, std::int64_t{0});
 
     // 两者皆无即零寿命：调用方须另判有无校验子（本库不做启发式新鲜度）。
-    const auto no_validity =
-        replied(std::uint16_t{200}, Fields{{"Date", std::string{AURORA_FIXDATE}}}, "ok");
+    const auto no_validity = replied(std::uint16_t{200}, Fields{{"Date", std::string{AURORA_FIXDATE}}}, "ok");
     AURORA_TEST_CHECK_EQ(freshness_of(no_validity, arrived).lifetime, secs(0));
 }
 
@@ -342,10 +332,10 @@ AURORA_TEST_CASE(initial_age_takes_the_larger_of_the_date_gap_and_age) {
 
 AURORA_TEST_CASE(a_response_marked_no_cache_is_stored_but_never_delivered_without_asking) {
     const auto arrived = at(AURORA_FIXDATE);
-    const auto always_ask = replied(std::uint16_t{200},
-                                    Fields{{"Cache-Control", "no-cache, max-age=600"},
-                                           {"Date", std::string{AURORA_FIXDATE}}, {"ETag", "\"v1\""}},
-                                    "ok");
+    const auto always_ask = replied(
+        std::uint16_t{200},
+        Fields{{"Cache-Control", "no-cache, max-age=600"}, {"Date", std::string{AURORA_FIXDATE}}, {"ETag", "\"v1\""}},
+        "ok");
     // 响应侧 `no-cache` 折成「即刻过期」：`max-age=600` 让位，因为那条指令说的就是「用之前先核对」。
     AURORA_TEST_CHECK_EQ(freshness_of(always_ask, arrived).lifetime, secs(0));
 
@@ -363,9 +353,8 @@ AURORA_TEST_CASE(a_response_marked_no_cache_is_stored_but_never_delivered_withou
     auto revalidated_cache = table(8);
     AURORA_TEST_REQUIRE(revalidated_cache.store(
         Method::Get, cache_url(), aurora::Headers{},
-        replied(std::uint16_t{200}, Fields{{"Cache-Control", "max-age=60, must-revalidate"},
-                                           {"Date", std::string{AURORA_FIXDATE}}},
-                "ok"),
+        replied(std::uint16_t{200},
+                Fields{{"Cache-Control", "max-age=60, must-revalidate"}, {"Date", std::string{AURORA_FIXDATE}}}, "ok"),
         arrived));
     AURORA_TEST_CHECK(
         revalidated_cache.lookup(Method::Get, cache_url(), aurora::Headers{}, arrived + secs(30)).fresh.has_value());
@@ -414,8 +403,7 @@ AURORA_TEST_CASE(a_fresh_entry_is_delivered_and_says_it_came_from_the_table) {
     auto validator_cache = table(8);
     AURORA_TEST_REQUIRE(validator_cache.store(
         Method::Get, cache_url(), aurora::Headers{},
-        replied(std::uint16_t{200}, Fields{{"Date", std::string{AURORA_FIXDATE}}, {"ETag", "\"v1\""}}, "ok"),
-        arrived));
+        replied(std::uint16_t{200}, Fields{{"Date", std::string{AURORA_FIXDATE}}, {"ETag", "\"v1\""}}, "ok"), arrived));
     AURORA_TEST_CHECK_FALSE(
         require_value(validator_cache.lookup(Method::Get, cache_url(), aurora::Headers{}, arrived).revalidate)
             .response.from_cache());
@@ -423,41 +411,45 @@ AURORA_TEST_CASE(a_fresh_entry_is_delivered_and_says_it_came_from_the_table) {
 
 AURORA_TEST_CASE(vary_values_decide_whether_the_second_request_hits) {
     const auto arrived = at(AURORA_FIXDATE);
-    const auto varies = replied(std::uint16_t{200},
-                               Fields{{"Cache-Control", "max-age=600"}, {"Vary", "Accept-Language"},
-                                      {"Date", std::string{AURORA_FIXDATE}}},
-                               "zh");
+    const auto varies = replied(
+        std::uint16_t{200},
+        Fields{{"Cache-Control", "max-age=600"}, {"Vary", "Accept-Language"}, {"Date", std::string{AURORA_FIXDATE}}},
+        "zh");
     auto cache = table(8);
     AURORA_TEST_REQUIRE(cache.store(Method::Get, cache_url(), one_request("Accept-Language", "zh"), varies, arrived));
 
     // 同名同值才命中：`Vary` 存的是「应答侧点名的头名 + 当时请求里那枚头的取值」。
-    AURORA_TEST_CHECK(cache.lookup(Method::Get, cache_url(), one_request("Accept-Language", "zh"), arrived).fresh.has_value());
+    AURORA_TEST_CHECK(
+        cache.lookup(Method::Get, cache_url(), one_request("Accept-Language", "zh"), arrived).fresh.has_value());
     AURORA_TEST_CHECK_FALSE(
         cache.lookup(Method::Get, cache_url(), one_request("Accept-Language", "en"), arrived).fresh.has_value());
     // 第二次请求干脆没带那枚头 = 另一种请求，不配复用为中文那份。
     AURORA_TEST_CHECK_FALSE(cache.lookup(Method::Get, cache_url(), aurora::Headers{}, arrived).fresh.has_value());
 
     // 同一 URL 可以并存多份变体：写入 `en` 那份不挤掉 `zh` 那份。
-    const auto english = replied(std::uint16_t{200},
-                                 Fields{{"Cache-Control", "max-age=600"}, {"Vary", "Accept-Language"},
-                                        {"Date", std::string{AURORA_FIXDATE}}},
-                                 "en");
+    const auto english = replied(
+        std::uint16_t{200},
+        Fields{{"Cache-Control", "max-age=600"}, {"Vary", "Accept-Language"}, {"Date", std::string{AURORA_FIXDATE}}},
+        "en");
     AURORA_TEST_REQUIRE(cache.store(Method::Get, cache_url(), one_request("Accept-Language", "en"), english, arrived));
     AURORA_TEST_CHECK_EQ(cache.size(), std::size_t{2});
-    AURORA_TEST_CHECK_EQ(as_text(require_value(
-                             cache.lookup(Method::Get, cache_url(), one_request("Accept-Language", "zh"), arrived).fresh)),
-                         std::string{"zh"});
-    AURORA_TEST_CHECK_EQ(as_text(require_value(
-                             cache.lookup(Method::Get, cache_url(), one_request("Accept-Language", "en"), arrived).fresh)),
-                         std::string{"en"});
+    AURORA_TEST_CHECK_EQ(
+        as_text(
+            require_value(cache.lookup(Method::Get, cache_url(), one_request("Accept-Language", "zh"), arrived).fresh)),
+        std::string{"zh"});
+    AURORA_TEST_CHECK_EQ(
+        as_text(
+            require_value(cache.lookup(Method::Get, cache_url(), one_request("Accept-Language", "en"), arrived).fresh)),
+        std::string{"en"});
 
     // 同键的第二次写入取代旧变体（同一请求特征不该在表里留两条说法）。
     AURORA_TEST_REQUIRE(
         cache.store(Method::Get, cache_url(), one_request("Accept-Language", "en"), fresh("en-2"), arrived));
     AURORA_TEST_CHECK_EQ(cache.size(), std::size_t{2});
-    AURORA_TEST_CHECK_EQ(as_text(require_value(
-                             cache.lookup(Method::Get, cache_url(), one_request("Accept-Language", "en"), arrived).fresh)),
-                         std::string{"en-2"});
+    AURORA_TEST_CHECK_EQ(
+        as_text(
+            require_value(cache.lookup(Method::Get, cache_url(), one_request("Accept-Language", "en"), arrived).fresh)),
+        std::string{"en-2"});
 }
 
 AURORA_TEST_CASE(five_gates_keep_a_response_out_of_the_table) {
@@ -472,19 +464,17 @@ AURORA_TEST_CASE(five_gates_keep_a_response_out_of_the_table) {
     // ③ 响应侧 `no-store`：连读都不该读，强制 bypass。
     AURORA_TEST_CHECK_FALSE(cache.store(
         Method::Get, cache_url(), aurora::Headers{},
-        replied(std::uint16_t{200}, Fields{{"Cache-Control", "no-store, max-age=60"},
-                                           {"Date", std::string{AURORA_FIXDATE}}},
-                "secret"),
+        replied(std::uint16_t{200},
+                Fields{{"Cache-Control", "no-store, max-age=60"}, {"Date", std::string{AURORA_FIXDATE}}}, "secret"),
         arrived));
     // ④ 请求侧 `no-store`：调用方在请求里就说了别存。
-    AURORA_TEST_CHECK_FALSE(cache.store(Method::Get, cache_url(), one_request("Cache-Control", "no-store"), fresh(),
-                                        arrived));
+    AURORA_TEST_CHECK_FALSE(
+        cache.store(Method::Get, cache_url(), one_request("Cache-Control", "no-store"), fresh(), arrived));
     // ⑤ `Vary: *`：随任何请求特征而变的应答不可复用。
     AURORA_TEST_CHECK_FALSE(cache.store(
         Method::Get, cache_url(), aurora::Headers{},
-        replied(std::uint16_t{200}, Fields{{"Cache-Control", "max-age=60"}, {"Vary", "*"},
-                                           {"Date", std::string{AURORA_FIXDATE}}},
-                "ok"),
+        replied(std::uint16_t{200},
+                Fields{{"Cache-Control", "max-age=60"}, {"Vary", "*"}, {"Date", std::string{AURORA_FIXDATE}}}, "ok"),
         arrived));
     // ⑥ 既没有效期又没有任何校验子：存了只能靠启发式交付，而本库不做启发式新鲜度。
     AURORA_TEST_CHECK_FALSE(
@@ -494,8 +484,7 @@ AURORA_TEST_CASE(five_gates_keep_a_response_out_of_the_table) {
     // 只有校验子而无有效期的照进表，但即刻过期：省的是体字节，不省那一次往返。
     AURORA_TEST_REQUIRE(cache.store(
         Method::Get, cache_url(), aurora::Headers{},
-        replied(std::uint16_t{200}, Fields{{"Date", std::string{AURORA_FIXDATE}}, {"ETag", "\"v1\""}}, "ok"),
-        arrived));
+        replied(std::uint16_t{200}, Fields{{"Date", std::string{AURORA_FIXDATE}}, {"ETag", "\"v1\""}}, "ok"), arrived));
     AURORA_TEST_CHECK_EQ(cache.size(), std::size_t{1});
 }
 
@@ -511,12 +500,12 @@ AURORA_TEST_CASE(the_table_evicts_the_least_recently_used_entry) {
     AURORA_TEST_CHECK_EQ(cache.size(), std::size_t{2});
     AURORA_TEST_CHECK_FALSE(
         cache.lookup(Method::Get, "http://127.0.0.1/b", aurora::Headers{}, arrived).fresh.has_value());
-    AURORA_TEST_CHECK_EQ(as_text(require_value(
-                             cache.lookup(Method::Get, "http://127.0.0.1/a", aurora::Headers{}, arrived).fresh)),
-                         std::string{"a"});
-    AURORA_TEST_CHECK_EQ(as_text(require_value(
-                             cache.lookup(Method::Get, "http://127.0.0.1/c", aurora::Headers{}, arrived).fresh)),
-                         std::string{"c"});
+    AURORA_TEST_CHECK_EQ(
+        as_text(require_value(cache.lookup(Method::Get, "http://127.0.0.1/a", aurora::Headers{}, arrived).fresh)),
+        std::string{"a"});
+    AURORA_TEST_CHECK_EQ(
+        as_text(require_value(cache.lookup(Method::Get, "http://127.0.0.1/c", aurora::Headers{}, arrived).fresh)),
+        std::string{"c"});
 
     // 容量为 0 与「不存任何东西」同义：当场逐出，而不是留着等命中。
     auto nothing = table(0);
@@ -527,11 +516,10 @@ AURORA_TEST_CASE(the_table_evicts_the_least_recently_used_entry) {
 AURORA_TEST_CASE(shrinking_the_capacity_evicts_down_to_the_new_limit) {
     const auto arrived = at(AURORA_FIXDATE);
     auto cache = table(4);
-    for (const std::string_view letter : {std::string_view{"a"}, std::string_view{"b"}, std::string_view{"c"},
-                                          std::string_view{"d"}}) {
-        AURORA_TEST_REQUIRE(cache.store(
-            Method::Get, std::string{"http://127.0.0.1/"} + std::string{letter}, aurora::Headers{}, fresh(letter),
-            arrived));
+    for (const std::string_view letter :
+         {std::string_view{"a"}, std::string_view{"b"}, std::string_view{"c"}, std::string_view{"d"}}) {
+        AURORA_TEST_REQUIRE(cache.store(Method::Get, std::string{"http://127.0.0.1/"} + std::string{letter},
+                                        aurora::Headers{}, fresh(letter), arrived));
     }
     AURORA_TEST_CHECK_EQ(cache.size(), std::size_t{4});
 
@@ -555,19 +543,26 @@ AURORA_TEST_CASE(shrinking_the_capacity_evicts_down_to_the_new_limit) {
 AURORA_TEST_CASE(a_revalidated_entry_keeps_the_body_and_adopts_the_new_headers) {
     const auto arrived = at(AURORA_FIXDATE);
     auto cache = table(8);
-    AURORA_TEST_REQUIRE(cache.store(
-        Method::Get, cache_url(), aurora::Headers{},
-        replied(std::uint16_t{200}, Fields{{"Cache-Control", "max-age=60"}, {"Date", std::string{AURORA_FIXDATE}},
-                                           {"ETag", "\"v1\""}, {"Content-Length", "2"}, {"X-Old", "1"}},
-                "ok"),
-        arrived));
+    AURORA_TEST_REQUIRE(cache.store(Method::Get, cache_url(), aurora::Headers{},
+                                    replied(std::uint16_t{200},
+                                            Fields{{"Cache-Control", "max-age=60"},
+                                                   {"Date", std::string{AURORA_FIXDATE}},
+                                                   {"ETag", "\"v1\""},
+                                                   {"Content-Length", "2"},
+                                                   {"X-Old", "1"}},
+                                            "ok"),
+                                    arrived));
 
     const auto now = at(AURORA_LATER);
     const auto not_modified = replied(std::uint16_t{304},
-                                      Fields{{"Date", std::string{AURORA_LATER}}, {"Cache-Control", "max-age=120"},
-                                             {"ETag", "\"v2\""}, {"X-New", "9"}, {"Content-Length", "0"}},
+                                      Fields{{"Date", std::string{AURORA_LATER}},
+                                             {"Cache-Control", "max-age=120"},
+                                             {"ETag", "\"v2\""},
+                                             {"X-New", "9"},
+                                             {"Content-Length", "0"}},
                                       "");
-    const auto merged = require_value(cache.revalidated(Method::Get, cache_url(), aurora::Headers{}, not_modified, now));
+    const auto merged =
+        require_value(cache.revalidated(Method::Get, cache_url(), aurora::Headers{}, not_modified, now));
     // 状态码与体仍取已存那份（304 按定义没有体），头部以 304 为准并回其余字段。
     AURORA_TEST_CHECK_EQ(merged.status(), std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(as_text(merged), std::string{"ok"});
@@ -593,11 +588,11 @@ AURORA_TEST_CASE(a_revalidated_entry_keeps_the_body_and_adopts_the_new_headers) 
 
 AURORA_TEST_CASE(merging_skips_the_four_fields_that_describe_the_payload) {
     const aurora::Headers stored = requested(Fields{{"Content-Length", "12"},
-                                                     {"Content-Range", "bytes 0-11/12"},
-                                                     {"Trailer", "X-Stuff"},
-                                                     {"Transfer-Encoding", "gzip"},
-                                                     {"ETag", "\"v1\""},
-                                                     {"X-Keep", "a"}});
+                                                    {"Content-Range", "bytes 0-11/12"},
+                                                    {"Trailer", "X-Stuff"},
+                                                    {"Transfer-Encoding", "gzip"},
+                                                    {"ETag", "\"v1\""},
+                                                    {"X-Keep", "a"}});
     const aurora::Headers update = requested(Fields{{"Content-Length", "0"},
                                                     {"Content-Range", "bytes 9-9/9"},
                                                     {"Trailer", "Nope"},

@@ -1,6 +1,6 @@
 #pragma once
 
-// Aurora net — TLS 后端接缝（CHG-010 TLS 切片，内部头）。
+// Aurora net — TLS 后端接缝（CHG-018 TLS 切片，内部头）。
 //
 // 存在的理由是把「TLS 状态机」与「哪个平台的 TLS 栈在跑它」彻底分开：
 //   - `net/tls.cpp` 只认本接口——握手循环、记录级读写、背压与取消这些与平台无关的纪律写一遍，

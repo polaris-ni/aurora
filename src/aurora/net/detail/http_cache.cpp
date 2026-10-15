@@ -64,8 +64,7 @@ namespace {
 }
 
 /// @brief 取一枚可解析为日期头的字段（`Date` / `Expires`），走 `parse_http_date()` 的纯日历算术。
-[[nodiscard]] auto date_field(const aurora::Headers &headers, std::string_view name)
-    -> std::optional<CacheTime> {
+[[nodiscard]] auto date_field(const aurora::Headers &headers, std::string_view name) -> std::optional<CacheTime> {
     const auto text = headers.get(name);
     if (!text.has_value()) {
         return std::nullopt;
@@ -106,11 +105,8 @@ namespace {
 
 /// @brief 从表里的一份应答取出交付形态并标记「出自缓存」。
 [[nodiscard]] auto cached_copy(const CacheEntry &entry) -> aurora::net::http::Response {
-    return aurora::net::http::Response{entry.response.status(),
-                                       std::string{entry.response.reason()},
-                                       entry.response.headers(),
-                                       entry.response.body(),
-                                       true};
+    return aurora::net::http::Response{entry.response.status(), std::string{entry.response.reason()},
+                                       entry.response.headers(), entry.response.body(), true};
 }
 
 }  // namespace
@@ -138,8 +134,7 @@ auto parse_cache_control(std::string_view value) -> CacheDirectives {
         // 空格不该让一条本来能缓存的应答失去新鲜期——那是对端的排版问题，不是本库的判定问题。
         const std::string name =
             to_lower_ascii(trim_ows(equals == std::string_view::npos ? item : item.substr(0, equals)));
-        std::string_view argument =
-            equals == std::string_view::npos ? std::string_view{} : item.substr(equals + 1);
+        std::string_view argument = equals == std::string_view::npos ? std::string_view{} : item.substr(equals + 1);
         argument = trim_ows(argument);
         if (argument.size() >= 2 && argument.front() == '"' && argument.back() == '"') {
             argument = argument.substr(1, argument.size() - 2);
@@ -198,8 +193,8 @@ auto freshness_of(const aurora::net::http::Response &response, CacheTime arrived
     return freshness_of(response, arrived, directives);
 }
 
-auto freshness_of(const aurora::net::http::Response &response, CacheTime arrived,
-                  const CacheDirectives &directives) -> Freshness {
+auto freshness_of(const aurora::net::http::Response &response, CacheTime arrived, const CacheDirectives &directives)
+    -> Freshness {
     Freshness out;
     out.arrived = arrived;
 
@@ -297,8 +292,8 @@ auto HttpResponseCache::lookup(aurora::net::http::Method method, const std::stri
 }
 
 auto HttpResponseCache::store(aurora::net::http::Method method, const std::string &url,
-                              const aurora::Headers &request_headers,
-                              const aurora::net::http::Response &response, CacheTime now) -> bool {
+                              const aurora::Headers &request_headers, const aurora::net::http::Response &response,
+                              CacheTime now) -> bool {
     if (!is_cacheable_method(method) || !is_cacheable_status(response.status())) {
         return false;
     }
@@ -333,11 +328,8 @@ auto HttpResponseCache::store(aurora::net::http::Method method, const std::strin
         entry.vary.emplace_back(name, request_headers.get(name).value_or(std::string{}));
     }
     // 表里存的是「未标缓存」的形态：`from_cache()` 只在交付那一刻置真，否则条目自己会被读成一次命中。
-    entry.response = aurora::net::http::Response{response.status(),
-                                                 std::string{response.reason()},
-                                                 response.headers(),
-                                                 response.body(),
-                                                 false};
+    entry.response = aurora::net::http::Response{response.status(), std::string{response.reason()}, response.headers(),
+                                                 response.body(), false};
     entry.freshness = freshness;
     entry.etag = etag;
     entry.last_modified = last_modified;
@@ -366,17 +358,13 @@ auto HttpResponseCache::revalidated(aurora::net::http::Method method, const std:
     auto entry = entries_[index.value()];
     // 头部以 304 为准并回已存的其余字段，体与状态码仍取已存那份（304 按定义没有体）。
     auto merged = merge_revalidated_headers(entry.response.headers(), not_modified.headers());
-    auto combined = aurora::net::http::Response{entry.response.status(),
-                                                std::string{entry.response.reason()},
-                                                std::move(merged),
-                                                entry.response.body(),
-                                                false};
+    auto combined = aurora::net::http::Response{entry.response.status(), std::string{entry.response.reason()},
+                                                std::move(merged), entry.response.body(), false};
     // 新鲜度按合并后的头部现算：304 没带 `Cache-Control` 时沿用已存那枚，带了就以它为准。
     entry.freshness = freshness_of(combined, now);
     entry.etag = combined.header("ETag");
     entry.last_modified = combined.header("Last-Modified");
-    entry.must_revalidate =
-        parse_cache_control(joined_field(combined.headers(), "Cache-Control")).must_revalidate;
+    entry.must_revalidate = parse_cache_control(joined_field(combined.headers(), "Cache-Control")).must_revalidate;
     entry.response = std::move(combined);
     entry.used = ++clock_;
     entries_[index.value()] = std::move(entry);
@@ -394,8 +382,7 @@ auto HttpResponseCache::clear() -> void {
 }
 
 auto HttpResponseCache::find_index(aurora::net::http::Method method, const std::string &url,
-                                   const aurora::Headers &request_headers) const
-    -> std::optional<std::size_t> {
+                                   const aurora::Headers &request_headers) const -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < entries_.size(); ++i) {
         const auto &entry = entries_[i];
         if (entry.method != method || entry.url != url) {
@@ -419,10 +406,9 @@ auto HttpResponseCache::evict_over_capacity() -> void {
     // 表只在持锁路径上被调用，故本函数不再自行加锁。
     const auto limit = static_cast<std::size_t>(options_.max_entries);
     while (entries_.size() > limit) {
-        const auto oldest = std::min_element(entries_.begin(), entries_.end(), [](const CacheEntry &left,
-                                                                                  const CacheEntry &right) {
-            return left.used < right.used;
-        });
+        const auto oldest =
+            std::min_element(entries_.begin(), entries_.end(),
+                             [](const CacheEntry &left, const CacheEntry &right) { return left.used < right.used; });
         entries_.erase(oldest);
     }
 }

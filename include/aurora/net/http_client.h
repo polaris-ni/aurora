@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief HTTP/1.1 发起侧客户端（CHG-010 §6 的 HTTP 发起侧、§12 语义的地基件）。
+/// @brief HTTP/1.1 发起侧客户端（CHG-018 §6 的 HTTP 发起侧、§12 语义的地基件）。
 /// @file net/http_client.h
 ///
 /// 本头回答一个问题：**「把一份 `Request` 送出去、把应答拿回来」**——连接（`http://` 直连、

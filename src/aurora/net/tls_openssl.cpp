@@ -1,4 +1,4 @@
-// Aurora net — OpenSSL 后端（CHG-010 TLS 切片：Linux 等无系统栈的腿，由 provider 装配，提案 §5 平台
+// Aurora net — OpenSSL 后端（CHG-018 TLS 切片：Linux 等无系统栈的腿，由 provider 装配，提案 §5 平台
 // 矩阵 + §16 第 1 项）。
 //
 // 本腿存在的前提是「Linux 没有可用的系统 TLS 栈」，而自带一份 TLS 源码会同时破坏「断网可构建」与

@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: src/aurora/net/detail/proxy_wire.h + src/aurora/net/detail/proxy_wire.cpp
-/// 测试说明: 代理握手字节层的逐值回归（CHG-010 §11 代理族的握手部分）。覆盖 CONNECT 请求行的
+/// 测试说明: 代理握手字节层的逐值回归（CHG-018 §11 代理族的握手部分）。覆盖 CONNECT 请求行的
 ///           `authority-form`（IPv6 补方括号）、`Proxy-Authorization: Basic` 的 base64 形态与
 ///           「无用户名即不发该头」，应答头部块解析的三态分岔（还没读够 / 完整 / 不合文法或超
 ///           上限）、同名头保序不折叠、CRLF 与裸 LF 两型换行；SOCKS5 侧覆盖方法协商请求（有凭据

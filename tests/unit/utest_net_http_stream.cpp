@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/http_stream.h + Client::open_stream（src/aurora/net/http_client.cpp）
-/// 测试说明: HTTP 发起侧流式接收的离线回归（CHG-010 §6 / §12「open_stream 形态裁决」）。以 ScriptedPeer 在
+/// 测试说明: HTTP 发起侧流式接收的离线回归（CHG-018 §6 / §12「open_stream 形态裁决」）。以 ScriptedPeer 在
 ///           回环上按脚本应答真实字节，验四条只有逐段交付才成立的形态：
 ///           - **完成事实是 `StreamOutcome`**：`response.body()` 恒空、`delivered_bytes` 与宿主拼出的文本逐值
 ///             相符、`on_head` / `on_data` / `on_end` 的调用次序与次数符合契约（失败结局不调 `on_end`）；

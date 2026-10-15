@@ -1,4 +1,4 @@
-// Aurora net — Schannel 系统栈后端（CHG-010 TLS 切片：Windows 缺省装配，提案 §5 平台矩阵）。
+// Aurora net — Schannel 系统栈后端（CHG-018 TLS 切片：Windows 缺省装配，提案 §5 平台矩阵）。
 //
 // 选系统栈而不是自带 TLS 源码，理由有三条，都不可让：
 //   - Windows 的系统栈零依赖、随 servicing 打补丁，本仓库「断网可构建」的不变量因此保持不变。

@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief 通用解压能力：按格式入参的 gzip / zlib / deflate 解压（CHG-010 §12「内容编码」的 core 级落地）。
+/// @brief 通用解压能力：按格式入参的 gzip / zlib / deflate 解压（CHG-018 §12「内容编码」的 core 级落地）。
 /// @file core/compression.h
 ///
 /// 本头回答一个问题：**「把一份按某种格式压缩的字节流还原成原始字节」**。它是 core 层共用基础件

@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/blocking.h
-/// 测试说明: aurora::net::blocking 跨平台 socket 操作层（CHG-006 建立，CHG-010 §4 将其降为
+/// 测试说明: aurora::net::blocking 跨平台 socket 操作层（CHG-006 建立，CHG-018 §4 将其降为
 ///           仅供工具与测试宿主使用的同步阻塞面）行为契约回归：临时端口监听与
 ///           `port()` 系统分配值回报、`wait_readable` 纯超时（false 非错误）与超时后到达、
 ///           connect→accept 往返 + `write_all`/`read_some` 字节完整（1MiB+7 压分块边界）、
