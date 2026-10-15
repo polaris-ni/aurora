@@ -50,8 +50,8 @@ namespace aurora {
 /// @note Thread: thread-safe（值类型）
 /// @note Side-effects: none
 enum class CompressionFormat : std::uint8_t {
-    Gzip,     ///< gzip 包装（RFC 1952）：HTTP `Content-Encoding: gzip` 的对应格式
-    Zlib,     ///< zlib 包装（RFC 1950）：HTTP `Content-Encoding: deflate` 的名义对应格式
+    Gzip,  ///< gzip 包装（RFC 1952）：HTTP `Content-Encoding: gzip` 的对应格式
+    Zlib,  ///< zlib 包装（RFC 1950）：HTTP `Content-Encoding: deflate` 的名义对应格式
     Deflate,  ///< 裸 DEFLATE 流（RFC 1951，无包装头/校验尾）：HTTP `deflate` 歧义的回落形态
 };
 
@@ -142,7 +142,6 @@ class Decompressor {
 /// @param format 压缩格式（显式声明）。
 /// @param input 待压缩字节。
 /// @return 恒为 `compression-unavailable` 失败态（压缩方向未实现）。
-[[nodiscard]] auto compress(CompressionFormat format, std::span<const char> input)
-    -> Result<std::vector<char>>;
+[[nodiscard]] auto compress(CompressionFormat format, std::span<const char> input) -> Result<std::vector<char>>;
 
 }  // namespace aurora

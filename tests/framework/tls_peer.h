@@ -68,8 +68,8 @@ namespace aurora::test::tls {
 /// `-not_after` 是较新版本才有的选项）时，签法会直接失败，用例据此报成环境缺项而不是伪造一次拒绝。
 /// 底型取 `std::uint8_t`：与公共侧的 `TlsVersion` 同形态，枚举只按值比较、不参与算术语境。
 enum class Lifetime : std::uint8_t {
-    Valid,   ///< 现行有效期（缺省）
-    Expired, ///< 有效期整体落在过去
+    Valid,  ///< 现行有效期（缺省）
+    Expired,  ///< 有效期整体落在过去
 };
 
 /// @brief 平台无关进程设施的内部件（spawn / 等待 / 强杀），只服务本头自身的对外类型。

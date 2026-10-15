@@ -64,8 +64,7 @@ auto wuffs_decoder_workbuf_len(CompressionFormat format, void *decoder) -> std::
             case CompressionFormat::Zlib:
                 return wuffs_zlib__decoder__workbuf_len(static_cast<wuffs_zlib__decoder *>(decoder)).max_incl;
             case CompressionFormat::Deflate:
-                return wuffs_deflate__decoder__workbuf_len(static_cast<wuffs_deflate__decoder *>(decoder))
-                    .max_incl;
+                return wuffs_deflate__decoder__workbuf_len(static_cast<wuffs_deflate__decoder *>(decoder)).max_incl;
         }
         return 0;
     }();
@@ -81,8 +80,7 @@ auto wuffs_decoder_transform(CompressionFormat format, void *decoder, wuffs_base
         case CompressionFormat::Zlib:
             return wuffs_zlib__decoder__transform_io(static_cast<wuffs_zlib__decoder *>(decoder), dst, src, work);
         case CompressionFormat::Deflate:
-            return wuffs_deflate__decoder__transform_io(static_cast<wuffs_deflate__decoder *>(decoder), dst, src,
-                                                        work);
+            return wuffs_deflate__decoder__transform_io(static_cast<wuffs_deflate__decoder *>(decoder), dst, src, work);
     }
     return wuffs_base__make_status("compression: unreachable format dispatch");
 }
@@ -98,13 +96,12 @@ struct Decompressor::Impl {
     bool finished{false};
 #ifdef AURORA_ENABLE_COMPRESSION
     void *decoder{nullptr};
-    std::vector<std::uint8_t> work;     ///< wuffs 工作缓冲（workbuf_len，三族均为个位数量级）
+    std::vector<std::uint8_t> work;  ///< wuffs 工作缓冲（workbuf_len，三族均为个位数量级）
     std::vector<std::uint8_t> staging;  ///< 解压产物暂存（AURORA_OUTPUT_CHUNK_BYTES）
-    wuffs_base__io_buffer out{};        ///< 指向 staging 的输出 io_buffer（meta 每轮重置）
+    wuffs_base__io_buffer out{};  ///< 指向 staging 的输出 io_buffer（meta 每轮重置）
 
     /// @brief 把一段解压产物 [begin, end) 经 Sink 交出，并累计限额计数（越限即止，不再吐出后续字节）。
-    static auto emit_output(Impl *impl, std::size_t begin, std::size_t end, const DecompressSink &sink)
-        -> Result<void>;
+    static auto emit_output(Impl *impl, std::size_t begin, std::size_t end, const DecompressSink &sink) -> Result<void>;
 
     /// @brief 驱动一轮解码循环：消费 in（ri→wi）向 out 产出，产物经 Sink 交出。
     ///
@@ -135,8 +132,8 @@ auto Decompressor::create(CompressionFormat format, const DecompressOptions &opt
     impl->max_output_bytes = options.max_output_bytes;
     impl->decoder = wuffs_decoder_alloc(format);
     if (impl->decoder == nullptr) {
-        return make_error(ErrorCode::CompressionUnavailable, "decoder allocation failed for format " +
-                                                                 std::string(format_name(format)));
+        return make_error(ErrorCode::CompressionUnavailable,
+                          "decoder allocation failed for format " + std::string(format_name(format)));
     }
     impl->work.resize(wuffs_decoder_workbuf_len(format, impl->decoder));
     impl->staging.resize(AURORA_OUTPUT_CHUNK_BYTES);
@@ -148,8 +145,8 @@ auto Decompressor::create(CompressionFormat format, const DecompressOptions &opt
 
 #ifdef AURORA_ENABLE_COMPRESSION
 
-auto Decompressor::Impl::emit_output(Impl *impl, std::size_t begin, std::size_t end,
-                                     const DecompressSink &sink) -> Result<void> {
+auto Decompressor::Impl::emit_output(Impl *impl, std::size_t begin, std::size_t end, const DecompressSink &sink)
+    -> Result<void> {
     if (end <= begin) {
         return Result<void>{};
     }
@@ -157,9 +154,9 @@ auto Decompressor::Impl::emit_output(Impl *impl, std::size_t begin, std::size_t 
     if (impl->max_output_bytes.has_value()) {
         const auto cap = *impl->max_output_bytes;
         if (impl->produced + static_cast<std::uint64_t>(len) > cap) {
-            return make_error(ErrorCode::CompressionOutputTooLarge,
-                              "decompressed output exceeds max_output_bytes (" + std::to_string(cap) +
-                                  " bytes) for format " + std::string(format_name(impl->format)));
+            return make_error(ErrorCode::CompressionOutputTooLarge, "decompressed output exceeds max_output_bytes (" +
+                                                                        std::to_string(cap) + " bytes) for format " +
+                                                                        std::string(format_name(impl->format)));
         }
     }
     impl->produced += static_cast<std::uint64_t>(len);
@@ -170,8 +167,8 @@ auto Decompressor::Impl::emit_output(Impl *impl, std::size_t begin, std::size_t 
     return Result<void>{};
 }
 
-auto Decompressor::Impl::drive(Impl *impl, wuffs_base__io_buffer *in, bool input_closed,
-                               const DecompressSink &sink) -> Result<void> {
+auto Decompressor::Impl::drive(Impl *impl, wuffs_base__io_buffer *in, bool input_closed, const DecompressSink &sink)
+    -> Result<void> {
     auto *out = &impl->out;
     const auto work = wuffs_base__make_slice_u8(impl->work.data(), impl->work.size());
     while (true) {
@@ -287,9 +284,7 @@ auto decompress(CompressionFormat format, std::span<const char> input, const Dec
     }
     auto &decoder = created.value();
     std::vector<char> out;
-    const auto collect = [&out](std::span<const char> chunk) {
-        out.insert(out.end(), chunk.begin(), chunk.end());
-    };
+    const auto collect = [&out](std::span<const char> chunk) { out.insert(out.end(), chunk.begin(), chunk.end()); };
     if (auto pushed = decoder.push(input, collect); !pushed) {
         return pushed.error();
     }
