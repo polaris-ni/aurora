@@ -364,6 +364,13 @@ AURORA_TEST_CASE(build_honours_the_compression_capability_leg) {
     AURORA_TEST_CHECK_EQ(result.error().code_enum, aurora::ErrorCode::HttpBodyCorrupt);
 }
 
+// 这条判据只在能力缺席的腿成立（建链即拒），故本腿登记成同名 SKIP：登记而非缺席，才能让两腿的用例数
+// 逐名可比，也不给 `registry_integrity` 留下「源文件里有这个名字、--list 里没有」的空档。
+AURORA_TEST_CASE(stream_building_a_chain_without_the_capability_fails_at_create) {
+    AURORA_TEST_SKIP(
+        "AURORA_ENABLE_COMPRESSION is enabled; rejecting at create only holds on the capability-absent leg");
+}
+
 AURORA_TEST_CASE(stream_gzip_arrives_in_odd_pieces) {
     // 逐段喂入不改变产物：一次喂完与一枚字节一枚字节地喂，拼出来的明文必须逐字节相同。
     const auto wire = bytes(AURORA_GZIP_HELLO);
