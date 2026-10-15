@@ -11,6 +11,7 @@
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/event.h"
 #include "aurora/event/focus.h"
+#include "aurora/webview/native_view_host.h"
 #include "aurora/widget/widget.h"
 #include "aurora/window/window.h"
 
@@ -235,6 +236,11 @@ class WindowHost {
     std::string scroll_scope_;  ///< `ScrollStorage` 作用域键（本窗口 id 的字符串形式，构造时定稿）
     WindowRole role_;
     WindowOptions opts_;
+    // 原生子视图书架：WebView 控件在挂载期经线程局部口 `NativeViewHost::current()`
+    // 登记自己，宿主每帧经它同步几何与可见性。
+    // ⚠️ 声明序即销毁序的逆序：本成员声明在 `scene_` 之前 ⇒ 控件树最后亡，控件析构时
+    // 经票据回访的宿主仍活着，注销走完整路径（票据另有 weak_ptr 门兜底反向顺序）。
+    webview::NativeViewHost native_view_host_;
     // ⚠️ 声明顺序即销毁顺序的逆序：`window_` 声明在 `scene_` 之后 → `window_` 先析构，
     // 其 `cached_root_`（持 root 的 Node 副本）先释放，UI 树随后销毁，不留下悬垂引用。
     Scene scene_;

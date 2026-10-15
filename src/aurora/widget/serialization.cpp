@@ -8,9 +8,10 @@
 
 #include "aurora/app/perf_overlay.h"
 #include "aurora/core/diagnostics.h"
-#include "aurora/core/platform.h"
+#include "aurora/core/platform.h"  // NOLINT
 #include "aurora/media/video_controls.h"
 #include "aurora/media/video_player.h"
+#include "aurora/webview/web_view.h"
 #include "aurora/navigation/hero.h"
 #include "aurora/widget/bar_chart.h"
 #include "aurora/widget/bottom_nav_bar.h"
@@ -189,6 +190,8 @@ auto register_core_widgets() -> void {
     // 独立反序列化时传 nullptr（控件内部已做空指针保护）。
     reg_default<VideoPlayer>("VideoPlayer");
     reg_default<VideoControls>("VideoControls", nullptr);
+    // WebView 承载外部 Web 内容：默认构造后经 deserialize_props 回填 url / mode 等。
+    reg_default<webview::WebView>("WebView");
     reg_default<Stack>("Stack", std::vector<Node>{});
     reg_default<Spacer>("Spacer");
     // 占位子节点须每次新建：若在注册时构造一次，所有 Show 实例会共用同一个 Spacer。

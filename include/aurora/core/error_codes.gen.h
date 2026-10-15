@@ -166,6 +166,13 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     HttpProtocolError = 122,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
     HttpContentEncodingUnsupported = 123,  ///< http-content-encoding-unsupported
     HttpBodyCorrupt = 124,  ///< http-body-corrupt: HTTP response body cannot be decoded: '{detail}'
+    WebViewRuntimeMissing = 125,  ///< webview-runtime-missing: No native web engine runtime available: '{detail}'
+    WebViewEngineInitFailed = 126,  ///< webview-engine-init-failed: Web engine initialization failed: '{detail}'
+    WebViewNavigationFailed = 127,  ///< webview-navigation-failed: Web navigation failed for '{uri}': '{detail}'
+    WebViewScriptEvalFailed = 128,  ///< webview-script-eval-failed: Script evaluation failed: '{detail}'
+    WebViewSnapshotUnsupported = 129,  ///< webview-snapshot-unsupported: Snapshot mode unavailable: '{detail}'
+    WebViewHostUnbound = 130,  ///< webview-host-unbound: Web view not bound to a native host: '{detail}'
+    WebViewUnsupportedMode = 131,  ///< webview-unsupported-mode
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -183,7 +190,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 125> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 132> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1793,6 +1800,97 @@ inline constexpr std::array<ErrorMeta, 125> AURORA_ERROR_TABLE = {
                     "is a data defect (at the peer, or in the encoding chain it declared), not a transport fault - the "
                     "bytes arrived whole, so retrying the same target only re-fetches the same broken payload; check "
                     "the declared Content-Encoding chain before suspecting the link",
+        },
+        {
+            .code = ErrorCode::WebViewRuntimeMissing,
+            .ident = "WebViewRuntimeMissing",
+            .slug = "webview-runtime-missing",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Warning,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "No native web engine runtime available: '{detail}'",
+            .hint = "The WebView control degrades to a placeholder rectangle; install the platform runtime (WebView2 "
+                    "Runtime on Windows, libwebkit2gtk on Linux) to enable it",
+        },
+        {
+            .code = ErrorCode::WebViewEngineInitFailed,
+            .ident = "WebViewEngineInitFailed",
+            .slug = "webview-engine-init-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Web engine initialization failed: '{detail}'",
+            .hint = "The engine runtime was found but could not be started; the control degrades to a placeholder - "
+                    "check the user data folder and display connection",
+        },
+        {
+            .code = ErrorCode::WebViewNavigationFailed,
+            .ident = "WebViewNavigationFailed",
+            .slug = "webview-navigation-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = true,
+            .message_tpl = "Web navigation failed for '{uri}': '{detail}'",
+            .hint = "Check the URI scheme and network reachability; custom schemes and file access must be enabled "
+                    "explicitly",
+        },
+        {
+            .code = ErrorCode::WebViewScriptEvalFailed,
+            .ident = "WebViewScriptEvalFailed",
+            .slug = "webview-script-eval-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = true,
+            .message_tpl = "Script evaluation failed: '{detail}'",
+            .hint = "The page may not have finished loading, or JavaScript is disabled on this control; retry after "
+                    "navigation completes",
+        },
+        {
+            .code = ErrorCode::WebViewSnapshotUnsupported,
+            .ident = "WebViewSnapshotUnsupported",
+            .slug = "webview-snapshot-unsupported",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Warning,
+            .auto_fixable = false,
+            .fix_category = "resource_error",
+            .retryable = false,
+            .message_tpl = "Snapshot mode unavailable: '{detail}'",
+            .hint = "Snapshot mode needs a live engine and, on Linux, an available GTK display connection; use "
+                    "Interactive mode on X11 or Windows instead",
+        },
+        {
+            .code = ErrorCode::WebViewHostUnbound,
+            .ident = "WebViewHostUnbound",
+            .slug = "webview-host-unbound",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Warning,
+            .auto_fixable = false,
+            .fix_category = "missing_prop",
+            .retryable = false,
+            .message_tpl = "Web view not bound to a native host: '{detail}'",
+            .hint = "The control is rendering outside a window host (headless/offscreen) or was registered before the "
+                    "host installed its thread-local slot",
+        },
+        {
+            .code = ErrorCode::WebViewUnsupportedMode,
+            .ident = "WebViewUnsupportedMode",
+            .slug = "webview-unsupported-mode",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Warning,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "Web view mode unsupported on this backend: '{detail}'",
+            .hint = "Interactive mode needs a native child surface; Wayland and headless backends cannot host one - "
+                    "switch to Snapshot mode or move the control",
         },
     },
 };

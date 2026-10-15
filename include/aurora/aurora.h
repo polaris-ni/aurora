@@ -164,6 +164,8 @@
 #include "aurora/theming/type_scale.h"
 #include "aurora/todo.h"
 #include "aurora/ui/factories.h"
+#include "aurora/webview/native_view_host.h"
+#include "aurora/webview/web_view.h"
 #include "aurora/widget/a11y_diff.h"
 #include "aurora/widget/a11y_tree.h"
 #include "aurora/widget/bar_chart.h"

@@ -233,6 +233,27 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_atspi)
     endif ()
 
+    # ---- WebKitGTK WebView（Linux/X11）：引擎 + 宿主接线的端到端真机验收 ——
+    # 收养外部 X 窗口 / 页面加载与导航态 / 标题 / evaluate 往返 / 双向消息通道 /
+    # X 子窗口几何与预期矩形闭环比对 / 改档后几何再下发 / 快照像素。强制 X11 路径
+    # （Wayland 下收养机制不成立，引擎按设计报 UnsupportedPlatform）。仅用公共 API。
+    if (LINUX AND AURORA_BACKEND_X11 AND AURORA_ENABLE_WEBVIEW_WEBKITGTK)
+        aurora_add_verify_probe(aurora_verify_webview_webkitgtk
+                "${_aurora_verify_dir}/webkitgtk_webview_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_webview_webkitgtk)
+    endif ()
+
+    # ---- WebView2 WebView（Windows）：引擎 + 宿主接线的端到端真机验收 ——
+    # 异步环境 / 控制器创建 / 页面加载与导航态 / 标题 / evaluate 往返 / 双向消息通道 /
+    # Win32 子窗口几何与可见性闭环比对 / 改档后几何再下发 / 快照像素。仅用公共 API。
+    # 运行期需 WebView2 Evergreen 运行时与可被 LoadLibrary 找到的 WebView2Loader.dll
+    # （应用侧可再分发件，运行前放到 exe 同目录或加进 PATH），见探针头注。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11) AND AURORA_ENABLE_WEBVIEW_WEBVIEW2)
+        aurora_add_verify_probe(aurora_verify_webview_webview2
+                "${_aurora_verify_dir}/webview2_webview_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_webview_webview2)
+    endif ()
+
     # ---- WASAPI 音频（Windows）：真实设备线程 / 格式协商 / 图时钟 / 出声路径真机核对 ----
     # 自动段核对激活/格式契约/时钟推进/缓冲源与推流通路/suspend-resume；--interactive 出声人工段
     # （扫频/双源混音/设备热切换）。需音频后端编译进库（AURORA_ENABLE_AUDIO=ON）。

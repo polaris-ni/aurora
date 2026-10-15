@@ -155,6 +155,28 @@ class Surface {
     /// （默认 `wait_events` 为分段 sleep，最迟 1000ms 自然醒，不丢事件仅延迟）。
     virtual auto request_wake() -> void {}
 
+    /// @brief 附加事件源的待监听条目（语义同 AT-SPI 桥的 `WatchFd`）。
+    ///
+    /// 存在的理由：宿主侧可能挂载自带事件循环的扩展（如 WebView 引擎的 GLib 主上下文），
+    /// 其 fd 必须并入本后端的 `wait_events` 等待集，否则扩展事件最迟要等 1000ms 分段兜底
+    /// 才被处理（交互场景不可接受）。条目由宿主经 `set_extra_event_source` 的 provider
+    /// 现取（事件源随引擎挂载/卸载动态变化，不缓存）。
+    struct ExtraWatch {
+        int fd = -1;           ///< 待监听的文件描述符（< 0 跳过）
+        bool readable = true;  ///< 是否关心可读事件
+        bool writable = false;  ///< 是否关心可写事件
+    };
+
+    /// @brief 安装「附加事件源」：`watches` 现取待监听 fd 集，`pump` 在 fd 就绪后推进一次。
+    ///
+    /// 后端实现须把 `watches()` 的 fd 并入 `wait_events` 的 poll 集、并在 poll 返回后调用
+    /// `pump()`（与 AT-SPI 桥的并入方式同构）。未安装（默认空）或传空函数即撤销——
+    /// 两个通道均回到「无附加事件源」行为。Win32 等消息泵后端可忽略（其消息泵天然覆盖）。
+    /// @param watches 待监听 fd 集的提供者（传空撤销）。
+    /// @param pump fd 就绪后的推进函数（传空撤销）。
+    virtual auto set_extra_event_source([[maybe_unused]] std::function<std::vector<ExtraWatch>()> watches,
+                                        [[maybe_unused]] std::function<void()> pump) -> void {}
+
     /// @brief 本后端的 `poll_platform_events()` 是否抽干「线程/进程级共享队列」。
     ///
     /// Windows（Win32 `PeekMessage(nullptr,…)`）与 GLFW（`glfwPollEvents()`）一次调用即

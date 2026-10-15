@@ -155,6 +155,11 @@ namespace aurora::tools {
     // ---- gesture ----
     enums["DragAxis"] = {"None", "Horizontal", "Vertical"};
 
+    // ---- webview ----
+    // 取值逐字来自 `web_view.cpp` 的 `mode_to_string`（序列化落盘的字符串即这两枚），
+    // 不是枚举成员的 C++ 限定名——属性值校验与补全都按字符串比对。
+    enums["WebViewMode"] = {"Interactive", "Snapshot"};
+
     // ---- json (au::json::Type: the public JSON module's value discriminator, AI-enumerable) ----
     enums["JsonType"] = {"Null", "Bool", "Int", "UInt", "Double", "RawNumber", "String", "Array", "Object"};
 

@@ -143,6 +143,16 @@ auto scenarios() -> std::vector<Scenario> {
              col->add(box(100.0F, 50.0F));
              return Node{col};
          }},
+        // WebView 快照模式：无宿主/无引擎时它就是一个 320×240 的普通占位盒——这条钉的是
+        // 「双模里帧流那一半」的**结构**面（盒模型与兄弟控件一样参与布局），像素面另有专门用例。
+        {.name = "webview_snapshot",
+         .build = []() -> Node {
+             auto col = std::make_shared<Column>();
+             col->add(Node{std::make_shared<webview::WebView>(
+                 webview::WebViewProps{.mode = webview::WebViewMode::Snapshot})});
+             col->add(box(100.0F, 20.0F));
+             return Node{col};
+         }},
     };
 }
 
@@ -302,6 +312,140 @@ AURORA_TEST_CASE(pixel_snapshot_matches_golden_baseline) {
     // 默认严格：逐像素零容差；容差仅用于吸收抗锯齿/字体 hinting 的跨平台抖动。
     // 传入 root 以启用归因：失败时报告会说清差异落在哪个控件的盒子里。
     golden::compare_or_update("golden_basic_column", current_path, &root);
+}
+
+// ---- WebView 快照模式：像素真的经引擎流进 Painter 帧流（判据 3 的像素面） ----
+
+namespace {
+
+/// @brief 一张确定性的「假页面」：与控件盒同尺寸（320×240），故 `draw_image` 是 1:1 blit，
+///        不引入任何缩放滤波 ⇒ 像素逐位可复现。左半纯红、右半纯绿、顶三行纯白、底三行纯蓝。
+/// @return 320×240 RGBA8 位图。
+auto stub_page_image() -> Image {
+    constexpr int page_w = 320;
+    constexpr int page_h = 240;
+    Image img;
+    img.width = page_w;
+    img.height = page_h;
+    img.pixels.assign(static_cast<std::size_t>(page_w) * static_cast<std::size_t>(page_h) * 4U, 0U);
+    for (int y = 0; y < page_h; ++y) {
+        for (int x = 0; x < page_w; ++x) {
+            std::uint8_t r = 0;
+            std::uint8_t g = 0;
+            std::uint8_t b = 0;
+            if (y < 3) {
+                r = g = b = 255;  // 顶带：白
+            } else if (y >= page_h - 3) {
+                b = 255;  // 底带：蓝
+            } else if (x < page_w / 2) {
+                r = 255;  // 左半：红
+            } else {
+                g = 255;  // 右半：绿
+            }
+            const std::size_t at = (static_cast<std::size_t>(y) * static_cast<std::size_t>(page_w) +
+                                    static_cast<std::size_t>(x)) *
+                                   4U;
+            img.pixels[at] = r;
+            img.pixels[at + 1] = g;
+            img.pixels[at + 2] = b;
+            img.pixels[at + 3] = 255;
+        }
+    }
+    return img;
+}
+
+/// @brief 只回确定性假页面的快照桩视图。
+class StubPageSink final : public webview::WebViewSink {
+  public:
+    auto set_native_rect(const webview::NativeViewRect & /*rect*/) -> void override {}
+    auto set_native_visible(bool /*visible*/) -> void override {}
+    auto capture(std::function<void(Image)> done) -> void override {
+        if (done) {
+            done(stub_page_image());
+        }
+    }
+    auto detach() -> void override {}
+
+    // 内容通道在本套件不参与判据（几何/像素另有专测），按契约留空实现。
+    auto navigate(const std::string & /*uri*/) -> void override {}
+    auto navigate_to_string(const std::string & /*html*/, const std::string & /*base_uri*/) -> void override {}
+    auto reload() -> void override {}
+    auto stop() -> void override {}
+    auto go_back() -> void override {}
+    auto go_forward() -> void override {}
+    auto set_zoom_factor(float /*zoom*/) -> void override {}
+    auto set_javascript_enabled(bool /*enabled*/) -> void override {}
+    auto evaluate_script(const std::string & /*js*/, std::function<void(std::string)> /*done*/) -> void override {}
+    auto post_message(const std::string & /*json*/) -> void override {}
+    auto set_callbacks(std::weak_ptr<webview::WebViewCallbacks> /*callbacks*/) -> void override {}
+};
+
+/// @brief 只提供快照能力的桩引擎（交互恒不可用 ⇒ 视图不会被授予原生可见）。
+class StubPageEngine final : public webview::NativeViewEngine {
+  public:
+    [[nodiscard]] auto id() const -> webview::WebViewEngine override { return webview::WebViewEngine::Null; }
+    [[nodiscard]] auto probe() const -> webview::WebViewCapabilities override {
+        return webview::WebViewCapabilities{.interactive = false,
+                                           .snapshot = true,
+                                           .engine = webview::WebViewEngine::Null,
+                                           .availability = webview::WebViewAvailability::Available};
+    }
+    [[nodiscard]] auto create_view(void * /*parent_window*/) -> std::unique_ptr<webview::WebViewSink> override {
+        return std::make_unique<StubPageSink>();
+    }
+};
+
+/// @brief 宿主桩窗口句柄（只作非空判据，桩引擎从不解引用）。
+/// @return 指向进程内静态存储的地址。
+auto stub_host_window() -> void * {
+    static int handle = 0;
+    return &handle;
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(webview_snapshot_blits_into_the_painter_frame_stream) {
+    // 判据 3：快照模式必须**在帧流里**——像素来自引擎 `capture`、由 `on_paint` 画进 Painter，
+    // 因而可被逐像素 golden 比对（交互模式的原生视图恰恰做不到这件事，它不在 Painter 里）。
+    //
+    // 独立基准纪律：golden 文件本身可以空转通过（控件什么都没画，基线也就什么都没画），故先用
+    // **手算的具体像素颜色**钉住「画出来的确实是那张假页面」，再比 golden。
+    webview::install_engine(std::make_shared<StubPageEngine>());
+    webview::NativeViewHost host;
+    host.bind_window(stub_host_window(), []() -> float { return 1.0F; }, []() -> EdgeInsets { return EdgeInsets{}; });
+    webview::NativeViewHost::set_current(&host);
+
+    auto wv = std::make_shared<webview::WebView>(
+        webview::WebViewProps{.mode = webview::WebViewMode::Snapshot, .background = Color{9, 9, 9, 255}});
+    auto col = std::make_shared<Column>();
+    col->add(Node{std::static_pointer_cast<Widget>(wv)});
+
+    Constraints c;
+    c.min = Size{.width = 0.0F, .height = 0.0F};
+    c.max = Size{.width = 320.0F, .height = 240.0F};
+    LayoutEngine::layout(*col, c);
+    AURORA_TEST_REQUIRE_FALSE(wv->degraded());
+
+    wv->request_snapshot({});
+    AURORA_TEST_REQUIRE_EQ(wv->snapshot_bitmap().pixels.size(), 320U * 240U * 4U);
+
+    Painter p;
+    p.begin(320, 240);
+    col->paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 320.0F, .height = 240.0F}},
+               BuildContext{});
+
+    // 手算取样：四象限 + 顶/底带各一点，颜色必须来自那张假页面。
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(10, 1) == Color(255, 255, 255, 255));  // 顶带白
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(10, 120) == Color(255, 0, 0, 255));    // 左半红
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(300, 120) == Color(0, 255, 0, 255));   // 右半绿
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(10, 238) == Color(0, 0, 255, 255));    // 底带蓝
+    // 反向守卫：占位底色一次都不许出现（出现即说明画的仍是降级占位而非快照）。
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(160, 120) != Color(9, 9, 9, 255));
+
+    golden::compare_or_update_painter("webview_snapshot", p);
+
+    webview::NativeViewHost::set_current(nullptr);
+    webview::install_engine(nullptr);
 }
 
 }  // namespace aurora::test_cases::utest_offscreen

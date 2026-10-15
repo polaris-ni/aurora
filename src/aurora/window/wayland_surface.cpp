@@ -148,6 +148,10 @@ struct WaylandSurface::Impl {
     // 申报偏差：xdg-shell 不暴露窗口屏幕原点 ⇒ SCREEN 系几何按窗口本地 px 如实申报。
     std::unique_ptr<detail::AtspiBridge> atspi;
     bool atspi_attempted = false;
+    // 宿主注入的「附加事件源」（WebView 引擎的 GLib 主上下文）：wait_events 把其 fd 并入
+    // poll 集、poll 返回后推进一次。语义与 atspi 并入同构；未安装时两通道均空。
+    std::function<std::vector<Surface::ExtraWatch>()> extra_watches;
+    std::function<void()> extra_pump;
     // 指针表面坐标（逻辑 px；Wayland 事件坐标天然为表面坐标，无需除 scale）。
     double ptr_x = 0.0;
     double ptr_y = 0.0;
@@ -2084,6 +2088,16 @@ auto WaylandSurface::wait_events(double timeout_ms) -> void {
             fds.push_back(pollfd{.fd = w.fd, .events = w.events, .revents = 0});
         }
     }
+    // 附加事件源的 fd 现取一次（引擎挂载/卸载动态变化，不缓存）。
+    if (d.extra_watches != nullptr) {
+        for (const auto &w : d.extra_watches()) {
+            if (w.fd < 0) {
+                continue;
+            }
+            const short ev = static_cast<short>((w.readable ? POLLIN : 0) | (w.writable ? POLLOUT : 0));  // NOLINT(*-signed-bitwise)
+            fds.push_back(pollfd{.fd = w.fd, .events = ev, .revents = 0});
+        }
+    }
     const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), static_cast<int>(std::ceil(capped)));
     if (rc > 0 && (fds[0].revents & POLLIN) != 0) {  // NOLINT(*-signed-bitwise)
         wl_display_read_events(d.dpy);
@@ -2100,6 +2114,15 @@ auto WaylandSurface::wait_events(double timeout_ms) -> void {
     if (d.atspi != nullptr) {
         d.atspi->pump();  // watch fd 就绪 ⇒ 读入并派发 AT-SPI 方法调用（应答经同一 fd 写出）
     }
+    if (d.extra_pump != nullptr) {
+        d.extra_pump();  // 引擎 fd 就绪（或分段兜底自然醒）⇒ 非阻塞推进一轮引擎事件循环
+    }
+}
+
+auto WaylandSurface::set_extra_event_source(std::function<std::vector<Surface::ExtraWatch>()> watches,
+                                            std::function<void()> pump) -> void {
+    impl_->extra_watches = std::move(watches);
+    impl_->extra_pump = std::move(pump);
 }
 
 auto WaylandSurface::request_wake() -> void {

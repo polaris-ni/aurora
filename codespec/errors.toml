@@ -1409,3 +1409,83 @@ fix_category = "invalid_value"
 retryable = false
 message = "HTTP response body cannot be decoded: '{detail}'"
 hint = "The message framed cleanly but its payload did not survive the declared content coding: the gzip/zlib/deflate stream is corrupt, truncated mid-symbol, or fails its trailing checksum. This is a data defect (at the peer, or in the encoding chain it declared), not a transport fault - the bytes arrived whole, so retrying the same target only re-fetches the same broken payload; check the declared Content-Encoding chain before suspecting the link"
+# ---- WebView 能力（原生 Web 视图插件式嵌入，交互 / 快照双模）----
+# 全部为「能力边界」类错误：引擎不可用时控件降级为占位矩形而非崩溃，故运行时缺失、
+# 模式不支持、宿主未绑定三枚取 warning（降级路径），真正动作失败的三枚取 error。
+
+[[error]]
+enum = "WebViewRuntimeMissing"
+slug = "webview-runtime-missing"
+category = "platform"
+severity = "warning"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "No native web engine runtime available: '{detail}'"
+hint = "The WebView control degrades to a placeholder rectangle; install the platform runtime (WebView2 Runtime on Windows, libwebkit2gtk on Linux) to enable it"
+
+[[error]]
+enum = "WebViewEngineInitFailed"
+slug = "webview-engine-init-failed"
+category = "platform"
+severity = "error"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "Web engine initialization failed: '{detail}'"
+hint = "The engine runtime was found but could not be started; the control degrades to a placeholder - check the user data folder and display connection"
+
+[[error]]
+enum = "WebViewNavigationFailed"
+slug = "webview-navigation-failed"
+category = "platform"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = true
+message = "Web navigation failed for '{uri}': '{detail}'"
+hint = "Check the URI scheme and network reachability; custom schemes and file access must be enabled explicitly"
+
+[[error]]
+enum = "WebViewScriptEvalFailed"
+slug = "webview-script-eval-failed"
+category = "platform"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = true
+message = "Script evaluation failed: '{detail}'"
+hint = "The page may not have finished loading, or JavaScript is disabled on this control; retry after navigation completes"
+
+[[error]]
+enum = "WebViewSnapshotUnsupported"
+slug = "webview-snapshot-unsupported"
+category = "platform"
+severity = "warning"
+auto_fixable = false
+fix_category = "resource_error"
+retryable = false
+message = "Snapshot mode unavailable: '{detail}'"
+hint = "Snapshot mode needs a live engine and, on Linux, an available GTK display connection; use Interactive mode on X11 or Windows instead"
+
+[[error]]
+enum = "WebViewHostUnbound"
+slug = "webview-host-unbound"
+category = "platform"
+severity = "warning"
+auto_fixable = false
+fix_category = "missing_prop"
+retryable = false
+message = "Web view not bound to a native host: '{detail}'"
+hint = "The control is rendering outside a window host (headless/offscreen) or was registered before the host installed its thread-local slot"
+
+[[error]]
+enum = "WebViewUnsupportedMode"
+slug = "webview-unsupported-mode"
+category = "platform"
+severity = "warning"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Web view mode unsupported on this backend: '{detail}'"
+hint = "Interactive mode needs a native child surface; Wayland and headless backends cannot host one - switch to Snapshot mode or move the control"

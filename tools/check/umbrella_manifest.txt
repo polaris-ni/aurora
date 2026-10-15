@@ -156,6 +156,8 @@ aurora/theming/theme_scope.h
 aurora/theming/type_scale.h
 aurora/todo.h
 aurora/ui/factories.h
+aurora/webview/native_view_host.h
+aurora/webview/web_view.h
 aurora/widget/a11y_diff.h
 aurora/widget/a11y_tree.h
 aurora/widget/bar_chart.h

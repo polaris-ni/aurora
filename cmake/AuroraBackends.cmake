@@ -497,6 +497,46 @@ if (AURORA_ENABLE_AUDIO)
     endif ()
 endif ()
 
+# ---- WebView 能力（原生 Web 视图插件式嵌入，交互 / 快照双模）----
+# webview/ 公共模块**常驻编译**（对齐 audio 的「图 API 恒在、能力运行期查询」先例）：
+# 开关只决定平台原生实现是否编入。未开启 / 运行期探测不到引擎运行时 → WebView 控件
+# 降级为占位矩形，不构建失败、不运行崩溃。
+# 作用域取 PRIVATE 且不 EXPORT：公共头零宏引用（能力一律经 WebViewCapabilities 的运行时
+# 值或 debug::feature_flags() 查询），故消费端无需看见这三枚宏——与 AURORA_ENABLE_SIMD
+# 等纯内部宏同口径。
+option(AURORA_ENABLE_WEBVIEW "Build the WebView control (native web embedding; OFF = placeholder degradation)" OFF)
+if (AURORA_ENABLE_WEBVIEW)
+    aurora_define_feature(AURORA_ENABLE_WEBVIEW SCOPE PRIVATE)
+    # Windows 对位后端：WebView2（系统运行时，运行期动态加载，不静态链 WebView2Loader）。
+    if (WIN32)
+        option(AURORA_ENABLE_WEBVIEW_WEBVIEW2 "Build WebView2 backend (Windows, runtime-bound)" ON)
+    else ()
+        option(AURORA_ENABLE_WEBVIEW_WEBVIEW2 "Build WebView2 backend (Windows, runtime-bound)" OFF)
+    endif ()
+    if (AURORA_ENABLE_WEBVIEW_WEBVIEW2)
+        if (NOT WIN32)
+            aurora_error("AURORA_ENABLE_WEBVIEW_WEBVIEW2 is only supported on Windows;"
+                    " disable it or turn off AURORA_ENABLE_WEBVIEW on other platforms.")
+        endif ()
+        aurora_define_feature(AURORA_ENABLE_WEBVIEW_WEBVIEW2 SCOPE PRIVATE)
+        aurora_log("WebView2 backend enabled (runtime-bound, zero link dependency)")
+    endif ()
+    # Linux 对位后端：WebKitGTK（运行期 dlopen，构建机无需 dev 包）。
+    if (LINUX)
+        option(AURORA_ENABLE_WEBVIEW_WEBKITGTK "Build WebKitGTK backend (Linux, runtime-bound)" ON)
+    else ()
+        option(AURORA_ENABLE_WEBVIEW_WEBKITGTK "Build WebKitGTK backend (Linux, runtime-bound)" OFF)
+    endif ()
+    if (AURORA_ENABLE_WEBVIEW_WEBKITGTK)
+        if (NOT LINUX)
+            aurora_error("AURORA_ENABLE_WEBVIEW_WEBKITGTK is only supported on Linux;"
+                    " disable it or turn off AURORA_ENABLE_WEBVIEW on other platforms.")
+        endif ()
+        aurora_define_feature(AURORA_ENABLE_WEBVIEW_WEBKITGTK SCOPE PRIVATE)
+        aurora_log("WebKitGTK backend enabled (runtime-bound, zero build dependency)")
+    endif ()
+endif ()
+
 # ---- 存储 SQLite 后端（记录仓储第三后端，opt-in，默认 OFF） ----
 # 存储层 Memory/Filesystem 两后端恒编译；SqliteBackend（真事务 BEGIN/COMMIT/ROLLBACK +
 # 二进制载荷 BLOB 内联存储）由 AURORA_ENABLE_STORAGE_SQLITE 决定是否编入。sqlite3 以

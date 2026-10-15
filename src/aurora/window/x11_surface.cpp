@@ -157,6 +157,10 @@ struct X11Surface::Impl {
     // 失败永久降级为 nullptr——无 libdbus/无会话总线/NO_AT_BRIDGE 都是 Linux 常态）。
     std::unique_ptr<detail::AtspiBridge> atspi;
     bool atspi_attempted = false;
+    // 宿主注入的「附加事件源」（WebView 引擎的 GLib 主上下文）：wait_events 把其 fd 并入
+    // poll 集、poll 返回后推进一次。语义与 atspi 并入同构；未安装时两通道均空。
+    std::function<std::vector<Surface::ExtraWatch>()> extra_watches;
+    std::function<void()> extra_pump;
     std::string title;  ///< 最近标题缓存（桥构造时回填 FRAME 节点 Name）
     int origin_x = 0;  ///< 客户区左上角的屏幕物理 px（ConfigureNotify 时 XTranslateCoordinates）
     int origin_y = 0;
@@ -1420,8 +1424,13 @@ auto X11Surface::wait_events(double timeout_ms) -> void {
     }
     // 无限等待按 1000ms 分段兜底（对齐 Win32/默认实现）：唤醒渠道丢失也最迟 1s 自然醒。
     const double capped = (timeout_ms < 0.0 || timeout_ms > 1000.0) ? 1000.0 : timeout_ms;
+    // 附加事件源的 fd 现取一次（引擎挂载/卸载动态变化，不缓存）。
+    std::vector<Surface::ExtraWatch> extra;
+    if (d.extra_watches != nullptr) {
+        extra = d.extra_watches();
+    }
     std::vector<pollfd> fds;
-    fds.reserve(2 + (d.atspi != nullptr ? 2 : 0));
+    fds.reserve(2 + (d.atspi != nullptr ? 2 : 0) + extra.size());
     fds.push_back(pollfd{.fd = ConnectionNumber(d.dpy), .events = POLLIN, .revents = 0});
     int wake_idx = -1;
     if (d.wake_fd[0] >= 0) {
@@ -1434,6 +1443,13 @@ auto X11Surface::wait_events(double timeout_ms) -> void {
             fds.push_back(pollfd{.fd = w.fd, .events = w.events, .revents = 0});
         }
     }
+    for (const auto &w : extra) {
+        if (w.fd < 0) {
+            continue;
+        }
+        const short ev = static_cast<short>((w.readable ? POLLIN : 0) | (w.writable ? POLLOUT : 0));  // NOLINT(*-signed-bitwise)
+        fds.push_back(pollfd{.fd = w.fd, .events = ev, .revents = 0});
+    }
     const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), static_cast<int>(std::ceil(capped)));
     if (rc > 0 && wake_idx >= 0 &&
         (fds[static_cast<std::size_t>(wake_idx)].revents & POLLIN) != 0) {  // NOLINT(*-signed-bitwise)
@@ -1445,6 +1461,15 @@ auto X11Surface::wait_events(double timeout_ms) -> void {
     if (d.atspi != nullptr) {
         d.atspi->pump();  // watch fd 就绪 ⇒ 读入并派发 AT-SPI 方法调用（应答经同一 fd 写出）
     }
+    if (d.extra_pump != nullptr) {
+        d.extra_pump();  // 引擎 fd 就绪（或分段兜底自然醒）⇒ 非阻塞推进一轮引擎事件循环
+    }
+}
+
+auto X11Surface::set_extra_event_source(std::function<std::vector<Surface::ExtraWatch>()> watches,
+                                        std::function<void()> pump) -> void {
+    impl_->extra_watches = std::move(watches);
+    impl_->extra_pump = std::move(pump);
 }
 
 auto X11Surface::request_wake() -> void {

@@ -53,6 +53,8 @@ auto WindowHost::teardown() -> void {
         // 回调打到半亡窗口即 use-after-free。Win32 `Impl::~Impl` 已有兜底置空（仅该后端），
         // 此处按同一清单在正常路径收敛，三后端经虚派发一并生效。
         sf.set_present_request({});
+        // 原生子视图的引擎事件源并入（attach_surface 安装）：lambda 捕获 this，须解绑。
+        sf.set_extra_event_source({}, {});
     }
     key_pre_ = nullptr;
     state_sink_ = nullptr;
@@ -100,6 +102,23 @@ auto WindowHost::attach_surface() -> void {
     // per-window 帧统计：默认仍写全局单例（单窗口用法零回归），多窗口下已由
     // `own_frame_stats()` 切到自有实例后再接线。
     window_->set_frame_stats(*active_stats_);
+    // 原生子视图书架：绑定宿主窗口句柄（Linux = X11 Window XID，由引擎自行解释）与
+    // 两个换算参数的现取 provider（DPI / CSD 安全区帧内可能变化，不缓存）。
+    native_view_host_.bind_window(
+        window_->surface().native_handle(), [this]() -> float { return window_->surface().scale_factor(); },
+        [this]() -> EdgeInsets { return window_->surface().content_inset(); });
+    // 引擎事件源并入帧循环等待：WebView 引擎（Linux = GLib 主上下文）的待监听 fd 进
+    // Surface::wait_events 的 poll 集，就绪后经 pump 非阻塞推进一轮。未装 Linux 引擎时
+    // 两个通道均为空转（poll_watches 返回空、pump 无操作），不影响其余后端。
+    sf.set_extra_event_source(
+        [this]() -> std::vector<Surface::ExtraWatch> {
+            std::vector<Surface::ExtraWatch> out;
+            for (const webview::WatchFd &w : native_view_host_.poll_watches()) {
+                out.push_back(Surface::ExtraWatch{.fd = w.fd, .readable = w.readable, .writable = w.writable});
+            }
+            return out;
+        },
+        [this]() -> void { native_view_host_.pump_engine_events(); });
     // 默认根主题注入的 OS 档：窗口创建时读一次系统明暗偏好并推给 Window（`Window` 自身不直读
     // 注册表/配置文件，避免公共头反向依赖平台层）。系统外观实时变更的再推送属后续生产钩子
     // （见 CHG-011 提案「OS 偏好读取口径」）；应用亦可 `Window::set_theme` 显式接管最高优先。
@@ -186,6 +205,10 @@ auto WindowHost::pump_events() -> void {
         return;
     }
     window_->pump_events();
+    // 引擎事件循环的非阻塞推进：WebView 引擎（Linux = GLib 主上下文）在此消化一轮。
+    // 与 AT-SPI 桥的帧首 pump 同构——阻塞等待已由 Surface::wait_events 并入引擎 fd，
+    // 此处只负责「就绪后 / 自然醒后」的非阻塞分发（未装 Linux 引擎时为空操作）。
+    native_view_host_.pump_engine_events();
 }
 
 auto WindowHost::tick() -> void { scene_.root().tick(std::chrono::steady_clock::now()); }
@@ -197,7 +220,18 @@ auto WindowHost::render_frame(double dt) -> Result<bool> {
     // 滚动位置按窗口隔离：`BuildContext` 不携带窗口标识，故由宿主在渲染入口给出作用域，
     // 同进程多窗口下同名 `restore_key` 不互相串味（同值重复构造走零分配快路径）。
     const ScrollStorage::Scope scroll_scope(scroll_scope_);
+    // 帧首安装原生子视图书架：控件挂载发生在 present_root 的树重建里，安装口必须早于
+    // 挂载（同 FocusManager 的帧级契约）；帧尾恢复。
+    webview::NativeViewHost::set_current(&native_view_host_);
     Result<bool> r = window_->present_root(scene_.root_node());
+    // present_root 返回时本帧布局已落定（window_bounds 查询时现算，此刻取到的是本帧
+    // 布局结果）。门控取「非 idle」：idle 帧无脏 ⇒ 几何不可能变化，免付 window_bounds
+    // 的树上溯（该查询契约禁止进入每帧路径）。下发比帧上屏晚一拍——原生视图位置在
+    // 下一帧 present 时生效，与 Win32 腿（put_Bounds 同在 render_frame 之后）同构。
+    if (!window_->is_idle_frame()) {
+        native_view_host_.sync_geometry(true);
+    }
+    webview::NativeViewHost::set_current(nullptr);
     // present_root 返回 Result<bool>：idle 跳过亦为 true（内部未做任何渲染）。
     if (window_->is_idle_frame()) {
         // 传入本帧墙钟间隔：idle 帧同样消耗了一段等待时间，「距上次实际渲染已过去多久」

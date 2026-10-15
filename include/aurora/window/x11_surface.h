@@ -108,6 +108,11 @@ class X11Surface final : public Surface {
     auto wait_events(double timeout_ms) -> void override;
     /// @brief 跨线程唤醒主循环（线程安全）：向自唤醒管道写 1 字节打断 wait_events。
     auto request_wake() -> void override;
+    /// @brief 安装宿主注入的「附加事件源」（WebView 引擎的 GLib 主上下文 fd 并入 poll 集）。
+    /// @param watches 待监听 fd 集的提供者（传空撤销）。
+    /// @param pump fd 就绪后的推进函数（传空撤销）。
+    auto set_extra_event_source(std::function<std::vector<Surface::ExtraWatch>()> watches,
+                                std::function<void()> pump) -> void override;
 
     /// @brief 增量上屏脏区（设备坐标）：非空时 present() 仅 swizzle+XPutImage 脏矩形，
     /// 而非整窗（对齐 Win32Surface 的增量 blit 策略）；脏区一次性消费。

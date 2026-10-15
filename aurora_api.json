@@ -4747,6 +4747,89 @@
       "examples": [
         "au::VideoPlayer{}.set_source(std::make_shared<au::ImageSequenceSource>(frames, 24.0))"
       ]
+    },
+    {
+      "type": "WebView",
+      "props": [
+        {
+          "name": "url",
+          "type": "string",
+          "default": "",
+          "note": "Initial navigation target (empty = no initial load)"
+        },
+        {
+          "name": "html",
+          "type": "string",
+          "default": "",
+          "note": "Inline HTML (ignored when url is non-empty)"
+        },
+        {
+          "name": "base_uri",
+          "type": "string",
+          "default": "",
+          "note": "Base URI for resolving relative resources of inline HTML"
+        },
+        {
+          "name": "mode",
+          "type": "WebViewMode",
+          "default": "Interactive",
+          "note": "Interactive = native child view (no Painter compositing); Snapshot = blit into the Painter frame",
+          "enum": [
+            "Interactive",
+            "Snapshot"
+          ]
+        },
+        {
+          "name": "zoom_factor",
+          "type": "float",
+          "default": 1.0,
+          "note": "Page zoom factor (1 = natural size)",
+          "minimum": "0.25",
+          "maximum": "5"
+        },
+        {
+          "name": "javascript_enabled",
+          "type": "bool",
+          "default": true,
+          "note": "Whether the page may execute scripts"
+        },
+        {
+          "name": "background",
+          "type": "Color",
+          "default": [
+            245,
+            245,
+            245,
+            255
+          ],
+          "note": "Backdrop color for the placeholder and the snapshot mode"
+        },
+        {
+          "name": "width",
+          "type": "Length",
+          "default": "auto"
+        },
+        {
+          "name": "height",
+          "type": "Length",
+          "default": "auto"
+        },
+        {
+          "name": "show",
+          "type": "bool",
+          "default": true
+        },
+        {
+          "name": "overflow",
+          "type": "string",
+          "default": "Visible"
+        }
+      ],
+      "events": [],
+      "children_policy": "none",
+      "examples": [
+        "au::webview::WebView{ au::webview::WebViewProps{ .url = \"...\" } }"
+      ]
     }
   ],
   "enums": [
@@ -5175,6 +5258,13 @@
       "values": [
         "Bottom",
         "Top"
+      ]
+    },
+    {
+      "name": "WebViewMode",
+      "values": [
+        "Interactive",
+        "Snapshot"
       ]
     }
   ],
@@ -6656,6 +6746,83 @@
       "retryable": false,
       "message": "HTTP response body cannot be decoded: '{detail}'",
       "hint": "The message framed cleanly but its payload did not survive the declared content coding: the gzip/zlib/deflate stream is corrupt, truncated mid-symbol, or fails its trailing checksum. This is a data defect (at the peer, or in the encoding chain it declared), not a transport fault - the bytes arrived whole, so retrying the same target only re-fetches the same broken payload; check the declared Content-Encoding chain before suspecting the link"
+    },
+    {
+      "enum": "WebViewRuntimeMissing",
+      "slug": "webview-runtime-missing",
+      "category": "platform",
+      "severity": "warning",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "No native web engine runtime available: '{detail}'",
+      "hint": "The WebView control degrades to a placeholder rectangle; install the platform runtime (WebView2 Runtime on Windows, libwebkit2gtk on Linux) to enable it"
+    },
+    {
+      "enum": "WebViewEngineInitFailed",
+      "slug": "webview-engine-init-failed",
+      "category": "platform",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "Web engine initialization failed: '{detail}'",
+      "hint": "The engine runtime was found but could not be started; the control degrades to a placeholder - check the user data folder and display connection"
+    },
+    {
+      "enum": "WebViewNavigationFailed",
+      "slug": "webview-navigation-failed",
+      "category": "platform",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": true,
+      "message": "Web navigation failed for '{uri}': '{detail}'",
+      "hint": "Check the URI scheme and network reachability; custom schemes and file access must be enabled explicitly"
+    },
+    {
+      "enum": "WebViewScriptEvalFailed",
+      "slug": "webview-script-eval-failed",
+      "category": "platform",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": true,
+      "message": "Script evaluation failed: '{detail}'",
+      "hint": "The page may not have finished loading, or JavaScript is disabled on this control; retry after navigation completes"
+    },
+    {
+      "enum": "WebViewSnapshotUnsupported",
+      "slug": "webview-snapshot-unsupported",
+      "category": "platform",
+      "severity": "warning",
+      "auto_fixable": false,
+      "fix_category": "resource_error",
+      "retryable": false,
+      "message": "Snapshot mode unavailable: '{detail}'",
+      "hint": "Snapshot mode needs a live engine and, on Linux, an available GTK display connection; use Interactive mode on X11 or Windows instead"
+    },
+    {
+      "enum": "WebViewHostUnbound",
+      "slug": "webview-host-unbound",
+      "category": "platform",
+      "severity": "warning",
+      "auto_fixable": false,
+      "fix_category": "missing_prop",
+      "retryable": false,
+      "message": "Web view not bound to a native host: '{detail}'",
+      "hint": "The control is rendering outside a window host (headless/offscreen) or was registered before the host installed its thread-local slot"
+    },
+    {
+      "enum": "WebViewUnsupportedMode",
+      "slug": "webview-unsupported-mode",
+      "category": "platform",
+      "severity": "warning",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Web view mode unsupported on this backend: '{detail}'",
+      "hint": "Interactive mode needs a native child surface; Wayland and headless backends cannot host one - switch to Snapshot mode or move the control"
     }
   ],
   "debug": [
