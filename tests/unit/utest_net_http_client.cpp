@@ -10,12 +10,19 @@
 ///           应答无体时不校验编码名；能力开关缺席的腿验「连宣告都不发」并把编码应答落 unsupported。进度节流
 ///           （§12「进度节流」）验上传按 64 KiB 分块推进且末值恰一次、注入帧号源后每方向收敛到「首发 + 末值
 ///           两笔」、无请求体不发上传、chunked 下载把总量如实报成未知，并以对端收到的请求全文证明「挂了回调
-///           才分块写、线上字节序列与一次写完逐字节相同」以及「没挂回调者零行为改动」。
+///           才分块写、线上字节序列与一次写完逐字节相同」以及「没挂回调者零行为改动」。重试（§12「重试策略」）
+///           在虚拟时钟下逐值验：退避确实在 `base` 之后才回头、`Retry-After` 的秒数压过算式并被 `max_backoff`
+///           夹住、尝试耗尽交出的仍是最后那次 503 应答而不是新错误、非幂等方法与表上标 `retryable=false` 的失败
+///           一律不重放（`accepts()` 恰一次），协议档失败也不重放；`Timeouts::total` 逐尝试重新计时（三扇窗口
+///           跑满 150 ms 虚拟时长）而 `RetryPolicy::budget` 是跨尝试的一堵墙（到点改报 `http-timeout` 并点名
+///           budget）；越界的 `RetryPolicy` 起手即落 `http-request-invalid`，一条连接都不发起。
 /// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <span>
 #include <string>
@@ -40,19 +47,25 @@ namespace {
 using aurora::CoroTask;
 using aurora::Result;
 using aurora::net::http::Client;
+using aurora::net::http::error_class_of;
+using aurora::net::http::HttpErrorClass;
 using aurora::net::http::Progress;
 using aurora::net::http::ProgressPhase;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
+using aurora::net::http::RetryPolicy;
 using aurora::net::http::Timeouts;
 using aurora::test::FakeEngine;
 using aurora::test::FakeEngineScope;
 using aurora::test::PeerScript;
 using aurora::test::PeerStop;
 using aurora::test::ScriptedPeer;
+using aurora::test::scripts::per_connection;
 using aurora::test::scripts::reply_after_reading;
 using aurora::test::scripts::silent;
+using aurora::test::scripts::write_then_half_close;
 using aurora::test::scripts::write_then_hold;
+using aurora::test::scripts::write_then_reset;
 
 /// @brief 拼一个指向回环端口的 GET 目标。
 [[nodiscard]] auto loopback_url(std::uint16_t port, std::string_view path = "/") -> std::string {
@@ -278,6 +291,62 @@ const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0, 
         }
         (void)socket.write_all(std::span<const char>{payload});
     };
+}
+
+/// @brief 拼一份「服务器明说现在不行」的 503 应答（重试环的状态码分岔只认这一族）。
+/// @param fields 额外的头部字段（每行以 `\\r\\n` 结尾，可空；`Retry-After` 由此注入）。
+/// @return 带 4 字节体 `busy` 的应答字节。
+[[nodiscard]] auto service_busy(std::string_view fields = {}) -> std::string {
+    return "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 4\r\n" + std::string{fields} + "\r\nbusy";
+}
+
+/// @brief 拼一份 200 应答：重试终于成功那一侧的对照。
+/// @return 带 2 字节体 `ok` 的应答字节。
+[[nodiscard]] auto service_ok() -> std::string { return "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"; }
+
+/// @brief 在脚本化时钟下把 `send` 泵到收尾：每轮推 10 ms 虚拟时钟、再给宿主一次跑事件的机会。
+///
+/// 退避等待登记在 `post_after` 上，不推时钟就永远不会到期；轮数上限把「排空不了」变成一次可见失败而不是挂死。
+/// 调用一律配 `AURORA_TEST_REQUIRE`：`CoroTask::result()` 在未收尾时读的是帧外内存，非致命的 CHECK 会继续
+/// 走到取结果那一步，于是一场「没排空」显示为一次段错误而不是一条失败判据。
+/// @param engine 脚本化时钟。
+/// @param task 待收尾的协程。
+/// @param rounds 轮数上限。
+/// @return 协程已收尾为真。
+[[nodiscard]] auto pump_send(FakeEngine &engine, CoroTask<Result<Response>> &task, int rounds = 40) -> bool {
+    for (int round = 0; round < rounds && !task.is_done(); ++round) {
+        (void)engine.advance(std::chrono::milliseconds{10});
+        aurora::test::net::pump_idle(std::chrono::milliseconds{5});
+    }
+    return task.is_done();
+}
+
+/// @brief 时间与宿主一起推进到谓词成立，或虚拟时长用完；返回时 `engine.now()` 即「实际烧掉的虚拟时长」。
+///
+/// 为什么不用 `drive_until` 配一次 `advance`：对端「接受连接」发生在客户读出应答**之前**，先把时钟推到位
+/// 再去等第二次接受，等于拿「退避还没登记」那一瞬当判据——单机侥幸通过、换台机器就红（本仓实测过这种红）。
+/// 本函数每步先推进再泵宿主，登记与否都兜得住；「等了多久」由返回时已推进的虚拟时长读出，而不是靠窗口观察。
+/// @param engine 脚本化时钟。
+/// @param pred 目标条件。
+/// @param virtual_ms 最多推进的虚拟时长（按 10 ms 步进）。
+/// @return 谓词成立为真。
+[[nodiscard]] auto pump_until(FakeEngine &engine, const std::function<bool()> &pred, std::int64_t virtual_ms) -> bool {
+    for (std::int64_t spent = 0; spent < virtual_ms; spent += 10) {
+        (void)engine.advance(std::chrono::milliseconds{10});
+        aurora::test::net::pump_idle(std::chrono::milliseconds{2});
+        if (pred()) {
+            return true;
+        }
+    }
+    return pred();
+}
+
+/// @brief 错误 detail 里是否点名了某一枚旋钮（同一条 `http-timeout` 在三档时限之间仍可分辨）。
+/// @param haystack 错误消息原文。
+/// @param needle 待找的字段名。
+/// @return 找到为真。
+[[nodiscard]] auto names_in(std::string_view haystack, std::string_view needle) -> bool {
+    return haystack.find(needle) != std::string_view::npos;
 }
 
 }  // namespace
@@ -864,6 +933,257 @@ AURORA_TEST_CASE(a_chunked_body_reports_download_progress_without_a_known_total)
     }
     AURORA_TEST_CHECK_TRUE(downloads.back().finished);
     AURORA_TEST_CHECK_EQ(downloads.back().transferred_bytes, std::uint64_t{11});
+}
+
+AURORA_TEST_CASE(send_replays_a_transient_status_until_the_peer_agrees) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    // 同一条监听口给两种说法：第一条连接回 503，第二条回 200。「换了目标」证不出重放，故不用两个对端。
+    ScriptedPeer peer(per_connection({reply_after_reading(1, service_busy()), reply_after_reading(1, service_ok())}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    // `jitter = 0` 让「等了就是算得那个数」成为可陈述的事实，而不是一个大概率事件。
+    client.retry_policy(RetryPolicy{.attempts = 3,
+                                    .base = std::chrono::milliseconds{50},
+                                    .max_backoff = std::chrono::milliseconds{60},
+                                    .jitter = 0.0});
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(
+        aurora::test::net::drive_until("first attempt answered", [&peer] { return peer.accepts() > 0; }).satisfied);
+
+    // 退避登记在脚本化时钟上：没推够 `base` 就不该有第二次连接，推过了就必须有。两问都看虚拟时长，
+    // 不看真实窗口的长短——后者只能证明「这段时间里没发生」，换个机器就成了假判据。
+    AURORA_TEST_CHECK_FALSE(pump_until(engine, [&peer] { return peer.accepts() > 1; }, 40));
+    AURORA_TEST_CHECK(pump_until(engine, [&peer] { return peer.accepts() > 1; }, 300));
+    AURORA_TEST_CHECK_GE(engine.now().count(), 50);
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+    // 只打了两次：第二次成功就不再往下打，`attempts` 是上限而不是次数。
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(send_hands_over_the_last_response_when_retries_are_exhausted) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, service_busy()));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.retry_policy(RetryPolicy{.attempts = 2, .base = std::chrono::milliseconds{10}});
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    // 非 2xx 是成功的 Result：耗尽时交出的是**服务器最后说的那一句**，本件不折成「重试失败」这种新码。
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{503});
+    AURORA_TEST_CHECK_EQ(response.value().body().size(), std::size_t{4});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(send_waits_the_retry_after_the_peer_asked_for) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(per_connection(
+        {reply_after_reading(1, service_busy("Retry-After: 2\r\n")), reply_after_reading(1, service_ok())}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    // `base` 只有 50 ms（上限用缺省的 30 s，不去夹 `Retry-After`）：若对端给的数字没被当回事，
+    // 第二次连接会在推进到 50 ms 时就出现。
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{50}});
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(
+        aurora::test::net::drive_until("first attempt answered", [&peer] { return peer.accepts() > 0; }).satisfied);
+
+    // 服务器给的数字压过了指数退避：200 ms 内不该回头，2 s 之后必须回头。
+    AURORA_TEST_CHECK_FALSE(pump_until(engine, [&peer] { return peer.accepts() > 1; }, 200));
+    AURORA_TEST_CHECK(pump_until(engine, [&peer] { return peer.accepts() > 1; }, 2600));
+    AURORA_TEST_CHECK_GE(engine.now().count(), 2000);
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+}
+
+AURORA_TEST_CASE(send_clamps_a_retry_after_to_the_backoff_ceiling) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(per_connection(
+        {reply_after_reading(1, service_busy("Retry-After: 3600\r\n")), reply_after_reading(1, service_ok())}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    // 对端要我们等一小时，本库的单次等待上限是 100 ms：夹到上限就该看见第二次连接（而不是等一小时的
+    // 虚拟时钟），但也不能短到退回 `base`——两问分别由「推进 500 ms 内必到」与「90 ms 内不到」读出。
+    client.retry_policy(RetryPolicy{
+        .attempts = 3, .base = std::chrono::milliseconds{10}, .max_backoff = std::chrono::milliseconds{100}});
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(
+        aurora::test::net::drive_until("first attempt answered", [&peer] { return peer.accepts() > 0; }).satisfied);
+    AURORA_TEST_CHECK_FALSE(pump_until(engine, [&peer] { return peer.accepts() > 1; }, 90));
+    AURORA_TEST_CHECK(pump_until(engine, [&peer] { return peer.accepts() > 1; }, 500));
+    AURORA_TEST_CHECK_GE(engine.now().count(), 100);
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+}
+
+AURORA_TEST_CASE(send_never_replays_a_non_idempotent_method) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, service_busy()));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
+    // 状态码那一族本身可重试，但方法是 `POST`：重放可能把一次提交变成两次，而这份代价在失败现场无从判定。
+    auto task = client.send(Request::post(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{503});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+}
+
+AURORA_TEST_CASE(send_replays_nothing_while_the_policy_is_off) {
+    ScriptedPeer peer(reply_after_reading(1, service_busy()));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    // 缺省策略 = 一次都不重放：这条是「装了环但环关着」与「本件从没打过第二次」的区分口。
+    Client client;
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{503});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+}
+
+AURORA_TEST_CASE(send_refuses_to_replay_a_protocol_error) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    // 状态码只有两位：头部本身就坏了，落 `Protocol` 档。重放一万次也是同一个错，故一条连接就收摊。
+    ScriptedPeer peer(write_then_half_close("HTTP/1.1 20 OK\r\n\r\n"));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpProtocolError);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+}
+
+AURORA_TEST_CASE(send_refuses_to_replay_a_failure_the_table_marks_non_retryable) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    // 声明 100 字节体却只给两字节就**异常断开**（`SO_LINGER` 时限 0）：读侧拿到的是真实套接口错误，落在
+    // `Unreachable` 档，而表把 `net-recv-failed` / `net-send-failed` 标成不可重试。这条正是「只读档位」与
+    // 「只读标志」两种错法的区分口——判据取的是交集。
+    //
+    // 用 `write_then_reset()` 而不是「写完直接 close」：后者交给读侧的是 FIN 还是 RST 并不由剧本决定，
+    // 于是「体没读全」会时而落 `net-recv-failed`、时而落 `http-protocol-error`（协议档同样不可重试，用例
+    // 看着像过了，实则换了判据来源）。关闭形态钉成 RST 后这条才是稳定的。
+    // 结局码随「先撞上读还是先撞上写」在两枚之间取一，档位与标志恒同，故断言钉档位 + 标志 + 不重放。
+    ScriptedPeer peer(write_then_reset("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nab"));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(error_class_of(response.error().code_enum), HttpErrorClass::Unreachable);
+    AURORA_TEST_CHECK_FALSE(response.error().retryable);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+}
+
+AURORA_TEST_CASE(send_gives_the_total_window_a_fresh_clock_per_attempt) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(silent());  // 连得上、永不回字节；后续尝试连进 backlog 即可，不靠脚本线程放行
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
+    // `total` 是**每一次尝试**的墙：三次尝试各烧掉一份 50 ms，而不是「整序列只剩 0 ms」。
+    auto task =
+        client.send(Request::get(loopback_url(peer.port())).timeouts(Timeouts{.total = std::chrono::milliseconds{50}}));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpTimeout);
+    AURORA_TEST_CHECK(names_in(response.error().message, "total"));
+    // 三扇墙 + 两段退避 = 170 ms 虚拟时间；若时限是全序列共用的，这里只会烧掉一扇（≈60 ms）。
+    // 本例不看 `accepts()`：那条脚本线程卡在第一条连接上永不放行，连接落在 backlog 里同样能把时限跑满。
+    AURORA_TEST_CHECK_GE(engine.now().count(), 150);
+}
+
+AURORA_TEST_CASE(send_stops_the_retry_sequence_at_the_budget) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(silent());
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    // 跨全部尝试的一堵墙（80 ms）比任何单档时限都短：到点即掐掉在途的那一次，剩余尝试不再发起。
+    client.retry_policy(
+        RetryPolicy{.attempts = 5, .base = std::chrono::milliseconds{10}, .budget = std::chrono::milliseconds{80}});
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    // 被墙掐掉的尝试以 `net-cancelled` 形态抵达：那既不是对端说的也不是本库上限，改报 `http-timeout` 并点名 budget。
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpTimeout);
+    AURORA_TEST_CHECK(names_in(response.error().message, "budget"));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+}
+
+AURORA_TEST_CASE(send_refuses_an_out_of_range_policy_before_any_connection) {
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, service_ok()));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    // 越界形态在起手就挡下（`http-request-invalid`），不进入任何一次尝试：连一条连接都不该发出去。
+    auto task = client.send(
+        Request::get(loopback_url(peer.port())).retry_policy(RetryPolicy{.base = std::chrono::milliseconds{-1}}));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
+    AURORA_TEST_CHECK(names_in(response.error().message, "base"));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
 }
 
 }  // namespace aurora::test_cases::utest_net_http_client

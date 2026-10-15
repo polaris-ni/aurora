@@ -14,6 +14,10 @@
 ///             就落 `http-content-encoding-unsupported`、无体应答不校验编码名，以及本腿无流式能力时直接落
 ///             `net-platform-unavailable` 而不悄悄退化成物化路径。内容编码那三项只在能力编入的腿成立，缺席的腿
 ///             按 `AURORA_TEST_SKIP` 登记。
+///           重试那三条验的是流式路径独有的资格口径：**`on_head` 交出即耗尽**——头没交出去的超时可以把三扇
+///             时限窗口跑满（虚拟时钟 ≥150 ms），头已经交出去的只剩一扇（≤90 ms）；越界的 `RetryPolicy` 在建协程
+///             前就被拒（对端一条连接都没被连上）。物化路径的逐值退避与 `Retry-After` 尊重在
+///             `utest_net_http_client.cpp`，退避算式与错误表在 `utest_net_http_retry.cpp`。
 /// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
 
 #include <chrono>
@@ -53,6 +57,7 @@ using aurora::net::http::Progress;
 using aurora::net::http::ProgressPhase;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
+using aurora::net::http::RetryPolicy;
 using aurora::net::http::SinkFlow;
 using aurora::net::http::StreamOutcome;
 using aurora::net::http::Timeouts;
@@ -60,6 +65,7 @@ using aurora::test::FakeEngine;
 using aurora::test::FakeEngineScope;
 using aurora::test::ScriptedPeer;
 using aurora::test::scripts::reply_after_reading;
+using aurora::test::scripts::silent;
 using aurora::test::scripts::write_then_hold;
 
 /// @brief 拼一个指向回环端口的 GET 目标。
@@ -86,6 +92,30 @@ using aurora::test::scripts::write_then_hold;
                           "open_stream done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
                           .satisfied);
     return inner(task);
+}
+
+/// @brief 在脚本化时钟下把一条流式交换泵到收尾（重试与超时的判据都要由用例推进时间，不能让真实时长说话）。
+/// @param engine 替身时钟。
+/// @param task 待收尾的协程。
+/// @param rounds 泵的上限轮次。
+/// @return 协程是否收尾（未收尾时调用方**必须**用 REQUIRE 收场）。
+///
+/// 调用一律配 `AURORA_TEST_REQUIRE`：`CoroTask::result()` 在未收尾时读的是帧外内存，非致命的 CHECK 会继续
+/// 走到取结果那一步，于是一场「没排空」显示为一次段错误而不是一条失败判据。
+[[nodiscard]] auto pump_stream(FakeEngine &engine, CoroTask<Result<StreamOutcome>> &task, int rounds = 60) -> bool {
+    for (int round = 0; round < rounds && !task.is_done(); ++round) {
+        (void)engine.advance(std::chrono::milliseconds{10});
+        aurora::test::net::pump_idle(std::chrono::milliseconds{2});
+    }
+    return task.is_done();
+}
+
+/// @brief 错误文本里是否点名了某枚旋钮/某一档（超时改道的判据要看 detail，不能只看码）。
+/// @param haystack 错误文本。
+/// @param needle 要点名的词。
+/// @return 命中为 true。
+[[nodiscard]] auto names_in(std::string_view haystack, std::string_view needle) -> bool {
+    return haystack.find(needle) != std::string_view::npos;
 }
 
 /// @brief 记录逐段交付事实的宿主替身：三个入口各自的次数、拼出的文本、以及在哪一段收摊。
@@ -535,5 +565,82 @@ AURORA_TEST_CASE(stream_enforces_the_decompressed_ceiling) {
 }
 
 #endif
+
+AURORA_TEST_CASE(stream_replays_a_timeout_raised_before_any_head_is_handed) {
+    // 流式路径的重放资格比物化路径窄，窄就窄在这一条：头还没交给宿主 ⇒ 可以重来。这里用「三档时限各拿一份
+    // 新的钟」把重放数出来：`Timeouts::total` 50 ms × 3 次尝试 + 两次退避 ≥ 150 ms 虚拟时长，一次尝试最多 60 ms。
+    //
+    // 判据取虚拟时钟而不是 `peer.accepts()`：对端脚本线程是**串行**服务的，`silent()` 会一直占住它，后面的
+    // 尝试因此连不上第 2 条连接——「先占住时限再放手让下一次成功」的剧本要把真实睡眠和虚拟时限赛跑，
+    // 输赢取决于机器负载。重放本身已由 `utest_net_http_client.cpp` 的逐值判据端到端证过，本用例只补流式
+    // 那一半独有的资格规则：没交过头的失败可以重来，且重来一次都没碰过宿主。
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(silent());
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
+    RecordingSink sink;
+    auto task = client.open_stream(
+        Request::get(loopback_url(peer.port())).timeouts(Timeouts{.total = std::chrono::milliseconds{50}}), sink);
+    AURORA_TEST_REQUIRE(pump_stream(engine, task));
+
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
+    AURORA_TEST_CHECK(names_in(outcome.error().message, "total"));  // 逐尝试重新计时的正是这一档
+    AURORA_TEST_CHECK_GE(engine.now().count(), 150);  // 三次尝试各用过一份 50 ms 窗口
+    AURORA_TEST_CHECK_EQ(sink.heads, 0);  // 重放期间一次都没向宿主交过头
+    AURORA_TEST_CHECK_EQ(sink.ends, 0);
+}
+
+AURORA_TEST_CASE(stream_does_not_replay_after_the_head_is_handed) {
+    // 头一旦交出就耗尽资格：本库不能假装「回到交头之前」让宿主重写已写下那段，那是把契约违约当成重试收益。
+    // 对端给出完整头部但按 `Content-Length` 欠着体不写，于是头交得出、交换收不完——同一枚时限旋钮下
+    // 上一次用例走满 150 ms，这一枚只走满一份窗口。
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(write_then_hold("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n"));  // 给头部不给体
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
+    RecordingSink sink;
+    auto task = client.open_stream(
+        Request::get(loopback_url(peer.port())).timeouts(Timeouts{.total = std::chrono::milliseconds{50}}), sink);
+    AURORA_TEST_REQUIRE(pump_stream(engine, task));
+
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);  // 头确实交出去过：资格就此耗尽
+    AURORA_TEST_CHECK_EQ(sink.ends, 0);  // 失败结局不调 `on_end`
+    AURORA_TEST_CHECK_LE(engine.now().count(), 90);  // 只剩一份窗口：第二次尝试根本没发生
+}
+
+AURORA_TEST_CASE(stream_refuses_an_out_of_range_policy_before_any_connection) {
+    // 形态闸在起手就过：越界的 `base` 不进入任何一次尝试，对端一条连接都不该被连上。
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("", {'o'})));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    RecordingSink sink;
+    auto task = client.open_stream(
+        Request::get(loopback_url(peer.port())).retry_policy(RetryPolicy{.base = std::chrono::milliseconds{-1}}), sink);
+    AURORA_TEST_REQUIRE(aurora::test::net::drive_until(
+                            "policy refused", [&task] { return task.is_done(); }, std::chrono::milliseconds{2000})
+                            .satisfied);
+
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
+    AURORA_TEST_CHECK(names_in(outcome.error().message, "base"));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
+    AURORA_TEST_CHECK_EQ(sink.heads, 0);
+}
 
 }  // namespace aurora::test_cases::utest_net_http_stream

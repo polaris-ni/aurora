@@ -7,12 +7,15 @@
 ///           请求丢弃消息体；链式字段追加保序、`set_header` 清同名后追加；应答值类型的状态码 / 原因 /
 ///           大小写不敏感取值 / 原始字节与文本形态；失败分型 `HttpErrorClass` 的逐码归档（以生成表做完整性
 ///           断言：每一枚 `net-*` / `http-*` 都必须被点名，非网络族码落兜底档）、档位与 `retryable` 的正交
-///           关系、`error_class_of_status` 的 400 边界，以及 `error_class_text` 的九枚小写稳定令牌。
+///           关系、`error_class_of_status` 的 400 边界，以及 `error_class_text` 的九枚小写稳定令牌。请求侧的
+///           `RetryPolicy` 槽位验两级语义：不设 = 跟随 `Client` 的缺省、设 `RetryPolicy{}` = 本条关闭重试
+///           （两者必须可区分）、再设是整份替换而非逐字段合并、五枚字段逐个回读。
 /// 全用例零 socket、零 DNS、不读环境变量，故三平台行为一致、wasm 腿同样可跑，无需 `AURORA_TEST_SKIP`。
 
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,7 +36,9 @@ using aurora::net::http::HttpErrorClass;
 using aurora::net::http::Method;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
+using aurora::net::http::RetryPolicy;
 using aurora::net::http::Timeouts;
+using aurora::testing::require_value;
 
 /// @brief 断言请求序列化成功并返回其文本（畸形即致命失败）。
 /// @param request 待序列化的请求。
@@ -301,6 +306,43 @@ AURORA_TEST_CASE(request_timeouts_have_three_stages) {
     AURORA_TEST_CHECK_TRUE(!bare.timeouts().connect.has_value());
     AURORA_TEST_CHECK_TRUE(!bare.timeouts().read_idle.has_value());
     AURORA_TEST_CHECK_TRUE(!bare.timeouts().total.has_value());
+}
+
+AURORA_TEST_CASE(request_retry_policy_slot_follows_or_overrides_the_client) {
+    const auto zero = std::chrono::milliseconds{0};
+
+    // 槽位只回答「本请求要不要覆盖 `Client` 的缺省」：不设即 `nullopt`，两级合成发生在客户端起手时。
+    const auto follow = Request::get("https://example.com/");
+    AURORA_TEST_CHECK_TRUE(!follow.retry_policy().has_value());
+
+    // 「这一条不许重试」= 设一份 `attempts` 为缺省值的策略，而不是传一枚空值——空值的意思是「跟随缺省」，
+    // 而缺省可能正是开着退避的客户端。关掉与没想过必须可区分，否则「按请求关重试」无从表达。
+    const auto off = Request::get("https://example.com/").retry_policy(RetryPolicy{});
+    AURORA_TEST_CHECK_EQ(require_value(off.retry_policy()).attempts, std::uint32_t{1});
+
+    // 逐字段回读：五枚各有其形，`budget` 不设仍是「没有墙」而不是「零时长墙」（非正值与不设同义）。
+    const auto full = Request::get("https://example.com/")
+                          .retry_policy(RetryPolicy{
+                              .attempts = 5,
+                              .base = std::chrono::milliseconds{30},
+                              .max_backoff = std::chrono::milliseconds{900},
+                              .jitter = 0.5,
+                              .budget = std::chrono::milliseconds{2000},
+                          });
+    const RetryPolicy policy = require_value(full.retry_policy());
+    AURORA_TEST_CHECK_EQ(policy.attempts, std::uint32_t{5});
+    AURORA_TEST_CHECK_EQ(policy.base.count(), std::int64_t{30});
+    AURORA_TEST_CHECK_EQ(policy.max_backoff.count(), std::int64_t{900});
+    AURORA_TEST_CHECK_NEAR(policy.jitter, 0.5, 1e-12);
+    AURORA_TEST_CHECK_EQ(policy.budget.value_or(zero).count(), std::int64_t{2000});
+
+    // 再设一次是整份替换而非逐字段合并：`budget` 由有值回到不设，本请求的墙随之消失。
+    auto replaced =
+        Request::get("https://example.com/").retry_policy(RetryPolicy{.budget = std::chrono::milliseconds{2000}});
+    replaced.retry_policy(RetryPolicy{.attempts = 2});
+    const RetryPolicy current = require_value(replaced.retry_policy());
+    AURORA_TEST_CHECK_EQ(current.attempts, std::uint32_t{2});
+    AURORA_TEST_CHECK_TRUE(!current.budget.has_value());
 }
 
 AURORA_TEST_CASE(error_class_maps_every_net_and_http_code) {

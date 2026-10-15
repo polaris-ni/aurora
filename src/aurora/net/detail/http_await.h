@@ -18,6 +18,8 @@
 // @note Thread: single-threaded（每个 awaiter 随一条协程帧串行使用，无共享状态）
 // @note Side-effects: 触发一次异步传输发起；恢复经主线程投递器
 
+#include <atomic>
+#include <chrono>
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
@@ -30,6 +32,7 @@
 
 #include "aurora/core/result.h"
 #include "aurora/net/cancellation.h"
+#include "aurora/net/engine.h"
 #include "aurora/net/tls.h"
 #include "aurora/net/transport.h"
 #include "aurora/state/async.h"  // aurora::detail::post_to_main
@@ -123,6 +126,43 @@ template <typename Stream>
 auto await_read(Stream &stream, std::span<char> buffer) -> CallbackAwaiter<std::size_t> {
     return CallbackAwaiter<std::size_t>(
         [&stream, buffer](CallbackAwaiter<std::size_t>::Sink on_done) { stream.read(buffer, std::move(on_done)); });
+}
+
+/// @brief 等待一段时间（重试退避用）；到期与取消谁先到就当场放行，二者都求得一次 `Result<void>`。
+///
+/// 引擎的 `post_after` 没有撤销口，且**停机时未到期的定时器被丢弃**（`net/engine.h`：定时器只承载「放弃
+/// 等待」的语义）。故本等待体自带一枚「恰好完成一次」的闸，并同时挂到取消令牌上——否则退避中的协程会在
+/// 引擎停机后永远悬着。取消不改变结局形态：调用方按 `is_cancelled()` 判这一下等待是被谁结束的。
+/// @param delay 等待时长；非正值等价于立即放行（仍经完成回调走，不与挂起点抢栈）。
+/// @param cancellation 本次交换的取消令牌（跨尝试的墙到点即取消它；按值持有，随 awaiter 存活）。
+inline auto await_sleep(std::chrono::milliseconds delay, Cancellation cancellation) -> CallbackAwaiter<void> {
+    return CallbackAwaiter<void>(
+        // 同 await_connect：发起器经 std::function 类型擦除转入触发的系统性假告警面；本发起器只做登记与
+        // 一次原子写，不抛。
+        // NOLINTNEXTLINE(bugprone-exception-escape)
+        [delay, cancellation](CallbackAwaiter<void>::Sink on_done) mutable {
+            auto fired = std::make_shared<std::atomic<bool>>(false);
+            // 完成回调移入 `fire` 持有：发起器只被调一次，之后再复制的都是这份持有而非再拷一次参数。
+            auto fire = [fired, on_done = std::move(on_done)]() mutable {
+                auto expected = false;
+                if (fired->compare_exchange_strong(expected, true)) {
+                    on_done(Result<void>{});
+                }
+            };
+            if (cancellation.is_cancelled()) {
+                fire();
+                return;
+            }
+            cancellation.on_cancel([fire]() mutable { fire(); });
+            if (delay.count() <= 0) {
+                fire();
+                return;
+            }
+            // 登记不成（本腿无引擎语义）也必须放行：协程悬着比退避失败更糟。
+            if (!Engine::instance().post_after(delay, [fire]() mutable { fire(); })) {
+                fire();
+            }
+        });
 }
 
 }  // namespace aurora::net::detail

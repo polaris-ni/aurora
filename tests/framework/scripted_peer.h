@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -136,6 +137,25 @@ inline auto reply_after_reading(std::size_t read_bytes, std::string payload) -> 
     };
 }
 
+/// @brief 按连接次序换剧本：第 n 条连接（从 0 起）跑 `steps` 的第 n 份，越界后恒用最后一份。
+///
+/// 重试、重定向到第二个对端、以及「第一次失败第二次成功」这一类判据都需要**同一条监听口给出不同的
+/// 说法**；用两份 `ScriptedPeer` 会把端口换成第二个，用例就分不清「重播放到了同一个目标」还是「换目标」。
+/// 连接数请读 `ScriptedPeer::accepts()`——本工厂只负责「这一条连接该说什么」。
+/// @param steps 依次使用的脚本（为空则一律不说任何话）。
+/// @return 脚本。
+inline auto per_connection(std::vector<PeerScript> steps) -> PeerScript {
+    // 序号是**这条监听口**的状态而非脚本的状态：`PeerScript` 会被复制进后台线程，故计数只能挂在共享位上。
+    auto cursor = std::make_shared<std::atomic<std::size_t>>(0);
+    return [steps = std::move(steps), cursor](aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
+        if (steps.empty()) {
+            return;
+        }
+        const std::size_t index = cursor->fetch_add(1);
+        steps.at(index < steps.size() ? index : steps.size() - 1)(socket, stop);
+    };
+}
+
 /// @brief 写出给定字节后**单向停写**（连接保持、只关写向）：半关闭判据的对端那一半。
 ///
 /// 用 `detail::shutdown_handle()` 而不是 `close()`：后者带来的是「双向收摊」，测不到「本端读得 0 字节
@@ -152,11 +172,21 @@ inline auto write_then_half_close(std::string payload) -> PeerScript {
     };
 }
 
-/// @brief 写出给定字节后立即关闭连接：对端收摊（以及其后的读 0 字节 / 写失败）判据。
-/// @param payload 关闭前写出的字节。
+/// @brief 写出给定字节后以 **RST** 收摊（`SO_LINGER` 时限 0 再关）：读侧拿到一次真实的套接口错误。
+///
+/// 为什么不是「写完直接 `close()`」：后者的结局**不唯一**——FIN 还是 RST 取决于关闭那一刻内核队列的形态，
+/// Winsock 在「本端接收缓冲里还压着没被读走的字节」时可把关闭改成异常断开，于是同一份剧本在负载不同的两台
+/// 机器上能落到两种结局（实测：同一用例在全绿与 `http-protocol-error` 之间翻脸，故本设施不设那枚剧本）。
+/// 要钉住「读侧报一次套接口错误」这条判据——`net-recv-failed` / `net-send-failed` 那一档的唯一来源——
+/// 就得把关闭形态本身钉死：时限 0 的 linger 令 `close()` 丢弃待发字节并直接发 RST，两腿同形
+/// （`transport.h` 的 `linger` 口径）。双向收摊但走优雅 FIN 的形态由 `write_then_half_close()` 承担。
+/// @param payload 断开之前写出的字节。
 /// @return 脚本。
-inline auto write_then_close(std::string payload) -> PeerScript {
+inline auto write_then_reset(std::string payload) -> PeerScript {
     return [payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket, PeerStop &) -> void {
+        aurora::net::NativeOptions reset{};
+        reset.linger = std::chrono::milliseconds{0};  // 0 = 关闭即 RST
+        (void)aurora::net::detail::apply_native_options(socket.native_handle(), reset);
         (void)socket.write_all(std::span<const char>{payload});
         socket.close();
     };

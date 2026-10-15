@@ -16,7 +16,8 @@
 /// - **一次 `send` = 一条连接的生命周期**：连接池、keep-alive 复用、`Session` 的 Cookie Jar 属后续切片，本
 ///   件每次为（每一跳）新建连接、应答物化后关闭，绝不为「复用」预先牺牲正确性。
 /// - **超时以 `Request::timeout()` 为准**：它是整请求时限（跨连接、TLS、读写、重定向全程），到点落
-///   `http-timeout`；分段超时（`connect` / `read_idle`）与 `RetryPolicy` / 缓存 / 认证属 §12 其余语义件。
+///   `http-timeout`；分段超时（`connect` / `read_idle`）已随之落地，重试（`RetryPolicy`）的每一次尝试各拿
+///   一份 `total`、跨全部尝试的墙另有 `RetryPolicy::budget`。缓存与认证属 §12 其余语义件。
 ///
 /// 内容编码（透明解压）在发起侧管线内完成，`Response` 交出的恒是还原后的字节：
 /// - **宣告与支持集同源**：构建编入解压能力时，`send` 替调用方补 `Accept-Encoding: gzip, deflate`；调用方
@@ -131,12 +132,33 @@ class Client {
         return progress_frame_source_;
     }
 
+    /// @brief 装本客户端的缺省重试策略（`Request::retry_policy()` 可逐请求覆盖）。
+    ///
+    /// 缺省即 `RetryPolicy{}`——`attempts` 为 `1`，**不重试**。策略开着时，每一次尝试都是从原始请求重新
+    /// 发起（含重新建连与重跑重定向链），不是「接着上次断的地方再读」；请求体由 `Request` 自持，故可重放。
+    /// 判据与两枚时间旋钮的分工见 `RetryPolicy` 的头注释。
+    /// @param value 重试策略。
+    /// @return 自身引用，便于链式调用。
+    auto retry_policy(RetryPolicy value) -> Client & {
+        retry_ = value;
+        return *this;
+    }
+
+    /// @brief 查看缺省重试策略。
+    /// @return 策略的只读引用。
+    [[nodiscard]] auto retry_policy() const -> const RetryPolicy & { return retry_; }
+
     /// @brief 发送一次请求并物化应答：连接 → 写出 → 逐段装配 → 透明解压 → 按 `Location` 跟随重定向。
     ///
     /// 全程受 `Request::timeout()` 的整请求时限约束（到点落 `http-timeout`）；重定向次数超过
     /// `Request::max_redirects()` 落 `http-redirect-limit`；应答声明了本件解不了的 `Content-Encoding` 落
     /// `http-content-encoding-unsupported`、声明得了但字节过不了该编码落 `http-body-corrupt`。协程出口，
     /// 续体恒回主线程。
+    ///
+    /// 重试按 `Request::retry_policy()`（缺省取本客户端的 `retry_policy()`，即不重试）逐尝试发起：每一次尝试
+    /// 都从原始请求重跑「建连 + 重定向链」，`Timeouts::total` 因此逐尝试重新计时，跨全部尝试的墙是
+    /// `RetryPolicy::budget`（到点落 `http-timeout` 并在 detail 点名 budget）。尝试耗尽后交出的仍是最后一次
+    /// 那一份事实——非 2xx 是成功的 `Response`，传输失败是最后一枚底层错误码，本件不新造「重试失败」码。
     /// @param request 待发送的请求（其 `render_head()` 的 URL 解析失败、字段畸形在此以错误结局交出；
     ///                未自带 `Accept-Encoding` 时由本件补齐）；按值接管以随协程帧存活，调用后可立即销毁源对象。
     /// @return 可 `co_await` 的协程任务：成功携物化的 `Response`，失败携对应 `http-*` / `net-*` 错误码。
@@ -161,6 +183,10 @@ class Client {
     /// 也不再交付；此时库内不宣告流「完整」，故解压环节的中途收摊不校验尾块。失败结局不调 `on_end`。本腿无
     /// 流式能力（`Engine::capabilities().streaming` 为假，如 wasm）时直接落 `net-platform-unavailable`，
     /// 绝不悄悄退化成物化路径。协程出口，续体恒回主线程。
+    ///
+    /// 重试同样成立，但资格比物化路径窄（判据见 `Request::retry_policy()`）：**`on_head` 交出即耗尽**——
+    /// 宿主一旦见过头部，后续尝试会把已写下那段再写一遍，本件绝不替宿主做那种重播；`stopped_by_sink` 是宿主
+    /// 自己收的摊，同样不重放。未交出头部的失败（建连、写出、装配、解压）与可重试的非 2xx 才进退避环。
     /// @param request 待发送的请求（按值接管以随协程帧存活，调用后可立即销毁源对象）。
     /// @param sink 接收侧宿主；**按引用**交付，其生命周期必须覆盖到协程收尾（`is_done()` 之后）。
     /// @return 可 `co_await` 的协程任务：成功携 `StreamOutcome`，失败携对应 `http-*` / `net-*` 错误码。
@@ -173,6 +199,7 @@ class Client {
     std::optional<std::uint64_t> max_decompressed_bytes_;  ///< 解压产物上限（nullopt = 跟随上一行）
     TlsContext tls_;  ///< https 握手口径
     std::function<std::uint64_t()> progress_frame_source_;  ///< 进度发射的帧号源（空 = 回合闸）
+    RetryPolicy retry_;  ///< 缺省重试策略（attempts=1 即关闭）；逐请求由 `Request::retry_policy()` 覆盖
 };
 
 }  // namespace aurora::net::http

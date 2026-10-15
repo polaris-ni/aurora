@@ -82,6 +82,52 @@ struct Timeouts {
     std::optional<std::chrono::milliseconds> total;  ///< 整请求时限
 };
 
+/// @brief 一次交换失败后要不要再打一遍、隔多久打；**缺省关闭**。
+///
+/// 本类型只表达「策略」，不表达「这次到底重不重试」——后者由三件既有事实共同决定，本库不自造第四份判据：
+/// - **方法是否幂等**：只有 `GET` / `HEAD` / `PUT` / `DELETE` 会被重放。重放一条非幂等请求可能把一次
+///   提交变成两次，而这个代价在失败现场无从判定（响应没收到，恰说明服务端可能已经做完了），故不由策略
+///   旋钮放开。
+/// - **失败的归因档**：`error_class_of()` 落在 `Dns` / `Unreachable` / `Timeout` 三档之一，且该码在
+///   `codespec/errors.toml` 里 `retryable` 为真，才允许重放。`net-cancelled` 虽标可重试，但它落在
+///   `Cancelled` 档、且重放用户主动取消的请求等于违抗那次取消，故被同一道闸挡住；`Protocol` / `Status` /
+///   `Invalid` 档同理不重放（报文畸形与用法的修复动作都不在「再打一遍」上）。
+/// - **应答状态码**：非 2xx 是成功的 `Result`（状态是数据不是错误），故这条分岔不看错误码，只看
+///   `error_class_of_status()` 给出的 `Status` 档里的**瞬时**那一族：408 / 429 / 500 / 502 / 503 / 504。
+///   这类重试耗尽时把最后那一次应答原样交出，绝不折成错误——调用方要看的是服务器怎么说。
+///
+/// 两枚时间旋钮各管一段：`total` 档（`Timeouts`）是**每一次尝试**的墙，重试的每次尝试重新拿一份；跨全部
+/// 尝试（含退避等待）的墙由本类型的 `budget` 表达，到点即停、剩余尝试不再发起。二者分开是因为「这条连接
+/// 慢」与「这次重试序列拖太久」是两件事，合成一枚会让 attempts 与 base 的乘积关系隐式决定总时长。
+///
+/// 越界形态（`base` 为负、`max_backoff` 小于 `base`、`jitter` 不在 `[0, 1]`）在发起起手时即落
+/// `http-request-invalid` 并在 detail 点名是哪一枚，不静默折算——「以为开了抖动其实没开」要等到线上重试
+/// 风暴才现形，那时现场已经没有配置信息。`budget` 非正值与不设等价（与 `Timeouts` 各档同口径）。
+/// @note Thread: thread-safe（值类型）
+/// @note Side-effects: none
+struct RetryPolicy {
+    /// @brief 总尝试数上限，**含首次**；`1`（缺省）即关闭重试，`0` 与 `1` 同义。
+    ///
+    /// 本库不给它设安全阀：真正的墙是 `budget` 与每尝试的 `total`，而「打多少次」是使用方的决定。
+    std::uint32_t attempts{1};
+    /// @brief 首次退避的基准时长（第 n 次退避以 `base * 2^(n-1)` 增长，再取抖动与上限）。
+    ///
+    /// 非正值合法，意为「不等待，立刻再打」（用于本地回环一类的即时重试场景）。
+    std::chrono::milliseconds base{std::chrono::milliseconds{200}};
+    /// @brief 单次等待的上限，**同时**充当指数退避的封顶与 `Retry-After` 的封顶。
+    ///
+    /// 合为一枚是有意的：两条路都在回答「这次最多愿意等多久」，分成两枚旋钮会让「对端要求等 10 分钟」与
+    /// 「我方退避上限」互相矛盾却无人裁决。越上限即按上限等待，随后照常发起下一次尝试。
+    std::chrono::milliseconds max_backoff{std::chrono::milliseconds{30000}};
+    /// @brief 抖动幅度，合法域 `[0, 1]`：本次等待在 `[算得值, 算得值 * (1 + jitter)]` 内取值。
+    ///
+    /// `0` = 完全确定（测试与可复现诊断用），缺省 `0.2` 足以打散同一时刻整批发起的重试，又不至于让最坏
+    /// 等待翻倍。抖动只负责打散节奏，故取值来自库内置的非密码学序列——它不需要也不可预测性可言。
+    double jitter{0.2};
+    /// @brief 跨全部尝试（含退避等待）的总墙；`nullopt` 或非正值 = 不设，仅由 `attempts` 收敛。
+    std::optional<std::chrono::milliseconds> budget;
+};
+
 /// @brief 进度所属方向；一次交换里两侧各报一段，回调需据此分流。
 ///
 /// 上传在请求体被传输层接受时推进，下载在应答体到达时推进。二者共用一枚回调是刻意的：调用方通常只关心
@@ -199,6 +245,18 @@ class Request {
     /// @return 超时集合的只读引用。
     [[nodiscard]] auto timeouts() const -> const Timeouts & { return timeouts_; }
 
+    /// @brief 为本次请求单独设定重试策略（覆盖 `Client::retry_policy()` 的缺省）。
+    ///
+    /// 只在「这一条请求跟别的请求不一样」时用（例如某个已知可安全重放的 PUT 想多打两次）。要关掉单条请求
+    /// 的缺省重试，设 `RetryPolicy{}` 即可（`attempts` 缺省 `1` = 关闭），不是传空值语义。
+    /// @param value 重试策略。
+    /// @return 自身引用，便于链式调用。
+    auto retry_policy(RetryPolicy value) -> Request &;
+
+    /// @brief 查看本请求的重试策略覆盖。
+    /// @return 已设定则返回之；`nullopt` = 跟随 `Client::retry_policy()`。
+    [[nodiscard]] auto retry_policy() const -> const std::optional<RetryPolicy> & { return retry_policy_; }
+
     /// @brief 设定重定向跟随上限（`0` 表示不跟随）。缺省 10。
     /// @param value 上限次数。
     /// @return 自身引用，便于链式调用。
@@ -245,6 +303,7 @@ class Request {
     Headers headers_;  ///< 请求字段（不含补齐项）
     std::vector<char> body_;  ///< 消息体
     Timeouts timeouts_;  ///< 三档超时（connect / read_idle / total），缺省全不设
+    std::optional<RetryPolicy> retry_policy_;  ///< 本请求的重试策略覆盖；nullopt = 跟随 Client 的缺省
     int max_redirects_{10};  ///< 重定向跟随上限
     ProgressHandler on_progress_;  ///< 进度回调（空 = 不报）；发起侧负责合流后再调用
 };

@@ -170,6 +170,11 @@ auto Request::timeouts(Timeouts value) -> Request & {
     return *this;
 }
 
+auto Request::retry_policy(RetryPolicy value) -> Request & {
+    retry_policy_ = value;
+    return *this;
+}
+
 auto Request::max_redirects(int value) -> Request & {
     max_redirects_ = value;
     return *this;
