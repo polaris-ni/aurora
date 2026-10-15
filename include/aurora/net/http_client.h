@@ -17,7 +17,7 @@
 ///   件每次为（每一跳）新建连接、应答物化后关闭，绝不为「复用」预先牺牲正确性。
 /// - **超时以 `Request::timeout()` 为准**：它是整请求时限（跨连接、TLS、读写、重定向全程），到点落
 ///   `http-timeout`；分段超时（`connect` / `read_idle`）已随之落地，重试（`RetryPolicy`）的每一次尝试各拿
-///   一份 `total`、跨全部尝试的墙另有 `RetryPolicy::budget`。缓存与认证属 §12 其余语义件。
+///   一份 `total`、跨全部尝试的墙另有 `RetryPolicy::budget`。认证属 §12 其余语义件。
 ///
 /// 内容编码（透明解压）在发起侧管线内完成，`Response` 交出的恒是还原后的字节：
 /// - **宣告与支持集同源**：构建编入解压能力时，`send` 替调用方补 `Accept-Encoding: gzip, deflate`；调用方
@@ -37,6 +37,19 @@
 /// - **挂了回调才分块写请求体**：上传进度要有可观测的节拍，故带体的请求按块写出、每块一次完成回调；未挂
 ///   回调时恒一次写完，线上字节序列两型完全相同（分块只影响本库内部的完成次数，不影响对端所见）。
 ///
+/// 内存缓存（`Client::cache()`，缺省关）只在开关开着时参与交换，四条口径与上面的形态裁决同级：
+/// - **查在重试环之外、写在环之外**：一次交换至多查表一次、至多写表一次。陈旧副本挂上的两枚条件头进的是
+///   原始请求，故每一次尝试都带着同一份校验子重跑；重放不会把一个 304 变成 200，也不会漏挂头部。
+/// - **新鲜即零交换**：命中新鲜副本时一条连接都不发起，交出的 `Response::from_cache()` 为真。§12 承诺的
+///   「同一 URL 二次请求不触网」就是这一条，代价是缓存里的说法可能落后于对端——那是开启者的选择。
+/// - **从不交付陈旧副本**：过期条目一律先向对端验证，验证失败（含重试耗尽）就把那次失败原样交出，绝不拿
+///   旧数据兜场。因此 `must-revalidate` 在本库里不需要额外分支（它的禁令正是本库的缺省），而 `no-cache`
+///   响应指令的效果等价于「条目即刻过期」，走同一条重验证路。
+/// - **进表的门槛由库判、不由调用方判**：只存 `GET` / `HEAD`、只存可缓存状态码那一族、`no-store` 与
+///   `Vary: *` 直接不存、无显式有效期又无校验子的不存（本库不做 `RFC 9111 §4.2.2` 的启发式新鲜度，
+///   那个算法随本机时钟与历史响应漂移，判据写不成定值；有校验子而无有效期则照存，条目即刻过期、每次都
+///   走条件请求，省的是体字节而不是那一次往返）。
+///
 /// 流式接收（`open_stream()` + `net/http_stream.h` 的 `DataSink`）与物化路径共用上述全部协议语义，四条形态
 /// 差别单列在那里：线上字节不设限（`max_body_bytes()` 管的是物化路径的内存）、`deflate` 两型按包装头判定、
 /// 重定向跳的消息体不读、本腿无流式能力时直接失败而不悄悄物化。
@@ -52,6 +65,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 
 #include "aurora/core/result.h"
@@ -60,6 +74,10 @@
 #include "aurora/net/tls.h"
 #include "aurora/state/coroutine.h"
 
+namespace aurora::net::detail {
+class HttpResponseCache;  ///< 实现侧缓存表：字段全部留在 `net/detail/http_cache.h`，公共头不暴露
+}
+
 namespace aurora::net::http {
 
 /// @brief HTTP 发起侧客户端：把 `Request` 送出去、把物化的 `Response` 拿回来。
@@ -67,8 +85,10 @@ namespace aurora::net::http {
 /// @note Side-effects: `send` / `open_stream` 发起网络 I/O
 class Client {
   public:
-    /// @brief 以缺省口径构造：不设物化体上限、TLS 采安全缺省（校验开、无 pin、系统信任库）。
-    Client() = default;
+    /// @brief 以缺省口径构造：不设物化体上限、TLS 采安全缺省（校验开、无 pin、系统信任库）、缓存关。
+    ///
+    /// 定义在实现侧：缓存表是一只指向库内类型的共享指针，公共头只知道它的名字，构造点必须看得见全貌。
+    Client();
 
     /// @brief 设定物化应答体的字节上限（`std::nullopt` = 不设限）。
     /// @param value 上限字节数；应答体越限落 `http-body-too-large`。
@@ -148,6 +168,24 @@ class Client {
     /// @return 策略的只读引用。
     [[nodiscard]] auto retry_policy() const -> const RetryPolicy & { return retry_; }
 
+    /// @brief 装本客户端的内存缓存口径（`CacheOptions{}` 即关掉，缺省就是它）。
+    ///
+    /// 开着时兑现 `RFC 9111` 的最小集：`GET` / `HEAD` 的应答按「方法 + 目标 URL + `Vary` 点名的请求头取值」
+    /// 建键存进表，新鲜副本直接交付且**一条连接都不发起**，陈旧副本挂上 `If-None-Match` / `If-Modified-Since`
+    /// 走条件请求，拿到 304 就把新头并进已存应答再交出（`Response::from_cache()` 为真）。`no-store`、
+    /// `Vary: *`、不可存的状态码集合、非幂等方法一律不进表。
+    ///
+    /// 表是**共享状态**：`Client` 的拷贝共用同一张表（各拿一份空表的话，拷贝一次就等于把已付的代价扔掉、
+    /// 下一次照样触网，那不是值语义想要的）。关掉开关不清空已有条目——开关管的是「查不查、写不写」，
+    /// 要清表请另建一个 `Client`。逐请求绕过用 `Request::no_cache()`。
+    /// @param value 缓存口径。
+    /// @return 自身引用，便于链式调用。
+    auto cache(CacheOptions value) -> Client &;
+
+    /// @brief 查看缓存口径。
+    /// @return 口径的只读引用（`enabled` 缺省假 = 不查也不写）。
+    [[nodiscard]] auto cache() const -> const CacheOptions & { return cache_options_; }
+
     /// @brief 发送一次请求并物化应答：连接 → 写出 → 逐段装配 → 透明解压 → 按 `Location` 跟随重定向。
     ///
     /// 全程受 `Request::timeout()` 的整请求时限约束（到点落 `http-timeout`）；重定向次数超过
@@ -162,6 +200,8 @@ class Client {
     /// @param request 待发送的请求（其 `render_head()` 的 URL 解析失败、字段畸形在此以错误结局交出；
     ///                未自带 `Accept-Encoding` 时由本件补齐）；按值接管以随协程帧存活，调用后可立即销毁源对象。
     /// @return 可 `co_await` 的协程任务：成功携物化的 `Response`，失败携对应 `http-*` / `net-*` 错误码。
+    /// @note 缓存开着且本请求未 `no_cache()` 时，命中新鲜副本直接返回（`from_cache()` 为真、零连接），
+    ///       陈旧副本自动挂条件头重验证，304 用新头更新已存应答后交出。
     [[nodiscard]] auto send(Request request) const -> CoroTask<Result<Response>>;
 
     /// @brief 发送一次请求并**流式**收下应答：字节到手一段就交一段，整条消息不必同时存在于内存。
@@ -187,6 +227,10 @@ class Client {
     /// 重试同样成立，但资格比物化路径窄（判据见 `Request::retry_policy()`）：**`on_head` 交出即耗尽**——
     /// 宿主一旦见过头部，后续尝试会把已写下那段再写一遍，本件绝不替宿主做那种重播；`stopped_by_sink` 是宿主
     /// 自己收的摊，同样不重放。未交出头部的失败（建连、写出、装配、解压）与可重试的非 2xx 才进退避环。
+    ///
+    /// 缓存命中时三个入口照常走：`on_head` 交已存的头部块，`on_data` 把已存的（已解压）体逐段交出去，
+    /// `on_end` 收尾——宿主看到的交付次序与真从对端取回时一致，区别只在 `StreamOutcome::wire_bytes` 为 0
+    /// （本次没有线上字节）而 `delivered_bytes` 是已存体的长度。304 重验证成功同理：线上只有头部块。
     /// @param request 待发送的请求（按值接管以随协程帧存活，调用后可立即销毁源对象）。
     /// @param sink 接收侧宿主；**按引用**交付，其生命周期必须覆盖到协程收尾（`is_done()` 之后）。
     /// @return 可 `co_await` 的协程任务：成功携 `StreamOutcome`，失败携对应 `http-*` / `net-*` 错误码。
@@ -200,6 +244,8 @@ class Client {
     TlsContext tls_;  ///< https 握手口径
     std::function<std::uint64_t()> progress_frame_source_;  ///< 进度发射的帧号源（空 = 回合闸）
     RetryPolicy retry_;  ///< 缺省重试策略（attempts=1 即关闭）；逐请求由 `Request::retry_policy()` 覆盖
+    CacheOptions cache_options_;  ///< 缓存口径（缺省关）；逐请求由 `Request::no_cache()` 越
+    std::shared_ptr<detail::HttpResponseCache> cache_;  ///< 共享的缓存表；拷贝的 Client 共用同一张
 };
 
 }  // namespace aurora::net::http

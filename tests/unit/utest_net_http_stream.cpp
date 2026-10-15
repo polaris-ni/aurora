@@ -18,6 +18,11 @@
 ///             时限窗口跑满（虚拟时钟 ≥150 ms），头已经交出去的只剩一扇（≤90 ms）；越界的 `RetryPolicy` 在建协程
 ///             前就被拒（对端一条连接都没被连上）。物化路径的逐值退避与 `Retry-After` 尊重在
 ///             `utest_net_http_client.cpp`，退避算式与错误表在 `utest_net_http_retry.cpp`。
+///           缓存（§12「条件请求与缓存校验」）验流式入口独有的三条：命中新鲜副本时**一条连接都不发起**，
+///             但仍按同一个次序把已存那份体逐段交给同一个宿主（`wire_bytes` 恒 0、`delivered_bytes` 恰等于体长、
+///             `response.from_cache()` 为真）；本入口**只读不写**，于是两次流式交换之间表里什么都没留下（第二次
+///             照旧触网）；表里那条由物化路径灌入的陈旧条目会被带着校验子去问，拿回的 304 不进宿主——交出的
+///             头部是已存那份 200、体是已存那段字节，并完的那一份重新获得新鲜度，第三次不再触网。
 /// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
 
 #include <chrono>
@@ -51,6 +56,7 @@ namespace {
 using aurora::CoroTask;
 using aurora::Result;
 using aurora::net::Capabilities;
+using aurora::net::http::CacheOptions;
 using aurora::net::http::Client;
 using aurora::net::http::DataSink;
 using aurora::net::http::Progress;
@@ -64,6 +70,7 @@ using aurora::net::http::Timeouts;
 using aurora::test::FakeEngine;
 using aurora::test::FakeEngineScope;
 using aurora::test::ScriptedPeer;
+using aurora::test::scripts::per_connection;
 using aurora::test::scripts::reply_after_reading;
 using aurora::test::scripts::silent;
 using aurora::test::scripts::write_then_hold;
@@ -92,6 +99,21 @@ using aurora::test::scripts::write_then_hold;
                           "open_stream done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
                           .satisfied);
     return inner(task);
+}
+
+/// @brief 走物化路径完成一次交换：缓存的重验证用例需要「表里先有一条」，而流式入口刻意不写表。
+/// @param client 客户端。
+/// @param request 请求。
+/// @return 应答的 Result 层（协程未收尾时由 REQUIRE 收场）。
+[[nodiscard]] auto prime_with_send(const Client &client, Request request) -> Result<Response> {
+    const aurora::test::net::HostDriven host;
+    auto task = client.send(std::move(request));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
+                          .satisfied);
+    const auto outer = task.result();
+    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    return outer.value();
 }
 
 /// @brief 在脚本化时钟下把一条流式交换泵到收尾（重试与超时的判据都要由用例推进时间，不能让真实时长说话）。
@@ -641,6 +663,99 @@ AURORA_TEST_CASE(stream_refuses_an_out_of_range_policy_before_any_connection) {
     AURORA_TEST_CHECK(names_in(outcome.error().message, "base"));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
     AURORA_TEST_CHECK_EQ(sink.heads, 0);
+}
+
+AURORA_TEST_CASE(a_cache_hit_streams_the_stored_body_without_the_wire) {
+    const aurora::test::net::HostDriven host;
+    const auto body = long_body(40000);  // 远超一次读的窗口：命中时也必须仍是「逐段」而不是一次倾倒
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    // 表先由物化路径灌一份（流式入口不写表，见下一例），这份 40 000 字节的载荷就是命中时要逐段交出去的那段。
+    AURORA_TEST_REQUIRE(bool(prime_with_send(client, Request::get(url))));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+
+    // 命中缓存走的是同一个宿主、同一套次序：头部一次、体按段、收摊一次，只是线上一个字节也没来。
+    RecordingSink sink;
+    const auto hit = open_and_drive(client, Request::get(url), sink);
+    AURORA_TEST_REQUIRE(bool(hit));
+    AURORA_TEST_CHECK(hit.value().response.from_cache());
+    AURORA_TEST_CHECK_EQ(hit.value().wire_bytes, std::uint64_t{0});
+    AURORA_TEST_CHECK_EQ(hit.value().delivered_bytes, body.size());
+    AURORA_TEST_CHECK_EQ(sink.text.size(), body.size());
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{body.begin(), body.end()});
+    AURORA_TEST_CHECK_TRUE(sink.segments > 1);
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_TRUE(sink.head_body_empty);
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 「同一 URL 二次请求不触网」在流式入口同样成立
+}
+
+AURORA_TEST_CASE(a_streamed_exchange_leaves_the_table_untouched) {
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", {'a'})));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    RecordingSink first;
+    const auto fetched = open_and_drive(client, Request::get(url), first);
+    AURORA_TEST_REQUIRE(bool(fetched));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+
+    // 流式入口只读不写：把载荷攒进表就意味着先把它攒进内存，那正是调用方选 `open_stream` 要避免的事。
+    // 判据是「第二次仍然触网」——若这里写进了表，第二次就该是一次命中。
+    RecordingSink second;
+    const auto again = open_and_drive(client, Request::get(url), second);
+    AURORA_TEST_REQUIRE(bool(again));
+    AURORA_TEST_CHECK_FALSE(again.value().response.from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(a_stale_entry_revalidates_and_streams_the_stored_body) {
+    const aurora::test::net::HostDriven host;
+    const std::vector<char> stored{'s', 't', 'o', 'r', 'e', 'd'};
+    // 第一条给「抵达即过期 + 校验子」：`send` 把它灌进表；第二条只回一句 304。
+    const auto initial = length_framed("Cache-Control: max-age=0\r\nETag: \"v1\"\r\n", stored);
+    const auto *const not_modified = "HTTP/1.1 304 Not Modified\r\nCache-Control: max-age=600\r\nETag: \"v2\"\r\n\r\n";
+    ScriptedPeer peer(per_connection({reply_after_reading(1, initial), reply_after_reading(1, not_modified)}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+    AURORA_TEST_REQUIRE(bool(prime_with_send(client, Request::get(url))));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(url), sink);
+    AURORA_TEST_REQUIRE(bool(outcome));
+    // 宿主看不见那枚中间状态：头部是已存那份 200，体是已存那 6 字节，`on_head` 恰一次、`on_end` 恰一次。
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{"stored"});
+    AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, std::uint64_t{6});
+    AURORA_TEST_CHECK(outcome.value().response.from_cache());
+    // 304 按定义没有体，故线上字节仍是 0（口径是「分帧解出的体字节」，与 HEAD 那一例同判据）。
+    AURORA_TEST_CHECK_EQ(outcome.value().wire_bytes, std::uint64_t{0});
+    AURORA_TEST_CHECK_EQ(outcome.value().response.header("ETag").value_or(std::string{}), std::string{"\"v2\""});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+
+    // 刚验证过的一份重新获得新鲜度：第三次不必再问对端，交出的仍是已存那份体。
+    RecordingSink third;
+    const auto again = open_and_drive(client, Request::get(url), third);
+    AURORA_TEST_REQUIRE(bool(again));
+    AURORA_TEST_CHECK(again.value().response.from_cache());
+    AURORA_TEST_CHECK_EQ(third.text, std::string{"stored"});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
 
 }  // namespace aurora::test_cases::utest_net_http_stream

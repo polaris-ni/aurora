@@ -175,6 +175,11 @@ auto Request::retry_policy(RetryPolicy value) -> Request & {
     return *this;
 }
 
+auto Request::no_cache(bool value) -> Request & {
+    no_cache_ = value;
+    return *this;
+}
+
 auto Request::max_redirects(int value) -> Request & {
     max_redirects_ = value;
     return *this;
@@ -198,8 +203,9 @@ auto Request::render_head() const -> Result<std::string> {
     return wire::render_request_head(method_text(method_), *url_, fields);
 }
 
-Response::Response(std::uint16_t status, std::string reason, Headers headers, std::vector<char> body)
-    : status_{status}, reason_{std::move(reason)}, headers_{std::move(headers)}, body_{std::move(body)} {}
+Response::Response(std::uint16_t status, std::string reason, Headers headers, std::vector<char> body, bool from_cache)
+    : status_{status}, reason_{std::move(reason)}, headers_{std::move(headers)}, body_{std::move(body)},
+      from_cache_{from_cache} {}
 
 auto Response::header(std::string_view name) const -> std::optional<std::string> { return headers_.get(name); }
 

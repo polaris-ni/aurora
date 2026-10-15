@@ -15,7 +15,13 @@
 ///           夹住、尝试耗尽交出的仍是最后那次 503 应答而不是新错误、非幂等方法与表上标 `retryable=false` 的失败
 ///           一律不重放（`accepts()` 恰一次），协议档失败也不重放；`Timeouts::total` 逐尝试重新计时（三扇窗口
 ///           跑满 150 ms 虚拟时长）而 `RetryPolicy::budget` 是跨尝试的一堵墙（到点改报 `http-timeout` 并点名
-///           budget）；越界的 `RetryPolicy` 起手即落 `http-request-invalid`，一条连接都不发起。
+///           budget）；越界的 `RetryPolicy` 起手即落 `http-request-invalid`，一条连接都不发起。缓存（§12「条件
+///           请求与缓存校验」）验开关兑现的那一条：新鲜副本命中时一条连接都不发起（`accepts()` 不变）且
+///           `from_cache()` 为真，过期条目带着表里的校验子先问对端、拿到 304 后交出的是并过头部的已存 200
+///           （调用方看不见那枚中间状态），刚验证过的一份再度获得新鲜度；响应侧 `no-store`、请求侧
+///           `Request::no_cache()`（既不读也不写）、提交类方法的应答、开关未开这四条各自把交换挡回线上。
+///           这一组用真实时钟——新鲜度算的是 `system_clock` 的账，推虚拟时钟推不动它，而「触没触网」由对端的
+///           `accepts()` 直接读出。
 /// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
 
 #include <atomic>
@@ -46,6 +52,7 @@ namespace {
 
 using aurora::CoroTask;
 using aurora::Result;
+using aurora::net::http::CacheOptions;
 using aurora::net::http::Client;
 using aurora::net::http::error_class_of;
 using aurora::net::http::HttpErrorClass;
@@ -113,6 +120,21 @@ const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0, 
     out += "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n";
     out.append(body.data(), body.size());
     return out;
+}
+
+/// @brief 把一段文本转成 `length_framed()` 要的字节体（缓存用例的载荷都是可读短词，用不上字节表）。
+/// @param text 文本。
+/// @return 等长缓冲。
+[[nodiscard]] auto body_of(std::string_view text) -> std::vector<char> {
+    return std::vector<char>{text.begin(), text.end()};
+}
+
+/// @brief 取出已交付应答的体（缓存判据问的是「交出的到底是哪一份载荷」，读原始字节最直白）。
+/// @param response 应答。
+/// @return 体的文本副本。
+[[nodiscard]] auto as_body_text(const Response &response) -> std::string {
+    const auto &body = response.body();
+    return std::string{body.begin(), body.end()};
 }
 
 /// @brief 记录被写出的请求字节、随后按给定应答收摊的对端脚本。
@@ -319,6 +341,20 @@ const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0, 
         aurora::test::net::pump_idle(std::chrono::milliseconds{5});
     }
     return task.is_done();
+}
+
+/// @brief 在真实时钟下完成一次交换并交出结果（缓存套件的判据用不上替身时钟）。
+///
+/// 新鲜度算的是 `system_clock` 的账：推虚拟时钟推不动它，而本套件要问的两件事——「触没触网」（对端的
+/// `accepts()`）与「载荷出自哪一份」（`from_cache()` 加体内容）——都不依赖时序精度，用真实时钟反而少一层
+/// 「时钟是脚本推的」的间接性。`HostDriven` 由用例自己声明，本函数只负责泵与取结果。
+/// @param client 客户端。
+/// @param request 请求（按值接收以适配 `send()` 的形参形态）。
+/// @return 应答的 Result 层（协程未收尾时由 `inner()` 的 REQUIRE 收场）。
+[[nodiscard]] auto send_and_drive(const Client &client, Request request) -> Result<Response> {
+    auto task = client.send(std::move(request));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
+    return inner(task);
 }
 
 /// @brief 时间与宿主一起推进到谓词成立，或虚拟时长用完；返回时 `engine.now()` 即「实际烧掉的虚拟时长」。
@@ -1184,6 +1220,181 @@ AURORA_TEST_CASE(send_refuses_an_out_of_range_policy_before_any_connection) {
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK(names_in(response.error().message, "base"));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
+}
+
+AURORA_TEST_CASE(a_fresh_cache_hit_never_reaches_the_peer) {
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("first"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    const auto first = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_CHECK_FALSE(first.value().from_cache());  // 第一次确实是从对端取回的
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+
+    // 开关兑现的就是这一条：命中新鲜副本时一条连接都不发起，载荷与头部都出自表里那一份。
+    const auto second = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_CHECK(second.value().from_cache());
+    AURORA_TEST_CHECK_EQ(second.value().status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(as_body_text(second.value()), std::string{"first"});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+}
+
+AURORA_TEST_CASE(a_stale_entry_asks_before_it_delivers) {
+    std::string first_request;
+    std::string second_request;
+    std::mutex guard;
+    const aurora::test::net::HostDriven host;
+    // `max-age=0` + `ETag`：进得了表，但抵达即过期，于是第二次交换必须先问对端。
+    const auto initial = length_framed("Cache-Control: max-age=0\r\nETag: \"v1\"\r\n", body_of("stored"));
+    const auto *const not_modified = "HTTP/1.1 304 Not Modified\r\nCache-Control: max-age=600\r\nETag: \"v2\"\r\n\r\n";
+    ScriptedPeer peer(per_connection(
+        {record_then_reply(first_request, guard, initial), record_then_reply(second_request, guard, not_modified)}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
+
+    const auto second = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(second));
+    // 304 不是调用方该看见的结局：并回已存的头部块与体，交出的仍是那份 200。
+    AURORA_TEST_CHECK_EQ(second.value().status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(as_body_text(second.value()), std::string{"stored"});
+    AURORA_TEST_CHECK(second.value().from_cache());
+    AURORA_TEST_CHECK_EQ(second.value().header("ETag").value_or(std::string{}), std::string{"\"v2\""});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+
+    // 条件头只挂在本库发起的那次重验证上：第一次请求不该带它，第二次必须带且带着表里那枚值。
+    AURORA_TEST_CHECK_EQ(recorded_request(first_request, guard).find("If-None-Match"), std::string::npos);
+    const auto sent = recorded_request(second_request, guard);
+    AURORA_TEST_CHECK_NE(sent.find("If-None-Match: \"v1\""), std::string::npos);
+    // 刚验证过的那份重新获得新鲜度：第三次不必再触网。
+    const auto third = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(third));
+    AURORA_TEST_CHECK(third.value().from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(the_peer_can_forbid_the_table) {
+    const aurora::test::net::HostDriven host;
+    // `no-store` 是硬闸：既不存也不复用，两次请求都得到对端去。
+    ScriptedPeer peer(
+        reply_after_reading(1, length_framed("Cache-Control: no-store, max-age=600\r\n", body_of("now"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
+    const auto second = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_CHECK_FALSE(second.value().from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(a_request_may_bypass_the_table) {
+    const aurora::test::net::HostDriven host;
+    // 两条连接给两种内容：绕过那次的应答若被写进表，第三次普通请求就该读出 `two`。
+    ScriptedPeer peer(
+        per_connection({reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("one"))),
+                        reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("two")))}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
+
+    // `Request::no_cache()` 取的是「这次要此刻的真相」：既不查表，这次的结果也不写进表。
+    const auto bypass = send_and_drive(client, Request::get(url).no_cache(true));
+    AURORA_TEST_REQUIRE(bool(bypass));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+    AURORA_TEST_CHECK_FALSE(bypass.value().from_cache());
+    AURORA_TEST_CHECK_EQ(as_body_text(bypass.value()), std::string{"two"});
+
+    // 第三次读回的是**第一次**那份：绕过只读不写，那条硬约定才立得住（若这次交出 `two`，就是写侧漏了闸）。
+    const auto after = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(after));
+    AURORA_TEST_CHECK(after.value().from_cache());
+    AURORA_TEST_CHECK_EQ(as_body_text(after.value()), std::string{"one"});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(the_table_is_off_until_it_is_turned_on) {
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("now"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;  // 缺省即关：同一 URL 两次请求照旧两次触网，`from_cache()` 恒假
+    const auto url = loopback_url(peer.port());
+    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
+    const auto second = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_CHECK_FALSE(second.value().from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(a_write_response_is_never_stored) {
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("created"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::post(url))));
+    const auto second = send_and_drive(client, Request::post(url));
+    AURORA_TEST_REQUIRE(bool(second));
+    // 提交类方法的应答描述的是「这次改动的结果」，留在表里等于把一次写的后效反复交付。
+    AURORA_TEST_CHECK_FALSE(second.value().from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(vary_makes_the_second_request_a_different_request) {
+    std::string first_request;
+    std::string second_request;
+    std::mutex guard;
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(per_connection(
+        {record_then_reply(first_request, guard,
+                           length_framed("Cache-Control: max-age=600\r\nVary: Accept\r\n", body_of("json"))),
+         record_then_reply(second_request, guard, length_framed("Cache-Control: max-age=600\r\n", body_of("xml")))}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    // 同一枚 `Accept` 的第二次请求命中：`Vary` 点名的头同名同值才算同一个请求。
+    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url).header("Accept", "application/json"))));
+    const auto same = send_and_drive(client, Request::get(url).header("Accept", "application/json"));
+    AURORA_TEST_REQUIRE(bool(same));
+    AURORA_TEST_CHECK(same.value().from_cache());
+    AURORA_TEST_CHECK_EQ(as_body_text(same.value()), std::string{"json"});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+
+    // 换了 `Accept` 就是另一种请求：它必须回到对端，且不能挤掉表里那份 JSON。
+    const auto other = send_and_drive(client, Request::get(url).header("Accept", "application/xml"));
+    AURORA_TEST_REQUIRE(bool(other));
+    AURORA_TEST_CHECK_FALSE(other.value().from_cache());
+    AURORA_TEST_CHECK_EQ(as_body_text(other.value()), std::string{"xml"});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+    const auto again = send_and_drive(client, Request::get(url).header("Accept", "application/json"));
+    AURORA_TEST_REQUIRE(bool(again));
+    AURORA_TEST_CHECK(again.value().from_cache());
+    AURORA_TEST_CHECK_EQ(as_body_text(again.value()), std::string{"json"});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+
+    // 两次请求都带着自己那枚 `Accept`：命中与否的差别只在表里的 `Vary` 比对，不在线上。
+    AURORA_TEST_CHECK_NE(recorded_request(first_request, guard).find("Accept: application/json"), std::string::npos);
+    AURORA_TEST_CHECK_NE(recorded_request(second_request, guard).find("Accept: application/xml"), std::string::npos);
 }
 
 }  // namespace aurora::test_cases::utest_net_http_client

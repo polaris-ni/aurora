@@ -33,6 +33,7 @@
 #include "aurora/core/url.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/detail/http_await.h"
+#include "aurora/net/detail/http_cache.h"
 #include "aurora/net/detail/http_encoding.h"
 #include "aurora/net/detail/http_progress.h"
 #include "aurora/net/detail/http_retry.h"
@@ -280,6 +281,120 @@ auto materialize_content_encoding(const wire::ResponseHead &head, wire::BodyFram
     return detail::parse_retry_after(field.value(), std::chrono::system_clock::now());
 }
 
+/// @brief 起手问表的结论：可直接交付的新鲜副本，以及「这次是不是替表里的条目去重验证」。
+struct CacheOpening {
+    std::optional<Response> fresh;  ///< 新鲜副本：非空即本次交换根本不必发起
+    bool revalidating{false};  ///< 已在请求上挂过两枚条件头
+    std::string key;  ///< 建键用的目标 URL；空 = 本次没参与缓存
+};
+
+/// @brief 缓存起手式：命中新鲜副本即交出，命中陈旧副本则把两枚条件头挂到请求上（原地改）。
+///
+/// 只在「开关开着 + 本请求没 `no_cache()` + 方法可缓存 + URL 解析成功」四件同时成立时才问表，缺一即整段
+/// 跳过——跳过的形态与缓存从未存在时逐字节相同（连一次内存查找都不做）。
+///
+/// 请求侧的 `Cache-Control` 在这里也有一票，与表内写入侧同口径：`no-store` 连查都不查（那条既不许存也不许
+/// 复用），`no-cache` 则只挡「不经核对就交付」这一种命中，条目带着校验子时照样挂头去验证——那是
+/// `RFC 9111 §5.2.1.5` 的字面语义，比 `Request::no_cache()` 的整段绕过弱一档，两者刻意不同。
+/// @param cache 表；未构造时跳过。
+/// @param options 本客户端的缓存口径。
+/// @param request 待发起的请求（陈旧副本会往它上面挂 `If-None-Match` / `If-Modified-Since`）。
+/// @return 见 `CacheOpening`。
+[[nodiscard]] auto open_from_cache(const std::shared_ptr<detail::HttpResponseCache> &cache, const CacheOptions &options,
+                                   Request &request) -> CacheOpening {
+    CacheOpening out;
+    if (!options.enabled || request.no_cache() || !detail::is_cacheable_method(request.method()) || !cache) {
+        return out;
+    }
+    const auto target = request.url();
+    if (!target.has_value()) {
+        return out;  // URL 还没解析成功：那是 `render_head()` 要报的错，缓存不猜键
+    }
+    const auto directive = detail::parse_cache_control(detail::joined_field(request.headers(), "Cache-Control"));
+    if (directive.no_store) {
+        return out;
+    }
+    out.key = target.value().to_string();
+    auto found = cache->lookup(request.method(), out.key, request.headers(), std::chrono::system_clock::now());
+    if (found.fresh.has_value() && !directive.no_cache) {
+        out.fresh = std::move(found.fresh);
+        return out;
+    }
+    if (found.revalidate.has_value()) {
+        // 调用方自己声明的条件头优先（与本件的 `Accept-Encoding` 同纪律：协商是调用方的表达，不覆盖）。
+        if (found.revalidate->etag.has_value() && !request.headers().contains("If-None-Match")) {
+            request.set_header("If-None-Match", found.revalidate.value().etag.value());
+            out.revalidating = true;
+        }
+        if (found.revalidate->last_modified.has_value() && !request.headers().contains("If-Modified-Since")) {
+            request.set_header("If-Modified-Since", found.revalidate.value().last_modified.value());
+            out.revalidating = true;
+        }
+    }
+    return out;
+}
+
+/// @brief 物化路径的收尾：304 换成合并后的已存应答，其余按规则进表。
+///
+/// 两枚判定都容错：合并不了（条目被逐出）就把对端说的那份 304 原样交出——编造一份体比交出真相更糟；
+/// 存不进表（`no-store` / `Vary: *` / 不可存的方法与状态码）是常态而非故障，不改变交出的应答。
+/// @param cache 表。
+/// @param options 本客户端的缓存口径。
+/// @param origin 本次交换的原始请求（键与 `Vary` 取值都从它身上取，重定向改写的是逐跳副本）。
+/// @param key 起手算出的建键 URL；空 = 本次没参与缓存。
+/// @param revalidating 起手是否挂过条件头。
+/// @param outcome 本次交换的结局（就地改写：304 → 合并副本）。
+auto settle_cache(const std::shared_ptr<detail::HttpResponseCache> &cache, const CacheOptions &options,
+                  const Request &origin, const std::string &key, bool revalidating, Result<Response> &outcome) -> void {
+    if (!options.enabled || origin.no_cache() || !detail::is_cacheable_method(origin.method()) || !cache ||
+        key.empty() || !outcome) {
+        return;
+    }
+    const auto now = std::chrono::system_clock::now();
+    if (outcome.value().status() == 304) {
+        // 调用方自己的条件请求拿到的 304 不在此列：本件不知道它对应表里哪一条，交出对端说的那份即可。
+        if (!revalidating) {
+            return;
+        }
+        auto merged = cache->revalidated(origin.method(), key, origin.headers(), outcome.value(), now);
+        if (merged.has_value()) {
+            outcome = Result<Response>{std::move(merged.value())};
+        }
+        return;
+    }
+    // 进不了表是常态而非故障（`no-store` / `Vary: *` / 不可存的方法与状态码 / 无有效期又无校验子），
+    // 它不改变交出的应答，故这里只把判定本身当成一次分支。
+    if (!cache->store(origin.method(), key, origin.headers(), outcome.value(), now)) {
+        return;
+    }
+}
+
+/// @brief 把一份已存应答按段交给流式宿主；交付次序与真从对端取回时一致。
+/// @param sink 宿主（调用方持有）。
+/// @param response 合并后要交出的那份（体来自表）。
+/// @return 完成事实：`wire_bytes` 恒 0（本次没有线上字节），`delivered_bytes` 是实交量。
+[[nodiscard]] auto deliver_cached_stream(DataSink &sink, const Response &response) -> StreamOutcome {
+    Response head{response.status(), std::string{response.reason()}, response.headers(), {}, true};
+    std::uint64_t delivered = 0;
+    bool stopped = sink.on_head(head) == SinkFlow::Stop;
+    if (!stopped) {
+        const auto &body = response.body();
+        for (std::size_t offset = 0; offset < body.size(); offset += AURORA_READ_CHUNK) {
+            const std::size_t length = std::min<std::size_t>(AURORA_READ_CHUNK, body.size() - offset);
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 分段窗口由 offset 与 length 界定
+            const std::span<const char> segment{body.data() + offset, length};
+            if (sink.on_data(segment) == SinkFlow::Stop) {
+                stopped = true;
+                break;
+            }
+            delivered += length;
+        }
+    }
+    sink.on_end();
+    return StreamOutcome{
+        .response = std::move(head), .wire_bytes = 0, .delivered_bytes = delivered, .stopped_by_sink = stopped};
+}
+
 /// @brief 重试环套在流式宿主外的记录壳：只转发并记下「头部是否已经交出去」。
 ///
 /// 为什么需要它：流式路径的重试只可能发生在 `on_head` 之前——首段字节一旦交给宿主就收不回来，重播等于让
@@ -325,13 +440,32 @@ class HeadGuardSink final : public DataSink {
 
 }  // namespace
 
+Client::Client() : cache_{std::make_shared<detail::HttpResponseCache>(cache_options_)} {}
+
+auto Client::cache(CacheOptions value) -> Client & {
+    cache_options_ = value;
+    // 口径同步进表：`max_entries` 是表自己的容量，改小时它按新上限逐出多余条目（不是留着等命中）。
+    // 表为空（只在移动后的壳上 possible）时无处可同步，开关本身仍已生效，下次起手照旧跳过。
+    if (cache_) {
+        cache_->set_options(value);
+    }
+    return *this;
+}
+
 auto Client::send(Request request) const -> CoroTask<Result<Response>> {
     // 策略取「请求覆盖 → 客户端缺省」两级；形态闸在起手就过，越界值不进入任何一次尝试。
     const RetryPolicy policy = request.retry_policy().value_or(retry_);
     if (const auto invalid = detail::validate_retry_policy(policy)) {
         co_return Result<Response>{*invalid};
     }
-    const Request origin = std::move(request);
+    Request origin = std::move(request);
+    // 缓存起手式：命中新鲜副本时一条连接都不发起就交出——§12 承诺的「同一 URL 二次请求不触网」正是这一条。
+    // 命中陈旧副本时把两枚条件头挂在**原始请求**上，故重试环的每一次尝试都带着同一份校验子重跑（挂在逐跳
+    // 副本上的话，第二次尝试就成了「第一次验证、第二次裸打」）。
+    CacheOpening opening = open_from_cache(cache_, cache_options_, origin);
+    if (opening.fresh.has_value()) {
+        co_return Result<Response>{std::move(*opening.fresh)};
+    }
     const bool loop_open = detail::retry_enabled(policy) && detail::is_idempotent_method(origin.method());
 
     // 跨全部尝试（含退避等待）的墙登记在这一枚令牌上；每一次尝试各拿一份自己的令牌与 `total` 看门狗，
@@ -644,6 +778,8 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
     if (!outcome && wall->fired.load() == static_cast<int>(TimeoutStage::Budget)) {
         outcome = Result<Response>{make_error(ErrorCode::HttpTimeout, "retry budget exhausted")};
     }
+    // 收尾进表 / 换 304：一次交换至多写一次，写在重试环之外——中间那次尝试的应答不该进表。
+    settle_cache(cache_, cache_options_, origin, opening.key, opening.revalidating, outcome);
     co_return outcome;
 }
 
@@ -671,6 +807,16 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
     StageTimer budget_timer(loop_open ? policy.budget : std::optional<std::chrono::milliseconds>{},
                             TimeoutStage::Budget, sequence, wall);
     Request origin = std::move(request);
+    // 缓存起手式：命中新鲜副本时把已存的那份体按段交给同一个宿主，一条连接都不发起。交付次序与真取回时一致
+    // （`on_head` → 若干次 `on_data` → `on_end`），`wire_bytes` 恒 0——本次确实没有线上字节，不是把计数漏掉了。
+    //
+    // 本入口**只读不写**：把流式载荷攒进表就意味着先把它攒进内存，那正是调用方选 `open_stream` 要避免的事。
+    // 于是命中之外的另一条分岔也在这里定：陈旧条目挂上条件头去验证，拿到 304 仍要合并、仍要把已存那份体逐段
+    // 交出去，但这次交换的结果不进表。
+    const CacheOpening opening = open_from_cache(cache_, cache_options_, origin);
+    if (opening.fresh.has_value()) {
+        co_return Result<StreamOutcome>{deliver_cached_stream(sink, *opening.fresh)};
+    }
     // 环关时没有壳可言：把调用方的宿主原样交下去，`on_head` / `on_data` / `on_end` 的调用对象与装环前完全
     // 同一个（少一层转发也就少一层「壳改变了宿主身份」的疑义）。环开着才套上记录头口的壳。
     HeadGuardSink guard{sink};  // 只借用：宿主由调用方持有，本壳随本帧存活到全部尝试结束
@@ -823,6 +969,7 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
             std::optional<detail::StreamingDecoder> decoder;  // 头部定形后才建链（建链要读 Content-Encoding）
             bool halted = false;
             bool redirect_hop = false;
+            bool not_modified_hop = false;  // 本次交换替表里的条目重验证并拿到了 304
 
             // 产出出口：链末每交一段明文记一次交付量。宿主回 `Stop` 只中止交付，本库不替它决定成败。
             auto emit = [&outlet, &delivered_bytes](std::span<const char> bytes) -> Result<detail::EmitFlow> {
@@ -889,6 +1036,12 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                         redirect_hop = true;
                         break;
                     }
+                    if (assembler.head().status == 304 && opening.revalidating) {
+                        // 条件请求拿到 304：那是本库替表里的条目问的，不该让宿主看见这枚中间状态——把新头并进
+                        // 已存应答，连同它的体一起按段交出。此处既不建解码链也不调 `on_head`，交付留到环外。
+                        not_modified_hop = true;
+                        break;
+                    }
                     std::vector<detail::Coding> chain;  // 应用次序；无体应答恒空（不校验编码名，与 `send` 同判据）
                     if (assembler.framing() != wire::BodyFraming::None) {
                         std::string list;
@@ -950,8 +1103,9 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                 break;
             }
             // 收尾排空：装配器在 `complete()` 那一轮已把明文交进 `pending_`，本步只兜住「最后一批还压在内部缓冲」
-            // 这一种形态。中途收摊（宿主 `Stop`）与弃体换跳（重定向）都不兜——前者不能再交付字节，后者的体本就作废。
-            if (!redirect_hop && !stopped_by_sink) {
+            // 这一种形态。中途收摊（宿主 `Stop`）、弃体换跳（重定向）与 304 都不兜——前者不能再交付字节，后两者的
+            // 体本就作废（重定向的是下一跳，304 的载荷在表里）。
+            if (!redirect_hop && !not_modified_hop && !stopped_by_sink) {
                 scratch.clear();
                 assembler.drain_body(scratch);
                 if (!scratch.empty() && decoder.has_value()) {
@@ -981,6 +1135,28 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                 }
                 current = std::move(next.value());
                 continue;
+            }
+            if (not_modified_hop) {
+                // 合并路径：304 的头部并进表里那条，状态码与体仍取已存那份，再按段交给宿主。条目已被逐出
+                // 就无从合并——那只能交出对端说的那份 304（它按定义没有体），编一份体比交出真相更糟。
+                Response update{assembler.head().status, assembler.head().reason, assembler.head().headers, {}};
+                std::optional<Response> merged;
+                if (cache_) {
+                    merged = cache_->revalidated(origin.method(), opening.key, origin.headers(), update,
+                                                 std::chrono::system_clock::now());
+                }
+                if (merged.has_value()) {
+                    one = Result<StreamOutcome>{deliver_cached_stream(outlet, merged.value())};
+                    break;
+                }
+                final_head = Response{update.status(), std::string{update.reason()}, update.headers(), {}};
+                stopped_by_sink = outlet.on_head(*final_head) == SinkFlow::Stop;
+                outlet.on_end();
+                one = Result<StreamOutcome>{StreamOutcome{.response = std::move(*final_head),
+                                                          .wire_bytes = wire_bytes,
+                                                          .delivered_bytes = delivered_bytes,
+                                                          .stopped_by_sink = stopped_by_sink}};
+                break;
             }
             if (!final_head.has_value()) {
                 one = Result<StreamOutcome>{

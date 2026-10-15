@@ -128,6 +128,23 @@ struct RetryPolicy {
     std::optional<std::chrono::milliseconds> budget;
 };
 
+/// @brief 内存缓存的开关与容量；**缺省关闭**。
+///
+/// 缺省关是刻意的：「同一 URL 的第二次请求不触网」改变的是可观测时序，挂着同一 `Client` 的调用方若不知道
+/// 缓存存在，会以为每次拿到的都是对端此刻的说法。开启后兑现的是 `RFC 9111` 的最小集——新鲜副本直接交付、
+/// 陈旧副本挂 `ETag` / `If-None-Match` 或 `Last-Modified` / `If-Modified-Since` 做条件请求、304 用新头更新
+/// 已存应答再交出、`no-store` 强制 bypass、`must-revalidate` 过期后绝不交付。
+///
+/// `max_entries` 管的是**条数**而非单条应答的大小：体量上限另有 `Client::max_body_bytes()` 与
+/// `Client::max_decompressed_bytes()` 两枚旋钮管字节，本库不用一份容量口径管两件事。越界时逐出最久未使用的
+/// 那条；`0` 与「不存任何东西」同义（保留 `enabled` 作可读开关，语义上两者都关）。
+/// @note Thread: thread-safe（值类型）
+/// @note Side-effects: none
+struct CacheOptions {
+    bool enabled{false};  ///< 开关；假 = 既不查也不写
+    std::uint32_t max_entries{64};  ///< 表的条数上限；越界逐出最久未使用的那条
+};
+
 /// @brief 进度所属方向；一次交换里两侧各报一段，回调需据此分流。
 ///
 /// 上传在请求体被传输层接受时推进，下载在应答体到达时推进。二者共用一枚回调是刻意的：调用方通常只关心
@@ -257,6 +274,19 @@ class Request {
     /// @return 已设定则返回之；`nullopt` = 跟随 `Client::retry_policy()`。
     [[nodiscard]] auto retry_policy() const -> const std::optional<RetryPolicy> & { return retry_policy_; }
 
+    /// @brief 设定本次交换完全绕过缓存：既不查表，也不把这次的结果写进表。
+    ///
+    /// 语义比 `RFC 9111 §5.2.1.5` 的 `no-cache` 请求指令强（那条只要求「交付前先向对端验证」，仍允许存），
+    /// 取的是 `no-cache` ∧ `no-store` 那一面：调用方按「这次要此刻的真相」用它，而弱形态留下的那次写入照样
+    /// 会让下一请求看见本次的副本，那不算把缓存「越」过去。只在 `Client::cache()` 开着时才有意义。
+    /// @param value 绕过为 true。
+    /// @return 自身引用，便于链式调用。
+    auto no_cache(bool value) -> Request &;
+
+    /// @brief 查看本次交换是否绕过缓存。
+    /// @return 绕过为 true；缺省假（跟随客户端的缓存开关）。
+    [[nodiscard]] auto no_cache() const -> bool { return no_cache_; }
+
     /// @brief 设定重定向跟随上限（`0` 表示不跟随）。缺省 10。
     /// @param value 上限次数。
     /// @return 自身引用，便于链式调用。
@@ -304,6 +334,7 @@ class Request {
     std::vector<char> body_;  ///< 消息体
     Timeouts timeouts_;  ///< 三档超时（connect / read_idle / total），缺省全不设
     std::optional<RetryPolicy> retry_policy_;  ///< 本请求的重试策略覆盖；nullopt = 跟随 Client 的缺省
+    bool no_cache_{false};  ///< 本次交换是否绕过缓存（既不读也不写）
     int max_redirects_{10};  ///< 重定向跟随上限
     ProgressHandler on_progress_;  ///< 进度回调（空 = 不报）；发起侧负责合流后再调用
 };
@@ -322,7 +353,10 @@ class Response {
     /// @param headers 应答字段。
     /// @param body 已解压的消息体字节（`Content-Encoding` 的透明解压在物化之前完成；`charset` 解码留给
     /// `text()` 按 `Content-Type` 现场执行，故 `body()` 恒给出未解码的原始字节）。
-    Response(std::uint16_t status, std::string reason, Headers headers, std::vector<char> body);
+    /// @param from_cache 这份应答是否出自本客户端的内存缓存（真 = 未参与本次线上交换，或只是 304 的另一半）。
+    ///                   发起侧交付新鲜副本、以及把 304 与已存副本合并时置真；从对端取回的完整应答置假。
+    Response(std::uint16_t status, std::string reason, Headers headers, std::vector<char> body,
+             bool from_cache = false);
 
     /// @brief 状态码。
     /// @return 三位整数。
@@ -345,6 +379,14 @@ class Response {
     /// @return 体字节的只读引用。
     [[nodiscard]] auto body() const -> const std::vector<char> & { return body_; }
 
+    /// @brief 这份应答是否出自本客户端的内存缓存。
+    ///
+    /// 两种形态都算：新鲜副本被直接交付（本次交换根本没连出去），以及条件请求拿到 304 后把已存副本合并交出
+    /// （线上只走了头部）。它只回答「这份载荷是不是从表里来的」，不回答「表里那条老不老」——新鲜度判定在
+    /// 发起侧完成，走到调用方手里的一律是可交付的。缓存未开启时恒为假。
+    /// @return 出自缓存为 true。
+    [[nodiscard]] auto from_cache() const -> bool { return from_cache_; }
+
     /// @brief 消息体的文本形态（按 `Content-Type` 的 `charset` 解码为 UTF-8 文本）。
     ///
     /// 首批只解 `charset` 为 UTF-8（剥前导 BOM）与 Latin-1（`iso-8859-1` / `latin-1`）两族；字段缺失
@@ -359,6 +401,7 @@ class Response {
     std::string reason_;  ///< 原因短语
     Headers headers_;  ///< 应答字段
     std::vector<char> body_;  ///< 已物化消息体
+    bool from_cache_{false};  ///< 载荷是否出自缓存（真 = 未参与线上交换，或只是 304 的另一半）
 };
 
 /// @brief 一次 HTTP 失败的归因档：把「该往哪儿排查」这一件事从错误码里提出来。
