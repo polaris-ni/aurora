@@ -36,6 +36,8 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/platform.h"
+
 // clang-format off
 // SDK 可见性旋钮：MinGW 的 `sspi.h` 要求三选一地点明握手 API 的调用侧（本腿是用户态出站，故
 // `SECURITY_WIN32`），而 `SCH_CREDENTIALS` / `TLS_PARAMETERS` 这一整套凭据形态在 `_WIN32_WINNT` 低于
@@ -69,11 +71,17 @@
 #include <windows.h>
 // `schannel.h` 里的 `TLS_PARAMETERS` 用 `UNICODE_STRING` 表达 ALPN，而 MinGW 把该类型的声明放在
 // `ntdef.h`，`windows.h` 并不转含它（SDK 的转含链不同）——不先纳入就报「does not name a type」。
+// ⚠ 两工具链拿它的入口不同：MinGW 在 `ntdef.h`；Windows SDK 的 `winnt.h` **已转含** `ntdef.h`
+// （再直接包含会整组重定义 `_PROCESSOR_NUMBER` / `_GROUP_AFFINITY` / `_LIST_ENTRY` / …），
+// SDK 侧的 `UNICODE_STRING` 由 `winternl.h` 提供。
+#ifdef AURORA_COMPILER_MINGW
 #include <ntdef.h>
+#else
+#include <winternl.h>
+#endif
 #include <schannel.h>
 #include <security.h>
 #include <wincrypt.h>
-#include <bcrypt.h>
 // clang-format on
 
 #include "aurora/core/result.h"
@@ -110,7 +118,7 @@ namespace {
 
 /// 关闭通知的 `SECBUFFER_TOKEN` 载荷（`ApplyControlToken` 的入参形态）。
 struct SchannelShutdownInfo {
-    ULONG shutdown_type = 0;  ///< 0 = SchannelShutdownUsedSecurity：本会话已建立安全上下文
+    [[maybe_unused]] ULONG shutdown_type = 0;  ///< 0 = SchannelShutdownUsedSecurity：本会话已建立安全上下文
 };
 
 constexpr std::size_t AURORA_RECORD_HEADER_BYTES = 5;
@@ -447,7 +455,7 @@ auto build_alpn_advertisement(const std::vector<std::string> &protocols) -> std:
     if (table.empty() || table.size() > AURORA_MAX_ALPN_TABLE_BYTES) {
         return {};
     }
-    const auto extension = static_cast<std::uint32_t>(SecApplicationProtocolNegotiationExt_ALPN);
+    constexpr auto extension = static_cast<std::uint32_t>(SecApplicationProtocolNegotiationExt_ALPN);
     const auto table_bytes = static_cast<std::uint16_t>(table.size());
     const auto payload_bytes = static_cast<std::uint32_t>(sizeof(extension) + sizeof(table_bytes) + table.size());
     auto bytes = std::vector<std::uint8_t>(
@@ -569,7 +577,7 @@ class SchannelBackend final : public TlsBackend {
     ///
     /// 吊销（CRL/OCSP）不在这里做：不给 `CERT_CHAIN_REVOCATION_CHECK_*` 即沿用系统缺省的「离线不判吊销」，
     /// 与两平台适配器一致；把它做成在线检查需要 AIA 网络取回，属另一件事。
-    [[nodiscard]] auto verify_chain() -> Result<void>;
+    [[nodiscard]] auto verify_chain() const -> Result<void>;
 
     /// 主机名核对：SAN 的 dNSName 优先，无 SAN 才看 CN。
     ///
@@ -820,7 +828,7 @@ auto SchannelBackend::capture_negotiated() -> void {
     }
 }
 
-auto SchannelBackend::verify_chain() -> Result<void> {
+auto SchannelBackend::verify_chain() const -> Result<void> {
     if (insecure_) {
         return Result<void>{};  // 危险开关：链判定与主机名核对一并跳过，发起处已留 warning 诊断
     }

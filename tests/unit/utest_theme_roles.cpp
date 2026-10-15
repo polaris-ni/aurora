@@ -33,7 +33,7 @@ auto contrast(const Color &a, const Color &b) -> double {
 
 AURORA_TEST_CASE(light_roles_preserve_consumed_baseline) {
     // 已消费角色取现行 Theme::light() 基准值，保证机械迁移后观感逐位不变。
-    const ColorRoles r = ColorRoles::light();
+    constexpr ColorRoles r = ColorRoles::light();
     AURORA_TEST_CHECK(r.primary == Color{0x00, 0x00, 0xFF});  // 承接旧 primary = Color::blue()
     AURORA_TEST_CHECK(r.on_primary == Color::white());  // 承接旧 on_primary
     AURORA_TEST_CHECK(r.surface == Color::white());  // 承接旧 background（白）
@@ -47,7 +47,7 @@ AURORA_TEST_CASE(light_roles_preserve_consumed_baseline) {
 AURORA_TEST_CASE(dark_roles_preserve_consumed_baseline_except_wcag_fix) {
     // 暗色 surface 取旧 background 暗值（唯一消费者 command_palette 观感不变）；
     // on_surface / focus_ring 取现行；primary / on_primary 为唯一有意的 WCAG 修正对。
-    const ColorRoles r = ColorRoles::dark();
+    constexpr ColorRoles r = ColorRoles::dark();
     AURORA_TEST_CHECK(r.surface == Color{0x20, 0x21, 0x24});
     AURORA_TEST_CHECK(r.on_surface == Color::white());
     AURORA_TEST_CHECK(r.focus_ring == Color::white());
@@ -59,7 +59,7 @@ AURORA_TEST_CASE(dark_roles_preserve_consumed_baseline_except_wcag_fix) {
 
 AURORA_TEST_CASE(all_on_color_pairs_meet_wcag_aa) {
     // 每个 on_* 与其配对角色对比度 ≥ 4.5:1（明暗两列全集）。
-    for (const ColorRoles r : {ColorRoles::light(), ColorRoles::dark()}) {
+    for (const ColorRoles &r : {ColorRoles::light(), ColorRoles::dark()}) {
         AURORA_TEST_CHECK(contrast(r.on_primary, r.primary) >= 4.5);
         AURORA_TEST_CHECK(contrast(r.on_primary_container, r.primary_container) >= 4.5);
         AURORA_TEST_CHECK(contrast(r.on_secondary, r.secondary) >= 4.5);
@@ -75,8 +75,8 @@ AURORA_TEST_CASE(all_on_color_pairs_meet_wcag_aa) {
 
 AURORA_TEST_CASE(dark_surface_family_darker_than_light) {
     // 明暗取向相反：暗色表面族整体亮度显著低于亮色。
-    const ColorRoles l = ColorRoles::light();
-    const ColorRoles d = ColorRoles::dark();
+    constexpr ColorRoles l = ColorRoles::light();
+    constexpr ColorRoles d = ColorRoles::dark();
     AURORA_TEST_CHECK(luminance(d.surface) < luminance(l.surface));
     AURORA_TEST_CHECK(luminance(d.surface_container) < luminance(l.surface_container));
     AURORA_TEST_CHECK(luminance(d.on_surface) > luminance(l.on_surface));
