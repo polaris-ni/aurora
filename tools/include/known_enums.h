@@ -168,6 +168,7 @@ namespace aurora::tools {
     enums["Method"] = {"Get", "Head", "Post", "Put", "Patch", "Delete"};
     enums["ProgressPhase"] = {"Upload", "Download"};
     enums["ProxyKind"] = {"Direct", "HttpConnect", "Socks5"};
+    enums["SinkFlow"] = {"Continue", "Stop"};
     enums["ShutdownMode"] = {"Read", "Write", "Both"};
     enums["TlsVersion"] = {"Tls10", "Tls11", "Tls12", "Tls13"};
 

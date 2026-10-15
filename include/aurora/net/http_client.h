@@ -3,10 +3,11 @@
 /// @brief HTTP/1.1 发起侧客户端（CHG-010 §6 的 HTTP 发起侧、§12 语义的地基件）。
 /// @file net/http_client.h
 ///
-/// 本头只回答一个问题：**「把一份 `Request` 送出去、拿回一份物化的 `Response`」**——连接（`http://` 直连、
-/// `https://` 先握手再套流）、写出请求头部与消息体、逐段喂接收侧装配器 `wire::ResponseAssembler` 物化应答、
-/// 按 `Location` 跟随重定向、并施加整请求时限。它是纯逻辑之上的收发编排，本身不持套接字（每次 `send` 起一条
-/// 连接、收尾即关），因此可自由拷贝、可并发发起。
+/// 本头回答一个问题：**「把一份 `Request` 送出去、把应答拿回来」**——连接（`http://` 直连、
+/// `https://` 先握手再套流）、写出请求头部与消息体、逐段喂接收侧装配器 `wire::ResponseAssembler` 装配应答、
+/// 按 `Location` 跟随重定向、并施加整请求时限。应答有两条交付路：`send` 物化进 `Response::body()` 才交出，
+/// `open_stream` 逐段交给宿主的 `DataSink`（形态差别见 `net/http_stream.h`）。它是纯逻辑之上的收发编排，本身
+/// 不持套接字（每次交换起一条连接、收尾即关），因此可自由拷贝、可并发发起。
 ///
 /// 三条形态裁决（规范性，落码与文档回写以此为准）：
 /// - **协程出口 `CoroTask<Result<Response>>`**：传输层（L1）刻意只给回调出口（`net/transport.h`：把 `Task`
@@ -35,13 +36,17 @@
 /// - **挂了回调才分块写请求体**：上传进度要有可观测的节拍，故带体的请求按块写出、每块一次完成回调；未挂
 ///   回调时恒一次写完，线上字节序列两型完全相同（分块只影响本库内部的完成次数，不影响对端所见）。
 ///
+/// 流式接收（`open_stream()` + `net/http_stream.h` 的 `DataSink`）与物化路径共用上述全部协议语义，四条形态
+/// 差别单列在那里：线上字节不设限（`max_body_bytes()` 管的是物化路径的内存）、`deflate` 两型按包装头判定、
+/// 重定向跳的消息体不读、本腿无流式能力时直接失败而不悄悄物化。
+///
 /// @code
 /// aurora::net::http::Client client;
 /// auto task = client.send(aurora::net::http::Request::get("https://example.com/api"));
 /// // 宿主帧内泵至 task.is_done()，再读 task.result() 得 Result<Response>
 /// @endcode
 /// @note Thread: thread-safe（值语义客户端；`send` 的续体恒回主线程）
-/// @note Side-effects: `send` 发起网络 I/O；构造与配置无副作用
+/// @note Side-effects: `send` / `open_stream` 发起网络 I/O；构造与配置无副作用
 
 #include <chrono>
 #include <cstdint>
@@ -50,14 +55,15 @@
 
 #include "aurora/core/result.h"
 #include "aurora/net/http.h"
+#include "aurora/net/http_stream.h"
 #include "aurora/net/tls.h"
 #include "aurora/state/coroutine.h"
 
 namespace aurora::net::http {
 
 /// @brief HTTP 发起侧客户端：把 `Request` 送出去、把物化的 `Response` 拿回来。
-/// @note Thread: thread-safe（可拷贝、可并发发起；每次 `send` 自持一条连接）
-/// @note Side-effects: `send` 发起网络 I/O
+/// @note Thread: thread-safe（可拷贝、可并发发起；每次 `send` / `open_stream` 自持一条连接）
+/// @note Side-effects: `send` / `open_stream` 发起网络 I/O
 class Client {
   public:
     /// @brief 以缺省口径构造：不设物化体上限、TLS 采安全缺省（校验开、无 pin、系统信任库）。
@@ -135,6 +141,32 @@ class Client {
     ///                未自带 `Accept-Encoding` 时由本件补齐）；按值接管以随协程帧存活，调用后可立即销毁源对象。
     /// @return 可 `co_await` 的协程任务：成功携物化的 `Response`，失败携对应 `http-*` / `net-*` 错误码。
     [[nodiscard]] auto send(Request request) const -> CoroTask<Result<Response>>;
+
+    /// @brief 发送一次请求并**流式**收下应答：字节到手一段就交一段，整条消息不必同时存在于内存。
+    ///
+    /// 协议语义与 `send` 同源（缺省 `Accept-Encoding` 宣告、编码链反序逐层还原、按 `Location` 跟随重定向、
+    /// `Request::timeout()` 的整请求时限、进度节流同判据），四条形态差别另有：
+    /// - **完成事实是 `StreamOutcome`**：交出的恒是最终一跳的头部块 + 两枚口径的字节数 + 停读事实，
+    ///   `response.body()` 恒为空——体的字节已经逐段交给 `sink`，库内不再留存。
+    /// - **线上字节不设限**：`max_body_bytes()` 管的是物化路径的内存，本路径不物化，故它对本入口没有任何
+    ///   约束（也不会因为设过它而提前失败）。解压产物照 `max_decompressed_bytes()` 限，越限落
+    ///   `http-body-too-large` 且在 detail 点名越的是这一枚旋钮。
+    /// - **`deflate` 的两型按包装头判定**：物化路径可以先试 zlib、解不开再回落裸流；本路径的字节一旦交给
+    ///   宿主就收不回来，重播等于让宿主重写已写下那段。故只看该环节最前两枚输入字节能否构成合法 zlib 头
+    ///   （`RFC 1950 §2.2`），据此把格式锁死到整条流。
+    /// - **重定向跳的消息体不读**：头部一判定为重定向即弃该跳载荷、直接发起下一跳——为一注定被丢弃的体继续
+    ///   读字节没有意义。`send` 逐跳物化，本入口只看最终一跳；`StreamOutcome::wire_bytes` 仍累计全部跳。
+    ///
+    /// `sink` 回 `SinkFlow::Stop` 时本次交换以**成功**结局返回（`stopped_by_sink` 为真），剩余字节不再读取
+    /// 也不再交付；此时库内不宣告流「完整」，故解压环节的中途收摊不校验尾块。失败结局不调 `on_end`。本腿无
+    /// 流式能力（`Engine::capabilities().streaming` 为假，如 wasm）时直接落 `net-platform-unavailable`，
+    /// 绝不悄悄退化成物化路径。协程出口，续体恒回主线程。
+    /// @param request 待发送的请求（按值接管以随协程帧存活，调用后可立即销毁源对象）。
+    /// @param sink 接收侧宿主；**按引用**交付，其生命周期必须覆盖到协程收尾（`is_done()` 之后）。
+    /// @return 可 `co_await` 的协程任务：成功携 `StreamOutcome`，失败携对应 `http-*` / `net-*` 错误码。
+    /// @note Thread: `sink` 的三个入口恒在主线程同步调用，由本协程串行驱动
+    /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
+    [[nodiscard]] auto open_stream(Request request, DataSink &sink) const -> CoroTask<Result<StreamOutcome>>;
 
   private:
     std::optional<std::uint64_t> max_body_bytes_;  ///< 物化体上限（nullopt = 不限）

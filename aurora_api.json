@@ -5084,6 +5084,13 @@
       ]
     },
     {
+      "name": "SinkFlow",
+      "values": [
+        "Continue",
+        "Stop"
+      ]
+    },
+    {
       "name": "SplitterOrientation",
       "values": [
         "Horizontal",

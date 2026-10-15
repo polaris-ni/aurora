@@ -25,6 +25,58 @@ namespace {
 /// 无环节编码名：按定义「没有环节要解」，解析阶段即归入空链，不产 `Coding` 值。
 constexpr std::string_view AURORA_CODING_IDENTITY = "identity";
 
+/// 流式 `deflate` 环节判定包装型所需的最少输入字节数（zlib 的头正好占两枚）。
+constexpr std::size_t AURORA_DEFLATE_PROBE_BYTES = 2;
+
+/// zlib（`RFC 1950 §2.2`）头里 CM 字段的取值：CMF 低 4 位为 8 才是 deflate 方法。
+constexpr int AURORA_ZLIB_CM_DEFLATE = 8;
+
+/// zlib 头的校验模数：两字节拼成 16 位整数后必须被 31 整除，不整除即不是 zlib 头。
+constexpr int AURORA_ZLIB_HEADER_CHECK_MODULUS = 31;
+
+/// zlib 头 CMF 高 4 位（窗口大小编码）的上界：`2^(CINFO+8)` 最大 32 KiB，超出即非 zlib。
+constexpr int AURORA_ZLIB_MAX_WINDOW_CODE = 7;
+
+/// @brief 取一段字节里某处的可比较值（`char` 的符号位是实现定义的，先转 `unsigned char` 再升格）。
+/// @param bytes 待取字节（调用方保证长度）。
+/// @param index 下标。
+/// @return 该字节的 0..255 值。
+constexpr auto unsigned_at(std::span<const char> bytes, std::size_t index) -> int {
+    // `std::span` 只提供 `operator[]`（无 `at()`），故越界防护落在调用方：本函数只被长度已核过的段调用。
+    return static_cast<int>(static_cast<unsigned char>(bytes[index]));
+}
+
+/// @brief 流式路径的 `deflate` 包装型判定：只看本环节最前两枚输入字节是否构成合法 zlib 头。
+///
+/// 三条约束同时成立才算 zlib（`RFC 1950 §2.2`）：CM 为 deflate、窗口编码不越 32 KiB 档、两字节拼出的
+/// 16 位数被 31 整除。任一不成立即按裸 DEFLATE（`RFC 1951`）建流。物化路径靠「先试再回落」消解同一歧义，
+/// 流式路径不能重播已交出的字节，故只看头（口径见本文件头注释）。
+/// @param first_two 本环节的头两枚输入字节（长度不足两枚即调用方的用法错误）。
+/// @return 锁定到整条流的包装格式。
+constexpr auto probe_deflate_format(std::span<const char> first_two) -> CompressionFormat {
+    const int cmf = unsigned_at(first_two, 0);
+    const int flg = unsigned_at(first_two, 1);
+    const bool method_is_deflate = (cmf & 0x0F) == AURORA_ZLIB_CM_DEFLATE;
+    const bool window_in_range = (cmf >> 4) <= AURORA_ZLIB_MAX_WINDOW_CODE;
+    const bool header_check_matches = ((cmf << 8) | flg) % AURORA_ZLIB_HEADER_CHECK_MODULUS == 0;
+    if (method_is_deflate && window_in_range && header_check_matches) {
+        return CompressionFormat::Zlib;
+    }
+    return CompressionFormat::Deflate;
+}
+
+/// @brief 环节开局即可确定的包装格式。
+///
+/// `Deflate` 回空 = 待首两枚输入字节判定；`Gzip` 恒是 RFC 1952 包装，没有歧义可判。
+/// @param coding 编码环节。
+/// @return 已确定的格式；待判定为空。
+constexpr auto known_format(Coding coding) -> std::optional<CompressionFormat> {
+    if (coding == Coding::Gzip) {
+        return CompressionFormat::Gzip;
+    }
+    return std::nullopt;
+}
+
 /// @brief 单字节 ASCII 小写化；非大写字母原样返回（不经 locale 敏感的 `std::tolower`）。
 /// @param c 待判字符。
 /// @return 小写后的字符。
@@ -163,6 +215,22 @@ auto decode_stage(Coding coding, std::span<const char> input, const DecompressOp
                           wrapped.error().message);
 }
 
+/// @brief 把编码链写成可读名单（建链失败时的文本要点名整条链，而不是只点最后一枚）。
+/// @tparam Range 可迭代到 `Coding` 的范围。
+/// @param chain 编码链。
+/// @return 逗号分隔的小写编码名。
+template <typename Range>
+[[nodiscard]] auto joined_codings(const Range &chain) -> std::string {
+    std::string list;
+    for (const Coding coding : chain) {
+        if (!list.empty()) {
+            list += ", ";
+        }
+        list += coding_name(coding);
+    }
+    return list;
+}
+
 }  // namespace
 
 auto compression_available() -> bool {
@@ -228,5 +296,173 @@ auto decode_content_encoding(const std::vector<Coding> &chain, std::span<const c
     }
     return current;
 }
+
+auto StreamingDecoder::create(const std::vector<Coding> &chain, std::optional<std::uint64_t> max_output_bytes,
+                              StreamingEmit emit) -> Result<StreamingDecoder> {
+    if (!emit) {
+        return make_error(ErrorCode::GeneralInvalidArgument,
+                          "a streaming decoder was built with no emit sink: bytes would be decoded and dropped");
+    }
+    StreamingDecoder built;
+    built.emit_ = std::move(emit);
+    built.max_output_bytes_ = max_output_bytes;
+    if (chain.empty()) {
+        return Result<StreamingDecoder>{std::move(built)};  // 空链：一个解压器都不建，push 的字节直通宿主
+    }
+    if (!compression_available()) {
+        // 与物化路径同一出口码，只是提前到建链这一步：本构建连 `Accept-Encoding` 都不该宣告，收到带编码的
+        // 载荷要么是畸形报文要么是对端越界，两种都没有「先收下半条流再失败」的理由。
+        return unsupported_error("the response declares Content-Encoding '" + joined_codings(chain) +
+                                 "' but this build has no decompression capability (AURORA_ENABLE_COMPRESSION=OFF)");
+    }
+    built.stages_.reserve(chain.size());
+    // 书写次序是应用次序（`RFC 9110 §8.4`），故还原从右往左：最后应用的环节最先建环、最先接线上字节。
+    for (const Coding coding : chain | std::views::reverse) {
+        Stage entry;
+        entry.coding = coding;
+        entry.format = known_format(coding);
+        entry.needs_probe = !entry.format.has_value();
+        if (entry.format.has_value()) {
+            if (auto opened = built.open(entry); !opened) {
+                return Result<StreamingDecoder>{to_http_error(opened.error(), coding_name(coding))};
+            }
+        }
+        built.stages_.push_back(std::move(entry));
+    }
+    return Result<StreamingDecoder>{std::move(built)};
+}
+
+auto StreamingDecoder::open(Stage &stage) const -> Result<void> {
+    if (!stage.format.has_value()) {
+        return corrupt_error("internal: a coding stage was opened before its format was determined");
+    }
+    const DecompressOptions options{.max_output_bytes = max_output_bytes_};
+    auto created = Decompressor::create(stage.format.value(), options);
+    if (!created) {
+        return Result<void>{created.error()};  // core 成因原样带回，由调用方翻成 HTTP 出口码
+    }
+    stage.decoder = std::move(created.value());
+    return Result<void>{};
+}
+
+auto StreamingDecoder::note_halt(Error error) -> void {
+    if (!abort_error_.has_value()) {
+        abort_error_ = std::move(error);  // 幂等：后到的中止不覆盖先到的成因
+    }
+}
+
+auto StreamingDecoder::halted() const -> std::optional<Result<EmitFlow>> {
+    // 宿主收摊优先于错误：同一轮 `push` 里先交出的段先被宿主拒掉，故 Stop 在字节次序上总是更早的那个事实。
+    if (aborted_by_host_) {
+        return Result<EmitFlow>{EmitFlow::Stop};
+    }
+    if (abort_error_.has_value()) {
+        return Result<EmitFlow>{abort_error_.value()};
+    }
+    return std::nullopt;
+}
+
+auto StreamingDecoder::emit_from(std::size_t index, std::span<const char> bytes) -> Result<EmitFlow> {
+    if (auto stop = halted(); stop.has_value()) {
+        return stop.value();
+    }
+    if (bytes.empty()) {
+        return Result<EmitFlow>{EmitFlow::Continue};  // 空段不打扰下一环，也不打扰宿主
+    }
+    if (index >= stages_.size()) {
+        auto handed = emit_(bytes);
+        if (!handed) {
+            note_halt(handed.error());
+            return handed;
+        }
+        if (handed.value() == EmitFlow::Stop) {
+            aborted_by_host_ = true;
+        }
+        return handed;
+    }
+    auto &stage = stages_.at(index);
+    std::vector<char> buffered;
+    std::span<const char> pending = bytes;
+    if (!stage.decoder.has_value()) {
+        if (stage.needs_probe && !stage.format.has_value()) {
+            stage.preamble.insert(stage.preamble.end(), bytes.begin(), bytes.end());
+            if (stage.preamble.size() < AURORA_DEFLATE_PROBE_BYTES) {
+                return Result<EmitFlow>{EmitFlow::Continue};  // 判定字节还没攒够：本段先按住不交
+            }
+            stage.format = probe_deflate_format(std::span<const char>{stage.preamble});
+        }
+        if (auto opened = open(stage); !opened) {
+            const auto mapped = to_http_error(opened.error(), coding_name(stage.coding));
+            note_halt(mapped);
+            return Result<EmitFlow>{mapped};
+        }
+        // 判定期间攒下的字节就是本流的前缀，换出到局部缓冲再喂入：容器与视图不再互相牵制（swap 后 preamble
+        // 已空，随后的段直接走「解码器已就位」那一支）。
+        if (!stage.preamble.empty()) {
+            buffered.swap(stage.preamble);
+            pending = std::span<const char>{buffered};
+        }
+    }
+    const auto forward = [this, index](std::span<const char> produced) -> void {
+        (void)emit_from(index + 1, produced);  // 中止事实记在链上，返回值在此无需二次处理
+    };
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 就位发生在 open() 内，跨函数赋值不入路径分析
+    const auto pushed = stage.decoder->push(pending, forward);
+    if (auto stop = halted(); stop.has_value()) {
+        return stop.value();
+    }
+    if (!pushed) {
+        const auto mapped = to_http_error(pushed.error(), coding_name(stage.coding));
+        note_halt(mapped);
+        return Result<EmitFlow>{mapped};
+    }
+    return Result<EmitFlow>{EmitFlow::Continue};
+}
+
+auto StreamingDecoder::settle(std::size_t index) -> Result<EmitFlow> {
+    if (auto stop = halted(); stop.has_value()) {
+        return stop.value();
+    }
+    if (index >= stages_.size()) {
+        return Result<EmitFlow>{EmitFlow::Continue};
+    }
+    auto &stage = stages_.at(index);
+    if (!stage.decoder.has_value()) {
+        if (stage.preamble.empty()) {
+            return settle(index + 1);  // 本环一个字节都没收到：没有流要终结，下游同样没有
+        }
+        // 不足两枚输入字节就收摊：zlib 的头本身占两枚，故这一环只可能是裸 DEFLATE（RFC 1951）。剩下那一两枚
+        // 字节照常喂入并终结——短流的「截断」定性归 core 判，本层不另造一套判据。
+        stage.format = CompressionFormat::Deflate;
+        if (auto opened = open(stage); !opened) {
+            const auto mapped = to_http_error(opened.error(), coding_name(stage.coding));
+            note_halt(mapped);
+            return Result<EmitFlow>{mapped};
+        }
+        std::vector<char> buffered;
+        buffered.swap(stage.preamble);
+        if (auto fed = emit_from(index, std::span<const char>{buffered}); !fed) {
+            return fed;
+        }
+    }
+    const auto forward = [this, index](std::span<const char> produced) -> void {
+        (void)emit_from(index + 1, produced);
+    };
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 终结的必是已 open 的那一环，赋值跨函数发生
+    const auto flushed = stage.decoder->finish(forward);
+    if (auto stop = halted(); stop.has_value()) {
+        return stop.value();
+    }
+    if (!flushed) {
+        const auto mapped = to_http_error(flushed.error(), coding_name(stage.coding));
+        note_halt(mapped);
+        return Result<EmitFlow>{mapped};
+    }
+    return settle(index + 1);
+}
+
+auto StreamingDecoder::push(std::span<const char> input) -> Result<EmitFlow> { return emit_from(0, input); }
+
+auto StreamingDecoder::finish() -> Result<EmitFlow> { return settle(0); }
 
 }  // namespace aurora::net::detail
