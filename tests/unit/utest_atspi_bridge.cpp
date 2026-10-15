@@ -18,6 +18,9 @@
 // NOLINTNEXTLINE(*-macro-usage)
 #define AURORA_ATSPI_BRIDGE_AVAILABLE 1
 #include "aurora/widget/widget.h"
+// 目标单元即本头声明的 detail::AtspiBridge / detail::AtspiEnv：公共 widget 头不传导
+// 本 src 内部头（层次意图如此），测试须显式包含（同 utest_atspi_protocol.cpp 先例）。
+#include "aurora/window/detail/atspi_bridge.h"
 #else
 // 平台可用性开关，供下方 #if 使用，无 constexpr 等价物
 // NOLINTNEXTLINE(*-macro-usage)
