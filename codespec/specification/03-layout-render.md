@@ -973,6 +973,8 @@ AURORA_TEST_CHECK(std::abs(snap["box"]["w"].get<float>() - 100.0F) < 0.001f);
 
 **系统化 golden 套件：** `utest_offscreen` 以 `render_to_logical_snapshot` 为基础建立跨布局的 Level 1+2 黄金文件比对：11 个固定尺寸场景（Column/Row/Stack/Grid/Scroll/嵌套容器、gap、padding、横/纵向 fill 分配）逐场景与 `tests/golden/logical_snapshots.json` 基准深度比对，盒模型逐字段漂移即红灯。场景全部使用 `px()` / `fill()` 等显式尺寸意图、不依赖字体度量，保证跨平台逐值一致。基准有意更新时设 `AURORA_UPDATE_GOLDEN=1` 重跑用例重写基准（见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) golden 环境变量）。
 
+**原生子视图（WebView）与快照口径的关系：** `WebView` 的**快照模式**把引擎产出的位图经 `Painter::draw_image` 落进 aurora 帧流（与 `ImageView` 同路），其像素是**确定的**、可参与无头像素判据；**交互模式**的原生子视图由窗口系统叠加、**不进** aurora 帧流（§8.1 的录制—回放不含它）。无头（`HeadlessSurface`）与无引擎环境下 `WebView` 恒降级为 `Placeholder` 占位盒（Level 1/2 快照仍是确定的 `WebView` 节点 + 占位几何），故**既有 golden 基准不受影响**；真实引擎行为由专用真机探针覆盖（见 [`06-app-platform.md`](06-app-platform.md) §12.1）。
+
 ### 10.2 SPEC.QUALITY.LAYOUT.ALGEBRA.001 布局系统的代数一致性
 
 **核心目标：** AI 可推理尺寸和位置。

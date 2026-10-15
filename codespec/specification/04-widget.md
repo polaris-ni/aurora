@@ -397,6 +397,7 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 / 设施 | 说明 |
 |:---|:---|
+| `WebView` | 系统原生 Web 嵌入控件（`webview/web_view.h`，`aurora::webview`）。props：`url` / `html` / `mode`（`WebViewMode` 枚举：Interactive / Snapshot）/ `javascript_enabled` / `zoom_factor`；回调 `on_navigation` / `on_title_changed` / `on_web_message` / `on_process_failed` 旁挂、**不进序列化面**。**降级而非中止**：引擎不可用时 `degraded()` 为真、呈现占位盒，能力经 `capabilities()` / `feature_flags().webview` 运行期查询（归因 slug 见 [`06-app-platform.md`](06-app-platform.md) §12.1）。**像素不经 `Painter` 合成**：交互模式由宿主 `NativeViewHost` 作原生子视图叠加显示、快照模式只作像素来源，契约同 §12.1 |
 | `InspectorPanel` | 左右分栏 Widget 树浏览器 + 属性编辑器（详见 [`08-tooling.md`](08-tooling.md)） |
 | `PerfOverlay` | 帧率 / 性能 HUD（`app/perf_overlay.h`）；`visible`、`show_counters`；每帧从 `FrameStats` 重读，故 `can_cache_display_list()` 为 `false`；读数陈旧（`FrameStats::is_stale()`）时第一行灰化并追加 `stale <空闲秒数>` |
 | `inspect.h` | 控件树检查函数集 |

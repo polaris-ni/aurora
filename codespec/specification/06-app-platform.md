@@ -945,6 +945,15 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 
 **版本常量**（`core/version.h`）：`AURORA_VERSION_MAJOR` / `MINOR` / `PATCH`（数字分量，CMake `project(VERSION)` 注入）、`AURORA_VERSION_SUFFIX_STR` + `AURORA_HAS_VERSION_SUFFIX`（semver 预发布后缀，来自 CMake 缓存变量 `AURORA_VERSION_SUFFIX`）、合成宏 `AURORA_VERSION_STRING`（完整 semver 串）。**库发布版本的单一事实来源是根 `CHANGELOG.md` 的 `currentVersion`**。
 
+**平台扩展点（第二类：宿主管理的原生子视图）：** 除 `Surface`（图形后端）外，本层新增**第二类平台扩展点** `NativeViewHost`，用于嵌入**系统原生视图**——首例为 `WebView` 控件：把系统 WebView 引擎的窗口作为**原生子视图**挂进 aurora 窗口，其像素**不经 `Painter` 合成**。契约：
+
+- 应用代码零 `#ifdef`：控件与宿主均无平台宏；平台差异全在 `src/aurora/webview/` 下的引擎实现源文件中，且经运行期 `dlopen` / `LoadLibrary` 绑定（缺引擎只降级、不改链接面）。能力经 `WebViewCapabilities` 与 `feature_flags().webview` / `.webview_webview2` / `.webview_webkitgtk` **运行期查询**（相关 `AURORA_ENABLE_WEBVIEW*` 宏 `SCOPE PRIVATE`，公共头零宏引用）。
+- 几何：宿主在**非 idle 帧**按「控件窗口逻辑盒 × scale + CSD 内缩」换算后下发原生矩形（换算唯一落点 `to_native_rect`，先加内缩再乘 scale）。原生子视图**不参与** `Painter` 帧流，也不受 aurora 裁剪 / 重叠影响（由窗口系统叠加）。
+- 可见性：交互模式经宿主授予原生可见（映射上屏并接收输入）；快照模式**恒不映射**，仅作像素来源。
+- Linux 事件泵：引擎（GLib 主上下文）的 fd 经 `Surface::set_extra_event_source` 并入 `X11Surface` / `WaylandSurface` 的 `wait_events` poll 集合；未装原生视图时为空操作。宿主访问口是**线程局部**的（形态仿 `current_focus_manager()`），由 `WindowHost` 在渲染入口 `set_current`、帧尾置空。
+
+**WebView 可用性矩阵（运行期归因）：** `UnsupportedPlatform`（如 Linux **Wayland**：不能把另一客户端的 GTK surface 作定位子 surface 附到宿主 `wl_surface`）→ 诊断 slug `webview-unsupported-mode`；`Disabled`（宏关闭）与 `MissingRuntime`（无 WebView2 运行时 / 无 WebKitGTK）→ `webview-runtime-missing`。两者修复动作相反，**不得混报**。
+
 **Web / WASM 平台适配：**
 
 | 方面 | 做法 |

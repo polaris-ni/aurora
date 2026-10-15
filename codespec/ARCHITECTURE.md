@@ -34,7 +34,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 ```
 
 - **依赖方向以向下为主，`core/` 为硬边界**：`core/`（基础层）的**公共头不依赖任何其他 aurora 模块**（只依赖自身与标准库）；其余层间以「上层依赖下层」为常态，确有必要时下层可反向引用上层（例：`render/offscreen.h` 的 `render_to_logical_snapshot` 需读取 widget 类型名与属性以产出逻辑快照；`window/` 的 `Surface` 家族需渲染类型）。该边界由门禁 `tools/check/check_core_layer_boundary.py` 守护（扫描 `include/aurora/core/**` 的 `#include`，任何指向上层的包含即失败）。`src/aurora/core/` 的实现**不在门禁范围**——其 2 处既知上层引用属叶子级、非传递性的元数据查阅：`diagnostics.cpp` 读 `widget/props_io.h` 以格式化属性值、`image.cpp` 委派 `image/image_codec.h` 解码。
-- **内核 / 适配分离**：平台差异收敛到 `Surface` 实现。
+- **内核 / 适配分离**：平台差异收敛到 `Surface` 实现。**第二类平台扩展点** `NativeViewHost`（`include/aurora/webview/`）另行收敛「宿主管理的原生子视图」——嵌入的系统原生视图（首例 `WebView`）由窗口系统叠加显示，其像素**不经** `Painter` / `RhiBackend` 帧流；控件与宿主保持零 `#ifdef`，平台差异仅在引擎实现源文件内、经运行期绑定（缺引擎只降级）。
 - **命令流与执行分离**：`DisplayList` 是绘制命令的**唯一来源**，`rhi::RhiBackend` 是它的**回放目标抽象**（command sink）；软件 `Painter`（经 `rhi::SoftwareRhi`）与 GPU 后端是它的**平级消费者**。新增后端只实现 `RhiBackend`，不改动录制侧与 `DisplayList`。
 - **响应式与渲染解耦**：状态变更经 `State` / `Signal` 精确投递到受影响的 widget 子树，不经「整树 diff + 重建」；渲染核心只负责把 widget 树绘制到 `Surface`。
 
@@ -145,6 +145,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 图像编解码 | `image/` | `image_codec.h` |
 | 检查器 | `inspector/` | `inspector_server.h` `inspector_api.h` |
 | 网络套接字层 | `net/` | `socket.h`（`aurora::net`：`Session` / `Listener` / `StreamSocket`；Winsock2/BSD socket 的仓内唯一适配落点，仅 IPv4 回环，契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8 与 [`changes/winsock-bsd-socket-layer/proposal.md`](changes/winsock-bsd-socket-layer/proposal.md)） |
+| WebView 嵌入 | `webview/` | `web_view.h` `native_view_host.h`（`aurora::webview`：`WebView` 控件 + 宿主侧原生子视图书架 `NativeViewHost`；第二类平台扩展点，像素不经 `Painter` 合成。契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §12.1） |
 | 工厂语法糖 | `ui/` | 声明式工厂函数（见 [`specification/04-widget.md`](specification/04-widget.md) §5） |
 | 入口 | `aurora.h` | 聚合 include + `namespace au` 别名提示 |
 | 命令行解析 | `cli/` | `args.h`（`ValueKind` `Arity` `Value` `Arguments` `EarlyView` `Invocation` `parse`） `command.h`（`CommandSpec` `Builtins` `OptionSchema` `PositionalSchema` `validate` `usage_line` `help_text` `version_text` `schema_json`）；`--help` / `--version` 为惰性注入的内建，与调用方自标的 `early_view` 旗标共用一条展示通道；契约见 [`specification/09-cli.md`](specification/09-cli.md) |
@@ -425,6 +426,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 9. **强类型几何**：尺寸 / 颜色 / 长度使用 `Length` / `Color` / `px()` 等强类型，禁止裸整数隐式转换。
 10. **`RelayoutBoundary` 语义**：`set_relayout_boundary(true)` 的控件成为显式重排边界——布局脏标记冒泡在边界处截断，且 `on_dirty(true)` 走局部重排而非整树重排。**`Scroll` 不得无条件置此标志**：骨架 → 真实内容的切换逻辑位于 `Scroll` 之上的祖先（由下方 `mark_needs_layout` 驱动），若 `Scroll` 成为边界会截断该脏冒泡，使内容切换永不触发（离屏缓冲恒为骨架）。仅在确有「子树自包含、且切换由本控件自身驱动」的语义时才置位。
 11. **几何权威在 `Node`**：`Widget` 不持有任何几何缓存。
+12. **原生子视图不被合成**：`NativeViewHost` 管理的原生子视图（系统 WebView 等）由窗口系统直接叠加显示，**不参与** `Painter` / `RhiBackend` 的帧录制与回放；aurora 侧只下发几何 / 可见性并按需读取快照像素。命中 / 裁剪 / 重叠一律以宿主窗口系统的实际叠加为准，库内不得假设其被合成进 aurora 帧缓冲。
 
 ---
 
