@@ -81,4 +81,32 @@ AURORA_TEST_CASE(build_box_collects_after_layout_without_relayout) {
     AURORA_TEST_CHECK_NEAR(tree.children[0].rect.origin.y, 0.0F, 1e-4F);
 }
 
+AURORA_TEST_CASE(size_intent_change_signals_parent_for_relayout) {
+    // 定尺寸控件（width 为 Fixed）天然满足 is_relayout_boundary()：其**内部内容**变化无需
+    // 父侧重排。但**尺寸意图本身**变化会改变父分给它的盒，必须让父侧重排——否则父侧 Node 几何
+    // 停留旧值（`window_bounds()` 读到过期盒，原生子视图几何据此下发即不跟随）。
+    // 判据：子树脏汇聚回调须以**父（Column）**为 origin 触发一次布局脏；若只以子控件为 origin
+    // （boundary 短路吞掉了父侧失效），即回归。
+    auto col = std::make_shared<Column>();
+    auto child = std::make_shared<Text>("x");
+    child->width(px(50.0F));
+    child->height(px(20.0F));
+    col->add(Node{child});
+    Node root{col};
+    LayoutEngine::layout(root.widget(), fixed_constraints());
+
+    AURORA_TEST_CHECK_TRUE(child->is_relayout_boundary());  // 前提：定尺寸 ⇒ 重排边界
+
+    bool parent_signalled = false;
+    root.widget().on_subtree_dirty = [&parent_signalled, &col](Widget &origin, bool layout) -> void {
+        if (layout && &origin == col.get()) {
+            parent_signalled = true;
+        }
+    };
+
+    child->width(px(120.0F));  // 改尺寸意图
+
+    AURORA_TEST_CHECK_TRUE(parent_signalled);
+}
+
 }  // namespace aurora::test_cases::utest_layout_engine

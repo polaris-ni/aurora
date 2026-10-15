@@ -357,16 +357,22 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @param len 宽度意图：`Fixed` / `Fraction` / `Expand` 在布局时把该轴夹成等式。
     /// @return 自身引用，供链式继续设置其它属性。
     virtual auto width(Length len) -> Widget & {
+        if (width_.kind == len.kind && width_.value == len.value) {
+            return *this;  // 尺寸意图未变：无需标脏（避免无谓重排）
+        }
         width_ = len;
-        mark_needs_layout();  // 尺寸意图变更影响测量结果：标脏布局
+        mark_size_intent_changed();  // 尺寸意图变更：自身 + 父侧均需重排
         return *this;
     }
     /// @brief 显式高度意图（语义同 `width`）。
     /// @param len 高度意图（强类型 `Length`，裸整数不可编译）。
     /// @return 自身引用，供链式继续设置其它属性。
     virtual auto height(Length len) -> Widget & {
+        if (height_.kind == len.kind && height_.value == len.value) {
+            return *this;  // 尺寸意图未变：无需标脏（避免无谓重排）
+        }
         height_ = len;
-        mark_needs_layout();  // 尺寸意图变更影响测量结果：标脏布局
+        mark_size_intent_changed();  // 尺寸意图变更：自身 + 父侧均需重排
         return *this;
     }
     /// @brief 读取当前宽度意图（设定值，非测量结果）。
@@ -1461,6 +1467,23 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
     // ---- why_trace 热路径埋点（AURORA_ENABLE_DEBUG）----
+    /// @brief 尺寸意图（`width` / `height`）变更的脏标记。
+    ///
+    /// 与 `mark_needs_layout` 的关键差别：尺寸意图是本控件**向父侧申报**的尺寸，其值一变，
+    /// 父分给本控件的盒随之改变，故**无论本控件是否 relayout boundary 都必须让父侧重排**。
+    /// 定尺寸控件天然满足 `is_relayout_boundary()`（尺寸不依赖子节点，`is_relayout_boundary()`
+    /// 对非 `WrapContent` 轴返回 true），若沿用其短路，本控件只在局部重排里刷新自身 `size_`，
+    /// 而父侧 Node 几何停留旧值——`window_bounds()` 读到的是过期盒（原生子视图几何据此下发
+    /// 即不跟随父侧新盒）。
+    auto mark_size_intent_changed() -> void {
+        mark_needs_layout();  // 标脏自身（含 request_frame）
+        // 无条件向父侧传播，绕开 `mark_needs_layout_impl` 里的 boundary 短路（见上）。父多为
+        // 非 boundary 容器 ⇒ 整树重排、父侧 Node 几何随之刷新；父若自身也是 boundary（如滚动
+        // 视口）⇒ 其局部重排会以新约束重新下发子盒，同样正确。
+        if (layout_parent_ != nullptr) {
+            layout_parent_->mark_needs_layout_impl(true);
+        }
+    }
     /// @brief 布局脏标记的实现体：公开入口 `mark_needs_layout` 委托至此。
     ///        置位后沿布局父链上溯失效祖先布局缓存，并请求一次重排帧。
     /// @param propagated 传播点显式传 true，使 `why_trace` 能区分「业务/状态直接触发的根因」
