@@ -115,8 +115,7 @@ AURORA_TEST_CASE(validate_names_the_out_of_range_knob) {
     AURORA_TEST_CHECK_EQ(negative_base.code_enum, aurora::ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK(names(negative_base.message, "base"));
 
-    const auto negative_cap =
-        require_value(validate_retry_policy(RetryPolicy{.base = ms(100), .max_backoff = ms(-1)}));
+    const auto negative_cap = require_value(validate_retry_policy(RetryPolicy{.base = ms(100), .max_backoff = ms(-1)}));
     AURORA_TEST_CHECK(names(negative_cap.message, "max_backoff"));
 
     const auto cap_below_base =
@@ -254,9 +253,8 @@ AURORA_TEST_CASE(retry_after_delay_seconds_saturates_instead_of_failing) {
     const std::string absurd(30, '9');
     AURORA_TEST_CHECK_EQ(millis(parse_retry_after(absurd, now)), std::int64_t{365LL * 86400 * 1000});
     // 非纯数字（负号、小数点、单位、空串）一律按「没给」处理，交给指数退避。
-    for (const std::string_view junk :
-         {std::string_view{"-1"}, std::string_view{"5.5"}, std::string_view{"5s"}, std::string_view{""},
-          std::string_view{"   "}, std::string_view{"abc"}}) {
+    for (const std::string_view junk : {std::string_view{"-1"}, std::string_view{"5.5"}, std::string_view{"5s"},
+                                        std::string_view{""}, std::string_view{"   "}, std::string_view{"abc"}}) {
         AURORA_TEST_CHECK_EQ(millis(parse_retry_after(junk, now)), std::int64_t{-1});
     }
 }
@@ -271,20 +269,14 @@ AURORA_TEST_CASE(http_date_is_pure_calendar_math) {
     AURORA_TEST_CHECK_EQ(since_epoch(require_value(epoch)), std::int64_t{0});
 
     // 文法不合即「不是 IMF-fixdate」：已弃用的两型不做时区猜测，缺星期 / 缺 GMT / 定宽不满足都按没给处理。
-    for (const std::string_view junk : {std::string_view{"Xyz, 06 Nov 1994 08:49:37 GMT"},
-                                       std::string_view{"Sun, 06 Nov 1994 08:49:37 UTC"},
-                                       std::string_view{"Sun, 06 Nov 1994 08:49:37 +0000"},
-                                       std::string_view{"Sun, 06 Nov 1994 08:49:37"},
-                                       std::string_view{"Sun, 06 Foo 1994 08:49:37 GMT"},
-                                       std::string_view{"Sun, 32 Nov 1994 08:49:37 GMT"},
-                                       std::string_view{"Sun, 00 Nov 1994 08:49:37 GMT"},
-                                       std::string_view{"Fri, 16 Dec 1969 23:59:59 GMT"},
-                                       std::string_view{"Sun, 06 Nov 10000 08:49:37 GMT"},
-                                       std::string_view{"Sun, 06 Nov 1994 24:00:00 GMT"},
-                                       std::string_view{"sun, 06 nov 1994 08:49:37 gmt"},
-                                       std::string_view{"Sun, 6 Nov 1994 08:49:37 GMT"},
-                                       std::string_view{"Sunday, 06 Nov 1994 08:49:37 GMT"},
-                                       std::string_view{""}}) {
+    for (const std::string_view junk :
+         {std::string_view{"Xyz, 06 Nov 1994 08:49:37 GMT"}, std::string_view{"Sun, 06 Nov 1994 08:49:37 UTC"},
+          std::string_view{"Sun, 06 Nov 1994 08:49:37 +0000"}, std::string_view{"Sun, 06 Nov 1994 08:49:37"},
+          std::string_view{"Sun, 06 Foo 1994 08:49:37 GMT"}, std::string_view{"Sun, 32 Nov 1994 08:49:37 GMT"},
+          std::string_view{"Sun, 00 Nov 1994 08:49:37 GMT"}, std::string_view{"Fri, 16 Dec 1969 23:59:59 GMT"},
+          std::string_view{"Sun, 06 Nov 10000 08:49:37 GMT"}, std::string_view{"Sun, 06 Nov 1994 24:00:00 GMT"},
+          std::string_view{"sun, 06 nov 1994 08:49:37 gmt"}, std::string_view{"Sun, 6 Nov 1994 08:49:37 GMT"},
+          std::string_view{"Sunday, 06 Nov 1994 08:49:37 GMT"}, std::string_view{""}}) {
         AURORA_TEST_CHECK_FALSE(parse_http_date(junk).has_value());
     }
 }
