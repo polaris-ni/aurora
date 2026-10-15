@@ -318,8 +318,14 @@ class Request {
     ///
     /// 补齐两处：无 `Host` 时按目标 URL 补；有消息体且未声明 `Content-Length` / `Transfer-Encoding`
     /// 时按体长度补。校验（方法令牌、字段名 token、字段值无 CR / LF、URL 含主机）由字节层执行。
+    ///
+    /// 请求目标默认写成 origin-form（`/path?query`），即「这条请求发往目标本身」。`absolute_form` 为真时
+    /// 改写成绝对形态（`http://host:port/path?query`）——那是**明文经转发代理**时代理要的写法（`RFC 9112
+    /// §3.2.2`），它据此决定把请求递给谁；`Host` 仍按目标 URL 补，代理不改写这条。发起侧只在路由判出
+    /// 「本跳的对端是转发代理而非目标」时置真，调用方一般不必自己碰它。
+    /// @param absolute_form 请求目标是否写成绝对形态；假 = origin-form（缺省）。
     /// @return 请求头部字节（以空行收尾）；URL 解析失败或文法不合时为错误（`http-request-invalid`）。
-    [[nodiscard]] auto render_head() const -> Result<std::string>;
+    [[nodiscard]] auto render_head(bool absolute_form = false) const -> Result<std::string>;
 
   private:
     /// @brief 由工厂共用：绑定方法与已解析的目标。
@@ -409,7 +415,7 @@ class Response {
 /// 本档只回答**归因层**，不回答**能不能重试**——后者由 `Error::retryable`（与 `codespec/errors.toml`
 /// 逐码同源）给出，两枚正交：`Timeout` 且可重试是「再来一次」，`Proxy` 且可重试
 /// （`net-proxy-config-unreadable`）是「读系统配置的时机不对」，压进同一枚枚举只会让调用方靠猜分工。
-/// 之所以还要第三枚分类而不是直接用生成表的 `ErrorCategory`：那是**全库**粗分类，本族 41 枚全落在
+/// 之所以还要第三枚分类而不是直接用生成表的 `ErrorCategory`：那是**全库**粗分类，本族 42 枚全落在
 /// `io` 下，分不出「名字解析不了」与「对端把字节写坏了」这两种相反的排查方向。
 ///
 /// 九档按「先具体后兜底」归一，同一枚码恒只进一档：`Cancelled` 优先于一切（调用方主动收摊，不再看
@@ -433,7 +439,7 @@ enum class HttpErrorClass : std::uint8_t {
 
 /// @brief 把一枚错误码归入 HTTP 失败分型档（全函数：任意 `ErrorCode` 都有档可归）。
 ///
-/// 逐码映射以本函数为唯一真值源，覆盖 `net-*` 与 `http-*` 两族全部 41 枚（含发起侧用不到的服务端面码，
+/// 逐码映射以本函数为唯一真值源，覆盖 `net-*` 与 `http-*` 两族全部 42 枚（含发起侧用不到的服务端面码，
 /// 同样给出档）；其余族的码（`general-*` / `widget-*` 之类）不是网络交换的产物，一律落 `Invalid` 而
 /// **不**报错——分型是观测口，不是校验口。两处值得点名的归类：`http-redirect-limit` 归 `Protocol`
 /// （对端把重定向写成了环，改不了它就得改跟随策略），`http-body-too-large` 归 `Invalid`（越的是本库

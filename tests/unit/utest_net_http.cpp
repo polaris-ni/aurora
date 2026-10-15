@@ -63,8 +63,8 @@ struct ClassExpectation {
     HttpErrorClass expected;  ///< 期望归入的档
 };
 
-/// @brief `net-*` 与 `http-*` 两族全部 41 枚的期望归因档（按档分组，便于逐条读判定依据）。
-constexpr std::array<ClassExpectation, 41> AURORA_HTTP_ERROR_CLASS_TABLE{{
+/// @brief `net-*` 与 `http-*` 两族全部 42 枚的期望归因档（按档分组，便于逐条读判定依据）。
+constexpr std::array<ClassExpectation, 42> AURORA_HTTP_ERROR_CLASS_TABLE{{
     // 名字解析不了：还没走到链路。
     {.code = aurora::ErrorCode::NetDnsFailed, .expected = HttpErrorClass::Dns},
     // 链路断了且没有更具体的档可归：含服务端面三枚（发起侧不产出，但同样给出档而非「未知」）。
@@ -111,6 +111,8 @@ constexpr std::array<ClassExpectation, 41> AURORA_HTTP_ERROR_CLASS_TABLE{{
     {.code = aurora::ErrorCode::NetFramerConfigInvalid, .expected = HttpErrorClass::Invalid},
     {.code = aurora::ErrorCode::NetBufferLimit, .expected = HttpErrorClass::Invalid},
     {.code = aurora::ErrorCode::NetFramerOverflow, .expected = HttpErrorClass::Invalid},
+    // 策略闸掐在发起之前：拒的是这份声明与这个目标的组合，不是链路。
+    {.code = aurora::ErrorCode::NetPolicyViolated, .expected = HttpErrorClass::Invalid},
     {.code = aurora::ErrorCode::HttpBodyTooLarge, .expected = HttpErrorClass::Invalid},
     {.code = aurora::ErrorCode::HttpCharsetUnsupported, .expected = HttpErrorClass::Invalid},
     {.code = aurora::ErrorCode::HttpContentEncodingUnsupported, .expected = HttpErrorClass::Invalid},
@@ -365,7 +367,7 @@ AURORA_TEST_CASE(error_class_maps_every_net_and_http_code) {
                               std::string{"class drift for: "} + std::string{meta.slug});
     }
     AURORA_TEST_CHECK_EQ(seen, AURORA_HTTP_ERROR_CLASS_TABLE.size());
-    AURORA_TEST_CHECK_EQ(seen, std::size_t{41});
+    AURORA_TEST_CHECK_EQ(seen, std::size_t{42});
 
     // `Status` 档没有码可映射（非 2xx 是成功 Result，状态码是数据不是错误），它的唯一产出点是下面那枚
     // 按状态码折算的函数——本断言把「码表里不该出现 Status」钉成一条事实，免得日后误加。

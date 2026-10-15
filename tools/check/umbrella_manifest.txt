@@ -109,6 +109,7 @@ aurora/net/http.h
 aurora/net/http_client.h
 aurora/net/http_stream.h
 aurora/net/poll.h
+aurora/net/policy.h
 aurora/net/proxy.h
 aurora/net/resolver.h
 aurora/net/socket.h

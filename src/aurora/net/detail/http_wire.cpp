@@ -299,6 +299,18 @@ auto default_port(std::string_view scheme) -> std::uint16_t {
     return 0;
 }
 
+/// @brief 该目标在线上要显式写出的端口（authority 的两处用法——绝对形态请求目标与 `Host`——共用这一枚取舍）。
+/// @param target 已解析的目标 URL。
+/// @return 需要写出的端口；走缺省端口（或未声明端口）时 0，表示不写。
+auto displayed_port(const Url &target) -> std::uint16_t {
+    const auto explicit_port = target.port();
+    if (!explicit_port.has_value()) {
+        return 0;
+    }
+    const auto def = default_port(target.scheme());
+    return (def == 0 || explicit_port.value() != def) ? explicit_port.value() : 0;
+}
+
 /// @brief 把主机与（可选）端口拼成请求目标与 `Host` 用的 authority。
 /// @param host 主机文本；含 `:` 即按 IPv6 字面量补方括号。
 /// @param port 需要显式写出的端口；为 0 表示走缺省端口、不写出。
@@ -399,7 +411,7 @@ auto framing_of(const ResponseHead &head, bool request_is_head) -> Result<BodyFr
     return BodyFraming::UntilClose;
 }
 
-auto render_request_head(std::string_view method_text, const Url &target, const Headers &fields)
+auto render_request_head(std::string_view method_text, const Url &target, const Headers &fields, bool absolute_form)
     -> Result<std::string> {
     if (!is_token(method_text)) {
         return request_error("request method '" + std::string{method_text} +
@@ -418,6 +430,21 @@ auto render_request_head(std::string_view method_text, const Url &target, const 
     if (target.has_query()) {
         request_target.push_back('?');
         request_target.append(target.query());
+    }
+    // 绝对形态在 origin-form 之前冠上 `scheme://authority`（`RFC 9112 §3.2.2`）。authority 用与 `Host` 同一套
+    // 端口取舍（缺省端口不写），且刻意不含 userinfo 与片段：前者是凭据、不该出现在线上（与代理凭据同一条
+    // 纪律），后者按 `RFC 9110 §7.2` 只属客户端，从来不发往对端。
+    if (absolute_form) {
+        if (target.host().empty()) {
+            return request_error("cannot render an absolute-form request target: target has an empty host");
+        }
+        std::string absolute;
+        absolute.reserve(target.scheme().size() + request_target.size() + 24);
+        absolute.append(target.scheme());
+        absolute.append("://");
+        absolute.append(authority(target.host(), displayed_port(target)));
+        absolute.append(request_target);
+        request_target = std::move(absolute);
     }
 
     // 字段名与字段值先行校验：CR / LF 是头部注入的唯一入口，必须在拼出任何字节之前拦住。
@@ -443,14 +470,7 @@ auto render_request_head(std::string_view method_text, const Url &target, const 
             return request_error(
                 "cannot derive a Host header: target has an empty authority and no explicit Host field");
         }
-        std::uint16_t port = 0;
-        if (auto explicit_port = target.port(); explicit_port.has_value()) {
-            const auto def = default_port(target.scheme());
-            if (def == 0 || explicit_port.value() != def) {
-                port = explicit_port.value();
-            }
-        }
-        out.append("Host: ").append(authority(target.host(), port)).append("\r\n");
+        out.append("Host: ").append(authority(target.host(), displayed_port(target))).append("\r\n");
     }
 
     for (const auto &field : fields.entries()) {

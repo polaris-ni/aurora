@@ -50,6 +50,32 @@
 ///   那个算法随本机时钟与历史响应漂移，判据写不成定值；有校验子而无有效期则照存，条目即刻过期、每次都
 ///   走条件请求，省的是体字节而不是那一次往返）。
 ///
+/// 代理（`Client::proxy()`，缺省 `ProxyEnvironment::disabled()` = 恒直连）有五条口径：
+/// - **一条建连路、两种交付**：每一跳由 `ProxyEnvironment::for_target(host, port, secure)` 定出 `ProxyConfig`，
+///   建连一律经 `StreamTransport::connect_via` 发出（`Direct` 按该入口的契约等价于直连），库里不留第二条
+///   建连入口，「这次到底有没有经代理」因此只有一个答案可问。经代理之后分两种交付形态：**隧道**（`https://`
+///   经 HTTP 代理、以及一切 SOCKS5）里对端仍是目标、请求行照写 origin-form；**转发**（`http://` 经 HTTP
+///   代理）里对端就是代理本身、请求行改写成绝对形态 `http://host:port/path?query`（`RFC 9112 §3.2.2`）。
+///   明文不为代理发 `CONNECT`：转发本就是转发代理的本职，而 `CONNECT` 到 80 端口常被拒止，那会把「代理不
+///   支持这种用法」伪装成连通性故障。两种形态下 `Host` 都按目标 URL 补齐，代理不改写这条。
+/// - **缺省绝不读环境变量**：代理集合只能由调用方显式装配（`ProxyEnvironment::from_environment()` /
+///   `from_environment_or_system()` 都是调用方的动作）。同一段代码在不同机器上因环境而异，是本提案要消灭
+///   的那类无痕故障，也让「连不上」的现场无法复现。
+/// - **隧道不成即失败，不回退直连**：代理不可达、拒绝建隧道、不会说话一律以对应 `net-proxy-*` / 连接类错误
+///   收尾（`connect_timeout` 覆盖直到隧道可用的整段），绝不改用直连再试一次——绕过代理往往正是策略禁止的
+///   那条路。凭据只出现在写出的字节里，诊断文本一律只带 `host:port`。
+/// - **`https://` 在隧道之上再握手**：SNI、证书校验与 `TlsContext` 口径的目标始终是原主机，代理只见 CONNECT
+///   与密文流。
+/// - **逐跳重算**：重定向把目标换成另一主机（乃至另一方案）时，本跳的代理决策按新目标重新定出，沿用的是
+///   同一份环境集合而不是上一跳的结论。
+///
+/// 声明式安全策略（`Client::policy()` → 进程级 `net::default_policy()` → `NetPolicy{}` 那组保守缺省，三级
+/// 取定见 `net/policy.h`）在发起侧问三条：
+/// - **起手先于缓存**：目标不合规矩时连缓存表都不查——策略先于「少打一次网络」这条优化，命中缓存照样是
+///   一次交付，不能因为它就没被问过。
+/// - **逐跳重问**：每一跳（含重定向带来的新主机、新方案）都按本跳的代理决策重新判定，上一跳放行不代表这一跳。
+/// - **拒在发出之前**：违规一律落 `net-policy-violated`，一条连接都不发起、一个字节都不写出。
+///
 /// 流式接收（`open_stream()` + `net/http_stream.h` 的 `DataSink`）与物化路径共用上述全部协议语义，四条形态
 /// 差别单列在那里：线上字节不设限（`max_body_bytes()` 管的是物化路径的内存）、`deflate` 两型按包装头判定、
 /// 重定向跳的消息体不读、本腿无流式能力时直接失败而不悄悄物化。
@@ -71,6 +97,8 @@
 #include "aurora/core/result.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_stream.h"
+#include "aurora/net/policy.h"
+#include "aurora/net/proxy.h"
 #include "aurora/net/tls.h"
 #include "aurora/state/coroutine.h"
 
@@ -168,6 +196,43 @@ class Client {
     /// @return 策略的只读引用。
     [[nodiscard]] auto retry_policy() const -> const RetryPolicy & { return retry_; }
 
+    /// @brief 装本客户端的代理集合（缺省 `ProxyEnvironment::disabled()`：一切目标直连）。
+    ///
+    /// 每一跳按 `ProxyEnvironment::for_target(host, port, secure)` 现算代理，之后按本头「代理」条的两种交付
+    /// 形态走：`https://` 与一切 SOCKS5 经该代理建隧道、在隧道之上按原主机握手与校验；`http://` 经 HTTP 代理
+    /// 时把请求交给它转发（绝对形态请求行、连到代理本身）。任何形态都**绝不回退直连**，失败以对应错误收尾。
+    /// 集合的装配恒是调用方的显式动作——本库不会自己去读环境变量或系统偏好（那会让同一段代码在不同机器上走
+    /// 不同路径），需要时由调用方取 `ProxyEnvironment::from_environment()` 或 `from_environment_or_system()`
+    /// 的结果交进来。`NO_PROXY` 例外照常生效：命中例外的目标本次就是 `Direct`，与声明式安全策略的交叉判定见
+    /// `net/policy.h`。
+    /// @param value 代理集合（含例外清单）。
+    /// @return 自身引用，便于链式调用。
+    auto proxy(ProxyEnvironment value) -> Client & {
+        proxy_ = std::move(value);
+        return *this;
+    }
+
+    /// @brief 查看已装的代理集合。
+    /// @return 集合的只读引用（缺省为空集合 = 一切直连）。
+    [[nodiscard]] auto proxy() const -> const ProxyEnvironment & { return proxy_; }
+
+    /// @brief 为本客户端显式声明一份安全策略（覆盖进程级默认）。
+    ///
+    /// 三级取定：本旋钮设过用它，否则用 `net::default_policy()`，两者都没设即 `NetPolicy{}` 那组保守缺省
+    /// （拒一切明文、TLS 下限 1.2、不强求代理）。判据与主机匹配口径见 `net/policy.h`；发起侧在起手与每一跳
+    /// 各问一次，被拒的那一跳一条连接都不发起。生效时刻是「交换发起那一刻」，之后改本旋钮或进程级默认都不
+    /// 影响在途交换。
+    /// @param value 安全策略。
+    /// @return 自身引用，便于链式调用。
+    auto policy(NetPolicy value) -> Client & {
+        policy_ = std::move(value);
+        return *this;
+    }
+
+    /// @brief 查看本客户端的**已设**策略。
+    /// @return 已设则返回之；否则 `nullopt`（表示跟随进程级默认与保守缺省，不表示关掉策略）。
+    [[nodiscard]] auto policy() const -> const std::optional<NetPolicy> & { return policy_; }
+
     /// @brief 装本客户端的内存缓存口径（`CacheOptions{}` 即关掉，缺省就是它）。
     ///
     /// 开着时兑现 `RFC 9111` 的最小集：`GET` / `HEAD` 的应答按「方法 + 目标 URL + `Vary` 点名的请求头取值」
@@ -202,6 +267,8 @@ class Client {
     /// @return 可 `co_await` 的协程任务：成功携物化的 `Response`，失败携对应 `http-*` / `net-*` 错误码。
     /// @note 缓存开着且本请求未 `no_cache()` 时，命中新鲜副本直接返回（`from_cache()` 为真、零连接），
     ///       陈旧副本自动挂条件头重验证，304 用新头更新已存应答后交出。
+    /// @note 起手先于查表、其后逐跳各过一遍 `NetPolicy` 三维判定（三级取定见本头「声明式安全策略」段）：
+    ///       被拒时落 `net-policy-violated`，一条连接都不发起、一个字节都不写出，缓存命中也不例外。
     [[nodiscard]] auto send(Request request) const -> CoroTask<Result<Response>>;
 
     /// @brief 发送一次请求并**流式**收下应答：字节到手一段就交一段，整条消息不必同时存在于内存。
@@ -234,6 +301,7 @@ class Client {
     /// @param request 待发送的请求（按值接管以随协程帧存活，调用后可立即销毁源对象）。
     /// @param sink 接收侧宿主；**按引用**交付，其生命周期必须覆盖到协程收尾（`is_done()` 之后）。
     /// @return 可 `co_await` 的协程任务：成功携 `StreamOutcome`，失败携对应 `http-*` / `net-*` 错误码。
+    /// @note 策略判定与 `send` 同一条路：起手先于查表、其后逐跳，被拒落 `net-policy-violated` 且不发起连接。
     /// @note Thread: `sink` 的三个入口恒在主线程同步调用，由本协程串行驱动
     /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
     [[nodiscard]] auto open_stream(Request request, DataSink &sink) const -> CoroTask<Result<StreamOutcome>>;
@@ -242,6 +310,8 @@ class Client {
     std::optional<std::uint64_t> max_body_bytes_;  ///< 物化体上限（nullopt = 不限）
     std::optional<std::uint64_t> max_decompressed_bytes_;  ///< 解压产物上限（nullopt = 跟随上一行）
     TlsContext tls_;  ///< https 握手口径
+    ProxyEnvironment proxy_;  ///< 代理集合（缺省空 = 一切直连；逐跳由 `for_target` 现算）
+    std::optional<NetPolicy> policy_;  ///< 已设的安全策略（未设 = 跟随进程级默认与保守缺省）
     std::function<std::uint64_t()> progress_frame_source_;  ///< 进度发射的帧号源（空 = 回合闸）
     RetryPolicy retry_;  ///< 缺省重试策略（attempts=1 即关闭）；逐请求由 `Request::retry_policy()` 覆盖
     CacheOptions cache_options_;  ///< 缓存口径（缺省关）；逐请求由 `Request::no_cache()` 越

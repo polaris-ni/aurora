@@ -6438,6 +6438,17 @@
       "hint": "The channel exists on this platform but the read was refused (registry access, dynamic-store failure); this is distinct from a machine that simply has no proxy configured, and the library never treats the two as the same outcome"
     },
     {
+      "enum": "NetPolicyViolated",
+      "slug": "net-policy-violated",
+      "category": "io",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Network policy refused the request before any byte went out: '{detail}'",
+      "hint": "A declarative NetPolicy dimension (cleartext allow-list, TLS version floor, or require-proxy) rejected this target; the detail names the dimension and both sides of the conflict. Widen the policy, add the host to allow_cleartext_hosts, or raise the TLS context's floor to match the policy — the request itself is unchanged and retrying it as-is cannot succeed"
+    },
+    {
       "enum": "NetOptionFailed",
       "slug": "net-option-failed",
       "category": "io",

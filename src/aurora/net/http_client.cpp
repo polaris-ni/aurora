@@ -200,6 +200,88 @@ auto advertise_accept_encoding(Request &request) -> void {
     request.header("Accept-Encoding", detail::AURORA_HTTP_ACCEPT_ENCODING);
 }
 
+/// @brief 一跳的建连事实：连到谁、以哪种形态连、请求行写成什么形态。
+///
+/// 三条发起侧口径在这枚小结构里一次定死：① 代理决策（`for_target` 的产出）先定；② 策略判定读的就是这一份
+/// 决策，故「有没有经代理」在库里只有一个答案；③ 建连一律走 `await_connect_via` 这一条路，转发形态只是把
+/// 「对端」换成代理本身、并把配置降为 `Direct`（代理已经站在门口，不必再「经代理」找它）。
+struct HopRoute {
+    ProxyConfig connect_with;  ///< 交给 `await_connect_via` 的配置（`Direct` = 对端就是直连目标或代理本身）
+    std::string peer_host;  ///< 建连对端主机文本
+    std::uint16_t peer_port{0};  ///< 建连对端端口（主机序）
+    bool absolute_form{false};  ///< 请求行是否写成绝对形态（明文交转发代理时才是真）
+};
+
+/// @brief 生效策略的三级取定：客户端显式设过 → 进程级默认 → `NetPolicy{}` 那组保守缺省。
+/// @param client_policy `Client::policy()` 的已设值。
+/// @return 本次交换逐跳共用的那一份策略。
+auto effective_policy(const std::optional<NetPolicy> &client_policy) -> NetPolicy {
+    if (client_policy.has_value()) {
+        return client_policy.value();
+    }
+    if (const auto from_process = default_policy(); from_process.has_value()) {
+        return from_process.value();
+    }
+    return NetPolicy{};
+}
+
+/// @brief 定出本跳的路由：先按目标算代理决策，再过策略闸，最后折算对端与请求行形态。
+///
+/// 次序是刻意的：策略要看「本跳实际会经过哪个代理」（`require_proxy` 那一维读的正是这个），故在决策之后；
+/// 而这一切都发生在任何 `co_await` 之前，被拒的那一跳一条连接都不发起、一个字节都不写出。
+/// @param environment 客户端的代理集合。
+/// @param tls 客户端的 TLS 口径（策略的版本下限维度拿它对表）。
+/// @param policy 本次交换生效的策略（发起那一刻读定，逐跳共用同一份）。
+/// @param target 本跳的目标 URL（已解析）。
+/// @param port 本跳的目标端口。
+/// @return 成功携路由；被策略拒绝携 `net-policy-violated`。
+auto plan_route(const ProxyEnvironment &environment, const TlsContext &tls, const NetPolicy &policy, const Url &target,
+                std::uint16_t port) -> Result<HopRoute> {
+    HopRoute route;
+    route.peer_host = std::string{target.host()};
+    route.peer_port = port;
+    const ProxyConfig decision = environment.for_target(route.peer_host, port, target.is_secure());
+    if (const auto verdict = policy.evaluate(target, decision, tls); !verdict) {
+        return Result<HopRoute>{verdict.error()};
+    }
+    // 明文遇上 HTTP 代理时按「转发」而非「隧道」交付：请求行写成绝对形态、对端换成代理本身。转发本就是转发
+    // 代理的本职，而 `CONNECT` 到 80 常被拒止——那会把「这种用法代理不支持」伪装成连通性故障。SOCKS5 没有
+    // 转发形态，`https://` 的载荷也不能让代理明文看见，两者一律建隧道、请求行照写 origin-form。
+    if (decision.kind() == ProxyKind::HttpConnect && !target.is_secure()) {
+        route.peer_host = decision.host();
+        route.peer_port = decision.port();
+        route.absolute_form = true;
+        route.connect_with = ProxyConfig::direct();
+    } else {
+        route.connect_with = decision;
+    }
+    return Result<HopRoute>{std::move(route)};
+}
+
+/// @brief 起手策略闸：目标解析不了或没有可用端口时放行（那是 `render_head` / 发起处原有判据要报的错，
+///        策略不抢它们的活、更不替畸形目标编一条），其余情形与逐跳判定同一条路。
+/// @param environment 代理集合。
+/// @param tls TLS 口径。
+/// @param policy 生效策略。
+/// @param request 起手请求（其 URL 可能已记解析失败）。
+/// @return 成功为 `Result<void>{}`；被拒携 `net-policy-violated`。
+auto gate_origin(const ProxyEnvironment &environment, const TlsContext &tls, const NetPolicy &policy,
+                 const Request &request) -> Result<void> {
+    const auto &slot = request.url();
+    if (!slot.has_value()) {
+        return Result<void>{};
+    }
+    const auto port = slot.value().effective_port();
+    if (!port.has_value()) {
+        return Result<void>{};
+    }
+    auto routed = plan_route(environment, tls, policy, slot.value(), *port);
+    if (!routed) {
+        return Result<void>{routed.error()};
+    }
+    return Result<void>{};
+}
+
 /// @brief 按应答的 `Content-Encoding` 链把已物化的消息体还原成原始字节（就地替换）。
 ///
 /// 分帧解出的仍是编码字节，还原必须在物化之后、`Response` 交出之前完成，`Response::body()` 才是调用方可
@@ -459,6 +541,13 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         co_return Result<Response>{*invalid};
     }
     Request origin = std::move(request);
+    // 策略在发起那一刻读定：本次交换的每一跳与缓存命中都问这一份，之后改 `Client::policy()` 或进程级默认
+    // 都不影响已在途的交换（判定用的是「出发时」的策略，不是「回投时」的策略）。
+    const NetPolicy security = effective_policy(policy_);
+    // 起手策略闸排在查表之前：命中缓存照样是一次交付，不能因为它就没被问过。
+    if (const auto verdict = gate_origin(proxy_, tls_, security, origin); !verdict) {
+        co_return Result<Response>{verdict.error()};
+    }
     // 缓存起手式：命中新鲜副本时一条连接都不发起就交出——§12 承诺的「同一 URL 二次请求不触网」正是这一条。
     // 命中陈旧副本时把两枚条件头挂在**原始请求**上，故重试环的每一次尝试都带着同一份校验子重跑（挂在逐跳
     // 副本上的话，第二次尝试就成了「第一次验证、第二次裸打」）。
@@ -512,15 +601,12 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         StageTimer total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
 
         for (;;) {
-            // ── 写出物化：请求头部 + 体（render_head 失败即 URL / 字段问题，原样交出）。
-            auto head = current.render_head();
-            if (!head) {
-                one = Result<Response>{head.error()};
-                break;
-            }
-            const auto &url_slot = current.url();  // render_head 成功即目标已解析
+            // ── 路由先于渲染：请求行写成哪种形态，取决于本跳的对端是目标本身还是转发代理。
+            const auto &url_slot = current.url();
             if (!url_slot.has_value()) {
-                one = Result<Response>{make_error(ErrorCode::HttpProtocolError, "target vanished after render_head")};
+                // 目标解析失败在工厂就已记进对象，这里借 render_head 把那条错误原样交出，不另编一句。
+                auto undeliverable = current.render_head();
+                one = Result<Response>{undeliverable.error()};
                 break;
             }
             const Url &target = url_slot.value();
@@ -538,6 +624,21 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                 one = Result<Response>{make_error(ErrorCode::HttpProtocolError, "target has no effective port")};
                 break;
             }
+            // 策略判定与代理决策同在这一处完成（`Direct` 与其余形态共用同一条建连路，见 `detail::await_connect_via`）：
+            // 故「有没有经代理」「这跳能不能发」在库里只有一个答案，且被拒时还轮不到渲染与建连。
+            auto routed = plan_route(proxy_, tls_, security, target, *port);
+            if (!routed) {
+                one = Result<Response>{routed.error()};
+                break;
+            }
+            const HopRoute &route = routed.value();
+            // ── 写出物化：请求头部 + 体（render_head 失败即字段畸形，一条连接都不发起、原样交出）。
+            auto head = current.render_head(route.absolute_form);
+            if (!head) {
+                one = Result<Response>{head.error()};
+                break;
+            }
+            // TLS 握手与证书校验的对象恒是目标主机（隧道之上再握手），代理看不见这些。
             const std::string host{target.host()};
 
             // ── 建连并统一读写口：明文 / TLS 两条流经捕获 shared_ptr 的类型擦除闭包收敛到同一对 awaiter。
@@ -545,7 +646,8 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
             StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
             if (target.is_secure()) {
-                auto plain = co_await detail::await_connect(host, *port, options, token);
+                auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
+                                                                options, token);
                 if (!plain) {
                     one = Result<Response>{plain.error()};
                     break;
@@ -559,7 +661,8 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                 read_one = [holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
                 write_one = [holder](std::span<const char> data) { return detail::await_write(*holder, data); };
             } else {
-                auto plain = co_await detail::await_connect(host, *port, options, token);
+                auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
+                                                                options, token);
                 if (!plain) {
                     one = Result<Response>{plain.error()};
                     break;
@@ -807,6 +910,11 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
     StageTimer budget_timer(loop_open ? policy.budget : std::optional<std::chrono::milliseconds>{},
                             TimeoutStage::Budget, sequence, wall);
     Request origin = std::move(request);
+    // 策略读定与起手闸同 `send`：发起那一刻取一份，逐跳共用；闸排在查表之前，缓存命中同样是交付。
+    const NetPolicy security = effective_policy(policy_);
+    if (const auto verdict = gate_origin(proxy_, tls_, security, origin); !verdict) {
+        co_return Result<StreamOutcome>{verdict.error()};
+    }
     // 缓存起手式：命中新鲜副本时把已存的那份体按段交给同一个宿主，一条连接都不发起。交付次序与真取回时一致
     // （`on_head` → 若干次 `on_data` → `on_end`），`wire_bytes` 恒 0——本次确实没有线上字节，不是把计数漏掉了。
     //
@@ -860,16 +968,11 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
         StageTimer total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
 
         for (;;) {
-            // ── 写出物化：请求头部 + 体（与 `send` 同判据，含「挂了回调才分块写」那条）。
-            auto head = current.render_head();
-            if (!head) {
-                one = Result<StreamOutcome>{head.error()};
-                break;
-            }
+            // ── 路由先于渲染：请求行形态取决于本跳的对端（与 `send` 同判据）。
             const auto &url_slot = current.url();
             if (!url_slot.has_value()) {
-                one = Result<StreamOutcome>{
-                    make_error(ErrorCode::HttpProtocolError, "target vanished after render_head")};
+                auto undeliverable = current.render_head();
+                one = Result<StreamOutcome>{undeliverable.error()};
                 break;
             }
             const Url &target = url_slot.value();
@@ -886,6 +989,20 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                 one = Result<StreamOutcome>{make_error(ErrorCode::HttpProtocolError, "target has no effective port")};
                 break;
             }
+            // 策略判定与代理决策同在这一处完成；被拒时连头部都没渲染，更没建连。
+            auto routed = plan_route(proxy_, tls_, security, target, *port);
+            if (!routed) {
+                one = Result<StreamOutcome>{routed.error()};
+                break;
+            }
+            const HopRoute &route = routed.value();
+            // ── 写出物化：请求头部 + 体（与 `send` 同判据，含「挂了回调才分块写」那条）。
+            auto head = current.render_head(route.absolute_form);
+            if (!head) {
+                one = Result<StreamOutcome>{head.error()};
+                break;
+            }
+            // TLS 握手与证书校验的对象恒是目标主机（隧道之上再握手），代理看不见这些。
             const std::string host{target.host()};
 
             // ── 建连并统一读写口：明文 / TLS 两条流经捕获 shared_ptr 的类型擦除闭包收敛到同一对 awaiter。
@@ -893,7 +1010,8 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
             StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
             if (target.is_secure()) {
-                auto plain = co_await detail::await_connect(host, *port, options, token);
+                auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
+                                                                options, token);
                 if (!plain) {
                     one = Result<StreamOutcome>{plain.error()};
                     break;
@@ -907,7 +1025,8 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                 read_one = [holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
                 write_one = [holder](std::span<const char> data) { return detail::await_write(*holder, data); };
             } else {
-                auto plain = co_await detail::await_connect(host, *port, options, token);
+                auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
+                                                                options, token);
                 if (!plain) {
                     one = Result<StreamOutcome>{plain.error()};
                     break;

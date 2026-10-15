@@ -146,25 +146,26 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     NetProxyProtocol = 102,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
     NetDnsFailed = 103,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
     NetProxyConfigUnreadable = 104,  ///< net-proxy-config-unreadable
-    NetOptionFailed = 105,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
-    NetConnectTimeout = 106,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
-    NetBufferLimit = 107,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
-    NetFramerOverflow = 108,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
-    NetFramerConfigInvalid = 109,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
-    NetOptionConflict = 110,  ///< net-option-conflict
-    NetTlsHandshakeFailed = 111,  ///< net-tls-handshake-failed: TLS handshake failed: '{detail}'
-    NetTlsCertRejected = 112,  ///< net-tls-cert-rejected: TLS certificate rejected: '{detail}'
-    NetTlsVersionMismatch = 113,  ///< net-tls-version-mismatch: TLS protocol version mismatch: '{detail}'
-    NetTlsEngineUnavailable = 114,  ///< net-tls-engine-unavailable: No TLS backend available: '{detail}'
-    NetTlsPinMismatch = 115,  ///< net-tls-pin-mismatch: TLS certificate pin mismatch: '{detail}'
-    HttpRequestInvalid = 116,  ///< http-request-invalid: HTTP request cannot be sent as written: '{detail}'
-    HttpTimeout = 117,  ///< http-timeout: HTTP request timed out: '{detail}'
-    HttpRedirectLimit = 118,  ///< http-redirect-limit: HTTP redirect chain exceeded the configured limit: '{detail}'
-    HttpBodyTooLarge = 119,  ///< http-body-too-large: HTTP response body exceeds the configured limit: '{detail}'
-    HttpCharsetUnsupported = 120,  ///< http-charset-unsupported: HTTP response charset is not supported: '{detail}'
-    HttpProtocolError = 121,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
-    HttpContentEncodingUnsupported = 122,  ///< http-content-encoding-unsupported
-    HttpBodyCorrupt = 123,  ///< http-body-corrupt: HTTP response body cannot be decoded: '{detail}'
+    NetPolicyViolated = 105,  ///< net-policy-violated
+    NetOptionFailed = 106,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
+    NetConnectTimeout = 107,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
+    NetBufferLimit = 108,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
+    NetFramerOverflow = 109,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
+    NetFramerConfigInvalid = 110,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
+    NetOptionConflict = 111,  ///< net-option-conflict
+    NetTlsHandshakeFailed = 112,  ///< net-tls-handshake-failed: TLS handshake failed: '{detail}'
+    NetTlsCertRejected = 113,  ///< net-tls-cert-rejected: TLS certificate rejected: '{detail}'
+    NetTlsVersionMismatch = 114,  ///< net-tls-version-mismatch: TLS protocol version mismatch: '{detail}'
+    NetTlsEngineUnavailable = 115,  ///< net-tls-engine-unavailable: No TLS backend available: '{detail}'
+    NetTlsPinMismatch = 116,  ///< net-tls-pin-mismatch: TLS certificate pin mismatch: '{detail}'
+    HttpRequestInvalid = 117,  ///< http-request-invalid: HTTP request cannot be sent as written: '{detail}'
+    HttpTimeout = 118,  ///< http-timeout: HTTP request timed out: '{detail}'
+    HttpRedirectLimit = 119,  ///< http-redirect-limit: HTTP redirect chain exceeded the configured limit: '{detail}'
+    HttpBodyTooLarge = 120,  ///< http-body-too-large: HTTP response body exceeds the configured limit: '{detail}'
+    HttpCharsetUnsupported = 121,  ///< http-charset-unsupported: HTTP response charset is not supported: '{detail}'
+    HttpProtocolError = 122,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
+    HttpContentEncodingUnsupported = 123,  ///< http-content-encoding-unsupported
+    HttpBodyCorrupt = 124,  ///< http-body-corrupt: HTTP response body cannot be decoded: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -182,7 +183,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 124> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 125> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1493,6 +1494,21 @@ inline constexpr std::array<ErrorMeta, 124> AURORA_ERROR_TABLE = {
             .hint = "The channel exists on this platform but the read was refused (registry access, dynamic-store "
                     "failure); this is distinct from a machine that simply has no proxy configured, and the library "
                     "never treats the two as the same outcome",
+        },
+        {
+            .code = ErrorCode::NetPolicyViolated,
+            .ident = "NetPolicyViolated",
+            .slug = "net-policy-violated",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "Network policy refused the request before any byte went out: '{detail}'",
+            .hint = "A declarative NetPolicy dimension (cleartext allow-list, TLS version floor, or require-proxy) "
+                    "rejected this target; the detail names the dimension and both sides of the conflict. Widen the "
+                    "policy, add the host to allow_cleartext_hosts, or raise the TLS context's floor to match the "
+                    "policy — the request itself is unchanged and retrying it as-is cannot succeed",
         },
         {
             .code = ErrorCode::NetOptionFailed,

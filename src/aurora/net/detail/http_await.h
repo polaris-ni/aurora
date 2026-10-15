@@ -33,6 +33,7 @@
 #include "aurora/core/result.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/engine.h"
+#include "aurora/net/proxy.h"
 #include "aurora/net/tls.h"
 #include "aurora/net/transport.h"
 #include "aurora/state/async.h"  // aurora::detail::post_to_main
@@ -87,15 +88,26 @@ class CallbackAwaiter {
     std::optional<Result<T>> result_;  ///< 完成结果；resume 前必有值
 };
 
-/// @brief 按主机名 + 端口建连（内含解析与 Happy Eyeballs 竞速），结果携已建立的流。
-inline auto await_connect(std::string host, std::uint16_t port, const StreamOptions &options,
-                          const Cancellation &cancellation) -> CallbackAwaiter<StreamTransport> {
+/// @brief 按代理决策建连：`Direct` 走直连入口，其余经代理建隧道，隧道不成即失败、绝不回退直连。
+///
+/// 发起侧只保留这一条建连路（代理与否在 `ProxyEnvironment::for_target` 处一次决定，之后不再分岔）：
+/// `connect_via` 对 `ProxyKind::Direct` 的契约就是「等价于走直连入口」（`net/transport.h`），故无代理的
+/// 缺省路径与接入代理前逐字节同型，竞速与地址族口径也共用同一份编排。
+/// @param proxy 本跳的代理决策（含 `Direct`）。
+/// @param host 目标主机文本。
+/// @param port 目标端口（主机序）。
+/// @param options 缓冲、超时与竞速口径；`connect_timeout` 在此覆盖「直到隧道可用」的整段。
+/// @param cancellation 本次交换的取消令牌。
+/// @return 可等待体，求得已建立的明文流（可能是隧道里的那条）。
+inline auto await_connect_via(ProxyConfig proxy, std::string host, std::uint16_t port, const StreamOptions &options,
+                              const Cancellation &cancellation) -> CallbackAwaiter<StreamTransport> {
     return CallbackAwaiter<StreamTransport>(
-        // connect 发起器经 std::function 类型擦除转入，命中本仓记录在案的「转入 std::function 一律判
-        // 不应抛出」系统性假告警面；发起器实际不抛（connect 全程回调，失败以 Result 交付，绝不抛出穿越）。
+        // 发起器经 std::function 类型擦除转入，命中本仓记录在案的「转入 std::function 一律判不应抛出」系统性
+        // 假告警面；发起器实际不抛（代理握手全程回调，失败以 Result 交付，绝不抛出穿越协程帧）。
         // NOLINTNEXTLINE(bugprone-exception-escape)
-        [host = std::move(host), port, options, cancellation](CallbackAwaiter<StreamTransport>::Sink on_done) mutable {
-            StreamTransport::connect(host, port, options, cancellation, std::move(on_done));
+        [proxy = std::move(proxy), host = std::move(host), port, options,
+         cancellation](CallbackAwaiter<StreamTransport>::Sink on_done) mutable {
+            StreamTransport::connect_via(proxy, host, port, options, cancellation, std::move(on_done));
         });
 }
 
@@ -106,7 +118,7 @@ inline auto await_handshake(StreamTransport stream, std::string server_name, con
     // 发起只发生一次，握手时从共享对象 move 出（此后该对象转为空态，无人再用）。
     auto plain = std::make_shared<StreamTransport>(std::move(stream));
     return CallbackAwaiter<TlsTransport>(
-        // 同 await_connect：发起器经 std::function 类型擦除转入触发的系统性假告警，握手失败以 Result 交付、不抛。
+        // 同 await_connect_via：发起器经 std::function 类型擦除转入触发的系统性假告警，握手失败以 Result 交付、不抛。
         // NOLINTNEXTLINE(bugprone-exception-escape)
         [plain, server_name = std::move(server_name), context,
          cancellation](CallbackAwaiter<TlsTransport>::Sink on_done) {
@@ -137,7 +149,7 @@ auto await_read(Stream &stream, std::span<char> buffer) -> CallbackAwaiter<std::
 /// @param cancellation 本次交换的取消令牌（跨尝试的墙到点即取消它；按值持有，随 awaiter 存活）。
 inline auto await_sleep(std::chrono::milliseconds delay, Cancellation cancellation) -> CallbackAwaiter<void> {
     return CallbackAwaiter<void>(
-        // 同 await_connect：发起器经 std::function 类型擦除转入触发的系统性假告警面；本发起器只做登记与
+        // 同 await_connect_via：发起器经 std::function 类型擦除转入触发的系统性假告警面；本发起器只做登记与
         // 一次原子写，不抛。
         // NOLINTNEXTLINE(bugprone-exception-escape)
         [delay, cancellation](CallbackAwaiter<void>::Sink on_done) mutable {

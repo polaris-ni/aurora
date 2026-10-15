@@ -40,6 +40,7 @@
 #include "aurora/net/blocking.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
+#include "aurora/net/policy.h"
 #include "aurora/state/coroutine.h"
 #include "framework/async_wait.h"
 #include "framework/aurora_test.h"
@@ -52,6 +53,7 @@ namespace {
 
 using aurora::CoroTask;
 using aurora::Result;
+using aurora::net::NetPolicy;
 using aurora::net::http::CacheOptions;
 using aurora::net::http::Client;
 using aurora::net::http::error_class_of;
@@ -385,10 +387,23 @@ const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0, 
     return haystack.find(needle) != std::string_view::npos;
 }
 
+/// @brief 为测试放行明文：缺省安全策略拒绝一切未列入白名单的 `http://` 目标，而本套件的对端恒在回环地址上。
+///
+/// 策略不给回环留隐含例外（那等于给「测试环境」开后门，生产代码里没人审查它），故触网用例逐客户端显式点名
+/// 回环地址。删掉本函数的调用会让本套件全部触网用例以 `net-policy-violated` 变红——这同时是闸门确实在建连
+/// 之前起作用的自证。
+/// @param client 待配置的客户端。
+auto allow_test_cleartext(Client &client) -> void {
+    NetPolicy permissive;
+    permissive.allow_cleartext_hosts = {"127.0.0.1"};
+    client.policy(std::move(permissive));
+}
+
 }  // namespace
 
 AURORA_TEST_CASE(send_materializes_content_length) {
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(
         reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -407,6 +422,7 @@ AURORA_TEST_CASE(send_materializes_content_length) {
 
 AURORA_TEST_CASE(send_materializes_chunked_body) {
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(reply_after_reading(
         1, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -424,6 +440,7 @@ AURORA_TEST_CASE(send_materializes_chunked_body) {
 
 AURORA_TEST_CASE(send_follows_redirect_across_peers) {
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer target(reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nZ"));
     AURORA_TEST_REQUIRE(target.valid());
     const std::string redirect =
@@ -447,6 +464,7 @@ AURORA_TEST_CASE(send_follows_redirect_across_peers) {
 
 AURORA_TEST_CASE(send_stops_at_redirect_limit) {
     Client client;
+    allow_test_cleartext(client);
     // 每跳都回 302 指向自身路径：跟随必然撞到上限而不是收敛。
     ScriptedPeer peer(reply_after_reading(1, "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -468,6 +486,7 @@ AURORA_TEST_CASE(send_times_out_whole_request) {
     const aurora::test::net::HostDriven host;
 
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(silent());  // 连得上，但永不回字节：读侧一直挂着。
     AURORA_TEST_REQUIRE(peer.valid());
 
@@ -491,6 +510,7 @@ AURORA_TEST_CASE(send_times_out_read_idle) {
     const FakeEngineScope scope(engine);
     const aurora::test::net::HostDriven host;
     Client client;
+    allow_test_cleartext(client);
     // 对端只写头部（声明 100 字节体却不再给）后静默：读体阶段挂起，read_idle 到点。
     ScriptedPeer peer(write_then_hold("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n"));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -514,6 +534,7 @@ AURORA_TEST_CASE(send_times_out_connect) {
     const FakeEngineScope scope(engine);
     const aurora::test::net::HostDriven host;
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(silent());
     AURORA_TEST_REQUIRE(peer.valid());
 
@@ -559,6 +580,7 @@ AURORA_TEST_CASE(send_times_out_connect) {
 
 AURORA_TEST_CASE(send_decompresses_a_gzip_body) {
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(reply_after_reading(1, length_framed("Content-Encoding: gzip\r\n", bytes(AURORA_GZIP_HELLO))));
     AURORA_TEST_REQUIRE(peer.valid());
     const aurora::test::net::HostDriven host;
@@ -577,6 +599,7 @@ AURORA_TEST_CASE(send_decompresses_a_gzip_body) {
 
 AURORA_TEST_CASE(send_falls_back_to_a_raw_deflate_stream) {
     Client client;
+    allow_test_cleartext(client);
     // 对端把裸 DEFLATE（RFC 1951）称作 `deflate`：zlib 包装那条路先拒，回落路径接手；分帧走 chunked。
     ScriptedPeer peer(reply_after_reading(1, chunked_framed("Content-Encoding: deflate\r\n", bytes(AURORA_RAW_HELLO))));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -594,6 +617,7 @@ AURORA_TEST_CASE(send_falls_back_to_a_raw_deflate_stream) {
 
 AURORA_TEST_CASE(send_undoes_a_multi_stage_chain_in_reverse) {
     Client client;
+    allow_test_cleartext(client);
     // 书写次序即应用次序：载荷先经 gzip 再经 zlib，故还原必须 deflate 先、gzip 后。
     ScriptedPeer peer(
         reply_after_reading(1, length_framed("Content-Encoding: gzip, deflate\r\n", bytes(AURORA_GZIP_THEN_ZLIB))));
@@ -617,6 +641,7 @@ AURORA_TEST_CASE(send_enforces_the_decompressed_ceiling) {
     const aurora::test::net::HostDriven host;
 
     Client tight;
+    allow_test_cleartext(tight);
     tight.max_decompressed_bytes(std::optional<std::uint64_t>{std::uint64_t{4}});
     auto limited = tight.send(Request::get(loopback_url(peer.port())));
     AURORA_TEST_CHECK(
@@ -629,6 +654,7 @@ AURORA_TEST_CASE(send_enforces_the_decompressed_ceiling) {
 
     // 同一条应答在放宽后放行：证明判据管的是产物字节数而不是「压缩即拒绝」。
     Client loose;
+    allow_test_cleartext(loose);
     loose.max_decompressed_bytes(std::optional<std::uint64_t>{std::uint64_t{12}});
     auto allowed = loose.send(Request::get(loopback_url(peer.port())));
     AURORA_TEST_CHECK(
@@ -645,6 +671,7 @@ AURORA_TEST_CASE(send_advertises_the_supported_codings_by_default) {
     std::mutex guard;
     std::string recorded;
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", {})));
     AURORA_TEST_REQUIRE(peer.valid());
     const aurora::test::net::HostDriven host;
@@ -661,6 +688,7 @@ AURORA_TEST_CASE(send_keeps_the_callers_accept_encoding) {
     std::mutex guard;
     std::string recorded;
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", {})));
     AURORA_TEST_REQUIRE(peer.valid());
     const aurora::test::net::HostDriven host;
@@ -678,6 +706,7 @@ AURORA_TEST_CASE(build_advertises_and_decodes_only_when_compression_is_compiled_
     std::mutex guard;
     std::string recorded;
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(
         record_then_reply(recorded, guard, length_framed("Content-Encoding: gzip\r\n", bytes(AURORA_GZIP_HELLO))));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -727,6 +756,7 @@ AURORA_TEST_CASE(build_advertises_and_decodes_only_when_compression_is_compiled_
     std::mutex guard;
     std::string recorded;
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(
         record_then_reply(recorded, guard, length_framed("Content-Encoding: gzip\r\n", bytes(AURORA_GZIP_HELLO))));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -747,6 +777,7 @@ AURORA_TEST_CASE(build_advertises_and_decodes_only_when_compression_is_compiled_
 
 AURORA_TEST_CASE(send_refuses_a_coding_outside_the_advertised_set) {
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(reply_after_reading(1, length_framed("Content-Encoding: br\r\n", {'u', 'n', 'k'})));
     AURORA_TEST_REQUIRE(peer.valid());
     const aurora::test::net::HostDriven host;
@@ -762,6 +793,7 @@ AURORA_TEST_CASE(send_refuses_a_coding_outside_the_advertised_set) {
 
 AURORA_TEST_CASE(send_refuses_a_body_that_fails_its_declared_coding) {
     Client client;
+    allow_test_cleartext(client);
     // 分帧干净（长度对得上）但字节过不了 gzip：判消息体损坏，而不是回吐压缩字节。
     ScriptedPeer peer(reply_after_reading(1, length_framed("Content-Encoding: gzip\r\n", {'N', 'O', 'T', '-'})));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -783,6 +815,7 @@ AURORA_TEST_CASE(send_refuses_a_body_that_fails_its_declared_coding) {
 
 AURORA_TEST_CASE(send_skips_coding_validation_for_a_head_response) {
     Client client;
+    allow_test_cleartext(client);
     // HEAD 应答照抄 GET 的头部（这里连 `br` 都带上了），但本就没有可解的载荷：无体形态不校验编码名。
     ScriptedPeer peer(
         reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Encoding: br\r\nContent-Length: 4096\r\n\r\n"));
@@ -802,6 +835,7 @@ AURORA_TEST_CASE(progress_reports_upload_bytes_and_always_ends_with_a_settled_va
     // 不降、末值恰发一次且给出「总量已知」。同时验「分块只为节拍、线上字节序列与一次写完逐字节相同」——
     // 判据落在对端收到的请求全文上，那是本库外部唯一能看的事实。
     Client client;
+    allow_test_cleartext(client);
     std::string recorded;
     std::mutex guard;
     ScriptedPeer peer(record_request_then_reply("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", recorded, guard));
@@ -851,6 +885,7 @@ AURORA_TEST_CASE(a_frame_gate_holds_progress_to_one_emission_per_frame_plus_the_
     // 帧号恒定 = 整趟交换只算一帧：此时每方向至多「首发 + 末值」两笔。回合闸下同样的载荷会有多笔首发，
     // 这条判据把「合流发生在源头」写实，而不是留给调用方自己去限频。
     Client client;
+    allow_test_cleartext(client);
     std::uint64_t frame = 1;
     client.progress_frame_source([&frame]() -> std::uint64_t { return frame; });
 
@@ -894,6 +929,7 @@ AURORA_TEST_CASE(an_unarmed_request_delivers_the_same_wire_bytes_as_an_armed_one
     // 没挂回调的请求不走分块写路径，线上字节仍须与挂了回调的那条逐字节相同——判据落在对端收到的全文上，
     // 那是「观测口对无需求者零行为改动」这条口径唯一的外部证据。
     Client client;
+    allow_test_cleartext(client);
     std::string recorded;
     std::mutex guard;
     ScriptedPeer peer(record_request_then_reply("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", recorded, guard));
@@ -924,6 +960,7 @@ AURORA_TEST_CASE(an_unarmed_request_delivers_the_same_wire_bytes_as_an_armed_one
 AURORA_TEST_CASE(a_get_without_a_request_body_reports_no_upload_progress) {
     // 无上传体即不报上传：进度是「这一趟真搬了多少字节」的事实，凑一笔 0/0 只是让调用方多写一个分支。
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello"));
     AURORA_TEST_REQUIRE(peer.valid());
     const aurora::test::net::HostDriven host;
@@ -947,6 +984,7 @@ AURORA_TEST_CASE(a_get_without_a_request_body_reports_no_upload_progress) {
 AURORA_TEST_CASE(a_chunked_body_reports_download_progress_without_a_known_total) {
     // chunked 分帧给不出体总量：进度必须诚实报「未知」，而不是把已到达的字节数当总量冒充 100%。
     Client client;
+    allow_test_cleartext(client);
     ScriptedPeer peer(reply_after_reading(
         1, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -980,6 +1018,7 @@ AURORA_TEST_CASE(send_replays_a_transient_status_until_the_peer_agrees) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     // `jitter = 0` 让「等了就是算得那个数」成为可陈述的事实，而不是一个大概率事件。
     client.retry_policy(RetryPolicy{.attempts = 3,
                                     .base = std::chrono::milliseconds{50},
@@ -1011,6 +1050,7 @@ AURORA_TEST_CASE(send_hands_over_the_last_response_when_retries_are_exhausted) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.retry_policy(RetryPolicy{.attempts = 2, .base = std::chrono::milliseconds{10}});
     auto task = client.send(Request::get(loopback_url(peer.port())));
     AURORA_TEST_REQUIRE(pump_send(engine, task));
@@ -1032,6 +1072,7 @@ AURORA_TEST_CASE(send_waits_the_retry_after_the_peer_asked_for) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     // `base` 只有 50 ms（上限用缺省的 30 s，不去夹 `Retry-After`）：若对端给的数字没被当回事，
     // 第二次连接会在推进到 50 ms 时就出现。
     client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{50}});
@@ -1059,6 +1100,7 @@ AURORA_TEST_CASE(send_clamps_a_retry_after_to_the_backoff_ceiling) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     // 对端要我们等一小时，本库的单次等待上限是 100 ms：夹到上限就该看见第二次连接（而不是等一小时的
     // 虚拟时钟），但也不能短到退回 `base`——两问分别由「推进 500 ms 内必到」与「90 ms 内不到」读出。
     client.retry_policy(RetryPolicy{
@@ -1084,6 +1126,7 @@ AURORA_TEST_CASE(send_never_replays_a_non_idempotent_method) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
     // 状态码那一族本身可重试，但方法是 `POST`：重放可能把一次提交变成两次，而这份代价在失败现场无从判定。
     auto task = client.send(Request::post(loopback_url(peer.port())));
@@ -1102,6 +1145,7 @@ AURORA_TEST_CASE(send_replays_nothing_while_the_policy_is_off) {
 
     // 缺省策略 = 一次都不重放：这条是「装了环但环关着」与「本件从没打过第二次」的区分口。
     Client client;
+    allow_test_cleartext(client);
     auto task = client.send(Request::get(loopback_url(peer.port())));
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
@@ -1120,6 +1164,7 @@ AURORA_TEST_CASE(send_refuses_to_replay_a_protocol_error) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
     auto task = client.send(Request::get(loopback_url(peer.port())));
     AURORA_TEST_REQUIRE(pump_send(engine, task));
@@ -1146,6 +1191,7 @@ AURORA_TEST_CASE(send_refuses_to_replay_a_failure_the_table_marks_non_retryable)
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
     auto task = client.send(Request::get(loopback_url(peer.port())));
     AURORA_TEST_REQUIRE(pump_send(engine, task));
@@ -1165,6 +1211,7 @@ AURORA_TEST_CASE(send_gives_the_total_window_a_fresh_clock_per_attempt) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
     // `total` 是**每一次尝试**的墙：三次尝试各烧掉一份 50 ms，而不是「整序列只剩 0 ms」。
     auto task =
@@ -1188,6 +1235,7 @@ AURORA_TEST_CASE(send_stops_the_retry_sequence_at_the_budget) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     // 跨全部尝试的一堵墙（80 ms）比任何单档时限都短：到点即掐掉在途的那一次，剩余尝试不再发起。
     client.retry_policy(
         RetryPolicy{.attempts = 5, .base = std::chrono::milliseconds{10}, .budget = std::chrono::milliseconds{80}});
@@ -1210,6 +1258,7 @@ AURORA_TEST_CASE(send_refuses_an_out_of_range_policy_before_any_connection) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     // 越界形态在起手就挡下（`http-request-invalid`），不进入任何一次尝试：连一条连接都不该发出去。
     auto task = client.send(
         Request::get(loopback_url(peer.port())).retry_policy(RetryPolicy{.base = std::chrono::milliseconds{-1}}));
@@ -1228,6 +1277,7 @@ AURORA_TEST_CASE(a_fresh_cache_hit_never_reaches_the_peer) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
 
@@ -1258,6 +1308,7 @@ AURORA_TEST_CASE(a_stale_entry_asks_before_it_delivers) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
     AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
@@ -1290,6 +1341,7 @@ AURORA_TEST_CASE(the_peer_can_forbid_the_table) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
     AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
@@ -1308,6 +1360,7 @@ AURORA_TEST_CASE(a_request_may_bypass_the_table) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
     AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
@@ -1333,6 +1386,7 @@ AURORA_TEST_CASE(the_table_is_off_until_it_is_turned_on) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;  // 缺省即关：同一 URL 两次请求照旧两次触网，`from_cache()` 恒假
+    allow_test_cleartext(client);
     const auto url = loopback_url(peer.port());
     AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
     const auto second = send_and_drive(client, Request::get(url));
@@ -1347,6 +1401,7 @@ AURORA_TEST_CASE(a_write_response_is_never_stored) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
     AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::post(url))));
@@ -1369,6 +1424,7 @@ AURORA_TEST_CASE(vary_makes_the_second_request_a_different_request) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;
+    allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
 

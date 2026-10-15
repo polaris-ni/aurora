@@ -190,7 +190,7 @@ auto Request::on_progress(ProgressHandler handler) -> Request & {
     return *this;
 }
 
-auto Request::render_head() const -> Result<std::string> {
+auto Request::render_head(bool absolute_form) const -> Result<std::string> {
     if (!url_.has_value()) {
         // 目标解析失败在工厂就已定案，这里只是把那条错误原样交出去，不再另编一句。
         return Result<std::string>{*url_error_};
@@ -200,7 +200,7 @@ auto Request::render_head() const -> Result<std::string> {
     if (!body_.empty() && !fields.contains("Content-Length") && !fields.contains("Transfer-Encoding")) {
         fields.set("Content-Length", std::to_string(body_.size()));
     }
-    return wire::render_request_head(method_text(method_), *url_, fields);
+    return wire::render_request_head(method_text(method_), *url_, fields, absolute_form);
 }
 
 Response::Response(std::uint16_t status, std::string reason, Headers headers, std::vector<char> body, bool from_cache)
@@ -275,12 +275,13 @@ auto error_class_of(ErrorCode code) -> HttpErrorClass {
         case ErrorCode::HttpRedirectLimit:  // 对端把重定向写成了环
             return HttpErrorClass::Protocol;
         default:
-            // 兜底档覆盖两类：本族里「动作在代码或配置里而不在网络上」的 16 枚（`net-url-invalid` /
+            // 兜底档覆盖两类：本族里「动作在代码或配置里而不在网络上」的 17 枚（`net-url-invalid` /
             // `http-request-invalid` / `net-endpoint-invalid` / `net-platform-unavailable` /
             // `net-tls-engine-unavailable` / `net-option-failed` / `net-option-conflict` /
             // `net-timeout-option-failed` / `net-proxy-config-invalid` / `net-proxy-unsupported` /
             // `net-framer-config-invalid` / `net-buffer-limit` / `net-framer-overflow` /
-            // `http-body-too-large` / `http-charset-unsupported` / `http-content-encoding-unsupported`），
+            // `net-policy-violated` / `http-body-too-large` / `http-charset-unsupported` /
+            // `http-content-encoding-unsupported`），
             // 以及压根不属于网络交换的其它族码。逐码清单以 `specification/06-app-platform.md` §8.8.22 与
             // `utest_net_http` 的期望表为准（本 switch 与那两处同批改）；分型是观测口而非校验口，故不报错、只归档。
             return HttpErrorClass::Invalid;

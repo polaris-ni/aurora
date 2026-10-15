@@ -85,12 +85,17 @@ enum class BodyFraming : std::uint8_t {
 /// - 方法文本必须是 token（未知方法在发起之前即拒，而不是让对端回一句 501 再解释）；
 /// - 字段名必须是 token、字段值不得含 CR / LF（头部注入的唯一入口就是这两个字符）；
 /// - 未给 `Host` 时按目标 URL 补齐（含非缺省端口），未给请求目标（path 为空）时补 `/`。
+///
+/// 请求目标有两种形态（`RFC 9112 §3.2.2` 把它列为 origin-form / absolute-form 等五种之一，客户端只用其中
+/// 两种）：origin-form 是「连到目标本身」时的写法，absolute-form 是「把这条请求交给转发代理」时的写法。
 /// @param method_text 方法文本（大写的 `GET` / `POST` 之类，取自 `http::method_text()`）。
 /// @param target 已解析的目标 URL；只用 path / query 拼请求目标，用 host / port 拼 `Host`。
 /// @param fields 请求字段（原始拼写原样写出，同名多条按登记次序全部写出）。
+/// @param absolute_form 请求目标是否写成绝对形态（`scheme://authority/path?query`，恒不含片段与 userinfo）；
+///                      假 = origin-form（缺省，直连与隧道两条路都是它）。
 /// @return 请求字节；不合文法为 `http-request-invalid`。
-[[nodiscard]] auto render_request_head(std::string_view method_text, const Url &target, const Headers &fields)
-    -> Result<std::string>;
+[[nodiscard]] auto render_request_head(std::string_view method_text, const Url &target, const Headers &fields,
+                                       bool absolute_form = false) -> Result<std::string>;
 
 /// @brief 分块传输（`Transfer-Encoding: chunked`）的解码状态机。
 ///
