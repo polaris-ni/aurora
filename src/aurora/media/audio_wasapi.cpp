@@ -625,7 +625,7 @@ auto WasapiCaptureBackend::start(CaptureFn /*on_pcm*/) -> bool { return false; }
 
 auto WasapiCaptureBackend::stop() -> void {}
 
-auto WasapiCaptureBackend::failed() -> bool { return false; }  // 桩无采集线程
+auto WasapiCaptureBackend::failed() const -> bool { return false; }  // 桩无采集线程
 
 }  // namespace aurora
 

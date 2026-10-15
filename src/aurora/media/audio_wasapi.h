@@ -64,7 +64,7 @@ class WasapiCaptureBackend final : public AudioCaptureBackend {
     /// @brief 中段设备失败观察口：true = 采集线程已因设备错误退出（回调不再到达）。
     ///        内部 `running` 标志是 stop 握手位（承载 join 义务），不可作死活判据。
     ///        disabled 桩恒 false（start 恒 false → 无中段可言）。
-    [[nodiscard]] static auto failed() -> bool;
+    [[nodiscard]] auto failed() const -> bool;
 
   private:
     struct Impl;
