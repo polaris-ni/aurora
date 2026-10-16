@@ -1026,12 +1026,14 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
 
     if (!insecure_) {
         if (anchors_ != nullptr) {
+            ::fprintf(stderr, "[tls-st][diag] before SecTrustSetAnchorCertificates\n");
             if (const auto status = ::SecTrustSetAnchorCertificates(trust, anchors_); status != noErr) {
                 return tls_error(ErrorCode::NetTlsHandshakeFailed,
                                  "appended trust roots were not accepted, status=" + hex_status(status));
             }
             // false = 除给定根之外**也**认系统信任库：追加而非替换。做成替换会让所有对接公网的用例在给出
             // 自签根的那一刻突然不认合法证书，那是比拒绝更糟的故障。
+            ::fprintf(stderr, "[tls-st][diag] before SecTrustSetAnchorCertificatesOnly\n");
             if (const auto status = ::SecTrustSetAnchorCertificatesOnly(trust, false); status != noErr) {
                 return tls_error(ErrorCode::NetTlsHandshakeFailed,
                                  "trust root merging was not accepted, status=" + hex_status(status));
@@ -1046,19 +1048,28 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
             return tls_error(ErrorCode::NetTlsHandshakeFailed, "server name is not representable as a policy host");
         }
         const CfReleaser expected_guard{expected};
+        ::fprintf(stderr, "[tls-st][diag] before SecPolicyCreateSSL\n");
         const SecPolicyRef policy = ::SecPolicyCreateSSL(true, expected);
         if (policy == nullptr) {
             return tls_error(ErrorCode::NetTlsHandshakeFailed, "server authentication policy is unavailable");
         }
         const CfReleaser policy_guard{policy};
+        ::fprintf(stderr, "[tls-st][diag] before SecTrustSetPolicies\n");
         if (const auto status = ::SecTrustSetPolicies(trust, policy); status != noErr) {
             return tls_error(ErrorCode::NetTlsHandshakeFailed,
                              "server authentication policy was not accepted, status=" + hex_status(status));
         }
     }
 
+    // 沙箱/无网络的 CI 跑者上，SecTrustEvaluateWithError 默认会尝试联网取 OCSP/中间证书，受限网络下
+    // Security 框架可能直接 abort（而非返回错误）。显式关闭网络取数让评估在离线环境确定化，与既有
+    // 「吊销信息取不到也不拒连」的口径一致。TEMP DIAG：开着网络开关之前先打点。
+    ::fprintf(stderr, "[tls-st][diag] before SecTrustSetNetworkFetchAllowed\n");
+    ::SecTrustSetNetworkFetchAllowed(trust, false);
+    ::fprintf(stderr, "[tls-st][diag] before SecTrustEvaluateWithError\n");
     CFErrorRef error = nullptr;
     const bool trusted = ::SecTrustEvaluateWithError(trust, &error);
+    ::fprintf(stderr, "[tls-st][diag] after SecTrustEvaluateWithError trusted=%d\n", static_cast<int>(trusted));
     // 系统的失败描述只说「哪张证书出了什么问题」，不含我们本来要连的那个名字；而「连到了给别人签发的证书」
     // 是本层最常见的一类现场，名字必须在诊断里（公共面对 `net-tls-cert-rejected` 的期望就是可归因）。
     const std::string detail = describe_cferror(error);

@@ -314,6 +314,14 @@ if (AURORA_BACKEND_GPU_WGPU)
     # dl/pthread/m（Rust std 的 libm 符号，缺则 pow/fmod 未定义）。
     if (WIN32)
         target_link_libraries(aurora PUBLIC wgpu_native ws2_32 userenv bcrypt advapi32 oleaut32 ntdll)
+    elseif (APPLE)
+        # wgpu-native 的 Metal 后端（metal-rs）把框架依赖经 Rust 链接元数据带入静态库，
+        # C++ 侧链静态库时必须显式补 -framework 标志，否则 MTLCopyAllDevices 等 Metal 符号
+        # 在最终链接期 undefined。下列为 Metal 后端在 macOS 上的既定系统框架集。
+        target_link_libraries(aurora PUBLIC wgpu_native
+                "-framework Metal" "-framework Foundation" "-framework QuartzCore"
+                "-framework CoreFoundation" "-framework IOKit" "-framework Security"
+                "-framework SystemConfiguration" "-framework CoreGraphics")
     elseif (UNIX)
         target_link_libraries(aurora PUBLIC wgpu_native ${CMAKE_DL_LIBS} pthread m)
     else ()
