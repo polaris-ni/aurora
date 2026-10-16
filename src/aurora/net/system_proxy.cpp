@@ -122,6 +122,13 @@ auto platform_system_proxy() -> Result<std::optional<SystemProxySnapshot>> {
 namespace aurora::net::detail {
 namespace {
 
+/// @brief 构造 `net-proxy-config-unreadable`（通道在、读取被拒）。
+/// @param detail 平台侧原因文本（ASCII）。
+/// @return 表驱动 Error。
+auto unreadable(std::string detail) -> Error {
+    return make_error(ErrorCode::NetProxyConfigUnreadable, "detail=system proxy: " + std::move(detail));
+}
+
 /// @brief CF 对象的手动释放器（本文件按非 ARC 的 C++ TU 编译，`Copy`/`Create` 规则须自己收尾）。
 class CfHandle {
   public:

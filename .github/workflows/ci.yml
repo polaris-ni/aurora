@@ -433,8 +433,10 @@ jobs:
           url="https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-macOS-ARM64.tar.xz"
           curl -fsSL "$url" -o "$RUNNER_TEMP/llvm.tar.xz"
           tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
-          bindir="$(dirname "$(find "$RUNNER_TEMP" -type f -name clang -path '*/bin/*' | head -1)")"
-          if [ -z "$bindir" ] || [ "$bindir" = "." ]; then
+          # LLVM 官方包装的 bin/clang 是指向 clang-22 的符号链接（真实二进制带版本后缀），
+          # 故 find 不得加 -type f；落到 -x 复核可执行性（跟随符号链接判定）。
+          bindir="$(dirname "$(find "$RUNNER_TEMP" \( -type f -o -type l \) -name clang -path '*/bin/*' | head -1)")"
+          if [ -z "$bindir" ] || [ "$bindir" = "." ] || [ ! -x "$bindir/clang" ]; then
             echo "::error::clang not found after extracting $url"
             exit 1
           fi
@@ -819,6 +821,15 @@ jobs:
 
       - name: Build (library + tests)
         run: cmake --build build-wasm
+
+      # Emscripten 的 socket shim 在 node 下运行时会 require('ws')。wasm 没有 BSD socket，
+      # 依赖真实 socket / DNS 的用例已在 AURORA_PLATFORM_WASM 下整体跳过（见各 net 套件与
+      # utest_net_resolver），正常情况下本模块不会被加载；装一层保险是因为漏网一处即令
+      # runner 进程级崩于 MODULE_NOT_FOUND（整腿红、且报错离根因远）。npm 瞬时故障不应
+      # 染红本就无需该模块的腿，故 continue-on-error。
+      - name: Install ws (Emscripten socket shim insurance)
+        continue-on-error: true
+        run: npm install ws --no-save --prefix build-wasm
 
       # ctest 经 CMAKE_CROSSCOMPILING_EMULATOR（Emscripten.cmake 设为 node）驱动 .js runner。
       - name: Test (ctest)
