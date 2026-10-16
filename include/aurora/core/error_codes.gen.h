@@ -173,6 +173,9 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     WebViewSnapshotUnsupported = 129,  ///< webview-snapshot-unsupported: Snapshot mode unavailable: '{detail}'
     WebViewHostUnbound = 130,  ///< webview-host-unbound: Web view not bound to a native host: '{detail}'
     WebViewUnsupportedMode = 131,  ///< webview-unsupported-mode
+    IconNameNotRegistered = 132,  ///< icon-name-not-registered: Icon name '{name}' is not registered: {detail}
+    IconGlyphUnavailable = 133,  ///< icon-glyph-unavailable: Icon glyph unavailable: {detail}
+    IconSvgUnsupported = 134,  ///< icon-svg-unsupported: Icon SVG source uses unsupported features: {detail}
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -190,7 +193,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 132> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 135> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1891,6 +1894,45 @@ inline constexpr std::array<ErrorMeta, 132> AURORA_ERROR_TABLE = {
             .message_tpl = "Web view mode unsupported on this backend: '{detail}'",
             .hint = "Interactive mode needs a native child surface; Wayland and headless backends cannot host one - "
                     "switch to Snapshot mode or move the control",
+        },
+        {
+            .code = ErrorCode::IconNameNotRegistered,
+            .ident = "IconNameNotRegistered",
+            .slug = "icon-name-not-registered",
+            .category = ErrorCategory::Validation,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "Icon name '{name}' is not registered: {detail}",
+            .hint = "Register the semantic name through IconRegistry before referencing it, or pick one of the "
+                    "registered names reported alongside this error",
+        },
+        {
+            .code = ErrorCode::IconGlyphUnavailable,
+            .ident = "IconGlyphUnavailable",
+            .slug = "icon-glyph-unavailable",
+            .category = ErrorCategory::Widget,
+            .severity = ErrorSeverity::Error,
+            .auto_fixable = false,
+            .fix_category = "missing_prop",
+            .retryable = false,
+            .message_tpl = "Icon glyph unavailable: {detail}",
+            .hint = "Register the icon font through FontEngine::register_font (or register_font_from_memory) and make "
+                    "sure the code point exists in that face",
+        },
+        {
+            .code = ErrorCode::IconSvgUnsupported,
+            .ident = "IconSvgUnsupported",
+            .slug = "icon-svg-unsupported",
+            .category = ErrorCategory::Render,
+            .severity = ErrorSeverity::Warning,
+            .auto_fixable = false,
+            .fix_category = "invalid_value",
+            .retryable = false,
+            .message_tpl = "Icon SVG source uses unsupported features: {detail}",
+            .hint = "The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside "
+                    "the library and supply the bitmap",
         },
     },
 };

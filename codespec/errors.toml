@@ -1489,3 +1489,36 @@ fix_category = "invalid_value"
 retryable = false
 message = "Web view mode unsupported on this backend: '{detail}'"
 hint = "Interactive mode needs a native child surface; Wayland and headless backends cannot host one - switch to Snapshot mode or move the control"
+
+[[error]]
+enum = "IconNameNotRegistered"
+slug = "icon-name-not-registered"
+category = "validation"
+severity = "error"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Icon name '{name}' is not registered: {detail}"
+hint = "Register the semantic name through IconRegistry before referencing it, or pick one of the registered names reported alongside this error"
+
+[[error]]
+enum = "IconGlyphUnavailable"
+slug = "icon-glyph-unavailable"
+category = "widget"
+severity = "error"
+auto_fixable = false
+fix_category = "missing_prop"
+retryable = false
+message = "Icon glyph unavailable: {detail}"
+hint = "Register the icon font through FontEngine::register_font (or register_font_from_memory) and make sure the code point exists in that face"
+
+[[error]]
+enum = "IconSvgUnsupported"
+slug = "icon-svg-unsupported"
+category = "render"
+severity = "warning"
+auto_fixable = false
+fix_category = "invalid_value"
+retryable = false
+message = "Icon SVG source uses unsupported features: {detail}"
+hint = "The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside the library and supply the bitmap"

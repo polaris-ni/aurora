@@ -20,6 +20,7 @@
 | 无障碍语义树 | `a11y_tree.h`（几何盒 / Name 回退链 / 递归节点与整树构建：`build_accessibility_tree`）、`a11y_diff.h`（`TreeSnapshot` / `NodeSnapshot` / `TreeDiff` / `build_tree_snapshot`）。二者需 `Widget` 完整定义，故归本层；纯类型与桥抽象留在 [`01-core.md`](01-core.md) §7.2 |
 | 容器与导航壳 | `drawer.h`、`tab_bar.h`、`menu_bar.h`、`toolbar.h`、`title_bar.h`、`dialog.h`、`popup.h`、`toast.h`、`expansion_panel.h`、`stepper.h`、`bottom_nav_bar.h` |
 | 绘制与占位 | `canvas.h`、`placeholder.h`、`skeleton.h`、`progress.h`、`image_widget.h`、`chip.h`、`form.h` |
+| 图标 | `icon_widget.h`（`Icon` / `IconButton`）；值类型与注册表在 `icon/icon.h`、SVG 光栅缓存在 `icon/icon_svg.h`（绘制通道契约见 [`03-layout-render.md`](03-layout-render.md) §8.2「图标绘制通道」） |
 | 数据展示与跨域控件 | `data_widgets.h`（`DataTable`/`TreeView`/`ListView`）；另散布于 `media/video_player.h`、`media/video_controls.h`、`navigation/hero.h`、`app/perf_overlay.h` |
 | 工厂与配方 | `recipes.h`、根级 `include/aurora/ui/` |
 | 调试 | `inspect.h`、`inspector_panel.h` |
@@ -378,6 +379,8 @@ au::Text("Welcome").font_size(24).bold();
 | 控件 | 说明 |
 |:---|:---|
 | `ImageView` | `bitmap`、`source`（源文件路径，用于序列化/占位）。URL 源经注入的 `ImageFetcher`（`ImageFetcher` / `from_url` / `begin_load` / `ImageLoadState::Loading/Loaded/Failed` / `ImageCache`，见 `image_widget.h`）异步加载；未注入 fetcher 时降级为占位。**序列化类型名为 `Image`**。`width()` / `height()` 是 widget 级方法，不进 `Props` |
+| `Icon` | 图标控件（`widget/icon_widget.h`，第 75 个 widget）：按语义名（`icon` 键，经 `IconRegistry` 查表）或代码侧 `IconData` 字面直绘字形 / SVG。`size`（dp 正方形，基准档 `IconSize` 16/20/24/32）、`color`（空 = 跟随主题 `on_surface_variant`）、`semantic_label`（非空才进语义树，覆写 `accessibility_label()`；空 = 纯装饰）。**库不内置任何图标资产**：字体经 `FontEngine::register_font*` 由应用注册，语义名经 `IconRegistry` 由应用注册；未注册名字绘制侧跳过（不崩溃、不画占位），`validate_ui` 报 `icon-name-not-registered` |
+| `IconButton` | 图标按钮（第 76 个 widget）：方形点击区内绘制图标（图标盒 + 两侧 `padding`），`on_click` 回调经 `activate()` 在 Release 且未拖拽/未长按时同步派发；未设色时按启用 / 悬停 / 按下 / 禁用四态取主题角色（禁用降级、焦点态画焦点环）。`wants_click()` 仅在启用且有回调时为 true——禁用态吞掉点击不冒泡 |
 | `VideoPlayer` | 视频播放控件（`media/video_player.h`）；`fit`（`BoxFit` 枚举：Fill / Contain / Cover 等）、`show_controls`；回调 `on_tap` / `on_double_tap`；帧源经 `set_source` 注入 |
 | `VideoControls` | 视频播放控件叠层（`media/video_controls.h`），配 `VideoPlayer` 使用，单子容器 |
 | `Placeholder` | 通用降级占位盒（`widget/placeholder.h`），序列化键 `message` 说明文字（`au::Placeholder("…")` 或 `.set_message("…")` 构造，非聚合类型、无 initializer_list 构造） |

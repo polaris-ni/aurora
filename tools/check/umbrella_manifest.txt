@@ -225,6 +225,9 @@ aurora/widget/title_bar.h
 aurora/widget/toast.h
 aurora/widget/toolbar.h
 aurora/widget/widget.h
+aurora/icon/icon.h
+aurora/icon/icon_svg.h
+aurora/widget/icon_widget.h
 aurora/window/cursor_map.h
 aurora/window/frame_pacing.h
 aurora/window/platform.h

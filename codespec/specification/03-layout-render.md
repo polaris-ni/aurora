@@ -546,6 +546,8 @@ au::Column{}
 
 > **Headless 行为**：字体加载**不按后端分支**——`render/font_discovery` 无条件注册内置 Noto Sans（见上文「默认字体」），`HeadlessSurface` 下走同一 FreeType 栅格化路径，`draw_text` 实际写入内存帧缓冲。这正是上文「含 Headless 逐位确定」与 §10.1 像素级 golden 回归成立的前提，涉及真实字形绘制的问题在无头下同样可复现。
 
+**图标绘制通道（`icon::paint_icon_data`）**：`Icon` / `IconButton` 与需要图标前导内容的控件（`Chip` 头像槽）共用同一绘制入口（`icon/icon.h`）。字形变体按 `{族名, 码位}` 构造 `Font`、UTF-8 编码码位后走 `draw_text`，盒内垂直居中（行盒顶对齐 + 光学中心垂直补偿参数化）；SVG 变体走 `icon::SvgIconCache` 的内存字节光栅（`detail::load_image_svg`，wasm 无文件系统故**禁走**路径入口），按（FNV-1a 内容摘要、目标尺寸、着色）三元组 LRU 缓存，字节上限 4 MB 独立于 `ImageCache` 的 64 MB 预算——后者以路径字符串为键、经 `Image::load` 解码（固有尺寸），承载不了尺寸与着色维度，故独立建缓存而不合并。着色白色视为直通原色，非白则按 RGBA8 直 alpha 逐像素相乘并 `invalidate_content_hash`。白名单拒绝内嵌位图 / 外部对象 / 滤镜 / 脚本 / 样式表等内置光栅器不实现的特性（`icon-svg-unsupported`）；光栅失败不绘制、不崩溃、不产缓存条目。
+
 ### 8.3 Surface
 
 `Surface` 是绘制目标抽象（窗口 / 离屏）。

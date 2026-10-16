@@ -137,5 +137,8 @@
 | 129 | `WebViewSnapshotUnsupported` | `webview-snapshot-unsupported` | platform | warning | false | resource_error | false | Snapshot mode unavailable: '{detail}' | Snapshot mode needs a live engine and, on Linux, an available GTK display connection; use Interactive mode on X11 or Windows instead |
 | 130 | `WebViewHostUnbound` | `webview-host-unbound` | platform | warning | false | missing_prop | false | Web view not bound to a native host: '{detail}' | The control is rendering outside a window host (headless/offscreen) or was registered before the host installed its thread-local slot |
 | 131 | `WebViewUnsupportedMode` | `webview-unsupported-mode` | platform | warning | false | invalid_value | false | Web view mode unsupported on this backend: '{detail}' | Interactive mode needs a native child surface; Wayland and headless backends cannot host one - switch to Snapshot mode or move the control |
+| 132 | `IconNameNotRegistered` | `icon-name-not-registered` | validation | error | false | invalid_value | false | Icon name '{name}' is not registered: {detail} | Register the semantic name through IconRegistry before referencing it, or pick one of the registered names reported alongside this error |
+| 133 | `IconGlyphUnavailable` | `icon-glyph-unavailable` | widget | error | false | missing_prop | false | Icon glyph unavailable: {detail} | Register the icon font through FontEngine::register_font (or register_font_from_memory) and make sure the code point exists in that face |
+| 134 | `IconSvgUnsupported` | `icon-svg-unsupported` | render | warning | false | invalid_value | false | Icon SVG source uses unsupported features: {detail} | The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside the library and supply the bitmap |
 
-<!-- count: total 132 error codes -->
+<!-- count: total 135 error codes -->

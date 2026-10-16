@@ -434,6 +434,8 @@ stdout（`AURORA_LOG_RAW`，无前缀）；失败行以 `[transport-error]` / `[
 
 `descriptor_to_json(WidgetDescriptor)` / `descriptor_to_json(PropDescriptor)` 输出标准 JSON，供 `gen_api_tools` 消费生成 `aurora_api.json`。
 
+**图标控件的 schema 口径**：`Icon` / `IconButton` 的 `icon` 属性是**语义名字符串**（经 `IconRegistry` 查表），不是枚举——库不内置图标清单，`aurora_api.json` 因此**不含** `IconName` 枚举段；`IconData::Kind`（`Glyph` / `Svg`）是值类型内部判别，不进属性 schema。代码侧直绘走 `IconData` 字面（`au::Icon(icon::IconData::glyph(族名, 码位))` 或 `svg(源字节)`），该路径不经序列化（字节体量不适于 JSON 树）。未注册语义名的树经 `validate_ui` 报 `icon-name-not-registered`，错误的 message 回带已注册名候选供纠错。
+
 ---
 
 ## 7 工具链

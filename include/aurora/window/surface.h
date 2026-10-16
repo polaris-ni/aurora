@@ -162,11 +162,16 @@ class Surface {
     /// 才被处理（交互场景不可接受）。条目由宿主经 `set_extra_event_source` 的 provider
     /// 现取（事件源随引擎挂载/卸载动态变化，不缓存）。
     struct ExtraWatch {
-        int fd = -1;           ///< 待监听的文件描述符（< 0 跳过）
+        int fd = -1;  ///< 待监听的文件描述符（< 0 跳过）
         bool readable = true;  ///< 是否关心可读事件
         bool writable = false;  ///< 是否关心可写事件
     };
 
+    // 豁免 performance-unnecessary-value-param：按值收参系刻意设计——两个后端 override 均以
+    // std::move 将参数转存成员（见 x11_surface.cpp 与 wayland_surface.cpp 的对应实现），按值即
+    // 「调用方临时量零拷贝移交」；且本函数是安装 / 卸载期少量调用的公共虚拟签名，改为常量引用会
+    // 破坏外部后端 override 的源码兼容并额外强制一次拷贝。
+    // NOLINTBEGIN(performance-unnecessary-value-param)
     /// @brief 安装「附加事件源」：`watches` 现取待监听 fd 集，`pump` 在 fd 就绪后推进一次。
     ///
     /// 后端实现须把 `watches()` 的 fd 并入 `wait_events` 的 poll 集、并在 poll 返回后调用
@@ -176,6 +181,7 @@ class Surface {
     /// @param pump fd 就绪后的推进函数（传空撤销）。
     virtual auto set_extra_event_source([[maybe_unused]] std::function<std::vector<ExtraWatch>()> watches,
                                         [[maybe_unused]] std::function<void()> pump) -> void {}
+    // NOLINTEND(performance-unnecessary-value-param)
 
     /// @brief 本后端的 `poll_platform_events()` 是否抽干「线程/进程级共享队列」。
     ///

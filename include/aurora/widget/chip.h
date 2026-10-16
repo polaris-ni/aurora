@@ -8,6 +8,7 @@
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
+#include "aurora/icon/icon.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
@@ -64,16 +65,31 @@ class Chip : public LeafWidget {
     }
 
     /// @brief 设置头像文本（显示在标签左侧，如 emoji 或首字母）。
-    /// @param av 头像文本（移入 `avatar_`，空串=不显示）
+    /// @param av 头像文本（移入 `avatar_`，空串=不显示）；与 `avatar_icon` 互斥，本调用清空图标入口
     /// @return 引用 `*this` 以继续链式配置
     auto set_avatar(std::string av) -> Chip & {
         avatar_ = std::move(av);
+        avatar_icon_.reset();  // 两入口互斥：字符串头像优先时清空图标入口
         mark_needs_paint();  // 前导内容变更需重绘
         return *this;
     }
     /// @brief 当前头像文本。
     /// @return `avatar_` 的常引用（空串=未设置）
     [[nodiscard]] auto avatar() const -> const std::string & { return avatar_; }
+
+    /// @brief 设置图标头像（显示在标签左侧，`IconData` 字形或 SVG）。
+    /// @param data 图标数据；与 `avatar` 字符串互斥，本调用清空文本入口
+    /// @return 引用 `*this` 以继续链式配置
+    auto set_avatar_icon(icon::IconData data) -> Chip & {
+        avatar_icon_ = std::move(data);
+        avatar_.clear();  // 两入口互斥：图标入口优先时清空文本头像
+        mark_needs_layout();
+        mark_needs_paint();
+        return *this;
+    }
+    /// @brief 当前图标头像（可空）。
+    /// @return `avatar_icon_` 的常引用；`!has_value()` 表示未设置
+    [[nodiscard]] auto avatar_icon() const -> const std::optional<icon::IconData> & { return avatar_icon_; }
 
     /// @brief 设置删除回调（非空时显示 × 按钮）。
     /// @param cb 删除回调；点击右 30% 区域触发
@@ -302,6 +318,9 @@ class Chip : public LeafWidget {
         if (!avatar_.empty()) {
             w += render::FontEngine::measure_width(avatar_, f) + 4.0F;
         }
+        if (avatar_icon_.has_value()) {
+            w += font_size_ + 4.0F;  // 图标盒占一行字高
+        }
         w += render::FontEngine::measure_width(label_, f);
         if (on_delete_) {
             w += render::FontEngine::measure_width(" ×", f);
@@ -342,6 +361,13 @@ class Chip : public LeafWidget {
                         f, tc);
             x += render::FontEngine::measure_width(avatar_, f) + 4.0F;
         }
+        if (avatar_icon_.has_value()) {
+            const Rect icon_box{
+                .origin = Point{.x = x, .y = bounds.origin.y + ((bounds.size.height - font_size_) / 2.0F)},
+                .size = Size{.width = font_size_, .height = font_size_}};
+            paint_icon_data(p, icon_box, *avatar_icon_, tc, 0.0F);
+            x += font_size_ + 4.0F;
+        }
         p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = 200.0F, .height = 20.0F}}, label_, f,
                     tc);
         x += render::FontEngine::measure_width(label_, f);
@@ -354,6 +380,7 @@ class Chip : public LeafWidget {
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     std::string label_;
     std::string avatar_;
+    std::optional<icon::IconData> avatar_icon_;  ///< 图标头像（`IconData` 字形 / SVG）；与 `avatar_` 互斥
     std::optional<Color> bg_;  ///< 标签背景色；空 = 跟随主题 surface_variant
     std::function<void()> on_delete_;
     std::optional<Color> text_color_;  ///< 标签/头像文字色；空 = 跟随主题 on_surface

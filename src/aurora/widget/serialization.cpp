@@ -11,8 +11,8 @@
 #include "aurora/core/platform.h"  // NOLINT
 #include "aurora/media/video_controls.h"
 #include "aurora/media/video_player.h"
-#include "aurora/webview/web_view.h"
 #include "aurora/navigation/hero.h"
+#include "aurora/webview/web_view.h"
 #include "aurora/widget/bar_chart.h"
 #include "aurora/widget/bottom_nav_bar.h"
 #include "aurora/widget/breakpoint_builder.h"
@@ -28,6 +28,7 @@
 #include "aurora/widget/form.h"
 #include "aurora/widget/grid.h"
 #include "aurora/widget/grid_view.h"
+#include "aurora/widget/icon_widget.h"
 #include "aurora/widget/image_widget.h"
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/lazy_row.h"
@@ -210,6 +211,9 @@ auto register_core_widgets() -> void {
     reg_default<Slider>("Slider");
     reg_default<ProgressIndicator>("ProgressIndicator");
     reg_default<Divider>("Divider");
+    // 图标体系（CHG-019）：库只提供机制，字体 / SVG 资产由应用提供，不内置图标集。
+    reg_default<Icon>("Icon");
+    reg_default<IconButton>("IconButton");
     reg_default<Hero>("Hero", "", Node{});
     reg_default<Popup>("Popup");
     reg_default<OverlayHost>("OverlayHost");

@@ -1498,6 +1498,128 @@
       ]
     },
     {
+      "type": "Icon",
+      "props": [
+        {
+          "name": "icon",
+          "type": "string",
+          "note": "Semantic name registered in IconRegistry"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": 24.0,
+          "note": "Box size (dp, square)",
+          "minimum": "0"
+        },
+        {
+          "name": "color",
+          "type": "Color",
+          "note": "Icon color (follows theme on_surface_variant when unset)",
+          "default_expr": "theme.on_surface_variant"
+        },
+        {
+          "name": "semantic_label",
+          "type": "string",
+          "note": "Accessibility label; non-empty = semantic"
+        },
+        {
+          "name": "width",
+          "type": "Length",
+          "default": "auto"
+        },
+        {
+          "name": "height",
+          "type": "Length",
+          "default": "auto"
+        },
+        {
+          "name": "show",
+          "type": "bool",
+          "default": true
+        },
+        {
+          "name": "overflow",
+          "type": "string",
+          "default": "Visible"
+        }
+      ],
+      "events": [],
+      "children_policy": "none",
+      "examples": [
+        "au::Icon(\"settings\")",
+        "au::Icon(icon::IconData::glyph(\"MaterialSymbols\", 0xE8B8))"
+      ]
+    },
+    {
+      "type": "IconButton",
+      "props": [
+        {
+          "name": "icon",
+          "type": "string",
+          "note": "Semantic name registered in IconRegistry"
+        },
+        {
+          "name": "size",
+          "type": "float",
+          "default": 24.0,
+          "note": "Icon box size (dp, square)",
+          "minimum": "0"
+        },
+        {
+          "name": "padding",
+          "type": "float",
+          "default": 8.0,
+          "note": "Padding around icon (dp)",
+          "minimum": "0"
+        },
+        {
+          "name": "color",
+          "type": "Color",
+          "note": "Icon color (theme role per state when unset)",
+          "default_expr": "theme.on_surface_variant"
+        },
+        {
+          "name": "semantic_label",
+          "type": "string",
+          "note": "Accessibility label"
+        },
+        {
+          "name": "enabled",
+          "type": "bool",
+          "default": true,
+          "note": "Interactive when true"
+        },
+        {
+          "name": "width",
+          "type": "Length",
+          "default": "auto"
+        },
+        {
+          "name": "height",
+          "type": "Length",
+          "default": "auto"
+        },
+        {
+          "name": "show",
+          "type": "bool",
+          "default": true
+        },
+        {
+          "name": "overflow",
+          "type": "string",
+          "default": "Visible"
+        }
+      ],
+      "events": [
+        "on_click"
+      ],
+      "children_policy": "none",
+      "examples": [
+        "au::IconButton(\"close\").set_on_click([]{ })"
+      ]
+    },
+    {
       "type": "Image",
       "props": [
         {
@@ -6823,6 +6945,39 @@
       "retryable": false,
       "message": "Web view mode unsupported on this backend: '{detail}'",
       "hint": "Interactive mode needs a native child surface; Wayland and headless backends cannot host one - switch to Snapshot mode or move the control"
+    },
+    {
+      "enum": "IconNameNotRegistered",
+      "slug": "icon-name-not-registered",
+      "category": "validation",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Icon name '{name}' is not registered: {detail}",
+      "hint": "Register the semantic name through IconRegistry before referencing it, or pick one of the registered names reported alongside this error"
+    },
+    {
+      "enum": "IconGlyphUnavailable",
+      "slug": "icon-glyph-unavailable",
+      "category": "widget",
+      "severity": "error",
+      "auto_fixable": false,
+      "fix_category": "missing_prop",
+      "retryable": false,
+      "message": "Icon glyph unavailable: {detail}",
+      "hint": "Register the icon font through FontEngine::register_font (or register_font_from_memory) and make sure the code point exists in that face"
+    },
+    {
+      "enum": "IconSvgUnsupported",
+      "slug": "icon-svg-unsupported",
+      "category": "render",
+      "severity": "warning",
+      "auto_fixable": false,
+      "fix_category": "invalid_value",
+      "retryable": false,
+      "message": "Icon SVG source uses unsupported features: {detail}",
+      "hint": "The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside the library and supply the bitmap"
     }
   ],
   "debug": [

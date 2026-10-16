@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "aurora/app/validate_ui.h"
+#include "aurora/icon/icon.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
 #include "framework/json_literals.h"
@@ -226,6 +227,54 @@ AURORA_TEST_CASE(valid_text_typed_props_exercise_type_matches) {
 
     const auto errs = validate_ui_tree(tree);
     AURORA_TEST_CHECK_TRUE(errs.empty());
+}
+
+// ---- 图标语义名校验（validate_ui 接 IconRegistry）----
+
+AURORA_TEST_CASE(icon_semantic_name_skipped_when_registry_empty) {
+    icon::IconRegistry::clear();  // 空注册表：跳过语义名校验（应用尚未注册，不误报）
+
+    Json tree = Json::object();
+    tree.set("type", "Column");
+    Json icon_node = Json::object();
+    Json icon_props = Json::object();
+    icon_props.set("icon", "settings");
+    icon_node.set("type", "Icon");
+    icon_node.set("props", icon_props);
+    tree.set("children", testing::json_arr({icon_node}));
+
+    const auto errs = validate_ui_tree(tree);
+    AURORA_TEST_CHECK_TRUE(errs.empty());
+}
+
+AURORA_TEST_CASE(icon_semantic_name_typo_reported_with_candidates) {
+    icon::IconRegistry::clear();
+    icon::IconRegistry::register_icon("settings", icon::IconData::glyph("MS", 0xE8B8));
+    icon::IconRegistry::register_icon("close", icon::IconData::glyph("MS", 0xE5CD));
+
+    Json tree = Json::object();
+    tree.set("type", "Column");
+    Json good = Json::object();
+    Json good_props = Json::object();
+    good_props.set("icon", "close");
+    good.set("type", "IconButton");
+    good.set("props", good_props);
+    Json bad = Json::object();
+    Json bad_props = Json::object();
+    bad_props.set("icon", "settingz");
+    bad.set("type", "Icon");
+    bad.set("props", bad_props);
+    tree.set("children", testing::json_arr({good, bad}));
+
+    const auto errs = validate_ui_tree(tree);
+    AURORA_TEST_CHECK_EQ(errs.size(), static_cast<std::size_t>(1));
+    AURORA_TEST_CHECK_EQ(errs[0].path, "$.children[1].props.icon");
+    AURORA_TEST_CHECK_TRUE(errs[0].message.find("settingz") != std::string::npos);
+    // 候选名回带：message 含已注册名，供 AI 与调用方纠错。
+    AURORA_TEST_CHECK_TRUE(errs[0].message.find("close") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(errs[0].message.find("settings") != std::string::npos);
+
+    icon::IconRegistry::clear();  // 还原进程级表，不污染后续用例
 }
 
 }  // namespace aurora::test_cases::utest_validate_ui
