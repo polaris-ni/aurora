@@ -157,7 +157,10 @@ AURORA_TEST_CASE(post_starts_thread_and_runs_off_caller_thread) {
 // 空任务受理但不占队列、也不拉起线程；停机后再 `post` 会重新惰性启动（两种结局都必须显式表达）。
 AURORA_TEST_CASE(empty_task_is_no_op_and_post_restarts_a_stopped_engine) {
 #ifdef AURORA_PLATFORM_WASM
-    AURORA_TEST_CHECK_TRUE(Engine::instance().post({}).ok());
+    // 无引擎腿不受理任何任务（含空任务）：与兄弟用例同一口径报不可用，不假装受理。
+    auto posted = Engine::instance().post({});
+    AURORA_TEST_CHECK_FALSE(posted.ok());
+    AURORA_TEST_CHECK_EQ(posted.error().code, "net-platform-unavailable");
 #else
     EngineGuard guard;
     AURORA_TEST_CHECK_TRUE(Engine::instance().post({}).ok());

@@ -146,15 +146,22 @@ AURORA_TEST_CASE(resolver_failure_and_empty_answer_both_fail_as_dns) {
 }
 
 AURORA_TEST_CASE(platform_leg_fails_for_the_reserved_invalid_tld) {
+#ifdef AURORA_PLATFORM_WASM
+    // 浏览器运行时没有 BSD socket 语义（解析经 shim 而非真 DNS），`.invalid` 的保留判定
+    // 在该腿上不成立；本腿由 NullEngine 一律回不可用，见其余 net 套件的同款跳过口径。
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#else
     // 真实平台腿：`.invalid` 由 RFC 6761 保留，合规解析器必须回 NXDOMAIN；完全没有网络的机器
-    // 同样回失败。两条路径的判据一致，故此用例不依赖 DNS 可达性，也不需要 `AURORA_TEST_SKIP`。
+    // 同样回失败。两条路径的判据一致，故此用例不依赖 DNS 可达性。
     const auto result = Resolver::lookup("aurora.invalid", 443);
     AURORA_TEST_REQUIRE_FALSE(bool(result));
     AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::NetDnsFailed);
     AURORA_TEST_CHECK_TRUE(result.error().message.find("aurora.invalid") != std::string::npos);
+#endif
 }
 
 AURORA_TEST_CASE(async_resolve_delivers_exactly_once_off_the_calling_thread) {
+    AURORA_TEST_REQUIRE_THREADS();
     const auto main_thread = std::this_thread::get_id();
     std::atomic_int hook_calls{0};
     std::atomic_int callback_calls{0};

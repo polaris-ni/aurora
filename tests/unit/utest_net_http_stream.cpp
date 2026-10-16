@@ -287,6 +287,9 @@ auto allow_test_cleartext(Client &client) -> void {
 }  // namespace
 
 AURORA_TEST_CASE(stream_delivers_a_content_length_body_segment_by_segment) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     Client client;
     allow_test_cleartext(client);
     const auto body = long_body(40000);  // 远超一次读的 16 KiB：段数大于 1 才是「流式」而不是措辞
@@ -313,6 +316,9 @@ AURORA_TEST_CASE(stream_delivers_a_content_length_body_segment_by_segment) {
 }
 
 AURORA_TEST_CASE(stream_delivers_a_chunked_body) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     Client client;
     allow_test_cleartext(client);
     const std::vector<char> body{'h', 'e', 'l', 'l', 'o'};
@@ -328,6 +334,9 @@ AURORA_TEST_CASE(stream_delivers_a_chunked_body) {
 }
 
 AURORA_TEST_CASE(stream_a_head_response_delivers_no_body_and_skips_coding_checks) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // HEAD 应答恒无体：中间层常照抄 `Content-Encoding`，那时无体应答上声明的编码名不该被校验，
     // 也不该为它建链——交付面是零段，收摊仍恰一次。
     Client client;
@@ -345,6 +354,9 @@ AURORA_TEST_CASE(stream_a_head_response_delivers_no_body_and_skips_coding_checks
 }
 
 AURORA_TEST_CASE(stream_stops_reading_when_the_sink_returns_stop) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 宿主收摊是正常结局：成功出口 + `stopped_by_sink`，剩余字节不再读取也不交付，而 `on_end` 仍宣告收摊。
     Client client;
     allow_test_cleartext(client);
@@ -367,6 +379,9 @@ AURORA_TEST_CASE(stream_stops_reading_when_the_sink_returns_stop) {
 }
 
 AURORA_TEST_CASE(stream_stops_at_the_head_when_the_sink_returns_stop_there) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 头部就收摊：一段都不交，链根本不必建，`on_end` 照样恰一次——「够了 / 用户取消了」不该被当成失败。
     Client client;
     allow_test_cleartext(client);
@@ -385,6 +400,9 @@ AURORA_TEST_CASE(stream_stops_at_the_head_when_the_sink_returns_stop_there) {
 }
 
 AURORA_TEST_CASE(stream_abandons_the_body_of_a_redirect_hop) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 头部一判定为重定向即换跳：中间跳的体不交付，`delivered_bytes` 只算最终一跳，
     // 而 `wire_bytes` 跨全部跳（两枚口径分别证出来，才说明它们不是同一个数换了个名字）。
     Client client;
@@ -412,6 +430,9 @@ AURORA_TEST_CASE(stream_abandons_the_body_of_a_redirect_hop) {
 }
 
 AURORA_TEST_CASE(stream_stops_at_the_redirect_limit) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     Client client;
     allow_test_cleartext(client);
     // 每跳都回 302 指向自身路径：跟随必然撞到上限而不是收敛。
@@ -428,6 +449,9 @@ AURORA_TEST_CASE(stream_stops_at_the_redirect_limit) {
 }
 
 AURORA_TEST_CASE(stream_ignores_the_materialized_body_ceiling) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // `max_body_bytes()` 是物化路径的内存闸：流式路径不物化，故它对本入口零约束（同一份应答在 `send` 那边
     // 会越限，在这边收完）。设了它就让 `open_stream` 提前失败，等于把「收大文件」变成必须调大一枚无关旋钮。
     Client client;
@@ -445,6 +469,9 @@ AURORA_TEST_CASE(stream_ignores_the_materialized_body_ceiling) {
 }
 
 AURORA_TEST_CASE(stream_refuses_a_coding_outside_the_supported_set_before_any_byte_is_handed) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 支持集外的名在建链那一步就拒，且一段都不交：让宿主收下压缩字节的前缀再失败，交出去的那段没法收回。
     Client client;
     allow_test_cleartext(client);
@@ -461,6 +488,9 @@ AURORA_TEST_CASE(stream_refuses_a_coding_outside_the_supported_set_before_any_by
 }
 
 AURORA_TEST_CASE(stream_times_out_a_stalled_peer) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 三档看门狗对两条交付路同判据：整请求到点落 `http-timeout`，不是 `net-cancelled`。
     FakeEngine engine;
     const FakeEngineScope scope(engine);
@@ -487,6 +517,9 @@ AURORA_TEST_CASE(stream_times_out_a_stalled_peer) {
 }
 
 AURORA_TEST_CASE(stream_reports_download_progress_on_wire_bytes_with_one_settled_value) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 进度报的是线上字节（解压前口径），末值恒发一次：合流不能把「收了摊」这一事实合掉。
     Client client;
     allow_test_cleartext(client);
@@ -540,6 +573,9 @@ AURORA_TEST_CASE(stream_refuses_to_run_on_a_leg_without_streaming_semantics) {
 #ifdef AURORA_ENABLE_COMPRESSION
 
 AURORA_TEST_CASE(stream_decompresses_a_gzip_body_with_two_byte_counters) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 交付给宿主的是还原后的明文，而 `wire_bytes` 记的是线上字节：两枚口径在同一个用例里各证一次。
     Client client;
     allow_test_cleartext(client);
@@ -558,6 +594,9 @@ AURORA_TEST_CASE(stream_decompresses_a_gzip_body_with_two_byte_counters) {
 }
 
 AURORA_TEST_CASE(stream_deflate_locks_the_format_from_the_wrapper_header) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 流式不「先试再回落」：首两枚输入字节构成合法 zlib 头即锁 zlib，否则锁裸 DEFLATE，两型各解通一次。
     const auto probe = [](std::string_view label, const std::vector<char> &wire) -> void {
         Client client;
@@ -576,6 +615,9 @@ AURORA_TEST_CASE(stream_deflate_locks_the_format_from_the_wrapper_header) {
 }
 
 AURORA_TEST_CASE(stream_enforces_the_decompressed_ceiling) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 越限的是解压产物：detail 点名 `max_decompressed_bytes`，且宿主收到的段数停在那一层越限之前。
     Client client;
     allow_test_cleartext(client);
@@ -603,20 +645,32 @@ AURORA_TEST_CASE(stream_enforces_the_decompressed_ceiling) {
 #else
 
 AURORA_TEST_CASE(stream_decompresses_a_gzip_body_with_two_byte_counters) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
 }
 
 AURORA_TEST_CASE(stream_deflate_locks_the_format_from_the_wrapper_header) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
 }
 
 AURORA_TEST_CASE(stream_enforces_the_decompressed_ceiling) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
 }
 
 #endif
 
 AURORA_TEST_CASE(stream_replays_a_timeout_raised_before_any_head_is_handed) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 流式路径的重放资格比物化路径窄，窄就窄在这一条：头还没交给宿主 ⇒ 可以重来。这里用「三档时限各拿一份
     // 新的钟」把重放数出来：`Timeouts::total` 50 ms × 3 次尝试 + 两次退避 ≥ 150 ms 虚拟时长，一次尝试最多 60 ms。
     //
@@ -648,6 +702,9 @@ AURORA_TEST_CASE(stream_replays_a_timeout_raised_before_any_head_is_handed) {
 }
 
 AURORA_TEST_CASE(stream_does_not_replay_after_the_head_is_handed) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 头一旦交出就耗尽资格：本库不能假装「回到交头之前」让宿主重写已写下那段，那是把契约违约当成重试收益。
     // 对端给出完整头部但按 `Content-Length` 欠着体不写，于是头交得出、交换收不完——同一枚时限旋钮下
     // 上一次用例走满 150 ms，这一枚只走满一份窗口。
@@ -674,6 +731,9 @@ AURORA_TEST_CASE(stream_does_not_replay_after_the_head_is_handed) {
 }
 
 AURORA_TEST_CASE(stream_refuses_an_out_of_range_policy_before_any_connection) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 形态闸在起手就过：越界的 `base` 不进入任何一次尝试，对端一条连接都不该被连上。
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, length_framed("", {'o'})));
@@ -697,6 +757,9 @@ AURORA_TEST_CASE(stream_refuses_an_out_of_range_policy_before_any_connection) {
 }
 
 AURORA_TEST_CASE(a_cache_hit_streams_the_stored_body_without_the_wire) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     const auto body = long_body(40000);  // 远超一次读的窗口：命中时也必须仍是「逐段」而不是一次倾倒
     ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body)));
@@ -729,6 +792,9 @@ AURORA_TEST_CASE(a_cache_hit_streams_the_stored_body_without_the_wire) {
 }
 
 AURORA_TEST_CASE(a_streamed_exchange_leaves_the_table_untouched) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", {'a'})));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -753,6 +819,9 @@ AURORA_TEST_CASE(a_streamed_exchange_leaves_the_table_untouched) {
 }
 
 AURORA_TEST_CASE(a_stale_entry_revalidates_and_streams_the_stored_body) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     const std::vector<char> stored{'s', 't', 'o', 'r', 'e', 'd'};
     // 第一条给「抵达即过期 + 校验子」：`send` 把它灌进表；第二条只回一句 304。

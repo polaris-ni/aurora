@@ -106,6 +106,7 @@ AURORA_TEST_CASE(watch_wakes_the_waiter_without_polling) {
 }
 
 AURORA_TEST_CASE(watch_predicate_sees_full_snapshots_only) {
+    AURORA_TEST_REQUIRE_THREADS();
     Watch<std::size_t> counter{0};
     // 谓词在锁内求值，故它看到的永远是完整快照：这里等「至少 3」，而写入方每次 +1。
     std::vector<std::thread> producers;
