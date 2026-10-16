@@ -77,18 +77,18 @@
 namespace aurora::net::detail {
 namespace {
 
-constexpr std::size_t kMaxRecordBodyBytes = 16384;  ///< 一条 TLS 记录的明文上限（RFC 5246 §6.2.1）
-constexpr std::size_t kMaxPlainReadBytes = 16384;  ///< 单次 `SSLRead` 的取字节上限（一记录的量）
-constexpr int kMaxHandshakeRounds = 8;  ///< 一次 `handshake()` 调用内的续跑轮次上限
-constexpr std::size_t kMaxAlpnProtocolIdBytes = 255;  ///< RFC 7301 的协议标识上限（列表长度前缀是 u8）
+constexpr std::size_t AURORA_MAX_RECORD_BODY_BYTES = 16384;  ///< 一条 TLS 记录的明文上限（RFC 5246 §6.2.1）
+constexpr std::size_t AURORA_MAX_PLAIN_READ_BYTES = 16384;  ///< 单次 `SSLRead` 的取字节上限（一记录的量）
+constexpr int AURORA_MAX_HANDSHAKE_ROUNDS = 8;  ///< 一次 `handshake()` 调用内的续跑轮次上限
+constexpr std::size_t AURORA_MAX_ALPN_PROTOCOL_ID_BYTES = 255;  ///< RFC 7301 的协议标识上限（列表长度前缀是 u8）
 
 /// DER 通用标签（X.680 标签号；本层只用得到这些）。
-constexpr std::uint8_t kTagSequence = 0x30;
-constexpr std::uint8_t kTagOid = 0x06;
-constexpr std::uint8_t kTagUtcTime = 0x17;
-constexpr std::uint8_t kTagGeneralizedTime = 0x18;
-constexpr std::uint8_t kTagUniversalString = 0x1C;
-constexpr std::uint8_t kTagBmpString = 0x1E;
+constexpr std::uint8_t AURORA_TAG_SEQUENCE = 0x30;
+constexpr std::uint8_t AURORA_TAG_OID = 0x06;
+constexpr std::uint8_t AURORA_TAG_UTC_TIME = 0x17;
+constexpr std::uint8_t AURORA_TAG_GENERALIZED_TIME = 0x18;
+constexpr std::uint8_t AURORA_TAG_UNIVERSAL_STRING = 0x1C;
+constexpr std::uint8_t AURORA_TAG_BMP_STRING = 0x1E;
 
 auto tls_error(ErrorCode code, std::string text) -> Error {
     return make_error(code, ErrorParams{{"detail", std::move(text)}});
@@ -514,7 +514,7 @@ struct DerElement {
 /// 按字节原样交出去（现代证书一律 UTF8String）；BMPString/UniversalString 是定宽大端码元，不转换就等于
 /// 把国际化主体名读成一堆空格——而那是唯一能解释「连到了错误的机器」的现场证据。
 [[nodiscard]] auto der_string_value(const DerElement &element) -> std::string {
-    if (element.tag == kTagBmpString) {  // UTF-16BE
+    if (element.tag == AURORA_TAG_BMP_STRING) {  // UTF-16BE
         std::string text;
         for (std::size_t index = 0; index + 1U < element.value.size(); index += 2U) {
             const auto unit =
@@ -532,7 +532,7 @@ struct DerElement {
         }
         return text;
     }
-    if (element.tag == kTagUniversalString) {  // UCS-4BE：只保 ASCII，其余以 `?` 呈现
+    if (element.tag == AURORA_TAG_UNIVERSAL_STRING) {  // UCS-4BE：只保 ASCII，其余以 `?` 呈现
         std::string text;
         for (std::size_t index = 0; index + 3U < element.value.size(); index += 4U) {
             const auto unit = (static_cast<unsigned>(element.value[index]) << 24U) |
@@ -568,7 +568,7 @@ struct DerElement {
         std::size_t position = 0;
         for (const auto &pair : *pairs) {  // AttributeTypeAndValue ::= SEQUENCE { type, value }
             const auto parts = der_children(pair.value);
-            if (!parts || parts->size() < 2U || (*parts)[0].tag != kTagOid) {
+            if (!parts || parts->size() < 2U || (*parts)[0].tag != AURORA_TAG_OID) {
                 continue;
             }
             const auto type = der_oid_text((*parts)[0].value);
@@ -592,9 +592,9 @@ struct DerElement {
     const std::span<const std::uint8_t> &value = element.value;
     const std::string_view text{reinterpret_cast<const char *>(value.data()), value.size()};
     std::size_t digits = 0;
-    if (element.tag == kTagUtcTime) {
+    if (element.tag == AURORA_TAG_UTC_TIME) {
         digits = 12U;  // YYMMDDHHMMSS
-    } else if (element.tag == kTagGeneralizedTime) {
+    } else if (element.tag == AURORA_TAG_GENERALIZED_TIME) {
         digits = 14U;  // YYYYMMDDHHMMSS
     } else {
         return {};
@@ -616,7 +616,7 @@ struct DerElement {
         return number;
     };
     auto year = take(2U);
-    if (element.tag == kTagUtcTime) {
+    if (element.tag == AURORA_TAG_UTC_TIME) {
         year += year >= 50U ? 1900U : 2000U;  // RFC 5280 的两位年窗口
     } else {
         year = year * 100U + take(2U);
@@ -639,11 +639,11 @@ struct DerElement {
 [[nodiscard]] auto parse_certificate(std::span<const std::uint8_t> der) -> std::optional<PeerCertificate> {
     std::size_t offset = 0;
     const auto certificate = der_read(der, offset);
-    if (!certificate || certificate->tag != kTagSequence) {
+    if (!certificate || certificate->tag != AURORA_TAG_SEQUENCE) {
         return std::nullopt;
     }
     const auto outer = der_children(certificate->value);
-    if (!outer || outer->empty() || outer->front().tag != kTagSequence) {
+    if (!outer || outer->empty() || outer->front().tag != AURORA_TAG_SEQUENCE) {
         return std::nullopt;
     }
     const auto fields = der_children(outer->front().value);
@@ -652,7 +652,7 @@ struct DerElement {
     }
     std::vector<DerElement> sequences;
     for (const auto &field : *fields) {
-        if (field.tag == kTagSequence) {
+        if (field.tag == AURORA_TAG_SEQUENCE) {
             sequences.push_back(field);
         }
     }
@@ -952,7 +952,7 @@ auto SecureTransportBackend::create(const TlsContext &context, std::string_view 
         }
         const CfReleaser guard{protocols};
         for (const auto &protocol : context.alpn_protocols) {
-            if (protocol.empty() || protocol.size() > kMaxAlpnProtocolIdBytes) {
+            if (protocol.empty() || protocol.size() > AURORA_MAX_ALPN_PROTOCOL_ID_BYTES) {
                 continue;  // 空标识不是合法的 RFC 7301 协议名：丢掉它，而不是宣告一个空协议。超长的同样丢掉
                            // ——协议名在 wire 上带 u8 长度前缀，本腿交出去只会让平台把整条连接判死，而 Schannel
                            // 腿对同一份配置是「跳过这一条、其余照宣」（见其 `build_alpn_advertisement`）。
@@ -984,7 +984,7 @@ auto SecureTransportBackend::handshake(std::vector<char> &outgoing) -> Result<bo
     // 一次调用内允许若干轮：`errSSLServerAuthCompleted` 之后文档要求「再调 SSLHandshake 续跑」，而续跑的
     // 那一轮才产出 ClientKeyExchange/Finished。若在这里就返回 false，调用方会去看需要更多字节，而对端正在
     // 等我们——握手僵死。轮次上限是防自旋的兜底，正常握手用不到两轮以上。
-    for (int round = 0; round < kMaxHandshakeRounds; ++round) {
+    for (int round = 0; round < AURORA_MAX_HANDSHAKE_ROUNDS; ++round) {
         const auto status = ::SSLHandshake(context_);
         drain_produced(outgoing);
         if (status == errSSLServerAuthCompleted || status == errSSLPeerAuthCompleted) {
@@ -1008,7 +1008,7 @@ auto SecureTransportBackend::handshake(std::vector<char> &outgoing) -> Result<bo
         return status_error(status, "tls handshake");
     }
     return tls_error(ErrorCode::NetTlsHandshakeFailed,
-                     "tls handshake did not settle within " + std::to_string(kMaxHandshakeRounds) + " rounds");
+                     "tls handshake did not settle within " + std::to_string(AURORA_MAX_HANDSHAKE_ROUNDS) + " rounds");
 }
 
 auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
@@ -1157,7 +1157,7 @@ auto SecureTransportBackend::next_records(std::vector<char> &plaintext, std::vec
     if (peer_closed_) {
         return Result<TlsDataState>{TlsDataState::PeerClosed};
     }
-    std::vector<char> scratch(kMaxPlainReadBytes, '\0');
+    std::vector<char> scratch(AURORA_MAX_PLAIN_READ_BYTES, '\0');
     // `SSLGetBufferedReadSize` 报的是「本轮能保证取到的已解密字节数」，且文档明写它不阻塞、不触发任何底层
     // 读——有了它就不必靠反复空读试探缓冲，接缝里的 NeedMore 才有确定判据。
     std::size_t buffered = 0;
@@ -1173,7 +1173,8 @@ auto SecureTransportBackend::next_records(std::vector<char> &plaintext, std::vec
         if (buffered == 0U && incoming_exhausted()) {
             break;  // 既无已解密字节，也无待喂字节
         }
-        const auto wanted = buffered != 0U ? std::min(buffered, kMaxPlainReadBytes) : kMaxPlainReadBytes;
+        const auto wanted =
+            buffered != 0U ? std::min(buffered, AURORA_MAX_PLAIN_READ_BYTES) : AURORA_MAX_PLAIN_READ_BYTES;
         std::size_t processed = 0;
         const auto status = ::SSLRead(context_, scratch.data(), wanted, &processed);
         if (processed != 0U) {
@@ -1217,7 +1218,7 @@ auto SecureTransportBackend::protect(std::span<const char> plaintext, std::vecto
     while (offset < plaintext.size()) {
         // 每次只喂一条记录的上限：`SSLWrite` 的文档对入参长度不作任何承诺，把分片行为留给系统决定就是赌
         // 运气；本层按 16 KiB 切开后，每次调用产出的记录数与内容都是确定的。
-        const auto chunk = std::min(plaintext.size() - offset, kMaxRecordBodyBytes);
+        const auto chunk = std::min(plaintext.size() - offset, AURORA_MAX_RECORD_BODY_BYTES);
         const auto body = plaintext.subspan(offset, chunk);
         std::size_t processed = 0;
         const auto status = ::SSLWrite(context_, body.data(), static_cast<size_t>(chunk), &processed);
