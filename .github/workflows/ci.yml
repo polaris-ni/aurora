@@ -10,8 +10,16 @@
 #   2. backends    — 非 HEADLESS 后端各自至少编译一次：X11/Wayland/GLFW（linux）、
 #                    D3D11/GLFW（win32）、macOS/GLFW（darwin）；ctest 下无显示环境，
 #                    create_native_window 回退 HeadlessSurface，编译与注册逻辑仍被覆盖。
+#                    Linux 腿额外打开 GLFW GL 3.3 栅格（AURORA_ENABLE_GLFW_GPU_GL）与
+#                    内置音频（ALSA）；三腿均打开 AURORA_BUILD_VERIFY_TOOLS 并把本平台
+#                    全部真机验收探针显式编出（此前仅 lint 静态分析），覆盖探针编译面。
+#                    三腿均打开 AURORA_BACKEND_GPU_WGPU：wgpu-native 经 cargo 源码构建（需
+#                    Rust 工具链 + libclang，见各腿 Setup 步骤），wgpu 测试运行期无 GPU adapter
+#                    故 SKIP，但 wgpu_native 静态库与 WgpuRhi C++ 后端在 linux/win32/macOS 各编一次。
 #   3. toggles     — feature 宏极性收口（ubuntu/gcc）：优化三开关全关（退化路径）、
 #                    SIMD 关（标量黄金路径）、图像编解码 + Inspector Server 开、
+#                    内置音频 + SQLite 存储后端开（此前仅 lint 静态分析，现真编译+跑单测）、
+#                    Unity Build 试点开（src/aurora/core/ 合批路径）、
 #                    PROFILING/TRACING/DEBUG 强制开（Release 下 FORCE=ON 分支）、DEBUG 强制关。
 #  3b. tls-providers — TLS provider 两腿（Linux static mbedTLS、Windows shared OpenSSL）：
 #                    验证 `AURORA_NET_TLS_PROVIDER` 的探测→引擎宏推导→导入目标链接这条构建面。
@@ -19,6 +27,8 @@
 #   5. coverage    — AURORA_ENABLE_COVERAGE=ON 的 `coverage` 聚合目标（内含 ctest + gcov 摘要）。
 #   6. wasm        — emcmake + AURORA_BACKEND_WASM=ON，构建库与测试 runner 并跑 ctest
 #                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）。
+#                    两腿：默认单线程 与 -pthread 真并行（AURORA_ENABLE_WASM_PTHREADS=ON），
+#                    覆盖该宏的 `-pthread` 链接标志与 ThreadPool 行为分支。
 #  7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
 #  8. lint        — clang-tidy 门禁，矩阵 = pass(DEBUG OFF / ON + 优化开关全关的反极性遍，三份
@@ -284,21 +294,21 @@ jobs:
         include:
           - name: linux-x11-wayland-glfw
             os: ubuntu-latest
-            apt-deps: libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
+            apt-deps: libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev libclang1-22
             # Release 作业默认 DEBUG=AUTO→OFF，X11 读回被门控——显式 ON 使 etest_x11 真实运行
             # （期望集口径见 08-tooling §8.2「CI 作业口径」；Wayland 无人值守无合成器，不期望）。
             # GLFW 期望 xvfb + mesa(llvmpipe) 提供 GLX 3.3 兼容上下文。
-            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_BACKEND_GPU_WGPU=ON
             e2e-expect: "x11,glfw"
           - name: windows-d3d11-glfw
             os: windows-latest
             # 同上：DEBUG=ON 使 Win32 读回可用（D3D11 读回无条件可用）；GLFW 在无 GL 环境的
             # runner 上建窗失败（Task 0 实测），不期望
-            cmake-flags: -DAURORA_BACKEND_D3D11=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON
+            cmake-flags: -DAURORA_BACKEND_D3D11=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_BACKEND_GPU_WGPU=ON
             e2e-expect: "win32,d3d11"
           - name: macos-appkit-glfw
             os: macos-latest
-            cmake-flags: -G Ninja -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON
+            cmake-flags: -G Ninja -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_BACKEND_GPU_WGPU=ON
             # 无人值守会话无窗口系统（探针实测，见 08-tooling §8.2），E2E 全部 skipped by policy
             e2e-expect: ""
 
@@ -314,7 +324,13 @@ jobs:
 
       - name: Install desktop backend dev dependencies
         if: matrix.apt-deps
-        run: sudo apt-get update -y && sudo apt-get install -y ${{ matrix.apt-deps }}
+        run: |
+          # libclang1-22：wgpu-native 的 build.rs 经 bindgen 从 webgpu.h 生成 FFI 头，构建期硬
+          # 依赖 libclang 共享库；apt.llvm.org 的 llvm-22 源提供与 lint 作业同大版本的 libclang。
+          sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          sudo apt-get update -y
+          sudo apt-get install -y ${{ matrix.apt-deps }}
 
       - name: Setup ccache
         if: runner.os == 'Linux' || runner.os == 'macOS'
@@ -322,11 +338,100 @@ jobs:
         with:
           key: backends-${{ matrix.name }}
 
+      # AURORA_BACKEND_GPU_WGPU=ON 需要 Rust 工具链（cargo/rustc）与 libclang（wgpu-native 的
+      # build.rs 经 bindgen 从 webgpu.h 生成 FFI）。三腿都开了 WGPU，configure 期硬探测二者，
+      # 缺失即 FATAL，故统一在此准备（必须早于 Configure）。toolchain=stable 在各平台默认解析为
+      # 与 C++ 编译器 ABI 一致的目标（linux-gnu / windows-msvc / apple-darwin）。
+      - name: Setup Rust toolchain (wgpu backend)
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      # stable 通道会随发布滚动；把解析后的版本号暴露给 cargo 缓存键，避免跨版本复用不兼容的
+      # target 产物导致误链接。三平台统一用 bash 取 rustc 版本号（dtolnay 已把 cargo/rustc 入 PATH）。
+      - name: Export resolved Rust version
+        shell: bash
+        run: echo "RUST_VER=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_ENV"
+
+      # cargo 缓存（wgpu-native 经 cargo 源码构建，首次拉 crates.io + 全量编译耗 5–15min/次）：
+      # ① registry/git 索引与下载缓存——按 Cargo.lock 哈希命中，跨 Rust 小版本稳定；
+      # ② wgpu-native 的 target/ 构建产物——按 平台 + Rust 版本 + lock 哈希 命中。两段均命中后，
+      # 因 .rs 与 Cargo.lock 冻结，cargo build 仅复用、不重编，backends 三腿墙钟显著下降。
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ hashFiles('third_party/wgpu-native/Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-
+
+      - name: Cache wgpu-native build
+        uses: actions/cache@v6
+        with:
+          path: third_party/wgpu-native/target
+          key: cargo-wgpu-${{ runner.os }}-${{ env.RUST_VER }}-${{ hashFiles('third_party/wgpu-native/Cargo.lock') }}
+          restore-keys: |
+            cargo-wgpu-${{ runner.os }}-${{ env.RUST_VER }}-
+
+      # Windows / macOS 运行器无 libclang（bindgen 构建期硬依赖）；Linux 经上方 apt.llvm.org 的
+      # libclang1-22 满足。此处下载 LLVM 官方 tarball 取 libclang，并把其 bin 入 PATH——cmake
+      # 探测到 clang 在 PATH 即定位同目录 libclang（见 AuroraBackends.cmake）。与 lint 作业 8w/8mac
+      # 同口径，仅此处用于构建而非 clang-tidy。
+      - name: Install LLVM 22 (libclang for wgpu bindgen)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-x86_64-pc-windows-msvc.tar.xz"
+          $out = Join-Path $env:RUNNER_TEMP "llvm.tar.xz"
+          Invoke-WebRequest -Uri $url -OutFile $out
+          $dest = Join-Path $env:RUNNER_TEMP "llvm"
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          & $sevenZip x $out "-o$dest" -y | Out-Null
+          & $sevenZip x (Join-Path $dest "llvm.tar") "-o$dest" -y | Out-Null
+          $bin = (Get-ChildItem -Path $dest -Recurse -Filter "clang.exe" | Select-Object -First 1).DirectoryName
+          if (-not $bin) { throw "clang.exe not found after extracting $url" }
+          # libclang 共享库位置随平台而异（Windows 在 bin/）；bindgen 经 LIBCLANG_PATH 定位，
+          # 直接指到 libclang 实际所在目录，避免 clang 在 PATH 误导探针指向无 libclang 的目录。
+          $libpath = (Get-ChildItem -Path $dest -Recurse -Filter "libclang.dll" | Select-Object -First 1).DirectoryName
+          if (-not $libpath) { throw "libclang.dll not found after extracting $url" }
+          Add-Content -Path $env:GITHUB_ENV -Value "LIBCLANG_PATH=$libpath"
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          & (Join-Path $bin "clang.exe") --version
+
+      - name: Install LLVM 22 (libclang for wgpu bindgen)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-macOS-ARM64.tar.xz"
+          curl -fsSL "$url" -o "$RUNNER_TEMP/llvm.tar.xz"
+          tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
+          bindir="$(dirname "$(find "$RUNNER_TEMP" -type f -name clang -path '*/bin/*' | head -1)")"
+          if [ -z "$bindir" ] || [ "$bindir" = "." ]; then
+            echo "::error::clang not found after extracting $url"
+            exit 1
+          fi
+          # macOS 上 libclang.dylib 在 <extract>/lib（不在 bin），bindgen 经 LIBCLANG_PATH 定位，
+          # 故直接指到 libclang 实际所在目录；否则 clang 在 PATH 会把探针带向无 libclang 的目录。
+          libdir="$(dirname "$(find "$RUNNER_TEMP" -type f \( -name 'libclang*.dylib' -o -name 'libclang*.so*' -o -name 'libclang.dll' \) | head -1)")"
+          echo "LIBCLANG_PATH=$libdir" >> "$GITHUB_ENV"
+          echo "$bindir" >> "$GITHUB_PATH"
+          "$bindir/clang" --version
+
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake-flags }}
 
       - name: Build (library + tools + tests)
         run: cmake --build build --config Release
+
+      # 真机验收探针（EXCLUDE_FROM_ALL，默认构建不含）：VERIFY_TOOLS 打开后本平台所有可用探针
+      # 在此显式编出，证明它们对当前 API/平台的编译面——此前仅 lint 静态分析、从不编二进制。
+      # 探针不进 ctest、需真实设备/窗口，故只编不跑（运行期判据由人工验收，见 AuroraVerify.cmake）。
+      - name: Build verify probes
+        if: contains(matrix.cmake-flags, 'AURORA_BUILD_VERIFY_TOOLS')
+        run: cmake --build build --config Release --target aurora_verify
 
       - name: ccache stats
         if: runner.os == 'Linux' || runner.os == 'macOS'
@@ -406,9 +511,19 @@ jobs:
           - name: simd-off
             cmake-flags: -DAURORA_ENABLE_SIMD=OFF
             run-tests: true
-          # 图像编解码（libjpeg-turbo / libwebp / wuffs）+ Inspector HTTP 服务器
-          - name: codecs-inspector-on
-            cmake-flags: -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON
+          # 可选子系统全开：图像编解码（libjpeg-turbo / libwebp / wuffs）+ Inspector HTTP 服务器
+          # + 内置音频设备后端 + SQLite 存储后端。AUDIO / STORAGE_SQLITE 此前仅 lint 静态分析
+          # （不编二进制、不跑测试），现与编解码一并真正编译并跑单测（utest_audio /
+          # utest_audio_alsa / utest_sqlite_backend），覆盖链接与运行期守卫分支。
+          # Linux 上 AUDIO=ON 自动带 ALSA（运行期 dlopen，无 dev 包依赖）。
+          - name: optional-subsystems-on
+            cmake-flags: -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON
+            run-tests: true
+          # Unity Build 试点：仅 src/aurora/core/ 打成 batch（CMakeLists.txt 反向排除实现）。
+          # 验证合批路径不破——合批会暴露平日逐 TU 编译被隐去的缺失包含，这正是该试点长期只在
+          # 本地热身、从未进 CI 的盲区。
+          - name: unity-core-on
+            cmake-flags: -DAURORA_ENABLE_UNITY_CORE=ON
             run-tests: true
           # 插桩强制开（TRACING 隐含 PROFILING）：AURORA_PROFILE_* 宏活跃分支 + DEBUG=ON
           - name: profiling-tracing-debug-on
@@ -486,14 +601,14 @@ jobs:
             apt-pkgs: libmbedtls-dev
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_NET_TLS_PROVIDER=static:/usr
           # 动态 OpenSSL：vcpkg classic 模式的三元组根（`include/openssl/ssl.h` + `lib/` + `bin/`）。
-          # 装进 `${{ runner.temp }}` 而不是 `$VCPKG_ROOT`：安装根由本作业自己创建并显式传给
+          # 装进 `$RUNNER_TEMP/vcpkg` 而不是 `$VCPKG_ROOT`：安装根由本作业自己创建并显式传给
           # provider 变量，不依赖镜像里 vcpkg 的位置与既有已装状态（`AURORA_NET_TLS_PROVIDER`
           # 只接受安装根，`prefix` 里带盘符冒号正是首冒号切分要保住的那条形态）。
           - name: windows-openssl-shared
             os: windows-latest
             apt-pkgs: ""
             vcpkg: true
-            cmake-flags: -DAURORA_NET_TLS_PROVIDER=shared:${{ runner.temp }}/vcpkg/installed/x64-windows -DAURORA_BUILD_TESTS=OFF
+            cmake-flags: -DAURORA_BUILD_TESTS=OFF
           # macOS 系统栈腿：不给 provider，证明缺省装配（`AURORA_NET_TLS_SECURE_TRANSPORT` +
           # `-framework Security`）在真 SDK 上编得出来。运行期判据取决于镜像里有无 `openssl`
           # 命令行，缺失时 TLS 套件按 `AURORA_TEST_SKIP` 退避而不是红。
@@ -512,7 +627,7 @@ jobs:
         if: matrix.vcpkg
         shell: bash
         run: |
-          root="${{ runner.temp }}/vcpkg"
+          root="$RUNNER_TEMP/vcpkg"
           git clone --depth 1 https://github.com/microsoft/vcpkg "$root"
           bash "$root/bootstrap-vcpkg.sh" -disableMetrics
           # Git Bash 不做无扩展名补全，Windows 下引导产物是 `vcpkg.exe`，POSIX 下是 `vcpkg`。
@@ -525,7 +640,16 @@ jobs:
           key: tls-${{ matrix.name }}
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake-flags }}
+        shell: bash
+        run: |
+          flags="${{ matrix.cmake-flags }}"
+          # runner 上下文不允许出现在 strategy.matrix，故 vcpkg 共享安装根不在矩阵里写死，
+          # 改为运行期用 $RUNNER_TEMP（GitHub 注入的环境变量）拼出并追加——与上方 Install
+          # OpenSSL 步骤写入的安装根保持一致（shared:<root>/installed/x64-windows）。
+          if [ "${{ matrix.vcpkg }}" = "true" ]; then
+            flags="$flags -DAURORA_NET_TLS_PROVIDER=shared:$RUNNER_TEMP/vcpkg/installed/x64-windows"
+          fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $flags
 
       - name: Build (library + tools)
         run: cmake --build build --config Release
@@ -635,11 +759,22 @@ jobs:
   # 6. WebAssembly：Emscripten 工具链 + WASM 后端（库 + 测试 runner + ctest）
   # ---------------------------------------------------------------------------
   wasm:
-    name: wasm (emscripten)
+    name: wasm (${{ matrix.name }})
     runs-on: ubuntu-latest
     # 曾为浏览器口径 lint 从 120 抬到 180；那道 lint 现已拆到作业 8w 分片跑（单遍 69.7 分钟，
     # 占本作业 79.4 分钟里的绝大部分），本作业回到「configure + 构建 + ctest」，120 分钟有余。
+    # 矩阵两腿：默认（WASM 单线程，AURORA_CAP_THREADS=0 支）与 pthreads-on（-pthread 真并行
+    # 线程池，宿主页面须 COOP/COEP）——把 `AURORA_ENABLE_WASM_PTHREADS` 这个此前从未显式打开的
+    # 宏真正编译并跑 wasm ctest，覆盖 `-pthread` 链接标志与 ThreadPool 行为分支。
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            cmake-flags: ""
+          - name: pthreads-on
+            cmake-flags: -DAURORA_ENABLE_WASM_PTHREADS=ON
     steps:
       - uses: actions/checkout@v7
 
@@ -655,7 +790,7 @@ jobs:
           version: latest
 
       - name: Configure (emcmake)
-        run: emcmake cmake -S . -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF
+        run: emcmake cmake -S . -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF ${{ matrix.cmake-flags }}
 
       - name: Build (library + tests)
         run: cmake --build build-wasm
@@ -907,7 +1042,7 @@ jobs:
       # 结果缓存（方案 C）：按「TU 内容 + 依赖内容 + 编译器/tidy 版本 + 配置 + 编译 argv」的
       # 指纹复用上一次的输出。改了什么就只重算受牵动的那批，其余跨 PR 直接复放。
       - name: Restore tidy result cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .tidy-cache
           key: aurora-tidy-${{ matrix.pass.label }}-${{ runner.os }}-${{ github.run_id }}
@@ -1079,7 +1214,7 @@ jobs:
           cat build-wasm-lint/lint-selection/selection.json
 
       - name: Restore tidy result cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .tidy-cache
           key: aurora-tidy-wasm-${{ runner.os }}-${{ github.run_id }}
