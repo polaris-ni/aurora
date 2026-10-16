@@ -210,8 +210,8 @@ auto HttpCookieJar::store_from_response(const aurora::Url &target, const aurora:
         std::erase_if(cookies_,
                       [&](const HttpCookie &entry) { return entry.expiry.has_value() && *entry.expiry <= now; });
         if (cookies_.size() >= AURORA_COOKIE_JAR_MAX) {
-            auto oldest =
-                std::ranges::min_element(cookies_, [](const HttpCookie &a, const HttpCookie &b) { return a.created < b.created; });
+            auto oldest = std::ranges::min_element(
+                cookies_, [](const HttpCookie &a, const HttpCookie &b) { return a.created < b.created; });
             cookies_.erase(oldest);
         }
         cookies_.push_back(std::move(*parsed));

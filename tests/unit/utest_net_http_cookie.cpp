@@ -51,21 +51,19 @@ using aurora::CoroTask;
 using aurora::Headers;
 using aurora::Result;
 using aurora::Url;
+using aurora::net::detail::HttpCookie;
+using aurora::net::detail::HttpCookieJar;
+using aurora::net::detail::parse_set_cookie;
 using aurora::net::http::Client;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
 using aurora::net::http::Session;
-using aurora::net::detail::HttpCookie;
-using aurora::net::detail::HttpCookieJar;
-using aurora::net::detail::parse_set_cookie;
 using aurora::test::PeerScript;
 using aurora::test::ScriptedPeer;
 using aurora::testing::require_value;
 
 /// @brief 判定基准时刻：取自墙上时钟即可——文法判据比的是相对序（过期 / 未过期），不比绝对值。
-[[nodiscard]] auto now() -> std::chrono::system_clock::time_point {
-    return std::chrono::system_clock::now();
-}
+[[nodiscard]] auto now() -> std::chrono::system_clock::time_point { return std::chrono::system_clock::now(); }
 
 /// @brief 解析一枚目标 URL（本套件的目标全是写死的合法串，解析失败当场收场）。
 /// @param text URL 文本。
@@ -119,17 +117,14 @@ AURORA_TEST_CASE(parse_expires_sets_lifetime_and_past_expiry_is_dropped) {
 }
 
 AURORA_TEST_CASE(parse_non_positive_max_age_is_dropped) {
-    AURORA_TEST_CHECK(!parse_set_cookie("sid=abc; Max-Age=0", url_of("http://shop.example/"), now())
-                           .has_value());
-    AURORA_TEST_CHECK(
-        !parse_set_cookie("sid=abc; Max-Age=-3", url_of("http://shop.example/"), now()).has_value());
+    AURORA_TEST_CHECK(!parse_set_cookie("sid=abc; Max-Age=0", url_of("http://shop.example/"), now()).has_value());
+    AURORA_TEST_CHECK(!parse_set_cookie("sid=abc; Max-Age=-3", url_of("http://shop.example/"), now()).has_value());
 }
 
 AURORA_TEST_CASE(parse_domain_mismatch_is_dropped) {
     // `Domain=other.example` 与请求主机 shop.example 不匹配：整条丢弃（§5.2.3），不是「当 host-only 存」。
-    AURORA_TEST_CHECK(!parse_set_cookie("sid=abc; Domain=other.example",
-                                        url_of("http://shop.example/"), now())
-                           .has_value());
+    AURORA_TEST_CHECK(
+        !parse_set_cookie("sid=abc; Domain=other.example", url_of("http://shop.example/"), now()).has_value());
     // 匹配的父域：host_only 翻假、域记属性值，此后深层子域也取得到。
     const auto cookie = parsed("sid=abc; Domain=example.com", url_of("http://www.example.com/"));
     AURORA_TEST_CHECK(!cookie.host_only);
@@ -138,8 +133,7 @@ AURORA_TEST_CASE(parse_domain_mismatch_is_dropped) {
 
 AURORA_TEST_CASE(parse_domain_match_excludes_ip_like_hosts) {
     // IP 形态的主机只认全等：`1.2.3.4` 不得与后缀 `2.3.4` 匹配（§5.1.3 的「主机不是 IP」半边）。
-    AURORA_TEST_CHECK(!parse_set_cookie("sid=abc; Domain=2.3.4", url_of("http://1.2.3.4/"), now())
-                           .has_value());
+    AURORA_TEST_CHECK(!parse_set_cookie("sid=abc; Domain=2.3.4", url_of("http://1.2.3.4/"), now()).has_value());
 }
 
 AURORA_TEST_CASE(parse_path_given_and_defaulted) {
@@ -290,11 +284,13 @@ auto read_request(aurora::net::blocking::StreamSocket &socket, aurora::test::Pee
     // 本套件每一条 send 都应当成功：内层失败在这里就地暴露（拿错误消息当判据输出），不让 `.value()`
     // 在 CHECK 里抛出把现场盖掉。
     const auto &answered = outer.value();
-    AURORA_TEST_REQUIRE_MSG(
-        bool(answered),
-        answered ? std::string{}
-                 : std::string{label}.append(": code=").append(std::to_string(static_cast<int>(answered.error().code_enum)))
-                       .append(" ").append(answered.error().message));
+    AURORA_TEST_REQUIRE_MSG(bool(answered),
+                            answered ? std::string{}
+                                     : std::string{label}
+                                           .append(": code=")
+                                           .append(std::to_string(static_cast<int>(answered.error().code_enum)))
+                                           .append(" ")
+                                           .append(answered.error().message));
     return answered;
 }
 
@@ -311,8 +307,8 @@ AURORA_TEST_CASE(session_round_trips_a_cookie_over_two_requests) {
     std::string second_request;
     std::mutex guard;
     auto cursor = std::make_shared<std::atomic<int>>(0);  // 池缺省关：每个周期各占一条连接，剧本按序号分支
-    auto script = [cursor, &first_request, &second_request,
-                   &guard](aurora::net::blocking::StreamSocket &socket, aurora::test::PeerStop &stop) -> void {
+    auto script = [cursor, &first_request, &second_request, &guard](aurora::net::blocking::StreamSocket &socket,
+                                                                    aurora::test::PeerStop &stop) -> void {
         // 先取连接序号再分支：每个周期各占一条连接，第 n 条连接服务第 n 枚请求。
         std::vector<char> drain(1024);
         if (cursor->fetch_add(1) == 0) {
@@ -328,8 +324,7 @@ AURORA_TEST_CASE(session_round_trips_a_cookie_over_two_requests) {
         if (!read_request(socket, stop, second_request, guard)) {
             return;
         }
-        (void)socket.write_all(
-            std::span<const char>{std::string{"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ndone"}});
+        (void)socket.write_all(std::span<const char>{std::string{"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ndone"}});
         (void)socket.read_some(std::span<char>{drain});
     };
     ScriptedPeer peer{script};
@@ -350,8 +345,8 @@ AURORA_TEST_CASE(bare_client_neither_stores_nor_sends_cookies) {
     std::string second_request;
     std::mutex guard;
     auto cursor = std::make_shared<std::atomic<int>>(0);
-    auto script = [cursor, &first_request, &second_request,
-                   &guard](aurora::net::blocking::StreamSocket &socket, aurora::test::PeerStop &stop) -> void {
+    auto script = [cursor, &first_request, &second_request, &guard](aurora::net::blocking::StreamSocket &socket,
+                                                                    aurora::test::PeerStop &stop) -> void {
         std::vector<char> drain(1024);
         if (cursor->fetch_add(1) == 0) {
             if (!read_request(socket, stop, first_request, guard)) {
@@ -365,8 +360,7 @@ AURORA_TEST_CASE(bare_client_neither_stores_nor_sends_cookies) {
         if (!read_request(socket, stop, second_request, guard)) {
             return;
         }
-        (void)socket.write_all(
-            std::span<const char>{std::string{"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ndone"}});
+        (void)socket.write_all(std::span<const char>{std::string{"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ndone"}});
         (void)socket.read_some(std::span<char>{drain});
     };
     ScriptedPeer peer{script};
@@ -399,9 +393,9 @@ AURORA_TEST_CASE(redirect_to_another_port_refetches_cookies_for_the_new_target) 
         if (!read_request(socket, stop, ignored, guard)) {
             return;
         }
-        (void)socket.write_all(std::span<const char>{std::string{
-            "HTTP/1.1 302 Found\r\nSet-Cookie: sid=abc123\r\nLocation: http://127.0.0.1:" +
-            std::to_string(second_port) + "/landing\r\nContent-Length: 0\r\n\r\n"}});
+        (void)socket.write_all(std::span<const char>{
+            std::string{"HTTP/1.1 302 Found\r\nSet-Cookie: sid=abc123\r\nLocation: http://127.0.0.1:" +
+                        std::to_string(second_port) + "/landing\r\nContent-Length: 0\r\n\r\n"}});
     }};
     AURORA_TEST_REQUIRE(first_peer.valid());
     Session session;

@@ -225,6 +225,27 @@ add_dependencies(gen_debug_api_json gen_debug_api)
 
 # MCP Server：stdio JSON-RPC 2.0，供 AI Agent 直接调用。
 aurora_add_tool(aurora_mcp tools/servers/aurora_mcp.cpp)
+
+# wasm fetch 引擎真跑探针（CHG-018 §16 第 37 项的验收腿）：node ≥ 18 下真跑，相一以真实 fetch
+# 打编排脚本起的本地 http 服务端（只绑 127.0.0.1、零出站），相二以脚本化替身覆盖受限形态。
+# 落点说明：源文件住 tools/verify/（真机验收语义同族），但**不经 AuroraVerify.cmake 注册**——
+# 那一族默认 OFF + EXCLUDE_FROM_ALL（真实桌面会话、非确定），本探针只绑回环、可在 CI 与默认
+# wasm 构建里确定地跑，属 wasm 平台的验收腿本体，故随默认构建交付。node 编排脚本
+# （wasm_fetch_node_drive.mjs）由 POST_BUILD 复制到产物旁。
+if (EMSCRIPTEN AND AURORA_BACKEND_WASM)
+    aurora_add_tool(aurora_verify_wasm_fetch tools/verify/wasm_fetch_live_probe.cpp)
+    set_target_properties(aurora_verify_wasm_fetch PROPERTIES SUFFIX ".mjs")
+    # MODULARIZE：编排脚本显式实例化并先起服务端（端口要经导出入口喂给探针）；INVOKE_RUN=0：
+    # main 不自启（探针等编排脚本唤起）。
+    target_link_options(aurora_verify_wasm_fetch PRIVATE
+            -sMODULARIZE=1 -sEXPORT_NAME=auroraFetchProbe -sINVOKE_RUN=0 -sEXIT_RUNTIME=0)
+    add_custom_command(TARGET aurora_verify_wasm_fetch POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy
+                    "${AURORA_SOURCE_DIR}/tools/verify/wasm_fetch_node_drive.mjs"
+                    "$<TARGET_FILE_DIR:aurora_verify_wasm_fetch>/wasm_fetch_node_drive.mjs"
+            COMMENT "Copying wasm fetch probe node driver next to the module")
+endif ()
+
 # live_* 工具族的 loopback HTTP 传输经 aurora::net（CHG-006）：socket 库需求由核心库
 # `aurora` 的 PUBLIC ws2_32 传导（见顶层 CMakeLists），此处不再散挂；也刻意**不**依赖
 # AURORA_BUILD_INSPECTOR_SERVER（应用侧是否起 InspectorServer 由应用自己 opt-in）。

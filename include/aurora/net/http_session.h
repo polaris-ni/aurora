@@ -47,15 +47,11 @@ class Session {
 
     /// @brief 查看本会话的客户端（连接池、重试、代理等配置都在它身上）。
     /// @return 客户端引用；本会话存续期间恒有效。
-    [[nodiscard]] auto client() -> Client & {
-        return client_;
-    }
+    [[nodiscard]] auto client() -> Client & { return client_; }
 
     /// @brief 查看本会话的客户端（只读）。
     /// @return 客户端常量引用。
-    [[nodiscard]] auto client() const -> const Client & {
-        return client_;
-    }
+    [[nodiscard]] auto client() const -> const Client & { return client_; }
 
   private:
     Client client_;  ///< 本会话的发起侧客户端（配置照常在它身上）

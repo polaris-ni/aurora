@@ -50,15 +50,15 @@ class HttpCookieJar {
     /// @param response_fields 应答头字段表（`Set-Cookie` 逐条取，不折叠）。
     /// @param secure_channel 本次交换是否走了 TLS（明文信道上的 `Secure` cookie 不存储）。
     /// @param now 现在的时刻（`Expires` 的比较基准与创建时刻的来源）。
-    auto store_from_response(const aurora::Url &target, const aurora::Headers &response_fields,
-                             bool secure_channel, std::chrono::system_clock::time_point now) -> void;
+    auto store_from_response(const aurora::Url &target, const aurora::Headers &response_fields, bool secure_channel,
+                             std::chrono::system_clock::time_point now) -> void;
 
     /// @brief 按 `§5.4` 的选择算法为一个请求目标算出 `Cookie` 头的值。
     /// @param target 请求目标 URL（域匹配、路径前缀、安全位都对着它算）。
     /// @param now 现在的时刻（过期条目就地清除）。
     /// @return `name=value` 以 `"; "` 相连的字符串；没有可发的 cookie 时为空串（调用方据此不附头）。
-    [[nodiscard]] auto cookies_for(const aurora::Url &target,
-                                   std::chrono::system_clock::time_point now) const -> std::string;
+    [[nodiscard]] auto cookies_for(const aurora::Url &target, std::chrono::system_clock::time_point now) const
+        -> std::string;
 
     /// @brief 当前存量条数（含未过期的会话 cookie；判据用）。
     [[nodiscard]] auto size() const -> std::size_t;

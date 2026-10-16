@@ -36,6 +36,7 @@
 #include "aurora/net/blocking.h"
 #include "aurora/net/detail/async_io.h"
 #include "aurora/net/detail/engine_override.h"
+#include "aurora/net/detail/http_fetch.h"
 #include "aurora/net/detail/runtime.h"
 #include "aurora/net/detail/tls_backend.h"
 #include "aurora/net/poll.h"
@@ -362,12 +363,23 @@ class PollEngine final : public Engine {
     std::intptr_t wake_handle_ = -1;  ///< 读端的原生句柄值（等待集合首位，构建期写、join 后清）
 };
 
-/// @brief 无 fd 语义腿（wasm）的引擎形态：能力全 false，投递一律报不可用，绝不假降级。
+/// @brief 无 fd 语义腿（wasm）的引擎形态：传输能力全 false，投递一律报不可用，绝不假降级。
+///
+/// 能力位按实测改判（§16 第 37 项）：wasm 腿的 HTTP 交换由浏览器 `fetch` 交付——自定义请求头可经
+/// fetch 传入（CORS 预检失败以浏览器错误形态抵达，不静默退化），故 `custom_headers` 为 true；流式
+/// 体本切片不消费 `ReadableStream`，`streaming` 保持 false（`open_stream` 的既有闸据此拒）。其余
+/// 传输形态本腿无 fd 语义，恒 false。
 class NullEngine final : public Engine {
   public:
     [[nodiscard]] auto name() const -> std::string_view override { return "none"; }
 
-    [[nodiscard]] auto capabilities() const -> Capabilities override { return Capabilities{}; }
+    [[nodiscard]] auto capabilities() const -> Capabilities override {
+        Capabilities caps;
+        if (detail::fetch_leg_active()) {
+            caps.custom_headers = true;
+        }
+        return caps;
+    }
 
     [[nodiscard]] auto post(std::function<void()> task) -> Result<void> override {
         (void)task;  // 本腿不受理任何任务：一律以不可用形态回报，不排队也不静默丢弃

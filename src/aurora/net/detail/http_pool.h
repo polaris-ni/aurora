@@ -170,7 +170,8 @@ class HttpPoolLease {
     auto operator=(const HttpPoolLease &) -> HttpPoolLease & = delete;
     HttpPoolLease(HttpPoolLease &&other) noexcept
         : pool_{other.pool_}, key_{std::move(other.key_)}, options_{other.options_},
-          connection_{std::move(other.connection_)}, born_{other.born_}, adopted_{other.adopted_}, armed_{other.armed_} {
+          connection_{std::move(other.connection_)}, born_{other.born_}, adopted_{other.adopted_},
+          armed_{other.armed_} {
         other.pool_ = nullptr;
     }
     auto operator=(HttpPoolLease &&other) noexcept -> HttpPoolLease & {
@@ -188,9 +189,7 @@ class HttpPoolLease {
     }
 
     /// @brief 析构即归还：武装过且回池判据成立交回连接，否则关闭并让出名额。
-    ~HttpPoolLease() {
-        settle();
-    }
+    ~HttpPoolLease() { settle(); }
 
     /// @brief 认领一条连接（取用所得或新建握手所得），并记下它的出生时刻。
     ///
@@ -205,19 +204,13 @@ class HttpPoolLease {
     }
 
     /// @brief 武装归还：析构时把认领的连接交回空闲表（而非关闭）。
-    auto arm() -> void {
-        armed_ = true;
-    }
+    auto arm() -> void { armed_ = true; }
 
     /// @brief 已认领的连接（尚未认领时两枚指针皆空）。
-    [[nodiscard]] auto connection() -> HttpPoolConnection & {
-        return connection_;
-    }
+    [[nodiscard]] auto connection() -> HttpPoolConnection & { return connection_; }
 
     /// @brief 这条连接的出生时刻。
-    [[nodiscard]] auto born() const -> std::chrono::steady_clock::time_point {
-        return born_;
-    }
+    [[nodiscard]] auto born() const -> std::chrono::steady_clock::time_point { return born_; }
 
   private:
     /// @brief 归还动作（析构与移动赋值共用）；幂等。未认领过任何东西的卫零作为。

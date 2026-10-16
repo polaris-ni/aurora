@@ -1203,6 +1203,19 @@ lint 侧另有两条。其一，`format-check` 逐文件本机合格（只对本
 
 工具链面：**无新增错误码**（全表仍 133 枚）、**无新增公共枚举**（`PoolOptions` / `Session` 不进 `known_enums.h`，`HttpPoolKey` 等皆 detail），伞头与 `tools/check/umbrella_manifest.txt` 收录 `net/http_session.h`；`aurora_api.json` 零差异（生成器只管 widgets / enums 两段，`Client` 的方法增量与 `Session` 不进该文件，`check_api_schema_sync` / `check_api_budget` 复核为绿）。两条实现侧的真缺陷随判据现形并同批修掉，记此：其一，占用卫的析构归还一度无视「武装」标志，未判干净的连接（`Connection: close`、`UntilClose`、leftover 富余）也被交回空闲表，下一次取用坐上一条对端已关的连接——交换以「写被取消 / 连接被中止」失败；处置是卫把武装翻译成两种归还（武装交连接、未武装交空）。其二，收尾的「超时改道」按档号无条件覆写错误 detail，排队等不到的「排队」成因被改写成通用「connect timeout」——两条成因的排查方向不同（前者调大上限或查泄漏、后者查网络），处置是改道之后恢复排队的 detail。契约见提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §16 第 36 项。
 
+#### 8.8.32 wasm `fetch` 引擎：HTTP 腿经浏览器交付（CHG-018 §16 第 37 项、§18-6 CORS 边界）
+
+wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false，§8.8.4 不动）；HTTP 腿是唯一例外，经浏览器 `fetch` 交付。库内新增 `src/aurora/net/detail/http_fetch.{h,cpp}`（命名空间 `aurora::net::detail`，**零新增公共头、不进伞头、不占公共 API 预算**；native 腿保留可编译的存根落点，让 fetch 腿代码在 native 构建里也参与编译防锈）。落码口径（裁决全文见提案 §16 第 37 项）：
+
+- **接入点只有一处，协议语义零重复**：`Client::send` 的「建连并统一读写口」分支按 `detail::fetch_leg_active()` 换挂一枚 `FetchExchangeAdapter`——写（记账即成功）、带窗口读（恒交「窗口内无应答」，发起侧据此照常发体，浏览器不等 100-continue）、读（首读把整单交给浏览器 `fetch`，结局合成线上字节流逐段交出、排空交 0）三个闭包与原生传输同构；写出环 / 读环 / 装配器 / 物化 / 重定向链 / 重试环 / 认证环 / 进度闸 / Cookie 附着与收取全部与原生腿共用同一份代码。`open_stream` 零改动：`Capabilities::streaming` 恒 false，既有闸直接落 `net-platform-unavailable`（**不做悄悄一次性物化**）。流式请求体同判：整单语义没有 `BodySource` 的分段与回放落点，发起侧前置拒并点名「先物化体」。
+- **重定向永不自动跟随**：fetch 以 `redirect: 'manual'` 发出，3xx 交回既有重定向链（凭据剥离、Cookie 按域重取、`max_redirects` 全部沿用原生判据）。node 腿的 3xx 头可读、链照走；**浏览器**的 manual 重定向是不透明应答（状态 0、头体皆空），桥如实落 `net-platform-unavailable` 并点名限制，绝不编造一条重定向。
+- **Cookie 只经库内 Jar**：fetch init 以 `credentials: 'omit'` 发出，浏览器自带 cookie 存储不参与（身份的单一入口，与 §8.8.31 的 Jar 纪律一致）；`Set-Cookie` 经 `Headers.getSetCookie()` 尽收（平台不给就收不到）。
+- **能力位按实测改判**：wasm 腿 `NullEngine::capabilities()` 改判 `custom_headers = true`（自定义请求头可经 fetch 传入，CORS 预检失败以 `net-connect-failed` 抵达——浏览器不披露成因，detail 写明「网络错误 / 预检拒绝 / DNS 失败三者不可分辨」）；`streaming` 保持 false；其余传输形态恒 false。请求头侧：连接管理与编码管理字段（`Host` / `Content-Length` / `Transfer-Encoding` / `Connection` / `Accept-Encoding`）不进 fetch init（浏览器按目标自算，forbidden header 的静默丢弃与按己值重发都不如实）；应答侧同族（含 `Content-Encoding`——浏览器已透明解码）在合成时剥除，`Content-Length` 以合成时刻的体长为准。
+- **超时以浏览器侧闸承担，不伪装已设限**：`Timeouts::connect` 档折算成 `AbortController` 的截止时刻（打断即 `http-timeout`，取消经令牌钩子接同一枚闸、落 `net-cancelled`）；`total` / `read_idle` 依赖引擎 `post_after`、本腿不可用故不计时，如实记此。代理为空操作：逐跳路由以空代理环境跑同一条 `plan_route()`，策略闸（含明文闸）照常在 fetch 之前起作用。
+- **无新增错误码**（全表仍 133 枚）、**无新增公共枚举**、`aurora_api.json` 零差异；原规划宏 `AURORA_NET_HTTP_FETCH` 不启用（网络栈无构建开关、公共 API 恒在，wasm 腿随平台直接启用，见 `BUILD_OPTIONS.md` §1.2）。
+
+判据：node ≥ 18 真跑探针 `tools/verify/wasm_fetch_live_probe.cpp`（`cmake --preset wasm` 后随默认构建交付；node 编排脚本 `wasm_fetch_node_drive.mjs` 经 POST_BUILD 复制到产物旁，`node build-wasm/wasm_fetch_node_drive.mjs` 运行，退出码 0 = 全过）——相一以**真实 fetch**打编排脚本起的本地 http 服务端（只绑 `127.0.0.1`、零出站）五项：GET 往返（状态 + 体）、POST 体 echo（请求体整单抵达）、自定义头抵达服务端、manual 重定向链跟随（302 → 200 landed）、`Set-Cookie` 收进 Jar 且下一跳按目标域重附（同 Session 两跳）；相二以脚本化替身覆盖受限形态七项：能力位改判、fetch 拒绝 → `net-connect-failed`、截止打断 → `http-timeout`、不透明重定向 → `net-platform-unavailable`、流式请求体前置拒、`open_stream` 拒且宿主零调用、明文闸照常生效。十二项判据全过（退出码 0）。配套 `utest_net_http_fetch`（3 例，双腿名册对称：native 钉「腿不激活 + 存根同步结算不可用」、wasm 钉「腿激活 + 能力位」；交换行为判据在事件循环形态下无法等待 promise 结算，由 node 探针承担、不在此谎报运行判据）。判据非空转已两处变异自证：摘掉 wasm 能力位改判 → `capabilities_bits_measured` 转红；请求头剥除改为全剥 → `real_custom_header_reaches_server` 转红（其余相一判据连带红），各自还原回绿。一处宿主侧事实记此：node/undici 对「同一 tick 内嵌套发起的请求」在退出收尾上有一枚 uv_async 断言（进程级噪声，与判据无关），探针经装主线程投递器把续体推迟到新鲜宏任务避开——与真实宿主姿态同构（宿主装 poster，续体回主线程队列）。契约见提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §16 第 37 项。
+
 ---
 
 ### 8.9 系统拖放（跨进程）

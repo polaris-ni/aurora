@@ -29,7 +29,7 @@ auto HttpConnectionPool::sweep_expired(const HttpPoolKey &key, const http::PoolO
                                    }
                                    return expired;
                                }),
-              idle_.end());
+                idle_.end());
 }
 
 auto HttpConnectionPool::acquire(const HttpPoolKey &key, const http::PoolOptions &options,
@@ -72,10 +72,7 @@ auto HttpConnectionPool::release(const HttpPoolKey &key, std::optional<HttpPoolC
         }
         return;
     }
-    idle_.push_back(IdleEntry{.key = key,
-                              .connection = std::move(*connection),
-                              .born = born,
-                              .idle_since = now});
+    idle_.push_back(IdleEntry{.key = key, .connection = std::move(*connection), .born = born, .idle_since = now});
 }
 
 auto HttpConnectionPool::clear() -> void {

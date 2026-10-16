@@ -19,6 +19,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -40,6 +41,7 @@
 #include "aurora/net/detail/http_cache.h"
 #include "aurora/net/detail/http_cookie_jar.h"
 #include "aurora/net/detail/http_encoding.h"
+#include "aurora/net/detail/http_fetch.h"
 #include "aurora/net/detail/http_pool.h"
 #include "aurora/net/detail/http_progress.h"
 #include "aurora/net/detail/http_request_id.h"
@@ -528,6 +530,204 @@ auto gate_origin(const ProxyEnvironment &environment, const TlsContext &tls, con
     return Result<void>{};
 }
 
+/// @brief fetch 腿该从 fetch init 里剥掉的请求头（连接管理与内容编码管理字段，浏览器自理）。
+///
+/// `Host` 与 `Accept-Encoding` 由浏览器按目标与解码能力自算；`Content-Length` / `Transfer-Encoding`
+/// 由 fetch 按体自理；`Connection` 是逐跳语义，fetch 交换没有「连接」可管。剥错一侧的后果是浏览器
+/// 要么静默丢弃（forbidden header）要么按自己的值重发——不如起手就不给。
+constexpr std::array<std::string_view, 5> AURORA_FETCH_STRIPPED_FIELDS{"host", "content-length", "transfer-encoding",
+                                                                       "connection", "accept-encoding"};
+
+/// @brief 判断一枚请求头是否属于 fetch 腿要剥掉的那族（字段名比较大小写不敏感）。
+/// @param name 请求头名。
+/// @return 应剥除为 true。
+[[nodiscard]] auto fetch_stripped_field(std::string_view name) -> bool {
+    return std::any_of(AURORA_FETCH_STRIPPED_FIELDS.begin(), AURORA_FETCH_STRIPPED_FIELDS.end(),
+                       [name](std::string_view candidate) { return field_name_equal(name, candidate); });
+}
+
+/// @brief wasm fetch 腿的读写适配器（§16 第 37 项）：挂在 `send` 的「建连并统一读写口」分支上。
+///
+/// fetch 是整单语义——没有逐段写出、没有 100-continue 问询、没有逐段读。适配器把这套差异收在
+/// 三个闭包的形态里：**写**只记账即成功（请求在装配规格时已整单备好）；**带窗口的读**恒交
+/// 「窗口内无应答」（发起侧据此照常发体，浏览器不等 100）；**读**在首次调用时把整单交给浏览器
+/// `fetch`，结局合成线上字节流逐段交出、排空后交 0（FIN 形态）——写出环 / 读环 / 物化 / 重定向
+/// 与原生腿共用同一份代码，本类不解释任何协议语义。
+/// @note Thread: single-threaded（随一次交换的协程帧使用）
+/// @note Side-effects: 首读经 `fetch_exchange` 发起一次真实网络交换
+class FetchExchangeAdapter {
+  public:
+    /// @brief 构造：装配 fetch 规格（URL / 方法 / 过闸请求头 / 已物化体 / 截止时刻）。
+    /// @param request 本跳的请求（URL 已由发起侧验证；体是物化形态，流式体在发起侧已前置拒）。
+    /// @param deadline 交换截止时长（`Timeouts::connect` 档折算；非正值 = 不设限）。
+    /// @param token 本跳的取消令牌（send 的逐尝试令牌；`fetch_exchange` 借它的钩子槽打断在途
+    ///        fetch——fetch 腿没有原生传输，该槽在本跳空闲）。
+    FetchExchangeAdapter(const Request &request, std::chrono::milliseconds deadline, const Cancellation &token)
+        : token_{token} {
+        spec_.url = request.url().has_value() ? request.url().value().to_string() : std::string{};
+        spec_.method_text = std::string{method_text(request.method())};
+        for (const auto &field : request.headers().entries()) {
+            if (!fetch_stripped_field(field.name)) {
+                spec_.headers.emplace_back(field.name, field.value);
+            }
+        }
+        spec_.body = request.body();
+        spec_.deadline = deadline;
+    }
+
+    FetchExchangeAdapter(const FetchExchangeAdapter &) = delete;
+    auto operator=(const FetchExchangeAdapter &) -> FetchExchangeAdapter & = delete;
+    FetchExchangeAdapter(FetchExchangeAdapter &&) = delete;
+    auto operator=(FetchExchangeAdapter &&) -> FetchExchangeAdapter & = delete;
+    ~FetchExchangeAdapter() = default;
+
+    /// @brief 写出：整单语义下无逐段落线，每一段记账即成功（字节数照报，写环的进度口径照走）。
+    /// @param data 待写字节段。
+    /// @return 可等待体，恒成功并报全段字节数。
+    [[nodiscard]] auto write(std::span<const char> data) -> detail::CallbackAwaiter<std::size_t> {
+        return detail::CallbackAwaiter<std::size_t>(
+            [data](const detail::CallbackAwaiter<std::size_t>::Sink &on_done) -> void {
+                on_done(Result<std::size_t>{data.size()});
+            });
+    }
+
+    /// @brief 带窗口的读（`Expect: 100-continue` 问询段）：浏览器不等 100，窗口内恒无应答。
+    /// @param capacity 读缓冲上限（整单语义下不消费，仅对齐闭包形态）。
+    /// @param window 等待窗口（同上）。
+    /// @return 可等待体，恒交 `WaitElapsed`（发起侧据此照常发体）。
+    [[nodiscard]] auto read_within(std::size_t capacity, std::chrono::milliseconds window)
+        -> detail::CallbackAwaiter<detail::WindowedRead> {
+        (void)capacity;
+        (void)window;
+        return detail::CallbackAwaiter<detail::WindowedRead>(
+            [](const detail::CallbackAwaiter<detail::WindowedRead>::Sink &on_done) -> void {
+                on_done(Result<detail::WindowedRead>{
+                    detail::WindowedRead{.outcome = detail::WindowedRead::Outcome::WaitElapsed}});
+            });
+    }
+
+    /// @brief 读：首读整单交付，其后从已合成的线上字节流逐段服务，排空交 0。
+    /// @param buffer 读缓冲。
+    /// @return 可等待体，求得交付字节数（0 = 本跳字节已交完）或失败。
+    [[nodiscard]] auto read(std::span<char> buffer) -> detail::CallbackAwaiter<std::size_t> {
+        return detail::CallbackAwaiter<std::size_t>(
+            // 发起器经 std::function 类型擦除转入触发的系统性假告警面；结局一律以 Result 交付、不抛。
+            // NOLINTNEXTLINE(bugprone-exception-escape)
+            [this, buffer](detail::CallbackAwaiter<std::size_t>::Sink on_done) mutable -> void {
+                if (!fired_) {
+                    fired_ = true;
+                    // 内层急切协程驱动一次 fetch_exchange（`CallbackAwaiter` 需要 协程帧，而本成员不是
+                    // 协程）；结局经投递口回到本闭包的调用方。适配器由 send 闭包的 shared_ptr 持有，
+                    // 活过整个挂起期。
+                    drive_first_read(buffer, std::move(on_done));
+                    return;
+                }
+                on_done(serve_staged(buffer));  // 已交付过：直接从合成字节流服务（可能同步恢复发起协程）
+            });
+    }
+
+  private:
+    /// @brief 首读的内层驱动：等 fetch 结局 → 归一错误 → 合成线上字节流 → 交出首段。
+    ///
+    /// `CoroTask` 急切启动（构造即执行），本函数的返回值只作保活句柄；结局经投递口交回。
+    /// @param buffer 读缓冲（首段交付目标）。
+    /// @param on_done 读写环的投递口。
+    auto drive_first_read(std::span<char> buffer, std::function<void(Result<std::size_t>)> on_done) -> CoroTask<void> {
+        auto outcome = co_await detail::fetch_exchange(spec_, token_);
+        if (!outcome) {
+            on_done(Result<std::size_t>{outcome.error()});
+            co_return;
+        }
+        switch (outcome.value().ending) {
+            case detail::FetchOutcome::Ending::Completed: {
+                auto staged = stage_response(outcome.value());
+                if (!staged) {
+                    on_done(Result<std::size_t>{staged.error()});
+                    co_return;
+                }
+                break;
+            }
+            case detail::FetchOutcome::Ending::Aborted:
+                // 打断的两个成因按令牌分辨：取消是调用方的决定，其余就是截止到点。
+                on_done(Result<std::size_t>{make_error(
+                    token_.is_cancelled() ? ErrorCode::NetCancelled : ErrorCode::HttpTimeout,
+                    token_.is_cancelled() ? "the exchange was cancelled while the browser fetch was in flight"
+                                          : "exchange timeout: the fetch deadline fired (browser abort)")});
+                co_return;
+            case detail::FetchOutcome::Ending::NetworkError:
+                on_done(Result<std::size_t>{
+                    make_error(ErrorCode::NetConnectFailed,
+                               "fetch failed: the browser does not disclose the cause (network error, CORS preflight "
+                               "refusal, or DNS resolution failure)")});
+                co_return;
+        }
+        on_done(serve_staged(buffer));
+    }
+
+    /// @brief 把 fetch 结局合成「线上字节流」：状态行 + 过滤后的应答头 +（有体时的）体长 + 体。
+    ///
+    /// 浏览器已透明解码：`Content-Encoding` / `Transfer-Encoding` 剥除，`Content-Length` 以**合成
+    /// 时刻的体长**为准（原值描述的是编码前的事实，与交出的字节不对应）。空体不补长度——装配器
+    /// 落 `UntilClose` 分帧、适配器排空即交 0（FIN），同一形态在本跳收口。状态 0 = 浏览器不透明
+    /// 应答（manual 重定向专属）：如实落 `net-platform-unavailable` 并点名限制，绝不编造一条重定向。
+    /// @param outcome fetch 结局。
+    /// @return 成功为 OK；不透明应答携 `net-platform-unavailable`。
+    [[nodiscard]] auto stage_response(const detail::FetchOutcome &outcome) -> Result<void> {
+        if (outcome.status == 0) {
+            return Result<void>{
+                make_error(ErrorCode::NetPlatformUnavailable,
+                           "the redirect response is opaque on this leg (browser fetch with manual redirect): the "
+                           "browser hides the redirect target, and redirects are never auto-followed here")};
+        }
+        std::string head = "HTTP/1.1 " + std::to_string(outcome.status);
+        head += outcome.reason.empty() ? " \r\n" : " " + outcome.reason + "\r\n";
+        std::size_t begin = 0;
+        while (begin < outcome.headers_text.size()) {
+            const auto end = outcome.headers_text.find('\n', begin);
+            const auto line = std::string_view{outcome.headers_text}.substr(
+                begin, end == std::string::npos ? std::string::npos : end - begin);
+            begin = end == std::string::npos ? outcome.headers_text.size() : end + 1;
+            const auto at = line.find(':');
+            if (at == std::string_view::npos || at == 0) {
+                continue;
+            }
+            const auto name = line.substr(0, at);
+            if (field_name_equal(name, "content-encoding") || field_name_equal(name, "transfer-encoding") ||
+                field_name_equal(name, "content-length")) {
+                continue;  // 应答侧同族：编码已被浏览器还原，长度与分帧由合成口径自理
+            }
+            head += line;
+            head += "\r\n";
+        }
+        if (!outcome.body.empty()) {
+            head += "content-length: " + std::to_string(outcome.body.size()) + "\r\n";
+        }
+        head += "\r\n";
+        staged_.assign(head.begin(), head.end());
+        staged_.insert(staged_.end(), outcome.body.begin(), outcome.body.end());
+        return Result<void>{};
+    }
+
+    /// @brief 从合成字节流服务一次读；排空后交 0（对端收摊形态）。
+    /// @param buffer 读缓冲。
+    /// @return 交付字节数（0 = 已交完）。
+    [[nodiscard]] auto serve_staged(std::span<char> buffer) -> Result<std::size_t> {
+        if (cursor_ >= staged_.size()) {
+            return Result<std::size_t>{std::size_t{0}};
+        }
+        const std::size_t take = std::min(staged_.size() - cursor_, buffer.size());
+        std::copy_n(staged_.begin() + static_cast<std::ptrdiff_t>(cursor_), take, buffer.begin());
+        cursor_ += take;
+        return Result<std::size_t>{take};
+    }
+
+    detail::FetchSpec spec_;  ///< fetch 交换规格（构造期装配）
+    const Cancellation &token_;  ///< 本跳的取消令牌（引用逐尝试令牌：取消打断在途 fetch，见构造注释）
+    std::vector<char> staged_;  ///< 合成的线上字节流（状态行 + 头 + 体）
+    std::size_t cursor_ = 0;  ///< 已交付游标
+    bool fired_ = false;  ///< 是否已发起过整单交换（首读标记）
+};
+
 /// @brief 由本跳的路由决策拼一枚池键（口径见 `detail::HttpPoolKey`：五枚在线事实 + 配置代次）。
 /// @param route 本跳的路由（`plan_route()` 的产物，代理各元与请求行形态都在里面）。
 /// @param secure 目标是否 `https://`（决定这条连接上有没有 TLS 会话）。
@@ -915,6 +1115,14 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
     if (const auto verdict = gate_origin(proxy_, tls_, security, origin); !verdict) {
         co_return Result<Response>{verdict.error()};
     }
+    // fetch 腿的整单语义不支持流式请求体：浏览器一次性交出整次交换，`BodySource` 的分段与回放口径
+    // 无落点。如实落 `net-platform-unavailable` 并点名，不做悄悄一次性物化（§16 第 37 项）。
+    if (detail::fetch_leg_active() && origin.body_source() != nullptr) {
+        co_return Result<Response>{
+            make_error(ErrorCode::NetPlatformUnavailable,
+                       "send: a streaming request body is not available on this leg (browser fetch delivers the "
+                       "whole exchange at once); materialize the body first")};
+    }
     // 缓存起手式：命中新鲜副本时一条连接都不发起就交出——§12 承诺的「同一 URL 二次请求不触网」正是这一条。
     // 命中陈旧副本时把两枚条件头挂在**原始请求**上，故重试环的每一次尝试都带着同一份校验子重跑（挂在逐跳
     // 副本上的话，第二次尝试就成了「第一次验证、第二次裸打」）。
@@ -988,6 +1196,10 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
         int hops = 0;
         Result<Response> one{make_error(ErrorCode::HttpProtocolError, "send produced no outcome")};
         const StreamOptions options;
+        // fetch 腿的整单语义（§16 第 37 项）：跳环里的建连分支据此换挂适配器；代理由浏览器代管，
+        // 逐跳路由以空代理环境跑同一条 plan_route（策略闸照常判定，代理决策恒 Direct）。
+        const bool fetch_leg = detail::fetch_leg_active();
+        const ProxyEnvironment fetch_empty_proxy{};
         // 认证环要在本环的收尾处读「最近一跳路由向谁、那次 `CONNECT` 回了什么」，而这两件事实生在逐跳作用域里，
         // 故提到尝试级留一份副本（`negotiation` 每跳开头重置，只有走隧道那一跳会被传输层写入）。
         HopRoute hop;
@@ -1038,7 +1250,9 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             }
             // 策略判定与代理决策同在这一处完成（`Direct` 与其余形态共用同一条建连路，见 `detail::await_connect_via`）：
             // 故「有没有经代理」「这跳能不能发」在库里只有一个答案，且被拒时还轮不到渲染与建连。
-            auto routed = plan_route(proxy_, tls_, security, target, *port);
+            // fetch 腿以空代理环境问同一条路：代理由浏览器代管，策略闸（含明文闸）照常判定。
+            auto routed = fetch_leg ? plan_route(fetch_empty_proxy, tls_, security, target, *port)
+                                    : plan_route(proxy_, tls_, security, target, *port);
             if (!routed) {
                 one = Result<Response>{routed.error()};
                 break;
@@ -1076,13 +1290,15 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             //    连接池开着时在「建连」之前多问一声池：命中即坐上那条空闲连接（跳过建连与握手）、无空闲但
             //    名额有余就照常建连、名额满就排队等——等的时间计入 connect 档（`StageTimer` 在本段之前登记），
             //    到点在 detail 点名「排队等不到」而不是「连不上」。
+            //    fetch 腿没有连接可池化：池整段跳过（retaining_leftover 随之为假，装配器不开容忍模式——
+            //    整单交付的应答不存在「完整之后又到字节」的形态，§16 第 37 项）。
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<char>)> read_one;
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
             std::function<detail::CallbackAwaiter<detail::WindowedRead>(std::size_t, std::chrono::milliseconds)>
                 read_within_one;
             auto late = std::make_shared<std::vector<char>>();
             StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
-            const bool retaining_leftover = pool_active(pool_, pool_options_);
+            const bool retaining_leftover = pool_active(pool_, pool_options_) && !fetch_leg;
             detail::HttpPoolLease lease;  // 空卫 = 池关着，析构零作为；池开着时析构即恰好归还一次
             bool leased_from_pool = false;
             bool force_fresh_connect = false;  // 陈旧连接重试的那一轮不再信任空闲条目（保证一定换新）
@@ -1130,58 +1346,72 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             }
             std::shared_ptr<StreamTransport> plain_holder;
             std::shared_ptr<TlsTransport> secure_holder;
-            if (leased_from_pool) {
-                plain_holder = lease.connection().plain;
-                secure_holder = lease.connection().secure;
-            } else if (target.is_secure()) {
-                auto plain =
-                    co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port, options,
-                                                       token, hop.tunneled_via_proxy ? &negotiation : nullptr);
-                if (!plain) {
-                    one = Result<Response>{plain.error()};
-                    break;
-                }
-                auto secure = co_await detail::await_handshake(std::move(plain.value()), host, tls_, token);
-                if (!secure) {
-                    one = Result<Response>{secure.error()};
-                    break;
-                }
-                secure_holder = std::make_shared<TlsTransport>(std::move(secure.value()));
-            } else {
-                auto plain =
-                    co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port, options,
-                                                       token, hop.tunneled_via_proxy ? &negotiation : nullptr);
-                if (!plain) {
-                    one = Result<Response>{plain.error()};
-                    break;
-                }
-                plain_holder = std::make_shared<StreamTransport>(std::move(plain.value()));
-            }
-            if (!leased_from_pool) {
-                lease.adopt(detail::HttpPoolConnection{.plain = plain_holder, .secure = secure_holder}, lease.born());
-            }
-            if (secure_holder != nullptr) {
-                read_one = [holder = secure_holder](std::span<char> buffer) {
-                    return detail::await_read(*holder, buffer);
-                };
-                write_one = [holder = secure_holder](std::span<const char> data) {
-                    return detail::await_write(*holder, data);
-                };
-                read_within_one = [holder = secure_holder, late](std::size_t capacity,
-                                                                 std::chrono::milliseconds window) {
-                    return detail::await_read_within(*holder, capacity, window, late);
+            if (fetch_leg) {
+                // ── fetch 腿（§16 第 37 项）：本跳不建连、写出不落线——浏览器在首次读时整单交付。
+                //    三个闭包挂在适配器上，写出环 / 读环 / 物化 / 重定向与原生腿共用同一份代码；
+                //    `plan_route` 在本腿以空代理环境跑（路由恒 `Direct`，代理由浏览器代管）。
+                auto adapter = std::make_shared<FetchExchangeAdapter>(
+                    current, timeouts.connect.value_or(std::chrono::milliseconds{0}), token);
+                read_one = [adapter](std::span<char> buffer) { return adapter->read(buffer); };
+                write_one = [adapter](std::span<const char> data) { return adapter->write(data); };
+                read_within_one = [adapter](std::size_t capacity, std::chrono::milliseconds window) {
+                    return adapter->read_within(capacity, window);
                 };
             } else {
-                read_one = [holder = plain_holder](std::span<char> buffer) {
-                    return detail::await_read(*holder, buffer);
-                };
-                write_one = [holder = plain_holder](std::span<const char> data) {
-                    return detail::await_write(*holder, data);
-                };
-                read_within_one = [holder = plain_holder, late](std::size_t capacity,
-                                                                std::chrono::milliseconds window) {
-                    return detail::await_read_within(*holder, capacity, window, late);
-                };
+                if (leased_from_pool) {
+                    plain_holder = lease.connection().plain;
+                    secure_holder = lease.connection().secure;
+                } else if (target.is_secure()) {
+                    auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host,
+                                                                    route.peer_port, options, token,
+                                                                    hop.tunneled_via_proxy ? &negotiation : nullptr);
+                    if (!plain) {
+                        one = Result<Response>{plain.error()};
+                        break;
+                    }
+                    auto secure = co_await detail::await_handshake(std::move(plain.value()), host, tls_, token);
+                    if (!secure) {
+                        one = Result<Response>{secure.error()};
+                        break;
+                    }
+                    secure_holder = std::make_shared<TlsTransport>(std::move(secure.value()));
+                } else {
+                    auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host,
+                                                                    route.peer_port, options, token,
+                                                                    hop.tunneled_via_proxy ? &negotiation : nullptr);
+                    if (!plain) {
+                        one = Result<Response>{plain.error()};
+                        break;
+                    }
+                    plain_holder = std::make_shared<StreamTransport>(std::move(plain.value()));
+                }
+                if (!leased_from_pool) {
+                    lease.adopt(detail::HttpPoolConnection{.plain = plain_holder, .secure = secure_holder},
+                                lease.born());
+                }
+                if (secure_holder != nullptr) {
+                    read_one = [holder = secure_holder](std::span<char> buffer) {
+                        return detail::await_read(*holder, buffer);
+                    };
+                    write_one = [holder = secure_holder](std::span<const char> data) {
+                        return detail::await_write(*holder, data);
+                    };
+                    read_within_one = [holder = secure_holder, late](std::size_t capacity,
+                                                                     std::chrono::milliseconds window) {
+                        return detail::await_read_within(*holder, capacity, window, late);
+                    };
+                } else {
+                    read_one = [holder = plain_holder](std::span<char> buffer) {
+                        return detail::await_read(*holder, buffer);
+                    };
+                    write_one = [holder = plain_holder](std::span<const char> data) {
+                        return detail::await_write(*holder, data);
+                    };
+                    read_within_one = [holder = plain_holder, late](std::size_t capacity,
+                                                                    std::chrono::milliseconds window) {
+                        return detail::await_read_within(*holder, capacity, window, late);
+                    };
+                }
             }
             connect_timer.stop();  // 建连（含握手）完成，connect 档停表，不误伤后续读写
 

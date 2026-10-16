@@ -1,5 +1,5 @@
 /// 测试类型: unit
-/// 目标单元: include/aurora/net/http.h（`PoolOptions`）+ include/aurora/net/http_client.h + 
+/// 目标单元: include/aurora/net/http.h（`PoolOptions`）+ include/aurora/net/http_client.h +
 ///           src/aurora/net/detail/http_pool.h + src/aurora/net/detail/http_pool.cpp
 /// 测试说明: 连接池治理的端到端回归（CHG-018 §12「分段超时与连接池治理」、提案 §16 第 36 项）。
 ///           复用与不回池以对端的 `accepts()` 计数为准（两条请求一条连接 = 复用；两条请求两条连接 =
@@ -42,6 +42,7 @@ namespace {
 using aurora::CoroTask;
 using aurora::ErrorCode;
 using aurora::Result;
+using aurora::net::TlsContext;
 using aurora::net::http::Client;
 using aurora::net::http::DataSink;
 using aurora::net::http::PoolOptions;
@@ -50,7 +51,6 @@ using aurora::net::http::Response;
 using aurora::net::http::SinkFlow;
 using aurora::net::http::StreamOutcome;
 using aurora::net::http::Timeouts;
-using aurora::net::TlsContext;
 using aurora::test::PeerScript;
 using aurora::test::PeerStop;
 using aurora::test::ScriptedPeer;
@@ -70,8 +70,8 @@ auto allow_test_cleartext(Client &client) -> void {
 
 /// @brief 读一次请求（读到头部块尾即回），档案交回调用方（线程经锁交接）。
 /// @return 读到请求为 true（读失败 / 对端收摊为 false）。
-auto read_request(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, std::string &recorded,
-                  std::mutex &guard) -> bool {
+auto read_request(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, std::string &recorded, std::mutex &guard)
+    -> bool {
     (void)socket.set_io_timeout(std::chrono::milliseconds{300});
     std::vector<char> buffer(8192);
     std::string seen;
@@ -112,8 +112,8 @@ auto read_request(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, s
 /// @return 对端脚本。
 [[nodiscard]] auto serve_cycles(int cycles, std::string response, std::string &recorded, std::mutex &guard)
     -> PeerScript {
-    return [cycles, response = std::move(response), &recorded,
-            &guard](aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
+    return [cycles, response = std::move(response), &recorded, &guard](aurora::net::blocking::StreamSocket &socket,
+                                                                       PeerStop &stop) -> void {
         for (int served = 0; served < cycles && !stop.load(); ++served) {
             if (!read_request(socket, stop, recorded, guard)) {
                 return;
@@ -131,8 +131,8 @@ auto read_request(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, s
 /// @return 对端脚本。
 [[nodiscard]] auto serve_one_then(std::string response, std::string &recorded, std::mutex &guard,
                                   bool close_after_write) -> PeerScript {
-    return [response = std::move(response), &recorded, &guard,
-            close_after_write](aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
+    return [response = std::move(response), &recorded, &guard, close_after_write](
+               aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
         if (!read_request(socket, stop, recorded, guard)) {
             return;
         }
@@ -154,10 +154,9 @@ auto read_request(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, s
     // 在 CHECK 里抛出把现场盖掉。
     const auto &answered = outer.value();
     AURORA_TEST_REQUIRE_MSG(
-        bool(answered),
-        answered ? std::string{}
-                 : "send failed: code=" + std::to_string(static_cast<int>(answered.error().code_enum)) + " " +
-                       answered.error().message);
+        bool(answered), answered ? std::string{}
+                                 : "send failed: code=" + std::to_string(static_cast<int>(answered.error().code_enum)) +
+                                       " " + answered.error().message);
     return answered;
 }
 
@@ -166,8 +165,7 @@ auto read_request(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, s
 /// @param request 请求。
 /// @param sink 接收侧宿主。
 /// @return 交换的 Result 层。
-[[nodiscard]] auto stream_and_drive(const Client &client, Request request, DataSink &sink)
-    -> Result<StreamOutcome> {
+[[nodiscard]] auto stream_and_drive(const Client &client, Request request, DataSink &sink) -> Result<StreamOutcome> {
     auto task = client.open_stream(std::move(request), sink);
     AURORA_TEST_CHECK(aurora::test::net::drive_until("stream done", [&task] { return task.is_done(); }).satisfied);
     const auto outer = task.result();
@@ -178,9 +176,7 @@ auto read_request(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, s
 /// @brief 取已交付应答的体长（入口参数是 Result 层：`send_and_drive` 已把失败挡在 REQUIRE 里）。
 /// @param answered 交换结果。
 /// @return 体字节数。
-[[nodiscard]] auto body_size(const Result<Response> &answered) -> std::size_t {
-    return answered.value().body().size();
-}
+[[nodiscard]] auto body_size(const Result<Response> &answered) -> std::size_t { return answered.value().body().size(); }
 
 /// @brief 只收不问的宿主替身：复用判据问的是连接数与体内容，不需要宿主做决定。
 class CollectingSink final : public DataSink {
@@ -201,9 +197,7 @@ class CollectingSink final : public DataSink {
         return SinkFlow::Continue;
     }
     /// @brief 记收尾。
-    auto on_end() -> void override {
-        ++ends;
-    }
+    auto on_end() -> void override { ++ends; }
 
     int heads{0};  ///< `on_head` 次数
     int ends{0};  ///< `on_end` 次数
@@ -277,14 +271,15 @@ AURORA_TEST_CASE(connection_close_is_never_returned_to_the_pool) {
         if (!read_into(socket, stop, first_log, guard)) {
             return;
         }
-        (void)socket.write_all(
-            std::span<const char>{ok_response("first", "Connection: close\r\n")});
+        (void)socket.write_all(std::span<const char>{ok_response("first", "Connection: close\r\n")});
         if (!read_into(socket, stop, first_log, guard)) {
             return;  // 判对时这条连接上不会有第二枚请求
         }
-        (void)socket.write_all(std::span<const char>{std::string{"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nwrongly"}});
+        (void)socket.write_all(
+            std::span<const char>{std::string{"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nwrongly"}});
     };
-    ScriptedPeer peer{per_connection({sloppy_but_keepalive, serve_one_then(ok_response("second"), second_log, guard, false)})};
+    ScriptedPeer peer{
+        per_connection({sloppy_but_keepalive, serve_one_then(ok_response("second"), second_log, guard, false)})};
     AURORA_TEST_REQUIRE(peer.valid());
     Client client;
     allow_test_cleartext(client);
@@ -354,9 +349,11 @@ AURORA_TEST_CASE(leftover_pipelined_bytes_abandon_reuse_but_keep_the_exchange) {
         if (!read_into(socket, stop, first_log, guard)) {
             return;  // 判对时这条连接上不会有第二枚请求
         }
-        (void)socket.write_all(std::span<const char>{std::string{"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nwrongly"}});
+        (void)socket.write_all(
+            std::span<const char>{std::string{"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nwrongly"}});
     };
-    ScriptedPeer peer{per_connection({pipeline_then_keepalive, serve_one_then(ok_response("second"), second_log, guard, false)})};
+    ScriptedPeer peer{
+        per_connection({pipeline_then_keepalive, serve_one_then(ok_response("second"), second_log, guard, false)})};
     AURORA_TEST_REQUIRE(peer.valid());
     Client client;
     allow_test_cleartext(client);
@@ -435,9 +432,9 @@ AURORA_TEST_CASE(per_host_limit_queues_and_times_out_naming_the_queue) {
     queuing.timeouts(limits);
     auto held_task = client.send(std::move(holder));  // 占住唯一名额（在途，不是空闲）
     auto queued_task = client.send(std::move(queuing));
-    AURORA_TEST_CHECK(aurora::test::net::drive_until("queued exchange settled",
-                                                     [&queued_task] { return queued_task.is_done(); })
-                          .satisfied);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("queued exchange settled", [&queued_task] {
+                          return queued_task.is_done();
+                      }).satisfied);
     const auto queued_outer = queued_task.result();
     AURORA_TEST_REQUIRE_MSG(bool(queued_outer), queued_outer ? std::string{} : queued_outer.error().message);
     // 双层解包：外层是「协程跑完没有」（必成），内层才是「排队超时」那枚失败——超时住在内层。
@@ -446,9 +443,9 @@ AURORA_TEST_CASE(per_host_limit_queues_and_times_out_naming_the_queue) {
     const auto &queued_error = queued_answer.error();
     AURORA_TEST_CHECK(queued_error.code_enum == ErrorCode::HttpTimeout);
     AURORA_TEST_CHECK(queued_error.message.find("queued") != std::string::npos);  // detail 点名「排队等不到」
-    AURORA_TEST_CHECK(aurora::test::net::drive_until("holding exchange settled",
-                                                     [&held_task] { return held_task.is_done(); })
-                          .satisfied);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("holding exchange settled", [&held_task] {
+                          return held_task.is_done();
+                      }).satisfied);
     const auto held_outer = held_task.result();
     AURORA_TEST_REQUIRE_MSG(bool(held_outer), held_outer ? std::string{} : held_outer.error().message);
     const auto &held_answer = held_outer.value();

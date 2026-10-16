@@ -44,7 +44,7 @@
 
 ### 1.2 TLS 后端引擎宏与 `AURORA_NET_TLS_PROVIDER`
 
-`aurora::net` 的事件引擎、事件源注册口与传输族**没有开关**：公共 API 恒在（提案 §8 的第一句裁决），裁剪面只落在「哪个 TLS 引擎被编进来」这一处，因此 `AURORA_ENABLE_NET` / `AURORA_NET_ENGINE_POLL` / `AURORA_NET_EVENT_SOURCE` / `AURORA_NET_HTTP_FETCH` 四枚原规划宏**不属首批落地面**（提案 §8 的宏表按本条读取，「平台 HTTP 引擎与 wasm `fetch`」本就是 §16 的非目标）。
+`aurora::net` 的事件引擎、事件源注册口与传输族**没有开关**：公共 API 恒在（提案 §8 的第一句裁决），裁剪面只落在「哪个 TLS 引擎被编进来」这一处，因此 `AURORA_ENABLE_NET` / `AURORA_NET_ENGINE_POLL` / `AURORA_NET_EVENT_SOURCE` / `AURORA_NET_HTTP_FETCH` 四枚原规划宏**不属首批落地面**（提案 §8 的宏表按本条读取，「平台 HTTP 引擎」是 §16 的非目标）。**wasm 腿的浏览器 `fetch` HTTP 路径随平台直接启用、无独立开关**（提案 §16 第 37 项：`Client::send` 在 `AURORA_PLATFORM_WASM` 下自动改道 fetch 桥，node 真跑探针 `aurora_verify_wasm_fetch` 随默认 wasm 构建交付）。
 
 | 宏 | 默认 | 语义 |
 |:---|:---|:---|
