@@ -1,7 +1,6 @@
 #pragma once
 
-/// @brief 通用解压能力：按格式入参的 gzip / zlib / deflate 解压（CHG-018 §12「内容编码」的 core 级落地）。
-/// @file core/compression.h
+/// @brief 通用解压能力：按格式入参的 gzip / zlib / deflate 解压
 ///
 /// 本头回答一个问题：**「把一份按某种格式压缩的字节流还原成原始字节」**。它是 core 层共用基础件
 /// （与 `Headers` / `Url` 同格局），首个消费者是网络栈 HTTP 发起侧的 `Content-Encoding` 透明解压，
@@ -93,13 +92,13 @@ class Decompressor {
     /// @param sink 解压产物消费回调；同步调用，不得在回调内再驱动本实例。
     /// @return 成功为 `Result<void>{}`；流损坏/截断落 `compression-data-corrupt`，解压总量越
     ///         `max_output_bytes` 落 `compression-output-too-large`。
-    auto push(std::span<const char> src, const DecompressSink &sink) -> Result<void>;
+    auto push(std::span<const char> src, const DecompressSink &sink) const -> Result<void>;
 
     /// @brief 宣告输入结束，排出解码器内残留产物（如 gzip 尾块前的缓冲）。
     /// @param sink 解压产物消费回调；同步调用。
     /// @return 成功为 `Result<void>{}`；流未完整终结（缺尾块/校验和不符）落
     ///         `compression-data-corrupt`。
-    auto finish(const DecompressSink &sink) -> Result<void>;
+    auto finish(const DecompressSink &sink) const -> Result<void>;
 
     /// @brief 析构：释放底层解码器（未 `finish()` 即析构 = 放弃该条流，无额外副作用）。
     ~Decompressor();

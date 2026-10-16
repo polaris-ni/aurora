@@ -161,6 +161,12 @@ AURORA_TEST_CASE(platform_leg_fails_for_the_reserved_invalid_tld) {
 }
 
 AURORA_TEST_CASE(async_resolve_delivers_exactly_once_off_the_calling_thread) {
+#ifdef AURORA_PLATFORM_WASM
+    // 浏览器运行时的异步解析没有引擎交付路径（无引擎腿一律回不可用，钩子根本没机会跑），
+    // 本用例「钩子在另一线程执行、回调在另一线程抵达」的前提在该腿不成立——与兄弟用例
+    // 同一口径整体跳过，而非把平台的不可用伪装成一次失败的查表。
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#else
     AURORA_TEST_REQUIRE_THREADS();
     const auto main_thread = std::this_thread::get_id();
     std::atomic_int hook_calls{0};
@@ -193,6 +199,7 @@ AURORA_TEST_CASE(async_resolve_delivers_exactly_once_off_the_calling_thread) {
     // 阻塞的查表腿与完成回调都不占用调用线程——这是「异步」的全部意义。
     AURORA_TEST_CHECK_EQ(lookup_thread_is_not_caller.load(), 1);
     AURORA_TEST_CHECK_EQ(callback_thread_is_not_caller.load(), 1);
+#endif
 }
 
 AURORA_TEST_CASE(empty_callback_starts_no_lookup) {

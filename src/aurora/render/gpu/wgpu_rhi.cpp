@@ -20,11 +20,11 @@
 
 #include <ranges>
 
-#include "aurora/core/platform.h"  // 平台宏折算（AURORA_PLATFORM_*，门禁禁裸 _WIN32/__linux__ 条件）
+#include "aurora/core/platform.h"  // NOLINT
 
 #ifdef AURORA_PLATFORM_WINDOWS
-#ifndef NOMINMAX
-#define NOMINMAX
+#ifndef NOMINMAX  // NOLINT(readability-identifier-naming)
+#define NOMINMAX  // NOLINT(readability-identifier-naming)
 #endif
 #ifndef WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming)
 #define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming)
@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -56,7 +57,7 @@ namespace {
 // bind group（binding 1..3 = 源纹理 + 两级采样器）跨管线统一，断批仅由 key 变化驱动。
 
 // CJK-LITERAL: shader-source - comment inside GPU shader source, never printed
-constexpr const char *AURORA_WGSL = R"(
+constexpr auto AURORA_WGSL = R"(
 struct Globals {
     cv4: vec4f,        // 当前附着目标逻辑尺寸 (w, h, _, _)：NDC 映射基准
     clip: vec4f,       // 裁剪矩形 x,y,w,h（逻辑 dp）
@@ -754,6 +755,8 @@ struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
     // ---- 异步回调状态 ----
     bool cb_done = false;
     std::string cb_error;
+    /// 未捕获设备错误的累计计数（回调里递增，创建口前后比对判「能力不具备」）。
+    std::atomic<std::uint64_t> uncaptured_errors{0};
 
     Impl() = default;
 
@@ -843,6 +846,21 @@ struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
     }
 
     // ---- 异步初始化（v29 全异步：回调 + 事件泵）----
+
+    // 未捕获错误的自卫回调。wgpu-native 的**默认**处理器直接 non-unwinding panic：无 GPU /
+    // 软件适配器的环境里一次管线校验失败即杀掉整个进程（CI 实测：utest_wgpu_rhi 在
+    // ensure_pipelines 的 wgpuDeviceCreateRenderPipeline 上 abort，连不上降级路径）。
+    // 装上本回调后错误只落日志与计数，创建口照旧返回 null，由调用点按「能力不具备」收场。
+    // 计数同时兜住「返回非 null 的坏管线」：创建前后比对，有增量即判不可用。
+    static void on_uncaptured_error_cb(WGPUDevice const * /*device*/, WGPUErrorType type, WGPUStringView msg, void *u1,
+                                       void * /*u2*/) {
+        auto *self = static_cast<Impl *>(u1);
+        if (self != nullptr) {
+            self->uncaptured_errors.fetch_add(1, std::memory_order_relaxed);
+        }
+        AURORA_LOG_ERROR("gpu-wgpu", "uncaptured device error (type=", static_cast<unsigned>(type),
+                         "): ", sv_view(msg));
+    }
 
     static void on_adapter_cb(WGPURequestAdapterStatus status, WGPUAdapter ad, WGPUStringView msg, void *u1,
                               void * /*u2*/) {
@@ -943,10 +961,17 @@ struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
     [[nodiscard]] bool init_device() {
         cb_done = false;
         cb_error.clear();
+        // 设备描述符装上未捕获错误回调（默认处理器会 panic，见回调注释）：软件适配器 / 无 GPU
+        // 环境下随后的创建调用只落错误，不杀进程。
+        WGPUUncapturedErrorCallbackInfo error_cb{};
+        error_cb.callback = &Impl::on_uncaptured_error_cb;
+        error_cb.userdata1 = this;
+        WGPUDeviceDescriptor desc{};
+        desc.uncapturedErrorCallbackInfo = error_cb;
         WGPURequestDeviceCallbackInfo cb{.mode = WGPUCallbackMode_WaitAnyOnly};  // mode 无 0 枚举项，随声明给值
         cb.callback = &Impl::on_device_cb;
         cb.userdata1 = this;
-        wgpuAdapterRequestDevice(adapter, nullptr, cb);  // 回调同步触发（同上）
+        wgpuAdapterRequestDevice(adapter, &desc, cb);  // 回调同步触发（同上）
         if (!cb_done || device == nullptr) {
             if (cb_error.empty()) {
                 cb_error = "device request failed";
@@ -1422,6 +1447,7 @@ struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
             d.fragment = &fs;
             return wgpuDeviceCreateRenderPipeline(device, &d);
         };
+        const auto errors_before = uncaptured_errors.load(std::memory_order_relaxed);
         for (std::size_t i = 0; i < static_cast<std::size_t>(PipeId::Count); ++i) {
             const auto pipe = static_cast<PipeId>(i);
             if (pipes1[i] == nullptr) {
@@ -1435,6 +1461,12 @@ struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
                                  " creation failed (fs=", AURORA_PIPE_SPECS[i].fs, ")");
                 return false;
             }
+        }
+        if (uncaptured_errors.load(std::memory_order_relaxed) != errors_before) {
+            // 创建口返回了非 null 的坏管线（校验失败只走错误回调的形态）：有增量即判不可用，
+            // 放它过去只会在后续渲染里以更难归因的方式坏掉。
+            AURORA_LOG_ERROR("gpu-wgpu", "pipeline creation reported uncaptured device errors; backend unavailable");
+            return false;
         }
 
         // NOLINTEND(*-pro-bounds-constant-array-index)
@@ -1576,7 +1608,7 @@ struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
         if (pass != nullptr) {
             return true;
         }
-        if (LayerEntry *entry = current_layer_entry(); entry != nullptr && entry->tex.tex != nullptr) {
+        if (const LayerEntry *entry = current_layer_entry(); entry != nullptr && entry->tex.tex != nullptr) {
             return open_pass(entry->tex, nullptr, false, PassKind::Layer);
         }
         return open_pass(msaa, canvas.view, false, PassKind::Canvas);
@@ -1840,7 +1872,7 @@ struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
         if (bg == nullptr) {
             return false;
         }
-        WGPUComputePassDescriptor cpd{};
+        constexpr WGPUComputePassDescriptor cpd{};
         const WGPUComputePassEncoder cp = wgpuCommandEncoderBeginComputePass(encoder, &cpd);
         if (cp != nullptr) {
             wgpuComputePassEncoderSetPipeline(cp, pipe);
@@ -2209,14 +2241,14 @@ struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
             return;
         }
         const BatchKey bk = key;
-        std::vector<Vertex> src = std::move(verts);
+        const std::vector<Vertex> src = std::move(verts);
         verts.clear();
         key_active = false;
         if (!ensure_target_pass()) {
             return;
         }
         // 批键存 BasePipe 基底，混合/预乘变体在此解析为具体管线。
-        PipeId pipe = PipeId::Solid;
+        auto pipe = PipeId::Solid;
         switch (bk.pipeline) {
             case BasePipe::Solid:
                 pipe = bk.blend_off ? PipeId::SolidNo : PipeId::Solid;
@@ -3407,7 +3439,7 @@ struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
             draw_present();
         }
 
-        WGPUCommandBuffer cmdbuf = wgpuCommandEncoderFinish(encoder, nullptr);
+        const WGPUCommandBuffer cmdbuf = wgpuCommandEncoderFinish(encoder, nullptr);
         wgpu_release(encoder, wgpuCommandEncoderRelease);
         frame_open = false;
         if (cmdbuf == nullptr) {

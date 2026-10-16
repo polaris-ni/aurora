@@ -442,7 +442,15 @@ jobs:
           fi
           # macOS 上 libclang.dylib 在 <extract>/lib（不在 bin），bindgen 经 LIBCLANG_PATH 定位，
           # 故直接指到 libclang 实际所在目录；否则 clang 在 PATH 会把探针带向无 libclang 的目录。
-          libdir="$(dirname "$(find "$RUNNER_TEMP" -type f \( -name 'libclang*.dylib' -o -name 'libclang*.so*' -o -name 'libclang.dll' \) | head -1)")"
+          # 文件名必须精确匹配 `libclang.dylib`：`libclang*.dylib` 会先命中
+          # lib/clang/*/lib/darwin/ 下的编译器运行时（libclang_rt.asan_osx_dynamic.dylib 等），
+          # 那目录里没有 bindgen 要的共享库（实测：LIBCLANG_PATH 被指成 darwin 子目录即
+          # "Unable to find libclang"）。
+          libdir="$(dirname "$(find "$RUNNER_TEMP" \( -type f -o -type l \) \( -name 'libclang.dylib' -o -name 'libclang.so*' -o -name 'libclang.dll' \) | head -1)")"
+          if [ -z "$libdir" ] || [ ! -e "$libdir/libclang.dylib" ]; then
+            echo "::error::libclang.dylib not found after extracting $url"
+            exit 1
+          fi
           echo "LIBCLANG_PATH=$libdir" >> "$GITHUB_ENV"
           echo "$bindir" >> "$GITHUB_PATH"
           "$bindir/clang" --version

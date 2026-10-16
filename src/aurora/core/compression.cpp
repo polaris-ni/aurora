@@ -1,8 +1,8 @@
 #include "aurora/core/compression.h"
 
 #include <cstddef>
-#include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -85,6 +85,14 @@ auto wuffs_decoder_transform(CompressionFormat format, void *decoder, wuffs_base
     return wuffs_base__make_status("compression: unreachable format dispatch");
 }
 
+/// @brief wuffs 解码器的释放器：`wuffs_*__decoder__alloc()` 按 libc 堆分配（wuffs 自带 C++
+/// 助手即以 `unique_ptr(alloc(), &free)` 配对），故经 unique_ptr 持有、析构即还。
+struct WuffsDecoderDeleter {
+    auto operator()(void *decoder) const noexcept -> void {
+        std::free(decoder);  // NOLINT(*-no-malloc) wuffs alloc 与 libc free 配对，见类型注释
+    }
+};
+
 #endif  // AURORA_ENABLE_COMPRESSION
 
 }  // namespace
@@ -95,14 +103,12 @@ struct Decompressor::Impl {
     std::uint64_t produced{0};
     bool finished{false};
 #ifdef AURORA_ENABLE_COMPRESSION
-    void *decoder{nullptr};
+    /// wuffs 解码器：三族入口各异，故以 void* 持有、用时按格式转具体类型；分配失败即空，
+    /// 析构经 WuffsDecoderDeleter 交还 libc 堆。
+    std::unique_ptr<void, WuffsDecoderDeleter> decoder;
     std::vector<std::uint8_t> work;  ///< wuffs 工作缓冲（workbuf_len，三族均为个位数量级）
     std::vector<std::uint8_t> staging;  ///< 解压产物暂存（AURORA_OUTPUT_CHUNK_BYTES）
     wuffs_base__io_buffer out{};  ///< 指向 staging 的输出 io_buffer（meta 每轮重置）
-
-    /// @brief 归还 wuffs 解码器：`wuffs_*__decoder__alloc()` 按 libc 堆分配（wuffs 自带 C++
-    /// 助手即以 `unique_ptr(alloc(), &free)` 配对），漏放即每实例泄漏一份解码器状态。
-    ~Impl() { std::free(decoder); }
 
     /// @brief 把一段解压产物 [begin, end) 经 Sink 交出，并累计限额计数（越限即止，不再吐出后续字节）。
     static auto emit_output(Impl *impl, std::size_t begin, std::size_t end, const DecompressSink &sink) -> Result<void>;
@@ -134,12 +140,12 @@ auto Decompressor::create(CompressionFormat format, const DecompressOptions &opt
     auto impl = std::make_unique<Impl>();
     impl->format = format;
     impl->max_output_bytes = options.max_output_bytes;
-    impl->decoder = wuffs_decoder_alloc(format);
+    impl->decoder.reset(wuffs_decoder_alloc(format));
     if (impl->decoder == nullptr) {
         return make_error(ErrorCode::CompressionUnavailable,
                           "decoder allocation failed for format " + std::string(format_name(format)));
     }
-    impl->work.resize(wuffs_decoder_workbuf_len(format, impl->decoder));
+    impl->work.resize(wuffs_decoder_workbuf_len(format, impl->decoder.get()));
     impl->staging.resize(AURORA_OUTPUT_CHUNK_BYTES);
     impl->out.data.ptr = impl->staging.data();
     impl->out.data.len = impl->staging.size();
@@ -177,7 +183,7 @@ auto Decompressor::Impl::drive(Impl *impl, wuffs_base__io_buffer *in, bool input
     const auto work = wuffs_base__make_slice_u8(impl->work.data(), impl->work.size());
     while (true) {
         const std::size_t src_before = in->meta.ri;
-        const wuffs_base__status z = wuffs_decoder_transform(impl->format, impl->decoder, out, in, work);
+        const wuffs_base__status z = wuffs_decoder_transform(impl->format, impl->decoder.get(), out, in, work);
         // 交出本轮产物 [ri, wi) 并推进消费点。⚠️ 写位置 wi 必须原样留给解码器：wuffs 的
         // io_transformer 是可恢复协程，每次调用从 a_dst->meta.wi 重建续写指针，并在挂起点
         // 把 [调用前 wi, 现 wi) 快照进内部 32 KiB 窗口；轮次间把 wi 重置为 0 会令写位置回退、
@@ -225,7 +231,7 @@ auto Decompressor::Impl::drive(Impl *impl, wuffs_base__io_buffer *in, bool input
 
 #endif  // AURORA_ENABLE_COMPRESSION
 
-auto Decompressor::push(std::span<const char> src, const DecompressSink &sink) -> Result<void> {
+auto Decompressor::push(std::span<const char> src, const DecompressSink &sink) const -> Result<void> {
     if (impl_ == nullptr) {
         return corrupt_error("decompressor used after move");
     }
@@ -252,7 +258,7 @@ auto Decompressor::push(std::span<const char> src, const DecompressSink &sink) -
 #endif
 }
 
-auto Decompressor::finish(const DecompressSink &sink) -> Result<void> {
+auto Decompressor::finish(const DecompressSink &sink) const -> Result<void> {
     if (impl_ == nullptr) {
         return corrupt_error("decompressor used after move");
     }
