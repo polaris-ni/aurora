@@ -802,15 +802,11 @@ auto SecureTransportBackend::create(const TlsContext &context, std::string_view 
     }
 
     // 客户端上下文 + 流类型：`kSSLStreamType` 才是本接缝的形态（记录是连续字节流，不是数据报）。
-    // C 侧的形态是「返回 OSStatus，对象经尾参带回」；Apple 文档页只列了三枚入参，那是 Swift 的 create
-    // 规则把出参并成了返回值，照它写成三参数赋值在 C++ 里编译不过。产出的上下文是一枚自有引用，由
-    // `release()` 交回 CFRelease（文档：用 CFRelease 释放该对象）。
-    if (const auto created =
-            ::SSLCreateContext(kCFAllocatorDefault, kSSLClientSide, kSSLStreamType, &backend->context_);
-        created != noErr || backend->context_ == nullptr) {
-        if (created != noErr) {
-            return status_error(created, "tls context creation");
-        }
+    // `SSLCreateContext` 直接**返回**自引用的上下文（分配失败回 nullptr）：旧 SDK 的 `SSLNewContext`
+    // 出参形态已废除，新签名没有 OSStatus 出口，失败只有空指针一种观测。产出的上下文由 `release()`
+    // 交回 CFRelease（文档：用 CFRelease 释放该对象）。
+    backend->context_ = ::SSLCreateContext(kCFAllocatorDefault, kSSLClientSide, kSSLStreamType);
+    if (backend->context_ == nullptr) {
         return tls_error(ErrorCode::NetTlsEngineUnavailable, "SecureTransport created no SSL context");
     }
 
@@ -1243,12 +1239,12 @@ auto SecureTransportBackend::shutdown_records(std::vector<char> &outgoing) -> Re
         return Result<void>{};  // 没有会话状态可关：空产出即「没发」而不是「失败」
     }
     closing_ = true;
-    // 接缝在这里要的是 close_notify，而 `SSLShutdown` 是文档指定的优雅关闭入口；`SSLShutdown` 之后不能用
-    // `SSLClose` 顶替——后者的说明只有「Terminates the current SSL session」，没有任何「通知对端」的承诺，
-    // 用它就把「我方已安全关闭」写成了「我方直接断气」。
-    // 产出照旧走写回调，因此取回字节即可交给调用方交付底层流。等对端回 close_notify 这一步在本层不可能
-    // 有结论（`incoming_exhausted()` 时读回调一律回 `errSSLWouldBlock`），所以成败一律忽略、空产出照算成功。
-    const auto status = ::SSLShutdown(context_);
+    // 接缝在这里要的是 close_notify，而 SecureTransport 并没有独立的「发送关闭通知」入口——
+    // `SSLShutdown` 这个名字在本框架里不存在（与 OpenSSL 的 `SSL_shutdown` 串味），`SSLClose`
+    // 终止会话即是本腿能拿到的最接近形态。产出照旧走写回调，因此取回字节即可交给调用方交付底层流。
+    // 等对端回 close_notify 这一步在本层不可能有结论（`incoming_exhausted()` 时读回调一律回
+    // `errSSLWouldBlock`），所以成败一律忽略、空产出照算成功。
+    const auto status = ::SSLClose(context_);
     drain_produced(outgoing);
     (void)status;  // 关闭通知的成败不可能有结论（对端已不再读），空产出与已产出都算尽力而为
     return Result<void>{};
