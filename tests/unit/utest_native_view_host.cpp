@@ -96,9 +96,9 @@ class RecordSink final : public webview::WebViewSink {
     auto set_callbacks(std::weak_ptr<webview::WebViewCallbacks> /*callbacks*/) -> void override {}
 
     std::vector<webview::NativeViewRect> rects;  ///< 收到过的矩形（按下发顺序）
-    std::vector<bool> visibility;                ///< 可见性翻转序列（未翻转则不追加）
-    int captures = 0;                            ///< 被请求捕获的次数
-    bool detached = false;                       ///< 是否被解绑过
+    std::vector<bool> visibility;  ///< 可见性翻转序列（未翻转则不追加）
+    int captures = 0;  ///< 被请求捕获的次数
+    bool detached = false;  ///< 是否被解绑过
 };
 
 /// @brief 两模式皆可用的桩引擎：让控件的挂载走**真实登记路径**（而非降级路径）。
@@ -107,9 +107,9 @@ class CapableEngine final : public webview::NativeViewEngine {
     [[nodiscard]] auto id() const -> webview::WebViewEngine override { return webview::WebViewEngine::Null; }
     [[nodiscard]] auto probe() const -> webview::WebViewCapabilities override {
         return webview::WebViewCapabilities{.interactive = true,
-                                           .snapshot = true,
-                                           .engine = webview::WebViewEngine::Null,
-                                           .availability = webview::WebViewAvailability::Available};
+                                            .snapshot = true,
+                                            .engine = webview::WebViewEngine::Null,
+                                            .availability = webview::WebViewAvailability::Available};
     }
     [[nodiscard]] auto create_view(void * /*parent_window*/) -> std::unique_ptr<webview::WebViewSink> override {
         return nullptr;  // 桩视图：宿主只登记几何，平台侧资源为零
@@ -154,8 +154,8 @@ auto laid_out_nested_tree(float w, float h) -> NestedTree {
 /// @param csd_inset CSD 内缩值（拷贝进共享持有）。
 auto bind_host(webview::NativeViewHost &host, const float &scale, EdgeInsets csd_inset) -> void {
     const auto stored = std::make_shared<EdgeInsets>(csd_inset);
-    host.bind_window(stub_window(), [&scale]() -> float { return scale; },
-                     [stored]() -> EdgeInsets { return *stored; });
+    host.bind_window(
+        stub_window(), [&scale]() -> float { return scale; }, [stored]() -> EdgeInsets { return *stored; });
 }
 
 }  // namespace
@@ -375,8 +375,7 @@ AURORA_TEST_CASE(sync_geometry_dedups_unchanged_geometry_and_redispatches_on_cha
     float scale = 2.0F;
     EdgeInsets csd;
     webview::NativeViewHost host;
-    host.bind_window(stub_window(), [&scale]() -> float { return scale; },
-                     [&csd]() -> EdgeInsets { return csd; });
+    host.bind_window(stub_window(), [&scale]() -> float { return scale; }, [&csd]() -> EdgeInsets { return csd; });
 
     auto sink = std::make_unique<RecordSink>();
     RecordSink *raw = sink.get();

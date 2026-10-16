@@ -103,10 +103,10 @@
 #include "aurora/app/scene.h"
 #include "aurora/core/dimension.h"
 #include "aurora/core/image.h"
-#include "aurora/widget/containers.h"
-#include "aurora/widget/node.h"
 #include "aurora/webview/native_view_host.h"
 #include "aurora/webview/web_view.h"
+#include "aurora/widget/containers.h"
+#include "aurora/widget/node.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
 #include "verify_args.h"
@@ -147,11 +147,11 @@ constexpr float AURORA_PROBE_VIEW_H1 = 260.0F;
 
 /// 各阶段墙钟上限（毫秒）。帧循环是忙转 ⇒ **帧预算对异步等待无意义**（WebView2 环境 /
 /// 控制器创建、IPC、渲染都以墙钟计），故一律以墙钟判，避免按帧早早误判超时。
-constexpr int AURORA_PROBE_BOOT_MS = 30000;      ///< 挂载 + 能力落定 + 导航起
-constexpr int AURORA_PROBE_NAV_MS = 40000;       ///< 导航 + 标题（WebView2 IPC）
-constexpr int AURORA_PROBE_SCRIPT_MS = 20000;    ///< 两次 evaluate 往返
-constexpr int AURORA_PROBE_MESSAGE_MS = 20000;   ///< 两侧消息通道
-constexpr int AURORA_PROBE_RESIZE_MS = 300;      ///< 改档后重排 + 再同步（纯本地布局，短墙钟即可）
+constexpr int AURORA_PROBE_BOOT_MS = 30000;  ///< 挂载 + 能力落定 + 导航起
+constexpr int AURORA_PROBE_NAV_MS = 40000;  ///< 导航 + 标题（WebView2 IPC）
+constexpr int AURORA_PROBE_SCRIPT_MS = 20000;  ///< 两次 evaluate 往返
+constexpr int AURORA_PROBE_MESSAGE_MS = 20000;  ///< 两侧消息通道
+constexpr int AURORA_PROBE_RESIZE_MS = 300;  ///< 改档后重排 + 再同步（纯本地布局，短墙钟即可）
 constexpr int AURORA_PROBE_SNAPSHOT_MS = 30000;  ///< 快照异步捕获
 /// 页侧反射求值的重试间隔（ms）：postMessage → 页 onmessage → 反射是异步的，须轮询。
 constexpr int AURORA_PROBE_REFLECT_INTERVAL_MS = 120;
@@ -298,16 +298,18 @@ auto CALLBACK enum_child_cb(HWND child, LPARAM lparam) -> BOOL {
 }
 
 /// @brief 两个物理矩形是否在容差内相等（预期 vs Win32 实测）。
-[[nodiscard]] auto rect_close(const aurora::webview::NativeViewRect &expected, const ChildInfo &actual, int tol) -> bool {
+[[nodiscard]] auto rect_close(const aurora::webview::NativeViewRect &expected, const ChildInfo &actual, int tol)
+    -> bool {
     return std::abs(expected.x - actual.x) <= tol && std::abs(expected.y - actual.y) <= tol &&
            std::abs(expected.width - actual.width) <= tol && std::abs(expected.height - actual.height) <= tol;
 }
 
 [[nodiscard]] auto child_text(const ChildInfo &c) -> std::string {
-    return "hwnd=" + aurora_verify::format_handle(static_cast<const void *>(c.hwnd)) + " depth=" +
-           aurora_verify::format_int(c.depth) + " cls=" + c.cls + " geom=(" + aurora_verify::format_int(c.x) + "," +
-           aurora_verify::format_int(c.y) + " " + aurora_verify::format_int(c.width) + "x" +
-           aurora_verify::format_int(c.height) + ") visible=" + (c.visible ? "yes" : "no");
+    return "hwnd=" + aurora_verify::format_handle(static_cast<const void *>(c.hwnd)) +
+           " depth=" + aurora_verify::format_int(c.depth) + " cls=" + c.cls + " geom=(" +
+           aurora_verify::format_int(c.x) + "," + aurora_verify::format_int(c.y) + " " +
+           aurora_verify::format_int(c.width) + "x" + aurora_verify::format_int(c.height) +
+           ") visible=" + (c.visible ? "yes" : "no");
 }
 
 [[nodiscard]] auto expected_text(const aurora::webview::NativeViewRect &r) -> std::string {
@@ -317,15 +319,15 @@ auto CALLBACK enum_child_cb(HWND child, LPARAM lparam) -> BOOL {
 
 /// @brief 帧循环驱动的阶段状态机（语义化阶段名，不用编号标记）。
 enum class Stage {
-    Boot,          ///< 等挂载与能力落定
-    Navigate,      ///< 等交互视图导航态与标题
-    Script,        ///< evaluate 两次布尔往返
+    Boot,  ///< 等挂载与能力落定
+    Navigate,  ///< 等交互视图导航态与标题
+    Script,  ///< evaluate 两次布尔往返
     PageToNative,  ///< 等页面经 shim 投出的消息
     NativeToPage,  ///< post_json 后等页面反射值
-    Geometry,      ///< Win32 子窗口证据 + 预期矩形闭环比对
-    Resize,        ///< 改尺寸意图 → 几何再下发 → 再次闭环比对
-    Snapshot,      ///< 快照请求 → 像素判据
-    Done,          ///< 收尾
+    Geometry,  ///< Win32 子窗口证据 + 预期矩形闭环比对
+    Resize,  ///< 改尺寸意图 → 几何再下发 → 再次闭环比对
+    Snapshot,  ///< 快照请求 → 像素判据
+    Done,  ///< 收尾
 };
 
 /// @brief 探针主体状态（帧回调与 main 共享；全部主线程内访问）。
@@ -473,7 +475,8 @@ auto main(int argc, char **argv) -> int {
         probe.nav_failed_detail = std::move(detail);
     });
 
-    aurora::Node root = aurora::Node{aurora::Column{aurora::Node{probe.interactive}, aurora::Node{probe.snapshot_view}}};
+    aurora::Node root =
+        aurora::Node{aurora::Column{aurora::Node{probe.interactive}, aurora::Node{probe.snapshot_view}}};
     aurora::Scene scene{std::move(root)};
     aurora::Application app{std::move(scene), std::move(window_owner), opts};
     probe.window = app.window();
@@ -484,8 +487,8 @@ auto main(int argc, char **argv) -> int {
         AURORA_LOG_ERROR("verify", "GetTempPathW failed");
         return 2;
     }
-    const std::wstring page_wpath =
-        std::wstring(tmp_dir) + L"aurora_verify_webview_webview2_" + std::to_wstring(::GetCurrentProcessId()) + L".html";
+    const std::wstring page_wpath = std::wstring(tmp_dir) + L"aurora_verify_webview_webview2_" +
+                                    std::to_wstring(::GetCurrentProcessId()) + L".html";
     {
         std::ofstream written(page_wpath.c_str(), std::ios::trunc);
         written << probe_page_html();
@@ -513,20 +516,19 @@ auto main(int argc, char **argv) -> int {
                     probe.stage_entered = true;
                     // 挂载发生在 present_root 的树重建里：此刻两个视图已登记（或已降级）。
                     const aurora::webview::WebViewCapabilities caps = probe.interactive->capabilities();
-                    probe.results.add(caps.engine == aurora::webview::WebViewEngine::WebView2 &&
-                                          caps.availability == aurora::webview::WebViewAvailability::Available &&
-                                          caps.interactive && caps.snapshot,
-                                      "engine-selected",
-                                      std::string("engine=") + (caps.engine == aurora::webview::WebViewEngine::WebView2
-                                                                    ? "WebView2"
-                                                                    : "not-WebView2") +
-                                          " availability=" + std::to_string(static_cast<int>(caps.availability)));
+                    probe.results.add(
+                        caps.engine == aurora::webview::WebViewEngine::WebView2 &&
+                            caps.availability == aurora::webview::WebViewAvailability::Available && caps.interactive &&
+                            caps.snapshot,
+                        "engine-selected",
+                        std::string("engine=") +
+                            (caps.engine == aurora::webview::WebViewEngine::WebView2 ? "WebView2" : "not-WebView2") +
+                            " availability=" + std::to_string(static_cast<int>(caps.availability)));
                     if (probe.interactive->degraded() || probe.snapshot_view->degraded()) {
-                        probe.results.add(false, "views-not-degraded",
-                                          std::string("interactive.degraded=") +
-                                              (probe.interactive->degraded() ? "true" : "false") +
-                                              " snapshot.degraded=" +
-                                              (probe.snapshot_view->degraded() ? "true" : "false"));
+                        probe.results.add(
+                            false, "views-not-degraded",
+                            std::string("interactive.degraded=") + (probe.interactive->degraded() ? "true" : "false") +
+                                " snapshot.degraded=" + (probe.snapshot_view->degraded() ? "true" : "false"));
                         enter_stage(Stage::Done);
                         return;
                     }
@@ -564,8 +566,8 @@ auto main(int argc, char **argv) -> int {
                 if (probe.stage_waited_ms() > AURORA_PROBE_NAV_MS) {
                     probe.results.add(false, "nav-loading-then-finished",
                                       std::string("timeout: loading=") + (probe.nav_loading ? "1" : "0") +
-                                          " finished=" + (probe.nav_finished ? "1" : "0") + " title=" +
-                                          (probe.title_seen ? "1" : "0"));
+                                          " finished=" + (probe.nav_finished ? "1" : "0") +
+                                          " title=" + (probe.title_seen ? "1" : "0"));
                     enter_stage(Stage::Done);
                 }
                 return;
@@ -573,14 +575,12 @@ auto main(int argc, char **argv) -> int {
             case Stage::Script: {
                 if (!probe.stage_entered) {
                     probe.stage_entered = true;
-                    probe.interactive->evaluate_script("window.__ready === true",
-                                                       [&probe](std::string v) {
-                                                           probe.eval_ready_done = true;
-                                                           probe.eval_ready_value = std::move(v);
-                                                       });
+                    probe.interactive->evaluate_script("window.__ready === true", [&probe](std::string v) {
+                        probe.eval_ready_done = true;
+                        probe.eval_ready_value = std::move(v);
+                    });
                     probe.interactive->evaluate_script(
-                        std::string("document.title === '") + AURORA_PROBE_DOC_TITLE + "'",
-                        [&probe](std::string v) {
+                        std::string("document.title === '") + AURORA_PROBE_DOC_TITLE + "'", [&probe](std::string v) {
                             probe.eval_title_done = true;
                             probe.eval_title_value = std::move(v);
                         });
@@ -672,8 +672,10 @@ auto main(int argc, char **argv) -> int {
                         enter_stage(Stage::Done);
                         return;
                     }
-                    const aurora::webview::NativeViewRect expected_i = aurora::webview::to_native_rect(*ib, scale, inset);
-                    const aurora::webview::NativeViewRect expected_s = aurora::webview::to_native_rect(*sb, scale, inset);
+                    const aurora::webview::NativeViewRect expected_i =
+                        aurora::webview::to_native_rect(*ib, scale, inset);
+                    const aurora::webview::NativeViewRect expected_s =
+                        aurora::webview::to_native_rect(*sb, scale, inset);
                     probe.expected_before = expected_i;
                     probe.have_expected_before = true;
                     probe.results.info("expected-interactive", expected_text(expected_i));
@@ -689,13 +691,11 @@ auto main(int argc, char **argv) -> int {
                         }
                     }
                     probe.results.add(match_i != nullptr && match_i->visible, "win32-interactive-visible",
-                                      match_i == nullptr
-                                          ? "no child matches expected rect " + expected_text(expected_i)
-                                          : child_text(*match_i));
+                                      match_i == nullptr ? "no child matches expected rect " + expected_text(expected_i)
+                                                         : child_text(*match_i));
                     probe.results.add(match_s != nullptr && !match_s->visible, "win32-snapshot-hidden",
-                                      match_s == nullptr
-                                          ? "no child matches expected rect " + expected_text(expected_s)
-                                          : child_text(*match_s));
+                                      match_s == nullptr ? "no child matches expected rect " + expected_text(expected_s)
+                                                         : child_text(*match_s));
                 }
                 enter_stage(Stage::Resize);
                 return;
@@ -704,8 +704,7 @@ auto main(int argc, char **argv) -> int {
                 if (!probe.stage_entered) {
                     probe.stage_entered = true;
                     // 改交互视图的尺寸意图 → 标脏布局 → 下一帧重排 → 几何再下发。
-                    probe.interactive->width(aurora::px(AURORA_PROBE_VIEW_W1))
-                        .height(aurora::px(AURORA_PROBE_VIEW_H1));
+                    probe.interactive->width(aurora::px(AURORA_PROBE_VIEW_W1)).height(aurora::px(AURORA_PROBE_VIEW_H1));
                 }
                 if (probe.stage_waited_ms() < AURORA_PROBE_RESIZE_MS) {
                     return;  // 等墙钟让重排与几何同步落定（帧忙转，帧数不代表墙钟）
@@ -753,16 +752,15 @@ auto main(int argc, char **argv) -> int {
                     const aurora::Image &img = probe.snapshot_bitmap;
                     const bool sized = img.width > 0 && img.height > 0 &&
                                        img.pixels.size() == static_cast<std::size_t>(img.width) *
-                                                                 static_cast<std::size_t>(img.height) * 4U;
+                                                                static_cast<std::size_t>(img.height) * 4U;
                     if (!sized) {
                         // 空图是引擎按契约兑现的「捕获未产出像素」（`NativeViewSink::capture`
                         // 要求失败也必须回调空图）。最常见成因是合成器不产帧：GPU 进程不可用
                         // 的会话里 `CapturePreview` 返回 S_OK 却永不回调。给出复核手段，免得
                         // 把环境限制误读成引擎缺陷。
                         probe.results.add(false, "snapshot-bitmap",
-                                          std::string("no pixels captured (") +
-                                              aurora_verify::format_int(img.width) + "x" +
-                                              aurora_verify::format_int(img.height) +
+                                          std::string("no pixels captured (") + aurora_verify::format_int(img.width) +
+                                              "x" + aurora_verify::format_int(img.height) +
                                               "); compositor may produce no frames — retry with "
                                               "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--in-process-gpu");
                         enter_stage(Stage::Done);
@@ -811,8 +809,8 @@ auto main(int argc, char **argv) -> int {
     // ---- 汇总 ----
     probe.results.dump();
     const int failures = probe.results.failures();
-    emit("summary: frames=" + aurora_verify::format_int(probe.frames) + ", failures=" +
-         aurora_verify::format_int(failures));
+    emit("summary: frames=" + aurora_verify::format_int(probe.frames) +
+         ", failures=" + aurora_verify::format_int(failures));
     if (failures > 0) {
         emit("FAILURES PRESENT (exit = 5)");
         return 5;

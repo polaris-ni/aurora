@@ -1447,7 +1447,8 @@ auto X11Surface::wait_events(double timeout_ms) -> void {
         if (w.fd < 0) {
             continue;
         }
-        const short ev = static_cast<short>((w.readable ? POLLIN : 0) | (w.writable ? POLLOUT : 0));  // NOLINT(*-signed-bitwise)
+        const short ev =
+            static_cast<short>((w.readable ? POLLIN : 0) | (w.writable ? POLLOUT : 0));  // NOLINT(*-signed-bitwise)
         fds.push_back(pollfd{.fd = w.fd, .events = ev, .revents = 0});
     }
     const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), static_cast<int>(std::ceil(capped)));

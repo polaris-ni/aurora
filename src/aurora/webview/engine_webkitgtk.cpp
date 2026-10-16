@@ -486,18 +486,17 @@ template <typename Fn>
         api.widget_destroy != nullptr && api.register_window != nullptr && api.widget_get_window != nullptr &&
         api.widget_set_window != nullptr && api.set_hexpand != nullptr && api.set_vexpand != nullptr &&
         api.container_add != nullptr && api.widget_show != nullptr && api.widget_hide != nullptr &&
-        api.size_allocate != nullptr &&
-        api.web_view_new != nullptr && api.web_view_new_with_ucm != nullptr && api.load_uri != nullptr &&
-        api.load_html != nullptr && api.reload != nullptr && api.stop_loading != nullptr && api.go_back != nullptr &&
-        api.go_forward != nullptr && api.can_go_back != nullptr && api.can_go_forward != nullptr &&
-        api.get_uri != nullptr && api.get_title != nullptr && api.get_settings != nullptr &&
-        api.set_javascript != nullptr && api.set_zoom_level != nullptr && api.evaluate_javascript != nullptr &&
-        api.evaluate_finish != nullptr && api.get_snapshot != nullptr && api.get_snapshot_finish != nullptr &&
-        api.ucm_new != nullptr && api.ucm_register_handler != nullptr && api.ucm_add_script != nullptr &&
-        api.user_script_new != nullptr && api.js_result_get_value != nullptr && api.jsc_to_string != nullptr &&
-        api.jsc_to_json != nullptr && api.surface_get_data != nullptr && api.surface_get_width != nullptr &&
-        api.surface_get_height != nullptr && api.surface_get_stride != nullptr && api.surface_get_format != nullptr &&
-        api.surface_destroy != nullptr;
+        api.size_allocate != nullptr && api.web_view_new != nullptr && api.web_view_new_with_ucm != nullptr &&
+        api.load_uri != nullptr && api.load_html != nullptr && api.reload != nullptr && api.stop_loading != nullptr &&
+        api.go_back != nullptr && api.go_forward != nullptr && api.can_go_back != nullptr &&
+        api.can_go_forward != nullptr && api.get_uri != nullptr && api.get_title != nullptr &&
+        api.get_settings != nullptr && api.set_javascript != nullptr && api.set_zoom_level != nullptr &&
+        api.evaluate_javascript != nullptr && api.evaluate_finish != nullptr && api.get_snapshot != nullptr &&
+        api.get_snapshot_finish != nullptr && api.ucm_new != nullptr && api.ucm_register_handler != nullptr &&
+        api.ucm_add_script != nullptr && api.user_script_new != nullptr && api.js_result_get_value != nullptr &&
+        api.jsc_to_string != nullptr && api.jsc_to_json != nullptr && api.surface_get_data != nullptr &&
+        api.surface_get_width != nullptr && api.surface_get_height != nullptr && api.surface_get_stride != nullptr &&
+        api.surface_get_format != nullptr && api.surface_destroy != nullptr;
     if (!syms_ok) {
         dlclose(api.gtk);
         dlclose(api.gdk);
@@ -1009,8 +1008,8 @@ class WebKitGtkSink final : public WebViewSink {
             return;
         }
         const std::uint64_t id = next_capture_id();
-        state_->pending_capture.push_back(
-            WebKitGtkState::PendingCapture{.id = id, .done = done, .settled = std::make_shared<std::atomic<bool>>(false)});
+        state_->pending_capture.push_back(WebKitGtkState::PendingCapture{
+            .id = id, .done = done, .settled = std::make_shared<std::atomic<bool>>(false)});
         auto *key = new SnapshotKey{.state = state_, .id = id};
         const WebKitGtkApi &api = *state_->api;
         api.get_snapshot(state_->web_view, AURORA_WEBKIT_SNAPSHOT_REGION_VISIBLE, AURORA_WEBKIT_SNAPSHOT_OPTIONS_NONE,

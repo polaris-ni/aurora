@@ -366,9 +366,9 @@ auto create_native_window(const WindowOptions &opts) -> Result<std::unique_ptr<W
     AURORA_LOG_WARN("window", "create_native_window: no display available; falling back to HeadlessSurface.");
     return create_window(HeadlessOptions{opts});
 #else
-    return make_error(
-        ErrorCode::PlatformUnavailable, "create_native_window: display unavailable and no Headless fallback.",
-        "Run inside an X11/Wayland session.", "aurora/window/window.h");
+    return make_error(ErrorCode::PlatformUnavailable,
+                      "create_native_window: display unavailable and no Headless fallback.",
+                      "Run inside an X11/Wayland session.", "aurora/window/window.h");
 #endif
 #elif defined(AURORA_BACKEND_MACOS)
     return create_window(MacOSOptions{opts});

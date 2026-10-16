@@ -148,8 +148,8 @@ auto scenarios() -> std::vector<Scenario> {
         {.name = "webview_snapshot",
          .build = []() -> Node {
              auto col = std::make_shared<Column>();
-             col->add(Node{std::make_shared<webview::WebView>(
-                 webview::WebViewProps{.mode = webview::WebViewMode::Snapshot})});
+             col->add(Node{
+                 std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Snapshot})});
              col->add(box(100.0F, 20.0F));
              return Node{col};
          }},
@@ -342,9 +342,8 @@ auto stub_page_image() -> Image {
             } else {
                 g = 255;  // 右半：绿
             }
-            const std::size_t at = (static_cast<std::size_t>(y) * static_cast<std::size_t>(page_w) +
-                                    static_cast<std::size_t>(x)) *
-                                   4U;
+            const std::size_t at =
+                (static_cast<std::size_t>(y) * static_cast<std::size_t>(page_w) + static_cast<std::size_t>(x)) * 4U;
             img.pixels[at] = r;
             img.pixels[at + 1] = g;
             img.pixels[at + 2] = b;
@@ -386,9 +385,9 @@ class StubPageEngine final : public webview::NativeViewEngine {
     [[nodiscard]] auto id() const -> webview::WebViewEngine override { return webview::WebViewEngine::Null; }
     [[nodiscard]] auto probe() const -> webview::WebViewCapabilities override {
         return webview::WebViewCapabilities{.interactive = false,
-                                           .snapshot = true,
-                                           .engine = webview::WebViewEngine::Null,
-                                           .availability = webview::WebViewAvailability::Available};
+                                            .snapshot = true,
+                                            .engine = webview::WebViewEngine::Null,
+                                            .availability = webview::WebViewAvailability::Available};
     }
     [[nodiscard]] auto create_view(void * /*parent_window*/) -> std::unique_ptr<webview::WebViewSink> override {
         return std::make_unique<StubPageSink>();
@@ -436,9 +435,9 @@ AURORA_TEST_CASE(webview_snapshot_blits_into_the_painter_frame_stream) {
 
     // 手算取样：四象限 + 顶/底带各一点，颜色必须来自那张假页面。
     AURORA_TEST_CHECK_TRUE(p.get_pixel(10, 1) == Color(255, 255, 255, 255));  // 顶带白
-    AURORA_TEST_CHECK_TRUE(p.get_pixel(10, 120) == Color(255, 0, 0, 255));    // 左半红
-    AURORA_TEST_CHECK_TRUE(p.get_pixel(300, 120) == Color(0, 255, 0, 255));   // 右半绿
-    AURORA_TEST_CHECK_TRUE(p.get_pixel(10, 238) == Color(0, 0, 255, 255));    // 底带蓝
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(10, 120) == Color(255, 0, 0, 255));  // 左半红
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(300, 120) == Color(0, 255, 0, 255));  // 右半绿
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(10, 238) == Color(0, 0, 255, 255));  // 底带蓝
     // 反向守卫：占位底色一次都不许出现（出现即说明画的仍是降级占位而非快照）。
     AURORA_TEST_CHECK_TRUE(p.get_pixel(160, 120) != Color(9, 9, 9, 255));
 

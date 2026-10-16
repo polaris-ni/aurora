@@ -132,9 +132,9 @@ class StubEngine final : public webview::NativeViewEngine {
 
     [[nodiscard]] auto probe() const -> webview::WebViewCapabilities override {
         return webview::WebViewCapabilities{.interactive = interactive_,
-                                           .snapshot = snapshot_,
-                                           .engine = webview::WebViewEngine::Null,
-                                           .availability = availability_};
+                                            .snapshot = snapshot_,
+                                            .engine = webview::WebViewEngine::Null,
+                                            .availability = availability_};
     }
 
     [[nodiscard]] auto create_view(void * /*parent_window*/) -> std::unique_ptr<webview::WebViewSink> override {
@@ -154,8 +154,7 @@ class StubEngine final : public webview::NativeViewEngine {
 /// @brief 装配一个两模式皆可用的桩引擎。
 /// @return 已安装的引擎共享指针（调用方无需持有，仅经 `install_engine` 生效）。
 auto install_capable_engine() -> std::shared_ptr<StubEngine> {
-    auto engine =
-        std::make_shared<StubEngine>(true, true, webview::WebViewAvailability::Available);
+    auto engine = std::make_shared<StubEngine>(true, true, webview::WebViewAvailability::Available);
     webview::install_engine(engine);
     return engine;
 }
@@ -164,8 +163,7 @@ auto install_capable_engine() -> std::shared_ptr<StubEngine> {
 /// @param host 待绑定的宿主。
 auto bind_stub_host(webview::NativeViewHost &host) -> void {
     static int stub_native_window = 0;
-    host.bind_window(&stub_native_window, []() -> float { return 1.0F; },
-                     []() -> EdgeInsets { return EdgeInsets{}; });
+    host.bind_window(&stub_native_window, []() -> float { return 1.0F; }, []() -> EdgeInsets { return EdgeInsets{}; });
 }
 
 /// @brief 清空诊断收集器，返回本次挂载之后新产生的全部诊断。
@@ -238,8 +236,7 @@ AURORA_TEST_CASE(null_engine_reports_disabled_availability) {
     webview::install_null_engine();
     const webview::WebViewCapabilities caps = webview::current_capabilities();
     AURORA_TEST_CHECK(caps.unavailable());
-    AURORA_TEST_CHECK_EQ(static_cast<int>(caps.availability),
-                         static_cast<int>(webview::WebViewAvailability::Disabled));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(caps.availability), static_cast<int>(webview::WebViewAvailability::Disabled));
 
     auto wv = std::make_shared<webview::WebView>();
     const std::vector<Diagnostic> items = collect_after([&wv]() { mount_in_tree(wv); });
@@ -251,8 +248,7 @@ AURORA_TEST_CASE(null_engine_reports_disabled_availability) {
 
 AURORA_TEST_CASE(missing_runtime_availability_degrades_as_runtime_missing) {
     // 宏已开启但运行期探测不到引擎：`create_view` 之外的一切都不该发生，且归因必须是运行时缺失。
-    webview::install_engine(
-        std::make_shared<StubEngine>(false, false, webview::WebViewAvailability::MissingRuntime));
+    webview::install_engine(std::make_shared<StubEngine>(false, false, webview::WebViewAvailability::MissingRuntime));
     auto wv = std::make_shared<webview::WebView>();
     const std::vector<Diagnostic> items = collect_after([&wv]() { mount_in_tree(wv); });
     AURORA_TEST_CHECK(wv->degraded());
@@ -289,14 +285,12 @@ AURORA_TEST_CASE(available_engine_without_host_degrades_with_host_unbound) {
 }
 
 AURORA_TEST_CASE(interactive_mode_unsupported_degrades_with_unsupported_mode) {
-    webview::install_engine(
-        std::make_shared<StubEngine>(false, true, webview::WebViewAvailability::Available));
+    webview::install_engine(std::make_shared<StubEngine>(false, true, webview::WebViewAvailability::Available));
     webview::NativeViewHost host;
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(
-        webview::WebViewProps{.mode = webview::WebViewMode::Interactive});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Interactive});
     const std::vector<Diagnostic> items = collect_after([&wv]() { mount_in_tree(wv); });
     AURORA_TEST_CHECK(wv->degraded());
     AURORA_TEST_CHECK_EQ(items.size(), 1U);
@@ -307,14 +301,12 @@ AURORA_TEST_CASE(interactive_mode_unsupported_degrades_with_unsupported_mode) {
 }
 
 AURORA_TEST_CASE(snapshot_mode_unsupported_degrades_with_snapshot_unsupported) {
-    webview::install_engine(
-        std::make_shared<StubEngine>(true, false, webview::WebViewAvailability::Available));
+    webview::install_engine(std::make_shared<StubEngine>(true, false, webview::WebViewAvailability::Available));
     webview::NativeViewHost host;
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(
-        webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
     const std::vector<Diagnostic> items = collect_after([&wv]() { mount_in_tree(wv); });
     AURORA_TEST_CHECK(wv->degraded());
     AURORA_TEST_CHECK_EQ(items.size(), 1U);
@@ -355,8 +347,7 @@ AURORA_TEST_CASE(snapshot_mode_registers_view_and_blits_captured_pixels) {
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(
-        webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
     const std::shared_ptr<Column> root = mount_in_tree(wv);
     AURORA_TEST_REQUIRE_TRUE(!wv->degraded());
     AURORA_TEST_CHECK_EQ(host.view_count(), 1U);
@@ -385,8 +376,7 @@ AURORA_TEST_CASE(failed_capture_keeps_the_last_good_bitmap) {
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(
-        webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
     const std::shared_ptr<Column> root = mount_in_tree(wv);
     AURORA_TEST_REQUIRE_TRUE(engine->last_sink != nullptr);
 
@@ -411,8 +401,7 @@ AURORA_TEST_CASE(snapshot_request_without_view_reports_and_resolves_empty) {
     // 「没收到回调」与「收到空图」是两种状态，只有后者可被调用方判读，故回调不得悬着。
     install_capable_engine();
     webview::NativeViewHost::set_current(nullptr);
-    auto wv = std::make_shared<webview::WebView>(
-        webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
     Diagnostics::take();
     mount_in_tree(wv);
     const std::vector<Diagnostic> mounted = Diagnostics::take();
@@ -450,7 +439,7 @@ AURORA_TEST_CASE(tree_teardown_unregisters_without_explicit_unmount) {
         wv.reset();  // 只剩树持有
     }
     AURORA_TEST_CHECK_EQ(host.view_count(), 1U);  // 控件仍在世（树持有），登记未动
-    root.reset();                                 // 拆树 ⇒ 控件随之析构，无显式 unmount
+    root.reset();  // 拆树 ⇒ 控件随之析构，无显式 unmount
     AURORA_TEST_CHECK_EQ(host.view_count(), 0U);
 
     webview::NativeViewHost::set_current(nullptr);
@@ -497,22 +486,26 @@ AURORA_TEST_CASE(degradation_warning_is_emitted_once_per_mount) {
 AURORA_TEST_CASE(mount_installs_gate_props_and_initial_navigation_in_order) {
     // 挂载期把属性推给视图的**顺序**本身是契约：先装回调（否则初始导航的事件丢在无人听的
     // 时刻）、再设缩放与脚本开关（页面排版依赖缩放）、最后才发起初始导航。
-    const std::shared_ptr<StubEngine> engine = std::make_shared<StubEngine>(
-        true, true, webview::WebViewAvailability::Available);
+    const std::shared_ptr<StubEngine> engine =
+        std::make_shared<StubEngine>(true, true, webview::WebViewAvailability::Available);
     webview::install_engine(engine);
     webview::NativeViewHost host;
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{
-        .url = "https://example.invalid/a", .mode = webview::WebViewMode::Interactive,
-        .zoom_factor = 1.5F, .javascript_enabled = false});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.url = "https://example.invalid/a",
+                                                                       .mode = webview::WebViewMode::Interactive,
+                                                                       .zoom_factor = 1.5F,
+                                                                       .javascript_enabled = false});
     const std::shared_ptr<Column> root = mount_in_tree(wv);
     AURORA_TEST_REQUIRE_TRUE(!wv->degraded());
     AURORA_TEST_REQUIRE_TRUE(engine->last_sink != nullptr);
 
     const std::vector<std::string> expected = {
-        "set_callbacks", "zoom:1.500000", "js:0", "navigate:https://example.invalid/a",
+        "set_callbacks",
+        "zoom:1.500000",
+        "js:0",
+        "navigate:https://example.invalid/a",
     };
     AURORA_TEST_CHECK_TRUE(engine->last_sink->log == expected);
     // `url` 非空 ⇒ 内联 HTML 一律不被导航（属性优先级是声明出来的，不是碰巧）。
@@ -523,15 +516,15 @@ AURORA_TEST_CASE(mount_installs_gate_props_and_initial_navigation_in_order) {
 }
 
 AURORA_TEST_CASE(mount_navigates_inline_html_only_when_url_is_empty) {
-    const std::shared_ptr<StubEngine> engine = std::make_shared<StubEngine>(
-        true, true, webview::WebViewAvailability::Available);
+    const std::shared_ptr<StubEngine> engine =
+        std::make_shared<StubEngine>(true, true, webview::WebViewAvailability::Available);
     webview::install_engine(engine);
     webview::NativeViewHost host;
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{
-        .html = "<p>hi</p>", .base_uri = "https://example.invalid/"});
+    auto wv = std::make_shared<webview::WebView>(
+        webview::WebViewProps{.html = "<p>hi</p>", .base_uri = "https://example.invalid/"});
     const std::shared_ptr<Column> root = mount_in_tree(wv);
     AURORA_TEST_REQUIRE_TRUE(engine->last_sink != nullptr);
     AURORA_TEST_CHECK_TRUE(logged(*engine->last_sink, "navigate_to_string:<p>hi</p>@https://example.invalid/"));
@@ -542,8 +535,8 @@ AURORA_TEST_CASE(mount_navigates_inline_html_only_when_url_is_empty) {
 }
 
 AURORA_TEST_CASE(commands_forward_to_the_registered_view) {
-    const std::shared_ptr<StubEngine> engine = std::make_shared<StubEngine>(
-        true, true, webview::WebViewAvailability::Available);
+    const std::shared_ptr<StubEngine> engine =
+        std::make_shared<StubEngine>(true, true, webview::WebViewAvailability::Available);
     webview::install_engine(engine);
     webview::NativeViewHost host;
     bind_stub_host(host);
@@ -564,8 +557,13 @@ AURORA_TEST_CASE(commands_forward_to_the_registered_view) {
     wv->evaluate_script("1+1", [&got_script](const std::string &r) -> void { got_script = r; });
 
     const std::vector<std::string> expected = {
-        "navigate:https://example.invalid/b", "reload", "stop", "go_back", "go_forward",
-        "post:{\"k\":1}", "evaluate:1+1",
+        "navigate:https://example.invalid/b",
+        "reload",
+        "stop",
+        "go_back",
+        "go_forward",
+        "post:{\"k\":1}",
+        "evaluate:1+1",
     };
     AURORA_TEST_CHECK_TRUE(engine->last_sink->log == expected);
     AURORA_TEST_CHECK_EQ(got_script, std::string{"\"ok\""});
@@ -604,8 +602,8 @@ AURORA_TEST_CASE(commands_without_a_view_only_record_intent) {
 }
 
 AURORA_TEST_CASE(engine_events_reach_the_controls_subscribed_callbacks) {
-    const std::shared_ptr<StubEngine> engine = std::make_shared<StubEngine>(
-        true, true, webview::WebViewAvailability::Available);
+    const std::shared_ptr<StubEngine> engine =
+        std::make_shared<StubEngine>(true, true, webview::WebViewAvailability::Available);
     webview::install_engine(engine);
     webview::NativeViewHost host;
     bind_stub_host(host);
@@ -688,7 +686,7 @@ AURORA_TEST_CASE(deserialize_ignores_absent_and_mistyped_keys) {
     Json props = Json::object();
     props.set("url", Json{"https://example.invalid/new"});
     props.set("zoom_factor", Json{"not-a-number"});  // 类型不符
-    props.set("mode", Json{"Bogus"});                // 枚举值非法
+    props.set("mode", Json{"Bogus"});  // 枚举值非法
     wv.deserialize_props(props);
 
     AURORA_TEST_CHECK(wv.url == "https://example.invalid/new");
