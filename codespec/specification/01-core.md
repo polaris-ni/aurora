@@ -101,7 +101,9 @@ struct Constraints {
 
 `Error`（`core/result.h`）是结构化错误值，字段如下：
 
-`code`（冻结 slug）、`message`、`suggestion`、`docs`、`where`、`hint`、`code_enum`、`severity`、`category`、`auto_fixable`、`retryable`、`fix_category`、`fix_params`。
+`code`（冻结 slug）、`message`、`suggestion`、`docs`、`where`、`hint`、`code_enum`、`severity`、`category`、`retryable`。
+
+其中 `retryable` 是**声明性**标记，只回答「同一输入重跑一次是否可能换到不同结果」，**不**回答「这次该不该重试」。后者由调用方结合幂等性、退避预算与 `error_class_of()` 的归因档共同决定（网络侧的判据与算式见 [`06-app-platform.md`](06-app-platform.md) §8.8.x）；库内唯一按此合成的判定是 `net::detail::should_retry_error()`。
 
 错误码的**单一声明源**是 [`errors.toml`](../errors.toml)，由 `tools/gen/gen_error_codes.cpp` 生成 `error_codes.gen.h`、[`ERROR_CATALOG.md`](../ERROR_CATALOG.md) 与 `aurora_api.json`。新增或修改错误码只改 `errors.toml` 后重跑生成器，不手改产物。
 
@@ -154,7 +156,7 @@ auto widget = restored.value();
 | `code_enum` | 与 `code` 对应的 `ErrorCode`（无码时 `GeneralUnknown`） |
 | `fix` | 可选结构化修复建议 `FixSuggestion` |
 
-`FixSuggestion`（`diagnostics.h`）含 `code`、`description` 与可选 `auto_fix` 回调，`has_auto_fix()` 判断是否可自动修复。
+`FixSuggestion`（`diagnostics.h`）含机器可读 `code` 与人类可读 `description`，只作展示——库产出修复建议，不代调用方改写代码。
 
 `Diagnostic::to_json_line()` 输出 JSON 行，供工具链消费。`severity_str()` / `category_str()` 供遗留代码按字符串比较，新代码应直接用枚举比较（两个 `using` 别名已标记 `[[deprecated]]`）。
 
@@ -171,10 +173,7 @@ auto widget = restored.value();
 | `count()` | 当前累计诊断数 |
 | `get_last_diagnostics()` | 最近诊断环形缓冲（上限 `AURORA_RECENT_CAP` = 64） |
 | `explain_diagnostic(code)` | slug → 人类可读解释，两个重载（字符串 / `ErrorCode`） |
-| `collect_fixes()` | 收集最近诊断中携带的修复建议（不消费，同一 `code` 可能多次出现） |
-| `apply_fix(code)` | 按 `code` 执行一次自动修复，命中返回 `true`，两个重载（slug 字符串 / `ErrorCode`，`diagnostics.h`） |
-| `register_fix(code, fix)` | 注册错误码 → 修复策略映射 |
-| `auto_fix_all()` | 应用全部已注册的自动修复，返回成功修复数 |
+| `collect_fixes()` | 收集最近诊断中携带的修复建议（仅 `code` 非空者，不消费，同一 `code` 可能多次出现） |
 
 ### 4.3 严格模式
 

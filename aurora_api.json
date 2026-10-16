@@ -5499,8 +5499,6 @@
       "slug": "general-unknown",
       "category": "general",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "unknown",
       "retryable": false,
       "message": "An unknown error occurred",
       "hint": "Check the log context or enable the diagnostic collector"
@@ -5510,8 +5508,6 @@
       "slug": "general-invalid-argument",
       "category": "general",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Invalid argument supplied",
       "hint": "Check the parameter type and value range"
@@ -5521,8 +5517,6 @@
       "slug": "general-not-supported",
       "category": "general",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "unknown",
       "retryable": false,
       "message": "Operation not supported",
       "hint": "Confirm whether the feature is available or use an alternative"
@@ -5532,8 +5526,6 @@
       "slug": "layout-null-child",
       "category": "layout",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "missing_child",
       "retryable": false,
       "message": "Layout child widget is null",
       "hint": "Remove the empty child node or provide a valid widget"
@@ -5543,8 +5535,6 @@
       "slug": "layout-depth-exceeded",
       "category": "layout",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "layout_conflict",
       "retryable": false,
       "message": "Layout tree depth exceeded the limit (default {max})",
       "hint": "Check for infinitely recursive Repeater/Provider"
@@ -5554,8 +5544,6 @@
       "slug": "layout-invalid-constraints",
       "category": "layout",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Invalid constraints (e.g. min > max)",
       "hint": "Check the constraints settings"
@@ -5565,8 +5553,6 @@
       "slug": "layout-size-out-of-constraints",
       "category": "layout",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Computed size out of constraints range",
       "hint": "Adjust the min/max constraints or content size"
@@ -5576,8 +5562,6 @@
       "slug": "widget-unknown-type",
       "category": "widget",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "unknown_widget",
       "retryable": false,
       "message": "Unregistered widget type '{type}' encountered during deserialization",
       "hint": "Register it first via WidgetRegistry::register_factory"
@@ -5587,8 +5571,6 @@
       "slug": "widget-invalid-prop",
       "category": "widget",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Invalid property value: '{prop}'",
       "hint": "Check the property type and value range"
@@ -5598,8 +5580,6 @@
       "slug": "widget-prop-constraint-violated",
       "category": "widget",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Property constraint violated (mutually exclusive properties set together)",
       "hint": "Check the validity of the property combination"
@@ -5609,8 +5589,6 @@
       "slug": "widget-missing-required-prop",
       "category": "widget",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "missing_prop",
       "retryable": false,
       "message": "Missing required property '{prop}'",
       "hint": "Add the missing required property"
@@ -5620,8 +5598,6 @@
       "slug": "render-font-load-failed",
       "category": "render",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Font load failed: '{path}'",
       "hint": "Check the font path and format"
@@ -5631,8 +5607,6 @@
       "slug": "render-image-load-failed",
       "category": "render",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Image load failed: '{path}'",
       "hint": "Check the image path, format and decoder"
@@ -5642,8 +5616,6 @@
       "slug": "render-invalid-color",
       "category": "render",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Invalid color value (e.g. component out of 0-255)",
       "hint": "Check the color component values"
@@ -5653,8 +5625,6 @@
       "slug": "io-file-not-found",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "File does not exist or cannot be opened: '{path}'",
       "hint": "Check the file path and permissions"
@@ -5664,8 +5634,6 @@
       "slug": "io-parse-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "type_error",
       "retryable": false,
       "message": "File parsing failed: '{detail}'",
       "hint": "Check the file content format"
@@ -5675,8 +5643,6 @@
       "slug": "io-image-decode-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Image decode failed",
       "hint": "Check image file validity or use a supported format"
@@ -5686,8 +5652,6 @@
       "slug": "io-image-invalid-dimensions",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Invalid image dimensions (width/height is 0 or exceeds the limit)",
       "hint": "Check image dimensions or use a valid-size resource"
@@ -5697,8 +5661,6 @@
       "slug": "io-image-encode-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Image encode failed",
       "hint": "Check image pixel data validity or encoder options (quality/format)"
@@ -5708,8 +5670,6 @@
       "slug": "validation-failed",
       "category": "validation",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "type_error",
       "retryable": false,
       "message": "Validation failed: '{detail}'",
       "hint": "Check input data validity"
@@ -5719,8 +5679,6 @@
       "slug": "validation-schema-mismatch",
       "category": "validation",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "type_error",
       "retryable": false,
       "message": "Schema mismatch",
       "hint": "Check data structure against the Schema definition"
@@ -5730,8 +5688,6 @@
       "slug": "validation-tree-too-deep",
       "category": "validation",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "layout_conflict",
       "retryable": false,
       "message": "UI tree depth exceeded the limit (default {max})",
       "hint": "Reduce nesting levels or split components"
@@ -5741,8 +5697,6 @@
       "slug": "validation-unknown-widget",
       "category": "validation",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "unknown_widget",
       "retryable": false,
       "message": "Unknown/unsupported widget type '{type}'",
       "hint": "Use a known widget type or register a custom type"
@@ -5752,8 +5706,6 @@
       "slug": "validation-null-child",
       "category": "validation",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "missing_child",
       "retryable": false,
       "message": "Child node is null",
       "hint": "Provide a valid child node or remove the item"
@@ -5763,8 +5715,6 @@
       "slug": "nav-depth-exceeded",
       "category": "navigation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "layout_conflict",
       "retryable": false,
       "message": "Navigation stack depth exceeded the limit (default {max})",
       "hint": "Check the Navigator push loop logic or call set_max_depth()"
@@ -5774,8 +5724,6 @@
       "slug": "nav-route-not-found",
       "category": "navigation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "missing_prop",
       "retryable": false,
       "message": "Route not registered: '{route}'",
       "hint": "Register the corresponding route or use the default route"
@@ -5785,8 +5733,6 @@
       "slug": "platform-unavailable",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Platform feature unavailable: '{detail}'",
       "hint": "Check the runtime environment or enable the corresponding backend"
@@ -5796,8 +5742,6 @@
       "slug": "platform-permission-denied",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Insufficient permissions: '{detail}'",
       "hint": "Check file/network permission settings"
@@ -5807,8 +5751,6 @@
       "slug": "platform-com-init-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "COM initialization failed",
       "hint": "Initialize COM outside the GUI thread or check the runtime environment"
@@ -5818,8 +5760,6 @@
       "slug": "platform-dialog-create-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Platform dialog creation failed",
       "hint": "Check the parent window handle or runtime environment"
@@ -5829,8 +5769,6 @@
       "slug": "os-hotkey-register-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "OS global hotkey registration failed: '{detail}'",
       "hint": "The key combination may already be grabbed by another process, unsupported on this platform, or the platform backend is unavailable"
@@ -5840,8 +5778,6 @@
       "slug": "notification-post-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "System notification could not be posted: '{detail}'",
       "hint": "The desktop notification service may be unavailable, or the platform backend does not support notifications"
@@ -5851,8 +5787,6 @@
       "slug": "runtime-coroutine-exception",
       "category": "runtime",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "exception",
       "retryable": true,
       "message": "Exception thrown during coroutine execution: '{detail}'",
       "hint": "Check the coroutine body for exception catching or fix the logic"
@@ -5862,8 +5796,6 @@
       "slug": "runtime-async-exception",
       "category": "runtime",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "exception",
       "retryable": true,
       "message": "Exception thrown during async task execution: '{detail}'",
       "hint": "Check the async callback for exception catching or fix the logic"
@@ -5873,8 +5805,6 @@
       "slug": "async-timeout",
       "category": "runtime",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "timeout",
       "retryable": true,
       "message": "Async task timed out (not completed within {ms}ms)",
       "hint": "Increase the timeout threshold or optimize async task duration"
@@ -5884,8 +5814,6 @@
       "slug": "generation-ui-empty",
       "category": "generation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "empty",
       "retryable": false,
       "message": "NL-to-UI generation result is empty (no valid widget)",
       "hint": "Provide a more specific natural language description or constraints"
@@ -5895,8 +5823,6 @@
       "slug": "renderer-unavailable",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Requested render backend is unavailable",
       "hint": "Check the backend compile switch (AURORA_BACKEND_D3D11) or fall back to software rendering (RendererPreference::Auto/Software)"
@@ -5906,8 +5832,6 @@
       "slug": "prefs-not-persistent",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Preferences is in memory-only mode and cannot be persisted",
       "hint": "Bind a config file path (Preferences(file)) to gain persistence"
@@ -5917,8 +5841,6 @@
       "slug": "prefs-open-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Failed to open config file: '{path}'",
       "hint": "Check the file path and read permissions"
@@ -5928,8 +5850,6 @@
       "slug": "prefs-parse-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "type_error",
       "retryable": false,
       "message": "Config file JSON parse failed: '{detail}'",
       "hint": "Check JSON syntax (quotes/commas/brackets) and field types"
@@ -5939,8 +5859,6 @@
       "slug": "prefs-write-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Config file write failed: '{detail}'",
       "hint": "Check disk space, whether the directory exists, and target file permissions"
@@ -5950,8 +5868,6 @@
       "slug": "widget-depth-exceeded",
       "category": "widget",
       "severity": "warning",
-      "auto_fixable": true,
-      "fix_category": "layout_conflict",
       "retryable": false,
       "message": "Widget tree depth exceeded the limit (default 64)",
       "hint": "Usually caused by infinitely recursive Repeater / self-referencing Provider; check rebuild conditions or set_max_depth()"
@@ -5961,8 +5877,6 @@
       "slug": "render-degraded",
       "category": "render",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Rendering degraded due to missing resources (e.g. font/image fallback)",
       "hint": "Non-fatal degradation, UI remains usable; check the missing resource path or provide alternatives"
@@ -5972,8 +5886,6 @@
       "slug": "font-missing",
       "category": "render",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Requested font unavailable, fell back to built-in Bitmap font",
       "hint": "On non-Windows platforms the GDI font fallback chain may differ; ensure the font is registered or use the built-in font"
@@ -5983,8 +5895,6 @@
       "slug": "surface-lost",
       "category": "platform",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Surface lost (e.g. window destroyed/device reset)",
       "hint": "Need to rebuild the Surface to continue rendering; in most cases the framework auto-recovers on next present"
@@ -5994,8 +5904,6 @@
       "slug": "not-restorable",
       "category": "widget",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "unknown",
       "retryable": false,
       "message": "Widget not restorable (skipped during serialization/deserialization)",
       "hint": "Widgets relying on runtime callbacks such as Repeater / Canvas cannot be restored from JSON; use a named factory or State injection"
@@ -6005,8 +5913,6 @@
       "slug": "json-parse-error",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "type_error",
       "retryable": false,
       "message": "JSON parse failed",
       "hint": "Check JSON syntax (quotes/commas/brackets) and whether field types match the Schema"
@@ -6016,8 +5922,6 @@
       "slug": "json-depth-exceeded",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "JSON nesting depth exceeds the limit of {max} (line {line}, column {column})",
       "hint": "Reduce the nesting depth or raise ParseOptions::max_depth"
@@ -6027,8 +5931,6 @@
       "slug": "json-type-mismatch",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "type_error",
       "retryable": false,
       "message": "JSON type mismatch: expected {expected}, got {actual}",
       "hint": "Check the value type or use the tolerant as_or(key, fallback) reader"
@@ -6038,8 +5940,6 @@
       "slug": "json-value-not-serializable",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Value cannot be serialized to JSON: {detail}",
       "hint": "JSON has no textual form for NaN/Inf; replace the value or drop it"
@@ -6049,8 +5949,6 @@
       "slug": "compression-data-corrupt",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Compressed stream is corrupt or truncated: '{detail}'",
       "hint": "The bytes do not form a valid gzip/zlib/deflate stream (bad magic, truncated mid-symbol, or trailing checksum mismatch). Verify the payload was not cut in transit; retrying the same bytes reproduces the same rejection, so this is a data problem rather than a transient one"
@@ -6060,8 +5958,6 @@
       "slug": "compression-output-too-large",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Decompressed output exceeds the configured limit: '{detail}'",
       "hint": "The stream is valid but its decompressed size crossed DecompressOptions::max_output_bytes, the decompression-bomb guard. Raise the limit if the payload is legitimately large, or stream it with Decompressor and process chunks as they arrive instead of materializing everything"
@@ -6071,8 +5967,6 @@
       "slug": "compression-unavailable",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Compression operation unavailable: '{detail}'",
       "hint": "No codec is registered for this format ID (the detail names it; check for typos against the predefined AURORA_COMPRESS_FORMAT_* constants), or the registered codec does not support this direction (a decompression-only codec refuses compress), or the build was configured with AURORA_ENABLE_COMPRESSION=OFF so the builtin decoders are absent. Register an implementation with aurora::register_codec (it can also replace builtin slots), or rebuild with AURORA_ENABLE_COMPRESSION=ON"
@@ -6082,8 +5976,6 @@
       "slug": "storage-backend-unavailable",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Storage backend unavailable (directory not writable or media open failed)",
       "hint": "Check storage path permissions; when a cross-process lock is held, wait or close the occupying process"
@@ -6093,8 +5985,6 @@
       "slug": "storage-record-not-found",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "missing_child",
       "retryable": false,
       "message": "Storage record does not exist",
       "hint": "Confirm the id spelling; or put first then get"
@@ -6104,8 +5994,6 @@
       "slug": "storage-record-corrupt",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "type_error",
       "retryable": false,
       "message": "Storage record corrupt (JSON parse failed or illegal structure)",
       "hint": "Delete the corrupt file or restore from backup; use clear to rebuild if necessary"
@@ -6115,8 +6003,6 @@
       "slug": "storage-type-mismatch",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "type_error",
       "retryable": false,
       "message": "Typed read type mismatch",
       "hint": "Ensure put/get use the same type T; or use get_value to read the raw payload"
@@ -6126,8 +6012,6 @@
       "slug": "storage-encoding-mismatch",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "type_error",
       "retryable": false,
       "message": "Serialized wire format mismatch",
       "hint": "Record stored as binary but type T only supports JSON (or vice versa); use get_value or fix T's serialization concept"
@@ -6137,8 +6021,6 @@
       "slug": "storage-io-error",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Storage underlying I/O failed",
       "hint": "Check disk space/permissions; rename failure may be a cross-volume move, use a same-volume path"
@@ -6148,8 +6030,6 @@
       "slug": "audio-graph-cycle",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "layout_conflict",
       "retryable": false,
       "message": "Audio graph connection would create a cycle ({src} -> {dst})",
       "hint": "Remove the back-edge; the audio graph must remain acyclic (DAG)"
@@ -6159,8 +6039,6 @@
       "slug": "audio-edge-not-found",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Audio connection does not exist and cannot be disconnected",
       "hint": "Connect the nodes first; connect() result is the authoritative edge state"
@@ -6170,8 +6048,6 @@
       "slug": "audio-context-closed",
       "category": "runtime",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "unknown",
       "retryable": false,
       "message": "AudioContext is closed; audio operations are no longer available",
       "hint": "Create a new AudioContext; close() is terminal"
@@ -6181,8 +6057,6 @@
       "slug": "audio-param-invalid",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Invalid audio parameter automation ({reason})",
       "hint": "Check times (non-negative, non-decreasing), exponential ramp must not cross zero, time_constant > 0"
@@ -6192,8 +6066,6 @@
       "slug": "audio-buffer-invalid",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "empty",
       "retryable": false,
       "message": "Invalid audio buffer ({reason})",
       "hint": "Ensure sample_rate > 0, channels in {1,2} and samples non-empty before playback"
@@ -6203,8 +6075,6 @@
       "slug": "audio-device-unavailable",
       "category": "platform",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Audio device unavailable ({reason}); running in silent mode",
       "hint": "The audio graph keeps running and drops samples; build with AURORA_ENABLE_AUDIO and check the platform device"
@@ -6214,8 +6084,6 @@
       "slug": "audio-recording-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Audio recording failed: {reason}",
       "hint": "Check the output path and permissions; capture device availability is reported separately as audio-device-unavailable"
@@ -6225,8 +6093,6 @@
       "slug": "cli-spec-invalid",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Invalid command spec: {reason}",
       "hint": "Fix the CommandSpec/OptionSchema declaration: names must be non-empty and unique, enum kinds must list choices"
@@ -6236,8 +6102,6 @@
       "slug": "cli-unknown-option",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": true,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Unknown option '{option}' for command '{command}'",
       "hint": "Check the spelling, or run with --help to list the options accepted by this command"
@@ -6247,8 +6111,6 @@
       "slug": "cli-unknown-subcommand",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": true,
-      "fix_category": "unknown_widget",
       "retryable": false,
       "message": "Unknown subcommand '{subcommand}' for command '{command}'",
       "hint": "Pick one of the subcommands listed in --help for this command"
@@ -6258,8 +6120,6 @@
       "slug": "cli-missing-subcommand",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "missing_prop",
       "retryable": false,
       "message": "Command '{command}' requires a subcommand",
       "hint": "Pass one of the subcommands listed in --help before any options"
@@ -6269,8 +6129,6 @@
       "slug": "cli-missing-value",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "missing_prop",
       "retryable": false,
       "message": "Option '{option}' requires a value",
       "hint": "Pass the value inline as --name=value or as a following token; flags that take no value must be declared Bool with arity 0"
@@ -6280,8 +6138,6 @@
       "slug": "cli-invalid-value",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": true,
-      "fix_category": "type_error",
       "retryable": false,
       "message": "Value '{value}' is not a valid {kind} for option '{option}'",
       "hint": "Check the literal syntax expected by the declared kind (see the value hint in --help)"
@@ -6291,8 +6147,6 @@
       "slug": "cli-choice-invalid",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": true,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Value '{value}' is not one of the allowed choices for option '{option}'",
       "hint": "Choices are listed in the option's help entry; matching is case-sensitive"
@@ -6302,8 +6156,6 @@
       "slug": "cli-range-violated",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": true,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Value '{value}' for option '{option}' is outside [{min}, {max}]",
       "hint": "Clamp or widen the bound declared on the option"
@@ -6313,8 +6165,6 @@
       "slug": "cli-arity-violated",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Option '{option}' expects between {min} and {max} values, got {actual}",
       "hint": "Adjust the number of repetitions/tokens, or relax the declared arity"
@@ -6324,8 +6174,6 @@
       "slug": "cli-missing-required",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "missing_prop",
       "retryable": false,
       "message": "Required option '{option}' is missing for command '{command}'",
       "hint": "Pass the option, or declare a default_value so it becomes optional"
@@ -6335,8 +6183,6 @@
       "slug": "cli-too-many-positionals",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Too many positional arguments for command '{command}': unexpected extra '{value}'",
       "hint": "Declare the extra slot in the positional schema, or pass it after '--' to treat it as trailing input"
@@ -6346,8 +6192,6 @@
       "slug": "cli-conflict-violated",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "layout_conflict",
       "retryable": false,
       "message": "Options '{option}' and '{conflict}' cannot be used together",
       "hint": "Drop one of the mutually exclusive options; the conflict group is declared on the option schema"
@@ -6357,8 +6201,6 @@
       "slug": "clipboard-access-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "System clipboard is inaccessible: '{detail}'",
       "hint": "Another thread/process may own the clipboard (retry once it is released), the OS helper may be missing (install xclip or xsel on Linux), or the stored payload failed validation"
@@ -6368,8 +6210,6 @@
       "slug": "clipboard-write-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Clipboard payload could not be committed: '{detail}'",
       "hint": "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free memory or retry the copy"
@@ -6379,8 +6219,6 @@
       "slug": "net-runtime-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Socket runtime initialization failed",
       "hint": "Winsock startup was rejected (WSAStartup); check winsock DLL availability and version request, then retry"
@@ -6390,8 +6228,6 @@
       "slug": "net-socket-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Socket creation failed",
       "hint": "socket() returned an error (fd limit / protocol unsupported); close unused sockets and retry"
@@ -6401,8 +6237,6 @@
       "slug": "net-bind-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Socket bind on loopback failed",
       "hint": "The port is taken or privileges are missing; pass port 0 to let the OS pick an ephemeral port"
@@ -6412,8 +6246,6 @@
       "slug": "net-listen-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Socket listen failed",
       "hint": "listen() rejected the bound socket (backlog out of range or socket already closed)"
@@ -6423,8 +6255,6 @@
       "slug": "net-accept-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Socket accept failed",
       "hint": "accept() returned an error (listener closed concurrently or fd limit); re-check the running flag before retrying"
@@ -6434,8 +6264,6 @@
       "slug": "net-connect-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Connect to loopback endpoint failed",
       "hint": "No listener on 127.0.0.1:{port} (service not started) or the local firewall refused the loopback connect"
@@ -6445,8 +6273,6 @@
       "slug": "net-timeout-option-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Socket timeout option could not be set",
       "hint": "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO) failed; do not continue into an unbounded wait, close and reopen the socket"
@@ -6456,8 +6282,6 @@
       "slug": "net-wait-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Socket readiness wait failed",
       "hint": "select() returned an error (fd set invalid or interrupted); re-check the running flag before retrying"
@@ -6467,8 +6291,6 @@
       "slug": "net-send-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Socket send failed",
       "hint": "send() returned <= 0 mid-write (peer closed or timeout); the byte stream is no longer reliable"
@@ -6478,8 +6300,6 @@
       "slug": "net-recv-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Socket receive failed",
       "hint": "recv() returned an error (peer reset or socket closed)"
@@ -6489,8 +6309,6 @@
       "slug": "net-recv-timeout",
       "category": "io",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "timeout",
       "retryable": true,
       "message": "Socket receive timed out",
       "hint": "SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat this as 'no more data now'"
@@ -6500,8 +6318,6 @@
       "slug": "system-drag-not-supported",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "System drag-and-drop unavailable: '{detail}'",
       "hint": "The platform/backend has no system drag-and-drop mechanism yet, or the capability bit is false; retrying cannot create the mechanism - fall back to a non-drag path (paste, file dialog)"
@@ -6511,8 +6327,6 @@
       "slug": "system-drag-session-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "System drag-and-drop session failed: '{detail}'",
       "hint": "The negotiation broke down or the source stopped providing data; treat the session as ended (action None) and surface a non-drag alternative"
@@ -6522,8 +6336,6 @@
       "slug": "clipboard-format-unsupported",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Clipboard format unsupported on this platform: '{mime}'",
       "hint": "This platform exposes no mechanism for the requested MIME type; query available_formats() first, or fall back to text/plain"
@@ -6533,8 +6345,6 @@
       "slug": "net-endpoint-invalid",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Network endpoint is not a valid address: '{detail}'",
       "hint": "Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use Endpoint::local for UnixSocket paths or named pipes"
@@ -6544,8 +6354,6 @@
       "slug": "net-cancelled",
       "category": "io",
       "severity": "info",
-      "auto_fixable": false,
-      "fix_category": "cancelled",
       "retryable": true,
       "message": "Network operation was cancelled",
       "hint": "The caller cancelled this operation (or its owner went away); the completion still fires once with this code, so drop the result only if the owner is gone"
@@ -6555,8 +6363,6 @@
       "slug": "net-platform-unavailable",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "platform_capability",
       "retryable": false,
       "message": "This network capability is unavailable on the current platform",
       "hint": "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait semantics (e.g. wasm), so there is no silent fallback by design"
@@ -6566,8 +6372,6 @@
       "slug": "net-url-invalid",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "URL is not a valid absolute or resolvable reference: '{detail}'",
       "hint": "Pass a complete URL with scheme (e.g. https://host/path) or a reference to resolve against a base URL; percent signs must introduce a two-hex-digit escape and IPv6 literals need brackets"
@@ -6577,8 +6381,6 @@
       "slug": "net-proxy-config-invalid",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Proxy configuration is not valid: '{detail}'",
       "hint": "Fix the value instead of ignoring it: a proxy URL is scheme://[user[:pass]@]host[:port] with no path, and a NO_PROXY entry is *, a domain, a domain with :port, or an IPv4/IPv6 CIDR; a malformed proxy setting must never fall back to a direct connection"
@@ -6588,8 +6390,6 @@
       "slug": "net-proxy-unsupported",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "This proxy protocol is not supported by the current build",
       "hint": "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a plaintext proxy hop"
@@ -6599,8 +6399,6 @@
       "slug": "net-proxy-unreachable",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Proxy tunnel could not be established: '{detail}'",
       "hint": "The proxy answered (or refused) but no tunnel was built; connect never fell back to direct on purpose, so check the proxy host/port and its own uplink rather than the target host"
@@ -6610,8 +6408,6 @@
       "slug": "net-proxy-auth-required",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Proxy rejected the supplied credentials: '{detail}'",
       "hint": "The proxy demanded authentication that was absent or refused: 407 on HTTP CONNECT, or a non-zero status on the SOCKS5 username/password subnegotiation; supply credentials in the proxy URL or re-authenticate once, do not retry blindly"
@@ -6621,8 +6417,6 @@
       "slug": "net-proxy-protocol",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Proxy handshake is not protocol-conformant: '{detail}'",
       "hint": "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server where a proxy port was expected"
@@ -6632,8 +6426,6 @@
       "slug": "net-dns-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Host name could not be resolved: '{detail}'",
       "hint": "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test"
@@ -6643,8 +6435,6 @@
       "slug": "net-proxy-config-unreadable",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Operating-system proxy settings could not be read: '{detail}'",
       "hint": "The channel exists on this platform but the read was refused (registry access, dynamic-store failure); this is distinct from a machine that simply has no proxy configured, and the library never treats the two as the same outcome"
@@ -6654,8 +6444,6 @@
       "slug": "net-policy-violated",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Network policy refused the request before any byte went out: '{detail}'",
       "hint": "A declarative NetPolicy dimension (cleartext allow-list, TLS version floor, or require-proxy) rejected this target; the detail names the dimension and both sides of the conflict. Widen the policy, add the host to allow_cleartext_hosts, or raise the TLS context's floor to match the policy — the request itself is unchanged and retrying it as-is cannot succeed"
@@ -6665,8 +6453,6 @@
       "slug": "net-option-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Socket option or shutdown call failed: '{detail}'",
       "hint": "setsockopt / getsockopt / shutdown returned an error (bad handle state, unsupported option, or the peer already reset the connection); the native code is in the message, check the option name and whether the socket is still connected"
@@ -6676,8 +6462,6 @@
       "slug": "net-connect-timeout",
       "category": "io",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "timeout",
       "retryable": true,
       "message": "Connection attempt timed out: '{detail}'",
       "hint": "The non-blocking connect did not produce a result within the configured deadline; a black-holed peer or an unreachable route looks identical to a slow one from here, so retry with a longer StreamOptions::connect_timeout or fall back to another candidate address"
@@ -6687,8 +6471,6 @@
       "slug": "net-buffer-limit",
       "category": "io",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": true,
       "message": "Transfer buffer limit exceeded: '{detail}'",
       "hint": "Backpressure fired: pending bytes reached the high-water mark, pending reads exceeded the read-buffer cap, or a framed message overflowed its limit; slow the producer down or raise the matching StreamOptions field rather than dropping data"
@@ -6698,8 +6480,6 @@
       "slug": "net-framer-overflow",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Framed message exceeds its configured limit: '{detail}'",
       "hint": "The stream produced a single message larger than FrameOptions::max_frame_bytes, or a length prefix declaring more bytes than the limit allows; raise the limit only for a protocol that genuinely carries such frames, otherwise treat the stream as malformed and close it rather than resynchronising inside an oversized frame"
@@ -6709,8 +6489,6 @@
       "slug": "net-framer-config-invalid",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Invalid framer configuration: '{detail}'",
       "hint": "A Framer factory was given a limit of 0, an empty or oversized delimiter, or a length field width outside 1..8 bytes; framing must be configured before it is used, because a silent default here would either accept unbounded frames or split messages at the wrong place"
@@ -6720,8 +6498,6 @@
       "slug": "net-option-conflict",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Socket option conflicts with the current configuration: '{detail}'",
       "hint": "Two settings cannot both hold on one socket (a connected UDP socket receives only from its peer, so joining a multicast group there would configure a socket that can never receive the group); use a second socket for the other form rather than reordering the calls"
@@ -6731,8 +6507,6 @@
       "slug": "net-tls-handshake-failed",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "TLS handshake failed: '{detail}'",
       "hint": "The peer aborted or refused the negotiation (unsupported cipher suite, alert from the server, truncated handshake, or a plaintext endpoint answering on a TLS port); the transport is unusable after this and must be closed. Reproduce with the peer's TLS logs before changing TlsContext, because retrying the same parameters only reproduces the same alert"
@@ -6742,8 +6516,6 @@
       "slug": "net-tls-cert-rejected",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "TLS certificate rejected: '{detail}'",
       "hint": "Chain verification failed (unknown issuer, expired or not-yet-valid leaf, hostname mismatch, or a policy constraint). Install the issuing CA into the trust root used by this TlsContext, or point TlsContext::add_trusted_certificate at the right PEM; do not reach for allow_insecure_certificate, which turns a real man-in-the-middle signal off for the whole transport"
@@ -6753,8 +6525,6 @@
       "slug": "net-tls-version-mismatch",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "TLS protocol version mismatch: '{detail}'",
       "hint": "TlsContext::min_version rules out every version the peer is willing to speak (commonly a TLS 1.3-only floor against a 1.2 endpoint). Lower the floor deliberately and record why, rather than mirroring the peer automatically: the floor is the negotiated security baseline"
@@ -6764,8 +6534,6 @@
       "slug": "net-tls-engine-unavailable",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "No TLS backend available: '{detail}'",
       "hint": "This platform has no system TLS stack that Aurora drives, and the build supplied no provider, so net::Engine::capabilities().tls is false. Configure AURORA_NET_TLS_PROVIDER=<static|shared>:<prefix> with an OpenSSL or mbedTLS installation, or run the request over plain transport on a trusted network; linking TLS sources into the library is not a supported route"
@@ -6775,8 +6543,6 @@
       "slug": "net-tls-pin-mismatch",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "TLS certificate pin mismatch: '{detail}'",
       "hint": "The peer's certificate does not carry any pinned public key, so the pinned identity changed (key rotation, reissued certificate, or an interception proxy). Update the pinned SPKI digests from an out-of-band source you trust and rotate them in lockstep with the service; never fall back to allow_insecure_certificate, which defeats the pin entirely"
@@ -6786,8 +6552,6 @@
       "slug": "http-request-invalid",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "HTTP request cannot be sent as written: '{detail}'",
       "hint": "The request violates the message grammar before any byte is written (unknown method text, a header name outside the token charset, a header value containing CR or LF, or a target URL without a host). Fix the request at the call site; the peer never sees it, so retrying with the same fields reproduces the same rejection"
@@ -6797,8 +6561,6 @@
       "slug": "http-timeout",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "timeout",
       "retryable": true,
       "message": "HTTP request timed out: '{detail}'",
       "hint": "The detail names which of the three stages expired (connect, read_idle or total), and they mean different things: connect says nothing answered, read_idle says the body stalled mid-flight, total says the whole exchange overran. Raise only the stage that fired - a blanket total budget turns slow-but-healthy transfers into failures"
@@ -6808,8 +6570,6 @@
       "slug": "http-redirect-limit",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "HTTP redirect chain exceeded the configured limit: '{detail}'",
       "hint": "Either the peer is bouncing between targets or the limit is genuinely too small for this endpoint's chain. Inspect the Location sequence in the diagnostics before raising the limit, because following a cycle also leaks credentials to each hop it revisits"
@@ -6819,8 +6579,6 @@
       "slug": "http-body-too-large",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "HTTP response body exceeds the configured limit: '{detail}'",
       "hint": "The guard is what keeps a wrong URL (a video behind a shortened link) from exhausting memory. The detail says which ceiling was crossed: max_body_bytes bounds the bytes that arrived on the wire, max_decompressed_bytes bounds the transparently decompressed payload (the decompression-bomb guard). Raise the one that fired if the payload is legitimately large, or switch to open_stream so the body is delivered in bounded chunks instead of materialized"
@@ -6830,8 +6588,6 @@
       "slug": "http-charset-unsupported",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "HTTP response charset is not supported: '{detail}'",
       "hint": "Response::text() decodes only UTF-8 and Latin-1 in this batch, so a body labelled with any other charset cannot be turned into text here. The undecoded bytes are always reachable through body(), so transcoding is the caller's to do; do not silently substitute U+FFFD or reinterpret the bytes as UTF-8, which would corrupt the payload"
@@ -6841,8 +6597,6 @@
       "slug": "http-protocol-error",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "HTTP peer violated the message grammar: '{detail}'",
       "hint": "The response is not parseable as HTTP/1.1 (bad status line, a chunk size that is not hexadecimal, framing that declares both Content-Length and an unknown Transfer-Encoding, or a body longer than its declared length). Close the connection and re-issue on a fresh one, because the byte stream is now misaligned and no later response on it can be trusted"
@@ -6852,8 +6606,6 @@
       "slug": "http-content-encoding-unsupported",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "HTTP response content encoding is not supported: '{detail}'",
       "hint": "The peer applied a content coding this client cannot undo - either the coding name is outside the advertised set (brotli and zstd are not built here) or the build was configured with AURORA_ENABLE_COMPRESSION=OFF, in which case no decoder exists and the request deliberately never advertised Accept-Encoding. Re-request with an encoding you can decode (Request::header sets Accept-Encoding; an identity body always arrives undecoded); never reinterpret the compressed bytes as text, which would hand the caller garbage"
@@ -6863,8 +6615,6 @@
       "slug": "http-body-corrupt",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "HTTP response body cannot be decoded: '{detail}'",
       "hint": "The message framed cleanly but its payload did not survive the declared content coding: the gzip/zlib/deflate stream is corrupt, truncated mid-symbol, or fails its trailing checksum. This is a data defect (at the peer, or in the encoding chain it declared), not a transport fault - the bytes arrived whole, so retrying the same target only re-fetches the same broken payload; check the declared Content-Encoding chain before suspecting the link"
@@ -6874,8 +6624,6 @@
       "slug": "webview-runtime-missing",
       "category": "platform",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "No native web engine runtime available: '{detail}'",
       "hint": "The WebView control degrades to a placeholder rectangle; install the platform runtime (WebView2 Runtime on Windows, libwebkit2gtk on Linux) to enable it"
@@ -6885,8 +6633,6 @@
       "slug": "webview-engine-init-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Web engine initialization failed: '{detail}'",
       "hint": "The engine runtime was found but could not be started; the control degrades to a placeholder - check the user data folder and display connection"
@@ -6896,8 +6642,6 @@
       "slug": "webview-navigation-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": true,
       "message": "Web navigation failed for '{uri}': '{detail}'",
       "hint": "Check the URI scheme and network reachability; custom schemes and file access must be enabled explicitly"
@@ -6907,8 +6651,6 @@
       "slug": "webview-script-eval-failed",
       "category": "platform",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": true,
       "message": "Script evaluation failed: '{detail}'",
       "hint": "The page may not have finished loading, or JavaScript is disabled on this control; retry after navigation completes"
@@ -6918,8 +6660,6 @@
       "slug": "webview-snapshot-unsupported",
       "category": "platform",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "Snapshot mode unavailable: '{detail}'",
       "hint": "Snapshot mode needs a live engine and, on Linux, an available GTK display connection; use Interactive mode on X11 or Windows instead"
@@ -6929,8 +6669,6 @@
       "slug": "webview-host-unbound",
       "category": "platform",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "missing_prop",
       "retryable": false,
       "message": "Web view not bound to a native host: '{detail}'",
       "hint": "The control is rendering outside a window host (headless/offscreen) or was registered before the host installed its thread-local slot"
@@ -6940,8 +6678,6 @@
       "slug": "webview-unsupported-mode",
       "category": "platform",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Web view mode unsupported on this backend: '{detail}'",
       "hint": "Interactive mode needs a native child surface; Wayland and headless backends cannot host one - switch to Snapshot mode or move the control"
@@ -6951,8 +6687,6 @@
       "slug": "icon-name-not-registered",
       "category": "validation",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Icon name '{name}' is not registered: {detail}",
       "hint": "Register the semantic name through IconRegistry before referencing it, or pick one of the registered names reported alongside this error"
@@ -6962,8 +6696,6 @@
       "slug": "icon-glyph-unavailable",
       "category": "widget",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "missing_prop",
       "retryable": false,
       "message": "Icon glyph unavailable: {detail}",
       "hint": "Register the icon font through FontEngine::register_font (or register_font_from_memory) and make sure the code point exists in that face"
@@ -6973,8 +6705,6 @@
       "slug": "icon-svg-unsupported",
       "category": "render",
       "severity": "warning",
-      "auto_fixable": false,
-      "fix_category": "invalid_value",
       "retryable": false,
       "message": "Icon SVG source uses unsupported features: {detail}",
       "hint": "The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside the library and supply the bitmap"
@@ -6984,8 +6714,6 @@
       "slug": "http-body-not-replayable",
       "category": "io",
       "severity": "error",
-      "auto_fixable": false,
-      "fix_category": "resource_error",
       "retryable": false,
       "message": "HTTP request body cannot be sent a second time: '{detail}'",
       "hint": "A 307 or 308 redirect must replay the message body, and the streaming body said it cannot return to its starting point, so resending it would ship a half-consumed payload. Either hand the payload over as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note that a body which cannot restart also opts this request out of the retry policy on purpose"

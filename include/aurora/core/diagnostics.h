@@ -1,6 +1,5 @@
 #pragma once
 
-#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -12,18 +11,13 @@ namespace aurora {
 
 /// @brief 结构化修复建议（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001）。
 ///
-/// 携带机器可读 `code`、人类可读 `description` 与可选的 `auto_fix` 回调。
-/// 工具 / UI 可经 `Diagnostics::collect_fixes()` 取出，调用 `apply_fix(code)` 一键修复。
+/// 携带机器可读 `code` 与人类可读 `description`。
+/// 工具 / UI 可经 `Diagnostics::collect_fixes()` 取出展示。
 /// @note Thread: main-thread only
 /// @note Side-effects: none
 struct FixSuggestion {
     std::string code;  ///< 机器可读标识（与 Diagnostic::code 对应）
     std::string description;  ///< 人类可读修复说明
-    std::function<void()> auto_fix;  ///< 可选：自动修复回调（无则仅提示）
-
-    /// @brief 是否携带可调用的自动修复回调。
-    /// @return auto_fix 非空时为 true。
-    [[nodiscard]] auto has_auto_fix() const -> bool { return static_cast<bool>(auto_fix); }
 };
 
 /// @brief 诊断记录（需求 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001：错误恢复与降级渲染）。
@@ -33,7 +27,7 @@ struct FixSuggestion {
 ///
 /// `code` 为机器可读的稳定标识（如 `nav-depth-exceeded`），供 `explain_diagnostic`
 /// 与 `--explain` 类工具输出人类可读的解释（CI / 开发者自助排查）。
-/// `fix` 为可选的结构化修复建议（specification/01-core.md §8.3）。
+/// `fix` 为可选的结构化修复建议（specification/01-core.md §4.1）。
 /// @note Thread: main-thread only
 /// @note Side-effects: none
 struct Diagnostic {
@@ -54,7 +48,7 @@ struct Diagnostic {
     [[nodiscard]] auto category_str() const -> std::string_view { return to_string(category); }
 
     /// @brief 序列化为单行 JSON（字段：severity/category/message，where/code 非空才输出）。
-    /// @return JSON 一行文本；fix 仅在携带 auto_fix 时输出 fix_code/fix_desc。
+    /// @return JSON 一行文本；fix 非空时一并输出 fix_code/fix_desc。
     [[nodiscard]] auto to_json_line() const -> std::string;
 };
 
@@ -117,30 +111,9 @@ class Diagnostics {
     [[nodiscard]] static auto explain_diagnostic(ErrorCode code) -> std::string;
 
     /// @brief 收集最近诊断中携带的修复建议（仅含 `code` 非空者），供工具 / UI 展示。
-    /// @return 修复建议列表（code 非空或有 auto_fix 的条目；同一 code 可重复，不消费）。
+    /// @return 修复建议列表（code 非空的条目；同一 code 可重复，不消费）。
     /// @note 不消费；同一 code 可能出现多次。
     [[nodiscard]] static auto collect_fixes() -> std::vector<FixSuggestion>;
-
-    /// @brief 按 `code` 应用一次自动修复（执行 `FixSuggestion::auto_fix`）。
-    /// @param code 要匹配的 FixSuggestion::code（在最近的诊断中查找）。
-    /// @return 命中并执行返回 true；未命中或无 auto_fix 返回 false。
-    static auto apply_fix(std::string_view code) -> bool;
-
-    /// @brief 注册错误码 → 修复策略映射。
-    /// @param code 错误码枚举（作为注册表键）。
-    /// @param fix 待注册的修复建议（同一代码覆盖现有策略）。
-    /// @note 全局注册表，线程安全性同 Diagnostics 本身（main-thread only）。
-    static auto register_fix(ErrorCode code, FixSuggestion fix) -> void;
-
-    /// @brief 应用所有已注册的自动修复，返回成功修复数。
-    /// @return 成功执行的修复条目数（按注册顺序，仅统计含 auto_fix 的条目）。
-    /// @note 按注册顺序尝试每个有 auto_fix 的条目。
-    static auto auto_fix_all() -> std::size_t;
-
-    /// @brief 按错误码应用自动修复。
-    /// @param code 错误码（查注册表，命中且含 auto_fix 则执行）。
-    /// @return 命中并执行返回 true；未命中或无 auto_fix 返回 false。
-    static auto apply_fix(ErrorCode code) -> bool;
 
     static constexpr std::size_t AURORA_RECENT_CAP = 64;  ///< 最近诊断环形缓冲的容量（保留条数）。
 

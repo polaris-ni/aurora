@@ -1,9 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/diagnostics.h
 /// 测试说明: 诊断收集器的累计/取清/计数、slug→表驱动元数据映射、无码退化与降级 Error 严重级、strict_mode 关闭下的
-/// degraded 记录、explain 兜底、修复建议收集与应用、注册表与 auto_fix_all、to_json_line 形态、recent 环形缓冲
+/// degraded 记录、explain 兜底、修复建议收集、to_json_line 形态、recent 环形缓冲
 
-#include <array>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -40,15 +39,6 @@ class QuietLogger {
     bool enabled_;
 };
 }  // namespace
-
-/// @brief 修复回调命中计数（静态存储期）：Diagnostics 修复注册表为进程级全局且无注销接口，
-/// 回调若捕获栈局部变量，用例结束后被后续用例的 auto_fix_all / apply_fix 执行即为 UB
-/// （悬垂写栈地址可能被新用例复用）。全文件修复回调一律命中文件级静态槽位计数器，
-/// 各用例只对自己槽位做增量断言。
-static auto fix_hits(std::size_t slot) -> std::size_t & {
-    static std::array<std::size_t, 3> hits{};
-    return hits.at(slot);
-}
 
 AURORA_TEST_CASE(report_accumulates_take_clears_and_counts) {
     const QuietLogger quiet;
@@ -137,70 +127,25 @@ AURORA_TEST_CASE(explain_diagnostic_slug_enum_and_unknown_fallback) {
     AURORA_TEST_CHECK_THAT(unknown, m::has_substr("Unknown diagnostic code"));
 }
 
-AURORA_TEST_CASE(fix_suggestion_collected_and_applied_by_slug) {
+AURORA_TEST_CASE(fix_suggestion_collected_by_code) {
     const QuietLogger quiet;
     (void)Diagnostics::take();
 
-    constexpr std::size_t slot = 0;
-    const FixSuggestion fix{.code = "utest-fix-depth", .description = "reduce nesting depth", .auto_fix = []() -> void {
-                                ++fix_hits(slot);
-                            }};
+    const FixSuggestion fix{.code = "utest-fix-depth", .description = "reduce nesting depth"};
     Diagnostics::report("tree too deep", "root", "nav-depth-exceeded", false, fix);
 
     // collect_fixes 读取 recent_（take 不清空），可能含其他用例残留：按本用例唯一 code 过滤断言。
+    // 无 code 的建议不进收集结果——收集口径就是「可按机器码定位的建议」。
     const auto fixes = Diagnostics::collect_fixes();
     bool found = false;
     for (const auto &f : fixes) {
         if (f.code == "utest-fix-depth") {
             found = true;
             AURORA_TEST_CHECK_STREQ(f.description, "reduce nesting depth");
-            AURORA_TEST_CHECK_TRUE(f.has_auto_fix());
         }
     }
     AURORA_TEST_CHECK_TRUE(found);
-
-    // 按 slug 应用一次自动修复（槽位增量，免疫注册表残留）；未知码返回 false。
-    const auto hits_before = fix_hits(slot);
-    AURORA_TEST_CHECK_EQ(Diagnostics::apply_fix("utest-fix-depth"), true);
-    AURORA_TEST_CHECK_EQ(fix_hits(slot) - hits_before, std::size_t{1});
-    AURORA_TEST_CHECK_EQ(Diagnostics::apply_fix("no-such-fix-code"), false);
     (void)Diagnostics::take();
-}
-
-AURORA_TEST_CASE(register_fix_applies_by_error_code) {
-    const QuietLogger quiet;
-    // 注册表全局共享：使用本文件内唯一的错误码，避免与其他用例的注册项串扰；
-    // 回调命中静态槽位（栈局部变量会在用例结束后悬垂）。
-    constexpr std::size_t slot = 1;
-    Diagnostics::register_fix(
-        ErrorCode::PrefsWriteFailed,
-        FixSuggestion{.code = "", .description = "", .auto_fix = []() -> void { ++fix_hits(slot); }});
-    const auto hits_before = fix_hits(slot);
-    AURORA_TEST_CHECK_EQ(Diagnostics::apply_fix(ErrorCode::PrefsWriteFailed), true);
-    AURORA_TEST_CHECK_EQ(fix_hits(slot) - hits_before, std::size_t{1});
-    // 未注册码：未命中返回 false。
-    AURORA_TEST_CHECK_EQ(Diagnostics::apply_fix(ErrorCode::StorageIoError), false);
-}
-
-AURORA_TEST_CASE(auto_fix_all_executes_only_auto_fixable_entries) {
-    const QuietLogger quiet;
-    // 本用例唯一错误码 + 静态槽位：auto_fix_all 每次调用执行注册表中全部带回调条目
-    // （含前序用例残留），故不能对返回值做绝对断言，只能要求两次调用间注册表不变
-    // （返回值相等）且本用例回调每次调用恰好执行一次。
-    constexpr std::size_t slot = 2;
-    Diagnostics::register_fix(
-        ErrorCode::StorageEncodingMismatch,
-        FixSuggestion{.code = "", .description = "", .auto_fix = []() -> void { ++fix_hits(slot); }});
-    // 无 auto_fix 回调的注册项不参与执行：按码 apply 也未命中可执行回调。
-    Diagnostics::register_fix(ErrorCode::FontMissing,
-                              FixSuggestion{.code = "font-hint", .description = "register the font", .auto_fix = {}});
-
-    const auto hits_before = fix_hits(slot);
-    const auto before = Diagnostics::auto_fix_all();
-    const auto after = Diagnostics::auto_fix_all();
-    AURORA_TEST_CHECK_EQ(after, before);  // 两次调用间注册表未变化
-    AURORA_TEST_CHECK_EQ(fix_hits(slot) - hits_before, std::size_t{2});  // 每次调用各执行一次
-    AURORA_TEST_CHECK_EQ(Diagnostics::apply_fix(ErrorCode::FontMissing), false);  // 无回调不可执行
 }
 
 AURORA_TEST_CASE(diagnostic_to_json_line_shape) {
@@ -218,15 +163,17 @@ AURORA_TEST_CASE(diagnostic_to_json_line_shape) {
     AURORA_TEST_CHECK_THAT(line, m::has_substr(R"("where":"widget-y")"));
     AURORA_TEST_CHECK_THAT(line, m::has_substr(R"("code":"widget-unknown-type")"));
 
-    // fix 携带 auto_fix 回调时输出 fix_code/fix_desc。
-    d.fix = FixSuggestion{.code = "fix-widget-type", .description = "register type", .auto_fix = []() -> void {}};
+    // 携带修复建议时一并输出 fix_code/fix_desc：建议不再要求可执行，上报即可见。
+    d.fix = FixSuggestion{.code = "fix-widget-type", .description = "register type"};
     const auto with_fix = d.to_json_line();
     AURORA_TEST_CHECK_THAT(with_fix, m::has_substr(R"("fix_code":"fix-widget-type")"));
+    AURORA_TEST_CHECK_THAT(with_fix, m::has_substr(R"("fix_desc":"register type")"));
 
-    // 无 auto_fix 回调的 fix 不写入 JSON 行。
-    d.fix = FixSuggestion{.code = "fix-hint-only", .description = "manual fix", .auto_fix = {}};
-    const auto without_auto = d.to_json_line();
-    AURORA_TEST_CHECK_THAT(without_auto, m::negated(m::has_substr("fix_code")));
+    // 未携带修复建议的诊断不写入这两个键。
+    d.fix.reset();
+    const auto without_fix = d.to_json_line();
+    AURORA_TEST_CHECK_THAT(without_fix, m::negated(m::has_substr("fix_code")));
+    AURORA_TEST_CHECK_THAT(without_fix, m::negated(m::has_substr("fix_desc")));
 }
 
 AURORA_TEST_CASE(get_last_diagnostics_ring_buffer_keeps_recent) {

@@ -39,7 +39,6 @@ AURORA_TEST_CASE(table_entries_have_unique_nonempty_keys) {
         AURORA_TEST_CHECK_FALSE(entry.ident.empty());
         AURORA_TEST_CHECK_FALSE(entry.message_tpl.empty());
         AURORA_TEST_CHECK_FALSE(entry.hint.empty());
-        AURORA_TEST_CHECK_FALSE(entry.fix_category.empty());
         slugs.insert(entry.slug);
     }
     // slug 重复即破坏对外唯一契约。
@@ -71,8 +70,6 @@ AURORA_TEST_CASE(lookup_helpers_match_table_entry) {
     AURORA_TEST_CHECK(aurora::slug(code) == meta.slug);
     AURORA_TEST_CHECK(aurora::category(code) == meta.category && meta.category == ErrorCategory::Layout);
     AURORA_TEST_CHECK(aurora::severity(code) == meta.severity && meta.severity == ErrorSeverity::Warning);
-    AURORA_TEST_CHECK_EQ(aurora::is_auto_fixable(code), meta.auto_fixable);
-    AURORA_TEST_CHECK_STREQ(aurora::fix_category_of(code), meta.fix_category);
     AURORA_TEST_CHECK_EQ(aurora::retryable(code), meta.retryable);
     AURORA_TEST_CHECK_STREQ(aurora::hint_of(code), meta.hint);
     // 抽查另一条 retryable 记录。
@@ -105,7 +102,6 @@ AURORA_TEST_CASE(lookup_functions_are_compile_time_usable) {
     static_assert(aurora::severity(ErrorCode::NavDepthExceeded) == ErrorSeverity::Error);
     static_assert(aurora::category(ErrorCode::LayoutNullChild) == ErrorCategory::Layout);
     static_assert(aurora::retryable(ErrorCode::RuntimeAsyncTimeout));
-    static_assert(!aurora::is_auto_fixable(ErrorCode::SurfaceLost));
     AURORA_TEST_CHECK(true);
 }
 

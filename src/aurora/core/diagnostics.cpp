@@ -1,9 +1,5 @@
 #include "aurora/core/diagnostics.h"
 
-#include <algorithm>
-#include <ranges>
-#include <unordered_map>
-
 #include "aurora/core/json.h"
 #include "aurora/core/strict_mode.h"
 
@@ -20,7 +16,7 @@ auto Diagnostic::to_json_line() const -> std::string {
     if (!code.empty()) {
         j.set("code", code);
     }
-    if (fix && fix->has_auto_fix()) {
+    if (fix) {
         j.set("fix_code", fix->code);
         j.set("fix_desc", fix->description);
     }
@@ -52,7 +48,7 @@ void Diagnostics::report(std::string_view message, std::string_view where, std::
         d.category = ErrorCategory::General;
     }
 
-    if (fix.has_auto_fix() || !fix.code.empty() || !fix.description.empty()) {
+    if (!fix.code.empty() || !fix.description.empty()) {
         d.fix = std::move(fix);
     }
 
@@ -112,57 +108,11 @@ auto Diagnostics::instance() -> Diagnostics & {
 auto Diagnostics::collect_fixes() -> std::vector<FixSuggestion> {
     std::vector<FixSuggestion> out;
     for (const auto &d : instance().recent_) {
-        if (d.fix && (!d.fix->code.empty() || d.fix->has_auto_fix())) {
+        if (d.fix && !d.fix->code.empty()) {
             out.push_back(*d.fix);
         }
     }
     return out;
-}
-
-auto Diagnostics::apply_fix(std::string_view code) -> bool {
-    const std::string key{code};
-    const auto it = std::ranges::find_if(instance().recent_, [&](const Diagnostic &d) -> bool {
-        return d.fix && d.fix->code == key && d.fix->has_auto_fix();
-    });
-    if (it != instance().recent_.end() && it->fix) {
-        // NOLINTNEXTLINE(bugprone-unchecked-optional-access) it->fix 已在本行条件中判 engaged，此处解引用安全
-        it->fix->auto_fix();
-        return true;
-    }
-    return false;
-}
-
-// ---- 需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001：错误码 → 修复策略注册表 ----
-
-namespace {
-/// @brief 全局错误码 → 修复策略注册表（main-thread only，同 Diagnostics 线程模型）。
-auto fix_registry() -> auto & {
-    static std::unordered_map<ErrorCode, FixSuggestion> registry;
-    return registry;
-}
-}  // namespace
-
-auto Diagnostics::register_fix(ErrorCode code, FixSuggestion fix) -> void { fix_registry()[code] = std::move(fix); }
-
-auto Diagnostics::auto_fix_all() -> std::size_t {
-    std::size_t count = 0;
-    for (auto &fix : fix_registry() | std::views::values) {
-        if (fix.has_auto_fix()) {
-            fix.auto_fix();
-            ++count;
-        }
-    }
-    return count;
-}
-
-auto Diagnostics::apply_fix(ErrorCode code) -> bool {
-    auto &reg = fix_registry();
-    const auto it = reg.find(code);
-    if (it != reg.end() && it->second.has_auto_fix()) {
-        it->second.auto_fix();
-        return true;
-    }
-    return false;
 }
 
 }  // namespace aurora

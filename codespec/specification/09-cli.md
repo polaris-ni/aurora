@@ -267,8 +267,7 @@ enum class EarlyView : std::uint8_t { None = 0, Help, Version, Schema };  // 封
 ### 6.2 建议文本
 
 `cli-unknown-option` 与 `cli-unknown-subcommand` 的 `Error::suggestion` 会给出编辑距离最近的候选
-（`Did you mean --width?` / `Available: render, serve`），无候选时退化为候选清单。这是 `auto_fixable = true` 的
-机器可读依据。
+（`Did you mean --width?` / `Available: render, serve`），无候选时退化为候选清单。
 
 ### 6.3 退出码约定（调用方职责）
 

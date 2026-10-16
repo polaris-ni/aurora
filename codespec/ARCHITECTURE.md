@@ -440,13 +440,13 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 每个错误同时服务于两类受众：
 
 - **进程外**（JSON / 日志 / IDE 工具 / AI 编码助手）：只认冻结 `slug`（如 `"nav-depth-exceeded"`，改名标识符也不变）与 `code_enum`。
-- **进程内**：用 `code_enum` 做类型安全分支，用 `severity` / `category` / `auto_fixable` / `retryable` 等元数据做策略判断。
+- **进程内**：用 `code_enum` 做类型安全分支，用 `severity` / `category` / `retryable` 等元数据做策略判断。
 
 失败路径统一：可恢复失败经 `Result<T>` 沿调用链返回，不靠异常横跨业务边界。
 
 ### 12.2 类型模型
 
-`Error`（`core/result.h`）字段分两类受众：`code` / `code_enum` 供机器解析；`severity` / `category` / `auto_fixable` / `retryable` / `fix_category` / `fix_params` 供进程内策略判断；另有 `message` / `suggestion` / `docs` / `where` / `hint` 供人与 AI 阅读。所有表驱动元数据由 [`errors.toml`](errors.toml) 经生成器产出，经 `make_error` 自动填充，无需手填。
+`Error`（`core/result.h`）字段分两类受众：`code` / `code_enum` 供机器解析；`severity` / `category` / `retryable` 供进程内策略判断；另有 `message` / `suggestion` / `docs` / `where` / `hint` 供人与 AI 阅读。所有表驱动元数据由 [`errors.toml`](errors.toml) 经生成器产出，经 `make_error` 自动填充，无需手填。
 
 `Result<T>` 成功持 `T`、失败持结构化 `Error`；`Result<void>` 特化用于只关心「是否出错」的接口（如 `flush` / `reload`），以 `bool` 标记成功态。
 
@@ -458,9 +458,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 |:---|:---|:---|
 | `ErrorCategory` | `General` / `Layout` / `Widget` / `Render` / `Io` / `Validation` / `Navigation` / `Platform` / `Runtime` / `Generation` / `Diagnostic`（共 11 域） | 错误域归类，过滤与聚合 |
 | `ErrorSeverity` | `Info` / `Warning` / `Error` / `Fatal` | 严重度分级，决定上报与中断策略 |
-| `auto_fixable` | `bool` | 是否可被工具 / IDE 自动修复 |
-| `retryable` | `bool` | 是否可重试（如异步超时） |
-| `fix_category` / `fix_params` | 字符串 | 修复策略分类与参数 |
+| `retryable` | `bool` | 声明性标记：同一输入重跑一次是否可能换到不同结果（如异步超时）。**不**回答「这次该不该重试」——后者由调用方结合幂等性、退避预算与 `error_class_of()` 归因档决定 |
 
 ### 12.4 生成管线
 

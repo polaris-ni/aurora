@@ -23,6 +23,14 @@ freeze: minor-versions-are-additive
 
 ### Breaking
 
+- **错误码移除自动修复层（CHG-021）**：错误码表与运行时诊断不再承载「自动修复」语义——库仍然只产出**修复建议**，不再为「能否被机器改写」背书。
+  - `codespec/errors.toml` 每条声明删除 `auto_fixable` 与 `fix_category` 两列，头部声明清单与字段释义注释同步；生成器 `tools/gen/gen_error_codes.cpp` 同步删除 `ErrorEntry` 两字段、两条解析分支、`fix_category` 兜底校验、`ErrorMeta` 两行、结构化绑定两变量、表初始化两行、`is_auto_fixable()` 与 `fix_category_of()` 两枚查表函数、目录表头与单元格、schema 两字段。三件生成物 `include/aurora/core/error_codes.gen.h` / `codespec/ERROR_CATALOG.md` / `aurora_api.json` 随生成器重建（error_codes 段对象键 9 → 7；目录表列 10 → 8）。
+  - `Error`（`core/result.h`）移除 `auto_fixable` / `fix_category` / `fix_params` 三字段，`make_error_from_table` 初始化同步；`Error::to_json()` 恒输出键由 7 降为 6——`code` / `message` / `code_enum` / `severity` / `category` / `retryable`，可选字段仍为 `suggestion` / `docs` / `where` / `hint`。迁移：原按 `auto_fixable` 决定是否自动改写的消费端，改读 `hint` 文案或 `Diagnostics::collect_fixes()` 的建议后自行决策；`fix_category` / `fix_params` 删前恒为空、零消费端，无需迁移。
+  - `Diagnostics`（`core/diagnostics.h`）移除修复回调机制：`FixSuggestion::auto_fix` 字段、`has_auto_fix()`、`apply_fix(std::string_view)`、`apply_fix(ErrorCode)`、`register_fix()`、`auto_fix_all()` 与进程级修复注册表。迁移：库内外无调用方；集成方若需「一键修复」，在应用侧按 `FixSuggestion::code` 自行分派执行。
+  - `FixSuggestion` 保留为纯展示结构（机器可读 `code` + 人类可读 `description`），`Diagnostic::fix` 字段与 `Diagnostics::report` 的 `fix` 形参形态不变；`collect_fixes()` 的收集口径相应收敛为「`code` 非空者」。
+  - `Diagnostic::to_json_line()` 输出 `fix_code` / `fix_desc` 的条件由「携带修复回调」改为「携带 `fix`」——与 `src/aurora/debug/debug_runtime.cpp` 的既有判据统一；此后上报了修复建议就一定能被看到，而无回调的建议不再被静默丢弃。
+  - **不在本次范围**：`retryable` 列与其查表函数 `retryable()` 原样保留——它是 `src/aurora/net/detail/http_retry.cpp` 中 `should_retry_error()` 的真实判据（与 `error_class_of()` 归因档取交集决定一次失败该不该重放），删除属重试策略变更而非清理。
+
 - **压缩解压能力可扩展化：编解码器抽象与注册表（CHG-020）**：`core/compression.h` 由「焊死在 wuffs 上的三格式解压」原地重写为「字符串格式 ID + 编解码器抽象 + 进程注册表」。
   - `enum class CompressionFormat` 移除，改三枚预定义常量 `AURORA_COMPRESS_FORMAT_GZIP` / `_ZLIB` / `_DEFLATE`（小写 `string_view`，与 HTTP 线上令牌一一对应，格式 ID 按字节精确匹配、大小写敏感）；自定义格式 ID 由应用自选字符串经 `register_codec` 注册。迁移：`CompressionFormat::Gzip` / `Zlib` / `Deflate` → `AURORA_COMPRESS_FORMAT_GZIP` / `_ZLIB` / `_DEFLATE`。
   - `Decompressor` 由具体类改为抽象基类：`push` / `finish` 契约逐字保留（const 限定、单条流作用域），静态 `Decompressor::create` 移除，创建入口移至注册表工厂 `create_decompressor(format, options)`，实例改经 `std::unique_ptr` 持有（moved-from 即空指针，调用属调用方用法错误；push-after-finish 与 finish 幂等由注册表装饰器统一收口）。迁移：`Decompressor::create(fmt, opts)` → `create_decompressor(fmt, opts)`，按值持有改 `unique_ptr`、`dec.push(...)` → `dec->push(...)`。

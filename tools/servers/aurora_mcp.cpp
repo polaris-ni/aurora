@@ -278,7 +278,7 @@ struct InspectorSession {
         t.set("name", "validate_ui");
         t.set("description",
               "Statically validate the UI tree against aurora_api.json schema: unknown type / missing required "
-              "prop / type mismatch / children policy; errors include JSON path and fix suggestions (for AI auto-fix)");
+              "prop / type mismatch / children policy; errors include JSON path and fix suggestions");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"tree"})));
         tools.push_back(std::move(t));
     }
