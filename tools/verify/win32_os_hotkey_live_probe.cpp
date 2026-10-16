@@ -195,7 +195,7 @@ auto run_auto_stage() -> int {
 
     // 1. 平台能力核对。Win32 上 `enabled()` 恒真；为假意味着走了非 Windows 的降级实现，
     //    此时后面 8 项全部失去意义（每条都会以「无后端」为由拒绝），故就地按环境不可用收尾。
-    const bool supported = registry.enabled();
+    const bool supported = aurora::OsHotkeyRegistry::enabled();
     check(supported, "platform capability: OsHotkeyRegistry::enabled() is true on Win32");
     if (!supported) {
         emit("result: no OS global hotkey backend on this platform (exit 2)");
@@ -268,11 +268,11 @@ auto run_auto_stage() -> int {
             "test backend injection is unavailable in this build (both AURORA_ENABLE_DEBUG and "
             "AURORA_ENABLE_TEST_HOOKS are required); the degraded platform path is not covered here");
     } else {
-        check(!registry.enabled(), "install_test_backend(false) turns enabled() off");
+        check(!aurora::OsHotkeyRegistry::enabled(), "install_test_backend(false) turns enabled() off");
         expect_register_failed("degraded platform path (no backend)",
                                registry.add(ctrl_alt_shift(aurora::KeyCode::D), std::function<void()>{}));
         check(aurora::OsHotkeyRegistry::remove_test_backend(), "remove_test_backend() returns true");
-        check(registry.enabled(), "enabled() is restored to true after remove_test_backend()");
+        check(aurora::OsHotkeyRegistry::enabled(), "enabled() is restored to true after remove_test_backend()");
     }
 
     return failures() == 0 ? 0 : 1;

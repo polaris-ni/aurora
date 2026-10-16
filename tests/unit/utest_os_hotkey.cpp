@@ -171,7 +171,7 @@ AURORA_TEST_CASE(registry_without_window_backend_does_not_crash) {
 
     for (int i = 0; i < 3; ++i) {
         OsHotkeyRegistry registry;
-        (void)registry.enabled();
+        (void)OsHotkeyRegistry::enabled();
         (void)registry.count();
         (void)registry.drain_pending();
         const auto res = registry.add(sample_combo(), []() -> void {});

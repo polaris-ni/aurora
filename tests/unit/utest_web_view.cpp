@@ -179,12 +179,7 @@ auto collect_after(const std::function<void()> &mount) -> std::vector<Diagnostic
 /// @param slug 冻结 slug。
 /// @return 命中为 true。
 auto has_code(const std::vector<Diagnostic> &items, const std::string &slug) -> bool {
-    for (const Diagnostic &d : items) {
-        if (d.code == slug) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(items, [&slug](const Diagnostic &d) -> bool { return d.code == slug; });
 }
 
 /// @brief 把控件放进容器并布局一次（触发挂载），返回根容器以延长生命周期。
@@ -197,7 +192,7 @@ auto has_code(const std::vector<Diagnostic> &items, const std::string &slug) -> 
 auto count_calls(const StubSink &sink, const std::string &prefix) -> std::size_t {
     std::size_t n = 0;
     for (const std::string &entry : sink.log) {
-        if (entry.size() >= prefix.size() && entry.compare(0, prefix.size(), prefix) == 0) {
+        if (entry.starts_with(prefix)) {
             ++n;
         }
     }
@@ -642,7 +637,7 @@ AURORA_TEST_CASE(callback_gate_drops_events_once_the_owner_is_gone) {
     StubSink *raw = sink.get();
     auto cbs = std::make_shared<webview::WebViewCallbacks>();
     int seen = 0;
-    cbs->on_web_message = [&seen](std::string /*json*/) -> void { ++seen; };
+    cbs->on_web_message = [&seen](const std::string & /*json*/) -> void { ++seen; };
     raw->set_callbacks(cbs);
 
     AURORA_TEST_CHECK_TRUE(raw->fire_web_message("a"));

@@ -436,7 +436,9 @@ AURORA_TEST_CASE(sync_geometry_reports_visibility_only_on_transitions) {
     AURORA_TEST_CHECK_EQ(raw->rects.size(), 1U);
 
     // 缩放随之改变 ⇒ 矩形重新下发；可见性已为 true，故不再重复上报。
-    scale = 2.0F;
+    // 缩放档位经 bind_host 以 const 引用逃逸进宿主的缩放来源回调，sync_geometry 读取它：
+    // 这次写入是活值（静态分析器看不穿 std::function 里的引用捕获，报死存储）。
+    scale = 2.0F;  // NOLINT(clang-analyzer-deadcode.DeadStores)
     AURORA_TEST_CHECK_EQ(host.sync_geometry(true), 1U);
     AURORA_TEST_CHECK_EQ(raw->rects.size(), 2U);
     AURORA_TEST_CHECK_EQ(raw->visibility.size(), 3U);

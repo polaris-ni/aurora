@@ -101,7 +101,7 @@ class SvgIconCache {
     struct Entry {
         Image image;
         std::size_t bytes = 0;
-        std::list<detail::CacheKey>::iterator lru_it{};
+        std::list<detail::CacheKey>::iterator lru_it;
     };
 
     SvgIconCache() = default;

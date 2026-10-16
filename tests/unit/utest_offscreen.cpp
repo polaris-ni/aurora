@@ -343,7 +343,7 @@ auto stub_page_image() -> Image {
                 g = 255;  // 右半：绿
             }
             const std::size_t at =
-                (static_cast<std::size_t>(y) * static_cast<std::size_t>(page_w) + static_cast<std::size_t>(x)) * 4U;
+                ((static_cast<std::size_t>(y) * static_cast<std::size_t>(page_w)) + static_cast<std::size_t>(x)) * 4U;
             img.pixels[at] = r;
             img.pixels[at + 1] = g;
             img.pixels[at + 2] = b;

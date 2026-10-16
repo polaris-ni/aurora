@@ -83,7 +83,7 @@ class OsHotkeyRegistry {
     /// @brief 注销一条热键并释放其 OS 注册。
     /// @param h `add()` 返回的句柄；无效句柄或不属于本注册表的 ID 返回 false（不抛、不报错）。
     /// @return 确有热键被注销时为 `true`。
-    auto remove(OsHotkeyHandle h) const -> bool;
+    [[nodiscard]] auto remove(OsHotkeyHandle h) const -> bool;
 
     /// @brief 注销本注册表内的全部热键（析构前主动释放，或整批撤掉重建时用）。
     auto clear() const -> void;
@@ -91,7 +91,7 @@ class OsHotkeyRegistry {
     /// @brief 排空待处理队列：把自上次排空以来命中的热键逐个交给其动作。
     /// 由帧循环每帧调用一次；动作在本调用内同步执行，其间再次命中会留到下一次排空。
     /// @return 本次实际执行了动作的热键条数（命中但动作为空的不计）。
-    auto drain_pending() const -> std::size_t;
+    [[nodiscard]] auto drain_pending() const -> std::size_t;
 
     /// @brief 本平台的 OS 级全局热键后端是否可用。
     /// @return 平台提供全局热键能力时为 `true`（如 Windows）；Wayland / GLFW / macOS 等

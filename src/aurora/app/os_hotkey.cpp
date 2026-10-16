@@ -308,7 +308,7 @@ auto OsHotkeyRegistry::add(const KeyCombo &combo, std::function<void()> action) 
         return register_error("combination already registered: " + combo.to_string());
     }
     const std::uint32_t id = next_hotkey_id();
-    if (!test_backend().active && !impl_->register_native(id, combo)) {
+    if (!test_backend().active && !Impl::register_native(id, combo)) {
         return register_error("OS rejected the combination: " + combo.to_string());
     }
     impl_->entries.push_back(Impl::Entry{.id = id, .combo = combo, .action = std::move(action)});
@@ -324,7 +324,7 @@ auto OsHotkeyRegistry::remove(OsHotkeyHandle h) const -> bool {
             continue;
         }
         if (!test_backend().active) {
-            impl_->unregister_native(it->id);
+            Impl::unregister_native(it->id);
         }
         impl_->entries.erase(it);
         // 已命中但尚未排空的同 ID 一并丢弃：热键已不存在，再排空等于执行已撤销的动作。
@@ -348,7 +348,7 @@ auto OsHotkeyRegistry::clear() const -> void {
     const bool inert = test_backend().active;
     for (const auto &e : impl_->entries) {
         if (!inert) {
-            impl_->unregister_native(e.id);
+            Impl::unregister_native(e.id);
         }
     }
     impl_->entries.clear();

@@ -58,8 +58,8 @@ auto main() -> int {
         hits_text->set(au::LocalizedString{"hits = " + std::to_string(next)});
     };
 
-    log_status(hotkeys.enabled() ? "backend available; press Register to grab Ctrl+Shift+K"
-                                 : "no OS global hotkey backend on this platform");
+    log_status(au::OsHotkeyRegistry::enabled() ? "backend available; press Register to grab Ctrl+Shift+K"
+                                               : "no OS global hotkey backend on this platform");
 
     // 帧循环里排空：命中在这里才转成状态变更，不在窗口过程内执行。
     app.set_on_frame([&hotkeys, &hits, &refresh_hits, &log_status]() -> void {
