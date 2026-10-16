@@ -17,10 +17,11 @@
 #                    Rust 工具链 + libclang，见各腿 Setup 步骤），wgpu 测试运行期无 GPU adapter
 #                    故 SKIP，但 wgpu_native 静态库与 WgpuRhi C++ 后端在 linux/win32/macOS 各编一次。
 #   3. toggles     — feature 宏极性收口（ubuntu/gcc）：优化三开关全关（退化路径）、
-#                    SIMD 关（标量黄金路径）、图像编解码 + Inspector Server 开、
-#                    内置音频 + SQLite 存储后端开（此前仅 lint 静态分析，现真编译+跑单测）、
-#                    Unity Build 试点开（src/aurora/core/ 合批路径）、
-#                    PROFILING/TRACING/DEBUG 强制开（Release 下 FORCE=ON 分支）、DEBUG 强制关。
+#                    SIMD 关（标量黄金路径）、图像编解码 + Inspector Server + WebView 控件
+#                    （WEBKITGTK 引擎关，见 env 注释）+ 内置音频 + SQLite 存储后端开
+#                    （真编译+跑单测）、COMPRESSION 关（解压不可用降级路径）、
+#                    DEBUG+TEST_HOOKS 双关（Release 发布态 PUBLIC 宏组合）、
+#                    PROFILING/TRACING/DEBUG 强制开（Release 下 FORCE=ON 分支）。
 #  3b. tls-providers — TLS provider 两腿（Linux static mbedTLS、Windows shared OpenSSL）：
 #                    验证 `AURORA_NET_TLS_PROVIDER` 的探测→引擎宏推导→导入目标链接这条构建面。
 #   4. asan        — AURORA_ENABLE_ASAN=ON（AddressSanitizer + UBSan）跑全量 ctest。
@@ -34,8 +35,9 @@
 #  8. lint        — clang-tidy 门禁，矩阵 = pass(DEBUG OFF / ON + 优化开关全关的反极性遍，三份
 #                    编译数据库) × shard(TU 清单分片，现 4 片) 共 12 个作业，去重后 0 finding 才
 #                    通过。纯静态分析，主 Linux 遍在 ubuntu-latest 单跑，且 configure 打开**除
-#                    Windows/macOS 特有宏之外的全部后端与能力开关**（X11/Wayland/GLFW/ALSA 音频/
-#                    SQLite/图像编解码/Inspector Server/verify 探针），使覆盖面尽可能贴近全仓。
+#                    Windows/macOS 特有宏之外的全部后端与能力开关**（含 WebView 控件；开关串集中
+#                    在顶层 env 的 LINT_CAPABILITY_FLAGS*，native 与 wasm 两份口径），使覆盖面
+#                    尽可能贴近全仓。
 #                    依赖 AuroraLint.cmake 提供的 `lint` 目标与 AURORA_LINT_SHARD 分片开关。
 #                    为什么摊成矩阵：runner 只有 4 vCPU，单遍 500+ TU 实测 86 分钟，三遍串跑
 #                    4 小时量级、必超时；分片只改排布不减覆盖面，总核时不变而墙钟近线性下降。
@@ -105,6 +107,27 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # lint 家族共用的「全能力开关集」，两份口径各自一串（折叠标量 >- 按空格并成单行 shell 参数）：
+  #   LINT_CAPABILITY_FLAGS       — job 8（native 双 pass）与 8i 的 build-lint-off / build-lint-on；
+  #   LINT_CAPABILITY_FLAGS_WASM  — job 8w 与 8i 的 build-wasm-lint（浏览器口径，无 PROFILING/VERIFY）。
+  # 集中一处维护，改这里即全部 lint 腿同步，消除四处粘贴漂移。
+  # WEBVIEW 宏是 PRIVATE：开启即让 webview 收口代码进入分析面；Linux 上显式关掉 WEBKITGTK
+  # （其引擎编译需 GTK3/WebKitGTK dev 头，lint 静态面不付这份依赖）。
+  LINT_CAPABILITY_FLAGS: >-
+    -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON
+    -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON
+    -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON
+    -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON
+    -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_ENABLE_WEBVIEW_WEBKITGTK=OFF
+    -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON
+    -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+  LINT_CAPABILITY_FLAGS_WASM: >-
+    -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON
+    -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON
+    -DAURORA_ENABLE_WEBVIEW=ON
+    -DAURORA_BUILD_INSPECTOR_SERVER=ON
 
 jobs:
 
@@ -303,8 +326,10 @@ jobs:
           - name: windows-d3d11-glfw
             os: windows-latest
             # 同上：DEBUG=ON 使 Win32 读回可用（D3D11 读回无条件可用）；GLFW 在无 GL 环境的
-            # runner 上建窗失败（Task 0 实测），不期望
-            cmake-flags: -DAURORA_BACKEND_D3D11=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_BACKEND_GPU_WGPU=ON
+            # runner 上建窗失败（Task 0 实测），不期望。WEBVIEW=ON 自动推导 WEBVIEW2=ON
+            # （引擎头 vendor 于 third_party/webview2/，运行期 LoadLibrary、零构建期链接依赖），
+            # 覆盖 engine_webview2.cpp 的真编译链接面。
+            cmake-flags: -DAURORA_BACKEND_D3D11=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_ENABLE_WEBVIEW=ON
             e2e-expect: "win32,d3d11"
           - name: macos-appkit-glfw
             os: macos-latest
@@ -512,33 +537,30 @@ jobs:
             cmake-flags: -DAURORA_ENABLE_SIMD=OFF
             run-tests: true
           # 可选子系统全开：图像编解码（libjpeg-turbo / libwebp / wuffs）+ Inspector HTTP 服务器
-          # + 内置音频设备后端 + SQLite 存储后端。AUDIO / STORAGE_SQLITE 此前仅 lint 静态分析
-          # （不编二进制、不跑测试），现与编解码一并真正编译并跑单测（utest_audio /
-          # utest_audio_alsa / utest_sqlite_backend），覆盖链接与运行期守卫分支。
+          # + 内置音频设备后端 + SQLite 存储后端 + WebView 控件（WEBKITGTK 引擎关——引擎编译需
+          # GTK3/WebKitGTK dev 头，见顶层 env 注释；控件与 NativeViewHost 收口照常编译）。
+          # AUDIO / STORAGE_SQLITE 此前仅 lint 静态分析（不编二进制、不跑测试），现与编解码一并
+          # 真正编译并跑单测（utest_audio / utest_audio_alsa / utest_sqlite_backend），
+          # 覆盖链接与运行期守卫分支。
           # Linux 上 AUDIO=ON 自动带 ALSA（运行期 dlopen，无 dev 包依赖）。
           - name: optional-subsystems-on
-            cmake-flags: -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON
-            run-tests: true
-          # Unity Build 试点：仅 src/aurora/core/ 打成 batch（CMakeLists.txt 反向排除实现）。
-          # 验证合批路径不破——合批会暴露平日逐 TU 编译被隐去的缺失包含，这正是该试点长期只在
-          # 本地热身、从未进 CI 的盲区。
-          - name: unity-core-on
-            cmake-flags: -DAURORA_ENABLE_UNITY_CORE=ON
+            cmake-flags: -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_ENABLE_WEBVIEW_WEBKITGTK=OFF
             run-tests: true
           # 插桩强制开（TRACING 隐含 PROFILING）：AURORA_PROFILE_* 宏活跃分支 + DEBUG=ON
           - name: profiling-tracing-debug-on
             cmake-flags: -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON -DAURORA_ENABLE_DEBUG=ON
             run-tests: true
-          # DEBUG 强制关：调试 API 调用点必须可编译、运行返回 disabled
-          - name: debug-off
-            cmake-flags: -DAURORA_ENABLE_DEBUG=OFF
+          # DEBUG + TEST_HOOKS 双关：Release 发布态的 PUBLIC 宏组合——调试 API 与测试注入
+          # 调用点必须可编译、运行返回 disabled / no-op
+          - name: debug-test-hooks-off
+            cmake-flags: -DAURORA_ENABLE_DEBUG=OFF -DAURORA_ENABLE_TEST_HOOKS=OFF
             run-tests: true
-          # HEADLESS 关闭：库与工具（bench/工厂降级路径均有 #ifdef 门控回退）不依赖
-          # HeadlessSurface 仍可构建。测试套件依赖 HeadlessSurface（E2E harness 基底），
-          # 该配置不支持跑测试 → AURORA_BUILD_TESTS=OFF 且跳过 Test 步骤，验收口径 = 构建绿
-          - name: headless-off
-            cmake-flags: -DAURORA_BACKEND_HEADLESS=OFF -DAURORA_BUILD_TESTS=OFF
-            run-tests: false
+          # COMPRESSION 关：解压不可用的诚实降级路径（compression-unavailable、
+          # HTTP 侧不发 Accept-Encoding / 拒收压缩应答）。utest_core_compression 恒注册、
+          # 体内按宏 SKIP，用例面不塌缩。
+          - name: compression-off
+            cmake-flags: -DAURORA_ENABLE_COMPRESSION=OFF
+            run-tests: true
 
     steps:
       - uses: actions/checkout@v7
@@ -789,8 +811,11 @@ jobs:
         with:
           version: latest
 
+      # AUDIO=ON 在 Emscripten 自动推导 AUDIO_WEBAUDIO=ON：Web Audio 设备后端此前只有
+      # lint-wasm 静态分析、无编译覆盖，本命令使其在两腿各真编一次，utest_audio 亦在
+      # wasm runner 下运行（无设备线程语义、推式环缓冲分支）。
       - name: Configure (emcmake)
-        run: emcmake cmake -S . -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF ${{ matrix.cmake-flags }}
+        run: emcmake cmake -S . -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DAURORA_ENABLE_AUDIO=ON ${{ matrix.cmake-flags }}
 
       - name: Build (library + tests)
         run: cmake --build build-wasm
@@ -1002,7 +1027,8 @@ jobs:
 
       # 扩面：主 Linux 遍打开除 Windows/macOS 特有宏之外的全部后端与能力开关，让
       # `#ifdef AURORA_BACKEND_X11/WAYLAND/GLFW`、GPU（GL / wgpu-native）、音频、SQLite、图像编解码、
-      # Inspector Server、性能观测（PROFILING/TRACING）与 verify 探针都进入分析面。
+      # WebView 控件、Inspector Server、性能观测（PROFILING/TRACING）与 verify 探针都进入分析面。
+      # 开关串维护在顶层 env 的 LINT_CAPABILITY_FLAGS（四处 lint 腿共用，防粘贴漂移）。
       # `matrix.pass.flags` 追加反极性遍的优化开关收口。
       # ⚠️ AURORA_BACKEND_GPU_WGPU=ON 只做 configure 期工具链探测（cargo/rustc/libclang），lint 目标
       #    不构建 wgpu_native_build，故无需真正跑 cargo 编译。
@@ -1013,12 +1039,7 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON \
             -DAURORA_ENABLE_DEBUG=${{ matrix.pass.debug }} \
             -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }} \
-            -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON \
-            -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON \
-            -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON \
-            -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON \
-            -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON \
-            -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON \
+            ${{ env.LINT_CAPABILITY_FLAGS }} \
             ${{ matrix.pass.flags }}
 
       # 生成物就位：lint 只 configure 不构建，而被分析的 TU 会 include wayland-scanner 产出的
@@ -1158,9 +1179,10 @@ jobs:
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
 
-      # configure 的**能力开关**与作业 8 对齐（音频 / SQLite / 图像编解码 / Inspector Server），
-      # 只去掉 native 后端（X11/Wayland/GLFW 在 wasm 下无意义）——换开关等于换覆盖面，扩面后
-      # 本作业的 TU 清单较历史基线（首轮 420 TU / 470 条）有增量，属预期。
+      # configure 的**能力开关**与作业 8 对齐（音频 / SQLite / 图像编解码 / WebView / Inspector
+      # Server），只去掉 native 后端（X11/Wayland/GLFW 在 wasm 下无意义）——开关串维护在顶层
+      # env 的 LINT_CAPABILITY_FLAGS_WASM；换开关等于换覆盖面，扩面后本作业的 TU 清单较历史
+      # 基线（首轮 420 TU / 470 条）有增量，属预期。
       # 与作业 8 同一套全量 / 增量分界（workflow 不支持 YAML 锚点复用，故同款块写两份）。
       # 浏览器口径的编译库是另一张 TU 清单，选集必须在本作业的编译库上重算一遍，
       # 不能复用 native 那份：`EMSCRIPTEN` 门后的 TU 与 `AURORA_BACKEND_WASM` 分支只在
@@ -1200,7 +1222,7 @@ jobs:
           fi
 
       - name: Configure (emcmake, export compile_commands.json)
-        run: emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }} -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON
+        run: emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }} ${{ env.LINT_CAPABILITY_FLAGS_WASM }}
 
       # 选集必须在 configure 之后：它读的就是这份编译库。全量时跳过（那份清单只有增量用得上）。
       # ⚠️ 与作业 8 同理，本分支在生产中不可达（`if:` 已排除非 master 分支 push），唯一的分支推送
@@ -1341,12 +1363,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF \
-            -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON \
-            -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON \
-            -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON \
-            -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON \
-            -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON \
-            -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+            ${{ env.LINT_CAPABILITY_FLAGS }}
           cmake --build build-lint-off --target wayland-gen
           python3 tools/check/select_lint_tus.py --build-dir build-lint-off --changed changed.txt --changed-only --out-dir build-lint-off/sel --shards 1
           list=build-lint-off/sel/tus_0.txt
@@ -1367,12 +1384,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON \
-            -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON \
-            -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON \
-            -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON \
-            -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON \
-            -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON \
-            -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+            ${{ env.LINT_CAPABILITY_FLAGS }}
           cmake --build build-lint-on --target wayland-gen
           python3 tools/check/select_lint_tus.py --build-dir build-lint-on --changed changed.txt --changed-only --out-dir build-lint-on/sel --shards 1
           list=build-lint-on/sel/tus_0.txt
@@ -1397,7 +1409,7 @@ jobs:
       - name: Lint wasm
         run: |
           set -euo pipefail
-          emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON
+          emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON ${{ env.LINT_CAPABILITY_FLAGS_WASM }}
           python3 tools/check/select_lint_tus.py --build-dir build-wasm-lint --changed changed.txt --changed-only --out-dir build-wasm-lint/sel --shards 1
           list=build-wasm-lint/sel/tus_0.txt
           if [ ! -s "$list" ]; then
@@ -1470,7 +1482,7 @@ jobs:
           & (Join-Path $bin "clang-tidy.exe") --version
 
       - name: Configure (mingw, export compile_commands.json)
-        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF -DAURORA_BACKEND_WIN32=ON -DAURORA_BACKEND_D3D11=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF -DAURORA_BACKEND_WIN32=ON -DAURORA_BACKEND_D3D11=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 
       # 定向选集：按平台 token 从第一方源码里挑出 Windows 相关文件，再交由选集脚本保留其中
       # 「本身就是 TU」的那些（--changed-only）。只扫平台相关代码，不扫全仓。
@@ -1541,7 +1553,7 @@ jobs:
         # clang-tidy 会因 `PCH file ... cmake_pch.hxx.pch not found` 把每个 TU 判为 broken。此处为
         # 「仅 lint」的 configure 关掉 PCH，使 compile_commands.json 不带 -include-pch
         #（基于 GCC 的 lint 作业本就是 PCH-off，不受影响）。
-        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF -DAURORA_BACKEND_MACOS=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF -DAURORA_BACKEND_MACOS=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 
       - name: Select macOS platform TUs
         shell: bash

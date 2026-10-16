@@ -685,7 +685,7 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 | 帧推进 | 帧序复用 `TestController` 已验证的既有序列（泵平台事件 → `Widget::tick` 手势计时 → `Animator::tick` → `Scheduler::tick` → `Window::present_root`）：内核自持 `Animator` / `Scheduler` 并经其 `set_current` 挂为进程内当前实例，使 mount 期注册的动画与定时任务可被逐帧推进。**不新增任何公共单帧 API**（`Application::step_frame()` 保持 `private`） |
 | 收敛与超时 | `pump_until_settled(max_frames)` 以「`Window::is_idle_frame()` 且无运行中动画」收敛；预算内未收敛返回 `RuntimeAsyncTimeout`，消息含已推进帧数、最后脏区状态、idle 帧状态与活跃动画数（可直接作为失败原因）。注意：**自驱动手势滑动**（`Scroll` 收位滑动等，不占 `Animator`）不在此判据覆盖内，其收敛协议见下文交互流往返层 |
 | 像素读回 | `capture_frame(const Surface &)` = `Surface::data()` + `Surface::framebuffer_size()` 组合，返回帧缓冲**物理像素**的 RGBA 帧；**未新增 `Surface` 公共读回虚方法**。`data()` 为 `nullptr`（后端未覆写读回，或该后端的读回受 `AURORA_ENABLE_DEBUG` 门控且未生效）时返回 `GeneralNotSupported`，消息沿用 `save_snapshot` 既有的 "framebuffer capture unavailable"；不返回空帧、不伪造内容 |
-| 查询面 | `collect_preorder` / `find_by_key` / `find_by_type` / `find_by_text` / `read_prop` 全部建立在**公共自描述通道**上（`Node::id()` / `Widget::type_name()` / `Widget::serialize_props` / `Widget::child_nodes()`），**不依赖 `TestController`**——后者整头受 `AURORA_BACKEND_HEADLESS` 门控，若查询面依赖它，「关掉无头后端但开真实后端」的构建里 E2E 恰好失去查询能力 |
+| 查询面 | `collect_preorder` / `find_by_key` / `find_by_type` / `find_by_text` / `read_prop` 全部建立在**公共自描述通道**上（`Node::id()` / `Widget::type_name()` / `Widget::serialize_props` / `Widget::child_nodes()`），**不依赖 `TestController`**——后者整头受 `AURORA_BACKEND_HEADLESS` 门控（无头后端恒编入，该宏恒真，但查询面不建立在它之上是设计纪律：查询能力的成立不系于任何一个后端宏） |
 | 语义快照 | `Session::semantic_snapshot()` 返回统一语义快照（`a11y::TreeSnapshot`：先序扁平 + `parent_id` + `by_id`，形状与 `widget/a11y_diff.h` 一致），`find_semantic_node()` 按角色（可选名称）先序取首个命中、`semantic_role_name()` 供报告可读名。快照与平台桥**同源**（同一 `build_accessibility_tree`，含 Name 回退链与 labelled_by 解析）——对快照成立的断言，平台桥投影也应成立；未建窗 / 未挂根返回 `GeneralInvalidArgument`，与 `read_pixels` 漏检口径一致 |
 | 输入注入 | `tap` / `drag` / `scroll` / `enter_text` 经 `Inspector::simulate_*` 走真实命中测试与冒泡派发（目标式语义），而非直接改控件状态；注入成功后登记「下一帧全量重绘」，模拟真实平台输入事件唤醒帧循环 |
 | 生命周期 | `Session` 以 RAII 兜底窗口生命周期：用例中途断言失败、抛出异常或提前 return 时析构即关闭窗口并回收宿主，不残留幽灵窗口；该保证不依赖用例显式调用清理函数，也不依赖测试框架的断言宏 |
@@ -714,7 +714,6 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
 | core / backends 的 macos | MacOS/GLFW 编译 | 空 | 无人值守会话无窗口系统（探针实测），全部 skipped by policy |
 | backends `linux-x11-wayland-glfw` | X11+GLFW+Wayland + 显式 `-DAURORA_ENABLE_DEBUG=ON` | `x11,glfw` | Release 作业须显式 DEBUG=ON 使 X11 读回可用；xvfb + llvmpipe 实测可建 GLX 3.3 上下文（GLFW 可跑）；Wayland 无 compositor 不期望 |
 | backends `windows-d3d11-glfw` | D3D11+GLFW + 显式 DEBUG=ON（Win32 随平台默认编译） | `win32,d3d11` | DEBUG=ON 使 Win32 读回可用；D3D11 读回无条件可用；GLFW 在该 runner 无 GL 环境实测不可建窗，不期望 |
-| toggles `headless-off` | `-DAURORA_BACKEND_HEADLESS=OFF -DAURORA_BUILD_TESTS=OFF` | —（跳过 Test 步骤） | 测试套件依赖 HeadlessSurface（内核自测基底与读回回退路径），该配置的验收口径 = 库与工具**构建绿**（bench / 工厂降级路径均有 `#ifdef` 门控回退） |
 | asan / coverage | 纯 Headless 默认面 | —（ctest 带 `-LE e2e` 排除） | 无真实后端可跑、全 skip 无信息量，排除以省 ctest 时间；coverage 聚合目标内置的 ctest 同口径排除 |
 
 另三条边界结论：wgpu（`AURORA_BACKEND_GPU_WGPU`，需 Rust 工具链与真机 GPU）不进任何 CI 默认作业，

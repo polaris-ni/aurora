@@ -33,13 +33,14 @@
     {
       "name": "wasm",
       "displayName": "Emscripten / WebAssembly (build-wasm)",
-      "description": "Equivalent to CI's `emcmake cmake` invocation: Emscripten toolchain via %EMSDK% (set by `emsdk activate --permanent`), WASM backend on, tests on (run them with `ctest --test-dir build-wasm`), demos on-demand.",
+      "description": "Equivalent to CI's `emcmake cmake` invocation: Emscripten toolchain via %EMSDK% (set by `emsdk activate --permanent`), WASM backend on, audio on (AURORA_ENABLE_AUDIO=ON as in the CI wasm job; AUDIO_WEBAUDIO auto-derived), tests on (run them with `ctest --test-dir build-wasm`), demos on-demand.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-wasm",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
         "AURORA_BACKEND_WASM": "ON",
+        "AURORA_ENABLE_AUDIO": "ON",
         "AURORA_BUILD_TESTS": "ON",
         "AURORA_BUILD_DEMOS": "ON"
       }
@@ -57,7 +58,7 @@
     {
       "name": "measure",
       "displayName": "Compile-speed baseline (build-measure, ccache off)",
-      "description": "Fixed conditions for a before/after compile-speed comparison: dedicated build-measure/ directory, gcc, Release, ccache disabled. Vary only the knob under test on top of it (e.g. -DAURORA_TEST_SHARDS=4 or -DAURORA_ENABLE_UNITY_CORE=ON) so both sides share the directory, the compiler and the cache setting.",
+      "description": "Fixed conditions for a before/after compile-speed comparison: dedicated build-measure/ directory, gcc, Release, ccache disabled. Vary only the knob under test on top of it (e.g. -DAURORA_TEST_SHARDS=4) so both sides share the directory, the compiler and the cache setting.",
       "inherits": "ninja",
       "binaryDir": "${sourceDir}/build-measure",
       "cacheVariables": {

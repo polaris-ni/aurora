@@ -43,7 +43,7 @@
 | 项目 | 要求 |
 |:---|:---|
 | 平台 | 三条腿：Windows 本机（MinGW/GCC + Ninja，系统栈 Schannel）、WSL Ubuntu（POSIX `poll`，分别以 mbedTLS 与 OpenSSL 作 provider） |
-| 构建 | 每腿一个独立构建目录；WSL 两腿需 `-DAURORA_BACKEND_HEADLESS=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_VERIFY_TOOLS=ON` 与对应的 `-DAURORA_NET_TLS_PROVIDER=<static\|shared>:<安装根>` |
+| 构建 | 每腿一个独立构建目录；WSL 两腿需 `-DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_VERIFY_TOOLS=ON` 与对应的 `-DAURORA_NET_TLS_PROVIDER=<static\|shared>:<安装根>` |
 | 终端 | 支持 UTF-8 输出；可分离重定向 stdout 与 stderr |
 | 网络 | **需出站访问 443**（本文档是全仓唯一允许出站的测试面）；`--host` 换成别的公网端点时 §2 的字段值断言须随之重取 |
 | 对照 | 证书字段的独立对照源为浏览器证书查看器或 `openssl s_client -connect <host>:443 -servername <host>`（后者不受本库代码影响，故是有效的外部对照） |
@@ -137,7 +137,7 @@
 | 测试目的 | 验证 TLS 后端的装配唯一决策点：系统栈缺省、provider 探测推导引擎宏、路径非法时 configure 期即失败，以及 Linux 无 provider 时的诚实降级 |
 | 前置条件 | 本机有 Windows 与 WSL 两条腿；WSL 内已安装 mbedTLS 与 OpenSSL 的开发文件（各自构成一枚「安装根」） |
 | 依赖用例 | 无 |
-| 操作步骤 | 1. Windows 腿：不给任何 provider，`cmake --preset ninja` 后 `cmake --build build --target aurora_verify_tls_live`（纯执行，无预期结果）<br>2. 查看该次 configure 的输出中 `TLS backend:` 那一行，并确认产物存在<br>3. WSL mbedTLS 腿：`cmake -S <仓> -B <新目录> -G Ninja -DAURORA_BACKEND_HEADLESS=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_NET_TLS_PROVIDER=static:<mbedTLS 安装根>` 后构建同一目标（纯执行，无预期结果）<br>4. 查看该次 configure 的 `TLS backend:` 行与构建退出码，再从生成的 `build.ninja` 里取三枚 mbedTLS 归档在链接行上的先后次序<br>5. WSL OpenSSL 腿：同法以 `-DAURORA_NET_TLS_PROVIDER=shared:/usr` configure 并构建（纯执行，无预期结果）<br>6. 查看该次 configure 的 `TLS backend:` 行与构建退出码<br>7. 把 provider 的安装根改成一枚不存在 `include/` 的目录再 configure 一次<br>8. Linux 腿不给任何 provider 再 configure 一次，并跑一条只查能力位的用例 |
+| 操作步骤 | 1. Windows 腿：不给任何 provider，`cmake --preset ninja` 后 `cmake --build build --target aurora_verify_tls_live`（纯执行，无预期结果）<br>2. 查看该次 configure 的输出中 `TLS backend:` 那一行，并确认产物存在<br>3. WSL mbedTLS 腿：`cmake -S <仓> -B <新目录> -G Ninja -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_NET_TLS_PROVIDER=static:<mbedTLS 安装根>` 后构建同一目标（纯执行，无预期结果）<br>4. 查看该次 configure 的 `TLS backend:` 行与构建退出码，再从生成的 `build.ninja` 里取三枚 mbedTLS 归档在链接行上的先后次序<br>5. WSL OpenSSL 腿：同法以 `-DAURORA_NET_TLS_PROVIDER=shared:/usr` configure 并构建（纯执行，无预期结果）<br>6. 查看该次 configure 的 `TLS backend:` 行与构建退出码<br>7. 把 provider 的安装根改成一枚不存在 `include/` 的目录再 configure 一次<br>8. Linux 腿不给任何 provider 再 configure 一次，并跑一条只查能力位的用例 |
 | 预期结果 | 2. configure 日志为 `TLS backend: system stack (AURORA_NET_TLS_SCHANNEL)`；构建 rc=0 且产出 `aurora_verify_tls_live.exe`<br>4. configure 日志为 `TLS backend: provider AURORA_NET_TLS_MBEDTLS (static) from <安装根>`；构建 rc=0；链接行上三枚归档的次序是 `libmbedtls.a` 在 `libmbedx509.a` 之前、`libmbedx509.a` 在 `libmbedcrypto.a` 之前（GNU ld 左到右求解，被依赖者须在右）<br>6. configure 日志为 `TLS backend: provider AURORA_NET_TLS_OPENSSL (shared) from /usr`；构建 rc=0<br>7. configure **失败**（非零退出），诊断打印实际检查过的 `include/` 与 `lib/` 组合；不得出现「configure 成功但后端为 none」的静默降级<br>8. configure 成功且日志为 `TLS backend: none`，能力位用例回报 `capabilities().tls == false`（提案判据 7 的可执行形态） |
 
 ### 2.2 真实公网链上的握手与摘要

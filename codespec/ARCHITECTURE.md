@@ -265,7 +265,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 | 后端 | 上屏方式 | 开关 |
 |:---|:---|:---|
-| `HeadlessSurface` | 内存帧缓冲，可同步导出 PNG | `AURORA_BACKEND_HEADLESS`（默认 ON） |
+| `HeadlessSurface` | 内存帧缓冲，可同步导出 PNG | `AURORA_BACKEND_HEADLESS`（恒编入，无开关） |
 | `Win32Surface` | 常驻 BGRA DIB section + `BitBlt`（RGBA→BGRA CPU swizzle），支持 `set_present_dirty` 增量上屏 | `AURORA_BACKEND_WIN32`（Windows 默认 ON） |
 | `D3D11Surface` | 复用 `Win32Host` 宿主，把 `Painter` RGBA8 帧缓冲作为动态纹理，脏矩形经 `UpdateSubresource` 增量上传，全屏三角形 + 像素着色器线性采样呈现（`Present(1,0)`） | `AURORA_BACKEND_D3D11`（默认 OFF） |
 | `WgpuWin32Surface` | 复用 `Win32Host` 宿主，帧级 DisplayList 交 `WgpuRhi` 在 GPU 端光栅化并 `wgpuSurfacePresent` 直渲上屏；GPU 失败永久回退 GDI `SetDIBitsToDevice` 上传路径 | `AURORA_BACKEND_GPU_WGPU` ∧ `AURORA_BACKEND_WIN32`（默认 OFF） |
@@ -546,7 +546,7 @@ CI 配置位于 `.github/workflows/`：
 - 编译缓存接入 `hendrikmuhs/ccache-action`（key 按 job / 矩阵名分桶）：core（Linux / macOS / windows-mingw）、backends（Linux / macOS）、toggles、asan、coverage、install-consumer；缓存口径（SLOPPINESS / BASEDIR / NOHASHDIR / 压缩）由 `cmake/AuroraCcache.cmake` 的编译器启动器统一注入，与本地构建共享同一语义，避免「本地命中、CI 全 miss」。
 - windows-msvc（默认 Visual Studio 多配置生成器）不接入编译缓存：CMake 的编译器启动器（`<LANG>_COMPILER_LAUNCHER`，sccache / ccache 的挂接点）仅在 Makefile / Ninja 生成器实现，VS 生成器下被静默忽略；要接入须先将该矩阵切换到 Ninja + cl，暂无必要（该配置无缓存路径、PCH 净收益显著，冷构建本身不构成瓶颈）。
 - windows 侧 Test 步骤显式 `shell: bash` 并设 `PYTHONUTF8=1`（默认 pwsh 无 `nproc`；cp1252 控制台无法编码 CJK 诊断输出）。
-- **编译耗时观测**：`core` 与 `backends` job 在 Build/Test 之后调用 `tools/check/build_baseline.py`（解析 `.ninja_log` 与 `LastTest.log`，纯观测、恒退出 0、不进门禁），把 `.ninja_log` / `LastTest.log` / `build-baseline.json` 作为 artifact 上传，并把摘要写入 step summary。before/after 对照用于决定 Unity Build 试点（`BUILD_OPTIONS.md` §4.8）的默认开关与批大小。
+- **编译耗时观测**：`core` 与 `backends` job 在 Build/Test 之后调用 `tools/check/build_baseline.py`（解析 `.ninja_log` 与 `LastTest.log`，纯观测、恒退出 0、不进门禁），把 `.ninja_log` / `LastTest.log` / `build-baseline.json` 作为 artifact 上传，并把摘要写入 step summary。before/after 对照用于编译耗时回归的趋势观察。
 
 ### 14.5 本地验证的目标平台与真机探针
 

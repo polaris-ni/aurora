@@ -368,7 +368,7 @@ auto create_native_window(const WindowOptions &opts) -> Result<std::unique_ptr<W
 #else
     return make_error(
         ErrorCode::PlatformUnavailable, "create_native_window: display unavailable and no Headless fallback.",
-        "Run inside an X11/Wayland session or rebuild with -DAURORA_BACKEND_HEADLESS=ON.", "aurora/window/window.h");
+        "Run inside an X11/Wayland session.", "aurora/window/window.h");
 #endif
 #elif defined(AURORA_BACKEND_MACOS)
     return create_window(MacOSOptions{opts});
@@ -383,7 +383,7 @@ auto create_native_window(const WindowOptions &opts) -> Result<std::unique_ptr<W
 #else
     (void)opts;
     return make_error(ErrorCode::PlatformUnavailable, "create_native_window: no built-in Surface backend compiled in.",
-                      "Enable a backend (e.g. -DAURORA_BACKEND_HEADLESS=ON) or inject a custom Surface via "
+                      "Inject a custom Surface via "
                       "create_window(std::unique_ptr<Surface>, WindowOptions).",
                       "aurora/window/window.h");
 #endif

@@ -674,7 +674,7 @@ au::Column{}
 
 | 后端 | 说明 | 开关 |
 |:---|:---|:---|
-| `HeadlessSurface` | 内存帧缓冲 / 离线 PNG，软件 `Painter` | `AURORA_BACKEND_HEADLESS`（默认 ON） |
+| `HeadlessSurface` | 内存帧缓冲 / 离线 PNG，软件 `Painter` | `AURORA_BACKEND_HEADLESS`（恒编入，无开关） |
 | `Win32Surface` | Win32/GDI，零三方依赖，仅 `_WIN32` | `AURORA_BACKEND_WIN32`（Windows 默认 ON） |
 | `D3D11Surface` | D3D11 GPU 增量上屏，Win32 专属 | `AURORA_BACKEND_D3D11`（默认 OFF） |
 | `WgpuWin32Surface` / `WgpuX11Surface` / `WgpuWaylandSurface` | wgpu GPU 栅格上屏（帧级 DisplayList 在 GPU 端光栅化），Win32 / X11 / Wayland 宿主 | `AURORA_BACKEND_GPU_WGPU`（默认 OFF，§8.8）∧ 宿主后端 |

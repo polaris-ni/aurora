@@ -519,7 +519,7 @@ class Surface {
 ///
 /// 用于无窗口系统的单元测试与无头校验；不依赖 GLFW/SDL/OpenGL。
 /// 窗口可见性策略（WindowVisibility）不在此落地：无 OS 窗口。
-/// 仅当 `AURORA_BACKEND_HEADLESS` 定义（默认 ON，可由 CMake `AURORA_BACKEND_HEADLESS=OFF` 剪裁）时提供。
+/// 恒提供：无头后端随库编入，`AURORA_BACKEND_HEADLESS` 宏恒定义（`BUILD_OPTIONS.md` §6 固定注入）。
 ///
 class HeadlessSurface : public Surface {
   public:

@@ -14,11 +14,11 @@
 # 累积已开启的 feature 宏名，供 AuroraInstall 统一导出（消除手动重复列表）。
 # 初始化位于 AuroraFeatures.cmake（早于本模块 include，且编解码宏等更早调用点也覆盖）。
 
-# ---- Headless（无头内存/PNG 后端，默认 ON） ----
-option(AURORA_BACKEND_HEADLESS "Build Headless (memory/PNG) Surface backend" ON)
-if (AURORA_BACKEND_HEADLESS)
-    aurora_define_feature(AURORA_BACKEND_HEADLESS EXPORT)
-endif ()
+# ---- Headless（无头内存/PNG 后端，恒编入，无开关） ----
+# 测试套件与像素读回回退路径以 HeadlessSurface 为基底（大量测试 TU 直接引用），
+# 关闭它不存在受支持的构建组合，故不再提供选项：宏恒定注入并随安装导出，
+# 消费端与库按同一 ODR 口径编译（固定注入详见 BUILD_OPTIONS.md §6）。
+aurora_define_feature(AURORA_BACKEND_HEADLESS EXPORT)
 
 # ---- Win32/GDI（Windows 默认 ON，否则 OFF） ----
 if (WIN32)

@@ -88,7 +88,7 @@ cmake --build build-verify-win32 --target aurora_verify_win32_csd
 | 后端开关 | 取值 |
 |:---|:---|
 | `AURORA_BACKEND_WIN32` | ON |
-| `AURORA_BACKEND_HEADLESS` | ON |
+| `AURORA_BACKEND_HEADLESS` | 恒编入（无开关） |
 | `AURORA_BACKEND_GLFW` / `D3D11` / `GPU_GL` / `GPU_WGPU` | OFF |
 | `AURORA_BACKEND_X11` / `WAYLAND` / `MACOS` / `WASM` | OFF |
 

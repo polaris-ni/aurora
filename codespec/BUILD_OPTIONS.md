@@ -141,11 +141,10 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 
 ## 3 `AURORA_BACKEND_*`：后端开关（= feature 宏）
 
-每个内置 `Surface` 图形后端一个开关；GPU 栅格后端 `AURORA_BACKEND_GPU_WGPU`（wgpu，§3.8）亦归此组。而 `AURORA_ENABLE_GLFW_GPU_GL` 是既有 GLFW 后端之上的 GPU 栅格模式增强、非独立后端，内置音频设备后端（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_WEBAUDIO`）为能力开关，二者均归 `AURORA_ENABLE_*` 组（§4）。**开关名与 PUBLIC 编译宏名完全相同**，宏以 `target_compile_definitions(aurora PUBLIC …)` 传播给所有消费者；库代码用 `#ifdef AURORA_BACKEND_XXX` 做代码剪裁。关闭某后端后，对应实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）始终可用，故「只用自定义 backend」可不编译任何内置后端。
+每个内置 `Surface` 图形后端一个开关；GPU 栅格后端 `AURORA_BACKEND_GPU_WGPU`（wgpu，§3.8）亦归此组。而 `AURORA_ENABLE_GLFW_GPU_GL` 是既有 GLFW 后端之上的 GPU 栅格模式增强、非独立后端，内置音频设备后端（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_WEBAUDIO`）为能力开关，二者均归 `AURORA_ENABLE_*` 组（§4）。**开关名与 PUBLIC 编译宏名完全相同**，宏以 `target_compile_definitions(aurora PUBLIC …)` 传播给所有消费者；库代码用 `#ifdef AURORA_BACKEND_XXX` 做代码剪裁。关闭某后端后，对应实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端。**例外**：无头后端 `HeadlessSurface` 恒编入、不设开关（测试套件与读回回退路径的基底，见 §6 固定注入表）。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）始终可用，故「只用自定义 backend」可不编译任何内置后端。
 
 | 选项 | 默认值 | 含义 | 传播宏 | 额外链接 |
 |:---|:---|:---|:---|:---|
-| `AURORA_BACKEND_HEADLESS` | `ON` | 无头内存 / PNG 后端（`HeadlessSurface`，离线渲染 / 测试）。⚠️ 关掉它只保证**库与工具**可构建（`AURORA_BUILD_TESTS=OFF`）：测试套件以无头后端为默认绘制目标，18 个测试 TU 直接引用 `HeadlessSurface`，故 `AURORA_BUILD_TESTS=ON` × `AURORA_BACKEND_HEADLESS=OFF` 不是受支持的组合（既存缺口） | `AURORA_BACKEND_HEADLESS` | — |
 | `AURORA_BACKEND_WIN32` | Windows `ON`，否则 `OFF` | Win32/GDI 后端（`Win32Surface` + `Win32Host` 共享宿主） | `AURORA_BACKEND_WIN32` | `user32` `gdi32` `shell32` `ole32` `uuid` `imm32` `dwmapi`（仅 `_WIN32`；`imm32` 供输入法组合桥，`dwmapi` 供 CSD 能力探测与帧扩展） |
 | `AURORA_BACKEND_D3D11` | `OFF` | D3D11 GPU 增量上屏后端（`D3D11Surface`） | `AURORA_BACKEND_D3D11` | `d3d11` `dxgi` `d3dcompiler`（仅 `_WIN32`） |
 | `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；真窗口帧路径 `WgpuWin32Surface` / `WgpuX11Surface` / `WgpuWaylandSurface` 另与宿主 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread` `m`(Linux) |
@@ -631,24 +630,6 @@ EM_JS(int, wa_available, (), { return typeof AudioContext === 'undefined' ? 0 : 
 
 ⚠️ 指令必须**裸写**：clang-format 22 把带尾注的 `// clang-format off  (理由)` 当成普通注释、保护**不生效**（实测静默损坏），理由注释另起一行放在指令上方即可（该处在保护体外，可被正常重排）。落点见 `src/aurora/media/audio_webaudio.cpp`、`src/aurora/window/wasm_aria.cpp`、`include/aurora/window/wasm_surface.h`、`include/aurora/app/application.h` 与 `tools/verify/wasm_*_live_probe.cpp`；新增任何触达 DOM 的 JS 宏时同样处理，并在 `format` 之后核对 JS 块与改前逐字一致。
 
-### 4.8 `AURORA_ENABLE_UNITY_CORE`（Unity Build 试点）
-
-| 项 | 值 |
-|:---|:---|
-| 默认值 | `OFF`（opt-in；默认构建与已落地的 CI 矩阵完全不变） |
-| feature 宏 | 不注入，仅改变 `aurora` 静态库的内部编译组织方式 |
-| 作用范围 | 仅 `src/aurora/core/` 下的源；库内其余 ~100 个源（`widget/` / `window/` / `render/` 等）保持逐文件独立编译 |
-
-`UNITY_BUILD` 是 **target 级**属性，无法只对某子目录开启。本试点以反向排除实现「仅 core/」：**先**对 `aurora` 目标打开 `UNITY_BUILD`（`UNITY_BUILD_MODE BATCH`、`UNITY_BUILD_BATCH_SIZE` 由 `AURORA_UNITY_BATCH_SIZE` 控制，默认 `4`），**再**对每一个**不**在 `src/aurora/core/` 下的源设 `SKIP_UNITY_BUILD_INCLUSION TRUE`。core/ 的源按批被 CMake 拼成 `Unity/unity_<n>_cxx.cxx` 一次编译。
-
-- **为什么只试点 core/**：Unity Build 把多个 `.cpp` 拼进同一个翻译单元，要求被合并的文件之间无冲突（同名匿名命名空间、重复 `static` 符号、宏 / `using` 泄漏等）。`core/` 是几何 / 状态 / 基础数据结构层，文件间耦合最小，最安全；其余模块（尤其 `window/`、`widget/` 大量互引）暂未纳入，避免 ODR / 重复符号风险。
-- **实测**（本仓，`AURORA_ENABLE_UNITY_CORE=ON` + ccache 热身）：core/ 14 个源打成 4 个 batch，库成功编出 `libaurora.a`；非 core 源命中既有 ccache，仅 batch 段重新编译。
-- **lint 覆盖面塌陷（重要）**：开启后 `compile_commands.json` 不再逐文件列出 core/ 源，本构建目录里的 `lint` 目标会**静默丢失 core/ 的 clang-tidy 覆盖**。要跑全量 lint，须从**未开启该开关的独立构建目录**（如 `build/`）发起 `lint` 目标。
-- **`AURORA_UNITY_BATCH_SIZE`**：正整数（非法值 configure 期 `aurora_error` 终止）；批大小越小、单 TU 越安全但合并收益越低；CMake 默认 8，试点期取 `4` 以优先保证可编译性。
-- **0 匹配保护**：若没有任何源落在 `src/aurora/core/` 下（如目录被整体移动），configure 期 `aurora_error` 终止，避免「开关开了却静默空转」。
-
-> 该开关**不改变任何运行时行为或 ABI**：只是把 core/ 的编译组织方式从「逐文件」改为「按批」，产出物逐位等价。是否默认开启、批大小取何值，待收束期编译耗时基线数据（见 `ARCHITECTURE.md` §14.4 与 `tools/check/build_baseline.py`）再定。
-
 ## 5 强制缓存变量（三方库源码构建内部）
 
 FreeType 与 HarfBuzz 均从仓库内置源码（`third_party/freetype`、`third_party/harfbuzz`）经 `add_subdirectory` 编入 `aurora` 静态库（断网可构建、版本确定）。`CMakeLists.txt` 先 `add_subdirectory(third_party/freetype)` 后 `add_subdirectory(third_party/harfbuzz)`——harfbuzz 在 `if (TARGET freetype)` 时自动开启 `HB_HAVE_FREETYPE`（提供 `hb-ft.h` 并链接 freetype）。aurora 直接 `target_link_libraries(aurora PUBLIC freetype harfbuzz)`，文本 shaping 由 HarfBuzz（`hb_shape` + `hb_ft_font`）完成，故 FreeType 自身保持 `FT_DISABLE_HARFBUZZ=ON`（standalone，避免别名耦合）。
@@ -681,7 +662,8 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 |:---|:---|:---|:---|
 | `NOMINMAX` | `add_compile_definitions(NOMINMAX)` | 全局 | 抑制 `<windows.h>` 的 `min` / `max` 宏，保证 `std::min` / `std::max` 在 Windows 可用 |
 | `_CRT_SECURE_NO_WARNINGS` | `target_compile_definitions(aurora PUBLIC …)` | 仅 MSVC | 抑制 MSVC 对 `std::fopen` 等 POSIX 函数的弃用警告 |
-| `AURORA_BACKEND_*` | `target_compile_definitions(aurora PUBLIC …)` | 由 §3 开关控制 | 后端 feature 宏 |
+| `AURORA_BACKEND_*` | `target_compile_definitions(aurora PUBLIC …)` | 由 §3 开关控制 | 后端 feature 宏（HEADLESS 除外，见下行） |
+| `AURORA_BACKEND_HEADLESS` | `aurora_define_feature(AURORA_BACKEND_HEADLESS EXPORT)`（无条件） | 恒注入 | 无头内存 / PNG 后端**恒编入、无开关**：测试套件与像素读回回退路径以 `HeadlessSurface` 为基底（大量测试 TU 直接引用），关闭它不存在受支持的构建组合，故不再提供选项。宏随安装导出，消费端与库同 ODR 口径 |
 
 除宏定义外，`aurora_setup_consumer_target`（`cmake/AuroraUtils.cmake`）在 **MinGW** 下对全部消费者目标（demo / 测试 / 工具）追加 `-Wa,-mbig-obj`：MinGW 汇编器的 COFF 目标文件默认段数上限 65535 会被 Debug（`-g`）下的超大消费者 TU 击穿（实测 `demo_google_play.cpp` 达 33614 段，报 "too many sections" / "file too big"），该标志把上限放宽到 2^32 段，产物仍为标准 COFF，对链接器透明；MSVC / clang-cl 的汇编器无此上限，不注入。`AURORA_ENABLE_COVERAGE` 的 GCC 分支出于同一原因亦注入（见 §4 约束）。
 
@@ -891,7 +873,6 @@ aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE includ
 -D AURORA_DOXYGEN_EXECUTABLE=<路径>           # PATH 上没有 doxygen 时显式指定
 
 # 后端开关（= feature 宏，PUBLIC 传播）
--D AURORA_BACKEND_HEADLESS=ON|OFF   # 无头 PNG（默认 ON）
 -D AURORA_BACKEND_WIN32=ON|OFF      # Win32/GDI（Win 默认 ON，否则 OFF）
 -D AURORA_BACKEND_D3D11=ON|OFF      # D3D11 GPU 上屏（默认 OFF）
 -D AURORA_BACKEND_GPU_WGPU=ON|OFF   # wgpu GPU 栅格（默认 OFF；需 Rust 工具链 + libclang，见 §3.8）
@@ -906,6 +887,13 @@ aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE includ
 -D AURORA_ENABLE_AUDIO_ALSA=ON|OFF   # ALSA 音频（依赖 ENABLE_AUDIO=ON；Linux 默认 ON，否则 OFF；dlopen 零构建依赖）
 -D AURORA_ENABLE_AUDIO_WEBAUDIO=ON|OFF   # Web Audio 音频（依赖 ENABLE_AUDIO=ON；Emscripten 默认 ON，否则 OFF；推式环零导出）
 -D AURORA_ENABLE_STORAGE_SQLITE=ON|OFF   # SQLite 存储后端（默认 OFF；存储门面与 Memory/Filesystem 恒编译）
+-D AURORA_ENABLE_WEBVIEW=ON|OFF     # WebView 控件（默认 OFF；公共模块恒编译，关闭=占位降级；PRIVATE 宏不传播）
+-D AURORA_ENABLE_WEBVIEW_WEBVIEW2=ON|OFF   # WebView2 引擎（依赖 ENABLE_WEBVIEW=ON；Win 默认 ON，否则 OFF；运行期绑定）
+-D AURORA_ENABLE_WEBVIEW_WEBKITGTK=ON|OFF  # WebKitGTK 引擎（依赖 ENABLE_WEBVIEW=ON；Linux 默认 ON，否则 OFF；运行期绑定）
+-D AURORA_ENABLE_COMPRESSION=ON|OFF # core 解压能力 gzip/zlib/deflate（默认 ON；关闭=诚实降级 compression-unavailable）
+-D AURORA_ENABLE_IMAGE_JPEG=ON|OFF  # JPEG 解码 libjpeg-turbo（默认 OFF，内部宏）
+-D AURORA_ENABLE_IMAGE_WEBP=ON|OFF  # WebP 解码 libwebp（默认 OFF，内部宏）
+-D AURORA_ENABLE_IMAGE_PNG=ON|OFF   # PNG/GIF 解码 wuffs（默认 OFF，内部宏）
 
 # 架构级优化（= feature 宏，PUBLIC 传播，默认均 ON）
 -D AURORA_ENABLE_LAYOUT_CACHE=ON|OFF
@@ -920,11 +908,8 @@ aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE includ
 -D AURORA_ENABLE_DEBUG=AUTO|ON|OFF       # 真实后端 DEBUG 能力（默认 AUTO，PUBLIC 宏）
 -D AURORA_ENABLE_TEST_HOOKS=ON|OFF       # 库侧测试注入点（默认 ON，PUBLIC 宏；双宏裁切，见 §4）
 -D AURORA_ENABLE_SIMD=ON|OFF             # 光栅 SIMD 双实现（默认 ON，内部宏）
--D AURORA_ENABLE_IMAGE_{JPEG,WEBP,PNG}=ON|OFF  # 图像解码能力（默认均 OFF，内部宏）
 -D AURORA_ENABLE_GLFW_GPU_GL=ON|OFF    # GPU OpenGL 3.3 core 栅格（默认 OFF；依赖 AURORA_BACKEND_GLFW=ON，非独立后端）
 -D AURORA_ENABLE_CCACHE=ON|OFF           # ccache 编译缓存（默认 ON；容量默认 10G）
--D AURORA_ENABLE_UNITY_CORE=ON|OFF       # Unity Build 试点：仅 src/aurora/core/ 打成 batch（默认 OFF，见 §4.8）
--D AURORA_UNITY_BATCH_SIZE=<n>           # 每批源数（默认 4；AURORA_ENABLE_UNITY_CORE=ON 时生效）
 -D AURORA_ENABLE_LLD=ON|OFF              # lld 链接器（默认 ON）
 -D AURORA_ENABLE_CLANG_TIDY=ON|OFF       # lint / lint-fix 目标（默认 ON）
 -D AURORA_LINT_SHARD=0/4                 # TU 分片（默认空 = 全量一遍；CI 矩阵用，见 §4.5）

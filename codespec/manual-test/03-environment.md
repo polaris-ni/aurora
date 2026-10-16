@@ -232,7 +232,7 @@
 | 前置条件 | 位于仓库根目录；`build/` 已完成 CMake 配置；`codespec/BUILD_OPTIONS.md` 可读 |
 | 依赖用例 | TC-ENVIRONMENT-001 |
 | 操作步骤 | 1. 打开构建目录中的 CMake 缓存文件 `CMakeCache.txt`（纯执行，无预期结果）<br>2. 逐项检索 `AURORA_BACKEND_*` 各开关取值<br>3. 检索 `AURORA_ENABLE_DEBUG` 取值<br>4. 对照 `codespec/BUILD_OPTIONS.md` 的开关清单核对缓存中的开关集合<br>5. 与 TC-ENVIRONMENT-001 的运行表现互证 |
-| 预期结果 | 2. 本机实测：`AURORA_BACKEND_WIN32=ON`、`AURORA_BACKEND_HEADLESS=ON`，`AURORA_BACKEND_D3D11` 与 GLFW、X11、Wayland、MacOS、Wasm、GPU 诸后端均为 OFF——与载体实际弹出原生窗口（而非 headless PNG）一致<br>3. `AURORA_ENABLE_DEBUG=ON`（本机实测取值；人工核对以实际缓存为准，取值与清单语义矛盾则 FAIL）<br>4. 缓存中出现的每个**由 `cmake/` 下 `option()` 声明的** `AURORA_*` 开关均能在清单中找到对应条目，无清单外开关；缓存里另有的工具链探测项（`FILEPATH` / `INTERNAL`）与版本串等非开关条目不计入本判据<br>5. TC-ENVIRONMENT-001 首屏为真实窗口，与本例步骤 2 的后端取值自洽 |
+| 预期结果 | 2. 本机实测：`AURORA_BACKEND_WIN32=ON`，`AURORA_BACKEND_D3D11` 与 GLFW、X11、Wayland、MacOS、Wasm、GPU 诸后端均为 OFF——与载体实际弹出原生窗口（而非 headless PNG）一致（无头后端恒编入、不设开关，缓存中无 `AURORA_BACKEND_HEADLESS` 条目属预期）<br>3. `AURORA_ENABLE_DEBUG=ON`（本机实测取值；人工核对以实际缓存为准，取值与清单语义矛盾则 FAIL）<br>4. 缓存中出现的每个**由 `cmake/` 下 `option()` 声明的** `AURORA_*` 开关均能在清单中找到对应条目，无清单外开关；缓存里另有的工具链探测项（`FILEPATH` / `INTERNAL`）与版本串等非开关条目不计入本判据<br>5. TC-ENVIRONMENT-001 首屏为真实窗口，与本例步骤 2 的后端取值自洽 |
 
 ## 3 执行记录表
 
