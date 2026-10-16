@@ -13,8 +13,10 @@
 /// - **协程出口 `CoroTask<Result<Response>>`**：传输层（L1）刻意只给回调出口（`net/transport.h`：把 `Task`
 ///   写进 L1 公共头会让下层反向依赖 L4），协程形态归上层给出——本发起侧就是那「上层」。续体经主线程投递器
 ///   恢复，故调用方（含 UI 线程）在 `co_await` 之后可安全触碰响应式状态；桥接细节藏在库内 `net/detail/`。
-/// - **一次 `send` = 一条连接的生命周期**：连接池、keep-alive 复用、`Session` 的 Cookie Jar 属后续切片，本
-///   件每次为（每一跳）新建连接、应答物化后关闭，绝不为「复用」预先牺牲正确性。
+/// - **连接生命周期由池口径裁决**：`PoolOptions{}` 缺省关——一次 `send` = 一条连接、用完即关的既有口径
+///   逐字不变；开着时同池键的请求坐上一条判干净的连接（复用资格五判据见 `PoolOptions` 头注释），判不干净
+///   当场关闭，绝不为「复用」预先牺牲正确性。`Session`（`net/http_session.h`）是身份层：持一枚 Cookie Jar
+///   并装进本客户端（拷贝共享池、身份只随 `Session`），裸 `Client` 不收不发 Cookie。
 /// - **超时以 `Request::timeout()` 为准**：它是整请求时限（跨连接、TLS、读写、重定向全程），到点落
 ///   `http-timeout`；分段超时（`connect` / `read_idle`）已随之落地，重试（`RetryPolicy`）的每一次尝试各拿
 ///   一份 `total`、跨全部尝试的墙另有 `RetryPolicy::budget`。认证（`Client::authenticator()`）是重试环内层的
@@ -116,9 +118,13 @@
 
 namespace aurora::net::detail {
 class HttpResponseCache;  ///< 实现侧缓存表：字段全部留在 `net/detail/http_cache.h`，公共头不暴露
-}
+class HttpConnectionPool;  ///< 实现侧连接池：字段全部留在 `net/detail/http_pool.h`，公共头不暴露
+class HttpCookieJar;  ///< 实现侧 Cookie Jar：字段全部留在 `net/detail/http_cookie_jar.h`，公共头不暴露
+}  // namespace aurora::net::detail
 
 namespace aurora::net::http {
+
+class Session;  ///< 会话面（身份层）：持有 Jar 并装进 Client，见 `net/http_session.h`
 
 /// @brief HTTP 发起侧客户端：把 `Request` 送出去、把物化的 `Response` 拿回来。
 /// @note Thread: thread-safe（可拷贝、可并发发起；每次 `send` / `open_stream` 自持一条连接）
@@ -161,10 +167,16 @@ class Client {
     }
 
     /// @brief 设定 `https://` 握手的安全口径（版本界、ALPN、校验、信任根、pin、客户端身份）。
+    ///
+    /// 每次改写都推进一枚**配置代次**（拷贝共享的计数器）：连接池开着时，池条目记着「当初按哪一代口径
+    /// 握手」，代次对不上即不复用——改了信任根还坐上一条按旧口径握手的连接，等于新配置静默不生效。
     /// @param context TLS 上下文。
     /// @return 自身引用，便于链式调用。
     auto tls_context(TlsContext context) -> Client & {
         tls_ = std::move(context);
+        if (tls_generation_ != nullptr) {
+            ++(*tls_generation_);
+        }
         return *this;
     }
 
@@ -303,6 +315,24 @@ class Client {
     /// @return 口径的只读引用（`enabled` 缺省假 = 不查也不写）。
     [[nodiscard]] auto cache() const -> const CacheOptions & { return cache_options_; }
 
+    /// @brief 装本客户端的连接池口径（`PoolOptions{}` 即关掉，缺省就是它）。
+    ///
+    /// 开着时兑现 keep-alive 的最小治理集：同池键的请求坐上一条判干净的连接（复用资格五判据：消息完整
+    /// 读完、无 leftover、对端未发 `Connection: close`、分帧非 `UntilClose`、HTTP/1.1——缺一即当场关闭），
+    /// 空闲超时与最长寿命到期即关，每键并发上限满时排队（等空闲连接的时间计入 `Timeouts::connect` 档，
+    /// 到点在 detail 点名「排队等不到」而非「连不上」）。任何一条连接被对端在空闲期关掉时，下一次坐上去
+    /// 的失败按普通传输失败交出（幂等方法的同一跳会先换一条新连接重试一次，非幂等不重试）。
+    ///
+    /// 池是**共享状态**：`Client` 的拷贝共用同一张池（与缓存表同一格局）。`tls_context()` 的每次改写推进
+    /// 一枚配置代次，池条目对不上代次即不复用——改了信任根不该悄悄坐旧连接。关掉开关即清空现有空闲连接。
+    /// @param value 池口径。
+    /// @return 自身引用，便于链式调用。
+    auto pool(PoolOptions value) -> Client &;
+
+    /// @brief 查看连接池口径。
+    /// @return 口径的只读引用（`enabled` 缺省假 = 一次交换一条连接、用完即关）。
+    [[nodiscard]] auto pool() const -> const PoolOptions & { return pool_options_; }
+
     /// @brief 发送一次请求并物化应答：连接 → 写出 → 逐段装配 → 透明解压 → 按 `Location` 跟随重定向。
     ///
     /// 全程受 `Request::timeout()` 的整请求时限约束（到点落 `http-timeout`）；重定向次数超过
@@ -377,6 +407,13 @@ class Client {
     bool request_id_{true};  ///< 链路标识缺省：自动补 `X-Request-Id`（逐请求由 `Request::request_id()` 定）
     CacheOptions cache_options_;  ///< 缓存口径（缺省关）；逐请求由 `Request::no_cache()` 越
     std::shared_ptr<detail::HttpResponseCache> cache_;  ///< 共享的缓存表；拷贝的 Client 共用同一张
+    PoolOptions pool_options_;  ///< 连接池口径（缺省关）
+    std::shared_ptr<detail::HttpConnectionPool> pool_;  ///< 共享的连接池；拷贝的 Client 共用同一张
+    std::shared_ptr<std::uint64_t> tls_generation_;  ///< TLS 配置代次（拷贝共享计数；`tls_context()` 每次改写自增）
+    std::shared_ptr<detail::HttpCookieJar> cookie_jar_;  ///< Cookie Jar（空 = 裸 Client 不收不发；只有 Session 会装）
+
+    // 会话面是唯一给本客户端装 Cookie Jar 的地方（`Session` 持有 Jar，`client()` 交出的引用挂它）。
+    friend class Session;
 };
 
 }  // namespace aurora::net::http

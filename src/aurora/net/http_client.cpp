@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
@@ -37,7 +38,9 @@
 #include "aurora/net/detail/http_await.h"
 #include "aurora/net/detail/http_body.h"
 #include "aurora/net/detail/http_cache.h"
+#include "aurora/net/detail/http_cookie_jar.h"
 #include "aurora/net/detail/http_encoding.h"
+#include "aurora/net/detail/http_pool.h"
 #include "aurora/net/detail/http_progress.h"
 #include "aurora/net/detail/http_request_id.h"
 #include "aurora/net/detail/http_retry.h"
@@ -76,6 +79,13 @@ constexpr std::chrono::milliseconds AURORA_AUTH_POLL_INTERVAL{5};
 /// 提供方没回话」——那是另一件事，且现实里它几乎总在等一个永远不会回来的 token 端点。上限取得明显大于任何合理
 /// 的换取耗时，为的是不误杀真在换取的实现方，同时不给整条协程留下静默悬挂的余地。
 constexpr std::size_t AURORA_AUTH_POLL_CEILING = 5000;
+
+/// @brief 连接池排队两次探测之间的让出时长。
+///
+/// 名额满时取空闲连接只能轮询等（空闲连接由并发的另一条交换归还），每次让出把控制权交回宿主事件循环，
+/// 那条交换的归还才发生得进来。等待的墙是 `Timeouts::connect` 档（排队计入建连预算，见 `PoolOptions`
+/// 头注释），到点即停——本间隔只是节奏，不是第二枚超时。
+constexpr std::chrono::milliseconds AURORA_POOL_QUEUE_POLL{5};
 
 /// @brief 三档超时的档号：写进 `TimeoutState::fired`，收尾据此拼 `http-timeout` 的 detail。
 ///
@@ -518,6 +528,95 @@ auto gate_origin(const ProxyEnvironment &environment, const TlsContext &tls, con
     return Result<void>{};
 }
 
+/// @brief 由本跳的路由决策拼一枚池键（口径见 `detail::HttpPoolKey`：五枚在线事实 + 配置代次）。
+/// @param route 本跳的路由（`plan_route()` 的产物，代理各元与请求行形态都在里面）。
+/// @param secure 目标是否 `https://`（决定这条连接上有没有 TLS 会话）。
+/// @param tls_generation 建连时刻的 TLS 配置代次。
+/// @return 池键。
+[[nodiscard]] auto make_pool_key(const HopRoute &route, bool secure, std::uint64_t tls_generation)
+    -> detail::HttpPoolKey {
+    detail::HttpPoolKey key;
+    key.secure = secure;
+    key.peer_host = route.peer_host;
+    key.peer_port = route.peer_port;
+    key.absolute_form = route.absolute_form;
+    key.tunneled = route.tunneled_via_proxy;
+    key.tls_generation = tls_generation;
+    return key;
+}
+
+/// @brief 装配器开不开 leftover 容忍模式：只在池开着时开（裸 `Client` 的线上行为与池从未存在时逐字节相同）。
+/// @param pool 池本体。
+/// @param options 池口径。
+/// @return 开池为真。
+[[nodiscard]] auto pool_active(const std::shared_ptr<detail::HttpConnectionPool> &pool, const PoolOptions &options)
+    -> bool {
+    return options.enabled && pool != nullptr;
+}
+
+/// @brief 把 Jar 里适用于本跳目标的 cookie 附成 `Cookie` 请求字段。
+///
+/// 调用方自写的 `Cookie` 永远优先（与 `Accept-Encoding` / 条件头同一条纪律：协商是调用方的表达）；Jar 取
+/// 出来是空串即什么也不做。附在原始请求副本与每一跳重建的副本上——缓存键因此自动看见 cookie
+/// （凭据字段恒参与建键，见 `detail/http_cache.h`）。
+/// @param request 就地附加的请求。
+/// @param jar 会话的 Jar（空 = 裸 `Client`，不收不发）。
+auto attach_cookies_from_jar(Request &request, const std::shared_ptr<detail::HttpCookieJar> &jar) -> void {
+    if (jar == nullptr || request.headers().contains("Cookie")) {
+        return;
+    }
+    const auto &slot = request.url();
+    if (!slot.has_value()) {
+        return;  // 目标还没解析成功：那是 `render_head()` 要报的错，Jar 不猜
+    }
+    auto header = jar->cookies_for(slot.value(), std::chrono::system_clock::now());
+    if (!header.empty()) {
+        request.header("Cookie", header);
+    }
+}
+
+/// @brief 把本跳应答里的全部 `Set-Cookie` 收进 Jar（畸形的逐条丢弃；`Secure` 遇明文信道不存储）。
+/// @param jar 会话的 Jar（空即整段跳过）。
+/// @param target 本跳目标。
+/// @param response_fields 本跳应答头（`Set-Cookie` 逐条取，不折叠）。
+/// @param secure_channel 本跳是否走了 TLS。
+auto harvest_set_cookies(const std::shared_ptr<detail::HttpCookieJar> &jar, const Url &target,
+                         const Headers &response_fields, bool secure_channel) -> void {
+    if (jar == nullptr) {
+        return;
+    }
+    jar->store_from_response(target, response_fields, secure_channel, std::chrono::system_clock::now());
+}
+
+/// @brief 复用资格的后三判据（前两判据——完整读完、无 leftover——由调用方在装配器上问）。
+///
+/// `Connection: close` 由对端明示不想保活；`UntilClose` 分帧在体读全的那一刻连接就没了；
+/// HTTP/1.0 缺省 close 语义（版本取自状态行，比从字段反推可靠）。`saw_fin` 是「本次交换见到过对端 FIN」。
+/// @param head 本跳应答头。
+/// @param framing 分帧形态。
+/// @param saw_fin 交换中是否观察到对端关闭。
+/// @return 五判据的后三枚全过为 true。
+[[nodiscard]] auto response_allows_reuse(const wire::ResponseHead &head, wire::BodyFraming framing, bool saw_fin)
+    -> bool {
+    if (saw_fin || framing == wire::BodyFraming::UntilClose) {
+        return false;
+    }
+    if (head.version_minor < 1) {
+        return false;  // HTTP/1.0：缺省即关
+    }
+    for (const auto &value : head.headers.values("Connection")) {
+        std::string lowered;
+        lowered.reserve(value.size());
+        for (const char c : value) {
+            lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        }
+        if (lowered.find("close") != std::string::npos) {
+            return false;  // 对端明示关闭（token 列表里出现 `close`；`keep-alive` 与其余令牌不影响）
+        }
+    }
+    return true;
+}
+
 /// @brief 按应答的 `Content-Encoding` 链把已物化的消息体还原成原始字节（就地替换）。
 ///
 /// 分帧解出的仍是编码字节，还原必须在物化之后、`Response` 交出之前完成，`Response::body()` 才是调用方可
@@ -766,7 +865,9 @@ class HeadGuardSink final : public DataSink {
 
 }  // namespace
 
-Client::Client() : cache_{std::make_shared<detail::HttpResponseCache>(cache_options_)} {}
+Client::Client()
+    : cache_{std::make_shared<detail::HttpResponseCache>(cache_options_)},
+      pool_{std::make_shared<detail::HttpConnectionPool>()}, tls_generation_{std::make_shared<std::uint64_t>(0)} {}
 
 auto Client::cache(CacheOptions value) -> Client & {
     cache_options_ = value;
@@ -774,6 +875,16 @@ auto Client::cache(CacheOptions value) -> Client & {
     // 表为空（只在移动后的壳上 possible）时无处可同步，开关本身仍已生效，下次起手照旧跳过。
     if (cache_) {
         cache_->set_options(value);
+    }
+    return *this;
+}
+
+auto Client::pool(PoolOptions value) -> Client & {
+    pool_options_ = value;
+    // 关掉即清空：池的承诺是「开着时同键请求坐干净连接」，关着时每条空闲连接都是无人认领的负担，
+    // 而且下一次开着时的首次取用也会被 sweep 淘汰掉它们——当场清比留给未来诚实。
+    if (pool_ && !value.enabled) {
+        pool_->clear();
     }
     return *this;
 }
@@ -794,6 +905,9 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
     // 都带着同一串出去，缓存键也据此在同一枚 id 上稳定命中。
     stamp_request_id(origin, request_id_);
     log_exchange_identity(origin);
+    // Jar 起手附着：把会话里适用于本目标的 cookie 附到原始请求副本上（排在查表之前，缓存键因此诚实——
+    // `Cookie` 恒参与建键）。调用方自写的 `Cookie` 优先，Jar 不覆盖。裸 `Client` 没有 Jar，此处零作为。
+    attach_cookies_from_jar(origin, cookie_jar_);
     // 策略在发起那一刻读定：本次交换的每一跳与缓存命中都问这一份，之后改 `Client::policy()` 或进程级默认
     // 都不影响已在途的交换（判定用的是「出发时」的策略，不是「回投时」的策略）。
     const NetPolicy security = effective_policy(policy_);
@@ -878,6 +992,8 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
         // 故提到尝试级留一份副本（`negotiation` 每跳开头重置，只有走隧道那一跳会被传输层写入）。
         HopRoute hop;
         detail::ProxyNegotiation negotiation;
+        bool stale_retried = false;  // 本尝试是否已对一条陈旧的池连接重试过（一尝试一次，保证收敛）
+        bool queue_failed = false;  // 本尝试是否在排队上没等到（connect 档到点或取消）：收尾据此把 detail 说成「排队」
 
         // 进度闸随协程帧存活；回调取自首跳请求，重定向后的各跳沿用同一份观测口（与 `timeouts` / 上限同纪律：
         // 发起侧选项在入口取一次，逐跳不重读）。下面几枚计数是**本跳**口径，每跳开头重置。
@@ -957,13 +1073,67 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             //    第三枚是「带窗口的读」，只服务 `Expect: 100-continue` 那一段问询。`late` 是那一段里被放弃
             //    那次读的落点：传输层按 FIFO 交付回调，故它后来到达的字节恒排在下一次读之前，装配前先清它
             //    （口径见 `detail::await_read_within`）。
+            //    连接池开着时在「建连」之前多问一声池：命中即坐上那条空闲连接（跳过建连与握手）、无空闲但
+            //    名额有余就照常建连、名额满就排队等——等的时间计入 connect 档（`StageTimer` 在本段之前登记），
+            //    到点在 detail 点名「排队等不到」而不是「连不上」。
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<char>)> read_one;
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
             std::function<detail::CallbackAwaiter<detail::WindowedRead>(std::size_t, std::chrono::milliseconds)>
                 read_within_one;
             auto late = std::make_shared<std::vector<char>>();
             StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
-            if (target.is_secure()) {
+            const bool retaining_leftover = pool_active(pool_, pool_options_);
+            detail::HttpPoolLease lease;  // 空卫 = 池关着，析构零作为；池开着时析构即恰好归还一次
+            bool leased_from_pool = false;
+            bool force_fresh_connect = false;  // 陈旧连接重试的那一轮不再信任空闲条目（保证一定换新）
+            if (retaining_leftover) {
+                const auto key =
+                    make_pool_key(route, target.is_secure(), tls_generation_ != nullptr ? *tls_generation_ : 0);
+                lease = detail::HttpPoolLease{*pool_, key, pool_options_};
+                for (;;) {
+                    auto got = pool_->acquire(key, pool_options_, std::chrono::steady_clock::now());
+                    if (got.verdict == detail::HttpPoolAcquire::Ready && force_fresh_connect) {
+                        // 陈旧事件之后不再信任空闲条目：逐条丢弃（关闭并让出名额），直到能开新连接。
+                        // 每丢一条名额就让一枚，循环必然收敛到 `OpenNew` 或排队。
+                        pool_->release(key, std::nullopt, got.born, pool_options_, std::chrono::steady_clock::now());
+                        continue;
+                    }
+                    if (got.verdict == detail::HttpPoolAcquire::Ready) {
+                        leased_from_pool = true;
+                        lease.adopt(std::move(got.connection), got.born);
+                        connect_timer.stop();  // 命中即停表：建连（含握手）这一段没有发生
+                        break;
+                    }
+                    if (got.verdict == detail::HttpPoolAcquire::OpenNew) {
+                        lease.adopt(std::move(got.connection), got.born);
+                        break;
+                    }
+                    // 排队：让出宿主回合，空闲连接由并发的另一条交换归还；connect 档到点即停。
+                    if (tstate->fired.load() != static_cast<int>(TimeoutStage::None)) {
+                        one = Result<Response>{make_error(
+                            ErrorCode::HttpTimeout,
+                            "connect timeout: queued too long for an idle connection (pool per-host limit)")};
+                        queue_failed = true;
+                        break;
+                    }
+                    co_await detail::await_sleep(AURORA_POOL_QUEUE_POLL, token);
+                    if (token.is_cancelled() && tstate->fired.load() == static_cast<int>(TimeoutStage::None)) {
+                        one = Result<Response>{make_error(ErrorCode::NetCancelled,
+                                                          "the exchange was cancelled while queued for a connection")};
+                        queue_failed = true;
+                        break;
+                    }
+                }
+                if (queue_failed) {
+                    break;  // 排队没等到：本跳收摊（错误已在 `one` 里，收尾的看门狗改道照常读它）
+                }
+            }
+            std::shared_ptr<StreamTransport> plain_holder;
+            std::shared_ptr<TlsTransport> secure_holder;
+            if (leased_from_pool) {
+                plain_holder = lease.connection().plain;
+                secure_holder = lease.connection().secure;
+            } else if (target.is_secure()) {
                 auto plain =
                     co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port, options,
                                                        token, hop.tunneled_via_proxy ? &negotiation : nullptr);
@@ -976,12 +1146,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                     one = Result<Response>{secure.error()};
                     break;
                 }
-                auto holder = std::make_shared<TlsTransport>(std::move(secure.value()));
-                read_one = [holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
-                write_one = [holder](std::span<const char> data) { return detail::await_write(*holder, data); };
-                read_within_one = [holder, late](std::size_t capacity, std::chrono::milliseconds window) {
-                    return detail::await_read_within(*holder, capacity, window, late);
-                };
+                secure_holder = std::make_shared<TlsTransport>(std::move(secure.value()));
             } else {
                 auto plain =
                     co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port, options,
@@ -990,10 +1155,31 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                     one = Result<Response>{plain.error()};
                     break;
                 }
-                auto holder = std::make_shared<StreamTransport>(std::move(plain.value()));
-                read_one = [holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
-                write_one = [holder](std::span<const char> data) { return detail::await_write(*holder, data); };
-                read_within_one = [holder, late](std::size_t capacity, std::chrono::milliseconds window) {
+                plain_holder = std::make_shared<StreamTransport>(std::move(plain.value()));
+            }
+            if (!leased_from_pool) {
+                lease.adopt(detail::HttpPoolConnection{.plain = plain_holder, .secure = secure_holder}, lease.born());
+            }
+            if (secure_holder != nullptr) {
+                read_one = [holder = secure_holder](std::span<char> buffer) {
+                    return detail::await_read(*holder, buffer);
+                };
+                write_one = [holder = secure_holder](std::span<const char> data) {
+                    return detail::await_write(*holder, data);
+                };
+                read_within_one = [holder = secure_holder, late](std::size_t capacity,
+                                                                 std::chrono::milliseconds window) {
+                    return detail::await_read_within(*holder, capacity, window, late);
+                };
+            } else {
+                read_one = [holder = plain_holder](std::span<char> buffer) {
+                    return detail::await_read(*holder, buffer);
+                };
+                write_one = [holder = plain_holder](std::span<const char> data) {
+                    return detail::await_write(*holder, data);
+                };
+                read_within_one = [holder = plain_holder, late](std::size_t capacity,
+                                                                std::chrono::milliseconds window) {
                     return detail::await_read_within(*holder, capacity, window, late);
                 };
             }
@@ -1003,10 +1189,21 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             //    事实，两处各问一次即不可能分岔（四条口径见 `detail/http_body.h`）。装配器与它的记账口先于写出
             //    就位，因为「先问再发体」要在发出请求体之前就把那条 1xx 喂进装配器。
             // ── 逐段装配应答的准备：喂 ResponseAssembler，按分帧物化体，直到 complete 或对端收摊。
-            wire::ResponseAssembler assembler(max_body_bytes_, current.is_head());
+            //    池开着时装配器开 leftover 容忍模式：完整之后再到的字节不再是「协议错」，而是存下来交复用判据
+            //    （富余非空即放弃复用、当场关连接，本交换照常成功——口径见提案 §16 第 36 项第③款）。
+            wire::ResponseAssembler assembler(max_body_bytes_, current.is_head(), retaining_leftover);
             std::vector<char> body;
             std::array<char, AURORA_READ_CHUNK> chunk{};
             bool halted = false;
+            bool saw_fin = false;  // 本跳是否观察到对端 FIN（复用资格判据之一）
+            // 陈旧连接重试的资格：坐的是池里的空闲连接、对端在空闲期把它关了（错误已见而头部未至）、
+            // 方法幂等（重放安全与重试环同一白名单）、且本次尝试还没重试过。三条失败出口（快路写出、
+            // 泵路写出、读环）各自问这一句，问中即 `continue` 跳循环换新连接重跑本跳。
+            auto stale_retry_eligible = [&]() -> bool {
+                return leased_from_pool && !stale_retried && !assembler.head_ready() &&
+                       tstate->fired.load() == static_cast<int>(TimeoutStage::None) && !token.is_cancelled() &&
+                       detail::is_idempotent_method(current.method());
+            };
             // 下载进度的记账口：每次 `drain_body` 之后按「新到多少线上字节」记一笔，再冲一次闸。闸由每一次读
             // 恢复推动，故一次交付至多一发；总量只有 `Length` 形态给得出，chunked / until-close 一律报未知。
             auto note_download = [&]() -> void {
@@ -1059,6 +1256,12 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                 payload.insert(payload.end(), current.body().begin(), current.body().end());
                 auto written = co_await write_one(std::span<const char>{payload});
                 if (!written) {
+                    if (stale_retry_eligible()) {
+                        stale_retried = true;
+                        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
+                        force_fresh_connect = true;
+                        continue;  // 空闲期被对端关了：幂等方法换新连接重跑本跳（一个字节都没出去过）
+                    }
                     one = Result<Response>{written.error()};
                     break;
                 }
@@ -1139,6 +1342,12 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                     }
                 }
                 if (write_failed) {
+                    if (stale_retry_eligible()) {
+                        stale_retried = true;
+                        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
+                        force_fresh_connect = true;
+                        continue;  // 头部都还没到就折了：幂等方法换新连接重跑本跳
+                    }
                     break;
                 }
             }
@@ -1165,6 +1374,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                 }
                 const std::size_t got = read.value();
                 if (got == 0) {  // 对端 FIN：UntilClose 据此判全，其余形态提前收摊即协议错位
+                    saw_fin = true;
                     auto closed = assembler.peer_closed();
                     if (!closed) {
                         one = Result<Response>{closed.error()};
@@ -1180,7 +1390,17 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                     break;
                 }
                 if (assembler.complete()) {
-                    break;  // 暂存那批字节已把这条报文交完：本轮新读的字节属下一条报文，不灌进装配器
+                    // 暂存那批字节已把这条报文交完：本轮新读的字节属下一条报文。池开着时它不再是无关紧要的
+                    // 尾巴——容忍模式下存进 leftover，复用判据见它非空即放弃复用（绝不让下一条的请求读到这里）。
+                    if (retaining_leftover) {
+                        auto parked = assembler.push(std::string_view{chunk.data(), got});
+                        if (!parked) {
+                            one = Result<Response>{parked.error()};
+                            halted = true;
+                            break;
+                        }
+                    }
+                    break;
                 }
                 auto pushed = feed(std::span<const char>{chunk.data(), got});
                 if (!pushed) {
@@ -1190,6 +1410,12 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                 }
             }
             if (halted) {
+                if (stale_retry_eligible()) {
+                    stale_retried = true;
+                    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
+                    force_fresh_connect = true;
+                    continue;  // 头部都还没到就读折了：幂等方法换新连接重跑本跳（多半是空闲期被对端关了）
+                }
                 break;
             }
             assembler.drain_body(body);
@@ -1204,6 +1430,13 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             }
             one = Result<Response>{
                 Response{response_head.status, response_head.reason, response_head.headers, std::move(body)}};
+            // ── 应答侧的 Jar 收取与复用判定（都在本跳收摊前一次问完）。
+            const auto response_leftover = assembler.take_leftover();
+            harvest_set_cookies(cookie_jar_, target, response_head.headers, target.is_secure());
+            if (retaining_leftover && response_leftover.empty() &&
+                response_allows_reuse(response_head, assembler.framing(), saw_fin)) {
+                lease.arm();  // 五判据全过：本跳出口（析构卫）把这条连接交回池
+            }
 
             // ── 重定向判定。
             if (!is_redirect(response_head.status) || limit == 0) {
@@ -1220,9 +1453,14 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                 break;
             }
             current = std::move(next.value());
+            // 下一跳按新目标的域重新从 Jar 取（cookie 的选择本来就按目标域逐跳算，与代理决策「逐跳重算」
+            // 同一条纪律）；换 origin 的跳已被 `follow()` 剥掉旧值，这里补上的只可能是 Jar 给的。
+            attach_cookies_from_jar(current, cookie_jar_);
         }
 
         // 超时改道：失败若因某档看门狗取消了令牌，一律改报 http-timeout，并在 detail 标明是哪一档。
+        // 排队等不到空闲连接也走 connect 档（等待计入同一份预算），但它的成因要说成「排队」而不是
+        // 「连不上」——两条成因的排查方向完全不同，故在改道之后把 detail 换回排队的说法。
         if (!one) {
             switch (static_cast<TimeoutStage>(tstate->fired.load())) {
                 case TimeoutStage::Connect:
@@ -1238,6 +1476,11 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                 case TimeoutStage::None:
                     break;
             }
+        }
+        if (queue_failed && tstate->fired.load() == static_cast<int>(TimeoutStage::Connect)) {
+            one = Result<Response>{
+                make_error(ErrorCode::HttpTimeout,
+                           "connect timeout: queued too long for an idle connection (pool per-host limit)")};
         }
 
         // 进度收尾：两个方向的末值各发一次，不看闸号。成败由 `one` 表达，这一发只宣告「这一趟到此收摊」，
@@ -1396,6 +1639,8 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
     // 链路标识与 `send` 同一处落一次：本入口的每一跳与每一次尝试都带同一串出去。
     stamp_request_id(origin, request_id_);
     log_exchange_identity(origin);
+    // Jar 起手附着与 `send` 同一处同判据（排在查表之前，缓存键因此诚实）。
+    attach_cookies_from_jar(origin, cookie_jar_);
     // 策略读定与起手闸同 `send`：发起那一刻取一份，逐跳共用；闸排在查表之前，缓存命中同样是交付。
     const NetPolicy security = effective_policy(policy_);
     if (const auto verdict = gate_origin(proxy_, tls_, security, origin); !verdict) {
@@ -1461,6 +1706,8 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
         HopRoute hop;
         detail::ProxyNegotiation negotiation;
         bool auth_hop = false;  // 本次尝试被认证问答掐住：头部尚未交出，凭据到位后整次重跑
+        bool stale_retried = false;  // 本尝试是否已对一条陈旧的池连接重试过（一尝试一次，保证收敛）
+        bool queue_failed = false;  // 本尝试是否在排队上没等到（connect 档到点或取消）：收尾据此把 detail 说成「排队」
 
         detail::ProgressGate gate(current.on_progress(), progress_frame_source_);
         std::uint64_t wire_bytes = 0;  // 跨全部跳、分帧解出的线上字节（解压前口径）
@@ -1536,13 +1783,62 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
 
             // ── 建连并统一读写口：明文 / TLS 两条流经捕获 shared_ptr 的类型擦除闭包收敛到同一对 awaiter，
             //    第三枚「带窗口的读」只服务 `Expect: 100-continue`（与 `send` 同形态，见那里的说明）。
+            //    连接池的取用与排队同 `send`（读那条的注释；流式路径的归还判据在收尾处，见下）。
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<char>)> read_one;
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
             std::function<detail::CallbackAwaiter<detail::WindowedRead>(std::size_t, std::chrono::milliseconds)>
                 read_within_one;
             auto late = std::make_shared<std::vector<char>>();
             StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
-            if (target.is_secure()) {
+            const bool retaining_leftover = pool_active(pool_, pool_options_);
+            detail::HttpPoolLease lease;  // 空卫 = 池关着，析构零作为；池开着时析构即恰好归还一次
+            bool leased_from_pool = false;
+            bool force_fresh_connect = false;  // 陈旧连接重试的那一轮不再信任空闲条目（保证一定换新）
+            if (retaining_leftover) {
+                const auto key =
+                    make_pool_key(route, target.is_secure(), tls_generation_ != nullptr ? *tls_generation_ : 0);
+                lease = detail::HttpPoolLease{*pool_, key, pool_options_};
+                for (;;) {
+                    auto got = pool_->acquire(key, pool_options_, std::chrono::steady_clock::now());
+                    if (got.verdict == detail::HttpPoolAcquire::Ready && force_fresh_connect) {
+                        pool_->release(key, std::nullopt, got.born, pool_options_, std::chrono::steady_clock::now());
+                        continue;  // 陈旧事件之后不再信任空闲条目：逐条丢弃，直到能开新连接
+                    }
+                    if (got.verdict == detail::HttpPoolAcquire::Ready) {
+                        leased_from_pool = true;
+                        lease.adopt(std::move(got.connection), got.born);
+                        connect_timer.stop();  // 命中即停表：建连（含握手）这一段没有发生
+                        break;
+                    }
+                    if (got.verdict == detail::HttpPoolAcquire::OpenNew) {
+                        lease.adopt(std::move(got.connection), got.born);
+                        break;
+                    }
+                    if (tstate->fired.load() != static_cast<int>(TimeoutStage::None)) {
+                        one = Result<StreamOutcome>{make_error(
+                            ErrorCode::HttpTimeout,
+                            "connect timeout: queued too long for an idle connection (pool per-host limit)")};
+                        queue_failed = true;
+                        break;
+                    }
+                    co_await detail::await_sleep(AURORA_POOL_QUEUE_POLL, token);
+                    if (token.is_cancelled() && tstate->fired.load() == static_cast<int>(TimeoutStage::None)) {
+                        one = Result<StreamOutcome>{make_error(
+                            ErrorCode::NetCancelled, "the exchange was cancelled while queued for a connection")};
+                        queue_failed = true;
+                        break;
+                    }
+                }
+                if (queue_failed) {
+                    break;
+                }
+            }
+            std::shared_ptr<StreamTransport> plain_holder;
+            std::shared_ptr<TlsTransport> secure_holder;
+            if (leased_from_pool) {
+                plain_holder = lease.connection().plain;
+                secure_holder = lease.connection().secure;
+            } else if (target.is_secure()) {
                 auto plain =
                     co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port, options,
                                                        token, hop.tunneled_via_proxy ? &negotiation : nullptr);
@@ -1555,12 +1851,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     one = Result<StreamOutcome>{secure.error()};
                     break;
                 }
-                auto holder = std::make_shared<TlsTransport>(std::move(secure.value()));
-                read_one = [holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
-                write_one = [holder](std::span<const char> data) { return detail::await_write(*holder, data); };
-                read_within_one = [holder, late](std::size_t capacity, std::chrono::milliseconds window) {
-                    return detail::await_read_within(*holder, capacity, window, late);
-                };
+                secure_holder = std::make_shared<TlsTransport>(std::move(secure.value()));
             } else {
                 auto plain =
                     co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port, options,
@@ -1569,10 +1860,31 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     one = Result<StreamOutcome>{plain.error()};
                     break;
                 }
-                auto holder = std::make_shared<StreamTransport>(std::move(plain.value()));
-                read_one = [holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
-                write_one = [holder](std::span<const char> data) { return detail::await_write(*holder, data); };
-                read_within_one = [holder, late](std::size_t capacity, std::chrono::milliseconds window) {
+                plain_holder = std::make_shared<StreamTransport>(std::move(plain.value()));
+            }
+            if (!leased_from_pool) {
+                lease.adopt(detail::HttpPoolConnection{.plain = plain_holder, .secure = secure_holder}, lease.born());
+            }
+            if (secure_holder != nullptr) {
+                read_one = [holder = secure_holder](std::span<char> buffer) {
+                    return detail::await_read(*holder, buffer);
+                };
+                write_one = [holder = secure_holder](std::span<const char> data) {
+                    return detail::await_write(*holder, data);
+                };
+                read_within_one = [holder = secure_holder, late](std::size_t capacity,
+                                                                 std::chrono::milliseconds window) {
+                    return detail::await_read_within(*holder, capacity, window, late);
+                };
+            } else {
+                read_one = [holder = plain_holder](std::span<char> buffer) {
+                    return detail::await_read(*holder, buffer);
+                };
+                write_one = [holder = plain_holder](std::span<const char> data) {
+                    return detail::await_write(*holder, data);
+                };
+                read_within_one = [holder = plain_holder, late](std::size_t capacity,
+                                                                std::chrono::milliseconds window) {
                     return detail::await_read_within(*holder, capacity, window, late);
                 };
             }
@@ -1582,11 +1894,18 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
             //    装配器与还原链先于写出就位，因为窗口里那条 1xx 要在发出请求体之前喂进装配器。
             // ── 逐段装配并交付：装配器**不设线上体上限**（物化路径的内存闸在这里没有对应的内存可闸），
             //    每段解出的明文喂进流式还原链，链末直交宿主。
-            wire::ResponseAssembler assembler{std::nullopt, current.is_head()};
+            wire::ResponseAssembler assembler{std::nullopt, current.is_head(), retaining_leftover};
             std::vector<char> scratch;  // 本段刚解出的线上字节（每轮先清空，故峰值只有一段的量）
             std::array<char, AURORA_READ_CHUNK> chunk{};
             std::optional<detail::StreamingDecoder> decoder;  // 头部定形后才建链（建链要读 Content-Encoding）
             bool halted = false;
+            bool saw_fin = false;  // 本跳是否观察到对端 FIN（复用资格判据之一）
+            // 陈旧连接重试的资格与 `send` 同判据（读那条的注释）。
+            auto stale_retry_eligible = [&]() -> bool {
+                return leased_from_pool && !stale_retried && !assembler.head_ready() &&
+                       tstate->fired.load() == static_cast<int>(TimeoutStage::None) && !token.is_cancelled() &&
+                       detail::is_idempotent_method(current.method());
+            };
             bool redirect_hop = false;
             bool not_modified_hop = false;  // 本次交换替表里的条目重验证并拿到了 304
 
@@ -1615,6 +1934,12 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 payload.insert(payload.end(), current.body().begin(), current.body().end());
                 auto written = co_await write_one(std::span<const char>{payload});
                 if (!written) {
+                    if (stale_retry_eligible()) {
+                        stale_retried = true;
+                        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
+                        force_fresh_connect = true;
+                        continue;  // 空闲期被对端关了：幂等方法换新连接重跑本跳（一个字节都没出去过）
+                    }
                     one = Result<StreamOutcome>{written.error()};
                     break;
                 }
@@ -1691,6 +2016,12 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     }
                 }
                 if (write_failed) {
+                    if (stale_retry_eligible()) {
+                        stale_retried = true;
+                        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
+                        force_fresh_connect = true;
+                        continue;  // 头部都还没到就折了：幂等方法换新连接重跑本跳
+                    }
                     break;
                 }
             }
@@ -1731,6 +2062,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     }
                     const std::size_t got = read.value();
                     if (got == 0) {  // 对端 FIN：UntilClose 据此判全，其余形态提前收摊即协议错位
+                        saw_fin = true;
                         auto closed = assembler.peer_closed();
                         if (!closed) {
                             one = Result<StreamOutcome>{closed.error()};
@@ -1905,6 +2237,12 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 }
             }
             if (halted) {
+                if (stale_retry_eligible()) {
+                    stale_retried = true;
+                    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
+                    force_fresh_connect = true;
+                    continue;  // 头部都还没到就读折了：幂等方法换新连接重跑本跳（多半是空闲期被对端关了）
+                }
                 break;
             }
             // 收尾排空：装配器在 `complete()` 那一轮已把明文交进 `pending_`，本步只兜住「最后一批还压在内部缓冲」
@@ -1933,12 +2271,16 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
 
             if (redirect_hop) {
                 Response hop{assembler.head().status, assembler.head().reason, assembler.head().headers, {}};
+                // 重定向跳只读了头部、体未读：这条连接上还压着没归属的字节，绝不回池（卫未武装，析构即关）。
+                harvest_set_cookies(cookie_jar_, target, hop.headers(), target.is_secure());
                 auto next = follow(current, hop);
                 if (!next) {
                     one = Result<StreamOutcome>{next.error()};
                     break;
                 }
                 current = std::move(next.value());
+                // 下一跳按新目标的域重新从 Jar 取（与 `send` 同一条逐跳纪律）。
+                attach_cookies_from_jar(current, cookie_jar_);
                 continue;
             }
             if (not_modified_hop) {
@@ -1951,6 +2293,11 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                                                  std::chrono::system_clock::now());
                 }
                 if (merged.has_value()) {
+                    // 304 那条消息已完整读过（无体、无 leftover 风险面之外的富余即被容忍模式记下），判干净即回池。
+                    if (retaining_leftover && assembler.take_leftover().empty() &&
+                        response_allows_reuse(assembler.head(), assembler.framing(), saw_fin)) {
+                        lease.arm();
+                    }
                     one = Result<StreamOutcome>{deliver_cached_stream(outlet, merged.value())};
                     break;
                 }
@@ -1983,10 +2330,18 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                                                       .wire_bytes = wire_bytes,
                                                       .delivered_bytes = delivered_bytes,
                                                       .stopped_by_sink = stopped_by_sink}};
+            // ── 应答侧的 Jar 收取与复用判定：最终一跳的消息已完整交付（宿主回 Stop 的收摊不算——那条流
+            //    没走完，连接上还压着未读字节，卫未武装即析构关闭）。
+            harvest_set_cookies(cookie_jar_, target, assembler.head().headers, target.is_secure());
+            if (retaining_leftover && !stopped_by_sink && assembler.take_leftover().empty() &&
+                response_allows_reuse(assembler.head(), assembler.framing(), saw_fin)) {
+                lease.arm();  // 五判据全过：本跳出口（析构卫）把这条连接交回池
+            }
             break;
         }
 
         // 超时改道：与 `send` 同判据——失败若因某档看门狗取消了令牌，一律改报 http-timeout 并标明是哪一档。
+        // 排队等不到空闲连接也走 connect 档，但成因要说成「排队」而不是「连不上」（细节同 `send` 那处）。
         if (!one) {
             switch (static_cast<TimeoutStage>(tstate->fired.load())) {
                 case TimeoutStage::Connect:
@@ -2002,6 +2357,11 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 case TimeoutStage::None:
                     break;
             }
+        }
+        if (queue_failed && tstate->fired.load() == static_cast<int>(TimeoutStage::Connect)) {
+            one = Result<StreamOutcome>{
+                make_error(ErrorCode::HttpTimeout,
+                           "connect timeout: queued too long for an idle connection (pool per-host limit)")};
         }
 
         // 进度收尾：与 `send` 同判据，两方向末值各发一次、不看闸号；成败由 `one` 表达。

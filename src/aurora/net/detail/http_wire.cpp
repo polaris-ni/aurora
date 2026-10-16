@@ -177,6 +177,9 @@ auto parse_status_line(std::string_view line, ResponseHead &head) -> bool {
     head.status = static_cast<std::uint16_t>(((status_text.at(0) - '0') * 100) + ((status_text.at(1) - '0') * 10) +
                                              (status_text.at(2) - '0'));
     head.reason = status_end == std::string_view::npos ? std::string{} : std::string{line.substr(status_end + 1)};
+    // 主版本恒为 1（本库不谈 HTTP/2 以上），次版本记下来供连接池的「HTTP/1.1 才可复用」判据用——
+    // 1.0 缺省 `close` 语义，逐跳判断比从字段反推可靠。
+    head.version_minor = static_cast<std::uint8_t>(version.substr(dot + 1).front() - '0');
     return true;
 }
 
@@ -602,6 +605,12 @@ auto ChunkedDecoder::push(std::string_view bytes) -> Result<void> {
             }
             case Phase::Ended: {
                 if (!buffer_.empty()) {
+                    if (retain_leftover_) {
+                        // 容忍模式（连接池复用的存侧半边）：富余字节存下来交调用方裁决，不判畸形。
+                        leftover_.insert(leftover_.end(), buffer_.begin(), buffer_.end());
+                        buffer_.clear();
+                        return Result<void>{};
+                    }
                     return protocol_error(
                         "received bytes after the terminating chunk and its trailer block; that is the start of the "
                         "next message, which this decoder does not consume");
@@ -645,8 +654,10 @@ auto parse_decimal(std::string_view text) -> std::uint64_t {
 
 }  // namespace
 
-ResponseAssembler::ResponseAssembler(std::optional<std::uint64_t> max_body_bytes, bool request_is_head)
-    : max_body_bytes_{max_body_bytes}, request_is_head_{request_is_head} {}
+ResponseAssembler::ResponseAssembler(std::optional<std::uint64_t> max_body_bytes, bool request_is_head,
+                                     bool retain_leftover)
+    : max_body_bytes_{max_body_bytes}, request_is_head_{request_is_head}, retain_leftover_{retain_leftover},
+      chunked_{retain_leftover} {}
 
 auto ResponseAssembler::absorb(std::string_view bytes) -> Result<void> {
     pending_.insert(pending_.end(), bytes.begin(), bytes.end());
@@ -685,6 +696,12 @@ auto ResponseAssembler::enter_body_phase() -> Result<void> {
 auto ResponseAssembler::push(std::string_view bytes) -> Result<void> {
     if (phase_ == Phase::Ended) {
         if (!bytes.empty()) {
+            if (retain_leftover_) {
+                // 容忍模式（连接池复用的存侧半边）：完整之后的字节属下一条消息，存下来交调用方裁决
+                // （富余非空即放弃复用），而不是当场判畸形。
+                leftover_.append(bytes);
+                return Result<void>{};
+            }
             return Result<void>{protocol_error(
                 "bytes after a complete response belong to the next message, which this assembler does not consume")};
         }
@@ -752,6 +769,12 @@ auto ResponseAssembler::push(std::string_view bytes) -> Result<void> {
             if (content_remaining_ == 0) {
                 complete_ = true;
                 phase_ = Phase::Ended;
+                if (retain_leftover_ && !buffer_.empty()) {
+                    // 同批抵达的字节越过了本条消息的边界（声明长度之后还有富余）：容忍模式下存下来交裁决，
+                    // 不留在缓冲里无人认领（关池时那只是无关紧要的尾巴，复用时它就是下一条的前缀）。
+                    leftover_.append(buffer_);
+                    buffer_.clear();
+                }
             }
             return Result<void>{};
         }
@@ -771,6 +794,9 @@ auto ResponseAssembler::push(std::string_view bytes) -> Result<void> {
             if (chunked_.complete()) {
                 complete_ = true;
                 phase_ = Phase::Ended;
+                // 终止块（及 trailer）之后的富余由解码器收在它自己的 leftover 里，转交到装配器统一出口。
+                auto extra = chunked_.take_leftover();
+                leftover_.append(extra.begin(), extra.end());
             }
             return Result<void>{};
         }
@@ -810,6 +836,12 @@ auto ResponseAssembler::take_informational() -> std::optional<ResponseHead> {
 auto ResponseAssembler::drain_body(std::vector<char> &out) -> void {
     out.insert(out.end(), pending_.begin(), pending_.end());
     pending_.clear();
+}
+
+auto ResponseAssembler::take_leftover() -> std::string {
+    auto taken = std::move(leftover_);
+    leftover_.clear();
+    return taken;
 }
 
 }  // namespace aurora::net::wire

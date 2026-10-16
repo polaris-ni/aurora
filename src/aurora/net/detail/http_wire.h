@@ -52,6 +52,7 @@ struct ResponseHead {
     std::uint16_t status{0};  ///< 三位状态码；只在头部块完整时给出
     std::string reason;  ///< 原因短语（原样保留，缺省为空——HTTP/2 风格的对端常常不给）
     Headers headers;  ///< 应答字段（同名保序、ASCII 大小写不敏感存取）
+    std::uint8_t version_minor{1};  ///< 状态行的 `HTTP/1.x` 次版本（主版本恒 1；连接池的 1.1 复用判据用它）
     std::size_t header_bytes{0};  ///< 状态行 + 头部块 + 空行占用的字节数，其后即消息体首字节
 };
 
@@ -120,10 +121,15 @@ enum class BodyFraming : std::uint8_t {
 /// @note Side-effects: none（全部状态在本对象内）
 class ChunkedDecoder {
   public:
+    /// @brief 构造。
+    /// @param retain_leftover 连接池复用的容忍模式（缺省关）：终止块与 trailer 之后又收到的字节不再判
+    ///                        畸形，而是存进 leftover 待调用方取走（「富余非空即放弃复用」的存侧半边）。
+    explicit ChunkedDecoder(bool retain_leftover = false) : retain_leftover_{retain_leftover} {}
+
     /// @brief 送入一段字节并推进状态机。
     /// @param bytes 新读到的原始字节（可以是半行、半块）。
     /// @return 成功 = 状态机仍可继续；失败 = 文法不合（长度字段非十六进制、缺 CRLF、长度越上限）
-    ///         或在终止块之后又收到字节（那是上一条消息的开头，本层不越界解释）。
+    ///         或在终止块之后又收到字节（容忍模式关时；那是上一条消息的开头，本层不越界解释）。
     [[nodiscard]] auto push(std::string_view bytes) -> Result<void>;
 
     /// @brief 取走已解码出的明文（取完即从内部缓冲移除，因此不会重复交付）。
@@ -138,6 +144,14 @@ class ChunkedDecoder {
     /// @return trailer 字段表；终止块之前为空。
     [[nodiscard]] auto trailers() const -> const Headers & { return trailers_; }
 
+    /// @brief 取走终止块之后到达的富余字节（容忍模式开时才有内容；取完即清）。
+    /// @return 富余字节；可能为空。
+    [[nodiscard]] auto take_leftover() -> std::vector<char> {
+        auto taken = std::move(leftover_);
+        leftover_.clear();
+        return taken;
+    }
+
   private:
     /// @brief 状态机的阶段，决定缓冲区头部那一段字节该按什么文法读。
     enum class Phase : std::uint8_t {
@@ -151,9 +165,11 @@ class ChunkedDecoder {
     std::vector<char> buffer_;  ///< 尚未解析完的原始字节
     std::vector<char> pending_;  ///< 已解码、等待 `drain()` 取走的明文
     Headers trailers_;  ///< 终止块之后的 trailer 字段
+    std::vector<char> leftover_;  ///< 容忍模式下终止块之后到达的富余字节（待取走）
     Phase phase_{Phase::SizeLine};  ///< 当前阶段
     std::uint64_t remaining_{0};  ///< 当前块还剩多少数据字节
     bool done_{false};  ///< 是否已见终止块（长度为 0 的块）
+    bool retain_leftover_{false};  ///< 容忍模式（连接池复用的存侧半边；缺省关，既有判据逐字不变）
 };
 
 /// @brief 把「一段段读到的原始字节」装配成一条完整应答的接收侧状态机。
@@ -184,7 +200,9 @@ class ResponseAssembler {
     /// @brief 构造。
     /// @param max_body_bytes 物化正文上限（`std::nullopt` = 不设上限）；越限落 `http-body-too-large`。
     /// @param request_is_head 对应请求是否为 `HEAD`（决定应答恒无体的判定）。
-    ResponseAssembler(std::optional<std::uint64_t> max_body_bytes, bool request_is_head);
+    /// @param retain_leftover 连接池复用的容忍模式（缺省关）：本条消息完整之后再收到的字节不再判畸形，
+    ///                        而是存进 leftover 待调用方经 `take_leftover()` 取走。关着时既有判据逐字不变。
+    ResponseAssembler(std::optional<std::uint64_t> max_body_bytes, bool request_is_head, bool retain_leftover = false);
 
     /// @brief 送入一段读到的原始字节并推进装配。
     /// @param bytes 新读到的连续字节（可只覆盖头部块中途、或同时覆盖头部尾与体首段）。
@@ -223,6 +241,10 @@ class ResponseAssembler {
     /// @param out 追加目标；只追加、不清空调用方缓冲。
     auto drain_body(std::vector<char> &out) -> void;
 
+    /// @brief 取走「本条消息完整之后」到达的富余字节（容忍模式开时才有内容；取完即清）。
+    /// @return 富余字节；空 = 本条消息干净结束（复用资格的存侧半边）。
+    [[nodiscard]] auto take_leftover() -> std::string;
+
   private:
     /// @brief 装配阶段。
     enum class Phase : std::uint8_t {
@@ -242,6 +264,8 @@ class ResponseAssembler {
 
     std::optional<std::uint64_t> max_body_bytes_;  ///< 物化上限（nullopt = 不限）
     bool request_is_head_{false};  ///< HEAD 请求判定
+    bool retain_leftover_{false};  ///< 容忍模式（连接池复用的存侧半边；缺省关）
+    std::string leftover_;  ///< 容忍模式下「完整之后」到达的富余字节（待 `take_leftover()` 取走）
     Phase phase_{Phase::Head};  ///< 当前阶段
     bool head_ready_{false};  ///< 头部块是否已解析
     bool complete_{false};  ///< 整条应答是否已装配完整

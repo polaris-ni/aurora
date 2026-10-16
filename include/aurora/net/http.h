@@ -150,6 +150,27 @@ struct CacheOptions {
     std::uint32_t max_entries{64};  ///< 表的条数上限；越界逐出最久未使用的那条
 };
 
+/// @brief 连接池的开关与治理口径；**缺省关闭**。
+///
+/// 缺省关是刻意的：连接复用改变的是「一次 `send` = 一条连接」这条已写进发起侧头注释的生命周期口径，开着时
+/// 第二次同名请求可能不再建连、而是坐上上一条还温着的连接——不知道池存在的调用方会把时序差异当成对端行为
+/// 变化。开启后兑现的是 keep-alive 的最小治理集：按本表五判据复用（消息完整读完、无 leftover、对端未发
+/// `Connection: close`、分帧非 `UntilClose`、HTTP/1.1），空闲超时与最长寿命到期即关，每主机并发上限满时
+/// 排队（等空闲连接的时间计入 `Timeouts::connect` 档，到点在 detail 点名「排队等不到」）。
+///
+/// `max_connections_per_host` 管的是**同一池键**（方案 + 对端主机 + 端口，含经代理的形态差异）上**同时
+/// 存在**的连接数（在途 + 空闲合计）；`0` 与「不设上限」同义。`idle_timeout` 与 `max_age` 各管一段：
+/// 前者管「空闲多久就关」（对端随时可能关掉它那边，闲置连接是消耗品），后者管「这条连接出生多久就关」
+/// （防 DNS 漂移之后仍在连旧地址）。二者的淘汰在每次取用与归还时顺手执行，不为它单起定时器。
+/// @note Thread: thread-safe（值类型）
+/// @note Side-effects: none
+struct PoolOptions {
+    bool enabled{false};  ///< 开关；假 = 一次 `send` / `open_stream` 一条连接，用完即关（既有口径）
+    std::uint32_t max_connections_per_host{6};  ///< 同一池键上同时存在的连接上限（在途 + 空闲）；`0` = 不设上限
+    std::chrono::milliseconds idle_timeout{std::chrono::milliseconds{30000}};  ///< 空闲多久即关；非正值 = 不淘汰
+    std::chrono::milliseconds max_age{std::chrono::milliseconds{300000}};  ///< 连接最长寿命；非正值 = 不淘汰
+};
+
 /// @brief 进度所属方向；一次交换里两侧各报一段，回调需据此分流。
 ///
 /// 上传在请求体被传输层接受时推进，下载在应答体到达时推进。二者共用一枚回调是刻意的：调用方通常只关心
