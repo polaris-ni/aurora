@@ -100,6 +100,10 @@ struct Decompressor::Impl {
     std::vector<std::uint8_t> staging;  ///< 解压产物暂存（AURORA_OUTPUT_CHUNK_BYTES）
     wuffs_base__io_buffer out{};  ///< 指向 staging 的输出 io_buffer（meta 每轮重置）
 
+    /// @brief 归还 wuffs 解码器：`wuffs_*__decoder__alloc()` 按 libc 堆分配（wuffs 自带 C++
+    /// 助手即以 `unique_ptr(alloc(), &free)` 配对），漏放即每实例泄漏一份解码器状态。
+    ~Impl() { std::free(decoder); }
+
     /// @brief 把一段解压产物 [begin, end) 经 Sink 交出，并累计限额计数（越限即止，不再吐出后续字节）。
     static auto emit_output(Impl *impl, std::size_t begin, std::size_t end, const DecompressSink &sink) -> Result<void>;
 
