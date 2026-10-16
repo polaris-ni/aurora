@@ -32,6 +32,7 @@
 #include "aurora/core/result.h"
 #include "aurora/net/blocking.h"
 #include "aurora/net/http.h"
+#include "aurora/net/http_auth.h"
 #include "aurora/net/http_client.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/net/policy.h"
@@ -52,6 +53,7 @@ using aurora::net::NetPolicy;
 using aurora::net::ProxyConfig;
 using aurora::net::ProxyEnvironment;
 using aurora::net::TlsContext;
+using aurora::net::http::BasicAuthenticator;
 using aurora::net::http::CacheOptions;
 using aurora::net::http::Client;
 using aurora::net::http::DataSink;
@@ -63,11 +65,19 @@ using aurora::test::dead_port;
 using aurora::test::PeerScript;
 using aurora::test::PeerStop;
 using aurora::test::ScriptedPeer;
+using aurora::test::scripts::per_connection;
 using aurora::test::scripts::reply_after_reading;
 
 /// @brief 一份最小可用的 200 应答（假代理与假源站都拿它收尾）。
 /// @return 应答字节。
 [[nodiscard]] auto service_ok() -> std::string { return "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"; }
+
+/// @brief 取应答体的文本形态（体的事实形态是字节段，断言写成串才可读）。
+/// @param response 应答。
+/// @return 体文本。
+[[nodiscard]] auto body_text(const Response &response) -> std::string {
+    return std::string{response.body().begin(), response.body().end()};
+}
 
 /// @brief 拼一个指向回环端口的明文目标。
 /// @param port 端口。
@@ -278,6 +288,106 @@ struct DefaultPolicyScope {
 /// @return 找到为真。
 [[nodiscard]] auto names_in(std::string_view haystack, std::string_view needle) -> bool {
     return haystack.find(needle) != std::string_view::npos;
+}
+
+/// @brief 整段小写副本：字段名的比较口径与线上一致（大小写不敏感）。
+/// @param head 请求字节。
+/// @return 小写副本。
+[[nodiscard]] auto lowered(std::string_view head) -> std::string {
+    std::string folded;
+    folded.reserve(head.size());
+    for (const char ch : head) {
+        folded.push_back(ch >= 'A' && ch <= 'Z' ? static_cast<char>(ch + 32) : ch);
+    }
+    return folded;
+}
+
+/// @brief 逐条连接把收到的请求头部块留档、随后按给定应答收摊的对端脚本。
+///
+/// 代理侧认证环的判据是「第二条带上了什么」，而重跑是同一条监听口上的另一条连接，故档案按连接分条而不是
+/// 互相覆盖（`record_then_reply()` 只留最后一条，那一形态证不出次序）。
+/// @param filed 每条连接一份档案（脚本线程追加）。
+/// @param guard 档案的锁。
+/// @param payload 读满一个头部块后写出的应答字节。
+/// @return 对端脚本。
+[[nodiscard]] auto record_each_then_reply(std::vector<std::string> &filed, std::mutex &guard, std::string payload)
+    -> PeerScript {
+    return [&filed, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
+                                                          PeerStop &stop) -> void {
+        (void)socket.set_io_timeout(std::chrono::milliseconds{200});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;
+            }
+            seen.append(buffer.data(), read.value());
+            if (seen.find("\r\n\r\n") != std::string::npos) {
+                break;  // 头部块到位即应答（本套件的认证用例都不带请求体）
+            }
+        }
+        {
+            const std::scoped_lock held(guard);
+            filed.push_back(seen);
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+    };
+}
+
+/// @brief 取已留档的连接条数。
+/// @param filed 档案。
+/// @param guard 档案的锁。
+/// @return 条数。
+[[nodiscard]] auto filed_count(const std::vector<std::string> &filed, std::mutex &guard) -> std::size_t {
+    const std::scoped_lock held(guard);
+    return filed.size();
+}
+
+/// @brief 取第 `index` 条连接的档案（小写副本）。
+/// @param filed 档案。
+/// @param guard 档案的锁。
+/// @param index 连接序号（从 0 起）。
+/// @return 该条请求的头部块文本；还没留到那一条即致命失败。
+[[nodiscard]] auto filed_request(const std::vector<std::string> &filed, std::mutex &guard, std::size_t index)
+    -> std::string {
+    std::vector<std::string> copy;
+    {
+        const std::scoped_lock held(guard);
+        copy = filed;
+    }
+    AURORA_TEST_REQUIRE_MSG(index < copy.size(), "the proxy has not filed that many requests");
+    return lowered(copy.at(index));
+}
+
+/// @brief 头部块里是否存在以某字段名起头的那一行（小写副本上的行首匹配）。
+///
+/// 不能用 `find("authorization:")`：`proxy-authorization` 以它结尾，子串匹配会把「补对了字段」读成「多写了
+/// 字段」，而这两句正是本用例要分开的那两件事。
+/// @param head 已小写的请求头部块。
+/// @param field 字段名 + 冒号，全小写。
+/// @return 命中为真。
+[[nodiscard]] auto has_field(std::string_view head, std::string_view field) -> bool {
+    if (head.starts_with(field)) {
+        return true;
+    }
+    return head.find(std::string{"\r\n"} + std::string{field}) != std::string::npos;
+}
+
+/// @brief 拼一份代理「要凭据」的 407：挑战原文 + 一枚可读的体。
+/// @param challenge `Proxy-Authenticate` 的字段值原文。
+/// @param body 消息体文本。
+/// @return 应答字节。
+[[nodiscard]] auto challenge_407(std::string_view challenge, std::string_view body = "no") -> std::string {
+    return "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: " + std::string{challenge} +
+           "\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + std::string{body};
+}
+
+/// @brief 拼一份放行用的 200（转发形态下的应答体）。
+/// @param body 消息体文本。
+/// @return 应答字节。
+[[nodiscard]] auto service_body(std::string_view body) -> std::string {
+    return "HTTP/1.1 200 OK\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + std::string{body};
 }
 
 }  // namespace
@@ -565,6 +675,93 @@ AURORA_TEST_CASE(the_effective_policy_is_snapshot_at_the_start_of_the_exchange) 
     const auto response = inner(task);
     AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+}
+
+AURORA_TEST_CASE(a_forwarded_407_is_answered_on_proxy_authorization) {
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::vector<std::string> filed;
+    ScriptedPeer proxy(per_connection({record_each_then_reply(filed, guard, challenge_407(R"(Basic realm="corp")")),
+                                       record_each_then_reply(filed, guard, service_body("done"))}));
+    AURORA_TEST_REQUIRE(proxy.valid());
+
+    Client client;
+    client.policy(permissive_cleartext());
+    client.proxy(environment({{"HTTP_PROXY", "http://127.0.0.1:" + std::to_string(proxy.port())}}));
+    client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "pw"));
+
+    const auto response = send_and_drive(client, Request::get("http://api.example.test/v1/items"));
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    // 代理那一环生在交付之前：宿主拿到的是补了凭据之后的那份 200，而不是先收到 407 再自己处理。
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(body_text(response.value()), "done");
+    AURORA_TEST_CHECK_EQ(proxy.accepts(), 2);
+    AURORA_TEST_REQUIRE(aurora::test::net::drive_until("both requests filed", [&filed, &guard] {
+                            return filed_count(filed, guard) == 2;
+                        }).satisfied);
+    AURORA_TEST_CHECK_FALSE(has_field(filed_request(filed, guard, 0), "proxy-authorization:"));
+    AURORA_TEST_CHECK_TRUE(has_field(filed_request(filed, guard, 1), "proxy-authorization: basic "));
+    // 补的是代理那一侧的字段，源站字段一枚都不多写：写了就等于把代理凭据交给源站（同源、同一份字节）。
+    AURORA_TEST_CHECK_FALSE(has_field(filed_request(filed, guard, 1), "authorization:"));
+}
+
+AURORA_TEST_CASE(a_source_challenge_through_a_proxy_is_answered_on_authorization) {
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::vector<std::string> filed;
+    // 401 是源站在说话、只是经代理转回：本环按 `AuthChallenge::proxy == false` 归到源站那一支。
+    ScriptedPeer proxy(
+        per_connection({record_each_then_reply(filed, guard,
+                                               "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"api\"\r\n"
+                                               "Content-Length: 2\r\n\r\nno"),
+                        record_each_then_reply(filed, guard, service_body("yes"))}));
+    AURORA_TEST_REQUIRE(proxy.valid());
+
+    Client client;
+    client.policy(permissive_cleartext());
+    client.proxy(environment({{"HTTP_PROXY", "http://127.0.0.1:" + std::to_string(proxy.port())}}));
+    client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "pw"));
+
+    const auto response = send_and_drive(client, Request::get("http://api.example.test/v1/items"));
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+    AURORA_TEST_REQUIRE(aurora::test::net::drive_until("both requests filed", [&filed, &guard] {
+                            return filed_count(filed, guard) == 2;
+                        }).satisfied);
+    AURORA_TEST_CHECK_TRUE(has_field(filed_request(filed, guard, 1), "authorization: basic "));
+    AURORA_TEST_CHECK_FALSE(has_field(filed_request(filed, guard, 1), "proxy-authorization:"));
+}
+
+AURORA_TEST_CASE(a_tunnel_refused_with_407_reissues_connect_with_the_credential) {
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::vector<std::string> filed;
+    ScriptedPeer proxy(
+        per_connection({record_each_then_reply(filed, guard, challenge_407(R"(Basic realm="corp")", "")),
+                        record_each_then_reply(filed, guard, "HTTP/1.1 200 Connection Established\r\n\r\n")}));
+    ScriptedPeer origin(reply_after_reading(1, service_ok()));  // 隧道之后对面没有 TLS 服务：它不该被连上
+    AURORA_TEST_REQUIRE(proxy.valid());
+    AURORA_TEST_REQUIRE(origin.valid());
+
+    Client client;
+    client.policy(NetPolicy{.allow_cleartext_hosts = {"127.0.0.1"}});
+    client.proxy(environment({{"HTTPS_PROXY", "http://127.0.0.1:" + std::to_string(proxy.port())}}));
+    client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "pw"));
+
+    const auto response =
+        send_and_drive(client, Request::get("https://127.0.0.1:" + std::to_string(origin.port()) + "/"));
+    // 结局仍是失败：隧道谈成之后没有 TLS 服务可谈。判据不在结局，在「隧道这一腿也被问过、也补过凭据」。
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE(aurora::test::net::drive_until("both connects filed", [&filed, &guard] {
+                            return filed_count(filed, guard) == 2;
+                        }).satisfied);
+    AURORA_TEST_CHECK_EQ(first_line(filed_request(filed, guard, 1)),
+                         "connect 127.0.0.1:" + std::to_string(origin.port()) + " http/1.1");
+    AURORA_TEST_CHECK_FALSE(has_field(filed_request(filed, guard, 0), "proxy-authorization:"));
+    AURORA_TEST_CHECK_TRUE(has_field(filed_request(filed, guard, 1), "proxy-authorization: basic "));
+    // 重发的是同一条腿上的第二条 `CONNECT`，不是「放弃隧道改直连」：目标监听口一条都不被连。
+    AURORA_TEST_CHECK_EQ(proxy.accepts(), 2);
+    AURORA_TEST_CHECK_EQ(origin.accepts(), 0);
 }
 
 }  // namespace aurora::test_cases::utest_net_http_proxy

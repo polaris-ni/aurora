@@ -454,17 +454,23 @@ inline auto openssl_issue(const std::filesystem::path &certificate, const std::f
 }
 
 /// @brief 以服务端自签证书为 CA 签一张客户端证书并打包成 PKCS#12。
+///
+/// 同一张证书与同一枚私钥的 **PEM 文本**也留在原地（`client_cert` / `client_key`）：`TlsContext` 的
+/// 客户端身份有 PKCS#12 与 PEM 两种入参形态，而 PEM 那一条只有 OpenSSL / mbedTLS 腿支持——两种形态必须
+/// 能用同一份材料各验一遍，否则「PEM 在这条腿上通了」就只能是没被证过的说法。
 /// @param certificate 服务端证书（充当 CA）。
 /// @param private_key 服务端私钥（签名用）。
 /// @param passphrase 档案口令。
 /// @param identity 档案落点（输出）。
+/// @param client_key 客户端私钥的 PEM 落点（输出，未加密）。
+/// @param client_cert 客户端证书的 PEM 落点（输出）。
 /// @return 结局。
 inline auto openssl_issue_client_identity(const std::filesystem::path &certificate,
                                           const std::filesystem::path &private_key, const std::string &passphrase,
-                                          const std::filesystem::path &identity) -> IssueResult {
+                                          const std::filesystem::path &identity,
+                                          const std::filesystem::path &client_key,
+                                          const std::filesystem::path &client_cert) -> IssueResult {
     const auto request = next_path("client-csr", ".pem");
-    const auto client_key = next_path("client-key", ".pem");
-    const auto client_cert = next_path("client-cert", ".pem");
     const auto extensions = next_path("client-ext", ".cnf");
     if (!write_text_file(extensions, "extendedKeyUsage=clientAuth\nbasicConstraints=CA:FALSE\n")) {
         return {.ok = false, .message = "the client certificate extension file could not be written"};
@@ -510,7 +516,7 @@ class Assets {
 
     /// @brief 现签一份资产。
     /// @param common_name 证书的主体名与 SAN（本设施只用于回环对端，缺省 `localhost`）。
-    /// @param with_identity 是否连带生成 PKCS#12 客户端身份（mTLS 用例才需要）。
+    /// @param with_identity 是否连带生成 mTLS 客户端身份（PKCS#12 与 PEM 两种入参形态同源）。
     /// @param lifetime 有效期形态；`Expired` 用于「Validity 已过期一定被拒」那条判据。
     explicit Assets(std::string_view common_name = "localhost", bool with_identity = false,
                     Lifetime lifetime = Lifetime::Valid) {
@@ -534,8 +540,10 @@ class Assets {
         valid_ = true;
         if (with_identity) {
             client_identity_ = detail::next_path("client-identity", ".p12");
-            const auto packed =
-                detail::openssl_issue_client_identity(certificate_, private_key_, passphrase_, client_identity_);
+            client_key_pem_ = detail::next_path("client-key", ".pem");
+            client_cert_pem_ = detail::next_path("client-cert", ".pem");
+            const auto packed = detail::openssl_issue_client_identity(
+                certificate_, private_key_, passphrase_, client_identity_, client_key_pem_, client_cert_pem_);
             if (!packed.ok) {
                 status_ = "server certificate is usable but the client identity could not be packed: " + packed.message;
             } else {
@@ -578,6 +586,18 @@ class Assets {
     /// @return 口令文本。
     [[nodiscard]] auto passphrase() const -> const std::string & { return passphrase_; }
 
+    /// @brief 客户端证书的 PEM 文本（`TlsContext::client_certificate_pem` 的入参形态）。
+    /// @return PEM 文本；不可用为空串。
+    [[nodiscard]] auto client_certificate_pem() const -> std::string {
+        return identity_ ? detail::read_file(client_cert_pem_) : std::string{};
+    }
+
+    /// @brief 客户端私钥的 PEM 文本（未加密；`TlsContext::client_private_key_pem` 的入参形态）。
+    /// @return PEM 文本；不可用为空串。
+    [[nodiscard]] auto client_private_key_pem() const -> std::string {
+        return identity_ ? detail::read_file(client_key_pem_) : std::string{};
+    }
+
     /// @brief 服务端证书的 PEM 文本（`TlsContext::trusted_certificates` 的入参形态）。
     /// @return PEM 文本。
     [[nodiscard]] auto certificate_pem() const -> std::string { return certificate_pem_; }
@@ -589,6 +609,8 @@ class Assets {
     std::filesystem::path certificate_;  ///< 服务端证书
     std::filesystem::path private_key_;  ///< 服务端私钥
     std::filesystem::path client_identity_;  ///< 客户端身份档案
+    std::filesystem::path client_key_pem_;  ///< 客户端私钥（PEM，同一份身份的另一种入参形态）
+    std::filesystem::path client_cert_pem_;  ///< 客户端证书（PEM，同上）
     std::string passphrase_{"aurora-test"};  ///< 档案口令
     std::string certificate_pem_;  ///< 证书 PEM 文本
 };

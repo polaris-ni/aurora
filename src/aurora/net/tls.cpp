@@ -366,6 +366,20 @@ auto validate_handshake_inputs(std::string_view server_name, const TlsContext &c
     if (context.max_version && *context.max_version < context.min_version) {
         return make_detail(ErrorCode::NetTlsVersionMismatch, "TlsContext upper version bound is below its lower bound");
     }
+    // 客户端身份的两种形态各说各话：PKCS#12 是一整包（证书 + 私钥 + 可选链），PEM 是拆开的一对。同时置值
+    // 就是「以谁为准」没有答案——猜一边等于悄悄丢掉调用方给的另一份材料，故当场拒。
+    const bool has_pkcs12 = context.client_identity.has_value();
+    const bool has_pem = context.client_certificate_pem.has_value() || context.client_private_key_pem.has_value();
+    if (has_pkcs12 && has_pem) {
+        return make_detail(ErrorCode::NetOptionConflict,
+                           "client identity is given both as PKCS#12 and as a PEM pair: choose one form");
+    }
+    // PEM 只给一半时同样没有可发送的身份：只有证书则拿不出签名，只有私钥则对端无从知道这是谁的钥匙。
+    // 报成「配置冲突」而不是让后端在握手半途报一句库内部的解析失败，是把错说在还没连线的时候。
+    if (has_pem && !(context.client_certificate_pem.has_value() && context.client_private_key_pem.has_value())) {
+        return make_detail(ErrorCode::NetOptionConflict,
+                           "a PEM client identity needs both client_certificate_pem and client_private_key_pem");
+    }
     return std::nullopt;
 }
 

@@ -112,9 +112,23 @@ struct TlsContext {
     /// @brief SPKI pin 集合（`PeerCertificate::public_key_sha256` 同形态）；空集=不设 pin。
     std::vector<std::string> pinned_public_keys;
     /// @brief 客户端身份（mTLS）：PKCS#12 档案的**字节内容**；未置值=不发送客户端证书。
+    ///        与下面两枚 PEM 字段互斥（同时置值即 `net-option-conflict`，本层不猜以谁为准）。
     std::optional<std::string> client_identity;
     /// @brief `client_identity` 的保护口令；档案无口令时留空。
     std::optional<std::string> client_identity_passphrase;
+    /// @brief 客户端身份的 PEM 形态（mTLS）：**证书链**文本，叶证书在前、其后依次是中间 CA，一段
+    ///        `-----BEGIN CERTIFICATE-----` 到 `-----END CERTIFICATE-----` 里可串多张。与
+    ///        `client_private_key_pem` 成对置值，且与上面的 PKCS#12 形态互斥。
+    /// @note 支持腿：OpenSSL 与 mbedTLS。走系统证书库的两腿（Windows Schannel、Apple
+    ///       SecureTransport）没有「从内存里的 PEM 造一枚可导出的身份」这条公开通路，置值即在起手落
+    ///       `net-platform-unavailable`——那是显式拒绝，不是回落成不带证书的连接。
+    std::optional<std::string> client_certificate_pem;
+    /// @brief 客户端身份的 PEM 形态（mTLS）：**私钥**文本（PKCS#8 或各后端的传统形态；加密口令本层不解，
+    ///        请先行解密后传入）。置了证书就必须同时置它，缺一即 `net-option-conflict`；两者都读得开时
+    ///        后端在装进会话**之前**先核对私钥与叶证书配不配对（OpenSSL 的 `X509_check_private_key`、
+    ///        mbedTLS 的 `mbedtls_pk_check_pair`），配错即 `general-invalid-argument` 且不放行。
+    /// @note 支持腿同 `client_certificate_pem`。
+    std::optional<std::string> client_private_key_pem;
 };
 
 /// @brief 一次握手的结果：成功携已建立的加密流，失败携原因（含 `net-tls-*` 系列与底层流的原因）。

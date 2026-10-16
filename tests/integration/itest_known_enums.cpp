@@ -49,6 +49,7 @@ namespace {
            static_cast<int>(aurora::net::http::ProgressPhase::Download) +
            static_cast<int>(aurora::net::http::SinkFlow::Stop) +
            static_cast<int>(aurora::net::http::HttpErrorClass::Cancelled) +
+           static_cast<int>(aurora::net::http::AuthScheme::Unsupported) +
            static_cast<int>(aurora::ResourcePhase::Failed) + static_cast<int>(aurora::StreamPolicy::Replace) +
            static_cast<int>(au::webview::WebViewMode::Snapshot);
 }

@@ -86,6 +86,17 @@ auto tls_error(ErrorCode code, std::string text) -> Error {
     return make_error(code, ErrorParams{{"detail", std::move(text)}});
 }
 
+/// @brief 客户端身份那几处失败的构造口。
+///
+/// 它们走「调用方覆盖 message」那一枚 `make_error` 重载而不是上面的 `tls_error`：后者把文本交给表模板的
+/// `{detail}` 槽，而 `general-invalid-argument` 的模板没有那一槽（`codespec/errors.toml` 里它渲染成一句
+/// 「Invalid argument supplied」），于是「PEM 的哪一步、缺什么」会在现场被整段吃掉——本节目的全部是替调用方
+/// 指认他给错了哪一份材料，指认丢了就等于没指认。同文件其余各码（`net-tls-*` / `net-platform-unavailable`）
+/// 的模板带槽，仍走 `tls_error`。
+auto identity_error(std::string text) -> Error {
+    return make_error(ErrorCode::GeneralInvalidArgument, std::move(text));
+}
+
 /// 取 OpenSSL 错误队列的栈顶原因文本。
 ///
 /// 只取栈顶是有取舍的：OpenSSL 一次失败常留下三四层调用栈，而本层的诊断面（`detail`）只有一条
@@ -360,6 +371,94 @@ auto build_alpn_advertisement(const std::vector<std::string> &protocols) -> std:
     return outcome;
 }
 
+/// PEM 文本（证书链 + 私钥）→ 客户端凭据。
+///
+/// 与上面那条 PKCS#12 通路共用同一套落点与次序：先叶、再中间证书、最后 `SSL_CTX_check_private_key`；
+/// 链的清理口径也一致——`SSL_CTX_clear_chain_certs` 先行，否则上一次配好的链留在 ctx 身上，而「发出去的
+/// 那条链到底是谁」直接决定服务端认不认这个客户端。区别只在材料：这里没有容器要解，也不接口令
+/// （加密过的 PEM 私钥本层不解，入参约定见 `net/tls.h`）。
+/// @param ctx 待装凭据的上下文（所有权仍归调用方）。
+/// @param chain_pem 证书链 PEM 文本，叶证书在前（契约如此，这里不做重排）。
+/// @param key_pem 私钥 PEM 文本（未加密）。
+/// @return 成功为空；失败携 `general-invalid-argument` 与成因文本。
+[[nodiscard]] auto apply_client_identity_pem(SSL_CTX *ctx, std::string_view chain_pem, std::string_view key_pem)
+    -> Result<void> {
+    auto *chain_source = ::BIO_new_mem_buf(chain_pem.data(), static_cast<int>(chain_pem.size()));
+    if (chain_source == nullptr) {
+        return identity_error("the client certificate chain could not be opened for reading");
+    }
+    // `sk_X509_*` 在这一族安全栈宏里展开（不是可调用的函数名），因此都不能加 `::` 限定。
+    auto *extras = sk_X509_new_null();
+    auto *leaf = ::PEM_read_bio_X509(chain_source, nullptr, nullptr, nullptr);
+    if (leaf != nullptr) {
+        // 其余条目是中间证书：读到末尾返回空指针，那不是失败，只是 PEM 到头了。
+        for (;;) {
+            auto *item = ::PEM_read_bio_X509(chain_source, nullptr, nullptr, nullptr);
+            if (item == nullptr) {
+                break;
+            }
+            if (sk_X509_push(extras, item) <= 0) {
+                ::X509_free(item);
+                break;
+            }
+        }
+    }
+    ::BIO_free(chain_source);
+    if (leaf != nullptr) {
+        // 读循环每次「没有下一块」都会往错误队列塞一条 `no start line`；叶证书已到手时那不是失败，留着
+        // 只会盖掉后面真正的成因——本层的诊断取的是栈顶。
+        ::ERR_clear_error();
+    }
+
+    auto *key_source = ::BIO_new_mem_buf(key_pem.data(), static_cast<int>(key_pem.size()));
+    auto *key = static_cast<EVP_PKEY *>(nullptr);
+    if (key_source != nullptr) {
+        key = ::PEM_read_bio_PrivateKey(key_source, nullptr, nullptr, nullptr);
+        ::BIO_free(key_source);
+    }
+
+    auto outcome = Result<void>{};
+    if (leaf == nullptr) {
+        // 这句话与 mbedTLS 腿逐字相同（那边把「整段不是可解码的 X.509」与「结构里没填进证书」合成一支判）：
+        // 对调用方而言这就是同一件事——链这一份材料里没有可用证书。
+        outcome = identity_error("the client certificate chain holds no usable X.509 certificate: " + openssl_reason());
+    } else if (key == nullptr) {
+        outcome = identity_error("the client private key is not a readable unencrypted PEM key: " + openssl_reason());
+    } else if (::X509_check_private_key(leaf, key) != 1) {
+        // 配对判据走在装入**之前**。OpenSSL 3 会顺手在 `SSL_CTX_use_PrivateKey` 里比对公钥，于是同一件事在
+        // 版本间会说成「could not be installed: key values mismatch」——那是引擎自己的步骤名，不是调用方要听的
+        // 诊断。这里直接问「这枚私钥配不配这张叶证书」，本层与 mbedTLS 腿的 `mbedtls_pk_check_pair` 因此对同一件
+        // 事给同一句话，且失败时 ctx 上还没落下半份凭据。
+        outcome = identity_error("the client private key does not match the client certificate");
+    } else if (::SSL_CTX_use_certificate(ctx, leaf) != 1) {
+        outcome = identity_error("the client certificate could not be installed: " + openssl_reason());
+    } else if (::SSL_CTX_use_PrivateKey(ctx, key) != 1) {
+        outcome = identity_error("the client private key could not be installed: " + openssl_reason());
+    } else if (::SSL_CTX_check_private_key(ctx) != 1) {
+        // 上面判的是两份入参，这一步判的是已经落到 ctx 上的那一对。预检通过后它不该再触发，留作最后一道复核：
+        // 「本层返回成功」从此恒等于「ctx 自己确认过这条链配这把私钥」。
+        outcome = identity_error("the client private key does not match the client certificate");
+    } else {
+        ::SSL_CTX_clear_chain_certs(ctx);
+        for (int index = 0; index < sk_X509_num(extras); ++index) {
+            auto *item = sk_X509_value(extras, index);
+            if (item == nullptr) {
+                continue;
+            }
+            if (::SSL_CTX_add1_chain_cert(ctx, item) != 1) {
+                outcome = identity_error("the client certificate chain could not be installed: " + openssl_reason());
+                break;
+            }
+        }
+    }
+    ::X509_free(leaf);
+    ::EVP_PKEY_free(key);
+    if (extras != nullptr) {
+        sk_X509_pop_free(extras, X509_free);
+    }
+    return outcome;
+}
+
 /// 一条 TLS 会话的 OpenSSL 实现（线程约定见 `detail/tls_backend.h`：调用方串行化，本类不自持锁）。
 class OpenSslBackend final : public TlsBackend {
   public:
@@ -528,6 +627,15 @@ auto OpenSslBackend::create(const TlsContext &context, std::string_view server_n
     if (context.client_identity) {
         if (auto identity =
                 apply_client_identity(ctx, *context.client_identity, context.client_identity_passphrase.value_or(""));
+            !identity) {
+            ::SSL_CTX_free(ctx);
+            return identity.error();
+        }
+    }
+    // 起手闸已保证这两种形态不会同时出现（`net/tls.cpp` 的 `validate_handshake_inputs`），故这里各判各的。
+    if (context.client_certificate_pem) {
+        if (auto identity = apply_client_identity_pem(ctx, *context.client_certificate_pem,
+                                                      context.client_private_key_pem.value_or(""));
             !identity) {
             ::SSL_CTX_free(ctx);
             return identity.error();

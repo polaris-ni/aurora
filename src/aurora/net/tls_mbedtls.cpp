@@ -33,13 +33,14 @@
 //     `mbedtls_threading_set_alt()` 装了实现才真正生效，本层不装（那是全进程的一次性决定，越出单条接缝的
 //     边界）。于是串行化完全落在接缝的既有口径上：一枚 `mbedtls_ssl_context` 只由 `net/tls.cpp` 的每连接
 //     互斥驱动，本层的库结构与两条缓冲都按「一会话一对象」持有，跨会话不共享任何状态。
-//   - **PKCS#12 客户端身份在本腿做不到**：mbedTLS 3.6.5 的 `pkcs12.h` 只导出三枚 PBE/密钥派生原语
-//     （`mbedtls_pkcs12_pbe`、`mbedtls_pkcs12_pbe_ext`、`mbedtls_pkcs12_derivation`——实测即
+//   - **PKCS#12 客户端身份在本腿做不到，PEM 形态可以**：mbedTLS 3.6.5 的 `pkcs12.h` 只导出三枚 PBE/密钥
+//     派生原语（`mbedtls_pkcs12_pbe`、`mbedtls_pkcs12_pbe_ext`、`mbedtls_pkcs12_derivation`——实测即
 //     `libmbedcrypto.a` 的全部 PKCS#12 导出面），既没有 PFX 容器的读侧也没有写侧，而
 //     `TlsContext::client_identity` 的公共口径是 PKCS#12 **字节**。自己补一套 AuthSafe/SafeBag 的 ASN.1
-//     解析（含 MAC 校验）不在本切片范围内，故给了身份就明确失败（`general-invalid-argument` + 指明缺哪项
-//     能力），而不是静默忽略——静默忽略会让调用方以为 mTLS 已生效，而现场只是对端拒绝了握手。裁决应记入
-//     提案 §5 的 provider 行：mbedTLS 腿 = 无 mTLS 客户端身份。
+//     解析（含 MAC 校验）不在本切片范围内，故给了 PFX 就明确失败（`general-invalid-argument` + 指明缺哪项
+//     能力），而不是静默忽略——静默忽略会让调用方以为 mTLS 已生效，而现场只是对端拒绝了握手。
+//     同一份身份的 PEM 形态（`client_certificate_pem` + `client_private_key_pem`）走的是库里现成的
+//     `x509_crt_parse` / `pk_parse_key` 通路，本腿完整支持；两条形态在公共面上互斥，见 `net/tls.h`。
 //
 // TLS 1.3 的后握手 NewSessionTicket 由库内部处理：3.6 缺省**关闭**信号形态
 // （`mbedtls_ssl_conf_tls13_enable_signal_new_session_tickets()` 未开），票据记录在 `mbedtls_ssl_read()`
@@ -100,6 +101,17 @@ constexpr std::array<const char *, 3> AURORA_SYSTEM_TRUST_BUNDLES = {
     "/etc/pki/tls/certs/ca-bundle.crt",  ///< Fedora / RHEL 系
     "/etc/ssl/cert.pem",  ///< 其它 BSD 派生的单文件形态
 };
+
+/// @brief 客户端身份那几处失败的构造口。
+///
+/// 它们走「调用方覆盖 message」那一枚 `make_error` 重载而不是上面的 `tls_error`：后者把文本交给表模板的
+/// `{detail}` 槽，而 `general-invalid-argument` 的模板没有那一槽（`codespec/errors.toml` 里它渲染成一句
+/// 「Invalid argument supplied」），于是「PEM 的哪一步、缺什么」会在现场被整段吃掉——本节目的全部是替调用方
+/// 指认他给错了哪一份材料，指认丢了就等于没指认。同文件其余各码（`net-tls-*` / `net-platform-unavailable`）
+/// 的模板带槽，仍走 `tls_error`。
+auto identity_error(std::string text) -> Error {
+    return make_error(ErrorCode::GeneralInvalidArgument, std::move(text));
+}
 
 auto tls_error(ErrorCode code, std::string text) -> Error {
     return make_error(code, ErrorParams{{"detail", std::move(text)}});
@@ -339,6 +351,20 @@ class MbedTlsBackend final : public TlsBackend {
     /// @return 成功；追加根本身解不开即 `general-invalid-argument`。
     [[nodiscard]] auto load_trust_roots(const TlsContext &context) -> Result<void>;
 
+    /// 把 PEM 文本交进任何 `mbedtls_*_parse` 前的统一形态：长度含结尾 NUL，分块才认得出结束。
+    [[nodiscard]] static auto nul_terminated(std::string_view text) -> std::string {
+        std::string buffer{text};
+        buffer.push_back('\0');
+        return buffer;
+    }
+
+    /// 装载客户端身份（PEM 形态）：证书链 + 私钥，并当场核对两者配不是一对。
+    ///
+    /// 装在 `config_` 之前完成的指针登记（`conf_own_cert` 只存指针、不复制正文），故这两枚库结构由本对象
+    /// 持有到连接结束；配错一对却在握手半途以 alert 收场，比在这里说一句「钥匙不是这张证书的」难查得多。
+    /// @return 成功；文本解不开、或私钥与叶证书不匹配即 `general-invalid-argument`。
+    [[nodiscard]] auto install_client_identity(const TlsContext &context) -> Result<void>;
+
     /// 握手完成那一刻的取证：对端证书摘要与协商出的 ALPN。
     ///
     /// 必须在 `mbedtls_ssl_handshake()` 返回 0 之后、任何后续 SSL 调用之前读：`mbedtls_ssl_get_peer_cert()`
@@ -352,7 +378,8 @@ class MbedTlsBackend final : public TlsBackend {
     /// `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`；现场需要的恰好是「它到底在拒哪一半」。
     [[nodiscard]] auto certificate_rejected(std::uint32_t flags) -> Error;
 
-    /// 释放库内结构：与构造反向，`ssl` 先于 `conf`（它持 conf 的指针），`conf` 先于根链（它持链的指针）。
+    /// 释放库内结构：与构造反向，`ssl` 先于 `conf`（它持 conf 的指针），`conf` 先于客户端身份材料
+    /// （`conf_own_cert` 登记的正是那两枚指针），身份材料先于根链（各自独立，按装配次序倒放）。
     void release() noexcept {
         if (ssl_ready_) {
             ::mbedtls_ssl_free(&ssl_);
@@ -361,6 +388,14 @@ class MbedTlsBackend final : public TlsBackend {
         if (config_ready_) {
             ::mbedtls_ssl_config_free(&config_);
             config_ready_ = false;
+        }
+        if (client_key_ready_) {
+            ::mbedtls_pk_free(&client_key_);
+            client_key_ready_ = false;
+        }
+        if (client_chain_ready_) {
+            ::mbedtls_x509_crt_free(&client_chain_);
+            client_chain_ready_ = false;
         }
         if (roots_ready_) {
             ::mbedtls_x509_crt_free(&roots_);
@@ -371,9 +406,13 @@ class MbedTlsBackend final : public TlsBackend {
     mbedtls_ssl_config config_{};  ///< 会话级 TLS 配置（版本界、authmode、ALPN、信任根都装在这里）
     mbedtls_ssl_context ssl_{};  ///< 状态机本体（bio 已绑到本对象）
     mbedtls_x509_crt roots_{};  ///< 信任根链：系统 bundle ∪ 追加根，必须活过 config_/ssl_
+    mbedtls_x509_crt client_chain_{};  ///< 客户端证书链（PEM 装进来的那份；`conf_own_cert` 只登记指针）
+    mbedtls_pk_context client_key_{};  ///< 客户端私钥（同上，必须活过 config_/ssl_）
     bool config_ready_ = false;  ///< config 是否已 init（决定 release 与失败路径）
     bool ssl_ready_ = false;  ///< ssl 是否已 init
     bool roots_ready_ = false;  ///< 根链是否已 init
+    bool client_chain_ready_ = false;  ///< 客户端证书链是否已 init
+    bool client_key_ready_ = false;  ///< 客户端私钥是否已 init
     bool handshaked_ = false;  ///< 握手是否完成
     bool peer_closed_ = false;  ///< 已收到 close_notify（或读端被就地关闭）
     bool insecure_ = false;  ///< 危险开关：置真即校验整体交给 VERIFY_NONE 跳过
@@ -442,14 +481,68 @@ auto MbedTlsBackend::load_trust_roots(const TlsContext &context) -> Result<void>
     return Result<void>{};
 }
 
+auto MbedTlsBackend::install_client_identity(const TlsContext &context) -> Result<void> {
+    const std::string chain = nul_terminated(*context.client_certificate_pem);
+    const std::string key = nul_terminated(*context.client_private_key_pem);
+    const auto *const chain_bytes = reinterpret_cast<const unsigned char *>(chain.data());
+    const auto *const key_bytes = reinterpret_cast<const unsigned char *>(key.data());
+
+    ::mbedtls_x509_crt_init(&client_chain_);
+    client_chain_ready_ = true;
+    const auto parsed_chain = ::mbedtls_x509_crt_parse(&client_chain_, chain_bytes, chain.size());
+    // 「链里到底有没有一张可用证书」是一条事实，两型证据合在一处判：负码说整段不是可解码的 X.509，
+    // 而 `raw.p` 为空说结构里根本没填进证书。判据取 `raw.p` 而非 `next`：对着刚 `init` 的空结构，第一张证书是
+    // **就地填进结构体本身**的，`next` 从第二张起才挂——实测 mbedTLS 3.6.5 里单张链解析成功时 `raw.p` 非空而
+    // `next` 恒为 null，拿 `next` 判空会把一份合法身份读成空链（本轮就是这么栽的）。合成一支而不是两支的另一个
+    // 理由是变异自证：拆成两支时，摘掉负码那一半后空链那一半仍交出同一句诊断，用例照绿、两处判据谁也没被证明在
+    // 起作用（实测即如此），合起来才是「摘掉就没得说」的那一处。
+    if (parsed_chain < 0 || client_chain_.raw.p == nullptr) {
+        auto text = std::string{"the client certificate chain holds no usable X.509 certificate"};
+        if (parsed_chain < 0) {
+            text += ": " + mbedtls_text(parsed_chain);  // 库的原话只对负码那一型有意义，空链那型没有码可引
+        }
+        return identity_error(std::move(text));
+    }
+    if (parsed_chain > 0) {
+        // 与追加根同一口径：调用方自己给的材料没有「个别条目不合口味」这一说，半条链送出去只会在对端换来
+        // 一次无法解释的拒绝。
+        return identity_error("the client certificate chain holds " + std::to_string(parsed_chain) +
+                              " block(s) that are not decodable X.509 certificates");
+    }
+
+    ::mbedtls_pk_init(&client_key_);
+    client_key_ready_ = true;
+    // 口令位给空：加密过的 PEM 私钥（`Proc-Type: 4,ENCRYPTED`）本层不解，那需要一个口令旋钮，而它一出现
+    // 就会与 PKCS#12 那枚 `client_identity_passphrase` 长成第二个「以谁为准」的冲突。
+    const auto parsed_key =
+        ::mbedtls_pk_parse_key(&client_key_, key_bytes, key.size(), nullptr, 0, &psa_random, nullptr);
+    if (parsed_key != 0) {
+        return identity_error("the client private key is not a readable unencrypted PEM key: " +
+                              mbedtls_text(parsed_key));
+    }
+    // 配对当场判定：链首那张就是叶证书（公共面把「叶在前」写成入参契约），它的公钥与这枚私钥对不上，
+    // 握手里就是一句来路不明的 alert。证书公钥住在 `pk` 字段（3.x 的 `mbedtls_x509_crt` 没有 `key`，
+    // 而 `pk_raw` 是它的 DER 原文），由 `mbedtls_x509_crt_parse_der` 在解析证书时一并填好。
+    const auto pair = ::mbedtls_pk_check_pair(&client_chain_.pk, &client_key_, &psa_random, nullptr);
+    if (pair != 0) {
+        return identity_error("the client private key does not match the client certificate: " + mbedtls_text(pair));
+    }
+    const auto installed = ::mbedtls_ssl_conf_own_cert(&config_, &client_chain_, &client_key_);
+    if (installed != 0) {
+        return identity_error("the client identity could not be installed on this session: " + mbedtls_text(installed));
+    }
+    return Result<void>{};
+}
+
 auto MbedTlsBackend::create(const TlsContext &context, std::string_view server_name)
     -> Result<std::unique_ptr<MbedTlsBackend>> {
     // mbedTLS 3.6.5 没有 PFX 容器的解析入口（`pkcs12.h` 只给 PBE/密钥派生原语），而公共口径给的就是
-    // PKCS#12 字节：本腿做不到，就给一个说明缺口的失败，而不是收下字段后静默不带客户端证书。
+    // PKCS#12 字节：本腿做不到，就给一个说明缺口的失败，而不是收下字段后静默不带客户端证书。同一份身份的
+    // PEM 形态在下面 `install_client_identity` 里是支持的（互斥口径由 `net/tls.cpp` 的起手闸保证）。
     if (context.client_identity) {
-        return tls_error(ErrorCode::GeneralInvalidArgument,
-                         "this build's mbedTLS engine has no PKCS#12 reader, so a client identity cannot be "
-                         "installed on a TLS session");
+        return identity_error(
+            "this build's mbedTLS engine has no PKCS#12 reader, so a client identity cannot be "
+            "installed on a TLS session; use client_certificate_pem / client_private_key_pem instead");
     }
 
     const auto rank = [](TlsVersion version) -> int {
@@ -497,6 +590,14 @@ auto MbedTlsBackend::create(const TlsContext &context, std::string_view server_n
     // 危险开关的落点：VERIFY_NONE 让库把链与主机名一并跳过（诊断与 pin 判定在 `net/tls.cpp`）。
     ::mbedtls_ssl_conf_authmode(&backend->config_,
                                 backend->insecure_ ? MBEDTLS_SSL_VERIFY_NONE : MBEDTLS_SSL_VERIFY_REQUIRED);
+
+    // 客户端身份装在配置上（`conf_own_cert` 只登记指针，正文由本对象持有），故排在信任根之后、`ssl_setup`
+    // 之前：与 ALPN 同一类「配置期材料」，都要活过整条连接。
+    if (context.client_certificate_pem) {
+        if (auto identity = backend->install_client_identity(context); !identity) {
+            return identity.error();
+        }
+    }
 
     // ALPN：库只登记指针数组且不复制正文，故正文与指针都由本对象持有到连接结束。
     // 单条 255 字节是协议上限（长度前缀是 u8），空标识是非法输入而不是「未宣告」，两者都在这里剔掉，

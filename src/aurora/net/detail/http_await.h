@@ -33,6 +33,7 @@
 
 #include "aurora/core/result.h"
 #include "aurora/net/cancellation.h"
+#include "aurora/net/detail/remote_connect.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/proxy.h"
 #include "aurora/net/tls.h"
@@ -93,22 +94,27 @@ class CallbackAwaiter {
 ///
 /// 发起侧只保留这一条建连路（代理与否在 `ProxyEnvironment::for_target` 处一次决定，之后不再分岔）：
 /// `connect_via` 对 `ProxyKind::Direct` 的契约就是「等价于走直连入口」（`net/transport.h`），故无代理的
-/// 缺省路径与接入代理前逐字节同型，竞速与地址族口径也共用同一份编排。
+/// 缺省路径与接入代理前逐字节同型，竞速与地址族口径也共用同一份编排。本桥接直接调用公共入口所转接的那个
+/// 内部函数（`StreamTransport::connect_via` 的实现就是一行转接，没有第二层动作），为的是把握手两侧的补充
+/// 事实带回来——那枚结构属库内形态，公共 L1 签名不因它而变，建连入口因此仍只有一个。
 /// @param proxy 本跳的代理决策（含 `Direct`）。
 /// @param host 目标主机文本。
 /// @param port 目标端口（主机序）。
 /// @param options 缓冲、超时与竞速口径；`connect_timeout` 在此覆盖「直到隧道可用」的整段。
 /// @param cancellation 本次交换的取消令牌。
+/// @param negotiation 隧道握手的补充事实（仅库内，见 `remote_connect.h`）；空指针 = 不参与。非空时调用方
+///        须持有它到回调落地——协程帧上的局部对象正满足这条（挂起期间帧不销毁）。
 /// @return 可等待体，求得已建立的明文流（可能是隧道里的那条）。
 inline auto await_connect_via(ProxyConfig proxy, std::string host, std::uint16_t port, const StreamOptions &options,
-                              const Cancellation &cancellation) -> CallbackAwaiter<StreamTransport> {
+                              const Cancellation &cancellation, ProxyNegotiation *negotiation = nullptr)
+    -> CallbackAwaiter<StreamTransport> {
     return CallbackAwaiter<StreamTransport>(
         // 发起器经 std::function 类型擦除转入，命中本仓记录在案的「转入 std::function 一律判不应抛出」系统性
         // 假告警面；发起器实际不抛（代理握手全程回调，失败以 Result 交付，绝不抛出穿越协程帧）。
         // NOLINTNEXTLINE(bugprone-exception-escape)
-        [proxy = std::move(proxy), host = std::move(host), port, options,
-         cancellation](CallbackAwaiter<StreamTransport>::Sink on_done) mutable {
-            StreamTransport::connect_via(proxy, host, port, options, cancellation, std::move(on_done));
+        [proxy = std::move(proxy), host = std::move(host), port, options, cancellation,
+         negotiation](CallbackAwaiter<StreamTransport>::Sink on_done) mutable {
+            connect_via_proxy(proxy, host, port, options, cancellation, std::move(on_done), negotiation);
         });
 }
 

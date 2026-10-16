@@ -2,6 +2,7 @@
 #include "aurora/net/detail/http_cache.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <limits>
@@ -34,6 +35,18 @@ namespace {
         return (raw >= 'A' && raw <= 'Z') ? static_cast<char>(raw + 32) : c;
     });
     return out;
+}
+
+/// @brief 恒参与建键的凭据字段：应答有没有说 `Vary` 都要收进条目（纪律见 `net/http_auth.h` 的凭据纪律条）。
+constexpr std::array<std::string_view, 2> AURORA_CREDENTIAL_VARY_FIELDS{std::string_view{"Authorization"},
+                                                                        std::string_view{"Cookie"}};
+
+/// @brief 字段名比较：ASCII 大小写折叠，与 `aurora::Headers` 的查找口径同一条尺。
+/// @param left 一侧名字。
+/// @param right 另一侧名字。
+/// @return 折叠后逐字节相同则为 true。
+[[nodiscard]] auto ascii_name_equal(std::string_view left, std::string_view right) -> bool {
+    return to_lower_ascii(left) == to_lower_ascii(right);
 }
 
 /// @brief 解析非负秒数（`max-age` / `Age` 共用）；带符号、带小数、混字母一律判「没给」。
@@ -323,8 +336,19 @@ auto HttpResponseCache::store(aurora::net::http::Method method, const std::strin
     CacheEntry entry;
     entry.method = method;
     entry.url = url;
-    entry.vary.reserve(vary_names->size());
+    // 凭据恒参与建键，与应答有没有写 `Vary` 无关（那条纪律见 `net/http_auth.h`）：一份带 `Authorization`
+    // 取回的副本若存成裸键，下一次裸打的请求就能读到它——那等于把上一位调用方的凭据换回的私密内容交给
+    // 了一位没有凭据的调用方。缺省也算一种值（空串），于是「没带凭据取回的副本」也只对没带凭据的请求可见。
+    // 复用同一枚 (name, value) 形态而不是另造一维键，是为了让命中判定仍只有一处（`find_index`）。
+    entry.vary.reserve(vary_names->size() + AURORA_CREDENTIAL_VARY_FIELDS.size());
     for (const auto &name : vary_names.value()) {
+        entry.vary.emplace_back(name, request_headers.get(name).value_or(std::string{}));
+    }
+    for (const auto &name : AURORA_CREDENTIAL_VARY_FIELDS) {
+        if (std::any_of(vary_names->begin(), vary_names->end(),
+                        [&name](const std::string &given) { return ascii_name_equal(given, name); })) {
+            continue;  // 对端已经点名它：上面那条循环按同一枚值收过了，收两遍只会让条目多一处同值比较
+        }
         entry.vary.emplace_back(name, request_headers.get(name).value_or(std::string{}));
     }
     // 表里存的是「未标缓存」的形态：`from_cache()` 只在交付那一刻置真，否则条目自己会被读成一次命中。

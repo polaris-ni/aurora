@@ -23,6 +23,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -32,6 +33,7 @@
 #include "aurora/core/result.h"
 #include "aurora/core/url.h"
 #include "aurora/net/cancellation.h"
+#include "aurora/net/detail/http_auth_wire.h"
 #include "aurora/net/detail/http_await.h"
 #include "aurora/net/detail/http_body.h"
 #include "aurora/net/detail/http_cache.h"
@@ -60,6 +62,20 @@ constexpr std::size_t AURORA_READ_CHUNK = std::size_t{16} * 1024;
 /// 取 300 ms 是「诚实的服务器多半在这之内回话」与「不该让整条请求为一次大概无疾而终的问询买单」之间的
 /// 折中；它只加在挂过 `expect_continue()` 且本次确有体的请求上。
 constexpr std::chrono::milliseconds AURORA_EXPECT_WINDOW{300};
+
+/// @brief 认证环两次轮询之间的让出时长。
+///
+/// 提供方的出口是协程，而 `CoroTask` 不可 `co_await`（`state/coroutine.h`：promise 永不首挂也不终挂，结果只经
+/// `is_done()` / `result()` 轮询），故本环只能轮询。每次让出把控制权交回宿主事件循环，提供方内部那次 token
+/// 换取的续体才投递得回来。内置件从不挂起，`is_done()` 当场为真，本间隔一次都用不上。
+constexpr std::chrono::milliseconds AURORA_AUTH_POLL_INTERVAL{5};
+
+/// @brief 一次问答的让出次数上限（× 上面的间隔 ≈ 25 秒）；到点落 `http-timeout` 并在 detail 点名提供方。
+///
+/// 这是库内置的兜底，不是第四枚超时旋钮：`Timeouts` 各档管的是「这条请求慢不慢」，而本环卡住的原因是「凭据
+/// 提供方没回话」——那是另一件事，且现实里它几乎总在等一个永远不会回来的 token 端点。上限取得明显大于任何合理
+/// 的换取耗时，为的是不误杀真在换取的实现方，同时不给整条协程留下静默悬挂的余地。
+constexpr std::size_t AURORA_AUTH_POLL_CEILING = 5000;
 
 /// @brief 三档超时的档号：写进 `TimeoutState::fired`，收尾据此拼 `http-timeout` 的 detail。
 ///
@@ -127,6 +143,37 @@ class StageTimer {
     std::shared_ptr<std::atomic<bool>> live_;  ///< 本段是否仍在计时；空 = 未登记（该档不设限）
 };
 
+/// @brief HTTP 字段名的比较口径：ASCII 大小写不敏感（`RFC 9110 §5.1`）。
+///
+/// `Headers` 内部同一枚判据是私有的（它的查找本就大小写不敏感），本处需要的是「拿着条目名逐条比」的那一侧，
+/// 故就地补一枚等价的短函数——照抄那一份口径，避免出现两套字段名比较。
+/// @param left 一侧名字。
+/// @param right 另一侧名字。
+/// @return 折叠大小写后逐字符相等时为 true。
+[[nodiscard]] auto field_name_equal(std::string_view left, std::string_view right) -> bool {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < left.size(); ++index) {
+        const auto fold = [](char unit) -> char {
+            return (unit >= 'A' && unit <= 'Z') ? static_cast<char>(unit - 'A' + 'a') : unit;
+        };
+        if (fold(left.at(index)) != fold(right.at(index))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// @brief 两个 URL 是否同一 origin（`RFC 9110 §7.2`：方案、主机、有效端口任一不同即换了域）。
+/// @param left 出发地。
+/// @param right 目的地。
+/// @return 同一 origin 为 true。
+[[nodiscard]] auto same_origin(const Url &left, const Url &right) -> bool {
+    return left.scheme() == right.scheme() && left.host() == right.host() &&
+           left.effective_port() == right.effective_port();
+}
+
 /// @brief 该状态码是否为需要跟随的重定向。
 [[nodiscard]] auto is_redirect(std::uint16_t status) -> bool {
     return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
@@ -155,6 +202,9 @@ class StageTimer {
 ///
 /// 保留体的那几条（307 / 308，以及非 POST 的 301/302/303）会把体连同三枚现地补字段的旋钮一起带到下一跳，
 /// 并在带走流式体时先把它放回原点——放不回即落 `http-body-not-replayable`，因为下一跳注定要整份重发。
+///
+/// 换 origin 的那一跳剥掉两枚凭据字段（`Authorization` / `Cookie`），判据与口径见 `net/http_auth.h` 的
+/// 「凭据纪律」条；同 origin 的重定向照原样带走，认证环补上的那枚也因此跟着后续每一跳。
 /// @param current 本跳请求。
 /// @param response 本跳拿到的重定向应答。
 /// @return 下一跳请求；无 `Location`、目标解不出、或体不可重放时为对应错误。
@@ -190,7 +240,16 @@ class StageTimer {
     }  // 307 / 308 严格保留方法与体
 
     Request redirected = make_request(method, next_url.to_string());
+    // 换 origin 就不带凭据（`RFC 9110 §15.4.4` 那条纪律，形态见 `net/http_auth.h`）：`Authorization` 是上一台
+    // 机器给的口令，跟着 302 送到另一台机器上就是把凭据交给一个陌生对端。`Cookie` 同理——Jar 属 Session 切片，
+    // 本阶段它只会以调用方自填的请求字段形态出现，那就一并剥掉。同 origin 的跳原样带走，认证环补上的那枚
+    // 因此跟着后续每一跳与每一次重试。
+    const bool leaves_origin = !same_origin(base.value(), next_url);
     for (const auto &entry : current.headers().entries()) {
+        if (leaves_origin &&
+            (field_name_equal(entry.name, "Authorization") || field_name_equal(entry.name, "Cookie"))) {
+            continue;
+        }
         redirected.header(entry.name, entry.value);
     }
     if (keep_body) {
@@ -219,6 +278,100 @@ class StageTimer {
         redirected.expect_continue(current.expect_continue());
     }
     return Result<Request>{std::move(redirected)};
+}
+
+/// @brief 认证环的触发判据：401（源站要凭据）与 407（代理要凭据）。
+///
+/// 两枚状态码说的是同一件事的两侧——「这一跳要凭据」，差别只在问的人是源站还是代理，而那一侧由挑战自己带上
+/// （`AuthChallenge::proxy`，取值就是「状态码是不是 407」）。
+/// @param status 应答状态码。
+/// @return 需要问一次凭据时为 true。
+[[nodiscard]] auto is_auth_challenge(std::uint16_t status) -> bool { return status == 401 || status == 407; }
+
+/// @brief 挑战字段名：源站问 `WWW-Authenticate`，代理问 `Proxy-Authenticate`。
+/// @param proxy 挑战是否来自代理。
+/// @return 字段名原文。
+[[nodiscard]] auto auth_challenge_field(bool proxy) -> std::string_view {
+    return proxy ? std::string_view{"Proxy-Authenticate"} : std::string_view{"WWW-Authenticate"};
+}
+
+/// @brief 答复字段名：源站补 `Authorization`，代理补 `Proxy-Authorization`。
+/// @param proxy 挑战是否来自代理。
+/// @return 字段名原文。
+[[nodiscard]] auto auth_credential_field(bool proxy) -> std::string_view {
+    return proxy ? std::string_view{"Proxy-Authorization"} : std::string_view{"Authorization"};
+}
+
+/// @brief 一次问答里，提供方的答复落成了哪种动作（口径见 `net/http_auth.h` 的五条裁决）。
+enum class AuthReply : std::uint8_t {
+    Declined,  ///< 答空，或代理挑战上没给出那枚字段：把对端说的那份 401 / 407 原样交出
+    Origin,  ///< 源站挑战的答复已并回原始请求：原地重跑本次尝试
+    Proxy,  ///< 代理挑战的答复已取出：原地重跑，且只写面向代理那一侧
+    Malformed,  ///< 字段名或值里带着 CR/LF：那是写不上线的字段，本次交换就此落 `http-request-invalid`
+};
+
+/// @brief 一次交换的认证环状态（随协程帧存活，跨全部跳与全部尝试共用一份）。
+struct AuthRing {
+    std::shared_ptr<Authenticator> provider;  ///< 提供方（空 = 本环整环不存在）
+    bool asked{false};  ///< 本次交换是否已问过：至多一次，答复如何都不问第二遍
+    std::optional<std::string> proxy_answer;  ///< 代理答复原文：只写面向代理那一侧，绝不进隧道里的请求
+};
+
+/// @brief 装配交给提供方的那份挑战：应答里的 401 / 407 与被拒的 `CONNECT` 在此合一。
+/// @param request 被拒的那一跳请求（方法与目标 URL 取自它）。
+/// @param fields 挑战字段的全部值（不折叠，逐条各成一枚方案）。
+/// @param status 触发本次问答的状态码。
+/// @param host 问的那一侧的主机文本：源站挑战是目标主机，代理挑战是**代理**主机。
+/// @return 挑战（一条方案都解析不出时 `mechanisms` 为空，仍照常问一次——「没得选」由实现方说，不由本库代答）。
+[[nodiscard]] auto make_auth_challenge(const Request &request, const std::vector<std::string> &fields,
+                                       std::uint16_t status, std::string_view host) -> AuthChallenge {
+    AuthChallenge challenge;
+    challenge.proxy = status == 407;
+    challenge.status = status;
+    challenge.host = std::string{host};
+    challenge.method = request.method();
+    if (const auto &target = request.url(); target.has_value()) {
+        challenge.url = target->to_string();
+    }
+    challenge.mechanisms = detail::parse_auth_mechanisms(fields);
+    return challenge;
+}
+
+/// @brief 把答复落成一次交换里的一处落位；源站答复并回**原始请求**，代理答复只留在环上。
+///
+/// 并回原始请求而不是当前那一跳，是因为重跑与后续每一跳都从 `origin` 重新起副本：只改副本的话，第二次尝试
+/// 又变成裸打，缓存键也看不见这份凭据（同一份凭据必须读到自己的副本，见 `net/http_auth.h` 的凭据纪律条）。
+/// @param challenge 本次问出去的挑战（决定落位与字段）。
+/// @param decision 提供方的答复。
+/// @param origin 本次交换的原始请求（源站答复就地并进去）。
+/// @param ring 本交换的认证环状态（代理答复写在这里）。
+/// @return 本环接下来该做的动作。
+[[nodiscard]] auto place_auth_decision(const AuthChallenge &challenge, const AuthDecision &decision, Request &origin,
+                                       AuthRing &ring) -> AuthReply {
+    if (decision.empty()) {
+        return AuthReply::Declined;
+    }
+    // CR/LF 放进字段值，写出去的就是两条字段乃至一条请求行：那是把「对端要凭据」变成「对端可以借这只手往这条
+    // 连接里塞话」。当场拒掉，而不是等下一跳的 `render_head()` 才发现——那时字节已在线上了。
+    for (const auto &entry : decision.headers.entries()) {
+        if (entry.name.find_first_of("\r\n") != std::string::npos ||
+            entry.value.find_first_of("\r\n") != std::string::npos) {
+            return AuthReply::Malformed;
+        }
+    }
+    if (challenge.proxy) {
+        // 代理挑战只认那一枚字段：其余即便写了也不会被送到任何一侧，等于没答复。
+        const auto answer = decision.headers.get(auth_credential_field(true));
+        if (!answer.has_value()) {
+            return AuthReply::Declined;
+        }
+        ring.proxy_answer = *answer;
+        return AuthReply::Proxy;
+    }
+    for (const auto &entry : decision.headers.entries()) {
+        origin.set_header(entry.name, entry.value);  // 同名以答复为准：覆盖调用方原先写在请求上的那枚
+    }
+    return AuthReply::Origin;
 }
 
 /// @brief 缺省时补上 `Accept-Encoding` 宣告：宣告与解码能力同源，未编入能力时连宣告都不发。
@@ -284,6 +437,8 @@ struct HopRoute {
     std::string peer_host;  ///< 建连对端主机文本
     std::uint16_t peer_port{0};  ///< 建连对端端口（主机序）
     bool absolute_form{false};  ///< 请求行是否写成绝对形态（明文交转发代理时才是真）
+    bool tunneled_via_proxy{false};  ///< 本跳是否经 HTTP 代理建 `CONNECT` 隧道（那句 407 属代理挑战，见下文）
+    std::string proxy_label;  ///< 代理主机文本（不经代理即空）：代理挑战里「谁在问」的就是这一侧
 };
 
 /// @brief 生效策略的三级取定：客户端显式设过 → 进程级默认 → `NetPolicy{}` 那组保守缺省。
@@ -326,8 +481,15 @@ auto plan_route(const ProxyEnvironment &environment, const TlsContext &tls, cons
         route.peer_port = decision.port();
         route.absolute_form = true;
         route.connect_with = ProxyConfig::direct();
+        route.proxy_label = decision.host();
     } else {
         route.connect_with = decision;
+        // 只有 HTTP 代理的隧道那一侧会有 `CONNECT` 应答可解析，也就只有它会回一句 407；SOCKS5 的子协商没有
+        // 挑战形态（凭据只能预防性给出），故不进认证环（裁决见 `net/http_auth.h` 的代理挑战条）。
+        if (decision.kind() == ProxyKind::HttpConnect) {
+            route.tunneled_via_proxy = true;
+            route.proxy_label = decision.host();
+        }
     }
     return Result<HopRoute>{std::move(route)};
 }
@@ -655,18 +817,27 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
     StageTimer budget_timer(loop_open ? policy.budget : std::optional<std::chrono::milliseconds>{},
                             TimeoutStage::Budget, sequence, wall);
     Result<Response> outcome{make_error(ErrorCode::HttpProtocolError, "send produced no outcome")};
+    // 认证环的每次交换状态：提供方取自客户端（空即整环不存在）、问过没有、代理那侧的答复。源站那侧的答复直接
+    // 并回 `origin`，故这里不留副本（口径见 `place_auth_decision`）。
+    AuthRing ring{.provider = authenticator_};
+    // 问出去的那份挑战存在交换作用域：提供方是协程出口，它的帧可能在本环放弃之后才被投递回来（见下面的契约条目）。
+    std::optional<AuthChallenge> asked_challenge;
+    // 本环要不要重跑本次尝试：递增 `attempt` 的动作被挪到重试环的尾巴上，正是为了让「问过凭据、重跑一次」
+    // 这条路不吃 `RetryPolicy::attempts` 名额（那条裁决见 `net/http_auth.h`）。
+    bool replay_for_credentials = false;
 
     // 重试环与单次交换**同帧**：`CoroTask` 不是 awaitable（`state/coroutine.h` 的 promise 永不首挂也不终挂，
     // 结果只经 `is_done()` / `result()` 轮询），故「把一次尝试抽成子协程再 co_await」在本库无对应机制——
     // 这正是本文件开头「刻意不做抽象」那条约束在重试这一层的再确认。
-    for (std::uint32_t attempt = 1;; ++attempt) {
+    for (std::uint32_t attempt = 1;;) {
         Cancellation token;
         // 墙到点即掐掉在途的这一次尝试（`Cancellation` 契约：钩子至多触发一次），随后本环据 `is_cancelled()` 收摊。
         sequence.on_cancel([token]() mutable { token.cancel(); });
         Request current = origin;  // 每次尝试都从原始请求重新发起：重定向与重放都会改写它
-        if (attempt > 1) {
-            // 上一次尝试把流式体读到了半途，本次须从原点重发。入口已判过资格的源在这里回退失败，说明它对
-            // 「能否回到原点」给了两个答案——按不可重放收摊，绝不把半截体写上线。
+        if (attempt > 1 || replay_for_credentials) {
+            // 上一次的这一趟把流式体读到了半途，本次须从原点重发。入口已判过资格的源在这里回退失败，说明它对
+            // 「能否回到原点」给了两个答案——按不可重放收摊，绝不把半截体写上线。认证环的重跑与重试的重跑在
+            // 这条判据上同构：都是「同一份请求再打一遍」，体自然也得再给一遍。
             if (auto *source = current.body_source(); source != nullptr && !source->restart()) {
                 outcome = Result<Response>{make_error(
                     ErrorCode::HttpBodyNotReplayable,
@@ -674,6 +845,7 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                 break;
             }
         }
+        replay_for_credentials = false;
         advertise_accept_encoding(current);  // 缺省宣告与解码能力同源；调用方已自带则不动
         // 解压产物上限缺省跟随线上体上限：两枚旋钮各管一段字节，未显式收紧即「压缩不该让物化结果更多」。
         // 跟随的是「设了没有」而非数值——两枚都未设即恒不设限（`nullopt`）。
@@ -684,6 +856,10 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         int hops = 0;
         Result<Response> one{make_error(ErrorCode::HttpProtocolError, "send produced no outcome")};
         const StreamOptions options;
+        // 认证环要在本环的收尾处读「最近一跳路由向谁、那次 `CONNECT` 回了什么」，而这两件事实生在逐跳作用域里，
+        // 故提到尝试级留一份副本（`negotiation` 每跳开头重置，只有走隧道那一跳会被传输层写入）。
+        HopRoute hop;
+        detail::ProxyNegotiation negotiation;
 
         // 进度闸随协程帧存活；回调取自首跳请求，重定向后的各跳沿用同一份观测口（与 `timeouts` / 上限同纪律：
         // 发起侧选项在入口取一次，逐跳不重读）。下面几枚计数是**本跳**口径，每跳开头重置。
@@ -734,8 +910,24 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                 break;
             }
             const HopRoute &route = routed.value();
+            hop = route;
+            negotiation = detail::ProxyNegotiation{};
+            if (hop.tunneled_via_proxy) {
+                // 答复回给 `CONNECT`：代理那句 407 说的是「这条隧道先付凭据」，故下一次建隧道时把答复写进
+                // `Proxy-Authorization`（覆写优先级见 `detail::wire::make_connect_request`）。
+                negotiation.proxy_authorization = ring.proxy_answer.value_or(std::string{});
+            }
             // ── 写出物化：请求头部 + 体（render_head 失败即字段畸形，一条连接都不发起、原样交出）。
-            auto head = current.render_head(route.absolute_form);
+            //    代理答复只写面向代理那一侧：转发腿从一份带答复的副本渲染，`current` 本身不沾它——否则本尝试的
+            //    下一跳换成直连或隧道时，那份代理凭据就被送到源站去了（口径见 `net/http_auth.h` 的代理挑战条）。
+            auto outbound = std::optional<Request>{};
+            const Request *on_wire = &current;
+            if (route.absolute_form && ring.proxy_answer.has_value()) {
+                outbound = current;
+                outbound->set_header(auth_credential_field(true), *ring.proxy_answer);
+                on_wire = &outbound.value();
+            }
+            auto head = on_wire->render_head(route.absolute_form);
             if (!head) {
                 one = Result<Response>{head.error()};
                 break;
@@ -754,8 +946,9 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
             auto late = std::make_shared<std::vector<char>>();
             StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
             if (target.is_secure()) {
-                auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
-                                                                options, token);
+                auto plain =
+                    co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port, options,
+                                                       token, hop.tunneled_via_proxy ? &negotiation : nullptr);
                 if (!plain) {
                     one = Result<Response>{plain.error()};
                     break;
@@ -772,8 +965,9 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
                     return detail::await_read_within(*holder, capacity, window, late);
                 };
             } else {
-                auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
-                                                                options, token);
+                auto plain =
+                    co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port, options,
+                                                       token, hop.tunneled_via_proxy ? &negotiation : nullptr);
                 if (!plain) {
                     one = Result<Response>{plain.error()};
                     break;
@@ -1048,6 +1242,63 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         }
         gate.finish();
 
+        // ── 认证环（三环次序：策略环 → 认证环 → 重试环之内层；五条裁决见 `net/http_auth.h`）。两个触发面在此
+        //    合一：应答里的 401 / 407，与被代理拒掉的 `CONNECT`（那次失败带着那句挑战原文回来，见
+        //    `detail::ProxyNegotiation`）。问到凭据就原地重跑本次尝试——不吃 `attempts` 名额，故本块排在重试
+        //    裁决之前、而递增 `attempt` 的动作在环尾。物化与流式两条路各写一遍这段（`co_await` 出不了普通函数，
+        //    口径同本文件开头的「刻意不做抽象」）。
+        if (ring.provider != nullptr && !ring.asked) {
+            std::optional<AuthChallenge> challenge;
+            if (one && is_auth_challenge(one.value().status())) {
+                const bool from_proxy = one.value().status() == 407;
+                const auto fields = one.value().headers().values(auth_challenge_field(from_proxy));
+                const std::string_view host =
+                    from_proxy ? std::string_view{hop.proxy_label}
+                               : (current.url().has_value() ? current.url()->host() : std::string_view{});
+                challenge = make_auth_challenge(current, fields, one.value().status(), host);
+            } else if (!one && hop.tunneled_via_proxy && negotiation.status == 407) {
+                challenge = make_auth_challenge(current, negotiation.authenticate, negotiation.status, hop.proxy_label);
+            }
+            if (challenge.has_value()) {
+                ring.asked = true;  // 问过即不再问：带着新凭据重跑后又吃一次挑战，交出的就是那一份
+                // 挑战存在**交换作用域**上而不是本块的临时量里：提供方若在问答中途挂起、又被本环放弃（超时或
+                // 取消），它那帧协程仍可能引用这份事实（`Authenticator::authenticate` 的存活期契约）。
+                asked_challenge = std::move(*challenge);
+                auto task = ring.provider->authenticate(*asked_challenge);
+                for (std::size_t polls = 0; !task.is_done() && polls < AURORA_AUTH_POLL_CEILING; ++polls) {
+                    co_await detail::await_sleep(AURORA_AUTH_POLL_INTERVAL, token);
+                }
+                if (!task.is_done()) {
+                    outcome = Result<Response>{make_error(ErrorCode::HttpTimeout, "the authenticator never answered")};
+                    break;
+                }
+                // 双层解包：`CoroTask<Result<T>>::result()` 求得 `Result<Result<T>>`——外层是「这帧协程有没有
+                // 跑完」、内层才是「提供方有没有给出凭据」，两枚失败各有各的说法，不得合流。
+                const auto outer = task.result();
+                if (!outer) {
+                    outcome = Result<Response>{make_error(ErrorCode::RuntimeCoroutineException, outer.error().message)};
+                    break;
+                }
+                const auto &answered = outer.value();
+                if (!answered) {
+                    // 提供方自己的失败就是本次交换的结局：拿一份没到手的凭据去重发，只是把一次明确的失败拖成
+                    // 一次含糊的 401。
+                    outcome = Result<Response>{answered.error()};
+                    break;
+                }
+                const auto reply = place_auth_decision(*asked_challenge, answered.value(), origin, ring);
+                if (reply == AuthReply::Malformed) {
+                    outcome = Result<Response>{make_error(ErrorCode::HttpRequestInvalid,
+                                                          "the authenticator answered with a field carrying CR or LF")};
+                    break;
+                }
+                if (reply != AuthReply::Declined) {
+                    replay_for_credentials = true;
+                    continue;  // 回到本环开头重跑：新令牌、新的逐尝试 `total`、原始请求带上补好的凭据
+                }
+            }
+        }
+
         // ── 重试裁决。非 2xx 是「成功的 Result」：状态码归 `should_retry_status` 判，尝试耗尽时把最后那次
         //    应答原样交出，绝不折成新错误；传输失败归 `should_retry_error` 判，耗尽时交出的同样是最后一枚
         //    底层错误。两枚时限旋钮的分工落在这里：`Timeouts::total` 逐尝试重新计时，`RetryPolicy::budget`
@@ -1073,6 +1324,9 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
         if (sequence.is_cancelled()) {
             break;  // 墙在退避等待期间到点：剩余尝试不再发起
         }
+        // 递增留在这里，正是为了让上面那条认证重跑 `continue` 绕过它：补一次凭据不算打了一次，
+        // `RetryPolicy::attempts` 管的是「服务暂时不行，再打几次」。
+        ++attempt;
     }
 
     // 被跨尝试的墙掐掉的尝试以 `net-cancelled` 形态抵达，那既不是对端说的也不是本库造的码——按 `total`
@@ -1135,16 +1389,21 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
     HeadGuardSink guard{sink};  // 只借用：宿主由调用方持有，本壳随本帧存活到全部尝试结束
     DataSink &outlet = loop_open ? static_cast<DataSink &>(guard) : sink;
     Result<StreamOutcome> outcome{make_error(ErrorCode::HttpProtocolError, "open_stream produced no outcome")};
+    // 认证环同 `send`：每次交换一份状态、问过不再问、代理答复只留一份在环上（那条路下面另说）。
+    AuthRing ring{.provider = authenticator_};
+    std::optional<AuthChallenge> asked_challenge;
+    bool replay_for_credentials = false;
 
     // 重试环与单次交换**同帧**：`CoroTask` 不是 awaitable（`state/coroutine.h` 的 promise 永不首挂也不终挂，
     // 结果只经 `is_done()` / `result()` 轮询），故「把一次尝试抽成子协程再 co_await」在本库无对应机制。
-    for (std::uint32_t attempt = 1;; ++attempt) {
+    for (std::uint32_t attempt = 1;;) {
         Cancellation token;
         // 墙到点即掐掉在途的这一次尝试（`Cancellation` 契约：钩子至多触发一次），随后本环据 `is_cancelled()` 收摊。
         sequence.on_cancel([token]() mutable { token.cancel(); });
         Request current = origin;
-        if (attempt > 1) {
-            // 上一次尝试把流式体读到了半途，本次须从原点重发；回退失败即按不可重放收摊（与 `send` 同判据）。
+        if (attempt > 1 || replay_for_credentials) {
+            // 上一次把流式体读到了半途，本次须从原点重发；回退失败即按不可重放收摊（与 `send` 同判据，认证环的
+            // 重跑同样算「再发一遍」）。
             if (auto *source = current.body_source(); source != nullptr && !source->restart()) {
                 outcome = Result<StreamOutcome>{make_error(
                     ErrorCode::HttpBodyNotReplayable,
@@ -1152,6 +1411,7 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                 break;
             }
         }
+        replay_for_credentials = false;
         advertise_accept_encoding(current);  // 缺省宣告与解码能力同源；调用方已自带则不动
         // 解压产物上限**只取 `max_decompressed_bytes()`**，不像 `send` 那样缺省跟随 `max_body_bytes()`：后者是
         // 物化路径的内存闸，流式路径不物化，拿它当解压上限会让「流式下载一个大压缩包」必须去调大一枚与内存无关
@@ -1162,6 +1422,10 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
         int hops = 0;
         Result<StreamOutcome> one{make_error(ErrorCode::HttpProtocolError, "open_stream produced no outcome")};
         const StreamOptions options;
+        // 逐跳的路由与 `CONNECT` 补充事实留一份到尝试级，供下面两处认证问答读（口径同 `send`）。
+        HopRoute hop;
+        detail::ProxyNegotiation negotiation;
+        bool auth_hop = false;  // 本次尝试被认证问答掐住：头部尚未交出，凭据到位后整次重跑
 
         detail::ProgressGate gate(current.on_progress(), progress_frame_source_);
         std::uint64_t wire_bytes = 0;  // 跨全部跳、分帧解出的线上字节（解压前口径）
@@ -1212,8 +1476,22 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                 break;
             }
             const HopRoute &route = routed.value();
+            hop = route;
+            negotiation = detail::ProxyNegotiation{};
+            if (hop.tunneled_via_proxy) {
+                negotiation.proxy_authorization = ring.proxy_answer.value_or(std::string{});
+            }
             // ── 写出物化：请求头部 + 体（与 `send` 同判据，含「挂了回调才分块写」那条）。
-            auto head = current.render_head(route.absolute_form);
+            //    代理答复只写面向代理那一侧，且从一份副本渲染（同 `send`：`current` 不沾它，后续跳换了直连或
+            //    隧道就不会把代理凭据送出去）。
+            auto outbound = std::optional<Request>{};
+            const Request *on_wire = &current;
+            if (route.absolute_form && ring.proxy_answer.has_value()) {
+                outbound = current;
+                outbound->set_header(auth_credential_field(true), *ring.proxy_answer);
+                on_wire = &outbound.value();
+            }
+            auto head = on_wire->render_head(route.absolute_form);
             if (!head) {
                 one = Result<StreamOutcome>{head.error()};
                 break;
@@ -1230,8 +1508,9 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
             auto late = std::make_shared<std::vector<char>>();
             StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
             if (target.is_secure()) {
-                auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
-                                                                options, token);
+                auto plain =
+                    co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port, options,
+                                                       token, hop.tunneled_via_proxy ? &negotiation : nullptr);
                 if (!plain) {
                     one = Result<StreamOutcome>{plain.error()};
                     break;
@@ -1248,8 +1527,9 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                     return detail::await_read_within(*holder, capacity, window, late);
                 };
             } else {
-                auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
-                                                                options, token);
+                auto plain =
+                    co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port, options,
+                                                       token, hop.tunneled_via_proxy ? &negotiation : nullptr);
                 if (!plain) {
                     one = Result<StreamOutcome>{plain.error()};
                     break;
@@ -1471,6 +1751,67 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
                         not_modified_hop = true;
                         break;
                     }
+                    // ── 认证问答（三环次序与五条裁决见 `net/http_auth.h`）。流式路径的难点在位置：重播资格在
+                    //    `on_head` 那一次转发时就耗尽，首段字节交出去收不回来，故本环**只能问在交付之前**、且在
+                    //    协程体内就地展开（`co_await` 出不了普通函数，口径同本文件开头的「刻意不做抽象」）。
+                    //    三种结局：拿到凭据即掐掉本跳整次重跑；提供方拒答就往下走，那枚 401/407 是对端给的答案、
+                    //    照原版交给宿主；其余（超时 / 提供方失败 / 答复含 CR 或 LF）按错误收摊，绝不交付半份头。
+                    if (ring.provider != nullptr && !ring.asked && is_auth_challenge(assembler.head().status)) {
+                        const bool from_proxy = assembler.head().status == 407;
+                        const std::string_view host =
+                            current.url().has_value() ? current.url()->host() : std::string_view{};
+                        auto challenge = make_auth_challenge(
+                            current, assembler.head().headers.values(auth_challenge_field(from_proxy)),
+                            assembler.head().status, host);
+                        ring.asked = true;  // 问过即不再问：重跑后又吃一次挑战，交出的就是那一份应答
+                        // 挑战存在**交换作用域**上而不是本块的临时量里：提供方若在问答中途挂起、又被本环放弃
+                        // （超时或取消），它那帧协程仍可能引用这份事实（`Authenticator::authenticate` 的存活期契约）。
+                        asked_challenge = std::move(challenge);
+                        auto task = ring.provider->authenticate(*asked_challenge);
+                        for (std::size_t polls = 0; !task.is_done() && polls < AURORA_AUTH_POLL_CEILING; ++polls) {
+                            co_await detail::await_sleep(AURORA_AUTH_POLL_INTERVAL, token);
+                        }
+                        const std::optional<AuthReply> reply = [&]() -> std::optional<AuthReply> {
+                            if (!task.is_done()) {
+                                one = Result<StreamOutcome>{
+                                    make_error(ErrorCode::HttpTimeout, "the authenticator never answered")};
+                                return std::nullopt;
+                            }
+                            // 双层解包：`CoroTask<Result<T>>::result()` 求得 `Result<Result<T>>`——外层是「这帧协程
+                            // 有没有跑完」、内层才是「提供方有没有给出凭据」，两枚失败各有各的说法，不得合流。
+                            const auto outer = task.result();
+                            if (!outer) {
+                                one = Result<StreamOutcome>{
+                                    make_error(ErrorCode::RuntimeCoroutineException, outer.error().message)};
+                                return std::nullopt;
+                            }
+                            const auto &answered = outer.value();
+                            if (!answered) {
+                                // 提供方自己的失败就是本次交换的结局：拿一份没到手的凭据去重发，只是把一次明确的
+                                // 失败拖成一次含糊的 401。
+                                one = Result<StreamOutcome>{answered.error()};
+                                return std::nullopt;
+                            }
+                            const auto placed = place_auth_decision(*asked_challenge, answered.value(), origin, ring);
+                            if (placed == AuthReply::Malformed) {
+                                one = Result<StreamOutcome>{
+                                    make_error(ErrorCode::HttpRequestInvalid,
+                                               "the authenticator answered with a field carrying CR or LF")};
+                                return std::nullopt;
+                            }
+                            return placed;
+                        }();
+                        if (!reply.has_value()) {
+                            halted = true;
+                            break;
+                        }
+                        if (reply != AuthReply::Declined) {
+                            auth_hop = true;
+                            replay_for_credentials = true;
+                            halted = true;
+                            break;  // 头部尚未交出、字节尚未交付：本跳作废，回到尝试环开头带凭据重跑
+                        }
+                    }
                     std::vector<detail::Coding> chain;  // 应用次序；无体应答恒空（不校验编码名，与 `send` 同判据）
                     if (assembler.framing() != wire::BodyFraming::None) {
                         std::string list;
@@ -1648,6 +1989,51 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
 
         gate.finish();
 
+        // ── 隧道那一侧的问答：代理把 `CONNECT` 拒成 407 时，那次失败带着挑战原文回来（见
+        //    `detail::ProxyNegotiation`），此时还没有头部可问，故本块的地位等同 `send` 里的同一处。答复只写
+        //    `Proxy-Authorization` 一份、且只上面向代理那条腿（`place_auth_decision` 的分工，口径同 `send`）。
+        if (!auth_hop && ring.provider != nullptr && !ring.asked && !one && hop.tunneled_via_proxy &&
+            negotiation.status == 407) {
+            auto challenge =
+                make_auth_challenge(current, negotiation.authenticate, negotiation.status, hop.proxy_label);
+            ring.asked = true;  // 问过即不再问：重跑后又吃一次挑战，交出的就是那一份应答
+            asked_challenge = std::move(challenge);  // 存活期契约同上：挑战住在交换作用域而非本块临时量里
+            auto task = ring.provider->authenticate(*asked_challenge);
+            for (std::size_t polls = 0; !task.is_done() && polls < AURORA_AUTH_POLL_CEILING; ++polls) {
+                co_await detail::await_sleep(AURORA_AUTH_POLL_INTERVAL, token);
+            }
+            if (!task.is_done()) {
+                outcome = Result<StreamOutcome>{make_error(ErrorCode::HttpTimeout, "the authenticator never answered")};
+                break;
+            }
+            const auto outer = task.result();  // 双层解包：外层是帧跑完否，内层才是提供方给没给凭据
+            if (!outer) {
+                outcome =
+                    Result<StreamOutcome>{make_error(ErrorCode::RuntimeCoroutineException, outer.error().message)};
+                break;
+            }
+            const auto &answered = outer.value();
+            if (!answered) {
+                outcome = Result<StreamOutcome>{answered.error()};
+                break;
+            }
+            const auto reply = place_auth_decision(*asked_challenge, answered.value(), origin, ring);
+            if (reply == AuthReply::Malformed) {
+                outcome = Result<StreamOutcome>{make_error(
+                    ErrorCode::HttpRequestInvalid, "the authenticator answered with a field carrying CR or LF")};
+                break;
+            }
+            if (reply != AuthReply::Declined) {
+                replay_for_credentials = true;
+                continue;  // 回到本环开头重跑：新令牌、新的逐尝试 `total`、隧道带上补好的代理凭据
+            }
+        }
+
+        // 头部问答在协程体内就地掐掉了本跳（那里说明过为什么只能问在那一步）：凭据已就位，整次重跑。
+        if (auth_hop) {
+            continue;
+        }
+
         // ── 重试裁决（与 `send` 同判据，另加两条流式专属资格）。非 2xx 仍是成功的 Result：尝试耗尽时把最后
         //    那次应答连同已交出的字节一起交出，绝不折成新错误。流式路径的资格在 `on_head` 那一次转发时即耗尽：
         //    首段字节交出去就收不回来，重播等于让宿主把已写下那段再写一遍；`stopped_by_sink` 是宿主自己收的摊，
@@ -1674,6 +2060,9 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
         if (sequence.is_cancelled()) {
             break;  // 墙在退避等待期间到点：剩余尝试不再发起
         }
+        // 递增只发生在「这一次算重试环的一次尝试」那条路上：认证问答的重跑从上面直接 `continue`，绕开这里，
+        // 故它不吃 `RetryPolicy::attempts` 名额（那条裁决见 `net/http_auth.h`）。
+        ++attempt;
     }
 
     // 被跨尝试的墙掐掉的尝试以 `net-cancelled` 形态抵达，那既不是对端说的也不是本库造的码——按 `total`

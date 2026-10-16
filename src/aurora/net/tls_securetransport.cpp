@@ -790,6 +790,14 @@ class SecureTransportBackend final : public TlsBackend {
 
 auto SecureTransportBackend::create(const TlsContext &context, std::string_view server_name)
     -> Result<std::unique_ptr<SecureTransportBackend>> {
+    // PEM 形态的客户端身份在本腿没有通路：`SSLSetCertificate` 要的是 `SecIdentityRef`，而它只能由钥匙串
+    // 或 PKCS#12 导入得到。此处落显式失败（`net-platform-unavailable`，口径见 `net/tls.h` 的支持腿说明），
+    // 而不是收下字段再静默不带证书——静默会让调用方以为 mTLS 已生效，而现场只是对端拒绝了握手。
+    if (context.client_certificate_pem || context.client_private_key_pem) {
+        return tls_error(ErrorCode::NetPlatformUnavailable,
+                         "this platform's TLS engine cannot install a PEM client identity; give "
+                         "client_identity as a PKCS#12 archive on this leg");
+    }
     std::unique_ptr<SecureTransportBackend> backend{new SecureTransportBackend()};
     backend->host_display_ = std::string{server_name};
     backend->insecure_ = context.allow_insecure_certificate;

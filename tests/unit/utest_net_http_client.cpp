@@ -41,6 +41,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -49,10 +50,12 @@
 #include <vector>
 
 #include "aurora/core/error_codes.h"
+#include "aurora/core/headers.h"
 #include "aurora/core/result.h"
 #include "aurora/net/blocking.h"
 #include "aurora/net/detail/http_request_id.h"
 #include "aurora/net/http.h"
+#include "aurora/net/http_auth.h"
 #include "aurora/net/http_client.h"
 #include "aurora/net/http_multipart.h"
 #include "aurora/net/policy.h"
@@ -67,8 +70,14 @@ namespace aurora::test_cases::utest_net_http_client {
 namespace {
 
 using aurora::CoroTask;
+using aurora::ErrorCode;
 using aurora::Result;
 using aurora::net::NetPolicy;
+using aurora::net::http::AuthChallenge;
+using aurora::net::http::AuthDecision;
+using aurora::net::http::Authenticator;
+using aurora::net::http::BasicAuthenticator;
+using aurora::net::http::BearerAuthenticator;
 using aurora::net::http::ByteRange;
 using aurora::net::http::CacheOptions;
 using aurora::net::http::Client;
@@ -593,6 +602,115 @@ class ScriptedBody final : public aurora::net::http::BodySource {
     std::size_t cursor_ = 0;  ///< 已交出的段下标
     std::size_t restarts_ = 0;  ///< 成功回到原点的次数
     std::size_t cap_ = static_cast<std::size_t>(-1);  ///< 成功回退的次数上限
+};
+
+/// @brief 逐条连接把收到的请求头部块留档、随后按给定应答收摊的对端脚本。
+///
+/// 认证环的判据问的是「第二次带上了什么、第一次有没有少带」，而重跑是同一条监听口上的**另一条连接**，故
+/// 档案必须按连接分条而不是互相覆盖（`record_then_reply()` 只留最后一条，那一形态证不出次序）。
+/// @param filed 每条连接一份档案（脚本线程追加）。
+/// @param guard 档案的锁。
+/// @param payload 读满一个头部块后写出的应答字节。
+/// @return 对端脚本。
+[[nodiscard]] auto record_each_then_reply(std::vector<std::string> &filed, std::mutex &guard, std::string payload)
+    -> PeerScript {
+    return [&filed, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
+                                                          PeerStop &stop) -> void {
+        (void)socket.set_io_timeout(std::chrono::milliseconds{200});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;
+            }
+            seen.append(buffer.data(), read.value());
+            if (seen.find("\r\n\r\n") != std::string::npos) {
+                break;  // 头部块到位即应答（本套件的认证用例都不带请求体）
+            }
+        }
+        {
+            const std::scoped_lock held(guard);
+            filed.push_back(seen);
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+    };
+}
+
+/// @brief 取已留档的连接条数（脚本线程写入，用例线程在每一步之前等有界变化）。
+/// @param filed 档案。
+/// @param guard 档案的锁。
+/// @return 条数。
+[[nodiscard]] auto filed_count(const std::vector<std::string> &filed, std::mutex &guard) -> std::size_t {
+    const std::scoped_lock held(guard);
+    return filed.size();
+}
+
+/// @brief 取第 `index` 条连接的档案（小写化后的副本，字段名比较不依赖大小写）。
+/// @param filed 档案。
+/// @param guard 档案的锁。
+/// @param index 连接序号（从 0 起）。
+/// @return 该条请求的头部块文本；还没留到那一条即致命失败。
+[[nodiscard]] auto filed_request(const std::vector<std::string> &filed, std::mutex &guard, std::size_t index)
+    -> std::string {
+    std::vector<std::string> copy;
+    {
+        const std::scoped_lock held(guard);
+        copy = filed;
+    }
+    AURORA_TEST_REQUIRE_MSG(index < copy.size(), "the peer has not filed that many requests");
+    return lowered(copy.at(index));
+}
+
+/// @brief 拼一份源站「要凭据」的 401：挑战原文 + 一枚可读的体（体用来指认交出的是哪一份 401）。
+/// @param challenge `WWW-Authenticate` 的字段值原文。
+/// @param body 消息体文本。
+/// @return 应答字节。
+[[nodiscard]] auto challenge_401(std::string_view challenge, std::string_view body = "one") -> std::string {
+    return "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: " + std::string{challenge} +
+           "\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + std::string{body};
+}
+
+/// @brief 只回一份错误的提供方：换取没换成，那份错误就是本次交换的结局。
+///
+/// 存在的理由是「提供方自身失败」这条路只能由派生类造出来——内置件恒成功，而本库不拿一份没到手的凭据去重发
+/// 这条裁决必须有用例。
+class RefusingProvider final : public Authenticator {
+  public:
+    /// @brief 挂一份给定的错误并交出它。
+    /// @param code 错误码。
+    /// @param reason 错误文本。
+    RefusingProvider(ErrorCode code, std::string reason) : code_(code), reason_(std::move(reason)) {}
+
+    /// @brief 不答复，只报错。
+    /// @return 协程任务：恒失败。
+    ///
+    /// 本件不读挑战，故形参不留名；挑战由发起侧持有、帧只借用（契约见 `net/http_auth.h`）。
+    /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters, readability-named-parameter)
+    [[nodiscard]] auto authenticate(const AuthChallenge &) const -> CoroTask<Result<AuthDecision>> override {
+        co_return Result<AuthDecision>{aurora::make_error(code_, reason_)};
+    }
+
+  private:
+    ErrorCode code_;  ///< 要交出的错误码
+    std::string reason_;  ///< 错误文本
+};
+
+/// @brief 答复里带上 CRLF 的提供方：那是写不上线的字段，本环要在线上之前拒掉它。
+class InjectingProvider final : public Authenticator {
+  public:
+    /// @brief 交出一枚借凭据之名往这条连接里塞话的答复。
+    /// @return 协程任务：恒成功，载荷是那枚畸形答复。
+    ///
+    /// 本件不读挑战，故形参不留名；挑战由发起侧持有、帧只借用（契约见 `net/http_auth.h`）。
+    /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters, readability-named-parameter)
+    [[nodiscard]] auto authenticate(const AuthChallenge &) const -> CoroTask<Result<AuthDecision>> override {
+        auto headers = aurora::Headers{};
+        // 值里带 CRLF：写出去就是两条字段乃至一条请求行——那是把「对端要凭据」变成「对端可以借这只手往这条
+        // 连接里塞话」。
+        headers.set("Authorization", "Basic QQ==\r\nX-Injected: 1");
+        co_return Result<AuthDecision>{AuthDecision{std::move(headers)}};
+    }
 };
 
 }  // namespace
@@ -2299,6 +2417,261 @@ AURORA_TEST_CASE(a_multipart_form_goes_out_as_one_streaming_body) {
     // 两个部件的长度都取得到，故这次上传走 `Content-Length` 而不是分块（口径见 `detail::plan_request_body`）。
     AURORA_TEST_CHECK_NE(sent.find("Content-Length: "), std::string::npos);
     AURORA_TEST_CHECK_EQ(sent.find("Transfer-Encoding"), std::string::npos);
+}
+
+AURORA_TEST_CASE(send_answers_a_source_challenge_and_replays_the_attempt) {
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::vector<std::string> filed;
+    // 同一条监听口上两条连接：第一次没凭据所以拒，第二次带上了才放行。换目标证不出「重跑的是同一次尝试」。
+    ScriptedPeer peer(per_connection({record_each_then_reply(filed, guard, challenge_401(R"(Basic realm="api")")),
+                                      record_each_then_reply(filed, guard, service_ok())}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.authenticator(std::make_shared<BasicAuthenticator>("Aladdin", "open sesame"));
+
+    const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+    AURORA_TEST_REQUIRE(aurora::test::net::drive_until("both requests filed", [&filed, &guard] {
+                            return filed_count(filed, guard) == 2;
+                        }).satisfied);
+    // 第一趟不带凭据（那是调用方的表达，本环不预防性地送），第二趟才补上——补的位置是 `Authorization`，
+    // 且同名以答复为准（这里请求上本来没有那枚字段，故只数一次）。
+    AURORA_TEST_CHECK_EQ(filed_request(filed, guard, 0).find("authorization:"), std::string::npos);
+    const auto replayed = filed_request(filed, guard, 1);
+    AURORA_TEST_CHECK_NE(replayed.find("authorization: basic "), std::string::npos);
+    AURORA_TEST_CHECK_EQ(count_occurrences(replayed, "authorization:"), std::size_t{1});
+}
+
+AURORA_TEST_CASE(a_credential_replay_does_not_consume_a_retry_attempt) {
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::vector<std::string> filed;
+    // 三条连接、两种拒绝：401（认证环的活）、503（重试环的活）、200。
+    ScriptedPeer peer(per_connection({record_each_then_reply(filed, guard, challenge_401(R"(Basic realm="api")")),
+                                      record_each_then_reply(filed, guard, service_busy()),
+                                      record_each_then_reply(filed, guard, service_ok())}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "pw"));
+    client.retry_policy(RetryPolicy{.attempts = 2,
+                                    .base = std::chrono::milliseconds{10},
+                                    .max_backoff = std::chrono::milliseconds{10},
+                                    .jitter = 0.0});
+
+    const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    // 注入凭据的重跑不占 `attempts` 名额：占掉的话这次尝试在 503 处就耗尽配额、交出的是那一份 503 而不是
+    // 200（那条裁决的理由见 `net/http_auth.h`：把「没带凭据」算成一次失败，开了重试的调用方永远学不会带凭据）。
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 3);
+    AURORA_TEST_REQUIRE(aurora::test::net::drive_until("all three requests filed", [&filed, &guard] {
+                            return filed_count(filed, guard) == 3;
+                        }).satisfied);
+    // 凭据并回原始请求，故第二次尝试（重试环的那一趟）也带着它——不是每趟都重新问一遍。
+    AURORA_TEST_CHECK_EQ(filed_request(filed, guard, 0).find("authorization:"), std::string::npos);
+    AURORA_TEST_CHECK_NE(filed_request(filed, guard, 1).find("authorization:"), std::string::npos);
+    AURORA_TEST_CHECK_NE(filed_request(filed, guard, 2).find("authorization:"), std::string::npos);
+}
+
+AURORA_TEST_CASE(a_second_challenge_is_handed_over_without_a_second_injection) {
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::vector<std::string> filed;
+    // 两次都拒，但体的文本不同：交出的必须是**后**那一份，而不是第一份挑战或某个折中的错误。
+    ScriptedPeer peer(
+        per_connection({record_each_then_reply(filed, guard, challenge_401(R"(Basic realm="api")", "one")),
+                        record_each_then_reply(filed, guard, challenge_401(R"(Basic realm="admin")", "two"))}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "wrong password"));
+
+    const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{401});
+    AURORA_TEST_CHECK_EQ(as_body_text(response.value()), std::string{"two"});
+    // 一次交换至多注入一次：带着新凭据重跑后又吃一次 401，说明这份凭据不对，本环不再问第二遍（挑战-重发的
+    // 死循环是这一类实现最典型的故障形态，而 `accepts() == 2` 就是它没发生的直接证据）。
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(a_declined_challenge_delivers_the_peers_own_401) {
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::vector<std::string> filed;
+    ScriptedPeer peer(record_each_then_reply(filed, guard, challenge_401(R"(Basic realm="api")", "gone")));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    // 内置件只答被点名的那一枚方案：对端只给 `Basic`，`Bearer` 提供方答空。
+    client.authenticator(std::make_shared<BearerAuthenticator>("tok"));
+
+    const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    // 空答复就是「放弃」，唯一动作是原样交出对端说的那份 401——既不折成错误，也不再打一次。
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{401});
+    AURORA_TEST_CHECK_EQ(as_body_text(response.value()), std::string{"gone"});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+    AURORA_TEST_CHECK_EQ(filed_request(filed, guard, 0).find("authorization:"), std::string::npos);
+}
+
+AURORA_TEST_CASE(a_provider_failure_ends_the_exchange) {
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, challenge_401(R"(Basic realm="api")")));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.authenticator(
+        std::make_shared<RefusingProvider>(ErrorCode::HttpTimeout, "the token endpoint never answered"));
+
+    const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
+    // 提供方自己的失败就是本次交换的结局：拿一份没到手的凭据去重发，只是把一次明确的失败拖成一次含糊的 401。
+    AURORA_TEST_REQUIRE(bool(!response));
+    AURORA_TEST_CHECK_EQ(response.error().code, std::string{"http-timeout"});
+    AURORA_TEST_CHECK_NE(response.error().message.find("token endpoint"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+}
+
+AURORA_TEST_CASE(a_credential_with_a_control_byte_is_refused_before_the_wire) {
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::vector<std::string> filed;
+    ScriptedPeer peer(record_each_then_reply(filed, guard, challenge_401(R"(Basic realm="api")")));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.authenticator(std::make_shared<InjectingProvider>());
+
+    const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
+    AURORA_TEST_REQUIRE(bool(!response));
+    AURORA_TEST_CHECK_EQ(response.error().code, std::string{"http-request-invalid"});
+    // 当场拒掉，而不是等下一跳的 `render_head()` 才发现：第二条连接一次都不该发起。
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+    AURORA_TEST_CHECK_EQ(filed_count(filed, guard), std::size_t{1});
+}
+
+AURORA_TEST_CASE(a_cross_origin_redirect_strips_the_credential_fields) {
+    const aurora::test::net::HostDriven host;
+    std::mutex second_guard;
+    std::vector<std::string> second_filed;
+    ScriptedPeer origin_b(record_each_then_reply(second_filed, second_guard, service_ok()));
+    AURORA_TEST_REQUIRE(origin_b.valid());
+    // 三条应答按连接次序排：① 换 origin 的 302（指向另一台）、② 同 origin 的 302（相对引用）、③ 那一跳的 200。
+    const std::string across = "HTTP/1.1 302 Found\r\nLocation: " + loopback_url(origin_b.port(), "/v1/items") +
+                               "\r\nContent-Length: 0\r\n\r\n";
+    std::mutex first_guard;
+    std::vector<std::string> first_filed;
+    ScriptedPeer origin_a(per_connection({record_each_then_reply(first_filed, first_guard, across),
+                                          record_each_then_reply(first_filed, first_guard,
+                                                                 "HTTP/1.1 302 Found\r\nLocation: /v1/other\r\n"
+                                                                 "Content-Length: 0\r\n\r\n"),
+                                          record_each_then_reply(first_filed, first_guard, service_ok())}));
+    AURORA_TEST_REQUIRE(origin_a.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    auto declared = Request::get(loopback_url(origin_a.port(), "/v1/items"));
+    declared.header("Authorization", "Basic ZZ==");
+    declared.header("Cookie", "session=abc");
+    declared.header("X-Keep", "yes");
+
+    // 换 origin（方案 / 主机 / 有效端口任一不同）：两枚凭据字段剥掉不带，其余字段照常跟着走。
+    const auto crossed = send_and_drive(client, declared);
+    AURORA_TEST_REQUIRE_MSG(bool(crossed), crossed ? std::string{} : crossed.error().message);
+    AURORA_TEST_CHECK_EQ(crossed.value().status(), std::uint16_t{200});
+    AURORA_TEST_REQUIRE(aurora::test::net::drive_until("the other origin filed it", [&second_filed, &second_guard] {
+                            return filed_count(second_filed, second_guard) == 1;
+                        }).satisfied);
+    const auto stranger = filed_request(second_filed, second_guard, 0);
+    AURORA_TEST_CHECK_EQ(stranger.find("authorization:"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(stranger.find("cookie:"), std::string::npos);
+    AURORA_TEST_CHECK_NE(stranger.find("x-keep: yes"), std::string::npos);
+
+    // 同 origin 的跳原样带走：上一台给的口令不该跟着 302 送到另一台机器，但同一台的另一条路径没有理由收不到。
+    const auto within = send_and_drive(client, declared);
+    AURORA_TEST_REQUIRE_MSG(bool(within), within ? std::string{} : within.error().message);
+    AURORA_TEST_CHECK_EQ(within.value().status(), std::uint16_t{200});
+    AURORA_TEST_REQUIRE(
+        aurora::test::net::drive_until("the same origin filed the second hop", [&first_filed, &first_guard] {
+            return filed_count(first_filed, first_guard) >= 3;
+        }).satisfied);
+    const auto hop = filed_request(first_filed, first_guard, 2);
+    AURORA_TEST_CHECK_NE(hop.find("authorization: basic "), std::string::npos);
+    AURORA_TEST_CHECK_NE(hop.find("cookie: session=abc"), std::string::npos);
+}
+
+AURORA_TEST_CASE(two_credentials_never_read_each_others_cache_entry) {
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("shared"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    auto first = Request::get(url);
+    first.header("Authorization", "Basic one==");
+    auto same = Request::get(url);
+    same.header("Authorization", "Basic one==");
+    auto other = Request::get(url);
+    other.header("Authorization", "Basic two==");
+
+    // 同一份凭据读得到自己的副本：那是缓存该做的事。
+    const auto stored = send_and_drive(client, first);
+    AURORA_TEST_REQUIRE(bool(stored));
+    AURORA_TEST_CHECK_FALSE(stored.value().from_cache());
+    const auto hit = send_and_drive(client, same);
+    AURORA_TEST_REQUIRE(bool(hit));
+    AURORA_TEST_CHECK(hit.value().from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+
+    // 换一份凭据就是另一个请求，**不依赖应答的 `Vary`**：应答没说它随凭据而变，缓存也得替凭据建键——
+    // 否则第二个调用方会读到第一份凭据换来的载荷，而那在对端眼里是一次越权。
+    const auto foreign = send_and_drive(client, other);
+    AURORA_TEST_REQUIRE(bool(foreign));
+    AURORA_TEST_CHECK_FALSE(foreign.value().from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(a_bare_copy_is_not_readable_by_a_credentialed_request) {
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("public"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    // 「没带凭据」也建键的一种取值：裸打取回的副本只对裸打可见（缺省算一枚值，见 `net/http_auth.h` 的凭据
+    // 纪律条）。上一枚用例证的是「凭据进键」，这一枚证的是「空值也进键」——只在有凭据时才建维的实现读不出
+    // 这两者的区别，却会把一份对端可能压根没打算给凭据持有者看的副本投给带凭据的请求。
+    const auto stored = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(stored));
+    AURORA_TEST_CHECK_FALSE(stored.value().from_cache());
+    const auto again = send_and_drive(client, Request::get(url));
+    AURORA_TEST_REQUIRE(bool(again));
+    AURORA_TEST_CHECK(again.value().from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+
+    auto guarded = Request::get(url);
+    guarded.header("Authorization", "Basic one==");
+    const auto credential = send_and_drive(client, std::move(guarded));
+    AURORA_TEST_REQUIRE(bool(credential));
+    AURORA_TEST_CHECK_FALSE(credential.value().from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
 
 AURORA_TEST_CASE(a_stamped_identifier_does_not_disturb_the_table) {

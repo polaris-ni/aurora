@@ -17,7 +17,8 @@
 ///   件每次为（每一跳）新建连接、应答物化后关闭，绝不为「复用」预先牺牲正确性。
 /// - **超时以 `Request::timeout()` 为准**：它是整请求时限（跨连接、TLS、读写、重定向全程），到点落
 ///   `http-timeout`；分段超时（`connect` / `read_idle`）已随之落地，重试（`RetryPolicy`）的每一次尝试各拿
-///   一份 `total`、跨全部尝试的墙另有 `RetryPolicy::budget`。认证属 §12 其余语义件。
+///   一份 `total`、跨全部尝试的墙另有 `RetryPolicy::budget`。认证（`Client::authenticator()`）是重试环内层的
+///   又一环，一次交换至多注入一次且不吃 `attempts` 名额，形态与判据见 `net/http_auth.h`。
 ///
 /// 内容编码（透明解压）在发起侧管线内完成，`Response` 交出的恒是还原后的字节：
 /// - **宣告与支持集同源**：core 注册表的 gzip / zlib / deflate 三槽均已注册时，`send` 替调用方补
@@ -95,9 +96,11 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "aurora/core/result.h"
 #include "aurora/net/http.h"
+#include "aurora/net/http_auth.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/net/policy.h"
 #include "aurora/net/proxy.h"
@@ -197,6 +200,26 @@ class Client {
     /// @brief 查看缺省重试策略。
     /// @return 策略的只读引用。
     [[nodiscard]] auto retry_policy() const -> const RetryPolicy & { return retry_; }
+
+    /// @brief 装本客户端的凭据提供方（缺省空 = 认证环整环不存在）。
+    ///
+    /// 拿到 401 / 407 时用它答一次挑战、据答复原地重跑那一次尝试；判据、三环次序与「至多注入一次」见
+    /// `net/http_auth.h`。这里**只有客户端一级**、没有逐请求旋钮，与 `retry_policy()` 的两级格局刻意不同：
+    /// 换取的凭据天然跨请求共享，而单条请求的一次性凭据早已由 `Request` 上直填 `Authorization` 覆盖。
+    ///
+    /// 提供方是**共享状态**：`Client` 的拷贝共用同一个实例（与缓存表同一格局）。一份 token 服务整段时间内
+    /// 的所有交换，拷一次就换一份凭据池既没有道理，也会让并发交换各自去换一份 token。实现方因此须自身线程
+    /// 安全——同一实例可被并发调用。
+    /// @param value 凭据提供方；空指针 = 关掉本环，401 / 407 一律原样交出。
+    /// @return 自身引用，便于链式调用。
+    auto authenticator(std::shared_ptr<Authenticator> value) -> Client & {
+        authenticator_ = std::move(value);
+        return *this;
+    }
+
+    /// @brief 查看已装的凭据提供方。
+    /// @return 已装则返回之；否则空指针（缺省，表示不答任何挑战）。
+    [[nodiscard]] auto authenticator() const -> const std::shared_ptr<Authenticator> & { return authenticator_; }
 
     /// @brief 装本客户端的链路标识缺省：是否自动补写 `X-Request-Id` 请求字段（缺省**开**）。
     ///
@@ -336,6 +359,8 @@ class Client {
     std::optional<NetPolicy> policy_;  ///< 已设的安全策略（未设 = 跟随进程级默认与保守缺省）
     std::function<std::uint64_t()> progress_frame_source_;  ///< 进度发射的帧号源（空 = 回合闸）
     RetryPolicy retry_;  ///< 缺省重试策略（attempts=1 即关闭）；逐请求由 `Request::retry_policy()` 覆盖
+    std::shared_ptr<Authenticator> authenticator_;  ///< 凭据提供方（空 = 认证环不存在）；拷贝的 Client 共用同一个
+
     bool request_id_{true};  ///< 链路标识缺省：自动补 `X-Request-Id`（逐请求由 `Request::request_id()` 定）
     CacheOptions cache_options_;  ///< 缓存口径（缺省关）；逐请求由 `Request::no_cache()` 越
     std::shared_ptr<detail::HttpResponseCache> cache_;  ///< 共享的缓存表；拷贝的 Client 共用同一张

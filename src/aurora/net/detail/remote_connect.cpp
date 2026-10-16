@@ -191,6 +191,8 @@ struct Tunnel {
     std::size_t offset = 0;  ///< 已交出的握手字节数：SOCKS5 是多段报文，不前移就会把上一段当本段重读
     Stage stage = Stage::ProxyLink;  ///< 当前阶段
     bool claimed = false;  ///< `on_done` 已占用
+    /// @brief 握手两侧的补充事实（借用：调用方持有它到 `on_done` 落地；空 = 不参与，绝大多数调用的形态）。
+    ProxyNegotiation *negotiation = nullptr;
 };
 
 /// @brief 隧道状态的共享指针（每个在途读写回调各持一份强引用）。
@@ -325,6 +327,12 @@ auto parse_handshake(const TunnelPointer &tunnel) -> void {
             const auto head = *parsed.value();
             if (head.status < 200 || head.status >= 300) {
                 // 非 2xx 一律不回退直连：407 落认证码，其余落不可达码，分岔由 wire 层负责。
+                // 代理在这一句里说的是「怎么才能过」，故把状态码与 `Proxy-Authenticate` 原文一并交回上层：
+                // 只留状态码就把挑战读成了一次纯粹的连通性故障，认证环无从答复。
+                if (tunnel->negotiation != nullptr) {
+                    tunnel->negotiation->status = head.status;
+                    tunnel->negotiation->authenticate = head.headers.values("Proxy-Authenticate");
+                }
                 finish_tunnel(tunnel, Result<StreamTransport>{wire::connect_tunnel_error(
                                           head.status, tunnel->proxy.to_string(), tunnel->target)});
                 return;
@@ -414,7 +422,14 @@ auto on_proxy_connected(const TunnelPointer &tunnel, Result<StreamTransport> out
     }
     tunnel->stream = std::move(outcome.value());
     if (tunnel->proxy.kind() == ProxyKind::HttpConnect) {
-        const auto request = wire::make_connect_request(tunnel->host, tunnel->port, tunnel->proxy.credentials());
+        // 认证环答出来的那份 `Proxy-Authorization` 优先于配置里的凭据：前者是对端这一轮点名要的方案，
+        // 后者只是预防性的一枚。没答过（或本调用不参与握手事实）就照旧走预防性形态。
+        std::optional<std::string> answer;
+        if (tunnel->negotiation != nullptr && !tunnel->negotiation->proxy_authorization.empty()) {
+            answer = tunnel->negotiation->proxy_authorization;
+        }
+        const auto request =
+            wire::make_connect_request(tunnel->host, tunnel->port, tunnel->proxy.credentials(), answer);
         send_handshake(tunnel, std::vector<char>(request.begin(), request.end()), Tunnel::Stage::HttpHeadRead);
         return;
     }
@@ -496,7 +511,8 @@ auto connect_by_name(std::string_view host, std::uint16_t port, const StreamOpti
 }
 
 auto connect_via_proxy(const ProxyConfig &proxy, std::string_view host, std::uint16_t port,
-                       const StreamOptions &options, const Cancellation &cancellation, ConnectDone on_done) -> void {
+                       const StreamOptions &options, const Cancellation &cancellation, ConnectDone on_done,
+                       ProxyNegotiation *negotiation) -> void {
     if (!on_done) {
         return;
     }
@@ -519,6 +535,7 @@ auto connect_via_proxy(const ProxyConfig &proxy, std::string_view host, std::uin
     tunnel->target = host_port(host, port);
     tunnel->on_done = std::move(on_done);
     tunnel->origin = std::this_thread::get_id();
+    tunnel->negotiation = negotiation;
 
     if (options.connect_timeout.count() > 0) {
         // 一枚时限覆盖「直到隧道可用」的整段：代理连上了却不应答握手同样要有结局，否则静默悬挂。

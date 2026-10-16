@@ -56,11 +56,18 @@ enum class Socks5Phase : std::uint8_t {
 };
 
 /// @brief 产出 HTTP `CONNECT` 请求字节（请求行 + `Host` + 可选 `Proxy-Authorization` + 空行）。
+///
+/// 凭据字段有两种来处：调用方放进代理 URL 的那一份按 `Basic` 预防性写出（`proxy_authorization` 未给时），
+/// 以及认证环针对 407 答复的那一份原样写出（给了就优先）。两者都只出现在写出的字节里，不进任何可打印形态。
 /// @param host 目标主机文本（IPv6 不带括号，本函数按需补括号）。
 /// @param port 目标端口（主机序）。
-/// @param credentials 代理凭据；`empty()` 时不发 `Proxy-Authorization`。
+/// @param credentials 代理凭据；`empty()` 且未给答复时不发 `Proxy-Authorization`。
+/// @param proxy_authorization 认证环答出的字段值原文（含方案名，如 `Digest qop=...`）；空或未给即按
+///        `credentials` 走预防性形态。值里不得有 CR/LF——那是字段注入，由调用方（发起侧的认证环）在装进
+///        状态前判掉，本层不再补一道重复判定。
 /// @return 可直接写入套接字的 UTF-8/Latin-1 字节串（以 CRLF 结尾的空行收束）。
-[[nodiscard]] auto make_connect_request(std::string_view host, std::uint16_t port, const ProxyCredentials &credentials)
+[[nodiscard]] auto make_connect_request(std::string_view host, std::uint16_t port, const ProxyCredentials &credentials,
+                                        const std::optional<std::string> &proxy_authorization = std::nullopt)
     -> std::string;
 
 /// @brief 解析代理就 CONNECT 回报的头部块。

@@ -11,7 +11,9 @@
 // - **竞速是串行交错而不是并发齐发**：首条立即发起，其后每条在「上条发起后 `race_stagger`」与
 //   「上条已出结果」两者先到时发起；最先建成者独占那次完成，落败者关闭。窗口置 0 即只发偏好族首条。
 // - **代理隧道只在握手成功时成立**：不可达、被拒、不会说话一律以失败收尾，**绝不回退直连**；读过头
-//   部块之后的字节经 `detail::seed_read` 接回该流的读队列前端，不会因为「一次读多了」而丢字节。
+//   部块之后的字节经 `detail::seed_read` 接回该流的读队列前端，不会因为「一次读多了」而丢字节。被 407
+//   拒时把代理亲口说出的 `Proxy-Authenticate` 原文交回上层（`ProxyNegotiation`）——带回去的是那句挑战，
+//   不是「允许改用直连」。
 // - **完成恰一次，且恒回到发起线程**：解析回调、交错定时器、隧道时限都可能在引擎线程落地，故每次
 //   进入编排状态前先归队到发起线程（与 `transport.cpp` 的 `deliver` 同一条通道、同一处局限）。
 //   归队之后本文件的状态转换全部串行，因此不设互斥量——这不是省锁，而是「所有入口都在同一条线程
@@ -48,6 +50,25 @@ namespace aurora::net::detail {
 auto connect_by_name(std::string_view host, std::uint16_t port, const StreamOptions &options,
                      const Cancellation &cancellation, ConnectDone on_done) -> void;
 
+/// @brief 隧道握手两侧的补充事实（仅库内）：入侧是这次要一并写出的 `Proxy-Authorization`，出侧是代理
+///        拒定时亲口说出的那句挑战。
+///
+/// 它存在的全部理由是 `RFC 9110 §15.5.2` 那一类挑战-答复：**代理回 407 时给的不是「连不上」而是一份
+/// 该怎么答的说明**（`Proxy-Authenticate` 列出方案与 `realm`）。这份事实若在库里就地丢掉，上层的认证环
+/// 就只能凭状态码猜，而猜出来的答复对端未必收。两侧合在一枚结构里而不是两次调用，是因为它们本就是同
+/// 一次握手的一进一出。
+///
+/// 只有 HTTP `CONNECT` 腿会读写它：被转发的明文请求里，407 与挑战都随那份应答一起正常交回上层（它本就是
+/// 一条 HTTP 应答）；SOCKS5 没有挑战-答复这套报文，`authenticate` 恒空。
+/// @note Thread: single-threaded（由发起本次握手的那条协程持有，回调落地时写入）
+/// @note Side-effects: none
+struct ProxyNegotiation {
+    std::string proxy_authorization;  ///< 入侧：随 `CONNECT` 写出的字段值原文（含方案名）；空 = 不发覆写，
+                                      ///< 仍按代理配置里的凭据走预防性 `Basic`
+    std::uint16_t status{0};  ///< 出侧：代理就 `CONNECT` 回的状态码；0 = 没读到应答头部块（不可达那类失败）
+    std::vector<std::string> authenticate;  ///< 出侧：`Proxy-Authenticate` 的全部原文，按线上次序、不折叠
+};
+
 /// @brief 经代理建立到 `host:port` 的隧道：连代理 → 握手 → 交出隧道里的流。
 ///
 /// `ProxyKind::Direct` 转交直连入口；其余形态的代理自身也走「解析 + 竞速」（代理常常是双栈的）。
@@ -58,7 +79,10 @@ auto connect_by_name(std::string_view host, std::uint16_t port, const StreamOpti
 /// @param options 缓冲、超时与竞速口径；`connect_timeout` 在此覆盖「直到隧道可用」的整体时限。
 /// @param cancellation 本次操作的取消令牌。
 /// @param on_done 完成回调；恰一次抵达。
+/// @param negotiation 握手两侧的补充事实（见 `ProxyNegotiation`）；空指针 = 不参与（绝大多数调用）。给了
+///        就既是「这次 CONNECT 要多写一枚字段」也是「被拒时把代理说的那句带回去」。
 auto connect_via_proxy(const ProxyConfig &proxy, std::string_view host, std::uint16_t port,
-                       const StreamOptions &options, const Cancellation &cancellation, ConnectDone on_done) -> void;
+                       const StreamOptions &options, const Cancellation &cancellation, ConnectDone on_done,
+                       ProxyNegotiation *negotiation = nullptr) -> void;
 
 }  // namespace aurora::net::detail

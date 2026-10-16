@@ -623,6 +623,14 @@ class SchannelBackend final : public TlsBackend {
 
 auto SchannelBackend::create(const TlsContext &context, std::string_view server_name)
     -> Result<std::unique_ptr<SchannelBackend>> {
+    // PEM 形态的客户端身份在本腿没有通路：Schannel 的凭据只能是从证书存储里取出的句柄，而公共面交的是一段
+    // 内存里的 PEM 文本。此处落显式失败（`net-platform-unavailable`，口径见 `net/tls.h` 的支持腿说明），
+    // 而不是收下字段再静默不带证书——静默会让调用方以为 mTLS 已生效，而现场只是对端拒绝了握手。
+    if (context.client_certificate_pem || context.client_private_key_pem) {
+        return tls_error(ErrorCode::NetPlatformUnavailable,
+                         "this platform's TLS engine cannot install a PEM client identity; give "
+                         "client_identity as a PKCS#12 archive on this leg");
+    }
     std::unique_ptr<SchannelBackend> backend{new SchannelBackend()};
     backend->target_ = to_wide(server_name);
     backend->host_ = to_lower_ascii(server_name);

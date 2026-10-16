@@ -330,6 +330,14 @@ AURORA_TEST_CASE(invalid_inputs_are_decided_before_any_backend) {
     auto crossed = TlsContext{};
     crossed.min_version = TlsVersion::Tls13;
     crossed.max_version = TlsVersion::Tls11;
+    // 客户端身份的两种形态互斥、且 PEM 那一对必须成双（口径见 `net/tls.h`）：这两条同样排在后端登场之前，
+    // 因为「以谁为准」没有后端能替调用方回答。
+    auto both_forms = TlsContext{};
+    both_forms.client_identity = "not really a pkcs#12 archive";
+    both_forms.client_certificate_pem = "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n";
+    both_forms.client_private_key_pem = "-----BEGIN PRIVATE KEY-----\n-----END PRIVATE KEY-----\n";
+    auto half_pem = TlsContext{};
+    half_pem.client_certificate_pem = "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n";
     const std::vector<Case> cases{
         Case{.name = "empty name", .server_name = "", .expected = "net-endpoint-invalid", .context = TlsContext{}},
         Case{.name = "ip literal",
@@ -344,6 +352,14 @@ AURORA_TEST_CASE(invalid_inputs_are_decided_before_any_backend) {
              .server_name = "localhost",
              .expected = "net-tls-version-mismatch",
              .context = crossed},
+        Case{.name = "both identity forms",
+             .server_name = "localhost",
+             .expected = "net-option-conflict",
+             .context = both_forms},
+        Case{.name = "pem identity missing its key",
+             .server_name = "localhost",
+             .expected = "net-option-conflict",
+             .context = half_pem},
     };
     for (const auto &item : cases) {
         HandshakeLog log;
@@ -813,6 +829,115 @@ AURORA_TEST_CASE(client_identity_satisfies_a_verified_peer_request) {
     write_through(channel, log, "mtls\n");
     AURORA_TEST_CHECK_EQ(read_once(channel, log, 64), std::string{"sltm\n"});
     channel.close();
+}
+
+AURORA_TEST_CASE(pem_client_identity_satisfies_a_verified_peer_request) {
+    const aurora::test::tls::Assets assets{"localhost", true};
+    aurora::test::tls::TlsPeer peer{assets, {"-Verify", "1", "-CAfile", assets.certificate().string()}};
+    require_peer(peer);
+    require_backend("needs a real handshake");
+    const auto chain = assets.client_certificate_pem();
+    const auto key = assets.client_private_key_pem();
+    if (!assets.identity_valid() || chain.empty() || key.empty()) {
+        AURORA_TEST_SKIP("the host openssl issued no PEM client materials: " + assets.status());
+    }
+    HostDriven host;
+
+    auto context = trusted_context(assets);
+    context.client_certificate_pem = chain;
+    context.client_private_key_pem = key;
+    HandshakeLog identified;
+    handshake(connect_stream(peer.port()), "localhost", context, identified);
+    if (!identified.ok && identified.code == "net-platform-unavailable") {
+        // Schannel / SecureTransport 这一类「身份只能以平台档案形态给出」的腿：起手就点名缺哪项能力，
+        // 静默收下这两枚字段才是缺陷。但「PEM 真能装上并完成互验」只能在装得上的腿上正面证明。
+        AURORA_TEST_SKIP("this build's TLS engine cannot install a PEM client identity: " + identified.message);
+    }
+    AURORA_TEST_REQUIRE_MSG(identified.ok, "handshake failed: " + identified.code + " " + identified.message);
+    AURORA_TEST_REQUIRE_EQ(identified.calls.load(), 1);
+    // 对端开了 `-Verify 1`：没把身份送出去的会话在这一步就被拒，故一次成功的握手加一次回显即同时证明
+    // 「装上了」与「送出去了」，不必再跑一遍匿名半（那条时序差异已记在上一枚用例里）。
+    auto channel = std::move(identified.transport);
+    TransferLog log;
+    write_through(channel, log, "mtls\n");
+    AURORA_TEST_CHECK_EQ(read_once(channel, log, 64), std::string{"sltm\n"});
+    channel.close();
+}
+
+AURORA_TEST_CASE(a_pem_identity_whose_key_is_from_another_pair_is_refused) {
+    const aurora::test::tls::Assets assets{"localhost", true};
+    require_backend("needs a tls engine to parse the pair");
+    const auto chain = assets.client_certificate_pem();
+    const auto foreign_key =
+        aurora::test::tls::detail::read_file(assets.private_key());  // 服务端那枚：合法 PEM，但与客户端证书不成对
+    if (!assets.identity_valid() || chain.empty() || foreign_key.empty()) {
+        AURORA_TEST_SKIP("the host openssl issued no PEM client materials: " + assets.status());
+    }
+    HostDriven host;
+
+    auto context = trusted_context(assets);
+    context.client_certificate_pem = chain;
+    context.client_private_key_pem = foreign_key;
+    HandshakeLog mismatched;
+    // 不需要对端开口：成对校验发生在装进 SSL 配置的那一刻，一条未连上的明文流也足以定结局。
+    TlsTransport::handshake(StreamTransport{}, "localhost", context, Cancellation{}, [&mismatched](auto result) {
+        mismatched.ok = result.ok();
+        if (!result) {
+            mismatched.code = result.error().code;
+            mismatched.message = result.error().message;
+        }
+        ++mismatched.calls;
+    });
+    AURORA_TEST_REQUIRE(drive_until(AURORA_SUBJECT, [&]() { return mismatched.calls.load() > 0; }).satisfied);
+    if (!mismatched.ok && mismatched.code == "net-platform-unavailable") {
+        AURORA_TEST_SKIP("this build's TLS engine cannot install a PEM client identity: " + mismatched.message);
+    }
+    AURORA_TEST_CHECK_EQ(mismatched.calls.load(), 1);
+    AURORA_TEST_CHECK_FALSE(mismatched.ok);
+    AURORA_TEST_CHECK_EQ(mismatched.code, std::string{"general-invalid-argument"});
+    // 成因也要钉住：装身份这条路上同一枚码有六处出口（链读不开、链里没有证书、私钥读不开、装不进 ctx……），
+    // 只断错误码时「更早的那一步」就能顶替本例要证的配对判定蒙混过关——这条文本把结局锁在配对那一步。
+    AURORA_TEST_CHECK_MSG(mismatched.message.find("does not match the client certificate") != std::string::npos,
+                          "the refusal came from another step: " + mismatched.message);
+    AURORA_TEST_CHECK_FALSE(mismatched.transport.is_open());
+}
+
+AURORA_TEST_CASE(a_pem_client_identity_without_a_certificate_is_refused) {
+    const aurora::test::tls::Assets assets{"localhost", true};
+    require_backend("needs a tls engine to read the chain");
+    const auto only_key = assets.client_private_key_pem();  // 合法 PEM，但里面只有私钥、没有证书
+    if (!assets.identity_valid() || only_key.empty()) {
+        AURORA_TEST_SKIP("the host openssl issued no PEM client materials: " + assets.status());
+    }
+    HostDriven host;
+
+    auto context = trusted_context(assets);
+    // 两份字段送同一枚私钥文本，这就是「把 key.pem 当成了 cert.pem」的现场形态：材料合法（PEM 读得开）、
+    // 角色用错（链里一张证书也没有）。
+    context.client_certificate_pem = only_key;
+    context.client_private_key_pem = only_key;
+    HandshakeLog refused;
+    TlsTransport::handshake(StreamTransport{}, "localhost", context, Cancellation{}, [&refused](auto result) {
+        refused.ok = result.ok();
+        if (!result) {
+            refused.code = result.error().code;
+            refused.message = result.error().message;
+        }
+        ++refused.calls;
+    });
+    AURORA_TEST_REQUIRE(drive_until(AURORA_SUBJECT, [&]() { return refused.calls.load() > 0; }).satisfied);
+    if (!refused.ok && refused.code == "net-platform-unavailable") {
+        AURORA_TEST_SKIP("this build's TLS engine cannot install a PEM client identity: " + refused.message);
+    }
+    AURORA_TEST_CHECK_EQ(refused.calls.load(), 1);
+    AURORA_TEST_CHECK_FALSE(refused.ok);
+    AURORA_TEST_CHECK_EQ(refused.code, std::string{"general-invalid-argument"});
+    // 断到「链」这一步、且断两腿逐字相同的那句话：mbedTLS 说整段不可解码、OpenSSL 说 PEM 块里没有证书，
+    // 在库里是两支，对调用方却是同一件事，故本层把它们收成一句话说同一件事实——含糊到私钥那一步或装不进
+    // ctx 那一步都不算数。
+    AURORA_TEST_CHECK_MSG(refused.message.find("holds no usable X.509 certificate") != std::string::npos,
+                          "the refusal did not name the chain: " + refused.message);
+    AURORA_TEST_CHECK_FALSE(refused.transport.is_open());
 }
 
 }  // namespace aurora::test_cases::utest_net_tls

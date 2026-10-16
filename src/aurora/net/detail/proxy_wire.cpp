@@ -18,6 +18,7 @@
 #include "aurora/core/headers.h"
 #include "aurora/core/result.h"
 #include "aurora/net/address.h"
+#include "aurora/net/detail/http_auth_wire.h"
 #include "aurora/net/proxy.h"
 
 namespace aurora::net::wire {
@@ -89,29 +90,6 @@ auto authority(std::string_view host, std::uint16_t port) -> std::string {
     }
     out.push_back(':');
     out.append(std::to_string(port));
-    return out;
-}
-
-/// @brief 标准 base64（`RFC 4648` §4，带填充），供 `Proxy-Authorization: Basic` 使用。
-/// @param input 待编码字节（这里是 `user:password` 的连接结果）。
-/// @return 编码文本；不含换行。
-auto base64_encode(std::string_view input) -> std::string {
-    constexpr std::string_view table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-    out.reserve(((input.size() + 2) / 3) * 4);
-    for (std::size_t index = 0; index < input.size(); index += 3) {
-        const auto first = static_cast<std::uint32_t>(static_cast<unsigned char>(input.at(index)));
-        const std::size_t available = input.size() - index;
-        const auto second = available > 1 ? static_cast<std::uint32_t>(static_cast<unsigned char>(input.at(index + 1)))
-                                          : static_cast<std::uint32_t>(0);
-        const auto third = available > 2 ? static_cast<std::uint32_t>(static_cast<unsigned char>(input.at(index + 2)))
-                                         : static_cast<std::uint32_t>(0);
-        const auto group = (first << 16) | (second << 8) | third;
-        out.push_back(table.at((group >> 18) & 0x3FU));
-        out.push_back(table.at((group >> 12) & 0x3FU));
-        out.push_back(available > 1 ? table.at((group >> 6) & 0x3FU) : '=');
-        out.push_back(available > 2 ? table.at(group & 0x3FU) : '=');
-    }
     return out;
 }
 
@@ -283,14 +261,18 @@ auto append_numeric_address(std::string_view host, std::uint16_t port, std::vect
 
 }  // namespace
 
-auto make_connect_request(std::string_view host, std::uint16_t port, const ProxyCredentials &credentials)
-    -> std::string {
+auto make_connect_request(std::string_view host, std::uint16_t port, const ProxyCredentials &credentials,
+                          const std::optional<std::string> &proxy_authorization) -> std::string {
     const auto target = authority(host, port);
     std::string out = "CONNECT " + target + " HTTP/1.1\r\n";
     out += "Host: " + target + "\r\n";
-    if (!credentials.empty()) {
-        out +=
-            "Proxy-Authorization: Basic " + base64_encode(credentials.username + ":" + credentials.password) + "\r\n";
+    // 挑战-答复那一条路给的字段值原样写上线（`Digest` 之类的答案不是 `user:pass`，压不进预防性形态）；
+    // 没给答复时仍按凭据做预防性 Basic。两处都不覆盖调用方已经写在配置里的凭据。
+    if (proxy_authorization.has_value() && !proxy_authorization->empty()) {
+        out += "Proxy-Authorization: " + *proxy_authorization + "\r\n";
+    } else if (!credentials.empty()) {
+        out += "Proxy-Authorization: Basic " +
+               detail::base64_encode(credentials.username + ":" + credentials.password) + "\r\n";
     }
     out += "\r\n";
     return out;
