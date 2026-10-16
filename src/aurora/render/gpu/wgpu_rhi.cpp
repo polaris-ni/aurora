@@ -967,6 +967,9 @@ struct WgpuRhi::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
         error_cb.callback = &Impl::on_uncaptured_error_cb;
         error_cb.userdata1 = this;
         WGPUDeviceDescriptor desc{};
+        // `{}` 会把 deviceLostCallbackInfo.mode（WGPUCallbackMode，无 0 枚举项）零初始化成无效值，
+        // 显式给一个有效枚举项（本进程不依赖 device-lost 回调，AllowProcessEvents 即「按需可泵」）。
+        desc.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
         desc.uncapturedErrorCallbackInfo = error_cb;
         WGPURequestDeviceCallbackInfo cb{.mode = WGPUCallbackMode_WaitAnyOnly};  // mode 无 0 枚举项，随声明给值
         cb.callback = &Impl::on_device_cb;
