@@ -33,7 +33,9 @@
 ///           字节范围与缓存分两道闸验：带 `range()` 的请求整段不碰表（既不拿整份副本充当分段应答，回来的那份
 ///           206 也不进表）；以裸 `Range` 头上线的请求本件认不出是分段问，只剩状态码那一闸——半截进了表，
 ///           下一次整份取回就会被它冒充。链路标识的两条（盖与不盖）也在本件，三级取定的细则在
-///           `utest_net_http_request_id.cpp`。
+///           `utest_net_http_request_id.cpp`。取消入口（`send` / `open_stream` 的 `Cancellation` 形参）验三条：
+///           起手已取消的令牌一个字节都不发（对端 `accepts()` 恒 0，策略与缓存都不问）、在途交换被掐即以
+///           `net-cancelled` 收尾（不挂到整请求时限上）、同一枚令牌下的流式交换三个宿主入口一次都不被调用。
 /// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
 
 #include <atomic>
@@ -53,11 +55,13 @@
 #include "aurora/core/headers.h"
 #include "aurora/core/result.h"
 #include "aurora/net/blocking.h"
+#include "aurora/net/cancellation.h"
 #include "aurora/net/detail/http_request_id.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_auth.h"
 #include "aurora/net/http_client.h"
 #include "aurora/net/http_multipart.h"
+#include "aurora/net/http_stream.h"
 #include "aurora/net/policy.h"
 #include "aurora/state/coroutine.h"
 #include "framework/async_wait.h"
@@ -72,6 +76,7 @@ namespace {
 using aurora::CoroTask;
 using aurora::ErrorCode;
 using aurora::Result;
+using aurora::net::Cancellation;
 using aurora::net::NetPolicy;
 using aurora::net::http::AuthChallenge;
 using aurora::net::http::AuthDecision;
@@ -81,6 +86,7 @@ using aurora::net::http::BearerAuthenticator;
 using aurora::net::http::ByteRange;
 using aurora::net::http::CacheOptions;
 using aurora::net::http::Client;
+using aurora::net::http::DataSink;
 using aurora::net::http::error_class_of;
 using aurora::net::http::HttpErrorClass;
 using aurora::net::http::MultipartWriter;
@@ -89,6 +95,8 @@ using aurora::net::http::ProgressPhase;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
 using aurora::net::http::RetryPolicy;
+using aurora::net::http::SinkFlow;
+using aurora::net::http::StreamOutcome;
 using aurora::net::http::Timeouts;
 using aurora::test::FakeEngine;
 using aurora::test::FakeEngineScope;
@@ -456,6 +464,33 @@ auto allow_test_cleartext(Client &client) -> void {
     permissive.allow_cleartext_hosts = {"127.0.0.1"};
     client.policy(std::move(permissive));
 }
+
+/// @brief 只数入口次数的宿主替身：取消类判据问的是「一次都没被调用」，不需要留下任何载荷。
+class CountingSink final : public DataSink {
+  public:
+    /// @brief 记一次头部到达并继续。
+    /// @param head 头部块。
+    /// @return 恒 `Continue`。
+    auto on_head(const Response &head) -> SinkFlow override {
+        (void)head;
+        ++heads;
+        return SinkFlow::Continue;
+    }
+    /// @brief 记一段体字节并继续。
+    /// @param body 本段明文。
+    /// @return 恒 `Continue`。
+    auto on_data(std::span<const char> body) -> SinkFlow override {
+        (void)body;
+        ++segments;
+        return SinkFlow::Continue;
+    }
+    /// @brief 记一次收摊宣告。
+    auto on_end() -> void override { ++ends; }
+
+    int heads{0};  ///< `on_head` 调用次数
+    int segments{0};  ///< `on_data` 调用次数
+    int ends{0};  ///< `on_end` 调用次数
+};
 
 /// @brief 读完头部就立即给出应答、随后**继续观察**一段窗口内还到达过什么字节，最后把全部收到的字节留档。
 ///
@@ -884,6 +919,108 @@ AURORA_TEST_CASE(send_times_out_connect) {
     const auto response = inner(task);
     AURORA_TEST_REQUIRE_FALSE(bool(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpTimeout);
+}
+
+AURORA_TEST_CASE(send_with_a_cancelled_token_issues_no_connection) {
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nZ"));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Cancellation token;
+    token.cancel();  // 起手即已取消：策略闸、缓存表、连接一概不问（头注释的「取消先于一切判定」）。
+    auto task = client.send(Request::get(loopback_url(peer.port())), token);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
+                          .satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, ErrorCode::NetCancelled);
+    aurora::test::net::pump_idle(std::chrono::milliseconds{50});  // 再给一段窗口：期间什么都不该发生
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
+}
+
+AURORA_TEST_CASE(cancelling_mid_exchange_ends_it_with_net_cancelled) {
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(silent());  // 连得上、永不回字节：交换挂在读上，正是「在途」的形态。
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Cancellation token;
+    // 两秒的整请求时限在这里是**兜底**而非判据：实现正确时取消在几十毫秒内就收尾，时限根本不到期；它保证
+    // 「取消没生效」这种回归留下的是断言红与一次可等的收尾，而不是一个跨过用例生命周期、在对端析构后才复活的
+    // 孤儿交换（那会在已亡的 socket 上续跑）。
+    auto task = client.send(Request::get(loopback_url(peer.port())).timeout(std::chrono::milliseconds{2000}), token);
+    AURORA_TEST_CHECK(
+        aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; }).satisfied);
+    token.cancel();
+    // 取消令挂起的读立刻以 net-cancelled 收尾：不经过整请求时限，也不改道成 http-timeout。等待窗口取 3 s（大于
+    // 上面那枚兜底时限），于是「取消没生效」的回归在这里等到的是一份**已收尾**的超时应答——断言比的是错误码，
+    // 不是在未收尾的协程上取结果。
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
+                          .satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, ErrorCode::NetCancelled);
+}
+
+AURORA_TEST_CASE(open_stream_with_a_cancelled_token_never_reaches_the_sink) {
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nZ"));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    CountingSink sink;
+    Cancellation token;
+    token.cancel();
+    auto task = client.open_stream(Request::get(loopback_url(peer.port())), sink, token);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "open_stream done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
+                          .satisfied);
+
+    const auto outer = task.result();
+    AURORA_TEST_REQUIRE(bool(outer));
+    const Result<StreamOutcome> &outcome = outer.value();
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, ErrorCode::NetCancelled);
+    // 三个入口一次都没被调用：取消的那次交换连头部都不该交给宿主。
+    AURORA_TEST_CHECK_EQ(sink.heads, 0);
+    AURORA_TEST_CHECK_EQ(sink.segments, 0);
+    AURORA_TEST_CHECK_EQ(sink.ends, 0);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
+}
+
+AURORA_TEST_CASE(a_cancelled_token_beats_a_fresh_cache_hit) {
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("first"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    const auto warm = send_and_drive(client, Request::get(url));  // 先把表填上一份新鲜副本
+    AURORA_TEST_REQUIRE(bool(warm));
+
+    // 这条判据钉住的是起手那一道闸：表里明明有一份新鲜副本，已取消的令牌也不把它当成一次交付交出。
+    Cancellation token;
+    token.cancel();
+    auto task = client.send(Request::get(url), token);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
+                          .satisfied);
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, ErrorCode::NetCancelled);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 只有热身那一次
 }
 
 #ifdef AURORA_ENABLE_COMPRESSION

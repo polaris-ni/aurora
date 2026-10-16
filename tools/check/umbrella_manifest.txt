@@ -107,6 +107,7 @@ aurora/net/engine.h
 aurora/net/framer.h
 aurora/net/http.h
 aurora/net/http_auth.h
+aurora/net/http_binding.h
 aurora/net/http_client.h
 aurora/net/http_multipart.h
 aurora/net/http_stream.h

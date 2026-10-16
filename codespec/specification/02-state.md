@@ -153,7 +153,8 @@ au::Button(au::ButtonProps{ .label = "+1" })
 |:---|:---|
 | `then(DoneFn cb)` | 注册完成回调，`DoneFn = std::function<void(const Result<T>&)>`，返回 `Task&` 以便链式（`async.h`） |
 | `with_timeout(d)` | 超过 `d` 未完成则向 `then` 回调投递 `async-timeout` 错误（`async.h`）。两条实现路径按线程池模式分流、语义一致：worker 池下看守是**睡 `d` 的后台池任务**；deferred（无 pthreads）下无线程可睡，只登记到期时刻，由 `Application::step_frame()` 帧尾扫描触发，等待中的宿主循环经该期限并入唤醒决策 |
-| `cancel()` | 取消结果投递（`async.h`） |
+| `cancel()` | 取消结果投递（`async.h`）：置位后 `then` 回调不再被调，已登记的取消观察者在锁外恰触发一次。幂等——第二次调用既不重新置位也不再触发观察者 |
+| `on_cancel(hook)` | 登记取消观察者（`async.h`）：`cancel()` 置位那一刻在**调用线程**上同步触发一次。三条契约与 `net::Cancellation::on_cancel` 同构——只保留最后登记的一枚（传空即撤销）、至多触发一次、**登记时若已取消则在当前线程立即触发**（不留「登记即失效」的窗口）。观察者不得阻塞，也不得假设自己跑在哪条线程上。本入口把「取消」补成可订阅的事实，于是承接侧（一条在途连接、一份待归还的句柄）能在同一刻放手，不必轮询取消标志或等自己的超时 |
 | `set_main_poster(poster)` | 静态，安装跨线程投递器（`async.h`） |
 
 **`then` 的回调默认在承载 `fn` 的线程池 worker 线程上同步执行**（未安装主线程投递器时直接调用 `fn`，供 headless / 测试；deferred 构建下「承载线程」就是宿主泵任务的线程，即 UI 主线程）；安装 `Task::set_main_poster`（或 `au::async` 的主线程投递器）后，回调才经投递器回到 UI（主）线程执行，此时方可直接更新 UI。安装者与帧循环唤醒的联动契约见 [`06-app-platform.md`](06-app-platform.md)。
@@ -169,12 +170,16 @@ task.with_timeout(std::chrono::seconds(5))
 
 **限制**：`with_timeout` 与 `cancel()` 都**无法中断任意 `fn`**，只丢弃或改道结果。deferred 构建另有两点如实口径：① 超时精度为**一帧**（到期只能由帧尾扫描发现，非墙钟即时）；② 任务本身也是排队执行，故期限到点而任务尚未跑完是常态——此时改道获胜，任务事后跑完不再二次回调（`delivered` 单点裁决）。
 
+**口径补充（取消的第二半效果）**：上句的「只丢弃或改道结果」约束的是**作业体自身**——`fn` 仍在承载它的线程上跑到结束，本层无法把它掐掉；它不等于「取消对整条链路毫无副作用」。经 `on_cancel` 登记的观察者把同一刻的取消事实外传，于是承接侧能在作业体之外真正放手：`net/http_binding.h` 就把一次 HTTP 交换的取消接到 `net::Cancellation` 上，在途套接口当场关闭（判据见 `tests/unit/utest_net_http_binding.cpp` 的 `a_reload_cuts_the_socket_of_the_previous_request` 与 `destroying_the_owner_releases_the_in_flight_socket`，证据取在对端：连接被读到 EOF、串行监听口的下一次 accept 照常受理新连接）。§7.2 与 §7.3 里那句旧写法按本段理解，编号与文字一律保留。
+
+
 ### 5.2 协程路径
 
 | 符号 | 说明 | 位置 |
 |:---|:---|:---|
 | `co_async(fn)` | 返回 awaitable，`co_await` 在后台线程池执行 `fn`，续体经主线程投递器回到主线程 | `coroutine.h` |
 | `CoroTask<T>` | 协程返回类型 | `coroutine.h` |
+| `CoroTask<T>::on_done(hook)` | 登记完成观察者：帧收尾那一刻以协程的 `Result<T>` 触发一次，三条契约与 `Task<T>::on_cancel` 同构（最后登记的一枚生效、至多一次、登记时帧已收尾则当前线程立即触发）。本库的 promise 永不首挂也不终挂，帧只靠 `resume` 前进，收尾历来只有 `is_done()` 一条轮询问法——本入口把「结束即交付」补成订阅问法，适配层因此不必自带节拍。**`void` 特化不提供**：它能交出的只有「已结束」与一枚可选错误，而有值形态那条契约的载荷在这里没有对应物 | `coroutine.h` |
 | `launch(task)` | 启动顶层协程 | `coroutine.h` |
 
 ```cpp
@@ -215,7 +220,7 @@ au::launch(load());
 
 - **一个资源 = 一个信号源**：阶段、值、错误打包成一份快照写进同一个 `State<...>`，一次落定只通知一次——三分支渲染必然同时读这三者，拆成三个信号只会让每次迁移多跑一轮重建；粒度因此收在「每个资源一个信号」，不同资源之间依旧互不牵连。
 - **结果不串台**：每次发送推进一个代次（generation），完成回调只认自己那一代。`Task::cancel()` 只能让尚未投递的结果闭嘴，**已排进主线程队列的那次投递照样抵达**，故 `reload()` 之后前序作业的迟到结果由代次守卫丢弃，不覆盖新状态。
-- **与作用域联动**：句柄可自由拷贝、全部拷贝共享同一内核；最后一个句柄放手（宿主 widget 卸载或资源被重新赋值）触发内核析构，析构里取消前序未完成作业；完成回调持内核弱引用，内核已亡即丢弃——两条路径都不产生悬垂访问。限制照搬 `Task`：取消无法中断作业体本身，只改变结果的投递去向。
+- **与作用域联动**：句柄可自由拷贝、全部拷贝共享同一内核；最后一个句柄放手（宿主 widget 卸载或资源被重新赋值）触发内核析构，析构里取消前序未完成作业；完成回调持内核弱引用，内核已亡即丢弃——两条路径都不产生悬垂访问。限制照搬 `Task`：取消无法中断作业体本身，只改变结果的投递去向；作业体之外那一半也照搬 §5.1 的口径补充——来源是 `net/http_binding.h` 交付的那类作业时，取消经 `on_cancel` 顺带关掉它的在途连接，故句柄放手不只是「结果不落地」，也把线上的一次往返掐停。
 - **帧内合并（流式）**：`push()` 只累加批次，并把「提交」经主线程投递器排队；队列排空前到达的全部交付合并成**一次**状态写入。故宿主卡顿期间的多次交付损失的是提交次数，不是数据——`batch_bytes()` 给出的是该批累计量，不是末条大小。
 
 `timeout` 复用 `Task<T>::with_timeout` 的两条分流（worker 池下是睡 `d` 的池任务；deferred 下登记到期看守、由帧尾扫描触发），去抖延时的通道与之相同，精度口径同 §5.1。
@@ -301,6 +306,8 @@ au::Column(au::ColumnProps{
 
 **验收标准：** 全部后台工作都可在无 GUI 环境（headless）下完成并回到主线程；`ThreadPool` 存活期间不出现新建的游离 `std::thread`；超时与取消路径只改变结果的投递去向，绝不中断用户函数。
 
+> **口径补充（与 §5.1 同源，编号与上句文字一律保留）**：上句约束的是**作业体**，不是整条链路。取消同刻还经 `Task<T>::on_cancel` 外传给承接侧，故「绝不中断用户函数」与「取消把在途的对外作业掐停」并存——网络交付面（`net/http_binding.h`，见 [`06-app-platform.md`](06-app-platform.md) §8.8.30）就是这条外传的消费者。协程侧的对称入口是 `CoroTask<T>::on_done`（§5.2），它把「帧收尾」从轮询补成订阅。
+
 > 内存与所有权侧的所有权模型见 [`01-core.md`](01-core.md) §8.1（SPEC.QUALITY.CORE.MEMORY-SAFETY.001）；跨线程回投与帧循环唤醒见 [`06-app-platform.md`](06-app-platform.md)。
 
 ### 7.3 SPEC.FEAT.NET.DECLARATIVE-BINDING.001 异步结果三态响应式绑定
@@ -309,8 +316,8 @@ au::Column(au::ColumnProps{
 
 **需求陈述：** 一次异步作业（网络请求、文件读取、进程间调用）可以直接退化成一个 widget 可读的三态信号源：`loading / ready / failed` 定点刷新，重发自动取消前序且旧结果不覆盖新状态，宿主失效后回调被丢弃。绑定层不认识网络，故 `net/` 不进入 `state/` 的依赖图。
 
-**API 与不变量：** 见 §5.4（`au::Resource<T>` / `au::StreamResource<T>` / `ResourcePhase` / `StreamPolicy` / `ResourceOptions` / `StreamOptions`）。
+**API 与不变量：** 见 §5.4（`au::Resource<T>` / `au::StreamResource<T>` / `ResourcePhase` / `StreamPolicy` / `ResourceOptions` / `StreamOptions`）。把一次 HTTP 交换送进这三态的接线件在 net 侧（`net/http_binding.h` 的 `deliver` / `bind_resource` / `deliver_stream` / `image_fetcher`），形态与判据见 [`06-app-platform.md`](06-app-platform.md) §8.8.30——本模块为它多出的只有 §5.1 的 `Task<T>::on_cancel` 与 §5.2 的 `CoroTask<T>::on_done` 两枚订阅口。
 
 **验收标准：** ① 一次落定只通知一次；② `reload()` 取消前序作业，且其迟到结果不覆盖新状态；③ 宿主析构后抵达的回调被丢弃，无悬垂访问；④ `StreamResource` 的 `Append` / `Replace` 两策略与帧内合并批次（`batch_bytes()` 为累计量）；⑤ 默认超时 30 s、`reload()` 不去抖，默认值在声明处可见。单测见 `tests/unit/utest_state_resource.cpp`。
 
-**约束：** 状态写入限主线程（须先装主线程投递器）；取消只改结果的投递去向，不中断作业体；去抖与超时复用 `Task<T>` 的既有通道，精度口径随其构建模式（见 §5.1）。
+**约束：** 状态写入限主线程（须先装主线程投递器）；取消只改结果的投递去向，不中断作业体（作业体之外那一半见 §5.1 的口径补充：来源登记了 `on_cancel` 时，取消同时掐停来源的在途作业——HTTP 交付面即如此，判据在 `tests/unit/utest_net_http_binding.cpp`）；去抖与超时复用 `Task<T>` 的既有通道，精度口径随其构建模式（见 §5.1）。

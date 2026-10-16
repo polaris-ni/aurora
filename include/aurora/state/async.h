@@ -22,8 +22,13 @@ namespace detail {
 /// @tparam T 任务值类型（由 `TaskValueOfT` 从 fn 返回类型萃取）。
 template <typename T>
 struct AsyncState {
-    std::mutex mutex;  ///< 保护 result/on_done/delivered 的读写
+    std::mutex mutex;  ///< 保护 result/on_done/on_cancel/delivered 的读写
     std::function<void(const Result<T> &)> on_done;  ///< 完成回调：结果就绪且可投递时被调用
+    /// @brief 取消观察者：`cancel()` 置位后恰触发一次（形态与 `net::Cancellation::on_cancel` 同构）。
+    ///
+    /// 取消这件事对本层历来只有「结果不再投递」这一半效果；本字段把它补成可订阅的事实，
+    /// 于是承接方（如网络交换）能在同一刻放手，而不必轮询 `cancelled` 或等自己的超时。
+    std::function<void()> on_cancel;
     std::optional<Result<T>> result;  ///< 后台计算完成后的结果（未就绪则为空）
     std::atomic<bool> cancelled{false};  ///< 取消标志：置位后不再向回调投递
     bool delivered{false};  ///< 已向回调投递（成功/取消/超时）避免重复
@@ -242,7 +247,9 @@ auto invoke_safe(F &&f) {
 /// 可回写 `State<T>` 以触发响应式定点刷新（与现有信号系统无缝衔接）。
 ///
 /// 取消语义：`cancel()` 标记任务为已取消，后台线程仍会执行完毕（无法中断任意函数），
-/// 但 `then` 回调不会被调用。适用于「不再关心结果」的场景。
+/// 但 `then` 回调不会被调用。适用于「不再关心结果」的场景。承接侧要真正放手（掐掉一条在途
+/// 连接、归还一个句柄），由 `on_cancel()` 登记的观察者去做——取消因此不只是「丢弃结果」，
+/// 也是一条可订阅、且至多触发一次的事实。
 ///
 /// 超时语义：`with_timeout(d)` 注册一个超时看守（worker 池下是一个后台池任务，deferred 池下是
 /// 一张到期登记表，由宿主帧尾扫描触发——见 `Task<T>::with_timeout`）；
@@ -293,12 +300,50 @@ class Task {
         return *this;
     }
 
-    /// @brief 取消任务：标记为已取消，`then` 回调不会被调用。
-    /// 注意：后台线程仍会执行完毕（无法中断任意函数），仅丢弃结果。
+    /// @brief 取消任务：标记为已取消，`then` 回调不会被调用；已登记的取消观察者在锁外恰触发一次。
+    /// 注意：后台线程仍会执行完毕（无法中断任意函数），仅丢弃结果——要真正放手承接侧的资源
+    /// （如一条在途连接），由 `on_cancel()` 登记的观察者去做，本函数不等它。
+    /// 幂等：第二次调用既不重新置位，也不再触发观察者。
     auto cancel() -> void {
-        std::scoped_lock<std::mutex> lock(state_->mutex);
-        state_->cancelled.store(true, std::memory_order_release);
-        state_->delivered = true;  // 取消即视为已处理，丢弃后续回调
+        std::function<void()> hook;
+        {
+            std::scoped_lock<std::mutex> lock(state_->mutex);
+            if (state_->cancelled.load(std::memory_order_relaxed)) {
+                return;  // 已取消过：置位与观察者都只属于第一次
+            }
+            state_->cancelled.store(true, std::memory_order_release);
+            state_->delivered = true;  // 取消即视为已处理，丢弃后续回调
+            hook = std::move(state_->on_cancel);  // 摘出即清空：钩子里没有第二份可被重复触发的东西
+        }
+        // 锁外触发：钩子按约定要能回头碰这枚状态（读 `is_cancelled()`、或直接投递取消事实），
+        // 持锁调用即自死锁。与 `net::Cancellation` 同一条口径——钩子在调用线程上同步执行，不得阻塞。
+        if (hook) {
+            hook();
+        }
+    }
+
+    /// @brief 登记取消观察者：`cancel()` 置位那一刻在调用线程上同步触发一次。
+    ///
+    /// 三条契约（与 `net::Cancellation::on_cancel` 同构）：只保留最后登记的一枚（传空即撤销登记）；
+    /// 至多触发一次；**登记时若已取消则在当前线程立即触发**，不留「登记即失效」的窗口。
+    /// 观察者不得阻塞，也不得假设自己跑在哪条线程上。
+    /// @param hook 取消时要执行的可调用体；空值表示撤销已登记的观察者。
+    auto on_cancel(std::function<void()> hook) -> void {
+        // 两条路各自把 `hook` 交给唯一的归属：已取消则交给本地这份、立即触发；未取消则登记进状态。
+        // 写成「先登记、再按标志回读」会让同一枚可调用体存在两处归属，检查器据此报 use-after-move，
+        // 而更糟的是回读那一份在并发登记下未必是自己刚放上去的那枚。
+        std::function<void()> fire_now;
+        {
+            std::scoped_lock<std::mutex> lock(state_->mutex);
+            if (state_->cancelled.load(std::memory_order_acquire)) {
+                fire_now = std::move(hook);  // 竞态纪律：取消先于登记也要有观察者收到这一次事实
+            } else {
+                state_->on_cancel = std::move(hook);
+            }
+        }
+        if (fire_now) {
+            fire_now();  // 锁外触发，与 `cancel()` 同一条口径
+        }
     }
 
     /// @brief 查询是否已取消。

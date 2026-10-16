@@ -16,8 +16,9 @@
 | `net/transport.h` | 异步流式传输 `StreamTransport` / `StreamListener`（TLS 之下的那条流） |
 | `net/tls.h` | `TlsContext` / `TlsVersion` / `PeerCertificate` / `TlsTransport`：TLS 通道，握手成功后与 L1 流同构 |
 | `net/resolver.h`、`net/proxy.h` | 名称解析与代理配置（本文件的用例只作前置，不单独出题） |
+| `net/http_binding.h` | 声明式交付面：`deliver` / `bind_resource` / `deliver_stream` / `image_fetcher`（把一次交换接成 `Task` 与三态资源，并把取消接回套接口） |
 
-本文档只覆盖**必须出站才能成立**的那部分判据：真实公网证书、真实对端的 ALPN 协商、真实 TLS 记录层上的往返。离线可跑的判据（自签桩下的握手、未知 CA 被拒、过期证书、危险开关、pin 判定、ALPN 无交集、取消与关闭结局）全部在 `tests/unit/utest_net_tls.cpp` 里，**不在本文档重复**——重复记录会让「手工跑过」与「CI 跑过」两种证据在读者眼里混成一种。
+本文档覆盖两类判据：**① 必须出站才能成立的**——真实公网证书、真实对端的 ALPN 协商、真实 TLS 记录层上的往返；**② 必须有宿主帧循环参与的**——三态资源在真实帧循环里的逐支可视落地（`TC-NET-007`）。第二类离线单测做不到：`tests/unit/` 里没有装帧循环的宿主，回投与唤醒这一段在测试里一律走「无投递器即同线程直调」那条腿，于是取消、失败与迟到结果这些「要看得见」的结局只剩运行期证据。离线可跑的判据（自签桩下的握手、未知 CA 被拒、过期证书、危险开关、pin 判定、ALPN 无交集、取消与关闭结局）全部在 `tests/unit/utest_net_tls.cpp` 里，**不在本文档重复**——重复记录会让「手工跑过」与「CI 跑过」两种证据在读者眼里混成一种。本口径自声明式交付面切片起追加第 ② 类，第 ① 类的取舍不变。
 
 ### 1.2 执行载体
 
@@ -201,6 +202,23 @@
 | 操作步骤 | 1. 三腿各运行一次探针并把 stdout 分别重定向到三个文件（纯执行，无预期结果）<br>2. 比对三段的 `[PASS]` / `[FAIL]` 计数与退出码<br>3. 比对三段的 `spki` 行<br>4. 比对三段的 `subject` 与 `issuer` 行<br>5. 各腿再跑一次离线 TLS 套件（`aurora_test_runner --run utest_net_tls`），核对通过数与跳过数 |
 | 预期结果 | 2. 三腿退出码同为 `0`，`[FAIL]` 计数同为 0<br>3. 三腿的 `spki` 逐字相同（同一张真实证书的 SPKI 摘要与后端无关；这条是 pin 计算跨腿可移植的唯一证据）<br>4. 三腿的 `subject` 与 `issuer` 文本逐字相同<br>5. 每腿 TLS 套件的失败数为 0；跳过只允许两枚，一是「本构建有后端，故无后端落点那例按环境缺失跳过」（每腿都有），二是 provider 腿缺少该能力对应的原生件（如 mbedTLS 3.6.5 无 PKCS#12 读取器 ⇒ 客户端身份那条，见 [`../specification/06-app-platform.md`](../specification/06-app-platform.md) §8.8.18）；离线用例不得因缺出站而跳过 |
 
+### 2.5 声明式交付面在宿主帧循环里的三态
+
+#### TC-NET-007 `Resource` 的三态逐支可视，且 `reload()` 的取消落到套接口上
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-NET-007 |
+| 测试目的 | 验证一次真实 HTTP 交换经 `net::http::bind_resource` 接成三态资源后，在宿主帧循环里把 Loading / Ready / Failed 三支逐支落地，且 `reload()` 的取消是真的掐断在途连接而不只是丢弃结果 |
+| 前置条件 | `ninja` 预设的构建目录已 configure 且能建 `demo_net_http`；本机可绑 `127.0.0.1` 的临时端口（**全程不出站、可在断网环境执行**）；stderr 未被丢弃——判据的一半在日志里 |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. `cmake --build build --target demo_net_http` 并运行 `build/demo_net_http.exe`，同时观察其 stderr（纯执行，无预期结果）<br>2. 起手立刻读窗口里的文本块与日志<br>3. 不做任何输入，等文本块自己变化后再读同一处<br>4. 按一次 `reload`，并在文本块仍是 `loading…` 的那段窗口内再按一次（桩的停顿就是应答前那次带超时的探针读，这一枚按得到）<br>5. 按 `stop / resume serving` 关掉供答，再按一次 `reload`<br>6. 再按一次 `stop / resume serving` 恢复供答，然后按 `reload` |
+| 预期结果 | 2. 文本块为 `loading… (reload again within this pause to cut the exchange mid-flight)`，日志同文本一行，并先于它出现 `accepted a connection`<br>3. 文本块变成 `seq=1  status=200  the socket is the truth`，日志里 `answered, closing the connection` 早于这一行——即「对端已写出」与「宿主看见」之间确有间隔，但这一变化不依赖任何输入事件<br>4. 日志出现 `request vanished before the answer (that exchange was cancelled)` 或 `peer vanished before the answer (that exchange was cancelled)`（桩读请求那一枚、与应答前那枚探针读，任一读到对端收摊都算；只丢结果的取消两枚都读不到东西）：前一次那条连接被掐断，这是取消落到套接口上的唯一硬证据；文本块最终落到更大的序号上，前一次的迟到结果没有盖住这一次<br>5. 文本块进 Failed 支 `failed: http-protocol-error - peer closed before the body was complete`，日志给出 `serving halted: connection closed without an answer`；窗口不崩、不白屏，`Resource` 的错误侧就是这一行的全部来源<br>6. 文本块回到 Ready 支且序号比第 5 步之前更大：失败不是终态，同一枚资源可继续重发 |
+
+**本用例只核对形态，不比对时刻**：第 3 步「对端已写出 → 宿主看见」之间的间隔由帧循环的唤醒时机决定，本机实测在数百毫秒到数秒之间浮动（宿主回投与唤醒属 `app` 层的既有行为，不是本交付面的判据），因此它只记为观察、不作红灯；若该间隔变成「直到下一次输入才落地」，才算唤醒丢失，按缺陷处理。
+
+**桩在写出应答之前先做一次探针读**（带 1.5 s 超时的第二次 `read_some`），而不是睡一段固定时长：睡出来的停顿留下的窗口是「对端已经写完一份没人收的应答」，客户端那一侧照常收到完整字节，取消只发生在结果投递上——第 4 步要看的「对端读到收摊」在那种形态里根本不可能出现，用例退化成「日志里有没有那一行」的赌博。探针读把「客户端还在等」与「客户端已经收摊」分成两种**线上事实**：还在等的只会让这次读超时，被取消的那一条交出一次真实的读端收摊。于是这段窗口既是 Loading 分支的可见时间，也是人工按得到 `reload` 的取消窗口（1.5 s），一物两用。
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -211,3 +229,4 @@
 | TC-NET-004 | 2026-10-14 | Qoder Agent | PASS | | 三腿均报 `[PASS] response over the encrypted channel starts with HTTP/1.` 且注记 `received 931 bytes`（三腿同一数量级、逐字节相同），非 0 也不是单枚记录大小；离线套件 `utest_net_tls` 的载荷跨记录往返用例在三腿均为 OK（分片落在任意记录边界上上层仍拿到完整字节） | | 931 字节与 `https://www.example.com/` 一次真实首页响应的量级相符 |
 | TC-NET-005 | 2026-10-14 | Qoder Agent | PASS | | 三腿探针第六段（另起一条连接、以改过一字符的真实摘要作 pin）均报 `[PASS] a public key outside the pin set is rejected with net-tls-pin-mismatch`，紧随的 `observed:` 注记逐字为 `net-tls-pin-mismatch (TLS certificate pin mismatch: 'peer public key pin toyMGpiThuoVaTygu6QeCcnum2PKJknnGOsHalH7BzU= is not in the configured pin set')`，携带命中的摘要值且不是链拒绝或握手类码；离线套件的「危险开关不遮蔽 pin」用例在三腿均为 OK | | 拒因来自 pin 判定本身；`allow_insecure_certificate` 置真只跳过链与主机名校验，pin 仍生效 |
 | TC-NET-006 | 2026-10-14 | Qoder Agent | PASS | | 三腿 stdout 逐字节比对：退出码同为 0，`[FAIL]` 计数同为 0，`subject`、`issuer`、`valid`、`spki` 四行与 `received 931 bytes` 三腿逐字相同；离线 TLS 套件失败数为 0，Windows 腿 19 跑 1 跳、WSL OpenSSL 腿 19 跑 1 跳、WSL mbedTLS 腿 18 跑 2 跳，跳过集合为 `absent_backend_reports_engine_unavailable`（三腿皆有后端故按环境缺失跳过）加 mbedTLS 腿的 `client_identity_satisfies_a_verified_peer_request`（3.6.5 无 PKCS#12 读取器）；`utest_net_test_double` 三腿各 14 例全跑全绿 | | 三条腿在同一次维护窗口内运行，故摘要一致性与证书轮换无关；`subject`/`issuer` 的文本形态自本批起按 DER 正序统一（OpenSSL 腿此前用 `XN_FLAG_RFC2253` 会反序，实测暴露后已改），跨腿可逐字比对的唯一值仍是 `spki` |
+| TC-NET-007 | 2026-10-16 | Qoder Agent | BLOCKED | | 第 2、3 步已见：起手文本块与日志同为 `loading… (reload again within this pause to cut the exchange mid-flight)`，且 `accepted a connection` 先于它；不做任何输入即落到 `seq=1  status=200  the socket is the truth`，日志里 `answered, closing the connection` 早于这一行约 4 s。第 4 步未按受控形态执行：运行期间本机桌面进入锁屏，Windows 侧自动化在锁屏下不投递输入，两次 `reload` 的间隔因此无从控制（其间一次非受控的取消确实让桩读到 `request vanished before the answer (that exchange was cancelled)`，但那不是按步骤按出来的证据）。第 5、6 步未执行 | | 判据既未成立也未推翻，按未执行对待；桌面解锁后照 §2.5 的步骤重跑即可。目前「取消落到套接口」的硬证据只有离线那枚 `utest_net_http_binding.a_reload_cuts_the_socket_of_the_previous_request`（证据取在串行对端：读到收摊 + 监听口照常受理下一条） |

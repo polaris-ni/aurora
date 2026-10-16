@@ -1,6 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/async.h
-/// 测试说明: Task<T> 的 then 值投递、Result 透传与异常捕获、cancel 丢弃结果、with_timeout
+/// 测试说明: Task<T> 的 then 值投递、Result 透传与异常捕获、cancel 丢弃结果与取消观察者的四条契约
+/// （首次取消触发一次、幂等、后登记只留最后一枚、登记时已取消即当场触发）、观察者在锁外执行、
+/// 落定与超时都不触发观察者、with_timeout
 /// 超时投递与提前完成不误报、结果就绪后注册回调的补投、主线程投递器路由，以及
 /// deferred 构建的登记式超时看守（到期表语义：只触发过期项、唤醒期限取最早且过期钳 0、
 /// delivered 后改道不二次回调）。全部经 promise/future 或原子量有界等待，断言只在用例线程执行
@@ -367,6 +369,93 @@ AURORA_TEST_CASE(then_delivery_routes_through_main_poster) {
 
     std::scoped_lock lock(queue_mutex);
     AURORA_TEST_CHECK_TRUE(queued.empty());  // delivered 去重：无二次投递
+}
+
+AURORA_TEST_CASE(cancel_observer_fires_once_on_the_first_cancel) {
+    auto state = std::make_shared<detail::AsyncState<int>>();
+    Task<int> task{state};
+    std::atomic<int> hits{0};
+    task.on_cancel([&hits]() -> void { hits.fetch_add(1, std::memory_order_relaxed); });
+
+    AURORA_TEST_CHECK_EQ(hits.load(), 0);  // 登记本身不算一次触发
+    task.cancel();
+    AURORA_TEST_CHECK_TRUE(task.is_cancelled());
+    AURORA_TEST_CHECK_EQ(hits.load(), 1);
+    task.cancel();  // 幂等：第二次既不重新置位，也不再触发观察者
+    AURORA_TEST_CHECK_EQ(hits.load(), 1);
+}
+
+AURORA_TEST_CASE(cancel_observer_registered_after_cancel_fires_immediately) {
+    auto state = std::make_shared<detail::AsyncState<int>>();
+    Task<int> task{state};
+    task.cancel();
+    std::atomic<int> hits{0};
+    task.on_cancel([&hits]() -> void { hits.fetch_add(1, std::memory_order_relaxed); });
+    // 竞态纪律：取消先于登记也要有观察者收到这一次事实，不留「登记即失效」的窗口。
+    AURORA_TEST_CHECK_EQ(hits.load(), 1);
+    task.on_cancel({});  // 已取消后撤销登记不该补触发，也不该改变既成事实
+    AURORA_TEST_CHECK_EQ(hits.load(), 1);
+}
+
+AURORA_TEST_CASE(cancel_observer_runs_outside_the_state_lock) {
+    auto state = std::make_shared<detail::AsyncState<int>>();
+    Task<int> task{state};
+    std::atomic<bool> lock_free{false};
+    task.on_cancel([&state, &lock_free]() -> void {
+        // try_lock 拿得到即证明钩子不在持锁区间里跑（拿到立刻放手）；钩子要能回头读这枚状态，
+        // 否则「在钩子里投递取消事实」这类实现一落码就自死锁。
+        if (state->mutex.try_lock()) {
+            state->mutex.unlock();
+            lock_free.store(true, std::memory_order_release);
+        }
+    });
+    task.cancel();
+    AURORA_TEST_CHECK_TRUE(lock_free.load(std::memory_order_acquire));
+}
+
+AURORA_TEST_CASE(cancel_observer_keeps_only_the_last_registration) {
+    auto state = std::make_shared<detail::AsyncState<int>>();
+    Task<int> task{state};
+    std::atomic<int> first{0};
+    std::atomic<int> second{0};
+    task.on_cancel([&first]() -> void { first.fetch_add(1, std::memory_order_relaxed); });
+    task.on_cancel([&second]() -> void { second.fetch_add(1, std::memory_order_relaxed); });
+    task.cancel();
+    AURORA_TEST_CHECK_EQ(first.load(), 0);  // 只保留最后登记的一枚
+    AURORA_TEST_CHECK_EQ(second.load(), 1);
+
+    // 传空即撤销登记：此后的取消不再触发任何人。
+    auto fresh = std::make_shared<detail::AsyncState<int>>();
+    Task<int> cleared{fresh};
+    std::atomic<int> hits{0};
+    cleared.on_cancel([&hits]() -> void { hits.fetch_add(1, std::memory_order_relaxed); });
+    cleared.on_cancel({});
+    cleared.cancel();
+    AURORA_TEST_CHECK_EQ(hits.load(), 0);
+}
+
+AURORA_TEST_CASE(cancel_observer_is_silent_on_completion_and_timeout) {
+    AURORA_TEST_REQUIRE_THREADS();
+    // 正常落定与超时改道都不是取消：观察者只在 `cancel()` 那一刻说话。
+    std::promise<void> entered;
+    std::promise<void> release;
+    auto entered_fut = entered.get_future();
+    std::atomic<int> hits{0};
+
+    auto task = async([&entered, &release]() -> int {
+        entered.set_value();
+        release.get_future().wait();
+        return 3;
+    });
+    task.on_cancel([&hits]() -> void { hits.fetch_add(1, std::memory_order_relaxed); });
+    AURORA_TEST_REQUIRE_EQ(entered_fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
+    task.with_timeout(std::chrono::milliseconds{1});  // 到点改道超时错误，不是取消
+    std::atomic<bool> delivered{false};
+    task.then([&delivered](const Result<int> &) -> void { delivered.store(true, std::memory_order_release); });
+    release.set_value();
+    AURORA_TEST_REQUIRE(wait_until([&delivered]() -> bool { return delivered.load(std::memory_order_acquire); }));
+    AURORA_TEST_CHECK_EQ(hits.load(), 0);
+    AURORA_TEST_CHECK_FALSE(task.is_cancelled());
 }
 
 }  // namespace aurora::test_cases::utest_async

@@ -3,7 +3,9 @@
 #include <atomic>
 #include <coroutine>
 #include <exception>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <utility>
 
@@ -18,6 +20,12 @@ template <typename T>
 struct CoroShared {
     std::atomic<bool> done{false};  ///< 协程是否已结束（由 ~promise_type 置位）
     std::optional<Result<T>> result;  ///< 完成结果；结束前为空
+    std::mutex mutex;  ///< 保护 on_done 的登记与摘取（帧收尾与登记可在同刻相遇）
+    /// @brief 完成观察者：帧收尾时恰触发一次（形态与 `Task<T>::on_cancel` 同构）。
+    ///
+    /// 协程帧只经 `is_done()` / `result()` 被观察，因此「等一个协程结束」在过去只能靠轮询——本字段
+    /// 把收尾这件事补成可订阅的事实，上层的适配器（如把一次网络交换交付成 `Task`）不必再睡每一轮。
+    std::function<void(const Result<T> &)> on_done;
 };
 /// @brief void 特化：无结果值，仅记录异常收尾时的错误。
 template <>
@@ -44,6 +52,7 @@ struct CoroShared<void> {
 /// au::launch(load());
 /// @endcode
 /// @tparam T 协程任务值类型（`result()` 求得 `Result<T>`）。
+/// @note 收尾的可观察口有两条：`is_done()` / `result()` 是轮询问法，`on_done()` 是订阅问法。
 /// @note Thread: main-thread only (continuation resumes on main thread)
 /// @note Side-effects: none
 /// @note Rebuildable: no
@@ -88,8 +97,22 @@ class CoroTask {
                 shared->result = make_error(ErrorCode::RuntimeCoroutineException, "coroutine threw unknown exception");
             }
         }
-        /// @brief promise 析构（帧收尾/销毁时触发）：置位 done，唤醒轮询方读取结果。
-        ~promise_type() { shared->done.store(true, std::memory_order_release); }
+        /// @brief promise 析构（帧收尾/销毁时触发）：置位 done 唤醒轮询方，并在锁外触发完成观察者。
+        /// @note 观察者摘出即清空：留着它，「会话持有共享状态、共享状态又持有会话」就成了自持环。
+        ~promise_type() {
+            std::function<void(const Result<T> &)> hook;
+            {
+                std::scoped_lock<std::mutex> lock(shared->mutex);
+                shared->done.store(true, std::memory_order_release);
+                hook = std::move(shared->on_done);
+            }
+            // 锁外触发：钩子按约定要能回头销毁这次交付的会话（含本共享状态的另一个持有者），
+            // 持锁调用即自死锁。结果槽此时必有值——`return_value` 与 `unhandled_exception` 是仅有的
+            // 两条收尾路径（同一枚契约见下方 `result()`），无值即帧被外力毁掉，那不在本库的形态里。
+            if (hook && shared->result.has_value()) {
+                hook(*shared->result);
+            }
+        }
     };
 
     /// @brief 由共享状态构造句柄（仅经 `get_return_object()`/协程编译器使用）。
@@ -111,11 +134,42 @@ class CoroTask {
     /// NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     [[nodiscard]] auto result() const -> Result<T> { return *shared_->result; }
 
+    /// @brief 登记完成观察者：帧收尾那一刻以协程的 `Result<T>` 触发一次。
+    ///
+    /// 三条契约（与 `Task<T>::on_cancel` 同构）：只保留最后登记的一枚（传空即撤销登记）；至多触发一次；
+    /// **登记时帧已收尾则在当前线程立即触发**，不留「登记即失效」的窗口。观察者跑在帧收尾的那条线程上
+    /// （经主线程投递器恢复的协程即主线程），不得阻塞。
+    ///
+    /// 本入口存在的理由：`CoroTask` 的 promise 永不首挂也不终挂，帧只能靠 `resume` 前进，结果历来只有
+    /// `is_done()` 一条问法——轮询。需要「结束即交付」的适配层（把一次交换交付成 `Task`）因此不必再
+    /// 自带一枚节拍，取消与超时照旧由承接侧自己的令牌管。
+    /// @param hook 完成时要执行的可调用体；空值表示撤销已登记的观察者。
+    auto on_done(std::function<void(const Result<T> &)> hook) -> void {
+        std::optional<Result<T>> late;
+        {
+            std::scoped_lock<std::mutex> lock(shared_->mutex);
+            if (!shared_->done.load(std::memory_order_acquire)) {
+                shared_->on_done = std::move(hook);
+                return;  // 未收尾：登记即完成，观察者由帧收尾时摘出触发
+            }
+            if (shared_->result.has_value()) {
+                late = shared_->result;  // 已收尾：锁外触发要把结果取一份副本
+            }
+        }
+        if (hook && late.has_value()) {
+            hook(*late);
+        }
+    }
+
   private:
     std::shared_ptr<detail::CoroShared<T>> shared_;
 };
 
 /// @brief `void` 特化：无返回值，续体仍回主线程。
+///
+/// 本形态**不提供** `on_done()`：它能交出的只有「已结束」与一枚可选错误，而有值形态那条契约的载荷
+/// （`Result<T>`）在这里没有对应物。库内需要订阅收尾的入口（`Client::send` / `open_stream` /
+/// `Authenticator::authenticate`）全是 `Result<T>` 形态，故此处不留一枚没有判据可钉的公共口。
 /// @note Thread: main-thread only
 /// @note Side-effects: none
 /// @note Rebuildable: no

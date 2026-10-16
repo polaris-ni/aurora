@@ -19,6 +19,12 @@
 ///   `http-timeout`；分段超时（`connect` / `read_idle`）已随之落地，重试（`RetryPolicy`）的每一次尝试各拿
 ///   一份 `total`、跨全部尝试的墙另有 `RetryPolicy::budget`。认证（`Client::authenticator()`）是重试环内层的
 ///   又一环，一次交换至多注入一次且不吃 `attempts` 名额，形态与判据见 `net/http_auth.h`。
+/// - **取消经 `Cancellation` 参数进来**：`send` / `open_stream` 各收一枚令牌（缺省即一份独立令牌 = 无人取消）。
+///   四条口径：**取消先于一切判定**——令牌到手时已取消，策略闸、缓存表、连接一概不问，直接落 `net-cancelled`；
+///   **掐的是在途那一次**——令牌接到交换内建的「跨尝试序列」上，取消即放行当前挂起点，本环不再发起新的尝试，
+///   而已经打过的那一次留下的事实（含其它错误码）不被改写；**令牌是共享状态**——拷贝只增引用，宿主与适配器
+///   看到同一个取消位（契约见 `net/cancellation.h`）；**不等钩子跑完**——`cancel()` 在调用线程上同步放行，
+///   不等结果落地，在途交换由会话自己收尾（声明式接线的「宿主析构即掐连接」正以此为前提）。
 ///
 /// 内容编码（透明解压）在发起侧管线内完成，`Response` 交出的恒是还原后的字节：
 /// - **宣告与支持集同源**：core 注册表的 gzip / zlib / deflate 三槽均已注册时，`send` 替调用方补
@@ -99,6 +105,7 @@
 #include <utility>
 
 #include "aurora/core/result.h"
+#include "aurora/net/cancellation.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_auth.h"
 #include "aurora/net/http_stream.h"
@@ -309,12 +316,14 @@ class Client {
     /// 那一份事实——非 2xx 是成功的 `Response`，传输失败是最后一枚底层错误码，本件不新造「重试失败」码。
     /// @param request 待发送的请求（其 `render_head()` 的 URL 解析失败、字段畸形在此以错误结局交出；
     ///                未自带 `Accept-Encoding` 时由本件补齐）；按值接管以随协程帧存活，调用后可立即销毁源对象。
+    /// @param cancellation 本次交换的取消令牌（共享状态句柄，缺省 = 独立令牌、无人可取消）。
     /// @return 可 `co_await` 的协程任务：成功携物化的 `Response`，失败携对应 `http-*` / `net-*` 错误码。
     /// @note 缓存开着且本请求未 `no_cache()` 时，命中新鲜副本直接返回（`from_cache()` 为真、零连接），
     ///       陈旧副本自动挂条件头重验证，304 用新头更新已存应答后交出。
     /// @note 起手先于查表、其后逐跳各过一遍 `NetPolicy` 三维判定（三级取定见本头「声明式安全策略」段）：
     ///       被拒时落 `net-policy-violated`，一条连接都不发起、一个字节都不写出，缓存命中也不例外。
-    [[nodiscard]] auto send(Request request) const -> CoroTask<Result<Response>>;
+    /// @note 取消口径见本头「取消经 `Cancellation` 参数进来」条：令牌到手时已取消即一个字节都不发。
+    [[nodiscard]] auto send(Request request, Cancellation cancellation = {}) const -> CoroTask<Result<Response>>;
 
     /// @brief 发送一次请求并**流式**收下应答：字节到手一段就交一段，整条消息不必同时存在于内存。
     ///
@@ -345,11 +354,15 @@ class Client {
     /// （本次没有线上字节）而 `delivered_bytes` 是已存体的长度。304 重验证成功同理：线上只有头部块。
     /// @param request 待发送的请求（按值接管以随协程帧存活，调用后可立即销毁源对象）。
     /// @param sink 接收侧宿主；**按引用**交付，其生命周期必须覆盖到协程收尾（`is_done()` 之后）。
+    /// @param cancellation 本次交换的取消令牌（共享状态句柄，缺省 = 独立令牌、无人可取消）。
     /// @return 可 `co_await` 的协程任务：成功携 `StreamOutcome`，失败携对应 `http-*` / `net-*` 错误码。
     /// @note 策略判定与 `send` 同一条路：起手先于查表、其后逐跳，被拒落 `net-policy-violated` 且不发起连接。
+    /// @note 取消到点在已交付给宿主的那一段之后不产生任何回滚：宿主见到过的字节仍由宿主处置，本件只保证
+    ///       不再交付后续字节，且 `on_end` 不被调用（失败结局不收尾，口径与 `sink` 主动停读不同）。
     /// @note Thread: `sink` 的三个入口恒在主线程同步调用，由本协程串行驱动
     /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
-    [[nodiscard]] auto open_stream(Request request, DataSink &sink) const -> CoroTask<Result<StreamOutcome>>;
+    [[nodiscard]] auto open_stream(Request request, DataSink &sink, Cancellation cancellation = {}) const
+        -> CoroTask<Result<StreamOutcome>>;
 
   private:
     std::optional<std::uint64_t> max_body_bytes_;  ///< 物化体上限（nullopt = 不限）

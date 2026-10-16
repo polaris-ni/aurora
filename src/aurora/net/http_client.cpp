@@ -778,7 +778,12 @@ auto Client::cache(CacheOptions value) -> Client & {
     return *this;
 }
 
-auto Client::send(Request request) const -> CoroTask<Result<Response>> {
+auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<Result<Response>> {
+    // 取消先于一切判定：令牌到手时已取消，策略闸、缓存表、连接一概不问（口径见本头「取消」条）。
+    // 排在最前是为了让这条判据与「一次都不触网」同样可断言——缓存命中虽不触网，也不该被当成一次交付。
+    if (cancellation.is_cancelled()) {
+        co_return Result<Response>{make_error(ErrorCode::NetCancelled, "the exchange was cancelled before it started")};
+    }
     // 策略取「请求覆盖 → 客户端缺省」两级；形态闸在起手就过，越界值不进入任何一次尝试。
     const RetryPolicy policy = request.retry_policy().value_or(retry_);
     if (const auto invalid = detail::validate_retry_policy(policy)) {
@@ -816,6 +821,10 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
     auto wall = std::make_shared<TimeoutState>();
     StageTimer budget_timer(loop_open ? policy.budget : std::optional<std::chrono::milliseconds>{},
                             TimeoutStage::Budget, sequence, wall);
+    // 宿主交来的令牌接到本交换的「跨尝试序列」上：取消即掐掉在途那一次（逐尝试的 `token` 由 sequence 转发），
+    // 且本环就此不再发起新的尝试。登记时若已取消会立即触发（`Cancellation` 的竞态契约），故起手检查到这里
+    // 之间那点空隙不会留下「取消了却没人掐」的窗口。
+    cancellation.on_cancel([sequence]() mutable { sequence.cancel(); });
     Result<Response> outcome{make_error(ErrorCode::HttpProtocolError, "send produced no outcome")};
     // 认证环的每次交换状态：提供方取自客户端（空即整环不存在）、问过没有、代理那侧的答复。源站那侧的答复直接
     // 并回 `origin`，故这里不留副本（口径见 `place_auth_decision`）。
@@ -830,6 +839,15 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
     // 结果只经 `is_done()` / `result()` 轮询），故「把一次尝试抽成子协程再 co_await」在本库无对应机制——
     // 这正是本文件开头「刻意不做抽象」那条约束在重试这一层的再确认。
     for (std::uint32_t attempt = 1;;) {
+        // 取消落在两次尝试之间（含起手检查之后的那点竞态）时，这里就是唯一的收摊口：一次都没打过即交「被取消」
+        // 这份事实，打过的那次留下它自己的错误码——本环不替调用方改写已经发生的事。
+        if (sequence.is_cancelled()) {
+            if (attempt == 1 && !replay_for_credentials) {
+                outcome =
+                    Result<Response>{make_error(ErrorCode::NetCancelled, "the exchange was cancelled before it ran")};
+            }
+            break;
+        }
         Cancellation token;
         // 墙到点即掐掉在途的这一次尝试（`Cancellation` 契约：钩子至多触发一次），随后本环据 `is_cancelled()` 收摊。
         sequence.on_cancel([token]() mutable { token.cancel(); });
@@ -1340,7 +1358,13 @@ auto Client::send(Request request) const -> CoroTask<Result<Response>> {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
-auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Result<StreamOutcome>> {
+auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellation) const
+    -> CoroTask<Result<StreamOutcome>> {
+    // 取消先于一切判定，且与 `send` 同一位置：已取消的令牌不问策略、不看本腿能力、不查表，也不调宿主任何一口。
+    if (cancellation.is_cancelled()) {
+        co_return Result<StreamOutcome>{
+            make_error(ErrorCode::NetCancelled, "the exchange was cancelled before it started")};
+    }
     // 策略取「请求覆盖 → 客户端缺省」两级；形态闸在起手就过，越界值不进入任何一次尝试。
     const RetryPolicy policy = request.retry_policy().value_or(retry_);
     if (const auto invalid = detail::validate_retry_policy(policy)) {
@@ -1365,6 +1389,9 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
     auto wall = std::make_shared<TimeoutState>();
     StageTimer budget_timer(loop_open ? policy.budget : std::optional<std::chrono::milliseconds>{},
                             TimeoutStage::Budget, sequence, wall);
+    // 宿主的令牌接到跨尝试序列上，转发与竞态口径同 `send`；已交出去的那一段宿主字节不回滚，
+    // 取消管的是「此后不再交付」。
+    cancellation.on_cancel([sequence]() mutable { sequence.cancel(); });
     Request origin = std::move(request);
     // 链路标识与 `send` 同一处落一次：本入口的每一跳与每一次尝试都带同一串出去。
     stamp_request_id(origin, request_id_);
@@ -1397,6 +1424,14 @@ auto Client::open_stream(Request request, DataSink &sink) const -> CoroTask<Resu
     // 重试环与单次交换**同帧**：`CoroTask` 不是 awaitable（`state/coroutine.h` 的 promise 永不首挂也不终挂，
     // 结果只经 `is_done()` / `result()` 轮询），故「把一次尝试抽成子协程再 co_await」在本库无对应机制。
     for (std::uint32_t attempt = 1;;) {
+        // 收摊口与 `send` 同一条：取消落在两次尝试之间时，一次都没打过才交「被取消」，打过的那次留下自己的事实。
+        if (sequence.is_cancelled()) {
+            if (attempt == 1 && !replay_for_credentials) {
+                outcome = Result<StreamOutcome>{
+                    make_error(ErrorCode::NetCancelled, "the exchange was cancelled before it ran")};
+            }
+            break;
+        }
         Cancellation token;
         // 墙到点即掐掉在途的这一次尝试（`Cancellation` 契约：钩子至多触发一次），随后本环据 `is_cancelled()` 收摊。
         sequence.on_cancel([token]() mutable { token.cancel(); });

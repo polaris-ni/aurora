@@ -1,11 +1,15 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/coroutine.h
 /// 测试说明: CoroTask<T>/CoroTask<void> 的完成与结果语义、co_await co_async 的值/异常/Result
-/// 错误透传、同步协程立即完成，以及续体经主线程投递器恢复（全部经 promise/future 有界等待，断言只在用例线程执行）
+/// 错误透传、同步协程立即完成，以及续体经主线程投递器恢复（全部经 promise/future 有界等待，断言只在用例线程执行）；
+/// 另有 `on_done()` 完成观察者的四条契约——收尾恰触发一次、已收尾时当场触发、只留最后登记的一枚
+/// （传空即撤销）、触发后不留下持有（观察者摘出即清空，会话与共享状态之间不成自持环）
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -46,6 +50,40 @@ struct MainPosterGuard {
     auto operator=(MainPosterGuard &&) -> MainPosterGuard & = delete;
     ~MainPosterGuard() { aurora::Task<int>::set_main_poster(nullptr); }
 };
+
+/// @brief 排空主线程投递队列直到 `done()` 成立（每轮先换出批次再在用例线程执行，锁外调用）。
+///
+/// 队列就是「帧还没收尾」的可控现场：续体排在队列里，不排空就不会收尾，于是登记观察者的先后次序
+/// 能用单线程时序钉死。空队列时睡 1 ms 再看（禁止忙等），预算用完仍不成立就把失败交回调用方的 REQUIRE。
+/// @param queue_mutex 队列锁。
+/// @param queued 投递队列（与安装的投递器同一份存储）。
+/// @param done 收尾判据。
+/// @param budget 等待预算。
+/// @return 判据成立为真。
+[[nodiscard]] auto drain_until_done(std::mutex &queue_mutex, std::vector<std::function<void()>> &queued,
+                                    const std::function<bool()> &done,
+                                    std::chrono::milliseconds budget = std::chrono::milliseconds{2000}) -> bool {
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    bool satisfied = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::vector<std::function<void()>> batch;
+        {
+            std::scoped_lock lock(queue_mutex);
+            batch.swap(queued);
+        }
+        for (std::function<void()> &fn : batch) {
+            fn();
+        }
+        satisfied = done();
+        if (satisfied) {
+            break;
+        }
+        if (batch.empty()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});  // 续体还没排进队列
+        }
+    }
+    return satisfied;
+}
 
 }  // namespace
 
@@ -243,6 +281,113 @@ AURORA_TEST_CASE(continuation_resumes_through_main_poster) {
     AURORA_TEST_REQUIRE_EQ(fut.wait_for(std::chrono::seconds{2}), std::future_status::ready);
     AURORA_TEST_CHECK_EQ(fut.get(), 7);
     AURORA_TEST_CHECK(wait_until([&task]() -> bool { return task.is_done(); }));
+}
+
+AURORA_TEST_CASE(on_done_reports_the_value_the_frame_ends_with) {
+    AURORA_TEST_REQUIRE_THREADS();
+    std::promise<Result<int>> box;
+    auto task = []() -> CoroTask<int> {
+        Result<int> r = co_await co_async([]() -> int { return 11; });
+        co_return r.ok() ? r.value() : -1;
+    }();
+    task.on_done([&box](const Result<int> &r) -> void { box.set_value(r); });
+
+    auto fut = box.get_future();
+    AURORA_TEST_REQUIRE_EQ(fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
+    const Result<int> r = fut.get();
+    AURORA_TEST_CHECK_TRUE(r.ok());
+    AURORA_TEST_CHECK_EQ(r.value(), 11);
+}
+
+AURORA_TEST_CASE(on_done_fires_at_registration_when_the_frame_already_ended) {
+    // 无挂起点的协程在创建表达式内就收尾（final_suspend 即毁帧并置位 done）：此后登记观察者
+    // 必须当场在登记线程触发一次，不留「登记即失效」的窗口。
+    auto task = []() -> CoroTask<int> { co_return 42; }();
+    AURORA_TEST_CHECK_TRUE(task.is_done());
+
+    bool fired = false;
+    int got = 0;
+    task.on_done([&fired, &got](const Result<int> &r) -> void {
+        fired = true;
+        got = r.value();
+    });
+    AURORA_TEST_CHECK_TRUE(fired);
+    AURORA_TEST_CHECK_EQ(got, 42);
+}
+
+AURORA_TEST_CASE(on_done_carries_the_error_of_a_frame_ended_by_exception) {
+    AURORA_TEST_REQUIRE_THREADS();
+    std::promise<Result<int>> box;
+    auto task = []() -> CoroTask<int> {
+        (void)co_await co_async([]() -> int { return 1; });
+        throw std::runtime_error{"outer boom"};
+    }();
+    task.on_done([&box](const Result<int> &r) -> void { box.set_value(r); });
+
+    auto fut = box.get_future();
+    AURORA_TEST_REQUIRE_EQ(fut.wait_for(std::chrono::seconds{5}), std::future_status::ready);
+    const Result<int> r = fut.get();
+    AURORA_TEST_CHECK_FALSE(r.ok());
+    AURORA_TEST_CHECK(r.error().code_enum == ErrorCode::RuntimeCoroutineException);
+    AURORA_TEST_CHECK_STREQ(r.error().code, "runtime-coroutine-exception");
+    AURORA_TEST_CHECK_THAT(r.error().message, m::has_substr("outer boom"));
+}
+
+AURORA_TEST_CASE(on_done_keeps_only_the_last_registration) {
+    AURORA_TEST_REQUIRE_THREADS();
+    // 投递器把续体排进队列：不排空就不会收尾，两次登记的先后次序因此是单线程可控的。
+    std::mutex queue_mutex;
+    std::vector<std::function<void()>> queued;
+    Task<int>::set_main_poster([&](std::function<void()> fn) -> void {
+        std::scoped_lock lock(queue_mutex);
+        queued.push_back(std::move(fn));
+    });
+    MainPosterGuard guard;
+
+    std::atomic<int> first{0};
+    std::atomic<int> second{0};
+    auto task = []() -> CoroTask<int> {
+        (void)co_await co_async([]() -> int { return 1; });
+        co_return 1;
+    }();
+    task.on_done([&first](const Result<int> &) -> void { first.fetch_add(1, std::memory_order_relaxed); });
+    task.on_done([&second](const Result<int> &) -> void { second.fetch_add(1, std::memory_order_relaxed); });
+    AURORA_TEST_REQUIRE(drain_until_done(queue_mutex, queued, [&task]() -> bool { return task.is_done(); }));
+    AURORA_TEST_CHECK_EQ(first.load(), 0);  // 只保留最后登记的一枚
+    AURORA_TEST_CHECK_EQ(second.load(), 1);
+
+    // 传空即撤销登记：收尾时没有任何观察者会被触发。
+    std::atomic<int> cleared{0};
+    auto another = []() -> CoroTask<int> {
+        (void)co_await co_async([]() -> int { return 2; });
+        co_return 2;
+    }();
+    another.on_done([&cleared](const Result<int> &) -> void { cleared.fetch_add(1, std::memory_order_relaxed); });
+    another.on_done({});
+    AURORA_TEST_REQUIRE(drain_until_done(queue_mutex, queued, [&another]() -> bool { return another.is_done(); }));
+    AURORA_TEST_CHECK_EQ(cleared.load(), 0);
+}
+
+AURORA_TEST_CASE(on_done_releases_its_own_capture_once_it_has_fired) {
+    AURORA_TEST_REQUIRE_THREADS();
+    // 观察者是「摘出即清空」而不是留在共享状态里：留着它，会话持有共享状态、共享状态又持有会话
+    // 就成了自持环——适配器再也放不掉那条交换。sentinel 的引用计数就是这一条的可读判据。
+    auto sentinel = std::make_shared<std::atomic<int>>(0);
+    std::atomic<bool> fired{false};
+    {
+        auto task = []() -> CoroTask<int> {
+            (void)co_await co_async([]() -> int { return 5; });
+            co_return 5;
+        }();
+        task.on_done([sentinel, &fired](const Result<int> &) -> void {
+            (void)sentinel;  // 观察者自持一份：它被留着就说明环没断
+            fired.store(true, std::memory_order_release);
+        });
+        AURORA_TEST_REQUIRE(wait_until([&fired]() -> bool { return fired.load(std::memory_order_acquire); }));
+        // 判据按引用取 sentinel：按值捕获会给轮询者自己加一份持有，那就永远比不到「只剩用例这一份」。
+        AURORA_TEST_CHECK(wait_until([&sentinel]() -> bool { return sentinel.use_count() == 1; }));
+    }
+    AURORA_TEST_CHECK_EQ(sentinel.use_count(), 1);  // 帧与句柄都已销毁：没有第二份持有者残留
 }
 
 }  // namespace aurora::test_cases::utest_coroutine
