@@ -1,13 +1,13 @@
 #pragma once
 
-/// @brief 平台网络运行时的 RAII 会话（CHG-018 §4 处置：由公共面降为库内细节）。
+/// @brief 平台网络运行时的 RAII 会话。
 /// @file net/detail/runtime.h
 ///
 /// **仅供 `src/aurora/net/` 实现侧使用，不占公共 API 预算。**存在理由三条：
 /// 1. Windows 的 Winsock 在使用任何 socket API 前必须 `WSAStartup`、末个使用者退出时
 ///    `WSACleanup`；POSIX 无此概念。这条生命周期是平台事实，不会因为公共面少了一个类型而消失。
 /// 2. 公共面曾有 `aurora::net::Session`，要求调用方自备会话；同步阻塞面迁进 `aurora::net::blocking`
-///    时按 CHG-018 §4 改为「库内自持」——句柄创建点先经 `socket.cpp` 里的进程级钉住取得运行时，
+///    时改为「库内自持」——句柄创建点先经 `socket.cpp` 里的进程级钉住取得运行时，
 ///    于是工具与测试宿主不再需要感知本类型。
 /// 3. 库内仍有「一时没有句柄、却要求运行时可用」的场景（引擎的整个生命周期、`local_ipc` 的运行期
 ///    探测），本类正是那枚作用域引用。计数与钉住共用同一份引用计数，两者叠加不会提前 `WSACleanup`。

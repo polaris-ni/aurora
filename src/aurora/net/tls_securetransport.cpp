@@ -1,4 +1,4 @@
-// Aurora net — SecureTransport 系统栈后端（CHG-018 TLS 切片：macOS 缺省装配，提案 §5 平台矩阵）。
+// Aurora net — SecureTransport 系统栈后端。
 //
 // 与 Schannel 腿同一套取舍：用系统栈而不是自带 TLS 源码，零依赖、随系统 servicing 打补丁，记录保护
 // 与版本降级策略由系统承担；本层只做三件系统做不了或做不对的事——把字节流换成内存推拉、把信任判定
@@ -732,9 +732,6 @@ class SecureTransportBackend final : public TlsBackend {
     /// 不调 `SSLClose`：文档没有承诺它的幂等性，而关闭通知的产出已由 `shutdown_records()` 承担；
     /// `SSLCreateContext` 的文档明写「用 `CFRelease` 释放本对象」，内存 I/O 之下没有 fd 需要额外收尾。
     void release() {
-        ::fprintf(stderr, "[tls-st][diag] release enter ctx=%p certs=%p anchors=%p\n",
-                  static_cast<void *>(context_), static_cast<void *>(certificate_refs_),
-                  static_cast<void *>(anchors_));
         if (certificate_refs_ != nullptr) {
             ::CFRelease(certificate_refs_);
             certificate_refs_ = nullptr;

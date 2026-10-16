@@ -52,27 +52,27 @@ constexpr auto unsigned_at(std::span<const char> bytes, std::size_t index) -> in
 /// 16 位数被 31 整除。任一不成立即按裸 DEFLATE（`RFC 1951`）建流。物化路径靠「先试再回落」消解同一歧义，
 /// 流式路径不能重播已交出的字节，故只看头（口径见本文件头注释）。
 /// @param first_two 本环节的头两枚输入字节（长度不足两枚即调用方的用法错误）。
-/// @return 锁定到整条流的包装格式。
-constexpr auto probe_deflate_format(std::span<const char> first_two) -> CompressionFormat {
+/// @return 锁定到整条流的包装格式 ID（指向静态存储的预定义常量）。
+constexpr auto probe_deflate_format(std::span<const char> first_two) -> std::string_view {
     const int cmf = unsigned_at(first_two, 0);
     const int flg = unsigned_at(first_two, 1);
     const bool method_is_deflate = (cmf & 0x0F) == AURORA_ZLIB_CM_DEFLATE;
     const bool window_in_range = (cmf >> 4) <= AURORA_ZLIB_MAX_WINDOW_CODE;
     const bool header_check_matches = ((cmf << 8) | flg) % AURORA_ZLIB_HEADER_CHECK_MODULUS == 0;
     if (method_is_deflate && window_in_range && header_check_matches) {
-        return CompressionFormat::Zlib;
+        return AURORA_COMPRESS_FORMAT_ZLIB;
     }
-    return CompressionFormat::Deflate;
+    return AURORA_COMPRESS_FORMAT_DEFLATE;
 }
 
 /// @brief 环节开局即可确定的包装格式。
 ///
 /// `Deflate` 回空 = 待首两枚输入字节判定；`Gzip` 恒是 RFC 1952 包装，没有歧义可判。
 /// @param coding 编码环节。
-/// @return 已确定的格式；待判定为空。
-constexpr auto known_format(Coding coding) -> std::optional<CompressionFormat> {
+/// @return 已确定的格式（指向静态存储的预定义常量，可安全持于 `std::optional`）；待判定为空。
+constexpr auto known_format(Coding coding) -> std::optional<std::string_view> {
     if (coding == Coding::Gzip) {
-        return CompressionFormat::Gzip;
+        return AURORA_COMPRESS_FORMAT_GZIP;
     }
     return std::nullopt;
 }
@@ -193,16 +193,16 @@ auto to_http_error(const Error &source, std::string_view coding) -> Error {
 auto decode_stage(Coding coding, std::span<const char> input, const DecompressOptions &options)
     -> Result<std::vector<char>> {
     if (coding == Coding::Gzip) {
-        return aurora::decompress(CompressionFormat::Gzip, input, options);
+        return aurora::decompress(AURORA_COMPRESS_FORMAT_GZIP, input, options);
     }
-    auto wrapped = aurora::decompress(CompressionFormat::Zlib, input, options);
+    auto wrapped = aurora::decompress(AURORA_COMPRESS_FORMAT_ZLIB, input, options);
     if (wrapped) {
         return wrapped;
     }
     if (wrapped.error().code_enum != ErrorCode::CompressionDataCorrupt) {
         return wrapped;
     }
-    auto raw = aurora::decompress(CompressionFormat::Deflate, input, options);
+    auto raw = aurora::decompress(AURORA_COMPRESS_FORMAT_DEFLATE, input, options);
     if (raw) {
         return raw;
     }
@@ -234,11 +234,16 @@ template <typename Range>
 }  // namespace
 
 auto compression_available() -> bool {
-#ifdef AURORA_ENABLE_COMPRESSION
-    return true;
-#else
-    return false;
-#endif
+    // 「宣告与支持集同源」在运行期的落实：gzip、zlib、deflate 三槽均已注册实现方为真——Deflate
+    // 环节内部先试 zlib 再回落裸流，两型都须有着落，任缺其一即整组不宣告、不做部分宣告。
+    // 「可服务」= 注册在案（覆盖与内置都算数），不试创建——创建失败属运行期诚实失败。
+    std::size_t served = 0;
+    for (const auto &entry : CompressionCodecRegistry::instance().registered()) {
+        served += static_cast<std::size_t>(entry.format == AURORA_COMPRESS_FORMAT_GZIP ||
+                                           entry.format == AURORA_COMPRESS_FORMAT_ZLIB ||
+                                           entry.format == AURORA_COMPRESS_FORMAT_DEFLATE);
+    }
+    return served == 3;
 }
 
 auto parse_content_encoding(std::string_view value) -> Result<std::vector<Coding>> {
@@ -311,9 +316,11 @@ auto StreamingDecoder::create(const std::vector<Coding> &chain, std::optional<st
     }
     if (!compression_available()) {
         // 与物化路径同一出口码，只是提前到建链这一步：本构建连 `Accept-Encoding` 都不该宣告，收到带编码的
-        // 载荷要么是畸形报文要么是对端越界，两种都没有「先收下半条流再失败」的理由。
+        // 载荷要么是畸形报文要么是对端越界，两种都没有「先收下半条流再失败」的理由。文案保留
+        // `AURORA_ENABLE_COMPRESSION` 字样：内置解码器只在宏开的构建编入，既有用例断言依赖该字样。
         return unsupported_error("the response declares Content-Encoding '" + joined_codings(chain) +
-                                 "' but this build has no decompression capability (AURORA_ENABLE_COMPRESSION=OFF)");
+                                 "' but this build cannot serve it: not all of gzip / zlib / deflate have a "
+                                 "registered codec (builtin decoders require AURORA_ENABLE_COMPRESSION=ON)");
     }
     built.stages_.reserve(chain.size());
     // 书写次序是应用次序（`RFC 9110 §8.4`），故还原从右往左：最后应用的环节最先建环、最先接线上字节。
@@ -337,7 +344,8 @@ auto StreamingDecoder::open(Stage &stage) const -> Result<void> {
         return corrupt_error("internal: a coding stage was opened before its format was determined");
     }
     const DecompressOptions options{.max_output_bytes = max_output_bytes_};
-    auto created = Decompressor::create(stage.format.value(), options);
+    // 格式 ID 指向静态存储的预定义常量，create_decompressor 内部注册即拷贝，无生命周期顾虑。
+    auto created = aurora::create_decompressor(stage.format.value(), options);
     if (!created) {
         return Result<void>{created.error()};  // core 成因原样带回，由调用方翻成 HTTP 出口码
     }
@@ -383,7 +391,7 @@ auto StreamingDecoder::emit_from(std::size_t index, std::span<const char> bytes)
     auto &stage = stages_.at(index);
     std::vector<char> buffered;
     std::span<const char> pending = bytes;
-    if (!stage.decoder.has_value()) {
+    if (stage.decoder == nullptr) {
         if (stage.needs_probe && !stage.format.has_value()) {
             stage.preamble.insert(stage.preamble.end(), bytes.begin(), bytes.end());
             if (stage.preamble.size() < AURORA_DEFLATE_PROBE_BYTES) {
@@ -427,13 +435,13 @@ auto StreamingDecoder::settle(std::size_t index) -> Result<EmitFlow> {
         return Result<EmitFlow>{EmitFlow::Continue};
     }
     auto &stage = stages_.at(index);
-    if (!stage.decoder.has_value()) {
+    if (stage.decoder == nullptr) {
         if (stage.preamble.empty()) {
             return settle(index + 1);  // 本环一个字节都没收到：没有流要终结，下游同样没有
         }
         // 不足两枚输入字节就收摊：zlib 的头本身占两枚，故这一环只可能是裸 DEFLATE（RFC 1951）。剩下那一两枚
         // 字节照常喂入并终结——短流的「截断」定性归 core 判，本层不另造一套判据。
-        stage.format = CompressionFormat::Deflate;
+        stage.format = AURORA_COMPRESS_FORMAT_DEFLATE;
         if (auto opened = open(stage); !opened) {
             const auto mapped = to_http_error(opened.error(), coding_name(stage.coding));
             note_halt(mapped);

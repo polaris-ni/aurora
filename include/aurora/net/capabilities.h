@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief 传输引擎的运行期能力声明（CHG-018 底座切片：能力差异经查询表达，公共 API 面零宏）。
+/// @brief 传输引擎的运行期能力声明。
 /// @file net/capabilities.h
 ///
 /// 使用方据本结构**运行期**降级，而不是靠平台宏猜（`SPEC.PLATFORM.ZERO-IFDEF.001` 的同构要求）。

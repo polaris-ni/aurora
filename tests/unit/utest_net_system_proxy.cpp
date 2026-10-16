@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: src/aurora/net/detail/system_proxy.cpp
-/// 测试说明: 系统代理快照到决策集合的换算回归（CHG-018 §11「系统代理读取」）：PAC 与 WPAD 一律
+/// 测试说明: 系统代理快照到决策集合的换算回归：PAC 与 WPAD 一律
 ///           报 `net-proxy-unsupported` 而不回空集合（配了自动配置的机器意图就是「须经代理」，
 ///           静默当成没配会让办公网流量直连出去且无痕）；系统里没配代理是正常状态，回空集合；
 ///           服务器表按 scheme 令牌分槽（`http=` / `https=` / `socks5=` / 裸项归 `all`），

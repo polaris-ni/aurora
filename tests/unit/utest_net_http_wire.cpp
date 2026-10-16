@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: src/aurora/net/detail/http_wire.h + src/aurora/net/detail/http_wire.cpp
-/// 测试说明: HTTP/1.1 报文字节层的逐值回归（CHG-018 §6 的报文编码 / 解析部分）。覆盖应答头部块解析
+/// 测试说明: HTTP/1.1 报文字节层的逐值回归。覆盖应答头部块解析
 ///           的三态分岔（还没读够 / 完整 / 不合文法或超头部上限）、同名头保序不折叠、obs-fold 续行合并、
 ///           CRLF 与裸 LF 两型换行、`header_bytes` 之后的字节归属消息体；分帧判定按规范性次序落形态
 ///           （`Content-Length` 与 `Transfer-Encoding` 并存判走私、非 chunked 的传输编码判不可实现、

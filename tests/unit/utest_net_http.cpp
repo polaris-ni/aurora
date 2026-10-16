@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/http.h + src/aurora/net/http.cpp
-/// 测试说明: HTTP 发起侧值类型的逐值回归（CHG-018 §6 / §12 的请求与应答对象）。覆盖方法枚举与线上
+/// 测试说明: HTTP 发起侧值类型的逐值回归。覆盖方法枚举与线上
 ///           文本的双向换算（往返一致、小写与未知拼写判 `http-request-invalid`）；工厂对目标 URL 的
 ///           当场解析与「解析失败延后到 render_head 才报错」的口径；请求序列化的两处补齐（有体且未声明
 ///           `Content-Length` / `Transfer-Encoding` 时按体长度补、缺 `Host` 由字节层按目标补）与 HEAD

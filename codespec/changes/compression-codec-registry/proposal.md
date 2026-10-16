@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-020 |
 | 提出日期 | 2026-10-16 |
-| 当前状态 | 已提议 |
+| 当前状态 | 已归档 |
 | 关联需求 | 无 |
 | 影响面 | 原地重写 include/aurora/core/compression.h 与 src/aurora/core/compression.cpp（字符串格式 ID、编解码器抽象、注册表、内置 wuffs 实现退为库内部）；迁移 src/aurora/net/detail/http_encoding.{h,cpp} 的格式标识与持有类型、include/aurora/net/http_client.h 的宣告条件注释（src/aurora/net/http_client.cpp 的注入调用点零改动：宣告判据收在 `compression_available()` 的实现内）；tests/unit/utest_core_compression.cpp 与 tests/integration/itest_known_enums.cpp 迁移；tools/include/known_enums.h 移除 CompressionFormat 登记、aurora_api.json 随 --target aurora_api_json 重建（enums 段 -1）；cmake/AuroraCompression.cmake 注释同步；codespec 回写见「回写落点」（另 CHANGELOG.md 记破坏性条目与迁移路径，该文档不属 codespec 树故不列为回写落点）；codespec/changes/xplat-network-stack/proposal.md 两处 CompressionFormat 引用随枚举移除过时（CHG-007 仍在提议态，落地时复核其表述，不列回写落点） |
 
@@ -27,15 +27,16 @@
     ```
 
     注册表内部以 `std::string` 持存格式 ID，故调用方的 `string_view` 不要求长命（注册即拷贝）。错误 detail 直接点名格式 ID 字符串，不再需要枚举到文本的映射表。
-2. **新增 `CompressionCodec` 抽象基类**：`name() -> std::string_view`（纯虚，实现方稳定标识，诊断用）；`can_compress() -> bool`（默认 false）；`compress(input, options) -> Result<std::vector<char>>`（默认落 `general-not-supported`，detail 带 name()）；`create_decompressor(options) -> Result<std::unique_ptr<Decompressor>>`（默认落 `compression-unavailable`——流式是可选能力，不实现即没有）。全部方法 const、实现须线程安全（同 `ImageCodec` 契约）；五法则禁拷贝移动、析构虚（实例经基类指针删除），只经 shared_ptr 注入注册表。编解码器不自带格式字段——格式到实现的绑定发生在注册点（同一实现可注册到多个格式 ID，内置 wuffs 实现即此形态）。用户侧接入形如：
+2. **新增 `CompressionCodec` 抽象基类**：`name() -> std::string_view`（纯虚，实现方稳定标识，诊断用）；`can_compress() -> bool`（默认 false）；`compress(format, input, options) -> Result<std::vector<char>>`（默认落 `general-not-supported`，detail 带 name()）；`create_decompressor(format, options) -> Result<std::unique_ptr<Decompressor>>`（默认落 `compression-unavailable`——流式是可选能力，不实现即没有）。**两方法首参均为注册表分派时透传的槽位格式 ID**（实施修订：初稿签名不带 format，但「同一实现注册到多个格式 ID」要求实现能按槽位产出对应流的编解码器——如 zlib 绑定同服 gzip 与 zlib 两槽、内置 wuffs 一份实现服务三族——格式绑定在注册点、实现自身不持格式状态，故由注册表在每次调用时告知）。全部方法 const、实现须线程安全（同 `ImageCodec` 契约）；五法则禁拷贝移动、析构虚（实例经基类指针删除），只经 shared_ptr 注入注册表。用户侧接入形如：
 
     ```cpp
     class ZstdCodec : public aurora::CompressionCodec {
         [[nodiscard]] auto name() const -> std::string_view override { return "my-zstd"; }
         [[nodiscard]] auto can_compress() const -> bool override { return true; }
-        [[nodiscard]] auto compress(std::span<const char> in, const aurora::CompressOptions &opt) const
-            -> aurora::Result<std::vector<char>> override;
-        [[nodiscard]] auto create_decompressor(const aurora::DecompressOptions &opt) const
+        [[nodiscard]] auto compress(std::string_view /*format*/, std::span<const char> in,
+                                    const aurora::CompressOptions &opt) const
+            -> aurora::Result<std::vector<char>> override;  // 单格式实现忽略槽位格式
+        [[nodiscard]] auto create_decompressor(std::string_view format, const aurora::DecompressOptions &opt) const
             -> aurora::Result<std::unique_ptr<aurora::Decompressor>> override;
     };
     aurora::register_codec("zstd", std::make_shared<ZstdCodec>());  // 一行接入，自定义格式 ID 自选
@@ -44,7 +45,7 @@
 
     流式契约的最小正确实现：`push` 缓存全部输入、`finish` 一次性解出并经 Sink 交出（不增量但合法）；关心峰值内存的实现自作真增量。编解码器只写流式即自动获得一次性入口（框架派生），无需实现第二个解压方法。编解码器方法返回的错误原样透传（不包装、不改码）。
 
-3. **`Decompressor` 由具体类改为抽象基类**：`push` / `finish` / `DecompressSink` 契约逐字保留（含 const 限定与单条流作用域纪律）；静态 `create()` 移除，创建入口移至注册表；实例改经 `unique_ptr` 持有，基类析构虚。空 `unique_ptr`（moved-from 或默认持有）上 `push` / `finish` 落 `compression-data-corrupt`——moved-from 即空指针，不再有独立的「已移动」状态，现「移动后使用源实例」用例迁移后即断此契约。内置 wuffs 实现退为库内部类型，头文件不再暴露其形状。**破坏性变更**：按值持有 `Decompressor` 与 `Decompressor::create` 的调用点迁移至 `create_decompressor(format, options)` 加 `unique_ptr`（仓内一处：src/aurora/net/detail/http_encoding.cpp；迁移路径记 CHANGELOG.md）。
+3. **`Decompressor` 由具体类改为抽象基类**：`push` / `finish` / `DecompressSink` 契约逐字保留（含 const 限定与单条流作用域纪律）；静态 `create()` 移除，创建入口移至注册表；实例改经 `unique_ptr` 持有，基类析构虚。moved-from 即空 `unique_ptr`，经其调用属调用方用法错误（无对象可分派，与任何 `unique_ptr` 所有权语义一致，库不另设「已移动」状态——实施修订：初稿曾写「空实例调用落 corrupt」，但空指针上的调用先于任何对象代码即 UB，不可实现）；push-after-finish 与 finish 幂等改由框架装饰器统一收口，现「移动后使用源实例」用例由桩编解码器的单条流作用域用例接替（双腿实跑）。内置 wuffs 实现退为库内部类型，头文件不再暴露其形状。**破坏性变更**：按值持有 `Decompressor` 与 `Decompressor::create` 的调用点迁移至 `create_decompressor(format, options)` 加 `unique_ptr`（仓内一处：src/aurora/net/detail/http_encoding.cpp；迁移路径记 CHANGELOG.md）。
 4. **新增 `CompressOptions`**：单旋钮 `std::optional<int> level`（nullopt = 编解码器自定义默认；语义由实现定义，如 zlib 0–9 / zstd 1–22），框架只透传不解释——不为猜测中的编码器预造旋钮阵。
 5. **新增 `CompressionCodecRegistry` 进程单例**：`instance()` 首次访问时按 `AURORA_ENABLE_COMPRESSION` 懒注册内置 wuffs 三族解码器（键为三枚预定义常量）；`register_codec(format, codec)` 为**覆盖语义**——同格式 ID 后注册者替换先注册者（「替换实现」正是本批开放的核心能力），空指针忽略；`unregister_codec(format)` 清除该格式 ID 的覆盖注册并回落内置（若有），无内置亦无覆盖时该格式不可用——测试隔离因此确定：注销即回默认态，不会把后续用例留在自定义实现上；注销不影响已创建的在途解压器（实例由调用方持有，与注册表槽位脱钩）；`compress` / `decompress` / `create_decompressor` 按格式 ID 分派，无实现落 `compression-unavailable`——格式无任何编解码器与「有编解码器但 `can_compress()` 为假」是两种 detail 文案（前者点名格式 ID，后者点名实现名与缺失的方向；后者由注册表预检 `can_compress()` 产生、码同为 `compression-unavailable`，编解码器默认 `compress` 的 `general-not-supported` 只在「声称可压缩却未覆写」的实现上可达）；无实现 detail 点名格式 ID，宏关闭的构建追加 `AURORA_ENABLE_COMPRESSION=OFF` 成因字样（HTTP 侧既有两例的 message 断言依赖，见验收判据 7）；`registered()` 诊断列表逐格式给出当前生效实现（覆盖优先），条目形态 `struct RegisteredCodec { std::string format; std::string name; };`。注册表内部持「内置表 + 覆盖表」两张表，查找 = 覆盖优先、回落内置；互斥量护槽位，全部方法 const（与 `ImageCodecRegistry` 同形态）；分派时锁内取 `shared_ptr` 副本、锁外调用实现——不在持锁期间运行实现方代码，与实现内重入注册也不会互锁。
 6. **自由函数转调单例**：`register_codec` / `unregister_codec` / `compress` / `decompress` / `create_decompressor`，第一参数均为格式 ID（`std::string_view`）；`compress` 尾随 `const CompressOptions & = {}` 缺省参（现 `compress(format, input)` 调用点源兼容）。一次性 `decompress` 在框架侧由流式派生（create → push 全量 → finish 收集），语义与现状逐字等价——编解码器作者只写流式即自动获得一次性入口。

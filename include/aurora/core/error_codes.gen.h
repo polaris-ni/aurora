@@ -93,7 +93,7 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     JsonValueNotSerializable = 49,  ///< json-value-not-serializable: Value cannot be serialized to JSON: {detail}
     CompressionDataCorrupt = 50,  ///< compression-data-corrupt: Compressed stream is corrupt or truncated: '{detail}'
     CompressionOutputTooLarge = 51,  ///< compression-output-too-large
-    CompressionUnavailable = 52,  ///< compression-unavailable
+    CompressionUnavailable = 52,  ///< compression-unavailable: Compression operation unavailable: '{detail}'
     StorageBackendUnavailable = 53,  ///< storage-backend-unavailable
     StorageRecordNotFound = 54,  ///< storage-record-not-found: Storage record does not exist
     StorageRecordCorrupt = 55,  ///< storage-record-corrupt
@@ -839,11 +839,13 @@ inline constexpr std::array<ErrorMeta, 135> AURORA_ERROR_TABLE = {
             .auto_fixable = false,
             .fix_category = "resource_error",
             .retryable = false,
-            .message_tpl = "Compression operation unavailable in this build: '{detail}'",
-            .hint = "Either the format is not compiled in (the AURORA_ENABLE_COMPRESSION build option gates "
-                    "gzip/zlib/deflate decompression) or the direction is not implemented (this batch ships "
-                    "decompression only; the compress entry point is designed but returns this error until an encoder "
-                    "lands). Decompressing with AURORA_ENABLE_COMPRESSION=ON is the available path",
+            .message_tpl = "Compression operation unavailable: '{detail}'",
+            .hint = "No codec is registered for this format ID (the detail names it; check for typos against the "
+                    "predefined AURORA_COMPRESS_FORMAT_* constants), or the registered codec does not support this "
+                    "direction (a decompression-only codec refuses compress), or the build was configured with "
+                    "AURORA_ENABLE_COMPRESSION=OFF so the builtin decoders are absent. Register an implementation with "
+                    "aurora::register_codec (it can also replace builtin slots), or rebuild with "
+                    "AURORA_ENABLE_COMPRESSION=ON",
         },
         {
             .code = ErrorCode::StorageBackendUnavailable,

@@ -1,8 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: src/aurora/net/detail/http_encoding.h + src/aurora/net/detail/http_encoding.cpp
 /// 测试说明: HTTP 应答 `Content-Encoding` 的编码链文法、逐层还原与**同一链条的流式串联**的逐值回归
-///           （CHG-018 §12「内容编码」的 HTTP 接入层）。覆盖宣告集与支持集同源
-///           （`AURORA_HTTP_ACCEPT_ENCODING` 自身可被解析回两枚环节）、编码名大小写不敏感与 OWS 修剪、
+///           。覆盖宣告集与支持集同源（`AURORA_HTTP_ACCEPT_ENCODING` 自身可被解析回两枚环节）、编码名大小写不敏感与 OWS 修剪、
 ///           字段缺席 / 空值 / `identity` 归零环节而列表里的空环节判文法畸形、支持集外的名点名落
 ///           `http-content-encoding-unsupported`；逐层还原按书写次序反序进行（`gzip, deflate` 先剥 deflate
 ///           再剥 gzip，正序解必失败）、`deflate` 先试 zlib 包装仅在其报流损坏时回落裸 DEFLATE、空载荷配
@@ -58,7 +57,7 @@ template <std::size_t N>
 /// @return 解析成功的编码链。
 [[nodiscard]] auto chain_of(std::string_view value) -> std::vector<Coding> {
     const auto parsed = aurora::net::detail::parse_content_encoding(value);
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     return parsed.value();
 }
 
@@ -71,7 +70,7 @@ template <std::size_t N>
                                       std::optional<std::uint64_t> max_output_bytes = {}) -> std::vector<char> {
     const auto decoded =
         aurora::net::detail::decode_content_encoding(chain, std::span<const char>{input}, max_output_bytes);
-    AURORA_TEST_REQUIRE_MSG(bool(decoded), decoded ? std::string{} : decoded.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(decoded), decoded ? std::string{} : decoded.error().message);
     return decoded.value();
 }
 
@@ -213,24 +212,24 @@ AURORA_TEST_CASE(parse_keeps_the_written_application_order) {
 AURORA_TEST_CASE(parse_rejects_empty_member_as_message_grammar) {
     for (const std::string_view value : {"gzip,,deflate", "gzip,", ",gzip", ","}) {
         const auto parsed = aurora::net::detail::parse_content_encoding(value);
-        AURORA_TEST_REQUIRE_MSG(!bool(parsed), "empty member must be rejected: " + std::string{value});
+        AURORA_TEST_REQUIRE_MSG(!static_cast<bool>(parsed), "empty member must be rejected: " + std::string{value});
         AURORA_TEST_CHECK_EQ(parsed.error().code_enum, aurora::ErrorCode::HttpProtocolError);
     }
 }
 
 AURORA_TEST_CASE(parse_names_the_unsupported_coding) {
     const auto brotli = aurora::net::detail::parse_content_encoding("br");
-    AURORA_TEST_REQUIRE_FALSE(bool(brotli));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(brotli));
     AURORA_TEST_CHECK_EQ(brotli.error().code_enum, aurora::ErrorCode::HttpContentEncodingUnsupported);
     AURORA_TEST_CHECK(brotli.error().message.find("'br'") != std::string::npos);
     // 链上后面的名同样被点名：不是「解掉前面那层然后交垃圾」。
     const auto chain = aurora::net::detail::parse_content_encoding("gzip, zstd");
-    AURORA_TEST_REQUIRE_FALSE(bool(chain));  // 后面的名同样被点名
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(chain));  // 后面的名同样被点名
     AURORA_TEST_CHECK_EQ(chain.error().code_enum, aurora::ErrorCode::HttpContentEncodingUnsupported);
     AURORA_TEST_CHECK(chain.error().message.find("zstd") != std::string::npos);
     // 带协商参数的写法只属于 `Accept-Encoding` 语境：应答侧出现它即对端越界，剥参数再解是替对端编造意图。
     const auto parameterized = aurora::net::detail::parse_content_encoding("gzip;q=1.0");
-    AURORA_TEST_REQUIRE_FALSE(bool(parameterized));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(parameterized));
     AURORA_TEST_CHECK_EQ(parameterized.error().code_enum, aurora::ErrorCode::HttpContentEncodingUnsupported);
 }
 
@@ -255,7 +254,7 @@ AURORA_TEST_CASE(stream_without_a_stage_hands_the_wire_bytes_through) {
     const std::vector<char> wire{'a', 'b', 'c', 'd', 'e', 'f', 'g'};
     Collector sink;
     const auto text = stream_decode({}, wire, 3, std::optional<std::uint64_t>{}, sink);
-    AURORA_TEST_REQUIRE_MSG(bool(text), text ? std::string{} : text.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(text), text ? std::string{} : text.error().message);
     AURORA_TEST_CHECK_EQ(text.value(), "abcdefg");
     AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{3});  // 7 字节按 3 段长喂 → 3+3+1 三段
 }
@@ -263,7 +262,7 @@ AURORA_TEST_CASE(stream_without_a_stage_hands_the_wire_bytes_through) {
 AURORA_TEST_CASE(stream_without_an_emit_sink_is_a_usage_error) {
     // 没有产出出口的链「解了就丢」，属用法错误而非协议错误：`general-invalid-argument`，且在建链就拒。
     const auto built = StreamingDecoder::create(chain_of("gzip"), std::optional<std::uint64_t>{}, StreamingEmit{});
-    AURORA_TEST_REQUIRE_FALSE(bool(built));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(built));
     AURORA_TEST_CHECK_EQ(built.error().code_enum, aurora::ErrorCode::GeneralInvalidArgument);
 }
 
@@ -273,13 +272,13 @@ AURORA_TEST_CASE(stream_host_stop_holds_the_chain_and_later_segments) {
     Collector sink;
     sink.stop_after = 2;
     auto built = StreamingDecoder::create({}, std::optional<std::uint64_t>{}, emit_for(sink));
-    AURORA_TEST_REQUIRE(bool(built));
+    AURORA_TEST_REQUIRE(static_cast<bool>(built));
     auto decoder = std::move(built.value());
     const std::span<const char> view{wire};
     for (std::size_t offset = 0; offset < view.size(); offset += 2) {
         const std::size_t take = std::min<std::size_t>(2, view.size() - offset);
         const auto pushed = decoder.push(view.subspan(offset, take));
-        AURORA_TEST_REQUIRE(bool(pushed));
+        AURORA_TEST_REQUIRE(static_cast<bool>(pushed));
         if (pushed.value() == EmitFlow::Stop) {
             break;  // 掐断：不再 `finish()`，也不再喂后续段
         }
@@ -287,7 +286,7 @@ AURORA_TEST_CASE(stream_host_stop_holds_the_chain_and_later_segments) {
     AURORA_TEST_CHECK_TRUE(sink.stopped);
     const std::size_t segments_at_stop = sink.segments;
     const auto late = decoder.push(std::span<const char>{wire.data(), 1});
-    AURORA_TEST_REQUIRE(bool(late));
+    AURORA_TEST_REQUIRE(static_cast<bool>(late));
     AURORA_TEST_CHECK_TRUE(late.value() == EmitFlow::Stop);  // 停住后任何段都得到同一个答复
     AURORA_TEST_CHECK_EQ(sink.segments, segments_at_stop);  // 且宿主一次也没被打扰
     // 收摊答复之外还要证明它不是「恰好没触发」：本用例的收摊点确实被显式设过，而非缺省的永不。
@@ -317,7 +316,7 @@ AURORA_TEST_CASE(decode_undoes_a_multi_stage_chain_in_reverse) {
     // 反过来的链（`deflate, gzip`）按次序先剥 gzip，而首两枚字节是 zlib 头，解不开即判消息体损坏。
     const auto wrong_order = aurora::net::detail::decode_content_encoding(
         chain_of("deflate, gzip"), std::span<const char>{bytes(AURORA_GZIP_THEN_ZLIB)}, std::optional<std::uint64_t>{});
-    AURORA_TEST_REQUIRE_FALSE(bool(wrong_order));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(wrong_order));
     AURORA_TEST_CHECK_EQ(wrong_order.error().code_enum, aurora::ErrorCode::HttpBodyCorrupt);
 }
 
@@ -325,7 +324,7 @@ AURORA_TEST_CASE(decode_ceiling_names_the_decompressed_knob) {
     const auto wire = bytes(AURORA_GZIP_HELLO);  // 解压产物 12 字节
     const auto tight = aurora::net::detail::decode_content_encoding(chain_of("gzip"), std::span<const char>{wire},
                                                                     std::optional<std::uint64_t>{std::uint64_t{4}});
-    AURORA_TEST_REQUIRE_FALSE(bool(tight));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(tight));
     AURORA_TEST_CHECK_EQ(tight.error().code_enum, aurora::ErrorCode::HttpBodyTooLarge);
     // detail 必须点名越的是 `max_decompressed_bytes`——两枚旋钮管不同字节，指错即调用方调错地方。
     AURORA_TEST_CHECK(tight.error().message.find("max_decompressed_bytes") != std::string::npos);
@@ -333,7 +332,7 @@ AURORA_TEST_CASE(decode_ceiling_names_the_decompressed_knob) {
     // 放宽到产物长度即放行：证明上限真的在管产物而不是线上字节（线上 32 字节 > 12）。
     const auto loose = aurora::net::detail::decode_content_encoding(chain_of("gzip"), std::span<const char>{wire},
                                                                     std::optional<std::uint64_t>{std::uint64_t{12}});
-    AURORA_TEST_REQUIRE(bool(loose));
+    AURORA_TEST_REQUIRE(static_cast<bool>(loose));
     AURORA_TEST_CHECK_EQ(as_text(loose.value()), "hello aurora");
 }
 
@@ -341,13 +340,13 @@ AURORA_TEST_CASE(decode_maps_core_corruption_to_http_body_corrupt) {
     const auto junk = bytes(AURORA_NOT_COMPRESSED);
     const auto gzip = aurora::net::detail::decode_content_encoding(chain_of("gzip"), std::span<const char>{junk},
                                                                    std::optional<std::uint64_t>{});
-    AURORA_TEST_REQUIRE_FALSE(bool(gzip));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(gzip));
     AURORA_TEST_CHECK_EQ(gzip.error().code_enum, aurora::ErrorCode::HttpBodyCorrupt);
     // 底层成因保留在文本里，但 HTTP 面只出现 `http-*` 一族码。
     AURORA_TEST_CHECK(gzip.error().message.find("compression-data-corrupt") != std::string::npos);
     const auto deflate = aurora::net::detail::decode_content_encoding(chain_of("deflate"), std::span<const char>{junk},
                                                                       std::optional<std::uint64_t>{});
-    AURORA_TEST_REQUIRE_FALSE(bool(deflate));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(deflate));
     AURORA_TEST_CHECK_EQ(deflate.error().code_enum, aurora::ErrorCode::HttpBodyCorrupt);
     // 两型都试过才判损坏：文本必须写明 zlib 包装与裸流各自的遭遇，否则回落形同没发生。
     AURORA_TEST_CHECK(deflate.error().message.find("zlib") != std::string::npos);
@@ -360,7 +359,7 @@ AURORA_TEST_CASE(build_honours_the_compression_capability_leg) {
     const auto junk = bytes(AURORA_NOT_COMPRESSED);
     const auto result = aurora::net::detail::decode_content_encoding(chain_of("gzip"), std::span<const char>{junk},
                                                                      std::optional<std::uint64_t>{});
-    AURORA_TEST_REQUIRE_FALSE(bool(result));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(result));
     AURORA_TEST_CHECK_EQ(result.error().code_enum, aurora::ErrorCode::HttpBodyCorrupt);
 }
 
@@ -371,15 +370,22 @@ AURORA_TEST_CASE(stream_building_a_chain_without_the_capability_fails_at_create)
         "AURORA_ENABLE_COMPRESSION is enabled; rejecting at create only holds on the capability-absent leg");
 }
 
+// 自注册三槽后能力转真的判据只在能力缺席的腿成立（内置三槽恒在使它在能力在场的构建里空洞），
+// 故本腿登记成同名 SKIP：登记而非缺席，才能让两腿的用例数逐名可比。
+AURORA_TEST_CASE(registered_codecs_restore_the_compression_capability) {
+    AURORA_TEST_SKIP(
+        "AURORA_ENABLE_COMPRESSION is enabled; capability restoration only holds on the capability-absent leg");
+}
+
 AURORA_TEST_CASE(stream_gzip_arrives_in_odd_pieces) {
     // 逐段喂入不改变产物：一次喂完与一枚字节一枚字节地喂，拼出来的明文必须逐字节相同。
     const auto wire = bytes(AURORA_GZIP_HELLO);
     Collector whole;
     const auto once = stream_decode(chain_of("gzip"), wire, wire.size(), std::optional<std::uint64_t>{}, whole);
-    AURORA_TEST_REQUIRE_MSG(bool(once), once ? std::string{} : once.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(once), once ? std::string{} : once.error().message);
     Collector dribble;
     const auto by_one = stream_decode(chain_of("gzip"), wire, 1, std::optional<std::uint64_t>{}, dribble);
-    AURORA_TEST_REQUIRE_MSG(bool(by_one), by_one ? std::string{} : by_one.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(by_one), by_one ? std::string{} : by_one.error().message);
     AURORA_TEST_CHECK_EQ(once.value(), "hello aurora");
     AURORA_TEST_CHECK_EQ(by_one.value(), "hello aurora");
     // 段界由调用方决定，与解码器内部的窗口无关：交付的段数可以不同，拼出的文本不能不同。
@@ -391,12 +397,12 @@ AURORA_TEST_CASE(stream_deflate_probe_locks_the_format_from_the_wrapper_header) 
     Collector zlib_sink;
     const auto zlib =
         stream_decode(chain_of("deflate"), bytes(AURORA_ZLIB_HELLO), 4, std::optional<std::uint64_t>{}, zlib_sink);
-    AURORA_TEST_REQUIRE_MSG(bool(zlib), zlib ? std::string{} : zlib.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(zlib), zlib ? std::string{} : zlib.error().message);
     AURORA_TEST_CHECK_EQ(zlib.value(), "hello aurora");
     Collector raw_sink;
     const auto raw =
         stream_decode(chain_of("deflate"), bytes(AURORA_RAW_HELLO), 4, std::optional<std::uint64_t>{}, raw_sink);
-    AURORA_TEST_REQUIRE_MSG(bool(raw), raw ? std::string{} : raw.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(raw), raw ? std::string{} : raw.error().message);
     AURORA_TEST_CHECK_EQ(raw.value(), "hello aurora");
 }
 
@@ -405,16 +411,16 @@ AURORA_TEST_CASE(stream_deflate_probe_holds_the_first_byte_until_the_header_is_k
     const auto wire = bytes(AURORA_ZLIB_HELLO);
     Collector sink;
     auto built = StreamingDecoder::create(chain_of("deflate"), std::optional<std::uint64_t>{}, emit_for(sink));
-    AURORA_TEST_REQUIRE(bool(built));
+    AURORA_TEST_REQUIRE(static_cast<bool>(built));
     auto decoder = std::move(built.value());
     const auto first = decoder.push(std::span<const char>{wire.data(), 1});
-    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_REQUIRE(static_cast<bool>(first));
     AURORA_TEST_CHECK_TRUE(first.value() == EmitFlow::Continue);
     AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{0});
     const auto rest = decoder.push(std::span<const char>{wire}.subspan(1));
-    AURORA_TEST_REQUIRE_MSG(bool(rest), rest ? std::string{} : rest.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(rest), rest ? std::string{} : rest.error().message);
     const auto done = decoder.finish();
-    AURORA_TEST_REQUIRE_MSG(bool(done), done ? std::string{} : done.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(done), done ? std::string{} : done.error().message);
     // 按住的那一枚头字节必须在锁定后补交在前：产物少一枚前缀字节就是坏流。
     AURORA_TEST_CHECK_EQ(sink.text, "hello aurora");
 }
@@ -424,12 +430,12 @@ AURORA_TEST_CASE(stream_undoes_a_multi_stage_chain_in_reverse) {
     const auto wire = bytes(AURORA_GZIP_THEN_ZLIB);
     Collector sink;
     const auto plain = stream_decode(chain_of("gzip, deflate"), wire, 5, std::optional<std::uint64_t>{}, sink);
-    AURORA_TEST_REQUIRE_MSG(bool(plain), plain ? std::string{} : plain.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(plain), plain ? std::string{} : plain.error().message);
     AURORA_TEST_CHECK_EQ(plain.value(), "hello aurora");
     // 次序弄反（`deflate, gzip`）：首两枚字节是 zlib 头，第一环按 gzip 认即拒——判损坏而不是解出垃圾。
     Collector wrong;
     const auto reversed = stream_decode(chain_of("deflate, gzip"), wire, 5, std::optional<std::uint64_t>{}, wrong);
-    AURORA_TEST_REQUIRE_FALSE(bool(reversed));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(reversed));
     AURORA_TEST_CHECK_EQ(reversed.error().code_enum, aurora::ErrorCode::HttpBodyCorrupt);
 }
 
@@ -439,13 +445,13 @@ AURORA_TEST_CASE(stream_ceiling_names_the_decompressed_knob) {
     Collector tight_sink;
     const auto tight =
         stream_decode(chain_of("gzip"), wire, 8, std::optional<std::uint64_t>{std::uint64_t{4}}, tight_sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(tight));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(tight));
     AURORA_TEST_CHECK_EQ(tight.error().code_enum, aurora::ErrorCode::HttpBodyTooLarge);
     AURORA_TEST_CHECK(tight.error().message.find("max_decompressed_bytes") != std::string::npos);
     Collector loose_sink;
     const auto loose =
         stream_decode(chain_of("gzip"), wire, 8, std::optional<std::uint64_t>{std::uint64_t{12}}, loose_sink);
-    AURORA_TEST_REQUIRE_MSG(bool(loose), loose ? std::string{} : loose.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(loose), loose ? std::string{} : loose.error().message);
     AURORA_TEST_CHECK_EQ(loose.value(), "hello aurora");
 }
 
@@ -454,7 +460,7 @@ AURORA_TEST_CASE(stream_corruption_surfaces_as_http_body_corrupt) {
     Collector junk_sink;
     const auto junk =
         stream_decode(chain_of("gzip"), bytes(AURORA_NOT_COMPRESSED), 4, std::optional<std::uint64_t>{}, junk_sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(junk));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(junk));
     AURORA_TEST_CHECK_EQ(junk.error().code_enum, aurora::ErrorCode::HttpBodyCorrupt);
     AURORA_TEST_CHECK(junk.error().message.find("compression-data-corrupt") != std::string::npos);
     // 截断：把 gzip 尾部（CRC32 + ISIZE）砍掉，喂入阶段无从判知，收摊时才宣告「这条流没走完」。
@@ -462,7 +468,7 @@ AURORA_TEST_CASE(stream_corruption_surfaces_as_http_body_corrupt) {
     const std::vector<char> truncated{wire.begin(), wire.end() - 8};
     Collector cut_sink;
     const auto cut = stream_decode(chain_of("gzip"), truncated, 6, std::optional<std::uint64_t>{}, cut_sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(cut));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(cut));
     AURORA_TEST_CHECK_EQ(cut.error().code_enum, aurora::ErrorCode::HttpBodyCorrupt);
 }
 
@@ -472,20 +478,20 @@ AURORA_TEST_CASE(stream_host_stop_inside_a_chain_holds_later_segments) {
     Collector sink;
     sink.stop_after = 1;
     auto built = StreamingDecoder::create(chain_of("gzip"), std::optional<std::uint64_t>{}, emit_for(sink));
-    AURORA_TEST_REQUIRE(bool(built));
+    AURORA_TEST_REQUIRE(static_cast<bool>(built));
     auto decoder = std::move(built.value());
     bool saw_stop = false;
     const std::span<const char> view{wire};
     for (std::size_t offset = 0; offset < view.size() && !saw_stop; offset += 3) {
         const std::size_t take = std::min<std::size_t>(3, view.size() - offset);
         const auto pushed = decoder.push(view.subspan(offset, take));
-        AURORA_TEST_REQUIRE_MSG(bool(pushed), pushed ? std::string{} : pushed.error().message);
+        AURORA_TEST_REQUIRE_MSG(static_cast<bool>(pushed), pushed ? std::string{} : pushed.error().message);
         saw_stop = pushed.value() == EmitFlow::Stop;
     }
     AURORA_TEST_REQUIRE(saw_stop);
     const std::size_t segments_at_stop = sink.segments;
     const auto late = decoder.push(std::span<const char>{wire.data(), 1});
-    AURORA_TEST_REQUIRE(bool(late));
+    AURORA_TEST_REQUIRE(static_cast<bool>(late));
     AURORA_TEST_CHECK_TRUE(late.value() == EmitFlow::Stop);
     AURORA_TEST_CHECK_EQ(sink.segments, segments_at_stop);
 }
@@ -522,7 +528,7 @@ AURORA_TEST_CASE(build_honours_the_compression_capability_leg) {
     const auto wire = bytes(AURORA_GZIP_HELLO);
     const auto result = aurora::net::detail::decode_content_encoding(chain_of("gzip"), std::span<const char>{wire},
                                                                      std::optional<std::uint64_t>{});
-    AURORA_TEST_REQUIRE_FALSE(bool(result));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(result));
     // 未编入解码器时「解不了」属能力缺席，落 unsupported 而不是 corrupt：静默交压缩字节才是最坏结果。
     AURORA_TEST_CHECK_EQ(result.error().code_enum, aurora::ErrorCode::HttpContentEncodingUnsupported);
     AURORA_TEST_CHECK(result.error().message.find("AURORA_ENABLE_COMPRESSION") != std::string::npos);
@@ -533,7 +539,7 @@ AURORA_TEST_CASE(stream_building_a_chain_without_the_capability_fails_at_create)
     // 畸形报文要么是对端越界，两种都没有「让字节流进宿主半程再失败」的理由。
     Collector sink;
     const auto built = StreamingDecoder::create(chain_of("gzip"), std::optional<std::uint64_t>{}, emit_for(sink));
-    AURORA_TEST_REQUIRE_FALSE(bool(built));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(built));
     AURORA_TEST_CHECK_EQ(built.error().code_enum, aurora::ErrorCode::HttpContentEncodingUnsupported);
     AURORA_TEST_CHECK(built.error().message.find("AURORA_ENABLE_COMPRESSION") != std::string::npos);
     AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{0});  // 失败在交付之前：一段都没交出去
@@ -565,6 +571,51 @@ AURORA_TEST_CASE(stream_corruption_surfaces_as_http_body_corrupt) {
 
 AURORA_TEST_CASE(stream_host_stop_inside_a_chain_holds_later_segments) {
     AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
+}
+
+/// @brief 能力注入判据用的最小桩解压器：不产字节、不报错（建链成功即为本例全部所需）。
+class CapabilityStubDecoder final : public aurora::Decompressor {
+  public:
+    [[nodiscard]] auto push(std::span<const char> src, const DecompressSink &sink) const -> Result<void> override {
+        (void)src;
+        (void)sink;
+        return Result<void>{};
+    }
+    [[nodiscard]] auto finish(const DecompressSink &sink) const -> Result<void> override {
+        (void)sink;
+        return Result<void>{};
+    }
+};
+
+/// @brief 最小桩编解码器：一份实例注册到三槽（分派经槽位格式透传，实现不持格式状态）。
+class CapabilityStubCodec final : public aurora::CompressionCodec {
+  public:
+    [[nodiscard]] auto name() const -> std::string_view override { return "capability-stub"; }
+    [[nodiscard]] auto create_decompressor(std::string_view format, const DecompressOptions &options) const
+        -> Result<std::unique_ptr<Decompressor> > override {
+        (void)format;
+        (void)options;
+        std::unique_ptr<Decompressor> decoder = std::make_unique<CapabilityStubDecoder>();
+        return decoder;
+    }
+};
+
+// 自注册三槽后能力转真：宏关的构建里注册 gzip / zlib / deflate 三槽实现，宣告判据（core 注册表查询）
+// 随之恢复、建链也不再即拒——「注入路径恒在」的直接判据。桩用完即注销，回落空注册表，不污染后续用例。
+AURORA_TEST_CASE(registered_codecs_restore_the_compression_capability) {
+    AURORA_TEST_CHECK_FALSE(aurora::net::detail::compression_available());
+    const auto codec = std::make_shared<CapabilityStubCodec>();
+    aurora::register_codec(aurora::AURORA_COMPRESS_FORMAT_GZIP, codec);
+    aurora::register_codec(aurora::AURORA_COMPRESS_FORMAT_ZLIB, codec);
+    aurora::register_codec(aurora::AURORA_COMPRESS_FORMAT_DEFLATE, codec);
+    AURORA_TEST_CHECK_TRUE(aurora::net::detail::compression_available());
+    Collector sink;
+    const auto built = StreamingDecoder::create(chain_of("gzip"), std::optional<std::uint64_t>{}, emit_for(sink));
+    AURORA_TEST_REQUIRE(static_cast<bool>(built));
+    aurora::unregister_codec(aurora::AURORA_COMPRESS_FORMAT_GZIP);
+    aurora::unregister_codec(aurora::AURORA_COMPRESS_FORMAT_ZLIB);
+    aurora::unregister_codec(aurora::AURORA_COMPRESS_FORMAT_DEFLATE);
+    AURORA_TEST_CHECK_FALSE(aurora::net::detail::compression_available());
 }
 
 #endif

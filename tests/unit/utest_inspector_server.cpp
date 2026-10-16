@@ -7,7 +7,7 @@
 /// 失败与派发失败的错误映射）和 /api/find 的 key/type/text 定位（路径与寻址端点同口径）。
 /// 树端点的线程落点同样在此覆盖：装上传递器后必须换到主线程下树，无传递器时回退内联执行。
 /// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端经同步阻塞传输层
-/// `aurora::net::blocking`（CHG-006 建立、CHG-018 §4 归位为工具面），随用例作用域关闭清理。
+/// `aurora::net::blocking`，随用例作用域关闭清理。
 /// AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩。
 
 #include <chrono>

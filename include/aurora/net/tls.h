@@ -1,7 +1,6 @@
 #pragma once
 
-/// @brief 安全通道（CHG-018 TLS 切片：L1 字节流之上的 TLS 客户端）。
-/// @file net/tls.h
+/// @brief 安全通道（TLS 切片：L1 字节流之上的 TLS 客户端）。
 ///
 /// 本头把「加密」做成 L1 流的一层叠加，而不是一条新的传输形态：握手成功之后，读写、背压、暂停、
 /// 取消、半关闭与 `StreamTransport` **逐字同构**，因此 L3 协议引擎（HTTP / SSE / WebSocket）不需要

@@ -1,5 +1,4 @@
-// http_encoding.h —— HTTP 应答 `Content-Encoding` 的发起侧解压管线（CHG-018 §12「内容编码」的 HTTP 接入；
-// 仅库实现可见，不属公共 API）。
+// http_encoding.h —— HTTP 应答 `Content-Encoding` 的发起侧解压管线。
 //
 // 为何单列：本文件里是三条各自有独立判据的纯逻辑——**编码名的文法与支持集的判定**（一个字节都不碰）、
 // **按编码链逐层还原字节**（core 能力 `aurora::decompress` 的物化编排）与**同一链条的流式串联**
@@ -10,8 +9,9 @@
 //
 // 五条口径（规范性，落码与文档回写以此为准）：
 // - **支持集就是宣告出去的那两枚**：`Accept-Encoding` 只宣告 `gzip, deflate`；链上出现任何别的名（`br` /
-//   `zstd` / 自定义）落 `http-content-encoding-unsupported` 并在文本里点名是哪一枚。构建未编入解压能力
-//   （`AURORA_ENABLE_COMPRESSION=OFF`）时发起侧连宣告都不发，而服务器强行压缩同样落这一枚码——静默把压缩
+//   `zstd` / 自定义）落 `http-content-encoding-unsupported` 并在文本里点名是哪一枚。core 注册表的三槽
+//   （gzip / zlib / deflate）未全部注册时发起侧连宣告都不发（内置解码器只在 `AURORA_ENABLE_COMPRESSION=ON`
+//   的构建编入，应用也可自注册补位），而服务器强行压缩同样落这一枚码——静默把压缩
 //   字节当明文交出是最坏的一种失败，它污染的是调用方拿到的每一个字节。
 // - **书写次序是应用次序，解压走反序**（`RFC 9110 §8.4`：`Content-Encoding: gzip, deflate` 表示载荷先经
 //   gzip 再经 deflate 加工，故还原从右往左——先剥 deflate 再剥 gzip；按书写次序正向解只会解出垃圾）。
@@ -56,11 +56,12 @@ enum class Coding : std::uint8_t {
 /// @brief 发起侧应当宣告的 `Accept-Encoding` 字段值（与上面的支持集同源）。
 inline constexpr std::string_view AURORA_HTTP_ACCEPT_ENCODING = "gzip, deflate";
 
-/// @brief 本构建是否具备解压能力（`AURORA_ENABLE_COMPRESSION` 的编译期事实）。
+/// @brief 本构建能否服务编码链解压（core 注册表的运行期事实：gzip / zlib / deflate 三槽均已注册）。
 ///
-/// 它是「发不发 `Accept-Encoding`」的唯一判据：不具备时恒假，发起侧据此**不宣告**任何编码，而不是宣告后
-/// 再在接收侧报错。
-/// @return 编入解压能力为 true，否则 false。
+/// 它是「发不发 `Accept-Encoding`」的唯一判据：任一必需槽位缺席即假，发起侧据此**不宣告**任何编码，
+/// 而不是宣告后再在接收侧报错。「可服务」= 注册在案（覆盖与内置都算数），不试创建——创建失败属运行期
+/// 诚实失败，宣告照常、解码报错如实上浮。
+/// @return 三槽均已注册实现为 true，否则 false。
 [[nodiscard]] auto compression_available() -> bool;
 
 /// @brief 解析 `Content-Encoding` 字段值为编码链（保持线上书写次序，即应用次序）。
@@ -114,9 +115,9 @@ class StreamingDecoder {
   public:
     /// @brief 按编码链建链：每环一枚 core 解压器，末环接产出出口。
     ///
-    /// 空链合法（直通：`push()` 的字节原样交给产出出口）。链上任一环需要解压而本构建未编入能力时，
-    /// **在建链这一步**就落 `http-content-encoding-unsupported`，而不是等字节流进半程才失败——宣告与
-    /// 支持集同源，本构建根本不该收到带编码的载荷，来了就是要么畸形要么对端越界，两种都早失败为好。
+    /// 空链合法（直通：`push()` 的字节原样交给产出出口）。链上任一环需要解压而 core 注册表的三槽
+    /// 未全部注册时，**在建链这一步**就落 `http-content-encoding-unsupported`，而不是等字节流进半程才失败
+    /// ——宣告与支持集同源，本构建根本不该收到带编码的载荷，来了就是要么畸形要么对端越界，两种都早失败为好。
     /// @param chain 已解析的编码链（应用次序；本函数自右向左建环）。
     /// @param max_output_bytes 逐层的解压产物上限（`std::nullopt` = 不设限）；越限落 `http-body-too-large`。
     /// @param emit 产出出口；空函数即 `general-invalid-argument`（用法错误，不当协议错误报）。
@@ -141,8 +142,8 @@ class StreamingDecoder {
     struct Stage {
         Coding coding{Coding::Gzip};  ///< 环节名：错误文本与格式判定都取之于它
         bool needs_probe{false};  ///< 是否为 `Deflate`：首两枚输入字节决定 zlib / 裸流
-        std::optional<CompressionFormat> format;  ///< 已锁定的包装格式（`Deflate` 未定期为空）
-        std::optional<Decompressor> decoder;  ///< 本环解压器（格式未定或一个字节都没收到时为空）
+        std::optional<std::string_view> format;  ///< 已锁定的包装格式 ID（指向预定义常量，`Deflate` 未定期为空）
+        std::unique_ptr<Decompressor> decoder;  ///< 本环解压器（格式未定或一个字节都没收到时为空）
         std::vector<char> preamble;  ///< 格式未定期攒下的输入字节（两枚即可判定，故至多攒两枚）
     };
 

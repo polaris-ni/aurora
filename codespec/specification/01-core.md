@@ -738,7 +738,7 @@ class SaxHandler {
 ## 10 HTTP 头集合（`core/headers.h`）
 
 > 覆盖 `include/aurora/core/headers.h`（header-only 值类型，无 `.cpp`）。
-> 该类型是 CHG-018 通用网络栈的两个 `core/` 基础件之一（另一个是 `Url`，契约见 §11）；
+> 该类型是通用网络栈的两个 `core/` 基础件之一（另一个是 `Url`，契约见 §11）；
 > HTTP / SSE / WebSocket 握手与 Inspector 的头部读写共用它，动机见
 > [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §12。
 
@@ -798,7 +798,7 @@ class SaxHandler {
 ## 11 URL 值类型（`core/url.h`）
 
 > 覆盖 `include/aurora/core/url.h` + `src/aurora/core/url.cpp`。
-> CHG-018 §12 的两个 `core/` 基础件中的另一个（`Headers` 见 §10）；`Request` / `WebSocket::connect` /
+> 两个 `core/` 基础件中的另一个（`Headers` 见 §10）；`Request` / `WebSocket::connect` /
 > Inspector 的 URL 读写共用它，动机见
 > [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §12。
 
@@ -900,33 +900,37 @@ initial bias 72 / initial n 0x80，前缀 `xn--`、定界符 `-`。
   向量）与 `tests/fixtures/url_vectors/resolve.tsv`（RFC 3986 §5.4 两张示例表逐条照录）。语料的
   来源、格式与加行方式见该目录 `README.md`。
 
-## 12 通用解压能力（`core/compression.h`）
+## 12 压缩解压编解码器与注册表（`core/compression.h`）
 
 ### 12.1 定位与边界
 
-`aurora::compression` 回答一个问题：**「把一份按某种格式压缩的字节流还原成原始字节」**。它是 core 层共用基础件（与 `Headers` / `Url` 同格局），首个消费者是网络栈 HTTP 发起侧的 `Content-Encoding` 透明解压（见 `06-app-platform.md` §8.8.19 / §8.8.20）；任何需要「按格式解压」的模块复用本能力，不各自 vendored 一份 inflate。
+`aurora::compression` 回答两个问题：**「把一份按某种格式压缩的字节流还原成原始字节」**与**「应用如何换掉或新增某个格式的实现」**。它是 core 层共用基础件（与 `Headers` / `Url` 同格局），首个消费者是网络栈 HTTP 发起侧的 `Content-Encoding` 透明解压（见 `06-app-platform.md` §8.8.20）；任何需要「按格式压缩 / 解压」的模块复用本能力，不各自 vendored 一份 inflate。
 
-三条形态约束：
+四条形态约束：
 
-- **格式显式入参，不做内容嗅探**：`CompressionFormat{Gzip, Zlib, Deflate}` 精确对应线上包装——`Gzip` = RFC 1952 包装、`Zlib` = RFC 1950 包装、`Deflate` = RFC 1951 裸 DEFLATE。HTTP 的 `Content-Encoding: deflate` 名义上是 zlib 格式但存在历史服务器发裸流的歧义，该歧义的消解（先试 `Zlib`、失败回落 `Deflate`）属 HTTP 层编排，不进本通用 API。
-- **解压炸弹防护是调用方的显式限额**：`DecompressOptions::max_output_bytes` 缺省不限；越限落 `compression-output-too-large`。知道业务上限的调用方恒设此值（HTTP 发起侧传的是它自己的 `Client::max_decompressed_bytes()`，未设则跟随 `max_body_bytes`，见 `06-app-platform.md` §8.8.20）。
-- **压缩方向只设计不实现**：`compress()` 恒落 `compression-unavailable`。仓内复用件 wuffs 对压缩格式只提供解码器（无任何编码器符号），本批不引入新 vendored 编码库、亦不手写 deflate 压缩机；待出现真实消费者时另立提案补齐。接口先立是为了让调用点形状稳定。
-
-构建开关 `AURORA_ENABLE_COMPRESSION`（默认 ON）门控本能力（见 `BUILD_OPTIONS.md`）；关闭时全部入口恒落 `compression-unavailable`（诚实降级，不静默把压缩字节当明文交出）。
+- **格式 ID 是小写字符串，显式入参，不做内容嗅探**：格式与线上包装的对应是精确的——`AURORA_COMPRESS_FORMAT_GZIP` = RFC 1952 包装、`AURORA_COMPRESS_FORMAT_ZLIB` = RFC 1950 包装、`AURORA_COMPRESS_FORMAT_DEFLATE` = RFC 1951 裸 DEFLATE。内置三格式经头文件预定义常量暴露（先例：`net/detail/http_encoding.h` 的 `AURORA_HTTP_ACCEPT_ENCODING`）；自定义格式（zstd / brotli / 应用私有 ID）由应用自选字符串注册。格式 ID 按字节精确匹配、大小写敏感：拼错的 ID 在运行期落 `compression-unavailable` 且 detail 点名（诚实失败，不静默回落）。HTTP 的 `Content-Encoding: deflate` 名义上是 zlib 格式但存在历史服务器发裸流的歧义，该歧义的消解（先试 zlib、失败回落裸流）属 HTTP 层编排，不进本通用 API。
+- **实现可替换、注册即用**：全部入口经 `CompressionCodecRegistry` 按格式 ID 分派；`register_codec` 为**覆盖语义**（同格式 ID 后注册者替换先注册者，内置 wuffs 实现即被覆盖对象），`unregister_codec` 清除覆盖并回落内置（若有）——注销即回默认态，测试隔离因此确定。编解码器只写流式解压即自动获得一次性入口（框架派生）；编解码器方法返回的错误原样透传（不包装、不改码）。
+- **解压炸弹防护双层**：实现层收到的 `DecompressOptions::max_output_bytes` 即产出上限，实现应自行止步（CPU 视角不白烧）；框架层再以计数装饰器兜底——越限即止交并落 `compression-output-too-large`，不依赖实现是否自觉。限额的单一事实源是 `DecompressOptions`，装饰器是兜底而非第二真源。
+- **注入路径恒在**：`AURORA_ENABLE_COMPRESSION`（默认 ON）只门控内置 wuffs 编解码器的**注册**；编解码器抽象、注册表与自由函数恒编入——关闭宏的构建里注册自定义编解码器即可用（诚实降级不静默把压缩字节当明文交出）。
 
 ### 12.2 接口契约
 
-- `decompress(format, input, options) -> Result<std::vector<char>>`：一次性物化，内部 create → push 全量 → finish 收集。
-- `class Decompressor`：流式，大文件全程不物化。生命周期 create → 若干次 push → 一次 finish；`push` 空跨段合法（允许把一条流切成任意切分喂入）；单条流作用域——`finish` 后再 `push`、流完整后再来字节（trailing garbage）均落 `compression-data-corrupt`，与 `wire::ResponseAssembler` 同纪律。实例 move-only（持 wuffs 解码器句柄）。
-- `DecompressSink`：解压产物消费回调（`std::function<void(std::span<const char>)>`），同步调用。
+- 格式 ID：`std::string_view` 入参；注册表内部以 `std::string` 持存，调用方的 `string_view` 不要求长命（注册即拷贝）。错误 detail 直接点名格式 ID 字符串，无枚举到文本的映射表。
+- `class CompressionCodec`（抽象基类）：`name()` 纯虚（实现方稳定标识，诊断与 `registered()` 用）；`can_compress()` 默认 false；`compress(format, input, options)` 默认落 `general-not-supported`（detail 带 name()）；`create_decompressor(format, options)` 默认落 `compression-unavailable`（流式是可选能力，不实现即没有）。**两方法首参为注册表分派时透传的槽位格式 ID**——同一实现可注册到多个格式 ID（一份 zlib 绑定同服 gzip 与 zlib 两槽、内置 wuffs 一份实现服务三族），格式绑定在注册点、实现自身不持格式状态。全部方法 const、实现须线程安全（同 `ImageCodec` 契约）；五法则禁拷贝移动、析构虚，只经 `shared_ptr` 注入。
+- `class Decompressor`（抽象基类）：`push` / `finish` 流式契约与逐字语义不变（const 限定、可空跨段、单条流作用域）；实例经 `unique_ptr` 持有，moved-from 即空指针（经其调用属调用方用法错误，库不设「已移动」状态）。push-after-finish 落 `compression-data-corrupt`、finish 幂等由注册表交出的装饰器**统一收口**，编解码器实现可免于自行维护流态。经基类指针删除，析构虚。
+- `DecompressSink`：解压产物消费回调（`std::function<void(std::span<const char>)>`），同步调用，不得在回调内再驱动同一实例。
+- `CompressOptions{level}`：单旋钮 `optional<int>`，nullopt = 实现自定义默认，数值语义由实现定义（如 zlib 0–9 / zstd 1–22），框架只透传不解释——不为猜测中的编码器预造旋钮阵。
+- `CompressionCodecRegistry`（进程单例，`instance()` 首次访问按宏懒注册内置三族）：内置 + 覆盖两张表、互斥量护槽位、全部方法 const（与 `ImageCodecRegistry` 同形态）；分派时锁内取 `shared_ptr` 副本、锁外调用实现——不在持锁期间运行实现方代码，与实现内重入注册也不会互锁。`registered()` 诊断列表逐格式给出当前生效实现（覆盖优先），条目形态 `RegisteredCodec{format, name}`，按格式 ID 字典序。
+- 自由函数 `register_codec` / `unregister_codec` / `compress` / `decompress` / `create_decompressor`：一行转调单例同名方法，第一参数均为格式 ID；一次性 `decompress` 在框架侧由流式派生（create → push 全量 → finish 收集），语义与流式逐字等价。
+- 不可用口径分两种 detail（码同为 `compression-unavailable`）：格式无任何编解码器 → 点名格式 ID（宏关闭的构建追加内置缺席成因字样）；有编解码器但 `can_compress()` 为假 → 点名实现名与缺失的方向（由注册表压缩分派前预检产生）。
 
 ### 12.3 wuffs 驱动口径（跨轮协程）
 
-实现对三方件 wuffs（`third_party/wuffs`，单文件 C 库）的复用：`wuffs_{gzip,zlib,deflate}__decoder` 经 `transform_io` 从 src 压缩字节向 dst 产出解压字节。**wuffs 的 io_transformer 是可恢复协程**：每次调用从 `a_dst->meta.wi` 重建续写指针，并在挂起点把新产产物快照进内部 32 KiB 窗口。故驱动循环必须**保留 dst 写位置、消费只推进 `meta.ri`、缓冲满时 `compact`**；轮次间把 `meta.wi` 重置为 0 会令写位置回退、内部历史计数与缓冲区内容错位，表现为伪 `#deflate: bad distance`（小载荷单轮完成不触发，大载荷跨轮必触发——本批由 `utest_core_compression` 的三格式大夹具对拍钉死）。
+内置实现对三方件 wuffs（`third_party/wuffs`，单文件 C 库）的复用：`wuffs_{gzip,zlib,deflate}__decoder` 经 `transform_io` 从 src 压缩字节向 dst 产出解压字节。**wuffs 的 io_transformer 是可恢复协程**：每次调用从 `a_dst->meta.wi` 重建续写指针，并在挂起点把新产产物快照进内部 32 KiB 窗口。故驱动循环必须**保留 dst 写位置、消费只推进 `meta.ri`、缓冲满时 `compact`**；轮次间把 `meta.wi` 重置为 0 会令写位置回退、内部历史计数与缓冲区内容错位，表现为伪 `#deflate: bad distance`（小载荷单轮完成不触发，大载荷跨轮必触发——由 `utest_core_compression` 的三格式大夹具对拍钉死）。wuffs 对压缩格式只提供解码器（无任何编码器符号），压缩方向的实现供给经注册表交给应用，内置实现 `can_compress()` 恒假。
 
 ### 12.4 层边界与回归
 
 - 公共头只依赖标准库与 `core/result.h`；wuffs 只在实现 `src/aurora/core/compression.cpp` 出现（对齐 `core/image.cpp` 桥接编解码器的先例），`tools/check/check_core_layer_boundary.py` 守护头层不反向依赖。
-- 头随伞头 `aurora/aurora.h` 收录，`tools/check/umbrella_manifest.txt` 同步；`CompressionFormat` 登记 `tools/include/known_enums.h` 并在 `tests/integration/itest_known_enums.cpp` 加编译期锚点。
-- 错误码三枚（`codespec/errors.toml` 登记 → 生成 `error_codes.gen.h` 与 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）：`compression-data-corrupt`（流损坏 / 截断 / trailing garbage）、`compression-output-too-large`（越 `max_output_bytes`）、`compression-unavailable`（格式未编入——宏关；或压缩方向未实现——detail 注明）。
-- 回归 `utest_core_compression`（12 例，纯内存、零网络零平台分支）：三格式小载荷逐值往返、截断与中部损坏落 corrupt、炸弹上限差一字节即拒（等于即放）、流式逐字节喂入与一次性对拍且大产物经 Sink 多段交出（三格式大载荷各一遍）、trailing garbage 与 finish 后再 push 落 corrupt、finish 幂等、移动后使用源实例报错、`compress` 恒 unsupported、空输入落 corrupt。`AURORA_ENABLE_COMPRESSION` 关闭时全部用例按 TEST-R6 纪律恒注册体内 SKIP。
+- 头随伞头 `aurora/aurora.h` 收录；压缩格式已非枚举，`tools/include/known_enums.h` 与 `tests/integration/itest_known_enums.cpp` 相应移除 `CompressionFormat` 登记（格式 ID 走字符串，不进 `aurora_api.json` 的 `enums` 段）。
+- 错误码三枚（`codespec/errors.toml` 登记 → 生成 `error_codes.gen.h` 与 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）：`compression-data-corrupt`（流损坏 / 截断 / trailing garbage）、`compression-output-too-large`（越 `max_output_bytes`）、`compression-unavailable`（格式无注册实现——detail 点名 ID；或注册实现不支持该方向——detail 点名实现与方向）。
+- 回归 `utest_core_compression` 按用例分腿（TEST-R6 纪律两腿逐名可比）：**注册表契约用例双腿实跑**——三枚常量取值、路由与调用计数、覆盖 / 注销回落、方向独立、未知格式与大小写敏感口径、框架护栏对不限额桩兜底、一次性与流式对拍、装饰器流态收口、诊断列表、压缩预检 detail、宏宏观数值（体内分岔）；**内置 golden 用例仅宏开腿实跑**——三格式小载荷逐值往返、截断与中部损坏落 corrupt、炸弹上限差一字节即拒（等于即放）、流式逐字节喂入对拍且大产物经 Sink 多段交出（三格式大载荷各一遍）、trailing garbage、finish 后再 push、finish 幂等、`compress` 恒 unavailable、空输入落 corrupt、覆盖 gzip 槽后改走桩且注销逐字节回落内置。

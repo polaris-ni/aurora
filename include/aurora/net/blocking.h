@@ -1,7 +1,6 @@
 #pragma once
 
-/// @brief 同步阻塞 socket 面（CHG-006 落地的能力，CHG-018 §4 处置后收缩进 `aurora::net::blocking`）。
-/// @file net/blocking.h
+/// @brief 同步阻塞 socket 面。
 ///
 /// **定位：仅供非 UI 线程的工具与测试宿主使用**——InspectorServer 的工作线程、`tools/` 下的服务器与
 /// 探针、单测里的回环桩。面向使用者的一侧（控件、状态、异步业务）一律走 `aurora/net/transport.h` 的
@@ -15,7 +14,7 @@
 ///
 /// 运行时生命周期**不需调用方感知**：Windows 侧的 `WSAStartup` 由实现侧在首次用到 socket 时钉住，
 /// 故本头只提供「拿句柄、用句柄」两类对象，没有任何需要先构造的运行时前置件。历史上公共面那枚
-/// `net::Session` 已按 CHG-018 §4 降为库内细节（`src/aurora/net/detail/runtime.h`）。
+/// `net::Session` 已降为库内细节（`src/aurora/net/detail/runtime.h`）。
 ///
 /// 范围刻意收敛为「本仓 Inspector 工具链 + 后续本机 AI 交互」所需：
 /// - **地址族由 `Endpoint` 决定**（IPv4 / IPv6 都走同一条 `connect` / `bind`）：不经 DNS，

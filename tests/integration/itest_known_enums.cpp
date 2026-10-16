@@ -50,7 +50,7 @@ namespace {
            static_cast<int>(aurora::net::http::SinkFlow::Stop) +
            static_cast<int>(aurora::net::http::HttpErrorClass::Cancelled) +
            static_cast<int>(aurora::ResourcePhase::Failed) + static_cast<int>(aurora::StreamPolicy::Replace) +
-           static_cast<int>(aurora::CompressionFormat::Deflate) + static_cast<int>(au::webview::WebViewMode::Snapshot);
+           static_cast<int>(au::webview::WebViewMode::Snapshot);
 }
 
 /// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。

@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief 非阻塞 socket 出口（CHG-018 传输切片的平台腿）。
+/// @brief 非阻塞 socket 出口。
 /// @file net/detail/async_io.h
 ///
 /// **仅供 `src/aurora/net/` 实现侧使用，不占公共 API 预算。**存在理由有三：

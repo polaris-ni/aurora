@@ -1,4 +1,4 @@
-// http_client.cpp —— HTTP 发起侧客户端的 send / open_stream 核心闭环（CHG-018 §6 / §12）。
+// http_client.cpp —— HTTP 发起侧客户端的 send / open_stream 核心闭环。
 //
 // 落在这里的是「把回调式传输按 HTTP 线上次序编排成一条协程」：连接（http 直连 / https 先握手）、
 // 写出 render_head() + 体、逐段喂接收侧装配器 ResponseAssembler 装配应答、按 Content-Encoding 还原消息体、

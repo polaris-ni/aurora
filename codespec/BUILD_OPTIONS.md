@@ -27,7 +27,7 @@
 | `cmake/AuroraThirdParty.cmake` | FreeType / HarfBuzz 源码构建 |
 | `cmake/AuroraUtils.cmake` | 消费者目标统一配置辅助（`aurora_setup_consumer_target`，demo / 测试 / 工具复用链接 / PCH / C++20 / 告警 / MinGW `-Wa,-mbig-obj`） |
 | `cmake/AuroraBackends.cmake` | 全部 `AURORA_BACKEND_*` Surface 图形后端剪裁开关 + 音频设备后端开关（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_WEBAUDIO`，ENABLE 组）+ 存储 SQLite 后端开关（`AURORA_ENABLE_STORAGE_SQLITE`，ENABLE 组）+ 架构级优化宏（`AURORA_ENABLE_LAYOUT_CACHE` 等） |
-| `cmake/AuroraCompression.cmake` | core 级压缩能力开关（`AURORA_ENABLE_COMPRESSION`，默认 ON）+ wuffs OBJECT 库 `aurora_wuffs`（图片 PNG 编解码与压缩能力共用，并集条件创建） |
+| `cmake/AuroraCompression.cmake` | core 级压缩能力开关（`AURORA_ENABLE_COMPRESSION`，默认 ON，**门控内置 wuffs 解码器的注册**）+ wuffs OBJECT 库 `aurora_wuffs`（图片 PNG 编解码与压缩能力共用，并集条件创建） |
 | `cmake/AuroraImageCodecs.cmake` | `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG`（编译期能力开关） |
 | `cmake/AuroraSimd.cmake` | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播） |
 | `cmake/AuroraCcache.cmake` | `AURORA_ENABLE_CCACHE`（ccache 编译缓存启动器） |
@@ -40,9 +40,9 @@
 | `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元，另可按 `AURORA_LINT_SHARD` 分片；须在全部目标定义之后 include） |
 | `cmake/AuroraFormat.cmake` | `AURORA_ENABLE_CLANG_FORMAT`（`format` / `format-check` 聚合目标，经 `tools/check/run_clang_format.py` 并行校验 / 重写非 third_party 源文件；与目标定义无关，放最后 include 亦可） |
 | `cmake/AuroraCheckTestRegistry.cmake` | **遗留模块**：当前无 CMake `include()` 引用（`registry_integrity` 已改由 `AuroraTests.cmake` 直接注册 python 脚本 `check_test_registry.py`）；保留仅供手工 / 历史参考，不计入常规构建 |
-| `cmake/AuroraNetTls.cmake` | TLS 后端装配的**唯一决策点**（CHG-018 TLS 切片）：`AURORA_NET_TLS_PROVIDER` 缓存变量、系统栈缺省装配、provider 头/库探测、引擎宏推导、导入目标 `aurora::net::tls`。细则见 §1.2 |
+| `cmake/AuroraNetTls.cmake` | TLS 后端装配的**唯一决策点**（TLS 切片）：`AURORA_NET_TLS_PROVIDER` 缓存变量、系统栈缺省装配、provider 头/库探测、引擎宏推导、导入目标 `aurora::net::tls`。细则见 §1.2 |
 
-### 1.2 TLS 后端引擎宏与 `AURORA_NET_TLS_PROVIDER`（CHG-018，第四族命名）
+### 1.2 TLS 后端引擎宏与 `AURORA_NET_TLS_PROVIDER`
 
 `aurora::net` 的事件引擎、事件源注册口与传输族**没有开关**：公共 API 恒在（提案 §8 的第一句裁决），裁剪面只落在「哪个 TLS 引擎被编进来」这一处，因此 `AURORA_ENABLE_NET` / `AURORA_NET_ENGINE_POLL` / `AURORA_NET_EVENT_SOURCE` / `AURORA_NET_HTTP_FETCH` 四枚原规划宏**不属首批落地面**（提案 §8 的宏表按本条读取，「平台 HTTP 引擎与 wasm `fetch`」本就是 §16 的非目标）。
 
@@ -104,7 +104,7 @@ demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` �
 | 产物 | `aurora_inspector_server` 静态库（`src/aurora/inspector/inspector_server.cpp`） |
 | 头文件 | `include/aurora/inspector/inspector_server.h` |
 
-`inspector_server.cpp` 已从核心 `aurora` 库源文件列表中排除（`list(FILTER ... EXCLUDE)`），仅当开关为 `ON` 时编入独立静态库——排除的目的只是**按开关剪裁服务器实现本身**：socket 能力已随核心公共模块 `aurora::net`（`src/aurora/net/socket.cpp`，CHG-006）常驻核心，Windows 链接面由核心 `PUBLIC ws2_32` 统一传导，各消费者（demo / 测试 / 工具）不再各自挂载。
+`inspector_server.cpp` 已从核心 `aurora` 库源文件列表中排除（`list(FILTER ... EXCLUDE)`），仅当开关为 `ON` 时编入独立静态库——排除的目的只是**按开关剪裁服务器实现本身**：socket 能力已随核心公共模块 `aurora::net`（`src/aurora/net/socket.cpp`）常驻核心，Windows 链接面由核心 `PUBLIC ws2_32` 统一传导，各消费者（demo / 测试 / 工具）不再各自挂载。
 
 ```powershell
 cmake -S . -B build -DAURORA_BUILD_INSPECTOR_SERVER=ON
@@ -336,7 +336,7 @@ cmake --build build
 | `AURORA_ENABLE_WEBVIEW_WEBVIEW2` | `AURORA_ENABLE_WEBVIEW=ON` 时 Windows `ON`，否则 `OFF` | WebView2 引擎后端（Windows 对位后端：系统 `Microsoft.Web.WebView2` 运行时，**运行时绑定 `LoadLibrary`——零构建期链接依赖**；`WebView2.h` 与运行环境头 vendor 于 `third_party/webview2/`，**不含 loader 二进制**）。缺运行时 → `probe()` 报 `MissingRuntime` → 占位降级。**前置依赖 `AURORA_ENABLE_WEBVIEW=ON`**；非 Windows 开启 FATAL | 注入 `AURORA_ENABLE_WEBVIEW_WEBVIEW2`（**SCOPE PRIVATE**，经 `aurora_define_feature` 注册） |
 | `AURORA_ENABLE_WEBVIEW_WEBKITGTK` | `AURORA_ENABLE_WEBVIEW=ON` 时 Linux `ON`，否则 `OFF` | WebKitGTK 引擎后端（Linux 对位后端：系统 **GTK3 + WebKitGTK 4.1**，运行时 `dlopen`——零构建期链接依赖）。仅 **X11** 可行（收养外部 X11 句柄 `gdk_x11_window_foreign_new_for_display`）；Wayland 不能把另一客户端 GTK surface 作定位子 surface ⇒ `probe()` 报 `UnsupportedPlatform`。缺运行时 → 报 `MissingRuntime`。**前置依赖 `AURORA_ENABLE_WEBVIEW=ON`**；非 Linux 开启 FATAL | 注入 `AURORA_ENABLE_WEBVIEW_WEBKITGTK`（**SCOPE PRIVATE**，经 `aurora_define_feature` 注册） |
 | `AURORA_ENABLE_STORAGE_SQLITE` | `OFF` | 存储层 `SqliteBackend` 后端（记录仓储第三后端：真事务 BEGIN IMMEDIATE/COMMIT/ROLLBACK、二进制载荷 BLOB 内联无 sidecar、`contains`/`clear` 单语句化）。存储门面与 Memory/Filesystem 两后端**恒编译**；本开关只决定是否编入 SQLite 后端与 `Storage::create(SqliteOptions)` 重载。sqlite3 以 amalgamation 源码入库 `third_party/sqlite/`（3.53.4，Public Domain），关闭时链接产物完全不含该组件 | 注入 `AURORA_ENABLE_STORAGE_SQLITE`（PUBLIC 传播，经 `aurora_define_feature` 注册；独立静态目标 `aurora_sqlite3` 编入 `sqlite3.c`，定义 `SQLITE_THREADSAFE=1` / `SQLITE_OMIT_LOAD_EXTENSION`，非 Win 另链 `dl`/`pthread`） |
-| `AURORA_ENABLE_COMPRESSION` | `ON` | core 级通用解压能力（`core/compression.h`：gzip / zlib / deflate 三格式解压，首个消费者是 HTTP 发起侧 `Content-Encoding` 透明解压，已随该件落地）。**默认 ON**：解压是网络栈语义完整性件（提案 CHG-018 §12「缺这些即语义不完整」）且无替换路径，不同于可缺席的替换型后端（SQLite / 图片编解码 / 音频设备）；实测 wuffs 单 TU 编译约 6 秒、`-O2` 产物约 350 KB（可经 `WUFFS_CONFIG__MODULES` 再裁剪），默认开启代价很小。关闭时全部入口恒落 `compression-unavailable`、HTTP 侧同步不发 `Accept-Encoding`（诚实降级，已落地：`Client::send` 只在能力编入**且**调用方未自设该头时注入 `gzip, deflate`；关闭时若应答仍带 `Content-Encoding` 即落 `http-content-encoding-unsupported`，绝不把压缩字节当明文交出）。压缩方向只设计不实现（wuffs 无编码器），详见 `01-core.md` §12 | 注入 `AURORA_ENABLE_COMPRESSION`（仅库内部，不 PUBLIC 传播；wuffs OBJECT 库 `aurora_wuffs` 由 `cmake/AuroraCompression.cmake` 按「PNG ∨ COMPRESSION」并集创建，图片编解码与压缩能力共用同一份编译产物，避免双份符号链接冲突） |
+| `AURORA_ENABLE_COMPRESSION` | `ON` | core 级压缩解压能力（`core/compression.h`：字符串格式 ID + 编解码器抽象 + 注册表，内置 wuffs 解码器供 gzip / zlib / deflate 三槽，首个消费者是 HTTP 发起侧 `Content-Encoding` 透明解压）。**默认 ON**：内置解码器是网络栈语义完整性件；实测 wuffs 单 TU 编译约 6 秒、`-O2` 产物约 350 KB（可经 `WUFFS_CONFIG__MODULES` 再裁剪），默认开启代价很小。**宏只门控内置实现的注册**：编解码器抽象、注册表与自由函数恒编入——关闭时内置三槽缺席，未补位即各入口落 `compression-unavailable`、HTTP 侧同步不发 `Accept-Encoding`（诚实降级）；注册自定义编解码器（同 ID 覆盖 / 新 ID 新增）即可用，注入路径恒在。内置 wuffs 实现无编码器，压缩方向经注册表由应用供给，详见 `01-core.md` §12 | 注入 `AURORA_ENABLE_COMPRESSION`（仅库内部，不 PUBLIC 传播；wuffs OBJECT 库 `aurora_wuffs` 由 `cmake/AuroraCompression.cmake` 按「PNG ∨ COMPRESSION」并集创建，图片编解码与压缩能力共用同一份编译产物，避免双份符号链接冲突） |
 | `AURORA_ENABLE_GLFW_GPU_GL` | `OFF` | GLFW 的 GPU OpenGL 3.3 core 栅格能力（`GpuGlRhi`：DisplayList 批渲染 + MSAA）。**非独立 `Surface` 后端**——仅为 `GlfwSurface` 的 GPU 栅格模式增强：无 `SurfaceKind`、硬依赖 `AURORA_BACKEND_GLFW`、GL 上下文与呈现由 GLFW 后端承担；未开 `AURORA_BACKEND_GLFW` 配置期 FATAL，GPU 初始化失败运行期自动回退软件纹理上传路径，`Surface::gpu_backend()` 非空时 `name()` 恒为 `"gpu-gl"`。细节见 §3.1 | 注入 `AURORA_ENABLE_GLFW_GPU_GL`（仅库内部，不 PUBLIC 传播；`GpuGlRhi` 类恒编译进库，宏只控制 `GlfwSurface` 是否接线 GPU 模式） |
 
 **约束**：
@@ -890,7 +890,7 @@ aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE includ
 -D AURORA_ENABLE_WEBVIEW=ON|OFF     # WebView 控件（默认 OFF；公共模块恒编译，关闭=占位降级；PRIVATE 宏不传播）
 -D AURORA_ENABLE_WEBVIEW_WEBVIEW2=ON|OFF   # WebView2 引擎（依赖 ENABLE_WEBVIEW=ON；Win 默认 ON，否则 OFF；运行期绑定）
 -D AURORA_ENABLE_WEBVIEW_WEBKITGTK=ON|OFF  # WebKitGTK 引擎（依赖 ENABLE_WEBVIEW=ON；Linux 默认 ON，否则 OFF；运行期绑定）
--D AURORA_ENABLE_COMPRESSION=ON|OFF # core 解压能力 gzip/zlib/deflate（默认 ON；关闭=诚实降级 compression-unavailable）
+-D AURORA_ENABLE_COMPRESSION=ON|OFF # 内置压缩解码器 gzip/zlib/deflate 的注册（默认 ON；关闭=内置缺席、注入路径恒在）
 -D AURORA_ENABLE_IMAGE_JPEG=ON|OFF  # JPEG 解码 libjpeg-turbo（默认 OFF，内部宏）
 -D AURORA_ENABLE_IMAGE_WEBP=ON|OFF  # WebP 解码 libwebp（默认 OFF，内部宏）
 -D AURORA_ENABLE_IMAGE_PNG=ON|OFF   # PNG/GIF 解码 wuffs（默认 OFF，内部宏）

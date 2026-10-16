@@ -1,6 +1,6 @@
 #pragma once
 
-// http_await.h —— 把回调式传输桥接成协程可等待体（CHG-018 §6 HTTP 发起侧；仅库实现可见，不属公共 API）。
+// http_await.h —— 把回调式传输桥接成协程可等待体。
 //
 // 为何单列：`StreamTransport` / `TlsTransport` 的 connect / read / write / handshake 一律是「登记一次操作、
 // 完成恰一次经回调抵达、且完成恒回到发起线程」的回调形态——这是 L1 刻意不给协程出口的分层裁决

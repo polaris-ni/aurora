@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief 系统代理设置的平台无关投影与解析口（CHG-018 §11「系统代理读取」的纯逻辑侧）。
+/// @brief 系统代理设置的平台无关投影与解析口。
 /// @file net/detail/system_proxy.h
 ///
 /// 各平台把「操作系统里配了什么」压成同一枚 `SystemProxySnapshot` 的三个文本字段，本件负责把

@@ -1495,7 +1495,7 @@ auto detail::peer_is_loopback(std::intptr_t handle) -> bool {
     return peer && peer.value().is_loopback();
 }
 
-// ---- 数据报（UDP）腿：非阻塞收发与组播口径（CHG-018 传输切片） -----------------------------------
+// ---- 数据报（UDP）腿：非阻塞收发与组播口径 -----------------------------------
 
 namespace {
 

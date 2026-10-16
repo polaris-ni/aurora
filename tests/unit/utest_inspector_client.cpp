@@ -44,7 +44,7 @@
 namespace {
 
 /// @brief 打开一个只绑回环、端口由系统分配的监听口，并把实际端口写回 `port_out`
-/// （经核心同步阻塞层 `aurora::net::blocking`，CHG-006 建立 / CHG-018 §4 归位；失败返回无效 `Listener`）。
+/// （经核心同步阻塞层 `aurora::net::blocking`，失败返回无效 `Listener`）。
 /// @param port_out 实际绑定的系统分配端口（失败时置 0）。
 [[nodiscard]] auto open_loopback_listener(std::uint16_t &port_out) -> aurora::net::blocking::Listener {
     auto listener = aurora::net::blocking::Listener::listen_loopback(0, 1);  // 临时端口：避免与并发用例或本机服务撞号

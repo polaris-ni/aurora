@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief 事件驱动的数据报传输（CHG-018 传输切片：UDP 的消息语义、组播与广播）。
+/// @brief 事件驱动的数据报传输。
 /// @file net/datagram.h
 ///
 /// 与 `StreamTransport` 的分工是**边界**而不是能力：流面向字节、没有消息分界，数据报一条一条、每条

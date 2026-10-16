@@ -1,4 +1,4 @@
-// Aurora net — mbedTLS provider 后端（CHG-018 TLS 切片：无系统栈腿的 provider 装配，提案 §5 平台矩阵）。
+// Aurora net — mbedTLS provider 后端。
 //
 // 本 TU 只在构建配置把 `AURORA_NET_TLS_PROVIDER=<static|shared>:<prefix>` 指到一枚 mbedTLS 安装根时被编译
 // （`cmake/AuroraNetTls.cmake` 由 `include/mbedtls/ssl.h` 的存在性推导宏，不接受手工设置），Linux 等「没有

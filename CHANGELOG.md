@@ -23,6 +23,13 @@ freeze: minor-versions-are-additive
 
 ### Breaking
 
+- **压缩解压能力可扩展化：编解码器抽象与注册表（CHG-020）**：`core/compression.h` 由「焊死在 wuffs 上的三格式解压」原地重写为「字符串格式 ID + 编解码器抽象 + 进程注册表」。
+  - `enum class CompressionFormat` 移除，改三枚预定义常量 `AURORA_COMPRESS_FORMAT_GZIP` / `_ZLIB` / `_DEFLATE`（小写 `string_view`，与 HTTP 线上令牌一一对应，格式 ID 按字节精确匹配、大小写敏感）；自定义格式 ID 由应用自选字符串经 `register_codec` 注册。迁移：`CompressionFormat::Gzip` / `Zlib` / `Deflate` → `AURORA_COMPRESS_FORMAT_GZIP` / `_ZLIB` / `_DEFLATE`。
+  - `Decompressor` 由具体类改为抽象基类：`push` / `finish` 契约逐字保留（const 限定、单条流作用域），静态 `Decompressor::create` 移除，创建入口移至注册表工厂 `create_decompressor(format, options)`，实例改经 `std::unique_ptr` 持有（moved-from 即空指针，调用属调用方用法错误；push-after-finish 与 finish 幂等由注册表装饰器统一收口）。迁移：`Decompressor::create(fmt, opts)` → `create_decompressor(fmt, opts)`，按值持有改 `unique_ptr`、`dec.push(...)` → `dec->push(...)`。
+  - `compress()` 从恒失败桩改为注册表调度：内置 wuffs 无编码器、`can_compress()` 恒假，仍落 `compression-unavailable`（detail 改点名实现与缺失方向）；应用注册带编码器的实现即「注册即用」。
+  - `AURORA_ENABLE_COMPRESSION` 语义收窄为**只门控内置 wuffs 解码器的注册**：编解码器抽象、注册表与自由函数恒编入，关闭宏的构建里注册自定义编解码器即可用（注入路径恒在）；HTTP 发起侧 `Accept-Encoding` 宣告判据由「编入宏」改「core 注册表 gzip / zlib / deflate 三槽均可服务」，格式集仍封闭为 gzip / deflate 两枚、零语义变化。
+  - 新增公共面：`CompressionCodec` / `CompressionCodecRegistry` / `RegisteredCodec` / `CompressOptions{level}` 与自由函数 `register_codec` / `unregister_codec` / `create_decompressor`；解压炸弹护栏改双层（实现层自止步 + 注册表计数装饰器兜底，越限仍落 `compression-output-too-large` 且越限之后的字节不交调用方）；`registered()` 诊断列表逐格式给出当前生效实现（覆盖优先）。
+
 - **构建选项面收口：删除 `AURORA_BACKEND_HEADLESS` 与 `AURORA_ENABLE_UNITY_CORE` 两枚 CMake 选项**（连同 `AURORA_UNITY_BATCH_SIZE`）：
   - `AURORA_BACKEND_HEADLESS` 不再是开关，无头内存 / PNG 后端**恒编入**：测试套件与像素读回回退路径以 `HeadlessSurface` 为基底，关闭它不存在受支持的构建组合（`AURORA_BUILD_TESTS=ON` × `HEADLESS=OFF` 本就是不受支持组合）。同名 feature 宏改为**无条件注入并随安装导出**（消费端 ODR 口径不变），`#ifdef` 门控代码与 `debug::feature_flags()` 镜像照常工作。迁移路径：删除构建命令里的 `-DAURORA_BACKEND_HEADLESS=ON`（传 `OFF` 的配置本就不受支持，无需迁移）。
   - `AURORA_ENABLE_UNITY_CORE`（Unity Build 试点）整体移除：ccache 已承担编译加速职责，试点未转正，删除后 `BUILD_OPTIONS.md` §4.8 一并撤下。迁移路径：删除构建命令里的 `-DAURORA_ENABLE_UNITY_CORE=ON` / `-DAURORA_UNITY_BATCH_SIZE=<n>`（无行为等价替代，编译组织方式恒为逐 TU）。

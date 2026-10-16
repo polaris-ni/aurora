@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief HTTP/1.1 发起侧客户端（CHG-018 §6 的 HTTP 发起侧、§12 语义的地基件）。
+/// @brief HTTP/1.1 发起侧客户端。
 /// @file net/http_client.h
 ///
 /// 本头回答一个问题：**「把一份 `Request` 送出去、把应答拿回来」**——连接（`http://` 直连、
@@ -20,9 +20,11 @@
 ///   一份 `total`、跨全部尝试的墙另有 `RetryPolicy::budget`。认证属 §12 其余语义件。
 ///
 /// 内容编码（透明解压）在发起侧管线内完成，`Response` 交出的恒是还原后的字节：
-/// - **宣告与支持集同源**：构建编入解压能力时，`send` 替调用方补 `Accept-Encoding: gzip, deflate`；调用方
+/// - **宣告与支持集同源**：core 注册表的 gzip / zlib / deflate 三槽均已注册时，`send` 替调用方补
+///   `Accept-Encoding: gzip, deflate`；调用方
 ///   已自带该字段（任意大小写拼写）则**原样保留、不覆盖也不重复追加**——协商是调用方的表达，本件只在缺省时
-///   补一个与自己解码能力等长的宣告。未编入（`AURORA_ENABLE_COMPRESSION=OFF`）时**连宣告都不发**，此时
+///   补一个与自己解码能力等长的宣告。三槽未全部注册（内置解码器仅在 `AURORA_ENABLE_COMPRESSION=ON`
+///   的构建编入；应用可自注册补位）时**连宣告都不发**，此时
 ///   对端强行压缩落 `http-content-encoding-unsupported`，绝不把压缩字节当明文交出。
 /// - **解码在物化之后、值层之前**：分帧（`Content-Length` / chunked）解出的仍是编码字节，本件按
 ///   `Content-Encoding` 链反序逐层还原，随后才交给 `Response`。`Response::text()` 的 charset 解码发生在

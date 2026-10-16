@@ -1,18 +1,19 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/compression.h + src/aurora/core/compression.cpp
-/// 测试说明: 通用解压能力契约回归（CHG-018 §12「内容编码」的 core 级落地）：三格式
-///           （gzip / zlib / deflate raw）解压逐值一致；截断与中部损坏落
-///           `compression-data-corrupt`；`max_output_bytes` 越限落
-///           `compression-output-too-large`（解压炸弹防护，差一字节即拒）；流式
-///           `Decompressor` 任意切分喂入与一次性 `decompress` 结果一致且大产物经
-///           Sink 多段交出（不物化）；流完整后再来字节（trailing garbage）与
-///           `finish` 后再 `push` 均按单条流作用域落 corrupt；`compress` 恒落
-///           `compression-unavailable`（只设计不实现）；移动后使用源实例报错。
-///           夹具为离线固定字节（python zlib/gzip mtime=0 生成），零网络零平台分支。
-/// ⚠️ 平台与能力分支一律写在**用例体内**（registry_integrity 静态扫源码，被 #ifdef
-///    摘掉的声明在另一种构建里必然单边失踪）。`AURORA_ENABLE_COMPRESSION` 默认 ON，
-///    关闭时全部用例恒 SKIP（见文件末 #else 分支）。
+/// 测试说明: 压缩解压编解码器与注册表契约回归（CHG-020）：三格式（gzip / zlib / deflate raw）
+///           解压逐值一致；截断与中部损坏落 `compression-data-corrupt`；`max_output_bytes` 越限落
+///           `compression-output-too-large`；流式任意切分喂入与一次性对拍且大产物经 Sink 多段交出
+///           （不物化）；单条流作用域（trailing garbage、finish 后再 push）落 corrupt；注册表面为
+///           本批新增——路由 / 覆盖 / 注销回落 / 方向独立 / 未知格式与大小写敏感口径 / 框架层护栏
+///           对不限额桩兜底 / 装饰器流态收口 / 诊断列表；`compress` 对内置三格式恒落
+///           `compression-unavailable`（wuffs 无编码器）。夹具为离线固定字节（python zlib/gzip
+///           mtime=0 生成），零网络零平台分支。
+/// ⚠️ 平台与能力分支一律写在**用例体内**（registry_integrity 静态扫源码，被 #ifdef 摘掉的声明在
+///    另一种构建里必然单边失踪）。本文件按用例分腿：注册表契约用例**双腿实跑**（注册表与注入路径
+///    在 `AURORA_ENABLE_COMPRESSION=OFF` 的构建照常编译），仅依赖内置解码器的 golden 用例在 OFF
+///    构建里同名 SKIP；宏的宏观数值判据集中在 `builtin_slots_track_the_capability_macro` 体内分岔。
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -23,15 +24,298 @@
 #include "aurora/core/compression.h"
 #include "framework/aurora_test.h"
 
-#ifdef AURORA_ENABLE_COMPRESSION
-
 namespace aurora::test_cases::utest_core_compression {
+
+namespace {
+
+/// @brief 字面串 → 字节视图（测试入参构造助手）。
+/// @param text 字面串。
+/// @return 指向其存储的只读字节视图。
+auto bytes_of(std::string_view text) -> std::span<const char> { return {text.data(), text.size()}; }
+
+/// @brief 桩解压器：`finish` 时一次性交出固定标记产物（不真解压）；`push` 只计数。
+///
+/// 刻意不自带流态收口（不查 push-after-finish、finish 不幂等去重）——那些由注册表装饰器统一负责，
+/// 本桩因此成为「装饰器确实在收口」判据的对照面。
+class StubDecoder final : public Decompressor {
+  public:
+    /// @param marker `finish` 时经 Sink 交出的标记产物。
+    /// @param push_calls 可选计数出口（路由判据用；空指针 = 不计数）。
+    StubDecoder(std::string_view marker, std::size_t *push_calls) : marker_(marker), push_calls_(push_calls) {}
+
+    [[nodiscard]] auto push(std::span<const char> src, const DecompressSink &sink) const -> Result<void> override {
+        (void)sink;
+        (void)src;
+        if (push_calls_ != nullptr) {
+            ++*push_calls_;
+        }
+        return Result<void>{};
+    }
+
+    [[nodiscard]] auto finish(const DecompressSink &sink) const -> Result<void> override {
+        sink(std::span<const char>(marker_.data(), marker_.size()));
+        return Result<void>{};
+    }
+
+  private:
+    std::string_view marker_;  ///< 指向调用方持存的标记文本
+    std::size_t *push_calls_;  ///< push 计数出口（可空）
+};
+
+/// @brief 桩编解码器：方向位与计数可配；压缩产物与解压产物都是固定标记串。
+class StubCodec final : public CompressionCodec {
+  public:
+    /// @param name 实现名（诊断列表与 detail 用）。
+    /// @param marker 固定产物文本。
+    /// @param supports_compress 压缩方向位。
+    /// @param supports_decompress 解压方向位（false 时 create_decompressor 落 unavailable）。
+    /// @param compress_calls 可选计数出口（可空）。
+    /// @param create_calls 可选计数出口（可空）。
+    /// @param push_calls 可选计数出口（可空，透传给桩解压器）。
+    StubCodec(std::string_view name, std::string_view marker, bool supports_compress, bool supports_decompress,
+              std::size_t *compress_calls = nullptr, std::size_t *create_calls = nullptr,
+              std::size_t *push_calls = nullptr)
+        : name_(name), marker_(marker), supports_compress_(supports_compress),
+          supports_decompress_(supports_decompress), compress_calls_(compress_calls), create_calls_(create_calls),
+          push_calls_(push_calls) {}
+
+    [[nodiscard]] auto name() const -> std::string_view override { return name_; }
+
+    [[nodiscard]] auto can_compress() const -> bool override { return supports_compress_; }
+
+    [[nodiscard]] auto compress(std::string_view format, std::span<const char> input,
+                                const CompressOptions &options) const -> Result<std::vector<char>> override {
+        (void)format;
+        (void)input;
+        (void)options;
+        if (compress_calls_ != nullptr) {
+            ++*compress_calls_;
+        }
+        return std::vector<char>(marker_.begin(), marker_.end());
+    }
+
+    [[nodiscard]] auto create_decompressor(std::string_view format, const DecompressOptions &options) const
+        -> Result<std::unique_ptr<Decompressor>> override {
+        (void)format;
+        (void)options;
+        if (create_calls_ != nullptr) {
+            ++*create_calls_;
+        }
+        if (!supports_decompress_) {
+            return make_error(ErrorCode::CompressionUnavailable, std::string(name_) + ": no streaming decompressor");
+        }
+        std::unique_ptr<Decompressor> decoder = std::make_unique<StubDecoder>(marker_, push_calls_);
+        return decoder;
+    }
+
+  private:
+    std::string_view name_;  ///< 实现名（指向调用方持存的文本）
+    std::string_view marker_;  ///< 固定产物文本
+    bool supports_compress_;  ///< 压缩方向位
+    bool supports_decompress_;  ///< 解压方向位
+    std::size_t *compress_calls_;  ///< compress 计数出口（可空）
+    std::size_t *create_calls_;  ///< create_decompressor 计数出口（可空）
+    std::size_t *push_calls_;  ///< push 计数出口（可空）
+};
+
+/// @brief 注册表里是否已登记某格式（诊断列表判据助手）。
+/// @param format 格式 ID。
+/// @return `registered()` 中出现为 true。
+auto registry_has_format(std::string_view format) -> bool {
+    const auto &entries = CompressionCodecRegistry::instance().registered();
+    return std::ranges::any_of(entries, [format](const RegisteredCodec &entry) { return entry.format == format; });
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// 注册表契约（双腿实跑）：注册表与注入路径在宏关闭的构建照常编译，用例不依赖内置实现。
+// ---------------------------------------------------------------------------
+
+// 三枚预定义常量是 HTTP 线上令牌的锚点：取值逐一钉死，漂移即拦。
+AURORA_TEST_CASE(predefined_format_constants_match_http_tokens) {
+    AURORA_TEST_CHECK(AURORA_COMPRESS_FORMAT_GZIP == std::string_view{"gzip"});
+    AURORA_TEST_CHECK(AURORA_COMPRESS_FORMAT_ZLIB == std::string_view{"zlib"});
+    AURORA_TEST_CHECK(AURORA_COMPRESS_FORMAT_DEFLATE == std::string_view{"deflate"});
+}
+
+// 路由与调用计数：自定义格式 ID 注册后，compress / decompress / create_decompressor 全部改走桩。
+AURORA_TEST_CASE(register_and_route_custom_format_across_all_entries) {
+    std::size_t compress_calls = 0;
+    std::size_t create_calls = 0;
+    std::size_t push_calls = 0;
+    const auto codec = std::make_shared<StubCodec>("test-codec", "stub-payload", true, true, &compress_calls,
+                                                   &create_calls, &push_calls);
+    register_codec("test-format", codec);
+
+    const auto compressed = compress("test-format", bytes_of("raw-bytes"));
+    AURORA_TEST_REQUIRE(bool(compressed));
+    constexpr std::string_view marker = "stub-payload";
+    const std::vector<char> expected_marker{marker.begin(), marker.end()};
+    AURORA_TEST_CHECK(compressed.value() == expected_marker);
+    AURORA_TEST_CHECK_EQ(compress_calls, std::size_t{1});
+
+    const auto decompressed = decompress("test-format", bytes_of("packed-bytes"));
+    AURORA_TEST_REQUIRE(bool(decompressed));
+    AURORA_TEST_CHECK(decompressed.value() == expected_marker);
+    AURORA_TEST_CHECK_EQ(create_calls, std::size_t{1});
+    AURORA_TEST_CHECK_EQ(push_calls, std::size_t{1});
+
+    unregister_codec("test-format");
+}
+
+// 方向独立可选：只实现压缩的桩 compress 成功而 decompress 落 unavailable，反之亦然——不连坐。
+AURORA_TEST_CASE(directions_are_independent) {
+    register_codec("compress-only", std::make_shared<StubCodec>("compress-only", "c", true, false));
+    register_codec("decompress-only", std::make_shared<StubCodec>("decompress-only", "d", false, true));
+
+    const auto up = compress("compress-only", bytes_of("x"));
+    AURORA_TEST_REQUIRE(bool(up));
+    const auto down = decompress("compress-only", bytes_of("x"));
+    AURORA_TEST_REQUIRE_FALSE(bool(down));
+    AURORA_TEST_CHECK_EQ(down.error().code_enum, ErrorCode::CompressionUnavailable);
+
+    const auto down_ok = decompress("decompress-only", bytes_of("x"));
+    AURORA_TEST_REQUIRE(bool(down_ok));
+    const auto up_denied = compress("decompress-only", bytes_of("x"));
+    AURORA_TEST_REQUIRE_FALSE(bool(up_denied));
+    AURORA_TEST_CHECK_EQ(up_denied.error().code_enum, ErrorCode::CompressionUnavailable);
+
+    unregister_codec("compress-only");
+    unregister_codec("decompress-only");
+}
+
+// 不可用口径：未知格式 ID 落 unavailable 且 detail 点名该 ID；三个入口同判据。
+AURORA_TEST_CASE(unknown_format_reports_unavailable_naming_the_id) {
+    const auto one_shot = decompress("no-such-format", bytes_of("x"));
+    AURORA_TEST_REQUIRE_FALSE(bool(one_shot));
+    AURORA_TEST_CHECK_EQ(one_shot.error().code_enum, ErrorCode::CompressionUnavailable);
+    AURORA_TEST_CHECK(one_shot.error().message.find("no-such-format") != std::string::npos);
+
+    const auto streamed = create_decompressor("no-such-format");
+    AURORA_TEST_REQUIRE_FALSE(bool(streamed));
+    AURORA_TEST_CHECK(streamed.error().message.find("no-such-format") != std::string::npos);
+
+    const auto up = compress("no-such-format", bytes_of("x"));
+    AURORA_TEST_REQUIRE_FALSE(bool(up));
+    AURORA_TEST_CHECK_EQ(up.error().code_enum, ErrorCode::CompressionUnavailable);
+}
+
+// 大小写敏感：`GZIP` 与 `gzip` 是两个 ID，前者未注册即不可用，绝不静默匹配内置槽。
+AURORA_TEST_CASE(format_ids_are_case_sensitive) {
+    const auto out = decompress("GZIP", bytes_of("x"));
+    AURORA_TEST_REQUIRE_FALSE(bool(out));
+    AURORA_TEST_CHECK_EQ(out.error().code_enum, ErrorCode::CompressionUnavailable);
+    AURORA_TEST_CHECK(out.error().message.find("GZIP") != std::string::npos);
+}
+
+// 框架层护栏：故意不限额的桩编解码器经注册表装饰器包裹后，越 max_output_bytes 仍落 too-large，
+// 且越限之后的字节不交调用方；一次性与流式两条路径同判据（护栏不依赖实现自觉）。
+AURORA_TEST_CASE(framework_guard_limits_unlimited_stub) {
+    const std::string big_marker(100, 'x');
+    register_codec("bomb-format", std::make_shared<StubCodec>("bomb", big_marker, false, true));
+
+    const auto one_shot = decompress("bomb-format", bytes_of("x"), {.max_output_bytes = 50});
+    AURORA_TEST_REQUIRE_FALSE(bool(one_shot));
+    AURORA_TEST_CHECK_EQ(one_shot.error().code_enum, ErrorCode::CompressionOutputTooLarge);
+
+    auto created = create_decompressor("bomb-format", {.max_output_bytes = 50});
+    AURORA_TEST_REQUIRE(bool(created));
+    std::size_t delivered_bytes = 0;
+    const auto collect = [&delivered_bytes](std::span<const char> chunk) { delivered_bytes += chunk.size(); };
+    AURORA_TEST_REQUIRE(bool(created.value()->push(bytes_of("x"), collect)));  // push 阶段桩不产字节
+    const auto flushed = created.value()->finish(collect);
+    AURORA_TEST_REQUIRE_FALSE(bool(flushed));
+    AURORA_TEST_CHECK_EQ(flushed.error().code_enum, ErrorCode::CompressionOutputTooLarge);
+    AURORA_TEST_CHECK_EQ(delivered_bytes, std::size_t{0});  // 越限产物整段被拦，一个字节都没交出
+
+    unregister_codec("bomb-format");
+}
+
+// 等价性：同一桩编解码器，一次性 decompress 与 create + push + finish 产物逐字节一致。
+AURORA_TEST_CASE(one_shot_matches_streaming_for_stub) {
+    register_codec("echo-format", std::make_shared<StubCodec>("echo", "stub-payload", false, true));
+
+    const auto one_shot = decompress("echo-format", bytes_of("compressed-bytes"));
+    AURORA_TEST_REQUIRE(bool(one_shot));
+    auto created = create_decompressor("echo-format");
+    AURORA_TEST_REQUIRE(bool(created));
+    std::vector<char> streamed;
+    const auto collect = [&streamed](std::span<const char> chunk) {
+        streamed.insert(streamed.end(), chunk.begin(), chunk.end());
+    };
+    AURORA_TEST_REQUIRE(bool(created.value()->push(bytes_of("compressed-bytes"), collect)));
+    AURORA_TEST_REQUIRE(bool(created.value()->finish(collect)));
+    AURORA_TEST_CHECK(one_shot.value() == streamed);
+
+    unregister_codec("echo-format");
+}
+
+// 装饰器收口单条流作用域：桩自身不做任何流态检查，push-after-finish 落 corrupt、finish 幂等
+// 全部来自框架层（注册表交出的每个解压器都被包裹）。
+AURORA_TEST_CASE(framework_decorators_enforce_stream_scope) {
+    register_codec("scoped-format", std::make_shared<StubCodec>("scoped", "m", false, true));
+    auto created = create_decompressor("scoped-format");
+    AURORA_TEST_REQUIRE(bool(created));
+    const auto collect = [](std::span<const char>) {};
+    AURORA_TEST_REQUIRE(bool(created.value()->finish(collect)));
+    const auto late = created.value()->push(bytes_of("x"), collect);
+    AURORA_TEST_REQUIRE_FALSE(bool(late));
+    AURORA_TEST_CHECK_EQ(late.error().code_enum, ErrorCode::CompressionDataCorrupt);
+    AURORA_TEST_REQUIRE(bool(created.value()->finish(collect)));  // 幂等：再收摊一次不报错
+    unregister_codec("scoped-format");
+}
+
+// 诊断列表：注册前不可见、注册后条目出现且名字正确、注销后消失（注销即回默认态）。
+AURORA_TEST_CASE(registered_lists_effective_implementations) {
+    AURORA_TEST_CHECK(!registry_has_format("list-format"));
+    register_codec("list-format", std::make_shared<StubCodec>("list-codec", "m", false, true));
+    AURORA_TEST_CHECK(registry_has_format("list-format"));
+    unregister_codec("list-format");
+    AURORA_TEST_CHECK(!registry_has_format("list-format"));
+}
+
+// 压缩预检：「有编解码器但 can_compress() 为假」点名实现名与缺失的方向，码同为 unavailable。
+AURORA_TEST_CASE(compress_precheck_names_codec_and_direction) {
+    register_codec("decompress-only-format", std::make_shared<StubCodec>("decompress-only", "m", false, true));
+    const auto out = compress("decompress-only-format", bytes_of("x"));
+    AURORA_TEST_REQUIRE_FALSE(bool(out));
+    AURORA_TEST_CHECK_EQ(out.error().code_enum, ErrorCode::CompressionUnavailable);
+    AURORA_TEST_CHECK(out.error().message.find("decompress-only") != std::string::npos);
+    AURORA_TEST_CHECK(out.error().message.find("does not support compression") != std::string::npos);
+    unregister_codec("decompress-only-format");
+}
+
+// 内置三槽随宏转跳（体内分岔）：宏开恒三槽且 gzip 真解压成功；宏关恒零槽且入口全落 unavailable。
+AURORA_TEST_CASE(builtin_slots_track_the_capability_macro) {
+    auto builtin_served = [] {
+        std::size_t served = 0;
+        for (const auto &entry : CompressionCodecRegistry::instance().registered()) {
+            served += static_cast<std::size_t>(entry.format == AURORA_COMPRESS_FORMAT_GZIP ||
+                                               entry.format == AURORA_COMPRESS_FORMAT_ZLIB ||
+                                               entry.format == AURORA_COMPRESS_FORMAT_DEFLATE);
+        }
+        return served;
+    };
+#ifdef AURORA_ENABLE_COMPRESSION
+    AURORA_TEST_CHECK_EQ(builtin_served(), std::size_t{3});
+#else
+    AURORA_TEST_CHECK_EQ(builtin_served(), std::size_t{0});
+    const auto out = decompress(AURORA_COMPRESS_FORMAT_GZIP, bytes_of("x"));
+    AURORA_TEST_REQUIRE_FALSE(bool(out));
+    AURORA_TEST_CHECK_EQ(out.error().code_enum, ErrorCode::CompressionUnavailable);
+#endif
+}
+
+#ifdef AURORA_ENABLE_COMPRESSION
 
 namespace {
 
 /// 三枚夹具的同一原payload（55 字节）与大夹具的周期行（265000 字节 = 5000 × 53）。
 constexpr std::string_view AURORA_TEST_PAYLOAD = "The quick brown fox jumps over the lazy dog. 0123456789";
 constexpr std::string_view AURORA_TEST_LARGE_LINE = "Aurora compression streaming fixture line 0123456789\n";
+/// 覆盖判据的桩产物：断言 gzip 槽改走桩时交出的是标记串而不是真实解压结果。
+constexpr std::string_view AURORA_TEST_STUB_PAYLOAD = "stub-payload";
 
 constexpr auto AURORA_TEST_GZIP_BYTES = std::to_array<std::uint8_t>(
     {0x1F, 0x8B, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xFF, 0x0B, 0xC9, 0x48, 0x55, 0x28, 0x2C, 0xCD, 0x4C, 0xCE,
@@ -220,16 +504,16 @@ auto fixture_span(const Container &v) -> std::span<const char> {
 AURORA_TEST_CASE(decompress_three_formats_roundtrip_to_payload) {
     const auto expected = expected_payload();
 
-    const auto gz = aurora::decompress(aurora::CompressionFormat::Gzip, fixture_span(AURORA_TEST_GZIP_BYTES));
+    const auto gz = aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_GZIP, fixture_span(AURORA_TEST_GZIP_BYTES));
     AURORA_TEST_REQUIRE(bool(gz));
     AURORA_TEST_CHECK_EQ(gz.value(), expected);
 
-    const auto zo = aurora::decompress(aurora::CompressionFormat::Zlib, fixture_span(AURORA_TEST_ZLIB_BYTES));
+    const auto zo = aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_ZLIB, fixture_span(AURORA_TEST_ZLIB_BYTES));
     AURORA_TEST_REQUIRE(bool(zo));
     AURORA_TEST_CHECK_EQ(zo.value(), expected);
 
     const auto raw =
-        aurora::decompress(aurora::CompressionFormat::Deflate, fixture_span(AURORA_TEST_DEFLATE_RAW_BYTES));
+        aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_DEFLATE, fixture_span(AURORA_TEST_DEFLATE_RAW_BYTES));
     AURORA_TEST_REQUIRE(bool(raw));
     AURORA_TEST_CHECK_EQ(raw.value(), expected);
 }
@@ -238,7 +522,7 @@ AURORA_TEST_CASE(decompress_three_formats_roundtrip_to_payload) {
 // 没有语义，静默交出前 N 字节比报错更坏。
 AURORA_TEST_CASE(decompress_truncated_stream_reports_corrupt) {
     const std::vector<std::uint8_t> cut(AURORA_TEST_GZIP_BYTES.begin(), AURORA_TEST_GZIP_BYTES.end() - 6);
-    const auto out = aurora::decompress(aurora::CompressionFormat::Gzip, fixture_span(cut));
+    const auto out = aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_GZIP, fixture_span(cut));
     AURORA_TEST_REQUIRE_FALSE(bool(out));
     AURORA_TEST_CHECK_EQ(out.error().code_enum, aurora::ErrorCode::CompressionDataCorrupt);
 }
@@ -248,7 +532,7 @@ AURORA_TEST_CASE(decompress_truncated_stream_reports_corrupt) {
 AURORA_TEST_CASE(decompress_corrupted_payload_reports_corrupt) {
     auto broken = AURORA_TEST_GZIP_BYTES;
     broken[20] = static_cast<std::uint8_t>(broken[20] ^ 0xFFU);
-    const auto out = aurora::decompress(aurora::CompressionFormat::Gzip, fixture_span(broken));
+    const auto out = aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_GZIP, fixture_span(broken));
     AURORA_TEST_REQUIRE_FALSE(bool(out));
     AURORA_TEST_CHECK_EQ(out.error().code_enum, aurora::ErrorCode::CompressionDataCorrupt);
 }
@@ -257,7 +541,7 @@ AURORA_TEST_CASE(decompress_corrupted_payload_reports_corrupt) {
 // 半条流同样没有语义。
 AURORA_TEST_CASE(decompress_over_max_output_bytes_reports_too_large) {
     const auto expected_size = static_cast<std::uint64_t>(AURORA_TEST_PAYLOAD.size());
-    const auto out = aurora::decompress(aurora::CompressionFormat::Gzip, fixture_span(AURORA_TEST_GZIP_BYTES),
+    const auto out = aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_GZIP, fixture_span(AURORA_TEST_GZIP_BYTES),
                                         {.max_output_bytes = expected_size - 1U});
     AURORA_TEST_REQUIRE_FALSE(bool(out));
     AURORA_TEST_CHECK_EQ(out.error().code_enum, aurora::ErrorCode::CompressionOutputTooLarge);
@@ -266,7 +550,7 @@ AURORA_TEST_CASE(decompress_over_max_output_bytes_reports_too_large) {
 // 上限恰好等于产物大小时必须成功：边界取「大于即拒」，不是「等于也拒」。
 AURORA_TEST_CASE(decompress_within_max_output_bytes_succeeds) {
     const auto expected_size = static_cast<std::uint64_t>(AURORA_TEST_PAYLOAD.size());
-    const auto out = aurora::decompress(aurora::CompressionFormat::Gzip, fixture_span(AURORA_TEST_GZIP_BYTES),
+    const auto out = aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_GZIP, fixture_span(AURORA_TEST_GZIP_BYTES),
                                         {.max_output_bytes = expected_size});
     AURORA_TEST_REQUIRE(bool(out));
     AURORA_TEST_CHECK_EQ(out.value(), expected_payload());
@@ -280,17 +564,17 @@ AURORA_TEST_CASE(streaming_push_finish_matches_one_shot_across_chunks) {
     // 三格式大载荷（265000 字节产物，远超 64 KiB 暂存块 ⇒ 必跨轮）：wuffs io_transformer
     // 是可恢复协程，跨轮驱动曾因写位置回退爆过伪 `#deflate: bad distance`（小载荷单轮完成
     // 不触发），故三格式各跑一遍「一次性 vs 逐字节流式」对拍。
-    const std::pair<aurora::CompressionFormat, std::span<const std::uint8_t>> cases[] = {
-        {aurora::CompressionFormat::Gzip, AURORA_TEST_GZIP_LARGE_BYTES},
-        {aurora::CompressionFormat::Zlib, AURORA_TEST_ZLIB_LARGE_BYTES},
-        {aurora::CompressionFormat::Deflate, AURORA_TEST_DEFLATE_LARGE_BYTES},
+    const std::pair<std::string_view, std::span<const std::uint8_t>> cases[] = {
+        {aurora::AURORA_COMPRESS_FORMAT_GZIP, AURORA_TEST_GZIP_LARGE_BYTES},
+        {aurora::AURORA_COMPRESS_FORMAT_ZLIB, AURORA_TEST_ZLIB_LARGE_BYTES},
+        {aurora::AURORA_COMPRESS_FORMAT_DEFLATE, AURORA_TEST_DEFLATE_LARGE_BYTES},
     };
     for (const auto &[format, fixture] : cases) {
         const auto one_shot = aurora::decompress(format, fixture_span(fixture));
         AURORA_TEST_REQUIRE(bool(one_shot));
         AURORA_TEST_CHECK_EQ(one_shot.value(), expected);
 
-        auto created = aurora::Decompressor::create(format);
+        auto created = aurora::create_decompressor(format);
         AURORA_TEST_REQUIRE(bool(created));
         auto &decoder = created.value();
 
@@ -301,10 +585,10 @@ AURORA_TEST_CASE(streaming_push_finish_matches_one_shot_across_chunks) {
             streamed.insert(streamed.end(), chunk.begin(), chunk.end());
         };
         for (std::size_t i = 0; i < fixture.size(); ++i) {
-            const auto pushed = decoder.push(fixture_span(fixture).subspan(i, 1), collect);
+            const auto pushed = decoder->push(fixture_span(fixture).subspan(i, 1), collect);
             AURORA_TEST_REQUIRE(bool(pushed));
         }
-        const auto finished = decoder.finish(collect);
+        const auto finished = decoder->finish(collect);
         AURORA_TEST_REQUIRE(bool(finished));
 
         AURORA_TEST_CHECK_EQ(streamed, expected);
@@ -317,58 +601,58 @@ AURORA_TEST_CASE(streaming_push_finish_matches_one_shot_across_chunks) {
 AURORA_TEST_CASE(trailing_bytes_after_stream_end_report_corrupt) {
     std::vector<std::uint8_t> with_tail(AURORA_TEST_GZIP_BYTES.begin(), AURORA_TEST_GZIP_BYTES.end());
     with_tail.push_back('\0');
-    const auto out = aurora::decompress(aurora::CompressionFormat::Gzip, fixture_span(with_tail));
+    const auto out = aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_GZIP, fixture_span(with_tail));
     AURORA_TEST_REQUIRE_FALSE(bool(out));
     AURORA_TEST_CHECK_EQ(out.error().code_enum, aurora::ErrorCode::CompressionDataCorrupt);
 }
 
 // finish 之后再 push 同样越界：流已终结，解码器不再接受任何输入。
 AURORA_TEST_CASE(push_after_finish_reports_corrupt) {
-    auto created = aurora::Decompressor::create(aurora::CompressionFormat::Gzip);
+    auto created = aurora::create_decompressor(aurora::AURORA_COMPRESS_FORMAT_GZIP);
     AURORA_TEST_REQUIRE(bool(created));
     auto &decoder = created.value();
     const auto collect = [](std::span<const char>) {};
-    AURORA_TEST_REQUIRE(bool(decoder.push(fixture_span(AURORA_TEST_GZIP_BYTES), collect)));
-    AURORA_TEST_REQUIRE(bool(decoder.finish(collect)));
-    const auto late = decoder.push(fixture_span(AURORA_TEST_GZIP_BYTES), collect);
+    AURORA_TEST_REQUIRE(bool(decoder->push(fixture_span(AURORA_TEST_GZIP_BYTES), collect)));
+    AURORA_TEST_REQUIRE(bool(decoder->finish(collect)));
+    const auto late = decoder->push(fixture_span(AURORA_TEST_GZIP_BYTES), collect);
     AURORA_TEST_REQUIRE_FALSE(bool(late));
     AURORA_TEST_CHECK_EQ(late.error().code_enum, aurora::ErrorCode::CompressionDataCorrupt);
 }
 
 // finish 幂等：已完整终结的流再 finish 一次是空操作，不二次报错也不二次排产物。
 AURORA_TEST_CASE(finish_is_idempotent_after_complete) {
-    auto created = aurora::Decompressor::create(aurora::CompressionFormat::Gzip);
+    auto created = aurora::create_decompressor(aurora::AURORA_COMPRESS_FORMAT_GZIP);
     AURORA_TEST_REQUIRE(bool(created));
     auto &decoder = created.value();
     std::size_t sink_calls = 0;
     const auto collect = [&sink_calls](std::span<const char>) { ++sink_calls; };
-    AURORA_TEST_REQUIRE(bool(decoder.push(fixture_span(AURORA_TEST_GZIP_BYTES), collect)));
-    AURORA_TEST_REQUIRE(bool(decoder.finish(collect)));
+    AURORA_TEST_REQUIRE(bool(decoder->push(fixture_span(AURORA_TEST_GZIP_BYTES), collect)));
+    AURORA_TEST_REQUIRE(bool(decoder->finish(collect)));
     const std::size_t calls_after_first = sink_calls;
-    AURORA_TEST_REQUIRE(bool(decoder.finish(collect)));
+    AURORA_TEST_REQUIRE(bool(decoder->finish(collect)));
     AURORA_TEST_CHECK_EQ(sink_calls, calls_after_first);
 }
 
-// 移动后使用源实例必须显式失败：unique_ptr 被掏空后任何使用都是逻辑错误，
-// 不能静默按空解码器继续。
-AURORA_TEST_CASE(moved_from_decompressor_reports_corrupt) {
-    auto created = aurora::Decompressor::create(aurora::CompressionFormat::Gzip);
-    AURORA_TEST_REQUIRE(bool(created));
-    auto moved_to = std::move(created.value());
-    const auto collect = [](std::span<const char>) {};
-    const auto late = created.value().push(fixture_span(AURORA_TEST_GZIP_BYTES), collect);
-    AURORA_TEST_REQUIRE_FALSE(bool(late));
-    AURORA_TEST_CHECK_EQ(late.error().code_enum, aurora::ErrorCode::CompressionDataCorrupt);
-    // 承接者功能完好：未喂过任何输入即 finish，如实报「流未完整终结」而不是假装成功。
-    const auto finished = moved_to.finish(collect);
-    AURORA_TEST_REQUIRE_FALSE(bool(finished));
-    AURORA_TEST_CHECK_EQ(finished.error().code_enum, aurora::ErrorCode::CompressionDataCorrupt);
+// 覆盖与注销回落：桩覆盖 gzip 槽后同一入口改走桩（产物是标记串而非真实解压），注销后内置实现
+// 逐字节恢复正确——证明注销回落内置而非留空（宏开的构建独有判据；宏关的腿同名 SKIP）。
+AURORA_TEST_CASE(override_builtin_slot_and_unregister_restores) {
+    register_codec(aurora::AURORA_COMPRESS_FORMAT_GZIP,
+                   std::make_shared<StubCodec>("override-codec", AURORA_TEST_STUB_PAYLOAD, false, true));
+    const auto overridden =
+        aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_GZIP, fixture_span(AURORA_TEST_GZIP_BYTES));
+    AURORA_TEST_REQUIRE(bool(overridden));
+    const std::vector<char> stub_payload{AURORA_TEST_STUB_PAYLOAD.begin(), AURORA_TEST_STUB_PAYLOAD.end()};
+    AURORA_TEST_CHECK(overridden.value() == stub_payload);
+    unregister_codec(aurora::AURORA_COMPRESS_FORMAT_GZIP);
+    const auto restored = aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_GZIP, fixture_span(AURORA_TEST_GZIP_BYTES));
+    AURORA_TEST_REQUIRE(bool(restored));
+    AURORA_TEST_CHECK(restored.value() == expected_payload());
 }
 
 // compress 只设计不实现：三个格式一律 compression-unavailable，detail 点明格式。
 AURORA_TEST_CASE(compress_reports_unavailable_for_every_format) {
-    for (const auto format :
-         {aurora::CompressionFormat::Gzip, aurora::CompressionFormat::Zlib, aurora::CompressionFormat::Deflate}) {
+    for (const auto format : {aurora::AURORA_COMPRESS_FORMAT_GZIP, aurora::AURORA_COMPRESS_FORMAT_ZLIB,
+                              aurora::AURORA_COMPRESS_FORMAT_DEFLATE}) {
         const auto out = aurora::compress(format, fixture_span(AURORA_TEST_GZIP_BYTES));
         AURORA_TEST_REQUIRE_FALSE(bool(out));
         AURORA_TEST_CHECK_EQ(out.error().code_enum, aurora::ErrorCode::CompressionUnavailable);
@@ -377,16 +661,12 @@ AURORA_TEST_CASE(compress_reports_unavailable_for_every_format) {
 
 // 空输入不是合法空流：gzip 至少要有头。落 corrupt 而不是交回空产物。
 AURORA_TEST_CASE(decompress_empty_input_reports_corrupt) {
-    const auto out = aurora::decompress(aurora::CompressionFormat::Gzip, std::span<const char>{});
+    const auto out = aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_GZIP, std::span<const char>{});
     AURORA_TEST_REQUIRE_FALSE(bool(out));
     AURORA_TEST_CHECK_EQ(out.error().code_enum, aurora::ErrorCode::CompressionDataCorrupt);
 }
 
-}  // namespace aurora::test_cases::utest_core_compression
-
-#else  // AURORA_ENABLE_COMPRESSION 未开启：用例恒注册，体内 SKIP（TEST-R6 纪律）。
-
-namespace aurora::test_cases::utest_core_compression {
+#else  // AURORA_ENABLE_COMPRESSION 未开启：内置 golden 用例恒注册、体内 SKIP（TEST-R6 纪律）。
 
 AURORA_TEST_CASE(decompress_three_formats_roundtrip_to_payload) {
     AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
@@ -415,7 +695,7 @@ AURORA_TEST_CASE(push_after_finish_reports_corrupt) {
 AURORA_TEST_CASE(finish_is_idempotent_after_complete) {
     AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
 }
-AURORA_TEST_CASE(moved_from_decompressor_reports_corrupt) {
+AURORA_TEST_CASE(override_builtin_slot_and_unregister_restores) {
     AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
 }
 AURORA_TEST_CASE(compress_reports_unavailable_for_every_format) {
@@ -425,6 +705,6 @@ AURORA_TEST_CASE(decompress_empty_input_reports_corrupt) {
     AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
 }
 
-}  // namespace aurora::test_cases::utest_core_compression
-
 #endif  // AURORA_ENABLE_COMPRESSION
+
+}  // namespace aurora::test_cases::utest_core_compression

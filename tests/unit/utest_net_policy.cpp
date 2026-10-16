@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/policy.h + src/aurora/net/policy.cpp
-/// 测试说明: 声明式安全策略的三维判据回归（CHG-018 §12 策略件）。全用例为纯判定逻辑，不开 socket、
+/// 测试说明: 声明式安全策略的三维判据回归。全用例为纯判定逻辑，不开 socket、
 ///           不查解析器，故三平台与 wasm 腿行为一致、无需 `AURORA_TEST_SKIP`。覆盖四件事：
 ///           - **明文主机清单的两种写法**：不带前导点＝注册名全等，带一枚前导点＝该域及其任意深层子域；
 ///             这一维与 `NoProxy` 的域名规则**刻意不同**（白名单里 `example.com` 静默放行 `sub.example.com`

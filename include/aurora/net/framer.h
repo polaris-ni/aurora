@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief 字节流 → 完整消息的分帧器（CHG-018 传输切片：SSE 行解析、本机 IPC 协议、远端终端协议共用）。
+/// @brief 字节流 → 完整消息的分帧器。
 /// @file net/framer.h
 ///
 /// `StreamTransport` 交付的是「这次读到了若干字节」，而绝大多数协议的语义单位是一条消息。本类型把那串

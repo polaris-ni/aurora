@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: src/aurora/net/detail/http_retry.h + src/aurora/net/detail/http_retry.cpp
-/// 测试说明: HTTP 重试判定与退避算式的逐值回归（CHG-018 §12「重试策略」的算式侧）。这套判据刻意从发起侧
+/// 测试说明: HTTP 重试判定与退避算式的逐值回归。这套判据刻意从发起侧
 ///           的协程体里拆出来，就是为了让每一条都能在零 socket、零时钟推进的场合断言：策略形态闸只挡越界
 ///           字段并点名是哪一枚（`base` 为负 / `max_backoff` 小于 `base` / `jitter` 不在 `[0,1]`，NaN 也算
 ///           越界，而 `budget` 非正值与不设等价故不属越界）；幂等白名单按 `RFC 9110` 的方法律取死集合

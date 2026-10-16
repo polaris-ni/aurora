@@ -366,7 +366,7 @@ endif ()
 # ---- 后端剪裁开关 + 优化宏（作用于上方 aurora 目标） ----
 include(AuroraBackends)
 
-# ---- TLS 后端装配（系统栈 / provider 探测；CHG-018 §5 平台矩阵）----
+# ---- TLS 后端装配（系统栈 / provider 探测）----
 # 必须在 include(AuroraFeatures) 之后：本模块经 aurora_define_feature 注入后端宏，
 # 且对 aurora 目标做 target_link_libraries。
 include(AuroraNetTls)

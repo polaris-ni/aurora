@@ -8,12 +8,12 @@
 # 本开关」并集——两个消费者（图片编解码与压缩能力）共享同一份编译产物，
 # 避免同开时双份符号链接冲突。
 #
-# AURORA_ENABLE_COMPRESSION 默认 ON：解压是 HTTP 语义完整性件（提案 §12
-# 「缺这些即语义不完整」），且无替换路径（不同于可缺席的替换型后端
-# SQLite / 图片编解码 / 音频设备），默认构建即提供；关时 compression.cpp
-# 全格式落 compression-unavailable、HTTP 侧同步不发 Accept-Encoding
-# （诚实降级，对齐音频 silent-mode 先例）。
-# PRIVATE 注入且不导出：能力属库内部，消费者与安装后口径一致（无该宏）。
+# AURORA_ENABLE_COMPRESSION 默认 ON：内置 wuffs 解码器是 HTTP 语义完整性件（提案 §12
+# 「缺这些即语义不完整」），默认构建即提供；宏只门控内置实现的**注册**——编解码器抽象、
+# 注册表与自由函数恒编入，关闭宏的构建里注册自定义编解码器即可用（注入路径恒在）。
+# 内置缺席且无覆盖注册时，core 各入口落 compression-unavailable、HTTP 侧同步不发
+# Accept-Encoding（诚实降级，对齐音频 silent-mode 先例）。
+# PRIVATE 注入且不导出：内置实现属库内部，消费者与安装后口径一致（无该宏）。
 # ---------------------------------------------------------------------------
 
 option(AURORA_ENABLE_COMPRESSION "Build core compression capability (gzip/zlib/deflate decompression via wuffs)" ON)

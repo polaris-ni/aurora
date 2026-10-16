@@ -1,4 +1,4 @@
-// Aurora net — TLS 会话状态机（CHG-018 TLS 切片：与平台后端无关的那一半）。
+// Aurora net — TLS 会话状态机。
 //
 // 本文件只做三件事：把 `detail::TlsBackend` 的字节推进接到 `StreamTransport` 的异步读写上、维护
 // 「已解密待交付」与「待登记读请求」两条队列、保证每一条用户回调恰一次抵达（含取消、底层失败与

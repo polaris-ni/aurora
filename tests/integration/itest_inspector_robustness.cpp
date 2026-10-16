@@ -18,7 +18,7 @@
 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
 
-#include "aurora/aurora.h"  // 伞头自带 aurora::net::blocking（同步阻塞传输面，CHG-006 建立、CHG-018 §4 归位）
+#include "aurora/aurora.h"
 #include "aurora/inspector/inspector_server.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
