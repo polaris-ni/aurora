@@ -17,14 +17,14 @@
 
 #ifdef AURORA_PLATFORM_WASM
 
+#include <emscripten.h>
+
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <unordered_map>
 #include <utility>
-
-#include <emscripten.h>
 
 #include "aurora/core/result.h"
 
@@ -237,7 +237,8 @@ auto fetch_exchange(const FetchSpec &spec, const Cancellation &token) -> Callbac
         // NOLINTNEXTLINE(bugprone-exception-escape)
         [&spec, token_handle = token](CallbackAwaiter<FetchOutcome>::Sink on_done) mutable -> void {
             if (token_handle.is_cancelled()) {
-                on_done(Result<FetchOutcome>{make_error(ErrorCode::NetCancelled, "the exchange was already cancelled")});
+                on_done(
+                    Result<FetchOutcome>{make_error(ErrorCode::NetCancelled, "the exchange was already cancelled")});
                 return;
             }
             const int id = next_exchange_id();
@@ -268,8 +269,7 @@ auto fetch_exchange(const FetchSpec &spec, const Cancellation &token) -> Callbac
                     std::memcpy(reinterpret_cast<void *>(body_ptr), spec.body.data(), spec.body.size());
                 }
             }
-            if (url_ptr == 0 || method_ptr == 0 || headers_ptr == 0 ||
-                (!spec.body.empty() && body_ptr == 0)) {
+            if (url_ptr == 0 || method_ptr == 0 || headers_ptr == 0 || (!spec.body.empty() && body_ptr == 0)) {
                 // 分配失败：登记即撤、钩子即撤，以运行时不可用收场（不静默假装发过）。
                 auto failed = std::move(pending_table()[id].settle);
                 pending_table().erase(id);
@@ -307,11 +307,10 @@ auto fetch_leg_active() -> bool { return false; }
 auto fetch_exchange(const FetchSpec & /*spec*/, const Cancellation & /*token*/) -> CallbackAwaiter<FetchOutcome> {
     // native 腿的占位形态：调用方以 `fetch_leg_active()` 分岔，本函数永不应被调用；
     // 保留一枚可编译的落点，让 fetch 腿的代码在 native 构建里也参与编译（防锈）。
-    return CallbackAwaiter<FetchOutcome>(
-        [](const CallbackAwaiter<FetchOutcome>::Sink &on_done) -> void {
-            on_done(Result<FetchOutcome>{
-                make_error(ErrorCode::NetPlatformUnavailable, "fetch exchange is only available on the wasm leg")});
-        });
+    return CallbackAwaiter<FetchOutcome>([](const CallbackAwaiter<FetchOutcome>::Sink &on_done) -> void {
+        on_done(Result<FetchOutcome>{
+            make_error(ErrorCode::NetPlatformUnavailable, "fetch exchange is only available on the wasm leg")});
+    });
 }
 
 }  // namespace aurora::net::detail

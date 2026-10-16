@@ -183,8 +183,7 @@ auto start_phase_real() -> void {
     start_case("real_post_body_roundtrip", poster,
                aurora::net::http::Request::post(probe_url("/echo")).body(std::vector<char>{'p', 'i', 'n', 'g'}),
                [](const Result<aurora::net::http::Response> &outcome, CaseResult &entry) -> void {
-                   require(entry, outcome.ok() && body_text(outcome) == "ping",
-                           "echo mismatch: " + body_text(outcome));
+                   require(entry, outcome.ok() && body_text(outcome) == "ping", "echo mismatch: " + body_text(outcome));
                });
 
     // 自定义请求头抵达服务端。
@@ -200,8 +199,7 @@ auto start_phase_real() -> void {
     // 重定向链：/hop1 → 302 → /next → 200 landed。
     auto follower = std::make_shared<aurora::net::http::Client>();
     allow_loopback(*follower);
-    start_case("real_redirect_chain_followed_by_hand", follower,
-               aurora::net::http::Request::get(probe_url("/hop1")),
+    start_case("real_redirect_chain_followed_by_hand", follower, aurora::net::http::Request::get(probe_url("/hop1")),
                [](const Result<aurora::net::http::Response> &outcome, CaseResult &entry) -> void {
                    require(entry, outcome.ok() && outcome.value().status() == 200 && body_text(outcome) == "landed",
                            "final landing mismatch: " + body_text(outcome));
@@ -218,12 +216,13 @@ auto start_phase_real() -> void {
         const auto &outcome = wrapped.value();  // 钩子载荷剥一层：内层才是 Result<Response>
         require(probe_state().results[slot], outcome.ok() && outcome.value().status() == 200, "set-cookie hop failed");
         auto second = session->client().send(aurora::net::http::Request::get(probe_url("/read-cookie")));
-        second.on_done([slot, session](const Result<Result<aurora::net::http::Response>> &inner_wrapped) mutable -> void {
-            const auto text = body_text(inner_wrapped.value());
-            require(probe_state().results[slot], inner_wrapped.ok() && text.find("probe=1") != std::string::npos,
-                    "cookie did not come back: " + text);
-            case_count_down();
-        });
+        second.on_done(
+            [slot, session](const Result<Result<aurora::net::http::Response>> &inner_wrapped) mutable -> void {
+                const auto text = body_text(inner_wrapped.value());
+                require(probe_state().results[slot], inner_wrapped.ok() && text.find("probe=1") != std::string::npos,
+                        "cookie did not come back: " + text);
+                case_count_down();
+            });
     });
 }
 
@@ -317,19 +316,20 @@ auto start_phase_two() -> void {
         allow_loopback(*client);
         auto source = std::make_shared<FixedSource>();
         auto task = client->send(aurora::net::http::Request::post("https://mock.test/upload").body(*source));
-        task.on_done([slot, client, source](
-                         const Result<Result<aurora::net::http::Response>> &wrapped) mutable -> void {
-            require(probe_state().results[slot], !wrapped.ok() || !wrapped.value().ok(),
-                    "unexpected success on the streaming-body request");
-            if (!wrapped.ok()) {
-                require(probe_state().results[slot], false, wrapped.error().message);
-            } else {
-                const auto &outcome = wrapped.value();
-                require(probe_state().results[slot], !outcome.ok() && outcome.error().code_enum == ErrorCode::NetPlatformUnavailable,
-                        outcome.ok() ? "unexpected success" : outcome.error().message);
-            }
-            case_count_down();
-        });
+        task.on_done(
+            [slot, client, source](const Result<Result<aurora::net::http::Response>> &wrapped) mutable -> void {
+                require(probe_state().results[slot], !wrapped.ok() || !wrapped.value().ok(),
+                        "unexpected success on the streaming-body request");
+                if (!wrapped.ok()) {
+                    require(probe_state().results[slot], false, wrapped.error().message);
+                } else {
+                    const auto &outcome = wrapped.value();
+                    require(probe_state().results[slot],
+                            !outcome.ok() && outcome.error().code_enum == ErrorCode::NetPlatformUnavailable,
+                            outcome.ok() ? "unexpected success" : outcome.error().message);
+                }
+                case_count_down();
+            });
     }
 
     // 流式接收按能力位拒（open_stream 的既有闸；判据同步落账，宿主不得被调过一次）。
@@ -339,14 +339,16 @@ auto start_phase_two() -> void {
         allow_loopback(*client);
         auto sink = std::make_shared<CountingSink>();
         auto task = client->open_stream(aurora::net::http::Request::get("https://mock.test/stream"), *sink);
-        task.on_done([slot, client, sink](const Result<Result<aurora::net::http::StreamOutcome>> &wrapped) mutable -> void {
+        task.on_done([slot, client,
+                      sink](const Result<Result<aurora::net::http::StreamOutcome>> &wrapped) mutable -> void {
             require(probe_state().results[slot], !wrapped.ok() || !wrapped.value().ok(),
                     "unexpected success on the streaming response");
             if (!wrapped.ok()) {
                 require(probe_state().results[slot], false, wrapped.error().message);
             } else {
                 const auto &outcome = wrapped.value();
-                require(probe_state().results[slot], !outcome.ok() && outcome.error().code_enum == ErrorCode::NetPlatformUnavailable,
+                require(probe_state().results[slot],
+                        !outcome.ok() && outcome.error().code_enum == ErrorCode::NetPlatformUnavailable,
                         outcome.ok() ? "unexpected success" : outcome.error().message);
             }
             require(probe_state().results[slot], sink->entries == 0, "the sink was invoked before the capability gate");
@@ -365,7 +367,8 @@ auto start_phase_two() -> void {
                 require(probe_state().results[slot], false, wrapped.error().message);
             } else {
                 const auto &outcome = wrapped.value();
-                require(probe_state().results[slot], !outcome.ok() && outcome.error().code_enum == ErrorCode::NetPolicyViolated,
+                require(probe_state().results[slot],
+                        !outcome.ok() && outcome.error().code_enum == ErrorCode::NetPolicyViolated,
                         outcome.ok() ? "unexpected success" : outcome.error().message);
             }
             case_count_down();
@@ -449,7 +452,8 @@ EM_JS(void, probe_defer_js, (std::intptr_t fn_ptr), {
 
 // @brief 推迟续体的回收口：调用并释放（EM_JS 只传地址，所有权归本函数）。
 extern "C" EMSCRIPTEN_KEEPALIVE void aurora_probe_deferred_run(std::intptr_t fn_ptr) {
-    auto *holder = reinterpret_cast<std::function<void()> *>(fn_ptr);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast): 跨语言只传地址
+    auto *holder = reinterpret_cast<std::function<void()> *>(
+        fn_ptr);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast): 跨语言只传地址
     (*holder)();
     delete holder;
 }
@@ -469,7 +473,8 @@ EMSCRIPTEN_KEEPALIVE void aurora_fetch_probe_run(int port) {
     probe_state().port = port;
     aurora::detail::main_poster() = [](std::function<void()> fn) -> void {
         auto *holder = new std::function<void()>(std::move(fn));
-        probe_defer_js(reinterpret_cast<std::intptr_t>(holder));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast): 跨语言只传地址
+        probe_defer_js(reinterpret_cast<std::intptr_t>(
+            holder));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast): 跨语言只传地址
     };
     start_phase_real();
 }

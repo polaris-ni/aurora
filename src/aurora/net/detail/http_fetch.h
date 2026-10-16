@@ -79,7 +79,6 @@ struct FetchOutcome {
 /// @param spec 交换规格；引用须活过整个挂起期（协程帧上的局部对象正满足这条）。
 /// @param token 交换的取消令牌。
 /// @return 可等待体，求得一次结局（`CallbackAwaiter<T>` 口径：co_await 求得 `Result<T>`）。
-[[nodiscard]] auto fetch_exchange(const FetchSpec &spec, const Cancellation &token)
-    -> CallbackAwaiter<FetchOutcome>;
+[[nodiscard]] auto fetch_exchange(const FetchSpec &spec, const Cancellation &token) -> CallbackAwaiter<FetchOutcome>;
 
 }  // namespace aurora::net::detail

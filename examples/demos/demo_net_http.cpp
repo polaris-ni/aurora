@@ -96,16 +96,48 @@ class Stub final {
         }
     }
 
+    /// @brief 早退前的优雅收摊：把客户端可能已压进缓冲的字节排空一轮再返回。
+    ///
+    /// 直接析构 close 时，套接口缓冲里若有未读数据，Windows 会以 RST 代 FIN——客户端那侧的失败形态会从
+    /// 干净的 EOF（`http-protocol-error - peer closed before the body was complete`）被扭曲成
+    /// `net-recv-failed (os_error=10053)`，手工判据就认不出「桩主动收摊」这一支了。
+    /// @param socket 本条连接（返回后由调用方的局部析构 close）。
+    auto drain_then_drop(aurora::net::blocking::StreamSocket &socket) -> void {
+        (void)socket.set_io_timeout(std::chrono::milliseconds{1000});
+        std::vector<char> buffer(2048);
+        for (;;) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;  // 客户端不再写（超时）或对端也收摊：缓冲已空，close 走 FIN
+            }
+        }
+    }
+
     /// @brief 服务一条连接：读到请求后先探一次「客户端还在不在」，再决定供答还是直接收摊。
     /// @param socket 本条连接。
     auto answer(aurora::net::blocking::StreamSocket &socket) -> void {
         AURORA_LOG_INFO("net_demo", "accepted a connection");
         std::vector<char> buffer(2048);
-        (void)socket.set_io_timeout(std::chrono::milliseconds{500});
-        const auto read = socket.read_some(std::span<char>{buffer});
-        if (!read || read.value() == 0) {
-            AURORA_LOG_INFO("net_demo", "request vanished before the answer (that exchange was cancelled)");
-            return;
+        // 请求头的写出经宿主帧循环（回投节奏实测可到数秒）：第一读的窗口放宽到 5 s，且**读超时不算收摊**——
+        // 客户端 reload() 取消会让这里立刻读到真实的收摊（0 字节或 RST），帧循环慢只表现为「暂时还没来」，
+        // 两种事实混成一条日志会让取消判据认不出真收摊。只有真错误（连接已亡）或对端 FIN 才退出本环。
+        (void)socket.set_io_timeout(std::chrono::milliseconds{5000});
+        for (;;) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read) {
+                if (read.error().code_enum == aurora::ErrorCode::NetRecvTimeout) {
+                    continue;  // 帧循环还没把请求送出来：接着等（进程退出路径由 stop() 的 close 兜底打断）
+                }
+                AURORA_LOG_INFO("net_demo", "request vanished before the answer (that exchange was cancelled)");
+                drain_then_drop(socket);
+                return;
+            }
+            if (read.value() == 0) {
+                AURORA_LOG_INFO("net_demo", "request vanished before the answer (that exchange was cancelled)");
+                drain_then_drop(socket);
+                return;
+            }
+            break;  // 请求头已到：本桩不解析内容，进入探针读
         }
         // 这枚探针是整个 demo 的关键一步：写出应答之前再读一次，把「客户端还在等」与「客户端已经收摊」分成两种
         // 线上事实——还在等的只会让这次读超时，被取消的那一条交出一次真实的读端收摊（0 字节）。停顿因此不是
@@ -116,10 +148,12 @@ class Stub final {
             probe ? probe.value() > 0 : probe.error().code_enum == aurora::ErrorCode::NetRecvTimeout;
         if (!still_waiting) {
             AURORA_LOG_INFO("net_demo", "peer vanished before the answer (that exchange was cancelled)");
+            drain_then_drop(socket);
             return;
         }
         if (!serving()) {
             AURORA_LOG_INFO("net_demo", "serving halted: connection closed without an answer");
+            drain_then_drop(socket);
             return;  // 不给应答直接收摊：客户端读到 EOF，传输失败进 Failed 分支
         }
         AURORA_LOG_INFO("net_demo", "answered, closing the connection");

@@ -6,11 +6,10 @@
 /// Jar 往返）由 node 真跑探针 `tools/verify/wasm_fetch_live_probe.cpp`（`wasm` 预设构建 + node ≥ 18
 /// 运行）承担——本套件在事件循环形态下无法等待 promise 结算，故不在此谎报运行判据。
 
-#include "aurora/core/platform.h"
-
 #include <chrono>
 
 #include "aurora/core/error_codes.h"
+#include "aurora/core/platform.h"
 #include "aurora/core/result.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/detail/http_fetch.h"
@@ -24,10 +23,10 @@ using aurora::CoroTask;
 using aurora::ErrorCode;
 using aurora::Result;
 using aurora::net::Cancellation;
-using aurora::net::detail::FetchOutcome;
-using aurora::net::detail::FetchSpec;
 using aurora::net::detail::fetch_exchange;
 using aurora::net::detail::fetch_leg_active;
+using aurora::net::detail::FetchOutcome;
+using aurora::net::detail::FetchSpec;
 
 /// @brief 驱动一次 `fetch_exchange`（`CallbackAwaiter` 须协程帧；native 存根同步结算，立即收尾）。
 /// @param spec 交换规格（native 存根不消费）。
