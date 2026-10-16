@@ -716,7 +716,11 @@ auto SchannelBackend::create(const TlsContext &context, std::string_view server_
     }
 
     TimeStamp expiry{};
-    const auto status = ::AcquireCredentialsHandleW(nullptr, UNISP_NAME_W, SECPKG_CRED_OUTBOUND, nullptr, &credentials,
+    // `AcquireCredentialsHandleW` 的 pszPrincipal 形参历史上签成 LPWSTR（非常量），而 UNISP_NAME_W
+    // 是字面量：该形参只读（凭据包名，系统不经它回写），复制一份可写缓冲喂给 API——MSVC 的
+    // C2664 正是卡在字面量到非常量指针的转换上，去常量则把「只读」这一点藏起来。
+    wchar_t principal[] = UNISP_NAME_W;
+    const auto status = ::AcquireCredentialsHandleW(nullptr, principal, SECPKG_CRED_OUTBOUND, nullptr, &credentials,
                                                     nullptr, nullptr, &backend->credential_, &expiry);
     if (status != SEC_E_OK) {
         return status_error(static_cast<LONG>(status), "tls credential");

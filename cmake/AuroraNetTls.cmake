@@ -136,9 +136,26 @@ else ()
     if (NOT TARGET aurora::net::tls)
         add_library(aurora::net::tls ${_aurora_tls_imported} IMPORTED GLOBAL)
     endif ()
-    set_target_properties(aurora::net::tls PROPERTIES
-                          IMPORTED_LOCATION "${_aurora_tls_ssl_lib}"
-                          INTERFACE_INCLUDE_DIRECTORIES "${_aurora_tls_prefix}/include")
+    if (_aurora_tls_linkage STREQUAL "shared" AND WIN32)
+        # Windows 共享腿的「链接面」与「运行面」是两枚文件：lib/ 下是导入库（.lib，链接器经它
+        # 找符号），bin/ 下是 DLL（运行期载入，vcpkg 名带版本后缀如 libssl-3-x64.dll）。MSVC 对
+        # 共享导入目标强制要求 IMPORTED_IMPLIB，缺失即 generate 期报「IMPORTED_IMPLIB not set」；
+        # 而 find_library 的 Windows 后缀表（.dll.lib/.lib/.a）只可能命中 .lib，正好当 implib。
+        # DLL 按 glob 补登 IMPORTED_LOCATION；glob 落空（布局异常）时只留 implib 同样能生成，
+        # 且 Windows 共享腿的消费者不运行（见 CI 口径），链接面齐备即足。
+        file(GLOB _aurora_tls_ssl_dll "${_aurora_tls_prefix}/bin/*ssl*.dll")
+        set_target_properties(aurora::net::tls PROPERTIES
+                              IMPORTED_IMPLIB "${_aurora_tls_ssl_lib}"
+                              INTERFACE_INCLUDE_DIRECTORIES "${_aurora_tls_prefix}/include")
+        if (_aurora_tls_ssl_dll)
+            list(GET _aurora_tls_ssl_dll 0 _aurora_tls_ssl_dll_first)
+            set_target_properties(aurora::net::tls PROPERTIES IMPORTED_LOCATION "${_aurora_tls_ssl_dll_first}")
+        endif ()
+    else ()
+        set_target_properties(aurora::net::tls PROPERTIES
+                              IMPORTED_LOCATION "${_aurora_tls_ssl_lib}"
+                              INTERFACE_INCLUDE_DIRECTORIES "${_aurora_tls_prefix}/include")
+    endif ()
     # 其余库经 INTERFACE_LINK_LIBRARIES 传导（IMPORTED_LOCATION 只放首枚，避免同一 lib 重复出现在链接行）。
     # 顺序按 GNU ld 的左到右求解规则排：被依赖者在后。mbedTLS 三枚archive的依赖方向是
     # mbedtls → mbedx509 → mbedcrypto，故 x509 必须排在 crypto **之前**，否则静态链接会把

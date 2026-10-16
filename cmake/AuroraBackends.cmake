@@ -214,17 +214,27 @@ if (AURORA_BACKEND_GPU_WGPU)
         find_program(AURORA_CLANG_EXECUTABLE clang)
         if (AURORA_CLANG_EXECUTABLE)
             get_filename_component(_wgpu_libclang_dir "${AURORA_CLANG_EXECUTABLE}" DIRECTORY)
-        elseif (WIN32)
-            # 注册表键由 LLVM 官方安装器写入；ProgramFiles/ProgramW6432 双查覆盖 32 位 CMake
-            # 跑在 64 位系统时的变量差异。两者都是相对量，不含盘符。
-            foreach (_cand "[HKEY_LOCAL_MACHINE\\SOFTWARE\\LLVM\\LLVM;]"
-                    "$ENV{ProgramFiles}/LLVM/bin" "$ENV{ProgramW6432}/LLVM/bin")
-                if (_cand AND EXISTS "${_cand}/libclang.dll")
-                    set(_wgpu_libclang_dir "${_cand}")
-                    break ()
-                endif ()
-            endforeach ()
+            # clang 旁目录不一定带 libclang 共享库：Ubuntu 的 clang 驱动在 /usr/bin，而
+            # libclang 在 /usr/lib/llvm-*/lib（Windows 的 LLVM 发行则两者同在 bin/）。
+            # 探到即验货，无共享库时清空继续走下面的通用默认位，否则 bindgen 会在
+            # cargo 阶段才报「Unable to find libclang」，与 configure 的成功假象相悖。
+            file(GLOB _wgpu_clang_side_libs "${_wgpu_libclang_dir}/libclang*.so*"
+                    "${_wgpu_libclang_dir}/libclang*.dylib" "${_wgpu_libclang_dir}/libclang.dll")
+            if (NOT _wgpu_clang_side_libs)
+                set(_wgpu_libclang_dir "")
+            endif ()
         endif ()
+    endif ()
+    if (NOT _wgpu_libclang_dir AND WIN32)
+        # 注册表键由 LLVM 官方安装器写入；ProgramFiles/ProgramW6432 双查覆盖 32 位 CMake
+        # 跑在 64 位系统时的变量差异。两者都是相对量，不含盘符。
+        foreach (_cand "[HKEY_LOCAL_MACHINE\\SOFTWARE\\LLVM\\LLVM;]"
+                "$ENV{ProgramFiles}/LLVM/bin" "$ENV{ProgramW6432}/LLVM/bin")
+            if (_cand AND EXISTS "${_cand}/libclang.dll")
+                set(_wgpu_libclang_dir "${_cand}")
+                break ()
+            endif ()
+        endforeach ()
     endif ()
     if (NOT _wgpu_libclang_dir AND UNIX)
         # Ubuntu/Debian 的 libclang 实际文件名为 libclang-XX.so(.1)，dev 包装为
