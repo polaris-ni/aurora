@@ -61,7 +61,10 @@
 - 库定位只在 `<prefix>/lib` 及其 multiarch 子目录（`lib/<三元组>`，Debian 系的实际位置）查找，找不到对应库同样 configure 期硬失败；mbedTLS 额外要求 `mbedx509`（证书链解析在 TLS 记录层之外）。
 - 探测通过后生成导入目标 `aurora::net::tls`（本体 / 测试 / 工具共用同一份 include 与库路径）；`shared` 的运行期寻址交宿主部署负责，本模块不写 RPATH、不拷 DLL。
 - 仓库**不自带任何 TLS 源码**：`third_party/` 无新增、`THIRD_PARTY_LICENSES.md` 不变（许可证由 provider 提供方自负）、「断网可构建」不变。
-- CI 为此新增 `tls-providers` 作业（三枚矩阵项：Linux `static:/usr` 指向 mbedTLS、Windows `shared:` 指向作业自建 vcpkg 根的 OpenSSL、macOS 系统栈），保证两套 provider 适配与系统栈缺省装配都有真编译覆盖；作业清单见 `.github/workflows/ci.yml` 头注释第 3b 项。
+- ⚠️ **CI 不用 `/usr` 当 provider 安装根**：Debian / Ubuntu 的 `/usr` 同时挂着 openssl 与 mbedtls 两套头，多命中时按上条规则 OpenSSL 优先——把安装根写成 `/usr` 等价于永远选不中 mbedTLS，`tls_mbedtls.cpp` 这条编译面就悄悄消失。故流水线统一用 `.github/actions/setup-net-capability-flags` 搭一个只挂 mbedTLS 的安装根（`/opt/aurora-tls-mbedtls`：`include/mbedtls` 指向 `/usr/include/mbedtls`，`lib` 只放 `libmbedtls.a` / `libmbedx509.a` / `libmbedcrypto.a`），需要 OpenSSL 的一侧直接用 `shared:/usr` 或 vcpkg / homebrew 的安装根。
+- ⚠️ 同一个安装根里**头与库必须同源**：库定位是 `find_library(NAMES ssl mbedtls)`，把 `lib` 指到 `/usr/lib` 会让 OpenSSL 的 `libssl.so` 抢先命中 `ssl` 这个名字，于是「头推导出 `AURORA_NET_TLS_MBEDTLS`、却链上 OpenSSL 的库」，链接期报 `undefined reference to psa_generate_random`（实测于 WSL / Ubuntu 26.04）。这是 `AuroraNetTls.cmake` 侧「库名不随推导出的引擎走」的既有行为，任何自建安装根都得自己规避。加新 Linux 作业时必须走这个动作，不要自己拼 provider 值。
+- CI 为此新增 `tls-providers` 作业（四枚矩阵项：Linux 指向上述 mbedTLS 安装根的静态连法、Windows `shared:` 指向作业自建 vcpkg 根的 OpenSSL、macOS 不给 provider 走系统栈 `AURORA_NET_TLS_SECURE_TRANSPORT`、macOS `shared:` 指向 homebrew 的 OpenSSL keg-only 根），保证两套 provider 适配（各自覆盖静态与动态两种形态）与系统栈缺省装配都有真编译覆盖；作业清单见 `.github/workflows/ci.yml` 头注释第 3b 项。
+- 除本作业外，网络能力面还是**整条流水线的公共前缀**：`AURORA_BUILD_INSPECTOR_SERVER` 与 `AURORA_NET_TLS_PROVIDER`（Linux 侧）由 `.github/actions/setup-net-capability-flags` 复合动作统一装配，core / backends / toggles / asan / coverage / install-consumer / wasm 全部引用同一份串——两枚开关关的是**运行面**而非编译面（`utest_inspector_server` 整文件降级 SKIP、`utest_net_tls` 按 `capabilities().tls` 大半 SKIP），漏一个作业就少一处没有替补的覆盖。
 - **静态 mbedTLS 的归档次序由本模块负责**：链接面按 `mbedtls → mbedx509 → mbedcrypto` 给出（x509 必须排在 crypto **之前**，否则 GNU ld 的单遍扫描会把 x509 对 crypto 的引用留在已收档的 crypto 之后而未解析）。次序写在 `cmake/AuroraNetTls.cmake` 的导入目标里，使用方不需要在自己一侧再排一遍，也不需要 `--start-group` 一类的兜底。
 - **macOS 系统栈腿的版本口径**：`SecureTransport` 整族自 macOS 10.15 起弃用，该 TU 因此整段关闭 `-Wdeprecated-declarations`（只圈本文件，不外溢到其他源）；所选 API 组合把**运行期下限留在 macOS 10.14**（`SecTrustEvaluateWithError` 是其中下限最高的一枚，ALPN 两枚访问器自 10.13、取链访问器自 10.7）。本仓不设 `CMAKE_OSX_DEPLOYMENT_TARGET`，故这是「本库能在哪个版本上跑起来」的下限声明，不改变使用方自己的部署目标。
 
@@ -103,6 +106,8 @@ demo 不进默认构建（`EXCLUDE_FROM_ALL`）：日常 `cmake --build build` �
 | 平台限制 | 跨平台（Windows: `ws2_32` 随核心 `aurora` 目标 `PUBLIC` 传导，不再散挂 / POSIX: `pthread`） |
 | 产物 | `aurora_inspector_server` 静态库（`src/aurora/inspector/inspector_server.cpp`） |
 | 头文件 | `include/aurora/inspector/inspector_server.h` |
+
+开关关闭时 `tests/unit/utest_inspector_server.cpp` 的用例恒注册但体内按 `AURORA_TEST_SKIP` 降级，因此**是否真在场决定的是运行面覆盖，而不是可选的编译面**：CI 侧由 `.github/actions/setup-net-capability-flags` 把它作为全流水线公共前缀打开（含 Emscripten 配置，该配置下实测可产出 `libaurora_inspector_server.a`），本机 / 手工验证请同样显式带上，否则看绿等于看 SKIP。安装面不受此开关影响：`cmake/AuroraInstall.cmake` 只安装核心 `aurora` 库，消费端须自行提供服务器目标。
 
 `inspector_server.cpp` 已从核心 `aurora` 库源文件列表中排除（`list(FILTER ... EXCLUDE)`），仅当开关为 `ON` 时编入独立静态库——排除的目的只是**按开关剪裁服务器实现本身**：socket 能力已随核心公共模块 `aurora::net`（`src/aurora/net/socket.cpp`）常驻核心，Windows 链接面由核心 `PUBLIC ws2_32` 统一传导，各消费者（demo / 测试 / 工具）不再各自挂载。
 
