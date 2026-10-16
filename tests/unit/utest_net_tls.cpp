@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <span>
 #include <string>
@@ -316,6 +317,7 @@ auto is_base64(std::string_view text) -> bool {
 }  // namespace
 
 AURORA_TEST_CASE(invalid_inputs_are_decided_before_any_backend) {
+    ::fprintf(stderr, "[diag] ENTER invalid_inputs body\n");
     // 这三条判据的价值恰在于「后端还没登场就定了结局」：无后端腿与 wasm 同样可证，
     // 也就不会有人把「本腿没有 TLS」误读成「入参校验没跑」。
     HostDriven host;

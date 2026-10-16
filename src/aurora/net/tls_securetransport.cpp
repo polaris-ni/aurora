@@ -732,6 +732,9 @@ class SecureTransportBackend final : public TlsBackend {
     /// 不调 `SSLClose`：文档没有承诺它的幂等性，而关闭通知的产出已由 `shutdown_records()` 承担；
     /// `SSLCreateContext` 的文档明写「用 `CFRelease` 释放本对象」，内存 I/O 之下没有 fd 需要额外收尾。
     void release() {
+        ::fprintf(stderr, "[tls-st][diag] release enter ctx=%p certs=%p anchors=%p\n",
+                  static_cast<void *>(context_), static_cast<void *>(certificate_refs_),
+                  static_cast<void *>(anchors_));
         if (certificate_refs_ != nullptr) {
             ::CFRelease(certificate_refs_);
             certificate_refs_ = nullptr;
@@ -744,6 +747,7 @@ class SecureTransportBackend final : public TlsBackend {
             ::CFRelease(context_);
             context_ = nullptr;
         }
+        ::fprintf(stderr, "[tls-st][diag] release done\n");
     }
 
     /// 把系统产出的记录交给调用方（追加语义），取完即清空。
