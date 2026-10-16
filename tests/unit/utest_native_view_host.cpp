@@ -80,7 +80,12 @@ class RecordSink final : public webview::WebViewSink {
             done(Image{});  // 本套件不判像素，只保证接口存在且回调必达
         }
     }
-    auto detach() -> void override { detached = true; }
+    auto detach() -> void override {
+        detached = true;
+        if (detach_seen) {
+            *detach_seen = true;
+        }
+    }
 
     // 内容通道在本套件不参与判据（几何/像素另有专测），按契约留空实现。
     auto navigate(const std::string & /*uri*/) -> void override {}
@@ -99,6 +104,8 @@ class RecordSink final : public webview::WebViewSink {
     std::vector<bool> visibility;  ///< 可见性翻转序列（未翻转则不追加）
     int captures = 0;  ///< 被请求捕获的次数
     bool detached = false;  ///< 是否被解绑过
+    /// 解绑观测票据：宿主注销条目即销毁 sink，调用点凭此票核账（不读已释放内存）。
+    std::shared_ptr<bool> detach_seen = std::make_shared<bool>(false);
 };
 
 /// @brief 两模式皆可用的桩引擎：让控件的挂载走**真实登记路径**（而非降级路径）。
@@ -239,13 +246,14 @@ AURORA_TEST_CASE(register_and_unregister_are_pairable_and_idempotent) {
 
     auto wv = std::make_shared<webview::WebView>();
     auto sink = std::make_unique<RecordSink>();
-    RecordSink *raw = sink.get();
+    // 票据先取：注销条目即销毁 sink，此后的核账只凭共享票据，不读已释放内存。
+    const auto detach_seen = sink->detach_seen;
     const std::size_t token = require_value(host.register_view(wv.get(), std::move(sink)));
     AURORA_TEST_CHECK_EQ(host.view_count(), 1U);
 
     host.unregister_view(token);
     AURORA_TEST_CHECK_EQ(host.view_count(), 0U);
-    AURORA_TEST_CHECK(raw->detached);
+    AURORA_TEST_CHECK(*detach_seen);  // 注销即解绑
 
     // 重复注销幂等（不崩、不误伤后续槽位）。
     host.unregister_view(token);
@@ -263,6 +271,7 @@ AURORA_TEST_CASE(unregister_only_touches_the_named_slot) {
     auto sink_a = std::make_unique<RecordSink>();
     auto sink_b = std::make_unique<RecordSink>();
     RecordSink *raw_b = sink_b.get();
+    const auto detach_seen_b = sink_b->detach_seen;  // 票据先取：b 注销后的核账凭它
     const std::size_t token_a = require_value(host.register_view(wv_a.get(), std::move(sink_a)));
     const std::size_t token_b = require_value(host.register_view(wv_b.get(), std::move(sink_b)));
     AURORA_TEST_CHECK_EQ(host.view_count(), 2U);
@@ -273,7 +282,7 @@ AURORA_TEST_CASE(unregister_only_touches_the_named_slot) {
     AURORA_TEST_CHECK_FALSE(raw_b->detached);  // 另一条完好无损
 
     host.unregister_view(token_b);
-    AURORA_TEST_CHECK(raw_b->detached);
+    AURORA_TEST_CHECK(*detach_seen_b);
     AURORA_TEST_CHECK_EQ(host.view_count(), 0U);
 }
 

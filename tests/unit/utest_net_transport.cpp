@@ -425,11 +425,18 @@ AURORA_TEST_CASE(write_backpressure_rejects_then_recovers) {
 
     pair.client.set_high_water_mark(AURORA_CHUNK);
     const std::vector<char> filler(AURORA_CHUNK, 'a');
+    // 写/读的完成回调经 Tasks 派发：发送缓冲满时要等下一次可写就绪，回调与在途读缓冲都会活过
+    // 当轮循环体。故观测对象与读缓冲统一直布在用例作用域、逐轮重置——放进循环体即栈悬垂
+    // （在途回调写进已销毁的日志），逐轮重置保持「每轮一座标」的断言语义不变。
+    WriteLog log;
     int rejections = 0;
     // 服务端一只字都不取：内核缓冲填满后本层开始攒待发字节，攒到高水位即拒。轮数给足——
     // 回环缓冲深度随平台与自动调参而异，判据是「一定会撞限」而不是「第几轮撞限」。
     for (int attempt = 0; attempt < 4096 && rejections == 0; ++attempt) {
-        WriteLog log;
+        log.calls.store(0);
+        log.bytes.store(0);
+        log.failed = false;
+        log.code.clear();
         pair.client.write(std::span<const char>(filler), write_into(log));
         if (log.failed) {
             AURORA_TEST_CHECK_EQ(log.code, "net-buffer-limit");
@@ -441,11 +448,18 @@ AURORA_TEST_CASE(write_backpressure_rejects_then_recovers) {
     AURORA_TEST_CHECK_GT(rejections, 0);
 
     int accepted_again = 0;
+    ReadLog drain;
+    std::vector<char> inbox(std::size_t{64} * 1024);
     for (int attempt = 0; attempt < 512 && accepted_again == 0; ++attempt) {
-        ReadLog drain;
-        std::vector<char> inbox(std::size_t{64} * 1024);
+        drain.calls.store(0);
+        drain.bytes.store(0);
+        drain.failed = false;
+        drain.code.clear();
+        log.calls.store(0);
+        log.bytes.store(0);
+        log.failed = false;
+        log.code.clear();
         pair.server.read(std::span<char>(inbox), read_into(drain));
-        WriteLog log;
         pair.client.write(std::span<const char>(filler), write_into(log));
         if (!log.failed) {
             ++accepted_again;
