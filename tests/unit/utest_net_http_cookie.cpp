@@ -303,6 +303,9 @@ auto read_request(aurora::net::blocking::StreamSocket &socket, aurora::test::Pee
 }
 
 AURORA_TEST_CASE(session_round_trips_a_cookie_over_two_requests) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::string first_request;
     std::string second_request;
     std::mutex guard;
@@ -341,6 +344,9 @@ AURORA_TEST_CASE(session_round_trips_a_cookie_over_two_requests) {
 }
 
 AURORA_TEST_CASE(bare_client_neither_stores_nor_sends_cookies) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::string first_request;
     std::string second_request;
     std::mutex guard;
@@ -375,6 +381,9 @@ AURORA_TEST_CASE(bare_client_neither_stores_nor_sends_cookies) {
 }
 
 AURORA_TEST_CASE(redirect_to_another_port_refetches_cookies_for_the_new_target) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // Cookie 的域匹配按主机不按端口（`RFC 6265` 的域里没有端口这一维），而本套件的对端都在 127.0.0.1 上：
     // 换端口的重定向因此是一次「同主机、新目标」的跳——`follow()` 剥掉旧值之后，Jar 按新目标的域把同一枚
     // cookie 重新附上（第 36 项的「下一跳按新目标的域重新从 Jar 取」正由此可证）。跨主机剥离的判据由
@@ -406,6 +415,9 @@ AURORA_TEST_CASE(redirect_to_another_port_refetches_cookies_for_the_new_target) 
 }
 
 AURORA_TEST_CASE(cache_key_sees_the_cookie_the_jar_attaches) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::string request;
     std::mutex guard;
     auto answers = std::make_shared<std::atomic<int>>(0);

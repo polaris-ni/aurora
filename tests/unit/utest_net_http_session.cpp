@@ -214,6 +214,9 @@ class CollectingSink final : public DataSink {
 }
 
 AURORA_TEST_CASE(two_requests_share_one_pooled_connection) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::string recorded;
     std::mutex guard;
     ScriptedPeer peer{serve_cycles(2, ok_response("served"), recorded, guard)};
@@ -229,6 +232,9 @@ AURORA_TEST_CASE(two_requests_share_one_pooled_connection) {
 }
 
 AURORA_TEST_CASE(pool_off_keeps_one_connection_per_send) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::string recorded;
     std::mutex guard;
     ScriptedPeer peer{per_connection({serve_one_then(ok_response("first"), recorded, guard, false),
@@ -244,6 +250,9 @@ AURORA_TEST_CASE(pool_off_keeps_one_connection_per_send) {
 }
 
 AURORA_TEST_CASE(connection_close_is_never_returned_to_the_pool) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 判据的锐利处：对端在 `Connection: close` 的应答之后**并不关连接**（第二个周期照常服务）。判对了，
     // 第二枚请求必然开新连接（对端第二条剧本收到它）；判错了（复用 close 应答的连接），第二枚请求会坐上
     // 第一条连接的第二周期，新连接一条都不来——`accepts()` 与第二条剧本的留档都拿不到那枚请求。
@@ -293,6 +302,9 @@ AURORA_TEST_CASE(connection_close_is_never_returned_to_the_pool) {
 }
 
 AURORA_TEST_CASE(until_close_framing_is_never_returned_to_the_pool) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::string recorded;
     std::mutex guard;
     // 第一条连接：无 `Content-Length` 的应答 + 单向停写（UntilClose 靠 FIN 判全，读完那一刻连接就没了）。
@@ -317,6 +329,9 @@ AURORA_TEST_CASE(until_close_framing_is_never_returned_to_the_pool) {
 }
 
 AURORA_TEST_CASE(leftover_pipelined_bytes_abandon_reuse_but_keep_the_exchange) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 判据的锐利处与 connection_close 那条同型：对端在塞进富余字节之后**继续服务**第二条连接上的请求。
     // 判错了（富余非空仍回池），第二枚请求会坐上第一条连接——它的请求行前面压着上一条应答的尾巴，
     // 对端读到的请求全文不再是 `GET /next`，且新连接一条都不来（accepts 停在 1）。
@@ -367,6 +382,9 @@ AURORA_TEST_CASE(leftover_pipelined_bytes_abandon_reuse_but_keep_the_exchange) {
 }
 
 AURORA_TEST_CASE(stale_pooled_connection_is_replaced_once_for_idempotent_methods) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::string recorded;
     std::mutex guard;
     // 第一条连接：应答完立刻关（对端在空闲期关掉）；第二条：正常服务。
@@ -384,6 +402,9 @@ AURORA_TEST_CASE(stale_pooled_connection_is_replaced_once_for_idempotent_methods
 }
 
 AURORA_TEST_CASE(idle_timeout_evicts_the_pooled_connection) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::string recorded;
     std::mutex guard;
     ScriptedPeer peer{per_connection({serve_one_then(ok_response("first"), recorded, guard, false),
@@ -401,6 +422,9 @@ AURORA_TEST_CASE(idle_timeout_evicts_the_pooled_connection) {
 }
 
 AURORA_TEST_CASE(tls_configuration_bump_blocks_reuse) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::string recorded;
     std::mutex guard;
     ScriptedPeer peer{per_connection({serve_one_then(ok_response("first"), recorded, guard, false),
@@ -418,6 +442,9 @@ AURORA_TEST_CASE(tls_configuration_bump_blocks_reuse) {
 }
 
 AURORA_TEST_CASE(per_host_limit_queues_and_times_out_naming_the_queue) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     ScriptedPeer peer{aurora::test::scripts::silent()};  // 第一条连接被它占住：连接上了但不说话
     AURORA_TEST_REQUIRE(peer.valid());
     Client client;
@@ -454,6 +481,9 @@ AURORA_TEST_CASE(per_host_limit_queues_and_times_out_naming_the_queue) {
 }
 
 AURORA_TEST_CASE(streaming_path_reuses_the_pooled_connection_too) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::string recorded;
     std::mutex guard;
     ScriptedPeer peer{serve_cycles(2, ok_response("streamed"), recorded, guard)};

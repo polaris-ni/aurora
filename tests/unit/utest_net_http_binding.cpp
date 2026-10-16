@@ -163,6 +163,9 @@ template <typename T>
 }  // namespace
 
 AURORA_TEST_CASE(deliver_projects_a_materialized_response) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, framed("200 OK", "hello")));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -180,6 +183,9 @@ AURORA_TEST_CASE(deliver_projects_a_materialized_response) {
 }
 
 AURORA_TEST_CASE(a_non_success_status_is_a_ready_value_not_a_failure) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, framed("404 Not Found", "missing")));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -196,6 +202,9 @@ AURORA_TEST_CASE(a_non_success_status_is_a_ready_value_not_a_failure) {
 }
 
 AURORA_TEST_CASE(a_transport_failure_lands_on_the_error_side) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(write_then_reset(""));  // 连上即 RST：读侧拿到一次真实的套接口错误
     AURORA_TEST_REQUIRE(peer.valid());
@@ -210,6 +219,9 @@ AURORA_TEST_CASE(a_transport_failure_lands_on_the_error_side) {
 }
 
 AURORA_TEST_CASE(a_reload_cuts_the_socket_of_the_previous_request) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::atomic<bool> first_closed{false};
     // 第一条连接静默到被掐断，第二条照常应答：串行监听口能接受第二条，本身就是前一条已收摊的证明。
@@ -234,6 +246,9 @@ AURORA_TEST_CASE(a_reload_cuts_the_socket_of_the_previous_request) {
 }
 
 AURORA_TEST_CASE(destroying_the_owner_releases_the_in_flight_socket) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::atomic<bool> closed{false};
     ScriptedPeer peer(hold_until_closed(closed));
@@ -250,6 +265,9 @@ AURORA_TEST_CASE(destroying_the_owner_releases_the_in_flight_socket) {
 }
 
 AURORA_TEST_CASE(the_exchange_survives_the_callers_client) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, framed("200 OK", "late")));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -272,6 +290,9 @@ AURORA_TEST_CASE(the_exchange_survives_the_callers_client) {
 }
 
 AURORA_TEST_CASE(deliver_stream_commits_segments_then_one_final_marker) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, chunked("200 OK", {"abc", "de", "fghij"})));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -302,6 +323,9 @@ AURORA_TEST_CASE(deliver_stream_commits_segments_then_one_final_marker) {
 }
 
 AURORA_TEST_CASE(a_cancelled_stream_fails_without_a_final_marker) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     // 两块发完就不再说（缺终止块）：交换挂在读上，正是「中途取消」的现场。
     ScriptedPeer peer(write_then_hold(chunked_prefix("200 OK", {"abc", "de"})));
@@ -325,6 +349,9 @@ AURORA_TEST_CASE(a_cancelled_stream_fails_without_a_final_marker) {
 }
 
 AURORA_TEST_CASE(image_fetcher_returns_the_body_on_a_success_status) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     const std::string png{"\x89PNG\r\n\x1a\nFAKE"};
     ScriptedPeer peer(reply_after_reading(1, framed("200 OK", png)));
@@ -341,6 +368,9 @@ AURORA_TEST_CASE(image_fetcher_returns_the_body_on_a_success_status) {
 }
 
 AURORA_TEST_CASE(image_fetcher_maps_a_not_found_to_an_image_load_error) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, framed("404 Not Found", "<html>nope</html>")));
     AURORA_TEST_REQUIRE(peer.valid());

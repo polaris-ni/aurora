@@ -922,6 +922,9 @@ AURORA_TEST_CASE(send_times_out_connect) {
 }
 
 AURORA_TEST_CASE(send_with_a_cancelled_token_issues_no_connection) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     Client client;
     allow_test_cleartext(client);
@@ -943,6 +946,9 @@ AURORA_TEST_CASE(send_with_a_cancelled_token_issues_no_connection) {
 }
 
 AURORA_TEST_CASE(cancelling_mid_exchange_ends_it_with_net_cancelled) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     Client client;
     allow_test_cleartext(client);
@@ -970,6 +976,9 @@ AURORA_TEST_CASE(cancelling_mid_exchange_ends_it_with_net_cancelled) {
 }
 
 AURORA_TEST_CASE(open_stream_with_a_cancelled_token_never_reaches_the_sink) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     Client client;
     allow_test_cleartext(client);
@@ -997,6 +1006,9 @@ AURORA_TEST_CASE(open_stream_with_a_cancelled_token_never_reaches_the_sink) {
 }
 
 AURORA_TEST_CASE(a_cancelled_token_beats_a_fresh_cache_hit) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("first"))));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -2055,6 +2067,9 @@ AURORA_TEST_CASE(vary_makes_the_second_request_a_different_request) {
 }
 
 AURORA_TEST_CASE(send_stamps_a_request_id_on_every_exchange) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     Client client;
@@ -2074,6 +2089,9 @@ AURORA_TEST_CASE(send_stamps_a_request_id_on_every_exchange) {
 }
 
 AURORA_TEST_CASE(send_sends_no_identifier_when_the_default_is_off) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     Client client;
@@ -2093,6 +2111,9 @@ AURORA_TEST_CASE(send_sends_no_identifier_when_the_default_is_off) {
 }
 
 AURORA_TEST_CASE(send_carries_a_request_level_identifier_verbatim) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     Client client;
@@ -2111,6 +2132,9 @@ AURORA_TEST_CASE(send_carries_a_request_level_identifier_verbatim) {
 }
 
 AURORA_TEST_CASE(send_sends_no_identifier_for_an_empty_declaration) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     Client client;
@@ -2128,6 +2152,9 @@ AURORA_TEST_CASE(send_sends_no_identifier_for_an_empty_declaration) {
 }
 
 AURORA_TEST_CASE(send_never_overwrites_an_identifier_the_caller_wrote) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     Client client;
@@ -2147,6 +2174,9 @@ AURORA_TEST_CASE(send_never_overwrites_an_identifier_the_caller_wrote) {
 }
 
 AURORA_TEST_CASE(every_attempt_of_a_retry_sequence_carries_one_identifier) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     FakeEngine engine;
     const FakeEngineScope scope(engine);
     const aurora::test::net::HostDriven host;
@@ -2176,6 +2206,9 @@ AURORA_TEST_CASE(every_attempt_of_a_retry_sequence_carries_one_identifier) {
 }
 
 AURORA_TEST_CASE(every_hop_of_a_redirect_chain_carries_one_identifier) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string origin_recorded;
     std::string target_recorded;
@@ -2202,6 +2235,9 @@ AURORA_TEST_CASE(every_hop_of_a_redirect_chain_carries_one_identifier) {
 }
 
 AURORA_TEST_CASE(expect_continue_sends_the_body_after_the_peer_opens_the_gate) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     const aurora::test::net::HostDriven host;
@@ -2228,6 +2264,9 @@ AURORA_TEST_CASE(expect_continue_sends_the_body_after_the_peer_opens_the_gate) {
 }
 
 AURORA_TEST_CASE(expect_continue_holds_the_body_back_when_the_peer_answers_with_a_final_status) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     const aurora::test::net::HostDriven host;
@@ -2255,6 +2294,9 @@ AURORA_TEST_CASE(expect_continue_holds_the_body_back_when_the_peer_answers_with_
 }
 
 AURORA_TEST_CASE(expect_continue_sends_the_body_when_the_peer_stays_silent) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     const aurora::test::net::HostDriven host;
@@ -2276,6 +2318,9 @@ AURORA_TEST_CASE(expect_continue_sends_the_body_when_the_peer_stays_silent) {
 }
 
 AURORA_TEST_CASE(a_streaming_body_with_an_unknown_total_goes_out_as_chunk_frames) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     const aurora::test::net::HostDriven host;
@@ -2301,6 +2346,9 @@ AURORA_TEST_CASE(a_streaming_body_with_an_unknown_total_goes_out_as_chunk_frames
 }
 
 AURORA_TEST_CASE(a_streaming_body_that_knows_its_total_goes_out_with_a_length) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     const aurora::test::net::HostDriven host;
@@ -2324,6 +2372,9 @@ AURORA_TEST_CASE(a_streaming_body_that_knows_its_total_goes_out_with_a_length) {
 }
 
 AURORA_TEST_CASE(a_streaming_body_that_cannot_rewind_closes_the_retry_loop) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string first;
     std::string second;
@@ -2356,6 +2407,9 @@ AURORA_TEST_CASE(a_streaming_body_that_cannot_rewind_closes_the_retry_loop) {
 }
 
 AURORA_TEST_CASE(a_rewindable_streaming_body_stays_in_the_retry_loop) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     FakeEngine engine;
     const FakeEngineScope scope(engine);
     std::mutex guard;
@@ -2388,6 +2442,9 @@ AURORA_TEST_CASE(a_rewindable_streaming_body_stays_in_the_retry_loop) {
 }
 
 AURORA_TEST_CASE(a_source_that_changes_its_mind_about_rewinding_stops_the_retry_loop) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     FakeEngine engine;
     const FakeEngineScope scope(engine);
     std::mutex guard;
@@ -2418,6 +2475,9 @@ AURORA_TEST_CASE(a_source_that_changes_its_mind_about_rewinding_stops_the_retry_
 }
 
 AURORA_TEST_CASE(a_body_preserving_redirect_refuses_a_source_that_cannot_rewind) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string origin_recorded;
     std::string target_recorded;
@@ -2444,6 +2504,9 @@ AURORA_TEST_CASE(a_body_preserving_redirect_refuses_a_source_that_cannot_rewind)
 }
 
 AURORA_TEST_CASE(a_range_request_neither_reads_nor_writes_the_table) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string whole;
     std::string partial;
@@ -2482,6 +2545,9 @@ AURORA_TEST_CASE(a_range_request_neither_reads_nor_writes_the_table) {
 }
 
 AURORA_TEST_CASE(a_partial_answer_never_enters_the_table) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string partial;
     std::string whole;
@@ -2514,6 +2580,9 @@ AURORA_TEST_CASE(a_partial_answer_never_enters_the_table) {
 }
 
 AURORA_TEST_CASE(a_multipart_form_goes_out_as_one_streaming_body) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     const aurora::test::net::HostDriven host;
@@ -2557,6 +2626,9 @@ AURORA_TEST_CASE(a_multipart_form_goes_out_as_one_streaming_body) {
 }
 
 AURORA_TEST_CASE(send_answers_a_source_challenge_and_replays_the_attempt) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::vector<std::string> filed;
@@ -2585,6 +2657,9 @@ AURORA_TEST_CASE(send_answers_a_source_challenge_and_replays_the_attempt) {
 }
 
 AURORA_TEST_CASE(a_credential_replay_does_not_consume_a_retry_attempt) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::vector<std::string> filed;
@@ -2618,6 +2693,9 @@ AURORA_TEST_CASE(a_credential_replay_does_not_consume_a_retry_attempt) {
 }
 
 AURORA_TEST_CASE(a_second_challenge_is_handed_over_without_a_second_injection) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::vector<std::string> filed;
@@ -2641,6 +2719,9 @@ AURORA_TEST_CASE(a_second_challenge_is_handed_over_without_a_second_injection) {
 }
 
 AURORA_TEST_CASE(a_declined_challenge_delivers_the_peers_own_401) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::vector<std::string> filed;
@@ -2662,6 +2743,9 @@ AURORA_TEST_CASE(a_declined_challenge_delivers_the_peers_own_401) {
 }
 
 AURORA_TEST_CASE(a_provider_failure_ends_the_exchange) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, challenge_401(R"(Basic realm="api")")));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -2680,6 +2764,9 @@ AURORA_TEST_CASE(a_provider_failure_ends_the_exchange) {
 }
 
 AURORA_TEST_CASE(a_credential_with_a_control_byte_is_refused_before_the_wire) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::vector<std::string> filed;
@@ -2699,6 +2786,9 @@ AURORA_TEST_CASE(a_credential_with_a_control_byte_is_refused_before_the_wire) {
 }
 
 AURORA_TEST_CASE(a_cross_origin_redirect_strips_the_credential_fields) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex second_guard;
     std::vector<std::string> second_filed;
@@ -2749,6 +2839,9 @@ AURORA_TEST_CASE(a_cross_origin_redirect_strips_the_credential_fields) {
 }
 
 AURORA_TEST_CASE(two_credentials_never_read_each_others_cache_entry) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("shared"))));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -2783,6 +2876,9 @@ AURORA_TEST_CASE(two_credentials_never_read_each_others_cache_entry) {
 }
 
 AURORA_TEST_CASE(a_bare_copy_is_not_readable_by_a_credentialed_request) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("public"))));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -2812,6 +2908,9 @@ AURORA_TEST_CASE(a_bare_copy_is_not_readable_by_a_credentialed_request) {
 }
 
 AURORA_TEST_CASE(a_stamped_identifier_does_not_disturb_the_table) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("first"))));
     AURORA_TEST_REQUIRE(peer.valid());

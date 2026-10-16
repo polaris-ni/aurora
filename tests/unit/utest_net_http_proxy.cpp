@@ -678,6 +678,9 @@ AURORA_TEST_CASE(the_effective_policy_is_snapshot_at_the_start_of_the_exchange) 
 }
 
 AURORA_TEST_CASE(a_forwarded_407_is_answered_on_proxy_authorization) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::vector<std::string> filed;
@@ -706,6 +709,9 @@ AURORA_TEST_CASE(a_forwarded_407_is_answered_on_proxy_authorization) {
 }
 
 AURORA_TEST_CASE(a_source_challenge_through_a_proxy_is_answered_on_authorization) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::vector<std::string> filed;
@@ -733,6 +739,9 @@ AURORA_TEST_CASE(a_source_challenge_through_a_proxy_is_answered_on_authorization
 }
 
 AURORA_TEST_CASE(a_tunnel_refused_with_407_reissues_connect_with_the_credential) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::vector<std::string> filed;

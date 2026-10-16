@@ -1196,6 +1196,9 @@ AURORA_TEST_CASE(a_stale_entry_revalidates_and_streams_the_stored_body) {
 }
 
 AURORA_TEST_CASE(stream_stamps_a_request_id_on_every_exchange) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     Client client;
     allow_test_cleartext(client);
     std::mutex guard;
@@ -1212,6 +1215,9 @@ AURORA_TEST_CASE(stream_stamps_a_request_id_on_every_exchange) {
 }
 
 AURORA_TEST_CASE(stream_carries_a_request_level_identifier_and_respects_the_switch) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     Client client;
     allow_test_cleartext(client);
     std::mutex guard;
@@ -1243,6 +1249,9 @@ AURORA_TEST_CASE(stream_carries_a_request_level_identifier_and_respects_the_swit
 }
 
 AURORA_TEST_CASE(stream_sends_the_body_after_the_peer_opens_the_gate) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     Client client;
@@ -1269,6 +1278,9 @@ AURORA_TEST_CASE(stream_sends_the_body_after_the_peer_opens_the_gate) {
 }
 
 AURORA_TEST_CASE(stream_delivers_an_answer_that_arrived_inside_the_expect_window) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     Client client;
@@ -1297,6 +1309,9 @@ AURORA_TEST_CASE(stream_delivers_an_answer_that_arrived_inside_the_expect_window
 }
 
 AURORA_TEST_CASE(stream_holds_the_body_back_when_the_expectation_gets_a_final_answer) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     Client client;
@@ -1323,6 +1338,9 @@ AURORA_TEST_CASE(stream_holds_the_body_back_when_the_expectation_gets_a_final_an
 }
 
 AURORA_TEST_CASE(stream_uploads_a_body_source_that_knows_its_total) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     std::mutex guard;
     std::string recorded;
     Client client;
@@ -1345,6 +1363,9 @@ AURORA_TEST_CASE(stream_uploads_a_body_source_that_knows_its_total) {
 }
 
 AURORA_TEST_CASE(stream_closes_the_retry_loop_on_a_body_that_cannot_rewind) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     // 头已经交给宿主的失败在流式路径本来就不可重放（`stream_does_not_replay_after_the_head_is_handed`），
     // 所以这一条要把失败安排在**交头之前**才问得出「重放闸有没有因不可回退的体而关门」：静默的对端 + `total`
     // 时限到点，头一次都没交出去，重放资格只剩闸这一道判据。判据看虚拟时长与错误码：门开着就要跑满三扇窗口
@@ -1375,6 +1396,9 @@ AURORA_TEST_CASE(stream_closes_the_retry_loop_on_a_body_that_cannot_rewind) {
 }
 
 AURORA_TEST_CASE(stream_answers_a_source_challenge_before_the_head_is_handed) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::vector<std::string> filed;
@@ -1406,6 +1430,9 @@ AURORA_TEST_CASE(stream_answers_a_source_challenge_before_the_head_is_handed) {
 }
 
 AURORA_TEST_CASE(a_declined_challenge_streams_the_peers_own_401) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
     const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::vector<std::string> filed;
