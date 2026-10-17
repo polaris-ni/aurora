@@ -93,6 +93,12 @@ constexpr std::uint8_t AURORA_TAG_UNIVERSAL_STRING = 0x1C;
 constexpr std::uint8_t AURORA_TAG_BMP_STRING = 0x1E;
 
 auto tls_error(ErrorCode code, std::string text) -> Error {
+    // `general-invalid-argument` 的表模板是「Invalid argument supplied」，没有 `{detail}` 槽位：走模板
+    // 渲染会把「哪一项不对」整段丢掉，而这类错误里调用方唯一需要的就是那一段（tls_backend.cpp 的
+    // make_invalid 记录了同一处取舍）。故该码按覆盖 message 构造，其余码仍走模板。
+    if (code == ErrorCode::GeneralInvalidArgument) {
+        return make_error(code, std::move(text));
+    }
     return make_error(code, ErrorParams{{"detail", std::move(text)}});
 }
 

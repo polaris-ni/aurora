@@ -1015,7 +1015,7 @@ auto set_tcp_option(NativeSocket s, int option, std::string_view label, int valu
 /// @brief 把毫秒意图换算成一枚至少为 1 的秒数（内核的保活与时限类选项都以整秒计）。
 /// @param value 调用方置了值的毫秒数。
 /// @return 向上取整后的秒数；非正值按 1 秒处理（0 秒的「立即探活」在内核侧没有对应形态）。
-#if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID)
+#if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID) || defined(AURORA_PLATFORM_MACOS)
 auto seconds_at_least_one(std::chrono::milliseconds value) -> int {
     const auto ms = std::max<long long>(value.count(), 1);
     return static_cast<int>((ms + 999) / 1000);
