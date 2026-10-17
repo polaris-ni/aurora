@@ -316,17 +316,33 @@ inline auto PieChart::section_hit(const Geometry &g, const Point &local) const -
     }
     constexpr float two_pi = 6.28318530717958647692F;
     constexpr float deg = 0.01745329251994329577F;
-    // 起始角偏移与绘制路径（`paint` 内的 `cursor`）同款取显式中间量：单表达式
-    // `atan2(dy, dx) - start_angle * deg` 可被编译器收缩成一次 FMA（单次舍入），12 点方向的
-    // 角度因此残差约 5.6e-8 弧度，归一化后恰落在 2π 边界上、被下方严格 `<` 排除——命中判定
-    // 随编译配置漂移（实测 toggles (simd-off) 三例：悬停/点击/交互分支全部命中不到扇区 0，
-    // 而同一进程的 golden 像素比对照常通过——绘制路径不受影响）。跨语句中间量强制
-    // 「先乘、后减」两次舍入，任何浮点收缩开关下结果确定。
+    // 起始角偏移与绘制路径（`paint` 内的 `cursor`）同款取显式中间量，让未收缩形态下 12 点方向
+    // 的角度精确为 0。但**不能依赖拆句防收缩**：优化器会把中间量前传回表达式再收缩（CI
+    // ubuntu-26.04 的 gcc 实测如此——拆句后 simd-off 腿仍红）。收缩后 12 点方向残差约
+    // 5.6e-8 弧度（单次舍入），故归一下方一律按「不信任输入」夹取，任何收缩开关下终点一致。
     const float start_offset = start_angle * deg;
     float ang = std::atan2(dy, dx) - start_offset;
     ang = std::fmod(ang, two_pi);
     if (ang < 0.0F) {
         ang += two_pi;
+    }
+    // 夹回 [0, 2π)：残差为极小的负值时，`ang += two_pi` 的和会被舍入成**恰好 2π**（12 点方向
+    // 的 -5.6e-8 即如此——ulp 4.8e-7 远大于残差本身），恰好落在下方扫描的严格 `<` 之外，整段
+    // 丢命中（实测 toggles (simd-off) 三例：悬停 / 点击 / 交互分支全部命中不到扇区 0，而同一
+    // 进程的 golden 像素比对照常通过——绘制路径不受影响）。减一次 2π 恢复不变量。
+    if (ang >= two_pi) {
+        ang -= two_pi;
+    }
+    // 扇区占比经 `pie_section_ratios` 归一化（Σ=1），数学上铺满整圆；最后一段**有效**扇区的
+    // 上界因此取 2π 本身而非 `cursor + sweep`——浮点累加和可能略低于 2π，会把贴近 2π 的角度
+    // 漏在最后一个扇区之外。零占比段被跳过、不占 cursor，「最后一段有效」按序取。
+    std::size_t last_positive = 0;
+    bool any_positive = false;
+    for (std::size_t i = 0; i < g.ratios.size(); ++i) {
+        if (static_cast<float>(g.ratios[i]) > 0.0F) {
+            last_positive = i;
+            any_positive = true;
+        }
     }
     float cursor = 0.0F;
     for (std::size_t i = 0; i < g.ratios.size(); ++i) {
@@ -334,7 +350,8 @@ inline auto PieChart::section_hit(const Geometry &g, const Point &local) const -
         if (sweep <= 0.0F) {
             continue;
         }
-        if (ang >= cursor && ang < cursor + sweep) {
+        const float upper = (any_positive && i == last_positive) ? two_pi : cursor + sweep;
+        if (ang >= cursor && ang < upper) {
             return static_cast<int>(i);
         }
         cursor += sweep;
