@@ -14,8 +14,10 @@
 #                    内置音频（ALSA）；三腿均打开 AURORA_BUILD_VERIFY_TOOLS 并把本平台
 #                    全部真机验收探针显式编出（此前仅 lint 静态分析），覆盖探针编译面。
 #                    三腿均打开 AURORA_BACKEND_GPU_WGPU：wgpu-native 经 cargo 源码构建（需
-#                    Rust 工具链 + libclang，见各腿 Setup 步骤），wgpu 测试运行期无 GPU adapter
-#                    故 SKIP，但 wgpu_native 静态库与 WgpuRhi C++ 后端在 linux/win32/macOS 各编一次。
+#                    Rust 工具链 + libclang，见各腿 Setup 步骤），wgpu_native 静态库与 WgpuRhi
+#                    C++ 后端在 linux/win32/macOS 各编一次。测试侧按运行期 adapter 分化：win32
+#                    腿（D3D12）与 macOS 腿（Metal）runner 有 adapter，utest_wgpu_rhi 整套真跑
+#                    像素断言；Linux 腿无 GPU adapter 整套 SKIP（该腿只验编译与注册逻辑）。
 #   3. toggles     — feature 宏极性收口（ubuntu/gcc）：优化三开关全关（退化路径）、
 #                    SIMD 关（标量黄金路径）、图像编解码 + Inspector Server + WebView 控件
 #                    （WEBKITGTK 引擎关，见 env 注释）+ 内置音频 + SQLite 存储后端开

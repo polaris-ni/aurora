@@ -523,8 +523,14 @@ AURORA_TEST_CASE(wgpu_replays_csd_decoration_over_content) {
     const Color bg = s.style.bg_active;
     // 标题栏条带（图标槽左侧的纯底色区）。
     AURORA_TEST_CHECK_EQ(pixel_at(px, 160, 4, 18), (std::array<int, 4>{bg.r, bg.g, bg.b, bg.a}));
-    // 悬停关闭钮圆底 = 特征红（与内容绿显著区分）。圆心本身被白色 ✕ 字形穿过，故取圆心上方。
-    const Point above_close{.x = g.close.origin.x + (g.close.size.width * 0.5F), .y = g.close.origin.y + 3.0F};
+    // 悬停关闭钮圆底 = 特征红（与内容绿显著区分）。取点与 CPU 同判据用例
+    // tests/unit/utest_title_bar_painter.cpp 的悬停关闭钮同口径：Adwaita 圆底恒以盒中心为圆心、
+    // 半径 11dp（22dp 直径，与盒宽解耦），圆心本身被白色 ✕ 字形穿过，故取 center.y-8——
+    // 盒 30dp 时圆顶在 origin.y+7，该点稳在圆内且在字形外。早期取点 origin.y+3 按「圆底为盒内
+    // 切圆」的旧几何尚在盘内；圆盘收窄为恒径 22dp 后盘顶升到 origin.y+7，原取点落到盘外 1px，
+    // 采到底色而断言失败——缺陷长期未被发现是因运行环境无 wgpu adapter 时本套件整体 SKIP。
+    const Point above_close{.x = g.close.origin.x + (g.close.size.width * 0.5F),
+                            .y = g.close.origin.y + (g.close.size.height * 0.5F) - 8.0F};
     const auto cc = pixel_at(px, 160, static_cast<int>(above_close.x), static_cast<int>(above_close.y));
     AURORA_TEST_CHECK(cc[0] > 180 && cc[1] < 90 && cc[2] < 90);
     // 图标槽：DrawImage 经纹理链路上屏（蓝色占优即证图标像素而非底色/内容色）。
