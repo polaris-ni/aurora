@@ -16,7 +16,13 @@ namespace aurora {
 WindowHost::WindowHost(WindowId id, Scene scene, std::unique_ptr<Window> window, const WindowOptions &opts)
     : id_(id), scroll_scope_(std::to_string(id)), role_(opts.role), opts_(opts), scene_(std::move(scene)),
       window_(std::move(window)) {
-    focus_.set_root(&scene_.root());  // Tab 焦点序遍历的起点（可为 nullptr → 禁用 Tab 导航）
+    // Tab 焦点序遍历的起点（可为 nullptr → 禁用 Tab 导航）。
+    // 空场景（根节点不持 widget，如 e2e harness 建窗期的 `Scene{Node{}}`）必须落 nullptr 分支：
+    // `Scene::root()` 内部对空 `shared_ptr` 解引用取 `Widget&`，加固构建（libstdc++
+    // `_GLIBCXX_ASSERTIONS`）下 `__shared_ptr_deref` 断言直接 abort。与 teardown 清
+    // `on_subtree_dirty` 前的 `root_node()` 判定同一口径（无断言构建下旧行为本就是静默
+    // 解出空指针再交给 `set_root(nullptr)`，本改动对非加固构建逐位无行为差异）。
+    focus_.set_root(scene_.root_node() ? &scene_.root() : nullptr);
 }
 
 auto WindowHost::teardown() -> void {
