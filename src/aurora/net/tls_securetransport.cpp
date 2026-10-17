@@ -1126,14 +1126,19 @@ auto SecureTransportBackend::capture_summary(SecTrustRef trust) -> Result<void> 
     if (leaf == nullptr) {
         return tls_error(ErrorCode::NetTlsCertRejected, "peer certificate chain has no leaf certificate");
     }
+    ::fprintf(stderr, "[tls-st][diag] capture_summary: before CopyData\n");
     const CFDataRef der = ::SecCertificateCopyData(leaf);  // Copy 规则：本函数负责释放
+    ::fprintf(stderr, "[tls-st][diag] capture_summary: der=%p\n", static_cast<const void *>(der));
     if (der == nullptr) {
         return tls_error(ErrorCode::NetTlsHandshakeFailed, "peer certificate could not be exported as DER");
     }
     const CfReleaser der_guard{der};
     const std::span<const std::uint8_t> bytes{reinterpret_cast<const std::uint8_t *>(::CFDataGetBytePtr(der)),
                                               static_cast<std::size_t>(::CFDataGetLength(der))};
+    ::fprintf(stderr, "[tls-st][diag] capture_summary: der_len=%ld ptr=%p\n", static_cast<long>(bytes.size()),
+              static_cast<const void *>(bytes.data()));
     const auto parsed = parse_certificate(bytes);
+    ::fprintf(stderr, "[tls-st][diag] capture_summary: parsed=%d\n", static_cast<int>(parsed.has_value()));
     if (!parsed) {
         return tls_error(ErrorCode::NetTlsCertRejected, "peer certificate is not a decodable X.509 structure");
     }

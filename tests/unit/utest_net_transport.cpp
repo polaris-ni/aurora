@@ -132,6 +132,7 @@ auto make_host_pair(aurora::app::EventSourceRegistry &registry) -> HostPair {
         }
         pair.server = std::move(result.value());
         ++accepted;
+        ::fprintf(stderr, "[diag][tp] accept delivered #%d\n", accepted.load());
     });
 
     std::atomic<int> connected{0};
