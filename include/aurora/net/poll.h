@@ -10,7 +10,7 @@
 /// 与 `net::blocking::Listener::wait_readable`（单句柄、`select`、同步回环）刻意分工：本基元是**多句柄、
 /// 事件驱动、读/写/错误/挂断四向**的等待形态，且**只做等待、不碰任何协议语义**——它不知道句柄背
 /// 后是 socket、管道还是 DBus 描述符。真正的平台差异（POSIX `poll` 的 `nfds`/`POLLNVAL`、Winsock
-/// `WSAPoll` 的 `SOCKET` 形态与 `SHORT` 事件位）在 `src/aurora/net/socket.cpp` 一次消化（CHG-006
+/// `WSAPoll` 的 `SOCKET` 形态与 `SHORT` 事件位）在 `src/aurora/net/socket.cpp` 一次消化（
 /// 不变量：平台 socket/poll 头的仓内唯一落点）。
 ///
 /// @code

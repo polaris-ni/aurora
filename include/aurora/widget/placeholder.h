@@ -160,7 +160,7 @@ class Placeholder : public Widget {
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props.set("message", message_);
-        // 三色仅在显式设置时输出：保留「跟随主题角色」语义（CHG-011 迁移批；与 Button/Text 同口径）。
+        // 三色仅在显式设置时输出：保留「跟随主题角色」语义（迁移批；与 Button/Text 同口径）。
         if (background_.has_value()) {
             props.set("background_color", color_to_json(*background_));
         }
@@ -200,7 +200,7 @@ class Placeholder : public Widget {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        // 三色：未显式设色时经 ctx 取主题角色（CHG-011 迁移批；ThemeScope 换肤即生效）。
+        // 三色：未显式设色时经 ctx 取主题角色（迁移批；ThemeScope 换肤即生效）。
         p.fill_rect(bounds, resolve_background(ctx));
         p.draw_rect(bounds, resolve_border(ctx));
         const Rect inner{.origin = Point{.x = bounds.origin.x + 6.0F, .y = bounds.origin.y + 6.0F},

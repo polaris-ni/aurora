@@ -4,7 +4,7 @@
 ///           Surface::content_inset 经 PaddingEdges 修饰自动下沉应用内容（绘制/命中同源）；
 ///           根注入 MediaQuery 调整为内容区口径（padding 归零、size 扣除内缩）；
 ///           inset 变化（模拟进出全屏归零）下一帧即生效，无需应用介入；
-///           CHG-007：命中派发以壳为根时按控件实际绘制位置点击即命中（绘制/命中零漂移）
+///           ：命中派发以壳为根时按控件实际绘制位置点击即命中（绘制/命中零漂移）
 
 #include <filesystem>
 #include <memory>
@@ -133,7 +133,7 @@ AURORA_TEST_CASE(zero_inset_keeps_legacy_geometry) {
 }
 
 AURORA_TEST_CASE(hit_dispatch_follows_inset_translation) {
-    // CHG-007：位置类事件以整窗下沉壳为命中根——按控件**实际绘制位置**点击必须命中。
+    // ：位置类事件以整窗下沉壳为命中根——按控件**实际绘制位置**点击必须命中。
     // 修复前 `WindowHost` 以应用根（内容坐标域）为派发根，命中整体偏移 inset.top
     // （demo_csd_gallery 的「按钮要往上一栏点」即此症状）。
     auto win = make_window(headless_opts("inset_hit"));

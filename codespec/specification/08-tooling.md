@@ -294,7 +294,7 @@ Column#root { bounds:[0,0,640,480]; visible:true; listeners:[on_click] }
 
 ## 5 InspectorServer（远程 HTTP）
 
-`InspectorServer`（`inspector/inspector_server.h`）是 localhost-only HTTP 服务器，暴露 REST 端点供外部 Inspector 工具远程访问运行时 widget 树。跨平台传输经同步阻塞工具面 `aurora::net::blocking`（CHG-006 建立，CHG-018 §4 归位为「仅供非 UI 线程的工具与测试宿主」，契约见 [`specification/06-app-platform.md`](06-app-platform.md) §8.8 与 §8.8.16；socket 运行时由库侧随句柄钉住，服务器自身不再持有任何「会话」对象；Windows 的 `ws2_32` / POSIX 的 `pthread` 分别由 `aurora` 与 `aurora_inspector_server` 目标传导），CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`（默认 OFF）。
+`InspectorServer`（`inspector/inspector_server.h`）是 localhost-only HTTP 服务器，暴露 REST 端点供外部 Inspector 工具远程访问运行时 widget 树。跨平台传输经同步阻塞工具面 `aurora::net::blocking`（建立，§4 归位为「仅供非 UI 线程的工具与测试宿主」，契约见 [`specification/06-app-platform.md`](06-app-platform.md) §8.8 与 §8.8.16；socket 运行时由库侧随句柄钉住，服务器自身不再持有任何「会话」对象；Windows 的 `ws2_32` / POSIX 的 `pthread` 分别由 `aurora` 与 `aurora_inspector_server` 目标传导），CMake 开关 `AURORA_BUILD_INSPECTOR_SERVER`（默认 OFF）。
 
 ```cpp
 InspectorServer server{ []() -> au::Node { return build_ui(); } };

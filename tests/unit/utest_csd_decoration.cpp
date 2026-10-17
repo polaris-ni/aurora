@@ -63,7 +63,7 @@ struct SnapshotRow {
 
 // 十格策略表 + 四分量期望（手写推算，见 sample_style 的栏高契约）。
 // **动 `resolve_mode` 前先看这张表**：它记录的是「抽层前 WaylandSurface 构造期 switch」的逐格结果，
-// 任何一格变化都意味着「同样的意图会得到不同的装饰形态」，须同步 CHG-004 验收判据与 codespec/ 回写。
+// 任何一格变化都意味着「同样的意图会得到不同的装饰形态」，须同步 验收判据与 codespec/ 回写。
 constexpr SnapshotRow AURORA_POLICY_SNAPSHOT[] = {
     // Auto / ServerSide + 有 SSD：真·服务端装饰，三项全 false，任何态都不留边距。
     {.policy = DecorationPolicy::Auto,
@@ -526,7 +526,7 @@ AURORA_TEST_CASE(default_metrics_reproduce_legacy_geometry) {
     // 度量覆写引入后 `TitleBarStyle{}`（= 默认 Adwaita）的几何基线必须显式钉住，否则改动
     // 推导式会一次性改坏三套既有预设的观感。期望值全部手写推算（Adwaita，width=800，栏高 36）：
     //   按钮边长 clamp(36-6, 26, 34)=30，间距 3，右缘外边距 6；图标 min(16, 36-20)=16 @ x=12。
-    //   CHG-010 把盒宽改成 libadwaita `.default-decoration` 的「22dp 内容 + 4dp 外边距」(30dp)、
+    //   把盒宽改成 libadwaita `.default-decoration` 的「22dp 内容 + 4dp 外边距」(30dp)、
     //   间距按 `windowcontrols { border-spacing: 3px }` 改为 3，本用例基线随之更新。
     const TitleBarStyle style = sample_style();
     const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, true);

@@ -33,7 +33,7 @@ AURORA_TEST_CASE(factories_set_scheme_and_csd_column) {
 }
 
 AURORA_TEST_CASE(derived_title_bar_style_matches_presets) {
-    // 基准契约：未逐字段定制时，「从 Theme 派生」与「直接取预设」配色字段逐值相同（typed 版，延续 CHG-010）。
+    // 基准契约：未逐字段定制时，「从 Theme 派生」与「直接取预设」配色字段逐值相同（typed 版，延续 ）。
     const TitleBarStyle from_dark = title_bar_style_from_theme(Theme::dark());
     const TitleBarStyle adwaita_dark = TitleBarStyle::from_preset(CsdPreset::AdwaitaDark);
     AURORA_TEST_CHECK_EQ(from_dark.bg_active, adwaita_dark.bg_active);

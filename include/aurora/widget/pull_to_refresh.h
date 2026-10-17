@@ -465,7 +465,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     }
 
     std::function<void()> on_refresh_;
-    /// @brief 下拉指示器强调色（spinner 弧线）；空 = 跟随主题 primary（CHG-011 迁移批：ThemeScope 换肤即生效）。
+    /// @brief 下拉指示器强调色（spinner 弧线）；空 = 跟随主题 primary（迁移批：ThemeScope 换肤即生效）。
     std::optional<Color> indicator_color_;
     /// @brief 顶部覆盖层背景色；空 = 跟随主题 surface。
     std::optional<Color> band_color_;

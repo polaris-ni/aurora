@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/http.h（`PoolOptions`）+ include/aurora/net/http_client.h +
 ///           src/aurora/net/detail/http_pool.h + src/aurora/net/detail/http_pool.cpp
-/// 测试说明: 连接池治理的端到端回归（CHG-018 §12「分段超时与连接池治理」、提案 §16 第 36 项）。
+/// 测试说明: 连接池治理的端到端回归（§12「分段超时与连接池治理」、提案 §16 第 36 项）。
 ///           复用与不回池以对端的 `accepts()` 计数为准（两条请求一条连接 = 复用；两条请求两条连接 =
 ///           判据挡住），五判据各有专例：干净连接复用、开关缺省关（既有「一次 `send` 一条连接」口径）、
 ///           `Connection: close` 不回池、`UntilClose` 分帧不回池、leftover 富余字节不回池（容忍模式下

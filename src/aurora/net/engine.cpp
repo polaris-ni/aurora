@@ -10,7 +10,7 @@
 //
 // 唤醒通道刻意**不引入新的平台代码**：它是一对回环 TCP 流（`blocking::Listener` +
 // `blocking::StreamSocket`，POSIX 与 Winsock 皆可 poll），因此本文件不出现 `poll.h` / `winsock2.h`
-// ——CHG-006 的「平台 socket 头唯一落点是 `src/aurora/net/socket.cpp`」不变量继续成立。
+// ——的「平台 socket 头唯一落点是 `src/aurora/net/socket.cpp`」不变量继续成立。
 
 #include "aurora/net/engine.h"
 

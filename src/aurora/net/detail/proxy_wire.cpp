@@ -1,7 +1,7 @@
 // proxy_wire.cpp —— 代理握手字节层的实现（见 `detail/proxy_wire.h` 的口径条款）。
 //
 // 本文件只做两件事：把要发给代理的字节按文法拼出来，把代理回给我们的字节按文法读回来。
-// 因此这里不出现任何平台 socket 头（CHG-006 的「平台头唯一落点在 socket.cpp」不变量继续成立），
+// 因此这里不出现任何平台 socket 头（的「平台头唯一落点在 socket.cpp」不变量继续成立），
 // 也不发起任何 I/O——「写到套接字 / 从套接字读」属传输切片，本层给它可逐值断言的纯函数。
 
 #include "aurora/net/detail/proxy_wire.h"

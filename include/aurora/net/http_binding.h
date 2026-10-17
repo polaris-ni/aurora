@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief HTTP 交换的声明式交付面：把一次交换接成 `Task` / `Resource` / `StreamResource`（CHG-018 §12）。
+/// @brief HTTP 交换的声明式交付面：把一次交换接成 `Task` / `Resource` / `StreamResource`（§12）。
 /// @file net/http_binding.h
 ///
 /// 本头回答一个问题：**「发起侧的协程出口，怎么直接落到 widget 能读的信号上」**。`Client::send` 交出的是

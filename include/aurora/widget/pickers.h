@@ -189,7 +189,7 @@ class DatePicker : public Widget {
     /// @return view_month_（1..12，随翻月导航变化）。
     [[nodiscard]] auto view_month() const -> int { return view_month_; }
 
-    // ---- CHG-011 主题着色（未显式设色时跟随注入主题角色）----
+    // ---- 主题着色（未显式设色时跟随注入主题角色）----
 
     /// @brief 设置强调色（链式）；用于选中高亮、翻月箭头与选中日数字。
     /// @param c 强调色；缺省跟随主题 `primary`。
@@ -621,7 +621,7 @@ class TimePicker : public Widget {
     /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
-    // ---- CHG-011 主题着色（未显式设色时跟随注入主题角色）----
+    // ---- 主题着色（未显式设色时跟随注入主题角色）----
 
     /// @brief 设置背景色（链式）；用于控件底。
     /// @param c 背景色；缺省跟随主题 `surface`。
@@ -878,7 +878,7 @@ class ColorPicker : public Widget {
     /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
-    // ---- CHG-011 主题着色（未显式设色时跟随注入主题角色）----
+    // ---- 主题着色（未显式设色时跟随注入主题角色）----
 
     /// @brief 设置强调色（链式）；用于选中色板格的高亮描边。
     /// @param c 强调色；缺省跟随主题 `primary`。

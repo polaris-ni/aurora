@@ -4,7 +4,7 @@
 // 点选后重建一个预览窗按该档位运行，并实时显示其 content_inset()：
 //   Auto        —— 优先系统 SSD；Win32 下即 DWM 系统标题栏，host 自绘不激活
 //   ServerSide  —— 强制系统标题栏（KDE / Win32 DWM），无 host 自绘
-//   ClientSide  —— 强制 host 自绘 CSD 标题栏（本次 CHG-004 的 Win32 宿主路径）：
+//   ClientSide  —— 强制 host 自绘 CSD 标题栏（本次 的 Win32 宿主路径）：
 //                  预览窗内置按钮可运行时循环切换 from_preset 的**全部六档**预设
 //                  （Adwaita / Windows / Mac 三套视觉语言 × 明暗两档）/ 切换窗框投影 /
 //                  放置或清除标题栏图标（演示 set_title_bar_style / set_window_frame_style /

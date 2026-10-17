@@ -35,7 +35,7 @@ AURORA_TEST_CASE(default_span_invariants) {
     AURORA_TEST_CHECK_TRUE(span.font == Font{});
     AURORA_TEST_CHECK_NEAR(span.font.size_pt, 14.0F, 1e-4F);
     AURORA_TEST_CHECK_EQ(span.font.weight, 400);
-    // CHG-011 迁移批：默认色未显式设置（空 optional）→ 跟随主题 on_surface（ThemeScope 换肤即生效），
+    // 迁移批：默认色未显式设置（空 optional）→ 跟随主题 on_surface（ThemeScope 换肤即生效），
     // 不再是固定的黑 {0,0,0,255}。
     AURORA_TEST_CHECK_FALSE(span.color.has_value());
 }
@@ -120,7 +120,7 @@ AURORA_TEST_CASE(localized_span_keeps_tr_metadata) {
     AURORA_TEST_CHECK_TRUE(span.color == Color::blue());
 }
 
-// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
 
 AURORA_TEST_CASE(text_span_color_follows_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题 on_surface；主题翻转 ⇒ 解析值翻转（换肤生效）。

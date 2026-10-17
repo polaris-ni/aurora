@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/http_multipart.h + src/aurora/net/http_multipart.cpp
-/// 测试说明: `multipart/form-data` 体流的逐字节回归（CHG-018 §12「大文件流式上传」的构造面）。覆盖固定
+/// 测试说明: `multipart/form-data` 体流的逐字节回归（§12「大文件流式上传」的构造面）。覆盖固定
 ///           边界下线上字节的逐字符形态、库生成边界的合法性与逐实例互不相同、`total_size()` 与实抽字节
 ///           恒等（这条等式是 `Content-Length` 不说谎的前提）、文件部件按段惰性读出并可整条重放、零长正文
 ///           不产出空段（空段只表示「交完了」）、`quoted-string` 的转义、部件媒体类型按扩展名查表与二进制

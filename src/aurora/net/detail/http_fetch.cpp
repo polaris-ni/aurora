@@ -1,4 +1,4 @@
-// Aurora net — wasm fetch 引擎桥（CHG-018 §16 第 37 项）。
+// Aurora net — wasm fetch 引擎桥（§16 第 37 项）。
 //
 // 职责只有一件：把一次 HTTP 交换打包给浏览器 `fetch`，把结局带回来。协议层（重定向链、
 // 超时改道、认证环、进度、Cookie 选择）全在发起侧既有环里；本文件是 wasm 腿的「传输」。

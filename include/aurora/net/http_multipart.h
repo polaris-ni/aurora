@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief `multipart/form-data` 请求体的构造器：内存部件与惰性文件部件（CHG-018 §12 上传便捷面）。
+/// @brief `multipart/form-data` 请求体的构造器：内存部件与惰性文件部件（§12 上传便捷面）。
 /// @file net/http_multipart.h
 ///
 /// 「把一份表单连同几个文件发出去」是 HTTP 侧最常被写坏的一件事：边界字符串手拼、部件头漏一行空行、

@@ -36,7 +36,7 @@ AURORA_TEST_CASE(default_state_and_type_name) {
 
     Json props = Json::object();
     s.serialize_props(props);
-    // 默认底色/高亮色未显式设置：不落盘（跟随主题角色，CHG-011 迁移批）。
+    // 默认底色/高亮色未显式设置：不落盘（跟随主题角色，迁移批）。
     AURORA_TEST_CHECK_FALSE(props.contains("color"));
     AURORA_TEST_CHECK_FALSE(props.contains("highlight"));
     AURORA_TEST_CHECK_NEAR(require_field<double>(props, "duration"), 1.5, 1e-4);
@@ -153,7 +153,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_TRUE(has_highlight);
 }
 
-// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
 
 /// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
 /// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。

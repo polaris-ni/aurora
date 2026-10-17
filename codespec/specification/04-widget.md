@@ -437,7 +437,7 @@ au::Text("Welcome").font_size(24).bold();
 
 ### 4.1 主题回退
 
-强调色（`active_color` / `accent_color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx)` 解析对应角色（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。`Button` 遵同一契约（CHG-011 迁移批起）：`ButtonProps::color` 为 `Reactive<std::optional<Color>>`（保留响应式能力，空 = 跟随 `roles.primary`）、`on_color` 为 `std::optional<Color>`（空 = 跟随 `roles.on_primary`），解析点是接收 `BuildContext` 的 `resolve_background(ctx)` / `resolve_text_color(ctx)`；`describe_static` 的 `default_value` 元数据为 `"theme.primary"` / `"theme.on_primary"`（AI/codegen 面文档值，不参与运行时）。
+强调色（`active_color` / `accent_color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx)` 解析对应角色（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。`Button` 遵同一契约（迁移批起）：`ButtonProps::color` 为 `Reactive<std::optional<Color>>`（保留响应式能力，空 = 跟随 `roles.primary`）、`on_color` 为 `std::optional<Color>`（空 = 跟随 `roles.on_primary`），解析点是接收 `BuildContext` 的 `resolve_background(ctx)` / `resolve_text_color(ctx)`；`describe_static` 的 `default_value` 元数据为 `"theme.primary"` / `"theme.on_primary"`（AI/codegen 面文档值，不参与运行时）。
 
 ### 4.2 状态反馈与禁用态
 

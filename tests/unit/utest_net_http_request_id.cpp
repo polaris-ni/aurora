@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: src/aurora/net/detail/http_request_id.h + src/aurora/net/detail/http_request_id.cpp
-/// 测试说明: HTTP 链路标识的取值形状与判定回归（CHG-018 §12「X-Request-Id」的取值侧；零 socket、零发起侧）。
+/// 测试说明: HTTP 链路标识的取值形状与判定回归（§12「X-Request-Id」的取值侧；零 socket、零发起侧）。
 ///           发起侧只在「三级取定」那一处问本件，故字段补齐与不覆盖的判据在 `utest_net_http_client`；这里
 ///           只断言交出的那一串本身：形状是 `RFC 9562` UUIDv4 的小写文本形态（36 字符、`8-4-4-4-12` 四段
 ///           以 `-` 相连、版本 nibble 恒 `4`、变体 nibble 落 `8`/`9`/`a`/`b`），随机位取自库内置的非密码学

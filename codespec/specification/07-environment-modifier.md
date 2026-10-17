@@ -227,7 +227,7 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 ### 5.3 CSD 派生通道（typed）
 
-`title_bar_style_from_theme(theme)` / `window_frame_style_from_theme(theme, base)`（`theming/csd_style_bridge.h`）签名保留，实现为「预设基座 + CSD 角色组派生」：基座按 `theme.scheme` 取 `CsdPreset::AdwaitaLight` / `AdwaitaDark`（几何 / 显隐 / 度量字段不参与派生，属定制面——维持 CHG-004 口径；CHG-008 / CHG-009 钉住的原生机度与字形口径不动），配色字段从 `csd` 角色组逐项派生（`bg_active` ← `title_bar_bg_active`、`fg_active` ← `title_bar_fg_active`、`close_hover` ← `title_bar_close_hover`、窗框投影色 ← `shadow_color` 等）。`Unspecified` 按 5.2 单一口径取明色列。
+`title_bar_style_from_theme(theme)` / `window_frame_style_from_theme(theme, base)`（`theming/csd_style_bridge.h`）签名保留，实现为「预设基座 + CSD 角色组派生」：基座按 `theme.scheme` 取 `CsdPreset::AdwaitaLight` / `AdwaitaDark`（几何 / 显隐 / 度量字段不参与派生，属定制面——维持 口径；/ 钉住的原生机度与字形口径不动），配色字段从 `csd` 角色组逐项派生（`bg_active` ← `title_bar_bg_active`、`fg_active` ← `title_bar_fg_active`、`close_hover` ← `title_bar_close_hover`、窗框投影色 ← `shadow_color` 等）。`Unspecified` 按 5.2 单一口径取明色列。
 
 **逐值不变量**：`title_bar_style_from_theme(Theme::light())` 与 `from_preset(CsdPreset::AdwaitaLight)`、`Theme::dark()` 与 `from_preset(CsdPreset::AdwaitaDark)` 的配色字段逐值相同（`Theme::light()` / `dark()` 用预设 pinned 值播种 `csd` 组），由 `utest_theme_csd_bridge` 钉死。**`from_bare` 口径**：`with_defaults()` 即 light 基准列，故 `title_bar_style_from_theme(Theme::with_defaults())` ≡ `from_preset(CsdPreset::AdwaitaLight)`——裸主题不再解析出暗色标题栏，这是随角色化重构落地的有意行为变化（迁移路径见 `CHANGELOG.md`）。
 
@@ -237,7 +237,7 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **保留面**：`ThemeScope`（`theming/theme_scope.h`，`Provider<Theme>` 子类，支持经共享 `State<Theme>` 运行时换肤，值变化即子树重渲染）、`inherit_theme(ctx)`、`resolve_theme(root, target)` 查询（`theming/theme_query.h`）、`resolve_color_scheme(explicit, theme, os)` 纯函数（`theming/csd_style_bridge.h`，三级链各层以 `Unspecified` 表示不表态逐层下探）。
 
-**废除面**（随角色化重构退场，迁移路径见 `CHANGELOG.md`）：`Theme` 扁平字段 `background` / `primary` / `on_primary` / `text` / `font`；`TokenValue`；`tokens` / `dark_tokens` 命名令牌表及全部 `token*` / `set_token` 成员（含 `token_for` / `token_in` 解析入口与 `csd.*` / `focus.ring` / `chart.palette.*` 字符串令牌层）；`StyleProps` / `TokenOr<T>` / `ResolvedStyle`（theming 目录下 style_props.h 头无生产消费方，文件本体与测试 `utest_style_props` 已随 CHG-011 收束批删除）。控件取色统一为两态：显式属性值 > 主题角色（未显式设置时角色必有值，无第三态回落），映射表见 [`04-widget.md`](04-widget.md)。
+**废除面**（随角色化重构退场，迁移路径见 `CHANGELOG.md`）：`Theme` 扁平字段 `background` / `primary` / `on_primary` / `text` / `font`；`TokenValue`；`tokens` / `dark_tokens` 命名令牌表及全部 `token*` / `set_token` 成员（含 `token_for` / `token_in` 解析入口与 `csd.*` / `focus.ring` / `chart.palette.*` 字符串令牌层）；`StyleProps` / `TokenOr<T>` / `ResolvedStyle`（theming 目录下 style_props.h 头无生产消费方，文件本体与测试 `utest_style_props` 已随 收束批删除）。控件取色统一为两态：显式属性值 > 主题角色（未显式设置时角色必有值，无第三态回落），映射表见 [`04-widget.md`](04-widget.md)。
 
 **主题 JSON 重建面**：角色集（roles + type_scale + csd + scheme）经 `to_json` / `from_json` 进出，JSON 键名即角色名——stringly 只允许存在于这个序列化边界，不进渲染路径；`ThemeExtension<T>` 不参与自动序列化。
 

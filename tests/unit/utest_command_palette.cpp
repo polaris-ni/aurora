@@ -565,7 +565,7 @@ AURORA_TEST_CASE(props_round_trip_preserves_i18n_semantics) {
     AURORA_TEST_CHECK_EQ(dst2.placeholder_key(), std::string{"host.command_palette.placeholder"});
 }
 
-// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
 
 AURORA_TEST_CASE(command_palette_colors_follow_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。

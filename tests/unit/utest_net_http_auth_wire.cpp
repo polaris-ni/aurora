@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: src/aurora/net/detail/http_auth_wire.h + src/aurora/net/detail/http_auth_wire.cpp
-/// 测试说明: 认证字段文法层与凭据编码的逐值回归（CHG-018 §12 认证切片的解析半边）。覆盖方案名归一
+/// 测试说明: 认证字段文法层与凭据编码的逐值回归（§12 认证切片的解析半边）。覆盖方案名归一
 ///           （`Basic` / `Bearer` 认档位、其余归 `Unsupported` 且原文拼写留在 `name`）、`realm` 单列成字段
 ///           且不重复进参数表（同名多次只取首个）、其余参数的键 ASCII 小写而值保留原文、quoted-string 里
 ///           的逗号不当分隔符、反斜杠转义（`\"` 与 `\\`，以及跟在反斜杠后的任意字符）、裸 token 参数、

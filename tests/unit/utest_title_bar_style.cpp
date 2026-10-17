@@ -19,7 +19,7 @@ AURORA_TEST_CASE(default_style_equals_adwaita_dark_preset) {
     AURORA_TEST_CHECK_EQ(def.fg_inactive, Color{0x91, 0x91, 0x93});
     AURORA_TEST_CHECK_EQ(def.hover_tint, Color{255, 255, 255, 38});
     AURORA_TEST_CHECK_EQ(def.close_hover, Color{0xE0, 0x1B, 0x24});
-    // 原生观感修复（CHG-010）：窗口控制圆底常态底色、标题栏底缘分隔线、按压底色均取 libadwaita
+    // 原生观感修复：窗口控制圆底常态底色、标题栏底缘分隔线、按压底色均取 libadwaita
     // 现行口径（暗色档）。
     AURORA_TEST_CHECK_EQ(def.button_tint, Color{255, 255, 255, 26});
     AURORA_TEST_CHECK_EQ(def.separator, Color{0x1D, 0x1D, 0x20});
@@ -40,7 +40,7 @@ AURORA_TEST_CASE(adwaita_light_preset_values) {
     // 亮色悬停罩是暗色白 α38 的镜像：黑 α38（libadwaita `$button_hover_color` = currentColor 15%）。
     AURORA_TEST_CHECK_EQ(s.hover_tint, Color{0, 0, 0, 38});
     AURORA_TEST_CHECK_EQ(s.close_hover, Color{0xE0, 0x1B, 0x24});
-    // 原生观感修复（CHG-010）：圆底常态底色 = currentColor 10%、按压底色 = 30%、底缘 shade 线。
+    // 原生观感修复：圆底常态底色 = currentColor 10%、按压底色 = 30%、底缘 shade 线。
     AURORA_TEST_CHECK_EQ(s.button_tint, Color{0, 0, 0, 26});
     AURORA_TEST_CHECK_EQ(s.pressed_tint, Color{0, 0, 0, 77});
     AURORA_TEST_CHECK_EQ(s.separator, Color{0xE0, 0xE0, 0xE0});

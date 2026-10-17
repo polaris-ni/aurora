@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/compression.h + src/aurora/core/compression.cpp
-/// 测试说明: 压缩解压编解码器与注册表契约回归（CHG-020）：三格式（gzip / zlib / deflate raw）
+/// 测试说明: 压缩解压编解码器与注册表契约回归：三格式（gzip / zlib / deflate raw）
 ///           解压逐值一致；截断与中部损坏落 `compression-data-corrupt`；`max_output_bytes` 越限落
 ///           `compression-output-too-large`；流式任意切分喂入与一次性对拍且大产物经 Sink 多段交出
 ///           （不物化）；单条流作用域（trailing garbage、finish 后再 push）落 corrupt；注册表面为

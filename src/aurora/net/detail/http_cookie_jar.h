@@ -1,4 +1,4 @@
-// HTTP Cookie Jar 内核（CHG-018 §12「Cookie」条、提案 §16 第 36 项第⑥款）。
+// HTTP Cookie Jar 内核（§12「Cookie」条、提案 §16 第 36 项第⑥款）。
 //
 // `RFC 6265` 的最小集：name / value / domain / path / `Secure` / `HttpOnly` 加过期（`Expires` 与
 // `Max-Age` 并给时 `Max-Age` 优先）。内存、不落盘、不做 `SameSite`——那是浏览器跨站模型的属性，本库

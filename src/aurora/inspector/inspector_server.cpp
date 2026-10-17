@@ -1,5 +1,5 @@
 // Aurora Inspector Server — minimal localhost-only HTTP server for remote widget tree access.
-// Transport goes through aurora::net (CHG-006): Winsock2 / BSD socket adaptation lives in
+// Transport goes through aurora::net (): Winsock2 / BSD socket adaptation lives in
 // src/aurora/net/socket.cpp, this file has zero platform socket vocabulary.
 
 #include "aurora/inspector/inspector_server.h"
@@ -34,7 +34,7 @@
 namespace aurora {
 
 // ---------------------------------------------------------------------------
-// Impl — 传输层句柄全部为 aurora::net 类型（平台 socket 词汇零出现，CHG-006）
+// Impl — 传输层句柄全部为 aurora::net 类型（平台 socket 词汇零出现）
 // ---------------------------------------------------------------------------
 struct InspectorServer::Impl {
     std::function<Node()> root_getter;

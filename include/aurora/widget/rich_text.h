@@ -146,7 +146,7 @@ inline auto measure_rich_text(const std::vector<TextSpan> &spans, float max_widt
 /// 文本经 `default_string_table()` + 当前 `Locale` 解析（支持 i18n）。布局采用确定性贪心换行，
 /// 整串宽度/高度由 `measureRichText` 决定；值来源支持 `Reactive<std::vector<TextSpan>>`。
 ///
-/// 颜色语义（CHG-011 迁移批）：片段 `TextSpan::color` 未显式设置时，跟随本控件 `text_color`
+/// 颜色语义（迁移批）：片段 `TextSpan::color` 未显式设置时，跟随本控件 `text_color`
 /// （缺省再回落主题 `on_surface`）——ThemeScope 换肤即生效；片段显式赋色优先。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json

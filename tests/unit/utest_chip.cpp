@@ -62,7 +62,7 @@ AURORA_TEST_CASE(default_and_labeled_construction) {
     tagged.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "label"), "Tag");
     AURORA_TEST_CHECK_FALSE(props.contains("avatar"));  // 空头像不落盘
-    // CHG-011 迁移批：未显式设色不落盘，绘制时跟随主题 surface_variant（不再钉 230）。
+    // 迁移批：未显式设色不落盘，绘制时跟随主题 surface_variant（不再钉 230）。
     AURORA_TEST_CHECK_FALSE(props.contains("background"));
     AURORA_TEST_CHECK_FALSE(props.contains("text_color"));
     AURORA_TEST_CHECK_FALSE(props.contains("delete_color"));
@@ -233,7 +233,7 @@ AURORA_TEST_CASE(badge_setters_serialize_and_describe) {
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "single");
 }
 
-// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
 
 AURORA_TEST_CASE(chip_colors_follow_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。

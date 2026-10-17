@@ -1,7 +1,7 @@
 // resolver.cpp —— 主机名解析的编排面（本文件不含任何平台 socket 头）。
 //
 // 分层纪律：`getaddrinfo` 属平台 socket 头，仓内唯一落点是 `src/aurora/net/socket.cpp`
-// （CHG-006 不变量），故本文件只做「字面量短路 → 取列表 → 规范化」的编排，平台腿经
+// （不变量），故本文件只做「字面量短路 → 取列表 → 规范化」的编排，平台腿经
 // `net::detail::platform_lookup` 调用。异步腿复用 `net::Engine` 的常驻线程做阻塞查询，完成
 // 投递走 `aurora::detail::post_to_main`——与 `Task<T>` 同一条主线程通道，因此宿主装了自有
 // 投递器时网络完成与 UI 事件共用一个队列（不新增第三种排队形态）。

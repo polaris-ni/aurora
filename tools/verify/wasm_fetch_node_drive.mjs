@@ -1,4 +1,4 @@
-// Aurora verify — wasm fetch 真跑探针的 node 编排脚本（CHG-018 §16 第 37 项验收腿）。
+// Aurora verify — wasm fetch 真跑探针的 node 编排脚本（§16 第 37 项验收腿）。
 //
 // 职责三件：起本地 HTTP 服务端（相一的真实对端，只绑 127.0.0.1）、驱动探针（模块就绪 →
 // `aurora_fetch_probe_run(port)` → 等探针收摊 → 读判据台账）、给退出码（0 = 全过 / 1 = 有判据未过）。

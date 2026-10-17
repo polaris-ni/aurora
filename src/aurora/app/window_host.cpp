@@ -121,7 +121,7 @@ auto WindowHost::attach_surface() -> void {
         [this]() -> void { native_view_host_.pump_engine_events(); });
     // 默认根主题注入的 OS 档：窗口创建时读一次系统明暗偏好并推给 Window（`Window` 自身不直读
     // 注册表/配置文件，避免公共头反向依赖平台层）。系统外观实时变更的再推送属后续生产钩子
-    // （见 CHG-011 提案「OS 偏好读取口径」）；应用亦可 `Window::set_theme` 显式接管最高优先。
+    // （见 提案「OS 偏好读取口径」）；应用亦可 `Window::set_theme` 显式接管最高优先。
     window_->set_os_color_scheme(os_color_scheme());
     if (opts_.max_fps > 0) {
         stats_.set_frame_budget_ms(1000.0 / static_cast<double>(opts_.max_fps));
@@ -289,7 +289,7 @@ auto WindowHost::dispatch(Event &e) -> void {
     // 焦点陷阱依赖它）；子派发路径会自行保存/复原该槽位，嵌套安全。
     FocusManager *const prev_fm = current_focus_manager();
     set_current_focus_manager(&focus_);
-    // 位置类事件以整窗下沉壳为派发根（`hit_root`，CHG-007）：后端上抛的表面坐标与绘制
+    // 位置类事件以整窗下沉壳为派发根（`hit_root`）：后端上抛的表面坐标与绘制
     // 几何经同一条 PaddingEdges 修饰平移命中，inset 非零档（CSD 自绘）不再有「像素与点击
     // 差一栏」的漂移；键盘/文本/组合不经命中链，仍走场景根。
     auto &root = scene_.root();

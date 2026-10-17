@@ -5,7 +5,7 @@
 // 设计约束：
 //   - **只连 loopback**。这是「把运行中的 UI 交给 AI 操作」的边界，绝不允许连到非本机；
 //     因此不做 DNS、不接受主机名，只认 127.0.0.1 / localhost / ::1，且一律连到 127.0.0.1。
-//   - 传输层经核心公共层 `aurora::net`（CHG-006）：Winsock/BSD 适配与两平台形态差异
+//   - 传输层经核心公共层 `aurora::net`：Winsock/BSD 适配与两平台形态差异
 //     （毫秒超时、Windows 运行时配对等）全部收敛在 `src/aurora/net/socket.cpp`，本文件零平台
 //     socket 词汇，只做 HTTP 组帧/收发编排/解析。
 //   - 核心库不感知本文件：本文件不进 `include/`、不进 `src/`；核心承诺的是「零第三方依赖」，

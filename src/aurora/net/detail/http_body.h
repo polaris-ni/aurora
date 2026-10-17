@@ -1,6 +1,6 @@
 #pragma once
 
-// http_body.h —— 请求体的线上形态计划（CHG-018 §12 上传便捷面；仅库实现可见，不属公共 API）。
+// http_body.h —— 请求体的线上形态计划（§12 上传便捷面；仅库实现可见，不属公共 API）。
 //
 // 为何单列：一条请求的体走 `Content-Length` 还是 `Transfer-Encoding: chunked`，是同一条事实的两面——头部里
 // 那句声明，与写完头部之后真正流出的字节，必须说同一件事。声明由 `Request::render_head()` 产出，字节由发起侧

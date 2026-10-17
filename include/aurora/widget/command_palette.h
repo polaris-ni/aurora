@@ -857,7 +857,7 @@ class CommandPalette : public Container {
     std::function<void(const std::string &)> on_execute_;  ///< 执行回调
     std::function<void()> on_close_;  ///< 关闭回调
 
-    /// @brief 主题跟随色（CHG-011 迁移批）：未显式设色时经 `resolve_*` 回落对应主题角色，显式设色优先。
+    /// @brief 主题跟随色（迁移批）：未显式设色时经 `resolve_*` 回落对应主题角色，显式设色优先。
     std::optional<Color> surface_color_;  ///< 卡片背景；空 = 跟随主题 surface
     std::optional<Color> scrim_color_;  ///< 遮罩层；空 = 跟随主题 scrim
     std::optional<Color> divider_color_;  ///< 分隔线；空 = 跟随主题 outline_variant

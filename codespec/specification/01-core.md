@@ -24,7 +24,7 @@
 | URL 值类型 | `url.h`（解析即规范化的 URL / 相对引用 / 百分号编解码 / 查询参数多值表，契约见 §11） |
 | 其他 | `image.h`、`font.h`、`literals.h`、`version.h` |
 
-根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`、`imperative.h`（命令式逃生舱：就地执行一段命令式代码块）。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`。）
+根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`、`imperative.h`（命令式逃生舱：就地执行一段命令式代码块）。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`）
 
 ---
 
@@ -739,7 +739,7 @@ class SaxHandler {
 > 覆盖 `include/aurora/core/headers.h`（header-only 值类型，无 `.cpp`）。
 > 该类型是通用网络栈的两个 `core/` 基础件之一（另一个是 `Url`，契约见 §11）；
 > HTTP / SSE / WebSocket 握手与 Inspector 的头部读写共用它，动机见
-> [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §12。
+>  §12。
 
 ### 10.1 定位与边界
 
@@ -799,7 +799,7 @@ class SaxHandler {
 > 覆盖 `include/aurora/core/url.h` + `src/aurora/core/url.cpp`。
 > 两个 `core/` 基础件中的另一个（`Headers` 见 §10）；`Request` / `WebSocket::connect` /
 > Inspector 的 URL 读写共用它，动机见
-> [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §12。
+>  §12。
 
 ### 11.1 定位与边界
 

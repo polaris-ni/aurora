@@ -32,7 +32,7 @@ AURORA_TEST_CASE(default_follows_theme_roles_when_colors_unset) {
     p.serialize_props(props);
     // 空消息序列化原样空串（绘制期才回退 "(placeholder)"）。
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "message"), "");
-    // 默认三色未显式设置：不输出键，跟随主题角色（CHG-011 迁移批）。
+    // 默认三色未显式设置：不输出键，跟随主题角色（迁移批）。
     AURORA_TEST_CHECK_FALSE(props.contains("background_color"));
     AURORA_TEST_CHECK_FALSE(props.contains("border_color"));
     AURORA_TEST_CHECK_FALSE(props.contains("text_color"));
@@ -124,7 +124,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_EQ(out.size(), 0U);
 }
 
-// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
 
 /// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
 /// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用

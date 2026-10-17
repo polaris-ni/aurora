@@ -226,7 +226,7 @@ add_dependencies(gen_debug_api_json gen_debug_api)
 # MCP Server：stdio JSON-RPC 2.0，供 AI Agent 直接调用。
 aurora_add_tool(aurora_mcp tools/servers/aurora_mcp.cpp)
 
-# wasm fetch 引擎真跑探针（CHG-018 §16 第 37 项的验收腿）：node ≥ 18 下真跑，相一以真实 fetch
+# wasm fetch 引擎真跑探针（§16 第 37 项的验收腿）：node ≥ 18 下真跑，相一以真实 fetch
 # 打编排脚本起的本地 http 服务端（只绑 127.0.0.1、零出站），相二以脚本化替身覆盖受限形态。
 # 落点说明：源文件住 tools/verify/（真机验收语义同族），但**不经 AuroraVerify.cmake 注册**——
 # 那一族默认 OFF + EXCLUDE_FROM_ALL（真实桌面会话、非确定），本探针只绑回环、可在 CI 与默认
@@ -246,7 +246,7 @@ if (EMSCRIPTEN AND AURORA_BACKEND_WASM)
             COMMENT "Copying wasm fetch probe node driver next to the module")
 endif ()
 
-# live_* 工具族的 loopback HTTP 传输经 aurora::net（CHG-006）：socket 库需求由核心库
+# live_* 工具族的 loopback HTTP 传输经 aurora::net：socket 库需求由核心库
 # `aurora` 的 PUBLIC ws2_32 传导（见顶层 CMakeLists），此处不再散挂；也刻意**不**依赖
 # AURORA_BUILD_INSPECTOR_SERVER（应用侧是否起 InspectorServer 由应用自己 opt-in）。
 
@@ -267,12 +267,12 @@ if (NOT EMSCRIPTEN)
     aurora_add_tool(aurora_e2e_client tools/e2e/e2e_client.cpp)
     # 能力层 include "inspector_client.h"（tools/servers/，aurora_add_tool 未注入该路径）。
     target_include_directories(aurora_e2e_client PRIVATE "${AURORA_SOURCE_DIR}/tools/servers")
-    # 传输层经 aurora::net（CHG-006），ws2_32 由核心库 PUBLIC 传导，不再散挂。
+    # 传输层经 aurora::net，ws2_32 由核心库 PUBLIC 传导，不再散挂。
     set_target_properties(aurora_e2e_client PROPERTIES EXCLUDE_FROM_ALL ON)
 endif ()
 
 # 注：原 tools/ai_compat_test（AI 兼容性批量验证可执行）已移除 —— 其 fixture 管线
-# （from_json → validate_ui → to_code）由 tests/integration/itest_ai_compat.cpp（:75 起的多个 AURORA_TEST_CASE）完整覆盖，且后者
+# （from_json → validate_ui → to_code）由 tests/integration/itest_ai_compat.cpp（75 起的多个 AURORA_TEST_CASE）完整覆盖，且后者
 # 改为目录遍历后是前者的超集（另含纯内存用例）。保留两份属重复实现。
 
 # 渲染基准：HeadlessSurface + Painter 多矩阵计时（非 CTest 断言，仅性能基线）。
@@ -315,7 +315,7 @@ endif ()
 # Inspector 远程 HTTP 接口（可选，跨平台）：localhost-only HTTP 服务器，
 # 暴露 REST 端点供外部 Inspector 工具访问 widget 树。
 # inspector_server.cpp 编入独立静态库 aurora_inspector_server（不编入核心 aurora 库）——
-# 隔离理由是「服务端实现不进核心」；socket 传输本身已由核心自带 aurora::net 提供（CHG-006，
+# 隔离理由是「服务端实现不进核心」；socket 传输本身已由核心自带 aurora::net 提供（
 # Windows 的 ws2_32 经 aurora PUBLIC 传导），POSIX 腿仍需 Threads::Threads 供 worker 线程。
 option(AURORA_BUILD_INSPECTOR_SERVER "Build Inspector remote HTTP server" OFF)
 if (AURORA_BUILD_INSPECTOR_SERVER)

@@ -4,7 +4,7 @@
 /// @file net/detail/async_io.h
 ///
 /// **仅供 `src/aurora/net/` 实现侧使用，不占公共 API 预算。**存在理由有三：
-/// 1. 「平台 socket 头唯一落点在 `src/aurora/net/socket.cpp`」这条既有不变量（CHG-006）要继续成立，
+/// 1. 「平台 socket 头唯一落点在 `src/aurora/net/socket.cpp`」这条既有不变量要继续成立，
 ///    异步传输层就不能自己碰 `<winsock2.h>` / `<sys/socket.h>`，只能经本头借道。
 /// 2. 非阻塞收发的事实形态是**三态**（完成若干字节 / 内核暂无进展 / 失败），而公共面的失败形态是
 ///    `Result`。「暂无进展」是一次正常的空转，不该占用一枚错误码——让它进 `Result` 会诱导调用方

@@ -1,6 +1,6 @@
 #pragma once
 
-/// @brief wasm fetch 引擎桥（CHG-018 §16 第 37 项：wasm 腿的 HTTP 交换由浏览器 `fetch` 交付）。
+/// @brief wasm fetch 引擎桥（§16 第 37 项：wasm 腿的 HTTP 交换由浏览器 `fetch` 交付）。
 /// @file net/detail/http_fetch.h
 ///
 /// wasm 腿没有 fd 语义（`Engine` 维持 `NullEngine`），HTTP 腿是唯一例外：整次交换打包给浏览器

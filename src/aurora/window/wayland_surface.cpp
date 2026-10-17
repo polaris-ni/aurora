@@ -405,7 +405,7 @@ void ptr_enter(void *data, wl_pointer * /*p*/, std::uint32_t serial, wl_surface 
     d.pointer_enter_serial = serial;
     d.apply_cursor(true);
     // 表面坐标 → 内容坐标（阴影边距平移；后端内部 CSD 判定用，纯逻辑见 detail::csd_geometry.h）；
-    // 对应用转发的是**整幅表面坐标**（CHG-007：下沉折算统一由派发根 ContentInsetRoot 壳承担）。
+    // 对应用转发的是**整幅表面坐标**（下沉折算统一由派发根 ContentInsetRoot 壳承担）。
     const int m = d.shadow_margin();
     d.ptr_x = csd::surface_to_content(wl_fixed_to_double(sx), m);
     d.ptr_y = csd::surface_to_content(wl_fixed_to_double(sy), m);
@@ -421,7 +421,7 @@ void ptr_leave(void *data, wl_pointer * /*p*/, std::uint32_t /*serial*/, wl_surf
 void ptr_motion(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, wl_fixed_t sx, wl_fixed_t sy) {
     Impl &d = *static_cast<Impl *>(data);
     // 表面坐标 → 内容坐标（与 ptr_enter 同映射；标题栏命中/全屏揭示在此坐标域判定）；
-    // 对应用转发仍取表面坐标原值（CHG-007，见 ptr_enter 注释）。
+    // 对应用转发仍取表面坐标原值（见 ptr_enter 注释）。
     const int m = d.shadow_margin();
     d.ptr_x = csd::surface_to_content(wl_fixed_to_double(sx), m);
     d.ptr_y = csd::surface_to_content(wl_fixed_to_double(sy), m);
@@ -494,7 +494,7 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
             }
             return;
         }
-        // 对应用转发整幅表面坐标（CHG-007）：内容坐标 + margin（映射值仅供后端内部判定）。
+        // 对应用转发整幅表面坐标：内容坐标 + margin（映射值仅供后端内部判定）。
         const int m_rel = d.shadow_margin();
         d.send_mouse(MouseAction::Release, MouseButton::Left, static_cast<float>(d.ptr_x + m_rel),
                      static_cast<float>(d.ptr_y + m_rel));
@@ -632,7 +632,7 @@ void ptr_axis(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, std::uint3
     // Wayland axis 正值 = 内容向下/向右滚动，量纲为表面像素（一格滚轮约 10–15px）；
     // 归一到 aurora 约定：上滚为正、约一格 ±1（与 X11 Button4/5 幅度一致）。
     const float amount = static_cast<float>(wl_fixed_to_double(value)) / 10.0F;
-    // 位置取整幅表面坐标（CHG-007：内容坐标 + margin；与指针转发同口径）。
+    // 位置取整幅表面坐标（内容坐标 + margin；与指针转发同口径）。
     const int margin = d.shadow_margin();
     ScrollEvent se;
     se.position = Point{.x = static_cast<float>(d.ptr_x + margin), .y = static_cast<float>(d.ptr_y + margin)};

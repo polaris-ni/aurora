@@ -213,7 +213,7 @@ AURORA_TEST_CASE(paint_covers_indicator_content_and_button_labels) {
     AURORA_TEST_CHECK_EQ(sigs.size(), 0U);  // Stepper 无外露信号
 }
 
-// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
 
 AURORA_TEST_CASE(stepper_colors_follow_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。

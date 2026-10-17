@@ -1,12 +1,12 @@
-// Aurora net — 跨平台 socket 操作层实现（CHG-006：本仓唯一的 Winsock2 / BSD socket 适配落点）。
+// Aurora net — 跨平台 socket 操作层实现（本仓唯一的 Winsock2 / BSD socket 适配落点）。
 //
 // 本文件之外的一切 TU 都不应出现平台 socket 头/裸调用（grep 判据见
-// codespec/changes/winsock-bsd-socket-layer/proposal.md 验收判据 2）。两平台差异在此一次消化：
+//  验收判据 2）。两平台差异在此一次消化：
 //   - 句柄形态：Winsock `SOCKET`（UINT_PTR，无效 = INVALID_SOCKET）vs POSIX `int`（无效 < 0），
 //     对外统一为 `std::intptr_t`（-1 = 无效）。
 //   - 运行时：Windows 须 WSAStartup/WSACleanup（引用计数，见本文件的 `runtime_pinned`），POSIX 无此概念。
 //   - 超时选项：SO_RCVTIMEO/SO_SNDTIMEO 在 Winsock 收 DWORD 毫秒、POSIX 收 struct timeval；
-//     误传形态在 Windows 上会把「5 秒」执行成「5 毫秒」（历史踩坑，见 CHG-006 动机）。
+//     误传形态在 Windows 上会把「5 秒」执行成「5 毫秒」（历史踩坑，见 动机）。
 //   - select 第一参：Windows 忽略、POSIX 须 max_fd+1。
 //   - recv/send 长度与返回：POSIX 为 ssize_t（64 位）、Winsock 为 int；按块上限（≤1MiB）
 //     使正返回值必落 int 区间，窄化在实现侧一次解决。

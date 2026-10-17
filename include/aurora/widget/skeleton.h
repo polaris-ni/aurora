@@ -145,7 +145,7 @@ class Skeleton : public LeafWidget {
         Widget::serialize_props(props);
         props.set("width", size_.width);
         props.set("height", size_.height);
-        // 底色/高亮带色仅在显式设置时输出：保留「跟随主题角色」语义（CHG-011 迁移批）。
+        // 底色/高亮带色仅在显式设置时输出：保留「跟随主题角色」语义（迁移批）。
         if (base_.has_value()) {
             props.set("color", color_to_json(*base_));
         }

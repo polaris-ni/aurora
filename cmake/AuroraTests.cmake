@@ -213,7 +213,7 @@ if (AURORA_BUILD_TESTS)
         # 库侧差异，聚合后收敛到 runner 一处：
         #   shcore — dpi_awareness 用例（GetDpiForWindow 等）高 DPI 回归；inspector — 检视 server pimpl 实现；
         #   -ffp-contract=off — 标量黄金参考禁 FMA 收缩（目标级应用：仅禁收缩，语义安全）。
-        # ws2_32 不再散挂 runner（CHG-006）：Inspector 传输全部经核心公共层 aurora::net，
+        # ws2_32 不再散挂 runner：Inspector 传输全部经核心公共层 aurora::net，
         # 由 `aurora` 的 PUBLIC ws2_32 传导，与 AURORA_BUILD_INSPECTOR_SERVER 开关无关。
         if (WIN32)
             # oleacc —— E2E 平台语义通道（tools/include/e2e/uia_client.h）与探针

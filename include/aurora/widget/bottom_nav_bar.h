@@ -154,7 +154,7 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
         Widget::serialize_props(props);
         props.set("selected_index", selected_index);  // NOLINT(*-pro-bounds-avoid-unchecked-container-access)
         props.set("bar_height", bar_height);
-        // 展示色仅在显式设置时输出：保留「跟随主题角色」语义（CHG-011 迁移批）。
+        // 展示色仅在显式设置时输出：保留「跟随主题角色」语义（迁移批）。
         if (background_color.has_value()) {
             props.set("background_color", color_to_json(*background_color));
         }

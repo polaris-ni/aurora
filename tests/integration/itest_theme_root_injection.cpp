@@ -1,6 +1,6 @@
 /// 测试类型: integration
 /// 目标单元: include/aurora/window/window.h（prepare_context 根主题注入）+ theming/theme_scope.h
-/// 测试说明: 集成——Window::present_root 自动注入根 Theme（CHG-011 接线批）。验证三级优先链：
+/// 测试说明: 集成——Window::present_root 自动注入根 Theme（接线批）。验证三级优先链：
 /// 显式 set_theme > set_os_color_scheme 推入的 OS 档（经稳定 seam 模拟，不依赖真机外观）> 明色；
 /// 探针 widget 经 inherit_theme(ctx) 读到注入主题，scheme 携带解析后最终档（非 Unspecified）。
 /// 另覆盖 OS 档位变化的生产链路：HeadlessSurface 的 emit_os_color_scheme_change seam

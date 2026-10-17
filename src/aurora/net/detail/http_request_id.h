@@ -1,4 +1,4 @@
-// http_request_id.h —— 一次 HTTP 交换的链路标识（CHG-018 §12「X-Request-Id 链路标识」；
+// http_request_id.h —— 一次 HTTP 交换的链路标识（§12「X-Request-Id 链路标识」；
 // 仅库实现可见，不属公共 API）。
 //
 // 为何单列：本文件里只有「一枚标识取成什么形状」这一条纯逻辑，零 socket、零时钟、零平台头，故它的文法

@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/http_auth.h + src/aurora/net/http_auth.cpp
-/// 测试说明: 认证值层与两枚内置提供方的形态回归（CHG-018 §12 认证切片的值半边）。覆盖 `AuthChallenge::mechanism()`
+/// 测试说明: 认证值层与两枚内置提供方的形态回归（§12 认证切片的值半边）。覆盖 `AuthChallenge::mechanism()`
 ///           按档位命中/落空、`AuthMechanism::parameter()` 的大小写不敏感与 `realm` 不在此处、`AuthDecision::empty()`
 ///           即「放弃」这一唯一表达、`basic_credentials()` 的 UTF-8 组串逐字节（含 `RFC 7617 §2.1` 的示例向量、
 ///           口令里的冒号不做转义）、内置件只在挑战点名自己那枚方案时答复（只给 `Digest` 时答空而不是拒答）、

@@ -36,7 +36,7 @@ namespace aurora {
 /// 2. **配色字段**：从 `theme.csd` 角色组直接取（`CsdRoles::light()` / `dark()` 的取值 ≡ 对应
 ///    Adwaita 预设，故工厂主题派生即等于预设；应用改 `theme.csd` 某字段即逐字段定制）。
 ///
-/// 栏高 / 布局语言 / 显隐 / 度量等几何与行为字段不参与派生（属定制面，维持 CHG-004 口径）。
+/// 栏高 / 布局语言 / 显隐 / 度量等几何与行为字段不参与派生（属定制面，维持 口径）。
 /// @param t 生效主题（`scheme` 为最终档、`csd` 为对应列或由应用逐字段覆写）。
 /// @return 派生样式。
 [[nodiscard]] inline auto title_bar_style_from_theme(const Theme &t) -> TitleBarStyle {

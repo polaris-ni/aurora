@@ -235,7 +235,7 @@ class Stepper : public LeafWidget {
         Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
         props.set("current", current_);
         props.set("step_count", static_cast<int>(steps_.size()));
-        // active/inactive 颜色仅在显式设置时输出：保留「跟随主题角色」语义（CHG-011 迁移批）。
+        // active/inactive 颜色仅在显式设置时输出：保留「跟随主题角色」语义（迁移批）。
         if (active_color_.has_value()) {
             props.set("active_color", color_to_json(*active_color_));
         }
@@ -288,7 +288,7 @@ class Stepper : public LeafWidget {
         for (size_t i = 0; i < steps_.size(); ++i) {
             const bool is_current = std::cmp_equal(i, current_);
             const bool is_done = std::cmp_less(i, current_);
-            // 当前步强调色 / 普通步色：未显式设色时回落主题角色（CHG-011 迁移批）。
+            // 当前步强调色 / 普通步色：未显式设色时回落主题角色（迁移批）。
             const Color text_color = is_current ? resolve_active_color(ctx) : resolve_inactive_color(ctx);
             const std::string prefix = is_done ? "✓ " : (std::to_string(i + 1) + std::string{". "});
             p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + 12.0F, .y = y + 10.0F},

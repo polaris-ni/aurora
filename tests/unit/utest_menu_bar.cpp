@@ -390,7 +390,7 @@ AURORA_TEST_CASE(non_press_event_falls_through_to_base) {
     AURORA_TEST_CHECK_EQ(hits, 0);
 }
 
-// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
 
 /// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
 /// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。

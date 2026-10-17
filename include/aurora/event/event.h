@@ -329,7 +329,7 @@ struct DragOffer {
 /// 求交后写定，宿主据此决定 OS 光标反馈。
 struct SystemDropEvent : Event {
     SystemDropPhase phase = SystemDropPhase::Drop;  ///< 阶段（默认 `Drop`，便于程序化构造落放事件）
-    Point position;  ///< 落点（整幅表面逻辑坐标，契约见 CHG-007 收口后的位置类事件口径）
+    Point position;  ///< 落点（整幅表面逻辑坐标，契约见 收口后的位置类事件口径）
     std::vector<std::string> formats;  ///< 本次拖放可用格式的 MIME 清单
     DragAction proposed = DragAction::None;  ///< 源建议的动作
     DragAction allowed = DragAction::None;  ///< 目标允许的动作（派发器按 accept 查询与 proposed 求交后写定）

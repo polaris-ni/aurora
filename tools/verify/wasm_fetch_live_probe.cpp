@@ -1,4 +1,4 @@
-// Aurora verify — wasm fetch 引擎真跑探针（CHG-018 §16 第 37 项的验收腿）。
+// Aurora verify — wasm fetch 引擎真跑探针（§16 第 37 项的验收腿）。
 //
 // 覆盖范围：wasm 腿的 HTTP 交换经浏览器 `fetch` 交付——本探针在 node ≥ 18 下真跑（全局 `fetch`
 // 在场），分两相：

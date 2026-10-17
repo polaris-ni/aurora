@@ -1,4 +1,4 @@
-// Aurora core — URL 值类型实现（CHG-018 §12 基础件：RFC 3986 语法、百分号编码、相对解析、IDNA punycode）。
+// Aurora core — URL 值类型实现（§12 基础件：RFC 3986 语法、百分号编码、相对解析、IDNA punycode）。
 //
 // 与 net/address.cpp 同一纪律：**手写、不经平台 API**，让同一输入在 Win32 / POSIX / wasm 上得到
 // 同一结果与同一条诊断（跨平台一致行为判据见 codespec/specification/06-app-platform.md §12.2）。

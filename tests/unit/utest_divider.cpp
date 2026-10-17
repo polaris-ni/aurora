@@ -142,7 +142,7 @@ AURORA_TEST_CASE(describe_reports_metadata) {
     AURORA_TEST_CHECK_TRUE(has_indent);
 }
 
-// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
 
 AURORA_TEST_CASE(divider_color_follows_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题 outline_variant；主题翻转 ⇒ 解析值翻转（换肤生效）。

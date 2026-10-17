@@ -1,4 +1,4 @@
-/// @brief HTTP 会话面（身份层）：Cookie Jar + 缺省配置（CHG-018 §12「Cookie」条、提案 §16 第 36 项第①款）。
+/// @brief HTTP 会话面（身份层）：Cookie Jar + 缺省配置（§12「Cookie」条、提案 §16 第 36 项第①款）。
 /// @file net/http_session.h
 ///
 /// 本头回答一个问题：**「一组请求共享同一次登录态」**。`Session` 收窄为身份层——持一枚内存 Cookie Jar

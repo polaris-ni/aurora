@@ -750,7 +750,7 @@ retryable = false
 message = "Clipboard payload could not be committed: '{detail}'"
 hint = "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free memory or retry the copy"
 
-# ---- net-*: aurora::net socket 层（CHG-006 统一 socket 操作层）----
+# ---- net-*: aurora::net socket 层（统一 socket 操作层）----
 
 [[error]]
 enum = "NetRuntimeFailed"

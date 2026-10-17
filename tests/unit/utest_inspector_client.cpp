@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: tools/servers/inspector_client.h
 /// 测试说明: 覆盖最小 Inspector HTTP 客户端的「发不出手之前」拒单口径（非回环主机 / 端口 0 /
-/// target 未以 '/' 开头）与**收发超时的平台形态**（传输经 `aurora::net`，CHG-006）。后者是回归位：Winsock 的
+/// target 未以 '/' 开头）与**收发超时的平台形态**（传输经 `aurora::net`）。后者是回归位：Winsock 的
 /// `SO_RCVTIMEO` / `SO_SNDTIMEO` 收的是 `DWORD` 毫秒数，POSIX 收的是 `struct timeval`，
 /// 把 `timeval` 递给 Winsock 它只把前 4 字节当毫秒读——于是「5 秒」在 Windows 上实际生效成
 /// 「5 毫秒」，慢于 5ms 的正常响应被 `WSAETIMEDOUT` 掐成 `empty response`。用例因此起一个
@@ -14,7 +14,7 @@
 /// 的用例名字面量」与「runner --list」逐条比对，被 `#ifdef` 摘掉的声明在另一种构建里必然单边
 /// 失踪。故 wasm 只让用例体退化为 AURORA_TEST_SKIP，声明恒可见（与 utest_x11_surface 同一手法）。
 /// ⚠️ socket 运行时由库侧随句柄创建自动钉住（`aurora::net::blocking` 契约），用例不再需要持有
-/// 任何「会话」前置件。CHG-006 迁移时曾要求体内持 `net::Session`，漏持在 Linux 腿无感、
+/// 任何「会话」前置件。迁移时曾要求体内持 `net::Session`，漏持在 Linux 腿无感、
 /// Windows 腿恒红（`socket()` 落 WSANOTINITIALISED）；该约束现已由实现侧吸收。
 
 #include <chrono>

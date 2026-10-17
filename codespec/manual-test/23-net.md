@@ -8,7 +8,7 @@
 
 ### 1.1 被测模块
 
-`net/` —— 通用网络栈（提案 [`changes/xplat-network-stack/proposal.md`](../changes/xplat-network-stack/proposal.md) §17 的落地件），在实测依赖分层中位于 L0（`app::EventSourceRegistry`）之上、L3（HTTP）之下：
+`net/` —— 通用网络栈（提案  §17 的落地件），在实测依赖分层中位于 L0（`app::EventSourceRegistry`）之上、L3（HTTP）之下：
 
 | 头 | 职责 |
 |:---|:---|

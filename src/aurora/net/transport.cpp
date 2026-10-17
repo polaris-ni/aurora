@@ -1,7 +1,7 @@
 // transport.cpp —— 事件驱动字节流的编排面。
 //
 // 分层纪律：本文件**不出现任何平台 socket 头**，非阻塞系统调用一律借道 `net/detail/async_io.h`
-// （CHG-006「平台 socket 头唯一落点是 socket.cpp」不变量）；等待由 `app::EventSourceRegistry` 的
+// （「平台 socket 头唯一落点是 socket.cpp」不变量）；等待由 `app::EventSourceRegistry` 的
 // 驱动方负责（缺省是 `net::Engine` 的常驻 poll 线程，宿主自带等待集时是宿主自己）。
 //
 // 并发形态（三条，规范性）：

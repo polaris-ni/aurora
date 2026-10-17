@@ -2,7 +2,7 @@
 //
 // 本文件**不含任何平台 socket/poll 头**：真正的「等待某些句柄就绪」经可注入的 Poller 接缝
 // 委托给上层（net 引擎层用 WSAPoll/poll 安装、测试用脚本化实现安装）。这让 app 层保持在
-// net 层之下且不触碰 CHG-006 的「socket 头唯一落点」不变量。
+// net 层之下且不触碰 的「socket 头唯一落点」不变量。
 
 #include "aurora/app/event_source_registry.h"
 
@@ -119,7 +119,7 @@ auto EventSourceRegistry::register_source(std::intptr_t handle, WaitInterest int
         return make_error(ErrorCode::NetPlatformUnavailable,
                           "register_source: this leg has no event-source wait semantics");
     }
-    // 有效句柄判据：-1 恒无效（延续 CHG-006 口径）。
+    // 有效句柄判据：-1 恒无效（延续 口径）。
     if (handle == static_cast<std::intptr_t>(-1)) {
         return make_error(ErrorCode::NetPlatformUnavailable, "register_source: handle -1 is not a waitable descriptor");
     }

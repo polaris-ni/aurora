@@ -211,7 +211,7 @@ auto register_core_widgets() -> void {
     reg_default<Slider>("Slider");
     reg_default<ProgressIndicator>("ProgressIndicator");
     reg_default<Divider>("Divider");
-    // 图标体系（CHG-019）：库只提供机制，字体 / SVG 资产由应用提供，不内置图标集。
+    // 图标体系：库只提供机制，字体 / SVG 资产由应用提供，不内置图标集。
     reg_default<Icon>("Icon");
     reg_default<IconButton>("IconButton");
     reg_default<Hero>("Hero", "", Node{});

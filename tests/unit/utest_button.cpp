@@ -134,7 +134,7 @@ AURORA_TEST_CASE(button_defaults_and_type_name) {
     AURORA_TEST_CHECK_NEAR(d.min_width, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(d.min_height, 0.0F, 1e-4F);
     // 默认背景/文字色未显式设置：跟随主题（roles.primary / roles.on_primary），
-    // 不再钉具体色值——换肤即生效（CHG-011 迁移批）。
+    // 不再钉具体色值——换肤即生效（迁移批）。
     AURORA_TEST_CHECK_FALSE(d.color.get().has_value());
     AURORA_TEST_CHECK_FALSE(d.on_color.has_value());
 }
@@ -434,7 +434,7 @@ AURORA_TEST_CASE(cursor_shape_hook_defaults_to_pointing_hand) {
     AURORA_TEST_CHECK(b.cursor_shape() == std::optional{CursorShape::PointingHand});
 }
 
-// ---- 主题跟随（CHG-011 迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
 
 /// 探针：把 protected 的 resolve_* 钩子提到 public（行为与生产路径同一条函数）。
 class ThemeProbe final : public Button {

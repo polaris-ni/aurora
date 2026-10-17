@@ -38,7 +38,7 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
 
     const bool justify = (text_align == TextAlign::Justify);
     float y = bounds.origin.y;
-    // 文字色：显式优先，否则跟随主题 on_surface（CHG-011 迁移批；ThemeScope 换肤即生效）。
+    // 文字色：显式优先，否则跟随主题 on_surface（迁移批；ThemeScope 换肤即生效）。
     const Color fg = resolve_text_color(ctx);
     // Start/End 为方向相对语义：RTL 时 Start=Right、End=Left（每行一致，行外解析一次）。
     const bool rtl = effective_direction(ctx) == TextDirection::RTL;

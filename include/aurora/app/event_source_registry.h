@@ -12,7 +12,7 @@
 ///
 /// 本层刻意**平台无关且不依赖 `net/`**：它只搬运 `std::intptr_t` 句柄与回调，绝不出现任何
 /// 平台 socket/poll 头（`winsock2.h` / `poll.h` 的仓内唯一落点是 `src/aurora/net/socket.cpp`，
-/// CHG-006 不变量）。真正的「阻塞直到某些句柄就绪」经三枚可注入接缝表达：
+/// 不变量）。真正的「阻塞直到某些句柄就绪」经三枚可注入接缝表达：
 /// - `Poller`：把一组 `WaitSource` 等待到就绪（由 net 引擎层或测试安装；未安装时
 ///   `wait_and_dispatch()` 返回 `net-platform-unavailable`，即 wasm 那种「不提供假降级」）。
 /// - `Dispatcher`：把一次就绪回调投回主线程（缺省为就地同步执行，与 `post_to_main` 无 poster
