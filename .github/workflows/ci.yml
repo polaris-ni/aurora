@@ -45,7 +45,7 @@
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
 #  8. lint        — clang-tidy 门禁，矩阵 = pass(DEBUG OFF / ON + 优化开关全关的反极性遍，三份
 #                    编译数据库) × shard(TU 清单分片，现 4 片) 共 12 个作业，去重后 0 finding 才
-#                    通过。纯静态分析，主 Linux 遍在 ubuntu-latest 单跑，且 configure 打开**除
+#                    通过。纯静态分析，主 Linux 遍在 ubuntu-26.04 单跑，且 configure 打开**除
 #                    Windows/macOS 特有宏之外的全部后端与能力开关**（含 WebView 控件；开关串集中
 #                    在顶层 env 的 LINT_CAPABILITY_FLAGS*，native 与 wasm 两份口径），使覆盖面
 #                    尽可能贴近全仓。
@@ -177,7 +177,7 @@ jobs:
       matrix:
         include:
           - name: linux-gcc-release
-            os: ubuntu-latest
+            os: ubuntu-26.04
             build-type: Release
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
             build-demos: true
@@ -185,13 +185,13 @@ jobs:
             # core 的 linux 默认后端面是纯 Headless（X11/GLFW 默认 OFF），无真实后端可期望。
             e2e-expect: ""
           - name: linux-gcc-debug
-            os: ubuntu-latest
+            os: ubuntu-26.04
             build-type: Debug
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
             e2e-expect: ""
           # linux 原生 clang：弥补 gcc 单编译器盲区（模板实例化 / 两阶段名字查找 / ODR 诊断更严格）
           - name: linux-clang-release
-            os: ubuntu-latest
+            os: ubuntu-26.04
             build-type: Release
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
             apt-pkgs: clang
@@ -355,7 +355,7 @@ jobs:
       matrix:
         include:
           - name: linux-x11-wayland-glfw
-            os: ubuntu-latest
+            os: ubuntu-26.04
             apt-deps: libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev libclang1-22
             # Release 作业默认 DEBUG=AUTO→OFF，X11 读回被门控——显式 ON 使 etest_x11 真实运行
             # （期望集口径见 08-tooling §8.2「CI 作业口径」；Wayland 无人值守无合成器，不期望）。
@@ -396,7 +396,7 @@ jobs:
           # libclang1-22：wgpu-native 的 build.rs 经 bindgen 从 webgpu.h 生成 FFI 头，构建期硬
           # 依赖 libclang 共享库；apt.llvm.org 的 llvm-22 源提供与 lint 作业同大版本的 libclang。
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
-          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           sudo apt-get install -y ${{ matrix.apt-deps }}
 
@@ -577,7 +577,7 @@ jobs:
   # ---------------------------------------------------------------------------
   toggles:
     name: toggles (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -698,7 +698,7 @@ jobs:
           # 静态 mbedTLS：安装根是配套动作搭的 `/opt/aurora-tls-mbedtls`（`/usr` 上 openssl 头会
           # 抢先命中，用它就编译不到 `tls_mbedtls.cpp` 了），顺带证明 Debian multiarch 的库定位。
           - name: linux-mbedtls-static
-            os: ubuntu-latest
+            os: ubuntu-26.04
             apt-pkgs: libmbedtls-dev
             cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_NET_TLS_PROVIDER=static:/opt/aurora-tls-mbedtls
           # 动态 OpenSSL：vcpkg classic 模式的三元组根（`include/openssl/ssl.h` + `lib/` + `bin/`）。
@@ -796,7 +796,7 @@ jobs:
       # 额外布置动态库；macOS provider 腿的 dylib 是 dyld 按安装名寻址，显式补一条搜索路径
       # （homebrew keg-only 不在默认 dyld 缓存路径上）；Windows 动态腿按上面的理由只证明链得上。
       - name: Test TLS suite
-        if: matrix.os == 'ubuntu-latest' || matrix.os == 'macos-latest'
+        if: matrix.os == 'ubuntu-26.04' || matrix.os == 'macos-latest'
         shell: bash
         run: |
           if [ -n "${OPENSSL_PREFIX:-}" ]; then
@@ -809,7 +809,7 @@ jobs:
   # ---------------------------------------------------------------------------
   asan:
     name: asan (ubuntu-gcc)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
@@ -861,7 +861,7 @@ jobs:
   # ---------------------------------------------------------------------------
   coverage:
     name: coverage (ubuntu-gcc)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
@@ -914,7 +914,7 @@ jobs:
   # ---------------------------------------------------------------------------
   wasm:
     name: wasm (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # 曾为浏览器口径 lint 从 120 抬到 180；那道 lint 现已拆到作业 8w 分片跑（单遍 69.7 分钟，
     # 占本作业 79.4 分钟里的绝大部分），本作业回到「configure + 构建 + ctest」，120 分钟有余。
     # 矩阵两腿：默认（WASM 单线程，AURORA_CAP_THREADS=0 支）与 pthreads-on（-pthread 真并行
@@ -983,7 +983,7 @@ jobs:
   # ---------------------------------------------------------------------------
   install-consumer:
     name: install + find_package (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -1060,7 +1060,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # 8. 静态检查门禁：clang-tidy 全量 lint（非 third_party 翻译单元，去重后 0 finding 才通过）
   # 版本钉死 clang-tidy-22，与本地 proved 组合（gcc 编译数据库 + clang-tidy 22.x → 0 findings）
-  # 保持一致，避免不同 clang 版本漂移导致门禁误报。仅跑 ubuntu-latest，因为
+  # 保持一致，避免不同 clang 版本漂移导致门禁误报。仅跑 ubuntu-26.04，因为
   # windows/macos 矩阵默认无 clang-tidy，且 lint 与平台无关（纯静态分析）。
   # 依赖 AuroraLint.cmake 提供的 `lint` 目标（需 configure 时 clang-tidy 在 PATH 上）。
   # 双 Pass：分别强制 -DAURORA_ENABLE_DEBUG=OFF / =ON，各自独立编译数据库，
@@ -1083,7 +1083,7 @@ jobs:
   # ---------------------------------------------------------------------------
   lint:
     name: clang-tidy (${{ matrix.pass.label }}, shard ${{ matrix.shard }}/${{ matrix.total }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # 240 → 40：每片 ~140 TU ≈ 24 分钟 tidy，加 apt 安装 / configure / wayland-gen ≈ 4 分钟；40 分钟是
     # 一倍半余量。余量必须留：本轮 TU 编译失败即整片红，慢起来没有上限。
     # 全量矩阵只跑 PR / master(+main) / 每周定时 / 手动触发；分支推送改由下方 lint-incremental
@@ -1117,7 +1117,7 @@ jobs:
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
           # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
-          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           # clang-format-22 一并装上：aurora_find_clang_format 在 configure 期要找一个读得懂
           # 本仓 .clang-format 的版本，缺它则 format 目标与生成链静默降级（见 BUILD_OPTIONS.md §4.7）。
@@ -1313,7 +1313,7 @@ jobs:
   # ---------------------------------------------------------------------------
   lint-wasm:
     name: clang-tidy (wasm, shard ${{ matrix.shard }}/${{ matrix.total }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # 40：单片 ~17 分钟 tidy + emsdk/apt/configure ~4 分钟，留一倍余量。
     # 与作业 8 同一套门禁分流：全量矩阵只在 PR / master(+main) / 定时 / 手动触发；分支推送
     # 由 lint-incremental 单 job 覆盖浏览器口径的增量子集。
@@ -1347,7 +1347,7 @@ jobs:
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
           # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
-          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           # clang-format-22 一并装上：aurora_find_clang_format 在 configure 期要找一个读得懂
           # 本仓 .clang-format 的版本，缺它则 format 目标与生成链静默降级（见 BUILD_OPTIONS.md §4.7）。
@@ -1481,7 +1481,7 @@ jobs:
   # ---------------------------------------------------------------------------
   lint-incremental:
     name: clang-tidy (incremental, push)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # 单 job 串三遍：子集小时约 5–15 分钟；回落 origin/master 差异或触发全局全量时可能放大，
     # 留一倍余量。
     timeout-minutes: 90
@@ -1495,7 +1495,7 @@ jobs:
       - name: Install clang-tidy-22 + desktop backend dev dependencies
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
-          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           # clang-format-22 与扩面所需的后端开发包（X11/Wayland/GLFW 的 configure 依赖）一并装上，
           # 与作业 8 同口径。ALSA 走运行期 dlopen，无 dev 包依赖。libclang1-22 见作业 8 同名步骤说明。
@@ -1784,7 +1784,7 @@ jobs:
   # ---------------------------------------------------------------------------
   fmt:
     name: clang-format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
