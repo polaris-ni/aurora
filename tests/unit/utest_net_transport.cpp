@@ -147,9 +147,12 @@ auto make_host_pair(aurora::app::EventSourceRegistry &registry) -> HostPair {
                                  }
                                  pair.client = std::move(result.value());
                                  ++connected;
+                                 ::fprintf(stderr, "[diag][tp] connect delivered #%d\n", connected.load());
                              });
 
+    ::fprintf(stderr, "[diag][tp] before pump\n");
     AURORA_TEST_REQUIRE(pump_until(registry, [&]() { return accepted.load() == 1 && connected.load() == 1; }));
+    ::fprintf(stderr, "[diag][tp] after pump\n");
     AURORA_TEST_REQUIRE(pair.client.is_open());
     AURORA_TEST_REQUIRE(pair.server.is_open());
     return pair;

@@ -1035,14 +1035,26 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
     }
     const CfReleaser trust_guard{trust};
 
+    // 危险开关的处理要绕开本平台一处硬约束：评估判否之后系统会把链里的证书对象收走——实测
+    // SecTrustEvaluateWithError 返回否之后（乃至评估之前）SecCertificateCopyData 都直接 abort。
+    // 而自签或名不匹配的链在本后端没有任何策略能评估通过，于是「仍评估一次、只是不采纳结论」这条
+    // 其他腿可行的口径在这里必然落在不可用的链上。故把对端叶子自己登记为唯一信任锚：评估因此得出
+    // 「可信」结论，链对象随之可用，pin 摘要才拿得到（危险开关不豁免 pin 判定，公共面口径见
+    // utest_net_tls 的 pin_mismatch_rejects_a_trusted_peer_and_insecure_switch_does_not_mask_it）。
     if (insecure_) {
-        // 危险开关下先摘摘要、不评估：自签或名不匹配的链在本后端拿不到「可信」结论（没有可用的信任根，
-        // 也没有任何策略能让它通过），而系统会把评估失败的 trust 里的证书对象置为不可用——实测在
-        // SecTrustEvaluateWithError 返回否之后，SecCertificateCopyData 直接 abort（Abort trap: 6）。
-        // 因此「仍评估一次、只是不采纳结论」这条其他腿可行的口径在本平台不可行：要拿到对端证书就必须在
-        // 评估之前读链，此时 SecTrustGetCertificateAtIndex 给出的还是 SSLCopyPeerTrust 刚建好的原始链。
-        ::fprintf(stderr, "[tls-st][diag] insecure: capture before evaluate\n");
-        return capture_summary(trust);
+        ::fprintf(stderr, "[tls-st][diag] insecure: anchoring the peer leaf\n");
+        if (::SecTrustGetCertificateCount(trust) > 0) {
+            const SecCertificateRef leaf = ::SecTrustGetCertificateAtIndex(trust, 0);  // Get 规则：不拥有
+            if (leaf != nullptr) {
+                const void *values[] = {leaf};
+                const CFArrayRef anchors = ::CFArrayCreate(nullptr, values, 1, &kCFTypeArrayCallBacks);
+                if (anchors != nullptr) {
+                    ::SecTrustSetAnchorCertificates(trust, anchors);
+                    ::SecTrustSetAnchorCertificatesOnly(trust, true);  // 只认这一张：即「信任对端」的语义
+                    ::CFRelease(anchors);
+                }
+            }
+        }
     }
 
     if (!insecure_) {
