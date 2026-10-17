@@ -396,7 +396,7 @@ jobs:
           # libclang1-22：wgpu-native 的 build.rs 经 bindgen 从 webgpu.h 生成 FFI 头，构建期硬
           # 依赖 libclang 共享库；apt.llvm.org 的 llvm-22 源提供与 lint 作业同大版本的 libclang。
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
-          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           sudo apt-get install -y ${{ matrix.apt-deps }}
 
@@ -1117,7 +1117,7 @@ jobs:
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
           # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
-          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           # clang-format-22 一并装上：aurora_find_clang_format 在 configure 期要找一个读得懂
           # 本仓 .clang-format 的版本，缺它则 format 目标与生成链静默降级（见 BUILD_OPTIONS.md §4.7）。
@@ -1347,7 +1347,7 @@ jobs:
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
           # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
-          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           # clang-format-22 一并装上：aurora_find_clang_format 在 configure 期要找一个读得懂
           # 本仓 .clang-format 的版本，缺它则 format 目标与生成链静默降级（见 BUILD_OPTIONS.md §4.7）。
@@ -1495,7 +1495,7 @@ jobs:
       - name: Install clang-tidy-22 + desktop backend dev dependencies
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
-          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           # clang-format-22 与扩面所需的后端开发包（X11/Wayland/GLFW 的 configure 依赖）一并装上，
           # 与作业 8 同口径。ALSA 走运行期 dlopen，无 dev 包依赖。libclang1-22 见作业 8 同名步骤说明。
