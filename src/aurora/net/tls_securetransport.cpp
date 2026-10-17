@@ -44,7 +44,7 @@
 //     链接）。曾考虑的 `SecTransform` + `kSecDigestSHA2` 已被文档判死（"SecTransform is no longer
 //     supported"），故不用。
 
-#ifdef AURORA_NET_TLS_SECURE_TRANSPORT
+#ifdef AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT
 
 #include <CommonCrypto/CommonDigest.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -1315,7 +1315,8 @@ auto memory_write(const void *connection, const void *data, size_t *processed) -
 
 }  // namespace
 
-auto make_tls_backend(const TlsContext &context, std::string_view server_name) -> Result<std::unique_ptr<TlsBackend>> {
+auto make_tls_backend_securetransport(const TlsContext &context, std::string_view server_name)
+    -> Result<std::unique_ptr<TlsBackend>> {
     auto backend = SecureTransportBackend::create(context, server_name);
     if (!backend) {
         return backend.error();
@@ -1324,10 +1325,8 @@ auto make_tls_backend(const TlsContext &context, std::string_view server_name) -
     return Result<std::unique_ptr<TlsBackend>>{std::unique_ptr<TlsBackend>{std::move(backend.value())}};
 }
 
-auto tls_backend_available() -> bool { return true; }
-
 }  // namespace aurora::net::detail
 
 #pragma GCC diagnostic pop
 
-#endif  // AURORA_NET_TLS_SECURE_TRANSPORT
+#endif  // AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT

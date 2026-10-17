@@ -9,10 +9,12 @@
 /// 四条形态裁决（规范性，落码与文档回写以此为准）：
 /// - **只有客户端**：本层不提供服务端 TLS（监听腿的加密归宿主服务自己负责，Aurora 的监听口是本机
 ///   IPC 与 Inspector 的回路，不构成公网服务端场景），因此没有 `TlsListener` 这一类形态。
-/// - **后端由构建配置选定，运行期以能力位回答**：`Engine::capabilities().tls` 是唯一真值源（提案 §5
-///   的平台矩阵）。本头**不含任何平台宏**（`SPEC.PLATFORM.ZERO-IFDEF.001`），也没有第二个「TLS 是否
-///   可用」的查询入口——两个真相源会诱导调用方去分支一条本腿并不存在的路径。无后端时 `handshake()`
-///   恰一次以 `net-tls-engine-unavailable` 收尾，而不是静默降级成明文。
+/// - **后端可插拔，运行期以能力位回答**：TLS 引擎由 `net/tls_backend.h` 的注册表提供——构建配置决定
+///   哪几枚内置腿在案（系统栈与 provider 腿**可以并存**，不是二选一），应用还能注入自研实现；
+///   `Engine::capabilities().tls` 回答「注册表是否非空」，是唯一真值源。本头**不含任何平台宏**
+///   （`SPEC.PLATFORM.ZERO-IFDEF.001`），也没有第二个「TLS 是否可用」的查询入口——两个真相源会诱导
+///   调用方去分支一条本腿并不存在的路径。选哪一枚由 `TlsContext::backend` 与全局候选链决定；没有可用
+///   后端时 `handshake()` 恰一次以 `net-tls-engine-unavailable` 收尾，而不是静默降级成明文。
 /// - **校验默认开启且失败即断连**：证书链、有效期、主机名任一项不过即以 `net-tls-cert-rejected` 收尾
 ///   并关闭底层流。绕过校验只有 `allow_insecure_certificate` 一枚显式命名的危险开关，且启用它必然
 ///   产生一条 `warning` 级诊断（用途仅限本地自签测试）。
@@ -129,6 +131,13 @@ struct TlsContext {
     ///        mbedTLS 的 `mbedtls_pk_check_pair`），配错即 `general-invalid-argument` 且不放行。
     /// @note 支持腿同 `client_certificate_pem`。
     std::optional<std::string> client_private_key_pem;
+    /// @brief 本次握手指定后端（`available_tls_backends()` 里的 id）；未置值即按全局缺省候选链选择。
+    ///        置值即**指名即用、绝不回落**：显式指定后端常常含合规或兼容性口径（「这条连接必须走系统栈，
+    ///        信任根归操作系统管」），悄悄换成另一枚等于推翻调用方的决定。
+    /// @note 指名不存在的 id 落 `net-tls-engine-unavailable`（detail 点名实际在案的 id）；指名那枚后端
+    ///       表达不了本口径落 `net-platform-unavailable`。两种都是明确失败，不会被别的后端「凑成功」。
+    ///       缺省链形态相反：后端不在案或明确表态不可用时继续下一枚，理由见 `net/tls_backend.h`。
+    std::optional<std::string> backend;
 };
 
 /// @brief 一次握手的结果：成功携已建立的加密流，失败携原因（含 `net-tls-*` 系列与底层流的原因）。
@@ -186,6 +195,13 @@ class TlsTransport {
     ///         （**形态不匹配而不是失败**：把「没有 ALPN」报成空串会让调用方把「未协商」误读成「协商
     ///         出一个空协议」，而后者的正确处置是关掉连接）。
     [[nodiscard]] auto negotiated_alpn() const -> Result<std::string>;
+
+    /// @brief 实际生效的后端标识（`TlsContext::backend` 的指名结果或候选链选中的那一枚）。
+    /// @return 成功携注册表里的 id；空态或已关闭为 `net-socket-failed`。
+    /// @note id 在握手起手那一刻固化，与 `peer_certificate()` 同理：通道关掉后再报「当前后端」会诱导
+    ///       调用方拿它去复用一条已不属于任何口径的连接。可观测性靠它——同一份配置在不同构建里可能
+    ///       落在不同腿上，而出错的那条腿正是排查的起点。
+    [[nodiscard]] auto backend() const -> Result<std::string>;
 
     /// @brief 登记一次解密读请求（缓冲必须存活到本次回调抵达；语义同 `StreamTransport::read`）。
     /// @param buffer 目标缓冲；空 span 的用法错误以 `net-buffer-limit` 形态经回调抵达。

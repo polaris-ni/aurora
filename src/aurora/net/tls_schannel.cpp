@@ -21,7 +21,7 @@
 // 本工具链的头文件缺少量已发布的 ABI 常量（协议位掩码、关闭通知载荷），在下方按官方值
 // 就地补齐——补齐的是声明不是实现，值取自 Windows SDK 头，不是猜测。
 
-#ifdef AURORA_NET_TLS_SCHANNEL
+#ifdef AURORA_ENABLE_NET_TLS_SCHANNEL
 
 #include <array>
 #include <cstddef>
@@ -1105,7 +1105,8 @@ auto SchannelBackend::shutdown_records(std::vector<char> &outgoing) -> Result<vo
 
 }  // namespace
 
-auto make_tls_backend(const TlsContext &context, std::string_view server_name) -> Result<std::unique_ptr<TlsBackend>> {
+auto make_tls_backend_schannel(const TlsContext &context, std::string_view server_name)
+    -> Result<std::unique_ptr<TlsBackend>> {
     auto backend = SchannelBackend::create(context, server_name);
     if (!backend) {
         return backend.error();
@@ -1114,8 +1115,6 @@ auto make_tls_backend(const TlsContext &context, std::string_view server_name) -
     return Result<std::unique_ptr<TlsBackend>>{std::unique_ptr<TlsBackend>{std::move(backend.value())}};
 }
 
-auto tls_backend_available() -> bool { return true; }
-
 }  // namespace aurora::net::detail
 
-#endif  // AURORA_NET_TLS_SCHANNEL
+#endif  // AURORA_ENABLE_NET_TLS_SCHANNEL

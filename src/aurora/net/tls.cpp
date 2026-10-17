@@ -1,7 +1,7 @@
 // Aurora net — TLS 会话状态机。
 //
-// 本文件只做三件事：把 `detail::TlsBackend` 的字节推进接到 `StreamTransport` 的异步读写上、维护
-// 「已解密待交付」与「待登记读请求」两条队列、保证每一条用户回调恰一次抵达（含取消、底层失败与
+// 本文件只做三件事：把 `TlsBackend`（`net/tls_backend.h` 的公共接缝）的字节推进接到 `StreamTransport`
+// 的异步读写上、维护 「已解密待交付」与「待登记读请求」两条队列、保证每一条用户回调恰一次抵达（含取消、底层失败与
 // 关闭这三种收尾）。加密本身一次都不在这里发生——那是后端的职责，见 `detail/tls_backend.h`。
 //
 // 锁纪律与 L1 同口径：会话状态由一枚互斥量串行化，**所有回调都转入 `Tasks` 后在锁外触发**。底层
@@ -57,6 +57,7 @@ struct TlsState {
     std::mutex mutex;  ///< 会话唯一串行化点
     StreamTransport stream;  ///< 接管来的底层流
     std::unique_ptr<TlsBackend> backend;  ///< 平台后端
+    std::string backend_id;  ///< 生效的后端标识（握手起手那一刻固化，供 `TlsTransport::backend()` 回报）
     Cancellation token;  ///< 本会话的取消令牌
     TlsPhase phase = TlsPhase::Handshaking;  ///< 当前阶段
     bool reading = false;  ///< 是否有一枚底层读在途
@@ -273,7 +274,7 @@ auto step_locked(const StatePtr &state, Tasks &tasks) -> void {
             return;
         }
         state->plain.insert(state->plain.end(), batch.begin(), batch.end());
-        if (records.value() == detail::TlsDataState::PeerClosed) {
+        if (records.value() == TlsDataState::PeerClosed) {
             state->peer_eof = true;
         }
         satisfy_reads_locked(*state, tasks);
@@ -298,7 +299,7 @@ auto step_locked(const StatePtr &state, Tasks &tasks) -> void {
             });
             return;
         }
-        if (records.value() == detail::TlsDataState::NeedMore) {
+        if (records.value() == TlsDataState::NeedMore) {
             arm_read_locked(state, tasks);
             return;
         }
@@ -408,13 +409,16 @@ auto TlsTransport::handshake(StreamTransport &&stream, std::string_view server_n
                         " (allow_insecure_certificate: local testing only)");
     }
 
-    auto backend = detail::make_tls_backend(context, server_name);
-    if (!backend) {
-        terminate_locked(state, tasks, backend.error(), false);
+    // 后端选择在握手起手一次成型：候选链解析出后端连同它的 id 一起固化，此后本次会话只认这一枚
+    // （回落只可能发生在握手开始前，理由见 `detail/tls_backend.h`）。
+    auto chosen = detail::resolve_tls_backend(context, server_name);
+    if (!chosen) {
+        terminate_locked(state, tasks, chosen.error(), false);
         fire(tasks);
         return;
     }
-    state->backend = std::move(backend.value());
+    state->backend = std::move(chosen.value().first);
+    state->backend_id = std::move(chosen.value().second);
 
     // 取消链条：外部令牌触发会话令牌，会话令牌的钩子负责收尾（钩子在调用线程同步执行）。
     // 登记时若已取消则就地执行钩子——那正是「先取消后发起」这条竞态窗口的唯一收口。
@@ -447,6 +451,15 @@ auto TlsTransport::negotiated_alpn() const -> Result<std::string> {
         return make_detail(ErrorCode::NetOptionConflict, "no application protocol was negotiated");
     }
     return *state_->alpn;
+}
+
+auto TlsTransport::backend() const -> Result<std::string> {
+    // 与 `peer_certificate()` 同口径：通道关掉后就不再有「当前后端」这一说（句柄里的 id 虽然还在，
+    // 但把它读出来会被当成一条仍可复用的连接的身份）。
+    if (!is_open() || state_->backend_id.empty()) {
+        return no_channel("backend");
+    }
+    return state_->backend_id;
 }
 
 auto TlsTransport::read(std::span<char> buffer, ReadDone on_done) -> void {

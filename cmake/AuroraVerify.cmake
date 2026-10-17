@@ -280,7 +280,7 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     # 自动段核对能力位、缺省口径握手、证书摘要形态、ALPN 两态回报、GET 往返与 pin 反向判据；
     # 「这张证书确实是这个站点的那张」只有人能判，故该项在 --interactive 人工段。本探针是唯一出站
     # 的真机面：CI runner 禁网且全部用例按零出站纪律构造，因此它不进 CTest，只在人工验收时运行。
-    # 本腿没有 TLS 后端（POSIX 未给 AURORA_NET_TLS_PROVIDER）时自动段以退出码 2 报 ENV-UNAVAILABLE。
+    # 本腿没有 TLS 后端（POSIX 未给 AURORA_NET_TLS_PROVIDERS）时自动段以退出码 2 报 ENV-UNAVAILABLE。
     if (NOT EMSCRIPTEN)
         aurora_add_verify_probe(aurora_verify_tls_live "${_aurora_verify_dir}/tls_live_probe.cpp")
         list(APPEND _aurora_verify_targets aurora_verify_tls_live)

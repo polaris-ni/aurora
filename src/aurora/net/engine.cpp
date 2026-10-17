@@ -133,8 +133,8 @@ class PollEngine final : public Engine {
         // 本机 IPC 位由运行期探测决定：头文件提供 `AF_UNIX` 与真的能开出这个地址族是两件事，
         // Windows 上「编译过」只说明前一件。
         caps.local_ipc = detail::local_ipc_supported();
-        // TLS 位与「`handshake()` 真的能成功」同源：由被编译进来的那个后端 TU 定义探测口，
-        // 没有后端时 `tls_unavailable.cpp` 答 false，调用方据此降级而不必去分支一条不存在的路径。
+        // TLS 位与「`handshake()` 真的能成功」同源：由后端注册表回答——非空即有腿可用。内置腿按构建
+        // 装配进入注册表，应用注入的自研后端同样算数，因此调用方据此降级而不必去分支一条不存在的路径。
         caps.tls = detail::tls_backend_available();
         return caps;
     }

@@ -10,7 +10,11 @@
 ///           （**合并**而非替换系统根），主机名不符（SNI 与证书 SAN/CN 不同）即便链可信也落 `net-tls-cert-rejected`；
 ///           危险开关 `allow_insecure_certificate` 跳过链与主机名判定但**必留一条 warning 诊断**，且它不影响
 ///           pin 判定——pin 未命中一律 `net-tls-pin-mismatch`（不设防与防错对象是两枚可分别表达的决策）；
-///           ALPN 命中回报协议标识、未宣告落 `net-option-conflict`（形态不匹配而不是失败）；取消让未完成的
+///           ALPN 命中回报协议标识、未宣告落 `net-option-conflict`（形态不匹配而不是失败）；`backend()` 回报
+///           这一次握手实际由哪条腿服务（取值恒在注册表表面内，关闭后落 `net-socket-failed`），共存装配下
+///           表面里**每一枚**后端都要各完成一次真握手（只走缺省那条等于另一枚编进库里却从没被走过），而
+///           指名后端（`TlsContext::backend`）落空时恰一次以 `net-tls-engine-unavailable` 收尾且**绝不回落**到
+///           下一枚；取消让未完成的
 ///           握手恰一次以 `net-cancelled` 收尾；`close()` 幂等且此后通道不再开放，对端进程消失后挂起的读
 ///           必有结局而不是悬挂。
 ///           对端是宿主 `openssl s_server` 子进程（`framework/tls_peer.h`）：证书链、记录分帧、close_notify
@@ -18,11 +22,12 @@
 /// ⚠️ 平台与能力分支一律写在**用例体内**（registry_integrity 静态扫源码，被 #ifdef 摘掉的声明在另一种
 ///    构建里必然单边失踪）。四条退让各有原因：wasm 无 fd 等待语义 → 全部真实收发用例 `AURORA_TEST_SKIP`；
 ///    宿主没有 `openssl` 命令行 → 依赖对端的用例跳过并报成环境缺项；本腿没有 TLS 后端（Linux 未给
-///    `AURORA_NET_TLS_PROVIDER`）→ 依赖握手的用例跳过，而「无后端即 `net-tls-engine-unavailable`」那条
+///    `AURORA_NET_TLS_PROVIDERS`）→ 依赖握手的用例跳过，而「无后端即 `net-tls-engine-unavailable`」那条
 ///    反而只在此刻可证；本腿的后端解析不了 PKCS#12（mbedTLS 腿）→ mTLS 的「身份真的送出去了」那半报成
 ///    缺项，同一用例里「带身份即落 `general-invalid-argument` 且绝不静默忽略」那半照常判。
 /// ⚠️ 本文件不校验证书吊销（CRL/OCSP）：吊销判定按系统栈缺省形态委托给平台，库内不实现第二条路径。
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -42,6 +47,7 @@
 #include "aurora/net/detail/tls_backend.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/tls.h"
+#include "aurora/net/tls_backend.h"
 #include "aurora/net/transport.h"
 #include "framework/async_wait.h"
 #include "framework/aurora_test.h"
@@ -411,6 +417,77 @@ AURORA_TEST_CASE(capability_bit_shares_one_source_with_probe) {
     HostDriven host;
     const auto caps = aurora::net::Engine::instance().capabilities();
     AURORA_TEST_CHECK_EQ(caps.tls, backend_available());
+}
+
+// 指名的 id 不在案即明确失败，且**不得被下一枚后端接走**：显式指定后端常常含合规或兼容性口径，悄悄换
+// 一枚等于推翻调用方的决定。后端在握手起手之前就被选定，因此这条判据不需要对端、在任何腿都可判。
+AURORA_TEST_CASE(designated_unknown_backend_fails_exactly_once_without_falling_back) {
+    HostDriven host;
+    HandshakeLog log;
+    TlsContext context;
+    context.backend = "no-such-tls-backend";
+    TlsTransport::handshake(StreamTransport{}, "localhost", context, Cancellation{}, [&log](auto result) {
+        log.ok = result.ok();
+        if (!result) {
+            log.code = result.error().code;
+            log.message = result.error().message;
+        }
+        ++log.calls;
+    });
+    AURORA_TEST_REQUIRE(drive_until(AURORA_SUBJECT, [&]() { return log.calls.load() > 0; }).satisfied);
+    AURORA_TEST_CHECK_EQ(log.calls.load(), 1);
+    AURORA_TEST_CHECK_FALSE(log.ok);
+    AURORA_TEST_CHECK_EQ(log.code, std::string{"net-tls-engine-unavailable"});
+    // 诊断要点名被指空的 id：只说「没有后端」会把写错名字与这台机器真的没腿两件事混成一件。
+    AURORA_TEST_CHECK(log.message.find("no-such-tls-backend") != std::string::npos);
+}
+
+AURORA_TEST_CASE(channel_names_the_backend_that_served_it) {
+    const aurora::test::tls::Assets assets;
+    aurora::test::tls::TlsPeer peer{assets};
+    require_peer(peer);
+    require_backend("needs a real handshake to have a backend in effect");
+    HostDriven host;
+    const auto surface = aurora::net::available_tls_backends();
+    auto channel = expect_open(connect_stream(peer.port()), "localhost", insecure_context());
+
+    // 回报值必须落在注册表表面内——「生效的后端」是调用方拿去填 `TlsContext::backend` 的候选，
+    // 报出一个表面外的名字就是让下一次指名注定落空。
+    const auto named = channel.backend();
+    AURORA_TEST_REQUIRE(named.ok());
+    AURORA_TEST_CHECK(std::find(surface.begin(), surface.end(), named.value()) != surface.end());
+
+    // 关闭之后不再交出一枚「当前可信的对端」：摘要与生效腿都是握手那一刻的固化事实，通道没了就没有
+    // 可指认的连接，读出来只会诱导调用方把它当成复用凭据。
+    channel.close();
+    const auto after_close = channel.backend();
+    AURORA_TEST_CHECK_FALSE(after_close.ok());
+    AURORA_TEST_CHECK_EQ(after_close.error().code, std::string{"net-socket-failed"});
+}
+
+// 共存装配的实证：表面里每一条腿都要各自完成一次真握手。只测缺省那条的话，另一枚腿的「编得进来却走
+// 不通」永远不会在这里暴露，而 provider 腿的存在理由恰恰是它走得通。
+AURORA_TEST_CASE(every_registered_backend_completes_a_real_handshake) {
+    const aurora::test::tls::Assets assets;
+    aurora::test::tls::TlsPeer peer{assets};
+    require_peer(peer);
+    require_backend("needs one real handshake per registered backend");
+    HostDriven host;
+    const auto surface = aurora::net::available_tls_backends();
+    for (const auto &id : surface) {
+        TlsContext context;
+        context.allow_insecure_certificate = true;
+        context.backend = id;
+        HandshakeLog log;
+        handshake(connect_stream(peer.port()), "localhost", context, log);
+        AURORA_TEST_REQUIRE_MSG(log.ok, "designated backend " + id + " failed: " + log.code + " " + log.message);
+        AURORA_TEST_CHECK_EQ(log.calls.load(), 1);
+        AURORA_TEST_REQUIRE(log.transport.is_open());
+        const auto named = log.transport.backend();
+        AURORA_TEST_REQUIRE(named.ok());
+        AURORA_TEST_CHECK_EQ(named.value(), id);
+        log.transport.close();
+    }
 }
 
 AURORA_TEST_CASE(handshake_establishes_channel_and_summarizes_peer) {

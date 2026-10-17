@@ -112,8 +112,8 @@ AURORA_TEST_CASE(capabilities_report_only_landed_forms) {
     AURORA_TEST_CHECK_TRUE(caps.udp);
     AURORA_TEST_CHECK_TRUE(caps.dns);
     AURORA_TEST_CHECK_EQ(caps.local_ipc, aurora::net::detail::local_ipc_supported());
-    // TLS 位不由平台宏推导，而由被装配进来的那个后端 TU 的探测口回报（无后端时 `tls_unavailable.cpp`
-    // 答 false）。本条只证「能力位与探测口同源、不是硬编码」；「答 true 的腿真能握手」的行为半身
+    // TLS 位不由平台宏推导，而由后端注册表回答（注册表为空即 false，注入自研后端即 true）。本条只证
+    // 「能力位与注册表同源、不是硬编码」；「答 true 的腿真能握手」的行为半身
     // 在 `utest_net_tls` 与真机探针 `tools/verify/tls_live_probe.cpp` 里。
     AURORA_TEST_CHECK_EQ(caps.tls, aurora::net::detail::tls_backend_available());
 #endif

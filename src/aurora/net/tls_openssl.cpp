@@ -1,9 +1,10 @@
 // Aurora net — OpenSSL 后端。
 //
-// 本腿存在的前提是「Linux 没有可用的系统 TLS 栈」，而自带一份 TLS 源码会同时破坏「断网可构建」与
-// 「仓库不 vendored 三方」两条不变量，故库由使用方以 `AURORA_NET_TLS_PROVIDER=<linkage>:<prefix>`
-// 传入本地安装；宏 `AURORA_NET_TLS_OPENSSL` 由 `cmake/AuroraNetTls.cmake` 的头探测推导，本 TU 只在
-// 该宏下产出符号（没选出后端时编译的是 `net/tls_unavailable.cpp`）。
+// 本腿存在的理由是「Linux 没有可供本库驱动的系统 TLS 栈」，而自带一份 TLS 源码会同时破坏「断网可构建」与
+// 「仓库不 vendored 三方」两条不变量，故库由使用方以 `AURORA_NET_TLS_PROVIDERS=<linkage>:<prefix>`
+// 传入本地安装；宏 `AURORA_ENABLE_NET_TLS_OPENSSL` 由 `cmake/AuroraNetTls.cmake` 的头探测推导，本 TU 只在
+// 该宏下产出符号。它与系统栈腿、mbedTLS 腿**可以同时在案**：多枚后端共存由 `net/tls_backend.cpp` 的
+// 注册表在运行期分派，一次握手用哪一枚由候选链或 `TlsContext::backend` 决定。
 //
 // 字节进出**全部**走 memory BIO，本层一次都不碰 fd（无 `SSL_get_fd`、无 `select`/`poll`、无
 // `BIO_new_connect`）：接缝（`net/detail/tls_backend.h`）的形态是「上层交付字节、后端回吐字节」，
@@ -45,7 +46,7 @@
 //     `RFC 8446` §4.3.2 与 §4.4.2 的时序）。据此公共语义是「握手成功不蕴含服务端已接受客户端证书」，
 //     实测覆盖两条 provider 腿（OpenSSL 与 mbedTLS 都先成功后落败）与 Windows 腿（Schannel 在握手内即拒）。
 
-#ifdef AURORA_NET_TLS_OPENSSL
+#ifdef AURORA_ENABLE_NET_TLS_OPENSSL
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -468,7 +469,7 @@ class OpenSslBackend final : public TlsBackend {
     ~OpenSslBackend() override;
 
     /// 会话即「一份 SSL 句柄 + 一对 memory BIO」的所有权载体，复制会让两份析构各自归还一次底层资源；
-    /// 接缝只经 `make_tls_backend` 交出 `unique_ptr`，因此显式禁掉复制与移动（资源本身不可复制）。
+    /// 接缝只经 `make_tls_backend_openssl` 交出 `unique_ptr`，因此显式禁掉复制与移动（资源本身不可复制）。
     OpenSslBackend(const OpenSslBackend &) = delete;
     OpenSslBackend(OpenSslBackend &&) = delete;
     auto operator=(const OpenSslBackend &) -> OpenSslBackend & = delete;
@@ -928,7 +929,8 @@ auto OpenSslBackend::shutdown_records(std::vector<char> &outgoing) -> Result<voi
 
 }  // namespace
 
-auto make_tls_backend(const TlsContext &context, std::string_view server_name) -> Result<std::unique_ptr<TlsBackend>> {
+auto make_tls_backend_openssl(const TlsContext &context, std::string_view server_name)
+    -> Result<std::unique_ptr<TlsBackend>> {
     auto backend = OpenSslBackend::create(context, server_name);
     if (!backend) {
         return backend.error();
@@ -937,8 +939,6 @@ auto make_tls_backend(const TlsContext &context, std::string_view server_name) -
     return Result<std::unique_ptr<TlsBackend>>{std::unique_ptr<TlsBackend>{std::move(backend.value())}};
 }
 
-auto tls_backend_available() -> bool { return true; }
-
 }  // namespace aurora::net::detail
 
-#endif  // AURORA_NET_TLS_OPENSSL
+#endif  // AURORA_ENABLE_NET_TLS_OPENSSL

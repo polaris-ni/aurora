@@ -1,6 +1,6 @@
 // Aurora net — mbedTLS provider 后端。
 //
-// 本 TU 只在构建配置把 `AURORA_NET_TLS_PROVIDER=<static|shared>:<prefix>` 指到一枚 mbedTLS 安装根时被编译
+// 本 TU 只在构建配置把 `AURORA_NET_TLS_PROVIDERS=<static|shared>:<prefix>` 指到一枚 mbedTLS 安装根时被编译
 // （`cmake/AuroraNetTls.cmake` 由 `include/mbedtls/ssl.h` 的存在性推导宏，不接受手工设置），Linux 等「没有
 // 缺省系统栈」的平台因此由它回答 `capabilities().tls`。
 //
@@ -28,7 +28,7 @@
 //     的等价物是 `psa_get_random` 内部那条，本腿不重复实现）。
 //   - **TLS 1.0/1.1 在本腿不存在**：mbedTLS 3.x 只实现 1.2/1.3，`mbedtls_ssl_protocol_version` 没有更低
 //     的枚举。下界落到 1.2，是「本引擎不支持更旧协议」而不是「无视调用方的下界」；上界低于 1.2 时允许集
-//     为空，`make_tls_backend()` 直接以 `general-invalid-argument` 定论，比在握手里报一个含糊的 alert 诚实。
+//     为空，`make_tls_backend_mbedtls()` 直接以 `general-invalid-argument` 定论，比在握手里报一个含糊的 alert 诚实。
 //   - **线程约定**：本机这枚构建开着 `MBEDTLS_THREADING_C`，但库里那把互斥只有应用侧用
 //     `mbedtls_threading_set_alt()` 装了实现才真正生效，本层不装（那是全进程的一次性决定，越出单条接缝的
 //     边界）。于是串行化完全落在接缝的既有口径上：一枚 `mbedtls_ssl_context` 只由 `net/tls.cpp` 的每连接
@@ -50,7 +50,7 @@
 // 危险开关（`allow_insecure_certificate`）落点是 `MBEDTLS_SSL_VERIFY_NONE`（链与主机名一并交给库跳过），
 // warning 诊断与 pin 判定都在 `net/tls.cpp`，本层不重复。
 
-#ifdef AURORA_NET_TLS_MBEDTLS
+#ifdef AURORA_ENABLE_NET_TLS_MBEDTLS
 
 #include "aurora/net/tls.h"
 
@@ -776,7 +776,8 @@ auto MbedTlsBackend::shutdown_records(std::vector<char> &outgoing) -> Result<voi
 
 }  // namespace
 
-auto make_tls_backend(const TlsContext &context, std::string_view server_name) -> Result<std::unique_ptr<TlsBackend>> {
+auto make_tls_backend_mbedtls(const TlsContext &context, std::string_view server_name)
+    -> Result<std::unique_ptr<TlsBackend>> {
     auto backend = MbedTlsBackend::create(context, server_name);
     if (!backend) {
         return backend.error();
@@ -785,8 +786,6 @@ auto make_tls_backend(const TlsContext &context, std::string_view server_name) -
     return Result<std::unique_ptr<TlsBackend>>{std::unique_ptr<TlsBackend>{std::move(backend.value())}};
 }
 
-auto tls_backend_available() -> bool { return true; }
-
 }  // namespace aurora::net::detail
 
-#endif  // AURORA_NET_TLS_MBEDTLS
+#endif  // AURORA_ENABLE_NET_TLS_MBEDTLS

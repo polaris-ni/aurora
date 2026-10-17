@@ -128,6 +128,7 @@
 #include "aurora/net/resolver.h"
 #include "aurora/net/socket.h"
 #include "aurora/net/tls.h"
+#include "aurora/net/tls_backend.h"
 #include "aurora/net/transport.h"
 #include "aurora/perf/counters.h"
 #include "aurora/perf/perf_log.h"

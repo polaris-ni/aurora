@@ -1,14 +1,17 @@
 // tools/verify/tls_live_probe.cpp — TLS 通道对真实公网端点的探针（非 CTest，本仓唯一出站段）。
 //
-// 覆盖：AURORA_NET_TLS_* 后端装配下与真实公网端点握手的整条 L2 通路——系统信任库里的**真实证书链**
-// （叶子 + 中间 + 根；仓内自签桩造不出「部分链」这一形态，也证不了系统根库那条通路）、SNI、ALPN
-// 广告与对端回选、记录级收发、SPKI pin 的命中判定。提案 §5 判据里「真实公网证书的验证」由本探针
-// 兑现：出站流量不可能进 CI（runner 禁网 + 全部用例的零出站纪律），故本探针不进 CTest。
+// 覆盖：本腿后端装配（`AURORA_ENABLE_NET_TLS_*` 决定注册表里在案的那几枚）下与真实公网端点握手的整条
+// L2 通路——系统信任库里的**真实证书链**（叶子 + 中间 + 根；仓内自签桩造不出「部分链」这一形态，也证
+// 不了系统根库那条通路）、SNI、ALPN 广告与对端回选、记录级收发、SPKI pin 的命中判定。「真实公网证书
+// 的验证」这一条只能由本探针兑现：出站流量不可能进 CI（runner 禁网 + 全部用例的零出站纪律），故本探针
+// 不进 CTest。
 //
 // 自动段（无需人工）：
 //   1. 能力位：`Engine::capabilities().tls` 为真（本腿有 TLS 后端；为假即退出码 2，属合法降级）。
 //   2. 握手：按缺省口径（校验开、只用系统根、TLS 1.2 下界）连到 host:port 并完成握手——这是
-//      「真实证书链被本腿系统栈判为可信」的直接证据，仓内桩一律替代不了。
+//      「真实证书链被本腿系统栈判为可信」的直接证据，仓内桩一律替代不了。`--backend <id>` 把这份
+//      口径交给指定那一枚后端（`TlsContext::backend`，指定即决定、绝不换腿），并在握手后核对
+//      `backend()` 回报的 id 与指定值逐字相同；不给该参数时核对回报的 id 确实在注册表表面。
 //   3. 证书摘要：`peer_certificate()` 的主体 / 签发者 / 有效期 / SPKI 摘要四项皆非空，且 SPKI
 //      摘要恒为 base64(SHA-256(SPKI DER)) 的 44 字符形态。
 //   4. ALPN：广告 `--alpn` 时候选回报只能是该值或对端未选（`net-option-conflict` 形态，记 SKIP）；
@@ -23,9 +26,11 @@
 //      确实是这个站点的那张」，程序在此只能证明它非空且可解析。
 // 退出码：0 全过；1 自动段断言失败；2 环境不可用（本腿无 TLS 后端，或 DNS / 出站通路不通）。
 //
-// 运行：build 目录下 ./aurora_verify_tls_live [--host <dns-name>] [--port 443] [--alpn <id>] [--interactive]
+// 运行：build 目录下 ./aurora_verify_tls_live [--host <dns-name>] [--port 443] [--alpn <id>]
+//       [--backend <id>] [--interactive]
 // 缺省目标是 www.example.com:443（IANA 保留的文档域名，持有效公网证书）。
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -42,6 +47,7 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/tls.h"
+#include "aurora/net/tls_backend.h"
 #include "aurora/net/transport.h"
 #include "verify_args.h"
 
@@ -275,6 +281,12 @@ auto main(int argc, char **argv) -> int {
                                                      .long_name = "alpn",
                                                      .kind = aurora::cli::ValueKind::String,
                                                      .help = "Advertise this ALPN id (omit to send no ALPN at all)"},
+                                                 aurora::cli::OptionSchema{
+                                                     .long_name = "backend",
+                                                     .kind = aurora::cli::ValueKind::String,
+                                                     .help = "Designate one backend id from available_tls_backends() "
+                                                             "for every "
+                                                             "handshake instead of taking the default candidate chain"},
                                              }},
                 argc, argv);
     if (!cli.arguments) {
@@ -295,15 +307,31 @@ auto main(int argc, char **argv) -> int {
         }
         context.alpn_protocols = {advertised.value()};
     }
+    std::optional<std::string> designated_backend;
+    if (arguments.explicitly_given("backend")) {
+        const auto requested = arguments.get<std::string>("backend");
+        if (!requested) {
+            return aurora_verify::CommandLine::AURORA_EXIT_USAGE;
+        }
+        context.backend = requested.value();
+        designated_backend = requested.value();
+    }
 
     emit("== Aurora TLS live probe ==");
     emit("target: " + host.value() + ":" + std::to_string(port.value()));
+    // 注册表表面先打出来：共存装配（系统栈与 provider 同时在案）的唯一直接证据就是这一行有多枚 id。
+    auto surface = aurora::net::available_tls_backends();
+    std::string surface_text;
+    for (const auto &id : surface) {
+        surface_text += surface_text.empty() ? id : ", " + id;
+    }
+    emit("backends on this leg: " + (surface_text.empty() ? "(none)" : surface_text));
 
     // 1. 能力位：本腿有没有 TLS 后端决定后面每一段是否有意义。
     const auto capabilities = Engine::instance().capabilities();
     if (!capabilities.tls) {
-        emit("[SKIP] capabilities().tls == false: no TLS backend assembled on this leg");
-        emit("       (POSIX legs need -DAURORA_NET_TLS_PROVIDER=<static|shared>:<prefix>)");
+        emit("[SKIP] capabilities().tls == false: no TLS backend in the registry on this leg");
+        emit("       (POSIX legs need -DAURORA_NET_TLS_PROVIDERS=<static|shared>:<prefix>)");
         emit("result: ENV-UNAVAILABLE (exit 2)");
         return 2;
     }
@@ -327,6 +355,18 @@ auto main(int argc, char **argv) -> int {
     }
     check(true, "handshake against the real chain in the system trust store succeeds");
     auto channel = std::move(established->value());
+
+    // 2b. 实际生效的后端：指定即逐字兑现，缺省则回报必须是注册表表面上的 id。
+    const auto served = channel.backend();
+    if (designated_backend) {
+        check(served.ok() && served.value() == *designated_backend,
+              "the designated backend served the handshake (a designation never falls back)");
+    } else {
+        const auto on_surface =
+            served.ok() && std::find(surface.begin(), surface.end(), served.value()) != surface.end();
+        check(on_surface, "backend() reports an id that is on the registry surface");
+    }
+    note("backend : " + (served.ok() ? served.value() : reason(served)));
 
     // 3. 证书摘要四项。
     const auto summary = channel.peer_certificate();
