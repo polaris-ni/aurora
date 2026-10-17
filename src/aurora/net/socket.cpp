@@ -1024,10 +1024,10 @@ auto seconds_at_least_one(std::chrono::milliseconds value) -> int {
 
 /// @brief 下发保活调参（空闲时长 / 探测间隔 / 失败次数）。
 ///
-/// 两腿的拼写完全不同，故各写一条：POSIX（Linux 与 Android）是 `TCP_KEEPIDLE` / `TCP_KEEPINTVL` /
-/// `TCP_KEEPCNT` 三枚 TCP 层选项；Winsock 只有一枚 `SIO_KEEPALIVE_VALS`，一次下发前两档，且**没有**
-/// 失败次数的入口。既不支持的字段不在这里被静默吞掉——调用方要的是「这条连接多久判死」，缺一档答案
-/// 就得说缺一档。
+/// 各腿的拼写不同，故按腿各写一条：Linux 与 Android 是 `TCP_KEEPIDLE` / `TCP_KEEPINTVL` /
+/// `TCP_KEEPCNT`；BSD 系（macOS）三档都有，只是空闲档叫 `TCP_KEEPALIVE`；Winsock 只有一枚
+/// `SIO_KEEPALIVE_VALS`，一次下发前两档，且**没有**失败次数的入口。既不支持的字段不在这里被静默
+/// 吞掉——调用方要的是「这条连接多久判死」，缺一档答案就得说缺一档。
 /// @param s 原生句柄（`SO_KEEPALIVE` 已置）。
 /// @param options 置了值的调参字段。
 /// @return 成功为 OK；本腿没有对应入口或系统调用失败为 `net-option-failed`（`detail` 写明缺哪一枚）。
@@ -1081,9 +1081,40 @@ auto apply_keepalive_tuning(NativeSocket s, const NativeOptions &options) -> Res
         }
     }
     return Result<void>{};
+#elif defined(AURORA_PLATFORM_MACOS)
+    // BSD 系的三档都在，只是空闲档不叫 `TCP_KEEPIDLE` 而叫 `TCP_KEEPALIVE`（Linux 那个名字在这里
+    // 不存在）；另两档与 Linux 同名。因此本腿与 Linux 腿同样能回答「这条连接多久判死」，不该落到
+    // 下面「本平台没有入口」的分支。
+    if (options.keep_alive_idle) {
+        if (auto set =
+                set_tcp_option(s, TCP_KEEPALIVE, "TCP_KEEPALIVE", seconds_at_least_one(*options.keep_alive_idle));
+            !set) {
+            return set.error();
+        }
+    }
+    if (options.keep_alive_interval) {
+        if (auto set =
+                set_tcp_option(s, TCP_KEEPINTVL, "TCP_KEEPINTVL", seconds_at_least_one(*options.keep_alive_interval));
+            !set) {
+            return set.error();
+        }
+    }
+    if (options.keep_alive_probes) {
+        if (*options.keep_alive_probes <= 0) {
+            return option_conflict("keep_alive_probes needs a positive retry count");
+        }
+        if (auto set = set_tcp_option(s, TCP_KEEPCNT, "TCP_KEEPCNT", *options.keep_alive_probes); !set) {
+            return set.error();
+        }
+    }
+    return Result<void>{};
 #else
-    (void)s;
-    (void)options;
+    // 本腿确实没有逐连接保活调参的入口。但「没有入口」只在**真的要求调参**时才算失败：只开
+    // `SO_KEEPALIVE` 的调用方要的就是系统缺省行为，上面已经置好了，此处再报错等于把一项平台缺省
+    // 能力说成不支持。
+    if (!options.keep_alive_idle && !options.keep_alive_interval && !options.keep_alive_probes) {
+        return Result<void>{};
+    }
     return make_error(ErrorCode::NetOptionFailed,
                       ErrorParams{{"detail", "this platform leg exposes no per-connection keepalive tuning"}});
 #endif
