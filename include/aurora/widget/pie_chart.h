@@ -316,7 +316,14 @@ inline auto PieChart::section_hit(const Geometry &g, const Point &local) const -
     }
     constexpr float two_pi = 6.28318530717958647692F;
     constexpr float deg = 0.01745329251994329577F;
-    float ang = std::atan2(dy, dx) - (start_angle * deg);
+    // 起始角偏移与绘制路径（`paint` 内的 `cursor`）同款取显式中间量：单表达式
+    // `atan2(dy, dx) - start_angle * deg` 可被编译器收缩成一次 FMA（单次舍入），12 点方向的
+    // 角度因此残差约 5.6e-8 弧度，归一化后恰落在 2π 边界上、被下方严格 `<` 排除——命中判定
+    // 随编译配置漂移（实测 toggles (simd-off) 三例：悬停/点击/交互分支全部命中不到扇区 0，
+    // 而同一进程的 golden 像素比对照常通过——绘制路径不受影响）。跨语句中间量强制
+    // 「先乘、后减」两次舍入，任何浮点收缩开关下结果确定。
+    const float start_offset = start_angle * deg;
+    float ang = std::atan2(dy, dx) - start_offset;
     ang = std::fmod(ang, two_pi);
     if (ang < 0.0F) {
         ang += two_pi;
