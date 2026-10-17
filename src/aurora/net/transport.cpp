@@ -250,6 +250,7 @@ auto close_stream(detail::StreamState &state, const Error &reason, Tasks &tasks)
     // NOLINTBEGIN(bugprone-exception-escape)
     if (state.on_connect) {
         auto done = std::move(state.on_connect);
+        state.on_connect = nullptr;  // 摘出即清空：小缓冲下 move 是克隆，不清源则同一次收尾会交付两遍
         tasks.emplace_back([done, reason]() { done(Result<StreamTransport>{reason}); });
     }
     for (auto &request : state.reads) {
@@ -420,6 +421,10 @@ auto on_stream_ready(const StreamPointer &state, std::uint64_t generation, const
             state->connecting = false;
             if (resolved) {
                 if (auto done = std::move(state->on_connect)) {
+                    // 摘出即清空：可调用体小到落进 std::function 内部缓冲时，移动是克隆而非转移，
+                    // 源会留着一份回调——随后 close_stream 的收尾会把同一次连接再交付一遍（实测
+                    // macOS 上第二次带 net-cancelled，令「已完成」的连接在调用方看来失败了）。
+                    state->on_connect = nullptr;
                     fired.emplace_back([done, held = state]() {
                         done(Result<StreamTransport>{detail::TransportFactory::wrap_stream(held)});
                     });

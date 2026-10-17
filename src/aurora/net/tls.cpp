@@ -161,8 +161,9 @@ auto terminate_locked(const StatePtr &state, Tasks &tasks, const Error &reason, 
     }
     if (!state->handshake_delivered) {
         state->handshake_delivered = true;
-        tasks.emplace_back(
-            [done = std::move(state->on_handshake), copy = reason]() { done(Result<TlsTransport>{copy}); });
+        auto done = std::move(state->on_handshake);
+        state->on_handshake = nullptr;  // 摘出即清空：小缓冲下 move 是克隆，不清源则回调会留在状态里
+        tasks.emplace_back([done, copy = reason]() { done(Result<TlsTransport>{copy}); });
     }
     if (notify) {
         auto cipher = std::make_shared<std::vector<char>>(std::move(*notify));
@@ -211,9 +212,11 @@ auto complete_handshake_locked(const StatePtr &state, Tasks &tasks) -> void {
     state->handshake_delivered = true;
     // 句柄按 move-only 交付，因此装进共享指针过 `Tasks` 这一道拷贝要求的坎（回调恰一次，取出即空态）。
     auto channel = std::make_shared<TlsTransport>(detail::TlsFactory::from_state(state));
-    tasks.emplace_back([done = std::move(state->on_handshake), channel]() mutable {
-        done(Result<TlsTransport>{std::move(*channel)});
-    });
+    auto done = std::move(state->on_handshake);
+    // 摘出即清空（字段契约就写着「落地后转空」）：可调用体小到落进 std::function 内部缓冲时移动是
+    // 克隆而非转移，源会留着一份回调；它捕获着本状态，留着就是一条自持环。
+    state->on_handshake = nullptr;
+    tasks.emplace_back([done, channel]() mutable { done(Result<TlsTransport>{std::move(*channel)}); });
 }
 
 // 推进会话直到「需要更多字节」或「出结果」为止；全程持锁，产出的动作经 `tasks` 在锁外执行。
