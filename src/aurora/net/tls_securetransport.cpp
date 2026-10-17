@@ -20,10 +20,12 @@
 //     （`InitializeSecurityContext` 的目标名只用于 SNI 与票据），只能自己实现，于是它对「只有 CN、没有 SAN」
 //     的证书回落到 CN，而本平台按自己的现行策略裁决。这一处差异是平台策略而非本层规则，跨腿对账按此读。
 //     失败诊断仍带上目标名（公共面 `net-tls-cert-rejected` 的可归因要求），并把系统的 CFError 描述一并带出。
-//   - **读链之前必须先评估**：`SecTrustGetCertificateAtIndex` 与 `SecTrustGetCertificateCount` 的文档都
-//     写明「调用之前必须先 `SecTrustEvaluateWithError`」。因此危险开关 `allow_insecure_certificate` 在
-//     本后端跳过的是**结论**而不是**动作**：仍然评估一次，只是不采纳它的结果。这样两种档位下拿到的
-//     证书摘要形态完全一致，不会出现「设了开关反而读不到对端证书」。
+//   - **读链与评估的次序**：`SecTrustGetCertificateAtIndex` 与 `SecTrustGetCertificateCount` 的文档都写
+//     明「调用之前必须先 `SecTrustEvaluateWithError`」，但那条前置只对**评估成功**的 trust 成立：评估判
+//     否后系统把链里的证书对象收走，此时 `SecCertificateCopyData` 直接 abort（macOS 跑者上实测 Abort
+//     trap: 6，取链的两枚访问器反倒都还返回正常值）。危险开关 `allow_insecure_certificate` 下评估**必然**
+//     判否（自签/名不匹配没有任何策略能放行），故该档位改为**评估之前**读链——此时拿到的是
+//     `SSLCopyPeerTrust` 刚建好的原始链，两种档位下证书摘要形态仍一致。
 //   - **SPKI 摘要自己切 DER**：`SecKeyCopyExternalRepresentation` 的文档写明 RSA 返回 PKCS#1、EC 返回
 //     ANSI X9.63 的 `04 || X || Y`——两者都不是 `SubjectPublicKeyInfo` 的 DER，取它算 pin 会与
 //     Schannel/OpenSSL 腿永久失配。故本层自己走一遍证书 DER（按 RFC 5280 的 TBSCertificate 字段次序），
@@ -1032,6 +1034,16 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
         return tls_error(ErrorCode::NetTlsCertRejected, "peer presents no certificate to verify");
     }
     const CfReleaser trust_guard{trust};
+
+    if (insecure_) {
+        // 危险开关下先摘摘要、不评估：自签或名不匹配的链在本后端拿不到「可信」结论（没有可用的信任根，
+        // 也没有任何策略能让它通过），而系统会把评估失败的 trust 里的证书对象置为不可用——实测在
+        // SecTrustEvaluateWithError 返回否之后，SecCertificateCopyData 直接 abort（Abort trap: 6）。
+        // 因此「仍评估一次、只是不采纳结论」这条其他腿可行的口径在本平台不可行：要拿到对端证书就必须在
+        // 评估之前读链，此时 SecTrustGetCertificateAtIndex 给出的还是 SSLCopyPeerTrust 刚建好的原始链。
+        ::fprintf(stderr, "[tls-st][diag] insecure: capture before evaluate\n");
+        return capture_summary(trust);
+    }
 
     if (!insecure_) {
         if (anchors_ != nullptr) {
