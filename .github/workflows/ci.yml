@@ -22,11 +22,12 @@
 #                    （真编译+跑单测）、COMPRESSION 关（解压不可用降级路径）、
 #                    DEBUG+TEST_HOOKS 双关（Release 发布态 PUBLIC 宏组合）、
 #                    PROFILING/TRACING/DEBUG 强制开（Release 下 FORCE=ON 分支）。
-#  3b. tls-providers — TLS provider 四腿（Linux 静态 mbedTLS、Windows 动态 OpenSSL(vcpkg)、
-#                    macOS 系统栈 SecureTransport、macOS 动态 OpenSSL(homebrew)）：验证
-#                    `AURORA_NET_TLS_PROVIDER` 的探测→引擎宏推导→导入目标链接这条构建面，
-#                    四枚 provider 宏里 mbedTLS / OpenSSL 两种 **形态**（静态 / 动态）与两种
-#                    **平台**（Windows / darwin）都被推一遍。
+#  3b. tls-providers — TLS 后端装配腿（Linux 双 provider：静态 mbedTLS + 动态 OpenSSL(/usr)、
+#                    Windows 动态 OpenSSL(vcpkg) 与系统栈 Schannel 并存、
+#                    macOS 系统栈 SecureTransport 单腿、macOS 动态 OpenSSL(homebrew) 与系统栈并存）：
+#                    验证 `AURORA_NET_TLS_PROVIDERS` 的逐项探测→引擎宏推导→导入目标链接这条构建面，
+#                    以及「系统栈与 provider 同时在案」这条共存关系。provider 宏里 mbedTLS /
+#                    OpenSSL 两种 **形态**（静态 / 动态）与两种 **平台**（Windows / darwin）都被推一遍。
 #  3c. 网络能力面（Inspector HTTP 服务器 + TLS provider）不是某一个作业的职责，而是**流水线的
 #                    公共前缀**：`setup-net-capability-flags` 复合动作按 runner OS 装配开关串并在
 #                    Linux 侧装 provider 依赖，core / backends / toggles / tls-providers / asan /
@@ -136,7 +137,7 @@ env:
     -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
     # static:/opt/aurora-tls-mbedtls（而非 /usr）：/usr 上 openssl 头会抢先命中，`tls_mbedtls.cpp`
     # 就永远进不了分析面；安装根由本作业的 Install 步骤与 setup-net-capability-flags 同源搭建。
-    -DAURORA_NET_TLS_PROVIDER=static:/opt/aurora-tls-mbedtls
+    -DAURORA_NET_TLS_PROVIDERS=static:/opt/aurora-tls-mbedtls
   LINT_CAPABILITY_FLAGS_WASM: >-
     -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON
     -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON
@@ -145,17 +146,19 @@ env:
   # 网络能力开关串（由 .github/actions/setup-net-capability-flags 消费，避免逐作业粘贴漂移）：
   #   Inspector HTTP 服务器 + TLS provider。前者是默认 OFF 的交付物开关，关闭时
   #   `utest_inspector_server` 整文件降级 SKIP；后者在 Linux / 其它 POSIX 侧**没有缺省系统栈**，
-  #   不给 provider 就落 `tls_unavailable.cpp`、`utest_net_tls` 大半 SKIP，故 Linux 串必须带安装根。
+  #   不给 provider 就没有任何 TLS 腿在案（`utest_net_tls` 大半 SKIP、`capabilities().tls` 为假），
+  #   故 Linux 串必须带安装根。
   #   ⚠️ Linux 串的安装根是 `/opt/aurora-tls-mbedtls` 而不是 `/usr`：Debian 系的 `/usr` 同时挂着
   #   openssl 与 mbedtls 两套头，多命中时 OpenSSL 优先（规则见 `cmake/AuroraNetTls.cmake`），
   #   指向 `/usr` 等于永远选不中 mbedTLS。该根由上述动作做成只挂 `include/mbedtls` 子树的安装根，
-  #   让推导**确定性**落到 `AURORA_NET_TLS_MBEDTLS`；需要 OpenSSL 的一侧直接用 `shared:/usr`，
-  #   那里 openssl 头本就在优先命中位（作业 3 的 TLS 反极性腿与作业 8 的 optimizations-off 遍如此）。
+  #   让推导**确定性**落到 `AURORA_ENABLE_NET_TLS_MBEDTLS`；需要 OpenSSL 的一侧直接在
+  #   `AURORA_NET_TLS_PROVIDERS` 里追加一条 `shared:/usr`，那里 openssl 头本就在优先命中位
+  #   （作业 3b 的双 provider 腿与作业 8 的 optimizations-off 遍如此）。
   #   Windows / macOS 靠系统栈缺省装配（Schannel / SecureTransport），不给 provider 本身就是「开」，
   #   两串因此只带 Inspector——provider 形态的同平台覆盖面由作业 3b 的对应腿平行补上。
   #   wasm 串同样只取 Inspector：Emscripten 侧不存在 TLS provider 安装根，硬给即 configure 期 FATAL。
   NET_CAPABILITY_FLAGS_LINUX: >-
-    -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_NET_TLS_PROVIDER=static:/opt/aurora-tls-mbedtls
+    -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_NET_TLS_PROVIDERS=static:/opt/aurora-tls-mbedtls
   NET_CAPABILITY_FLAGS_WINDOWS: >-
     -DAURORA_BUILD_INSPECTOR_SERVER=ON
   NET_CAPABILITY_FLAGS_MACOS: >-
@@ -618,12 +621,12 @@ jobs:
             run-tests: true
           # TLS provider 反极性（动态 OpenSSL，`/usr` 就是它的安装根）：本 job 各腿的公共网络串给的是
           # 静态 mbedTLS（安装根见 NET_CAPABILITY_FLAGS_LINUX 注释——不能直接用 /usr，那里 OpenSSL
-          # 优先），本腿追加同名变量把它换成 OpenSSL，使 `AURORA_NET_TLS_OPENSSL` 与
-          # `AURORA_NET_TLS_MBEDTLS` 两枚引擎 TU 在本 job 各拿到一次运行期验证
+          # 优先），本腿追加同名变量把它换成 OpenSSL，使 `AURORA_ENABLE_NET_TLS_OPENSSL` 与
+          # `AURORA_ENABLE_NET_TLS_MBEDTLS` 两枚引擎宏各拿到一次运行期验证
           # （cmake 命令行取同名变量最后一次出现的值，故追加即覆盖）。
           - name: tls-openssl-shared
             apt-pkgs: libssl-dev
-            cmake-flags: -DAURORA_NET_TLS_PROVIDER=shared:/usr
+            cmake-flags: -DAURORA_NET_TLS_PROVIDERS=shared:/usr
             run-tests: true
 
     steps:
@@ -675,17 +678,17 @@ jobs:
         run: xvfb-run -a ctest --test-dir build --output-on-failure -C Release -j "$(nproc)"
 
   # ---------------------------------------------------------------------------
-  # 3b. TLS provider 四腿：`AURORA_NET_TLS_PROVIDER` 的探测与链接（提案 §5 的后端矩阵）
-  #     验收面是**构建**：前缀校验 → 头探测推导引擎宏 → 库定位 → 导入目标 → 后端 TU 编译进库。
-  #     运行期判据（握手 / 证书 / ALPN / pin 那一组）不在此作业：Windows Schannel 系统栈腿与
-  #     WSL 的 OpenSSL + mbedTLS provider 腿在本机跑（见 06-app-platform §8.8.18 的回归记录），
-  #     这里红的是「换台机器就链不出来」那一类故障，而不是 TLS 语义。
+  # 3b. TLS 后端装配腿：`AURORA_NET_TLS_PROVIDERS` 的逐项探测与链接（后端矩阵）
+  #     验收面有两层。构建面：前缀校验 → 头探测推导引擎宏 → 库定位 → 导入目标 → 后端 TU 编译进库。
+  #     共存面：系统栈与 provider 在**同一次装配**里同时成立——单腿矩阵证明不了它，而它正是本作业
+  #     存在的理由。运行期判据（握手 / 证书 / ALPN / pin 那一组）随 `utest_net_tls` 与
+  #     `utest_net_tls_backend` 两套件取，前者在共存装配下逐枚指名后端各完成一次真握手。
   #     Windows 腿带 `AURORA_BUILD_TESTS=OFF`：动态 OpenSSL 的 DLL 不在测试可执行的检索路径上，
   #     运行测试会红成加载失败而不是构建失败——链接面由库与工具目标证明即可。
-  #     macOS 两腿的差别是「系统栈缺省装配」与「homebrew provider」：前者验证不给 provider 时
-  #     `AURORA_NET_TLS_SECURE_TRANSPORT` + `-framework Security` 能否在真 SDK 上编出来，后者把
-  #     `AURORA_NET_TLS_OPENSSL` 这条适配链推到 darwin 上补一次（两枚 provider 宏的 OS 组合
-  #     至此齐了：mbedTLS-linux、OpenSSL-win32、OpenSSL-darwin）。
+  #     macOS 两腿的差别是「只有系统栈」与「系统栈 + homebrew provider」：前者验证不给 provider 时
+  #     `AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT` + `-framework Security` 能否在真 SDK 上编出来，后者把
+  #     `AURORA_ENABLE_NET_TLS_OPENSSL` 这条适配链推到 darwin 上并同时保住系统栈（两枚 provider 宏的
+  #     OS 组合至此齐了：mbedTLS-linux、OpenSSL-win32、OpenSSL-darwin）。
   # ---------------------------------------------------------------------------
   tls-providers:
     name: tls provider (${{ matrix.name }})
@@ -695,38 +698,44 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 静态 mbedTLS：安装根是配套动作搭的 `/opt/aurora-tls-mbedtls`（`/usr` 上 openssl 头会
-          # 抢先命中，用它就编译不到 `tls_mbedtls.cpp` 了），顺带证明 Debian multiarch 的库定位。
-          - name: linux-mbedtls-static
+          # 双 provider 同时在案：静态 mbedTLS 走配套动作搭的「只挂 mbedtls 子树」的根（`/usr` 上
+          # openssl 头会抢先命中，用它就编译不到 `tls_mbedtls.cpp` 了），动态 OpenSSL 直接指向 `/usr`
+          # ——Debian multiarch 的库定位顺带被证明。两条 entry 推导出的 kind 不同，因此不触发「同
+          # kind 重复」的 configure 期硬失败；装配结果里 `mbedtls` 与 `openssl` 两条腿都在注册表表面，
+          # `utest_net_tls` 因此在这里逐枚各做一次真握手。
+          - name: linux-mbedtls-plus-openssl
             os: ubuntu-26.04
-            apt-pkgs: libmbedtls-dev
-            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_NET_TLS_PROVIDER=static:/opt/aurora-tls-mbedtls
-          # 动态 OpenSSL：vcpkg classic 模式的三元组根（`include/openssl/ssl.h` + `lib/` + `bin/`）。
+            apt-pkgs: libmbedtls-dev libssl-dev
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_NET_TLS_PROVIDERS=static:/opt/aurora-tls-mbedtls,shared:/usr
+          # 动态 OpenSSL + 系统栈 Schannel 并存：`AURORA_ENABLE_NET_TLS_SYSTEM=ON` 本就是该腿缺省，这里显式
+          # 写出是为了把「给了 OpenSSL 安装根也照样保住 Schannel」声明成判据而不是巧合。
+          # vcpkg classic 模式的三元组根（`include/openssl/ssl.h` + `lib/` + `bin/`）。
           # 装进 `$RUNNER_TEMP/vcpkg` 而不是 `$VCPKG_ROOT`：安装根由本作业自己创建并显式传给
-          # provider 变量，不依赖镜像里 vcpkg 的位置与既有已装状态（`AURORA_NET_TLS_PROVIDER`
+          # provider 变量，不依赖镜像里 vcpkg 的位置与既有已装状态（`AURORA_NET_TLS_PROVIDERS`
           # 只接受安装根，`prefix` 里带盘符冒号正是首冒号切分要保住的那条形态）。
-          - name: windows-openssl-shared
+          - name: windows-schannel-plus-openssl
             os: windows-latest
             apt-pkgs: ""
             vcpkg: true
-            cmake-flags: -DAURORA_BUILD_TESTS=OFF
-          # macOS 系统栈腿：不给 provider，证明缺省装配（`AURORA_NET_TLS_SECURE_TRANSPORT` +
+            cmake-flags: -DAURORA_BUILD_TESTS=OFF -DAURORA_ENABLE_NET_TLS_SYSTEM=ON
+          # macOS 系统栈腿：不给 provider，证明缺省装配（`AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT` +
           # `-framework Security`）在真 SDK 上编得出来。运行期判据取决于镜像里有无 `openssl`
           # 命令行，缺失时 TLS 套件按 `AURORA_TEST_SKIP` 退避而不是红。
           - name: macos-securetransport-system
             os: macos-latest
             apt-pkgs: ""
             cmake-flags: -G Ninja
-          # macOS provider 腿：homebrew 的 OpenSSL 安装根（`$(brew --prefix openssl@3)` = keg-only
-          # 的 `/opt/homebrew/opt/openssl@3`，含 `include/openssl/ssl.h` 与 `lib/libssl.dylib`）。
-          # 装它就对了，而不用 macOS 自带 LibreSSL 那一份：后者既没有 `include/openssl/ssl.h`，
+          # macOS 并存腿：homebrew 的 OpenSSL 安装根（`$(brew --prefix openssl@3)` = keg-only
+          # 的 `/opt/homebrew/opt/openssl@3`，含 `include/openssl/ssl.h` 与 `lib/libssl.dylib`）与系统栈
+          # 同时给。装它就对了，而不用 macOS 自带 LibreSSL 那一份：后者既没有 `include/openssl/ssl.h`，
           # `/usr/lib` 下的 `libssl.dylib` 也只是 SDK 占位 shim（链接能过、符号语义不对），provider
-          # 校验会直接 FATAL，把安装根指向 /usr 在 darwin 上不可行。
-          - name: macos-openssl-shared
+          # 校验会直接 FATAL，把安装根指向 /usr 在 darwin 上不可行。本腿是共存形态唯一的运行期实证：
+          # `securetransport` 与 `openssl` 各被指名完成一次真握手。
+          - name: macos-securetransport-plus-openssl
             os: macos-latest
             apt-pkgs: ""
             homebrew-openssl: true
-            cmake-flags: -G Ninja
+            cmake-flags: -G Ninja -DAURORA_ENABLE_NET_TLS_SYSTEM=ON
     steps:
       - uses: actions/checkout@v7
 
@@ -773,17 +782,20 @@ jobs:
       - name: Configure
         shell: bash
         run: |
-          flags="${{ matrix.cmake-flags }}"
+          # 公共串放在最前、矩阵串放在后：CMake 取最后一次 `-D`，而本作业的被测对象恰恰是矩阵里的
+          # provider 串——把它排在 `setup-net-capability-flags` 的 Linux 统一串之前，会被那条串悄悄
+          # 覆盖回「只装 mbedTLS 一条腿」，矩阵红绿都不再说明装配形态。
+          flags="${{ steps.net-flags.outputs.flags }}"
+          flags="$flags ${{ matrix.cmake-flags }}"
           # runner 上下文不允许出现在 strategy.matrix，故 vcpkg 共享安装根不在矩阵里写死，
           # 改为运行期用 $RUNNER_TEMP（GitHub 注入的环境变量）拼出并追加——与上方 Install
           # OpenSSL 步骤写入的安装根保持一致（shared:<root>/installed/x64-windows）。
           if [ "${{ matrix.vcpkg }}" = "true" ]; then
-            flags="$flags -DAURORA_NET_TLS_PROVIDER=shared:$RUNNER_TEMP/vcpkg/installed/x64-windows"
+            flags="$flags -DAURORA_NET_TLS_PROVIDERS=shared:$RUNNER_TEMP/vcpkg/installed/x64-windows"
           fi
           if [ "${{ matrix.homebrew-openssl }}" = "true" ]; then
-            flags="$flags -DAURORA_NET_TLS_PROVIDER=shared:$OPENSSL_PREFIX"
+            flags="$flags -DAURORA_NET_TLS_PROVIDERS=shared:$OPENSSL_PREFIX"
           fi
-          flags="$flags ${{ steps.net-flags.outputs.flags }}"
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $flags
 
       - name: Build (library + tools)
@@ -802,6 +814,10 @@ jobs:
           if [ -n "${OPENSSL_PREFIX:-}" ]; then
             export DYLD_LIBRARY_PATH="${OPENSSL_PREFIX}/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
           fi
+          # 两套件各跑一次进程：注册表是进程级状态，`utest_net_tls_backend` 的桩注入与显式置链
+          # 靠用例内的存还原收口，但把「真实握手」与「改写注册表」分开在两个进程里跑，才是
+          # 共存形态运行期判据的干净读法。
+          ./build/aurora_test_runner --run utest_net_tls_backend
           ./build/aurora_test_runner --run utest_net_tls
 
   # ---------------------------------------------------------------------------
@@ -1107,7 +1123,7 @@ jobs:
           # （tls_mbedtls.cpp / tls_openssl.cpp）各自进一个 pass 的分析面，不新增 job。
           - label: optimizations-off
             debug: "OFF"
-            flags: -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_OCCLUSION_CULLING=OFF -DAURORA_ENABLE_DISPLAY_LIST=OFF -DAURORA_ENABLE_SIMD=OFF -DAURORA_ENABLE_TEST_HOOKS=OFF -DAURORA_NET_TLS_PROVIDER=shared:/usr
+            flags: -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_OCCLUSION_CULLING=OFF -DAURORA_ENABLE_DISPLAY_LIST=OFF -DAURORA_ENABLE_SIMD=OFF -DAURORA_ENABLE_TEST_HOOKS=OFF -DAURORA_NET_TLS_PROVIDERS=shared:/usr
         shard: [0, 1, 2, 3]
         # 单值维度：只为给 `--shard=i/n` 的 n 一个 yaml 内的引用点（见上方注释）。
         total: [4]
