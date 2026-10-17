@@ -1246,7 +1246,8 @@ auto InspectorServer::start(uint16_t port) const -> bool {
     // 单线程 wasm 构建（Emscripten 未开 -pthread）下 std::thread 构造直接抛 "Not supported"；
     // 按编码规范以编译期能力宏拦截，返回明确的不可用，而非让调用方吃未捕获异常。
     // 需要真并行的 wasm 产物请构建时开 AURORA_ENABLE_WASM_PTHREADS（=ON 时 AURORA_CAP_THREADS 翻 1）。
-    AURORA_LOG_ERROR("inspector", "InspectorServer unavailable: no thread support (AURORA_CAP_THREADS=0 on this build)");
+    AURORA_LOG_ERROR("inspector",
+                     "InspectorServer unavailable: no thread support (AURORA_CAP_THREADS=0 on this build)");
     return false;
 #endif
     if (impl_->running.load()) {

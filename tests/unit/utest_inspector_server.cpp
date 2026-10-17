@@ -337,7 +337,7 @@ struct FindTree {
 #endif  // AURORA_BUILD_INSPECTOR_SERVER（辅助设施段；用例恒注册，体内降级 SKIP）
 
 AURORA_TEST_CASE(initial_state_is_stopped) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -347,7 +347,7 @@ AURORA_TEST_CASE(initial_state_is_stopped) {
 }
 
 AURORA_TEST_CASE(start_and_stop_lifecycle) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -363,7 +363,7 @@ AURORA_TEST_CASE(start_and_stop_lifecycle) {
 }
 
 AURORA_TEST_CASE(start_twice_while_running_fails) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -376,7 +376,7 @@ AURORA_TEST_CASE(start_twice_while_running_fails) {
 }
 
 AURORA_TEST_CASE(stop_is_idempotent_and_restartable) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -394,7 +394,7 @@ AURORA_TEST_CASE(stop_is_idempotent_and_restartable) {
 }
 
 AURORA_TEST_CASE(destructor_joins_worker_and_releases_state) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     {
@@ -412,7 +412,7 @@ AURORA_TEST_CASE(destructor_joins_worker_and_releases_state) {
 }
 
 AURORA_TEST_CASE(tree_endpoint_serves_widget_tree_json) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -429,7 +429,7 @@ AURORA_TEST_CASE(tree_endpoint_serves_widget_tree_json) {
 }
 
 AURORA_TEST_CASE(components_endpoint_returns_json_array) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -445,7 +445,7 @@ AURORA_TEST_CASE(components_endpoint_returns_json_array) {
 }
 
 AURORA_TEST_CASE(unknown_endpoint_returns_404) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -459,7 +459,7 @@ AURORA_TEST_CASE(unknown_endpoint_returns_404) {
 }
 
 AURORA_TEST_CASE(wrong_method_returns_405) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -473,7 +473,7 @@ AURORA_TEST_CASE(wrong_method_returns_405) {
 }
 
 AURORA_TEST_CASE(bad_pick_params_return_400) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -487,7 +487,7 @@ AURORA_TEST_CASE(bad_pick_params_return_400) {
 }
 
 AURORA_TEST_CASE(missing_host_header_returns_403) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -501,7 +501,7 @@ AURORA_TEST_CASE(missing_host_header_returns_403) {
 }
 
 AURORA_TEST_CASE(debug_state_requires_surface_getter) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -520,7 +520,7 @@ AURORA_TEST_CASE(debug_state_requires_surface_getter) {
 }
 
 AURORA_TEST_CASE(input_click_dispatches_to_target_and_toggles_state) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
@@ -544,7 +544,7 @@ AURORA_TEST_CASE(input_click_dispatches_to_target_and_toggles_state) {
 }
 
 AURORA_TEST_CASE(input_scroll_dispatches_to_target_and_reaches_on_scroll) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
@@ -565,7 +565,7 @@ AURORA_TEST_CASE(input_scroll_dispatches_to_target_and_reaches_on_scroll) {
 }
 
 AURORA_TEST_CASE(input_text_dispatches_to_target_and_inserts_text) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
@@ -584,7 +584,7 @@ AURORA_TEST_CASE(input_text_dispatches_to_target_and_inserts_text) {
 }
 
 AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
@@ -616,7 +616,7 @@ AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
 }
 
 AURORA_TEST_CASE(input_endpoint_accepts_empty_path_as_tree_root) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     // 空串路径即树根本身（与 find_node_by_path 的空路径语义一致），使根控件无需再包一层容器
@@ -636,7 +636,7 @@ AURORA_TEST_CASE(input_endpoint_accepts_empty_path_as_tree_root) {
 }
 
 AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
@@ -659,7 +659,7 @@ AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
 }
 
 AURORA_TEST_CASE(input_drag_dispatches_press_move_release_to_target) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InputTree tree = make_input_tree();
@@ -689,7 +689,7 @@ AURORA_TEST_CASE(input_drag_dispatches_press_move_release_to_target) {
 }
 
 AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     FindTree tree = make_find_tree();
@@ -744,7 +744,7 @@ AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
 // query 值的百分号解码：HTTP 客户端对空格 / 非 ASCII 一律按 `%XX` 编码，服务端不解码就永远
 // 匹配不上这些值（真实场景：`/api/find?text=New%20auxiliary%20window` 定位多窗口载体的按钮）。
 AURORA_TEST_CASE(find_endpoint_percent_decodes_query_values) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     FindTree tree = make_find_tree();
@@ -784,7 +784,7 @@ AURORA_TEST_CASE(find_endpoint_percent_decodes_query_values) {
 }
 
 AURORA_TEST_CASE(find_endpoint_rejects_malformed_requests) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     FindTree tree = make_find_tree();
@@ -803,7 +803,7 @@ AURORA_TEST_CASE(find_endpoint_rejects_malformed_requests) {
 }
 
 AURORA_TEST_CASE(tree_endpoint_by_window_returns_target_window_tree) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     // 主窗用共享树（Column[Text "hello"]）；window=1 → Column[Text "window-one"]，
@@ -847,7 +847,7 @@ AURORA_TEST_CASE(tree_endpoint_by_window_returns_target_window_tree) {
 }
 
 AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     // 未注册 window_tree_getter 时，带 window 参数的请求必须回 400（明确告知需配置），
@@ -861,7 +861,7 @@ AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
 }
 
 AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);
@@ -895,7 +895,7 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
 // 帧内在增删节点，worker 线程读到已释放节点。用例靠「线程流水」判定：`root_getter` 记录的调用
 // 线程必须全等于排水线程，且排水线程就是用例主线程；修复前这些调用发生在 worker 线程，必红。
 AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_poster_thread) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     QueuedPoster poster;
@@ -939,7 +939,7 @@ AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_poster_thread) {
 
 // 目标：无投递器（无事件循环）时树端点仍可同步服务——marshal 的回退分支不得变成硬依赖。
 AURORA_TEST_CASE(tree_routes_work_without_a_poster_inline) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
 #else
     InspectorServer server(tree_getter);

@@ -1,8 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: src/aurora/net/detail/http_encoding.h + src/aurora/net/detail/http_encoding.cpp
 /// 测试说明: HTTP 应答 `Content-Encoding` 的编码链文法、逐层还原与**同一链条的流式串联**的逐值回归
-///           。覆盖宣告集与支持集同源（`AURORA_HTTP_ACCEPT_ENCODING` 自身可被解析回两枚环节）、编码名大小写不敏感与 OWS 修剪、
-///           字段缺席 / 空值 / `identity` 归零环节而列表里的空环节判文法畸形、支持集外的名点名落
+///           。覆盖宣告集与支持集同源（`AURORA_HTTP_ACCEPT_ENCODING` 自身可被解析回两枚环节）、编码名大小写不敏感与 OWS
+///           修剪、 字段缺席 / 空值 / `identity` 归零环节而列表里的空环节判文法畸形、支持集外的名点名落
 ///           `http-content-encoding-unsupported`；逐层还原按书写次序反序进行（`gzip, deflate` 先剥 deflate
 ///           再剥 gzip，正序解必失败）、`deflate` 先试 zlib 包装仅在其报流损坏时回落裸 DEFLATE、空载荷配
 ///           已声明环节交出空产物而不是流损坏、逐层受 `max_output_bytes` 约束；core 层三枚 `compression-*`
