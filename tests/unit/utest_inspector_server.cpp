@@ -8,8 +8,10 @@
 /// 树端点的线程落点同样在此覆盖：装上传递器后必须换到主线程下树，无传递器时回退内联执行。
 /// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端经同步阻塞传输层
 /// `aurora::net::blocking`，随用例作用域关闭清理。
-/// AURORA_BUILD_INSPECTOR_SERVER=OFF，或无线程能力构建（Emscripten 未开 -pthread，AURORA_CAP_THREADS=0）
-/// 时整文件降级为 skip 桩——服务依赖后台 worker 线程，单线程 wasm 无法承载。
+/// AURORA_BUILD_INSPECTOR_SERVER=OFF，或无线程能力构建（Emscripten 未开 -pthread，AURORA_CAP_THREADS=0），
+/// 或 wasm 平台（AURORA_PLATFORM_WASM）时，整文件降级为 skip 桩——服务既依赖后台 worker 线程，
+/// 也依赖 bind/listen/accept 的 BSD socket 语义；wasm 即便开了 -pthread 也只补上线程、不补套接字，
+/// 故此处须按平台（而非仅按线程能力）判定，否则 worker 会阻塞在永不就绪的套接字操作上。
 
 #include <chrono>
 #include <condition_variable>
@@ -44,7 +46,7 @@
 
 namespace aurora::test_cases::utest_inspector_server {
 
-#if defined(AURORA_BUILD_INSPECTOR_SERVER) && AURORA_CAP_THREADS
+#if defined(AURORA_BUILD_INSPECTOR_SERVER) && AURORA_CAP_THREADS && !defined(AURORA_PLATFORM_WASM)
 namespace {
 
 /// @brief 共享测试树：Column 根 + Text 子节点（静态存储期，供 worker 线程 root_getter 读取）。
@@ -337,8 +339,10 @@ struct FindTree {
 #endif  // AURORA_BUILD_INSPECTOR_SERVER（辅助设施段；用例恒注册，体内降级 SKIP）
 
 AURORA_TEST_CASE(initial_state_is_stopped) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_CHECK_EQ(server.is_running(), false);
@@ -347,8 +351,10 @@ AURORA_TEST_CASE(initial_state_is_stopped) {
 }
 
 AURORA_TEST_CASE(start_and_stop_lifecycle) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     // 端口传 0：由系统分配临时端口，规避并行用例间的端口冲突。
@@ -363,8 +369,10 @@ AURORA_TEST_CASE(start_and_stop_lifecycle) {
 }
 
 AURORA_TEST_CASE(start_twice_while_running_fails) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -376,8 +384,10 @@ AURORA_TEST_CASE(start_twice_while_running_fails) {
 }
 
 AURORA_TEST_CASE(stop_is_idempotent_and_restartable) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_CHECK_NO_THROW(server.stop());  // 未启动时 stop 直接返回
@@ -394,8 +404,10 @@ AURORA_TEST_CASE(stop_is_idempotent_and_restartable) {
 }
 
 AURORA_TEST_CASE(destructor_joins_worker_and_releases_state) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     {
         InspectorServer scoped(tree_getter);
@@ -412,8 +424,10 @@ AURORA_TEST_CASE(destructor_joins_worker_and_releases_state) {
 }
 
 AURORA_TEST_CASE(tree_endpoint_serves_widget_tree_json) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -429,8 +443,10 @@ AURORA_TEST_CASE(tree_endpoint_serves_widget_tree_json) {
 }
 
 AURORA_TEST_CASE(components_endpoint_returns_json_array) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -445,8 +461,10 @@ AURORA_TEST_CASE(components_endpoint_returns_json_array) {
 }
 
 AURORA_TEST_CASE(unknown_endpoint_returns_404) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -459,8 +477,10 @@ AURORA_TEST_CASE(unknown_endpoint_returns_404) {
 }
 
 AURORA_TEST_CASE(wrong_method_returns_405) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -473,8 +493,10 @@ AURORA_TEST_CASE(wrong_method_returns_405) {
 }
 
 AURORA_TEST_CASE(bad_pick_params_return_400) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -487,8 +509,10 @@ AURORA_TEST_CASE(bad_pick_params_return_400) {
 }
 
 AURORA_TEST_CASE(missing_host_header_returns_403) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -501,8 +525,10 @@ AURORA_TEST_CASE(missing_host_header_returns_403) {
 }
 
 AURORA_TEST_CASE(debug_state_requires_surface_getter) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -520,8 +546,10 @@ AURORA_TEST_CASE(debug_state_requires_surface_getter) {
 }
 
 AURORA_TEST_CASE(input_click_dispatches_to_target_and_toggles_state) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InputTree tree = make_input_tree();
     AURORA_TEST_REQUIRE_FALSE(tree.checkbox->value());  // 起始未勾选，翻转可观测
@@ -544,8 +572,10 @@ AURORA_TEST_CASE(input_click_dispatches_to_target_and_toggles_state) {
 }
 
 AURORA_TEST_CASE(input_scroll_dispatches_to_target_and_reaches_on_scroll) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -565,8 +595,10 @@ AURORA_TEST_CASE(input_scroll_dispatches_to_target_and_reaches_on_scroll) {
 }
 
 AURORA_TEST_CASE(input_text_dispatches_to_target_and_inserts_text) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -584,8 +616,10 @@ AURORA_TEST_CASE(input_text_dispatches_to_target_and_inserts_text) {
 }
 
 AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -616,8 +650,10 @@ AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
 }
 
 AURORA_TEST_CASE(input_endpoint_accepts_empty_path_as_tree_root) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     // 空串路径即树根本身（与 find_node_by_path 的空路径语义一致），使根控件无需再包一层容器
     // 就能被驱动；这里直接把 TextInput 作根来验证。
@@ -636,8 +672,10 @@ AURORA_TEST_CASE(input_endpoint_accepts_empty_path_as_tree_root) {
 }
 
 AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -659,8 +697,10 @@ AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
 }
 
 AURORA_TEST_CASE(input_drag_dispatches_press_move_release_to_target) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InputTree tree = make_input_tree();
     InspectorServer server(tree.getter());
@@ -689,8 +729,10 @@ AURORA_TEST_CASE(input_drag_dispatches_press_move_release_to_target) {
 }
 
 AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     FindTree tree = make_find_tree();
     InspectorServer server(tree.getter());
@@ -744,8 +786,10 @@ AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
 // query 值的百分号解码：HTTP 客户端对空格 / 非 ASCII 一律按 `%XX` 编码，服务端不解码就永远
 // 匹配不上这些值（真实场景：`/api/find?text=New%20auxiliary%20window` 定位多窗口载体的按钮）。
 AURORA_TEST_CASE(find_endpoint_percent_decodes_query_values) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     FindTree tree = make_find_tree();
     InspectorServer server(tree.getter());
@@ -784,8 +828,10 @@ AURORA_TEST_CASE(find_endpoint_percent_decodes_query_values) {
 }
 
 AURORA_TEST_CASE(find_endpoint_rejects_malformed_requests) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     FindTree tree = make_find_tree();
     InspectorServer server(tree.getter());
@@ -803,8 +849,10 @@ AURORA_TEST_CASE(find_endpoint_rejects_malformed_requests) {
 }
 
 AURORA_TEST_CASE(tree_endpoint_by_window_returns_target_window_tree) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     // 主窗用共享树（Column[Text "hello"]）；window=1 → Column[Text "window-one"]，
     // window=2 → Checkbox 根；其它 id → 空 Node（路由层 404）。
@@ -847,8 +895,10 @@ AURORA_TEST_CASE(tree_endpoint_by_window_returns_target_window_tree) {
 }
 
 AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     // 未注册 window_tree_getter 时，带 window 参数的请求必须回 400（明确告知需配置），
     // 而非静默回退主窗或 404。
@@ -861,8 +911,10 @@ AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
 }
 
 AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
@@ -895,8 +947,10 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
 // 帧内在增删节点，worker 线程读到已释放节点。用例靠「线程流水」判定：`root_getter` 记录的调用
 // 线程必须全等于排水线程，且排水线程就是用例主线程；修复前这些调用发生在 worker 线程，必红。
 AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_poster_thread) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     QueuedPoster poster;
     getter_threads().clear();
@@ -939,8 +993,10 @@ AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_poster_thread) {
 
 // 目标：无投递器（无事件循环）时树端点仍可同步服务——marshal 的回退分支不得变成硬依赖。
 AURORA_TEST_CASE(tree_routes_work_without_a_poster_inline) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER is not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     InspectorServer server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));

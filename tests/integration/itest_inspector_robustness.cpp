@@ -5,7 +5,10 @@
 ///           Content-Length 大小写混排与 body 内伪装头：一律返回 4xx/5xx JSON
 ///           响应且进程存活，绝不 std::terminate。真实 loopback HTTP 往返驱动。
 ///           AURORA_BUILD_INSPECTOR_SERVER=OFF，或无线程能力构建（Emscripten 未开 -pthread，
-///           AURORA_CAP_THREADS=0）时整文件降级为 skip 桩——服务依赖后台 worker 线程。
+///           AURORA_CAP_THREADS=0），或 wasm 平台（AURORA_PLATFORM_WASM）时整文件降级为
+///           skip 桩——服务既依赖后台 worker 线程，也依赖 bind/listen/accept 的 BSD socket
+///           语义；wasm 即便开了 -pthread 也只补线程、不补套接字，故此处按平台而非仅按
+///           线程能力判定。
 
 #include <cstdint>
 #include <functional>
@@ -27,7 +30,7 @@
 
 namespace aurora::test_cases::itest_inspector_robustness {
 
-#if defined(AURORA_BUILD_INSPECTOR_SERVER) && AURORA_CAP_THREADS
+#if defined(AURORA_BUILD_INSPECTOR_SERVER) && AURORA_CAP_THREADS && !defined(AURORA_PLATFORM_WASM)
 namespace {
 
 /// @brief 共享测试树：Column 根 + Text 子节点（静态存储期，供 worker 线程 root_getter 读取）。
@@ -132,8 +135,10 @@ class ScopedServer {
 #endif  // AURORA_BUILD_INSPECTOR_SERVER（辅助设施段；用例恒注册，体内降级 SKIP）
 
 AURORA_TEST_CASE(debug_flags_type_mismatch_returns_400) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     const ScopedServer server;
 
@@ -167,8 +172,10 @@ AURORA_TEST_CASE(debug_flags_type_mismatch_returns_400) {
 }
 
 AURORA_TEST_CASE(to_code_style_type_mismatch_and_out_of_range_fallback) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     const ScopedServer server;
 
@@ -195,8 +202,10 @@ AURORA_TEST_CASE(to_code_style_type_mismatch_and_out_of_range_fallback) {
 }
 
 AURORA_TEST_CASE(widget_put_invalid_font_weight_does_not_terminate) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     const ScopedServer server;
 
@@ -209,8 +218,10 @@ AURORA_TEST_CASE(widget_put_invalid_font_weight_does_not_terminate) {
 }
 
 AURORA_TEST_CASE(query_string_and_mixed_case_content_length) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     const ScopedServer server;
 
@@ -242,8 +253,10 @@ AURORA_TEST_CASE(query_string_and_mixed_case_content_length) {
 }
 
 AURORA_TEST_CASE(body_length_trap_and_liveness_probe) {
-#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     const ScopedServer server;
 
