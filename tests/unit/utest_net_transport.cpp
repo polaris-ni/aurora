@@ -28,6 +28,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -117,6 +118,7 @@ auto make_host_pair(aurora::app::EventSourceRegistry &registry) -> HostPair {
     AURORA_TEST_REQUIRE(bound.ok());
     HostPair pair{.listener = std::move(bound.value())};
     AURORA_TEST_REQUIRE_NE(pair.listener.local_port(), std::uint16_t{0});
+    ::fprintf(stderr, "[diag][tp] bound port=%u\n", static_cast<unsigned>(pair.listener.local_port()));
 
     std::atomic<int> accepted{0};
     pair.listener.accept([&pair, &accepted](auto result) {
@@ -124,6 +126,8 @@ auto make_host_pair(aurora::app::EventSourceRegistry &registry) -> HostPair {
         // `std::terminate`；这里只记录失败，前提是否成立由下面的 `pump_until` 断言负责转红。
         AURORA_TEST_CHECK(result.ok());
         if (!result) {
+            ::fprintf(stderr, "[diag][tp] accept failed: %s | %s\n", result.error().code.c_str(),
+                      result.error().message.c_str());
             return;
         }
         pair.server = std::move(result.value());
@@ -136,6 +140,8 @@ auto make_host_pair(aurora::app::EventSourceRegistry &registry) -> HostPair {
                                  // 口径同上：connect 的失败派发同样可能落在析构路径内。
                                  AURORA_TEST_CHECK(result.ok());
                                  if (!result) {
+                                     ::fprintf(stderr, "[diag][tp] connect failed: %s | %s\n",
+                                               result.error().code.c_str(), result.error().message.c_str());
                                      return;
                                  }
                                  pair.client = std::move(result.value());

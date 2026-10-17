@@ -1082,6 +1082,7 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
     // 系统的失败描述只说「哪张证书出了什么问题」，不含我们本来要连的那个名字；而「连到了给别人签发的证书」
     // 是本层最常见的一类现场，名字必须在诊断里（公共面对 `net-tls-cert-rejected` 的期望就是可归因）。
     const std::string detail = describe_cferror(error);
+    ::fprintf(stderr, "[tls-st][diag] after describe_cferror\n");
     if (error != nullptr) {
         ::CFRelease(error);
     }
@@ -1096,15 +1097,20 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
     // 强制在线检查是另一件事。
 
     // 名字与链的结论到此都由系统给出，剩下的只是把叶子证书摘成公共面摘要。
+    ::fprintf(stderr, "[tls-st][diag] before capture_summary call\n");
     return capture_summary(trust);
 }
 
 auto SecureTransportBackend::capture_summary(SecTrustRef trust) -> Result<void> {
     // 两个访问器都要求「先评估」，这正是本函数只在评估之后被调用的原因（文件头有文档原话）。
-    if (::SecTrustGetCertificateCount(trust) <= 0) {
+    ::fprintf(stderr, "[tls-st][diag] capture_summary: enter\n");
+    const auto count = ::SecTrustGetCertificateCount(trust);
+    ::fprintf(stderr, "[tls-st][diag] capture_summary: count=%ld\n", static_cast<long>(count));
+    if (count <= 0) {
         return tls_error(ErrorCode::NetTlsCertRejected, "peer presents no certificate to verify");
     }
     const SecCertificateRef leaf = ::SecTrustGetCertificateAtIndex(trust, 0);  // Get 规则：不拥有该引用
+    ::fprintf(stderr, "[tls-st][diag] capture_summary: leaf=%p\n", static_cast<const void *>(leaf));
     if (leaf == nullptr) {
         return tls_error(ErrorCode::NetTlsCertRejected, "peer certificate chain has no leaf certificate");
     }
