@@ -109,6 +109,10 @@ class CoroTask {
                 std::scoped_lock<std::mutex> lock(shared->mutex);
                 shared->done.store(true, std::memory_order_release);
                 hook = std::move(shared->on_done);
+                // 必须显式清空源：可调用体小到落进 std::function 内部缓冲（小缓冲优化）时，
+                // 移动是「克隆」而非转移，源仍持有一份观察者——那就不是「摘出即清空」，观察者连同
+                // 其捕获会活到共享状态销毁，正是上一条注释要断的自持环。显式置空与实现细节无关。
+                shared->on_done = nullptr;
             }
             // 锁外触发：钩子按约定要能回头销毁这次交付的会话（含本共享状态的另一个持有者），
             // 持锁调用即自死锁。结果槽此时必有值——`return_value` 与 `unhandled_exception` 是仅有的

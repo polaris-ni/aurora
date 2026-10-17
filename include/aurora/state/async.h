@@ -314,6 +314,10 @@ class Task {
             state_->cancelled.store(true, std::memory_order_release);
             state_->delivered = true;  // 取消即视为已处理，丢弃后续回调
             hook = std::move(state_->on_cancel);  // 摘出即清空：钩子里没有第二份可被重复触发的东西
+            // 必须显式清空源：可调用体小到落进 std::function 内部缓冲（小缓冲优化）时，移动是「克隆」
+            // 而非转移，源仍持有一份观察者——留着它，观察者连同其捕获会活到共享状态销毁（自持环）。
+            // 与 `CoroTask::promise_type::~promise_type` 同一条纪律。显式置空与实现细节无关。
+            state_->on_cancel = nullptr;
         }
         // 锁外触发：钩子按约定要能回头碰这枚状态（读 `is_cancelled()`、或直接投递取消事实），
         // 持锁调用即自死锁。与 `net::Cancellation` 同一条口径——钩子在调用线程上同步执行，不得阻塞。
