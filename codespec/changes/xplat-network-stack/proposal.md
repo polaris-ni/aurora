@@ -146,23 +146,26 @@ class DatagramTransport;  // UDP：bind / send_to / receive_from，同 StreamTra
 
 系统栈引擎按平台默认装配（用户裁决），Linux 无系统栈、由使用方以 **provider 缓存变量传入本地安装的库**：
 
-| 平台 | 默认后端 | 宏 | provider 覆盖 |
+| 平台 | 默认后端 | 宏 | provider 并存 |
 |:---|:---|:---|:---|
-| Windows | Schannel（系统，零依赖） | `AURORA_NET_TLS_SCHANNEL` | 可覆盖 |
-| macOS | SecureTransport（系统） | `AURORA_NET_TLS_SECURE_TRANSPORT` | 可覆盖 |
-| Linux（X11 / Wayland / GLFW 宿主） | **无默认**：未给 provider 即 `capabilities().tls` 为 false | `AURORA_NET_TLS_OPENSSL` / `AURORA_NET_TLS_MBEDTLS`（由探测择一） | **必选项** |
+| Windows | Schannel（系统，零依赖） | `AURORA_ENABLE_NET_TLS_SCHANNEL` | 可并存 |
+| macOS | SecureTransport（系统） | `AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT` | 可并存 |
+| Linux（X11 / Wayland / GLFW 宿主） | **无默认**：未给 provider 即 `capabilities().tls` 为 false | `AURORA_ENABLE_NET_TLS_OPENSSL` / `AURORA_ENABLE_NET_TLS_MBEDTLS`（逐条探测推导） | **必选项** |
 | wasm | 无原生 socket，TLS 由浏览器 `fetch` 代管 | — | 不适用 |
+
+> **裁决更替（2026-10-17）**：本表原写「provider 覆盖系统栈」，即给出 provider 安装根时系统栈那条腿不再装配。该形态已被推翻——两枚旋钮（`AURORA_ENABLE_NET_TLS_SYSTEM` 与列表型 `AURORA_NET_TLS_PROVIDERS`）各自独立生效，系统栈与 provider **共存**，「用哪一枚」由运行期后端注册表按候选链决定而不是由构建期二选一决定。理由：系统栈是零依赖、随 servicing 打补丁、由 OS 信任库统一管根的那条腿，为了让应用能用 provider 库而把它编译掉是拿安全默认换可选能力。原行号与表述保留，不制造指向不存在条目的伪死链。
 
 provider 语义（用户裁决的传参形态）：
 
 ```
--D AURORA_NET_TLS_PROVIDER=static:/opt/mbedtls    # 静态链：取 <prefix>/lib/*.a
--D AURORA_NET_TLS_PROVIDER=shared:/usr/local      # 动态链：取 <prefix>/lib/*.so|dylib|dll
+-D AURORA_NET_TLS_PROVIDERS=static:/opt/mbedtls              # 静态链：取 <prefix>/lib/*.a
+-D AURORA_NET_TLS_PROVIDERS=shared:/usr/local                # 动态链：取 <prefix>/lib/*.so|dylib|dll
+-D AURORA_NET_TLS_PROVIDERS=static:/opt/mbedtls,shared:/usr  # 两条共存：同一次装配编入两枚引擎
 ```
 
-- 值形如 `<linkage>:<prefix>`：`linkage` 取 `static` / `shared`，`prefix` 是约定 `include/` + `lib/` 布局的安装根。
-- **后端种类由探测判定**：`<prefix>/include/openssl/ssl.h` 存在按 OpenSSL 语义编译、`<prefix>/include/mbedtls/ssl.h` 存在按 mbedTLS 编译，两者皆无则 configure 期硬失败并列出期望的头路径（不静默降级为「无 TLS」），多命中时 OpenSSL 优先并在配置日志显式记录；宏 `AURORA_NET_TLS_OPENSSL` / `AURORA_NET_TLS_MBEDTLS` 由此推导、不手工设置。
-- 探测通过后生成导入目标（`aurora::net::tls`），`shared` 形态的运行期寻址交宿主部署负责，不引入 RPATH 魔法。
+- 值形如 `<linkage>:<prefix>`：`linkage` 取 `static` / `shared`，`prefix` 是约定 `include/` + `lib/` 布局的安装根；列表项之间以 `,` 或 `;` 分隔，**同一后端种类至多一枚**。
+- **后端种类由探测判定**：`<prefix>/include/openssl/ssl.h` 存在按 OpenSSL 语义编译、`<prefix>/include/mbedtls/ssl.h` 存在按 mbedTLS 编译，两者皆无则 configure 期硬失败并列出期望的头路径（不静默降级为「无 TLS」），同一根内多命中时 OpenSSL 优先并在配置日志显式记录；宏 `AURORA_ENABLE_NET_TLS_OPENSSL` / `AURORA_ENABLE_NET_TLS_MBEDTLS` 逐条由此推导、不手工设置。库定位按推导出的种类查该种类自己的库名，不再取两套库的并集。
+- 探测通过后按种类生成导入目标并聚合成 `aurora::net::tls`，`shared` 形态的运行期寻址交宿主部署负责，不引入 RPATH 魔法。
 - `prefix` **只接受安装根**（形如 `/opt/mbedtls`、`/usr/local`），不做向上猜测或递归搜索：写错路径时诊断会打印实际检查过的 `include/` 与 `lib/` 组合，避免「路径语义太宽 → 链接到意外版本」这类难查故障。
 - 仓库**不自带任何 TLS 源码**：断网可构建不变，许可证由 provider 提供方自负（不触发 `THIRD_PARTY_LICENSES.md` 变更）；CI `toggles` 矩阵新增两 job——Linux `static:` 指向 CI 预置 mbedTLS、Windows `shared:` 指向 vcpkg 布局 OpenSSL，保证两套适配都有真编译覆盖。
 - **provider 腿的能力可以小于系统栈腿，但不得静默**：一枚 provider 引擎缺哪项能力，`TlsContext` 的对应字段就在**发起前**明确失败并写明缺口（见 §16 第 20 项），绝不收下字段后当没这回事——后者会让调用方以为 mTLS 或自定义信任根已生效，而现场只是对端拒绝握手。
@@ -251,11 +254,11 @@ class Resource {                         // 三态：Loading / Ready(T) / Failed
 | `AURORA_ENABLE_NET` | `ON` | 网络栈编入（关掉后 API 面仍在、调用即返回「引擎不可用」错误，供极简体裁剪） |
 | `AURORA_NET_ENGINE_POLL` | `ON` | 内置事件驱动线程引擎（跨平台基线实现） |
 | `AURORA_NET_EVENT_SOURCE` | `ON` | 通用事件源注册口，首批覆盖 Win32 / X11 / Wayland / macOS / GLFW / Headless 全平台 |
-| `AURORA_NET_TLS_SCHANNEL` / `AURORA_NET_TLS_SECURE_TRANSPORT` | 各自平台 `ON` | 系统栈 TLS 引擎 |
-| `AURORA_NET_TLS_OPENSSL` / `AURORA_NET_TLS_MBEDTLS` | 由探测推导 | provider 库适配引擎，**不手工设置** |
+| `AURORA_ENABLE_NET_TLS_SCHANNEL` / `AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT` | 由 `AURORA_ENABLE_NET_TLS_SYSTEM` 推导（各自平台缺省 `ON`） | 系统栈 TLS 引擎 |
+| `AURORA_ENABLE_NET_TLS_OPENSSL` / `AURORA_ENABLE_NET_TLS_MBEDTLS` | 由 provider 逐条探测推导 | provider 库适配引擎，**不手工设置**；与系统栈两枚可以同时为真 |
 | ~~`AURORA_NET_HTTP_FETCH`~~ | — | 规划宏未启用（见 §16 第 37 项：网络栈无构建开关、公共 API 恒在，wasm 腿的浏览器 `fetch` HTTP 路径随平台直接启用，受 CORS 与无监听语义约束） |
 
-配套缓存变量（非宏）：`AURORA_NET_TLS_PROVIDER=<static|shared>:<prefix>`，语义与探测规则见 §5。
+配套缓存变量（非宏）：`AURORA_ENABLE_NET_TLS_SYSTEM`（系统栈腿）与列表型 `AURORA_NET_TLS_PROVIDERS=<static|shared>:<prefix>[,...]`（provider 腿），两枚独立生效、可共存；旧单值 `AURORA_NET_TLS_PROVIDER` 保留为别名，新旧同设即 configure 期硬失败。语义与探测规则见 §5。
 
 落码需同步：声明处 cmake 模块、`aurora_define_feature` 登记、codespec/BUILD_OPTIONS.md §4 清单行、运行期可查则进 include/aurora/debug/feature_flags.h。Windows 链接面 `ws2_32` 维持 CHG-006 口径（核心 `PUBLIC`）。第三方依赖原则（经裁决）：**优先系统栈、零 vendored 新库、不自带 TLS 源码**，Linux 由 provider 指向使用方本地安装，仓库 `third_party/` 无新增、`THIRD_PARTY_LICENSES.md` 不变、「断网可构建」不变。
 
