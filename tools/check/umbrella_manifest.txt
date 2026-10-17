@@ -118,6 +118,7 @@ aurora/net/proxy.h
 aurora/net/resolver.h
 aurora/net/socket.h
 aurora/net/tls.h
+aurora/net/tls_backend.h
 aurora/net/transport.h
 aurora/perf/counters.h
 aurora/perf/perf_log.h

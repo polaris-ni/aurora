@@ -6365,7 +6365,7 @@
       "severity": "error",
       "retryable": false,
       "message": "This network capability is unavailable on the current platform",
-      "hint": "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait semantics (e.g. wasm), so there is no silent fallback by design"
+      "hint": "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait semantics (e.g. wasm), so there is no silent fallback by design. When a TLS backend factory reports it, the code names the configuration that backend cannot express (e.g. a system certificate store leg given an in-memory PEM identity): under the default candidate chain the next backend is tried, while an explicitly designated one (TlsContext::backend) returns it as-is"
     },
     {
       "enum": "NetUrlInvalid",
@@ -6536,7 +6536,7 @@
       "severity": "error",
       "retryable": false,
       "message": "No TLS backend available: '{detail}'",
-      "hint": "This platform has no system TLS stack that Aurora drives, and the build supplied no provider, so net::Engine::capabilities().tls is false. Configure AURORA_NET_TLS_PROVIDER=<static|shared>:<prefix> with an OpenSSL or mbedTLS installation, or run the request over plain transport on a trusted network; linking TLS sources into the library is not a supported route"
+      "hint": "Call aurora::net::available_tls_backends(): an empty list means this build compiled no TLS engine, so supply a provider through AURORA_NET_TLS_PROVIDERS=<static|shared>:<install root> or register a backend with aurora::net::register_tls_backend(). A non-empty list means the candidate chain matched nothing instead: check set_default_tls_backends() and TlsContext::backend, whose id must be one of the listed backends. Aurora never downgrades a TLS request to plaintext"
     },
     {
       "enum": "NetTlsPinMismatch",
