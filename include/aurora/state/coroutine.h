@@ -99,6 +99,10 @@ class CoroTask {
         }
         /// @brief promise 析构（帧收尾/销毁时触发）：置位 done 唤醒轮询方，并在锁外触发完成观察者。
         /// @note 观察者摘出即清空：留着它，「会话持有共享状态、共享状态又持有会话」就成了自持环。
+        /// @note 豁免 bugprone-exception-escape：锁外触发观察者走 std::function 调用，无 noexcept
+        /// 规格——即 .clang-tidy 记录在案的 std::function 假告警面（浏览器口径才走通调用图）。
+        /// 同一份代码在 native 口径不报（口径差异见 CODING_STANDARDS.md §5.2）。
+        /// NOLINTNEXTLINE(bugprone-exception-escape)
         ~promise_type() {
             std::function<void(const Result<T> &)> hook;
             {

@@ -45,6 +45,9 @@ using PumpTail = std::function<void()>;
 /// @brief 泵尾巴的存储位（进程级单点，用例线程安装）。
 /// @return 存放 `PumpTail` 的引用；空可调用体 = 没有额外步骤。
 inline auto pump_tail_slot() -> PumpTail & {
+    // 惰性构造的函数内 static：首次调用才建，跨 TU 初始化顺序问题在此不存在（本检查的担心面）。
+    // 仅浏览器口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static PumpTail tail;
     return tail;
 }
