@@ -13,7 +13,7 @@
 |:---|:---|:---|:---|
 | `AURORA_BUILD_*` | 构建产物开关 | 是否**构建**某个额外交付物（demos / tests / Inspector 服务器） | 否（例外：`AURORA_BUILD_INSPECTOR_SERVER`（§2.3）的开关名同时作为编译宏注入——与后端组「开关名 = 宏名」同惯例） |
 | `AURORA_BACKEND_*` | 内置后端开关 | 每个**内置 `Surface` 图形后端**一个开关；**开关名 = PUBLIC feature 宏名** | 是（`#ifdef` 剪裁 + PUBLIC 传播给消费者） |
-| `AURORA_ENABLE_*` | 插桩 / 分析 / 能力开关 | 是否注入编译 / 链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速 / 内部能力（lld / ccache / SIMD / DEBUG / 测试注入点 / 内置音频设备后端 / 内置 WebView 引擎后端） | 多数否；`PROFILING` / `TRACING` 与架构级优化三开关及 `DEBUG` / `TEST_HOOKS` / `AUDIO` / `AUDIO_WASAPI` / `AUDIO_ALSA` / `AUDIO_WEBAUDIO` 注入 PUBLIC 宏，`SIMD` / `IMAGE_*` / `WEBVIEW` 组注入内部（PRIVATE）宏，`LLD` / `CCACHE` 不注入宏 |
+| `AURORA_ENABLE_*` | 插桩 / 分析 / 能力开关 | 是否注入编译 / 链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速 / 内部能力（lld / ccache / SIMD / DEBUG / 测试注入点 / 内置音频设备后端 / 内置 WebView 引擎后端 / 内置 TLS 后端引擎） | 多数否；`PROFILING` / `TRACING` 与架构级优化三开关及 `DEBUG` / `TEST_HOOKS` / `AUDIO` / `AUDIO_WASAPI` / `AUDIO_ALSA` / `AUDIO_WEBAUDIO` 注入 PUBLIC 宏，`SIMD` / `IMAGE_*` / `WEBVIEW` 组与 `NET_TLS_*` 组注入内部（PRIVATE）宏，`LLD` / `CCACHE` 不注入宏 |
 
 > `Win32/GDI` 后端仅在 `_WIN32` 下编译，无需额外开关，已由 `AURORA_BACKEND_WIN32` 的内置默认值覆盖。
 
@@ -40,31 +40,40 @@
 | `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元，另可按 `AURORA_LINT_SHARD` 分片；须在全部目标定义之后 include） |
 | `cmake/AuroraFormat.cmake` | `AURORA_ENABLE_CLANG_FORMAT`（`format` / `format-check` 聚合目标，经 `tools/check/run_clang_format.py` 并行校验 / 重写非 third_party 源文件；与目标定义无关，放最后 include 亦可） |
 | `cmake/AuroraCheckTestRegistry.cmake` | **遗留模块**：当前无 CMake `include()` 引用（`registry_integrity` 已改由 `AuroraTests.cmake` 直接注册 python 脚本 `check_test_registry.py`）；保留仅供手工 / 历史参考，不计入常规构建 |
-| `cmake/AuroraNetTls.cmake` | TLS 后端装配的**唯一决策点**（TLS 切片）：`AURORA_NET_TLS_PROVIDER` 缓存变量、系统栈缺省装配、provider 头/库探测、引擎宏推导、导入目标 `aurora::net::tls`。细则见 §1.2 |
+| `cmake/AuroraNetTls.cmake` | TLS 后端装配的**唯一决策点**（TLS 切片）：系统栈开关 `AURORA_ENABLE_NET_TLS_SYSTEM` 与 provider 列表 `AURORA_NET_TLS_PROVIDERS` **各自独立生效**（共存装配）、逐条 entry 的头/库探测、引擎宏推导、按种类建导入目标并聚合为 `aurora::net::tls`。细则见 §1.2 |
 
-### 1.2 TLS 后端引擎宏与 `AURORA_NET_TLS_PROVIDER`
+### 1.2 TLS 后端引擎宏与 `AURORA_ENABLE_NET_TLS_SYSTEM` / `AURORA_NET_TLS_PROVIDERS`
 
 `aurora::net` 的事件引擎、事件源注册口与传输族**没有开关**：公共 API 恒在（提案 §8 的第一句裁决），裁剪面只落在「哪个 TLS 引擎被编进来」这一处，因此 `AURORA_ENABLE_NET` / `AURORA_NET_ENGINE_POLL` / `AURORA_NET_EVENT_SOURCE` / `AURORA_NET_HTTP_FETCH` 四枚原规划宏**不属首批落地面**（提案 §8 的宏表按本条读取，「平台 HTTP 引擎」是 §16 的非目标）。**wasm 腿的浏览器 `fetch` HTTP 路径随平台直接启用、无独立开关**（提案 §16 第 37 项：`Client::send` 在 `AURORA_PLATFORM_WASM` 下自动改道 fetch 桥，node 真跑探针 `aurora_verify_wasm_fetch` 随默认 wasm 构建交付）。
 
 | 宏 | 默认 | 语义 |
 |:---|:---|:---|
-| `AURORA_NET_TLS_SCHANNEL` | Windows 且未给 provider 时 `ON` | 系统栈 TLS 引擎（零依赖，随 servicing 打补丁） |
-| `AURORA_NET_TLS_SECURE_TRANSPORT` | macOS 且未给 provider 时 `ON` | 系统栈 TLS 引擎 |
-| `AURORA_NET_TLS_OPENSSL` / `AURORA_NET_TLS_MBEDTLS` | **由探测推导，不接受手工设置**（`-DAURORA_NET_TLS_OPENSSL=ON` 一类不认） | provider 库适配引擎 |
+| `AURORA_ENABLE_NET_TLS_SCHANNEL` | 由 `AURORA_ENABLE_NET_TLS_SYSTEM` 推导（Windows 缺省 `ON`） | 系统栈 TLS 引擎（零依赖，随 servicing 打补丁） |
+| `AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT` | 由 `AURORA_ENABLE_NET_TLS_SYSTEM` 推导（macOS 缺省 `ON`） | 系统栈 TLS 引擎 |
+| `AURORA_ENABLE_NET_TLS_OPENSSL` / `AURORA_ENABLE_NET_TLS_MBEDTLS` | **由 provider 列表逐条探测推导，不接受手工设置**（`-DAURORA_ENABLE_NET_TLS_OPENSSL=ON` 一类不认） | provider 库适配引擎 |
 
-四枚都是 **`PRIVATE` 作用域**：公共头零 `#ifdef`（`SPEC.PLATFORM.ZERO-IFDEF.001`），消费者编译不需要它们，故也不 `EXPORT`——导出会让安装侧出现「头里没有、宏却有」的剪裁不一致，也不进 `aurora::debug::feature_flags()`。运行期真值另有唯一入口：`Engine::capabilities().tls` 由被编译进来的那个后端 TU 定义的 `detail::tls_backend_available()` 回答，因此能力位与「调用真的能成功」严格同源（见 `specification/06-app-platform.md` §8.8.18）。Linux / 其它 POSIX 腿**没有缺省系统栈**：未给 provider 即编译 `tls_unavailable.cpp`，`capabilities().tls` 为 false、TLS 构造报 `net-tls-engine-unavailable`，不存在退回明文的通路。
+四枚都是 **`PRIVATE` 作用域**：公共头零 `#ifdef`（`SPEC.PLATFORM.ZERO-IFDEF.001`），消费者编译不需要它们，故也不 `EXPORT`——导出会让安装侧出现「头里没有、宏却有」的剪裁不一致，也不进 `aurora::debug::feature_flags()`。**多枚同时为真是本装配面的目标形态而非冲突**：宏只回答「哪几枚引擎的 TU 被编了进来」，「这次握手用哪一枚」由运行期后端注册表按候选链决定（`include/aurora/net/tls_backend.h`，细则见 `specification/06-app-platform.md` §8.8.18）。运行期真值另有唯一入口：`Engine::capabilities().tls` 由**注册表是否非空**回答，内置后端在注册表首次访问时就地安装、安装集合即被编进来的那几枚 TU，因此能力位与「调用真的能成功」仍然同源。Linux / 其它 POSIX 腿**没有可驱动的系统 TLS 栈**：未给 provider 即没有任何内置后端，`capabilities().tls` 为 false、TLS 构造报 `net-tls-engine-unavailable`，不存在退回明文的通路（也没有「无后端桩」TU——该形态下回答能力位的逻辑就是注册表本身）。
 
-`AURORA_NET_TLS_PROVIDER`（缓存变量，非宏）值形如 `<static|shared>:<prefix>`：
+装配面由**两枚互相独立的旋钮**决定，这是「系统栈与 provider 共存」的构建前提：
 
-- `prefix` **只接受安装根**（含 `include/` 与 `lib/`，形如 `static:/opt/mbedtls`、`shared:/usr/local`），不做向上猜测或递归搜索；写错路径时诊断打印实际检查过的组合。分隔符只按第一个冒号切分，故 Windows 安装根的盘符冒号（`C:\openssl`）合法。
-- 引擎种类由头探测推导：`<prefix>/include/openssl/ssl.h` → OpenSSL，`<prefix>/include/mbedtls/ssl.h` → mbedTLS；**两者皆无即 configure 期硬失败**（不静默降级为「无 TLS」），多命中时 OpenSSL 优先并在配置日志显式记录。
-- 库定位只在 `<prefix>/lib` 及其 multiarch 子目录（`lib/<三元组>`，Debian 系的实际位置）查找，找不到对应库同样 configure 期硬失败；mbedTLS 额外要求 `mbedx509`（证书链解析在 TLS 记录层之外）。
-- 探测通过后生成导入目标 `aurora::net::tls`（本体 / 测试 / 工具共用同一份 include 与库路径）；`shared` 的运行期寻址交宿主部署负责，本模块不写 RPATH、不拷 DLL。
+| 旋钮 | 类型 | 缺省 | 语义 |
+|:---|:---|:---|:---|
+| `AURORA_ENABLE_NET_TLS_SYSTEM` | `option` | Win32 / APPLE `ON`，其余平台 `OFF` | 是否编入本平台系统栈引擎。在不具备可驱动系统栈的平台上显式置 `ON` 即 configure 期硬失败——静默无后端会把「拼错平台」伪装成「构建成功」 |
+| `AURORA_NET_TLS_PROVIDERS` | 缓存字符串（列表） | 空 | 编入哪几枚 provider 库适配引擎，形如 `<static\|shared>:<安装根>` 的条目串 |
+
+`AURORA_NET_TLS_PROVIDERS` 的取值规则：
+
+- 多条 entry 的分隔符接受 `;` 与 `,`：命令行里裸 `;` 会被 shell 当成语句结束，装配面需要一个不需要转义的写法。安装根里带逗号的目录名不被支持（本库三个 runner 上都不存在这种路径，静默切开会让诊断指向一条没打算装的 entry）。
+- 单项值形如 `<static|shared>:<prefix>`：`prefix` **只接受安装根**（含 `include/` 与 `lib/`，形如 `static:/opt/mbedtls`、`shared:/usr/local`），不做向上猜测或递归搜索；写错路径时诊断打印实际检查过的组合。分隔符只按第一个冒号切分，故 Windows 安装根的盘符冒号（`C:\openssl`）合法。
+- 引擎种类逐条由头探测推导：`<prefix>/include/openssl/ssl.h` → OpenSSL，`<prefix>/include/mbedtls/ssl.h` → mbedTLS；**两者皆无即 configure 期硬失败**（不静默降级为「无 TLS」），同一根内多命中时 OpenSSL 优先并在配置日志显式记录。
+- **同一后端种类至多一枚 provider**：两个 OpenSSL 根没有可区分的语义，猜哪一个都是错，列表里重复命中即 configure 期硬失败。该变量回答的是「哪些栈存在」，不是「同一个栈的哪份安装」。
+- 库定位按**推导出的种类自己的库名**查找（OpenSSL 腿查 `ssl` / `crypto`，mbedTLS 腿查 `mbedtls` / `mbedcrypto` / `mbedx509`），只在 `<prefix>/lib` 及其 multiarch 子目录（`lib/<三元组>`，Debian 系的实际位置）内查，找不到即 configure 期硬失败并打印查找过的目录。名字不取两套库的并集——并集会让「头推导出 mbedTLS、却链上 OpenSSL 的库」在安装根混挂两套库时发生（实测于 WSL / Ubuntu：链接期 `undefined reference to psa_generate_random`），现在这类错配在装配面被构造性排除。mbedTLS 额外要求 `mbedx509`（证书链解析在 TLS 记录层之外）。
+- 每枚 provider 生成一个按种类命名的导入目标（`aurora::net::tls.openssl` / `aurora::net::tls.mbedtls`），再由它们聚合成 `aurora::net::tls`（`INTERFACE`）——本体 / 测试 / 工具 / 安装侧的引用点因此不随 provider 数目变化。静态 mbedTLS 的三枚 archive 按 GNU ld 左到右求解规则排为 `mbedtls → mbedx509 → mbedcrypto`。`shared` 的运行期寻址交宿主部署负责，本模块不写 RPATH、不拷 DLL（Windows 动态腿只证明链得上：`lib/` 下是导入库、`bin/` 下才是 DLL）。
+- **旧单值写法 `AURORA_NET_TLS_PROVIDER` 保留为别名**：只给旧名的命令行（现 CI 与 manual-test 的历史写法）语义不变；新旧**同时置值即 configure 期硬失败**并打印两个取值——同一旋钮的两种拼法没有「谁覆盖谁」的答案，猜就是口径漂移。
 - 仓库**不自带任何 TLS 源码**：`third_party/` 无新增、`THIRD_PARTY_LICENSES.md` 不变（许可证由 provider 提供方自负）、「断网可构建」不变。
-- ⚠️ **CI 不用 `/usr` 当 provider 安装根**：Debian / Ubuntu 的 `/usr` 同时挂着 openssl 与 mbedtls 两套头，多命中时按上条规则 OpenSSL 优先——把安装根写成 `/usr` 等价于永远选不中 mbedTLS，`tls_mbedtls.cpp` 这条编译面就悄悄消失。故流水线统一用 `.github/actions/setup-net-capability-flags` 搭一个只挂 mbedTLS 的安装根（`/opt/aurora-tls-mbedtls`：`include/mbedtls` 指向 `/usr/include/mbedtls`，`lib` 只放 `libmbedtls.a` / `libmbedx509.a` / `libmbedcrypto.a`），需要 OpenSSL 的一侧直接用 `shared:/usr` 或 vcpkg / homebrew 的安装根。
-- ⚠️ 同一个安装根里**头与库必须同源**：库定位是 `find_library(NAMES ssl mbedtls)`，把 `lib` 指到 `/usr/lib` 会让 OpenSSL 的 `libssl.so` 抢先命中 `ssl` 这个名字，于是「头推导出 `AURORA_NET_TLS_MBEDTLS`、却链上 OpenSSL 的库」，链接期报 `undefined reference to psa_generate_random`（实测于 WSL / Ubuntu 26.04）。这是 `AuroraNetTls.cmake` 侧「库名不随推导出的引擎走」的既有行为，任何自建安装根都得自己规避。加新 Linux 作业时必须走这个动作，不要自己拼 provider 值。
-- CI 为此新增 `tls-providers` 作业（四枚矩阵项：Linux 指向上述 mbedTLS 安装根的静态连法、Windows `shared:` 指向作业自建 vcpkg 根的 OpenSSL、macOS 不给 provider 走系统栈 `AURORA_NET_TLS_SECURE_TRANSPORT`、macOS `shared:` 指向 homebrew 的 OpenSSL keg-only 根），保证两套 provider 适配（各自覆盖静态与动态两种形态）与系统栈缺省装配都有真编译覆盖；作业清单见 `.github/workflows/ci.yml` 头注释第 3b 项。
-- 除本作业外，网络能力面还是**整条流水线的公共前缀**：`AURORA_BUILD_INSPECTOR_SERVER` 与 `AURORA_NET_TLS_PROVIDER`（Linux 侧）由 `.github/actions/setup-net-capability-flags` 复合动作统一装配，core / backends / toggles / asan / coverage / install-consumer / wasm 全部引用同一份串——两枚开关关的是**运行面**而非编译面（`utest_inspector_server` 整文件降级 SKIP、`utest_net_tls` 按 `capabilities().tls` 大半 SKIP），漏一个作业就少一处没有替补的覆盖。
+- ⚠️ **CI 不用 `/usr` 当 mbedTLS 的安装根**：Debian / Ubuntu 的 `/usr` 同时挂着 openssl 与 mbedtls 两套头，多命中时按上条规则 OpenSSL 优先——把 mbedTLS 那条 entry 写成 `shared:/usr` 等价于永远选不中 mbedTLS，`tls_mbedtls.cpp` 这条编译面会悄悄消失。故流水线统一用 `.github/actions/setup-net-capability-flags` 搭一个只挂 mbedTLS 子树的安装根（`/opt/aurora-tls-mbedtls`：`include/mbedtls` 指向 `/usr/include/mbedtls`，`lib` 只放 `libmbedtls.a` / `libmbedx509.a` / `libmbedcrypto.a`），让该 entry 的推导确定性落到 `AURORA_ENABLE_NET_TLS_MBEDTLS`；需要 OpenSSL 的一侧则在列表里**追加一条 `shared:/usr`**，那里 openssl 头本就在优先命中位。
+- CI 的 `tls-providers` 作业据此排矩阵（四条腿：Linux 静态 mbedTLS + 动态 OpenSSL 双 provider、Windows 动态 OpenSSL（作业自建 vcpkg 根）与系统栈 Schannel 并存、macOS 不给 provider 只走系统栈、macOS 动态 OpenSSL（homebrew keg-only 根）与系统栈 SecureTransport 并存），使两套 provider 适配（静态 / 动态两形态）、系统栈缺省装配与**共存装配**都有真编译与真握手覆盖；作业清单见 `.github/workflows/ci.yml` 头注释第 3b 项。
+- 除本作业外，网络能力面还是**整条流水线的公共前缀**：`AURORA_BUILD_INSPECTOR_SERVER` 与 `AURORA_NET_TLS_PROVIDERS`（Linux 侧）由 `.github/actions/setup-net-capability-flags` 复合动作统一装配，core / backends / toggles / asan / coverage / install-consumer / wasm 全部引用同一份串——两枚开关关的是**运行面**而非编译面（`utest_inspector_server` 整文件降级 SKIP、`utest_net_tls` 按 `capabilities().tls` 大半 SKIP），漏一个作业就少一处没有替补的覆盖。个别腿需要反极性时在 `matrix.cmake-flags` 里**追加同名 `-D`**（CMake 命令行取同名变量最后一次出现的值），故装配脚本必须把公共串排在矩阵串之前。
 - **静态 mbedTLS 的归档次序由本模块负责**：链接面按 `mbedtls → mbedx509 → mbedcrypto` 给出（x509 必须排在 crypto **之前**，否则 GNU ld 的单遍扫描会把 x509 对 crypto 的引用留在已收档的 crypto 之后而未解析）。次序写在 `cmake/AuroraNetTls.cmake` 的导入目标里，使用方不需要在自己一侧再排一遍，也不需要 `--start-group` 一类的兜底。
 - **macOS 系统栈腿的版本口径**：`SecureTransport` 整族自 macOS 10.15 起弃用，该 TU 因此整段关闭 `-Wdeprecated-declarations`（只圈本文件，不外溢到其他源）；所选 API 组合把**运行期下限留在 macOS 10.14**（`SecTrustEvaluateWithError` 是其中下限最高的一枚，ALPN 两枚访问器自 10.13、取链访问器自 10.7）。本仓不设 `CMAKE_OSX_DEPLOYMENT_TARGET`，故这是「本库能在哪个版本上跑起来」的下限声明，不改变使用方自己的部署目标。
 

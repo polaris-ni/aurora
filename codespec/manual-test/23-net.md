@@ -33,6 +33,7 @@
 | `--host` | DNS 名 | `www.example.com` | SNI 与主机名核对的输入 |
 | `--port` | `1`–`65535` | `443` | TLS 端口的 TCP 端口 |
 | `--alpn` | 单条 ASCII 标识 | 不发 ALPN 扩展 | 宣告一枚 ALPN 标识（`http/1.1` 在目标端点上协商得出，别的标识会被对端拒绝） |
+| `--backend` | 单条后端 id | 走缺省候选链 | 将每次握手**指名**给某一枚后端（取值来自 `available_tls_backends()`）；指名字段只接受一个 id，且指名的那一条永不回落 |
 | `--interactive` | 开关 | 关 | 在核对证书字段后暂停，供与浏览器逐项比对 |
 
 **退出码即结论**：`0` 全部判据通过、`1` 有 `[FAIL]`、`2` 环境不可用（`[SKIP]`，两种成因：本腿没有 TLS 后端，或 DNS／出站路径不可用）。探针**不进 CTest**（`aurora_add_verify_probe` 的 `EXCLUDE_FROM_ALL` 与出站要求，见 §1.8），产品输出经 `AURORA_LOG_RAW` 走 stdout，因此 `[PASS]` / `[FAIL]` 行可直接重定向成文本比对。
@@ -43,8 +44,8 @@
 
 | 项目 | 要求 |
 |:---|:---|
-| 平台 | 三条腿：Windows 本机（MinGW/GCC + Ninja，系统栈 Schannel）、WSL Ubuntu（POSIX `poll`，分别以 mbedTLS 与 OpenSSL 作 provider） |
-| 构建 | 每腿一个独立构建目录；WSL 两腿需 `-DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_VERIFY_TOOLS=ON` 与对应的 `-DAURORA_NET_TLS_PROVIDER=<static\|shared>:<安装根>` |
+| 平台 | 四条腿：Windows 本机（MinGW/GCC + Ninja，系统栈 Schannel）、WSL Ubuntu（POSIX `poll`，分别以 mbedTLS 与 OpenSSL 作 provider，外加一条两枚 provider **同时在案**的共存腿） |
+| 构建 | 每腿一个独立构建目录；WSL 各腿需 `-DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_VERIFY_TOOLS=ON` 与对应的 `-DAURORA_NET_TLS_PROVIDERS=<static\|shared>:<安装根>[,...]`（列表可多条，条目间以 `,` 或 `;` 分隔） |
 | 终端 | 支持 UTF-8 输出；可分离重定向 stdout 与 stderr |
 | 网络 | **需出站访问 443**（本文档是全仓唯一允许出站的测试面）；`--host` 换成别的公网端点时 §2 的字段值断言须随之重取 |
 | 对照 | 证书字段的独立对照源为浏览器证书查看器或 `openssl s_client -connect <host>:443 -servername <host>`（后者不受本库代码影响，故是有效的外部对照） |
@@ -75,7 +76,7 @@
 3. 多项依赖以**半角逗号加一个空格**（`, `）分隔；逗号前后不得出现空格以外的字符。
 4. 多项依赖的**排列顺序即依赖先后**——先决者在前。因用例按编号升序声明，等价于按被依赖用例的**编号升序**排列。
 
-**模块级约定**：三腿的 configure 与构建统一置于 `TC-NET-001`；其余用例不重复构建，通过依赖用例字段间接依赖该用例产出的探针可执行文件。
+**模块级约定**：各腿的 configure 与构建统一置于 `TC-NET-001`；其余用例不重复构建，通过依赖用例字段间接依赖该用例产出的探针可执行文件。
 
 **为什么必须统一格式**：本文件由 `tools/check/check_manual_test_format.py` 解析守护（CTest 用例 `check_manual_test_format`，校验字段名与顺序、取值域、依赖拓扑、步骤-预期同号映射与执行记录表格式）。上述约定使每个字段可用**单条正则**校验，无需自然语言推断。
 
@@ -122,24 +123,24 @@
 |:---|:---|
 | 探针不进 CTest | 出站的成败不由本库决定（公网端点的证书轮换、限速、DNS 都可能让一条判据变红），把这种噪声接进门禁会让红灯失去归因价值；提案 §17 的切片纪律「不跨切片留红灯」因此要求这类用例只能手工触发 |
 | 不做公网服务端互操作矩阵（各站点的实现偏差） | 判据是「本库的客户端在真实链上走得通」，不是「本库能通过任意服务器的考验」；后者要维护一枚不断漂移的站点集合，属另一件事 |
-| 吊销检查（CRL / OCSP）不出题 | 三条腿一律不做吊销判定（见 [`specification/06-app-platform.md`](../specification/06-app-platform.md) §8.8.18），已知边界而非疏漏 |
+| 吊销检查（CRL / OCSP）不出题 | 各后端引擎一律不做吊销判定（见 [`specification/06-app-platform.md`](../specification/06-app-platform.md) §8.8.18），已知边界而非疏漏 |
 | 会话恢复 / 0-RTT / 重协商的服务端侧 | 接缝只暴露「数据阶段可外发握手字节」这一条例外通路，服务端发起的形态需要一枚可控服务器，属离线用例范围 |
 | 逐平台等待集并入宿主主循环 | 提案 §16 第 12 项把它收窄为宿主可选项，仓内宿主一律走常驻引擎线程 |
 
 ## 2 用例清单
 
-### 2.1 三腿装配与构建基线
+### 2.1 装配与构建基线
 
-#### TC-NET-001 三腿 configure 与探针构建，含 provider 探测的两类失败
+#### TC-NET-001 多腿 configure 与探针构建，含共存装配与 provider 探测的失败形态
 
 | 项目 | 内容 |
 |:---|:---|
 | 用例编号 | TC-NET-001 |
-| 测试目的 | 验证 TLS 后端的装配唯一决策点：系统栈缺省、provider 探测推导引擎宏、路径非法时 configure 期即失败，以及 Linux 无 provider 时的诚实降级 |
-| 前置条件 | 本机有 Windows 与 WSL 两条腿；WSL 内已安装 mbedTLS 与 OpenSSL 的开发文件（各自构成一枚「安装根」） |
+| 测试目的 | 验证 TLS 后端的装配唯一决策点：系统栈开关与 provider 列表**各自独立生效**（给了 provider 也保住系统栈那条腿）、provider 逐条探测推导引擎宏、路径非法 / 同种类重复 / 新旧旋钮同设时 configure 期即失败，以及 Linux 无任何后端时的诚实降级 |
+| 前置条件 | 本机有 Windows 与 WSL 两条腿；WSL 内已安装 mbedTLS 与 OpenSSL 的开发文件（各自构成一枚「安装根」，mbedTLS 腿若直接用 `/usr` 会因该根同时挂着两套头而命中 OpenSSL 优先规则，需按 `BUILD_OPTIONS.md` §1.2 搭一枚只挂 mbedTLS 子树的根） |
 | 依赖用例 | 无 |
-| 操作步骤 | 1. Windows 腿：不给任何 provider，`cmake --preset ninja` 后 `cmake --build build --target aurora_verify_tls_live`（纯执行，无预期结果）<br>2. 查看该次 configure 的输出中 `TLS backend:` 那一行，并确认产物存在<br>3. WSL mbedTLS 腿：`cmake -S <仓> -B <新目录> -G Ninja -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_NET_TLS_PROVIDER=static:<mbedTLS 安装根>` 后构建同一目标（纯执行，无预期结果）<br>4. 查看该次 configure 的 `TLS backend:` 行与构建退出码，再从生成的 `build.ninja` 里取三枚 mbedTLS 归档在链接行上的先后次序<br>5. WSL OpenSSL 腿：同法以 `-DAURORA_NET_TLS_PROVIDER=shared:/usr` configure 并构建（纯执行，无预期结果）<br>6. 查看该次 configure 的 `TLS backend:` 行与构建退出码<br>7. 把 provider 的安装根改成一枚不存在 `include/` 的目录再 configure 一次<br>8. Linux 腿不给任何 provider 再 configure 一次，并跑一条只查能力位的用例 |
-| 预期结果 | 2. configure 日志为 `TLS backend: system stack (AURORA_NET_TLS_SCHANNEL)`；构建 rc=0 且产出 `aurora_verify_tls_live.exe`<br>4. configure 日志为 `TLS backend: provider AURORA_NET_TLS_MBEDTLS (static) from <安装根>`；构建 rc=0；链接行上三枚归档的次序是 `libmbedtls.a` 在 `libmbedx509.a` 之前、`libmbedx509.a` 在 `libmbedcrypto.a` 之前（GNU ld 左到右求解，被依赖者须在右）<br>6. configure 日志为 `TLS backend: provider AURORA_NET_TLS_OPENSSL (shared) from /usr`；构建 rc=0<br>7. configure **失败**（非零退出），诊断打印实际检查过的 `include/` 与 `lib/` 组合；不得出现「configure 成功但后端为 none」的静默降级<br>8. configure 成功且日志为 `TLS backend: none`，能力位用例回报 `capabilities().tls == false`（提案判据 7 的可执行形态） |
+| 操作步骤 | 1. Windows 腿：不给任何 provider，`cmake --preset ninja` 后 `cmake --build build --target aurora_verify_tls_live`（纯执行，无预期结果）<br>2. 查看该次 configure 的输出中 `TLS backend:` 那一行，并确认产物存在<br>3. WSL mbedTLS 腿：`cmake -S <仓> -B <新目录> -G Ninja -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_NET_TLS_PROVIDERS=static:<mbedTLS 安装根>` 后构建同一目标（纯执行，无预期结果）<br>4. 查看该次 configure 的 `TLS backend:` 行与构建退出码，再从生成的 `build.ninja` 里取三枚 mbedTLS 归档在链接行上的先后次序<br>5. WSL OpenSSL 腿：同法以 `-DAURORA_NET_TLS_PROVIDERS=shared:/usr` configure 并构建（纯执行，无预期结果）<br>6. 查看该次 configure 的 `TLS backend:` 行与构建退出码<br>7. 把 provider 的安装根改成一枚不存在 `include/` 的目录再 configure 一次<br>8. Linux 腿不给任何 provider 再 configure 一次，并跑一条只查能力位的用例<br>9. WSL 共存腿：同法以 `-DAURORA_NET_TLS_PROVIDERS=static:<mbedTLS 安装根>,shared:/usr` configure 并构建库与测试可执行，查看该次 configure 的 `TLS backend:` 行数与构建退出码<br>10. 该共存腿的探针不带参数跑一次（读取 `backends on this leg:` 行与 `backend :` 注记），再各以 `--backend mbedtls`、`--backend openssl` 各跑一次<br>11. 同一共存腿上以 `-DAURORA_NET_TLS_PROVIDERS=shared:/usr,shared:<另一枚 OpenSSL 安装根>` 再 configure 一次；随后以只给旧单值 `AURORA_NET_TLS_PROVIDER=<static\|shared>:<安装根>` 的命令行 configure 一次，并把新旧两枚同设再 configure 一次<br>12. 该共存腿跑 TLS 两套件：`--run utest_net_tls_backend` 与 `--run utest_net_tls` |
+| 预期结果 | 2. configure 日志为 `TLS backend: system stack (AURORA_ENABLE_NET_TLS_SCHANNEL)`；构建 rc=0 且产出 `aurora_verify_tls_live.exe`<br>4. configure 日志为 `TLS backend: provider MBEDTLS (static) from <安装根>`；构建 rc=0；链接行上三枚归档的次序是 `libmbedtls.a` 在 `libmbedx509.a` 之前、`libmbedx509.a` 在 `libmbedcrypto.a` 之前（GNU ld 左到右求解，被依赖者须在右）<br>6. configure 日志为 `TLS backend: provider OPENSSL (shared) from /usr`；构建 rc=0<br>7. configure **失败**（非零退出），诊断打印实际检查过的 `include/` 与 `lib/` 组合；不得出现「configure 成功但一条后端也没装」的静默降级<br>8. configure 成功且日志里除 `TLS backend: system stack disabled (AURORA_ENABLE_NET_TLS_SYSTEM=OFF)` 外没有任何 `TLS backend:` 行，能力位用例回报 `capabilities().tls == false`，请求 TLS 通道落 `net-tls-engine-unavailable`（不存在退回明文的通路）<br>9. configure 日志同时出现 `provider MBEDTLS (static)` 与 `provider OPENSSL (shared)` 两行——两枚 provider 在同一次装配里各推导出自己的引擎宏，互不挤掉；构建 rc=0<br>10. 不带参数时 `backends on this leg:` 行同时列出 `openssl` 与 `mbedtls`（缺省链按优先级降序，`backend :` 注记是其中排在前的那枚），两次带 `--backend` 的运行各以指定那一枚完成真握手，判据行 `the designated backend served the handshake (a designation never falls back)` 为 `[PASS]` 且 `backend :` 注记与指定值逐字相同；三次运行退出码同为 0<br>11. 两条 entry 推导到同一后端种类时 configure **失败**，诊断说明「同一种类至多一枚 provider」；只给旧单值时装配结果与步骤 3/5 逐字一致（别名仍可用）；新旧同设时 configure **失败**并打印两个实际取值<br>12. `utest_net_tls_backend` 全绿（注册表与候选链的离线判据，不触网）；`utest_net_tls` 在本腿失败数为 0，且 `every_registered_backend_completes_a_real_handshake` 逐枚各完成一次真握手而非只跑缺省那一枚 |
 
 ### 2.2 真实公网链上的握手与摘要
 
@@ -225,7 +226,7 @@
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| TC-NET-001 | 2026-10-14 | Qoder Agent | PASS | | Windows 腿 configure 日志 `TLS backend: system stack (AURORA_NET_TLS_SCHANNEL)`，构建 rc=0 且产出 `aurora_verify_tls_live.exe`；WSL mbedTLS 腿日志 `TLS backend: provider AURORA_NET_TLS_MBEDTLS (static) from <该腿的 mbedTLS 安装根>`（安装根是本机路径，按门禁纪律不入仓库文本，`-D` 传入）、rc=0，`build.ninja` 链接行三枚归档次序为 `libmbedtls.a` → `libmbedx509.a` → `libmbedcrypto.a`；WSL OpenSSL 腿日志 `TLS backend: provider AURORA_NET_TLS_OPENSSL (shared) from /usr`、rc=0；安装根改成不存在 `include/` 的目录时 configure rc=1 并打印实际检查过的 `include/` 与 `lib/` 组合；Linux 腿不给 provider 时 configure 成功且日志 `TLS backend: none`，该构建内 `utest_net_tls.absent_backend_reports_engine_unavailable` 为 OK（能力位为假、请求 TLS 通道落 `net-tls-engine-unavailable`） | | 无 provider 的那次运行该套件 20 例中 4 跑 16 跳过，跳过原因逐条为 `this build carries no tls backend (capabilities().tls is false)`，即诚实降级而不是静默放行 |
+| TC-NET-001 | 2026-10-17 | Qoder Agent | PASS | | Windows 腿 configure 日志 `TLS backend: system stack (AURORA_ENABLE_NET_TLS_SCHANNEL)`、构建 rc=0 且产出 `aurora_verify_tls_live.exe`，探针 `backends on this leg: schannel`、缺省 `backend : schannel`、`--backend schannel` 判据行 `[PASS] the designated backend served the handshake (a designation never falls back)`、`--backend mbedtls` 单次失败落 `net-tls-engine-unavailable`（detail 逐字 `tls backend 'mbedtls' is not registered (in the registry: schannel)`）且不再试任何其他后端；WSL 单枚 mbedTLS 腿日志 `TLS backend: provider MBEDTLS (static) from <该腿的 mbedTLS 安装根>`（安装根是本机路径，按门禁纪律不入仓库文本，`-D` 传入）、rc=0，`build.ninja` 链接行三枚归档次序 `libmbedtls.a` → `libmbedx509.a` → `libmbedcrypto.a`；WSL 单枚 OpenSSL 腿日志 `TLS backend: provider OPENSSL (shared) from /usr`、rc=0；共存腿 `-DAURORA_NET_TLS_PROVIDERS=static:<安装根>,shared:/usr`（逗号分隔形态）同一次 configure 打出 `provider MBEDTLS (static)` 与 `provider OPENSSL (shared)` 两行、rc=0，`libaurora.a` 里 `make_tls_backend_mbedtls` 与 `make_tls_backend_openssl` 两枚工厂符号同时在案，探针 `backends on this leg: openssl, mbedtls`、缺省 `backend : openssl`（优先级 60 > 40 取走在前的那枚）、`--backend mbedtls` 与 `--backend openssl` 各以指名那一枚完成真握手且 `backend :` 注记与指定值逐字相同、三次退出码同为 0，`--backend no-such` 落 `net-tls-engine-unavailable`（detail 逐字 `tls backend 'no-such' is not registered (in the registry: openssl, mbedtls)`）且一次也没试别的后端；三条 configure 硬失败均为 rc=1：安装根改成不存在 `include/` 时打印实际检查过的 `include/` 与 `lib/` 组合、两条 entry 同种类时 `Two TLS providers resolve to the same backend kind 'openssl'`、新旧旋钮同设时 `Both AURORA_NET_TLS_PROVIDER and AURORA_NET_TLS_PROVIDERS are set`；只给旧单值的 configure 与步骤 3/5 逐字一致（别名仍可用）；无 provider 且 `AURORA_ENABLE_NET_TLS_SYSTEM=OFF` 的 Linux 腿 configure rc=0、日志除 `TLS backend: system stack disabled (AURORA_ENABLE_NET_TLS_SYSTEM=OFF)` 外没有任何 `TLS backend:` 行，`utest_net_tls.absent_backend_reports_engine_unavailable` 在该腿实跑 OK；测试面：`utest_net_tls_backend` Windows 腿与 WSL 共存腿各 20 例全绿（共存腿另以 `--shuffle 7 --repeat 3` 复跑 60 例全绿），`utest_net_tls` Windows 腿 22 跑 4 跳、WSL 共存腿 25 跑 1 跳（唯一跳过 `absent_backend_reports_engine_unavailable`，成因「本构建有后端」），无 provider 腿 5 跑 21 跳 | | 本行取代 2026-10-14 的旧记录（那一次只有「恰好一枚后端」的装配形态，configure 日志为 `AURORA_NET_TLS_*` 旧宏名、无后端腿打印 `TLS backend: none`，步骤 9–12 当时不存在）；共存腿上原先 mbedTLS 单腿缺的 PKCS#12 判据（`client_identity_satisfies_a_verified_peer_request`）转为实跑通过，因为候选链先取 OpenSSL 接手——这正是步骤 10「共存 + 回落只发生在握手前」的运行形态；无 provider 腿的 `utest_net_tls_backend` 为 18 跑 2 跳，跳过成因逐字 `this build carries no builtin tls backend, the case inspects the builtin surface only` |
 | TC-NET-002 | 2026-10-14 | Qoder Agent | PASS | | 三腿（Windows Schannel、WSL OpenSSL、WSL mbedTLS）退出码均为 0 且末尾 `result: PASS (exit 0)`，判据行各 7 条 `[PASS]` 无 `[FAIL]`；首条为 `capabilities().tls reports the assembled backend`，缺省口径条目为 `handshake against the real chain in the system trust store succeeds`；四行注记均有值——`subject CN=example.com`、`issuer C=US, O=SSL Corporation, CN=Cloudflare TLS Issuing ECC CA 3`、`valid 2026-09-26T22:49:11Z .. 2026-12-25T22:56:35Z`、`spki toyMGpiThuoVaTygu6QeCcnum2PKJknnGOsHalH7BzU=`；`openssl s_client` 独立对照给出逐字相同的 `subject=` 与 `issuer=`，`openssl x509 -pubkey` 到 SPKI DER 再到 SHA-256 base64 的独立算得值与 `spki` 行逐字相同（44 字符、结尾一枚 `=`、纯 base64 字符集） | | 三腿全程未追加任何信任根，真实证书由系统信任库直接接受；SPKI 形态即 `base64(SHA-256(DER(SPKI)))`，不是十六进制指纹也不是整证摘要 |
 | TC-NET-003 | 2026-10-14 | Qoder Agent | PASS | | 三腿 `--alpn http/1.1` 运行均 rc=0，ALPN 判据行为 `[PASS] negotiated ALPN is the advertised id (a peer may only pick from the advertisement)`；不带 `--alpn` 的运行判据行数仍为 7 条 `[PASS]`，那一条换成 `[PASS] no ALPN advertised -> negotiated_alpn() reports the shape mismatch, not an empty id`；`openssl s_client -alpn http/1.1` 独立对照输出 `ALPN protocol: http/1.1`，与本腿回报一致 | | 本端点确实选中该标识，故三腿都落在「协商出标识」这一分支；「未协商」与「未宣告」两分支的可执行形态由离线套件覆盖，不依赖公网端点行为 |
 | TC-NET-004 | 2026-10-14 | Qoder Agent | PASS | | 三腿均报 `[PASS] response over the encrypted channel starts with HTTP/1.` 且注记 `received 931 bytes`（三腿同一数量级、逐字节相同），非 0 也不是单枚记录大小；离线套件 `utest_net_tls` 的载荷跨记录往返用例在三腿均为 OK（分片落在任意记录边界上上层仍拿到完整字节） | | 931 字节与 `https://www.example.com/` 一次真实首页响应的量级相符 |

@@ -124,7 +124,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.FEAT.NET.ENGINE-PLUGGABILITY.001 | 可插拔网络引擎（公共 API 面不加宏，实现按平台引擎可选） | AI 生成的网络代码零 `#ifdef`、无能力平台明确降级报错而非静默失败 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.PLATFORM.NET.EVENT-SOURCE.001 | 事件循环网络完成事件与通用事件源注册口 | 网络结果恒回主线程投递，UI 线程不阻塞在 I/O 等待上 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.FEAT.NET.TRANSPORT-SUITE.001 | 异步 TCP / UDP / 本地 IPC（UDS / NamedPipe）传输族，含 DNS 双栈与竞速、代理族（`CONNECT` / SOCKS5 / 系统与环境变量）、分帧工具与读写背压 | 可连任意主机、可监听服务、可取消，为第三方非阻塞会话（如 SSH）提供字节流底座，且慢消费者不导致无界缓冲 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
-| SPEC.PLATFORM.NET.TLS-BACKEND.001 | TLS 通道（系统栈引擎 + 使用方 provider + 默认证书校验与自定义信任根） | 加密通道与明文流同构，上层协议无需感知，校验失败即断连 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
+| SPEC.PLATFORM.NET.TLS-BACKEND.001 | TLS 通道（可插拔后端注册表：系统栈引擎与使用方 provider **共存装配** + 每次握手指定后端 + 默认证书校验与自定义信任根） | 加密通道与明文流同构，上层协议无需感知，校验失败即断连；后端可注入 / 可注销 / 可查询，缺省走有序候选链、回落只发生在握手开始前，显式指定后端则绝不换腿 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8.18 |
 | SPEC.FEAT.NET.HTTP-CLIENT.001 | HTTP/1.1 客户端（`Url` 值类型 / 基础请求集 / 流式与帧对齐进度 / gzip 透明解压 / 条件请求与内存缓存 / Cookie / 认证 / SSE） | AI 可直接拉取数据与资源，手拼 URL 与静默字符集替换这类高频错误在类型层消失，大文件不占满内存，跨平台协议语义逐值一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.FEAT.NET.WEBSOCKET.001 | WebSocket 客户端（RFC 6455 握手 / 分帧 / ping-pong / close code） | 长连接双向增量数据可订阅，帧上限与关闭语义明确 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.FEAT.NET.DECLARATIVE-BINDING.001 | 异步结果三态响应式绑定（`state` 模块的 `Resource` / `StreamResource`） | 请求即状态源，`loading / ready / failed` 定点刷新，重发自动取消前序且宿主失效不回调 | [`02-state.md`](specification/02-state.md) §7.3 |
