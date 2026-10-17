@@ -8,7 +8,8 @@
 /// 树端点的线程落点同样在此覆盖：装上传递器后必须换到主线程下树，无传递器时回退内联执行。
 /// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端经同步阻塞传输层
 /// `aurora::net::blocking`，随用例作用域关闭清理。
-/// AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩。
+/// AURORA_BUILD_INSPECTOR_SERVER=OFF，或无线程能力构建（Emscripten 未开 -pthread，AURORA_CAP_THREADS=0）
+/// 时整文件降级为 skip 桩——服务依赖后台 worker 线程，单线程 wasm 无法承载。
 
 #include <chrono>
 #include <condition_variable>
@@ -43,7 +44,7 @@
 
 namespace aurora::test_cases::utest_inspector_server {
 
-#ifdef AURORA_BUILD_INSPECTOR_SERVER
+#if defined(AURORA_BUILD_INSPECTOR_SERVER) && AURORA_CAP_THREADS
 namespace {
 
 /// @brief 共享测试树：Column 根 + Text 子节点（静态存储期，供 worker 线程 root_getter 读取）。

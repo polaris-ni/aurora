@@ -247,9 +247,15 @@ auto MultipartWriter::form_invalid(const std::string &detail) -> Error {
 
 auto MultipartWriter::file_length(std::string_view path) -> std::optional<std::uint64_t> {
     std::error_code ec;
-    const auto size = std::filesystem::file_size(std::filesystem::path{path}, ec);
+    const auto fs_path = std::filesystem::path{path};
+    // 目录不是可取正文长度的文件：MSVC/clang-cl 的 `std::filesystem::file_size` 对目录不报错（返回 0），
+    // 而 libstdc++/libc++ 会报 EISDIR；显式拦截让三平台一致交「长度未知」，与 open_file() 的目录前置判定对齐。
+    if (std::filesystem::is_directory(fs_path, ec)) {
+        return std::nullopt;
+    }
+    const auto size = std::filesystem::file_size(fs_path, ec);
     if (ec) {
-        return std::nullopt;  // 不存在、是目录、非常规文件、无权限——一律按「长度未知」处理
+        return std::nullopt;  // 不存在、非常规文件、无权限——一律按「长度未知」处理
     }
     return static_cast<std::uint64_t>(size);
 }

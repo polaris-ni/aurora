@@ -4,7 +4,8 @@
 ///           非对象 body、越界 style、非法 font_weight、带 query 的 REST 路由、
 ///           Content-Length 大小写混排与 body 内伪装头：一律返回 4xx/5xx JSON
 ///           响应且进程存活，绝不 std::terminate。真实 loopback HTTP 往返驱动。
-///           AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩
+///           AURORA_BUILD_INSPECTOR_SERVER=OFF，或无线程能力构建（Emscripten 未开 -pthread，
+///           AURORA_CAP_THREADS=0）时整文件降级为 skip 桩——服务依赖后台 worker 线程。
 
 #include <cstdint>
 #include <functional>
@@ -26,7 +27,7 @@
 
 namespace aurora::test_cases::itest_inspector_robustness {
 
-#ifdef AURORA_BUILD_INSPECTOR_SERVER
+#if defined(AURORA_BUILD_INSPECTOR_SERVER) && AURORA_CAP_THREADS
 namespace {
 
 /// @brief 共享测试树：Column 根 + Text 子节点（静态存储期，供 worker 线程 root_getter 读取）。
