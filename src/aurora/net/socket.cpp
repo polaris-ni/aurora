@@ -94,6 +94,9 @@ auto native_recv_timed_out(int os_error) -> bool { return os_error == WSAETIMEDO
 ///       形态之间摇摆，而创建句柄这一步的 `WSAEINVAL` 除地址族外没有别的来源。
 auto native_family_unsupported(int os_error) -> bool { return os_error == WSAEAFNOSUPPORT || os_error == WSAEINVAL; }
 
+/// @brief send 附加标志：Winsock 无 SIGPIPE 概念（默认行为即不产信号），标志为 0。
+constexpr int AURORA_SEND_FLAGS = 0;
+
 /// @brief Windows 的 SDK 头不提供 `sockaddr_un`，而其 AF_UNIX 腿解析传入地址时认的正是这一布局
 /// （前两字节是地址族，其后是路径文本），故在此按内核侧形态补齐声明并冠以库内类型名（仓内命名
 /// 纪律不允许自定义类型直接占平台标识符）。POSIX 腿一律用 `<sys/un.h>` 里的真实类型——macOS 的
@@ -119,6 +122,11 @@ auto native_recv_timed_out(int os_error) -> bool { return os_error == EAGAIN || 
 
 // POSIX：地址族不支持只有一个回报码（本机 IPC 通路在裸内核上没有对应物时的形态）。
 auto native_family_unsupported(int os_error) -> bool { return os_error == EAFNOSUPPORT; }
+
+/// @brief send 附加标志：POSIX 对「对端已断开仍继续写」默认回 SIGPIPE 直接杀进程，而本层错误语义
+/// 全走返回值路径（`EPIPE` 经 `net-send-failed` 回报），信号纯属多余杀伤，故显式抑制。
+/// 重试路径尤其依赖这一点：连接被对端先行关闭时，写入须落成一次可重试的失败而非进程死亡。
+constexpr int AURORA_SEND_FLAGS = MSG_NOSIGNAL;
 #endif
 
 /// @brief Winsock `SOCKET` 宏常量各工具链形态不一，经 uint64 中转落 intptr_t 保证
@@ -441,7 +449,7 @@ auto write_all_native(NativeSocket s, std::span<const char> data) -> Result<void
     while (left > 0) {
         const int len = static_cast<int>(std::min<std::size_t>(left, 1U << 20U));
         // 返回值用 ptrdiff_t 承接：POSIX send 返回 ssize_t（64 位）、Winsock 返回 int。
-        const auto n = static_cast<std::ptrdiff_t>(::send(s, p, len, 0));
+        const auto n = static_cast<std::ptrdiff_t>(::send(s, p, len, AURORA_SEND_FLAGS));
         if (n <= 0) {
             return net_error(ErrorCode::NetSendFailed, "send");
         }
@@ -1410,7 +1418,7 @@ auto detail::try_write(std::intptr_t handle, std::span<const char> data) -> IoAt
         return attempt;
     }
     const int len = static_cast<int>(std::min<std::size_t>(data.size(), 1U << 20U));
-    const auto n = static_cast<std::ptrdiff_t>(::send(from_handle(handle), data.data(), len, 0));
+    const auto n = static_cast<std::ptrdiff_t>(::send(from_handle(handle), data.data(), len, AURORA_SEND_FLAGS));
     if (n > 0) {
         IoAttempt attempt;
         attempt.bytes = static_cast<std::size_t>(n);
@@ -1682,7 +1690,8 @@ auto detail::try_send_datagram(std::intptr_t handle, std::span<const char> data)
         return datagram_too_large_attempt();
     }
     const int len = static_cast<int>(data.size());
-    const auto n = static_cast<std::ptrdiff_t>(::send(from_handle(handle), datagram_payload_pointer(data), len, 0));
+    const auto n = static_cast<std::ptrdiff_t>(
+        ::send(from_handle(handle), datagram_payload_pointer(data), len, AURORA_SEND_FLAGS));
     return datagram_send_attempt(n, "send(connected datagram)");
 }
 
