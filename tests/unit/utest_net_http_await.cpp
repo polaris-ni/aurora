@@ -7,12 +7,15 @@
 ///           `net-cancelled` 在本层不改道、窗口非正时连一次读登记都不做、引擎拒投定时器时照样当场放行。
 ///           `await_sleep` 面覆盖：到点唤醒与取消唤醒互斥且恰一次、已取消令牌不进引擎队列、非正时长立即
 ///           放行、拒投腿也会恢复（退避中的协程绝不悬着）。`await_read` / `await_write` 面覆盖最朴素的一次
-///           往返把传输计数交回协程，并证明 spans 指向的调用方存储扛过了整段挂起。
+///           往返把传输计数交回协程，并证明 spans 指向的调用方存储扛过了整段挂起；另覆盖「同步完成不重入
+///           挂起点」——写一登记就交付时，重试环的下一轮写绝不在上一轮写尚未返回时发起（嵌套深度恒 1）。
 /// 全程零 socket、零线程：交付时机与虚拟时钟都由用例点名——「谁先到」这条竞速判据用真实套接字测不出来。
-/// 用例统一装「排队式」主线程投递器：`aurora::detail::post_to_main` 在未装投递器时**就地**执行闭包，那会让
-/// 「在 `await_suspend` 内同步交付」那两条路（窗口非正、引擎拒投）在挂起表达式里就把协程跑到收尾，届时
-/// 等待体已析构，本文件要验的「失者绝不触碰等待体」既无从观察也无必要观察；排队之后恢复点由用例说了算，
-/// 与真实事件循环同形。
+/// 异步路径的用例统一装「排队式」主线程投递器：恢复只入队不执行，由用例线程排空——恢复点由用例说了算，
+/// 与真实事件循环同形，「交付恰一次」也可经队列长度逐一点验。同步完成（窗口非正、引擎拒投、已取消、
+/// 非正退避）则一律不经投递器：`await_suspend` 返回 `false`，协程在挂起表达式里就地前进，故这些用例的
+/// `drain()` 恒为 0——这是「同步完成不得在 await_suspend 内重入协程帧」的回归哨：无主投递器时
+/// `post_to_main` 就地执行闭包，一旦同步完成改走投递器，挂起点之后的代码就会在 await_suspend 尚未返回时
+/// 跑第二遍，协程经其中一条路收尾释放帧后，迟到的回调再恢复已释放的帧即成 heap-use-after-free。
 
 #include <algorithm>
 #include <array>
@@ -117,11 +120,25 @@ class FakeStream {
         read_requests_.push_back(Request<std::span<char>>{.region = buffer, .on_done = std::move(on_done)});
     }
 
-    /// @brief 登记一次写：记下待写字节，接受与否由 `take_write` 决定。
+    /// @brief 登记一次写：记下待写字节，接受与否由 `take_write` 决定；开了同步交付模式则当场交付。
     /// @param data 待写字节（调用方持有，须活过整段挂起）。
     /// @param on_done 完成回调。
     auto write(std::span<const char> data, Done on_done) -> void {
         write_requests_.push_back(Request<std::span<const char>>{.region = data, .on_done = std::move(on_done)});
+        if (!inline_writes_) {
+            return;  // 缺省形态：只登记，交付时机由用例点名
+        }
+        // 同步交付：回调在本次 write 调用内就抵达（循环套接字上写立即成功的形态）。深度跟踪让
+        // 「恢复是否嵌在另一轮写尚未返回时」可被逐值断言——重入的正确形态是深度恒 1。
+        ++write_depth_;
+        max_write_depth_ = std::max(max_write_depth_, write_depth_);
+        std::size_t accepted = data.size();
+        if (inline_write_rejections_ > 0) {
+            --inline_write_rejections_;
+            accepted = 0;  // 同步交 0 字节：不是失败，是一次「没写完」，调用方据此重试
+        }
+        write_requests_.back().deliver(accepted);
+        --write_depth_;
     }
 
     /// @brief 已登记的读请求数。
@@ -169,6 +186,18 @@ class FakeStream {
         write_requests_[index].deliver(length);
     }
 
+    /// @brief 打开写的同步交付模式：此后每次写一登记就交付，前 `rejections` 次交 0 字节（调用方重试），
+    /// 之后全盘接受。用于复现「循环套接字上写立即成功」的同步完成路径。
+    /// @param rejections 先交出 0 字节的次数（0 = 每次都全盘接受）。
+    auto complete_writes_inline(std::size_t rejections) -> void {
+        inline_writes_ = true;
+        inline_write_rejections_ = rejections;
+    }
+
+    /// @brief 历史最大的写调用嵌套深度。
+    /// @return 1 = 任何一次写都不曾在另一轮写尚未返回时发起（同步恢复的正确形态）；2+ = 重入。
+    [[nodiscard]] auto max_write_depth() const -> std::size_t { return max_write_depth_; }
+
   private:
     /// @brief 一条在途请求：目标区 + 完成回调 + 已交付标记。
     /// @tparam Region 缓冲形态（读为可写 span，写为只读 span）
@@ -201,6 +230,10 @@ class FakeStream {
 
     std::vector<Request<std::span<char>>> read_requests_;  ///< 按登记序排好的读请求
     std::vector<Request<std::span<const char>>> write_requests_;  ///< 按登记序排好的写请求
+    bool inline_writes_{false};  ///< 写一登记就交付（同步完成路径）；缺省关，交付时机由用例点名
+    std::size_t inline_write_rejections_{0};  ///< 同步交付中先交 0 字节的次数（重试脚本）
+    std::size_t write_depth_{0};  ///< 当前写调用嵌套深度（同步交付里恢复协程即体现为嵌套）
+    std::size_t max_write_depth_{0};  ///< 历史最大写嵌套深度
 };
 
 /// @brief 字节向量转文本，便于逐值断言线上内容。
@@ -265,6 +298,24 @@ auto plain_round_trip(FakeStream *stream, std::span<const char> payload, std::sp
     }
     *read_count = got.value();
     co_return 1;
+}
+
+/// @brief 重试写协程：写不满 payload 就再写一轮，记录实际发起的轮数。
+/// @param stream 假流指针（对象须比协程活得久；协程形参一律不用引用）。
+/// @param payload 待写字节（调用方存储，须活过挂起）。
+/// @param attempts 实际写轮数落点。
+/// @return 写满即 1；本用例不脚本化失败（假流同步模式只交成功态）。
+auto write_until_accepted(FakeStream *stream, std::span<const char> payload, std::size_t *attempts) -> CoroTask<int> {
+    for (;;) {
+        const auto wrote = co_await await_write(*stream, payload);
+        ++*attempts;
+        if (!wrote) {
+            co_return 0;
+        }
+        if (wrote.value() >= payload.size()) {
+            co_return 1;
+        }
+    }
 }
 
 /// @brief 一段退避等待的结局记录。
@@ -435,7 +486,8 @@ AURORA_TEST_CASE(a_non_positive_window_registers_neither_a_read_nor_a_timer) {
         auto late = std::make_shared<std::vector<char>>();
         WindowedRead out;
         const auto task = launch(windowed_read(&stream, late, 32, std::chrono::milliseconds{width}, &out));
-        AURORA_TEST_CHECK_EQ(poster.drain(), std::size_t{1});
+        // 同步完成就地恢复：投递器里什么都不该有（改走投递器就是在 await_suspend 内重入协程帧）。
+        AURORA_TEST_CHECK_EQ(poster.drain(), std::size_t{0});
         AURORA_TEST_CHECK_TRUE(task.is_done());
         AURORA_TEST_CHECK_TRUE(out.outcome == WindowedRead::Outcome::WaitElapsed);
         // 「不等待」必须连那条 FIFO 队列都不占：否则这一轮读会把下一轮的字节顶到后面。
@@ -455,8 +507,8 @@ AURORA_TEST_CASE(an_engine_that_refuses_work_still_releases_the_waiter) {
     WindowedRead out;
 
     const auto task = launch(windowed_read(&stream, late, 32, std::chrono::milliseconds{50}, &out));
-    // 登记不成也必须放行：协程悬着比不等更糟。
-    AURORA_TEST_CHECK_EQ(poster.drain(), std::size_t{1});
+    // 登记不成也必须放行：协程悬着比不等更糟。同步交付同样就地恢复，不经投递器。
+    AURORA_TEST_CHECK_EQ(poster.drain(), std::size_t{0});
     AURORA_TEST_CHECK_TRUE(task.is_done());
     AURORA_TEST_CHECK_TRUE(out.outcome == WindowedRead::Outcome::WaitElapsed);
     AURORA_TEST_CHECK_EQ(engine.posts_refused(), 1);
@@ -514,7 +566,8 @@ AURORA_TEST_CASE(an_already_cancelled_token_short_circuits_the_wait) {
     SleepRecord record;
 
     const auto task = launch(wait_then_report(token, std::chrono::milliseconds{5000}, &record));
-    AURORA_TEST_CHECK_EQ(poster.drain(), std::size_t{1});
+    // 同步短路就地恢复：不进引擎队列，也不经投递器。
+    AURORA_TEST_CHECK_EQ(poster.drain(), std::size_t{0});
     AURORA_TEST_CHECK_TRUE(task.is_done());
     AURORA_TEST_CHECK_TRUE(record.cancelled);
     AURORA_TEST_CHECK_EQ(engine.pending(), std::size_t{0});  // 不进引擎队列，也就不占任何时限
@@ -530,7 +583,8 @@ AURORA_TEST_CASE(a_non_positive_or_refused_backoff_still_resumes_the_coroutine) 
     {
         SleepRecord zero;
         const auto task = launch(wait_then_report(token, std::chrono::milliseconds{0}, &zero));
-        AURORA_TEST_CHECK_EQ(poster.drain(), std::size_t{1});
+        // 非正退避同步放行：就地恢复，不经投递器。
+        AURORA_TEST_CHECK_EQ(poster.drain(), std::size_t{0});
         AURORA_TEST_CHECK_TRUE(task.is_done());
         AURORA_TEST_CHECK_TRUE(zero.ok);
         AURORA_TEST_CHECK_FALSE(zero.cancelled);
@@ -541,11 +595,30 @@ AURORA_TEST_CASE(a_non_positive_or_refused_backoff_still_resumes_the_coroutine) 
     SleepRecord refused;
     {
         const auto task = launch(wait_then_report(token, std::chrono::milliseconds{40}, &refused));
-        AURORA_TEST_CHECK_EQ(poster.drain(), std::size_t{1});
+        // 拒投同样同步放行：就地恢复，不经投递器。
+        AURORA_TEST_CHECK_EQ(poster.drain(), std::size_t{0});
         AURORA_TEST_CHECK_TRUE(task.is_done());
         AURORA_TEST_CHECK_TRUE(refused.ok);
     }
     AURORA_TEST_CHECK_GE(engine.posts_refused(), 1);
+}
+
+AURORA_TEST_CASE(a_write_completed_inline_never_reenters_the_suspension_point) {
+    // 本用例刻意不装投递器：无主时 `post_to_main` 就地执行闭包，正是重入事故的培养基。
+    FakeStream stream;
+    stream.complete_writes_inline(2);  // 前两轮写同步交 0 字节（没写完，重试），第三轮全盘接受
+    const std::string payload = "POST /x HTTP/1.1\r\n";
+    const std::span<const char> outbound{payload.data(), payload.size()};
+    std::size_t attempts = 0;
+
+    const auto task = launch(write_until_accepted(&stream, outbound, &attempts));
+    // 三轮写全部在 await_suspend 内经返回值就地恢复：launch 返回时协程已收尾，轮数一轮不多。
+    AURORA_TEST_CHECK_TRUE(task.is_done());
+    AURORA_TEST_CHECK_EQ(attempts, std::size_t{3});
+    AURORA_TEST_CHECK_EQ(stream.write_requests(), std::size_t{3});
+    // 核心判据：任何一轮写都不曾在上一轮写尚未返回时发起。同步完成若改经投递器恢复，重试环的下一轮
+    // 就会嵌在上一轮写的回调栈里（嵌套深度 2+），协程帧也会在嵌套栈尚未退尽时就被销毁。
+    AURORA_TEST_CHECK_EQ(stream.max_write_depth(), std::size_t{1});
 }
 
 AURORA_TEST_CASE(a_plain_write_then_read_hands_back_the_transport_counts) {

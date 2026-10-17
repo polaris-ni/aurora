@@ -12,6 +12,11 @@
 // - **awaiter 的生命周期由协程帧担保**：`co_await` 的 awaiter 临时活到该表达式结束（含恢复之后），
 //   故 `await_suspend` 里捕获的 `this` 在回调触发那一刻必然存活；结果先落 `result_`、再投恢复，
 //   `await_resume` 取用时恒有值。
+// - **同步完成不抢挂起点**：`await_suspend` 返回 `bool`。发起器在本次调用内就交回结局（循环套接字上的
+//   写、窗口非正的读、已取消的退避都走这条）时返回 `false`，协程在挂起表达式内就地前进；此时的完成
+//   绝不能经 `post_to_main` 投递——无主投递器时那条路是就地执行，等于在 `await_suspend` 尚未返回时
+//   重入协程帧，挂起点之后的代码跑第二遍，协程经一条路收尾释放帧后，另一条路迟到的回调再恢复已释放
+//   的帧即成 heap-use-after-free。发起器已返回（armed）后抵达的回调才一律走投递器。
 // - **不吞取消**：`Cancellation` 被 cancel 后，在途操作的回调以 `net-cancelled` 恰一次抵达，awaiter 原样
 //   把它作为 `Result<T>` 交回协程，由上层决定改道成 `http-timeout` 还是 `net-cancelled`——本层不解释取消。
 //
@@ -70,13 +75,26 @@ class CallbackAwaiter {
     [[nodiscard]] auto await_ready() const noexcept -> bool { return false; }
 
     /// @brief awaiter 协议：登记续体为完成回调的恢复目标，再触发发起器。
-    /// @param handle 待恢复的协程句柄；结果落地后经 `post_to_main` 恢复之。
-    auto await_suspend(std::coroutine_handle<> handle) -> void {
+    ///
+    /// 返回值遵守 awaiter 协议对「同步完成」的约定：发起器在本次调用内就交回结局（循环套接字上的
+    /// 写、窗口非正的读、已取消的退避都会走这条）时返回 `false`，协程在挂起表达式内就地前进。
+    /// 此时绝不能经 `post_to_main` 恢复：未装主投递器时那条路是就地执行，等于在 `await_suspend`
+    /// 尚未返回时重入协程帧——挂起点之后的代码会跑第二遍（重复登记在途操作、二次进入重试环），
+    /// 协程经其中一条路收尾后帧已释放，另一条路迟到的回调再恢复已释放的帧即成
+    /// heap-use-after-free（asan 作业实测：expect-continue 用例崩在本文件发起器内）。
+    /// @param handle 待恢复的协程句柄；异步完成的结果落地后经 `post_to_main` 恢复之。
+    /// @return `true` = 保持挂起，等异步完成经投递器恢复；`false` = 发起期间已同步完成，就地恢复。
+    auto await_suspend(std::coroutine_handle<> handle) -> bool {
         handle_ = handle;
         start_([this](Result<T> result) -> void {
             result_.emplace(std::move(result));
-            aurora::detail::post_to_main([handle = handle_]() -> void { handle.resume(); });
+            if (armed_) {
+                aurora::detail::post_to_main([handle = handle_]() -> void { handle.resume(); });
+            }
+            // 未 armed（发起器尚未返回）：同步完成只落结果，恢复交给 await_suspend 的返回值
         });
+        armed_ = true;  // 发起器已返回：此后抵达的回调一律经投递器恢复
+        return !result_.has_value();
     }
 
     /// @brief awaiter 协议：取回传输操作的结局。
@@ -88,6 +106,12 @@ class CallbackAwaiter {
     std::function<void(Sink)> start_;  ///< 发起器（含目标句柄/参数副本，await_suspend 时调一次）
     std::coroutine_handle<> handle_;  ///< 被挂起、待恢复的续体
     std::optional<Result<T>> result_;  ///< 完成结果；resume 前必有值
+    /// @brief 发起器已返回的闸。
+    ///
+    /// `false` 期间抵达的完成只落 `result_`、不投恢复（同步完成：恢复交给 `await_suspend` 的返回值）；
+    /// 置 `true` 之后抵达的一律经 `post_to_main` 恢复。防的是「就地执行的投递器 + 发起期间同步完成」
+    /// 在 `await_suspend` 内重入协程帧的那条路，完整机理见 `await_suspend` 的文档。
+    bool armed_{false};
 };
 
 /// @brief 按代理决策建连：`Direct` 走直连入口，其余经代理建隧道，隧道不成即失败、绝不回退直连。
