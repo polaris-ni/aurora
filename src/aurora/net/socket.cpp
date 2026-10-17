@@ -1245,7 +1245,9 @@ auto detail::open_nonblocking_listener(const Endpoint &endpoint, int backlog, co
     if (!opened) {
         return opened.error();
     }
-    const NativeSocket s = opened.value();
+    // `open_configured_stream` 交回的是 `intptr_t` 形态句柄（`to_handle` 的出口），还原经 `from_handle`：
+    // POSIX 上 `NativeSocket` 窄于 `intptr_t`，直接初始化是实现定义收窄，显式走既定逆转换。
+    const NativeSocket s = from_handle(opened.value());
     sockaddr_storage storage{};
     auto built = make_address(endpoint, storage);
     if (!built) {
