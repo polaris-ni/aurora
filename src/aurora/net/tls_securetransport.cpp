@@ -97,7 +97,7 @@ auto tls_error(ErrorCode code, std::string text) -> Error {
     // 渲染会把「哪一项不对」整段丢掉，而这类错误里调用方唯一需要的就是那一段（tls_backend.cpp 的
     // make_invalid 记录了同一处取舍）。故该码按覆盖 message 构造，其余码仍走模板。
     if (code == ErrorCode::GeneralInvalidArgument) {
-        return make_error(code, std::move(text));
+        return make_error(code, text);
     }
     return make_error(code, ErrorParams{{"detail", std::move(text)}});
 }
@@ -306,7 +306,7 @@ auto base64_value(char character) -> int {
 /// 错位的 DER，而错位的 DER 会被后续解析读成一张名字完全不同的证书——那时现场指向的是证书，不是资产。
 [[nodiscard]] auto from_base64(std::string_view text) -> std::vector<std::uint8_t> {
     std::vector<std::uint8_t> bytes;
-    bytes.reserve((text.size() / 4U) * 3U + 3U);
+    bytes.reserve(((text.size() / 4U) * 3U) + 3U);
     unsigned accumulator = 0;
     unsigned bits = 0;
     // 收尾时把「已凑够整字节但还没写出」的位排空：末组常见形态是两字符（1 字节）或三字符（2 字节），
@@ -351,11 +351,11 @@ auto base64_value(char character) -> int {
 /// 长度入参是 `CC_LONG`（u32）。SPKI 的 DER 远小于 4 GiB，但仍显式判一次边界：把截断读成「算完了」会让
 /// pin 与另一枚同样截断的配置值相等，那是本层最难发现的错法。
 [[nodiscard]] auto sha256(std::span<const std::uint8_t> bytes) -> std::vector<std::uint8_t> {
-    constexpr std::size_t kDigestBytes = static_cast<std::size_t>(CC_SHA256_DIGEST_LENGTH);
+    constexpr auto digest_bytes = static_cast<std::size_t>(CC_SHA256_DIGEST_LENGTH);
     if (bytes.size() > static_cast<std::size_t>(0xFFFFFFFFUL)) {
         return {};
     }
-    std::vector<std::uint8_t> digest(kDigestBytes, std::uint8_t{0});
+    std::vector<std::uint8_t> digest(digest_bytes, std::uint8_t{0});
     (void)::CC_SHA256(bytes.data(), static_cast<CC_LONG>(bytes.size()), digest.data());
     return digest;
 }
@@ -613,7 +613,7 @@ struct DerElement {
 /// RFC 5280 §4.1.2.5 一律是 GMT，因此解析不需要时区数学；只接受以 `Z` 收尾的形态，非 GMT 即判坏。
 [[nodiscard]] auto der_time_text(const DerElement &element) -> std::string {
     const std::span<const std::uint8_t> &value = element.value;
-    const std::string_view text{reinterpret_cast<const char *>(value.data()), value.size()};
+    const std::string_view text{static_cast<const char *>(static_cast<const void *>(value.data())), value.size()};
     std::size_t digits = 0;
     if (element.tag == AURORA_TAG_UTC_TIME) {
         digits = 12U;  // YYMMDDHHMMSS
@@ -634,7 +634,7 @@ struct DerElement {
     const auto take = [&text, &cursor](std::size_t count) {
         unsigned number = 0;
         for (std::size_t index = 0; index < count; ++index) {
-            number = number * 10U + static_cast<unsigned>(text[cursor++] - '0');
+            number = (number * 10U) + static_cast<unsigned>(text[cursor++] - '0');
         }
         return number;
     };
@@ -642,7 +642,7 @@ struct DerElement {
     if (element.tag == AURORA_TAG_UTC_TIME) {
         year += year >= 50U ? 1900U : 2000U;  // RFC 5280 的两位年窗口
     } else {
-        year = year * 100U + take(2U);
+        year = (year * 100U) + take(2U);
     }
     const auto month = take(2U);
     const auto day = take(2U);
@@ -715,6 +715,10 @@ class SecureTransportBackend final : public TlsBackend {
 
     /// @brief 归还本对象持有的 CF 引用（不调 `SSLClose`，理由见 `release`）。
     ~SecureTransportBackend() override { release(); }
+    SecureTransportBackend(const SecureTransportBackend &) = delete;
+    auto operator=(const SecureTransportBackend &) -> SecureTransportBackend & = delete;
+    SecureTransportBackend(SecureTransportBackend &&) = delete;
+    auto operator=(SecureTransportBackend &&) -> SecureTransportBackend & = delete;
 
     auto push_incoming(std::span<const char> bytes) -> void override {
         // 已喂给系统的部分就地丢掉：这是密文缓冲唯一的收缩点，否则一条长连接上的字节会单调增长。
@@ -733,14 +737,14 @@ class SecureTransportBackend final : public TlsBackend {
 
     auto shutdown_records(std::vector<char> &outgoing) -> Result<void> override;
 
-    auto peer_certificate() const -> Result<PeerCertificate> override {
+    [[nodiscard]] auto peer_certificate() const -> Result<PeerCertificate> override {
         if (!cert_) {
             return tls_error(ErrorCode::NetSocketFailed, "no peer certificate is bound to this session");
         }
         return *cert_;
     }
 
-    auto negotiated_alpn() const -> std::optional<std::string> override { return alpn_; }
+    [[nodiscard]] auto negotiated_alpn() const -> std::optional<std::string> override { return alpn_; }
 
     // 两个内存 I/O 回调是自由函数（`SSLSetIOFuncs` 要的是 C 函数指针，成员函数指针要 reinterpret 才是
     // 同一形态，那是不必要的未定义行为），因此以友元取得本类的缓冲所有权。
@@ -853,7 +857,8 @@ auto SecureTransportBackend::create(const TlsContext &context, std::string_view 
 
     // 信任判定上收：拿不到这个选项就宁可不连——系统的自动通路不认追加根，静默继续会让「给了根却连不上」
     // 变成一条永远解释不清的失败。
-    if (const auto status = ::SSLSetSessionOption(backend->context_, kSSLSessionOptionBreakOnServerAuth, true);
+    if (const auto status =
+            ::SSLSetSessionOption(backend->context_, kSSLSessionOptionBreakOnServerAuth, static_cast<Boolean>(true));
         status != noErr) {
         return status_error(status, "tls manual verification option");
     }
@@ -921,9 +926,9 @@ auto SecureTransportBackend::create(const TlsContext &context, std::string_view 
     // 客户端身份（mTLS）：PKCS#12 就地导入（不落钥匙串），取 item 0 的 `SecIdentityRef` 装进数组交给
     // `SSLSetCertificate`——文档要求数组第 0 位必须是身份，且必须在 `SSLHandshake` 之前设好。
     if (context.client_identity) {
-        const CFDataRef archive =
-            ::CFDataCreate(kCFAllocatorDefault, reinterpret_cast<const UInt8 *>(context.client_identity->data()),
-                           static_cast<CFIndex>(context.client_identity->size()));
+        const CFDataRef archive = ::CFDataCreate(
+            kCFAllocatorDefault, static_cast<const UInt8 *>(static_cast<const void *>(context.client_identity->data())),
+            static_cast<CFIndex>(context.client_identity->size()));
         if (archive == nullptr) {
             return tls_error(ErrorCode::GeneralInvalidArgument, "client identity cannot be buffered");
         }
@@ -1069,7 +1074,8 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
                 const CFArrayRef anchors = ::CFArrayCreate(nullptr, values, 1, &kCFTypeArrayCallBacks);
                 if (anchors != nullptr) {
                     ::SecTrustSetAnchorCertificates(trust, anchors);
-                    ::SecTrustSetAnchorCertificatesOnly(trust, true);  // 只认这一张：即「信任对端」的语义
+                    ::SecTrustSetAnchorCertificatesOnly(
+                        trust, static_cast<Boolean>(true));  // 只认这一张：即「信任对端」的语义
                     ::CFRelease(anchors);
                 }
             }
@@ -1084,7 +1090,8 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
             }
             // false = 除给定根之外**也**认系统信任库：追加而非替换。做成替换会让所有对接公网的用例在给出
             // 自签根的那一刻突然不认合法证书，那是比拒绝更糟的故障。
-            if (const auto status = ::SecTrustSetAnchorCertificatesOnly(trust, false); status != noErr) {
+            if (const auto status = ::SecTrustSetAnchorCertificatesOnly(trust, static_cast<Boolean>(false));
+                status != noErr) {
                 return tls_error(ErrorCode::NetTlsHandshakeFailed,
                                  "trust root merging was not accepted, status=" + hex_status(status));
             }
@@ -1098,7 +1105,7 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
             return tls_error(ErrorCode::NetTlsHandshakeFailed, "server name is not representable as a policy host");
         }
         const CfReleaser expected_guard{expected};
-        const SecPolicyRef policy = ::SecPolicyCreateSSL(true, expected);
+        const SecPolicyRef policy = ::SecPolicyCreateSSL(static_cast<Boolean>(true), expected);
         if (policy == nullptr) {
             return tls_error(ErrorCode::NetTlsHandshakeFailed, "server authentication policy is unavailable");
         }
@@ -1112,7 +1119,7 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
     // 沙箱/无网络的 CI 跑者上，SecTrustEvaluateWithError 默认会尝试联网取 OCSP/中间证书，受限网络下
     // Security 框架可能直接 abort（而非返回错误）。显式关闭网络取数让评估在离线环境确定化，与既有
     // 「吊销信息取不到也不拒连」的口径一致。
-    ::SecTrustSetNetworkFetchAllowed(trust, false);
+    ::SecTrustSetNetworkFetchAllowed(trust, static_cast<Boolean>(false));
     CFErrorRef error = nullptr;
     const bool trusted = ::SecTrustEvaluateWithError(trust, &error);
     // 系统的失败描述只说「哪张证书出了什么问题」，不含我们本来要连的那个名字；而「连到了给别人签发的证书」
@@ -1150,9 +1157,9 @@ auto SecureTransportBackend::capture_summary(SecTrustRef trust) -> Result<void> 
         return tls_error(ErrorCode::NetTlsHandshakeFailed, "peer certificate could not be exported as DER");
     }
     const CfReleaser der_guard{der};
-    const std::span<const std::uint8_t> bytes{reinterpret_cast<const std::uint8_t *>(::CFDataGetBytePtr(der)),
+    const std::span<const std::uint8_t> bytes{static_cast<const std::uint8_t *>(::CFDataGetBytePtr(der)),
                                               static_cast<std::size_t>(::CFDataGetLength(der))};
-    const auto parsed = parse_certificate(bytes);
+    auto parsed = parse_certificate(bytes);
     if (!parsed) {
         return tls_error(ErrorCode::NetTlsCertRejected, "peer certificate is not a decodable X.509 structure");
     }
@@ -1189,7 +1196,7 @@ auto SecureTransportBackend::capture_alpn() -> void {
     if (::CFGetTypeID(raw) == ::CFDataGetTypeID()) {
         const auto *data = static_cast<CFDataRef>(raw);
         const CFIndex length = ::CFDataGetLength(data);
-        const std::span<const char> text{reinterpret_cast<const char *>(::CFDataGetBytePtr(data)),
+        const std::span<const char> text{static_cast<const char *>(::CFDataGetBytePtr(data)),
                                          length > 0 ? static_cast<std::size_t>(length) : std::size_t{0}};
         if (!text.empty()) {
             alpn_ = std::string{text.data(), text.size()};
@@ -1316,11 +1323,11 @@ auto memory_read(const void *connection, void *buffer, size_t *processed) -> int
     if (self == nullptr || buffer == nullptr || processed == nullptr) {
         return errSSLClosedAbort;
     }
-    const std::size_t requested = static_cast<std::size_t>(*processed);
+    const auto requested = static_cast<std::size_t>(*processed);
     const std::size_t available = self->pending_.size() - self->pending_taken_;
     const std::size_t taken = std::min(available, requested);
     if (taken != 0U) {
-        const std::span<const char> window{self->pending_.data() + self->pending_taken_, taken};
+        const std::span<const char> window{std::span<const char>{self->pending_}.subspan(self->pending_taken_, taken)};
         std::memcpy(buffer, window.data(), taken);
         self->pending_taken_ += taken;
     }

@@ -148,7 +148,7 @@ class CfHandle {
 
     /// @brief 取回原始引用（仅本类用途：交给 CF 的读取函数）。
     /// @return 构造时传入的对象引用。
-    auto get() const -> CFTypeRef { return object_; }
+    [[nodiscard]] auto get() const -> CFTypeRef { return object_; }
 
   private:
     CFTypeRef object_{nullptr};
@@ -164,7 +164,7 @@ auto read_string(CFDictionaryRef dictionary, CFStringRef key, std::string &out) 
     if (raw == nullptr || ::CFGetTypeID(static_cast<CFTypeRef>(raw)) != ::CFStringGetTypeID()) {
         return false;
     }
-    const auto value = static_cast<CFStringRef>(raw);
+    const auto *const value = static_cast<CFStringRef>(raw);
     const CFIndex length = ::CFStringGetLength(value);
     if (length <= 0) {
         out.clear();
@@ -204,14 +204,14 @@ auto read_exceptions(CFDictionaryRef dictionary) -> std::string {
     if (raw == nullptr || ::CFGetTypeID(static_cast<CFTypeRef>(raw)) != ::CFArrayGetTypeID()) {
         return {};
     }
-    const auto list = static_cast<CFArrayRef>(raw);
+    const auto *const list = static_cast<CFArrayRef>(raw);
     std::string out;
     for (CFIndex index = 0; index < ::CFArrayGetCount(list); ++index) {
         const void *element = ::CFArrayGetValueAtIndex(list, index);
         if (element == nullptr || ::CFGetTypeID(static_cast<CFTypeRef>(element)) != ::CFStringGetTypeID()) {
             continue;  // 数组项由系统持有且非所有权移交，按索引取即可
         }
-        const auto value = static_cast<CFStringRef>(element);
+        const auto *const value = static_cast<CFStringRef>(element);
         const CFIndex capacity = ::CFStringGetMaximumSizeForEncoding(::CFStringGetLength(value), kCFStringEncodingUTF8);
         if (capacity <= 0) {
             continue;
@@ -255,7 +255,7 @@ auto platform_system_proxy() -> Result<std::optional<SystemProxySnapshot>> {
         // 动态存储不可达（网络配置服务没起来、沙箱拒绝）：通道在但读不到，不是「没配」。
         return unreadable("SCDynamicStoreCopyProxies returned no dictionary");
     }
-    const auto dictionary = static_cast<CFDictionaryRef>(handle.get());
+    const auto *const dictionary = static_cast<CFDictionaryRef>(handle.get());
 
     SystemProxySnapshot snapshot;
     snapshot.bypass_list = read_exceptions(dictionary);
