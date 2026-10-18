@@ -10,6 +10,7 @@
 ///           常数时，`31 位 × 2` 的取值域会立刻在这里露出：连续多枚只会落在同一小段里）。
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <set>
 #include <vector>
@@ -39,17 +40,25 @@ using aurora::net::detail::noncrypto_unit;
 
 AURORA_TEST_CASE(unit_values_spread_the_whole_half_open_interval) {
     const auto values = draw_units(2000);
-    std::set<double> distinct;
+    // 「铺满整个半开区间」按十等分桶命中判，不再拿「两两不重复」当代理：抽样撞一次生日碰撞
+    // 就让互异计数少一，而序列是时钟播种的非密码学源、有限分辨率下碰撞是概率必然而非回归
+    // （本用例曾以 1999/2000 偶发把 asan 腿染红）。覆盖判据对目标退化依旧敏感。
+    constexpr int kBuckets = 10;
+    std::array<int, kBuckets> coverage{};
     double least = values.front();
     double most = values.front();
     for (const double value : values) {
         // 域本身：半开区间 `[0, 1)`，两端之外的值都不该出现。
         AURORA_TEST_CHECK(value >= 0.0 && value < 1.0);
-        distinct.insert(value);
+        const int bucket = static_cast<int>(value * static_cast<double>(kBuckets));
+        coverage[std::clamp(bucket, 0, kBuckets - 1)] += 1;  // 右端兜底，绝不越界
         least = std::min(least, value);
         most = std::max(most, value);
     }
-    AURORA_TEST_CHECK_EQ(distinct.size(), values.size());
+    // 每桶都该有值：取值域若被压成 `[0, 0.5)`（除以 2^32 那一型错误），上半五桶全空，这里立刻露出来。
+    for (const int hits : coverage) {
+        AURORA_TEST_CHECK(hits > 0);
+    }
     // 两端都要真的够得到：除以 2^32 的那一型错误只会让右端停在 0.5 以下。
     AURORA_TEST_CHECK(least < 0.05);
     AURORA_TEST_CHECK(most > 0.95);
