@@ -87,6 +87,33 @@ struct LoopbackPair {
     return aurora::test::wait_until(AURORA_ENGINE_SUBJECT, pred, budget).satisfied;
 }
 
+/// @brief 等待回调计数进入静止并取到静止值（注销后在途尾批的落地判据）。
+///
+/// 注册口口径：注销只把条目移出快照，**已入队的一次尾批仍会抵达**（§18-1；作废尾批是
+/// `cancel_pending()` 的独立职责）。`dispatch` 在锁内建成待投递闭包后放锁再投递，注销因此
+/// 与尾批投递天然竞态：不先等尾批落地就取基线，尾批会被误记成「注销后新回调」（ASan 减速
+/// 下实测翻盏）。注销后该 token 再无新 pending 可建，最多一轮尾批，连续多次采样相等即静止。
+/// @param hits 回调计数（注销后只减不增的那一个）。
+/// @return 静止后的计数值；预算耗尽未静止也返回最后一次读数（此时整套等待已失去意义）。
+auto quiesce_hits(const std::atomic<int> &hits) -> int {
+    int stable = 0;
+    int previous = hits.load();
+    const auto deadline = std::chrono::steady_clock::now() + AURORA_WAIT_BUDGET;
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+        const auto current = hits.load();
+        if (current == previous) {
+            if (++stable >= 2) {
+                return current;
+            }
+        } else {
+            stable = 0;
+        }
+        previous = current;
+    }
+    return previous;
+}
+
 }  // namespace
 
 // 能力矩阵如实回报：本腿的事件源/字节流/监听/数据报/名称解析位为真，TLS 位与被编译进来的后端同源，
@@ -240,7 +267,10 @@ AURORA_TEST_CASE(resident_loop_delivers_registered_source) {
         auto registration = std::move(reg.value());
     }
     AURORA_TEST_CHECK_EQ(registry.live_count(), std::size_t{0});
-    const int settled = hits.load();
+    // 先让在途尾批落地再取基线：`unregister_source` 只移出快照、不作废已入队尾批（§18-1），
+    // 而 `dispatch` 锁内建闭包、放锁后投递，注销与尾批天然竞态；直接取基线会把尾批误记成
+    // 「注销后新回调」。尾批最多一轮，落地后该 token 再无新回调可产。
+    const int settled = quiesce_hits(hits);
     write_payload(pair.client, "y");
     AURORA_TEST_CHECK_FALSE(wait_until([&] { return hits.load() > settled; }, std::chrono::milliseconds{120}));
 #endif
