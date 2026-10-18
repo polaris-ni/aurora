@@ -161,7 +161,6 @@ using ListenerPointer = std::shared_ptr<detail::ListenerState>;
 /// @param what 操作描述，进 message 便于现场定位。
 /// @return `net-cancelled` 错误。
 auto cancelled_reason(std::string what) -> Error {
-    ::fprintf(stderr, "[diag][tp] cancelled_reason(%s)\n", what.c_str());
     return make_error(ErrorCode::NetCancelled, std::move(what) + " was cancelled before completion");
 }
 

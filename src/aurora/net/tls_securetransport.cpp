@@ -767,7 +767,6 @@ class SecureTransportBackend final : public TlsBackend {
             ::CFRelease(context_);
             context_ = nullptr;
         }
-        ::fprintf(stderr, "[tls-st][diag] release done\n");
     }
 
     /// 把系统产出的记录交给调用方（追加语义），取完即清空。
@@ -1063,7 +1062,6 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
     // 「可信」结论，链对象随之可用，pin 摘要才拿得到（危险开关不豁免 pin 判定，公共面口径见
     // utest_net_tls 的 pin_mismatch_rejects_a_trusted_peer_and_insecure_switch_does_not_mask_it）。
     if (insecure_) {
-        ::fprintf(stderr, "[tls-st][diag] insecure: anchoring the peer leaf\n");
         if (::SecTrustGetCertificateCount(trust) > 0) {
             const SecCertificateRef leaf = ::SecTrustGetCertificateAtIndex(trust, 0);  // Get 规则：不拥有
             if (leaf != nullptr) {
@@ -1080,14 +1078,12 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
 
     if (!insecure_) {
         if (anchors_ != nullptr) {
-            ::fprintf(stderr, "[tls-st][diag] before SecTrustSetAnchorCertificates\n");
             if (const auto status = ::SecTrustSetAnchorCertificates(trust, anchors_); status != noErr) {
                 return tls_error(ErrorCode::NetTlsHandshakeFailed,
                                  "appended trust roots were not accepted, status=" + hex_status(status));
             }
             // false = 除给定根之外**也**认系统信任库：追加而非替换。做成替换会让所有对接公网的用例在给出
             // 自签根的那一刻突然不认合法证书，那是比拒绝更糟的故障。
-            ::fprintf(stderr, "[tls-st][diag] before SecTrustSetAnchorCertificatesOnly\n");
             if (const auto status = ::SecTrustSetAnchorCertificatesOnly(trust, false); status != noErr) {
                 return tls_error(ErrorCode::NetTlsHandshakeFailed,
                                  "trust root merging was not accepted, status=" + hex_status(status));
@@ -1102,13 +1098,11 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
             return tls_error(ErrorCode::NetTlsHandshakeFailed, "server name is not representable as a policy host");
         }
         const CfReleaser expected_guard{expected};
-        ::fprintf(stderr, "[tls-st][diag] before SecPolicyCreateSSL\n");
         const SecPolicyRef policy = ::SecPolicyCreateSSL(true, expected);
         if (policy == nullptr) {
             return tls_error(ErrorCode::NetTlsHandshakeFailed, "server authentication policy is unavailable");
         }
         const CfReleaser policy_guard{policy};
-        ::fprintf(stderr, "[tls-st][diag] before SecTrustSetPolicies\n");
         if (const auto status = ::SecTrustSetPolicies(trust, policy); status != noErr) {
             return tls_error(ErrorCode::NetTlsHandshakeFailed,
                              "server authentication policy was not accepted, status=" + hex_status(status));
@@ -1117,17 +1111,13 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
 
     // 沙箱/无网络的 CI 跑者上，SecTrustEvaluateWithError 默认会尝试联网取 OCSP/中间证书，受限网络下
     // Security 框架可能直接 abort（而非返回错误）。显式关闭网络取数让评估在离线环境确定化，与既有
-    // 「吊销信息取不到也不拒连」的口径一致。TEMP DIAG：开着网络开关之前先打点。
-    ::fprintf(stderr, "[tls-st][diag] before SecTrustSetNetworkFetchAllowed\n");
+    // 「吊销信息取不到也不拒连」的口径一致。
     ::SecTrustSetNetworkFetchAllowed(trust, false);
-    ::fprintf(stderr, "[tls-st][diag] before SecTrustEvaluateWithError\n");
     CFErrorRef error = nullptr;
     const bool trusted = ::SecTrustEvaluateWithError(trust, &error);
-    ::fprintf(stderr, "[tls-st][diag] after SecTrustEvaluateWithError trusted=%d\n", static_cast<int>(trusted));
     // 系统的失败描述只说「哪张证书出了什么问题」，不含我们本来要连的那个名字；而「连到了给别人签发的证书」
     // 是本层最常见的一类现场，名字必须在诊断里（公共面对 `net-tls-cert-rejected` 的期望就是可归因）。
     const std::string detail = describe_cferror(error);
-    ::fprintf(stderr, "[tls-st][diag] after describe_cferror\n");
     if (error != nullptr) {
         ::CFRelease(error);
     }
@@ -1142,36 +1132,27 @@ auto SecureTransportBackend::verify_peer_trust() -> Result<void> {
     // 强制在线检查是另一件事。
 
     // 名字与链的结论到此都由系统给出，剩下的只是把叶子证书摘成公共面摘要。
-    ::fprintf(stderr, "[tls-st][diag] before capture_summary call\n");
     return capture_summary(trust);
 }
 
 auto SecureTransportBackend::capture_summary(SecTrustRef trust) -> Result<void> {
     // 两个访问器都要求「先评估」，这正是本函数只在评估之后被调用的原因（文件头有文档原话）。
-    ::fprintf(stderr, "[tls-st][diag] capture_summary: enter\n");
     const auto count = ::SecTrustGetCertificateCount(trust);
-    ::fprintf(stderr, "[tls-st][diag] capture_summary: count=%ld\n", static_cast<long>(count));
     if (count <= 0) {
         return tls_error(ErrorCode::NetTlsCertRejected, "peer presents no certificate to verify");
     }
     const SecCertificateRef leaf = ::SecTrustGetCertificateAtIndex(trust, 0);  // Get 规则：不拥有该引用
-    ::fprintf(stderr, "[tls-st][diag] capture_summary: leaf=%p\n", static_cast<const void *>(leaf));
     if (leaf == nullptr) {
         return tls_error(ErrorCode::NetTlsCertRejected, "peer certificate chain has no leaf certificate");
     }
-    ::fprintf(stderr, "[tls-st][diag] capture_summary: before CopyData\n");
     const CFDataRef der = ::SecCertificateCopyData(leaf);  // Copy 规则：本函数负责释放
-    ::fprintf(stderr, "[tls-st][diag] capture_summary: der=%p\n", static_cast<const void *>(der));
     if (der == nullptr) {
         return tls_error(ErrorCode::NetTlsHandshakeFailed, "peer certificate could not be exported as DER");
     }
     const CfReleaser der_guard{der};
     const std::span<const std::uint8_t> bytes{reinterpret_cast<const std::uint8_t *>(::CFDataGetBytePtr(der)),
                                               static_cast<std::size_t>(::CFDataGetLength(der))};
-    ::fprintf(stderr, "[tls-st][diag] capture_summary: der_len=%ld ptr=%p\n", static_cast<long>(bytes.size()),
-              static_cast<const void *>(bytes.data()));
     const auto parsed = parse_certificate(bytes);
-    ::fprintf(stderr, "[tls-st][diag] capture_summary: parsed=%d\n", static_cast<int>(parsed.has_value()));
     if (!parsed) {
         return tls_error(ErrorCode::NetTlsCertRejected, "peer certificate is not a decodable X.509 structure");
     }
