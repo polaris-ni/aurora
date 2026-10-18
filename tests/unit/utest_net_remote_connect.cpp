@@ -59,14 +59,14 @@ using aurora::test::net::EngineGuard;
 using aurora::test::net::HostDriven;
 
 /// @brief 「第二条候选根本不该发起」的观察窗：明显大于交错窗口，又不把挂死伪装成慢。
-constexpr std::chrono::milliseconds AURORA_GRACE_WINDOW{600};
+[[maybe_unused]] constexpr std::chrono::milliseconds AURORA_GRACE_WINDOW{600};
 
 /// @brief 隧道成功时随头部块一起写出的标记字节（握手多读的那段必须原样回到应用）。
-constexpr std::string_view AURORA_TUNNEL_MARKER{"TUNNELDATA"};
+[[maybe_unused]] constexpr std::string_view AURORA_TUNNEL_MARKER{"TUNNELDATA"};
 
 /// @brief 「这条还没让调用方出结果」的观察窗：握手中间的每一轮都以「继续等下一段」为正常结局，
 ///        用全预算去确认这件事会把每轮都拖成一次超时。
-constexpr std::chrono::milliseconds AURORA_STEP_WINDOW{300};
+[[maybe_unused]] constexpr std::chrono::milliseconds AURORA_STEP_WINDOW{300};
 
 /// @brief 本文件宿主等待的主题名：超时文本据此指明是竞速腿、握手段还是隧道没出结果。
 constexpr std::string_view AURORA_PUMP_SUBJECT = "net-remote-connect-host-pump";
@@ -125,7 +125,7 @@ auto pump_until(aurora::app::EventSourceRegistry &registry, const std::function<
 /// @brief 让宿主空转一段有界时间（「不该发生的事」只能靠窗口观察，不能靠谓词等）。
 /// @param registry 进程级事件源注册口（同上，泵自取进程级单例）。
 /// @param window 窗口长度。
-auto spin(aurora::app::EventSourceRegistry &registry, std::chrono::milliseconds window) -> void {
+[[maybe_unused]] auto spin(aurora::app::EventSourceRegistry &registry, std::chrono::milliseconds window) -> void {
     (void)registry;  // NOLINT(bugprone-unused-parameter) 形参为维持调用点形态而留
     aurora::test::net::pump_idle(window);
 }
@@ -143,7 +143,7 @@ struct ConnectLog {
 /// @brief 取已记录的回调用次数。
 /// @param log 目标日志。
 /// @return 次数。
-auto calls_of(ConnectLog &log) -> int {
+[[maybe_unused]] auto calls_of(ConnectLog &log) -> int {
     std::scoped_lock lock(log.mutex);
     return log.calls;
 }
@@ -151,7 +151,7 @@ auto calls_of(ConnectLog &log) -> int {
 /// @brief 取失败原因 slug（成功或未收尾时为空）。
 /// @param log 目标日志。
 /// @return slug 文本副本。
-auto code_of(ConnectLog &log) -> std::string {
+[[maybe_unused]] auto code_of(ConnectLog &log) -> std::string {
     std::scoped_lock lock(log.mutex);
     return log.code;
 }
@@ -159,7 +159,7 @@ auto code_of(ConnectLog &log) -> std::string {
 /// @brief 取失败原因 slug + 现场细节（红时用它指认「哪一阶段、为什么」）。
 /// @param log 目标日志。
 /// @return `slug / message` 文本；成功或未收尾时为空。
-auto reason_of(ConnectLog &log) -> std::string {
+[[maybe_unused]] auto reason_of(ConnectLog &log) -> std::string {
     std::scoped_lock lock(log.mutex);
     return log.code.empty() ? std::string{} : log.code + " / " + log.detail;
 }
@@ -167,7 +167,7 @@ auto reason_of(ConnectLog &log) -> std::string {
 /// @brief 把一次连接的结果落到日志里。
 /// @param log 目标日志（须存活到回调抵达）。
 /// @return 可直接交给 `connect_via` 或名字形态 `connect` 的回调。
-auto connect_into(ConnectLog &log) -> aurora::net::ConnectDone {
+[[maybe_unused]] auto connect_into(ConnectLog &log) -> aurora::net::ConnectDone {
     return [&log](auto result) {
         std::scoped_lock lock(log.mutex);
         if (!result) {
@@ -233,7 +233,7 @@ auto bind_loopback() -> StreamListener {
 /// @param listener 目标监听口。
 /// @param sink 存放交付的流。
 /// @param accepted 计数（回调自增）。
-auto arm_accept(StreamListener &listener, StreamTransport &sink, std::atomic<int> &accepted) -> void {
+[[maybe_unused]] auto arm_accept(StreamListener &listener, StreamTransport &sink, std::atomic<int> &accepted) -> void {
     listener.accept([&sink, &accepted](auto result) {
         // 致命断言会抛 CaseAbort，而本回调可能落在 `~StreamListener` 的派发路径上（析构边界内的抛出直接
         // `std::terminate`，整条测试进程连带消失），故这里只用非致命断言记录失败。
@@ -250,7 +250,7 @@ auto arm_accept(StreamListener &listener, StreamTransport &sink, std::atomic<int
 ///        `net-socket-failed`，把「代理不会说话」误记成「测试自己不会说话」。
 /// @param registry 进程级事件源注册口。
 /// @param accepted `arm_accept` 自增的计数。
-auto await_proxy_side(aurora::app::EventSourceRegistry &registry, const std::atomic<int> &accepted) -> void {
+[[maybe_unused]] auto await_proxy_side(aurora::app::EventSourceRegistry &registry, const std::atomic<int> &accepted) -> void {
     AURORA_TEST_REQUIRE(pump_until(registry, [&accepted]() { return accepted.load() >= 1; }));
 }
 
@@ -284,7 +284,7 @@ auto read_until(aurora::app::EventSourceRegistry &registry, StreamTransport &pee
 /// @param registry 进程级事件源注册口。
 /// @param peer 握手对端。
 /// @param payload 待写文本。
-auto write_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &peer, std::string_view payload)
+[[maybe_unused]] auto write_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &peer, std::string_view payload)
     -> void {
     LegLog log;
     peer.write(std::span<const char>(payload.data(), payload.size()), write_into(log));
@@ -295,7 +295,7 @@ auto write_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &
 /// @brief 把 SOCKS5 的八位组序列换成一串可直接写出的字节。
 /// @param bytes 各八位组。
 /// @return 文本形态的原始字节。
-[[nodiscard]] auto raw(std::initializer_list<std::uint8_t> bytes) -> std::string {
+[[maybe_unused]] [[nodiscard]] auto raw(std::initializer_list<std::uint8_t> bytes) -> std::string {
     std::string out;
     out.reserve(bytes.size());
     for (const auto byte : bytes) {
@@ -309,7 +309,7 @@ auto write_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &
 /// @param peer 握手对端。
 /// @param count 目标字节数。
 /// @return 读到的字节文本。
-auto read_exact(aurora::app::EventSourceRegistry &registry, StreamTransport &peer, std::size_t count) -> std::string {
+[[maybe_unused]] auto read_exact(aurora::app::EventSourceRegistry &registry, StreamTransport &peer, std::size_t count) -> std::string {
     return read_until(registry, peer, [count](const std::string &seen) { return seen.size() >= count; });
 }
 
@@ -322,7 +322,7 @@ struct TargetWatch {
 
 /// @brief 起一个目标监听口并登记 accept 计数（不回写任何字节，纯粹观察）。
 /// @param watch 目标观察体（生命周期由用例负责）。
-auto watch_target(TargetWatch &watch) -> void {
+[[maybe_unused]] auto watch_target(TargetWatch &watch) -> void {
     watch.listener = bind_loopback();
     watch.listener.accept([&watch](auto result) {
         if (result) {

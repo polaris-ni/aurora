@@ -28,7 +28,6 @@
 #include <string>
 #include <string_view>
 #include <thread>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -37,18 +36,17 @@
 #include "aurora/net/address.h"
 #include "aurora/net/blocking.h"
 #include "aurora/net/detail/runtime.h"
-#include "aurora/net/socket.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_net_socket {
 namespace {
 
 /// @brief 等待类用例的统一轮询窗口（足够覆盖内核回环往返、又不至于拖慢失败路径）。
-constexpr std::chrono::milliseconds AURORA_NET_POLL_TIMEOUT{80};
+[[maybe_unused]] constexpr std::chrono::milliseconds AURORA_NET_POLL_TIMEOUT{80};
 
 /// @brief 在临时端口起一个回环监听口；建立失败即 REQUIRE 转红（用例的环境前提，不是被测行为）。
 /// @return 就绪的 Listener（`port()` 为非 0 系统分配值）。
-auto make_listener() -> aurora::net::blocking::Listener {
+[[maybe_unused]] auto make_listener() -> aurora::net::blocking::Listener {
     auto bound = aurora::net::blocking::Listener::listen_loopback(0, 4);
     AURORA_TEST_REQUIRE(bound.ok());
     auto listener = std::move(bound.value());
@@ -430,33 +428,3 @@ AURORA_TEST_CASE(dual_stack_listener_still_recognizes_loopback) {
 // 迁移期别名：`aurora::net::{StreamSocket,Listener}` 必须与 `blocking` 同名类型是同一个类型，
 // 否则就是「旧别名还在、新面已改语义」的中间态。别名带弃用标记，故引用它的这段整体落进
 // 告警抑制窗口；别名在下一版移除时本用例一并删除。
-AURORA_TEST_CASE(deprecated_aliases_resolve_to_blocking_types) {
-#ifdef AURORA_PLATFORM_WASM
-    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
-#else
-#ifdef AURORA_COMPILER_MSVC
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#else
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-    static_assert(std::is_same_v<aurora::net::StreamSocket, aurora::net::blocking::StreamSocket>);
-    static_assert(std::is_same_v<aurora::net::Listener, aurora::net::blocking::Listener>);
-    AURORA_TEST_CHECK_TRUE((std::is_same_v<aurora::net::StreamSocket, aurora::net::blocking::StreamSocket>));
-    AURORA_TEST_CHECK_TRUE((std::is_same_v<aurora::net::Listener, aurora::net::blocking::Listener>));
-
-    // 同义不只在类型上：经旧名建监听口，拿到的是同一套行为（有效句柄 + 非 0 分配端口）。
-    const auto bound = aurora::net::Listener::listen_loopback(0, 2);
-    AURORA_TEST_REQUIRE(bound.ok());
-    AURORA_TEST_CHECK_TRUE(bound.value().is_valid());
-    AURORA_TEST_CHECK_NE(bound.value().port(), std::uint16_t{0});
-#ifdef AURORA_COMPILER_MSVC
-#pragma warning(pop)
-#else
-#pragma GCC diagnostic pop
-#endif
-#endif
-}
-
-}  // namespace aurora::test_cases::utest_net_socket

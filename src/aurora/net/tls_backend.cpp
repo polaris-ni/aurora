@@ -32,16 +32,16 @@ namespace aurora::net {
 namespace {
 
 // 内置后端的标识。名字即构建宏所指的这条腿，写进诊断后调用方可以直接拿去填 `TlsContext::backend`。
-constexpr std::string_view AURORA_ID_SCHANNEL = "schannel";
-constexpr std::string_view AURORA_ID_SECURE_TRANSPORT = "securetransport";
-constexpr std::string_view AURORA_ID_OPENSSL = "openssl";
-constexpr std::string_view AURORA_ID_MBEDTLS = "mbedtls";
+[[maybe_unused]] constexpr std::string_view AURORA_ID_SCHANNEL = "schannel";
+[[maybe_unused]] constexpr std::string_view AURORA_ID_SECURE_TRANSPORT = "securetransport";
+[[maybe_unused]] constexpr std::string_view AURORA_ID_OPENSSL = "openssl";
+[[maybe_unused]] constexpr std::string_view AURORA_ID_MBEDTLS = "mbedtls";
 
 // 内置腿的缺省次序：系统栈在前（零依赖、补丁与信任根都归操作系统管），provider 库按「更通用者在前」
 // 排。次序是缺省值而非强制——`set_default_tls_backends()` 可以整体改写。
-constexpr int AURORA_PRIORITY_SYSTEM = 100;
-constexpr int AURORA_PRIORITY_OPENSSL = 60;
-constexpr int AURORA_PRIORITY_MBEDTLS = 40;
+[[maybe_unused]] constexpr int AURORA_PRIORITY_SYSTEM = 100;
+[[maybe_unused]] constexpr int AURORA_PRIORITY_OPENSSL = 60;
+[[maybe_unused]] constexpr int AURORA_PRIORITY_MBEDTLS = 40;
 
 auto make_detail(ErrorCode code, std::string text) -> Error {
     return make_error(code, ErrorParams{{"detail", std::move(text)}});
@@ -114,16 +114,15 @@ auto install_builtins_locked(Registry &state) -> void {
 
 // 在快照里按 id 找一条后端。
 auto find_locked(const std::vector<Entry> &entries, std::string_view id) -> const Entry * {
-    const auto found =
-        std::find_if(entries.begin(), entries.end(), [id](const Entry &entry) { return entry.id == id; });
+    const auto found = std::ranges::find_if(entries, [id](const Entry &entry) { return entry.id == id; });
     return found == entries.end() ? nullptr : &*found;
 }
 
 // 缺省链 = 在案后端按优先级降序（同优先级保持注册次序）。
 auto chain_from(const std::vector<Entry> &entries) -> std::vector<std::string> {
     std::vector<Entry> sorted = entries;
-    std::stable_sort(sorted.begin(), sorted.end(),
-                     [](const Entry &left, const Entry &right) { return left.priority > right.priority; });
+    std::ranges::stable_sort(sorted,
+                             [](const Entry &left, const Entry &right) { return left.priority > right.priority; });
     std::vector<std::string> ids;
     ids.reserve(sorted.size());
     for (const auto &entry : sorted) {
@@ -178,8 +177,7 @@ auto unregister_tls_backend(std::string_view id) -> bool {
     auto &state = registry();
     std::scoped_lock lock{state.mutex};
     install_builtins_locked(state);
-    const auto found =
-        std::find_if(state.entries.begin(), state.entries.end(), [id](const Entry &entry) { return entry.id == id; });
+    const auto found = std::ranges::find_if(state.entries, [id](const Entry &entry) { return entry.id == id; });
     if (found == state.entries.end()) {
         return false;
     }
@@ -202,8 +200,8 @@ auto set_default_tls_backends(std::vector<std::string> chain) -> Result<void> {
         }
     }
     auto sorted = chain;
-    std::sort(sorted.begin(), sorted.end());
-    if (std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end()) {
+    std::ranges::sort(sorted);
+    if (std::ranges::adjacent_find(sorted) != sorted.end()) {
         return make_invalid(
             "the tls candidate chain lists the same backend id twice (order carries meaning, "
             "duplicates do not)");

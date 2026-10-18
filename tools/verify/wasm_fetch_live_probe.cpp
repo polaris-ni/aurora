@@ -56,6 +56,13 @@
 #include "aurora/net/policy.h"
 #include "aurora/state/async.h"
 
+// 以下 4 个为 EM_JS 在文件尾以 `extern "C"` 生成的外部链接函数；前向声明置于全局作用域（外部链接），
+// 与 EM_JS 定义一致，避免匿名命名空间内的内部声明因「内部链接却无内部定义」触发 -Wundefined-internal。
+extern "C" auto probe_notify_done() -> void;
+extern "C" auto install_mock_fetch() -> void;
+extern "C" auto script_mock_step(const char *url, const char *kind) -> void;
+extern "C" auto probe_defer_js(std::intptr_t fn_ptr) -> void;
+
 namespace {
 
 using aurora::ErrorCode;
@@ -86,11 +93,7 @@ auto probe_state() -> ProbeState & {
     return state;
 }
 
-// 前置声明（EM_JS 定义在文件尾）。
-auto probe_notify_done() -> void;
-auto install_mock_fetch() -> void;
-auto script_mock_step(const char *url, const char *kind) -> void;
-auto probe_defer_js(std::intptr_t fn_ptr) -> void;
+// 前置声明（EM_JS 定义在文件尾，均为 `extern "C"` 外部链接；同名前向声明见文件顶部全局作用域）。
 auto start_phase_two() -> void;
 
 /// @brief 判据原语：把一次断言记进本用例的台账条目（首个失败现场保留）。
@@ -416,7 +419,7 @@ EM_JS(void, install_mock_fetch, (), {
         if (step === 'opaque') {
             return Promise.resolve({
                 status: 0,
-                statusText: '',
+                statusText: "",
                 headers: new Headers(),
                 arrayBuffer: async () => new ArrayBuffer(0),
             });
@@ -428,7 +431,7 @@ EM_JS(void, install_mock_fetch, (), {
         const bytes = step.body ? new TextEncoder().encode(step.body) : new Uint8Array(0);
         return Promise.resolve({
             status: step.status,
-            statusText: step.reason || '',
+            statusText: step.reason || "",
             headers,
             arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
         });

@@ -58,7 +58,7 @@ auto literal(std::string_view text, std::uint16_t port) -> Endpoint {
 /// @brief 轮询等待一个异步完成（引擎线程与主线程投递器的组合不保证时序）。
 /// @param flag 完成标志。
 /// @return 在预算内完成为 true。
-auto wait_until(const std::atomic_flag &flag) -> bool {
+[[maybe_unused]] auto wait_until(const std::atomic_flag &flag) -> bool {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (std::chrono::steady_clock::now() < deadline) {
         if (flag.test()) {

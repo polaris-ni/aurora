@@ -70,10 +70,10 @@ using aurora::test::scripts::write_then_half_close;
 using aurora::test::scripts::write_then_hold;
 
 /// @brief 观察窗：足够盖住一次回环连接与一轮泵，又不至于把「不该发生的第二条结局」伪装成慢。
-constexpr std::chrono::milliseconds AURORA_GRACE_WINDOW{200};
+[[maybe_unused]] constexpr std::chrono::milliseconds AURORA_GRACE_WINDOW{200};
 
 /// @brief 脚本时限：连接类用例的时限由替身推进，真时钟一毫秒都不必等。
-constexpr std::chrono::milliseconds AURORA_SCRIPTED_TIMEOUT{500};
+[[maybe_unused]] constexpr std::chrono::milliseconds AURORA_SCRIPTED_TIMEOUT{500};
 
 /// @brief 一次连接结局的观测记录。
 ///
@@ -99,7 +99,7 @@ struct LegLog {
 /// @brief 取已记录的回调用次数。
 /// @param log 目标日志。
 /// @return 次数。
-auto calls_of(ConnectLog &log) -> int {
+[[maybe_unused]] auto calls_of(ConnectLog &log) -> int {
     std::scoped_lock lock(log.mutex);
     return log.calls;
 }
@@ -107,7 +107,7 @@ auto calls_of(ConnectLog &log) -> int {
 /// @brief 取失败原因 slug（成功或未收尾时为空）。
 /// @param log 目标日志。
 /// @return slug 文本副本。
-auto code_of(ConnectLog &log) -> std::string {
+[[maybe_unused]] auto code_of(ConnectLog &log) -> std::string {
     std::scoped_lock lock(log.mutex);
     return log.code;
 }
@@ -115,7 +115,7 @@ auto code_of(ConnectLog &log) -> std::string {
 /// @brief 把一次连接结局记进日志。
 /// @param log 目标日志（须存活到回调抵达）。
 /// @return 可直接交给 `connect` / `connect_via` 的回调。
-auto connect_into(ConnectLog &log) -> aurora::net::ConnectDone {
+[[maybe_unused]] auto connect_into(ConnectLog &log) -> aurora::net::ConnectDone {
     return [&log](auto result) {
         std::scoped_lock lock(log.mutex);
         if (!result) {
@@ -162,7 +162,7 @@ auto write_into(LegLog &log) -> aurora::net::WriteDone {
 /// @brief 替身形态下的连接口径：时限交给脚本时钟，其余按缺省。
 /// @param timeout 时限；非零值才会登记定时器。
 /// @return 连接选项。
-auto scripted_options(std::chrono::milliseconds timeout = std::chrono::milliseconds{0}) -> StreamOptions {
+[[maybe_unused]] auto scripted_options(std::chrono::milliseconds timeout = std::chrono::milliseconds{0}) -> StreamOptions {
     StreamOptions options;
     options.connect_timeout = timeout;
     return options;
@@ -172,7 +172,7 @@ auto scripted_options(std::chrono::milliseconds timeout = std::chrono::milliseco
 /// @param stream 目标流。
 /// @param scratch 读缓冲。
 /// @return 本轮读到的字节；对端已停写或失败时为空串（失败另有 `ok` 输出）。
-auto read_round(StreamTransport &stream, std::vector<char> &scratch, bool *ok = nullptr) -> std::string {
+[[maybe_unused]] auto read_round(StreamTransport &stream, std::vector<char> &scratch, bool *ok = nullptr) -> std::string {
     LegLog log;
     stream.read(std::span<char>(scratch), read_into(log));
     const auto wait = drive_until("read-lands", [&log]() -> bool { return log.calls.load() >= 1; });
@@ -190,7 +190,7 @@ auto read_round(StreamTransport &stream, std::vector<char> &scratch, bool *ok = 
 /// @brief 写一段字节并等到写完。
 /// @param stream 目标流。
 /// @param payload 待写文本。
-auto write_round(StreamTransport &stream, std::string_view payload) -> void {
+[[maybe_unused]] auto write_round(StreamTransport &stream, std::string_view payload) -> void {
     LegLog log;
     stream.write(std::span<const char>(payload.data(), payload.size()), write_into(log));
     const auto wait = drive_until("write-lands", [&log]() -> bool { return log.calls.load() >= 1; });

@@ -520,7 +520,7 @@ auto Clipboard::available_formats() -> Result<std::vector<std::string>> {
 #endif
 }
 
-auto Clipboard::set_payload(const std::string &mime, const std::vector<std::uint8_t> &bytes) -> Result<bool> {
+auto Clipboard::set_payload(const std::string &mime, [[maybe_unused]] const std::vector<std::uint8_t> &bytes) -> Result<bool> {
     if (mime.empty()) {
         return make_error(ErrorCode::GeneralInvalidArgument, "set_payload: mime must not be empty");
     }
@@ -557,7 +557,7 @@ auto Clipboard::get_payload(const std::string &mime) -> Result<std::vector<std::
     return format_unsupported(mime);
 }
 
-auto Clipboard::set_files(const std::vector<std::string> &paths) -> Result<bool> {
+auto Clipboard::set_files([[maybe_unused]] const std::vector<std::string> &paths) -> Result<bool> {
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
     {
         auto &backend = test_backend();
@@ -593,7 +593,7 @@ auto Clipboard::get_files() -> Result<std::vector<std::string>> {
     return format_unsupported(AURORA_MIME_URI_LIST);
 }
 
-auto Clipboard::set_html(const std::string &html) -> Result<bool> {
+auto Clipboard::set_html([[maybe_unused]] const std::string &html) -> Result<bool> {
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
     {
         auto &backend = test_backend();

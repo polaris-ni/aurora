@@ -42,7 +42,7 @@ using aurora::test::AURORA_WAIT_BUDGET;
 using aurora::test::net::EngineGuard;
 
 /// @brief 定时用例的下界余量（Windows 等待粒度可比毫秒粗，故只断言「不早得多」而非精确）。
-constexpr std::chrono::milliseconds AURORA_TIMER_SLACK{40};
+[[maybe_unused]] constexpr std::chrono::milliseconds AURORA_TIMER_SLACK{40};
 
 /// @brief 本文件等待的主题名：超时文本据此指明是引擎线程那一腿没跑到位。
 constexpr std::string_view AURORA_ENGINE_SUBJECT = "net-engine-wait";
@@ -55,7 +55,7 @@ struct LoopbackPair {
 
 /// @brief 在临时端口起监听、连接、接受，得到一对连通的回环流；监听口随即关闭。
 /// @return 连通的 client/server 对。
-auto make_connected_pair() -> LoopbackPair {
+[[maybe_unused]] auto make_connected_pair() -> LoopbackPair {
     auto bound = aurora::net::blocking::Listener::listen_loopback(0, 4);
     AURORA_TEST_REQUIRE(bound.ok());
     auto listener = std::move(bound.value());
@@ -70,7 +70,7 @@ auto make_connected_pair() -> LoopbackPair {
 /// @brief 向对端写入一段字节（失败即刻转红：写不出去就无法制造「就绪」这一被测前提）。
 /// @param socket 目标流。
 /// @param payload 待发送文本。
-auto write_payload(aurora::net::blocking::StreamSocket &socket, std::string_view payload) -> void {
+[[maybe_unused]] auto write_payload(aurora::net::blocking::StreamSocket &socket, std::string_view payload) -> void {
     auto sent = socket.write_all(std::span<const char>(payload.data(), payload.size()));
     AURORA_TEST_REQUIRE(sent.ok());
 }
@@ -82,7 +82,7 @@ auto write_payload(aurora::net::blocking::StreamSocket &socket, std::string_view
 /// @param pred 目标条件。
 /// @param budget 最长等待时长；负向观察窗一律显式给短值。
 /// @return 预算内成立为 true。
-auto wait_until(const std::function<bool()> &pred, std::chrono::milliseconds budget = AURORA_WAIT_BUDGET) -> bool {
+[[maybe_unused]] auto wait_until(const std::function<bool()> &pred, std::chrono::milliseconds budget = AURORA_WAIT_BUDGET) -> bool {
     return aurora::test::wait_until(AURORA_ENGINE_SUBJECT, pred, budget).satisfied;
 }
 

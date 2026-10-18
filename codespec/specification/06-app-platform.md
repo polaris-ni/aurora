@@ -720,7 +720,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 `include/aurora/net/blocking.h` + `src/aurora/net/socket.cpp` 是全仓**唯一**的 Winsock2 / BSD socket 适配落点：公共头零平台 socket 头，`#include <winsock2.h>` / `<sys/socket.h>` 只允许出现在该 `.cpp`（验收 grep 判据见 ）。范围收敛为「Inspector 工具链 + 本机 AI 交互」所需：**地址族由 `Endpoint` 决定**（IPv4 / IPv6 同一条 `connect` / `bind` 通路，`*_loopback` 两枚工厂仍固定绑 `127.0.0.1`，都不经 DNS）、同步阻塞 + 显式超时、失败一律 `Result<T>` + 表驱动 `net-*` 错误码（`ERROR_CATALOG.md`，message 携带 OS 原生码）。
 
-该同步面按提案  §4 归位为 `aurora::net::blocking` 子命名空间，**仅供非 UI 线程的工具与测试宿主**（`InspectorServer` 工作线程、`tools/` 服务器与探针、单测里的回环桩）——面向使用者的路径一律走 §8.8.11 起的异步传输族，阻塞语义不得再渗回 UI 侧。迁移期内 `include/aurora/net/socket.h` 只剩转发别名（见 §8.8.16）。
+该同步面按提案  §4 归位为 `aurora::net::blocking` 子命名空间，**仅供非 UI 线程的工具与测试宿主**（`InspectorServer` 工作线程、`tools/` 服务器与探针、单测里的回环桩）——面向使用者的路径一律走 §8.8.11 起的异步传输族，阻塞语义不得再渗回 UI 侧。旧名 `aurora::net::{StreamSocket,Listener}` 已移除，迁移时直接改用 `aurora::net::blocking` 同名类型（成员逐名不变）。
 
 两个类型（外加一枚库内细节）：
 
@@ -956,7 +956,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 - **落点**：类型声明搬进新公共头 `include/aurora/net/blocking.h`（命名空间 `aurora::net::blocking`），实现仍在 `src/aurora/net/socket.cpp`（该文件里 `blocking::StreamSocket` / `blocking::Listener` 的定义包在同一对命名空间括号内）——「平台 socket 头唯一落点」不变量不破，本切片不新增 `.cpp`，故 `CMakeLists.txt` 的源文件清单零变化。新头已入伞头 `include/aurora/aurora.h` 与 `tools/check/umbrella_manifest.txt`（否则 `check_umbrella_header` 的「每个公共头都被分类」判据红）。
 - **运行时归属（三段，规范性）**：① 本文件创建任何句柄前先过 `runtime_pinned()`，它取一枚**进程级、只申请不归还**的 Winsock 引用——「只申请不还」是刻意取舍而非疏漏，与 §8.8.2 注册口单例「刻意不析构」同一条裁决：`WSACleanup` 落在静态析构阶段后，任何退出路径上的 socket 调用都会撞 `WSANOTINITIALISED`，而本库不承诺退出期行为；取不到运行时以 `net-runtime-failed` 显式失败，不退化成 `net-socket-failed`（那会把「平台运行时没起来」误报成「这一次调用失败」，掩盖成因）。② 引擎、异步流传输与数据报各自持一成员 `detail::Session`，随自身生命周期申请与归还——这是 §4「引擎自身管理运行时生命周期」的落点。③ 使用方不再感知：`aurora::net::blocking` 的两类型没有任何需要先构造的运行时前置件，`Session` 降为库内细节（`src/aurora/net/detail/runtime.h`，非公共头）。名字解析（`getaddrinfo`）同样自带会话，其前置条件由实现侧承担。
-- **迁移期别名**：`include/aurora/net/socket.h` 不再定义任何类型，只剩 `aurora::net::{StreamSocket,Listener}` 两枚 `[[deprecated]]` 转发别名与逐符号替代表，指向 `blocking` 的同名类型；判据是 `utest_net_socket` 的 `deprecated_aliases_resolve_to_blocking_types`（编译期 `static_assert` 同体 + 运行期经旧名建口），别名在下一版连同该用例一并移除。别名期内**禁止改动 `blocking` 的行为语义**（提案 §20 顺延条款），否则「旧名还在、新面已改语义」的中间态无人可辨。
+- **旧名已移除**：`aurora::net::{StreamSocket,Listener}` 两枚旧名已在本版本从公共面删除，仅余 `aurora::net::blocking` 同名类型（成员逐名不变）；迁移即把名字前缀改为 `blocking::`、包含改 `#include "aurora/net/blocking.h"`，无需其它改动。**禁止改动 `blocking` 的行为语义**，否则既有调用点行为漂移无人可辨。
 - **消费者同批迁移**：`InspectorServer` 删掉运行时会话成员、监听与客户端句柄改走 `net::blocking`，REST 协议语义逐值不变（4 MiB body 上限、`Connection: close`、非回环对端 403、异常兜底 500）；`tools/servers/inspector_client.h` 的 `http_request` 签名与响应语义不变，其契约错误串（`connect() failed on 127.0.0.1:<port>`、`empty response`、`refusing non-loopback host: …`、`io timeout setup failed`）全部保留，只有 `socket runtime initialization failed` 因无来源而删除（全仓断言已核）；五处测试（`utest_net_socket` `utest_net_poll` `utest_net_engine` `utest_inspector_client` `itest_inspector_robustness`）删除自备会话并把回环桩改指 `blocking`。`utest_net_socket` 沿用现文件名，仅把「目标单元」指向 `blocking.h`——历史 §8.8 回归条目仍以该文件名为可达引用。
 - 错误码：本切片**无新增码**，`net-runtime-failed` 获得新落点（此前只在会话构造失败时产生，现在句柄创建点即可能产出）。
 - 回归：Windows（MinGW）与 WSL（POSIX）两条验证腿上，上述六个套件全绿；Windows 腿的 IPv6 双栈用例因本机 v6-only 而 `AURORA_TEST_SKIP`（环境缺失，非行为差异）。1MiB+7 往返用例的读线程结构与「对端关闭 = `read_some` 返回 0」口径均未改动，是「别名只做转发、语义零漂移」的主要证据。

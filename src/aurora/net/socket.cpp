@@ -588,9 +588,9 @@ auto StreamSocket::set_io_timeout(std::chrono::milliseconds timeout) const -> Re
     // 取选项变量地址过界是唯一方式。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
     const int rcv_rc = ::setsockopt(from_handle(handle_), SOL_SOCKET, SO_RCVTIMEO,
-                                    reinterpret_cast<const char *>(option), option_size);
+                                    static_cast<const char *>(option), option_size);
     const int snd_rc = ::setsockopt(from_handle(handle_), SOL_SOCKET, SO_SNDTIMEO,
-                                    reinterpret_cast<const char *>(option), option_size);
+                                    static_cast<const char *>(option), option_size);
     // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     if (rcv_rc != 0 || snd_rc != 0) {
         return net_error(ErrorCode::NetTimeoutOptionFailed, "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO)");
@@ -1031,7 +1031,7 @@ auto seconds_at_least_one(std::chrono::milliseconds value) -> int {
 /// @param s 原生句柄（`SO_KEEPALIVE` 已置）。
 /// @param options 置了值的调参字段。
 /// @return 成功为 OK；本腿没有对应入口或系统调用失败为 `net-option-failed`（`detail` 写明缺哪一枚）。
-auto apply_keepalive_tuning(NativeSocket s, const NativeOptions &options) -> Result<void> {
+auto apply_keepalive_tuning([[maybe_unused]] NativeSocket s, const NativeOptions &options) -> Result<void> {
 #ifdef AURORA_PLATFORM_WINDOWS
     if (options.keep_alive_probes) {
         return make_error(ErrorCode::NetOptionFailed,

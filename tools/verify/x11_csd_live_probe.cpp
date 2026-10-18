@@ -9,13 +9,13 @@
 // 悬停 / 按压 / 拖拽 / 双击的手工目视段不进本探针（见 codespec/manual-test/10-window.md）。
 //
 // 构建（方式 ① CMake 目标，推荐）：
-//   cmake -S . -B build-verify -G Ninja -DCMAKE_BUILD_TYPE=Release \
+//   cmake -S . -B build-verify -G Ninja -DCMAKE_BUILD_TYPE=Release
 //         -DAURORA_BACKEND_X11=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 //   cmake --build build-verify --target aurora_verify_x11_csd
 // 构建（方式 ② 手写命令，须先有一个 DEBUG+X11 构建目录 build-x11-dbg）：
-//   g++ -std=c++20 -DAURORA_BACKEND_X11 -DAURORA_ENABLE_DEBUG -DAURORA_PLATFORM_LINUX \
-//       -I include tools/verify/x11_csd_live_probe.cpp -o /tmp/x11_csd_live_probe \
-//       build-x11-dbg/libaurora.a build-x11-dbg/third_party/harfbuzz/libharfbuzz.a \
+//   g++ -std=c++20 -DAURORA_BACKEND_X11 -DAURORA_ENABLE_DEBUG -DAURORA_PLATFORM_LINUX
+//       -I include tools/verify/x11_csd_live_probe.cpp -o /tmp/x11_csd_live_probe
+//       build-x11-dbg/libaurora.a build-x11-dbg/third_party/harfbuzz/libharfbuzz.a
 //       build-x11-dbg/third_party/freetype/libfreetype.a -lX11 -lz -lpthread -ldl -lm
 //
 // 运行：DISPLAY=:0 ./aurora_verify_x11_csd        （退出码 0=全过 1=判据失败 2=环境不支持）

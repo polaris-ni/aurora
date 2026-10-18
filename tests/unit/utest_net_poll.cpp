@@ -34,10 +34,10 @@ namespace aurora::test_cases::utest_net_poll {
 namespace {
 
 /// @brief 等待类用例的统一轮询窗口（覆盖内核回环往返，又不至于拖慢失败路径）。
-constexpr std::chrono::milliseconds AURORA_NET_POLL_TIMEOUT{80};
+[[maybe_unused]] constexpr std::chrono::milliseconds AURORA_NET_POLL_TIMEOUT{80};
 
 /// @brief 纯超时用例的短窗口（无待就绪项时确保尽快返回而非长挂）。
-constexpr std::chrono::milliseconds AURORA_NET_EMPTY_TIMEOUT{20};
+[[maybe_unused]] constexpr std::chrono::milliseconds AURORA_NET_EMPTY_TIMEOUT{20};
 
 /// @brief 一对已建立的回环 TCP 连接（client 发起、经 backlog 由同线程 accept 取得 server）。
 /// @note 两个 StreamSocket 均 move-only；作为返回值靠移动/RVO 落地。
@@ -48,7 +48,7 @@ struct LoopbackPair {
 
 /// @brief 在临时端口起监听、连接、接受，得到一对连通的回环流套接字后关闭监听口。
 /// @return 连通的 client/server 对（listener 已在函数返回时析构关闭）。
-auto make_connected_pair() -> LoopbackPair {
+[[maybe_unused]] auto make_connected_pair() -> LoopbackPair {
     auto bound = aurora::net::blocking::Listener::listen_loopback(0, 4);
     AURORA_TEST_REQUIRE(bound.ok());
     auto listener = std::move(bound.value());
@@ -67,7 +67,7 @@ auto make_connected_pair() -> LoopbackPair {
 /// @brief 写入全部字节并在断言失败时立即转红的测试内助记（write_all 的 Result 样板收一次）。
 /// @param socket 目标流。
 /// @param payload 待发送文本。
-auto write_payload(aurora::net::blocking::StreamSocket &socket, std::string_view payload) -> void {
+[[maybe_unused]] auto write_payload(aurora::net::blocking::StreamSocket &socket, std::string_view payload) -> void {
     auto sent = socket.write_all(std::span<const char>(payload.data(), payload.size()));
     AURORA_TEST_REQUIRE(sent.ok());
 }
@@ -91,7 +91,7 @@ struct SeamGuard {
 
 /// @brief 由 `net::wait_ready` 组装注册口 Poller：WaitSource→PollDescriptor 摊平、就绪项按令牌回填。
 /// @return 就绪等待接缝实现。
-auto poller_over_wait_ready() -> aurora::app::EventSourceRegistry::Poller {
+[[maybe_unused]] auto poller_over_wait_ready() -> aurora::app::EventSourceRegistry::Poller {
     return [](const std::vector<aurora::app::WaitSource> &sources,
               std::chrono::milliseconds timeout) -> aurora::Result<std::vector<aurora::app::ReadySource>> {
         std::vector<aurora::net::PollDescriptor> want;

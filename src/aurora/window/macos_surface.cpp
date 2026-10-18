@@ -21,6 +21,13 @@
 // AppKit 头需在 .cpp 内引入，避免公共头污染消费者
 #import <AppKit/AppKit.h>
 
+// `busyButClickableCursor` 是 NSCursor 的私有类方法（无公开声明）。补一个类别声明，
+// 让编译器把返回类型识别成 `NSCursor *`（消 -Wobjc-method-access），`[cursor set]` 也因而
+// 落到 NSCursor 唯一的 `set` 上（消 -Wobjc-multiple-method-names）。仅本文件 macOS 实现内使用。
+@interface NSCursor (AuroraPrivateCursor)
++ (NSCursor *)busyButClickableCursor;
+@end
+
 namespace aurora {
 
 struct MacOSSurface::Impl {

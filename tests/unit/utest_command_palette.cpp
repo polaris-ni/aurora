@@ -475,7 +475,7 @@ AURORA_TEST_CASE(custom_key_still_localizes) {
     AURORA_TEST_CHECK_EQ(palette.empty_message_key(), em_key);
 
     // 换 key 后**仍走 i18n**：缺省档未登记 → 兜底；fr 档 → 译文。
-    constexpr BuildContext plain;
+    [[maybe_unused]] constexpr BuildContext plain;
     AURORA_TEST_CHECK_EQ(palette.placeholder(), std::string{CommandPalette::AURORA_DEFAULT_PLACEHOLDER_TEXT});
 
     const Environment env = Environment{}.with<Locale>(Locale{.language = "fr"});

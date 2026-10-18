@@ -166,8 +166,8 @@ print('DONE', flush=True)
     }
     if (pid == 0) {
         // 子进程：stdout/stderr 重定向到输出文件，exec 客户端；exec 失败即退出非 0。
-        ::freopen(output_path.c_str(), "w", stdout);
-        ::freopen(output_path.c_str(), "a", stderr);
+        (void)::freopen(output_path.c_str(), "w", stdout);
+        (void)::freopen(output_path.c_str(), "a", stderr);
         ::execlp("python3", "python3", script_path.c_str(), frame_title.c_str(), static_cast<char *>(nullptr));
         ::_exit(127);
     }

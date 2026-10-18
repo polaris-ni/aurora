@@ -52,7 +52,7 @@ using aurora::test::net::EngineGuard;
 using aurora::test::net::HostDriven;
 
 /// @brief 组播用例用的组地址（RFC 4312 管理范围，不会与真实路由组冲突）。
-constexpr std::string_view AURORA_GROUP_V4 = "239.255.41.255";
+[[maybe_unused]] constexpr std::string_view AURORA_GROUP_V4 = "239.255.41.255";
 
 /// @brief 本文件宿主等待的主题名：超时文本据此指明是收发轮次还是引擎驱动那一腿没出结果。
 constexpr std::string_view AURORA_PUMP_SUBJECT = "net-datagram-host-pump";
@@ -75,14 +75,14 @@ auto pump_until(aurora::app::EventSourceRegistry &registry, const std::function<
 /// @brief 有界等待谓词成立（引擎驱动形态：本线程完全不碰 `dispatch()`）。
 /// @param pred 目标条件。
 /// @return 预算内成立为 true。
-auto wait_until(const std::function<bool()> &pred) -> bool {
+[[maybe_unused]] auto wait_until(const std::function<bool()> &pred) -> bool {
     return aurora::test::wait_until(AURORA_ENGINE_SUBJECT, pred).satisfied;
 }
 
 /// @brief 绑出一枚回环数据报套接字（端口交给系统分配）。
 /// @param options 缓冲口径。
 /// @return 已就绪的套接字；绑不出来即 REQUIRE 转红（制造不出被测前提时不该继续跑）。
-auto bind_socket(const DatagramOptions &options) -> DatagramTransport {
+[[maybe_unused]] auto bind_socket(const DatagramOptions &options) -> DatagramTransport {
     auto bound = DatagramTransport::bind(Endpoint::loopback(0), options);
     AURORA_TEST_REQUIRE(bound.ok());
     auto socket = std::move(bound.value());
@@ -93,7 +93,7 @@ auto bind_socket(const DatagramOptions &options) -> DatagramTransport {
 
 /// @brief 绑出一枚回环套接字并按其端口组成目标端点，得到可互发的两台「主机内进程」。
 /// @return 套接字与其自身端口组成的端点。
-auto bind_pair_endpoint(DatagramTransport &socket) -> Endpoint { return Endpoint::loopback(socket.local_port()); }
+[[maybe_unused]] auto bind_pair_endpoint(DatagramTransport &socket) -> Endpoint { return Endpoint::loopback(socket.local_port()); }
 
 /// @brief 一次发送的观测记录。
 struct SendLog {
@@ -138,7 +138,7 @@ auto send_into(SendLog &log) -> aurora::net::DatagramSendDone {
 /// @brief 把一次接收的结果落到日志里。
 /// @param log 目标日志（须存活到回调抵达）。
 /// @return 可直接交给 `receive()` 的回调。
-auto receive_into(ReceiveLog &log) -> aurora::net::DatagramDone {
+[[maybe_unused]] auto receive_into(ReceiveLog &log) -> aurora::net::DatagramDone {
     return [&log](auto result) {
         if (!result) {
             log.failed = true;
@@ -157,7 +157,7 @@ auto receive_into(ReceiveLog &log) -> aurora::net::DatagramDone {
 /// @brief 把一次接收的结果只记次数（回调线程不确定时用）。
 /// @param log 目标日志（须存活到回调抵达）。
 /// @return 可直接交给 `receive()` 的回调。
-auto receive_counted(CountLog &log) -> aurora::net::DatagramDone {
+[[maybe_unused]] auto receive_counted(CountLog &log) -> aurora::net::DatagramDone {
     return [&log](auto result) {
         if (result) {
             log.bytes.store(result.value().bytes.size());
@@ -169,7 +169,7 @@ auto receive_counted(CountLog &log) -> aurora::net::DatagramDone {
 /// @brief 把一次发送的结果只记次数。
 /// @param log 目标日志（须存活到回调抵达）。
 /// @return 可直接交给 `send_to()` 的回调。
-auto send_counted(CountLog &log) -> aurora::net::DatagramSendDone {
+[[maybe_unused]] auto send_counted(CountLog &log) -> aurora::net::DatagramSendDone {
     return [&log](auto result) {
         if (result) {
             log.bytes.store(result.value());
@@ -183,7 +183,7 @@ auto send_counted(CountLog &log) -> aurora::net::DatagramSendDone {
 /// @param socket 发送方。
 /// @param target 目标端点。
 /// @param payload 载荷。
-auto send_and_pump(aurora::app::EventSourceRegistry &registry, DatagramTransport &socket, const Endpoint &target,
+[[maybe_unused]] auto send_and_pump(aurora::app::EventSourceRegistry &registry, DatagramTransport &socket, const Endpoint &target,
                    std::string_view payload) -> void {
     SendLog log;
     socket.send_to(std::span<const char>(payload.data(), payload.size()), target, send_into(log));

@@ -122,7 +122,7 @@ auto warn(const std::string &label) -> void {
 
 /// @brief 记一条跳过说明。
 /// @param label 说明文案。
-auto skip(const std::string &label) -> void { emit("[SKIP] " + label); }
+[[maybe_unused]] auto skip(const std::string &label) -> void { emit("[SKIP] " + label); }
 
 /// @brief 休眠指定毫秒（给桌面服务器与GLib 主循环留出处理时间）。
 /// @param ms 休眠时长（毫秒）。

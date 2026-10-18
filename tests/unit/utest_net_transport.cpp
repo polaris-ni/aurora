@@ -69,7 +69,7 @@ using aurora::test::net::HostDriven;
 using aurora::test::net::pump_once;
 
 /// @brief 背压用例的单次写入长度（同时用作写高水位，便于把「overshoot 至多一枚」写成断言）。
-constexpr std::size_t AURORA_CHUNK{4096};
+[[maybe_unused]] constexpr std::size_t AURORA_CHUNK{4096};
 
 /// @brief 本文件两次等待的主题名：超时文本据此指明「是宿主泵没等到还是引擎线程没送到」。
 constexpr std::string_view AURORA_PUMP_SUBJECT = "net-transport-host-pump";
@@ -99,7 +99,7 @@ auto pump_until(aurora::app::EventSourceRegistry &registry, const std::function<
 /// @brief 有界轮询等待谓词成立（引擎驱动形态：本线程完全不碰 `dispatch()`）。
 /// @param pred 目标条件。
 /// @return 预算内成立为 true。
-auto wait_until(const std::function<bool()> &pred) -> bool {
+[[maybe_unused]] auto wait_until(const std::function<bool()> &pred) -> bool {
     return aurora::test::wait_until(AURORA_ENGINE_SUBJECT, pred).satisfied;
 }
 
@@ -113,7 +113,7 @@ struct HostPair {
 /// @brief 绑定临时端口、发起连接并交付服务端流，得到连通的一对回环流。
 /// @param registry 进程级事件源注册口（须已由 `HostDriven` 置为宿主驱动）。
 /// @return 连通的一对；任一侧未达成即 REQUIRE 转红（制造不出被测前提时不该继续跑）。
-auto make_host_pair(aurora::app::EventSourceRegistry &registry) -> HostPair {
+[[maybe_unused]] auto make_host_pair(aurora::app::EventSourceRegistry &registry) -> HostPair {
     auto bound = StreamListener::bind(Endpoint::loopback(0), 4, host_options());
     AURORA_TEST_REQUIRE(bound.ok());
     HostPair pair{.listener = std::move(bound.value())};
@@ -177,7 +177,7 @@ struct WriteLog {
 /// @brief 把一次读的结果落到日志里。
 /// @param log 目标日志（须存活到回调抵达）。
 /// @return 可直接交给 `StreamTransport::read` 的回调。
-auto read_into(ReadLog &log) -> aurora::net::ReadDone {
+[[maybe_unused]] auto read_into(ReadLog &log) -> aurora::net::ReadDone {
     return [&log](auto result) {
         if (!result) {
             log.failed = true;
@@ -208,7 +208,7 @@ auto write_into(WriteLog &log) -> aurora::net::WriteDone {
 /// @param registry 进程级事件源注册口。
 /// @param stream 目标流。
 /// @param payload 待发送文本。
-auto send_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &stream, std::string_view payload)
+[[maybe_unused]] auto send_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &stream, std::string_view payload)
     -> void {
     WriteLog log;
     stream.write(std::span<const char>(payload.data(), payload.size()), write_into(log));
@@ -219,7 +219,7 @@ auto send_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &s
 
 /// @brief 本机 IPC 形态是否可用（该位由运行期探测给出；探测不过的用例整体跳过而不是转红）。
 /// @return 本腿能开出 AF_UNIX 流式套接字为 true。
-auto local_ipc_available() -> bool { return aurora::net::Engine::instance().capabilities().local_ipc; }
+[[maybe_unused]] auto local_ipc_available() -> bool { return aurora::net::Engine::instance().capabilities().local_ipc; }
 
 /// @brief 本用例临时目录内的一个本机 IPC 名字。
 ///
@@ -227,7 +227,7 @@ auto local_ipc_available() -> bool { return aurora::net::Engine::instance().capa
 /// 时间戳与序号，长名会让用例在长仓库路径的机器上无缘无故地变红。
 /// @param name 目录内的名字。
 /// @return 平台原生分隔符的完整路径；临时目录不可用时为空串。
-auto local_ipc_name(std::string_view name) -> std::string {
+[[maybe_unused]] auto local_ipc_name(std::string_view name) -> std::string {
     const auto &dir = aurora::testing::isolation::temp_dir();
     if (dir.empty()) {
         return {};
@@ -246,7 +246,7 @@ struct LocalPair {
 /// @param registry 进程级事件源注册口（须已由 `HostDriven` 置为宿主驱动）。
 /// @param name 本用例临时目录内的路径。
 /// @return 连通的一对；造不出前提即 REQUIRE 转红。
-auto make_local_pair(aurora::app::EventSourceRegistry &registry, const std::string &name) -> LocalPair {
+[[maybe_unused]] auto make_local_pair(aurora::app::EventSourceRegistry &registry, const std::string &name) -> LocalPair {
     const auto target = Endpoint::local(name);
     AURORA_TEST_REQUIRE(target.ok());
     auto bound = StreamListener::bind(target.value(), 4, host_options());
@@ -284,7 +284,7 @@ auto make_local_pair(aurora::app::EventSourceRegistry &registry, const std::stri
 /// @param endpoint 监听端点。
 /// @param options 待验证的原生选项集合。
 /// @return 结果码文本。
-auto bind_code(const Endpoint &endpoint, const StreamOptions &options) -> std::string {
+[[maybe_unused]] auto bind_code(const Endpoint &endpoint, const StreamOptions &options) -> std::string {
     auto bound = StreamListener::bind(endpoint, 4, options);
     if (bound) {
         return {};
@@ -297,7 +297,7 @@ auto bind_code(const Endpoint &endpoint, const StreamOptions &options) -> std::s
 /// @param endpoint 目标端点。
 /// @param options 待验证的原生选项集合。
 /// @return 结果码文本。
-auto connect_code(aurora::app::EventSourceRegistry &registry, const Endpoint &endpoint, const StreamOptions &options)
+[[maybe_unused]] auto connect_code(aurora::app::EventSourceRegistry &registry, const Endpoint &endpoint, const StreamOptions &options)
     -> std::string {
     std::atomic<int> calls{0};
     std::string code;

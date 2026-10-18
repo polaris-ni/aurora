@@ -140,7 +140,7 @@ AURORA_TEST_CASE(count_watch_merges_concurrent_bumps_exactly) {
         });
     }
     const auto wait =
-        events.wait_for("all-bumps-landed", [total](const std::size_t &value) -> bool { return value >= total; });
+        events.wait_for("all-bumps-landed", [](const std::size_t &value) -> bool { return value >= total; });
     for (auto &worker : workers) {
         worker.join();
     }

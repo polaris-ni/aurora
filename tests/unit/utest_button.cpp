@@ -76,7 +76,7 @@ auto capture_draw_text(Widget &w, const Rect &box, const BuildContext &ctx) -> s
 #endif
 
 /// 直绘一遍（非录制）并把整块画布读回，供逐像素比对。
-auto render_to_pixels(Widget &w, const Rect &box, const BuildContext &ctx, int cw, int ch) -> std::vector<Color> {
+[[maybe_unused]] auto render_to_pixels(Widget &w, const Rect &box, const BuildContext &ctx, int cw, int ch) -> std::vector<Color> {
     Painter p;
     p.begin(cw, ch);
     w.paint(p, box, ctx);
