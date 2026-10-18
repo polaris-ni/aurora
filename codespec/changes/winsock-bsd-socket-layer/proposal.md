@@ -6,7 +6,7 @@
 | 提出日期 | 2026-10-12 |
 | 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.ZERO-IFDEF.001 |
-| 影响面 | 新增公共模块 `net/`（`include/aurora/net/socket.h` + `src/aurora/net/socket.cpp`，伞头接入、`aurora_api.json` 刷新、`errors.toml` 扩 `net-*` 码）；核心库 Windows 链接面无条件引入 `ws2_32`；替换 `inspector_server.cpp`、`tools/servers/inspector_client.h`、`utest_inspector_server.cpp`、`utest_inspector_client.cpp`、`itest_inspector_robustness.cpp` 五处裸 socket 实现并删除其平台适配块；不改 Inspector REST 协议语义、不改 X11/Wayland 事件循环 fd 通道 |
+| 影响面 | 新增公共模块 `net/`（`socket.h` + `src/aurora/net/socket.cpp`，伞头接入、`aurora_api.json` 刷新、`errors.toml` 扩 `net-*` 码）；核心库 Windows 链接面无条件引入 `ws2_32`；替换 `inspector_server.cpp`、`tools/servers/inspector_client.h`、`utest_inspector_server.cpp`、`utest_inspector_client.cpp`、`itest_inspector_robustness.cpp` 五处裸 socket 实现并删除其平台适配块；不改 Inspector REST 协议语义、不改 X11/Wayland 事件循环 fd 通道 |
 
 ## 动机
 
@@ -21,7 +21,7 @@
 
 ## 变更内容
 
-1. **新增公共模块 `net/`**：`include/aurora/net/socket.h`（命名空间 `aurora::net`，**不暴露任何平台 socket 头**：句柄以 `std::intptr_t` 承载、`-1` 恒为无效值，字节序/`sockaddr`/`socklen_t` 全部封闭在实现侧）+ `src/aurora/net/socket.cpp`（全仓唯一的 Winsock/POSIX 适配落点）。伞头 `aurora/aurora.h` 与 `umbrella_manifest.txt` 同步收录。
+1. **新增公共模块 `net/`**：`socket.h`（命名空间 `aurora::net`，**不暴露任何平台 socket 头**：句柄以 `std::intptr_t` 承载、`-1` 恒为无效值，字节序/`sockaddr`/`socklen_t` 全部封闭在实现侧）+ `src/aurora/net/socket.cpp`（全仓唯一的 Winsock/POSIX 适配落点）。伞头 `aurora/aurora.h` 与 `umbrella_manifest.txt` 同步收录。
 2. **API 面（三个类型，失败一律 `Result<T>` + 表驱动 `Error`）**：
    - `Session`：进程级 socket 运行时 RAII（引用计数；Windows 腿 `WSAStartup/WSACleanup`，POSIX 腿零成本占位），`ok()` 表初始化成败。取代各文件自写的 `WinsockSession`/逐点 `WSAStartup` 调用。
    - `Listener`：`listen_loopback(port, backlog) -> Result<Listener>`（port=0 即系统临时端口，`port()` 回报实际值；只绑 `127.0.0.1`）、`wait_readable(timeout) -> Result<bool>`（select 可中断等待，两平台 nfds 差异内部消化）、`accept() -> Result<StreamSocket>`、`close()`（先 `shutdown(SD_BOTH)` 再关，保证唤醒对端线程的等待，语义同现 server stop）。
