@@ -356,7 +356,12 @@ const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0, 
     -> PeerScript {
     return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
                                                              PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{500});
+        // 「收满再答」是本脚本的设计意图，超时只是防挂死的兜底：客户端写完头到写完体之间只隔几个
+        // 事件循环轮次，但慢腿（asan + 并发）下线程调度能把这段墙钟拉长，500ms 会被击穿——服务端
+        // 一提前收摊就关闭连接，客户端紧接着的写体只会撞上 RST（`net-send-failed`，EPIPE），于是
+        // 「可重绕体重试」一族偶发染红。兜底放到 10s：正常路径毫秒级完成不受影响；异常路径里客户端
+        // 收尾即关连接，本端的阻塞读会立刻读到对端收摊而返回，不会真的坐等。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         std::string seen;
         std::size_t want = 0;
@@ -547,7 +552,10 @@ class CountingSink final : public DataSink {
                                  std::mutex &guard) -> PeerScript {
     return [&recorded, &guard, informational = std::move(informational), payload = std::move(payload)](
                aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{500});
+        // 同 `record_request_then_reply()`：等满再答，超时只兜底。Expect 场景里客户端写完头后要等
+        // 信息应答或等窗口到点（数百毫秒）才发体，500ms 贴脸写会把「沉默盲发」那条用例也拖进同一
+        // 种竞态；放到 10s 后慢腿的调度延迟再也击不穿。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         std::string seen;
         std::size_t head_end = std::string::npos;

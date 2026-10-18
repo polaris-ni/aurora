@@ -407,7 +407,10 @@ auto allow_test_cleartext(Client &client) -> void {
                                  std::mutex &guard) -> PeerScript {
     return [&recorded, &guard, informational = std::move(informational), payload = std::move(payload)](
                aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{500});
+        // 同 `utest_net_http_client.cpp` 的 `serve_request()`：等满再答，超时只兜底。Expect 场景下
+        // 客户端写完头要等信息应答或窗口到点才发体，500ms 会被慢腿（asan + 并发）的调度击穿，服务端
+        // 提前收摊即关连接，随后的写体撞 RST；放到 10s 后正常路径毫秒级、异常路径由客户端收摊唤醒。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         std::string seen;
         std::size_t head_end = std::string::npos;
