@@ -426,22 +426,16 @@ inline auto openssl_available() -> bool {
 /// @return 结局。
 inline auto openssl_issue(const std::filesystem::path &certificate, const std::filesystem::path &private_key,
                           std::string_view common_name, Lifetime lifetime = Lifetime::Valid) -> IssueResult {
-    auto argv = std::vector<std::string>{"openssl",
-                                         "req",
-                                         "-x509",
-                                         "-newkey",
-                                         "rsa:2048",
-                                         "-keyout",
-                                         private_key.string(),
-                                         "-out",
-                                         certificate.string(),
-                                         "-days",
-                                         "30",
-                                         "-nodes",
-                                         "-subj",
-                                         "/CN=" + std::string{common_name},
-                                         "-addext",
-                                         "subjectAltName=DNS:" + std::string{common_name}};
+    auto argv = std::vector<std::string>{
+        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", private_key.string(), "-out", certificate.string(),
+        "-days", "30", "-nodes", "-subj", "/CN=" + std::string{common_name}, "-addext",
+        "subjectAltName=DNS:" + std::string{common_name},
+        // 一张被当作「信任根」追加的自签证书，本就该是一张合法 CA（CA:TRUE）+ 服务器证书
+        // （serverAuth）。缺这两项时 OpenSSL / mbedTLS 仍宽松放行，但 SecureTransport 的
+        // `SecPolicyCreateSSL` 会按 TLS 策略拒绝它（"certificate is not permitted for this
+        // usage"），于是 `appended_trust_root_*` / `pin_mismatch_*` / `client_identity_*` 在 macOS 腿
+        // 上无故失败。补全后所有后端行为一致。
+        "-addext", "extendedKeyUsage=serverAuth", "-addext", "basicConstraints=CA:TRUE"};
     if (lifetime == Lifetime::Expired) {
         // `-not_after` 覆盖 `-days`，两枚时刻一起回填才能让「现在」落到区间之外。
         argv.insert(argv.end(), {"-not_before", "20200101000000Z", "-not_after", "20200102000000Z"});
