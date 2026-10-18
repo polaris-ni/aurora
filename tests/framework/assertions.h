@@ -350,12 +350,20 @@ namespace aurora::testing {
 ///
 /// 为什么需要这个包装：`AURORA_TEST_REQUIRE(opt.has_value())` 的展开会把判定结果
 /// 交给报告器函数，`bugprone-unchecked-optional-access` 的路径分析无法据此认定
-/// 「已检查」，紧随其后的 `opt->` / `*opt` 会被误报。把「检查 + 取值」收进本函数后
-/// 调用点不再直接触碰 optional，误报消除；代价是此处需要一处具名抑制。
+/// 「已检查」，调用点紧随其后的 `opt->` / `*opt` 会被误报。把「检查 + 取值」收进
+/// 本函数后调用点不再直接触碰 optional，误报消除。
+///
+/// 空值分支显式抛 `CaseAbort` 而非只靠 REQUIRE：`report()` 声明在本 TU 之外，静态
+/// 分析器看不到它按 Fatal 级别抛出的那一手，会沿「REQUIRE 记过账但函数照常返回」
+/// 的路径继续走到下面的拷贝，把空 optional 的未初始化存储当作已构造对象复制
+/// （对 `Error` 这类含标量字段的类型即 `clang-analyzer-core.uninitialized.Assign`）。
+/// 这一抛同时把「绝不解引用空 optional」钉成不依赖报告器行为的硬不变量。
 template <typename T>
 [[nodiscard]] auto require_value(const std::optional<T> &opt) -> T {
     AURORA_TEST_REQUIRE(opt.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 上一行 REQUIRE 已断言持有值，其宏展开对路径分析不透明
+    if (!opt.has_value()) {
+        throw CaseAbort{"require_value: optional is empty"};
+    }
     return *opt;
 }
 

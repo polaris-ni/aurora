@@ -101,7 +101,7 @@ AURORA_TEST_CASE(parse_max_age_wins_over_expires) {
     // `Expires` 无关——后者若被采信，这枚 cookie 当场就死。
     const auto cookie = parsed("sid=abc; Max-Age=600; Expires=Sun, 06 Nov 1994 08:49:37 GMT");
     AURORA_TEST_CHECK(cookie.expiry.has_value());
-    const auto span = std::chrono::duration_cast<std::chrono::seconds>(*cookie.expiry - now());
+    const auto span = std::chrono::duration_cast<std::chrono::seconds>(require_value(cookie.expiry) - now());
     AURORA_TEST_CHECK(span.count() > 590 && span.count() <= 600);
 }
 
@@ -109,7 +109,7 @@ AURORA_TEST_CASE(parse_expires_sets_lifetime_and_past_expiry_is_dropped) {
     // 远期 `Expires` 单独给：过期时刻 = 属性值（比基准晚即可，绝对值不进判据）。
     const auto cookie = parsed("sid=abc; Expires=Sun, 06 Nov 2194 08:49:37 GMT");
     AURORA_TEST_CHECK(cookie.expiry.has_value());
-    AURORA_TEST_CHECK(*cookie.expiry > now());
+    AURORA_TEST_CHECK(require_value(cookie.expiry) > now());
     // 早于基准的 `Expires`：整条丢弃（与 `Max-Age <= 0` 同一归途），不是一枚已死条目。
     AURORA_TEST_CHECK(
         !parse_set_cookie("sid=abc; Expires=Sun, 06 Nov 1994 08:49:37 GMT", url_of("http://shop.example/"), now())
