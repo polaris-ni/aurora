@@ -219,7 +219,7 @@ auto drive_send(detail::DatagramState &state, Tasks &tasks) -> void {
         auto done = std::move(front.done);
         state.pending_send_bytes = state.pending_send_bytes > total ? state.pending_send_bytes - total : 0;
         state.sends.pop_front();
-        if (attempt.failed()) {
+        if (attempt.failure) {
             const auto error = *attempt.failure;
             // 回调转入 Tasks（std::function）故被本检查判为「不应抛出」，口径同 close_datagram。
             // NOLINTNEXTLINE(bugprone-exception-escape)
@@ -248,7 +248,7 @@ auto drive_receive(detail::DatagramState &state, Tasks &tasks) -> void {
         auto done = std::move(front.done);
         const std::span<char> buffer = front.buffer;  // 出队即销毁该节点，故先把缓冲视图取出来
         state.receives.pop_front();
-        if (attempt.failed()) {
+        if (attempt.failure) {
             const auto error = *attempt.failure;
             // 回调转入 Tasks（std::function）故被本检查判为「不应抛出」，口径同 close_datagram。
             // NOLINTNEXTLINE(bugprone-exception-escape)
