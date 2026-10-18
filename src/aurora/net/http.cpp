@@ -291,6 +291,11 @@ auto Request::no_cache(bool value) -> Request & {
     return *this;
 }
 
+auto Request::sse(SseOptions value) -> Request & {
+    sse_ = value;
+    return *this;
+}
+
 auto Request::max_redirects(int value) -> Request & {
     max_redirects_ = value;
     return *this;

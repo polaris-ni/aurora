@@ -110,6 +110,7 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_auth.h"
+#include "aurora/net/http_sse.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/net/policy.h"
 #include "aurora/net/proxy.h"
@@ -333,6 +334,19 @@ class Client {
     /// @return 口径的只读引用（`enabled` 缺省假 = 一次交换一条连接、用完即关）。
     [[nodiscard]] auto pool() const -> const PoolOptions & { return pool_options_; }
 
+    /// @brief 装本客户端的事件流重连口径（`open_sse` 专用；缺省开重连、额度 8 次、窗口初值 3 秒）。
+    ///
+    /// 与 `pool()` / `cache()` 相反，这里的缺省是**开**：事件流是一条没有结束的流，关掉重连等于把「对端重启、
+    /// 网络抖一下」这一类最常见的现实变成宿主自己接的活，而续传标识恰恰只有库知道该在什么时刻带上。
+    /// 逐请求由 `Request::sse()` 覆盖。
+    /// @param value 重连口径。
+    /// @return 自身引用，便于链式调用。
+    auto sse(SseOptions value) -> Client &;
+
+    /// @brief 查看事件流重连口径。
+    /// @return 口径的只读引用（`reconnect` 缺省真 = 一条流断了就再接一条，直到额度用尽或宿主收摊）。
+    [[nodiscard]] auto sse() const -> const SseOptions & { return sse_options_; }
+
     /// @brief 发送一次请求并物化应答：连接 → 写出 → 逐段装配 → 透明解压 → 按 `Location` 跟随重定向。
     ///
     /// 全程受 `Request::timeout()` 的整请求时限约束（到点落 `http-timeout`）；重定向次数超过
@@ -394,6 +408,45 @@ class Client {
     [[nodiscard]] auto open_stream(Request request, DataSink &sink, Cancellation cancellation = {}) const
         -> CoroTask<Result<StreamOutcome>>;
 
+    /// @brief 订阅一次 `text/event-stream`：逐条事件交付，一条流断了就带着续传标识再接一条。
+    ///
+    /// 本入口住在 `open_stream()` **之上**而不是旁边：分帧、透明解压、重定向、三档超时、连接池、Cookie 与
+    /// 策略闸全都由那条腿原样兑现，这里只加两件事——行与字段的语义（判据见 `net/http_sse.h` 与库内
+    /// `net/detail/http_sse.h`）与「重连之后还是同一次订阅」这层会话状态。七条形态差别另有：
+    /// - **一次调用 = 一个订阅，不是一条交换**：`SseOutcome::exchanges` 随重连增长，`SseSink::on_open` 每条流
+    ///   各叫一次（那是宿主唯一能知道「流断过」的出口）。
+    /// - **重连窗口只有一个来源**：服务端写的 `retry:` 原样采用，**不封顶、不指数退避、不加抖动**——「这条流
+    ///   多久之后该重连」是服务端的事，它是唯一知道自己为什么断了的一方；「本库最多替宿主试几次」是本地
+    ///   决定，由 `SseOptions::max_reconnects` 收敛。服务端从未写 `retry:` 才用 `retry_default` 作初值。
+    /// - **只有「这条流断了」才重连**：非 2xx 应答、`Content-Type` 不是 `text/event-stream`（允许带参数）、
+    ///   单行或单条事件越限三族都是**终止失败**——重连一万次拿到的也是同一个答案，落
+    ///   `http-protocol-error` / `net-framer-overflow` / `net-buffer-limit` 且不重连。取消同理（落
+    ///   `net-cancelled`，已交付给宿主的事件不回滚）。传输类失败与对端干净收摊算「断了」。
+    ///   这条判定**不看 `Error::retryable`**：那枚旗位说的是「同一条请求原样重发有没有意义」（`net-recv-failed`
+    ///   因此标假——读了一半的字节流不能续），而订阅问的是另一件事；按旗位筛会把对端砸断连接这种最常见的断流
+    ///   形态判成「别再试了」，于是自动重连在最该生效的地方不生效。
+    /// - **额度用尽不新造码**：交出的是最后一次交换的真实失败并在 detail 点名额度已尽；最后一次交换本身干净
+    ///   时仍是成功结局，由 `SseOutcome::reconnect_exhausted` 表达「我停了，不是因为服务端说完了」。
+    /// - **方法只认 GET**：事件流的语义就是一条 GET 出来的长应答，其余方法起手即落 `http-request-invalid`——
+    ///   既不静默改成 GET（那会让调用方以为发出去了体），也不照发（那会打出一个本库不认识的协议）。
+    /// - **`Last-Event-ID` 只在非空时带**：从未有过 `id:` 字段就没必要发一枚内容为空的头；服务端用空值 id
+    ///   表达「清空续传标识」，其线上形态同样是不带。
+    /// - **不查也不写缓存表**：`open_stream` 那侧「只读不写」的理由在这里更进一步——一次订阅要的是**此刻之后**
+    ///   的事件，一份新鲜的历史副本对它没有任何意义，照着交付反而会让宿主以为收到了新事件。
+    ///
+    /// `Timeouts` 的三档管的是**单条流**（每（重）建一条流各拿一份），不是整个订阅；会话的收口靠
+    /// `cancellation` 与额度。本腿无流式能力（`Engine::capabilities().streaming` 为假，如 wasm）时直接落
+    /// `net-platform-unavailable`，绝不退化成「物化一份应答再慢慢切行」——那等于把一条不会结束的流等成一次
+    /// 也不会结束的挂死。协程出口，续体恒回主线程。
+    /// @param request 待订阅的请求（只认 GET；按值接管以随协程帧存活，调用后可立即销毁源对象）。
+    /// @param sink 订阅侧宿主；**按引用**交付，其生命周期必须覆盖到协程收尾（`is_done()` 之后）。
+    /// @param cancellation 本次订阅的取消令牌（共享状态句柄，缺省 = 独立令牌、无人可取消）。
+    /// @return 可 `co_await` 的协程任务：成功携 `SseOutcome`，失败携对应 `http-*` / `net-*` 错误码。
+    /// @note Thread: `sink` 的四个入口恒在主线程同步调用，由本协程串行驱动
+    /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
+    [[nodiscard]] auto open_sse(Request request, SseSink &sink, Cancellation cancellation = {}) const
+        -> CoroTask<Result<SseOutcome>>;
+
   private:
     std::optional<std::uint64_t> max_body_bytes_;  ///< 物化体上限（nullopt = 不限）
     std::optional<std::uint64_t> max_decompressed_bytes_;  ///< 解压产物上限（nullopt = 跟随上一行）
@@ -408,6 +461,7 @@ class Client {
     CacheOptions cache_options_;  ///< 缓存口径（缺省关）；逐请求由 `Request::no_cache()` 越
     std::shared_ptr<detail::HttpResponseCache> cache_;  ///< 共享的缓存表；拷贝的 Client 共用同一张
     PoolOptions pool_options_;  ///< 连接池口径（缺省关）
+    SseOptions sse_options_;  ///< 事件流重连口径（缺省开）；逐请求由 `Request::sse()` 覆盖
     std::shared_ptr<detail::HttpConnectionPool> pool_;  ///< 共享的连接池；拷贝的 Client 共用同一张
     std::shared_ptr<std::uint64_t> tls_generation_;  ///< TLS 配置代次（拷贝共享计数；`tls_context()` 每次改写自增）
     std::shared_ptr<detail::HttpCookieJar> cookie_jar_;  ///< Cookie Jar（空 = 裸 Client 不收不发；只有 Session 会装）
