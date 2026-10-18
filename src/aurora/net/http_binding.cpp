@@ -25,6 +25,7 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
+#include "aurora/net/http_sse.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/state/async.h"
 #include "aurora/state/coroutine.h"
@@ -79,6 +80,45 @@ class StreamBinder final : public DataSink {
     std::uint64_t offset_{0};  ///< 已交付的明文段累计
 };
 
+/// @brief 把事件流订阅的交付转成 `StreamResource<SseRecord>` 提交的宿主壳。
+///
+/// 状态码在 `on_open` 记下、随每条事件一起交出——重连之后是另一条流、另一个状态码，而条目序列仍连着一条不差。
+/// 三枚文本一律物化进条目：`SseEvent` 的视图属于解析器缓冲，回调返回即失效，而 `StreamResource` 的条目要活到
+/// 宿主下一次读数。收尾标记不在 `on_end` 出，而在协程结束时统一出——那里才拿得到跨全部流的累计事实。
+class SseBinder final : public SseSink {
+  public:
+    /// @brief 以要提交的流资源构造。
+    /// @param resource 提交目标。
+    explicit SseBinder(aurora::StreamResource<SseRecord> resource) : resource_(std::move(resource)) {}
+
+    /// @brief 记下本条流的状态码并继续收（重连后每条流各叫一次）。
+    /// @param head 头部块（`body()` 恒空）。
+    /// @return 恒 `Continue`：本壳没有「够了」的判定，收摊归取消令牌。
+    auto on_open(const Response &head) -> SinkFlow override {
+        status_ = head.status();
+        return SinkFlow::Continue;
+    }
+
+    /// @brief 一条事件成形：物化成一条 `SseRecord` 提交。
+    /// @param event 本条事件（视图只在本次调用内有效，故必须拷贝）。
+    /// @return 恒 `Continue`。
+    auto on_event(const SseEvent &event) -> SinkFlow override {
+        resource_.push(SseRecord{.status = status_,
+                                 .index = index_,
+                                 .event = std::string{event.type},
+                                 .data = std::string{event.data},
+                                 .id = std::string{event.id},
+                                 .last = false});
+        ++index_;
+        return SinkFlow::Continue;
+    }
+
+  private:
+    aurora::StreamResource<SseRecord> resource_;  ///< 提交目标（共享内核句柄）
+    std::uint16_t status_{0};  ///< 当前那条流的状态码
+    std::uint64_t index_{0};  ///< 已提交的事件条数（= 下一条的序号）
+};
+
 }  // namespace
 
 auto detail::exchange_material(const Client &client, Request request, Cancellation cancellation)
@@ -124,6 +164,32 @@ auto deliver_stream(const Client &client, Request request, Cancellation cancella
         }
         const aurora::Error &error = outer.ok() ? outer.value().error() : outer.error();
         resource.fail(error);  // 未提交的批次由 `StreamResource` 丢弃，已提交数据保留
+    });
+    return resource;
+}
+
+auto deliver_sse(const Client &client, Request request, Cancellation cancellation, aurora::StreamOptions options)
+    -> aurora::StreamResource<SseRecord> {
+    auto resource = aurora::StreamResource<SseRecord>::open(options);
+    auto session = std::make_shared<Client>(client);
+    auto binder = std::make_shared<SseBinder>(resource);
+
+    auto coro = session->open_sse(std::move(request), *binder, std::move(cancellation));
+    coro.on_done([resource, binder, session](const Result<Result<SseOutcome>> &outer) mutable -> void {
+        if (outer.ok() && outer.value().ok()) {
+            const auto &outcome = outer.value().value();
+            // 收尾标记带的是**跨全部流**的事实：`index` 取事件总条数（= 下一条本该用的序号），`id` 取收摊时的
+            // 续传标识。宿主据此既能判「订阅收完了」，也能在下一次订阅里手动接上。
+            resource.push(SseRecord{.status = outcome.response.status(),
+                                    .index = outcome.events,
+                                    .event = {},
+                                    .data = {},
+                                    .id = outcome.last_event_id,
+                                    .last = true});
+            return;
+        }
+        const aurora::Error &error = outer.ok() ? outer.value().error() : outer.error();
+        resource.fail(error);  // 断在半途：已提交的事件保留，未成形的那条由订阅侧丢弃
     });
     return resource;
 }

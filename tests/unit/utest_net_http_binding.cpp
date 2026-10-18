@@ -50,6 +50,8 @@ using aurora::net::NetPolicy;
 using aurora::net::http::Client;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
+using aurora::net::http::SseOptions;
+using aurora::net::http::SseRecord;
 using aurora::net::http::StreamChunk;
 using aurora::test::PeerScript;
 using aurora::test::PeerStop;
@@ -98,6 +100,34 @@ namespace m = aurora::testing::matchers;
 /// @return 应答字节。
 [[nodiscard]] auto chunked(std::string_view status, const std::vector<std::string> &chunks) -> std::string {
     return chunked_prefix(status, chunks) + "0\r\n\r\n";
+}
+
+/// @brief 拼一份声明了事件流的 chunked 应答（`deliver_sse` 那族判据的字节来源）。
+///
+/// 块长按 `RFC 9110` 的口径写成十六进制：本文件的 `chunked()` 走的是「块长十进制恰好也等于十六进制」的小
+/// 载荷，而事件正文一行就有 9~18 字节，越过 9 之后那两条写法开始分家（十位的十进制读成十六进制会多要字节）。
+/// @param chunks 依次交出的体片段（片段边界与事件边界错位才是这里的常态）。
+/// @param terminate 是否补上终止块（假 = 对端还在推，正是「中途取消」的现场）。
+/// @return 应答字节。
+[[nodiscard]] auto event_stream_response(const std::vector<std::string> &chunks, bool terminate = true) -> std::string {
+    static constexpr std::string_view HEX_DIGITS = "0123456789abcdef";
+    std::string payload{"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n"};
+    for (const auto &chunk : chunks) {
+        std::size_t remaining = chunk.size();
+        std::string size_text;
+        do {
+            size_text.insert(size_text.begin(), HEX_DIGITS[remaining % 16U]);
+            remaining /= 16U;
+        } while (remaining != 0);
+        payload += size_text;
+        payload += "\r\n";
+        payload += chunk;
+        payload += "\r\n";
+    }
+    if (terminate) {
+        payload += "0\r\n\r\n";
+    }
+    return payload;
 }
 
 /// @brief 为测试放行明文：缺省安全策略拒绝回环 `http://`，触网用例逐客户端点名。
@@ -348,6 +378,96 @@ AURORA_TEST_CASE(a_cancelled_stream_fails_without_a_final_marker) {
     AURORA_TEST_REQUIRE(!resource.items().empty());
     AURORA_TEST_CHECK_FALSE(resource.items().back().last);  // 失败的流不产假收尾标记
     AURORA_TEST_CHECK_EQ(resource.items().size(), committed);  // 取消之后不再提交，已提交的都留着
+}
+
+AURORA_TEST_CASE(deliver_sse_commits_records_then_one_final_marker) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    // 段边界与事件边界错位：第一条一整条在一块里，第二条的 `id` / `event` / `data` 三行挤在下一块里。
+    ScriptedPeer peer(
+        reply_after_reading(1, event_stream_response({"data: a\n\n", "id: 7\nevent: tick\ndata: b\n\n"})));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    SseOptions options;
+    options.reconnect = false;  // 本条判据要的是「一条流交完就收尾」，重连会把收尾标记推到第二次交换之后
+    client.sse(options);
+
+    const aurora::StreamResource<SseRecord> resource =
+        aurora::net::http::deliver_sse(client, Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(pump("subscription closes", [&resource] {
+        const auto &items = resource.items();
+        return !items.empty() && items.back().last;
+    }));
+
+    const auto &items = resource.items();
+    AURORA_TEST_REQUIRE_EQ(items.size(), std::size_t{3});  // 两条事件 + 一枚收尾标记
+    AURORA_TEST_CHECK_EQ(items[0].index, std::uint64_t{0});
+    AURORA_TEST_CHECK_EQ(items[0].event, std::string{"message"});  // 服务端没命名时折出的缺省类型
+    AURORA_TEST_CHECK_EQ(items[0].data, std::string{"a"});
+    AURORA_TEST_CHECK_EQ(items[0].id, std::string{});
+    AURORA_TEST_CHECK_EQ(items[0].status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(items[1].index, std::uint64_t{1});
+    AURORA_TEST_CHECK_EQ(items[1].event, std::string{"tick"});
+    AURORA_TEST_CHECK_EQ(items[1].data, std::string{"b"});
+    AURORA_TEST_CHECK_EQ(items[1].id, std::string{"7"});  // 派发时刻的续传标识，不是「本条带没带」
+    AURORA_TEST_CHECK_FALSE(items[1].last);
+    AURORA_TEST_CHECK_TRUE(items[2].last);
+    AURORA_TEST_CHECK_EQ(items[2].index, std::uint64_t{2});  // 序号 = 事件总条数：下一条本该落在哪儿
+    AURORA_TEST_CHECK_EQ(items[2].id, std::string{"7"});  // 收尾标记带的是收摊时手上那枚续传标识
+    AURORA_TEST_CHECK(items[2].data.empty());
+    AURORA_TEST_CHECK_EQ(resource.phase(), aurora::ResourcePhase::Ready);
+}
+
+AURORA_TEST_CASE(a_cancelled_subscription_fails_but_keeps_committed_records) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    // 一块发完就不再说话（缺终止块）：订阅挂在读上，正是「宿主已收到过东西、又要中途停手」的现场。
+    ScriptedPeer peer(write_then_hold(event_stream_response({"data: a\n\n"}, false)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    Cancellation token;
+    const auto resource = aurora::net::http::deliver_sse(client, Request::get(loopback_url(peer.port())), token);
+    AURORA_TEST_CHECK(pump("first record lands", [&resource] { return !resource.items().empty(); }));
+    AURORA_TEST_REQUIRE_MSG(!resource.items().empty(), "no record reached the stream before cancel");
+    const std::size_t committed = resource.items().size();
+
+    token.cancel();
+    AURORA_TEST_CHECK(
+        pump("subscription fails", [&resource] { return resource.phase() == aurora::ResourcePhase::Failed; }));
+    AURORA_TEST_CHECK_EQ(require_value(resource.error()).code_enum, ErrorCode::NetCancelled);
+    AURORA_TEST_REQUIRE(!resource.items().empty());
+    AURORA_TEST_CHECK_FALSE(resource.items().back().last);  // 失败的订阅不产假收尾标记
+    AURORA_TEST_CHECK_EQ(resource.items().size(), committed);  // 取消不回收已交出去的事件
+}
+
+AURORA_TEST_CASE(deliver_sse_reports_a_refused_stream_without_any_record) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    // 看着像事件流的纯文本：闸门在第一条记录成形之前就把这条流判死，宿主一条假记录都不该收到。
+    ScriptedPeer peer(reply_after_reading(1, framed("200 OK", "data: a\n\n", "Content-Type: text/plain\r\n")));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    SseOptions options;
+    options.reconnect = false;
+    client.sse(options);
+
+    const auto resource = aurora::net::http::deliver_sse(client, Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(
+        pump("subscription fails", [&resource] { return resource.phase() == aurora::ResourcePhase::Failed; }));
+    AURORA_TEST_CHECK_EQ(require_value(resource.error()).code_enum, ErrorCode::HttpProtocolError);
+    AURORA_TEST_CHECK(resource.items().empty());
 }
 
 AURORA_TEST_CASE(image_fetcher_returns_the_body_on_a_success_status) {

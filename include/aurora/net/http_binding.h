@@ -23,8 +23,8 @@
 ///   只有传输与协议层失败才走 `Result` 的错误侧。
 ///
 /// 流式一侧的条目形态是 `StreamChunk`（状态码 + 偏移 + 该段字节 + 收尾标记），每段一条、追加进
-/// `StreamResource`。SSE 与 WebSocket
-/// 的**按记录解码**不归本头（两者各是后续切片），这里只保证「字节到手一段就交一段」与「取消即掐」两条。
+/// `StreamResource`。SSE 一侧另有条目形态 `SseRecord`（一条事件一条记录），因为按记录解码住在
+/// `Client::open_sse()` 里、本头只负责把它交出的事件落成条目；WebSocket 的按帧解码仍是后续切片。
 ///
 /// @code
 /// aurora::net::http::Client client;
@@ -37,12 +37,13 @@
 /// aurora::set_default_image_fetcher(aurora::net::http::image_fetcher());
 /// @endcode
 /// @note Thread: 出口与 `Client` 同口径——结局经主线程投递器抵达；未装投递器时在承接作业的线程直调
-/// @note Side-effects: `deliver` / `bind_resource` / `deliver_stream` / `image_fetcher` 发起网络 I/O
+/// @note Side-effects: `deliver` / `bind_resource` / `deliver_stream` / `deliver_sse` / `image_fetcher` 发起网络 I/O
 
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -50,6 +51,7 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
+#include "aurora/net/http_sse.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/state/async.h"
 #include "aurora/state/resource.h"
@@ -74,6 +76,25 @@ struct StreamChunk {
     std::uint64_t offset{0};  ///< 该段起点：此前已交付的明文字节数
     std::vector<std::uint8_t> bytes;  ///< 该段明文（已按 `Content-Encoding` 还原）
     bool last{false};  ///< 是否为收尾标记条目（`bytes` 此时为空）
+};
+
+/// @brief 事件流交付的一条记录：`StreamResource<SseRecord>` 的条目类型。
+///
+/// 与 `StreamChunk` 同一条纪律——**状态码随每一条在场**：`Replace` 策略的流只留最新一条，状态码不住在条目里
+/// 就问不出「这条事件来自哪一次应答」；重连之后是另一条流、另一个状态码，而条目序列仍是一条接一条。
+/// `index` 是这次订阅里的序号（从 `0` 起、跨全部流单调递增），乱序或漏条当场可见。三枚文本都是**自有拷贝**：
+/// `SseEvent` 的视图只在回调期间有效，落成条目必须物化，这也是本类型与 `SseEvent` 分开的理由。
+/// `last` 是收尾标记条目（订阅正常结束时恰出一条，失败结局不出而改由 `StreamResource::fail()` 表达），
+/// 此时 `event` 与 `data` 为空，`id` 是收摊时的续传标识——调用方想手动接着收就把它写进 `Last-Event-ID`。
+/// @note Thread: thread-safe（值类型）
+/// @note Side-effects: none
+struct SseRecord {
+    std::uint16_t status{0};  ///< 该条所属流的状态码（重连之后是另一条流）
+    std::uint64_t index{0};  ///< 本次订阅里该条的序号；`last` 标记那条取的是「事件总条数」
+    std::string event;  ///< 事件类型；服务端未命名时是 `message`
+    std::string data;  ///< 消息体：多行 `data` 已以 LF 连接
+    std::string id;  ///< 派发时刻该流的续传标识；从未有过 `id:` 字段时为空
+    bool last{false};  ///< 是否为收尾标记条目（`event` 与 `data` 此时为空）
 };
 
 namespace detail {
@@ -202,6 +223,23 @@ template <typename T>
 /// @return 处于 Loading 的流资源句柄（首批字节到达后进 Ready）。
 [[nodiscard]] auto deliver_stream(const Client &client, Request request, Cancellation cancellation = {},
                                   aurora::StreamOptions options = {}) -> aurora::StreamResource<StreamChunk>;
+
+/// @brief 订阅一次事件流并绑成 `StreamResource<SseRecord>`：一条事件成形就提交一条。
+///
+/// 与 `deliver_stream` 同一条交付纪律，只是条目从「一段字节」换成「一条事件」：每条一个 `SseRecord`（`index`
+/// 单调递增）、收尾恒恰出一条 `last` 标记、失败只走 `fail()` 且已提交的事件保留。重连与续传标识由
+/// `Client::open_sse()` 带着，宿主不必接力，也**不会**因此多出条目边界——断线前后是同一个 `index` 序列。
+///
+/// 一次订阅按形态可以永不结束（服务端不写完、额度又不设上限），故收摊只有两条路：宿主 `cancel()` 这枚令牌
+/// （在途那条流当场中断，已提交的事件保留，结局落 `net-cancelled` 走 `fail()`），以及本入口之外的
+/// `SseSink` 侧停读——本壳没有「够了」的判定，它只把事件落成条目。
+/// @param client 借用的客户端（本次交付自持一份拷贝）。
+/// @param request 待订阅的请求（只认 GET，其余起手落 `http-request-invalid`）。
+/// @param cancellation 本次订阅的取消令牌。
+/// @param options 提交策略（`Append` = 逐条累积，`Replace` = 只留最新一条）。
+/// @return 处于 Loading 的流资源句柄（首条事件到达后进 Ready）。
+[[nodiscard]] auto deliver_sse(const Client &client, Request request, Cancellation cancellation = {},
+                               aurora::StreamOptions options = {}) -> aurora::StreamResource<SseRecord>;
 
 /// @brief 取图器：把「URL → 字节」接成一次 HTTP 交换，形态与 widget 侧的取图口结构一致。
 ///
