@@ -104,11 +104,11 @@ using aurora::test::PeerScript;
 using aurora::test::PeerStop;
 using aurora::test::ScriptedPeer;
 using aurora::test::scripts::per_connection;
+using aurora::test::scripts::read_head_then_reset;
 using aurora::test::scripts::reply_after_reading;
 using aurora::test::scripts::silent;
 using aurora::test::scripts::write_then_half_close;
 using aurora::test::scripts::write_then_hold;
-using aurora::test::scripts::write_then_reset;
 
 /// @brief 拼一个指向回环端口的 GET 目标。
 [[nodiscard]] auto loopback_url(std::uint16_t port, std::string_view path = "/") -> std::string {
@@ -1777,11 +1777,12 @@ AURORA_TEST_CASE(send_refuses_to_replay_a_failure_the_table_marks_non_retryable)
     // `Unreachable` 档，而表把 `net-recv-failed` / `net-send-failed` 标成不可重试。这条正是「只读档位」与
     // 「只读标志」两种错法的区分口——判据取的是交集。
     //
-    // 用 `write_then_reset()` 而不是「写完直接 close」：后者交给读侧的是 FIN 还是 RST 并不由剧本决定，
-    // 于是「体没读全」会时而落 `net-recv-failed`、时而落 `http-protocol-error`（协议档同样不可重试，用例
-    // 看着像过了，实则换了判据来源）。关闭形态钉成 RST 后这条才是稳定的。
-    // 结局码随「先撞上读还是先撞上写」在两枚之间取一，档位与标志恒同，故断言钉档位 + 标志 + 不重放。
-    ScriptedPeer peer(write_then_reset("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nab"));
+    // 剧本必须先读请求再砸（`read_head_then_reset()`）：连上就砸的话，RST 可能抢在客户端的连接完成取错
+    // （`socket.cpp` 的 `take_connect_error` 读 `SO_ERROR`）之前落账，那一次尝试会以**可重试**的
+    // `net-connect-failed` 收场并重放一条连接，`accepts() == 1` 就被一次调度竞态改写（实测 Linux asan
+    // 作业翻成 2）。客户端必然先过完连接取错、再发出请求，故读到请求头即证明竞态窗口已关：此后的 RST
+    // 只落在读应答的路上，结局恒为读侧错误。
+    ScriptedPeer peer(read_head_then_reset("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nab"));
     AURORA_TEST_REQUIRE(peer.valid());
 
     Client client;

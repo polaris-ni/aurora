@@ -194,6 +194,37 @@ inline auto write_then_reset(std::string payload) -> PeerScript {
     };
 }
 
+/// @brief 读满请求头后再以 **RST** 收摊：「应答已开头、体没读完」那一次读侧套接口错误的确定性来源。
+///
+/// 与 `write_then_reset()` 的分工在于**动手之前先把请求读干净**。连上就写、写完就砸那份剧本里，RST 的
+/// 落点不唯一：它可能抢在客户端的连接完成取错（`socket.cpp` 的 `take_connect_error` 读 `SO_ERROR`）之前
+/// 落账，那一次尝试便以 `net-connect-failed` 收场——该码在错误表里标着**可重试**，客户端会重放一条连接，
+/// 「不可重试就不重放」一族判据的 `accepts()` 读数被一次调度竞态改写（实测 Linux asan 作业翻成 2）。客户端
+/// 必然先过完连接取错、再发出请求，故脚本读到请求头时竞态窗口已确定性关闭：此后的 RST 只可能落在读应答的
+/// 路上，结局恒为 `net-recv-failed`。
+/// @param payload 断开之前写出的字节。
+/// @return 脚本。
+inline auto read_head_then_reset(std::string payload) -> PeerScript {
+    return [payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket, PeerStop &) -> void {
+        // 兜底只防「请求永远不来」的挂死：正常路径里请求头随首个报文段到齐，毫秒级即返回。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        while (seen.find("\r\n\r\n") == std::string::npos) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;  // 读超时或对端已停写：请求不会更完整了，按手上的字节收摊
+            }
+            seen.append(buffer.data(), read.value());
+        }
+        aurora::net::NativeOptions reset{};
+        reset.linger = std::chrono::milliseconds{0};  // 0 = 关闭即 RST
+        (void)aurora::net::detail::apply_native_options(socket.native_handle(), reset);
+        (void)socket.write_all(std::span<const char>{payload});
+        socket.close();
+    };
+}
+
 /// @brief 一次写出越限长度的字节（超大帧 / 越界载荷判据的字节来源）。
 /// @param total 写出总字节数（按内核能接受的块大小分次写出，但仍是一次性灌满读侧）。
 /// @param filler 填充字节。
