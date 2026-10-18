@@ -346,7 +346,7 @@ auto drive_read(detail::StreamState &state, Tasks &tasks) -> void {
         auto &front = state.reads.front();
         const std::size_t limit = std::min(front.buffer.size(), state.options.read_chunk_bytes);
         const auto attempt = detail::try_read(state.handle, front.buffer.first(limit));
-        if (attempt.failed()) {
+        if (attempt.failure) {
             close_stream(state, *attempt.failure, tasks);
             return;
         }
@@ -375,7 +375,7 @@ auto drive_write(detail::StreamState &state, Tasks &tasks) -> void {
         auto &front = state.writes.front();
         const auto rest = std::span<const char>(front.data).subspan(front.offset);
         const auto attempt = detail::try_write(state.handle, rest);
-        if (attempt.failed()) {
+        if (attempt.failure) {
             close_stream(state, *attempt.failure, tasks);
             return;
         }
@@ -560,7 +560,7 @@ auto refresh_listener_interest(const ListenerPointer &state, Tasks &tasks) -> vo
                 (void)ready;  // 电平触发：循环到「暂无待接受连接」为止，不必分辨方向
                 while (!held->pending.empty()) {
                     const auto attempt = detail::try_accept(held->handle);
-                    if (attempt.failed()) {
+                    if (attempt.failure) {
                         auto done = std::move(held->pending.front());
                         held->pending.pop_front();
                         const auto error = *attempt.failure;
