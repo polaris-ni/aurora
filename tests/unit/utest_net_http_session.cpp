@@ -72,7 +72,9 @@ auto allow_test_cleartext(Client &client) -> void {
 /// @return 读到请求为 true（读失败 / 对端收摊为 false）。
 auto read_request(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, std::string &recorded, std::mutex &guard)
     -> bool {
-    (void)socket.set_io_timeout(std::chrono::milliseconds{300});
+    // 兜底只防「请求永远不来」的挂死：accept 到首字节的墙钟可被慢腿调度拉长，短档会把没写完的请求
+    // 读成超时（见 utest_net_http_proxy 同款说明）。
+    (void)socket.set_io_timeout(std::chrono::seconds{10});
     std::vector<char> buffer(8192);
     std::string seen;
     while (!stop.load()) {
@@ -260,8 +262,8 @@ AURORA_TEST_CASE(connection_close_is_never_returned_to_the_pool) {
     std::string second_log;
     std::mutex guard;
     auto read_into = [](aurora::net::blocking::StreamSocket &socket, PeerStop &stop, std::string &log,
-                        std::mutex &guard) -> bool {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{300});
+                        std::mutex &guard, std::chrono::milliseconds read_guard) -> bool {
+        (void)socket.set_io_timeout(read_guard);
         std::vector<char> buffer(8192);
         std::string seen;
         while (seen.find("\r\n\r\n") == std::string::npos && !stop.load()) {
@@ -277,12 +279,12 @@ AURORA_TEST_CASE(connection_close_is_never_returned_to_the_pool) {
     };
     // 第一条连接：答完 `Connection: close` 的应答后继续等第二枚请求（守约的服务器不该等来，错的实现会来）。
     auto sloppy_but_keepalive = [&](aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
-        if (!read_into(socket, stop, first_log, guard)) {
+        if (!read_into(socket, stop, first_log, guard, std::chrono::seconds{10})) {
             return;
         }
         (void)socket.write_all(std::span<const char>{ok_response("first", "Connection: close\r\n")});
-        if (!read_into(socket, stop, first_log, guard)) {
-            return;  // 判对时这条连接上不会有第二枚请求
+        if (!read_into(socket, stop, first_log, guard, std::chrono::milliseconds{300})) {
+            return;  // 判对时这条连接上不会有第二枚请求（短窗是剧情：等什么都不会来）
         }
         (void)socket.write_all(
             std::span<const char>{std::string{"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nwrongly"}});
@@ -339,8 +341,8 @@ AURORA_TEST_CASE(leftover_pipelined_bytes_abandon_reuse_but_keep_the_exchange) {
     std::string second_log;
     std::mutex guard;
     auto read_into = [](aurora::net::blocking::StreamSocket &socket, PeerStop &stop, std::string &log,
-                        std::mutex &guard) -> bool {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{300});
+                        std::mutex &guard, std::chrono::milliseconds read_guard) -> bool {
+        (void)socket.set_io_timeout(read_guard);
         std::vector<char> buffer(8192);
         std::string seen;
         while (seen.find("\r\n\r\n") == std::string::npos && !stop.load()) {
@@ -355,14 +357,14 @@ AURORA_TEST_CASE(leftover_pipelined_bytes_abandon_reuse_but_keep_the_exchange) {
         return true;
     };
     auto pipeline_then_keepalive = [&](aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
-        if (!read_into(socket, stop, first_log, guard)) {
+        if (!read_into(socket, stop, first_log, guard, std::chrono::seconds{10})) {
             return;
         }
         std::string payload = ok_response("ok");
         payload += "HTTP/1.1 200 OK\r\n";  // 下一条消息的前缀：谁都没请它来
         (void)socket.write_all(std::span<const char>{payload});
-        if (!read_into(socket, stop, first_log, guard)) {
-            return;  // 判对时这条连接上不会有第二枚请求
+        if (!read_into(socket, stop, first_log, guard, std::chrono::milliseconds{300})) {
+            return;  // 判对时这条连接上不会有第二枚请求（短窗是剧情：等什么都不会来）
         }
         (void)socket.write_all(
             std::span<const char>{std::string{"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nwrongly"}});

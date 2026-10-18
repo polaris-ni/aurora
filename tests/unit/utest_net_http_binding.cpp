@@ -117,7 +117,9 @@ auto allow_test_cleartext(Client &client) -> void {
 /// @return 脚本。
 [[nodiscard]] auto hold_until_closed(std::atomic<bool> &closed) -> PeerScript {
     return [&closed](Socket &socket, PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{50});
+        // 静默等对端收摊：超时只是防挂死的兜底。50ms 一档在慢腿上会在客户端关闭到达前就默默放弃，
+        // 观测位拿不到那次 EOF，把「取消没生效」误报成现场缺失。放到 10s：EOF 到达即返回，不受影响。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         while (!stop.load()) {
             const auto read = socket.read_some(std::span<char>{buffer});

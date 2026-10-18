@@ -120,7 +120,9 @@ inline auto scatter(std::vector<std::string> fragments) -> PeerScript {
 inline auto reply_after_reading(std::size_t read_bytes, std::string payload) -> PeerScript {
     return [read_bytes, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
                                                       PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{200});
+        // 兜底只防「请求永远不来」的挂死：accept 到客户端写出首个字节之间的墙钟在慢腿上可被调度拉长，
+        // 200ms 一档会把「还没写完的请求」读成超时——脚本随即替一个没收到的请求编造应答并关连接。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         std::size_t seen = 0;
         while (seen < read_bytes && !stop.load()) {

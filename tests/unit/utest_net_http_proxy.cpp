@@ -129,7 +129,11 @@ using aurora::test::scripts::reply_after_reading;
 [[nodiscard]] auto record_then_reply(std::string &recorded, std::mutex &guard, std::string payload) -> PeerScript {
     return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
                                                              PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{200});
+        // 兜底只防「请求永远不来」的挂死，不参与剧情：accept 到客户端写出首个字节之间的墙钟在慢腿上
+        // 可被调度拉长（ctest 并发 + 慢机），一档 200ms 会把还没写完的请求读成超时——脚本随即替一个
+        // 没收到的请求编造应答并关闭连接，客户端真正的 CONNECT 随后撞 RST，407 挑战丢失、认证环不触发。
+        // 放到 10s：正常路径毫秒级收摊不受影响，异常路径也要等到远超用例预算之后才可能触发。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         std::string seen;
         while (!stop.load()) {
@@ -159,7 +163,8 @@ using aurora::test::scripts::reply_after_reading;
 /// @return 对端脚本。
 [[nodiscard]] auto record_then_open_tunnel(std::string &recorded, std::mutex &guard) -> PeerScript {
     return [&recorded, &guard](aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{200});
+        // 兜底只防「请求永远不来」的挂死：见 `record_then_reply` 的同款说明。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         std::string seen;
         while (!stop.load()) {
@@ -314,7 +319,8 @@ struct DefaultPolicyScope {
     -> PeerScript {
     return [&filed, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
                                                           PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{200});
+        // 兜底只防「请求永远不来」的挂死：见 `record_then_reply` 的同款说明。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         std::string seen;
         while (!stop.load()) {

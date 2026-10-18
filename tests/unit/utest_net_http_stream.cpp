@@ -311,7 +311,7 @@ auto allow_test_cleartext(Client &client) -> void {
 [[nodiscard]] auto record_then_reply(std::string &recorded, std::mutex &guard, std::string payload) -> PeerScript {
     return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
                                                              PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{200});
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         std::string seen;
         while (!stop.load()) {
@@ -459,7 +459,9 @@ auto allow_test_cleartext(Client &client) -> void {
 [[nodiscard]] auto answer_then_watch(std::string payload, std::string &recorded, std::mutex &guard) -> PeerScript {
     return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
                                                              PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{150});
+        // 读请求段用长兜底（accept 到首字节的墙钟可被慢腿调度拉长，见代理套件同款说明）；
+        // 答完之后的观察窗才是剧情性的「接住一次盲发」窗口，保持短档。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         std::string seen;
         while (!stop.load()) {
@@ -473,6 +475,7 @@ auto allow_test_cleartext(Client &client) -> void {
             }
         }
         (void)socket.write_all(std::span<const char>{payload});
+        (void)socket.set_io_timeout(std::chrono::milliseconds{150});
         while (!stop.load()) {  // 答完之后接着看：盲发的体在这里会被读到并进入留档
             const auto read = socket.read_some(std::span<char>{buffer});
             if (!read || read.value() == 0) {
@@ -567,7 +570,7 @@ class ScriptedBody final : public aurora::net::http::BodySource {
     -> PeerScript {
     return [&filed, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
                                                           PeerStop &stop) -> void {
-        (void)socket.set_io_timeout(std::chrono::milliseconds{200});
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(4096);
         std::string seen;
         while (!stop.load()) {

@@ -241,7 +241,7 @@ auto allow_test_cleartext(Client &client) -> void {
 /// @return 读到的请求全文（读失败 / 对端收摊为空）。
 auto read_request(aurora::net::blocking::StreamSocket &socket, aurora::test::PeerStop &stop, std::string &recorded,
                   std::mutex &guard) -> bool {
-    (void)socket.set_io_timeout(std::chrono::milliseconds{200});
+    (void)socket.set_io_timeout(std::chrono::seconds{10});
     std::vector<char> buffer(8192);
     std::string seen;
     while (!stop.load()) {
@@ -426,7 +426,7 @@ AURORA_TEST_CASE(cache_key_sees_the_cookie_the_jar_attaches) {
     auto script = [answers, &request, &guard](aurora::net::blocking::StreamSocket &socket,
                                               aurora::test::PeerStop &stop) -> void {
         std::string seen;
-        (void)socket.set_io_timeout(std::chrono::milliseconds{300});
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
         std::vector<char> buffer(8192);
         while (seen.find("\r\n\r\n") == std::string::npos && !stop.load()) {
             const auto read = socket.read_some(std::span<char>{buffer});
