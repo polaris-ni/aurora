@@ -309,9 +309,18 @@ auto base64_value(char character) -> int {
     bytes.reserve((text.size() / 4U) * 3U + 3U);
     unsigned accumulator = 0;
     unsigned bits = 0;
+    // 收尾时把「已凑够整字节但还没写出」的位排空：末组常见形态是两字符（1 字节）或三字符（2 字节），
+    // 直接丢弃就等于把证书 DER 的尾部截掉一截——解码结果看着非空，却不再是一份可解码的证书。
+    const auto drain_tail = [&bytes](unsigned &accumulator, unsigned &bits) -> void {
+        while (bits >= 8U) {
+            bits -= 8U;
+            bytes.push_back(static_cast<std::uint8_t>((accumulator >> bits) & 0xFFU));
+        }
+    };
     for (const char character : text) {
         if (character == '=') {
-            return bytes;  // 填充之后不再有正文
+            drain_tail(accumulator, bits);  // 填充之后不再有正文
+            return bytes;
         }
         if (character == ' ' || character == '\t' || character == '\r' || character == '\n') {
             continue;
@@ -323,11 +332,17 @@ auto base64_value(char character) -> int {
         accumulator = (accumulator << 6U) | static_cast<unsigned>(value);
         bits += 6U;
         if (bits >= 24U) {
+            // 满 24 位即整整三个字节：一次全部写出。只写一个会把解码结果缩到正确长度的三分之一，
+            // 那样的字节流不是证书 DER，`SecCertificateCreateWithData` 也就只能回 NULL——症状表现为
+            // 「追加的根不可解码」，而真正错的是这里的位数换算。
             bits -= 24U;
+            bytes.push_back(static_cast<std::uint8_t>((accumulator >> (bits + 16U)) & 0xFFU));
+            bytes.push_back(static_cast<std::uint8_t>((accumulator >> (bits + 8U)) & 0xFFU));
             bytes.push_back(static_cast<std::uint8_t>((accumulator >> bits) & 0xFFU));
             accumulator &= (1U << bits) - 1U;
         }
     }
+    drain_tail(accumulator, bits);
     return bytes;
 }
 
