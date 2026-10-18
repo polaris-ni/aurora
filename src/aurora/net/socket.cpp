@@ -587,10 +587,10 @@ auto StreamSocket::set_io_timeout(std::chrono::milliseconds timeout) const -> Re
     // `optval` 形参两平台都只认按字节传参（POSIX `const void *`、Winsock `const char *`），
     // 取选项变量地址过界是唯一方式。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
-    const int rcv_rc = ::setsockopt(from_handle(handle_), SOL_SOCKET, SO_RCVTIMEO,
-                                    static_cast<const char *>(option), option_size);
-    const int snd_rc = ::setsockopt(from_handle(handle_), SOL_SOCKET, SO_SNDTIMEO,
-                                    static_cast<const char *>(option), option_size);
+    const int rcv_rc =
+        ::setsockopt(from_handle(handle_), SOL_SOCKET, SO_RCVTIMEO, static_cast<const char *>(option), option_size);
+    const int snd_rc =
+        ::setsockopt(from_handle(handle_), SOL_SOCKET, SO_SNDTIMEO, static_cast<const char *>(option), option_size);
     // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     if (rcv_rc != 0 || snd_rc != 0) {
         return net_error(ErrorCode::NetTimeoutOptionFailed, "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO)");

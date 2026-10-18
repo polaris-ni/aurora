@@ -82,7 +82,8 @@ struct LoopbackPair {
 /// @param pred 目标条件。
 /// @param budget 最长等待时长；负向观察窗一律显式给短值。
 /// @return 预算内成立为 true。
-[[maybe_unused]] auto wait_until(const std::function<bool()> &pred, std::chrono::milliseconds budget = AURORA_WAIT_BUDGET) -> bool {
+[[maybe_unused]] auto wait_until(const std::function<bool()> &pred,
+                                 std::chrono::milliseconds budget = AURORA_WAIT_BUDGET) -> bool {
     return aurora::test::wait_until(AURORA_ENGINE_SUBJECT, pred, budget).satisfied;
 }
 

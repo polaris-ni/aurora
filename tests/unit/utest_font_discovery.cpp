@@ -256,7 +256,7 @@ AURORA_TEST_CASE(fallback_chain_places_family_between_main_and_default) {
     register_probe_family("utest-chain-mono", true);
 
     const std::vector<std::string> chain{"utest-chain-mono"};
-    const autowith_chain = render::resolve_faces("utest-main-family", 400, chain);
+    const auto with_chain = render::resolve_faces("utest-main-family", 400, chain);
 
     // 主族自身必须仍在首位（链是「本族缺字之后」的追加段，不是替换）。
     AURORA_TEST_REQUIRE_FALSE(with_chain.empty());
@@ -320,7 +320,7 @@ AURORA_TEST_CASE(fallback_chain_order_survives_a_cross_family_weight_resort) {
     AURORA_TEST_REQUIRE_EQ(mono_face->weight, 400);
 
     const std::vector<std::string> chain{"utest-mix-mono", bold_family};
-    const autofaces = render::resolve_faces("utest-mix-main", 400, chain);
+    const auto faces = render::resolve_faces("utest-mix-main", 400, chain);
     AURORA_TEST_REQUIRE(faces.size() >= 4U);
 
     // 段序断言用**相对位置**而非硬编码下标：粗体族通常同时有 400 与 700 的面，段内按请求
@@ -346,7 +346,7 @@ AURORA_TEST_CASE(fallback_chain_order_survives_a_cross_family_weight_resort) {
     // 反向链序：粗体族在前、常规族在后。**同一个 700 面**的下标必须整体前移，
     // 否则「顺序即语义」这条承诺在实现里并不成立。
     const std::vector<std::string> reversed{bold_family, "utest-mix-mono"};
-    const autorev = render::resolve_faces("utest-mix-main", 400, reversed);
+    const auto rev = render::resolve_faces("utest-mix-main", 400, reversed);
     AURORA_TEST_REQUIRE(rev.size() >= 4U);
     const auto rev_idx_of = [&rev](const render::FontFace *needle) -> std::size_t {
         const auto it = std::ranges::find(rev, needle);
@@ -368,12 +368,12 @@ AURORA_TEST_CASE(fallback_chain_unknown_family_falls_through_to_default) {
     // 链首是**不存在的族名**：必须跳过并继续，且整条链不得因此解析为空 ——
     // 尾部默认链仍须兜底（缺字回退依赖这一点）。
     const std::vector<std::string> chain{"utest-no-such-family-aaa", "utest-also-missing-bbb"};
-    const autofaces = render::resolve_faces("utest-fallthrough-main", 400, chain);
+    const auto faces = render::resolve_faces("utest-fallthrough-main", 400, chain);
     AURORA_TEST_REQUIRE_FALSE(faces.empty());
     AURORA_TEST_CHECK_NOT_NULL(faces.front()->face);
 
     // 不可解析的链必须与「无链」给出同一结果：既然两族都没解析到面，追加它们就是空操作。
-    const autoplain = render::resolve_faces("utest-fallthrough-main", 400);
+    const auto plain = render::resolve_faces("utest-fallthrough-main", 400);
     AURORA_TEST_CHECK_EQ(faces.size(), plain.size());
     AURORA_TEST_CHECK_EQ(faces.front(), plain.front());
 }
@@ -385,7 +385,7 @@ AURORA_TEST_CASE(fallback_chain_entry_skips_pseudo_family_and_empty_names) {
     // 伪族名（空串 / sans-serif / default）是默认链的键而非族名：链上出现它们若被接受，等于
     // 把尾部回落提前到首位，与「链在默认链之前」的语义相悖。此处只验「不抛且结果合法」。
     const std::vector<std::string> chain{"", "sans-serif"};
-    const autofaces = render::resolve_faces("utest-pseudo-main", 400, chain);
+    const auto faces = render::resolve_faces("utest-pseudo-main", 400, chain);
     AURORA_TEST_REQUIRE_FALSE(faces.empty());
     AURORA_TEST_CHECK_NOT_NULL(faces.front()->face);
 }
@@ -397,15 +397,15 @@ AURORA_TEST_CASE(empty_chain_is_byte_identical_to_no_chain_overload) {
     // 「不指定时与现状逐字节一致」：空链重载须与无链重载给出**完全相同**的指针序列
     // （逐元素对拍，而非只比 size —— 只比 size 时「换了顺序」会漏判）。
     const std::vector<std::string> empty_chain{};  // NOLINT: MSVC下STL非常量表达式
-    const autowith_empty = render::resolve_faces("utest-equiv-main", 400, empty_chain);
-    const autoplain = render::resolve_faces("utest-equiv-main", 400);
+    const auto with_empty = render::resolve_faces("utest-equiv-main", 400, empty_chain);
+    const auto plain = render::resolve_faces("utest-equiv-main", 400);
     AURORA_TEST_REQUIRE_EQ(with_empty.size(), plain.size());
     for (std::size_t i = 0; i < plain.size(); ++i) {
         AURORA_TEST_CHECK_EQ(with_empty.at(i), plain.at(i));
     }
     // 默认链路径同样验一遍（既有消费者最关心的那条）。
-    const autodef_with_empty = render::resolve_faces("", 400, empty_chain);
-    const autodef_plain = render::resolve_faces("", 400);
+    const auto def_with_empty = render::resolve_faces("", 400, empty_chain);
+    const auto def_plain = render::resolve_faces("", 400);
     AURORA_TEST_REQUIRE_EQ(def_with_empty.size(), def_plain.size());
     for (std::size_t i = 0; i < def_plain.size(); ++i) {
         AURORA_TEST_CHECK_EQ(def_with_empty.at(i), def_plain.at(i));
@@ -425,7 +425,7 @@ AURORA_TEST_CASE(fallback_chain_names_are_resolvable_like_listed_families) {
     for (const auto &info : listed) {
         chain.push_back(info.family);
     }
-    const autofaces = render::resolve_faces("utest-source-main", 400, chain);
+    const auto faces = render::resolve_faces("utest-source-main", 400, chain);
     AURORA_TEST_REQUIRE_FALSE(faces.empty());
     // 枚举出的族至少有一个能在链里解析到面：否则「同源」承诺落空。
     bool any_listed_family_resolved = false;

@@ -250,7 +250,8 @@ auto bind_loopback() -> StreamListener {
 ///        `net-socket-failed`，把「代理不会说话」误记成「测试自己不会说话」。
 /// @param registry 进程级事件源注册口。
 /// @param accepted `arm_accept` 自增的计数。
-[[maybe_unused]] auto await_proxy_side(aurora::app::EventSourceRegistry &registry, const std::atomic<int> &accepted) -> void {
+[[maybe_unused]] auto await_proxy_side(aurora::app::EventSourceRegistry &registry, const std::atomic<int> &accepted)
+    -> void {
     AURORA_TEST_REQUIRE(pump_until(registry, [&accepted]() { return accepted.load() >= 1; }));
 }
 
@@ -284,8 +285,8 @@ auto read_until(aurora::app::EventSourceRegistry &registry, StreamTransport &pee
 /// @param registry 进程级事件源注册口。
 /// @param peer 握手对端。
 /// @param payload 待写文本。
-[[maybe_unused]] auto write_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &peer, std::string_view payload)
-    -> void {
+[[maybe_unused]] auto write_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &peer,
+                                    std::string_view payload) -> void {
     LegLog log;
     peer.write(std::span<const char>(payload.data(), payload.size()), write_into(log));
     AURORA_TEST_REQUIRE(pump_until(registry, [&log]() { return log.calls.load() >= 1; }));
@@ -309,7 +310,8 @@ auto read_until(aurora::app::EventSourceRegistry &registry, StreamTransport &pee
 /// @param peer 握手对端。
 /// @param count 目标字节数。
 /// @return 读到的字节文本。
-[[maybe_unused]] auto read_exact(aurora::app::EventSourceRegistry &registry, StreamTransport &peer, std::size_t count) -> std::string {
+[[maybe_unused]] auto read_exact(aurora::app::EventSourceRegistry &registry, StreamTransport &peer, std::size_t count)
+    -> std::string {
     return read_until(registry, peer, [count](const std::string &seen) { return seen.size() >= count; });
 }
 

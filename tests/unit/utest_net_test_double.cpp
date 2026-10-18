@@ -162,7 +162,8 @@ auto write_into(LegLog &log) -> aurora::net::WriteDone {
 /// @brief 替身形态下的连接口径：时限交给脚本时钟，其余按缺省。
 /// @param timeout 时限；非零值才会登记定时器。
 /// @return 连接选项。
-[[maybe_unused]] auto scripted_options(std::chrono::milliseconds timeout = std::chrono::milliseconds{0}) -> StreamOptions {
+[[maybe_unused]] auto scripted_options(std::chrono::milliseconds timeout = std::chrono::milliseconds{0})
+    -> StreamOptions {
     StreamOptions options;
     options.connect_timeout = timeout;
     return options;
@@ -172,7 +173,8 @@ auto write_into(LegLog &log) -> aurora::net::WriteDone {
 /// @param stream 目标流。
 /// @param scratch 读缓冲。
 /// @return 本轮读到的字节；对端已停写或失败时为空串（失败另有 `ok` 输出）。
-[[maybe_unused]] auto read_round(StreamTransport &stream, std::vector<char> &scratch, bool *ok = nullptr) -> std::string {
+[[maybe_unused]] auto read_round(StreamTransport &stream, std::vector<char> &scratch, bool *ok = nullptr)
+    -> std::string {
     LegLog log;
     stream.read(std::span<char>(scratch), read_into(log));
     const auto wait = drive_until("read-lands", [&log]() -> bool { return log.calls.load() >= 1; });

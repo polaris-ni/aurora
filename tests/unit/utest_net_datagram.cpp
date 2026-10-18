@@ -93,7 +93,9 @@ auto pump_until(aurora::app::EventSourceRegistry &registry, const std::function<
 
 /// @brief 绑出一枚回环套接字并按其端口组成目标端点，得到可互发的两台「主机内进程」。
 /// @return 套接字与其自身端口组成的端点。
-[[maybe_unused]] auto bind_pair_endpoint(DatagramTransport &socket) -> Endpoint { return Endpoint::loopback(socket.local_port()); }
+[[maybe_unused]] auto bind_pair_endpoint(DatagramTransport &socket) -> Endpoint {
+    return Endpoint::loopback(socket.local_port());
+}
 
 /// @brief 一次发送的观测记录。
 struct SendLog {
@@ -183,8 +185,8 @@ auto send_into(SendLog &log) -> aurora::net::DatagramSendDone {
 /// @param socket 发送方。
 /// @param target 目标端点。
 /// @param payload 载荷。
-[[maybe_unused]] auto send_and_pump(aurora::app::EventSourceRegistry &registry, DatagramTransport &socket, const Endpoint &target,
-                   std::string_view payload) -> void {
+[[maybe_unused]] auto send_and_pump(aurora::app::EventSourceRegistry &registry, DatagramTransport &socket,
+                                    const Endpoint &target, std::string_view payload) -> void {
     SendLog log;
     socket.send_to(std::span<const char>(payload.data(), payload.size()), target, send_into(log));
     AURORA_TEST_REQUIRE(pump_until(registry, [&log]() { return log.calls.load() >= 1; }));

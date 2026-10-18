@@ -520,7 +520,8 @@ auto Clipboard::available_formats() -> Result<std::vector<std::string>> {
 #endif
 }
 
-auto Clipboard::set_payload(const std::string &mime, [[maybe_unused]] const std::vector<std::uint8_t> &bytes) -> Result<bool> {
+auto Clipboard::set_payload(const std::string &mime, [[maybe_unused]] const std::vector<std::uint8_t> &bytes)
+    -> Result<bool> {
     if (mime.empty()) {
         return make_error(ErrorCode::GeneralInvalidArgument, "set_payload: mime must not be empty");
     }

@@ -425,6 +425,4 @@ AURORA_TEST_CASE(dual_stack_listener_still_recognizes_loopback) {
 #endif
 }
 
-// 迁移期别名：`aurora::net::{StreamSocket,Listener}` 必须与 `blocking` 同名类型是同一个类型，
-// 否则就是「旧别名还在、新面已改语义」的中间态。别名带弃用标记，故引用它的这段整体落进
-// 告警抑制窗口；别名在下一版移除时本用例一并删除。
+}  // namespace aurora::test_cases::utest_net_socket

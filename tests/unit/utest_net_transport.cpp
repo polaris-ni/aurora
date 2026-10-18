@@ -208,8 +208,8 @@ auto write_into(WriteLog &log) -> aurora::net::WriteDone {
 /// @param registry 进程级事件源注册口。
 /// @param stream 目标流。
 /// @param payload 待发送文本。
-[[maybe_unused]] auto send_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &stream, std::string_view payload)
-    -> void {
+[[maybe_unused]] auto send_payload(aurora::app::EventSourceRegistry &registry, StreamTransport &stream,
+                                   std::string_view payload) -> void {
     WriteLog log;
     stream.write(std::span<const char>(payload.data(), payload.size()), write_into(log));
     AURORA_TEST_REQUIRE(pump_until(registry, [&log]() { return log.calls.load() >= 1; }));
@@ -246,7 +246,8 @@ struct LocalPair {
 /// @param registry 进程级事件源注册口（须已由 `HostDriven` 置为宿主驱动）。
 /// @param name 本用例临时目录内的路径。
 /// @return 连通的一对；造不出前提即 REQUIRE 转红。
-[[maybe_unused]] auto make_local_pair(aurora::app::EventSourceRegistry &registry, const std::string &name) -> LocalPair {
+[[maybe_unused]] auto make_local_pair(aurora::app::EventSourceRegistry &registry, const std::string &name)
+    -> LocalPair {
     const auto target = Endpoint::local(name);
     AURORA_TEST_REQUIRE(target.ok());
     auto bound = StreamListener::bind(target.value(), 4, host_options());
@@ -297,8 +298,8 @@ struct LocalPair {
 /// @param endpoint 目标端点。
 /// @param options 待验证的原生选项集合。
 /// @return 结果码文本。
-[[maybe_unused]] auto connect_code(aurora::app::EventSourceRegistry &registry, const Endpoint &endpoint, const StreamOptions &options)
-    -> std::string {
+[[maybe_unused]] auto connect_code(aurora::app::EventSourceRegistry &registry, const Endpoint &endpoint,
+                                   const StreamOptions &options) -> std::string {
     std::atomic<int> calls{0};
     std::string code;
     StreamTransport::connect(endpoint, options, Cancellation{}, [&](auto result) {
