@@ -10,7 +10,6 @@
 ///           常数时，`31 位 × 2` 的取值域会立刻在这里露出：连续多枚只会落在同一小段里）。
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <set>
 #include <vector>
@@ -43,15 +42,17 @@ AURORA_TEST_CASE(unit_values_spread_the_whole_half_open_interval) {
     // 「铺满整个半开区间」按十等分桶命中判，不再拿「两两不重复」当代理：抽样撞一次生日碰撞
     // 就让互异计数少一，而序列是时钟播种的非密码学源、有限分辨率下碰撞是概率必然而非回归
     // （本用例曾以 1999/2000 偶发把 asan 腿染红）。覆盖判据对目标退化依旧敏感。
-    constexpr int kBuckets = 10;
-    std::array<int, kBuckets> coverage{};
+    constexpr int buckets = 10;
+    std::vector<int> coverage(static_cast<std::size_t>(buckets), 0);
     double least = values.front();
     double most = values.front();
     for (const double value : values) {
         // 域本身：半开区间 `[0, 1)`，两端之外的值都不该出现。
         AURORA_TEST_CHECK(value >= 0.0 && value < 1.0);
-        const int bucket = static_cast<int>(value * static_cast<double>(kBuckets));
-        coverage[std::clamp(bucket, 0, kBuckets - 1)] += 1;  // 右端兜底，绝不越界
+        const int bucket = static_cast<int>(value * static_cast<double>(buckets));
+        // 右端兜底，绝不越界：`value` 恰为 1.0 时 bucket 会顶到 10，夹回末桶。
+        const auto index = static_cast<std::size_t>(std::clamp(bucket, 0, buckets - 1));
+        ++coverage[index];
         least = std::min(least, value);
         most = std::max(most, value);
     }
