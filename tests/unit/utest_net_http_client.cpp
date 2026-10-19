@@ -2424,6 +2424,9 @@ AURORA_TEST_CASE(a_rewindable_streaming_body_stays_in_the_retry_loop) {
 #endif
     FakeEngine engine;
     const FakeEngineScope scope(engine);
+    // 用 `pump_send` 就必须声明宿主驱动：`06-app-platform.md` §8.8.4 投递纪律③规定一条事件源只由
+    // 一个驱动方等待，缺这道守卫时引擎与用例线程同时等待、一次就绪各投一次。
+    const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::string first;
     std::string second;
@@ -2459,6 +2462,8 @@ AURORA_TEST_CASE(a_source_that_changes_its_mind_about_rewinding_stops_the_retry_
 #endif
     FakeEngine engine;
     const FakeEngineScope scope(engine);
+    // 同上一条：`pump_send` 与常驻引擎不得同时等待同一批句柄（§8.8.4 投递纪律③）。
+    const aurora::test::net::HostDriven host;
     std::mutex guard;
     std::string first;
     std::string second;
