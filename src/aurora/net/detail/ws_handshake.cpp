@@ -278,8 +278,7 @@ auto validate_ws_handshake(const wire::ResponseHead &head, std::string_view key,
     if (const auto protocol = head.headers.get("Sec-WebSocket-Protocol"); protocol.has_value()) {
         const auto pieces = split_tokens(*protocol);
         for (const auto piece : pieces) {
-            const bool offered = std::find(offer.subprotocols.begin(), offer.subprotocols.end(), std::string{piece}) !=
-                                 offer.subprotocols.end();
+            const bool offered = std::ranges::find(offer.subprotocols, std::string{piece}) != offer.subprotocols.end();
             if (!offered) {
                 return Result<WsHandshakeAccept>{rejected("the peer selected subprotocol \"" + std::string{piece} +
                                                           "\", which this client never offered")};

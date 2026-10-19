@@ -47,7 +47,7 @@
 8. **宏命名归位**：四枚引擎宏改名 `AURORA_ENABLE_NET_TLS_{SCHANNEL,SECURE_TRANSPORT,OPENSSL,MBEDTLS}`，归 `BUILD_OPTIONS.md` §1 的 ENABLE 组（`PRIVATE` 注入、不 `EXPORT`、不进 `aurora::debug::feature_flags()`，三条现状不变）。provider 侧宏仍由探测推导、不接受手工设置。旧宏名不做兼容别名：它们 `PRIVATE` 且不导出，消费者编译里从不存在，改名无迁移成本；库内四个 `#ifdef` 点与文档一次改齐。
 9. **后端 TU 改唯一入口、删无后端桩**：四枚 TU 的 `detail::make_tls_backend()` 改为 `detail::make_tls_backend_schannel()` / `_securetransport()` / `_openssl()` / `_mbedtls()`，`detail::tls_backend_available()` 从各 TU 移除（改由注册表提供）；`src/aurora/net/detail/tls_backend.h` 退为内部声明头（声明四枚唯一入口与注册表需要的内置安装钩子），`tls_unavailable.cpp` 删除。多宏同真不再是链接冲突，而是「多条腿同时在注册表里」。
 10. **已定案裁决的更替**：`codespec/changes/xplat-network-stack/proposal.md` 里「Windows / macOS 仍默认系统栈，且可被 provider 覆盖」这条已定案表述被本变更**推翻**（覆盖 → 共存）；`codespec/specification/06-app-platform.md` §8.8.18 的「装配模块因此只保证恰好编译一个后端 TU」同步作废并改写。旧编号与旧条目就地改写、不删除，避免制造指向不存在条目的伪死链。
-11. **非目标**：不提供服务端 TLS（`TlsListener` 仍不存在，客户端-only 裁决不变）；不引入任何 TLS 源码或三方依赖（`third_party/` 不变、断网可构建不变）；不做后端配置的持久化；不承诺跨编译器 / 跨 CRT 的插件二进制兼容——插件契约承诺的是**源码级 C++ 抽象接口**，同工具链同 CRT 静态或动态装配由调用方保证，这条如实写进公共头注释与文档而不是含糊过去。
+11. **非目标**：不提供服务端 TLS（`TlsListener` 仍不存在，客户端-only 裁决不变）；不引入任何 TLS 的**动态二进制**依赖（`shared:` 腿的运行期寻址交宿主部署）——原先「`third_party/` 无新增、不引入任何 TLS 源码」这条已被**后续构建裁决更替**：mbedTLS 改由仓库内置源码 `third_party/mbedtls` 装配（`AURORA_ENABLE_NET_TLS_MBEDTLS=ON` → `add_subdirectory`，见 `cmake/AuroraNetTls.cmake` 与 `BUILD_OPTIONS.md` §1.2），故 `third_party/` 有新增，但「断网可构建」不变（源码在库、不联网），OpenSSL 仍不内置、仍走 provider 安装根；不做后端配置的持久化；不承诺跨编译器 / 跨 CRT 的插件二进制兼容——插件契约承诺的是**源码级 C++ 抽象接口**，同工具链同 CRT 静态或动态装配由调用方保证，这条如实写进公共头注释与文档而不是含糊过去。
 
 ## 验收判据
 

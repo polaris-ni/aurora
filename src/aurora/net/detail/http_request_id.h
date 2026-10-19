@@ -19,8 +19,6 @@
 //   「同一进程两枚标识不可能相同」是那枚单序列给出的性质，换了熵源就不再成立，故本文件只承诺形状合法。
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
 #include <string>
 #include <string_view>
 

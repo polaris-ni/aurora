@@ -160,15 +160,15 @@ class Framer {
     /// @param on_frame 帧出口；空回调视为「一条都不投」，即立即暂停，不改变缓冲。
     /// @return 成功为本次结果；终态失败为原样错误（`net-framer-overflow` / `net-buffer-limit` /
     ///         `net-framer-config-invalid`）。
-    [[nodiscard]] auto feed(std::span<const char> bytes, const FrameSink &on_frame) -> Result<FeedReport>;
+    [[nodiscard]] auto feed(std::span<const char> bytes, const FrameSink &on_frame) const -> Result<FeedReport>;
 
     /// @brief 宣告输入结束：交付尾巴（行 / 分隔符型）或丢弃残片（长度前缀型）。
     /// @param on_frame 帧出口；补交付的帧以 `Frame::unterminated == true` 标明形态。
     /// @return 成功为本次结果；终态失败为原样错误。
-    [[nodiscard]] auto finish(const FrameSink &on_frame) -> Result<FinishReport>;
+    [[nodiscard]] auto finish(const FrameSink &on_frame) const -> Result<FinishReport>;
 
     /// @brief 清空缓冲与终态错误，回到刚构造的形态（换一条连接复用本对象时用）。
-    auto reset() -> void;
+    auto reset() const -> void;
 
     /// @brief 内部缓冲的当前字节数（未交付的完整帧 + 凑不满一帧的残片）。
     /// @return 缓冲字节数；对象处于终态时同样是真值，供诊断读取。

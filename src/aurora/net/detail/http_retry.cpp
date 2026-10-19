@@ -106,7 +106,7 @@ constexpr std::array<std::uint16_t, 6> AURORA_TRANSIENT_STATUS{408, 429, 500, 50
 /// @return 属于七枚规范拼写之一为 true。
 [[nodiscard]] auto is_weekday(std::string_view text) -> bool {
     constexpr std::array<std::string_view, 7> names{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-    return std::find(names.begin(), names.end(), text) != names.end();
+    return std::ranges::find(names, text) != names.end();
 }
 
 /// @brief 由月份缩写查月序（1..12）；表是本库自有的三字母表，不依赖本地化的月份名。
@@ -116,7 +116,7 @@ constexpr std::array<std::uint16_t, 6> AURORA_TRANSIENT_STATUS{408, 429, 500, 50
     // 以迭代器距离而非下标取月序：本表是编译期定长的 `std::array`，裸下标在 tidy 眼里是「非常量下标」。
     // 迭代器在 MSVC STL 下不是裸指针，`auto *const` 形态不可移植（实测编译失败）⇒ 保持 `auto`。
     // NOLINTNEXTLINE(readability-qualified-auto)
-    const auto found = std::find(months.begin(), months.end(), name);
+    const auto found = std::ranges::find(months, name);
     if (found == months.end()) {
         return 0;
     }
@@ -171,8 +171,7 @@ auto should_retry_error(const aurora::Error &error) -> bool {
 }
 
 auto should_retry_status(std::uint16_t status) -> bool {
-    return std::find(AURORA_TRANSIENT_STATUS.begin(), AURORA_TRANSIENT_STATUS.end(), status) !=
-           AURORA_TRANSIENT_STATUS.end();
+    return std::ranges::find(AURORA_TRANSIENT_STATUS, status) != AURORA_TRANSIENT_STATUS.end();
 }
 
 auto backoff_delay(const aurora::net::http::RetryPolicy &policy, std::uint32_t attempt) -> std::chrono::milliseconds {
@@ -266,7 +265,7 @@ auto parse_retry_after(std::string_view value, std::chrono::system_clock::time_p
         return std::nullopt;
     }
     // 形态一：延迟秒数（`RFC 9110 §10.2.3` 的 `delay-seconds`，非负整数、位数不限）。
-    const std::int64_t year_cap = 365LL * 86400;  // 一年封顶：更大的数没有可等的意义
+    constexpr std::int64_t year_cap = 365LL * 86400;  // 一年封顶：更大的数没有可等的意义
     if (const auto seconds = parse_delay_seconds(text, year_cap)) {
         return std::chrono::milliseconds{seconds.value() * 1000};
     }

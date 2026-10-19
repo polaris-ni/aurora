@@ -38,10 +38,8 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 #include "aurora/core/result.h"
@@ -188,7 +186,7 @@ class WsSession : public std::enable_shared_from_this<WsSession> {
         -> void;
 
     /// @brief 放弃在途读写并归还连接（幂等）。
-    auto abort_link() -> void;
+    auto abort_link() const -> void;
 
     /// @brief 装配分帧器的四个出口（消息派发、两种探活帧、对端关闭）。
     /// @return 出口束。

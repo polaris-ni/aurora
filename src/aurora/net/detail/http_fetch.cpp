@@ -13,7 +13,7 @@
 
 #include "aurora/net/detail/http_fetch.h"
 
-#include "aurora/core/platform.h"
+#include "aurora/core/platform.h"  // NOLINT
 
 #ifdef AURORA_PLATFORM_WASM
 

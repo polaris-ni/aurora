@@ -81,7 +81,6 @@
 #include <vector>
 
 #include "aurora/core/result.h"
-#include "aurora/net/http.h"
 #include "aurora/net/http_stream.h"
 
 namespace aurora::net {
@@ -221,7 +220,7 @@ class WebSocket {
     /// @return 本次发送是否被接受：成功 = 已入队；`ws-send-queue-full` = 队列满（会话不受影响）；
     ///         `net-buffer-limit` = 超过整消息上限；`ws-protocol-error` = 文本不是合法 UTF-8；
     ///         `ws-closed` = 会话已收尾或是空句柄。
-    [[nodiscard]] auto send(std::string_view text, WsSent on_sent = {}) -> Result<void>;
+    [[nodiscard]] auto send(std::string_view text, WsSent on_sent = {}) const -> Result<void>;
 
     /// @brief 发一条二进制消息（必要时由库自动分片）。
     ///
@@ -232,7 +231,7 @@ class WebSocket {
     /// @param binary 消息字节。
     /// @param on_sent 落地回报；可空。
     /// @return 同 `send(std::string_view, WsSent)` 的结局（二进制不判 UTF-8，故无 `ws-protocol-error` 那一型）。
-    [[nodiscard]] auto send_binary(std::span<const char> binary, WsSent on_sent = {}) -> Result<void>;
+    [[nodiscard]] auto send_binary(std::span<const char> binary, WsSent on_sent = {}) const -> Result<void>;
 
     /// @brief 发起关闭：投递一枚 close 帧，之后本会话不再接受新的发送。
     ///
@@ -241,7 +240,7 @@ class WebSocket {
     /// @param code 线上状态码；必须在 `RFC 6455 §7.4` 的上线可取值内（缺省 1000 = 正常关闭）。
     /// @param reason 原因文本（UTF-8，与码合起来不得越过 125 字节的控制帧上限）。
     /// @return 关闭帧是否被接受：`ws-closed` = 已收尾；`ws-protocol-error` = 码或原因不合形态。
-    [[nodiscard]] auto close(std::uint16_t code = 1000U, std::string_view reason = {}) -> Result<void>;
+    [[nodiscard]] auto close(std::uint16_t code = 1000U, std::string_view reason = {}) const -> Result<void>;
 
     /// @brief 发送队列里还压着多少待发字节（含尚未写出的分片）。
     /// @return 字节数；空句柄为 0。

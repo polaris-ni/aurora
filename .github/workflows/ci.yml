@@ -24,12 +24,13 @@
 #                    （真编译+跑单测）、COMPRESSION 关（解压不可用降级路径）、
 #                    DEBUG+TEST_HOOKS 双关（Release 发布态 PUBLIC 宏组合）、
 #                    PROFILING/TRACING/DEBUG 强制开（Release 下 FORCE=ON 分支）。
-#  3b. tls-providers — TLS 后端装配腿（Linux 双 provider：静态 mbedTLS + 动态 OpenSSL(/usr)、
+#  3b. tls-providers — TLS 后端装配腿（Linux 双引擎：内置源码 mbedTLS + 动态 OpenSSL(/usr) provider、
 #                    Windows 动态 OpenSSL(vcpkg) 与系统栈 Schannel 并存、
 #                    macOS 系统栈 SecureTransport 单腿、macOS 动态 OpenSSL(homebrew) 与系统栈并存）：
-#                    验证 `AURORA_NET_TLS_PROVIDERS` 的逐项探测→引擎宏推导→导入目标链接这条构建面，
-#                    以及「系统栈与 provider 同时在案」这条共存关系。provider 宏里 mbedTLS /
-#                    OpenSSL 两种 **形态**（静态 / 动态）与两种 **平台**（Windows / darwin）都被推一遍。
+#                    验证 `AURORA_ENABLE_NET_TLS_MBEDTLS` 内置源码构建、`AURORA_NET_TLS_PROVIDERS` 的
+#                    逐项探测→引擎宏推导→导入目标链接（现为 OpenSSL 唯一 provider），以及「系统栈 /
+#                    内置 mbedTLS / OpenSSL provider 同时在案」这条共存关系。provider 的两种 **形态**
+#                    （静态 / 动态）与两种 **平台**（Windows / darwin）都被推一遍。
 #  3c. 网络能力面（Inspector HTTP 服务器 + TLS provider）不是某一个作业的职责，而是**流水线的
 #                    公共前缀**：`setup-net-capability-flags` 复合动作按 runner OS 装配开关串并在
 #                    Linux 侧装 provider 依赖，core / backends / toggles / tls-providers / asan /
@@ -146,9 +147,9 @@ env:
   # ⚠️ 折叠标量 >- 内部禁写 `#` 注释行：块标量里 `#` 是**字面内容**而非 YAML 注释，会随
   # ${{ env.* }} 展开进 shell，把该行剩余部分连同行尾续行 `\` 一起注释掉——轻则丢失参数，
   # 重则把下一行变成独立命令（`-D...: command not found`，exit 127）。注释一律写在键外。
-  # TLS provider 安装根说明（曾误写在标量内部，导致 native lint 全线丢 mbedTLS 覆盖面）：
-  #   static:/opt/aurora-tls-mbedtls（而非 /usr）：/usr 上 openssl 头会抢先命中，`tls_mbedtls.cpp`
-  #   就永远进不了分析面；安装根由本作业的 Install 步骤与 setup-net-capability-flags 同源搭建。
+  # TLS 覆盖面说明：mbedTLS 由仓库内置源码构建（`AURORA_ENABLE_NET_TLS_MBEDTLS=ON`，源码随 checkout
+  # 就位，无需 /opt provider 根）；optimizations-off pass 追加一条 OpenSSL provider（`shared:/usr`），
+  # 两枚引擎 TU 各拿到一次 lint 分析面。
   LINT_CAPABILITY_FLAGS: >-
     -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON
     -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON
@@ -157,28 +158,25 @@ env:
     -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_ENABLE_WEBVIEW_WEBKITGTK=OFF
     -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON
     -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
-    -DAURORA_NET_TLS_PROVIDERS=static:/opt/aurora-tls-mbedtls
+    -DAURORA_ENABLE_NET_TLS_MBEDTLS=ON
   LINT_CAPABILITY_FLAGS_WASM: >-
     -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON
     -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON
     -DAURORA_ENABLE_WEBVIEW=ON
     -DAURORA_BUILD_INSPECTOR_SERVER=ON
   # 网络能力开关串（由 .github/actions/setup-net-capability-flags 消费，避免逐作业粘贴漂移）：
-  #   Inspector HTTP 服务器 + TLS provider。前者是默认 OFF 的交付物开关，关闭时
-  #   `utest_inspector_server` 整文件降级 SKIP；后者在 Linux / 其它 POSIX 侧**没有缺省系统栈**，
-  #   不给 provider 就没有任何 TLS 腿在案（`utest_net_tls` 大半 SKIP、`capabilities().tls` 为假），
-  #   故 Linux 串必须带安装根。
-  #   ⚠️ Linux 串的安装根是 `/opt/aurora-tls-mbedtls` 而不是 `/usr`：Debian 系的 `/usr` 同时挂着
-  #   openssl 与 mbedtls 两套头，多命中时 OpenSSL 优先（规则见 `cmake/AuroraNetTls.cmake`），
-  #   指向 `/usr` 等于永远选不中 mbedTLS。该根由上述动作做成只挂 `include/mbedtls` 子树的安装根，
-  #   让推导**确定性**落到 `AURORA_ENABLE_NET_TLS_MBEDTLS`；需要 OpenSSL 的一侧直接在
-  #   `AURORA_NET_TLS_PROVIDERS` 里追加一条 `shared:/usr`，那里 openssl 头本就在优先命中位
-  #   （作业 3b 的双 provider 腿与作业 8 的 optimizations-off 遍如此）。
-  #   Windows / macOS 靠系统栈缺省装配（Schannel / SecureTransport），不给 provider 本身就是「开」，
-  #   两串因此只带 Inspector——provider 形态的同平台覆盖面由作业 3b 的对应腿平行补上。
-  #   wasm 串同样只取 Inspector：Emscripten 侧不存在 TLS provider 安装根，硬给即 configure 期 FATAL。
+  #   Inspector HTTP 服务器 + TLS 后端。前者是默认 OFF 的交付物开关，关闭时 `utest_inspector_server`
+  #   整文件降级 SKIP；后者在 Linux / 其它 POSIX 侧**没有缺省系统栈**，不开一条 TLS 腿就没有任何引擎在案
+  #   （`utest_net_tls` 大半 SKIP、`capabilities().tls` 为假）。
+  #   Linux 串开内置 mbedTLS（`AURORA_ENABLE_NET_TLS_MBEDTLS=ON`）：源码在 `third_party/mbedtls`、随
+  #   checkout 就位、断网可构建，不再需要外部安装根或 `/opt` 引导（旧 `static:/opt/aurora-tls-mbedtls`
+  #   provider 路径已废弃）。需要 OpenSSL 的一侧直接在 `AURORA_NET_TLS_PROVIDERS` 里追加一条 `shared:/usr`
+  #   ——那里 openssl 头齐备（作业 3b 的双引擎腿、作业 8 的 optimizations-off 遍、toggles 反极性腿如此）。
+  #   Windows / macOS 靠系统栈缺省装配（Schannel / SecureTransport），两串因此只带 Inspector——provider
+  #   形态的同平台覆盖面由作业 3b 的对应腿平行补上。
+  #   wasm 串同样只取 Inspector：Emscripten 侧不编 mbedTLS/OpenSSL，TLS 走浏览器 fetch。
   NET_CAPABILITY_FLAGS_LINUX: >-
-    -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_NET_TLS_PROVIDERS=static:/opt/aurora-tls-mbedtls
+    -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_ENABLE_NET_TLS_MBEDTLS=ON
   NET_CAPABILITY_FLAGS_WINDOWS: >-
     -DAURORA_BUILD_INSPECTOR_SERVER=ON
   NET_CAPABILITY_FLAGS_MACOS: >-
@@ -683,11 +681,10 @@ jobs:
           - name: compression-off
             cmake-flags: -DAURORA_ENABLE_COMPRESSION=OFF
             run-tests: true
-          # TLS provider 反极性（动态 OpenSSL，`/usr` 就是它的安装根）：本 job 各腿的公共网络串给的是
-          # 静态 mbedTLS（安装根见 NET_CAPABILITY_FLAGS_LINUX 注释——不能直接用 /usr，那里 OpenSSL
-          # 优先），本腿追加同名变量把它换成 OpenSSL，使 `AURORA_ENABLE_NET_TLS_OPENSSL` 与
-          # `AURORA_ENABLE_NET_TLS_MBEDTLS` 两枚引擎宏各拿到一次运行期验证
-          # （cmake 命令行取同名变量最后一次出现的值，故追加即覆盖）。
+          # TLS 反极性腿：本 job 各腿的公共网络串（NET_CAPABILITY_FLAGS_LINUX）给的是内置 mbedTLS
+          # （`AURORA_ENABLE_NET_TLS_MBEDTLS=ON`），本腿追加一条 OpenSSL provider（`shared:/usr` 就是它的
+          # 安装根），使 `AURORA_ENABLE_NET_TLS_OPENSSL` 与 `AURORA_ENABLE_NET_TLS_MBEDTLS` 两枚引擎宏
+          # 各拿到一次运行期验证（cmake 命令行取同名变量最后一次出现的值，故追加即生效；两枚宏本就并存）。
           - name: tls-openssl-shared
             apt-pkgs: libssl-dev
             cmake-flags: -DAURORA_NET_TLS_PROVIDERS=shared:/usr
@@ -764,15 +761,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 双 provider 同时在案：静态 mbedTLS 走配套动作搭的「只挂 mbedtls 子树」的根（`/usr` 上
-          # openssl 头会抢先命中，用它就编译不到 `tls_mbedtls.cpp` 了），动态 OpenSSL 直接指向 `/usr`
-          # ——Debian multiarch 的库定位顺带被证明。两条 entry 推导出的 kind 不同，因此不触发「同
-          # kind 重复」的 configure 期硬失败；装配结果里 `mbedtls` 与 `openssl` 两条腿都在注册表表面，
+          # 双引擎同时在案：mbedTLS 走仓库内置源码（`AURORA_ENABLE_NET_TLS_MBEDTLS=ON`，源码随 checkout
+          # 就位），动态 OpenSSL 直接指向 `/usr`（Debian multiarch 的库定位顺带被证明）。两条腿一个来自
+          # 内置构建、一个来自 provider，kind 不冲突；装配结果里 `mbedtls` 与 `openssl` 都在注册表表面，
           # `utest_net_tls` 因此在这里逐枚各做一次真握手。
           - name: linux-mbedtls-plus-openssl
             os: ubuntu-26.04
-            apt-pkgs: libmbedtls-dev libssl-dev
-            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_NET_TLS_PROVIDERS=static:/opt/aurora-tls-mbedtls,shared:/usr
+            apt-pkgs: libssl-dev
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_ENABLE_NET_TLS_MBEDTLS=ON -DAURORA_NET_TLS_PROVIDERS=shared:/usr
           # 动态 OpenSSL + 系统栈 Schannel 并存：`AURORA_ENABLE_NET_TLS_SYSTEM=ON` 本就是该腿缺省，这里显式
           # 写出是为了把「给了 OpenSSL 安装根也照样保住 Schannel」声明成判据而不是巧合。
           # vcpkg classic 模式的三元组根（`include/openssl/ssl.h` + `lib/` + `bin/`）。
@@ -1194,7 +1190,7 @@ jobs:
           # 反极性遍：架构级优化开关全部关闭（layout 缓存 / 遮挡剔除 / Display List / SIMD）
           # 与测试注入点关闭——这些 `#ifdef` 收口的分支在默认三开关全开时根本不参与分析。
           # 与上方两遍共用同一份扩面后端/能力开关（见 Configure 步骤）。
-          # 本 pass 另把 TLS provider 从 mbedtls（env 串）反极性为 OpenSSL：两枚 provider TU
+          # 本 pass 另在 env 串的内置 mbedTLS 之外追加一条 OpenSSL provider（shared:/usr）：两枚引擎 TU
           # （tls_mbedtls.cpp / tls_openssl.cpp）各自进一个 pass 的分析面，不新增 job。
           - label: optimizations-off
             debug: "OFF"
@@ -1217,28 +1213,14 @@ jobs:
           # 无 dev 包依赖（见 AuroraBackends.cmake 音频段），故不在列表里。
           # libclang1-22：wgpu-native 的 bindgen 由 configure 期探测 libclang 共享库，clang-tidy-22
           # 只拉 libclang-cpp22（C++ 接口）不含 C 接口的 libclang-22.so.1，故显式补装。
-          # libmbedtls-dev：LINT_CAPABILITY_FLAGS 的 TLS provider（static:/opt/aurora-tls-mbedtls）
-          # 需要 include/mbedtls/ssl.h + lib/<triplet>/libmbedtls.a；libssl-dev 供 OpenSSL 腿
-          # （optimizations-off pass 的反极性 provider，runner 镜像虽预装仍显式钉住）。
+          # mbedTLS 现由仓库内置源码构建（AURORA_ENABLE_NET_TLS_MBEDTLS，源码随 checkout 就位），无需
+          # libmbedtls-dev、也不再搭 /opt provider 根；libssl-dev 供 optimizations-off pass 的 OpenSSL 腿。
           sudo apt-get install -y clang-tidy-22 clang-format-22 libclang1-22 \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
             libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev \
-            libmbedtls-dev libssl-dev
+            libssl-dev
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
-          # 搭一个只挂 mbedtls 子树的安装根：直接把 provider 指向 /usr 会被 OpenSSL 抢先命中
-          # （两套头同时在场时 OpenSSL 优先），那样 native 主遍永远分析不到 tls_mbedtls.cpp。
-          # 与 .github/actions/setup-net-capability-flags 同形态，两处路径必须一致。
-          sudo mkdir -p /opt/aurora-tls-mbedtls/include /opt/aurora-tls-mbedtls/lib
-          sudo ln -sfn /usr/include/mbedtls /opt/aurora-tls-mbedtls/include/mbedtls
-          # lib 只放 mbedTLS 三枚静态库：provider 的库定位是 find_library(NAMES ssl mbedtls)，
-          # 若该目录下同时有 OpenSSL 的 libssl.so，就会「头推导出 MBEDTLS、却链上 OpenSSL 的库」
-          # → 链接期 undefined reference to psa_generate_random（与 setup-net-capability-flags 同形态）。
-          for n in mbedtls mbedx509 mbedcrypto; do
-            sudo ln -sfn "/usr/lib/$(gcc -dumpmachine)/lib$n.a" "/opt/aurora-tls-mbedtls/lib/lib$n.a"
-          done
-          test -f /opt/aurora-tls-mbedtls/include/mbedtls/ssl.h
-          test ! -e /opt/aurora-tls-mbedtls/lib/libssl.a
 
       # AURORA_BACKEND_GPU_WGPU=ON 的 configure 期硬探测 cargo / rustc（见 AuroraBackends.cmake）；
       # 运行器镜像通常已预装 Rust，存在即跳过，缺失时才经 rustup 装最小 stable。
@@ -1592,25 +1574,13 @@ jobs:
           sudo apt-get update -y
           # clang-format-22 与扩面所需的后端开发包（X11/Wayland/GLFW 的 configure 依赖）一并装上，
           # 与作业 8 同口径。ALSA 走运行期 dlopen，无 dev 包依赖。libclang1-22 见作业 8 同名步骤说明。
-          # libmbedtls-dev 供 LINT_CAPABILITY_FLAGS 的 TLS provider（static:/opt/aurora-tls-mbedtls）。
+          # mbedTLS 现由仓库内置源码构建（AURORA_ENABLE_NET_TLS_MBEDTLS，源码随 checkout 就位）：无需
+          # libmbedtls-dev，也不再搭 /opt provider 根。
           sudo apt-get install -y clang-tidy-22 clang-format-22 libclang1-22 \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
-            libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev \
-            libmbedtls-dev
+            libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
-          # 同作业 8：把 provider 安装根做成只挂 mbedtls 子树，避免 /usr 上的 openssl 头抢先命中
-          # （两套头同时在场时 OpenSSL 优先），否则本作业选中的 TU 里不会有 tls_mbedtls.cpp。
-          sudo mkdir -p /opt/aurora-tls-mbedtls/include /opt/aurora-tls-mbedtls/lib
-          sudo ln -sfn /usr/include/mbedtls /opt/aurora-tls-mbedtls/include/mbedtls
-          # lib 只放 mbedTLS 三枚静态库：provider 的库定位是 find_library(NAMES ssl mbedtls)，
-          # 若该目录下同时有 OpenSSL 的 libssl.so，就会「头推导出 MBEDTLS、却链上 OpenSSL 的库」
-          # → 链接期 undefined reference to psa_generate_random（与 setup-net-capability-flags 同形态）。
-          for n in mbedtls mbedx509 mbedcrypto; do
-            sudo ln -sfn "/usr/lib/$(gcc -dumpmachine)/lib$n.a" "/opt/aurora-tls-mbedtls/lib/lib$n.a"
-          done
-          test -f /opt/aurora-tls-mbedtls/include/mbedtls/ssl.h
-          test ! -e /opt/aurora-tls-mbedtls/lib/libssl.a
 
       # 与作业 8 同口径：wgpu 后端的 configure 期硬探测 cargo / rustc；镜像预装则跳过。
       - name: Ensure Rust toolchain (wgpu backend configure probe)

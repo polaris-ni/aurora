@@ -21,7 +21,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -250,17 +249,17 @@ auto close_stream(detail::StreamState &state, const Error &reason, Tasks &tasks)
     if (state.on_connect) {
         auto done = std::move(state.on_connect);
         state.on_connect = nullptr;  // 摘出即清空：小缓冲下 move 是克隆，不清源则同一次收尾会交付两遍
-        tasks.emplace_back([done, reason]() { done(Result<StreamTransport>{reason}); });
+        tasks.emplace_back([done, reason]() -> void { done(Result<StreamTransport>{reason}); });
     }
     for (auto &request : state.reads) {
         auto done = std::move(request.done);
-        tasks.emplace_back([done, reason]() { done(Result<std::size_t>{reason}); });
+        tasks.emplace_back([done, reason]() -> void { done(Result<std::size_t>{reason}); });
     }
     state.reads.clear();
     state.pending_read_bytes = 0;
     for (auto &request : state.writes) {
         auto done = std::move(request.done);
-        tasks.emplace_back([done, reason]() { done(Result<std::size_t>{reason}); });
+        tasks.emplace_back([done, reason]() -> void { done(Result<std::size_t>{reason}); });
     }
     // NOLINTEND(bugprone-exception-escape)
     state.writes.clear();
@@ -309,7 +308,7 @@ auto satisfy_reads_from_ahead(detail::StreamState &state, Tasks &tasks) -> bool 
     auto done = std::move(front.done);
     release_read_slot(state, front.buffer.size());
     state.reads.pop_front();
-    tasks.emplace_back([done, bytes = limit]() { done(Result<std::size_t>{bytes}); });
+    tasks.emplace_back([done, bytes = limit]() -> void { done(Result<std::size_t>{bytes}); });
     return true;
 }
 
@@ -319,7 +318,7 @@ auto satisfy_reads_from_ahead(detail::StreamState &state, Tasks &tasks) -> bool 
 auto satisfy_reads_with_eof(detail::StreamState &state, Tasks &tasks) -> void {
     for (auto &request : state.reads) {
         auto done = std::move(request.done);
-        tasks.emplace_back([done]() { done(Result<std::size_t>{std::size_t{0}}); });
+        tasks.emplace_back([done]() -> void { done(Result<std::size_t>{std::size_t{0}}); });
     }
     state.reads.clear();
     state.pending_read_bytes = 0;
@@ -360,7 +359,7 @@ auto drive_read(detail::StreamState &state, Tasks &tasks) -> void {
         auto done = std::move(front.done);
         release_read_slot(state, front.buffer.size());
         state.reads.pop_front();
-        tasks.emplace_back([done, bytes = attempt.bytes]() { done(Result<std::size_t>{bytes}); });
+        tasks.emplace_back([done, bytes = attempt.bytes]() -> void { done(Result<std::size_t>{bytes}); });
     }
 }
 
@@ -389,7 +388,7 @@ auto drive_write(detail::StreamState &state, Tasks &tasks) -> void {
             auto done = std::move(front.done);
             const std::size_t total = front.data.size();
             state.writes.pop_front();
-            tasks.emplace_back([done, total]() { done(Result<std::size_t>{total}); });
+            tasks.emplace_back([done, total]() -> void { done(Result<std::size_t>{total}); });
         }
     }
     refresh_write_latch(state);
@@ -424,7 +423,7 @@ auto on_stream_ready(const StreamPointer &state, std::uint64_t generation, const
                     // 源会留着一份回调——随后 close_stream 的收尾会把同一次连接再交付一遍（实测
                     // macOS 上第二次带 net-cancelled，令「已完成」的连接在调用方看来失败了）。
                     state->on_connect = nullptr;
-                    fired.emplace_back([done, held = state]() {
+                    fired.emplace_back([done, held = state]() -> void {
                         done(Result<StreamTransport>{detail::TransportFactory::wrap_stream(held)});
                     });
                     drop_connecting(state.get());  // 任务已握有强引用，本表可以让位
@@ -567,7 +566,7 @@ auto refresh_listener_interest(const ListenerPointer &state, Tasks &tasks) -> vo
                         // 完成回调转入 Tasks（std::function），本检查对无 noexcept 规格的可调用对象一律判为
                         // 「不应抛出」；抛出只可能来自调用方回调，本层不在派发边界吞它（口径同 close_stream）。
                         // NOLINTNEXTLINE(bugprone-exception-escape)
-                        fired.emplace_back([done, error]() { done(Result<StreamTransport>{error}); });
+                        fired.emplace_back([done, error]() -> void { done(Result<StreamTransport>{error}); });
                         break;
                     }
                     if (!attempt.peer) {
@@ -583,7 +582,8 @@ auto refresh_listener_interest(const ListenerPointer &state, Tasks &tasks) -> vo
                         // 完成回调转入 Tasks（std::function），口径同 close_stream。原因按值进闭包：
                         // `applied` 在派发之前就已析构。
                         // NOLINTNEXTLINE(bugprone-exception-escape)
-                        fired.emplace_back([done, error = applied.error()]() { done(Result<StreamTransport>{error}); });
+                        fired.emplace_back(
+                            [done, error = applied.error()]() -> void { done(Result<StreamTransport>{error}); });
                         break;
                     }
                     auto stream = make_accepted_stream(*attempt.peer, held->options, held->owner);
@@ -606,7 +606,7 @@ auto refresh_listener_interest(const ListenerPointer &state, Tasks &tasks) -> vo
             auto callback = std::move(done);
             // 回调转入 Tasks（std::function）故被本检查判为「不应抛出」，口径同 close_stream。
             // NOLINTNEXTLINE(bugprone-exception-escape)
-            tasks.emplace_back([callback, error]() { callback(Result<StreamTransport>{error}); });
+            tasks.emplace_back([callback, error]() -> void { callback(Result<StreamTransport>{error}); });
         }
         state->pending.clear();
         return;
@@ -631,7 +631,7 @@ auto close_listener(detail::ListenerState &state, const Error &reason, Tasks &ta
         auto callback = std::move(done);
         // 回调转入 Tasks（std::function）故被本检查判为「不应抛出」，同 close_stream。
         // NOLINTNEXTLINE(bugprone-exception-escape)
-        tasks.emplace_back([callback, reason]() { callback(Result<StreamTransport>{reason}); });
+        tasks.emplace_back([callback, reason]() -> void { callback(Result<StreamTransport>{reason}); });
     }
     state.pending.clear();
 }
@@ -649,7 +649,7 @@ auto ensure_driver() -> Result<void> {
     if (app::EventSourceRegistry::instance().host_driven()) {
         return Result<void>{};
     }
-    return Engine::instance().post([]() {});
+    return Engine::instance().post([]() -> void {});
 }
 
 }  // namespace
@@ -692,7 +692,7 @@ auto StreamTransport::connect(const Endpoint &endpoint, const StreamOptions &opt
         std::scoped_lock lock(state->mutex);
         token = state->cancellation;
     }
-    token.on_cancel([witness]() { close_and_deliver(witness, cancelled_reason("connection")); });
+    token.on_cancel([witness]() -> void { close_and_deliver(witness, cancelled_reason("connection")); });
     if (stream_closed(state)) {
         return;
     }
@@ -747,7 +747,7 @@ auto StreamTransport::connect(const Endpoint &endpoint, const StreamOptions &opt
         // 这段定时提交整段豁免：闭包交给引擎的定时排队口（无 noexcept 规格的可调用对象），本检查一律判为
         // 「不应抛出」；其中的分配与关闭链是超时收尾的必经路径，改成 noexcept 等于在引擎线程上 terminate。
         // NOLINTBEGIN(bugprone-exception-escape)
-        auto timed = Engine::instance().post_after(options.connect_timeout, [witness, target]() {
+        auto timed = Engine::instance().post_after(options.connect_timeout, [witness, target]() -> void {
             const auto held = witness.lock();
             if (!held) {
                 return;
@@ -847,7 +847,7 @@ auto StreamTransport::is_loopback_peer() const -> bool {
     return detail::peer_is_loopback(state_->handle);
 }
 
-auto StreamTransport::read(std::span<char> buffer, ReadDone on_done) -> void {
+auto StreamTransport::read(std::span<char> buffer, ReadDone on_done) const -> void {
     if (!on_done) {
         return;
     }
@@ -868,14 +868,14 @@ auto StreamTransport::read(std::span<char> buffer, ReadDone on_done) -> void {
         // 不能按建议在锁内预构造错误对象：那会把分配搬进临界区，而本层的口径是锁内只做非阻塞系统调用。
         // NOLINTBEGIN(bugprone-exception-escape)
         if (state_->closed) {
-            fired.emplace_back([done = std::move(on_done), reason = cancelled_reason("queued read")]() {
+            fired.emplace_back([done = std::move(on_done), reason = cancelled_reason("queued read")]() -> void {
                 done(Result<std::size_t>{reason});
             });
         } else if (state_->peer_eof) {
-            fired.emplace_back([done = std::move(on_done)]() { done(Result<std::size_t>{std::size_t{0}}); });
+            fired.emplace_back([done = std::move(on_done)]() -> void { done(Result<std::size_t>{std::size_t{0}}); });
         } else if (state_->pending_read_bytes + buffer.size() > state_->options.max_pending_bytes) {
             const auto size = std::to_string(state_->options.max_pending_bytes);
-            fired.emplace_back([done = std::move(on_done), size]() {
+            fired.emplace_back([done = std::move(on_done), size]() -> void {
                 done(Result<std::size_t>{
                     make_error(ErrorCode::NetBufferLimit, ErrorParams{{"detail", "pending read cap " + size}})});
             });
@@ -892,7 +892,7 @@ auto StreamTransport::read(std::span<char> buffer, ReadDone on_done) -> void {
     deliver(std::move(fired), state_->owner);
 }
 
-auto StreamTransport::write(std::span<const char> data, WriteDone on_done) -> void {
+auto StreamTransport::write(std::span<const char> data, WriteDone on_done) const -> void {
     if (!on_done) {
         return;
     }
@@ -910,17 +910,17 @@ auto StreamTransport::write(std::span<const char> data, WriteDone on_done) -> vo
         // 同 read() 的四条分支：回调转入 Tasks 即被本检查判为「不应抛出」，错误对象留在锁外构造。
         // NOLINTBEGIN(bugprone-exception-escape)
         if (state_->closed) {
-            fired.emplace_back([done = std::move(on_done), reason = cancelled_reason("queued write")]() {
+            fired.emplace_back([done = std::move(on_done), reason = cancelled_reason("queued write")]() -> void {
                 done(Result<std::size_t>{reason});
             });
         } else if (state_->write_shut) {
             const auto detail_text = std::string{"stream write side is shut down"};
-            fired.emplace_back([done = std::move(on_done), detail_text]() {
+            fired.emplace_back([done = std::move(on_done), detail_text]() -> void {
                 done(Result<std::size_t>{make_error(ErrorCode::NetOptionFailed, ErrorParams{{"detail", detail_text}})});
             });
         } else if (state_->write_blocked) {
             const auto size = std::to_string(state_->options.write_high_water_bytes);
-            fired.emplace_back([done = std::move(on_done), size]() {
+            fired.emplace_back([done = std::move(on_done), size]() -> void {
                 done(Result<std::size_t>{make_error(
                     ErrorCode::NetBufferLimit, ErrorParams{{"detail", "write high-water " + size + " exceeded"}})});
             });
@@ -942,7 +942,7 @@ auto StreamTransport::write(std::span<const char> data, WriteDone on_done) -> vo
     deliver(std::move(fired), state_->owner);
 }
 
-auto StreamTransport::set_high_water_mark(std::size_t bytes) -> void {
+auto StreamTransport::set_high_water_mark(std::size_t bytes) const -> void {
     if (!state_) {
         return;
     }
@@ -961,7 +961,7 @@ auto StreamTransport::set_high_water_mark(std::size_t bytes) -> void {
     deliver(std::move(fired), state_->owner);
 }
 
-auto StreamTransport::pause_read() -> void {
+auto StreamTransport::pause_read() const -> void {
     if (!state_) {
         return;
     }
@@ -976,7 +976,7 @@ auto StreamTransport::pause_read() -> void {
     deliver(std::move(fired), state_->owner);
 }
 
-auto StreamTransport::resume_read() -> void {
+auto StreamTransport::resume_read() const -> void {
     if (!state_) {
         return;
     }
@@ -1008,12 +1008,12 @@ auto StreamTransport::pending_write_bytes() const -> std::size_t {
     return state_->pending_write_bytes;
 }
 
-auto StreamTransport::shutdown(ShutdownMode mode) -> Result<void> {
+auto StreamTransport::shutdown(ShutdownMode mode) const -> Result<void> {
     if (!state_) {
         return Result<void>{no_stream_reason("shutdown")};
     }
     Tasks fired;
-    Result<void> outcome{Result<void>{}};
+    auto outcome{Result<void>{}};
     {
         std::scoped_lock lock(state_->mutex);
         if (state_->closed) {
@@ -1038,7 +1038,7 @@ auto StreamTransport::shutdown(ShutdownMode mode) -> Result<void> {
                     auto done = std::move(request.done);
                     // 回调转入 Tasks 即被本检查判为「不应抛出」（口径同 close_stream）；停写排队的收尾不可省。
                     // NOLINTNEXTLINE(bugprone-exception-escape)
-                    fired.emplace_back([done, reason]() { done(Result<std::size_t>{reason}); });
+                    fired.emplace_back([done, reason]() -> void { done(Result<std::size_t>{reason}); });
                 }
                 state_->writes.clear();
                 state_->pending_write_bytes = 0;
@@ -1052,7 +1052,7 @@ auto StreamTransport::shutdown(ShutdownMode mode) -> Result<void> {
     return outcome;
 }
 
-auto StreamTransport::close() -> void {
+auto StreamTransport::close() const -> void {
     if (!state_) {
         return;
     }
@@ -1114,7 +1114,7 @@ auto StreamListener::bind(const Endpoint &endpoint, int backlog, const StreamOpt
     return Result<StreamListener>{detail::TransportFactory::wrap_listener(std::move(state))};
 }
 
-auto StreamListener::accept(AcceptDone on_ready) -> void {
+auto StreamListener::accept(AcceptDone on_ready) const -> void {
     if (!on_ready) {
         return;
     }
@@ -1126,7 +1126,7 @@ auto StreamListener::accept(AcceptDone on_ready) -> void {
     {
         std::scoped_lock lock(state_->mutex);
         if (state_->closed) {
-            fired.emplace_back([done = std::move(on_ready), reason = cancelled_reason("accept")]() {
+            fired.emplace_back([done = std::move(on_ready), reason = cancelled_reason("accept")]() -> void {
                 done(Result<StreamTransport>{reason});
             });
         } else {
@@ -1161,7 +1161,7 @@ auto StreamListener::is_valid() const -> bool {
     return !state_->closed && state_->handle != -1;
 }
 
-auto StreamListener::close() -> void {
+auto StreamListener::close() const -> void {
     if (!state_) {
         return;
     }

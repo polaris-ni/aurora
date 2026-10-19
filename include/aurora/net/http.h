@@ -474,7 +474,7 @@ class Request {
     /// @brief 设定三档超时（连接 / 读空闲 / 总耗时）。
     /// @param value 超时集合。
     /// @return 自身引用，便于链式调用。
-    auto timeouts(Timeouts value) -> Request &;
+    auto timeouts(const Timeouts &value) -> Request &;
 
     /// @brief 查看三档超时。
     /// @return 超时集合的只读引用。

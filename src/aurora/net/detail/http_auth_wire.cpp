@@ -28,7 +28,7 @@ constexpr auto to_lower(char c) -> char {
 /// @return 折叠后的副本。
 [[nodiscard]] auto to_lower(std::string_view text) -> std::string {
     std::string out{text};
-    std::transform(out.begin(), out.end(), out.begin(), [](char c) { return to_lower(c); });
+    std::ranges::transform(out, out.begin(), [](char c) { return to_lower(c); });
     return out;
 }
 
@@ -171,8 +171,8 @@ auto parse_auth_mechanism(std::string_view value) -> std::optional<aurora::net::
             }
             continue;
         }
-        const auto duplicate = std::any_of(mechanism.parameters.begin(), mechanism.parameters.end(),
-                                           [&lowered](const auto &entry) { return entry.first == lowered; });
+        const auto duplicate =
+            std::ranges::any_of(mechanism.parameters, [&lowered](const auto &entry) { return entry.first == lowered; });
         if (!duplicate) {
             mechanism.parameters.emplace_back(lowered, std::move(text));
         }

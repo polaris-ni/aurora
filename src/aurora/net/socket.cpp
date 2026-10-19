@@ -249,7 +249,7 @@ auto check_unix_path(std::string_view path) -> Result<void> {
 auto make_unix_address(const Endpoint &endpoint, sockaddr_storage &storage) -> Result<AddrLen> {
     static_assert(sizeof(UnixSocketAddr) <= sizeof(sockaddr_storage),
                   "a unix domain address must fit in the generic socket storage");
-    if (auto fits = check_unix_path(endpoint.host()); !fits) {
+    if (const auto fits = check_unix_path(endpoint.host()); !fits) {
         return fits.error();
     }
     // `sockaddr_storage` 是「足够大以容纳任一族」的通用容器，按族擦回具体类型是标准用法。
@@ -994,8 +994,7 @@ auto option_conflict(std::string_view detail) -> Error {
 /// @param value 选项值。
 /// @return 成功为 OK；失败为 `net-option-failed`（含 OS 原生码）。
 auto set_int_option(NativeSocket s, int level, int option, std::string_view label, int value) -> Result<void> {
-    const char *const bytes =
-        reinterpret_cast<const char *>(&value);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto bytes = reinterpret_cast<const char *>(&value);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     if (::setsockopt(s, level, option, bytes, static_cast<int>(sizeof(value))) != 0) {
         return net_error(ErrorCode::NetOptionFailed, "setsockopt(" + std::string{label} + ")");
     }
@@ -1171,7 +1170,7 @@ auto apply_socket_options(NativeSocket s, AddressFamily family, const NativeOpti
             std::min(seconds, static_cast<unsigned int>(std::numeric_limits<unsigned short>::max())));
         const ::linger value{.l_onoff = 1, .l_linger = capped};
         // 选项值按结构体整体传字节，这是 `SO_LINGER` 唯一的形态。
-        const char *const bytes =
+        const auto bytes =
             reinterpret_cast<const char *>(&value);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         if (::setsockopt(s, SOL_SOCKET, SO_LINGER, bytes, static_cast<int>(sizeof(value))) != 0) {
             return net_error(ErrorCode::NetOptionFailed, "setsockopt(SO_LINGER)");
@@ -1591,14 +1590,14 @@ auto set_multicast_loop_option(NativeSocket s, AddressFamily family, bool enable
     // 选项值宽度按族分岔是内核口径而非平台口径，故只有 `reinterpret_cast` 需要豁免。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
     if (family == AddressFamily::IPv4) {
-        auto value = static_cast<unsigned char>(enabled ? 1 : 0);
+        const auto value = static_cast<unsigned char>(enabled ? 1 : 0);
         if (::setsockopt(s, IPPROTO_IP, IP_MULTICAST_LOOP, reinterpret_cast<const char *>(&value),
                          static_cast<int>(sizeof(value))) != 0) {
             return net_error(ErrorCode::NetOptionFailed, "setsockopt(IP_MULTICAST_LOOP)");
         }
         return Result<void>{};
     }
-    auto value = static_cast<unsigned int>(enabled ? 1 : 0);
+    const auto value = static_cast<unsigned int>(enabled ? 1 : 0);
     if (::setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, reinterpret_cast<const char *>(&value),
                      static_cast<int>(sizeof(value))) != 0) {
         return net_error(ErrorCode::NetOptionFailed, "setsockopt(IPV6_MULTICAST_LOOP)");
@@ -1817,7 +1816,7 @@ auto detail::set_multicast_loopback(std::intptr_t handle, bool enabled) -> Resul
 }
 
 auto detail::set_broadcast_allowed(std::intptr_t handle, bool enabled) -> Result<void> {
-    auto value = enabled ? 1 : 0;
+    const auto value = enabled ? 1 : 0;
     // 选项值取 int 是两平台同名宽度（Winsock 的 BOOL 即 int），故只需豁免地址的按字节传参。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
     if (::setsockopt(from_handle(handle), SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char *>(&value),

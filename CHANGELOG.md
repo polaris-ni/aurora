@@ -21,6 +21,22 @@ freeze: minor-versions-are-additive
 
 ## [Unreleased]
 
+### Changed
+
+- **mbedTLS TLS 后端改由仓库内置源码构建，不再作为 provider 安装根传入**（`cmake/AuroraNetTls.cmake`、`codespec/BUILD_OPTIONS.md` §1.2、`codespec/specification/06-app-platform.md` §8.8.18）。新增构建选项 `AURORA_ENABLE_NET_TLS_MBEDTLS`（缺省 `OFF`）：置 `ON` 即 `add_subdirectory(third_party/mbedtls … EXCLUDE_FROM_ALL)` 编译并链接内置 mbedTLS 3.6 静态库（依赖序 `mbedtls → mbedx509 → mbedcrypto`；子项目自带 `install()` 由 `SKIP_INSTALL_RULES` 抑制以不污染导出包；`CMAKE_POLICY_VERSION_MINIMUM` 抬到 3.10 以免上游 `cmake_minimum_required(3.5.1)` 在 CMake 4.x 下升级成硬错误），源码进仓库、断网可构建、不改上游，与 GLFW / SQLite 同口径。`AURORA_NET_TLS_PROVIDERS` 自此**只承载 OpenSSL**。注册表 / 候选链 / 后端契约（`tls_backend.h`）与握手语义均不变。
+
+### Breaking
+
+- 构建接口：原先以 `-DAURORA_NET_TLS_PROVIDERS=static:<mbedTLS 安装根>`（含共存串里的那条 mbedTLS entry）装配 mbedTLS 的命令行不再受支持——传入仅含 mbedTLS 的安装根现在 configure 期硬失败并指向新开关。引擎宏 `AURORA_ENABLE_NET_TLS_MBEDTLS` 由「仅由 provider 探测推导、不接受手工设置」改为可由用户直接置 `ON`（仍 `PRIVATE` 作用域，公共头零 `#ifdef` 不变）。OpenSSL provider 与系统栈腿的装配接口不变。
+
+### Migration
+
+- 把配置里的 `-DAURORA_NET_TLS_PROVIDERS=static:<mbedTLS 安装根>`（或共存串里的该条 mbedTLS entry）替换为 `-DAURORA_ENABLE_NET_TLS_MBEDTLS=ON`；provider 列表里只保留 OpenSSL 的 `shared:<根>` / `static:<根>` 条目。CI 已随本次同步：`.github/actions/setup-net-capability-flags` 去掉 `/opt/aurora-tls-mbedtls` 引导与 `libmbedtls-dev`，Linux 能力串与 lint / toggles / tls-providers 作业改用新开关。
+
+### Notes
+
+- `third_party/mbedtls`（3.6.5，上游源码保持原样）需在提交时 `git add` 后才随仓库分发；`THIRD_PARTY_LICENSES.md` 登记其上游许可随该步入库。
+
 ## [1.0.0-alpha.10] - 2026-10-19
 
 > 类型：pre-release

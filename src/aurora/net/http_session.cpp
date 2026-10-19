@@ -1,7 +1,5 @@
 #include "aurora/net/http_session.h"
 
-#include <utility>
-
 #include "aurora/net/detail/http_cookie_jar.h"
 
 namespace aurora::net::http {

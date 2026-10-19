@@ -99,7 +99,6 @@
 /// @note Thread: thread-safe（值语义客户端；`send` 的续体恒回主线程）
 /// @note Side-effects: `send` / `open_stream` 发起网络 I/O；构造与配置无副作用
 
-#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -213,7 +212,7 @@ class Client {
     /// 判据与两枚时间旋钮的分工见 `RetryPolicy` 的头注释。
     /// @param value 重试策略。
     /// @return 自身引用，便于链式调用。
-    auto retry_policy(RetryPolicy value) -> Client & {
+    auto retry_policy(const RetryPolicy &value) -> Client & {
         retry_ = value;
         return *this;
     }
@@ -329,7 +328,7 @@ class Client {
     /// 一枚配置代次，池条目对不上代次即不复用——改了信任根不该悄悄坐旧连接。关掉开关即清空现有空闲连接。
     /// @param value 池口径。
     /// @return 自身引用，便于链式调用。
-    auto pool(PoolOptions value) -> Client &;
+    auto pool(const PoolOptions &value) -> Client &;
 
     /// @brief 查看连接池口径。
     /// @return 口径的只读引用（`enabled` 缺省假 = 一次交换一条连接、用完即关）。

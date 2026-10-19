@@ -25,7 +25,6 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -155,7 +154,7 @@ class StageTimer {
     ~StageTimer() { stop(); }
 
     /// @brief 停表：令尚未到期的定时器闭包到点时 no-op（幂等）。
-    auto stop() -> void {
+    auto stop() const -> void {
         if (live_ != nullptr) {
             live_->store(false);
         }
@@ -558,8 +557,8 @@ constexpr std::array<std::string_view, 5> AURORA_FETCH_STRIPPED_FIELDS{"host", "
 /// @param name 请求头名。
 /// @return 应剥除为 true。
 [[nodiscard]] auto fetch_stripped_field(std::string_view name) -> bool {
-    return std::any_of(AURORA_FETCH_STRIPPED_FIELDS.begin(), AURORA_FETCH_STRIPPED_FIELDS.end(),
-                       [name](std::string_view candidate) { return field_name_equal(name, candidate); });
+    return std::ranges::any_of(AURORA_FETCH_STRIPPED_FIELDS,
+                               [name](std::string_view candidate) { return field_name_equal(name, candidate); });
 }
 
 /// @brief wasm fetch 腿的读写适配器（§16 第 37 项）：挂在 `send` 的「建连并统一读写口」分支上。
@@ -1095,7 +1094,7 @@ auto Client::cache(CacheOptions value) -> Client & {
     return *this;
 }
 
-auto Client::pool(PoolOptions value) -> Client & {
+auto Client::pool(const PoolOptions &value) -> Client & {
     pool_options_ = value;
     // 关掉即清空：池的承诺是「开着时同键请求坐干净连接」，关着时每条空闲连接都是无人认领的负担，
     // 而且下一次开着时的首次取用也会被 sweep 淘汰掉它们——当场清比留给未来诚实。
@@ -2371,11 +2370,11 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     //    照原版交给宿主；其余（超时 / 提供方失败 / 答复含 CR 或 LF）按错误收摊，绝不交付半份头。
                     if (ring.provider != nullptr && !ring.asked && is_auth_challenge(assembler.head().status)) {
                         const bool from_proxy = assembler.head().status == 407;
-                        const std::string_view host =
+                        const std::string_view host_str =
                             current.url().has_value() ? current.url()->host() : std::string_view{};
                         auto challenge = make_auth_challenge(
                             current, assembler.head().headers.values(auth_challenge_field(from_proxy)),
-                            assembler.head().status, host);
+                            assembler.head().status, host_str);
                         ring.asked = true;  // 问过即不再问：重跑后又吃一次挑战，交出的就是那一份应答
                         // 挑战存在**交换作用域**上而不是本块的临时量里：提供方若在问答中途挂起、又被本环放弃
                         // （超时或取消），它那帧协程仍可能引用这份事实（`Authenticator::authenticate` 的存活期契约）。
@@ -2516,10 +2515,10 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
             }
 
             if (redirect_hop) {
-                Response hop{assembler.head().status, assembler.head().reason, assembler.head().headers, {}};
+                Response resp{assembler.head().status, assembler.head().reason, assembler.head().headers, {}};
                 // 重定向跳只读了头部、体未读：这条连接上还压着没归属的字节，绝不回池（卫未武装，析构即关）。
-                harvest_set_cookies(cookie_jar_, target, hop.headers(), target.is_secure());
-                auto next = follow(current, hop);
+                harvest_set_cookies(cookie_jar_, target, resp.headers(), target.is_secure());
+                auto next = follow(current, resp);
                 if (!next) {
                     one = Result<StreamOutcome>{next.error()};
                     break;

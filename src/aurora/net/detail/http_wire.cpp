@@ -449,7 +449,7 @@ auto render_request_head(std::string_view method_text, const Url &target, const 
     }
     // 请求目标（origin-form）：path 为空补 '/'，非空但不以 '/' 开头时补前导 '/'，随后接查询串；不含片段。
     std::string request_target;
-    if (auto path = target.path(); path.empty()) {
+    if (const auto path = target.path(); path.empty()) {
         request_target = "/";
     } else if (path.front() != '/') {
         request_target.push_back('/');

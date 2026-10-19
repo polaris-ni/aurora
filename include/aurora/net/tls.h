@@ -206,7 +206,7 @@ class TlsTransport {
     /// @brief 登记一次解密读请求（缓冲必须存活到本次回调抵达；语义同 `StreamTransport::read`）。
     /// @param buffer 目标缓冲；空 span 的用法错误以 `net-buffer-limit` 形态经回调抵达。
     /// @param on_done 完成回调；携实际交付的明文字节数，0 = 对端已关闭写向。
-    auto read(std::span<char> buffer, ReadDone on_done) -> void;
+    auto read(std::span<char> buffer, ReadDone on_done) const -> void;
 
     /// @brief 登记一次加密写请求（语义同 `StreamTransport::write`，背压判据落在密文待发字节上）。
     /// @param data 待发送明文；空 span 直接以 OK 完成（不产生记录）。
@@ -214,10 +214,10 @@ class TlsTransport {
     auto write(std::span<const char> data, WriteDone on_done) -> void;
 
     /// @brief 暂停读投递：不再从底层流取字节，密文留在内核与对端缓冲里。
-    auto pause_read() -> void;
+    auto pause_read() const -> void;
 
     /// @brief 恢复读投递（未暂停时为空操作）。
-    auto resume_read() -> void;
+    auto resume_read() const -> void;
 
     /// @brief 当前是否处于暂停读状态。
     /// @return 上一次 `pause_read()` 生效且尚未 `resume_read()` 时为真。
@@ -228,7 +228,7 @@ class TlsTransport {
     [[nodiscard]] auto pending_write_bytes() const -> std::size_t;
 
     /// @brief 关闭通道：发出 close_notify（尽力而为）、丢弃未完成的读写请求并关闭底层流。幂等。
-    auto close() -> void;
+    auto close() const -> void;
 
     /// @brief 本通道的取消令牌（`cancel()` 会中止未完成的握手与读写并关闭通道）。
     /// @return 与本对象共享状态的令牌；空态返回一枚独立令牌（取消它不产生任何效果）。

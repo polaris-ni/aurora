@@ -276,7 +276,7 @@ auto Request::timeout(std::chrono::milliseconds value) -> Request & {
     return *this;
 }
 
-auto Request::timeouts(Timeouts value) -> Request & {
+auto Request::timeouts(const Timeouts &value) -> Request & {
     timeouts_ = value;
     return *this;
 }

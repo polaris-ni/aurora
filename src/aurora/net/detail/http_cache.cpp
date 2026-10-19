@@ -30,7 +30,7 @@ namespace {
 /// @brief ASCII 小写化（字段名与指令名一律按此归一，不做 Unicode 折叠）。
 [[nodiscard]] auto to_lower_ascii(std::string_view text) -> std::string {
     std::string out{text};
-    std::transform(out.begin(), out.end(), out.begin(), [](char c) {
+    std::ranges::transform(out, out.begin(), [](char c) {
         const auto raw = static_cast<unsigned char>(c);
         return (raw >= 'A' && raw <= 'Z') ? static_cast<char>(raw + 32) : c;
     });
@@ -170,7 +170,7 @@ auto parse_cache_control(std::string_view value) -> CacheDirectives {
 
 auto is_cacheable_status(std::uint16_t status) -> bool {
     static constexpr std::uint16_t CACHEABLE[] = {200, 203, 300, 301, 404, 405, 410, 414, 501};
-    return std::find(std::begin(CACHEABLE), std::end(CACHEABLE), status) != std::end(CACHEABLE);
+    return std::ranges::find(CACHEABLE, status) != std::end(CACHEABLE);
 }
 
 auto is_cacheable_method(aurora::net::http::Method method) -> bool {
@@ -190,7 +190,7 @@ auto parse_vary(std::string_view value) -> std::optional<std::vector<std::string
             continue;
         }
         const std::string lowered = to_lower_ascii(item);
-        if (std::find(names.begin(), names.end(), lowered) == names.end()) {
+        if (std::ranges::find(names, lowered) == names.end()) {
             names.push_back(lowered);
         }
     }
@@ -258,7 +258,7 @@ auto merge_revalidated_headers(const aurora::Headers &stored, const aurora::Head
         if (is_payload_describing(lowered)) {
             continue;
         }
-        if (std::find(handled.begin(), handled.end(), lowered) != handled.end()) {
+        if (std::ranges::find(handled, lowered) != handled.end()) {
             continue;
         }
         handled.push_back(lowered);
@@ -345,8 +345,8 @@ auto HttpResponseCache::store(aurora::net::http::Method method, const std::strin
         entry.vary.emplace_back(name, request_headers.get(name).value_or(std::string{}));
     }
     for (const auto &name : AURORA_CREDENTIAL_VARY_FIELDS) {
-        if (std::any_of(vary_names->begin(), vary_names->end(),
-                        [&name](const std::string &given) { return ascii_name_equal(given, name); })) {
+        if (std::ranges::any_of(*vary_names,
+                                [&name](const std::string &given) { return ascii_name_equal(given, name); })) {
             continue;  // 对端已经点名它：上面那条循环按同一枚值收过了，收两遍只会让条目多一处同值比较
         }
         entry.vary.emplace_back(name, request_headers.get(name).value_or(std::string{}));
@@ -430,9 +430,8 @@ auto HttpResponseCache::evict_over_capacity() -> void {
     // 表只在持锁路径上被调用，故本函数不再自行加锁。
     const auto limit = static_cast<std::size_t>(options_.max_entries);
     while (entries_.size() > limit) {
-        const auto oldest =
-            std::min_element(entries_.begin(), entries_.end(),
-                             [](const CacheEntry &left, const CacheEntry &right) { return left.used < right.used; });
+        const auto oldest = std::ranges::min_element(
+            entries_, [](const CacheEntry &left, const CacheEntry &right) { return left.used < right.used; });
         entries_.erase(oldest);
     }
 }

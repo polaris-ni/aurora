@@ -1,23 +1,20 @@
 name: Setup network capability flags
 description: >-
-  为调用作业装配「网络能力开关串」并在需要处装 TLS provider 依赖：
+  为调用作业装配「网络能力开关串」：
   ① Inspector HTTP 服务器（`AURORA_BUILD_INSPECTOR_SERVER`，默认 OFF 的交付物开关，
      `src/aurora/inspector/inspector_server.cpp` 编为独立静态库）；
-  ② TLS provider（`AURORA_NET_TLS_PROVIDERS`，`<static|shared>:<安装根>` 的条目串，可多条；
-     空值=只用本平台系统栈。Windows / macOS 的系统栈缺省即开，两串因此本来就已「有 TLS」）。
+  ② TLS 后端。Windows / macOS 有系统栈缺省装配（Schannel / SecureTransport），串里不带 provider 即已
+     「有 TLS」。Linux / 其它 POSIX 侧没有缺省系统栈，本串用内置源码 mbedTLS
+     （`AURORA_ENABLE_NET_TLS_MBEDTLS=ON`）给出一条腿——源码在 `third_party/mbedtls`、随 checkout 就位、
+     断网可构建，本动作**不再安装任何依赖**。需要OpenSSL 的作业自行在矩阵里追加 `AURORA_NET_TLS_PROVIDERS=shared:/usr` 并装 `libssl-dev`。
   为什么要集中在这里：`utest_inspector_server` 与 `utest_net_tls` 在宏/后端缺席时整文件降级 SKIP
   （前者按 `AURORA_BUILD_INSPECTOR_SERVER`，后者按 `Engine::capabilities().tls`），开关不开等于
-  这两个套件在 CI 里从未真正执行过。口径与 provider 文法见 `codespec/BUILD_OPTIONS.md` §1.2 / §2.3。
-  Linux / 其它 POSIX 侧**没有缺省系统栈**，不给 provider 就没有任何 TLS 腿进注册表（能力位为假、
-  握手落 `net-tls-engine-unavailable`），故 Linux 作业统一装 mbedTLS 开发包并搭一个只挂着 mbedtls
-  子树的安装根（不能直接把唯一一条 entry 指向 `/usr`：那里 openssl 头会抢先命中）；
-  Windows / macOS 有系统栈缺省装配（Schannel / SecureTransport），不给 provider 即是「开」，
-  不必也不该塞依赖。
+  这两个套件在 CI 里从未真正执行过。口径见 `codespec/BUILD_OPTIONS.md` §1.2 / §2.3。
 inputs:
   flavor:
     description: >-
-      `native`（默认）：按 runner OS 取串。`wasm`：Emscripten 口径只取 Inspector —— 浏览器侧没有
-      「含 include/ 与 lib/ 的 TLS provider 安装根」，硬给 provider 必然 configure 期 FATAL。
+      `native`（默认）：按 runner OS 取串。`wasm`：Emscripten 口径只取 Inspector —— 浏览器侧 TLS 走
+      fetch、不编 mbedTLS / OpenSSL，硬给 TLS 开关必然 configure 期 FATAL。
     required: false
     default: native
 outputs:
@@ -27,37 +24,6 @@ outputs:
 runs:
   using: composite
   steps:
-    # provider 只接受「安装根」，而 Debian 系的 /usr **同时挂着 openssl 与 mbedtls 两套头**，多命中
-    # 时 OpenSSL 优先（见 `cmake/AuroraNetTls.cmake`）——把**唯一**一条 entry 指向 /usr 等价于永远
-    # 选不中 mbedTLS，`tls_mbedtls.cpp` 在 CI 里就永远不会被编译。这里装完包再搭一个只挂着 mbedtls
-    # 子树的安装根，让该条 entry 的推导**确定性**落到 `AURORA_ENABLE_NET_TLS_MBEDTLS`：
-    #   include/mbedtls -> /usr/include/mbedtls（openssl 头不在此根下，无从胜出）
-    #   lib            -> 只放 mbedtls / mbedx509 / mbedcrypto 三枚静态库
-    # 库定位按推导出的种类各查各名（mbedTLS 腿查 `mbedtls`/`mbedx509`/`mbedcrypto`，OpenSSL 腿查
-    # `ssl`/`crypto`），因此「宏推导成 mbedTLS 却链到 OpenSSL 的库」这种错配在装配面就不成立；
-    # 本根仍然只放三枚 mbedtls 静态库，是为了让这条 entry 的头与库来自同一个安装根。
-    # 安装根钉在固定绝对路径 `/opt/aurora-tls-mbedtls`，好让 `NET_CAPABILITY_FLAGS_LINUX` 里能
-    # 写死同一个字符串（provider 值若在 shell 变量里传递，就回到「各作业口径偷偷漂移」的老问题）。
-    - name: Install TLS provider dev package and root (mbedTLS, Linux only)
-      if: runner.os == 'Linux' && inputs.flavor != 'wasm'
-      shell: bash
-      run: |
-        set -euo pipefail
-        sudo apt-get update -y
-        sudo apt-get install -y libmbedtls-dev
-        root=/opt/aurora-tls-mbedtls
-        arch="$(gcc -dumpmachine)"
-        sudo mkdir -p "$root/include" "$root/lib"
-        sudo ln -sfn /usr/include/mbedtls "$root/include/mbedtls"
-        for n in mbedtls mbedx509 mbedcrypto; do
-          sudo ln -sfn "/usr/lib/$arch/lib$n.a" "$root/lib/lib$n.a"
-        done
-        # 自证推导会落在 MBEDTLS：该根下有 mbedtls/ssl.h、没有任何 openssl 头、且 lib 下没有 libssl
-        test -f "$root/include/mbedtls/ssl.h"
-        test ! -e "$root/include/openssl/ssl.h"
-        test -f "$root/lib/libmbedtls.a"
-        test ! -e "$root/lib/libssl.a"
-
     - name: Resolve flags
       id: resolve
       shell: bash

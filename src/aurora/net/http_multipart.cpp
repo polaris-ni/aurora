@@ -338,7 +338,7 @@ auto MultipartWriter::validate() const -> Result<void> {
         return form_invalid("multipart body has no part: a multipart/form-data body carries at least one part");
     }
     if (boundary_.empty() || boundary_.size() > AURORA_BOUNDARY_MAX_LENGTH ||
-        std::any_of(boundary_.begin(), boundary_.end(), [](char unit) { return !is_boundary_char(unit); })) {
+        std::ranges::any_of(boundary_, [](char unit) { return !is_boundary_char(unit); })) {
         return form_invalid("multipart boundary must be 1.." + std::to_string(AURORA_BOUNDARY_MAX_LENGTH) +
                             " characters drawn from letters, digits and '()+_,-./:=? (a space is not accepted: "
                             "it would have to be quoted inside the Content-Type parameter)");
@@ -376,8 +376,7 @@ auto MultipartWriter::validate() const -> Result<void> {
         }
         // 内存部件逐字节查一次；文件部件不查——那要先读完整份，与惰性读的承诺正相反。库生成的边界与
         // 文件内容相撞的概率约等于零，用固定边界上传含该字符串的文件则是调用方的契约，不在这里兜。
-        if (part.path.empty() &&
-            std::search(part.data.begin(), part.data.end(), boundary_.begin(), boundary_.end()) != part.data.end()) {
+        if (part.path.empty() && std::ranges::search(part.data, boundary_).begin() != part.data.end()) {
             return form_invalid(label +
                                 " carries a payload that contains the boundary: the peer would treat that "
                                 "occurrence as a delimiter line and cut the body short");

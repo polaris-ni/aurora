@@ -214,10 +214,10 @@ auto sha256(std::span<const std::uint8_t> bytes) -> std::vector<std::uint8_t> {
                 ::BCryptFinishHash(hash, digest.data(), digest_length, 0) != STATUS_SUCCESS) {
                 digest.clear();
             }
-            ::BCryptDestroyHash(hash);
+            (void)::BCryptDestroyHash(hash);
         }
     }
-    ::BCryptCloseAlgorithmProvider(algorithm, 0);
+    (void)::BCryptCloseAlgorithmProvider(algorithm, 0);
     return digest;
 }
 
@@ -642,7 +642,7 @@ auto SchannelBackend::create(const TlsContext &context, std::string_view server_
         if (store == nullptr) {
             return tls_error(ErrorCode::NetTlsEngineUnavailable, "cannot open an in-memory certificate store");
         }
-        WCHAR root_name[] = L"ROOT";
+        constexpr WCHAR root_name[] = L"ROOT";
         if (auto *system = ::CertOpenSystemStoreW(0, root_name); system != nullptr) {
             for (const auto *item = ::CertEnumCertificatesInStore(system, nullptr); item != nullptr;
                  item = ::CertEnumCertificatesInStore(system, item)) {
@@ -963,7 +963,7 @@ auto SchannelBackend::next_records(std::vector<char> &plaintext, std::vector<cha
             const auto boundary = first_record_bytes();
             const auto eaten = boundary == 0 ? pending_.size() : boundary;
             pending_.erase(pending_.begin(), pending_.begin() + static_cast<std::ptrdiff_t>(eaten));
-            if (auto round = renegotiate(outgoing); !round) {
+            if (const auto round = renegotiate(outgoing); !round) {
                 return round.error();
             }
             if (!outgoing.empty()) {

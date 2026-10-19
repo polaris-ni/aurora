@@ -133,7 +133,7 @@ class ExchangeSink final : public DataSink {
     /// @brief 以宿主与会话构造，并就地装好本条流的解析器。
     /// @param host 订阅侧宿主（由调用方持有，本壳只借用）。
     /// @param session 跨交换存活的那份会话事实。
-    ExchangeSink(SseSink &host, SseSession session)
+    ExchangeSink(SseSink &host, const SseSession &session)
         : host_(host), session_(session),
           parser_(detail::SseParserSinks{
               .on_event = [this](const detail::SseParsedEvent &event) -> bool { return deliver(event); },
@@ -215,7 +215,7 @@ class ExchangeSink final : public DataSink {
     /// @brief 解析器派发一条事件：落累计、交宿主，并把宿主的收摊答复回传给解析器。
     /// @param event 成形的那条事件（视图属于解析器缓冲，本次调用内有效）。
     /// @return 宿主继续收为 true。
-    auto deliver(const detail::SseParsedEvent &event) -> bool {
+    auto deliver(const detail::SseParsedEvent &event) const -> bool {
         // `id` 取的是**派发时刻**该流的续传标识（DOM 的 `lastEventId` 同口径），可能是更早某条带下来的；
         // 视图指向帧上的 `last_event_id`，本次回调内不会被改写（解析器的字段效应只在下一行才写它）。
         const SseEvent view{.type = std::string_view{event.type},
