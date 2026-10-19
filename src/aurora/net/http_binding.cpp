@@ -128,7 +128,9 @@ class SseBinder final : public SseSink {
 /// 开始**：帧收尾时交回句柄，此后读环还要跑很久。收尾口那份持有随那次调用一起销毁，壳就成了一根没人认领的
 /// 悬空引用（会话借用的 `WebSocketSink&` 指着一块已释放的内存）。于是本壳自己保住自己（`self_`），并在会话
 /// 对该 sink 的最后一次调用里松手——`on_closed` 恒恰一次且是唯一的终态出口（`net/websocket.h` 第八条），从
-/// 那里放手既保证会话此后摸不到已销毁的 sink，也保证壳不会活成一根泄漏。
+/// 那里放手既保证会话此后摸不到已销毁的 sink，也保证壳不会活成一根泄漏。这枚「最后一次调用」与该句柄交回
+/// 本壳的先后**不由本层决定**（会话可以在起跑那一趟里就说完全部事实），因此自持只在那次调用还没发生时才开始
+/// （`terminal_` 的口径见 `submit()`）。
 ///
 /// 第二处差别是取消的去向。`connect_websocket()` 的令牌管到握手结算为止，此后不再驱动会话——那条纪律守的是
 /// 「同一份资源不留两个互不知情的所有者」。本壳要的形状是「宿主停手 = 这条订阅结束」，于是**由壳自己**把那枚
@@ -159,8 +161,19 @@ class WsBinder final : public WebSocketSink, public std::enable_shared_from_this
     ///
     /// 登记钩子时若取消事实已经成立，那条契约要求在当前线程立即触发一次——正好是「宿主在握手期间就按了停手」
     /// 的现场：句柄此刻已在手上，`close_from_host()` 当场把这条会话关掉，不留一条没人收摊的连接。
-    /// @param session 握手交出的会话句柄（单所有权，随本壳存活到收尾）。
+    ///
+    /// 反过来的先后同样出得了，而本入口开头那问就是为它设的：握手那次读不必停在头部块边界上，帧流里已经抵达
+    /// 的字节（对端的消息连同它的 close）会在 `start()` 这一趟里就地跑完，于是 `on_closed` 早在句柄交回发起侧
+    /// **之前**就落进资源。那之后本壳再自持就成了没有终点的持有——松手那一行永远不会有人叫。asan 腿实测到
+    /// 这个形态：四条「对端先说close」的用例各留下一座「壳 + 句柄 + 会话 + 传输状态」的孤岛，全部只以
+    /// 间接泄漏的面目出现（环内每一枚都被同环的邻居指着，故没有一处直接泄漏可指）。
+    /// @param session 握手交出的会话句柄（单所有权，随本壳存活到收尾；本壳已见过终态即就地放手）。
     auto submit(WebSocket session) -> void {
+        if (terminal_) {
+            // 句柄按值进来、随本次返回销毁：`detach()` 对已定局的会话只补一次幂等的 `abort_link()`，
+            // 该报的终态已经报过，这里不再碰 sink，也就不留任何在途事实。
+            return;
+        }
         session_ = std::move(session);
         self_ = shared_from_this();  // 自持：发起侧那份收尾口在本次调用返回后即销毁，此后只有本壳认得自己
         cancellation_.on_cancel([weak = weak_from_this()]() -> void {
@@ -191,6 +204,9 @@ class WsBinder final : public WebSocketSink, public std::enable_shared_from_this
     /// @brief 会话收尾：干净收摊出一条 `last` 标记，非干净收摊落 `fail()`，随后松开这份持有。
     /// @param close 收尾事实（线上状态码 / 原因 / 由谁开启 / 本地判定的失败），只借用，分量随记录各自拷走。
     auto on_closed(const WsCloseInfo &close) -> void override {
+        // 终态旗位先立再落条目：它是 `submit()` 的唯一闸（先后次序不由本层决定，机理见那里的说明），
+        // 而「已经报过终态」这件事在提交那一步之前就成立。
+        terminal_ = true;
         // 「正常关闭」的判据就是公共头给 `WsCloseInfo::failure` 那一句：既无码又无文本。本壳不另立一条分岔，
         // 否则同一件事在库里有两个说法。
         const bool clean =
@@ -233,6 +249,7 @@ class WsBinder final : public WebSocketSink, public std::enable_shared_from_this
     Cancellation cancellation_;  ///< 宿主那枚令牌的副本（钩子据此接回本端收摊）
     std::optional<WebSocket> session_;  ///< 握手交出的会话句柄（本壳是它唯一的持有者）
     std::shared_ptr<WsBinder> self_;  ///< 自持：会话的存续期长于发起它的那条协程帧
+    bool terminal_{false};  ///< 是否已报过终态：`on_closed()` 与 `submit()` 的先后不由本层决定，闸设在后一边
     std::uint64_t index_{0};  ///< 已提交的消息条数（= 下一条的序号，也是收尾标记那条的序号）
 };
 

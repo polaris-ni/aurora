@@ -36,6 +36,10 @@ freeze: minor-versions-are-additive
 
 - `state/coroutine.h` 的 `CoroTask<T>::on_done(hook)` 观察者形参由 `std::function<void(const Result<T> &)>` 改为 `std::function<void(Result<T> &)>`：观察者拿到的是**结果槽本身**，与 `~promise_type` 触发时交出的那一份同源。**源码兼容**——按 `const Result<T> &` 声明的既有 lambda 照样绑得上，可拷贝载荷的行为逐字不变；改形的理由是让单所有权载荷（`WebSocket` 句柄）能从回调里**搬走**——按 `const &` 交出时它只剩拷贝，而那份拷贝在语义上不存在（两个持有者就意味着两次关闭）。`void` 特化仍刻意不提供 `on_done()`。
 
+### Fixed
+
+- `deliver_ws` 的接线壳 `WsBinder` 不再在终态已经报过之后才开始自持。握手那次读不必停在头部块边界上，帧流里已经抵达的字节（对端的消息连同它的 close）可以在会话起跑那一趟里就地跑完，于是 sink 的**最后一次**调用（`on_closed`）早于句柄交回本壳（`submit()`）；原形态下这笔自持没有松手点，本壳连同 `WebSocket` 句柄、会话与其传输状态成为一座环内互指的孤岛——CI 的 asan 腿在 `utest_net_http_binding` 报 22 042 字节 / 101 枚分配、全部只以间接泄漏的面目出现（环内每一枚都被同环的邻居指着），四条「对端先说 close」的用例各漏一枚会话。现由一枚终态旗位作闸：见过终态即不再自持，句柄随那次交接就地销毁（`detach()` 对已定局的会话只补一次幂等的 `abort_link()`）。宿主可见行为逐条不变（那 21 例的断言一字未改），判据按「先有红灯、后有修复」的顺序自证，Linux gcc ASan 树复跑 410/410 全绿且零泄漏。契约与证据记在 `codespec/specification/06-app-platform.md` §8.8.35。
+
 ### Notes
 
 - WebSocket 客户端与公共随机面的验收口径：全量 ctest 435/435 通过（含全部 `check_*` 静态门禁，其中 `check_api_schema_sync` 绿即证明两枚新公共头与 `WsMessageKind` 已进 `aurora_api.json`，实测该生成物在本轮整形后无 diff，`enums` 39 枚 / `error_codes` 140 枚）、`format-check` 1160 文件差异 0。⚠️ tidy 覆盖面口径教训：`run_clang_tidy.py --include` 是**未锚定**的正则，前两轮按 `net/(ws_frame|ws_handshake|…)` 书写只命中 `src/aurora/net/` 直属那几枚 TU，`net/detail/` 下的三枚与测试侧六枚（含 `tests/framework/ws_peer.h`）从头到尾没进过门禁面；把正则展开为 `src/aurora/net/(detail/(…)|…)` 后，库侧另得 18 条、测试侧 69 条，现已全部归零（13 枚 TU、findings 0）。测试侧那 69 条的处置口径是「能改码不改配置」：13 枚文件级常量按 `AURORA_` 前缀改名、12 处聚合初始化改指名写法、4 处形参/局部量改借用、3 处补运算括号、2 处定长下标改 `.at()`、1 处指针加减改 `substr`、1 处枚举底型收窄、1 处补 `~WsScene() = default`、1 处 `bool(x)` 改 `x.ok()`、1 处删冗余 cast，合计 39 条真改；余下 30 条走就地豁免并写明原因（26 处是 `AURORA_TEST_REQUIRE` 已守卫、而路径分析穿不过断言宏的 `.value()` / `->`，2 处是收尾泵的析构面，2 处是「故意在移出后的对象上取值」的用例判据本身）。库侧那 18 条同口径：能改码的改码（`subspan` / `substr` 替指针加减、形参与局部量改借用、`std::move` 交出所有权），穿不过分析器的定长表下标与 `reinterpret_cast` 目标类型逐点豁免并写明原因。
