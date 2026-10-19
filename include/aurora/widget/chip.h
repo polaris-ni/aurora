@@ -8,8 +8,10 @@
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
+#include "aurora/icon/icon.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -31,8 +33,10 @@ class Chip : public LeafWidget {
     Chip() = default;
     /// @brief 构造标签：直接给定文字与可选背景色。
     /// @param label 标签文字（移入 `label_`）
-    /// @param bg    背景色，缺省浅灰 {230,230,230}
-    explicit Chip(std::string label, Color bg = Color{230, 230, 230}) : label_(std::move(label)), bg_(bg) {}
+    /// @param bg    背景色；缺省 `std::nullopt` ⇒ 未显式设色，跟随主题 `roles.surface_variant`
+    ///             （ThemeScope 换肤即生效）。传入具体色值则显式覆盖主题。
+    explicit Chip(std::string label, std::optional<Color> bg = std::nullopt)
+        : label_(std::move(label)), bg_(bg) {}  // optional 平凡可拷贝，move 无收益
 
     /// @brief 类型名：供注册表/日志/序列化按名分派。
     /// @return 静态字符串 `"Chip"`
@@ -48,9 +52,9 @@ class Chip : public LeafWidget {
         mark_needs_paint();  // 文字变更需重绘前景
         return *this;
     }
-    /// @brief 当前背景色。
-    /// @return `bg_` 值拷贝
-    [[nodiscard]] auto background() const -> Color { return bg_; }
+    /// @brief 当前背景色（可选）。
+    /// @return `bg_` 的常引用；`!has_value()` 表示未显式设色（绘制时回落主题 `surface_variant`）
+    [[nodiscard]] auto background() const -> const std::optional<Color> & { return bg_; }
     /// @brief 设置背景色（链式）。
     /// @param c 新背景色（写入 `bg_` 并标记重绘）
     /// @return 引用 `*this` 以继续链式配置
@@ -61,16 +65,31 @@ class Chip : public LeafWidget {
     }
 
     /// @brief 设置头像文本（显示在标签左侧，如 emoji 或首字母）。
-    /// @param av 头像文本（移入 `avatar_`，空串=不显示）
+    /// @param av 头像文本（移入 `avatar_`，空串=不显示）；与 `avatar_icon` 互斥，本调用清空图标入口
     /// @return 引用 `*this` 以继续链式配置
     auto set_avatar(std::string av) -> Chip & {
         avatar_ = std::move(av);
+        avatar_icon_.reset();  // 两入口互斥：字符串头像优先时清空图标入口
         mark_needs_paint();  // 前导内容变更需重绘
         return *this;
     }
     /// @brief 当前头像文本。
     /// @return `avatar_` 的常引用（空串=未设置）
     [[nodiscard]] auto avatar() const -> const std::string & { return avatar_; }
+
+    /// @brief 设置图标头像（显示在标签左侧，`IconData` 字形或 SVG）。
+    /// @param data 图标数据；与 `avatar` 字符串互斥，本调用清空文本入口
+    /// @return 引用 `*this` 以继续链式配置
+    auto set_avatar_icon(icon::IconData data) -> Chip & {
+        avatar_icon_ = std::move(data);
+        avatar_.clear();  // 两入口互斥：图标入口优先时清空文本头像
+        mark_needs_layout();
+        mark_needs_paint();
+        return *this;
+    }
+    /// @brief 当前图标头像（可空）。
+    /// @return `avatar_icon_` 的常引用；`!has_value()` 表示未设置
+    [[nodiscard]] auto avatar_icon() const -> const std::optional<icon::IconData> & { return avatar_icon_; }
 
     /// @brief 设置删除回调（非空时显示 × 按钮）。
     /// @param cb 删除回调；点击右 30% 区域触发
@@ -114,6 +133,27 @@ class Chip : public LeafWidget {
         return *this;
     }
 
+    /// @brief 解析标签背景色：未显式设色时经 ctx 取主题 `surface_variant`（ThemeScope 换肤即生效），显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light（与 OS 未表态同口径）。
+    /// @return 生效背景色。
+    [[nodiscard]] auto resolve_background(const BuildContext &ctx) const -> Color {
+        return bg_.value_or(inherit_theme(ctx).roles.surface_variant);
+    }
+
+    /// @brief 解析标签/头像文字色：未显式设色时经 ctx 取主题 `on_surface`，显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效文字色。
+    [[nodiscard]] auto resolve_text_color(const BuildContext &ctx) const -> Color {
+        return text_color_.value_or(inherit_theme(ctx).roles.on_surface);
+    }
+
+    /// @brief 解析删除钮颜色：未显式设色时经 ctx 取主题 `on_surface_variant`，显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效删除钮颜色。
+    [[nodiscard]] auto resolve_delete_color(const BuildContext &ctx) const -> Color {
+        return delete_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
+    }
+
     /// @brief 静态自描述（规格附录 B）：可序列化属性/事件/子策略的运行时描述表。
     /// @return `Chip` 的 `WidgetDescriptor`（label/avatar/颜色/字号/圆角等，事件 on_delete，无子节点）
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
@@ -135,21 +175,21 @@ class Chip : public LeafWidget {
                      .json_type = "string"},
                     {.name = "background",
                      .type = "Color",
-                     .default_value = "Color(230,230,230)",
+                     .default_value = R"("theme.surface_variant")",
                      .required = false,
-                     .note = "Background color",
+                     .note = "Background color (follows theme surface_variant when unset)",
                      .json_type = "array"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = "Color::black()",
+                     .default_value = R"("theme.on_surface")",
                      .required = false,
-                     .note = "Text color",
+                     .note = "Text color (follows theme on_surface when unset)",
                      .json_type = "array"},
                     {.name = "delete_color",
                      .type = "Color",
-                     .default_value = "{128,128,128,255}",
+                     .default_value = R"("theme.on_surface_variant")",
                      .required = false,
-                     .note = "Delete button color",
+                     .note = "Delete button color (follows theme on_surface_variant when unset)",
                      .json_type = "array"},
                     {.name = "font_size",
                      .type = "float",
@@ -223,9 +263,16 @@ class Chip : public LeafWidget {
         if (!avatar_.empty()) {
             props.set("avatar", avatar_);
         }
-        props.set("background", color_to_json(bg_));
-        props.set("text_color", color_to_json(text_color_));
-        props.set("delete_color", color_to_json(delete_color_));
+        // 背景/文字/删除色仅在显式设置时输出：保留「跟随主题」语义（与 Button/Text 同口径）
+        if (bg_.has_value()) {
+            props.set("background", color_to_json(*bg_));
+        }
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));
+        }
+        if (delete_color_.has_value()) {
+            props.set("delete_color", color_to_json(*delete_color_));
+        }
         props.set("font_size", font_size_);
         props.set("corner_radius", corner_radius_);
     }
@@ -259,7 +306,7 @@ class Chip : public LeafWidget {
 
   protected:
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        paint_background(p, bounds);
+        paint_background(p, bounds, ctx);
         paint_foreground(p, bounds, ctx);
     }
 
@@ -270,6 +317,9 @@ class Chip : public LeafWidget {
         float w = h_pad * 2.0F;
         if (!avatar_.empty()) {
             w += render::FontEngine::measure_width(avatar_, f) + 4.0F;
+        }
+        if (avatar_icon_.has_value()) {
+            w += font_size_ + 4.0F;  // 图标盒占一行字高
         }
         w += render::FontEngine::measure_width(label_, f);
         if (on_delete_) {
@@ -282,9 +332,10 @@ class Chip : public LeafWidget {
     /// @brief 继承扩展点：绘制胶囊背景（悬停调暗）。
     /// @param p 绘制器。
     /// @param bounds 本控件布局矩形（圆角未设时取其半高为半径）。
-    virtual auto paint_background(Painter &p, const Rect &bounds) -> void {
+    /// @param ctx 构建上下文：未显式设色时解析主题 `surface_variant` 作背景。
+    virtual auto paint_background(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
         const float radius = corner_radius_ >= 0.0F ? corner_radius_ : bounds.size.height * 0.5F;
-        const Color bg = hovered() ? bg_.shaded(0.92F) : bg_;
+        const Color bg = hovered() ? resolve_background(ctx).shaded(0.92F) : resolve_background(ctx);
         if (radius > 0.0F) {
             p.fill_rounded_rect(bounds, radius, bg);
         } else {
@@ -295,34 +346,45 @@ class Chip : public LeafWidget {
     /// @brief 继承扩展点：绘制头像 + 标签 + 删除钮。
     /// @param p 绘制器。
     /// @param bounds 本控件布局矩形（文本基线与删除钮均在其内定位）。
+    /// @param ctx 构建上下文：供主题取色（标签/头像/删除钮未显式设色时回落对应角色）。
     /// @note 名称不可用 `paint_content`：该名在 `Widget` 中是 `virtual` 的绘制管线核心
     ///       （`paint()` → `render_into()` → `paint_content()`），签名完全一致会被**意外覆盖**，
     ///       导致管线绕过 `on_paint`，胶囊背景永不绘制（历史缺陷）。
-    virtual auto paint_foreground(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void {
+    virtual auto paint_foreground(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
         const Font f{.size_pt = font_size_};
+        const Color tc = resolve_text_color(ctx);
+        const Color dc = resolve_delete_color(ctx);
         float x = bounds.origin.x + 10.0F;
         const float y = bounds.origin.y + 4.0F;
         if (!avatar_.empty()) {
             p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = 100.0F, .height = 20.0F}}, avatar_,
-                        f, text_color_);
+                        f, tc);
             x += render::FontEngine::measure_width(avatar_, f) + 4.0F;
         }
+        if (avatar_icon_.has_value()) {
+            const Rect icon_box{
+                .origin = Point{.x = x, .y = bounds.origin.y + ((bounds.size.height - font_size_) / 2.0F)},
+                .size = Size{.width = font_size_, .height = font_size_}};
+            paint_icon_data(p, icon_box, *avatar_icon_, tc, 0.0F);
+            x += font_size_ + 4.0F;
+        }
         p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = 200.0F, .height = 20.0F}}, label_, f,
-                    text_color_);
+                    tc);
         x += render::FontEngine::measure_width(label_, f);
         if (on_delete_) {
             p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = 30.0F, .height = 20.0F}}, " ×", f,
-                        delete_color_);
+                        dc);
         }
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     std::string label_;
     std::string avatar_;
-    Color bg_{230, 230, 230};
+    std::optional<icon::IconData> avatar_icon_;  ///< 图标头像（`IconData` 字形 / SVG）；与 `avatar_` 互斥
+    std::optional<Color> bg_;  ///< 标签背景色；空 = 跟随主题 surface_variant
     std::function<void()> on_delete_;
-    Color text_color_ = Color::black();  ///< 文本色
-    Color delete_color_ = Color{128, 128, 128, 255};  ///< 删除钮颜色
+    std::optional<Color> text_color_;  ///< 标签/头像文字色；空 = 跟随主题 on_surface
+    std::optional<Color> delete_color_;  ///< 删除钮颜色；空 = 跟随主题 on_surface_variant
     float font_size_ = 13.0F;  ///< 字号 pt
     float corner_radius_ = -1.0F;  ///< 圆角半径 dp；< 0 自动 = 高度一半
     // NOLINTEND(*-non-private-member-variables-in-classes)
@@ -375,6 +437,20 @@ class Badge : public SingleChild {
         return *this;
     }
 
+    /// @brief 解析徽章背景色：未显式设色时经 ctx 取主题 `error`（ThemeScope 换肤即生效），显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效徽章底色。
+    [[nodiscard]] auto resolve_badge_color(const BuildContext &ctx) const -> Color {
+        return badge_color_.value_or(inherit_theme(ctx).roles.error);
+    }
+
+    /// @brief 解析徽章文字色：未显式设色时经 ctx 取主题 `on_error`，显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效徽章文字色。
+    [[nodiscard]] auto resolve_text_color(const BuildContext &ctx) const -> Color {
+        return text_color_.value_or(inherit_theme(ctx).roles.on_error);
+    }
+
     /// @brief 静态自描述（规格附录 B）：可序列化属性/事件/子策略的运行时描述表。
     /// @return `Badge` 的 `WidgetDescriptor`（count/背景色/文字色，单子节点策略）
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
@@ -392,15 +468,15 @@ class Badge : public SingleChild {
                      .min_value = "0"},
                     {.name = "badge_color",
                      .type = "Color",
-                     .default_value = "Color(255,0,0)",
+                     .default_value = R"("theme.error")",
                      .required = false,
-                     .note = "Badge background color",
+                     .note = "Badge background color (follows theme error when unset)",
                      .json_type = "array"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = "Color::white()",
+                     .default_value = R"("theme.on_error")",
                      .required = false,
-                     .note = "Badge text color",
+                     .note = "Badge text color (follows theme on_error when unset)",
                      .json_type = "array"},
                     {.name = "width",
                      .type = "Length",
@@ -438,8 +514,13 @@ class Badge : public SingleChild {
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用属性
         props.set("count", count_);
-        props.set("badge_color", color_to_json(badge_color_));
-        props.set("text_color", color_to_json(text_color_));
+        // 徽章底/文字色仅在显式设置时输出：保留「跟随主题」语义（与 Button/Text/Chip 同口径）
+        if (badge_color_.has_value()) {
+            props.set("badge_color", color_to_json(*badge_color_));
+        }
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));
+        }
     }
 
     /// @brief 从 JSON 重建 Badge 自有属性（与 `serialize_props` 对偶；键缺失保留现值）。
@@ -467,10 +548,10 @@ class Badge : public SingleChild {
             constexpr float bh = 18.0F;
             const Rect badge_rect{.origin = Point{.x = bounds.origin.x + bounds.size.width - bw, .y = bounds.origin.y},
                                   .size = Size{.width = bw, .height = bh}};
-            p.fill_rounded_rect(badge_rect, bh * 0.5F, badge_color_);  // 胶囊徽章（对标 Material Badge）
+            p.fill_rounded_rect(badge_rect, bh * 0.5F, resolve_badge_color(ctx));  // 胶囊徽章（对标 Material Badge）
             const Font f{.size_pt = 11.0F, .weight = 700};
             const std::string txt = (count_ > 99) ? "99+" : std::to_string(count_);
-            p.draw_text(badge_rect, txt, f, text_color_);
+            p.draw_text(badge_rect, txt, f, resolve_text_color(ctx));
         }
     }
 
@@ -488,8 +569,8 @@ class Badge : public SingleChild {
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     int count_ = 0;
-    Color badge_color_ = Color::red();
-    Color text_color_ = Color::white();  ///< 徽章文字色
+    std::optional<Color> badge_color_;  ///< 徽章底色；空 = 跟随主题 error
+    std::optional<Color> text_color_;  ///< 徽章文字色；空 = 跟随主题 on_error
     // NOLINTEND(*-non-private-member-variables-in-classes)
 };
 

@@ -41,7 +41,7 @@ struct Event {
 | `ScrollEvent` | `position`、`delta_x`（右为正）、`delta_y`（**上为正**）、`remaining_y`（消费后未用尽的垂直余量，与 `delta_y` 同单位同号，默认 0）、`modifiers`（修饰键位组合，后端在产生处写入，见 §2.2.2） | `event.h` |
 | `TextInputEvent` | `text`（UTF-8 文本片段） | `event.h` |
 | `TextCompositionEvent` | `preedit`（UTF-8 预编辑串，空 = 组合结束/取消）、`cursor_index`（组合光标，**preedit 内码点下标**）、`sel_start` / `sel_end`（待转换选区，含尾；无选区时 `sel_end == AURORA_NO_SELECTION`）、`committed`（本次上屏文本，UTF-8） | `event.h` |
-| `FileDropEvent` | `position` 与拖放文件信息 | `event.h` |
+| `SystemDropEvent` | 跨进程系统拖放四态：`phase`（`SystemDropPhase::Enter` / `Over` / `Leave` / `Drop`）、`position`（整幅表面逻辑坐标，见 §2.3）、`formats`（可用格式的 MIME 清单）、`proposed`（源建议动作）、`allowed`（目标允许动作，派发器在 enter / over 态按 accept 查询与 `proposed` 求交后写定）、`payload`（`std::shared_ptr<const DragPayload>`，仅 drop 态保证非空）；便利读取 `files()` / `text()` / `image()` / `bytes(mime)` 一律返回 `Result`，**格式不存在 = `Ok` 空值** | `event.h` |
 | `TouchEvent` | `TouchPoint{id, position, prev_position, is_active}` 集合 | `event.h` |
 
 枚举：`MouseButton{Left, Right, Middle}`、`MouseAction`（`event.h`）、`KeyAction{Down, Up}`、`ModifierKey`（`event.h）、`KeyCode`（`keycode.h`）。
@@ -196,7 +196,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | `dispatch_mouse(Widget& root, MouseEvent&, FocusManager* = nullptr) -> bool`（实体方法） | 带指针捕获的鼠标派发：Press 命中后缓存命中链，后续 Move/Release 即使命中失败也持续派发给按下时目标，直到 Release 解除捕获（`Application` 走此路径）；**派发前覆写 `e.click_count`**（连击序号，§2.2.1） |
 | `static dispatch(Widget& root, KeyEvent&, FocusManager&) -> bool` | 键盘事件；识别 Tab / Shift+Tab 并转为 `move_focus`，Tab、方向键与激活键各有一个控件级 opt-in 前置投递（`wants_tab_keys()` / `wants_navigation_keys()` / `wants_activation_keys()`，见 §4.2）；`root` 为统一重载签名而保留，键盘不经命中链 |
 | `static dispatch(Widget& root, ScrollEvent&) -> bool` | 滚动事件：沿命中链**自最深向根**找 `wants_scroll()` 者逐个派发，余量经 `remaining_y` 上冒（§3.3） |
-| `static dispatch(Widget& root, FileDropEvent&) -> bool` | 文件拖放事件（不冒泡，仅交给命中目标） |
+| `static dispatch(Widget& root, SystemDropEvent&) -> bool` | 系统拖放四态（不冒泡，仅交给命中目标；`Enter` / `Over` 两态额外调用命中目标的 `query_system_drag_accept`，与 `proposed` 求交后写定 `e.allowed`，见 §5.2） |
 | `static dispatch(Widget& root, TextInputEvent&, FocusManager&) -> bool` | 文本输入（只路由到焦点控件；无焦点返回 `false`） |
 | `static dispatch(Widget& root, TextCompositionEvent&, FocusManager&) -> bool` | IME 组合态同步推送（`event/dispatcher.h`）：与文本输入同径——**只路由到当前焦点控件**的 `on_text_composition`，不经命中链、不冒泡（组合串属于正在输入的编辑器，上冒只会让容器误吞）；无焦点返回 `false` |
 
@@ -464,6 +464,16 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | `DragData` | 拖拽载荷，含 `mime_type`（`"text/plain"`、`"aurora/widget"` 或自定义） | `drag_drop.h` |
 | `DragSession` | 一次拖拽会话，跟踪 `origin_` 与 `active_` | `drag_drop.h` |
 | `DropTargetCallbacks` | 放置目标回调集 | `drag_drop.h` |
+
+上表是**应用内**拖拽（进程内控件重排 / 手势，不经 OS 拖放协议）。与之并列的另一条路径是**跨进程系统拖放**（资源管理器 ↔ 应用），由 `SystemDropEvent` 事件族表达，二者不共用类型也不共用回调：
+
+- **四态共用一个结构**：`SystemDropEvent` 以 `phase` 字段区分 `Enter` / `Over` / `Leave` / `Drop`（与 `MouseEvent` + `MouseAction` 同款惯例，不造四个事件类型）。四态**一律不冒泡**、只交给命中目标——沿用文件拖放的既有派发规则；`Enter` / `Over` 是「询问」态，读取载荷按空口径返回，**只有 `Drop` 态保证带载荷**。
+- **坐标口径**：`position` 与其余位置类事件一致，取「整幅表面逻辑坐标」（§2.3）；后端只做「屏幕 → 客户区 → 逻辑」一次换算，命中侧以整窗下沉壳为派发根，与绘制共用同一条平移。
+- **accept 查询是单一真值源**：`Widget::query_system_drag_accept(formats) -> DragAction` 返回「本控件会执行什么动作」，基类默认 `DragAction::None`（不接受）。派发器在 `Enter` / `Over` 两态命中后调用它，与源建议动作 `proposed` 求交写入 `allowed`（两侧表态冲突即 `None`），宿主据此决定 OS 光标反馈。该查询在 `Over` 态按指针采样频率发生，**实现须常量级、禁止触发重布局**。
+- **载荷读取**：`DragPayload` 是 pimpl 的只读句柄（`std::shared_ptr<const DragPayload>`），按 MIME 取原始字节；`files()` / `text()` / `image()` / `bytes(mime)` 为便利读取，一律返回 `Result`，**格式不存在 = `Ok` 空值**（空内容不是失败，与 `Clipboard` 同口径）。`files()` 解码 `text/uri-list`，只返回可映射为本地路径的条目，非 `file` scheme 的行静默跳过。
+- **动作口径**：`DragAction{None, Copy, Move, Link}`，`None` 表示不接受 / 无动作（也是取消与失败的返回值，**不是成功**）。
+- **拖出**：控件经 `on_provide_drag()` 声明 `DragOffer`（格式清单 + 按 MIME 提供字节的回调），`begin_system_drag()` 发起会话；结束回调定名 `on_system_drag_end(DragAction)`，与应用内拖拽的 `on_drag_end` **刻意分名**（同一控件上两套拖拽语义不共名）。
+- **无障碍替代**：拖放不是唯一路径——粘贴、文件对话框等非拖拽入口在 UI 上须可达，放置反馈不得只靠光标形态表达（颜色 / 高亮 / 文案同时给）。
 
 ---
 

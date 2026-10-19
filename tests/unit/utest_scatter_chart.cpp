@@ -5,9 +5,7 @@
 /// 空数据与 NaN 点跳过，以及像素 golden 基线（chart_scatter.png，受 AURORA_UPDATE_GOLDEN 控制）
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -17,7 +15,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
-#include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
 #include "framework/json_access.h"
@@ -204,6 +201,78 @@ AURORA_TEST_CASE(golden_scatter_chart_matches_baseline) {
     p.axis_x = ChartAxisSpec{.label = "x", .tick_count = 5};
     p.axis_y = ChartAxisSpec{.label = "y", .tick_count = 5};
     golden::compare_or_update("chart_scatter", render_chart(p));
+}
+
+AURORA_TEST_CASE(paint_and_interaction_branches) {
+    Painter painter;
+    const BuildContext ctx;
+    auto paint_at = [&painter, &ctx](Widget &w) -> void {
+        w.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = w.size()}, ctx);
+    };
+
+    // 1) 空数据：无界约束走 300x200 缺省画布。
+    ScatterChart empty{};
+    empty.layout(Constraints{}, ctx);
+    paint_at(empty);
+
+    // 2) 非有限点跳过 + 图例 Bottom 几何（仅验证绘制不炸）。
+    ScatterChartProps p = bare_props();
+    p.series = {ScatterSeries{.name = "A",
+                              .points = {ChartPoint{.x = 1.0, .y = 2.0}, ChartPoint{.x = NAN, .y = 1.0},
+                                         ChartPoint{.x = 3.0, .y = INFINITY}, ChartPoint{.x = 3.0, .y = 3.0}}},
+                ScatterSeries{.name = "B", .points = {ChartPoint{.x = 2.0, .y = 2.0}}}};
+    p.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Bottom};
+    ScatterChart chart{p};
+    layout_only(chart);
+    chart.on_hover_change(true);
+    paint_at(chart);
+
+    // 3) 裸配置（图例关）悬停数据点 → 准线 / 高亮绘制 + accessibility_value。
+    //    显式双轴域 [0,4]：点 (2,2) → (160,100)，hover 命中 index 0。
+    ScatterChartProps hp = bare_props();
+    hp.axis_x = ChartAxisSpec{.visible = false, .tick_count = 5, .min = 0.0, .max = 4.0};
+    hp.axis_y = ChartAxisSpec{.visible = false, .tick_count = 5, .min = 0.0, .max = 4.0};
+    hp.series = {ScatterSeries{.name = "P", .points = {ChartPoint{.x = 2.0, .y = 2.0}}}};
+    ScatterChart hover{hp};
+    layout_only(hover);
+    MouseEvent hit = move_at(160.0F, 100.0F);
+    hover.on_pointer_event(hit);
+    AURORA_TEST_REQUIRE_TRUE(hover.hovered_point().has_value());
+    paint_at(hover);
+    AURORA_TEST_CHECK_FALSE(hover.accessibility_value().empty());
+    AURORA_TEST_CHECK_TRUE(hover.accessibility_role() == AccessibilityRole::Image);
+
+    // 4) 图例 Top（默认位）命中：优先于数据点 + 降透明绘制；悬停离开清除。
+    ScatterChartProps tp = bare_props();
+    tp.series = {ScatterSeries{.name = "A", .points = {ChartPoint{.x = 1.0, .y = 1.0}}},
+                 ScatterSeries{.name = "B", .points = {ChartPoint{.x = 2.0, .y = 2.0}}}};
+    tp.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Top};
+    ScatterChart top{tp};
+    layout_only(top);
+    MouseEvent legend_move = move_at(2.0F, 2.0F);
+    top.on_pointer_event(legend_move);
+    AURORA_TEST_CHECK_FALSE(top.hovered_point().has_value());  // 图例优先，不再解析数据点
+    paint_at(top);
+    top.on_hover_change(false);
+    AURORA_TEST_CHECK_FALSE(top.hovered_point().has_value());
+
+    // 5) 图例 Right：纵排命中区生成（宽 500 收窄绘图区）。
+    ScatterChartProps rp = bare_props();
+    rp.series = {ScatterSeries{.name = "A", .points = {ChartPoint{.x = 1.0, .y = 1.0}}},
+                 ScatterSeries{.name = "B", .points = {ChartPoint{.x = 2.0, .y = 2.0}}}};
+    rp.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Right};
+    ScatterChart right{rp};
+    Constraints wide;
+    wide.min = Size{.width = 0.0F, .height = 0.0F};
+    wide.max = Size{.width = 500.0F, .height = 200.0F};
+    right.layout(wide, ctx);
+    paint_at(right);
+
+    // 6) Press 事件不属 Move/Release：回落基类。
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    press.local_position = Point{.x = 2.0F, .y = 2.0F};
+    hover.on_pointer_event(press);
 }
 
 }  // namespace aurora::test_cases::utest_scatter_chart

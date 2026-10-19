@@ -717,7 +717,7 @@ class LazyList : public Widget {
     }
 
     /// @brief 位置变化时写回注册表（**仅内存**：落盘由 App 经 `ScrollStorage::sync` + `Preferences::flush` 决定）。
-    auto write_back_offset() -> void {
+    auto write_back_offset() const -> void {
         if (restore_key_.empty()) {
             return;
         }

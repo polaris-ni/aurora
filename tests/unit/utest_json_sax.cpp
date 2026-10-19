@@ -4,7 +4,6 @@
 /// 容器闭合事件的成员计数、handler 返回 false 时提前终止且按成功返回、失败口径与 DOM 出口一致、
 /// 深度上限同样生效
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>

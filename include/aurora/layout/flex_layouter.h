@@ -58,7 +58,7 @@ struct FlexItem {
     /// @return 仅带测量通道（基线通道为 `nullptr`）的 FlexItem。
     template <typename Ctx>
     static auto make(float w, Ctx *ctx, MeasureFn fn) -> FlexItem {
-        return FlexItem{w, fn, ctx, nullptr, nullptr};
+        return FlexItem{.flex = w, .measure = fn, .measure_ctx = ctx, .baseline = nullptr, .baseline_ctx = nullptr};
     }
 
     /// @brief 工厂（带基线通道）：`bfn` 仅在该容器的交叉轴对齐为 `Baseline` 时被调用。
@@ -71,7 +71,7 @@ struct FlexItem {
     /// @return 同时带测量与基线通道的 FlexItem。
     template <typename Ctx>
     static auto make(float w, Ctx *ctx, MeasureFn fn, BaselineFn bfn, Ctx *bctx) -> FlexItem {
-        return FlexItem{w, fn, ctx, bfn, bctx};
+        return FlexItem{.flex = w, .measure = fn, .measure_ctx = ctx, .baseline = bfn, .baseline_ctx = bctx};
     }
 };
 

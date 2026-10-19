@@ -8,7 +8,6 @@
 #include "aurora/render/painter.h"
 #include "aurora/widget/data_widgets.h"
 #include "aurora/widget/descriptor.h"
-#include "aurora/widget/inspect.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {

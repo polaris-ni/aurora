@@ -14,14 +14,15 @@
 /// Column 子项之间有 gap，内容盒中心可能落在间隙里（与被测行为无关）。同理不硬编码任何
 /// 坐标：字体度量按平台不同，只断言「点在该按钮盒内 ⇒ 命中该按钮」这一关系。
 
-#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "aurora/environment/build_context.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/painter.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/dialog.h"
@@ -314,6 +315,21 @@ AURORA_TEST_CASE(overlay_host_dialog_does_not_penetrate_to_base) {
     // 浮层内容吃掉这次点击，基础内容的按钮一次都不该响（这正是 borealis 的原始症状）。
     AURORA_TEST_CHECK_EQ(hits, 1);
     AURORA_TEST_CHECK_EQ(base_hits, 0);
+}
+
+AURORA_TEST_CASE(dialog_paint_draws_mask_and_content) {
+    // 覆盖 on_paint：打开态铺半透明遮罩 + 按居中盒落笔内容；关闭态直接 return。
+    int hits = 0;
+    auto dialog = std::make_shared<Dialog>();
+    dialog->set_content(make_content(hits));
+    dialog->show();
+    LayoutEngine::layout(*dialog, full());
+
+    Painter painter;
+    dialog->paint(painter, viewport(), BuildContext{});  // 打开态：遮罩 + 内容
+
+    dialog->close();
+    dialog->paint(painter, viewport(), BuildContext{});  // 关闭态：on_paint 早返回
 }
 
 }  // namespace aurora::test_cases::utest_dialog

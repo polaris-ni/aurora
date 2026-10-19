@@ -98,6 +98,9 @@ void nap_ms(long ms) {
 
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_WAYLAND)
 
+// 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现，捕获反而把失败压成 0。
+// 口径与 tools/verify/ 其余探针、examples/ 各 demo 入口同。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     const auto cli = aurora_verify::parse_interactive("Wayland client-side cursor live probe", argc, argv);
     if (!cli.arguments) {
@@ -154,8 +157,11 @@ auto main(int argc, char **argv) -> int {
             nap_ms(20);
         }
     }
-    emit("WAYLAND_DISPLAY=" +
-         std::string(std::getenv("WAYLAND_DISPLAY") != nullptr ? std::getenv("WAYLAND_DISPLAY") : "") +
+    // getenv 单次取值：条件与使用必须是**同一次调用**的返回值——写成两次 getenv 时，判空校验的是
+    // 前一次的指针，真正喂给 std::string 的是后一次（clang-analyzer-cplusplus.StringChecker 即按
+    // 「后者可能为 null」报出；运行时虽不会变，模式本身脆弱）。
+    const char *const wayland_display = std::getenv("WAYLAND_DISPLAY");
+    emit("WAYLAND_DISPLAY=" + std::string{wayland_display != nullptr ? wayland_display : ""} +
          ", scale=" + aurora_verify::format_uint(static_cast<unsigned>(surface.scale_factor())) +
          ", pointer landing strategy=" + aurora_verify::format_int(strategy) +
          ", window size=" + aurora_verify::format_int(static_cast<long long>(surface.size().width)) + "x" +
@@ -210,7 +216,7 @@ auto main(int argc, char **argv) -> int {
              aurora_verify::pad_right(aurora_verify::format_int(st.hotspot_y), 6) +
              aurora_verify::pad_right(aurora_verify::format_int(st.image_count), 8) +
              aurora_verify::pad_right(aurora_verify::format_int(st.commits), 9) +
-             aurora_verify::format_handle(reinterpret_cast<const void *>(static_cast<std::uintptr_t>(st.buffer_id))));
+             aurora_verify::format_hex(st.buffer_id));
         all_applied = all_applied && st.applied;
         all_named = all_named && (st.resolved_name == rfc);
         const bool geom_ok = st.image_width > 0 && st.image_height > 0 && st.hotspot_x >= 0 && st.hotspot_y >= 0 &&
@@ -226,7 +232,7 @@ auto main(int argc, char **argv) -> int {
     check(all_named, "all 11/11 resolved names equal cursor_rfc_name verbatim (no default/left_ptr fallback)");
     check(all_geom_ok, "all 11/11 bitmaps sized > 0 with the hotspot inside them (scaling converted correctly)");
     check(all_single_commit, "all 11/11 shapes committed exactly once (commits +1 per shape, no duplicates)");
-    if (names.empty() || *names.begin() == "") {
+    if (names.empty() || (*names.begin()).empty()) {
         AURORA_LOG_ERROR("verify", "cursor theme unavailable (no resolved name), the criteria cannot run");
         return 4;
     }

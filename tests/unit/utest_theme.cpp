@@ -1,130 +1,81 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/theming/theme.h
-/// 测试说明: 覆盖 TokenValue 三态承载与 is/as 判定、Theme 扁平字段默认契约、light/dark/with_defaults 工厂、
-/// 命名令牌的登记/查询/覆盖、token_or 的类型匹配与类型不匹配回退
+/// 测试说明: 覆盖强类型主题聚合——默认构造即 light 基准列（scheme 不表态）、light()/dark() 工厂置列与档、
+/// with_defaults 与默认构造一致、随 ThemeExtension 的类型级扩展转发、以及作为值类型经扩展注册表深拷贝的
+/// 独立性。（色角色取值与 WCAG 由 utest_theme_roles 覆盖；CSD 派生由 utest_theme_csd_bridge 覆盖。）
 
-#include <optional>
-#include <string>
-
-#include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/theming/theme.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_theme {
 
-AURORA_TEST_CASE(token_value_defaults_to_color_black) {
-    // 默认构造落在 variant 首选项（Color），其值为 Color{}。
-    const TokenValue token;
-    AURORA_TEST_CHECK_TRUE(token.is<Color>());
-    AURORA_TEST_CHECK_FALSE(token.is<Font>());
-    AURORA_TEST_CHECK_FALSE(token.is<double>());
-    AURORA_TEST_CHECK_EQ(token.as<Color>().value_or(Color::red()), Color{});
-}
+namespace {
+/// @brief 测试用扩展（模拟应用自定义令牌面）。
+struct Brand {
+    int level = 0;  ///< 强度档位。
+};
+}  // namespace
 
-AURORA_TEST_CASE(token_value_carries_each_alternative) {
-    const TokenValue as_color{Color::red()};
-    const TokenValue as_font{Font{.family = "Noto Sans", .size_pt = 18.0F}};
-    const TokenValue as_dimension{12.5};
-
-    AURORA_TEST_CHECK_TRUE(as_color.is<Color>());
-    AURORA_TEST_CHECK_TRUE(as_font.is<Font>());
-    AURORA_TEST_CHECK_TRUE(as_dimension.is<double>());
-
-    AURORA_TEST_CHECK_EQ(as_color.as<Color>().value_or(Color{}), Color::red());
-    AURORA_TEST_CHECK_EQ(as_font.as<Font>().value_or(Font{}).family, std::string{"Noto Sans"});
-    AURORA_TEST_CHECK_NEAR(as_dimension.as<double>().value_or(0.0), 12.5, 1e-9);
-}
-
-AURORA_TEST_CASE(token_value_as_returns_nullopt_on_type_mismatch) {
-    // 类型不匹配返回 nullopt 而非抛异常：解析层据此回退 fallback。
-    const TokenValue token{Color::blue()};
-    AURORA_TEST_CHECK_FALSE(token.as<Font>().has_value());
-    AURORA_TEST_CHECK_FALSE(token.as<double>().has_value());
-    AURORA_TEST_CHECK_TRUE(token.as<Color>().has_value());
-}
-
-AURORA_TEST_CASE(theme_default_flat_fields) {
+AURORA_TEST_CASE(default_theme_is_light_baseline) {
+    // 裸主题不再是「无色空壳」：字段声明默认值即 light 基准列，scheme 保持不表态。
     const Theme theme;
-    AURORA_TEST_CHECK_EQ(theme.background, Color::white());
-    AURORA_TEST_CHECK_EQ(theme.primary, Color::blue());
-    AURORA_TEST_CHECK_EQ(theme.on_primary, Color::white());
-    AURORA_TEST_CHECK_EQ(theme.text, Color::black());
-    AURORA_TEST_CHECK_EQ(theme.font, Font{});
-    AURORA_TEST_CHECK_TRUE(theme.tokens.empty());
+    AURORA_TEST_CHECK(theme.roles.surface == ColorRoles::light().surface);
+    AURORA_TEST_CHECK(theme.csd == CsdRoles::light());
+    AURORA_TEST_CHECK(theme.scheme == ColorScheme::Unspecified);
+    AURORA_TEST_CHECK(theme.type_scale.body_medium == Font{});
 }
 
-AURORA_TEST_CASE(theme_light_is_default_and_dark_overrides) {
-    // light() 的扁平字段等价于默认构造，但额外登记 focus.ring 令牌；dark() 改背景/主色/文本三色并登记自己的
-    // focus.ring。
-    AURORA_TEST_CHECK_EQ(Theme::light().background, Theme{}.background);
-    AURORA_TEST_CHECK_EQ(Theme::light().primary, Theme{}.primary);
-    AURORA_TEST_CHECK_EQ(Theme::light().token_or<Color>("focus.ring", Color{}), Color::black());
+AURORA_TEST_CASE(light_and_dark_factories_set_column_and_scheme) {
+    const Theme light = Theme::light();
+    AURORA_TEST_CHECK(light.scheme == ColorScheme::Light);
+    AURORA_TEST_CHECK(light.roles.primary == Color{0x00, 0x00, 0xFF});
+    AURORA_TEST_CHECK(light.roles.focus_ring == Color::black());
 
     const Theme dark = Theme::dark();
-    AURORA_TEST_CHECK_EQ(dark.background, Color::from_rgba(32, 33, 36));
-    AURORA_TEST_CHECK_EQ(dark.primary, Color::from_rgba(90, 120, 240));
-    AURORA_TEST_CHECK_EQ(dark.text, Color::white());
-    AURORA_TEST_CHECK_NE(dark.background, Theme::light().background);
-    AURORA_TEST_CHECK_EQ(dark.token_or<Color>("focus.ring", Color{}), Color::white());
+    AURORA_TEST_CHECK(dark.scheme == ColorScheme::Dark);
+    // 暗色 surface 取旧 background 暗值（唯一消费者观感不变）；primary 为 WCAG 修正对。
+    AURORA_TEST_CHECK(dark.roles.surface == Color{0x20, 0x21, 0x24});
+    AURORA_TEST_CHECK(dark.roles.primary == Color{0xC0, 0xC1, 0xFF});
+    AURORA_TEST_CHECK(dark.roles.focus_ring == Color::white());
     // 焦点环必须与主色拉开，否则环会被读成控件自带的一圈边框（见 Widget::paint_content）。
-    AURORA_TEST_CHECK_NE(dark.token_or<Color>("focus.ring", Color{}), dark.primary);
-    AURORA_TEST_CHECK_NE(Theme::light().token_or<Color>("focus.ring", Color{}), Theme::light().primary);
+    AURORA_TEST_CHECK(dark.roles.focus_ring != dark.roles.primary);
+    AURORA_TEST_CHECK(light.roles.focus_ring != light.roles.primary);
 }
 
-AURORA_TEST_CASE(theme_with_defaults_is_merge_root) {
-    // with_defaults 与默认构造逐字段一致（含空令牌表），作为 resolve_theme 的兜底根主题。
+AURORA_TEST_CASE(with_defaults_matches_default_construct) {
     const Theme root = Theme::with_defaults();
     const Theme base;
-    AURORA_TEST_CHECK_EQ(root.background, base.background);
-    AURORA_TEST_CHECK_EQ(root.primary, base.primary);
-    AURORA_TEST_CHECK_EQ(root.on_primary, base.on_primary);
-    AURORA_TEST_CHECK_EQ(root.text, base.text);
-    AURORA_TEST_CHECK_EQ(root.font, base.font);
-    AURORA_TEST_CHECK_EQ(root.tokens.size(), base.tokens.size());
+    AURORA_TEST_CHECK(root.roles.surface == base.roles.surface);
+    AURORA_TEST_CHECK(root.csd == base.csd);
+    AURORA_TEST_CHECK(root.scheme == base.scheme);
 }
 
-AURORA_TEST_CASE(theme_token_roundtrip_and_overwrite) {
+AURORA_TEST_CASE(theme_extension_forwarding_set_get_remove) {
     Theme theme;
-    AURORA_TEST_CHECK_FALSE(theme.token("color.brand").has_value());
-
-    theme.set_token("color.brand", TokenValue{Color::red()});
-    const auto first = theme.token("color.brand");
-    AURORA_TEST_REQUIRE_TRUE(first.has_value());
-    AURORA_TEST_CHECK_EQ(first.value_or(TokenValue{}).as<Color>().value_or(Color{}), Color::red());
-
-    // 同名覆盖：后写胜出，令牌数不增长。
-    theme.set_token("color.brand", TokenValue{Color::blue()});
-    AURORA_TEST_CHECK_EQ(theme.tokens.size(), 1U);
-    AURORA_TEST_CHECK_EQ(theme.token_or<Color>("color.brand", Color{}), Color::blue());
+    AURORA_TEST_CHECK(theme.extension<Brand>() == nullptr);
+    theme.set_extension(Brand{7});
+    const Brand *got = theme.extension<Brand>();
+    AURORA_TEST_REQUIRE(got != nullptr);
+    AURORA_TEST_CHECK_EQ(got->level, 7);
+    AURORA_TEST_CHECK(theme.remove_extension<Brand>());
+    AURORA_TEST_CHECK(theme.extension<Brand>() == nullptr);
 }
 
-AURORA_TEST_CASE(theme_token_or_matches_type_or_falls_back) {
-    Theme theme;
-    theme.set_token("space.md", TokenValue{8.0});
-    theme.set_token("color.brand", TokenValue{Color::red()});
-
-    AURORA_TEST_CHECK_NEAR(theme.token_or<double>("space.md", 0.0), 8.0, 1e-9);
-    AURORA_TEST_CHECK_EQ(theme.token_or<Color>("color.brand", Color{}), Color::red());
-
-    // 缺失令牌 → fallback。
-    AURORA_TEST_CHECK_NEAR(theme.token_or<double>("space.missing", 4.0), 4.0, 1e-9);
-    // 类型不匹配（space.md 是 double，按 Color 取）→ fallback。
-    AURORA_TEST_CHECK_EQ(theme.token_or<Color>("space.md", Color::green()), Color::green());
-}
-
-AURORA_TEST_CASE(theme_is_copyable_value_type) {
-    // 主题经 Provider 注入子树，拷贝语义必须是深值（令牌表独立）。
+AURORA_TEST_CASE(theme_copy_is_deep_value_including_extensions) {
+    // 主题经 Provider 注入子树，拷贝语义必须是深值（扩展注册表独立）。
     Theme original;
-    original.set_token("color.brand", TokenValue{Color::red()});
+    original.set_extension(Brand{1});
 
     Theme copy = original;
-    copy.set_token("color.brand", TokenValue{Color::blue()});
-    copy.set_token("color.extra", TokenValue{Color::green()});
+    copy.set_extension(Brand{99});  // 改副本不影响源
 
-    AURORA_TEST_CHECK_EQ(original.token_or<Color>("color.brand", Color{}), Color::red());
-    AURORA_TEST_CHECK_FALSE(original.token("color.extra").has_value());
-    AURORA_TEST_CHECK_EQ(copy.tokens.size(), 2U);
+    const Brand *src = original.extension<Brand>();
+    const Brand *dst = copy.extension<Brand>();
+    AURORA_TEST_REQUIRE(src != nullptr);
+    AURORA_TEST_REQUIRE(dst != nullptr);
+    AURORA_TEST_CHECK_EQ(src->level, 1);
+    AURORA_TEST_CHECK_EQ(dst->level, 99);
 }
 
 }  // namespace aurora::test_cases::utest_theme

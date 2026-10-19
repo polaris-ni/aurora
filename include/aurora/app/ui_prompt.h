@@ -53,14 +53,14 @@ struct UiPromptOptions {
         }
         // 未注册类型直接跳过。判据必须是**注册表成员表**：`component_schema` 会无条件写入
         // `w["type"] = name`，故「返回对象里有 type」不代表该类型存在。
-        if (std::find(registered_types.begin(), registered_types.end(), type) == registered_types.end()) {
+        if (std::ranges::find(registered_types, type) == registered_types.end()) {
             continue;
         }
         const Json schema = aurora::describe_component(type);
 
         out += "## " + type + "\n";
         std::string tags;
-        if (schema.as_or<bool>("is_container", false)) {
+        if (schema.as_or<bool>("container", false)) {
             tags += " container";
         }
         if (schema.as_or<bool>("is_clickable", false)) {
@@ -73,25 +73,30 @@ struct UiPromptOptions {
             out += "- children: " + schema.as_or<std::string>("children_policy", "none") + "\n";
         }
 
-        // 属性：类型取自 prop_descriptors，缺省值取自 default_props（后者是实测序列化结果，最可信）。
-        const auto *defaults_ptr = schema.at("default_props");
-        const Json defaults = defaults_ptr != nullptr ? *defaults_ptr : Json::object();
-        if (defaults.is_object() && !defaults.empty()) {
+        // 属性与缺省值取自单一权威 props 表：default 是 serialize_props 的实测序列化结果，最可信；
+        // 只带 default 的条目输出取值（default_expr 显示串形态不是可写值，只列名）。
+        const auto *props_ptr = schema.at("props");
+        if (props_ptr != nullptr && props_ptr->is_array() && !props_ptr->empty()) {
             out += "- props: ";
             bool first = true;
-            for (const auto &e : defaults.entries()) {
+            for (const auto &entry : *props_ptr) {
+                const auto name = entry.as_or<std::string>("name", "");
+                if (name.empty()) {
+                    continue;
+                }
                 if (!first) {
                     out += ", ";
                 }
                 first = false;
-                out += e.key;
+                out += name;
                 if (opt.include_defaults) {
-                    const Json &v = e.value;
-                    if (v.is_string()) {
-                        out += "=" + v.as_or<std::string>("");
-                    } else {
-                        const auto d = json::dump(v);
-                        out += "=" + (d.ok() ? d.value() : std::string{});
+                    if (const auto *v = entry.at("default"); v != nullptr) {
+                        if (v->is_string()) {
+                            out += "=" + v->as_or<std::string>("");
+                        } else {
+                            const auto d = json::dump(*v);
+                            out += "=" + (d.ok() ? d.value() : std::string{});
+                        }
                     }
                 }
             }
@@ -123,7 +128,7 @@ struct UiPromptOptions {
 [[nodiscard]] inline auto ui_prompt_for(const std::string &description) -> std::string {
     std::vector<std::string> types;
     auto remember = [&types](const std::string &t) -> void {
-        if (std::find(types.begin(), types.end(), t) == types.end()) {
+        if (std::ranges::find(types, t) == types.end()) {
             types.push_back(t);
         }
     };
@@ -145,7 +150,7 @@ struct UiPromptOptions {
         remember(std::string(base));
     }
 
-    std::sort(types.begin(), types.end());
+    std::ranges::sort(types);
     return build_ui_prompt(types);
 }
 
@@ -222,13 +227,13 @@ namespace detail {
 
 /// @brief 类型是否已注册。
 /// ⚠️ 不能用 `describe_component(name).contains("type")` 判断 —— `component_schema` 会**无条件**写入
-/// `w["type"] = name`，未注册类型同样返回一个带 `type` 的对象（只是没有 `default_props`）。
+/// `w["type"] = name`，未注册类型同样返回一个带 `type` 的对象（只是没有 `props` 条目）。
 /// 只有拿注册表成员表来判才准。
 /// @param type 待判定的类型名（精确匹配注册表原名）
 /// @return 已注册为 true；未注册为 false
 [[nodiscard]] inline auto ui_is_registered(const std::string &type) -> bool {
     const std::vector<std::string> &types = ui_registered_types();
-    return std::find(types.begin(), types.end(), type) != types.end();
+    return std::ranges::find(types, type) != types.end();
 }
 
 /// @brief 大小写不敏感的**最佳**类型名修正：先精确（忽略大小写），再取唯一的子串命中。
@@ -289,29 +294,29 @@ namespace detail {
     if (out.contains("type") && out.at("type")->is_string()) {
         const Json schema = aurora::describe_component(out.at("type")->as_or<std::string>(""));
 
-        // 2) 补齐**必填**属性。值取自 default_props（实测序列化结果），类型保真度最高。
+        // 2) 补齐**必填**属性。值取自单一 props 表的 default（serialize_props 实测序列化结果），
+        //    类型保真度最高；只补带 default 的条目——default_expr 显示串形态不是可写值。
         //
-        // ⚠️ 刻意**不**补齐全部缺省属性：validator 按 `PropDescriptor` 的声明类型判值，而缺省属性里
+        // ⚠️ 刻意**不**补齐全部缺省属性：validator 按声明类型判值，而缺省属性里
         // 有 `color` 这类以数组承载 Color 的项，与 validator 对 "Color" 的宽松判定（string/object）
         // 不兼容 —— 无脑回填会把一棵本来合法的树改成一堆类型错误（实测踩到）。
         // 校验只关心必填项，故只补必填项。
-        const auto *defaults_ptr = schema.at("default_props");
-        const Json defaults = defaults_ptr != nullptr ? *defaults_ptr : Json::object();
-        const auto *descriptors_ptr = schema.at("prop_descriptors");
-        const Json descriptors = descriptors_ptr != nullptr ? *descriptors_ptr : Json::array();
-        for (const auto &descriptor : descriptors) {
-            if (!descriptor.as_or<bool>("required", false)) {
-                continue;
-            }
-            const auto name = descriptor.as_or<std::string>("name", "");
-            if (name.empty()) {
-                continue;
-            }
-            if (!out.contains("props") || !out.at("props")->is_object()) {
-                out.set("props", Json::object());
-            }
-            if (!out.at("props")->contains(name) && defaults.contains(name)) {
-                out.at("props")->set(name, *defaults.at(name));
+        const auto *props_ptr = schema.at("props");
+        if (props_ptr != nullptr && props_ptr->is_array()) {
+            for (const auto &entry : *props_ptr) {
+                if (!entry.as_or<bool>("required", false)) {
+                    continue;
+                }
+                const auto name = entry.as_or<std::string>("name", "");
+                if (name.empty()) {
+                    continue;
+                }
+                if (!out.contains("props") || !out.at("props")->is_object()) {
+                    out.set("props", Json::object());
+                }
+                if (const auto *v = entry.at("default"); v != nullptr && !out.at("props")->contains(name)) {
+                    out.at("props")->set(name, *v);
+                }
             }
         }
 
@@ -338,7 +343,7 @@ namespace detail {
 }  // namespace detail
 
 /// @brief 确定性机修（specification/08-tooling.md §2.6）：**不调用 LLM**，把明显可修的问题修掉。
-/// 覆盖三类：未知类型（模糊匹配到唯一已注册类型）、缺失属性（按 `default_props` 回填）、
+/// 覆盖三类：未知类型（模糊匹配到唯一已注册类型）、缺失属性（按 `props` 表的 `default` 回填）、
 /// children 策略违规（声明 none 却带子节点则丢弃）。修不了的（如结构错误、类型彻底无法辨认）
 /// 原样保留，交给 `generate_ui_repair` 的重试环让 LLM 重来。
 ///

@@ -365,6 +365,25 @@ class ProgressDialog : public Widget {
         props.set("cancellable", Json{cancellable_});
     }
 
+    /// @brief 从 props JSON 还原自有属性（缺失键保持当前值）。
+    /// @param props 属性 JSON；各字段独立还原，类型不符回退默认值。
+    /// @note Rebuildable: yes, via from_json
+    auto deserialize_props(const Json &props) -> void override {
+        Widget::deserialize_props(props);
+        if (props.contains("message")) {
+            message_ = props.at("message")->as_or<std::string>("");
+        }
+        if (props.contains("progress")) {
+            progress_.set(props.at("progress")->as_or<float>(-1.0F));
+        }
+        if (props.contains("open")) {
+            open_ = props.at("open")->as_or<bool>(false);
+        }
+        if (props.contains("cancellable")) {
+            cancellable_ = props.at("cancellable")->as_or<bool>(true);
+        }
+    }
+
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override;
 

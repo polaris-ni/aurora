@@ -12,7 +12,9 @@
 #include "aurora/core/font.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/descriptor.h"
+#include "aurora/widget/props_io.h"  // color_to_json / json_to_color
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -21,6 +23,7 @@ namespace aurora {
 struct Menu {
     std::string title;  ///< 顶级菜单名（如 "File"）
     std::vector<MenuItem> items;  ///< 下拉菜单项
+    std::string id;  ///< 稳定标识（可空；自绘路径忽略，供原生菜单桥按标识路由点击）
 };
 
 /// @brief 声明式菜单栏：自绘跨平台实现。
@@ -65,6 +68,13 @@ class MenuBar : public Widget {
                      .required = false,
                      .note = "Currently open menu index (-1 = none)",
                      .json_type = "integer"},
+                    {.name = "text_color",
+                     .type = "Color",
+                     .default_value = "\"theme.on_surface\"",
+                     .required = false,
+                     .note = "Menu item text color (follows theme on_surface when enabled, "
+                             "on_surface_variant when disabled; explicit value wins)",
+                     .json_type = "array"},
                 },
             .events = {},
             .children_policy = "none",
@@ -117,6 +127,28 @@ class MenuBar : public Widget {
     /// @brief 当前菜单栏高度。
     /// @return 高度 dp（默认 28.0）。
     [[nodiscard]] auto bar_height() const -> float { return bar_height_; }
+
+    /// @brief 设置菜单项文字色（链式）。
+    /// @param c 菜单项文字色；写入 `text_color_`，覆盖主题回退（启用/禁用态统一取该值）。
+    /// @return 引用自身，便于链式调用。
+    auto set_text_color(Color c) -> MenuBar & {
+        text_color_ = c;
+        return *this;
+    }
+
+    /// @brief 解析下拉菜单项生效文字色：未显式设色时经 ctx 取主题角色
+    ///        （启用 → `on_surface`，禁用 → `on_surface_variant`；ThemeScope 换肤即生效），
+    ///        显式设色优先（且忽略启用/禁用分支）。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @param item_enabled 菜单项是否启用（禁用态取 `on_surface_variant`）。
+    /// @return 生效文字色。
+    [[nodiscard]] auto resolve_item_text_color(const BuildContext &ctx, bool item_enabled) const -> Color {
+        if (text_color_.has_value()) {
+            return *text_color_;
+        }
+        const auto &roles = inherit_theme(ctx).roles;
+        return item_enabled ? roles.on_surface : roles.on_surface_variant;
+    }
 
     /// @brief 点击交互：栏上点击展开/切换；下拉内点击触发菜单项；其他区域收起。
     /// @param e [in] 鼠标事件；仅消费 Press（命中后置 is_handled），非 Press 转交基类。
@@ -216,6 +248,22 @@ class MenuBar : public Widget {
             titles.push_back(m.title);
         }
         props.set("menu_titles", titles);
+        // 菜单项文字色仅在显式设置时输出：保留「跟随主题角色」语义。
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));
+        }
+    }
+
+    /// @brief 反序列化栏高与顶级菜单标题列表（菜单项回调不可序列化，仅保留标题）。
+    /// @param props [in] 源属性 JSON 对象；缺键保留现值。
+    auto deserialize_props(const Json &props) -> void override {
+        Widget::deserialize_props(props);
+        if (props.contains("bar_height")) {
+            bar_height_ = props.at("bar_height")->as_or<float>(28.0F);
+        }
+        if (props.contains("text_color")) {
+            text_color_ = json_to_color(*props.at("text_color"));
+        }
     }
 
   protected:
@@ -225,7 +273,7 @@ class MenuBar : public Widget {
         return c.constrain(Size{.width = w, .height = bar_height_});
     }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // 栏背景
         const Rect bar{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = bar_height_}};
         p.fill_rect(bar, Color(248, 248, 250, 255));
@@ -246,7 +294,9 @@ class MenuBar : public Widget {
             const Rect text_box{
                 .origin = Point{.x = x + AURORA_TITLE_PADDING, .y = bounds.origin.y + 6.0F},
                 .size = Size{.width = w - (AURORA_TITLE_PADDING * 2.0F), .height = bar_height_ - 12.0F}};
-            p.draw_text(text_box, menus_[i].title, f, Color(30, 30, 30, 255));
+            // 顶级菜单标题恒为启用态：跟随主题文字角色（与下拉项同一套 resolver，
+            // 未显式设色时取 on_surface，换肤即生效）。
+            p.draw_text(text_box, menus_[i].title, f, resolve_item_text_color(ctx, true));
             x += w;
         }
 
@@ -269,7 +319,7 @@ class MenuBar : public Widget {
                                      .size = Size{.width = drop.size.width - 8.0F, .height = 1.0F}},
                                 Color(228, 228, 232, 255));
                 } else {
-                    const Color text_color = item.enabled ? Color(30, 30, 30, 255) : Color(170, 170, 170, 255);
+                    const Color text_color = resolve_item_text_color(ctx, item.enabled);
                     const Rect text_box{
                         .origin = Point{.x = drop.origin.x + 10.0F, .y = y + 5.0F},
                         .size = Size{.width = drop.size.width - 20.0F, .height = AURORA_ITEM_HEIGHT - 10.0F}};
@@ -324,6 +374,7 @@ class MenuBar : public Widget {
     std::vector<Menu> menus_;
     int open_ = -1;
     float bar_height_ = 28.0F;
+    std::optional<Color> text_color_;  ///< 菜单项文字色；空 = 跟随主题（启用 on_surface / 禁用 on_surface_variant）
 };
 
 }  // namespace aurora

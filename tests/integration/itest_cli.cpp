@@ -95,11 +95,11 @@ AURORA_TEST_CASE(cli_describe_returns_button_schema) {
     const au::Json schema = au::describe_component("Button");
     AURORA_TEST_CHECK(!schema.empty());
     AURORA_TEST_CHECK(require_field<std::string>(schema, "type") == "Button");
-    AURORA_TEST_CHECK(schema.contains("prop_descriptors"));
+    AURORA_TEST_CHECK(schema.contains("props"));
 
-    // 未知组件：返回空对象或不含有效 prop_descriptors。
+    // 未知组件：返回空对象或不含有效 props 条目。
     const au::Json unknown = au::describe_component("FooBar");
-    const auto *unknown_desc = unknown.find("prop_descriptors");
+    const auto *unknown_desc = unknown.find("props");
     AURORA_TEST_CHECK(unknown_desc == nullptr || unknown_desc->empty());
 }
 
@@ -200,7 +200,7 @@ AURORA_TEST_CASE(cli_schema_lists_all_components_with_descriptors) {
     au::Json widgets = au::Json::array();
     for (const auto &s : schemas) {
         AURORA_TEST_CHECK(s.contains("type"));
-        AURORA_TEST_CHECK(s.contains("prop_descriptors"));
+        AURORA_TEST_CHECK(s.contains("props"));
         widgets.push_back(s);
     }
     api.set("widgets", widgets);

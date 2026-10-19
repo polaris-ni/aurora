@@ -48,7 +48,7 @@ auto main() -> int {
     // 顺序镜像：重排回调里刷新显示（数据已由控件改写；此处只做展示）。
     auto order = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"(no reorder yet)"});
 
-    auto list = std::make_shared<au::ReorderableList<std::string>>(
+    const auto list = std::make_shared<au::ReorderableList<std::string>>(
         items,
         [](const std::string &value, int index) -> au::Node {
             const au::Color accent = (index % 2 == 0) ? pal::AURORA_PRIMARY : pal::AURORA_ACCENT;

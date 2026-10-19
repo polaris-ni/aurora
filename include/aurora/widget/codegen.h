@@ -224,7 +224,7 @@ struct PropTarget {
 
 /// @brief 键名 ≠ 公开成员名、路径嵌套、或只能经 setter 写入的属性差集表。
 ///
-/// 逐条由 `aurora_cli describe <Type>` 的 `default_props` 键集与控件头文件的成员声明比对得出，
+/// 逐条由 `aurora_cli describe <Type>` 的 `props` 表键集与控件头文件的成员声明比对得出，
 /// 并以 `g++ -fsyntax-only` 编译产物验证（未登记者按同名公开成员处理）。典型三类：
 /// ① 嵌套聚合（Text 的 `font_size` 落在 `font.size_pt`、Column 的 `main_axis_alignment` 落在
 /// `flex.main_axis`）；② 改名（Text 的 `color` 落在 `text_color`）；③ protected 字段 + 公有
@@ -355,12 +355,12 @@ struct PropTarget {
 
 /// @brief 一个属性在自描述里的事实：声明序、C++ 声明类型、（若为枚举）合法取值名。
 struct PropDescriptor {
-    std::size_t order{};  ///< 在 `prop_descriptors` 里的下标 = `*Props` 成员声明序
+    std::size_t order{};  ///< 在 `props` 表里的下标 = `*Props` 成员声明序
     std::string cpp_type;  ///< C++ 声明类型名（`StackFit`/`BoxFit`/`float`…）
     std::vector<std::string> enum_values;  ///< 枚举取值名；非枚举属性为空
 };
 
-/// @brief 该类型只读属性描述表（键 → PropDescriptor），数据源是 `describe_component()` 的 `prop_descriptors`。
+/// @brief 该类型只读属性描述表（键 → PropDescriptor），数据源是 `describe_component()` 的 `props` 表。
 ///
 /// 用它而不是再造一张手写表，因为这三件事只能由控件自己说：
 /// ① **声明序**——C++ 指定初始化器必须按聚合成员声明序书写，乱序直接编译失败，而快照 JSON 的键是
@@ -383,7 +383,7 @@ struct PropDescriptor {
     }
     std::unordered_map<std::string, PropDescriptor> table{};  // 未命中缓存时新建的描述表（未知类型为空表）
     const Json schema = describe_component(type);  // 未知类型为空对象
-    const auto *pd_val = schema.at("prop_descriptors");
+    const auto *pd_val = schema.at("props");
     if (pd_val != nullptr && pd_val->is_array()) {
         std::size_t idx = 0;
         for (const auto &d : *pd_val) {
@@ -455,7 +455,7 @@ struct PropDescriptor {
         return {};
     }
     const auto same_ignore_case = [](const std::string &a, const std::string &b) {
-        return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](const char x, const char y) {
+        return std::ranges::equal(a, b, [](const char x, const char y) {
             return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
         });
     };
@@ -679,7 +679,7 @@ struct PropDescriptor {
     }
     // --- number ---
     if (value.is_number()) {
-        // Length 属性以裸数字承载（`describe` 的 `default_props` 就这么写）：`240.0f` 撞不进
+        // Length 属性以裸数字承载（`describe` 的 `props` 表就这么写）：`240.0f` 撞不进
         // 不可隐式转换的 `Length` 构造，按 px 语义包装才成立。
         const std::string cpp_type = declared_type(type, key);
         if (cpp_type == "Length") {
@@ -763,7 +763,7 @@ struct PropEmit {
     -> std::vector<PropEmit> {
     std::vector<PropEmit> out{};  // 发射序列累加容器（过滤后按成员声明序稳定排序）
     for (const auto &e : props.entries()) {
-        const std::string key = std::string(e.key);
+        const auto key = std::string(e.key);
         std::string expr = emit_prop_value(key, e.value, type);
         if (expr == "/* unknown */") {
             continue;
@@ -785,9 +785,8 @@ struct PropEmit {
         out.push_back(
             {.key = key, .lhs = std::string{target.lhs}, .expr = std::move(expr), .via_setter = target.via_setter});
     }
-    std::stable_sort(
-        out.begin(), out.end(),
-        [&](const PropEmit &a, const PropEmit &b) {  // 按 *Props 成员声明序稳定排序，未登记键保持 JSON 原序
+    std::ranges::stable_sort(
+        out, [&](const PropEmit &a, const PropEmit &b) {  // 按 *Props 成员声明序稳定排序，未登记键保持 JSON 原序
             return prop_order(type, a.key) < prop_order(type, b.key);
         });
     return out;

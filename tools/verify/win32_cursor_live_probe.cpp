@@ -509,11 +509,16 @@ auto main(int argc, char **argv) -> int {
         auto session = aurora::e2e::open(spec);
         if (!session.ok()) {
             AURORA_LOG_WARN("verify", "D3D11Surface(GPU): open failed: " + session.reason());
-        } else if (!static_cast<aurora::D3D11Surface &>(session.surface()).is_available()) {
-            AURORA_LOG_WARN("verify", "D3D11Surface device unavailable (no adapter); skipping this path");
         } else {
-            session.mount(aurora::Node{aurora::Column{}});  // 最小真实树占位，理由同 GDI 路
-            worse_of(run_sweep(session.surface(), "D3D11Surface(GPU)", title, interactive));
+            // session 由 Backend::D3D11 打开，动态类型即 D3D11Surface，静态下行转换安全。
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast): Backend::D3D11 保证动态类型
+            auto &d3d_surface = static_cast<aurora::D3D11Surface &>(session.surface());
+            if (!d3d_surface.is_available()) {
+                AURORA_LOG_WARN("verify", "D3D11Surface device unavailable (no adapter); skipping this path");
+            } else {
+                session.mount(aurora::Node{aurora::Column{}});  // 最小真实树占位，理由同 GDI 路
+                worse_of(run_sweep(session.surface(), "D3D11Surface(GPU)", title, interactive));
+            }
         }
     }
 #endif

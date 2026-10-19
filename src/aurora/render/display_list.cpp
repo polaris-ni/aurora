@@ -1,7 +1,5 @@
 #include "aurora/render/display_list.h"
 
-#include "aurora/render/font_engine.h"
-#include "aurora/render/painter.h"
 #include "aurora/render/rhi/rhi_backend.h"
 #include "aurora/render/rhi/software_rhi.h"
 

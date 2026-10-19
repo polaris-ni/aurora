@@ -32,6 +32,7 @@
 #include <X11/Xlib.h>
 
 #include <cstdlib>
+#include <utility>
 
 // <X11/X.h>（经 Xlib.h 引入）**无条件**定义 `#define CursorShape 0`，与本项目公共类型名
 // `aurora::CursorShape` 硬碰撞：不解除时任何 `CursorShape` 记号都被展开为 `0`，报出
@@ -71,15 +72,23 @@ AURORA_TEST_CASE(x11_surface_window_creation_skipped) {
 
 namespace {
 
-/// 进程级 X 协议错误计数（Xlib 的错误处理器是**进程全局**的，与连接无关）。
-/// 借此捕获 aurora 自身 X 连接上的 BadCursor / BadWindow 等错误——无需指针 hover，
-/// 在 Wayland/Xwayland 会话下同样可判定「光标资源是否被真实服务器接受」。
-int g_x_error_count = 0;
-unsigned char g_last_error_code = 0;
+/// Xlib 的错误处理器是**进程全局**的 C 回调，与连接无关；借此捕获 aurora 自身 X 连接上的
+/// BadCursor / BadWindow 等错误——无需指针 hover，在 Wayland/Xwayland 会话下同样可判定
+/// 「光标资源是否被真实服务器接受」。可变状态收进函数局部静态、经访问器读写，避免
+/// 命名空间级可变全局量。
+auto x_error_count() -> int & {
+    static int count = 0;
+    return count;
+}
+
+auto x_last_error_code() -> unsigned char & {
+    static unsigned char code = 0;
+    return code;
+}
 
 auto count_x_error(Display * /*display*/, XErrorEvent *event) -> int {
-    ++g_x_error_count;
-    g_last_error_code = event->error_code;
+    ++x_error_count();
+    x_last_error_code() = event->error_code;
     return 0;  // 已处理：不打印、不终止（默认处理器会打印后 exit）
 }
 
@@ -95,8 +104,8 @@ AURORA_TEST_CASE(x11_surface_live_real_window_and_cursor_sweep) {
     }
 
     const XErrorHandler previous = XSetErrorHandler(count_x_error);
-    g_x_error_count = 0;
-    g_last_error_code = 0;
+    x_error_count() = 0;
+    x_last_error_code() = 0;
 
     {
         // 构造即建立真实 X 连接 + 创建真实窗口。
@@ -107,6 +116,9 @@ AURORA_TEST_CASE(x11_surface_live_real_window_and_cursor_sweep) {
         AURORA_TEST_REQUIRE_TRUE(dpy != nullptr);
 
         // 独立连接也认得该 XID ⇒ 它确实是 X 服务器侧的真实窗口（而非客户端假象）。
+        // native_handle 契约返回 void *，X11 的 XID 本是整数：void* → uintptr_t → Window 的
+        // 身份折算只用于喂给独立连接的 Xlib 调用，从不解引用。就地豁免。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         const auto win = static_cast<Window>(reinterpret_cast<std::uintptr_t>(surface.native_handle()));
         AURORA_TEST_CHECK_TRUE(win != 0);
         XWindowAttributes attrs{};
@@ -116,19 +128,19 @@ AURORA_TEST_CASE(x11_surface_live_real_window_and_cursor_sweep) {
 
         // 两轮全形状：第 2 轮命中 Impl 的「按形状缓存句柄」分支（首轮才 XCreateFontCursor）。
         for (int round = 0; round < 2; ++round) {
-            for (int i = 0; i < static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT); ++i) {
+            for (int i = 0; std::cmp_less(i, aurora::AURORA_CURSOR_SHAPE_COUNT); ++i) {
                 surface.set_cursor(static_cast<aurora::CursorShape>(i));
             }
         }
         // wait_events 阻塞在 X 连接 fd 上：给服务器处理请求、并让 Xlib 读回异步错误的窗口。
         surface.wait_events(50.0);
-        AURORA_TEST_CHECK_EQ(g_x_error_count, 0);
+        AURORA_TEST_CHECK_EQ(x_error_count(), 0);
 
         // 光标下发后窗口仍可用（标题、几何未受影响）。
         AURORA_TEST_CHECK_TRUE(surface.size().width > 0.0F);
         surface.set_title("aurora-live-i1-cursor");
         surface.wait_events(20.0);
-        AURORA_TEST_CHECK_EQ(g_x_error_count, 0);
+        AURORA_TEST_CHECK_EQ(x_error_count(), 0);
 
         XCloseDisplay(dpy);
     }
@@ -151,12 +163,14 @@ AURORA_TEST_CASE(x11_surface_live_ime_bridge_invariants) {
 
     // 观测面一致性：IC 只可能随 IM 出现、preedit 回调风格只可能随 IC 出现（不可能倒挂）。
     auto st = surface.ime_state();
-    AURORA_TEST_CHECK(!(st.ic_created && !st.im_open));
-    AURORA_TEST_CHECK(!(st.preedit_callbacks && !st.ic_created));
+    AURORA_TEST_CHECK(!st.ic_created || st.im_open);
+    AURORA_TEST_CHECK(!st.preedit_callbacks || st.ic_created);
 
     // provider 接线本身不得产生任何协议副作用（锚点只在组合期有意义）。
-    surface.set_composition_caret_provider(
-        [] { return aurora::Rect{aurora::Point{24.0F, 40.0F}, aurora::Size{6.0F, 16.0F}}; });
+    surface.set_composition_caret_provider([] {
+        return aurora::Rect{.origin = aurora::Point{.x = 24.0F, .y = 40.0F},
+                            .size = aurora::Size{.width = 6.0F, .height = 16.0F}};
+    });
     for (int i = 0; i < 8; ++i) {
         surface.poll_platform_events();
         surface.wait_events(15.0);
@@ -174,6 +188,8 @@ AURORA_TEST_CASE(x11_surface_live_ime_bridge_invariants) {
         // 焦点宣告接线：独立连接拉起/切走输入焦点 → FocusIn/Out 经事件循环驱动 X{Set,Unset}ICFocus。
         Display *obs = XOpenDisplay(nullptr);
         AURORA_TEST_REQUIRE_TRUE(obs != nullptr);
+        // 同上：void* 身份折算喂独立连接的 Xlib 焦点调用（理由见上方同款豁免）。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         const auto win = static_cast<::Window>(reinterpret_cast<std::uintptr_t>(surface.native_handle()));
         XMapWindow(obs, win);
         XRaiseWindow(obs, win);

@@ -50,7 +50,7 @@ AURORA_TEST_CASE(ascii_preedit_indices_pass_through) {
     // 纯 ASCII：单元数 == 码点数 == 字节数，索引原样。
     const auto e = make_preedit_state(u16({'n', 'i', 'h', 'a', 'o'}), 3, {});
     AURORA_TEST_CHECK_EQ(e.preedit, std::string("nihao"));
-    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(3));
+    AURORA_TEST_CHECK_EQ(e.cursor_index, static_cast<std::size_t>(3));
     AURORA_TEST_CHECK_FALSE(e.has_preedit_selection());
     AURORA_TEST_CHECK(e.committed.empty());
 }
@@ -59,18 +59,18 @@ AURORA_TEST_CASE(cjk_preedit_is_utf8_and_cursor_is_cp_index) {
     // 「你好」在 UTF-16 里 2 单元、UTF-8 里 6 字节；契约要求 UTF-8 串 + 码点下标。
     const auto e = make_preedit_state(u16({0x4F60U, 0x597DU}), 2, {});
     AURORA_TEST_CHECK_EQ(e.preedit, std::string("\xE4\xBD\xA0\xE5\xA5\xBD"));
-    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(2));
+    AURORA_TEST_CHECK_EQ(e.cursor_index, static_cast<std::size_t>(2));
 }
 
 AURORA_TEST_CASE(surrogate_pair_caret_clamps_to_codepoint_start) {
     // 「你😀好」：单元布局 [你, 高, 低, 好]，码点布局 [0=你, 1=😀, 2=好]。
     const std::u16string s = u16({0x4F60U, 0x1F600U, 0x597DU});
-    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 0), std::size_t(0));
-    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 1), std::size_t(1));
-    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 2), std::size_t(1));  // 代理对内部 → 夹紧到起点
-    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 3), std::size_t(2));
-    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 4), std::size_t(3));
-    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 99), std::size_t(3));  // 越界夹紧到总数
+    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 0), static_cast<std::size_t>(0));
+    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 1), static_cast<std::size_t>(1));
+    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 2), static_cast<std::size_t>(1));  // 代理对内部 → 夹紧到起点
+    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 3), static_cast<std::size_t>(2));
+    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 4), static_cast<std::size_t>(3));
+    AURORA_TEST_CHECK_EQ(utf16_index_to_cp_index(s, 99), static_cast<std::size_t>(3));  // 越界夹紧到总数
 }
 
 AURORA_TEST_CASE(orphan_surrogate_becomes_replacement_char) {
@@ -78,7 +78,7 @@ AURORA_TEST_CASE(orphan_surrogate_becomes_replacement_char) {
     const std::u16string s{u'\x4F60', u'\xD800'};
     const auto e = make_preedit_state(s, 2, {});
     AURORA_TEST_CHECK_EQ(e.preedit, std::string("\xE4\xBD\xA0\xEF\xBF\xBD"));
-    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(2));
+    AURORA_TEST_CHECK_EQ(e.cursor_index, static_cast<std::size_t>(2));
 }
 
 AURORA_TEST_CASE(target_selection_maps_attr_run) {
@@ -86,8 +86,8 @@ AURORA_TEST_CASE(target_selection_maps_attr_run) {
     const std::u16string s = u16({'a', 'b', 'c', 'd'});
     const CpRange r = target_selection(s, {AURORA_DONE, AURORA_TARGET, AURORA_TARGET, AURORA_DONE});
     AURORA_TEST_CHECK_TRUE(r.has_selection());
-    AURORA_TEST_CHECK_EQ(r.start, std::size_t(1));
-    AURORA_TEST_CHECK_EQ(r.end, std::size_t(2));
+    AURORA_TEST_CHECK_EQ(r.start, static_cast<std::size_t>(1));
+    AURORA_TEST_CHECK_EQ(r.end, static_cast<std::size_t>(2));
 }
 
 AURORA_TEST_CASE(target_selection_accepts_both_target_attrs) {
@@ -96,8 +96,8 @@ AURORA_TEST_CASE(target_selection_accepts_both_target_attrs) {
     const CpRange r = target_selection(
         s, {static_cast<std::uint8_t>(Attr::TargetConverted), static_cast<std::uint8_t>(Attr::InputError)});
     AURORA_TEST_CHECK_TRUE(r.has_selection());
-    AURORA_TEST_CHECK_EQ(r.start, std::size_t(0));
-    AURORA_TEST_CHECK_EQ(r.end, std::size_t(0));
+    AURORA_TEST_CHECK_EQ(r.start, static_cast<std::size_t>(0));
+    AURORA_TEST_CHECK_EQ(r.end, static_cast<std::size_t>(0));
 }
 
 AURORA_TEST_CASE(target_selection_without_target_has_no_range) {
@@ -113,27 +113,27 @@ AURORA_TEST_CASE(target_selection_spanning_surrogate_pair_collapses_to_one_cp) {
     const std::u16string s = u16({0x1F600U, 'x'});
     const CpRange r = target_selection(s, {AURORA_TARGET, AURORA_TARGET, AURORA_DONE});
     AURORA_TEST_CHECK_TRUE(r.has_selection());
-    AURORA_TEST_CHECK_EQ(r.start, std::size_t(0));
-    AURORA_TEST_CHECK_EQ(r.end, std::size_t(0));
+    AURORA_TEST_CHECK_EQ(r.start, static_cast<std::size_t>(0));
+    AURORA_TEST_CHECK_EQ(r.end, static_cast<std::size_t>(0));
 }
 
 AURORA_TEST_CASE(target_selection_honours_shorter_or_longer_attr_array) {
     const std::u16string s = u16({'a', 'b', 'c'});
     // 缺尾（attrs 短于串）：按较短者生效，不越界读。
     const CpRange short_run = target_selection(s, {AURORA_TARGET});
-    AURORA_TEST_CHECK_EQ(short_run.start, std::size_t(0));
-    AURORA_TEST_CHECK_EQ(short_run.end, std::size_t(0));
+    AURORA_TEST_CHECK_EQ(short_run.start, static_cast<std::size_t>(0));
+    AURORA_TEST_CHECK_EQ(short_run.end, static_cast<std::size_t>(0));
     // 多余（attrs 长于串）：越界部分忽略。
     const CpRange long_run = target_selection(s, {AURORA_DONE, AURORA_TARGET, AURORA_DONE, AURORA_DONE, AURORA_DONE});
-    AURORA_TEST_CHECK_EQ(long_run.start, std::size_t(1));
-    AURORA_TEST_CHECK_EQ(long_run.end, std::size_t(1));
+    AURORA_TEST_CHECK_EQ(long_run.start, static_cast<std::size_t>(1));
+    AURORA_TEST_CHECK_EQ(long_run.end, static_cast<std::size_t>(1));
 }
 
 AURORA_TEST_CASE(empty_comp_means_composition_cancelled) {
     // 空组合串：preedit 空、光标 0、无选区（控件据此走 cancel 分支）。
     const auto e = make_preedit_state(u16({}), 0, {AURORA_TARGET});
     AURORA_TEST_CHECK(e.preedit.empty());
-    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(0));
+    AURORA_TEST_CHECK_EQ(e.cursor_index, static_cast<std::size_t>(0));
     AURORA_TEST_CHECK_FALSE(e.has_preedit_selection());
 }
 
@@ -142,10 +142,10 @@ AURORA_TEST_CASE(preedit_state_end_to_end_with_selection) {
     const std::u16string s = u16({0x4E00U, 0x4E8CU, 0x4E09U});  // 一二三
     const auto e = make_preedit_state(s, 1, {AURORA_DONE, AURORA_TARGET, AURORA_TARGET});
     AURORA_TEST_CHECK_EQ(e.preedit, std::string("\xE4\xB8\x80\xE4\xBA\x8C\xE4\xB8\x89"));
-    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(1));
+    AURORA_TEST_CHECK_EQ(e.cursor_index, static_cast<std::size_t>(1));
     AURORA_TEST_CHECK_TRUE(e.has_preedit_selection());
-    AURORA_TEST_CHECK_EQ(e.sel_start, std::size_t(1));
-    AURORA_TEST_CHECK_EQ(e.sel_end, std::size_t(2));
+    AURORA_TEST_CHECK_EQ(e.sel_start, static_cast<std::size_t>(1));
+    AURORA_TEST_CHECK_EQ(e.sel_end, static_cast<std::size_t>(2));
 }
 
 // ---- UTF-8 口径（X11 XIM 组合串 / Wayland text-input-v3 index_in_text）----
@@ -156,20 +156,20 @@ AURORA_TEST_CASE(utf8_byte_to_cp_index_passes_through_and_clamps) {
         "\xE4\xBD\xA0"
         "a"
         "\xE5\xA5\xBD";
-    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 0), std::size_t(0));  // 「你」起点
-    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 3), std::size_t(1));  // a（ASCII）
-    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 4), std::size_t(2));  // 「好」起点
-    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 7), std::size_t(3));  // 串尾 = 总码点数
-    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 99), std::size_t(3));  // 越界夹紧
-    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 1), std::size_t(0));  // 切进「你」中部 → 夹紧起点
-    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 5), std::size_t(2));  // 切进「好」中部 → 夹紧起点
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 0), static_cast<std::size_t>(0));  // 「你」起点
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 3), static_cast<std::size_t>(1));  // a（ASCII）
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 4), static_cast<std::size_t>(2));  // 「好」起点
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 7), static_cast<std::size_t>(3));  // 串尾 = 总码点数
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 99), static_cast<std::size_t>(3));  // 越界夹紧
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 1), static_cast<std::size_t>(0));  // 切进「你」中部 → 夹紧起点
+    AURORA_TEST_CHECK_EQ(utf8_byte_to_cp_index(s, 5), static_cast<std::size_t>(2));  // 切进「好」中部 → 夹紧起点
 }
 
 AURORA_TEST_CASE(utf8_preedit_cursor_and_no_selection) {
     // Wayland 形态：preedit 携 UTF-8 游标字节、无选区（v3 的 preedit_string 不带选区端点）。
     const auto e = make_preedit_state_utf8("\xE4\xBD\xA0\xE5\xA5\xBD", 3, -1, -1);  // 「你好」游标在第 2 字前
     AURORA_TEST_CHECK_EQ(e.preedit, std::string("\xE4\xBD\xA0\xE5\xA5\xBD"));
-    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(1));
+    AURORA_TEST_CHECK_EQ(e.cursor_index, static_cast<std::size_t>(1));
     AURORA_TEST_CHECK_FALSE(e.has_preedit_selection());
     AURORA_TEST_CHECK(e.committed.empty());
 }
@@ -177,7 +177,7 @@ AURORA_TEST_CASE(utf8_preedit_cursor_and_no_selection) {
 AURORA_TEST_CASE(utf8_preedit_cursor_minus_one_falls_back_to_end) {
     // cursor=-1（输入法未给游标）→ 退化到串尾码点下标。
     const auto e = make_preedit_state_utf8("ni hao", -1, -1, -1);
-    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(6));
+    AURORA_TEST_CHECK_EQ(e.cursor_index, static_cast<std::size_t>(6));
 }
 
 AURORA_TEST_CASE(utf8_preedit_half_open_selection_maps_to_inclusive_cp) {
@@ -185,18 +185,18 @@ AURORA_TEST_CASE(utf8_preedit_half_open_selection_maps_to_inclusive_cp) {
     constexpr std::string_view s = "\xE4\xB8\x80\xE4\xBA\x8C\xE4\xB8\x89";
     const auto one = make_preedit_state_utf8(s, 6, 3, 6);
     AURORA_TEST_CHECK_TRUE(one.has_preedit_selection());
-    AURORA_TEST_CHECK_EQ(one.sel_start, std::size_t(1));
-    AURORA_TEST_CHECK_EQ(one.sel_end, std::size_t(1));
+    AURORA_TEST_CHECK_EQ(one.sel_start, static_cast<std::size_t>(1));
+    AURORA_TEST_CHECK_EQ(one.sel_end, static_cast<std::size_t>(1));
     // [0,6) 含「一二」→ 含尾 [0,1]。
     const auto two = make_preedit_state_utf8(s, 0, 0, 6);
-    AURORA_TEST_CHECK_EQ(two.sel_start, std::size_t(0));
-    AURORA_TEST_CHECK_EQ(two.sel_end, std::size_t(1));
+    AURORA_TEST_CHECK_EQ(two.sel_start, static_cast<std::size_t>(0));
+    AURORA_TEST_CHECK_EQ(two.sel_end, static_cast<std::size_t>(1));
 }
 
 AURORA_TEST_CASE(utf8_preedit_empty_means_cancelled) {
     const auto e = make_preedit_state_utf8("", -1, -1, -1);
     AURORA_TEST_CHECK(e.preedit.empty());
-    AURORA_TEST_CHECK_EQ(e.cursor_index, std::size_t(0));
+    AURORA_TEST_CHECK_EQ(e.cursor_index, static_cast<std::size_t>(0));
     AURORA_TEST_CHECK_FALSE(e.has_preedit_selection());
 }
 
@@ -204,8 +204,8 @@ AURORA_TEST_CASE(utf8_preedit_selection_end_clamped_to_last_cp) {
     // 尾端点越界（半开区间 end ≥ 串长）→ 含尾码点夹紧到最后一个码点。
     constexpr std::string_view s = "\xE4\xBD\xA0\xE5\xA5\xBD";  // 「你好」2 码点
     const auto e = make_preedit_state_utf8(s, 0, 3, 99);
-    AURORA_TEST_CHECK_EQ(e.sel_start, std::size_t(1));
-    AURORA_TEST_CHECK_EQ(e.sel_end, std::size_t(1));  // total-1
+    AURORA_TEST_CHECK_EQ(e.sel_start, static_cast<std::size_t>(1));
+    AURORA_TEST_CHECK_EQ(e.sel_end, static_cast<std::size_t>(1));  // total-1
 }
 
 }  // namespace aurora::test_cases::utest_ime_composition

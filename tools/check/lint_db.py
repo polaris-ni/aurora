@@ -29,9 +29,20 @@ import subprocess
 # 跑过一轮，但它们的告警几乎全是 `readability-identifier-naming`，而该检查有按类别的
 # `*IgnoredRegexp`（clang-tidy 22 实测有效，探针见 BUILD_OPTIONS.md §4.5）——用命名豁免能
 # 保住这两个文件的其余覆盖面，故不改用「整文件排除」这种永久盲点。
+# ③ 构建目录里的生成物：不属于本仓代码，却可能被写进同一份 compile_commands.json。
+#    典型是 Wayland 协议胶水（wayland-scanner 在 configure 期把 xdg-shell 等 XML 编成
+#    `<build>/wayland-gen/*-protocol.c`）：这些 .c 既不按本仓风格检查，又会因缺生成头让整片
+#    TU 编译失败（broken_tus）。按「以 `-gen` 结尾的目录段」匹配，不写死 wayland-gen——协议集
+#    与生成器名字会增删。
+#    ⚠️ 刻意**不**用裸 `gen/`：源码树里 `tools/gen/` 是本仓 API / 错误码生成器的正式目录，
+#    全局匹配它会把第一方代码静默踢出 lint 覆盖面。构建目录专属的 `<build>/gen/` 由
+#    `generated_exclude(build_dir)` 在锚定到本轮构建目录之后再补上。
+GENERATED_EXCLUDE = re.compile(r"(^|/)[^/]*-gen/")
+
 DEFAULT_EXCLUDE = re.compile(
     r"(^|/)third_party/"
     r"|tests/support/fake_gl\.h$"
+    r"|" + GENERATED_EXCLUDE.pattern
 )
 
 # 预处理取依赖时要从编译命令里剔除的选项。
@@ -168,6 +179,52 @@ def load_tus(compile_db: str, include: re.Pattern | None,
             continue
         out.append(f)
     return sorted(out)
+
+
+def generated_exclude(build_dir: str | None = None) -> re.Pattern:
+    """**仅生成物**这一类构建目录生成物的排除正则（供 `count_generated_tus` 计数用）。
+
+    基线是 `GENERATED_EXCLUDE`（`*-gen/` 目录段，与源码树无关）。给出 `build_dir` 时再补一条
+    锚定到本轮构建目录的 `<build>/gen/`——这一形态只有在确定构建目录后才安全（源码树里的
+    `gen/` 是正式目录，见 GENERATED_EXCLUDE 的注释）。
+    """
+    pattern = GENERATED_EXCLUDE.pattern
+    if build_dir:
+        root = norm(os.path.abspath(build_dir)).rstrip("/")
+        pattern += "|" + re.escape(root + "/gen/")
+    return re.compile(pattern)
+
+
+def default_exclude(build_dir: str | None = None) -> re.Pattern:
+    """门禁默认排除：third_party / GL 桩 / 生成物，外加锚定到本轮构建目录的 `<build>/gen/`。
+
+    runner 与选集脚本共用同一份「TU 宇宙」口径（诊断过滤也用它）。为什么不直接在
+    `DEFAULT_EXCLUDE` 里带上 `<build>/gen/`：构建目录只有在运行时才知道，而 `gen/` 这一名字在
+    源码树里另有正式目录（`tools/gen/`），全局匹配会误伤第一方代码。
+    """
+    pattern = DEFAULT_EXCLUDE.pattern
+    if build_dir:
+        root = norm(os.path.abspath(build_dir)).rstrip("/")
+        pattern += "|" + re.escape(root + "/gen/")
+    return re.compile(pattern)
+
+
+def count_generated_tus(compile_db: str, build_dir: str | None = None) -> int:
+    """编译库里被生成物排除命中的 TU 条数（去重）。
+
+    排除必须留痕：`load_tus` 会静默丢弃生成物，若汇总里不记这个数，「生成物被排除」与
+    「本就没生成」在门禁日志里长得一样。只计生成物这一类，third_party 与点名豁免不算在内。
+    """
+    pat = generated_exclude(build_dir)
+    seen: set[str] = set()
+    n = 0
+    for f, _args, _dir in load_db(compile_db):
+        if f in seen:
+            continue
+        seen.add(f)
+        if pat.search(f):
+            n += 1
+    return n
 
 
 def deps_command(args: list[str]) -> list[str] | None:

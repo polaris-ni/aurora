@@ -10,9 +10,15 @@
 // 设计要点：
 // - pimpl 隔离：公共头不含 <wayland-client.h> 与 scanner 生成头（xdg-shell 胶水仅
 //   存在于 build 目录），全部平台逻辑在 src/aurora/window/wayland_surface.cpp。
-// - 上屏路径：软件 Painter RGBA 帧缓冲 → CPU swizzle 到 WL_SHM_FORMAT_XRGB8888
-//   （小端 BGRX，与 Win32 RGBA→BGRA 等价）→ wl_shm 共享内存 wl_buffer →
+// - 上屏路径：软件 Painter RGBA 帧缓冲 → CPU swizzle（预乘 alpha）到
+//   WL_SHM_FORMAT_ARGB8888（小端 BGRA；内容区 alpha=255 与旧 XRGB 路径逐值等价，
+//   四周阴影边距带半透 alpha）→ wl_shm 共享内存 wl_buffer →
 //   attach + damage_buffer + commit（双缓冲槽轮换，busy 时 roundtrip 等 release）。
+// - 阴影边距（CSD shadow margin，libadwaita 范式）：wl_surface buffer 比 window geometry
+//   四周各大出阴影边距（detail::csd_geometry.h），margin 承载衰减阴影与窗口外缩放热区；
+//   `xdg_surface.set_window_geometry` 只报内容矩形，opaque region 同步限定在内容区；
+//   最大化/全屏/平铺态边距塌缩为 0。`size()` 为整幅表面口径，应用内容偏移由
+//   `content_inset()` 经 ContentInsetRoot 壳折算。
 // - 窗口壳：wl_surface + xdg_surface + xdg_toplevel；configure 驱动尺寸/状态
 //   （maximized/fullscreen/activated）；close 事件 → should_close。
 //   服务端装饰经 zxdg_decoration_manager_v1 协商（KDE 有；GNOME 无 → 无标题栏，
@@ -63,6 +69,9 @@ class WaylandSurface final : public Surface {
     /// @brief 禁止拷贝赋值：listener user-data 绑定本对象，任何使用均为编译期错误。
     /// @return 删除声明无运行期返回值。
     WaylandSurface &operator=(const WaylandSurface &) = delete;
+    /// @brief 禁止移动：listener 的 user-data 指针绑定 this，移动后原地址失效即悬垂。
+    WaylandSurface(WaylandSurface &&) = delete;
+    WaylandSurface &operator=(WaylandSurface &&) = delete;
 
     /// @brief Wayland 连接与窗口壳是否创建成功（无 WAYLAND_DISPLAY/纯 TTY 环境为 false）。
     /// 工厂 `create_window(WaylandOptions)` 据此返回 `Result` 错误而非崩溃。
@@ -77,16 +86,17 @@ class WaylandSurface final : public Surface {
     /// @brief 当前帧的软件栅格化 Painter（写入 RGBA 帧缓冲，present 时 swizzle 上屏）。
     /// @return Painter 引用，生命周期同本 Surface。
     [[nodiscard]] auto painter() -> Painter & override;
-    /// @brief 提交当前帧：RGBA → XRGB8888 swizzle 进 wl_shm 缓冲，attach+damage+commit
-    /// （双缓冲槽轮换，busy 时 roundtrip 等 release；脏区非空仅 damage 脏矩形）。
+    /// @brief 提交当前帧：RGBA（预乘 alpha）→ ARGB8888 swizzle 进 wl_shm 缓冲，
+    /// attach+damage+commit（双缓冲槽轮换，busy 时 roundtrip 等 release；脏区非空仅 damage 脏矩形）。
     /// @return 提交成功 true；连接失效时 false 及错误信息。
     [[nodiscard]] auto present() -> Result<bool> override;
     /// @brief 当前帧像素（设备像素缓冲，RGBA）：DEBUG 下覆写返回 Painter 缓冲；
     /// Release（未开 `AURORA_ENABLE_DEBUG`）回落基类默认值 nullptr，使 `save_snapshot` 返回 disabled。
     /// @return 帧像素只读指针；无缓冲或未开 DEBUG 时 nullptr。
     [[nodiscard]] auto data() const -> const std::uint8_t * override;
-    /// @brief 逻辑尺寸：xdg configure 事件驱动写入的当前窗口尺寸。
-    /// @return 最近一次 configure 生效的逻辑 Size。
+    /// @brief 整幅表面逻辑尺寸（dp）：内容（window geometry）尺寸 + 2×阴影边距；
+    /// 最大化/全屏/平铺/非 CSD 态边距塌缩为 0，与内容尺寸相等。
+    /// @return wl_surface buffer 对应的逻辑 Size（configure 内容尺寸经边距放大）。
     [[nodiscard]] auto size() const -> Size override;
     /// @brief 已呈现帧数：每次 `present()` 真正 attach+commit 上屏自增（Hidden 档不 commit 故不计）。
     /// @return 成功 commit 的帧计数。
@@ -108,6 +118,11 @@ class WaylandSurface final : public Surface {
     auto wait_events(double timeout_ms) -> void override;
     /// @brief 跨线程唤醒主循环（线程安全）：向自唤醒管道写 1 字节打断 wait_events。
     auto request_wake() -> void override;
+    /// @brief 安装宿主注入的「附加事件源」（WebView 引擎的 GLib 主上下文 fd 并入 poll 集）。
+    /// @param watches 待监听 fd 集的提供者（传空撤销）。
+    /// @param pump fd 就绪后的推进函数（传空撤销）。
+    auto set_extra_event_source(std::function<std::vector<Surface::ExtraWatch>()> watches, std::function<void()> pump)
+        -> void override;
 
     /// @brief 增量上屏脏区（设备坐标）：非空时 present() 仅 swizzle+damage_buffer 脏矩形，
     /// 而非整窗（对齐 Win32/X11 的增量 blit 策略）；脏区一次性消费。
@@ -209,6 +224,12 @@ class WaylandSurface final : public Surface {
     /// @brief 运行期更新 CSD 标题栏样式（存入 Impl 并触发重绘，下帧 draw_decoration 生效）。
     /// @param style 新的标题栏样式（配色/高度/按钮布局）。
     auto set_title_bar_style(const TitleBarStyle &style) -> void override;
+    /// @brief 运行期更新 CSD 窗框样式（存入 Impl、重算 window geometry 后触发重绘）。
+    ///
+    /// 与标题栏样式不同之处：投影厚度直接改变整幅 buffer 尺寸，故除重绘外还须同步
+    /// window geometry 与 `content_inset`，否则应用侧布局会按旧安全区排一帧。
+    /// @param style 新的窗框样式（投影开关/厚度/基色/模糊半径与外轮廓圆角）。
+    auto set_window_frame_style(const WindowFrameStyle &style) -> void override;
     /// @brief 控件发起窗口拖拽移动（Wayland：xdg_toplevel_move，须在 Press 派发栈内调用）。
     auto begin_window_move() -> void override;
     /// @brief 控件发起窗口边缘缩放（Wayland：xdg_toplevel_resize）。
@@ -217,8 +238,10 @@ class WaylandSurface final : public Surface {
     /// @brief 运行期更新 CSD 标题栏图标（shared_ptr 共享像素避免深拷贝）并触发重绘。
     /// @param icon 图标图像（共享所有权）；nullptr 清除。
     auto set_title_bar_icon(const std::shared_ptr<Image> &icon) -> void override;
-    /// @brief 客户端装饰安全区内边距：CSD 标题栏高度（顶）与可缩放边框厚度（四周）。
-    /// @return 各边内缩距离；SSD 或无装饰时全零。
+    /// @brief 客户端装饰安全区内边距：表面原点到应用内容原点的总偏移——含阴影边距
+    /// （左/右/底/顶各一份，顶部再叠加 CSD 标题栏高度）；最大化/平铺态边距塌缩仅余标题栏，
+    /// 全屏/SSD/无装饰时全零。
+    /// @return 各边内缩距离（逻辑 dp）；SSD 或无装饰时全零。
     [[nodiscard]] auto content_inset() const -> EdgeInsets override;
     /// @brief 程序化关闭：置 close_requested，下帧退出主循环。
     auto close() -> void override;
@@ -248,9 +271,9 @@ class WaylandSurface final : public Surface {
     /// @note 申报偏差：xdg-shell 不暴露窗口屏幕原点 ⇒ 几何按窗口本地 px 申报。
     auto set_accessibility_root(Widget *root) -> void override;
 
-    /// @brief 是否正在自绘 CSD 装饰（标题栏/边框，画进 Painter 帧缓冲）：合成器无
-    /// xdg-decoration SSD 且装饰策略需要兜底时为 true。GPU 宿主（WgpuWaylandSurface）
-    /// 据此决定是否需要把装饰录制进当帧。
+    /// @brief 是否正在自绘 CSD 装饰（标题栏 + 阴影边距）：合成器无 xdg-decoration SSD 且
+    /// 装饰策略需要兜底时为 true。GPU 宿主（WgpuWaylandSurface）据此决定是否需要把装饰
+    /// （overlay/underlay 两层）录制进当帧。
     /// @return 本窗口走客户端装饰自绘时 true。
     [[nodiscard]] auto uses_client_decorations() const -> bool;
 
@@ -264,6 +287,19 @@ class WaylandSurface final : public Surface {
     /// @return 本帧有装饰被录制时 true。
     /// @note 用后端自带的独立录制 Painter，可在 app 帧 DL 录制期间安全调用（互不嵌套）。
     auto record_client_decoration(DisplayList &dl) -> bool;
+
+    /// @brief 把本帧窗口阴影**录制**为 `DisplayList` underlay（不触帧缓冲），供 GPU 宿主在
+    /// app 帧 DL **之前**回放——阴影必须位于不透明内容底色之下（margin 半透衰减带）。
+    /// GPU/DL 路径的阴影源为 `csd::paint_window_shadow`；软件 wl_shm 路径不经此通道
+    /// （Painter 画布恒不透明画不出真 alpha），改由 `present()` 的
+    /// `csd::compose_shadow_margins_bgra` 在 swizzle 后直接合成，两路视觉参数同源。
+    ///
+    /// 坐标为**逻辑 dp**（与帧级 DL 同口径，缩放在回放侧生效），内容矩形原点平移至
+    /// (margin, margin)。阴影边距塌缩为 0（最大化/全屏/平铺/非 CSD）时返回 false 且不改写
+    /// `dl`，调用方据此跳过回放。
+    /// @param dl 追加录制目标的帧级 DisplayList（无阴影时保持原样）。
+    /// @return 本帧有阴影被录制时 true。
+    auto record_client_decoration_underlay(DisplayList &dl) -> bool;
 
     /// @brief 全部 Wayland/xkb 状态（display/registry/shm 双缓冲/seat/唤醒管道），见 wayland_surface.cpp。
     /// public 而非 private：C 协议 listener（自由函数指针表）需在类外以 `Impl*` 收发 user data。

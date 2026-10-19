@@ -7,7 +7,7 @@
 /// （未登记回退英文字面量、随 `ctx` 注入的 locale 变化）、文本覆盖优先于查表、自定义 key 仍走 i18n、
 /// 空态提示确实进入绘制、以及属性序列化往返保留 i18n 语义。
 
-#include <cstddef>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +23,7 @@
 #include "aurora/i18n/string_table.h"
 #include "aurora/render/display_list.h"
 #include "aurora/render/rhi/rhi_backend.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/command_palette.h"
 #include "framework/aurora_test.h"
 
@@ -131,6 +132,16 @@ void fill_registry(CommandRegistry &reg, int &calls) {
     closed.title = "Close File";
     closed.enabled = []() -> bool { return false; };
     reg.add(std::move(closed));
+}
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 }  // namespace
@@ -464,7 +475,7 @@ AURORA_TEST_CASE(custom_key_still_localizes) {
     AURORA_TEST_CHECK_EQ(palette.empty_message_key(), em_key);
 
     // 换 key 后**仍走 i18n**：缺省档未登记 → 兜底；fr 档 → 译文。
-    constexpr BuildContext plain;
+    [[maybe_unused]] constexpr BuildContext plain;
     AURORA_TEST_CHECK_EQ(palette.placeholder(), std::string{CommandPalette::AURORA_DEFAULT_PLACEHOLDER_TEXT});
 
     const Environment env = Environment{}.with<Locale>(Locale{.language = "fr"});
@@ -552,6 +563,46 @@ AURORA_TEST_CASE(props_round_trip_preserves_i18n_semantics) {
     dst2.deserialize_props(text_props);
     AURORA_TEST_CHECK_EQ(dst2.placeholder(), std::string{"Literal placeholder"});
     AURORA_TEST_CHECK_EQ(dst2.placeholder_key(), std::string{"host.command_palette.placeholder"});
+}
+
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+
+AURORA_TEST_CASE(command_palette_colors_follow_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
+    CommandPalette b{nullptr};
+    AURORA_TEST_CHECK(b.resolve_surface_color(bare) == Color::white());  // light surface = white
+    AURORA_TEST_CHECK(b.resolve_scrim_color(bare) == Color{0, 0, 0});  // light scrim = black
+    AURORA_TEST_CHECK(b.resolve_divider_color(bare) == Color{0xC6, 0xC6, 0xC6});  // light outline_variant
+    AURORA_TEST_CHECK(b.resolve_selected_color(bare) == Color::blue());  // light primary
+    AURORA_TEST_CHECK(b.resolve_text_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
+    AURORA_TEST_CHECK(b.resolve_muted_color(bare) == Color{0x47, 0x47, 0x47});  // light on_surface_variant
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(b.resolve_surface_color(dark) == Color{0x20, 0x21, 0x24});  // dark surface
+    AURORA_TEST_CHECK(b.resolve_scrim_color(dark) == Color{0, 0, 0});  // dark scrim = black
+    AURORA_TEST_CHECK(b.resolve_divider_color(dark) == Color{0x47, 0x47, 0x47});  // dark outline_variant
+    AURORA_TEST_CHECK(b.resolve_selected_color(dark) == Color{0xC0, 0xC1, 0xFF});  // dark primary
+    AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color{0xFF, 0xFF, 0xFF});  // dark on_surface = 白
+    AURORA_TEST_CHECK(b.resolve_muted_color(dark) == Color{0xC6, 0xC6, 0xC6});  // dark on_surface_variant
+}
+
+AURORA_TEST_CASE(command_palette_explicit_colors_override_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    CommandPalette b{nullptr};
+    b.surface_color(Color{0xE0, 0x1B, 0x24});
+    b.scrim_color(Color{0x10, 0x20, 0x30});
+    b.divider_color(Color{0xAA, 0xBB, 0xCC});
+    b.selected_color(Color{0x12, 0x34, 0x56});
+    b.text_color(Color{0x77, 0x88, 0x99});
+    b.muted_color(Color{0x99, 0x88, 0x77});
+    AURORA_TEST_CHECK(b.resolve_surface_color(dark) == Color{0xE0, 0x1B, 0x24});
+    AURORA_TEST_CHECK(b.resolve_scrim_color(dark) == Color{0x10, 0x20, 0x30});
+    AURORA_TEST_CHECK(b.resolve_divider_color(dark) == Color{0xAA, 0xBB, 0xCC});
+    AURORA_TEST_CHECK(b.resolve_selected_color(dark) == Color{0x12, 0x34, 0x56});
+    AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color{0x77, 0x88, 0x99});
+    AURORA_TEST_CHECK(b.resolve_muted_color(dark) == Color{0x99, 0x88, 0x77});
 }
 
 }  // namespace aurora::test_cases::utest_command_palette

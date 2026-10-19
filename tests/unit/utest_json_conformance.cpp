@@ -6,7 +6,6 @@
 ///           tests/fixtures/json_test_suite/README.md。
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>

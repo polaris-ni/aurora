@@ -5,8 +5,6 @@
 /// 空数据与单点 / 全等值不崩、以及像素 golden 基线（chart_sparkline.png，受 AURORA_UPDATE_GOLDEN 控制）
 
 #include <algorithm>
-#include <charconv>
-#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -15,7 +13,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
-#include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
 #include "framework/json_access.h"

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -207,7 +206,7 @@ class PieChart : public LeafWidget, public PieChartProps {
     /// @param g 几何快照
     /// @param local 本地坐标
     /// @return 命中图例项序号，无命中为 nullopt
-    [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
+    [[nodiscard]] static auto legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t>;
 
     Geometry geom_;  ///< 当前几何（每次 on_layout 重算）
     ChartGrowIn grow_;  ///< grow-in 动画器（on_mount 接入帧循环）
@@ -220,7 +219,7 @@ inline auto PieChart::compute_geometry(const Size &size, const Font &font) const
     Geometry g;
     g.ratios = pie_section_ratios(sections);
     const float line_h = render::FontEngine::measure_height(font) + 4.0F;
-    float left = padding.left;
+    const float left = padding.left;
     float top = padding.top;
     float right = std::max(padding.left, size.width - padding.right);
     float bottom = std::max(padding.top, size.height - padding.bottom);
@@ -289,12 +288,12 @@ inline auto PieChart::on_layout(const Constraints &c, const BuildContext &ctx) -
     }
     s.width = std::max(s.width, 0.0F);
     s.height = std::max(s.height, 0.0F);
-    geom_ = compute_geometry(s, inherit_theme(ctx).font);
+    geom_ = compute_geometry(s, inherit_theme(ctx).type_scale.body_medium);
     return s;
 }
 
 // 顺序扫描 legend_rects，首个包含该点的矩形即命中。
-inline auto PieChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
+inline auto PieChart::legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
         const Rect &r = g.legend_rects[i];
         if (local.x >= r.origin.x && local.x <= r.right() && local.y >= r.origin.y && local.y <= r.bottom()) {
@@ -317,10 +316,33 @@ inline auto PieChart::section_hit(const Geometry &g, const Point &local) const -
     }
     constexpr float two_pi = 6.28318530717958647692F;
     constexpr float deg = 0.01745329251994329577F;
-    float ang = std::atan2(dy, dx) - (start_angle * deg);
+    // 起始角偏移与绘制路径（`paint` 内的 `cursor`）同款取显式中间量，让未收缩形态下 12 点方向
+    // 的角度精确为 0。但**不能依赖拆句防收缩**：优化器会把中间量前传回表达式再收缩（CI
+    // ubuntu-26.04 的 gcc 实测如此——拆句后 simd-off 腿仍红）。收缩后 12 点方向残差约
+    // 5.6e-8 弧度（单次舍入），故归一下方一律按「不信任输入」夹取，任何收缩开关下终点一致。
+    const float start_offset = start_angle * deg;
+    float ang = std::atan2(dy, dx) - start_offset;
     ang = std::fmod(ang, two_pi);
     if (ang < 0.0F) {
         ang += two_pi;
+    }
+    // 夹回 [0, 2π)：残差为极小的负值时，`ang += two_pi` 的和会被舍入成**恰好 2π**（12 点方向
+    // 的 -5.6e-8 即如此——ulp 4.8e-7 远大于残差本身），恰好落在下方扫描的严格 `<` 之外，整段
+    // 丢命中（实测 toggles (simd-off) 三例：悬停 / 点击 / 交互分支全部命中不到扇区 0，而同一
+    // 进程的 golden 像素比对照常通过——绘制路径不受影响）。减一次 2π 恢复不变量。
+    if (ang >= two_pi) {
+        ang -= two_pi;
+    }
+    // 扇区占比经 `pie_section_ratios` 归一化（Σ=1），数学上铺满整圆；最后一段**有效**扇区的
+    // 上界因此取 2π 本身而非 `cursor + sweep`——浮点累加和可能略低于 2π，会把贴近 2π 的角度
+    // 漏在最后一个扇区之外。零占比段被跳过、不占 cursor，「最后一段有效」按序取。
+    std::size_t last_positive = 0;
+    bool any_positive = false;
+    for (std::size_t i = 0; i < g.ratios.size(); ++i) {
+        if (static_cast<float>(g.ratios[i]) > 0.0F) {
+            last_positive = i;
+            any_positive = true;
+        }
     }
     float cursor = 0.0F;
     for (std::size_t i = 0; i < g.ratios.size(); ++i) {
@@ -328,7 +350,8 @@ inline auto PieChart::section_hit(const Geometry &g, const Point &local) const -
         if (sweep <= 0.0F) {
             continue;
         }
-        if (ang >= cursor && ang < cursor + sweep) {
+        const float upper = (any_positive && i == last_positive) ? two_pi : cursor + sweep;
+        if (ang >= cursor && ang < upper) {
             return static_cast<int>(i);
         }
         cursor += sweep;
@@ -495,12 +518,12 @@ inline auto PieChart::deserialize_props(const Json &props) -> void {
 // 绘制顺序：扇区与扇内百分比标签 → 图例色块与名称 → 悬停值框（居中偏上并夹进控件边界）。
 inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     const Theme theme = inherit_theme(ctx);
-    const Font &font = theme.font;
+    const Font &font = theme.type_scale.body_medium;
     const Point origin = bounds.origin;
     const Geometry &g = geom_;
     const float line_h = render::FontEngine::measure_height(font) + 4.0F;
-    const Color grid = Color{theme.text.r, theme.text.g, theme.text.b, 31};
-    const Color axis = Color{theme.text.r, theme.text.g, theme.text.b, 160};
+    const Color grid = Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 31};
+    const Color axis = Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 160};
 
     constexpr float two_pi = 6.28318530717958647692F;
     constexpr float deg = 0.01745329251994329577F;
@@ -527,7 +550,7 @@ inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
         p.fill_sector(Point{.x = origin.x + g.center.x, .y = origin.y + g.center.y}, g.outer, g.inner, a0, a1, c);
         if (hovered_section_.has_value() && std::cmp_equal(*hovered_section_, i)) {
             p.stroke_arc(Point{.x = origin.x + g.center.x, .y = origin.y + g.center.y}, (g.outer + g.inner) * 0.5F,
-                         std::max(1.0F, g.outer - g.inner), a0, a1, theme.text);
+                         std::max(1.0F, g.outer - g.inner), a0, a1, theme.roles.on_surface);
         }
         if (show_percentage_labels && g.ratios[i] > 0.0F) {
             const float mid = (a0 + a1) * 0.5F;
@@ -574,11 +597,11 @@ inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
         const float bx = std::clamp(g.center.x + (g.outer * 0.5F), 0.0F, std::max(0.0F, bounds.size.width - w));
         const float by = std::clamp(g.center.y - g.outer - h - 4.0F, 0.0F, std::max(0.0F, bounds.size.height - h));
         const Rect box{.origin = Point{.x = origin.x + bx, .y = origin.y + by}, .size = Size{.width = w, .height = h}};
-        p.fill_rounded_rect(box, 4.0F, Color{theme.background.r, theme.background.g, theme.background.b, 242});
+        p.fill_rounded_rect(box, 4.0F, Color{theme.roles.surface.r, theme.roles.surface.g, theme.roles.surface.b, 242});
         p.draw_rounded_border(box, 4.0F, 1.0F, grid);
         const Rect text_box{.origin = Point{.x = origin.x + bx + 8.0F, .y = origin.y + by + 4.0F},
                             .size = Size{.width = w - 16.0F, .height = line_h}};
-        p.draw_text(text_box, text, font, theme.text);
+        p.draw_text(text_box, text, font, theme.roles.on_surface);
     }
 }
 

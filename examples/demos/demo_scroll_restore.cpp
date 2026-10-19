@@ -24,7 +24,7 @@ auto fixed(float w, float h, const au::Node &child) -> au::Node {
 
 /// 带 `restore_key` 的滚动列表：同 key 的新实例（重建 / 重启）会恢复上次位置。
 auto feed(std::shared_ptr<au::LazyList> &out, const char *key, int count, au::Color accent) -> au::Node {
-    auto list = std::make_shared<au::LazyList>(
+    const auto list = std::make_shared<au::LazyList>(
         count,
         [accent](int i) -> au::Node {
             auto row = std::make_unique<au::Row>();
@@ -41,7 +41,7 @@ auto feed(std::shared_ptr<au::LazyList> &out, const char *key, int count, au::Co
 
 /// 一个小按钮（demo 内联用）。
 auto button(const char *label, std::function<void()> on_click) -> au::Node {
-    auto btn = std::make_shared<au::Button>(label);
+    const auto btn = std::make_shared<au::Button>(label);
     btn->set_on_click(std::move(on_click));
     return au::Node{std::shared_ptr<au::Widget>(btn)};
 }
@@ -60,8 +60,8 @@ auto main() -> int {
 
     std::shared_ptr<au::LazyList> left_list;
     std::shared_ptr<au::LazyList> right_list;
-    au::Node left = fixed(280.0F, 240.0F, feed(left_list, "demo.left", 60, pal::AURORA_PRIMARY));
-    au::Node right = fixed(280.0F, 240.0F, feed(right_list, "demo.right", 60, pal::AURORA_ACCENT));
+    const au::Node left = fixed(280.0F, 240.0F, feed(left_list, "demo.left", 60, pal::AURORA_PRIMARY));
+    const au::Node right = fixed(280.0F, 240.0F, feed(right_list, "demo.right", 60, pal::AURORA_ACCENT));
 
     au::Row columns;
     columns.add(left);

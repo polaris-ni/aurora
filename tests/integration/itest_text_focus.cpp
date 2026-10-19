@@ -55,8 +55,8 @@ struct Stage {
         col = std::make_shared<Column>(ColumnProps{.children = {Node{txt}, Node{btn}}});
         col->set_focusable(false);  // 容器不抢占焦点，焦点应落在叶控件上
         col->mount(ctx);
-        const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
-                             .max = Size{.width = AURORA_TEST_TEXT_FOCUS_W, .height = AURORA_TEST_TEXT_FOCUS_H}};
+        constexpr Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
+                                 .max = Size{.width = AURORA_TEST_TEXT_FOCUS_W, .height = AURORA_TEST_TEXT_FOCUS_H}};
         col->layout(cc, ctx);
         p.begin(static_cast<int>(AURORA_TEST_TEXT_FOCUS_W), static_cast<int>(AURORA_TEST_TEXT_FOCUS_H));
         repaint_on_white();

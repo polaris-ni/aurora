@@ -78,7 +78,11 @@
 namespace {
 
 /// @brief 累计的断言失败条数，决定退出码 1。
-int failures = 0;
+///        函数局部静态 + 访问器收敛，避免命名空间级可变全局量。
+auto failures() -> int & {
+    static int count = 0;
+    return count;
+}
 
 /// @brief 宿主回调侧收到的全部 `KeyEvent` 记录（本探针的观察面）。
 struct KeyRecord {
@@ -125,7 +129,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
 auto check(bool passed, const std::string &label) -> void {
     emit(std::string("[") + (passed ? "PASS" : "FAIL") + ") " + label);
     if (!passed) {
-        ++failures;
+        ++failures();
     }
 }
 
@@ -168,11 +172,20 @@ auto send_syskey(HWND hwnd, bool syskey_down, int vk) -> LRESULT {
 //
 // `SC_CLOSE` 在 MinGW 的 `windows.h` 里虽有定义，但同族的 `SC_SYSMENU` 没有（只有 MSVC SDK 的
 // `winuser.h` 给了），故这一族统一按 Win32 文档的官方数值写死并注明来源，避免为探针引入 SDK 依赖。
-constexpr WORD kScClose = 0xF060;  ///< `SC_CLOSE`（Alt+F4 关闭窗口）。
-constexpr WORD kMaskCommand = 0xFFF0U;  ///< `WM_SYSCOMMAND` 的 wParam 低 4 位为保留位，须掩掉。
+constexpr WORD AURORA_SC_CLOSE = 0xF060;  ///< `SC_CLOSE`（Alt+F4 关闭窗口）。
+constexpr WORD AURORA_MASK_COMMAND = 0xFFF0U;  ///< `WM_SYSCOMMAND` 的 wParam 低 4 位为保留位，须掩掉。
 
-WNDPROC g_original_wndproc = nullptr;  ///< Aurora 自己的窗口过程（子类化前的原值）。
-std::vector<WORD> g_syscommands;  ///< 收到的 `WM_SYSCOMMAND` 命令码序列（`SC_CLOSE` 等）。
+/// @brief Aurora 自己的窗口过程（子类化前的原值）。
+auto original_wndproc() -> WNDPROC & {
+    static WNDPROC proc = nullptr;
+    return proc;
+}
+
+/// @brief 收到的 `WM_SYSCOMMAND` 命令码序列（`SC_CLOSE` 等）。
+auto syscommands() -> std::vector<WORD> & {
+    static std::vector<WORD> commands;
+    return commands;
+}
 
 /// @brief 子类窗口过程：只拦 `WM_SYSCOMMAND` 做记录，其余原样转交 Aurora 的窗口过程。
 /// @param hwnd 窗口句柄。
@@ -182,10 +195,10 @@ std::vector<WORD> g_syscommands;  ///< 收到的 `WM_SYSCOMMAND` 命令码序列
 /// @return 子类自身消费时返回 0；否则为原窗口过程的返回值。
 auto CALLBACK subclass_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) -> LRESULT {
     if (msg == WM_SYSCOMMAND) {
-        g_syscommands.push_back(static_cast<WORD>(wp & kMaskCommand));
+        syscommands().push_back(static_cast<WORD>(wp & AURORA_MASK_COMMAND));
         return 0;  // 记录即可，不交回：交回 SC_CLOSE 会销毁窗口，后续断言就没了
     }
-    return CallWindowProcA(g_original_wndproc, hwnd, msg, wp, lp);
+    return CallWindowProcA(original_wndproc(), hwnd, msg, wp, lp);
 }
 
 /// @brief 给窗口装上子类（记录 `WM_SYSCOMMAND`）。
@@ -193,9 +206,13 @@ auto CALLBACK subclass_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) -> LR
 /// @return 装类是否成功。
 [[nodiscard]] auto install_subclass(HWND hwnd) -> bool {
     SetLastError(0);
-    g_original_wndproc = reinterpret_cast<WNDPROC>(
-        SetWindowLongPtrA(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&subclass_wnd_proc)));
-    return g_original_wndproc != nullptr;
+    // 窗口过程换装没有类型安全替代（`SetWindowLongPtrA` 形参为 `LONG_PTR`），故两处转换各带一条定点豁免。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto proc_bits = reinterpret_cast<LONG_PTR>(&subclass_wnd_proc);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr)
+    auto previous = reinterpret_cast<WNDPROC>(SetWindowLongPtrA(hwnd, GWLP_WNDPROC, proc_bits));
+    original_wndproc() = previous;
+    return previous != nullptr;
 }
 
 /// @brief 自动段：全部判据见本文件头注释的「自动段」清单。
@@ -254,7 +271,7 @@ auto run_auto_stage() -> int {
     // 3. F10（系统菜单键）不派发。
     sink.records.clear();
     send_syskey(hwnd, true, VK_F10);
-    check(sink.records.size() == 0U,
+    check(sink.records.empty(),
           "WM_SYSKEYDOWN(VK_F10) does NOT dispatch a KeyEvent (system-menu key is system semantics): " +
               aurora_verify::format_uint(sink.records.size()));
 
@@ -293,14 +310,14 @@ auto run_auto_stage() -> int {
         check(!sink.records.front().is_down, "the release KeyEvent action is KeyAction::Up");
     }
 
-    return failures == 0 ? 0 : 1;
+    return failures() == 0 ? 0 : 1;
 }
 
 /// @brief 人工段：真键盘按 Alt+F4，由窗口子类**自动判读**「消费则不关窗、未消费则关窗」。
 ///
 /// 注入通道证不了这一段（`DefWindowProcA` 读 `GetKeyState(VK_MENU)` 物理态，见上方子类注释），
 /// 故必须真键盘。子类把 `WM_SYSCOMMAND` 记下但**不交回**，于是「关窗」不会真的发生，
-/// 操作者按错一次也不必重跑 —— 判据由 `g_syscommands` 自动给出。
+/// 操作者按错一次也不必重跑 —— 判据由 `syscommands()` 自动给出。
 /// @return 该段退出码：0 两段判据均成立；1 否则。
 auto run_interactive_stage() -> int {
     emit("---- interactive segment ----");
@@ -323,15 +340,16 @@ auto run_interactive_stage() -> int {
 
     // 第 1 段：未消费态。系统关闭请求必须真的产生 —— 这证明「未消费时回落 DefWindowProcA」。
     sink.consume = false;
-    g_syscommands.clear();
+    syscommands().clear();
     emit("Step 1 (unconsumed path): press Alt+F4 NOW on the probe window.");
     emit("  Expected: the window stays open (the probe intercepts SC_CLOSE), and the log below shows it arrived.");
     host.wait_events(30.0);  // 阻塞等消息，最多 30s；操作者按键即提前返回
-    const bool close_seen = std::find(g_syscommands.begin(), g_syscommands.end(), kScClose) != g_syscommands.end();
+    const bool close_seen =
+        std::find(syscommands().begin(), syscommands().end(), AURORA_SC_CLOSE) != syscommands().end();
     check(close_seen,
           "unconsumed Alt+F4: WM_SYSCOMMAND(SC_CLOSE) reached the system (fell through to DefWindowProcA), "
           "commands seen = " +
-              aurora_verify::format_uint(g_syscommands.size()));
+              aurora_verify::format_uint(syscommands().size()));
     if (!close_seen) {
         emit(
             "  Hint: no SC_CLOSE within 30s. Either the keypress did not reach this window, or the session is "
@@ -340,21 +358,21 @@ auto run_interactive_stage() -> int {
 
     // 第 2 段：消费态。系统关闭请求必须**不**产生 —— 这证明「消费即止」。
     sink.consume = true;
-    g_syscommands.clear();
+    syscommands().clear();
     sink.records.clear();
     emit("Step 2 (consumed path): the handler now consumes every KeyEvent. Press Alt+F4 NOW again.");
     emit("  Expected: the handler sees the event, but NO SC_CLOSE is produced (Aurora short-circuited).");
     host.wait_events(30.0);
     const bool close_seen_again =
-        std::find(g_syscommands.begin(), g_syscommands.end(), kScClose) != g_syscommands.end();
-    check(sink.records.size() >= 1U,
+        std::find(syscommands().begin(), syscommands().end(), AURORA_SC_CLOSE) != syscommands().end();
+    check(!sink.records.empty(),
           "consumed Alt+F4: the handler saw the event: " + aurora_verify::format_uint(sink.records.size()));
     check(!close_seen_again,
           "consumed Alt+F4: no WM_SYSCOMMAND(SC_CLOSE) reached the system (Aurora short-circuited), commands seen = " +
-              aurora_verify::format_uint(g_syscommands.size()));
+              aurora_verify::format_uint(syscommands().size()));
     sink.consume = false;
 
-    return failures == 0 ? 0 : 1;
+    return failures() == 0 ? 0 : 1;
 }
 
 }  // namespace

@@ -47,7 +47,7 @@
 #include "e2e/harness.h"  // E2E 驱动内核：建窗统一经 e2e::open（RAII + 失败翻译）
 #include "verify_args.h"
 
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
 #include <windows.h>
 #endif
 
@@ -55,12 +55,16 @@ namespace {
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-int failures = 0;
+// 失败计数藏函数内静态：探针不落全局可变状态（与 alsa_audio_live_probe 同款）。
+auto failures() -> int & {
+    static int count = 0;
+    return count;
+}
 
 auto check(bool passed, const std::string &label) -> void {
     emit(std::string("[") + (passed ? "PASS" : "FAIL") + "] " + label);
     if (!passed) {
-        failures++;
+        failures()++;
     }
 }
 
@@ -68,6 +72,9 @@ auto nearly(float a, float b, float tol = 0.01F) -> bool { return std::fabs(a - 
 
 }  // namespace
 
+// 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现，捕获反而把失败压成 0。
+// 口径与 tools/verify/ 其余探针、examples/ 各 demo 入口同。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     const auto cli = aurora_verify::parse_interactive("GLFW DPI scale-report live probe", argc, argv);
     if (!cli.arguments) {
@@ -80,12 +87,12 @@ auto main(int argc, char **argv) -> int {
     // ---- 窗口（建窗经 E2E 内核 e2e::open）----
     // 尺寸取 480x320 dp：非 100% DPI 下窗口有足够像素让「物理 vs 逻辑」的差异可分辨
     // （150% 屏上物理 720x480，差 240x160，远超浮点容差）。
-    constexpr int kLogicalW = 480;
-    constexpr int kLogicalH = 320;
+    constexpr int logical_w = 480;
+    constexpr int logical_h = 320;
     aurora::e2e::WindowSpec spec;
     spec.backend = aurora::e2e::Backend::Glfw;
-    spec.width = kLogicalW;
-    spec.height = kLogicalH;
+    spec.width = logical_w;
+    spec.height = logical_h;
     spec.title = "aurora-verify-glfw-dpi";
     spec.visibility = aurora::WindowVisibility::Normal;
     auto session = aurora::e2e::open(spec);
@@ -139,7 +146,7 @@ auto main(int argc, char **argv) -> int {
     // ⚠️ 本条**不**证明跨屏时的端到端正确性：注入复现不了「合成器按新 DPI 重新协商
     // 帧缓冲与窗口尺寸」那一段（GLFW 在 Win32 分支会真的按 suggested rect 改窗口）。
     // 那部分由人工段 (d) 覆盖。
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     auto *hwnd = static_cast<HWND>(win.surface().native_handle());
     if (hwnd == nullptr) {
         check(false, "(e0) native_handle() returned HWND (needed to inject WM_DPICHANGED)");
@@ -220,31 +227,31 @@ auto main(int argc, char **argv) -> int {
     check(pumped2.ok(), "(b0) second frame pump succeeded");
     const auto logical = win.surface().size();
     const auto physical = win.surface().framebuffer_size();
-    const bool size_matches_request = (static_cast<int>(std::lround(logical.width)) == kLogicalW) &&
-                                      (static_cast<int>(std::lround(logical.height)) == kLogicalH);
+    const bool size_matches_request = (static_cast<int>(std::lround(logical.width)) == logical_w) &&
+                                      (static_cast<int>(std::lround(logical.height)) == logical_h);
     check(size_matches_request, "(b1) size() == requested dp (" + std::to_string(logical.width) + "x" +
-                                    std::to_string(logical.height) + " vs " + std::to_string(kLogicalW) + "x" +
-                                    std::to_string(kLogicalH) + ")");
-    const bool fb_is_physical = nearly(static_cast<float>(physical.width), static_cast<float>(kLogicalW) * scale) &&
-                                nearly(static_cast<float>(physical.height), static_cast<float>(kLogicalH) * scale);
+                                    std::to_string(logical.height) + " vs " + std::to_string(logical_w) + "x" +
+                                    std::to_string(logical_h) + ")");
+    const bool fb_is_physical = nearly(static_cast<float>(physical.width), static_cast<float>(logical_w) * scale) &&
+                                nearly(static_cast<float>(physical.height), static_cast<float>(logical_h) * scale);
     check(fb_is_physical,
           "(b2) framebuffer_size() == requested dp x scale (" + std::to_string(physical.width) + "x" +
               std::to_string(physical.height) + " vs " +
-              std::to_string(static_cast<int>(std::lround(static_cast<float>(kLogicalW) * scale))) + "x" +
-              std::to_string(static_cast<int>(std::lround(static_cast<float>(kLogicalH) * scale))) + ")");
+              std::to_string(static_cast<int>(std::lround(static_cast<float>(logical_w) * scale))) + "x" +
+              std::to_string(static_cast<int>(std::lround(static_cast<float>(logical_h) * scale))) + ")");
     check(nearly(logical.width * scale, static_cast<float>(physical.width)) &&
               nearly(logical.height * scale, static_cast<float>(physical.height)),
           "(b3) frame / logical / scale are consistent (logical x scale == framebuffer)");
     // 不退化为逻辑尺寸：GLFW 后端的 painter 按物理分辨率分配，若 framebuffer_size 漏 override
     // 则此处返回逻辑值，≠100% DPI 下 (b2) 转红。
-    check(!(nearly(static_cast<float>(physical.width), logical.width) && scale > 1.01F) ||
-              nearly(static_cast<float>(physical.width), static_cast<float>(kLogicalW) * scale),
+    check(!nearly(static_cast<float>(physical.width), logical.width) || scale <= 1.01F ||
+              nearly(static_cast<float>(physical.width), static_cast<float>(logical_w) * scale),
           "(b4) framebuffer_size() is not silently falling back to logical size");
 
-    if (failures == 0) {
+    if (failures() == 0) {
         emit("== automatic segment passed ==");
     } else {
-        emit("== automatic segment FAILED (" + std::to_string(failures) + ") ==");
+        emit("== automatic segment FAILED (" + std::to_string(failures()) + ") ==");
     }
 
     // ---- 人工段 (d)：真跨屏拖动 ----
@@ -275,7 +282,7 @@ auto main(int argc, char **argv) -> int {
         emit("[FAIL] (d1) no scale-change report received after cross-monitor drag");
         emit("        if this host has only one monitor, or all monitors share the same scale,");
         emit("        this criterion cannot rotate — record it as SKIP, not as a pass.");
-        ++failures;
+        ++failures();
     } else {
         emit("[PASS] (d1) scale-change report received " + std::to_string(report_count) + " time(s)");
         check(nearly(reported_scale, win.surface().scale_factor()),
@@ -291,5 +298,5 @@ auto main(int argc, char **argv) -> int {
                   std::to_string(post.height) + " at scale " + std::to_string(win.surface().scale_factor()) + ")");
     }
 
-    return failures == 0 ? 0 : 1;
+    return failures() == 0 ? 0 : 1;
 }

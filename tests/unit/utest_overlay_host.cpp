@@ -22,7 +22,6 @@
 /// 作为可达框基准——这条通路与 `window_bounds()` 完全独立，两者相符才说明读数与派发同源。
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -79,7 +78,7 @@ class MountProbe final : public Widget {
     [[nodiscard]] auto can_cache_layout() const -> bool override { return false; }
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         if (const auto *th = ctx.environment<Theme>()) {
-            primary_at_layout = th->primary;
+            primary_at_layout = th->roles.primary;
         }
         return c.constrain(Size{.width = 10.0F, .height = 10.0F});
     }
@@ -89,7 +88,7 @@ class MountProbe final : public Widget {
         host_at_mount = ctx.host_id;
         if (const auto *th = ctx.environment<Theme>()) {
             theme_seen_at_mount = true;
-            primary_at_mount = th->primary;
+            primary_at_mount = th->roles.primary;
         }
     }
     auto on_unmount(const BuildContext &ctx) -> void override {
@@ -136,9 +135,9 @@ AURORA_TEST_CASE(runtime_added_overlay_is_mounted_on_next_layout) {
     // 「根长期存活 + 运行期加子树」这一常见形态：浮层必须在下一次布局由父侧 ctx 挂上，
     // 症状此前是「浮层里的控件收不到挂载」——主题不跟、定时档不启动，且全程无日志。
     Theme theme_a;
-    theme_a.primary = Color::from_rgba(11, 22, 33);
+    theme_a.roles.primary = Color::from_rgba(11, 22, 33);
     Theme theme_b;
-    theme_b.primary = Color::from_rgba(44, 55, 66);
+    theme_b.roles.primary = Color::from_rgba(44, 55, 66);
     // ctx.env 必须非空（真实窗口里指向 `root_env_`）：`Provider::rebuild_env` 在有父环境时走
     // `Environment::with()` 每次重建一份新环境，换肤才生效；`env == nullptr` 的退化路径走
     // `set_local`，其 `map_.emplace` 对已存在的键不覆盖——那是独立于本任务的既有缺陷，不在此顺带修。
@@ -164,14 +163,14 @@ AURORA_TEST_CASE(runtime_added_overlay_is_mounted_on_next_layout) {
     AURORA_TEST_CHECK_EQ(probe->effect_count(), 3U);
     // 挂到的是**宿主**的 ctx：主题注入读得到，不是无环境的裸 ctx。
     AURORA_TEST_CHECK_TRUE(probe->theme_seen_at_mount);
-    AURORA_TEST_CHECK_TRUE(probe->primary_at_mount == theme_a.primary);
+    AURORA_TEST_CHECK_TRUE(probe->primary_at_mount == theme_a.roles.primary);
 
     // 换肤后仍读到新值：挂载补齐不是「挂上就冻结」。
     // 第二遍**换一组约束**：`State` 变更只向上失效，缓存命中的祖先会整段跳过子树
     // （既有布局缓存语义，不在本次范围），换约束才能让一次完整布局真的走到 probe。
     provider.set_value(theme_b);
     LayoutEngine::layout(provider, bounded(260.0F, 220.0F), ctx);
-    AURORA_TEST_CHECK_TRUE(probe->primary_at_layout == theme_b.primary);
+    AURORA_TEST_CHECK_TRUE(probe->primary_at_layout == theme_b.roles.primary);
     AURORA_TEST_CHECK_EQ(probe->mounts, 1);  // 同宿主不重复挂载
 }
 

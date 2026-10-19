@@ -26,7 +26,7 @@ auto main() -> int {
     pager.modifier.set(au::Modifier{}.size(360.0F, aurora_page_height).border(1.0F, pal::AURORA_BORDER));
 
     // ② 条目吸附：周期 = 行高，居中对齐（末段不足一格时夹到内容末端，不停在半行）。
-    auto list = std::make_shared<au::LazyList>(
+    const auto list = std::make_shared<au::LazyList>(
         200,
         [](int i) -> au::Node {
             au::Text item{"Row " + std::to_string(i) + " · snap to center"};

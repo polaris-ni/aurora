@@ -13,7 +13,7 @@
 
 #include "aurora/core/accessibility.h"
 #include "aurora/event/dispatcher.h"
-#include "aurora/widget/containers.h"
+#include "aurora/event/event.h"
 #include "aurora/widget/dismissible.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
@@ -59,6 +59,7 @@ class TestRow final : public aurora::Container {
   public:
     auto type_name() const -> const char * override { return "TestRow"; }
 
+  protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         float x = 0.0F;
         for (Node &ch : children_) {
@@ -90,6 +91,13 @@ auto t_ms(long long ms) -> std::chrono::steady_clock::time_point {
     return std::chrono::steady_clock::time_point{std::chrono::milliseconds{ms}};
 }
 
+/// 暴露 protected 的 TouchEvent 派发入口（on_pointer_event(TouchEvent&) 覆写）。
+class TouchableDismiss final : public Dismissible {
+  public:
+    using Dismissible::Dismissible;
+    auto feed_touch(TouchEvent &e) -> void { on_pointer_event(e); }
+};
+
 }  // namespace
 
 // ---- 自描述元数据 ----
@@ -116,7 +124,7 @@ AURORA_TEST_CASE(dtd_reduce_motion_short_circuits_to_endpoint) {
     DragToDismiss dtd(DragAxis::Horizontal, 100.0, SpringDescription{});
     dtd.recognizer_slop_for_test(5.0);
     int dismissed = 0;
-    dtd.on_dismissed([&dismissed]() { ++dismissed; });
+    dtd.on_dismissed([&dismissed] { ++dismissed; });
     dtd.on_mouse(make_mouse(MouseAction::Press, Point{.x = 0.0F, .y = 0.0F}));
     dtd.on_mouse(make_mouse(MouseAction::Move, Point{.x = 70.0F, .y = 0.0F}));
     dtd.on_release();
@@ -130,7 +138,7 @@ AURORA_TEST_CASE(dtd_reduce_motion_short_circuits_to_endpoint) {
     DragToDismiss back(DragAxis::Horizontal, 100.0, SpringDescription{});
     back.recognizer_slop_for_test(5.0);
     int back_dismissed = 0;
-    back.on_dismissed([&back_dismissed]() { ++back_dismissed; });
+    back.on_dismissed([&back_dismissed] { ++back_dismissed; });
     back.on_mouse(make_mouse(MouseAction::Press, Point{.x = 0.0F, .y = 0.0F}));
     back.on_mouse(make_mouse(MouseAction::Move, Point{.x = 30.0F, .y = 0.0F}));
     back.on_release();
@@ -249,13 +257,13 @@ AURORA_TEST_CASE(dismissible_release_above_threshold_removes_self_from_container
 }
 
 AURORA_TEST_CASE(dismissible_custom_callback_overrides_default_removal) {
-    auto dis = std::make_shared<Dismissible>(fixed_box());
+    const auto dis = std::make_shared<Dismissible>(fixed_box());
     TestRow row;
     row.add(Node{dis});
     row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, BuildContext{});
 
     int dismissed = 0;
-    dis->on_dismissed([&dismissed]() { ++dismissed; });  // 覆盖默认摘除
+    dis->on_dismissed([&dismissed] { ++dismissed; });  // 覆盖默认摘除
 
     EventDispatcher dispatcher;
     MouseEvent press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
@@ -270,6 +278,88 @@ AURORA_TEST_CASE(dismissible_custom_callback_overrides_default_removal) {
     AURORA_TEST_CHECK_EQ(dismissed, 1);  // 回调触发
     AURORA_TEST_CHECK_EQ(row.child_nodes().size(), 1U);  // 不自动摘除
     AURORA_TEST_CHECK_EQ(dis.use_count(), 2);  // 测试 + 容器仍持有
+}
+
+// ---- on_paint：progress 0 / progress>0 两分支 ----
+
+AURORA_TEST_CASE(dismissible_paint_progress_zero_and_in_flight) {
+    Painter painter;
+    constexpr BuildContext ctx;
+
+    // progress = 0：直接绘制子节点（无位移/渐隐）。
+    Dismissible rest{fixed_box()};
+    rest.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, ctx);
+    rest.paint(painter, Rect{.origin = Point{}, .size = rest.size()}, ctx);
+
+    // progress > 0：paint 期平移 + 渐隐（须先驱动拖动再绘制；动画不改布局盒）。
+    const auto dis = std::make_shared<Dismissible>(fixed_box());
+    TestRow row;
+    row.add(Node{dis});
+    row.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, ctx);
+    EventDispatcher dispatcher;
+    MouseEvent press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(row, press);
+    MouseEvent move = make_mouse(MouseAction::Move, Point{.x = 60.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(row, move);
+    AURORA_TEST_CHECK_NEAR(dis->progress(), 0.5, 1e-9);
+    dis->paint(painter, Rect{.origin = Point{}, .size = dis->size()}, ctx);
+
+    // 垂直轴构造：同一绘制路径的轴分支（shift 只作用于 y）。
+    Dismissible vertical{fixed_box(), DragAxis::Vertical};
+    vertical.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, ctx);
+    vertical.paint(painter, Rect{.origin = Point{}, .size = vertical.size()}, ctx);
+}
+
+// ---- 触摸路径 + 无 Container 祖先的静默摘除 ----
+
+AURORA_TEST_CASE(dismissible_touch_drag_drives_progress) {
+    TouchableDismiss dis{fixed_box()};
+    // 约束 100x50 → 行程校准为 100（跟手 1:1 可精确预期）。
+    dis.layout(Constraints{.min = Size{}, .max = Size{.width = 100.0F, .height = 50.0F}}, BuildContext{});
+
+    TouchEvent press;
+    press.points.push_back(TouchPoint{
+        .position = Point{.x = 10.0F, .y = 10.0F}, .prev_position = Point{.x = 10.0F, .y = 10.0F}, .is_active = true});
+    dis.feed_touch(press);
+    AURORA_TEST_CHECK_NEAR(dis.progress(), 0.0, 1e-9);
+
+    TouchEvent move;
+    move.points.push_back(TouchPoint{
+        .position = Point{.x = 50.0F, .y = 10.0F}, .prev_position = Point{.x = 10.0F, .y = 10.0F}, .is_active = true});
+    dis.feed_touch(move);
+    AURORA_TEST_CHECK_NEAR(dis.progress(), 0.4, 1e-9);  // 触摸取首活跃点，1:1 同鼠标
+
+    // 松手裁决入口在鼠标路径：经 MouseEvent Release 触发 spring 回位（0.4 < 阈值）。
+    EventDispatcher dispatcher;
+    MouseEvent mrel = make_mouse(MouseAction::Release, Point{.x = 50.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(dis, mrel);
+    AURORA_TEST_CHECK_TRUE(dis.is_animating());
+    for (int i = 0; i < 400 && dis.is_animating(); ++i) {
+        dis.tick(t_ms(static_cast<long long>(i + 1) * 16));
+    }
+    AURORA_TEST_CHECK_FALSE(dis.is_animating());
+    AURORA_TEST_CHECK_NEAR(dis.progress(), 0.0, 1e-3);
+}
+
+AURORA_TEST_CASE(dismissible_without_container_ancestor_keeps_terminal_state) {
+    // 直接作为根（无 Container 祖先）：飞出后默认摘除静默保持终态，不崩溃。
+    // 约束 100x50 → 行程校准为 100；拖到 0.9（≥ 阈值）松手。
+    Dismissible root{fixed_box()};
+    root.layout(Constraints{.min = Size{}, .max = Size{.width = 100.0F, .height = 50.0F}}, BuildContext{});
+
+    EventDispatcher dispatcher;
+    MouseEvent press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(root, press);
+    MouseEvent move = make_mouse(MouseAction::Move, Point{.x = 90.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(root, move);
+    MouseEvent release = make_mouse(MouseAction::Release, Point{.x = 90.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(root, release);
+    AURORA_TEST_CHECK_TRUE(root.is_animating());
+    for (int i = 0; i < 400 && root.is_animating(); ++i) {
+        root.tick(t_ms(static_cast<long long>(i + 1) * 16));  // Widget::tick 公共入口 → tick_gestures
+    }
+    AURORA_TEST_CHECK_FALSE(root.is_animating());
+    AURORA_TEST_CHECK_NEAR(root.progress(), 1.0, 1e-3);  // 终态保持，无祖先可摘除
 }
 
 }  // namespace aurora::test_cases::utest_dismissible

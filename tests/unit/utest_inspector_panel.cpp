@@ -12,6 +12,7 @@
 #include "aurora/render/painter.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
+#include "aurora/widget/inspect.h"
 #include "aurora/widget/inspector_panel.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
@@ -185,7 +186,7 @@ AURORA_TEST_CASE(inspector_panel_export_code_button_invokes_callback) {
     // 随后点击按钮区域触发 on_export_code。
     Painter p;
     p.begin(400, 300);
-    const Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
+    constexpr Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
     BuildContext ctx;
     panel.paint(p, bounds, ctx);
 
@@ -200,7 +201,7 @@ AURORA_TEST_CASE(inspector_panel_export_code_button_invokes_callback) {
 
 AURORA_TEST_CASE(inspector_panel_set_root_retargets_selection) {
     InspectorPanel panel{[]() -> Node { return Node{Column{Node{Text{"first"}}}}; }};
-    BuildContext ctx;
+    constexpr BuildContext ctx;
     (void)panel.layout(bounded(400.0F, 300.0F), ctx);
 
     auto second_btn = std::make_shared<Button>("second");

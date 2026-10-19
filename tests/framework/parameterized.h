@@ -29,7 +29,6 @@
 // 不必自己转发构造函数。
 // ============================================================
 
-#include <cstddef>
 #include <cstdio>
 #include <functional>
 #include <initializer_list>
@@ -184,7 +183,7 @@ class ParamFamilyRegistrar {
 
 /// @brief 类型名的短形态（截到最后一个限定符/空格，供类型参数化用例名使用）。
 template <typename T>
-[[nodiscard]] inline auto short_type_name() -> std::string {
+[[nodiscard]] auto short_type_name() -> std::string {
     const std::string qualified = type_name_str<T>();
     const auto last = qualified.find_last_of(": ");
     return (last == std::string::npos) ? qualified : qualified.substr(last + 1);

@@ -4,11 +4,16 @@
 ///           非对象 body、越界 style、非法 font_weight、带 query 的 REST 路由、
 ///           Content-Length 大小写混排与 body 内伪装头：一律返回 4xx/5xx JSON
 ///           响应且进程存活，绝不 std::terminate。真实 loopback HTTP 往返驱动。
-///           AURORA_BUILD_INSPECTOR_SERVER=OFF 时整文件降级为 skip 桩
+///           AURORA_BUILD_INSPECTOR_SERVER=OFF，或无线程能力构建（Emscripten 未开 -pthread，
+///           AURORA_CAP_THREADS=0），或 wasm 平台（AURORA_PLATFORM_WASM）时整文件降级为
+///           skip 桩——服务既依赖后台 worker 线程，也依赖 bind/listen/accept 的 BSD socket
+///           语义；wasm 即便开了 -pthread 也只补线程、不补套接字，故此处按平台而非仅按
+///           线程能力判定。
 
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <sstream>
 #include <string>
 
@@ -17,29 +22,15 @@
 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
 
-#ifdef AURORA_PLATFORM_WINDOWS
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-using SOCKET = int;
-constexpr SOCKET AURORA_INVALID_SOCKET = -1;
-inline auto closesocket(SOCKET s) -> int { return ::close(s); }
-#endif
-
 #include "aurora/aurora.h"
 #include "aurora/inspector/inspector_server.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
-#include "aurora/window/surface.h"
 #endif
 
 namespace aurora::test_cases::itest_inspector_robustness {
 
-#ifdef AURORA_BUILD_INSPECTOR_SERVER
+#if defined(AURORA_BUILD_INSPECTOR_SERVER) && AURORA_CAP_THREADS && !defined(AURORA_PLATFORM_WASM)
 namespace {
 
 /// @brief 共享测试树：Column 根 + Text 子节点（静态存储期，供 worker 线程 root_getter 读取）。
@@ -54,70 +45,29 @@ auto shared_tree() -> std::shared_ptr<Column> & {
 
 auto tree_getter() -> Node { return Node{shared_tree()}; }
 
-#ifdef AURORA_PLATFORM_WINDOWS
-/// @brief Winsock 会话（引用计数式启停，随作用域清理）。
-struct WinsockSession {
-    WinsockSession() {
-        WSADATA data{};
-        started = WSAStartup(MAKEWORD(2, 2), &data) == 0;
-    }
-    ~WinsockSession() {
-        if (started) {
-            WSACleanup();
-        }
-    }
-    WinsockSession(const WinsockSession &) = delete;
-    auto operator=(const WinsockSession &) -> WinsockSession & = delete;
-    WinsockSession(WinsockSession &&) = delete;
-    auto operator=(WinsockSession &&) -> WinsockSession & = delete;
-    bool started = false;
-};
-#endif
-
 /// @brief 对 127.0.0.1:port 发送原始请求文本并回收完整响应（服务端 Connection: close）。
 auto http_raw(std::uint16_t port, const std::string &raw) -> std::string {
-#ifdef AURORA_PLATFORM_WINDOWS
-    const WinsockSession wsa;
-#endif
-    const SOCKET sock =
-#ifdef AURORA_PLATFORM_WINDOWS
-        ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    // Winsock 惯用法：INVALID_SOCKET 为宏常量（各工具链经 cast 定义），tidy 穿透 cast 误报混比。
-    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
-    if (sock == INVALID_SOCKET) {
+    auto connected = aurora::net::blocking::StreamSocket::connect_loopback(port);
+    if (!connected) {
         return {};
     }
-#else
-        ::socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        return {};
-    }
-#endif
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(port);
-    // Winsock connect() 形参类型是 sockaddr*，sockaddr_in 强转为通用 socket 地址属必要写法。
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
-        closesocket(sock);
-        return {};
-    }
-    (void)send(sock, raw.data(), static_cast<int>(raw.size()), 0);
+    auto sock = std::move(connected.value());
+    // 旧实现单次 send 忽略部分写；畸形请求都远小于套接字缓冲，write_all 同形且更稳。
+    static_cast<void>(sock.write_all(std::span<const char>(raw)));
 
     std::string resp;
     char buf[4096];
     for (;;) {
-        const int n = recv(sock, buf, sizeof(buf), 0);
-        if (n <= 0) {
-            break;
+        const auto got = sock.read_some(std::span<char>(buf));
+        if (!got || got.value() == 0) {
+            break;  // 出错 / 对端关闭
         }
-        resp.append(buf, static_cast<std::size_t>(n));
+        resp.append(buf, got.value());
         if (resp.size() > (1U << 20U)) {
             break;  // 安全上限，防异常服务端无限输出
         }
     }
-    closesocket(sock);
+    sock.close();
     return resp;
 }
 
@@ -185,8 +135,10 @@ class ScopedServer {
 #endif  // AURORA_BUILD_INSPECTOR_SERVER（辅助设施段；用例恒注册，体内降级 SKIP）
 
 AURORA_TEST_CASE(debug_flags_type_mismatch_returns_400) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     const ScopedServer server;
 
@@ -210,13 +162,20 @@ AURORA_TEST_CASE(debug_flags_type_mismatch_returns_400) {
     {
         const auto r = http_request(server.port(), "POST", "/api/debug/flags", R"({"layout_guides":true})");
         AURORA_TEST_CHECK_EQ(status_of(r), 200);
+        // 用例末态必须复原：debug flags 是进程级全局，layout_guides 残留会让后续窗口每帧
+        // 叠画品红框（部分裁剪帧还在 pop_clip 后整窗叠加、脏区外二次混色），级联打红
+        // itest_dirty_clip_paint 的「脏区 == 整帧重绘逐位一致」像素判据。
+        const auto off = http_request(server.port(), "POST", "/api/debug/flags", R"({"layout_guides":false})");
+        AURORA_TEST_CHECK_EQ(status_of(off), 200);
     }
 #endif
 }
 
 AURORA_TEST_CASE(to_code_style_type_mismatch_and_out_of_range_fallback) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     const ScopedServer server;
 
@@ -243,8 +202,10 @@ AURORA_TEST_CASE(to_code_style_type_mismatch_and_out_of_range_fallback) {
 }
 
 AURORA_TEST_CASE(widget_put_invalid_font_weight_does_not_terminate) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     const ScopedServer server;
 
@@ -257,8 +218,10 @@ AURORA_TEST_CASE(widget_put_invalid_font_weight_does_not_terminate) {
 }
 
 AURORA_TEST_CASE(query_string_and_mixed_case_content_length) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     const ScopedServer server;
 
@@ -290,8 +253,10 @@ AURORA_TEST_CASE(query_string_and_mixed_case_content_length) {
 }
 
 AURORA_TEST_CASE(body_length_trap_and_liveness_probe) {
-#ifndef AURORA_BUILD_INSPECTOR_SERVER
-    AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER not enabled: the Inspector HTTP server is not built");
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
 #else
     const ScopedServer server;
 

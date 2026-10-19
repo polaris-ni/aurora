@@ -56,7 +56,7 @@
 | 电源 | 建议接入电源并设为高性能模式；笔记本省电模式会显著抬高帧时间 |
 | 记录 | 建议把 stdout 重定向留档，便于两轮对照 |
 
-本机启用 `AURORA_BACKEND_WIN32` 与 `AURORA_BACKEND_HEADLESS`，未启用 GLFW / D3D11 / wgpu，故 `bench_gpu` 的 GPU 路径在本机不可执行，相关判定记 `SKIP`。
+本机启用 `AURORA_BACKEND_WIN32`（无头后端恒编入、无开关），未启用 GLFW / D3D11 / wgpu，故 `bench_gpu` 的 GPU 路径在本机不可执行，相关判定记 `SKIP`。
 
 ### 1.4 用例编号规则
 

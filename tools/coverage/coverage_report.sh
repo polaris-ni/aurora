@@ -23,7 +23,10 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-SRC_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+# coverage_report.sh lives in <repo>/tools/coverage/, so the repo root is two levels up
+# (SCRIPT_DIR/.. == tools, SCRIPT_DIR/../.. == repo root). Passing the wrong root to
+# gcov_aggregate.py makes every source path fail the in_scope() prefix check -> empty report.
+SRC_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 BUILD_DIR=${1:-build-cov}
 THRESHOLD=${2:-90}
 
@@ -55,5 +58,5 @@ done < "$WORK/gcdas.txt"
 # ---- Aggregation + report (text / CSV / self-drawn HTML) is delegated entirely to gcov_aggregate.py ----
 AGG="$SCRIPT_DIR/gcov_aggregate.py"
 command -v python3 >/dev/null 2>&1 || { echo "[coverage] python3 not found (needed for aggregation/HTML)" >&2; exit 2; }
-python3 "$AGG" "$WORK/all.gcov" --src-root "$SRC_ROOT" --threshold "$THRESHOLD" \
+python3 "$AGG" "$WORK/all.gcov" --src-root "$SRC_ROOT" --build-dir "$BUILD_DIR" --threshold "$THRESHOLD" \
     --csv "$BUILD_DIR/coverage.csv" --html "$BUILD_DIR/coverage.html"

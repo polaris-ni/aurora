@@ -13,8 +13,8 @@ struct FlexLayoutContext {
     Flex config;
     Constraints parent;
     std::vector<FlexItem> items;
-    bool horizontal;
-    bool reverse;
+    bool horizontal = false;
+    bool reverse = false;
     int main_axis;
     float inf;
     bool main_finite;

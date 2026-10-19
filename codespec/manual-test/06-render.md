@@ -64,7 +64,7 @@
 |:---|:---|
 | 平台 | Windows 本机（实测环境为 MinGW/GCC + Ninja）；有显示后端，demo 可开窗 |
 | 构建 | 库与载体均已构建；demo 为按需目标，不在默认构建内 |
-| 基线后端 | 基线构建仅启用 `AURORA_BACKEND_WIN32` 与 `AURORA_BACKEND_HEADLESS`（D3D11/GLFW/wgpu 默认 OFF）——影响 TC-RENDER-012 的执行条件 |
+| 基线后端 | 基线构建仅启用 `AURORA_BACKEND_WIN32`（无头后端恒编入、无开关；D3D11/GLFW/wgpu 默认 OFF）——影响 TC-RENDER-012 的执行条件 |
 | 看图工具 | 任意可打开 PNG 并支持放大（如系统自带照片查看器） |
 | 输出物 | 离屏渲染的 PNG 统一写到 `build/` 下，用看图工具打开比对 |
 | 交互驱动 | 人工手操为默认口径。若需无人值守复现（如会话被锁），走两条通道：**窗口消息**（`PostMessage` 的按钮 / 滚轮消息）可驱动点击与滚动，但 `WM_MOUSEMOVE` **不产生任何 hover / 拖拽效果**；**进程内注入**（`build/aurora_e2e_client --port <n>` 的 `tap` / `drag` / `scroll` / `text` 子命令，需以 `AURORA_INSPECTOR_PORT` 启动 demo）经 `EventDispatcher` 派发，可驱动悬停与拖拽选区。像素判据一律取 `PrintWindow` 抓帧，且注入后需等 ≥2 s 让只绘帧落地。 |

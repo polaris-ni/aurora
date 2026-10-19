@@ -346,7 +346,7 @@ class TextInput : public LeafWidget {
         if (read_only_ || !enabled_) {
             return;
         }
-        std::string v = value_.get();
+        const std::string v = value_.get();
         const std::size_t a = std::min(start, v.size());
         const std::size_t b = std::clamp(end, a, v.size());
         std::string next = v.substr(0, a);
@@ -1101,7 +1101,7 @@ class TextInput : public LeafWidget {
         Color border = disabled ? Color{180, 180, 180, 255} : border_color_;
         float bw = border_width_;
         if (!disabled && is_focused()) {
-            border = focused_border_color_.value_or(inherit_theme(ctx).primary);
+            border = focused_border_color_.value_or(inherit_theme(ctx).roles.primary);
             bw = std::max(bw, 1.5F);  // 聚焦态边框加粗（Fluent 式聚焦提示）
         }
         if (corner_radius_ > 0.0F) {

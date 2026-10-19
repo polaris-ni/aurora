@@ -13,7 +13,7 @@
 // which would make the LSP / MCP suggest names that do not compile.
 //
 // Maintenance rules:
-// 1. Key = the type name appearing in property descriptors (`prop_descriptors[].type`), or a
+// 1. Key = the type name appearing in property descriptors (`props[].type`), or a
 //    public-module enum exposed for AI enumeration (e.g. `JsonType` from aurora/core/json.h),
 //    not an arbitrary name; `Curve` is `class Curve` (easing.h:39), whose values come from the
 //    discriminating enum `CurveKind`. `ColorPalette` is a set of named constants under
@@ -155,12 +155,34 @@ namespace aurora::tools {
     // ---- gesture ----
     enums["DragAxis"] = {"None", "Horizontal", "Vertical"};
 
+    // ---- webview ----
+    // 取值逐字来自 `web_view.cpp` 的 `mode_to_string`（序列化落盘的字符串即这两枚），
+    // 不是枚举成员的 C++ 限定名——属性值校验与补全都按字符串比对。
+    enums["WebViewMode"] = {"Interactive", "Snapshot"};
+
     // ---- json (au::json::Type: the public JSON module's value discriminator, AI-enumerable) ----
     enums["JsonType"] = {"Null", "Bool", "Int", "UInt", "Double", "RawNumber", "String", "Array", "Object"};
 
     // ---- named colors (au::colors::AURORA_*, not an enum; provides value hints for the Color property) ----
     enums["ColorPalette"] = {"AURORA_WHITE", "AURORA_BLACK", "AURORA_BLUE",   "AURORA_RED",
                              "AURORA_GREEN", "AURORA_GRAY",  "AURORA_YELLOW", "AURORA_TRANSPARENT"};
+
+    // ---- network (aurora::net public enums; not widget property types, but AI-enumerable API surface) ----
+    enums["AddressFamily"] = {"IPv4", "IPv6", "LocalPath"};
+    enums["AuthScheme"] = {"Basic", "Bearer", "Unsupported"};
+    enums["HttpErrorClass"] = {"Invalid", "Dns",      "Unreachable", "Proxy",    "Tls",
+                               "Timeout", "Protocol", "Status",      "Cancelled"};
+    enums["LengthByteOrder"] = {"Big", "Little"};
+    enums["Method"] = {"Get", "Head", "Post", "Put", "Patch", "Delete"};
+    enums["ProgressPhase"] = {"Upload", "Download"};
+    enums["ProxyKind"] = {"Direct", "HttpConnect", "Socks5"};
+    enums["SinkFlow"] = {"Continue", "Stop"};
+    enums["ShutdownMode"] = {"Read", "Write", "Both"};
+    enums["TlsVersion"] = {"Tls10", "Tls11", "Tls12", "Tls13"};
+
+    // ---- declarative binding (aurora::Resource / aurora::StreamResource, state/resource.h) ----
+    enums["ResourcePhase"] = {"Loading", "Ready", "Failed"};
+    enums["StreamPolicy"] = {"Append", "Replace"};
 
     return enums;
 }

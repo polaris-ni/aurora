@@ -2,6 +2,7 @@
 
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/button.h"
 #include "aurora/widget/text.h"
 
@@ -37,6 +38,8 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
 
     const bool justify = (text_align == TextAlign::Justify);
     float y = bounds.origin.y;
+    // 文字色：显式优先，否则跟随主题 on_surface（迁移批；ThemeScope 换肤即生效）。
+    const Color fg = resolve_text_color(ctx);
     // Start/End 为方向相对语义：RTL 时 Start=Right、End=Left（每行一致，行外解析一次）。
     const bool rtl = effective_direction(ctx) == TextDirection::RTL;
     for (std::size_t li = 0; li < lines_.size(); ++li) {
@@ -90,23 +93,23 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
                 for (const auto &word : words) {
                     const float ww = render::FontEngine::measure_width(word, f, opts);
                     p.draw_text(Rect{.origin = Point{.x = wx, .y = y}, .size = Size{.width = ww, .height = line_h}},
-                                word, f, text_color, aa, opts);
+                                word, f, fg, aa, opts);
                     wx += ww + step;
                 }
                 line_left = bounds.origin.x;
                 line_right = bounds.origin.x + avail;
             } else {
                 p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = line_w, .height = line_h}},
-                            line, f, text_color, aa, opts);
+                            line, f, fg, aa, opts);
             }
         } else {
             p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = line_w, .height = line_h}}, line, f,
-                        text_color, aa, opts);
+                        fg, aa, opts);
         }
 
         // 装饰线（上划线 / 下划线 / 删除线）按整行绘制。
         if (decoration != TextDecoration::None) {
-            const Color dc = decoration_color.a > 0 ? decoration_color : text_color;
+            const Color dc = decoration_color.value_or(fg);
             const float thick = std::max(1.0F, line_h * 0.06F);
             if (decoration_has(decoration, TextDecoration::Underline)) {
                 p.fill_rect(Rect{.origin = Point{.x = line_left, .y = y + (line_h * 0.82F)},
@@ -245,11 +248,12 @@ auto Button::paint_label(Painter &p, const Rect &bounds, Color text_color, const
 }
 
 auto Button::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
-    // 绘制分阶段（继承扩展点）：背景 → 边框 → 文字；状态色由 resolve_* 钩子解析。
-    paint_background(p, bounds, resolve_background());
+    // 绘制分阶段（继承扩展点）：背景 → 边框 → 文字；状态色由 resolve_* 钩子解析
+    // （未显式设色时经 ctx 取主题角色）。
+    paint_background(p, bounds, resolve_background(ctx));
     paint_border(p, bounds);
     // 本帧只解析一次：量宽与落笔共用 display 这一份副本。
-    paint_label(p, bounds, resolve_text_color(), resolved_label(ctx));
+    paint_label(p, bounds, resolve_text_color(ctx), resolved_label(ctx));
 }
 
 }  // namespace aurora

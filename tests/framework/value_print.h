@@ -250,9 +250,15 @@ template <typename T>
         if constexpr (ByteLike<Element>) {
             return byte_dump(value);
         } else if constexpr (std::is_same_v<Element, Plain>) {
-            // 自引用退化容器：迭代产物与自身同型（如 nlohmann::json 标量——遍历恒产生自身引用），
-            // 递归打印将无限展开直至栈溢出；退回流式输出（json 有 operator<<）。
-            return via_stream(value);
+            // 自引用退化容器：迭代产物与自身同型（如 JSON 标量——遍历恒产生自身引用），
+            // 递归打印将无限展开直至栈溢出。有流式出口的用流式（nlohmann 时代形态），
+            // 没有的（自研 `json::Value` 刻意不提供 `operator<<`）退回类型名占位——
+            // 判据要的是「值不等」这一事实，具体渲染形态不值得把框架反向依赖到具体 JSON 实现上。
+            if constexpr (IsStreamable<Plain>::value) {
+                return via_stream(value);
+            } else {
+                return "<self-referential " + type_name_str<Plain>() + ">";
+            }
         } else {
             std::string out = "{ ";
             std::size_t index = 0;

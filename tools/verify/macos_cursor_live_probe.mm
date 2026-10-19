@@ -39,10 +39,10 @@
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"
 
-#if !defined(AURORA_PLATFORM_MACOS)
+#ifndef AURORA_PLATFORM_MACOS
 #error "aurora_verify_macos_cursor 只能在 macOS 上构建（AURORA_PLATFORM_MACOS）"
 #endif
-#if !defined(AURORA_BACKEND_MACOS)
+#ifndef AURORA_BACKEND_MACOS
 #error "须开启 AURORA_BACKEND_MACOS"
 #endif
 
@@ -54,6 +54,13 @@
 
 #include "aurora/window/cursor_map.h"
 #include "verify_print.h"
+
+// `busyButClickableCursor` 自 macOS 10.14 起由 AppKit 提供，但部分 SDK 的 `NSCursor` 头未暴露
+// 该 class method 声明，直接发消息会被 clang 判为「未知类方法」（error）。探针内补一条同名
+// category 声明即可通过编译；运行期仍由 AppKit 实现响应（该 selector 在 10.14+ 恒存在）。
+@interface NSCursor (AuroraVerifyBusyCursor)
++ (NSCursor *)busyButClickableCursor;
+@end
 
 namespace {
 
@@ -97,7 +104,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
 /// ObjC 对象 → 裸指针（仅供打印；不改所有权）。ARC 下须用 `__bridge`、非 ARC 下该关键字
 /// 不可用，故按 `__has_feature(objc_arc)` 三分支给出，避免「返回后仍有可达代码」的死分支。
 inline auto raw_ptr(id object) -> const void * {
-#if defined(__has_feature)
+#ifdef __has_feature
 #if __has_feature(objc_arc)
     return (__bridge const void *)object;
 #else
@@ -110,6 +117,8 @@ inline auto raw_ptr(id object) -> const void * {
 
 }  // namespace
 
+// 入口不吞异常：探针的失败以未捕获异常落到非零退出码，捕获反而把它压成 0（与既有探针同口径）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     int rc = 0;
     @autoreleasepool {

@@ -113,4 +113,38 @@ AURORA_TEST_CASE(unmapped_keysym_falls_back_to_unknown) {
     AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(0xFFFFFFFFUL) == KeyCode::Unknown);
 }
 
+// 补齐既有测试未覆盖的具名键与标点键 switch 分支：Escape / Tab / BackSpace / Delete /
+// Space / 左右修饰键（Shift·Control·Alt·Super）/ 以及全部主键盘标点（minus~grave）。
+// 这些分支与已锁定的区间判、KP_* 段共同构成 keysym_map 的完整映射表。
+AURORA_TEST_CASE(remaining_named_and_punctuation_keys_map) {
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Escape) == KeyCode::Escape);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Tab) == KeyCode::Tab);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_BackSpace) == KeyCode::Backspace);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Delete) == KeyCode::Delete);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_space) == KeyCode::Space);
+
+    // 左右修饰键各合并到同一逻辑键（不区分左右物理键）。
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Shift_L) == KeyCode::Shift);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Shift_R) == KeyCode::Shift);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Control_L) == KeyCode::Control);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Control_R) == KeyCode::Control);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Alt_L) == KeyCode::Alt);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Alt_R) == KeyCode::Alt);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Super_L) == KeyCode::Meta);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_Super_R) == KeyCode::Meta);
+
+    // 主键盘标点行：键码逐位映射到对应 KeyCode。
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_minus) == KeyCode::Minus);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_equal) == KeyCode::Equal);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_bracket_left) == KeyCode::LeftBracket);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_bracket_right) == KeyCode::RightBracket);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_backslash) == KeyCode::Backslash);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_semicolon) == KeyCode::Semicolon);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_apostrophe) == KeyCode::Quote);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_comma) == KeyCode::Comma);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_period) == KeyCode::Period);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_slash) == KeyCode::Slash);
+    AURORA_TEST_CHECK(aurora::detail::keysym_to_keycode(ks::AURORA_KEYSYM_grave) == KeyCode::Backquote);
+}
+
 }  // namespace aurora::test_cases::utest_keysym_map

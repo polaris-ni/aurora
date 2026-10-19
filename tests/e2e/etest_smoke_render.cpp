@@ -25,7 +25,6 @@
 ///     DPI 环境诚实跳过）。
 
 #include <cmath>
-#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -139,7 +138,7 @@ inline constexpr SceneGoldenBudget AURORA_SCENE_BUDGETS[] = {
     }
     // 注册表内场景必在预算表中（两表同源维护，registry 校验兜底）；不可达路径给保守值
     // （requires_scale_one=true：未知场景在缩放环境下按不适用处理）。
-    static const SceneGoldenBudget FALLBACK{.id = "", .budget = 0, .shape = "", .requires_scale_one = true};
+    static constexpr SceneGoldenBudget FALLBACK{.id = "", .budget = 0, .shape = "", .requires_scale_one = true};
     return FALLBACK;
 }
 
@@ -355,7 +354,7 @@ AURORA_TEST_P(GoldenBackends, golden_within_tolerance_of_software_baseline) {
 AURORA_INSTANTIATE_TEST_SUITE_P_GEN(real_windows, RealWindowBackends, smoke_backend_values(), smoke_backend_name);
 
 /// @brief golden 矩阵取值：注册表全部场景 × 全部真实窗口后端（注册表是场景面的单一事实来源）。
-[[nodiscard]] auto golden_case_values() -> std::vector<GoldenCase> {
+[[nodiscard]] static auto golden_case_values() -> std::vector<GoldenCase> {
     std::vector<GoldenCase> values;
     for (const au::demo_scenes::SceneEntry &scene : au::demo_scenes::scene_registry()) {
         for (const e2e::Backend backend : smoke_backend_values()) {

@@ -94,7 +94,9 @@ class Scroll : public Container, public ScrollProps {
     /// @brief 便捷构造：扁平罗列子项，取首项为唯一子节点（Scroll{ Column{...} }）。
     /// @param kids 子项列表；只消费首项，其余静默忽略（本容器 children_policy = single）。
     Scroll(std::initializer_list<Node> kids) {
-        if (kids.size() > 0) {
+        // `std::initializer_list` 无 `empty()`（标准只给 size/begin/end），故以迭代器判空，
+        // 而非 clang-tidy 提示的 `empty()`——该形态在 libstdc++/libc++ 下均不可编译。
+        if (kids.begin() != kids.end()) {
             children_.push_back(*kids.begin());
         }
     }
@@ -825,7 +827,7 @@ class Scroll : public Container, public ScrollProps {
     /// @param kids 本层候选子节点（布局时的 children_ 视图）。
     /// @param base 本层顶部在内容坐标系的累计偏移（父级原点；逐层加子节点 bounds.origin.y）。
     /// @param out 输出：命中的 StickyHeader 以 `{node, natural_y}` 追加于此（已滚过头顶者由绘制端筛）。
-    auto collect_stickies(const std::vector<Node> &kids, float base, std::vector<StickyEntry> &out) -> void {
+    static auto collect_stickies(const std::vector<Node> &kids, float base, std::vector<StickyEntry> &out) -> void {
         for (const Node &n : kids) {
             if (n.widget().is_sticky_header()) {
                 out.push_back(StickyEntry{.node = &n, .natural_y = base + n.bounds().origin.y});
@@ -845,8 +847,8 @@ class Scroll : public Container, public ScrollProps {
         if (sticky_nodes_.empty()) {
             return;
         }
-        std::sort(sticky_nodes_.begin(), sticky_nodes_.end(),
-                  [](const StickyEntry &a, const StickyEntry &b) { return a.natural_y < b.natural_y; });
+        std::ranges::sort(sticky_nodes_,
+                          [](const StickyEntry &a, const StickyEntry &b) { return a.natural_y < b.natural_y; });
         float stack_bottom = 0.0F;  // 已钉驻头部占用的顶部区带高度
         for (std::size_t i = 0; i < sticky_nodes_.size(); ++i) {
             const StickyEntry &s = sticky_nodes_[i];
@@ -915,7 +917,7 @@ class Scroll : public Container, public ScrollProps {
     }
 
     /// @brief 位置变化时写回注册表（**仅内存**：落盘由 App 经 `ScrollStorage::sync` + `Preferences::flush` 决定）。
-    auto write_back_offset() -> void {
+    auto write_back_offset() const -> void {
         if (restore_key.empty()) {
             return;
         }

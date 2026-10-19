@@ -1,0 +1,1464 @@
+/// 测试类型: unit
+/// 目标单元: include/aurora/net/http_stream.h + Client::open_stream（src/aurora/net/http_client.cpp）
+/// 测试说明: HTTP 发起侧流式接收的离线回归。以 ScriptedPeer 在
+///           回环上按脚本应答真实字节，验四条只有逐段交付才成立的形态：
+///           - **完成事实是 `StreamOutcome`**：`response.body()` 恒空、`delivered_bytes` 与宿主拼出的文本逐值
+///             相符、`on_head` / `on_data` / `on_end` 的调用次序与次数符合契约（失败结局不调 `on_end`）；
+///           - **线上字节不设限**：`max_body_bytes()` 管的是物化路径的内存，对本入口没有任何约束（同一份应答
+///             在 `send` 那边越限、在这边收完），而 `max_decompressed_bytes()` 仍逐层限解压产物并点名该旋钮；
+///           - **宿主 `Stop` 是正常结局**：回成功的 `StreamOutcome` 且 `stopped_by_sink` 为真、后续段不再交付、
+///             `on_end` 仍恰一次，绝不落成取消类错误码；
+///           - **重定向跳的体不读**：头部一判定为重定向即换跳，最终一跳的头部与文本交给宿主，`wire_bytes`
+///             仍累计全部跳（跨跳口径与 `delivered_bytes` 只算终跳的口径必须能分别证出来）。
+///           另验三档超时同判据（到点改道 `http-timeout`）、进度以线上字节计且末值恰一次、支持集外的编码名在建链
+///             就落 `http-content-encoding-unsupported`、无体应答不校验编码名，以及本腿无流式能力时直接落
+///             `net-platform-unavailable` 而不悄悄退化成物化路径。内容编码那三项只在能力编入的腿成立，缺席的腿
+///             按 `AURORA_TEST_SKIP` 登记。
+///           重试那三条验的是流式路径独有的资格口径：**`on_head` 交出即耗尽**——头没交出去的超时可以把三扇
+///             时限窗口跑满（虚拟时钟 ≥150 ms），头已经交出去的只剩一扇（≤90 ms）；越界的 `RetryPolicy` 在建协程
+///             前就被拒（对端一条连接都没被连上）。物化路径的逐值退避与 `Retry-After` 尊重在
+///             `utest_net_http_client.cpp`，退避算式与错误表在 `utest_net_http_retry.cpp`。
+///           缓存（§12「条件请求与缓存校验」）验流式入口独有的三条：命中新鲜副本时**一条连接都不发起**，
+///             但仍按同一个次序把已存那份体逐段交给同一个宿主（`wire_bytes` 恒 0、`delivered_bytes` 恰等于体长、
+///             `response.from_cache()` 为真）；本入口**只读不写**，于是两次流式交换之间表里什么都没留下（第二次
+///             照旧触网）；表里那条由物化路径灌入的陈旧条目会被带着校验子去问，拿回的 304 不进宿主——交出的
+///             头部是已存那份 200、体是已存那段字节，并完的那一份重新获得新鲜度，第三次不再触网。
+///           上传侧（§12「请求体来源」与「100-continue」）验本入口的写侧与物化路径同判据：自报总长的流式源整份
+///             上线（写出侧的停止条件取自声明长度，不是「交了第一段就算完」）；`Expect` 的窗口里对端先开口才发体、
+///             直接以 417 作答就把体按下不发且那枚终态照常交给宿主（不是错误结局）；对端把「100 + 200 + 体」一次
+///             写完时，报文已在装配器里收满，宿主的 `on_head` / `on_data` / `on_end` 仍欠着——少一次强制过环，宿主
+///             就收到一个零次交头的结局。重放闸那条要把失败安排在**交头之前**（静默对端 + `total` 到点），否则
+///             头已 hand-off 这件事本身就关门，问不出闸的资格。链路标识的两条也在本件，细则在
+///             `utest_net_http_request_id.cpp`。
+/// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "aurora/core/error_codes.h"
+#include "aurora/core/result.h"
+#include "aurora/net/blocking.h"
+#include "aurora/net/capabilities.h"
+#include "aurora/net/detail/http_request_id.h"
+#include "aurora/net/http.h"
+#include "aurora/net/http_auth.h"
+#include "aurora/net/http_client.h"
+#include "aurora/net/http_stream.h"
+#include "aurora/net/policy.h"
+#include "aurora/state/coroutine.h"
+#include "framework/async_wait.h"
+#include "framework/aurora_test.h"
+#include "framework/fake_engine.h"
+#include "framework/net_wait.h"
+#include "framework/scripted_peer.h"
+
+namespace aurora::test_cases::utest_net_http_stream {
+namespace {
+
+using aurora::CoroTask;
+using aurora::Result;
+using aurora::net::Capabilities;
+using aurora::net::NetPolicy;
+using aurora::net::http::BasicAuthenticator;
+using aurora::net::http::BearerAuthenticator;
+using aurora::net::http::CacheOptions;
+using aurora::net::http::Client;
+using aurora::net::http::DataSink;
+using aurora::net::http::Progress;
+using aurora::net::http::ProgressPhase;
+using aurora::net::http::Request;
+using aurora::net::http::Response;
+using aurora::net::http::RetryPolicy;
+using aurora::net::http::SinkFlow;
+using aurora::net::http::StreamOutcome;
+using aurora::net::http::Timeouts;
+using aurora::test::FakeEngine;
+using aurora::test::FakeEngineScope;
+using aurora::test::PeerScript;
+using aurora::test::PeerStop;
+using aurora::test::ScriptedPeer;
+using aurora::test::scripts::per_connection;
+using aurora::test::scripts::reply_after_reading;
+using aurora::test::scripts::silent;
+using aurora::test::scripts::write_then_hold;
+
+/// @brief 拼一个指向回环端口的 GET 目标。
+[[nodiscard]] auto loopback_url(std::uint16_t port, std::string_view path = "/") -> std::string {
+    return "http://127.0.0.1:" + std::to_string(port) + std::string{path};
+}
+
+/// @brief 取协程结果的外层（协程本身不抛，外层恒成功）。
+[[nodiscard]] auto inner(CoroTask<Result<StreamOutcome>> &task) -> Result<StreamOutcome> {
+    const auto outer = task.result();
+    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    return outer.value();
+}
+
+/// @brief 发起一条流式交换并泵到收尾：宿主替身与出口结果都留在调用方手里。
+/// @param client 客户端。
+/// @param request 请求。
+/// @param sink 宿主替身。
+/// @return 交换的出口结果（失败时带错误码与文本）。
+[[nodiscard]] auto open_and_drive(const Client &client, Request request, DataSink &sink) -> Result<StreamOutcome> {
+    const aurora::test::net::HostDriven host;
+    auto task = client.open_stream(std::move(request), sink);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "open_stream done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
+                          .satisfied);
+    return inner(task);
+}
+
+/// @brief 走物化路径完成一次交换：缓存的重验证用例需要「表里先有一条」，而流式入口刻意不写表。
+/// @param client 客户端。
+/// @param request 请求。
+/// @return 应答的 Result 层（协程未收尾时由 REQUIRE 收场）。
+[[nodiscard]] auto prime_with_send(const Client &client, Request request) -> Result<Response> {
+    const aurora::test::net::HostDriven host;
+    auto task = client.send(std::move(request));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
+                          .satisfied);
+    const auto outer = task.result();
+    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    return outer.value();
+}
+
+/// @brief 在脚本化时钟下把一条流式交换泵到收尾（重试与超时的判据都要由用例推进时间，不能让真实时长说话）。
+/// @param engine 替身时钟。
+/// @param task 待收尾的协程。
+/// @param rounds 泵的上限轮次。
+/// @return 协程是否收尾（未收尾时调用方**必须**用 REQUIRE 收场）。
+///
+/// 调用一律配 `AURORA_TEST_REQUIRE`：`CoroTask::result()` 在未收尾时读的是帧外内存，非致命的 CHECK 会继续
+/// 走到取结果那一步，于是一场「没排空」显示为一次段错误而不是一条失败判据。
+[[nodiscard]] auto pump_stream(FakeEngine &engine, CoroTask<Result<StreamOutcome>> &task, int rounds = 60) -> bool {
+    for (int round = 0; round < rounds && !task.is_done(); ++round) {
+        (void)engine.advance(std::chrono::milliseconds{10});
+        aurora::test::net::pump_idle(std::chrono::milliseconds{2});
+    }
+    return task.is_done();
+}
+
+/// @brief 错误文本里是否点名了某枚旋钮/某一档（超时改道的判据要看 detail，不能只看码）。
+/// @param haystack 错误文本。
+/// @param needle 要点名的词。
+/// @return 命中为 true。
+[[nodiscard]] auto names_in(std::string_view haystack, std::string_view needle) -> bool {
+    return haystack.find(needle) != std::string_view::npos;
+}
+
+/// @brief 记录逐段交付事实的宿主替身：三个入口各自的次数、拼出的文本、以及在哪一段收摊。
+///
+/// 它是本套件的观测面——流式的判据几乎全在「交了几段、交了什么、什么时候不再交」上，而这些只有宿主自己说得清。
+/// 成员公开是为了让断言直读；本类型只在用例线程被驱动（续体经主线程投递器恢复），无并发面。
+class RecordingSink final : public DataSink {
+  public:
+    /// @brief 记一次头部到达，并核对头的交付形态（体的字节在此恒为空，是契约而非巧合）。
+    /// @param head 头部块。
+    /// @return 恒继续（收摊的判定放在体上；`stop_at_head` 打开时才在头部就收摊）。
+    auto on_head(const Response &head) -> SinkFlow override {
+        ++heads;
+        status = head.status();
+        head_body_empty = head.body().empty();
+        return stop_at_head ? SinkFlow::Stop : SinkFlow::Continue;
+    }
+
+    /// @brief 记一段体字节，按 `stop_after` 决定何时收摊。
+    /// @param body 本段明文。
+    /// @return 继续或收摊。
+    auto on_data(std::span<const char> body) -> SinkFlow override {
+        ++segments;
+        max_segment = body.size() > max_segment ? body.size() : max_segment;
+        text.append(body.data(), body.size());
+        if (segments >= stop_after) {
+            stopped = true;
+            return SinkFlow::Stop;
+        }
+        return SinkFlow::Continue;
+    }
+
+    /// @brief 记一次收摊宣告。
+    auto on_end() -> void override { ++ends; }
+
+    int heads{0};  ///< `on_head` 调用次数
+    int ends{0};  ///< `on_end` 调用次数
+    std::size_t segments{0};  ///< `on_data` 调用次数
+    std::size_t max_segment{0};  ///< 单段最大字节数（「不物化」的可测量形态）
+    std::string text;  ///< 按交付次序拼接的明文
+    std::uint16_t status{0};  ///< 头部块里的状态码
+    bool head_body_empty{false};  ///< 头部交付时 `body()` 是否为空
+    bool stopped{false};  ///< 本宿主是否回出过 `Stop`
+    bool stop_at_head{false};  ///< 是否在头部就收摊
+    std::size_t stop_after{std::numeric_limits<std::size_t>::max()};  ///< 第几段起收摊
+};
+
+// `hello aurora` 的金样包装：gzip（RFC 1952）与裸 DEFLATE（RFC 1951）、zlib 包装（RFC 1950）。
+#ifdef AURORA_ENABLE_COMPRESSION
+/// @brief 把无符号字节表转成消息体缓冲（压缩字节常 ≥ 0x80，写成 char 字面量会踩实现定义转换）。
+/// @tparam N 表长。
+/// @param table 字节表。
+/// @return 等长缓冲。
+template <std::size_t N>
+[[nodiscard]] auto bytes(const unsigned char (&table)[N]) -> std::vector<char> {
+    std::vector<char> out;
+    out.reserve(N);
+    for (const unsigned char unit : table) {
+        out.push_back(static_cast<char>(unit));
+    }
+    return out;
+}
+
+const unsigned char AURORA_GZIP_HELLO[] = {31, 139, 8,  0,   0,  0,  0, 0, 2,   255, 203, 72,  205, 201, 201, 87,
+                                           72, 44,  45, 202, 47, 74, 4, 0, 214, 230, 105, 148, 12,  0,   0,   0};
+const unsigned char AURORA_RAW_HELLO[] = {203, 72, 205, 201, 201, 87, 72, 44, 45, 202, 47, 74, 4, 0};
+const unsigned char AURORA_ZLIB_HELLO[] = {120, 156, 203, 72, 205, 201, 201, 87,  72, 44,
+                                           45,  202, 47,  74, 4,   0,   30,  136, 4,  191};
+#endif
+
+/// @brief 拼一份 `Content-Length` 分帧的 200 应答：头部字段 + 原样字节体。
+/// @param fields 头部字段行（每行以 `\\r\\n` 结尾，可空）。
+/// @param body 消息体字节。
+/// @return 可直接喂给对端脚本的应答字节。
+[[nodiscard]] auto length_framed(std::string_view fields, const std::vector<char> &body) -> std::string {
+    std::string out = "HTTP/1.1 200 OK\r\n";
+    out += fields;
+    out += "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n";
+    out.append(body.data(), body.size());
+    return out;
+}
+
+/// @brief 拼一份 chunked 分帧的 200 应答：整块 + 终止块。
+/// @param fields 头部字段行（可空）。
+/// @param body 分块解码后应交出的字节。
+/// @return 应答字节。
+[[nodiscard]] auto chunked_framed(std::string_view fields, const std::vector<char> &body) -> std::string {
+    std::string size_text;
+    for (std::size_t remaining = body.size(); remaining > 0; remaining /= 16) {
+        // 分块长度是十六进制小写（`RFC 9110 §7.1`）：直接算字符而不查表，省一枚下标越界面。
+        const int digit = static_cast<int>(remaining % 16);
+        const char glyph = digit < 10 ? static_cast<char>('0' + digit) : static_cast<char>('a' + digit - 10);
+        size_text.insert(size_text.begin(), glyph);
+    }
+    if (size_text.empty()) {
+        size_text = "0";
+    }
+    std::string out = "HTTP/1.1 200 OK\r\n";
+    out += fields;
+    out += "Transfer-Encoding: chunked\r\n\r\n";
+    out += size_text;
+    out += "\r\n";
+    out.append(body.data(), body.size());
+    out += "\r\n0\r\n\r\n";
+    return out;
+}
+
+/// @brief 取一段可辨识的长正文：长度要大到一次读装不下，「逐段」才是可观测的事实而不是修辞。
+/// @param total 字节数。
+/// @return 消息体字节（每 16 字节轮换一次字母，便于肉眼定位错位）。
+[[nodiscard]] auto long_body(std::size_t total) -> std::vector<char> {
+    std::vector<char> out;
+    out.reserve(total);
+    for (std::size_t index = 0; index < total; ++index) {
+        out.push_back(static_cast<char>('a' + ((index / 16) % 26)));
+    }
+    return out;
+}
+
+/// @brief 拼一份 200 应答：体已上线、交换正常收尾那一侧的对照。
+/// @return 带 2 字节体 `ok` 的应答字节。
+[[nodiscard]] auto service_ok() -> std::string { return length_framed("", {'o', 'k'}); }
+
+/// @brief 取出下载方向的发射序列（频次与末值判据都要分方向看）。
+/// @param seen 全部发射。
+/// @return 下载发射副本（保持次序）。
+[[nodiscard]] auto downloads_of(const std::vector<Progress> &seen) -> std::vector<Progress> {
+    std::vector<Progress> out;
+    for (const Progress &progress : seen) {
+        if (progress.phase == ProgressPhase::Download) {
+            out.push_back(progress);
+        }
+    }
+    return out;
+}
+
+/// @brief 为测试放行明文：缺省安全策略拒绝一切未列入白名单的 `http://` 目标，而本套件的对端恒在回环地址上。
+///
+/// 策略不给回环留隐含例外（那等于给「测试环境」开后门，生产代码里没人审查它），故触网用例逐客户端显式点名
+/// 回环地址。删掉本函数的调用会让本套件全部触网用例以 `net-policy-violated` 变红——这同时是闸门确实在建连
+/// 之前起作用的自证。
+/// @param client 待配置的客户端。
+auto allow_test_cleartext(Client &client) -> void {
+    NetPolicy permissive;
+    permissive.allow_cleartext_hosts = {"127.0.0.1"};
+    client.policy(std::move(permissive));
+}
+
+/// @brief 记录被写出的请求头部块、随后按给定应答收摊的对端脚本（流式入口的标识判据要看写出的字节）。
+/// @param recorded 交接缓冲（脚本线程写入）。
+/// @param guard 交接缓冲的锁。
+/// @param payload 读满一个头部块后写出的应答字节。
+/// @return 对端脚本。
+[[nodiscard]] auto record_then_reply(std::string &recorded, std::mutex &guard, std::string payload) -> PeerScript {
+    return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
+                                                             PeerStop &stop) -> void {
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;
+            }
+            seen.append(buffer.data(), read.value());
+            if (seen.find("\r\n\r\n") != std::string::npos) {
+                break;  // 头部块到位即应答（GET 无体，再读只会挂到超时）
+            }
+        }
+        {
+            const std::scoped_lock held(guard);
+            recorded = seen;
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+    };
+}
+
+/// @brief 取记录到的请求字节里 `X-Request-Id` 的字段值（大小写不敏感找字段名，取第一条）。
+/// @param recorded 交接缓冲。
+/// @param guard 交接缓冲的锁。
+/// @return 字段值；没这条字段时为空串。
+[[nodiscard]] auto recorded_identifier(std::string &recorded, std::mutex &guard) -> std::string {
+    std::string text;
+    {
+        const std::scoped_lock held(guard);
+        text = recorded;
+    }
+    const std::string_view head{"x-request-id: "};
+    // 字段名按不敏感匹配：发起侧写的是规范拼写，但判据不该被拼写绑住。
+    std::string lowered;
+    lowered.reserve(text.size());
+    for (const char unit : text) {
+        lowered.push_back(unit >= 'A' && unit <= 'Z' ? static_cast<char>(unit + 32) : unit);
+    }
+    const auto begin = lowered.find(head);
+    if (begin == std::string::npos) {
+        return {};
+    }
+    const auto cursor = begin + head.size();
+    const auto end = lowered.find("\r\n", cursor);
+    return text.substr(cursor, end == std::string::npos ? std::string::npos : end - cursor);
+}
+
+/// @brief 把文本里的字节按 ASCII 小写化（比对头部字段时不依赖拼写大小写）。
+/// @param text 原文。
+/// @return 小写副本。
+[[nodiscard]] auto lowered(std::string_view text) -> std::string {
+    std::string out{text};
+    for (char &unit : out) {
+        if (unit >= 'A' && unit <= 'Z') {
+            unit = static_cast<char>(static_cast<unsigned char>(unit) + 32);
+        }
+    }
+    return out;
+}
+
+/// @brief 从请求头部块里取它自己声明的体长（无 `Content-Length` 即零）。
+///
+/// 长度必须从请求现地读而不是用例另算：回环端口是五位数字，按占位 URL 算出的头部长度与真实请求差几位，
+/// 差出来的那段会让脚本一直读到 I/O 超时。
+/// @param head_block 头部块（含收尾的空行）。
+/// @return 声明的字节数。
+[[nodiscard]] auto declared_body_bytes(std::string_view head_block) -> std::size_t {
+    const std::string folded = lowered(head_block);
+    constexpr std::string_view key = "content-length:";
+    const auto at = folded.find(std::string{key});
+    if (at == std::string::npos) {
+        return 0;
+    }
+    std::size_t pos = at + key.size();
+    while (pos < folded.size() && (folded[pos] == ' ' || folded[pos] == '\t')) {
+        ++pos;
+    }
+    std::size_t value = 0;
+    while (pos < folded.size() && folded[pos] >= '0' && folded[pos] <= '9') {
+        value = (value * 10) + static_cast<std::size_t>(folded[pos] - '0');
+        ++pos;
+    }
+    return value;
+}
+
+/// @brief 按脚本服务一条完整请求：可选先回一条信息应答，再读满整条请求（`Content-Length` 与分块帧各自读到
+///        该停的地方），把收到的字节留档，最后写出应答。
+/// @param informational 读完头部块后先写出的信息应答；空串 = 不说。
+/// @param payload 最后写出的应答字节。
+/// @param recorded 交接缓冲（脚本线程写入）。
+/// @param guard 交接缓冲的锁。
+/// @return 对端脚本。
+[[nodiscard]] auto serve_request(std::string informational, std::string payload, std::string &recorded,
+                                 std::mutex &guard) -> PeerScript {
+    return [&recorded, &guard, informational = std::move(informational), payload = std::move(payload)](
+               aurora::net::blocking::StreamSocket &socket, PeerStop &stop) -> void {
+        // 同 `utest_net_http_client.cpp` 的 `serve_request()`：等满再答，超时只兜底。Expect 场景下
+        // 客户端写完头要等信息应答或窗口到点才发体，500ms 会被慢腿（asan + 并发）的调度击穿，服务端
+        // 提前收摊即关连接，随后的写体撞 RST；放到 10s 后正常路径毫秒级、异常路径由客户端收摊唤醒。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        std::size_t head_end = std::string::npos;
+        std::size_t want = 0;
+        bool chunked = false;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;  // 读不动即收摊：本端已把看到的部分留档
+            }
+            seen.append(buffer.data(), read.value());
+            if (head_end == std::string::npos) {
+                const auto at = seen.find("\r\n\r\n");
+                if (at == std::string::npos) {
+                    continue;
+                }
+                head_end = at + 4;
+                const std::string head = lowered(seen.substr(0, head_end));
+                chunked = head.find("transfer-encoding: chunked") != std::string::npos;
+                want = head_end + declared_body_bytes(std::string_view{seen}.substr(0, head_end));
+                if (!informational.empty()) {
+                    (void)socket.write_all(std::span<const char>{informational});
+                }
+            }
+            // 分块体读到终止块才算读满；本套件的正文都是短词，终止串不会与正文相撞。
+            if (chunked ? seen.find("\r\n0\r\n\r\n", head_end) != std::string::npos : seen.size() >= want) {
+                break;
+            }
+        }
+        {
+            const std::scoped_lock held(guard);
+            recorded = seen;
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+    };
+}
+
+/// @brief 读完头部就立即给出应答、随后**继续观察**一段窗口内还到达过什么字节，最后把全部收到的字节留档。
+///
+/// 「体有没有上线」这条判据不能用只读头就收摊的脚本：那种留档停在应答之前，即使本库把体盲发上线，档案里
+/// 也看不见它——于是断言恒真、测的是脚本而不是实现。
+/// @param payload 读完头部块后写出的应答字节。
+/// @param recorded 交接缓冲（脚本线程写入）。
+/// @param guard 交接缓冲的锁。
+/// @return 对端脚本。
+[[nodiscard]] auto answer_then_watch(std::string payload, std::string &recorded, std::mutex &guard) -> PeerScript {
+    return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
+                                                             PeerStop &stop) -> void {
+        // 读请求段用长兜底（accept 到首字节的墙钟可被慢腿调度拉长，见代理套件同款说明）；
+        // 答完之后的观察窗才是剧情性的「接住一次盲发」窗口，保持短档。
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;
+            }
+            seen.append(buffer.data(), read.value());
+            if (seen.find("\r\n\r\n") != std::string::npos) {
+                break;
+            }
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+        (void)socket.set_io_timeout(std::chrono::milliseconds{150});
+        while (!stop.load()) {  // 答完之后接着看：盲发的体在这里会被读到并进入留档
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;  // 读不动（含超时）即本端收摊
+            }
+            seen.append(buffer.data(), read.value());
+        }
+        {
+            const std::scoped_lock held(guard);
+            recorded = seen;
+        }
+    };
+}
+
+/// @brief 取记录到的请求字节副本。
+/// @param recorded 交接缓冲。
+/// @param guard 交接缓冲的锁。
+/// @return 请求字节副本。
+[[nodiscard]] auto recorded_request(const std::string &recorded, std::mutex &guard) -> std::string {
+    const std::scoped_lock held(guard);
+    return recorded;
+}
+
+/// @brief 等到对端脚本把整份请求档案交回。
+///
+/// 脚本按「读完（或读到收摊）之后一次性落档」的形态写档案，而落档发生在脚本线程：Linux 回环上客户端能在
+/// 2 ms 内收尾，脚本那边还停在 150 ms 的读超时里，此时取到的档案是空串。空串既会让「该上线的字段没上线」
+/// 假红，更会让「不该上线的体没上线」恒真——后者测的是脚本的时序而不是实现。故凡以 `answer_then_watch`
+/// 的留档作判据的用例，都先等档案就位再取。
+/// @param recorded 交接缓冲。
+/// @param guard 交接缓冲的锁。
+/// @return 档案已就位为 true（到预算仍未落档即由用例侧的致命断言暴露）。
+[[nodiscard]] auto await_recorded(std::string &recorded, std::mutex &guard) -> bool {
+    return aurora::test::net::drive_until("peer filed the request",
+                                          [&recorded, &guard] { return !recorded_request(recorded, guard).empty(); })
+        .satisfied;
+}
+
+/// @brief 一只可回退、按脚本交段的推送源：流式上传的线上形态与逐段节拍都靠它喂。
+///
+/// `rewindable` 答假时 `restart()` 直接拒绝——重放闸在流式入口那一侧的失败判据就靠它。
+class ScriptedBody final : public aurora::net::http::BodySource {
+  public:
+    /// @brief 以段列、自报总长与可回退性构造。
+    /// @param pieces 逐段交出的正文文本。
+    /// @param total `total_size()` 的回答；`nullopt` = 未知（本次该走分块）。
+    /// @param rewindable `restart()` 的回答。
+    ScriptedBody(std::vector<std::string> pieces, std::optional<std::uint64_t> total, bool rewindable)
+        : pieces_(std::move(pieces)), total_(total), rewindable_(rewindable) {}
+
+    [[nodiscard]] auto next_chunk() -> Result<std::vector<char>> override {
+        if (cursor_ >= pieces_.size()) {
+            return Result<std::vector<char>>{std::vector<char>{}};  // 段列交完 = 体已发完
+        }
+        const std::string &piece = pieces_.at(cursor_++);
+        return Result<std::vector<char>>{std::vector<char>{piece.begin(), piece.end()}};
+    }
+    [[nodiscard]] auto total_size() const -> std::optional<std::uint64_t> override { return total_; }
+    auto restart() -> bool override {
+        if (!rewindable_) {
+            return false;
+        }
+        cursor_ = 0;
+        ++restarts_;
+        return true;
+    }
+
+    /// @brief 已交出的段数（成功回退后归零）。
+    /// @return 段数。
+    [[nodiscard]] auto pulls() const -> std::size_t { return cursor_; }
+    /// @brief 成功回到原点的次数。
+    /// @return 次数。
+    [[nodiscard]] auto restarts() const -> std::size_t { return restarts_; }
+
+  private:
+    std::vector<std::string> pieces_;  ///< 脚本段列
+    std::optional<std::uint64_t> total_;  ///< 自报总长
+    bool rewindable_;  ///< 可否回到原点
+    std::size_t cursor_ = 0;  ///< 已交出的段下标
+    std::size_t restarts_ = 0;  ///< 成功回到原点的次数
+};
+
+/// @brief 逐条连接把收到的请求头部块留档、随后按给定应答收摊的对端脚本。
+///
+/// 认证环在流式路径上的判据是「第二次带上了什么」，而重跑是同一条监听口上的另一条连接，故档案按连接分条
+/// 而不是互相覆盖（`record_then_reply()` 只留最后一条，那一形态证不出次序）。
+/// @param filed 每条连接一份档案（脚本线程追加）。
+/// @param guard 档案的锁。
+/// @param payload 读满一个头部块后写出的应答字节。
+/// @return 对端脚本。
+[[nodiscard]] auto record_each_then_reply(std::vector<std::string> &filed, std::mutex &guard, std::string payload)
+    -> PeerScript {
+    return [&filed, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
+                                                          PeerStop &stop) -> void {
+        (void)socket.set_io_timeout(std::chrono::seconds{10});
+        std::vector<char> buffer(4096);
+        std::string seen;
+        while (!stop.load()) {
+            const auto read = socket.read_some(std::span<char>{buffer});
+            if (!read || read.value() == 0) {
+                break;
+            }
+            seen.append(buffer.data(), read.value());
+            if (seen.find("\r\n\r\n") != std::string::npos) {
+                break;  // 头部块到位即应答（本套件的认证用例都不带请求体）
+            }
+        }
+        {
+            const std::scoped_lock held(guard);
+            filed.push_back(seen);
+        }
+        (void)socket.write_all(std::span<const char>{payload});
+    };
+}
+
+/// @brief 取已留档的连接条数。
+/// @param filed 档案。
+/// @param guard 档案的锁。
+/// @return 条数。
+[[nodiscard]] auto filed_count(const std::vector<std::string> &filed, std::mutex &guard) -> std::size_t {
+    const std::scoped_lock held(guard);
+    return filed.size();
+}
+
+/// @brief 取第 `index` 条连接的档案（小写副本）。
+/// @param filed 档案。
+/// @param guard 档案的锁。
+/// @param index 连接序号（从 0 起）。
+/// @return 该条请求的头部块文本；还没留到那一条即致命失败。
+[[nodiscard]] auto filed_request(const std::vector<std::string> &filed, std::mutex &guard, std::size_t index)
+    -> std::string {
+    std::vector<std::string> copy;
+    {
+        const std::scoped_lock held(guard);
+        copy = filed;
+    }
+    AURORA_TEST_REQUIRE_MSG(index < copy.size(), "the peer has not filed that many requests");
+    return lowered(copy.at(index));
+}
+
+/// @brief 拼一份源站「要凭据」的 401：挑战原文 + 一枚可读的体。
+/// @param challenge `WWW-Authenticate` 的字段值原文。
+/// @param body 消息体文本。
+/// @return 应答字节。
+[[nodiscard]] auto challenge_401(std::string_view challenge, std::string_view body = "one") -> std::string {
+    return "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: " + std::string{challenge} +
+           "\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + std::string{body};
+}
+}  // namespace
+
+AURORA_TEST_CASE(stream_delivers_a_content_length_body_segment_by_segment) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    Client client;
+    allow_test_cleartext(client);
+    const auto body = long_body(40000);  // 远超一次读的 16 KiB：段数大于 1 才是「流式」而不是措辞
+    ScriptedPeer peer(reply_after_reading(1, length_framed("", body)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);  // 契约：`on_head` 恰一次，且在任一段体之前
+    AURORA_TEST_CHECK_TRUE(sink.head_body_empty);
+    AURORA_TEST_CHECK_TRUE(sink.segments > 1);
+    AURORA_TEST_CHECK_EQ(sink.text.size(), body.size());
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_FALSE(sink.stopped);
+
+    const auto &done = outcome.value();
+    AURORA_TEST_CHECK_EQ(done.response.status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_TRUE(done.response.body().empty());  // 完成事实里不复制一份体：体的字节已交给宿主
+    AURORA_TEST_CHECK_EQ(done.wire_bytes, body.size());
+    AURORA_TEST_CHECK_EQ(done.delivered_bytes, body.size());
+    AURORA_TEST_CHECK_FALSE(done.stopped_by_sink);
+}
+
+AURORA_TEST_CASE(stream_delivers_a_chunked_body) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    Client client;
+    allow_test_cleartext(client);
+    const std::vector<char> body{'h', 'e', 'l', 'l', 'o'};
+    ScriptedPeer peer(reply_after_reading(1, chunked_framed("", body)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_CHECK_EQ(sink.text, "hello");
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, std::uint64_t{5});
+}
+
+AURORA_TEST_CASE(stream_a_head_response_delivers_no_body_and_skips_coding_checks) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // HEAD 应答恒无体：中间层常照抄 `Content-Encoding`，那时无体应答上声明的编码名不该被校验，
+    // 也不该为它建链——交付面是零段，收摊仍恰一次。
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 0\r\n\r\n"));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::head(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{0});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_EQ(outcome.value().wire_bytes, std::uint64_t{0});
+    AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, std::uint64_t{0});
+}
+
+AURORA_TEST_CASE(stream_stops_reading_when_the_sink_returns_stop) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 宿主收摊是正常结局：成功出口 + `stopped_by_sink`，剩余字节不再读取也不交付，而 `on_end` 仍宣告收摊。
+    Client client;
+    allow_test_cleartext(client);
+    const auto body = long_body(40000);
+    ScriptedPeer peer(reply_after_reading(1, length_framed("", body)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    sink.stop_after = 2;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{2});  // 停住后再无交付：段数恰好停在收摊那一处
+    AURORA_TEST_CHECK_TRUE(sink.text.size() < body.size());
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    const auto &done = outcome.value();
+    AURORA_TEST_CHECK_TRUE(done.stopped_by_sink);
+    AURORA_TEST_CHECK_EQ(done.delivered_bytes, sink.text.size());
+    AURORA_TEST_CHECK_TRUE(done.wire_bytes >= done.delivered_bytes);  // 线上口径不小于交付口径
+}
+
+AURORA_TEST_CASE(stream_stops_at_the_head_when_the_sink_returns_stop_there) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 头部就收摊：一段都不交，链根本不必建，`on_end` 照样恰一次——「够了 / 用户取消了」不该被当成失败。
+    Client client;
+    allow_test_cleartext(client);
+    const auto body = long_body(40000);
+    ScriptedPeer peer(reply_after_reading(1, length_framed("", body)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    sink.stop_at_head = true;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{0});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_TRUE(outcome.value().stopped_by_sink);
+    AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, std::uint64_t{0});
+}
+
+AURORA_TEST_CASE(stream_abandons_the_body_of_a_redirect_hop) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 头部一判定为重定向即换跳：中间跳的体不交付，`delivered_bytes` 只算最终一跳，
+    // 而 `wire_bytes` 跨全部跳（两枚口径分别证出来，才说明它们不是同一个数换了个名字）。
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer target(reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nZ"));
+    AURORA_TEST_REQUIRE(target.valid());
+    const std::string redirect =
+        "HTTP/1.1 302 Found\r\nLocation: " + loopback_url(target.port()) + "\r\nContent-Length: 3\r\n\r\nabc";
+    ScriptedPeer origin(reply_after_reading(1, redirect));
+    AURORA_TEST_REQUIRE(origin.valid());
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(origin.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    AURORA_TEST_CHECK_EQ(sink.text, "Z");
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);  // 中间跳的头部不进宿主：宿主只见最终一跳
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
+    const auto &done = outcome.value();
+    AURORA_TEST_CHECK_EQ(done.response.status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(done.delivered_bytes, std::uint64_t{1});
+    AURORA_TEST_CHECK_EQ(done.wire_bytes, std::uint64_t{4});  // 3（中间跳已到）+ 1（终跳）
+    AURORA_TEST_CHECK_EQ(origin.accepts(), 1);
+    AURORA_TEST_CHECK_EQ(target.accepts(), 1);
+}
+
+AURORA_TEST_CASE(stream_stops_at_the_redirect_limit) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    Client client;
+    allow_test_cleartext(client);
+    // 每跳都回 302 指向自身路径：跟随必然撞到上限而不是收敛。
+    ScriptedPeer peer(reply_after_reading(1, "HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto outcome =
+        open_and_drive(client, Request::get(loopback_url(peer.port(), "/loop")).max_redirects(2), sink);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpRedirectLimit);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 3);  // 初始一跳 + 两跳跟随，其后超限而止
+    AURORA_TEST_CHECK_EQ(sink.ends, 0);  // 失败结局不宣告收摊
+}
+
+AURORA_TEST_CASE(stream_ignores_the_materialized_body_ceiling) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // `max_body_bytes()` 是物化路径的内存闸：流式路径不物化，故它对本入口零约束（同一份应答在 `send` 那边
+    // 会越限，在这边收完）。设了它就让 `open_stream` 提前失败，等于把「收大文件」变成必须调大一枚无关旋钮。
+    Client client;
+    allow_test_cleartext(client);
+    client.max_body_bytes(std::optional<std::uint64_t>{std::uint64_t{4}});
+    const auto body = long_body(40000);
+    ScriptedPeer peer(reply_after_reading(1, length_framed("", body)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, body.size());
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+}
+
+AURORA_TEST_CASE(stream_refuses_a_coding_outside_the_supported_set_before_any_byte_is_handed) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 支持集外的名在建链那一步就拒，且一段都不交：让宿主收下压缩字节的前缀再失败，交出去的那段没法收回。
+    Client client;
+    allow_test_cleartext(client);
+    const std::vector<char> body{'n', 'o', 't', '-', 'b', 'r'};
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Content-Encoding: br\r\n", body)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpContentEncodingUnsupported);
+    AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{0});
+    AURORA_TEST_CHECK_EQ(sink.ends, 0);  // 失败不宣告收摊：字节流断在半途，收尾归调用方按 Result 分流
+}
+
+AURORA_TEST_CASE(stream_times_out_a_stalled_peer) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 三档看门狗对两条交付路同判据：整请求到点落 `http-timeout`，不是 `net-cancelled`。
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(write_then_hold("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n"));  // 给头部不给体
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    auto task = client.open_stream(
+        Request::get(loopback_url(peer.port())).timeouts(Timeouts{.read_idle = std::chrono::milliseconds{50}}), sink);
+    AURORA_TEST_CHECK(
+        aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; }).satisfied);
+    engine.advance(std::chrono::milliseconds{50});
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "open_stream done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
+                          .satisfied);
+
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
+    AURORA_TEST_CHECK_EQ(sink.ends, 0);
+}
+
+AURORA_TEST_CASE(stream_reports_download_progress_on_wire_bytes_with_one_settled_value) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 进度报的是线上字节（解压前口径），末值恒发一次：合流不能把「收了摊」这一事实合掉。
+    Client client;
+    allow_test_cleartext(client);
+    const auto body = long_body(40000);
+    ScriptedPeer peer(reply_after_reading(1, length_framed("", body)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    std::vector<Progress> seen;
+    RecordingSink sink;
+    auto request = Request::get(loopback_url(peer.port()));
+    request.on_progress([&seen](const Progress &progress) -> void { seen.push_back(progress); });
+    const auto outcome = open_and_drive(client, std::move(request), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    const auto down = downloads_of(seen);
+    AURORA_TEST_REQUIRE(!down.empty());
+    AURORA_TEST_CHECK_TRUE(down.front().total_known);  // `Content-Length` 给得出总量
+    AURORA_TEST_CHECK_EQ(down.front().total_bytes, body.size());
+    for (std::size_t index = 1; index < down.size(); ++index) {
+        AURORA_TEST_CHECK_TRUE(down.at(index).transferred_bytes >= down.at(index - 1).transferred_bytes);
+    }
+    AURORA_TEST_CHECK_TRUE(down.back().finished);
+    AURORA_TEST_CHECK_EQ(down.back().transferred_bytes, body.size());
+    std::size_t settled = 0;
+    for (const Progress &progress : down) {
+        settled += progress.finished ? 1U : 0U;
+    }
+    AURORA_TEST_CHECK_EQ(settled, std::size_t{1});  // 末值恰一次：不多发也不缺发
+}
+
+AURORA_TEST_CASE(stream_refuses_to_run_on_a_leg_without_streaming_semantics) {
+    // 本腿无流式能力时直接失败，绝不悄悄退化成物化路径：退化会把调用方的内存预算和预期一起毁掉。
+    FakeEngine engine;
+    Capabilities caps;
+    caps.streaming = false;
+    engine.set_capabilities(caps);
+    const FakeEngineScope scope(engine);
+
+    RecordingSink sink;
+    auto task = Client{}.open_stream(Request::get("http://127.0.0.1:1/"), sink);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "open_stream done", [&task] { return task.is_done(); }, std::chrono::milliseconds{1000})
+                          .satisfied);
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetPlatformUnavailable);
+    AURORA_TEST_CHECK_EQ(sink.heads, 0);
+    AURORA_TEST_CHECK_EQ(sink.ends, 0);
+}
+
+#ifdef AURORA_ENABLE_COMPRESSION
+
+AURORA_TEST_CASE(stream_decompresses_a_gzip_body_with_two_byte_counters) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 交付给宿主的是还原后的明文，而 `wire_bytes` 记的是线上字节：两枚口径在同一个用例里各证一次。
+    Client client;
+    allow_test_cleartext(client);
+    const auto wire = bytes(AURORA_GZIP_HELLO);  // 线上 32 字节
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Content-Encoding: gzip\r\n", wire)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_CHECK_EQ(sink.text, "hello aurora");  // 压缩字节一个都没进宿主
+    const auto &done = outcome.value();
+    AURORA_TEST_CHECK_EQ(done.wire_bytes, wire.size());
+    AURORA_TEST_CHECK_EQ(done.delivered_bytes, std::uint64_t{12});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+}
+
+AURORA_TEST_CASE(stream_deflate_locks_the_format_from_the_wrapper_header) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 流式不「先试再回落」：首两枚输入字节构成合法 zlib 头即锁 zlib，否则锁裸 DEFLATE，两型各解通一次。
+    const auto probe = [](std::string_view label, const std::vector<char> &wire) -> void {
+        Client client;
+        allow_test_cleartext(client);
+        ScriptedPeer peer(reply_after_reading(1, length_framed("Content-Encoding: deflate\r\n", wire)));
+        AURORA_TEST_REQUIRE(peer.valid());
+
+        RecordingSink sink;
+        const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+        AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{"deflate probe failed: "} + std::string{label}
+                                                       : outcome.error().message);
+        AURORA_TEST_CHECK_EQ(sink.text, "hello aurora");
+    };
+    probe("zlib wrapper", bytes(AURORA_ZLIB_HELLO));
+    probe("raw stream", bytes(AURORA_RAW_HELLO));
+}
+
+AURORA_TEST_CASE(stream_enforces_the_decompressed_ceiling) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 越限的是解压产物：detail 点名 `max_decompressed_bytes`，且宿主收到的段数停在那一层越限之前。
+    Client client;
+    allow_test_cleartext(client);
+    client.max_decompressed_bytes(std::optional<std::uint64_t>{std::uint64_t{4}});
+    const auto wire = bytes(AURORA_GZIP_HELLO);
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Content-Encoding: gzip\r\n", wire)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpBodyTooLarge);
+    AURORA_TEST_CHECK(outcome.error().message.find("max_decompressed_bytes") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(sink.text.size() <= 4);
+    AURORA_TEST_CHECK_EQ(sink.ends, 0);  // 越限是失败，不是收摊
+
+    // 放宽到产物长度即放行：证明限的确实是解压产物而不是线上字节（线上 32 > 12）。
+    client.max_decompressed_bytes(std::optional<std::uint64_t>{std::uint64_t{12}});
+    RecordingSink loose;
+    const auto passed = open_and_drive(client, Request::get(loopback_url(peer.port())), loose);
+    AURORA_TEST_REQUIRE_MSG(bool(passed), passed ? std::string{} : passed.error().message);
+    AURORA_TEST_CHECK_EQ(loose.text, "hello aurora");
+}
+
+#else
+
+AURORA_TEST_CASE(stream_decompresses_a_gzip_body_with_two_byte_counters) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
+}
+
+AURORA_TEST_CASE(stream_deflate_locks_the_format_from_the_wrapper_header) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
+}
+
+AURORA_TEST_CASE(stream_enforces_the_decompressed_ceiling) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
+}
+
+#endif
+
+AURORA_TEST_CASE(stream_replays_a_timeout_raised_before_any_head_is_handed) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 流式路径的重放资格比物化路径窄，窄就窄在这一条：头还没交给宿主 ⇒ 可以重来。这里用「三档时限各拿一份
+    // 新的钟」把重放数出来：`Timeouts::total` 50 ms × 3 次尝试 + 两次退避 ≥ 150 ms 虚拟时长，一次尝试最多 60 ms。
+    //
+    // 判据取虚拟时钟而不是 `peer.accepts()`：对端脚本线程是**串行**服务的，`silent()` 会一直占住它，后面的
+    // 尝试因此连不上第 2 条连接——「先占住时限再放手让下一次成功」的剧本要把真实睡眠和虚拟时限赛跑，
+    // 输赢取决于机器负载。重放本身已由 `utest_net_http_client.cpp` 的逐值判据端到端证过，本用例只补流式
+    // 那一半独有的资格规则：没交过头的失败可以重来，且重来一次都没碰过宿主。
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(silent());
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
+    RecordingSink sink;
+    auto task = client.open_stream(
+        Request::get(loopback_url(peer.port())).timeouts(Timeouts{.total = std::chrono::milliseconds{50}}), sink);
+    AURORA_TEST_REQUIRE(pump_stream(engine, task));
+
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
+    AURORA_TEST_CHECK(names_in(outcome.error().message, "total"));  // 逐尝试重新计时的正是这一档
+    AURORA_TEST_CHECK_GE(engine.now().count(), 150);  // 三次尝试各用过一份 50 ms 窗口
+    AURORA_TEST_CHECK_EQ(sink.heads, 0);  // 重放期间一次都没向宿主交过头
+    AURORA_TEST_CHECK_EQ(sink.ends, 0);
+}
+
+AURORA_TEST_CASE(stream_does_not_replay_after_the_head_is_handed) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 头一旦交出就耗尽资格：本库不能假装「回到交头之前」让宿主重写已写下那段，那是把契约违约当成重试收益。
+    // 对端给出完整头部但按 `Content-Length` 欠着体不写，于是头交得出、交换收不完——同一枚时限旋钮下
+    // 上一次用例走满 150 ms，这一枚只走满一份窗口。
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(write_then_hold("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n"));  // 给头部不给体
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
+    RecordingSink sink;
+    auto task = client.open_stream(
+        Request::get(loopback_url(peer.port())).timeouts(Timeouts{.total = std::chrono::milliseconds{50}}), sink);
+    AURORA_TEST_REQUIRE(pump_stream(engine, task));
+
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);  // 头确实交出去过：资格就此耗尽
+    AURORA_TEST_CHECK_EQ(sink.ends, 0);  // 失败结局不调 `on_end`
+    AURORA_TEST_CHECK_LE(engine.now().count(), 90);  // 只剩一份窗口：第二次尝试根本没发生
+}
+
+AURORA_TEST_CASE(stream_refuses_an_out_of_range_policy_before_any_connection) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 形态闸在起手就过：越界的 `base` 不进入任何一次尝试，对端一条连接都不该被连上。
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("", {'o'})));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    RecordingSink sink;
+    auto task = client.open_stream(
+        Request::get(loopback_url(peer.port())).retry_policy(RetryPolicy{.base = std::chrono::milliseconds{-1}}), sink);
+    AURORA_TEST_REQUIRE(aurora::test::net::drive_until(
+                            "policy refused", [&task] { return task.is_done(); }, std::chrono::milliseconds{2000})
+                            .satisfied);
+
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
+    AURORA_TEST_CHECK(names_in(outcome.error().message, "base"));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
+    AURORA_TEST_CHECK_EQ(sink.heads, 0);
+}
+
+AURORA_TEST_CASE(a_cache_hit_streams_the_stored_body_without_the_wire) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    const auto body = long_body(40000);  // 远超一次读的窗口：命中时也必须仍是「逐段」而不是一次倾倒
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    // 表先由物化路径灌一份（流式入口不写表，见下一例），这份 40 000 字节的载荷就是命中时要逐段交出去的那段。
+    AURORA_TEST_REQUIRE(bool(prime_with_send(client, Request::get(url))));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+
+    // 命中缓存走的是同一个宿主、同一套次序：头部一次、体按段、收摊一次，只是线上一个字节也没来。
+    RecordingSink sink;
+    const auto hit = open_and_drive(client, Request::get(url), sink);
+    AURORA_TEST_REQUIRE(bool(hit));
+    AURORA_TEST_CHECK(hit.value().response.from_cache());
+    AURORA_TEST_CHECK_EQ(hit.value().wire_bytes, std::uint64_t{0});
+    AURORA_TEST_CHECK_EQ(hit.value().delivered_bytes, body.size());
+    AURORA_TEST_CHECK_EQ(sink.text.size(), body.size());
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{body.begin(), body.end()});
+    AURORA_TEST_CHECK_TRUE(sink.segments > 1);
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_TRUE(sink.head_body_empty);
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 「同一 URL 二次请求不触网」在流式入口同样成立
+}
+
+AURORA_TEST_CASE(a_streamed_exchange_leaves_the_table_untouched) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", {'a'})));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+
+    RecordingSink first;
+    const auto fetched = open_and_drive(client, Request::get(url), first);
+    AURORA_TEST_REQUIRE(bool(fetched));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+
+    // 流式入口只读不写：把载荷攒进表就意味着先把它攒进内存，那正是调用方选 `open_stream` 要避免的事。
+    // 判据是「第二次仍然触网」——若这里写进了表，第二次就该是一次命中。
+    RecordingSink second;
+    const auto again = open_and_drive(client, Request::get(url), second);
+    AURORA_TEST_REQUIRE(bool(again));
+    AURORA_TEST_CHECK_FALSE(again.value().response.from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(a_stale_entry_revalidates_and_streams_the_stored_body) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    const std::vector<char> stored{'s', 't', 'o', 'r', 'e', 'd'};
+    // 第一条给「抵达即过期 + 校验子」：`send` 把它灌进表；第二条只回一句 304。
+    const auto initial = length_framed("Cache-Control: max-age=0\r\nETag: \"v1\"\r\n", stored);
+    const auto *const not_modified = "HTTP/1.1 304 Not Modified\r\nCache-Control: max-age=600\r\nETag: \"v2\"\r\n\r\n";
+    ScriptedPeer peer(per_connection({reply_after_reading(1, initial), reply_after_reading(1, not_modified)}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port());
+    AURORA_TEST_REQUIRE(bool(prime_with_send(client, Request::get(url))));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(url), sink);
+    AURORA_TEST_REQUIRE(bool(outcome));
+    // 宿主看不见那枚中间状态：头部是已存那份 200，体是已存那 6 字节，`on_head` 恰一次、`on_end` 恰一次。
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{"stored"});
+    AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, std::uint64_t{6});
+    AURORA_TEST_CHECK(outcome.value().response.from_cache());
+    // 304 按定义没有体，故线上字节仍是 0（口径是「分帧解出的体字节」，与 HEAD 那一例同判据）。
+    AURORA_TEST_CHECK_EQ(outcome.value().wire_bytes, std::uint64_t{0});
+    AURORA_TEST_CHECK_EQ(outcome.value().response.header("ETag").value_or(std::string{}), std::string{"\"v2\""});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+
+    // 刚验证过的一份重新获得新鲜度：第三次不必再问对端，交出的仍是已存那份体。
+    RecordingSink third;
+    const auto again = open_and_drive(client, Request::get(url), third);
+    AURORA_TEST_REQUIRE(bool(again));
+    AURORA_TEST_CHECK(again.value().response.from_cache());
+    AURORA_TEST_CHECK_EQ(third.text, std::string{"stored"});
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+AURORA_TEST_CASE(stream_stamps_a_request_id_on_every_exchange) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    Client client;
+    allow_test_cleartext(client);
+    std::mutex guard;
+    std::string recorded;
+    ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", long_body(40000))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    // 标识的落位与 `send` 同处（协程体外、原始请求那一次）：本入口每跳与每次尝试都从它拷一份，挂上即全程同值。
+    AURORA_TEST_CHECK_EQ(aurora::net::detail::is_request_id_shape(recorded_identifier(recorded, guard)), true);
+}
+
+AURORA_TEST_CASE(stream_carries_a_request_level_identifier_and_respects_the_switch) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    Client client;
+    allow_test_cleartext(client);
+    std::mutex guard;
+    std::string recorded;
+    ScriptedPeer peer(record_then_reply(recorded, guard, length_framed("", long_body(200))));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    RecordingSink sink;
+    const auto declared = open_and_drive(client, Request::get(loopback_url(peer.port())).request_id("trace-42"), sink);
+    AURORA_TEST_REQUIRE(bool(declared));
+    AURORA_TEST_CHECK_EQ(recorded_identifier(recorded, guard), std::string{"trace-42"});
+
+    // 请求级空声明与客户端总开关都关掉这一次：与物化路径同一套三级取定，两个入口不说两种话。
+    std::string quiet;
+    ScriptedPeer second(record_then_reply(quiet, guard, length_framed("", long_body(200))));
+    AURORA_TEST_REQUIRE(second.valid());
+    RecordingSink next_sink;
+    const auto omitted = open_and_drive(client, Request::get(loopback_url(second.port())).request_id(""), next_sink);
+    AURORA_TEST_REQUIRE(bool(omitted));
+    AURORA_TEST_CHECK_EQ(recorded_identifier(quiet, guard), std::string{});
+
+    client.request_id(false);
+    std::string off;
+    ScriptedPeer third(record_then_reply(off, guard, length_framed("", long_body(200))));
+    AURORA_TEST_REQUIRE(third.valid());
+    RecordingSink off_sink;
+    AURORA_TEST_REQUIRE(bool(open_and_drive(client, Request::get(loopback_url(third.port())), off_sink)));
+    AURORA_TEST_CHECK_EQ(recorded_identifier(off, guard), std::string{});
+}
+
+AURORA_TEST_CASE(stream_sends_the_body_after_the_peer_opens_the_gate) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(serve_request("HTTP/1.1 100 Continue\r\n\r\n", service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    ScriptedBody source{{"abcde", "fgh"}, std::nullopt, true};
+    RecordingSink sink;
+    const auto outcome =
+        open_and_drive(client, Request::post(loopback_url(peer.port())).body(source).expect_continue(true), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    // 信息应答既不进宿主的 `on_head`，也不改变交出的状态码：宿主看见的只有那份 200。
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{"ok"});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+
+    const auto sent = recorded_request(recorded, guard);
+    AURORA_TEST_CHECK_NE(sent.find("Expect: 100-continue"), std::string::npos);
+    // 体是在窗口里收到 1xx 之后才写上线的：对端把整条请求读满了才有这份留档。
+    AURORA_TEST_CHECK_NE(sent.find("5\r\nabcde\r\n3\r\nfgh\r\n0\r\n\r\n"), std::string::npos);
+}
+
+AURORA_TEST_CASE(stream_delivers_an_answer_that_arrived_inside_the_expect_window) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    // 一次性写出的「100 + 200 + 体」大概率被窗口里那一次读整个捞回：此时报文已在装配器里收满，读环的
+    // 续跑条件（`!complete()`）本不成立，宿主的 `on_head`/`on_data`/`on_end` 却仍欠着。这条就是那一批字节的
+    // 交付判据——少一次强制过环，宿主就会在毫不知情的情况下收到一个零次交头的结局。
+    ScriptedPeer peer(answer_then_watch("HTTP/1.1 100 Continue\r\n\r\n" + service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    ScriptedBody source{{"abcde"}, std::optional<std::uint64_t>{std::uint64_t{5}}, true};
+    RecordingSink sink;
+    const auto outcome =
+        open_and_drive(client, Request::post(loopback_url(peer.port())).body(source).expect_continue(true), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{"ok"});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, std::uint64_t{2});
+    // 闸门已开：体照发，对端在答后继续观察的那段窗口里应当读到它。
+    AURORA_TEST_REQUIRE(await_recorded(recorded, guard));
+    const auto sent = recorded_request(recorded, guard);
+    AURORA_TEST_CHECK_NE(sent.find("abcde"), std::string::npos);
+}
+
+AURORA_TEST_CASE(stream_holds_the_body_back_when_the_expectation_gets_a_final_answer) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    // 对端读完头部直接回 417：流式入口同样得把体按下不发，并把这枚最终状态正常交给宿主（不是错误结局）。
+    ScriptedPeer peer(
+        answer_then_watch("HTTP/1.1 417 Expectation Failed\r\nContent-Length: 0\r\n\r\n", recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    ScriptedBody source{{"abcde"}, std::optional<std::uint64_t>{std::uint64_t{5}}, true};
+    RecordingSink sink;
+    const auto outcome =
+        open_and_drive(client, Request::post(loopback_url(peer.port())).body(source).expect_continue(true), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{417});
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, std::uint64_t{0});
+    AURORA_TEST_REQUIRE(await_recorded(recorded, guard));
+    const auto sent = recorded_request(recorded, guard);
+    AURORA_TEST_CHECK_NE(sent.find("Expect: 100-continue"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(sent.find("abcde"), std::string::npos);
+}
+
+AURORA_TEST_CASE(stream_uploads_a_body_source_that_knows_its_total) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    std::mutex guard;
+    std::string recorded;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(serve_request("", service_ok(), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    // 定长形态的流式体必须整份上线：写出侧的停止条件取自声明长度，而不是「交了第一段就算完」。
+    ScriptedBody source{{"abcde", "fgh"}, std::optional<std::uint64_t>{std::uint64_t{8}}, true};
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::post(loopback_url(peer.port())).body(source), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{"ok"});
+
+    const auto sent = lowered(recorded_request(recorded, guard));
+    AURORA_TEST_CHECK_NE(sent.find("content-length: 8"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(sent.find("transfer-encoding:"), std::string::npos);
+    AURORA_TEST_CHECK_NE(sent.find("\r\n\r\nabcdefgh"), std::string::npos);
+    AURORA_TEST_CHECK_EQ(source.pulls(), std::size_t{2});
+}
+
+AURORA_TEST_CASE(stream_closes_the_retry_loop_on_a_body_that_cannot_rewind) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    // 头已经交给宿主的失败在流式路径本来就不可重放（`stream_does_not_replay_after_the_head_is_handed`），
+    // 所以这一条要把失败安排在**交头之前**才问得出「重放闸有没有因不可回退的体而关门」：静默的对端 + `total`
+    // 时限到点，头一次都没交出去，重放资格只剩闸这一道判据。判据看虚拟时长与错误码：门开着就要跑满三扇窗口
+    // （兄弟用例的 `>= 150`），门关了只烧一扇；而中途回不了原点会改报 `http-body-not-replayable`，那是闸自己
+    // 掐错了尝试，不是调用方该看见的结局。
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(silent());
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.retry_policy(RetryPolicy{.attempts = 3, .base = std::chrono::milliseconds{10}});
+    ScriptedBody source{{"abcde"}, std::optional<std::uint64_t>{std::uint64_t{5}}, false};
+    RecordingSink sink;
+    auto task = client.open_stream(
+        Request::put(loopback_url(peer.port())).body(source).timeouts(Timeouts{.total = std::chrono::milliseconds{50}}),
+        sink);
+    AURORA_TEST_REQUIRE(pump_stream(engine, task));
+
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
+    AURORA_TEST_CHECK_LT(engine.now().count(), std::int64_t{100});  // 只烧了一扇 50 ms 窗口
+    AURORA_TEST_CHECK_EQ(sink.heads, 0);
+    AURORA_TEST_CHECK_EQ(source.restarts(), std::size_t{0});  // 答假的源不会被反复拧回原点
+}
+
+AURORA_TEST_CASE(stream_answers_a_source_challenge_before_the_head_is_handed) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::vector<std::string> filed;
+    // 第一次没凭据所以拒、第二次带上才放行。两趟都从同一条监听口走：换目标证不出「重跑的是同一次尝试」。
+    ScriptedPeer peer(per_connection({record_each_then_reply(filed, guard, challenge_401(R"(Basic realm="api")", "no")),
+                                      record_each_then_reply(filed, guard, service_ok())}));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "pw"));
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    // 流式路径的认证环必须生在**首段字节交给宿主之前**：那份 401 的头部块从没到达宿主，宿主看到的第一个头
+    // 就是重跑之后那份 200。「头交出去就收不回来」这条重放闸规则（`stream_does_not_replay_after_the_head_is_handed`）
+    // 对本环同样成立，于是本环只能问在交头之前——宿主因此永远不会看见半截的 401。
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{"ok"});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+    AURORA_TEST_REQUIRE(aurora::test::net::drive_until("both requests filed", [&filed, &guard] {
+                            return filed_count(filed, guard) == 2;
+                        }).satisfied);
+    AURORA_TEST_CHECK_EQ(filed_request(filed, guard, 0).find("authorization:"), std::string::npos);
+    AURORA_TEST_CHECK_NE(filed_request(filed, guard, 1).find("authorization: basic "), std::string::npos);
+}
+
+AURORA_TEST_CASE(a_declined_challenge_streams_the_peers_own_401) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    std::mutex guard;
+    std::vector<std::string> filed;
+    ScriptedPeer peer(record_each_then_reply(filed, guard, challenge_401(R"(Basic realm="api")", "gone")));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.authenticator(std::make_shared<BearerAuthenticator>("tok"));  // 对端只给 `Basic`：答空
+    RecordingSink sink;
+    const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+
+    // 放弃答复时交出的仍是**对端说的那一份** 401，且头部块只交一次、随后正常收摊——本环不把它折成错误。
+    AURORA_TEST_CHECK_EQ(sink.heads, 1);
+    AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{401});
+    AURORA_TEST_CHECK_EQ(sink.text, std::string{"gone"});
+    AURORA_TEST_CHECK_EQ(sink.ends, 1);
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+    AURORA_TEST_CHECK_EQ(filed_request(filed, guard, 0).find("authorization:"), std::string::npos);
+}
+
+}  // namespace aurora::test_cases::utest_net_http_stream

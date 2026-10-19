@@ -6,7 +6,6 @@
 ///           探测，未构建则 SKIP
 /// 覆盖说明: aurora_mcp 是独立可执行（tools/servers/），e2e 仅验证进程可运行
 
-#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -96,16 +95,16 @@ AURORA_TEST_CASE(mcp_describe_component_returns_full_schema) {
     AURORA_TEST_CHECK(!schema.empty());
     AURORA_TEST_CHECK(schema.contains("type"));
     AURORA_TEST_CHECK(require_field<std::string>(schema, "type") == "Button");
-    AURORA_TEST_CHECK(schema.contains("prop_descriptors"));
-    AURORA_TEST_CHECK(require_child(schema, "prop_descriptors")->is_array());
-    AURORA_TEST_CHECK(!require_child(schema, "prop_descriptors")->empty());
+    AURORA_TEST_CHECK(schema.contains("props"));
+    AURORA_TEST_CHECK(require_child(schema, "props")->is_array());
+    AURORA_TEST_CHECK(!require_child(schema, "props")->empty());
     AURORA_TEST_CHECK(schema.contains("events"));
     AURORA_TEST_CHECK(schema.contains("children_policy"));
     AURORA_TEST_CHECK(require_field<std::string>(schema, "children_policy") == "none");
 
-    // 未知组件：返回空 Json 对象或不含有效 prop_descriptors。
+    // 未知组件：返回空 Json 对象或不含有效 props 条目。
     const au::Json unknown = au::describe_component("NonExistentWidget");
-    const auto *unknown_desc = unknown.find("prop_descriptors");
+    const auto *unknown_desc = unknown.find("props");
     AURORA_TEST_CHECK(unknown_desc == nullptr || unknown_desc->empty());
 }
 
@@ -195,10 +194,10 @@ AURORA_TEST_CASE(mcp_get_schema_matches_component_count) {
     AURORA_TEST_CHECK(!schemas.empty());
     AURORA_TEST_CHECK(schemas.size() == au::list_all_components().size());
 
-    // 每个 schema 含 type 和 prop_descriptors。
+    // 每个 schema 含 type 和 props 表。
     for (const auto &s : schemas) {
         AURORA_TEST_CHECK(s.contains("type"));
-        AURORA_TEST_CHECK(s.contains("prop_descriptors"));
+        AURORA_TEST_CHECK(s.contains("props"));
     }
 }
 

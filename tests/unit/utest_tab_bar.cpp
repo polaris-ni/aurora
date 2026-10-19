@@ -9,7 +9,6 @@
 /// 判据：追加当刻未挂载（父侧尚无 ctx 可用），一次布局后恰好挂载 1 次、订阅条数为固定值、
 /// 挂到的是宿主 ctx；同宿主重复布局不重复挂载。
 
-#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -51,7 +50,7 @@ class MountProbe final : public Widget {
         ++mounts;
         if (const auto *th = ctx.environment<Theme>()) {
             theme_seen_at_mount = true;
-            primary_at_mount = th->primary;
+            primary_at_mount = th->roles.primary;
         }
     }
     auto on_unmount(const BuildContext &ctx) -> void override {
@@ -67,7 +66,7 @@ class MountProbe final : public Widget {
 
 AURORA_TEST_CASE(runtime_added_tab_content_is_mounted_on_next_layout) {
     Theme theme;
-    theme.primary = Color::from_rgba(77, 88, 99);
+    theme.roles.primary = Color::from_rgba(77, 88, 99);
     auto bar = std::make_shared<TabBar>();
     bar->add_tab(Tab{.label = "first"});
     Provider<Theme> provider{theme, Node{bar}};
@@ -85,7 +84,7 @@ AURORA_TEST_CASE(runtime_added_tab_content_is_mounted_on_next_layout) {
     AURORA_TEST_CHECK_EQ(probe->effect_count(), 3U);
     // 挂到的是宿主的 ctx：主题注入读得到，不是无环境的裸 ctx。
     AURORA_TEST_CHECK_TRUE(probe->theme_seen_at_mount);
-    AURORA_TEST_CHECK_TRUE(probe->primary_at_mount == theme.primary);
+    AURORA_TEST_CHECK_TRUE(probe->primary_at_mount == theme.roles.primary);
 
     // 同宿主重复布局不重复挂载（既有幂等保护不得被补挂机制绕过）。
     LayoutEngine::layout(provider, bounded(320.0F, 240.0F));

@@ -30,7 +30,6 @@
 /// 仅首次生效——mount 之后才注册的运行期动画可能落到其他会话的驱动器。本套件用例均为
 /// 静态场景（无运行期动画注册），交互动画的推进语义已由 etest_interaction_flow 覆盖。
 
-#include <cmath>
 #include <memory>
 #include <stdexcept>
 #include <string>

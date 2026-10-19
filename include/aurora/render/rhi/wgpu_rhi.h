@@ -139,7 +139,7 @@ class WgpuRhi final : public RhiBackend, public RhiFrameSink {
     /// @brief 字形图集页边长（默认 1024；须在 `begin_frame` 前设置，非正值忽略）。
     /// 常规消费者无须调用；测试用小页覆盖「满页开新页 / 页数封顶 LRU 淘汰」路径。
     /// @param side 图集页边长（像素，非正值为无效输入、不改状态）。
-    auto set_glyph_page_size(int side) -> void;
+    auto set_glyph_page_size(int side) const -> void;
 
     /// @brief 离屏读回通道开关（默认 `true`，即每帧 `end_frame` 录一次目标纹理 → MAP_READ
     /// 缓冲拷贝并登记 `bufferMapAsync`）。仅供离屏诊断通路（`read_pixels`）使用。
@@ -151,7 +151,7 @@ class WgpuRhi final : public RhiBackend, public RhiFrameSink {
     ///
     /// 真窗口（swapchain）模式不登记读回，本开关无作用。
     /// @param on `true` = 帧尾登记读回拷贝与映射；`false` = 跳过（期间 `read_pixels` 返回 false）。
-    auto set_readback_enabled(bool on) -> void;
+    auto set_readback_enabled(bool on) const -> void;
 
     /// @brief 区域效果 compute 路开关（默认 `true`）：置 false 后 `BlurRegion`/`BlendRegion`/
     /// `MaskRegion`（画布路与层路）整体强制走**片元兜底路**，如同 compute 管线未建成。
@@ -160,13 +160,13 @@ class WgpuRhi final : public RhiBackend, public RhiFrameSink {
     /// `cs_mip` 大图重采样不受本开关影响。两路语义同源（`blur_tap`/`blend_rgb`/`mask_base`
     /// 单一来源），像素差异仅 quantization 顺序级别（见规格 §8.8）。
     /// @param on `true` = compute 管线就绪时走 compute 路；`false` = 三效果族整体强制片元兜底路。
-    auto set_compute_effects_enabled(bool on) -> void;
+    auto set_compute_effects_enabled(bool on) const -> void;
 
     /// @brief 当前帧内容读回（RGBA8，行序自上而下）。仅供诊断/快照/容差 golden。
     /// 调用窗口：`end_frame` 之后、下一次 `begin_frame` 之前。返回 false = 不可用或失败。
     /// @param out 输出参数：成功时被整帧像素字节覆写。
     /// @return `true` = 读回成功；`false` = 读回关闭、非离屏模式或映射失败。
-    [[nodiscard]] auto read_pixels(std::vector<std::uint8_t> &out) -> bool;
+    [[nodiscard]] auto read_pixels(std::vector<std::uint8_t> &out) const -> bool;
 
     /// @brief RhiBackend 能力位（specification/03 §8.7）：device 就绪时 gpu=true，compute 随
     ///        所选后端（GLES=false）；native_surface_import 恒 false。

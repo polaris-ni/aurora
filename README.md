@@ -17,7 +17,7 @@
 | state | 细粒度响应式信号（State/Computed/Effect）、Store、UndoStack、线程池 + 协程异步 |
 | layout | Flex/Grid 布局器、`Length` 四态约束求解、两阶段测量-定位、布局缓存与溢出策略 |
 | event / animation / navigation | 命中测试 + 同步派发、焦点、手势与拖拽、快捷键；`Easing`/`Spring`/`Animator` 帧动画；`Route`/`Navigator`/`Router`、转场与 Hero、deep linking |
-| theming / i18n / environment | 设计令牌与 `StyleProps`、`Provider` 依赖注入、媒体查询与响应式构建、多语言、`Modifier` 正交修饰 |
+| theming / i18n / environment | Material 3 色角色集与 `ThemeExtension<T>` 类型安全扩展、`Provider` 依赖注入、媒体查询与响应式构建、多语言、`Modifier` 正交修饰 |
 | window | Headless / Win32(GDI) / GLFW / X11 / Wayland / WASM / macOS / D3D11 上屏偏置 / WGPU GPU 栅格（Vulkan·D3D12·Metal·GLES）；事件驱动帧循环（空闲 CPU 趋近 0） |
 | storage / preferences | 信封式记录仓储（内存/文件系统后端）；JSON 键值配置（多进程安全 LWW 合并） |
 | inspector / 工具链 | 本地回环 HTTP 检视服务、`aurora_lsp` 语言服务器、`aurora_mcp` MCP Server、`aurora_cli` |
@@ -151,7 +151,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 | [codespec/CODING_STANDARDS.md](codespec/CODING_STANDARDS.md) | 编码规范 / AI 友好性规则                |
 | [codespec/GUIDELINE.md](codespec/GUIDELINE.md)               | 复制即用配方（最小可编译片段）          |
 | [codespec/BUILD_OPTIONS.md](codespec/BUILD_OPTIONS.md)       | CMake 开关 / 编译宏 / 环境变量（权威）  |
-| [CHANGELOG.md](CHANGELOG.md)                             | 版本与变更记录                          |
+| [CHANGELOG.md](CHANGELOG.md)                                 | 版本与变更记录                          |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)           | 第三方组件许可清单                      |
 
 ## 许可证

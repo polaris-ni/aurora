@@ -4,7 +4,6 @@
 /// 翻月回卷、网格映射、指针交互）、TimePicker（回卷调节、四象限点击）、ColorPicker（默认/自定义
 /// 色板、点击选色）的构造契约、属性读写、自描述、序列化往返与无头布局/绘制
 
-#include <memory>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -185,9 +184,12 @@ AURORA_TEST_CASE(date_picker_layout_and_describe) {
     const auto d = DatePicker::describe_static();
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "DatePicker");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
-    AURORA_TEST_REQUIRE_EQ(d.properties.size(), 3U);
+    // 3 个数据属性 + 4 个主题回退色属性（accent/text/background/border，默认 theme.*）。
+    AURORA_TEST_REQUIRE_EQ(d.properties.size(), 7U);
     AURORA_TEST_CHECK_EQ(std::string{d.properties[0].name}, "year");
     AURORA_TEST_CHECK_EQ(std::string{d.properties[2].name}, "day");
+    AURORA_TEST_CHECK_EQ(std::string{d.properties[3].name}, "accent_color");
+    AURORA_TEST_CHECK_EQ(std::string{d.properties[3].default_value}, "\"theme.primary\"");
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
     AURORA_TEST_CHECK_EQ(d.invariants.size(), 2U);
@@ -318,7 +320,8 @@ AURORA_TEST_CASE(time_picker_pointer_quadrants) {
 AURORA_TEST_CASE(time_picker_describe_and_json_roundtrip) {
     const auto d = TimePicker::describe_static();
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "TimePicker");
-    AURORA_TEST_REQUIRE_EQ(d.properties.size(), 2U);
+    // 2 个数据属性 + 3 个主题回退色属性（background/border/text，默认 theme.*）。
+    AURORA_TEST_REQUIRE_EQ(d.properties.size(), 5U);
     AURORA_TEST_CHECK_EQ(std::string{d.properties[0].name}, "hour");
     AURORA_TEST_CHECK_EQ(std::string{d.properties[1].name}, "minute");
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
@@ -396,7 +399,8 @@ AURORA_TEST_CASE(color_picker_pointer_grid_select) {
 AURORA_TEST_CASE(color_picker_describe_and_json_roundtrip) {
     const auto d = ColorPicker::describe_static();
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "ColorPicker");
-    AURORA_TEST_REQUIRE_EQ(d.properties.size(), 1U);
+    // 数据属性 color + 主题回退色属性 accent_color（默认 theme.primary）。
+    AURORA_TEST_REQUIRE_EQ(d.properties.size(), 2U);
     AURORA_TEST_CHECK_EQ(std::string{d.properties[0].name}, "color");
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");

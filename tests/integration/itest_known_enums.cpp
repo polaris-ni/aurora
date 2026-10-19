@@ -16,7 +16,6 @@
 #include "aurora/widget/alignment.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
-#include "framework/json_literals.h"
 #include "known_enums.h"
 
 namespace aurora::test_cases::itest_known_enums {
@@ -42,7 +41,17 @@ namespace {
            static_cast<int>(au::KeyCode::D0) + static_cast<int>(au::KeyCode::Backquote) +
            static_cast<int>(au::KeyCode::F12) + static_cast<int>(au::DrawerSide::Right) +
            static_cast<int>(au::Orientation::Vertical) + static_cast<int>(au::SplitterOrientation::Horizontal) +
-           static_cast<int>(au::ToastPosition::Top) + static_cast<int>(au::LegendPosition::Right);
+           static_cast<int>(au::ToastPosition::Top) + static_cast<int>(au::LegendPosition::Right) +
+           static_cast<int>(aurora::net::AddressFamily::LocalPath) +
+           static_cast<int>(aurora::net::LengthByteOrder::Little) + static_cast<int>(aurora::net::ProxyKind::Socks5) +
+           static_cast<int>(aurora::net::ShutdownMode::Both) + static_cast<int>(aurora::net::TlsVersion::Tls13) +
+           static_cast<int>(aurora::net::http::Method::Delete) +
+           static_cast<int>(aurora::net::http::ProgressPhase::Download) +
+           static_cast<int>(aurora::net::http::SinkFlow::Stop) +
+           static_cast<int>(aurora::net::http::HttpErrorClass::Cancelled) +
+           static_cast<int>(aurora::net::http::AuthScheme::Unsupported) +
+           static_cast<int>(aurora::ResourcePhase::Failed) + static_cast<int>(aurora::StreamPolicy::Replace) +
+           static_cast<int>(au::webview::WebViewMode::Snapshot);
 }
 
 /// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。
@@ -125,7 +134,7 @@ AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {
     std::vector<std::string> uncovered;
     std::size_t checked = 0;
     for (const auto &s : schemas) {
-        const auto *descriptors = s.find("prop_descriptors");
+        const auto *descriptors = s.find("props");
         if (descriptors == nullptr || !descriptors->is_array()) {
             continue;
         }

@@ -15,6 +15,12 @@ class LifecycleReadout : public au::LeafWidget {
     [[nodiscard]] auto describe() const -> au::WidgetDescriptor override {
         return au::WidgetDescriptor{.name = "LifecycleReadout", .children_policy = "none"};
     }
+    /// @brief 把最近一次绘出的两行读数一并序列化，使其可经 `/api/tree` 读取（无人值守取证用）。
+    auto serialize_props(au::Json &props) const -> void override {
+        au::LeafWidget::serialize_props(props);
+        props.set("window_state", last_state_);
+        props.set("window_mode", last_mode_);
+    }
 
   protected:
     auto on_layout(const au::Constraints &c, const au::BuildContext & /*ctx*/) -> au::Size override {
@@ -38,13 +44,6 @@ class LifecycleReadout : public au::LeafWidget {
         p.draw_text(au::Rect{.origin = au::Point{.x = b.origin.x + 12.0F, .y = b.origin.y + 40.0F},
                              .size = au::Size{.width = b.size.width - 24.0F, .height = th}},
                     "WindowMode = " + m, au::Font{.size_pt = 16.0F}, pal::AURORA_TEXT);
-    }
-
-    /// @brief 把最近一次绘出的两行读数一并序列化，使其可经 `/api/tree` 读取（无人值守取证用）。
-    auto serialize_props(au::Json &props) const -> void override {
-        au::LeafWidget::serialize_props(props);
-        props.set("window_state", last_state_);
-        props.set("window_mode", last_mode_);
     }
 
   private:

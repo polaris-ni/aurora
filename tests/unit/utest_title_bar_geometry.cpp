@@ -21,43 +21,51 @@ auto near_rect(const Rect &r, float x, float y, float w, float h) -> void {
 }  // namespace
 
 AURORA_TEST_CASE(adwaita_buttons_stack_right_to_left) {
-    // 默认 Adwaita：正方形边长 clamp(36-10,22,30)=26、间距 4、右缘外边距 8；
+    // 默认 Adwaita：正方形边长 clamp(36-6,26,34)=30、间距 3、右缘外边距 6（libadwaita
+    // `.default-decoration` 的「22dp 内容 + 4dp 外边距」与 `windowcontrols { border-spacing: 3px }`）；
     // 自右向左 close→max→min，垂直居中。
-    const TitleBarStyle style;
+    constexpr TitleBarStyle style;
     const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, true);
-    near_rect(g.close, 766.0F, 5.0F, 26.0F, 26.0F);
-    near_rect(g.maximize, 736.0F, 5.0F, 26.0F, 26.0F);
-    near_rect(g.minimize, 706.0F, 5.0F, 26.0F, 26.0F);
+    near_rect(g.close, 764.0F, 3.0F, 30.0F, 30.0F);
+    near_rect(g.maximize, 731.0F, 3.0F, 30.0F, 30.0F);
+    near_rect(g.minimize, 698.0F, 3.0F, 30.0F, 30.0F);
 }
 
 AURORA_TEST_CASE(adwaita_icon_and_title_bands) {
-    // 图标槽：边长 min(16, 36-20)=16、x=12、垂直居中；标题区从图标右 +8 到按钮组左 -8，
-    // 垂直全高（文字由绘制层居中）。
-    const TitleBarStyle style;
+    // 图标槽：边长 min(16, 36-20)=16、x=12、垂直居中；标题区为**整宽带**（Adwaita 档
+    // `center_title` 为默认 true，libadwaita `AdwHeaderBar` 标题即居中），居中由绘制层按
+    // 实测量宽完成，垂直方向同样由绘制层按行盒高居中。
+    constexpr TitleBarStyle style;
     const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, true);
     near_rect(g.icon, 12.0F, 10.0F, 16.0F, 16.0F);
-    near_rect(g.title, 36.0F, 0.0F, 662.0F, 36.0F);
+    near_rect(g.title, 0.0F, 0.0F, 800.0F, 36.0F);
 }
 
 AURORA_TEST_CASE(windows_buttons_seamless_full_height) {
-    // WinUI 布局：按钮宽 round(36*1.44)=52、整高、自右上角无缝向左排（无边距无间距）。
-    const TitleBarStyle style = TitleBarStyle::windows_dark();
+    // WinUI 布局（真机 DWM 口径）：按钮盒 46×32（预设显式钉值）、整高、自右上角无缝向左排
+    // （无边距无间距）；图标槽显式 16dp —— 栏高 32 时按栏高推导的 min(16, h-20) 会退化为 12，
+    // 故预设必须钉住这一项。
+    constexpr TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::WindowsDark);
     const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, true);
-    near_rect(g.close, 748.0F, 0.0F, 52.0F, 36.0F);
-    near_rect(g.maximize, 696.0F, 0.0F, 52.0F, 36.0F);
-    near_rect(g.minimize, 644.0F, 0.0F, 52.0F, 36.0F);
+    near_rect(g.close, 754.0F, 0.0F, 46.0F, 32.0F);
+    near_rect(g.maximize, 708.0F, 0.0F, 46.0F, 32.0F);
+    near_rect(g.minimize, 662.0F, 0.0F, 46.0F, 32.0F);
     // 相邻按钮右缘相接（无缝）。
     AURORA_TEST_CHECK_NEAR(g.maximize.right(), g.close.origin.x, 1e-4F);
     AURORA_TEST_CHECK_NEAR(g.minimize.right(), g.maximize.origin.x, 1e-4F);
-    // 标题区到按钮组左侧留 8。
-    near_rect(g.title, 36.0F, 0.0F, 600.0F, 36.0F);
+    // 图标槽 16dp 垂直居中：(32-16)/2 = 8。
+    near_rect(g.icon, 12.0F, 8.0F, 16.0F, 16.0F);
+    // 标题区从图标右侧 +8 起到按钮组左侧 -8，垂直全高。
+    near_rect(g.title, 36.0F, 0.0F, 618.0F, 32.0F);
 }
 
 AURORA_TEST_CASE(mac_traffic_lights_left_to_right) {
-    // macOS 布局：圆直径 clamp(36*0.4,11,14)=14、左缘外边距 8、间距 8，
+    // macOS 布局（**未钉值**的回落口径）：圆直径 clamp(36*0.4,11,14)=14、左缘外边距 8、间距 8，
     // 自左向右 close→min→max（macOS 顺序）；图标排按钮组右侧 +12。
+    // ⚠️ Mac 两档预设不走这组推导式（已钉 12 / 8 / 14），见下一条用例。
     TitleBarStyle style;
     style.button_layout = TitleBarButtonLayout::Mac;
+    style.center_title = false;  // 本用例测左对齐口径的标题镜像区（默认 true 会给整宽带）
     const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, true);
     near_rect(g.close, 8.0F, 11.0F, 14.0F, 14.0F);
     near_rect(g.minimize, 30.0F, 11.0F, 14.0F, 14.0F);
@@ -67,6 +75,21 @@ AURORA_TEST_CASE(mac_traffic_lights_left_to_right) {
     near_rect(g.title, 102.0F, 0.0F, 690.0F, 36.0F);
 }
 
+AURORA_TEST_CASE(mac_preset_pins_native_traffic_light_metrics) {
+    // Mac 预设把红绿灯几何钉到真机口径（栏高 28 / 直径 12 / 圆心距 20 ⇒ 间距 8、首枚圆心距
+    // 左缘 20 ⇒ 外边距 14），与上面那条「未钉值回落」用例刻意并存——两组数字不同正是钉值生效
+    // 的证据：沿用推导式在栏高 28 时会给出直径 clamp(11.2,11,14)=11.2、外边距 8，与真机差 43%。
+    constexpr TitleBarStyle style = TitleBarStyle::from_preset(CsdPreset::MacDark);
+    const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, true);
+    near_rect(g.close, 14.0F, 8.0F, 12.0F, 12.0F);
+    near_rect(g.minimize, 34.0F, 8.0F, 12.0F, 12.0F);
+    near_rect(g.maximize, 54.0F, 8.0F, 12.0F, 12.0F);
+    // 图标槽同样钉 16dp（栏高 28 时推导式 min(16, 8) 会退化成 8）。
+    near_rect(g.icon, 78.0F, 6.0F, 16.0F, 16.0F);
+    // Mac 预设置 center_title=true（macOS 窗口标题居中）⇒ 标题区是整宽带，居中由绘制层完成。
+    near_rect(g.title, 0.0F, 0.0F, 800.0F, 28.0F);
+}
+
 AURORA_TEST_CASE(hidden_buttons_do_not_reserve_space) {
     // 显式 show_*=false 的按钮返回空盒且不占位，其余按钮位置不变（右侧系自贴边排布，
     // 藏最左的最小化钮不影响 close/max；藏 close 则后继按钮向贴边侧收缩补位）。
@@ -74,29 +97,29 @@ AURORA_TEST_CASE(hidden_buttons_do_not_reserve_space) {
     style.show_minimize = false;
     const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, true);
     AURORA_TEST_CHECK_EQ(g.minimize.size.width, 0.0F);
-    near_rect(g.close, 766.0F, 5.0F, 26.0F, 26.0F);
-    near_rect(g.maximize, 736.0F, 5.0F, 26.0F, 26.0F);
+    near_rect(g.close, 764.0F, 3.0F, 30.0F, 30.0F);
+    near_rect(g.maximize, 731.0F, 3.0F, 30.0F, 30.0F);
 
     TitleBarStyle no_close;
     no_close.show_close = false;
     const TitleBarGeometry g2 = title_bar_geometry(800.0F, no_close, false, true);
     AURORA_TEST_CHECK_EQ(g2.close.size.width, 0.0F);
-    near_rect(g2.maximize, 766.0F, 5.0F, 26.0F, 26.0F);
-    near_rect(g2.minimize, 736.0F, 5.0F, 26.0F, 26.0F);
+    near_rect(g2.maximize, 764.0F, 3.0F, 30.0F, 30.0F);
+    near_rect(g2.minimize, 731.0F, 3.0F, 30.0F, 30.0F);
 }
 
 AURORA_TEST_CASE(non_resizable_hides_maximize_and_shifts_minimize) {
     // resizable=false：maximize 盒为空（自动隐藏），min 收缩进其让出的槽位。
-    const TitleBarStyle style;
+    constexpr TitleBarStyle style;
     const TitleBarGeometry g = title_bar_geometry(800.0F, style, false, false);
     AURORA_TEST_CHECK_NEAR(g.maximize.size.width, 0.0F, 1e-4F);
-    near_rect(g.close, 766.0F, 5.0F, 26.0F, 26.0F);
-    near_rect(g.minimize, 736.0F, 5.0F, 26.0F, 26.0F);
+    near_rect(g.close, 764.0F, 3.0F, 30.0F, 30.0F);
+    near_rect(g.minimize, 731.0F, 3.0F, 30.0F, 30.0F);
 }
 
 AURORA_TEST_CASE(maximized_flag_does_not_change_geometry) {
     // 头文件契约：maximized 只决定最大化/还原图标字形（绘制层消费），不影响任何按钮盒。
-    const TitleBarStyle style;
+    constexpr TitleBarStyle style;
     const TitleBarGeometry normal = title_bar_geometry(800.0F, style, false, true);
     const TitleBarGeometry maximized = title_bar_geometry(800.0F, style, true, true);
     AURORA_TEST_CHECK_TRUE(normal.close == maximized.close);
@@ -108,7 +131,9 @@ AURORA_TEST_CASE(maximized_flag_does_not_change_geometry) {
 
 AURORA_TEST_CASE(degenerate_and_squeezed_widths_yield_empty_bands) {
     // 退化输入：width<=0 全空几何（空盒约定 = width==0）。
-    const TitleBarStyle style;
+    // 左对齐口径（`center_title` 现默认为 true，居中档给整宽带、不参与「挤压退化」判据）。
+    TitleBarStyle style;
+    style.center_title = false;
     const TitleBarGeometry zero = title_bar_geometry(0.0F, style, false, true);
     AURORA_TEST_CHECK_NEAR(zero.close.size.width, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(zero.maximize.size.width, 0.0F, 1e-4F);
@@ -120,7 +145,7 @@ AURORA_TEST_CASE(degenerate_and_squeezed_widths_yield_empty_bands) {
     // 窄窗挤压：标题区 left>right 时退化为空盒，按钮盒仍按规则计算。
     const TitleBarGeometry narrow = title_bar_geometry(60.0F, style, false, true);
     AURORA_TEST_CHECK_NEAR(narrow.title.size.width, 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(narrow.close.origin.x, 26.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(narrow.close.origin.x, 24.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(center_title_uses_full_width_band) {
@@ -129,28 +154,35 @@ AURORA_TEST_CASE(center_title_uses_full_width_band) {
     style.center_title = true;
     const TitleBarGeometry g = title_bar_geometry(500.0F, style, false, true);
     near_rect(g.title, 0.0F, 0.0F, 500.0F, 36.0F);
-    near_rect(g.close, 466.0F, 5.0F, 26.0F, 26.0F);
-    near_rect(g.maximize, 436.0F, 5.0F, 26.0F, 26.0F);
-    near_rect(g.minimize, 406.0F, 5.0F, 26.0F, 26.0F);
+    near_rect(g.close, 464.0F, 3.0F, 30.0F, 30.0F);
+    near_rect(g.maximize, 431.0F, 3.0F, 30.0F, 30.0F);
+    near_rect(g.minimize, 398.0F, 3.0F, 30.0F, 30.0F);
 }
 
 AURORA_TEST_CASE(button_side_follows_height_clamps) {
-    // 高度驱动的尺寸规则：Adwaita 边长 clamp(h-10,22,30)；Windows 宽 round(h*1.44)；
+    // 高度驱动的尺寸规则：Adwaita 边长 clamp(h-6,26,34)；Windows 宽 round(h*1.44)；
     // Mac 直径 clamp(h*0.4,11,14)；图标槽 min(16, h-20)。
     TitleBarStyle adwaita;
     adwaita.height = 30.0F;
     const TitleBarGeometry small = title_bar_geometry(800.0F, adwaita, false, true);
-    near_rect(small.close, 770.0F, 4.0F, 22.0F, 22.0F);  // clamp(20,22,30)=22
+    near_rect(small.close, 768.0F, 2.0F, 26.0F, 26.0F);  // clamp(24,26,34)=26，右缘外边距 6
     near_rect(small.icon, 12.0F, 10.0F, 10.0F, 10.0F);  // min(16, 30-20)=10
 
     adwaita.height = 50.0F;
     const TitleBarGeometry large = title_bar_geometry(800.0F, adwaita, false, true);
-    near_rect(large.close, 762.0F, 10.0F, 30.0F, 30.0F);  // clamp(40,22,30)=30
+    near_rect(large.close, 760.0F, 8.0F, 34.0F, 34.0F);  // clamp(44,26,34)=34
 
-    TitleBarStyle windows = TitleBarStyle::windows_dark();
+    TitleBarStyle windows = TitleBarStyle::from_preset(CsdPreset::WindowsDark);
     windows.height = 40.0F;
+    windows.metrics.button_size = 0.0F;  // 归零覆盖值 → 走栏高推导路径（Windows 宽 = round(h*1.44)）
     const TitleBarGeometry win = title_bar_geometry(800.0F, windows, false, true);
     near_rect(win.close, 742.0F, 0.0F, 58.0F, 40.0F);  // round(57.6)=58
+
+    // 显式覆盖优先于栏高推导：预设已钉 button_size=46，即便 height=40 也保持 46（不复随栏高漂移）。
+    TitleBarStyle win_ov = TitleBarStyle::from_preset(CsdPreset::WindowsDark);
+    win_ov.height = 40.0F;  // 不归零 button_size（预设已置 46）
+    const TitleBarGeometry win_override = title_bar_geometry(800.0F, win_ov, false, true);
+    near_rect(win_override.close, 754.0F, 0.0F, 46.0F, 40.0F);
 
     TitleBarStyle mac;
     mac.height = 20.0F;

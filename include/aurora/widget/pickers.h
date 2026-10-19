@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -10,6 +11,7 @@
 #include "aurora/core/font.h"
 #include "aurora/core/string_util.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -135,6 +137,30 @@ class DatePicker : public Widget {
                      .enum_values = {},
                      .min_value = "1",
                      .max_value = "31"},
+                    {.name = "accent_color",
+                     .type = "Color",
+                     .default_value = "\"theme.primary\"",
+                     .required = false,
+                     .note = "Accent color (selected highlight, nav arrows, selected day)",
+                     .json_type = "array"},
+                    {.name = "text_color",
+                     .type = "Color",
+                     .default_value = "\"theme.on_surface\"",
+                     .required = false,
+                     .note = "Text color (title, unselected days)",
+                     .json_type = "array"},
+                    {.name = "background_color",
+                     .type = "Color",
+                     .default_value = "\"theme.surface\"",
+                     .required = false,
+                     .note = "Control background",
+                     .json_type = "array"},
+                    {.name = "border_color",
+                     .type = "Color",
+                     .default_value = "\"theme.on_surface_variant\"",
+                     .required = false,
+                     .note = "Control border",
+                     .json_type = "array"},
                 },
             .events = {"on_change"},
             .children_policy = "none",
@@ -162,6 +188,62 @@ class DatePicker : public Widget {
     /// @brief 月历视图所在月份。
     /// @return view_month_（1..12，随翻月导航变化）。
     [[nodiscard]] auto view_month() const -> int { return view_month_; }
+
+    // ---- 主题着色（未显式设色时跟随注入主题角色）----
+
+    /// @brief 设置强调色（链式）；用于选中高亮、翻月箭头与选中日数字。
+    /// @param c 强调色；缺省跟随主题 `primary`。
+    /// @return DatePicker 引用（链式调用）。
+    auto set_accent_color(Color c) -> DatePicker & {
+        accent_color_ = c;
+        return *this;
+    }
+    /// @brief 设置文本色（链式）；用于标题与未选中日数字。
+    /// @param c 文本色；缺省跟随主题 `on_surface`。
+    /// @return DatePicker 引用（链式调用）。
+    auto set_text_color(Color c) -> DatePicker & {
+        text_color_ = c;
+        return *this;
+    }
+    /// @brief 设置背景色（链式）；用于控件底。
+    /// @param c 背景色；缺省跟随主题 `surface`。
+    /// @return DatePicker 引用（链式调用）。
+    auto set_background_color(Color c) -> DatePicker & {
+        background_color_ = c;
+        return *this;
+    }
+    /// @brief 设置边框色（链式）；用于控件外描边。
+    /// @param c 边框色；缺省跟随主题 `on_surface_variant`。
+    /// @return DatePicker 引用（链式调用）。
+    auto set_border_color(Color c) -> DatePicker & {
+        border_color_ = c;
+        return *this;
+    }
+
+    /// @brief 解析生效强调色：未显式设色经 ctx 取主题 `primary`。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效强调色。
+    [[nodiscard]] auto resolve_accent_color(const BuildContext &ctx) const -> Color {
+        return accent_color_.value_or(inherit_theme(ctx).roles.primary);
+    }
+    /// @brief 解析生效文本色：未显式设色经 ctx 取主题 `on_surface`。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效文本色。
+    [[nodiscard]] auto resolve_text_color(const BuildContext &ctx) const -> Color {
+        return text_color_.value_or(inherit_theme(ctx).roles.on_surface);
+    }
+    /// @brief 解析生效背景色：未显式设色经 ctx 取主题 `surface`。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效背景色。
+    [[nodiscard]] auto resolve_background_color(const BuildContext &ctx) const -> Color {
+        return background_color_.value_or(inherit_theme(ctx).roles.surface);
+    }
+    /// @brief 解析生效边框色：未显式设色经 ctx 取主题 `on_surface_variant`。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效边框色。
+    [[nodiscard]] auto resolve_border_color(const BuildContext &ctx) const -> Color {
+        return border_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
+    }
 
     /// @brief 选中日期（非法忽略；触发 on_change 并同步视图年月）。
     /// @param d 目标日期。
@@ -254,6 +336,19 @@ class DatePicker : public Widget {
         props.set("year", d.year);
         props.set("month", d.month);
         props.set("day", d.day);
+        // 仅显式设置时输出主题着色色（保留「跟随主题」语义）。
+        if (accent_color_.has_value()) {
+            props.set("accent_color", color_to_json(*accent_color_));
+        }
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));
+        }
+        if (background_color_.has_value()) {
+            props.set("background_color", color_to_json(*background_color_));
+        }
+        if (border_color_.has_value()) {
+            props.set("border_color", color_to_json(*border_color_));
+        }
     }
 
     /// @brief 从属性 JSON 回填年/月/日（键均可选；合成日期合法才生效并同步视图年月）。
@@ -275,6 +370,19 @@ class DatePicker : public Widget {
             view_year_ = d.year;
             view_month_ = d.month;
         }
+        // 主题着色色反序列化（仅当显式提供）；缺省保留 nullopt → 跟随主题。
+        if (props.contains("accent_color")) {
+            accent_color_ = json_to_color(*props.at("accent_color"));
+        }
+        if (props.contains("text_color")) {
+            text_color_ = json_to_color(*props.at("text_color"));
+        }
+        if (props.contains("background_color")) {
+            background_color_ = json_to_color(*props.at("background_color"));
+        }
+        if (props.contains("border_color")) {
+            border_color_ = json_to_color(*props.at("border_color"));
+        }
     }
 
   protected:
@@ -282,24 +390,28 @@ class DatePicker : public Widget {
         return c.constrain(Size{.width = 224.0F, .height = AURORA_HEADER + (6.0F * 28.0F)});
     }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        const Color accent = resolve_accent_color(ctx);
+        const Color text = resolve_text_color(ctx);
+        const Color bg = resolve_background_color(ctx);
+        const Color border = resolve_border_color(ctx);
         Font f;
         f.size_pt = 12.0F;
-        p.fill_rect(bounds, Color(255, 255, 255, 255));
-        p.draw_rect(bounds, Color(210, 210, 215, 255));
+        p.fill_rect(bounds, bg);
+        p.draw_rect(bounds, border);
 
         // 头部：< 年-月 >
         const std::string title = internal::string_format("%04d-%02d", view_year_, view_month_);
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + 8.0F, .y = bounds.origin.y + 8.0F},
                          .size = Size{.width = AURORA_NAV_ZONE, .height = AURORA_HEADER - 16.0F}},
-                    "<", f, Color(0, 122, 255, 255));
+                    "<", f, accent);
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + (bounds.size.width * 0.5F) - 30.0F,
                                          .y = bounds.origin.y + 8.0F},
                          .size = Size{.width = 80.0F, .height = AURORA_HEADER - 16.0F}},
-                    title, f, Color(30, 30, 30, 255));
+                    title, f, text);
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + bounds.size.width - 16.0F, .y = bounds.origin.y + 8.0F},
                          .size = Size{.width = 12.0F, .height = AURORA_HEADER - 16.0F}},
-                    ">", f, Color(0, 122, 255, 255));
+                    ">", f, accent);
 
         // 网格
         const float cell_w = bounds.size.width / 7.0F;
@@ -317,11 +429,11 @@ class DatePicker : public Widget {
                     .size = Size{.width = cell_w, .height = cell_h}};
                 const bool is_sel = sel.year == view_year_ && sel.month == view_month_ && sel.day == day;
                 if (is_sel) {
-                    p.fill_rect(cell, Color(0, 122, 255, 40));
+                    p.fill_rect(cell, accent.with_alpha(40));
                 }
                 p.draw_text(Rect{.origin = Point{.x = cell.origin.x + 6.0F, .y = cell.origin.y + 5.0F},
                                  .size = Size{.width = cell_w - 8.0F, .height = cell_h - 8.0F}},
-                            std::to_string(day), f, is_sel ? Color(0, 122, 255, 255) : Color(40, 40, 45, 255));
+                            std::to_string(day), f, is_sel ? accent : text);
             }
         }
     }
@@ -352,6 +464,11 @@ class DatePicker : public Widget {
     int view_year_ = 2026;
     int view_month_ = 1;
     std::function<void(Date)> on_change_;
+
+    std::optional<Color> accent_color_;  ///< 强调色；空 = 跟随主题 primary
+    std::optional<Color> text_color_;  ///< 文本色；空 = 跟随主题 on_surface
+    std::optional<Color> background_color_;  ///< 背景色；空 = 跟随主题 surface
+    std::optional<Color> border_color_;  ///< 边框色；空 = 跟随主题 on_surface_variant
 };
 
 /// @brief 时间选择器：时/分两列上下调节。
@@ -405,6 +522,24 @@ class TimePicker : public Widget {
                      .enum_values = {},
                      .min_value = "0",
                      .max_value = "59"},
+                    {.name = "background_color",
+                     .type = "Color",
+                     .default_value = "\"theme.surface\"",
+                     .required = false,
+                     .note = "Control background",
+                     .json_type = "array"},
+                    {.name = "border_color",
+                     .type = "Color",
+                     .default_value = "\"theme.on_surface_variant\"",
+                     .required = false,
+                     .note = "Control border",
+                     .json_type = "array"},
+                    {.name = "text_color",
+                     .type = "Color",
+                     .default_value = "\"theme.on_surface\"",
+                     .required = false,
+                     .note = "Text color (time text)",
+                     .json_type = "array"},
                 },
             .events = {"on_change"},
             .children_policy = "none",
@@ -486,12 +621,65 @@ class TimePicker : public Widget {
     /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
+    // ---- 主题着色（未显式设色时跟随注入主题角色）----
+
+    /// @brief 设置背景色（链式）；用于控件底。
+    /// @param c 背景色；缺省跟随主题 `surface`。
+    /// @return TimePicker 引用（链式调用）。
+    auto set_background_color(Color c) -> TimePicker & {
+        background_color_ = c;
+        return *this;
+    }
+    /// @brief 设置边框色（链式）；用于控件外描边。
+    /// @param c 边框色；缺省跟随主题 `on_surface_variant`。
+    /// @return TimePicker 引用（链式调用）。
+    auto set_border_color(Color c) -> TimePicker & {
+        border_color_ = c;
+        return *this;
+    }
+    /// @brief 设置文本色（链式）；用于时刻文本。
+    /// @param c 文本色；缺省跟随主题 `on_surface`。
+    /// @return TimePicker 引用（链式调用）。
+    auto set_text_color(Color c) -> TimePicker & {
+        text_color_ = c;
+        return *this;
+    }
+
+    /// @brief 解析生效背景色：未显式设色经 ctx 取主题 `surface`。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效背景色。
+    [[nodiscard]] auto resolve_background_color(const BuildContext &ctx) const -> Color {
+        return background_color_.value_or(inherit_theme(ctx).roles.surface);
+    }
+    /// @brief 解析生效边框色：未显式设色经 ctx 取主题 `on_surface_variant`。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效边框色。
+    [[nodiscard]] auto resolve_border_color(const BuildContext &ctx) const -> Color {
+        return border_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
+    }
+    /// @brief 解析生效文本色：未显式设色经 ctx 取主题 `on_surface`。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效文本色。
+    [[nodiscard]] auto resolve_text_color(const BuildContext &ctx) const -> Color {
+        return text_color_.value_or(inherit_theme(ctx).roles.on_surface);
+    }
+
     /// @brief 序列化选中时/分到属性 JSON（先经基类写公共属性）。
     /// @param props 输出目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入公共属性
         props.set("hour", selected_.get().hour);
         props.set("minute", selected_.get().minute);
+        // 仅显式设置时输出主题着色色（保留「跟随主题」语义）。
+        if (background_color_.has_value()) {
+            props.set("background_color", color_to_json(*background_color_));
+        }
+        if (border_color_.has_value()) {
+            props.set("border_color", color_to_json(*border_color_));
+        }
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));
+        }
     }
 
     /// @brief 从属性 JSON 回填时/分（键均可选；合成时刻合法才生效）。
@@ -508,6 +696,16 @@ class TimePicker : public Widget {
         if (t.is_valid()) {
             selected_.set(t);
         }
+        // 主题着色色反序列化（仅当显式提供）；缺省保留 nullopt → 跟随主题。
+        if (props.contains("background_color")) {
+            background_color_ = json_to_color(*props.at("background_color"));
+        }
+        if (props.contains("border_color")) {
+            border_color_ = json_to_color(*props.at("border_color"));
+        }
+        if (props.contains("text_color")) {
+            text_color_ = json_to_color(*props.at("text_color"));
+        }
     }
 
   protected:
@@ -515,14 +713,17 @@ class TimePicker : public Widget {
         return c.constrain(Size{.width = 120.0F, .height = 72.0F});
     }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         Font f;
         f.size_pt = 18.0F;
-        p.fill_rect(bounds, Color(255, 255, 255, 255));
-        p.draw_rect(bounds, Color(210, 210, 215, 255));
+        const Color bg = resolve_background_color(ctx);
+        const Color border = resolve_border_color(ctx);
+        const Color text = resolve_text_color(ctx);
+        p.fill_rect(bounds, bg);
+        p.draw_rect(bounds, border);
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + 16.0F, .y = bounds.origin.y + 24.0F},
                          .size = Size{.width = bounds.size.width - 32.0F, .height = 28.0F}},
-                    selected_.get().to_string(), f, Color(30, 30, 30, 255));
+                    selected_.get().to_string(), f, text);
     }
 
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext & /*ctx*/) -> Widget * override {
@@ -532,6 +733,10 @@ class TimePicker : public Widget {
   private:
     State<TimeOfDay> selected_{TimeOfDay{}};
     std::function<void(TimeOfDay)> on_change_;
+
+    std::optional<Color> background_color_;  ///< 背景色；空 = 跟随主题 surface
+    std::optional<Color> border_color_;  ///< 边框色；空 = 跟随主题 on_surface_variant
+    std::optional<Color> text_color_;  ///< 文本色；空 = 跟随主题 on_surface
 };
 
 /// @brief 颜色选择器：预设色板网格选择。
@@ -568,6 +773,12 @@ class ColorPicker : public Widget {
                      .default_value = "black",
                      .required = false,
                      .note = "Selection color",
+                     .json_type = "array"},
+                    {.name = "accent_color",
+                     .type = "Color",
+                     .default_value = "\"theme.primary\"",
+                     .required = false,
+                     .note = "Accent color (selected swatch highlight)",
                      .json_type = "array"},
                 },
             .events = {"on_change"},
@@ -667,11 +878,32 @@ class ColorPicker : public Widget {
     /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
 
+    // ---- 主题着色（未显式设色时跟随注入主题角色）----
+
+    /// @brief 设置强调色（链式）；用于选中色板格的高亮描边。
+    /// @param c 强调色；缺省跟随主题 `primary`。
+    /// @return ColorPicker 引用（链式调用）。
+    auto set_accent_color(Color c) -> ColorPicker & {
+        accent_color_ = c;
+        return *this;
+    }
+
+    /// @brief 解析生效强调色：未显式设色经 ctx 取主题 `primary`。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效强调色。
+    [[nodiscard]] auto resolve_accent_color(const BuildContext &ctx) const -> Color {
+        return accent_color_.value_or(inherit_theme(ctx).roles.primary);
+    }
+
     /// @brief 序列化选中颜色到属性 JSON（先经基类写公共属性）。
     /// @param props 输出目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入公共属性
         props.set("color", color_to_json(selected_.get()));
+        // 仅显式设置时输出强调色（保留「跟随主题」语义）。
+        if (accent_color_.has_value()) {
+            props.set("accent_color", color_to_json(*accent_color_));
+        }
     }
 
     /// @brief 从属性 JSON 的 color 键回填选中色（键缺失则不动）。
@@ -680,6 +912,10 @@ class ColorPicker : public Widget {
         Widget::deserialize_props(props);
         if (props.contains("color")) {
             selected_.set(json_to_color(*props.at("color")));
+        }
+        // 强调色反序列化（仅当显式提供）；缺省保留 nullopt → 跟随主题 primary。
+        if (props.contains("accent_color")) {
+            accent_color_ = json_to_color(*props.at("accent_color"));
         }
     }
 
@@ -692,9 +928,10 @@ class ColorPicker : public Widget {
         return c.constrain(Size{.width = cell * AURORA_COLS, .height = cell * static_cast<float>(rows)});
     }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         const auto &pal = palette();
         const float cell = bounds.size.width / AURORA_COLS;
+        const Color accent = resolve_accent_color(ctx);
         const Color sel = selected_.get();
         for (std::size_t i = 0; i < pal.size(); ++i) {
             const int col = static_cast<int>(i) % static_cast<int>(AURORA_COLS);
@@ -704,7 +941,7 @@ class ColorPicker : public Widget {
                               .size = Size{.width = cell - 4.0F, .height = cell - 4.0F}};
             p.fill_rect(swatch, pal[i]);
             const bool is_sel = pal[i].r == sel.r && pal[i].g == sel.g && pal[i].b == sel.b;
-            p.draw_rect(swatch, is_sel ? Color(0, 122, 255, 255) : Color(200, 200, 205, 255));
+            p.draw_rect(swatch, is_sel ? accent : Color(200, 200, 205, 255));
         }
     }
 
@@ -718,6 +955,7 @@ class ColorPicker : public Widget {
     State<Color> selected_{Color(0, 0, 0, 255)};
     std::vector<Color> palette_;
     std::function<void(Color)> on_change_;
+    std::optional<Color> accent_color_;  ///< 强调色；空 = 跟随主题 primary
 };
 
 }  // namespace aurora

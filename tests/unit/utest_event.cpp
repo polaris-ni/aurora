@@ -39,8 +39,22 @@ AURORA_TEST_CASE(event_defaults_and_handled_flag) {
     const TextInputEvent text{};
     AURORA_TEST_CHECK(text.text.empty());
 
-    const FileDropEvent drop{};
-    AURORA_TEST_CHECK(drop.paths.empty());
+    const SystemDropEvent drop{};
+    AURORA_TEST_CHECK(drop.formats.empty());
+    AURORA_TEST_CHECK_EQ(drop.phase, SystemDropPhase::Drop);  // 默认态 = drop（程序化构造的常态）
+    AURORA_TEST_CHECK_EQ(drop.proposed, DragAction::None);
+    AURORA_TEST_CHECK_EQ(drop.allowed, DragAction::None);
+    AURORA_TEST_CHECK(drop.payload == nullptr);  // 未携带载荷：读取按空口径返回
+
+    // 无载荷时的便利读取一律为空口径（空内容不是失败），且不得崩溃。
+    AURORA_TEST_REQUIRE(drop.files().ok());
+    AURORA_TEST_CHECK(drop.files().value().empty());
+    AURORA_TEST_REQUIRE(drop.text().ok());
+    AURORA_TEST_CHECK(drop.text().value().empty());
+    AURORA_TEST_REQUIRE(drop.image().ok());
+    AURORA_TEST_CHECK_EQ(drop.image().value().width, 0);
+    AURORA_TEST_REQUIRE(drop.bytes("text/plain").ok());
+    AURORA_TEST_CHECK(drop.bytes("text/plain").value().empty());
 
     const TouchPoint point{};
     AURORA_TEST_CHECK_EQ(point.id, 0);

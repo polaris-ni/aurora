@@ -53,7 +53,7 @@
 #if !defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID)
 #error "aurora_verify_wayland_ime can only be built on Linux (AURORA_PLATFORM_LINUX)"
 #endif
-#if !defined(AURORA_BACKEND_WAYLAND)
+#ifndef AURORA_BACKEND_WAYLAND
 #error "AURORA_BACKEND_WAYLAND must be enabled"
 #endif
 
@@ -74,12 +74,16 @@ namespace {
 
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
-int failures = 0;
+/// 失败计数：函数局部静态 + 访问器收敛（探针退出码的依据），避免命名空间级可变全局量。
+auto failures() -> int & {
+    static int count = 0;
+    return count;
+}
 
 auto check(bool ok, const std::string &label) -> void {
     emit(std::string("[") + (ok ? "PASS" : "FAIL") + "] " + label);
     if (!ok) {
-        ++failures;
+        ++failures();
     }
 }
 
@@ -112,6 +116,9 @@ auto pump_until(aurora::WaylandSurface &surface, const std::function<bool()> &do
 
 }  // namespace
 
+// 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现，捕获反而把失败压成 0。
+// 口径与 tools/verify/ 其余探针、examples/ 各 demo 入口同。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     const auto cli = aurora_verify::parse_interactive("Wayland text-input-v3 IME bridge live probe", argc, argv);
     if (!cli.arguments) {
@@ -181,8 +188,8 @@ auto main(int argc, char **argv) -> int {
                 surface.wait_events(50.0);
             }
         }
-        emit(failures > 0 ? "FAILURES PRESENT (" + std::to_string(failures) + ")" : "ALL AUTOMATED CHECKS PASS");
-        return failures > 0 ? 4 : 0;
+        emit(failures() > 0 ? "FAILURES PRESENT (" + std::to_string(failures()) + ")" : "ALL AUTOMATED CHECKS PASS");
+        return failures() > 0 ? 4 : 0;
     }
 
     // ---- ③ 绑定链 ----
@@ -196,7 +203,8 @@ auto main(int argc, char **argv) -> int {
 
     // provider：非零插入点盒（=宿主判定「焦点在文本控件」）。真实应用里由 WindowHost 接线，
     // 探针直接模拟该激励——enable 判据只依赖「provider 报盒」，不依赖控件树。
-    aurora::Rect caret_box{aurora::Point{64.0F, 96.0F}, aurora::Size{8.0F, 20.0F}};
+    aurora::Rect caret_box{.origin = aurora::Point{.x = 64.0F, .y = 96.0F},
+                           .size = aurora::Size{.width = 8.0F, .height = 20.0F}};
     surface.set_composition_caret_provider([&caret_box] { return caret_box; });
 
     const bool entered =
@@ -223,7 +231,8 @@ auto main(int argc, char **argv) -> int {
         const bool disabled = pump_until(surface, [&surface] { return !surface.text_input_state().enabled; }, 500);
         check(disabled && surface.text_input_state().commits > commits_after_enable,
               "caret rectangle zeroed -> disable+commit sent (enabled flips false)");
-        caret_box = aurora::Rect{aurora::Point{64.0F, 96.0F}, aurora::Size{8.0F, 20.0F}};
+        caret_box = aurora::Rect{.origin = aurora::Point{.x = 64.0F, .y = 96.0F},
+                                 .size = aurora::Size{.width = 8.0F, .height = 20.0F}};
         const bool re_enabled = pump_until(surface, [&surface] { return surface.text_input_state().enabled; }, 500);
         check(re_enabled, "non-zero rectangle again -> enable sent once more (reversible, no stickiness)");
     }
@@ -250,8 +259,8 @@ auto main(int argc, char **argv) -> int {
         }
     }
 
-    if (failures > 0) {
-        emit("FAILURES PRESENT (" + std::to_string(failures) + ")");
+    if (failures() > 0) {
+        emit("FAILURES PRESENT (" + std::to_string(failures()) + ")");
         return 4;
     }
     emit("ALL AUTOMATED CHECKS PASS");

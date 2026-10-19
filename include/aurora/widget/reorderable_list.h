@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -79,6 +78,8 @@ class ReorderableList : public Container {
           gap_(gap < 0.0F ? (Diagnostics::degraded("layout", "ReorderableList gap is negative, degraded to 0"), 0.0F)
                           : gap) {
         // 落位动画与近边缘 auto-scroll 均由每帧 tick 驱动（同 Dismissible/ToastHost 模式）。
+        // 基类 Widget 成员不能进派生类初始化列表，只能在构造体内置位。
+        // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
         needs_gesture_tick_ = true;
         rebuild_if_needed();  // 构造即按当前数据量实例化子项
     }
@@ -403,7 +404,7 @@ class ReorderableList : public Container {
         if (tops_.empty()) {
             return -1;
         }
-        const auto it = std::upper_bound(tops_.begin(), tops_.end(), y);
+        const auto it = std::ranges::upper_bound(tops_, y);
         const auto idx = static_cast<std::ptrdiff_t>(it - tops_.begin()) - 1;
         return static_cast<int>(std::clamp<std::ptrdiff_t>(idx, 0, static_cast<std::ptrdiff_t>(tops_.size()) - 1));
     }
@@ -466,7 +467,7 @@ class ReorderableList : public Container {
     /// @brief 落位动画的弹簧参数（默认 `SpringDescription{}`）。
     /// @param spring 新的弹簧参数。
     /// @return 自身引用（链式）。
-    auto set_spring(SpringDescription spring) -> ReorderableList & {
+    auto set_spring(const SpringDescription &spring) -> ReorderableList & {
         spring_ = spring;
         return *this;
     }
@@ -636,6 +637,100 @@ class ReorderableList : public Container {
     /// @return 恒为 false。
     [[nodiscard]] auto can_cache_layout() const -> bool override { return false; }
 
+    /// @brief 键盘重排按键入口：`↑`/`↓` 移光标（抓取态下即挪目标位）、`Home`/`End` 跳首末、
+    ///        `Space`/`Enter` 抓取 ⇄ 落位、`Esc` 取消。
+    ///
+    /// 与基类默认实现的关键差别：**未认领的按键不置 `is_handled`**，以便派发器把方向键回落给
+    /// 几何焦点导航、把 Enter/Space 回落给 `activate()`、把「未抓取时的 Esc」留给页面级返回。
+    /// 指针拖拽 / 落位动画期间整条键盘路径让路（两套换位通道不并存，避免数据被双写）。
+    /// @param e 键盘事件（认领时置 is_handled）。
+    auto on_key_event(KeyEvent &e) -> void override {
+        if (!keyboard_reorder_ || e.action != KeyAction::Down || children_.empty() || drag_state_ != DragState::Idle) {
+            return;
+        }
+        const int n = static_cast<int>(children_.size());
+        switch (static_cast<KeyCode>(e.key)) {
+            case KeyCode::ArrowUp:
+                move_keyboard_cursor(-1);
+                e.is_handled = true;
+                return;
+            case KeyCode::ArrowDown:
+                move_keyboard_cursor(1);
+                e.is_handled = true;
+                return;
+            case KeyCode::Home:
+                set_keyboard_index(0);
+                e.is_handled = true;
+                return;
+            case KeyCode::End:
+                set_keyboard_index(n - 1);
+                e.is_handled = true;
+                return;
+            case KeyCode::Space:
+            case KeyCode::Enter:
+                if (keyboard_grabbed_) {
+                    drop_keyboard_item();
+                } else {
+                    grab_keyboard_item();
+                }
+                e.is_handled = true;
+                return;
+            case KeyCode::Escape:
+                if (cancel_keyboard_grab()) {
+                    e.is_handled = true;
+                }
+                return;
+            default:
+                return;  // 其余按键交回派发器默认语义
+        }
+    }
+
+    /// @brief 获焦：光标未定位时落到**首个可见项**（并播报位置，读屏一进列表即知当前项）；
+    ///        失焦：撤销未落位的抓取（数据未变，光标回原位）。
+    ///
+    /// 故意不落到 index 0：获焦不是滚动请求。若在此 `ensure_index_visible(0)`，一个已由
+    /// `restore_key` 恢复到中段的列表会在获焦瞬间被拽回顶部（`itest_reorder` 曾以此抓到回归）。
+    /// @param focused 是否刚获得焦点（false = 失焦）。
+    auto on_focus_change(bool focused) -> void override {
+        Container::on_focus_change(focused);
+        if (!focused) {
+            cancel_keyboard_grab();
+            return;
+        }
+        if (!keyboard_reorder_ || keyboard_index_ >= 0 || children_.empty()) {
+            return;
+        }
+        const int n = static_cast<int>(children_.size());
+        keyboard_index_ = std::clamp(visible_range().first, 0, n - 1);
+        mark_needs_paint();
+        announce_position();
+    }
+
+    /// @brief 指针事件入口：先驱动本控件拖拽状态机，拖拽 / 落位期间消费事件，否则交回容器修饰链。
+    /// @param e 鼠标事件。
+    auto on_pointer_event(MouseEvent &e) -> void override {
+        handle_pointer(e);
+        // 拖拽 / 落位中消费事件（父级与子项都不再响应点击）。
+        if (is_dragging() || is_settling()) {
+            e.is_handled = true;
+        } else {
+            Container::on_pointer_event(e);  // 修饰链（Clickable 等）照常
+        }
+    }
+
+    /// @brief 触摸事件入口：原始触点只走容器修饰链；拖拽由派发器按每个触点合成的 MouseEvent 驱动。
+    /// @param e 触摸事件。
+    auto on_pointer_event(TouchEvent &e) -> void override {
+        // 原始触点只走修饰链：拖拽由派发器按每个触点**合成的 MouseEvent** 驱动（与
+        // Draggable / LongPress 的既有语义一致）。若在此再喂同一个识别器，两条通道会互相
+        // 覆盖 delta/轴锁定状态（识别器是单指针状态机）。
+        if (is_dragging() || is_settling()) {
+            e.is_handled = true;
+            return;
+        }
+        Container::on_pointer_event(e);
+    }
+
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         rebuild_if_needed();  // 布局前按当前数据量补实例化
@@ -763,100 +858,6 @@ class ReorderableList : public Container {
         on_tick(now);
     }
 
-    /// @brief 键盘重排按键入口：`↑`/`↓` 移光标（抓取态下即挪目标位）、`Home`/`End` 跳首末、
-    ///        `Space`/`Enter` 抓取 ⇄ 落位、`Esc` 取消。
-    ///
-    /// 与基类默认实现的关键差别：**未认领的按键不置 `is_handled`**，以便派发器把方向键回落给
-    /// 几何焦点导航、把 Enter/Space 回落给 `activate()`、把「未抓取时的 Esc」留给页面级返回。
-    /// 指针拖拽 / 落位动画期间整条键盘路径让路（两套换位通道不并存，避免数据被双写）。
-    /// @param e 键盘事件（认领时置 is_handled）。
-    auto on_key_event(KeyEvent &e) -> void override {
-        if (!keyboard_reorder_ || e.action != KeyAction::Down || children_.empty() || drag_state_ != DragState::Idle) {
-            return;
-        }
-        const int n = static_cast<int>(children_.size());
-        switch (static_cast<KeyCode>(e.key)) {
-            case KeyCode::ArrowUp:
-                move_keyboard_cursor(-1);
-                e.is_handled = true;
-                return;
-            case KeyCode::ArrowDown:
-                move_keyboard_cursor(1);
-                e.is_handled = true;
-                return;
-            case KeyCode::Home:
-                set_keyboard_index(0);
-                e.is_handled = true;
-                return;
-            case KeyCode::End:
-                set_keyboard_index(n - 1);
-                e.is_handled = true;
-                return;
-            case KeyCode::Space:
-            case KeyCode::Enter:
-                if (keyboard_grabbed_) {
-                    drop_keyboard_item();
-                } else {
-                    grab_keyboard_item();
-                }
-                e.is_handled = true;
-                return;
-            case KeyCode::Escape:
-                if (cancel_keyboard_grab()) {
-                    e.is_handled = true;
-                }
-                return;
-            default:
-                return;  // 其余按键交回派发器默认语义
-        }
-    }
-
-    /// @brief 获焦：光标未定位时落到**首个可见项**（并播报位置，读屏一进列表即知当前项）；
-    ///        失焦：撤销未落位的抓取（数据未变，光标回原位）。
-    ///
-    /// 故意不落到 index 0：获焦不是滚动请求。若在此 `ensure_index_visible(0)`，一个已由
-    /// `restore_key` 恢复到中段的列表会在获焦瞬间被拽回顶部（`itest_reorder` 曾以此抓到回归）。
-    /// @param focused 是否刚获得焦点（false = 失焦）。
-    auto on_focus_change(bool focused) -> void override {
-        Container::on_focus_change(focused);
-        if (!focused) {
-            cancel_keyboard_grab();
-            return;
-        }
-        if (!keyboard_reorder_ || keyboard_index_ >= 0 || children_.empty()) {
-            return;
-        }
-        const int n = static_cast<int>(children_.size());
-        keyboard_index_ = std::clamp(visible_range().first, 0, n - 1);
-        mark_needs_paint();
-        announce_position();
-    }
-
-    /// @brief 指针事件入口：先驱动本控件拖拽状态机，拖拽 / 落位期间消费事件，否则交回容器修饰链。
-    /// @param e 鼠标事件。
-    auto on_pointer_event(MouseEvent &e) -> void override {
-        handle_pointer(e);
-        // 拖拽 / 落位中消费事件（父级与子项都不再响应点击）。
-        if (is_dragging() || is_settling()) {
-            e.is_handled = true;
-        } else {
-            Container::on_pointer_event(e);  // 修饰链（Clickable 等）照常
-        }
-    }
-
-    /// @brief 触摸事件入口：原始触点只走容器修饰链；拖拽由派发器按每个触点合成的 MouseEvent 驱动。
-    /// @param e 触摸事件。
-    auto on_pointer_event(TouchEvent &e) -> void override {
-        // 原始触点只走修饰链：拖拽由派发器按每个触点**合成的 MouseEvent** 驱动（与
-        // Draggable / LongPress 的既有语义一致）。若在此再喂同一个识别器，两条通道会互相
-        // 覆盖 delta/轴锁定状态（识别器是单指针状态机）。
-        if (is_dragging() || is_settling()) {
-            e.is_handled = true;
-            return;
-        }
-        Container::on_pointer_event(e);
-    }
-
   private:
     // ---- 绘制辅助 ----
 
@@ -921,7 +922,7 @@ class ReorderableList : public Container {
     }
 
     /// @brief 按 restore_key 把当前偏移写回 ScrollStorage（无键则 no-op）。
-    auto write_back_offset() -> void {
+    auto write_back_offset() const -> void {
         if (restore_key_.empty()) {
             return;
         }
@@ -1012,7 +1013,7 @@ class ReorderableList : public Container {
     /// @brief 被拖项抬升（自绘阴影；不污染子项修饰链，裁决 16）。
     /// @param p 绘制器。
     /// @param global 被拖项全局矩形。
-    auto paint_drag_shadow(Painter &p, const Rect &global, const Rect & /*local*/) -> void {
+    static auto paint_drag_shadow(Painter &p, const Rect &global, const Rect & /*local*/) -> void {
         p.draw_shadow(global, 0.0F, 6.0F, 12.0F, Color(0, 0, 0, 70));  // 抬升阴影参数：海拔/模糊/半透明黑
     }
 
@@ -1040,7 +1041,7 @@ class ReorderableList : public Container {
     /// @param p 绘制器。
     /// @param bounds 本控件全局矩形。
     /// @param ctx 构建上下文（取主题色）。
-    auto paint_keyboard_cursor(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
+    auto paint_keyboard_cursor(Painter &p, const Rect &bounds, const BuildContext &ctx) const -> void {
         if (!keyboard_reorder_ || keyboard_index_ < 0 || (!is_focused() && !keyboard_grabbed_)) {
             return;
         }
@@ -1051,7 +1052,7 @@ class ReorderableList : public Container {
         const Rect global{.origin = bounds.origin + local.origin, .size = local.size};
         p.draw_rounded_border(global, AURORA_CURSOR_RING_RADIUS,
                               keyboard_grabbed_ ? AURORA_CURSOR_GRABBED_THICKNESS : AURORA_CURSOR_THICKNESS,
-                              inherit_theme(ctx).primary);
+                              inherit_theme(ctx).roles.primary);
     }
 
     /// @brief 相对移动光标；未定位时 `+1` 落到首项、`-1` 落到末项（与列表类控件的键盘习惯一致）。
@@ -1080,7 +1081,7 @@ class ReorderableList : public Container {
     }
 
     /// @brief 播报光标位置（「位置 i / 共 n 项」）——读屏在纯浏览态也得到反馈。
-    auto announce_position() -> void {
+    auto announce_position() const -> void {
         if (keyboard_index_ < 0) {
             return;
         }

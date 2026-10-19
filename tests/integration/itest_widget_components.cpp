@@ -7,7 +7,6 @@
 /// （低阶 FlexLayouter 语义由 utest_flex_layouter 覆盖）
 
 #include <chrono>
-#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -31,7 +30,6 @@
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
-#include "framework/json_literals.h"
 
 namespace aurora::test_cases::itest_widget_components {
 using aurora::testing::require_child;
@@ -42,7 +40,7 @@ namespace {
 
 /// 挂载 + 布局 + 绘制一遍（控件独立渲染的最小驱动）。
 auto render_tree(Widget &w, float ww, float hh) -> void {
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     w.mount(ctx);
     const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = ww, .height = hh}};
     w.layout(cc, ctx);
@@ -136,8 +134,8 @@ AURORA_TEST_CASE(align_in_column_centers_cross_axis_without_stealing_main_space)
 
     // 绘制盒与命中盒同源：居中的 120×40 子盒（x 140..260）内命中该 Text，
     // 展开行两端（左 0..140、右 260..400）的空白命不中任何控件。
-    const BuildContext ctx;
-    const Rect root_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
+    constexpr BuildContext ctx;
+    constexpr Rect root_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
     Widget *on_block = col.hit_test(Point{.x = 200.0F, .y = 20.0F}, root_box, ctx);
     Widget *on_left_gutter = col.hit_test(Point{.x = 20.0F, .y = 20.0F}, root_box, ctx);
     Widget *on_right_gutter = col.hit_test(Point{.x = 380.0F, .y = 20.0F}, root_box, ctx);
@@ -154,8 +152,8 @@ AURORA_TEST_CASE(align_hit_box_shrinks_for_clickable_widget) {
     Column col{Node{std::move(tappable)}};
     render_tree(col, 400.0F, 60.0F);
 
-    const BuildContext ctx;
-    const Rect root_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 60.0F}};
+    constexpr BuildContext ctx;
+    constexpr Rect root_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 60.0F}};
     AURORA_TEST_CHECK_TRUE(col.hit_test(Point{.x = 200.0F, .y = 20.0F}, root_box, ctx) != nullptr);
     AURORA_TEST_CHECK_EQ(col.hit_test(Point{.x = 380.0F, .y = 20.0F}, root_box, ctx), nullptr);
 }
@@ -232,7 +230,7 @@ AURORA_TEST_CASE(logical_snapshot_and_pixels_are_deterministic) {
 
     // 像素确定性：同树两次栅格化结果一致。
     auto render_pixels = [](Widget &w, int ww, int hh) -> std::vector<std::uint8_t> {
-        const BuildContext ctx;
+        constexpr BuildContext ctx;
         w.mount(ctx);
         const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F},
                             .max = Size{.width = static_cast<float>(ww), .height = static_cast<float>(hh)}};
@@ -259,17 +257,18 @@ AURORA_TEST_CASE(column_row_alignment_and_props_roundtrip) {
     // Widget 层：Column/Row 经 set_main_axis_size 透传 flex.main_axis_size，撑满父级。
     Column col{Node{Text{"a"}}, Node{Text{"b"}}};
     col.set_main_axis_size(MainAxisSize::Max);
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     col.mount(ctx);
-    const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 200.0F}};
+    constexpr Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
+                             .max = Size{.width = 100.0F, .height = 200.0F}};
     const Size s = col.layout(cc, ctx);
     AURORA_TEST_CHECK_NEAR(s.height, 200.0F, 1e-3F);
 
     Row row{Node{Text{"a"}}, Node{Text{"b"}}};
     row.set_main_axis_size(MainAxisSize::Max);
-    const BuildContext rctx;
+    constexpr BuildContext rctx;
     row.mount(rctx);
-    const Constraints rc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 200.0F, .height = 50.0F}};
+    constexpr Constraints rc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 200.0F, .height = 50.0F}};
     const Size rs = row.layout(rc, rctx);
     AURORA_TEST_CHECK_NEAR(rs.width, 200.0F, 1e-3F);
 

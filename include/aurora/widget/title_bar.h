@@ -157,7 +157,7 @@ class TitleBar : public Widget {
         return *this;
     }
     /// @brief 整体替换配色/尺寸风格。
-    /// @param s 标题栏风格（TitleBarStyle，默认 adwaita_dark）
+    /// @param s 标题栏风格（TitleBarStyle，默认即 CsdPreset::AdwaitaDark 基准）
     /// @return 自身引用（链式调用）
     auto set_style(const TitleBarStyle &s) -> TitleBar & {
         style_ = s;
@@ -615,7 +615,7 @@ class TitleBar : public Widget {
     std::vector<TitleBarAction> actions_;
     std::vector<TitleBarAction> snap_actions_;  ///< Snap 弹窗自定义追加项
     bool window_controls_ = true;
-    TitleBarStyle style_{};  ///< 默认 adwaita_dark（含 height=36）
+    TitleBarStyle style_{};  ///< 默认 = CsdPreset::AdwaitaDark 基准（含 height=36）
     TitleBarGeometry geom_{};  ///< 布局期缓存（paint/hit 共用）
     std::vector<Rect> action_rects_;  ///< 布局期缓存
     const Environment *env_ = nullptr;  ///< 事件阶段读 WindowChrome（on_layout 时刷新）

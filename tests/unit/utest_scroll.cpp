@@ -9,7 +9,6 @@
 /// 仅在 AURORA_ENABLE_PROFILING=ON 时生效，否则注册为 skip）
 
 #include <chrono>
-#include <cstddef>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -1109,7 +1108,7 @@ AURORA_TEST_CASE(hit_node_origin_equals_independently_recomputed_window_position
     AURORA_TEST_REQUIRE(!chain.empty());
 
     const auto it = std::ranges::find_if(
-        chain, [&f, idx](const HitNode &n) -> bool { return n.ptr == static_cast<Widget *>(f.rows[idx].get()); });
+        chain, [&f](const HitNode &n) -> bool { return n.ptr == static_cast<Widget *>(f.rows[idx].get()); });
     AURORA_TEST_REQUIRE(it != chain.end());
     // 独立复算真窗口位：该行盒顶 = 内容 y − offset_y_（视口是根，原点 0）。
     const float expected_window_y = (static_cast<float>(idx) * AURORA_ROW_H) - f.scroll->offset_y();
@@ -1127,7 +1126,7 @@ AURORA_TEST_CASE(hit_node_origin_agrees_with_window_bounds) {
     const float local_y = (static_cast<float>(idx) * AURORA_ROW_H) - f.scroll->offset_y() + (AURORA_ROW_H * 0.5F);
     const auto chain = f.scroll->hit_test_chain(Point{.x = 10.0F, .y = local_y}, g27_viewport(), BuildContext{});
     const auto it = std::ranges::find_if(
-        chain, [&f, idx](const HitNode &n) -> bool { return n.ptr == static_cast<Widget *>(f.rows[idx].get()); });
+        chain, [&f](const HitNode &n) -> bool { return n.ptr == static_cast<Widget *>(f.rows[idx].get()); });
     AURORA_TEST_REQUIRE(it != chain.end());
     const Rect wb = require_value(f.rows[idx]->window_bounds());
     AURORA_TEST_CHECK(it->origin.y == wb.origin.y);  // 容差 0：逐位相等

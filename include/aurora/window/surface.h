@@ -16,7 +16,9 @@
 #include "aurora/event/event.h"
 #include "aurora/render/painter.h"
 #include "aurora/render/png.h"
+#include "aurora/theming/color_scheme.h"
 #include "aurora/window/title_bar_style.h"
+#include "aurora/window/window_frame_style.h"
 #include "aurora/window/window_state.h"
 
 namespace aurora {
@@ -80,6 +82,7 @@ struct WindowStyleOptions {
     Size min_size{.width = 0.0F, .height = 0.0F};  ///< 最小逻辑尺寸（0 = 不限）
     Size max_size{.width = 0.0F, .height = 0.0F};  ///< 最大逻辑尺寸（0 = 不限）
     TitleBarStyle title_bar{};  ///< CSD 自绘标题栏样式（Wayland/X11 等客户端装饰后端使用）
+    WindowFrameStyle frame{};  ///< CSD 自绘窗框样式（投影厚度/基色/模糊与外轮廓圆角）
 };
 
 /// @brief 表面抽象：平台窗口/画布的绘制目标（ARCHITECTURE.md §4.3 `Surface`，<<platform impl>>）。
@@ -151,6 +154,34 @@ class Surface {
     /// 供后台线程（如 `au::async` 回投主线程）在投递工作后调用；默认空实现
     /// （默认 `wait_events` 为分段 sleep，最迟 1000ms 自然醒，不丢事件仅延迟）。
     virtual auto request_wake() -> void {}
+
+    /// @brief 附加事件源的待监听条目（语义同 AT-SPI 桥的 `WatchFd`）。
+    ///
+    /// 存在的理由：宿主侧可能挂载自带事件循环的扩展（如 WebView 引擎的 GLib 主上下文），
+    /// 其 fd 必须并入本后端的 `wait_events` 等待集，否则扩展事件最迟要等 1000ms 分段兜底
+    /// 才被处理（交互场景不可接受）。条目由宿主经 `set_extra_event_source` 的 provider
+    /// 现取（事件源随引擎挂载/卸载动态变化，不缓存）。
+    struct ExtraWatch {
+        int fd = -1;  ///< 待监听的文件描述符（< 0 跳过）
+        bool readable = true;  ///< 是否关心可读事件
+        bool writable = false;  ///< 是否关心可写事件
+    };
+
+    // 豁免 performance-unnecessary-value-param：按值收参系刻意设计——两个后端 override 均以
+    // std::move 将参数转存成员（见 x11_surface.cpp 与 wayland_surface.cpp 的对应实现），按值即
+    // 「调用方临时量零拷贝移交」；且本函数是安装 / 卸载期少量调用的公共虚拟签名，改为常量引用会
+    // 破坏外部后端 override 的源码兼容并额外强制一次拷贝。
+    // NOLINTBEGIN(performance-unnecessary-value-param)
+    /// @brief 安装「附加事件源」：`watches` 现取待监听 fd 集，`pump` 在 fd 就绪后推进一次。
+    ///
+    /// 后端实现须把 `watches()` 的 fd 并入 `wait_events` 的 poll 集、并在 poll 返回后调用
+    /// `pump()`（与 AT-SPI 桥的并入方式同构）。未安装（默认空）或传空函数即撤销——
+    /// 两个通道均回到「无附加事件源」行为。Win32 等消息泵后端可忽略（其消息泵天然覆盖）。
+    /// @param watches 待监听 fd 集的提供者（传空撤销）。
+    /// @param pump fd 就绪后的推进函数（传空撤销）。
+    virtual auto set_extra_event_source([[maybe_unused]] std::function<std::vector<ExtraWatch>()> watches,
+                                        [[maybe_unused]] std::function<void()> pump) -> void {}
+    // NOLINTEND(performance-unnecessary-value-param)
 
     /// @brief 本后端的 `poll_platform_events()` 是否抽干「线程/进程级共享队列」。
     ///
@@ -252,6 +283,16 @@ class Surface {
     /// @param h 几何态回调；按值接收并移动入成员。
     virtual auto set_window_mode_handler(WindowModeHandler h) -> void { window_mode_handler_ = std::move(h); }
 
+    /// @brief OS 明暗偏好变化上报句柄：系统深浅色切换时触发（Win32 后端经 `WM_SETTINGCHANGE`
+    /// 探测；其余后端当前不产生该通知，接口预留同构扩展点）。
+    using OsColorSchemeHandler = std::function<void(ColorScheme)>;
+    /// @brief 注册 OS 明暗偏好变化上报句柄（默认存入 `os_color_scheme_handler_`；
+    /// 真实后端可覆盖以叠加本地状态记录）。
+    /// @param h 档位回调；按值接收并移动入成员。
+    virtual auto set_os_color_scheme_handler(OsColorSchemeHandler h) -> void {
+        os_color_scheme_handler_ = std::move(h);
+    }
+
     /// @brief 立即重绘请求回调。
     /// 后端在窗口几何变化/系统要求重绘（如 Win32 `WM_SIZE`/`WM_PAINT`）时调用，
     /// 由 `Window` 接为「对当前缓存根再渲染一帧」，使帧缓冲在 DWM 合成前已为新尺寸内容，
@@ -292,6 +333,14 @@ class Surface {
 
     /// @brief 运行期更新 CSD 自绘标题栏样式（默认空实现；Wayland 等客户端装饰后端覆写生效）。
     virtual auto set_title_bar_style(const TitleBarStyle & /*style*/) -> void {}
+
+    /// @brief 运行期更新 CSD 自绘窗框样式（默认空实现；客户端装饰后端覆写生效）。
+    ///
+    /// 与 `set_title_bar_style` 对称：投影厚度会改变整幅表面尺寸与 `content_inset`，
+    /// 故覆写方须在改动后重新同步 window geometry（Wayland 即重跑 `apply_surface_geometry`）。
+    /// 无自绘窗框的后端（Headless / Wasm / GLFW 等）保持默认空实现即可，语义为「本后端无窗框」。
+    /// @param style 目标窗框样式；探测不到合成能力时后端会自行把投影厚度降为 0。
+    virtual auto set_window_frame_style([[maybe_unused]] const WindowFrameStyle &style) -> void {}
 
     /// @brief 运行期更新 CSD 标题栏图标（默认空实现）。参数取 `std::shared_ptr<Image>`：
     /// `Image` 内嵌整幅像素缓冲（`std::vector<std::uint8_t>`，见 core/image.h）非轻拷贝，
@@ -451,6 +500,14 @@ class Surface {
         }
     }
 
+    /// @brief 上报 OS 明暗偏好变化（由真实后端在 `WM_SETTINGCHANGE` 等时机调用）。
+    /// @param scheme 新的 OS 档位（`Unspecified` 表示探测不到偏好，按明色回落）。
+    auto notify_os_color_scheme_change(ColorScheme scheme) const -> void {
+        if (os_color_scheme_handler_) {
+            os_color_scheme_handler_(scheme);
+        }
+    }
+
     /// @brief 窗口可见性状态上报句柄（子类经 set_* 注册）。
     WindowStateHandler window_state_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
     /// @brief 窗口几何态上报句柄（子类经 set_* 注册）。
@@ -459,6 +516,8 @@ class Surface {
     PresentRequest present_request_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
     /// @brief DPI 缩放变化上报句柄（子类经 set_scale_change_handler 注册）。
     ScaleChangeHandler scale_change_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+    /// @brief OS 明暗偏好变化上报句柄（子类经 set_os_color_scheme_handler 注册）。
+    OsColorSchemeHandler os_color_scheme_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 };
 
 #ifdef AURORA_BACKEND_HEADLESS
@@ -466,7 +525,7 @@ class Surface {
 ///
 /// 用于无窗口系统的单元测试与无头校验；不依赖 GLFW/SDL/OpenGL。
 /// 窗口可见性策略（WindowVisibility）不在此落地：无 OS 窗口。
-/// 仅当 `AURORA_BACKEND_HEADLESS` 定义（默认 ON，可由 CMake `AURORA_BACKEND_HEADLESS=OFF` 剪裁）时提供。
+/// 恒提供：无头后端随库编入，`AURORA_BACKEND_HEADLESS` 宏恒定义（`BUILD_OPTIONS.md` §6 固定注入）。
 ///
 class HeadlessSurface : public Surface {
   public:
@@ -616,11 +675,23 @@ class HeadlessSurface : public Surface {
     /// @param scale 模拟的新缩放因子（经 notify_scale_change 触发回调）。
     auto emit_scale_change(float scale) const -> void { notify_scale_change(scale); }
 
+    /// @brief 测试 seam：模拟 OS 明暗偏好变化（系统深浅色切换）。
+    /// @param scheme 模拟的 OS 档位（经 notify_os_color_scheme_change 触发回调）。
+    auto emit_os_color_scheme_change(ColorScheme scheme) const -> void { notify_os_color_scheme_change(scheme); }
+
+    /// @brief 测试 seam：设置 CSD 安全区内边距（模拟 Wayland 自绘装饰的预留区）。
+    /// @param insets 模拟的各边内缩距离（经 `content_inset()` 上报给 `Window` 的自动下沉壳）。
+    auto set_content_inset(EdgeInsets insets) -> void { content_inset_ = insets; }
+    /// @brief 当前模拟的 CSD 安全区内边距（默认零 = 无自绘装饰，与历史行为一致）。
+    /// @return 各边内缩距离。
+    [[nodiscard]] auto content_inset() const -> EdgeInsets override { return content_inset_; }
+
   private:
     Painter painter_;
     /// @brief PNG 输出路径（非空时 present 落盘）。声明顺序先于 size_ 以匹配构造初始化列表，防 -Wreorder。
     std::string png_path_;
     Size size_{.width = 0.0F, .height = 0.0F};  ///< 当前逻辑尺寸（构造/begin_frame/set_size 驱动）
+    EdgeInsets content_inset_{};  ///< 模拟的 CSD 安全区（经 set_content_inset 置位；默认零）
     int frame_ = 0;  ///< 已 present 帧计数
     bool should_close_ = false;  ///< 关闭请求（经 `set_should_close` 置位；见 `should_close()`）。
     const Surface *owner_ = nullptr;  ///< 记录的 owner（多窗口测试观测点）。

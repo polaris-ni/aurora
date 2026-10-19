@@ -9,17 +9,20 @@
 
 namespace aurora {
 
+// clang-analyzer 在个别 TU 把 `struct Error` 字段误判为「未初始化赋值」：聚合初始化 + variant 持有两层
+// 分析器无法建模，字段实际带默认成员初始化器且所有产出路径显式赋值，故在此抑制该诊断。
 /// @brief 结构化错误（需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001：机器可解析错误）。
 ///
 /// 字段分两类受众：
 /// - 进程外（JSON/日志/IDE 工具）：只认 `code`（冻结 slug，如 "nav-depth-exceeded"
 /// 改名标识符也不变）与 `code_enum`（C++ 标识符，调试用）。
 /// - 进程内：用 `code_enum` 做 `err.code_enum == ErrorCode::X` 类型安全分支，用 `severity`/
-/// `category`/`auto_fixable`/`fix_category`/`retryable` 元数据做策略判断。
+/// `category`/`retryable` 元数据做策略判断。
 ///
 /// 所有元数据由 codespec/errors.toml 经生成器产出，经 make_error 自动填充，无需手填。
 /// @note Thread: thread-safe
 /// @note Side-effects: none
+/// NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
 struct Error {
     std::string code;  ///< 冻结对外 slug（如 "nav-depth-exceeded"），只增不删
     std::string message;  ///< 人类可读描述（由表模板 + params 渲染，或调用方覆盖）
@@ -27,22 +30,23 @@ struct Error {
     std::string docs;  ///< 可选：文档链接/章节
     std::string where;  ///< 可选：发生位置（file:line）
     std::string hint;  ///< 修复提示（来自表，可被 make_error 覆盖）
-    /// @brief 编译期枚举码（errors.toml 生成表的索引；表驱动元数据的分界标记）。
-    ErrorCode code_enum{};  ///< 编译期枚举码（默认 GeneralUnknown）
+    /// @brief 编译期枚举码（errors.toml 生成表的索引；表驱动元数据的分界标记；默认 GeneralUnknown）。
+    ///
+    /// @note 紧邻的就地豁免（`clang-analyzer-core.uninitialized.Assign`）：本字段带默认成员初始化器
+    /// `{}`，所有产出路径（`make_error_from_table`）亦显式赋 `.code_enum = code`；分析器无法把「聚合
+    /// 指定初始化 + variant 持有」两层建模起来，故在个别 TU 上误判为「未初始化赋值」。
+    ErrorCode code_enum{};  // NOLINT(clang-analyzer-core.uninitialized.Assign) 理由见上方 @note
     ErrorSeverity severity = ErrorSeverity::Error;  ///< 来自 errors.toml
     ErrorCategory category = ErrorCategory::General;  ///< 来自 errors.toml
-    bool auto_fixable = false;  ///< 来自 errors.toml
     bool retryable = false;  ///< 来自 errors.toml
-    std::string fix_category;  ///< 修复策略分类（如 "type_error"|"missing_prop"）
-    std::string fix_params;  ///< 修复参数（JSON 字符串形式）
 
-    /// @brief 序列化为单行 JSON：code/message/code_enum/severity/category/auto_fixable/retryable 恒输出，
-    /// suggestion/docs/where/hint/fix_category 非空才输出，fix_params 原样内嵌（其本身已是 JSON）。
+    /// @brief 序列化为单行 JSON：code/message/code_enum/severity/category/retryable 恒输出，
+    /// suggestion/docs/where/hint 非空才输出。
     /// @return JSON 对象一行文本（字符串字段做双引号、反斜杠与换行转义；不经三方 JSON 库）。
     [[nodiscard]] auto to_json() const -> std::string;
 };
 
-/// @brief 查表填充 Error 的 slug/severity/category/fix 元数据与一个 message。
+/// @brief 查表填充 Error 的 slug/severity/category/retryable 元数据与一个 message。
 /// @param code 编译期枚举码（AURORA_ERROR_TABLE 索引；未知码由 at() 抛异常拦截）。
 /// @param message 人类可读描述（调用方给定，不经模板渲染）。
 /// @param hint 修复提示；空时回退表中的默认 hint。
@@ -57,10 +61,7 @@ struct Error {
         .code_enum = code,
         .severity = m.severity,
         .category = m.category,
-        .auto_fixable = m.auto_fixable,
         .retryable = m.retryable,
-        .fix_category = std::string(m.fix_category),
-        .fix_params = {},
     };
 }
 

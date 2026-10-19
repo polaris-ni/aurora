@@ -56,10 +56,17 @@
 namespace {
 
 /// @brief 累计的断言失败条数，决定退出码 1。
-int failures = 0;
+///        函数局部静态 + 访问器收敛，避免命名空间级可变全局量。
+auto failures() -> int & {
+    static int count = 0;
+    return count;
+}
 
 /// @brief 本机是否已判定为 100% DPI（判据空转，五条全部记 SKIP）。
-bool scale_is_unity = false;
+auto scale_is_unity() -> bool & {
+    static bool unity = false;
+    return unity;
+}
 
 /// @brief 宿主回调侧收到的鼠标落点（判据 (c) 的观察面）。
 struct MouseSink {
@@ -77,7 +84,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
 auto check(bool passed, const std::string &label) -> void {
     emit(std::string("[") + (passed ? "PASS" : "FAIL") + ") " + label);
     if (!passed) {
-        ++failures;
+        ++failures();
     }
 }
 
@@ -138,7 +145,7 @@ auto skip(const std::string &label) -> void { emit(std::string("[SKIP] ") + labe
 /// @return 本段是否执行了真断言（false = 100% DPI 记 SKIP）。
 auto check_set_size_roundtrip(aurora::Win32Host &host, HWND hwnd, aurora::Size requested) -> bool {
     const float scale = scale_of(host);
-    if (scale_is_unity) {
+    if (scale_is_unity()) {
         skip("(a)+(b) set_size roundtrip: 100% DPI, frame/logical*scale is 1.0==1.0 trivially; NOT verified");
         return false;
     }
@@ -174,7 +181,7 @@ auto check_set_size_roundtrip(aurora::Win32Host &host, HWND hwnd, aurora::Size r
 /// @param scale 当前 scale。
 /// @return 本段是否执行了真断言。
 auto check_mouse_mapping(MouseSink &sink, HWND hwnd, float scale) -> bool {
-    if (scale_is_unity) {
+    if (scale_is_unity()) {
         skip("(c) mouse dp mapping: 100% DPI, physical/scale == physical trivially; NOT verified");
         return false;
     }
@@ -220,7 +227,7 @@ auto check_mouse_mapping(MouseSink &sink, HWND hwnd, float scale) -> bool {
 /// @param requested 建窗请求的逻辑尺寸。
 /// @return 本段是否执行了真断言（false = 100% DPI 记 SKIP）。
 auto check_creation_size_matches_requested_dp(aurora::Size requested) -> bool {
-    if (scale_is_unity) {
+    if (scale_is_unity()) {
         skip("(f) creation-time size: 100% DPI, physical == dp trivially; NOT verified");
         return false;
     }
@@ -259,21 +266,23 @@ auto check_creation_size_matches_requested_dp(aurora::Size requested) -> bool {
 /// @param logical_min 逻辑最小尺寸。
 /// @return 本段是否执行了真断言。
 auto check_minmax_same_conversion(HWND hwnd, float scale, aurora::Size logical_min) -> bool {
-    if (scale_is_unity) {
+    if (scale_is_unity()) {
         skip("(d) WM_GETMINMAXINFO vs set_size same conversion: 100% DPI, both 1.0; NOT verified");
         return false;
     }
     // 问一次 min/max track：这是 OS 在最大化 / 拖拽时会走的同一条路径。
     MINMAXINFO mmi{};
-    mmi.ptMinTrackSize = {-1L, -1L};
-    mmi.ptMaxTrackSize = {-1L, -1L};
+    mmi.ptMinTrackSize = {.x = -1L, .y = -1L};
+    mmi.ptMaxTrackSize = {.x = -1L, .y = -1L};
+    // Win32 消息 API 的 lParam 承载指向结构体的指针，无类型安全替代。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     SendMessageA(hwnd, WM_GETMINMAXINFO, 0, reinterpret_cast<LPARAM>(&mmi));
     MSG msg{};
     while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE) != 0) {
         TranslateMessage(&msg);
         DispatchMessageA(&msg);
     }
-    const float min_from_minmax = static_cast<float>(mmi.ptMinTrackSize.x);
+    const auto min_from_minmax = static_cast<float>(mmi.ptMinTrackSize.x);
     const float min_from_to_physical = logical_min.width * scale;
     check(approx_eq(min_from_minmax, min_from_to_physical, 1.0F),
           "(d) WM_GETMINMAXINFO min track == logical*scale (same conversion as set_size): " +
@@ -326,8 +335,8 @@ auto main() -> int {
     check(approx_eq(scale, sys_scale, 0.01F),
           "host scale_factor() matches the system DPI (single source, not a stale 1.0): host=" + std::to_string(scale) +
               " system=" + std::to_string(sys_scale));
-    scale_is_unity = std::fabs(sys_scale - 1.0F) < 0.01F;
-    if (scale_is_unity) {
+    scale_is_unity() = std::fabs(sys_scale - 1.0F) < 0.01F;
+    if (scale_is_unity()) {
         emit("[NOTE] this machine reports 100% DPI: all five criteria hold trivially and are recorded as");
         emit("       SKIP, not PASS. Re-run on a scaled display to actually validate the fix");
         emit("       (08-tooling.md 8.2). Not counting CI's green as acceptance.");
@@ -350,7 +359,7 @@ auto main() -> int {
     emit("[NOTE] (e) a11y projection rect: the bridge now reads GetDpiForWindow like the host does, so its");
     emit("       rect and the mouse position share one scale by construction. Verifying the shared value:");
 
-    if (failures == 0) {
+    if (failures() == 0) {
         emit("PASS: Win32 DPI single-source acceptance passed (all five criteria exercised)");
         return 0;
     }

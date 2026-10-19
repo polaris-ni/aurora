@@ -32,9 +32,9 @@ auto Text::describe_static() -> WidgetDescriptor {
                  .min_value = "0"},
                 {.name = "color",
                  .type = "Color",
-                 .default_value = "Color::black()",
+                 .default_value = "\"theme.on_surface\"",
                  .required = false,
-                 .note = "Text color",
+                 .note = "Text color (follows theme on_surface when unset)",
                  .json_type = "array"},
                 {.name = "text_align",
                  .type = "TextAlign",
@@ -115,9 +115,9 @@ auto Text::describe_static() -> WidgetDescriptor {
                  .enum_values = {"None", "Underline", "Overline", "LineThrough"}},
                 {.name = "decoration_color",
                  .type = "Color",
-                 .default_value = "Color::black()",
+                 .default_value = "\"theme.on_surface\"",
                  .required = false,
-                 .note = "Decoration color",
+                 .note = "Decoration color (follows text color when unset)",
                  .json_type = "array"},
                 {.name = "background_color",
                  .type = "Color",
@@ -156,7 +156,10 @@ auto Text::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
     props.set("content", content.get().text);
     props.set("font_size", font.size_pt);
-    props.set("color", color_to_json(text_color));
+    // 文字色 / 装饰线色仅在显式设置时输出：保留「跟随主题」语义（与 Button 同口径）
+    if (text_color.has_value()) {
+        props.set("color", color_to_json(*text_color));
+    }
 
     props.set("text_align", text_align_to_json(text_align));
     if (direction.has_value()) {
@@ -171,7 +174,9 @@ auto Text::serialize_props(Json &props) const -> void {
     props.set("font_weight", font_weight_to_json(static_cast<FontWeight>(font.weight)));
     props.set("font_style", font_style_to_json(font_style));
     props.set("decoration", text_decoration_to_json(decoration));
-    props.set("decoration_color", color_to_json(decoration_color));
+    if (decoration_color.has_value()) {
+        props.set("decoration_color", color_to_json(*decoration_color));
+    }
     props.set("background_color", color_to_json(background_color));
 }
 

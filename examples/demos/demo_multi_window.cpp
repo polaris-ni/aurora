@@ -2,7 +2,6 @@
 //
 // 每个窗口是一个 `WindowHost`：拥有自己的 Scene（UI 树）、FocusManager 与帧统计，
 // 由 `Application` 的单一帧循环统一驱动——关掉一个窗口不影响其他窗口继续渲染。
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -124,8 +123,8 @@ auto build_main_ui(au::Application &app, const std::shared_ptr<au::State<au::Loc
         }
     };
 
-    au::Button bcast_btn{au::ButtonProps{.label = "Broadcast to all windows (bus)"}};
-    bcast_btn.on_click = [&app, &ping_seq]() -> void {
+    au::Button cast_btn{au::ButtonProps{.label = "Broadcast to all windows (bus)"}};
+    cast_btn.on_click = [&app, &ping_seq]() -> void {
         ++ping_seq;
         // 携带发送者窗口 id：订阅侧可据此实现点对点过滤（这里全量广播）。
         app.bus().post(PingMessage{.text = "broadcast #" + std::to_string(ping_seq)}, app.main_window());
@@ -149,7 +148,7 @@ auto build_main_ui(au::Application &app, const std::shared_ptr<au::State<au::Loc
                     gap(8),
                     std::move(display_btn),
                     gap(8),
-                    std::move(bcast_btn),
+                    std::move(cast_btn),
                     gap(12),
                     au::Text{au::TextProps{.content = au::Reactive{last_ping}}},
                     gap(12),

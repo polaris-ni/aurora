@@ -5,6 +5,7 @@
 /// 编码→解码往返保真、畸形输入的结构化错误，以及静态图降级为单帧动图
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <span>
 #include <string>
@@ -13,6 +14,7 @@
 #include "aurora/core/image.h"
 #include "aurora/image/image_codec.h"
 #include "framework/aurora_test.h"
+#include "framework/isolation.h"
 
 namespace aurora::test_cases::utest_image_codec {
 
@@ -99,10 +101,23 @@ AURORA_TEST_CASE(detect_webp_by_riff_container) {
     AURORA_TEST_CHECK_EQ(static_cast<int>(image::detect_format(webp)), static_cast<int>(image::ImageFormat::WebP));
 }
 
+AURORA_TEST_CASE(detect_format_hdr_magic_resolves_to_unknown) {
+    // HDR (#?RADIANCE / #?RGBE) 当前枚举未单列：嗅探识别后交 StbCodec 兜底解码，故嗅探返回 Unknown。
+    const std::vector<std::uint8_t> radiance{'#', '?', 'R', 'A', 'D', 'I', 'A', 'N', 'C', 'E', 0x0A};
+    AURORA_TEST_CHECK_EQ(static_cast<int>(image::detect_format(radiance)),
+                         static_cast<int>(image::ImageFormat::Unknown));
+}
+
 AURORA_TEST_CASE(format_from_path_uses_extension) {
     AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.png")), static_cast<int>(image::ImageFormat::PNG));
     AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.jpg")),
                          static_cast<int>(image::ImageFormat::JPEG));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.jpeg")),
+                         static_cast<int>(image::ImageFormat::JPEG));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.gif")), static_cast<int>(image::ImageFormat::GIF));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.bmp")), static_cast<int>(image::ImageFormat::BMP));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.webp")),
+                         static_cast<int>(image::ImageFormat::WebP));
     AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.svg")), static_cast<int>(image::ImageFormat::SVG));
     AURORA_TEST_CHECK_EQ(static_cast<int>(image::format_from_path("a.unknown-ext")),
                          static_cast<int>(image::ImageFormat::Unknown));
@@ -179,6 +194,57 @@ AURORA_TEST_CASE(decode_async_resolves_to_same_result) {
     const auto decoded = future.get();
     AURORA_TEST_REQUIRE_TRUE(decoded.ok());
     AURORA_TEST_CHECK_EQ(decoded.value().width, 3);
+}
+
+// 覆盖 ImageSource 双派发（File/Memory）、未指定格式编码回退、save 写盘、decode_async 文件分支，
+// 以及静态图经 decode_animated_bytes 兜底降级为单帧（stb 对 PNG 直接走嗅探分支，故用无 decode_animated 的 probe
+// 触发兜底）。
+AURORA_TEST_CASE(registry_dispatch_covers_file_and_fallback_paths) {
+    auto &reg = image::ImageCodecRegistry::instance();
+    const Image img = make_image(2, 2, 0x7F);
+
+    auto enc = reg.encode(img, image::EncodeOptions{.format = image::ImageFormat::PNG});
+    AURORA_TEST_REQUIRE_TRUE(enc.ok());
+    const auto &png = enc.value();
+
+    // decode(ImageSource) 文件分支。
+    auto via_file = reg.decode(image::ImageSource::from_file("no/such/file.png"));
+    AURORA_TEST_CHECK_FALSE(via_file.ok());
+
+    // decode_animated(ImageSource) 文件分支（decode_animated_file 体）。
+    auto anim_file = reg.decode_animated(image::ImageSource::from_file("no/such/file.png"));
+    AURORA_TEST_CHECK_FALSE(anim_file.ok());
+
+    // decode_animated(ImageSource) 内存分支（派发到 decode_animated_memory）。
+    auto anim_mem = reg.decode_animated(image::ImageSource::from_memory(png));
+    AURORA_TEST_REQUIRE_TRUE(anim_mem.ok());
+    AURORA_TEST_CHECK_EQ(anim_mem.value().frames.size(), 1U);
+
+    // 未指定格式编码 -> 回退到任意可用编码器（默认 PNG）。
+    auto enc_def = reg.encode(img, image::EncodeOptions{.format = image::ImageFormat::Unknown});
+    AURORA_TEST_REQUIRE_TRUE(enc_def.ok());
+
+    // save 到隔离临时目录：编码 + 写盘 + 回读（走 isolation::temp_dir，不外泄到系统 /tmp）。
+    const std::filesystem::path tmp =
+        std::filesystem::path(aurora::testing::isolation::temp_dir()) / "aurora_ut_registry_dispatch.png";
+    auto saved = reg.save(img, tmp, image::EncodeOptions{.format = image::ImageFormat::PNG});
+    AURORA_TEST_REQUIRE_TRUE(saved.ok());
+    auto reread = reg.decode_file(tmp);
+    AURORA_TEST_REQUIRE_TRUE(reread.ok());
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+
+    // decode_async 文件来源分支。
+    auto fut = reg.decode_async(image::ImageSource::from_file("no/such/file.png"));
+    auto async_res = fut.get();
+    AURORA_TEST_CHECK_FALSE(async_res.ok());
+
+    // 自定义 codec 接入后，动图解码经兜底单帧路径（ProbeCodec 无 decode_animated 重载）。
+    reg.register_codec(std::make_shared<ProbeCodec>());
+    const std::vector<std::uint8_t> probe{'A', 'U', 'R', 'P', 0x00};
+    auto anim_probe = reg.decode_animated_memory(probe);
+    AURORA_TEST_REQUIRE_TRUE(anim_probe.ok());
+    AURORA_TEST_CHECK_EQ(anim_probe.value().frames.size(), 1U);
 }
 
 }  // namespace aurora::test_cases::utest_image_codec

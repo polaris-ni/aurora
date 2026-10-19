@@ -259,23 +259,6 @@ class Dropdown : public Widget {
         Widget::on_pointer_event(e);
     }
 
-    /// @brief 挂载时存环境链：布局与绘制都还没跑的首帧也能读到视口高。
-    ///
-    /// `on_paint` 是主写入点（每帧必过），`on_layout` 是兜底（**布局缓存命中时整段被跳过**，
-    /// 见 `Widget::layout`），本入口则保证「一次都没布局/绘制过」时也有环境链可用。
-    /// @param ctx 构建上下文：取其环境链地址（`root_env_`，窗口生命周期内恒定）。
-    auto on_mount(const BuildContext &ctx) -> void override { env_ = ctx.env; }
-
-    /// @brief 清空缓存的环境链地址（与 `on_mount` 对称）。
-    ///
-    /// `env_` 指向宿主的环境链，被摘下后宿主可能先销毁 ⇒ 留着就是悬垂指针。下次布局的兜底写入
-    /// （`on_layout` / `on_paint`）会重新填上，故清空不影响任何读取路径。
-    /// @param ctx 本控件挂载时记录的那份上下文。
-    auto on_unmount(const BuildContext &ctx) -> void override {
-        (void)ctx;
-        env_ = nullptr;
-    }
-
     /// @brief 声明本控件参与点击分发。
     /// @return 恒为 true。
     [[nodiscard]] auto wants_click() const -> bool override { return true; }
@@ -390,6 +373,26 @@ class Dropdown : public Widget {
         }
     }
 
+    /// @brief 滚轮：面板被限高时把余量转成面板内部滚动，吃不完的上冒给外层可滚动祖先。
+    /// @param e 滚轮事件：读 `delta_y`，回写 `is_handled` 与未吸收余量 `remaining_y`。
+    auto on_scroll(ScrollEvent &e) -> void override {
+        // 面板未被限高（无需内部滚动）时不接管，交给外层——与「面板即完整内容」的情形一致。
+        const std::optional<PanelGeometry> geo = panel_geometry(size().width, focus_bounds_.origin.y);
+        const bool scrollable = geo.has_value() && geo->content_h > geo->window.size.height + 1e-3F;
+        if (!scrollable || e.delta_y == 0.0F) {
+            Widget::on_scroll(e);
+            return;
+        }
+        e.is_handled = true;
+        const float before = panel_scroll_;
+        const float max_scroll = std::max(0.0F, geo->content_h - geo->window.size.height);
+        panel_scroll_ = std::clamp(panel_scroll_ - e.delta_y, 0.0F, max_scroll);
+        if (panel_scroll_ != before) {
+            mark_needs_paint();
+        }
+        e.remaining_y = e.delta_y + (panel_scroll_ - before);
+    }
+
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         env_ = ctx.env;  // 环境链兜底写入（主写入点在 on_paint，见 PanelGeometry 文档）
@@ -407,6 +410,23 @@ class Dropdown : public Widget {
         return c.constrain(Size{.width = w, .height = box_height_});
     }
 
+    /// @brief 挂载时存环境链：布局与绘制都还没跑的首帧也能读到视口高。
+    ///
+    /// `on_paint` 是主写入点（每帧必过），`on_layout` 是兜底（**布局缓存命中时整段被跳过**，
+    /// 见 `Widget::layout`），本入口则保证「一次都没布局/绘制过」时也有环境链可用。
+    /// @param ctx 构建上下文：取其环境链地址（`root_env_`，窗口生命周期内恒定）。
+    auto on_mount(const BuildContext &ctx) -> void override { env_ = ctx.env; }
+
+    /// @brief 清空缓存的环境链地址（与 `on_mount` 对称）。
+    ///
+    /// `env_` 指向宿主的环境链，被摘下后宿主可能先销毁 ⇒ 留着就是悬垂指针。下次布局的兜底写入
+    /// （`on_layout` / `on_paint`）会重新填上，故清空不影响任何读取路径。
+    /// @param ctx 本控件挂载时记录的那份上下文。
+    auto on_unmount(const BuildContext &ctx) -> void override {
+        (void)ctx;
+        env_ = nullptr;
+    }
+
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // 环境链主写入点：每帧必过、不受布局缓存影响（on_layout 在缓存命中时被整段跳过，
         // 不可作为唯一写入点）。存的是 root_env_ 的地址——窗口生命周期内恒定、每帧原地
@@ -415,7 +435,7 @@ class Dropdown : public Widget {
         Font f;
         f.size_pt = font_size_;
         // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
-        Color accent = accent_color_.value_or(inherit_theme(ctx).primary);
+        Color accent = accent_color_.value_or(inherit_theme(ctx).roles.primary);
         Color box = box_color_;
         Color border = border_color_;
         Color text = text_color_;
@@ -610,26 +630,6 @@ class Dropdown : public Widget {
             return this;
         }
         return nullptr;
-    }
-
-    /// @brief 滚轮：面板被限高时把余量转成面板内部滚动，吃不完的上冒给外层可滚动祖先。
-    /// @param e 滚轮事件：读 `delta_y`，回写 `is_handled` 与未吸收余量 `remaining_y`。
-    auto on_scroll(ScrollEvent &e) -> void override {
-        // 面板未被限高（无需内部滚动）时不接管，交给外层——与「面板即完整内容」的情形一致。
-        const std::optional<PanelGeometry> geo = panel_geometry(size().width, focus_bounds_.origin.y);
-        const bool scrollable = geo.has_value() && geo->content_h > geo->window.size.height + 1e-3F;
-        if (!scrollable || e.delta_y == 0.0F) {
-            Widget::on_scroll(e);
-            return;
-        }
-        e.is_handled = true;
-        const float before = panel_scroll_;
-        const float max_scroll = std::max(0.0F, geo->content_h - geo->window.size.height);
-        panel_scroll_ = std::clamp(panel_scroll_ - e.delta_y, 0.0F, max_scroll);
-        if (panel_scroll_ != before) {
-            mark_needs_paint();
-        }
-        e.remaining_y = e.delta_y + (panel_scroll_ - before);
     }
 
     static constexpr float AURORA_PAD = 10.0F;  ///< 文本内边距(dp)

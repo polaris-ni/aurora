@@ -3,7 +3,7 @@
 #include <string>
 
 #include "aurora/core/log.h"
-#include "aurora/core/platform.h"
+#include "aurora/core/platform.h"  // NOLINT
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
 
@@ -64,7 +64,6 @@
 #endif
 
 namespace aurora {
-
 // 通用：用已构造的 Surface 组装 Window，并套用跨后端共享的尺寸/标题。
 //
 // DPI 感知在这里启用（而非在 `Win32Host::Impl` 构造体内）：本函数是**所有** `create_window`
@@ -102,7 +101,7 @@ auto create_window(const HeadlessOptions &opts) -> Result<std::unique_ptr<Window
 
 #ifdef AURORA_BACKEND_WIN32
 auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> {
-    // 渲染后端偏好：统一的硬件加速可选开关。
+// 渲染后端偏好：统一的硬件加速可选开关。
 #if defined(AURORA_BACKEND_GPU_WGPU) && defined(AURORA_BACKEND_WIN32)
     if (opts.renderer == RendererPreference::GpuWgpu) {
         // wgpu GPU 栅格路径（DisplayList 直接在 GPU 端光栅化，非 CPU 像素上传）。
@@ -229,7 +228,7 @@ auto create_window(const GlfwOptions &opts) -> Result<std::unique_ptr<Window>> {
 
 #ifdef AURORA_BACKEND_X11
 auto create_window(const X11Options &opts) -> Result<std::unique_ptr<Window>> {
-#if defined(AURORA_BACKEND_GPU_WGPU)
+#ifdef AURORA_BACKEND_GPU_WGPU
     if (opts.renderer == RendererPreference::GpuWgpu) {
         // wgpu GPU 栅格路径（X11 宿主）：Auto 不隐式选择本路径，仅显式强制时启用（Win32 同口径）。
         auto gpu =
@@ -269,7 +268,7 @@ auto create_window(const X11Options &opts) -> Result<std::unique_ptr<Window>> {
 
 #ifdef AURORA_BACKEND_WAYLAND
 auto create_window(const WaylandOptions &opts) -> Result<std::unique_ptr<Window>> {
-#if defined(AURORA_BACKEND_GPU_WGPU)
+#ifdef AURORA_BACKEND_GPU_WGPU
     if (opts.renderer == RendererPreference::GpuWgpu) {
         // wgpu GPU 栅格路径（Wayland 宿主）：Auto 不隐式选择本路径，仅显式强制时启用（Win32/X11 同口径）。
         auto gpu =
@@ -367,9 +366,9 @@ auto create_native_window(const WindowOptions &opts) -> Result<std::unique_ptr<W
     AURORA_LOG_WARN("window", "create_native_window: no display available; falling back to HeadlessSurface.");
     return create_window(HeadlessOptions{opts});
 #else
-    return make_error(
-        ErrorCode::PlatformUnavailable, "create_native_window: display unavailable and no Headless fallback.",
-        "Run inside an X11/Wayland session or rebuild with -DAURORA_BACKEND_HEADLESS=ON.", "aurora/window/window.h");
+    return make_error(ErrorCode::PlatformUnavailable,
+                      "create_native_window: display unavailable and no Headless fallback.",
+                      "Run inside an X11/Wayland session.", "aurora/window/window.h");
 #endif
 #elif defined(AURORA_BACKEND_MACOS)
     return create_window(MacOSOptions{opts});
@@ -384,7 +383,7 @@ auto create_native_window(const WindowOptions &opts) -> Result<std::unique_ptr<W
 #else
     (void)opts;
     return make_error(ErrorCode::PlatformUnavailable, "create_native_window: no built-in Surface backend compiled in.",
-                      "Enable a backend (e.g. -DAURORA_BACKEND_HEADLESS=ON) or inject a custom Surface via "
+                      "Inject a custom Surface via "
                       "create_window(std::unique_ptr<Surface>, WindowOptions).",
                       "aurora/window/window.h");
 #endif
@@ -445,5 +444,4 @@ auto enable_dpi_awareness() -> void {
     // macOS / Linux：DPI 感知由系统 compositor / Cocoa 自动处理，无需 opt-in；空实现保证跨平台调用安全。
 #endif
 }
-
 }  // namespace aurora

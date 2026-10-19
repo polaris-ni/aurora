@@ -13,7 +13,6 @@
 #include <string>
 
 namespace aurora {
-
 /// @brief 细粒度性能埋点是否在本次构建中启用。
 ///
 /// 由 CMake 开关 `AURORA_ENABLE_PROFILING` 决定（默认随构建类型：
@@ -100,7 +99,6 @@ struct RenderCounters {
     /// @return 进程期存活的表头字符串视图。
     [[nodiscard]] static auto csv_header() -> std::string_view;
 };
-
 }  // namespace aurora
 
 // ---------------------------------------------------------------------------
@@ -111,10 +109,16 @@ struct RenderCounters {
 // 有代价或有副作用，调用点须自行用 `#ifdef AURORA_ENABLE_PROFILING` 包裹。
 // ---------------------------------------------------------------------------
 #ifdef AURORA_ENABLE_PROFILING
+
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+
 /// @brief 累加计数字段：`AURORA_PROFILE_COUNT(fill_rects, 1)`。
+/// `field` 是**记号**（按名访问 RenderCounters 成员），不是值——只能宏，无函数等价物。
 #define AURORA_PROFILE_COUNT(field, n) (void)(::aurora::RenderCounters::current().field += (n))
 /// @brief 直接赋值计数字段：`AURORA_PROFILE_SET(full_redraw, true)`。
 #define AURORA_PROFILE_SET(field, v) (void)(::aurora::RenderCounters::current().field = (v))
+
+// NOLINTEND(cppcoreguidelines-macro-usage)
 #else
 /// @brief 埋点关闭时与启用分支同形参：展开为空语句，宏参数不被求值。
 /// @param field 要累加的计数字段名（本分支忽略）。

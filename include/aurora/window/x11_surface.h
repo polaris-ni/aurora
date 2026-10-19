@@ -56,6 +56,9 @@ class X11Surface final : public Surface {
     /// @brief 禁用拷贝赋值：同拷贝构造，唯一 X 资源不可复制。
     /// @return 已删除重载，不存在实际返回路径。
     X11Surface &operator=(const X11Surface &) = delete;
+    /// @brief 禁用移动：连接/窗口生命周期与对象同寿，资源无「移交给新属主」的语义。
+    X11Surface(X11Surface &&) = delete;
+    X11Surface &operator=(X11Surface &&) = delete;
 
     /// @brief X 连接与窗口是否创建成功（无 DISPLAY/纯 TTY 环境为 false）。
     /// 工厂 `create_window(X11Options)` 据此返回 `Result` 错误而非崩溃。
@@ -105,6 +108,11 @@ class X11Surface final : public Surface {
     auto wait_events(double timeout_ms) -> void override;
     /// @brief 跨线程唤醒主循环（线程安全）：向自唤醒管道写 1 字节打断 wait_events。
     auto request_wake() -> void override;
+    /// @brief 安装宿主注入的「附加事件源」（WebView 引擎的 GLib 主上下文 fd 并入 poll 集）。
+    /// @param watches 待监听 fd 集的提供者（传空撤销）。
+    /// @param pump fd 就绪后的推进函数（传空撤销）。
+    auto set_extra_event_source(std::function<std::vector<Surface::ExtraWatch>()> watches, std::function<void()> pump)
+        -> void override;
 
     /// @brief 增量上屏脏区（设备坐标）：非空时 present() 仅 swizzle+XPutImage 脏矩形，
     /// 而非整窗（对齐 Win32Surface 的增量 blit 策略）；脏区一次性消费。
@@ -117,6 +125,16 @@ class X11Surface final : public Surface {
     /// @brief 运行时更新窗口标题（XStoreName + _NET_WM_NAME，UTF-8）。
     /// @param title 新窗口标题（UTF-8）。
     auto set_title(const std::string &title) -> void override;
+
+    /// @brief 运行期热更 CSD 标题栏样式（装饰带立即重绘；仅客户端装饰策略下可见）。
+    /// @param style 新的标题栏样式。
+    auto set_title_bar_style(const TitleBarStyle &style) -> void override;
+    /// @brief 运行期热更窗框样式（X11 无外延阴影 margin，厚度只影响内缘热区宽度）。
+    /// @param style 新的窗框样式。
+    auto set_window_frame_style(const WindowFrameStyle &style) -> void override;
+    /// @brief CSD 安全区：自绘标题栏带高度经安全区上报，应用内容由框架自动下沉。
+    /// @return 四向内边距；非客户端装饰策略或塌缩态为全零。
+    [[nodiscard]] auto content_inset() const -> EdgeInsets override;
 
     /// @brief 运行时更新悬停光标形状：`XCreateFontCursor` + `XDefineCursor` + `XFlush`。
     /// 句柄按 `CursorShape` 取值序缓存在 Impl（`XCreateFontCursor` 每次调用都产生新资源，

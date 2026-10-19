@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -200,7 +199,7 @@ class ScatterChart : public LeafWidget, public ScatterChartProps {
     /// @param g 几何快照
     /// @param local 本地坐标
     /// @return 命中图例项序号，无命中为 nullopt
-    [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
+    [[nodiscard]] static auto legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t>;
     /// @brief 最近数据点命中：比例尺映射后按各系列阈值 dot_radius + 4dp 比较欧氏距离，命中多个时取最近。
     /// @param g 几何快照
     /// @param local 本地坐标
@@ -342,12 +341,12 @@ inline auto ScatterChart::on_layout(const Constraints &c, const BuildContext &ct
     }
     s.width = std::max(s.width, 0.0F);
     s.height = std::max(s.height, 0.0F);
-    geom_ = compute_geometry(s, inherit_theme(ctx).font);
+    geom_ = compute_geometry(s, inherit_theme(ctx).type_scale.body_medium);
     return s;
 }
 
 // 顺序扫描 legend_rects，首个包含该点的矩形即命中。
-inline auto ScatterChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
+inline auto ScatterChart::legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
         const Rect &r = g.legend_rects[i];
         if (local.x >= r.origin.x && local.x <= r.right() && local.y >= r.origin.y && local.y <= r.bottom()) {
@@ -540,13 +539,13 @@ inline auto ScatterChart::deserialize_props(const Json &props) -> void {
 // 绘制顺序：y 轴与网格 → x 轴数值刻度 → 数据点 → 图例 → 悬停准线/圆环/值框。
 inline auto ScatterChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     const Theme theme = inherit_theme(ctx);
-    const Font &font = theme.font;
+    const Font &font = theme.type_scale.body_medium;
     const Point origin = bounds.origin;
     const Geometry &g = geom_;
     const Rect &plot = g.plot;
     const float line_h = render::FontEngine::measure_height(font) + 4.0F;
-    const Color grid = Color{theme.text.r, theme.text.g, theme.text.b, 31};
-    const Color axis = Color{theme.text.r, theme.text.g, theme.text.b, 160};
+    const Color grid = Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 31};
+    const Color axis = Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 160};
 
     if (axis_y.visible) {
         draw_numeric_axis(p, origin, plot, g.y_scale, axis_y, font, grid, axis);
@@ -628,11 +627,11 @@ inline auto ScatterChart::on_paint(Painter &p, const Rect &bounds, const BuildCo
             p.draw_line(Point{.x = origin.x + plot.origin.x, .y = origin.y + hovered_px->y},
                         Point{.x = origin.x + plot.right(), .y = origin.y + hovered_px->y}, 1.0F, grid);
         }
-        const float d = 12.0F;
+        constexpr float d = 12.0F;
         const Rect ring{
             .origin = Point{.x = origin.x + hovered_px->x - (d * 0.5F), .y = origin.y + hovered_px->y - (d * 0.5F)},
             .size = Size{.width = d, .height = d}};
-        p.draw_rounded_border(ring, d * 0.5F, 2.0F, theme.text);
+        p.draw_rounded_border(ring, d * 0.5F, 2.0F, theme.roles.on_surface);
 
         if (hovered_point_.has_value()) {
             const auto [k, i] = *hovered_point_;
@@ -647,11 +646,12 @@ inline auto ScatterChart::on_paint(Painter &p, const Rect &bounds, const BuildCo
                 const float by = std::clamp(hovered_px->y - h - 4.0F, 0.0F, std::max(0.0F, bounds.size.height - h));
                 const Rect box{.origin = Point{.x = origin.x + bx, .y = origin.y + by},
                                .size = Size{.width = w, .height = h}};
-                p.fill_rounded_rect(box, 4.0F, Color{theme.background.r, theme.background.g, theme.background.b, 242});
+                p.fill_rounded_rect(box, 4.0F,
+                                    Color{theme.roles.surface.r, theme.roles.surface.g, theme.roles.surface.b, 242});
                 p.draw_rounded_border(box, 4.0F, 1.0F, grid);
                 const Rect text_box{.origin = Point{.x = origin.x + bx + 8.0F, .y = origin.y + by + 4.0F},
                                     .size = Size{.width = w - 16.0F, .height = line_h}};
-                p.draw_text(text_box, text, font, theme.text);
+                p.draw_text(text_box, text, font, theme.roles.on_surface);
             }
         }
     }

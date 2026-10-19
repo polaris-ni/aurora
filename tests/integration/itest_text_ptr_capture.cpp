@@ -51,14 +51,14 @@ auto make_left_aligned_text() -> std::shared_ptr<Text> {
 
 void layout_root(Widget &root, const float w, const float h) {
     const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     root.layout(c, ctx);
 }
 
 void paint_root(Widget &root, const float w, const float h) {
     Painter p;
     p.begin(static_cast<int>(w), static_cast<int>(h));
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     root.paint(p, Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = w, .height = h}}, ctx);
 }
 
@@ -88,15 +88,15 @@ auto scan_texts(Widget &root) -> std::map<std::string, Rect> {
 /// 鼠标序列发射器：dispatch 闭包决定走实体实例（指针捕获域独立）还是静态持久单例。
 using Sink = std::function<void(MouseAction, float, float)>;
 
-auto press_at(Sink &s, float x, float y) -> void { s(MouseAction::Press, x, y); }
-auto move_to(Sink &s, float x, float y) -> void { s(MouseAction::Move, x, y); }
-auto release_at(Sink &s, float x, float y) -> void { s(MouseAction::Release, x, y); }
+auto press_at(const Sink &s, float x, float y) -> void { s(MouseAction::Press, x, y); }
+auto move_to(const Sink &s, float x, float y) -> void { s(MouseAction::Move, x, y); }
+auto release_at(const Sink &s, float x, float y) -> void { s(MouseAction::Release, x, y); }
 
 }  // namespace
 
 AURORA_TEST_CASE(rtl_drag_select_reaches_leftmost_char) {
     // 1) RTL 拖选最左字：从右端按下向左拖（越过左边界），须包含索引 0（首字'默'）。
-    auto a = make_left_aligned_text();
+    const auto a = make_left_aligned_text();
     Column col{ColumnProps{.children = {Node{a}}}};
     layout_root(col, AURORA_W, AURORA_H);
     paint_root(col, AURORA_W, AURORA_H);
@@ -110,7 +110,7 @@ AURORA_TEST_CASE(rtl_drag_select_reaches_leftmost_char) {
     EventDispatcher ed;  // 实体派发器：独立指针捕获域
     FocusManager fm;
     fm.set_root(&col);
-    Sink dispatch = [&](MouseAction action, float x, float y) -> void {
+    const Sink dispatch = [&](MouseAction action, float x, float y) -> void {
         MouseEvent e;
         e.action = action;
         e.button = MouseButton::Left;
@@ -134,7 +134,7 @@ AURORA_TEST_CASE(release_outside_window_retains_selection) {
     // 2) 窗口外释放：拖选时光标移出根/窗口，释放事件仍须送达并按捕获路径结束选择；
     //    释放后的 Move 不得再改变选区（selecting_ 已结束）。
     // CJK-LITERAL: cjk-fixture - Han content asserted via hitbox scan and post-release selection state
-    auto a = std::make_shared<Text>(TextProps{.content = LocalizedString{"默认14pt文本"}, .soft_wrap = true});
+    const auto a = std::make_shared<Text>(TextProps{.content = LocalizedString{"默认14pt文本"}, .soft_wrap = true});
     Column col{ColumnProps{.children = {Node{a}}}};
     layout_root(col, AURORA_W, AURORA_H);
     paint_root(col, AURORA_W, AURORA_H);
@@ -148,7 +148,7 @@ AURORA_TEST_CASE(release_outside_window_retains_selection) {
     EventDispatcher ed;
     FocusManager fm;
     fm.set_root(&col);
-    Sink dispatch = [&](MouseAction action, float x, float y) -> void {
+    const Sink dispatch = [&](MouseAction action, float x, float y) -> void {
         MouseEvent e;
         e.action = action;
         e.button = MouseButton::Left;
@@ -170,9 +170,9 @@ AURORA_TEST_CASE(release_outside_window_retains_selection) {
 AURORA_TEST_CASE(adjacent_soft_wrap_texts_do_not_overlap) {
     // 3) 相邻两 soft_wrap 文本不应重叠：默认 soft_wrap=true 时 Text 仅当确需换行才填满，
     //    短文本按内容宽度上报，兄弟控件可并排且各自可选中。
-    auto a = make_left_aligned_text();
+    const auto a = make_left_aligned_text();
     // CJK-LITERAL: cjk-fixture - second Han text keyed into the non-overlap hitbox assert
-    auto b = std::make_shared<Text>(
+    const auto b = std::make_shared<Text>(
         TextProps{.content = LocalizedString{"Text控件"}, .text_align = TextAlign::Left, .soft_wrap = true});
     Row row{RowProps{.children = {Node{a}, Node{b}}}};
     layout_root(row, AURORA_W, AURORA_H);
@@ -192,7 +192,7 @@ AURORA_TEST_CASE(adjacent_soft_wrap_texts_do_not_overlap) {
 AURORA_TEST_CASE(static_dispatch_path_rtl_drag_reaches_leftmost_char) {
     // 4) 静态 EventDispatcher::dispatch 路径（每个事件委托进程内持久实例 → 保留指针捕获）：
     //    与 run_demo 一致的真实派发路径下，RTL 拖选越过左边界仍延伸到索引 0（含最左'默'）。
-    auto a = make_left_aligned_text();
+    const auto a = make_left_aligned_text();
     Column col{ColumnProps{.children = {Node{a}}}};
     layout_root(col, AURORA_W, AURORA_H);
     paint_root(col, AURORA_W, AURORA_H);
@@ -205,7 +205,7 @@ AURORA_TEST_CASE(static_dispatch_path_rtl_drag_reaches_leftmost_char) {
 
     FocusManager fm;
     fm.set_root(&col);
-    Sink dispatch = [&](MouseAction action, float x, float y) -> void {
+    const Sink dispatch = [&](MouseAction action, float x, float y) -> void {
         MouseEvent e;
         e.action = action;
         e.button = MouseButton::Left;

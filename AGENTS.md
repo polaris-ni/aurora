@@ -1,6 +1,6 @@
 # AGENTS.md — Aurora 协作单一入口（路由 + 硬约束）
 
-> 本文件只做两件事：① 把人 / AI 导到 `codespec/` 里的唯一权威文档；② 列出不可违反的硬约束。**细则一律不在这里**（体量受门禁 `check_agents_size` 守护，超 8 KiB 红灯）；完整导航见 §4。
+> 目的：① 把开发者 / AI 引导至 `codespec/` 里的唯一权威文档；② 列出不可违反的硬约束，**细则不在这里**，完整导航见 §4。
 
 ---
 
@@ -9,24 +9,24 @@
 C++20 跨平台 **AI-first** GUI 库：声明式 + 响应式 + 概念可枚举，纯软件栅格 `Painter` 渲染（**无 `Renderer` 接口、帧级 DisplayList、不依赖 GPU**），单线程 UI + 同步事件 + 细粒度响应式信号，编译型静态库交付。
 
 - 命名空间 `aurora`；唯一伞头 `aurora/aurora.h`。
-- alpha 预览版，**不构成稳定性承诺**；版本号以 `CHANGELOG.md` 顶部 `currentVersion` 为准（`check_version_consistency` 守门），破坏性变更按 semver 记入并给迁移路径（`SPECIFICATIONS.md` §12）。
+- alpha 预览版，**不构成稳定性承诺**；版本号以 `CHANGELOG.md` 顶部 `currentVersion` 为准，破坏性变更按 semver 记入并给迁移路径（`SPECIFICATIONS.md` §12）。
 
 ## 2 目录布局
 
-代码在 `include/`（公共头）+ `src/aurora/`（实现，非模板纯逻辑离头）；`tools/`（生成器/服务器/bench/门禁/真机探针）、`cmake/`（16 模块，顶层编排）、`third_party/`；`tests/`（`utest_`/`itest_`/`etest_`）、`examples/demos/`（与公共源 1:1，CMake GLOB）；**文档全在 `codespec/`**。根留 `AGENTS.md`+数据 `aurora_api.json`（勿手改）、`CHANGELOG.md`、`CMakePresets.json`、`compile_flags.txt`；`build*/` 产物不入版控、不可引用。
+代码在 `include/`（公共头）+ `src/aurora/`（实现，非模板纯逻辑离头）；`tools/`（生成器/服务器/bench/门禁/真机探针）、`cmake/`（编译脚本）、`third_party/`（三方文件，不允许修改）；`tests/`（`utest_*`单元测试/`itest_*`集成测试/`etest_*`端到端测试）、`examples/demos/`（使用demo）；**文档全在 `codespec/`**。根留 `AGENTS.md`+数据 `aurora_api.json`（勿手改）、`CHANGELOG.md`、`CMakePresets.json`、`compile_flags.txt`；`build*/`等中间产物不入Git、不可引用。
 
-## 3 构建 · 测试 · 门禁（复制即用）
+## 3 构建 · 测试 · 门禁
 
 ```powershell
-cmake --preset ninja                    # configure（Ninja + gcc/g++）
-cmake --build build --target <tgt>      # 建库/工具/测试；全量 demo 用 --target demos
-ctest --preset ninja-test               # 全量测试 + 全部静态门禁（并行、进程隔离）
-cmake --build build --target aurora_api_json  # 改动 widget / 类型 / 属性键后刷新
+cmake --preset ninja # configure（Ninja + gcc/g++）
+cmake --build build --target <tgt> # 建库/工具/测试；全量 demo 用 --target demos
+ctest --preset ninja-test # 全量测试 + 全部静态门禁（并行、进程隔离）
+cmake --build build --target aurora_api_json # 改动 widget / 类型 / 属性键后刷新
 ```
 
 - 预设 `mingw`/`wasm`；变体 `ninja-shards`（分片=4）、`measure`（ccache 关，供耗时对照）；门禁 `lint`（Clang-Tidy）、`format-check`（clang-format，改写 `format`）、`docs`（Doxygen）。门槛 CMake ≥ 3.20 + C++20 编译器。
 - demo 不进默认构建（`EXCLUDE_FROM_ALL`）；新增 `.cpp` 须刷 GLOB（`CONFIGURE_DEPENDS` 多自动，否则碰 `CMakeLists.txt`）；禁本机绝对路径（`check_no_hardcoded_paths`）。开关/宏/变量只列 `BUILD_OPTIONS.md`。
-- **测试写法**见 `CODING_STANDARDS.md` §3.1–§3.2：一源 ↔ 一 `utest_*.cpp` ↔ 一 `demo_*.cpp`；`AURORA_TEST_CASE` 静态注册、**套件名=文件 stem**；feature 宏未开 `#else` 写 `AURORA_TEST_SKIP`；含 golden 从仓库根直跑。
+- **测试写法**见 `CODING_STANDARDS.md` §3.1–§3.2：一个源文件（相同模块的.h和.cpp算成一个）对应一个 `utest_*.cpp`和`demo_*.cpp`；`AURORA_TEST_CASE` 静态注册、**套件名=文件 stem**；feature 宏未开 `#else` 写 `AURORA_TEST_SKIP`；含 golden 从仓库根直跑。
 
 ### 3.1 变更 → 必跑门禁
 
@@ -38,25 +38,27 @@ cmake --build build --target aurora_api_json  # 改动 widget / 类型 / 属性�
 | `core/` 依赖/边界/目录/伞头 | `check_core_layer_boundary`、`check_arch_module_map`、`check_umbrella_header` |
 | 平台/后端分支、feature 宏 | `check_platform_macros` + CI `toggles` 矩阵 |
 | `codespec/` 文档与交叉引用 | `check_codespec_xref`、`check_code_doc_sync`、`check_manual_test_format`、`check_change_proposals` |
-| `AGENTS.md` 本身 | `check_agents_size`（> 8 KiB 红灯，超限下沉勿放宽） |
+| `AGENTS.md` 本身 | `check_agents_size` |
 | 版本号/`CHANGELOG.md` | `check_version_consistency` |
+
+跑`clang-tidy`的`lint`门禁耗时较长，本地只跑修改的文件。
 
 ---
 
 ## 4 文档导航（codespec/）
 
-顶层 6 份正文（标「权威」= 该领域唯一权威，冲突时以它为准）+ 子系统规格 9 份 + 生成物 `ERROR_CATALOG.md`（数据驱动、路径硬编码不可移动）+ `manual-test/`（22 份手工测试，不进本导航）+ `changes/`（变更提案，契约见 `changes/README.md`）。
+顶层正文（标「权威」= 该领域唯一权威，冲突时以它为准）+ 子系统规格 + 生成物 `ERROR_CATALOG.md`（数据驱动、路径硬编码不可移动）+ `manual-test/`（手工测试，不进本导航）+ `changes/`（变更提案）。
 
 | 你要解决的问题 | 读这个 |
 |:---|:---|
-| 定位、设计原则、需求清单（30 条）、文档地图、版本门禁 | `SPECIFICATIONS.md`（§5 特性 / §8 地图 / §12 版本门禁） |
-| 架构、分层、运行时、模块映射、数据流、事件、渲染、设计不变量（11 条）、性能、测试与 CI、端到端流程、门禁矩阵 | 权威 `ARCHITECTURE.md`（§14 测试与 CI / §15 变更落地流程） |
+| 定位、设计原则、需求清单、文档地图、版本门禁 | `SPECIFICATIONS.md`（§5 特性 / §8 地图 / §12 版本门禁） |
+| 架构、分层、运行时、模块映射、数据流、事件、渲染、设计不变量、性能、测试与 CI、端到端流程、门禁矩阵 | 权威 `ARCHITECTURE.md`（§14 测试与 CI / §15 变更落地流程） |
 | 错误处理、命名、日志纪律、注释形态、字面量语言、AI 友好性、SemVer、提交信息、反例速查 | 权威 `CODING_STANDARDS.md`（§10 提交 / §13 注释 / §14 字面量 / §15 反例） |
 | CMake 开关、缓存变量、feature 宏、环境变量、find_package 集成 | 权威 `BUILD_OPTIONS.md` |
 | 概念语义、跨框架对照、状态作用域决策树 | `CONCEPTS.md` |
-| 最小可编译配方（42 组） | `GUIDELINE.md` |
+| 最小可编译配方 | `GUIDELINE.md` |
 
-子系统规格 9 份（`codespec/specification/`，模块域→文件映射见 `SPECIFICATIONS.md` §5）：`01-core.md`、`02-state.md`、`03-layout-render.md`、`04-widget.md`、`05-event-navigation.md`、`06-app-platform.md`、`07-environment-modifier.md`、`08-tooling.md`、`09-cli.md`。
+子系统规格（`codespec/specification/`，模块域→文件映射见 `SPECIFICATIONS.md` §5）：`01-core.md`、`02-state.md`、`03-layout-render.md`、`04-widget.md`、`05-event-navigation.md`、`06-app-platform.md`、`07-environment-modifier.md`、`08-tooling.md`、`09-cli.md`。
 
 > 模块存在性：`a11y` 跨 `core/`+`widget/`，`audio` 属 `media/`（经 `AURORA_ENABLE_AUDIO`）；均未单列 spec 但非不存在。编号写法见 `CODING_STANDARDS.md` §11。
 
@@ -77,6 +79,6 @@ cmake --build build --target aurora_api_json  # 改动 widget / 类型 / 属性�
 11. **引用须可达且随仓库分发**：文档引用写仓库相对路径+真实章节锚点，代码引用不写行号；**禁引** `*.draft.md`/`.workbuddy/`、`build*/`本机绝对路径；未落地规划标「计划/待建」。
 12. **公共 API 注释按 `CODING_STANDARDS.md` §13 写全**：`///`（尾注 `///<`）、命令 `@` 前缀、`@brief` 居首，按 §13.5.2 补 `@param`/`@return`/`@tparam`/枚举项；豁免写 `DOC-EXEMPT: <规则> <原因>`。
 13. **字符串字面量不得含中文**（`CODING_STANDARDS.md` §14）：注释可中文，字面量抵不受本库控的终端代码页；例外仅限功能必需中文并就地标 `CJK-LITERAL: <类别> - <原因>`。
-14. **改动先落变更提案再落码**：触及公共 API/分层边界/后端矩阵或性能门槛，先在 `codespec/changes/<语义短名>/proposal.md` 写清动机、变更内容、验收判据与回写落点，状态按 `已提议 → 实施中 → 已归档` 流转；日常小修无需提案。
+14. **<试行>改动先落变更提案再落码**：触及公共 API/分层边界/后端矩阵或性能门槛，先在 `codespec/changes/<语义短名>/proposal.md` 写清动机、变更内容、验收判据与回写落点，状态按 `已提议 → 实施中 → 已归档` 流转，代码、注释、文档不得出现提案编号和语义短名（因为提案可能被删除）；日常小修无需提案。
 
 > 规则增量由 §3.1 门禁把关；存量豁免白名单内置脚本并注原因；门禁输出必须全 ASCII。

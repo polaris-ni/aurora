@@ -16,7 +16,6 @@
 // ============================================================================
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -206,7 +205,7 @@ namespace detail {
         return label;
     }
     if (role == AccessibilityRole::Text || role == AccessibilityRole::TextInput) {
-        if (auto text = w.accessibility_text(); !text.empty()) {
+        if (const auto text = w.accessibility_text(); !text.empty()) {
             return std::string{text};
         }
         return w.accessibility_value();
@@ -294,7 +293,7 @@ inline auto resolve_label_ref(AccessibilityNode *n, const LabelRefIndex &idx,
         return;
     }
     AccessibilityNode *target = it->second;  // 引用键命中的目标节点（可能自身也是引用者）
-    if (std::find(stack.begin(), stack.end(), target->id) != stack.end()) {
+    if (std::ranges::find(stack, target->id) != stack.end()) {
         stack.pop_back();
         report_label_ref_once(
             "The labelled_by reference chain forms a cycle, "

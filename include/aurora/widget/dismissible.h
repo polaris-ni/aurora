@@ -37,7 +37,7 @@ class Dismissible : public SingleChild {
     /// @param axis 拖动主轴（Horizontal/Vertical），默认水平。
     /// @param spring 松手裁决后的飞出/回位弹簧参数，默认 SpringDescription{}。
     explicit Dismissible(Node child, DragAxis axis = DragAxis::Horizontal,
-                         SpringDescription spring = SpringDescription{})
+                         const SpringDescription &spring = SpringDescription{})
         : SingleChild(std::move(child)), dtd_(axis, 200.0, spring) {
         // spring 阶段由每帧 tick 驱动，须开启 gesture-tick（同 ToastHost 模式）。
         needs_gesture_tick_ = true;
@@ -84,6 +84,29 @@ class Dismissible : public SingleChild {
     /// @brief spring 阶段是否仍在推进（跟手不算动画）。
     /// @return spring 动画进行中为 true。
     [[nodiscard]] auto is_animating() const -> bool { return dtd_.is_animating(); }
+
+    /// @brief 指针拖拽通道：事件先喂给消除识别器（拖动跟手），松手时做飞出 / 回位裁决；
+    ///        拖动与 spring 飞行期间消费事件，否则交回修饰链下发子树。
+    /// @param e 鼠标事件；拖动 / 飞出中被置 `is_handled`。
+    auto on_pointer_event(MouseEvent &e) -> void override {
+        const bool was_dragging = dtd_.is_dragging();  // Release 会先结束识别，须先采样
+        dtd_.on_mouse(e);
+        if (e.action == MouseAction::Release && was_dragging) {
+            dtd_.on_release();  // 松手裁决：阈值判飞出/回位，spring 接管
+        }
+        if (dtd_.is_dragging() || dtd_.is_animating()) {
+            e.is_handled = true;  // 拖动/飞出中：消费事件，父级不响应点击。
+        } else {
+            SingleChild::on_pointer_event(e);
+        }
+    }
+
+    /// @brief 触摸通道：喂给消除识别器后原样下发子树（拖拽由派发器按触点合成的鼠标事件驱动）。
+    /// @param e 触摸事件。
+    auto on_pointer_event(TouchEvent &e) -> void override {
+        dtd_.on_touch(e);
+        SingleChild::on_pointer_event(e);  // 修饰链照常
+    }
 
     /// @brief 消除行程（逻辑 dp；默认 200，构造后可调）。
     double travel_distance = 200.0;
@@ -132,24 +155,6 @@ class Dismissible : public SingleChild {
         p.set_alpha(prev_alpha);  // Painter 无栈：手动还原（见 set_alpha 契约）
     }
 
-    auto on_pointer_event(MouseEvent &e) -> void override {
-        const bool was_dragging = dtd_.is_dragging();  // Release 会先结束识别，须先采样
-        dtd_.on_mouse(e);
-        if (e.action == MouseAction::Release && was_dragging) {
-            dtd_.on_release();  // 松手裁决：阈值判飞出/回位，spring 接管
-        }
-        if (dtd_.is_dragging() || dtd_.is_animating()) {
-            e.is_handled = true;  // 拖动/飞出中：消费事件，父级不响应点击。
-        } else {
-            SingleChild::on_pointer_event(e);
-        }
-    }
-
-    auto on_pointer_event(TouchEvent &e) -> void override {
-        dtd_.on_touch(e);
-        SingleChild::on_pointer_event(e);  // 修饰链照常
-    }
-
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         SingleChild::tick_gestures(now);
         // spring 推进：以墙钟差为 dt（tick 由 Application::tick 每帧驱动）。
@@ -168,7 +173,7 @@ class Dismissible : public SingleChild {
     }
 
   private:
-    auto fire_dismissed() -> void {
+    auto fire_dismissed() const -> void {
         if (on_dismissed_) {
             on_dismissed_();
             return;  // 自定义回调接管摘除语义。
@@ -177,7 +182,7 @@ class Dismissible : public SingleChild {
         remove_from_parent_container();
     }
 
-    auto remove_from_parent_container() -> void {
+    auto remove_from_parent_container() const -> void {
         Widget *w = layout_parent();
         while (w != nullptr) {
             if (auto *container = dynamic_cast<Container *>(w); container != nullptr) {

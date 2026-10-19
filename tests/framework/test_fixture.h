@@ -22,9 +22,6 @@
 
 #include <utility>
 
-#include "test_registry.h"
-#include "test_types.h"
-
 namespace aurora::testing {
 
 /// @brief fixture 基类：AURORA_TEST_F / AURORA_TEST_P / AURORA_TYPED_TEST 的统一契约。

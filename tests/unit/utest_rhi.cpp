@@ -4,7 +4,6 @@
 /// 指针（含负下标 → nullptr 的回退）；SoftwareRhi 逐条转发回 Painter 后帧缓冲与直接绘制逐位一致；
 /// 未绑定目标的 submit 为 no-op；bind 可切换目标。SoftwareRhi 头亦在此直接 include（见下）。
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>

@@ -1,6 +1,6 @@
 # 核心基础层（core）
 
-> 覆盖 `include/aurora/core/`（36 个头文件）与根级 `todo.h`、`commands.h`。
+> 覆盖 `include/aurora/core/`（38 个头文件）与根级 `todo.h`、`commands.h`。
 > 本文件是错误、诊断、日志、异步底座、基础几何类型与 JSON 值容器的**唯一权威**；错误码全量清单见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)（生成物），编码层面的错误写法规则见 [`CODING_STANDARDS.md`](../CODING_STANDARDS.md) §1。
 
 ---
@@ -20,9 +20,11 @@
 | 平台与能力查询 | `platform.h`、`enums.h`、`native_surface.h` |
 | 无障碍（a11y） | `accessibility.h`（角色 / 动作 / 节点 / 事件 / 设置等纯数据类型与指针级钩子）、`a11y_types.h`（状态 / 取值域 / 选区值类型）、`a11y_provider.h`（桥抽象与注册表）、`a11y_text.h`（UTF-8 ↔ UTF-16 偏移映射） |
 | JSON 值容器 | `json.h`（公共轻头；实现位于 `src/aurora/core/json/`，契约见 §9） |
+| HTTP 头集合 | `headers.h`（大小写不敏感、同名保序多值的头表值类型，契约见 §10） |
+| URL 值类型 | `url.h`（解析即规范化的 URL / 相对引用 / 百分号编解码 / 查询参数多值表，契约见 §11） |
 | 其他 | `image.h`、`font.h`、`literals.h`、`version.h` |
 
-根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`、`imperative.h`（命令式逃生舱：就地执行一段命令式代码块）。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`。）
+根级头文件：`aurora.h`（唯一入口）、`aurora_fwd.h`（仅前向声明，供只需指针/引用的编译单元降低包含成本）、`aurora_pch.h`、`commands.h`、`todo.h`、`imperative.h`（命令式逃生舱：就地执行一段命令式代码块）。（原根级 `test_helpers.h` 已迁至 `tests/support/test_helpers.h`，定位为仓库私有测试设施，退出公共 API 与 `aurora_api.json`）
 
 ---
 
@@ -99,7 +101,9 @@ struct Constraints {
 
 `Error`（`core/result.h`）是结构化错误值，字段如下：
 
-`code`（冻结 slug）、`message`、`suggestion`、`docs`、`where`、`hint`、`code_enum`、`severity`、`category`、`auto_fixable`、`retryable`、`fix_category`、`fix_params`。
+`code`（冻结 slug）、`message`、`suggestion`、`docs`、`where`、`hint`、`code_enum`、`severity`、`category`、`retryable`。
+
+其中 `retryable` 是**声明性**标记，只回答「同一输入重跑一次是否可能换到不同结果」，**不**回答「这次该不该重试」。后者由调用方结合幂等性、退避预算与 `error_class_of()` 的归因档共同决定（网络侧的判据与算式见 [`06-app-platform.md`](06-app-platform.md) §8.8.x）；库内唯一按此合成的判定是 `net::detail::should_retry_error()`。
 
 错误码的**单一声明源**是 [`errors.toml`](../errors.toml)，由 `tools/gen/gen_error_codes.cpp` 生成 `error_codes.gen.h`、[`ERROR_CATALOG.md`](../ERROR_CATALOG.md) 与 `aurora_api.json`。新增或修改错误码只改 `errors.toml` 后重跑生成器，不手改产物。
 
@@ -152,7 +156,7 @@ auto widget = restored.value();
 | `code_enum` | 与 `code` 对应的 `ErrorCode`（无码时 `GeneralUnknown`） |
 | `fix` | 可选结构化修复建议 `FixSuggestion` |
 
-`FixSuggestion`（`diagnostics.h`）含 `code`、`description` 与可选 `auto_fix` 回调，`has_auto_fix()` 判断是否可自动修复。
+`FixSuggestion`（`diagnostics.h`）含机器可读 `code` 与人类可读 `description`，只作展示——库产出修复建议，不代调用方改写代码。
 
 `Diagnostic::to_json_line()` 输出 JSON 行，供工具链消费。`severity_str()` / `category_str()` 供遗留代码按字符串比较，新代码应直接用枚举比较（两个 `using` 别名已标记 `[[deprecated]]`）。
 
@@ -169,10 +173,7 @@ auto widget = restored.value();
 | `count()` | 当前累计诊断数 |
 | `get_last_diagnostics()` | 最近诊断环形缓冲（上限 `AURORA_RECENT_CAP` = 64） |
 | `explain_diagnostic(code)` | slug → 人类可读解释，两个重载（字符串 / `ErrorCode`） |
-| `collect_fixes()` | 收集最近诊断中携带的修复建议（不消费，同一 `code` 可能多次出现） |
-| `apply_fix(code)` | 按 `code` 执行一次自动修复，命中返回 `true`，两个重载（slug 字符串 / `ErrorCode`，`diagnostics.h`） |
-| `register_fix(code, fix)` | 注册错误码 → 修复策略映射 |
-| `auto_fix_all()` | 应用全部已注册的自动修复，返回成功修复数 |
+| `collect_fixes()` | 收集最近诊断中携带的修复建议（仅 `code` 非空者，不消费，同一 `code` 可能多次出现） |
 
 ### 4.3 严格模式
 
@@ -730,3 +731,205 @@ class SaxHandler {
 
 语料根默认取仓库内 `tests/fixtures/json_test_suite`，可经环境变量 `AURORA_JSON_TEST_SUITE_DIR`
 覆盖以指向另一份 checkout；语料目录缺失时用例**失败而非跳过**——该资产随仓库分发，缺失即环境错误。
+
+---
+
+## 10 HTTP 头集合（`core/headers.h`）
+
+> 覆盖 `include/aurora/core/headers.h`（header-only 值类型，无 `.cpp`）。
+> 该类型是通用网络栈的两个 `core/` 基础件之一（另一个是 `Url`，契约见 §11）；
+> HTTP / SSE / WebSocket 握手与 Inspector 的头部读写共用它，动机见
+>  §12。
+
+### 10.1 定位与边界
+
+`aurora::Headers` 表达一组「字段名 → 值」，是纯值类型：不含句柄、无共享状态、无平台头，
+可在任意线程拷贝与比较。它之所以不能用 `std::map<std::string, std::string>` 或
+`std::unordered_map` 顶替，是因为 RFC 9110 §5 的三条语义与「按键去重的字典」直接冲突：
+
+| 语义 | 内容 | 被字典形态破坏的方式 |
+|:---|:---|:---|
+| 字段名大小写不敏感 | `Content-Type` 与 `content-type` 是同一个字段 | 大小写敏感的键使同一字段读成两个 |
+| 同名字段可重复且顺序有意义 | `Set-Cookie` 每条独立生效，多条不得合并 | 按键去重会静默丢弃第二条起的全部 Cookie |
+| 书写拼写需保留 | 序列化到线上时按写入者拼发送 | 统一小写会改变可观测的报文形态 |
+
+因此存储是**有序条目表**（`std::vector<Entry>`），名字折叠只发生在比较时；`entries()` 是遍历与
+序列化的唯一出口，给出原始拼写与插入顺序。
+
+### 10.2 接口契约
+
+| 接口 | 语义 |
+|:---|:---|
+| `set(name, value)` | 先移除**全部**同名条目，再把新条目**追加到末尾**（非原位覆盖） |
+| `append(name, value)` | 不去重，新条目置于末尾；多值字段的正确写入形态 |
+| `get(name)` | 返回**首个**匹配条目的值，无匹配为 `std::nullopt` |
+| `values(name)` | 返回全部匹配值，按写入顺序；未命中为空序列而非错误 |
+| `contains(name)` | 存在至少一个同名条目 |
+| `remove(name)` | 移除全部同名条目，返回真实条数；重复调用为 no-op（幂等） |
+| `clear()` / `size()` / `empty()` | `size()` 按**条目数**计（同名重复计多条） |
+| `entries()` | 只读条目序列：`{name, value}`，原始拼写 + 插入顺序 |
+| `operator==` | 逐条目比较：名字折叠 ASCII 大小写、值严格比较、**顺序敏感** |
+
+两条口径值得显式记录，因为它们都是「实现容易悄悄走偏」的点：
+
+- **`set` 挪到末尾**是刻意的：让同一 `Headers` 序列化出的字段次序与调用时序一致。HTTP/1.1
+  本身不依赖字段次序，但 Inspector 时间线与测试断言依赖它稳定可复现。
+- **折叠只在 ASCII 字母范围**，不做 locale 相关的 Unicode 折叠：HTTP 字段名本就是 ASCII
+  令牌（RFC 9110 §5.1），非 ASCII 名字按不相等处理；实现用逐字节 `unsigned char` 区间判断，
+  不经 `std::tolower`（后者受 locale 影响且对负值 `char` 是 UB 温床）。
+
+### 10.3 相等语义
+
+顺序敏感是**有意的严格**：折叠后内容相同但次序不同的两个头表判不等。理由是二者序列化出的
+报文不同，而该类型的使用场景（请求构造、响应快照、时间线回放）需要「相等 ⇒ 报文相同」这一
+方向的保证；反向放宽会让 Inspector 的差分把真实的报文变化读成无变化。
+
+### 10.4 层边界与回归
+
+- 只依赖标准库（`<optional>` / `<string>` / `<string_view>` / `<vector>`），由
+  `tools/check/check_core_layer_boundary.py` 守护；不引入 `net/` 任何头，避免 `core → net` 反向依赖。
+- header-only，随伞头 `aurora/aurora.h` 收录（`tools/check/umbrella_manifest.txt` 同步）。
+- 回归：`utest_core_headers`（大小写不敏感存取与原始拼写保留、`append` 保序不折叠、`set`
+  覆盖全部同名并移到末尾、`remove` 计数与幂等、逐条目相等的三个维度：名字折叠 / 值严格 / 顺序敏感）。
+
+---
+
+## 11 URL 值类型（`core/url.h`）
+
+> 覆盖 `include/aurora/core/url.h` + `src/aurora/core/url.cpp`。
+> 两个 `core/` 基础件中的另一个（`Headers` 见 §10）；`Request` / `WebSocket::connect` /
+> Inspector 的 URL 读写共用它，动机见
+>  §12。
+
+### 11.1 定位与边界
+
+存在的理由是提案里的一句话——**手拼 URL 恰是 AI 生成代码的头号错误源**。因此网络栈对外的入口一律
+收 `Url`，裸字符串只能经 `Url::parse` 显式进入。`Url` 与 `QueryParams` 都是纯值类型：无句柄、
+无共享状态、无平台头，可在任意线程拷贝与比较。
+
+文法与相对解析按 RFC 3986 手写，不调用任何平台 API：Windows 的 `UrlEscape/UrlUnescape` 是 IE 依赖，
+而「哪些畸形串被谁容忍」会随 libc 漂移——两者都违反 `SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001`
+（同一输入在 Win32 / POSIX / wasm 上必须给出同一结果与同一条诊断）。
+
+### 11.2 解析即规范化
+
+存的是规范化后的分量，不是原文；`to_string()` 输出规范形态，且 `parse(x.to_string())` 必得回与
+`x` 相等的对象——**幂等是「规范化」的定义**，由黄金语料逐行兜住而不是靠单条断言。
+
+| 口径 | 内容 | 不这么做的后果 |
+|:---|:---|:---|
+| scheme 与注册名主机转小写 | `HTTPS://Example.COM` → `https://example.com` | 同一主机因拼写产生两个缓存键 |
+| 三元组大写化 + 无保留还原 | `%41`→`A`、`%7e`→`~`、`%2f`→`%2F` | 语义相同的两个 URL 判不等 |
+| `%2F` **不**还原成 `/` | 路径里 `a%2Fb` 与 `a/b` 是两个资源 | 悄悄合并不同资源 |
+| 绝对 URL 做点段消除 | `/a/../b` → `/b`（RFC 3986 §5.2.4 / §6.2.2） | 规范化不完整 |
+| 相对引用**保留**点段 | `../g` 原样存 | 提前消除会抹掉引用携带的层级（§5.2.4 定义在合并之后） |
+| 主机尾点去除 | `example.com.` ≡ `example.com` | 根标签是同一名字的另一种拼写 |
+
+`%2e%2e` / `%2e` 的归宿由「先还原无保留字符、再做点段消除」的次序决定，因此与 WHATWG 同色
+（`http://a/b/c/%2e%2e/g` → `http://a/b/g`）；`%2F` 因不属无保留集，永远不会变成新的分隔符。
+
+拒绝而非「自动修复」的输入一律返回 `net-url-invalid`，`message` 携 `detail=` 指明原因与位置：控制字节
+与空格（不做浏览器式补 `%20`——静默改写会把手抖的空格变成对端可见的资源身份）、截断或非法的百分号
+三元组、主机段的百分号转义、非点分四段 / 前导零 / 超范围的 IPv4、括号不配对或 `::` 多现的 IPv6、
+含空标签或首尾为 `-` 的注册名、`xn--` 后为空的标签、非十进制或超 65535 的端口、非法 scheme token。
+
+### 11.3 接口契约
+
+编码态与解码态的分工是这套 API 的第一规则：**分量出口恒为编码态线上形态**（`userinfo()` /
+`host()` / `path()` / `query()` / `fragment()`，`to_string()` 直接拼接它们），可读文本走
+`percent_decode()` 与 `query_params()`（解码态）。`from_parts` 与出口同口径，收**编码态**入参。
+
+| 接口 | 语义 |
+|:---|:---|
+| `parse(text)` | 绝对 URL 与相对引用都接受；引用形态 `is_absolute()` 为 false |
+| `from_parts(scheme, host, port, path, query, fragment)` | 结构化入口；裸 IPv6 自动补方括号；`nullopt` 与空串在 query / fragment 上语义不同（「无该段」vs「写了 `?` / `#`」） |
+| `resolve(reference)` | 引用带 scheme 时整体胜出（基址不参与，故 `http:g` → `http:g`）；基址无 scheme 时报错而非猜 |
+| `port()` / `effective_port()` | 前者只回答「文本里写了没有」，后者回答「连到哪」（`http`/`ws` → 80，`https`/`wss` → 443，其余 scheme 无默认值）；显式写出的默认端口原样保留，不折叠 |
+| `host()` / `host_kind()` | 主机三型显式：`Name` / `Ipv4` / `Ipv6` / `Empty`，由解析结果决定而非按字符串形态猜 |
+| `query_params()` | 查询串 → 有序多值表（键值均解码态） |
+| `is_secure()` | **只看 scheme**：`http://127.0.0.1` 依然明文，`NetPolicy` 据此拒非白名单明文，而不是靠「本机地址看起来无害」放行 |
+| `to_unicode_host()` | 显示出口：punycode 标签解回 UTF-8；字面量原样返回 |
+| `operator==` | 逐分量比较规范化后的存储形态 |
+
+`PercentSet` 四套集合的差别只在定界符，选错即改变资源身份：
+
+| 集合 | 额外保留 | 用途 |
+|:---|:---|:---|
+| `Unreserved` | 无（仅字母数字与 `-` `.` `_` `~`） | 生成不可歧义的片段 |
+| `PathSegment` | `!$&'()*+,;=` `:` `@` `/` | 路径段（RFC 3986 §3.3） |
+| `QueryParam` | 同上再加 `?`，但 `&` `=` 作定界符须转义 | 查询串里的单个键或值 |
+| `Fragment` | 同上再加 `#` | 片段 |
+
+`QueryParams` 与 §10 `Headers` 同构而口径相反：键**大小写敏感**（URL 查询串没有同键折叠惯例，
+`?a=1&A=2` 是两个键）、同键不折叠且保序、`a=` 是空串而非缺失、`&&` 的空槽不产出幽灵参数。
+
+`percent_decode()` 不把 `+` 当空格——那是 `application/x-www-form-urlencoded` 的历史约定，不外溢到
+URL 层；截断的三元组判失败而非「原样保留」，否则 `%2` 会一路走到对端再变成不可预期字节。
+
+### 11.4 主机与 IDNA
+
+注册名走**缩减版 IDNA**：逐标签处理，纯 ASCII 标签原样保留，含非 ASCII 的标签做 ASCII 小写 +
+punycode（RFC 3492 §6.3，`adapt` 见 §6.1）。参数为 base 36 / tmin 1 / tmax 26 / skew 38 / damp 700 /
+initial bias 72 / initial n 0x80，前缀 `xn--`、定界符 `-`。
+
+三条有意的限制（语料里有成对向量把差异钉成事实，见 `tests/fixtures/url_vectors/README.md`）：
+
+- **不做 Unicode 归一化**（无 NFC/NFD、无 Unicode 大小写折叠），只做 ASCII 小写。所以 `MÜNCHEN.test`
+  → `xn--mnchen-psa.test`，而浏览器先按 UTS #46 把 `Ü` 折成 `ü` 再编码，得 `xn--mnchen-3ya.test`；
+  `ß` 按码点走 `xn--zca`，与主流浏览器的 nontransitional 结果同色。取舍理由：归一化表随 Unicode
+  版本变动，而本库要求各平台逐值同色，优先级高于与浏览器判等。
+- **主机段拒绝百分号转义**（`http://m%C3%BCnchen.test/` 直接报错）：转义在 DNS 侧没有 1:1 对应，
+  且 `%2e%2e` 一类写法可被利用做前缀仿冒。
+- **非四段数字主机按注册名**（`1.2.3`、`1.2.3.4.5` 是 `Name`）：本层不做 `inet_aton` 式缩写，
+  免得同一地址有两种拼写却判不等。
+
+### 11.5 层边界与回归
+
+- 只依赖标准库与 `core/result.h`；IPv4 / IPv6 语法在本层自行校验，**不**引用 `net/`（避免
+  `core → net` 反向依赖），但口径与 `net::Endpoint` 一致（点分四段、禁前导零），由
+  `tools/check/check_core_layer_boundary.py` 守护。
+- 实现落在 `src/aurora/core/url.cpp`（非模板纯逻辑离头）；头随伞头 `aurora/aurora.h` 收录，
+  `tools/check/umbrella_manifest.txt` 同步。
+- 错误码一枚：`net-url-invalid`（`codespec/errors.toml` 登记 → 生成 `error_codes.gen.h` 与
+  [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)），全族共用，畸形细节进 `message` 的 `detail=`。
+- 回归 `utest_core_url`（14 例，纯内存、无平台分支）：规范化五口径与幂等、`port()` 与
+  `effective_port()` 的三态、四套 `PercentSet` 与解码侧 `+`、`QueryParams` 保序多值与键大小写敏感、
+  主机三型与 IDNA 往返、`from_parts` 的裸 IPv6 补括号、相等比较按规范化形态，外加两个**黄金语料驱动**
+  的用例——`tests/fixtures/url_vectors/parse.tsv`（解析 / 规范化 / 拒绝，含 IDN 与 punycode 多次插入
+  向量）与 `tests/fixtures/url_vectors/resolve.tsv`（RFC 3986 §5.4 两张示例表逐条照录）。语料的
+  来源、格式与加行方式见该目录 `README.md`。
+
+## 12 压缩解压编解码器与注册表（`core/compression.h`）
+
+### 12.1 定位与边界
+
+`aurora::compression` 回答两个问题：**「把一份按某种格式压缩的字节流还原成原始字节」**与**「应用如何换掉或新增某个格式的实现」**。它是 core 层共用基础件（与 `Headers` / `Url` 同格局），首个消费者是网络栈 HTTP 发起侧的 `Content-Encoding` 透明解压（见 `06-app-platform.md` §8.8.20）；任何需要「按格式压缩 / 解压」的模块复用本能力，不各自 vendored 一份 inflate。
+
+四条形态约束：
+
+- **格式 ID 是小写字符串，显式入参，不做内容嗅探**：格式与线上包装的对应是精确的——`AURORA_COMPRESS_FORMAT_GZIP` = RFC 1952 包装、`AURORA_COMPRESS_FORMAT_ZLIB` = RFC 1950 包装、`AURORA_COMPRESS_FORMAT_DEFLATE` = RFC 1951 裸 DEFLATE。内置三格式经头文件预定义常量暴露（先例：`net/detail/http_encoding.h` 的 `AURORA_HTTP_ACCEPT_ENCODING`）；自定义格式（zstd / brotli / 应用私有 ID）由应用自选字符串注册。格式 ID 按字节精确匹配、大小写敏感：拼错的 ID 在运行期落 `compression-unavailable` 且 detail 点名（诚实失败，不静默回落）。HTTP 的 `Content-Encoding: deflate` 名义上是 zlib 格式但存在历史服务器发裸流的歧义，该歧义的消解（先试 zlib、失败回落裸流）属 HTTP 层编排，不进本通用 API。
+- **实现可替换、注册即用**：全部入口经 `CompressionCodecRegistry` 按格式 ID 分派；`register_codec` 为**覆盖语义**（同格式 ID 后注册者替换先注册者，内置 wuffs 实现即被覆盖对象），`unregister_codec` 清除覆盖并回落内置（若有）——注销即回默认态，测试隔离因此确定。编解码器只写流式解压即自动获得一次性入口（框架派生）；编解码器方法返回的错误原样透传（不包装、不改码）。
+- **解压炸弹防护双层**：实现层收到的 `DecompressOptions::max_output_bytes` 即产出上限，实现应自行止步（CPU 视角不白烧）；框架层再以计数装饰器兜底——越限即止交并落 `compression-output-too-large`，不依赖实现是否自觉。限额的单一事实源是 `DecompressOptions`，装饰器是兜底而非第二真源。
+- **注入路径恒在**：`AURORA_ENABLE_COMPRESSION`（默认 ON）只门控内置 wuffs 编解码器的**注册**；编解码器抽象、注册表与自由函数恒编入——关闭宏的构建里注册自定义编解码器即可用（诚实降级不静默把压缩字节当明文交出）。
+
+### 12.2 接口契约
+
+- 格式 ID：`std::string_view` 入参；注册表内部以 `std::string` 持存，调用方的 `string_view` 不要求长命（注册即拷贝）。错误 detail 直接点名格式 ID 字符串，无枚举到文本的映射表。
+- `class CompressionCodec`（抽象基类）：`name()` 纯虚（实现方稳定标识，诊断与 `registered()` 用）；`can_compress()` 默认 false；`compress(format, input, options)` 默认落 `general-not-supported`（detail 带 name()）；`create_decompressor(format, options)` 默认落 `compression-unavailable`（流式是可选能力，不实现即没有）。**两方法首参为注册表分派时透传的槽位格式 ID**——同一实现可注册到多个格式 ID（一份 zlib 绑定同服 gzip 与 zlib 两槽、内置 wuffs 一份实现服务三族），格式绑定在注册点、实现自身不持格式状态。全部方法 const、实现须线程安全（同 `ImageCodec` 契约）；五法则禁拷贝移动、析构虚，只经 `shared_ptr` 注入。
+- `class Decompressor`（抽象基类）：`push` / `finish` 流式契约与逐字语义不变（const 限定、可空跨段、单条流作用域）；实例经 `unique_ptr` 持有，moved-from 即空指针（经其调用属调用方用法错误，库不设「已移动」状态）。push-after-finish 落 `compression-data-corrupt`、finish 幂等由注册表交出的装饰器**统一收口**，编解码器实现可免于自行维护流态。经基类指针删除，析构虚。
+- `DecompressSink`：解压产物消费回调（`std::function<void(std::span<const char>)>`），同步调用，不得在回调内再驱动同一实例。
+- `CompressOptions{level}`：单旋钮 `optional<int>`，nullopt = 实现自定义默认，数值语义由实现定义（如 zlib 0–9 / zstd 1–22），框架只透传不解释——不为猜测中的编码器预造旋钮阵。
+- `CompressionCodecRegistry`（进程单例，`instance()` 首次访问按宏懒注册内置三族）：内置 + 覆盖两张表、互斥量护槽位、全部方法 const（与 `ImageCodecRegistry` 同形态）；分派时锁内取 `shared_ptr` 副本、锁外调用实现——不在持锁期间运行实现方代码，与实现内重入注册也不会互锁。`registered()` 诊断列表逐格式给出当前生效实现（覆盖优先），条目形态 `RegisteredCodec{format, name}`，按格式 ID 字典序。
+- 自由函数 `register_codec` / `unregister_codec` / `compress` / `decompress` / `create_decompressor`：一行转调单例同名方法，第一参数均为格式 ID；一次性 `decompress` 在框架侧由流式派生（create → push 全量 → finish 收集），语义与流式逐字等价。
+- 不可用口径分两种 detail（码同为 `compression-unavailable`）：格式无任何编解码器 → 点名格式 ID（宏关闭的构建追加内置缺席成因字样）；有编解码器但 `can_compress()` 为假 → 点名实现名与缺失的方向（由注册表压缩分派前预检产生）。
+
+### 12.3 wuffs 驱动口径（跨轮协程）
+
+内置实现对三方件 wuffs（`third_party/wuffs`，单文件 C 库）的复用：`wuffs_{gzip,zlib,deflate}__decoder` 经 `transform_io` 从 src 压缩字节向 dst 产出解压字节。**wuffs 的 io_transformer 是可恢复协程**：每次调用从 `a_dst->meta.wi` 重建续写指针，并在挂起点把新产产物快照进内部 32 KiB 窗口。故驱动循环必须**保留 dst 写位置、消费只推进 `meta.ri`、缓冲满时 `compact`**；轮次间把 `meta.wi` 重置为 0 会令写位置回退、内部历史计数与缓冲区内容错位，表现为伪 `#deflate: bad distance`（小载荷单轮完成不触发，大载荷跨轮必触发——由 `utest_core_compression` 的三格式大夹具对拍钉死）。wuffs 对压缩格式只提供解码器（无任何编码器符号），压缩方向的实现供给经注册表交给应用，内置实现 `can_compress()` 恒假。
+
+### 12.4 层边界与回归
+
+- 公共头只依赖标准库与 `core/result.h`；wuffs 只在实现 `src/aurora/core/compression.cpp` 出现（对齐 `core/image.cpp` 桥接编解码器的先例），`tools/check/check_core_layer_boundary.py` 守护头层不反向依赖。
+- 头随伞头 `aurora/aurora.h` 收录；压缩格式已非枚举，`tools/include/known_enums.h` 与 `tests/integration/itest_known_enums.cpp` 相应移除 `CompressionFormat` 登记（格式 ID 走字符串，不进 `aurora_api.json` 的 `enums` 段）。
+- 错误码三枚（`codespec/errors.toml` 登记 → 生成 `error_codes.gen.h` 与 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）：`compression-data-corrupt`（流损坏 / 截断 / trailing garbage）、`compression-output-too-large`（越 `max_output_bytes`）、`compression-unavailable`（格式无注册实现——detail 点名 ID；或注册实现不支持该方向——detail 点名实现与方向）。
+- 回归 `utest_core_compression` 按用例分腿（TEST-R6 纪律两腿逐名可比）：**注册表契约用例双腿实跑**——三枚常量取值、路由与调用计数、覆盖 / 注销回落、方向独立、未知格式与大小写敏感口径、框架护栏对不限额桩兜底、一次性与流式对拍、装饰器流态收口、诊断列表、压缩预检 detail、宏宏观数值（体内分岔）；**内置 golden 用例仅宏开腿实跑**——三格式小载荷逐值往返、截断与中部损坏落 corrupt、炸弹上限差一字节即拒（等于即放）、流式逐字节喂入对拍且大产物经 Sink 多段交出（三格式大载荷各一遍）、trailing garbage、finish 后再 push、finish 幂等、`compress` 恒 unavailable、空输入落 corrupt、覆盖 gzip 槽后改走桩且注销逐字节回落内置。

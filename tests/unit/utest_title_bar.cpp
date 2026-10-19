@@ -14,7 +14,6 @@
 /// 该点在栏的布局盒之外。弹窗按真实交互路径展开（悬停最大化钮 ≥400ms），不走私有入口。
 
 #include <chrono>
-#include <cstddef>
 #include <memory>
 #include <string>
 #include <thread>

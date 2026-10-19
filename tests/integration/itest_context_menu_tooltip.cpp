@@ -33,7 +33,7 @@ AURORA_TEST_CASE(menu_item_construction_and_submenu) {
 }
 
 AURORA_TEST_CASE(tooltip_node_visibility_follows_delay) {
-    TooltipNode tt{"Hello Tooltip", 100.0F};
+    const TooltipNode tt{"Hello Tooltip", 100.0F};
     AURORA_TEST_CHECK_STREQ(tt.text(), "Hello Tooltip");
     AURORA_TEST_CHECK_NEAR(tt.delay_ms(), 100.0F, 1e-4F);
     AURORA_TEST_CHECK_FALSE(tt.is_visible());
@@ -59,7 +59,7 @@ AURORA_TEST_CASE(tooltip_node_visibility_follows_delay) {
 }
 
 AURORA_TEST_CASE(tooltip_node_negative_delay_clamps_to_zero) {
-    TooltipNode tt{"Instant", -10.0F};
+    const TooltipNode tt{"Instant", -10.0F};
     AURORA_TEST_CHECK_NEAR(tt.delay_ms(), 0.0F, 1e-4F);
 
     const auto now = std::chrono::steady_clock::now();
@@ -69,8 +69,8 @@ AURORA_TEST_CASE(tooltip_node_negative_delay_clamps_to_zero) {
 }
 
 AURORA_TEST_CASE(context_menu_node_open_close_and_position) {
-    std::vector items = {MenuItem{"Copy"}, MenuItem{"Paste"}};
-    ContextMenuNode cm{items};
+    const std::vector items = {MenuItem{"Copy"}, MenuItem{"Paste"}};
+    const ContextMenuNode cm{items};
     AURORA_TEST_CHECK_FALSE(cm.is_open());
     AURORA_TEST_CHECK_EQ(cm.items().size(), 2U);
 
@@ -126,10 +126,10 @@ AURORA_TEST_CASE(modifier_context_menu_open_close) {
 }
 
 AURORA_TEST_CASE(widget_right_click_opens_context_menu) {
-    auto t = std::make_shared<Text>("Target");
+    const auto t = std::make_shared<Text>("Target");
     t->modifier.set(Modifier{}.context_menu(std::vector{MenuItem{"Cut"}}));
 
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     t->mount(ctx);
 
     // 右键按下应被消费并打开上下文菜单。
@@ -155,10 +155,10 @@ AURORA_TEST_CASE(widget_right_click_opens_context_menu) {
 }
 
 AURORA_TEST_CASE(widget_tick_drives_tooltip_delay) {
-    auto t = std::make_shared<Text>("Hover me");
+    const auto t = std::make_shared<Text>("Hover me");
     t->modifier.set(Modifier{}.tooltip("Widget Tip", 80.0F));
 
-    const BuildContext ctx;
+    constexpr BuildContext ctx;
     t->mount(ctx);
 
     const auto now = std::chrono::steady_clock::now();

@@ -12,7 +12,6 @@
 #include "aurora/storage/memory_backend.h"
 #include "framework/aurora_test.h"
 #include "framework/json_literals.h"
-#include "framework/json_value_printer.h"
 
 namespace aurora::test_cases::utest_memory_backend {
 

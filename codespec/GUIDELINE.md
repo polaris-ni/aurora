@@ -192,29 +192,28 @@ auto wide = au::Text("宽 200");          // 派生类型变量
 wide.width(au::px(200));                 // width() 返回 Widget&，不能内联进 Node
 au::Node fixed = std::move(wide);        // Node 仅移动派生对象（Widget 拷贝被删除）
 
-au::Theme theme{ .primary = au::colors::AURORA_BLUE, .background = au::colors::AURORA_WHITE };
+au::Theme theme = au::Theme::light();
+theme.roles.primary = au::colors::AURORA_BLUE;   // 覆写色角色
 auto themed = au::ThemeProvider{ theme, au::Button(au::ButtonProps{ .label = "主题按钮" }) };
 ```
 
-### 10.1 命名令牌与 StyleProps
+### 10.1 色角色与类型安全扩展
 
-除扁平字段外，可登记命名令牌并以「令牌名或具体值」两态写样式，渲染时经 `Theme` 解析：
+控件经 `inherit_theme(ctx)` 读主题：角色为直接字段访问，无哈希查找、无堆分配；控件未显式设色时回落对应角色（各控件契约见 [`specification/04-widget.md`](specification/04-widget.md)）。应用可整体覆写角色基准值，或以类型为键挂自定义令牌面：
 
 ```cpp
-au::Theme theme = au::Theme::light();
-theme.set_token("color.brand", au::Color::red());   // 命名令牌（Color / Font / double 三态）
-theme.set_token("space.md", 16.0);                  // dp 尺寸令牌
+au::Theme theme = au::Theme::dark();
+theme.roles.primary = au::Color{ 90, 120, 240, 255 };   // 覆写主色角色（其余角色不变）
 
-au::ThemeScope scope{ theme, build_content() };     // 注入（沿用 ThemeProvider 机制）
-
-// 组件绘制前用最近祖先 Theme 解析两态样式：
-au::StyleProps sp;
-sp.background    = "color.brand";   // 令牌名 → 解析为 au::Color::red()
-sp.padding       = "space.md";      // 令牌名 → 解析为 16.0
-sp.corner_radius = 8.0;             // 具体值 → 直接采用
-au::ResolvedStyle r = sp.resolve(nearest_theme);
-// r.background == au::Color::red(); r.padding == 16.0; r.corner_radius == 8.0
+// 应用自定义令牌面：类型安全扩展（对标 Flutter ThemeExtension<T>，无字符串回落）
+struct BrandAccent { au::Color gradient_start; au::Color gradient_end; };
+theme.extensions.set<BrandAccent>({ au::Color::red(), au::Color::blue() });
+if (const auto *brand = theme.extensions.get<BrandAccent>()) {  // 未注册返回 nullptr
+    // 用 brand->gradient_start / gradient_end 绘制
+}
 ```
+
+窗口装饰配色（标题栏 / 窗框）另走组件级角色组 `CsdRoles` 与 `title_bar_style_from_theme` 派生通道，明暗档位与默认根注入口径见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §5。
 
 ### 10.2 Checkbox 样式定制
 

@@ -6,7 +6,6 @@
 /// FrameScope 自动喂数据行为随 AURORA_ENABLE_TRACING 的运行时探测（测试 TU 不写 #if 门控）。
 
 #include <cstdint>
-#include <filesystem>
 #include <fstream>
 #include <string>
 

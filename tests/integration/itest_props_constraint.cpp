@@ -133,11 +133,11 @@ AURORA_TEST_CASE(registry_make_degrades_invalid_color_and_reports) {
 }
 
 AURORA_TEST_CASE(length_factories_positive_values) {
-    const auto fxd = Length::fixed(10.0F);
+    constexpr auto fxd = Length::fixed(10.0F);
     AURORA_TEST_CHECK(fxd.kind == LengthKind::Fixed);
     AURORA_TEST_CHECK_NEAR(fxd.value, 10.0F, 1e-3F);
 
-    const auto fr = Length::ratio(0.5F);
+    constexpr auto fr = Length::ratio(0.5F);
     AURORA_TEST_CHECK(fr.kind == LengthKind::Fraction);
     AURORA_TEST_CHECK_NEAR(fr.value, 0.5F, 1e-3F);
 }

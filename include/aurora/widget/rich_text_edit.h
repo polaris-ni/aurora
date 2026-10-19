@@ -14,6 +14,7 @@
 #include "aurora/core/utf8.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/undo_stack.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/text_span.h"
 #include "aurora/widget/widget.h"
 
@@ -23,7 +24,8 @@ namespace aurora {
 struct StyledChar {
     char ch = ' ';  ///< 字符（按 char 存储：UTF-8 多字节序列逐字节展开为多个 StyledChar，共享同一样式）。
     Font font{};  ///< 该字符字体（`to_spans` 合并与行内 run 切分均以 font 相等为键）。
-    Color color = Color::black();  ///< 该字符颜色（同为合并/切分键）。
+    /// @brief 该字符颜色（同为合并/切分键）；空 = 跟随主题 `on_surface`（ThemeScope 换肤即生效）。
+    std::optional<Color> color;
     bool underline = false;  ///< 下划线开关（逐字绘制；不参与 span/run 的相等判据）。
 };
 
@@ -105,14 +107,21 @@ class RichTextEdit : public LeafWidget {
         return *this;
     }
     /// @brief 当前输入颜色。
-    /// @return 当前输入颜色（缺省黑色）。
-    [[nodiscard]] auto current_color() const -> Color { return cur_color_; }
+    /// @return 当前输入颜色；空 = 跟随主题 `on_surface`（ThemeScope 换肤即生效，与 Text/RichText 同口径）。
+    [[nodiscard]] auto current_color() const -> std::optional<Color> { return cur_color_; }
     /// @brief 设置当前输入颜色（链式）。
-    /// @param c 新输入颜色。
+    /// @param c 新输入颜色；空 = 跟随主题 on_surface。
     /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_current_color(Color c) -> RichTextEdit & {
+    auto set_current_color(std::optional<Color> c) -> RichTextEdit & {
         cur_color_ = c;
         return *this;
+    }
+    /// @brief 解析生效文字色：未显式设色时经 ctx 取主题 `on_surface`（ThemeScope 换肤即生效），
+    ///        显式设色优先。每个 `StyledChar` 的 `color` 在绘制处进一步优先于本值。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light（与 OS 未表态同口径）。
+    /// @return 生效文字色。
+    [[nodiscard]] auto resolve_text_color(const BuildContext &ctx) const -> Color {
+        return cur_color_.value_or(inherit_theme(ctx).roles.on_surface);
     }
     /// @brief 当前输入下划线开关。
     /// @return true = 新插入字符带下划线。
@@ -266,7 +275,7 @@ class RichTextEdit : public LeafWidget {
     ///       （三桥的文本编辑通道都只传纯文本，无样式信息）。
     /// @note Side-effects: mutates document
     auto accessibility_replace_text(std::size_t start, std::size_t end, std::string_view utf8) -> void override {
-        std::string next = plain_text();
+        const std::string next = plain_text();
         const std::size_t a = std::min(start, next.size());
         const std::size_t b = std::clamp(end, a, next.size());
         std::string rebuilt = next.substr(0, a);
@@ -445,7 +454,7 @@ class RichTextEdit : public LeafWidget {
     struct RunLayout {
         std::string text;  ///< 该 run 文本（UTF-8；样式 run 先按同 font 同 color 合并，再按层级细分）。
         Font font = {};  ///< run 统一字体（样式合并判据）。
-        Color color = Color::black();  ///< run 统一颜色（样式合并判据）。
+        std::optional<Color> color;  ///< run 统一颜色（样式合并判据）；空 = 跟随主题 on_surface。
         std::vector<char> underline;  ///< 与 text 逐字对应的下划线标记（0/1）
         float x = 0.0F;  ///< run 视觉起点 x（L2 重排后写入；RTL 段整体右对齐后再排布）。
         float w = 0.0F;  ///< run 视觉宽度（按其整形方向测得）。
@@ -461,7 +470,7 @@ class RichTextEdit : public LeafWidget {
     /// @param base 该行的段落基准方向（显式方向优先，否则按内容 guess）。
     /// @param bounds 布局参照盒（LTR 自左缘起排，RTL 以其右缘为锚）。
     /// @return 按视觉顺序排列的层级 run（含 x/w/begin/end/dir）。
-    auto compute_line_runs(const Line &line, TextDirection base, const Rect &bounds) const -> std::vector<RunLayout>;
+    static auto compute_line_runs(const Line &line, TextDirection base, const Rect &bounds) -> std::vector<RunLayout>;
 
     /// @brief 计算给定行内、逻辑下标 `caret_local` 处光标的视觉 x（相对 bounds 左缘）。
     ///        RTL 下 `FontEngine::caret_x` 返回逻辑 0 在右缘的视觉偏移，调用方无需再镜像。
@@ -470,7 +479,7 @@ class RichTextEdit : public LeafWidget {
     /// @param caret_local 行内逻辑下标（0..chars.size()，即光标插入点列）。
     /// @param bounds run 布局参照盒（RTL 右对齐基准）。
     /// @return 光标视觉 x；没有任何 run 覆盖该下标时返回 -1.0F（调用侧视为无效）。
-    auto caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local, const Rect &bounds) const
+    static auto caret_visual_x(const Line &line, TextDirection base, std::size_t caret_local, const Rect &bounds)
         -> float;
 
     // ---- 编辑操作（带 UndoStack 集成）----
@@ -543,8 +552,9 @@ class RichTextEdit : public LeafWidget {
     /// @param p 目标绘制器。
     /// @param x preedit 起点 x（文档光标的视觉位置，由调用方经 `caret_visual_x` 求得）。
     /// @param y 所绘行顶部 y。
+    /// @param ctx 构建上下文：未显式设色时 `cur_color_` 经其取主题 `on_surface`。
     /// @return preedit 的测量宽度。
-    auto paint_preedit(Painter &p, float x, float y) const -> float;
+    auto paint_preedit(Painter &p, float x, float y, const BuildContext &ctx) const -> float;
 
     /// @brief 取消组合：清空 preedit 与其选区（失焦 / 平台侧取消时调用）。
     auto cancel_composition() -> void;
@@ -558,7 +568,7 @@ class RichTextEdit : public LeafWidget {
     /// @brief `accessibility_text()` 的视图中转缓存（见该方法注释：调用方须即时消费）。
     mutable std::string a11y_text_cache_;
     Font cur_font_{};  ///< 当前输入字体（新插入字符的样式模板）。
-    Color cur_color_ = Color::black();  ///< 当前输入颜色。
+    std::optional<Color> cur_color_;  ///< 当前输入颜色；空 = 跟随主题 on_surface（ThemeScope 换肤即生效）。
     bool cur_underline_ = false;  ///< 当前输入下划线开关。
     UndoStack *undo_ = nullptr;  ///< 外部撤销栈（不持有所有权；nullptr = 编辑不记撤销）。
     float line_height_ = 20.0F;  ///< 生效行高（dp；on_layout 以当前字体测量，异常回退 20）。

@@ -157,6 +157,10 @@ struct Length {
     /// @brief 构造 Expand 意图。
     /// @return kind = Expand 的长度值。
     [[nodiscard]] static constexpr auto expand() noexcept -> Length { return Length{LengthKind::Expand}; }
+    // 豁免 bugprone-exception-escape：AURORA_ASSERT 在 debug 配置展开为含 FATAL 日志的
+    // AURORA_CHECK，日志调用被静态判定可抛；契约失败即 std::abort()，无异常真能逃出 noexcept
+    // 边界（environment.h 已记录同族假告警面）。
+    // NOLINTBEGIN(bugprone-exception-escape)
     /// @brief 构造固定像素长度。
     /// @param px 非负像素值（负值触发调试断言）。
     /// @return kind = Fixed、value = px 的长度值。
@@ -168,9 +172,11 @@ struct Length {
     /// @param f [0, 1] 区间的比例值（越界触发调试断言）。
     /// @return kind = Fraction、value = f 的长度值。
     [[nodiscard]] static constexpr auto ratio(float f) noexcept -> Length {
-        AURORA_ASSERT(f >= 0.0F && f <= 1.0F, "Length::ratio requires a fraction in [0, 1]");
+        AURORA_ASSERT(f >= 0.0F, "Length::ratio requires a non-negative fraction");
+        AURORA_ASSERT(f <= 1.0F, "Length::ratio requires a fraction in [0, 1]");
         return Length{LengthKind::Fraction, f};
     }
+    // NOLINTEND(bugprone-exception-escape)
 };
 
 /// @brief 布局约束（Flutter 式 min/max，超集安卓三模式）。

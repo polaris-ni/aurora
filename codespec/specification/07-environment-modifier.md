@@ -12,7 +12,7 @@
 |:---|:---|
 | 环境与构建上下文 | `environment/environment.h`、`environment/build_context.h` |
 | 媒体查询 | `environment/media_query.h` |
-| 主题 | `theming/theme.h`、`theming/theme_scope.h`、`theming/theme_query.h`、`theming/style_props.h` |
+| 主题 | `theming/theme.h`（聚合）、`theming/color_roles.h`、`theming/type_scale.h`、`theming/csd_roles.h`、`theming/csd_style_bridge.h`、`theming/theme_scope.h`、`theming/theme_query.h`、`theming/theme_extension.h`、`theming/color_scheme.h` |
 | 国际化 | `i18n/localized_string.h`、`i18n/string_table.h`、`i18n/locale.h` |
 | 修饰符 | `modifier/modifier.h`、`modifier/modifier_base.h`、`modifier/modifier_layout.h`、`modifier/modifier_paint.h`、`modifier/modifier_input.h`、`modifier/modifier_transform.h` |
 
@@ -65,7 +65,7 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 
 `PlatformKind` / `DeviceKind` 反映**编译目标**平台（编译期常量），非运行期 OS 探测；运行期能力探测走 `au::platform().capabilities()`（见 [`06-app-platform.md`](06-app-platform.md) §5）。
 
-**客户端自绘装饰的安全区**：Wayland 客户端自绘装饰（CSD）标题栏 / 边框占用的区域经 `Surface::content_inset()` 并入 `padding`，子树据其为内容留白以避开自绘装饰——对齐 Flutter `MediaQuery.padding` / `SafeArea` 范式。
+**客户端自绘装饰的安全区（框架自动下沉）**：Wayland 客户端自绘装饰（CSD）标题栏 / 边框占用的区域经 `Surface::content_inset()` 暴露，由 `Window::present_root` **自动下沉**——应用根统一挂到框架私有壳 `detail::ContentInsetRoot` 下，内缩量经其 `PaddingEdges` 修饰在布局期收紧约束、绘制/命中期平移内容盒，应用树无感知。位置类事件（鼠标/滚轮/触控/文件拖放）的命中与派发根**即该壳**（`Window::hit_root()`），事件坐标为**整幅表面逻辑坐标**（与 `content_inset()` 同域），下沉平移由壳的同一条 `PaddingEdges` 修饰在命中期承担——与绘制零漂移（窗口宿主侧见 [`06-app-platform.md`](06-app-platform.md) §2.4）。根注入的 `MediaQuery` 相应为**内容区口径**：`padding` 归零（占用区已被框架消费）、`size` 扣除内缩；应用**不应**再手动消费 `padding`（双重内缩）。需要「自绘进安全区」等特殊场景时，经 `Window::content_inset()` 读取原始占用区，并以空 `MediaQueryProvider` 覆盖根注入口径。inset 为零的后端（各后端的 SSD / 系统非客户区档与 Frameless 档）壳的修饰链为空，行为与无壳逐位一致；inset 变化（如进出全屏归零）下一帧重排生效。测试见 `tests/integration/itest_content_inset_sink.cpp`。
 
 **工厂**
 
@@ -117,25 +117,69 @@ auto root = au::MediaQueryProvider{
 
 | 取值 | 行为 |
 |:---|:---|
-| `Auto` | 优先协商服务端装饰（SSD，原生标题栏）；compositor 不支持时回退客户端自绘（CSD）标题栏 + 边框兜底 |
+| `Auto` | 优先协商服务端装饰（SSD，原生标题栏）；compositor 不支持时回退客户端自绘（CSD）标题栏 + 窗口阴影边距（margin 承载缩放热区，见下） |
 | `ServerSide` | 强制 SSD；不可用时退化为 CSD 兜底（避免无装饰且不可操作） |
-| `ClientSide` | 强制自绘 CSD 标题栏（即便 compositor 支持 SSD） |
-| `Borderless` | 无标题栏，但保留可拖拽缩放边框；移动靠**修饰键拖拽**（按住 `Super` / `Alt` 拖拽任意处 → `xdg_toplevel_move`） |
-| `Frameless` | 完全无装饰，由应用自绘 UI 并经程序化窗口控制驱动状态 |
+| `ClientSide` | 强制自绘 CSD 标题栏（即便 compositor 支持 SSD），带窗口阴影边距 |
+| `Borderless` | 无标题栏，保留窗口阴影边距（margin 带可拖拽缩放）；移动靠**修饰键拖拽**（按住 `Super` / `Alt` 拖拽任意处 → `xdg_toplevel_move`） |
+| `Frameless` | 完全无装饰、无阴影边距，由应用自绘 UI 并经程序化窗口控制驱动状态 |
 
-**安全区**：CSD 标题栏 / 边框占用区经 `Surface::content_inset()` 暴露，并入 `MediaQuery.padding`。
+**三后端映射**（策略解析纯函数 `csd::resolve_mode(policy, ssd_available)`，`src/aurora/window/detail/csd_decoration.h`；「有无 SSD」各后端构造期一次判定）：
+
+| 后端 | Auto / ServerSide | ClientSide | Borderless | Frameless |
+|:---|:---|:---|:---|:---|
+| Wayland | 有 `xdg-decoration` → SSD；无 → CSD（title+margin） | CSD（title+margin，即便合成器支持 SSD） | 仅 margin 带 | 无任何装饰 |
+| X11 | 保留 WM 装饰（X11 的 SSD 即 WM 原生口沿，无须协商） | `_MOTIF_WM_HINTS` 撤 WM 口沿后自绘标题栏 + 内缘八向热区 | 仅内缘热区 | 无任何装饰 |
+| Win32 | 保留 `DWM`/系统非客户区装饰 | 去 `WS_CAPTION`（保留 `WS_THICKFRAME` 系统缩放模态）+ `WM_NCCALCSIZE`（wParam=TRUE）吞非客户区使客户区 = 整窗，最大化把客户区拉回显示器工作区（经典 −8dp 边框问题修正）；`WM_NCHITTEST` 回报热区：内缘八向（复用 `csd::classify_resize_zone`，带宽 = `frame_margin_dp(frame, dwm_capable)`）→ `HTLEFT`/…、标题带空白 → `HTCAPTION`（系统白给拖拽/双击最大化/Aero Snap）、按钮 → `HTCLIENT`，修饰键（Alt/Meta）拖拽兜底 → `HTCAPTION`；标题栏自绘经 `paint_decoration` 于三表面 present 路径覆绘，按钮按压/释放结算与 X11/Wayland 共层；建窗 / `set_size` 的窗口矩形在吞框档**不做** `AdjustWindowRect` 非客户区外扩（窗口矩形 = 请求物理客户区，`DWMWA_EXTENDED_FRAME_BOUNDS` 实测 == 窗口矩形 ⇒ 整窗可见；外扩会让吞框后的客户区多出不可见边框带宽，布局视口与真实客户区错位——底部/右侧纯背景带） | 无标题栏，热区与修饰键拖拽同左（`csd_mod_move` 激活） | `WS_POPUP`，无任何装饰 |
+
+**安全区**：CSD 标题栏 / 阴影边距占用区经 `Surface::content_inset()` 暴露，由 `present_root` 的下沉壳（`ContentInsetRoot`）自动消费（见 §3.1「客户端自绘装饰的安全区」）；根注入 `MediaQuery.padding` 恒为内容区口径（已消费 ⇒ 归零）。
+
+Wayland CSD 的**阴影边距模型**（单表面，libadwaita 风格；纯逻辑收敛在 `src/aurora/window/detail/csd_geometry.h`）：wl_surface buffer = 应用内容 + 四周 `AURORA_SHADOW_MARGIN_DP`（10dp）边距，边距承载真 alpha 柔影与 ≥8dp 的八向缩放热区；`xdg_surface.set_window_geometry(m,m,内容宽,内容高)` 声明可视窗口边界，`wl_surface.set_opaque_region` 仅报内容矩形。此模型下 **`WaylandSurface::size()` 返回整幅表面逻辑尺寸（内容 + 2×margin）**，`content_inset()` 语义为「表面原点 → 应用内容原点」，按下表取值（`m` = margin、`tb` = 标题栏高）：
+
+| 状态 | ClientSide / Auto 回退 CSD | Borderless | SSD / Frameless |
+|:---|:---|:---|:---|
+| Normal / 平铺外常态 | `{m, m+tb, m, m}` | `{m, m, m, m}` | `{0,0,0,0}` |
+| Maximized / 任意向 tiled | `{0, tb, 0, 0}`（margin 塌缩） | `{0,0,0,0}` | `{0,0,0,0}` |
+| FullScreen | `{0, tb, 0, 0}`（揭示条出现前 tb 亦不绘制） | `{0,0,0,0}` | `{0,0,0,0}` |
+
+margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙、无阴影），回 Normal 恢复；状态切换走整幅重绘。指针在进入表面的三个入口（enter / motion / button）统一做「表面坐标 → 内容坐标（−margin）」映射，热区判定 `csd::classify_resize_zone` 在内容坐标域进行（表驱动纯函数，`utest_csd_geometry` 守门；映射值仅供后端内部 CSD 判定消费）。对应用上抛的事件（悬停/按压/滚轮）则按契约转发**整幅表面坐标原值**——下沉折算统一由派发根壳承担（见 §3.1），后端不做第二份平移。margin 厚度可经 `WindowFrameStyle::shadow_margin_dp` 显式配置（0 = 关闭；显式关闭 / 能力不足 / 非正值三路归零，见 `csd::frame_margin_dp`），默认值逐值等于既有 10dp 常量。X11 与 Win32 后端 buffer 即内容矩形（不假设 ARGB 视觉与合成器），无外延 margin 分量——外延阴影自动降级为 0，标题栏带为**内缘覆绘** + **内缘热区**（同一 `csd::classify_resize_zone` 判定式按「内容坐标缩进 margin 后的外延环」口径复用，不写第二份八向逻辑），`content_inset()` 只承载标题栏带高度；Win32 自绘档标题栏带宽 `frame_margin_dp(frame, dwm_capable)`（DWM 合成关闭时归零，探针 `aurora_verify_win32_csd` 锁降级语义）。Headless 维持零 inset 口径。
 
 **程序化窗口控制**（`Surface` / `Window` 虚函数，默认空实现）：`close()`、`minimize()`、`toggle_maximize()`、`set_fullscreen(bool)`。Wayland 经 `xdg_toplevel` 协议生效，使无标题栏 / 无边框窗口也能由应用按钮驱动状态。
 
 ### 4.2 TitleBar
 
-**`TitleBarStyle`**（`window/title_bar_style.h`）是 CSD 标题栏样式值类型，字段：`height`（默认 36）、`bg_active`、`bg_inactive`、`fg_active`、`fg_inactive`、`hover_tint`、`close_hover`、`button_layout`（`TitleBarButtonLayout{Adwaita, Windows, Mac}`，默认 `Adwaita`）、`show_minimize`、`show_maximize`、`show_close`、`show_title`、`center_title`。预设：`adwaita_dark()` / `adwaita_light()` / `windows_dark()`。
+**`TitleBarStyle`**（`window/title_bar_style.h`）是 CSD 标题栏样式值类型，字段：`height`（默认 36）、`bg_active`、`bg_inactive`、`fg_active`、`fg_inactive`、`hover_tint`、`close_hover`、`button_layout`（`TitleBarButtonLayout{Adwaita, Windows, Mac}`，默认 `Adwaita`）、`show_minimize`、`show_maximize`、`show_close`、`show_title`、`center_title`，以及三类自定义项：`metrics`（`TitleBarMetrics`：按钮盒尺寸 / 间距 / 贴边外边距 / 图标槽 / 内容内边距 / 标题字号字重，各分量 **0 = 沿用视觉语言的栏高联动推导式**，非 0 才是显式覆写）、`corner_radius`（标题栏背景**下角**圆角，0 = 直角）、`pressed_tint` / `close_pressed`（按压态配色，绘制优先级「按压 > 悬停」）。
+
+**预设**：`CsdPreset`（三套视觉语言 × 明暗两档 = `AdwaitaLight/Dark`、`WindowsLight/Dark`、`MacLight/Dark` 六值）+ 工厂 `TitleBarStyle::from_preset(CsdPreset)`；`TitleBarStyle{}` 的默认成员值即 `AdwaitaDark`。旧三个静态预设函数（`adwaita_dark()` / `adwaita_light()` / `windows_dark()`）已删除，迁移路径见 `CHANGELOG.md` 的 Migration 节。各预设显隐开关全开、按压 alpha 不低于悬停；macOS 红绿灯圆形底色由绘制层按布局语言固定，预设不覆盖。
+
+**度量口径三档分治**（`metrics` 的「0 = 沿用栏高联动推导式」仍成立，但三套语言的取值策略不同）：
+
+| 视觉语言 | 栏高 | 度量取法 | 出处 |
+|:---|:---|:---|:---|
+| Adwaita | 36dp | **不钉** `metrics`（`TitleBarStyle{}` 默认成员值即 `AdwaitaDark` 的契约，钉值会让两者分叉）；间距与贴边外边距由推导式旧值 4/8 改为 **6/6** | libadwaita `.toolbar`（`AdwHeaderBar` 自动带该类）「6px margins and spacing between widgets」，`headerbar` 另有 `padding: 0 6px`；按钮盒推导结果 `clamp(h−10,22,30)` = 26dp 已等于 libadwaita `windowcontrols` 尺寸，故不钉 |
+| Windows | 32dp | **显式钉值**：按钮盒 46dp、图标槽 16dp（栏高 32 时「`min(16, h−20)`」会退化成 12，故必须钉住）、标题 9pt / 400、悬停 / 按压遮罩 α≈0.0605 / ≈0.1 | Win11 DWM 真机实测（WinUI 标准遮罩口径） |
+| Mac | 28dp | **显式钉值**：红绿灯直径 12dp、间距 8dp（相邻圆心距 20dp）、贴边外边距 14dp（首枚圆心距左缘 20dp）、图标槽 16dp、标题 13pt / 400 且居中 | macOS 标准窗口口径；旧推导式在栏高 36 下给直径 14 / 外边距 8，差 17% / 43% |
+
+`TitleBarMetrics::title_font_weight` 默认 500 → **700**（libadwaita `.title` 为 bold），Windows / Mac 两档各自钉 400。
+
+**字形与按钮盒宽解耦的不变量**（三套语言统一）：字形一律由绘制层按固定设计网格居中于按钮盒绘制，按钮盒再宽字形也不放大——Windows 10×10 epx（Segoe Fluent Icons）/ 线宽 1dp、Adwaita 16×16 symbolic / 1.5dp、macOS 6pt（12pt 圆内占一半）/ 1dp，常量见 `title_bar_painter.cpp` 的 `AURORA_{WIN,ADWAITA,MAC}_GLYPH_HALF_DP` / `..._STROKE_DP`；旧实现统一按「盒宽 / 3.0、`盒宽 / 3.6`」推导，字形随盒放大（Windows 档实测放大到 34dp，是挤压感根因）。Windows 关闭钮还原字形重绘为「8×8 主框 + 右上错位副框的顶边与右边」。
+
+**关闭钮字形取色规则**（三套语言统一）：常态随前景色（亮色档为黑），仅当底色被悬停 / 按压的特征红替换时转白——红底上深色符号不可读、白底上白色符号不可见，是同一判据的两侧（修复 `AdwaitaLight`（`#EBEBEB`）/ `WindowsLight`（`#F3F3F3`）下关闭钮画不出来的功能性缺陷）。Adwaita 悬停 / 按压的圆形底与按压态反馈（优先级「按压 > 悬停」）同批补齐。
+
+**标题对齐**（水平与垂直各自成规，均由绘制层落地）：
+- **水平**：`center_title=true` 时几何层给**整宽带**（不扣按钮组），绘制层按 `FontEngine::measure_width` 实测量宽把文字摆到整宽带的中点。默认成员值为 **true**（默认档即 Adwaita：libadwaita `AdwHeaderBar` 的标题居中），macOS 两档同为 true，**Windows 两档显式置 false**（WinUI 标题左对齐）。此前该开关是「文档承诺、绘制层未实现」——置真只放开带宽，文字仍左对齐。
+- **垂直**：三套语言一律居中，与 `center_title` 无关。绘制层按 `FontEngine::measure_height` 把字体行盒摆到栏高的中点再调 `draw_text`——`draw_text` 的 y 是**行盒顶**（基线 = 顶 + ascent），把标题带原样传下去会把文字顶到栏的上缘（实测墨迹中心比栏高中心偏上：Adwaita 6dp / Windows 8.5dp / Mac 1.5dp）。行盒含下伸部，纯大写标题的视觉中心因此比几何中心低 1~2dp，属字体度量固有偏差，不另加补偿常数。
 
 挂载于 `WindowStyleOptions::title_bar`，运行期经 `Surface::set_title_bar_style` 热更。
+
+**窗框样式**：`WindowFrameStyle`（`window/window_frame_style.h`，挂载于 `WindowStyleOptions::frame`，热更口 `Surface::set_window_frame_style`）：`shadow_enabled` / `shadow_margin_dp`（投影带厚度 = 缩放热区宽度）/ `shadow_color` / `shadow_blur_radius`（0 = 由 margin−1 推导，显式值夹到 margin 内）/ `corner_radius`（外轮廓圆角，0 = 直角）。默认值逐值等于既有 `AURORA_SHADOW_*` 常量，未配置零视觉变化；投影厚度 / 基色 / 模糊两条上屏路径（软件 `compose_shadow_margins_bgra` 与 GPU `draw_shadow`）同源消费折算后的值。X11 无外延 margin，厚度只作用于内缘热区宽度。
+
+**共享装饰层**：策略解析、按钮命中、按压结算（**动作在释放触发**——按下即触发会使按压色永不可见，且失去「按下后拖开即取消」的纠错语义，对齐 GTK/Win32）、全屏揭示条状态机、连击记账与绘制装配收敛在库内私有头 `src/aurora/window/detail/csd_decoration.h`（纯值、无平台头，`utest_csd_decoration` 以策略 × SSD 有无 × 窗口几何态的快照表逐格锁语义）；各后端只做平台事件映射。
 
 **几何单一来源**：纯函数 `title_bar_geometry(width, style, maximized, resizable)` 返回各按钮 / 图标 / 标题矩形（隐藏 = 空盒）；绘制与命中测试共用，规则以其实现注释为唯一权威。
 
 **绘制单一来源**：`csd::paint_title_bar(Painter&, const TitleBarPaintState&)`（`src/aurora/window/detail/title_bar_painter.h`，库内私有）把 `title_bar_geometry` 的矩形集光栅为一次 `Painter` 调用（背景 + 图标 + 标题 + 三套视觉语言的按钮，hover/激活态入状态结构）。软件路径（`WaylandSurface::Impl::draw_decoration`）与 GPU 路径（`WaylandSurface::record_client_decoration` → 帧 `Sink::end_frame` 回放进 swapchain 帧，见 [`03-layout-render.md`](03-layout-render.md) §8.8）同为它的消费者，故两条上屏路径的装饰逐位一致（`utest_title_bar_painter` 以「直绘 vs 录制回放」全画布字节比对守门）；无装饰可绘（SSD 合成器 / `Frameless`）时录制侧返回 false、当帧不含装饰命令。
+
+**窗口阴影 underlay**：`csd::paint_window_shadow`（同头文件）以内容矩形为形状、零偏移、模糊半径 `margin−AURORA_SHADOW_BLUR_INSET_PX` 录制 `Painter::draw_shadow`，仅作 GPU/DisplayList 路径的阴影源（`record_client_decoration_underlay` → `Sink::begin_frame` 先于 app 帧回放，Shadow 管线写真 alpha 到透明清除的 swapchain）。软件 wl_shm 路径不经 Painter（Painter 目标画布恒不透明，混合恒写 alpha=255，画不出半透明柔影）：`present()` 在 RGBA→BGRA 预乘 swizzle 之后调 `csd::compose_shadow_margins_bgra`（`src/aurora/window/detail/csd_shadow_compose.h`）直接覆写 margin 环的 BGRA 字——内容矩形跳过、角部按两向欧氏距离衰减、外缘写透明字 0 且幂等。视觉参数两条路径同源于 `csd_geometry.h`（`AURORA_SHADOW_BASE_COLOR{0,0,0,70}` / `AURORA_SHADOW_BLUR_INSET_PX` / `shadow_attenuation`），由 `utest_csd_shadow_compose` 对 BGRA 字逐值守门。
 
 **`Surface` 相关虚函数**：`set_title_bar_icon(std::shared_ptr<Image>)`（图标槽）、`begin_window_move()` / `begin_window_resize(WindowResizeEdge)`（控件发起拖拽 / 缩放——**须在指针按下事件派发栈内同步调用**，受 Wayland `xdg` move / resize 的 serial 时效约束）。
 
@@ -147,35 +191,55 @@ auto root = au::MediaQueryProvider{
 
 ## 5 主题
 
-### 5.1 Theme
+### 5.1 主题值对象与角色集
 
-`Theme`（`theming/theme.h`）是扁平设计令牌：`Theme{ .background, .primary, .on_primary, .text, .font }`；`Theme::light()` / `Theme::dark()` 提供默认主题。经 `ThemeProvider` 注入，组件用 `ctx.environment<Theme>()` 读取。
+`Theme`（`theming/theme.h`）是角色化主题值对象，结构为 `Theme{ roles, type_scale, csd, scheme }` 加一张 `ThemeExtension<T>` 注册表；`Theme::light()` / `Theme::dark()` 是两个内置档位，`with_defaults()` 返回 light 基准列（`scheme` 保持 `Unspecified`）。经 `ThemeProvider` / `ThemeScope` 注入，组件用 `inherit_theme(ctx)` 读取。
 
-**命名令牌层**（叠加于扁平字段，不改注入机制）：
+**色角色层 `ColorRoles`**（`theming/color_roles.h`，纯值 struct，snake_case 字段名一套、明暗两列取值，命名对标 Material 3 `ColorScheme` 全集）：
 
-| 成员 | 说明 |
-|:---|:---|
-| `Theme::set_token(name, TokenValue)` | 登记命名令牌。`TokenValue` 可承载 `Color` / `Font` / `double`（dp）三态之一 |
-| `Theme::token(name)` | 返回 `std::optional<TokenValue>` |
-| `Theme::token_or<T>(name, fallback)` | 强转目标类型，缺失或类型不匹配时回退 |
+- 主色四组：`primary` / `on_primary` / `primary_container` / `on_primary_container`，`secondary` / `on_secondary` / `secondary_container` / `on_secondary_container`，`tertiary` / `on_tertiary` / `tertiary_container` / `on_tertiary_container`，`error` / `on_error` / `error_container` / `on_error_container`
+- 表面族：`surface` / `surface_dim` / `surface_bright` / `surface_container_lowest` / `surface_container_low` / `surface_container` / `surface_container_high` / `surface_container_highest` / `on_surface` / `on_surface_variant` / `surface_variant`
+- 描边族：`outline` / `outline_variant`
+- 反转族：`inverse_surface` / `inverse_on_surface` / `inverse_primary`
+- 其他：`scrim` / `shadow` / `surface_tint`
+- Aurora 扩展角色（Material 3 无对应）：`focus_ring`（焦点环极性色，light 纯黑 / dark 纯白）、`hover` / `pressed`（交互态配色的收纳位）
+- 取舍：Material 3 的 `background` / `on_background` 折叠进 `surface` / `on_surface`（M3 新版 `ColorScheme` 亦移除 background，本库跟随）
 
-令牌随 `ThemeProvider` 注入整体传递，后代经 `environment<Theme>()` 读到的 `Theme` 即含令牌表。
+每个 `on_*` 角色与配对容器角色的 WCAG AA 对比度 ≥ 4.5:1 由 `utest_theme_roles` 断言；角色基准值即预设取值（dark `primary` 为达标修正后的取值，理由见 `CHANGELOG.md` 破坏性条目）。
 
-**内置主题登记的令牌**（`Theme::light()` / `Theme::dark()` 各自 `set_token`，`Theme::with_defaults()` 与裸 `Theme{}` 不登记任何令牌）：
+**排版角色层 `TypeScale`**（`theming/type_scale.h`）：Material 3 排版 15 档（`display` / `headline` / `title` / `body` / `label` 各 large/medium/small）的 `Font` 字段；图表族经 `compute_geometry` 读取的字阶语义由 `type_scale.body_medium` 承接。
 
-| 令牌名 | 浅色 | 深色 | 消费方 | 未登记时的回退 |
-|:---|:---|:---|:---|:---|
-| `focus.ring` | 纯黑 | 纯白 | `Widget::paint_content` 的统一焦点环（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4） | `primary` |
+**类型安全扩展 `ThemeExtension<T>`**（`theming/theme_extension.h`）：应用自定义令牌面以类型为键注册——概念基类 + 模板模型（值语义深拷贝，与 `Theme` 随控件回调网被值拷贝的现状一致）；`Theme::extension<T>()` 返回 `const T*`，未注册返回 `nullptr`（调用方显式判空，无字符串拼写静默回落）。典型用途是图表色板（`ChartPalette` 扩展）。扩展**不参与** JSON 自动序列化，由应用自行负责。
 
-回退语义是刻意的：环色改由令牌驱动后，未登记该令牌的自定义主题仍画 `primary`，行为与改动前逐位一致，不构成未经请求的视觉变更。
+**窗口装饰角色组 `CsdRoles`**（`theming/csd_roles.h`）：`Theme` 的库自有字段（与 `roles` / `type_scale` 同层，不经 `ThemeExtension<T>`——窗口装饰配色是框架资产且必须在渲染路径零分配），8 个字段与标题栏/窗框配色一一对应（`title_bar_bg_active` / `title_bar_bg_inactive` / `title_bar_fg_active` / `title_bar_fg_inactive` / `title_bar_hover_tint` / `title_bar_pressed_tint` / `title_bar_close_hover` / `shadow_color`）。取值来源见「CSD 派生通道」。
 
-### 5.2 StyleProps
+### 5.2 默认根注入与 OS 跟随
 
-`StyleProps`（`theming/style_props.h`）是轻量样式叠加结构，字段（`background` / `foreground` / `font` / `corner_radius` / `padding`）均为 `TokenOr<T>` 两态——可填「具体值」或「令牌名」。
+`Window`（`window/window.h`）持有主题状态，暴露 `set_theme(const Theme&)`（应用显式设置，最高优先）、`theme()` 与 `set_os_color_scheme(ColorScheme)`（供宿主推入 OS 档位的设定器）。`prepare_context` 每帧向根 `BuildContext` 注入 `Theme`（`root_env_.set<Theme>(resolved_root_theme())`），与 `MediaQuery` / `WindowState` / `WindowMode` / `WindowChrome` 同址注入，机制完全对称——子树无 `ThemeScope` 时经 `inherit_theme(ctx)` 读到此值。
 
-`StyleProps::resolve(theme)` 把全部两态字段解析为 `ResolvedStyle` 具体值：令牌名经 `Theme` 查询且类型匹配则返回，否则回退 fallback。组件可在绘制前用最近祖先 `Theme` 解析 `StyleProps`，实现「令牌驱动的样式」而无需逐一手写扁平字段读取。
+**三级优先链**（应用未显式设置时）：显式 `set_theme` > OS 档（经 `set_os_color_scheme` 推入）> 明色。OS 未表态（`Unspecified`，headless/CI 常见）回落明色，故「`Unspecified` ≡ 明色列」是全系统单一口径：根注入链底、CSD 桥基座（见 5.3）与 `inherit_theme` 的无注入兜底（`Theme::light()`，`theming/theme_scope.h`）同解。注入的主题 `scheme` 携带解析后的最终档（`Light` / `Dark`，不为 `Unspecified`）。
 
-`theming/theme_scope.h` 与 `theming/theme_query.h` 分别提供换肤 scope 与主题查询辅助。
+**OS 偏好的推入路径**：`platform.h` 反向依赖 `window.h`，故 `Window` 不直读 `os_color_scheme()`；由 `WindowHost`（app 层）在 `attach_surface` 创建窗口时推入 `set_os_color_scheme(os_color_scheme())`，与 `set_window_state` / `set_window_mode` 的同位推送同构。读取口径：注册表 / 配置文件访问有副作用，**不在每帧直读**——创建时读一次。运行期变更：Win32 后端在 `WndProc` 捕获 `WM_SETTINGCHANGE`（明暗外观切换以 `ImmersiveColorSet` 标识；宿主构造期播种一次档位基线，只上报相对基线的变化，避免把已推入档位当新变化重报），经 `Surface::set_os_color_scheme_handler`（与 `set_scale_change_handler` 同构的基类 seam）上抛 `WindowHost`，转发为 `Window::set_os_color_scheme` + 强制整帧重排重绘——「跟随系统深浅色」下一帧生效，无轮询。`WindowHost::teardown` 同步解绑该句柄（消息泵在宿主回收后仍可收到 `WM_SETTINGCHANGE`，捕获 `this` 未解绑即 use-after-free）。Linux / macOS 无对等系统信号，策略文档化为「创建时读 + 应用可随时 `set_theme` 显式接管」，不假装实时。
+
+`os_color_scheme()`（`window/platform.h`）的探测细节：Linux 读 GTK 配置文件启发式（不引 DBus 依赖），Win32 读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` 的 `AppsUseLightTheme`（REG_DWORD，0 = Dark；键在值缺 = Light；键打不开 = Unspecified，实现位于独立 TU 避免公共头引入 `<windows.h>`），macOS 按 `NSAppearance` 契约标注未在本仓库无头构建内编译验证。`Platform::color_scheme` 字段须由调用方经 `os_color_scheme()` 显式填充（`platform()` 不代做——读偏好有文件 / 注册表访问副作用）。
+
+**测试约定（防 CI 档位漂移）**：经 `Window` 呈现主题消费控件、且做绝对色像素断言的测试，必须显式固定主题档（`set_theme` 或 `set_os_color_scheme`）——否则其观感随 runner 的 OS 档位漂移。「跟随 OS」的正向验证经 seam 打桩完成（`set_os_color_scheme` 推入反转档位断言注入翻转），不依赖真机档位，见 `itest_theme_root_injection`。
+
+### 5.3 CSD 派生通道（typed）
+
+`title_bar_style_from_theme(theme)` / `window_frame_style_from_theme(theme, base)`（`theming/csd_style_bridge.h`）签名保留，实现为「预设基座 + CSD 角色组派生」：基座按 `theme.scheme` 取 `CsdPreset::AdwaitaLight` / `AdwaitaDark`（几何 / 显隐 / 度量字段不参与派生，属定制面——维持 口径；/ 钉住的原生机度与字形口径不动），配色字段从 `csd` 角色组逐项派生（`bg_active` ← `title_bar_bg_active`、`fg_active` ← `title_bar_fg_active`、`close_hover` ← `title_bar_close_hover`、窗框投影色 ← `shadow_color` 等）。`Unspecified` 按 5.2 单一口径取明色列。
+
+**逐值不变量**：`title_bar_style_from_theme(Theme::light())` 与 `from_preset(CsdPreset::AdwaitaLight)`、`Theme::dark()` 与 `from_preset(CsdPreset::AdwaitaDark)` 的配色字段逐值相同（`Theme::light()` / `dark()` 用预设 pinned 值播种 `csd` 组），由 `utest_theme_csd_bridge` 钉死。**`from_bare` 口径**：`with_defaults()` 即 light 基准列，故 `title_bar_style_from_theme(Theme::with_defaults())` ≡ `from_preset(CsdPreset::AdwaitaLight)`——裸主题不再解析出暗色标题栏，这是随角色化重构落地的有意行为变化（迁移路径见 `CHANGELOG.md`）。
+
+**为什么不从通用角色派生**：现预设 CSD 值与通用角色值存在差集——light `title_bar_fg_active` = 0x333334 而 `text` 角色为纯黑；dark `title_bar_bg_active` = 0x2E2E32 而 `surface` = 0x303030、`title_bar_fg_inactive` = 0x919193 而 `text.muted` 口径的 `on_surface_variant` = 0x9A9996。从通用角色派生要么砸掉逐值不变量，要么把通用角色改成 CSD 专用值（污染所有读 `surface` 的控件）。CSD 配色本就是组件级覆写面，类型化后继续单列；应用逐字段定制直接改派生结果的 `TitleBarStyle` 字段（或直接 `set_title_bar_style`）。
+
+### 5.4 作用域、查询与废除面
+
+**保留面**：`ThemeScope`（`theming/theme_scope.h`，`Provider<Theme>` 子类，支持经共享 `State<Theme>` 运行时换肤，值变化即子树重渲染）、`inherit_theme(ctx)`、`resolve_theme(root, target)` 查询（`theming/theme_query.h`）、`resolve_color_scheme(explicit, theme, os)` 纯函数（`theming/csd_style_bridge.h`，三级链各层以 `Unspecified` 表示不表态逐层下探）。
+
+**废除面**（随角色化重构退场，迁移路径见 `CHANGELOG.md`）：`Theme` 扁平字段 `background` / `primary` / `on_primary` / `text` / `font`；`TokenValue`；`tokens` / `dark_tokens` 命名令牌表及全部 `token*` / `set_token` 成员（含 `token_for` / `token_in` 解析入口与 `csd.*` / `focus.ring` / `chart.palette.*` 字符串令牌层）；`StyleProps` / `TokenOr<T>` / `ResolvedStyle`（theming 目录下 style_props.h 头无生产消费方，文件本体与测试 `utest_style_props` 已随 收束批删除）。控件取色统一为两态：显式属性值 > 主题角色（未显式设置时角色必有值，无第三态回落），映射表见 [`04-widget.md`](04-widget.md)。
+
+**主题 JSON 重建面**：角色集（roles + type_scale + csd + scheme）经 `to_json` / `from_json` 进出，JSON 键名即角色名——stringly 只允许存在于这个序列化边界，不进渲染路径；`ThemeExtension<T>` 不参与自动序列化。
 
 ---
 

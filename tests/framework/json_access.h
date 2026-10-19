@@ -15,7 +15,6 @@
 // 故下列函数在断言失败后不会真正返回，返回值可直接使用而无需再判空。
 // ============================================================================
 
-#include <cstddef>
 #include <string_view>
 #include <utility>
 
@@ -40,7 +39,7 @@ namespace aurora::testing {
 
 /// @brief 断言字段存在且值可窄化为 T；缺失或类型不符即本用例致命失败。
 template <json::json_readable T>
-[[nodiscard]] inline auto require_field(const json::Value &object, std::string_view key) -> T {
+[[nodiscard]] auto require_field(const json::Value &object, std::string_view key) -> T {
     auto value = object.get<T>(key);
     AURORA_TEST_REQUIRE(value);
     return value.value();

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -126,7 +125,7 @@ class UtfOffsetMap {
             return text_.size();
         }
         // upper_bound 取第一个 utf16 偏移 > 目标者的前一位 ⇒ 该码点起点。
-        const auto it = std::upper_bound(utf16_of_.begin(), utf16_of_.end(), utf16_index);
+        const auto it = std::ranges::upper_bound(utf16_of_, utf16_index);
         const std::size_t idx = (it == utf16_of_.begin()) ? 0 : static_cast<std::size_t>(it - utf16_of_.begin()) - 1;
         return starts_.at(idx);
     }
@@ -141,7 +140,7 @@ class UtfOffsetMap {
         if (utf8_index >= text_.size()) {
             return utf16_of_.back();
         }
-        const auto it = std::upper_bound(starts_.begin(), starts_.end(), utf8_index);
+        const auto it = std::ranges::upper_bound(starts_, utf8_index);
         const std::size_t idx = (it == starts_.begin()) ? 0 : static_cast<std::size_t>(it - starts_.begin()) - 1;
         return utf16_of_.at(idx);
     }
@@ -155,7 +154,7 @@ class UtfOffsetMap {
             return utf8_index;
         }
         std::size_t idx = 0;
-        const auto it = std::lower_bound(starts_.begin(), starts_.end(), utf8_index);
+        const auto it = std::ranges::lower_bound(starts_, utf8_index);
         idx = static_cast<std::size_t>(it - starts_.begin());
         if (count > 0) {
             idx += static_cast<std::size_t>(count);
@@ -308,7 +307,7 @@ class UtfOffsetMap {
         }
         case TextUnit::Word: {
             // 先夹紧到码点起点，再向两侧扫同类字符。
-            UtfOffsetMap map{text};
+            const UtfOffsetMap map{text};
             const std::size_t at = map.advance_utf8(index, 0);
             std::size_t start = at;
             while (start > 0) {

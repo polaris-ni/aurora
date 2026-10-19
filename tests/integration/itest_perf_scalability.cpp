@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>

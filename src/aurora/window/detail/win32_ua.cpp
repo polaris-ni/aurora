@@ -678,6 +678,7 @@ auto UiaNodeProvider::node() const -> std::optional<a11y::NodeSnapshot> {
     // 拉取式同步点与跨线程纪律都在 `snapshot_copy` 内：回投主人线程重建，
     // 再把该节点**按值**带回。此后本 provider 只读自己这份副本 —— 主线程随后怎么换快照、
     // 怎么摘 widget，都不会让这里的读数悬垂（旧实现返回指向 `snap_` 的裸指针，正是缺陷本体）。
+    // 拆除门闩的安全兜底在 `eval_on_main` 内（`snapshot_copy` 的回投入口）；此处不再重复判。
     return bridge_->snapshot_copy(id_);
 }
 
@@ -1208,7 +1209,11 @@ auto UiaRootProvider::get_HostRawElementProvider(IRawElementProviderSimple **ret
         return E_POINTER;
     }
     *ret = nullptr;
-    if (bridge_ == nullptr) {
+    // 此处不经 `eval_on_main`（`host_provider()` 只读 `host_provider_` 成员，无回投），
+    // 故 `eval_on_main` 的拆除门闩兜底覆盖不到。析构期 `~Win32UiaBridge` 在 `disconnect_all`
+    // 之后会 `host_provider_->Release(); host_provider_ = nullptr;`，若 RPC 线程此刻读到已释放
+    // 的指针即 UAF。门闩在 `disconnect_all` 首行立起、先于该 Release，故此处显式判。
+    if (bridge_ == nullptr || bridge_->tearing_down()) {
         return UIA_E_ELEMENTNOTAVAILABLE;
     }
     IRawElementProviderSimple *host = bridge_->host_provider();
@@ -1978,8 +1983,8 @@ auto Win32UiaBridge::set_root(Widget *root) -> void {
     // 换根重建（#8）：收到非空新根即解除「拆除门闩」——典型场景是旧根经
     // `on_widget_destroying` 销毁广播后，宿主注入重建后的新根。若 root 为 nullptr（去根），
     // 不动门闩（交由 `disconnect_all` / `on_widget_destroying` 管理）。
-    if (root != nullptr && tearing_down_) {
-        tearing_down_ = false;
+    if (root != nullptr && tearing_down_.load(std::memory_order_acquire)) {
+        tearing_down_.store(false, std::memory_order_release);
     }
     root_ = root;
     dirty_ = true;
@@ -1987,7 +1992,7 @@ auto Win32UiaBridge::set_root(Widget *root) -> void {
 
 auto Win32UiaBridge::reset_teardown() -> void {
     // #8：受控复位（仅换根重建前调用；见头文件文档）。
-    tearing_down_ = false;
+    tearing_down_.store(false, std::memory_order_release);
 }
 
 auto Win32UiaBridge::mark_dirty() -> void { dirty_ = true; }
@@ -2007,7 +2012,7 @@ auto Win32UiaBridge::on_widget_destroying(const Widget *w) -> void {
 }
 
 auto Win32UiaBridge::sync_if_dirty() -> void {
-    if (tearing_down_ || !dirty_) {
+    if (tearing_down_.load(std::memory_order_acquire) || !dirty_) {
         return;
     }
     rebuild();
@@ -2073,7 +2078,7 @@ auto Win32UiaBridge::disconnect_all() -> void {
     // 门闩必须**先**立：`UiaDisconnectProvider` 会同步重入本 provider 取属性（UIA 需为被
     // 丢弃的侦听者补发属性变更事件），而窗口销毁后于宿主拆 UI 树是常规顺序，此刻 `root_`
     // 已悬垂。先清根/快照/脏，令重入路径只得到「元素不可用」，绝不重建。
-    tearing_down_ = true;
+    tearing_down_.store(true, std::memory_order_release);
     root_ = nullptr;
     dirty_ = false;
     snap_ = {};
@@ -2241,7 +2246,7 @@ auto Win32UiaBridge::scrollable_ancestor_on_main(std::uint64_t id) const -> bool
 
 auto Win32UiaBridge::rebuild() -> void {
     dirty_ = false;
-    if (tearing_down_ || root_ == nullptr || !active_) {
+    if (tearing_down_.load(std::memory_order_acquire) || root_ == nullptr || !active_) {
         return;
     }
     a11y::TreeSnapshot next = a11y::build_tree_snapshot(*root_, Rect{.origin = Point{}, .size = root_->size()});

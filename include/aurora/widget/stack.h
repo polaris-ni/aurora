@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <initializer_list>
-#include <memory>
 #include <vector>
 
 #include "aurora/core/enums.h"

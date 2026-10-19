@@ -127,17 +127,18 @@ AURORA_TEST_CASE(focused_button_paints_ring_outside_its_box) {
     // 环色取自主题命名令牌，而非直接取 primary：与控件自身底色同色时，环会被读成「控件自带
     // 的一圈边框」（即用户报的「按钮点击后变小、外侧多一圈边」的成因之一）。
     const Theme light = Theme::light();
-    AURORA_TEST_CHECK_EQ(ring_sample(focused_p, box2), light.token_or<Color>("focus.ring", light.primary));
-    AURORA_TEST_CHECK(Color{ring_sample(focused_p, box2)} != light.primary);
+    AURORA_TEST_CHECK_EQ(ring_sample(focused_p, box2), light.roles.focus_ring);
+    AURORA_TEST_CHECK(Color{ring_sample(focused_p, box2)} != light.roles.primary);
 }
 
-AURORA_TEST_CASE(ring_color_falls_back_to_primary_without_token) {
-    // 未登记 focus.ring 的自定义主题必须保持改动前行为（环色 == primary），否则本次变更
-    // 对所有既有自定义主题构成未经请求的视觉改动。
+AURORA_TEST_CASE(custom_theme_ring_uses_role_not_primary_fallback) {
+    // 行为变化：类型化后每个 Theme 都持 focus_ring（默认列 = 纯黑极性色），不再有
+    // 「未登记 focus.ring 令牌则回退 primary」的第三态。自定义主色不改 focus_ring 时，
+    // 环仍取极性黑、与主色拉开。
     Theme custom;
-    custom.primary = Color{10, 200, 30, 255};
-    AURORA_TEST_CHECK_FALSE(custom.tokens.contains("focus.ring"));
-    AURORA_TEST_CHECK_EQ(custom.token_or<Color>("focus.ring", custom.primary), custom.primary);
+    custom.roles.primary = Color{10, 200, 30, 255};
+    AURORA_TEST_CHECK(custom.roles.focus_ring == Color::black());
+    AURORA_TEST_CHECK(custom.roles.focus_ring != custom.roles.primary);
 }
 
 AURORA_TEST_CASE(text_input_opts_out_of_the_base_ring) {
@@ -175,7 +176,7 @@ AURORA_TEST_CASE(keyboard_arrival_paints_ring) {
     AURORA_TEST_REQUIRE_TRUE(btn.focus_ring_shown());
     AURORA_TEST_CHECK_MSG(ring_pixels_above(p, box) > 0, "keyboard stop must paint the base focus ring");
     const Theme light = Theme::light();
-    AURORA_TEST_CHECK_EQ(ring_sample(p, box), light.token_or<Color>("focus.ring", light.primary));
+    AURORA_TEST_CHECK_EQ(ring_sample(p, box), light.roles.focus_ring);
 }
 
 AURORA_TEST_CASE(tab_after_pointer_click_restores_the_ring) {

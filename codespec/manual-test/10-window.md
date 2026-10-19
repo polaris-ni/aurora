@@ -27,7 +27,10 @@
 |:---|:---|:---|
 | `examples/demos/demo_multi_window.cpp` | `demo_multi_window` | 多窗口创建与关闭、窗口角色与模态、跨显示器移动、跨窗广播、退出路径 |
 | `examples/demos/demo_custom_surface.cpp` | `demo_custom_surface` | 自定义 `Surface` 注入、无窗口（Headless）路径与产物 |
+| `examples/demos/demo_csd_gallery.cpp` | `demo_csd_gallery` | CSD（客户端自绘装饰）全景：五档策略预览窗；`ClientSide` host 自绘交互与 `Borderless`/`Frameless` 控件级 TitleBar 的真机点击走查（TC-WINDOW-016） |
 | `tools/verify/glfw_dpi_live_probe.cpp` | `aurora_verify_glfw_dpi` | **GLFW 后端**的 DPI 缩放换算自洽与缩放变化上报（探针，非 demo） |
+| `tools/verify/x11_csd_live_probe.cpp` | `aurora_verify_x11_csd` | **X11 后端**的客户端自绘装饰（CSD）离屏像素级判据：`ClientSide` 撤 WM 口沿后标题栏带真绘出、`content_inset` 上报栏高、`Auto`/`Frameless` 零入侵口径（探针，非 demo） |
+| `tools/verify/win32_csd_live_probe.cpp` | `aurora_verify_win32_csd` | **Win32 后端**的客户端自绘装饰（CSD）离屏像素级判据：`WM_NCCALCSIZE` 吞框（最大化拉回工作区）、五档策略的 `content_inset` / 像素 / `WM_NCHITTEST` 热区回归、按钮释放触发与拖离取消、降级归零、热更（探针，非 demo） |
 
 **第三个载体的构建口径与前两个不同，须单独构建目录**（探针受两个开关门控，二者在本模块的默认
 `build/` 里都不满足，故前两个载体的构建步骤不能覆盖它）：
@@ -36,6 +39,27 @@
 cmake -S . -B build-verify-glfw -G Ninja -DAURORA_BACKEND_GLFW=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 cmake --build build-verify-glfw --target aurora_verify_glfw_dpi
 ```
+
+**X11 CSD 探针的构建口径更苛刻**：像素判据直读帧缓冲（`data()`），须 `AURORA_ENABLE_DEBUG=ON`
+（Release 构建下该口被裁掉、恒返空指针），另需 `AURORA_BACKEND_X11=ON` 与
+`AURORA_BUILD_VERIFY_TOOLS=ON`，三个开关在 GLFW 载体的构建目录里同样不满足，故独立成目录：
+
+```
+cmake -S . -B build-verify-x11 -G Ninja -DAURORA_BACKEND_X11=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build-verify-x11 --target aurora_verify_x11_csd
+```
+
+**Win32 CSD 探针的构建口径同 X11**（像素判据直读帧缓冲，须 `AURORA_ENABLE_DEBUG=ON`，另需
+`AURORA_BACKEND_WIN32=ON` 与 `AURORA_BUILD_VERIFY_TOOLS=ON`；本机默认 `build/` 的前两个开关
+已满足，仅须追加 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 重 configure）：
+
+```
+cmake -S . -B build-verify-win32 -G Ninja -DAURORA_BACKEND_WIN32=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build-verify-win32 --target aurora_verify_win32_csd
+```
+
+探针的判据段（`content_inset` / 标题栏带像素 / 零入侵）为**自动段**，退出码语义同上；悬停 / 按压 /
+拖拽 / 双击的**人工目视段**由用例步骤承载（见 TC-WINDOW-014），不受探针退出码覆盖。
 
 探针**全部输出走 stdout**（经 `AURORA_LOG_RAW`），**stderr 恒为空**——判定读 stdout，勿按
 「stderr 应有 N 行」立判据。退出码：`0` 全过；`1` 有断言失败；`2` 环境不可用；`3` 人工段待执行
@@ -64,13 +88,21 @@ cmake --build build-verify-glfw --target aurora_verify_glfw_dpi
 | 后端开关 | 取值 |
 |:---|:---|
 | `AURORA_BACKEND_WIN32` | ON |
-| `AURORA_BACKEND_HEADLESS` | ON |
+| `AURORA_BACKEND_HEADLESS` | 恒编入（无开关） |
 | `AURORA_BACKEND_GLFW` / `D3D11` / `GPU_GL` / `GPU_WGPU` | OFF |
 | `AURORA_BACKEND_X11` / `WAYLAND` / `MACOS` / `WASM` | OFF |
 
-因此 **D3D11、wgpu、X11、Wayland、macOS、WASM 六个后端的人工验证在本机不可执行**，本模块不为它们
+因此 **D3D11、wgpu、Wayland、macOS、WASM 五个后端的人工验证在本机不可执行**，本模块不为它们
 编写用例（其窗口表现差异属跨平台真机验收的范畴）。TC-WINDOW-001 的方案 B 覆盖 Headless 路径，
 其余用例覆盖 Win32 路径。
+
+**X11 后端的例外**（口径同 GLFW）：本机有可达的 X server（`DISPLAY=:0`，XWayland 会话），只需另建
+一个开启 `AURORA_BACKEND_X11` **且 `AURORA_ENABLE_DEBUG=ON`** 的构建目录（口径见 §1.2 的
+X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据。
+
+**Win32 后端的例外**：它是本机原生后端（`AURORA_BACKEND_WIN32=ON`），自绘装饰已落地（见
+`07-environment-modifier.md` §4.1 三后端映射表）；探针只须 `AURORA_BUILD_VERIFY_TOOLS=ON`
+（口径见 §1.2 的 Win32 CSD 探针段），故 TC-WINDOW-015 覆盖 Win32 的自绘装饰自动判据。
 
 **GLFW 后端的例外**：它是**本机可执行**的——只需另建一个开启 `AURORA_BACKEND_GLFW` 的构建目录
 （口径见 §1.2），不依赖本节表格所列的 `build/` 配置。故 TC-WINDOW-013 覆盖 GLFW 的 DPI 换算与
@@ -350,6 +382,43 @@ cmake --build build-verify-glfw --target aurora_verify_glfw_dpi
 此时探针自身报 `PENDING MANUAL` 且退出码为 3。⚠️ **退出码 3 是「待验收」不是「通过」**，不得记 `PASS`。
 本机当前即此状态（仅一块物理显示器），故下方记录表中本例的人工段记 `SKIP`。
 
+### 2.8 客户端自绘装饰（CSD）
+
+#### TC-WINDOW-014 X11 后端自绘装饰策略映射与像素判据
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-014 |
+| 测试目的 | 验证 `X11Surface` 对 `WindowStyleOptions::decoration` 的三路映射：`ClientSide` 撤 WM 口沿后自绘标题栏带真绘出且安全区上报栏高；`Auto`（SSD）与 `Frameless` 装饰零入侵应用内容 |
+| 前置条件 | 仓库根目录；`build-verify-x11` 已按 §1.2 的 X11 探针口径构建（三开关：`AURORA_BACKEND_X11` / `AURORA_ENABLE_DEBUG` / `AURORA_BUILD_VERIFY_TOOLS`）；`DISPLAY` 指向可达的 X server |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 运行 `DISPLAY=:0 ./build-verify-x11/aurora_verify_x11_csd 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 记录退出码<br>3. 查看 `out.txt` 的 PASS/FAIL 行、`band=`/`below=` 像素行与 `content_inset` 行<br>4. 查看 `err.txt` 应为空<br>5. （人工目视段）改用可见性 Normal 的最小示例或探针加 `--interactive` 观察：悬停三按钮的底色反馈、按压深于悬停、按住标题空白拖动窗口、标题双击切换最大化 |
+| 预期结果 | 2. 退出码 0<br>3. `content_inset` 行 `top=36.0` 且 `left/right/bottom` 为 0；`band=303030`、`below=FFFFFF`；恰 7 行 `[PASS]`、0 行 `[FAIL]`（client-side 三条 + auto 两条 + frameless 两条）<br>4. 恒空（探针输出全走 stdout）<br>5. 悬停底色即时出现且随指针离开消失；按压底色深于悬停且松手才触发动作（拖开即取消）；拖动平滑跟手；双击在最大化与还原间切换 |
+
+#### TC-WINDOW-015 Win32 后端自绘装饰策略映射、热区与释放触发判据
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-015 |
+| 测试目的 | 验证 `Win32Host` 对 `WindowStyleOptions::decoration` 的五档映射：`WM_NCCALCSIZE` 吞非客户区使客户区 = 整窗（最大化拉回显示器工作区）；`ClientSide` 标题栏带真绘出（AdwaitaDark `#303030`）且安全区上报栏高；五档的 `WM_NCHITTEST` 热区逐点与共享层口径重合；按钮**释放触发**与「按下拖离松手不动作」取消语义；降级（`shadow_margin_dp` 显式关闭）热区归零；`set_title_bar_style` 热更生效 |
+| 前置条件 | 仓库根目录；`build-verify-win32`（或追加了 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 的默认 `build/`）已按 §1.2 的 Win32 探针口径构建（三开关：`AURORA_BACKEND_WIN32` / `AURORA_ENABLE_DEBUG` / `AURORA_BUILD_VERIFY_TOOLS`）；DWM 桌面合成开启（关闭时降级判据自适应，探针自行探测） |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 运行 `./build-verify-win32/aurora_verify_win32_csd.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 记录退出码<br>3. 查看 `out.txt` 的 PASS/FAIL 行、`#RRGGBB` 像素行、`HT*` 命中行与 `checks=` 汇总行<br>4. 查看 `err.txt` 应为空<br>5. （人工目视段）拖动 ClientSide 窗口标题带空白移动窗口、标题带双击切换最大化、Win+方向键 Aero Snap、确认 Alt+Space 系统菜单在**系统档**可用（自绘档不提供，属平台边界见 `BUILD_OPTIONS.md` 平台差异注记） |
+| 预期结果 | 2. 退出码 0<br>3. `checks=47 pass=47`；`ClientSide` 段标题带 `#303030`、内容区 `#FFFFFF` 零入侵、`content_inset` `top=36`；热更后带 `#202020`（WindowsDark）且按压 `#991D11` 优先于悬停 `#C42B1C`；Auto 段带像素 `#FFFFFF` 且窗口顶部仍回报系统 caption；降级段左/底缘 `HTCLIENT` 化、角点回退标题带 `HTCAPTION`、带像素与栏高不变；最大化段客户区 = 工作区、左缘 `HTCLIENT`、释放最大化钮还原<br>4. 恒空（探针输出全走 stdout）<br>5. 拖动/双击/Aero Snap 由系统 `HTCAPTION` 白给、平滑跟手；系统档 Alt+Space 弹出系统菜单 |
+
+#### TC-WINDOW-016 CSD 预览窗按可见位置点击零漂移（Win32 真机走查）
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-016 |
+| 测试目的 | 验证 `demo_csd_gallery` 预览窗在真实窗口环境下「按控件可见位置点击即命中」——`ClientSide` host 自绘路径四按钮逐一生效，`Borderless`/`Frameless` 控件级 TitleBar 的点击命中链建立在绘制位置（绘制与命中零漂移，验收判据 3） |
+| 前置条件 | 仓库根目录；`build/` 已构建载体 `demo_csd_gallery`（`cmake --build build --target demo_csd_gallery`）；DWM 桌面合成开启；活动桌面会话（锁屏时窗口无法接收注入输入）；真实鼠标或等效指针注入通道 |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 启动载体：`./build/demo_csd_gallery.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 在主控制窗点击 `ClientSide preview` 按钮，等预览窗出现（纯执行，无预期结果）<br>3. 按预览窗内 `Cycle title-bar theme (host self-draw)` 按钮的可见位置点击一次（纯执行，无预期结果）<br>4. 读取预览窗状态行文本与顶部自绘标题带的整带配色<br>5. 按 `Toggle window frame shadow` 按钮的可见位置点击一次（纯执行，无预期结果）<br>6. 读取状态行文本<br>7. 按 `Toggle title-bar icon` 按钮的可见位置点击一次（纯执行，无预期结果）<br>8. 读取状态行文本与标题带左端图标槽<br>9. 把该预览窗先缩矮到 `Close this preview` 按钮完全不可见，再向下拉长使该按钮重新可见（纯执行，无预期结果）<br>10. 按拉长后 `Close this preview` 按钮的可见位置点击一次（纯执行，无预期结果）<br>11. 查看预览窗存活状态与 `err.txt` 的新增行<br>12. 点击主控制窗 `Borderless preview` 按钮，在出现的预览窗内依次点击控件级 TitleBar 上的 `Info`、`−`、`□`、`×`（纯执行，无预期结果）<br>13. 查看预览窗存活状态与 `err.txt` 的新增行<br>14. 在该预览窗内按可见位置点击 `Close this preview`（纯执行，无预期结果）<br>15. 查看窗口状态与 `err.txt` 的新增行<br>16. 点击主控制窗 `Frameless preview` 按钮，重复步骤 12 与 14 的点击序列（纯执行，无预期结果）<br>17. 查看窗口状态与 `err.txt` 的新增行<br>18. 查看 `err.txt` 全文 |
+| 预期结果 | 4. 状态行由 `host title-bar theme → <主题名>` 更新为循环序（AdwaitaDark → AdwaitaLight → WindowsDark → WindowsLight）的下一档；顶部自绘标题带整带配色随主题即时重绘<br>6. 状态行更新为 `window frame shadow → off`（若点击前已为 `off` 则更新为 `on`，即与点击前状态翻转）<br>8. 状态行更新为 `title-bar icon → set`（若点击前已为 `set` 则 `cleared`）；`set` 后标题带左端出现 24×24 双色演示图标，`cleared` 后图标消失<br>11. 预览窗关闭消失；`err.txt` 新增 1 行，级别 `INF`，消息形如 `[app] window host closed and reaped: id= <N>`（`<N>` 为该预览窗 id）。**判据要点**：点击发生在拉长后按钮的可见位置——修复前该点击落空（须上移约一个标题栏高度才生效），此步骤即原始缺陷场景<br>13. 窗口保持存活不关闭；`err.txt` 恰新增 1 行，级别 `INF`，消息含 `csdg: info clicked`（控件在其绘制位置被命中）；`−` / `□` / `×` 三钮不产生新增行（其表现为 Win32 平台范围空动作，见下方注记）<br>15. 预览窗关闭消失；`err.txt` 新增 1 行回收行（与步骤 11 同格式）<br>17. 与步骤 13 / 15 同口径：`Info` 命中日志新增 1 行、`−` / `□` / `×` 无新增行且窗口存活、`Close this preview` 后窗口消失并新增 1 行回收行<br>18. 除上述 `INF` 行外无 `ERR` / `FTL` 级日志；可出现既有观察性 `WRN`（预览窗关闭时布局父链解除提示，详见执行记录备注） |
+
+**本例与 、及控件级 TitleBar 三钮的平台范围**：步骤 9–11 复原 `demo_csd_gallery` 的原始缺陷场景（的动因）——向下拉长窗口露出 `Close this preview` 后，修复前按按钮可见位置点击无效、须点击其上方约一个标题栏高度才生效；修复后同一可见位置点击即命中。步骤 12–17 的控件级 TitleBar 走查中，`−` / `□` / `×` 经 `WindowChrome` 转发的 `Surface::close()` / `minimize()` / `toggle_maximize()` / `set_fullscreen()` 为默认空实现、仅 Wayland（`xdg_toplevel`）覆盖（见 `specification/07-environment-modifier.md` 的「程序化窗口控制」段）——在 Win32 真机上表现为无害空动作，属既有平台范围、非缺陷，更非本次命中修复的回归；命中是否对齐以 `Info` 动作日志与 `Close this preview` 的可见位置点击判定，不得把三钮的空动作记为失败。
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -367,3 +436,6 @@ cmake --build build-verify-glfw --target aurora_verify_glfw_dpi
 | TC-WINDOW-011 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：退出码 0，进程不再存在且无窗口残留。步骤 4：`err.txt` 仅启动的 1 行 `INF`，无 `ERR`/`FTL` | | 本机会话锁屏，标题栏属非客户区、合成点击落不到，故步骤 2 以发送 `WM_SYSCOMMAND`/`SC_CLOSE` 等价代替——这正是点击标题栏关闭按钮时系统投递给窗口的消息。本用例文本于本轮修订（原步骤含「新建一扇辅助窗口」，与 `ExitPolicy::LastWindowClosed` 语义冲突，见 §2.6 分工说明） |
 | TC-WINDOW-012 | 2026-09-26 | Qoder Agent | PASS | | 步骤 3：关闭主窗后进程仍存活，存活窗口只剩标题 `Auxiliary #1` 的一扇，`err.txt` 新增 1 行 `INF` 且消息为 `[app] window host closed and reaped: id=1`（id=1 即主窗）。步骤 5：关闭该辅助窗口后退出码 0，无窗口残留。步骤 6：`err.txt` 全文 3 行均为 `INF`，无 `ERR`/`FTL` | | 关闭最后一扇窗口时进程先行退出，故不再有该窗口的回收日志行，属预期时序。本例为新增，用以固定「主窗关闭不连带关闭其他窗口」这一默认策略边界 |
 | TC-WINDOW-013 | 2026-10-03 | WorkBuddy | SKIP | | 自动段（步骤 1-4）全部通过：`scale_factor()` = 1.5（本机 150%）；`(b1)` 480x320 逻辑 dp、`(b2)` 帧缓冲 720x480、`(b3)` 480x320x1.5=720x480 三者逐位相符、`(b4)` 未退化为逻辑尺寸；`(c1)` 构造期无误报 count=0；`(e1)` 注入后 handler 被调用 count=1、`(e2)` 上报值 1.0 == 注入 96/96、`(e3)` 与 `scale_factor()` 一致、`(e5)` 同值再注入计数保持 1（去重生效）、`(e6)` 已采纳缩放保持 1.0；`err.txt` 为 0 字节。人工段（步骤 5-6）未执行：探针报 `PENDING MANUAL`、退出码 3 | | 记 `SKIP` 的原因是前置不满足而非判据失败：本机仅一块物理显示器（`\\.\DISPLAY1` 3840x2160 @150%，`DISPLAY2-5` 的 `stateFlags=0` 即未挂载），无第二个不同缩放的输出可拖，与 TC-WINDOW-008/009 同因。步骤 4 顺带核实了探针的通道分离：输出全走 stdout，stderr 恒空。本例为新增载体（探针而非 demo），故本模块 §1.2/§1.3 已同步登记该载体的独立构建口径与后端例外。⚠️ 取证过程中曾出现一次「自动段 (e5) 转红」的假故障，根因是恢复变异源码后未重编、跑的是变异前的旧 `aurora.lib`（产物 mtime 早于源码 mtime），重建后即恢复全绿——与本仓既有教训一致（记忆恢复后必须重跑验证） |
+| TC-WINDOW-014 | 2026-10-12 | WorkBuddy | PASS | | 步骤 2：退出码 0。步骤 3：`content_inset: top=36.0 left=0.0 right=0.0 bottom=0.0`；`band=303030 below=FFFFFF (expect 303030 / FFFFFF)`；恰 7 行 `[PASS]`（client-side 的 inset/带像素/内容零入侵三条 + auto 的 inset/零入侵两条 + frameless 的 inset/零入侵两条），0 行 `[FAIL]`，末行 `checks=7 pass=7`。步骤 4：`err.txt` 为空 | | 自动段三策略映射逐条过；步骤 5 人工目视段待真机会话补记（本会话无指针注入通道）。构建口径为 §1.2 的 `build-verify-x11`（`AURORA_BACKEND_X11=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON`） |
+| TC-WINDOW-015 | 2026-10-12 | WorkBuddy | PASS | | 步骤 2：退出码 0。步骤 3：末行 `checks=47 pass=47`；ClientSide 段客户区 = 窗口矩形（`WM_NCCALCSIZE` 吞框）、`content_inset` `top=36`、带像素 `#303030` 且内容区 `#FFFFFF` 零入侵、逐点热区回归过（八向 / 标题带 / 按钮→HTCLIENT）、悬停关钮 `#E01B24`、同钮释放触发关窗；热更段带 `#202020`、按压 `#991D11` 覆悬停 `#C42B1C`、拖离松手不关窗且无残留高亮；Auto 段带像素 `#FFFFFF`、窗口顶带仍报 `HTCAPTION`（系统 caption 完好）；降级段左/底缘与角点 `HTCLIENT` 化、角点落入标题带报 `HTCAPTION`、带像素与栏高不变；最大化段客户区 = 显示器工作区、左缘 `HTCLIENT`、带空白 `HTCAPTION`、释放最大化钮完成最大化→还原往返。步骤 4：`err.txt` 为 0 字节 | | 自动段五档映射逐条过；DWM 合成开启；降级判据经 `frame.shadow_margin_dp = 0` 显式注入实测；判据经三次变异（热区门收窄到 csd_border、最大化标题带门加 sizable、win32_surface 删除 `paint_decoration` 调用）逐一转红后恢复复绿，非结构性假绿。步骤 5 人工目视段（拖动/双击/Aero Snap/系统菜单）待真机会话补记。构建口径为本机默认 `build/` 追加 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 重 configure（WIN32/DEBUG 两开关已满足） |
+| TC-WINDOW-016 | 2026-10-12 | WorkBuddy | PASS | | 步骤 4：`Cycle title-bar theme` 按钮可见位置点击逐档循环，状态行依次为 `host title-bar theme → AdwaitaLight`、`→ WindowsDark`、`→ WindowsLight`，顶部自绘标题带整带配色随主题逐档重绘。步骤 6：状态行 `window frame shadow → off`。步骤 8：状态行 `title-bar icon → set`，标题带左端出现 24×24 双色图标。步骤 9–11：物理 840×640 缩矮后 `Close this preview` 带从像素扫描中消失，物理 840×940 拉长后于原相对位置重现（bitmap 纵带 y=[698,754]），按该可见位置（屏幕物理 (291,878)）真实点击后窗口立即消失，`err.txt` 新增 `INF` 行 `[app] window host closed and reaped: id=4`。步骤 13：Borderless 预览在绘制位置点击 `Info` 后新增 `INF` 行 `csdg: info clicked`；`−` / `□` / `×` 点击后窗口存活、无新增行。步骤 15：`Close this preview` 后窗口消失并新增回收行 `id=5`。步骤 17：Frameless 同口径复验，`csdg: info clicked` 再新增 1 行、`×` 无动作且窗口存活、`Close this preview` 后新增回收行 `id=6`。步骤 18：全文无 `ERR` / `FTL` | | 取证口径：真机点击经 `SetCursorPos` + `mouse_event` 注入屏幕物理坐标（非 `PostMessage` 直投），落点取 DPI 感知 `PrintWindow` 像素扫描出的按钮带中轴（窗口物理 rect (152,152) 840×780 @ DPI 144 即 150% 缩放）；运行二进制为含 修复的构建（可执行文件 mtime 晚于修复源文件、工作树对该源文件无未提交改动）。平台范围观察：控件级 TitleBar 的 `−` / `□` / `×` 为 Win32 无害空动作（`Surface` 四操作默认空实现、仅 Wayland 生效，见 `specification/07-environment-modifier.md`），命中链本身无恙（同条 `Info` 动作在绘制位置逐次触发日志）。观察性现象：每扇预览窗关闭时稳定新增 1 行 `WRN`（`layout parent detached while the child widget is still alive: Column`，应用根子树解挂序提示），不影响关闭与回收，不记缺陷 |

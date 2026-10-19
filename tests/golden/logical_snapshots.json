@@ -417,6 +417,37 @@
           "children": []
         }
       ]
+    },
+    "webview_snapshot": {
+      "type": "Column",
+      "box": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 320.0,
+        "h": 240.0
+      },
+      "children": [
+        {
+          "type": "WebView",
+          "box": {
+            "x": 0.0,
+            "y": 0.0,
+            "w": 320.0,
+            "h": 240.0
+          },
+          "children": []
+        },
+        {
+          "type": "Text",
+          "box": {
+            "x": 0.0,
+            "y": 240.0,
+            "w": 100.0,
+            "h": 20.0
+          },
+          "children": []
+        }
+      ]
     }
   }
 }

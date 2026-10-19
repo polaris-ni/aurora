@@ -26,7 +26,7 @@ struct FlagKeyPair {
     bool FeatureFlags::*field;
 };
 
-/// 全部 21 个归一化镜像字段（与 BUILD_OPTIONS.md 三层命名分组一一对应）。
+/// 全部 25 个归一化镜像字段（与 BUILD_OPTIONS.md 三层命名分组一一对应）。
 [[nodiscard]] auto flag_key_table() -> const std::vector<FlagKeyPair> & {
     static const std::vector<FlagKeyPair> AURORA_FLAG_KEY_TABLE = {
         {.key = "AURORA_BACKEND_HEADLESS", .field = &FeatureFlags::backend_headless},
@@ -51,6 +51,9 @@ struct FlagKeyPair {
         {.key = "AURORA_ENABLE_IMAGE_JPEG", .field = &FeatureFlags::image_jpeg},
         {.key = "AURORA_ENABLE_IMAGE_WEBP", .field = &FeatureFlags::image_webp},
         {.key = "AURORA_ENABLE_IMAGE_PNG", .field = &FeatureFlags::image_png},
+        {.key = "AURORA_ENABLE_WEBVIEW", .field = &FeatureFlags::webview},
+        {.key = "AURORA_ENABLE_WEBVIEW_WEBVIEW2", .field = &FeatureFlags::webview_webview2},
+        {.key = "AURORA_ENABLE_WEBVIEW_WEBKITGTK", .field = &FeatureFlags::webview_webkitgtk},
     };
     return AURORA_FLAG_KEY_TABLE;
 }
@@ -82,6 +85,9 @@ AURORA_TEST_CASE(value_initialized_flags_are_all_false) {
     AURORA_TEST_CHECK_FALSE(defaults.image_jpeg);
     AURORA_TEST_CHECK_FALSE(defaults.image_webp);
     AURORA_TEST_CHECK_FALSE(defaults.image_png);
+    AURORA_TEST_CHECK_FALSE(defaults.webview);
+    AURORA_TEST_CHECK_FALSE(defaults.webview_webview2);
+    AURORA_TEST_CHECK_FALSE(defaults.webview_webkitgtk);
 }
 
 AURORA_TEST_CASE(snapshot_matches_json_per_macro_key) {

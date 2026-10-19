@@ -5,8 +5,6 @@
 /// 以及像素 golden 基线（chart_pie.png，受 AURORA_UPDATE_GOLDEN 控制）
 
 #include <algorithm>
-#include <charconv>
-#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -16,7 +14,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
-#include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
 #include "framework/json_access.h"
@@ -179,6 +176,66 @@ AURORA_TEST_CASE(golden_pie_chart_matches_baseline) {
     p.center_space_ratio = 0.45F;
     p.show_percentage_labels = true;
     golden::compare_or_update("chart_pie", render_chart(p));
+}
+
+AURORA_TEST_CASE(paint_and_interaction_branches) {
+    Painter painter;
+    const BuildContext ctx;
+    auto paint_at = [&painter, &ctx](Widget &w) -> void {
+        w.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = w.size()}, ctx);
+    };
+
+    // 1) 空数据：无界约束走 240x200 缺省画布；无扇区绘制早返回。
+    PieChart empty{};
+    empty.layout(Constraints{}, ctx);
+    paint_at(empty);
+
+    // 2) 零值扇区（sweep ≤ gap 跳过）+ 百分比标签 + 图例 Bottom：绘制全路径。
+    PieChartProps p = bare_props();
+    p.sections = {PieSection{.name = "A", .value = 3.0}, PieSection{.name = "z", .value = 0.0},
+                  PieSection{.name = "B", .value = 1.0}};
+    p.show_percentage_labels = true;
+    p.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Bottom};
+    PieChart chart{p};
+    layout_only(chart);
+    chart.on_hover_change(true);
+    paint_at(chart);
+
+    // 3) 悬停扇区 → 描弧高亮 + 值框绘制 + accessibility_value 文本。
+    MouseEvent hit = move_at(160.0F, 40.0F);  // 正上方命中扇区 0
+    chart.on_pointer_event(hit);
+    AURORA_TEST_REQUIRE_TRUE(chart.hovered_section().has_value());
+    paint_at(chart);
+    AURORA_TEST_CHECK_FALSE(chart.accessibility_value().empty());
+    AURORA_TEST_CHECK_TRUE(chart.accessibility_role() == AccessibilityRole::Image);
+
+    // 4) 图例 Bottom 命中 → 图例优先于扇区 + 联动降透明绘制；悬停离开清除。
+    MouseEvent legend_move = move_at(4.0F, 195.0F);
+    chart.on_pointer_event(legend_move);
+    AURORA_TEST_CHECK_FALSE(chart.hovered_section().has_value());  // 图例优先
+    paint_at(chart);
+    chart.on_hover_change(false);
+    AURORA_TEST_CHECK_FALSE(chart.hovered_section().has_value());
+
+    // 5) 图例 Right：纵排命中区（宽 500 让图例项放得下）。
+    PieChartProps rp = bare_props();
+    rp.sections = {PieSection{.name = "A", .value = 1.0}, PieSection{.name = "B", .value = 1.0}};
+    rp.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Right};
+    PieChart right{rp};
+    Constraints wide;
+    wide.min = Size{.width = 0.0F, .height = 0.0F};
+    wide.max = Size{.width = 500.0F, .height = 200.0F};
+    right.layout(wide, ctx);
+    MouseEvent legend_right = move_at(470.0F, 4.0F);
+    right.on_pointer_event(legend_right);
+    AURORA_TEST_CHECK_FALSE(right.hovered_section().has_value());  // 图例命中优先
+    paint_at(right);
+
+    // 6) Press 事件不属 Move/Release：回落基类。
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    press.local_position = Point{.x = 160.0F, .y = 40.0F};
+    chart.on_pointer_event(press);
 }
 
 }  // namespace aurora::test_cases::utest_pie_chart

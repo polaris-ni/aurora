@@ -5,7 +5,6 @@
 /// run 对非法输入（空树/非正视口）的拒绝路径、结果序列化格式，以及最小离线基准
 /// （HeadlessSurface + 固定尺寸内容树 + 程序化滚动，帧数压到 2 帧做快速端到端自证）。
 
-#include <cstddef>
 #include <memory>
 #include <string>
 

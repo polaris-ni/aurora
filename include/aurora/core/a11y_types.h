@@ -1,12 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
-#include <optional>
-#include <string_view>
-
-#include "aurora/core/types.h"
 
 namespace aurora {
 

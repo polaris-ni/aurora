@@ -389,7 +389,7 @@ inline auto EntryRange::Iterator::operator++() noexcept -> Iterator & {
 /// @param tag 后置哑元标记，仅用于重载决议（C++ 惯例）。
 /// @return 自增前的迭代器副本。
 inline auto EntryRange::Iterator::operator++([[maybe_unused]] int tag) noexcept -> Iterator {
-    Iterator prev = *this;
+    const Iterator prev = *this;
     ++p_;  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) 同前置自增
     return prev;
 }

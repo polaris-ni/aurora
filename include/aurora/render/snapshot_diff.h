@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
@@ -338,7 +337,7 @@ struct DiffRegion {
         out.push_back(r);
     }
 
-    std::sort(out.begin(), out.end(), [](const DiffRegion &a, const DiffRegion &b) {  // 确定性排序（规则见函数头）
+    std::ranges::sort(out, [](const DiffRegion &a, const DiffRegion &b) {  // 确定性排序（规则见函数头）
         if (a.diff_pixels != b.diff_pixels) {
             return a.diff_pixels > b.diff_pixels;
         }

@@ -41,7 +41,7 @@ AccessModifierOffset: -2
 
 # 函数参数紧凑排列
 BinPackArguments: true
-BinPackParameters: BinPack
+BinPackParameters: true
 
 # 构造函数初始化列表：超长时冒号前换行，尽量打包
 BreakConstructorInitializers: BeforeColon

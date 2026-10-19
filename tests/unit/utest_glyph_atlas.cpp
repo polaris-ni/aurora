@@ -3,7 +3,6 @@
 /// 测试说明: 覆盖 GlyphAtlas 的未命中返回空指针、插入后字段保真（含 Gray/Lcd 两种缓冲语义）、
 /// 同键覆盖、clear 全清，以及容量上限触发的 LRU 淘汰与访问提升对淘汰顺序的影响
 
-#include <cstddef>
 #include <cstdint>
 #include <vector>
 

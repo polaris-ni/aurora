@@ -431,9 +431,9 @@ class PlayRepository {
         return v;
     }
     [[nodiscard]] auto list_by_category(const std::string &cat) const -> std::vector<AppItem> {
-        auto v = all();
+        const auto v = all();
         std::vector<AppItem> out;
-        for (auto &a : v) {
+        for (const auto &a : v) {
             if (a.category == cat) {
                 out.push_back(a);
             }
@@ -442,9 +442,9 @@ class PlayRepository {
     }
     [[nodiscard]] auto list_by_subcategory(const std::string &cat, const std::string &sub) const
         -> std::vector<AppItem> {
-        auto v = all();
+        const auto v = all();
         std::vector<AppItem> out;
-        for (auto &a : v) {
+        for (const auto &a : v) {
             if (a.category == cat && a.subcategory == sub) {
                 out.push_back(a);
             }
@@ -452,20 +452,20 @@ class PlayRepository {
         return out;
     }
     [[nodiscard]] auto search(const std::string &q) const -> std::vector<AppItem> {
-        auto v = all();
+        const auto v = all();
         std::vector<AppItem> out;
         std::string ql;
         ql.reserve(q.size());
-        for (char c : q) {
+        for (const char c : q) {
             ql.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
         }
-        for (auto &a : v) {
+        for (const auto &a : v) {
             std::string n;
             std::string d;
-            for (char c : a.name) {
+            for (const char c : a.name) {
                 n.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
             }
-            for (char c : a.developer) {
+            for (const char c : a.developer) {
                 d.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
             }
             if (n.find(ql) != std::string::npos || d.find(ql) != std::string::npos) {

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -40,7 +39,7 @@ class ScrollStorage {
     /// @return 单例引用（首次调用时构造）。
     [[nodiscard]] static auto instance() -> ScrollStorage &;
 
-    static constexpr const char *AURORA_GROUP_NAME =
+    static constexpr auto AURORA_GROUP_NAME =
         "scroll_positions";  ///< 持久化分组名：`attach` 后数据位于 `Preferences` 的该分组下。
 
     /// @brief 作用域 RAII：构造时设置当前作用域（空串 = 无作用域 / 全局单桶），析构恢复前值。

@@ -54,7 +54,7 @@
 #if !defined(AURORA_PLATFORM_UNIX) || defined(AURORA_PLATFORM_MACOS)
 #error "aurora_verify_x11_cursor can only be built on Linux/Unix (non-Apple)"
 #endif
-#if !defined(AURORA_BACKEND_X11)
+#ifndef AURORA_BACKEND_X11
 #error "AURORA_BACKEND_X11 must be enabled"
 #endif
 
@@ -66,6 +66,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <string>
+#include <utility>
 
 #include "aurora/window/x11_surface.h"  // aurora 头必须先于 Xlib（None/Bool/Status 宏污染）：Xlib 的 `#define None 0L` 会炸掉 aurora 侧以 None 为枚举成员的声明。
 #include "aurora/window/cursor_map.h"
@@ -99,12 +100,19 @@ struct XFixesCursorImageAbi {
 using GetCursorImageFn = XFixesCursorImageAbi *(*)(Display *);
 using QueryExtensionFn = int (*)(Display *, int *, int *);
 
-GetCursorImageFn g_get_cursor_image = nullptr;
+/// dlsym 解析的 XFixes 符号：函数局部静态 + 访问器收敛，避免命名空间级可变全局量。
+auto get_cursor_image_fn() -> GetCursorImageFn & {
+    static GetCursorImageFn fn = nullptr;
+    return fn;
+}
 
 auto hash_pixels(const XFixesCursorImageAbi *image) -> std::uint64_t {
     std::uint64_t h = 1469598103934665603ULL;  // FNV-1a 64
     const auto count = static_cast<std::size_t>(image->width) * static_cast<std::size_t>(image->height);
     for (std::size_t i = 0; i < count; ++i) {
+        // pixels 是 Xlib C ABI 的裸数组（长度 = width×height，XFixes 协议定死），按元素指纹哈希
+        // 就地豁免裸指针下标。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         h ^= static_cast<std::uint64_t>(image->pixels[i]);
         h *= 1099511628211ULL;
     }
@@ -134,7 +142,7 @@ auto read_cursor_settled(Display *dpy) -> CursorSnapshot {
     for (int attempt = 0; attempt < 20; ++attempt) {
         XSync(dpy, False);
         nap_ms(25);
-        XFixesCursorImageAbi *first = g_get_cursor_image(dpy);
+        XFixesCursorImageAbi *first = get_cursor_image_fn()(dpy);
         if (first == nullptr) {
             return out;
         }
@@ -143,7 +151,7 @@ auto read_cursor_settled(Display *dpy) -> CursorSnapshot {
         XFree(first);
         XSync(dpy, False);
         nap_ms(10);
-        XFixesCursorImageAbi *second = g_get_cursor_image(dpy);
+        XFixesCursorImageAbi *second = get_cursor_image_fn()(dpy);
         if (second == nullptr) {
             return out;
         }
@@ -239,7 +247,7 @@ auto place_pointer_over(Display *dpy, Window root, Window win, int screen_w, int
         if (!stable) {
             continue;  // 几何取不到 / 一直在动 / 被放到 root 外：重读一次整体再来
         }
-        XWarpPointer(dpy, None, root, 0, 0, 0, 0, g.x + g.w / 2, g.y + g.h / 2);
+        XWarpPointer(dpy, None, root, 0, 0, 0, 0, g.x + (g.w / 2), g.y + (g.h / 2));
         XSync(dpy, False);
         for (int waited = 0; waited <= 800; waited += 100) {
             Window child = 0;
@@ -293,6 +301,9 @@ auto x_error_handler(Display *dpy, XErrorEvent *ev) -> int {
 
 }  // namespace
 
+// 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现，捕获反而把失败压成 0。
+// 口径与 tools/verify/ 其余探针、examples/ 各 demo 入口同。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
     // 命令行面即声明表：位置参数 [DISPLAY] 给定即覆盖环境变量（多 X 会话机器上定点验收）。
     const auto spec = aurora::cli::CommandSpec{
@@ -315,6 +326,9 @@ auto main(int argc, char **argv) -> int {
         AURORA_LOG_ERROR("verify", "X11Surface unavailable -- no DISPLAY or no usable X server");
         return 2;
     }
+    // native_handle 契约返回 void *，X11 XID 本是整数：身份折算喂独立连接的 Xlib 调用，
+    // 从不解引用（与 utest_x11_surface 同款豁免）。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     const auto win = static_cast<Window>(reinterpret_cast<std::uintptr_t>(surface.native_handle()));
 
     Display *dpy = XOpenDisplay(nullptr);
@@ -332,11 +346,14 @@ auto main(int argc, char **argv) -> int {
         XCloseDisplay(dpy);
         return 2;
     }
-    g_get_cursor_image = reinterpret_cast<GetCursorImageFn>(dlsym(lib, "XFixesGetCursorImage"));
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    get_cursor_image_fn() = reinterpret_cast<GetCursorImageFn>(dlsym(lib, "XFixesGetCursorImage"));
+    // dlsym 契约的「对象指针 → 函数指针」唯一拼法（同 alsa/atspi 桥的符号绑定豁免口径）。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     auto query_extension = reinterpret_cast<QueryExtensionFn>(dlsym(lib, "XFixesQueryExtension"));
     int event_base = 0;
     int error_base = 0;
-    if (g_get_cursor_image == nullptr || query_extension == nullptr ||
+    if (get_cursor_image_fn() == nullptr || query_extension == nullptr ||
         query_extension(dpy, &event_base, &error_base) == 0) {
         AURORA_LOG_ERROR("verify", "XFIXES extension unavailable");
         XCloseDisplay(dpy);
@@ -347,9 +364,8 @@ auto main(int argc, char **argv) -> int {
     const int screen_w = DisplayWidth(dpy, DefaultScreen(dpy));
     const int screen_h = DisplayHeight(dpy, DefaultScreen(dpy));
     AURORA_LOG_RAW("verify", "display=", DisplayString(dpy), " root=", aurora_verify::format_int(screen_w), "x",
-                   aurora_verify::format_int(screen_h), " window=",
-                   aurora_verify::format_handle(reinterpret_cast<const void *>(static_cast<std::uintptr_t>(win))),
-                   "\n");
+                   aurora_verify::format_int(screen_h),
+                   " window=", aurora_verify::format_hex(static_cast<std::uint64_t>(win)), "\n");
 
     // ---- 策略 1：常规映射 + 按窗口自身几何 warp（真实 X11 会话下 child==win 即命中）----
     XMapRaised(dpy, win);
@@ -410,7 +426,7 @@ auto main(int argc, char **argv) -> int {
     std::uint64_t distinct = 0;
     std::uint64_t last_hash = 0;
     int identical_runs = 0;
-    for (int i = 0; i < static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT); ++i) {
+    for (int i = 0; std::cmp_less(i, aurora::AURORA_CURSOR_SHAPE_COUNT); ++i) {
         const auto shape = static_cast<aurora::CursorShape>(i);
         surface.set_cursor(shape);
         const CursorSnapshot snap = read_cursor_settled(dpy);

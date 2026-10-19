@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -359,16 +357,22 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @param len 宽度意图：`Fixed` / `Fraction` / `Expand` 在布局时把该轴夹成等式。
     /// @return 自身引用，供链式继续设置其它属性。
     virtual auto width(Length len) -> Widget & {
+        if (width_.kind == len.kind && width_.value == len.value) {
+            return *this;  // 尺寸意图未变：无需标脏（避免无谓重排）
+        }
         width_ = len;
-        mark_needs_layout();  // 尺寸意图变更影响测量结果：标脏布局
+        mark_size_intent_changed();  // 尺寸意图变更：自身 + 父侧均需重排
         return *this;
     }
     /// @brief 显式高度意图（语义同 `width`）。
     /// @param len 高度意图（强类型 `Length`，裸整数不可编译）。
     /// @return 自身引用，供链式继续设置其它属性。
     virtual auto height(Length len) -> Widget & {
+        if (height_.kind == len.kind && height_.value == len.value) {
+            return *this;  // 尺寸意图未变：无需标脏（避免无谓重排）
+        }
         height_ = len;
-        mark_needs_layout();  // 尺寸意图变更影响测量结果：标脏布局
+        mark_size_intent_changed();  // 尺寸意图变更：自身 + 父侧均需重排
         return *this;
     }
     /// @brief 读取当前宽度意图（设定值，非测量结果）。
@@ -712,10 +716,51 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @return 候选窗定位盒（绝对窗口逻辑 dp）：基类回退 `focus_bounds_`（整个控件盒），从未绘制过时为零盒。
     [[nodiscard]] virtual auto composition_caret_bounds() const -> Rect { return focus_bounds_; }
 
-    /// @brief 操作系统文件拖放落在本控件时触发；消费时置 `e.is_handled` 阻止继续。
-    /// 默认不处理（交给命中目标自身）。
-    /// @param e 文件拖放事件（携带落点与文件列表）；默认实现不消费、不回写 `is_handled`。
-    virtual auto on_file_drop(FileDropEvent &e) -> void { (void)e; }
+    /// @brief 系统拖放（跨进程）落在本控件时触发；四个阶段共用本入口，消费时置 `e.is_handled`。
+    ///
+    /// 默认不处理（不消费、不回写 `is_handled`）。四态一律不冒泡、只交给命中目标，故本入口
+    /// 每次会话可能收到多次（`Enter` / `Over` 按指针采样频率，`Drop` 至多一次）。
+    /// **只有 `Drop` 态保证带载荷**：`Enter` / `Over` 读载荷按空口径返回，不得假定有数据。
+    /// @param e 系统拖放事件（阶段、落点、可用格式、动作与载荷句柄）。
+    virtual auto on_system_drop(SystemDropEvent &e) -> void { (void)e; }
+
+    /// @brief 查询本控件是否接受这批格式的拖入，以及接受哪个动作（accept 语义的**唯一真值源**）。
+    ///
+    /// 宿主在 `Enter` / `Over` 态调用它以决定 OS 光标反馈（例如「可复制」与「禁止放置」），
+    /// 派发器据此与源建议动作求交后写入 `SystemDropEvent::allowed`。基类默认 `DragAction::None`
+    /// = 不接受；**返回值不是「建议」而是「本控件会执行什么」**，故与 `Drop` 态的实际处理须一致。
+    ///
+    /// 实现须常量级：本调用发生在 `Over` 态（按指针采样频率到达），**禁止在此触发重布局**；
+    /// 格式匹配走预编译的格式表，不做线性外查找以外的任何工作。
+    /// @param formats 本次拖放可用格式的 MIME 清单（与 `SystemDropEvent::formats` 同内容）。
+    /// @return 接受时返回 `Copy` / `Move` / `Link`；不接受返回 `DragAction::None`（基类默认）。
+    [[nodiscard]] virtual auto query_system_drag_accept(const std::vector<std::string> &formats) -> DragAction {
+        (void)formats;
+        return DragAction::None;
+    }
+
+    /// @brief 声明本控件可拖出的数据（拖出要约）；默认不提供（该控件不可作为拖出源）。
+    ///
+    /// 与 `on_system_drop`（拖入）分工：本入口只描述「我能给出什么」，会话发起走
+    /// `begin_system_drag()`。返回 `std::nullopt` 即不可拖出。
+    /// @return 拖出要约（格式清单 + 按 MIME 取字节的回调）；基类默认 `std::nullopt`。
+    [[nodiscard]] virtual auto on_provide_drag() -> std::optional<DragOffer> { return std::nullopt; }
+
+    /// @brief 以 `on_provide_drag()` 的要约发起一次系统拖出会话。
+    ///
+    /// **动作口径**：会话成功回 `Copy` / `Move` / `Link`；被取消、被拒绝或建立失败回 `None`——
+    /// `None` **不是成功**，调用方不得把它当作「拖出完成」。当前各平台后端尚未接线，无测试后端时
+    /// 返回 `system-drag-not-supported`（机制缺失是稳态，错误码 `retryable = false`，不该重试）。
+    /// @return 协商出的动作；无要约或无后端时为结构化 `Error`。
+    [[nodiscard]] auto begin_system_drag() -> Result<DragAction>;
+
+    /// @brief 系统拖出会话结束回调：告知本控件最终动作（成功动作为 `Copy` / `Move` / `Link`，
+    ///        取消 / 被拒 / 失败为 `None`）。
+    ///
+    /// 与进程内拖拽的 `on_drag_end` **刻意分名**：同一控件上两套拖拽语义不共名，避免覆写时
+    /// 误接另一条路径。基类默认为空实现（不消费、不重绘）。
+    /// @param action 会话结束时的动作。
+    virtual auto on_system_drag_end(DragAction action) -> void { (void)action; }
 
     /// @brief 焦点变更通知（获焦 focus=true / 失焦 focus=false）。
     /// 基类默认维护 `is_focused_` 以便 `is_focused()` 正确；子类可覆写以更新聚焦态绘制。
@@ -1176,7 +1221,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @param child 待摘除的子控件（非空，且其 `layout_parent()` 确为 `this`）。
     /// @note Side-effects: 写 `child->layout_parent_`（清零）；子控件仍存活，不触及其析构。
     /// @note Thread: main-thread only
-    void detach_child_layout_parent(Widget *child);
+    void detach_child_layout_parent(Widget *child) const;
 
     /// @brief 摘除全部直接子节点的布局父指针（父先亡那一半的悬垂防护）。
     ///
@@ -1422,6 +1467,23 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
     // ---- why_trace 热路径埋点（AURORA_ENABLE_DEBUG）----
+    /// @brief 尺寸意图（`width` / `height`）变更的脏标记。
+    ///
+    /// 与 `mark_needs_layout` 的关键差别：尺寸意图是本控件**向父侧申报**的尺寸，其值一变，
+    /// 父分给本控件的盒随之改变，故**无论本控件是否 relayout boundary 都必须让父侧重排**。
+    /// 定尺寸控件天然满足 `is_relayout_boundary()`（尺寸不依赖子节点，`is_relayout_boundary()`
+    /// 对非 `WrapContent` 轴返回 true），若沿用其短路，本控件只在局部重排里刷新自身 `size_`，
+    /// 而父侧 Node 几何停留旧值——`window_bounds()` 读到的是过期盒（原生子视图几何据此下发
+    /// 即不跟随父侧新盒）。
+    auto mark_size_intent_changed() -> void {
+        mark_needs_layout();  // 标脏自身（含 request_frame）
+        // 无条件向父侧传播，绕开 `mark_needs_layout_impl` 里的 boundary 短路（见上）。父多为
+        // 非 boundary 容器 ⇒ 整树重排、父侧 Node 几何随之刷新；父若自身也是 boundary（如滚动
+        // 视口）⇒ 其局部重排会以新约束重新下发子盒，同样正确。
+        if (layout_parent_ != nullptr) {
+            layout_parent_->mark_needs_layout_impl(true);
+        }
+    }
     /// @brief 布局脏标记的实现体：公开入口 `mark_needs_layout` 委托至此。
     ///        置位后沿布局父链上溯失效祖先布局缓存，并请求一次重排帧。
     /// @param propagated 传播点显式传 true，使 `why_trace` 能区分「业务/状态直接触发的根因」
@@ -1593,7 +1655,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
         if (!focus_ring_shown() && !painted_focus_ring_) {
             return box;
         }
-        const float out = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
+        constexpr float out = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
         return Rect{.origin = Point{.x = box.origin.x - out, .y = box.origin.y - out},
                     .size = Size{.width = box.size.width + (2.0F * out), .height = box.size.height + (2.0F * out)}};
     }
@@ -2178,7 +2240,6 @@ class SingleChild : public Widget {
         return Widget::layout(c, ctx);
     }
 
-  protected:
     /// @brief 可写子节点视图（`SingleChild` 实现）：返回与 `child_` 同步的单元素可写表。
     ///
     /// **不可**复用 `child_nodes()` 的 `child_view_` 缓存：那是一份**拷贝**，对它取可写引用
@@ -2197,6 +2258,7 @@ class SingleChild : public Widget {
         return child_view_mut_;
     }
 
+  protected:
     /// @brief 自身持有份数（`SingleChild` 实现）：`child_` + 可能已建的 `child_view_mut_`
     ///        + 可能已建且有效的 `child_view_`。
     ///

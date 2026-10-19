@@ -7,7 +7,6 @@
 /// 覆盖说明: 另断言文字区外的渐变带底色像素不被文字污染（确定性回归锚点）
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <vector>
 
@@ -57,7 +56,7 @@ AURORA_TEST_CASE(clear_type_vs_supersample_metrics_on_gradient) {
 
     // 确定性锚点：文字矩形（x∈[20,580], y∈[20,60]）之外，渐变带底色不被文字污染。
     // (5,5) 落在第 0 带（蓝 37,99,235）且在文字矩形外；两模式结果一致。
-    const auto px = static_cast<std::size_t>((5 * w) + 5) * 4U;
+    constexpr auto px = static_cast<std::size_t>((5 * w) + 5) * 4U;
     AURORA_TEST_CHECK_EQ(ct.at(px + 0), 37);
     AURORA_TEST_CHECK_EQ(ct.at(px + 1), 99);
     AURORA_TEST_CHECK_EQ(ct.at(px + 2), 235);

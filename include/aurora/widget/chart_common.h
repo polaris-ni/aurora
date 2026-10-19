@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstddef>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -111,7 +110,7 @@ class LinearScale {
     /// @param tick_count 期望刻度数（内部 clamp ≥ 1，用于推导原始步长）。
     /// @return nice 化后的比例尺（域端点向 step 对齐，步长为 nice 数）。
     [[nodiscard]] static auto from_domain(double d0, double d1, int tick_count) -> LinearScale {
-        double lo = std::min(d0, d1);  // 域两端排序后的下界。
+        const double lo = std::min(d0, d1);  // 域两端排序后的下界。
         double hi = std::max(d0, d1);  // 域两端排序后的上界。
         if (!std::isfinite(lo) || !std::isfinite(hi)) {
             return LinearScale{0.0, 1.0, 1.0};
@@ -291,17 +290,51 @@ class BandScale {
     return palette.at(index % palette.size());
 }
 
-/// @brief 系列取色优先级：显式 color > `Theme` 命名令牌 `chart.palette.<i%8>` > 内置色板。
-/// @param index 系列索引（令牌名与内置色板均按 index % 8 选取）。
-/// @param explicit_color 系列显式色；有值时直接返回，不参与令牌查询。
-/// @param theme 查询 `chart.palette.*` 命名令牌的主题。
-/// @return 最终系列颜色（令牌缺失时回退内置色板）。
+/// @brief 图表系列色板主题扩展（对标 Flutter `ThemeExtension<T>`，纯值类型、可拷贝即满足约束）。
+///
+/// 系列取色优先级：显式 `series.color` > 注册的 `ChartPalette` 扩展 > 内置 `chart_palette` 兜底。
+/// 内置兜底与 `ChartPalette::light()` 同值，故未注册时观感逐位不变。应用可在根主题播种：
+/// `Theme::light().with_extension(ChartPalette::light())`，随后 `inherit_theme(ctx)` 透传的
+/// `Theme` 即携带该扩展；未播种（或 `Theme{}` 兜底）时回落内置色板，行为不变。
+struct ChartPalette {
+    /// @brief 8 色循环色板（默认即 light 档；dark 档沿用同值以保证跨档可辨识，可按需调暗）。
+    std::array<Color, 8> palette{
+        Color{66, 133, 244, 255},  // blue
+        Color{219, 68, 55, 255},  // red
+        Color{244, 180, 0, 255},  // yellow
+        Color{15, 157, 88, 255},  // green
+        Color{171, 71, 188, 255},  // purple
+        Color{255, 112, 67, 255},  // deep orange
+        Color{0, 172, 193, 255},  // cyan
+        Color{124, 179, 66, 255},  // light green
+    };
+
+    /// @brief 浅色档色板（与内置 `chart_palette` 同值）。
+    /// @return 浅色档 `ChartPalette` 值。
+    [[nodiscard]] static auto light() -> ChartPalette { return ChartPalette{}; }
+    /// @brief 深色档色板（沿用浅色值；待后续按 M3 暗色强调色微调）。
+    /// @return 深色档 `ChartPalette` 值。
+    [[nodiscard]] static auto dark() -> ChartPalette { return ChartPalette{}; }
+    /// @brief 兜底色板（等同于 light，供未注册扩展时等价回退）。
+    /// @return 兜底 `ChartPalette` 值。
+    [[nodiscard]] static auto fallback() -> ChartPalette { return ChartPalette{}; }
+};
+static_assert(ThemeExtension<ChartPalette>, "ChartPalette must satisfy ThemeExtension (copyable value type)");
+
+/// @brief 系列取色优先级：显式 color > `ChartPalette` 主题扩展 > 内置色板。
+/// @param index 系列索引（色板按 index % 8 选取）。
+/// @param explicit_color 系列显式色；有值时直接返回，不参与色板查询。
+/// @param theme 生效主题（经 `ThemeExtension<ChartPalette>` 读取注册色板；未注册回落内置 `chart_palette`）。
+/// @return 最终系列颜色。
 [[nodiscard]] inline auto resolve_series_color(std::size_t index, const std::optional<Color> &explicit_color,
                                                const Theme &theme) -> Color {
     if (explicit_color.has_value()) {
         return *explicit_color;
     }
-    return theme.token_or<Color>("chart.palette." + std::to_string(index % 8U), chart_palette(index));
+    if (const auto *cp = theme.extension<ChartPalette>(); cp != nullptr) {
+        return cp->palette.at(index % cp->palette.size());
+    }
+    return chart_palette(index);  // 未注册 ChartPalette 扩展 ⇒ 内置色板兜底（观感不变）
 }
 
 // ---------- JSON 编解码（数据进序列化面）----------

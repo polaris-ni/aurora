@@ -91,33 +91,92 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     JsonDepthExceeded = 47,  ///< json-depth-exceeded
     JsonTypeMismatch = 48,  ///< json-type-mismatch: JSON type mismatch: expected {expected}, got {actual}
     JsonValueNotSerializable = 49,  ///< json-value-not-serializable: Value cannot be serialized to JSON: {detail}
-    StorageBackendUnavailable = 50,  ///< storage-backend-unavailable
-    StorageRecordNotFound = 51,  ///< storage-record-not-found: Storage record does not exist
-    StorageRecordCorrupt = 52,  ///< storage-record-corrupt
-    StorageTypeMismatch = 53,  ///< storage-type-mismatch: Typed read type mismatch
-    StorageEncodingMismatch = 54,  ///< storage-encoding-mismatch: Serialized wire format mismatch
-    StorageIoError = 55,  ///< storage-io-error: Storage underlying I/O failed
-    AudioGraphCycle = 56,  ///< audio-graph-cycle: Audio graph connection would create a cycle ({src} -> {dst})
-    AudioEdgeNotFound = 57,  ///< audio-edge-not-found: Audio connection does not exist and cannot be disconnected
-    AudioContextClosed = 58,  ///< audio-context-closed
-    AudioParamInvalid = 59,  ///< audio-param-invalid: Invalid audio parameter automation ({reason})
-    AudioBufferInvalid = 60,  ///< audio-buffer-invalid: Invalid audio buffer ({reason})
-    AudioDeviceUnavailable = 61,  ///< audio-device-unavailable
-    AudioRecordingFailed = 62,  ///< audio-recording-failed: Audio recording failed: {reason}
-    CliSpecInvalid = 63,  ///< cli-spec-invalid: Invalid command spec: {reason}
-    CliUnknownOption = 64,  ///< cli-unknown-option: Unknown option '{option}' for command '{command}'
-    CliUnknownSubcommand = 65,  ///< cli-unknown-subcommand: Unknown subcommand '{subcommand}' for command '{command}'
-    CliMissingSubcommand = 66,  ///< cli-missing-subcommand: Command '{command}' requires a subcommand
-    CliMissingValue = 67,  ///< cli-missing-value: Option '{option}' requires a value
-    CliInvalidValue = 68,  ///< cli-invalid-value: Value '{value}' is not a valid {kind} for option '{option}'
-    CliChoiceInvalid = 69,  ///< cli-choice-invalid
-    CliRangeViolated = 70,  ///< cli-range-violated: Value '{value}' for option '{option}' is outside [{min}, {max}]
-    CliArityViolated = 71,  ///< cli-arity-violated
-    CliMissingRequired = 72,  ///< cli-missing-required: Required option '{option}' is missing for command '{command}'
-    CliTooManyPositionals = 73,  ///< cli-too-many-positionals
-    CliConflictViolated = 74,  ///< cli-conflict-violated: Options '{option}' and '{conflict}' cannot be used together
-    ClipboardAccessFailed = 75,  ///< clipboard-access-failed: System clipboard is inaccessible: '{detail}'
-    ClipboardWriteFailed = 76,  ///< clipboard-write-failed: Clipboard payload could not be committed: '{detail}'
+    CompressionDataCorrupt = 50,  ///< compression-data-corrupt: Compressed stream is corrupt or truncated: '{detail}'
+    CompressionOutputTooLarge = 51,  ///< compression-output-too-large
+    CompressionUnavailable = 52,  ///< compression-unavailable: Compression operation unavailable: '{detail}'
+    StorageBackendUnavailable = 53,  ///< storage-backend-unavailable
+    StorageRecordNotFound = 54,  ///< storage-record-not-found: Storage record does not exist
+    StorageRecordCorrupt = 55,  ///< storage-record-corrupt
+    StorageTypeMismatch = 56,  ///< storage-type-mismatch: Typed read type mismatch
+    StorageEncodingMismatch = 57,  ///< storage-encoding-mismatch: Serialized wire format mismatch
+    StorageIoError = 58,  ///< storage-io-error: Storage underlying I/O failed
+    AudioGraphCycle = 59,  ///< audio-graph-cycle: Audio graph connection would create a cycle ({src} -> {dst})
+    AudioEdgeNotFound = 60,  ///< audio-edge-not-found: Audio connection does not exist and cannot be disconnected
+    AudioContextClosed = 61,  ///< audio-context-closed
+    AudioParamInvalid = 62,  ///< audio-param-invalid: Invalid audio parameter automation ({reason})
+    AudioBufferInvalid = 63,  ///< audio-buffer-invalid: Invalid audio buffer ({reason})
+    AudioDeviceUnavailable = 64,  ///< audio-device-unavailable
+    AudioRecordingFailed = 65,  ///< audio-recording-failed: Audio recording failed: {reason}
+    CliSpecInvalid = 66,  ///< cli-spec-invalid: Invalid command spec: {reason}
+    CliUnknownOption = 67,  ///< cli-unknown-option: Unknown option '{option}' for command '{command}'
+    CliUnknownSubcommand = 68,  ///< cli-unknown-subcommand: Unknown subcommand '{subcommand}' for command '{command}'
+    CliMissingSubcommand = 69,  ///< cli-missing-subcommand: Command '{command}' requires a subcommand
+    CliMissingValue = 70,  ///< cli-missing-value: Option '{option}' requires a value
+    CliInvalidValue = 71,  ///< cli-invalid-value: Value '{value}' is not a valid {kind} for option '{option}'
+    CliChoiceInvalid = 72,  ///< cli-choice-invalid
+    CliRangeViolated = 73,  ///< cli-range-violated: Value '{value}' for option '{option}' is outside [{min}, {max}]
+    CliArityViolated = 74,  ///< cli-arity-violated
+    CliMissingRequired = 75,  ///< cli-missing-required: Required option '{option}' is missing for command '{command}'
+    CliTooManyPositionals = 76,  ///< cli-too-many-positionals
+    CliConflictViolated = 77,  ///< cli-conflict-violated: Options '{option}' and '{conflict}' cannot be used together
+    ClipboardAccessFailed = 78,  ///< clipboard-access-failed: System clipboard is inaccessible: '{detail}'
+    ClipboardWriteFailed = 79,  ///< clipboard-write-failed: Clipboard payload could not be committed: '{detail}'
+    NetRuntimeFailed = 80,  ///< net-runtime-failed: Socket runtime initialization failed
+    NetSocketFailed = 81,  ///< net-socket-failed: Socket creation failed
+    NetBindFailed = 82,  ///< net-bind-failed: Socket bind on loopback failed
+    NetListenFailed = 83,  ///< net-listen-failed: Socket listen failed
+    NetAcceptFailed = 84,  ///< net-accept-failed: Socket accept failed
+    NetConnectFailed = 85,  ///< net-connect-failed: Connect to loopback endpoint failed
+    NetTimeoutOptionFailed = 86,  ///< net-timeout-option-failed: Socket timeout option could not be set
+    NetWaitFailed = 87,  ///< net-wait-failed: Socket readiness wait failed
+    NetSendFailed = 88,  ///< net-send-failed: Socket send failed
+    NetRecvFailed = 89,  ///< net-recv-failed: Socket receive failed
+    NetRecvTimeout = 90,  ///< net-recv-timeout: Socket receive timed out
+    SystemDragNotSupported = 91,  ///< system-drag-not-supported: System drag-and-drop unavailable: '{detail}'
+    SystemDragSessionFailed = 92,  ///< system-drag-session-failed: System drag-and-drop session failed: '{detail}'
+    ClipboardFormatUnsupported = 93,  ///< clipboard-format-unsupported
+    NetEndpointInvalid = 94,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
+    NetCancelled = 95,  ///< net-cancelled: Network operation was cancelled
+    NetPlatformUnavailable = 96,  ///< net-platform-unavailable
+    NetUrlInvalid = 97,  ///< net-url-invalid: URL is not a valid absolute or resolvable reference: '{detail}'
+    NetProxyConfigInvalid = 98,  ///< net-proxy-config-invalid: Proxy configuration is not valid: '{detail}'
+    NetProxyUnsupported = 99,  ///< net-proxy-unsupported: This proxy protocol is not supported by the current build
+    NetProxyUnreachable = 100,  ///< net-proxy-unreachable: Proxy tunnel could not be established: '{detail}'
+    NetProxyAuthRequired = 101,  ///< net-proxy-auth-required: Proxy rejected the supplied credentials: '{detail}'
+    NetProxyProtocol = 102,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
+    NetDnsFailed = 103,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
+    NetProxyConfigUnreadable = 104,  ///< net-proxy-config-unreadable
+    NetPolicyViolated = 105,  ///< net-policy-violated
+    NetOptionFailed = 106,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
+    NetConnectTimeout = 107,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
+    NetBufferLimit = 108,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
+    NetFramerOverflow = 109,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
+    NetFramerConfigInvalid = 110,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
+    NetOptionConflict = 111,  ///< net-option-conflict
+    NetTlsHandshakeFailed = 112,  ///< net-tls-handshake-failed: TLS handshake failed: '{detail}'
+    NetTlsCertRejected = 113,  ///< net-tls-cert-rejected: TLS certificate rejected: '{detail}'
+    NetTlsVersionMismatch = 114,  ///< net-tls-version-mismatch: TLS protocol version mismatch: '{detail}'
+    NetTlsEngineUnavailable = 115,  ///< net-tls-engine-unavailable: No TLS backend available: '{detail}'
+    NetTlsPinMismatch = 116,  ///< net-tls-pin-mismatch: TLS certificate pin mismatch: '{detail}'
+    HttpRequestInvalid = 117,  ///< http-request-invalid: HTTP request cannot be sent as written: '{detail}'
+    HttpTimeout = 118,  ///< http-timeout: HTTP request timed out: '{detail}'
+    HttpRedirectLimit = 119,  ///< http-redirect-limit: HTTP redirect chain exceeded the configured limit: '{detail}'
+    HttpBodyTooLarge = 120,  ///< http-body-too-large: HTTP response body exceeds the configured limit: '{detail}'
+    HttpCharsetUnsupported = 121,  ///< http-charset-unsupported: HTTP response charset is not supported: '{detail}'
+    HttpProtocolError = 122,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
+    HttpContentEncodingUnsupported = 123,  ///< http-content-encoding-unsupported
+    HttpBodyCorrupt = 124,  ///< http-body-corrupt: HTTP response body cannot be decoded: '{detail}'
+    WebViewRuntimeMissing = 125,  ///< webview-runtime-missing: No native web engine runtime available: '{detail}'
+    WebViewEngineInitFailed = 126,  ///< webview-engine-init-failed: Web engine initialization failed: '{detail}'
+    WebViewNavigationFailed = 127,  ///< webview-navigation-failed: Web navigation failed for '{uri}': '{detail}'
+    WebViewScriptEvalFailed = 128,  ///< webview-script-eval-failed: Script evaluation failed: '{detail}'
+    WebViewSnapshotUnsupported = 129,  ///< webview-snapshot-unsupported: Snapshot mode unavailable: '{detail}'
+    WebViewHostUnbound = 130,  ///< webview-host-unbound: Web view not bound to a native host: '{detail}'
+    WebViewUnsupportedMode = 131,  ///< webview-unsupported-mode
+    IconNameNotRegistered = 132,  ///< icon-name-not-registered: Icon name '{name}' is not registered: {detail}
+    IconGlyphUnavailable = 133,  ///< icon-glyph-unavailable: Icon glyph unavailable: {detail}
+    IconSvgUnsupported = 134,  ///< icon-svg-unsupported: Icon SVG source uses unsupported features: {detail}
+    HttpBodyNotReplayable = 135,  ///< http-body-not-replayable
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -127,15 +186,13 @@ struct ErrorMeta {
     std::string_view slug;  ///< frozen external code, e.g. "nav-depth-exceeded"
     ErrorCategory category;  ///< error domain
     ErrorSeverity severity;  ///< declared severity
-    bool auto_fixable;  ///< whether a fixer may rewrite the offending source
-    std::string_view fix_category;  ///< fixer bucket, empty when auto_fixable is false
     bool retryable;  ///< whether re-running the operation may succeed
     std::string_view message_tpl;  ///< contains {placeholder}
     std::string_view hint;  ///< remediation advice, empty when none is declared
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 136> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -143,8 +200,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "general-unknown",
             .category = ErrorCategory::General,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "unknown",
             .retryable = false,
             .message_tpl = "An unknown error occurred",
             .hint = "Check the log context or enable the diagnostic collector",
@@ -155,8 +210,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "general-invalid-argument",
             .category = ErrorCategory::General,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Invalid argument supplied",
             .hint = "Check the parameter type and value range",
@@ -167,8 +220,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "general-not-supported",
             .category = ErrorCategory::General,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "unknown",
             .retryable = false,
             .message_tpl = "Operation not supported",
             .hint = "Confirm whether the feature is available or use an alternative",
@@ -179,8 +230,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "layout-null-child",
             .category = ErrorCategory::Layout,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "missing_child",
             .retryable = false,
             .message_tpl = "Layout child widget is null",
             .hint = "Remove the empty child node or provide a valid widget",
@@ -191,8 +240,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "layout-depth-exceeded",
             .category = ErrorCategory::Layout,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "layout_conflict",
             .retryable = false,
             .message_tpl = "Layout tree depth exceeded the limit (default {max})",
             .hint = "Check for infinitely recursive Repeater/Provider",
@@ -203,8 +250,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "layout-invalid-constraints",
             .category = ErrorCategory::Layout,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Invalid constraints (e.g. min > max)",
             .hint = "Check the constraints settings",
@@ -215,8 +260,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "layout-size-out-of-constraints",
             .category = ErrorCategory::Layout,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Computed size out of constraints range",
             .hint = "Adjust the min/max constraints or content size",
@@ -227,8 +270,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "widget-unknown-type",
             .category = ErrorCategory::Widget,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "unknown_widget",
             .retryable = false,
             .message_tpl = "Unregistered widget type '{type}' encountered during deserialization",
             .hint = "Register it first via WidgetRegistry::register_factory",
@@ -239,8 +280,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "widget-invalid-prop",
             .category = ErrorCategory::Widget,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Invalid property value: '{prop}'",
             .hint = "Check the property type and value range",
@@ -251,8 +290,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "widget-prop-constraint-violated",
             .category = ErrorCategory::Widget,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Property constraint violated (mutually exclusive properties set together)",
             .hint = "Check the validity of the property combination",
@@ -263,8 +300,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "widget-missing-required-prop",
             .category = ErrorCategory::Widget,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "missing_prop",
             .retryable = false,
             .message_tpl = "Missing required property '{prop}'",
             .hint = "Add the missing required property",
@@ -275,8 +310,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "render-font-load-failed",
             .category = ErrorCategory::Render,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Font load failed: '{path}'",
             .hint = "Check the font path and format",
@@ -287,8 +320,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "render-image-load-failed",
             .category = ErrorCategory::Render,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Image load failed: '{path}'",
             .hint = "Check the image path, format and decoder",
@@ -299,8 +330,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "render-invalid-color",
             .category = ErrorCategory::Render,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Invalid color value (e.g. component out of 0-255)",
             .hint = "Check the color component values",
@@ -311,8 +340,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "io-file-not-found",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "File does not exist or cannot be opened: '{path}'",
             .hint = "Check the file path and permissions",
@@ -323,8 +350,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "io-parse-failed",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "File parsing failed: '{detail}'",
             .hint = "Check the file content format",
@@ -335,8 +360,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "io-image-decode-failed",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Image decode failed",
             .hint = "Check image file validity or use a supported format",
@@ -347,8 +370,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "io-image-invalid-dimensions",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Invalid image dimensions (width/height is 0 or exceeds the limit)",
             .hint = "Check image dimensions or use a valid-size resource",
@@ -359,8 +380,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "io-image-encode-failed",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Image encode failed",
             .hint = "Check image pixel data validity or encoder options (quality/format)",
@@ -371,8 +390,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "validation-failed",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "Validation failed: '{detail}'",
             .hint = "Check input data validity",
@@ -383,8 +400,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "validation-schema-mismatch",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "Schema mismatch",
             .hint = "Check data structure against the Schema definition",
@@ -395,8 +410,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "validation-tree-too-deep",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "layout_conflict",
             .retryable = false,
             .message_tpl = "UI tree depth exceeded the limit (default {max})",
             .hint = "Reduce nesting levels or split components",
@@ -407,8 +420,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "validation-unknown-widget",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "unknown_widget",
             .retryable = false,
             .message_tpl = "Unknown/unsupported widget type '{type}'",
             .hint = "Use a known widget type or register a custom type",
@@ -419,8 +430,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "validation-null-child",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "missing_child",
             .retryable = false,
             .message_tpl = "Child node is null",
             .hint = "Provide a valid child node or remove the item",
@@ -431,8 +440,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "nav-depth-exceeded",
             .category = ErrorCategory::Navigation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "layout_conflict",
             .retryable = false,
             .message_tpl = "Navigation stack depth exceeded the limit (default {max})",
             .hint = "Check the Navigator push loop logic or call set_max_depth()",
@@ -443,8 +450,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "nav-route-not-found",
             .category = ErrorCategory::Navigation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "missing_prop",
             .retryable = false,
             .message_tpl = "Route not registered: '{route}'",
             .hint = "Register the corresponding route or use the default route",
@@ -455,8 +460,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "platform-unavailable",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Platform feature unavailable: '{detail}'",
             .hint = "Check the runtime environment or enable the corresponding backend",
@@ -467,8 +470,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "platform-permission-denied",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Insufficient permissions: '{detail}'",
             .hint = "Check file/network permission settings",
@@ -479,8 +480,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "platform-com-init-failed",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "COM initialization failed",
             .hint = "Initialize COM outside the GUI thread or check the runtime environment",
@@ -491,8 +490,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "platform-dialog-create-failed",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Platform dialog creation failed",
             .hint = "Check the parent window handle or runtime environment",
@@ -503,8 +500,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "os-hotkey-register-failed",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "OS global hotkey registration failed: '{detail}'",
             .hint = "The key combination may already be grabbed by another process, unsupported on this platform, or "
@@ -516,8 +511,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "notification-post-failed",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "System notification could not be posted: '{detail}'",
             .hint = "The desktop notification service may be unavailable, or the platform backend does not support "
@@ -529,8 +522,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "runtime-coroutine-exception",
             .category = ErrorCategory::Runtime,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "exception",
             .retryable = true,
             .message_tpl = "Exception thrown during coroutine execution: '{detail}'",
             .hint = "Check the coroutine body for exception catching or fix the logic",
@@ -541,8 +532,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "runtime-async-exception",
             .category = ErrorCategory::Runtime,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "exception",
             .retryable = true,
             .message_tpl = "Exception thrown during async task execution: '{detail}'",
             .hint = "Check the async callback for exception catching or fix the logic",
@@ -553,8 +542,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "async-timeout",
             .category = ErrorCategory::Runtime,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "timeout",
             .retryable = true,
             .message_tpl = "Async task timed out (not completed within {ms}ms)",
             .hint = "Increase the timeout threshold or optimize async task duration",
@@ -565,8 +552,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "generation-ui-empty",
             .category = ErrorCategory::Generation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "empty",
             .retryable = false,
             .message_tpl = "NL-to-UI generation result is empty (no valid widget)",
             .hint = "Provide a more specific natural language description or constraints",
@@ -577,8 +562,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "renderer-unavailable",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Requested render backend is unavailable",
             .hint = "Check the backend compile switch (AURORA_BACKEND_D3D11) or fall back to software rendering "
@@ -590,8 +573,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "prefs-not-persistent",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Preferences is in memory-only mode and cannot be persisted",
             .hint = "Bind a config file path (Preferences(file)) to gain persistence",
@@ -602,8 +583,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "prefs-open-failed",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Failed to open config file: '{path}'",
             .hint = "Check the file path and read permissions",
@@ -614,8 +593,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "prefs-parse-failed",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "Config file JSON parse failed: '{detail}'",
             .hint = "Check JSON syntax (quotes/commas/brackets) and field types",
@@ -626,8 +603,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "prefs-write-failed",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Config file write failed: '{detail}'",
             .hint = "Check disk space, whether the directory exists, and target file permissions",
@@ -638,8 +613,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "widget-depth-exceeded",
             .category = ErrorCategory::Widget,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = true,
-            .fix_category = "layout_conflict",
             .retryable = false,
             .message_tpl = "Widget tree depth exceeded the limit (default 64)",
             .hint = "Usually caused by infinitely recursive Repeater / self-referencing Provider; check rebuild "
@@ -651,8 +624,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "render-degraded",
             .category = ErrorCategory::Render,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Rendering degraded due to missing resources (e.g. font/image fallback)",
             .hint = "Non-fatal degradation, UI remains usable; check the missing resource path or provide alternatives",
@@ -663,8 +634,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "font-missing",
             .category = ErrorCategory::Render,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Requested font unavailable, fell back to built-in Bitmap font",
             .hint = "On non-Windows platforms the GDI font fallback chain may differ; ensure the font is registered or "
@@ -676,8 +645,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "surface-lost",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Surface lost (e.g. window destroyed/device reset)",
             .hint = "Need to rebuild the Surface to continue rendering; in most cases the framework auto-recovers on "
@@ -689,8 +656,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "not-restorable",
             .category = ErrorCategory::Widget,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = false,
-            .fix_category = "unknown",
             .retryable = false,
             .message_tpl = "Widget not restorable (skipped during serialization/deserialization)",
             .hint = "Widgets relying on runtime callbacks such as Repeater / Canvas cannot be restored from JSON; use "
@@ -702,8 +667,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "json-parse-error",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "JSON parse failed",
             .hint = "Check JSON syntax (quotes/commas/brackets) and whether field types match the Schema",
@@ -714,8 +677,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "json-depth-exceeded",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "JSON nesting depth exceeds the limit of {max} (line {line}, column {column})",
             .hint = "Reduce the nesting depth or raise ParseOptions::max_depth",
@@ -726,8 +687,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "json-type-mismatch",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "JSON type mismatch: expected {expected}, got {actual}",
             .hint = "Check the value type or use the tolerant as_or(key, fallback) reader",
@@ -738,11 +697,48 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "json-value-not-serializable",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Value cannot be serialized to JSON: {detail}",
             .hint = "JSON has no textual form for NaN/Inf; replace the value or drop it",
+        },
+        {
+            .code = ErrorCode::CompressionDataCorrupt,
+            .ident = "CompressionDataCorrupt",
+            .slug = "compression-data-corrupt",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Compressed stream is corrupt or truncated: '{detail}'",
+            .hint = "The bytes do not form a valid gzip/zlib/deflate stream (bad magic, truncated mid-symbol, or "
+                    "trailing checksum mismatch). Verify the payload was not cut in transit; retrying the same bytes "
+                    "reproduces the same rejection, so this is a data problem rather than a transient one",
+        },
+        {
+            .code = ErrorCode::CompressionOutputTooLarge,
+            .ident = "CompressionOutputTooLarge",
+            .slug = "compression-output-too-large",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Decompressed output exceeds the configured limit: '{detail}'",
+            .hint = "The stream is valid but its decompressed size crossed DecompressOptions::max_output_bytes, the "
+                    "decompression-bomb guard. Raise the limit if the payload is legitimately large, or stream it with "
+                    "Decompressor and process chunks as they arrive instead of materializing everything",
+        },
+        {
+            .code = ErrorCode::CompressionUnavailable,
+            .ident = "CompressionUnavailable",
+            .slug = "compression-unavailable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Compression operation unavailable: '{detail}'",
+            .hint = "No codec is registered for this format ID (the detail names it; check for typos against the "
+                    "predefined AURORA_COMPRESS_FORMAT_* constants), or the registered codec does not support this "
+                    "direction (a decompression-only codec refuses compress), or the build was configured with "
+                    "AURORA_ENABLE_COMPRESSION=OFF so the builtin decoders are absent. Register an implementation with "
+                    "aurora::register_codec (it can also replace builtin slots), or rebuild with "
+                    "AURORA_ENABLE_COMPRESSION=ON",
         },
         {
             .code = ErrorCode::StorageBackendUnavailable,
@@ -750,8 +746,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "storage-backend-unavailable",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Storage backend unavailable (directory not writable or media open failed)",
             .hint = "Check storage path permissions; when a cross-process lock is held, wait or close the occupying "
@@ -763,8 +757,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "storage-record-not-found",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "missing_child",
             .retryable = false,
             .message_tpl = "Storage record does not exist",
             .hint = "Confirm the id spelling; or put first then get",
@@ -775,8 +767,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "storage-record-corrupt",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "Storage record corrupt (JSON parse failed or illegal structure)",
             .hint = "Delete the corrupt file or restore from backup; use clear to rebuild if necessary",
@@ -787,8 +777,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "storage-type-mismatch",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "Typed read type mismatch",
             .hint = "Ensure put/get use the same type T; or use get_value to read the raw payload",
@@ -799,8 +787,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "storage-encoding-mismatch",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "Serialized wire format mismatch",
             .hint = "Record stored as binary but type T only supports JSON (or vice versa); use get_value or fix T's "
@@ -812,8 +798,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "storage-io-error",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Storage underlying I/O failed",
             .hint = "Check disk space/permissions; rename failure may be a cross-volume move, use a same-volume path",
@@ -824,8 +808,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "audio-graph-cycle",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "layout_conflict",
             .retryable = false,
             .message_tpl = "Audio graph connection would create a cycle ({src} -> {dst})",
             .hint = "Remove the back-edge; the audio graph must remain acyclic (DAG)",
@@ -836,8 +818,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "audio-edge-not-found",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Audio connection does not exist and cannot be disconnected",
             .hint = "Connect the nodes first; connect() result is the authoritative edge state",
@@ -848,8 +828,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "audio-context-closed",
             .category = ErrorCategory::Runtime,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "unknown",
             .retryable = false,
             .message_tpl = "AudioContext is closed; audio operations are no longer available",
             .hint = "Create a new AudioContext; close() is terminal",
@@ -860,8 +838,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "audio-param-invalid",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Invalid audio parameter automation ({reason})",
             .hint =
@@ -873,8 +849,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "audio-buffer-invalid",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "empty",
             .retryable = false,
             .message_tpl = "Invalid audio buffer ({reason})",
             .hint = "Ensure sample_rate > 0, channels in {1,2} and samples non-empty before playback",
@@ -885,8 +859,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "audio-device-unavailable",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Warning,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Audio device unavailable ({reason}); running in silent mode",
             .hint = "The audio graph keeps running and drops samples; build with AURORA_ENABLE_AUDIO and check the "
@@ -898,8 +870,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "audio-recording-failed",
             .category = ErrorCategory::Io,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "Audio recording failed: {reason}",
             .hint = "Check the output path and permissions; capture device availability is reported separately as "
@@ -911,8 +881,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-spec-invalid",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Invalid command spec: {reason}",
             .hint = "Fix the CommandSpec/OptionSchema declaration: names must be non-empty and unique, enum kinds must "
@@ -924,8 +892,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-unknown-option",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = true,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Unknown option '{option}' for command '{command}'",
             .hint = "Check the spelling, or run with --help to list the options accepted by this command",
@@ -936,8 +902,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-unknown-subcommand",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = true,
-            .fix_category = "unknown_widget",
             .retryable = false,
             .message_tpl = "Unknown subcommand '{subcommand}' for command '{command}'",
             .hint = "Pick one of the subcommands listed in --help for this command",
@@ -948,8 +912,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-missing-subcommand",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "missing_prop",
             .retryable = false,
             .message_tpl = "Command '{command}' requires a subcommand",
             .hint = "Pass one of the subcommands listed in --help before any options",
@@ -960,8 +922,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-missing-value",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "missing_prop",
             .retryable = false,
             .message_tpl = "Option '{option}' requires a value",
             .hint = "Pass the value inline as --name=value or as a following token; flags that take no value must be "
@@ -973,8 +933,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-invalid-value",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = true,
-            .fix_category = "type_error",
             .retryable = false,
             .message_tpl = "Value '{value}' is not a valid {kind} for option '{option}'",
             .hint = "Check the literal syntax expected by the declared kind (see the value hint in --help)",
@@ -985,8 +943,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-choice-invalid",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = true,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Value '{value}' is not one of the allowed choices for option '{option}'",
             .hint = "Choices are listed in the option's help entry; matching is case-sensitive",
@@ -997,8 +953,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-range-violated",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = true,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Value '{value}' for option '{option}' is outside [{min}, {max}]",
             .hint = "Clamp or widen the bound declared on the option",
@@ -1009,8 +963,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-arity-violated",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Option '{option}' expects between {min} and {max} values, got {actual}",
             .hint = "Adjust the number of repetitions/tokens, or relax the declared arity",
@@ -1021,8 +973,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-missing-required",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "missing_prop",
             .retryable = false,
             .message_tpl = "Required option '{option}' is missing for command '{command}'",
             .hint = "Pass the option, or declare a default_value so it becomes optional",
@@ -1033,8 +983,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-too-many-positionals",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "invalid_value",
             .retryable = false,
             .message_tpl = "Too many positional arguments for command '{command}': unexpected extra '{value}'",
             .hint =
@@ -1046,8 +994,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "cli-conflict-violated",
             .category = ErrorCategory::Validation,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "layout_conflict",
             .retryable = false,
             .message_tpl = "Options '{option}' and '{conflict}' cannot be used together",
             .hint = "Drop one of the mutually exclusive options; the conflict group is declared on the option schema",
@@ -1058,8 +1004,6 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "clipboard-access-failed",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = true,
             .message_tpl = "System clipboard is inaccessible: '{detail}'",
             .hint = "Another thread/process may own the clipboard (retry once it is released), the OS helper may be "
@@ -1071,12 +1015,672 @@ inline constexpr std::array<ErrorMeta, 77> AURORA_ERROR_TABLE = {
             .slug = "clipboard-write-failed",
             .category = ErrorCategory::Platform,
             .severity = ErrorSeverity::Error,
-            .auto_fixable = false,
-            .fix_category = "resource_error",
             .retryable = false,
             .message_tpl = "Clipboard payload could not be committed: '{detail}'",
             .hint = "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free "
                     "memory or retry the copy",
+        },
+        {
+            .code = ErrorCode::NetRuntimeFailed,
+            .ident = "NetRuntimeFailed",
+            .slug = "net-runtime-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Socket runtime initialization failed",
+            .hint = "Winsock startup was rejected (WSAStartup); check winsock DLL availability and version request, "
+                    "then retry",
+        },
+        {
+            .code = ErrorCode::NetSocketFailed,
+            .ident = "NetSocketFailed",
+            .slug = "net-socket-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Socket creation failed",
+            .hint = "socket() returned an error (fd limit / protocol unsupported); close unused sockets and retry",
+        },
+        {
+            .code = ErrorCode::NetBindFailed,
+            .ident = "NetBindFailed",
+            .slug = "net-bind-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Socket bind on loopback failed",
+            .hint = "The port is taken or privileges are missing; pass port 0 to let the OS pick an ephemeral port",
+        },
+        {
+            .code = ErrorCode::NetListenFailed,
+            .ident = "NetListenFailed",
+            .slug = "net-listen-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Socket listen failed",
+            .hint = "listen() rejected the bound socket (backlog out of range or socket already closed)",
+        },
+        {
+            .code = ErrorCode::NetAcceptFailed,
+            .ident = "NetAcceptFailed",
+            .slug = "net-accept-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Socket accept failed",
+            .hint = "accept() returned an error (listener closed concurrently or fd limit); re-check the running flag "
+                    "before retrying",
+        },
+        {
+            .code = ErrorCode::NetConnectFailed,
+            .ident = "NetConnectFailed",
+            .slug = "net-connect-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Connect to loopback endpoint failed",
+            .hint = "No listener on 127.0.0.1:{port} (service not started) or the local firewall refused the loopback "
+                    "connect",
+        },
+        {
+            .code = ErrorCode::NetTimeoutOptionFailed,
+            .ident = "NetTimeoutOptionFailed",
+            .slug = "net-timeout-option-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Socket timeout option could not be set",
+            .hint = "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO) failed; do not continue into an unbounded wait, close and "
+                    "reopen the socket",
+        },
+        {
+            .code = ErrorCode::NetWaitFailed,
+            .ident = "NetWaitFailed",
+            .slug = "net-wait-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Socket readiness wait failed",
+            .hint =
+                "select() returned an error (fd set invalid or interrupted); re-check the running flag before retrying",
+        },
+        {
+            .code = ErrorCode::NetSendFailed,
+            .ident = "NetSendFailed",
+            .slug = "net-send-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Socket send failed",
+            .hint = "send() returned <= 0 mid-write (peer closed or timeout); the byte stream is no longer reliable",
+        },
+        {
+            .code = ErrorCode::NetRecvFailed,
+            .ident = "NetRecvFailed",
+            .slug = "net-recv-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Socket receive failed",
+            .hint = "recv() returned an error (peer reset or socket closed)",
+        },
+        {
+            .code = ErrorCode::NetRecvTimeout,
+            .ident = "NetRecvTimeout",
+            .slug = "net-recv-timeout",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Warning,
+            .retryable = true,
+            .message_tpl = "Socket receive timed out",
+            .hint = "SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat "
+                    "this as 'no more data now'",
+        },
+        {
+            .code = ErrorCode::SystemDragNotSupported,
+            .ident = "SystemDragNotSupported",
+            .slug = "system-drag-not-supported",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "System drag-and-drop unavailable: '{detail}'",
+            .hint = "The platform/backend has no system drag-and-drop mechanism yet, or the capability bit is false; "
+                    "retrying cannot create the mechanism - fall back to a non-drag path (paste, file dialog)",
+        },
+        {
+            .code = ErrorCode::SystemDragSessionFailed,
+            .ident = "SystemDragSessionFailed",
+            .slug = "system-drag-session-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "System drag-and-drop session failed: '{detail}'",
+            .hint = "The negotiation broke down or the source stopped providing data; treat the session as ended "
+                    "(action None) and surface a non-drag alternative",
+        },
+        {
+            .code = ErrorCode::ClipboardFormatUnsupported,
+            .ident = "ClipboardFormatUnsupported",
+            .slug = "clipboard-format-unsupported",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Clipboard format unsupported on this platform: '{mime}'",
+            .hint = "This platform exposes no mechanism for the requested MIME type; query available_formats() first, "
+                    "or fall back to text/plain",
+        },
+        {
+            .code = ErrorCode::NetEndpointInvalid,
+            .ident = "NetEndpointInvalid",
+            .slug = "net-endpoint-invalid",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Network endpoint is not a valid address: '{detail}'",
+            .hint = "Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use "
+                    "Endpoint::local for UnixSocket paths or named pipes",
+        },
+        {
+            .code = ErrorCode::NetCancelled,
+            .ident = "NetCancelled",
+            .slug = "net-cancelled",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Info,
+            .retryable = true,
+            .message_tpl = "Network operation was cancelled",
+            .hint = "The caller cancelled this operation (or its owner went away); the completion still fires once "
+                    "with this code, so drop the result only if the owner is gone",
+        },
+        {
+            .code = ErrorCode::NetPlatformUnavailable,
+            .ident = "NetPlatformUnavailable",
+            .slug = "net-platform-unavailable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "This network capability is unavailable on the current platform",
+            .hint = "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait "
+                    "semantics (e.g. wasm), so there is no silent fallback by design. When a TLS backend factory "
+                    "reports it, the code names the configuration that backend cannot express (e.g. a system "
+                    "certificate store leg given an in-memory PEM identity): under the default candidate chain the "
+                    "next backend is tried, while an explicitly designated one (TlsContext::backend) returns it as-is",
+        },
+        {
+            .code = ErrorCode::NetUrlInvalid,
+            .ident = "NetUrlInvalid",
+            .slug = "net-url-invalid",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "URL is not a valid absolute or resolvable reference: '{detail}'",
+            .hint = "Pass a complete URL with scheme (e.g. https://host/path) or a reference to resolve against a base "
+                    "URL; percent signs must introduce a two-hex-digit escape and IPv6 literals need brackets",
+        },
+        {
+            .code = ErrorCode::NetProxyConfigInvalid,
+            .ident = "NetProxyConfigInvalid",
+            .slug = "net-proxy-config-invalid",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Proxy configuration is not valid: '{detail}'",
+            .hint = "Fix the value instead of ignoring it: a proxy URL is scheme://[user[:pass]@]host[:port] with no "
+                    "path, and a NO_PROXY entry is *, a domain, a domain with :port, or an IPv4/IPv6 CIDR; a malformed "
+                    "proxy setting must never fall back to a direct connection",
+        },
+        {
+            .code = ErrorCode::NetProxyUnsupported,
+            .ident = "NetProxyUnsupported",
+            .slug = "net-proxy-unsupported",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "This proxy protocol is not supported by the current build",
+            .hint = "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected "
+                    "proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a "
+                    "plaintext proxy hop",
+        },
+        {
+            .code = ErrorCode::NetProxyUnreachable,
+            .ident = "NetProxyUnreachable",
+            .slug = "net-proxy-unreachable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Proxy tunnel could not be established: '{detail}'",
+            .hint = "The proxy answered (or refused) but no tunnel was built; connect never fell back to direct on "
+                    "purpose, so check the proxy host/port and its own uplink rather than the target host",
+        },
+        {
+            .code = ErrorCode::NetProxyAuthRequired,
+            .ident = "NetProxyAuthRequired",
+            .slug = "net-proxy-auth-required",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Proxy rejected the supplied credentials: '{detail}'",
+            .hint = "The proxy demanded authentication that was absent or refused: 407 on HTTP CONNECT, or a non-zero "
+                    "status on the SOCKS5 username/password subnegotiation; supply credentials in the proxy URL or "
+                    "re-authenticate once, do not retry blindly",
+        },
+        {
+            .code = ErrorCode::NetProxyProtocol,
+            .ident = "NetProxyProtocol",
+            .slug = "net-proxy-protocol",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Proxy handshake is not protocol-conformant: '{detail}'",
+            .hint = "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status "
+                    "line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server "
+                    "where a proxy port was expected",
+        },
+        {
+            .code = ErrorCode::NetDnsFailed,
+            .ident = "NetDnsFailed",
+            .slug = "net-dns-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Host name could not be resolved: '{detail}'",
+            .hint =
+                "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form "
+                "or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test",
+        },
+        {
+            .code = ErrorCode::NetProxyConfigUnreadable,
+            .ident = "NetProxyConfigUnreadable",
+            .slug = "net-proxy-config-unreadable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Operating-system proxy settings could not be read: '{detail}'",
+            .hint = "The channel exists on this platform but the read was refused (registry access, dynamic-store "
+                    "failure); this is distinct from a machine that simply has no proxy configured, and the library "
+                    "never treats the two as the same outcome",
+        },
+        {
+            .code = ErrorCode::NetPolicyViolated,
+            .ident = "NetPolicyViolated",
+            .slug = "net-policy-violated",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Network policy refused the request before any byte went out: '{detail}'",
+            .hint = "A declarative NetPolicy dimension (cleartext allow-list, TLS version floor, or require-proxy) "
+                    "rejected this target; the detail names the dimension and both sides of the conflict. Widen the "
+                    "policy, add the host to allow_cleartext_hosts, or raise the TLS context's floor to match the "
+                    "policy — the request itself is unchanged and retrying it as-is cannot succeed",
+        },
+        {
+            .code = ErrorCode::NetOptionFailed,
+            .ident = "NetOptionFailed",
+            .slug = "net-option-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Socket option or shutdown call failed: '{detail}'",
+            .hint = "setsockopt / getsockopt / shutdown returned an error (bad handle state, unsupported option, or "
+                    "the peer already reset the connection); the native code is in the message, check the option name "
+                    "and whether the socket is still connected",
+        },
+        {
+            .code = ErrorCode::NetConnectTimeout,
+            .ident = "NetConnectTimeout",
+            .slug = "net-connect-timeout",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Warning,
+            .retryable = true,
+            .message_tpl = "Connection attempt timed out: '{detail}'",
+            .hint = "The non-blocking connect did not produce a result within the configured deadline; a black-holed "
+                    "peer or an unreachable route looks identical to a slow one from here, so retry with a longer "
+                    "StreamOptions::connect_timeout or fall back to another candidate address",
+        },
+        {
+            .code = ErrorCode::NetBufferLimit,
+            .ident = "NetBufferLimit",
+            .slug = "net-buffer-limit",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Warning,
+            .retryable = true,
+            .message_tpl = "Transfer buffer limit exceeded: '{detail}'",
+            .hint = "Backpressure fired: pending bytes reached the high-water mark, pending reads exceeded the "
+                    "read-buffer cap, or a framed message overflowed its limit; slow the producer down or raise the "
+                    "matching StreamOptions field rather than dropping data",
+        },
+        {
+            .code = ErrorCode::NetFramerOverflow,
+            .ident = "NetFramerOverflow",
+            .slug = "net-framer-overflow",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Framed message exceeds its configured limit: '{detail}'",
+            .hint = "The stream produced a single message larger than FrameOptions::max_frame_bytes, or a length "
+                    "prefix declaring more bytes than the limit allows; raise the limit only for a protocol that "
+                    "genuinely carries such frames, otherwise treat the stream as malformed and close it rather than "
+                    "resynchronising inside an oversized frame",
+        },
+        {
+            .code = ErrorCode::NetFramerConfigInvalid,
+            .ident = "NetFramerConfigInvalid",
+            .slug = "net-framer-config-invalid",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Invalid framer configuration: '{detail}'",
+            .hint = "A Framer factory was given a limit of 0, an empty or oversized delimiter, or a length field width "
+                    "outside 1..8 bytes; framing must be configured before it is used, because a silent default here "
+                    "would either accept unbounded frames or split messages at the wrong place",
+        },
+        {
+            .code = ErrorCode::NetOptionConflict,
+            .ident = "NetOptionConflict",
+            .slug = "net-option-conflict",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Socket option conflicts with the current configuration: '{detail}'",
+            .hint = "Two settings cannot both hold on one socket (a connected UDP socket receives only from its peer, "
+                    "so joining a multicast group there would configure a socket that can never receive the group); "
+                    "use a second socket for the other form rather than reordering the calls",
+        },
+        {
+            .code = ErrorCode::NetTlsHandshakeFailed,
+            .ident = "NetTlsHandshakeFailed",
+            .slug = "net-tls-handshake-failed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "TLS handshake failed: '{detail}'",
+            .hint = "The peer aborted or refused the negotiation (unsupported cipher suite, alert from the server, "
+                    "truncated handshake, or a plaintext endpoint answering on a TLS port); the transport is unusable "
+                    "after this and must be closed. Reproduce with the peer's TLS logs before changing TlsContext, "
+                    "because retrying the same parameters only reproduces the same alert",
+        },
+        {
+            .code = ErrorCode::NetTlsCertRejected,
+            .ident = "NetTlsCertRejected",
+            .slug = "net-tls-cert-rejected",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "TLS certificate rejected: '{detail}'",
+            .hint =
+                "Chain verification failed (unknown issuer, expired or not-yet-valid leaf, hostname mismatch, or a "
+                "policy constraint). Install the issuing CA into the trust root used by this TlsContext, or point "
+                "TlsContext::add_trusted_certificate at the right PEM; do not reach for allow_insecure_certificate, "
+                "which turns a real man-in-the-middle signal off for the whole transport",
+        },
+        {
+            .code = ErrorCode::NetTlsVersionMismatch,
+            .ident = "NetTlsVersionMismatch",
+            .slug = "net-tls-version-mismatch",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "TLS protocol version mismatch: '{detail}'",
+            .hint = "TlsContext::min_version rules out every version the peer is willing to speak (commonly a TLS "
+                    "1.3-only floor against a 1.2 endpoint). Lower the floor deliberately and record why, rather than "
+                    "mirroring the peer automatically: the floor is the negotiated security baseline",
+        },
+        {
+            .code = ErrorCode::NetTlsEngineUnavailable,
+            .ident = "NetTlsEngineUnavailable",
+            .slug = "net-tls-engine-unavailable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "No TLS backend available: '{detail}'",
+            .hint = "Call aurora::net::available_tls_backends(): an empty list means this build compiled no TLS "
+                    "engine, so supply a provider through AURORA_NET_TLS_PROVIDERS=<static|shared>:<install root> or "
+                    "register a backend with aurora::net::register_tls_backend(). A non-empty list means the candidate "
+                    "chain matched nothing instead: check set_default_tls_backends() and TlsContext::backend, whose id "
+                    "must be one of the listed backends. Aurora never downgrades a TLS request to plaintext",
+        },
+        {
+            .code = ErrorCode::NetTlsPinMismatch,
+            .ident = "NetTlsPinMismatch",
+            .slug = "net-tls-pin-mismatch",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "TLS certificate pin mismatch: '{detail}'",
+            .hint = "The peer's certificate does not carry any pinned public key, so the pinned identity changed (key "
+                    "rotation, reissued certificate, or an interception proxy). Update the pinned SPKI digests from an "
+                    "out-of-band source you trust and rotate them in lockstep with the service; never fall back to "
+                    "allow_insecure_certificate, which defeats the pin entirely",
+        },
+        {
+            .code = ErrorCode::HttpRequestInvalid,
+            .ident = "HttpRequestInvalid",
+            .slug = "http-request-invalid",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "HTTP request cannot be sent as written: '{detail}'",
+            .hint = "The request violates the message grammar before any byte is written (unknown method text, a "
+                    "header name outside the token charset, a header value containing CR or LF, or a target URL "
+                    "without a host). Fix the request at the call site; the peer never sees it, so retrying with the "
+                    "same fields reproduces the same rejection",
+        },
+        {
+            .code = ErrorCode::HttpTimeout,
+            .ident = "HttpTimeout",
+            .slug = "http-timeout",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "HTTP request timed out: '{detail}'",
+            .hint = "The detail names which of the three stages expired (connect, read_idle or total), and they mean "
+                    "different things: connect says nothing answered, read_idle says the body stalled mid-flight, "
+                    "total says the whole exchange overran. Raise only the stage that fired - a blanket total budget "
+                    "turns slow-but-healthy transfers into failures",
+        },
+        {
+            .code = ErrorCode::HttpRedirectLimit,
+            .ident = "HttpRedirectLimit",
+            .slug = "http-redirect-limit",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "HTTP redirect chain exceeded the configured limit: '{detail}'",
+            .hint = "Either the peer is bouncing between targets or the limit is genuinely too small for this "
+                    "endpoint's chain. Inspect the Location sequence in the diagnostics before raising the limit, "
+                    "because following a cycle also leaks credentials to each hop it revisits",
+        },
+        {
+            .code = ErrorCode::HttpBodyTooLarge,
+            .ident = "HttpBodyTooLarge",
+            .slug = "http-body-too-large",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "HTTP response body exceeds the configured limit: '{detail}'",
+            .hint = "The guard is what keeps a wrong URL (a video behind a shortened link) from exhausting memory. The "
+                    "detail says which ceiling was crossed: max_body_bytes bounds the bytes that arrived on the wire, "
+                    "max_decompressed_bytes bounds the transparently decompressed payload (the decompression-bomb "
+                    "guard). Raise the one that fired if the payload is legitimately large, or switch to open_stream "
+                    "so the body is delivered in bounded chunks instead of materialized",
+        },
+        {
+            .code = ErrorCode::HttpCharsetUnsupported,
+            .ident = "HttpCharsetUnsupported",
+            .slug = "http-charset-unsupported",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "HTTP response charset is not supported: '{detail}'",
+            .hint = "Response::text() decodes only UTF-8 and Latin-1 in this batch, so a body labelled with any other "
+                    "charset cannot be turned into text here. The undecoded bytes are always reachable through body(), "
+                    "so transcoding is the caller's to do; do not silently substitute U+FFFD or reinterpret the bytes "
+                    "as UTF-8, which would corrupt the payload",
+        },
+        {
+            .code = ErrorCode::HttpProtocolError,
+            .ident = "HttpProtocolError",
+            .slug = "http-protocol-error",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "HTTP peer violated the message grammar: '{detail}'",
+            .hint = "The response is not parseable as HTTP/1.1 (bad status line, a chunk size that is not hexadecimal, "
+                    "framing that declares both Content-Length and an unknown Transfer-Encoding, or a body longer than "
+                    "its declared length). Close the connection and re-issue on a fresh one, because the byte stream "
+                    "is now misaligned and no later response on it can be trusted",
+        },
+        {
+            .code = ErrorCode::HttpContentEncodingUnsupported,
+            .ident = "HttpContentEncodingUnsupported",
+            .slug = "http-content-encoding-unsupported",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "HTTP response content encoding is not supported: '{detail}'",
+            .hint = "The peer applied a content coding this client cannot undo - either the coding name is outside the "
+                    "advertised set (brotli and zstd are not built here) or the build was configured with "
+                    "AURORA_ENABLE_COMPRESSION=OFF, in which case no decoder exists and the request deliberately never "
+                    "advertised Accept-Encoding. Re-request with an encoding you can decode (Request::header sets "
+                    "Accept-Encoding; an identity body always arrives undecoded); never reinterpret the compressed "
+                    "bytes as text, which would hand the caller garbage",
+        },
+        {
+            .code = ErrorCode::HttpBodyCorrupt,
+            .ident = "HttpBodyCorrupt",
+            .slug = "http-body-corrupt",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "HTTP response body cannot be decoded: '{detail}'",
+            .hint = "The message framed cleanly but its payload did not survive the declared content coding: the "
+                    "gzip/zlib/deflate stream is corrupt, truncated mid-symbol, or fails its trailing checksum. This "
+                    "is a data defect (at the peer, or in the encoding chain it declared), not a transport fault - the "
+                    "bytes arrived whole, so retrying the same target only re-fetches the same broken payload; check "
+                    "the declared Content-Encoding chain before suspecting the link",
+        },
+        {
+            .code = ErrorCode::WebViewRuntimeMissing,
+            .ident = "WebViewRuntimeMissing",
+            .slug = "webview-runtime-missing",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Warning,
+            .retryable = false,
+            .message_tpl = "No native web engine runtime available: '{detail}'",
+            .hint = "The WebView control degrades to a placeholder rectangle; install the platform runtime (WebView2 "
+                    "Runtime on Windows, libwebkit2gtk on Linux) to enable it",
+        },
+        {
+            .code = ErrorCode::WebViewEngineInitFailed,
+            .ident = "WebViewEngineInitFailed",
+            .slug = "webview-engine-init-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Web engine initialization failed: '{detail}'",
+            .hint = "The engine runtime was found but could not be started; the control degrades to a placeholder - "
+                    "check the user data folder and display connection",
+        },
+        {
+            .code = ErrorCode::WebViewNavigationFailed,
+            .ident = "WebViewNavigationFailed",
+            .slug = "webview-navigation-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Web navigation failed for '{uri}': '{detail}'",
+            .hint = "Check the URI scheme and network reachability; custom schemes and file access must be enabled "
+                    "explicitly",
+        },
+        {
+            .code = ErrorCode::WebViewScriptEvalFailed,
+            .ident = "WebViewScriptEvalFailed",
+            .slug = "webview-script-eval-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Script evaluation failed: '{detail}'",
+            .hint = "The page may not have finished loading, or JavaScript is disabled on this control; retry after "
+                    "navigation completes",
+        },
+        {
+            .code = ErrorCode::WebViewSnapshotUnsupported,
+            .ident = "WebViewSnapshotUnsupported",
+            .slug = "webview-snapshot-unsupported",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Warning,
+            .retryable = false,
+            .message_tpl = "Snapshot mode unavailable: '{detail}'",
+            .hint = "Snapshot mode needs a live engine and, on Linux, an available GTK display connection; use "
+                    "Interactive mode on X11 or Windows instead",
+        },
+        {
+            .code = ErrorCode::WebViewHostUnbound,
+            .ident = "WebViewHostUnbound",
+            .slug = "webview-host-unbound",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Warning,
+            .retryable = false,
+            .message_tpl = "Web view not bound to a native host: '{detail}'",
+            .hint = "The control is rendering outside a window host (headless/offscreen) or was registered before the "
+                    "host installed its thread-local slot",
+        },
+        {
+            .code = ErrorCode::WebViewUnsupportedMode,
+            .ident = "WebViewUnsupportedMode",
+            .slug = "webview-unsupported-mode",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Warning,
+            .retryable = false,
+            .message_tpl = "Web view mode unsupported on this backend: '{detail}'",
+            .hint = "Interactive mode needs a native child surface; Wayland and headless backends cannot host one - "
+                    "switch to Snapshot mode or move the control",
+        },
+        {
+            .code = ErrorCode::IconNameNotRegistered,
+            .ident = "IconNameNotRegistered",
+            .slug = "icon-name-not-registered",
+            .category = ErrorCategory::Validation,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Icon name '{name}' is not registered: {detail}",
+            .hint = "Register the semantic name through IconRegistry before referencing it, or pick one of the "
+                    "registered names reported alongside this error",
+        },
+        {
+            .code = ErrorCode::IconGlyphUnavailable,
+            .ident = "IconGlyphUnavailable",
+            .slug = "icon-glyph-unavailable",
+            .category = ErrorCategory::Widget,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Icon glyph unavailable: {detail}",
+            .hint = "Register the icon font through FontEngine::register_font (or register_font_from_memory) and make "
+                    "sure the code point exists in that face",
+        },
+        {
+            .code = ErrorCode::IconSvgUnsupported,
+            .ident = "IconSvgUnsupported",
+            .slug = "icon-svg-unsupported",
+            .category = ErrorCategory::Render,
+            .severity = ErrorSeverity::Warning,
+            .retryable = false,
+            .message_tpl = "Icon SVG source uses unsupported features: {detail}",
+            .hint = "The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside "
+                    "the library and supply the bitmap",
+        },
+        {
+            .code = ErrorCode::HttpBodyNotReplayable,
+            .ident = "HttpBodyNotReplayable",
+            .slug = "http-body-not-replayable",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "HTTP request body cannot be sent a second time: '{detail}'",
+            .hint =
+                "A 307 or 308 redirect must replay the message body, and the streaming body said it cannot return to "
+                "its starting point, so resending it would ship a half-consumed payload. Either hand the payload over "
+                "as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note "
+                "that a body which cannot restart also opts this request out of the retry policy on purpose",
         },
     },
 };
@@ -1100,18 +1704,6 @@ constexpr auto category(ErrorCode c) -> ErrorCategory {
 /// @return declared severity.
 constexpr auto severity(ErrorCode c) -> ErrorSeverity {
     return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).severity;
-}
-/// @brief whether a fixer may rewrite the offending source for this error.
-/// @param[in] c error code to look up.
-/// @return declared auto_fixable flag.
-constexpr auto is_auto_fixable(ErrorCode c) -> bool {
-    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).auto_fixable;
-}
-/// @brief fixer bucket of an error code.
-/// @param[in] c error code to look up.
-/// @return fix category, empty when none is declared.
-constexpr auto fix_category_of(ErrorCode c) -> std::string_view {
-    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).fix_category;
 }
 /// @brief whether re-running the failed operation may succeed.
 /// @param[in] c error code to look up.

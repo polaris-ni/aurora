@@ -59,8 +59,7 @@ static auto schema() -> const au::tools::Schema & {
                 } else if (const auto *v = j.at("container"); v != nullptr && v->is_string()) {
                     c.children_policy = v->as_or<std::string>("");
                 }
-                if (const auto *descriptors = j.at("prop_descriptors");
-                    descriptors != nullptr && descriptors->is_array()) {
+                if (const auto *descriptors = j.at("props"); descriptors != nullptr && descriptors->is_array()) {
                     for (const auto &descriptor : *descriptors) {
                         au::tools::PropSchema ps;
                         if (const auto *v = descriptor.at("name"); v != nullptr && v->is_string()) {

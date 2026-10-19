@@ -19,7 +19,6 @@
 /// 数值来自 `Stopwatch::now_ms()` 的进程内单调时间原点。
 ///
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>

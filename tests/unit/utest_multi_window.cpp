@@ -4,7 +4,6 @@
 /// 逐窗隔离、逐窗独立渲染、帧统计隔离与单窗口全局单例兼容、关闭一个窗口不影响其他窗口的帧循环回收。
 /// 全部以 Headless 多实例驱动（无 OS 窗口），不依赖任何真实后端。
 
-#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>

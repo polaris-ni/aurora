@@ -3,13 +3,28 @@
 /// 测试说明: 覆盖 TextSpan 片段——默认与样式构造不变量、序列组装与子片段拷贝、Font/Color
 /// 逐值相等语义（同样式合并的前提）与 i18n tr 元数据保留
 
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/text_span.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_text_span {
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用
+/// （调用方持有 holder 即保证环境存活；BuildContext 本就只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
 
 AURORA_TEST_CASE(default_span_invariants) {
     // 默认构造：空文本、默认字体（sans-serif / 14pt / 400）、黑色。
@@ -20,7 +35,9 @@ AURORA_TEST_CASE(default_span_invariants) {
     AURORA_TEST_CHECK_TRUE(span.font == Font{});
     AURORA_TEST_CHECK_NEAR(span.font.size_pt, 14.0F, 1e-4F);
     AURORA_TEST_CHECK_EQ(span.font.weight, 400);
-    AURORA_TEST_CHECK_TRUE(span.color == Color::black());
+    // 迁移批：默认色未显式设置（空 optional）→ 跟随主题 on_surface（ThemeScope 换肤即生效），
+    // 不再是固定的黑 {0,0,0,255}。
+    AURORA_TEST_CHECK_FALSE(span.color.has_value());
 }
 
 AURORA_TEST_CASE(styled_span_construction_keeps_fields) {
@@ -35,7 +52,7 @@ AURORA_TEST_CASE(styled_span_construction_keeps_fields) {
 
     const TextSpan text_only{.text = LocalizedString{"plain"}};
     AURORA_TEST_CHECK_TRUE(text_only.font == Font{});
-    AURORA_TEST_CHECK_TRUE(text_only.color == Color::black());
+    AURORA_TEST_CHECK_FALSE(text_only.color.has_value());  // 未设色 → 跟随主题 on_surface
 
     // LocalizedString 可由字符串字面量隐式构造。
     const TextSpan implicit_text{.text = "implicit"};
@@ -101,6 +118,27 @@ AURORA_TEST_CASE(localized_span_keeps_tr_metadata) {
     AURORA_TEST_CHECK_TRUE(span.text.localize);
     AURORA_TEST_CHECK_TRUE(span.text.args.empty());
     AURORA_TEST_CHECK_TRUE(span.color == Color::blue());
+}
+
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+
+AURORA_TEST_CASE(text_span_color_follows_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题 on_surface；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
+    TextSpan span;
+    AURORA_TEST_CHECK_FALSE(span.color.has_value());  // 默认未设色
+    AURORA_TEST_CHECK(span.resolve_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(span.resolve_color(dark) == Color{0xFF, 0xFF, 0xFF});  // dark on_surface = 白
+}
+
+AURORA_TEST_CASE(text_span_explicit_color_overrides_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    TextSpan span;
+    span.color = Color{0xE0, 0x1B, 0x24};  // error 红，刻意区别于两档 on_surface
+    AURORA_TEST_CHECK(span.resolve_color(dark) == Color{0xE0, 0x1B, 0x24});
 }
 
 }  // namespace aurora::test_cases::utest_text_span

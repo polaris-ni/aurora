@@ -6,7 +6,9 @@
 #include <string>
 #include <vector>
 
+#include "aurora/environment/build_context.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/painter.h"
 #include "aurora/state/binding.h"
 #include "aurora/state/reactive.h"
 #include "aurora/state/state.h"
@@ -152,6 +154,31 @@ AURORA_TEST_CASE(describe_reports_metadata) {
         }
     }
     AURORA_TEST_CHECK_TRUE(has_value);
+}
+
+AURORA_TEST_CASE(paint_covers_capsule_rect_and_rounded) {
+    Painter painter;
+
+    // 默认：corner_radius < 0 → 自动胶囊路径。
+    ProgressIndicator def;
+    def.set_value(0.5);
+    LayoutEngine::layout(def, bounded(200.0F, 100.0F));
+    def.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = def.size()}, BuildContext{});
+
+    // 直角（corner_radius = 0）路径。
+    ProgressIndicator square;
+    square.set_value(0.3);
+    square.set_corner_radius(0.0F);
+    LayoutEngine::layout(square, bounded(200.0F, 100.0F));
+    square.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = square.size()}, BuildContext{});
+
+    // 圆角（corner_radius > 0）路径 + 显式颜色。
+    ProgressIndicator rounded;
+    rounded.set_value(0.8);
+    rounded.set_color(Color(1, 2, 3, 4));
+    rounded.set_corner_radius(4.0F);
+    LayoutEngine::layout(rounded, bounded(200.0F, 100.0F));
+    rounded.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = rounded.size()}, BuildContext{});
 }
 
 }  // namespace aurora::test_cases::utest_progress

@@ -12,7 +12,7 @@
 //
 // 本文件为骨架，全部方法在 macOS 环境实写后替换 stub。
 
-#include "aurora/core/platform.h"
+#include "aurora/core/platform.h"  // NOLINT
 #if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
 
 #include "aurora/core/log.h"
@@ -20,6 +20,13 @@
 
 // AppKit 头需在 .cpp 内引入，避免公共头污染消费者
 #import <AppKit/AppKit.h>
+
+// `busyButClickableCursor` 是 NSCursor 的私有类方法（无公开声明）。补一个类别声明，
+// 让编译器把返回类型识别成 `NSCursor *`（消 -Wobjc-method-access），`[cursor set]` 也因而
+// 落到 NSCursor 唯一的 `set` 上（消 -Wobjc-multiple-method-names）。仅本文件 macOS 实现内使用。
+@interface NSCursor (AuroraPrivateCursor)
++ (NSCursor *)busyButClickableCursor;
+@end
 
 namespace aurora {
 
@@ -53,7 +60,7 @@ struct MacOSSurface::Impl {
 };
 
 MacOSSurface::MacOSSurface(int w, int h, const std::string &title)
-    : impl_(std::make_unique<Impl>()), size_{static_cast<float>(w), static_cast<float>(h)} {
+    : impl_(std::make_unique<Impl>()), size_{.width = static_cast<float>(w), .height = static_cast<float>(h)} {
     if (!impl_->create_window(w, h, title)) {
         AURORA_LOG_WARN("macos_surface", "create_window failed");
     }
@@ -67,9 +74,10 @@ MacOSSurface::~MacOSSurface() {
 
 auto MacOSSurface::begin_frame(int w, int h) -> Result<bool> {
     painter_.begin(w, h);
-    size_ = Size{static_cast<float>(w), static_cast<float>(h)};
+    size_ = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};
     // 浅色底色（与 Win32/X11 一致）
-    painter_.fill_rect(Rect{Point{0.0F, 0.0F}, Size{static_cast<float>(w), static_cast<float>(h)}},
+    painter_.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
+                            .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)}},
                        Color{245, 245, 247, 255});
     return true;
 }

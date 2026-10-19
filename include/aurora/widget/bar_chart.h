@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -262,7 +261,7 @@ class BarChart : public LeafWidget, public BarChartProps {
     /// @param g 布局期几何。
     /// @param local 控件局部坐标。
     /// @return 图例项索引；未命中为 `std::nullopt`。
-    [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
+    [[nodiscard]] static auto legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t>;
     /// @brief 安全取数据点值：系列 / 类目越界或非有限值（NaN / Inf）回退 0.0。
     /// @param series_idx 系列索引。
     /// @param cat_idx 类目索引。
@@ -272,7 +271,7 @@ class BarChart : public LeafWidget, public BarChartProps {
     /// @param g 布局期几何。
     /// @param cat_idx 类目索引。
     /// @return 带中心像素位置。
-    [[nodiscard]] auto category_center(const Geometry &g, std::size_t cat_idx) const -> float;
+    [[nodiscard]] static auto category_center(const Geometry &g, std::size_t cat_idx) -> float;
 
     Geometry geom_;  ///< 布局期算定的绘图几何缓存（on_layout 写入，绘制 / 命中反查复用）
     ChartGrowIn grow_;  ///< grow-in 入场动画状态（on_mount 接入帧循环；数据变更时重放）
@@ -455,12 +454,12 @@ inline auto BarChart::compute_geometry(const Size &size, const Font &font) const
 }
 
 // 供十字准线吸附与类目标签居中使用。
-inline auto BarChart::category_center(const Geometry &g, std::size_t cat_idx) const -> float {
+inline auto BarChart::category_center(const Geometry &g, std::size_t cat_idx) -> float {
     return g.x_band.band_center_px(cat_idx, g.plot.origin.x, g.plot.right());
 }
 
 // 对 legend_rects 逐项做矩形包含判断。
-inline auto BarChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
+inline auto BarChart::legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
         const Rect &r = g.legend_rects[i];
         if (local.x >= r.origin.x && local.x <= r.right() && local.y >= r.origin.y && local.y <= r.bottom()) {
@@ -485,7 +484,7 @@ inline auto BarChart::on_layout(const Constraints &c, const BuildContext &ctx) -
     }
     s.width = std::max(s.width, 0.0F);
     s.height = std::max(s.height, 0.0F);
-    geom_ = compute_geometry(s, inherit_theme(ctx).font);
+    geom_ = compute_geometry(s, inherit_theme(ctx).type_scale.body_medium);
     return s;
 }
 
@@ -722,7 +721,7 @@ inline auto BarChart::deserialize_props(const Json &props) -> void {
 /// @param ctx 构建上下文（继承主题字体 / 配色）。
 inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     const Theme theme = inherit_theme(ctx);
-    const Font &font = theme.font;
+    const Font &font = theme.type_scale.body_medium;
     const float off_x = bounds.origin.x;
     const float off_y = bounds.origin.y;
     // 局部几何 → 全局绘制坐标
@@ -735,8 +734,10 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
     const Geometry &g = geom_;
     const Rect &plot = g.plot;
     const float line_h = render::FontEngine::measure_height(font) + 4.0F;
-    const Color grid = Color{theme.text.r, theme.text.g, theme.text.b, 31};  // ≈ text × 0.12
-    const Color axis = Color{theme.text.r, theme.text.g, theme.text.b, 160};  // ≈ text × 0.63
+    const Color grid =
+        Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 31};  // ≈ text × 0.12
+    const Color axis =
+        Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 160};  // ≈ text × 0.63
 
     // ---- 网格线（y 刻度）----
     if (axis_y.visible && axis_y.show_grid_lines && plot.size.height > 0.0F) {
@@ -878,7 +879,7 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
             p.draw_line(Point{.x = gx(cx), .y = gy(plot.origin.y)}, Point{.x = gx(cx), .y = gy(plot.bottom())}, 1.0F,
                         grid);
         }
-        p.draw_rounded_border(grect(*hovered_bar), 2.0F, 2.0F, theme.text);
+        p.draw_rounded_border(grect(*hovered_bar), 2.0F, 2.0F, theme.roles.on_surface);
         if (hovered_point_.has_value()) {
             const auto [si, ci] = *hovered_point_;
             if (si >= 0 && std::cmp_less(si, n_series)) {
@@ -894,11 +895,11 @@ inline auto BarChart::on_paint(Painter &p, const Rect &bounds, const BuildContex
                 by = std::clamp(by, 0.0F, std::max(0.0F, bounds.size.height - h));
                 const Rect box{.origin = Point{.x = bx, .y = by}, .size = Size{.width = w, .height = h}};
                 p.fill_rounded_rect(grect(box), 4.0F,
-                                    Color{theme.background.r, theme.background.g, theme.background.b, 242});
+                                    Color{theme.roles.surface.r, theme.roles.surface.g, theme.roles.surface.b, 242});
                 p.draw_rounded_border(grect(box), 4.0F, 1.0F, grid);
                 const Rect text_box{.origin = Point{.x = bx + 8.0F, .y = by + 4.0F},
                                     .size = Size{.width = w - 16.0F, .height = line_h}};
-                p.draw_text(grect(text_box), text, font, theme.text);
+                p.draw_text(grect(text_box), text, font, theme.roles.on_surface);
             }
         }
     }

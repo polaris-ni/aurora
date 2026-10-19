@@ -3,7 +3,6 @@
 /// 测试说明: UTF-8↔UTF-16 偏移映射（含非 BMP 代理对的向下夹紧）、双向转换往返、
 ///           按码点/UTF-16 单元前后移动、Word/Line/Character/Document 单位展开
 
-#include <cstddef>
 #include <string>
 #include <string_view>
 #include <utility>

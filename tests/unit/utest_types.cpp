@@ -3,7 +3,6 @@
 /// 测试说明: 覆盖 Point/Size/Rect/EdgeInsets/Constraints/Length
 /// 的构造默认值、几何运算、命中与相交边界、约束钳制与强类型转换禁令
 
-#include <cstdint>
 #include <limits>
 #include <type_traits>
 

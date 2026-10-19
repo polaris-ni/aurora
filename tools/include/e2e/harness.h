@@ -722,7 +722,8 @@ class Session {
             session.adopt(create_window(opts));
         }
 #endif
-#ifdef AURORA_BACKEND_GPU_WGPU
+#if defined(AURORA_BACKEND_GPU_WGPU) && \
+    (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
         else if (spec.backend == Backend::Wgpu) {
             WgpuOptions opts;
             opts.size = size;

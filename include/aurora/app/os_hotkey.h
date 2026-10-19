@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -79,25 +78,25 @@ class OsHotkeyRegistry {
     /// @param action 命中时执行的动作（可空；空动作仍占住该组合，排空时跳过）。
     /// @return 成功为 `Ok(句柄)`（ID 自 1 起）；失败为结构化 `Error`，恒为
     /// `ErrorCode::OsHotkeyRegisterFailed`，`detail` 给出具体成因。
-    auto add(const KeyCombo &combo, std::function<void()> action) -> Result<OsHotkeyHandle>;
+    auto add(const KeyCombo &combo, std::function<void()> action) const -> Result<OsHotkeyHandle>;
 
     /// @brief 注销一条热键并释放其 OS 注册。
     /// @param h `add()` 返回的句柄；无效句柄或不属于本注册表的 ID 返回 false（不抛、不报错）。
     /// @return 确有热键被注销时为 `true`。
-    auto remove(OsHotkeyHandle h) -> bool;
+    [[nodiscard]] auto remove(OsHotkeyHandle h) const -> bool;
 
     /// @brief 注销本注册表内的全部热键（析构前主动释放，或整批撤掉重建时用）。
-    auto clear() -> void;
+    auto clear() const -> void;
 
     /// @brief 排空待处理队列：把自上次排空以来命中的热键逐个交给其动作。
     /// 由帧循环每帧调用一次；动作在本调用内同步执行，其间再次命中会留到下一次排空。
     /// @return 本次实际执行了动作的热键条数（命中但动作为空的不计）。
-    auto drain_pending() -> std::size_t;
+    [[nodiscard]] auto drain_pending() const -> std::size_t;
 
     /// @brief 本平台的 OS 级全局热键后端是否可用。
     /// @return 平台提供全局热键能力时为 `true`（如 Windows）；Wayland / GLFW / macOS 等
     /// 无后端时为 `false`，此时 `add()` 恒返回错误、`remove()` 恒返回 false。
-    [[nodiscard]] auto enabled() const -> bool;
+    [[nodiscard]] static auto enabled() -> bool;
 
     /// @brief 当前已注册的热键条数（不含已排空但尚未注销的命中）。
     /// @return 注册表中的热键条数。

@@ -12,7 +12,6 @@
 // 均在本目录内按模块扩展。
 // ============================================================
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>

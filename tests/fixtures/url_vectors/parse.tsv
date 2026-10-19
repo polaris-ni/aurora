@@ -1,0 +1,95 @@
+# Url::parse 黄金用例集（列 1 = 输入文本，列 2 = 规范化后的 to_string()，`ERR` = 必须以 net-url-invalid 拒绝）
+# 以 # 开头的行与空行跳过；分隔符是制表符；本文件按 UTF-8 读取、按字节比较。
+# 来源与口径见同目录 README.md。
+HTTPS://Example.COM:8443/A/../b%2Fx%41?q=1&q=%2b#frag%7e	https://example.com:8443/b%2FxA?q=1&q=%2B#frag~
+http://example.com./x	http://example.com/x
+http://example.com./	http://example.com/
+http://h/a%2fb	http://h/a%2Fb
+http://h/%41%7e%2D%5F	http://h/A~-_
+http://h/a b	ERR
+http://h/?q=%26&b=%3D	http://h/?q=%26&b=%3D
+http://h/#a%23b	http://h/#a%23b
+http://h/a%20b	http://h/a%20b
+http://a/b/c/./../../g	http://a/g
+http://a/b/c/%2e%2e/g	http://a/b/g
+http://a/b/c/%2e/g	http://a/b/c/g
+http://a/b/c/..	http://a/b/
+http://a/b/c/%2E%2E/	http://a/b/
+../g	../g
+g/../h/x	g/../h/x
+http://USER:pa%20SS@h.example:80/	http://USER:pa%20SS@h.example:80/
+http://h:/x	http://h/x
+http://h:00080/	http://h:80/
+http://h	http://h
+http://h/	http://h/
+http://h:0x50/	ERR
+http://h:99999/	ERR
+http://h:80/x	http://h:80/x
+http://192.168.0.1:8080/	http://192.168.0.1:8080/
+http://1.2.3/	http://1.2.3/
+http://1.2.3.4.5/	http://1.2.3.4.5/
+http://[2001:DB8::1]:8080/x	http://[2001:db8::1]:8080/x
+http://[fe80::1%25eth0]/	http://[fe80::1%25eth0]/
+http://[::ffff:192.0.2.1]/	http://[::ffff:192.0.2.1]/
+http://[1:2:3:4:5:6:7:8]/	http://[1:2:3:4:5:6:7:8]/
+http://[::]/	http://[::]/
+http://01.2.3.4/	ERR
+http://256.1.1.1/	ERR
+http://::1/	ERR
+http://[::1	ERR
+http://h]/	ERR
+http://[1::2::3]/	ERR
+http://[1:2:3]/	ERR
+http://[12345::1]/	ERR
+http://[fe80::1%25]/	ERR
+http://m%C3%BCnchen.test/	ERR
+http://über.test/	http://xn--ber-goa.test/
+# 大小写：ASCII 折叠做、Unicode 折叠不做，故 Ü(0xDC) 与 ü(0xFC) 是两个不同的名字
+# （浏览器按 UTS #46 折叠成 ü，给 xn--mnchen-3ya）。两行成对，漂移即判红。
+http://MÜNCHEN.test/	http://xn--mnchen-psa.test/
+http://münchen.test/	http://xn--mnchen-3ya.test/
+http://日本語.test/	http://xn--wgv71a119e.test/
+http://ß.test/	http://xn--zca.test/
+http://naïve-café.test/	http://xn--nave-caf-i1a7c.test/
+http://xn--mnchen-3ya.test/	http://xn--mnchen-3ya.test/
+http://xn--/x	ERR
+http://-bad.test/	ERR
+http://bad-.test/	ERR
+http://example..com/	ERR
+http://日 本.test/	ERR
+http://h/日本	http://h/%E6%97%A5%E6%9C%AC
+http://h/%E6%97%A5%E6%9C%AC	http://h/%E6%97%A5%E6%9C%AC
+http://h/?q=中文	http://h/?q=%E4%B8%AD%E6%96%87
+http://h/?b=2&a=1&b=3&a=1	http://h/?b=2&a=1&b=3&a=1
+http://h/?a=1&a=	http://h/?a=1&a=
+http://h/?&&=	http://h/?&&=
+//host/path	//host/path
+?q=1	?q=1
+#frag	#frag
+g?y#s	g?y#s
+mailto:user@example.com	mailto:user@example.com
+data:text/plain,a%2Fb	data:text/plain,a%2Fb
+http://h/p;v/x	http://h/p;v/x
+/path?with#frag	/path?with#frag
+1http://x/	ERR
+http://h/a%zz	ERR
+http://h/a%2	ERR
+http://user%xx@h/	ERR
+http://ex ample.com/	ERR
+http://h/#a b	ERR
+# RFC 3986 §4.2：冒号先于任何定界符出现 => 整段是 scheme（`g:x` 解析为 scheme=g、path=x）；
+# 定界符先出现 => 不含 scheme 的引用，此时冒号留在路径里原样输出（相对引用不做点段消除）。
+g:x	g:x
+../g:x	../g:x
+./g:x	./g:x
+http://中文.test/	http://xn--fiq228c.test/
+http://这就是中文吗.test/	http://xn--fiqz7lzxhg4j7xao24p.test/
+http://传送到了东京.test/	http://xn--xhqwj5d3so0k326j.test/
+http://äää.test/	http://xn--4caaa.test/
+http://äa.test/	http://xn--a-zfa.test/
+http://aä.test/	http://xn--a-0fa.test/
+http://abä.test/	http://xn--ab-wia.test/
+http://αβγδεπανζ.test/	http://xn--mxaacefgi9cza.test/
+http://bücher.test/	http://xn--bcher-kva.test/
+http://日本.test/	http://xn--wgv71a.test/
+http://᠀᠁᠂.test/	http://xn--55ecd.test/

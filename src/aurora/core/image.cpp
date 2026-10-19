@@ -118,7 +118,7 @@ auto Image::load_svg(std::string_view path, int target_w, int target_h) -> Resul
 }
 
 auto Image::content_hash() const -> std::uint64_t {
-    if (!content_hash_valid_) {
+    if (!content_hash_value_valid) {
         // FNV-1a 64 位：逐字节折叠像素缓冲。单线程 UI 模型下无并发求值；
         // const 访问经 mutable 缓存落回本对象（拷贝携带缓存，见头文件契约）。
         std::uint64_t h = 14695981039346656037ULL;
@@ -126,10 +126,10 @@ auto Image::content_hash() const -> std::uint64_t {
             h ^= byte;
             h *= 1099511628211ULL;
         }
-        content_hash_ = h;
-        content_hash_valid_ = true;
+        content_hash_value = h;
+        content_hash_value_valid = true;
     }
-    return content_hash_;
+    return content_hash_value;
 }
 
 }  // namespace aurora

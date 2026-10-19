@@ -3,7 +3,6 @@
 /// 测试说明: stb_image 通用解码链路集成——无头渲染产出真实 PNG 后经 Image::load（编解码注册表）
 ///           文件解码往返，并覆盖缺失文件/空文件/损坏内容/目录四类错误路径的结构化失败
 
-#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <string>

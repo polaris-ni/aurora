@@ -3,8 +3,6 @@
 /// 测试说明: 覆盖 ToolBar/StatusBar 的类型契约与自描述、构造（vector/初始化列表）、
 /// 链式配置与非法值降级、水平排列/垂直居中/尾项右对齐布局行为、序列化往返与无头绘制冒烟
 
-#include <cmath>
-#include <memory>
 #include <string>
 #include <type_traits>
 #include <vector>

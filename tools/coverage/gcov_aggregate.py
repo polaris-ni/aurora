@@ -27,13 +27,22 @@ import os
 import sys
 
 
-def parse_intermediate(text, src_root, counts):
-    """Parse gcov intermediate format (JSON stream or legacy file:/lcount: sections) into counts[path][line]=sum."""
+def parse_intermediate(text, src_root, build_dir, counts):
+    """Parse gcov intermediate format (JSON stream or legacy file:/lcount: sections) into counts[path][line]=sum.
+
+    `build_dir` is the directory gcov was invoked in (coverage_report.sh runs it from the
+    CMake binary dir). gcov emits `file` paths relative to that cwd (e.g. "../src/aurora/foo.cpp"
+    when ccache's CCACHE_BASEDIR normalization rewrites absolute paths), so relative paths must be
+    resolved against build_dir — NOT src_root — otherwise they climb one level above the repo
+    (src_root/../src/...) and fail the in_scope() prefix check, yielding an empty report.
+    """
 
     def add(p, line, cnt):
         p = os.path.normpath(p).replace("\\", "/")
         if p and not os.path.isabs(p):
-            p = os.path.normpath(os.path.join(src_root, p)).replace("\\", "/")
+            # Resolve relative paths against the gcov cwd; fall back to src_root if unknown.
+            base = build_dir if build_dir else src_root
+            p = os.path.normpath(os.path.join(base, p)).replace("\\", "/")
         d = counts.setdefault(p, {})
         d[line] = d.get(line, 0) + cnt
 
@@ -73,6 +82,8 @@ def main():
     ap.add_argument("input", nargs="+",
                     help="gcov intermediate-format files (multiple allowed); a directory collects *.gcov under it")
     ap.add_argument("--src-root", default=None, help="repo root (default: two levels above this script)")
+    ap.add_argument("--build-dir", default=None,
+                    help="dir gcov ran in (CMake binary dir); relative `file` paths resolve against this")
     ap.add_argument("--threshold", type=float, default=90.0)
     ap.add_argument("--csv", default=None)
     ap.add_argument("--html", default=None)
@@ -81,6 +92,7 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     src_root = os.path.normpath(args.src_root or os.path.dirname(os.path.dirname(here))).replace("\\", "/").rstrip(
         "/") + "/"
+    build_dir = os.path.abspath(args.build_dir).replace("\\", "/").rstrip("/") if args.build_dir else None
 
     files = []
     for p in args.input:
@@ -92,7 +104,7 @@ def main():
     counts = {}
     for fp in files:
         with open(fp, encoding="utf-8", errors="replace") as fh:
-            parse_intermediate(fh.read(), src_root, counts)
+            parse_intermediate(fh.read(), src_root, build_dir, counts)
 
     rows = []
     for path, lines in counts.items():

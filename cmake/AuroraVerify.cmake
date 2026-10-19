@@ -174,6 +174,24 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_wgpu)
     endif ()
 
+    # ---- X11 客户端自绘装饰（真实 X server）：ClientSide 撤 WM 口沿后标题栏带真绘出 +
+    # content_inset 上报 + Auto/Frameless 零入侵口径。像素判据需 DEBUG 构建（data() 暴露帧缓冲）。
+    if (AURORA_BACKEND_X11 AND AURORA_ENABLE_DEBUG)
+        aurora_add_verify_probe(aurora_verify_x11_csd "${_aurora_verify_dir}/x11_csd_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_x11_csd)
+    endif ()
+
+    # ---- Win32 客户端自绘装饰（真实桌面）：WM_NCCALCSIZE 吞框几何 + WM_NCHITTEST 逐点热区
+    # 回归（SendMessage 直报，不依赖抓屏）+ DEBUG data() 像素判据（AdwaitaDark 栏带/hover/press
+    # 分层/零入侵）+ 释放触发与拖离取消 + 降级归零 + 热更 + 最大化触发与 rcWork 几何。
+    # 像素判据需 DEBUG 构建（data() 暴露帧缓冲）；期望值取库内共享层同一份函数
+    # （src/aurora/window/detail/csd_*.h），故需 src 包含目录（同 WASAPI/ALSA 探针先例）。
+    if (WIN32 AND AURORA_BACKEND_WIN32 AND AURORA_ENABLE_DEBUG)
+        aurora_add_verify_probe(aurora_verify_win32_csd "${_aurora_verify_dir}/win32_csd_live_probe.cpp")
+        target_include_directories(aurora_verify_win32_csd PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_csd)
+    endif ()
+
     # ---- X11 wgpu GPU 栅格（Linux 真实窗口 + 离屏直驱，WSLg vGPU 可验）：与 Win32 探针同段结构，
     # 宿主动态类型为 WgpuX11Surface，另加 XGetImage 截图落盘物证。需 WGPU+X11 通道编译进库。
     if (AURORA_BACKEND_GPU_WGPU AND AURORA_BACKEND_X11)
@@ -215,6 +233,27 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_atspi)
     endif ()
 
+    # ---- WebKitGTK WebView（Linux/X11）：引擎 + 宿主接线的端到端真机验收 ——
+    # 收养外部 X 窗口 / 页面加载与导航态 / 标题 / evaluate 往返 / 双向消息通道 /
+    # X 子窗口几何与预期矩形闭环比对 / 改档后几何再下发 / 快照像素。强制 X11 路径
+    # （Wayland 下收养机制不成立，引擎按设计报 UnsupportedPlatform）。仅用公共 API。
+    if (LINUX AND AURORA_BACKEND_X11 AND AURORA_ENABLE_WEBVIEW_WEBKITGTK)
+        aurora_add_verify_probe(aurora_verify_webview_webkitgtk
+                "${_aurora_verify_dir}/webkitgtk_webview_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_webview_webkitgtk)
+    endif ()
+
+    # ---- WebView2 WebView（Windows）：引擎 + 宿主接线的端到端真机验收 ——
+    # 异步环境 / 控制器创建 / 页面加载与导航态 / 标题 / evaluate 往返 / 双向消息通道 /
+    # Win32 子窗口几何与可见性闭环比对 / 改档后几何再下发 / 快照像素。仅用公共 API。
+    # 运行期需 WebView2 Evergreen 运行时与可被 LoadLibrary 找到的 WebView2Loader.dll
+    # （应用侧可再分发件，运行前放到 exe 同目录或加进 PATH），见探针头注。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11) AND AURORA_ENABLE_WEBVIEW_WEBVIEW2)
+        aurora_add_verify_probe(aurora_verify_webview_webview2
+                "${_aurora_verify_dir}/webview2_webview_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_webview_webview2)
+    endif ()
+
     # ---- WASAPI 音频（Windows）：真实设备线程 / 格式协商 / 图时钟 / 出声路径真机核对 ----
     # 自动段核对激活/格式契约/时钟推进/缓冲源与推流通路/suspend-resume；--interactive 出声人工段
     # （扫频/双源混音/设备热切换）。需音频后端编译进库（AURORA_ENABLE_AUDIO=ON）。
@@ -236,6 +275,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         # 公共 API 不暴露，仅本探针直连验收其生命周期行为（同 WASAPI 探针口径）。
         target_include_directories(aurora_verify_alsa_audio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         list(APPEND _aurora_verify_targets aurora_verify_alsa_audio)
+    endif ()
+    # ---- TLS 通道（任意有出站通路的路）：真实公网证书链 / SNI / ALPN 回选 / 记录级收发 / SPKI pin ----
+    # 自动段核对能力位、缺省口径握手、证书摘要形态、ALPN 两态回报、GET 往返与 pin 反向判据；
+    # 「这张证书确实是这个站点的那张」只有人能判，故该项在 --interactive 人工段。本探针是唯一出站
+    # 的真机面：CI runner 禁网且全部用例按零出站纪律构造，因此它不进 CTest，只在人工验收时运行。
+    # 本腿没有 TLS 后端（POSIX 未给 AURORA_NET_TLS_PROVIDERS）时自动段以退出码 2 报 ENV-UNAVAILABLE。
+    if (NOT EMSCRIPTEN)
+        aurora_add_verify_probe(aurora_verify_tls_live "${_aurora_verify_dir}/tls_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_tls_live)
     endif ()
     # ---- WASM rAF 帧循环（浏览器）：Application::run() 经 requestAnimationFrame 真实驱动帧环，
     # 一次验收渲染上屏 / DOM 事件 / deferred 线程池帧尾排空三条接线（期望项见源文件头注释）。

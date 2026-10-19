@@ -10,7 +10,7 @@
 #
 # 比对项：
 #   1) widgets 的 type 集合（新增控件未刷新 json / 已删控件仍在 json 残留）；
-#   2) 每个共同 type 的属性键集合（prop_descriptors[].name + default_props + props）；
+#   2) 每个共同 type 的属性键集合（单一 props 表：props[].name）；
 #   3) enums 的名称集合。
 #   任一项差集非空 → 非零退出并打印缺失 / 多余明细。
 #
@@ -42,19 +42,20 @@ def repo_root_of(path):
 
 
 def prop_keys(widget):
-    """Collect the property-key set of one widget entry (symmetric on both sides)."""
+    """Collect the property-key set of one widget entry (symmetric on both sides).
+
+    属性面是单一权威表 props（对象数组，键序 = 描述符声明序 + 布局公共条目）。
+    """
     keys = set()
-    descriptors = widget.get("prop_descriptors")
-    if isinstance(descriptors, list):
-        keys |= {d.get("name") for d in descriptors if isinstance(d, dict)}
     props = widget.get("props")
-    if isinstance(props, dict):
-        keys |= set(props.keys())
-    elif isinstance(props, list):
-        keys |= {p for p in props if isinstance(p, str)}
-    defaults = widget.get("default_props")
-    if isinstance(defaults, dict):
-        keys |= set(defaults.keys())
+    if isinstance(props, list):
+        for entry in props:
+            if isinstance(entry, dict):
+                name = entry.get("name")
+                if name:
+                    keys.add(name)
+            elif isinstance(entry, str):  # 兼容旧格式（名字列表）
+                keys.add(entry)
     keys.discard(None)
     return keys
 

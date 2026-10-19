@@ -389,7 +389,7 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_linear_scanline_sse2(st
         const __m128 vpx = _mm_add_ps(_mm_mul_ps(_mm_sub_ps(vx, vsx), vdx), vpy);
         __m128 t = _mm_mul_ps(vpx, vinv);
         t = _mm_max_ps(vzero, _mm_min_ps(vone, t));
-        __m128 frac = (range > 0.0F) ? _mm_div_ps(_mm_sub_ps(t, vstop0), vrange) : vzero;
+        const __m128 frac = (range > 0.0F) ? _mm_div_ps(_mm_sub_ps(t, vstop0), vrange) : vzero;
         std::uint8_t *base = row + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
             const __m128 val = _mm_add_ps(vc0[c], _mm_mul_ps(vdiff[c], frac));
@@ -454,7 +454,7 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto gradient_radial_scanline_sse2(st
         const __m128 vdist = _mm_sqrt_ps(_mm_add_ps(_mm_mul_ps(vpx, vpx), vpy));
         __m128 t = _mm_mul_ps(vdist, vinv_r);
         t = _mm_max_ps(vzero, _mm_min_ps(vone, t));
-        __m128 frac = (range > 0.0F) ? _mm_div_ps(_mm_sub_ps(t, vstop0), vrange) : vzero;
+        const __m128 frac = (range > 0.0F) ? _mm_div_ps(_mm_sub_ps(t, vstop0), vrange) : vzero;
         std::uint8_t *base = row + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
             const __m128 val = _mm_add_ps(vc0[c], _mm_mul_ps(vdiff[c], frac));
@@ -651,7 +651,7 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_linear_scanline_avx2(std
         const __m256 vpx = _mm256_add_ps(_mm256_mul_ps(_mm256_sub_ps(vx, vsx), vdx), vpy);
         __m256 t = _mm256_mul_ps(vpx, vinv);
         t = _mm256_max_ps(vzero, _mm256_min_ps(vone, t));
-        __m256 frac = (range > 0.0F) ? _mm256_div_ps(_mm256_sub_ps(t, vstop0), vrange) : vzero;
+        const __m256 frac = (range > 0.0F) ? _mm256_div_ps(_mm256_sub_ps(t, vstop0), vrange) : vzero;
         std::uint8_t *base = row + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
             const __m256 val = _mm256_add_ps(vc0[c], _mm256_mul_ps(vdiff[c], frac));
@@ -721,7 +721,7 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_radial_scanline_avx2(std
         const __m256 vdist = _mm256_sqrt_ps(_mm256_add_ps(_mm256_mul_ps(vpx, vpx), vpy));
         __m256 t = _mm256_mul_ps(vdist, vinv_r);
         t = _mm256_max_ps(vzero, _mm256_min_ps(vone, t));
-        __m256 frac = (range > 0.0F) ? _mm256_div_ps(_mm256_sub_ps(t, vstop0), vrange) : vzero;
+        const __m256 frac = (range > 0.0F) ? _mm256_div_ps(_mm256_sub_ps(t, vstop0), vrange) : vzero;
         std::uint8_t *base = row + (static_cast<std::size_t>(i) * 4U);
         for (int c = 0; c < 3; ++c) {
             const __m256 val = _mm256_add_ps(vc0[c], _mm256_mul_ps(vdiff[c], frac));
@@ -804,8 +804,8 @@ inline AURORA_SSE41_TARGET AURORA_NOINLINE auto box_blur_line_sse2(std::uint8_t 
     for (int x = 1; x < n; ++x) {
         const int ridx = std::clamp(x + r, 0, n - 1);
         const int lidx = std::clamp(x - 1 - r, 0, n - 1);
-        __m128i rv = blur_load4(src + (static_cast<std::size_t>(ridx) * src_step));
-        __m128i lv = blur_load4(src + (static_cast<std::size_t>(lidx) * src_step));
+        const __m128i rv = blur_load4(src + (static_cast<std::size_t>(ridx) * src_step));
+        const __m128i lv = blur_load4(src + (static_cast<std::size_t>(lidx) * src_step));
         acc = _mm_sub_epi32(acc, lv);
         acc = _mm_add_epi32(acc, rv);
         alignas(16) int s[4];
@@ -873,7 +873,7 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto box_blur_line_avx2(std::uint8_t *
                                                                   const std::uint8_t *src, int src_step, int n, int r)
     -> void {
     const int denom = (2 * r) + 1;
-    alignas(32) int seed[8] = {0};
+    alignas(32) int seed[8] = {};
     for (int k = -r; k <= r; ++k) {
         const int idx = std::clamp(k, 0, n - 1);
         const std::uint8_t *p = src + (static_cast<std::size_t>(idx) * src_step);
@@ -887,8 +887,8 @@ inline AURORA_AVX2_TARGET AURORA_NOINLINE auto box_blur_line_avx2(std::uint8_t *
         if (x > 0) {
             const int ridx = std::clamp(x + r, 0, n - 1);
             const int lidx = std::clamp(x - 1 - r, 0, n - 1);
-            __m256i rv = blur_load4_avx2(src + (static_cast<std::size_t>(ridx) * src_step));
-            __m256i lv = blur_load4_avx2(src + (static_cast<std::size_t>(lidx) * src_step));
+            const __m256i rv = blur_load4_avx2(src + (static_cast<std::size_t>(ridx) * src_step));
+            const __m256i lv = blur_load4_avx2(src + (static_cast<std::size_t>(lidx) * src_step));
             acc = _mm256_sub_epi32(acc, lv);
             acc = _mm256_add_epi32(acc, rv);
         }

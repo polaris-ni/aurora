@@ -29,9 +29,10 @@ class SqliteBackend : public StorageBackend {
   public:
     /// @brief 打开（或创建）单文件库/`:memory:` 库并就绪 schema；失败不抛异常。
     /// @param opts 库路径与 WAL/内存模式选择；path 为空回退默认配置目录。
-    explicit SqliteBackend(SqliteOptions opts = {});
+    explicit SqliteBackend(const SqliteOptions &opts = {});
 
-    /// @brief 析构：关闭连接（等价幂等 close()）。
+    /// @brief 析构：释放连接（与 `close()` 走同一条实体路径，但**不经虚派发**——析构期派生
+    ///        子对象已销毁，调虚 `close()` 会静默绕过派生侧收尾）。
     ~SqliteBackend() override;
 
     /// @brief 后端是否成功打开（库可开、schema 就绪）。`Storage::create(SqliteOptions)` 据它返回 Result。
@@ -77,13 +78,29 @@ class SqliteBackend : public StorageBackend {
     [[nodiscard]] auto flush() -> Result<void> override;
 
     /// @brief 关闭连接（幂等；析构自动调用）。
-    /// @return 恒成功（重复 close 亦成功）。
+    /// @return 恒成功（重复 close 亦成功）。关闭后 `is_open()` 为 false，其余操作按「未打开」返回错误。
     [[nodiscard]] auto close() -> Result<void> override;
+
+    /// @brief 数据库连接是唯一资源属主：显式删除拷贝/移动，补齐五件套口径
+    ///        （误拷贝会在编译期报错，而非落到 unique_ptr 成员的隐式行为）。
+    ///        删除的特-member 函数按惯例放 public：私有删除只让友元/成员的误用
+    ///        变成「私有成员不可访问」这种误导性报错。
+    SqliteBackend(const SqliteBackend &) = delete;
+    auto operator=(const SqliteBackend &) -> SqliteBackend & = delete;
+    SqliteBackend(SqliteBackend &&) = delete;
+    auto operator=(SqliteBackend &&) -> SqliteBackend & = delete;
 
   private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
     bool open_ = false;
+
+    /// @brief 关连接的实体工作（非虚）：`close()` 与析构共用同一路径。
+    /// @details 析构内不得调虚 `close()`——那一刻派生类子对象已销毁，虚派发静默落到本类
+    ///          槽位，「派生重写的 close()」被绕过（本类的连接释放仍会执行，但派生侧的
+    ///          收尾不会）。故析构只调本函数，`close()` 转调它，幂等语义不变。
+    /// @return 恒成功（连接已关或未开均为成功）。
+    [[nodiscard]] auto close_connection() -> Result<void>;
 };
 
 }  // namespace aurora::storage

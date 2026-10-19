@@ -73,7 +73,7 @@ class Subscription {
 
     /// @brief 立即取消订阅（幂等；重复调用安全）。
     auto reset() -> void {
-        auto fn = std::exchange(
+        const auto fn = std::exchange(
             cancel_, nullptr);  // 显式置空：moved-from function 为空无标准保证（libc++ 可残留），防双取消破坏幂等
         if (fn) {
             fn();

@@ -11,18 +11,21 @@
 /// 探针取点纪律：浮层矩形按**控件外契约**独立重建（栏高 / 行高 26 / 浮层宽 180 / 菜单项数），
 /// 并与公开的 `dropdown_bounds()` 对账（两者分叉即报警）；取点前先断言该点在栏的布局盒之外。
 
-#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "aurora/app/menu.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/menu_bar.h"
+#include "aurora/widget/props_io.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_menu_bar {
@@ -139,7 +142,7 @@ AURORA_TEST_CASE(flyout_point_reaches_menu_bar_in_column_host) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -166,7 +169,7 @@ AURORA_TEST_CASE(flyout_press_triggers_menu_item_via_real_dispatch) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -212,7 +215,7 @@ AURORA_TEST_CASE(closed_menu_bar_does_not_claim_flyout_area) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -237,7 +240,7 @@ AURORA_TEST_CASE(compat_entry_and_dispatch_entry_agree_pointwise) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
     LayoutEngine::layout(*root, host_constraints());
     bar->open(0);
 
@@ -254,6 +257,170 @@ AURORA_TEST_CASE(compat_entry_and_dispatch_entry_agree_pointwise) {
         }
     }
     AURORA_TEST_CHECK_EQ(hits, 0);  // 命中查询不得有副作用
+}
+
+AURORA_TEST_CASE(bar_click_opens_and_toggles_menu) {
+    // 栏上点击顶级菜单标题：首次展开、再次同标题收起（toggle 分支）。
+    int hits = 0;
+    int last = -1;
+    const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
+    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    LayoutEngine::layout(*root, host_constraints());
+
+    const Rect bb = child_box(*root, *bar);
+    AURORA_TEST_REQUIRE(bb.size.width > 0.0F);
+
+    // 第一个顶级菜单标题起于 x=0，宽 >= 40。点击 x=10 命中「File」。
+    MouseEvent open_click = press(bb.origin.x + 10.0F, bb.origin.y + 5.0F);
+    EventDispatcher::dispatch(*root, open_click, nullptr);
+    AURORA_TEST_CHECK_EQ(bar->open_menu(), 0);
+    AURORA_TEST_CHECK_TRUE(bar->is_open());
+
+    // 再次点击同一标题：收起（toggle 到 -1）。
+    MouseEvent toggle = press(bb.origin.x + 10.0F, bb.origin.y + 5.0F);
+    EventDispatcher::dispatch(*root, toggle, nullptr);
+    AURORA_TEST_CHECK_EQ(bar->open_menu(), -1);
+    AURORA_TEST_CHECK_FALSE(bar->is_open());
+    AURORA_TEST_CHECK_EQ(hits, 0);  // 栏点击不触发菜单项
+}
+
+AURORA_TEST_CASE(bar_empty_click_closes) {
+    // 栏上空白（越过所有标题）点击 → 收起。
+    int hits = 0;
+    int last = -1;
+    const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
+    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    LayoutEngine::layout(*root, host_constraints());
+    bar->open(1);
+
+    const Rect bb = child_box(*root, *bar);
+    // 点落在栏高内、越过所有顶级菜单标题（标题总宽 < 宿主宽 320），触发栏上空白收起。
+    MouseEvent empty = press(bb.origin.x + 200.0F, bb.origin.y + 5.0F);
+    EventDispatcher::dispatch(*root, empty, nullptr);
+    AURORA_TEST_CHECK_EQ(bar->open_menu(), -1);
+}
+
+AURORA_TEST_CASE(add_menu_appends_and_relayouts) {
+    int hits = 0;
+    int last = -1;
+    std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
+    AURORA_TEST_CHECK_EQ(bar->menu_count(), 2U);
+
+    Menu extra;
+    extra.title = "Edit";
+    MenuItem cut;
+    cut.label = "Cut";
+    cut.on_click = [&hits, &last] {
+        ++hits;
+        last = 7;
+    };
+    extra.items.push_back(std::move(cut));
+    bar->add_menu(std::move(extra));
+    AURORA_TEST_CHECK_EQ(bar->menu_count(), 3U);
+
+    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    LayoutEngine::layout(*root, host_constraints());  // 追加后重新布局不崩溃
+    bar->open(0);
+    AURORA_TEST_CHECK(bar->dropdown_bounds().size.height > 0.0F);  // 展开时浮层含菜单项高度
+}
+
+AURORA_TEST_CASE(serialize_records_titles_and_height) {
+    int hits = 0;
+    int last = -1;
+    const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
+    bar->set_bar_height(32.0F);
+    Json props = Json::object();
+    bar->serialize_props(props);
+    AURORA_TEST_CHECK_TRUE(props.contains("bar_height"));
+    AURORA_TEST_CHECK_TRUE(props.contains("menu_titles"));
+    AURORA_TEST_CHECK_EQ(props.at("bar_height")->as_or<float>(0.0F), 32.0F);
+    const Json &titles = *props.at("menu_titles");
+    AURORA_TEST_CHECK_EQ(static_cast<std::size_t>(titles.size()), bar->menu_count());
+}
+
+AURORA_TEST_CASE(paint_dropdown_with_separator_checkable_shortcut) {
+    // 下拉含分隔符 / 可勾选 / 快捷键 / 禁用项：覆盖 on_paint 的各分支。
+    std::vector<Menu> menus;
+    Menu file;
+    file.title = "File";
+    MenuItem open;
+    open.label = "Open";
+    open.shortcut_text = "Ctrl+O";
+    file.items.push_back(std::move(open));
+    MenuItem sep;
+    sep.separator = true;
+    file.items.push_back(std::move(sep));
+    MenuItem check;
+    check.label = "Read Only";
+    check.checkable = true;
+    check.checked = true;
+    file.items.push_back(std::move(check));
+    MenuItem disabled;
+    disabled.label = "Locked";
+    disabled.enabled = false;
+    file.items.push_back(std::move(disabled));
+    menus.push_back(std::move(file));
+
+    auto bar = std::make_shared<MenuBar>(std::move(menus));
+    bar->set_bar_height(AURORA_BAR_HEIGHT);
+    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    LayoutEngine::layout(*root, host_constraints());
+    bar->open(0);
+
+    Painter painter;
+    constexpr Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F},
+                          .size = Size{.width = AURORA_HOST_WIDTH, .height = AURORA_HOST_HEIGHT}};
+    bar->paint(painter, bounds, BuildContext{});  // 分隔符 + 勾选前缀 + 快捷键右对齐 + 禁用灰显
+}
+
+AURORA_TEST_CASE(non_press_event_falls_through_to_base) {
+    // 非 Press 事件下沉基类链（不崩溃、不消费）。
+    int hits = 0;
+    int last = -1;
+    const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
+    constexpr BuildContext ctx;
+    bar->mount(ctx);
+    LayoutEngine::layout(*bar, host_constraints());
+
+    MouseEvent move;
+    move.action = MouseAction::Move;
+    move.button = MouseButton::Left;
+    move.local_position = Point{.x = 10.0F, .y = 5.0F};
+    bar->on_pointer_event(move);  // Move != Press → 下沉基类，不消费、不触发菜单项
+    AURORA_TEST_CHECK_EQ(hits, 0);
+}
+
+// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+static auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
+AURORA_TEST_CASE(menu_bar_colors_follow_theme_when_unset) {
+    // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
+    constexpr BuildContext bare;  // 无注入：inherit_theme 回落 light
+    const MenuBar bar;
+    // 启用项文字 → on_surface；禁用项 → on_surface_variant。
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(bare, true) == Color{0, 0, 0});  // light on_surface
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(bare, false) == Color(71, 71, 71));  // light on_surface_variant
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(dark, true) == Color{255, 255, 255});  // dark on_surface
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(dark, false) == Color(198, 198, 198));  // dark on_surface_variant
+}
+
+AURORA_TEST_CASE(menu_bar_explicit_colors_override_theme) {
+    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    MenuBar bar;
+    bar.set_text_color(Color(0xE0, 0x1B, 0x24));  // error 红，刻意区别于两档角色
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(dark, true) == Color(0xE0, 0x1B, 0x24));
+    AURORA_TEST_CHECK(bar.resolve_item_text_color(dark, false) == Color(0xE0, 0x1B, 0x24));
 }
 
 }  // namespace aurora::test_cases::utest_menu_bar

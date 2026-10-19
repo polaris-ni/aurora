@@ -18,7 +18,6 @@
 ///           撑成宿主矩阵，与内核「只回答用哪个后端」的定位相悖。
 
 #include <chrono>
-#include <memory>
 #include <thread>
 
 #include "aurora/core/platform.h"

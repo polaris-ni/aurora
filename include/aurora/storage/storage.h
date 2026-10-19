@@ -44,7 +44,7 @@ class Storage {
     ///        StorageBackendUnavailable；真事务语义见 `SqliteBackend::transaction`。
     /// @param opts 库路径与 WAL/内存模式选择。
     /// @return 成功携带就绪门面；打开失败携带错误。
-    [[nodiscard]] static auto create(SqliteOptions opts) -> Result<Storage>;
+    [[nodiscard]] static auto create(const SqliteOptions &opts) -> Result<Storage>;
 #endif
 
     /// @brief 注入任意后端（自定义 / SQLite / 测试 Memory）—— 对标 Application(Scene, unique_ptr<Surface>)。

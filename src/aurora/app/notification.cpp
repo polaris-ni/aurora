@@ -71,8 +71,8 @@ namespace {
 inline constexpr const char *AURORA_DEFAULT_TAG_KEY = "x-aurora-default-action";
 
 /// @brief  Windows 气球的兜底清理时长（毫秒）与「气球结束后再留的余量」。
-inline constexpr std::uint32_t AURORA_DEFAULT_CLEANUP_MS = 12000;
-inline constexpr std::uint32_t AURORA_CLEANUP_SLACK_MS = 2000;
+[[maybe_unused]] inline constexpr std::uint32_t AURORA_DEFAULT_CLEANUP_MS = 12000;
+[[maybe_unused]] inline constexpr std::uint32_t AURORA_CLEANUP_SLACK_MS = 2000;
 
 /// @brief 通知中心的进程级状态（互斥保护：`last_notification` 允许跨线程读取）。
 struct CenterState {
@@ -91,14 +91,14 @@ struct CenterState {
 /// @brief 取通知的有效动作键（空 tag 用占位键兜底）。
 /// @param notification 通知内容。
 /// @return 用于向桌面服务注册「点击」动作的非空键。
-[[nodiscard]] auto action_key(const Notification &notification) -> std::string {
+[[nodiscard, maybe_unused]] auto action_key(const Notification &notification) -> std::string {
     return notification.tag.empty() ? std::string{AURORA_DEFAULT_TAG_KEY} : notification.tag;
 }
 
 /// @brief 把回调拿到的动作键还原成调用方语义下的 tag（占位键还原为空串）。
 /// @param key 桌面服务回传的动作键。
 /// @return 与 `Notification::tag` 同语义的 tag。
-[[nodiscard]] auto tag_from_action_key(const std::string &key) -> std::string {
+[[nodiscard, maybe_unused]] auto tag_from_action_key(const std::string &key) -> std::string {
     return (key == AURORA_DEFAULT_TAG_KEY) ? std::string{} : key;
 }
 
@@ -119,7 +119,7 @@ auto dispatch_activated(const std::string &tag) -> void {
 /// @brief 统一失败出口。
 /// @param detail 失败原因（进 `NotificationPostFailed` 的 `{detail}` 占位符）。
 /// @return 结构化错误。
-[[nodiscard]] auto post_failed(const std::string &detail) -> Result<void> {
+[[nodiscard, maybe_unused]] auto post_failed(const std::string &detail) -> Result<void> {
     AURORA_LOG_WARN("notification", "post failed: ", detail);
     return make_error(ErrorCode::NotificationPostFailed, ErrorParams{{"detail", detail}});
 }
@@ -549,8 +549,8 @@ struct LibdbusError {
 };
 
 inline constexpr int AURORA_DBUS_BUS_SESSION = 0;  ///< `DBusBusType::DBUS_BUS_SESSION`
-inline constexpr int AURORA_DBUS_TYPE_BYTE = 'y';  ///< DBUS_TYPE_BYTE
-inline constexpr int AURORA_DBUS_TYPE_BOOLEAN = 'b';  ///< DBUS_TYPE_BOOLEAN
+[[maybe_unused]] inline constexpr int AURORA_DBUS_TYPE_BYTE = 'y';  ///< DBUS_TYPE_BYTE
+[[maybe_unused]] inline constexpr int AURORA_DBUS_TYPE_BOOLEAN = 'b';  ///< DBUS_TYPE_BOOLEAN
 inline constexpr int AURORA_DBUS_TYPE_INT32 = 'i';  ///< DBUS_TYPE_INT32
 inline constexpr int AURORA_DBUS_TYPE_UINT32 = 'u';  ///< DBUS_TYPE_UINT32
 inline constexpr int AURORA_DBUS_TYPE_STRING = 's';  ///< DBUS_TYPE_STRING
@@ -623,6 +623,7 @@ struct DbusApi {
 
 /// @brief 取出错误描述；拿不到（未置位 / 版本差异）时返回空串。
 /// @param error 已由 libdbus 填充的错误块。
+/// @param fallback dbus_error_set false时的回退值
 /// @return 描述串的副本；不可得时为空串。
 [[nodiscard]] auto dbus_detail_or_unknown(const LibdbusError &error, std::string fallback) -> std::string {
     if (!dbus_error_set(error)) {
@@ -1038,7 +1039,7 @@ auto NotificationCenter::pump_events() -> void {
     // Windows 的气球事件由隐藏窗口的消息 pump 同步送达（宿主的 PeekMessage 即覆盖，
     // 这里若再抽一次会把宿主的窗口消息抢走），故这条就是 no-op。
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
-    linux_state();  // 保证状态先于下面两级访问而构造
+    (void)linux_state();  // 保证状态先于下面两级访问而构造
     load_glib();
     LinuxNotifyState &s = linux_state();
     if (s.main_context_iteration != nullptr) {

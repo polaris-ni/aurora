@@ -6,8 +6,6 @@
 /// 全程**不注册真实系统热键**：受支持的平台上改走进程内 inert 测试后端
 /// （AURORA_ENABLE_DEBUG + AURORA_ENABLE_TEST_HOOKS 双宏齐备时可用），CI 上不干扰系统。
 
-#include <cstddef>
-#include <cstdint>
 #include <string>
 
 #include "aurora/app/os_hotkey.h"
@@ -173,7 +171,7 @@ AURORA_TEST_CASE(registry_without_window_backend_does_not_crash) {
 
     for (int i = 0; i < 3; ++i) {
         OsHotkeyRegistry registry;
-        (void)registry.enabled();
+        (void)OsHotkeyRegistry::enabled();
         (void)registry.count();
         (void)registry.drain_pending();
         const auto res = registry.add(sample_combo(), []() -> void {});

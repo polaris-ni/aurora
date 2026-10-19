@@ -27,6 +27,7 @@
 - **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按下一条「常量命名」走 `AURORA_` 前缀 + `UPPER_CASE`（如 `AURORA_NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。
 - **常量命名**：命名空间 / 文件级与类内 `static constexpr` 常量统一 `AURORA_` 前缀 + `UPPER_CASE` 全大写下划线（如 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`）；禁止 `k` 前缀 CamelCase。**豁免**：镜像外部标准 API 枚举值的常量按官方名原样保留（`AURORA_` 前缀会破坏与外部文档 / 官方头的逐名对照），前提是收敛在专属命名空间内隔离作用域——现有两例：`colors` 命名空间的色板常量（`core/color.h`）与 `rhi::gl` 命名空间的 GL 枚举镜像（`src/aurora/render/gpu/gl_core.h`，如 `TEXTURE_2D` / `RGBA8`，值逐一取自 GL 官方规范）。`FALSE_` / `TRUE_` 的尾部下划线为规避平台宏碰撞的例外，不作为成员命名惯例。
 - **生命周期回调强类型**：`au::Lifecycle` 的 `on_mount` / `on_unmount`、窗口级 `WindowState` / `WindowMode` 的 `set_on_*` 回调均为具名 `std::function` 强类型（`MountCb = std::function<void(const BuildContext&)>`、`UnmountCb = std::function<void()>`，`WindowStateHandler` / `WindowModeHandler` 同理）；枚举取值穷尽且按「可见性 / 几何态」正交划分（`WindowState` 不并入 `Maximized`），AI 无需猜测「是否还有隐藏状态」。回调均可空（无副作用时不传），且不走异常捕获（与主线程事件回调一致）。
+- **图标语义名**：`IconRegistry` 的键是 ASCII `snake_case`、表达**含义而非位置或尺寸**（`settings` / `close` / `chevron_right`，而非 `icon_1` / `left_24px` / `red_star`）。语义名由应用注册、库不预置条目；引用未注册名字在运行期返回 `icon-name-not-registered` 结构化错误（message 回带已注册名候选），库侧**不做**静默占位或字符串模糊匹配纠偏。
 
 ---
 
@@ -183,6 +184,16 @@
 - 只测拓扑校验 / 非法参数路径的用例同样显式注入，别把「碰巧没声卡」当成通过条件。
 - 确需真实设备的验证不进单测：放 `tools/verify/` 真机探针（条件构建、不进 CTest），见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §2.4 的 `aurora_verify_*`。
 
+### 3.7 异步等待与测试替身口径
+
+被测对象在别的线程或别的时钟上时，用例只允许通过 `tests/framework/` 里的两份辅助等待，不得再各自手写轮询圈。这条与 §3.5 golden 基线的收敛同源：同一段设施曾在多个文件里各抄一份，任何改进都要改多处。
+
+- **等一个条件**用 `tests/framework/async_wait.h` 的 `wait_until(subject, pred, budget)`；缺省预算取该头的 `AURORA_WAIT_BUDGET`（单一真值，勿在文件内另立数值）。等待是通知驱动或有界轮询，**禁止忙等**（无条件空转的 `while` 圈）、禁止 `sleep_for` 一把然后直接断言、禁止无界等待。
+- **超时必须自报**：`WaitOutcome` 带 `subject` / `elapsed` / `budget` / `polls`，正向判据用 `AURORA_TEST_WAIT_UNTIL(outcome)` 把现场写进红灯文本。辅助本身**不得替调用方判定正反**——凡转发给既有断言点的辅助（`CHECK` / `REQUIRE` / `CHECK_FALSE` 三向都可能），一律返回静默 `bool`，否则「这段时间里不该发生」的负向判据会被反着报成红灯。
+- **等的时候谁来泵**用 `tests/framework/net_wait.h`：宿主驱动形态取 `HostDriven` + `pump_once` / `drive_until` / `pump_idle`，引擎驱动形态取 `EngineGuard`（析构把常驻线程、投递接缝与驱动方开关一并交回缺省态，见 §3.1「用例不得依赖进程隔离兜住全局副作用」）。同一枚事件源不得由引擎与宿主同时等待（[`06-app-platform.md`](specification/06-app-platform.md) §8.8.4 的互斥口径）。
+- **三类替身各司其职**：`tests/framework/fake_engine.h` 的 `FakeEngine` 只管**时间**（脚本化到期任务），`tests/framework/scripted_peer.h` 的 `ScriptedPeer` 只管**对端字节**，`net_wait.h` 只管**就绪泵**；`FakeEngineScope` 安装替身时钟时同步将 `run_pending` 挂进泵尾巴，否则 `Engine::post` 的立即任务（名字解析、竞速交错）在脚本化时钟下永不推进，红成「超时」而不是「忘了跑」。
+- **零出站**：网络用例只连回环，未监听的端口经「绑定即关闭」取得，并对端做回环校验；用例必须在无出站网络的 CI 上跑通。
+
 ## 4 元数据与可观测
 
 - **错误可机读**：`Error::to_json()` 输出结构化错误（`code` / `message` / `suggestion` / `docs` / `where`），供 AI 解析。
@@ -244,6 +255,8 @@
 3. **检查清单写成多物理行**（比前两条更危险的一类）：`NOLINTBEGIN(a, b,` 折到下一行 `c)` 时，clang-tidy 22 只解析指令所在物理行的括号，跨行括号被读成**空列表**，而空列表的语义是「豁免一切」——整段区间内**所有**检查一律不报。`NOLINTEND(` 与代码行尾的 `NOLINT(` 同形同因。前两条是豁免落空、告警漏出（门禁看得见），这一条是超额豁免、把真实存量一并吞掉（只有把名单改对后复跑才暴露）。名单必须**单行写完**；超过 120 列时按下列顺序收敛：① 删掉 `.clang-tidy` 里本已关闭的检查名；② 改用通配压缩（`*-pro-bounds-*` 一类——通配是**按名匹配**，实测不会退化成豁免一切，且不匹配的通配也不会误豁免）；③ 把理由整段移到指令之前，只留名单。区间名单一律写成「删掉该区间后 clang-tidy 实测报出的检查集」，不得顺手抄大桶。
 
 ⚠️ 同族还有一条硬失败：**`NOLINT` 令牌只能出现在真指令里**——注释文本里出现的 `NOLINTBEGIN(` / `NOLINTEND(` 字样同样被解析成指令，未配对的 `NOLINTBEGIN` 不是告警而是 `clang-tidy-nolint` **硬错误**，直接中断该翻译单元的整轮分析（表现为「该 TU 零告警」的假干净）；裸令牌（不带括号列表）则会对下一物理行形成一次全量豁免。指代他处的既有豁免时写「紧邻式豁免」/「区间式豁免」，勿抄令牌。
+
+**上游词汇绑定型豁免**（`readability-identifier-naming` 唯一该走豁免而非改名的子类）：当标识符名**逐字取自上游 C API**、且该名字本身就是「读到这里就去查上游文档」的检索锚点，改名即切断可追溯性时，才允许豁免。写法为**区间式**（`NOLINTBEGIN(check)` … `NOLINTEND(check)` 成对覆盖整段）。历史实例是 `inspector_server.cpp` 顶部的 Winsock→POSIX 兼容垫片（`INVALID_SOCKET` / `SOCKET_ERROR` / `SD_BOTH` / `WSAStartup` / `WSACleanup` / `WSAGetLastError` / `MAKEWORD` 七个名字与 Windows 腿逐字同名）——该垫片已随统一 socket 层（`aurora::net`，见 []()）删除，**本仓当前零实例**；此规则作为判据保留，供后续真出现词汇绑定场景时套用。三条纪律：① 点名判据是「词汇绑定」而非「是外部符号」——**仅表达本仓命名约定偏离的**（如 libdbus / X11 的简写常量、缺前缀的 `wl_listener` 对象）一律改名到位，不放宽到命名检查的 `CheckOptions`；② 理由整段写在 `NOLINTBEGIN` **之前**（受上面第 1 类折行失效的同一约束）；③ 名单与 `NOLINTEND` 同行闭合（受上面第 3 类约束）。机理与逐条清单见 []()。
 
 以上四类排版由 CTest 门禁 `check_nolint_layout`（`tools/check/check_nolint_layout.py`）常驻把关——脚本内把违规标为 **规则 1**（上方第 1、2 条：指令与代码之间插入任何行）、**规则 2**（⚠️ 段：散文抄令牌）、**规则 3**（上方第 3 条：清单跨行）。它只看注释行的排布与括号是否在本行闭合，补的正是 clang-tidy 看不见的那一段。实测第 1 类在本仓一次成型 **234 处、涉及 98 个文件**，其中 194 处恰好落在真实告警行上，已全部改写为「理由前置 + 指令紧贴代码」（只动注释行，代码行零改动）。第 3 类实测成型 **4 段大区间**（`painter.cpp`、`painter_simd.inl`、`win32_ua.cpp`、`system_tray_win32.cpp`，合计覆盖约 5 000 行），把名单改对后复跑浮出 **795 条从未被报告的告警**：其中 363 条直接改码消除（补括号 130 + 字面量后缀改大写 233，与全仓其余代码同口径），余下才按实测集合收进区间名单。理由注释的位置约束另见 §8.5 末尾与 `BUILD_OPTIONS.md` §4.7。
 
@@ -357,7 +370,7 @@
 
 每个控件实现静态 `describe_static()`（注册表 / 工具链消费的完整 `WidgetDescriptor`，含属性 / 事件 / 子节点策略 / 示例）与必写的 `type_name()`；`describe()` 现由 `Widget` 提供默认实现（无富描述控件可省略 override），仅当需要额外 properties / events / children_policy 时才覆写。
 
-`component_schema()` 消费 `describe()` 输出并增强 `prop_descriptors` / `events` / `children_policy` / `examples` 字段；`list_all_schemas()` 批量返回全部已注册组件 schema；`aurora_api.json` 自动包含新字段。
+`component_schema()` 消费 `describe()` 输出并增强 `props`（单一属性表，含类型/默认值/枚举等元数据） / `events` / `children_policy` / `examples` 字段；`list_all_schemas()` 批量返回全部已注册组件 schema；`aurora_api.json` 自动包含新字段。
 
 ### 6.13 评分方法
 
@@ -858,7 +871,7 @@ au::Button(au::ButtonProps{ .label = "OK" });
 | `locale-output` | 中文输出即功能本身 | zh/ja 日期格式化的「年/月/日」 |
 | `on-screen-demo` | 只绘进窗口、从不打印的 demo 文案 | `LocalizedString{"拖拽或滚轮…"}` 之类的上屏提示 |
 | `shader-source` | 交给 GPU 的着色器源码里的注释 | WGSL/GLSL raw string 内的中文注释 |
-| `regex-semantic` / `doc-schema` | Python 工具里充当匹配模式或文档字段名的中文片段 | 识别 `架构 §N` 引用、全角 `（）`、manual-test 中文字段名 |
+| `regex-semantic` / `doc-schema` | Python 工具里充当匹配模式或文档字段名的中文片段 | 识别 `架构 §N` 引用、全角 ``、manual-test 中文字段名 |
 
 标记形态：`// CJK-LITERAL: <类别> - <一句话原因>`（Python 用 `# CJK-LITERAL: …`），写在命中行本身或其上 3 行内；跨行拼接的句子要整句改写，不得留下孤立的 `）`、` 个` 之类残片。**诊断文案不属例外**——那正是控制台输出，一律翻译。
 
@@ -880,6 +893,8 @@ au::Button(au::ButtonProps{ .label = "OK" });
 | 用 `#ifdef` 包住整个虚函数/成员**定义** | 定义无条件写、分支放进函数体——否则 Release vtable 悬空引用 |
 | `#if` 包住 `AURORA_TEST_CASE` 声明 | 条件编译只能在**用例体内**，声明须无条件可见，否则 `registry_integrity` 单边失踪（§3.1） |
 | 测试文件里自己写 `main()` | `main` 由 `tests/framework/test_main.cpp` 唯一提供（§3.1） |
+| 用 `std::string_view` 或 `"\x03abc"` 形态的字面量承载含 `\0` 的二进制测试输入 | 两条坑叠加：`std::string_view` 从 `const char*` 构造会在首个 `\0` 截断（长度变成 0 而不是预期字节数），而 `\x` 转义**贪婪吞掉后续十六进制数字**（`"\x03abc"` 是一个越界转义，不是「`0x03` 后跟 `abc`」）。二进制输入一律显式带长度（`std::span<const char>(literal, N - 1)` 形态的helper），并把转义与其后的可打印字节用相邻字面量拼接隔开：`"\x03" "abc"` |
+| 在完成回调里写致命断言（`AURORA_TEST_REQUIRE*`） | 回调可能在**析构边界内**派发（如 `~StreamListener` → `close()` → 交付尾批），致命断言抛出的 `CaseAbort` 穿过 `noexcept` 即 `std::terminate`，整条测试进程连带消失、报告里看不见失败原因；回调内只用非致命断言记录失败（[`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.11） |
 | 新增 `std::cout` / `printf` / `puts` | 走 `AURORA_LOG_*`（stderr）/ `AURORA_LOG_RAW`（stdout 产品输出）/ 测试与工具里的 `AURORA_TEST_PRINTF*`（§4.1） |
 | 字符串字面量里写中文 | 字面量写英文 + ASCII 标点；确属功能必需中文时就地 `CJK-LITERAL: <类别> - <原因>`（§14） |
 | 只写 `@brief` 就交差 | 按 §13.5.2「命令必选矩阵」补齐 `@param[in/out]`、`@return`、`@tparam`、枚举项/常量说明 |

@@ -16,7 +16,6 @@
 // 两支纯函数，使「漏掉换算」这件事在单测层面可见。
 //
 // 门控与 `glfw_keymap.h` 同款：`AURORA_BACKEND_GLFW`。
-#include "aurora/core/platform.h"
 
 #ifdef AURORA_BACKEND_GLFW
 
@@ -32,7 +31,10 @@ namespace aurora::detail {
 /// @param scale 内容缩放因子（`glfwGetWindowContentScale`）；非正数按 1.0 处理。
 /// @return 物理像素尺寸（四舍五入）。
 [[nodiscard]] constexpr auto glfw_px_from_dp(int dp, float scale) -> int {
-    return dp <= 0 ? 0 : static_cast<int>(static_cast<float>(dp) * normalized_scale(scale) + 0.5F);
+    // constexpr 求值用不了 std::lround（C++20 的 <cmath> 无 constexpr 重载）；入参是窗口尺寸
+    // 量级（远小于 float 精度拐点 2^24），+0.5F 舍入无表示误差，行为由下方 static_assert 钉死。
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings)
+    return dp <= 0 ? 0 : static_cast<int>((static_cast<float>(dp) * normalized_scale(scale)) + 0.5F);
 }
 
 /// @brief GLFW 屏幕坐标（物理像素）→ 逻辑 dp。
@@ -40,7 +42,9 @@ namespace aurora::detail {
 /// @param scale 内容缩放因子（`glfwGetWindowContentScale`）；非正数按 1.0 处理。
 /// @return 逻辑尺寸（dp，四舍五入）。
 [[nodiscard]] constexpr auto glfw_dp_from_px(int px, float scale) -> int {
-    return px <= 0 ? 0 : static_cast<int>(static_cast<float>(px) / normalized_scale(scale) + 0.5F);
+    // 同上：constexpr 禁用 std::lround，量级安全，行为由 static_assert 钉死。
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings)
+    return px <= 0 ? 0 : static_cast<int>((static_cast<float>(px) / normalized_scale(scale)) + 0.5F);
 }
 
 // ---- 换算的编译期基准（失败即换算写错，不等运行期发现）----

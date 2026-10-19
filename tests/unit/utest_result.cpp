@@ -82,9 +82,7 @@ AURORA_TEST_CASE(make_error_renders_template_and_fills_table_metadata) {
     AURORA_TEST_CHECK(e.code_enum == ErrorCode::NavDepthExceeded);
     AURORA_TEST_CHECK(e.severity == ErrorSeverity::Error);
     AURORA_TEST_CHECK(e.category == ErrorCategory::Navigation);
-    AURORA_TEST_CHECK_EQ(e.auto_fixable, false);
     AURORA_TEST_CHECK_EQ(e.retryable, false);
-    AURORA_TEST_CHECK_STREQ(e.fix_category, "layout_conflict");
     AURORA_TEST_CHECK_STREQ(e.hint, std::string{aurora::hint_of(ErrorCode::NavDepthExceeded)});
 }
 
@@ -125,7 +123,6 @@ AURORA_TEST_CASE(make_error_from_table_fills_frozen_slug_metadata) {
     AURORA_TEST_CHECK_STREQ(e.code, "async-timeout");  // 冻结 slug 与 C++ 标识符解耦
     AURORA_TEST_CHECK_STREQ(e.message, "timeout message");
     AURORA_TEST_CHECK_EQ(e.retryable, true);
-    AURORA_TEST_CHECK_STREQ(e.fix_category, "timeout");
     AURORA_TEST_CHECK_STREQ(e.hint, std::string{aurora::hint_of(ErrorCode::RuntimeAsyncTimeout)});
     AURORA_TEST_CHECK(e.code_enum == ErrorCode::RuntimeAsyncTimeout);
 }
@@ -137,7 +134,6 @@ AURORA_TEST_CASE(error_default_construction_uses_neutral_metadata) {
     AURORA_TEST_CHECK(d.code_enum == ErrorCode::GeneralUnknown);
     AURORA_TEST_CHECK(d.severity == ErrorSeverity::Error);
     AURORA_TEST_CHECK(d.category == ErrorCategory::General);
-    AURORA_TEST_CHECK_EQ(d.auto_fixable, false);
     AURORA_TEST_CHECK_EQ(d.retryable, false);
 }
 
@@ -152,7 +148,6 @@ AURORA_TEST_CASE(error_to_json_shape_and_escaping) {
     AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("code_enum":"IOFileNotFound")"));
     AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("severity":"error")"));
     AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("category":"io")"));
-    AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("auto_fixable":false)"));
     AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("retryable":false)"));
 }
 

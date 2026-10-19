@@ -6,9 +6,12 @@
 #include <string>
 #include <vector>
 
+#include "aurora/environment/build_context.h"
 #include "aurora/event/event.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/widget/props_io.h"
 #include "aurora/widget/switch.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -20,6 +23,13 @@ namespace {
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// 布局后绘制一帧（headless 直跑；inherit_theme 回退 Theme::light()）。
+auto paint_once(Switch &s) -> void {
+    LayoutEngine::layout(s, bounded(200.0F, 100.0F));
+    Painter painter;
+    s.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = s.size()}, BuildContext{});
 }
 
 }  // namespace
@@ -171,6 +181,82 @@ AURORA_TEST_CASE(switch_serialize_deserialize_roundtrip) {
     LayoutEngine::layout(dst, bounded(200.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(dst.size().width, 56.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(dst.size().height, 28.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(switch_paint_covers_state_branches) {
+    // 开启态（显式主题色）+ 滑块右端。
+    Switch on;
+    on.set_value(true);
+    on.set_active_color(Color{1, 2, 3, 4});
+    on.set_thumb_color(Color{250, 250, 250, 255});
+    paint_once(on);
+
+    // 关闭态（默认灰轨道 + 无描边）。
+    Switch off;
+    paint_once(off);
+
+    // 关闭态描边（enabled 时描边原色）。
+    Switch bordered;
+    bordered.set_border(Color{5, 6, 7, 8}, 1.5F);
+    paint_once(bordered);
+
+    // 关闭态描边 + 禁用（描边降透明分支）。
+    Switch bordered_disabled;
+    bordered_disabled.set_border(Color{5, 6, 7, 8}, 1.5F);
+    bordered_disabled.set_enabled(false);
+    paint_once(bordered_disabled);
+
+    // 禁用态统一灰化（active/inactive/thumb 全走灰化分支）。
+    Switch disabled;
+    disabled.set_enabled(false);
+    paint_once(disabled);
+
+    // 悬停态轨道压暗（shaded 0.90 分支）。
+    Switch hovered;
+    hovered.on_hover_change(true);
+    paint_once(hovered);
+
+    // 按下态轨道压暗（shaded 0.80 分支；Press 置 pressed_）。
+    Switch pressed;
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    pressed.on_pointer_event(press);
+    paint_once(pressed);
+}
+
+AURORA_TEST_CASE(switch_accessibility_toggle_and_state) {
+    Switch s;
+    AURORA_TEST_CHECK_EQ(s.accessibility_value(), std::string{"false"});
+    const AccessibilityState off_state = s.accessibility_state();
+    AURORA_TEST_CHECK_TRUE(off_state.checkable);
+    AURORA_TEST_CHECK_FALSE(off_state.checked);
+
+    // 读屏 Toggle 动作翻转开关。
+    const AccessibilityActionRequest req{.action = AccessibilityAction::Toggle};
+    AURORA_TEST_CHECK_TRUE(s.perform_accessibility_action(req));
+    AURORA_TEST_CHECK_TRUE(s.value());
+    AURORA_TEST_CHECK_EQ(s.accessibility_value(), std::string{"true"});
+
+    // 非 Toggle 动作回落基类（不翻转）。
+    const AccessibilityActionRequest other{.action = AccessibilityAction::Focus};
+    (void)s.perform_accessibility_action(other);
+    AURORA_TEST_CHECK_TRUE(s.value());
+}
+
+AURORA_TEST_CASE(switch_deserialize_partial_and_thumb_inset) {
+    // thumb_inset 非法值（<0）回落 2.0。
+    Switch inset;
+    inset.set_thumb_inset(-4.0F);
+    paint_once(inset);
+
+    // 反序列化部分键：只给 colors，不给尺寸/描边。
+    Json props = Json::object();
+    props.set("active_color", color_to_json(Color{9, 8, 7, 6}));
+    props.set("inactive_color", color_to_json(Color{11, 12, 13, 14}));
+    props.set("thumb_color", color_to_json(Color{15, 16, 17, 18}));
+    Switch partial;
+    partial.deserialize_props(props);
+    paint_once(partial);
 }
 
 }  // namespace aurora::test_cases::utest_switch

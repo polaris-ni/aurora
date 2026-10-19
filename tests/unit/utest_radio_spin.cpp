@@ -7,9 +7,12 @@
 #include <string>
 #include <vector>
 
+#include "aurora/core/color.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/painter.h"
 #include "aurora/widget/radio_spin.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -238,6 +241,66 @@ AURORA_TEST_CASE(spinbox_describe_and_roundtrip) {
     AURORA_TEST_CHECK_NEAR(dst.max_value(), 100.0, 1e-4);
     AURORA_TEST_CHECK_NEAR(dst.step(), 5.0, 1e-4);
     AURORA_TEST_CHECK_EQ(dst.display_text(), "$50.0 px");
+}
+
+// ---- 绘制（on_paint）覆盖 ----
+
+AURORA_TEST_CASE(radiogroup_paint_vertical_horizontal_disabled_themed) {
+    Painter painter;
+    const Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 240.0F, .height = 120.0F}};
+
+    // 纵向默态：覆盖 on_paint + paint_option（选中项内实心圆点 / 未选中仅圆环）。
+    RadioGroup rg({"A", "B", "C"});
+    LayoutEngine::layout(rg, bounded(240.0F, 120.0F));
+    rg.paint(painter, Rect{.origin = Point{}, .size = rg.size()}, BuildContext{});
+
+    // 水平排列：覆盖 on_paint 的横向累加分支。
+    RadioGroup hor({"A", "B"}, 0, true);
+    LayoutEngine::layout(hor, bounded(240.0F, 120.0F));
+    hor.paint(painter, Rect{.origin = Point{}, .size = hor.size()}, BuildContext{});
+
+    // 显式 active_color：覆盖 active_color_.value_or(...) 的「已设置」分支。
+    RadioGroup themed({"A", "B"});
+    themed.set_active_color(Color{10, 20, 30, 40});
+    LayoutEngine::layout(themed, bounded(240.0F, 120.0F));
+    themed.paint(painter, Rect{.origin = Point{}, .size = themed.size()}, BuildContext{});
+
+    // 禁用态：覆盖 on_paint 灰化分支（accent/idle/text 统一回退灰）。
+    RadioGroup off({"A", "B"});
+    off.set_enabled(false);
+    LayoutEngine::layout(off, bounded(240.0F, 120.0F));
+    off.paint(painter, bounds, BuildContext{});
+
+    // 选中项在末尾：覆盖纵向命中第 3 行 + 末项 paint_option 选中分支。
+    RadioGroup sel_last({"A", "B", "C"});
+    sel_last.select(2);
+    LayoutEngine::layout(sel_last, bounded(240.0F, 120.0F));
+    sel_last.paint(painter, Rect{.origin = Point{}, .size = sel_last.size()}, BuildContext{});
+}
+
+AURORA_TEST_CASE(spinbox_paint_rounded_square_disabled) {
+    Painter painter;
+    const Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 120.0F, .height = 30.0F}};
+
+    // 圆角（corner_radius 默认 4 > 0）：覆盖 paint_box 圆角分支 + paint_value + paint_arrows。
+    SpinBox sb(50.0, 0.0, 100.0, 5.0);
+    sb.set_prefix("$");
+    sb.set_suffix(" px");
+    sb.set_decimals(1);
+    LayoutEngine::layout(sb, bounded(200.0F, 100.0F));
+    sb.paint(painter, Rect{.origin = Point{}, .size = sb.size()}, BuildContext{});
+
+    // 直角（corner_radius = 0）：覆盖 paint_box 直角分支。
+    SpinBox sq(50.0, 0.0, 100.0, 5.0);
+    sq.set_corner_radius(0.0F);
+    LayoutEngine::layout(sq, bounded(200.0F, 100.0F));
+    sq.paint(painter, Rect{.origin = Point{}, .size = sq.size()}, BuildContext{});
+
+    // 禁用态：覆盖 on_paint 灰化分支（背景/边框/文本/箭头统一回退灰）。
+    SpinBox off(50.0, 0.0, 100.0, 5.0);
+    off.set_enabled(false);
+    LayoutEngine::layout(off, bounded(200.0F, 100.0F));
+    off.paint(painter, bounds, BuildContext{});
 }
 
 }  // namespace aurora::test_cases::utest_radio_spin

@@ -16,7 +16,6 @@
 
 #include <aurora/core/enums.h>
 
-#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <vector>

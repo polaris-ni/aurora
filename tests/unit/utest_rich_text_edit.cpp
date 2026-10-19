@@ -7,15 +7,17 @@
 /// 选区高亮镜像、聚焦光标落右缘像素
 
 #include <algorithm>
-#include <cstddef>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/keycode.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/rich_text_edit.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -29,6 +31,16 @@ namespace {
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 }  // namespace
@@ -301,7 +313,7 @@ AURORA_TEST_CASE(rtl_block_right_aligns_within_line) {
         LayoutEngine::layout(t, bounded(300.0F, 300.0F));
         Painter p;
         p.begin(308, static_cast<int>(t.size().height) + 4);
-        const BuildContext ctx;
+        constexpr BuildContext ctx;
         t.paint(p, Rect{.origin = Point{.x = 2.0F, .y = 2.0F}, .size = t.size()}, ctx);
         const int y0 = 2 + static_cast<int>(t.size().height / 2.0F);
         for (int x = 0; x < 308; ++x) {
@@ -339,7 +351,7 @@ AURORA_TEST_CASE(rtl_selection_highlight_mirrors_to_right) {
 
         Painter p;
         p.begin(308, static_cast<int>(t.size().height) + 4);
-        const BuildContext ctx;
+        constexpr BuildContext ctx;
         t.paint(p, Rect{.origin = Point{.x = 2.0F, .y = 2.0F}, .size = t.size()}, ctx);
         const int y0 = 2 + static_cast<int>(t.size().height / 2.0F);
         float lo = 1e9F;
@@ -374,7 +386,7 @@ AURORA_TEST_CASE(rtl_focused_caret_paints_at_right_edge) {
 
         Painter p;
         p.begin(308, static_cast<int>(t.size().height) + 4);
-        const BuildContext ctx;
+        constexpr BuildContext ctx;
         t.paint(p, Rect{.origin = Point{.x = 2.0F, .y = 2.0F}, .size = t.size()}, ctx);
         const int y0 = 2 + static_cast<int>(t.size().height / 2.0F);
         for (int x = 0; x < 308; ++x) {
@@ -392,6 +404,400 @@ AURORA_TEST_CASE(rtl_focused_caret_paints_at_right_edge) {
     AURORA_TEST_CHECK_TRUE(ltr_cx >= 0.0F);
     AURORA_TEST_CHECK_TRUE(rtl_cx >= 0.0F);
     AURORA_TEST_CHECK_TRUE(rtl_cx > ltr_cx + 50.0F);  // RTL 光标在右缘
+}
+
+AURORA_TEST_CASE(accessibility_hooks_and_text_pattern) {
+    // 无障碍语义组：state(multiline) / text / selection / set_selection / replace_text /
+    // perform_action(Value) / cursor_shape / wants_*_keys / on_text_input。
+    RichTextEdit edit;
+    edit.load_spans({TextSpan{.text = LocalizedString{"hello"}, .font = Font{.size_pt = 14.0F}}});
+
+    // 多行语义：multilinie 恒为 true（UIA 侧映射 Document）。
+    const auto state = edit.accessibility_state();
+    AURORA_TEST_CHECK_TRUE(state.multiline);
+
+    // 全文视图（缓存中转）与纯文本一致。
+    AURORA_TEST_CHECK_EQ(std::string{edit.accessibility_text()}, std::string{"hello"});
+
+    // 选区视图：初始为零宽区间（光标态），恒有值。
+    const auto sel = require_value(edit.accessibility_selection());
+    AURORA_TEST_CHECK_EQ(sel.start, 0U);
+    AURORA_TEST_CHECK_EQ(sel.end, 0U);
+
+    // set_selection：设置后光标置于区间终点。
+    edit.accessibility_set_selection(1, 4);
+    AURORA_TEST_CHECK_TRUE(edit.has_selection());
+    AURORA_TEST_CHECK_EQ(edit.selected_text(), std::string{"ell"});
+    const auto sel2 = require_value(edit.accessibility_selection());
+    AURORA_TEST_CHECK_EQ(sel2.start, 1U);
+    AURORA_TEST_CHECK_EQ(sel2.end, 4U);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 4U);
+    // 越界夹紧到文档长度。
+    edit.accessibility_set_selection(0, 999);
+    AURORA_TEST_CHECK_EQ(require_value(edit.accessibility_selection()).end, 5U);
+
+    // replace_text：区间替换后按当前输入样式重建，光标落插入串尾。
+    edit.set_current_color(Color::red());
+    edit.accessibility_replace_text(1, 3, "EY");
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"hEYlo"});
+    const auto spans = edit.to_spans();
+    AURORA_TEST_REQUIRE_EQ(spans.size(), 1U);  // 重建走单 span
+    AURORA_TEST_CHECK_TRUE(spans[0].color == Color::red());
+    AURORA_TEST_CHECK_EQ(edit.caret(), 3U);  // a + utf8.size() = 1 + 2
+    AURORA_TEST_CHECK_FALSE(edit.has_selection());
+
+    // perform_accessibility_action：Value 整值替换；其余动作回落基类。
+    AccessibilityActionRequest value_req;
+    value_req.action = AccessibilityAction::Value;
+    value_req.text = "replaced";
+    AURORA_TEST_CHECK_TRUE(edit.perform_accessibility_action(value_req));
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"replaced"});
+    AccessibilityActionRequest toggle_req;
+    toggle_req.action = AccessibilityAction::Toggle;
+    AURORA_TEST_CHECK_FALSE(edit.perform_accessibility_action(toggle_req));  // 非编辑动作不认领
+
+    // 组合态 accessibility_value：preedit 插在光标处播报。
+    edit.on_focus_change(true);
+    TextCompositionEvent typing;
+    typing.preedit = "XY";
+    edit.on_text_composition(typing);
+    AURORA_TEST_CHECK_EQ(edit.accessibility_value(), std::string{"replacedXY"});
+
+    // 游标语义常量。
+    AURORA_TEST_CHECK_TRUE(require_value(edit.cursor_shape()) == CursorShape::IBeam);
+    AURORA_TEST_CHECK_TRUE(edit.wants_activation_keys());
+    AURORA_TEST_CHECK_TRUE(edit.wants_navigation_keys());
+
+    // on_text_input：非空文本走 do_insert 并消费；空文本不消费。
+    RichTextEdit ins;
+    ins.on_focus_change(true);
+    TextInputEvent seed;
+    seed.text = "abc";
+    ins.on_text_input(seed);
+    AURORA_TEST_CHECK_TRUE(seed.is_handled);
+    AURORA_TEST_CHECK_EQ(ins.plain_text(), std::string{"abc"});
+    TextInputEvent blank;
+    blank.text = "";
+    ins.on_text_input(blank);
+    AURORA_TEST_CHECK_FALSE(blank.is_handled);
+}
+
+AURORA_TEST_CASE(preedit_inverted_selection_degenerates_to_point) {
+    // preedit 选区端点倒置（sel_end < sel_start）→ 收敛为单点。
+    RichTextEdit edit;
+    edit.on_focus_change(true);
+    TextCompositionEvent typing;
+    typing.preedit = "abcd";
+    typing.cursor_index = 2;
+    typing.sel_start = 3;
+    typing.sel_end = 1;
+    edit.on_text_composition(typing);
+    AURORA_TEST_CHECK_TRUE(typing.is_handled);
+    AURORA_TEST_CHECK_EQ(edit.preedit(), std::string{"abcd"});
+    AURORA_TEST_CHECK_EQ(edit.composition_cursor(), 2U);
+    // sel_start/sel_end 无公开 getter，经绘制路径间接覆盖（组合态 paint 走 preedit 选区分支）。
+    Painter p;
+    p.begin(200, 80);
+    edit.layout(bounded(200.0F, 80.0F), BuildContext{});
+    edit.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 80.0F}},
+               BuildContext{});
+    edit.on_focus_change(false);  // 收尾：取消组合
+    AURORA_TEST_CHECK_FALSE(edit.is_composing());
+}
+
+AURORA_TEST_CASE(keyboard_shortcuts_style_undo_and_select_all) {
+    RichTextEdit edit;
+    UndoStack stack;
+    edit.set_undo_stack(&stack);
+    edit.on_focus_change(true);
+
+    auto press = [](KeyCode code, ModifierKey mods) -> KeyEvent {
+        KeyEvent k;
+        k.key = static_cast<int>(code);
+        k.action = KeyAction::Down;
+        k.modifiers = mods;
+        return k;
+    };
+
+    // 非 Down 动作直接放行。
+    KeyEvent up = press(KeyCode::A, ModifierKey::None);
+    up.action = KeyAction::Up;
+    edit.on_key_event(up);
+    AURORA_TEST_CHECK_FALSE(up.is_handled);
+
+    TextInputEvent seed;
+    seed.text = "abc";
+    edit.on_text_input(seed);
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"abc"});
+
+    // Ctrl+B/I/U 样式切换（二次切换回退）。
+    KeyEvent b = press(KeyCode::B, ModifierKey::Control);
+    edit.on_key_event(b);
+    AURORA_TEST_CHECK_TRUE(b.is_handled);
+    AURORA_TEST_CHECK_TRUE(edit.current_font().weight >= 700);
+    KeyEvent b2 = press(KeyCode::B, ModifierKey::Control);
+    edit.on_key_event(b2);
+    AURORA_TEST_CHECK_TRUE(edit.current_font().weight < 700);
+    KeyEvent i = press(KeyCode::I, ModifierKey::Control);
+    edit.on_key_event(i);
+    AURORA_TEST_CHECK_TRUE(edit.current_font().family.size() >= 2 &&
+                           edit.current_font().family.substr(edit.current_font().family.size() - 2) == "/I");
+    KeyEvent i2 = press(KeyCode::I, ModifierKey::Control);
+    edit.on_key_event(i2);
+    AURORA_TEST_CHECK_FALSE(edit.current_font().family.size() >= 2 &&
+                            edit.current_font().family.substr(edit.current_font().family.size() - 2) == "/I");
+    KeyEvent u = press(KeyCode::U, ModifierKey::Control);
+    edit.on_key_event(u);
+    AURORA_TEST_CHECK_TRUE(edit.current_underline());
+    KeyEvent u2 = press(KeyCode::U, ModifierKey::Control);
+    edit.on_key_event(u2);
+    AURORA_TEST_CHECK_FALSE(edit.current_underline());
+
+    // Ctrl+A 全选；Ctrl+Z 撤销删除插入；Ctrl+Shift+Z 重做恢复。
+    KeyEvent a = press(KeyCode::A, ModifierKey::Control);
+    edit.on_key_event(a);
+    AURORA_TEST_CHECK_TRUE(edit.has_selection());
+    AURORA_TEST_CHECK_EQ(edit.selected_text(), std::string{"abc"});
+    AURORA_TEST_CHECK_EQ(edit.caret(), 3U);
+
+    KeyEvent z = press(KeyCode::Z, ModifierKey::Control);
+    edit.on_key_event(z);
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{""});
+    AURORA_TEST_CHECK_EQ(edit.caret(), 0U);
+    KeyEvent rz = press(KeyCode::Z, ModifierKey::Control | ModifierKey::Shift);
+    edit.on_key_event(rz);
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"abc"});
+    KeyEvent y = press(KeyCode::Y, ModifierKey::Control);
+    edit.on_key_event(y);
+    // 无可重做时 Y 仍消费但不改文档。
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"abc"});
+
+    // 未识别的 Ctrl 组合不认领。
+    KeyEvent q = press(KeyCode::Q, ModifierKey::Control);
+    edit.on_key_event(q);
+    AURORA_TEST_CHECK_FALSE(q.is_handled);
+}
+
+AURORA_TEST_CASE(move_keys_text_keys_and_undo_roundtrip) {
+    RichTextEdit edit;
+    UndoStack stack;
+    edit.set_undo_stack(&stack);
+    edit.on_focus_change(true);
+
+    auto press = [](KeyCode code, ModifierKey mods) -> KeyEvent {
+        KeyEvent k;
+        k.key = static_cast<int>(code);
+        k.action = KeyAction::Down;
+        k.modifiers = mods;
+        return k;
+    };
+
+    TextInputEvent seed;
+    seed.text = "hello";
+    edit.on_text_input(seed);
+
+    // End/Home 与 Shift 扩选。
+    KeyEvent end_k = press(KeyCode::End, ModifierKey::None);
+    edit.on_key_event(end_k);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 5U);
+    KeyEvent home_k = press(KeyCode::Home, ModifierKey::None);
+    edit.on_key_event(home_k);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 0U);
+    KeyEvent sh_end = press(KeyCode::End, ModifierKey::Shift);
+    edit.on_key_event(sh_end);
+    AURORA_TEST_CHECK_TRUE(edit.has_selection());
+    AURORA_TEST_CHECK_EQ(edit.selected_text(), std::string{"hello"});
+    // 带选区时无 Shift 方向键塌缩：← 塌到选区起点（min）。
+    KeyEvent left = press(KeyCode::ArrowLeft, ModifierKey::None);
+    edit.on_key_event(left);
+    AURORA_TEST_CHECK_FALSE(edit.has_selection());
+    AURORA_TEST_CHECK_EQ(edit.caret(), 0U);
+    KeyEvent left2 = press(KeyCode::ArrowLeft, ModifierKey::None);
+    edit.on_key_event(left2);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 0U);  // 已在文首，钳制不动
+    KeyEvent right_in = press(KeyCode::ArrowRight, ModifierKey::None);
+    edit.on_key_event(right_in);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 1U);
+    // Shift+→ 扩选（无既有选区时建立锚点）。
+    KeyEvent sh_right = press(KeyCode::ArrowRight, ModifierKey::Shift);
+    edit.on_key_event(sh_right);
+    AURORA_TEST_CHECK_EQ(edit.selected_text(), std::string{"e"});
+    // ← 塌缩回选区起点。
+    KeyEvent left3 = press(KeyCode::ArrowLeft, ModifierKey::None);
+    edit.on_key_event(left3);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 1U);
+    KeyEvent end_k2 = press(KeyCode::End, ModifierKey::None);
+    edit.on_key_event(end_k2);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 5U);
+
+    // Delete：caret < n 时删光标后字符；caret == n 时消费但无变化。
+    KeyEvent del_end = press(KeyCode::Delete, ModifierKey::None);
+    edit.on_key_event(del_end);
+    AURORA_TEST_CHECK_TRUE(del_end.is_handled);
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"hello"});
+    KeyEvent left4 = press(KeyCode::ArrowLeft, ModifierKey::None);
+    edit.on_key_event(left4);
+    KeyEvent del = press(KeyCode::Delete, ModifierKey::None);
+    edit.on_key_event(del);
+    AURORA_TEST_CHECK_TRUE(del.is_handled);
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"hell"});
+    KeyEvent del2 = press(KeyCode::Delete, ModifierKey::None);
+    edit.on_key_event(del2);
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"hell"});
+
+    // Backspace：删光标前字符并记撤销。
+    KeyEvent bs = press(KeyCode::Backspace, ModifierKey::None);
+    edit.on_key_event(bs);
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"hel"});
+    KeyEvent z = press(KeyCode::Z, ModifierKey::Control);
+    edit.on_key_event(z);
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"hell"});
+
+    // Enter 插入换行。
+    KeyEvent enter = press(KeyCode::Enter, ModifierKey::None);
+    edit.on_key_event(enter);
+    AURORA_TEST_CHECK_EQ(edit.plain_text(), std::string{"hell\n"});
+
+    // 非编辑键不消费。
+    KeyEvent tab = press(KeyCode::Tab, ModifierKey::None);
+    edit.on_key_event(tab);
+    AURORA_TEST_CHECK_FALSE(tab.is_handled);
+}
+
+AURORA_TEST_CASE(pointer_click_positions_caret) {
+    RichTextEdit edit;
+    edit.load_spans({TextSpan{.text = LocalizedString{"ab\ncd"}, .font = Font{.size_pt = 14.0F}}});
+    edit.layout(bounded(200.0F, 100.0F), BuildContext{});
+
+    auto click = [&edit](float x, float y) {
+        MouseEvent e;
+        e.action = MouseAction::Press;
+        e.button = MouseButton::Left;
+        e.local_position = Point{.x = x, .y = y};
+        edit.on_pointer_event(e);
+        return e;
+    };
+
+    // 第一行点击：消费并把光标收敛到命中字符。
+    MouseEvent e0 = click(10.0F, 5.0F);
+    AURORA_TEST_CHECK_TRUE(e0.is_handled);
+    AURORA_TEST_CHECK_FALSE(edit.has_selection());
+    AURORA_TEST_CHECK_TRUE(edit.caret() <= 2U);  // 第一行内
+    // 第二行点击（跨行下标累加路径；y 取足够大以落入第二行或行尾兜底）。
+    MouseEvent e1 = click(30.0F, 45.0F);
+    AURORA_TEST_CHECK_TRUE(e1.is_handled);
+    AURORA_TEST_CHECK_TRUE(edit.caret() >= 3U);
+    // 点击超出行数范围 → 光标落文档尾。
+    MouseEvent e2 = click(30.0F, 90.0F);
+    AURORA_TEST_CHECK_TRUE(e2.is_handled);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 5U);
+
+    // 未布局（无行）时按下：消费并直接返回。
+    RichTextEdit fresh;
+    MouseEvent e3;
+    e3.action = MouseAction::Press;
+    e3.button = MouseButton::Left;
+    e3.local_position = Point{.x = 5.0F, .y = 5.0F};
+    fresh.on_pointer_event(e3);
+    AURORA_TEST_CHECK_TRUE(e3.is_handled);
+
+    // 非「左键按下」不处理。
+    MouseEvent e4;
+    e4.action = MouseAction::Move;
+    e4.button = MouseButton::Left;
+    e4.local_position = Point{.x = 5.0F, .y = 5.0F};
+    edit.on_pointer_event(e4);
+    AURORA_TEST_CHECK_FALSE(e4.is_handled);
+}
+
+AURORA_TEST_CASE(paint_selection_underline_preedit_and_cursor) {
+    auto paint = [](Widget &w, float wpx, float hpx) {
+        Painter p;
+        p.begin(static_cast<int>(wpx), static_cast<int>(hpx));
+        w.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = wpx, .height = hpx}},
+                BuildContext{});
+    };
+
+    // 空文档直接绘制：懒重排路径。
+    RichTextEdit empty;
+    empty.on_focus_change(true);
+    paint(empty, 120.0F, 40.0F);
+
+    // 带下划线的混合样式文档（逐字下划线绘制路径）。
+    RichTextEdit edit;
+    UndoStack stack;
+    edit.set_undo_stack(&stack);
+    edit.on_focus_change(true);
+    edit.set_current_underline(true);
+    TextInputEvent part1;
+    part1.text = "ab";
+    edit.on_text_input(part1);
+    edit.set_current_underline(false);
+    TextInputEvent part2;
+    part2.text = "cd";
+    edit.on_text_input(part2);
+
+    // 全选后绘制：选区高亮路径。
+    KeyEvent a;
+    a.key = static_cast<int>(KeyCode::A);
+    a.modifiers = ModifierKey::Control;
+    edit.on_key_event(a);
+    paint(edit, 120.0F, 40.0F);
+
+    // 非组合聚焦态绘制：文档光标路径。
+    KeyEvent right;
+    right.key = static_cast<int>(KeyCode::ArrowRight);
+    edit.on_key_event(right);
+    paint(edit, 120.0F, 40.0F);
+
+    // 组合态绘制：preedit 内选区 + 下划线 + 候选插入点光标（聚焦）。
+    TextCompositionEvent typing;
+    typing.preedit = "ni";
+    typing.cursor_index = 1;
+    typing.sel_start = 0;
+    typing.sel_end = 0;
+    edit.on_text_composition(typing);
+    paint(edit, 120.0F, 40.0F);
+
+    // composition_caret_bounds：组合 + preedit_cursor_ > 0 → 候选窗 = 文档光标 + preedit 前缀宽。
+    (void)edit.caret();  // 触发惰性断言无副作用；仅保持调用形态
+    const Rect bounds = edit.composition_caret_bounds();
+    AURORA_TEST_CHECK_TRUE(bounds.size.width >= 0.0F);
+    AURORA_TEST_CHECK_TRUE(bounds.size.height >= 0.0F);
+
+    // 从未绘制过的新控件（focus_bounds 为零盒）：caret_box_at 返回空 → 回退基类控件盒。
+    RichTextEdit bare;
+    TextCompositionEvent pend;
+    pend.preedit = "x";
+    bare.on_text_composition(pend);
+    const Rect fb = bare.composition_caret_bounds();
+    AURORA_TEST_CHECK_EQ(fb.size.width, 0.0F);
+
+    // 布局：字号 0 测高异常回退路径（能产出有效行高即可）。
+    RichTextEdit tiny;
+    tiny.set_current_font(Font{.size_pt = 0.0F});
+    const Size sz = tiny.layout(bounded(100.0F, 100.0F), BuildContext{});
+    AURORA_TEST_CHECK_TRUE(sz.height >= 1.0F);
+}
+
+AURORA_TEST_CASE(rich_text_edit_color_follows_theme_when_unset) {
+    // 未显式设置当前输入色时，resolve_text_color 经 ctx 取主题 on_surface：
+    // 裸 ctx 回落 light（黑），注入 dark 主题翻面为白。
+    constexpr BuildContext bare;
+    const RichTextEdit edit;
+    AURORA_TEST_CHECK_FALSE(edit.current_color().has_value());
+    AURORA_TEST_CHECK(edit.resolve_text_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(edit.resolve_text_color(dark) == Color{0xFF, 0xFF, 0xFF});  // dark on_surface = 白
+}
+
+AURORA_TEST_CASE(rich_text_edit_explicit_color_overrides_theme) {
+    // 显式设置当前输入色后，resolve_text_color 忽略主题（即便注入 dark）。
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    RichTextEdit edit;
+    edit.set_current_color(Color{0xE0, 0x1B, 0x24});
+    AURORA_TEST_CHECK(edit.resolve_text_color(dark) == Color{0xE0, 0x1B, 0x24});
 }
 
 }  // namespace aurora::test_cases::utest_rich_text_edit

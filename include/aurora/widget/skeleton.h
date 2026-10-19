@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
+#include <optional>
 
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
+#include "aurora/widget/props_io.h"  // color_to_json / json_to_color
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -72,6 +74,21 @@ class Skeleton : public LeafWidget {
     /// @return 由 tick 推进的归一化相位。
     [[nodiscard]] auto phase() const -> double { return phase_; }
 
+    /// @brief 解析生效底色：未显式设色时经 ctx 取主题 `surface_variant`（ThemeScope 换肤即生效），显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效底色。
+    [[nodiscard]] auto resolve_base(const BuildContext &ctx) const -> Color {
+        return base_.value_or(inherit_theme(ctx).roles.surface_variant);
+    }
+
+    /// @brief 解析生效高亮带色：未显式设色时经 ctx 取主题 `surface_container_lowest`（ThemeScope 换肤即生效），
+    ///        显式设色优先。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效高亮带色。
+    [[nodiscard]] auto resolve_highlight(const BuildContext &ctx) const -> Color {
+        return highlight_.value_or(inherit_theme(ctx).roles.surface_container_lowest);
+    }
+
     /// @brief 类型名，供序列化与运行时自描述使用。
     /// @return C 字符串 "Skeleton"。
     [[nodiscard]] auto type_name() const -> const char * override { return "Skeleton"; }
@@ -95,14 +112,14 @@ class Skeleton : public LeafWidget {
                      .note = "Placeholder height"},
                     {.name = "color",
                      .type = "Color",
-                     .default_value = "{220,220,220,255}",
+                     .default_value = "\"theme.surface_variant\"",
                      .required = false,
-                     .note = "Base color"},
+                     .note = "Base color (follows theme surface_variant when unset)"},
                     {.name = "highlight",
                      .type = "Color",
-                     .default_value = "{255,255,255,255}",
+                     .default_value = "\"theme.surface_container_lowest\"",
                      .required = false,
-                     .note = "Highlight band color"},
+                     .note = "Highlight band color (follows theme surface_container_lowest when unset)"},
                     {.name = "duration",
                      .type = "double",
                      .default_value = "1.5",
@@ -128,8 +145,13 @@ class Skeleton : public LeafWidget {
         Widget::serialize_props(props);
         props.set("width", size_.width);
         props.set("height", size_.height);
-        props.set("color", color_to_json(base_));
-        props.set("highlight", color_to_json(highlight_));
+        // 底色/高亮带色仅在显式设置时输出：保留「跟随主题角色」语义（迁移批）。
+        if (base_.has_value()) {
+            props.set("color", color_to_json(*base_));
+        }
+        if (highlight_.has_value()) {
+            props.set("highlight", color_to_json(*highlight_));
+        }
         props.set("duration", duration_);
     }
 
@@ -161,15 +183,15 @@ class Skeleton : public LeafWidget {
         return c.constrain(Size{.width = w, .height = h});
     }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
-        p.fill_rect(bounds, base_);
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        p.fill_rect(bounds, resolve_base(ctx));
         const float band_w = bounds.size.width * 0.3F;
         const float travel = bounds.size.width + band_w;
         float x = bounds.origin.x + (static_cast<float>(phase_) * travel) - band_w;
         x = std::max(x, bounds.origin.x);
         const Rect band{.origin = Point{.x = x, .y = bounds.origin.y},
                         .size = Size{.width = band_w, .height = bounds.size.height}};
-        p.fill_rect(band, highlight_);
+        p.fill_rect(band, resolve_highlight(ctx));
     }
 
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
@@ -190,8 +212,8 @@ class Skeleton : public LeafWidget {
 
   private:
     Size size_{.width = 0.0F, .height = 16.0F};
-    Color base_{220, 220, 220, 255};
-    Color highlight_{255, 255, 255, 255};
+    std::optional<Color> base_ = std::nullopt;  ///< 底色；空 = 跟随主题 surface_variant（ThemeScope 换肤即生效）
+    std::optional<Color> highlight_ = std::nullopt;  ///< 高亮带色；空 = 跟随主题 surface_container_lowest
     double duration_ = 1.5;
     double phase_ = 0.0;
     std::chrono::steady_clock::time_point start_;

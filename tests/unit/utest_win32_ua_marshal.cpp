@@ -15,7 +15,6 @@
 #include <optional>
 #include <thread>
 #include <utility>
-#include <vector>
 
 #include "aurora/core/platform.h"
 #include "aurora/state/async.h"

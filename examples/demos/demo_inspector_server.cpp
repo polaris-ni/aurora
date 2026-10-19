@@ -25,7 +25,7 @@ constexpr std::uint16_t AURORA_INSPECTOR_PORT = 6280;
 /// @brief 被检视的表单：根为 Column，五个子节点的索引 0..4 恒定不变。
 ///
 /// 布局（索引 → 控件）：
-///   0 Text「User info form」 · 1 TextInput(空) · 2 TextInput(alice@example.com)
+///   0 Text「User info form」 · 1 TextInput(空) · 2 TextInput("alice@example.com")
 ///   3 Button「Submit」        · 4 Text（提交计数）
 /// 索引 3 → 4 构成可远程观测的因果：`POST /api/input/click {"path":"3"}` 应使索引 4 的文本递增。
 auto build_form(const std::shared_ptr<au::State<int>> &count,
@@ -56,8 +56,8 @@ auto main() -> int {
     au::enable_dpi_awareness();  // 必须在建窗前，否则 DPI 感知失败（scale=1.0，高分屏发虚）
     au::init_console();
 
-    auto count = std::make_shared<au::State<int>>(0);
-    auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"submit count = 0"});
+    const auto count = std::make_shared<au::State<int>>(0);
+    const auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"submit count = 0"});
 
     au::WindowOptions opts;
     opts.size = au::Size{.width = 620.0F, .height = 420.0F};
@@ -70,7 +70,7 @@ auto main() -> int {
     au::Application app{au::Scene{build_form(count, label)}, std::move(win_res.value()), opts};
 
     // 注入 live 根树与运行时 Surface：前者供树查询 / 属性读写 / 交互模拟，后者供截图与状态端点。
-    au::InspectorServer server{[&app]() -> au::Node { return app.scene().root_node(); }};
+    const au::InspectorServer server{[&app]() -> au::Node { return app.scene().root_node(); }};
     server.set_surface_getter([&app]() -> au::Surface * {
         auto *w = app.window();
         return w != nullptr ? &w->surface() : nullptr;

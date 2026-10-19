@@ -14,6 +14,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -50,13 +51,22 @@ template <typename T>
         std::string(op) + " failed: sqlite rc=" + std::to_string(rc) + (msg ? std::string(" (") + msg + ")" : ""))};
 }
 
+/// @brief `SQLITE_TRANSIENT` 的单点折算：把上游宏的整型→指针转换收在一处并写明理由。
+/// @details 上游定义为 `((sqlite3_destructor_type)-1)`（sqlite3.h）——「析构槽填 -1」是 sqlite
+///          表达 *复制一份、绑定期满后由库自行 free* 的唯一写法：这里**不能**改传 nullptr，
+///          后者语义相反（不复制，指针须由调用方保活），而本文件的入参缓冲全是调用方局部对象。
+///          于是两条告警（C 风格跨类型转换、整型转指针抑制优化）只能在此就地豁免；折算成具名
+///          常量后，原先散落在 8 处 bind_* 的重复告警也一并归一。
+/// NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)
+const sqlite3_destructor_type AURORA_SQLITE_TRANSIENT = SQLITE_TRANSIENT;
+
 void exec_simple(sqlite3 *db, const char *sql, int *rc_out) {
     char *err = nullptr;
     const int rc = sqlite3_exec(db, sql, nullptr, nullptr, &err);
-    if (err) {
+    if (err != nullptr) {
         sqlite3_free(err);
     }
-    if (rc_out) {
+    if (rc_out != nullptr) {
         *rc_out = rc;
     }
 }
@@ -70,7 +80,7 @@ struct SqliteBackend::Impl {
     bool wal = false;
 };
 
-SqliteBackend::SqliteBackend(SqliteOptions opts) : impl_(std::make_unique<Impl>()) {
+SqliteBackend::SqliteBackend(const SqliteOptions &opts) : impl_(std::make_unique<Impl>()) {
     std::filesystem::path path;
     if (!opts.in_memory) {
         path = opts.path.empty() ? aurora::preferences::Preferences::default_config_dir() / "aurora_storage.db"
@@ -84,9 +94,12 @@ SqliteBackend::SqliteBackend(SqliteOptions opts) : impl_(std::make_unique<Impl>(
 
     // C++20 u8string → char*：Windows 宽字符路径经 UTF-8 触库，避免 ANSI 代码页丢字。
     const std::u8string open_target = opts.in_memory ? std::u8string{u8":memory:"} : path.u8string();
+    // char8_t* → const char*：u8string 与 sqlite C API 的字符类型拼不上（char8_t 是独立类型），
+    // 布局同为 1 字节 UTF-8 码元；这是 ABI 边界折算，reinterpret_cast 是唯一拼法。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     const int rc = sqlite3_open(reinterpret_cast<const char *>(open_target.c_str()), &impl_->db);
     if (rc != SQLITE_OK) {
-        if (impl_->db) {
+        if (impl_->db != nullptr) {
             sqlite3_close_v2(impl_->db);
             impl_->db = nullptr;
         }
@@ -120,19 +133,25 @@ SqliteBackend::SqliteBackend(SqliteOptions opts) : impl_(std::make_unique<Impl>(
     open_ = true;
 }
 
-SqliteBackend::~SqliteBackend() { (void)close(); }
+SqliteBackend::~SqliteBackend() { (void)close_connection(); }
 
-auto SqliteBackend::close() -> Result<void> {
-    std::lock_guard lock(impl_->mu);
-    if (impl_->db) {
+auto SqliteBackend::close() -> Result<void> { return close_connection(); }
+
+auto SqliteBackend::close_connection() -> Result<void> {
+    std::scoped_lock lock(impl_->mu);
+    if (impl_->db != nullptr) {
         sqlite3_close_v2(impl_->db);
         impl_->db = nullptr;
     }
+    // 句柄已释放 ⇒ 必须同时落 `open_`：否则 `is_open()` 仍报 true，后续操作绕过「未打开」判据
+    // 把空 `sqlite3 *` 交给 sqlite3_prepare_v2（SQLITE_MISUSE 路径，跨版本行为不作保证）。
+    // 幂等口径不变：重复 close 仍返回成功。
+    open_ = false;
     return Result<void>{};
 }
 
 auto SqliteBackend::put_record(const std::string &id, const StorageRecord &rec) -> Result<void> {
-    std::lock_guard lock(impl_->mu);
+    std::scoped_lock lock(impl_->mu);
     if (!open_) {
         return Result<void>{make_error(ErrorCode::StorageBackendUnavailable, "SQLite backend not opened: " + id)};
     }
@@ -158,15 +177,15 @@ auto SqliteBackend::put_record(const std::string &id, const StorageRecord &rec) 
         rc != SQLITE_OK) {
         return sqlite_err<void>("prepare put", rc, impl_->db);
     }
-    sqlite3_bind_text(stmt, 1, id.data(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, rec.type.data(), static_cast<int>(rec.type.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, id.data(), static_cast<int>(id.size()), AURORA_SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, rec.type.data(), static_cast<int>(rec.type.size()), AURORA_SQLITE_TRANSIENT);
     sqlite3_bind_int64(stmt, 3, static_cast<sqlite3_int64>(rec.version));
     sqlite3_bind_int64(stmt, 4, static_cast<sqlite3_int64>(rec.encoding == StorageEncoding::Binary ? 1 : 0));
     sqlite3_bind_int64(stmt, 5, mtime_to_ms(rec.mtime));
-    sqlite3_bind_text(stmt, 6, json_text.data(), static_cast<int>(json_text.size()), SQLITE_TRANSIENT);
-    sqlite3_bind_blob(stmt, 7, bytes.empty() ? nullptr : reinterpret_cast<const void *>(bytes.data()),
-                      static_cast<int>(bytes.size()), SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 8, rec.blob_ref.data(), static_cast<int>(rec.blob_ref.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 6, json_text.data(), static_cast<int>(json_text.size()), AURORA_SQLITE_TRANSIENT);
+    sqlite3_bind_blob(stmt, 7, bytes.empty() ? nullptr : static_cast<const void *>(bytes.data()),
+                      static_cast<int>(bytes.size()), AURORA_SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 8, rec.blob_ref.data(), static_cast<int>(rec.blob_ref.size()), AURORA_SQLITE_TRANSIENT);
 
     const int step = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -177,7 +196,7 @@ auto SqliteBackend::put_record(const std::string &id, const StorageRecord &rec) 
 }
 
 auto SqliteBackend::get_record(const std::string &id) -> Result<StorageRecord> {
-    std::lock_guard lock(impl_->mu);
+    std::scoped_lock lock(impl_->mu);
     if (!open_) {
         return Result<StorageRecord>{
             make_error(ErrorCode::StorageBackendUnavailable, "SQLite backend not opened: " + id)};
@@ -190,7 +209,7 @@ auto SqliteBackend::get_record(const std::string &id) -> Result<StorageRecord> {
         rc != SQLITE_OK) {
         return sqlite_err<StorageRecord>("prepare get", rc, impl_->db);
     }
-    sqlite3_bind_text(stmt, 1, id.data(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, id.data(), static_cast<int>(id.size()), AURORA_SQLITE_TRANSIENT);
 
     const int step = sqlite3_step(stmt);
     if (step == SQLITE_DONE) {
@@ -206,6 +225,9 @@ auto SqliteBackend::get_record(const std::string &id) -> Result<StorageRecord> {
     StorageRecord rec;
     auto text_at = [stmt](int col) -> std::string {
         const auto *p = sqlite3_column_text(stmt, col);
+        // unsigned char* → char*：sqlite C API 把文本定为 unsigned char*，std::string 只收 char*，
+        // 同为 1 字节码元的 ABI 边界折算，reinterpret_cast 是唯一拼法。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         return p ? std::string(reinterpret_cast<const char *>(p),
                                static_cast<std::size_t>(sqlite3_column_bytes(stmt, col)))
                  : std::string{};
@@ -222,12 +244,10 @@ auto SqliteBackend::get_record(const std::string &id) -> Result<StorageRecord> {
         const void *blob = sqlite3_column_blob(stmt, 6);
         const int n = sqlite3_column_bytes(stmt, 6);
         StorageBytes bytes(static_cast<std::size_t>(n));
-        if (blob && n > 0) {
-            const auto *src = static_cast<const std::uint8_t *>(blob);
-            for (int i = 0; i < n; ++i) {
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                bytes[static_cast<std::size_t>(i)] = static_cast<std::byte>(src[i]);
-            }
+        if ((blob != nullptr) && n > 0) {
+            // 整块 memcpy 取代逐字节下标循环：既无指针算术也无未检查访问，且 sqlite3_column_blob
+            // 的缓冲在下次 step 前有效，同步拷贝安全。
+            std::memcpy(bytes.data(), blob, static_cast<std::size_t>(n));
         }
         out.value().payload = std::move(bytes);
     } else {
@@ -245,7 +265,7 @@ auto SqliteBackend::get_record(const std::string &id) -> Result<StorageRecord> {
 }
 
 auto SqliteBackend::remove(const std::string &id) -> Result<void> {
-    std::lock_guard lock(impl_->mu);
+    std::scoped_lock lock(impl_->mu);
     if (!open_) {
         return Result<void>{make_error(ErrorCode::StorageBackendUnavailable, "SQLite backend not opened: " + id)};
     }
@@ -254,7 +274,7 @@ auto SqliteBackend::remove(const std::string &id) -> Result<void> {
         rc != SQLITE_OK) {
         return sqlite_err<void>("prepare remove", rc, impl_->db);
     }
-    sqlite3_bind_text(stmt, 1, id.data(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, id.data(), static_cast<int>(id.size()), AURORA_SQLITE_TRANSIENT);
     const int step = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     if (step != SQLITE_DONE) {
@@ -264,7 +284,7 @@ auto SqliteBackend::remove(const std::string &id) -> Result<void> {
 }
 
 auto SqliteBackend::list() -> Result<std::vector<std::string>> {
-    std::lock_guard lock(impl_->mu);
+    std::scoped_lock lock(impl_->mu);
     if (!open_) {
         return Result<std::vector<std::string>>{
             make_error(ErrorCode::StorageBackendUnavailable, "SQLite backend not opened")};
@@ -277,7 +297,9 @@ auto SqliteBackend::list() -> Result<std::vector<std::string>> {
     std::vector<std::string> ids;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         const auto *p = sqlite3_column_text(stmt, 0);
-        if (p) {
+        if (p != nullptr) {
+            // unsigned char* → char*：同 text_at 的 sqlite C API ABI 边界折算（唯一拼法）。
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
             ids.emplace_back(reinterpret_cast<const char *>(p),
                              static_cast<std::size_t>(sqlite3_column_bytes(stmt, 0)));
         }
@@ -287,7 +309,7 @@ auto SqliteBackend::list() -> Result<std::vector<std::string>> {
 }
 
 auto SqliteBackend::contains(const std::string &id) -> Result<bool> {
-    std::lock_guard lock(impl_->mu);
+    std::scoped_lock lock(impl_->mu);
     if (!open_) {
         return Result<bool>{make_error(ErrorCode::StorageBackendUnavailable, "SQLite backend not opened: " + id)};
     }
@@ -297,14 +319,14 @@ auto SqliteBackend::contains(const std::string &id) -> Result<bool> {
         rc != SQLITE_OK) {
         return sqlite_err<bool>("prepare contains", rc, impl_->db);
     }
-    sqlite3_bind_text(stmt, 1, id.data(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, id.data(), static_cast<int>(id.size()), AURORA_SQLITE_TRANSIENT);
     const bool found = sqlite3_step(stmt) == SQLITE_ROW;
     sqlite3_finalize(stmt);
     return Result<bool>{found};
 }
 
 auto SqliteBackend::clear() -> Result<void> {
-    std::lock_guard lock(impl_->mu);
+    std::scoped_lock lock(impl_->mu);
     if (!open_) {
         return Result<void>{make_error(ErrorCode::StorageBackendUnavailable, "SQLite backend not opened")};
     }
@@ -317,7 +339,7 @@ auto SqliteBackend::clear() -> Result<void> {
 }
 
 auto SqliteBackend::transaction(const std::function<Result<void>(StorageBackend &)> &body) -> Result<void> {
-    std::lock_guard lock(impl_->mu);
+    std::scoped_lock lock(impl_->mu);
     if (!open_) {
         return Result<void>{make_error(ErrorCode::StorageBackendUnavailable, "SQLite backend not opened")};
     }
@@ -347,7 +369,7 @@ auto SqliteBackend::transaction(const std::function<Result<void>(StorageBackend 
 }
 
 auto SqliteBackend::flush() -> Result<void> {
-    std::lock_guard lock(impl_->mu);
+    std::scoped_lock lock(impl_->mu);
     if (!open_ || !impl_->wal) {
         return Result<void>{};
     }

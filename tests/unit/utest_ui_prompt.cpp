@@ -4,7 +4,6 @@
 ///           未知类型跳过），以及自修复环（确定性机修：未知类型修正 / 缺属性回填 / children 策略裁剪；
 ///           LLM 由外部注入，本库从不发起网络请求；无 LLM 时仍自洽且不空转）
 
-#include <cstddef>
 #include <set>
 #include <string>
 #include <vector>
@@ -100,7 +99,7 @@ AURORA_TEST_CASE(repair_adds_required_props_only_and_keeps_explicit_values) {
     // 不兼容的值塞进树里，反而把原本合法的树改坏（实测踩到的坑）。
     const Json schema = aurora::describe_component("Text");
     std::set<std::string> required;
-    const auto *descriptors = require_child(schema, "prop_descriptors");
+    const auto *descriptors = require_child(schema, "props");
     for (const auto &descriptor : *descriptors) {
         if (descriptor.as_or<bool>("required", false)) {
             required.insert(std::string{descriptor.as_or<std::string>("name", "")});

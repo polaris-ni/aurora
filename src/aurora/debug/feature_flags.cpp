@@ -86,6 +86,17 @@ auto feature_flags() -> FeatureFlags {
     f.image_png = true;
 #endif
 
+    // ---- WebView 能力 ----
+#ifdef AURORA_ENABLE_WEBVIEW
+    f.webview = true;
+#endif
+#ifdef AURORA_ENABLE_WEBVIEW_WEBVIEW2
+    f.webview_webview2 = true;
+#endif
+#ifdef AURORA_ENABLE_WEBVIEW_WEBKITGTK
+    f.webview_webkitgtk = true;
+#endif
+
     return f;
 }
 
@@ -113,6 +124,9 @@ auto FeatureFlags::to_json() const -> Json {
     j.set("AURORA_ENABLE_IMAGE_JPEG", Json{image_jpeg});
     j.set("AURORA_ENABLE_IMAGE_WEBP", Json{image_webp});
     j.set("AURORA_ENABLE_IMAGE_PNG", Json{image_png});
+    j.set("AURORA_ENABLE_WEBVIEW", Json{webview});
+    j.set("AURORA_ENABLE_WEBVIEW_WEBVIEW2", Json{webview_webview2});
+    j.set("AURORA_ENABLE_WEBVIEW_WEBKITGTK", Json{webview_webkitgtk});
     return j;
 }
 

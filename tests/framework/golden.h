@@ -17,7 +17,6 @@
 // AURORA_GOLDEN_DIR / AURORA_UPDATE_GOLDEN / AURORA_GOLDEN_MAX_DIFF / AURORA_GOLDEN_MAX_PIXELS。
 
 #include <charconv>
-#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <string>

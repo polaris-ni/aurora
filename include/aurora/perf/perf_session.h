@@ -15,7 +15,6 @@
 /// 全部由调用方经 `AURORA_LOG_RAW` 输出（项目硬规则第 8 条）。
 ///
 
-#include <cstddef>
 #include <string>
 #include <vector>
 

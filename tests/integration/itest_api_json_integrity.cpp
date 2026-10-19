@@ -16,7 +16,6 @@
 #include "aurora/aurora.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
-#include "framework/json_literals.h"
 #include "known_enums.h"
 #include "paths.h"
 
@@ -102,7 +101,7 @@ AURORA_TEST_CASE(api_json_contains_all_toolchain_sections) {
 
 AURORA_TEST_CASE(api_json_scalar_sections_hold_expected_values) {
     const au::Json api = load_api_json();
-    const std::pair<const char *, const char *> pairs[] = {
+    constexpr std::pair<const char *, const char *> pairs[] = {
         {"library", "aurora"},
         {"language", "c++20"},
         {"include", "aurora/aurora.h"},
@@ -158,13 +157,13 @@ AURORA_TEST_CASE(api_json_enums_match_known_enums_registry) {
 
     // 类型名双向漂移。
     int drift = 0;
-    for (const auto &[name, vals] : expected) {
+    for (const auto &name : expected | std::views::keys) {
         if (!actual.contains(name)) {
             AURORA_TEST_TRACE("enum present in known_enums but missing from aurora_api.json: " + name);
             ++drift;
         }
     }
-    for (const auto &[name, vals] : actual) {
+    for (const auto &name : actual | std::views::keys) {
         if (!expected.contains(name)) {
             AURORA_TEST_TRACE("enum stale in aurora_api.json but absent from known_enums: " + name);
             ++drift;

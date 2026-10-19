@@ -71,7 +71,7 @@ auto ScrollStorage::read(std::string_view key) -> std::optional<float> {
         return std::nullopt;
     }
     // 懒回读：Preferences 中已有记录时填充内存缓存（**不**计入待落盘项——它已在那里）。
-    auto group = prefs_->group(AURORA_GROUP_NAME);
+    const auto group = prefs_->group(AURORA_GROUP_NAME);
     if (!group.contains(k)) {
         return std::nullopt;
     }

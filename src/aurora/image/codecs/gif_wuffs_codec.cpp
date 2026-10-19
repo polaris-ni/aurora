@@ -10,6 +10,10 @@
 #ifdef AURORA_ENABLE_IMAGE_PNG
 
 #include "aurora/core/image.h"
+// wuffs 官方单文件集成约定：整份 .c 当头包含（此处只取声明，WUFFS_IMPLEMENTATION 由
+// cmake 的 aurora_wuffs OBJECT 库在一个 TU 定义、链接进 aurora）——wuffs 唯一支持
+// 的用法，非误包含 C 源文件。就地豁免。
+// NOLINTNEXTLINE(bugprone-suspicious-include)
 #include "wuffs/release/c/wuffs-v0.3.c"
 
 namespace aurora::image {

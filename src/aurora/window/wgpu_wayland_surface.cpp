@@ -19,7 +19,8 @@ namespace aurora {
 // ---- 帧 sink 适配（口径同 Win32/X11 版内置 Sink） ----
 
 auto WgpuWaylandSurface::Sink::begin_frame(int width, int height, float scale) -> bool {
-    // `Window::present_gpu_frame` 传逻辑 dp 尺寸；`RhiFrameSink` 契约要求设备像素。
+    // `Window::present_gpu_frame` 传逻辑 dp 尺寸（整幅表面口径 = 内容 + 2×阴影边距）；
+    // `RhiFrameSink` 契约要求设备像素。
     const float s = scale > 0.0F ? scale : 1.0F;
     const int dev_w = std::max(1, static_cast<int>(std::lround(static_cast<float>(width) * s)));
     const int dev_h = std::max(1, static_cast<int>(std::lround(static_cast<float>(height) * s)));
@@ -27,14 +28,24 @@ auto WgpuWaylandSurface::Sink::begin_frame(int width, int height, float scale) -
     owner_->gpu_frame_active_ = ok;
     if (!ok) {
         owner_->gpu_dead_ = true;  // 运行期失效：此后 data() 可读软件回退帧缓冲
+        return false;
     }
-    return ok;
+    // 阴影 underlay：必须在 app 帧 DL 回放之前（内容矩形不透明底色随后覆盖阴影形状内部，
+    // 只留 margin 衰减带）。软件 wl_shm 路径不经此通道——Painter 画布恒不透明画不出真
+    // alpha，改由 present() 的 csd::compose_shadow_margins_bgra 直写 BGRA；两路视觉参数
+    // 同源 csd_geometry.h（AURORA_SHADOW_BASE_COLOR / AURORA_SHADOW_BLUR_INSET_PX /
+    // shadow_attenuation）。
+    // pass 清除值为透明 {0,0,0,0}、swapchain alphaMode=Auto，margin 随合成器半透混合。
+    if (owner_->host_->record_client_decoration_underlay(deco_underlay_dl_)) {
+        deco_underlay_dl_.replay(*rhi_);
+    }
+    return true;
 }
 
 auto WgpuWaylandSurface::Sink::end_frame() -> void {
-    // 自绘 CSD 装饰合成进当帧：swapchain 独占整块 wl_surface，内嵌宿主画进 Painter 的标题栏
-    // 不会随帧缓冲上屏，故装饰只能作为命令在 app 帧之上回放开（软件路径画的是同一份内容，
-    // 两条路径共用 `csd::paint_title_bar`，见 WaylandSurface::record_client_decoration）。
+    // 自绘 CSD 标题栏 overlay 合成进当帧：swapchain 独占整块 wl_surface，内嵌宿主画进 Painter
+    // 的标题栏不会随帧缓冲上屏，故装饰只能作为命令在 app 帧之上回放开（软件路径画的是同一份
+    // 内容，两条路径共用 `csd::paint_title_bar`，见 WaylandSurface::record_client_decoration）。
     // 坐标同为逻辑 dp、同用本帧 scale，与 app 帧 DL 同一变换口径，故热区与像素不会错位。
     if (owner_->host_->record_client_decoration(deco_dl_)) {
         deco_dl_.replay(*rhi_);

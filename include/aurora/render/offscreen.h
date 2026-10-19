@@ -90,7 +90,7 @@ namespace aurora {
 /// @param height 视口高
 /// @return 逻辑快照 JSON。
 [[nodiscard]] inline auto render_to_logical_snapshot(Node &root, int width, int height) -> Json {
-    BuildContext ctx;
+    constexpr BuildContext ctx;
     root->mount(ctx);
 
     Constraints c;

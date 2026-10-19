@@ -34,7 +34,7 @@
 关于各载体的观测量与已知现象：
 
 - `demo_app` 走 `au::App()` 流式路径，**不经** `run_demo` 启动器，故 stdout 与 stderr 均为空；这是它与其余载体的基线差异。
-- `demo_test_controller` 要求构建开关 `AURORA_BACKEND_HEADLESS` 为 ON（默认）；开关关闭时载体编译另一分支，仅打印 `demo_test_controller: AURORA_BACKEND_HEADLESS 未开启，跳过` 并返回 0。
+- `demo_test_controller` 载体依赖无头后端（恒编入、无开关）；`AURORA_BACKEND_HEADLESS` 宏是 `#ifdef` 门控（恒真），不存在关闭分支构建。
 - `demo_system_tray` 的真实实现是 **Win32 专有**（`Shell_NotifyIcon` + 隐藏消息窗口）；非 Windows / Headless 下 `SystemTray` 全部方法为 no-op。
 - `demo_timers` 经 `run_demo` 只建窗口、**不建** `Application`，故没有 `Scheduler`，其定时器不触发；库的表现为「降级 + 明确诊断」。
 - `demo_hot_reload` 读写**当前工作目录**下的 `ui.json`，文件不存在时自动写入一份默认内容。
@@ -227,7 +227,7 @@
 |:---|:---|
 | 用例编号 | TC-APP-006 |
 | 测试目的 | 验证无头「渲染 → 交互 → 断言」闭环的逐行输出与退出码符合契约 |
-| 前置条件 | 载体 `demo_test_controller` 已构建成功；构建开关 `AURORA_BACKEND_HEADLESS` 为 ON（默认） |
+| 前置条件 | 载体 `demo_test_controller` 已构建成功；无头后端恒编入（无开关） |
 | 依赖用例 | TC-APP-001 |
 | 操作步骤 | 1. 运行 `./build/demo_test_controller.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 记录进程退出码<br>3. 查看 `err.txt` 的内容与行数<br>4. 逐行核对 `out.txt` 的行数与内容<br>5. 核对 `out.txt` 第 2 行三个字段之间的空白形态 |
 | 预期结果 | 2. 退出码为 0（断言全部通过后自行退出，不进入事件循环）<br>3. `err.txt` 为 0 行（空文件，无诊断日志）<br>4. `out.txt` **恰 7 行**，依次为 `frames after first pump: 1`、`find_by_key("tap")=1  find_by_key("name")=1  find_by_type("Button")=1`、`pump_and_settle frames: 2, total frames: 2`、`counter matches 'clicks = 2': yes`、`expect_visible(button): pass`、`expect_prop(input, value='Aurora'): pass`、`demo PASSED`<br>5. 第 2 行三个字段之间各为**两个空格**（`find_by_key("tap")=1`、`find_by_key("name")=1`、`find_by_type("Button")=1` 两两之间各 2 个空格），单空格即 FAIL |

@@ -9,8 +9,6 @@
 /// 平台门控: 依赖 `AURORA_BACKEND_GLFW`（头随门控裁掉）；未开启时每条用例落 SKIP 桩
 ///           （声明无条件可见，满足 `runner --list` 与测试源字面量一致）
 
-#include <cstdint>
-
 #include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
 #ifdef AURORA_BACKEND_GLFW
 #include <GLFW/glfw3.h>

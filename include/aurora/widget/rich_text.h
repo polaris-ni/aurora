@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@
 #include "aurora/render/painter.h"
 #include "aurora/state/reactive.h"
 #include "aurora/state/signal_view.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/text_span.h"
 #include "aurora/widget/widget.h"
 
@@ -24,7 +26,7 @@ namespace detail {
 struct RichWord {
     std::string text;  ///< 单词文本（已完成 i18n 解析）
     Font font;  ///< 所属片段的样式字体
-    Color color;  ///< 所属片段的渲染色
+    std::optional<Color> color;  ///< 所属片段的渲染色；空 = 跟随控件默认文字色（再回落主题 on_surface）
     float width = 0.0F;  ///< 该单词按 font 实测的宽度（dp）
 };
 
@@ -143,6 +145,9 @@ inline auto measure_rich_text(const std::vector<TextSpan> &spans, float max_widt
 ///
 /// 文本经 `default_string_table()` + 当前 `Locale` 解析（支持 i18n）。布局采用确定性贪心换行，
 /// 整串宽度/高度由 `measureRichText` 决定；值来源支持 `Reactive<std::vector<TextSpan>>`。
+///
+/// 颜色语义（迁移批）：片段 `TextSpan::color` 未显式设置时，跟随本控件 `text_color`
+/// （缺省再回落主题 `on_surface`）——ThemeScope 换肤即生效；片段显式赋色优先。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
 class RichText : public LeafWidget {
@@ -156,6 +161,22 @@ class RichText : public LeafWidget {
     /// @brief 构造富文本：接管响应式片段序列。
     /// @param spans 片段序列的响应式值（文本/字体/颜色），移入 `spans_`
     explicit RichText(Reactive<std::vector<TextSpan>> spans) : spans_(std::move(spans)) {}
+
+    /// @brief 设置默认文本色（链式）；影响未显式设色的片段（回落主题 on_surface）。
+    /// @param c 文字前景色。
+    /// @return 自身引用，便于链式调用。
+    auto text_color(Color c) -> RichText & {
+        text_color_ = c;
+        return *this;
+    }
+
+    /// @brief 解析生效文字色：未显式设色时经 ctx 取主题 `on_surface`（ThemeScope 换肤即生效），
+    ///        显式设色优先。片段级 `TextSpan::color` 在绘制处进一步优先于本值。
+    /// @param ctx 构建上下文：供主题取色；无注入时 `inherit_theme` 回落 light（与 OS 未表态同口径）。
+    /// @return 生效文字色。
+    [[nodiscard]] auto resolve_text_color(const BuildContext &ctx) const -> Color {
+        return text_color_.value_or(inherit_theme(ctx).roles.on_surface);
+    }
 
     /// @brief 登记需订阅的信号视图：片段序列 `spans_`。
     /// @param out 末尾追加 `&spans_`（内容变更驱动重排重绘）
@@ -189,6 +210,12 @@ class RichText : public LeafWidget {
                      .required = false,
                      .note = "Plain text content (for serialization)",
                      .json_type = "string"},
+                    {.name = "text_color",
+                     .type = "Color",
+                     .default_value = "\"theme.on_surface\"",
+                     .required = false,
+                     .note = "Default text color (follows theme on_surface when unset)",
+                     .json_type = "array"},
                     {.name = "width",
                      .type = "Length",
                      .default_value = "auto",
@@ -226,6 +253,10 @@ class RichText : public LeafWidget {
             all += s.text.text;
         }
         props.set("text", all);
+        // 默认文字色仅在显式设置时输出：保留「跟随主题」语义。
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));
+        }
     }
 
     /// @brief 反序列化：`text` 键存在时重建为单一片段序列（富文本样式无法由 JSON 恢复）。
@@ -234,6 +265,9 @@ class RichText : public LeafWidget {
         Widget::deserialize_props(props);
         if (props.contains("text")) {
             spans_ = Reactive{std::vector{TextSpan{.text = LocalizedString{props.at("text")->as_or<std::string>("")}}}};
+        }
+        if (props.contains("text_color")) {
+            text_color_ = json_to_color(*props.at("text_color"));
         }
     }
 
@@ -262,14 +296,16 @@ class RichText : public LeafWidget {
             const Locale loc = (ctx.environment<Locale>() != nullptr) ? *ctx.environment<Locale>() : Locale{};
             lines_ = layout_rich_text(spans_.get(), bounds.size.width, loc);
         }
+        const Color fg = resolve_text_color(ctx);  // 未显式设色的片段回落此值（再回落主题 on_surface）
         float y = bounds.origin.y;
         for (const auto &line : lines_) {
             float x = bounds.origin.x;
             for (const auto &wd : line.words) {
                 if (!wd.text.empty()) {
+                    const Color c = wd.color.value_or(fg);  // 片段显式色优先于控件默认色
                     p.draw_text(
                         Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = wd.width, .height = line.height}},
-                        wd.text, wd.font, wd.color);
+                        wd.text, wd.font, c);
                 }
                 x += wd.width + render::FontEngine::measure_width(" ", wd.font);
             }
@@ -279,6 +315,7 @@ class RichText : public LeafWidget {
 
   private:
     Reactive<std::vector<TextSpan>> spans_;
+    std::optional<Color> text_color_;  ///< 默认文字色；空 = 跟随主题 on_surface
     std::vector<detail::RichLine> lines_;
 };
 

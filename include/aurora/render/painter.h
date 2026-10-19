@@ -400,14 +400,14 @@ class Painter {
     /// @brief 开始层捕获（录制模式下记 BeginLayer 命令；Direct 模式 no-op）。
     /// @param key 层纹理缓存键（与 RhiBackend 流式槽同键寻址）。
     /// @param size 层尺寸（逻辑 dp）。
-    auto begin_layer(std::uint64_t key, const Size &size) -> void;
+    auto begin_layer(std::uint64_t key, const Size &size) const -> void;
     /// @brief 结束层捕获（录制模式下记 EndLayer 命令；Direct 模式 no-op）。
-    auto end_layer() -> void;
+    auto end_layer() const -> void;
     /// @brief 合成层纹理到当前画布（录制模式下记 DrawLayer 命令；Direct 模式 no-op）。
     /// @param key 层纹理缓存键。
     /// @param matrix 逻辑 dp 空间仿射矩阵。
     /// @param src_scale 层的 device pixel ratio。
-    auto draw_layer(std::uint64_t key, const Matrix2D &matrix, float src_scale) -> void;
+    auto draw_layer(std::uint64_t key, const Matrix2D &matrix, float src_scale) const -> void;
 
   private:
     struct ClipRegion {
@@ -486,7 +486,7 @@ class Painter {
     /// @param aa 抗锯齿策略。
     /// @param opts 排版选项。
     auto record_text_cmd(const Rect &r, const std::string &s, const Font &f, Color c, render::TextAAMode aa,
-                         const render::TextLayoutOpts &opts) -> void;
+                         const render::TextLayoutOpts &opts) const -> void;
     std::vector<DisplayList *> recording_stack_;  ///< 录制目标栈；非空即录制模式
     std::vector<char> rec_dynamic_;  ///< 与录制栈平行的「含动态内容」标记（mark_recording_dynamic 置全部）
 };

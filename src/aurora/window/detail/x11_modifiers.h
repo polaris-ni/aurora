@@ -21,13 +21,13 @@
 
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
 
-#include <cstdint>
-
 #include "aurora/event/event.h"
 
 namespace aurora::detail {
 
-// X11 核心协议的修饰态掩码（X11 ABI 稳定常量，数值取自 `<X11/X.h>` 的同名宏）。
+// X11 核心协议的修饰态掩码（X11 ABI 稳定常量；数值逐个取自 `<X11/X.h>` 的 `ShiftMask` /
+// `LockMask` / `ControlMask` / `Mod1Mask` … 宏，命名按本仓 `AURORA_` + 全大写口径，
+// 对应关系由 `x11_surface.cpp` 的 `static_assert` 编译期钉住）。
 // 逐项语义见下方 `//` 注释——这些是命名空间内的裸常量而非可文档化声明，按本仓
 // `check_doc_comments` 的口径（DOC-R3）挂 `///` 会被判为孤立文档块，故用普通注释。
 //
@@ -36,20 +36,20 @@ namespace aurora::detail {
 namespace x11_state_mask {
 
 // Shift（任一侧）。X 不分左右，本就只有一个 Shift 位。
-inline constexpr unsigned int kShift = 1U << 0U;
+inline constexpr unsigned int AURORA_SHIFT_MASK = 1U << 0U;
 // Caps Lock。**未建模**：锁定态对指针与键盘事件均无消费方，不静默折成某个语义位。
-inline constexpr unsigned int kLock = 1U << 1U;
+inline constexpr unsigned int AURORA_LOCK_MASK = 1U << 1U;
 // Control（任一侧）。
-inline constexpr unsigned int kControl = 1U << 2U;
+inline constexpr unsigned int AURORA_CONTROL_MASK = 1U << 2U;
 // `Mod1`，X 惯例映射为 **Alt**（PC 键盘约定；非 PC 布局可能是别的键，本库按 PC 惯例取用）。
-inline constexpr unsigned int kMod1 = 1U << 3U;
+inline constexpr unsigned int AURORA_MOD1_MASK = 1U << 3U;
 // `Mod2`，PC 键盘约定上是 **NumLock**。它不是「按住态」而是「锁定态」，但 X 把锁定态也编进
 // `state`，故与其它位同口径取用、无需额外查询。
-inline constexpr unsigned int kMod2 = 1U << 4U;
+inline constexpr unsigned int AURORA_MOD2_MASK = 1U << 4U;
 // `Mod3`，PC 键盘约定上是 AltGr 的第三段（无消费方，不建模）。
-inline constexpr unsigned int kMod3 = 1U << 5U;
+inline constexpr unsigned int AURORA_MOD3_MASK = 1U << 5U;
 // `Mod4`，X 惯例映射为 **Super / Meta**（对应 Windows 的 Win 键、macOS 的 Command）。
-inline constexpr unsigned int kMod4 = 1U << 6U;
+inline constexpr unsigned int AURORA_MOD4_MASK = 1U << 6U;
 
 }  // namespace x11_state_mask
 
@@ -68,19 +68,19 @@ inline constexpr unsigned int kMod4 = 1U << 6U;
 /// @return 对应的位集（组合值，非单个枚举量）。
 [[nodiscard]] constexpr auto mods_from_x11_state(unsigned int state) -> ModifierKey {
     auto m = ModifierKey::None;
-    if ((state & x11_state_mask::kShift) != 0U) {
+    if ((state & x11_state_mask::AURORA_SHIFT_MASK) != 0U) {
         m = m | ModifierKey::Shift;
     }
-    if ((state & x11_state_mask::kControl) != 0U) {
+    if ((state & x11_state_mask::AURORA_CONTROL_MASK) != 0U) {
         m = m | ModifierKey::Control;
     }
-    if ((state & x11_state_mask::kMod1) != 0U) {
+    if ((state & x11_state_mask::AURORA_MOD1_MASK) != 0U) {
         m = m | ModifierKey::Alt;
     }
-    if ((state & x11_state_mask::kMod4) != 0U) {
+    if ((state & x11_state_mask::AURORA_MOD4_MASK) != 0U) {
         m = m | ModifierKey::Meta;
     }
-    if ((state & x11_state_mask::kMod2) != 0U) {
+    if ((state & x11_state_mask::AURORA_MOD2_MASK) != 0U) {
         m = m | ModifierKey::NumLock;
     }
     return m;

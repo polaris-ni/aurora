@@ -1,91 +1,54 @@
 // Aurora Inspector Server — minimal localhost-only HTTP server for remote widget tree access.
-// Cross-platform: Winsock2 on Windows, BSD sockets on POSIX. Zero third-party dependencies.
+// Transport goes through aurora::net (): Winsock2 / BSD socket adaptation lives in
+// src/aurora/net/socket.cpp, this file has zero platform socket vocabulary.
 
 #include "aurora/inspector/inspector_server.h"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <future>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include "aurora/core/platform.h"
-
-#ifdef AURORA_PLATFORM_WINDOWS
-// Windows: Winsock2（须在 windows.h 之前）
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
-#pragma comment(lib, "ws2_32.lib")
-#endif
-#else
-// POSIX: BSD sockets
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
-
-#include <cerrno>
-
-// ---- Winsock 词汇 → POSIX 映射：使下方主体逻辑（socket / bind / listen / accept /
-//      recv / send / select / htonl / htons / ntohs / inet_addr）在两种平台编译运行一致 ----
-using SOCKET = int;
-constexpr SOCKET INVALID_SOCKET = -1;
-constexpr int SOCKET_ERROR = -1;
-constexpr int SD_BOTH = SHUT_RDWR;
-struct WSADATA {
-    int dummy = 0;
-};
-inline int WSAStartup(uint16_t, void *) { return 0; }
-inline void WSACleanup() {}
-inline int WSAGetLastError() { return errno; }
-#define MAKEWORD(a, b) (0)
-inline int closesocket(SOCKET s) { return ::close(s); }
-// htonl / htons / ntohs / inet_addr / INADDR_LOOPBACK 由 <arpa/inet.h> / <netinet/in.h> 提供
-#endif
-
-#include <filesystem>
-#include <fstream>
-#include <future>
-
 #include "aurora/core/log.h"
+#include "aurora/core/platform.h"
 #include "aurora/debug/debug_backend.h"
 #include "aurora/debug/debug_paint.h"
 #include "aurora/debug/debug_runtime.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/inspector/inspector_api.h"
+#include "aurora/net/blocking.h"
 #include "aurora/state/async.h"
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/yaml.h"
 
-#if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
-#pragma comment(lib, "ws2_32.lib")
-#endif
-
 namespace aurora {
 
 // ---------------------------------------------------------------------------
-// Impl — 隐藏所有 Winsock2 类型
+// Impl — 传输层句柄全部为 aurora::net 类型（平台 socket 词汇零出现）
 // ---------------------------------------------------------------------------
 struct InspectorServer::Impl {
     std::function<Node()> root_getter;
     std::function<Surface *()> surface_getter;  // 可选：debug 端点访问运行时 Surface
     std::function<std::vector<std::uint32_t>()> window_ids_getter;  // 可选：多窗口枚举（/api/windows）
     std::function<Node(std::uint32_t)> window_tree_getter;  // 可选：按窗口 id 取树（/api/tree?window=）
-    SOCKET listen_socket = INVALID_SOCKET;
+    net::blocking::Listener listener;  // 回环监听口（close = shutdown+close）
     std::thread worker;
     std::atomic<bool> running{false};
     std::mutex tree_mutex;  // 保护 widget 树访问
     uint16_t bound_port = 0;
 
     void accept_loop();
-    void handle_client(SOCKET client);
+    void handle_client(net::blocking::StreamSocket client);
 
     /// @brief 把「取当前树根 → 遍历 → 组装 HTTP 响应」整段派发到主线程执行。
     ///
@@ -352,22 +315,10 @@ static auto query_param(const std::string &path, std::string_view key) -> std::s
 // 的启发式同源——各控件的文本属性名不统一，逐键比对字符串值，命中其一即算）。
 constexpr std::string_view AURORA_TEXT_PROP_KEYS[] = {"content", "text", "label", "value", "hint", "placeholder"};
 
-// 可靠发送：send 可能部分写入（响应体超过套接字缓冲时必然发生，如 snapshot PNG），
-// 循环写满为止；对端断开 / 出错返回 false。
-static auto send_all(SOCKET client, const std::string &data) -> bool {
-    const char *p = data.data();
-    std::size_t left = data.size();
-    constexpr std::size_t chunk_size = 1U << 20U;  // 每次 ≤1MiB，避免 int 截断
-    while (left > 0) {
-        const int n = send(client, p, static_cast<int>(std::min(left, chunk_size)), 0);
-        if (n <= 0) {
-            return false;
-        }
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 套接字发送按字节推进指针是有意设计
-        p += n;
-        left -= static_cast<std::size_t>(n);
-    }
-    return true;
+// 可靠发送：分块写满逻辑收敛在 net::blocking::StreamSocket::write_all（实现侧 ≤1MiB 分块 +
+// 两平台返回值窄化统一），此处只保留 bool 形态供既有调用点使用。
+static auto send_all(const net::blocking::StreamSocket &client, const std::string &data) -> bool {
+    return static_cast<bool>(client.write_all(std::span<const char>(data)));
 }
 
 // ---------------------------------------------------------------------------
@@ -536,8 +487,9 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             return error_response(405, "Method not allowed for /api/debug/tree");
         }
         try {
-            return on_tree(
-                [](Node &root) -> std::string { return json_response(200, "OK", aurora::debug::widget_tree(root)); });
+            return on_tree([](const Node &root) -> std::string {
+                return json_response(200, "OK", aurora::debug::widget_tree(root));
+            });
         } catch (const std::exception &e) {
             return error_response(500, std::string("widget_tree failed: ") + e.what());
         }
@@ -678,7 +630,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         }
         // 回退：主窗口（构造时注入的 root_getter），向后兼容既有 /api/tree。
         return on_tree(
-            [](Node &root) -> std::string { return json_response(200, "OK", Inspector::tree_json_full(root)); });
+            [](const Node &root) -> std::string { return json_response(200, "OK", Inspector::tree_json_full(root)); });
     }
 
     // GET /api/widget/{path} — 单 widget 属性
@@ -784,7 +736,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
             return error_response(
                 400, "Missing or invalid 'path' (tree index path string, e.g. \"0/1\"; empty string targets the root)");
         }
-        const std::string widget_path = path_it->as_or<std::string>("");
+        const auto widget_path = path_it->as_or<std::string>("");
         float dx = 0.0F;
         float dy = 0.0F;
         std::string text;
@@ -1052,7 +1004,7 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
         if (method != "GET") {
             return error_response(405, "Method not allowed for /api/yaml");
         }
-        return on_tree([](Node &root) -> std::string {
+        return on_tree([](const Node &root) -> std::string {
             const Json tree = Inspector::tree_json_full(root);
             const std::string yaml = aurora::serialization::to_yaml(tree);
             return make_response(200, "OK", "text/yaml", yaml);
@@ -1103,8 +1055,8 @@ auto InspectorServer::Impl::route_request(const std::string &method, const std::
 // ---------------------------------------------------------------------------
 // 客户端连接处理
 // ---------------------------------------------------------------------------
-void InspectorServer::Impl::handle_client(SOCKET client) {
-    // 读取请求数据（简单实现：一次 recv 足够处理小请求）
+void InspectorServer::Impl::handle_client(net::blocking::StreamSocket client) {
+    // 读取请求数据（简单实现：一次头部读足够处理小请求）；Socket 随作用域结束自动关闭。
     constexpr int buf_size = 8192;
     char buf[buf_size];
     std::string request;
@@ -1112,12 +1064,14 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
 
     // 先读取头部
     while (total < buf_size - 1) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 套接字接收按字节推进指针是有意设计
-        const int n = recv(client, buf + total, buf_size - 1 - total, 0);
-        if (n <= 0) {
+        // 剩余缓冲切 span：长度由区间自身携带，免裸指针算式外泄。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 定长请求缓冲按已读偏移切片是有意设计
+        const auto slot = std::span<char>(buf + total, static_cast<std::size_t>(buf_size - 1 - total));
+        const auto got = client.read_some(slot);
+        if (!got || got.value() == 0) {  // 出错或对端关闭：停读，已收部分按现状处理
             break;
         }
-        total += n;
+        total += static_cast<int>(got.value());
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): 定长请求缓冲按运行时常量下标访问是有意设计
         buf[total] = '\0';
         // 检查是否已收到完整头部（以 \r\n\r\n 结束）
@@ -1127,7 +1081,6 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
     }
 
     if (total <= 0) {
-        closesocket(client);
         return;
     }
 
@@ -1139,17 +1092,13 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
     {
         auto sp1 = request.find(' ');
         if (sp1 == std::string::npos) {
-            const std::string resp = error_response(400, "Malformed request line");
-            send_all(client, resp);
-            closesocket(client);
+            send_all(client, error_response(400, "Malformed request line"));
             return;
         }
         method = request.substr(0, sp1);
         auto sp2 = request.find(' ', sp1 + 1);
         if (sp2 == std::string::npos) {
-            const std::string resp = error_response(400, "Malformed request line");
-            send_all(client, resp);
-            closesocket(client);
+            send_all(client, error_response(400, "Malformed request line"));
             return;
         }
         req_path = request.substr(sp1 + 1, sp2 - sp1 - 1);
@@ -1162,16 +1111,12 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
         const std::string host = header_value(request, "Host");
         if (host.empty() || !is_loopback_host(host)) {  // 缺失 Host 同样拒绝（HTTP/1.1 客户端必发）
             AURORA_LOG_WARN("inspector", "Rejecting request with non-loopback Host header");
-            const std::string resp = error_response(403, "Forbidden: unexpected Host header");
-            send_all(client, resp);
-            closesocket(client);
+            send_all(client, error_response(403, "Forbidden: unexpected Host header"));
             return;
         }
         if (!header_value(request, "Origin").empty()) {
             AURORA_LOG_WARN("inspector", "Rejecting cross-origin (browser) request");
-            const std::string resp = error_response(403, "Forbidden: browser origins are not allowed");
-            send_all(client, resp);
-            closesocket(client);
+            send_all(client, error_response(403, "Forbidden: browser origins are not allowed"));
             return;
         }
     }
@@ -1196,9 +1141,7 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
     }
     if (content_length < 0 || content_length > max_body_bytes) {
         AURORA_LOG_WARN("inspector", "Rejecting oversized request body: ", content_length);
-        const std::string resp = error_response(413, "Payload Too Large");
-        send_all(client, resp);
-        closesocket(client);
+        send_all(client, error_response(413, "Payload Too Large"));
         return;
     }
 
@@ -1210,16 +1153,15 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
     }
     const int body_needed = content_length - static_cast<int>(body.size());
     if (body_needed > 0) {
-        // 继续读取 body 剩余部分
+        // 继续读取 body 剩余部分（read_some 允许部分读；出错/对端关闭即止，残缺 body 按现状路由）
         std::vector<char> body_buf(body_needed);
-        int received = 0;
-        while (received < body_needed) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 套接字接收按字节推进指针是有意设计
-            const int n = recv(client, body_buf.data() + received, body_needed - received, 0);
-            if (n <= 0) {
+        std::size_t received = 0;
+        while (received < body_buf.size()) {
+            const auto got = client.read_some(std::span<char>(body_buf).subspan(received));
+            if (!got || got.value() == 0) {
                 break;
             }
-            received += n;
+            received += got.value();
         }
         body.append(body_buf.data(), received);
     }
@@ -1237,7 +1179,7 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
         response = error_response(500, "internal error");
     }
     send_all(client, response);
-    closesocket(client);
+    // client 为按值持有的 net::blocking::StreamSocket：返回即随作用域析构关闭。
 }
 
 // ---------------------------------------------------------------------------
@@ -1246,53 +1188,35 @@ void InspectorServer::Impl::handle_client(SOCKET client) {
 void InspectorServer::Impl::accept_loop() {
     AURORA_LOG_INFO("inspector", "InspectorServer accept loop started on port ", bound_port);
     while (running.load()) {
-        // 使用 select 使 accept 可中断（超时 200ms 检查 running 标志）
-        fd_set read_fds;
-        FD_ZERO(&read_fds);
-        FD_SET(listen_socket, &read_fds);
-        struct timeval tv{};  // 值初始化，随后显式设置超时
-        tv.tv_sec = 0;
-        tv.tv_usec = 200000;  // 200ms
-
-#ifdef AURORA_PLATFORM_WINDOWS
-        const int sel = select(0, &read_fds, nullptr, nullptr, &tv);
-#else
-        // POSIX 要求 nfds = 最高 fd + 1（Windows 忽略该参数）
-        const int sel = select(listen_socket + 1, &read_fds, nullptr, nullptr, &tv);
-#endif
-        if (sel < 0) {
+        // 可中断等待（超时 200ms 检查 running 标志）；两平台 select 形态差异由 net::blocking::Listener 消化。
+        const auto ready = listener.wait_readable(std::chrono::milliseconds{200});
+        if (!ready) {
             if (!running.load()) {
-                break;
+                break;  // stop() 已关闭监听口：等待报错属预期唤醒路径
             }
-            const int err = WSAGetLastError();
-            AURORA_LOG_ERROR("inspector", "select() failed with error: ", err);
+            AURORA_LOG_ERROR("inspector", "wait_readable() failed: ", ready.error().message);
             break;
         }
-        if (sel == 0) {
+        if (!ready.value()) {
             continue;  // timeout，检查 running
         }
 
-        sockaddr_in client_addr{};
-        socklen_t addr_len = sizeof(client_addr);
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): WinSock API 要求 sockaddr* 强转，无法避免
-        SOCKET client = accept(listen_socket, reinterpret_cast<sockaddr *>(&client_addr), &addr_len);
-        // NOLINTNEXTLINE(modernize-use-integer-sign-comparison): SOCKET 与 INVALID_SOCKET 的 WinSock 惯用比较
-        if (client == INVALID_SOCKET) {
+        auto client = listener.accept();
+        if (!client) {
             if (!running.load()) {
                 break;
             }
-            AURORA_LOG_WARN("inspector", "accept() failed, error: ", WSAGetLastError());
+            AURORA_LOG_WARN("inspector", "accept() failed: ", client.error().message);
             continue;
         }
 
-        // 验证连接来自 localhost
-        if (client_addr.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
+        // 验证连接来自 localhost（非回环对端立即拒绝；临时 StreamSocket 随作用域关闭）
+        if (!client.value().is_loopback_peer()) {
             AURORA_LOG_WARN("inspector", "Rejecting non-localhost connection");
-            closesocket(client);
             continue;
         }
 
-        handle_client(client);
+        handle_client(std::move(client.value()));
     }
     AURORA_LOG_INFO("inspector", "InspectorServer accept loop exiting");
 }
@@ -1318,60 +1242,31 @@ auto InspectorServer::set_window_tree_getter(std::function<Node(std::uint32_t)> 
 InspectorServer::~InspectorServer() { stop(); }
 
 auto InspectorServer::start(uint16_t port) const -> bool {
+#if AURORA_CAP_THREADS == 0
+    // 单线程 wasm 构建（Emscripten 未开 -pthread）下 std::thread 构造直接抛 "Not supported"；
+    // 按编码规范以编译期能力宏拦截，返回明确的不可用，而非让调用方吃未捕获异常。
+    // 需要真并行的 wasm 产物请构建时开 AURORA_ENABLE_WASM_PTHREADS（=ON 时 AURORA_CAP_THREADS 翻 1）。
+    AURORA_LOG_ERROR("inspector",
+                     "InspectorServer unavailable: no thread support (AURORA_CAP_THREADS=0 on this build)");
+    return false;
+#endif
     if (impl_->running.load()) {
         AURORA_LOG_WARN("inspector", "InspectorServer already running on port ", impl_->bound_port);
         return false;
     }
 
-    // 初始化 Winsock
-    WSADATA wsa_data;
-    const int wsa_result = WSAStartup(MAKEWORD(2, 2), &wsa_data);
-    if (wsa_result != 0) {
-        AURORA_LOG_ERROR("inspector", "WSAStartup failed with error: ", wsa_result);
+    // 绑定并监听 localhost 回环口（仅本机访问；backlog 5 与旧实现一致）。平台 socket 运行时随
+    // 句柄创建自动就位（`aurora::net::blocking` 不再要求调用方自备会话），起不来时以
+    // `net-runtime-failed` 形态落在下面这条错误分支里。
+    auto listener = net::blocking::Listener::listen_loopback(port, 5);
+    if (!listener) {
+        AURORA_LOG_ERROR("inspector", "start failed on port ", port, ": ", listener.error().message);
         return false;
     }
+    impl_->listener = std::move(listener.value());
 
-    // 创建 TCP socket
-    impl_->listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison): SOCKET 与 INVALID_SOCKET 的 WinSock 惯用比较
-    if (impl_->listen_socket == INVALID_SOCKET) {
-        AURORA_LOG_ERROR("inspector", "socket() failed with error: ", WSAGetLastError());
-        WSACleanup();
-        return false;
-    }
-
-    // 绑定到 localhost（仅本机访问）
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // 127.0.0.1
-    addr.sin_port = htons(port);
-
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): WinSock API 要求 sockaddr* 强转，无法避免
-    if (bind(impl_->listen_socket, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR) {
-        AURORA_LOG_ERROR("inspector", "bind() failed on port ", port, ", error: ", WSAGetLastError());
-        closesocket(impl_->listen_socket);
-        impl_->listen_socket = INVALID_SOCKET;
-        WSACleanup();
-        return false;
-    }
-
-    if (listen(impl_->listen_socket, 5) == SOCKET_ERROR) {
-        AURORA_LOG_ERROR("inspector", "listen() failed, error: ", WSAGetLastError());
-        closesocket(impl_->listen_socket);
-        impl_->listen_socket = INVALID_SOCKET;
-        WSACleanup();
-        return false;
-    }
-
-    // 获取实际绑定的端口（若传入 0 则系统分配）
-    sockaddr_in bound_addr{};
-    socklen_t addr_len = sizeof(bound_addr);
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): WinSock API 要求 sockaddr* 强转，无法避免
-    if (getsockname(impl_->listen_socket, reinterpret_cast<sockaddr *>(&bound_addr), &addr_len) == 0) {
-        impl_->bound_port = ntohs(bound_addr.sin_port);
-    } else {
-        impl_->bound_port = port;
-    }
+    // 实际绑定的端口（若传入 0 则系统分配）——Listener 在绑定回报时已取好
+    impl_->bound_port = impl_->listener.port();
 
     impl_->running.store(true);
     impl_->worker = std::thread([this]() -> void { impl_->accept_loop(); });
@@ -1381,28 +1276,21 @@ auto InspectorServer::start(uint16_t port) const -> bool {
 }
 
 void InspectorServer::stop() const {
-    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison): SOCKET 与 INVALID_SOCKET 的 WinSock 惯用比较
-    if (!impl_->running.load() && impl_->listen_socket == INVALID_SOCKET) {
+    if (!impl_->running.load() && !impl_->listener.is_valid()) {
         return;
     }
 
     AURORA_LOG_INFO("inspector", "Stopping InspectorServer...");
     impl_->running.store(false);
 
-    // 先 shutdown 再 closesocket，确保 worker 线程的 select/accept 被中断
-    // NOLINTNEXTLINE(modernize-use-integer-sign-comparison): SOCKET 与 INVALID_SOCKET 的 WinSock 惯用比较
-    if (impl_->listen_socket != INVALID_SOCKET) {
-        ::shutdown(impl_->listen_socket, SD_BOTH);
-        closesocket(impl_->listen_socket);
-        impl_->listen_socket = INVALID_SOCKET;
-    }
+    // blocking::Listener::close = shutdown(both) + close：确保 worker 线程的 wait_readable/accept 被唤醒
+    impl_->listener.close();
 
     // 等待 worker 线程退出
     if (impl_->worker.joinable()) {
         impl_->worker.join();
     }
 
-    WSACleanup();
     impl_->bound_port = 0;
     AURORA_LOG_INFO("inspector", "InspectorServer stopped");
 }

@@ -44,6 +44,11 @@ struct FeatureFlags {
     bool image_jpeg = false;  ///< AURORA_ENABLE_IMAGE_JPEG：JPEG 解码能力。
     bool image_webp = false;  ///< AURORA_ENABLE_IMAGE_WEBP：WebP 解码能力。
     bool image_png = false;  ///< AURORA_ENABLE_IMAGE_PNG：PNG 编解码能力。
+    bool webview = false;  ///< AURORA_ENABLE_WEBVIEW：WebView 控件（公共模块恒编译；关 = 占位降级）。
+    bool webview_webview2 =
+        false;  ///< AURORA_ENABLE_WEBVIEW_WEBVIEW2：WebView2 原生实现（Windows，PRIVATE 宏，只经本结构查询）。
+    bool webview_webkitgtk =
+        false;  ///< AURORA_ENABLE_WEBVIEW_WEBKITGTK：WebKitGTK 原生实现（Linux，PRIVATE 宏，只经本结构查询）。
 
     /// @brief JSON 导出：键 = 完整宏名（如 "AURORA_BACKEND_HEADLESS"），值 = bool。
     /// @return JSON 对象，全部字段的键序与本结构字段声明序一致。

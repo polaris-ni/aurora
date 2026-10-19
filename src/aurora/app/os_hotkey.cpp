@@ -192,10 +192,10 @@ struct OsHotkeyRegistry::Impl {
     /// @param id 待注册的热键 ID（同时是 `WM_HOTKEY` 的 wParam）。
     /// @param combo 键组合。
     /// @return 注册成功为真。
-    auto register_native(std::uint32_t id, const KeyCombo &combo) -> bool;
+    static auto register_native(std::uint32_t id, const KeyCombo &combo) -> bool;
     /// @brief 从 OS 注销热键（与 `register_native` 成对）。
     /// @param id 热键 ID。
-    auto unregister_native(std::uint32_t id) -> void;
+    static auto unregister_native(std::uint32_t id) -> void;
 
     /// @brief 收到一条 `WM_HOTKEY`：只做「确认归属 + 入队」，不执行动作。
     /// @param id 命中 ID（`wParam`）。
@@ -297,7 +297,7 @@ OsHotkeyRegistry::~OsHotkeyRegistry() {
 #endif
 }
 
-auto OsHotkeyRegistry::add(const KeyCombo &combo, std::function<void()> action) -> Result<OsHotkeyHandle> {
+auto OsHotkeyRegistry::add(const KeyCombo &combo, std::function<void()> action) const -> Result<OsHotkeyHandle> {
     if (!platform_supported()) {
         return register_error("no OS global hotkey backend on this platform");
     }
@@ -308,14 +308,14 @@ auto OsHotkeyRegistry::add(const KeyCombo &combo, std::function<void()> action) 
         return register_error("combination already registered: " + combo.to_string());
     }
     const std::uint32_t id = next_hotkey_id();
-    if (!test_backend().active && !impl_->register_native(id, combo)) {
+    if (!test_backend().active && !Impl::register_native(id, combo)) {
         return register_error("OS rejected the combination: " + combo.to_string());
     }
     impl_->entries.push_back(Impl::Entry{.id = id, .combo = combo, .action = std::move(action)});
     return OsHotkeyHandle{id};
 }
 
-auto OsHotkeyRegistry::remove(OsHotkeyHandle h) -> bool {
+auto OsHotkeyRegistry::remove(OsHotkeyHandle h) const -> bool {
     if ((impl_ == nullptr) || (h.id == 0U)) {
         return false;
     }
@@ -324,7 +324,7 @@ auto OsHotkeyRegistry::remove(OsHotkeyHandle h) -> bool {
             continue;
         }
         if (!test_backend().active) {
-            impl_->unregister_native(it->id);
+            Impl::unregister_native(it->id);
         }
         impl_->entries.erase(it);
         // 已命中但尚未排空的同 ID 一并丢弃：热键已不存在，再排空等于执行已撤销的动作。
@@ -341,21 +341,21 @@ auto OsHotkeyRegistry::remove(OsHotkeyHandle h) -> bool {
     return false;
 }
 
-auto OsHotkeyRegistry::clear() -> void {
+auto OsHotkeyRegistry::clear() const -> void {
     if (impl_ == nullptr) {
         return;
     }
     const bool inert = test_backend().active;
     for (const auto &e : impl_->entries) {
         if (!inert) {
-            impl_->unregister_native(e.id);
+            Impl::unregister_native(e.id);
         }
     }
     impl_->entries.clear();
     impl_->pending.clear();
 }
 
-auto OsHotkeyRegistry::drain_pending() -> std::size_t {
+auto OsHotkeyRegistry::drain_pending() const -> std::size_t {
     if (impl_ == nullptr) {
         return 0;
     }
@@ -377,7 +377,7 @@ auto OsHotkeyRegistry::drain_pending() -> std::size_t {
     return fired;
 }
 
-auto OsHotkeyRegistry::enabled() const -> bool { return platform_supported(); }
+auto OsHotkeyRegistry::enabled() -> bool { return platform_supported(); }
 
 auto OsHotkeyRegistry::count() const -> std::size_t { return (impl_ == nullptr) ? 0U : impl_->entries.size(); }
 

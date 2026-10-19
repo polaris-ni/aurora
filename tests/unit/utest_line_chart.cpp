@@ -5,9 +5,7 @@
 /// 以及像素 golden 基线（chart_line.png，受 AURORA_GOLDEN_DIR / MAX_DIFF / MAX_PIXELS / UPDATE_GOLDEN 控制）
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -17,8 +15,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/render/offscreen.h"
-#include "aurora/render/png.h"
-#include "aurora/render/snapshot_diff.h"
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
 
@@ -217,6 +213,78 @@ AURORA_TEST_CASE(golden_line_chart_matches_baseline) {
     p.categories = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     p.axis_y = ChartAxisSpec{.label = "%", .tick_count = 5};
     golden::compare_or_update("chart_line", render_chart(p));
+}
+
+AURORA_TEST_CASE(paint_and_interaction_branches) {
+    Painter painter;
+    const BuildContext ctx;
+    auto paint_at = [&painter, &ctx](Widget &w) -> void {
+        w.paint(painter, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = w.size()}, ctx);
+    };
+
+    // 1) 空数据：无界约束走 300x200 缺省画布；plot 内 Move 因 series 空命中早返回。
+    LineChart empty{};
+    empty.layout(Constraints{}, ctx);
+    paint_at(empty);
+    MouseEvent on_empty = move_at(160.0F, 100.0F);
+    empty.on_pointer_event(on_empty);
+    AURORA_TEST_CHECK_FALSE(empty.hovered_point().has_value());
+
+    // 2) 图例 Bottom 几何预留 + show_dots=false 绘制路径（不悬停，只验证绘制不炸）。
+    LineChartProps p = bare_props();
+    p.series = {ChartSeries{.name = "A", .values = {0.0, 2.0, 4.0}},
+                ChartSeries{.name = "B", .values = {NAN, 1.0, 2.0}}};
+    p.axis_y = ChartAxisSpec{.visible = false, .tick_count = 5, .min = 0.0, .max = 4.0};
+    p.show_dots = false;
+    p.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Bottom};
+    LineChart chart{p};
+    layout_only(chart);
+    chart.on_hover_change(true);
+    paint_at(chart);
+
+    // 3) 裸配置（图例关）悬停数据点 → 十字准线 / 高亮绘制 + accessibility_value。
+    LineChartProps hp = bare_props();
+    hp.series = {ChartSeries{.name = "A", .values = {0.0, 2.0, 4.0}}};
+    hp.axis_y = ChartAxisSpec{.visible = false, .tick_count = 5, .min = 0.0, .max = 4.0};
+    LineChart hover{hp};
+    layout_only(hover);
+    MouseEvent hit = move_at(160.0F, 100.0F);
+    hover.on_pointer_event(hit);
+    AURORA_TEST_REQUIRE_TRUE(hover.hovered_point().has_value());
+    paint_at(hover);
+    AURORA_TEST_CHECK_FALSE(hover.accessibility_value().empty());
+    AURORA_TEST_CHECK_TRUE(hover.accessibility_role() == AccessibilityRole::Image);
+
+    // 4) 图例 Top（默认位）命中：优先于数据点 + 降透明绘制；悬停离开清除。
+    LineChartProps tp = bare_props();
+    tp.series = {ChartSeries{.name = "A", .values = {1.0, 2.0}}, ChartSeries{.name = "B", .values = {2.0, 1.0}}};
+    tp.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Top};
+    LineChart top{tp};
+    layout_only(top);
+    MouseEvent legend_move = move_at(2.0F, 2.0F);
+    top.on_pointer_event(legend_move);
+    AURORA_TEST_CHECK_TRUE(top.hovered_legend().has_value());
+    AURORA_TEST_CHECK_FALSE(top.hovered_point().has_value());
+    paint_at(top);
+    top.on_hover_change(false);
+    AURORA_TEST_CHECK_FALSE(top.hovered_legend().has_value());
+
+    // 5) 图例 Right：纵排命中区生成（宽 500 收窄绘图区）。
+    LineChartProps rp = bare_props();
+    rp.series = {ChartSeries{.name = "A", .values = {1.0, 2.0}}, ChartSeries{.name = "B", .values = {2.0, 1.0}}};
+    rp.legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Right};
+    LineChart right{rp};
+    Constraints wide;
+    wide.min = Size{.width = 0.0F, .height = 0.0F};
+    wide.max = Size{.width = 500.0F, .height = 200.0F};
+    right.layout(wide, ctx);
+    paint_at(right);
+
+    // 6) Press 事件不属 Move/Release：回落基类。
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    press.local_position = Point{.x = 160.0F, .y = 100.0F};
+    hover.on_pointer_event(press);
 }
 
 }  // namespace aurora::test_cases::utest_line_chart

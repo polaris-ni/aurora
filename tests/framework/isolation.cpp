@@ -1,7 +1,6 @@
 #include "isolation.h"
 
 #include <chrono>
-#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -209,6 +208,7 @@ auto sweep_stale_temp_dirs() -> void {
     const auto threshold = fs::file_time_type::clock::now() - std::chrono::hours(1);
     std::vector<fs::path> bases;
     bases.push_back(fs::path{root} / "test_temp");  // 主基目录（运行路径下的 test_temp/）
+#ifndef AURORA_PLATFORM_WASM
     std::error_code sys_ec;
     const auto sys_tmp = fs::temp_directory_path(sys_ec);
     if (!sys_ec) {
@@ -216,6 +216,15 @@ auto sweep_stale_temp_dirs() -> void {
     }
 #ifndef AURORA_PLATFORM_WINDOWS
     bases.emplace_back("/tmp");  // 回退②：POSIX /tmp（emplace 避免临时 path 拷贝）
+#endif
+#else
+    // Emscripten + NODERAWFS 下两个回退基目录都不可用，且系统临时目录那条会**致命**：
+    // Windows 宿主上 temp_directory_path() 返回 `C:\...\Temp`（盘符 + 反斜杠），wasm FS 把它
+    // 当成合法路径解析到**真实的宿主系统临时目录**；其中混有 IDE 插座（jb.station.ij.*.sock）等
+    // 特殊文件，迭代到它们时 FS shim 的 stat 直接抛 C++ 异常——连 error_code 重载都兜不住
+    // （libc++ 目录迭代器增量内部走抛出路径），整条 setup 链路崩在 main 之前，runner 起不来。
+    // 且系统临时目录内容随宿主程序动态增减，崩溃与否不确定（IDE 开着才现形）。wasm 下用例临时
+    // 目录恒在 cwd/test_temp/（setup 随后把 cwd 切到仓库根），主基目录已全覆盖，回退无收益。
 #endif
     std::vector<fs::path> stale;
     for (const auto &base : bases) {

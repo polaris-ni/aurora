@@ -12,7 +12,6 @@
 /// 类本身仍参与编译与链接，便于单测直接驱动。
 ///
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -21,7 +20,6 @@
 #include "aurora/perf/stopwatch.h"
 
 namespace aurora {
-
 /// @brief 单个作用域计时样本。
 ///
 /// @warning `name` 为不拥有所有权的静态字符串指针（通常是字符串字面量或 `__func__`），
@@ -219,7 +217,6 @@ class ScopedTimer {
 };
 
 namespace detail {
-
 /// @brief 帧作用域收尾钩子：把当帧 zone 样本与计数快照转交 `TraceWriter`。
 ///
 /// 定义在 `profiler.cpp`，避免 `profiler.h` 反向依赖 `trace_writer.h`（后者依赖前者）。
@@ -227,7 +224,6 @@ namespace detail {
 /// @internal 仅供 `FrameScope` 调用，不属于公共 API。
 ///
 auto on_frame_scope_end() -> void;
-
 }  // namespace detail
 
 /// @brief RAII 帧作用域：构造开帧（并清零当帧渲染计数器），析构闭帧。
@@ -264,7 +260,6 @@ class FrameScope {
     FrameScope(FrameScope &&) = delete;
     auto operator=(FrameScope &&) -> FrameScope & = delete;
 };
-
 }  // namespace aurora
 
 // ---------------------------------------------------------------------------
@@ -274,14 +269,18 @@ class FrameScope {
 // 也不实例化 `ScopedTimer`。
 // ---------------------------------------------------------------------------
 
+// NOLINTBEGIN(cppcoreguidelines-macro-usage)
+
 /// @brief 内部辅助宏：两级拼接，令 `__LINE__` 等实参先展开再参与连接。
 #define AURORA_PROF_CAT_IMPL(a, b) a##b
 
 /// @brief 记号连接宏：为当前作用域生成唯一命名的计时变量。
-#define AURORA_PROF_CAT(a, b) AURORA_PROF_CAT_IMPL(a, b)  // NOLINT(cppcoreguidelines-macro-usage)
+#define AURORA_PROF_CAT(a, b) AURORA_PROF_CAT_IMPL(a, b)
 
 #ifdef AURORA_ENABLE_PROFILING
 /// @brief 为当前作用域计时；`name` 必须是静态字符串字面量。
+/// 计时器名必须逐调用点唯一（__LINE__ 粘接）且宏位于语句前缀位——两者都不是 constexpr
+/// 函数能给出的能力，函数式宏是有意选择。就地豁免。
 #define AURORA_PROFILE_SCOPE(name) \
     ::aurora::ScopedTimer AURORA_PROF_CAT(_au_zone_, __LINE__) { name }
 /// @brief 为当前函数计时（zone 名取 `__func__`）。
@@ -291,9 +290,11 @@ class FrameScope {
     ::aurora::FrameScope AURORA_PROF_CAT(_au_frame_, __LINE__) {}
 #else
 /// @brief 性能采集关闭时展开为 `((void)0)`：不计时，`name` 实参也不被求值。
-#define AURORA_PROFILE_SCOPE(name) ((void)0)  // NOLINT(cppcoreguidelines-macro-usage)
+#define AURORA_PROFILE_SCOPE(name) ((void)0)
 /// @brief 性能采集关闭时展开为 `((void)0)`：不计时。
-#define AURORA_PROFILE_FUNCTION() ((void)0)  // NOLINT(cppcoreguidelines-macro-usage)
+#define AURORA_PROFILE_FUNCTION() ((void)0)
 /// @brief 性能采集关闭时展开为 `((void)0)`：不开帧也不闭帧。
-#define AURORA_PROFILE_FRAME() ((void)0)  // NOLINT(cppcoreguidelines-macro-usage)
+#define AURORA_PROFILE_FRAME() ((void)0)
 #endif
+
+// NOLINTEND(cppcoreguidelines-macro-usage)

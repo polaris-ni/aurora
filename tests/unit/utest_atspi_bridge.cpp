@@ -7,12 +7,10 @@
 ///           tools/verify 探针把关）
 
 #include <cstdlib>
-#include <memory>
 #include <string_view>
 #include <vector>
 
 #include "aurora/core/platform.h"
-#include "aurora/window/detail/atspi_bridge.h"
 #include "framework/aurora_test.h"
 
 #if defined(AURORA_PLATFORM_LINUX) && (defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
@@ -20,6 +18,9 @@
 // NOLINTNEXTLINE(*-macro-usage)
 #define AURORA_ATSPI_BRIDGE_AVAILABLE 1
 #include "aurora/widget/widget.h"
+// 目标单元即本头声明的 detail::AtspiBridge / detail::AtspiEnv：公共 widget 头不传导
+// 本 src 内部头（层次意图如此），测试须显式包含（同 utest_atspi_protocol.cpp 先例）。
+#include "aurora/window/detail/atspi_bridge.h"
 #else
 // 平台可用性开关，供下方 #if 使用，无 constexpr 等价物
 // NOLINTNEXTLINE(*-macro-usage)
@@ -64,14 +65,14 @@ class ProbeRoot final : public LeafWidget {
 }  // namespace
 
 AURORA_TEST_CASE(no_at_bridge_env_forces_degradation) {
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     (void)_putenv_s("NO_AT_BRIDGE", "1");
 #else
     (void)::setenv("NO_AT_BRIDGE", "1", 1);
 #endif
     // 显式免提（GNOME 惯例）：不碰 libdbus/总线，create 恒 nullptr。
     AURORA_TEST_CHECK_NULL(detail::AtspiBridge::create(probe_env()).get());
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     (void)_putenv_s("NO_AT_BRIDGE", "");
 #else
     (void)::unsetenv("NO_AT_BRIDGE");
@@ -80,7 +81,7 @@ AURORA_TEST_CASE(no_at_bridge_env_forces_degradation) {
 
 AURORA_TEST_CASE(live_embed_handshake_and_teardown) {
     const char *opt_in = std::getenv("AURORA_LIVE_ATSPI");
-    if (opt_in == nullptr || opt_in[0] == '\0' || std::string_view{opt_in} == "0") {
+    if (opt_in == nullptr || *opt_in == '\0' || std::string_view{opt_in} == "0") {
         AURORA_TEST_SKIP("set AURORA_LIVE_ATSPI=1 explicitly: connects to the real a11y bus and completes Embed");
         return;
     }

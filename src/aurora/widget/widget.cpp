@@ -8,7 +8,9 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/core/debug.h"
 #include "aurora/core/diagnostics.h"
+#include "aurora/core/error_codes.h"
 #include "aurora/core/log.h"
+#include "aurora/core/result.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/focus.h"
 #include "aurora/modifier/modifier.h"
@@ -164,7 +166,7 @@ Node::~Node() {
     // 唯一持有者——`use_count()` 对「临时副本」与「父先亡」取值相同，分不开。
 }
 
-void Widget::detach_child_layout_parent(Widget *child) {
+void Widget::detach_child_layout_parent(Widget *child) const {
     if (child == nullptr) {
         return;
     }
@@ -602,16 +604,15 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
                 }
             }
         }
-        const float out = ring_gap + ring_thickness;
+        constexpr float out = ring_gap + ring_thickness;
         const Rect ring{
             .origin = Point{.x = ring_box.origin.x - out, .y = ring_box.origin.y - out},
             .size = Size{.width = ring_box.size.width + (2.0F * out), .height = ring_box.size.height + (2.0F * out)}};
 
         if (ring.size.width > 0.0F && ring.size.height > 0.0F) {
-            // 环色取命名令牌 "focus.ring"；未登记时回退 primary，使自定义主题保持改动前行为。
+            // 焦点环取极性色角色（旧 "focus.ring" 令牌的类型化承接）。
             const Theme theme = inherit_theme(ctx);
-            p.draw_rounded_border(ring, ring_radius, ring_thickness,
-                                  theme.token_or<Color>("focus.ring", theme.primary));
+            p.draw_rounded_border(ring, ring_radius, ring_thickness, theme.roles.focus_ring);
             painted_focus_ring_ = true;  // 环像素落在自身盒外：标脏须按外扩盒，见 Widget::dirty_bounds()
         }
     }
@@ -903,7 +904,7 @@ auto Widget::window_bounds() const -> std::optional<Rect> {
         // （无内容控件、布局单测的探针桩）同样有确定的位置，它的窗口盒是有效答案而非空值。
         return std::nullopt;
     }
-    const Widget *child = this;
+    const auto *child = this;  // 逐层上溯时会被 `child = parent` 改写，故是指向 const 的指针而非常指针
     const Widget *parent = layout_parent_;
     if (parent == nullptr) {
         // 自身即根：根的窗口盒原点取**最近一次绘制实际使用的根盒**——`Window::run_paint` 以
@@ -1058,6 +1059,20 @@ auto Widget::request_focus() -> void {
     if (FocusManager *fm = current_focus_manager()) {
         fm->request_focus(this);
     }
+}
+
+auto Widget::begin_system_drag() -> Result<DragAction> {
+    // 要约由控件自己声明（on_provide_drag），会话本身交给 system_drag 入口——控件层不认识
+    // 平台后端，也不持有宿主句柄，这层只做「有数据才发起」的判据。
+    const std::optional<DragOffer> offer = on_provide_drag();
+    if (!offer.has_value()) {
+        return make_error(ErrorCode::SystemDragNotSupported,
+                          "begin_system_drag: the widget provides no drag offer (on_provide_drag returned nullopt)");
+    }
+    const Result<DragAction> action = system_drag::begin(*offer);
+    // 无论成功与否都回报控件：会话结束是控件清理拖出态的唯一时机，失败同样要收尾。
+    on_system_drag_end(action ? action.value() : DragAction::None);
+    return action;
 }
 
 auto Widget::collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void {}

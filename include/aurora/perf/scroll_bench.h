@@ -15,7 +15,6 @@
 /// 动控件、或事件没命中它，`scrollable_found = false` 与 `moved_frames = 0` 会直接暴露，
 /// 而不是给出一组漂亮却无意义的读数。调用方（工具 / 单测）须先校验这些字段再看性能数。
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 

@@ -225,12 +225,30 @@ add_dependencies(gen_debug_api_json gen_debug_api)
 
 # MCP Server：stdio JSON-RPC 2.0，供 AI Agent 直接调用。
 aurora_add_tool(aurora_mcp tools/servers/aurora_mcp.cpp)
-# aurora_mcp 的 live_* 工具族要连本机 Inspector（loopback HTTP），故需平台 socket 库。
-# 刻意**不**依赖 AURORA_BUILD_INSPECTOR_SERVER：客户端只需要 socket，不需要把服务端实现编进来
-# （应用侧是否起 InspectorServer 由应用自己 opt-in）。POSIX 下 socket 在 libc，无需额外链接。
-if (WIN32)
-    target_link_libraries(aurora_mcp PRIVATE ws2_32)
+
+# wasm fetch 引擎真跑探针（§16 第 37 项的验收腿）：node ≥ 18 下真跑，相一以真实 fetch
+# 打编排脚本起的本地 http 服务端（只绑 127.0.0.1、零出站），相二以脚本化替身覆盖受限形态。
+# 落点说明：源文件住 tools/verify/（真机验收语义同族），但**不经 AuroraVerify.cmake 注册**——
+# 那一族默认 OFF + EXCLUDE_FROM_ALL（真实桌面会话、非确定），本探针只绑回环、可在 CI 与默认
+# wasm 构建里确定地跑，属 wasm 平台的验收腿本体，故随默认构建交付。node 编排脚本
+# （wasm_fetch_node_drive.mjs）由 POST_BUILD 复制到产物旁。
+if (EMSCRIPTEN AND AURORA_BACKEND_WASM)
+    aurora_add_tool(aurora_verify_wasm_fetch tools/verify/wasm_fetch_live_probe.cpp)
+    set_target_properties(aurora_verify_wasm_fetch PROPERTIES SUFFIX ".mjs")
+    # MODULARIZE：编排脚本显式实例化并先起服务端（端口要经导出入口喂给探针）；INVOKE_RUN=0：
+    # main 不自启（探针等编排脚本唤起）。
+    target_link_options(aurora_verify_wasm_fetch PRIVATE
+            -sMODULARIZE=1 -sEXPORT_NAME=auroraFetchProbe -sINVOKE_RUN=0 -sEXIT_RUNTIME=0)
+    add_custom_command(TARGET aurora_verify_wasm_fetch POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy
+                    "${AURORA_SOURCE_DIR}/tools/verify/wasm_fetch_node_drive.mjs"
+                    "$<TARGET_FILE_DIR:aurora_verify_wasm_fetch>/wasm_fetch_node_drive.mjs"
+            COMMENT "Copying wasm fetch probe node driver next to the module")
 endif ()
+
+# live_* 工具族的 loopback HTTP 传输经 aurora::net：socket 库需求由核心库
+# `aurora` 的 PUBLIC ws2_32 传导（见顶层 CMakeLists），此处不再散挂；也刻意**不**依赖
+# AURORA_BUILD_INSPECTOR_SERVER（应用侧是否起 InspectorServer 由应用自己 opt-in）。
 
 # CLI 工具：组件发现 / 校验 / 离屏渲染 / 代码生成。
 aurora_add_tool(aurora_cli tools/servers/aurora_cli.cpp)
@@ -249,16 +267,12 @@ if (NOT EMSCRIPTEN)
     aurora_add_tool(aurora_e2e_client tools/e2e/e2e_client.cpp)
     # 能力层 include "inspector_client.h"（tools/servers/，aurora_add_tool 未注入该路径）。
     target_include_directories(aurora_e2e_client PRIVATE "${AURORA_SOURCE_DIR}/tools/servers")
-    # 传输层直调 Winsock（inspector_client.h），与 aurora_mcp 同款：客户端只需要 socket 库，
-    # 不依赖 AURORA_BUILD_INSPECTOR_SERVER（应用侧是否起 InspectorServer 由应用自己 opt-in）。
-    if (WIN32)
-        target_link_libraries(aurora_e2e_client PRIVATE ws2_32)
-    endif ()
+    # 传输层经 aurora::net，ws2_32 由核心库 PUBLIC 传导，不再散挂。
     set_target_properties(aurora_e2e_client PROPERTIES EXCLUDE_FROM_ALL ON)
 endif ()
 
 # 注：原 tools/ai_compat_test（AI 兼容性批量验证可执行）已移除 —— 其 fixture 管线
-# （from_json → validate_ui → to_code）由 tests/integration/itest_ai_compat.cpp（:75 起的多个 AURORA_TEST_CASE）完整覆盖，且后者
+# （from_json → validate_ui → to_code）由 tests/integration/itest_ai_compat.cpp（75 起的多个 AURORA_TEST_CASE）完整覆盖，且后者
 # 改为目录遍历后是前者的超集（另含纯内存用例）。保留两份属重复实现。
 
 # 渲染基准：HeadlessSurface + Painter 多矩阵计时（非 CTest 断言，仅性能基线）。
@@ -300,15 +314,16 @@ endif ()
 
 # Inspector 远程 HTTP 接口（可选，跨平台）：localhost-only HTTP 服务器，
 # 暴露 REST 端点供外部 Inspector 工具访问 widget 树。
-# inspector_server.cpp 编入独立静态库 aurora_inspector_server（不编入核心 aurora 库），
-# 避免未开启开关时引入平台 socket 依赖（Windows: ws2_32；POSIX: pthread）。
+# inspector_server.cpp 编入独立静态库 aurora_inspector_server（不编入核心 aurora 库）——
+# 隔离理由是「服务端实现不进核心」；socket 传输本身已由核心自带 aurora::net 提供（
+# Windows 的 ws2_32 经 aurora PUBLIC 传导），POSIX 腿仍需 Threads::Threads 供 worker 线程。
 option(AURORA_BUILD_INSPECTOR_SERVER "Build Inspector remote HTTP server" OFF)
 if (AURORA_BUILD_INSPECTOR_SERVER)
     add_library(aurora_inspector_server STATIC
             src/aurora/inspector/inspector_server.cpp
     )
     if (WIN32)
-        target_link_libraries(aurora_inspector_server PUBLIC aurora ws2_32)
+        target_link_libraries(aurora_inspector_server PUBLIC aurora)
     else ()
         find_package(Threads REQUIRED)
         target_link_libraries(aurora_inspector_server PUBLIC aurora Threads::Threads)

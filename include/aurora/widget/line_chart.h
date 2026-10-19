@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
@@ -244,12 +243,12 @@ class LineChart : public LeafWidget, public LineChartProps {
     /// @param g 布局期几何。
     /// @param i 点索引。
     /// @return 像素位置（局部坐标）。
-    [[nodiscard]] auto point_x(const Geometry &g, std::size_t i) const -> float;
+    [[nodiscard]] static auto point_x(const Geometry &g, std::size_t i) -> float;
     /// @brief 反查命中的图例项（命中区与绘制同源于 geom_.legend_rects）。
     /// @param g 布局期几何。
     /// @param local 控件局部坐标。
     /// @return 图例项索引；未命中为 `std::nullopt`。
-    [[nodiscard]] auto legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t>;
+    [[nodiscard]] static auto legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t>;
     /// @brief 最近数据点命中：遍历全部系列求欧氏距离，阈值 = dot_radius + 8dp。
     /// @param g 布局期几何。
     /// @param local 控件局部坐标。
@@ -331,7 +330,7 @@ inline auto LineChart::compute_y_scale() const -> LinearScale {
     return LinearScale::from_domain(lo, hi, axis_y.tick_count);
 }
 
-inline auto LineChart::point_x(const Geometry &g, std::size_t i) const -> float {
+inline auto LineChart::point_x(const Geometry &g, std::size_t i) -> float {
     if (g.point_count <= 1U) {
         return g.plot.origin.x + (g.plot.size.width * 0.5F);
     }
@@ -433,12 +432,12 @@ inline auto LineChart::on_layout(const Constraints &c, const BuildContext &ctx) 
     }
     s.width = std::max(s.width, 0.0F);
     s.height = std::max(s.height, 0.0F);
-    geom_ = compute_geometry(s, inherit_theme(ctx).font);
+    geom_ = compute_geometry(s, inherit_theme(ctx).type_scale.body_medium);
     return s;
 }
 
 // 对 legend_rects 逐项做矩形包含判断。
-inline auto LineChart::legend_hit(const Geometry &g, const Point &local) const -> std::optional<std::size_t> {
+inline auto LineChart::legend_hit(const Geometry &g, const Point &local) -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < g.legend_rects.size(); ++i) {
         const Rect &r = g.legend_rects[i];
         if (local.x >= r.origin.x && local.x <= r.right() && local.y >= r.origin.y && local.y <= r.bottom()) {
@@ -662,13 +661,13 @@ inline auto LineChart::deserialize_props(const Json &props) -> void {
 /// @param ctx 构建上下文（继承主题字体 / 配色）。
 inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     const Theme theme = inherit_theme(ctx);
-    const Font &font = theme.font;
+    const Font &font = theme.type_scale.body_medium;
     const Point origin = bounds.origin;
     const Geometry &g = geom_;
     const Rect &plot = g.plot;
     const float line_h = render::FontEngine::measure_height(font) + 4.0F;
-    const Color grid = Color{theme.text.r, theme.text.g, theme.text.b, 31};
-    const Color axis = Color{theme.text.r, theme.text.g, theme.text.b, 160};
+    const Color grid = Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 31};
+    const Color axis = Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 160};
 
     if (axis_y.visible) {
         draw_numeric_axis(p, origin, plot, g.y_scale, axis_y, font, grid, axis);
@@ -758,7 +757,7 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
         const Rect ring{
             .origin = Point{.x = origin.x + hovered_px->x - (d * 0.5F), .y = origin.y + hovered_px->y - (d * 0.5F)},
             .size = Size{.width = d, .height = d}};
-        p.draw_rounded_border(ring, d * 0.5F, 2.0F, theme.text);
+        p.draw_rounded_border(ring, d * 0.5F, 2.0F, theme.roles.on_surface);
 
         if (hovered_point_.has_value()) {
             const auto [k, i] = *hovered_point_;
@@ -774,11 +773,12 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
                 by = std::clamp(by, 0.0F, std::max(0.0F, bounds.size.height - h));
                 const Rect box{.origin = Point{.x = origin.x + bx, .y = origin.y + by},
                                .size = Size{.width = w, .height = h}};
-                p.fill_rounded_rect(box, 4.0F, Color{theme.background.r, theme.background.g, theme.background.b, 242});
+                p.fill_rounded_rect(box, 4.0F,
+                                    Color{theme.roles.surface.r, theme.roles.surface.g, theme.roles.surface.b, 242});
                 p.draw_rounded_border(box, 4.0F, 1.0F, grid);
                 const Rect text_box{.origin = Point{.x = origin.x + bx + 8.0F, .y = origin.y + by + 4.0F},
                                     .size = Size{.width = w - 16.0F, .height = line_h}};
-                p.draw_text(text_box, text, font, theme.text);
+                p.draw_text(text_box, text, font, theme.roles.on_surface);
             }
         }
     }

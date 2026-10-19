@@ -355,11 +355,11 @@ class Checkbox : public LeafWidget {
     };
 
     /// @brief 解析当前状态配色：禁用时统一灰化。子类可只覆盖配色而不改绘制几何。
-    /// @param ctx 构建上下文：提供主题作用域，未显式设置 `active_color` 时取 `inherit_theme(ctx).primary`。
+    /// @param ctx 构建上下文：提供主题作用域，未显式设置 `active_color` 时取 `inherit_theme(ctx).roles.primary`。
     /// @return 三态配色聚合；禁用态返回固定灰化三元组（忽略显式设置的颜色）。
     /// @note Side-effects: none
     [[nodiscard]] virtual auto resolve_palette(const BuildContext &ctx) -> Palette {
-        Palette pal{.active = active_color_.value_or(inherit_theme(ctx).primary),
+        Palette pal{.active = active_color_.value_or(inherit_theme(ctx).roles.primary),
                     .border = border_color_,
                     .check = check_color_};
         if (!enabled_) {

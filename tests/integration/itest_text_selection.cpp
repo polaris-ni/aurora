@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
@@ -150,7 +149,7 @@ auto bounded(float w, float h) -> Constraints {
 AURORA_TEST_CASE(no_highlight_without_selection) {
     use_supersample_aa();
     Text txt("Hello Selection");
-    BuildContext ctx;
+    constexpr BuildContext ctx;
     Painter p;
     p.begin(400, 60);
     p.fill_rect(Rect{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 400, .height = 60}}, Color::white());
@@ -167,7 +166,7 @@ AURORA_TEST_CASE(readonly_text_draws_no_caret_on_focus) {
     use_supersample_aa();
     Text txt("readonly text no caret");
     BuildContext ctx;
-    const Rect full{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 400, .height = 60}};
+    constexpr Rect full{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 400, .height = 60}};
 
     Painter base;
     base.begin(400, 60);
@@ -195,7 +194,7 @@ AURORA_TEST_CASE(selection_highlight_visible_and_cleared_on_blur) {
     use_supersample_aa();
     Text txt("Hello Selection");
     BuildContext ctx;
-    const Rect full{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 400, .height = 60}};
+    constexpr Rect full{.origin = Point{.x = 0, .y = 0}, .size = Size{.width = 400, .height = 60}};
     Painter p;
     p.begin(400, 60);
     p.fill_rect(full, Color::white());

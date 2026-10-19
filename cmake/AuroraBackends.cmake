@@ -14,11 +14,11 @@
 # 累积已开启的 feature 宏名，供 AuroraInstall 统一导出（消除手动重复列表）。
 # 初始化位于 AuroraFeatures.cmake（早于本模块 include，且编解码宏等更早调用点也覆盖）。
 
-# ---- Headless（无头内存/PNG 后端，默认 ON） ----
-option(AURORA_BACKEND_HEADLESS "Build Headless (memory/PNG) Surface backend" ON)
-if (AURORA_BACKEND_HEADLESS)
-    aurora_define_feature(AURORA_BACKEND_HEADLESS EXPORT)
-endif ()
+# ---- Headless（无头内存/PNG 后端，恒编入，无开关） ----
+# 测试套件与像素读回回退路径以 HeadlessSurface 为基底（大量测试 TU 直接引用），
+# 关闭它不存在受支持的构建组合，故不再提供选项：宏恒定注入并随安装导出，
+# 消费端与库按同一 ODR 口径编译（固定注入详见 BUILD_OPTIONS.md §6）。
+aurora_define_feature(AURORA_BACKEND_HEADLESS EXPORT)
 
 # ---- Win32/GDI（Windows 默认 ON，否则 OFF） ----
 if (WIN32)
@@ -31,8 +31,10 @@ if (AURORA_BACKEND_WIN32)
     if (WIN32)
         # user32/gdi32：窗口与 GDI；shell32/ole32：Shell_NotifyIcon 与 COM 文件对话框；
         # uuid：CLSID/IID 常量（IFileOpenDialog 等）；imm32：IMM32 组合输入桥
-        # （ImmGetContext / ImmGetCompositionStringW / ImmSetCandidateWindow，见 window/detail/win32_ime.*）。
-        target_link_libraries(aurora PUBLIC user32 gdi32 shell32 ole32 uuid imm32)
+        # （ImmGetContext / ImmGetCompositionStringW / ImmSetCandidateWindow，见 window/detail/win32_ime.*）；
+        # dwmapi：DWM composition 探测与帧扩展（DwmIsCompositionEnabled /
+        # DwmExtendFrameIntoClientArea，见 window/detail/win32_dwm.h，CSD 投影/圆角能力判据）。
+        target_link_libraries(aurora PUBLIC user32 gdi32 shell32 ole32 uuid imm32 dwmapi)
     endif ()
 endif ()
 
@@ -212,17 +214,27 @@ if (AURORA_BACKEND_GPU_WGPU)
         find_program(AURORA_CLANG_EXECUTABLE clang)
         if (AURORA_CLANG_EXECUTABLE)
             get_filename_component(_wgpu_libclang_dir "${AURORA_CLANG_EXECUTABLE}" DIRECTORY)
-        elseif (WIN32)
-            # 注册表键由 LLVM 官方安装器写入；ProgramFiles/ProgramW6432 双查覆盖 32 位 CMake
-            # 跑在 64 位系统时的变量差异。两者都是相对量，不含盘符。
-            foreach (_cand "[HKEY_LOCAL_MACHINE\\SOFTWARE\\LLVM\\LLVM;]"
-                    "$ENV{ProgramFiles}/LLVM/bin" "$ENV{ProgramW6432}/LLVM/bin")
-                if (_cand AND EXISTS "${_cand}/libclang.dll")
-                    set(_wgpu_libclang_dir "${_cand}")
-                    break ()
-                endif ()
-            endforeach ()
+            # clang 旁目录不一定带 libclang 共享库：Ubuntu 的 clang 驱动在 /usr/bin，而
+            # libclang 在 /usr/lib/llvm-*/lib（Windows 的 LLVM 发行则两者同在 bin/）。
+            # 探到即验货，无共享库时清空继续走下面的通用默认位，否则 bindgen 会在
+            # cargo 阶段才报「Unable to find libclang」，与 configure 的成功假象相悖。
+            file(GLOB _wgpu_clang_side_libs "${_wgpu_libclang_dir}/libclang*.so*"
+                    "${_wgpu_libclang_dir}/libclang*.dylib" "${_wgpu_libclang_dir}/libclang.dll")
+            if (NOT _wgpu_clang_side_libs)
+                set(_wgpu_libclang_dir "")
+            endif ()
         endif ()
+    endif ()
+    if (NOT _wgpu_libclang_dir AND WIN32)
+        # 注册表键由 LLVM 官方安装器写入；ProgramFiles/ProgramW6432 双查覆盖 32 位 CMake
+        # 跑在 64 位系统时的变量差异。两者都是相对量，不含盘符。
+        foreach (_cand "[HKEY_LOCAL_MACHINE\\SOFTWARE\\LLVM\\LLVM;]"
+                "$ENV{ProgramFiles}/LLVM/bin" "$ENV{ProgramW6432}/LLVM/bin")
+            if (_cand AND EXISTS "${_cand}/libclang.dll")
+                set(_wgpu_libclang_dir "${_cand}")
+                break ()
+            endif ()
+        endforeach ()
     endif ()
     if (NOT _wgpu_libclang_dir AND UNIX)
         # Ubuntu/Debian 的 libclang 实际文件名为 libclang-XX.so(.1)，dev 包装为
@@ -302,6 +314,14 @@ if (AURORA_BACKEND_GPU_WGPU)
     # dl/pthread/m（Rust std 的 libm 符号，缺则 pow/fmod 未定义）。
     if (WIN32)
         target_link_libraries(aurora PUBLIC wgpu_native ws2_32 userenv bcrypt advapi32 oleaut32 ntdll)
+    elseif (APPLE)
+        # wgpu-native 的 Metal 后端（metal-rs）把框架依赖经 Rust 链接元数据带入静态库，
+        # C++ 侧链静态库时必须显式补 -framework 标志，否则 MTLCopyAllDevices 等 Metal 符号
+        # 在最终链接期 undefined。下列为 Metal 后端在 macOS 上的既定系统框架集。
+        target_link_libraries(aurora PUBLIC wgpu_native
+                "-framework Metal" "-framework Foundation" "-framework QuartzCore"
+                "-framework CoreFoundation" "-framework IOKit" "-framework Security"
+                "-framework SystemConfiguration" "-framework CoreGraphics")
     elseif (UNIX)
         target_link_libraries(aurora PUBLIC wgpu_native ${CMAKE_DL_LIBS} pthread m)
     else ()
@@ -371,6 +391,7 @@ if (AURORA_BACKEND_WAYLAND)
         aurora_log("Wayland text-input-unstable-v3: protocol XML missing (wayland-protocols too old?), IME bridge degrades to no-op")
     endif ()
     set(AURORA_WL_GEN_SRCS "")
+    set(AURORA_WL_GEN_HDRS "")
     foreach (_entry IN LISTS AURORA_WL_PROTOS)
         string(REPLACE "|" ";" _pair "${_entry}")
         list(GET _pair 0 _xml)
@@ -383,7 +404,14 @@ if (AURORA_BACKEND_WAYLAND)
                 DEPENDS "${_xml}" VERBATIM
                 COMMENT "wayland-scanner: ${_name}")
         list(APPEND AURORA_WL_GEN_SRCS "${_src}")
+        list(APPEND AURORA_WL_GEN_HDRS "${_hdr}")
     endforeach ()
+    # 聚合目标：把生成的协议头/源拉成一个可单独构建的 target。lint 作业只 configure 不构建
+    # （clang-tidy 只吃 compile_commands.json），但被分析的 TU 会 include 这些生成头——缺头即
+    # `broken_tus`，门禁把「缺文件」如实判红。故 lint 前先 `cmake --build <build> --target
+    # wayland-gen` 一次（秒级），让生成头就位。整套构建（`--target aurora`）本就会经 custom
+    # command 连带生成，这里的聚合只多给一个显式入口，不改变既有依赖关系。
+    add_custom_target(wayland-gen DEPENDS ${AURORA_WL_GEN_HDRS} ${AURORA_WL_GEN_SRCS})
     # 生成的 C 胶水非本项目代码：屏蔽 -Wall/-Wpedantic 告警（不改动其内容）。
     set_source_files_properties(${AURORA_WL_GEN_SRCS} PROPERTIES COMPILE_OPTIONS "-w")
     target_sources(aurora PRIVATE ${AURORA_WL_GEN_SRCS})
@@ -484,6 +512,46 @@ if (AURORA_ENABLE_AUDIO)
         endif ()
         aurora_define_feature(AURORA_ENABLE_AUDIO_WEBAUDIO EXPORT)
         aurora_log("Web Audio backend enabled (AudioContext + main-thread push ring)")
+    endif ()
+endif ()
+
+# ---- WebView 能力（原生 Web 视图插件式嵌入，交互 / 快照双模）----
+# webview/ 公共模块**常驻编译**（对齐 audio 的「图 API 恒在、能力运行期查询」先例）：
+# 开关只决定平台原生实现是否编入。未开启 / 运行期探测不到引擎运行时 → WebView 控件
+# 降级为占位矩形，不构建失败、不运行崩溃。
+# 作用域取 PRIVATE 且不 EXPORT：公共头零宏引用（能力一律经 WebViewCapabilities 的运行时
+# 值或 debug::feature_flags() 查询），故消费端无需看见这三枚宏——与 AURORA_ENABLE_SIMD
+# 等纯内部宏同口径。
+option(AURORA_ENABLE_WEBVIEW "Build the WebView control (native web embedding; OFF = placeholder degradation)" OFF)
+if (AURORA_ENABLE_WEBVIEW)
+    aurora_define_feature(AURORA_ENABLE_WEBVIEW SCOPE PRIVATE)
+    # Windows 对位后端：WebView2（系统运行时，运行期动态加载，不静态链 WebView2Loader）。
+    if (WIN32)
+        option(AURORA_ENABLE_WEBVIEW_WEBVIEW2 "Build WebView2 backend (Windows, runtime-bound)" ON)
+    else ()
+        option(AURORA_ENABLE_WEBVIEW_WEBVIEW2 "Build WebView2 backend (Windows, runtime-bound)" OFF)
+    endif ()
+    if (AURORA_ENABLE_WEBVIEW_WEBVIEW2)
+        if (NOT WIN32)
+            aurora_error("AURORA_ENABLE_WEBVIEW_WEBVIEW2 is only supported on Windows;"
+                    " disable it or turn off AURORA_ENABLE_WEBVIEW on other platforms.")
+        endif ()
+        aurora_define_feature(AURORA_ENABLE_WEBVIEW_WEBVIEW2 SCOPE PRIVATE)
+        aurora_log("WebView2 backend enabled (runtime-bound, zero link dependency)")
+    endif ()
+    # Linux 对位后端：WebKitGTK（运行期 dlopen，构建机无需 dev 包）。
+    if (LINUX)
+        option(AURORA_ENABLE_WEBVIEW_WEBKITGTK "Build WebKitGTK backend (Linux, runtime-bound)" ON)
+    else ()
+        option(AURORA_ENABLE_WEBVIEW_WEBKITGTK "Build WebKitGTK backend (Linux, runtime-bound)" OFF)
+    endif ()
+    if (AURORA_ENABLE_WEBVIEW_WEBKITGTK)
+        if (NOT LINUX)
+            aurora_error("AURORA_ENABLE_WEBVIEW_WEBKITGTK is only supported on Linux;"
+                    " disable it or turn off AURORA_ENABLE_WEBVIEW on other platforms.")
+        endif ()
+        aurora_define_feature(AURORA_ENABLE_WEBVIEW_WEBKITGTK SCOPE PRIVATE)
+        aurora_log("WebKitGTK backend enabled (runtime-bound, zero build dependency)")
     endif ()
 endif ()
 

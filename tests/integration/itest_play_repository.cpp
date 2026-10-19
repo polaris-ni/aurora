@@ -6,7 +6,6 @@
 ///           screenshots 数据契约，以及可替换 DataHook 数据源注入
 
 #include <array>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>

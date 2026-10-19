@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <thread>
 #include <type_traits>
+#include <utility>
 
 #include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_WAYLAND)
@@ -98,7 +99,7 @@ AURORA_TEST_CASE(wayland_surface_live_cursor_commit_sweep) {
     // 两轮全形状（形状逐一变化，故每轮每形状各提交一次）。命中名取**严格等值**断言：走 default/left_ptr
     // 回退即「未按请求形状解析」，属缺陷而非主题差异（freedesktop 规范名是主题的必备项）。
     for (int round = 0; round < 2; ++round) {
-        for (int i = 0; i < static_cast<int>(aurora::AURORA_CURSOR_SHAPE_COUNT); ++i) {
+        for (int i = 0; std::cmp_less(i, aurora::AURORA_CURSOR_SHAPE_COUNT); ++i) {
             const auto shape = static_cast<aurora::CursorShape>(i);
             surface.set_cursor(shape);
             surface.poll_platform_events();
@@ -149,11 +150,13 @@ AURORA_TEST_CASE(wayland_surface_live_text_input_bridge_invariants) {
             "bridge is not compiled");
     }
     // 一致性不变量：input 只能来自 manager 绑定，enable 只能发生在本端已建 input 之后。
-    AURORA_TEST_CHECK(!(st.input_created && !st.manager_bound));
-    AURORA_TEST_CHECK(!(st.enabled && !st.input_created));
+    AURORA_TEST_CHECK(!st.input_created || st.manager_bound);
+    AURORA_TEST_CHECK(!st.enabled || st.input_created);
 
-    surface.set_composition_caret_provider(
-        [] { return aurora::Rect{aurora::Point{24.0F, 40.0F}, aurora::Size{6.0F, 16.0F}}; });
+    surface.set_composition_caret_provider([] {
+        return aurora::Rect{.origin = aurora::Point{.x = 24.0F, .y = 40.0F},
+                            .size = aurora::Size{.width = 6.0F, .height = 16.0F}};
+    });
     for (int i = 0; i < 10; ++i) {  // present 内含 IME 状态刷新
         (void)surface.begin_frame(320, 240);
         (void)surface.present();

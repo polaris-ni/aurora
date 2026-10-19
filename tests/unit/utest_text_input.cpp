@@ -7,7 +7,6 @@
 /// Ctrl+X 在剪贴板写入失败时不删选区且留诊断
 
 #include <algorithm>
-#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -20,6 +19,7 @@
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/render/painter.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -783,6 +783,198 @@ AURORA_TEST_CASE(cut_keeps_text_when_clipboard_write_fails) {
         "the deterministic clipboard-write failure (invalid UTF-8 rejected before OpenClipboard) is Windows-specific; "
         "xsel/xclip/pbcopy accept arbitrary bytes, so this path cannot fail deterministically elsewhere");
 #endif
+}
+
+AURORA_TEST_CASE(accessibility_selection_and_replace_hooks) {
+    // 读屏钩子族：码点 ⇄ 字节换算（多字节文本走两条独立路径）。
+    TextInput ti;
+    ti.on_focus_change(true);
+    TextInputEvent seed;
+    seed.text = "héllo";  // é 占 2 字节：h(0) é(1..2) l(3) l(4) o(5)
+    ti.on_text_input(seed);
+    AURORA_TEST_CHECK_EQ(std::string{ti.accessibility_text()}, std::string{"héllo"});
+
+    // 无选区：两端重合于光标（字节位置）。
+    const auto no_sel = aurora::testing::require_value(ti.accessibility_selection());
+    AURORA_TEST_CHECK_EQ(no_sel.start, no_sel.end);
+
+    // 读屏设置选区（码点区间 [1,4)）→ 字节半开区间 [1,4)。
+    ti.accessibility_set_selection(1, 4);
+    const auto sel = aurora::testing::require_value(ti.accessibility_selection());
+    AURORA_TEST_CHECK_EQ(sel.start, 1U);
+    AURORA_TEST_CHECK_EQ(sel.end, 4U);
+    AURORA_TEST_CHECK_EQ(ti.selected_text(), std::string{"él"});
+
+    // 单点选区（start==end）：退化为光标位置，两端重合。
+    ti.accessibility_set_selection(2, 2);
+    const auto caret_sel = aurora::testing::require_value(ti.accessibility_selection());
+    AURORA_TEST_CHECK_EQ(caret_sel.start, caret_sel.end);
+    AURORA_TEST_CHECK_FALSE(ti.has_selection());
+
+    // 越界钳制：字节索引截断到文本长度。
+    ti.accessibility_set_selection(0, 9999);
+    AURORA_TEST_CHECK_TRUE(ti.has_selection());
+
+    // 读屏替换文本：[1,3) 字节区间（即 é）→ "X"。
+    ti.accessibility_replace_text(1, 3, "X");
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{"hXllo"});
+
+    // 只读 / 禁用：替换不生效。
+    TextInput ro;
+    ro.set_value("keep").set_read_only(true);
+    ro.accessibility_replace_text(0, 4, "nope");
+    AURORA_TEST_CHECK_EQ(ro.value(), std::string{"keep"});
+    TextInput dis;
+    dis.set_value("keep").set_enabled(false);
+    dis.accessibility_replace_text(0, 4, "nope");
+    AURORA_TEST_CHECK_EQ(dis.value(), std::string{"keep"});
+}
+
+AURORA_TEST_CASE(select_all_backspace_and_forward_delete_keys) {
+    auto press = [](KeyCode code, ModifierKey mods) -> KeyEvent {
+        KeyEvent k;
+        k.key = static_cast<int>(code);
+        k.action = KeyAction::Down;
+        k.modifiers = mods;
+        return k;
+    };
+
+    // Ctrl+A 全选 → Backspace 删除整个选区。
+    TextInput ti;
+    ti.on_focus_change(true);
+    TextInputEvent seed;
+    seed.text = "abcd";
+    ti.on_text_input(seed);
+    auto ctrl_a = press(KeyCode::A, ModifierKey::Control);
+    ti.on_key_event(ctrl_a);
+    AURORA_TEST_CHECK_TRUE(ti.has_selection());
+    AURORA_TEST_CHECK_EQ(ti.selected_text(), std::string{"abcd"});
+    auto bksp = press(KeyCode::Backspace, ModifierKey::None);
+    ti.on_key_event(bksp);
+    AURORA_TEST_CHECK_EQ(ti.value(), std::string{""});
+
+    // 无选区 Backspace：删除光标前一个字符（delete_before_caret 的 UTF-8 尾字节回退）。
+    TextInput utf8_field;
+    utf8_field.on_focus_change(true);
+    TextInputEvent cjk;
+    cjk.text = "a你b";  // CJK-LITERAL: cjk-fixture - multi-byte UTF-8 caret deletion fixture
+    utf8_field.on_text_input(cjk);
+    auto b1 = press(KeyCode::Backspace, ModifierKey::None);
+    utf8_field.on_key_event(b1);
+    AURORA_TEST_CHECK_EQ(utf8_field.value(), std::string{"a你"});  // CJK-LITERAL: cjk-fixture - 末字符整码点删除
+    // 光标在开头：Backspace no-op。
+    auto al1 = press(KeyCode::ArrowLeft, ModifierKey::None);
+    utf8_field.on_key_event(al1);
+    auto al2 = press(KeyCode::ArrowLeft, ModifierKey::None);
+    utf8_field.on_key_event(al2);
+    auto b2 = press(KeyCode::Backspace, ModifierKey::None);
+    utf8_field.on_key_event(b2);
+    AURORA_TEST_CHECK_EQ(utf8_field.value(), std::string{"a你"});  // CJK-LITERAL: cjk-fixture - 光标在开头退格无变化
+
+    // 前向 Delete 键：单行框仅支持退格，Delete 未被消费、文本保持不变。
+    TextInput fwd;
+    fwd.on_focus_change(true);
+    TextInputEvent xyz;
+    xyz.text = "xyz";
+    fwd.on_text_input(xyz);
+    auto home_k = press(KeyCode::Home, ModifierKey::None);
+    fwd.on_key_event(home_k);
+    AURORA_TEST_CHECK_TRUE(home_k.is_handled);
+    auto del_k = press(KeyCode::Delete, ModifierKey::None);
+    fwd.on_key_event(del_k);
+    AURORA_TEST_CHECK_FALSE(del_k.is_handled);
+    AURORA_TEST_CHECK_EQ(fwd.value(), std::string{"xyz"});
+}
+
+AURORA_TEST_CASE(pointer_press_drag_release_selection) {
+    TextInput ti;
+    ti.on_focus_change(true);
+    TextInputEvent seed;
+    seed.text = "abcdef";
+    ti.on_text_input(seed);
+    ti.mount(BuildContext{});
+    ti.layout(bounded(300.0F, 60.0F), BuildContext{});
+
+    // 按下定位光标 + 拖拽扩选 + 抬起结束。
+    MouseEvent press_e;
+    press_e.action = MouseAction::Press;
+    press_e.local_position = Point{.x = 10.0F, .y = 30.0F};
+    ti.on_pointer_event(press_e);
+    AURORA_TEST_CHECK_TRUE(press_e.is_handled);
+
+    MouseEvent drag;
+    drag.action = MouseAction::Move;
+    drag.local_position = Point{.x = 60.0F, .y = 30.0F};
+    ti.on_pointer_event(drag);
+    AURORA_TEST_CHECK_TRUE(drag.is_handled);
+    AURORA_TEST_CHECK_TRUE(ti.has_selection());  // 拖拽形成选区（含头含尾）
+
+    MouseEvent up;
+    up.action = MouseAction::Release;
+    up.local_position = Point{.x = 60.0F, .y = 30.0F};
+    ti.on_pointer_event(up);
+    AURORA_TEST_CHECK_TRUE(up.is_handled);
+
+    // 禁用态：指针交互直接放行（不消费、不选中）。
+    TextInput disabled;
+    disabled.set_enabled(false);
+    disabled.mount(BuildContext{});
+    disabled.layout(bounded(300.0F, 60.0F), BuildContext{});
+    MouseEvent ignored;
+    ignored.action = MouseAction::Press;
+    ignored.local_position = Point{.x = 10.0F, .y = 30.0F};
+    disabled.on_pointer_event(ignored);
+    AURORA_TEST_CHECK_FALSE(ignored.is_handled);
+}
+
+AURORA_TEST_CASE(paint_obscured_selection_preedit_and_border) {
+    // 掩码态：逐码点圆点绘制。
+    TextInput pw;
+    pw.on_focus_change(true);
+    pw.set_obscure_text(true);
+    pw.set_border_width(2.0F);
+    TextInputEvent seed;
+    seed.text = "secret";
+    pw.on_text_input(seed);
+    pw.mount(BuildContext{});
+    pw.layout(bounded(300.0F, 60.0F), BuildContext{});
+    {
+        Painter p;
+        p.begin(300, 60);
+        pw.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = pw.size()}, BuildContext{});
+    }
+
+    // 全选高亮绘制（掩码串与实绘同源）。
+    KeyEvent select_all;
+    select_all.key = static_cast<int>(KeyCode::A);
+    select_all.action = KeyAction::Down;
+    select_all.modifiers = ModifierKey::Control;
+    pw.on_key_event(select_all);
+    {
+        Painter p;
+        p.begin(300, 60);
+        pw.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = pw.size()}, BuildContext{});
+    }
+
+    // 组合态：preedit 下划线/选区高亮绘制 + 选区端点倒置退化 + 组合光标盒。
+    TextInput comp;
+    comp.on_focus_change(true);
+    comp.mount(BuildContext{});
+    comp.layout(bounded(300.0F, 60.0F), BuildContext{});
+    TextCompositionEvent pre;
+    pre.preedit = "zhong";
+    pre.cursor_index = 5;
+    pre.sel_start = 5;
+    pre.sel_end = 1;  // 端点倒置 → 退化为单点选区
+    comp.on_text_composition(pre);
+    AURORA_TEST_CHECK_TRUE(comp.is_composing());
+    {
+        Painter p;
+        p.begin(300, 60);
+        comp.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = comp.size()}, BuildContext{});
+    }
+    const Rect cb = comp.composition_caret_bounds();
+    AURORA_TEST_CHECK_GT(cb.size.height, 0.0F);
 }
 
 }  // namespace aurora::test_cases::utest_text_input

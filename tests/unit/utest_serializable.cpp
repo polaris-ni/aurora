@@ -14,7 +14,6 @@
 #include "aurora/storage/serializable.h"
 #include "framework/aurora_test.h"
 #include "framework/json_literals.h"
-#include "framework/json_value_printer.h"
 
 namespace aurora::test_cases::utest_serializable {
 

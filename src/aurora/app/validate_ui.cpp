@@ -4,6 +4,7 @@
 #include <set>
 #include <sstream>
 
+#include "aurora/icon/icon.h"
 #include "aurora/widget/serialization.h"
 #include "aurora/widget/widget.h"
 
@@ -156,9 +157,9 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
     const auto *props_ptr = node.at("props");
     const Json &props = props_ptr != nullptr ? *props_ptr : empty_props;
 
-    // 3a. 检查必填属性
-    if (schema->contains("prop_descriptors") && schema->at("prop_descriptors")->is_array()) {
-        const Json &descriptors = *schema->at("prop_descriptors");
+    // 3a. 检查必填属性与类型匹配（单一权威 props 表：required 仅 true 时输出，缺省读作 false）
+    if (schema->contains("props") && schema->at("props")->is_array()) {
+        const Json &descriptors = *schema->at("props");
         for (const auto &descriptor : descriptors) {
             const auto p_name = descriptor.as_or<std::string>("name", "");
             const bool required = descriptor.as_or<bool>("required", false);
@@ -198,6 +199,18 @@ auto validate_node(const Json &node, const std::string &path, std::vector<Valida
                     sug += ptype;
                     errors.push_back({.path = p_path, .message = msg, .suggestion = sug});
                 }
+            }
+        }
+    }
+
+    // 3c. 图标语义名（Icon / IconButton）：`IconRegistry` 非空时查表，未命中报结构化错误并回带候选名；
+    // 表空视为「应用尚未注册任何图标」，跳过校验避免把合法的启动早期误报成一片。
+    if ((type == "Icon" || type == "IconButton") && props.contains("icon")) {
+        const auto icon_name = props.at("icon")->as_or<std::string>("");
+        if (!icon_name.empty() && !icon::IconRegistry::names().empty()) {
+            if (const auto hit = icon::IconRegistry::lookup(icon_name); !hit.ok()) {
+                errors.push_back(
+                    {.path = props_path + ".icon", .message = hit.error().message, .suggestion = hit.error().hint});
             }
         }
     }

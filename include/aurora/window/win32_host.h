@@ -1,14 +1,16 @@
 #pragma once
 
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 
 #include "aurora/core/a11y_provider.h"
+#include "aurora/core/image.h"
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
 #include "aurora/window/surface.h"
+#include "aurora/window/title_bar_style.h"
+#include "aurora/window/window_frame_style.h"
 #include "aurora/window/window_state.h"
 
 // 共享 Win32 窗口宿主：仅依赖 Windows SDK（user32/gdi32），零三方依赖。
@@ -24,6 +26,9 @@
 #ifdef AURORA_BACKEND_WIN32
 
 namespace aurora {
+
+class DisplayList;  // GPU 帧命令缓冲（完整定义见 render/display_list.h）；装饰录制口按引用取用
+class Painter;  // 绘制目标（完整定义见 render/painter.h，已由 surface.h 前置声明可见）
 
 /// @brief 共享 Win32 窗口宿主：窗口创建 + 消息泵 + 事件翻译 + DPI + 同步重渲染。
 ///
@@ -77,6 +82,41 @@ class Win32Host {
     /// @brief 运行时更新窗口标题（SetWindowText + UTF-8→ACP，支持非 ASCII 字符）。
     /// @param title 新标题（UTF-8）。
     auto set_title(const std::string &title) const -> void;
+
+    // ---- 自绘装饰（CSD：`WindowStyleOptions::decoration` 的真实语义）----
+
+    /// @brief 运行期更新自绘标题栏样式（转发给宿主；下一帧重绘装饰带）。
+    /// @param style 新标题栏样式（栏高/配色/按钮语言/显隐开关）。
+    auto set_title_bar_style(const TitleBarStyle &style) const -> void;
+    /// @brief 运行期更新自绘窗框样式（投影厚度/基色/模糊）。
+    ///
+    /// 投影厚度即缩放热区带宽：变化后热区判定同步更新。Win32 客户区恒为整窗
+    /// （无外延 margin 带），故不涉及表面尺寸口径变化，只重算热区。
+    /// @param style 新窗框样式；探测不到 DWM 合成能力时投影厚度自行降为 0。
+    auto set_window_frame_style(const WindowFrameStyle &style) const -> void;
+    /// @brief 运行期更新标题栏图标（nullptr = 留白，几何位保留）。
+    /// @param icon 图标像素（共享指针，避免深拷贝像素缓冲）。
+    auto set_title_bar_icon(const std::shared_ptr<Image> &icon) const -> void;
+    /// @brief 自绘装饰为应用内容预留的安全区（逻辑 dp）。
+    ///
+    /// 只报标题栏带高度（`top = 栏高`，其余 0；口径与 X11 逐值一致）；Auto/ServerSide
+    /// 档无自绘装饰，恒零。最大化保留栏高，全屏由共享层归零（揭示条不回流布局）。
+    /// @return 装饰占用的内边距（逻辑 dp）。
+    [[nodiscard]] auto content_inset() const -> EdgeInsets;
+    /// @brief 把自绘标题栏覆绘进给定帧缓冲（软件上屏路径：GDI / D3D11 上传前调用）。
+    ///
+    /// 幂等：重复调用逐位重画同一份装饰；策略未激活（Auto/ServerSide）或全屏未揭示时
+    /// 零开销直返。坐标同 Painter 的逻辑 dp 域（缩放由 Painter 的 scale 承载）。
+    /// @param p 目标帧缓冲（须已按当前 scale 配置）。
+    auto paint_decoration(Painter &p) const -> void;
+    /// @brief 把自绘标题栏录制进帧级 DisplayList（GPU 上屏路径：app 帧之后回放）。
+    ///
+    /// swapchain 独占整块窗口，画进 Painter 的装饰不随帧缓冲上屏，故只能作为命令在
+    /// app 帧之上回放——与 `WgpuWaylandSurface` 的装饰回放同一模式，两条路径共用
+    /// `csd::paint_title_bar`，绘制内容同源。
+    /// @param dl 帧命令缓冲（录制前清空，回放侧为 RHI）。
+    /// @return 本帧有标题栏内容要回放时 true（调用方据此跳过空回放）。
+    auto record_client_decoration(DisplayList &dl) const -> bool;
 
     /// @brief 原生窗口句柄（`HWND`），以 `void*` 暴露以避免公共头引入 <windows.h>。
     [[nodiscard]] auto hwnd() const -> void *;
@@ -141,6 +181,9 @@ class Win32Host {
     /// @brief 注册 DPI 缩放变化回调：`WM_DPICHANGED` 处理后上报新的 `scale_factor`。
     /// @param h 缩放变化处理器，参数为新的缩放因子。
     auto set_scale_change_handler(std::function<void(float)> h) const -> void;
+    /// @brief 注册 OS 明暗偏好变化回调：`WM_SETTINGCHANGE` 探测到系统深浅色切换后上报新档位。
+    /// @param h 档位处理器，参数为新的 OS 档位（`Unspecified` = 探测不到偏好）。
+    auto set_os_color_scheme_handler(Surface::OsColorSchemeHandler h) const -> void;
 
     // ---- 无障碍桥 ----
 

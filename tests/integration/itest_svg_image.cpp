@@ -6,7 +6,6 @@
 ///           viewBox 回退、尺寸/形状数量防御
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>

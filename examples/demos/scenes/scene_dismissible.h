@@ -34,7 +34,7 @@ namespace aurora::demo_scenes {
     auto make_card = [](const std::string &label, au::Color tint, bool custom_cb) -> au::Node {
         au::Text title{label};
         title.modifier.set(au::Modifier{}.background(tint).size(280.0F, 56.0F));
-        auto dis = std::make_shared<au::Dismissible>(au::Node{std::move(title)});
+        const auto dis = std::make_shared<au::Dismissible>(au::Node{std::move(title)});
         if (custom_cb) {
             // 自定义回调接管默认摘除：这里只记录（真实场景多为删除数据后重建子树）。
             // 回调转入 std::function（on_dismissed），本检查对可调用对象一律判「不应抛出」；
@@ -47,7 +47,7 @@ namespace aurora::demo_scenes {
         return au::Node{dis};
     };
 
-    au::Column list = au::Column{
+    auto list = au::Column{
         au::ColumnProps{
             .children =
                 {
@@ -57,7 +57,7 @@ namespace aurora::demo_scenes {
                 },
         },
     };
-    auto list_ptr = std::make_shared<au::Column>(std::move(list));
+    const auto list_ptr = std::make_shared<au::Column>(std::move(list));
 
     au::Node root = au::Column{
         au::ColumnProps{

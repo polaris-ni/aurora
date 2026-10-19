@@ -9,8 +9,6 @@
 /// 闸门与欠载真机面不在 CI：见 tools/verify/wasm_audio_live_probe.cpp。
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
 #include <numeric>
 #include <vector>
 

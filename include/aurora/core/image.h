@@ -46,7 +46,7 @@ struct Image {
     [[nodiscard]] auto content_hash() const -> std::uint64_t;
 
     /// @brief 使摘要缓存失效（直接改写 `pixels` 后调用，见 `content_hash` 注释）。
-    auto invalidate_content_hash() -> void { content_hash_valid_ = false; }
+    auto invalidate_content_hash() const -> void { content_hash_value_valid = false; }
 
     /// @brief 从文件加载。
     /// 分发策略：未压缩 24 位 BMP 走内置解码；PNG/JPG/GIF/TGA/HDR 等走 vendored
@@ -72,15 +72,13 @@ struct Image {
     std::uint64_t stream_key = 0;
     std::uint64_t stream_version = 0;  ///< 流式版本号；相对上次值变化即触发 GPU 增量 sub-upload。
 
-    // NOLINTBEGIN(readability-identifier-naming)
     /// @brief 内部缓存（勿直接读写）：content_hash 惰性求值状态。
     /// 声明在 pixels 之后，保持既有 `Image{.width=…, .height=…, .pixels=…}` 聚合初始化兼容
     /// （未列字段取默认值）；尾部 `_` 是内部缓存标记，但 `Image` 是聚合体——成员必须公开，
     /// 否则 `Image{.pixels=…}` 这类既有初始化写法即失效（POD 数据载体约定，见 CODING_STANDARDS.md §2）。
     /// @note 上方区间式豁免起点与下方终点成对，覆盖两缓存成员的命名豁免。
-    mutable std::uint64_t content_hash_ = 0;  ///< 惰性求值的内容摘要缓存值。
-    mutable bool content_hash_valid_ = false;  ///< 摘要缓存有效性；改写 pixels 后由 invalidate 置 false。
-    // NOLINTEND(readability-identifier-naming)
+    mutable std::uint64_t content_hash_value = 0;  ///< 惰性求值的内容摘要缓存值。
+    mutable bool content_hash_value_valid = false;  ///< 摘要缓存有效性；改写 pixels 后由 invalidate 置 false。
 };
 
 }  // namespace aurora

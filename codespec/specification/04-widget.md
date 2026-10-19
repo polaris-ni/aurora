@@ -20,6 +20,7 @@
 | 无障碍语义树 | `a11y_tree.h`（几何盒 / Name 回退链 / 递归节点与整树构建：`build_accessibility_tree`）、`a11y_diff.h`（`TreeSnapshot` / `NodeSnapshot` / `TreeDiff` / `build_tree_snapshot`）。二者需 `Widget` 完整定义，故归本层；纯类型与桥抽象留在 [`01-core.md`](01-core.md) §7.2 |
 | 容器与导航壳 | `drawer.h`、`tab_bar.h`、`menu_bar.h`、`toolbar.h`、`title_bar.h`、`dialog.h`、`popup.h`、`toast.h`、`expansion_panel.h`、`stepper.h`、`bottom_nav_bar.h` |
 | 绘制与占位 | `canvas.h`、`placeholder.h`、`skeleton.h`、`progress.h`、`image_widget.h`、`chip.h`、`form.h` |
+| 图标 | `icon_widget.h`（`Icon` / `IconButton`）；值类型与注册表在 `icon/icon.h`、SVG 光栅缓存在 `icon/icon_svg.h`（绘制通道契约见 [`03-layout-render.md`](03-layout-render.md) §8.2「图标绘制通道」） |
 | 数据展示与跨域控件 | `data_widgets.h`（`DataTable`/`TreeView`/`ListView`）；另散布于 `media/video_player.h`、`media/video_controls.h`、`navigation/hero.h`、`app/perf_overlay.h` |
 | 工厂与配方 | `recipes.h`、根级 `include/aurora/ui/` |
 | 调试 | `inspect.h`、`inspector_panel.h` |
@@ -378,6 +379,8 @@ au::Text("Welcome").font_size(24).bold();
 | 控件 | 说明 |
 |:---|:---|
 | `ImageView` | `bitmap`、`source`（源文件路径，用于序列化/占位）。URL 源经注入的 `ImageFetcher`（`ImageFetcher` / `from_url` / `begin_load` / `ImageLoadState::Loading/Loaded/Failed` / `ImageCache`，见 `image_widget.h`）异步加载；未注入 fetcher 时降级为占位。**序列化类型名为 `Image`**。`width()` / `height()` 是 widget 级方法，不进 `Props` |
+| `Icon` | 图标控件（`widget/icon_widget.h`，第 75 个 widget）：按语义名（`icon` 键，经 `IconRegistry` 查表）或代码侧 `IconData` 字面直绘字形 / SVG。`size`（dp 正方形，基准档 `IconSize` 16/20/24/32）、`color`（空 = 跟随主题 `on_surface_variant`）、`semantic_label`（非空才进语义树，覆写 `accessibility_label()`；空 = 纯装饰）。**库不内置任何图标资产**：字体经 `FontEngine::register_font*` 由应用注册，语义名经 `IconRegistry` 由应用注册；未注册名字绘制侧跳过（不崩溃、不画占位），`validate_ui` 报 `icon-name-not-registered` |
+| `IconButton` | 图标按钮（第 76 个 widget）：方形点击区内绘制图标（图标盒 + 两侧 `padding`），`on_click` 回调经 `activate()` 在 Release 且未拖拽/未长按时同步派发；未设色时按启用 / 悬停 / 按下 / 禁用四态取主题角色（禁用降级、焦点态画焦点环）。`wants_click()` 仅在启用且有回调时为 true——禁用态吞掉点击不冒泡 |
 | `VideoPlayer` | 视频播放控件（`media/video_player.h`）；`fit`（`BoxFit` 枚举：Fill / Contain / Cover 等）、`show_controls`；回调 `on_tap` / `on_double_tap`；帧源经 `set_source` 注入 |
 | `VideoControls` | 视频播放控件叠层（`media/video_controls.h`），配 `VideoPlayer` 使用，单子容器 |
 | `Placeholder` | 通用降级占位盒（`widget/placeholder.h`），序列化键 `message` 说明文字（`au::Placeholder("…")` 或 `.set_message("…")` 构造，非聚合类型、无 initializer_list 构造） |
@@ -391,10 +394,13 @@ au::Text("Welcome").font_size(24).bold();
 | `ProgressDialog` | 模态进度对话框（`widget/drawer.h`）；`message`、`progress`（0..1，-1 = 不确定态）、`open`、`cancellable`；回调 `on_cancel` |
 | `OverlayHost` | 浮层宿主（`widget/popup.h`）；`add_overlay(Node)` 追加浮层并返回**可移除序号**（`std::optional<std::size_t>`，宿主尚无基础内容时为 `std::nullopt`——此时新节点落在序号 0，而 0 恒被解释为**基础内容**、`remove_overlay` 拒收，返回它等于给调用方一个永远删不掉的下标），`remove_overlay(index)` 拒收 0 与越界序号；允许多子 |
 
+`MenuBar`（自绘，`widget/menu_bar.h`）的数据侧是**应用级单一真源**：菜单项结构 `MenuItem`（`app/menu.h`）与顶级菜单结构 `Menu`（`widget/menu_bar.h`）既被自绘 `MenuBar` 消费，也被 `Modifier` 层的上下文菜单与 `SystemTray` 共用；纯数据模型 `MenuModel` 与投影函数（`to_menu_model` / `to_menu_models` / `from_menu_model`）从**同一批结构**投影出「无行为、无渲染提示」的数据视图，供原生菜单桥消费（契约与投影方向见 [`06-app-platform.md`](06-app-platform.md) §8.4）。控件自身不参与投影：`MenuBar` 存的仍是 `std::vector<Menu>`，其构造、绘制与命中逻辑与投影无关；`Menu` / `MenuItem` 为原生桥而增的 `id` 字段不参与自绘任何分支。自绘与原生是同一份模型的**二显一存**，不另立平行菜单 API（命令行入口在 [`GUIDELINE.md`](GUIDELINE.md)）。
+
 ### 3.7 平台与调试
 
 | 控件 / 设施 | 说明 |
 |:---|:---|
+| `WebView` | 系统原生 Web 嵌入控件（`webview/web_view.h`，`aurora::webview`）。props：`url` / `html` / `mode`（`WebViewMode` 枚举：Interactive / Snapshot）/ `javascript_enabled` / `zoom_factor`；回调 `on_navigation` / `on_title_changed` / `on_web_message` / `on_process_failed` 旁挂、**不进序列化面**。**降级而非中止**：引擎不可用时 `degraded()` 为真、呈现占位盒，能力经 `capabilities()` / `feature_flags().webview` 运行期查询（归因 slug 见 [`06-app-platform.md`](06-app-platform.md) §12.1）。**像素不经 `Painter` 合成**：交互模式由宿主 `NativeViewHost` 作原生子视图叠加显示、快照模式只作像素来源，契约同 §12.1 |
 | `InspectorPanel` | 左右分栏 Widget 树浏览器 + 属性编辑器（详见 [`08-tooling.md`](08-tooling.md)） |
 | `PerfOverlay` | 帧率 / 性能 HUD（`app/perf_overlay.h`）；`visible`、`show_counters`；每帧从 `FrameStats` 重读，故 `can_cache_display_list()` 为 `false`；读数陈旧（`FrameStats::is_stale()`）时第一行灰化并追加 `stale <空闲秒数>` |
 | `inspect.h` | 控件树检查函数集 |
@@ -419,7 +425,7 @@ au::Text("Welcome").font_size(24).bold();
 1. **数据与视觉配置都是纯值属性**，整包进序列化面（`to_json` / `from_json` / `diff` / `apply_patch`）——AI 可经 schema + `from_json` 生成带真实数据的图表；交互回调（如 `on_point_tapped`）旁挂、**不进序列化面**。
 2. **轴域与命中反查同源**：渲染、刻度生成、hover 命中都消费同一份 `LinearScale` / `BandScale`，不得各算一遍。
 3. **绘制不得越出控件 `bounds`**：控件自身的绘制越界不会被擦除（残影），脏区按 `Widget::dirty_bounds()`（= `paint_bounds_` ∪ 盒外装饰）标记。轴留白与图例带在控件内部以 `padding` 预留，悬浮值框按可用区夹取 / 翻转。唯一被认可的盒外绘制是基类统一焦点环，其外扩已由 `dirty_bounds()` 承担（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4）。
-4. **取色与取 Locale 一律带回退**：系列色 = 显式 `color` > `Theme` 命名令牌 `chart.palette.<i%8>` > 内置 8 色板；网格 / 标签色取自 `inherit_theme(ctx)`；刻度文本经 `format_number(v, locale, digits)`，Locale 用 `ctx.environment<Locale>()` 取值、**未注入回退 `Locale{}`**（`render_to_png` 传 `constexpr BuildContext`，`env_of<Locale>` 会断言失败）。
+4. **取色与取 Locale 一律带回退**：系列色 = 显式 `color` > 主题图表色板 `ChartPalette`（经 `ThemeExtension<T>` 接入，应用可在根主题播种 `Theme::light().with_extension(ChartPalette::light())`）> 内置 8 色板（`chart_palette(index % 8)`，未注册 `ChartPalette` 时回落，观感同值）；网格 / 标签色取自 `inherit_theme(ctx)`；刻度文本经 `format_number(v, locale, digits)`，Locale 用 `ctx.environment<Locale>()` 取值、**未注入回退 `Locale{}`**（`render_to_png` 传 `constexpr BuildContext`，`env_of<Locale>` 会断言失败）。
 
 健壮性降级：空数据只画轴；`range == 0` 时域退化为 `[v, v+1]`（全 0 即 `[0,1]`）；NaN / ±inf 数据点跳过；点数超限时截断。反序列化对畸形数组元素逐项跳过并 `Diagnostics::degraded`，绝不抛异常。
 
@@ -431,7 +437,7 @@ au::Text("Welcome").font_size(24).bold();
 
 ### 4.1 主题回退
 
-强调色（`active_color` / `accent_color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx).primary` 解析（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。例外：`Button` 的 `color`（`ButtonProps::color`，`button.h`）是 **`Reactive<Color> = Color::blue()`**，**非** optional，默认即蓝底、不跟随主题，`on_paint` 直接 `resolve_background()`（见 `widgets_paint.cpp`）。
+强调色（`active_color` / `accent_color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx)` 解析对应角色（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。`Button` 遵同一契约（迁移批起）：`ButtonProps::color` 为 `Reactive<std::optional<Color>>`（保留响应式能力，空 = 跟随 `roles.primary`）、`on_color` 为 `std::optional<Color>`（空 = 跟随 `roles.on_primary`），解析点是接收 `BuildContext` 的 `resolve_background(ctx)` / `resolve_text_color(ctx)`；`describe_static` 的 `default_value` 元数据为 `"theme.primary"` / `"theme.on_primary"`（AI/codegen 面文档值，不参与运行时）。
 
 ### 4.2 状态反馈与禁用态
 

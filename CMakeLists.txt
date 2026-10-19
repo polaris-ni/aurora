@@ -229,7 +229,7 @@ file(GLOB_RECURSE AURORA_SOURCES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/*.cpp")
 
 # inspector_server.cpp 编入独立静态库 aurora_inspector_server（仅 AURORA_BUILD_INSPECTOR_SERVER=ON 时构建），
-# 不编入核心 aurora 库，避免未开启开关时引入 Winsock2 依赖（见 cmake/AuroraTools.cmake）。
+# 不编入核心 aurora 库——隔离的是 HTTP 服务端实现；socket 传输层 aurora::net 属核心公共能力。
 list(FILTER AURORA_SOURCES EXCLUDE REGEX "inspector_server\.cpp$")
 
 add_library(aurora STATIC ${AURORA_SOURCES})
@@ -263,12 +263,29 @@ if (NOT MSVC)
 endif ()
 # FreeType：PUBLIC 链接使任意消费者（demo/测试/工具）静态链入，无需自行配置。
 target_link_libraries(aurora PUBLIC freetype harfbuzz)
+# aurora::net：核心公共 socket 层的 Windows 传输库，PUBLIC 传导给全部消费者
+# （demo/测试/工具/inspector_server），散挂点已在 cmake/AuroraTools.cmake / AuroraTests.cmake 收敛删除。
+# advapi32：注册表读取（os_color_scheme 的 Win32 分支，见 window/platform.h 与
+# src/aurora/window/win32_platform.cpp）——公共头内联函数在任何 Windows 构建里都可能
+# 引用该符号，故挂在顶层而非后端块内（后端块只在 AURORA_BACKEND_WIN32=ON 时生效）。
+# winhttp：系统代理采集腿（src/aurora/net/system_proxy.cpp 的 Win32 分支）读用户级 IE 代理设置。
+if (WIN32)
+    target_link_libraries(aurora PUBLIC ws2_32 advapi32 winhttp)
+endif ()
+# SystemConfiguration / CoreFoundation：同一采集腿的 macOS 分支读动态存储里的系统代理，
+# 与后端无关（AURORA_BACKEND_MACOS 关闭时该腿照样编译），故挂在顶层。
+if (APPLE)
+    target_link_libraries(aurora PUBLIC "-framework SystemConfiguration" "-framework CoreFoundation")
+endif ()
 
 # ---- 图片编解码器外部库（libjpeg-turbo / libwebp / wuffs）----
 # ⚠️ 必须在 add_library(aurora ...) 之后 include：本模块内部以 target_link_libraries(aurora ...)
 # 把各 codec 的 OBJECT 库链入 aurora，若 aurora 目标尚未创建会报 "not built by this project"。
 # feature 宏单一入口（aurora_define_feature）须先于首个调用点加载。
 include(AuroraFeatures)
+# 压缩能力须先于图片编解码：wuffs OBJECT 库由 AuroraCompression 统一持有（并集条件），
+# AuroraImageCodecs 的 PNG 块只保留宏注入，不再自建 OBJECT 库。
+include(AuroraCompression)
 include(AuroraImageCodecs)
 
 # ---- PCH 门控决策（库自身与消费者共用单一真相变量 AURORA_PCH_ENABLED） ----
@@ -349,58 +366,13 @@ endif ()
 # ---- 后端剪裁开关 + 优化宏（作用于上方 aurora 目标） ----
 include(AuroraBackends)
 
+# ---- TLS 后端装配（系统栈 / provider 探测）----
+# 必须在 include(AuroraFeatures) 之后：本模块经 aurora_define_feature 注入后端宏，
+# 且对 aurora 目标做 target_link_libraries。
+include(AuroraNetTls)
+
 # ---- 光栅内核 SIMD 双实现开关 ----
 include(AuroraSimd)
-
-# ---- Unity Build 试点：仅 src/aurora/core/（AURORA_ENABLE_UNITY_CORE；默认 OFF）----
-# 目的：把 core/ 下那批 TU 合批编译，摊薄每个 TU 重复解析标准库头 + 重复实例化模板的成本。
-# GCC 侧 PCH 已强制关闭（见上方 AURORA_PCH_ENABLED 判定），故这条路径与 PCH 不重叠、不互相掩盖。
-#
-# CMake 的 UNITY_BUILD 是 **target 级**属性，而本仓只有一个 aurora 目标，故「仅 core/」只能反选：
-# 对 core/ 之外的每个源打 SKIP_UNITY_BUILD_INCLUSION，让它们照旧逐 TU 编译。源清单从**目标本身**
-# 取（get_target_property），因而含 AuroraBackends 追加的 Wayland 生成胶水——本块必须放在其后。
-# 批大小默认 4（而非 CMake 的 8）：core/ 现有 9 个 TU，批越大越省重复解析，但同名 static /
-# 匿名命名空间 / 宏污染的碰撞面也越大，试点期取小批先保可编译性，再用 AURORA_UNITY_BATCH_SIZE 扫。
-option(AURORA_ENABLE_UNITY_CORE
-        "Compile src/aurora/core/*.cpp in Unity Build batches (compile-speed pilot; see BUILD_OPTIONS.md 4.8)" OFF)
-set(AURORA_UNITY_BATCH_SIZE "4" CACHE STRING
-        "Sources per Unity Build batch when AURORA_ENABLE_UNITY_CORE=ON")
-if (AURORA_ENABLE_UNITY_CORE)
-    if (NOT AURORA_UNITY_BATCH_SIZE MATCHES "^[1-9][0-9]*$")
-        aurora_error("AURORA_UNITY_BATCH_SIZE must be a positive integer (got '${AURORA_UNITY_BATCH_SIZE}')")
-    endif ()
-    set_target_properties(aurora PROPERTIES
-            UNITY_BUILD ON
-            UNITY_BUILD_MODE BATCH
-            UNITY_BUILD_BATCH_SIZE "${AURORA_UNITY_BATCH_SIZE}")
-    get_target_property(_aurora_sources aurora SOURCES)
-    set(_aurora_unity_batched 0)
-    set(_aurora_unity_solo 0)
-    foreach (_src IN LISTS _aurora_sources)
-        if (_src MATCHES "/src/aurora/core/")
-            math(EXPR _aurora_unity_batched "${_aurora_unity_batched} + 1")
-        else ()
-            set_source_files_properties("${_src}" PROPERTIES SKIP_UNITY_BUILD_INCLUSION TRUE)
-            math(EXPR _aurora_unity_solo "${_aurora_unity_solo} + 1")
-        endif ()
-    endforeach ()
-    if (_aurora_unity_batched EQUAL 0)
-        # 一个都没匹配上 = 试点静默空转（例如源路径口径变更），必须当场报错而不是「构建照样绿」。
-        aurora_error("AURORA_ENABLE_UNITY_CORE=ON but no source matched '/src/aurora/core/' — the pilot would be a no-op")
-    endif ()
-    aurora_log("Unity Build pilot: ${_aurora_unity_batched} core/ source(s) batched (batch size ${AURORA_UNITY_BATCH_SIZE}),"
-            " ${_aurora_unity_solo} other source(s) kept out of unity inclusion")
-    # ⚠️ 覆盖面提醒（不阻断，故用 WARNING）：批编译后 compile_commands.json 里的 core/ 条目变成 Unity
-    # 批文件、不再逐 TU 列出，而 clang-tidy 正是按编译数据库枚举 TU——在**同一个构建目录**里跑 lint
-    # 会静默丢掉 core/ 的静态检查覆盖面（与 AURORA_LINT_SHARD 缺片同性质的「跑到但没活儿」）。
-    aurora_warn("AURORA_ENABLE_UNITY_CORE=ON: src/aurora/core/*.cpp are compiled as Unity batches, so"
-            " compile_commands.json no longer lists them individually and a clang-tidy run in THIS build"
-            " directory silently loses core/ coverage; run the 'lint' target from a separate build directory"
-            " configured without AURORA_ENABLE_UNITY_CORE.")
-    unset(_aurora_sources)
-    unset(_aurora_unity_batched)
-    unset(_aurora_unity_solo)
-endif ()
 
 # ---- 消费者共享 PCH（demo/测试/工具用） ----
 # 消费者 TU 的最大解析成本是 aurora.h 伞头（全部 widget/render 公共头）。aurora 库自身
