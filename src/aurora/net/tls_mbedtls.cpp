@@ -176,8 +176,9 @@ auto to_base64(std::span<const std::uint8_t> bytes) -> std::string {
     const auto capacity = (whole_groups * 4) + 1;
     auto text = std::string(capacity, '\0');
     auto written = std::size_t{0};
-    auto *const out = reinterpret_cast<unsigned char *>(
-        text.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS C API 收 `unsigned char *`
+    // mbedTLS 的 C API 收 `unsigned char *`：reinterpret_cast 是这条 C 边界的必经形态，无类型安全替代。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto *const out = reinterpret_cast<unsigned char *>(text.data());
     if (::mbedtls_base64_encode(out, capacity, &written, bytes.data(), bytes.size()) != 0) {
         return {};
     }
@@ -449,8 +450,9 @@ auto MbedTlsBackend::load_trust_roots(const TlsContext &context) -> Result<void>
         }
         auto buffer = std::string{bundle};
         buffer.push_back('\0');  // mbedTLS 的 PEM 通路要求以 NUL 收尾的缓冲
-        const auto *const bundle_bytes = reinterpret_cast<const unsigned char *>(
-            buffer.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `const unsigned char *`
+        // mbedTLS 的 C API 收 `const unsigned char *`：reinterpret_cast 是这条 C 边界的必经形态。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        const auto *const bundle_bytes = reinterpret_cast<const unsigned char *>(buffer.data());
         const auto failures = ::mbedtls_x509_crt_parse(&roots_, bundle_bytes, buffer.size());
         if (failures < 0) {
             // 整枚 bundle 读不通（格式不认识）：这不是致命，但「没有系统根」得说清是哪枚文件出的场。
@@ -467,8 +469,9 @@ auto MbedTlsBackend::load_trust_roots(const TlsContext &context) -> Result<void>
         }
         auto buffer = std::string{pem};
         buffer.push_back('\0');  // 同上：长度含结尾 NUL，PEM 分块才认得出结束
-        const auto *const pem_bytes = reinterpret_cast<const unsigned char *>(
-            buffer.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `const unsigned char *`
+        // mbedTLS 的 C API 收 `const unsigned char *`：reinterpret_cast 是这条 C 边界的必经形态。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        const auto *const pem_bytes = reinterpret_cast<const unsigned char *>(buffer.data());
         const auto failures = ::mbedtls_x509_crt_parse(&roots_, pem_bytes, buffer.size());
         if (failures < 0) {
             return tls_error(
@@ -492,10 +495,11 @@ auto MbedTlsBackend::install_client_identity(const TlsContext &context) -> Resul
     }
     const std::string chain = nul_terminated(*context.client_certificate_pem);
     const std::string key = nul_terminated(*context.client_private_key_pem);
-    const auto *const chain_bytes = reinterpret_cast<const unsigned char *>(
-        chain.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `const unsigned char *`
-    const auto *const key_bytes = reinterpret_cast<const unsigned char *>(
-        key.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `const unsigned char *`
+    // mbedTLS 的 C API 收 `const unsigned char *`：reinterpret_cast 是这条 C 边界的必经形态。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto *const chain_bytes = reinterpret_cast<const unsigned char *>(chain.data());
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto *const key_bytes = reinterpret_cast<const unsigned char *>(key.data());
 
     ::mbedtls_x509_crt_init(&client_chain_);
     client_chain_ready_ = true;
@@ -511,7 +515,7 @@ auto MbedTlsBackend::install_client_identity(const TlsContext &context) -> Resul
         if (parsed_chain < 0) {
             text += ": " + mbedtls_text(parsed_chain);  // 库的原话只对负码那一型有意义，空链那型没有码可引
         }
-        return identity_error(std::move(text));
+        return identity_error(text);
     }
     if (parsed_chain > 0) {
         // 与追加根同一口径：调用方自己给的材料没有「个别条目不合口味」这一说，半条链送出去只会在对端换来
@@ -705,8 +709,9 @@ auto MbedTlsBackend::next_records(std::vector<char> &plaintext, std::vector<char
     auto rounds = 0;
     while (rounds < AURORA_CONTROL_ONLY_ROUNDS) {
         ++rounds;
-        auto *const read_buf = reinterpret_cast<unsigned char *>(
-            scratch.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `unsigned char *`
+        // mbedTLS 的 C API 收 `unsigned char *`：reinterpret_cast 是这条 C 边界的必经形态。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        auto *const read_buf = reinterpret_cast<unsigned char *>(scratch.data());
         const auto count = ::mbedtls_ssl_read(&ssl_, read_buf, scratch.size());
         if (count > 0) {
             plaintext.insert(plaintext.end(), scratch.begin(), scratch.begin() + static_cast<std::ptrdiff_t>(count));
@@ -754,8 +759,9 @@ auto MbedTlsBackend::protect(std::span<const char> plaintext, std::vector<char> 
         const auto remaining = plaintext.size() - cursor;
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) 明文缓冲按游标取下一段裸指针
         const auto *const first = plaintext.data() + static_cast<std::ptrdiff_t>(cursor);
-        const auto *const write_buf = reinterpret_cast<const unsigned char *>(
-            first);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `const unsigned char *`
+        // mbedTLS 的 C API 收 `const unsigned char *`：reinterpret_cast 是这条 C 边界的必经形态。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        const auto *const write_buf = reinterpret_cast<const unsigned char *>(first);
         const auto written = ::mbedtls_ssl_write(&ssl_, write_buf, remaining);
         if (written > 0) {
             cursor += static_cast<std::size_t>(written);
