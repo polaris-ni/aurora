@@ -9,6 +9,8 @@
 
 namespace aurora {
 
+// clang-analyzer 在个别 TU 把 `struct Error` 字段误判为「未初始化赋值」：聚合初始化 + variant 持有两层
+// 分析器无法建模，字段实际带默认成员初始化器且所有产出路径显式赋值，故在此抑制该诊断。
 /// @brief 结构化错误（需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001：机器可解析错误）。
 ///
 /// 字段分两类受众：
@@ -20,6 +22,7 @@ namespace aurora {
 /// 所有元数据由 codespec/errors.toml 经生成器产出，经 make_error 自动填充，无需手填。
 /// @note Thread: thread-safe
 /// @note Side-effects: none
+/// NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
 struct Error {
     std::string code;  ///< 冻结对外 slug（如 "nav-depth-exceeded"），只增不删
     std::string message;  ///< 人类可读描述（由表模板 + params 渲染，或调用方覆盖）

@@ -94,9 +94,7 @@ auto tls_error(ErrorCode code, std::string text) -> Error {
 /// 「Invalid argument supplied」），于是「PEM 的哪一步、缺什么」会在现场被整段吃掉——本节目的全部是替调用方
 /// 指认他给错了哪一份材料，指认丢了就等于没指认。同文件其余各码（`net-tls-*` / `net-platform-unavailable`）
 /// 的模板带槽，仍走 `tls_error`。
-auto identity_error(std::string text) -> Error {
-    return make_error(ErrorCode::GeneralInvalidArgument, std::move(text));
-}
+auto identity_error(const std::string &text) -> Error { return make_error(ErrorCode::GeneralInvalidArgument, text); }
 
 /// 取 OpenSSL 错误队列的栈顶原因文本。
 ///
@@ -438,7 +436,8 @@ auto build_alpn_advertisement(const std::vector<std::string> &protocols) -> std:
     } else if (::SSL_CTX_check_private_key(ctx) != 1) {
         // 上面判的是两份入参，这一步判的是已经落到 ctx 上的那一对。预检通过后它不该再触发，留作最后一道复核：
         // 「本层返回成功」从此恒等于「ctx 自己确认过这条链配这把私钥」。
-        outcome = identity_error("the client private key does not match the client certificate");
+        outcome = identity_error(
+            "the client private key does not match the client certificate (verified after installation)");
     } else {
         ::SSL_CTX_clear_chain_certs(ctx);
         for (int index = 0; index < sk_X509_num(extras); ++index) {

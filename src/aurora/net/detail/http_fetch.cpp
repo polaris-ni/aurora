@@ -62,7 +62,7 @@ namespace {
 // ⚠️ wasm 交接边界：缓冲只能手工落在 wasm 堆上（JS 侧 `UTF8ToString` / `aurora_fetch_free` 认的就是
 // 这个堆的地址），而地址又以 `std::intptr_t` 过界——手工分配与 reinterpret_cast 都是该边界的固有
 // 形态，无类型安全替代，故整段区间豁免（逐行重复无信息量）。
-// NOLINTBEGIN(cppcoreguidelines-owning-memory, cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic, -warnings-as-errors)
+// NOLINTBEGIN(cppcoreguidelines-owning-memory, cppcoreguidelines-no-malloc, cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic, -warnings-as-errors)
 /// @brief 在 wasm 堆上分配一块并拷入字节串（含 NUL 终结位，UTF8ToString 需要）。
 /// @param text 待拷字节串。
 /// @return 堆地址；调用方经 `aurora_fetch_free` 归还。
@@ -82,13 +82,13 @@ extern "C" EMSCRIPTEN_KEEPALIVE auto aurora_fetch_alloc(int bytes) -> std::intpt
     if (bytes <= 0) {
         return 0;
     }
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory, cppcoreguidelines-pro-type-reinterpret-cast, -warnings-as-errors) wasm 堆上的交接缓冲
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory, cppcoreguidelines-no-malloc, cppcoreguidelines-pro-type-reinterpret-cast, -warnings-as-errors) wasm 堆上的交接缓冲
     return reinterpret_cast<std::intptr_t>(std::malloc(static_cast<std::size_t>(bytes)));
 }
 
 // @brief 归还交接缓冲（C++ 侧收尾与 JS 侧异常路径共用）。
 extern "C" EMSCRIPTEN_KEEPALIVE auto aurora_fetch_free(std::intptr_t address) -> void {
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory, cppcoreguidelines-pro-type-reinterpret-cast, performance-no-int-to-ptr, -warnings-as-errors)
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory, cppcoreguidelines-no-malloc, cppcoreguidelines-pro-type-reinterpret-cast, performance-no-int-to-ptr, -warnings-as-errors)
     std::free(reinterpret_cast<void *>(address));
 }
 
@@ -274,12 +274,12 @@ auto fetch_exchange(const FetchSpec &spec, const Cancellation &token) -> Callbac
             auto body_ptr = std::intptr_t{0};
             if (!spec.body.empty()) {
                 // 同 `copy_to_heap`：wasm 堆地址以整数过界，手工分配与 reinterpret_cast 是该边界的固有形态。
-                // NOLINTBEGIN(*-owning-memory, *-pro-type-reinterpret-cast, *-no-int-to-ptr, -warnings-as-errors)
+                // NOLINTBEGIN(cppcoreguidelines-*, *-no-int-to-ptr, -warnings-as-errors)
                 body_ptr = reinterpret_cast<std::intptr_t>(std::malloc(spec.body.size()));
                 if (body_ptr != 0) {
                     std::memcpy(reinterpret_cast<void *>(body_ptr), spec.body.data(), spec.body.size());
                 }
-                // NOLINTEND(*-owning-memory, *-pro-type-reinterpret-cast, *-no-int-to-ptr, -warnings-as-errors)
+                // NOLINTEND(cppcoreguidelines-*, *-no-int-to-ptr, -warnings-as-errors)
             }
             if (url_ptr == 0 || method_ptr == 0 || headers_ptr == 0 || (!spec.body.empty() && body_ptr == 0)) {
                 // 分配失败：登记即撤、钩子即撤，以运行时不可用收场（不静默假装发过）。

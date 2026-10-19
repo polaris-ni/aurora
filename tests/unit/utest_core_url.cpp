@@ -124,6 +124,7 @@ AURORA_TEST_CASE(parse_normalizes_case_percent_and_dot_segments) {
     // （判为未检查访问）⇒ 先落一个具名局部再判空、再解包。
     const auto port = url.port();
     AURORA_TEST_REQUIRE(port.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access) 宏已守卫 has_value
     AURORA_TEST_CHECK_EQ(*port, std::uint16_t{8443});
     AURORA_TEST_CHECK_EQ(url.path(), std::string("/b%2FxA"));
     AURORA_TEST_CHECK_EQ(url.query(), std::string("q=1&q=%2B"));
@@ -161,6 +162,7 @@ AURORA_TEST_CASE(effective_port_follows_scheme_but_keeps_explicit_value) {
         AURORA_TEST_CHECK_FALSE(parsed.value().port().has_value());
         const auto effective = parsed.value().effective_port();
         AURORA_TEST_REQUIRE(effective.has_value());
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access) 宏已守卫 has_value
         AURORA_TEST_CHECK_EQ(std::to_string(*effective), std::string(row.expected));
     }
 
@@ -173,6 +175,7 @@ AURORA_TEST_CASE(effective_port_follows_scheme_but_keeps_explicit_value) {
     AURORA_TEST_REQUIRE(explicit_default.ok());
     const auto explicit_port = explicit_default.value().port();
     AURORA_TEST_REQUIRE(explicit_port.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access) 宏已守卫 has_value
     AURORA_TEST_CHECK_EQ(*explicit_port, std::uint16_t{80});
     AURORA_TEST_CHECK_EQ(explicit_default.value().to_string(), std::string("http://h:80/"));
 

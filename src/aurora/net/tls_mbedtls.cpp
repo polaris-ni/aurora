@@ -109,9 +109,7 @@ constexpr std::array<const char *, 3> AURORA_SYSTEM_TRUST_BUNDLES = {
 /// 「Invalid argument supplied」），于是「PEM 的哪一步、缺什么」会在现场被整段吃掉——本节目的全部是替调用方
 /// 指认他给错了哪一份材料，指认丢了就等于没指认。同文件其余各码（`net-tls-*` / `net-platform-unavailable`）
 /// 的模板带槽，仍走 `tls_error`。
-auto identity_error(std::string text) -> Error {
-    return make_error(ErrorCode::GeneralInvalidArgument, std::move(text));
-}
+auto identity_error(const std::string &text) -> Error { return make_error(ErrorCode::GeneralInvalidArgument, text); }
 
 auto tls_error(ErrorCode code, std::string text) -> Error {
     return make_error(code, ErrorParams{{"detail", std::move(text)}});
@@ -137,8 +135,8 @@ auto mbedtls_text(int code) -> std::string {
 /// 函数内静态量让它在整个进程里只跑一次（C++11 起线程安全初始化），因此多个会话并发建后端也不需要
 /// 本层另加锁；`psa_crypto_init()` 本身幂等。
 auto psa_entropy_ready() -> bool {
-    static const bool initialized = [] { return ::psa_crypto_init() == PSA_SUCCESS; }();
-    return initialized;
+    static const bool INITIALIZED = [] { return ::psa_crypto_init() == PSA_SUCCESS; }();
+    return INITIALIZED;
 }
 
 /// `mbedtls_ssl_conf_rng()` 的适配：随机字节直接取 PSA，不引入 legacy entropy/ctr_drbg 通路。
@@ -178,8 +176,9 @@ auto to_base64(std::span<const std::uint8_t> bytes) -> std::string {
     const auto capacity = (whole_groups * 4) + 1;
     auto text = std::string(capacity, '\0');
     auto written = std::size_t{0};
-    if (::mbedtls_base64_encode(reinterpret_cast<unsigned char *>(text.data()), capacity, &written, bytes.data(),
-                                bytes.size()) != 0) {
+    auto *const out = reinterpret_cast<unsigned char *>(
+        text.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS C API 收 `unsigned char *`
+    if (::mbedtls_base64_encode(out, capacity, &written, bytes.data(), bytes.size()) != 0) {
         return {};
     }
     text.resize(written);  // `olen` 不含写入的 NUL
@@ -240,6 +239,7 @@ auto spki_sha256(const mbedtls_x509_crt &cert) -> std::string {
     if (length <= 0 || static_cast<std::size_t>(length) > buffer.size()) {
         return {};
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) DER 缓冲尾部回溯一段裸指针
     const auto *first = buffer.data() + buffer.size() - static_cast<std::size_t>(length);
     return to_base64(sha256(std::span<const std::uint8_t>{first, static_cast<std::size_t>(length)}));
 }
@@ -303,14 +303,14 @@ class MbedTlsBackend final : public TlsBackend {
 
     auto shutdown_records(std::vector<char> &outgoing) -> Result<void> override;
 
-    auto peer_certificate() const -> Result<PeerCertificate> override {
+    [[nodiscard]] auto peer_certificate() const -> Result<PeerCertificate> override {
         if (!cert_) {
             return tls_error(ErrorCode::NetSocketFailed, "no peer certificate is bound to this session");
         }
         return *cert_;
     }
 
-    auto negotiated_alpn() const -> std::optional<std::string> override { return alpn_; }
+    [[nodiscard]] auto negotiated_alpn() const -> std::optional<std::string> override { return alpn_; }
 
   private:
     MbedTlsBackend() = default;
@@ -318,7 +318,9 @@ class MbedTlsBackend final : public TlsBackend {
     /// memory BIO 的发送侧：只追加、不交付、永不部分写，因此 mbedTLS 眼里「socket 总是立即可写」。
     static auto bio_send(void *context, const unsigned char *data, std::size_t length) -> int {
         auto *self = static_cast<MbedTlsBackend *>(context);
-        self->produced_.insert(self->produced_.end(), data, data + length);
+        self->produced_.insert(
+            self->produced_.end(), data,
+            data + length);  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) memory BIO 发送侧：裸指针区间
         return static_cast<int>(length);
     }
 
@@ -330,6 +332,7 @@ class MbedTlsBackend final : public TlsBackend {
             return MBEDTLS_ERR_SSL_WANT_READ;
         }
         const auto taken = length < available ? length : available;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) memory BIO 接收侧：从已读偏移取一段裸指针
         const auto *first = self->incoming_.data() + static_cast<std::ptrdiff_t>(self->incoming_read_);
         std::copy_n(first, static_cast<std::ptrdiff_t>(taken), data);
         self->incoming_read_ += taken;
@@ -446,8 +449,9 @@ auto MbedTlsBackend::load_trust_roots(const TlsContext &context) -> Result<void>
         }
         auto buffer = std::string{bundle};
         buffer.push_back('\0');  // mbedTLS 的 PEM 通路要求以 NUL 收尾的缓冲
-        const auto failures =
-            ::mbedtls_x509_crt_parse(&roots_, reinterpret_cast<const unsigned char *>(buffer.data()), buffer.size());
+        const auto *const bundle_bytes = reinterpret_cast<const unsigned char *>(
+            buffer.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `const unsigned char *`
+        const auto failures = ::mbedtls_x509_crt_parse(&roots_, bundle_bytes, buffer.size());
         if (failures < 0) {
             // 整枚 bundle 读不通（格式不认识）：这不是致命，但「没有系统根」得说清是哪枚文件出的场。
             return tls_error(ErrorCode::GeneralInvalidArgument, std::string{"the system trust bundle at "} + path +
@@ -463,8 +467,9 @@ auto MbedTlsBackend::load_trust_roots(const TlsContext &context) -> Result<void>
         }
         auto buffer = std::string{pem};
         buffer.push_back('\0');  // 同上：长度含结尾 NUL，PEM 分块才认得出结束
-        const auto failures =
-            ::mbedtls_x509_crt_parse(&roots_, reinterpret_cast<const unsigned char *>(buffer.data()), buffer.size());
+        const auto *const pem_bytes = reinterpret_cast<const unsigned char *>(
+            buffer.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `const unsigned char *`
+        const auto failures = ::mbedtls_x509_crt_parse(&roots_, pem_bytes, buffer.size());
         if (failures < 0) {
             return tls_error(
                 ErrorCode::GeneralInvalidArgument,
@@ -482,10 +487,15 @@ auto MbedTlsBackend::load_trust_roots(const TlsContext &context) -> Result<void>
 }
 
 auto MbedTlsBackend::install_client_identity(const TlsContext &context) -> Result<void> {
+    if (!context.client_certificate_pem.has_value() || !context.client_private_key_pem.has_value()) {
+        return identity_error("client identity is incomplete: certificate or private key PEM is missing");
+    }
     const std::string chain = nul_terminated(*context.client_certificate_pem);
     const std::string key = nul_terminated(*context.client_private_key_pem);
-    const auto *const chain_bytes = reinterpret_cast<const unsigned char *>(chain.data());
-    const auto *const key_bytes = reinterpret_cast<const unsigned char *>(key.data());
+    const auto *const chain_bytes = reinterpret_cast<const unsigned char *>(
+        chain.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `const unsigned char *`
+    const auto *const key_bytes = reinterpret_cast<const unsigned char *>(
+        key.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `const unsigned char *`
 
     ::mbedtls_x509_crt_init(&client_chain_);
     client_chain_ready_ = true;
@@ -695,7 +705,9 @@ auto MbedTlsBackend::next_records(std::vector<char> &plaintext, std::vector<char
     auto rounds = 0;
     while (rounds < AURORA_CONTROL_ONLY_ROUNDS) {
         ++rounds;
-        const auto count = ::mbedtls_ssl_read(&ssl_, reinterpret_cast<unsigned char *>(scratch.data()), scratch.size());
+        auto *const read_buf = reinterpret_cast<unsigned char *>(
+            scratch.data());  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `unsigned char *`
+        const auto count = ::mbedtls_ssl_read(&ssl_, read_buf, scratch.size());
         if (count > 0) {
             plaintext.insert(plaintext.end(), scratch.begin(), scratch.begin() + static_cast<std::ptrdiff_t>(count));
             continue;
@@ -740,8 +752,11 @@ auto MbedTlsBackend::protect(std::span<const char> plaintext, std::vector<char> 
     auto cursor = std::size_t{0};
     while (cursor < plaintext.size()) {
         const auto remaining = plaintext.size() - cursor;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic) 明文缓冲按游标取下一段裸指针
         const auto *const first = plaintext.data() + static_cast<std::ptrdiff_t>(cursor);
-        const auto written = ::mbedtls_ssl_write(&ssl_, reinterpret_cast<const unsigned char *>(first), remaining);
+        const auto *const write_buf = reinterpret_cast<const unsigned char *>(
+            first);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast) mbedTLS 收 `const unsigned char *`
+        const auto written = ::mbedtls_ssl_write(&ssl_, write_buf, remaining);
         if (written > 0) {
             cursor += static_cast<std::size_t>(written);
             continue;
