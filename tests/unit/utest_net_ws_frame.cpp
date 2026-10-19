@@ -369,6 +369,10 @@ AURORA_TEST_CASE(a_close_frame_reports_code_and_reason_or_the_absence_of_one) {
     Recorder rec;
     AURORA_TEST_REQUIRE(feed(rec, peer_frame(true, 0x8, close_frame_payload(1000, "bye"))));
     AURORA_TEST_REQUIRE_EQ(rec.codes.size(), 1U);
+    // 前序两枚 AURORA_TEST_REQUIRE 已断言状态码在场，而断言宏的展开对 tidy 的路径分析不透明，属误报；
+    // 本机 tidy 22.1.2 遍不报、CI 的 Linux 22.1.8 遍把两处解包各自报在解包那行，故整段收进区间式豁免
+    // （同族写法见本文件的 UTF-8 用例与 `tests/unit/utest_net_websocket.cpp`）。
+    // NOLINTBEGIN(bugprone-unchecked-optional-access)
     AURORA_TEST_REQUIRE(rec.codes[0].has_value());
     AURORA_TEST_CHECK_EQ(*rec.codes[0], 1000U);
     AURORA_TEST_CHECK_EQ(rec.reasons[0], "bye");
@@ -379,6 +383,7 @@ AURORA_TEST_CASE(a_close_frame_reports_code_and_reason_or_the_absence_of_one) {
     AURORA_TEST_REQUIRE(only_code.codes[0].has_value());
     AURORA_TEST_CHECK_EQ(*only_code.codes[0], 1001U);
     AURORA_TEST_CHECK(only_code.reasons[0].empty());
+    // NOLINTEND(bugprone-unchecked-optional-access)
 
     // 零长载荷 = 对端没带码：折成 1000 会让一次没说清的收场冒充一次好端端的道别。
     Recorder silent;
@@ -617,6 +622,9 @@ AURORA_TEST_CASE(utf8_check_accepts_well_formed_shapes_and_points_at_the_lead_by
     for (const Probe &probe : refused) {
         const auto bad = first_invalid_utf8(probe.bytes);
         AURORA_TEST_REQUIRE_MSG(bad.has_value(), "a malformed sequence was accepted");
+        // 紧邻式豁免：上一行的 AURORA_TEST_REQUIRE_MSG 已断言持有值，宏展开对 tidy 的路径分析不透明，
+        // 属误报；本机 tidy 22.1.2 遍不报，CI 的 Linux 22.1.8 遍报在本行。
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         AURORA_TEST_CHECK_EQ(*bad, probe.first_bad);
     }
 }

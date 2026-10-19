@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <utility>
 
 #include "aurora/core/error_codes.h"
 #include "aurora/core/platform.h"
@@ -136,7 +137,10 @@ auto fill_platform(std::span<std::byte> out) -> Result<void> {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         const auto address = reinterpret_cast<std::intptr_t>(piece.data());
         const auto taken = aurora_random_fill_js(address, static_cast<int>(chunk));
-        if (taken < 0 || static_cast<std::size_t>(taken) != chunk) {
+        // 有符号的 `taken` 与无符号的 `chunk` 之间不做手写强转：`std::cmp_not_equal` 把这枚跨符号比较
+        // 做成编译期正确形态（负值已由前一条件短路挡掉），语义与强转版逐枚相同，但不重复声明类型。
+        // 只有浏览器口径会分析这一腿——native 遍里本分支整段预处理掉，故告警只在 wasm 遍出现。
+        if (taken < 0 || std::cmp_not_equal(taken, chunk)) {
             return make_error(ErrorCode::NetPlatformUnavailable,
                               "random: crypto.getRandomValues is unavailable on this leg");
         }

@@ -33,7 +33,11 @@ using aurora::net::detail::make_request_id;
     const auto id = make_request_id();
     AURORA_TEST_CHECK(static_cast<bool>(id));
     if (!id) {
-        return std::string(36, 'z');
+        // 先落一枚局部量再交出：`return std::string(36, 'z')` 逐字重复了声明的返回类型，命中
+        // modernize-return-braced-init-list，而该检查建议的花括号形态走的是 `initializer_list`
+        // 重载，会把「36 枚 z」变成两枚字符——故此处改形而不照建议修。
+        auto absent = std::string(36, 'z');
+        return absent;
     }
     return id.value();
 }
@@ -159,8 +163,8 @@ AURORA_TEST_CASE(the_random_bits_reach_every_segment_of_the_id) {
     // 两枚 64 位取值若写成同一枚（`head` 拼了两遍），第二段的四枚 nibble 必然与末段中间那四位逐枚相等：
     // 段界是 8 / 13 / 18 / 23，故第二段的 4 枚在 9..12，末段（12 枚，起于 24）的第 5..8 位在 28..31，
     // 两处取的正是同一组 16 位。独立取值下这一撞每枚概率 2^-16，64 枚里期望 0.001 次，故逐枚判不等站得住。
-    for (std::size_t index = 0; index < draws.size(); ++index) {
-        const std::string_view value = draws.at(index);
+    for (const std::string &draw : draws) {
+        const std::string_view value = draw;
         AURORA_TEST_CHECK_NE(value.substr(9, 4), value.substr(28, 4));
     }
 }

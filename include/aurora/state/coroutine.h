@@ -143,7 +143,8 @@ class CoroTask {
     /// 豁免本检查：契约要求先 `is_done()`。`return_value` 与 `unhandled_exception` 是协程收尾的必经
     /// 两条路径、都写入 `result`，而 `done` 只在 `~promise_type` 置位——故 `done` 为真时 `result`
     /// 必有值。要改成运行期分支需新增「未完成」公共错误码（现无契合项，属 API 扩张），且不改本检查
-    /// 建议的形态；调用方违约即文档化的未定义行为。同一份代码 native 遍不报（口径差异见
+    /// 建议的形态；调用方违约即文档化的未定义行为。同一份代码在本机 native 遍（tidy 22.1.2）不报，
+    /// CI 的 Linux 遍（tidy 22.1.8）报，浏览器遍此前已按 §5.2 记为同族命中（口径差异见
     /// CODING_STANDARDS.md §5.2）。
     ///
     /// 载荷不可拷贝（单所有权句柄一类，如 `net::WebSocket`）时结果槽里那一份是**搬走**而不是复制出来的，
@@ -152,11 +153,15 @@ class CoroTask {
     /// @return 完成结果的成功/错误载荷（解包 `shared_->result`）。
     /// NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     [[nodiscard]] auto result() const -> Result<T> {
+        // 区间式覆盖两条分支的解包：CI 的 Linux 遍（tidy 22.1.8）把告警报在这两行，声明行那枚紧邻式
+        // 豁免罩不住它们（本机 native 遍两处都不报，理由同上段契约）。
+        // NOLINTBEGIN(bugprone-unchecked-optional-access)
         if constexpr (std::is_copy_constructible_v<Result<T>>) {
             return *shared_->result;
         } else {
-            return std::move(*shared_->result);  // NOLINT(bugprone-unchecked-optional-access) 同上契约
+            return std::move(*shared_->result);
         }
+        // NOLINTEND(bugprone-unchecked-optional-access)
     }
 
     /// @brief 登记完成观察者：帧收尾那一刻以协程的 `Result<T>` 触发一次。
