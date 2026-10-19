@@ -75,7 +75,7 @@ auto copy_to_heap(const std::string &text) -> std::intptr_t {
     (static_cast<char *>(raw))[text.size()] = '\0';
     return reinterpret_cast<std::intptr_t>(raw);
 }
-// NOLINTEND(cppcoreguidelines-owning-memory, cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic, -warnings-as-errors)
+// NOLINTEND(cppcoreguidelines-owning-memory, cppcoreguidelines-no-malloc, cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic, -warnings-as-errors)
 
 // @brief JS 侧向 wasm 堆要一块应答缓冲（`extern "C"` 供 EM_JS 调用，导出面仅此三枚）。
 extern "C" EMSCRIPTEN_KEEPALIVE auto aurora_fetch_alloc(int bytes) -> std::intptr_t {
