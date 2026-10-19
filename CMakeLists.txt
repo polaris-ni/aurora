@@ -269,8 +269,11 @@ target_link_libraries(aurora PUBLIC freetype harfbuzz)
 # src/aurora/window/win32_platform.cpp）——公共头内联函数在任何 Windows 构建里都可能
 # 引用该符号，故挂在顶层而非后端块内（后端块只在 AURORA_BACKEND_WIN32=ON 时生效）。
 # winhttp：系统代理采集腿（src/aurora/net/system_proxy.cpp 的 Win32 分支）读用户级 IE 代理设置。
+# bcrypt：系统熵源（src/aurora/net/random.cpp 的 Windows 腿，`BCryptGenRandom`）。它与 TLS 无关，
+# 故挂在顶层而非 cmake/AuroraNetTls.cmake 的 provider 块内——那一条只在 Schannel 开着时才链，
+# 而随机面是 WebSocket 掩码、multipart 边界与链路标识的共同底座，不能跟着一条可选的 TLS 配置走。
 if (WIN32)
-    target_link_libraries(aurora PUBLIC ws2_32 advapi32 winhttp)
+    target_link_libraries(aurora PUBLIC ws2_32 advapi32 bcrypt winhttp)
 endif ()
 # SystemConfiguration / CoreFoundation：同一采集腿的 macOS 分支读动态存储里的系统代理，
 # 与后端无关（AURORA_BACKEND_MACOS 关闭时该腿照样编译），故挂在顶层。

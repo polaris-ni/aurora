@@ -21,7 +21,7 @@
 
 #include "aurora/core/error_codes.h"
 #include "aurora/net/detail/http_body.h"
-#include "aurora/net/detail/noncrypto_random.h"
+#include "aurora/net/detail/random_draw.h"
 
 namespace aurora::net::http {
 namespace {
@@ -154,11 +154,16 @@ auto append_hex(std::string &out, std::uint64_t value, std::size_t width) -> voi
     }
 }
 
-/// @brief 生成一枚边界：定长前缀加一整个 64 位随机数的十六进制形。
-/// @return 长度 23、字符全合法、逐次构造互不相同的令牌。
-[[nodiscard]] auto make_boundary() -> std::string {
+/// @brief 生成一枚边界：定长前缀加一整个 64 位系统熵取值的十六进制形。
+/// @return 成功为长度 23、字符全合法、逐次构造互不相同且不可预测的令牌；失败为 `net-platform-unavailable`
+///         （本腿取不到系统熵——此处刻意不回落伪随机，可猜的边界等于给内容注入开门）。
+[[nodiscard]] auto make_boundary() -> Result<std::string> {
+    auto random = detail::random_u64();
+    if (!random) {
+        return random.error();
+    }
     std::string out{AURORA_BOUNDARY_PREFIX};
-    append_hex(out, detail::noncrypto_u64(), AURORA_BOUNDARY_RANDOM_WIDTH);
+    append_hex(out, random.value(), AURORA_BOUNDARY_RANDOM_WIDTH);
     return out;
 }
 
@@ -260,7 +265,15 @@ auto MultipartWriter::file_length(std::string_view path) -> std::optional<std::u
     return static_cast<std::uint64_t>(size);
 }
 
-MultipartWriter::MultipartWriter() : boundary_{make_boundary()} {}
+MultipartWriter::MultipartWriter() {
+    // 构造不设失败通道（本类的方法都返回自身引用以支持链式写法），故熵不可得先记下、由 `validate()`
+    // 如实交出——与「失败一律推迟到取字节时」是同一条纪律。
+    if (auto generated = make_boundary(); generated) {
+        boundary_ = generated.value();
+    } else {
+        entropy_failure_ = generated.error();
+    }
+}
 
 MultipartWriter::~MultipartWriter() = default;
 
@@ -306,6 +319,7 @@ auto MultipartWriter::file(std::string_view name, std::string_view path) -> Mult
 
 auto MultipartWriter::boundary(std::string value) -> MultipartWriter & {
     boundary_ = std::move(value);
+    entropy_failure_.reset();  // 覆写的那枚不靠系统熵：构造时记下的失败就此与本次体无关
     failure_checked_ = false;  // 覆写的那枚可能撞进正文，之前「合格」的结论不再算数
     return *this;
 }
@@ -316,6 +330,10 @@ auto MultipartWriter::content_type() const -> std::string {
 }
 
 auto MultipartWriter::validate() const -> Result<void> {
+    if (entropy_failure_.has_value()) {
+        // 先报这一条：缺省边界根本没生成，此时 `boundary_` 是空串，字符集与长度那套话都是空谈。
+        return *entropy_failure_;
+    }
     if (parts_.empty()) {
         return form_invalid("multipart body has no part: a multipart/form-data body carries at least one part");
     }

@@ -3,7 +3,8 @@
 /// 测试说明: CoroTask<T>/CoroTask<void> 的完成与结果语义、co_await co_async 的值/异常/Result
 /// 错误透传、同步协程立即完成，以及续体经主线程投递器恢复（全部经 promise/future 有界等待，断言只在用例线程执行）；
 /// 另有 `on_done()` 完成观察者的四条契约——收尾恰触发一次、已收尾时当场触发、只留最后登记的一枚
-/// （传空即撤销）、触发后不留下持有（观察者摘出即清空，会话与共享状态之间不成自持环）
+/// （传空即撤销）、触发后不留下持有（观察者摘出即清空，会话与共享状态之间不成自持环）；观察者交出的那一份
+/// 是结果槽的**可变引用**，故单所有权载荷（`std::unique_ptr` 一类，库里对应 `net::WebSocket` 句柄）也搬得走
 
 #include <atomic>
 #include <chrono>
@@ -388,6 +389,53 @@ AURORA_TEST_CASE(on_done_releases_its_own_capture_once_it_has_fired) {
         AURORA_TEST_CHECK(wait_until([&sentinel]() -> bool { return sentinel.use_count() == 1; }));
     }
     AURORA_TEST_CHECK_EQ(sentinel.use_count(), 1);  // 帧与句柄都已销毁：没有第二份持有者残留
+}
+
+AURORA_TEST_CASE(on_done_hands_over_a_move_only_payload) {
+    AURORA_TEST_REQUIRE_THREADS();
+    // 单所有权载荷（`net::WebSocket` 那一族句柄）只能搬不能拷，故观察者拿到的必须是结果槽的**可变引用**：
+    // 签名退成 `const Result<T> &` 时，下面那两句 `std::move(outcome.value())` 就是在调用一枚不存在的拷贝
+    // 构造，「把一次升级交出的会话接成资源」这件事从这一层就断掉。载荷取 `unique_ptr`——搬走与否当场可读。
+    using Payload = std::unique_ptr<int>;
+
+    std::atomic<bool> fired{false};
+    Payload landed;
+    auto task = []() -> CoroTask<Payload> {
+        Result<Payload> r = co_await co_async([]() -> Payload { return std::make_unique<int>(42); });
+        if (!r.ok()) {
+            co_return Payload{};
+        }
+        co_return std::move(r.value());
+    }();
+    task.on_done([&fired, &landed](Result<Payload> &outcome) -> void {
+        if (outcome.ok()) {
+            landed = std::move(outcome.value());
+        }
+        fired.store(true, std::memory_order_release);
+    });
+    AURORA_TEST_REQUIRE(wait_until([&fired]() -> bool { return fired.load(std::memory_order_acquire); }));
+    AURORA_TEST_REQUIRE(landed != nullptr);
+    AURORA_TEST_CHECK_EQ(*landed, 42);
+
+    // 登记时帧已收尾的那一路同样要把载荷交出去（当场触发，搬走的是槽里那一份而不是副本）。
+    auto ended = []() -> CoroTask<Payload> { co_return std::make_unique<int>(7); }();
+    AURORA_TEST_CHECK_TRUE(ended.is_done());
+    bool late_fired = false;
+    Payload late;
+    ended.on_done([&late_fired, &late](Result<Payload> &outcome) -> void {
+        late_fired = true;
+        if (outcome.ok()) {
+            late = std::move(outcome.value());
+        }
+    });
+    AURORA_TEST_CHECK_TRUE(late_fired);
+    AURORA_TEST_REQUIRE(late != nullptr);
+    AURORA_TEST_CHECK_EQ(*late, 7);
+    // 搬走之后同槽里是**已搬空的有效值**（成功侧仍在，载荷为空）：与 `result()` 那处 `if constexpr` 同一条
+    // 口径——可拷贝载荷留副本、同一枚结果读两次还是那个值，单所有权载荷只有一位持有者。写明而不留读者猜。
+    const auto polled = ended.result();
+    AURORA_TEST_CHECK(polled.ok());
+    AURORA_TEST_CHECK(polled.value() == nullptr);
 }
 
 }  // namespace aurora::test_cases::utest_coroutine

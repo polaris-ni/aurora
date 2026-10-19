@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <type_traits>
 #include <utility>
 
 #include "aurora/state/async.h"
@@ -25,7 +26,13 @@ struct CoroShared {
     ///
     /// 协程帧只经 `is_done()` / `result()` 被观察，因此「等一个协程结束」在过去只能靠轮询——本字段
     /// 把收尾这件事补成可订阅的事实，上层的适配器（如把一次网络交换交付成 `Task`）不必再睡每一轮。
-    std::function<void(const Result<T> &)> on_done;
+    ///
+    /// 形参写成**可变**引用而不是 `const`：观察者拿到的是结果槽本身，与 `~promise_type` 触发时交出的
+    /// 那一份同源。可拷贝载荷不受影响（照旧按 `const Result<T> &` 接就行，引用能绑上非常量），
+    /// 而单所有权载荷（如 `net::WebSocket` 句柄）只有从这里才**搬得走**——`const` 那一版下
+    /// `std::move(o.value())` 会退化成调用不存在的拷贝构造，整条订阅路对这类载荷直接闭死。
+    /// 搬走后同槽再读即读到已搬空的值，与 `result()` 那条口径逐字同型（两处都是「一次交付只有一位持有者」）。
+    std::function<void(Result<T> &)> on_done;
 };
 /// @brief void 特化：无结果值，仅记录异常收尾时的错误。
 template <>
@@ -104,7 +111,7 @@ class CoroTask {
         /// 同一份代码在 native 口径不报（口径差异见 CODING_STANDARDS.md §5.2）。
         /// NOLINTNEXTLINE(bugprone-exception-escape)
         ~promise_type() {
-            std::function<void(const Result<T> &)> hook;
+            std::function<void(Result<T> &)> hook;
             {
                 std::scoped_lock<std::mutex> lock(shared->mutex);
                 shared->done.store(true, std::memory_order_release);
@@ -138,9 +145,19 @@ class CoroTask {
     /// 必有值。要改成运行期分支需新增「未完成」公共错误码（现无契合项，属 API 扩张），且不改本检查
     /// 建议的形态；调用方违约即文档化的未定义行为。同一份代码 native 遍不报（口径差异见
     /// CODING_STANDARDS.md §5.2）。
+    ///
+    /// 载荷不可拷贝（单所有权句柄一类，如 `net::WebSocket`）时结果槽里那一份是**搬走**而不是复制出来的，
+    /// 第二次读得到的是已搬空的有效值——这类载荷本就不允许有两个持有者，重复读它没有可主张的意义。可拷贝
+    /// 载荷仍走拷贝，「同一枚结果读两次得到同一个值」的既有形态不变。
     /// @return 完成结果的成功/错误载荷（解包 `shared_->result`）。
     /// NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    [[nodiscard]] auto result() const -> Result<T> { return *shared_->result; }
+    [[nodiscard]] auto result() const -> Result<T> {
+        if constexpr (std::is_copy_constructible_v<Result<T>>) {
+            return *shared_->result;
+        } else {
+            return std::move(*shared_->result);  // NOLINT(bugprone-unchecked-optional-access) 同上契约
+        }
+    }
 
     /// @brief 登记完成观察者：帧收尾那一刻以协程的 `Result<T>` 触发一次。
     ///
@@ -151,8 +168,12 @@ class CoroTask {
     /// 本入口存在的理由：`CoroTask` 的 promise 永不首挂也不终挂，帧只能靠 `resume` 前进，结果历来只有
     /// `is_done()` 一条问法——轮询。需要「结束即交付」的适配层（把一次交换交付成 `Task`）因此不必再
     /// 自带一枚节拍，取消与超时照旧由承接侧自己的令牌管。
+    ///
+    /// 交出的那一份是结果槽的**可变引用**（机理见 `detail::CoroShared<T>::on_done`）：观察者因此既能按
+    /// `const Result<T> &` 接住可拷贝载荷（既有形态逐字不变，引用绑得上非常量），也能把单所有权载荷
+    /// `std::move` 走——「交付一条自持读环的会话句柄」要的正是后半条，而 `const` 那一版只给得出前半条。
     /// @param hook 完成时要执行的可调用体；空值表示撤销已登记的观察者。
-    auto on_done(std::function<void(const Result<T> &)> hook) -> void {
+    auto on_done(std::function<void(Result<T> &)> hook) -> void {
         std::optional<Result<T>> late;
         {
             std::scoped_lock<std::mutex> lock(shared_->mutex);
@@ -161,7 +182,14 @@ class CoroTask {
                 return;  // 未收尾：登记即完成，观察者由帧收尾时摘出触发
             }
             if (shared_->result.has_value()) {
-                late = shared_->result;  // 已收尾：锁外触发要把结果取一份副本
+                // 已收尾：锁外触发要先把结果取成自己持有的一份。可拷贝载荷取副本（槽里那份留给后来的
+                // `result()` 轮询者，同一枚结果读两次仍是同一个值）；单所有权载荷只能搬走，搬走后同槽
+                // 即读到已搬空的值——与 `result()` 那处 `if constexpr` 同一条口径。
+                if constexpr (std::is_copy_constructible_v<Result<T>>) {
+                    late = shared_->result;
+                } else {
+                    late = std::move(*shared_->result);
+                }
             }
         }
         if (hook && late.has_value()) {

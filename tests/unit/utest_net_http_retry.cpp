@@ -7,8 +7,8 @@
 ///           （`GET` / `HEAD` / `PUT` / `DELETE`）；一枚失败的重试资格是 `Error::retryable` 与归因档的
 ///           **交集**（`net-cancelled` 标着可重试但落在 `Cancelled` 档，故被挡住——重放用户主动取消的请求
 ///           等于违抗那次取消；代理档与缓冲上限同理），状态码那族只收 408 / 429 / 500 / 502 / 503 / 504；
-///           指数退避逐次翻倍并在 `max_backoff` 封顶（移位越界只可能落到上限，不会绕回小值）；抖动取库内置
-///           的非密码学序列，故 `jitter=0` 恒等于算得值、`jitter=1` 落在 `[raw, 2*raw]` 且总和仍受封顶；
+///           指数退避逐次翻倍并在 `max_backoff` 封顶（移位越界只可能落到上限，不会绕回小值）；抖动取进程级
+///           系统熵，`jitter=0` 时实现根本不去取熵（当场回算得值），`jitter=1` 落在 `[raw, 2*raw]` 且总和仍受封顶；
 ///           `Retry-After` 两形态都解（延迟秒数位数不限、到一年封顶而非退化成「没给」，IMF-fixdate 走纯日历
 ///           算术且只认规范星期 / 月份拼写与 `" GMT"` 收尾，过期日期折成零等待），有它就以它为准、不加抖动、
 ///           仍受 `max_backoff` 封顶。日期与时钟全部由参数注入，故三平台同值、wasm 腿同样可跑。
@@ -220,7 +220,8 @@ AURORA_TEST_CASE(backoff_doubles_then_clamps) {
 
 AURORA_TEST_CASE(jitter_is_a_spread_not_a_random_number) {
     const RetryPolicy off{.base = ms(100), .max_backoff = ms(100000), .jitter = 0.0};
-    // 抖动关掉时恒等于算得值：这条只有在序列可复现时才成立，故本库不用 `std::random_device`。
+    // 抖动关掉时恒等于算得值：这条靠的是「`jitter <= 0` 就不去取熵」那条例支，而不是某种可复现的序列——
+    // 换成系统熵后这里依然逐枚相等，因为那条路径上一枚随机数都不碰。
     for (int draw = 0; draw < 32; ++draw) {
         AURORA_TEST_CHECK_EQ(wait_delay(off, 2, std::nullopt), ms(200));
     }

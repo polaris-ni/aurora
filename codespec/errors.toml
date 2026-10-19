@@ -1257,3 +1257,38 @@ severity = "error"
 retryable = false
 message = "HTTP request body cannot be sent a second time: '{detail}'"
 hint = "A 307 or 308 redirect must replay the message body, and the streaming body said it cannot return to its starting point, so resending it would ship a half-consumed payload. Either hand the payload over as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note that a body which cannot restart also opts this request out of the retry policy on purpose"
+[[error]]
+enum = "WsClosed"
+slug = "ws-closed"
+category = "io"
+severity = "info"
+retryable = true
+message = "WebSocket connection is closed: '{detail}'"
+hint = "The peer ran the close handshake, a pong deadline expired, or this side shut the handle down, so no further frame will be delivered. Reconnecting is a fresh connection with a fresh handshake, not a resume: application-level state the protocol carried (subprotocol, session identity, anything the server keyed on the old connection) has to be re-established by the caller"
+
+[[error]]
+enum = "WsHandshakeRejected"
+slug = "ws-handshake-rejected"
+category = "io"
+severity = "error"
+retryable = false
+message = "WebSocket upgrade was refused: '{detail}'"
+hint = "The peer did not answer the upgrade with 101 Switching Protocols, Sec-WebSocket-Accept did not match the key this side sent, or a required subprotocol went unchosen. This is a stable answer about the endpoint and the configuration, so retrying the same request reaches the same verdict: fix the URL, the subprotocol list, or the Origin the server expects"
+
+[[error]]
+enum = "WsProtocolError"
+slug = "ws-protocol-error"
+category = "io"
+severity = "error"
+retryable = false
+message = "WebSocket peer violated the frame grammar: '{detail}'"
+hint = "A frame was malformed, exceeded a configured frame or reassembled-message limit, carried a control frame that is not a complete message or whose payload is longer than 125 bytes, or held text that is not valid UTF-8. The byte stream is now misaligned, so the connection is dropped rather than continued: no later frame on it can be trusted"
+
+[[error]]
+enum = "WsSendQueueFull"
+slug = "ws-send-queue-full"
+category = "io"
+severity = "warning"
+retryable = true
+message = "WebSocket send queue is full: '{detail}'"
+hint = "The producer outran the wire: pending outgoing payload reached its byte cap or the queue its entry cap. This refuses only the message that hit the limit and leaves the connection open, on purpose - whether to keep buffering, drop, or close is the caller's decision. Slow the producer down or raise the matching WebSocketOptions field"

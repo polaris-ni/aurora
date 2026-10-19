@@ -467,15 +467,20 @@ auto error_class_of(ErrorCode code) -> HttpErrorClass {
         case ErrorCode::HttpProtocolError:
         case ErrorCode::HttpBodyCorrupt:
         case ErrorCode::HttpRedirectLimit:  // 对端把重定向写成了环
+        case ErrorCode::WsHandshakeRejected:  // 对端对「要不要升级」给的答案，说的是这条对话而非链路通不通
+        case ErrorCode::WsProtocolError:  // 对端把帧流写坏了：与 `http-protocol-error` 同档同判据
             return HttpErrorClass::Protocol;
+        case ErrorCode::WsClosed:  // 会话收摊（对端 close / pong 到点 / 本侧关停）：这条连接不再在场，是链路事实
+            return HttpErrorClass::Unreachable;
         default:
-            // 兜底档覆盖两类：本族里「动作在代码或配置里而不在网络上」的 18 枚（`net-url-invalid` /
+            // 兜底档覆盖两类：本族里「动作在代码或配置里而不在网络上」的 19 枚（`net-url-invalid` /
             // `http-request-invalid` / `net-endpoint-invalid` / `net-platform-unavailable` /
             // `net-tls-engine-unavailable` / `net-option-failed` / `net-option-conflict` /
             // `net-timeout-option-failed` / `net-proxy-config-invalid` / `net-proxy-unsupported` /
             // `net-framer-config-invalid` / `net-buffer-limit` / `net-framer-overflow` /
             // `net-policy-violated` / `http-body-too-large` / `http-charset-unsupported` /
-            // `http-content-encoding-unsupported` / `http-body-not-replayable`），
+            // `http-content-encoding-unsupported` / `http-body-not-replayable` / `ws-send-queue-full`，
+            // 最后那枚拒的是「这一条先别发」，动作在调用方的生产节奏与 `WebSocketOptions` 的额度上），
             // 以及压根不属于网络交换的其它族码。逐码清单以 `specification/06-app-platform.md` §8.8.22 与
             // `utest_net_http` 的期望表为准（本 switch 与那两处同批改）；分型是观测口而非校验口，故不报错、只归档。
             return HttpErrorClass::Invalid;

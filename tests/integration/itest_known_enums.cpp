@@ -45,7 +45,7 @@ namespace {
            static_cast<int>(aurora::net::AddressFamily::LocalPath) +
            static_cast<int>(aurora::net::LengthByteOrder::Little) + static_cast<int>(aurora::net::ProxyKind::Socks5) +
            static_cast<int>(aurora::net::ShutdownMode::Both) + static_cast<int>(aurora::net::TlsVersion::Tls13) +
-           static_cast<int>(aurora::net::http::Method::Delete) +
+           static_cast<int>(aurora::net::WsMessageKind::Binary) + static_cast<int>(aurora::net::http::Method::Delete) +
            static_cast<int>(aurora::net::http::ProgressPhase::Download) +
            static_cast<int>(aurora::net::http::SinkFlow::Stop) +
            static_cast<int>(aurora::net::http::HttpErrorClass::Cancelled) +

@@ -115,6 +115,7 @@
 #include "aurora/net/policy.h"
 #include "aurora/net/proxy.h"
 #include "aurora/net/tls.h"
+#include "aurora/net/websocket.h"
 #include "aurora/state/coroutine.h"
 
 namespace aurora::net::detail {
@@ -446,6 +447,46 @@ class Client {
     /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
     [[nodiscard]] auto open_sse(Request request, SseSink &sink, Cancellation cancellation = {}) const
         -> CoroTask<Result<SseOutcome>>;
+
+    /// @brief 发起一次 `ws://` / `wss://` 升级握手，成功交出一条自持读环的会话句柄。
+    ///
+    /// 本入口是 `Client` 三条发起腿里的第三条（`send` 物化、`open_stream` / `open_sse` 交付、本件升级），它
+    /// 复用前两条腿的地基而不复用它们的骨架：解析与双栈竞速、代理隧道或转发、TLS 信任根、策略闸、链路标识、
+    /// Cookie 附着与收取、`Timeouts` 全部照旧兑现；而应答侧的装配器、重定向环、重试环、缓存表与分帧解码**一律
+    /// 不进来**——101 之后这条连接不再是「一次交换」，把 `ResponseAssembler` 套上去它会把 101 当场判成协议违例
+    /// （那是 HTTP 侧正确的判断，只是不适用于升级）。握手字节层与判定在 `net/detail/ws_handshake.h`，会话状态
+    /// 在 `net/detail/ws_session.h`，形态约束的完整口径见 `net/websocket.h` 的文件头。
+    ///
+    /// 六条与另两腿不同的落点（规范性）：
+    /// - **方法只认 `GET`**：其余方法起手即落 `http-request-invalid`，既不静默改成 `GET`（那会让调用方以为
+    ///     发出去了体），也不照发（那会打出一个本库不认识的协议）。
+    /// - **不重试、不跟随重定向**：一条已经升级的连接没法「换个地址再升一次」，而 `RetryPolicy` 的「原样重发」
+    ///     在这里意味着再打一枚 `Sec-WebSocket-Key` 去问同一件事——服务端把它当成两次独立握手是常态。3xx 与非
+    ///     2xx 同样由 `validate_ws_handshake()` 点名状态码后落 `ws-handshake-rejected`。
+    /// - **不进连接池**：句柄是这条连接的唯一持有者，池既拿不到它也收不回它；`PoolOptions` 在本腿上无事可管，
+    ///     握手一律起新连接。复用与「同一条长连接」在两处说的是相反的事。
+    /// - **不查也不写缓存表**：一次升级要的是此刻之后的帧，一份历史副本对它没有意义。
+    /// - **超时与取消管到握手结算为止**：`Timeouts::connect` 照旧管建连（含 TLS 握手），`Timeouts::total` 管
+    ///     整段握手（写出请求到读出 `101`）；`Timeouts::read_idle` 在本腿上无事可管——升级后的读环属于会话而不
+    ///     属于这次交换，它的时限由 `WebSocketOptions` 的两枚心跳旋钮表达。令牌到点或被取消只影响握手，不会
+    ///     掐一条宿主正在使用的会话（口径同 `net/websocket.h`）。
+    /// - **`101` 之后读多的字节属于帧流**：一次读不会刚好停在头部块的边界上，那一段原样交给会话先喂分帧器，
+    ///     既不丢半条消息，也不把它当成「上一条消息的余货」判成畸形。
+    ///
+    /// 本腿无裸流式能力（`Engine::capabilities().streaming` 为假，如 wasm）时起手即落 `net-platform-unavailable`
+    /// （裁决见提案 §16 第 3 项：浏览器 `fetch` 那侧连可读的 socket 都不给，要接原生 `WebSocket` 是另一件事）。
+    /// 协程出口，续体恒回主线程。
+    /// @param request 待升级的请求（只认 `GET`；按值接管以随协程帧存活，调用后可立即销毁源对象）。
+    /// @param sink 会话侧宿主；**按引用**交付，其生命周期必须覆盖到会话收尾——即句柄析构或 `on_closed` 之后。
+    ///             握手未成时本入口**不调用它的任何一口**（含 `on_closed`）：那次会话从未存在过，失败事实全部
+    ///             由返回的 `Result` 表达，两条通知路若各报一次，宿主就会在同一次调用里收到两个终态。
+    /// @param options 三枚上限、子协议与心跳两档（读定一次，此后改旋钮不影响已交出的会话）。
+    /// @param cancellation 握手段的取消令牌（缺省 = 独立令牌、无人可取消；结算后不再驱动会话）。
+    /// @return 可 `co_await` 的协程任务：成功携 `WebSocket` 句柄，失败携对应 `ws-*` / `http-*` / `net-*` 错误码。
+    /// @note Thread: `sink` 的四个入口恒在主线程同步调用，由会话的读环串行驱动
+    /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
+    [[nodiscard]] auto connect_websocket(Request request, WebSocketSink &sink, WebSocketOptions options = {},
+                                         Cancellation cancellation = {}) const -> CoroTask<Result<WebSocket>>;
 
   private:
     std::optional<std::uint64_t> max_body_bytes_;  ///< 物化体上限（nullopt = 不限）

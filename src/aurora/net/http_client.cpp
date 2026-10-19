@@ -10,6 +10,12 @@
 // 里的 `co_await` 无法从普通函数里发出，把「建连 + 写出」抽成辅助协程要么按值搬动那些类型擦除闭包、要么让
 // 每一跳多背一帧，两种都比这几十行的重复更容易出错。四条真差异（体不物化、头部即判重定向、线上不设限、
 // deflate 按包装头判定）全部落在各自看得见的地方，读一条即能对照另一条。
+//
+// 第三条发起腿 `connect_websocket` 也住在本文件，因为它要复用本文件私有的一半地基：策略三级取定、路由
+// (`plan_route`) 与起手闸 (`gate_origin`)、链路标识与 Cookie 附着。那几件在库内各只有一份实现（「有没有经
+// 代理」这个答案全库只有一个，见 `HopRoute` 的注释），搬到别处就得要么复制一份、要么把它们公开成库内接口。
+// 它与另两腿**不共用骨架**：应答侧的装配器、重定向环、重试环、缓存表与分帧解码一概不进来（判据见
+// `Client::connect_websocket()` 的文档），握手一结算就把连接交给 `detail::WsSession`，此后不再有交换可言。
 #include "aurora/net/http_client.h"
 
 #include <algorithm>
@@ -47,10 +53,14 @@
 #include "aurora/net/detail/http_request_id.h"
 #include "aurora/net/detail/http_retry.h"
 #include "aurora/net/detail/http_wire.h"
+#include "aurora/net/detail/random_draw.h"
+#include "aurora/net/detail/ws_handshake.h"
+#include "aurora/net/detail/ws_session.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/http.h"
 #include "aurora/net/tls.h"
 #include "aurora/net/transport.h"
+#include "aurora/net/websocket.h"
 #include "aurora/state/coroutine.h"
 
 namespace aurora::net::http {
@@ -417,7 +427,13 @@ auto stamp_request_id(Request &request, bool enabled) -> void {
         return;  // 空串 = 这条请求明确不要标识，缺省补齐就此打住
     }
     if (enabled) {
-        request.header(detail::AURORA_HTTP_REQUEST_ID, detail::make_request_id());
+        // 取不到系统熵时这一条就是不带标识，而不是带一枚可猜的：请求照常发出，缺失由那一行 WARN 记下
+        // （口径见 `detail/http_request_id.h` 第三条）。调用方自带的标识与 `Request::request_id()` 不经此处。
+        if (auto id = detail::make_request_id(); id) {
+            request.header(detail::AURORA_HTTP_REQUEST_ID, id.value());
+        } else {
+            detail::note_entropy_unavailable("X-Request-Id");
+        }
     }
 }
 
@@ -2694,6 +2710,207 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
     // 档的先例改报 `http-timeout` 并在 detail 点名是 budget，使「超时」在两枚旋钮之间仍可分辨。
     if (!outcome && wall->fired.load() == static_cast<int>(TimeoutStage::Budget)) {
         outcome = Result<StreamOutcome>{make_error(ErrorCode::HttpTimeout, "retry budget exhausted")};
+    }
+    co_return outcome;
+}
+
+// Sink 由调用方持有、协程帧只借用（`include/aurora/net/http_client.h` 的声明处同一口径）。声明处的那条紧邻豁免
+// 不跨翻译单元传导：本定义被 `http_binding.cpp` 之外的一切包含者看到时，这里就是它的告警点。
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters)
+auto Client::connect_websocket(Request request, WebSocketSink &sink, WebSocketOptions options,
+                               Cancellation cancellation) const -> CoroTask<Result<WebSocket>> {
+    // 取消先于一切判定，与 `send` / `open_stream` 同一位置：已取消的令牌不问策略、不看本腿能力，也不调宿主
+    // 那四个入口的任何一口——那次会话从未存在过，`on_closed` 也无从谈起。
+    if (cancellation.is_cancelled()) {
+        co_return Result<WebSocket>{
+            make_error(ErrorCode::NetCancelled, "the upgrade handshake was cancelled before it started")};
+    }
+    // 方法闸在起手，而不是「静默改成 GET」：调用方以为发出去了体、对端收到的却是一条无体 GET，比一次失败
+    // 更难排查。协议文法只承认 GET 升级（`RFC 6455 §5.1`）。
+    if (request.method() != Method::Get) {
+        co_return Result<WebSocket>{
+            make_error(ErrorCode::HttpRequestInvalid, "only GET can be upgraded to a WebSocket connection")};
+    }
+    // 本腿要的是**一条可以被持续读写的裸连接**；wasm 的 `fetch` 连可读的 socket 都不给（裁决见提案 §16 第 3
+    // 项）。绝不退化成别的形态：拿一次物化交换冒充一条不会结束的会话，比直接失败更误导调用方。
+    if (!Engine::instance().capabilities().streaming) {
+        co_return Result<WebSocket>{
+            make_error(ErrorCode::NetPlatformUnavailable, "connect_websocket: this leg has no raw byte stream")};
+    }
+
+    Request origin = std::move(request);
+    // 链路标识与 Cookie 附着同另两腿：写在原始请求上，一次交换一枚。
+    stamp_request_id(origin, request_id_);
+    log_exchange_identity(origin);
+    attach_cookies_from_jar(origin, cookie_jar_);
+    // 策略读定与起手闸同另两腿：被拒时连头部都没渲染，更不发起连接。
+    const NetPolicy security = effective_policy(policy_);
+    if (const auto verdict = gate_origin(proxy_, tls_, security, origin); !verdict) {
+        co_return Result<WebSocket>{verdict.error()};
+    }
+    const auto &slot = origin.url();
+    if (!slot.has_value()) {
+        // 目标解析失败由 `render_head()` 说（它带着解析时记下的那枚原因），策略不抢这个活。
+        auto undeliverable = origin.render_head();
+        co_return Result<WebSocket>{undeliverable.error()};
+    }
+    const Url &target = slot.value();
+    const std::string_view scheme = target.scheme();
+    if (scheme != "ws" && scheme != "wss") {
+        co_return Result<WebSocket>{
+            make_error(ErrorCode::WsHandshakeRejected,
+                       ErrorParams{{"detail", "the target scheme is '" + std::string{scheme} + "', not ws or wss"}})};
+    }
+    const auto port = target.effective_port();
+    if (!port.has_value()) {
+        co_return Result<WebSocket>{
+            make_error(ErrorCode::WsHandshakeRejected, ErrorParams{{"detail", "the target has no effective port"}})};
+    }
+    // 路由与另两腿同一条 `plan_route`（库内「有没有经代理」只有这一个答案）：`ws://` 遇明文转发代理时请求行
+    // 写成绝对形态，`wss://` 一律走隧道——隧道之上的 TLS 握手对象恒是目标主机。
+    auto routed = plan_route(proxy_, tls_, security, target, *port);
+    if (!routed) {
+        co_return Result<WebSocket>{routed.error()};
+    }
+    const HopRoute &route = routed.value();  // 只借用：`routed` 活到本函数收尾，与另两腿同一形态
+
+    // 令牌与看门狗只服务握手这一段：结算之后这条连接归会话与句柄，取消不再掐一条宿主正在使用的会话。
+    // `read_idle` 在本腿上无事可管——它管的是「一次交换的两段读之间」，而升级后的读环属于会话。
+    Cancellation token;
+    cancellation.on_cancel([token]() mutable { token.cancel(); });
+    auto tstate = std::make_shared<TimeoutState>();
+    const Timeouts timeouts = origin.timeouts();
+    StageTimer total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
+    StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
+    const StreamOptions stream_options;
+    detail::ProxyNegotiation negotiation;  // 只带回 `CONNECT` 的补充事实；本腿不进认证环
+    Result<WebSocket> outcome{make_error(ErrorCode::HttpProtocolError, "connect_websocket produced no outcome")};
+
+    for (;;) {
+        // ── 起新连接：本腿不进池（句柄是这条连接唯一的持有者，池既拿不到它也收不回它）。
+        std::shared_ptr<StreamTransport> plain_holder;
+        std::shared_ptr<TlsTransport> secure_holder;
+        auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host, route.peer_port,
+                                                        stream_options, token, &negotiation);
+        if (!plain) {
+            outcome = Result<WebSocket>{plain.error()};
+            break;
+        }
+        if (target.is_secure()) {
+            auto secure =
+                co_await detail::await_handshake(std::move(plain.value()), std::string{target.host()}, tls_, token);
+            if (!secure) {
+                outcome = Result<WebSocket>{secure.error()};
+                break;
+            }
+            secure_holder = std::make_shared<TlsTransport>(std::move(secure.value()));
+        } else {
+            plain_holder = std::make_shared<StreamTransport>(std::move(plain.value()));
+        }
+        connect_timer.stop();
+        std::function<detail::CallbackAwaiter<std::size_t>(std::span<char>)> read_one;
+        std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
+        if (secure_holder != nullptr) {
+            read_one = [holder = secure_holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
+            write_one = [holder = secure_holder](std::span<const char> data) {
+                return detail::await_write(*holder, data);
+            };
+        } else {
+            read_one = [holder = plain_holder](std::span<char> buffer) { return detail::await_read(*holder, buffer); };
+            write_one = [holder = plain_holder](std::span<const char> data) {
+                return detail::await_write(*holder, data);
+            };
+        }
+
+        // ── 写出握手：四枚字段由库写定，调用方写的同名值被覆写（口径见 `detail/ws_handshake.h`）；体与
+        //    `Content-Length` / `Transfer-Encoding` 在那一层已被剥掉，本腿也压根不看 `Expect: 100-continue`。
+        const detail::WsHandshakeOffer offer{.subprotocols = options.subprotocols,
+                                             .require_subprotocol = options.require_subprotocol};
+        std::string key;
+        auto head = detail::render_ws_handshake(target, origin.headers(), offer, route.absolute_form, key);
+        if (!head) {
+            outcome = Result<WebSocket>{head.error()};
+            break;
+        }
+        const std::string handshake_bytes = std::move(head.value());
+        auto written = co_await write_one(std::span<const char>{handshake_bytes});
+        if (!written) {
+            outcome = Result<WebSocket>{written.error()};
+            break;
+        }
+
+        // ── 逐段读头部块，装配器一律不上：`wire::ResponseAssembler` 把 101 当场判成协议违例（那对一条普通
+        //    交换是正确的），而这里要的恰恰是那一句应答。`parse_response_head` 只吃头部块自身占用的字节。
+        std::string buffered;
+        std::optional<wire::ResponseHead> head_block;
+        bool interrupted = false;
+        std::array<char, AURORA_READ_CHUNK> chunk{};
+        while (!head_block.has_value()) {
+            auto got = co_await read_one(std::span<char>{chunk});
+            if (!got) {
+                outcome = Result<WebSocket>{got.error()};
+                interrupted = true;
+                break;
+            }
+            if (got.value() == 0U) {
+                outcome = Result<WebSocket>{make_error(
+                    ErrorCode::WsHandshakeRejected,
+                    ErrorParams{{"detail", "the peer closed the connection without answering the upgrade"}})};
+                interrupted = true;
+                break;
+            }
+            buffered.append(chunk.data(), got.value());
+            auto parsed = wire::parse_response_head(std::string_view{buffered});
+            if (!parsed) {
+                outcome = Result<WebSocket>{parsed.error()};
+                interrupted = true;
+                break;
+            }
+            head_block = parsed.value();  // 空 = 头部块还没读完，继续读下一段
+        }
+        if (interrupted) {
+            break;
+        }
+
+        auto accept = detail::validate_ws_handshake(*head_block, key, offer);
+        if (!accept) {
+            outcome = Result<WebSocket>{accept.error()};
+            break;
+        }
+        // 应答侧的 Jar 收取照做：升级应答里的 `Set-Cookie` 同样是服务端要本会话记住的身份（畸形条目逐条丢弃）。
+        harvest_set_cookies(cookie_jar_, target, head_block->headers, target.is_secure());
+        // 头部块之后已经到手的字节属于帧流：一次读不会刚好停在那道边界上。交给会话先喂分帧器，既不丢半条
+        // 消息，也不把它当成「上一条消息的余货」判成畸形。
+        std::string leftover;
+        if (head_block->header_bytes < buffered.size()) {
+            leftover = buffered.substr(head_block->header_bytes);
+        }
+        auto session = std::make_shared<detail::WsSession>(plain_holder, secure_holder, sink, std::move(options),
+                                                           accept.value().subprotocol, std::move(leftover));
+        session->start(session);
+        outcome = Result<WebSocket>{WebSocket{session}};
+        // 交权即撤钩：本枚令牌到此刻说完了「这次交换别做了」，此后这条连接归句柄与会话（口径见公共头文件头
+        // 末段）。不撤的话，宿主日后取消一枚它早已不该过问的令牌，会经建连时登记的连接级钩子把会话当场掐断
+        // ——同一份资源两个互不知情的所有者。`Cancellation::on_cancel` 交空体即撤销登记（`net/cancellation.h`）。
+        cancellation.on_cancel({});
+        break;
+    }
+
+    // 超时改道与另两腿同判据：失败若因某档看门狗取消了令牌，一律改报 `http-timeout` 并标明是哪一档；
+    // 令牌本身被取消则留着 `net-cancelled`——那是宿主说的手，不是时限到的事实。
+    if (!outcome) {
+        switch (static_cast<TimeoutStage>(tstate->fired.load())) {
+            case TimeoutStage::Connect:
+                outcome = Result<WebSocket>{make_error(ErrorCode::HttpTimeout, "connect timeout")};
+                break;
+            case TimeoutStage::Total:
+                outcome = Result<WebSocket>{make_error(ErrorCode::HttpTimeout, "total timeout")};
+                break;
+            case TimeoutStage::ReadIdle:  // 本腿不设读空闲档：升级后的读环不属于这次交换
+            case TimeoutStage::Budget:  // 跨尝试的墙属重试环，本腿既无重试也无外层登记
+            case TimeoutStage::None:
+                break;
+        }
     }
     co_return outcome;
 }

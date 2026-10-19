@@ -16,7 +16,7 @@
 
 #include "aurora/core/error_codes.h"
 #include "aurora/core/result.h"
-#include "aurora/net/detail/noncrypto_random.h"
+#include "aurora/net/detail/random_draw.h"
 #include "aurora/net/http.h"
 
 namespace aurora::net::detail {
@@ -40,11 +40,12 @@ constexpr std::array<std::uint16_t, 6> AURORA_TRANSIENT_STATUS{408, 429, 500, 50
     return std::min(value, cap);
 }
 
-/// @brief 抖动序列的推进体：转发到库内置的非密码学序列（口径与选型理由见 `detail/noncrypto_random.h`）。
+/// @brief 抖动序列的推进体：转发到系统熵取值口（口径与降级理由见 `detail/random_draw.h`）。
 ///
-/// 本文件不再自带状态与参数：抖动与链路标识要的只是同一件事——「不必安全，但必须散得开」，故共用一份
-/// 进程内序列。这里保留一层转发的名字，是让下方 `wait_delay` 的读法仍指向「抖动的一个单位」这一语义。
-[[nodiscard]] auto jitter_unit() -> double { return noncrypto_unit(); }
+/// 本文件不再自带状态与参数：抖动要的只是「散得开」，而系统熵顺带保证了这一点。这里保留一层转发的名字，
+/// 是让下方 `wait_delay` 的读法仍指向「抖动的一个单位」这一语义。取不到熵时那一层交出 `0.0` 并记一行
+/// WARN——退避照算，只是这一条不打散，比让一次可重放的失败变成「重试判定本身出错」更合语义。
+[[nodiscard]] auto jitter_unit() -> double { return random_unit(); }
 
 /// @brief 跳过首尾的空白（`OWS` = 空格与水平制表）。
 [[nodiscard]] auto trim_ows(std::string_view text) -> std::string_view {

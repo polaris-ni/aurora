@@ -177,6 +177,10 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     IconGlyphUnavailable = 133,  ///< icon-glyph-unavailable: Icon glyph unavailable: {detail}
     IconSvgUnsupported = 134,  ///< icon-svg-unsupported: Icon SVG source uses unsupported features: {detail}
     HttpBodyNotReplayable = 135,  ///< http-body-not-replayable
+    WsClosed = 136,  ///< ws-closed: WebSocket connection is closed: '{detail}'
+    WsHandshakeRejected = 137,  ///< ws-handshake-rejected: WebSocket upgrade was refused: '{detail}'
+    WsProtocolError = 138,  ///< ws-protocol-error: WebSocket peer violated the frame grammar: '{detail}'
+    WsSendQueueFull = 139,  ///< ws-send-queue-full: WebSocket send queue is full: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -192,7 +196,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 136> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 140> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1681,6 +1685,58 @@ inline constexpr std::array<ErrorMeta, 136> AURORA_ERROR_TABLE = {
                 "its starting point, so resending it would ship a half-consumed payload. Either hand the payload over "
                 "as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note "
                 "that a body which cannot restart also opts this request out of the retry policy on purpose",
+        },
+        {
+            .code = ErrorCode::WsClosed,
+            .ident = "WsClosed",
+            .slug = "ws-closed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Info,
+            .retryable = true,
+            .message_tpl = "WebSocket connection is closed: '{detail}'",
+            .hint = "The peer ran the close handshake, a pong deadline expired, or this side shut the handle down, so "
+                    "no further frame will be delivered. Reconnecting is a fresh connection with a fresh handshake, "
+                    "not a resume: application-level state the protocol carried (subprotocol, session identity, "
+                    "anything the server keyed on the old connection) has to be re-established by the caller",
+        },
+        {
+            .code = ErrorCode::WsHandshakeRejected,
+            .ident = "WsHandshakeRejected",
+            .slug = "ws-handshake-rejected",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "WebSocket upgrade was refused: '{detail}'",
+            .hint = "The peer did not answer the upgrade with 101 Switching Protocols, Sec-WebSocket-Accept did not "
+                    "match the key this side sent, or a required subprotocol went unchosen. This is a stable answer "
+                    "about the endpoint and the configuration, so retrying the same request reaches the same verdict: "
+                    "fix the URL, the subprotocol list, or the Origin the server expects",
+        },
+        {
+            .code = ErrorCode::WsProtocolError,
+            .ident = "WsProtocolError",
+            .slug = "ws-protocol-error",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "WebSocket peer violated the frame grammar: '{detail}'",
+            .hint = "A frame was malformed, exceeded a configured frame or reassembled-message limit, carried a "
+                    "control frame that is not a complete message or whose payload is longer than 125 bytes, or held "
+                    "text that is not valid UTF-8. The byte stream is now misaligned, so the connection is dropped "
+                    "rather than continued: no later frame on it can be trusted",
+        },
+        {
+            .code = ErrorCode::WsSendQueueFull,
+            .ident = "WsSendQueueFull",
+            .slug = "ws-send-queue-full",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Warning,
+            .retryable = true,
+            .message_tpl = "WebSocket send queue is full: '{detail}'",
+            .hint = "The producer outran the wire: pending outgoing payload reached its byte cap or the queue its "
+                    "entry cap. This refuses only the message that hit the limit and leaves the connection open, on "
+                    "purpose - whether to keep buffering, drop, or close is the caller's decision. Slow the producer "
+                    "down or raise the matching WebSocketOptions field",
         },
     },
 };

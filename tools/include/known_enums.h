@@ -179,6 +179,7 @@ namespace aurora::tools {
     enums["SinkFlow"] = {"Continue", "Stop"};
     enums["ShutdownMode"] = {"Read", "Write", "Both"};
     enums["TlsVersion"] = {"Tls10", "Tls11", "Tls12", "Tls13"};
+    enums["WsMessageKind"] = {"Text", "Binary"};
 
     // ---- declarative binding (aurora::Resource / aurora::StreamResource, state/resource.h) ----
     enums["ResourcePhase"] = {"Loading", "Ready", "Failed"};
