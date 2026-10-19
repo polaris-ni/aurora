@@ -8,7 +8,7 @@
 //
 // 协程结构：本库的 `CoroTask` 不是 awaitable，「跑完一次流式交换再据其结局决定下一步」因此经
 // `detail::await_coro` 桥在同一帧里完成（约束与理由见其文档）——订阅层正是它存在的第一个用户。
-#include "aurora/net/http_client.h"
+#include "aurora/net/detail/http_sse.h"
 
 #include <cctype>
 #include <chrono>
@@ -25,9 +25,9 @@
 #include "aurora/core/result.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/detail/http_await.h"
-#include "aurora/net/detail/http_sse.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/http.h"
+#include "aurora/net/http_client.h"
 #include "aurora/net/http_sse.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/state/coroutine.h"
@@ -94,11 +94,11 @@ constexpr std::string_view AURORA_SSE_EVENT_STREAM_TYPE{"text/event-stream"};
 /// @return 属于本地拒绝为 true。
 [[nodiscard]] auto refused_before_the_wire(const ErrorCode code) -> bool {
     switch (code) {
-        case ErrorCode::HttpRequestInvalid:       // 请求形态本身不对（非 GET）
-        case ErrorCode::NetPolicyViolated:        // 安全策略不放行这个目标
-        case ErrorCode::NetPlatformUnavailable:   // 本腿没有流式语义
-        case ErrorCode::HttpRedirectLimit:        // 重定向上限：再来一条流还是同一条路
-        case ErrorCode::NetCancelled:             // 取消（循环头部另有兜底，这里防它从交换里冒出来）
+        case ErrorCode::HttpRequestInvalid:  // 请求形态本身不对（非 GET）
+        case ErrorCode::NetPolicyViolated:  // 安全策略不放行这个目标
+        case ErrorCode::NetPlatformUnavailable:  // 本腿没有流式语义
+        case ErrorCode::HttpRedirectLimit:  // 重定向上限：再来一条流还是同一条路
+        case ErrorCode::NetCancelled:  // 取消（循环头部另有兜底，这里防它从交换里冒出来）
             return true;
         default:
             return false;
@@ -134,8 +134,7 @@ class ExchangeSink final : public DataSink {
     /// @param host 订阅侧宿主（由调用方持有，本壳只借用）。
     /// @param session 跨交换存活的那份会话事实。
     ExchangeSink(SseSink &host, SseSession session)
-        : host_(host),
-          session_(session),
+        : host_(host), session_(session),
           parser_(detail::SseParserSinks{
               .on_event = [this](const detail::SseParsedEvent &event) -> bool { return deliver(event); },
               .on_comment = [this](std::string_view text) -> void { host_.on_comment(text); },
@@ -154,10 +153,10 @@ class ExchangeSink final : public DataSink {
     /// @return 继续交付为 `Continue`；定局（终止失败或宿主收摊）为 `Stop`。
     auto on_head(const Response &head) -> SinkFlow override {
         if (head.status() < 200 || head.status() > 299) {
-            terminal_ = make_error(ErrorCode::HttpProtocolError,
-                                   ErrorParams{{"detail",
-                                                "an event-stream subscription ended on a non-success status (" +
-                                                    std::to_string(head.status()) + ")"}});
+            terminal_ =
+                make_error(ErrorCode::HttpProtocolError,
+                           ErrorParams{{"detail", "an event-stream subscription ended on a non-success status (" +
+                                                      std::to_string(head.status()) + ")"}});
             return SinkFlow::Stop;
         }
         if (!declares_event_stream(head)) {
@@ -244,8 +243,7 @@ auto Client::sse(SseOptions value) -> Client & {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
-auto Client::open_sse(Request request, SseSink &sink, Cancellation cancellation) const
-    -> CoroTask<Result<SseOutcome>> {
+auto Client::open_sse(Request request, SseSink &sink, Cancellation cancellation) const -> CoroTask<Result<SseOutcome>> {
     // 取消先于一切判定，与 `send` / `open_stream` 同一位置：已取消的令牌不问方法、不看本腿能力，也不调宿主任何一口。
     if (cancellation.is_cancelled()) {
         co_return Result<SseOutcome>{
@@ -256,9 +254,8 @@ auto Client::open_sse(Request request, SseSink &sink, Cancellation cancellation)
     if (request.method() != Method::Get) {
         co_return Result<SseOutcome>{make_error(
             ErrorCode::HttpRequestInvalid,
-            ErrorParams{{"detail",
-                         std::string{"an event-stream subscription must be a GET, the request said "} +
-                             std::string{method_text(request.method())}}})};
+            ErrorParams{{"detail", std::string{"an event-stream subscription must be a GET, the request said "} +
+                                       std::string{method_text(request.method())}}})};
     }
     // 本腿没有流式语义（wasm 无 ReadableStream）时直接失败，绝不退化成「物化一份应答再慢慢切行」：
     // 那等于把一条不会结束的流等成一次也不会结束的挂死。
@@ -317,9 +314,8 @@ auto Client::open_sse(Request request, SseSink &sink, Cancellation cancellation)
             // 其线上形态同样是不带。
             current.set_header("Last-Event-ID", last_event_id);
         }
-        ExchangeSink exchange{sink, SseSession{.last_event_id = last_event_id,
-                                               .window = retry_window,
-                                               .events = events}};
+        ExchangeSink exchange{sink,
+                              SseSession{.last_event_id = last_event_id, .window = retry_window, .events = events}};
         auto one = co_await detail::await_coro(open_stream(current, exchange, cancellation));
         ++exchanges;
         if (one) {

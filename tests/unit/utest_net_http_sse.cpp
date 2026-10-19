@@ -54,8 +54,8 @@ namespace {
 
 using aurora::CoroTask;
 using aurora::Result;
-using aurora::net::Capabilities;
 using aurora::net::Cancellation;
+using aurora::net::Capabilities;
 using aurora::net::NetPolicy;
 using aurora::net::detail::AURORA_SSE_MAX_EVENT_BYTES;
 using aurora::net::detail::AURORA_SSE_MAX_LINE_BYTES;
@@ -66,11 +66,11 @@ using aurora::net::http::CacheOptions;
 using aurora::net::http::Client;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
+using aurora::net::http::SinkFlow;
 using aurora::net::http::SseEvent;
 using aurora::net::http::SseOptions;
 using aurora::net::http::SseOutcome;
 using aurora::net::http::SseSink;
-using aurora::net::http::SinkFlow;
 using aurora::test::FakeEngine;
 using aurora::test::FakeEngineScope;
 using aurora::test::PeerScript;
@@ -147,7 +147,8 @@ struct Recorder {
                 const std::size_t index = types.size();
                 types.push_back(event.type);
                 datas.push_back(event.data);
-                return decline_at != 0 && index + 1 >= decline_at ? false : accept_events;
+                // `decline_at` 是 1 基的「第几条起收摊」，正数才有意义；换成无符号比较口径后，判据与它同源。
+                return decline_at > 0 && index + 1 >= static_cast<std::size_t>(decline_at) ? false : accept_events;
             },
             .on_comment = [this](std::string_view text) -> void { comments.emplace_back(text); },
             .on_last_id = [this](const std::string &value) -> void { ids.push_back(value); },
@@ -247,14 +248,13 @@ auto allow_test_cleartext(Client &client) -> void {
 /// @param token 取消令牌。
 /// @param budget 收尾预算（重连与窗口用例各要各的：默认 3 s 足够覆盖两次回环交换）。
 /// @return 订阅的出口结果（协程未收尾时由 REQUIRE 收场）。
-[[nodiscard]] auto subscribe_and_drive(const Client &client, Request request, SseSink &sink,
-                                       Cancellation token = {},
+[[nodiscard]] auto subscribe_and_drive(const Client &client, Request request, SseSink &sink, Cancellation token = {},
                                        std::chrono::milliseconds budget = std::chrono::milliseconds{3000})
     -> Result<SseOutcome> {
     const aurora::test::net::HostDriven host;
     auto task = client.open_sse(std::move(request), sink, std::move(token));
-    AURORA_TEST_REQUIRE_MSG(aurora::test::net::drive_until("open_sse done", [&task] { return task.is_done(); },
-                                                           budget)
+    AURORA_TEST_REQUIRE_MSG(aurora::test::net::drive_until(
+                                "open_sse done", [&task] { return task.is_done(); }, budget)
                                 .satisfied,
                             "the subscription never settled inside the wait budget");
     return inner(task);
@@ -265,8 +265,8 @@ auto allow_test_cleartext(Client &client) -> void {
 /// @param guard 交接缓冲的锁。
 /// @param payload 要写出的应答字节。
 /// @return 对端脚本。
-[[nodiscard]] auto record_head_then_reply(std::vector<std::string> &recorded, std::mutex &guard,
-                                          std::string payload) -> PeerScript {
+[[nodiscard]] auto record_head_then_reply(std::vector<std::string> &recorded, std::mutex &guard, std::string payload)
+    -> PeerScript {
     return [&recorded, &guard, payload = std::move(payload)](aurora::net::blocking::StreamSocket &socket,
                                                              PeerStop &) -> void {
         (void)socket.set_io_timeout(std::chrono::seconds{10});
@@ -405,14 +405,17 @@ AURORA_TEST_CASE(sse_parser_adopts_a_retry_field_only_when_it_is_all_digits) {
 
 AURORA_TEST_CASE(sse_parser_strips_a_byte_order_mark_even_across_segments) {
     Recorder direct;
-    const auto whole = feed(direct, {"\xEF\xBB\xBF" "data: x\n\n"});
+    const auto whole = feed(direct, {"\xEF\xBB\xBF"
+                                     "data: x\n\n"});
     AURORA_TEST_REQUIRE_MSG(bool(whole), whole ? std::string{} : whole.error().message);
     AURORA_TEST_CHECK_EQ(direct.datas.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(direct.datas.at(0), "x");
 
     Recorder split;
     // BOM 横跨两段：判不出来的那两枚字节必须挂住，否则第一段会被切成一行假字段，宿主收到一条假事件。
-    const auto halves = feed(split, {"\xEF\xBB", "\xBF" "data: y\n\n"});
+    const auto halves = feed(split, {"\xEF\xBB",
+                                     "\xBF"
+                                     "data: y\n\n"});
     AURORA_TEST_REQUIRE_MSG(bool(halves), halves ? std::string{} : halves.error().message);
     AURORA_TEST_CHECK_EQ(split.datas.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(split.datas.at(0), "y");
@@ -527,8 +530,8 @@ AURORA_TEST_CASE(sse_subscription_refuses_a_non_get_request_without_touching_the
     AURORA_TEST_REQUIRE(peer.valid());
 
     RecordingSink sink;
-    const auto outcome = subscribe_and_drive(client, Request::post(loopback_url(peer.port())).sse(single_stream()),
-                                             sink);
+    const auto outcome =
+        subscribe_and_drive(client, Request::post(loopback_url(peer.port())).sse(single_stream()), sink);
     AURORA_TEST_REQUIRE_FALSE(bool(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK(outcome.error().message.find("GET") != std::string::npos);
@@ -544,8 +547,8 @@ AURORA_TEST_CASE(sse_subscription_refuses_a_plain_text_response_and_does_not_rec
     // 内容类型严判：`text/plain` 上一条「看着像事件流」的文本会让宿主收到一堆服务端从没打算推的记录。
     Client client;
     allow_test_cleartext(client);
-    ScriptedPeer peer(reply_after_reading(
-        1, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 10\r\n\r\ndata: x\n\n"));
+    ScriptedPeer peer(
+        reply_after_reading(1, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 10\r\n\r\ndata: x\n\n"));
     AURORA_TEST_REQUIRE(peer.valid());
 
     RecordingSink sink;
@@ -572,8 +575,8 @@ AURORA_TEST_CASE(sse_subscription_accepts_an_event_stream_with_a_charset_paramet
     AURORA_TEST_REQUIRE(peer.valid());
 
     RecordingSink sink;
-    const auto outcome = subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(single_stream()),
-                                             sink);
+    const auto outcome =
+        subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(single_stream()), sink);
     AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(sink.events, 1);
     AURORA_TEST_CHECK_EQ(sink.datas.at(0), "x");
@@ -612,9 +615,8 @@ AURORA_TEST_CASE(sse_subscription_reconnects_with_the_last_event_id) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     RecordingSink sink;
-    const auto outcome = subscribe_and_drive(client,
-                                             Request::get(loopback_url(peer.port())).sse(immediate_reconnect(1)),
-                                             sink);
+    const auto outcome =
+        subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(1)), sink);
     AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
 
     AURORA_TEST_CHECK_EQ(sink.opens, 2);  // 每条流各叫一次：那是宿主唯一能知道「流断过」的出口
@@ -644,9 +646,8 @@ AURORA_TEST_CASE(sse_subscription_clears_the_resume_token_when_the_peer_writes_a
     AURORA_TEST_REQUIRE(peer.valid());
 
     RecordingSink sink;
-    const auto outcome = subscribe_and_drive(client,
-                                             Request::get(loopback_url(peer.port())).sse(immediate_reconnect(2)),
-                                             sink);
+    const auto outcome =
+        subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(2)), sink);
     AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(outcome.value().last_event_id, "");
     AURORA_TEST_CHECK_TRUE(request_contains(recorded, guard, 1, "Last-Event-ID: 7"));
@@ -667,8 +668,7 @@ AURORA_TEST_CASE(sse_subscription_adopts_the_retry_window_the_peer_wrote) {
     AURORA_TEST_REQUIRE(fast.valid());
 
     RecordingSink sink;
-    const auto outcome =
-        subscribe_and_drive(client, Request::get(loopback_url(fast.port())).sse(slow), sink);
+    const auto outcome = subscribe_and_drive(client, Request::get(loopback_url(fast.port())).sse(slow), sink);
     AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(outcome.value().exchanges, std::uint32_t{2});
     AURORA_TEST_CHECK_EQ(sink.events, 2);
@@ -685,8 +685,8 @@ AURORA_TEST_CASE(sse_subscription_adopts_the_retry_window_the_peer_wrote) {
         aurora::test::net::drive_until("first stream settled", [&other] { return other.events >= 1; }).satisfied);
     // 4 s 的初值在一秒半内不会到期：这条判据钉的是「服务端没写才用本地初值」的后半句。
     AURORA_TEST_CHECK_FALSE(
-        aurora::test::net::drive_until("second exchange settles early", [&task] { return task.is_done(); },
-                                       std::chrono::milliseconds{1500})
+        aurora::test::net::drive_until(
+            "second exchange settles early", [&task] { return task.is_done(); }, std::chrono::milliseconds{1500})
             .satisfied);
     token.cancel();
     AURORA_TEST_CHECK(aurora::test::net::drive_until(
@@ -712,9 +712,8 @@ AURORA_TEST_CASE(sse_subscription_stops_reading_when_the_sink_stops) {
 
     RecordingSink sink;
     sink.stop_after = 2;
-    const auto outcome = subscribe_and_drive(client,
-                                             Request::get(loopback_url(peer.port())).sse(immediate_reconnect(8)),
-                                             sink);
+    const auto outcome =
+        subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(8)), sink);
     AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(sink.events, 2);  // 停在收摊那一条，之后一条都不交
     AURORA_TEST_CHECK_EQ(sink.ends, 1);
@@ -763,8 +762,8 @@ AURORA_TEST_CASE(sse_subscription_surfaces_the_last_failure_when_the_budget_runs
     AURORA_TEST_REQUIRE(peer.valid());
 
     RecordingSink sink;
-    const auto outcome = subscribe_and_drive(
-        client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(2)), sink);
+    const auto outcome =
+        subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(2)), sink);
     AURORA_TEST_REQUIRE_FALSE(bool(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetRecvFailed);
     AURORA_TEST_CHECK(outcome.error().message.find("reconnect budget of 2") != std::string::npos);
@@ -831,11 +830,12 @@ AURORA_TEST_CASE(sse_subscription_neither_reads_nor_writes_the_cache) {
     // 「不查」只有先喂出一条**真能命中**的新鲜副本才算判据：表空时查与不查逐字节相同，变异掉绕过也无人变红。
     // 故同一 URL 先走一次普通交换把带 `max-age` 的副本存进表，再订阅同一目标。写侧另说：流式交换本就没有
     // `settle_cache` 那一步，`no_cache(true)` 买到的是读侧那一刀，本用例把两侧各留一枚断言。
-    static constexpr char SEEDED_BODY[] = "HTTP/1.1 200 OK\r\n"
-                                          "Cache-Control: max-age=600\r\n"
-                                          "Content-Type: text/plain\r\n"
-                                          "Content-Length: 3\r\n\r\n"
-                                          "old";
+    static constexpr char SEEDED_BODY[] =
+        "HTTP/1.1 200 OK\r\n"
+        "Cache-Control: max-age=600\r\n"
+        "Content-Type: text/plain\r\n"
+        "Content-Length: 3\r\n\r\n"
+        "old";
     Client client;
     allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
@@ -860,8 +860,8 @@ AURORA_TEST_CASE(sse_subscription_neither_reads_nor_writes_the_cache) {
     const auto subscribed = subscribe_and_drive(client, Request::get(url).sse(single_stream()), sink);
     AURORA_TEST_REQUIRE_MSG(bool(subscribed), subscribed ? std::string{} : subscribed.error().message);
     AURORA_TEST_CHECK_FALSE(subscribed.value().response.from_cache());
-    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);     // 表里那条新鲜副本没被拿来充当订阅的答案
-    AURORA_TEST_CHECK_EQ(sink.events, 1);        // 收到的是流里那一条，不是副本的载荷
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 2);  // 表里那条新鲜副本没被拿来充当订阅的答案
+    AURORA_TEST_CHECK_EQ(sink.events, 1);  // 收到的是流里那一条，不是副本的载荷
 
     auto probe = client.send(Request::get(url));
     AURORA_TEST_CHECK(aurora::test::net::drive_until(

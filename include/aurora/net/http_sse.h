@@ -59,7 +59,7 @@ namespace aurora::net::http {
 struct SseEvent {
     std::string_view type;  ///< 事件类型；未命名时是 `message`
     std::string_view data;  ///< 消息体：多行 `data` 以 LF 连接，不含收尾空行；恒非空
-    std::string_view id;    ///< 本条派发时该流的续传标识；从未有过 `id:` 字段时为空
+    std::string_view id;  ///< 本条派发时该流的续传标识；从未有过 `id:` 字段时为空
 };
 
 /// @brief 订阅侧的宿主对象：逐条收下事件并回报是否继续。

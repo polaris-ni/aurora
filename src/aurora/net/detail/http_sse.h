@@ -58,8 +58,8 @@ struct SseParsedEvent {
 /// @note Side-effects: 由实现方决定；本层只约定调用时机
 struct SseParserSinks {
     std::function<bool(const SseParsedEvent &event)> on_event;  ///< 一条事件成形（空行收尾）
-    std::function<void(std::string_view text)> on_comment;      ///< 一行注释（含心跳用的空注释）
-    std::function<void(const std::string &value)> on_last_id;   ///< `id` 字段落下即报（空值也报，那是清空）
+    std::function<void(std::string_view text)> on_comment;  ///< 一行注释（含心跳用的空注释）
+    std::function<void(const std::string &value)> on_last_id;  ///< `id` 字段落下即报（空值也报，那是清空）
     std::function<void(std::chrono::milliseconds window)> on_retry;  ///< `retry` 字段落下即报（非数字不报）
 };
 
@@ -127,15 +127,15 @@ class SseStreamParser {
     /// @param error 待记录的错误。
     auto fail(Error error) -> Result<void>;
 
-    SseParserSinks sinks_;            ///< 四个出口（可缺）
-    std::string head_;                ///< 流首待判 BOM 的挂起字节（判完即清）
-    std::string line_;                ///< 正在凑的一行（不含终止符）
-    std::string data_;                ///< 本条事件已攒的数据缓冲
-    std::string event_type_;          ///< 本条事件的事件类型缓冲；空 = 未命名，派发时折成 `message`
-    std::optional<Error> failure_;    ///< 终态错误；有值即本实例只重复交出它
-    bool pending_cr_{false};          ///< 上一段以 CR 收尾：本段首字节是 LF 时不另起一行
-    bool bom_checked_{false};         ///< 流首的 BOM 是否已判定（只判一次）
-    bool paused_{false};              ///< 宿主是否已回过「不再收」
+    SseParserSinks sinks_;  ///< 四个出口（可缺）
+    std::string head_;  ///< 流首待判 BOM 的挂起字节（判完即清）
+    std::string line_;  ///< 正在凑的一行（不含终止符）
+    std::string data_;  ///< 本条事件已攒的数据缓冲
+    std::string event_type_;  ///< 本条事件的事件类型缓冲；空 = 未命名，派发时折成 `message`
+    std::optional<Error> failure_;  ///< 终态错误；有值即本实例只重复交出它
+    bool pending_cr_{false};  ///< 上一段以 CR 收尾：本段首字节是 LF 时不另起一行
+    bool bom_checked_{false};  ///< 流首的 BOM 是否已判定（只判一次）
+    bool paused_{false};  ///< 宿主是否已回过「不再收」
 };
 
 }  // namespace aurora::net::detail

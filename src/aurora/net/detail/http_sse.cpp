@@ -59,14 +59,9 @@ constexpr std::string_view AURORA_SSE_BOM{"\xEF\xBB\xBF"};
 SseStreamParser::SseStreamParser(SseParserSinks sinks) : sinks_(std::move(sinks)) {}
 
 SseStreamParser::SseStreamParser(SseStreamParser &&other) noexcept
-    : sinks_(std::move(other.sinks_)),
-      line_(std::move(other.line_)),
-      data_(std::move(other.data_)),
-      event_type_(std::move(other.event_type_)),
-      failure_(std::move(other.failure_)),
-      pending_cr_(other.pending_cr_),
-      bom_checked_(other.bom_checked_),
-      paused_(other.paused_) {
+    : sinks_(std::move(other.sinks_)), line_(std::move(other.line_)), data_(std::move(other.data_)),
+      event_type_(std::move(other.event_type_)), failure_(std::move(other.failure_)), pending_cr_(other.pending_cr_),
+      bom_checked_(other.bom_checked_), paused_(other.paused_) {
     other.pending_cr_ = false;
 }
 
@@ -121,9 +116,9 @@ auto SseStreamParser::push(std::string_view bytes) -> Result<void> {
         line_.append(input.substr(offset, stop - offset));
         offset = stop;
         if (line_.size() > AURORA_SSE_MAX_LINE_BYTES) {
-            return fail(make_error(
-                ErrorCode::NetFramerOverflow,
-                ErrorParams{{"detail", "event-stream line exceeds the built-in line limit of 1 MiB"}}));
+            return fail(
+                make_error(ErrorCode::NetFramerOverflow,
+                           ErrorParams{{"detail", "event-stream line exceeds the built-in line limit of 1 MiB"}}));
         }
         if (next == std::string_view::npos) {
             break;  // 本段没有终止符了：剩下的字节属于正在凑的那一行
@@ -204,10 +199,10 @@ auto SseStreamParser::consume_line(std::string_view line) -> Result<void> {
     // 未知字段忽略而不是报错：那是 text/event-stream 的向后兼容机制。
     const std::size_t event_bytes = data_.size() + event_type_.size();
     if (event_bytes > AURORA_SSE_MAX_EVENT_BYTES) {
-        return fail(make_error(ErrorCode::NetBufferLimit,
-                               ErrorParams{{"detail",
-                                            "event-stream record exceeds the built-in "
-                                            "record limit of 4 MiB before its blank line"}}));
+        return fail(
+            make_error(ErrorCode::NetBufferLimit, ErrorParams{{"detail",
+                                                               "event-stream record exceeds the built-in "
+                                                               "record limit of 4 MiB before its blank line"}}));
     }
     return Result<void>{};
 }
