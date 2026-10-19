@@ -28,8 +28,8 @@
 //   7) 收尾：进程正常退出即 teardown 无恙。
 //
 // 构建：
-//   cmake -S . -B build-verify -G Ninja -DCMAKE_BUILD_TYPE=Release \
-//         -DAURORA_BACKEND_WIN32=ON -DAURORA_BUILD_VERIFY_TOOLS=ON \
+//   cmake -S . -B build-verify -G Ninja -DCMAKE_BUILD_TYPE=Release
+//         -DAURORA_BACKEND_WIN32=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 //         -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_ENABLE_WEBVIEW_WEBVIEW2=ON
 //   cmake --build build-verify --target aurora_verify_webview_webview2
 //
@@ -271,7 +271,7 @@ auto CALLBACK enum_child_cb(HWND child, LPARAM lparam) -> BOOL {
     if (::GetWindowRect(child, &wr) != 0) {
         // 一律换算到**宿主客户区**（`put_Bounds` 的坐标系）；WebView2 的子窗可能嵌套，
         // 故不能只在直接父窗里算。
-        POINT pts[2] = {{wr.left, wr.top}, {wr.right, wr.bottom}};
+        POINT pts[2] = {{.x = wr.left, .y = wr.top}, {.x = wr.right, .y = wr.bottom}};
         ::MapWindowPoints(nullptr, ctx->host, pts, 2);  // hWndFrom = nullptr ⇒ 入参视为屏幕坐标
         ci.x = static_cast<int>(pts[0].x);
         ci.y = static_cast<int>(pts[0].y);
@@ -318,7 +318,7 @@ auto CALLBACK enum_child_cb(HWND child, LPARAM lparam) -> BOOL {
 }
 
 /// @brief 帧循环驱动的阶段状态机（语义化阶段名，不用编号标记）。
-enum class Stage {
+enum class Stage : std::uint8_t {
     Boot,  ///< 等挂载与能力落定
     Navigate,  ///< 等交互视图导航态与标题
     Script,  ///< evaluate 两次布尔往返
@@ -335,32 +335,41 @@ struct Probe {
     Results results;
 
     // ---- 异步证据（回调置位；状态机轮询）----
-    bool nav_loading = false;
-    bool nav_finished = false;
-    bool nav_failed = false;
+    // 成员按对齐分组排列：8 字节对齐成员在前、4 字节成员居中、1 字节标志收尾。
+    // bool 与多字节成员交错会各自引入填充（clang-analyzer performance.Padding），
+    // 集中收尾后仅剩对齐收尾的零星填充。
     std::string nav_failed_detail;
-    bool title_seen = false;
     std::string title_value;
-    bool page_message_seen = false;
     std::string page_message;
-    bool eval_ready_done = false;
     std::string eval_ready_value;
-    bool eval_title_done = false;
     std::string eval_title_value;
-    bool eval_reflect_done = false;
     std::string eval_reflect_value;
-    bool snapshot_done = false;
     aurora::Image snapshot_bitmap;
 
     // ---- 控件与窗口 ----
     std::shared_ptr<aurora::webview::WebView> interactive;
     std::shared_ptr<aurora::webview::WebView> snapshot_view;
     aurora::Window *window = nullptr;
-    int frames = 0;
-    Stage stage = Stage::Boot;
-    bool stage_entered = false;
     std::chrono::steady_clock::time_point stage_start = std::chrono::steady_clock::now();
+    std::vector<ChildInfo> children_before;
+    aurora::webview::NativeViewRect expected_before{};
+
+    int frames = 0;
     int reflect_last_ms = -1;  ///< 上次发起反射求值的阶段相对毫秒（轮询节流用；-1=尚未发起）
+    Stage stage = Stage::Boot;
+
+    // ---- 1 字节标志集中收尾（见上文对齐分组说明）----
+    bool nav_loading = false;
+    bool nav_finished = false;
+    bool nav_failed = false;
+    bool title_seen = false;
+    bool page_message_seen = false;
+    bool eval_ready_done = false;
+    bool eval_title_done = false;
+    bool eval_reflect_done = false;
+    bool snapshot_done = false;
+    bool stage_entered = false;
+    bool have_expected_before = false;
 
     /// @brief 本阶段已消耗的墙钟毫秒（阶段由 `reset_stage()` 起算）。
     [[nodiscard]] auto stage_waited_ms() const -> int {
@@ -368,11 +377,6 @@ struct Probe {
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - stage_start)
                 .count());
     }
-
-    // ---- 几何阶段的中间量 ----
-    std::vector<ChildInfo> children_before;
-    aurora::webview::NativeViewRect expected_before{};
-    bool have_expected_before = false;
 
     auto reset_stage() -> void {
         stage_entered = false;

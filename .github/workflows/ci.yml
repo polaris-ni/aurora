@@ -129,6 +129,12 @@ env:
   # 集中一处维护，改这里即全部 lint 腿同步，消除四处粘贴漂移。
   # WEBVIEW 宏是 PRIVATE：开启即让 webview 收口代码进入分析面；Linux 上显式关掉 WEBKITGTK
   # （其引擎编译需 GTK3/WebKitGTK dev 头，lint 静态面不付这份依赖）。
+  # ⚠️ 折叠标量 >- 内部禁写 `#` 注释行：块标量里 `#` 是**字面内容**而非 YAML 注释，会随
+  # ${{ env.* }} 展开进 shell，把该行剩余部分连同行尾续行 `\` 一起注释掉——轻则丢失参数，
+  # 重则把下一行变成独立命令（`-D...: command not found`，exit 127）。注释一律写在键外。
+  # TLS provider 安装根说明（曾误写在标量内部，导致 native lint 全线丢 mbedTLS 覆盖面）：
+  #   static:/opt/aurora-tls-mbedtls（而非 /usr）：/usr 上 openssl 头会抢先命中，`tls_mbedtls.cpp`
+  #   就永远进不了分析面；安装根由本作业的 Install 步骤与 setup-net-capability-flags 同源搭建。
   LINT_CAPABILITY_FLAGS: >-
     -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON
     -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON
@@ -137,8 +143,6 @@ env:
     -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_ENABLE_WEBVIEW_WEBKITGTK=OFF
     -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON
     -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
-    # static:/opt/aurora-tls-mbedtls（而非 /usr）：/usr 上 openssl 头会抢先命中，`tls_mbedtls.cpp`
-    # 就永远进不了分析面；安装根由本作业的 Install 步骤与 setup-net-capability-flags 同源搭建。
     -DAURORA_NET_TLS_PROVIDERS=static:/opt/aurora-tls-mbedtls
   LINT_CAPABILITY_FLAGS_WASM: >-
     -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON

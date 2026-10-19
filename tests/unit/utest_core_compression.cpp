@@ -17,6 +17,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -521,7 +522,8 @@ AURORA_TEST_CASE(decompress_three_formats_roundtrip_to_payload) {
 // 截断（砍掉 gzip  trailer 与尾段）不是「解出部分」而是整条流失败：半条流对调用方
 // 没有语义，静默交出前 N 字节比报错更坏。
 AURORA_TEST_CASE(decompress_truncated_stream_reports_corrupt) {
-    const std::vector<std::uint8_t> cut(AURORA_TEST_GZIP_BYTES.begin(), AURORA_TEST_GZIP_BYTES.end() - 6);
+    // `std::prev` 而非 `end() - 6`：后者是裸指针算术（本 check 只拦运算式，`prev` 表达的是同一件事）。
+    const std::vector<std::uint8_t> cut(AURORA_TEST_GZIP_BYTES.begin(), std::prev(AURORA_TEST_GZIP_BYTES.end(), 6));
     const auto out = aurora::decompress(aurora::AURORA_COMPRESS_FORMAT_GZIP, fixture_span(cut));
     AURORA_TEST_REQUIRE_FALSE(bool(out));
     AURORA_TEST_CHECK_EQ(out.error().code_enum, aurora::ErrorCode::CompressionDataCorrupt);

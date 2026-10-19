@@ -145,7 +145,7 @@ auto open_case(const std::string &name) -> std::size_t {
 /// @param client 客户端（探针全程持有一份 shared_ptr，本参数共享所有权）。
 /// @param request 请求。
 /// @param judge 判据体：拿一次交换的结局与台账槽位落账（可链后续交换）。
-auto start_case(std::string name, std::shared_ptr<const aurora::net::http::Client> client,
+auto start_case(const std::string &name, std::shared_ptr<const aurora::net::http::Client> client,
                 aurora::net::http::Request request,
                 std::function<void(const Result<aurora::net::http::Response> &, CaseResult &)> judge) -> void {
     const auto slot = open_case(name);
@@ -234,11 +234,11 @@ auto start_phase_real() -> void {
 /// @brief 只数入口次数的接收宿主（流式拒判据只问「进没进闸」，不需要载荷）。
 class CountingSink final : public aurora::net::http::DataSink {
   public:
-    auto on_head(const aurora::net::http::Response &) -> aurora::net::http::SinkFlow override {
+    auto on_head([[maybe_unused]] const aurora::net::http::Response &head) -> aurora::net::http::SinkFlow override {
         ++entries;
         return aurora::net::http::SinkFlow::Continue;
     }
-    auto on_data(std::span<const char>) -> aurora::net::http::SinkFlow override {
+    auto on_data([[maybe_unused]] std::span<const char> bytes) -> aurora::net::http::SinkFlow override {
         ++entries;
         return aurora::net::http::SinkFlow::Continue;
     }
@@ -455,8 +455,11 @@ EM_JS(void, probe_defer_js, (std::intptr_t fn_ptr), {
 
 // @brief 推迟续体的回收口：调用并释放（EM_JS 只传地址，所有权归本函数）。
 extern "C" EMSCRIPTEN_KEEPALIVE void aurora_probe_deferred_run(std::intptr_t fn_ptr) {
-    auto *holder = reinterpret_cast<std::function<void()> *>(
-        fn_ptr);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast): 跨语言只传地址
+    // 跨语言只传地址（reinterpret_cast 无类型安全替代）；⚠️ 该语句被折行，行尾式豁免会落在第二行
+    // 而静默失效，故用区间式豁免覆盖整条语句。
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast, performance-no-int-to-ptr)
+    auto *holder = reinterpret_cast<std::function<void()> *>(fn_ptr);
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast, performance-no-int-to-ptr)
     (*holder)();
     delete holder;
 }
@@ -476,8 +479,10 @@ EMSCRIPTEN_KEEPALIVE void aurora_fetch_probe_run(int port) {
     probe_state().port = port;
     aurora::detail::main_poster() = [](std::function<void()> fn) -> void {
         auto *holder = new std::function<void()>(std::move(fn));
-        probe_defer_js(reinterpret_cast<std::intptr_t>(
-            holder));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast): 跨语言只传地址
+        // 同上：跨语言只传地址；语句折行 ⇒ 行尾式豁免会落到第二行失效，改用区间式豁免。
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+        probe_defer_js(reinterpret_cast<std::intptr_t>(holder));
+        // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     };
     start_phase_real();
 }
@@ -494,6 +499,9 @@ EMSCRIPTEN_KEEPALIVE int aurora_fetch_probe_report() {
 
 }  // extern "C"
 
+// 探针入口只有一句告示输出：名义抛点是 `std::string` 构造（bad_alloc），而 `main` 无法上报——
+// 换成 try/catch 也只是把失败吞掉，故就地豁免。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main() {
     emit("wasm_fetch_live_probe: waiting for the node driver (aurora_fetch_probe_run)");
     return 0;

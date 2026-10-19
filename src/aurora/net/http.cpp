@@ -304,7 +304,10 @@ auto Request::on_progress(ProgressHandler handler) -> Request & {
 auto Request::render_head(bool absolute_form) const -> Result<std::string> {
     if (!url_.has_value()) {
         // 目标解析失败在工厂就已定案，这里只是把那条错误原样交出去，不再另编一句。
-        return Result<std::string>{*url_error_};
+        // ⚠️ `url_` 与 `url_error_` 是工厂里配对的二选一（`url_` 空即 `url_error_` 必有值，反之亦然），
+        // 该不变式跨函数不可见 ⇒ 就地豁免；改写成 `value_or` 会编出一条与工厂定案不同的错误，故不那样写。
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        return Result<std::string>{url_error_.value()};
     }
     Headers fields = headers_;
     auto plan = detail::plan_request_body(*this);

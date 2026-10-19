@@ -15,6 +15,10 @@ namespace aurora::app {
 
 // ---- EventSourceRegistration ------------------------------------------------
 
+// 析构体只做「摘表项 + 变量通知」：`unregister_source` 的 `std::scoped_lock` 与通知回调在**声明上**
+// 都可抛，实际路径无分配；析构期没有上报通道（改 try/catch 只会把失败静默吞掉），故就地豁免
+// （同 `ScrollStorage::Scope::~Scope` 的处置口径）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 EventSourceRegistration::~EventSourceRegistration() { unregister(); }
 
 EventSourceRegistration::EventSourceRegistration(EventSourceRegistration &&other) noexcept
@@ -22,6 +26,8 @@ EventSourceRegistration::EventSourceRegistration(EventSourceRegistration &&other
     other.registry_ = nullptr;  // 源转空态：其析构不再触发注销（§18-1 移动不双重注销）
 }
 
+// 同析构：移动赋值先 `unregister()` 再接管，唯一的名义抛点就是摘表项那一步（声明可抛、实际无分配）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto EventSourceRegistration::operator=(EventSourceRegistration &&other) noexcept -> EventSourceRegistration & {
     if (this != &other) {
         unregister();  // 先放手旧条目，再接管

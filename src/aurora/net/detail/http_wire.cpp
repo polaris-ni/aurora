@@ -720,10 +720,13 @@ auto ResponseAssembler::push(std::string_view bytes) -> Result<void> {
             if (!parsed) {
                 return Result<void>{parsed.error()};
             }
-            if (!parsed.value().has_value()) {
+            // 同 remote_connect：先把 `parsed.value()` 绑成具名引用再判空，否则连写的第二次 `.value()`
+            // 与前一行的 `has_value()` 判空在分析器眼里不是同一个 optional（判为未检查访问）。
+            auto &maybe = parsed.value();
+            if (!maybe.has_value()) {
                 return Result<void>{};  // 头部块还没读够
             }
-            ResponseHead candidate = std::move(*parsed.value());
+            ResponseHead candidate = std::move(*maybe);
             if (candidate.status == AURORA_HTTP_STATUS_SWITCHING_PROTOCOLS) {
                 return Result<void>{protocol_error(
                     "response is 101 Switching Protocols: this client does not change protocol mid-connection "

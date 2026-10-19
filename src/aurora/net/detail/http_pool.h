@@ -174,6 +174,9 @@ class HttpPoolLease {
           armed_{other.armed_} {
         other.pool_ = nullptr;
     }
+    // 移动赋值先 `settle()` 放手旧租约：名义抛点只有池内空闲表的插入（bad_alloc），而本函数已声明
+    // noexcept——改 try/catch 会把「归还失败」静默吞掉，与「恰好一次归还」的契约正面冲突，故就地豁免。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     auto operator=(HttpPoolLease &&other) noexcept -> HttpPoolLease & {
         if (this != &other) {
             settle();
@@ -188,8 +191,11 @@ class HttpPoolLease {
         return *this;
     }
 
+    // 同上：析构期没有上报通道，且 `settle()` 的名义抛点只有池内表插入。
+    // NOLINTBEGIN(bugprone-exception-escape)
     /// @brief 析构即归还：武装过且回池判据成立交回连接，否则关闭并让出名额。
     ~HttpPoolLease() { settle(); }
+    // NOLINTEND(bugprone-exception-escape)
 
     /// @brief 认领一条连接（取用所得或新建握手所得），并记下它的出生时刻。
     ///

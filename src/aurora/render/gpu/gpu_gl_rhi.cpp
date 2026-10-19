@@ -805,7 +805,8 @@ struct GpuGlRhi::Impl {
         }
         // 版本门槛：核心版本 ≥ 3.3。数字解析 major.minor（兼容 "4.5.0 - build 27" /
         // "10.1 ..." 等驱动形态；非数字开头解析失败即拒绝）。
-        auto ver = reinterpret_cast<const char *>(gl.get_string(VERSION));  // NOLINT(*-pro-type-reinterpret-cast)
+        const auto *ver =
+            reinterpret_cast<const char *>(gl.get_string(VERSION));  // NOLINT(*-pro-type-reinterpret-cast)
         int major = 0;
         int minor = 0;
         bool parsed = false;

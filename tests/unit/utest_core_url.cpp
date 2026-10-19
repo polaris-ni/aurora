@@ -120,8 +120,11 @@ AURORA_TEST_CASE(parse_normalizes_case_percent_and_dot_segments) {
     AURORA_TEST_CHECK_EQ(url.scheme(), std::string("https"));
     AURORA_TEST_CHECK_EQ(url.host(), std::string("example.com"));
     AURORA_TEST_CHECK_TRUE(url.host_kind() == aurora::UrlHostKind::Name);
-    AURORA_TEST_REQUIRE(url.port().has_value());
-    AURORA_TEST_CHECK_EQ(*url.port(), std::uint16_t{8443});
+    // ⚠️ `port()` 每次调用都返回一枚新的临时 optional，判空与解包若各调一次，路径分析认不出是同一枚
+    // （判为未检查访问）⇒ 先落一个具名局部再判空、再解包。
+    const auto port = url.port();
+    AURORA_TEST_REQUIRE(port.has_value());
+    AURORA_TEST_CHECK_EQ(*port, std::uint16_t{8443});
     AURORA_TEST_CHECK_EQ(url.path(), std::string("/b%2FxA"));
     AURORA_TEST_CHECK_EQ(url.query(), std::string("q=1&q=%2B"));
     AURORA_TEST_CHECK_EQ(url.fragment(), std::string("frag~"));
@@ -156,8 +159,9 @@ AURORA_TEST_CASE(effective_port_follows_scheme_but_keeps_explicit_value) {
         const auto parsed = aurora::Url::parse(row.text);
         AURORA_TEST_REQUIRE(parsed.ok());
         AURORA_TEST_CHECK_FALSE(parsed.value().port().has_value());
-        AURORA_TEST_REQUIRE(parsed.value().effective_port().has_value());
-        AURORA_TEST_CHECK_EQ(std::to_string(*parsed.value().effective_port()), std::string(row.expected));
+        const auto effective = parsed.value().effective_port();
+        AURORA_TEST_REQUIRE(effective.has_value());
+        AURORA_TEST_CHECK_EQ(std::to_string(*effective), std::string(row.expected));
     }
 
     const auto ftp = aurora::Url::parse("ftp://h/x");
@@ -167,8 +171,9 @@ AURORA_TEST_CASE(effective_port_follows_scheme_but_keeps_explicit_value) {
 
     const auto explicit_default = aurora::Url::parse("http://h:80/");
     AURORA_TEST_REQUIRE(explicit_default.ok());
-    AURORA_TEST_REQUIRE(explicit_default.value().port().has_value());
-    AURORA_TEST_CHECK_EQ(*explicit_default.value().port(), std::uint16_t{80});
+    const auto explicit_port = explicit_default.value().port();
+    AURORA_TEST_REQUIRE(explicit_port.has_value());
+    AURORA_TEST_CHECK_EQ(*explicit_port, std::uint16_t{80});
     AURORA_TEST_CHECK_EQ(explicit_default.value().to_string(), std::string("http://h:80/"));
 
     const auto secure = aurora::Url::parse("https://h/");

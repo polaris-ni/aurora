@@ -27,8 +27,12 @@ struct Error {
     std::string docs;  ///< 可选：文档链接/章节
     std::string where;  ///< 可选：发生位置（file:line）
     std::string hint;  ///< 修复提示（来自表，可被 make_error 覆盖）
-    /// @brief 编译期枚举码（errors.toml 生成表的索引；表驱动元数据的分界标记）。
-    ErrorCode code_enum{};  ///< 编译期枚举码（默认 GeneralUnknown）
+    /// @brief 编译期枚举码（errors.toml 生成表的索引；表驱动元数据的分界标记；默认 GeneralUnknown）。
+    ///
+    /// @note 紧邻的就地豁免（`clang-analyzer-core.uninitialized.Assign`）：本字段带默认成员初始化器
+    /// `{}`，所有产出路径（`make_error_from_table`）亦显式赋 `.code_enum = code`；分析器无法把「聚合
+    /// 指定初始化 + variant 持有」两层建模起来，故在个别 TU 上误判为「未初始化赋值」。
+    ErrorCode code_enum{};  // NOLINT(clang-analyzer-core.uninitialized.Assign) 理由见上方 @note
     ErrorSeverity severity = ErrorSeverity::Error;  ///< 来自 errors.toml
     ErrorCategory category = ErrorCategory::General;  ///< 来自 errors.toml
     bool retryable = false;  ///< 来自 errors.toml

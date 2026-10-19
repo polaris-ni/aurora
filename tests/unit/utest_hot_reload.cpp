@@ -193,7 +193,7 @@ AURORA_TEST_CASE(declared_props_win_over_preserved_state) {
 AURORA_TEST_CASE(set_state_key_and_deferred_loader_injection) {
     // 仅路径构造（不触文件系统），随后注入 loader 与状态 key 均可生效。
     HotReload hr("unused.json");
-    hr.set_state_key("id");
+    HotReload::set_state_key("id");
 
     Json current = text_tree("v1");
     hr.set_loader([&current]() -> Json { return current; });

@@ -26,7 +26,8 @@ AURORA_TEST_CASE(name_access_is_case_insensitive_and_preserves_spelling) {
 
     auto got = headers.get("CoNtEnT-tYpE");
     AURORA_TEST_REQUIRE(got.has_value());
-    AURORA_TEST_CHECK_EQ(*got, std::string("application/json"));
+    AURORA_TEST_CHECK_EQ(*got, std::string("application/json"));  // NOLINT(bugprone-unchecked-optional-access) 上一行
+                                                                  // REQUIRE 已断言持有值，其宏展开对路径分析不透明
 
     // 遍历出口给的是原始拼写，不是折叠后的形态。
     AURORA_TEST_REQUIRE_EQ(headers.entries().size(), std::size_t{1});
@@ -46,7 +47,8 @@ AURORA_TEST_CASE(append_keeps_duplicates_in_insertion_order) {
 
     auto first = headers.get("SET-COOKIE");
     AURORA_TEST_REQUIRE(first.has_value());
-    AURORA_TEST_CHECK_EQ(*first, std::string("a=1"));
+    AURORA_TEST_CHECK_EQ(*first, std::string("a=1"));  // NOLINT(bugprone-unchecked-optional-access) 上一行 REQUIRE
+                                                       // 已断言持有值，其宏展开对路径分析不透明
 
     // 未命中的字段返回空序列而非「不存在」的错误形态。
     AURORA_TEST_CHECK_TRUE(headers.values("X-Missing").empty());

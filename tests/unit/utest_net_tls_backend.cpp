@@ -590,6 +590,7 @@ AURORA_TEST_CASE(factory_receives_the_handshake_inputs_verbatim) {
     AURORA_TEST_REQUIRE(bool(resolved));
     AURORA_TEST_CHECK_STREQ(log.server_name, "registry.invalid");
     AURORA_TEST_REQUIRE(bool(log.designated_backend.has_value()));
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access) 上一行 REQUIRE 已断言持有值，其宏展开对路径分析不透明
     AURORA_TEST_CHECK_STREQ(*log.designated_backend, "utest-tls-inspector");
     AURORA_TEST_CHECK(log.insecure);
     AURORA_TEST_CHECK_EQ(log.min_version, static_cast<int>(aurora::net::TlsVersion::Tls13));

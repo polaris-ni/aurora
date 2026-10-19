@@ -184,6 +184,9 @@ inline auto launch(const std::vector<std::string> &argv, const std::filesystem::
         std::vector<char *> arguments;
         arguments.reserve(argv.size() + 1);
         for (const auto &argument : argv) {
+            // execvp 的签名收 `char *const argv[]`（POSIX 历史形态，不改写参数字符串）；
+            // 这些 string 活过 execvp 调用，const_cast 是该 API 的标准用法。
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
             arguments.push_back(const_cast<char *>(argument.c_str()));
         }
         arguments.push_back(nullptr);
@@ -410,7 +413,10 @@ inline auto describe(std::string_view command, const CommandResult &result) -> s
 /// 且在两腿、两种 shell、有无 vcpkg 的环境里给出同一个答案。
 /// @return 可用为 true。
 inline auto openssl_available() -> bool {
-    // 函数级 static const 按仓内惯例（`socket.cpp` 的 `PINNED`/`SUPPORTED`）用全大写。
+    // 全大写是函数级 static const 的仓内惯例（`socket.cpp` 的 `PINNED`/`SUPPORTED`）。
+    // 就地豁免 `bugprone-dynamic-static-initializers`：本例是懒初始化（首次调用时线程安全地一次性
+    // 构造）且 inline 函数内的函数级静态跨 TU 单实例，不存在跨 TU 静态初始化顺序依赖。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static const bool PRESENT = [] {
         const auto result = run_and_wait({"openssl", "version"});
         return result.spawned && result.exit_code == 0;

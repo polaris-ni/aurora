@@ -31,14 +31,14 @@ using aurora::net::detail::FetchSpec;
 /// @brief 驱动一次 `fetch_exchange`（`CallbackAwaiter` 须协程帧；native 存根同步结算，立即收尾）。
 /// @param spec 交换规格（native 存根不消费）。
 /// @return 交换结局。
-auto drive_exchange(const FetchSpec &spec) -> CoroTask<Result<FetchOutcome>> {
+auto drive_exchange(const FetchSpec spec) -> CoroTask<Result<FetchOutcome>> {
     Cancellation token;
     auto outcome = co_await fetch_exchange(spec, token);
     co_return outcome;
 }
 
 AURORA_TEST_CASE(fetch_leg_matches_platform) {
-#if defined(AURORA_PLATFORM_WASM)
+#ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_CHECK_TRUE(fetch_leg_active());
 #else
     AURORA_TEST_CHECK_FALSE(fetch_leg_active());
@@ -46,7 +46,7 @@ AURORA_TEST_CASE(fetch_leg_matches_platform) {
 }
 
 AURORA_TEST_CASE(fetch_exchange_stub_reports_unavailable_on_native) {
-#if defined(AURORA_PLATFORM_WASM)
+#ifdef AURORA_PLATFORM_WASM
     // wasm 腿的 fetch_exchange 是真桥：调它就发真网络请求，判据由 node 探针承担（见文件头注释）。
     AURORA_TEST_SKIP("the real fetch bridge is exercised by the node probe (tools/verify), not here");
 #else
@@ -63,7 +63,7 @@ AURORA_TEST_CASE(fetch_exchange_stub_reports_unavailable_on_native) {
 }
 
 AURORA_TEST_CASE(wasm_engine_capability_bits_measured) {
-#if defined(AURORA_PLATFORM_WASM)
+#ifdef AURORA_PLATFORM_WASM
     const auto caps = aurora::net::Engine::instance().capabilities();
     // 能力位按实测改判（§16 第 37 项）：自定义请求头可传（预检失败以错误形态抵达）、流式体本切片
     // 不消费 ReadableStream、传输形态本腿无 fd 语义。

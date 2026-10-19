@@ -613,7 +613,11 @@ struct DerElement {
 /// RFC 5280 §4.1.2.5 一律是 GMT，因此解析不需要时区数学；只接受以 `Z` 收尾的形态，非 GMT 即判坏。
 [[nodiscard]] auto der_time_text(const DerElement &element) -> std::string {
     const std::span<const std::uint8_t> &value = element.value;
-    const std::string_view text{static_cast<const char *>(static_cast<const void *>(value.data())), value.size()};
+    // ⚠️ `std::span<const std::uint8_t>` → `std::string_view` 两端无类型安全替代；经 `const void *`
+    // 中转虽能编译，却是 `bugprone-casting-through-void` 明令禁止的形态（该检查的建议正是
+    // reinterpret_cast），故此处按仓内 Win32/COM 边界惯例用 reinterpret_cast 并就地豁免。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    const std::string_view text{reinterpret_cast<const char *>(value.data()), value.size()};
     std::size_t digits = 0;
     if (element.tag == AURORA_TAG_UTC_TIME) {
         digits = 12U;  // YYMMDDHHMMSS
@@ -926,9 +930,13 @@ auto SecureTransportBackend::create(const TlsContext &context, std::string_view 
     // 客户端身份（mTLS）：PKCS#12 就地导入（不落钥匙串），取 item 0 的 `SecIdentityRef` 装进数组交给
     // `SSLSetCertificate`——文档要求数组第 0 位必须是身份，且必须在 `SSLHandshake` 之前设好。
     if (context.client_identity) {
-        const CFDataRef archive = ::CFDataCreate(
-            kCFAllocatorDefault, static_cast<const UInt8 *>(static_cast<const void *>(context.client_identity->data())),
-            static_cast<CFIndex>(context.client_identity->size()));
+        // ⚠️ `CFDataCreate` 形参是 `const UInt8 *`，而 `std::string::data()` 是 `const char *`——两端无关
+        // 类型只能 reinterpret_cast（同 `der_time_text`，经 `const void *` 中转触 casting-through-void）。
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+        const CFDataRef archive =
+            ::CFDataCreate(kCFAllocatorDefault, reinterpret_cast<const UInt8 *>(context.client_identity->data()),
+                           static_cast<CFIndex>(context.client_identity->size()));
+        // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
         if (archive == nullptr) {
             return tls_error(ErrorCode::GeneralInvalidArgument, "client identity cannot be buffered");
         }
@@ -1196,8 +1204,12 @@ auto SecureTransportBackend::capture_alpn() -> void {
     if (::CFGetTypeID(raw) == ::CFDataGetTypeID()) {
         const auto *data = static_cast<CFDataRef>(raw);
         const CFIndex length = ::CFDataGetLength(data);
-        const std::span<const char> text{static_cast<const char *>(::CFDataGetBytePtr(data)),
+        // ⚠️ CFDataGetBytePtr 返回 `const UInt8 *`（`const unsigned char *`），与 `const char *` 互不
+        // static_cast 转换，只能 reinterpret_cast（经 `const void *` 中转触 casting-through-void）。
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+        const std::span<const char> text{reinterpret_cast<const char *>(::CFDataGetBytePtr(data)),
                                          length > 0 ? static_cast<std::size_t>(length) : std::size_t{0}};
+        // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
         if (!text.empty()) {
             alpn_ = std::string{text.data(), text.size()};
         }

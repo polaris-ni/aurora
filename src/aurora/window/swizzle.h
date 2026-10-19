@@ -1,6 +1,9 @@
 // swizzle.h —— 内部共享像素 swizzle 辅助（仅库实现可见，不属公共 API）。
 #pragma once
 
+// <cstddef> 不可省：本头只依赖 std::size_t，其他平台靠上游头间接带入它，
+// 但 wasm 配置下没有那份间接包含，`no type named 'size_t' in namespace 'std'`。
+#include <cstddef>
 #include <cstdint>
 
 namespace aurora {

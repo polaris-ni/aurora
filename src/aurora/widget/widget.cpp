@@ -904,7 +904,7 @@ auto Widget::window_bounds() const -> std::optional<Rect> {
         // （无内容控件、布局单测的探针桩）同样有确定的位置，它的窗口盒是有效答案而非空值。
         return std::nullopt;
     }
-    auto child = this;
+    const auto *child = this;  // 逐层上溯时会被 `child = parent` 改写，故是指向 const 的指针而非常指针
     const Widget *parent = layout_parent_;
     if (parent == nullptr) {
         // 自身即根：根的窗口盒原点取**最近一次绘制实际使用的根盒**——`Window::run_paint` 以

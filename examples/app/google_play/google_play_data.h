@@ -433,7 +433,7 @@ class PlayRepository {
     [[nodiscard]] auto list_by_category(const std::string &cat) const -> std::vector<AppItem> {
         const auto v = all();
         std::vector<AppItem> out;
-        for (auto &a : v) {
+        for (const auto &a : v) {
             if (a.category == cat) {
                 out.push_back(a);
             }
@@ -444,7 +444,7 @@ class PlayRepository {
         -> std::vector<AppItem> {
         const auto v = all();
         std::vector<AppItem> out;
-        for (auto &a : v) {
+        for (const auto &a : v) {
             if (a.category == cat && a.subcategory == sub) {
                 out.push_back(a);
             }
@@ -459,7 +459,7 @@ class PlayRepository {
         for (const char c : q) {
             ql.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
         }
-        for (auto &a : v) {
+        for (const auto &a : v) {
             std::string n;
             std::string d;
             for (const char c : a.name) {

@@ -320,11 +320,14 @@ auto parse_handshake(const TunnelPointer &tunnel) -> void {
                 finish_tunnel(tunnel, Result<StreamTransport>{parsed.error()});
                 return;
             }
-            if (!parsed.value()) {
+            // ⚠️ 必须把 `parsed.value()` 绑成一个具名引用再守卫：连写两次 `.value()` 时静态分析无法
+            // 把前一行的 `has_value()` 判空与后一行的解包关联到同一个 optional 上（视为未检查访问）。
+            auto &maybe = parsed.value();
+            if (!maybe.has_value()) {
                 start_read(tunnel);  // 还没读到终止空行
                 return;
             }
-            const auto head = *parsed.value();
+            const auto head = *maybe;
             if (head.status < 200 || head.status >= 300) {
                 // 非 2xx 一律不回退直连：407 落认证码，其余落不可达码，分岔由 wire 层负责。
                 // 代理在这一句里说的是「怎么才能过」，故把状态码与 `Proxy-Authenticate` 原文一并交回上层：
@@ -346,11 +349,12 @@ auto parse_handshake(const TunnelPointer &tunnel) -> void {
                 finish_tunnel(tunnel, Result<StreamTransport>{parsed.error()});
                 return;
             }
-            if (!parsed.value()) {
+            auto &maybe = parsed.value();
+            if (!maybe.has_value()) {
                 start_read(tunnel);
                 return;
             }
-            const auto method = *parsed.value();
+            const auto method = *maybe;
             if (method == 0 || method == 2) {
                 // 本段 2 字节回报交出去后才发下一段：不前移偏移，下一段会把这段当自己的开头重读。
                 tunnel->offset += AURORA_SOCKS_SHORT_REPLY;
@@ -371,11 +375,12 @@ auto parse_handshake(const TunnelPointer &tunnel) -> void {
                 finish_tunnel(tunnel, Result<StreamTransport>{parsed.error()});
                 return;
             }
-            if (!parsed.value()) {
+            auto &maybe = parsed.value();
+            if (!maybe.has_value()) {
                 start_read(tunnel);
                 return;
             }
-            const auto status = *parsed.value();
+            const auto status = *maybe;
             if (status == 0) {
                 tunnel->offset += AURORA_SOCKS_SHORT_REPLY;  // 同方法协商：这 2 字节已交出，CONNECT 应答才是本段
                 send_socks_connect(tunnel);
@@ -391,11 +396,12 @@ auto parse_handshake(const TunnelPointer &tunnel) -> void {
                 finish_tunnel(tunnel, Result<StreamTransport>{parsed.error()});
                 return;
             }
-            if (!parsed.value()) {
+            auto &maybe = parsed.value();
+            if (!maybe.has_value()) {
                 start_read(tunnel);
                 return;
             }
-            const auto reply = *parsed.value();
+            const auto reply = *maybe;
             if (reply.status == 0) {
                 complete_handshake(tunnel, reply.consumed);
                 return;
@@ -483,6 +489,10 @@ auto connect_by_name(std::string_view host, std::uint16_t port, const StreamOpti
         return;
     }
     const auto origin = std::this_thread::get_id();
+    // 下面两枚 lambda 都转入 std::function（Resolver 回调与 `run_on_origin` 的归队体）：本检查对任何
+    // 可调用对象一律判「不应抛出」（std::function::operator() 无 noexcept 规格，分析器无法证明），
+    // 属 .clang-tidy 已记录的系统性假告警面 —— 同 `commands.cpp` 的处置口径，区间豁免并写明理由。
+    // NOLINTBEGIN(bugprone-exception-escape)
     Resolver::resolve(
         host, port,
         [origin, options, cancellation, on_done = std::move(on_done)](Result<std::vector<Endpoint>> resolved) mutable {
@@ -508,6 +518,7 @@ auto connect_by_name(std::string_view host, std::uint16_t port, const StreamOpti
                 launch(race, 0);
             });
         });
+    // NOLINTEND(bugprone-exception-escape)
 }
 
 auto connect_via_proxy(const ProxyConfig &proxy, std::string_view host, std::uint16_t port,

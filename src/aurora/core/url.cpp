@@ -157,7 +157,8 @@ auto is_scheme_token(std::string_view text) -> bool {
     if (text.empty() || !is_alpha(static_cast<unsigned char>(text.front()))) {
         return false;
     }
-    return std::all_of(text.begin() + 1, text.end(), [](const char c) {
+    const std::string_view rest = text.substr(1);
+    return std::all_of(rest.begin(), rest.end(), [](const char c) {
         const auto byte = static_cast<unsigned char>(c);
         return is_alpha(byte) || is_digit(byte) || byte == '+' || byte == '-' || byte == '.';
     });

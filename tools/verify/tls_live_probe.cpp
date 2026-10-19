@@ -163,7 +163,11 @@ auto connect_stream(const std::string &host, std::uint16_t port) -> std::optiona
         return std::nullopt;
     }
     auto outcome = landing.take();
-    if (!outcome || !outcome->ok()) {
+    if (!outcome) {
+        emit("[FAIL] connect to " + host + ":" + std::to_string(port) + " -> no outcome delivered");
+        return std::nullopt;
+    }
+    if (!outcome->ok()) {
         emit("[FAIL] connect to " + host + ":" + std::to_string(port) + " -> " + reason(*outcome));
         return std::nullopt;
     }
@@ -196,7 +200,11 @@ auto round_trip(TlsTransport &channel, const std::string &host) -> std::optional
         return std::nullopt;
     }
     const auto write_outcome = written.take();
-    if (!write_outcome || !write_outcome->ok()) {
+    if (!write_outcome) {
+        emit("[FAIL] request write -> no outcome delivered");
+        return std::nullopt;
+    }
+    if (!write_outcome->ok()) {
         emit("[FAIL] request write -> " + reason(*write_outcome));
         return std::nullopt;
     }

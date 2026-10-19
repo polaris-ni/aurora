@@ -113,6 +113,8 @@ constexpr std::array<std::uint16_t, 6> AURORA_TRANSIENT_STATUS{408, 429, 500, 50
     constexpr std::array<std::string_view, 12> months{"Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
     // 以迭代器距离而非下标取月序：本表是编译期定长的 `std::array`，裸下标在 tidy 眼里是「非常量下标」。
+    // 迭代器在 MSVC STL 下不是裸指针，`auto *const` 形态不可移植（实测编译失败）⇒ 保持 `auto`。
+    // NOLINTNEXTLINE(readability-qualified-auto)
     const auto found = std::find(months.begin(), months.end(), name);
     if (found == months.end()) {
         return 0;
