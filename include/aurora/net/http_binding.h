@@ -23,8 +23,9 @@
 ///   只有传输与协议层失败才走 `Result` 的错误侧。
 ///
 /// 流式一侧的条目形态是 `StreamChunk`（状态码 + 偏移 + 该段字节 + 收尾标记），每段一条、追加进
-/// `StreamResource`。SSE 一侧另有条目形态 `SseRecord`（一条事件一条记录），因为按记录解码住在
-/// `Client::open_sse()` 里、本头只负责把它交出的事件落成条目；WebSocket 的按帧解码仍是后续切片。
+/// `StreamResource`。SSE 一侧另有条目形态 `SseRecord`（一条事件一条记录），WebSocket 一侧有条目形态
+/// `WsRecord`（一条**成形消息**一条记录）：按记录解码住在 `Client::open_sse()` 与那条升级会话的读环里，
+/// 本头只负责把它们交出的事件与消息落成条目。
 ///
 /// @code
 /// aurora::net::http::Client client;
@@ -37,12 +38,14 @@
 /// aurora::set_default_image_fetcher(aurora::net::http::image_fetcher());
 /// @endcode
 /// @note Thread: 出口与 `Client` 同口径——结局经主线程投递器抵达；未装投递器时在承接作业的线程直调
-/// @note Side-effects: `deliver` / `bind_resource` / `deliver_stream` / `deliver_sse` / `image_fetcher` 发起网络 I/O
+/// @note Side-effects: `deliver` / `bind_resource` / `deliver_stream` / `deliver_sse` / `deliver_ws` /
+/// `image_fetcher` 发起网络 I/O
 
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -53,6 +56,7 @@
 #include "aurora/net/http_client.h"
 #include "aurora/net/http_sse.h"
 #include "aurora/net/http_stream.h"
+#include "aurora/net/websocket.h"
 #include "aurora/state/async.h"
 #include "aurora/state/resource.h"
 
@@ -95,6 +99,36 @@ struct SseRecord {
     std::string data;  ///< 消息体：多行 `data` 已以 LF 连接
     std::string id;  ///< 派发时刻该流的续传标识；从未有过 `id:` 字段时为空
     bool last{false};  ///< 是否为收尾标记条目（`event` 与 `data` 此时为空）
+};
+
+/// @brief 会话交付的一条记录：`StreamResource<WsRecord>` 的条目类型。
+///
+/// 一条**成形消息**一条记录，与 `WebSocketSink::on_message` 的派发口径逐字同型：分片消息只在最后一片到齐、
+/// 整条成形之后出一条（中间片不派发生物，是公共头那条纪律，不是本壳的取舍）。记录因此管的是「宿主读得出的
+/// 一条内容」而不是「线上一枚帧」——把 4 KiB 的十分片交成十条条目，等于让每个宿主自己再拼一遍。
+///
+/// 三处与 `SseRecord` 形态不同，各有理由：
+/// - **没有 `status` 那枚分量**：升级成功的应答恒是 `101`（`ws_handshake` 那道闸只认 `101`，其余一律落
+///   `ws-handshake-rejected`），而本面不重连（一条已经换过协议的连接没法「换个地址再升一次」）。
+///   把一个不可能变化的量抄进每条记录，只是把不变量伪装成事实。
+/// - **载荷只有一枚 `payload`**：文本与二进制由 `kind` 分岔，不必像 SSE 那样再拆 `event` / `data` / `id` 三枚
+///   ——那三枚是 SSE 的字段名，协议里没有对应物。
+/// - **收尾标记带的是 close 交换的三枚事实**（`close_code` / `close_reason` / `by_peer`）：SSE 的收尾交的是
+///   「下次接着收」的续传标识，而会话的收尾交的是「这次为什么结束」。非干净的收摊**不出**这条标记，
+///   改由 `StreamResource::fail()` 表达（与 `deliver_stream` / `deliver_sse` 同一条纪律）。
+///
+/// 心跳不进条目流：收到 ping 的自动 pong 是协议义务、库里已经做完，把探活字节混进消息流会让 `Replace` 策略
+/// 下的读数变成心跳而不是内容。要观察探活就自己实现 `WebSocketSink`（走 `Client::connect_websocket()`）。
+/// @note Thread: thread-safe（值类型）
+/// @note Side-effects: none
+struct WsRecord {
+    std::uint64_t index{0};  ///< 本次会话里该条的序号；`last` 标记那条取的是「消息总条数」
+    aurora::net::WsMessageKind kind{aurora::net::WsMessageKind::Text};  ///< 该条的线上类型；`last` 那条无意义
+    std::string payload;  ///< 消息载荷（文本已判过 UTF-8，二进制原样）；`last` 那条为空
+    std::optional<std::uint16_t> close_code;  ///< 收尾标记那条：抵达的线上状态码；没带码即空
+    std::string close_reason;  ///< 收尾标记那条：随码抵达的原因文本（可为空）
+    bool by_peer{false};  ///< 收尾标记那条：这次收摊是否由对端的 close 帧开启
+    bool last{false};  ///< 是否为收尾标记条目（`kind` 与 `payload` 此时无意义）
 };
 
 namespace detail {
@@ -240,6 +274,33 @@ template <typename T>
 /// @return 处于 Loading 的流资源句柄（首条事件到达后进 Ready）。
 [[nodiscard]] auto deliver_sse(const Client &client, Request request, Cancellation cancellation = {},
                                aurora::StreamOptions options = {}) -> aurora::StreamResource<SseRecord>;
+
+/// @brief 发起一次升级握手并把这条会话接成 `StreamResource<WsRecord>`：一条成形消息提交一条。
+///
+/// 与 `deliver_sse` 同一条交付纪律，只是条目从「一条事件」换成「一条消息」：每条一个 `WsRecord`（`index`
+/// 单调递增）、干净收尾恒恰出一条 `last` 标记（带 close 交换的三枚事实）、非干净收摊只走 `fail()` 且已提交的
+/// 消息保留。握手那条腿的全部口径照 `Client::connect_websocket()`（只认 `GET`、不重试、不跟随重定向、
+/// 不进连接池与缓存表、`ws://` 之外的 scheme 与 wasm 腿起手即败）。
+///
+/// **本面是订阅面，不是双向面**：返回的是读数句柄，`WebSocket` 那枚能往会话里说话的手柄由内部持有并随会话
+/// 收尾释放，本入口不交出、也没有「再把它取回来」的口。这不是遗漏而是一条切分：双向形态已经有出口
+/// （`Client::connect_websocket()` 交出句柄，宿主自持 sink），把同一件事再做一遍成「既能读又能写的资源」
+/// 就要在 `StreamResource` 上补一枚发送口，而那枚口在 SSE 与流式两条腿上都没有对应物——三条流同住一种形态
+/// 比一条流多两枚旋钮更值钱。要发东西就用那条入口。
+///
+/// 三条收摊路，各有一种结局：宿主取消那枚令牌（本端发起 `close(1000)`，走到对端回声或链路收尾后出 `last`
+/// 标记）、对端收摊且 close 交换干净（出 `last` 标记）、协议违例 / 传输失败 / 对端没说 close 就 EOF（落
+/// `fail()`，不出标记）。握手未成时同样落 `fail()`，且**一条记录都不出**——那次会话从未存在过。
+/// @param client 借用的客户端（本次交付自持一份拷贝）。
+/// @param request 待升级的请求（只认 `GET`；按值接管）。
+/// @param session_options 三枚上限、子协议与心跳两档（读定一次，随会话存活）。
+/// @param cancellation 本次订阅的取消令牌：握手期掐交换，握手后掐会话（与 `connect_websocket()` 那条
+///        「令牌管到握手结算为止」的分工不同，这里是交付面自己把取消接成 `close()`，机理见实现侧的类文档）。
+/// @param options 提交策略（`Append` = 逐条累积，`Replace` = 只留最新一条）。
+/// @return 处于 Loading 的流资源句柄（首条消息到达后进 Ready）。
+[[nodiscard]] auto deliver_ws(const Client &client, Request request, aurora::net::WebSocketOptions session_options = {},
+                              Cancellation cancellation = {}, aurora::StreamOptions options = {})
+    -> aurora::StreamResource<WsRecord>;
 
 /// @brief 取图器：把「URL → 字节」接成一次 HTTP 交换，形态与 widget 侧的取图口结构一致。
 ///
