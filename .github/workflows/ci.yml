@@ -99,6 +99,17 @@
 #   VS 生成器——CMake 仅在 Makefile/Ninja 生成器实现编译器启动器，VS 生成器下
 #   sccache/ccache 均无法挂接，故不接入缓存。
 #
+# 触发去重（作业 0 gate）：`push: "**"` 与 `pull_request` 对同一分支推送会双跑全家桶。
+#   gate 在 push 事件秒级查询「本次 sha 是否已是某个 open PR 的 head」，是则下游重作业全部
+#   跳过（该 PR 的 pull_request run 与本次 push 由同一投递创建，覆盖面重合）；没有 open PR
+#   的分支推送照旧全量，master/main 与查询失败一律不跳（fail-open）。8i 增量 lint 同吃该
+#   输出：有 PR 跑全量矩阵时，增量入口是纯重复。
+#
+# 编译并行（cmake --build --parallel）：所有库/工具/demos/consumer/format-check 构建行统一
+#   带 `--parallel`（Ninja/MSBuild/Make 各自取满 runner 核数，实测核数由 nproc 口径同态）；
+#   `lint` 目标内部由 run_clang_tidy.py 按 --jobs 并行（缺省即全核），wayland-gen 为单一
+#   codegen 命令，二者不加 --parallel 亦无串行之虞。ctest 并行口径不变。
+#
 # 选项语义以 codespec/BUILD_OPTIONS.md 为唯一权威来源。
 # ---------------------------------------------------------------------------
 
@@ -108,6 +119,9 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # push 与 pull_request 在同一分支上的双触发由作业 0 `gate` 查重收口：推送的提交若已被
+  # open PR 收编（head sha 一致），push 腿的重作业跳过、PR 腿照常全量；没有 PR 的分支推送
+  # 不受影响（判据 fail-open，见 gate 作业注释）。
   # 每周一次全量 + 手动触发：增量门禁的覆盖面是「本次改动牵动的 TU」，而「某个 TU 长期
   # 没被任何 PR 选中」这类系统性缺口不会自愈。全量门槛因此保留两处固定出口：master 推送
   # 与每周一凌晨的定时遍；workflow_dispatch 供人工补跑。
@@ -175,12 +189,52 @@ env:
 jobs:
 
   # ---------------------------------------------------------------------------
+  # 0. gate — push / pull_request 查重网关（秒级、零构建）。
+  #    `push: "**"` 与 `pull_request` 两个触发器叠在同一分支上时会双跑全家桶：推送的
+  #    提交只要已被某个 open PR 收编（head sha 一致），该 PR 的 pull_request run 与本次
+  #    push run 由同一次 webhook 投递同时创建，覆盖面完全重合。本作业把这条重合判成
+  #    `dup=true`，下游重作业据此跳过；而**没有** PR 的分支推送照旧全量跑——分支 CI
+  #    不因挂不挂 PR 而缺席。判据宁松勿紧：查询出错、PR 列表读不到、master/main 推送
+  #    一律 dup=false（fail-open，宁可多跑一场也不漏覆盖）。8i 增量 lint 同样吃这个
+  #    输出：有 PR 在跑全量矩阵时，增量入口是纯重复。
+  # ---------------------------------------------------------------------------
+  gate:
+    name: gate (push vs pull_request dedup)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      dup: ${{ steps.dedup.outputs.dup }}
+    steps:
+      - name: Look for an open PR whose head is exactly this push
+        id: dedup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DUP_EVENT: ${{ github.event_name }}
+          DUP_REF: ${{ github.ref }}
+          DUP_SHA: ${{ github.sha }}
+          DUP_REPO: ${{ github.repository }}
+        run: |
+          dup=false
+          matched=0
+          if [ "$DUP_EVENT" = "push" ] && [ "$DUP_REF" != "refs/heads/master" ] && [ "$DUP_REF" != "refs/heads/main" ]; then
+            matched=$(gh api "repos/$DUP_REPO/pulls?state=open&per_page=100" \
+              --jq "[.[] | select(.head.sha == \"$DUP_SHA\" and .head.repo.full_name == \"$DUP_REPO\")] | length" 2>/dev/null || echo 0)
+            if [ "$matched" -gt 0 ] 2>/dev/null; then dup=true; fi
+          fi
+          echo "dup=$dup" >> "$GITHUB_OUTPUT"
+          echo "push/PR dedup: dup=$dup (open PRs with head=$DUP_SHA: $matched)"
+
+  # ---------------------------------------------------------------------------
   # 1. 核心矩阵：默认配置 + 构建类型极性（AUTO 三态的两个分支）
   # ---------------------------------------------------------------------------
   core:
     name: core (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -284,12 +338,12 @@ jobs:
       - name: Build (library + tools + tests, timed for link-cost observability)
         if: runner.os != 'Windows'
         shell: bash
-        run: time cmake --build build --config ${{ matrix.build-type }}
+        run: time cmake --build build --config ${{ matrix.build-type }} --parallel
 
       # windows-latest 默认 pwsh，无 bash time；分步保持矩阵统一构建命令
       - name: Build (library + tools + tests)
         if: runner.os == 'Windows'
-        run: cmake --build build --config ${{ matrix.build-type }}
+        run: cmake --build build --config ${{ matrix.build-type }} --parallel
 
       # 收束期可观测性：ccache 命中率纳入 CI 输出（hendrikmuhs/ccache-action 已注入 PATH）
       - name: ccache stats
@@ -299,7 +353,7 @@ jobs:
       # demos 不进默认构建（EXCLUDE_FROM_ALL），单独拉起聚合目标确保持续可编译
       - name: Build demos
         if: matrix.build-demos
-        run: cmake --build build --config ${{ matrix.build-type }} --target demos
+        run: cmake --build build --config ${{ matrix.build-type }} --target demos --parallel
 
       # Linux headless runner 无 X display、无剪贴板工具：装 xvfb + xclip/xsel 并用 xvfb-run
       # 包裹 ctest，让依赖系统剪贴板的用例真正执行而非 SKIP；Windows/macOS 剪贴板原生可用，直跑 ctest。
@@ -359,6 +413,8 @@ jobs:
     name: backends (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -513,14 +569,14 @@ jobs:
 
       - name: Build (library + tools + tests)
         shell: bash
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
 
       # 真机验收探针（EXCLUDE_FROM_ALL，默认构建不含）：VERIFY_TOOLS 打开后本平台所有可用探针
       # 在此显式编出，证明它们对当前 API/平台的编译面——此前仅 lint 静态分析、从不编二进制。
       # 探针不进 ctest、需真实设备/窗口，故只编不跑（运行期判据由人工验收，见 AuroraVerify.cmake）。
       - name: Build verify probes
         if: contains(matrix.cmake-flags, 'AURORA_BUILD_VERIFY_TOOLS')
-        run: cmake --build build --config Release --target aurora_verify
+        run: cmake --build build --config Release --target aurora_verify --parallel
 
       - name: ccache stats
         if: runner.os == 'Linux' || runner.os == 'macOS'
@@ -588,6 +644,8 @@ jobs:
     name: toggles (${{ matrix.name }})
     runs-on: ubuntu-26.04
     timeout-minutes: 120
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -662,7 +720,7 @@ jobs:
         run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release ${{ steps.net-flags.outputs.flags }} ${{ matrix.cmake-flags }}
 
       - name: Build (library + tools + tests)
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
 
       - name: ccache stats
         run: ccache --show-stats --verbose || ccache --show-stats
@@ -700,6 +758,8 @@ jobs:
     name: tls provider (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -805,7 +865,7 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release $flags
 
       - name: Build (library + tools)
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
 
       - name: ccache stats
         run: ccache --show-stats --verbose || ccache --show-stats
@@ -833,6 +893,8 @@ jobs:
     name: asan (ubuntu-gcc)
     runs-on: ubuntu-26.04
     timeout-minutes: 120
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -860,7 +922,7 @@ jobs:
         run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_ASAN=ON ${{ steps.net-flags.outputs.flags }}
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel
 
       - name: ccache stats
         run: ccache --show-stats --verbose || ccache --show-stats
@@ -885,6 +947,8 @@ jobs:
     name: coverage (ubuntu-gcc)
     runs-on: ubuntu-26.04
     timeout-minutes: 120
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -916,7 +980,7 @@ jobs:
         run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
 
       - name: Build + ctest + gcov summary (coverage target, under virtual X display)
-        run: xvfb-run -a cmake --build build --target coverage
+        run: xvfb-run -a cmake --build build --target coverage --parallel
 
       - name: ccache stats
         run: ccache --show-stats --verbose || ccache --show-stats
@@ -943,6 +1007,8 @@ jobs:
     # 线程池，宿主页面须 COOP/COEP）——把 `AURORA_ENABLE_WASM_PTHREADS` 这个此前从未显式打开的
     # 宏真正编译并跑 wasm ctest，覆盖 `-pthread` 链接标志与 ThreadPool 行为分支。
     timeout-minutes: 120
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -981,7 +1047,7 @@ jobs:
         run: emcmake cmake -S . -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DAURORA_ENABLE_AUDIO=ON ${{ matrix.cmake-flags }} ${{ steps.net-flags.outputs.flags }}
 
       - name: Build (library + tests)
-        run: cmake --build build-wasm
+        run: cmake --build build-wasm --parallel
 
       # Emscripten 的 socket shim 在 node 下运行时会 require('ws')。wasm 没有 BSD socket，
       # 依赖真实 socket / DNS 的用例已在 AURORA_PLATFORM_WASM 下整体跳过（见各 net 套件与
@@ -1007,6 +1073,8 @@ jobs:
     name: install + find_package (${{ matrix.name }})
     runs-on: ubuntu-26.04
     timeout-minutes: 120
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1043,7 +1111,7 @@ jobs:
       - name: Configure + Build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release ${{ matrix.configure-flags }} ${{ steps.net-flags.outputs.flags }}
-          cmake --build build --config Release
+          cmake --build build --config Release --parallel
 
       - name: ccache stats
         run: ccache --show-stats --verbose || ccache --show-stats
@@ -1075,7 +1143,7 @@ jobs:
           }
           EOF
           cmake -S consumer -B consumer/build -G Ninja -DCMAKE_PREFIX_PATH="${{ github.workspace }}/install-prefix"
-          cmake --build consumer/build
+          cmake --build consumer/build --parallel
           ./consumer/build/consumer
           test -f hello.png
 
@@ -1110,7 +1178,8 @@ jobs:
     # 一倍半余量。余量必须留：本轮 TU 编译失败即整片红，慢起来没有上限。
     # 全量矩阵只跑 PR / master(+main) / 每周定时 / 手动触发；分支推送改由下方 lint-incremental
     # 单 job 增量覆盖（见作业 8i），避免每个功能分支 push 都发 12 个 native lint job。
-    if: github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -1339,7 +1408,8 @@ jobs:
     # 40：单片 ~17 分钟 tidy + emsdk/apt/configure ~4 分钟，留一倍余量。
     # 与作业 8 同一套门禁分流：全量矩阵只在 PR / master(+main) / 定时 / 手动触发；分支推送
     # 由 lint-incremental 单 job 覆盖浏览器口径的增量子集。
-    if: github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -1507,7 +1577,10 @@ jobs:
     # 单 job 串三遍：子集小时约 5–15 分钟；回落 origin/master 差异或触发全局全量时可能放大，
     # 留一倍余量。
     timeout-minutes: 90
-    if: github.event_name == 'push' && github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main'
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' }}
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && github.event_name == 'push' && github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -1659,7 +1732,8 @@ jobs:
     name: clang-tidy (windows, platform TUs)
     runs-on: windows-latest
     timeout-minutes: 90
-    if: github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
     env:
       # 本作业的若干工具步打印中文（tools/check/*.py）：cp1252 控制台编码无法表示，强制 UTF-8。
       PYTHONUTF8: 1
@@ -1740,7 +1814,8 @@ jobs:
     name: clang-tidy (macos, platform TUs)
     runs-on: macos-latest
     timeout-minutes: 60
-    if: github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
     steps:
       - uses: actions/checkout@v7
 
@@ -1808,6 +1883,8 @@ jobs:
     name: clang-format
     runs-on: ubuntu-26.04
     timeout-minutes: 20
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -1819,4 +1896,4 @@ jobs:
         run: cmake -S . -B build-fmt -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_CLANG_TIDY=OFF -DAURORA_ENABLE_CLANG_FORMAT=ON
 
       - name: Check formatting (fails on any divergence)
-        run: cmake --build build-fmt --target format-check
+        run: cmake --build build-fmt --target format-check --parallel
