@@ -713,8 +713,26 @@ auto StreamTransport::connect(const Endpoint &endpoint, const StreamOptions &opt
         fail(driven.error());
         return;
     }
-    state->connecting = true;
 
+    // 先发起 `connect()`、后登记可写关注。顺序反了会开出一扇跨线程竞态窗：未发起连接的 TCP 句柄
+    // 「发送缓冲为空即 POLLOUT」，另一条驱动腿（宿主 `dispatch` 或引擎等待集）能在登记与发起之间的
+    // 间隙里取到可写就绪，`take_connect_error` 此时的 0 只说明「尚未记下错误」，不构成「已连接」——
+    // 连接被误判成功，第一笔写落在未连接句柄上即 `EPIPE`，发起线程回头 `connect()` 只剩已归还的
+    // 句柄（`EBADF`）。电平触发的等待（`poll`）保证登记晚于连接完成也不丢事件，至多慢一个轮次；
+    // 在途连接则只在 ESTABLISHED 或失败时才报可写，窗口从源头不存在。
+    if (stream_closed(state)) {
+        return;
+    }
+    auto started = detail::start_connect(state->handle, endpoint);
+    if (!started) {
+        fail(started.error());
+        return;
+    }
+    if (stream_closed(state)) {
+        return;  // 发起期间取消已落地：句柄已归还，不再登记也不再交付第二遍
+    }
+
+    state->connecting = true;
     Tasks armed;
     {
         std::scoped_lock lock(state->mutex);
@@ -723,15 +741,6 @@ auto StreamTransport::connect(const Endpoint &endpoint, const StreamOptions &opt
     deliver(std::move(armed), owner);
     if (stream_closed(state)) {
         return;  // 登记失败已由 close_stream 交付过结果
-    }
-
-    auto started = detail::start_connect(state->handle, endpoint);
-    if (!started) {
-        fail(started.error());
-        return;
-    }
-    if (stream_closed(state)) {
-        return;
     }
 
     if (options.connect_timeout.count() > 0) {
