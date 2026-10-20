@@ -170,9 +170,11 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 
 ### 3.1 帧循环
 
-帧循环由 **`Application::run()` 统一驱动**（多窗口语义见 §2.4）：每帧 pump 事件 → 集中派发 → `tick` → 逐窗口 `present_root`（脏区决策）→ `present()`。`Window::run(on_frame, max_frames)` **保留**供单窗口低阶调用方（自拼帧循环、测试、demo 直驱）使用；多窗口请走 `Application::run`。所有构建、事件、重绘都在 UI 线程（单线程 UI，见 [`01-core.md`](01-core.md) §8.1）。
+帧循环由 **`Application::run()` 统一驱动**（多窗口语义见 §2.4）：每帧 pump 平台事件 → 集中排空异步结果（通知激活 / 热键命中 / 系统拖放终结与在途读取，见下）→ 集中派发 → `tick` → 逐窗口 `present_root`（脏区决策）→ `present()`。`Window::run(on_frame, max_frames)` **保留**供单窗口低阶调用方（自拼帧循环、测试、demo 直驱）使用；多窗口请走 `Application::run`。所有构建、事件、重绘都在 UI 线程（单线程 UI，见 [`01-core.md`](01-core.md) §8.1）。
 
 > ⚠ **`Window::run` 不含「逐宿主 tick」这一步**：`Widget::tick`（长按阈值、甩动惯性、`VideoPlayer` 播放时钟等一切每帧计时）只在 `Application::run` 的帧序里被驱动。低阶自拼循环若承载这类控件，须在 `on_frame` 回调内自行 `root.widget().tick(now)`，并把帧等待的 `anim_active` 取作「本帧实际发生了渲染」（`!Window::is_idle_frame()`），否则控件恒停在首帧、且首帧后即陷入无限深睡。`examples/demos/demo_common.h` 的 `run_demo` 已按此接线。
+
+**异步结果排空点（帧内兑现通则）**：三类异步结果在同一时点集中排空——平台事件抽取之后、`on_frame` 回调之前：通知激活（`NotificationCenter::pump_events()`）、热键命中（`OsHotkeyRegistry::drain_pending()`）、系统拖放的终结回调与在途读取（`system_drag::pump_reads()`，契约见 §8.9）。通则：**异步结果在帧内排空兑现、不在平台消息泵内同步回调**——回调可能重建页面 / 触发重排，在消息泵内重入会把布局与绘制切到半途的状态（热键与通知激活两条既有路径同此，本批把系统拖放并入同一时点）。宿主不调用对应排空入口 ⇒ 回调不到，库**不谎报**成功（与 `NotificationCenter` 既有口径一致）。⚠ **`Window::run` 低阶路径不含拖放排空这一步**：自拼帧循环若承载拖出会话或 `read_async` 在途读取，须每帧自行调用 `system_drag::pump_reads()`（无在途项时近零开销），否则终态与读取结果永远不到；`Application::run` 已含此步。
 
 ### 3.2 脏区追踪（默认开启）
 
@@ -529,6 +531,18 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - **`text/uri-list` 编解码是纯逻辑**（`src/aurora/app/uri_list.h`，无平台依赖）：编码逐条路径产出 `file://` URI（空 authority 的第三个斜杠按需补出，空格等保留字符 `%XX` 大写十六进制），行以 CRLF 结尾；解码容错 CRLF / LF / CR 三种分隔符、忽略空行、`file://` 行百分号解码为本地路径并还原盘符形态（`file:///C:/x` → `C:/x`；POSIX 绝对路径的前导 `/` 保留）。**非 `file` scheme 的行（`http://` 等）不映射为路径、静默跳过**——`get_files()` 只返回可映射为本地路径的条目，完整原始行经 `get_payload(AURORA_MIME_URI_LIST)` 取得；全部条目被跳过时是 `Ok(空清单)`。`set_files` **只接受本地路径**（URL 类内容走 `set_payload`），与解码侧口径对称。
 - **空口径沿旧约**：格式不存在 = `Ok` 空值（空内容不是失败）；空串 / 空清单 / 空字节写入 = no-op，**保留既有内容**；`mime` 为空串是调用方参数错（`GeneralInvalidArgument`）。
 - **平台实现不在本批**：Win32 既有 text / image 两族零改动；富格式的平台后端（`CF_HDROP` / "HTML Format" / `RegisterClipboardFormat`、X11 / Wayland selection 目标协商、macOS `NSPasteboard`）随后续批次落地，落地前非测试路径按 `ClipboardFormatUnsupported` 报错。memory 测试后端已覆盖富格式往返。
+
+**惰性提供、监听与清空（`ClipboardOffer` 同址扩充，不新开门面类）**：
+
+- **`set_offer(ClipboardOffer)` 注册延迟渲染要约**：各格式的数据在真正被读取时才经 `provide` 回调生成（对标 Win32 `SetClipboardData(format, NULL)` 的 `WM_RENDERFORMAT`、macOS pasteboard promise、GTK4 `GdkContentProvider`）。注册后回调**一次都不被调用**；读取某格式时只对该格式回调一次。`formats` 为空或 `provide` 为空回调是调用方参数错，返回 `general-invalid-argument` 而非静默成功。
+- **渲染结果只生成一次并缓存**（对标平台 `WM_RENDERFORMAT` 后由系统托管）；`provide` 返回 `Error` **不缓存**，每次读取各自重试提供。重复注册以新要约**整体替换**旧要约（含其已渲染缓存）。
+- **与立即写混用合法且互不覆盖**：同一份内容上一格式走 `set_payload` 立即写、另一格式走要约惰性声明，两者都能被读到且结果各自正确；立即写的格式不触发惰性回调。同一 MIME 被随后的**非空**立即写通道写入时，该格式自要约改由立即写接管（与平台「后写者接管该格式」同款）。
+- **提供失败口径**：`provide` 返回 `Error`（或为空而该格式被真正请求）时读取侧拿到 `clipboard-provider-failed`（`retryable = false`——同一笔数据是否重试由应用决定，库不代做重试），而非既有三枚之一。
+- **`on_ownership_lost(callback)`**：所有权被夺（别的进程清空 / 覆写剪贴板；Win32 `WM_DESTROYCLIPBOARD`、X11 selection owner 被夺的平台锚）时回调一次，与 `set_offer` 成对，用于释放惰性提供所依赖的缓存与临时资源；未注册惰性要约时不触发（没有可失去的所有权的要约）。所有权丢失是**正常态不是故障**，走回调而不产出错误码。传空回调即注销；注册新回调**替换**旧回调（不叠加，避免多注册点各自持资源）。
+- **`on_change(callback)`**：内容变化监听。平台无监听机制时**注册即失败**，返回 `clipboard-listen-unsupported`（`retryable = false`，机制缺失是稳态）——宁可如实报错，也不让调用方逻辑静默失效，与 `available_formats()` 「不因 API 已声明就谎报可用」同款定调。注册新回调同样替换旧的；传空回调即注销（注销不需要监听机制）。回调在派发线程上串行调用，实现须轻量、不得触发重布局或再次读写剪贴板。
+- **`clear()` 与空写入语义相反**：`clear()` 是**主动清空**（清空后 `available_formats()` 返回 `Ok(空清单)`；错误口径 `ClipboardAccessFailed` / `ClipboardWriteFailed` / `GeneralNotSupported`）；而空文本 / 空图像 / 空字节 / 空清单的 `set_*` 是契约内 no-op、**保留既有内容**。二者并列写明以防误用。监听注册不是内容：`clear()` 清内容（要约即所有权声明，随内容一并清空），监听注册留存。
+- **两条通道要约同构**：`ClipboardOffer` 与拖出侧 `DragOffer`（§8.9）字段形态一致（格式清单 + 同签名 `provide`），MIME 取值同出 `app/mime_types.h`——同一个 `provide` 回调可同时交给两条通道；两侧不合并（`event/` 不依赖 `app/` 的分层约束），取值一致由常量表保证。
+- **立骨期边界**：惰性要约、监听与 `clear()` 在 memory 测试后端下全流程可测；平台路径如实报错（要约按 `ClipboardFormatUnsupported`、`on_change` 按 `ClipboardListenUnsupported`），`clear()` 按平台到位程度分部接线（Win32 `EmptyClipboard`、Linux `xsel --clear`，macOS 未接则如实报 `GeneralNotSupported`）。
 
 **控件层（`TextInput` / `Text` / `RichTextEdit` 的 Ctrl+C/X/V）**：这些快捷键路径无 `Result` 出口（`on_key_event` 返回 `void`），故失败经 `Diagnostics::warn(msg, where, code)` 上报——桥接 Logger 且进 `Diagnostics::report()` 收集，机器可读，与 `widget.cpp` / `timer.h` 既有口径一致。同时快捷键语义随失败收紧：
 
@@ -1304,12 +1318,14 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 
 - **程序化派发入口**：`Application::dispatch_system_drop(SystemDropEvent &)` / `WindowHost::dispatch_system_drop(SystemDropEvent &)`，四态共用，阶段由调用方给定。位置类事件同款：派发根为整窗下沉壳，坐标为整幅表面逻辑坐标。无头环境与单测经它完整走通四态派发，**不依赖任何真实窗口**。
 - **平台后端接入点**：后端把 OS 会话翻译成事件后交 `WindowHost` 的事件处理器（Win32 `WM_DROPFILES` 路径已按此换型，HDROP 解析与坐标换算原样保留）。其余后端的 OLE / Xdnd / `wl_data_device` / dragging session 属后续接线范围。
-- **拖出**：`system_drag::begin(DragOffer)` 是会话入口。当前无后端接线时返回 `system-drag-not-supported`；控件侧入口为 `Widget::begin_system_drag()`（取 `on_provide_drag()` 的要约），结束回 `on_system_drag_end(DragAction)`。**不引入嵌套消息泵**（Win32 `DoDragDrop` 的嵌套泵与重入 guard 属接线期设计项）。
-- **错误口径**（`ERROR_CATALOG.md`）：`system-drag-not-supported`（无机制 / 能力位为 false；`retryable = false`，机制缺失是稳态，重试无意义）与 `system-drag-session-failed`（会话建立或进行期失败：协商破裂、源数据中断；同样按稳态定稿，瞬态重试由调用方按 hint 自行决策）。要约不合法（空 `formats` / 空 `provide`）是调用方参数问题，走 `general-invalid-argument`，与「平台没机制」分开报。
-- **测试注入**：`system_drag::install_test_backend()` / `reset_test_backend()` / `remove_test_backend()` 三件套（同 `Clipboard::install_test_backend` 范式，`AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release 下零副作用）。安装后 `begin` 不触碰平台、直接回成功动作 `Copy`，使拖出分支在无头环境可测。载荷侧由 `DragPayload::from_bytes` 直接构造内存载荷，drop 态的往返不依赖平台。
-- **热路径与无障碍**：`Over` 态按指针采样频率到达，accept 查询须常量级、禁在拖放路径触发重布局；拖放不是唯一路径，粘贴 / 文件对话框等非拖拽入口在 UI 上须可达，放置反馈不得只靠光标形态。
+- **拖出（事件驱动执行模型）**：`system_drag::begin(DragOffer, on_end)` 是会话入口——**发起即返回**，不阻塞到会话结束。理由：本库是单线程 UI + 帧循环，阻塞期间不泵帧循环则终结回调无从派发、泵则引入嵌套循环的重入面；Win32 `DoDragDrop` / Qt `QDrag::exec()` 的嵌套模态循环**不取**（原「接线期设计项」就此收敛为「不引入」）。返回值语义收窄为「会话是否发起成功」（`Ok` **不等于**落放成功）；最终结局与动作经 `on_end(SystemDragOutcome, DragAction)` 投递，由帧循环 `system_drag::pump_reads()` 兑现（插入位置与排空通则见 §3.1；宿主不排空 ⇒ 回调不到，不谎报）。`SystemDragOutcome{Succeeded, Cancelled, Rejected, Failed}` 与 `DragAction`「谈成了什么」分工：把三种非成功结局折叠成同一个 `DragAction::None` 时，控件层三条路径的回调序列逐字相同（都是 begin → end(None)），等于没补。控件侧入口 `Widget::begin_system_drag()`（取 `on_provide_drag()` 的要约）；`on_provide_drag()` 返回 `std::nullopt`（控件自称无要约）时不发起、也不派发终态；发起失败（无后端 / 能力位 false / 要约不合法）则直接派发 `on_system_drag_end(Failed, None)` 收尾——「失败同样要收尾」：会话结束是控件清理拖出态的唯一时机。源侧回调族与四条结局序列的完整契约见 [`05-event-navigation.md`](05-event-navigation.md) §5.2。
+- **会话取消**：`system_drag::cancel()` 调用时机不受限——事件驱动下任意时刻可调：会话外为 no-op、不影响后续会话；会话内取消，终态 `Cancelled` 仍经帧循环投递。同时**就地收口全部在途读取**（有数据即兑现数据，否则按 `system-drag-read-failed` 兑现），不悬挂。程序化取消与 Esc 语义共用同一条路径。
+- **非阻塞读取契约**：`DragPayload` 双通道——`bytes()` 一族同步读取（小载荷、无头测试、同步后端），`read_async(mime, callback)` 与 `SystemDropEvent::{text,image,bytes,files}_async` 非阻塞：登记在途项后立即返回，结果经 `pump_reads()` 帧内排空兑现、**不在平台消息泵内同步回调**（回调可能重建页面 / 触发重排，重入会把布局与绘制切到半途状态）。同一 const 句柄可被并发读取——每次调用各自独立登记、各自兑现一次，不共享结果、不互相取消；回调只被调用一次。源侧迟迟不给数据时按墙钟超时（生产路径固定时长，测试可调）兑现 `system-drag-read-failed`；会话收口时就地兑现，不悬挂。事件层便利读取与 `DragPayload` 直连两条路结果一致。
+- **错误口径**（`ERROR_CATALOG.md`，全表 140 → **146** 枚）：既有两枚——`system-drag-not-supported`（无机制 / 能力位为 false；`retryable = false`，机制缺失是稳态，重试无意义）与 `system-drag-session-failed`（协商破裂 / 源数据中断；稳态定稿，瞬态重试由调用方按 hint 自行决策）；新增四枚——`system-drag-read-failed`（读取失败 / 墙钟超时；`retryable = true`，瞬态——同一格式二次尝试可能成功）、`system-drag-decode-failed`（字节到达但按该 MIME 解码失败；`retryable = false`，源侧数据缺陷）、`system-drag-cancelled`（用户取消；`severity = info`——用户意图不是故障，不进错误分支）、`system-drag-move-rollback`（Move 落放后源侧删除失败；`retryable = true`——目标侧数据保持权威，稍后重试删除而非重新复制）。剪贴板侧同批新增 `clipboard-provider-failed` 与 `clipboard-listen-unsupported` 两枚（§8.2）。要约不合法（空 `formats` / 空 `provide`）是调用方参数问题，走 `general-invalid-argument`，与「平台没机制」分开报。**反馈要求**：读取失败、取消与被拒绝在 UI 上须给出非光标的可见反馈（颜色 / 高亮 / 文案），放置反馈不得只靠光标形态表达。
+- **测试注入**：`system_drag::install_test_backend()` / `reset_test_backend()` / `remove_test_backend()` 三件套（同 `Clipboard::install_test_backend` 范式，`AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release 下零副作用）。安装后 `begin` 不触碰平台、登记在途会话（终态由 `emit_session_end(outcome, action)` 驱动，经下一拍 `pump_reads()` 投递；`Move` 时先调 `DragOffer::on_move_confirmed` 确认，失败则终态改写为 `Failed` 并上报 `system-drag-move-rollback`），使拖出分支在无头环境可测。载荷侧由 `DragPayload::from_bytes` 直接构造内存载荷，drop 态的往返不依赖平台。测试专用接缝另四件：`test_withhold_format(mime)`（扣留某格式的读取以覆盖墙钟超时）、`test_set_read_timeout(ms)`（生产路径固定、测试可调）、`test_in_drain_phase()`（断言回调在帧内排空兑现而非消息泵内同步回调）、`test_last_session_error()` / `test_last_offer()`（终态错误与要约字段往返断言）。
+- **热路径与无障碍**：`Over` 态按指针采样频率到达，accept 查询须常量级、禁在拖放路径触发重布局；拖放不是唯一路径，粘贴 / 文件对话框等非拖拽入口在 UI 上须可达，放置反馈不得只靠光标形态。可接收拖放的控件须同时提供 `system_drag_alternative_path()`（可达性契约见 [`05-event-navigation.md`](05-event-navigation.md) §5.2）。
 
-回归：`utest_drag_payload`（载荷往返、空口径、inert 后端、能力位锚定）+ `utest_dispatcher`（四态派发与 accept 查询）+ `utest_event` / `utest_application`（默认构造与程序化入口）。
+回归：`utest_drag_payload`（载荷往返、空口径、inert 后端、能力位锚定、异步读取全族：不卡帧 / 并发独立 / 排空阶段 / 不排空不到 / 就地收口 / 墙钟超时 / 五路径回调序列 / 影像往返）+ `utest_dispatcher`（四态派发与 accept 查询、修饰键翻译单点、自动滚边意图派发）+ `utest_scroll_viewport` / `utest_scroll` / `utest_reorderable_list`（`DragAutoScroll` 内核与共享常量）+ `utest_accessibility`（替代路径与「仅拖拽可达」投影）+ `utest_application`（帧循环排空端到端）+ `utest_event`（默认构造与程序化入口）。
 
 ---
 

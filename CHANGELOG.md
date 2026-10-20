@@ -28,10 +28,26 @@ freeze: minor-versions-are-additive
 ### Breaking
 
 - 构建接口：原先以 `-DAURORA_NET_TLS_PROVIDERS=static:<mbedTLS 安装根>`（含共存串里的那条 mbedTLS entry）装配 mbedTLS 的命令行不再受支持——传入仅含 mbedTLS 的安装根现在 configure 期硬失败并指向新开关。引擎宏 `AURORA_ENABLE_NET_TLS_MBEDTLS` 由「仅由 provider 探测推导、不接受手工设置」改为可由用户直接置 `ON`（仍 `PRIVATE` 作用域，公共头零 `#ifdef` 不变）。OpenSSL provider 与系统栈腿的装配接口不变。
+- 系统拖出会话改走**事件驱动执行模型**（规格：`codespec/specification/06-app-platform.md` §8.9、§3.1 帧循环排空点；`codespec/specification/05-event-navigation.md` §5.2）：`system_drag::begin` 返回类型由 `Result<DragAction>` 改为 `Result<void>`——阻塞到会话结束、同步返回动作的形态让位给「发起即返回、终态经回调投递」（本库是单线程 UI + 帧循环，阻塞期间不泵帧循环则回调无从派发、泵则引入嵌套消息泵的重入面；Win32 `DoDragDrop` / Qt `QDrag::exec()` 的嵌套模态循环不取）。**实际影响面为零**：系统拖放后端当前尚未接线（`system_drag_in` / `system_drag_out` 恒为 false），没有已发布行为被改变，破坏性仅体现在 API 签名上。
+- `system_drag::begin` 形参由 `(const DragOffer &)` 改为 `(const DragOffer &, on_end)`：终结回调 `std::function<void(SystemDragOutcome, DragAction)>` 随发起一并登记，终态经帧循环 `system_drag::pump_reads()` 兑现（宿主不排空 ⇒ 回调不到，不谎报）。不关心终态可传空回调（会话照常，只是收不到终态）。
+- `Widget::begin_system_drag()` 返回类型由 `Result<DragAction>` 改为 `Result<void>`：返回值只表「会话是否发起成功」（`Ok` **不等于**落放成功），最终结局与动作改在 `on_system_drag_end` 里取。
+- `Widget::on_system_drag_end` 签名与语义由 `(DragAction)`（无论成败都收尾）改为 `(SystemDragOutcome, DragAction)`（会话终结投递）：新增的 outcome 形参让「被拒绝」与「会话中途异常」两条**回调序列逐字相同**的路径在控件层可分辨（折叠成同一个 `DragAction::None` 等于没补）。原本只关心动作的调用方补第一个实参后自行忽略即可；`Cancelled` 路径仍严格早于本回调派发 `on_system_drag_cancel()`。
+
+### Added
+
+- **跨进程数据交换契约补全**（剪贴板惰性提供与监听、系统拖放非阻塞读取与自动滚边、可达性契约；规格落点 `06-app-platform.md` §8.2 / §8.9 / §3.1 与 `05-event-navigation.md` §5.2）：
+  - 剪贴板（`app/clipboard.h`，同址扩充不新开门面）：`ClipboardOffer{formats, provide}` + `set_offer()` 注册**惰性要约**——各格式数据在真正被读取时才经 `provide` 回调生成（对标 Win32 `SetClipboardData(format, NULL)` 的 `WM_RENDERFORMAT`、macOS pasteboard promise、GTK4 `GdkContentProvider`），与立即写混用合法且互不覆盖；`on_ownership_lost()` 所有权被夺回调（与 `set_offer` 成对，释放惰性提供依赖的缓存）；`on_change()` 变更监听（无监听机制的平台**注册即失败**，`clipboard-listen-unsupported`，宁可如实报错也不让调用方逻辑静默失效）；`clear()` 主动清空（与空写入 no-op 的「保留既有内容」语义相反）。`ClipboardOffer` 与拖出侧 `DragOffer` 字段形态同构，同一个 `provide` 回调可同时交给两条通道（MIME 词汇同出 `app/mime_types.h`）。
+  - 系统拖放非阻塞读取（`event/event.h`）：`DragPayload::read_async(mime, callback)` 与 `SystemDropEvent::{text,image,bytes,files}_async` 登记在途项后立即返回，结果经帧循环 `system_drag::pump_reads()` **帧内排空兑现**、不在平台消息泵内同步回调（回调可能重建页面 / 触发重排）；宿主不排空 ⇒ 回调不到（不谎报）；同一 const 句柄可并发读取、各自独立兑现一次、不互相取消；源侧迟迟不给数据按墙钟超时兑现 `system-drag-read-failed`；会话收口（`cancel()`）就地兑现，不悬挂。`Application` 帧序在 `NotificationCenter::pump_events()` 后、`on_frame` 前插入该排空点（与通知激活、热键命中同一时点语义）；`Window::run` 低阶路径不含此步，自拼帧循环须自行每帧调用。
+  - 拖出会话面新增：`system_drag::cancel()`（调用时机不受限：会话外 no-op、会话内取消并就地收口全部在途读取；程序化取消与 Esc 语义共用同一条路径）、`system_drag::proposed_action_for(modifiers, default_action)`（修饰键 → 源建议动作的**唯一翻译点**：Ctrl → Copy、Shift → Move、Ctrl+Shift → Link，无有效修饰键取源侧缺省动作——`ModifierKey::None` 两义不可推定；比对前按 `AURORA_MODIFIER_PRESSABLE_MASK` 摘除锁定态位）、`DragOffer` 四枚可选字段（拖拽影像 / 热点偏移 / 源侧缺省动作 / Move 完成确认回调）、`SystemDragOutcome{Succeeded, Cancelled, Rejected, Failed}` 枚举。
+  - 自动滚边（`widget/scroll_viewport.h`）：`DragAutoScroll` 内核——时间戳全部由调用方帧计时供给（内核不自读时钟），按侵入深度比例给速、带宽 clamp 到视口半高，带外 / 视口未定尺 / 新鲜度超时（`AURORA_DRAG_AUTO_SCROLL_STALE_S = 1.0`）就地收车；共享常量 `AURORA_AUTO_SCROLL_THRESHOLD_DP = 48.0`（与 `ReorderableList` 同名缺省值相等，进程内拖拽与跨进程拖放两条路径共用一套手感）与 `AURORA_AUTO_SCROLL_MAX_SPEED = 600.0`；派发落点 `Widget::on_system_drag_auto_scroll(position)` 沿祖先链上溯至最近可滚动祖先（`Over` 给落点、`Leave` / `Drop` 给 `nullopt`），不新增滚动实现。
+  - 可达性契约：`Widget::accepts_system_drag()` / `system_drag_alternative_path()` 与 `AccessibilityNode::{drag_reachable, drag_alternative_path}` / `is_drag_only_reachable()`——接受拖入却未提供非拖拽替代路径的控件在无障碍树中被标记「仅拖拽可达」，桥与工具链据此告警（文档层承诺升为可验收契约）。
+  - 错误码 +6（全表 140 → **146** 枚，只增不改）：`clipboard-provider-failed`（惰性提供回调返回 `Error` 或为空而格式被真正请求；retryable false）、`clipboard-listen-unsupported`（平台无变更监听机制；retryable false）、`system-drag-read-failed`（读取失败 / 墙钟超时；retryable **true**——瞬态）、`system-drag-decode-failed`（字节到达但按 MIME 解码失败；retryable false——源侧数据缺陷）、`system-drag-cancelled`（用户取消；severity **info**——用户意图不是故障，不进错误分支）、`system-drag-move-rollback`（Move 落放后源侧删除失败；retryable true——目标侧数据保持权威，稍后重试删除而非重新复制）。
+  - 测试注入扩充（双宏 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 裁切，Release 下零副作用）：剪贴板 memory 后端覆盖惰性按需兑现、所有权丢失与变更通知模拟、无机制平台如实报错、`clear()` 与空写入的相反语义；`system_drag` inert 后端新增 `emit_session_end` / `test_withhold_format` / `test_set_read_timeout` / `test_in_drain_phase` / `test_last_session_error` / `test_last_offer` 接缝，覆盖五路径回调序列、影像与热点往返、墙钟超时与排空阶段断言。
 
 ### Migration
 
 - 把配置里的 `-DAURORA_NET_TLS_PROVIDERS=static:<mbedTLS 安装根>`（或共存串里的该条 mbedTLS entry）替换为 `-DAURORA_ENABLE_NET_TLS_MBEDTLS=ON`；provider 列表里只保留 OpenSSL 的 `shared:<根>` / `static:<根>` 条目。CI 已随本次同步：`.github/actions/setup-net-capability-flags` 去掉 `/opt/aurora-tls-mbedtls` 引导与 `libmbedtls-dev`，Linux 能力串与 lint / toggles / tls-providers 作业改用新开关。
+- 系统拖出改事件驱动后的调用方改造（因后端未接线，实际无现存调用方受影响，本条说明形态变化）：`system_drag::begin(offer)` → `system_drag::begin(offer, on_end)`，原本 `auto r = begin(offer); if (r) use(r.value());` 的形态改为在 `on_end(outcome, action)` 里按 outcome 分支（`Ok` 只代表「会话已发起」）；`Widget::begin_system_drag()` 同样只判 `Ok` / `Error`；覆写 `on_system_drag_end` 的控件补第一个形参 `SystemDragOutcome`（只关心动作的忽略它即可，但补上才能区分「被拒绝」与「会话失败」）。原先在 begin 返回后同步清理拖出态的控件，改到 `on_system_drag_end` 里清理——发起失败路径也会派发 `end(Failed, None)` 收尾，「失败同样要收尾」的口径不变。
 
 ### Notes
 

@@ -264,7 +264,7 @@ auto detail::exchange_material(const Client &client, Request request, Cancellati
     // 收尾口持有会话：钩子在 promise 析构时被**摘出**再调用，随那次调用结束而销毁，故会话恰好在帧收尾那一刻
     // 放手——不留「会话持有共享状态、共享状态持有会话」的自持环（自持环的形态判据见 `utest_coroutine` 的
     // `on_done_releases_its_own_capture_once_it_has_fired`，本面「调用方客户端先亡仍完成交换」一条验的是它的后果）。
-    coro.on_done([state](const Result<Result<Response>> &outer) mutable -> void {
+    coro.on_done([state, session](const Result<Result<Response>> &outer) mutable -> void {
         if (outer.ok()) {
             detail::settle_job<Response>(state, outer.value());
             return;
@@ -285,7 +285,7 @@ auto deliver_stream(const Client &client, Request request, Cancellation cancella
 
     // 令牌按值流进发起侧即可：`Cancellation` 是共享状态句柄，移交副本不切断与调用方那枚的相连关系。
     auto coro = session->open_stream(std::move(request), *binder, std::move(cancellation));
-    coro.on_done([resource](const Result<Result<StreamOutcome>> &outer) mutable -> void {
+    coro.on_done([resource, binder, session](const Result<Result<StreamOutcome>> &outer) mutable -> void {
         if (outer.ok() && outer.value().ok()) {
             const auto &outcome = outer.value().value();
             // 收尾标记带最终状态码与明文累计：偏移在此与交付段累计一致，乱序或多出一段都当场可见。
@@ -308,7 +308,7 @@ auto deliver_sse(const Client &client, Request request, Cancellation cancellatio
     const auto binder = std::make_shared<SseBinder>(resource);
 
     auto coro = session->open_sse(std::move(request), *binder, std::move(cancellation));
-    coro.on_done([resource](const Result<Result<SseOutcome>> &outer) mutable -> void {
+    coro.on_done([resource, binder, session](const Result<Result<SseOutcome>> &outer) mutable -> void {
         if (outer.ok() && outer.value().ok()) {
             const auto &outcome = outer.value().value();
             // 收尾标记带的是**跨全部流**的事实：`index` 取事件总条数（= 下一条本该用的序号），`id` 取收摊时的
@@ -339,7 +339,7 @@ auto deliver_ws(const Client &client, Request request, WebSocketOptions session_
         session->connect_websocket(std::move(request), *binder, std::move(session_options), std::move(cancellation));
     // 收尾口拿到的那份是可变引用（`CoroTask<T>::on_done` 的形参形态），故单所有权的会话句柄能从结果槽里
     // **搬**进壳——按 `const` 接就只有拷贝这一条路，而那枚句柄压根没有拷贝构造。
-    coro.on_done([binder](Result<Result<WebSocket>> &outer) mutable -> void {
+    coro.on_done([binder, session](Result<Result<WebSocket>> &outer) mutable -> void {
         if (outer.ok() && outer.value().ok()) {
             binder->submit(std::move(outer.value().value()));
             return;

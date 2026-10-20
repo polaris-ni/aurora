@@ -181,6 +181,12 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     WsHandshakeRejected = 137,  ///< ws-handshake-rejected: WebSocket upgrade was refused: '{detail}'
     WsProtocolError = 138,  ///< ws-protocol-error: WebSocket peer violated the frame grammar: '{detail}'
     WsSendQueueFull = 139,  ///< ws-send-queue-full: WebSocket send queue is full: '{detail}'
+    ClipboardProviderFailed = 140,  ///< clipboard-provider-failed
+    ClipboardListenUnsupported = 141,  ///< clipboard-listen-unsupported
+    SystemDragReadFailed = 142,  ///< system-drag-read-failed
+    SystemDragDecodeFailed = 143,  ///< system-drag-decode-failed
+    SystemDragCancelled = 144,  ///< system-drag-cancelled: System drag session was cancelled: '{detail}'
+    SystemDragMoveRollback = 145,  ///< system-drag-move-rollback
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -196,7 +202,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 140> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 146> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1737,6 +1743,83 @@ inline constexpr std::array<ErrorMeta, 140> AURORA_ERROR_TABLE = {
                     "entry cap. This refuses only the message that hit the limit and leaves the connection open, on "
                     "purpose - whether to keep buffering, drop, or close is the caller's decision. Slow the producer "
                     "down or raise the matching WebSocketOptions field",
+        },
+        {
+            .code = ErrorCode::ClipboardProviderFailed,
+            .ident = "ClipboardProviderFailed",
+            .slug = "clipboard-provider-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Lazy clipboard provider failed for '{mime}': '{detail}'",
+            .hint = "The provide callback registered through the lazy offer returned an error, or was empty while the "
+                    "format was actually requested. The bytes could not be rendered on demand - fix the provider or "
+                    "supply the format eagerly; re-reading the same clipboard reproduces the same failure, so this is "
+                    "not a transient one",
+        },
+        {
+            .code = ErrorCode::ClipboardListenUnsupported,
+            .ident = "ClipboardListenUnsupported",
+            .slug = "clipboard-listen-unsupported",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "This platform cannot listen for clipboard changes: '{detail}'",
+            .hint =
+                "No clipboard-change listener mechanism exists here (the platform anchors are "
+                "AddClipboardFormatListener on Win32, QClipboard::dataChanged, GdkClipboard::changed, and NSPasteboard "
+                "changeCount). The absence is stable, so retrying cannot create it - sample available_formats() at the "
+                "moments that matter instead of registering a listener that would never fire",
+        },
+        {
+            .code = ErrorCode::SystemDragReadFailed,
+            .ident = "SystemDragReadFailed",
+            .slug = "system-drag-read-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "System drag payload read failed for '{mime}': '{detail}'",
+            .hint =
+                "The source session went away, cancelled mid-transfer, or the bytes never arrived within the read "
+                "deadline. Unlike a missing mechanism this is transient - the same format may well succeed on a second "
+                "attempt - so surface the failure with a non-cursor fallback and let the control decide about retrying",
+        },
+        {
+            .code = ErrorCode::SystemDragDecodeFailed,
+            .ident = "SystemDragDecodeFailed",
+            .slug = "system-drag-decode-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "System drag payload could not be decoded as '{mime}': '{detail}'",
+            .hint = "The bytes arrived but do not form a valid payload for the declared MIME (for example image/png "
+                    "that no decoder accepts). The same bytes fail again - this is a data defect at the source, not a "
+                    "transient one; drop the payload and report it rather than retrying",
+        },
+        {
+            .code = ErrorCode::SystemDragCancelled,
+            .ident = "SystemDragCancelled",
+            .slug = "system-drag-cancelled",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Info,
+            .retryable = false,
+            .message_tpl = "System drag session was cancelled: '{detail}'",
+            .hint = "The user pressed Esc, moved the pointer away, or the system ended the session. This is user "
+                    "intent, not a fault - do not route it into an error branch; the source data stays untouched and "
+                    "the control simply returns to its idle state",
+        },
+        {
+            .code = ErrorCode::SystemDragMoveRollback,
+            .ident = "SystemDragMoveRollback",
+            .slug = "system-drag-move-rollback",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Move drop landed but the source could not delete its data: '{detail}'",
+            .hint =
+                "The target received and stored the payload, but deleting the original failed (file locked, permission "
+                "revoked). The target's copy stays authoritative - retry the deletion later instead of re-copying, and "
+                "remember the contract: the source never deletes before the move confirmation arrives",
         },
     },
 };

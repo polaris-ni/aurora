@@ -8,7 +8,11 @@
 /// 以及真实 TextInput 的方向键归光标、不夺焦点）、滚轮/文本/文件拖放路由、
 /// 滚轮余量自最深可滚动者上冒给更浅祖先（嵌套滚动协调：内层到顶后外层下拉刷新接手）、
 /// TouchDispatcher 按指针 id 捕获与合成鼠标事件、连击序号（click_count）在 Press 上累加并在
-/// Release / Move 上恒为 1、超窗或位移过大重置、上限封顶为 3、左右键与多指针各自独立计数
+/// Release / Move 上恒为 1、超窗或位移过大重置、上限封顶为 3、左右键与多指针各自独立计数。
+/// 系统拖放段另覆盖：修饰键→proposed 的翻译只有 proposed_action_for 一个入口（派发器与
+/// 控件不做第二处翻译，proposed 派发前后一字不差）、Over 态驱动自动滚边意图而
+/// Leave / Drop 态收车（Enter 不带意图、意图严格早于同态落放派发、空白区不派发）、
+/// 意图沿 layout_parent() 上溯交给最近可滚动祖先而链上无可滚动者返回 false
 
 #include <algorithm>
 #include <chrono>
@@ -30,6 +34,8 @@
 namespace aurora::test_cases::utest_dispatcher {
 
 namespace {
+
+using aurora::testing::require_value;
 
 /// 固定尺寸叶控件：记录收到的指针/键盘/滚轮/文本/拖放事件，可配置是否消费。
 class TestBox final : public LeafWidget {
@@ -66,6 +72,13 @@ class TestBox final : public LeafWidget {
     std::vector<std::string> last_accept_formats;
     /// `query_system_drag_accept` 的返回值（默认 `None` = 不接受，即基类默认语义）。
     DragAction accept_action = DragAction::None;
+    /// 拖入自动滚边意图的调用记录：Over 态记落点、Leave / Drop 态记收车（`std::nullopt`）。
+    int auto_scroll_calls = 0;
+    std::vector<std::optional<Point>> auto_scroll_log;
+    /// 钩子被调用时读取的 `drop_count`（钩子先于 `on_system_drop` ⇒ 该值不含本次落放）。
+    std::vector<int> auto_scroll_drop_count_log;
+    /// 覆写 `on_system_drag_auto_scroll` 的返回值开关（false = 本控件不接管，基类默认口径）。
+    bool auto_scroll_consumes = false;
     Point last_local{};
     std::optional<int> last_pointer_id;
     std::optional<CursorShape> cursor_hook;  // 非 nullopt 时作为 cursor_shape() 虚钩子返回
@@ -154,6 +167,13 @@ class TestBox final : public LeafWidget {
         return accept_action;
     }
 
+    auto on_system_drag_auto_scroll(const std::optional<Point> &position) -> bool override {
+        ++auto_scroll_calls;
+        auto_scroll_log.push_back(position);
+        auto_scroll_drop_count_log.push_back(drop_count);  // 记调用时机：先于本态的 on_system_drop
+        return auto_scroll_consumes;
+    }
+
     [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return cursor_hook; }
 };
 
@@ -212,6 +232,49 @@ class TestRow final : public Container {
     auto on_text_composition(TextCompositionEvent &e) -> void override {
         ++composition_count;
         Widget::on_text_composition(e);
+    }
+};
+
+/// 不覆写自动滚边钩子的最小叶控件：基类「沿 layout_parent() 上溯」契约的观测对象。
+class ChainProbeLeaf final : public LeafWidget {
+  public:
+    auto type_name() const -> const char * override { return "ChainProbeLeaf"; }
+
+    auto on_layout(const Constraints &c, [[maybe_unused]] const BuildContext &ctx) -> Size override {
+        size_ = c.constrain(Size{.width = 40.0F, .height = 40.0F});
+        return size_;
+    }
+
+    auto on_paint([[maybe_unused]] Painter &p, [[maybe_unused]] const Rect &bounds,
+                  [[maybe_unused]] const BuildContext &ctx) -> void override {}
+};
+
+/// 自称可滚动的容器：覆写自动滚边钩子返回 true 并记录落点，充当「最近可滚动祖先」。
+class ScrollableProbeRow final : public Container {
+  public:
+    std::vector<std::optional<Point>> intent_log;  ///< 逐条记录收到的滚边意图（落点或收车）
+
+    auto type_name() const -> const char * override { return "ScrollableProbeRow"; }
+
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        float x = 0.0F;
+        float max_height = 0.0F;
+        for (Node &ch : children_) {
+            const Size cs = ch.widget().layout(Constraints{.min = Size{}, .max = c.max}, ctx);
+            ch.set_bounds(Rect{.origin = Point{.x = x, .y = 0.0F}, .size = cs});
+            x += cs.width;
+            max_height = std::max(max_height, cs.height);
+        }
+        size_ = c.constrain(Size{.width = x, .height = max_height});
+        return size_;
+    }
+
+    auto on_paint([[maybe_unused]] Painter &p, [[maybe_unused]] const Rect &bounds,
+                  [[maybe_unused]] const BuildContext &ctx) -> void override {}
+
+    auto on_system_drag_auto_scroll(const std::optional<Point> &position) -> bool override {
+        intent_log.push_back(position);
+        return true;  // 本控件即链上「最近可滚动祖先」：意图到此为止
     }
 };
 
@@ -1014,6 +1077,158 @@ AURORA_TEST_CASE(system_drop_consumed_target_reports_handled) {
     drop.position = Point{.x = 20.0F, .y = 20.0F};
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*tree.row, drop));
     AURORA_TEST_CHECK_EQ(tree.box1->drop_count, 1);
+}
+
+AURORA_TEST_CASE(proposed_action_translation_is_the_single_point) {
+    // 修饰键 → 源建议动作的翻译只有 system_drag::proposed_action_for 一个入口：
+    // Ctrl→Copy、Shift→Move、Ctrl+Shift→Link（Windows 惯例），无有效修饰键取源侧
+    // 缺省动作。控件与派发器都不做第二处翻译（见下一用例）。
+    AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::None, DragAction::Copy), DragAction::Copy);
+    AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::None, DragAction::Move), DragAction::Move);
+    AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::None, DragAction::Link), DragAction::Link);
+    AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::Control, DragAction::Move), DragAction::Copy);
+    AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::Shift, DragAction::Copy), DragAction::Move);
+    AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::Control | ModifierKey::Shift, DragAction::Copy),
+                         DragAction::Link);
+    // 锁定态位（NumLock 常开）不参与判定：翻译前按 AURORA_MODIFIER_PRESSABLE_MASK 摘除。
+    AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::Control | ModifierKey::NumLock, DragAction::Move),
+                         DragAction::Copy);
+    AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::NumLock, DragAction::Move), DragAction::Move);
+    // 缺省动作未表态（None 两义：没按 / 程序化合成）⇒ Copy 兜底，不由修饰键缺席推定。
+    AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::None, DragAction::None), DragAction::Copy);
+}
+
+AURORA_TEST_CASE(system_drop_dispatch_never_rewrites_proposed) {
+    auto tree = make_tree();
+
+    // proposed 是宿主 / 后端经 proposed_action_for 译好后写进事件的；派发器只写
+    // allowed（与 accept 查询求交），不碰 proposed——「谁翻译」的唯一答案即上一用例
+    // 的翻译函数。变异自证：派发器若自行把 modifiers 折进 proposed，下面写着 Move 的
+    // proposed 会被改写为 Copy，本用例转红。
+    SystemDropEvent over;
+    over.phase = SystemDropPhase::Over;
+    over.position = Point{.x = 20.0F, .y = 20.0F};
+    over.formats = {"text/plain"};
+    over.proposed = DragAction::Move;
+    over.modifiers = ModifierKey::Control;  // 与 proposed 故意不一致：翻译器会产出 Copy
+    AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, over));
+    AURORA_TEST_CHECK_EQ(over.proposed, DragAction::Move);  // 派发前后一字不差
+    AURORA_TEST_CHECK_EQ(over.modifiers, ModifierKey::Control);  // 修饰位原样透传
+    AURORA_TEST_CHECK_EQ(over.allowed, DragAction::None);       // 目标不接受（基类默认）
+
+    // Enter 态同口径；目标接受 Move 时 allowed 才由求交给出（仍不改 proposed）。
+    tree.box1->accept_action = DragAction::Move;
+    SystemDropEvent enter;
+    enter.phase = SystemDropPhase::Enter;
+    enter.position = Point{.x = 20.0F, .y = 20.0F};
+    enter.formats = {"text/plain"};
+    enter.proposed = DragAction::Move;
+    enter.modifiers = ModifierKey::Control;
+    AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, enter));
+    AURORA_TEST_CHECK_EQ(enter.proposed, DragAction::Move);
+    AURORA_TEST_CHECK_EQ(enter.allowed, DragAction::Move);
+
+    // Drop 态：proposed 与 allowed 都保持调用方写入的值（该态只放置）。
+    SystemDropEvent drop;
+    drop.phase = SystemDropPhase::Drop;
+    drop.position = Point{.x = 20.0F, .y = 20.0F};
+    drop.proposed = DragAction::Link;
+    drop.allowed = DragAction::Copy;
+    (void)EventDispatcher::dispatch(*tree.row, drop);
+    AURORA_TEST_CHECK_EQ(drop.proposed, DragAction::Link);
+    AURORA_TEST_CHECK_EQ(drop.allowed, DragAction::Copy);
+}
+
+AURORA_TEST_CASE(system_drop_over_drives_auto_scroll_and_leave_drop_release) {
+    auto tree = make_tree();
+
+    // Enter 态不带滚边意图（会话刚开始、落点尚未稳定）：一次都不调。
+    SystemDropEvent enter;
+    enter.phase = SystemDropPhase::Enter;
+    enter.position = Point{.x = 20.0F, .y = 20.0F};
+    (void)EventDispatcher::dispatch(*tree.row, enter);
+    AURORA_TEST_CHECK_EQ(tree.box1->auto_scroll_calls, 0);
+
+    // Over 态：落点逐次交给命中目标（按指针采样频率更新）。
+    SystemDropEvent over;
+    over.phase = SystemDropPhase::Over;
+    over.position = Point{.x = 20.0F, .y = 20.0F};
+    (void)EventDispatcher::dispatch(*tree.row, over);
+    AURORA_TEST_CHECK_EQ(tree.box1->auto_scroll_calls, 1);
+    AURORA_TEST_REQUIRE_EQ(tree.box1->auto_scroll_log.size(), 1U);
+    AURORA_TEST_REQUIRE(tree.box1->auto_scroll_log[0].has_value());
+    AURORA_TEST_CHECK_NEAR(require_value(tree.box1->auto_scroll_log[0]).x, 20.0F, 1.0e-6F);
+    AURORA_TEST_CHECK_NEAR(require_value(tree.box1->auto_scroll_log[0]).y, 20.0F, 1.0e-6F);
+
+    SystemDropEvent over2;
+    over2.phase = SystemDropPhase::Over;
+    over2.position = Point{.x = 25.0F, .y = 12.0F};
+    (void)EventDispatcher::dispatch(*tree.row, over2);
+    AURORA_TEST_CHECK_EQ(tree.box1->auto_scroll_calls, 2);
+    AURORA_TEST_REQUIRE(tree.box1->auto_scroll_log[1].has_value());
+    AURORA_TEST_CHECK_NEAR(require_value(tree.box1->auto_scroll_log[1]).x, 25.0F, 1.0e-6F);
+
+    // Leave / Drop 态：收车（nullopt 抵达同一目标）。
+    SystemDropEvent leave;
+    leave.phase = SystemDropPhase::Leave;
+    leave.position = Point{.x = 25.0F, .y = 12.0F};
+    (void)EventDispatcher::dispatch(*tree.row, leave);
+    AURORA_TEST_CHECK_EQ(tree.box1->auto_scroll_calls, 3);
+    AURORA_TEST_CHECK_FALSE(tree.box1->auto_scroll_log[2].has_value());
+
+    SystemDropEvent drop;
+    drop.phase = SystemDropPhase::Drop;
+    drop.position = Point{.x = 25.0F, .y = 12.0F};
+    (void)EventDispatcher::dispatch(*tree.row, drop);
+    AURORA_TEST_CHECK_EQ(tree.box1->auto_scroll_calls, 4);
+    AURORA_TEST_CHECK_FALSE(tree.box1->auto_scroll_log[3].has_value());
+
+    // 意图严格早于同态落放派发：钩子内读到的 drop_count 不含本次（1,2,3,4 —— 此前
+    // 各态的落放已计数、本次的还未）。
+    AURORA_TEST_REQUIRE_EQ(tree.box1->auto_scroll_drop_count_log.size(), 4U);
+    AURORA_TEST_CHECK_EQ(tree.box1->auto_scroll_drop_count_log[0], 1);
+    AURORA_TEST_CHECK_EQ(tree.box1->auto_scroll_drop_count_log[1], 2);
+    AURORA_TEST_CHECK_EQ(tree.box1->auto_scroll_drop_count_log[2], 3);
+    AURORA_TEST_CHECK_EQ(tree.box1->auto_scroll_drop_count_log[3], 4);
+
+    // 空白区（命中落空）任何态都不派发：滚边意图也不会产生（Leave 落点在窗口外时的
+    // 收车由滚动祖先的新鲜度超时兜底，见 DragAutoScroll 的用例）。
+    SystemDropEvent miss;
+    miss.phase = SystemDropPhase::Over;
+    miss.position = Point{.x = 500.0F, .y = 500.0F};
+    (void)EventDispatcher::dispatch(*tree.row, miss);
+    AURORA_TEST_CHECK_EQ(tree.box1->auto_scroll_calls, 4);
+}
+
+AURORA_TEST_CASE(auto_scroll_intent_reaches_the_nearest_scrollable_ancestor) {
+    // 命中目标自身不接管滚边意图时，基类沿 layout_parent() 上溯，把落点交给最近可
+    // 滚动祖先；链上无可滚动者 ⇒ 返回 false（无滚动可驱动，控件侧自行收车）。
+    auto row = std::make_shared<ScrollableProbeRow>();
+    auto leaf = std::make_shared<ChainProbeLeaf>();
+    row->add(Node{leaf});
+    row->layout(Constraints{}, BuildContext{});
+
+    SystemDropEvent over;
+    over.phase = SystemDropPhase::Over;
+    over.position = Point{.x = 20.0F, .y = 20.0F};
+    AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*row, over));  // 无人消费
+    AURORA_TEST_REQUIRE_EQ(row->intent_log.size(), 1U);
+    AURORA_TEST_REQUIRE(row->intent_log[0].has_value());
+    AURORA_TEST_CHECK_NEAR(require_value(row->intent_log[0]).x, 20.0F, 1.0e-6F);
+    AURORA_TEST_CHECK_NEAR(require_value(row->intent_log[0]).y, 20.0F, 1.0e-6F);
+
+    // 收车沿同一链路上溯：Leave 态 nullopt 抵达同一祖先。
+    SystemDropEvent leave;
+    leave.phase = SystemDropPhase::Leave;
+    leave.position = Point{.x = 20.0F, .y = 20.0F};
+    (void)EventDispatcher::dispatch(*row, leave);
+    AURORA_TEST_REQUIRE_EQ(row->intent_log.size(), 2U);
+    AURORA_TEST_CHECK_FALSE(row->intent_log[1].has_value());
+
+    // 链上无可滚动者（裸叶控件、无容器祖先）⇒ 上溯到链尾返回 false。
+    const auto bare = std::make_shared<ChainProbeLeaf>();
+    AURORA_TEST_CHECK_FALSE(bare->on_system_drag_auto_scroll(Point{.x = 1.0F, .y = 1.0F}));
+    AURORA_TEST_CHECK_FALSE(bare->on_system_drag_auto_scroll(std::nullopt));
 }
 
 AURORA_TEST_CASE(touch_dispatcher_captures_and_synthesizes_per_pointer) {

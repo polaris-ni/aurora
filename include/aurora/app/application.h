@@ -606,6 +606,9 @@ class Application {
         // 保证本帧命中的热键当帧就生效（与 on_frame_ 同一时点语义）。
         static_cast<void>(os_hotkeys_.drain_pending());
         NotificationCenter::pump_events();
+        // 系统拖放的异步结果（终结回调 / 在途读取）同在此排空：不在平台消息泵内同步回调，
+        // 宿主不排空 ⇒ 回调不到（不谎报）。与通知激活、热键命中同一时点语义。
+        system_drag::pump_reads();
         if (on_frame_) {
             on_frame_();
         }

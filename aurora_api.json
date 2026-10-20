@@ -6760,6 +6760,60 @@
       "retryable": true,
       "message": "WebSocket send queue is full: '{detail}'",
       "hint": "The producer outran the wire: pending outgoing payload reached its byte cap or the queue its entry cap. This refuses only the message that hit the limit and leaves the connection open, on purpose - whether to keep buffering, drop, or close is the caller's decision. Slow the producer down or raise the matching WebSocketOptions field"
+    },
+    {
+      "enum": "ClipboardProviderFailed",
+      "slug": "clipboard-provider-failed",
+      "category": "platform",
+      "severity": "error",
+      "retryable": false,
+      "message": "Lazy clipboard provider failed for '{mime}': '{detail}'",
+      "hint": "The provide callback registered through the lazy offer returned an error, or was empty while the format was actually requested. The bytes could not be rendered on demand - fix the provider or supply the format eagerly; re-reading the same clipboard reproduces the same failure, so this is not a transient one"
+    },
+    {
+      "enum": "ClipboardListenUnsupported",
+      "slug": "clipboard-listen-unsupported",
+      "category": "platform",
+      "severity": "error",
+      "retryable": false,
+      "message": "This platform cannot listen for clipboard changes: '{detail}'",
+      "hint": "No clipboard-change listener mechanism exists here (the platform anchors are AddClipboardFormatListener on Win32, QClipboard::dataChanged, GdkClipboard::changed, and NSPasteboard changeCount). The absence is stable, so retrying cannot create it - sample available_formats() at the moments that matter instead of registering a listener that would never fire"
+    },
+    {
+      "enum": "SystemDragReadFailed",
+      "slug": "system-drag-read-failed",
+      "category": "platform",
+      "severity": "error",
+      "retryable": true,
+      "message": "System drag payload read failed for '{mime}': '{detail}'",
+      "hint": "The source session went away, cancelled mid-transfer, or the bytes never arrived within the read deadline. Unlike a missing mechanism this is transient - the same format may well succeed on a second attempt - so surface the failure with a non-cursor fallback and let the control decide about retrying"
+    },
+    {
+      "enum": "SystemDragDecodeFailed",
+      "slug": "system-drag-decode-failed",
+      "category": "platform",
+      "severity": "error",
+      "retryable": false,
+      "message": "System drag payload could not be decoded as '{mime}': '{detail}'",
+      "hint": "The bytes arrived but do not form a valid payload for the declared MIME (for example image/png that no decoder accepts). The same bytes fail again - this is a data defect at the source, not a transient one; drop the payload and report it rather than retrying"
+    },
+    {
+      "enum": "SystemDragCancelled",
+      "slug": "system-drag-cancelled",
+      "category": "platform",
+      "severity": "info",
+      "retryable": false,
+      "message": "System drag session was cancelled: '{detail}'",
+      "hint": "The user pressed Esc, moved the pointer away, or the system ended the session. This is user intent, not a fault - do not route it into an error branch; the source data stays untouched and the control simply returns to its idle state"
+    },
+    {
+      "enum": "SystemDragMoveRollback",
+      "slug": "system-drag-move-rollback",
+      "category": "platform",
+      "severity": "error",
+      "retryable": true,
+      "message": "Move drop landed but the source could not delete its data: '{detail}'",
+      "hint": "The target received and stored the payload, but deleting the original failed (file locked, permission revoked). The target's copy stays authoritative - retry the deletion later instead of re-copying, and remember the contract: the source never deletes before the move confirmation arrives"
     }
   ],
   "debug": [

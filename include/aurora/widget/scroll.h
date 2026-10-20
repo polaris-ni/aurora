@@ -427,6 +427,28 @@ class Scroll : public Container, public ScrollProps {
     /// @return `glide_.active`；滑动抵达终点的那一帧之后即为 false。
     [[nodiscard]] auto is_gliding() const -> bool { return glide_.active; }
 
+    /// @brief 拖入自动滚边（系统拖放 `Over` 态由派发器调用，见
+    ///        `Widget::on_system_drag_auto_scroll`）：记录落点，帧计时里按侵入深度推进。
+    ///
+    /// 垂直滚动容器：只对上下边缘带内的落点给速（方向与边缘一致）；落点在带外或传入
+    /// `std::nullopt`（`Leave` / `Drop` 收车）即收车。复用 `offset_y_` / `content_h_` 既有
+    /// 滚动状态，不新增滚动实现。
+    /// @param position 落点（窗口逻辑 dp）；`std::nullopt` = 收车。
+    /// @return 恒 true：本控件即可滚动祖先，意图到此不再上溯。
+    auto on_system_drag_auto_scroll(const std::optional<Point> &position) -> bool override {
+        if (!position.has_value()) {
+            drag_auto_scroll_.stop();
+            if (!glide_.active) {
+                needs_gesture_tick_ = false;  // 无收位滑动在途：摘除帧计时，回到空闲节流
+            }
+            return true;
+        }
+        drag_auto_scroll_.drive(*position);
+        needs_gesture_tick_ = true;
+        request_frame(false);
+        return true;
+    }
+
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         // 垂直滚动容器的内容宽度应受视口宽度约束，避免子节点返回 inf 宽度，
@@ -759,8 +781,17 @@ class Scroll : public Container, public ScrollProps {
     /// @param now 本帧时刻（单调时钟），与上一滑动时刻求差推进收位滑动插值。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Container::tick_gestures(now);  // 子树手势照常计时
-        if (!glide_.active) {
+        if (drag_auto_scroll_.active) {
+            tick_drag_auto_scroll(now);  // 拖入自动滚边：Over 态驱动、按帧推进
+        }
+        if (!glide_.active && !drag_auto_scroll_.active) {
             needs_gesture_tick_ = false;  // 静止后摘除每帧计时，回到空闲节流
+            return;
+        }
+        if (!glide_.active) {
+            // 仅自动滚边在途：收位滑动段整段跳过。未激活的 `glide_.tick` 交回的是**陈旧终点**
+            // （从未滑动过时为初始 `to == 0`），旧形态无条件写回会把滚边本帧刚推进的 offset
+            // 盖回 0——两条驱动共用一次 tick，写段只归激活的那条。
             return;
         }
         const double dt =
@@ -769,7 +800,7 @@ class Scroll : public Container, public ScrollProps {
         float v = glide_.tick(dt);
         // 布局可能在滑动中改变内容/视口尺寸：目标随动夹取，防滑出可滚范围。
         v = std::clamp(v, 0.0F, std::max(0.0F, content_h_ - viewport_h_));
-        if (!glide_.active) {  // 本帧抵达终点
+        if (!glide_.active && !drag_auto_scroll_.active) {  // 本帧抵达终点且无滚边在途：摘除帧计时
             glide_last_.reset();
             needs_gesture_tick_ = false;
         }
@@ -780,6 +811,30 @@ class Scroll : public Container, public ScrollProps {
             publish_offset();
             request_frame(false);  // 活跃帧信号：滑动期逐帧标脏，decide_wait 不误判空闲深睡
         }
+    }
+
+    /// @brief 拖入自动滚边逐帧推进（系统拖放 `Over` 态驱动，见 `on_system_drag_auto_scroll`）。
+    ///        与收位滑动同策略：仅平移 blit，不重录内容缓冲。
+    /// @param now 本帧时刻（单调时钟），与上一推进时刻求差得本帧 dt。
+    auto tick_drag_auto_scroll(std::chrono::steady_clock::time_point now) -> void {
+        const std::optional<Rect> box = window_bounds();
+        if (!box.has_value()) {
+            drag_auto_scroll_.stop();  // 从未布局：无从换算落点，收车
+            return;
+        }
+        const float delta = drag_auto_scroll_.advance(*box, now);
+        if (!drag_auto_scroll_.active || delta == 0.0F) {
+            return;  // 带外 / 新鲜度超时（advance 已就地收车）或零增量：本帧不推进
+        }
+        const float target = std::clamp(offset_y_ + delta, 0.0F, std::max(0.0F, content_h_ - viewport_h_));
+        if (target == offset_y_) {
+            drag_auto_scroll_.stop();  // 已到可滚边缘：收车（单次拖放不会再有反方向意图）
+            return;
+        }
+        offset_y_ = target;
+        write_back_offset();
+        publish_offset();
+        request_frame(false);
     }
 
   private:
@@ -811,6 +866,7 @@ class Scroll : public Container, public ScrollProps {
     }
 
     ScrollGlide glide_;  ///< snap 收位 / scroll_to 的短滑动时序
+    DragAutoScroll drag_auto_scroll_;  ///< 拖入自动滚边状态（系统拖放 Over 态驱动，与收位滑动互不抢占）
     std::optional<std::chrono::steady_clock::time_point> glide_last_;  ///< 上一滑动帧时刻（墙钟差 = dt）
     std::shared_ptr<State<float>> offset_state_;  ///< 懒创建的偏移信号（滚动驱动动画原语，经 offset_signal 暴露）
     float published_offset_ = 0.0F;  ///< 最近一次发布的偏移值（镜像，避免回读 get() 误订阅）

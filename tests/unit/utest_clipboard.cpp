@@ -5,7 +5,11 @@
 /// （非法 UTF-8 载荷 → ClipboardWriteFailed 且不动既有内容；图像参数非法 → GeneralInvalidArgument），
 /// 其余路径全程不写系统剪贴板（后端不可用时 SKIP）；
 /// 富格式段覆盖自定义 MIME 载荷、files / html 便利封装、available_formats 如实反映已写格式、
-/// 空值与空写口径、以及立骨期平台路径的 clipboard-format-unsupported
+/// 空值与空写口径、以及立骨期平台路径的 clipboard-format-unsupported；
+/// 惰性要约与监听段覆盖按需兑现（注册零调用、逐格式各自一次、渲染一次即缓存）、
+/// 立即写与惰性混用互不覆盖、所有权丢失与变更监听的触发 / 替换 / 无机制如实报错、
+/// 提供失败的 provider-failed 口径、clear 与空写 no-op 的相反语义、
+/// 以及 ClipboardOffer 与 DragOffer 的同构锚点
 
 #include <algorithm>
 #include <cstdint>
@@ -16,6 +20,7 @@
 #include "aurora/app/clipboard.h"
 #include "aurora/app/mime_types.h"
 #include "aurora/core/platform.h"
+#include "aurora/event/event.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_clipboard {
@@ -390,6 +395,274 @@ AURORA_TEST_CASE(empty_mime_payload_is_an_argument_error) {
     const auto result = Clipboard::set_payload("", to_bytes("x"));
     AURORA_TEST_REQUIRE_FALSE(result.ok());
     AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::GeneralInvalidArgument);
+}
+
+// ---- 惰性要约与监听段 ----
+
+namespace {
+
+/// @brief 记录每次 `provide` 实参的探针：既当回调用，又当调用台账断言。
+struct ProvideProbe {
+    std::vector<std::string> calls;  ///< 每次调用收到的 mime（按序）
+    bool fail = false;  ///< true = 回调返回 Error（覆盖提供失败口径）
+
+    auto as_callback() -> std::function<Result<std::vector<std::uint8_t>>(const std::string &)> {
+        return [this](const std::string &mime) -> Result<std::vector<std::uint8_t>> {
+            calls.push_back(mime);
+            if (fail) {
+                return make_error(ErrorCode::GeneralInvalidArgument, "probe: deliberate provider failure");
+            }
+            return to_bytes("rendered:" + mime);
+        };
+    }
+};
+
+/// @brief 造一份三格式惰性要约（text/plain + text/html + 自定义 MIME）。
+auto make_offer(ProvideProbe &probe) -> ClipboardOffer {
+    ClipboardOffer offer;
+    offer.formats = {std::string{AURORA_MIME_TEXT_PLAIN}, std::string{AURORA_MIME_TEXT_HTML},
+                     "application/x-aurora-lazy"};
+    offer.provide = probe.as_callback();
+    return offer;
+}
+
+}  // namespace
+
+// 惰性要约的按需兑现：注册后回调一次都未被调用（渲染延迟到真正读取那一刻），逐个格式读取时
+// 每个格式各自触发一次、且只带该格式的 mime 入参；已渲染格式走缓存，不再触发回调。
+// 变异自证：把 `set_offer` 改成注册时立即兑现全部格式，「注册后零调用」这条即刻转红。
+AURORA_TEST_CASE(lazy_offer_defers_render_until_each_format_is_read) {
+    require_test_backend();
+
+    ProvideProbe probe;
+    AURORA_TEST_REQUIRE(Clipboard::set_offer(make_offer(probe)).ok());
+
+    // 注册即零调用：三格式数据都还没渲染。
+    AURORA_TEST_CHECK(probe.calls.empty());
+
+    // 读之前，声明的格式已如实入列（要约即所有权声明，不因未渲染而隐瞒）。
+    const auto formats = Clipboard::available_formats();
+    AURORA_TEST_REQUIRE(formats.ok());
+    AURORA_TEST_CHECK_TRUE(has_format(formats.value(), AURORA_MIME_TEXT_PLAIN));
+    AURORA_TEST_CHECK_TRUE(has_format(formats.value(), AURORA_MIME_TEXT_HTML));
+    AURORA_TEST_CHECK_TRUE(has_format(formats.value(), "application/x-aurora-lazy"));
+
+    // 逐个读取：每个格式各自触发一次回调，且只带该格式 mime。
+    const auto text = Clipboard::get_text();
+    AURORA_TEST_REQUIRE(text.ok());
+    AURORA_TEST_CHECK_EQ(text.value(), std::string{"rendered:text/plain"});
+    AURORA_TEST_REQUIRE_EQ(probe.calls.size(), 1U);
+    AURORA_TEST_CHECK_EQ(probe.calls[0], std::string{AURORA_MIME_TEXT_PLAIN});
+
+    const auto html = Clipboard::get_html();
+    AURORA_TEST_REQUIRE(html.ok());
+    AURORA_TEST_CHECK_EQ(html.value(), std::string{"rendered:text/html"});
+    AURORA_TEST_REQUIRE_EQ(probe.calls.size(), 2U);
+    AURORA_TEST_CHECK_EQ(probe.calls[1], std::string{AURORA_MIME_TEXT_HTML});
+
+    const auto raw = Clipboard::get_payload("application/x-aurora-lazy");
+    AURORA_TEST_REQUIRE(raw.ok());
+    AURORA_TEST_CHECK_EQ(to_text(raw.value()), std::string{"rendered:application/x-aurora-lazy"});
+    AURORA_TEST_REQUIRE_EQ(probe.calls.size(), 3U);
+
+    // 渲染一次即缓存：复读不再触发回调（对标 WM_RENDERFORMAT 后由系统托管）。
+    AURORA_TEST_REQUIRE(Clipboard::get_text().ok());
+    AURORA_TEST_REQUIRE(Clipboard::get_html().ok());
+    AURORA_TEST_REQUIRE(Clipboard::get_payload("application/x-aurora-lazy").ok());
+    AURORA_TEST_CHECK_EQ(probe.calls.size(), 3U);
+}
+
+// 要约不合法（formats 为空 / provide 为空回调）是调用方参数问题，与「平台没有机制」分开报。
+// 变异自证：把这两个分支改成静默 Ok，「参数错」断言即刻转红。
+AURORA_TEST_CASE(malformed_lazy_offer_is_an_argument_error) {
+    require_test_backend();
+
+    ClipboardOffer no_formats;
+    no_formats.provide = [](const std::string &) -> Result<std::vector<std::uint8_t>> { return to_bytes("x"); };
+    const auto empty_formats = Clipboard::set_offer(no_formats);
+    AURORA_TEST_REQUIRE_FALSE(empty_formats.ok());
+    AURORA_TEST_CHECK_EQ(empty_formats.error().code_enum, ErrorCode::GeneralInvalidArgument);
+
+    ClipboardOffer no_provide;
+    no_provide.formats.emplace_back(AURORA_MIME_TEXT_PLAIN);
+    const auto null_provide = Clipboard::set_offer(no_provide);
+    AURORA_TEST_REQUIRE_FALSE(null_provide.ok());
+    AURORA_TEST_CHECK_EQ(null_provide.error().code_enum, ErrorCode::GeneralInvalidArgument);
+}
+
+// 立即写与惰性要约混用：互不覆盖、各自可读；立即写的格式不触发惰性回调。
+// 另覆盖双向的「后写者接管」：立即写把该 MIME 自要约摘走，set_offer 也把声明格式自立即写摘走。
+AURORA_TEST_CASE(immediate_write_and_lazy_offer_coexist_without_clobbering) {
+    require_test_backend();
+
+    ProvideProbe probe;
+    ClipboardOffer offer;
+    offer.formats = {std::string{AURORA_MIME_TEXT_PLAIN}, "application/x-aurora-lazy"};
+    offer.provide = probe.as_callback();
+    AURORA_TEST_REQUIRE(Clipboard::set_offer(offer).ok());
+
+    // 另一格式走立即写（不在要约声明里）：两条通道互不覆盖。
+    const std::vector<std::uint8_t> immediate{0x0AU, 0x0BU};
+    AURORA_TEST_REQUIRE(Clipboard::set_payload("application/x-immediate", immediate).ok());
+
+    const auto lazy = Clipboard::get_payload("application/x-aurora-lazy");
+    AURORA_TEST_REQUIRE(lazy.ok());
+    AURORA_TEST_CHECK_EQ(to_text(lazy.value()), std::string{"rendered:application/x-aurora-lazy"});
+
+    // 立即写通道可读，且没有触发惰性回调（只触发过 lazy 那一次）。
+    const auto now = Clipboard::get_payload("application/x-immediate");
+    AURORA_TEST_REQUIRE(now.ok());
+    AURORA_TEST_CHECK_EQ(now.value(), immediate);
+    AURORA_TEST_REQUIRE_EQ(probe.calls.size(), 1U);
+    AURORA_TEST_CHECK_EQ(probe.calls[0], std::string{"application/x-aurora-lazy"});
+
+    // 后写者接管（立即写侧）：对要约已声明的 text/plain 做非空立即写，该格式改走立即写通道。
+    AURORA_TEST_REQUIRE(Clipboard::set_text("immediate text").ok());
+    const auto text = Clipboard::get_text();
+    AURORA_TEST_REQUIRE(text.ok());
+    AURORA_TEST_CHECK_EQ(text.value(), std::string{"immediate text"});
+    AURORA_TEST_REQUIRE_EQ(probe.calls.size(), 1U);  // 被接管的格式不再回调 provide
+}
+
+// 所有权丢失：回调被调用且只调一次；未注册惰性要约时整体 no-op；重复注册新回调后旧的不再被调用
+// （替换不叠加，避免多注册点各自持资源）。
+AURORA_TEST_CASE(ownership_lost_fires_once_and_replaces_previous_registration) {
+    require_test_backend();
+
+    // 未注册要约：模拟所有权被夺也不触发（没有可失去的所有权）。
+    int early_calls = 0;
+    Clipboard::on_ownership_lost([&early_calls]() -> void { ++early_calls; });
+    Clipboard::emit_ownership_lost();
+    AURORA_TEST_CHECK_EQ(early_calls, 0);
+
+    ProvideProbe probe;
+    AURORA_TEST_REQUIRE(Clipboard::set_offer(make_offer(probe)).ok());
+
+    int first_calls = 0;
+    Clipboard::on_ownership_lost([&first_calls]() -> void { ++first_calls; });
+    Clipboard::emit_ownership_lost();
+    AURORA_TEST_CHECK_EQ(first_calls, 1);
+
+    // 要约随所有权一并失效：二次模拟无约可在手，不再触发。
+    Clipboard::emit_ownership_lost();
+    AURORA_TEST_CHECK_EQ(first_calls, 1);
+
+    // 替换语义：旧回调不再被调用。
+    int second_calls = 0;
+    Clipboard::on_ownership_lost([&second_calls]() -> void { ++second_calls; });
+    ProvideProbe probe2;
+    AURORA_TEST_REQUIRE(Clipboard::set_offer(make_offer(probe2)).ok());
+    Clipboard::emit_ownership_lost();
+    AURORA_TEST_CHECK_EQ(first_calls, 1);  // 旧的没动
+    AURORA_TEST_CHECK_EQ(second_calls, 1);
+}
+
+// 变更监听：有机制时注册即生效、模拟变化触发回调；无机制时注册即失败（不谎报——注册了却收不到
+// 通知会让调用方逻辑静默失效）。变异自证：把「无机制」分支改成返回 Ok，本用例即刻转红。
+AURORA_TEST_CASE(change_listener_reports_unsupported_without_mechanism) {
+    require_test_backend();  // 安装即置「有监听机制」
+
+    int changes = 0;
+    AURORA_TEST_REQUIRE(Clipboard::on_change([&changes]() -> void { ++changes; }).ok());
+    Clipboard::emit_change();
+    AURORA_TEST_CHECK_EQ(changes, 1);
+
+    // 无机制平台：注册即失败，且此后模拟变化不再触发新回调（没有注册进去）。
+    Clipboard::set_listen_supported(false);
+    int lost = 0;
+    const auto unsupported = Clipboard::on_change([&lost]() -> void { ++lost; });
+    AURORA_TEST_REQUIRE_FALSE(unsupported.ok());
+    AURORA_TEST_CHECK_EQ(unsupported.error().code_enum, ErrorCode::ClipboardListenUnsupported);
+    AURORA_TEST_CHECK_EQ(unsupported.error().code, std::string{"clipboard-listen-unsupported"});
+    AURORA_TEST_CHECK_FALSE(unsupported.error().retryable);  // 机制缺失是稳态
+    Clipboard::emit_change();
+    AURORA_TEST_CHECK_EQ(lost, 0);  // 新回调从未注册进去
+    AURORA_TEST_CHECK_EQ(changes, 2);  // 失败注册无副作用：先前那个注册仍然有效
+
+    // 恢复监听机制，避免把「无机制」状态泄漏给同进程后继用例。
+    Clipboard::set_listen_supported(true);
+}
+
+// 提供失败口径：惰性回调返回 Error 时读取侧拿到 ClipboardProviderFailed（而非既有三枚之一），
+// 且失败不缓存——再次读取各自重试（同一笔数据是否重试由应用决定，retryable=false）。
+AURORA_TEST_CASE(provider_failure_surfaces_clipboard_provider_failed) {
+    require_test_backend();
+
+    ProvideProbe probe;
+    probe.fail = true;
+    ClipboardOffer offer;
+    offer.formats = {"application/x-aurora-lazy"};
+    offer.provide = probe.as_callback();
+    AURORA_TEST_REQUIRE(Clipboard::set_offer(offer).ok());
+
+    const auto first = Clipboard::get_payload("application/x-aurora-lazy");
+    AURORA_TEST_REQUIRE_FALSE(first.ok());
+    AURORA_TEST_CHECK_EQ(first.error().code_enum, ErrorCode::ClipboardProviderFailed);
+    AURORA_TEST_CHECK_EQ(first.error().code, std::string{"clipboard-provider-failed"});
+    AURORA_TEST_CHECK_FALSE(first.error().retryable);
+
+    // 失败不缓存：每次读取各自重试（回调再次被调用）。
+    const auto second = Clipboard::get_payload("application/x-aurora-lazy");
+    AURORA_TEST_REQUIRE_FALSE(second.ok());
+    AURORA_TEST_CHECK_EQ(second.error().code_enum, ErrorCode::ClipboardProviderFailed);
+    AURORA_TEST_REQUIRE_EQ(probe.calls.size(), 2U);
+}
+
+// clear 与空写是两件相反的事：clear 主动清空（available_formats 为 Ok(空清单)），
+// 空串 / 空清单 / 空字节的 set_* 是契约内 no-op、保留既有内容。二者语义相反，并列断言防误用。
+AURORA_TEST_CASE(clear_empties_formats_while_empty_writes_keep_content) {
+    require_test_backend();
+
+    AURORA_TEST_REQUIRE(Clipboard::set_text("keep me").ok());
+    ProvideProbe probe;
+    AURORA_TEST_REQUIRE(Clipboard::set_offer(make_offer(probe)).ok());
+    const auto before_clear = Clipboard::available_formats();
+    AURORA_TEST_REQUIRE(before_clear.ok());
+    AURORA_TEST_CHECK_TRUE(has_format(before_clear.value(), AURORA_MIME_TEXT_PLAIN));
+    AURORA_TEST_CHECK_TRUE(has_format(before_clear.value(), "application/x-aurora-lazy"));
+
+    // 主动清空：全部格式（含要约即所有权声明）一并清掉。
+    AURORA_TEST_REQUIRE(Clipboard::clear().ok());
+    const auto cleared = Clipboard::available_formats();
+    AURORA_TEST_REQUIRE(cleared.ok());
+    AURORA_TEST_CHECK_EQ(cleared.value(), std::vector<std::string>{});
+    AURORA_TEST_CHECK_EQ(Clipboard::get_text().value(), std::string{});
+
+    // 空写 no-op：先写内容，再空写，内容原样保留（与 clear 的相反语义）。
+    AURORA_TEST_REQUIRE(Clipboard::set_text("kept again").ok());
+    AURORA_TEST_REQUIRE(Clipboard::set_text(std::string{}).ok());
+    AURORA_TEST_CHECK_EQ(Clipboard::get_text().value(), std::string{"kept again"});
+    AURORA_TEST_REQUIRE(Clipboard::set_payload("application/x-keep", to_bytes("v")).ok());
+    AURORA_TEST_REQUIRE(Clipboard::set_payload("application/x-keep", {}).ok());
+    AURORA_TEST_CHECK_EQ(to_text(Clipboard::get_payload("application/x-keep").value()), std::string{"v"});
+}
+
+// 两条通道要约同构：ClipboardOffer 与 DragOffer 字段形态一致（格式清单 + 同签名的 provide），
+// 且 MIME 取值同出自 app/mime_types.h——用「同一个 provide 回调同时交给两条通道、结果一致」
+// 锁定这一对称关系（「同一套词汇不在两条路径上各长一次」的锚点）。
+AURORA_TEST_CASE(clipboard_offer_is_isomorphic_with_drag_offer) {
+    require_test_backend();
+
+    ProvideProbe clipboard_probe;
+    const auto provide = clipboard_probe.as_callback();
+
+    ClipboardOffer clipboard_offer;
+    clipboard_offer.formats = {std::string{AURORA_MIME_TEXT_PLAIN}, std::string{AURORA_MIME_URI_LIST}};
+    clipboard_offer.provide = provide;
+    AURORA_TEST_REQUIRE(Clipboard::set_offer(clipboard_offer).ok());
+
+    // 同一个 provide 原样交给拖出侧要约：字段形态一致，故可直接赋值。
+    DragOffer drag_offer;
+    drag_offer.formats = clipboard_offer.formats;
+    drag_offer.provide = provide;
+    const auto via_drag = drag_offer.provide(std::string{AURORA_MIME_TEXT_PLAIN});
+    AURORA_TEST_REQUIRE(via_drag.ok());
+    AURORA_TEST_CHECK_EQ(to_text(via_drag.value()), std::string{"rendered:text/plain"});
+
+    // 剪贴板侧经同一回调读到的内容一致（两条通道同一套词汇、同一份提供逻辑）。
+    const auto via_clipboard = Clipboard::get_payload(std::string{AURORA_MIME_TEXT_PLAIN});
+    AURORA_TEST_REQUIRE(via_clipboard.ok());
+    AURORA_TEST_CHECK_EQ(to_text(via_clipboard.value()), to_text(via_drag.value()));
 }
 
 }  // namespace aurora::test_cases::utest_clipboard

@@ -563,6 +563,14 @@ auto EventDispatcher::dispatch(Widget &root, SystemDropEvent &e) -> bool {
     if (e.phase == SystemDropPhase::Enter || e.phase == SystemDropPhase::Over) {
         e.allowed = intersect_drag_action(e.proposed, target->query_system_drag_accept(e.formats));
     }
+    // 拖入自动滚边：Over 态把落点交给命中链上最近可滚动祖先（由后者按帧推进，见
+    // Widget::on_system_drag_auto_scroll）；Leave / Drop 态收车。Leave 的落点可能在窗口外
+    // 导致命中落空——此时收车由滚动祖先的新鲜度超时兜底（DragAutoScroll::advance）。
+    if (e.phase == SystemDropPhase::Over) {
+        target->on_system_drag_auto_scroll(e.position);
+    } else if (e.phase == SystemDropPhase::Leave || e.phase == SystemDropPhase::Drop) {
+        target->on_system_drag_auto_scroll(std::nullopt);
+    }
     target->on_system_drop(e);
     return e.is_handled;
 }

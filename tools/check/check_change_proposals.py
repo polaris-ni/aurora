@@ -408,7 +408,7 @@ def main() -> int:
             for item in kept:
                 print(f"  - {item}")
         print()
-        print("  See codespec/changes/README.md for the proposal schema: field names, order and")
+        print("  See AGENTS.md section 5 item 14 for the proposal convention: field names, order and")
         print("  value domains are all part of the parse contract.")
         print("  Fix the proposals rather than loosening this gate, unless the contract itself")
         print("  changes (then update every proposal and this script together).")

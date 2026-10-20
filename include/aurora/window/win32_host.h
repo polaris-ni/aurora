@@ -202,10 +202,9 @@ class Win32Host {
     /// @brief 覆盖 `WM_GETOBJECT` 处理（宿主可抢先接管；默认空 → 走内置 UIA 桥）。
     ///
     /// 以指针宽度整数传递 `WPARAM`/`LPARAM`、返回 `LRESULT`，避免在公共头引入 `<windows.h>`；
-    /// 宿主侧（`.cpp`）在调用前 `static_cast` 回原生类型。
+    /// 宿主侧（`.cpp`）在调用前 `static_cast` 回原生类型。hook 注册即生效，本设置器无返回值。
     /// @param h WM_GETOBJECT 覆盖钩子：入参为指针宽度整数的 `WPARAM`/`LPARAM`，返回 optional `LRESULT`；
     /// 返回 `std::nullopt` 表示「未处理，交内置桥 / DefWindowProc」。
-    /// @return 本设置器无返回值（hook 注册即生效）。
     auto set_accessibility_hook(std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> h) const
         -> void;
 

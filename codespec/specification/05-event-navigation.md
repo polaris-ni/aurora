@@ -472,8 +472,23 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 - **accept 查询是单一真值源**：`Widget::query_system_drag_accept(formats) -> DragAction` 返回「本控件会执行什么动作」，基类默认 `DragAction::None`（不接受）。派发器在 `Enter` / `Over` 两态命中后调用它，与源建议动作 `proposed` 求交写入 `allowed`（两侧表态冲突即 `None`），宿主据此决定 OS 光标反馈。该查询在 `Over` 态按指针采样频率发生，**实现须常量级、禁止触发重布局**。
 - **载荷读取**：`DragPayload` 是 pimpl 的只读句柄（`std::shared_ptr<const DragPayload>`），按 MIME 取原始字节；`files()` / `text()` / `image()` / `bytes(mime)` 为便利读取，一律返回 `Result`，**格式不存在 = `Ok` 空值**（空内容不是失败，与 `Clipboard` 同口径）。`files()` 解码 `text/uri-list`，只返回可映射为本地路径的条目，非 `file` scheme 的行静默跳过。
 - **动作口径**：`DragAction{None, Copy, Move, Link}`，`None` 表示不接受 / 无动作（也是取消与失败的返回值，**不是成功**）。
-- **拖出**：控件经 `on_provide_drag()` 声明 `DragOffer`（格式清单 + 按 MIME 提供字节的回调），`begin_system_drag()` 发起会话；结束回调定名 `on_system_drag_end(DragAction)`，与应用内拖拽的 `on_drag_end` **刻意分名**（同一控件上两套拖拽语义不共名）。
-- **无障碍替代**：拖放不是唯一路径——粘贴、文件对话框等非拖拽入口在 UI 上须可达，放置反馈不得只靠光标形态表达（颜色 / 高亮 / 文案同时给）。
+- **拖出（事件驱动执行模型）**：控件经 `on_provide_drag()` 声明 `DragOffer`（格式清单 + 按 MIME 提供字节的回调，另含可选影像与热点偏移、源侧缺省动作、Move 确认回调四枚可选字段），`begin_system_drag()` 经 `system_drag::begin` 发起会话——**发起即返回**，不阻塞到会话结束（单线程 UI + 帧循环下，阻塞即要么饿死回调、要么引入嵌套消息泵的重入面；平台壳侧契约见 [`06-app-platform.md`](06-app-platform.md) §8.9）。`system_drag::cancel()` 调用时机不受限（会话外 no-op、会话内取消并就地收口在途读取）。终态经帧循环 `system_drag::pump_reads()` 投递。结束回调族与应用内拖拽的 `on_drag_end` **刻意分名**（同一控件上两套拖拽语义不共名）。
+- **源侧回调族四条序列**（`on_system_drag_begin` / `on_system_drag_cancel` / `on_system_drag_end(outcome, action)`，五种路径缺一即契约不全）：
+
+  | 路径 | 回调序列 |
+  |:---|:---|
+  | 成功落放 | `begin` → `end(Succeeded, 协商出的动作)` |
+  | 被取消（Esc / 系统取消） | `begin` → `cancel` → `end(Cancelled, None)` |
+  | 被拒绝（目标不接受） | `begin` → `end(Rejected, None)` |
+  | 会话中途异常终止 | `begin` → `end(Failed, None)` |
+  | 发起失败（无后端 / 能力位 false / 要约不合法） | `end(Failed, None)`（**无 `begin`**） |
+
+  `on_system_drag_cancel` **只**出现在被取消路径且严格早于 `end`；「被拒绝」与「中途异常」序列逐字相同，靠 `SystemDragOutcome` 区分——**正因如此 outcome 必须进签名**。「无要约控件」（`on_provide_drag()` 返回 `std::nullopt`）连 `end` 都不派发：从未发起过会话、无可收尾的拖出态。控件销毁即取消在途会话，终结回调不落到已回收对象上（双轨判活：shared_ptr 轨 `weak_from_this()`、栈 / 成员对象轨销毁令牌）。
+- **Move 确认与回滚**：目标接收成功后源删除回调（`DragOffer::on_move_confirmed`）被调用一次，且**严格早于** `on_system_drag_end(Succeeded, Move)` 投递（事件驱动下该顺序从外部可断言；源不得在收到确认前删除数据）。删除回调返回 `Error` ⇒ 会话终态改写为 `Failed` + `Move` 并上报 `system-drag-move-rollback`，目标侧数据保持不动。
+- **修饰键翻译归属（唯一翻译点）**：`proposed` 由宿主 / 后端在派发前经 `system_drag::proposed_action_for(modifiers, default_action)` 一次写定；控件只读 `proposed` 与 `allowed`、不做翻译（控件侧不存在第二处翻译）。Ctrl → Copy、Shift → Move、Ctrl+Shift → Link（Windows 惯例）；无有效修饰键 ⇒ 取源侧缺省动作（`DragOffer::default_action`，缺省 `Copy`）——`ModifierKey::None` 两义（没按 / 程序化合成），不可靠修饰键缺席推定。比对前按 `AURORA_MODIFIER_PRESSABLE_MASK` 摘除锁定态位（NumLock 常开的实现上 Win32 `GetKeyState` 一类返回含锁定态位，不摘会让 Ctrl 组合静默失配且本地难复现）。
+- **非阻塞读取契约**：`DragPayload::read_async` 与 `SystemDropEvent` 的 `*_async` 便利读取登记在途项，结果经帧循环排空兑现（宿主不排空 ⇒ 回调不到，不谎报）；同一 const 句柄可并发读取、各自独立兑现一次、不互相取消；墙钟超时兑现 `system-drag-read-failed`；会话收口就地兑现，不悬挂。同步 `bytes()` 一族保留供小载荷与同步后端；事件层便利读取与 `DragPayload` 直连两条路结果一致。
+- **自动滚边协议**：拖放悬停近边缘的滚动由 `DragAutoScroll` 内核驱动（`scroll_viewport.h`）——时间戳全部由调用方帧计时供给（内核不自读时钟，宿主可冻结 / 快进）；按侵入深度比例给速，带宽 clamp 到视口半高；共享常量 `AURORA_AUTO_SCROLL_THRESHOLD_DP = 48.0`（与 `ReorderableList` 同名缺省值相等——进程内拖拽与跨进程拖放两条路径手感一致的锚点）与 `AURORA_AUTO_SCROLL_MAX_SPEED = 600.0`；带外 / 视口未定尺 / 新鲜度超时（`AURORA_DRAG_AUTO_SCROLL_STALE_S = 1.0`，意图沉默即收车）就地收车。派发落点 `Widget::on_system_drag_auto_scroll(position)`：基类沿祖先链上溯至**最近可滚动祖先**（覆写并返回 true 者即可滚动），`Over` 态给落点、`Leave` / `Drop` 给 `nullopt`；本契约不新增滚动实现，只补「拖入时谁驱动滚动」。
+- **无障碍替代路径**：可接收拖放的控件（`accepts_system_drag()` 为 true）须同时提供 `system_drag_alternative_path()`（人类可读描述，如「上下文菜单的『移动到』项」）；缺省为空 = 该控件只有拖拽一条路，无障碍树构建时把节点标记为「仅拖拽可达」（`AccessibilityNode::is_drag_only_reachable()` = `drag_reachable && 替代路径为空`），桥与工具链据此告警。粘贴、文件对话框等非拖拽入口在 UI 上须可达；放置反馈不得只靠光标形态表达（颜色 / 高亮 / 文案同时给）。
 
 ---
 

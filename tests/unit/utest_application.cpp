@@ -2,7 +2,8 @@
 /// 目标单元: include/aurora/app/application.h
 /// 测试说明: 覆盖 Application 无头构造的默认状态（无 Window、严格模式、窗口可见性/几何态
 /// 响应式初值）、子系统句柄（scene/focus/scheduler/shortcuts）、快捷键优先派发（消费/落空/禁用）、
-/// 空场景同步派发安全性与 App 流式构建器链式配置（不进入真实帧循环）
+/// 空场景同步派发安全性与 App 流式构建器链式配置（不进入真实帧循环）、
+/// 帧循环对系统拖放异步结果的排空接线（终结回调 / 在途读取只在 step_frame 内兑现）
 
 #include <cstdint>
 #include <memory>
@@ -15,6 +16,7 @@
 #include "aurora/app/mime_types.h"
 #include "aurora/widget/text.h"
 #include "aurora/window/surface.h"
+#include "aurora/window/window.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_application {
@@ -180,6 +182,80 @@ AURORA_TEST_CASE(plain_scene_dispatches_are_safe_noops) {
     TextInputEvent text;
     text.text = "x";
     AURORA_TEST_CHECK_FALSE(app.dispatch_text(text));
+}
+
+AURORA_TEST_CASE(frame_loop_drains_system_drag_session_end) {
+#ifdef AURORA_BACKEND_HEADLESS
+    // 帧循环排空接线：系统拖出的异步结果（终结回调 / 在途读取）只在宿主帧内兑现——
+    // 登记之后、帧推进之前零投递；帧内排空后当帧即投递且只投一次（宿主不排空 ⇒ 收不到，
+    // 不谎报；与通知激活 / 热键命中同一时点语义）。
+    (void)system_drag::remove_test_backend();
+    if (!system_drag::install_test_backend()) {
+        AURORA_TEST_SKIP(
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+    }
+
+    WindowOptions o;
+    o.title = "drag-drain";
+    o.size = Size{.width = 120.0F, .height = 80.0F};
+    o.max_frames = 2;       // 两帧：第一帧兑现终态、第二帧兑现读取
+    o.power_saving = false;  // 无 OS 等待通道：忙轮询，帧数确定
+    HeadlessOptions h;
+    static_cast<WindowOptions &>(h) = o;
+    auto window = create_window(h);
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(window));
+
+    int end_calls = 0;
+    int frames_seen = 0;
+    SystemDragOutcome got_outcome = SystemDragOutcome::Failed;
+    DragAction got_action = DragAction::None;
+
+    std::unordered_map<std::string, std::vector<std::uint8_t>> data;
+    data.emplace(std::string(AURORA_MIME_TEXT_PLAIN), std::vector<std::uint8_t>{'a', 'b'});
+    const auto payload = DragPayload::from_bytes(std::move(data));
+    int read_calls = 0;
+
+    Application app{Scene{Node{std::make_shared<Text>("idle")}}, std::move(window.value()), o};
+    // on_frame 在帧内排空（system_drag::pump_reads）之后调用：第一帧里终态应已兑现
+    // （据此断言「帧内兑现」），同帧登记在途读取（据此断言「登记后不立即兑现」），
+    // 交由第二帧排空。
+    app.set_on_frame([&]() -> void {
+        ++frames_seen;
+        if (frames_seen != 1) {
+            return;
+        }
+        AURORA_TEST_CHECK_EQ(end_calls, 1);
+        payload->read_async(std::string(AURORA_MIME_TEXT_PLAIN),
+                            [&read_calls](const Result<std::vector<std::uint8_t>> &r) -> void {
+                                ++read_calls;
+                                AURORA_TEST_CHECK(r.ok());
+                            });
+        AURORA_TEST_CHECK_EQ(read_calls, 0);
+    });
+
+    DragOffer offer;
+    offer.formats.emplace_back(AURORA_MIME_TEXT_PLAIN);
+    offer.provide = [](const std::string & /*mime*/) -> Result<std::vector<std::uint8_t>> {
+        return std::vector<std::uint8_t>{'x'};
+    };
+    AURORA_TEST_REQUIRE(system_drag::begin(offer, [&](SystemDragOutcome outcome, DragAction action) -> void {
+        ++end_calls;
+        got_outcome = outcome;
+        got_action = action;
+    }).ok());
+    system_drag::emit_session_end(SystemDragOutcome::Succeeded, DragAction::Copy);
+    AURORA_TEST_CHECK_EQ(end_calls, 0);  // 帧未推进：零投递
+
+    app.run();  // 推进两帧
+
+    AURORA_TEST_CHECK_EQ(frames_seen, 2);
+    AURORA_TEST_CHECK_EQ(end_calls, 1);  // 只投一次
+    AURORA_TEST_CHECK_EQ(got_outcome, SystemDragOutcome::Succeeded);
+    AURORA_TEST_CHECK_EQ(got_action, DragAction::Copy);
+    AURORA_TEST_CHECK_EQ(read_calls, 1);  // 第二帧排空兑现
+#else
+    AURORA_TEST_SKIP("frame-loop drain probe needs the Headless backend");
+#endif
 }
 
 AURORA_TEST_CASE(app_builder_chains_fluently) {
