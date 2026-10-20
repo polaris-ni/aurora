@@ -28,12 +28,127 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/net/blocking.h"
+#include "aurora/net/observability.h"
 #include "aurora/state/async.h"
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/yaml.h"
 #include "route_match.h"
 
 namespace aurora {
+
+namespace {
+
+/// @brief 按已取的策略快照呈现一枚树属性文本：键为 `tree.<属性键>`，分级恒为 Sensitive。
+///
+/// 不转调公共 `present_field()`：那枚 helper 每次调用都重读进程级策略槽，一棵树逐叶重读会让
+/// 中途安装 / 卸载策略把同一份导出切成两种口径。此处由调用方先取一份快照，整份文档一致。
+/// @param policy 本次导出持有的策略快照（非空）。
+/// @param key 键词汇（`tree.<属性键>`）。
+/// @param value 原始文本。
+/// @return 经两段式裁决后的最终文本；策略抛出时回退到折叠形态。
+auto present_tree_text(const net::ExportPolicy &policy, std::string_view key, std::string_view value) -> std::string {
+    constexpr std::string_view folded = "***";
+    bool allowed = false;
+    try {
+        allowed = policy.allows(net::ExportSurface::InspectorJson, key, net::FieldClass::Sensitive);
+    } catch (...) {
+        allowed = false;  // 策略实现抛出按「不放行」处理，与 present_field 的兜底同口径
+    }
+    const std::string base = allowed ? std::string{value} : std::string{folded};
+    try {
+        return policy.present(net::ExportSurface::InspectorJson, key, net::FieldClass::Sensitive, base);
+    } catch (...) {
+        return std::string{folded};
+    }
+}
+
+/// @brief 折叠一枚属性值的全部字符串叶子；容器结构与数字 / 布尔 / null 原样保留。
+///
+/// 键在整棵属性值内沿用顶层属性名：策略词汇只认 `tree.<属性键>`，嵌套成员名不另立键，
+/// 否则同一属性会因内层字段名不同而被拆成多条互不知情的策略项。
+/// @param policy 本次导出持有的策略快照。
+/// @param key 顶层属性键（`tree.<属性键>`）。
+/// @param value 属性值。
+/// @return 折叠后的属性值。
+auto redact_prop_value(const net::ExportPolicy &policy, std::string_view key, const Json &value) -> Json {
+    if (const auto text = value.as_string(); text.has_value()) {
+        return Json{present_tree_text(policy, key, text.value())};
+    }
+    if (value.is_object()) {
+        Json out = Json::object();
+        for (const auto &entry : value.entries()) {
+            out.set(entry.key, redact_prop_value(policy, key, entry.value));
+        }
+        return out;
+    }
+    if (value.is_array()) {
+        Json out = Json::array();
+        for (const Json &item : value) {
+            out.push_back(redact_prop_value(policy, key, item));
+        }
+        return out;
+    }
+    return value;
+}
+
+/// @brief 折叠 `props` / `values` 对象：属性名与容器结构保留，只有字符串叶子换形态。
+/// @param policy 本次导出持有的策略快照。
+/// @param props 属性对象。
+/// @return 折叠后的属性对象。
+auto redact_prop_object(const net::ExportPolicy &policy, const Json &props) -> Json {
+    Json out = Json::object();
+    for (const auto &entry : props.entries()) {
+        const std::string key = "tree." + std::string{entry.key};
+        out.set(entry.key, redact_prop_value(policy, key, entry.value));
+    }
+    return out;
+}
+
+/// @brief 折叠一棵树文档：逐节点的 `props` 走属性折叠，`type` / `focused` / 节点次序原样。
+/// @param policy 本次导出持有的策略快照。
+/// @param node 树节点（`{type, props, children}`）。
+/// @return 折叠后的节点；非对象原样返回。
+auto redact_tree_node(const net::ExportPolicy &policy, const Json &node) -> Json {
+    if (!node.is_object()) {
+        return node;
+    }
+    Json out = Json::object();
+    for (const auto &entry : node.entries()) {
+        if (entry.key == "props" && entry.value.is_object()) {
+            out.set(entry.key, redact_prop_object(policy, entry.value));
+        } else if (entry.key == "children" && entry.value.is_array()) {
+            Json children = Json::array();
+            for (const Json &child : entry.value) {
+                children.push_back(redact_tree_node(policy, child));
+            }
+            out.set(entry.key, std::move(children));
+        } else {
+            out.set(entry.key, entry.value);
+        }
+    }
+    return out;
+}
+
+/// @brief 折叠单控件记录的 `values`；`descriptor`（含 name 与 property_names）原样。
+/// @param policy 本次导出持有的策略快照。
+/// @param record `{descriptor, values}` 记录。
+/// @return 折叠后的记录；非对象原样返回。
+auto redact_widget_record(const net::ExportPolicy &policy, const Json &record) -> Json {
+    if (!record.is_object()) {
+        return record;
+    }
+    Json out = Json::object();
+    for (const auto &entry : record.entries()) {
+        if (entry.key == "values" && entry.value.is_object()) {
+            out.set(entry.key, redact_prop_object(policy, entry.value));
+        } else {
+            out.set(entry.key, entry.value);
+        }
+    }
+    return out;
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Impl — 传输层句柄全部为 aurora::net 类型（平台 socket 词汇零出现）
@@ -638,9 +753,16 @@ auto InspectorServer::Impl::handle_windows(const RouteCall & /*call*/) -> std::s
 
 // GET /api/debug/tree — Widget 树 JSON
 auto InspectorServer::Impl::handle_debug_tree(const RouteCall & /*call*/) -> std::string {
+    // 策略快照在进入主线程闭包前取一次：整份导出共用同一个口径（中途装卸不切开一份文档）。
+    const auto policy = net::export_policy();
     try {
-        return on_tree(
-            [](const Node &root) -> std::string { return json_response(200, "OK", aurora::debug::widget_tree(root)); });
+        return on_tree([policy](const Node &root) -> std::string {
+            Json tree = aurora::debug::widget_tree(root);
+            if (policy) {
+                tree = redact_tree_node(*policy, tree);
+            }
+            return json_response(200, "OK", tree);
+        });
     } catch (const std::exception &e) {
         return error_response(500, std::string("widget_tree failed: ") + e.what());
     }
@@ -738,6 +860,8 @@ auto InspectorServer::Impl::handle_debug_flags(const RouteCall &call) -> std::st
 
 // GET /api/tree — 完整 widget 树 JSON（route 已剥离 query，/api/tree?x=1 不再误 404）
 auto InspectorServer::Impl::handle_tree(const RouteCall &call) -> std::string {
+    // 策略快照在进入主线程闭包前取一次：整份导出共用同一个口径（中途装卸不切开一份文档）。
+    const auto policy = net::export_policy();
     // 多窗口：?window=<id> 取指定窗口的树（需注册 window_tree_getter）。
     const std::string win_param = query_param(call.path, "window");
     if (!win_param.empty()) {
@@ -759,7 +883,11 @@ auto InspectorServer::Impl::handle_tree(const RouteCall &call) -> std::string {
                     return Json{};  // 标记窗口不存在
                 }
                 found = true;
-                return Inspector::tree_json_full(root);
+                Json document = Inspector::tree_json_full(root);
+                if (policy) {
+                    document = redact_tree_node(*policy, document);
+                }
+                return document;
             });
             if (!found) {
                 return error_response(404, "Window " + win_param + " not found");
@@ -770,8 +898,13 @@ auto InspectorServer::Impl::handle_tree(const RouteCall &call) -> std::string {
         }
     }
     // 回退：主窗口（构造时注入的 root_getter），向后兼容既有 /api/tree。
-    return on_tree(
-        [](const Node &root) -> std::string { return json_response(200, "OK", Inspector::tree_json_full(root)); });
+    return on_tree([policy](const Node &root) -> std::string {
+        Json document = Inspector::tree_json_full(root);
+        if (policy) {
+            document = redact_tree_node(*policy, document);
+        }
+        return json_response(200, "OK", document);
+    });
 }
 
 // GET /api/widget/{path} — 单 widget 属性
@@ -810,6 +943,9 @@ auto InspectorServer::Impl::handle_widget(const RouteCall &call) -> std::string 
         }
     }
 
+    // 只有 GET 导出属性值：PUT 回的是状态，不参与折叠；快照仍在此取一次，整份响应共用。
+    const auto policy = net::export_policy();
+
     return on_tree([&](Node &root) -> std::string {
         // 寻址必须走 `find_widget`（统一遍历：`child_nodes()`，空则回退 `for_each_child`），
         // 与 `/api/tree` 的枚举口径同源；否则虚拟化容器（NavigatorHost / LazyList 等）的
@@ -820,6 +956,9 @@ auto InspectorServer::Impl::handle_widget(const RouteCall &call) -> std::string 
         }
         if (!is_put) {
             Json props = Inspector::get_prop(*target);
+            if (policy) {
+                props = redact_widget_record(*policy, props);
+            }
             return json_response(200, "OK", props);
         }
         auto result = Inspector::set_prop(*target, prop_name, value);
@@ -1127,8 +1266,13 @@ auto InspectorServer::Impl::handle_components(const RouteCall & /*call*/) -> std
 
 // GET /api/yaml — 当前树的 YAML 格式
 auto InspectorServer::Impl::handle_yaml(const RouteCall & /*call*/) -> std::string {
-    return on_tree([](const Node &root) -> std::string {
-        const Json tree = Inspector::tree_json_full(root);
+    // 与 JSON 树同一份折叠后再转文本：两条导出面不各留一套口径。
+    const auto policy = net::export_policy();
+    return on_tree([policy](const Node &root) -> std::string {
+        Json tree = Inspector::tree_json_full(root);
+        if (policy) {
+            tree = redact_tree_node(*policy, tree);
+        }
         const std::string yaml = aurora::serialization::to_yaml(tree);
         return make_response(200, "OK", "text/yaml", yaml);
     });

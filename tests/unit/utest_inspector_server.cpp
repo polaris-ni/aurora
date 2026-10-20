@@ -5,6 +5,8 @@
 /// 请求-响应、404/405/400/403 错误请求、/api/debug/state 的 surface getter 装配错误路径，
 /// 以及 /api/input/{click,scroll,drag,text} 交互模拟（派发到目标控件、请求体校验、目标定位
 /// 失败与派发失败的错误映射）和 /api/find 的 key/type/text 定位（路径与寻址端点同口径）。
+/// 树导出脱敏同样在此覆盖：安装策略后四面导出折叠 props/values 的字符串叶子、放行键逐条生效、
+/// 结构键保持可读，未安装策略时输出与改造前逐字节相同，纯输入变换的 /api/to_code 不参与折叠。
 /// 树端点的线程落点同样在此覆盖：装上传递器后必须换到主线程下树，无传递器时回退内联执行。
 /// 端口一律用 0（系统分配临时端口，无冲突）；无文件句柄副作用。客户端经同步阻塞传输层
 /// `aurora::net::blocking`，随用例作用域关闭清理。
@@ -13,6 +15,7 @@
 /// 也依赖 bind/listen/accept 的 BSD socket 语义；wasm 即便开了 -pthread 也只补上线程、不补套接字，
 /// 故此处须按平台（而非仅按线程能力）判定，否则 worker 会阻塞在永不就绪的套接字操作上。
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -34,6 +37,7 @@
 #include "aurora/event/event.h"  // ScrollEvent
 #include "aurora/inspector/inspector_server.h"
 #include "aurora/net/blocking.h"
+#include "aurora/net/observability.h"
 #include "aurora/state/async.h"  // detail::main_poster（跨线程投递器，marshal 的落点）
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
@@ -335,6 +339,55 @@ struct FindTree {
     };
 }
 // NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+/// @brief 拒绝一切 Sensitive 的导出策略：`present` 原样返回，故导出里看到的恒是库给出的折叠形态。
+class DenySensitivePolicy final : public aurora::net::ExportPolicy {
+  public:
+    [[nodiscard]] auto present(aurora::net::ExportSurface /*surface*/, std::string_view /*key*/,
+                               aurora::net::FieldClass /*field_class*/, std::string_view value) const
+        -> std::string override {
+        return std::string{value};
+    }
+};
+
+/// @brief 只放行给定键的导出策略；键集合之外的 Sensitive 仍折叠。
+class AllowSelectedKeysPolicy final : public aurora::net::ExportPolicy {
+  public:
+    /// @brief 构造。
+    /// @param keys 允许放行的键词汇（仅 `InspectorJson` 面生效）。
+    explicit AllowSelectedKeysPolicy(std::vector<std::string> keys) : keys_(std::move(keys)) {}
+
+    [[nodiscard]] auto allows(aurora::net::ExportSurface surface, std::string_view key,
+                              aurora::net::FieldClass /*field_class*/) const -> bool override {
+        return surface == aurora::net::ExportSurface::InspectorJson && std::ranges::find(keys_, key) != keys_.end();
+    }
+
+    [[nodiscard]] auto present(aurora::net::ExportSurface /*surface*/, std::string_view /*key*/,
+                               aurora::net::FieldClass /*field_class*/, std::string_view value) const
+        -> std::string override {
+        return std::string{value};
+    }
+
+  private:
+    std::vector<std::string> keys_;  ///< 放行键集合
+};
+
+/// @brief 安装一枚进程级导出策略并在作用域结束时清回「未设」。
+///
+/// 清回是判据的一部分：未安装策略时 Inspector 的整条 walk 不执行，导出与改造前逐字节相同。
+class ScopedExportPolicy {
+  public:
+    /// @brief 安装。
+    /// @param policy 策略持有；为空即清回「未设」。
+    explicit ScopedExportPolicy(std::shared_ptr<const aurora::net::ExportPolicy> policy) {
+        aurora::net::install_export_policy(std::move(policy));
+    }
+    ~ScopedExportPolicy() { aurora::net::install_export_policy(nullptr); }
+    ScopedExportPolicy(const ScopedExportPolicy &) = delete;
+    auto operator=(const ScopedExportPolicy &) -> ScopedExportPolicy & = delete;
+    ScopedExportPolicy(ScopedExportPolicy &&) = delete;
+    auto operator=(ScopedExportPolicy &&) -> ScopedExportPolicy & = delete;
+};
 
 }  // namespace
 #endif  // AURORA_BUILD_INSPECTOR_SERVER（辅助设施段；用例恒注册，体内降级 SKIP）
@@ -1104,6 +1157,103 @@ AURORA_TEST_CASE(tree_routes_work_without_a_poster_inline) {
     AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/tree").find("Column") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/widget/0").find("200") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/yaml").find("200") != std::string::npos);
+    server.stop();
+#endif
+}
+
+// 目标：Inspector 的四面树导出按同一份策略快照折叠属性字符串；未安装策略时整条 walk 不执行。
+AURORA_TEST_CASE(tree_export_folds_property_strings_only_under_a_policy) {
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
+#else
+    auto tree = make_input_tree();
+    tree.input->set_value("hunter2");
+    tree.input->set_placeholder("type here");
+    InspectorServer server(tree.getter());
+    server.set_window_tree_getter([root = tree.root](std::uint32_t id) -> Node { return id == 7U ? *root : Node{}; });
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    // 对照组：没有策略时原值与结构键都在，walk 一次都不走。
+    const std::string baseline_tree = http_get(server.port(), "/api/tree");
+    AURORA_TEST_CHECK_TRUE(baseline_tree.find("hunter2") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(baseline_tree.find("\"type\":\"TextInput\"") != std::string::npos);
+    const std::string baseline_widget = http_get(server.port(), "/api/widget/1");
+    AURORA_TEST_CHECK_TRUE(baseline_widget.find("hunter2") != std::string::npos);
+    const std::string baseline_yaml = http_get(server.port(), "/api/yaml");
+    AURORA_TEST_CHECK_TRUE(baseline_yaml.find("hunter2") != std::string::npos);
+
+    {
+        ScopedExportPolicy installed{std::make_shared<DenySensitivePolicy>()};
+
+        const std::string tree_resp = http_get(server.port(), "/api/tree");
+        AURORA_TEST_CHECK_EQ(tree_resp.find("hunter2"), std::string::npos);
+        AURORA_TEST_CHECK_TRUE(tree_resp.find("\"value\":\"***\"") != std::string::npos);
+        AURORA_TEST_CHECK_TRUE(tree_resp.find("\"placeholder\":\"***\"") != std::string::npos);
+        AURORA_TEST_CHECK_TRUE(tree_resp.find("\"type\":\"TextInput\"") != std::string::npos);  // 结构键不折叠
+
+        // ?window= 分支与主窗口同源同口径。
+        const std::string window_resp = http_get(server.port(), "/api/tree?window=7");
+        AURORA_TEST_CHECK_EQ(window_resp.find("hunter2"), std::string::npos);
+        AURORA_TEST_CHECK_TRUE(window_resp.find("\"value\":\"***\"") != std::string::npos);
+
+        const std::string debug_resp = http_get(server.port(), "/api/debug/tree");
+        AURORA_TEST_CHECK_EQ(debug_resp.find("hunter2"), std::string::npos);
+        AURORA_TEST_CHECK_TRUE(debug_resp.find("\"type\":\"TextInput\"") != std::string::npos);
+
+        // 单控件端点折叠的是 values；descriptor 的名字与属性名清单保留可读性。
+        const std::string widget_resp = http_get(server.port(), "/api/widget/1");
+        AURORA_TEST_CHECK_EQ(widget_resp.find("hunter2"), std::string::npos);
+        AURORA_TEST_CHECK_TRUE(widget_resp.find("\"value\":\"***\"") != std::string::npos);
+        AURORA_TEST_CHECK_TRUE(widget_resp.find("\"name\":\"TextInput\"") != std::string::npos);
+        AURORA_TEST_CHECK_TRUE(widget_resp.find("\"property_names\"") != std::string::npos);
+
+        const std::string yaml_resp = http_get(server.port(), "/api/yaml");
+        AURORA_TEST_CHECK_EQ(yaml_resp.find("hunter2"), std::string::npos);
+        AURORA_TEST_CHECK_TRUE(yaml_resp.find("***") != std::string::npos);
+    }
+    // 卸载后与基线逐字节相同：无策略即「整条 walk 不执行」。
+    AURORA_TEST_CHECK_EQ(http_get(server.port(), "/api/tree"), baseline_tree);
+    AURORA_TEST_CHECK_EQ(http_get(server.port(), "/api/widget/1"), baseline_widget);
+    AURORA_TEST_CHECK_EQ(http_get(server.port(), "/api/yaml"), baseline_yaml);
+    server.stop();
+#endif
+}
+
+// 目标：两段式策略在树导出里逐键生效——放行的键拿原值、其余仍折叠；纯输入变换端点不 walk。
+AURORA_TEST_CASE(tree_export_policy_gates_each_property_key) {
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
+#else
+    auto tree = make_input_tree();
+    tree.input->set_value("hunter2");
+    tree.input->set_placeholder("type here");
+    InspectorServer server(tree.getter());
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    {
+        // 只放行 `tree.value`：同一个控件里的 `placeholder` 仍折叠，证明键是逐条裁决而非整对象一刀切。
+        ScopedExportPolicy installed{std::make_shared<AllowSelectedKeysPolicy>(std::vector<std::string>{"tree.value"})};
+        const std::string tree_resp = http_get(server.port(), "/api/tree");
+        AURORA_TEST_CHECK_TRUE(tree_resp.find("\"value\":\"hunter2\"") != std::string::npos);
+        AURORA_TEST_CHECK_TRUE(tree_resp.find("\"placeholder\":\"***\"") != std::string::npos);
+
+        const std::string widget_resp = http_get(server.port(), "/api/widget/1");
+        AURORA_TEST_CHECK_TRUE(widget_resp.find("\"value\":\"hunter2\"") != std::string::npos);
+        AURORA_TEST_CHECK_TRUE(widget_resp.find("\"placeholder\":\"***\"") != std::string::npos);
+    }
+    {
+        // `to_code` 把调用方自己送进来的树转成代码，是纯输入变换而非状态导出，不参与折叠。
+        // 用步进风格（style=1）确保属性完整落码，否则 Fluent 会略去 setter-only 属性而使判据空转。
+        ScopedExportPolicy installed{std::make_shared<DenySensitivePolicy>()};
+        const std::string code_resp =
+            http_post(server.port(), "/api/to_code", R"({"style":1,"type":"TextInput","props":{"value":"hunter2"}})");
+        AURORA_TEST_CHECK_TRUE(code_resp.find("200 OK") != std::string::npos);
+        AURORA_TEST_CHECK_TRUE(code_resp.find("hunter2") != std::string::npos);
+    }
     server.stop();
 #endif
 }
