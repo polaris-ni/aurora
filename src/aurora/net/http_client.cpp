@@ -52,6 +52,7 @@
 #include "aurora/net/detail/http_request_id.h"
 #include "aurora/net/detail/http_retry.h"
 #include "aurora/net/detail/http_wire.h"
+#include "aurora/net/detail/observability_trace.h"
 #include "aurora/net/detail/random_draw.h"
 #include "aurora/net/detail/ws_handshake.h"
 #include "aurora/net/detail/ws_session.h"
@@ -452,6 +453,107 @@ auto log_exchange_identity(const Request &request) -> void {
     }
     AURORA_LOG_DEBUG("net", "http exchange: id=", *announced, " method=", method_text(request.method()),
                      " host=", host);
+}
+
+#ifdef AURORA_ENABLE_DEBUG
+/// @brief 取本次交换的链路标识：以已落在请求上的 `X-Request-Id` 头为准。
+///
+/// 不读 `Request::request_id()`：重定向的每一跳由 `follow()` 重建请求，只复制字段、不复制那枚取值，
+/// 读头才能在全部跳与全部尝试上得到同一串（口径见 `stamp_request_id`）。
+/// @param request 已打标的请求。
+/// @return 字段值；未带标识时为空串。
+auto request_id_of(const Request &request) -> std::string {
+    return request.headers().get(detail::AURORA_HTTP_REQUEST_ID).value_or(std::string{});
+}
+#endif
+
+/// @brief 起一笔本跳记账；Release 下只放一枚空壳，标识与 URL 文本一概不复制。
+/// @param slot 存放句柄的槽（为空时构造）。
+/// @param request 本跳请求（取方法与链路标识）。
+/// @param target 本跳目标（取 origin-form 与主机）。
+/// @param hop 重定向跳序号。
+/// @param pass 物理尝试序号。
+/// @param reused 本跳是否复用池内连接。
+auto begin_exchange_trace(std::optional<ExchangeTrace> &slot, const Request &request, const Url &target,
+                          std::uint16_t hop, std::uint16_t pass, bool reused) -> void {
+#ifdef AURORA_ENABLE_DEBUG
+    slot.emplace(method_text(request.method()), request_id_of(request), target, hop, pass, reused, false);
+#else
+    (void)request;
+    slot.emplace(std::string_view{}, std::string_view{}, target, hop, pass, reused, false);
+#endif
+}
+
+/// @brief 起一笔不随跳重置的记账：WebSocket 握手腿每次调用只有一条物理往来，句柄恒有值。
+///
+/// 另两条腿的句柄按跳重建、以 `optional` 表示「本跳还没起手」；本腿没有那个中间状态，直接用值类型既省掉
+/// 一层判空，也让「恰好一条 begin / end」由作用域本身保证。
+/// @param request 本腿请求（取方法与链路标识）。
+/// @param target 本腿目标（取 origin-form 与主机）。
+/// @param hop 重定向跳序号。
+/// @param pass 物理尝试序号。
+/// @param reused 本跳是否复用池内连接。
+/// @return 记账句柄；Release 下为空壳。
+auto make_exchange_trace(const Request &request, const Url &target, std::uint16_t hop, std::uint16_t pass, bool reused)
+    -> ExchangeTrace {
+#ifdef AURORA_ENABLE_DEBUG
+    return ExchangeTrace{method_text(request.method()), request_id_of(request), target, hop, pass, reused, false};
+#else
+    (void)request;
+    return ExchangeTrace{std::string_view{}, std::string_view{}, target, hop, pass, reused, false};
+#endif
+}
+
+/// @brief 记一条「打标之后、任何阶段开始之前」的本地结局：零 mark，`failed_stage` 为空。
+///
+/// 策略闸、能力闸、不可重放与目标不可渲染都落在这一类：这次交换确实有一条记录，但它连一个阶段都没开始。
+/// 缓存命中另走 `record_cache_hit`（它带状态码与交付字节，且 `from_cache = true`）。
+/// @param request 发起请求（未解析出 URL 时路径与主机为空）。
+/// @param code 结局错误码。
+/// @param pass 物理尝试序号。
+/// @param hop 重定向跳序号。
+auto record_local_outcome(const Request &request, ErrorCode code, std::uint16_t pass, std::uint16_t hop) -> void {
+#ifdef AURORA_ENABLE_DEBUG
+    const Url absent;
+    const auto &slot = request.url();
+    ExchangeTrace trace{method_text(request.method()),
+                        request_id_of(request),
+                        slot.has_value() ? slot.value() : absent,
+                        hop,
+                        pass,
+                        false,
+                        false};
+    trace.fail(code, std::nullopt);
+    trace.finish();
+#else
+    (void)request;
+    (void)code;
+    (void)pass;
+    (void)hop;
+#endif
+}
+
+/// @brief 记一条新鲜缓存命中：零 mark、`from_cache = true`、`received` 为交付体字节。
+/// @param request 发起请求。
+/// @param response 缓存里取出的完整应答。
+auto record_cache_hit(const Request &request, const Response &response) -> void {
+#ifdef AURORA_ENABLE_DEBUG
+    const Url absent;
+    const auto &slot = request.url();
+    ExchangeTrace trace{method_text(request.method()),
+                        request_id_of(request),
+                        slot.has_value() ? slot.value() : absent,
+                        0,
+                        0,
+                        false,
+                        true};
+    trace.set_status(response.status());
+    trace.note_received(static_cast<std::uint64_t>(response.body().size()));
+    trace.finish();
+#else
+    (void)request;
+    (void)response;
+#endif
 }
 
 /// @brief 一跳的建连事实：连到谁、以哪种形态连、请求行写成什么形态。
@@ -1128,11 +1230,13 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
     const NetPolicy security = effective_policy(policy_);
     // 起手策略闸排在查表之前：命中缓存照样是一次交付，不能因为它就没被问过。
     if (const auto verdict = gate_origin(proxy_, tls_, security, origin); !verdict) {
+        record_local_outcome(origin, verdict.error().code_enum, 0, 0);
         co_return Result<Response>{verdict.error()};
     }
     // fetch 腿的整单语义不支持流式请求体：浏览器一次性交出整次交换，`BodySource` 的分段与回放口径
     // 无落点。如实落 `net-platform-unavailable` 并点名，不做悄悄一次性物化（§16 第 37 项）。
     if (detail::fetch_leg_active() && origin.body_source() != nullptr) {
+        record_local_outcome(origin, ErrorCode::NetPlatformUnavailable, 0, 0);
         co_return Result<Response>{
             make_error(ErrorCode::NetPlatformUnavailable,
                        "send: a streaming request body is not available on this leg (browser fetch delivers the "
@@ -1143,6 +1247,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
     // 副本上的话，第二次尝试就成了「第一次验证、第二次裸打」）。
     CacheOpening opening = open_from_cache(cache_, cache_options_, origin);
     if (opening.fresh.has_value()) {
+        record_cache_hit(origin, *opening.fresh);
         co_return Result<Response>{std::move(*opening.fresh)};
     }
     // 重试环的资格有三道判据：策略开着、方法幂等、体可回放到原点。第三道只挂在流式体上——内存体天然能重发，
@@ -1175,6 +1280,8 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
     // 重试环与单次交换**同帧**：`CoroTask` 不是 awaitable（`state/coroutine.h` 的 promise 永不首挂也不终挂，
     // 结果只经 `is_done()` / `result()` 轮询），故「把一次尝试抽成子协程再 co_await」在本库无对应机制——
     // 这正是本文件开头「刻意不做抽象」那条约束在重试这一层的再确认。
+    // `pass` 是**物理往来**序号而非重试配额：认证重跑不递增 `attempt`，故它自己取一枚新 `pass`（口径见公共头）。
+    std::uint16_t next_pass = 0;
     for (std::uint32_t attempt = 1;;) {
         // 取消落在两次尝试之间（含起手检查之后的那点竞态）时，这里就是唯一的收摊口：一次都没打过即交「被取消」
         // 这份事实，打过的那次留下它自己的错误码——本环不替调用方改写已经发生的事。
@@ -1182,9 +1289,16 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             if (attempt == 1 && !replay_for_credentials) {
                 outcome =
                     Result<Response>{make_error(ErrorCode::NetCancelled, "the exchange was cancelled before it ran")};
+                // 取消发生在打标之后、第一次物理往来之前：仍记一条零 mark 的取消记录（配对不因「没触网」而缺）。
+                record_local_outcome(origin,
+                                     wall->fired.load() == static_cast<int>(TimeoutStage::Budget)
+                                         ? ErrorCode::HttpTimeout
+                                         : ErrorCode::NetCancelled,
+                                     0, 0);
             }
             break;
         }
+        std::uint16_t pass_index = next_pass++;  // 陈旧连接换新重跑会再取一枚
         Cancellation token;
         // 墙到点即掐掉在途的这一次尝试（`Cancellation` 契约：钩子至多触发一次），随后本环据 `is_cancelled()` 收摊。
         sequence.on_cancel([token]() mutable { token.cancel(); });
@@ -1221,6 +1335,9 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
         detail::ProxyNegotiation negotiation;
         bool stale_retried = false;  // 本尝试是否已对一条陈旧的池连接重试过（一尝试一次，保证收敛）
         bool queue_failed = false;  // 本尝试是否在排队上没等到（connect 档到点或取消）：收尾据此把 detail 说成「排队」
+        // 本尝试的记账句柄与「失败时正在进行的阶段」：句柄逐跳重建，故放在尝试级、由每跳开头重置。
+        std::optional<ExchangeTrace> trace;
+        std::optional<HttpStage> failure_stage;
 
         // 进度闸随协程帧存活；回调取自首跳请求，重定向后的各跳沿用同一份观测口（与 `timeouts` / 上限同纪律：
         // 发起侧选项在入口取一次，逐跳不重读）。下面几枚计数是**本跳**口径，每跳开头重置。
@@ -1231,6 +1348,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
         std::uint64_t upload_total = 0;  // 本跳请求体总量（长度给得出时才有意义）
         bool upload_total_known = false;  // 本跳的请求体总量是否给得出（分块形态给不出）
         bool head_seen = false;  // 本跳是否已见到头部（决定要不要报下载末值）
+        bool first_byte_seen = false;  // 本跳是否已读到应答头首字节（阶段标记只落一次）
         bool upload_running = false;  // 本跳是否走了分块写路径
         bool upload_settled = false;  // 上传末值是否已在写环里发过（避免收尾重发同一事实）
 
@@ -1239,6 +1357,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
         StageTimer total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
 
         for (;;) {
+            failure_stage.reset();
             // ── 路由先于渲染：请求行写成哪种形态，取决于本跳的对端是目标本身还是转发代理。
             const auto &url_slot = current.url();
             if (!url_slot.has_value()) {
@@ -1255,6 +1374,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             upload_total = 0;
             upload_total_known = false;
             head_seen = false;
+            first_byte_seen = false;
             upload_running = false;
             upload_settled = false;
 
@@ -1307,6 +1427,8 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             //    到点在 detail 点名「排队等不到」而不是「连不上」。
             //    fetch 腿没有连接可池化：池整段跳过（retaining_leftover 随之为假，装配器不开容忍模式——
             //    整单交付的应答不存在「完整之后又到字节」的形态，§16 第 37 项）。
+            //    记账从这一刻起手：池排队计入本跳耗时；复用与否要到取用之后才知道（`set_reused_connection` 补记）。
+            begin_exchange_trace(trace, current, target, static_cast<std::uint16_t>(hops), pass_index, false);
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<char>)> read_one;
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
             std::function<detail::CallbackAwaiter<detail::WindowedRead>(std::size_t, std::chrono::milliseconds)>
@@ -1332,6 +1454,9 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                     if (got.verdict == detail::HttpPoolAcquire::Ready) {
                         leased_from_pool = true;
                         lease.adopt(std::move(got.connection), got.born);
+                        // 复用连接没有建连与握手两段：首枚 mark 就是「传输就绪」，记在取用这一刻。
+                        trace->set_reused_connection(true);
+                        trace->mark(HttpStage::ConnectionAcquired);
                         connect_timer.stop();  // 命中即停表：建连（含握手）这一段没有发生
                         break;
                     }
@@ -1345,6 +1470,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                             ErrorCode::HttpTimeout,
                             "connect timeout: queued too long for an idle connection (pool per-host limit)")};
                         queue_failed = true;
+                        failure_stage = HttpStage::Connect;  // 排队计入 connect 档
                         break;
                     }
                     co_await detail::await_sleep(AURORA_POOL_QUEUE_POLL, token);
@@ -1352,6 +1478,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                         one = Result<Response>{make_error(ErrorCode::NetCancelled,
                                                           "the exchange was cancelled while queued for a connection")};
                         queue_failed = true;
+                        failure_stage = HttpStage::Connect;
                         break;
                     }
                 }
@@ -1382,13 +1509,17 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                                                                     hop.tunneled_via_proxy ? &negotiation : nullptr);
                     if (!plain) {
                         one = Result<Response>{plain.error()};
+                        failure_stage = HttpStage::Connect;  // DNS 失败也在这一段（口径见公共头的阶段表）
                         break;
                     }
+                    trace->mark(HttpStage::Connect);
                     auto secure = co_await detail::await_handshake(std::move(plain.value()), host, tls_, token);
                     if (!secure) {
                         one = Result<Response>{secure.error()};
+                        failure_stage = HttpStage::TlsHandshake;
                         break;
                     }
+                    trace->mark(HttpStage::TlsHandshake);
                     secure_holder = std::make_shared<TlsTransport>(std::move(secure.value()));
                 } else {
                     auto plain = co_await detail::await_connect_via(route.connect_with, route.peer_host,
@@ -1396,8 +1527,10 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                                                                     hop.tunneled_via_proxy ? &negotiation : nullptr);
                     if (!plain) {
                         one = Result<Response>{plain.error()};
+                        failure_stage = HttpStage::Connect;
                         break;
                     }
+                    trace->mark(HttpStage::Connect);
                     plain_holder = std::make_shared<StreamTransport>(std::move(plain.value()));
                 }
                 if (!leased_from_pool) {
@@ -1428,6 +1561,10 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                     };
                 }
             }
+            if (!leased_from_pool) {
+                // 新连接在 Connect / TlsHandshake 之后；fetch 腿没有这两段，首枚就是本枚（浏览器代管建连）。
+                trace->mark(HttpStage::ConnectionAcquired);
+            }
             connect_timer.stop();  // 建连（含握手）完成，connect 档停表，不误伤后续读写
 
             // ── 发出请求。写出形态由 `detail::plan_request_body()` 裁决——那是 `render_head()` 已经用过的同一份
@@ -1449,11 +1586,34 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                        tstate->fired.load() == static_cast<int>(TimeoutStage::None) && !token.is_cancelled() &&
                        detail::is_idempotent_method(current.method());
             };
+            // 失败时正在进行的阶段：头部未定形时停在 FirstByte 之前（连首字节都没到就是 RequestSent），
+            // 头部定形后即在读体（BodyDone）。
+            auto read_failure_stage = [&]() -> HttpStage {
+                if (assembler.head_ready()) {
+                    return HttpStage::BodyDone;
+                }
+                return first_byte_seen ? HttpStage::FirstByte : HttpStage::RequestSent;
+            };
+            // 空闲连接被对端关掉时的换新重跑：本跳记一次失败的物理往来，换一枚 `pass` 再起一跳（`hop` 不变）。
+            auto restart_on_stale = [&](HttpStage stage) -> bool {
+                if (!stale_retry_eligible()) {
+                    return false;
+                }
+                stale_retried = true;
+                // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
+                force_fresh_connect = true;
+                trace->fail(one.error().code_enum, stage);
+                trace->finish();
+                trace.reset();
+                pass_index = next_pass++;
+                return true;
+            };
             // 下载进度的记账口：每次 `drain_body` 之后按「新到多少线上字节」记一笔，再冲一次闸。闸由每一次读
             // 恢复推动，故一次交付至多一发；总量只有 `Length` 形态给得出，chunked / until-close 一律报未知。
             auto note_download = [&]() -> void {
                 if (!head_seen && assembler.head_ready()) {
                     head_seen = true;
+                    trace->set_status(assembler.head().status);
                     announced_total = assembler.framing() == wire::BodyFraming::Length
                                           ? announced_length(assembler.head())
                                           : std::optional<std::uint64_t>{};
@@ -1501,21 +1661,23 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                 payload.insert(payload.end(), current.body().begin(), current.body().end());
                 auto written = co_await write_one(std::span<const char>{payload});
                 if (!written) {
-                    if (stale_retry_eligible()) {
-                        stale_retried = true;
-                        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
-                        force_fresh_connect = true;
+                    one = Result<Response>{written.error()};
+                    failure_stage = HttpStage::ConnectionAcquired;  // RequestSent 未到：请求还没交完
+                    if (restart_on_stale(*failure_stage)) {
                         continue;  // 空闲期被对端关了：幂等方法换新连接重跑本跳（一个字节都没出去过）
                     }
-                    one = Result<Response>{written.error()};
                     break;
                 }
+                trace->note_sent(payload.size());
             } else {
                 bool write_failed = false;
                 auto written_head = co_await write_one(std::span<const char>{head.value()});
                 if (!written_head) {
                     one = Result<Response>{written_head.error()};
+                    failure_stage = HttpStage::ConnectionAcquired;
                     write_failed = true;
+                } else {
+                    trace->note_sent(head.value().size());
                 }
                 if (!write_failed && await_continue) {
                     // 窗口里那条 1xx 不是最终应答：它排在最终应答之前被装配器收下，不改写后者的分帧与判定；
@@ -1524,12 +1686,20 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                     const auto &probe = handed.value();  // awaiter 恒以成功 `Result` 交出结局，失败在载荷里
                     if (probe.outcome == detail::WindowedRead::Outcome::Failure) {
                         one = Result<Response>{*probe.error};
+                        failure_stage = HttpStage::ConnectionAcquired;
                         write_failed = true;
                     }
-                    if (!write_failed) {
+                    if (!write_failed && !probe.bytes.empty()) {
+                        // 线上字节与阶段在喂装配器之前记：即便这批字节随后被判畸形，它们确实到达过。
+                        trace->note_received(probe.bytes.size());
+                        if (!first_byte_seen) {
+                            first_byte_seen = true;
+                            trace->mark(HttpStage::FirstByte);
+                        }
                         auto queued = feed(std::span<const char>{probe.bytes});
                         if (!queued) {
                             one = Result<Response>{queued.error()};
+                            failure_stage = read_failure_stage();
                             write_failed = true;
                         }
                     }
@@ -1556,6 +1726,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                         auto segment = pump.next_segment();
                         if (!segment) {
                             one = Result<Response>{segment.error()};  // 源读失败：原样上抛，不替它编原因
+                            failure_stage = HttpStage::ConnectionAcquired;
                             write_failed = true;
                             break;
                         }
@@ -1565,9 +1736,11 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                         auto written = co_await write_one(std::span<const char>{segment.value()});
                         if (!written) {
                             one = Result<Response>{written.error()};
+                            failure_stage = HttpStage::ConnectionAcquired;
                             write_failed = true;
                             break;
                         }
+                        trace->note_sent(segment.value().size());
                         // 契约：`write` 成功即整段进入内核（`net/transport.h` 的「全部字节都进入内核或明确失败
                         // 才算完成」），故计数按泵交出的正文推进、不回读交付数——交付数在这里没有第二种取值。
                         uploaded = pump.payload_bytes();
@@ -1587,21 +1760,21 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                     }
                 }
                 if (write_failed) {
-                    if (stale_retry_eligible()) {
-                        stale_retried = true;
-                        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
-                        force_fresh_connect = true;
+                    if (restart_on_stale(failure_stage.value_or(HttpStage::ConnectionAcquired))) {
                         continue;  // 头部都还没到就折了：幂等方法换新连接重跑本跳
                     }
                     break;
                 }
             }
+            // 头与体全部交给传输层（417 一类的直接作答没发体，但请求已按对端意思交完）。
+            trace->mark(HttpStage::RequestSent);
             while (!assembler.complete()) {
                 StageTimer read_timer(timeouts.read_idle, TimeoutStage::ReadIdle, token, tstate);
                 auto read = co_await read_one(std::span<char>{chunk});
                 read_timer.stop();  // 本段交付已落地，重置空闲计时：下一轮 read 重新起表
                 if (!read) {
                     one = Result<Response>{read.error()};
+                    failure_stage = read_failure_stage();
                     halted = true;
                     break;
                 }
@@ -1609,10 +1782,16 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                 // 它的线上次序再判本轮结局——结局即便是「对端已关」也一样：那批字节可能正是最后一段应答，而
                 // 关闭事实总是可以在一条已完整的报文之后再观察到的。队列只可能被填一次，喂完即清。
                 if (!late->empty()) {
+                    trace->note_received(late->size());
+                    if (!first_byte_seen) {
+                        first_byte_seen = true;
+                        trace->mark(HttpStage::FirstByte);
+                    }
                     auto queued = feed(std::span<const char>{late->data(), late->size()});
                     late->clear();
                     if (!queued) {
                         one = Result<Response>{queued.error()};
+                        failure_stage = read_failure_stage();
                         halted = true;
                         break;
                     }
@@ -1623,16 +1802,23 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                     auto closed = assembler.peer_closed();
                     if (!closed) {
                         one = Result<Response>{closed.error()};
+                        failure_stage = read_failure_stage();
                         halted = true;
                         break;
                     }
                     if (!assembler.complete()) {
                         one = Result<Response>{
                             make_error(ErrorCode::HttpProtocolError, "peer closed before the body was complete")};
+                        failure_stage = read_failure_stage();
                         halted = true;
                         break;
                     }
                     break;
+                }
+                trace->note_received(got);
+                if (!first_byte_seen) {
+                    first_byte_seen = true;
+                    trace->mark(HttpStage::FirstByte);
                 }
                 if (assembler.complete()) {
                     // 暂存那批字节已把这条报文交完：本轮新读的字节属下一条报文。池开着时它不再是无关紧要的
@@ -1641,6 +1827,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                         auto parked = assembler.push(std::string_view{chunk.data(), got});
                         if (!parked) {
                             one = Result<Response>{parked.error()};
+                            failure_stage = read_failure_stage();
                             halted = true;
                             break;
                         }
@@ -1650,15 +1837,13 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                 auto pushed = feed(std::span<const char>{chunk.data(), got});
                 if (!pushed) {
                     one = Result<Response>{pushed.error()};
+                    failure_stage = read_failure_stage();
                     halted = true;
                     break;
                 }
             }
             if (halted) {
-                if (stale_retry_eligible()) {
-                    stale_retried = true;
-                    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
-                    force_fresh_connect = true;
+                if (restart_on_stale(failure_stage.value_or(HttpStage::RequestSent))) {
                     continue;  // 头部都还没到就读折了：幂等方法换新连接重跑本跳（多半是空闲期被对端关了）
                 }
                 break;
@@ -1667,10 +1852,16 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             note_download();
 
             const auto &response_head = assembler.head();
+            // BodyDone 只落最终一跳：中间重定向跳的体即便读全了也不是这次交付的终点（口径见公共头的阶段表）。
+            const bool last_hop = !is_redirect(response_head.status) || limit == 0;
+            if (last_hop) {
+                trace->mark(HttpStage::BodyDone);
+            }
             // 透明解压：分帧给出的仍是编码字节，还原完才交给 `Response`；失败与传输失败分道（字节已完整到达）。
             auto decoded = materialize_content_encoding(response_head, assembler.framing(), body, decompressed_limit);
             if (!decoded) {
                 one = Result<Response>{decoded.error()};
+                failure_stage = HttpStage::BodyDone;  // 线上体已读完，失败发生在还原
                 break;
             }
             one = Result<Response>{
@@ -1701,6 +1892,9 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             // 下一跳按新目标的域重新从 Jar 取（cookie 的选择本来就按目标域逐跳算，与代理决策「逐跳重算」
             // 同一条纪律）；换 origin 的跳已被 `follow()` 剥掉旧值，这里补上的只可能是 Jar 给的。
             attach_cookies_from_jar(current, cookie_jar_);
+            // 本跳到此收摊：状态码与字节都在，没有 BodyDone（中间跳），也没有错误。
+            trace->finish();
+            trace.reset();
         }
 
         // 超时改道：失败若因某档看门狗取消了令牌，一律改报 http-timeout，并在 detail 标明是哪一档。
@@ -1726,6 +1920,25 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             one = Result<Response>{
                 make_error(ErrorCode::HttpTimeout,
                            "connect timeout: queued too long for an idle connection (pool per-host limit)")};
+        }
+
+        // ── 本跳记账收摊：结局在这一刻定稿，存储与总线在此配对。
+        //    句柄存在 = 本跳确实起过一次物理往来（含池排队）；不存在且以失败收场 = 连一跳都没开始（本地拒绝）。
+        //    跨尝试的墙到点时与环外的改报同一口径，记录里也落 `http-timeout`，不把它记成用户取消。
+        if (trace.has_value()) {
+            if (!one) {
+                const ErrorCode code = wall->fired.load() == static_cast<int>(TimeoutStage::Budget)
+                                           ? ErrorCode::HttpTimeout
+                                           : one.error().code_enum;
+                trace->fail(code, failure_stage);
+            }
+            trace->finish();
+            trace.reset();
+        } else if (!one) {
+            record_local_outcome(current,
+                                 wall->fired.load() == static_cast<int>(TimeoutStage::Budget) ? ErrorCode::HttpTimeout
+                                                                                              : one.error().code_enum,
+                                 pass_index, static_cast<std::uint16_t>(hops));
         }
 
         // 进度收尾：两个方向的末值各发一次，不看闸号。成败由 `one` 表达，这一发只宣告「这一趟到此收摊」，
@@ -1858,13 +2071,6 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
     if (const auto invalid = detail::validate_retry_policy(policy)) {
         co_return Result<StreamOutcome>{*invalid};
     }
-    // 本腿无流式语义（wasm 无 ReadableStream）时直接失败，绝不悄悄退化成物化路径：调用方选 `open_stream`
-    // 要的就是「整条载荷不必同时存在于内存」，退化成交换一份 `Response` 是把它的内存预算和预期一起毁掉。
-    if (!Engine::instance().capabilities().streaming) {
-        co_return Result<StreamOutcome>{
-            make_error(ErrorCode::NetPlatformUnavailable, "open_stream: this leg has no streaming response body")};
-    }
-
     // 三道资格与 `send` 同判据：策略开着、方法幂等、体可回放到原点（`restart()` 是流式体唯一的重放判据）。
     const bool replayable = request.body_source() == nullptr || request.body_source()->restart();
     const bool loop_open =
@@ -1884,11 +2090,20 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
     // 链路标识与 `send` 同一处落一次：本入口的每一跳与每一次尝试都带同一串出去。
     stamp_request_id(origin, request_id_);
     log_exchange_identity(origin);
+    // 本腿无流式语义（wasm 无 ReadableStream）时直接失败，绝不悄悄退化成物化路径：调用方选 `open_stream`
+    // 要的就是「整条载荷不必同时存在于内存」，退化成交换一份 `Response` 是把它的内存预算和预期一起毁掉。
+    // 排在打标之后：这是一次「有记录、零 mark」的本地拒绝，不是一次没发生过的交换。
+    if (!Engine::instance().capabilities().streaming) {
+        record_local_outcome(origin, ErrorCode::NetPlatformUnavailable, 0, 0);
+        co_return Result<StreamOutcome>{
+            make_error(ErrorCode::NetPlatformUnavailable, "open_stream: this leg has no streaming response body")};
+    }
     // Jar 起手附着与 `send` 同一处同判据（排在查表之前，缓存键因此诚实）。
     attach_cookies_from_jar(origin, cookie_jar_);
     // 策略读定与起手闸同 `send`：发起那一刻取一份，逐跳共用；闸排在查表之前，缓存命中同样是交付。
     const NetPolicy security = effective_policy(policy_);
     if (const auto verdict = gate_origin(proxy_, tls_, security, origin); !verdict) {
+        record_local_outcome(origin, verdict.error().code_enum, 0, 0);
         co_return Result<StreamOutcome>{verdict.error()};
     }
     // 缓存起手式：命中新鲜副本时把已存的那份体按段交给同一个宿主，一条连接都不发起。交付次序与真取回时一致
@@ -1899,6 +2114,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
     // 交出去，但这次交换的结果不进表。
     const CacheOpening opening = open_from_cache(cache_, cache_options_, origin);
     if (opening.fresh.has_value()) {
+        record_cache_hit(origin, *opening.fresh);
         co_return Result<StreamOutcome>{deliver_cached_stream(sink, *opening.fresh)};
     }
     // 环关时没有壳可言：把调用方的宿主原样交下去，`on_head` / `on_data` / `on_end` 的调用对象与装环前完全
@@ -1913,15 +2129,23 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
 
     // 重试环与单次交换**同帧**：`CoroTask` 不是 awaitable（`state/coroutine.h` 的 promise 永不首挂也不终挂，
     // 结果只经 `is_done()` / `result()` 轮询），故「把一次尝试抽成子协程再 co_await」在本库无对应机制。
+    // `pass` 与 `send` 同口径：认证重跑不递增 `attempt`，故它自己取一枚新 `pass`。
+    std::uint16_t next_pass = 0;
     for (std::uint32_t attempt = 1;;) {
         // 收摊口与 `send` 同一条：取消落在两次尝试之间时，一次都没打过才交「被取消」，打过的那次留下自己的事实。
         if (sequence.is_cancelled()) {
             if (attempt == 1 && !replay_for_credentials) {
                 outcome = Result<StreamOutcome>{
                     make_error(ErrorCode::NetCancelled, "the exchange was cancelled before it ran")};
+                record_local_outcome(origin,
+                                     wall->fired.load() == static_cast<int>(TimeoutStage::Budget)
+                                         ? ErrorCode::HttpTimeout
+                                         : ErrorCode::NetCancelled,
+                                     0, 0);
             }
             break;
         }
+        std::uint16_t pass_index = next_pass++;  // 陈旧连接换新重跑会再取一枚
         Cancellation token;
         // 墙到点即掐掉在途的这一次尝试（`Cancellation` 契约：钩子至多触发一次），随后本环据 `is_cancelled()` 收摊。
         sequence.on_cancel([token]() mutable { token.cancel(); });
@@ -1953,6 +2177,9 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
         bool auth_hop = false;  // 本次尝试被认证问答掐住：头部尚未交出，凭据到位后整次重跑
         bool stale_retried = false;  // 本尝试是否已对一条陈旧的池连接重试过（一尝试一次，保证收敛）
         bool queue_failed = false;  // 本尝试是否在排队上没等到（connect 档到点或取消）：收尾据此把 detail 说成「排队」
+        // 本尝试的记账句柄与「失败时正在进行的阶段」（口径同 `send`）。
+        std::optional<ExchangeTrace> trace;
+        std::optional<HttpStage> failure_stage;
 
         detail::ProgressGate gate(current.on_progress(), progress_frame_source_);
         std::uint64_t wire_bytes = 0;  // 跨全部跳、分帧解出的线上字节（解压前口径）
@@ -1967,6 +2194,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
         std::uint64_t upload_total = 0;
         bool upload_total_known = false;  // 请求体总量给得出否（分块形态给不出）
         bool head_seen = false;
+        bool first_byte_seen = false;  // 本跳是否已读到应答头首字节（阶段标记只落一次）
         bool upload_running = false;
         bool upload_settled = false;
 
@@ -1974,6 +2202,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
         StageTimer total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
 
         for (;;) {
+            failure_stage.reset();
             // ── 路由先于渲染：请求行形态取决于本跳的对端（与 `send` 同判据）。
             const auto &url_slot = current.url();
             if (!url_slot.has_value()) {
@@ -1988,6 +2217,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
             upload_total = 0;
             upload_total_known = false;
             head_seen = false;
+            first_byte_seen = false;
             upload_running = false;
             upload_settled = false;
 
@@ -2029,6 +2259,8 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
             // ── 建连并统一读写口：明文 / TLS 两条流经捕获 shared_ptr 的类型擦除闭包收敛到同一对 awaiter，
             //    第三枚「带窗口的读」只服务 `Expect: 100-continue`（与 `send` 同形态，见那里的说明）。
             //    连接池的取用与排队同 `send`（读那条的注释；流式路径的归还判据在收尾处，见下）。
+            //    记账同样从这一刻起手：池排队计入本跳耗时；复用与否要到取用之后才知道（`set_reused_connection` 补记）。
+            begin_exchange_trace(trace, current, target, static_cast<std::uint16_t>(hops), pass_index, false);
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<char>)> read_one;
             std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
             std::function<detail::CallbackAwaiter<detail::WindowedRead>(std::size_t, std::chrono::milliseconds)>
@@ -2052,6 +2284,9 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     if (got.verdict == detail::HttpPoolAcquire::Ready) {
                         leased_from_pool = true;
                         lease.adopt(std::move(got.connection), got.born);
+                        // 复用连接没有建连与握手两段：首枚 mark 就是「传输就绪」，记在取用这一刻。
+                        trace->set_reused_connection(true);
+                        trace->mark(HttpStage::ConnectionAcquired);
                         connect_timer.stop();  // 命中即停表：建连（含握手）这一段没有发生
                         break;
                     }
@@ -2064,6 +2299,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                             ErrorCode::HttpTimeout,
                             "connect timeout: queued too long for an idle connection (pool per-host limit)")};
                         queue_failed = true;
+                        failure_stage = HttpStage::Connect;  // 排队计入 connect 档
                         break;
                     }
                     co_await detail::await_sleep(AURORA_POOL_QUEUE_POLL, token);
@@ -2071,6 +2307,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                         one = Result<StreamOutcome>{make_error(
                             ErrorCode::NetCancelled, "the exchange was cancelled while queued for a connection")};
                         queue_failed = true;
+                        failure_stage = HttpStage::Connect;
                         break;
                     }
                 }
@@ -2089,13 +2326,17 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                                                        token, hop.tunneled_via_proxy ? &negotiation : nullptr);
                 if (!plain) {
                     one = Result<StreamOutcome>{plain.error()};
+                    failure_stage = HttpStage::Connect;  // DNS 失败也在这一段（口径见公共头的阶段表）
                     break;
                 }
+                trace->mark(HttpStage::Connect);
                 auto secure = co_await detail::await_handshake(std::move(plain.value()), host, tls_, token);
                 if (!secure) {
                     one = Result<StreamOutcome>{secure.error()};
+                    failure_stage = HttpStage::TlsHandshake;
                     break;
                 }
+                trace->mark(HttpStage::TlsHandshake);
                 secure_holder = std::make_shared<TlsTransport>(std::move(secure.value()));
             } else {
                 auto plain =
@@ -2103,8 +2344,10 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                                                        token, hop.tunneled_via_proxy ? &negotiation : nullptr);
                 if (!plain) {
                     one = Result<StreamOutcome>{plain.error()};
+                    failure_stage = HttpStage::Connect;
                     break;
                 }
+                trace->mark(HttpStage::Connect);
                 plain_holder = std::make_shared<StreamTransport>(std::move(plain.value()));
             }
             if (!leased_from_pool) {
@@ -2132,6 +2375,10 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                                                                 std::chrono::milliseconds window) {
                     return detail::await_read_within(*holder, capacity, window, late);
                 };
+            }
+            if (!leased_from_pool) {
+                // 新连接在 Connect / TlsHandshake 之后；复用连接的首枚 mark 已在取用处记下。
+                trace->mark(HttpStage::ConnectionAcquired);
             }
             connect_timer.stop();
 
@@ -2161,6 +2408,27 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 return Result<detail::EmitFlow>{flow == SinkFlow::Stop ? detail::EmitFlow::Stop
                                                                        : detail::EmitFlow::Continue};
             };
+            // 失败时正在进行的阶段（口径同 `send`）：头部已定形即在读体，首字节未到则仍在交请求。
+            auto read_failure_stage = [&]() -> HttpStage {
+                if (assembler.head_ready()) {
+                    return HttpStage::BodyDone;
+                }
+                return first_byte_seen ? HttpStage::FirstByte : HttpStage::RequestSent;
+            };
+            // 空闲连接被对端关掉时的换新重跑：本跳记一次失败的物理往来，换一枚 `pass` 再起一跳（`hop` 不变）。
+            auto restart_on_stale = [&](HttpStage stage) -> bool {
+                if (!stale_retry_eligible()) {
+                    return false;
+                }
+                stale_retried = true;
+                // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
+                force_fresh_connect = true;
+                trace->fail(one.error().code_enum, stage);
+                trace->finish();
+                trace.reset();
+                pass_index = next_pass++;
+                return true;
+            };
 
             auto plan = detail::plan_request_body(current);
             if (!plan) {
@@ -2179,21 +2447,23 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 payload.insert(payload.end(), current.body().begin(), current.body().end());
                 auto written = co_await write_one(std::span<const char>{payload});
                 if (!written) {
-                    if (stale_retry_eligible()) {
-                        stale_retried = true;
-                        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
-                        force_fresh_connect = true;
+                    one = Result<StreamOutcome>{written.error()};
+                    failure_stage = HttpStage::ConnectionAcquired;  // RequestSent 未到：请求还没交完
+                    if (restart_on_stale(*failure_stage)) {
                         continue;  // 空闲期被对端关了：幂等方法换新连接重跑本跳（一个字节都没出去过）
                     }
-                    one = Result<StreamOutcome>{written.error()};
                     break;
                 }
+                trace->note_sent(payload.size());
             } else {
                 bool write_failed = false;
                 auto written_head = co_await write_one(std::span<const char>{head.value()});
                 if (!written_head) {
                     one = Result<StreamOutcome>{written_head.error()};
+                    failure_stage = HttpStage::ConnectionAcquired;
                     write_failed = true;
+                } else {
+                    trace->note_sent(head.value().size());
                 }
                 if (!write_failed && await_continue) {
                     // 那条 1xx 只喂进装配器、不做判定也不交付：头部判定在环内统一走，本处只要「对端回过话没有」
@@ -2202,12 +2472,20 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     const auto &probe = handed.value();  // awaiter 恒以成功 `Result` 交出结局，失败在载荷里
                     if (probe.outcome == detail::WindowedRead::Outcome::Failure) {
                         one = Result<StreamOutcome>{*probe.error};
+                        failure_stage = HttpStage::ConnectionAcquired;
                         write_failed = true;
                     }
                     if (!write_failed && !probe.bytes.empty()) {
+                        // 线上字节与阶段在喂装配器之前记：即便这批字节随后被判畸形，它们确实到达过。
+                        trace->note_received(probe.bytes.size());
+                        if (!first_byte_seen) {
+                            first_byte_seen = true;
+                            trace->mark(HttpStage::FirstByte);
+                        }
                         auto queued = assembler.push(std::string_view{probe.bytes.data(), probe.bytes.size()});
                         if (!queued) {
                             one = Result<StreamOutcome>{queued.error()};
+                            failure_stage = read_failure_stage();
                             write_failed = true;
                         } else {
                             carried = true;
@@ -2232,6 +2510,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                         auto segment = pump.next_segment();
                         if (!segment) {
                             one = Result<StreamOutcome>{segment.error()};
+                            failure_stage = HttpStage::ConnectionAcquired;
                             write_failed = true;
                             break;
                         }
@@ -2241,9 +2520,11 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                         auto written = co_await write_one(std::span<const char>{segment.value()});
                         if (!written) {
                             one = Result<StreamOutcome>{written.error()};
+                            failure_stage = HttpStage::ConnectionAcquired;
                             write_failed = true;
                             break;
                         }
+                        trace->note_sent(segment.value().size());
                         uploaded = pump.payload_bytes();
                         const bool settled = length_known ? uploaded >= upload_total : pump.done();
                         if (gate.armed()) {
@@ -2261,15 +2542,14 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     }
                 }
                 if (write_failed) {
-                    if (stale_retry_eligible()) {
-                        stale_retried = true;
-                        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
-                        force_fresh_connect = true;
+                    if (restart_on_stale(failure_stage.value_or(HttpStage::ConnectionAcquired))) {
                         continue;  // 头部都还没到就折了：幂等方法换新连接重跑本跳
                     }
                     break;
                 }
             }
+            // 头与体全部交给传输层（417 一类的直接作答没发体，但请求已按对端意思交完）。
+            trace->mark(HttpStage::RequestSent);
 
             while (!assembler.complete() || carried) {
                 if (carried) {
@@ -2277,10 +2557,16 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 } else if (!late->empty()) {
                     // 被放弃那次「带窗口的读」后来到过的字节排在本次读之前（传输层的 FIFO 口径），先兑现它的
                     // 线上次序。队列只可能被填一次，喂完即清。
+                    trace->note_received(late->size());
+                    if (!first_byte_seen) {
+                        first_byte_seen = true;
+                        trace->mark(HttpStage::FirstByte);
+                    }
                     auto queued = assembler.push(std::string_view{late->data(), late->size()});
                     late->clear();
                     if (!queued) {
                         one = Result<StreamOutcome>{queued.error()};
+                        failure_stage = read_failure_stage();
                         halted = true;
                         break;
                     }
@@ -2290,6 +2576,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     read_timer.stop();
                     if (!read) {
                         one = Result<StreamOutcome>{read.error()};
+                        failure_stage = read_failure_stage();
                         halted = true;
                         break;
                     }
@@ -2297,10 +2584,16 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     // 线上次序再判本轮结局——结局即便是「对端已关」也一样：那批字节可能正是完整的一条应答。
                     // 队列只可能被填一次，喂完即清。
                     if (!late->empty()) {
+                        trace->note_received(late->size());
+                        if (!first_byte_seen) {
+                            first_byte_seen = true;
+                            trace->mark(HttpStage::FirstByte);
+                        }
                         auto queued = assembler.push(std::string_view{late->data(), late->size()});
                         late->clear();
                         if (!queued) {
                             one = Result<StreamOutcome>{queued.error()};
+                            failure_stage = read_failure_stage();
                             halted = true;
                             break;
                         }
@@ -2311,23 +2604,37 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                         auto closed = assembler.peer_closed();
                         if (!closed) {
                             one = Result<StreamOutcome>{closed.error()};
+                            failure_stage = read_failure_stage();
                             halted = true;
                             break;
                         }
                         if (!assembler.complete()) {
                             one = Result<StreamOutcome>{
                                 make_error(ErrorCode::HttpProtocolError, "peer closed before the body was complete")};
+                            failure_stage = read_failure_stage();
                             halted = true;
                             break;
                         }
                         // 不在这里 break：本轮可能就是「头部与整段体都出自暂存字节」的那一轮，宿主的
                         // `on_head` → `on_data` 次序得跟着走完，之后 `while` 的条件自然收场。
                     } else if (!assembler.complete()) {
+                        trace->note_received(got);
+                        if (!first_byte_seen) {
+                            first_byte_seen = true;
+                            trace->mark(HttpStage::FirstByte);
+                        }
                         auto pushed = assembler.push(std::string_view{chunk.data(), got});
                         if (!pushed) {
                             one = Result<StreamOutcome>{pushed.error()};
+                            failure_stage = read_failure_stage();
                             halted = true;
                             break;
+                        }
+                    } else {
+                        trace->note_received(got);
+                        if (!first_byte_seen) {
+                            first_byte_seen = true;
+                            trace->mark(HttpStage::FirstByte);
                         }
                     }
                 }
@@ -2342,6 +2649,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 // 头部判定必须先于体交付：一次读常同时带来头部尾与体首段，而宿主的次序契约是 on_head → on_data。
                 if (!head_seen && assembler.head_ready()) {
                     head_seen = true;
+                    trace->set_status(assembler.head().status);
                     announced_total = assembler.framing() == wire::BodyFraming::Length
                                           ? announced_length(assembler.head())
                                           : std::optional<std::uint64_t>{};
@@ -2482,13 +2790,14 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 }
             }
             if (halted) {
-                if (stale_retry_eligible()) {
-                    stale_retried = true;
-                    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 协程帧上的跨 continue 读，分析器不可见
-                    force_fresh_connect = true;
+                if (restart_on_stale(failure_stage.value_or(HttpStage::RequestSent))) {
                     continue;  // 头部都还没到就读折了：幂等方法换新连接重跑本跳（多半是空闲期被对端关了）
                 }
                 break;
+            }
+            if (!redirect_hop && !stopped_by_sink) {
+                // 最终一跳的线上体已读完；中间重定向跳的体不属于本次交付，宿主主动停读不算读完。
+                trace->mark(HttpStage::BodyDone);
             }
             // 收尾排空：装配器在 `complete()` 那一轮已把明文交进 `pending_`，本步只兜住「最后一批还压在内部缓冲」
             // 这一种形态。中途收摊（宿主 `Stop`）、弃体换跳（重定向）与 304 都不兜——前者不能再交付字节，后两者的
@@ -2508,6 +2817,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                     auto emitted = decoder->push(std::span<const char>{scratch});
                     if (!emitted) {
                         one = Result<StreamOutcome>{emitted.error()};
+                        failure_stage = HttpStage::BodyDone;  // 线上体已读完，失败发生在还原
                         break;
                     }
                     stopped_by_sink = emitted.value() == detail::EmitFlow::Stop;
@@ -2526,6 +2836,9 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 current = std::move(next.value());
                 // 下一跳按新目标的域重新从 Jar 取（与 `send` 同一条逐跳纪律）。
                 attach_cookies_from_jar(current, cookie_jar_);
+                // 本跳到此收摊：状态码与字节都在，没有 BodyDone（中间跳），也没有错误。
+                trace->finish();
+                trace.reset();
                 continue;
             }
             if (not_modified_hop) {
@@ -2565,6 +2878,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 auto settled = decoder ? decoder->finish() : Result<detail::EmitFlow>{detail::EmitFlow::Continue};
                 if (!settled) {
                     one = Result<StreamOutcome>{settled.error()};
+                    failure_stage = HttpStage::BodyDone;  // 线上体已读完，失败发生在还原链收摊
                     break;
                 }
                 // 收摊时回 `Stop` 同样是「宿主不要了」这一事实（此时线上字节已读完，只是末段交付被掐）。
@@ -2628,6 +2942,25 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
         }
 
         gate.finish();
+
+        // ── 本跳记账收摊：结局在这一刻定稿，存储与总线在此配对（口径同 `send`）。
+        //    `auth_hop` 那条路头部尚未交出、字节尚未交付，整次尝试被认证问答作废、凭据到位后重跑，
+        //    与本跳的真实结局无关（`one` 此时仍是占位错误），故只收摊、不记失败。
+        if (trace.has_value()) {
+            if (!one && !auth_hop) {
+                const ErrorCode code = wall->fired.load() == static_cast<int>(TimeoutStage::Budget)
+                                           ? ErrorCode::HttpTimeout
+                                           : one.error().code_enum;
+                trace->fail(code, failure_stage);
+            }
+            trace->finish();
+            trace.reset();
+        } else if (!one) {
+            record_local_outcome(current,
+                                 wall->fired.load() == static_cast<int>(TimeoutStage::Budget) ? ErrorCode::HttpTimeout
+                                                                                              : one.error().code_enum,
+                                 pass_index, static_cast<std::uint16_t>(hops));
+        }
 
         // ── 隧道那一侧的问答：代理把 `CONNECT` 拒成 407 时，那次失败带着挑战原文回来（见
         //    `detail::ProxyNegotiation`），此时还没有头部可问，故本块的地位等同 `send` 里的同一处。答复只写
@@ -2732,36 +3065,41 @@ auto Client::connect_websocket(Request request, WebSocketSink &sink, WebSocketOp
     }
     // 本腿要的是**一条可以被持续读写的裸连接**；wasm 的 `fetch` 连可读的 socket 都不给（裁决见提案 §16 第 3
     // 项）。绝不退化成别的形态：拿一次物化交换冒充一条不会结束的会话，比直接失败更误导调用方。
-    if (!Engine::instance().capabilities().streaming) {
-        co_return Result<WebSocket>{
-            make_error(ErrorCode::NetPlatformUnavailable, "connect_websocket: this leg has no raw byte stream")};
-    }
-
+    // 能力闸排在打标之后：它拒绝的是一次本可被观测的交换，记录里留一枚零 mark 的本地拒绝（阶段为空）。
     Request origin = std::move(request);
     // 链路标识与 Cookie 附着同另两腿：写在原始请求上，一次交换一枚。
     stamp_request_id(origin, request_id_);
     log_exchange_identity(origin);
     attach_cookies_from_jar(origin, cookie_jar_);
+    if (!Engine::instance().capabilities().streaming) {
+        record_local_outcome(origin, ErrorCode::NetPlatformUnavailable, 0, 0);
+        co_return Result<WebSocket>{
+            make_error(ErrorCode::NetPlatformUnavailable, "connect_websocket: this leg has no raw byte stream")};
+    }
     // 策略读定与起手闸同另两腿：被拒时连头部都没渲染，更不发起连接。
     const NetPolicy security = effective_policy(policy_);
     if (const auto verdict = gate_origin(proxy_, tls_, security, origin); !verdict) {
+        record_local_outcome(origin, verdict.error().code_enum, 0, 0);
         co_return Result<WebSocket>{verdict.error()};
     }
     const auto &slot = origin.url();
     if (!slot.has_value()) {
         // 目标解析失败由 `render_head()` 说（它带着解析时记下的那枚原因），策略不抢这个活。
         auto undeliverable = origin.render_head();
+        record_local_outcome(origin, undeliverable.error().code_enum, 0, 0);
         co_return Result<WebSocket>{undeliverable.error()};
     }
     const Url &target = slot.value();
     const std::string_view scheme = target.scheme();
     if (scheme != "ws" && scheme != "wss") {
+        record_local_outcome(origin, ErrorCode::WsHandshakeRejected, 0, 0);
         co_return Result<WebSocket>{
             make_error(ErrorCode::WsHandshakeRejected,
                        ErrorParams{{"detail", "the target scheme is '" + std::string{scheme} + "', not ws or wss"}})};
     }
     const auto port = target.effective_port();
     if (!port.has_value()) {
+        record_local_outcome(origin, ErrorCode::WsHandshakeRejected, 0, 0);
         co_return Result<WebSocket>{
             make_error(ErrorCode::WsHandshakeRejected, ErrorParams{{"detail", "the target has no effective port"}})};
     }
@@ -2769,6 +3107,7 @@ auto Client::connect_websocket(Request request, WebSocketSink &sink, WebSocketOp
     // 写成绝对形态，`wss://` 一律走隧道——隧道之上的 TLS 握手对象恒是目标主机。
     auto routed = plan_route(proxy_, tls_, security, target, *port);
     if (!routed) {
+        record_local_outcome(origin, routed.error().code_enum, 0, 0);
         co_return Result<WebSocket>{routed.error()};
     }
     const HopRoute &route = routed.value();  // 只借用：`routed` 活到本函数收尾，与另两腿同一形态
@@ -2784,6 +3123,11 @@ auto Client::connect_websocket(Request request, WebSocketSink &sink, WebSocketOp
     const StreamOptions stream_options;
     detail::ProxyNegotiation negotiation;  // 只带回 `CONNECT` 的补充事实；本腿不进认证环
     Result<WebSocket> outcome{make_error(ErrorCode::HttpProtocolError, "connect_websocket produced no outcome")};
+    // 本腿只收**握手**那一条：升级后的会话不进请求活动表（会话的收摊事实在 `WsCloseInfo` 里）。
+    // 一次握手就是一次物理往来，`pass` 与 `hop` 恒 0（本腿无重试、无重定向）。
+    ExchangeTrace trace = make_exchange_trace(origin, target, 0, 0, false);
+    std::optional<HttpStage> failure_stage;
+    bool first_byte_seen = false;
 
     for (;;) {
         // ── 起新连接：本腿不进池（句柄是这条连接唯一的持有者，池既拿不到它也收不回它）。
@@ -2793,20 +3137,25 @@ auto Client::connect_websocket(Request request, WebSocketSink &sink, WebSocketOp
                                                         stream_options, token, &negotiation);
         if (!plain) {
             outcome = Result<WebSocket>{plain.error()};
+            failure_stage = HttpStage::Connect;
             break;
         }
+        trace.mark(HttpStage::Connect);
         if (target.is_secure()) {
             auto secure =
                 co_await detail::await_handshake(std::move(plain.value()), std::string{target.host()}, tls_, token);
             if (!secure) {
                 outcome = Result<WebSocket>{secure.error()};
+                failure_stage = HttpStage::TlsHandshake;
                 break;
             }
+            trace.mark(HttpStage::TlsHandshake);
             secure_holder = std::make_shared<TlsTransport>(std::move(secure.value()));
         } else {
             plain_holder = std::make_shared<StreamTransport>(std::move(plain.value()));
         }
         connect_timer.stop();
+        trace.mark(HttpStage::ConnectionAcquired);
         std::function<detail::CallbackAwaiter<std::size_t>(std::span<char>)> read_one;
         std::function<detail::CallbackAwaiter<std::size_t>(std::span<const char>)> write_one;
         if (secure_holder != nullptr) {
@@ -2829,51 +3178,67 @@ auto Client::connect_websocket(Request request, WebSocketSink &sink, WebSocketOp
         auto head = detail::render_ws_handshake(target, origin.headers(), offer, route.absolute_form, key);
         if (!head) {
             outcome = Result<WebSocket>{head.error()};
+            failure_stage = HttpStage::ConnectionAcquired;  // 握手请求还没交出
             break;
         }
         const std::string handshake_bytes = std::move(head.value());
         auto written = co_await write_one(std::span<const char>{handshake_bytes});
         if (!written) {
             outcome = Result<WebSocket>{written.error()};
+            failure_stage = HttpStage::ConnectionAcquired;
             break;
         }
+        trace.note_sent(handshake_bytes.size());
+        trace.mark(HttpStage::RequestSent);  // 握手请求已全部交给传输层
 
         // ── 逐段读头部块，装配器一律不上：`wire::ResponseAssembler` 把 101 当场判成协议违例（那对一条普通
         //    交换是正确的），而这里要的恰恰是那一句应答。`parse_response_head` 只吃头部块自身占用的字节。
         std::string buffered;
         std::optional<wire::ResponseHead> head_block;
-        bool interrupted = false;
+        // 本腿没有 Body 完成阶段：首字节到了即 FirstByte，之后一切失败都归在这一段。
+        auto handshake_failure_stage = [&]() -> HttpStage {
+            return first_byte_seen ? HttpStage::FirstByte : HttpStage::RequestSent;
+        };
         std::array<char, AURORA_READ_CHUNK> chunk{};
         while (!head_block.has_value()) {
             auto got = co_await read_one(std::span<char>{chunk});
             if (!got) {
                 outcome = Result<WebSocket>{got.error()};
-                interrupted = true;
+                failure_stage = handshake_failure_stage();
                 break;
             }
             if (got.value() == 0U) {
                 outcome = Result<WebSocket>{make_error(
                     ErrorCode::WsHandshakeRejected,
                     ErrorParams{{"detail", "the peer closed the connection without answering the upgrade"}})};
-                interrupted = true;
+                failure_stage = handshake_failure_stage();
                 break;
+            }
+            trace.note_received(got.value());
+            if (!first_byte_seen) {
+                first_byte_seen = true;
+                trace.mark(HttpStage::FirstByte);
             }
             buffered.append(chunk.data(), got.value());
             auto parsed = wire::parse_response_head(std::string_view{buffered});
             if (!parsed) {
                 outcome = Result<WebSocket>{parsed.error()};
-                interrupted = true;
+                failure_stage = HttpStage::FirstByte;
                 break;
             }
             head_block = parsed.value();  // 空 = 头部块还没读完，继续读下一段
         }
-        if (interrupted) {
+        // 头部块没到手就是读环里已经收场：下一步直接跳出本腿去定稿，别拿空的头块往下走。
+        // 这同时是给路径分析的一座桥——`head_block` 持有值由判空直接支配，下面的解引用不再隔着布尔中转。
+        if (!head_block.has_value()) {
             break;
         }
+        trace.set_status(head_block->status);
 
         auto accept = detail::validate_ws_handshake(*head_block, key, offer);
         if (!accept) {
             outcome = Result<WebSocket>{accept.error()};
+            failure_stage = HttpStage::FirstByte;  // 头部已到，失败发生在升级验收
             break;
         }
         // 应答侧的 Jar 收取照做：升级应答里的 `Set-Cookie` 同样是服务端要本会话记住的身份（畸形条目逐条丢弃）。
@@ -2911,6 +3276,11 @@ auto Client::connect_websocket(Request request, WebSocketSink &sink, WebSocketOp
                 break;
         }
     }
+    // 握手记账收摊：结局在改道之后定稿；成功时没有 BodyDone（升级后的帧流不属于请求观测）。
+    if (!outcome) {
+        trace.fail(outcome.error().code_enum, failure_stage);
+    }
+    trace.finish();
     co_return outcome;
 }
 }  // namespace aurora::net::http

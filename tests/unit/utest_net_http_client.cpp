@@ -36,8 +36,13 @@
 ///           `utest_net_http_request_id.cpp`。取消入口（`send` / `open_stream` 的 `Cancellation` 形参）验三条：
 ///           起手已取消的令牌一个字节都不发（对端 `accepts()` 恒 0，策略与缓存都不问）、在途交换被掐即以
 ///           `net-cancelled` 收尾（不挂到整请求时限上）、同一枚令牌下的流式交换三个宿主入口一次都不被调用。
+///           网络活动记账另成一族（`AURORA_ENABLE_DEBUG` 限定）：一次完整交换的阶段次序与偏移单调、重定向中间跳
+///           无 `BodyDone`、复用连接的首枚 `ConnectionAcquired` 偏移为零、200 体中途失败保留状态码、打标前拒绝
+///           零记录、打标后本地拒绝零 mark、新鲜缓存命中零 mark、宿主停读无 `BodyDone`、取消落 `net-cancelled`
+///           且非 `abandoned`、重定向 + 重试 + 凭据重放的 hop/pass 展开与查询口径。
 /// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -49,6 +54,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "aurora/core/error_codes.h"
@@ -61,6 +67,7 @@
 #include "aurora/net/http_auth.h"
 #include "aurora/net/http_client.h"
 #include "aurora/net/http_multipart.h"
+#include "aurora/net/http_observability.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/net/policy.h"
 #include "aurora/state/coroutine.h"
@@ -89,7 +96,10 @@ using aurora::net::http::Client;
 using aurora::net::http::DataSink;
 using aurora::net::http::error_class_of;
 using aurora::net::http::HttpErrorClass;
+using aurora::net::http::HttpRequestTimeline;
+using aurora::net::http::HttpStage;
 using aurora::net::http::MultipartWriter;
+using aurora::net::http::PoolOptions;
 using aurora::net::http::Progress;
 using aurora::net::http::ProgressPhase;
 using aurora::net::http::Request;
@@ -758,6 +768,102 @@ class InjectingProvider final : public Authenticator {
         co_return Result<AuthDecision>{AuthDecision{std::move(headers)}};
     }
 };
+
+#ifdef AURORA_ENABLE_DEBUG
+
+/// @brief 把进程级活动存储恢复到缺省口径并清空：各例互不继承记录。
+///
+/// 存储是进程级的（跨全部 `Client` 共用），本套件的用例又都真实触网；不在这里归零，后一例会把前一例的交换
+/// 数进自己的 `entries.size()`。`AURORA_ENABLE_DEBUG` 未开时这些函数是空操作，整套观测用例本就按跳过登记。
+auto reset_network_activity() -> void {
+    aurora::net::http::set_activity_options(aurora::net::http::ActivityOptions{});
+    aurora::net::http::clear_network_activity();
+}
+
+/// @brief 读到一次请求的头部块尾并留档（keep-alive 周期脚本用）。
+/// @param socket 连接。
+/// @param stop 对端停机信号。
+/// @param recorded 留档缓冲（只留最后一枚请求）。
+/// @param guard 留档的锁。
+/// @return 读到非空请求为真。
+[[nodiscard]] auto read_head_into(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, std::string &recorded,
+                                  std::mutex &guard) -> bool {
+    (void)socket.set_io_timeout(std::chrono::seconds{10});
+    std::vector<char> buffer(8192);
+    std::string seen;
+    while (!stop.load()) {
+        const auto read = socket.read_some(std::span<char>{buffer});
+        if (!read || read.value() == 0) {
+            break;
+        }
+        seen.append(buffer.data(), read.value());
+        if (seen.find("\r\n\r\n") != std::string::npos) {
+            break;
+        }
+    }
+    {
+        const std::scoped_lock held(guard);
+        recorded = seen;
+    }
+    return !seen.empty();
+}
+
+/// @brief 一条连接跑 N 个「读请求 → 应答」周期：连接复用判据的对端半边。
+/// @param cycles 计划服务的请求-应答周期数。
+/// @param response 每个周期写出的应答字节。
+/// @param recorded 最后一枚请求的交接缓冲。
+/// @param guard 交接缓冲的锁。
+/// @return 对端脚本。
+[[nodiscard]] auto serve_cycles(int cycles, std::string response, std::string &recorded, std::mutex &guard)
+    -> PeerScript {
+    return [cycles, response = std::move(response), &recorded, &guard](aurora::net::blocking::StreamSocket &socket,
+                                                                       PeerStop &stop) -> void {
+        for (int served = 0; served < cycles && !stop.load(); ++served) {
+            if (!read_head_into(socket, stop, recorded, guard)) {
+                return;
+            }
+            (void)socket.write_all(std::span<const char>{response});
+        }
+    };
+}
+
+/// @brief 时间线里是否出现某一阶段（缺席即本跳没经历）。
+/// @param timeline 时间线。
+/// @param stage 待找阶段。
+/// @return 出现为真。
+[[nodiscard]] auto has_stage(const HttpRequestTimeline &timeline, HttpStage stage) -> bool {
+    return std::any_of(timeline.marks.begin(), timeline.marks.end(),
+                       [stage](const aurora::net::http::StageMark &mark) { return mark.stage == stage; });
+}
+
+/// @brief 第一段体就收摊的宿主：`SinkFlow::Stop` 那一族判据要的正是「主动停读」。
+class StoppingSink final : public DataSink {
+  public:
+    /// @brief 记一次头部到达并继续。
+    /// @param head 头部块。
+    /// @return 恒 `Continue`。
+    auto on_head(const Response &head) -> SinkFlow override {
+        (void)head;
+        ++heads;
+        return SinkFlow::Continue;
+    }
+    /// @brief 第一段体即收摊。
+    /// @param body 本段明文。
+    /// @return 恒 `Stop`。
+    auto on_data(std::span<const char> body) -> SinkFlow override {
+        (void)body;
+        ++segments;
+        return SinkFlow::Stop;
+    }
+    /// @brief 记一次收尾宣告。
+    auto on_end() -> void override { ++ends; }
+
+    int heads{0};  ///< `on_head` 调用次数
+    int segments{0};  ///< `on_data` 调用次数
+    int ends{0};  ///< `on_end` 调用次数
+};
+
+#endif
 
 }  // namespace
 
@@ -2946,6 +3052,448 @@ AURORA_TEST_CASE(a_stamped_identifier_does_not_disturb_the_table) {
     AURORA_TEST_REQUIRE(bool(second));
     AURORA_TEST_CHECK(second.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
+}
+
+AURORA_TEST_CASE(send_records_a_full_stage_timeline) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Content-Type: text/plain\r\n", body_of("hello"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+    Client client;
+    allow_test_cleartext(client);
+
+    const auto response =
+        send_and_drive(client, Request::get(loopback_url(peer.port(), "/pkg/run?a=1")).request_id("rid-stage"));
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+
+    const auto snapshot = aurora::net::http::activity_snapshot();
+    AURORA_TEST_REQUIRE(snapshot.available);
+    AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{1});
+    const auto &entry = snapshot.entries.front();
+    AURORA_TEST_CHECK_EQ(entry.request_id, std::string{"rid-stage"});
+    AURORA_TEST_CHECK_EQ(entry.method, std::string{"GET"});
+    // 查询值是 `Sensitive`：未装放行策略时折叠，路径其余部分原样。
+    AURORA_TEST_CHECK_EQ(entry.path, std::string{"/pkg/run?a=***"});
+    AURORA_TEST_CHECK_EQ(entry.host, "127.0.0.1:" + std::to_string(peer.port()));
+    AURORA_TEST_CHECK_EQ(entry.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(entry.hop, std::uint16_t{0});
+    AURORA_TEST_CHECK_EQ(entry.pass, std::uint16_t{0});
+    AURORA_TEST_CHECK_FALSE(entry.in_flight);
+    AURORA_TEST_CHECK_FALSE(entry.abandoned);
+    AURORA_TEST_CHECK_FALSE(entry.from_cache);
+    AURORA_TEST_CHECK(entry.error_code.empty());
+    AURORA_TEST_CHECK_FALSE(entry.failed_stage.has_value());
+    AURORA_TEST_CHECK_GT(entry.sent, std::uint64_t{0});
+    AURORA_TEST_CHECK_GT(entry.received, std::uint64_t{0});
+    AURORA_TEST_CHECK_EQ(snapshot.dropped, std::uint64_t{0});
+
+    const auto timeline = aurora::testing::require_value(aurora::net::http::timeline_of("rid-stage"));
+    AURORA_TEST_CHECK_EQ(timeline.exchange_id, entry.exchange_id);
+    AURORA_TEST_CHECK_FALSE(timeline.in_flight);
+    // 明文目标没有握手段：五枚阶段按线上次序各到一次。
+    const std::vector<HttpStage> expected{HttpStage::Connect, HttpStage::ConnectionAcquired, HttpStage::RequestSent,
+                                          HttpStage::FirstByte, HttpStage::BodyDone};
+    AURORA_TEST_REQUIRE_EQ(timeline.marks.size(), expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        AURORA_TEST_CHECK(timeline.marks.at(index).stage == expected.at(index));
+        if (index > 0) {
+            AURORA_TEST_CHECK(timeline.marks.at(index - 1).offset <= timeline.marks.at(index).offset);
+        }
+    }
+    AURORA_TEST_CHECK(timeline.marks.back().offset <= timeline.total);
+#endif
+}
+
+AURORA_TEST_CASE(a_redirect_hop_has_no_body_done) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer target(reply_after_reading(1, service_ok()));
+    AURORA_TEST_REQUIRE(target.valid());
+    const std::string redirect =
+        "HTTP/1.1 302 Found\r\nLocation: " + loopback_url(target.port(), "/final") + "\r\nContent-Length: 0\r\n\r\n";
+    ScriptedPeer origin(reply_after_reading(1, redirect));
+    AURORA_TEST_REQUIRE(origin.valid());
+    Client client;
+    allow_test_cleartext(client);
+
+    const auto response =
+        send_and_drive(client, Request::get(loopback_url(origin.port(), "/start")).request_id("rid-hop"));
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+
+    // 每一跳各占一条记录，按 `exchange_id` 升序；中间跳的体是被主动放弃的，故没有 `BodyDone`。
+    const auto hops = aurora::net::http::timelines_of("rid-hop");
+    AURORA_TEST_REQUIRE_EQ(hops.size(), std::size_t{2});
+    AURORA_TEST_CHECK(hops.at(0).exchange_id < hops.at(1).exchange_id);
+    AURORA_TEST_CHECK_EQ(hops.at(0).hop, std::uint16_t{0});
+    AURORA_TEST_CHECK_EQ(hops.at(1).hop, std::uint16_t{1});
+    AURORA_TEST_CHECK_FALSE(has_stage(hops.at(0), HttpStage::BodyDone));
+    AURORA_TEST_CHECK(has_stage(hops.at(1), HttpStage::BodyDone));
+
+    const auto latest = aurora::testing::require_value(aurora::net::http::timeline_of("rid-hop"));
+    AURORA_TEST_CHECK_EQ(latest.exchange_id, hops.at(1).exchange_id);
+
+    const auto snapshot = aurora::net::http::activity_snapshot();
+    AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(snapshot.entries.at(0).status, std::uint16_t{200});  // 最新在前
+    AURORA_TEST_CHECK_EQ(snapshot.entries.at(1).status, std::uint16_t{302});
+    AURORA_TEST_CHECK_FALSE(snapshot.entries.at(0).in_flight);
+    AURORA_TEST_CHECK_FALSE(snapshot.entries.at(1).in_flight);
+#endif
+}
+
+AURORA_TEST_CASE(a_reused_connection_starts_at_connection_acquired) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    const aurora::test::net::HostDriven host;
+    std::string recorded;
+    std::mutex guard;
+    ScriptedPeer peer(serve_cycles(2, length_framed("", body_of("served")), recorded, guard));
+    AURORA_TEST_REQUIRE(peer.valid());
+    Client client;
+    allow_test_cleartext(client);
+    client.pool(PoolOptions{.enabled = true});
+
+    const auto first =
+        send_and_drive(client, Request::get(loopback_url(peer.port(), "/first")).request_id("rid-pool-0"));
+    AURORA_TEST_REQUIRE(bool(first));
+    const auto second =
+        send_and_drive(client, Request::get(loopback_url(peer.port(), "/next")).request_id("rid-pool-1"));
+    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 第二次坐上了同一条连接
+
+    const auto fresh = aurora::testing::require_value(aurora::net::http::timeline_of("rid-pool-0"));
+    const auto reused = aurora::testing::require_value(aurora::net::http::timeline_of("rid-pool-1"));
+    AURORA_TEST_CHECK_FALSE(fresh.reused_connection);
+    AURORA_TEST_CHECK(has_stage(fresh, HttpStage::Connect));
+    AURORA_TEST_CHECK(reused.reused_connection);
+    // 复用连接没有建连与握手：首枚是偏移为零的 `ConnectionAcquired`，其后照常是请求与应答各段。
+    AURORA_TEST_CHECK_FALSE(has_stage(reused, HttpStage::Connect));
+    AURORA_TEST_CHECK_FALSE(has_stage(reused, HttpStage::TlsHandshake));
+    AURORA_TEST_REQUIRE_FALSE(reused.marks.empty());
+    AURORA_TEST_CHECK(reused.marks.front().stage == HttpStage::ConnectionAcquired);
+    AURORA_TEST_CHECK_EQ(reused.marks.front().offset.count(), std::int64_t{0});
+    AURORA_TEST_CHECK(has_stage(reused, HttpStage::BodyDone));
+#endif
+}
+
+AURORA_TEST_CASE(a_mid_body_failure_keeps_the_answered_status) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(write_then_half_close("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nhello"));
+    AURORA_TEST_REQUIRE(peer.valid());
+    Client client;
+    allow_test_cleartext(client);
+
+    const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-body-fail"));
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+
+    const auto snapshot = aurora::net::http::activity_snapshot();
+    AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{1});
+    const auto &entry = snapshot.entries.front();
+    // 头部已经完整交付，故状态码是事实；失败发生在把体收满这一段。
+    AURORA_TEST_CHECK_EQ(entry.status, std::uint16_t{200});
+    AURORA_TEST_CHECK(entry.failed_stage == std::optional<HttpStage>{HttpStage::BodyDone});
+    AURORA_TEST_CHECK_FALSE(entry.error_code.empty());
+    AURORA_TEST_CHECK_FALSE(entry.in_flight);
+    const auto timeline = aurora::testing::require_value(aurora::net::http::timeline_of("rid-body-fail"));
+    AURORA_TEST_CHECK(has_stage(timeline, HttpStage::FirstByte));
+    AURORA_TEST_CHECK_FALSE(has_stage(timeline, HttpStage::BodyDone));  // 终点没到，不是「失败于已到终点」
+#endif
+}
+
+AURORA_TEST_CASE(a_pre_stamp_rejection_leaves_no_record) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    Client client;
+    allow_test_cleartext(client);
+
+    // 越界的重试策略在打标之前就被拒：这次交换从未被记账。
+    const auto invalid =
+        send_and_drive(client, Request::get("http://127.0.0.1:1/").retry_policy(RetryPolicy{.jitter = 2.0}));
+    AURORA_TEST_REQUIRE_FALSE(bool(invalid));
+    AURORA_TEST_CHECK_EQ(invalid.error().code_enum, ErrorCode::HttpRequestInvalid);
+
+    // 起手即已取消同理：取消先于打标，连一条零 mark 的记录都不该有。
+    Cancellation token;
+    token.cancel();
+    auto task = client.send(Request::get("http://127.0.0.1:1/"), token);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
+                          .satisfied);
+    const auto cancelled = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(cancelled));
+    AURORA_TEST_CHECK_EQ(cancelled.error().code_enum, ErrorCode::NetCancelled);
+
+    AURORA_TEST_CHECK(aurora::net::http::activity_snapshot().entries.empty());
+#endif
+}
+
+AURORA_TEST_CASE(a_policy_rejection_is_recorded_without_stages) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    Client client;
+    client.policy(NetPolicy{});  // 显式空策略：回环不在明文放行名单里
+
+    const auto response = send_and_drive(client, Request::get("http://127.0.0.1:1/blocked").request_id("rid-policy"));
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, ErrorCode::NetPolicyViolated);
+
+    // 打标之后的本地拒绝：有一条记录，但它连一个阶段都没开始。
+    const auto snapshot = aurora::net::http::activity_snapshot();
+    AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{1});
+    const auto &entry = snapshot.entries.front();
+    AURORA_TEST_CHECK_EQ(entry.request_id, std::string{"rid-policy"});
+    AURORA_TEST_CHECK_EQ(entry.error_code, std::string{"net-policy-violated"});
+    AURORA_TEST_CHECK_FALSE(entry.failed_stage.has_value());
+    AURORA_TEST_CHECK_EQ(entry.status, std::uint16_t{0});
+    AURORA_TEST_CHECK_EQ(entry.sent, std::uint64_t{0});
+    AURORA_TEST_CHECK_EQ(entry.received, std::uint64_t{0});
+    AURORA_TEST_CHECK_FALSE(entry.in_flight);
+    const auto timeline = aurora::testing::require_value(aurora::net::http::timeline_of("rid-policy"));
+    AURORA_TEST_CHECK(timeline.marks.empty());
+#endif
+}
+
+AURORA_TEST_CASE(a_fresh_cache_hit_is_recorded_without_stages) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("Cache-Control: max-age=600\r\n", body_of("cached"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+    Client client;
+    allow_test_cleartext(client);
+    client.cache(CacheOptions{.enabled = true});
+    const auto url = loopback_url(peer.port(), "/cached");
+
+    const auto stored = send_and_drive(client, Request::get(url).request_id("rid-cache"));
+    AURORA_TEST_REQUIRE(bool(stored));
+    const auto hit = send_and_drive(client, Request::get(url).request_id("rid-cache"));
+    AURORA_TEST_REQUIRE(bool(hit));
+    AURORA_TEST_CHECK(hit.value().from_cache());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 第二次一条连接都没发起
+
+    const auto snapshot = aurora::net::http::activity_snapshot();
+    AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{2});
+    const auto &entry = snapshot.entries.front();  // 最新在前：命中那一笔
+    AURORA_TEST_CHECK(entry.from_cache);
+    AURORA_TEST_CHECK_EQ(entry.status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(entry.hop, std::uint16_t{0});
+    AURORA_TEST_CHECK_EQ(entry.pass, std::uint16_t{0});
+    AURORA_TEST_CHECK_EQ(entry.sent, std::uint64_t{0});  // 没有请求上线
+    AURORA_TEST_CHECK_EQ(entry.received, std::uint64_t{6});  // 交付体字节
+    AURORA_TEST_CHECK_FALSE(entry.in_flight);
+    AURORA_TEST_CHECK(entry.error_code.empty());
+    const auto timeline = aurora::testing::require_value(aurora::net::http::timeline_of("rid-cache"));
+    AURORA_TEST_CHECK(timeline.marks.empty());
+    AURORA_TEST_CHECK_FALSE(timeline.in_flight);
+    AURORA_TEST_CHECK_FALSE(timeline.reused_connection);
+#endif
+}
+
+AURORA_TEST_CASE(a_sink_stop_leaves_the_timeline_without_body_done) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, length_framed("", body_of("abcdef"))));
+    AURORA_TEST_REQUIRE(peer.valid());
+    Client client;
+    allow_test_cleartext(client);
+    StoppingSink sink;
+
+    auto task = client.open_stream(Request::get(loopback_url(peer.port())).request_id("rid-sink"), sink);
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("open_stream done", [&task] { return task.is_done(); }).satisfied);
+    const auto outer = task.result();
+    AURORA_TEST_REQUIRE(bool(outer));
+    const auto &outcome = outer.value();
+    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_CHECK(outcome.value().stopped_by_sink);
+    AURORA_TEST_CHECK_EQ(sink.segments, 1);  // 第一段体即收摊
+
+    const auto snapshot = aurora::net::http::activity_snapshot();
+    AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{1});
+    const auto &entry = snapshot.entries.front();
+    AURORA_TEST_CHECK_EQ(entry.status, std::uint16_t{200});
+    AURORA_TEST_CHECK(entry.error_code.empty());  // 主动停读是成功结局，不是失败
+    AURORA_TEST_CHECK_FALSE(entry.in_flight);
+    const auto timeline = aurora::testing::require_value(aurora::net::http::timeline_of("rid-sink"));
+    AURORA_TEST_CHECK(has_stage(timeline, HttpStage::FirstByte));
+    AURORA_TEST_CHECK_FALSE(has_stage(timeline, HttpStage::BodyDone));
+#endif
+}
+
+AURORA_TEST_CASE(a_cancelled_exchange_ends_as_net_cancelled_not_abandoned) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    const aurora::test::net::HostDriven host;
+    Client client;
+    allow_test_cleartext(client);
+    ScriptedPeer peer(silent());
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Cancellation token;
+    auto task = client.send(
+        Request::get(loopback_url(peer.port())).request_id("rid-cancel").timeout(std::chrono::milliseconds{2000}),
+        token);
+    AURORA_TEST_CHECK(
+        aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; }).satisfied);
+    token.cancel();
+    AURORA_TEST_CHECK(aurora::test::net::drive_until(
+                          "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
+                          .satisfied);
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_CHECK_EQ(response.error().code_enum, ErrorCode::NetCancelled);
+
+    // 取消是交换的**结局**而不是「没发生」：一条记录、已收摊、错误码就是取消，且不由析构补记 abandoned。
+    const auto snapshot = aurora::net::http::activity_snapshot();
+    AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{1});
+    const auto &entry = snapshot.entries.front();
+    AURORA_TEST_CHECK_EQ(entry.error_code, std::string{"net-cancelled"});
+    AURORA_TEST_CHECK(entry.error_class == HttpErrorClass::Cancelled);
+    AURORA_TEST_CHECK_FALSE(entry.abandoned);
+    AURORA_TEST_CHECK_FALSE(entry.in_flight);
+    AURORA_TEST_CHECK(aurora::net::http::timeline_of("rid-cancel").has_value());
+#endif
+}
+
+AURORA_TEST_CASE(a_physical_sequence_expands_by_hop_and_pass) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    FakeEngine engine;
+    const FakeEngineScope scope(engine);
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer target(reply_after_reading(1, service_ok()));
+    AURORA_TEST_REQUIRE(target.valid());
+    const std::string redirect =
+        "HTTP/1.1 302 Found\r\nLocation: " + loopback_url(target.port(), "/final") + "\r\nContent-Length: 0\r\n\r\n";
+    std::mutex guard;
+    std::vector<std::string> filed;
+    // 同一监听口按次序给三种拒绝：401（认证环）、503（重试环）、302（重定向环）；第四条物理往来落在目标端。
+    ScriptedPeer origin(per_connection({record_each_then_reply(filed, guard, challenge_401(R"(Basic realm="api")")),
+                                        record_each_then_reply(filed, guard, service_busy()),
+                                        record_each_then_reply(filed, guard, redirect)}));
+    AURORA_TEST_REQUIRE(origin.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "pw"));
+    client.retry_policy(RetryPolicy{.attempts = 2,
+                                    .base = std::chrono::milliseconds{10},
+                                    .max_backoff = std::chrono::milliseconds{10},
+                                    .jitter = 0.0});
+    auto task = client.send(Request::get(loopback_url(origin.port(), "/start")).request_id("rid-expand"));
+    AURORA_TEST_REQUIRE(pump_send(engine, task));
+
+    const auto response = inner(task);
+    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(origin.accepts(), 3);
+    AURORA_TEST_CHECK_EQ(target.accepts(), 1);
+
+    // 四条物理往来各一条记录，按 exchange_id 升序；凭据重放与重试各取一枚新 pass，重定向只在同一次尝试内部
+    // 递增 hop（故最后一跳与产生它的 302 共用 pass）。
+    const auto hops = aurora::net::http::timelines_of("rid-expand");
+    AURORA_TEST_REQUIRE_EQ(hops.size(), std::size_t{4});
+    const std::vector<std::pair<std::uint16_t, std::uint16_t>> expected{{0, 0}, {0, 1}, {0, 2}, {1, 2}};
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        AURORA_TEST_CHECK_EQ(hops.at(index).hop, expected.at(index).first);
+        AURORA_TEST_CHECK_EQ(hops.at(index).pass, expected.at(index).second);
+        if (index > 0) {
+            AURORA_TEST_CHECK(hops.at(index - 1).exchange_id < hops.at(index).exchange_id);
+        }
+        AURORA_TEST_CHECK_FALSE(hops.at(index).in_flight);
+    }
+    // 中间两笔（401 与 503）没有被当作失败结局：它们是同一次逻辑交换内部的重跑依据。
+    const auto entries = aurora::net::http::activity_snapshot().entries;
+    AURORA_TEST_REQUIRE_EQ(entries.size(), std::size_t{4});
+    AURORA_TEST_CHECK_EQ(entries.at(3).status, std::uint16_t{401});  // 最新在前
+    AURORA_TEST_CHECK_EQ(entries.at(2).status, std::uint16_t{503});
+    AURORA_TEST_CHECK_EQ(entries.at(1).status, std::uint16_t{302});
+    AURORA_TEST_CHECK_EQ(entries.at(0).status, std::uint16_t{200});
+    AURORA_TEST_CHECK(entries.at(0).error_code.empty());
+#endif
+}
+
+AURORA_TEST_CASE(a_silenced_request_id_still_reaches_the_snapshot) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    reset_network_activity();
+    const aurora::test::net::HostDriven host;
+    ScriptedPeer peer(reply_after_reading(1, service_ok()));
+    AURORA_TEST_REQUIRE(peer.valid());
+    Client client;
+    allow_test_cleartext(client);
+
+    // 空串 = 明确声明本次不带链路标识：交换照记，但无处可查。
+    const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id(""));
+    AURORA_TEST_REQUIRE(bool(response));
+    const auto snapshot = aurora::net::http::activity_snapshot();
+    AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{1});
+    AURORA_TEST_CHECK(snapshot.entries.front().request_id.empty());
+
+    AURORA_TEST_CHECK_FALSE(aurora::net::http::timeline_of("").has_value());
+    AURORA_TEST_CHECK(aurora::net::http::timelines_of("").empty());
+    AURORA_TEST_CHECK_FALSE(aurora::net::http::timeline_of("no-such-request").has_value());
+    AURORA_TEST_CHECK(aurora::net::http::timelines_of("no-such-request").empty());
+#endif
 }
 
 }  // namespace aurora::test_cases::utest_net_http_client

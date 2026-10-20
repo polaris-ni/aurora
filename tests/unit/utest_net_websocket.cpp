@@ -16,7 +16,8 @@
 ///           带上那枚状态码、显式 `close()` 之后不再接受发送；句柄析构尽力投递 `close(1000)` 且不再报
 ///           `on_closed`；在交付回调里销毁句柄即停止派发而会话判定照走；`SinkFlow::Stop` 只关派发；对端没说
 ///           close 就收摊分两种 detail；读侧越限交 `ws-protocol-error`；空句柄与移动后的源句柄一律 `ws-closed`
-///           而不是崩溃；握手结算之后宿主的取消令牌不再掐这条会话。
+///           而不是崩溃；握手结算之后宿主的取消令牌不再掐这条会话。**活动记账**（`AURORA_ENABLE_DEBUG` 限定）
+///           验握手腿只记一条 101、无 `BodyDone` 的记录——升级之后是帧流，会话的收摊事实在 `WsCloseInfo`。
 ///           全用例零真实远端、零 DNS（目标恒为 `ws://127.0.0.1:<port>`），故禁网 CI 无需豁免；浏览器腿没有
 ///           BSD socket 语义，凡触网的用例按 `AURORA_TEST_SKIP` 登记。
 
@@ -43,6 +44,7 @@
 #include "aurora/net/capabilities.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
+#include "aurora/net/http_observability.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/net/policy.h"
 #include "aurora/net/transport.h"
@@ -1309,6 +1311,43 @@ AURORA_TEST_CASE(websocket_a_late_cancellation_does_not_close_the_session) {
     // 前序 AURORA_TEST_REQUIRE 已断言持有值，断言宏的展开对 tidy 的路径分析不透明，属误报。
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_EQ(seen->payload, "after the host cancelled");
+}
+
+AURORA_TEST_CASE(a_handshake_is_recorded_without_body_done) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+#ifndef AURORA_ENABLE_DEBUG
+    AURORA_TEST_SKIP("network activity is compiled out when AURORA_ENABLE_DEBUG is off");
+#else
+    aurora::net::http::set_activity_options(aurora::net::http::ActivityOptions{});
+    aurora::net::http::clear_network_activity();
+    WsScene scene{WsPlan{}};
+    {
+        auto handle = scene.open();
+        AURORA_TEST_CHECK_TRUE(handle.is_open());
+
+        // 本腿只收**握手**这一条：一条记录、状态码 101、已收摊，且没有 `BodyDone`——升级之后是帧流，
+        // 不是一次请求的体走到了终点。会话自身的收摊事实在 `WsCloseInfo`，不进请求活动表。
+        const auto snapshot = aurora::net::http::activity_snapshot();
+        AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{1});
+        const auto &entry = snapshot.entries.front();
+        AURORA_TEST_CHECK_EQ(entry.status, std::uint16_t{101});
+        AURORA_TEST_CHECK_EQ(entry.hop, std::uint16_t{0});
+        AURORA_TEST_CHECK_EQ(entry.pass, std::uint16_t{0});
+        AURORA_TEST_CHECK_FALSE(entry.in_flight);
+        AURORA_TEST_CHECK(entry.error_code.empty());
+        AURORA_TEST_REQUIRE_FALSE(entry.request_id.empty());  // 客户端缺省补齐了链路标识
+        const auto timeline = aurora::testing::require_value(aurora::net::http::timeline_of(entry.request_id));
+        const auto has_stage = [&timeline](aurora::net::http::HttpStage stage) {
+            return std::any_of(timeline.marks.begin(), timeline.marks.end(),
+                               [stage](const aurora::net::http::StageMark &mark) { return mark.stage == stage; });
+        };
+        AURORA_TEST_CHECK(has_stage(aurora::net::http::HttpStage::RequestSent));
+        AURORA_TEST_CHECK(has_stage(aurora::net::http::HttpStage::FirstByte));
+        AURORA_TEST_CHECK_FALSE(has_stage(aurora::net::http::HttpStage::BodyDone));
+    }
+#endif
 }
 
 }  // namespace aurora::test_cases::utest_net_websocket
