@@ -5072,6 +5072,15 @@
       ]
     },
     {
+      "name": "ExchangeLeg",
+      "values": [
+        "Send",
+        "Stream",
+        "ServerSentEvents",
+        "WebSocket"
+      ]
+    },
+    {
       "name": "ExportSurface",
       "values": [
         "Log",

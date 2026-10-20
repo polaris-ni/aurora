@@ -119,6 +119,7 @@
 #include "aurora/net/http_auth.h"
 #include "aurora/net/http_binding.h"
 #include "aurora/net/http_client.h"
+#include "aurora/net/http_hook.h"
 #include "aurora/net/http_multipart.h"
 #include "aurora/net/http_observability.h"
 #include "aurora/net/http_session.h"

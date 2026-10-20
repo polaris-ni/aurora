@@ -48,6 +48,7 @@ namespace {
            static_cast<int>(aurora::net::WsMessageKind::Binary) + static_cast<int>(aurora::net::http::Method::Delete) +
            static_cast<int>(aurora::net::http::ProgressPhase::Download) +
            static_cast<int>(aurora::net::http::SinkFlow::Stop) +
+           static_cast<int>(aurora::net::http::ExchangeLeg::WebSocket) +
            static_cast<int>(aurora::net::http::HttpErrorClass::Cancelled) +
            static_cast<int>(aurora::net::http::AuthScheme::Unsupported) +
            static_cast<int>(aurora::net::ExportSurface::InspectorJson) +
