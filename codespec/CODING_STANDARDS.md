@@ -220,6 +220,8 @@
 
 **凭据一律折叠，四个导出面同口径**：头部、URL（含 userinfo 与令牌查询参数）、消息体与控件属性中的凭据，不得以原值进入任何导出文本——日志行、错误 `detail`、Inspector JSON、活动快照一视同仁。库侧只对自己知情的那半分级（`net::FieldClass`）：`Secret` 恒折叠、宿主无权放行；`Sensitive` 默认折叠、按 `(net::ExportSurface + 键)` 显式放行；`Public` 原样但宿主可再收窄；消息体恒不导出（不折叠，直接不出现）。新增任何 detail 或导出字段必须经 `net::present_field` / `net::present_url`，不得手拼；宿主策略拿不到 `Secret` 原值，故「原样返回」的调试桩也放大不了。分级名单、折叠形态与两段式策略见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.38。
 
+**库上跑的宿主回调只许快、不许炸、不许回头咬库**：凡由库在同一调用栈上同步派发的宿主回调（HTTP 交换钩子的两问是当前的例子），契约一律是同一条——**不得阻塞、不得做 I/O、不得抛异常穿越回调、不得持有发起它的那个对象**（引用环让资源永不释放），并自行保证并发安全（不同交换可并发问同一枚实现）。非主线程的回调里不得直接触碰 UI。库侧的两条配套纪律：WARN 与错误 detail 只带序号 / 腿 / 标识这类可公开事实，不带 URL、头值与异常 `what()`（与上一条同源）；回调抛出的异常就地捕获、按该回调的定位决定失败或降级，绝不带出库边界（与协程出口「以 `Result` 表达成败、不抛」同一条纪律）。完整契约与落点见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.40。
+
 ---
 
 ## 5 契约与表达
@@ -897,6 +899,7 @@ au::Button(au::ButtonProps{ .label = "OK" });
 | 测试文件里自己写 `main()` | `main` 由 `tests/framework/test_main.cpp` 唯一提供（§3.1） |
 | 用 `std::string_view` 或 `"\x03abc"` 形态的字面量承载含 `\0` 的二进制测试输入 | 两条坑叠加：`std::string_view` 从 `const char*` 构造会在首个 `\0` 截断（长度变成 0 而不是预期字节数），而 `\x` 转义**贪婪吞掉后续十六进制数字**（`"\x03abc"` 是一个越界转义，不是「`0x03` 后跟 `abc`」）。二进制输入一律显式带长度（`std::span<const char>(literal, N - 1)` 形态的helper），并把转义与其后的可打印字节用相邻字面量拼接隔开：`"\x03" "abc"` |
 | 在完成回调里写致命断言（`AURORA_TEST_REQUIRE*`） | 回调可能在**析构边界内**派发（如 `~StreamListener` → `close()` → 交付尾批），致命断言抛出的 `CaseAbort` 穿过 `noexcept` 即 `std::terminate`，整条测试进程连带消失、报告里看不见失败原因；回调内只用非致命断言记录失败（[`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.11） |
+| 在库同步派发的宿主回调（HTTP 交换钩子的两问）里做无界阻塞 I/O，或让钩子持有同一枚 `Client` 自反馈上报 | 回调只许快、不许抛、不许持有发起它的对象（链 → 钩子 → `Client` → 链是引用环）；要在回调里发起交换就换一枚不挂同一组钩子的客户端，把上报挪到回调之外（§4.1 末段与 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.40） |
 | 新增 `std::cout` / `printf` / `puts` | 走 `AURORA_LOG_*`（stderr）/ `AURORA_LOG_RAW`（stdout 产品输出）/ 测试与工具里的 `AURORA_TEST_PRINTF*`（§4.1） |
 | 把 `Authorization` / `Cookie` / 带令牌的查询串原值直接拼进日志、错误 `detail` 或 Inspector JSON | 一律经 `net::present_field` / `net::present_url`：`Secret` 恒折叠且宿主不可放大、`Sensitive` 按 `(导出面 + 键)` 放行、消息体不导出（§4.1、[`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.38） |
 | 字符串字面量里写中文 | 字面量写英文 + ASCII 标点；确属功能必需中文时就地 `CJK-LITERAL: <类别> - <原因>`（§14） |
