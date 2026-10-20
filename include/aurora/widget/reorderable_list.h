@@ -1349,7 +1349,8 @@ class ReorderableList : public Container {
     std::string restore_key_;  ///< 滚动位置保存键（空 = 不参与恢复）
     bool scroll_restored_ = false;  ///< 是否已执行过恢复 / 已被程序化设置就位
     bool drag_handle_ = false;  ///< 是否限定右侧手柄区域起拖
-    float auto_scroll_threshold_ = AURORA_AUTO_SCROLL_THRESHOLD_DP;  ///< 近边缘自动滚动触发带高（dp，0 = 关闭；与跨进程拖放共用同一缺省）
+    float auto_scroll_threshold_ =
+        AURORA_AUTO_SCROLL_THRESHOLD_DP;  ///< 近边缘自动滚动触发带高（dp，0 = 关闭；与跨进程拖放共用同一缺省）
 
     /// @brief 拖拽 / 落位态字段。
     DragState drag_state_ = DragState::Idle;

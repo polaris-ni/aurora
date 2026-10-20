@@ -272,7 +272,12 @@ AURORA_TEST_CASE(async_read_does_not_block_the_frame_loop) {
     // 大载荷（8 MiB）走两条路：事件层便利读取（SystemDropEvent::text_async）与
     // DragPayload 直连（read_async）。契约：登记后同步侧零兑现（发起不阻塞），
     // pump 一拍全量兑现且只兑现一次，内容与同步读取全等。
-    (void)system_drag::remove_test_backend();  // 复位进程级在途登记表（跨用例隔离）
+    // 本用例依赖排空阶段钩子（test_in_drain_phase / test_withhold_format / test_set_read_timeout），
+    // 仅在 inert 后端编入时（AURORA_ENABLE_DEBUG + AURORA_ENABLE_TEST_HOOKS）可观测；否则跳过。
+    if (!system_drag::install_test_backend()) {
+        AURORA_TEST_SKIP(
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+    }
 
     constexpr std::size_t payload_bytes = 8U << 20U;  // 8 MiB：同步读完足以卡住帧循环的量级
     std::vector<std::uint8_t> big(payload_bytes);
@@ -406,7 +411,11 @@ AURORA_TEST_CASE(concurrent_async_reads_are_independent) {
 AURORA_TEST_CASE(async_callback_runs_in_drain_phase_not_message_pump) {
     // 「帧内排空、不在平台消息泵内同步回调」的可判定形式：登记时不在排空阶段，
     // 回调执行时在排空阶段；宿主不排空 ⇒ 回调不到（不谎报）。
-    (void)system_drag::remove_test_backend();
+    // 依赖 test_in_drain_phase 钩子，仅在 inert 后端编入时可观测；否则跳过。
+    if (!system_drag::install_test_backend()) {
+        AURORA_TEST_SKIP(
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+    }
 
     std::unordered_map<std::string, std::vector<std::uint8_t>> data;
     data.emplace(std::string(AURORA_MIME_TEXT_PLAIN), to_bytes("drain-probe"));
@@ -448,8 +457,8 @@ AURORA_TEST_CASE(without_drain_the_callback_never_fires) {
     payload->read_async(std::string(AURORA_MIME_TEXT_PLAIN),
                         [&ledger](const Result<std::vector<std::uint8_t>> &) { ledger.emplace_back("read"); });
     AURORA_TEST_REQUIRE(system_drag::begin(make_text_offer(), [&ledger](SystemDragOutcome, DragAction) {
-        ledger.emplace_back("end");
-    }).ok());
+                            ledger.emplace_back("end");
+                        }).ok());
     system_drag::emit_session_end(SystemDragOutcome::Succeeded, DragAction::Copy);
 
     AURORA_TEST_CHECK(ledger.empty());
@@ -497,9 +506,9 @@ AURORA_TEST_CASE(session_end_settles_in_flight_reads_in_place) {
     int end_calls = 0;
     SystemDragOutcome end_outcome = SystemDragOutcome::Failed;
     AURORA_TEST_REQUIRE(system_drag::begin(make_text_offer(), [&](SystemDragOutcome o, DragAction) {
-        ++end_calls;
-        end_outcome = o;
-    }).ok());
+                            ++end_calls;
+                            end_outcome = o;
+                        }).ok());
 
     system_drag::cancel();
 
@@ -516,9 +525,9 @@ AURORA_TEST_CASE(session_end_settles_in_flight_reads_in_place) {
     AURORA_TEST_CHECK_EQ(end_calls, 1);
     AURORA_TEST_CHECK_EQ(end_outcome, SystemDragOutcome::Cancelled);
     AURORA_TEST_REQUIRE(system_drag::begin(make_text_offer(), [&](SystemDragOutcome o, DragAction) {
-        ++end_calls;
-        end_outcome = o;
-    }).ok());
+                            ++end_calls;
+                            end_outcome = o;
+                        }).ok());
     system_drag::cancel();
     system_drag::pump_reads();
     AURORA_TEST_CHECK_EQ(end_calls, 2);
@@ -917,7 +926,7 @@ AURORA_TEST_CASE(widget_destruction_cancels_in_flight_session) {
         box.on_end_hook = [end_calls] { ++*end_calls; };
         AURORA_TEST_REQUIRE(box.begin_system_drag().ok());
         AURORA_TEST_CHECK_EQ(*begin_calls, 1);  // begin 回调同步派发
-        AURORA_TEST_CHECK_EQ(*end_calls, 0);    // 终态未到（帧循环排空）
+        AURORA_TEST_CHECK_EQ(*end_calls, 0);  // 终态未到（帧循环排空）
     }  // ← 控件在此析构：置存活令牌 false + cancel() 登记终态
 
     // 析构后排空一拍：回调须被令牌挡下，外部计数不涨；provide 零回调。
@@ -959,7 +968,7 @@ AURORA_TEST_CASE(begin_callback_runs_inline_without_nested_pump) {
     bool in_drain_at_begin = true;  // 初值取反：钩子内必须置 false 才算证伪
     box.on_begin_hook = [&box, &in_drain_at_begin] {
         in_drain_at_begin = system_drag::test_in_drain_phase();
-        box.mark_needs_layout();    // 树写操作：不得触发嵌套派发
+        box.mark_needs_layout();  // 树写操作：不得触发嵌套派发
         system_drag::pump_reads();  // 嵌套排空：此刻无待投递终态，应无副作用
     };
     AURORA_TEST_REQUIRE(box.begin_system_drag().ok());

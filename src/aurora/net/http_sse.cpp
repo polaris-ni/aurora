@@ -215,7 +215,7 @@ class ExchangeSink final : public DataSink {
     /// @brief 解析器派发一条事件：落累计、交宿主，并把宿主的收摊答复回传给解析器。
     /// @param event 成形的那条事件（视图属于解析器缓冲，本次调用内有效）。
     /// @return 宿主继续收为 true。
-    auto deliver(const detail::SseParsedEvent &event) const -> bool {
+    [[nodiscard]] auto deliver(const detail::SseParsedEvent &event) const -> bool {
         // `id` 取的是**派发时刻**该流的续传标识（DOM 的 `lastEventId` 同口径），可能是更早某条带下来的；
         // 视图指向帧上的 `last_event_id`，本次回调内不会被改写（解析器的字段效应只在下一行才写它）。
         const SseEvent view{.type = std::string_view{event.type},

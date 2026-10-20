@@ -96,8 +96,7 @@ struct TestBackend {
 
 /// @brief 该 MIME 是否由惰性要约声明（持锁判定）。
 [[nodiscard]] auto offer_declares(const TestBackend &backend, const std::string &mime) -> bool {
-    return backend.offer.has_value() &&
-           std::ranges::find(backend.offer->formats, mime) != backend.offer->formats.end();
+    return backend.offer.has_value() && std::ranges::find(backend.offer->formats, mime) != backend.offer->formats.end();
 }
 
 /// @brief 立即写接管：非空立即写把该 MIME 自惰性要约摘走（与平台「后写者接管该格式」同款）。
@@ -357,8 +356,8 @@ auto Clipboard::get_text() -> Result<std::string> {
                 }
                 if (offer_declares(backend, mime)) {
                     if (backend.offer) {
-                provide = backend.offer->provide;  // 锁外调用：拷贝回调而非持锁调用
-            }
+                        provide = backend.offer->provide;  // 锁外调用：拷贝回调而非持锁调用
+                    }
                 } else {
                     immediate = backend.text;  // 立即写文本通道
                 }
@@ -524,8 +523,8 @@ auto Clipboard::get_image() -> Result<Image> {
                 }
                 if (offer_declares(backend, mime)) {
                     if (backend.offer) {
-                provide = backend.offer->provide;  // 锁外调用：拷贝回调而非持锁调用
-            }
+                        provide = backend.offer->provide;  // 锁外调用：拷贝回调而非持锁调用
+                    }
                 } else {
                     immediate = backend.image;  // 立即写图像通道
                 }
@@ -811,9 +810,9 @@ auto Clipboard::set_offer(const ClipboardOffer &offer) -> Result<void> {
     }
 #endif
     // 平台路径：惰性提供机制本轮未接，如实报错——不因「新 API 已声明」就谎报可用。
-    return make_error(ErrorCode::ClipboardFormatUnsupported,
-                      ErrorParams{{"mime", offer.formats.front()},
-                                  {"detail", "lazy provide is not wired on this platform yet"}});
+    return make_error(
+        ErrorCode::ClipboardFormatUnsupported,
+        ErrorParams{{"mime", offer.formats.front()}, {"detail", "lazy provide is not wired on this platform yet"}});
 }
 
 auto Clipboard::on_ownership_lost(std::function<void()> callback) -> void {
@@ -994,6 +993,8 @@ auto Clipboard::set_listen_supported(bool supported) -> void {
     auto &listeners = clipboard_listeners();
     const std::scoped_lock lock{listeners.mutex};
     listeners.listen_supported = supported;
+#else
+    (void)supported;
 #endif
 }
 

@@ -105,8 +105,8 @@ struct SystemDragTestBackend {
 }
 
 /// @brief 兑现一条在途读取：数据就绪 ⇒ 字节；空口径 ⇒ 空值；未到位 / 超时 ⇒ 读取失败。
-[[nodiscard]] auto fulfill_read(const PendingRead &entry, bool data_ready,
-                                std::chrono::steady_clock::time_point now) -> Result<std::vector<std::uint8_t>> {
+[[nodiscard]] auto fulfill_read(const PendingRead &entry, bool data_ready, std::chrono::steady_clock::time_point now)
+    -> Result<std::vector<std::uint8_t>> {
     if (!entry.payload->has(entry.mime)) {
         return std::vector<std::uint8_t>{};  // 空口径：格式不存在不是失败
     }
@@ -180,8 +180,8 @@ auto deliver_session_end() -> void {
         if (!confirmed) {
             // Move 落放后源侧删除失败：终态改写为 Move 失败并上报回滚；目标侧数据保持不动。
             outcome = SystemDragOutcome::Failed;
-            record_session_error(make_error(ErrorCode::SystemDragMoveRollback,
-                                            ErrorParams{{"detail", confirmed.error().message}}));
+            record_session_error(
+                make_error(ErrorCode::SystemDragMoveRollback, ErrorParams{{"detail", confirmed.error().message}}));
         }
     }
     if (on_end) {
@@ -253,8 +253,7 @@ auto DragPayload::image() const -> Result<Image> {
     if (!decoded) {
         // 字节已取到但按 MIME 解码失败：专属错误码（同一份字节重试无意义，retryable = false）。
         return make_error(ErrorCode::SystemDragDecodeFailed,
-                          ErrorParams{{"mime", mime_key(AURORA_DRAG_MIME_PNG)},
-                                      {"detail", decoded.error().message}});
+                          ErrorParams{{"mime", mime_key(AURORA_DRAG_MIME_PNG)}, {"detail", decoded.error().message}});
     }
     return decoded.value();
 }
@@ -312,16 +311,16 @@ auto SystemDropEvent::files_async(std::function<void(Result<std::vector<std::str
         callback(std::vector<std::string>{});
         return;
     }
-    payload->read_async(mime_key(AURORA_DRAG_MIME_URI_LIST),
-                        [callback = std::move(callback)](const Result<std::vector<std::uint8_t>> &raw) {
-                            if (!raw) {
-                                callback(raw.error());
-                                return;
-                            }
-                            callback(uri_list::decode(
-                                std::string_view(reinterpret_cast<const char *>(raw.value().data()),  // NOLINT(*-pro-type-reinterpret-cast)
-                                                 raw.value().size())));
-                        });
+    payload->read_async(mime_key(AURORA_DRAG_MIME_URI_LIST), [callback = std::move(callback)](
+                                                                 const Result<std::vector<std::uint8_t>> &raw) {
+        if (!raw) {
+            callback(raw.error());
+            return;
+        }
+        callback(uri_list::decode(
+            std::string_view(reinterpret_cast<const char *>(raw.value().data()),  // NOLINT(*-pro-type-reinterpret-cast)
+                             raw.value().size())));
+    });
 }
 
 auto SystemDropEvent::text_async(std::function<void(Result<std::string>)> callback) const -> void {
@@ -329,14 +328,15 @@ auto SystemDropEvent::text_async(std::function<void(Result<std::string>)> callba
         callback(std::string{});
         return;
     }
-    payload->read_async(mime_key(AURORA_DRAG_MIME_TEXT), [callback = std::move(callback)](const Result<std::vector<std::uint8_t>> &raw) {
-        if (!raw) {
-            callback(raw.error());
-            return;
-        }
-        const auto &buf = raw.value();
-        callback(std::string(buf.begin(), buf.end()));
-    });
+    payload->read_async(mime_key(AURORA_DRAG_MIME_TEXT),
+                        [callback = std::move(callback)](const Result<std::vector<std::uint8_t>> &raw) {
+                            if (!raw) {
+                                callback(raw.error());
+                                return;
+                            }
+                            const auto &buf = raw.value();
+                            callback(std::string(buf.begin(), buf.end()));
+                        });
 }
 
 auto SystemDropEvent::image_async(std::function<void(Result<Image>)> callback) const -> void {
@@ -344,7 +344,8 @@ auto SystemDropEvent::image_async(std::function<void(Result<Image>)> callback) c
         callback(Image{});
         return;
     }
-    payload->read_async(mime_key(AURORA_DRAG_MIME_PNG), [callback = std::move(callback)](const Result<std::vector<std::uint8_t>> &raw) {
+    payload->read_async(mime_key(AURORA_DRAG_MIME_PNG), [callback = std::move(callback)](
+                                                            const Result<std::vector<std::uint8_t>> &raw) {
         if (!raw) {
             callback(raw.error());
             return;
@@ -356,9 +357,8 @@ auto SystemDropEvent::image_async(std::function<void(Result<Image>)> callback) c
         auto decoded = image::decode_memory(raw.value());
         if (!decoded) {
             // 字节已取到但按 MIME 解码失败：专属错误码（同一份字节重试无意义）。
-            callback(make_error(ErrorCode::SystemDragDecodeFailed,
-                                ErrorParams{{"mime", mime_key(AURORA_DRAG_MIME_PNG)},
-                                            {"detail", decoded.error().message}}));
+            callback(make_error(ErrorCode::SystemDragDecodeFailed, ErrorParams{{"mime", mime_key(AURORA_DRAG_MIME_PNG)},
+                                                                               {"detail", decoded.error().message}}));
             return;
         }
         callback(decoded.value());
@@ -383,6 +383,10 @@ auto system_drag::begin(const DragOffer &offer, std::function<void(SystemDragOut
         return make_error(ErrorCode::GeneralInvalidArgument,
                           "system_drag::begin: empty formats or no provide callback");
     }
+    // 机制缺失：没有任何后端接线（真实平台后端或测试 inert 后端）时落回 SystemDragNotSupported。
+    // 过渡期所有 SurfaceKind 的 system_drag_in/out capability 均为 false（见同文件
+    // capability_bits_for_system_drag_are_false_until_backends_land 用例），故此处恒报机制缺失；
+    // 真实后端接线后会经同一入口放行（其 available 标志翻 true），届时本分支不再触发。
 #ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
     {
         auto &backend = system_drag_test_backend();
@@ -393,6 +397,9 @@ auto system_drag::begin(const DragOffer &offer, std::function<void(SystemDragOut
         }
         backend.last_offer = offer;  // inert 后端记录要约（测试断言影像 / 缺省动作等字段往返）
     }
+#else
+    return make_error(ErrorCode::SystemDragNotSupported,
+                      "system_drag::begin: no system drag-and-drop backend is wired on this platform yet");
 #endif
     {
         auto &session = drag_session();
@@ -562,6 +569,8 @@ auto system_drag::test_withhold_format(const std::string &mime) -> void {
     auto &backend = system_drag_test_backend();
     const std::scoped_lock lock{backend.mutex};
     backend.withheld.insert(mime);
+#else
+    (void)mime;
 #endif
 }
 
@@ -569,8 +578,9 @@ auto system_drag::test_set_read_timeout(std::chrono::milliseconds timeout) -> vo
 #ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
     auto &registry = read_registry();
     const std::scoped_lock lock{registry.mutex};
-    registry.timeout =
-        (timeout <= std::chrono::milliseconds::zero()) ? AURORA_SYSTEM_DRAG_READ_TIMEOUT : timeout;
+    registry.timeout = (timeout <= std::chrono::milliseconds::zero()) ? AURORA_SYSTEM_DRAG_READ_TIMEOUT : timeout;
+#else
+    (void)timeout;
 #endif
 }
 

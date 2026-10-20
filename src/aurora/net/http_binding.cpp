@@ -254,7 +254,7 @@ class WsBinder final : public WebSocketSink, public std::enable_shared_from_this
 
 }  // namespace
 
-auto detail::exchange_material(const Client &client, Request request, Cancellation cancellation)
+auto detail::exchange_material(const Client &client, Request request, const Cancellation &cancellation)
     -> aurora::Task<Response> {
     const auto session = std::make_shared<Client>(client);  // 帧持有 this：会话上堆，由收尾口持有
     auto state = std::make_shared<aurora::detail::AsyncState<Response>>();

@@ -430,7 +430,7 @@ auto TlsTransport::handshake(StreamTransport &&stream, std::string_view server_n
     // 登记时若已取消则就地执行钩子——那正是「先取消后发起」这条竞态窗口的唯一收口。
     const std::weak_ptr<detail::TlsState> weaker{state};
     state->token.on_cancel([weaker]() -> void { on_cancelled(weaker); });
-    auto source = cancellation;  // 令牌是可共享的状态句柄，拷贝即加入同一状态（入参是 const 引用）
+    const Cancellation &source = cancellation;  // 令牌是可共享的状态句柄，引用即加入同一状态（入参是 const 引用）
     source.on_cancel([token = state->token]() mutable { token.cancel(); });
 
     {

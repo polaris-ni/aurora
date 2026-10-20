@@ -253,8 +253,7 @@ AURORA_TEST_CASE(drag_auto_scroll_band_clamps_to_half_viewport_and_window_origin
     const Rect short_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 40.0F}};
     DragAutoScroll scroll;
     scroll.drive(Point{.x = 50.0F, .y = 21.0F});  // 底带内、距下沿 19dp（刚过带界 1dp）：速率为满速的 1/20
-    AURORA_TEST_CHECK_NEAR(scroll.advance(short_box, t0), AURORA_AUTO_SCROLL_MAX_SPEED * (1.0F / 20.0F) / 60.0F,
-                           1e-3F);
+    AURORA_TEST_CHECK_NEAR(scroll.advance(short_box, t0), AURORA_AUTO_SCROLL_MAX_SPEED * (1.0F / 20.0F) / 60.0F, 1e-3F);
 
     // 恰在 band 上界（y = 20）：两带皆不命中 ⇒ 收车。
     scroll.drive(Point{.x = 50.0F, .y = 20.0F});

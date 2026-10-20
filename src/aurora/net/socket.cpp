@@ -994,7 +994,8 @@ auto option_conflict(std::string_view detail) -> Error {
 /// @param value 选项值。
 /// @return 成功为 OK；失败为 `net-option-failed`（含 OS 原生码）。
 auto set_int_option(NativeSocket s, int level, int option, std::string_view label, int value) -> Result<void> {
-    const auto bytes = reinterpret_cast<const char *>(&value);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto *const bytes =
+        reinterpret_cast<const char *>(&value);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     if (::setsockopt(s, level, option, bytes, static_cast<int>(sizeof(value))) != 0) {
         return net_error(ErrorCode::NetOptionFailed, "setsockopt(" + std::string{label} + ")");
     }
@@ -1170,7 +1171,7 @@ auto apply_socket_options(NativeSocket s, AddressFamily family, const NativeOpti
             std::min(seconds, static_cast<unsigned int>(std::numeric_limits<unsigned short>::max())));
         const ::linger value{.l_onoff = 1, .l_linger = capped};
         // 选项值按结构体整体传字节，这是 `SO_LINGER` 唯一的形态。
-        const auto bytes =
+        const auto *const bytes =
             reinterpret_cast<const char *>(&value);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         if (::setsockopt(s, SOL_SOCKET, SO_LINGER, bytes, static_cast<int>(sizeof(value))) != 0) {
             return net_error(ErrorCode::NetOptionFailed, "setsockopt(SO_LINGER)");

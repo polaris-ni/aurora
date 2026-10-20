@@ -130,7 +130,7 @@ class StageTimer {
     /// @param stage 到点写入 `state->fired` 的档号。
     /// @param token 到点取消的令牌（在途操作以 net-cancelled 收尾）。
     /// @param state 三档共享的触发状态。
-    StageTimer(std::optional<std::chrono::milliseconds> window, TimeoutStage stage, Cancellation token,
+    StageTimer(std::optional<std::chrono::milliseconds> window, TimeoutStage stage, const Cancellation &token,
                const std::shared_ptr<TimeoutState> &state) {
         if (!window.has_value() || window->count() <= 0) {
             return;

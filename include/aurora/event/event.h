@@ -239,8 +239,8 @@ enum class DragAction : std::uint8_t {
 enum class SystemDragOutcome : std::uint8_t {
     Succeeded,  ///< 落放成功（`DragAction` 有效）
     Cancelled,  ///< 被 Esc 或系统取消（用户意图，不是故障）
-    Rejected,   ///< 目标不接受该拖放
-    Failed,     ///< 会话中途异常终止，或 Move 落放后源侧删除失败（回滚）
+    Rejected,  ///< 目标不接受该拖放
+    Failed,  ///< 会话中途异常终止，或 Move 落放后源侧删除失败（回滚）
 };
 
 /// @brief 系统拖放的四个阶段（specification/05-event-navigation.md §5.2）。
@@ -458,7 +458,7 @@ namespace system_drag {
 /// @param on_end 终结回调：会话终结时投递 `(SystemDragOutcome, DragAction)`。四种结局
 /// （`Succeeded` / `Cancelled` / `Rejected` / `Failed`）可分辨；传空回调表示不关心终态（会话照常）。
 /// @return `Ok` = 会话已发起；无后端 / 能力位为 false / 要约不合法时为结构化 `Error`
-///（`Ok` **不等于**落放成功——终态看 `on_end`）。
+/// （`Ok` **不等于**落放成功——终态看 `on_end`）。
 [[nodiscard]] auto begin(const DragOffer &offer, std::function<void(SystemDragOutcome, DragAction)> on_end)
     -> Result<void>;
 

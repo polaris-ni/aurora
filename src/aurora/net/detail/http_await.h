@@ -305,8 +305,9 @@ auto await_read_within(Stream &stream, std::size_t capacity, std::chrono::millis
 /// 等待」的语义）。故本等待体自带一枚「恰好完成一次」的闸，并同时挂到取消令牌上——否则退避中的协程会在
 /// 引擎停机后永远悬着。取消不改变结局形态：调用方按 `is_cancelled()` 判这一下等待是被谁结束的。
 /// @param delay 等待时长；非正值等价于立即放行（仍经完成回调走，不与挂起点抢栈）。
-/// @param cancellation 本次交换的取消令牌（跨尝试的墙到点即取消它；按值持有，随 awaiter 存活）。
-inline auto await_sleep(std::chrono::milliseconds delay, Cancellation cancellation) -> CallbackAwaiter<void> {
+/// @param cancellation 本次交换的取消令牌（跨尝试的墙到点即取消它；按引用传入，经发起器 lambda 按值捕获随 awaiter
+/// 存活）。
+inline auto await_sleep(std::chrono::milliseconds delay, const Cancellation &cancellation) -> CallbackAwaiter<void> {
     return CallbackAwaiter<void>(
         // 同 await_connect_via：发起器经 std::function 类型擦除转入触发的系统性假告警面；本发起器只做登记与
         // 一次原子写，不抛。

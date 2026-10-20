@@ -96,8 +96,10 @@ struct AccessibilityNode {
     std::string stable_key;  ///< 宿主经 `Widget::set_stable_key` 声明的跨重建稳定键（空 = 未设）
     std::string labelled_by;  ///< 本节点名字来源的**键**（`Widget::set_labelled_by`；空 = 未声明）
     std::uint64_t labelled_by_id = 0;  ///< 解析后的目标 `id`（0 = 未声明 / 未命中 / 目标无名 / 环上）；桥据此投影关系
-    bool drag_reachable = false;  ///< 本控件是否经系统拖放入站（可达性维度之一；控件侧静态声明，见 `Widget::accepts_system_drag`）
-    std::string drag_alternative_path;  ///< 非拖拽替代路径描述（空 = 仅拖拽可达；见 `Widget::system_drag_alternative_path`）
+    bool drag_reachable =
+        false;  ///< 本控件是否经系统拖放入站（可达性维度之一；控件侧静态声明，见 `Widget::accepts_system_drag`）
+    std::string
+        drag_alternative_path;  ///< 非拖拽替代路径描述（空 = 仅拖拽可达；见 `Widget::system_drag_alternative_path`）
 
     /// @brief 动作集合是否包含指定动作。
     /// @param a 待检查的动作位。

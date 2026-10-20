@@ -1091,8 +1091,9 @@ AURORA_TEST_CASE(proposed_action_translation_is_the_single_point) {
     AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::Control | ModifierKey::Shift, DragAction::Copy),
                          DragAction::Link);
     // 锁定态位（NumLock 常开）不参与判定：翻译前按 AURORA_MODIFIER_PRESSABLE_MASK 摘除。
-    AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::Control | ModifierKey::NumLock, DragAction::Move),
-                         DragAction::Copy);
+    AURORA_TEST_CHECK_EQ(
+        system_drag::proposed_action_for(ModifierKey::Control | ModifierKey::NumLock, DragAction::Move),
+        DragAction::Copy);
     AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::NumLock, DragAction::Move), DragAction::Move);
     // 缺省动作未表态（None 两义：没按 / 程序化合成）⇒ Copy 兜底，不由修饰键缺席推定。
     AURORA_TEST_CHECK_EQ(system_drag::proposed_action_for(ModifierKey::None, DragAction::None), DragAction::Copy);
@@ -1114,7 +1115,7 @@ AURORA_TEST_CASE(system_drop_dispatch_never_rewrites_proposed) {
     AURORA_TEST_CHECK_FALSE(EventDispatcher::dispatch(*tree.row, over));
     AURORA_TEST_CHECK_EQ(over.proposed, DragAction::Move);  // 派发前后一字不差
     AURORA_TEST_CHECK_EQ(over.modifiers, ModifierKey::Control);  // 修饰位原样透传
-    AURORA_TEST_CHECK_EQ(over.allowed, DragAction::None);       // 目标不接受（基类默认）
+    AURORA_TEST_CHECK_EQ(over.allowed, DragAction::None);  // 目标不接受（基类默认）
 
     // Enter 态同口径；目标接受 Move 时 allowed 才由求交给出（仍不改 proposed）。
     tree.box1->accept_action = DragAction::Move;

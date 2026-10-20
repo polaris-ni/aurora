@@ -198,7 +198,7 @@ AURORA_TEST_CASE(frame_loop_drains_system_drag_session_end) {
     WindowOptions o;
     o.title = "drag-drain";
     o.size = Size{.width = 120.0F, .height = 80.0F};
-    o.max_frames = 2;       // 两帧：第一帧兑现终态、第二帧兑现读取
+    o.max_frames = 2;  // 两帧：第一帧兑现终态、第二帧兑现读取
     o.power_saving = false;  // 无 OS 等待通道：忙轮询，帧数确定
     HeadlessOptions h;
     static_cast<WindowOptions &>(h) = o;
@@ -239,10 +239,10 @@ AURORA_TEST_CASE(frame_loop_drains_system_drag_session_end) {
         return std::vector<std::uint8_t>{'x'};
     };
     AURORA_TEST_REQUIRE(system_drag::begin(offer, [&](SystemDragOutcome outcome, DragAction action) -> void {
-        ++end_calls;
-        got_outcome = outcome;
-        got_action = action;
-    }).ok());
+                            ++end_calls;
+                            got_outcome = outcome;
+                            got_action = action;
+                        }).ok());
     system_drag::emit_session_end(SystemDragOutcome::Succeeded, DragAction::Copy);
     AURORA_TEST_CHECK_EQ(end_calls, 0);  // 帧未推进：零投递
 

@@ -159,9 +159,9 @@ auto settle_job(const std::shared_ptr<aurora::detail::AsyncState<T>> &state, Res
 /// 非模板的核心（`deliver` 的模板外壳只负责在其上再投影一次），实现住在 `src/aurora/net/http_binding.cpp`。
 /// @param client 借用的客户端（内部拷一份交给帧的收尾口持有）。
 /// @param request 待发送的请求。
-/// @param cancellation 本次交换的取消令牌。
+/// @param cancellation 本次交换的取消令牌（按 const 引用传入）。
 /// @return 交出物化应答的作业句柄。
-[[nodiscard]] auto exchange_material(const Client &client, Request request, Cancellation cancellation)
+[[nodiscard]] auto exchange_material(const Client &client, Request request, const Cancellation &cancellation)
     -> aurora::Task<Response>;
 
 }  // namespace detail
@@ -177,8 +177,8 @@ auto settle_job(const std::shared_ptr<aurora::detail::AsyncState<T>> &state, Res
 /// @param cancellation 取消令牌（缺省 = 独立令牌、无人可取消）。
 /// @return 落定为 `Result<T>` 的作业句柄。
 template <typename T>
-[[nodiscard]] auto deliver(const Client &client, Request request, Projection<T> project, Cancellation cancellation = {})
-    -> aurora::Task<T> {
+[[nodiscard]] auto deliver(const Client &client, Request request, Projection<T> project,
+                           const Cancellation &cancellation = {}) -> aurora::Task<T> {
     auto raw = detail::exchange_material(client, std::move(request), cancellation);
     auto state = std::make_shared<aurora::detail::AsyncState<T>>();
     aurora::Task<T> job{state};
@@ -202,9 +202,9 @@ template <typename T>
 /// @param request 待发送的请求（按值接管）。
 /// @param cancellation 取消令牌。
 /// @return 落定为 `Result<Response>` 的作业句柄。
-[[nodiscard]] inline auto deliver(const Client &client, Request request, Cancellation cancellation = {})
+[[nodiscard]] inline auto deliver(const Client &client, Request request, const Cancellation &cancellation = {})
     -> aurora::Task<Response> {
-    return detail::exchange_material(client, std::move(request), std::move(cancellation));
+    return detail::exchange_material(client, std::move(request), cancellation);
 }
 
 /// @brief 发起一次交换并直接绑成三态 `Resource<T>`：读取即订阅，落定即定点刷新。
