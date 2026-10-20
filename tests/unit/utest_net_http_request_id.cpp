@@ -162,11 +162,16 @@ AURORA_TEST_CASE(the_random_bits_reach_every_segment_of_the_id) {
     }
     // 两枚 64 位取值若写成同一枚（`head` 拼了两遍），第二段的四枚 nibble 必然与末段中间那四位逐枚相等：
     // 段界是 8 / 13 / 18 / 23，故第二段的 4 枚在 9..12，末段（12 枚，起于 24）的第 5..8 位在 28..31，
-    // 两处取的正是同一组 16 位。独立取值下这一撞每枚概率 2^-16，64 枚里期望 0.001 次，故逐枚判不等站得住。
+    // 两处取的正是同一组 16 位。独立取值下这一撞每枚概率 2^-16，单枚判不等会把约万分之一的假红带进
+    // 每条流水线；退化实现下 64 枚会**枚枚**相撞，故判据落在整批的命中数上：只容忍 1 次偶然碰撞。
+    std::size_t cross_segment_hits = 0;
     for (const std::string &draw : draws) {
         const std::string_view value = draw;
-        AURORA_TEST_CHECK_NE(value.substr(9, 4), value.substr(28, 4));
+        if (value.substr(9, 4) == value.substr(28, 4)) {
+            ++cross_segment_hits;
+        }
     }
+    AURORA_TEST_CHECK_LE(cross_segment_hits, std::size_t{1});
 }
 
 AURORA_TEST_CASE(shape_check_rejects_everything_that_is_not_uuidv4) {
