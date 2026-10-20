@@ -1349,7 +1349,7 @@ class ReorderableList : public Container {
     std::string restore_key_;  ///< 滚动位置保存键（空 = 不参与恢复）
     bool scroll_restored_ = false;  ///< 是否已执行过恢复 / 已被程序化设置就位
     bool drag_handle_ = false;  ///< 是否限定右侧手柄区域起拖
-    float auto_scroll_threshold_ = 48.0F;  ///< 近边缘自动滚动触发带高（dp，0 = 关闭）
+    float auto_scroll_threshold_ = AURORA_AUTO_SCROLL_THRESHOLD_DP;  ///< 近边缘自动滚动触发带高（dp，0 = 关闭；与跨进程拖放共用同一缺省）
 
     /// @brief 拖拽 / 落位态字段。
     DragState drag_state_ = DragState::Idle;
@@ -1374,7 +1374,6 @@ class ReorderableList : public Container {
 
     static constexpr float AURORA_HYSTERESIS = 2.0F;  ///< 换位滞回（dp，跨中点 ±2dp 内不切换）
     static constexpr float AURORA_HANDLE_BAND = 48.0F;  ///< 手柄区域宽度（dp，`drag_handle` 模式）
-    static constexpr float AURORA_AUTO_SCROLL_MAX_SPEED = 600.0F;  ///< auto-scroll 最大速度（dp/s）
     static constexpr float AURORA_SETTLE_EPSILON = 0.5F;  ///< 位移小于该值直接落位（不做动画）
     static constexpr float AURORA_ASSUMED_FPS = 60.0F;  ///< 帧间速度估计的采样率假设（Hz）
     static constexpr float AURORA_MAX_RELEASE_VELOCITY = 3000.0F;  ///< 松手初速度上界（dp/s）

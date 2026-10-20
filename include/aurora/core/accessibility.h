@@ -96,12 +96,23 @@ struct AccessibilityNode {
     std::string stable_key;  ///< 宿主经 `Widget::set_stable_key` 声明的跨重建稳定键（空 = 未设）
     std::string labelled_by;  ///< 本节点名字来源的**键**（`Widget::set_labelled_by`；空 = 未声明）
     std::uint64_t labelled_by_id = 0;  ///< 解析后的目标 `id`（0 = 未声明 / 未命中 / 目标无名 / 环上）；桥据此投影关系
+    bool drag_reachable = false;  ///< 本控件是否经系统拖放入站（可达性维度之一；控件侧静态声明，见 `Widget::accepts_system_drag`）
+    std::string drag_alternative_path;  ///< 非拖拽替代路径描述（空 = 仅拖拽可达；见 `Widget::system_drag_alternative_path`）
 
     /// @brief 动作集合是否包含指定动作。
     /// @param a 待检查的动作位。
     /// @return actions 含 a 位时为 true。
     [[nodiscard]] auto has_action(AccessibilityAction a) const -> bool {
         return (static_cast<std::uint16_t>(actions) & static_cast<std::uint16_t>(a)) != 0;
+    }
+
+    /// @brief 是否「仅拖拽可达」：接受拖入却未提供非拖拽替代路径（可达性契约的违例态）。
+    ///
+    /// 桥（UIA / ATK / NSAccessibility）与工具链据此告警——可接收拖放的控件须同时提供一条
+    /// 不经拖拽的等价入口（文档层承诺升为契约层后的可机检判据）。
+    /// @return `drag_reachable` 为真且替代路径描述为空时为 true。
+    [[nodiscard]] auto is_drag_only_reachable() const -> bool {
+        return drag_reachable && drag_alternative_path.empty();
     }
 
     /// @brief 是否有「交互类」动作（Click/Invoke/Toggle/Value/Select）：内容视图判定的输入之一。

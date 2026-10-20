@@ -4,7 +4,8 @@
 ///           可变行高 y 累计表、内建滚动的夹取与滚轮语义、restore_key 恢复与写回、
 ///           可见范围与命中索引换算、自绘滚动控件的缓存声明语义，以及键盘重排替代路径
 ///           （方向键光标 + 抓取/落位/取消 + 滚入视口 + 读屏播报 + i18n 键 + 开关让路）
-/// 覆盖说明: 拖拽识别 / 让位 / 落位动画 / auto-scroll 见 C2 / C3 用例（同文件续写）
+/// 覆盖说明: 拖拽识别 / 让位 / 落位动画 / 近边缘 auto-scroll（触发带缺省取共享常量
+///           AURORA_AUTO_SCROLL_THRESHOLD_DP，与跨进程系统拖放同一手感）见同文件后续用例
 
 #include <algorithm>
 #include <chrono>
@@ -731,6 +732,21 @@ AURORA_TEST_CASE(auto_scroll_follows_dragged_item_near_viewport_edge) {
     list.tick(now + std::chrono::milliseconds(16));
     AURORA_TEST_CHECK_NEAR(list.scroll_offset(), offset_after, 1e-4F);
     AURORA_TEST_CHECK_FALSE(list.is_dragging());
+}
+
+AURORA_TEST_CASE(auto_scroll_threshold_defaults_to_the_shared_constant) {
+    // 近边缘自动滚动的触发带缺省取共享常量：进程内拖拽（本控件）与跨进程系统拖放
+    // （`Widget::on_system_drag_auto_scroll` 链上滚动祖先）共用一套手感。显式设置仍可
+    // 各自调参，负值夹到 0（关闭）。
+    auto items = make_items({0, 1, 2});
+    const ReorderableList<int> list{items, make_builder({40.0F})};
+    AURORA_TEST_CHECK_NEAR(list.auto_scroll_threshold(), AURORA_AUTO_SCROLL_THRESHOLD_DP, 1e-4F);
+
+    ReorderableList<int> tuned{items, make_builder({40.0F})};
+    tuned.set_auto_scroll_threshold(12.0F);
+    AURORA_TEST_CHECK_NEAR(tuned.auto_scroll_threshold(), 12.0F, 1e-4F);
+    tuned.set_auto_scroll_threshold(-5.0F);
+    AURORA_TEST_CHECK_NEAR(tuned.auto_scroll_threshold(), 0.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(horizontal_drag_does_not_start_reorder) {
