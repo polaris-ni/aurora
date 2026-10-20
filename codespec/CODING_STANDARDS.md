@@ -218,6 +218,8 @@
 
 两通道均可通过 `set_sink` / `set_raw_sink` 重定向到文件或测试捕获。契约见 [`specification/08-tooling.md`](specification/08-tooling.md) §9。
 
+**凭据一律折叠，四个导出面同口径**：头部、URL（含 userinfo 与令牌查询参数）、消息体与控件属性中的凭据，不得以原值进入任何导出文本——日志行、错误 `detail`、Inspector JSON、活动快照一视同仁。库侧只对自己知情的那半分级（`net::FieldClass`）：`Secret` 恒折叠、宿主无权放行；`Sensitive` 默认折叠、按 `(net::ExportSurface + 键)` 显式放行；`Public` 原样但宿主可再收窄；消息体恒不导出（不折叠，直接不出现）。新增任何 detail 或导出字段必须经 `net::present_field` / `net::present_url`，不得手拼；宿主策略拿不到 `Secret` 原值，故「原样返回」的调试桩也放大不了。分级名单、折叠形态与两段式策略见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.38。
+
 ---
 
 ## 5 契约与表达
@@ -896,6 +898,7 @@ au::Button(au::ButtonProps{ .label = "OK" });
 | 用 `std::string_view` 或 `"\x03abc"` 形态的字面量承载含 `\0` 的二进制测试输入 | 两条坑叠加：`std::string_view` 从 `const char*` 构造会在首个 `\0` 截断（长度变成 0 而不是预期字节数），而 `\x` 转义**贪婪吞掉后续十六进制数字**（`"\x03abc"` 是一个越界转义，不是「`0x03` 后跟 `abc`」）。二进制输入一律显式带长度（`std::span<const char>(literal, N - 1)` 形态的helper），并把转义与其后的可打印字节用相邻字面量拼接隔开：`"\x03" "abc"` |
 | 在完成回调里写致命断言（`AURORA_TEST_REQUIRE*`） | 回调可能在**析构边界内**派发（如 `~StreamListener` → `close()` → 交付尾批），致命断言抛出的 `CaseAbort` 穿过 `noexcept` 即 `std::terminate`，整条测试进程连带消失、报告里看不见失败原因；回调内只用非致命断言记录失败（[`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.11） |
 | 新增 `std::cout` / `printf` / `puts` | 走 `AURORA_LOG_*`（stderr）/ `AURORA_LOG_RAW`（stdout 产品输出）/ 测试与工具里的 `AURORA_TEST_PRINTF*`（§4.1） |
+| 把 `Authorization` / `Cookie` / 带令牌的查询串原值直接拼进日志、错误 `detail` 或 Inspector JSON | 一律经 `net::present_field` / `net::present_url`：`Secret` 恒折叠且宿主不可放大、`Sensitive` 按 `(导出面 + 键)` 放行、消息体不导出（§4.1、[`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.38） |
 | 字符串字面量里写中文 | 字面量写英文 + ASCII 标点；确属功能必需中文时就地 `CJK-LITERAL: <类别> - <原因>`（§14） |
 | 只写 `@brief` 就交差 | 按 §13.5.2「命令必选矩阵」补齐 `@param[in/out]`、`@return`、`@tparam`、枚举项/常量说明 |
 | 在代码/文档留 `P0` / `Phase 1` / 旧编号 | 一律改成语义化表述（唯一稳定标识是需求 ID 与文档章节号，见 §11 与 `AGENTS.md` 硬规则 10） |

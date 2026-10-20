@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-025 |
 | 提出日期 | 2026-10-20 |
-| 当前状态 | 已提议 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.NET.OBSERVABILITY.001 |
 | 影响面 | 三个可独立评审的切片：① Inspector 路由注册表化（文件内静态表 + 可取单测的匹配器，零公共面）；② 网络记账与脱敏（两枚新公共头、三枚举 / 五结构体 / 两抽象类 / 十二自由函数，进程级活动存储与事件总线，两段式 `ExportPolicy`）；③ 暴露面（`GET /api/network`、`GET /api/network/request`、MCP 22 → 24）。**无破坏性签名变更、无新增错误码、`Client` / `Response` 零数据成员改动**；`AURORA_ENABLE_DEBUG=OFF` 时总线与三处 emit 点从编译面消失，脱敏保留（Inspector 在 Release 也读树）。REST 面只有一处有意的行为纠回：`DELETE /api/widget/` 一类「动词不支持 **且** 路径退化」的交集由 400 变 405 |
 

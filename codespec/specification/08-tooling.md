@@ -329,6 +329,8 @@ server.stop();        // 停止并 join 工作线程
 | POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit；`style` 存在但非整数返回 400，越界整数回退 Fluent |
 | POST | `/api/input/{click\|scroll\|drag\|text\|pointer}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll`/`drag` 另取数值 `dx`/`dy`（缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取字符串 `text`，`pointer` 另取字符串 `phase`（`press`\|`move`\|`release`，必填）与可选数值 `x`/`y`（控件本地 dp，缺省为该控件中心）——单步派发一个指针动作，供调用方自行合成跨子区域的连续拖拽。前四种为**目标式**（指针取控件中心），`pointer` 为**坐标式**。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
 | GET | `/api/find` | 按 key/type/text 定位控件：`?key=<Node::set_id 标识>&type=<type_name>&text=<文本>`，至少给一个参数（否则 400），多参数 AND。返回 `{matches:[{path, type, id}], count}`——`path` 为索引路径（根为空串），与 `/api/widget/{path}`、`/api/input/*` 同口径，可直接喂给寻址端点；`text` 比对文本类属性启发式（`content\|text\|label\|value\|hint\|placeholder`，与 `TestController::find_by_text` 同源）。遍历走 `child_nodes()` 原存储 const 引用（不构造 `Node` 副本，活树安全）；虚拟化容器（不覆写 `child_nodes()`）的子树不可见（与 `find_node_by_path` 同限：宁可少报、不可错报）。零命中回 200 + 空 `matches`（非错误，由调用方裁决）；方法非 GET 回 405。query 值一律先按 RFC 3986 百分号解码再比对（`%20` → 空格、UTF-8 字节序列 → 中文标签，`+` 保持字面量），故含空格/非 ASCII 的 `label` 可直接经 URL 编码定位；畸形百分号（`%zz`、尾部孤立 `%`）按字面量保留，不升级成错误响应 |
+| GET | `/api/network` | 进程级网络活动快照（`InspectorJson` 面呈现、最新在前）。查询参数：`limit`（0 = 全部，非负整数）、`host`（精确、ASCII 大小写不敏感、空串 400）、`status`（整数 0..65535）；**先过滤再取 `limit`**，`limit` 不影响 `dropped` / `truncated`。非法参数 400；返回 `{available, count, dropped, truncated, entries}`；Release 回 `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`（200） |
+| GET | `/api/network/request?id=<X-Request-Id>` | 同一逻辑请求的多跳展开：返回 `{available, request_id, entry, timelines}`——`entry` 为最新一条活动条目（含 path / host / status / 失败归因），`timelines` 按 `exchange_id` 升序、逐跳带 `StageMark`。缺 `id` 或空串 400；未知 id 404 且**不回显调用方 id**；Release 同上 unavailable。契约与阶段语义见 [`06-app-platform.md`](06-app-platform.md) §8.8.37、§8.8.39 |
 
 > `/api/input/*` 中 `click`/`scroll`/`drag`/`text` 为「目标式」语义：落点取目标控件中心，故目标须已布局（未布局时尺寸为零、中心退化为自身原点）。`pointer` 是唯一的「坐标式」通道：落点由请求体 `x`/`y` 给定（控件本地 dp），一次只派发一个指针动作，逐步调用即可合成跨子区域的连续拖拽——派发器在 Press 时缓存命中链为 `pointer_capture_`，故后续 `move` 仍会投给被按住的控件，与真实指针一致。失败（路径不存在 / 不可派发 / 参数不符）一律在派发前返回，**不改变任何控件状态**。滚动只派发事件，偏移量不在响应里（控件虽各自序列化 `offset` / `scroll_offset`，但响应体不回传），需要读回偏移请读控件属性或写 C++ 测试。
 
@@ -361,6 +363,9 @@ server.stop();        // 停止并 join 工作线程
 
 - `live_tree` / `live_widget_get` / `live_widget_set` / `live_patch` / `live_simulate`，分别映射到 §5.1 表的
   `GET /api/tree` / `GET /api/widget/{path}` / `PUT /api/widget/{path}/{prop}` / `POST /api/patch` / `POST /api/input/*`。
+- `list_network_activity` / `describe_network_request`，分别映射到 §5.1 表的 `GET /api/network` /
+  `GET /api/network/request?id=`；工具把 Inspector 的 JSON 原文交回（条目已按 `InspectorJson` 面脱敏），
+  会话发现同上。时间线与阶段语义见 [`06-app-platform.md`](06-app-platform.md) §8.8.37。
 - **会话发现按「方案 ③」（不落进程注册表文件）**：优先级为 ① 工具入参 `session`（`"6280"` 或 `"127.0.0.1:6280"`）
   ② 环境变量 `AURORA_INSPECTOR_PORT` ③ 默认 `6280`（与 `InspectorServer::start()` 默认值一致）。
   主机**恒被 pin 到回环**：客户端不做 DNS，只认 `127.0.0.1` / `localhost` / `::1`，且一律连到 `127.0.0.1`。
@@ -453,8 +458,19 @@ stdio JSON-RPC 2.0。传输格式：`Content-Length: <N>\r\n\r\n<JSON-RPC 2.0 bo
 | `validate_ui` | `{tree}` | 结构化诊断 | `validate_ui_tree_json()` |
 | `render_snapshot` | `{tree, width?, height?}` | 逻辑快照 JSON | `render_to_logical_snapshot()` |
 | `render_png` | `{tree, width?, height?, path?}` | PNG 文件路径 | `render_to_png()` |
+| `compare_snapshot` | `{tree, baseline_path, width?, height?, tolerance?}` | 逐像素统计 + 按控件归因的空间聚类差异区 + 文本摘要 | `Image::load()` + `render_to_image()` + `collect_widget_boxes()` + `build_snapshot_diff_report()`（`baseline_path` 限工作目录内相对路径、禁 `..`） |
 | `to_code` | `{tree, style?}` | C++ 代码 | `to_code()` |
 | `to_yaml` | `{tree}` | YAML 格式字符串 | `serialization::to_yaml(Json)` |
+| `generate_ui` | `{description}` | UI 树 JSON（`{"node": …}` 包装）；无 LLM、未命中回退 `Text` | `generate_ui()` |
+| `build_ui_prompt` | `{description}` | 给外部 LLM 的紧凑 schema 提示文本（库自身不发起任何网络请求） | `ui_prompt_for()` |
+| `repair_tree` | `{tree}`（接受 `{"node": …}` 包装） | `{tree, valid, errors}`：确定性修复未知类型、补 schema 缺省、`children_policy=none` 的类型丢弃子节点 | `repair_ui_tree()` + `validate_ui_tree()` |
+| `live_tree` | `{session?, window?}` | 运行中应用的真实 widget 树 JSON（`?window=` 取指定窗口） | `GET /api/tree`（经 `InspectorSession`） |
+| `live_widget_get` | `{session?, path}` | 单个控件的全部属性 JSON | `GET /api/widget/{path}` |
+| `live_widget_set` | `{session?, path, prop, value}` | 回写结果（失败带原因） | `PUT /api/widget/{path}/{prop}` |
+| `live_patch` | `{session?, ops}` | 批量属性补丁结果（只覆盖属性，不能增删结构） | `POST /api/patch` |
+| `live_simulate` | `{session?, path, action, dx?, dy?, text?}` | `{status, action, widget_path}`：经真实命中与派发路径 | `POST /api/input/*` |
+| `list_network_activity` | `{session?, limit?, host?, status?}` | Inspector network 快照 JSON `{available, count, dropped, truncated, entries}`（已脱敏） | `GET /api/network` |
+| `describe_network_request` | `{session?, request_id}` | `{available, request_id, entry, timelines}`：最新条目 + 逐跳阶段时间线 | `GET /api/network/request?id=` |
 | `get_schema` | 无 | 完整 API schema | `list_all_schemas()` + enums |
 | `simulate_interaction` | `{tree, path, action, dx?, dy?, text?, width?, height?}` | 目标控件属性 + 交互后逻辑快照 | `from_json()` + `render_to_logical_snapshot()`（派发前布局）+ `find_node()` + `simulate_click/scroll/text_input()` + `get_prop()` |
 | `list_commands` | `{commands, query?, limit?, include_disabled?}` | 过滤排序后的命令描述符 + 计数 | `command_fuzzy_score()`（与命令面板同一打分与排序） |
@@ -1042,8 +1058,10 @@ std::string dump = au::dump_tree_json(root).dump();
 - 不仅人类可用，AI Agent 也能通过 MCP 协议查询组件树、属性、状态快照。
 - 形成「代码 → 运行 → 检查 → 修复」的反馈闭环。
 - UI 树 dump 统一以 `widget/inspect.h` 内的自由函数提供，**不提供 `Widget::dump()` 成员方法**。
+- **网络可观测面同址暴露**：`GET /api/network`（活动快照，按 `limit` / `host` / `status` 过滤，先过滤再截断）与 `GET /api/network/request?id=<X-Request-Id>`（同一逻辑请求的多跳展开）；MCP 侧对应 `list_network_activity` / `describe_network_request`，工具把 Inspector 的 JSON 原文交回、不另开面。契约与阶段语义见 [`06-app-platform.md`](06-app-platform.md) §8.8.36–§8.8.39。Release 构建如实回 `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`，不静默回空表。
+- **导出必过脱敏闸**：`/api/tree`、`/api/debug/tree`、`/api/yaml`、`/api/widget/{path}` 的字符串属性与两枚 network 端点同批量经 `net::present_field` / `present_url`——`Secret` 恒折叠、宿主无权放大，`Sensitive` 默认折叠、按 `(ExportSurface + 键)` 放行，消息体恒不导出；未安装策略时树导出逐字节不变。`/api/to_code`（纯输入变换）、`/api/find` `/api/debug/pick`（只回路径 / 类型 / 边界）、`/api/patch`（只回状态）不在 walk 范围。键词汇、分级与折叠形态见 [`06-app-platform.md`](06-app-platform.md) §8.8.38。
 
-**验收标准：** 任一运行时 UI 树可经 `dump_tree_json*` 导出且能被 `from_json` 重建；`InspectorPanel` 可浏览与回写属性。
+**验收标准：** 任一运行时 UI 树可经 `dump_tree_json*` 导出且能被 `from_json` 重建；`InspectorPanel` 可浏览与回写属性；网络活动可按 `X-Request-Id` 展开逐跳阶段且四个导出面（`Timeline` / `InspectorJson` / `Log` / `ErrorDetail`）不泄漏凭据原值。
 
 ### 10.3 SPEC.FEAT.TOOLING.API-SCHEMA.001 机器可读 API Schema
 
@@ -1135,7 +1153,7 @@ int main() {
 
 三件套的 API 契约见 §7：
 
-- **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 13 个 MCP tools。
+- **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 24 个 MCP tools（清单见 §7.1；含 `live_*` 五枚、`list_network_activity` / `describe_network_request` 两枚网络工具）。
 - **CLI（`aurora_cli`）**：子命令 `components` / `describe` / `search` / `validate` / `snapshot` / `render` / `preview` / `to-code` / `to-yaml` / `schema`，以及全局选项 `--help`（`-h`）/ `--version`（`-V`）。
 - **LSP（`aurora_lsp`）**：stdio JSON-RPC 2.0 语言服务，对声明式写法提供 completion / hover / diagnostics / codeAction 四件套，消费库 live API（`describe_component` + `known_enums`），无需读取 `aurora_api.json` 文件，始终与代码同步。
 

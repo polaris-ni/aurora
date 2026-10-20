@@ -331,6 +331,34 @@ AURORA_TEST_CASE(lifecycle_pairs_begin_marks_and_end) {
     AURORA_TEST_CHECK_EQ(sink->ends, std::uint64_t{1});  // 已收摊的句柄析构不得补发
 }
 
+AURORA_TEST_CASE(timeline_of_returns_newest_hop_including_in_flight) {
+    ProcessReset reset;
+    const Url target = make_url("https://example.com/r");
+
+    ExchangeTrace first{"GET", "rid-latest", target, 0, 0, false, false};
+    first.mark(HttpStage::Connect);
+    first.finish();
+    ExchangeTrace second{"GET", "rid-latest", target, 1, 0, false, false};
+    second.mark(HttpStage::Connect);
+
+    // 同一链路：`timeline_of` 取 exchange_id 最大的一跳，在途也照取（不能因未收摊就跳过它）。
+    auto latest = require_value(timeline_of("rid-latest"));
+    AURORA_TEST_CHECK_EQ(latest.exchange_id, second.id());
+    AURORA_TEST_CHECK_EQ(latest.hop, static_cast<std::uint16_t>(1));
+    AURORA_TEST_CHECK_TRUE(latest.in_flight);
+    AURORA_TEST_CHECK_GT(latest.total.count(), std::int64_t{0});
+
+    // 全部跳按 exchange_id 升序，与快照的「最新在前」刻意分岔：时间线回答的是因果次序。
+    const auto hops = timelines_of("rid-latest");
+    AURORA_TEST_REQUIRE_EQ(hops.size(), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(hops.front().exchange_id, first.id());
+    AURORA_TEST_CHECK_EQ(hops.back().exchange_id, second.id());
+
+    second.finish();
+    latest = require_value(timeline_of("rid-latest"));
+    AURORA_TEST_CHECK_FALSE(latest.in_flight);
+}
+
 AURORA_TEST_CASE(abandoned_trace_ends_once_without_fake_error) {
     ProcessReset reset;
     auto sink = std::make_shared<CountingSink>();

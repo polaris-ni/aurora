@@ -624,6 +624,8 @@ AURORA_TEST_CASE(route_registry_matches_every_registered_endpoint) {
         {.target = "/api/debug/diagnostics", .verb = "GET"},
         {.target = "/api/debug/why", .verb = "GET"},
         {.target = "/api/windows", .verb = "GET"},
+        {.target = "/api/network", .verb = "GET"},
+        {.target = "/api/network/request?id=", .verb = "GET"},
         {.target = "/api/debug/tree", .verb = "GET"},
         {.target = "/api/debug/pick?x=0&y=0", .verb = "GET"},
         {.target = "/api/debug/flags", .verb = "POST"},
@@ -664,11 +666,13 @@ AURORA_TEST_CASE(route_registry_gates_method_before_path_shape) {
     const std::string delete_widget =
         http_roundtrip(server.port(), "DELETE /api/widget/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
     AURORA_TEST_CHECK_TRUE(delete_widget.find("405") != std::string::npos);
-    AURORA_TEST_CHECK_TRUE(delete_widget.find("Method not allowed for /api/widget") != std::string::npos);
+    // 整段比对而不是子串包含：前缀族的 label 若误带尾斜杠，`/api/widget` 仍是 `/api/widget/` 的前缀，
+    // 子串判据放它过去，这里就会漏掉那处文案漂移。
+    AURORA_TEST_CHECK_TRUE(delete_widget.find(R"("error":"Method not allowed for /api/widget")") != std::string::npos);
     const std::string delete_input =
         http_roundtrip(server.port(), "DELETE /api/input/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
     AURORA_TEST_CHECK_TRUE(delete_input.find("405") != std::string::npos);
-    AURORA_TEST_CHECK_TRUE(delete_input.find("Method not allowed for /api/input") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(delete_input.find(R"("error":"Method not allowed for /api/input")") != std::string::npos);
 
     // 支持的动词 + 退化路径仍是 400（路径形状由 handler 说，不是方法闸的事）。
     AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/widget/").find("400") != std::string::npos);
