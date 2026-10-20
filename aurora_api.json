@@ -5072,6 +5072,23 @@
       ]
     },
     {
+      "name": "ExportSurface",
+      "values": [
+        "Log",
+        "Timeline",
+        "InspectorJson",
+        "ErrorDetail"
+      ]
+    },
+    {
+      "name": "FieldClass",
+      "values": [
+        "Public",
+        "Sensitive",
+        "Secret"
+      ]
+    },
+    {
       "name": "FontStyle",
       "values": [
         "Normal",
@@ -5104,6 +5121,17 @@
         "Protocol",
         "Status",
         "Cancelled"
+      ]
+    },
+    {
+      "name": "HttpStage",
+      "values": [
+        "Connect",
+        "TlsHandshake",
+        "ConnectionAcquired",
+        "RequestSent",
+        "FirstByte",
+        "BodyDone"
       ]
     },
     {

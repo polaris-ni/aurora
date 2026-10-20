@@ -169,6 +169,9 @@ namespace aurora::tools {
 
     // ---- network (aurora::net public enums; not widget property types, but AI-enumerable API surface) ----
     enums["AddressFamily"] = {"IPv4", "IPv6", "LocalPath"};
+    enums["ExportSurface"] = {"Log", "Timeline", "InspectorJson", "ErrorDetail"};
+    enums["FieldClass"] = {"Public", "Sensitive", "Secret"};
+    enums["HttpStage"] = {"Connect", "TlsHandshake", "ConnectionAcquired", "RequestSent", "FirstByte", "BodyDone"};
     enums["AuthScheme"] = {"Basic", "Bearer", "Unsupported"};
     enums["HttpErrorClass"] = {"Invalid", "Dns",      "Unreachable", "Proxy",    "Tls",
                                "Timeout", "Protocol", "Status",      "Cancelled"};

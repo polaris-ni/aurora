@@ -110,9 +110,11 @@ aurora/net/http_auth.h
 aurora/net/http_binding.h
 aurora/net/http_client.h
 aurora/net/http_multipart.h
+aurora/net/http_observability.h
 aurora/net/http_session.h
 aurora/net/http_sse.h
 aurora/net/http_stream.h
+aurora/net/observability.h
 aurora/net/poll.h
 aurora/net/policy.h
 aurora/net/proxy.h
