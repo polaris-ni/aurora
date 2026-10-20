@@ -285,10 +285,11 @@ auto HttpResponseCache::set_options(aurora::net::http::CacheOptions options) -> 
 }
 
 auto HttpResponseCache::lookup(aurora::net::http::Method method, const std::string &url,
-                               const aurora::Headers &request_headers, CacheTime now) -> CacheLookup {
+                               const aurora::Headers &request_headers, CacheTime now,
+                               const std::vector<std::string> &extra_vary) -> CacheLookup {
     CacheLookup out;
     const std::scoped_lock guard{mutex_};
-    const auto index = find_index(method, url, request_headers);
+    const auto index = find_index(method, url, request_headers, extra_vary);
     if (!index.has_value()) {
         return out;
     }
@@ -306,7 +307,7 @@ auto HttpResponseCache::lookup(aurora::net::http::Method method, const std::stri
 
 auto HttpResponseCache::store(aurora::net::http::Method method, const std::string &url,
                               const aurora::Headers &request_headers, const aurora::net::http::Response &response,
-                              CacheTime now) -> bool {
+                              CacheTime now, const std::vector<std::string> &extra_vary) -> bool {
     if (!is_cacheable_method(method) || !is_cacheable_status(response.status())) {
         return false;
     }
@@ -351,6 +352,17 @@ auto HttpResponseCache::store(aurora::net::http::Method method, const std::strin
         }
         entry.vary.emplace_back(name, request_headers.get(name).value_or(std::string{}));
     }
+    // 发起侧追加的变体名（钩子触点集）同样进键、同样取当时的值。三处去重：对端点过的、凭据收过的、
+    // 本组里重名的——触点集本身已按名去重，这里只防它与上面两份相撞。
+    for (const auto &name : extra_vary) {
+        const auto already_stored = [&name](const std::pair<std::string, std::string> &stored) {
+            return ascii_name_equal(stored.first, name);
+        };
+        if (std::ranges::any_of(entry.vary, already_stored)) {
+            continue;
+        }
+        entry.vary.emplace_back(name, request_headers.get(name).value_or(std::string{}));
+    }
     // 表里存的是「未标缓存」的形态：`from_cache()` 只在交付那一刻置真，否则条目自己会被读成一次命中。
     entry.response = aurora::net::http::Response{response.status(), std::string{response.reason()}, response.headers(),
                                                  response.body(), false};
@@ -361,7 +373,7 @@ auto HttpResponseCache::store(aurora::net::http::Method method, const std::strin
 
     const std::scoped_lock guard{mutex_};
     entry.used = ++clock_;
-    if (const auto index = find_index(method, url, request_headers); index.has_value()) {
+    if (const auto index = find_index(method, url, request_headers, extra_vary); index.has_value()) {
         entries_[index.value()] = std::move(entry);  // 同键的旧变体被这次的结果取代
     } else {
         entries_.push_back(std::move(entry));
@@ -372,10 +384,11 @@ auto HttpResponseCache::store(aurora::net::http::Method method, const std::strin
 
 auto HttpResponseCache::revalidated(aurora::net::http::Method method, const std::string &url,
                                     const aurora::Headers &request_headers,
-                                    const aurora::net::http::Response &not_modified, CacheTime now)
+                                    const aurora::net::http::Response &not_modified, CacheTime now,
+                                    const std::vector<std::string> &extra_vary)
     -> std::optional<aurora::net::http::Response> {
     const std::scoped_lock guard{mutex_};
-    const auto index = find_index(method, url, request_headers);
+    const auto index = find_index(method, url, request_headers, extra_vary);
     if (!index.has_value()) {
         return std::nullopt;
     }
@@ -406,10 +419,21 @@ auto HttpResponseCache::clear() -> void {
 }
 
 auto HttpResponseCache::find_index(aurora::net::http::Method method, const std::string &url,
-                                   const aurora::Headers &request_headers) const -> std::optional<std::size_t> {
+                                   const aurora::Headers &request_headers,
+                                   const std::vector<std::string> &extra_vary) const -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < entries_.size(); ++i) {
         const auto &entry = entries_[i];
         if (entry.method != method || entry.url != url) {
+            continue;
+        }
+        // 覆盖判定先于取值比较：条目缺当前任何一枚追加变体名即不匹配。存入时追加名连同取值已进 `vary`，
+        // 故取值由下面那条既有循环负责——这里只补「这条目压根没算过这枚头」那一种不能命中的形态。
+        const bool covered = std::ranges::all_of(extra_vary, [&entry](const std::string &name) {
+            return std::ranges::any_of(entry.vary, [&name](const std::pair<std::string, std::string> &stored) {
+                return ascii_name_equal(stored.first, name);
+            });
+        });
+        if (!covered) {
             continue;
         }
         bool matches = true;

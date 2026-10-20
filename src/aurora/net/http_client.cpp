@@ -47,6 +47,7 @@
 #include "aurora/net/detail/http_cookie_jar.h"
 #include "aurora/net/detail/http_encoding.h"
 #include "aurora/net/detail/http_fetch.h"
+#include "aurora/net/detail/http_hook_chain.h"
 #include "aurora/net/detail/http_pool.h"
 #include "aurora/net/detail/http_progress.h"
 #include "aurora/net/detail/http_request_id.h"
@@ -227,10 +228,17 @@ class StageTimer {
 ///
 /// 换 origin 的那一跳剥掉两枚凭据字段（`Authorization` / `Cookie`），判据与口径见 `net/http_auth.h` 的
 /// 「凭据纪律」条；同 origin 的重定向照原样带走，认证环补上的那枚也因此跟着后续每一跳。
+///
+/// 钩子改过的字段（`touched`，即触点集）在换 origin 时**一并剥掉**：库不知道哪一枚自定义头是凭据，而钩子经手
+/// 过的那一组是库唯一能知道的「这可能是注入的身份」。误伤一枚无害自定义头的代价比把租户标识 / API key / 签名
+/// 带到陌生对端小得多。**调用方自写且钩子没碰过的自定义头维持原样带走**——这条不对称是刻意的（判据见
+/// `net/http_hook.h` 与规格）。
 /// @param current 本跳请求。
 /// @param response 本跳拿到的重定向应答。
+/// @param touched 钩子触点集（ASCII 小写名）；空即本交换没有钩子改写过任何字段。
 /// @return 下一跳请求；无 `Location`、目标解不出、或体不可重放时为对应错误。
-[[nodiscard]] auto follow(const Request &current, const Response &response) -> Result<Request> {
+[[nodiscard]] auto follow(const Request &current, const Response &response,
+                          const std::vector<std::string> &touched = {}) -> Result<Request> {
     const auto location = response.header("Location");
     if (!location.has_value()) {
         return Result<Request>{make_error(ErrorCode::HttpProtocolError, "redirect response carried no Location")};
@@ -268,8 +276,10 @@ class StageTimer {
     // 因此跟着后续每一跳与每一次重试。
     const bool leaves_origin = !same_origin(base.value(), next_url);
     for (const auto &entry : current.headers().entries()) {
-        if (leaves_origin &&
-            (field_name_equal(entry.name, "Authorization") || field_name_equal(entry.name, "Cookie"))) {
+        if (leaves_origin && (field_name_equal(entry.name, "Authorization") || field_name_equal(entry.name, "Cookie") ||
+                              std::ranges::any_of(touched, [&entry](const std::string &name) {
+                                  return field_name_equal(entry.name, std::string_view{name});
+                              }))) {
             continue;
         }
         redirected.header(entry.name, entry.value);
@@ -556,6 +566,34 @@ auto record_cache_hit(const Request &request, const Response &response) -> void 
 #endif
 }
 
+/// @brief 记一条钩子短路交付：零 mark、`from_cache = false`、有状态码与交付字节、`sent = 0`。
+///
+/// 这是一次**没有线上往来的成功交付**，与既有三类记录都不同：真实交换有阶段 mark，新鲜缓存命中 `from_cache`
+/// 为真，本地拒绝有错误码而没有状态码。「零 mark + 有状态码 + 无错误码 + `from_cache=false`」因此唯一地
+/// 指向钩子短路，Inspector 与时间线无需新字段就能把它辨认出来。复用 `record_cache_hit` 会把替身伪装成
+/// 缓存命中，与事实相反，故另立本口。
+/// @param request 发起请求（钩子改写后的那一份）。
+/// @param response 钩子交出的应答（已物化，库不再解压）。
+auto record_hook_delivery(const Request &request, const Response &response) -> void {
+#ifdef AURORA_ENABLE_DEBUG
+    const Url absent;
+    const auto &slot = request.url();
+    ExchangeTrace trace{method_text(request.method()),
+                        request_id_of(request),
+                        slot.has_value() ? slot.value() : absent,
+                        0,
+                        0,
+                        false,
+                        false};
+    trace.set_status(response.status());
+    trace.note_received(static_cast<std::uint64_t>(response.body().size()));
+    trace.finish();
+#else
+    (void)request;
+    (void)response;
+#endif
+}
+
 /// @brief 一跳的建连事实：连到谁、以哪种形态连、请求行写成什么形态。
 ///
 /// 三条发起侧口径在这枚小结构里一次定死：① 代理决策（`for_target` 的产出）先定；② 策略判定读的就是这一份
@@ -645,6 +683,81 @@ auto gate_origin(const ProxyEnvironment &environment, const TlsContext &tls, con
         return Result<void>{routed.error()};
     }
     return Result<void>{};
+}
+
+/// @brief 交给钩子写通道的字段表：把改写落在**要上线的那份表**上。
+///
+/// 为什么是 `const_cast` 而不是「拷一份改完再塞回去」：`Request` 的公共面只给只读访问器，既没有整表设值口，
+/// 也没有删除某枚字段的入口——逐枚回写写不出「钩子删掉一头」这条语义，还会把一次改写摊成 N 次设值。本函数
+/// 唯一的调用侧传的都是协程帧上的**非 const 局部 `Request`**，故放宽到其成员表的写通道是良定义的回写，
+/// 不存在「改掉一枚 const 对象」那种 UB。
+/// @param request 本次交换的原始请求（非 const）。
+/// @return 其字段表的可写引用。
+[[nodiscard]] auto hook_header_table(Request &request) -> Headers & {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast): 对象本身非 const，这里只放宽其成员表的写通道
+    return const_cast<Headers &>(request.headers());
+}
+
+/// @brief 一次交换跑完钩子面之后的产物：记账事实、短路值、以及「就此收摊」的错误。
+/// @note Thread: 随一次交换的协程帧
+/// @note Side-effects: none
+struct HookPass {
+    detail::ExchangeHookChain::Run run;  ///< 收摊前缀、链末逻辑头与触点集（空链时 `engaged` 为假）
+    std::optional<Result<Response>> delivery;  ///< 短路值：只有 `Send` 腿会给出
+    std::optional<Error> failure;  ///< 就此收摊的结局（链拒绝 / 钩子后取消 / 闸 #2 拒绝）
+};
+
+/// @brief 钩子链 → 钩子后取消复检 → 闸 #2（含保留头终检）：四条腿共用的那一段次序。
+///
+/// 三段的次序都是定死的（判据见 `net/http_client.h` 的「交换钩子」段与 `net/http_hook.h`）：链跑完**先**复检
+/// 取消——取消先于短路，钩子在回调里取消令牌时短路值作废、`after_response` 一概不问；**再**重跑策略闸。闸 #2
+/// 在今天的入参面下不可能与闸 #1 得出不同结论（目标、端口、代理与 `TlsContext` 都不可达），保留头终检同理是
+/// 逐钩子检查之后的冗余防线；两者都按结构不变量保留，不为其伪造用例。
+/// @param chain 客户端的钩子链（空 = 整段跳过）。
+/// @param origin 本次交换的原始请求（就地被钩子改写）。
+/// @param environment 代理集合（闸 #2 用）。
+/// @param tls TLS 口径（闸 #2 用）。
+/// @param policy 本次交换生效的策略（闸 #2 用）。
+/// @param leg 本腿。
+/// @param cancellation 宿主交来的取消令牌（钩子后复检用）。
+/// @return 记账事实与「要不要就此收摊」。
+[[nodiscard]] auto engage_exchange_hooks(const std::shared_ptr<detail::ExchangeHookChain> &chain, Request &origin,
+                                         const ProxyEnvironment &environment, const TlsContext &tls,
+                                         const NetPolicy &policy, ExchangeLeg leg, const Cancellation &cancellation)
+    -> HookPass {
+    HookPass pass;
+    if (chain == nullptr) {
+        return pass;
+    }
+    detail::ExchangeHookChain::BeforeResult before =
+        chain->run_before(origin.method(), origin.url(), hook_header_table(origin), leg);
+    pass.run = std::move(before.run);
+    if (before.status == detail::ExchangeHookChain::BeforeStatus::Rejected) {
+        pass.failure = std::move(before.rejection);
+        return pass;
+    }
+    if (cancellation.is_cancelled()) {
+        pass.failure = make_error(ErrorCode::NetCancelled, "the exchange was cancelled during the request hooks");
+        return pass;
+    }
+    if (const auto verdict = gate_origin(environment, tls, policy, origin); !verdict) {
+        pass.failure = verdict.error();
+        return pass;
+    }
+    if (before.status == detail::ExchangeHookChain::BeforeStatus::ShortCircuit) {
+        pass.delivery = std::move(before.delivery);
+    }
+    return pass;
+}
+
+/// @brief 收摊问：只问实际跑过 `before_request` 的那段前缀，视图取链末的逻辑请求。
+/// @param run `engage_exchange_hooks` 的记账产物。
+/// @param origin 本次交换的原始请求。
+/// @param leg 本腿。
+/// @param response 要交出的应答（线上应答 / 新鲜缓存副本 / 短路成功那一份）。
+auto engage_response_hooks(const detail::ExchangeHookChain::Run &run, const Request &origin, ExchangeLeg leg,
+                           const Response &response) -> void {
+    detail::ExchangeHookChain::run_after(run, origin.method(), origin.url(), leg, response);
 }
 
 /// @brief fetch 腿该从 fetch init 里剥掉的请求头（连接管理与内容编码管理字段，浏览器自理）。
@@ -1040,9 +1153,10 @@ struct CacheOpening {
 /// @param cache 表；未构造时跳过。
 /// @param options 本客户端的缓存口径。
 /// @param request 待发起的请求（陈旧副本会往它上面挂 `If-None-Match` / `If-Modified-Since`）。
+/// @param extra_vary 变体名追加集：钩子触点（见 `net/http_hook.h`），空即按既有口径建键。
 /// @return 见 `CacheOpening`。
 [[nodiscard]] auto open_from_cache(const std::shared_ptr<detail::HttpResponseCache> &cache, const CacheOptions &options,
-                                   Request &request) -> CacheOpening {
+                                   Request &request, const std::vector<std::string> &extra_vary = {}) -> CacheOpening {
     CacheOpening out;
     if (!options.enabled || request.no_cache() || request.range().has_value() ||
         !detail::is_cacheable_method(request.method()) || !cache) {
@@ -1057,7 +1171,8 @@ struct CacheOpening {
         return out;
     }
     out.key = target.value().to_string();
-    auto found = cache->lookup(request.method(), out.key, request.headers(), std::chrono::system_clock::now());
+    auto found =
+        cache->lookup(request.method(), out.key, request.headers(), std::chrono::system_clock::now(), extra_vary);
     if (found.fresh.has_value() && !directive.no_cache) {
         out.fresh = std::move(found.fresh);
         return out;
@@ -1086,8 +1201,10 @@ struct CacheOpening {
 /// @param key 起手算出的建键 URL；空 = 本次没参与缓存。
 /// @param revalidating 起手是否挂过条件头。
 /// @param outcome 本次交换的结局（就地改写：304 → 合并副本）。
+/// @param extra_vary 变体名追加集：钩子触点（见 `net/http_hook.h`），空即按既有口径建键。
 auto settle_cache(const std::shared_ptr<detail::HttpResponseCache> &cache, const CacheOptions &options,
-                  const Request &origin, const std::string &key, bool revalidating, Result<Response> &outcome) -> void {
+                  const Request &origin, const std::string &key, bool revalidating, Result<Response> &outcome,
+                  const std::vector<std::string> &extra_vary = {}) -> void {
     if (!options.enabled || origin.no_cache() || !detail::is_cacheable_method(origin.method()) || !cache ||
         key.empty() || !outcome) {
         return;
@@ -1098,7 +1215,7 @@ auto settle_cache(const std::shared_ptr<detail::HttpResponseCache> &cache, const
         if (!revalidating) {
             return;
         }
-        auto merged = cache->revalidated(origin.method(), key, origin.headers(), outcome.value(), now);
+        auto merged = cache->revalidated(origin.method(), key, origin.headers(), outcome.value(), now, extra_vary);
         if (merged.has_value()) {
             outcome = Result<Response>{std::move(merged.value())};
         }
@@ -1106,7 +1223,7 @@ auto settle_cache(const std::shared_ptr<detail::HttpResponseCache> &cache, const
     }
     // 进不了表是常态而非故障（`no-store` / `Vary: *` / 不可存的方法与状态码 / 无有效期又无校验子），
     // 它不改变交出的应答，故这里只把判定本身当成一次分支。
-    if (!cache->store(origin.method(), key, origin.headers(), outcome.value(), now)) {
+    if (!cache->store(origin.method(), key, origin.headers(), outcome.value(), now, extra_vary)) {
         return;
     }
 }
@@ -1184,7 +1301,17 @@ class HeadGuardSink final : public DataSink {
 
 Client::Client()
     : cache_{std::make_shared<detail::HttpResponseCache>(cache_options_)},
-      pool_{std::make_shared<detail::HttpConnectionPool>()}, tls_generation_{std::make_shared<std::uint64_t>(0)} {}
+      pool_{std::make_shared<detail::HttpConnectionPool>()}, tls_generation_{std::make_shared<std::uint64_t>(0)},
+      hook_chain_{std::make_shared<detail::ExchangeHookChain>()} {}
+
+auto Client::use(std::shared_ptr<ExchangeHook> hook) const -> ExchangeHookRegistration {
+    // 链恒存在（构造即建，移动后的壳上也留着一枚空链）：这里不再懒建，否则 `use()` 这条 const 路要mutable
+    // 成员才能补。空指针登记由链内核自己折成一次空操作并返回空句柄。
+    if (!hook_chain_) {
+        return {};
+    }
+    return hook_chain_->use(std::move(hook));
+}
 
 auto Client::cache(CacheOptions value) -> Client & {
     cache_options_ = value;
@@ -1228,13 +1355,34 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
     // 策略在发起那一刻读定：本次交换的每一跳与缓存命中都问这一份，之后改 `Client::policy()` 或进程级默认
     // 都不影响已在途的交换（判定用的是「出发时」的策略，不是「回投时」的策略）。
     const NetPolicy security = effective_policy(policy_);
-    // 起手策略闸排在查表之前：命中缓存照样是一次交付，不能因为它就没被问过。
+    // 起手策略闸排在钩子与查表之前：命中缓存照样是一次交付，被策略拒绝的目标更是一次都不该被改写。
     if (const auto verdict = gate_origin(proxy_, tls_, security, origin); !verdict) {
         record_local_outcome(origin, verdict.error().code_enum, 0, 0);
         co_return Result<Response>{verdict.error()};
     }
+    // 交换钩子链：闸 #1 之后、fetch 腿形态判定与缓存查表之前，一次交换恰好问一遍 `before_request`。
+    // 链跑完就地接两道复检（取消先于短路、闸 #2 是结构不变量），判据见本头「交换钩子」段。
+    HookPass hooks =
+        engage_exchange_hooks(hook_chain_, origin, proxy_, tls_, security, ExchangeLeg::Send, cancellation);
+    if (hooks.failure.has_value()) {
+        record_local_outcome(origin, hooks.failure->code_enum, 0, 0);
+        co_return Result<Response>{std::move(*hooks.failure)};
+    }
+    if (hooks.delivery.has_value()) {
+        // 短路是**终点**：不查缓存、不进缓存、不更新 Jar、不跟随 `Location`、不进重试环、不发进度、不再解压。
+        // 记账先于收摊问，故 `after_response` 里查活动表已经能看到这次交付（三条交付路同序）。
+        if (hooks.delivery->ok()) {
+            const Response &mocked = hooks.delivery->value();
+            record_hook_delivery(origin, mocked);
+            engage_response_hooks(hooks.run, origin, ExchangeLeg::Send, mocked);
+        } else {
+            record_local_outcome(origin, hooks.delivery->error().code_enum, 0, 0);
+        }
+        co_return std::move(*hooks.delivery);
+    }
     // fetch 腿的整单语义不支持流式请求体：浏览器一次性交出整次交换，`BodySource` 的分段与回放口径
     // 无落点。如实落 `net-platform-unavailable` 并点名，不做悄悄一次性物化（§16 第 37 项）。
+    // 排在短路之后：替身不必为 fetch 腿物化体，流式体请求也能被 mock。
     if (detail::fetch_leg_active() && origin.body_source() != nullptr) {
         record_local_outcome(origin, ErrorCode::NetPlatformUnavailable, 0, 0);
         co_return Result<Response>{
@@ -1245,9 +1393,11 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
     // 缓存起手式：命中新鲜副本时一条连接都不发起就交出——§12 承诺的「同一 URL 二次请求不触网」正是这一条。
     // 命中陈旧副本时把两枚条件头挂在**原始请求**上，故重试环的每一次尝试都带着同一份校验子重跑（挂在逐跳
     // 副本上的话，第二次尝试就成了「第一次验证、第二次裸打」）。
-    CacheOpening opening = open_from_cache(cache_, cache_options_, origin);
+    // 触点集作为额外 `Vary` 名参与建键：钩子经手过的头必须进键，否则新租户会读到旧租户的副本。
+    CacheOpening opening = open_from_cache(cache_, cache_options_, origin, hooks.run.touched);
     if (opening.fresh.has_value()) {
         record_cache_hit(origin, *opening.fresh);
+        engage_response_hooks(hooks.run, origin, ExchangeLeg::Send, *opening.fresh);
         co_return Result<Response>{std::move(*opening.fresh)};
     }
     // 重试环的资格有三道判据：策略开着、方法幂等、体可回放到原点。第三道只挂在流式体上——内存体天然能重发，
@@ -1883,7 +2033,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
                     make_error(ErrorCode::HttpRedirectLimit, "redirect chain exceeded the configured limit")};
                 break;
             }
-            auto next = follow(current, one.value());
+            auto next = follow(current, one.value(), hooks.run.touched);
             if (!next) {
                 one = Result<Response>{next.error()};
                 break;
@@ -2054,12 +2204,24 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
         outcome = Result<Response>{make_error(ErrorCode::HttpTimeout, "retry budget exhausted")};
     }
     // 收尾进表 / 换 304：一次交换至多写一次，写在重试环之外——中间那次尝试的应答不该进表。
-    settle_cache(cache_, cache_options_, origin, opening.key, opening.revalidating, outcome);
+    settle_cache(cache_, cache_options_, origin, opening.key, opening.revalidating, outcome, hooks.run.touched);
+    // 收摊问只在这一条路上问：成功交出一枚应答（含非 2xx——那是对端说的事实，不是本库的失败）。
+    if (outcome) {
+        engage_response_hooks(hooks.run, origin, ExchangeLeg::Send, outcome.value());
+    }
     co_return outcome;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
 auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellation) const
+    -> CoroTask<Result<StreamOutcome>> {
+    // 公共面只把腿定成 `Stream`：调用方没有资格（也没有理由）指定自己那条交换「算哪条腿」，那枚事实由入口决定。
+    // 订阅层要传 `ServerSentEvents` 就走私有实现体（判据见本头「交换钩子」段）。本函数不是协程，直接把任务
+    // 交下去——协程帧只有一份，套在实现体之外那一份没有存在理由。
+    return open_stream_impl(std::move(request), sink, std::move(cancellation), ExchangeLeg::Stream);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
+auto Client::open_stream_impl(Request request, DataSink &sink, Cancellation cancellation, ExchangeLeg leg) const
     -> CoroTask<Result<StreamOutcome>> {
     // 取消先于一切判定，且与 `send` 同一位置：已取消的令牌不问策略、不看本腿能力、不查表，也不调宿主任何一口。
     if (cancellation.is_cancelled()) {
@@ -2106,13 +2268,22 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
         record_local_outcome(origin, verdict.error().code_enum, 0, 0);
         co_return Result<StreamOutcome>{verdict.error()};
     }
+    // 交换钩子链：闸 #1 之后、缓存与重试之前，与 `send` 同一条次序。本腿**只问起手问**——它的收摊值是
+    // `StreamOutcome` 而非 `Response`，为钩子另造一份「头部已定、体未读完」的应答快照等于在库里长出第二份
+    // 应答真值（刻意限制，判据见 `net/http_hook.h`）。起手交出短路值即整次落 `http-request-invalid`：
+    // 静默忽略会让宿主的替身「以为 mock 了，实际打到了真网」。
+    HookPass hooks = engage_exchange_hooks(hook_chain_, origin, proxy_, tls_, security, leg, cancellation);
+    if (hooks.failure.has_value()) {
+        record_local_outcome(origin, hooks.failure->code_enum, 0, 0);
+        co_return Result<StreamOutcome>{std::move(*hooks.failure)};
+    }
     // 缓存起手式：命中新鲜副本时把已存的那份体按段交给同一个宿主，一条连接都不发起。交付次序与真取回时一致
     // （`on_head` → 若干次 `on_data` → `on_end`），`wire_bytes` 恒 0——本次确实没有线上字节，不是把计数漏掉了。
     //
     // 本入口**只读不写**：把流式载荷攒进表就意味着先把它攒进内存，那正是调用方选 `open_stream` 要避免的事。
     // 于是命中之外的另一条分岔也在这里定：陈旧条目挂上条件头去验证，拿到 304 仍要合并、仍要把已存那份体逐段
     // 交出去，但这次交换的结果不进表。
-    const CacheOpening opening = open_from_cache(cache_, cache_options_, origin);
+    const CacheOpening opening = open_from_cache(cache_, cache_options_, origin, hooks.run.touched);
     if (opening.fresh.has_value()) {
         record_cache_hit(origin, *opening.fresh);
         co_return Result<StreamOutcome>{deliver_cached_stream(sink, *opening.fresh)};
@@ -2828,7 +2999,7 @@ auto Client::open_stream(Request request, DataSink &sink, Cancellation cancellat
                 Response resp{assembler.head().status, assembler.head().reason, assembler.head().headers, {}};
                 // 重定向跳只读了头部、体未读：这条连接上还压着没归属的字节，绝不回池（卫未武装，析构即关）。
                 harvest_set_cookies(cookie_jar_, target, resp.headers(), target.is_secure());
-                auto next = follow(current, resp);
+                auto next = follow(current, resp, hooks.run.touched);
                 if (!next) {
                     one = Result<StreamOutcome>{next.error()};
                     break;
@@ -3102,6 +3273,15 @@ auto Client::connect_websocket(Request request, WebSocketSink &sink, WebSocketOp
         record_local_outcome(origin, ErrorCode::WsHandshakeRejected, 0, 0);
         co_return Result<WebSocket>{
             make_error(ErrorCode::WsHandshakeRejected, ErrorParams{{"detail", "the target has no effective port"}})};
+    }
+    // 交换钩子链：问的是握手那一跳，升级之后的会话不属一次 HTTP 交换（与可观测性切片把会话排除出请求活动表
+    // 是同一条分界）。故本腿既不问 `after_response`（收摊值是 `WebSocket`），也不承认短路值——交出即整次落
+    // `http-request-invalid`。保留头在本腿多四枚：握手四字段由库写定，子协议与扩展走 `WebSocketOptions`。
+    HookPass hooks =
+        engage_exchange_hooks(hook_chain_, origin, proxy_, tls_, security, ExchangeLeg::WebSocket, cancellation);
+    if (hooks.failure.has_value()) {
+        record_local_outcome(origin, hooks.failure->code_enum, 0, 0);
+        co_return Result<WebSocket>{std::move(*hooks.failure)};
     }
     // 路由与另两腿同一条 `plan_route`（库内「有没有经代理」只有这一个答案）：`ws://` 遇明文转发代理时请求行
     // 写成绝对形态，`wss://` 一律走隧道——隧道之上的 TLS 握手对象恒是目标主机。

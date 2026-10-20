@@ -316,7 +316,10 @@ auto Client::open_sse(Request request, SseSink &sink, Cancellation cancellation)
         }
         ExchangeSink exchange{sink,
                               SseSession{.last_event_id = last_event_id, .window = retry_window, .events = events}};
-        auto one = co_await detail::await_coro(open_stream(current, exchange, cancellation));
+        // 走私有实现体而不是公共 `open_stream`：一次（重）连在钩子眼里是 `ServerSentEvents` 腿上的**一次交换**
+        // （逐连重问一次起手问，判据见 `net/http_hook.h`），公共面把腿定成 `Stream` 会把它说成一次普通流式交换。
+        auto one = co_await detail::await_coro(
+            open_stream_impl(current, exchange, cancellation, ExchangeLeg::ServerSentEvents));
         ++exchanges;
         if (one) {
             wire_bytes += one.value().wire_bytes;

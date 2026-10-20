@@ -87,6 +87,17 @@
 /// - **逐跳重问**：每一跳（含重定向带来的新主机、新方案）都按本跳的代理决策重新判定，上一跳放行不代表这一跳。
 /// - **拒在发出之前**：违规一律落 `net-policy-violated`，一条连接都不发起、一个字节都不写出。
 ///
+/// 交换钩子（`Client::use()` → `net/http_hook.h`）在发起侧问两问，三条口径与上面的形态裁决同级：
+/// - **双闸夹一问**：策略闸先在钩子**之前**判——被拒的目标一次都不会问到钩子；钩子链跑完后再按最终请求重问
+///   一次并做保留头终检。后一问是结构不变量而不是第二个可观测事件（逐钩子检查已经使「链末才发现违规」不可
+///   独立构造），故被钩子改坏的目标不会漏到线上。链路标识与 Cookie 附着排在第一道闸之前，钩子因此看得见
+///   它们，也正因如此那两枚字段里有保留头。
+/// - **一问一答的配对**：一次交换至多问一次 `before_request`（`open_sse` 每次重连是一条新交换、各问一次），
+///   至多问一次 `after_response`；只有**成功交出应答**的那次才问收摊问——失败、取消、策略拒绝与三条流式腿
+///   （它们的收摊值不是 `Response`）一概不问。
+/// - **短路只在 `send`**：其余三条腿交出短路值即整次落 `http-request-invalid`，因为「宿主以为 mock 掉了、
+///   实际打到了真网」比一次明确的失败更难排查。
+///
 /// 流式接收（`open_stream()` + `net/http_stream.h` 的 `DataSink`）与物化路径共用上述全部协议语义，四条形态
 /// 差别单列在那里：线上字节不设限（`max_body_bytes()` 管的是物化路径的内存）、`deflate` 两型按包装头判定、
 /// 重定向跳的消息体不读、本腿无流式能力时直接失败而不悄悄物化。
@@ -109,6 +120,7 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_auth.h"
+#include "aurora/net/http_hook.h"
 #include "aurora/net/http_sse.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/net/policy.h"
@@ -121,6 +133,7 @@ namespace aurora::net::detail {
 class HttpResponseCache;  ///< 实现侧缓存表：字段全部留在 `net/detail/http_cache.h`，公共头不暴露
 class HttpConnectionPool;  ///< 实现侧连接池：字段全部留在 `net/detail/http_pool.h`，公共头不暴露
 class HttpCookieJar;  ///< 实现侧 Cookie Jar：字段全部留在 `net/detail/http_cookie_jar.h`，公共头不暴露
+class ExchangeHookChain;  ///< 实现侧钩子链：字段全部留在 `net/detail/http_hook_chain.h`，公共头不暴露
 }  // namespace aurora::net::detail
 
 namespace aurora::net::http {
@@ -347,6 +360,24 @@ class Client {
     /// @return 口径的只读引用（`reconnect` 缺省真 = 一条流断了就再接一条，直到额度用尽或宿主收摊）。
     [[nodiscard]] auto sse() const -> const SseOptions & { return sse_options_; }
 
+    /// @brief 登记一枚交换钩子，返回**必须在登记期间存活**的句柄。
+    ///
+    /// 钩子在每次交换起手时被问一次 `before_request`（策略闸之后、缓存查表与重试环之前），在成功交出应答时
+    /// 被问一次 `after_response`；判据、并发口径与三条硬约束见 `net/http_hook.h`。链上按登记次序跑，同一枚
+    /// 实例登记两次就跑两次（本入口不去重——「同一份逻辑挂两处」是宿主自己的决定）。
+    ///
+    /// 链是**共享状态**：`Client` 的拷贝共用同一条链（与缓存表、连接池同一格局）。返回的句柄 move-only，析构
+    /// 即摘除本次登记；忽略返回值等于登记后立刻摘除。句柄不延长链的生命期：所有 `Client` 都没了，链即销毁，
+    /// 句柄析构为空操作。
+    ///
+    /// 在途交换看的是起手那一刻的快照：回调期间注销链上任何一枚都不会影响本次交换，也不会把它的实现对象在
+    /// 本次交换中途析构。
+    /// @param hook 钩子（由链持有）；空指针即一次空登记，链上无条目。
+    /// @return 登记句柄；空指针登记返回空句柄。
+    /// @note 钩子不得持有本 `Client`（链 → 钩子 → `Client` → 链是引用环）；要在回调里发起交换，用另一枚不挂
+    ///       同一组钩子的客户端。
+    [[nodiscard]] auto use(std::shared_ptr<ExchangeHook> hook) const -> ExchangeHookRegistration;
+
     /// @brief 发送一次请求并物化应答：连接 → 写出 → 逐段装配 → 透明解压 → 按 `Location` 跟随重定向。
     ///
     /// 全程受 `Request::timeout()` 的整请求时限约束（到点落 `http-timeout`）；重定向次数超过
@@ -488,6 +519,20 @@ class Client {
                                          Cancellation cancellation = {}) const -> CoroTask<Result<WebSocket>>;
 
   private:
+    /// @brief 流式腿的实现体：`open_stream()` 与 `open_sse()` 共用同一条编排，只有钩子看到的腿不同。
+    ///
+    /// 公共面为什么不留这枚参数：`ExchangeLeg` 是钩子面的事实，调用方没有理由（也没有资格）指定自己那条交换
+    /// 「算哪条腿」——它由入口决定。订阅层经由本入口把 `ServerSentEvents` 传下去，其余调用一律经
+    /// `open_stream()` 拿到 `Stream`。
+    /// @param request 待发送的请求（按值接管以随协程帧存活）。
+    /// @param sink 接收侧宿主；**按引用**交付，生命周期须覆盖到协程收尾。
+    /// @param cancellation 本次交换的取消令牌。
+    /// @param leg 交给钩子的腿。
+    /// @return 可 `co_await` 的协程任务：成功携 `StreamOutcome`，失败携对应 `http-*` / `net-*` 错误码。
+    /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
+    [[nodiscard]] auto open_stream_impl(Request request, DataSink &sink, Cancellation cancellation,
+                                        ExchangeLeg leg) const -> CoroTask<Result<StreamOutcome>>;
+
     std::optional<std::uint64_t> max_body_bytes_;  ///< 物化体上限（nullopt = 不限）
     std::optional<std::uint64_t> max_decompressed_bytes_;  ///< 解压产物上限（nullopt = 跟随上一行）
     TlsContext tls_;  ///< https 握手口径
@@ -505,6 +550,8 @@ class Client {
     std::shared_ptr<detail::HttpConnectionPool> pool_;  ///< 共享的连接池；拷贝的 Client 共用同一张
     std::shared_ptr<std::uint64_t> tls_generation_;  ///< TLS 配置代次（拷贝共享计数；`tls_context()` 每次改写自增）
     std::shared_ptr<detail::HttpCookieJar> cookie_jar_;  ///< Cookie Jar（空 = 裸 Client 不收不发；只有 Session 会装）
+    std::shared_ptr<detail::ExchangeHookChain>
+        hook_chain_;  ///< 共享的交换钩子链；拷贝的 Client 共用同一条（空 = 链不存在，快路径直接跳过）
 
     // 会话面是唯一给本客户端装 Cookie Jar 的地方（`Session` 持有 Jar，`client()` 交出的引用挂它）。
     friend class Session;
