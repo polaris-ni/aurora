@@ -22,6 +22,7 @@
 #include <mutex>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -488,6 +489,106 @@ AURORA_TEST_CASE(wrong_method_returns_405) {
     const std::string resp =
         http_roundtrip(server.port(), "POST /api/tree HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n");
     AURORA_TEST_CHECK_TRUE(resp.find("405") != std::string::npos);
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(route_registry_matches_every_registered_endpoint) {
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
+#else
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    // 逐枚精确端点用「它声明的动词」打一次：只要注册表漏登或动词位掩码写错，请求就会落 404/405，
+    // 而「命中后业务层怎么说」（400/404/500）不是本用例的判据——这里只验证分派本身。
+    struct Probe {
+        const char *target;
+        const char *verb;
+    };
+    const Probe probes[] = {
+        {.target = "/api/debug/state", .verb = "GET"},
+        {.target = "/api/debug/snapshot", .verb = "GET"},
+        {.target = "/api/debug/perf", .verb = "GET"},
+        {.target = "/api/debug/timeline", .verb = "GET"},
+        {.target = "/api/debug/diagnostics", .verb = "GET"},
+        {.target = "/api/debug/why", .verb = "GET"},
+        {.target = "/api/windows", .verb = "GET"},
+        {.target = "/api/debug/tree", .verb = "GET"},
+        {.target = "/api/debug/pick?x=0&y=0", .verb = "GET"},
+        {.target = "/api/debug/flags", .verb = "POST"},
+        {.target = "/api/tree", .verb = "GET"},
+        {.target = "/api/widget/0", .verb = "GET"},
+        {.target = "/api/input/click", .verb = "POST"},
+        {.target = "/api/find?type=Text", .verb = "GET"},
+        {.target = "/api/patch", .verb = "POST"},
+        {.target = "/api/components", .verb = "GET"},
+        {.target = "/api/yaml", .verb = "GET"},
+        {.target = "/api/to_code", .verb = "POST"},
+    };
+    for (const Probe &probe : probes) {
+        std::string request = std::string{probe.verb} + " " + probe.target + " HTTP/1.1\r\nHost: 127.0.0.1\r\n";
+        if (std::string_view{probe.verb} == "POST") {
+            request += "Content-Length: 0\r\n";
+        }
+        request += "\r\n";
+        const std::string resp = http_roundtrip(server.port(), request);
+        AURORA_TEST_CHECK_TRUE(resp.find("404") == std::string::npos);
+        AURORA_TEST_CHECK_TRUE(resp.find("405") == std::string::npos);
+    }
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(route_registry_gates_method_before_path_shape) {
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
+#else
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    // 动词本就不被支持 + 路径恰好退化：405 而不是 400。405 说的是「这个端点不接受这个动词」，
+    // 路径形状对错改变不了这个更基本的事实。
+    const std::string delete_widget =
+        http_roundtrip(server.port(), "DELETE /api/widget/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    AURORA_TEST_CHECK_TRUE(delete_widget.find("405") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(delete_widget.find("Method not allowed for /api/widget") != std::string::npos);
+    const std::string delete_input =
+        http_roundtrip(server.port(), "DELETE /api/input/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    AURORA_TEST_CHECK_TRUE(delete_input.find("405") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(delete_input.find("Method not allowed for /api/input") != std::string::npos);
+
+    // 支持的动词 + 退化路径仍是 400（路径形状由 handler 说，不是方法闸的事）。
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/widget/").find("400") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_post(server.port(), "/api/widget/0", "{}").find("405") != std::string::npos);
+
+    // 前缀族不吞近似路径：没有尾斜杠的 /api/widget 不命中，仍走 404 兜底。
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/widget").find("404") != std::string::npos);
+    server.stop();
+#endif
+}
+
+AURORA_TEST_CASE(route_registry_strips_query_before_matching) {
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
+#else
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+    // 精确项与前缀族都在剥离查询串后的路径上匹配；查询串照旧交给 handler 解析。
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/tree?x=1").find("200 OK") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/widget/0?x=1").find("200 OK") != std::string::npos);
+
+    // 404 兜底回显的是含查询串的原样 path，便于调用方对照自己发的东西。
+    const std::string unknown = http_get(server.port(), "/api/no_such?x=1");
+    AURORA_TEST_CHECK_TRUE(unknown.find("404") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(unknown.find("/api/no_such?x=1") != std::string::npos);
     server.stop();
 #endif
 }
