@@ -569,6 +569,46 @@ AURORA_TEST_CASE(error_classification_keeps_status_and_failed_stage) {
     AURORA_TEST_CHECK_TRUE(snapshot.entries.back().error_code.empty());
 }
 
+#else  // AURORA_ENABLE_DEBUG
+
+// Release 下存储、总线与埋点整体缺席：逐例登记跳过（而不是把用例从注册表里删掉），
+// 让 `--list` 与源码里的用例名逐条对齐。
+AURORA_TEST_CASE(lifecycle_pairs_begin_marks_and_end) {
+    AURORA_TEST_SKIP("The activity store and event bus are not compiled without AURORA_ENABLE_DEBUG");
+}
+
+AURORA_TEST_CASE(timeline_of_returns_newest_hop_including_in_flight) {
+    AURORA_TEST_SKIP("The activity store and event bus are not compiled without AURORA_ENABLE_DEBUG");
+}
+
+AURORA_TEST_CASE(abandoned_trace_ends_once_without_fake_error) {
+    AURORA_TEST_SKIP("The activity store and event bus are not compiled without AURORA_ENABLE_DEBUG");
+}
+
+AURORA_TEST_CASE(bus_notifies_every_subscriber_and_detaches_on_death) {
+    AURORA_TEST_SKIP("The activity store and event bus are not compiled without AURORA_ENABLE_DEBUG");
+}
+
+AURORA_TEST_CASE(capacity_evicts_oldest_including_in_flight) {
+    AURORA_TEST_SKIP("The activity store and event bus are not compiled without AURORA_ENABLE_DEBUG");
+}
+
+AURORA_TEST_CASE(shrink_and_record_switch_follow_the_table) {
+    AURORA_TEST_SKIP("The activity store and event bus are not compiled without AURORA_ENABLE_DEBUG");
+}
+
+AURORA_TEST_CASE(bounded_budget_replaces_targets_and_caps_presentation) {
+    AURORA_TEST_SKIP("The activity store and event bus are not compiled without AURORA_ENABLE_DEBUG");
+}
+
+AURORA_TEST_CASE(snapshot_surface_changes_presentation) {
+    AURORA_TEST_SKIP("The activity store and event bus are not compiled without AURORA_ENABLE_DEBUG");
+}
+
+AURORA_TEST_CASE(error_classification_keeps_status_and_failed_stage) {
+    AURORA_TEST_SKIP("The activity store and event bus are not compiled without AURORA_ENABLE_DEBUG");
+}
+
 #endif  // AURORA_ENABLE_DEBUG
 
 AURORA_TEST_CASE(activity_surface_follows_build_flavour) {

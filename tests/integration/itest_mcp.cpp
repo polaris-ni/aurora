@@ -144,6 +144,8 @@ auto run_mcp_batch(const std::string &exe, const std::string &requests) -> std::
     std::unique_ptr<FILE, decltype(&_pclose)> pipe{_popen(command.c_str(), "rb"), &_pclose};
 #else
     const std::string command = "\"" + exe + "\" < \"" + input.string() + "\" 2>/dev/null";
+    // 测试用意拉起自构建二进制，命令固定且不含外部输入。
+    // NOLINTNEXTLINE(bugprone-command-processor)
     std::unique_ptr<FILE, decltype(&pclose)> pipe{popen(command.c_str(), "r"), &pclose};
 #endif
     AURORA_TEST_REQUIRE(pipe != nullptr);

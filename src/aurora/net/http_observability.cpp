@@ -523,6 +523,8 @@ auto timelines_of(std::string_view request_id) -> std::vector<HttpRequestTimelin
 
 #else  // AURORA_ENABLE_DEBUG
 
+// 公开签名按值收 weak_ptr（与头文件一致）；Release 下总线不存在，实参只为签名对齐。
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 auto subscribe_events(std::weak_ptr<NetEventSink> sink) -> void { (void)sink; }
 
 auto activity_options() -> ActivityOptions { return ActivityOptions{}; }

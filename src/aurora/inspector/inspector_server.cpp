@@ -753,6 +753,8 @@ auto InspectorServer::Impl::routes() -> std::span<const RouteEntry> {
 // main-thread-only 约束一致；无事件循环时回退为直接执行（测试 / 无头）。
 
 // GET /api/debug/state — Surface 运行时状态
+// 路由表共用非 const 成员指针类型（同表还容纳会改状态的端点），不逐端点分型。
+// NOLINTNEXTLINE(readability-make-member-function-const)
 auto InspectorServer::Impl::handle_debug_state(const RouteCall & /*call*/) -> std::string {
     if (!surface_getter) {
         return error_response(400, "Surface getter not configured");
@@ -770,6 +772,7 @@ auto InspectorServer::Impl::handle_debug_state(const RouteCall & /*call*/) -> st
 }
 
 // GET /api/debug/snapshot?source=fb|win — 截图 PNG（image/png）
+// NOLINTNEXTLINE(readability-make-member-function-const)
 auto InspectorServer::Impl::handle_debug_snapshot(const RouteCall &call) -> std::string {
     if (!surface_getter) {
         return error_response(400, "Surface getter not configured");
@@ -866,6 +869,7 @@ auto InspectorServer::Impl::handle_debug_why(const RouteCall & /*call*/) -> std:
 }
 
 // GET /api/windows — 枚举全部窗口 id（多窗口调试）
+// NOLINTNEXTLINE(readability-make-member-function-const)
 auto InspectorServer::Impl::handle_windows(const RouteCall & /*call*/) -> std::string {
     Json ids = Json::array();
     if (window_ids_getter) {

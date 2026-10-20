@@ -1259,7 +1259,12 @@ AURORA_TEST_CASE(tree_export_folds_property_strings_only_under_a_policy) {
 
         const std::string debug_resp = http_get(server.port(), "/api/debug/tree");
         AURORA_TEST_CHECK_EQ(debug_resp.find("hunter2"), std::string::npos);
+#ifdef AURORA_ENABLE_DEBUG
         AURORA_TEST_CHECK_TRUE(debug_resp.find("\"type\":\"TextInput\"") != std::string::npos);
+#else
+        // Release 下调试树门面整体缺席：端点只回 unavailable 快照，不导出任何树内容。
+        AURORA_TEST_CHECK_TRUE(debug_resp.find("\"available\":false") != std::string::npos);
+#endif
 
         // 单控件端点折叠的是 values；descriptor 的名字与属性名清单保留可读性。
         const std::string widget_resp = http_get(server.port(), "/api/widget/1");
