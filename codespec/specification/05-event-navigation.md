@@ -489,6 +489,21 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 - **非阻塞读取契约**：`DragPayload::read_async` 与 `SystemDropEvent` 的 `*_async` 便利读取登记在途项，结果经帧循环排空兑现（宿主不排空 ⇒ 回调不到，不谎报）；同一 const 句柄可并发读取、各自独立兑现一次、不互相取消；墙钟超时兑现 `system-drag-read-failed`；会话收口就地兑现，不悬挂。同步 `bytes()` 一族保留供小载荷与同步后端；事件层便利读取与 `DragPayload` 直连两条路结果一致。
 - **自动滚边协议**：拖放悬停近边缘的滚动由 `DragAutoScroll` 内核驱动（`scroll_viewport.h`）——时间戳全部由调用方帧计时供给（内核不自读时钟，宿主可冻结 / 快进）；按侵入深度比例给速，带宽 clamp 到视口半高；共享常量 `AURORA_AUTO_SCROLL_THRESHOLD_DP = 48.0`（与 `ReorderableList` 同名缺省值相等——进程内拖拽与跨进程拖放两条路径手感一致的锚点）与 `AURORA_AUTO_SCROLL_MAX_SPEED = 600.0`；带外 / 视口未定尺 / 新鲜度超时（`AURORA_DRAG_AUTO_SCROLL_STALE_S = 1.0`，意图沉默即收车）就地收车。派发落点 `Widget::on_system_drag_auto_scroll(position)`：基类沿祖先链上溯至**最近可滚动祖先**（覆写并返回 true 者即可滚动），`Over` 态给落点、`Leave` / `Drop` 给 `nullopt`；本契约不新增滚动实现，只补「拖入时谁驱动滚动」。
 - **无障碍替代路径**：可接收拖放的控件（`accepts_system_drag()` 为 true）须同时提供 `system_drag_alternative_path()`（人类可读描述，如「上下文菜单的『移动到』项」）；缺省为空 = 该控件只有拖拽一条路，无障碍树构建时把节点标记为「仅拖拽可达」（`AccessibilityNode::is_drag_only_reachable()` = `drag_reachable && 替代路径为空`），桥与工具链据此告警。粘贴、文件对话框等非拖拽入口在 UI 上须可达；放置反馈不得只靠光标形态表达（颜色 / 高亮 / 文案同时给）。
+- **平台后端映射（四后端事件翻译）**：后端只做五件事——坐标、formats、proposed、allowed、载荷，其余全在本节已冻结的契约里。平台无关的那一层是**零平台头折算层** `src/aurora/window/detail/system_drag_translate.h`（可无头单测），平台桥只把 OS 原生值搬进 `DragInFrame`、再把写定的 `allowed` 搬回 OS 光标反馈：
+
+  | 后端 | Enter | Over | Leave | Drop | 光标反馈回写 | 状态 |
+  |:---|:---|:---|:---|:---|:---|:---|
+  | Win32 OLE | `IDropTarget::DragEnter` | `DragOver` | `DragLeave` | `Drop` | `DragOver` / `DragEnter` 的 `pdwEffect`（`DROPEFFECT_*`） | **拖入已接线** |
+  | X11 Xdnd | `XdndEnter` | `XdndPosition` | `XdndLeave` | `XdndDrop` | `XdndStatus`（接受与否 + 动作 + 矩形） | 后续批次 |
+  | Wayland | `wl_data_device.data_offer` 四态 | 同左 | 同左 | 同左 | `wl_data_offer.set_actions` | 后续批次 |
+  | macOS | `draggingEntered` | `draggingUpdated` | `draggingExited` | `performDragOperation` | `draggingEntered` / `draggingUpdated` 返回的 `NSDragOperation` | 后续批次 |
+
+  - **坐标**：OS 会话坐标 → 客户区像素 → **整幅表面逻辑坐标**（§2.3）；除数取宿主的 `scale`（宿主内 DPI 的唯一真值源），折算层不另读 DPI。
+  - **formats**：OS 格式 → MIME 清单，取值一律出自 `app/mime_types.h`（单一真源），未登记格式丢弃；顺序即源侧优先级，折算不得重排。
+  - **proposed**：拖出侧取 `DragOffer::default_action`；**拖入侧源是外部进程、没有 `DragOffer`**，故取 OS 报告的源侧建议动作（Win32 `pdwEffect` / X11 `XdndEnter` 的 action 位 / Wayland `source_actions` / macOS `draggingSourceOperationMask`），OS 未报告时按 `Copy` 兜底。
+  - **allowed**：命中目标的 `query_system_drag_accept` 与 `proposed` 求交后写定，宿主按上表逐后端回写——这是「询问 → 反馈」闭环的唯一出口。
+  - **载荷**：小载荷走同步（`DragPayload::from_bytes`），大载荷 / 远程载荷走 `read_async` + `pump_reads()`（阈值 `AURORA_DRAG_SYNC_PAYLOAD_LIMIT` 是四后端共用的单一真源）。
+  - **能力位与方向**：`system_drag_in` / `system_drag_out` **按方向独立翻位**（不是成对翻位），当前 `Win32` 与 `D3D11` 的拖入为 true、其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定）；`Glfw` 与 `Headless` 恒 false。
 
 ---
 

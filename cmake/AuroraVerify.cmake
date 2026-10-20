@@ -101,6 +101,16 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_ime)
     endif ()
 
+    # ---- Win32 OLE 拖入桥（RegisterDragDrop + IDropTarget 四态 / accept 回写 / 拖入入口）----
+    # 自动段验收「宿主确实注册了 OLE 拖入目标」（重复注册返回 DRAGDROP_E_ALREADYREGISTERED）、
+    # 能力位已翻、以及合成事件经真派发器得到 allowed 求交；跨进程会话本身（从资源管理器拖文件）
+    # 只能由 --interactive 人工段核对，无头与无人工操作均无法产生 OS 会话。ole32 已随 aurora
+    # PUBLIC 链接，探针无需额外链接。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_drag "${_aurora_verify_dir}/win32_drag_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_drag)
+    endif ()
+
     # ---- Win32 OS 级全局热键（真实窗口 + 隐藏消息窗口接 WM_HOTKEY；「应用无焦点也触发」+ 排空语义）----
     # 自动段验收注册表 API 面（enabled / add / 判重 / 无效主键 / remove / clear / drain / 注入降级）；
     # 「OS 真把按键投到本进程」靠 --interactive 人工段（把焦点切到别的进程再按）。

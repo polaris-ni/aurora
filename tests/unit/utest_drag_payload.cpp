@@ -252,17 +252,33 @@ AURORA_TEST_CASE(system_drag_test_backend_lifecycle) {
     AURORA_TEST_CHECK_FALSE(system_drag::remove_test_backend());  // reset 已清掉安装态
 }
 
-AURORA_TEST_CASE(capability_bits_for_system_drag_are_false_until_backends_land) {
-    // 立骨期锚定：后端尚未接线，任何 SurfaceKind 下都不得声称支持系统拖放。
-    // 接线后会翻位，届时本用例由接线方按实测替换（它是过渡锚点，不是永久契约）。
-    const SurfaceKind kinds[] = {SurfaceKind::Headless, SurfaceKind::Win32,   SurfaceKind::Glfw,  SurfaceKind::D3D11,
-                                 SurfaceKind::X11,      SurfaceKind::Wayland, SurfaceKind::MacOS, SurfaceKind::Wasm};
-    for (const SurfaceKind kind : kinds) {
+AURORA_TEST_CASE(capability_bits_for_system_drag_track_wired_backends_per_direction) {
+    // 方向级分叉锚定：两个能力位**按各自后端独立翻位**（不是成对翻位），故每一方向对每个
+    // SurfaceKind 都有明确期望值。接线方落地哪个方向就翻哪个方向，本表随之更新——
+    // 「未接线先声称」的变异（为未接线方向翻位）会让对应用例转红。
+    struct Expectation {
+        SurfaceKind kind;
+        bool drag_in;
+        bool drag_out;
+    };
+    // Win32 / D3D11 共用同一个 `Win32Host` 与同一 OLE 拖入桥实例（D3D11 只是上屏形态），故同翻。
+    // Glfw 恒 false：零 `#ifdef` 公共头无法按宿主 OS 分叉，且 GLFW 自持 drop 不承载四态协商。
+    const Expectation table[] = {
+        {.kind = SurfaceKind::Headless, .drag_in = false, .drag_out = false},
+        {.kind = SurfaceKind::Win32, .drag_in = true, .drag_out = false},
+        {.kind = SurfaceKind::Glfw, .drag_in = false, .drag_out = false},
+        {.kind = SurfaceKind::D3D11, .drag_in = true, .drag_out = false},
+        {.kind = SurfaceKind::X11, .drag_in = false, .drag_out = false},
+        {.kind = SurfaceKind::Wayland, .drag_in = false, .drag_out = false},
+        {.kind = SurfaceKind::MacOS, .drag_in = false, .drag_out = false},
+        {.kind = SurfaceKind::Wasm, .drag_in = false, .drag_out = false},
+    };
+    for (const Expectation &row : table) {
         Platform p;
-        p.surface = kind;
+        p.surface = row.kind;
         const auto caps = p.capabilities();
-        AURORA_TEST_CHECK_FALSE(caps.system_drag_in);
-        AURORA_TEST_CHECK_FALSE(caps.system_drag_out);
+        AURORA_TEST_CHECK_EQ(static_cast<int>(caps.system_drag_in), static_cast<int>(row.drag_in));
+        AURORA_TEST_CHECK_EQ(static_cast<int>(caps.system_drag_out), static_cast<int>(row.drag_out));
     }
 }
 

@@ -13,6 +13,7 @@
 #include "aurora/app/uri_list.h"
 #include "aurora/core/error_codes.h"
 #include "aurora/core/result.h"
+#include "aurora/event/detail/system_drag_ingress.h"
 #include "aurora/event/event.h"
 #include "aurora/image/image_codec.h"
 
@@ -384,9 +385,9 @@ auto system_drag::begin(const DragOffer &offer, std::function<void(SystemDragOut
                           "system_drag::begin: empty formats or no provide callback");
     }
     // 机制缺失：没有任何后端接线（真实平台后端或测试 inert 后端）时落回 SystemDragNotSupported。
-    // 过渡期所有 SurfaceKind 的 system_drag_in/out capability 均为 false（见同文件
-    // capability_bits_for_system_drag_are_false_until_backends_land 用例），故此处恒报机制缺失；
-    // 真实后端接线后会经同一入口放行（其 available 标志翻 true），届时本分支不再触发。
+    // **拖出方向**当前尚无后端接线（拖入已由 Win32 OLE 桥落地，二者按方向独立翻位，见
+    // `tests/unit/utest_drag_payload.cpp` 的方向级分叉锚定用例），故此处恒报机制缺失；
+    // 拖出后端接线后会经同一入口放行，届时本分支不再触发。
 #ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
     {
         auto &backend = system_drag_test_backend();
@@ -613,6 +614,84 @@ auto system_drag::test_last_offer() -> std::optional<DragOffer> {
     return std::nullopt;
 #endif
 }
+
+// ---- 系统拖入入口（与拖出三件套对称的注入面；契约见 event/detail/system_drag_ingress.h）----
+
+namespace system_drag::ingress {
+
+namespace {
+#ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
+/// @brief 进程唯一 inert 拖入后端状态（函数内 static，规避静态初始化顺序问题）。
+struct DragInTestBackend {
+    std::mutex mutex;  ///< 保护以下成员
+    bool active = false;  ///< 是否接管拖入链（`active` 期间 `dispatch` 抑制真实派发）
+};
+
+[[nodiscard]] auto drag_in_test_backend() -> DragInTestBackend & {
+    static DragInTestBackend backend;
+    return backend;
+}
+#endif
+}  // namespace
+
+auto dispatch(SystemDropEvent &event, const DragInSink &sink) -> DragAction {
+#ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
+    {
+        auto &backend = drag_in_test_backend();
+        const std::scoped_lock lock{backend.mutex};
+        if (backend.active) {
+            return DragAction::None;  // 抑制：真实后端与测试注入互斥，不叠加
+        }
+    }
+#endif
+    if (sink == nullptr) {
+        return DragAction::None;  // 无派发链可投：不谎报已派发
+    }
+    return sink(event);
+}
+
+auto install_test_drag_in() -> bool {
+#ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
+    auto &backend = drag_in_test_backend();
+    const std::scoped_lock lock{backend.mutex};
+    backend.active = true;
+    return true;
+#else
+    return false;
+#endif
+}
+
+auto reset_test_drag_in() -> void {
+#ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
+    auto &backend = drag_in_test_backend();
+    const std::scoped_lock lock{backend.mutex};
+    backend.active = false;
+#endif
+}
+
+auto remove_test_drag_in() -> bool {
+#ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
+    auto &backend = drag_in_test_backend();
+    const std::scoped_lock lock{backend.mutex};
+    const bool was_active = backend.active;
+    backend.active = false;
+    return was_active;
+#else
+    return false;
+#endif
+}
+
+auto test_drag_in_active() -> bool {
+#ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
+    auto &backend = drag_in_test_backend();
+    const std::scoped_lock lock{backend.mutex};
+    return backend.active;
+#else
+    return false;
+#endif
+}
+
+}  // namespace system_drag::ingress
 
 #undef AURORA_SYSTEM_DRAG_TEST_BACKEND
 

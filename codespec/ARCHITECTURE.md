@@ -331,6 +331,18 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 契约与接线状态表见 `specification/05-event-navigation.md` §2.4，各平台侧细节（IMM32 取舍 / XIM 风格协商与取字溢出 / v3 enable 判据与去重）见 `specification/06-app-platform.md` §8.5。
 
+### 8.7 系统拖放桥接（platform system-drag bridge）
+
+**分层与所有权。** 与无障碍桥、输入法桥同构：平台中立值类型（`event/event.h` 的 `SystemDropEvent` 四态与 `SystemDragOutcome`，已由既有切片冻结）→ 折算层（`src/aurora/window/detail/system_drag_translate.{h,cpp}`，**零平台头**：剪贴板格式 ↔ MIME、`MK_*` → `ModifierKey`、客户区像素 → 逻辑 dp、`DragAction` ↔ `DROPEFFECT`、同步载荷阈值）→ 平台桥（Win32 OLE = `src/aurora/window/detail/win32_drag.{h,cpp}` 独立桥类；X11 Xdnd 与 Wayland `wl_data_device` 入口点少，按 §8.6 的同一判据分别内联在各自 `surface.cpp` 的 `Impl` 内）。
+
+**拖入入口（与前两桥不同的一点）**：拖出由本进程发起（`system_drag::begin`），拖入由**外部进程**发起，故多一层「宿主投事件的唯一入口」`src/aurora/event/detail/system_drag_ingress.h`（内部头，不进 `include/`）：平台桥把折算好的事件交给它、拿回派发器写定的 `allowed` 去回写 OS 光标；配套的 inert 拖入后端（`install_test_drag_in` 一族，双宏裁切）在接管期间**抑制真实派发**，使拖入链在无头环境可被完整接管。槽由调用方持有而非全局登记——多窗口下进程级单槽会让后登记者覆盖先登记者。
+
+**窗口归属与能力位**：桥由 `Win32Host::Impl` 唯一持有（`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 转发同一实例，与 §8.5、§8.6 同纪律）；Linux / macOS 随各自 `Impl`。能力位 `system_drag_in` / `system_drag_out` **按方向独立翻位**（拖入与拖出分批次落地，成对翻位会让未落地的方向谎报支持），当前仅 `Win32` 与 `D3D11` 的拖入为 true。
+
+**首批边界**：拖入四态 + 同步载荷；拖出（`IDropSource` + `DoDragDrop` 与 Win32 重入闸）、大载荷异步通道、`CF_DIBV5` → PNG 转码、其余三平台属后续批次。真机接缝由 `tools/verify/win32_drag_live_probe.cpp` 覆盖，无头可证明的部分全在 `utest_system_drag_translate` / `utest_system_drag_ingress` / `utest_drag_payload` 里——目标口径与 §8.6 一致：**无头 CI 证明不了的只剩平台接缝**。
+
+契约与四后端映射表见 `specification/05-event-navigation.md` §5.2，平台侧细节（OLE 初始化与降级、窄路径移除、拖入注入面）见 `specification/06-app-platform.md` §8.9。
+
 ---
 
 ## 9 序列化与元信息

@@ -20,10 +20,11 @@ struct PlatformCapabilities {
     /// @brief 支持接收系统拖入（跨进程拖放进应用）。
     ///
     /// 能力位只表「机制是否存在」：运行期不可用（会话建立失败、权限不足等）仍走 `Result` 错误，
-    /// 二者不互相替代。**当前恒为 false**——系统拖放后端尚未接线，此处不预先声称支持；接线后按各
-    /// 后端实测翻位。
+    /// 二者不互相替代。两个方向**按各自后端独立翻位**——拖入已由 Win32 OLE 桥接线（Win32 / D3D11
+    /// 两类 Surface 共用同一宿主窗口与同一桥实例），拖出仍未接线故恒 false；未接线的方向不预先
+    /// 声称支持。
     bool system_drag_in = false;
-    /// @brief 支持发起系统拖出（从应用拖到其它进程）。语义同上，**当前恒为 false**。
+    /// @brief 支持发起系统拖出（从应用拖到其它进程）。语义同上，**当前恒为 false**（后端未接线）。
     bool system_drag_out = false;
 };
 
@@ -54,8 +55,9 @@ struct Platform {
 
     /// @brief 由设备形态与 Surface 后端类别推导平台能力标志。
     /// @return 聚合结果：desktop/mobile 按 DeviceKind 判定；multitouch 与 high_frequency_pointer
-    /// 在 Win32/Glfw/X11/Wayland/MacOS 五类真实显示 Surface 下为 true；system_drag_in /
-    /// system_drag_out 恒为 false（系统拖放后端尚未接线，保持默认值即「不声称支持」）。
+    /// 在 Win32/Glfw/X11/Wayland/MacOS 五类真实显示 Surface 下为 true；`system_drag_in` 仅在
+    /// 已接线的后端下为 true（当前为 Win32 / D3D11），`system_drag_out` 恒为 false（未接线，
+    /// 保持默认值即「不声称支持」）。
     [[nodiscard]] auto capabilities() const -> PlatformCapabilities {
         // 待填充的能力标志聚合：默认值起步，先按设备形态、再按 SurfaceKind 逐项置位。
         PlatformCapabilities c;
@@ -68,6 +70,11 @@ struct Platform {
         c.high_frequency_pointer =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::Glfw || surface == SurfaceKind::X11 ||
              surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
+        // 系统拖入：Win32 OLE 桥已接线。D3D11 与 Win32 共用同一个 `Win32Host`（与同一桥实例），
+        // 只是上屏形态不同，故同翻；wgpu 是**渲染后端偏好**而非独立的 `SurfaceKind`（其宿主仍是
+        // Win32 / X11 / Wayland 之一），不在此单列。Glfw 恒 false（见提案 CHG-027 变更内容第 3 条：
+        // 零 `#ifdef` 公共头无法按宿主 OS 分叉，且 GLFW 自持 drop 不承载四态协商）。
+        c.system_drag_in = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
         return c;
     }
 };
