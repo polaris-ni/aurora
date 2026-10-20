@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -28,6 +29,7 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/net/blocking.h"
+#include "aurora/net/http_observability.h"
 #include "aurora/net/observability.h"
 #include "aurora/state/async.h"
 #include "aurora/widget/codegen.h"
@@ -148,6 +150,121 @@ auto redact_widget_record(const net::ExportPolicy &policy, const Json &record) -
     return out;
 }
 
+/// @brief Release 构建下 network 端点的确定形态：与既有调试门面的 unavailable 形状一致。
+/// @return `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`。
+auto network_unavailable_json() -> Json {
+    Json out = Json::object();
+    out.set("available", Json{false});
+    out.set("reason", "AURORA_ENABLE_DEBUG not enabled");
+    return out;
+}
+
+/// @brief 活动条目的 JSON 形态；可选失败归因缺席时写 null，字段集合不随结局变化。
+/// @param entry 已按 `InspectorJson` 面呈现的条目。
+/// @return 条目 JSON。
+auto activity_entry_json(const net::http::HttpActivityEntry &entry) -> Json {
+    Json out = Json::object();
+    out.set("exchange_id", entry.exchange_id);
+    out.set("request_id", entry.request_id);
+    out.set("method", entry.method);
+    out.set("path", entry.path);
+    out.set("host", entry.host);
+    out.set("hop", entry.hop);
+    out.set("pass", entry.pass);
+    out.set("status", entry.status);
+    out.set("error_code", entry.error_code);
+    out.set("error_class",
+            entry.error_class ? Json{std::string{net::http::error_class_text(*entry.error_class)}} : Json{});
+    out.set("failed_stage",
+            entry.failed_stage ? Json{std::string{net::http::http_stage_text(*entry.failed_stage)}} : Json{});
+    out.set("elapsed_us", entry.elapsed.count());
+    out.set("sent", entry.sent);
+    out.set("received", entry.received);
+    out.set("in_flight", Json{entry.in_flight});
+    out.set("abandoned", Json{entry.abandoned});
+    out.set("reused_connection", Json{entry.reused_connection});
+    out.set("from_cache", Json{entry.from_cache});
+    out.set("truncated", Json{entry.truncated});
+    return out;
+}
+
+/// @brief 一跳时间线的 JSON 形态；阶段名走稳定令牌，偏移与总耗时一律微秒。
+/// @param timeline 时间线。
+/// @return 时间线 JSON。
+auto request_timeline_json(const net::http::HttpRequestTimeline &timeline) -> Json {
+    Json marks = Json::array();
+    for (const auto &mark : timeline.marks) {
+        Json item = Json::object();
+        item.set("stage", std::string{net::http::http_stage_text(mark.stage)});
+        item.set("offset_us", mark.offset.count());
+        marks.push_back(std::move(item));
+    }
+    Json out = Json::object();
+    out.set("exchange_id", timeline.exchange_id);
+    out.set("request_id", timeline.request_id);
+    out.set("hop", timeline.hop);
+    out.set("pass", timeline.pass);
+    out.set("total_us", timeline.total.count());
+    out.set("in_flight", Json{timeline.in_flight});
+    out.set("reused_connection", Json{timeline.reused_connection});
+    out.set("marks", std::move(marks));
+    return out;
+}
+
+/// @brief ASCII 小写化：host 过滤的大小写不敏感只按协议字母表比对，不引入 locale。
+/// @param text 原始文本。
+/// @return 仅大写字母被折成小写后的副本。
+auto ascii_lower(std::string_view text) -> std::string {
+    std::string out{text};
+    for (char &character : out) {
+        if (character >= 'A' && character <= 'Z') {
+            character = static_cast<char>(character - 'A' + 'a');
+        }
+    }
+    return out;
+}
+
+/// @brief 查询串里是否存在同名参数（用于区分「缺省」与「给了空值」）。
+/// @param path 含查询串的请求目标。
+/// @param key 参数名。
+/// @return 同名参数出现即 true。
+auto query_has_param(const std::string &path, std::string_view key) -> bool {
+    const auto q = path.find('?');
+    if (q == std::string::npos) {
+        return false;
+    }
+    std::string_view query = std::string_view{path}.substr(q + 1);
+    while (true) {
+        const auto amp = query.find('&');
+        const std::string_view pair = query.substr(0, amp);
+        const auto eq = pair.find('=');
+        if (pair.substr(0, eq) == key) {
+            return true;
+        }
+        if (amp == std::string_view::npos) {
+            return false;
+        }
+        query.remove_prefix(amp + 1);
+    }
+}
+
+/// @brief 解析非负整数查询参数；空串、负号、非数字与溢出都算非法。
+/// @tparam T 无符号目标类型。
+/// @param text 参数原值。
+/// @param out 解析结果（仅在返回 true 时有效）。
+/// @return 完整消费整段文本且无错为 true。
+template <typename T>
+auto parse_uint_param(std::string_view text, T &out) -> bool {
+    if (text.empty()) {
+        return false;
+    }
+    const auto *first = text.data();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): from_chars 要 [first, last) 两端
+    const auto *last = text.data() + text.size();
+    const auto result = std::from_chars(first, last, out);
+    return result.ec == std::errc{} && result.ptr == last;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -217,6 +334,8 @@ struct InspectorServer::Impl {
     auto handle_debug_diagnostics(const RouteCall &call) -> std::string;
     auto handle_debug_why(const RouteCall &call) -> std::string;
     auto handle_windows(const RouteCall &call) -> std::string;
+    auto handle_network(const RouteCall &call) -> std::string;
+    auto handle_network_request(const RouteCall &call) -> std::string;
     auto handle_debug_tree(const RouteCall &call) -> std::string;
     auto handle_debug_pick(const RouteCall &call) -> std::string;
     auto handle_debug_flags(const RouteCall &call) -> std::string;
@@ -436,7 +555,7 @@ static auto method_mask(std::string_view method) -> std::uint8_t {
 // 百分号解码（RFC 3986 的 query 值形态）：`%XX` 还原为对应字节，十六进制大小写均可；`%` 后
 // 不足两位十六进制时按字面量保留（宽松解析，畸形请求不该升级成 500）。`+` 保持字面量——
 // 「+ 表空格」是 application/x-www-form-urlencoded 的另一套约定，本服务不做该假设。
-static auto percent_decode(std::string_view s) -> std::string {
+static auto decode_query_value(std::string_view s) -> std::string {
     auto hex = [](char c) -> int {
         if (c >= '0' && c <= '9') {
             return c - '0';
@@ -486,7 +605,7 @@ static auto query_param(const std::string &path, std::string_view key) -> std::s
         const std::string pair = query.substr(start, end - start);
         const auto eq = pair.find('=');
         if (eq != std::string::npos && pair.substr(0, eq) == k) {
-            return percent_decode(pair.substr(eq + 1));
+            return decode_query_value(pair.substr(eq + 1));
         }
         start = end + 1;
     }
@@ -560,6 +679,16 @@ auto InspectorServer::Impl::routes() -> std::span<const RouteEntry> {
          .methods = AURORA_HTTP_METHOD_GET,
          .label = "/api/windows",
          .handler = &Impl::handle_windows},
+        {.pattern = "/api/network",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/network",
+         .handler = &Impl::handle_network},
+        {.pattern = "/api/network/request",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/network/request",
+         .handler = &Impl::handle_network_request},
         {.pattern = "/api/debug/tree",
          .kind = inspector::detail::RouteKind::Exact,
          .methods = AURORA_HTTP_METHOD_GET,
@@ -856,6 +985,95 @@ auto InspectorServer::Impl::handle_debug_flags(const RouteCall &call) -> std::st
     flags_json.set("overdraw", Json{f.overdraw});
     ok.set("flags", std::move(flags_json));
     return json_response(200, "OK", ok);
+}
+
+// GET /api/network — 请求活动快照（按 InspectorJson 面呈现）
+auto InspectorServer::Impl::handle_network(const RouteCall &call) -> std::string {
+    // 全量取快照后再过滤、再截断：limit 是调用方视野的上限，不是过滤前的窗口取舍。
+    const auto snapshot = net::http::activity_snapshot(net::ExportSurface::InspectorJson, 0);
+    if (!snapshot.available) {
+        return json_response(200, "OK", network_unavailable_json());
+    }
+
+    std::uint32_t limit = 0;
+    if (query_has_param(call.path, "limit") && !parse_uint_param(query_param(call.path, "limit"), limit)) {
+        return error_response(400, "limit param must be a non-negative integer");
+    }
+    bool has_status = false;
+    std::uint16_t status = 0;
+    if (query_has_param(call.path, "status")) {
+        if (!parse_uint_param(query_param(call.path, "status"), status)) {
+            return error_response(400, "status param must be an integer in 0..65535");
+        }
+        has_status = true;
+    }
+    std::string host_filter;
+    if (query_has_param(call.path, "host")) {
+        host_filter = ascii_lower(query_param(call.path, "host"));
+        if (host_filter.empty()) {
+            return error_response(400, "host param must not be empty");
+        }
+    }
+
+    Json entries = Json::array();
+    std::size_t matched = 0;
+    for (const auto &entry : snapshot.entries) {
+        if (!host_filter.empty() && ascii_lower(entry.host) != host_filter) {
+            continue;
+        }
+        if (has_status && entry.status != status) {
+            continue;
+        }
+        if (limit > 0 && matched >= limit) {
+            break;
+        }
+        entries.push_back(activity_entry_json(entry));
+        ++matched;
+    }
+
+    Json out = Json::object();
+    out.set("available", Json{true});
+    out.set("count", matched);
+    out.set("dropped", snapshot.dropped);
+    out.set("truncated", snapshot.truncated);
+    out.set("entries", std::move(entries));
+    return json_response(200, "OK", out);
+}
+
+// GET /api/network/request?id=<X-Request-Id> — 同一逻辑交换的多跳展开
+auto InspectorServer::Impl::handle_network_request(const RouteCall &call) -> std::string {
+    const auto snapshot = net::http::activity_snapshot(net::ExportSurface::InspectorJson, 0);
+    if (!snapshot.available) {
+        return json_response(200, "OK", network_unavailable_json());
+    }
+    const std::string request_id = query_param(call.path, "id");
+    if (request_id.empty()) {
+        return error_response(400, "Missing required query parameter: id");
+    }
+    // entries 最新在前：首个同 id 条目即该链最新一跳。
+    const net::http::HttpActivityEntry *entry = nullptr;
+    for (const auto &candidate : snapshot.entries) {
+        if (candidate.request_id == request_id) {
+            entry = &candidate;
+            break;
+        }
+    }
+    const auto timelines = net::http::timelines_of(request_id);
+    if (entry == nullptr || timelines.empty()) {
+        // 不回显调用方给的 id：任意输入都不进响应体。
+        return error_response(404, "No network activity for the requested id");
+    }
+
+    Json hops = Json::array();
+    for (const auto &timeline : timelines) {
+        hops.push_back(request_timeline_json(timeline));
+    }
+    Json out = Json::object();
+    out.set("available", Json{true});
+    out.set("request_id", request_id);
+    out.set("entry", activity_entry_json(*entry));
+    out.set("timelines", std::move(hops));
+    return json_response(200, "OK", out);
 }
 
 // GET /api/tree — 完整 widget 树 JSON（route 已剥离 query，/api/tree?x=1 不再误 404）

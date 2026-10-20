@@ -7,22 +7,32 @@
 //
 // Usage: aurora_mcp (launched by an AI Agent in stdio mode; no human interaction required)
 //
-// Exposes 21 MCP Tools:
+// Exposes 24 MCP Tools:
 //   list_components / describe_component / search_components /
 //   validate_tree / validate_ui / render_snapshot / render_png / compare_snapshot /
 //   generate_ui / build_ui_prompt / repair_tree /
 //   live_tree / live_widget_get / live_widget_set / live_patch / live_simulate /
+//   list_network_activity / describe_network_request /
 //   to_code / to_yaml / get_schema / simulate_interaction /
 //   list_commands / invoke_command
 //
-// 其中 `live_*` 五个面向**正在运行的应用**（经其 Inspector HTTP 服务，仅回环，端口见
-// `AURORA_INSPECTOR_PORT`）；其余均为**离线无状态**——以 `tree` 入参在本进程内临时建树。
+// 其中 `live_*` 五个与 `list_network_activity` / `describe_network_request` 面向**正在运行的应用**
+// （经其 Inspector HTTP 服务，仅回环，端口见 `AURORA_INSPECTOR_PORT`）；其余均为**离线无状态**——
+// 以 `tree` 入参在本进程内临时建树。
 
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
+
+#include "aurora/core/platform.h"
+
+#ifdef AURORA_PLATFORM_WINDOWS
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 #include "api_schema.h"
 #include "aurora/aurora.h"
@@ -182,6 +192,32 @@ struct InspectorSession {
         }
     }
     return session;
+}
+
+/// @brief 把查询参数值编码为 RFC 3986 的 query 形态：仅保留非保留字符，其余按 %XX 上屏。
+///
+/// Inspector 的 `query_param` 会做百分号解码，故含 `&` / `=` / 非 ASCII 的 request id 只有在
+/// 编码后才能原样到达服务端；不编码会让这类标识被拆成额外的查询参数。
+/// @param text 原始值。
+/// @return 可直接拼进 `?id=` 的编码结果。
+[[nodiscard]] auto percent_encode_query_value(std::string_view text) -> std::string {
+    constexpr std::string_view hex{"0123456789ABCDEF"};
+    std::string out;
+    out.reserve(text.size());
+    for (const char character : text) {
+        const auto byte = static_cast<unsigned char>(character);
+        const bool unreserved = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
+                                (byte >= '0' && byte <= '9') || byte == '-' || byte == '_' || byte == '.' ||
+                                byte == '~';
+        if (unreserved) {
+            out.push_back(character);
+            continue;
+        }
+        out.push_back('%');
+        out.push_back(hex[byte >> 4U]);
+        out.push_back(hex[byte & 0x0FU]);
+    }
+    return out;
 }
 
 // ---------- MCP tool definitions ----------
@@ -461,6 +497,38 @@ struct InspectorSession {
               "Dispatch a synthetic interaction (click / scroll / text) into a RUNNING application, going "
               "through the real hit-test and dispatch path.");
         t.set("inputSchema", schema_obj(std::move(props), req_arr({"path", "action"})));
+        tools.push_back(std::move(t));
+    }
+    // list_network_activity（Inspector network 面）
+    {
+        au::Json props = au::Json::object();
+        props.set("session",
+                  str_prop(R"(Optional "6280" or "127.0.0.1:6280"; defaults to env AURORA_INSPECTOR_PORT, then 6280)"));
+        props.set("limit", int_prop("Maximum entries to return, newest first (0 = all; default 0)"));
+        props.set("host", str_prop("Optional exact host filter, case-insensitive"));
+        props.set("status", int_prop("Optional HTTP status filter, e.g. 503"));
+        au::Json t = au::Json::object();
+        t.set("name", "list_network_activity");
+        t.set("description",
+              "Read the LIVE network activity of a running Aurora application (process-wide store, newest first). "
+              "Each entry is one physical exchange: method / host / path / status / failure class and stage / bytes "
+              "/ timing. Filters are applied BEFORE the limit, so filtering for a rare status still finds it. "
+              "Credential-bearing fields are already redacted on the Inspector side.");
+        t.set("inputSchema", schema_obj(std::move(props), au::Json::array()));
+        tools.push_back(std::move(t));
+    }
+    // describe_network_request（Inspector network 面）
+    {
+        au::Json props = au::Json::object();
+        props.set("session", str_prop(R"(Optional "6280" or "127.0.0.1:6280")"));
+        props.set("request_id", str_prop("X-Request-Id value shared by the physical exchanges of one logical request"));
+        au::Json t = au::Json::object();
+        t.set("name", "describe_network_request");
+        t.set("description",
+              "Expand one logical request of a running Aurora application: returns the latest activity entry plus "
+              "every hop's stage timeline (connect / TLS / acquire / sent / first byte / body), ordered by "
+              "exchange_id. Unknown ids return an error; the id is never echoed back.");
+        t.set("inputSchema", schema_obj(std::move(props), req_arr({"request_id"})));
         tools.push_back(std::move(t));
     }
     // get_schema
@@ -918,6 +986,53 @@ struct InspectorSession {
         return inspector_result(session, "POST", "/api/input/" + action, dumped.ok() ? dumped.value() : std::string{});
     }
 
+    if (name == "list_network_activity") {
+        std::string session_error;
+        const InspectorSession session = resolve_session(args, session_error);
+        if (!session_error.empty()) {
+            return tool_result(text_content("Error: " + session_error), true);
+        }
+        std::string target = "/api/network";
+        auto append_param = [&target](const std::string &pair) -> void {
+            target += target.find('?') == std::string::npos ? '?' : '&';
+            target += pair;
+        };
+        if (const auto *limit_v = args.at("limit"); limit_v != nullptr && !limit_v->is_null()) {
+            if (!limit_v->is_integer() || limit_v->as_or<std::int64_t>(-1) < 0) {
+                return tool_result(text_content("Error: 'limit' must be a non-negative integer"), true);
+            }
+            append_param("limit=" + std::to_string(limit_v->as_or<std::int64_t>(0)));
+        }
+        if (const auto *host_v = args.at("host"); host_v != nullptr && !host_v->is_null()) {
+            if (!host_v->is_string()) {
+                return tool_result(text_content("Error: 'host' must be a string"), true);
+            }
+            append_param("host=" + percent_encode_query_value(host_v->as_or<std::string>("")));
+        }
+        if (const auto *status_v = args.at("status"); status_v != nullptr && !status_v->is_null()) {
+            const std::int64_t status = status_v->is_integer() ? status_v->as_or<std::int64_t>(-1) : -1;
+            if (status < 0 || status > 65535) {
+                return tool_result(text_content("Error: 'status' must be an integer in 0..65535"), true);
+            }
+            append_param("status=" + std::to_string(status));
+        }
+        return inspector_result(session, "GET", target);
+    }
+
+    if (name == "describe_network_request") {
+        std::string session_error;
+        const InspectorSession session = resolve_session(args, session_error);
+        if (!session_error.empty()) {
+            return tool_result(text_content("Error: " + session_error), true);
+        }
+        const auto *id_v = args.at("request_id");
+        if (id_v == nullptr || !id_v->is_string() || id_v->as_or<std::string>("").empty()) {
+            return tool_result(text_content("Error: missing 'request_id' parameter"), true);
+        }
+        return inspector_result(session, "GET",
+                                "/api/network/request?id=" + percent_encode_query_value(id_v->as_or<std::string>("")));
+    }
+
     if (name == "to_code") {
         const auto *tree_v = args.at("tree");
         if (tree_v == nullptr || !tree_v->is_object()) {
@@ -1168,6 +1283,11 @@ struct InspectorSession {
 // ---------- main ----------
 
 auto main() -> int {  // NOLINT(*-exception-escape)
+#ifdef AURORA_PLATFORM_WINDOWS
+    // 帧头按字节计数：标准流默认文本模式会把 `\r\n` 再翻译成 `\r\r\n`，对端就切不出帧边界。
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     aurora::serialization::register_core_widgets();
 
     // MCP stdio main loop

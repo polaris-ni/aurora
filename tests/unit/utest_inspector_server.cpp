@@ -29,14 +29,18 @@
 #include <thread>
 #include <vector>
 
+#include "aurora/core/json.h"  // 端点响应体的结构化断言
 #include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
 
 #include "aurora/event/event.h"  // ScrollEvent
 #include "aurora/inspector/inspector_server.h"
 #include "aurora/net/blocking.h"
+#include "aurora/net/detail/observability_trace.h"  // 夹具：直接向进程级活动存储写入一笔交换
+#include "aurora/net/http_observability.h"
 #include "aurora/net/observability.h"
 #include "aurora/state/async.h"  // detail::main_poster（跨线程投递器，marshal 的落点）
 #include "aurora/widget/button.h"
@@ -388,6 +392,57 @@ class ScopedExportPolicy {
     ScopedExportPolicy(ScopedExportPolicy &&) = delete;
     auto operator=(ScopedExportPolicy &&) -> ScopedExportPolicy & = delete;
 };
+
+/// @brief 每例前后把进程级活动存储与配置清回缺省，避免用例间串味（Release 下两枚函数是 no-op）。
+class ScopedActivityReset {
+  public:
+    ScopedActivityReset() { reset(); }
+    ~ScopedActivityReset() { reset(); }
+    ScopedActivityReset(const ScopedActivityReset &) = delete;
+    auto operator=(const ScopedActivityReset &) -> ScopedActivityReset & = delete;
+    ScopedActivityReset(ScopedActivityReset &&) = delete;
+    auto operator=(ScopedActivityReset &&) -> ScopedActivityReset & = delete;
+
+  private:
+    static auto reset() -> void {
+        aurora::net::http::clear_network_activity();
+        aurora::net::http::set_activity_options(aurora::net::http::ActivityOptions{});
+    }
+};
+
+/// @brief 向进程级活动存储写入一笔已收摊的交换（存储不依赖订阅者，夹具无需挂总线）。
+///
+/// 句柄在作用域内收摊：`finish()` 之后再析构不会再发第二枚 end，也不会被记成 abandoned。
+/// Release 构建下 `ExchangeTrace` 是空壳，本函数什么都不写——端点用例在那种构建下走 unavailable 分支。
+/// @param method 请求方法。
+/// @param request_id 链路标识。
+/// @param url 目标 URL（取 host 与 origin-form）。
+/// @param hop 重定向跳序号。
+/// @param pass 物理尝试序号。
+/// @param status 应答状态码。
+auto seed_activity(std::string_view method, std::string_view request_id, std::string_view url, std::uint16_t hop,
+                   std::uint16_t pass, std::uint16_t status) -> void {
+    auto parsed = aurora::Url::parse(url);
+    AURORA_TEST_REQUIRE_TRUE(parsed.ok());
+    aurora::net::http::ExchangeTrace trace{method, request_id, parsed.value(), hop, pass, false, false};
+    trace.mark(aurora::net::http::HttpStage::ConnectionAcquired);
+    trace.mark(aurora::net::http::HttpStage::RequestSent);
+    trace.set_status(status);
+    trace.mark(aurora::net::http::HttpStage::FirstByte);
+    trace.mark(aurora::net::http::HttpStage::BodyDone);
+    trace.finish();
+}
+
+/// @brief 从原始 HTTP 响应里解析 JSON 体（错误体也是 JSON，不按状态码分流）。
+/// @param response 完整响应文本。
+/// @return 解析后的 JSON；缺分隔符或解析失败即本用例致命失败。
+[[nodiscard]] auto response_json(const std::string &response) -> Json {
+    const auto separator = response.find("\r\n\r\n");
+    AURORA_TEST_REQUIRE(separator != std::string::npos);
+    auto parsed = json::parse(response.substr(separator + 4));
+    AURORA_TEST_REQUIRE_TRUE(parsed.ok());
+    return parsed.value();
+}
 
 }  // namespace
 #endif  // AURORA_BUILD_INSPECTOR_SERVER（辅助设施段；用例恒注册，体内降级 SKIP）
@@ -1254,6 +1309,150 @@ AURORA_TEST_CASE(tree_export_policy_gates_each_property_key) {
         AURORA_TEST_CHECK_TRUE(code_resp.find("200 OK") != std::string::npos);
         AURORA_TEST_CHECK_TRUE(code_resp.find("hunter2") != std::string::npos);
     }
+    server.stop();
+#endif
+}
+
+// 目标：活动快照的过滤先于 limit——先按 host / status 过滤，再取最新 N 条；非法参数回 400。
+AURORA_TEST_CASE(network_snapshot_filters_before_limit) {
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
+#else
+    ScopedActivityReset reset;
+    seed_activity("GET", "rid-a", "http://api.example.test/one", 0, 0, 200);
+    seed_activity("POST", "rid-b", "http://api.example.test/two", 0, 0, 503);
+    seed_activity("GET", "rid-c", "http://cdn.example.test/three", 0, 0, 200);
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+#ifdef AURORA_ENABLE_DEBUG
+    const Json all = response_json(http_get(server.port(), "/api/network"));
+    AURORA_TEST_CHECK_TRUE(aurora::testing::require_field<bool>(all, "available"));
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::size_t>(all, "count"), std::size_t{3});
+    const Json &all_entries = *aurora::testing::require_child(all, "entries");
+    AURORA_TEST_CHECK_TRUE(all_entries.is_array());
+    AURORA_TEST_REQUIRE_EQ(all_entries.size(), std::size_t{3});
+    // 最新在前：rid-c 最后写入，排第一。
+    AURORA_TEST_CHECK_EQ(
+        aurora::testing::require_field<std::string>(*aurora::testing::require_child_at(all_entries, 0), "request_id"),
+        std::string{"rid-c"});
+
+    // host 精确匹配、大小写不敏感：两条同主机记录都保留，最新在前。
+    const Json by_host = response_json(http_get(server.port(), "/api/network?host=API.EXAMPLE.TEST"));
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::size_t>(by_host, "count"), std::size_t{2});
+    const Json &host_entries = *aurora::testing::require_child(by_host, "entries");
+    AURORA_TEST_REQUIRE_EQ(host_entries.size(), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(
+        aurora::testing::require_field<std::string>(*aurora::testing::require_child_at(host_entries, 0), "request_id"),
+        std::string{"rid-b"});
+    AURORA_TEST_CHECK_EQ(
+        aurora::testing::require_field<std::string>(*aurora::testing::require_child_at(host_entries, 1), "request_id"),
+        std::string{"rid-a"});
+
+    // 先过滤再截断：全表最新是 200 的 rid-c；status=503 过滤后才轮得到 rid-b。
+    // 若次序颠倒（先 limit=1 再过滤），这里会得到 0 条——判据正是这一条。
+    const Json filtered = response_json(http_get(server.port(), "/api/network?status=503&limit=1"));
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::size_t>(filtered, "count"), std::size_t{1});
+    const Json &filtered_entries = *aurora::testing::require_child(filtered, "entries");
+    AURORA_TEST_REQUIRE_EQ(filtered_entries.size(), std::size_t{1});
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::string>(
+                             *aurora::testing::require_child_at(filtered_entries, 0), "request_id"),
+                         std::string{"rid-b"});
+
+    // limit=0 表示全部；无匹配的过滤条件回空表而不是错误。
+    const Json all_again = response_json(http_get(server.port(), "/api/network?limit=0"));
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::size_t>(all_again, "count"), std::size_t{3});
+    const Json empty = response_json(http_get(server.port(), "/api/network?host=other.example.test"));
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::size_t>(empty, "count"), std::size_t{0});
+    AURORA_TEST_CHECK_TRUE(aurora::testing::require_child(empty, "entries")->empty());
+
+    // 非法参数：空值、非数字、负号与越界一律 400。
+    for (const char *target : {"/api/network?limit=abc", "/api/network?limit=-1", "/api/network?limit=",
+                               "/api/network?status=70000", "/api/network?status=", "/api/network?host="}) {
+        const std::string resp = http_get(server.port(), target);
+        AURORA_TEST_CHECK_TRUE(resp.find("400 Bad Request") != std::string::npos);
+    }
+#else
+    // Release：两枚端点都给出与调试门面一致的 unavailable 形态，不因参数的完整与否分流。
+    for (const char *target : {"/api/network", "/api/network?limit=1", "/api/network/request?id=rid-a"}) {
+        const std::string resp = http_get(server.port(), target);
+        AURORA_TEST_CHECK_TRUE(resp.find("200 OK") != std::string::npos);
+        const Json body = response_json(resp);
+        AURORA_TEST_CHECK_FALSE(aurora::testing::require_field<bool>(body, "available"));
+        AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::string>(body, "reason"),
+                             std::string{"AURORA_ENABLE_DEBUG not enabled"});
+    }
+#endif
+    server.stop();
+#endif
+}
+
+// 目标：单条请求的多跳展开与 id 校验——命中回最新条目与升序时间线，缺参 400、未知 404 且不回显 id。
+AURORA_TEST_CASE(network_request_expands_hops_and_validates_id) {
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP(
+        "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
+        "semantics)");
+#else
+    ScopedActivityReset reset;
+    seed_activity("GET", "rid-hop", "http://api.example.test/start", 0, 0, 302);
+    seed_activity("GET", "rid-other", "http://cdn.example.test/other", 0, 0, 200);
+    seed_activity("GET", "rid-hop", "http://api.example.test/final", 1, 0, 200);
+    InspectorServer server(tree_getter);
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+
+#ifdef AURORA_ENABLE_DEBUG
+    const std::string hit = http_get(server.port(), "/api/network/request?id=rid-hop");
+    AURORA_TEST_CHECK_TRUE(hit.find("200 OK") != std::string::npos);
+    const Json body = response_json(hit);
+    AURORA_TEST_CHECK_TRUE(aurora::testing::require_field<bool>(body, "available"));
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::string>(body, "request_id"), std::string{"rid-hop"});
+
+    // entry 是该 id 最新一条活动条目：第二跳的状态、路径与跳序号都来自它。
+    const Json &entry = *aurora::testing::require_child(body, "entry");
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::int64_t>(entry, "status"), std::int64_t{200});
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::int64_t>(entry, "hop"), std::int64_t{1});
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::string>(entry, "path"), std::string{"/final"});
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::string>(entry, "host"), std::string{"api.example.test"});
+
+    // timelines 按 exchange_id 升序：第一跳是 302，第二跳是 200，阶段名走稳定令牌。
+    const Json &timelines = *aurora::testing::require_child(body, "timelines");
+    AURORA_TEST_CHECK_TRUE(timelines.is_array());
+    AURORA_TEST_REQUIRE_EQ(timelines.size(), std::size_t{2});
+    const Json &first_hop = *aurora::testing::require_child_at(timelines, 0);
+    const Json &second_hop = *aurora::testing::require_child_at(timelines, 1);
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::int64_t>(first_hop, "hop"), std::int64_t{0});
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::int64_t>(second_hop, "hop"), std::int64_t{1});
+    AURORA_TEST_CHECK_LE(aurora::testing::require_field<std::uint64_t>(first_hop, "exchange_id"),
+                         aurora::testing::require_field<std::uint64_t>(second_hop, "exchange_id"));
+    const Json &marks = *aurora::testing::require_child(second_hop, "marks");
+    AURORA_TEST_CHECK_TRUE(marks.is_array());
+    AURORA_TEST_REQUIRE_EQ(marks.size(), std::size_t{4});
+    AURORA_TEST_CHECK_EQ(
+        aurora::testing::require_field<std::string>(*aurora::testing::require_child_at(marks, 0), "stage"),
+        std::string{"connection_acquired"});
+    AURORA_TEST_CHECK_EQ(
+        aurora::testing::require_field<std::string>(*aurora::testing::require_child_at(marks, 3), "stage"),
+        std::string{"body_done"});
+
+    // 缺 id / 空 id：400；未知 id：404，且响应全文不回显调用方给的标识。
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/network/request").find("400 Bad Request") !=
+                           std::string::npos);
+    AURORA_TEST_CHECK_TRUE(http_get(server.port(), "/api/network/request?id=").find("400 Bad Request") !=
+                           std::string::npos);
+    const std::string unknown = http_get(server.port(), "/api/network/request?id=probe-secret-identifier");
+    AURORA_TEST_CHECK_TRUE(unknown.find("404 Not Found") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(unknown.find("probe-secret-identifier") == std::string::npos);
+#else
+    const std::string resp = http_get(server.port(), "/api/network/request?id=rid-hop");
+    AURORA_TEST_CHECK_TRUE(resp.find("200 OK") != std::string::npos);
+    const Json body = response_json(resp);
+    AURORA_TEST_CHECK_FALSE(aurora::testing::require_field<bool>(body, "available"));
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_field<std::string>(body, "reason"),
+                         std::string{"AURORA_ENABLE_DEBUG not enabled"});
+#endif
     server.stop();
 #endif
 }

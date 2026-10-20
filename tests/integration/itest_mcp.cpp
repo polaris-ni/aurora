@@ -3,13 +3,23 @@
 /// 测试说明: aurora-mcp 工具链测试——库 API（list_all_components/describe_component/
 ///           search_components/from_json+validate/render_to_logical_snapshot/to_code/
 ///           list_all_schemas/simulate_*）直测 MCP 工具消费的逻辑；协议端到端按构建产物
-///           探测，未构建则 SKIP
-/// 覆盖说明: aurora_mcp 是独立可执行（tools/servers/），e2e 仅验证进程可运行
+///           探测，未构建则 SKIP。另有一条真 stdio 往返：拉起 aurora_mcp、喂一批 JSON-RPC
+///           帧，核对工具清单 24 枚与 network 两枚工具的 Inspector 回环（过滤、多跳展开与
+///           未知 id 的 404 映射），夹具经进程级活动存储直接写入。
+/// 覆盖说明: aurora_mcp 是独立可执行（tools/servers/），协议用例要求该产物已构建且
+///           Inspector server 已编入；两者缺一即 SKIP。
 
+#include <charconv>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include "aurora/app/validate.h"
 #include "aurora/aurora.h"
@@ -24,6 +34,12 @@
 #include "framework/json_literals.h"
 #include "paths.h"
 
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+#include "aurora/inspector/inspector_server.h"
+#include "aurora/net/detail/observability_trace.h"
+#include "aurora/net/http_observability.h"
+#endif
+
 namespace aurora::test_cases::itest_mcp {
 using aurora::testing::require_child;
 using aurora::testing::require_child_at;
@@ -36,17 +52,21 @@ using au::serialization::to_code;
 
 namespace {
 
-// MCP 端到端：stdin 给 EOF 即退出（固定冒烟命令拉起自构建二进制，输出重定向 null 设备）。
-auto run_mcp_smoke() -> int {
-    std::string exe;
+/// @brief 定位自构建的 aurora_mcp 可执行文件；未构建返回空串。
+[[nodiscard]] auto locate_mcp_binary() -> std::string {
     for (const char *name : {"aurora_mcp.exe", "aurora_mcp"}) {
-        const std::string p = au::testing::paths::under_repo(std::string{"build/"} + name);
+        const std::string path = au::testing::paths::under_repo(std::string{"build/"} + name);
         std::error_code ec;
-        if (std::filesystem::is_regular_file(p, ec)) {
-            exe = p;
-            break;
+        if (std::filesystem::is_regular_file(path, ec)) {
+            return path;
         }
     }
+    return {};
+}
+
+// MCP 端到端：stdin 给 EOF 即退出（固定冒烟命令拉起自构建二进制，输出重定向 null 设备）。
+auto run_mcp_smoke() -> int {
+    const std::string exe = locate_mcp_binary();
     if (exe.empty()) {
         return -1;  // 未构建
     }
@@ -60,6 +80,169 @@ auto run_mcp_smoke() -> int {
     // NOLINTNEXTLINE(bugprone-command-processor)
     return std::system(cmd.c_str());
 }
+
+#ifdef AURORA_BUILD_INSPECTOR_SERVER
+
+/// @brief 每例前后把进程级活动存储与配置清回缺省（Release 下两枚函数是 no-op）。
+class ScopedActivityReset {
+  public:
+    ScopedActivityReset() { reset(); }
+    ~ScopedActivityReset() { reset(); }
+    ScopedActivityReset(const ScopedActivityReset &) = delete;
+    auto operator=(const ScopedActivityReset &) -> ScopedActivityReset & = delete;
+    ScopedActivityReset(ScopedActivityReset &&) = delete;
+    auto operator=(ScopedActivityReset &&) -> ScopedActivityReset & = delete;
+
+  private:
+    static auto reset() -> void {
+        aurora::net::http::clear_network_activity();
+        aurora::net::http::set_activity_options(aurora::net::http::ActivityOptions{});
+    }
+};
+
+/// @brief 向进程级活动存储写入一笔已收摊的交换；MCP 子进程经 Inspector 端点读回同一份数据。
+/// @param method 请求方法。
+/// @param request_id 链路标识。
+/// @param url 目标 URL。
+/// @param hop 重定向跳序号。
+/// @param pass 物理尝试序号。
+/// @param status 应答状态码。
+auto seed_network_activity(std::string_view method, std::string_view request_id, std::string_view url,
+                           std::uint16_t hop, std::uint16_t pass, std::uint16_t status) -> void {
+    auto parsed = aurora::Url::parse(url);
+    AURORA_TEST_REQUIRE_TRUE(parsed.ok());
+    aurora::net::http::ExchangeTrace trace{method, request_id, parsed.value(), hop, pass, false, false};
+    trace.mark(aurora::net::http::HttpStage::ConnectionAcquired);
+    trace.mark(aurora::net::http::HttpStage::RequestSent);
+    trace.set_status(status);
+    trace.mark(aurora::net::http::HttpStage::FirstByte);
+    trace.mark(aurora::net::http::HttpStage::BodyDone);
+    trace.finish();
+}
+
+/// @brief 一批请求写临时文件、stdin 重定向、stdout 走管道，拉起 MCP 并读回全部输出。
+///
+/// 子进程读到 EOF 即收摊，故一次调用可完整覆盖 tools/list 与多条 tools/call；不需要交互式
+/// 双向管道。命令只拼自构建产物路径与本用例临时文件路径，不含外部输入。
+/// @param exe 可执行文件路径。
+/// @param requests 全部 JSON-RPC 帧（按 Content-Length 分帧）。
+/// @return 子进程的标准输出原文。
+auto run_mcp_batch(const std::string &exe, const std::string &requests) -> std::string {
+    const std::filesystem::path input =
+        std::filesystem::path{aurora::testing::isolation::temp_dir()} / "mcp-batch-requests.txt";
+    {
+        std::ofstream out(input, std::ios::binary | std::ios::trunc);
+        AURORA_TEST_REQUIRE(out.good());
+        out << requests;
+    }
+#ifdef AURORA_PLATFORM_WINDOWS
+    // `call` 前缀不是可省的装饰：MinGW 的 `_popen` 把整条命令再交给 `cmd /c`，命令以引号开头
+    // 时会踩引号剥离规则，重定向被吞掉、子进程输出为空；让首 token 变成 `call` 即可稳定解析。
+    const std::string command = "call \"" + exe + "\" < \"" + input.string() + "\" 2>nul";
+    // 测试用意拉起自构建二进制，命令固定且不含外部输入。
+    // NOLINTNEXTLINE(bugprone-command-processor)
+    std::unique_ptr<FILE, decltype(&_pclose)> pipe{_popen(command.c_str(), "rb"), &_pclose};
+#else
+    const std::string command = "\"" + exe + "\" < \"" + input.string() + "\" 2>/dev/null";
+    std::unique_ptr<FILE, decltype(&pclose)> pipe{popen(command.c_str(), "r"), &pclose};
+#endif
+    AURORA_TEST_REQUIRE(pipe != nullptr);
+    std::string output;
+    char buffer[4096];
+    for (;;) {
+        const std::size_t got = std::fread(buffer, 1, sizeof(buffer), pipe.get());
+        if (got == 0) {
+            break;
+        }
+        output.append(buffer, got);
+    }
+    return output;
+}
+
+/// @brief 拼一枚 JSON-RPC 帧（Content-Length 头 + 体）。
+/// @param id 消息 id。
+/// @param method JSON-RPC 方法。
+/// @param params 参数；Null 表示不写 params。
+/// @return 可直接写进子进程 stdin 的帧。
+auto rpc_frame(int id, std::string_view method, const au::Json &params) -> std::string {
+    au::Json request = au::Json::object();
+    request.set("jsonrpc", "2.0");
+    request.set("id", id);
+    request.set("method", std::string{method});
+    if (!params.is_null()) {
+        request.set("params", params);
+    }
+    const auto dumped = au::json::dump(request);
+    const std::string body = dumped.ok() ? dumped.value() : std::string{};
+    return "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+}
+
+/// @brief 拼一枚 tools/call 帧。
+/// @param id 消息 id。
+/// @param tool 工具名。
+/// @param arguments 工具参数对象。
+/// @return 帧文本。
+auto tool_call_frame(int id, std::string_view tool, const au::Json &arguments) -> std::string {
+    au::Json params = au::Json::object();
+    params.set("name", std::string{tool});
+    params.set("arguments", arguments);
+    return rpc_frame(id, "tools/call", params);
+}
+
+/// @brief 从 MCP 的 stdout 批量输出里切出全部 JSON-RPC 消息。
+/// @param raw 原始输出。
+/// @return 按出现次序排列的已解析消息；分帧不完整处停止。
+auto parse_mcp_messages(std::string_view raw) -> std::vector<au::Json> {
+    std::vector<au::Json> messages;
+    std::size_t offset = 0;
+    while (offset < raw.size()) {
+        const auto header_end = raw.find("\r\n\r\n", offset);
+        if (header_end == std::string_view::npos) {
+            break;
+        }
+        const std::string_view header = raw.substr(offset, header_end - offset);
+        const auto marker = header.find("Content-Length:");
+        if (marker == std::string_view::npos) {
+            break;
+        }
+        std::size_t digits_begin = marker + 15;
+        while (digits_begin < header.size() && header[digits_begin] == ' ') {
+            ++digits_begin;
+        }
+        std::size_t length = 0;
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): from_chars 要 [first, last) 两端
+        const auto parsed_length = std::from_chars(header.data() + digits_begin, header.data() + header.size(), length);
+        if (parsed_length.ec != std::errc{}) {
+            break;
+        }
+        const auto body_begin = header_end + 4;
+        if (body_begin + length > raw.size()) {
+            break;
+        }
+        auto parsed = au::json::parse(raw.substr(body_begin, length));
+        if (parsed) {
+            messages.push_back(std::move(parsed).value());
+        }
+        offset = body_begin + length;
+    }
+    return messages;
+}
+
+/// @brief 从 tools/call 响应里取回工具载荷：Inspector 的 JSON 原文在 content[0].text。
+/// @param message 一条 JSON-RPC 响应。
+/// @return 解析后的工具载荷；响应带 isError 或文本不可解析即本用例致命失败。
+auto tool_payload(const au::Json &message) -> au::Json {
+    const au::Json &result = *require_child(message, "result");
+    AURORA_TEST_REQUIRE(result.find("isError") == nullptr);
+    const au::Json &content = *require_child(result, "content");
+    const au::Json &text_item = *require_child_at(content, 0);
+    const auto text = require_field<std::string>(text_item, "text");
+    auto parsed = au::json::parse(text);
+    AURORA_TEST_REQUIRE_TRUE(parsed.ok());
+    return parsed.value();
+}
+
+#endif  // AURORA_BUILD_INSPECTOR_SERVER
 
 }  // namespace
 
@@ -394,6 +577,124 @@ AURORA_TEST_CASE(mcp_protocol_e2e_binary_smoke) {
         AURORA_TEST_SKIP("aurora_mcp not built");
     }
     AURORA_TEST_CHECK(ret == 0 || ret == 1);  // stdin EOF 后正常退出
+}
+
+AURORA_TEST_CASE(mcp_network_tools_roundtrip_through_inspector) {
+#if !defined(AURORA_BUILD_INSPECTOR_SERVER) || !AURORA_CAP_THREADS || defined(AURORA_PLATFORM_WASM)
+    AURORA_TEST_SKIP("requires the inspector server, worker threads and BSD sockets");
+#else
+    AURORA_TEST_REQUIRE_SUBPROCESS();
+    const std::string exe = locate_mcp_binary();
+    if (exe.empty()) {
+        AURORA_TEST_SKIP("aurora_mcp not built");
+    }
+    ScopedActivityReset reset;
+
+    // 夹具写进本进程的活动存储；MCP 子进程经本地 Inspector 端点读回同一份数据，两枚网络
+    // 工具走的正是对用户开放的通道。同一 request_id 的两跳（302 → 200）覆盖多跳展开，
+    // 另一笔 503 覆盖 host/status 过滤。
+    seed_network_activity("GET", "rid-hop", "https://api.example.test/start", 0, 0, 302);
+    seed_network_activity("GET", "rid-filter", "https://api.example.test/two", 0, 0, 503);
+    seed_network_activity("GET", "rid-hop", "https://api.example.test/final", 1, 0, 200);
+
+    const auto column = std::make_shared<au::Column>();
+    column->add(au::Node{std::make_shared<au::Text>("network")});
+    aurora::InspectorServer server{[column]() -> au::Node { return au::Node{column}; }};
+    AURORA_TEST_REQUIRE_TRUE(server.start(0));
+    const std::string session = "127.0.0.1:" + std::to_string(server.port());
+
+    au::Json default_args = au::Json::object();
+    default_args.set("session", session);
+    au::Json filtered_args = au::Json::object();
+    filtered_args.set("session", session);
+    filtered_args.set("host", "API.EXAMPLE.TEST");  // 大小写不敏感由端点负责
+    filtered_args.set("status", 503);
+    au::Json describe_args = au::Json::object();
+    describe_args.set("session", session);
+    describe_args.set("request_id", "rid-hop");
+    au::Json unknown_args = au::Json::object();
+    unknown_args.set("session", session);
+    unknown_args.set("request_id", "probe-secret-identifier");
+
+    const std::string requests = rpc_frame(1, "tools/list", au::Json{}) +
+                                 tool_call_frame(2, "list_network_activity", default_args) +
+                                 tool_call_frame(3, "list_network_activity", filtered_args) +
+                                 tool_call_frame(4, "describe_network_request", describe_args) +
+                                 tool_call_frame(5, "describe_network_request", unknown_args);
+    const std::vector<au::Json> messages = parse_mcp_messages(run_mcp_batch(exe, requests));
+    AURORA_TEST_REQUIRE_EQ(messages.size(), std::size_t{5});
+
+    // tools/list：两枚网络工具已注册，工具总数 22 → 24。
+    const au::Json &tools = *require_child(*require_child(messages[0], "result"), "tools");
+    AURORA_TEST_CHECK_EQ(tools.size(), std::size_t{24});
+    bool has_list = false;
+    bool has_describe = false;
+    for (const au::Json &tool : tools) {
+        const auto name = tool.as_or<std::string>("name", "");
+        has_list = has_list || name == "list_network_activity";
+        has_describe = has_describe || name == "describe_network_request";
+    }
+    AURORA_TEST_CHECK_TRUE(has_list);
+    AURORA_TEST_CHECK_TRUE(has_describe);
+
+#ifdef AURORA_ENABLE_DEBUG
+    // 缺省 limit：全部三笔，最新在前（rid-hop 的第二跳最后写入）。
+    const au::Json listed = tool_payload(messages[1]);
+    AURORA_TEST_CHECK_TRUE(listed.as_or<bool>("available", false));
+    AURORA_TEST_CHECK_EQ(listed.as_or<std::int64_t>("count", -1), std::int64_t{3});
+    const au::Json &entries = *require_child(listed, "entries");
+    AURORA_TEST_REQUIRE_EQ(entries.size(), std::size_t{3});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(entries, 0), "request_id"),
+                         std::string{"rid-hop"});
+    AURORA_TEST_CHECK_EQ(require_field<std::int64_t>(*require_child_at(entries, 0), "hop"), std::int64_t{1});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(entries, 1), "request_id"),
+                         std::string{"rid-filter"});
+
+    // 按 host + status 过滤：只剩 503 那笔。
+    const au::Json filtered = tool_payload(messages[2]);
+    AURORA_TEST_CHECK_TRUE(filtered.as_or<bool>("available", false));
+    AURORA_TEST_CHECK_EQ(filtered.as_or<std::int64_t>("count", -1), std::int64_t{1});
+    const au::Json &hit = *require_child_at(*require_child(filtered, "entries"), 0);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(hit, "request_id"), std::string{"rid-filter"});
+    AURORA_TEST_CHECK_EQ(require_field<std::int64_t>(hit, "status"), std::int64_t{503});
+
+    // 指定 request_id：条目取最新一跳，时间线按 hop 升序展开两跳。
+    const au::Json described = tool_payload(messages[3]);
+    AURORA_TEST_CHECK_TRUE(described.as_or<bool>("available", false));
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(described, "request_id"), std::string{"rid-hop"});
+    const au::Json &latest = *require_child(described, "entry");
+    AURORA_TEST_CHECK_EQ(require_field<std::int64_t>(latest, "hop"), std::int64_t{1});
+    AURORA_TEST_CHECK_EQ(require_field<std::int64_t>(latest, "status"), std::int64_t{200});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(latest, "path"), std::string{"/final"});
+    const au::Json &timelines = *require_child(described, "timelines");
+    AURORA_TEST_REQUIRE_EQ(timelines.size(), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(require_field<std::int64_t>(*require_child_at(timelines, 0), "hop"), std::int64_t{0});
+    AURORA_TEST_CHECK_EQ(require_field<std::int64_t>(*require_child_at(timelines, 1), "hop"), std::int64_t{1});
+    const au::Json &marks = *require_child(*require_child_at(timelines, 0), "marks");
+    AURORA_TEST_REQUIRE_TRUE(!marks.empty());
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(marks, 0), "stage"),
+                         std::string{"connection_acquired"});
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child_at(marks, marks.size() - 1), "stage"),
+                         std::string{"body_done"});
+
+    // 未知 id：工具报错只给状态码，不回传调用方的查询串。
+    const au::Json &unknown_result = *require_child(messages[4], "result");
+    AURORA_TEST_CHECK_TRUE(unknown_result.as_or<bool>("isError", false));
+    const auto unknown_text =
+        require_field<std::string>(*require_child_at(*require_child(unknown_result, "content"), 0), "text");
+    AURORA_TEST_CHECK_TRUE(unknown_text.find("HTTP 404") != std::string::npos);
+    AURORA_TEST_CHECK_TRUE(unknown_text.find("probe-secret-identifier") == std::string::npos);
+#else
+    // Release：两枚工具仍可调用，端点给确定形态的 unavailable，而不是 404 或空表。
+    for (const au::Json &message : {messages[1], messages[2], messages[3], messages[4]}) {
+        const au::Json payload = tool_payload(message);
+        AURORA_TEST_CHECK_FALSE(payload.as_or<bool>("available", true));
+        AURORA_TEST_CHECK_EQ(payload.as_or<std::string>("reason", std::string{}),
+                             std::string{"AURORA_ENABLE_DEBUG not enabled"});
+    }
+#endif
+    server.stop();
+#endif
 }
 
 // ---------- 命令枚举 / 解析工具（无状态：描述符随请求传入） ----------
