@@ -942,8 +942,9 @@ AURORA_TEST_CASE(the_identifier_is_one_value_across_both_views_the_record_and_th
     const std::optional<std::string> in_after = answers.at(0).headers.get("X-Request-Id");
     AURORA_TEST_REQUIRE(in_before.has_value());
     AURORA_TEST_REQUIRE(in_after.has_value());
-    AURORA_TEST_CHECK_EQ(*in_before, "rid-one-value");
-    AURORA_TEST_CHECK_EQ(*in_after, *in_before);
+    // 两枚视图里的同一枚 id：整枚 optional 参与比较，取值这一步不交给解引用（判据要的是「同名同值」）。
+    AURORA_TEST_CHECK(in_before == std::optional<std::string>{"rid-one-value"});
+    AURORA_TEST_CHECK(in_after == in_before);
     AURORA_TEST_CHECK_EQ(entry_for("rid-one-value").request_id, "rid-one-value");
     AURORA_TEST_REQUIRE(await_filed(filed, guard, 1));
     AURORA_TEST_CHECK_TRUE(contains(filed_request(filed, guard, 0), "x-request-id: rid-one-value"));
@@ -1038,7 +1039,7 @@ AURORA_TEST_CASE(hooks_run_in_registration_order_and_later_writes_win) {
     // 视图是本枚入口时刻的快照：第二枚看得见前一枚的改写，看不见自己的。
     const std::optional<std::string> tenant_in_second_view = seen_by_second.at(0).headers.get("X-Tenant");
     AURORA_TEST_REQUIRE(tenant_in_second_view.has_value());
-    AURORA_TEST_CHECK_EQ(*tenant_in_second_view, "one");
+    AURORA_TEST_CHECK(tenant_in_second_view == std::optional<std::string>{"one"});
     AURORA_TEST_REQUIRE(await_filed(filed, guard, 1));
     const std::string wire = filed_request(filed, guard, 0);
     AURORA_TEST_CHECK_TRUE(contains(wire, "x-tenant: two"));
