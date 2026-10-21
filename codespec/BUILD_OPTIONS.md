@@ -31,6 +31,7 @@
 | `cmake/AuroraImageCodecs.cmake` | `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG`（编译期能力开关） |
 | `cmake/AuroraSimd.cmake` | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播） |
 | `cmake/AuroraCcache.cmake` | `AURORA_ENABLE_CCACHE`（ccache 编译缓存启动器） |
+| `cmake/AuroraUnity.cmake` | `AURORA_UNITY_BUILD`（Unity/jumbo 构建：`aurora_apply_unity` / `aurora_unity_exclude`，缺省 OFF，见 §4.8） |
 | `cmake/AuroraTools.cmake` | 工具 / 基准可执行（`aurora_add_tool()` 统一样板）+ `AURORA_BUILD_INSPECTOR_SERVER` + `AURORA_BUILD_DOCS`（Doxygen `docs` 聚合目标，见 §2） |
 | `cmake/AuroraVerify.cmake` | `AURORA_BUILD_VERIFY_TOOLS`：真机验收探针（`tools/verify/` 下按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**） |
 | `cmake/AuroraDemos.cmake` | 示例 demo 定义块（须在 `AuroraTools` 与 `AuroraTests` 之后 include，因其依赖 `aurora_inspector_server` 目标） |
@@ -92,6 +93,7 @@
 | `AURORA_TEST_SHARDS` | `1` | 测试 runner 分片数（非开关、为正整数缓存变量）：`1` 与单 runner 完全等价；`N>1` 按 Suite（文件 stem）MD5 稳定散列把用例源拆为 N 个 runner（各含唯一 main），CTest 用例名带分片号（`<stem>_s<k>`，其中 `k` 从 `0` 起取 `0..N-1`），`registry_integrity` 对各 runner `--list` 取并集比对 | N 个 `aurora_test_runner_s<k>`（`k` 取 `0..N-1`）可执行；默认保持 `1`（单 runner，全局默认行为不变），需要并行链接用 `cmake --preset ninja-shards`（= `AURORA_TEST_SHARDS=4`），或用 `-DAURORA_TEST_SHARDS=<N>` 任意覆盖。 |
 | `AURORA_BUILD_E2E` | `ON` | 编译 `tests/e2e/`（`etest_` 前缀）下的**真实后端端到端**用例：建真实窗口 + 走上屏链路 + 读回像素断言。Emscripten 交叉构建下强制不纳入（wasm 产物无宿主窗口 / 显示），且须与 `registry_integrity` 的 `--tests-dir` 保持同口径 | `tests/e2e/*.cpp` 并入 `aurora_test_runner`；CTest 侧对 `etest_` 用例额外打 `LABELS e2e`（供 `ctest -L e2e` 分层编排） |
 | `AURORA_E2E_TIMEOUT_MS` | `60000` | E2E 用例的看门狗超时（非开关、为正整数字符串缓存变量）：按 stem 前缀 `etest_` 以 `--timeout=<ms>` 注入。runner 默认不设限，而真实窗口事件循环一旦挂起没有兜底，故须显式设限——到点先写报告再以退出码 3 结束 | 无（仅改变 `etest_` 用例的 CTest 命令行） |
+| `AURORA_TEST_OPT_LEVEL` | `auto` | 测试用例 TU 的优化级别（非开关、缓存字符串）：`auto`（缺省）= 优化构建（非 Debug）按 `-O1` 编译用例 TU、Debug 维持 `-O0`——注入条件三条同时满足（单配置生成器 + configure 期非 Debug + 非 MSVC 系旗标）：多配置生成器（VS）下 configure 期判不出 Debug 配置，而 CMake Debug 默认含 `/RTC1`、与 `/O*` 并存是 MSVC D8016 硬错误（CI `windows-msvc-debug` 即该形态）；MSVC 系（MSVC / clang-cl）优化构建默认档本就是 `/O2` 而非 `-O3`，降 `/O1` 是净降级、实测口径不成立。`0`-`3` = 显式档位（GCC/Clang `-O0..-O3`，MSVC `/Od../O2`；恒注入——MSVC Debug 配置下 `/O1../O2` 与默认 `/RTC1` 并存会 D8016，需要时先按 `CMakeLists.txt` 的做法从 `CMAKE_CXX_FLAGS_DEBUG` 摘除 `/RTC1`）；`none` = 永不覆盖（跟随构建类型）。用例是正确性校验而非性能热点（热点全在 `-O3` 的 aurora 库与三方文本光栅内），降档只改用例 TU 自身代码生成速度，不触碰任何 ABI 相关标志（异常 / RTTI / NDEBUG / C++ 标准与库逐项一致）。实测（16 核冷构建、ccache 关）：全量构建 CPU 时间 -27%、墙钟 -18%，且改动单个用例文件后的增量编译同样变快 | 仅改变 `aurora_test_runner`（含分片）用例 TU 的 `-O` 档位；库 / 工具 / demo 一律不受影响 |
 | `AURORA_BUILD_INSPECTOR_SERVER` | `OFF` | 编译 Inspector 远程 HTTP 服务器（跨平台：传输经核心 `aurora::net`，Windows 的 `ws2_32` 随核心 `PUBLIC` 传导 / POSIX 链 `pthread`） | `aurora_inspector_server` 静态库 |
 | `AURORA_BUILD_VERIFY_TOOLS` | `OFF` | **定义**（非默认构建）`tools/verify/` 下的真机验收探针：按「当前平台 + 已开启后端」条件定义，全部 `EXCLUDE_FROM_ALL`，**不进 CTest**（会创建真实窗口、读取屏幕光标，非确定且干扰用户桌面） | 各 `aurora_verify_<平台>_cursor` 可执行文件 + 聚合目标 `aurora_verify` |
 | `AURORA_BUILD_DOCS` | `ON` | 是否**提供** Doxygen API 文档站目标：配置期 `find_program(doxygen)` 探测，未找到则跳过定义（不 FATAL——doxygen 属可选外部工具），也可显式传入可执行路径。目标本身 `EXCLUDE_FROM_ALL`，`cmake --build build` 不触发；配置单一来源是仓库根 `Doxyfile`（`WARN_AS_ERROR=YES`，告警即失败），口径见 `CODING_STANDARDS.md` §13.7 | `docs` 聚合目标（产物 `build/docs/`，告警日志 `build/docs/doxygen_warnings.log`） |
@@ -646,6 +648,51 @@ EM_JS(int, wa_available, (), { return typeof AudioContext === 'undefined' ? 0 : 
 
 ⚠️ 指令必须**裸写**：clang-format 22 把带尾注的 `// clang-format off  (理由)` 当成普通注释、保护**不生效**（实测静默损坏），理由注释另起一行放在指令上方即可（该处在保护体外，可被正常重排）。落点见 `src/aurora/media/audio_webaudio.cpp`、`src/aurora/window/wasm_aria.cpp`、`include/aurora/window/wasm_surface.h`、`include/aurora/app/application.h` 与 `tools/verify/wasm_*_live_probe.cpp`；新增任何触达 DOM 的 JS 宏时同样处理，并在 `format` 之后核对 JS 块与改前逐字一致。
 
+### 4.8 `AURORA_UNITY_BUILD`（Unity / jumbo 构建）
+
+| 项 | 值 |
+|:---|:---|
+| 默认值 | `OFF` |
+| feature 宏 | 不注入，纯构建编排 |
+| 批次大小 | `AURORA_UNITY_BATCH_SIZE`（缺省 `16`，正整数缓存变量） |
+| 生效目标 | `aurora` 库、`aurora_test_runner`（含分片）、`aurora_add_tool` 族、`aurora_json`；单文件目标（各 demo / `gen_*` 生成器）合并没有收益，自动为空操作 |
+| 强制关闭 | 覆盖率 / ASan 插桩构建；clang-tidy 门禁构建（`AURORA_ENABLE_CLANG_TIDY=ON` 且未显式开 unity，见下「极性判定」） |
+| 模块 | `cmake/AuroraUnity.cmake`（`aurora_apply_unity()` / `aurora_unity_exclude()`） |
+
+**机制**：把目标的多个源文件合并为少量批处理 TU（CMake 生成 `#include` 原文件的 unity 源），把「每个 TU 各解析一遍 `aurora.h` 伞头（300+ 公共头）」的重复成本摊到一批文件上。消费者 TU 的最大解析成本就是这把伞头，故 unity 对**全量 / 冷构建**收益最大，对单文件迭代是净亏（见下）。
+
+**取舍（为何缺省 OFF）**：unity 用「单文件迭代变慢」换「全量构建变快」——改动一个文件会令其所在整个批次（`AURORA_UNITY_BATCH_SIZE` 个文件）一起重编，且批次内容变了 ccache 亦不命中（缓存键按批处理 TU 的完整内容计算，改一个文件 = 整批换键）。适合大重构、CI 全量构建；不适合「改一个用例文件 → 编 → 跑」的日常小循环（那条路已经有 ccache + `AURORA_TEST_OPT_LEVEL` 兜底，见 §2）。
+
+**实测**（本机 16 核、gcc、Release、ccache 关、`-j16`，全量构建墙钟；测试 `-O1` 即 `AURORA_TEST_OPT_LEVEL=auto`）：
+
+| 配置 | 墙钟 | CPU 时间 | 相对基线 | 说明 |
+|:---|:---|:---|:---|:---|
+| 基线（unity OFF、测试 `-O3`） | 12:17 | 45:21 | — | 既有默认行为 |
+| 仅测试 `-O1`（unity OFF） | 10:01 | 32:56 | -18% / -27% | 零迭代损失 |
+| 仅 unity batch 16（测试 `-O3`） | 3:21 | 25:59 | -73% / -43% | 库 + runner 合并 |
+| unity batch 16 + 测试 `-O1` | 2:35 | 17:33 | -79% / -61% | 全量最快，单文件迭代损失最大 |
+
+unity 是本机环境下的主导旋钮：单个 TU 的固定成本（伞头解析 + 进程/IO 开销）远高于代码生成，合并 16 个文件只付一次伞头。墙钟降幅（-73%）大于 CPU 降幅（-43%），因为边数从 688 降到 159，16 核的调度尾部同步收缩。
+
+单文件迭代（同条件，触碰一个用例文件后增量构建，ninja log 实测）：非 unity 只重编该 TU——`utest_button.cpp` 触碰增量约 4.5 s（`-O1`；全量构建内约 18.3 s，`-O3` 约 19.1 s）；unity batch 16 重编其所在 16 文件批次，含该文件的批次约 34 s（全量构建内 92 s，随并发波动）——单文件迭代约慢 5–8 倍。批次大小就是「全量收益 ÷ 迭代惩罚」的权衡旋钮，`-DAURORA_UNITY_BATCH_SIZE=8` 两者各折半。
+
+**ODR 冲突源排除**：库内 `src/aurora/net/` 多文件在匿名命名空间重名（`protocol_error` / `trim_ows` / `decimal` / `to_lower_ascii` / `ascii_lower` 等）且 `detail` 命名空间按文件重组，`src/aurora/perf/profiler.cpp` 与 `perf_session.cpp` 重名 `same_zone_name`——这些文件经 `aurora_unity_exclude()` 标记 `SKIP_UNITY_BUILD_INCLUSION`（CMake 4.4 起对普通源文件生效）**独立编译，与关闭 unity 时逐字节相同**，其余 TU 照常合并。测试目录经全量单 TU 探针验证零冲突，无需排除。新增源文件若引入同类冲突，unity 构建会以重定义错误显式失败——把文件加进 `CMakeLists.txt` 的排除列表即可（不需要时为纯净收益）。
+
+**极性判定（clang-tidy 门禁）**：`AURORA_ENABLE_CLANG_TIDY` 默认 `ON`，其 cache 项在**首次 configure 后即存在**；若按「clang-tidy 当前值」直接判定，普通构建目录的任何一次 reconfigure（glob verify / cmake 文件变更）都会把 unity 悄悄关掉（首次 configure 时 `option()` 尚未运行、项不存在故放行，之后恒存在故拦截）。故判据是「**clang-tidy 开 且 用户未显式开 unity** 才跳过」：`AURORA_UNITY_BUILD=ON` 由 `-D` 持久进 cache，用户意图跨 reconfigure 稳定；CI lint 作业（`-DAURORA_ENABLE_CLANG_TIDY=ON`、不带 unity）因此恒得真实 TU 路径——lint 从 `compile_commands.json` 取 TU 清单，unity 下清单会变成构建目录里的生成文件，按路径的排除名单 / 分片 / `--git-diff` 挑选全部失真。显式同时开两者时以用户意图为准（lint 将看到 unity TU，属已知取舍）。
+
+**与其它开关的相互作用**：
+
+- **ccache**：批处理 TU 同样走缓存；首轮 unity 构建是冷编译，之后命中。多构建目录共享缓存（`CCACHE_BASEDIR` + `NOHASHDIR`，见 §4.3）对 unity 与非 unity 构建同样成立。
+- **PCH**：正交。GCC 下两者皆关（§2.2）；MSVC/Clang 下消费者 PCH 的 REUSE 对 unity TU 同样生效。
+- **覆盖率 / ASan**：强制关闭——行覆盖会全部归属生成的 unity 文件，per-file 归因失效；符号归因同样劣化。与 PCH 门控同口径。
+- **测试分片**（`AURORA_TEST_SHARDS`）：正交，各分片 runner 独立合并。
+
+```powershell
+cmake -S . -B build -DAURORA_UNITY_BUILD=ON                          # 开启（batch 16）
+cmake -S . -B build -DAURORA_UNITY_BUILD=ON -DAURORA_UNITY_BATCH_SIZE=8   # 更小批次：全量收益减半、单文件迭代惩罚减半
+cmake -S . -B build -DAURORA_UNITY_BUILD=ON -DAURORA_TEST_OPT_LEVEL=2     # 叠加测试 -O2
+```
+
 ## 5 强制缓存变量（三方库源码构建内部）
 
 FreeType 与 HarfBuzz 均从仓库内置源码（`third_party/freetype`、`third_party/harfbuzz`）经 `add_subdirectory` 编入 `aurora` 静态库（断网可构建、版本确定）。`CMakeLists.txt` 先 `add_subdirectory(third_party/freetype)` 后 `add_subdirectory(third_party/harfbuzz)`——harfbuzz 在 `if (TARGET freetype)` 时自动开启 `HB_HAVE_FREETYPE`（提供 `hb-ft.h` 并链接 freetype）。aurora 直接 `target_link_libraries(aurora PUBLIC freetype harfbuzz)`，文本 shaping 由 HarfBuzz（`hb_shape` + `hb_ft_font`）完成，故 FreeType 自身保持 `FT_DISABLE_HARFBUZZ=ON`（standalone，避免别名耦合）。
@@ -881,6 +928,7 @@ aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE includ
 -D AURORA_BUILD_DEMOS=ON|OFF                  # demos（默认 ON）
 -D AURORA_BUILD_TESTS=ON|OFF                  # CTest（默认 ON）
 -D AURORA_TEST_SHARDS=<N>                     # 测试 runner 分片数（默认 1 = 单 runner；显式开启：cmake --preset ninja-shards = 4 片）
+-D AURORA_TEST_OPT_LEVEL=auto|none|0-3        # 测试用例 TU 优化级别（默认 auto = 优化构建 -O1 / Debug 维持 -O0；none = 跟随构建类型）
 -D AURORA_BUILD_E2E=ON|OFF                    # 真实后端 E2E 用例 tests/e2e/（默认 ON；Emscripten 强制排除）
 -D AURORA_E2E_TIMEOUT_MS=<ms>                 # etest_ 用例看门狗超时（默认 60000）
 -D AURORA_BUILD_INSPECTOR_SERVER=ON|OFF       # Inspector HTTP 服务器（默认 OFF）
@@ -927,6 +975,8 @@ aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE includ
 -D AURORA_ENABLE_GLFW_GPU_GL=ON|OFF    # GPU OpenGL 3.3 core 栅格（默认 OFF；依赖 AURORA_BACKEND_GLFW=ON，非独立后端）
 -D AURORA_ENABLE_CCACHE=ON|OFF           # ccache 编译缓存（默认 ON；容量默认 10G）
 -D AURORA_ENABLE_LLD=ON|OFF              # lld 链接器（默认 ON）
+-D AURORA_UNITY_BUILD=ON|OFF             # Unity/jumbo 构建（默认 OFF；全量构建加速、单文件迭代变慢，见 §4.8）
+-D AURORA_UNITY_BATCH_SIZE=<N>           # unity 批次大小（默认 16；仅 AURORA_UNITY_BUILD=ON 时生效）
 -D AURORA_ENABLE_CLANG_TIDY=ON|OFF       # lint / lint-fix 目标（默认 ON）
 -D AURORA_LINT_SHARD=0/4                 # TU 分片（默认空 = 全量一遍；CI 矩阵用，见 §4.5）
 

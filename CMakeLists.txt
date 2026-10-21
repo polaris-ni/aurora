@@ -4,6 +4,7 @@
 # 本文件只做「工程声明 + 核心库目标 + 模块编排」；具体逻辑按职责拆分在 cmake/ 下：
 #   cmake/AuroraThirdParty.cmake      — FreeType/HarfBuzz 源码构建
 #   cmake/AuroraBackends.cmake        — 后端剪裁开关（Headless/Win32/D3D11/GLFW/X11/Wayland/macOS/WASM）
+#   cmake/AuroraUnity.cmake           — Unity（jumbo）构建开关（aurora_apply_unity；全量/冷构建加速，缺省 OFF）
 #   cmake/AuroraTools.cmake           — 工具/基准可执行（gen_api_tools / gen_error_codes / gen_debug_api / MCP / CLI / LSP / bench_* 等）
 #   cmake/AuroraVerify.cmake          — 真机验收探针（tools/verify/ 下，默认 OFF + EXCLUDE_FROM_ALL）
 #   cmake/AuroraTests.cmake           — CTest 注册式 runner（GLOB tests/*.cpp + tests/unit + tests/integration 链入单一 aurora_test_runner，AURORA_TEST() 自注册）
@@ -183,6 +184,11 @@ endif ()
 # ---- ccache 编译缓存（加速重复编译）----
 include(AuroraCcache)
 
+# ---- Unity（jumbo）构建开关（定义 aurora_apply_unity；缺省 OFF）----
+# 须在首个目标定义与 aurora_setup_consumer_target 调用之前：函数体在调用期
+# 求值，但插桩 / clang-tidy 门控读 -D cache 项，早 include 早生效。
+include(AuroraUnity)
+
 # ---- 三方字体依赖（FreeType + HarfBuzz 源码构建）----
 include(AuroraThirdParty)
 
@@ -233,6 +239,18 @@ file(GLOB_RECURSE AURORA_SOURCES CONFIGURE_DEPENDS
 list(FILTER AURORA_SOURCES EXCLUDE REGEX "inspector_server\.cpp$")
 
 add_library(aurora STATIC ${AURORA_SOURCES})
+# Unity 合并（AURORA_UNITY_BUILD=ON 时）：库 TU 数量仅次于测试 runner，
+# 是冷构建 CPU 时间的第二大头；插桩 / lint 构建下自动退化为不合并。
+aurora_apply_unity(aurora)
+# ODR 冲突源排除（仅 unity 开启时生效）：net 模块多文件在匿名命名空间重名
+# （protocol_error / trim_ows / decimal / to_lower_ascii / ascii_lower 等），
+# 且 detail 命名空间按文件重组；perf/profiler.cpp 与 perf_session.cpp 重名
+# same_zone_name。这些文件独立编译（与关闭 unity 时逐字节相同），其余库 TU
+# 照常合并。判定方法：全库单 TU 探针编译（test_temp/unity_probe_lib*.cpp）。
+if (AURORA_UNITY_BUILD)
+    aurora_unity_exclude("${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/net/*.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/perf/profiler.cpp")
+endif ()
 # 版本常量注入：project(VERSION) + AURORA_VERSION_SUFFIX → version.h 的
 # AURORA_VERSION_* / AURORA_VERSION_STRING（PUBLIC：消费者与测试同源取值）。
 set(AURORA_VERSION_HAS_SUFFIX 0)

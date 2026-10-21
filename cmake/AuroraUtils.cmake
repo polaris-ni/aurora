@@ -5,6 +5,7 @@
 # 统一处理所有「消费 aurora 库」的可执行目标（demo/测试/工具）的样板：
 #   - PRIVATE 链接 aurora（自动获得其 PUBLIC 头目录 / feature 宏 / PCH 锚点）
 #   - CXX_STANDARD 20
+#   - 应用 Unity 合并（aurora_apply_unity，受 AURORA_UNITY_BUILD 门控；插桩 / lint 下自动退化）
 #   - 复用消费者共享 PCH（REUSE_FROM aurora_consumer_pch，受 AURORA_PCH_ENABLED 门控）
 #   - 注入项目统一告警标志（与 aurora 自身一致）
 #   - MinGW 下追加 -Wa,-mbig-obj（放宽 COFF 段数上限，见函数内注释）
@@ -20,6 +21,10 @@ function(aurora_setup_consumer_target _tgt)
     # 链接 aurora 静态库（PUBLIC 传递头目录 / feature 宏 / 版本定义）。
     target_link_libraries(${_tgt} PRIVATE aurora)
     set_target_properties(${_tgt} PROPERTIES CXX_STANDARD 20)
+
+    # Unity 合并（AURORA_UNITY_BUILD=ON 时生效；插桩 / lint 构建下自动退化）。
+    # 单文件目标（各 demo / gen_* 生成器）合并没有收益，CMake 自动为空操作。
+    aurora_apply_unity(${_tgt})
 
     # 复用消费者共享 PCH（含 aurora.h，.gch 只编一份）；flags 不匹配时 GCC 安全回退为文本包含。
     # 插桩构建下 PCH 关闭，跳过 REUSE_FROM（见 AURORA_PCH_ENABLED）。

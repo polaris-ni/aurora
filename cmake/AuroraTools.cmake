@@ -37,6 +37,9 @@ add_library(aurora_json STATIC
         src/aurora/core/utf8.cpp)
 target_include_directories(aurora_json PUBLIC ${AURORA_SOURCE_DIR}/include)
 set_target_properties(aurora_json PROPERTIES CXX_STANDARD 20)
+# Unity 合并（AURORA_UNITY_BUILD=ON 时生效；插桩 / lint 构建下自动退化）：
+# 6 个 JSON TU 各含 core 层重头，合并后伞头解析只付一次。
+aurora_apply_unity(aurora_json)
 
 # 错误码生成器：解析 codespec/errors.toml -> error_codes.gen.h / ERROR_CATALOG.md /
 # aurora_api.json 的 "error_codes" 段。独立可执行文件，**不链接 aurora**（避免鸡生蛋，

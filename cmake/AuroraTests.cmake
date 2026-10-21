@@ -185,6 +185,22 @@ if (AURORA_BUILD_TESTS)
         message(FATAL_ERROR "AURORA_TEST_SHARDS must be a positive integer (got '${AURORA_TEST_SHARDS}')")
     endif ()
 
+    # ---- 测试用例 TU 的优化级别（AURORA_TEST_OPT_LEVEL，非开关、缓存字符串）----
+    # 用例是正确性校验而非性能热点：热点全在 -O3 的 aurora 库与三方文本光栅内，
+    # 以构建类型默认档（Release = -O3）编译 400+ 个用例 TU，实测占全量构建 CPU
+    # 时间的一半以上，而库侧一行不变。降档只改用例 TU 自身的代码生成速度，不触碰
+    # 任何 ABI 相关标志（异常 / RTTI / NDEBUG / C++ 标准与库逐项一致），语义等价。
+    # 取值：auto（缺省）= 优化构建（非 Debug）按 -O1 编用例、Debug 维持 -O0
+    # （保住 hybrid debug「消费者目标可单步」口径；多配置生成器与 MSVC 系旗标下
+    # 不注入，理由见 _aurora_configure_runner 内应用处）；0-3 = 显式档位
+    # （GCC/Clang: -O0..-O3；MSVC: /Od../O2，无 /O3；恒注入——MSVC Debug 配置下
+    # /O1../O2 与默认 /RTC1 并存会 D8016，需要时先摘除 /RTC1）；none = 永不覆盖。
+    set(AURORA_TEST_OPT_LEVEL "auto" CACHE STRING
+            "Optimization level for test-case TUs: 'auto' (default) = -O1 in optimized single-config non-MSVC builds, build-type default otherwise; 0-3 = explicit; 'none' = never override")
+    if (NOT AURORA_TEST_OPT_LEVEL MATCHES "^(auto|none|[0-3])$")
+        message(FATAL_ERROR "AURORA_TEST_OPT_LEVEL must be 'auto', 'none' or 0-3 (got '${AURORA_TEST_OPT_LEVEL}')")
+    endif ()
+
     # E2E 用例的看门狗超时（ms）。runner 默认 timeout_ms=0 即不设限，而真实窗口事件循环
     # 一旦挂起就没有兜底（不设 CTest TIMEOUT 属性先例），故由下方两条 add_test 注册循环
     # 按 stem 前缀 etest_ 显式注入 --timeout；到点 runner 先写报告再以退出码 3 结束。
@@ -234,6 +250,45 @@ if (AURORA_BUILD_TESTS)
         # 测试 TU 与库 TU 必须同口径，故按选项向 runner 同步注入（对齐上方 SIMD 的处理）。
         if (AURORA_ENABLE_COMPRESSION)
             target_compile_definitions(${tgt} PRIVATE AURORA_ENABLE_COMPRESSION)
+        endif ()
+        # 测试用例 TU 优化级别（AURORA_TEST_OPT_LEVEL，定义处有完整理由）：
+        # target_compile_options 追加在命令行末尾，覆盖构建类型默认 -O3——
+        # 与 Debug hybrid 给库覆写 -O3 同一机制。
+        # auto 的注入条件（三条同时满足，缺一不注入）：
+        #   ① configure 期构建类型非 Debug——Debug 维持 -O0，保住 hybrid debug
+        #      「消费者目标可单步」口径（与 CMakeLists.txt 的 Debug 优化块对偶：那块抬库、这块不碰消费者）；
+        #   ② 单配置生成器——多配置（VS）下 CMAKE_BUILD_TYPE 被强制成 Release、configure 期
+        #      判不出 Debug 配置，而 CMake Debug 默认含 /RTC1，与 /O* 并存是 MSVC D8016
+        #      硬错误（CMakeLists.txt MSVC Debug hybrid 前置同款坑；CI windows-msvc-debug
+        #      正是 VS 生成器 + --config Debug 的形态，注入即红灯）；
+        #   ③ 非 MSVC 系旗标（MSVC / clang-cl）——其优化构建默认档本就是 /O2 而非 -O3，
+        #      降到 /O1 是净降级，实测口径（-O3 → -O1 省 27% CPU）不成立。
+        # 显式档位（0-3）不受上述条件约束：用户点名即恒注入（MSVC Debug 配置下 /O1../O2 与
+        # 默认 /RTC1 并存会 D8016，需要时先按 CMakeLists.txt 的做法从 CMAKE_CXX_FLAGS_DEBUG 摘除）。
+        set(_aurora_test_opt "")
+        if (AURORA_TEST_OPT_LEVEL STREQUAL "auto")
+            if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug"
+                    AND NOT CMAKE_CONFIGURATION_TYPES
+                    AND NOT (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"
+                    OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC"))
+                set(_aurora_test_opt "1")
+            endif ()
+        elseif (AURORA_TEST_OPT_LEVEL MATCHES "^[0-3]$")
+            set(_aurora_test_opt "${AURORA_TEST_OPT_LEVEL}")
+        endif ()
+        if (_aurora_test_opt)
+            if (MSVC)
+                if (_aurora_test_opt STREQUAL "0")
+                    set(_aurora_test_opt_flag "/Od")
+                elseif (_aurora_test_opt STREQUAL "3")
+                    set(_aurora_test_opt_flag "/O2")  # MSVC 无 /O3：/O2 即最大化速度
+                else ()
+                    set(_aurora_test_opt_flag "/O${_aurora_test_opt}")
+                endif ()
+            else ()
+                set(_aurora_test_opt_flag "-O${_aurora_test_opt}")
+            endif ()
+            target_compile_options(${tgt} PRIVATE ${_aurora_test_opt_flag})
         endif ()
         if (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
             # /STACK：MSVC 系链接器（link.exe / lld-link）默认栈保留仅 1MB，而 JSON 解析器是
