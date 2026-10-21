@@ -191,12 +191,13 @@ if (AURORA_BUILD_TESTS)
     # 时间的一半以上，而库侧一行不变。降档只改用例 TU 自身的代码生成速度，不触碰
     # 任何 ABI 相关标志（异常 / RTTI / NDEBUG / C++ 标准与库逐项一致），语义等价。
     # 取值：auto（缺省）= 优化构建（非 Debug）按 -O1 编用例、Debug 维持 -O0
-    # （保住 hybrid debug「消费者目标可单步」口径；多配置生成器与 MSVC 系旗标下
-    # 不注入，理由见 _aurora_configure_runner 内应用处）；0-3 = 显式档位
-    # （GCC/Clang: -O0..-O3；MSVC: /Od../O2，无 /O3；恒注入——MSVC Debug 配置下
-    # /O1../O2 与默认 /RTC1 并存会 D8016，需要时先摘除 /RTC1）；none = 永不覆盖。
+    # （保住 hybrid debug「消费者目标可单步」口径；多配置生成器、MSVC 系旗标与
+    # 消费者 PCH 开启下不注入，理由见 _aurora_configure_runner 内应用处）；
+    # 0-3 = 显式档位（GCC/Clang: -O0..-O3；MSVC: /Od../O2，无 /O3；恒注入——
+    # MSVC Debug 配置下 /O1../O2 与默认 /RTC1 并存会 D8016，需要时先摘除 /RTC1；
+    # 消费者 PCH 门下不注入并发 WARNING，原因同 auto 条件④）；none = 永不覆盖。
     set(AURORA_TEST_OPT_LEVEL "auto" CACHE STRING
-            "Optimization level for test-case TUs: 'auto' (default) = -O1 in optimized single-config non-MSVC builds, build-type default otherwise; 0-3 = explicit; 'none' = never override")
+            "Optimization level for test-case TUs: 'auto' (default) = -O1 in optimized single-config non-MSVC builds without consumer PCH, build-type default otherwise; 0-3 = explicit (not applied under consumer PCH); 'none' = never override")
     if (NOT AURORA_TEST_OPT_LEVEL MATCHES "^(auto|none|[0-3])$")
         message(FATAL_ERROR "AURORA_TEST_OPT_LEVEL must be 'auto', 'none' or 0-3 (got '${AURORA_TEST_OPT_LEVEL}')")
     endif ()
@@ -262,19 +263,36 @@ if (AURORA_BUILD_TESTS)
         #      硬错误（CMakeLists.txt MSVC Debug hybrid 前置同款坑；CI windows-msvc-debug
         #      正是 VS 生成器 + --config Debug 的形态，注入即红灯）；
         #   ③ 非 MSVC 系旗标（MSVC / clang-cl）——其优化构建默认档本就是 /O2 而非 -O3，
-        #      降到 /O1 是净降级，实测口径（-O3 → -O1 省 27% CPU）不成立。
-        # 显式档位（0-3）不受上述条件约束：用户点名即恒注入（MSVC Debug 配置下 /O1../O2 与
-        # 默认 /RTC1 并存会 D8016，需要时先按 CMakeLists.txt 的做法从 CMAKE_CXX_FLAGS_DEBUG 摘除）。
+        #      降到 /O1 是净降级，实测口径（-O3 → -O1 省 27% CPU）不成立；
+        #   ④ 消费者共享 PCH 关闭（NOT AURORA_PCH_ENABLED）——consumer PCH 按构建类型
+        #      默认档编译、且被 demo/工具/测试全部消费者共用，clang 要求 TU 与 PCH 的
+        #      优化档一致：emscripten 直接报 "OptimizationLevel differs in precompiled
+        #      file" 硬错（CI wasm 两个作业实测红灯），vanilla clang（macOS-clang）虽仅
+        #      -Winvalid-pch 警告回退文本包含，但全部 runner TU 静默失去 PCH——两种
+        #      形态都不取，故 PCH 门下整体不注入（PCH 仅对 clang 系默认开：GCC 与
+        #      插桩构建本就关闭，门控见 CMakeLists.txt AURORA_PCH_ENABLED 与
+        #      BUILD_OPTIONS.md §2.2）。
+        # 显式档位（0-3）同样受 ④ 约束：PCH 门下不注入并发 WARNING——请求无法兑现，
+        # 静默跳过即是假绿；auto/none 无请求意味，静默跳过。
         set(_aurora_test_opt "")
         if (AURORA_TEST_OPT_LEVEL STREQUAL "auto")
             if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug"
                     AND NOT CMAKE_CONFIGURATION_TYPES
                     AND NOT (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"
-                    OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC"))
+                    OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+                    AND NOT AURORA_PCH_ENABLED)
                 set(_aurora_test_opt "1")
             endif ()
         elseif (AURORA_TEST_OPT_LEVEL MATCHES "^[0-3]$")
-            set(_aurora_test_opt "${AURORA_TEST_OPT_LEVEL}")
+            if (AURORA_PCH_ENABLED)
+                message(WARNING "AURORA_TEST_OPT_LEVEL=${AURORA_TEST_OPT_LEVEL} not applied: "
+                        "the shared consumer PCH (AURORA_PCH_ENABLED) is built at the "
+                        "build-type default optimization level and reused by all consumer "
+                        "targets; clang requires TU and PCH optimization levels to match. "
+                        "Use AURORA_TEST_OPT_LEVEL=none to silence this warning.")
+            else ()
+                set(_aurora_test_opt "${AURORA_TEST_OPT_LEVEL}")
+            endif ()
         endif ()
         if (_aurora_test_opt)
             if (MSVC)
