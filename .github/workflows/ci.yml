@@ -248,13 +248,17 @@ jobs:
           - name: linux-gcc-debug
             os: ubuntu-26.04
             build-type: Debug
-            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+            # 构建提速：unity 批处理（gcc/PCH 关，本地已 440 例 ctest 验证；DEBUG 下测试 -O 档
+            # auto 不注入，保持可调试）。见 codespec/BUILD_OPTIONS.md §4.8 / CHANGELOG。
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_UNITY_BUILD=ON
             e2e-expect: ""
           # linux 原生 clang：弥补 gcc 单编译器盲区（模板实例化 / 两阶段名字查找 / ODR 诊断更严格）
           - name: linux-clang-release
             os: ubuntu-26.04
             build-type: Release
-            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+            # 构建提速：unity 批处理（clang 侧 PCH 默认 ON，但 unity 与 PCH 正交、不影响优化档；
+            # 测试 -O 档 auto 因 PCH 门不注入）。本地 gcc 已全绿，clang 侧作为 CI 拓宽验证。
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DAURORA_UNITY_BUILD=ON
             apt-pkgs: clang
             e2e-expect: ""
           - name: windows-msvc
@@ -423,7 +427,7 @@ jobs:
             # Release 作业默认 DEBUG=AUTO→OFF，X11 读回被门控——显式 ON 使 etest_x11 真实运行
             # （期望集口径见 08-tooling §8.2「CI 作业口径」；Wayland 无人值守无合成器，不期望）。
             # GLFW 期望 xvfb + mesa(llvmpipe) 提供 GLX 3.3 兼容上下文。
-            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_BACKEND_GPU_WGPU=ON
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_UNITY_BUILD=ON -DAURORA_TEST_OPT_LEVEL=1
             e2e-expect: "x11,glfw"
           - name: windows-d3d11-glfw
             os: windows-latest
@@ -688,6 +692,12 @@ jobs:
           - name: tls-openssl-shared
             apt-pkgs: libssl-dev
             cmake-flags: -DAURORA_NET_TLS_PROVIDERS=shared:/usr
+            run-tests: true
+          # 构建提速旋钮锁点：unity 批处理 + 测试用例 -O1（见 codespec/BUILD_OPTIONS.md §4.8）。
+          # 与 core/backends 的 gcc 单配置腿同源，但作为独立选项曲面腿——任一旋钮的 CMake 装配
+          # 逻辑回归都会在本腿单独红，不污染主矩阵；同时让 CI 持续验证快构建路径可用。
+          - name: fast-build
+            cmake-flags: -DAURORA_UNITY_BUILD=ON -DAURORA_TEST_OPT_LEVEL=1
             run-tests: true
 
     steps:
