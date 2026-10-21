@@ -427,7 +427,10 @@ jobs:
             # Release 作业默认 DEBUG=AUTO→OFF，X11 读回被门控——显式 ON 使 etest_x11 真实运行
             # （期望集口径见 08-tooling §8.2「CI 作业口径」；Wayland 无人值守无合成器，不期望）。
             # GLFW 期望 xvfb + mesa(llvmpipe) 提供 GLX 3.3 兼容上下文。
-            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_UNITY_BUILD=ON -DAURORA_TEST_OPT_LEVEL=1
+            # 注：本腿不开 AURORA_UNITY_BUILD——后端头（wgpu/GL/X11/GLFW）在 unity 合并 TU
+            # 内对 Type/Value/Result/Json 等标识符造成宏泄漏（json.h 解析失败），属本仓后端
+            # 头的系统性隐患，需独立头文件宏审计才能安全开启；此处仅保留安全的测试降优档。
+            cmake-flags: -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_TEST_OPT_LEVEL=1
             e2e-expect: "x11,glfw"
           - name: windows-d3d11-glfw
             os: windows-latest
