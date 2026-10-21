@@ -111,6 +111,26 @@ class ThreadPool {
     /// @return deferred_ 标记（构造期确定，运行期不变）。
     [[nodiscard]] auto is_deferred() const -> bool { return deferred_; }
 
+    /// @brief 可中断的带时限等待：在内部互斥上 `cv_.wait_for(lock, d, [this]{ return stop_; })`。
+    /// @detail 供 `Task<T>::with_timeout` 的非 deferred 分支等场景使用——超时看守原本是
+    ///         `std::this_thread::sleep_for(d)` 的裸睡眠，进程退出时线程池析构置 `stop_=true` +
+    ///         `notify_all()` 无法唤醒它，导致析构 `join` 卡满整个超时窗口（实测 `default_pool`
+    ///         单例析构让 `utest_net_http_binding` 进程退出静默 30s）。改为可中断等待后，析构的
+    ///         `notify_all` 立即唤醒等待中的看守任务，不再阻塞退出。
+    /// @tparam Rep 时长 `d` 的计数类型（如 `std::chrono::milliseconds` 底层的 `std::int64_t`）。
+    /// @tparam Period 时长 `d` 的刻度周期（如 `std::milli` 等 `std::ratio`，表示每 tick 的秒数）。
+    /// @param d 等待时长；正常运行（`stop_` 恒 false）下语义等同 `sleep_for(d)`，超时判定不受影响。
+    /// @note deferred 模式（无后台线程可 wait）直接返回，不进入等待——`with_timeout` 的非 deferred
+    ///       分支本就不会在 deferred 下调用，此处保护仅为防误用。
+    template <typename Rep, typename Period>
+    auto interruptible_wait_for(std::chrono::duration<Rep, Period> d) -> void {
+        if (deferred_) {
+            return;
+        }
+        std::unique_lock lock(mutex_);
+        cv_.wait_for(lock, d, [this]() -> bool { return stop_; });
+    }
+
     /// @brief 当前 worker 线程数（deferred 模式恒为 0）。
     /// @return workers_ 容器大小。
     [[nodiscard]] auto worker_count() const -> std::size_t { return workers_.size(); }

@@ -238,4 +238,41 @@ AURORA_TEST_CASE(frame_loop_drains_deferred_default_pool) {
 #endif
 }
 
+AURORA_TEST_CASE(interruptible_wait_for_waits_full_duration_while_running) {
+    AURORA_TEST_REQUIRE_THREADS();
+    // 非 deferred 池：interruptible_wait_for 在 stop_ 为 false 时语义等同 sleep_for，
+    // 等待时长 ≈ 给定窗口（避开调度抖动，用充足余量判据）。
+    aurora::ThreadPool pool{2};
+    AURORA_TEST_CHECK_FALSE(pool.is_deferred());
+    std::atomic<bool> done{false};
+    pool.execute([&pool, &done]() -> void {
+        pool.interruptible_wait_for(std::chrono::milliseconds{80});
+        done.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    AURORA_TEST_CHECK_FALSE(done.load(std::memory_order_acquire));  // 尚未到窗口
+    std::this_thread::sleep_for(std::chrono::milliseconds{150});  // 越过 80ms 窗口 + 余量
+    AURORA_TEST_CHECK_TRUE(done.load(std::memory_order_acquire));
+}
+
+AURORA_TEST_CASE(interruptible_wait_for_wakes_early_when_pool_destroyed) {
+    AURORA_TEST_REQUIRE_THREADS();
+    // 关键回归（CHG-030）：进程退出时 default_pool 析构置 stop_ + notify_all；
+    // 等待中的 interruptible_wait_for 应被立即唤醒，而非睡满整个超时窗口。
+    // 用局部非 deferred 池复现同一析构路径（进程级单例不可在用例内析构）。
+    auto pool = std::make_shared<aurora::ThreadPool>(2);
+    AURORA_TEST_CHECK_FALSE(pool->is_deferred());
+    std::atomic<bool> woke{false};
+    pool->execute([&pool, &woke]() -> void {
+        pool->interruptible_wait_for(std::chrono::seconds{30});  // 若不被唤醒会睡 30s
+        woke.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});  // 让 worker 进入等待
+    const auto start = std::chrono::steady_clock::now();
+    pool.reset();  // 析构：stop_=true + notify_all → 唤醒等待中的任务 → join 不卡
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    AURORA_TEST_CHECK_TRUE(woke.load(std::memory_order_acquire));
+    AURORA_TEST_CHECK_LE(elapsed, std::chrono::seconds{2});  // 远小于 30s
+}
+
 }  // namespace aurora::test_cases::utest_thread_pool
