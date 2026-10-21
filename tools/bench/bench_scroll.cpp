@@ -72,7 +72,8 @@ using aurora::Size;
 namespace {
 
 /// @brief 数据表环绕取元素：索引对表长取模（bench 各数据表均按确定性环绕复用）。
-/// 一处收口 NOLINT：取模结果恒小于表长，越界不可能；逐处抑制反而淹没调用点语义。
+/// 取模索引恒小于表长、越界不可能；此处一处收口径向豁免（见下一条指令的附注理由），
+/// 调用点语义不被逐处豁免淹没。
 template <typename T, std::size_t N>
 [[nodiscard]] auto wrap_elem(const T (&table)[N], int i) -> const T & {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): 取模索引恒小于表长
