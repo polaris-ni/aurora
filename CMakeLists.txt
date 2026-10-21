@@ -367,7 +367,8 @@ endif ()
 # 比 Release(-O3) 慢数倍，导致 demo/测试在 Debug 下卡顿且难以排查真实性能问题。
 # 仅给 aurora 库加 -O3 只能把 Debug 从 ~15 抬到 ~30（paint 仍被 -O0 的 freetype 拖死），
 # 故对 aurora 库 + freetype/harfbuzz 等第三方库一并施加 -O3（保留 -g 调试信息）：
-# 实测把 demo_google_play 的 Debug 帧率从 ~15 抬到接近 Release 的 ~50 FPS（与 build/ 对齐）。
+# 实测把重 UI demo（原应用级 demo_google_play，已退役）的 Debug 帧率从 ~15 抬到接近 Release 的
+# ~50 FPS（与 build/ 对齐）。
 # 折中方案（hybrid debug）：aurora 库与第三方库 -O3，demo/测试等消费者目标仍按 -O0 编译，
 # 保证你能在自己的 demo 代码里正常单步/断点，而库内光栅热点与第三方文本光栅得到优化。
 # 注：freetype 在 Debug 下的逻辑 target 仍为 `freetype`（输出名 libfreetyped.a，带 debug postfix），

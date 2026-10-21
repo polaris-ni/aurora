@@ -403,7 +403,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 | HUD-only 帧 | 无脏、尺寸未变，但叠加层到期且软件缓冲可复用 | 是（仅合成新 HUD） | true |
 | 完整渲染 | 有脏 / 布局脏 / 尺寸变化 / 根变化 / 系统重绘 / GPU 路径下叠加层到期 | 是 | false |
 
-空闲期两种场景（无叠加层的事件驱动深睡、叠加层可见的每 500 ms 一帧）的实测基线与复现步骤见 [`specification/08-tooling.md`](specification/08-tooling.md) §7.4.1（口径、基线与复现）与人工用例 [`manual-test/17-perf.md`](manual-test/17-perf.md)（TC-PERF-006 覆盖无叠加层、TC-PERF-008 覆盖叠加层可见）。
+空闲期两种场景（无叠加层的事件驱动深睡、叠加层可见的每 500 ms 一帧）的实测基线与复现步骤见 [`specification/08-tooling.md`](specification/08-tooling.md) §7.4.1（口径、基线与复现）与人工用例 [`manual-test/17-perf.md`](manual-test/17-perf.md)（TC-PERF-006 覆盖无叠加层；叠加层可见原由 TC-PERF-008 覆盖，其载具退役后改由集成用例 `itest_perf_overlay_refresh` 承担）。
 
 ### 10.5 硬约束
 

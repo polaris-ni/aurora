@@ -236,9 +236,10 @@ auto ScrollBenchHarness::run(Node root, Size viewport, const Config &cfg) -> Res
     // 落定阶段：不滚动、只空转帧，等骨架屏 / 入场动画 / 延迟内容全部就位。
     //
     // 判据取「连续无脏」**或**「墙钟达标」，两者都算正常落定。只认前者是错的：
-    // `demo_google_play` 的 BannerCarousel 每帧 `mark_needs_paint` 自驱动轮播，这类树
-    // 原理上永远不会 idle，硬等 idle 只会等到上限然后误报「未收敛」。骨架屏究竟退没
-    // 退场，改由采样前后的行程复测（`geometry_stable()`）事后证伪，不在这里猜。
+    // `app` 场景首屏的 AppBannerCarousel 按墙钟自驱动轮播，过渡期间每帧
+    // `mark_needs_paint`，这类树原理上永远不会 idle，硬等 idle 只会等到上限然后
+    // 误报「未收敛」。骨架屏 / 入场动画究竟退没退场，改由采样前后的行程复测
+    // （`geometry_stable()`）事后证伪，不在这里猜。
     if (cfg.settle_ms > 0.0) {
         const Stopwatch settle_sw;
         int consecutive_idle = 0;

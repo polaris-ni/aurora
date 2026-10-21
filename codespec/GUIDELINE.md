@@ -393,12 +393,12 @@ cmake --build build --target bench_render
 ```bash
 cmake --build build --target bench_scroll
 # 时间口径（Release + PROFILING=OFF）：独立进程多次取最小，抵消离屏缓冲堆碎片噪声
-for i in 1 2 3; do ./build/bench_scroll.exe --scene google_play --format csv; done
+for i in 1 2 3; do ./build/bench_scroll.exe --scene app --format csv; done
 
 # 计数口径（Release + PROFILING=ON）：确定性，可直接锁基线
 cmake -S . -B build-prof -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_PROFILING=ON
 cmake --build build-prof --target bench_scroll
-./build-prof/bench_scroll.exe --scene google_play --format csv
+./build-prof/bench_scroll.exe --scene app --format csv
 ```
 
 **在代码里直接用 `ScrollBenchHarness` 做自证采样**（先查 `trustworthy()` 再读性能指标）：

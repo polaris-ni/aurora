@@ -148,7 +148,7 @@
 | `clipboard.h` | 无独立载体；真实系统剪贴板路径由 TC-APP-012 经 `demo_rich_text_edit` 的 Ctrl+C / Ctrl+X / Ctrl+V 覆盖，进程内语义由内存测试后端全覆盖 | `tests/unit/utest_clipboard.cpp` |
 | `file_dialog.h` `ui_prompt.h` `validate_ui.h` | 弹出真实系统对话框/提示，属 GUI 交互，项目约定不引入 GUI 交互测试；`file_dialog` 的 headless 钩子与取消路径由单测覆盖 | `tests/unit/utest_file_dialog.cpp` |
 | `validate.h` `generate_ui.h` | UI 树校验与代码生成语义由 `aurora_cli` 的 `validate` / `to-code` 子命令与 golden 基准覆盖 | `tests/golden/`；另见 `codespec/manual-test/11-widget.md` |
-| `shortcuts.h` | 键组合匹配语义由单测全覆盖；端到端按键派发已作为 `codespec/manual-test/21-debug.md` 的载体出现 | `tests/unit/utest_shortcuts.cpp` |
+| `shortcuts.h` | 键组合匹配语义由单测全覆盖；端到端按键派发的人工覆盖原以调试载体模块承担，该模块随载体退役取消 | `tests/unit/utest_shortcuts.cpp` |
 | `scene.h` `window_host.h` `window_geometry.h` `display.h` | 结构与几何模型，可观测行为已由 window 模块文档覆盖；多显示器迁移在本机单显示器环境不可复现（载体明确日志 `single display; nothing to move to`） | `codespec/manual-test/10-window.md` |
 | `menu.h` | `MenuItem` 语义（含分隔符）由单测覆盖；其端到端表现由托盘用例 TC-APP-011 在真实通知区域观察 | `tests/unit/utest_system_tray.cpp` |
 | `perf_overlay.h` | 叠层绘制与性能门禁由 perf 模块文档覆盖 | `codespec/manual-test/17-perf.md` |

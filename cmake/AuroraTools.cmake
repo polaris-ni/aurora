@@ -282,10 +282,9 @@ endif ()
 aurora_add_tool(bench_render tools/bench/bench_render.cpp)
 
 # 滚动基准：ScrollBenchHarness 在 Headless 下跑确定性滚动序列，产出 §7 基线。
-# 需要 examples/app/google_play 的头（google_play_ui.h）——基线口径规定打在真实业务树上而非合成树；
-# 该头 header-only 且随仓库分发，不引入额外构建依赖。
+# app 场景（自包含于 bench_scroll.cpp，复刻真实商店首页形态）即 §7 的滚动基线口径载体，
+# 不依赖 examples/ 下任何 fixture 头；synthetic 为无应用形态的对照组。
 aurora_add_tool(bench_scroll tools/bench/bench_scroll.cpp)
-target_include_directories(bench_scroll PRIVATE "${AURORA_SOURCE_DIR}/examples/app/google_play")
 
 # Win32 上屏诊断基准：拆分拖选帧的 paint / GDI blit 成本（非 CTest；无 Win32 后端时直接跳过）。
 aurora_add_tool(bench_win32_present tools/bench/bench_win32_present.cpp)

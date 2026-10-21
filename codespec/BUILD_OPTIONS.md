@@ -499,7 +499,7 @@ python tools/check/run_clang_tidy.py --build-dir build --tu-list build/lint-sele
 
 判定依据是**编译库自身的 include 闭包**（对每条编译命令跑一次 `-MM`），不是构建图：
 
-> `ninja -t deps` 只认**已经构建过**的目标，而 demos 是 `EXCLUDE_FROM_ALL`——它们不在构建图里， 却实实在在在编译库里、也实实在在会因为改一个公共头而产生新告警。本机实测：`keycode.h` 的 一条 `readability-string-compare` 正是从 `examples/app/google_play/demo_google_play.cpp` 这个 TU 报出来的，按构建图选集会正好漏掉它。
+> `ninja -t deps` 只认**已经构建过**的目标，而 demos 是 `EXCLUDE_FROM_ALL`——它们不在构建图里， 却实实在在在编译库里、也实实在在会因为改一个公共头而产生新告警。本机实测：`keycode.h` 的 一条 `readability-string-compare` 正是从应用级 demo（已退役的 `demo_google_play.cpp`）这个 TU 报出来的，按构建图选集会正好漏掉它。
 
 三条「宁可多选、不可漏选」的兜底：① 取依赖失败（超时 / 编译器缺失 / 不支持 `-MM`）的 TU 一律 入选；② 改动里出现**已不存在**的文件（删头，删后闭包算不出来）→ 退化为全量；③ 改动命中 「全局配置」（`.clang-tidy`、`compile_flags.txt`、CMake 模块、本脚本与 runner 自身）→ 退化为 全量，因为这类文件改的是**分析口径本身**，选任何子集都是错的。 反向守卫是脚本唯一会以退出码 2 失败的情形：**改动里存在本编译库认得的 C/C++ 文件，却一个 TU 都没选中**——逻辑上不可能，一旦发生说明选集链路坏了，不能让它以「0 待跑」的形态流进 CI。 本机实测口径：556 TU 的编译库做一轮依赖探测 ~22 秒（8 并行）；该批改动（10 个 C/C++ 文件） 选中 184 个 TU（33%）。
 
@@ -735,7 +735,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `AURORA_BACKEND_*` | `target_compile_definitions(aurora PUBLIC …)` | 由 §3 开关控制 | 后端 feature 宏（HEADLESS 除外，见下行） |
 | `AURORA_BACKEND_HEADLESS` | `aurora_define_feature(AURORA_BACKEND_HEADLESS EXPORT)`（无条件） | 恒注入 | 无头内存 / PNG 后端**恒编入、无开关**：测试套件与像素读回回退路径以 `HeadlessSurface` 为基底（大量测试 TU 直接引用），关闭它不存在受支持的构建组合，故不再提供选项。宏随安装导出，消费端与库同 ODR 口径 |
 
-除宏定义外，`aurora_setup_consumer_target`（`cmake/AuroraUtils.cmake`）在 **MinGW** 下对全部消费者目标（demo / 测试 / 工具）追加 `-Wa,-mbig-obj`：MinGW 汇编器的 COFF 目标文件默认段数上限 65535 会被 Debug（`-g`）下的超大消费者 TU 击穿（实测 `demo_google_play.cpp` 达 33614 段，报 "too many sections" / "file too big"），该标志把上限放宽到 2^32 段，产物仍为标准 COFF，对链接器透明；MSVC / clang-cl 的汇编器无此上限，不注入。`AURORA_ENABLE_COVERAGE` 的 GCC 分支出于同一原因亦注入（见 §4 约束）。
+除宏定义外，`aurora_setup_consumer_target`（`cmake/AuroraUtils.cmake`）在 **MinGW** 下对全部消费者目标（demo / 测试 / 工具）追加 `-Wa,-mbig-obj`：MinGW 汇编器的 COFF 目标文件默认段数上限 65535 会被 Debug（`-g`）下的超大消费者 TU 击穿（实测已退役的 `demo_google_play.cpp` 达 33614 段，报 "too many sections" / "file too big"），该标志把上限放宽到 2^32 段，产物仍为标准 COFF，对链接器透明；MSVC / clang-cl 的汇编器无此上限，不注入。`AURORA_ENABLE_COVERAGE` 的 GCC 分支出于同一原因亦注入（见 §4 约束）。
 
 ---
 

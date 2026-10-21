@@ -209,7 +209,7 @@ if (AURORA_BUILD_TESTS)
             "Watchdog timeout (ms) injected via --timeout for etest_ (real backend) cases")
 
     # runner 目标统一配置（分片共享）：链接 aurora + C++20 + 消费者 PCH + 告警；
-    # tests/ 供框架头解析，examples/app/google_play 供 google_play_data/ui 数据层测试，
+    # tests/ 供框架头解析，
     # examples/demos 供 E2E 用例包含与 demo 同源的场景头（scenes/*.h）；
     # tools/include 复用 known_enums.h 等 SSOT，tests/support 为测试公共设施；
     # tools/servers 供 header-only 的工具侧客户端（inspector_client.h）被真代码单测——
@@ -219,7 +219,6 @@ if (AURORA_BUILD_TESTS)
     function(_aurora_configure_runner tgt)
         aurora_setup_consumer_target(${tgt}
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-                "${CMAKE_CURRENT_SOURCE_DIR}/examples/app/google_play"
                 "${CMAKE_CURRENT_SOURCE_DIR}/examples/demos")
         target_include_directories(${tgt} PRIVATE
                 "${AURORA_SOURCE_DIR}/tools/include"

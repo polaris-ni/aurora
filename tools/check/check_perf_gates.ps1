@@ -34,7 +34,7 @@
 .PARAMETER BuildDir
   Release + PROFILING=OFF build dir containing the bench executables (default "build").
 .PARAMETER Scene
-  bench_scroll scene (default "google_play"); "synthetic" also available.
+  bench_scroll scene (default "app"); "synthetic" / "lazy" / "grid" also available.
 .PARAMETER Repeat
   Number of independent bench_scroll process samples; takes the lowest p99 (default 3).
 .PARAMETER ProfilingBuild
@@ -43,11 +43,11 @@
 
 .EXAMPLE
   pwsh tools/check/check_perf_gates.ps1
-  pwsh tools/check/check_perf_gates.ps1 -BuildDir build -Scene google_play -Repeat 3 -ProfilingBuild build-prof
+  pwsh tools/check/check_perf_gates.ps1 -BuildDir build -Scene app -Repeat 3 -ProfilingBuild build-prof
 #>
 param(
     [string]$BuildDir = "build",
-    [string]$Scene = "google_play",
+    [string]$Scene = "app",
     [int]$Repeat = 3,
     [string]$ProfilingBuild = ""
 )

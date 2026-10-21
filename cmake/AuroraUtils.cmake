@@ -43,7 +43,7 @@ function(aurora_setup_consumer_target _tgt)
 
     # MinGW 的 COFF 目标文件默认段数上限（65535）会被超大消费者 TU 在 Debug（-g + 大量
     # 模板/内联实体的 header-only 控件）下击穿，汇编器报 "too many sections" / "file too big"
-    #（实测 examples/app/google_play/demo_google_play.cpp 达 33614 段）。
+    #（实测最大的消费者 TU 达 33614 段——此前为已退役的应用级 demo）。
     # -Wa,-mbig-obj 把上限放宽到 2^32 段，对象仍是标准 COFF，对链接器与其他平台透明。
     # 与 AURORA_ENABLE_COVERAGE（AuroraInstrumentation.cmake）同口径，此处覆盖 demo / 测试 / 工具
     # 全部消费者目标；MSVC / clang-cl 的汇编器无此限制，不加。

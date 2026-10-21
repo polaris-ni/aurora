@@ -537,7 +537,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `aurora_cli` | `tools/servers/aurora_cli.cpp` | CLI 工具链，见 §7.2 |
 | `aurora_lsp` | `tools/servers/aurora_lsp.cpp` | LSP 语言服务，见 §7.3 |
 | `bench_render` | `tools/bench/bench_render.cpp` | 渲染基准（HeadlessSurface + Painter 计时，非 CTest 断言） |
-| `bench_scroll` | `tools/bench/bench_scroll.cpp` | 滚动基准（确定性滚动序列，依赖 google_play 头） |
+| `bench_scroll` | `tools/bench/bench_scroll.cpp` | 滚动基准（确定性滚动序列；`app` 场景为自包含应用形态负载，`synthetic` 为对照组，`lazy` / `grid` 为隔离场景） |
 | `bench_win32_present` | `tools/bench/bench_win32_present.cpp` | Win32 上屏诊断基准（无 Win32 后端时跳过） |
 | `bench_idle_cpu` | `tools/bench/bench_idle_cpu.cpp` | 空闲 CPU 基准（无 Win32 后端时跳过） |
 
@@ -560,7 +560,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 | 项 | 无叠加层 | 叠加层可见 |
 |:---|:---|:---|
-| 载具 | `bench_idle_cpu` | `examples/app/google_play/demo_google_play.cpp` |
+| 载具 | `bench_idle_cpu` | 已移除：原 `demo_google_play.cpp`（该 demo 退役时一并移除；叠加层刷新语义由 `tests/integration/itest_perf_overlay_refresh` 自动化覆盖） |
 | 后端 | Win32 软件渲染（`AURORA_BACKEND_WIN32`） | 同左 |
 | 构建 | `build/` | `build-inspector/`（调试开启 + Inspector 服务开启） |
 | 帧率上限 | 默认（60） | `opts.max_fps = 60` |
@@ -577,7 +577,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 - 门槛与判定由 `bench_idle_cpu` 自身给出（空闲 < 5%；旧实现忙轮询时该值会顶到约 100%）。活跃场景同次实测为 CPU 6.7%、帧率 35.8（被夹在 60 附近），PASS。
 - 该场景**未挂叠加层** ⇒ 不触发 HUD-only 帧（态 ②），因而空闲帧语义的改动对它无影响；改动后已实测复验通过。
 
-**叠加层可见：每 500 ms 一帧**（人工用例见 [`../manual-test/17-perf.md](../manual-test/17-perf.md) TC-PERF-008）：
+**叠加层可见：每 500 ms 一帧**（人工用例 TC-PERF-008 随其载具 `demo_google_play` 退役而移除；当前由集成用例 `tests/integration/itest_perf_overlay_refresh.cpp` 覆盖。以下为退役前实测，仅作口径参照）：
 
 | 观测 | 值 |
 |:---|:---|
@@ -599,15 +599,15 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 1. 构建基准：`cmake --build build --target bench_idle_cpu`。
 2. 直接运行该基准，读它打印的两行结果与 PASS / FAIL：空闲场景要求 CPU 占比 < 5%，活跃场景要求帧率被夹在 60 附近。
 
-叠加层可见（基准族未覆盖此场景，需自建观测）：
+叠加层可见（原需自建观测；载具 `demo_google_play` 已退役，本组数字为退役前实测，仅供口径参照，复验改走 `itest_perf_overlay_refresh`）：
 
-1. 构建调试开启 + Inspector 服务开启的构建目录，得到载具 `demo_google_play`。
+1. 退役前口径：构建调试开启 + Inspector 服务开启的构建目录，得到载具 `demo_google_play`。
 2. 以分离进程方式启动载具，并把标准输出重定向到文件（载具的帧率摘要行经 `AURORA_LOG_RAW` 输出，即标准输出；标准错误恒为空）。
 3. 间隔数秒两次采样该进程的 CPU 时间，跳过启动阶段，按上方口径计算占比。
 4. 结束进程后读回输出文件：统计 `idle` 计数的逐秒增量与 `(stale)` 出现的行数。
 5. 确认该载具进程已退出，避免占用目标导致下一次重编报占用错误。
 
-> 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述。**尚未纳入 CI 门禁**：时间类门槛历史上只作本地趋势对照（见 `tools/check/perf_gates.json` 的 `source` 字段），若要新增门槛，需先固定载具、采样窗口与判定阈值。另：叠加层空闲场景此前只有自动化用例覆盖，人工用例 TC-PERF-008 已补齐。
+> 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述。**尚未纳入 CI 门禁**：时间类门槛历史上只作本地趋势对照（见 `tools/check/perf_gates.json` 的 `source` 字段），若要新增门槛，需先固定载具、采样窗口与判定阈值。另：叠加层空闲场景的自动覆盖由 `tests/integration/itest_perf_overlay_refresh.cpp` 承担（原人工用例 TC-PERF-008 随载具退役移除）。
 
 ### 7.5 真机验收探针（`tools/verify/`）
 

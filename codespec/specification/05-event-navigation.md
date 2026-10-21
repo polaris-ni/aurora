@@ -56,7 +56,7 @@ struct Event {
 
 **跨后端产出不一致（平台事实，非疏漏）**：`KP_0`–`KP_9` 与运算键（`KP_Add` / `KP_Subtract` / `KP_Multiply` / `KP_Divide` / `KP_Decimal` / `KP_Separator`）三后端齐备；`KP_Insert` / `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` **只有 X11 / Wayland 后端产出**（X11 的 KP_* keysym 与主键各占独立码点，天然可分）。Win32 在导航区把两边**共用同一组虚拟键码**，实测六个键里只有 `Home` 真的可分（主键盘扫描码 `0x47` / 小键盘 `E0 4E`）——`End` / `PgUp` / `PgDn` 两边的 (VK, scan, extended) 完全相同或仅 extended 位不同（主键盘 PgUp / PgDn 本身就带 E0 前缀），把「带 E0」当成「来自小键盘」会**误判主键盘那两个键**，误判比不判更糟，故判据保守到只认 Home。GLFW 的键码表本身没有 `GLFW_KEY_KP_INSERT` / `_HOME` 之类的常量，同样无法区分。**故消费方在 Win32 与 GLFW 上不能假定这几项一定命中**，需要时应按平台兜底。判据本体在 `src/aurora/window/detail/win32_keymap.h` 的 `is_numpad_nav_scan`（含完整实测对照表）与 `src/aurora/window/keysym_map.h`，均有单测逐值锁定。GLFW 侧的键码表自 `glfw_surface.cpp` 的 `static` 函数抽到可单测内部头 `src/aurora/window/detail/glfw_keymap.h`（与 `win32_keymap.h` 对称）：此前「四后端键码一致」这条契约在 Win32 与 X11 / Wayland 两配置都有 CTest 断言，唯独 GLFW 配置没有，错位只能等真机才显形。
 
-**修饰键语义（`KeyEvent::modifiers`）= 队列相对，而非派发时刻的物理读数**：宿主按键盘消息流推进一份修饰位状态（Win32 侧为 `src/aurora/window/detail/win32_modifiers.h` 的 `ModifierKeyTracker`），`KeyEvent` 携带的是「该键在队列里被处理的那一刻」的修饰态。取此口径的理由：在派发时刻异步采样（`GetAsyncKeyState`）会让热键命中与否取决于「消息被泵到之前修饰键是否仍按着」，于是 UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时按键**静默**丢失（同载体同形态实测 0/10，见 `manual-test/21-debug.md` TC-DEBUG-004 备注）。三条配套边界：
+**修饰键语义（`KeyEvent::modifiers`）= 队列相对，而非派发时刻的物理读数**：宿主按键盘消息流推进一份修饰位状态（Win32 侧为 `src/aurora/window/detail/win32_modifiers.h` 的 `ModifierKeyTracker`），`KeyEvent` 携带的是「该键在队列里被处理的那一刻」的修饰态。取此口径的理由：在派发时刻异步采样（`GetAsyncKeyState`）会让热键命中与否取决于「消息被泵到之前修饰键是否仍按着」，于是 UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时按键**静默**丢失（同载体同形态实测 0/10；该观测出自已退役调试载体的人工用例 TC-DEBUG-004，实测结论保留为设计依据）。三条配套边界：
 
 - **左右归并**：`VK_LSHIFT` / `VK_RSHIFT` / `VK_SHIFT` 折到同一位，使不配对的变体（注入或布局按下给 L 变体、抬起给通用码）不残留幻影；代价是同位上任一变体抬起即清位。
 - **失焦清空、激活播种**：`WM_ACTIVATE` 转非激活与 `WM_KILLFOCUS` 整体清零（未送达的抬起消息不可追），重新取得激活时用一次异步读数播种基线（覆盖「Alt+Tab 切进来时 Alt 已按下」）。因此修饰键**只在持有键盘焦点的那个窗口内计数**——非前台窗口上的物理 Ctrl 不再被别的窗口借读，这恰是 Windows 自身的键盘语义。
@@ -107,7 +107,7 @@ struct Event {
 **两种被明确否决的做法**（不要实现，后果都是「看起来能跑、实则静默错」）：
 
 - ❌ **在派发器里用「最后一次 `KeyEvent` 的 `modifiers` 快照」兜底**。修饰键的按下事件可能根本不属于本窗口：`Alt+Tab` 切进来时按住的 Alt，其按下消息投给了别的窗口，本窗口的快照必然错。快照兜底在单窗口快速操作下看起来是对的，只在跨窗口切换时失效——正是最难复现的一类。
-- ❌ **在派发时刻现场轮询物理按键态**（Win32 的 `GetAsyncKeyState` 一类）。指针事件同属消息驱动，从消息进队列到派发可能已晚于一帧；UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时修饰键早已抬起，热键/手势**静默**丢失（同载体同形态实测 0/10，见 `manual-test/21-debug.md` TC-DEBUG-004 备注）。
+- ❌ **在派发时刻现场轮询物理按键态**（Win32 的 `GetAsyncKeyState` 一类）。指针事件同属消息驱动，从消息进队列到派发可能已晚于一帧；UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时修饰键早已抬起，热键/手势**静默**丢失（同载体同形态实测 0/10；该观测出自已退役调试载体的人工用例 TC-DEBUG-004，实测结论保留为设计依据）。
 
 **逐后端真值源**（每条路径只允许一个来源；同一字段两个真值源会在两个来源分歧时静默错位）：
 
