@@ -677,7 +677,11 @@ unity 是本机环境下的主导旋钮：单个 TU 的固定成本（伞头解�
 
 单文件迭代（同条件，触碰一个用例文件后增量构建，ninja log 实测）：非 unity 只重编该 TU——`utest_button.cpp` 触碰增量约 4.5 s（`-O1`；全量构建内约 18.3 s，`-O3` 约 19.1 s）；unity batch 16 重编其所在 16 文件批次，含该文件的批次约 34 s（全量构建内 92 s，随并发波动）——单文件迭代约慢 5–8 倍。批次大小就是「全量收益 ÷ 迭代惩罚」的权衡旋钮，`-DAURORA_UNITY_BATCH_SIZE=8` 两者各折半。
 
-**ODR 冲突源排除**：库内 `src/aurora/net/` 多文件在匿名命名空间重名（`protocol_error` / `trim_ows` / `decimal` / `to_lower_ascii` / `ascii_lower` 等）且 `detail` 命名空间按文件重组，`src/aurora/perf/profiler.cpp` 与 `perf_session.cpp` 重名 `same_zone_name`——这些文件经 `aurora_unity_exclude()` 标记 `SKIP_UNITY_BUILD_INCLUSION`（CMake 4.4 起对普通源文件生效）**独立编译，与关闭 unity 时逐字节相同**，其余 TU 照常合并。测试目录经全量单 TU 探针验证零冲突，无需排除。新增源文件若引入同类冲突，unity 构建会以重定义错误显式失败——把文件加进 `CMakeLists.txt` 的排除列表即可（不需要时为纯净收益）。
+**ODR 冲突源排除**：合并进同一 unity TU 会重定义的文件经 `aurora_unity_exclude()` 标记 `SKIP_UNITY_BUILD_INCLUSION`（CMake 4.4 起对普通源文件生效）**独立编译，与关闭 unity 时逐字节相同**，其余 TU 照常合并。已知冲突源：
+- `src/aurora/net/` 多文件在匿名命名空间重名（`protocol_error` / `trim_ows` / `decimal` / `to_lower_ascii` / `ascii_lower` 等）且 `detail` 命名空间按文件重组；
+- `src/aurora/perf/profiler.cpp` 与 `perf_session.cpp` 重名 `same_zone_name`；
+- 成对实现文件在各自匿名命名空间定义同名符号（两个语义不同的后端 / RHI 各自实现）：`app/os_hotkey.cpp` 与 `app/clipboard.cpp` 的 `test_backend()` / `TestBackend*`、`render/gpu/gpu_gl_rhi.cpp` 与 `render/gpu/wgpu_rhi.cpp` 的 `Vertex` / `VSOut` / `sample_gradient_lut` / `hex_u32` / `AURORA_MSAA_*` 等、`window/d3d11_surface.cpp` 的 `VSOut` 与 `wgpu_rhi.cpp` 冲突、`webview/engine_webkitgtk.cpp` 与 `engine_webview2.cpp` 的 `PendingEval` / `PendingCapture`、`webview/engine_null.cpp` 的 `NullEngine` 与 `net/engine.cpp`（已由 `net/*.cpp` 排除）冲突——典型报错 `redefinition of struct Vertex` / `ambiguating new declaration of test_backend()`。
+判定方法：全库扫描匿名命名空间内跨文件同名定义（类型 / constexpr·const 变量 / 函数），逐一排除冲突对——**不依赖 batch 边界运气**：之前本地 unity 全绿只是 batch 分组恰好避开冲突对、CI 上分组不同即撞，故凡发现跨文件同名匿名定义的文件对都整对排除。测试目录经全量单 TU 探针验证零冲突，无需排除。新增源文件若引入同类冲突，unity 构建会以重定义错误显式失败——把文件加进 `CMakeLists.txt` 的排除列表即可（不需要时为纯净收益）。
 
 **极性判定（clang-tidy 门禁）**：`AURORA_ENABLE_CLANG_TIDY` 默认 `ON`，其 cache 项在**首次 configure 后即存在**；若按「clang-tidy 当前值」直接判定，普通构建目录的任何一次 reconfigure（glob verify / cmake 文件变更）都会把 unity 悄悄关掉（首次 configure 时 `option()` 尚未运行、项不存在故放行，之后恒存在故拦截）。故判据是「**clang-tidy 开 且 用户未显式开 unity** 才跳过」：`AURORA_UNITY_BUILD=ON` 由 `-D` 持久进 cache，用户意图跨 reconfigure 稳定；CI lint 作业（`-DAURORA_ENABLE_CLANG_TIDY=ON`、不带 unity）因此恒得真实 TU 路径——lint 从 `compile_commands.json` 取 TU 清单，unity 下清单会变成构建目录里的生成文件，按路径的排除名单 / 分片 / `--git-diff` 挑选全部失真。显式同时开两者时以用户意图为准（lint 将看到 unity TU，属已知取舍）。
 

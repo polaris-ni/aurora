@@ -249,7 +249,23 @@ aurora_apply_unity(aurora)
 # 照常合并。判定方法：全库单 TU 探针编译（test_temp/unity_probe_lib*.cpp）。
 if (AURORA_UNITY_BUILD)
     aurora_unity_exclude("${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/net/*.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/perf/profiler.cpp")
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/perf/profiler.cpp"
+            # 成对实现文件在各自匿名命名空间定义同名符号，合并进同一 unity TU
+            # 即 ODR 冲突（重名来源见下，独立编译与关闭 unity 时逐字节相同）：
+            #  - app：os_hotkey.cpp / clipboard.cpp 的 test_backend() + TestBackend*
+            #  - gpu RHI：gpu_gl_rhi.cpp / wgpu_rhi.cpp 的 Vertex / VSOut /
+            #    sample_gradient_lut / hex_u32 / AURORA_MSAA_* 等（两个 RHI 各自实现）
+            #  - d3d11：d3d11_surface.cpp 的 VSOut 与 wgpu_rhi.cpp 冲突
+            #  - webview：engine_webkitgtk.cpp / engine_webview2.cpp 的 PendingEval /
+            #    PendingCapture；engine_null.cpp 的 NullEngine 与 net/engine.cpp 冲突
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/os_hotkey.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/clipboard.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/render/gpu/gpu_gl_rhi.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/render/gpu/wgpu_rhi.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/d3d11_surface.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/webview/engine_webkitgtk.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/webview/engine_webview2.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/webview/engine_null.cpp")
 endif ()
 # 版本常量注入：project(VERSION) + AURORA_VERSION_SUFFIX → version.h 的
 # AURORA_VERSION_* / AURORA_VERSION_STRING（PUBLIC：消费者与测试同源取值）。
