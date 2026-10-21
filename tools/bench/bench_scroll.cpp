@@ -593,6 +593,10 @@ class AppCellLeaf : public au::LeafWidget {
         au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 0.0F});
     for (int i = 0; i < AURORA_APP_RECO_VISIBLE; ++i) {
         const BenchReco &data = (*recos)[static_cast<std::size_t>(i)];  // NOLINT(*-redundant-parentheses)
+        // 绘制回调经 Canvas 转入 std::function 后，分析器无法证明其不抛；wasm 口径
+        // （libc++）另判 substr 可能抛出。bench 数据下标恒在界内（确定性环绕表），
+        // 与 bench_render / bench_gpu / bench_idle_cpu 同口径豁免。
+        // NOLINTNEXTLINE(bugprone-exception-escape)
         auto thumb = std::make_shared<au::Canvas>(96.0F, 96.0F, [data, th](au::Painter &p, const au::Rect &b) -> void {
             p.fill_rounded_rect(b, 14.0F, data.tile_a);
             p.draw_linear_gradient(b, b.origin, au::Point{.x = b.origin.x, .y = b.origin.y + b.size.height},
