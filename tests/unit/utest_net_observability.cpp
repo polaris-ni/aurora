@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -342,6 +343,11 @@ AURORA_TEST_CASE(timeline_of_returns_newest_hop_including_in_flight) {
     second.mark(HttpStage::Connect);
 
     // 同一链路：`timeline_of` 取 exchange_id 最大的一跳，在途也照取（不能因未收摊就跳过它）。
+    // 先让出一个可分辨的间隔再查：在途条目的 `total` 是「现在 - 起手」按微秒**截断**的
+    // 口径，构造到查询若不足 1µs（热缓存单进程下完全可能——套件内重复实测约四成命中，
+    // CI 全套单进程跑过一次即红灯），`total` 截断成 0：那不是「没算」而是口径不可分辨。
+    // 睡 2ms 后恒为毫秒级，`> 0` 才是对「在途也算 total」的确定性断言。
+    std::this_thread::sleep_for(std::chrono::milliseconds{2});
     auto latest = require_value(timeline_of("rid-latest"));
     AURORA_TEST_CHECK_EQ(latest.exchange_id, second.id());
     AURORA_TEST_CHECK_EQ(latest.hop, static_cast<std::uint16_t>(1));
