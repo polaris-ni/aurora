@@ -335,6 +335,9 @@ class FilePickerSession {
 ///        供无头用例在 `on_frame_` 里脚本化触发确认 / 取消（`run_modal` 循环内）。
 /// @return 观察者引用（测试装配后须清空，避免污染同进程后续用例）。
 [[nodiscard]] inline auto &session_observer() {
+    // 测试接缝：函数内 static 惰性初始化（首次调用才构造，无模块加载期副作用）。仅 libc++
+    // （Emscripten）的 std::function 默认构造非 constexpr，故动态初始化告警只在该口径下触发。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static std::function<void(FilePickerView &)> observer;
     return observer;
 }
