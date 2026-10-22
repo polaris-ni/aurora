@@ -189,6 +189,7 @@ struct GlfwSurface::Impl {
     Impl(Impl &&) = delete;
     auto operator=(Impl &&) -> Impl & = delete;
 
+    auto set_window_mode(WindowMode m) -> void;
     auto begin_frame(int width, int height) -> Result<bool>;
     auto painter() -> Painter & { return painter_impl; }
     auto present() -> Result<bool>;
@@ -484,6 +485,30 @@ auto GlfwSurface::set_cursor(CursorShape shape) -> void {
     glfwSetCursor(pimpl_->window, handle);
 }
 
+auto GlfwSurface::Impl::set_window_mode(WindowMode m) -> void {
+    if (window == nullptr) {
+        return;
+    }
+    // glfw*Window 系列是请求语义：iconify/maximize/restore 回调回来后再定档上报
+    // （compute_window_mode → notify_window_mode），与 Wayland configure 同构。
+    switch (m) {
+        case WindowMode::Normal:
+            glfwRestoreWindow(window);
+            break;
+        case WindowMode::Maximized:
+            glfwMaximizeWindow(window);
+            break;
+        case WindowMode::Minimized:
+            glfwIconifyWindow(window);
+            break;
+        case WindowMode::FullScreen:
+            // 本后端无 monitor 切换通道（glfwSetWindowMonitor 会改视频模式，超出本批范围）：
+            // 留痕，不装懂。
+            AURORA_LOG_WARN("window", "GlfwSurface::set_window_mode: FullScreen is not implemented on this backend");
+            break;
+    }
+}
+
 auto GlfwSurface::Impl::begin_frame(int width, int height) -> Result<bool> {
     // 软件帧缓冲按**物理**分辨率分配，几何绘制把 dp 坐标 × scale，1:1 贴窗口避免发虚——
     // 与 Win32Surface / D3D11Surface / X11 / Wayland 同一模型。落地只需一次
@@ -760,6 +785,12 @@ auto GlfwSurface::set_window_state_handler(WindowStateHandler h) -> void {
     pimpl_->window_state_handler = std::move(h);
 }
 auto GlfwSurface::set_window_mode_handler(WindowModeHandler h) -> void { pimpl_->window_mode_handler = std::move(h); }
+
+auto GlfwSurface::set_window_mode(WindowMode m) -> void {
+    if (pimpl_ != nullptr) {
+        pimpl_->set_window_mode(m);
+    }
+}
 auto GlfwSurface::set_scale_change_handler(ScaleChangeHandler h) -> void {
     pimpl_->scale_change_handler = std::move(h);
 }

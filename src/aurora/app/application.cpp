@@ -30,15 +30,57 @@ auto capture_host_geometry(const WindowHost &host) -> WindowGeometry {
     return g;
 }
 
+/// @brief 目标显示器是否仍在（几何态降级判定用）。
+/// @param display_id 快照记录的显示器 id；负值 = 未声明（非 Win32 后端恒 -1），不参与判定。
+/// @return 当前显示器列表里存在该 id 时 true。
+auto display_still_present(int display_id) -> bool {
+    if (display_id < 0) {
+        return true;  // 未声明显示器：无可核验，按仍在处理
+    }
+    for (const Display &d : app::list_displays()) {
+        if (d.id == display_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// @brief 把几何快照应用到宿主（物理像素 → 当前 DPI 的逻辑 dp 后下发）。
-auto apply_host_geometry(WindowHost &host, const WindowGeometry &g) -> void {
+///
+/// **写读对称**：除位置与尺寸外，落盘的几何态 `mode` 也在此消费——经幂等原语
+/// `Surface::set_window_mode` 追回桌面（保存腿与序列化腿自引入起就写 `mode`，
+/// 缺的只是这一条消费点）。三条口径：
+/// - `Minimized` 恢复为 `Normal`（写死的政策）：启动即看不见；且 `Minimized` 与
+///   `WindowState::Hidden` 耦合，而恢复腿没有设置 `WindowState` 的通道，硬恢复会制造
+///   「快照说最小化、可见性说可见」的分裂。留一条 INFO（用户最小化是合法操作，不是异常）；
+/// - 显示器不在 ⇒ 几何态归 `Normal` + WARN（尺寸位置照常恢复：物理坐标相交就摆得回）。
+///   `is_window_geometry_usable` 不看 `display_id`（宽松口径），故此处补判；
+/// - `Maximized` / `FullScreen` **只追几何态，位置与尺寸都不下发**：那两档的位置由
+///   OS / compositor 摆放，下发既无意义也可能触发多余的 `SetWindowPos` / configure。
+///
+/// @param host 目标宿主。
+/// @param g 几何快照（已过 `is_window_geometry_usable` 判定）。
+/// @param key 持久化键（日志归因用）。
+auto apply_host_geometry(WindowHost &host, const WindowGeometry &g, const std::string &key) -> void {
     if (!host.has_window()) {
         return;
     }
     Surface &sf = host.window()->surface();
-    const float scale = sf.scale_factor() > 0.0F ? sf.scale_factor() : 1.0F;
-    sf.set_size(Size{.width = g.size.width / scale, .height = g.size.height / scale});
-    sf.set_position(g.origin);
+    WindowMode mode = g.mode;
+    if (mode == WindowMode::Minimized) {
+        AURORA_LOG_INFO("app", "stored window mode is Minimized; restoring as Normal (key=" + key + ")");
+        mode = WindowMode::Normal;
+    }
+    if (mode != WindowMode::Normal && !display_still_present(g.display_id)) {
+        AURORA_LOG_WARN("app", "stored window display is gone; restoring as Normal (key=" + key + ")");
+        mode = WindowMode::Normal;
+    }
+    sf.set_window_mode(mode);
+    if (mode == WindowMode::Normal) {
+        const float scale = sf.scale_factor() > 0.0F ? sf.scale_factor() : 1.0F;
+        sf.set_size(Size{.width = g.size.width / scale, .height = g.size.height / scale});
+        sf.set_position(g.origin);
+    }
 }
 
 }  // namespace
@@ -115,7 +157,7 @@ auto Application::restore_geometry_for(WindowHost &host, const std::string &pers
         return;
     }
     if (const auto g = load_window_geometry(*geometry_store_, persist_id)) {
-        apply_host_geometry(host, *g);
+        apply_host_geometry(host, *g, persist_id);
     }
 }
 

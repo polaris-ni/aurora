@@ -111,7 +111,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.FEAT.TOOLING.UI-TO-CODE.001 | 可逆性：UI → 代码的参考还原 | AI 可分析现有界面并重构 | [`08-tooling.md`](specification/08-tooling.md) §10.7（工具链侧）、[`04-widget.md`](specification/04-widget.md) §6.2（控件侧） |
 | SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.001 | 部分代码容错（半成品可编译可运行） | AI 可增量开发 | [`01-core.md`](specification/01-core.md) §8.4 |
 | SPEC.PERF.API.TOKEN-EFFICIENCY.001 | Token 效率 + 编译速度约束 | AI 迭代循环效率 | 本文 §4.3 |
-| SPEC.FEAT.APP.MULTI-WINDOW.001 | 多窗口（一个进程多个顶层窗口） | AI 生成的复合应用可多窗协同，且不退化单窗调用模型 | [`06-app-platform.md`](specification/06-app-platform.md) §2.4 |
+| SPEC.FEAT.APP.MULTI-WINDOW.001 | 多窗口（一个进程多个顶层窗口） | AI 生成的复合应用可多窗协同，且不退化单窗调用模型；逐窗几何记忆（尺寸 / 位置 / 几何态三项落盘，重启后几何态经幂等原语追回那一档，`Minimized` 按政策恢复为 `Normal`）；窗口关闭请求可经闸门在销毁前可否决（来源三档 + 边沿闩一次一问 + fail-open 后置条件） | [`06-app-platform.md`](specification/06-app-platform.md) §2.4（关闭请求闸门）；**本行由多窗口相关的一组变更共享，随落地分批合并改写** |
 | SPEC.FEAT.WIDGET.LAYOUT.BASELINE-ALIGN.001 | 交叉轴基线对齐（`CrossAxisAlignment::Baseline`） | 同一行内文本与控件的首行基线共线（含 Modifier 内边距与退化路径） | [`03-layout-render.md`](specification/03-layout-render.md) §3.8、[`04-widget.md`](specification/04-widget.md) §3.3 |
 | SPEC.FEAT.WIDGET.LAYOUT.SCROLL-RESTORE.001 | 滚动位置保存/恢复（`app::ScrollStorage`） | 重建 / 重启后滚动位置可还原，且多窗口与同键争用不串味 | [`06-app-platform.md`](specification/06-app-platform.md) §9.3、[`04-widget.md`](specification/04-widget.md) §3.3 |
 | SPEC.FEAT.WIDGET.DATA.LIST-REORDER.001 | 列表拖拽重排（`ReorderableList`） | 用户可拖动条目换位：跟手 / 让位 / 近边缘自动滚动 / 落位动画，数据由控件改写 | [`04-widget.md`](specification/04-widget.md) §3.4、[`GUIDELINE.md`](GUIDELINE.md) §36 |

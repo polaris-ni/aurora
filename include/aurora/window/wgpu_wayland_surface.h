@@ -217,6 +217,9 @@ class WgpuWaylandSurface final : public Surface {
     /// @brief 进入/退出全屏（转发内嵌宿主；xdg_toplevel fullscreen）。
     /// @param on true 全屏，false 还原。
     auto set_fullscreen(bool on) -> void override { host_->set_fullscreen(on); }
+    /// @brief 程序化设定几何态（幂等）：转发到共享宿主（与 minimize/toggle_maximize/set_fullscreen 同源）。
+    /// @param m 目标几何态。
+    auto set_window_mode(WindowMode m) -> void override { host_->set_window_mode(m); }
 
     /// @brief 无障碍桥：落在内嵌宿主（AT-SPI2 桥由 WaylandSurface 承接，GPU/软件路径共用）。
     /// @return 宿主持有的桥指针（未建桥/降级时为 nullptr；宿主拥有生命周期）。

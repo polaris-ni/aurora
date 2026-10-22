@@ -148,6 +148,11 @@ struct X11Surface::Impl {
     auto ime_emit_preedit(const std::string &utf8, int caret, int sel_begin_byte, int sel_end_byte) -> void;
     /// @brief 把 provider 的插入点盒折算为客户窗口物理 px 写入 XNSpotLocation（变化才发）。
     auto ime_update_spot() -> void;
+    /// @brief 发一条 EWMH `_NET_WM_STATE` ClientMessage（**目标态语义**）。
+    /// @param action 0 = REMOVE、1 = ADD（2 = TOGGLE 仅历史路径保留，新代码一律 0/1）。
+    /// @param s1 第一状态原子（如 `_NET_WM_STATE_MAXIMIZED_VERT`）。
+    /// @param s2 第二状态原子（如 `_NET_WM_STATE_MAXIMIZED_HORZ`；无则传 0）。
+    auto send_net_wm_state(std::int32_t action, Atom s1, Atom s2) const -> void;
     XPoint ime_last_spot{};  ///< 上次下发的锚点（去重）
     bool ime_spot_valid = false;
     bool ime_focused = false;  ///< XSetICFocus 已发且未 XUnsetICFocus（观测面）
@@ -203,6 +208,23 @@ struct X11Surface::Impl {
 };
 
 /// @brief 设置窗口标题：ICCCM `XStoreName`（latin1 兜底）+ EWMH `_NET_WM_NAME`（UTF-8，现代 WM 优先读）。
+auto X11Surface::Impl::send_net_wm_state(std::int32_t action, Atom s1, Atom s2) const -> void {
+    XClientMessageEvent m{};
+    m.type = ClientMessage;
+    m.window = win;
+    m.message_type = net_wm_state;
+    m.format = 32;
+    m.data.l[0] = static_cast<long>(action);  // NOLINT(*-pro-type-union-access)
+    m.data.l[1] = static_cast<long>(s1);  // NOLINT(*-pro-type-union-access)
+    m.data.l[2] = static_cast<long>(s2);  // NOLINT(*-pro-type-union-access)
+    m.data.l[3] = 1L;  // source indication: application  // NOLINT(*-pro-type-union-access)
+    const ::Window root = RootWindow(dpy, DefaultScreen(dpy));
+    // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
+    XSendEvent(dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask,
+               reinterpret_cast<XEvent *>(&m));  // NOLINT(*-pro-type-reinterpret-cast)
+    XFlush(dpy);
+}
+
 auto X11Surface::Impl::apply_title(const std::string &title_in) -> void {
     Impl &d = *this;
     d.title = title_in;  // 缓存给 AT-SPI 桥（FRAME Name；桥可能晚于 set_title 构造）
@@ -947,6 +969,29 @@ auto X11Surface::cancel_close() -> void {
     }
 }
 
+auto X11Surface::set_window_mode(WindowMode m) -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr) {
+        return;
+    }
+    // 目标态直设（幂等）：几何恢复腿的驱动点。EWMH 属性通告（PropertyNotify）到达后经既有
+    // 路径更新 d.mode 并上报，与本方法解耦——本方法只负责把「要变成什么」说给 WM。
+    switch (m) {
+        case WindowMode::Normal:
+            d.send_net_wm_state(0, d.st_fullscreen, 0);
+            d.send_net_wm_state(0, d.st_max_v, d.st_max_h);
+            break;
+        case WindowMode::Maximized:
+            d.send_net_wm_state(1, d.st_max_v, d.st_max_h);
+            break;
+        case WindowMode::FullScreen:
+            d.send_net_wm_state(1, d.st_fullscreen, 0);
+            break;
+        case WindowMode::Minimized:
+            XIconifyWindow(d.dpy, d.win, DefaultScreen(d.dpy));
+            break;
+    }
+}
 
 auto X11Surface::set_present_dirty(const std::vector<Rect> &device_rects) -> void {
     impl_->present_dirty = device_rects;
@@ -1108,22 +1153,11 @@ auto X11Surface::poll_platform_events() -> void {
                    reinterpret_cast<XEvent *>(&m));  // NOLINT(*-pro-type-reinterpret-cast)
         XFlush(d.dpy);
     };
-    const auto csd_toggle_maximize = [&]() -> void {
-        XClientMessageEvent m{};
-        m.type = ClientMessage;
-        m.window = d.win;
-        m.message_type = d.net_wm_state;
-        m.format = 32;
-        m.data.l[0] = 2L;  // _NET_WM_STATE_TOGGLE  // NOLINT(*-pro-type-union-access)
-        m.data.l[1] = static_cast<long>(d.st_max_v);  // NOLINT(*-pro-type-union-access)
-        m.data.l[2] = static_cast<long>(d.st_max_h);  // NOLINT(*-pro-type-union-access)
-        m.data.l[3] = 1L;  // source indication: application  // NOLINT(*-pro-type-union-access)
-        const ::Window root = RootWindow(d.dpy, DefaultScreen(d.dpy));
-        // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
-        XSendEvent(d.dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask,
-                   reinterpret_cast<XEvent *>(&m));  // NOLINT(*-pro-type-reinterpret-cast)
-        XFlush(d.dpy);
-    };
+    // EWMH 目标态请求（ADD/REMOVE）：一次性消掉 _NET_WM_STATE_TOGGLE 的切换语义——
+    // CSD 钮据此按本地 mode 快照算目标态；几何恢复腿（set_window_mode）更只能用目标态。
+    const auto csd_set_maximized = [&](bool on) -> void { d.send_net_wm_state(on ? 1 : 0, d.st_max_v, d.st_max_h); };
+    const auto csd_set_fullscreen = [&](bool on) -> void { d.send_net_wm_state(on ? 1 : 0, d.st_fullscreen, 0); };
+    const auto csd_toggle_maximize = [&]() -> void { csd_set_maximized(d.mode != WindowMode::Maximized); };
     const auto csd_geometry_now = [&]() -> TitleBarGeometry {
         return title_bar_geometry(d.size.width, d.tb_style, d.mode == WindowMode::Maximized, d.resizable);
     };

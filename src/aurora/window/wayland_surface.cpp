@@ -2034,6 +2034,40 @@ auto WaylandSurface::set_fullscreen(bool on) -> void {
     wl_display_flush(d.dpy);
 }
 
+auto WaylandSurface::set_window_mode(WindowMode m) -> void {
+    Impl &d = *impl_;
+    if (d.toplevel == nullptr) {
+        return;
+    }
+    // 目标态直设（幂等）：几何恢复要的是「变成什么」。Normal 只拆当前已挂的态，
+    // 未挂的不发，省一次 roundtrip。
+    switch (m) {
+        case WindowMode::Normal:
+            if (d.mode == WindowMode::Maximized) {
+                xdg_toplevel_unset_maximized(d.toplevel);
+            }
+            if (d.mode == WindowMode::FullScreen) {
+                xdg_toplevel_unset_fullscreen(d.toplevel);
+            }
+            break;
+        case WindowMode::Maximized:
+            xdg_toplevel_set_maximized(d.toplevel);
+            break;
+        case WindowMode::FullScreen:
+            xdg_toplevel_set_fullscreen(d.toplevel, nullptr);
+            break;
+        case WindowMode::Minimized:
+            xdg_toplevel_set_minimized(d.toplevel);
+            break;
+    }
+    wl_surface_commit(d.surface);
+    wl_display_flush(d.dpy);
+    // 本地态仍由 configure 单独驱动（on_xdg_surface_configure 是唯一写方）：几何恢复发生在
+    // 首帧之前，等不起 configure 往返，故此处立即上报目标态；configure 到达后若值相同，
+    // `want_mode != mode` 为假不会二次上报（上游 on_window_mode_changed 亦有去重）。
+    notify_window_mode(m);
+}
+
 auto WaylandSurface::poll_platform_events() -> void {
     Impl &d = *impl_;
     if (d.dpy == nullptr) {

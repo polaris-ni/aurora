@@ -193,6 +193,7 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | 表面契约与无头产物 | `Surface` 抽象能否被外部实现、无头路径能否产出 PNG，需真实文件产物 |
 | 退出路径 | 「主动退出」与「关闭主窗」两条结束路径是否都能干净退出 |
 | 关闭请求闸门（真机） | 「OS 关闭钮的请求何时置位」「否决后窗口是否真的不销毁」「窗口管理器是否重发关闭请求」三项只有真实窗口管理器参与才有答案；无头底座的程序化置位（`set_should_close`）代替不了消息路径，逐后端的清位落点也只有真机能验 |
+| 窗口几何态恢复（真机） | 「落盘的几何态重启后是否回到那一档」「`Minimized` 是否如政策变 `Normal`」「各后端 `set_window_mode` 的真实落点与 WRN 留痕」只有真实 OS 窗口环境才有答案；无头 seam 只记录目标态并同步上报（`utest_window_geometry` 已覆盖快照 / State 两层与降级口径），代替不了 WM 与 compositor 的实际定档 |
 
 **不纳入人工测试的头及其理由**：
 
@@ -439,6 +440,25 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 
 **六腿不可互相替代的原因**：OS 关闭请求的置位发生在后端消息路径里，清位是各后端私有标志的回写，二者都是后端私事；无头底座的 `set_should_close(false)` 能证明闸门逻辑正确，不能证明「点了关闭钮窗口真的还在」——后者才是本例的判据，也是「否决后窗口管理器是否重发」这一问只有真机能回答的原因。
 
+### 2.10 窗口几何态恢复（真机走查）
+
+#### TC-WINDOW-020 三档几何态重启恢复与 Minimized 归 Normal 策略走查
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-020 |
+| 测试目的 | 验证落盘的窗口几何态（Normal / Maximized / FullScreen）重启后能否回到那一档，以及 Minimized 按政策恢复为 Normal 并留 INFO——真实 OS 窗口环境下的端到端走查 |
+| 前置条件 | 仓库根目录；几何态恢复真机探针已按被测后端的口径构建（Win32 腿用本机默认 `build/` 追加 `AURORA_BUILD_VERIFY_TOOLS=ON` 重 configure，X11 / GLFW 腿按 §1.2 的独立构建目录，Wayland / macOS / WASM 腿需对应平台真机）；探针宿主声明持久化键并挂接可落盘的 `Preferences`；活动桌面会话（锁屏时窗口收不到 OS 消息）；真实指针或等效注入通道 |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 启动几何态恢复真机探针，取 Win32 腿，指定目标档 `Normal`：把主窗拖到非默认位置并缩放到非默认尺寸，正常关闭探针使几何落盘，再启动第二趟（纯执行，无预期结果）<br>2. 读取第二趟启动时的 mode 读数、主窗位置与尺寸，并查看 `err.txt` 新增行<br>3. 按同口径把目标档切为 `Maximized`：首趟切档后正常关闭落盘，启动次趟读取 mode 读数与窗口外观，并查看 `err.txt` 新增行<br>4. 按同口径把目标档切为 `FullScreen`：首趟切档后正常关闭落盘，启动次趟读取 mode 读数、窗口外观与 `err.txt` 新增行<br>5. 把主窗最小化后正常关闭落盘，启动次趟读取 mode 读数、窗口是否可见与 `err.txt` 新增行<br>6. 在 X11 会话（`DISPLAY` 指向可达 X server）下按同口径重跑 `Normal` / `Maximized` / `FullScreen` / `Minimized` 四组（纯执行，无预期结果）<br>7. 记录 X11 腿四组实测：mode 是否回到那一档、`Minimized` 是否如政策变 `Normal`、位置与尺寸是否恢复<br>8. 在 Wayland 会话下按同口径重跑四组（纯执行，无预期结果）<br>9. 记录 Wayland 腿四组实测<br>10. 在 GLFW 构建目录下按同口径重跑四组（纯执行，无预期结果）<br>11. 记录 GLFW 腿四组实测（含 `FullScreen` 一档的 WRN 留痕是否出现）<br>12. 在 macOS 真机上按同口径重跑四组（纯执行，无预期结果）<br>13. 记录 macOS 腿四组实测（骨架后端：`set_window_mode` 为默认空实现，mode 是否停在 `Normal`）<br>14. 在 WASM 页面壳下按同口径重跑四组（纯执行，无预期结果）<br>15. 记录 WASM 腿四组实测（无 OS 窗口语义，mode 是否停在 `Normal`、位置尺寸是否未动）<br>16. 汇总各腿记录，与 `specification/06-app-platform.md` §2.4「几何态恢复」的申报逐条核对，并将 mode 读数与「缩放与跨屏不更新」「X11 / Wayland 位置与尺寸未实现」两条既有偏差分开记录 |
+| 预期结果 | 2. Win32 腿 `Normal`：mode 读数为 `Normal`；主窗位置与尺寸回到首趟落盘值（物理像素口径，Win32 的 `set_size` / `set_position` 为真实现，该档应逐位恢复）；`err.txt` 无新增 `ERR` / `FTL`（Normal 档恢复不产生日志）<br>3. Win32 腿 `Maximized`：mode 读数回到 `Maximized`，窗口以最大化外观呈现；`err.txt` 无新增行（该档只追几何态，不产生日志）<br>4. Win32 腿 `FullScreen`：本后端无 monitor 切换通道（申报内缺口）——`err.txt` 应出现 1 行 WRN（tag `"window"`，消息含 `FullScreen is not implemented on this backend`），mode 实际读数如实记录（预期停在原档而非 `FullScreen`）；此为申报内降级，不得记缺陷，也不得记「读不回」式失败<br>5. Win32 腿 `Minimized`：mode 读数为 `Normal` 且窗口可见（非最小化外观）；`err.txt` 恰新增 1 行 `INF`（tag `"app"`），消息形如 `stored window mode is Minimized; restoring as Normal (key=<k>)`<br>7. X11 腿四组齐全：`Normal` 档的位置与尺寸**按未实现缺口单独记录**（该后端 `set_size` / `set_position` 为空动作，no-op 属申报内，不得记缺陷）；`Maximized` / `FullScreen` 两档 mode 读数应各自回到那一档；`Minimized` 一档同 Win32 口径（变 `Normal` + INFO）。mode 读数与位置尺寸读数**不得混为一谈**<br>9. Wayland 腿四组齐全，口径同 X11 腿（位置与尺寸同样按未实现缺口单独记录）；`Maximized` / `FullScreen` 应经 `xdg_toplevel` 最大化 / 全屏态真实生效<br>11. GLFW 腿四组齐全；`FullScreen` 一档同 Win32 口径（WRN 留痕 + mode 不声称到位）；其余三档 mode 读数各自回到那一档<br>13. macOS 腿四组齐全；骨架后端 `set_window_mode` 为默认空实现 ⇒ mode 停在 `Normal`、无模式切换外观，如实记录，不得记为缺陷（骨架后端的既有范围）<br>15. WASM 腿四组齐全；浏览器无 OS 窗口几何语义 ⇒ mode 停在 `Normal`、位置尺寸不动，属申报内平台范围，不得记为缺陷<br>16. 各腿记录与规格申报逐条一致；凡申报为降级的项（Win32 / GLFW 的 FullScreen、macOS 骨架、WASM 无 OS 语义、X11 / Wayland 位置尺寸未实现）在实测中确有对应表现；mode 读数与「缩放与跨屏不更新」（Linux 三后端缩放变化上报未实现）是两个独立偏差，须分开记录，不得互相解释 |
+
+**本例编号的取定**：现最高为 019（关闭请求闸门用例）；017 / 018 为早期预留后未落用的断档序号——按 §1.4「序号不复用、新用例取下一个可用序号」不作断档回填，本例取 020。
+
+**本例与既有读数的分工**：mode 恢复腿的消费点与两条既有偏差互相独立——①「Linux 三后端缩放变化上报未实现」（改系统缩放或跨屏后 `scale_factor` 不自动更新，影响的是 `Normal` 档的物理 ↔ 逻辑折算，见 §2.7 与 TC-WINDOW-013）；② X11 / Wayland 的 `set_size` / `set_position` 未实现（位置与尺寸恢复在 Linux 上是 no-op）。三者不得混为一个读数：mode 不对就说 mode，尺寸不对先分辨是哪条偏差。
+
+**本例载体为真机探针（非 demo）**：既有 demo 不声明 `persist_id`、不挂几何存储，承载不了恢复腿；构建口径同 §1.2 的各后端探针段（后端开关 + `AURORA_BUILD_VERIFY_TOOLS`），每腿以「首趟落盘、次趟恢复」两趟运行。落盘只走正常关闭路径（`reap_closed` 收集步对 `should_close()==true` 的宿主执行并打一次性闩），故步骤里的关闭一律要求放行关闭，不用 `quit()` 代替。
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -460,3 +480,4 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | TC-WINDOW-015 | 2026-10-12 | WorkBuddy | PASS | | 步骤 2：退出码 0。步骤 3：末行 `checks=47 pass=47`；ClientSide 段客户区 = 窗口矩形（`WM_NCCALCSIZE` 吞框）、`content_inset` `top=36`、带像素 `#303030` 且内容区 `#FFFFFF` 零入侵、逐点热区回归过（八向 / 标题带 / 按钮→HTCLIENT）、悬停关钮 `#E01B24`、同钮释放触发关窗；热更段带 `#202020`、按压 `#991D11` 覆悬停 `#C42B1C`、拖离松手不关窗且无残留高亮；Auto 段带像素 `#FFFFFF`、窗口顶带仍报 `HTCAPTION`（系统 caption 完好）；降级段左/底缘与角点 `HTCLIENT` 化、角点落入标题带报 `HTCAPTION`、带像素与栏高不变；最大化段客户区 = 显示器工作区、左缘 `HTCLIENT`、带空白 `HTCAPTION`、释放最大化钮完成最大化→还原往返。步骤 4：`err.txt` 为 0 字节 | | 自动段五档映射逐条过；DWM 合成开启；降级判据经 `frame.shadow_margin_dp = 0` 显式注入实测；判据经三次变异（热区门收窄到 csd_border、最大化标题带门加 sizable、win32_surface 删除 `paint_decoration` 调用）逐一转红后恢复复绿，非结构性假绿。步骤 5 人工目视段（拖动/双击/Aero Snap/系统菜单）待真机会话补记。构建口径为本机默认 `build/` 追加 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 重 configure（WIN32/DEBUG 两开关已满足） |
 | TC-WINDOW-016 | 2026-10-12 | WorkBuddy | PASS | | 步骤 4：`Cycle title-bar theme` 按钮可见位置点击逐档循环，状态行依次为 `host title-bar theme → AdwaitaLight`、`→ WindowsDark`、`→ WindowsLight`，顶部自绘标题带整带配色随主题逐档重绘。步骤 6：状态行 `window frame shadow → off`。步骤 8：状态行 `title-bar icon → set`，标题带左端出现 24×24 双色图标。步骤 9–11：物理 840×640 缩矮后 `Close this preview` 带从像素扫描中消失，物理 840×940 拉长后于原相对位置重现（bitmap 纵带 y=[698,754]），按该可见位置（屏幕物理 (291,878)）真实点击后窗口立即消失，`err.txt` 新增 `INF` 行 `[app] window host closed and reaped: id=4`。步骤 13：Borderless 预览在绘制位置点击 `Info` 后新增 `INF` 行 `csdg: info clicked`；`−` / `□` / `×` 点击后窗口存活、无新增行。步骤 15：`Close this preview` 后窗口消失并新增回收行 `id=5`。步骤 17：Frameless 同口径复验，`csdg: info clicked` 再新增 1 行、`×` 无动作且窗口存活、`Close this preview` 后新增回收行 `id=6`。步骤 18：全文无 `ERR` / `FTL` | | 取证口径：真机点击经 `SetCursorPos` + `mouse_event` 注入屏幕物理坐标（非 `PostMessage` 直投），落点取 DPI 感知 `PrintWindow` 像素扫描出的按钮带中轴（窗口物理 rect (152,152) 840×780 @ DPI 144 即 150% 缩放）；运行二进制为含 修复的构建（可执行文件 mtime 晚于修复源文件、工作树对该源文件无未提交改动）。平台范围观察：控件级 TitleBar 的 `−` / `□` / `×` 为 Win32 无害空动作（`Surface` 四操作默认空实现、仅 Wayland 生效，见 `specification/07-environment-modifier.md`），命中链本身无恙（同条 `Info` 动作在绘制位置逐次触发日志）。观察性现象：每扇预览窗关闭时稳定新增 1 行 `WRN`（`layout parent detached while the child widget is still alive: Column`，应用根子树解挂序提示），不影响关闭与回收，不记缺陷 |
 | TC-WINDOW-019 | | | | | | | |
+| TC-WINDOW-020 | | | | | | | |

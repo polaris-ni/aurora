@@ -193,6 +193,11 @@ class GlfwSurface : public Surface {
     /// @param path 输出 PNG 文件路径。
     /// @return 写盘成功 true；窗口失效/平台不支持时 false 及错误信息。
     [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;
+    /// @brief 程序化设定几何态（幂等）：Normal / Maximized / Minimized 经 glfwRestoreWindow /
+    ///        glfwMaximizeWindow / glfwIconifyWindow 落地（回调回来定档上报，与 Wayland 同构）；
+    ///        FullScreen 无实现（monitor 切换通道未建），调用时留一条 WARN。
+    /// @param m 目标几何态。
+    auto set_window_mode(WindowMode m) -> void override;
 
   private:
     struct Impl;

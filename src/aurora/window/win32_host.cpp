@@ -1316,6 +1316,28 @@ auto Win32Host::cancel_close() -> void {
     }
 }
 
+auto Win32Host::set_window_mode(WindowMode m) -> void {
+    if (pimpl_ == nullptr || pimpl_->hwnd == nullptr) {
+        return;
+    }
+    // SC_* 是请求语义：结果由 WM_SIZE → handle_size 定档（IsZoomed / SIZE_MINIMIZED）并上报，
+    // 与用户操作系统菜单同路径。
+    switch (m) {
+        case WindowMode::Normal:
+            PostMessageA(pimpl_->hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+            break;
+        case WindowMode::Maximized:
+            PostMessageA(pimpl_->hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+            break;
+        case WindowMode::Minimized:
+            PostMessageA(pimpl_->hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+            break;
+        case WindowMode::FullScreen:
+            // 本后端无 monitor 切换通道（FullScreen 只作为 CSD 布局判据存在）：留痕，不装懂。
+            AURORA_LOG_WARN("window", "Win32Host::set_window_mode: FullScreen is not implemented on this backend");
+            break;
+    }
+}
 [[nodiscard]] auto Win32Host::present_count() const -> int { return pimpl_->present_count; }
 [[nodiscard]] auto Win32Host::background_brush() -> void * { return static_cast<void *>(Impl::bg_brush); }
 

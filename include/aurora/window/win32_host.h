@@ -132,6 +132,11 @@ class Win32Host {
     /// @brief 撤销本窗口的关闭请求（关闭闸门否决时调用）：清 `should_close` 标志。
     ///        `WM_DESTROY`（窗口已销毁，含随 owner 自动销毁的 owned 子窗）置的位**拒绝清**。
     auto cancel_close() -> void;
+    /// @brief 程序化设定几何态（幂等）：Normal / Maximized / Minimized 经 SC_RESTORE /
+    ///        SC_MAXIMIZE / SC_MINIMIZE 落到窗口过程，WM_SIZE 回来时定档并上报（与用户走
+    ///        系统菜单同一路径，不在此另设判定）。FullScreen 本后端无实现，调用时留一条 WARN。
+    /// @param m 目标几何态。
+    auto set_window_mode(WindowMode m) -> void;
     /// @brief 已呈现次数（测试/自检用）：验证 WM_SIZE/WM_PAINT 触发了同步重渲染。
     /// @return present_request 生效以来的呈现计数。
     [[nodiscard]] auto present_count() const -> int;

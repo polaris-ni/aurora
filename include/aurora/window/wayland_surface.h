@@ -255,6 +255,10 @@ class WaylandSurface final : public Surface {
     /// @brief 程序化全屏：xdg_toplevel_set/unset_fullscreen。
     /// @param on true 进入全屏，false 退出全屏。
     auto set_fullscreen(bool on) -> void override;
+    /// @brief 程序化设定几何态（幂等）：set/unset_maximized 与 set/unset_fullscreen 按目标态
+    /// 组合，立即经 notify_window_mode 上报；稍后到达的 configure 以相同值幂等收敛。
+    /// @param m 目标几何态。
+    auto set_window_mode(WindowMode m) -> void override;
     /// @brief 原生窗口句柄：`wl_surface*`。
     [[nodiscard]] auto native_handle() const -> void * override;
 

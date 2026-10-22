@@ -489,6 +489,20 @@ class Surface {
     /// @return GPU 帧 sink 裸指针（所有权归后端）；默认 nullptr（走软件栅格路径）。
     [[nodiscard]] virtual auto gpu_backend() -> rhi::RhiFrameSink * { return nullptr; }
 
+    /// @brief 程序化设定窗口几何态（**目标态语义**，幂等）：直达目标档，不做切换翻转。
+    ///
+    /// 与既有 `minimize` / `toggle_maximize` / `set_fullscreen` 三枚**切换语义**原语互补：
+    /// 几何持久化的恢复腿（`Application` 的窗口几何恢复）经本原语把落盘的
+    /// `WindowGeometry::mode` 追回桌面——恢复时窗口通常恰是 `Normal`，三枚切换原语
+    /// 「读当前态再补一次翻转」的次序在异步 WM 下不可靠，且无法表达 Maximized → FullScreen
+    /// 这类直设目标态。目标档 `Normal` 表示回到普通可移动可缩放态。
+    /// @note 默认空实现（源码兼容：自定义 Surface 派生类零改即可编译）。覆写方应在实现内
+    ///       经 `notify_window_mode` 上报新态，使 `Window::window_mode()` 快照、
+    ///       `Application::window_mode()` 响应式 State 与 `set_on_window_mode` 回调同链同步；
+    ///       异步后端可只发请求（Wayland configure / Win32 WM_SIZE 随后定档上报）。
+    /// @note 本槽追加在虚函数段表尾：既有槽位序号不变（ABI 面仅新增一槽，需全量重编）。
+    virtual auto set_window_mode(WindowMode /*m*/) -> void {}
+
   protected:
     /// @brief 上报当前窗口可见性状态（由真实后端在状态变化时调用）。
     /// @param s 新的可见性状态。
@@ -602,6 +616,17 @@ class HeadlessSurface : public Surface {
     /// @brief 撤销关闭请求（无头测试 seam）：把 `set_should_close` 的写入回滚为 false。
     auto cancel_close() -> void override { should_close_ = false; }
 
+    /// @brief 测试 seam：程序化设定几何态（几何恢复腿的驱动点）：记录目标态并经
+    ///        `notify_window_mode` 同步上报（`Window` 快照 / 应用级 State 同链更新）。
+    ///        无 OS 语义、零副作用，也不会让宿主被判为几何不可用。
+    /// @param m 目标几何态。
+    auto set_window_mode(WindowMode m) -> void override {
+        window_mode_ = m;
+        notify_window_mode(m);
+    }
+    /// @brief 最近一次 `set_window_mode` 记录的目标态（无 OS 语义，仅供无头断言）。
+    /// @return 记录的几何态；从未设定时为 `Normal`。
+    [[nodiscard]] auto window_mode() const -> WindowMode { return window_mode_; }
 
     /// @brief 覆写悬停光标下发：Headless 无系统光标，改为按序记录下发形状，
     /// 使「派发器解析 → Application 接线 → Surface 生效」整条链路在无头环境可确定性断言
@@ -715,6 +740,7 @@ class HeadlessSurface : public Surface {
     int focus_count_ = 0;  ///< `focus_window()` 调用次数。
     int display_id_ = -1;  ///< 设定值（模拟所在显示器）。
     Point origin_{};  ///< 模拟的屏幕位置（几何持久化测试观测点）。
+    WindowMode window_mode_ = WindowMode::Normal;  ///< set_window_mode 记录的目标态（无头观测点）。
     std::vector<CursorShape> cursor_log_;  ///< 悬停光标下发序列（无头验收入口；见 set_cursor）。
 };
 #endif  // AURORA_BACKEND_HEADLESS

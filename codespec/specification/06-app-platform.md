@@ -233,6 +233,56 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 - **兜底**：键缺失 / JSON 格式错误 / 几何不可用（显示器被拔除、分辨率变小导致完全落在屏外）→ 一律回退默认布局。**格式错误与不可用分两类 WARN**，便于区分「存储被破坏」与「显示器变了」。
 - 本类不做隐式 I/O：落盘由调用方 `Preferences::flush()` 决定。
 
+**几何态恢复（写读对称的消费点）**
+
+保存腿（`capture_host_geometry`）取 `Window::window_mode()` 入快照、序列化腿（`window_geometry_to_json`）把 `mode` 写成六键之一、反序列化腿（`window_geometry_from_json`）对越界 `mode` 判格式错误——唯独恢复腿（`apply_host_geometry`）只下发位置与尺寸，`g.mode` 自引入起无人消费。「写了不读」比「不写」更有害：最大化 / 全屏那一档重启回不到那一档，而落盘文件里那一格白纸黑字，读者会以为功能存在（误导面与不一致面同时成立）。恢复腿现补上这条消费点：按 `WindowGeometry::mode` 经幂等原语 `Surface::set_window_mode` 追回几何态。
+
+| 成员 | 说明 |
+|:---|:---|
+| `Surface::set_window_mode(WindowMode)`（virtual，默认空实现） | **目标态语义**的幂等原语：直达 `m` 所指档位，不做切换翻转。与既有 `minimize` / `toggle_maximize` / `set_fullscreen` 三枚**切换语义**原语互补——恢复时窗口通常恰是 `Normal`，切换原语「读当前态再补一次翻转」的次序在异步 WM 下不可靠，且无法表达 `Maximized → FullScreen` 这类直设目标态 |
+| 兼容性 | 新槽**追加在虚函数段表尾**（`set_fullscreen` 之后）：既有槽位序号不变；ABI 面仅新增一槽（**需全量重编**），默认空实现保证**源码兼容**（自定义 `Surface` 派生类零改即可编译） |
+| 上报链 | 覆写方经既有 `notify_window_mode` 上报，使 `Window::window_mode()` 快照、`Application::window_mode()` State 与 `set_on_window_mode` 回调同链同步；异步后端（Wayland configure / Win32 `WM_SIZE` / GLFW 回调）可只发请求、随后定档上报 |
+
+**三条口径**：
+
+| 落盘 `mode` | 恢复行为 |
+|:---|:---|
+| `Normal` | `set_size` + `set_position`（现行为逐位保留；物理像素按当前 `scale_factor` 折回逻辑 dp） |
+| `Maximized` / `FullScreen` | **只追几何态，位置与尺寸都不下发**——那两档的位置由 OS / compositor 摆放，下发既无意义也可能触发多余的 `SetWindowPos` / configure |
+| `Minimized` | **恢复为 `Normal`** 并留一条 INFO。理由有二：启动即看不见（应用看起来没启动）；且 `WindowMode::Minimized` 与 `WindowState::Hidden` 耦合，而恢复腿没有设置 `WindowState` 的通道（`Window::set_window_state` 同样只是快照），硬恢复会制造「快照说最小化、可见性说可见」的分裂。用 INFO 而非 WARN：用户最小化是合法操作，不是异常 |
+
+**降级拆两件事**（几何不可用与显示器不在是两条独立路径）：
+
+- **几何不可用**（屏外 / 尺寸非正）：既有宽松判定（`is_window_geometry_usable` 只看「尺寸为正 + 与某显示器工作区有交集」，**完全不看 `display_id`**）→ `load` 回 `nullopt` + WARN（`stored window geometry is off-screen; falling back to default (key=<k>)`）→ `apply` 不执行 → mode 天然保持默认 `Normal`，不留「默认尺寸 + 非默认几何态」的脏态。
+- **`display_id` 指向的显示器已不在**：恢复腿补判（宽松判定不看该字段，故此处补）——**不拒绝恢复**（与「部分越界不拒」同精神：物理坐标相交就摆得回），但 mode 归 `Normal` + WARN（`stored window display is gone; restoring as Normal (key=<k>)`）。`display_id < 0`（未声明，非 Win32 后端恒 -1）不参与判定；该降级在 Linux 真机与无头面结构性不可触发，由单测直接构造 `WindowGeometry` 喂 `load` 路径覆盖。
+
+**两条日志**（tag 均为 `"app"`，`<k>` 为持久化键）：`Minimized` → `Normal` 为 **INFO**（`stored window mode is Minimized; restoring as Normal (key=<k>)`）；显示器不在降级为 **WARN**（`stored window display is gone; restoring as Normal (key=<k>)`）。
+
+**各后端分工**：
+
+| 后端 | `set_window_mode` 实现 | 真机状态 |
+|:---|:---|:---|
+| Wayland | `xdg_toplevel` 的 set/unset_maximized 与 set/unset_fullscreen 按目标态组合（`Normal` 只拆当前已挂的态）；实现内立即 `notify_window_mode`，稍后到达的 configure 以相同值幂等收敛（本地态仍由 configure 单独驱动） | 真实现 |
+| X11 | EWHM `_NET_WM_STATE` **ADD / REMOVE 目标态** ClientMessage——CSD 三钮原 `_NET_WM_STATE_TOGGLE` 切换语义已一并重构为按本地 mode 快照算目标态；`Minimized` 走 `XIconifyWindow`；属性通告到达后经既有路径更新并上报 | 真实现 |
+| Win32 | `SC_RESTORE` / `SC_MAXIMIZE` / `SC_MINIMIZE` 经窗口过程（与用户走系统菜单同路径），`WM_SIZE` 回来定档上报 | 真实现 |
+| GLFW | `glfwRestoreWindow` / `glfwMaximizeWindow` / `glfwIconifyWindow`，回调回来定档上报 | 真实现 |
+| Headless | 记录目标态 + `notify_window_mode` 同步上报：无 OS 语义、零副作用、可断言（无头几何恢复用例的观测面） | 真实现（测试 seam） |
+| macOS | 骨架后端，保持默认空实现 | 骨架申报（未实装） |
+
+- **转发装饰器**：`WgpuWaylandSurface` 逐方法转发 `host_`，本原语已补转发（不补则该后端静默失效）。
+- **无头 seam 行为**：`mode != Normal` 时同样安全 no-op、不报错，也不会让宿主被判为几何不可用（否则既有无头几何用例会因几何「不可用」转红）。
+
+**与关闭闸门的交互**：几何保存点在 `reap_closed` 收集步、只对 `should_close()==true` 的宿主执行并打 `geometry_saved_` 一次性闩 ⇒ 关闭被否决的宿主不进收集步、不写快照、不打闩，下次真关时以最新几何落盘——「否决不写、下次真关写最新」由现有结构天然满足，闩语义无需放宽。
+
+**恢复时刻的可信性**：恢复发生在 `register_host` 尾部（首帧之前），该时刻 `scale_factor` 在各后端已可信（Win32 建窗期定稿、X11 构造期读 Xft.dpi、Wayland 两次 roundtrip 后 `wl_output` scale 已到、GLFW 即时查询、Headless 恒 1.0）。与「Linux 三后端缩放变化上报未实现」（改系统缩放或跨屏后不自动更新）是**两个独立偏差**，真机读数不得混为一个。
+
+**已知缺口（均不在本批，不得暗示已修）**：
+
+- X11 与 Wayland 的 `set_size` / `set_position` 本就未实现——位置与尺寸恢复在 Linux 上是 no-op，与 mode 恢复是两个独立偏差，真机读数须分开记；
+- Win32 与 GLFW 的 `FullScreen` 无实现（monitor 切换通道未建），调用时留一条 WRN（tag `"window"`）；
+- `WgpuX11Surface` / `WgpuWin32Surface` / `D3D11Surface` 三个同源面**不转发任何几何原语**（`minimize` / `toggle_maximize` / `set_fullscreen` 历来不转发，本批只补了转发的 `WgpuWaylandSurface`）——统一既有缺口，不在本批；
+- 应用级 `window_mode()` State 只聚合主窗（`register_host` 的 mode sink 仅在宿主即主窗时转发）：既有口径、非本批引入，仅在 §6.2 补记，行为不改。
+
 **统一帧循环**（`Application::run`，不再委托 `Window::run`）：
 
 ```
@@ -458,6 +508,8 @@ au::Lifecycle(
 **后端上报**：`Win32Surface` 处理 `WM_SIZE`（MINIMIZED / MAXIMIZED / RESTORED → 几何态；最小化同时置 `WindowState::Hidden`）与 `WM_ACTIVATE`（非 `WA_INACTIVE` → `Visible`，否则 `Occluded`）；`GlfwSurface` 注册 `glfwSetWindowIconifyCallback` / `glfwSetWindowFocusCallback` / `glfwSetWindowMaximizeCallback`；`HeadlessSurface` 提供 `simulate_window_state` / `simulate_window_mode` 测试 seam。后端各自仅「**状态变化时**」经 `Surface::WindowStateHandler` / `WindowModeHandler` 上报。
 
 **上层聚合**：`Application` 暴露响应式 `State<WindowState>& window_state()` / `State<WindowMode>& window_mode()` 与命令式回调 `set_on_window_state` / `set_on_window_mode`；每帧经 `Window::present_root` 将当前快照注入根 `Environment`，子树可 `ctx.environment<WindowState>()` / `ctx.environment<WindowMode>()` 读取。
+
+**聚合范围（既有口径）**：上述两枚 State 与两枚回调**只聚合主窗口**——`register_host` 安装的 state / mode sink 仅在宿主即主窗口时转发；非主窗口的可见性 / 几何态变化只落在自己的宿主快照（`Window::window_state()` / `Window::window_mode()`）上。与 §2.4 的逐窗几何持久化不冲突：几何快照逐窗独立读写（非主窗重启后同样回到自己的几何态），应用级 State 只是主窗的投影。
 
 ```cpp
 app.set_on_window_state([](au::WindowState s) {
