@@ -1156,7 +1156,6 @@ auto X11Surface::poll_platform_events() -> void {
     // EWMH 目标态请求（ADD/REMOVE）：一次性消掉 _NET_WM_STATE_TOGGLE 的切换语义——
     // CSD 钮据此按本地 mode 快照算目标态；几何恢复腿（set_window_mode）更只能用目标态。
     const auto csd_set_maximized = [&](bool on) -> void { d.send_net_wm_state(on ? 1 : 0, d.st_max_v, d.st_max_h); };
-    const auto csd_set_fullscreen = [&](bool on) -> void { d.send_net_wm_state(on ? 1 : 0, d.st_fullscreen, 0); };
     const auto csd_toggle_maximize = [&]() -> void { csd_set_maximized(d.mode != WindowMode::Maximized); };
     const auto csd_geometry_now = [&]() -> TitleBarGeometry {
         return title_bar_geometry(d.size.width, d.tb_style, d.mode == WindowMode::Maximized, d.resizable);

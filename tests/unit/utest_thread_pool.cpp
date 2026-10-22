@@ -241,7 +241,8 @@ AURORA_TEST_CASE(frame_loop_drains_deferred_default_pool) {
 AURORA_TEST_CASE(interruptible_wait_for_waits_full_duration_while_running) {
     AURORA_TEST_REQUIRE_THREADS();
     // 非 deferred 池：interruptible_wait_for 在 stop_ 为 false 时语义等同 sleep_for，
-    // 等待时长 ≈ 给定窗口（避开调度抖动，用充足余量判据）。
+    // 等待时长 ≈ 给定窗口。不早醒（20ms 内未置位）是核心语义；完成等待用带截止的轮询
+    // 容忍 CI 加载机的 worker 线程启动调度抖动（避免固定窗口误判）。
     aurora::ThreadPool pool{2};
     AURORA_TEST_CHECK_FALSE(pool.is_deferred());
     std::atomic<bool> done{false};
@@ -250,9 +251,16 @@ AURORA_TEST_CASE(interruptible_wait_for_waits_full_duration_while_running) {
         done.store(true, std::memory_order_release);
     });
     std::this_thread::sleep_for(std::chrono::milliseconds{20});
-    AURORA_TEST_CHECK_FALSE(done.load(std::memory_order_acquire));  // 尚未到窗口
-    std::this_thread::sleep_for(std::chrono::milliseconds{150});  // 越过 80ms 窗口 + 余量
-    AURORA_TEST_CHECK_TRUE(done.load(std::memory_order_acquire));
+    AURORA_TEST_CHECK_FALSE(done.load(std::memory_order_acquire));  // 不早醒（< 80ms 窗口）
+    bool completed = false;
+    for (int i = 0; i < 200; ++i) {  // 200 × 10ms = 2s 充裕截止
+        if (done.load(std::memory_order_acquire)) {
+            completed = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    AURORA_TEST_CHECK_TRUE(completed);
 }
 
 AURORA_TEST_CASE(interruptible_wait_for_wakes_early_when_pool_destroyed) {

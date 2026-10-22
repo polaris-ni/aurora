@@ -189,7 +189,7 @@ struct GlfwSurface::Impl {
     Impl(Impl &&) = delete;
     auto operator=(Impl &&) -> Impl & = delete;
 
-    auto set_window_mode(WindowMode m) -> void;
+    auto set_window_mode(WindowMode m) const -> void;
     auto begin_frame(int width, int height) -> Result<bool>;
     auto painter() -> Painter & { return painter_impl; }
     auto present() -> Result<bool>;
@@ -204,7 +204,7 @@ struct GlfwSurface::Impl {
     [[nodiscard]] auto should_close() const -> bool { return glfwWindowShouldClose(window) == GLFW_TRUE; }
     /// @brief 撤销关闭请求：GLFW 侧旗标由 `glfwSetWindowShouldClose` 双向可控，清位后
     ///        `should_close()` 立即回到 false（后置条件成立，不走 fail-open）。
-    auto cancel_close() -> void {
+    auto cancel_close() const -> void {
         if (window != nullptr) {
             glfwSetWindowShouldClose(window, GLFW_FALSE);
         }
@@ -485,7 +485,7 @@ auto GlfwSurface::set_cursor(CursorShape shape) -> void {
     glfwSetCursor(pimpl_->window, handle);
 }
 
-auto GlfwSurface::Impl::set_window_mode(WindowMode m) -> void {
+auto GlfwSurface::Impl::set_window_mode(WindowMode m) const -> void {
     if (window == nullptr) {
         return;
     }
