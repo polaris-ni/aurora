@@ -208,8 +208,27 @@ class Application {
 
     /// @brief 注册窗口关闭回调：宿主被帧末回收**之后**触发一次，参数为被关闭窗口 id。
     /// 供上层释放与该窗口绑定的外部资源（不要在此回调内再关闭其他窗口）。
+    /// 与 `set_on_close_requested` 的分工：本回调在回收**之后**，只能事后清理；可否决的
+    /// 拦截点在 `set_on_close_requested`。
     /// @param cb 关闭回调（参数为被关闭窗口 id）；置空可注销。
     auto set_on_window_closed(std::function<void(WindowId)> cb) -> void { on_window_closed_ = std::move(cb); }
+
+    /// @brief 注册窗口关闭闸门（可否决）：每扇窗口每次关闭请求的**抬沿**询问一次。
+    ///
+    /// 调用点：`step_frame` 内 `on_frame_()` 之后、`tick_all()` 之前（晚于 `pump_all_once`
+    /// 保证本帧后端置位已可见；早于 `render_all` 保证应用在回调里开的确认浮层当帧上屏；
+    /// 早于 `reap_closed` 保证被否宿主不进回收步、不写几何快照）。
+    /// 返回 `false` 即撤销本次关闭：清记账位与后端旗标，窗口当帧继续渲染。
+    ///
+    /// 闸门是**同步布尔判定**，不是「弹框等用户」的地方——回调只许快、不许阻塞、不许抛
+    /// （CODING_STANDARDS §4.1）。正确模式：回调返回 `false` 撤销 → 应用自挂确认浮层 →
+    /// 用户确认后调 `close_window()`（`Programmatic` 源直接放行）。
+    /// 回调抛异常按**放行**处理并记 ERROR（fail-open，绝不穿出 `step_frame`）。
+    /// @param cb 闸门回调：`true` = 放行（当帧帧末回收），`false` = 撤销本次关闭；置空注销。
+    /// @note Thread: main-thread only
+    auto set_on_close_requested(std::function<bool(WindowId, CloseRequestSource)> cb) -> void {
+        on_close_requested_ = std::move(cb);
+    }
 
     // ---- 跨窗通信与几何持久化（specification/06-app-platform.md §2.4）----
 
@@ -359,7 +378,8 @@ class Application {
     /// 多窗口下的每帧顺序（specification/06-app-platform.md §2.4）：
     ///   1. `drain_posted()` —— 先执行后台回投的主线程工作（可能标脏，当帧即可刷新）；
     ///   2. `pump_all_once()` —— 抽干平台事件（共享队列后端只 pump 一次，见 `Surface::pumps_thread_queue`）；
-    ///   3. `on_frame_()` 回调 + 各宿主手势 `tick()`；
+    ///   3. `on_frame_()` 回调 + 关闭闸门询问步（`poll_close_requests()`，可否决）
+    ///      + 各宿主手势 `tick()`；
     ///   4. `anim_.tick(dt)` / `sched_.tick(dt)` —— **应用级共享**，每帧只推进一次；
     ///   5. 逐宿主 `render_frame(dt)` —— 各窗口独立脏区决策与上屏；
     ///   6. `reap_closed()` —— 帧末统一回收已关闭窗口（不在迭代中销毁宿主）；
@@ -508,6 +528,16 @@ class Application {
     /// 回收必须在帧末而非事件派发栈内：宿主析构会连带销毁 UI 树，而此时回调栈上可能仍持有控件引用。
     auto reap_closed() -> void;
 
+    /// @brief 帧内关闭闸门询问步（见 `set_on_close_requested`）：先做策略连带置位，
+    ///        再对本帧新抬起的关闭请求逐宿询问闸门（边沿闩，一次一问），被否则撤销。
+    ///
+    /// 无闸门回调时本步的净效果与历史行为逐位等价：连带置位不受回调判据控制，仅「询问」受控。
+    auto poll_close_requests() -> void;
+    /// @brief 询问闸门并处理异常（fail-open：抛异常按放行处理，绝不穿出 `step_frame`）。
+    /// @param h 目标宿主（提供窗口 id 与关闭来源）。
+    /// @return true = 放行；false = 撤销本次关闭。
+    [[nodiscard]] auto ask_close_gate(const WindowHost &h) const -> bool;
+
     /// @brief 帧末统一阻塞等待一次（取各宿主等待时长的最小值）。
     /// @param frame_start 本帧起始时刻（`step_frame` 返回值），用于帧预算扣除。
     auto wait_once(const std::chrono::steady_clock::time_point &frame_start) -> void;
@@ -612,6 +642,9 @@ class Application {
         if (on_frame_) {
             on_frame_();
         }
+        // 关闭闸门询问步：**必须**排在 on_frame_ 之后——应用最典型的写法是在 on_frame_ 里
+        // 调 close_window()，排在之前会让该关闭当帧直接进 reap_closed、永远不过闸。
+        poll_close_requests();
         tick_all();
         anim_.tick(dt);
         sched_.tick(dt);  // 定时任务随帧推进（在 present 前触发，当帧 UI 即可刷新）
@@ -694,6 +727,8 @@ class Application {
     ExitPolicy exit_policy_ = ExitPolicy::LastWindowClosed;  ///< 退出策略（见 `set_exit_policy`）。
     bool quit_requested_ = false;  ///< `quit()` 请求：任何策略下都使 `run()` 退出。
     std::function<void(WindowId)> on_window_closed_;  ///< 窗口关闭回调（宿主回收后触发）。
+    std::function<bool(WindowId, CloseRequestSource)>
+        on_close_requested_;  ///< 关闭闸门（可否决；见 `set_on_close_requested`）。
     /// @brief 多窗口下「无线程级等待通道」后端（X11/Wayland/Wasm）的等待上限（毫秒）。
     /// 这些后端的 `wait_events` 只覆盖**自身**连接 fd 或事件目标，帧循环每帧只能等其中一个
     /// Surface；若按单窗口语义无限等待，其余窗口的输入会被饿到才有事件。封顶为轮询式短等，

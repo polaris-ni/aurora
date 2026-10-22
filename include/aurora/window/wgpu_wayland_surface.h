@@ -123,6 +123,8 @@ class WgpuWaylandSurface final : public Surface {
     /// @brief 是否已收到关闭窗口请求（转发内嵌宿主；xdg_toplevel close 置位）。
     /// @return 收到关闭请求为 true，主循环据此退出。
     [[nodiscard]] auto should_close() const -> bool override { return host_->should_close(); }
+    /// @brief 撤销关闭请求：转发到共享宿主（与 `should_close()` 同源，不在此另设判定）。
+    auto cancel_close() -> void override { host_->cancel_close(); }
     /// @brief 非阻塞抽取并派发 Wayland 事件（转发内嵌宿主）。
     auto poll_platform_events() -> void override { host_->poll_platform_events(); }
     /// @brief 阻塞等待 Wayland 事件/唤醒/超时（转发内嵌宿主的 poll(2) 路径）。

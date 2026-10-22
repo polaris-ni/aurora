@@ -54,6 +54,10 @@ class MacOSSurface : public Surface {
     /// @brief 是否应关闭窗口（windowShouldClose: 翻译路径未实写，暂无人置位）。
     /// @return Impl 存活时返回其 should_close 标志（当前恒 false）；impl_ 已释放时返回 true。
     [[nodiscard]] auto should_close() const -> bool override;
+    /// @brief 撤销本后端的关闭请求（关闭闸门否决时调用）：清 Impl 的关闭标志。
+    /// @note 本后端为骨架（`Impl` 全 stub）；真实 AppKit 侧须在 `windowShouldClose:` 返回
+    ///       NO 之外同步清位，届时一并落地（本方法即其落点）。
+    auto cancel_close() -> void override;
 
     /// @brief 运行时更新悬停光标形状：`[[NSCursor …] set]`（AppKit 在 .cpp 内 `#import`）。
     /// 后端映射：Arrow→`arrowCursor`、IBeam→`IBeamCursor`、PointingHand→`pointingHandCursor`、

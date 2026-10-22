@@ -192,6 +192,7 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | 跨显示器移动 | 窗口出现在另一台显示器上，无头环境无法验证 |
 | 表面契约与无头产物 | `Surface` 抽象能否被外部实现、无头路径能否产出 PNG，需真实文件产物 |
 | 退出路径 | 「主动退出」与「关闭主窗」两条结束路径是否都能干净退出 |
+| 关闭请求闸门（真机） | 「OS 关闭钮的请求何时置位」「否决后窗口是否真的不销毁」「窗口管理器是否重发关闭请求」三项只有真实窗口管理器参与才有答案；无头底座的程序化置位（`set_should_close`）代替不了消息路径，逐后端的清位落点也只有真机能验 |
 
 **不纳入人工测试的头及其理由**：
 
@@ -419,6 +420,25 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 
 **本例与 、及控件级 TitleBar 三钮的平台范围**：步骤 9–11 复原 `demo_csd_gallery` 的原始缺陷场景（的动因）——向下拉长窗口露出 `Close this preview` 后，修复前按按钮可见位置点击无效、须点击其上方约一个标题栏高度才生效；修复后同一可见位置点击即命中。步骤 12–17 的控件级 TitleBar 走查中，`−` / `□` / `×` 经 `WindowChrome` 转发的 `Surface::close()` / `minimize()` / `toggle_maximize()` / `set_fullscreen()` 为默认空实现、仅 Wayland（`xdg_toplevel`）覆盖（见 `specification/07-environment-modifier.md` 的「程序化窗口控制」段）——在 Win32 真机上表现为无害空动作，属既有平台范围、非缺陷，更非本次命中修复的回归；命中是否对齐以 `Info` 动作日志与 `Close this preview` 的可见位置点击判定，不得把三钮的空动作记为失败。
 
+### 2.9 关闭请求闸门（跨后端真机走查）
+
+#### TC-WINDOW-019 关闭请求闸门的置位时机、否决保活与逐后端清位走查
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-019 |
+| 测试目的 | 验证关闭请求闸门在真实窗口环境下的三项表现：OS 关闭钮的置位时点、否决后窗口不销毁且窗口管理器是否重发请求、各后端清位落点的实测差异 |
+| 前置条件 | 仓库根目录；关闭闸门真机探针已按被测后端的口径构建（Win32 腿用本机默认 `build/` 追加 `AURORA_BUILD_VERIFY_TOOLS=ON` 重 configure，X11 / GLFW 腿按 §1.2 的独立构建目录，Wayland / macOS / WASM 三腿需对应平台真机）；活动桌面会话（锁屏时窗口收不到 OS 关闭消息）；真实指针或等效注入通道 |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 启动装载了「首问否决、再问放行」闸门回调的关闭闸门真机探针，取 Win32 腿，确认主窗已显示（纯执行，无预期结果）<br>2. 点击探针主窗标题栏的关闭按钮一次（纯执行，无预期结果）<br>3. 读取探针输出的关闭请求置位时点记录（相对 `pump_all_once` 与 `on_frame_` 的先后）与窗口存活状态<br>4. 等待约两帧后再次点击同一关闭钮一次（纯执行，无预期结果）<br>5. 读取闸门询问计数与窗口存活状态<br>6. 判定本后端在否决后**是否重发**关闭请求（以询问计数是否自增为据）<br>7. 切到放行档，再次点击关闭钮（纯执行，无预期结果）<br>8. 读取窗口存活状态与 `err.txt` 的回收行<br>9. 在 X11 会话（`DISPLAY` 指向可达 X server）下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>10. 记录 X11 腿的三项实测（置位时点 / 是否重发 / 否决后是否存活）<br>11. 在 Wayland 会话下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>12. 记录 Wayland 腿的三项实测<br>13. 在 GLFW 构建目录下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>14. 记录 GLFW 腿的三项实测（含 `glfwSetWindowShouldClose` 清位后 `glfwWindowShouldClose` 是否回到假）<br>15. 在 macOS 真机上按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>16. 记录 macOS 腿的三项实测（骨架后端：清位是否生效、是否出现 fail-open `WRN`）<br>17. 在 WASM 页面壳下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>18. 记录 WASM 腿的三项实测（含「否决任一窗口即否决全部」的共享标志降级是否如申报发生）<br>19. 汇总六腿记录，与 `specification/06-app-platform.md` §2.4 的申报逐条核对 |
+| 预期结果 | 3. 置位时点落在帧内的 `pump_all_once` 之后、`on_frame_` 之前（即 OS 关闭消息由本帧 pump 带进来的当帧旗标）；窗口仍存活且当帧继续出图<br>5. 询问计数为 2（第一次置位与再置位各一次抬沿，同帧多次置位不重复问）；窗口**仍存活**，`err.txt` 无回收行<br>6. 计数自增即证明本后端的窗口管理器在否决后**不再重发**关闭请求；若计数持续自增则记为「重发」，须在记录表备注中写明重发频率（二者都属可接受实测，但必须与规格申报一致）<br>8. 窗口消失；`err.txt` 恰新增 1 行 `INF`，消息形如 `[app] window host closed and reaped: id= <N>`<br>10. 三项齐全且与 Win32 腿的口径逐项可比：置位时点同样落在 pump 之后，否决后窗口存活<br>12. 三项齐全；Wayland 的程序化 `Surface::close()` 写的是同一个后端位，故「程序化 / OS」两路在宿主记账位上须可分（来源判为 `Programmatic` 而非 `OperatingSystem`）<br>14. 三项齐全，且清位后 `glfwWindowShouldClose` 读回假<br>16. 三项齐全；macOS 骨架后端如实记录清位是否生效与是否出现 fail-open `WRN`（不得记为缺陷，属骨架后端的既有范围）<br>18. 三项齐全；页面级单标志共享导致的「否决任一窗口即否决全部」须如实记录是否与规格申报一致<br>19. 六腿记录与规格申报逐条一致；凡申报为降级的项（WASM 共享标志、macOS 骨架）在实测中确有对应表现，未申报的项不得出现降级 |
+
+**本例编号的取定**：现最高为 016；017 / 018 为同批预留后未落用的断档序号，按 §1.4「序号不复用」不作回填，本例取下一个可用序号 019。
+
+**本例与 TC-WINDOW-011 / 012 的分工**：那两条走 `demo_multi_window` 的默认路径（不装闸门回调），只验「关闭能干净退出」与退出策略下的存活边界；本例装载闸门回调，验的是「关闭可被撤销」与逐后端的清位落点。既有 demo 载体不装闸门、无法承载，故本例载体为**探针（非 demo）**，构建口径同 §1.2 的各后端探针段（三开关：后端开关 / `AURORA_ENABLE_DEBUG` / `AURORA_BUILD_VERIFY_TOOLS`）。
+
+**六腿不可互相替代的原因**：OS 关闭请求的置位发生在后端消息路径里，清位是各后端私有标志的回写，二者都是后端私事；无头底座的 `set_should_close(false)` 能证明闸门逻辑正确，不能证明「点了关闭钮窗口真的还在」——后者才是本例的判据，也是「否决后窗口管理器是否重发」这一问只有真机能回答的原因。
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -439,3 +459,4 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | TC-WINDOW-014 | 2026-10-12 | WorkBuddy | PASS | | 步骤 2：退出码 0。步骤 3：`content_inset: top=36.0 left=0.0 right=0.0 bottom=0.0`；`band=303030 below=FFFFFF (expect 303030 / FFFFFF)`；恰 7 行 `[PASS]`（client-side 的 inset/带像素/内容零入侵三条 + auto 的 inset/零入侵两条 + frameless 的 inset/零入侵两条），0 行 `[FAIL]`，末行 `checks=7 pass=7`。步骤 4：`err.txt` 为空 | | 自动段三策略映射逐条过；步骤 5 人工目视段待真机会话补记（本会话无指针注入通道）。构建口径为 §1.2 的 `build-verify-x11`（`AURORA_BACKEND_X11=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON`） |
 | TC-WINDOW-015 | 2026-10-12 | WorkBuddy | PASS | | 步骤 2：退出码 0。步骤 3：末行 `checks=47 pass=47`；ClientSide 段客户区 = 窗口矩形（`WM_NCCALCSIZE` 吞框）、`content_inset` `top=36`、带像素 `#303030` 且内容区 `#FFFFFF` 零入侵、逐点热区回归过（八向 / 标题带 / 按钮→HTCLIENT）、悬停关钮 `#E01B24`、同钮释放触发关窗；热更段带 `#202020`、按压 `#991D11` 覆悬停 `#C42B1C`、拖离松手不关窗且无残留高亮；Auto 段带像素 `#FFFFFF`、窗口顶带仍报 `HTCAPTION`（系统 caption 完好）；降级段左/底缘与角点 `HTCLIENT` 化、角点落入标题带报 `HTCAPTION`、带像素与栏高不变；最大化段客户区 = 显示器工作区、左缘 `HTCLIENT`、带空白 `HTCAPTION`、释放最大化钮完成最大化→还原往返。步骤 4：`err.txt` 为 0 字节 | | 自动段五档映射逐条过；DWM 合成开启；降级判据经 `frame.shadow_margin_dp = 0` 显式注入实测；判据经三次变异（热区门收窄到 csd_border、最大化标题带门加 sizable、win32_surface 删除 `paint_decoration` 调用）逐一转红后恢复复绿，非结构性假绿。步骤 5 人工目视段（拖动/双击/Aero Snap/系统菜单）待真机会话补记。构建口径为本机默认 `build/` 追加 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 重 configure（WIN32/DEBUG 两开关已满足） |
 | TC-WINDOW-016 | 2026-10-12 | WorkBuddy | PASS | | 步骤 4：`Cycle title-bar theme` 按钮可见位置点击逐档循环，状态行依次为 `host title-bar theme → AdwaitaLight`、`→ WindowsDark`、`→ WindowsLight`，顶部自绘标题带整带配色随主题逐档重绘。步骤 6：状态行 `window frame shadow → off`。步骤 8：状态行 `title-bar icon → set`，标题带左端出现 24×24 双色图标。步骤 9–11：物理 840×640 缩矮后 `Close this preview` 带从像素扫描中消失，物理 840×940 拉长后于原相对位置重现（bitmap 纵带 y=[698,754]），按该可见位置（屏幕物理 (291,878)）真实点击后窗口立即消失，`err.txt` 新增 `INF` 行 `[app] window host closed and reaped: id=4`。步骤 13：Borderless 预览在绘制位置点击 `Info` 后新增 `INF` 行 `csdg: info clicked`；`−` / `□` / `×` 点击后窗口存活、无新增行。步骤 15：`Close this preview` 后窗口消失并新增回收行 `id=5`。步骤 17：Frameless 同口径复验，`csdg: info clicked` 再新增 1 行、`×` 无动作且窗口存活、`Close this preview` 后新增回收行 `id=6`。步骤 18：全文无 `ERR` / `FTL` | | 取证口径：真机点击经 `SetCursorPos` + `mouse_event` 注入屏幕物理坐标（非 `PostMessage` 直投），落点取 DPI 感知 `PrintWindow` 像素扫描出的按钮带中轴（窗口物理 rect (152,152) 840×780 @ DPI 144 即 150% 缩放）；运行二进制为含 修复的构建（可执行文件 mtime 晚于修复源文件、工作树对该源文件无未提交改动）。平台范围观察：控件级 TitleBar 的 `−` / `□` / `×` 为 Win32 无害空动作（`Surface` 四操作默认空实现、仅 Wayland 生效，见 `specification/07-environment-modifier.md`），命中链本身无恙（同条 `Info` 动作在绘制位置逐次触发日志）。观察性现象：每扇预览窗关闭时稳定新增 1 行 `WRN`（`layout parent detached while the child widget is still alive: Column`，应用根子树解挂序提示），不影响关闭与回收，不记缺陷 |
+| TC-WINDOW-019 | | | | | | | |

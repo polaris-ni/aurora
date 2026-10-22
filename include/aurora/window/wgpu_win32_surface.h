@@ -106,6 +106,8 @@ class WgpuWin32Surface final : public Surface {
     /// @brief 是否已收到关闭窗口请求（转发共享宿主；WM_CLOSE/WM_DESTROY 置位）。
     /// @return 收到关闭请求为 true，主循环据此退出。
     [[nodiscard]] auto should_close() const -> bool override { return win_->should_close(); }
+    /// @brief 撤销关闭请求：转发到共享宿主（与 `should_close()` 同源，不在此另设判定）。
+    auto cancel_close() -> void override { win_->cancel_close(); }
     /// @brief 抽取并派发本线程消息队列中的窗口消息（转发共享宿主）。
     auto poll_platform_events() -> void override { win_->poll_platform_events(); }
     /// @brief 阻塞等待消息或超时（转发共享宿主）。

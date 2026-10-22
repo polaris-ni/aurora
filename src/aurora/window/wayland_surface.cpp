@@ -135,6 +135,8 @@ struct WaylandSurface::Impl {
     bool pending_tiled = false;  ///< 任一 TILED_LEFT/RIGHT/TOP/BOTTOM（xdg-shell v2，阴影边距塌缩用）
     bool pending_act = true;
     bool close_requested = false;
+    /// @brief 连接已死（合成器退出/协议错误）：此后拒绝清位（见 `WaylandSurface::cancel_close`）。
+    bool window_gone = false;
     bool active = true;
     bool minimized = false;
     bool tiled = false;  ///< 当前合成器平铺态（阴影边距塌缩；标题栏保留）
@@ -1793,6 +1795,12 @@ auto WaylandSurface::frame_count() const -> int { return impl_->presented; }
 auto WaylandSurface::scale_factor() const -> float { return static_cast<float>(impl_->scale); }
 
 auto WaylandSurface::should_close() const -> bool { return impl_->close_requested; }
+auto WaylandSurface::cancel_close() -> void {
+    // 连接已死路径拒绝清位：调用方经后置复验走 fail-open（记 WARN、当帧完成回收）。
+    if (!impl_->window_gone) {
+        impl_->close_requested = false;
+    }
+}
 
 auto WaylandSurface::set_present_dirty(const std::vector<Rect> &device_rects) -> void {
     impl_->present_dirty = device_rects;
@@ -2052,6 +2060,7 @@ auto WaylandSurface::poll_platform_events() -> void {
         // 连接错误（合成器退出/协议错误）：按关闭处理，帧循环可退出。
         AURORA_LOG_WARN("window", "WaylandSurface: display connection error; treating as close.");
         d.close_requested = true;
+        d.window_gone = true;  // 连接已死：此后 cancel_close 必须拒绝清位
     }
     if (d.present_stale) {
         // 上一帧被派发点上的 configure 打断而丢帧（见 present()）：此刻已不在渲染栈内，重绘请求不再被

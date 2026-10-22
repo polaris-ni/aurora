@@ -99,10 +99,93 @@
 | `LastWindowClosed`（默认） | 最后一个**有 OS 窗口**的宿主关闭即退出；单窗口用法 ≡ 历史行为 |
 | `MainWindowClosed` | 主窗口关闭 → 连带关闭全部窗口并退出（传统单主窗应用） |
 | `ExplicitOnly` | 仅 `Application::quit()` 可退出：窗口全关也继续运行（常驻 / 托盘型应用） |
+| 关闭闸门（与策略正交） | 三种策略下的关闭请求**都**先过 `set_on_close_requested` 询问步，被否则清位不进回收；只有 `quit()` 不走关闭旗标、天然不过闸（详见下节「窗口关闭请求闸门」） |
 
 - `quit()` 在**任何**策略下都使 `run()` 退出；`set_main_window(WindowId)` 可改主窗口（默认首个登记的宿主）。
 - `set_on_window_closed(cb)`：宿主被回收**之后**触发一次（参数为被关闭窗口 id），供释放外部资源。
 - **回收规则**：`reap_closed()` 每帧末执行——先收集待回收 id 再统一销毁（杜绝迭代中销毁）；从属窗口的连带关闭只置位、由**下一次**回收执行；全部窗口都关闭时**保留主窗口宿主**，使 `scene()`/`window()` 等访问器在 `run()` 结束后仍可用。
+
+**窗口关闭请求闸门（销毁前可否决）**
+
+关闭原本是一条单向旗标链：后端置位 → 宿主聚合 → 帧末 `reap_closed` 无条件回收，应用侧没有任何拦截点（`set_on_window_closed` 排在回收**之后**，问什么都来不及）。闸门在「置位」与「回收」之间插入一枚可否决的询问步，使「关闭」成为可撤销的请求而非既成事实。
+
+| 成员 | 说明 |
+|:---|:---|
+| `Application::set_on_close_requested(std::function<bool(WindowId, CloseRequestSource)>)` | 注册闸门回调；回 `false` 即**撤销**本次关闭（清旗标、不进回收），回 `true` 即放行（当帧帧末照常回收）；置空注销 |
+| `CloseRequestSource`（落 `window.h`，紧邻 `ExitPolicy`） | 关闭来源三档枚举；枚举值序即 ABI 契约，不得重排 |
+| `WindowHost::request_close(CloseRequestSource source = Programmatic)` | 带默认参的关闭请求入口，既有调用点源码兼容；`Application::close_window()` 走 `Programmatic` |
+| `WindowHost::cancel_close()` | 清 `close_requested_` / `close_source_` / `close_asked_` 三枚记账位并转发 `Surface::cancel_close()`；二者均**公有** |
+| `Surface::cancel_close()`（virtual，默认空实现） | 契约：把 `should_close()` 清回 `false`；自定义 `Surface` 不覆写即零清位，由 fail-open 兜底 |
+
+**调用点时序**：询问步 `poll_close_requests()` 插在 `step_frame` 内 **`on_frame_()` 之后、`tick_all()` 之前**：
+
+```
+drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_all → anim/sched tick → render_all → reap_closed → pump_deferred_work → wait_once
+```
+
+三条相对次序的理由：晚于 `pump_all_once`（本帧的 OS 关闭消息已置位，当帧即可被问）、早于 `render_all`（被否窗口当帧照常出图，不闪）、早于 `reap_closed` 的收集步（收集以 `should_close()` 为判据，被否宿主天然跳过，**无需守卫**）。**决定性的一条是「晚于 `on_frame_`」**：应用最典型的写法就是在 `on_frame_` 里调 `close_window()`，若询问步排在其之前，该关闭当帧直接进 `reap_closed` 被回收、**永远不过闸**——「程序化关闭也过闸」会被架空。
+
+策略连带（`MainWindowClosed` 的全窗预置位）整段上移到询问步首部、**在闸门判据之前**，故无闸门回调时净效果与历史行为逐位等价；连带循环**排除主窗自身**，否则会把主窗的来源覆写成 `PolicyCascade`。
+
+**来源三档与判定式**
+
+| 档位 | 语义 |
+|:---|:---|
+| `OperatingSystem` | OS 关闭钮 / 窗口管理器请求（Win32 `WM_CLOSE`、X11 `WM_DELETE_WINDOW`、Wayland `xdg_toplevel.close`） |
+| `Programmatic` | 程序化关闭：`Application::close_window()` / `Window::close()` / `WindowHost::request_close()` |
+| `PolicyCascade` | 策略连带：`MainWindowClosed` 的全窗连带与 Transient 从属连带 |
+
+判定式为 `src = close_requested_ ? close_source_ : OperatingSystem`。**不能**反过来用「后端旗标 ⇒ OS、宿主旗标 ⇒ 程序化」推导：各后端的程序化 `Surface::close()` 是否写后端旗标并不一致（Wayland 写、X11 / Win32 反之），只有宿主层的记账位是可信来源。推论：Win32 外部 `PostQuitMessage` 投递的 `WM_QUIT` 折算出的关闭请求**落 `OperatingSystem`**——该路径不经过宿主记账位，要标 `Programmatic` 须新增 `Surface` 侧的原因通道（本批不做）。
+
+**边沿闩口径（一次一问）**
+
+每宿主私有 `close_asked_` + `close_source_`（**不进公共 API**），询问步对宿主做**单遍索引遍历**：旗标为假则复位闩；已置位且未问过则置闩并询问；回 `false` 则 `cancel_close()`。策略连带已在询问之前置位，故单遍即覆盖连带扇，无需第二遍。遍历用索引且**每轮重取 `hosts_.size()`**——回调内可以 `open_window()` / `close_window()`。
+
+| 场景 | 口径 |
+|:---|:---|
+| 同帧多次置位 | 旗标是 bool，置位幂等；一个抬沿只问一次 |
+| 置位 → 否决 → 再置位 | 否决清闩；再置位即新抬沿，再问一次 |
+| 后端帧间重复上报 | 每次上报前旗标已被清，各自成为新抬沿，各自问一次 |
+| 应用长期不答 | 询问是同步调用，帧循环停在该点；**不**重试、**不**重复询问（故闸门回调只许快） |
+
+**清位三层与 fail-open**
+
+| 层次 | 落点 |
+|:---|:---|
+| `Surface::cancel_close()` | GLFW 用 `glfwSetWindowShouldClose(w, GLFW_FALSE)`；Win32 清 `should_close`（`handle_close` 只置位、不 `DestroyWindow`）；X11 / Wayland 清 `close_requested`；无头 `set_should_close(false)`；macOS 为骨架（清 `Impl` 标志，真实 AppKit 侧待该后端实写时一并落地）；同源面 `d3d11` / `wgpu_win32` / `wgpu_x11` / `wgpu_wayland` 逐面转发 |
+| `WindowHost::cancel_close()` | 清三枚记账位 + 转发到 `Surface` |
+| 后置复验 | 复验 `should_close()` 仍为真 ⇒ 记一次 `AURORA_LOG_WARN("app", …)` 并按**放行**处理 |
+
+- **fail-open 教义**：宁可完成用户请求的关闭，也不留一扇永远关不掉的窗。严格模式下该 WARN **不会**升级为硬失败（只有 `Diagnostics::degraded` 会），故本路径**不上报 `degraded`**。
+- **已销毁路径必须拒绝清位**：X11 `DestroyNotify`、Win32 `WM_DESTROY`、Wayland 连接错误三处的窗口业已不存在，清位会造出收不掉的僵尸宿主（X11 侧还会触发 BadWindow）。各后端私有一枚 `window_gone` 标志在这些路径置位，`cancel_close()` 遇之**拒绝清位**，由 fail-open 落到「WARN + 放行、当帧回收」。这让 fail-open 从「自定义 `Surface` 的兜底」升级为「已销毁窗口的必然出口」。
+- 「否决后 `should_close()` 必为假」是成文的**后置条件**，由后置复验守住。
+
+**否决语义定稿**
+
+| 场景 | 定稿 |
+|:---|:---|
+| 普通 OS 请求被否 | 清旗标；当帧继续 `render_all`；不进回收、不写几何快照、`set_on_window_closed` 不触发 |
+| `MainWindowClosed` 全否 | 主窗先被否 ⇒ 连带虽已预置但同步撤销 ⇒ 无一扇被收 ⇒ `should_exit()` 为假 ⇒ `run()` 继续 |
+| `MainWindowClosed` 主放行、部分扇被否 | **主窗照收、`run()` 退出**；被否扇作为活宿主留存至 `~Application`——否决**不等于**不退出，此条必须明写 |
+| `quit()` | 不走关闭旗标，**天然不过闸**；任何策略下都使 `run()` 退出 |
+| `ExplicitOnly` | 关闭照问；退出与否与闸门无关 |
+| Transient 从属连带 | 过闸，来源 `PolicyCascade`；owner 先收、从属次帧被问（现有时序不变） |
+| 孤儿从属（owner 已被收、从属被否存活） | 连带被否时**一并解绑 owner**（`surface().set_owner(nullptr)`，Win32 侧 `GWLP_HWNDPARENT` 置 NULL 即合法解除），否则被否从属持悬垂 owner 指针，且 Transient 连带与模态输入恢复都失去载体 |
+| 回调内再 `close_window()` / `open_window()` | 容许（索引遍历 + 每轮重取尺寸）；不承诺同帧必问 |
+| 回调抛异常 | ERROR 日志 + **按放行处理** + **不复位闩**；绝不穿出 `step_frame`（按否决 + 复位闩会导致每帧一问、每帧一条 ERROR、窗口永久关不掉，直接违反 fail-open） |
+| 回调内跑应用自有模态循环 | 允许；**禁止重入 `run()` / `step_frame()`**（库不设重入护栏，此为文档硬约束） |
+| **已知边界**：关闭旗标在 `run()` 启动前已置位 | 闸门**只覆盖帧循环推进期间**的关闭请求。若旗标在 `run()` 启动前即为真（`MainWindowClosed` 下 `should_exit()` 立即为真），循环一帧都不推进，闸门不会被询问 |
+
+**与 `set_on_window_closed` 的时点分工**
+
+| 回调 | 时点 | 能做什么 |
+|:---|:---|:---|
+| `set_on_close_requested` | 帧内、销毁与回收**之前** | 可否决：回 `false` 撤销本次关闭，窗口仍存活、当帧仍渲染 |
+| `set_on_window_closed` | 宿主被回收**之后** | 只能事后清理与该窗口绑定的外部资源；窗口已不存在，无法拦截 |
+
+**正确用法模式**：闸门是**同步布尔判定**，不是「弹框等用户」的地方。正确模式是「回 `false` 撤销 → 应用自行挂确认浮层 → 用户确认后再调 `close_window()`（`Programmatic` 源直接放行）」。回调纪律同 `CODING_STANDARDS.md` §4.1 的宿主回调要求：**只许快、不许阻塞、不许抛**。
+
+**WASM 后端（如实申报的降级）**：`WasmSurface::cancel_close()` 给的是真实实现（把页面级 static 标志写回 false），但该标志**为全部实例共享**——否决任一窗口即否决全部；且浏览器可在 beforeunload 后强制卸载，本后端**不保证**不退到 fail-open 的「满载档」。不实现（留空实现）的后果是每次卸载刷一条 fail-open WARN 且窗口必然被收，比真实实现更差。
 
 **模态与父子窗口**
 

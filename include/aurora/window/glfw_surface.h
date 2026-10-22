@@ -138,6 +138,9 @@ class GlfwSurface : public Surface {
     /// @brief 用户是否请求关闭窗口（`glfwWindowShouldClose`）。
     /// @return 窗口收到关闭请求时 true。
     [[nodiscard]] auto should_close() const -> bool override;
+    /// @brief 撤销本后端的关闭请求（关闭闸门否决时调用）：GLFW 的关闭旗标双向可控，
+    ///        经 `glfwSetWindowShouldClose(window, GLFW_FALSE)` 清回 false。
+    auto cancel_close() -> void override;
 
     /// @brief 非阻塞处理 GLFW 事件队列（`glfwPollEvents`），回调翻译为 aurora `Event` 派发。
     auto poll_platform_events() -> void override;

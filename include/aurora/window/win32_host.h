@@ -129,6 +129,9 @@ class Win32Host {
     /// @brief 用户是否请求关闭窗口（WM_CLOSE 后置位）。
     /// @return 收到关闭请求时 true。
     [[nodiscard]] auto should_close() const -> bool;
+    /// @brief 撤销本窗口的关闭请求（关闭闸门否决时调用）：清 `should_close` 标志。
+    ///        `WM_DESTROY`（窗口已销毁，含随 owner 自动销毁的 owned 子窗）置的位**拒绝清**。
+    auto cancel_close() -> void;
     /// @brief 已呈现次数（测试/自检用）：验证 WM_SIZE/WM_PAINT 触发了同步重渲染。
     /// @return present_request 生效以来的呈现计数。
     [[nodiscard]] auto present_count() const -> int;

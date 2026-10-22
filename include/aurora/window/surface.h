@@ -131,6 +131,18 @@ class Surface {
     /// @brief 平台是否已请求关闭（帧循环据此退出）。
     /// @return 收到关闭请求时 true；默认 false（无 OS 关闭事件）。
     [[nodiscard]] virtual auto should_close() const -> bool { return false; }
+    /// @brief 撤销本后端的关闭请求：把 `should_close()` 清回 `false`（关闭闸门否决时调用）。
+    ///
+    /// 后置条件：调用后 `should_close()` **必须**为假。调用方（`WindowHost::cancel_close`）
+    /// 会复验该条件，仍为真则记 WARN 并按「放行」处理（fail-open：宁可完成用户请求的关闭，
+    /// 也不留一扇永远关不掉的窗）。
+    ///
+    /// **窗口已被 OS 销毁**的路径（`WM_DESTROY` / `DestroyNotify` / Wayland 连接错误）本方法
+    /// **必须拒绝清位**：窗口已不存在，清位会造出永远收不掉的僵尸宿主；此时由上述 fail-open
+    /// 兜住（记 WARN、当帧完成回收）。
+    ///
+    /// 默认空实现：自定义 Surface 零改动，代价是该后端恒不可否决，由 fail-open 后置复验兜住。
+    virtual auto cancel_close() -> void {}
     /// @brief 轮询平台原生事件（无头实现为空操作）。
     virtual auto poll_platform_events() -> void {}
 
@@ -587,6 +599,9 @@ class HeadlessSurface : public Surface {
     /// 确定性驱动，否则多窗口帧循环无法在无头环境断言。
     /// @param v 置位值：true 模拟用户请求关闭。
     auto set_should_close(bool v) -> void { should_close_ = v; }
+    /// @brief 撤销关闭请求（无头测试 seam）：把 `set_should_close` 的写入回滚为 false。
+    auto cancel_close() -> void override { should_close_ = false; }
+
 
     /// @brief 覆写悬停光标下发：Headless 无系统光标，改为按序记录下发形状，
     /// 使「派发器解析 → Application 接线 → Surface 生效」整条链路在无头环境可确定性断言

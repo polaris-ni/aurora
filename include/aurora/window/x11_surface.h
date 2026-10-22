@@ -101,6 +101,10 @@ class X11Surface final : public Surface {
     /// @brief 是否已收到关闭窗口请求：`ClientMessage(WM_DELETE_WINDOW)` 置位。
     /// @return 收到关闭请求为 true，主循环据此退出。
     [[nodiscard]] auto should_close() const -> bool override;
+    /// @brief 撤销本后端的关闭请求（关闭闸门否决时调用）：`WM_DELETE_WINDOW` 与 CSD 关闭钮
+    ///        置的位可清（ICCCM 语义下客户端本就可以不销毁窗口）；`DestroyNotify` 置的位
+    ///        **拒绝清**（XID 已失效，清位会造出收不掉的僵尸宿主并触发 BadWindow）。
+    auto cancel_close() -> void override;
     /// @brief 非阻塞抽取并派发 X 队列中的全部事件（翻译为 aurora `Event` 后上抛）。
     auto poll_platform_events() -> void override;
     /// @brief 阻塞等待 X 事件/唤醒/超时：poll(2) 于 X 连接 fd + 自唤醒管道。

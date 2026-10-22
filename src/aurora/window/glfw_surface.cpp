@@ -201,6 +201,13 @@ struct GlfwSurface::Impl {
     }
     [[nodiscard]] auto scale_factor() const -> float { return scale; }
     [[nodiscard]] auto should_close() const -> bool { return glfwWindowShouldClose(window) == GLFW_TRUE; }
+    /// @brief 撤销关闭请求：GLFW 侧旗标由 `glfwSetWindowShouldClose` 双向可控，清位后
+    ///        `should_close()` 立即回到 false（后置条件成立，不走 fail-open）。
+    auto cancel_close() -> void {
+        if (window != nullptr) {
+            glfwSetWindowShouldClose(window, GLFW_FALSE);
+        }
+    }
     static auto poll_platform_events() -> void { glfwPollEvents(); }
     auto wait_events(double timeout_ms) const -> void;
     static auto request_wake() -> void { glfwPostEmptyEvent(); }
@@ -812,6 +819,11 @@ auto GlfwSurface::set_size(Size s) -> void {
 [[nodiscard]] auto GlfwSurface::size() const -> Size { return pimpl_->size(); }
 [[nodiscard]] auto GlfwSurface::scale_factor() const -> float { return pimpl_->scale_factor(); }
 [[nodiscard]] auto GlfwSurface::should_close() const -> bool { return pimpl_->should_close(); }
+auto GlfwSurface::cancel_close() -> void {
+    if (pimpl_ != nullptr) {
+        pimpl_->cancel_close();
+    }
+}
 auto GlfwSurface::poll_platform_events() -> void { Impl::poll_platform_events(); }
 auto GlfwSurface::wait_events(double timeout_ms) -> void { pimpl_->wait_events(timeout_ms); }
 auto GlfwSurface::request_wake() -> void { Impl::request_wake(); }

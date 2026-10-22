@@ -99,6 +99,12 @@ auto MacOSSurface::present() -> Result<bool> {
 auto MacOSSurface::size() const -> Size { return size_; }
 
 auto MacOSSurface::should_close() const -> bool { return impl_ ? impl_->should_close : true; }
+auto MacOSSurface::cancel_close() -> void {
+    // impl_ 为空时 should_close() 恒真（窗口已不存在）⇒ 不改写，由 fail-open 后置复验兜住。
+    if (impl_ != nullptr) {
+        impl_->should_close = false;
+    }
+}
 
 auto MacOSSurface::set_cursor(CursorShape shape) -> void {
     // 光标形状：NSCursor 为进程级单例，`set` 即改当前光标，无需持有/释放。

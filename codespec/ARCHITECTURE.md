@@ -198,6 +198,15 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 `Application::run` / `Window::run` 为**事件驱动 + 帧节流**模型：每帧末尾经纯函数 `compute_wait_timeout`（`window/frame_pacing.h`）决策下次唤醒，循环在 `Surface::wait_events(timeout_ms)` 阻塞。
 
+**帧内次序（`Application::run` 的 `step_frame`）**：
+
+```text
+drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_close_requests() → tick_all
+             → anim / sched tick → render_all → reap_closed → pump_deferred_work → wait_once
+```
+
+关闭闸门询问步（`poll_close_requests()`）位于 `on_frame_()` 之后、`tick_all()` 之前：晚于 `pump_all_once` 使当帧的 OS 关闭消息必被问到，早于 `render_all` 与 `reap_closed` 的收集步使被否窗口当帧照常出图且不进回收；而排在 `on_frame_()` **之后**是决定性的一条——应用最典型的写法是在 `on_frame_` 里调 `close_window()`，排在其之前会让该关闭当帧即被回收、永远不过闸。闸门语义见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §2.4。
+
 | 情形 | 行为 |
 |:---|:---|
 | 完全空闲（无脏区 / 无动画 / 无定时任务） | 无限等待事件，静态界面 CPU 趋近 0 |

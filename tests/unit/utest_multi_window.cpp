@@ -5,8 +5,10 @@
 /// 全部以 Headless 多实例驱动（无 OS 窗口），不依赖任何真实后端。
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "aurora/app/application.h"
 #include "aurora/app/perf_overlay.h"
@@ -210,6 +212,212 @@ AURORA_TEST_CASE(headless_host_never_owns_a_surface) {
     AURORA_TEST_CHECK_TRUE(host->should_close());
     // Scene 仍可用（render_to_png 与程序化派发路径）。
     AURORA_TEST_CHECK_EQ(std::string{host->scene().root().type_name()}, "Text");
+}
+
+// ---- 关闭闸门（销毁前可否决的公共入口）----
+//
+// 底座与既有用例同款：双窗无头 + `power_saving=false` + `max_frames` 有限帧，
+// 用 `HeadlessSurface::set_should_close(true)` 模拟「用户点了 ×」。
+
+AURORA_TEST_CASE(close_gate_veto_keeps_window_alive) {
+    WindowOptions opts;
+    opts.max_frames = 4;
+    opts.power_saving = false;
+
+    auto wa = make_window("A");
+    AURORA_TEST_REQUIRE_NOT_NULL(wa.get());
+    Application app{make_scene("A"), std::move(wa), opts};
+    auto wb = make_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    auto *sb = dynamic_cast<HeadlessSurface *>(&wb->surface());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene("B"));
+    AURORA_TEST_REQUIRE_NOT_NULL(sb);
+
+    int asked = 0;
+    int closed = 0;
+    app.set_on_window_closed([&closed](WindowId) -> void { ++closed; });
+    app.set_on_close_requested([&asked](WindowId, CloseRequestSource src) -> bool {
+        ++asked;
+        // 纯后端置位（未经 request_close 记账）⇒ 判为 OperatingSystem。
+        AURORA_TEST_CHECK_EQ(src, CloseRequestSource::OperatingSystem);
+        return false;  // 恒否决
+    });
+
+    sb->set_should_close(true);  // 模拟用户点 B 的 ×
+    app.run();
+
+    // 无闸门时 B 在首帧即被回收；装了恒否决的闸门后 B 存活且只问一次（边沿闩）。
+    AURORA_TEST_CHECK_EQ(asked, 1);
+    AURORA_TEST_CHECK_EQ(closed, 0);
+    AURORA_TEST_CHECK_EQ(app.window_count(), 2U);
+    AURORA_TEST_CHECK_NOT_NULL(app.window_host(id_b));
+    AURORA_TEST_CHECK_FALSE(app.window_host(id_b)->should_close());  // 记账位与后端旗标双清
+}
+
+AURORA_TEST_CASE(close_gate_reasks_on_a_new_edge) {
+    WindowOptions opts;
+    opts.max_frames = 4;
+    opts.power_saving = false;
+
+    auto wa = make_window("A");
+    AURORA_TEST_REQUIRE_NOT_NULL(wa.get());
+    Application app{make_scene("A"), std::move(wa), opts};
+    auto wb = make_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    auto *sb = dynamic_cast<HeadlessSurface *>(&wb->surface());
+    app.open_window(std::move(wb), make_scene("B"));
+    AURORA_TEST_REQUIRE_NOT_NULL(sb);
+
+    int asked = 0;
+    int frames = 0;
+    app.set_on_close_requested([&asked](WindowId, CloseRequestSource) -> bool {
+        ++asked;
+        return false;  // 恒否决
+    });
+    app.set_on_frame([&frames, sb]() -> void {
+        ++frames;
+        if (frames == 2) {
+            sb->set_should_close(true);  // 否决后再置位 ⇒ 新的一条抬沿
+        }
+    });
+
+    sb->set_should_close(true);
+    app.run();
+
+    AURORA_TEST_CHECK_EQ(asked, 2);  // 两次独立请求 ⇒ 问两次（不是每帧都问）
+    AURORA_TEST_CHECK_EQ(app.window_count(), 2U);  // 两次都被撤销
+}
+
+AURORA_TEST_CASE(close_gate_approve_reaps_once) {
+    WindowOptions opts;
+    opts.max_frames = 3;
+    opts.power_saving = false;
+
+    auto wa = make_window("A");
+    AURORA_TEST_REQUIRE_NOT_NULL(wa.get());
+    Application app{make_scene("A"), std::move(wa), opts};
+    auto wb = make_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    auto *sb = dynamic_cast<HeadlessSurface *>(&wb->surface());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene("B"));
+    AURORA_TEST_REQUIRE_NOT_NULL(sb);
+
+    int asked = 0;
+    int closed = 0;
+    app.set_on_window_closed([&closed](WindowId) -> void { ++closed; });
+    app.set_on_close_requested([&asked](WindowId, CloseRequestSource) -> bool {
+        ++asked;
+        return true;  // 恒放行
+    });
+
+    sb->set_should_close(true);
+    app.run();
+
+    AURORA_TEST_CHECK_EQ(asked, 1);
+    AURORA_TEST_CHECK_EQ(closed, 1);  // 放行 ⇒ 当帧回收，关闭回调恰一次
+    AURORA_TEST_CHECK_EQ(app.window_count(), 1U);
+    AURORA_TEST_CHECK_NULL(app.window_host(id_b));
+}
+
+AURORA_TEST_CASE(close_gate_reports_programmatic_source) {
+    WindowOptions opts;
+    opts.max_frames = 3;
+    opts.power_saving = false;
+
+    auto wa = make_window("A");
+    AURORA_TEST_REQUIRE_NOT_NULL(wa.get());
+    Application app{make_scene("A"), std::move(wa), opts};
+    auto wb = make_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene("B"));
+
+    int asked = 0;
+    CloseRequestSource got = CloseRequestSource::OperatingSystem;
+    app.set_on_close_requested([&asked, &got](WindowId, CloseRequestSource src) -> bool {
+        ++asked;
+        got = src;
+        return false;
+    });
+
+    app.close_window(id_b);  // 程序化关闭 ⇒ 经 request_close 记账
+    app.run();
+
+    AURORA_TEST_CHECK_EQ(asked, 1);
+    AURORA_TEST_CHECK_EQ(got, CloseRequestSource::Programmatic);  // 与「后端置位 ⇒ OS」区分开
+    AURORA_TEST_CHECK_EQ(app.window_count(), 2U);
+}
+
+AURORA_TEST_CASE(close_gate_policy_cascade_asks_each_window) {
+    WindowOptions opts;
+    opts.max_frames = 4;
+    opts.power_saving = false;
+
+    auto wa = make_window("A");
+    AURORA_TEST_REQUIRE_NOT_NULL(wa.get());
+    auto *sa = dynamic_cast<HeadlessSurface *>(&wa->surface());
+    Application app{make_scene("A"), std::move(wa), opts};
+    auto wb = make_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene("B"));
+    AURORA_TEST_REQUIRE_NOT_NULL(sa);
+
+    app.set_exit_policy(ExitPolicy::MainWindowClosed);
+    int frames = 0;
+    std::vector<std::pair<WindowId, CloseRequestSource>> asked;
+    app.set_on_close_requested([&asked](WindowId id, CloseRequestSource src) -> bool {
+        asked.emplace_back(id, src);
+        return false;  // 全部否决
+    });
+    // 关闭必须在**帧内**触发：主窗旗标若在 run() 之前就置位，MainWindowClosed 下 should_exit()
+    // 立即为真、循环一帧都不推进，闸门也就没有机会被问（该边界已写入提案的不做清单）。
+    app.set_on_frame([&frames, sa]() -> void {
+        ++frames;
+        if (frames == 1) {
+            sa->set_should_close(true);  // 主窗被请求关闭
+        }
+    });
+
+    app.run();
+
+    // 主窗（后端置位 ⇒ OS）与连带扇（PolicyCascade）各被问一次；全否 ⇒ 无一扇被收。
+    AURORA_TEST_REQUIRE_EQ(asked.size(), 2U);  // 空容器上 front() 是 UB：先致命断言再取元素
+    AURORA_TEST_CHECK_EQ(asked.front().second, CloseRequestSource::OperatingSystem);
+    AURORA_TEST_CHECK_EQ(asked.front().first, app.main_window());
+    AURORA_TEST_CHECK_EQ(asked.back().second, CloseRequestSource::PolicyCascade);
+    AURORA_TEST_CHECK_EQ(asked.back().first, id_b);
+    AURORA_TEST_CHECK_EQ(app.window_count(), 2U);
+    AURORA_TEST_CHECK_NOT_NULL(app.window_host(id_b));
+    AURORA_TEST_CHECK_EQ(frames, 4);  // 未提前退出（无闸门时首帧即退出）
+}
+
+AURORA_TEST_CASE(close_gate_throwing_callback_is_fail_open) {
+    WindowOptions opts;
+    opts.max_frames = 3;
+    opts.power_saving = false;
+
+    auto wa = make_window("A");
+    AURORA_TEST_REQUIRE_NOT_NULL(wa.get());
+    Application app{make_scene("A"), std::move(wa), opts};
+    auto wb = make_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    auto *sb = dynamic_cast<HeadlessSurface *>(&wb->surface());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene("B"));
+    AURORA_TEST_REQUIRE_NOT_NULL(sb);
+
+    app.set_on_close_requested([](WindowId, CloseRequestSource) -> bool {
+        throw std::runtime_error("gate boom");  // 回调抛异常
+    });
+    sb->set_should_close(true);
+
+    bool escaped = false;  // 异常绝不穿出 step_frame / run()
+    try {
+        app.run();
+    } catch (...) {
+        escaped = true;
+    }
+    AURORA_TEST_CHECK_FALSE(escaped);
+    AURORA_TEST_CHECK_EQ(app.window_count(), 1U);  // fail-open：按放行处理
+    AURORA_TEST_CHECK_NULL(app.window_host(id_b));
 }
 
 }  // namespace aurora::test_cases::utest_multi_window

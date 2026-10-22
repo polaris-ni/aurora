@@ -179,6 +179,8 @@ struct Win32Host::Impl {
     float scale = 1.0F;
     WindowStyleOptions style{};  ///< 高级样式（置顶/无边框/尺寸限制）。
     bool should_close = false;
+    /// @brief 窗口已被 `WM_DESTROY` 销毁：此后拒绝清位（见 `Win32Host::cancel_close`）。
+    bool window_gone = false;
     EventHandler handler;
     int present_count = 0;  ///< 已触发同步重渲染次数（WM_SIZE/WM_PAINT 计数）。
     bool minimized = false;  ///< 是否最小化（WM_SIZE SIZE_MINIMIZED）。
@@ -810,6 +812,7 @@ auto Win32Host::Impl::handle_close() -> LRESULT {
 
 auto Win32Host::Impl::handle_destroy() -> LRESULT {
     should_close = true;
+    window_gone = true;  // 窗口已销毁：此后 cancel_close 必须拒绝清位
     // 窗口销毁：先全量断连 UIA provider 再置空 hwnd —— 否则 UIA 侧缓存的 provider 会
     // 在窗口已销毁后回调进来（Chromium / Qt 已知崩溃源，R1）。
     if (a11y != nullptr) {
@@ -1306,6 +1309,13 @@ auto Win32Host::record_client_decoration(DisplayList &dl) const -> bool {
 [[nodiscard]] auto Win32Host::size() const -> Size { return pimpl_->size; }
 [[nodiscard]] auto Win32Host::scale_factor() const -> float { return pimpl_->scale; }
 [[nodiscard]] auto Win32Host::should_close() const -> bool { return pimpl_->should_close; }
+auto Win32Host::cancel_close() -> void {
+    // 已销毁路径拒绝清位：调用方经后置复验走 fail-open（记 WARN、当帧完成回收）。
+    if (!pimpl_->window_gone) {
+        pimpl_->should_close = false;
+    }
+}
+
 [[nodiscard]] auto Win32Host::present_count() const -> int { return pimpl_->present_count; }
 [[nodiscard]] auto Win32Host::background_brush() -> void * { return static_cast<void *>(Impl::bg_brush); }
 

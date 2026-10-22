@@ -75,6 +75,20 @@ enum class ExitPolicy : std::uint8_t {
     ExplicitOnly,  ///< 仅 `Application::quit()` 可退出：窗口全关也不退出（常驻型/托盘型应用）
 };
 
+/// @brief 窗口关闭请求的来源：区分「谁发起的关闭」，供 `Application::set_on_close_requested` 判定。
+///
+/// 判定口径：`WindowHost::request_close(source)` 显式记账；未经记账而关闭旗标为真者一律判为
+/// `OperatingSystem`。不能反过来用「后端旗标 ⇒ OS、宿主旗标 ⇒ 程序化」推导——各后端的程序化
+/// `Surface::close()` 是否写后端旗标并不一致，只有宿主层的记账位是可信来源。
+///
+/// 关闭闸门的完整语义见 specification/06-app-platform.md §2.4。
+/// @note 枚举值序即 ABI 契约，不得重排。
+enum class CloseRequestSource : std::uint8_t {
+    OperatingSystem,  ///< OS 关闭钮 / 窗口管理器请求（WM_CLOSE、WM_DELETE_WINDOW、xdg_toplevel.close）
+    Programmatic,  ///< 程序化关闭：`Application::close_window()` / `Window::close()` / `WindowHost::request_close()`
+    PolicyCascade,  ///< 策略连带：`ExitPolicy::MainWindowClosed` 与 Transient 从属连带
+};
+
 // =============================================================================
 // 窗口构建：选项 / 类型安全工厂 / Surface 种类（原 window/backend.h，已并入本模块）
 // -----------------------------------------------------------------------------

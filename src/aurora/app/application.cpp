@@ -139,7 +139,7 @@ auto Application::windows() const -> std::vector<WindowHost *> {
 
 auto Application::close_window(WindowId id) const -> void {
     if (auto *h = window_host(id)) {
-        h->request_close();  // 下一次帧末由 reap_closed 回收
+        h->request_close(CloseRequestSource::Programmatic);  // 下一次帧末由 reap_closed 回收
     }
 }
 
@@ -231,14 +231,71 @@ auto Application::render_all(double dt) const -> void {
     }
 }
 
-auto Application::reap_closed() -> void {
-    // ① 策略连带：`MainWindowClosed` 下主窗关闭即关闭全部窗口（真正回收在下一帧，
-    //    本帧仅置位，避免在同一轮里一边遍历一边销毁）。
+auto Application::poll_close_requests() -> void {
+    // ① 策略连带：`MainWindowClosed` 下主窗已请求关闭 ⇒ 对每个**非主**宿主置连带位。
+    //    置于闸门判据之前：无回调时净效果与历史 `reap_closed` ① 逐位等价（现有用例的地基）。
+    //    排除主窗自身：它此刻必然已 should_close()，连带到它只会把其来源覆写成 PolicyCascade。
     if (exit_policy_ == ExitPolicy::MainWindowClosed && main_host_ != nullptr && main_host_->should_close()) {
-        for (const auto &h : hosts_) {
-            h->request_close();
+        for (std::size_t i = 0; i < hosts_.size(); ++i) {  // NOLINT(*-loop-convert)
+            if (hosts_[i].get() != main_host_) {
+                hosts_[i]->request_close(CloseRequestSource::PolicyCascade);
+            }
         }
     }
+    if (on_close_requested_ == nullptr) {
+        return;  // 无闸门回调：零行为（仅保留上面的连带置位）
+    }
+    // ② 边沿询问。索引遍历 + 每轮重取 size()：回调内可重入 open/close 窗口（同 pump_all_once 纪律）。
+    for (std::size_t i = 0; i < hosts_.size(); ++i) {  // NOLINT(*-loop-convert)
+        WindowHost *const h = hosts_[i].get();
+        if (!h->should_close()) {
+            h->close_asked_ = false;  // 旗标回落 ⇒ 边沿记忆随之复位（下一个抬起即新的一次询问）
+            continue;
+        }
+        if (h->close_asked_) {
+            continue;  // 本条抬沿已问过：一次关闭请求只问一次
+        }
+        h->close_asked_ = true;
+        if (ask_close_gate(*h)) {
+            continue;  // 放行：留给本帧 reap_closed 回收
+        }
+        h->cancel_close();
+        if (h->should_close()) {
+            // fail-open 后置条件：后端不可否决（或窗口已被 OS 销毁）⇒ 宁可完成用户请求的关闭，
+            // 也不留一扇永远关不掉的窗。
+            AURORA_LOG_WARN("app",
+                            "close request veto unsupported by backend; allowing close: id=" + std::to_string(h->id()));
+            continue;
+        }
+        // 被否存活的从属窗：若其 owner 已被回收，解绑悬垂 owner 指针（Transient 连带与模态
+        // 输入恢复都以 owner 为载体，owner 已死则两者都失去落点）。
+        const WindowOptions &o = h->options();
+        if (o.owner != AURORA_INVALID_WINDOW_ID && window_host(o.owner) == nullptr && h->window() != nullptr) {
+            h->window()->surface().set_owner(nullptr);
+        }
+    }
+}
+
+auto Application::ask_close_gate(const WindowHost &h) const -> bool {
+    // 来源判定式：`close_requested_` 只由 request_close(source) 写，故「未记账而旗标为真」必为 OS 路。
+    // 反之不可用（各后端的程序化 Surface::close() 是否写后端旗标并不一致）。
+    const CloseRequestSource src = h.close_requested_ ? h.close_source_ : CloseRequestSource::OperatingSystem;
+    try {
+        return on_close_requested_(h.id(), src);
+    } catch (const std::exception &e) {
+        // fail-open：异常绝不穿出 step_frame，且按放行处理（若按否决 + 复位闩，确定性抛异常的
+        // 回调会导致每帧一问、每帧一条 ERROR、窗口永久关不掉）。
+        AURORA_LOG_ERROR("app", std::string("on_close_requested threw; allowing close (fail-open): ") + e.what());
+        return true;
+    } catch (...) {
+        AURORA_LOG_ERROR("app", "on_close_requested threw non-std exception; allowing close (fail-open)");
+        return true;
+    }
+}
+
+auto Application::reap_closed() -> void {
+    // ① 策略连带已上移至本帧更早的 `poll_close_requests()`（step_frame 内 on_frame_ 之后）：
+    //    连带置位必须在「询问闸门」之前发生，否则被否的主窗也会连带收掉其余窗口。此处不再置位。
 
     // ② 收集本轮待回收的宿主（先只收集 id，容器推迟到 ④ 才修改，避免迭代器/悬垂）。
     //    同时做几何持久化：必须在此刻（Surface 仍有效、宿主未被销毁），且对**所有**已请求关闭的
@@ -293,7 +350,7 @@ auto Application::reap_closed() -> void {
         // 保持「每轮只销毁 ② 收集到的宿主」的不变式，杜绝迭代中销毁。
         for (const auto &h : hosts_) {
             if (h->options().owner == id) {
-                h->request_close();
+                h->request_close(CloseRequestSource::PolicyCascade);
             }
         }
     }

@@ -178,6 +178,8 @@ struct X11Surface::Impl {
     Size size{.width = 0.0F, .height = 0.0F};  ///< 逻辑 dp（布局用）。
     float scale = 1.0F;
     bool close_requested = false;
+    /// @brief 窗口已被 `DestroyNotify` 销毁：此后拒绝清位（见 `X11Surface::cancel_close`）。
+    bool window_gone = false;
     bool active = true;
     bool minimized = false;
     WindowVisibility visibility = WindowVisibility::Normal;  ///< 构造期定档的可见性策略。
@@ -938,6 +940,13 @@ auto X11Surface::frame_count() const -> int { return impl_->presented; }
 auto X11Surface::scale_factor() const -> float { return impl_->scale; }
 
 auto X11Surface::should_close() const -> bool { return impl_->close_requested; }
+auto X11Surface::cancel_close() -> void {
+    // 已销毁路径拒绝清位：调用方经后置复验走 fail-open（记 WARN、当帧完成回收）。
+    if (!impl_->window_gone) {
+        impl_->close_requested = false;
+    }
+}
+
 
 auto X11Surface::set_present_dirty(const std::vector<Rect> &device_rects) -> void {
     impl_->present_dirty = device_rects;
@@ -1403,6 +1412,7 @@ auto X11Surface::poll_platform_events() -> void {
                 break;
             case DestroyNotify:
                 d.close_requested = true;
+                d.window_gone = true;  // 窗口已不存在：此后 cancel_close 必须拒绝清位
                 break;
             default:
                 break;
