@@ -628,10 +628,50 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 ### 8.1 文件对话框
 
-`app/file_dialog.h` 提供 `file_dialog::open_file` / `save_file` / `open_folder`。
+`app/file_dialog.h` 提供 `file_dialog::open_file` / `save_file` / `open_folder` 三个入口，签名两腿共用：`Options{title, initial_dir, filters}` + `interactive` 开关。`Options` 三键的语义在每条腿上都必须被真实消费（见下方「`Options` 消费口径」），不得像旧版非 Windows 分支那样 `(void)opts` 丢弃全部字段。
 
-- Win32 经 COM 实现（`IFileOpenDialog` 多选 / `IFileSaveDialog` / `FOS_PICKFOLDERS` 文件夹选择器）；非 Win32 走 headless 钩子。
-- `Options{title, initial_dir, filters}` + `interactive` 开关，避免自动化环境卡在 GUI。
+#### 8.1.1 两个真实实现腿
+
+- **Win32 腿**（`src/aurora/app/file_dialog_win32.cpp`，`AURORA_PLATFORM_WINDOWS`）：经 COM 实现——`IFileOpenDialog` 多选 / `IFileSaveDialog` / `FOS_PICKFOLDERS` 文件夹选择器。钩子优先、`interactive == false` 回空、否则弹真框等用户。
+- **桌面自绘腿**（Linux / macOS，`src/aurora/app/file_dialog_selfdrawn.cpp`，`AURORA_PLATFORM_LINUX || AURORA_PLATFORM_MACOS`）：框架自绘选择器，零第三方依赖（不引入 GTK / Qt 链接期桌面库、不引入 DBus 客户端、不把「装了外部二进制」变成运行期前提）。架构为四层：
+  - L0 数据源 `DirectorySource` 概念（`list_dir` / `is_dir` / `to_absolute` / `root`），默认 `std::filesystem` 实现，测试可注入 mock 无头证；
+  - L1 状态机 `FilePickerModel`：当前目录、条目、过滤匹配、选择、确认 / 取消，纯逻辑、完全无头；
+  - L2 装配 `FilePickerView`：以 `Dialog`（居中内容 + 遮罩 + 焦点作用域）承载、`ListView` / `TextInput` / `Button` 装配的模态面板，**自带零帧循环**，不进 `WidgetRegistry`、不新增公共 widget；
+  - L3 三入口路由：钩子优先 → `interactive == false` 回空 → 有 `Application` 上下文走 `Application::run_modal` 嵌套帧循环 → 无上下文 WARN 回空。
+- **其余平台（WASM / Android / BSD 等）**：保留 `file_dialog.h` 内联回退（钩子语义 + 等价取消回空），`AURORA_PLATFORM_WASM` 不做真实选择器（主线程不可阻塞、文件系统是 MEMFS 而非用户真实磁盘），仅在注释与本节如实申报。
+
+#### 8.1.2 钩子与 `interactive` 的优先级次序（三支共用）
+
+1. 三个 headless 钩子（`headless_open_result` / `headless_save_result` / `headless_folder_result`）任意非空 → 直接返回该预设，**不构造选择器**（计数可证），不消费 `Options`；
+2. `interactive == false` → 回空（等价取消），不弹 UI；
+3. 否则进入真实 / 自绘路径。
+
+#### 8.1.3 `Options` 消费口径
+
+- `title`：作浮层标题（`open_file` / `save_file` / `open_folder` 各腿均消费；Win32 走 `SetTitle`、自绘腿作 `Dialog` 标题；空 = 形态默认标题）。
+- `initial_dir`：作初始位置（自绘腿消费；不存在 / 不可读 → 降级到数据源根并留一条可归因 `AURORA_LOG_WARN`，不挂起、不抛）。
+- `filters`：过滤文件条目（自绘腿仅影响列表展示；目录选择器形态下被忽略——目录无类型语义）；三腿统一在头注释写明「忽略」，自绘腿不消费时留 DEBUG 日志。
+
+#### 8.1.4 取消与降级的错误语义
+
+- **取消不是失败**：用户取消、目录不可选、无可用通道三路径一律返回 `Ok(空串 / 空列表)`（调用方不必分支），**仅系统级异常回 `Error`**。
+- 桌面腿系统级失败复用既有 `platform-dialog-create-failed` 错误码（见 [`ERROR_CATALOG.md`](../../codespec/ERROR_CATALOG.md)，errors.toml 零新增）；Win32 腿复用 `PlatformComInitFailed`。
+- 若某平台态确实拿不出选择器，须 `AURORA_LOG_WARN`（tag `file_dialog`）留痕后回空，不弹半残浮层、不回假路径。
+
+#### 8.1.5 `run_modal` 执行模型与「无上下文即等价非交互」路由
+
+桌面自绘腿同步阻塞到用户作答（与 `QFileDialog::exec()` 同口径），真交互路径在调用线程内阻塞到用户作答。执行模型为「恰好一层嵌套模态」：
+
+- 选择器由菜单 / 帧回调 / 脚本化直调打开时，调用点未必在派发栈内，故 `FilePickerView::show_modal` 自包装当前焦点管理器后再 `Dialog::show`，保证焦点作用域配对；
+- **有 `Application` 上下文**（`loop_begin` 经 `Application::set_loop_application` 登记，自绘三入口据此判「有无上下文」）→ 把选择器挂上主窗口场景根、驱动 `Application::run_modal`（`run_modal` 入口保存进程级单例——`Scheduler` / `Animator` / 主回投器 / 焦点管理器 / 严格模式 / 帧循环所属应用登记——出口逐项还原，模态期新建的定时器 / 动画 / 回投归本应用，退出后外层口径与入口相等，不会半身不遂）；
+- **无上下文**（无头 / 纯库调用 / 尚未 `run`）→ 不挂起、不新建 `Application`，WARN 后回空，直接对三个自由函数断言即可；
+- **嵌套深度**：允许一枚选择器叠在另一枚的内层打开（A 的确认回调内再开 B，结果各走实例局部变量、不经全局钩子），第三层即 WARN 拒绝并回空——不死锁、不半身不遂；
+- **模态期派发抑制**：`run_modal` 入口置 `detail::modal_dispatch_suppressed()`、出口还原，嵌套循环里的点击经 `WindowHost::dispatch` 派发时不得翻转活动窗口记账（与活动窗口查询的记账点协同）；
+- 选择器运行期间宿主自己的关闭请求照常进入关闭闸门。
+
+#### 8.1.6 性能口径
+
+目录枚举是 UI 线程上的同步 I/O，按需创建、关闭即释（不常驻）。第一版不设上限、不后台化；超大目录的枚举存在帧卡顿风险，规格留记。
 
 ### 8.2 剪贴板
 

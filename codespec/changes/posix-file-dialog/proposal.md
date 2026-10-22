@@ -4,7 +4,7 @@
 | :--- | :--- |
 | 变更编号 | CHG-031 |
 | 提出日期 | 2026-10-22 |
-| 当前状态 | 已提议 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 |
 | 影响面 | `include/aurora/app/file_dialog.h`（`#else` 分支内 Linux / macOS 两支由 `inline` 定义改为声明，WASM / Android / BSD 支**保留** `inline` 定义体；公共签名一字不改）、`include/aurora/app/application.h`（新增一枚薄公共逃生舱 `run_modal(...)`）、新增 src/aurora/app/detail/ 下内部头与 src/aurora/app/file_dialog_selfdrawn.cpp（平台中性实现，Linux 与 macOS 桌面平台编译）、`src/aurora/app/file_dialog_win32.cpp`（Win32 腿不动）、`tests/unit/utest_file_dialog.cpp`（并入新增用例，不新建文件）、`codespec/specification/06-app-platform.md`、`codespec/SPECIFICATIONS.md`、`codespec/manual-test/19-app.md`；无新增公共 widget / 枚举 / 错误码，`aurora_api.json` 预期零差异（理由见变更内容第 8 条） |
 

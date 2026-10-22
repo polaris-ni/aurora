@@ -21,6 +21,10 @@ freeze: minor-versions-are-additive
 
 ## [Unreleased]
 
+### Added
+
+- **Linux / macOS 桌面平台补齐文件 / 目录选择器的真实实现**（框架自绘，零第三方依赖；规格见 `codespec/specification/06-app-platform.md` §8.1）。此前非 Windows 平台只有静默回退（丢弃全部 `Options`、不弹 UI、取消与失败逐位不可分），现三入口 `file_dialog::open_file` / `save_file` / `open_folder` 在桌面平台走库内自绘模态选择器：`Dialog` + `ListView` + `TextInput` + `Button` 装配，目录经 `std::filesystem` 枚举，`title` / `initial_dir` / `filters` 三键真消费（目录选择器忽略 `filters`），取消一律返回空串（等价非交互，不报 `Error`）。执行模型为 `Application::run_modal` 嵌套帧循环（同步阻塞到用户作答，允许恰好一层嵌套，更深拒绝并 WARN 回空），模态期派发不翻转活动窗口记账；无 `Application` 上下文（无头 / 纯库调用 / 尚未 `run`）即等价非交互 WARN 回空、不挂起。选择器复合体不进 `WidgetRegistry`、不新增公共 widget，`aurora_api.json` 预期零差异；WASM / Android / BSD 等平台保留原有内联回退（WASM 主线程不可阻塞、文件系统为 MEMFS，不做真实选择器）。系统级失败复用既有 `platform-dialog-create-failed` 错误码（errors.toml 零新增）。回归由 `tests/unit/utest_file_dialog.cpp`（L1 状态机与 L2 离屏快照无头全覆盖、L3 经 `run_modal` 的真实帧驱动验证挂载 / 返回 / 单例还原 / 一层嵌套）锁定。
+
 ### Changed
 
 - **Inspector 的「动词不支持**且**路径退化」交集由 400 变 405**（`src/aurora/inspector/inspector_server.cpp`、`codespec/specification/08-tooling.md` §5.1）。路由表改为文件内静态注册表 + 两趟匹配（精确项整体优先、前缀项按登记次序兜后），方法闸从各处理器前移到派发处、处理器内的路径形状校验保留：`DELETE /api/widget/`、`DELETE /api/widget//` 一类此前落到处理器再以路径形状回 400 的请求，现在在派发处先命中「方法不支持」回 405（文案 `Method not allowed for /api/widget`，前缀 label 不带尾斜杠）；其余路径的 400 / 404 分流与全部现存端点的响应逐值不变。`GET /api/network` 与 `GET /api/network/request?id=` 两枚新端点经同一注册表挂载。

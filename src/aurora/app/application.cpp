@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <functional>
 #include <utility>
 
+#include "aurora/app/detail/file_picker.h"
 #include "aurora/app/window_geometry.h"
 #include "aurora/core/log.h"
 #include "aurora/media/audio.h"
@@ -37,12 +39,8 @@ auto display_still_present(int display_id) -> bool {
     if (display_id < 0) {
         return true;  // 未声明显示器：无可核验，按仍在处理
     }
-    for (const Display &d : app::list_displays()) {
-        if (d.id == display_id) {
-            return true;
-        }
-    }
-    return false;
+    const auto &displays = app::list_displays();
+    return std::ranges::any_of(displays, [display_id](const Display &d) { return d.id == display_id; });
 }
 
 /// @brief 把几何快照应用到宿主（物理像素 → 当前 DPI 的逻辑 dp 后下发）。
@@ -530,6 +528,86 @@ auto Application::dispatch_touch(const TouchEvent &e) const -> void {
     if (main_host_ != nullptr) {
         main_host_->dispatch_touch(e);
     }
+}
+
+auto Application::set_loop_application(Application *app) -> void {
+    // 帧循环所属登记（自绘选择器三入口的「有无上下文」判据；见 run_modal 与
+    // specification/06-app-platform.md §8 文件 / 目录选择器）。槽位定义在内部头，
+    // 公共头不依赖 src/ 路径。
+    file_dialog::detail::current_application_slot() = app;
+}
+
+auto Application::run_modal(const std::function<bool()> &done) -> void {
+    if (modal_depth_ >= 2) {
+        // 恰好一枚选择器叠在另一枚内层（A 的确认回调内再开 B）：第三层即拒绝并回空
+        // （调用方按取消语义处理），不死锁、不半身不遂。
+        AURORA_LOG_WARN("app", "run_modal: modal loop nesting limit reached; refusing deeper nesting");
+        return;
+    }
+    // 进程级单例入口快照：模态期安装本应用的上下文，退出原样归还——外层可能是另一个
+    // Application、TestController 或「无」，置空式收尾会把外层打成半身不遂。
+    Scheduler *const prev_sched = Scheduler::current();
+    Animator *const prev_anim = Animator::current();
+    std::function<void(std::function<void()>)> prev_poster;
+    {
+        std::scoped_lock lk(detail::main_poster_mutex());
+        prev_poster = detail::main_poster();
+    }
+    FocusManager *const prev_focus = current_focus_manager();
+    const StrictMode prev_strict = aurora::strict_mode();
+    Application *const prev_app = file_dialog::detail::current_application_slot();
+    // RAII 还原：即使 step_frame 抛出（各步均有 fail-open 契约，理论不可达）也归还单例。
+    struct SingletonRestore {  // NOLINT(cppcoreguidelines-special-member-functions): 局部 RAII
+                               // 还原器，按引用捕获现场、不复制
+        Scheduler *sched;
+        Animator *anim;
+        std::function<void(std::function<void()>)> poster;
+        FocusManager *focus;
+        StrictMode strict;
+        Application *app;
+        // 抛出面：set_main_poster 体内是 std::function 移动赋值（条件 noexcept）+ 加锁，
+        // 其余四项为平凡指针 / 枚举赋值；模态收尾期无分配需求，实际不可抛
+        // （同 ScrollStorage::Scope::~Scope 的处置口径）。
+        // NOLINTNEXTLINE(bugprone-exception-escape)
+        ~SingletonRestore() {
+            Task<bool>::set_main_poster(std::move(poster));  // 空 poster = 卸载（与 loop_end 同口径）
+            Scheduler::set_current(sched);
+            Animator::set_current(anim);
+            set_current_focus_manager(focus);
+            aurora::set_strict_mode(strict);
+            file_dialog::detail::current_application_slot() = app;
+            file_dialog::detail::modal_dispatch_suppressed() = false;
+        }
+    } restore{.sched = prev_sched,
+              .anim = prev_anim,
+              .poster = std::move(prev_poster),
+              .focus = prev_focus,
+              .strict = prev_strict,
+              .app = prev_app};
+
+    Scheduler::set_current(&sched_);
+    Animator::set_current(&anim_);
+    Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
+        {
+            std::scoped_lock lk(posted_mutex_);
+            posted_.push_back(std::move(fn));
+        }
+        request_wake_all();
+    });
+    file_dialog::detail::current_application_slot() = this;
+    file_dialog::detail::modal_dispatch_suppressed() = true;
+    ++modal_depth_;
+
+    while (!done() && !should_exit() && frame_budget_left()) {
+        const auto frame_start = step_frame();
+        if (!frame_budget_left()) {
+            break;
+        }
+        wait_once(frame_start);
+    }
+
+    --modal_depth_;
+    // 单例还原由 restore 析构完成（模态期安装的四个写口 + 入口快照逐项归还）。
 }
 
 }  // namespace aurora

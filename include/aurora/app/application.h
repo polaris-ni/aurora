@@ -429,6 +429,27 @@ class Application {
         loop_end();
     }
 
+    /// @brief 嵌套模态帧循环（自绘文件 / 目录选择器的执行模型，specification/06-app-platform.md
+    ///        §8 文件 / 目录选择器）：入口保存进程级单例（`Scheduler::current` /
+    ///        `Animator::current` / `Task<bool>` 主回投器 / `current_focus_manager` / 线程级严格模式
+    ///        / 帧循环所属应用登记）并安装本应用的上下文，出口原样还原——模态期新建的定时器 /
+    ///        动画 / 回投归本应用，退出后外层（另一个 Application、TestController 或无）看到的口径
+    ///        与入口逐项相等，不会把外层 FrameStats / Scheduler 置空成「半身不遂」。
+    ///
+    /// 循环每帧推进 `step_frame()`（完整帧序：pump → on_frame_ → 关闭闸门 → tick → render →
+    /// reap → deferred → 等待），直到 `done()` 为真、宿主全部请求关闭或帧预算耗尽。模态期间
+    /// 宿主自己的关闭请求照常进入关闭闸门；派发不记账（`detail::modal_dispatch_suppressed()`
+    /// 为真，供活动窗口记账点跳过嵌套循环里的点击）。
+    ///
+    /// 执行模型：同步阻塞到用户作答（Qt `QFileDialog::exec()` 同口径）；**允许一枚选择器叠在
+    /// 另一枚的内层打开**（选择器 A 的确认回调内再开 B，结果各走实例局部变量、不经全局钩子），
+    /// 第三层即 WARN 拒绝并回空——不死锁、不半身不遂。
+    /// @param done 每帧末轮询的完成判据：返回 true 即退出模态（由选择器的确认 / Cancel 置位）。
+    /// @note Thread: main-thread only
+    /// @note Side-effects: drives frames (nested loop), installs process-level singletons
+    /// @note Rebuildable: no
+    auto run_modal(const std::function<bool()> &done) -> void;
+
     /// @brief 渲染当前场景到 PNG。运行期同样套用严格模式（specification/01-core.md §4.3 / CI 门禁），
     ///        使无窗口后端（HeadlessSurface）的离屏渲染也能触发严格失败。
     /// @param path 输出 PNG 文件路径（C 字符串）。
@@ -601,6 +622,12 @@ class Application {
 
     // ---- 帧循环驱动原语（同步 while 与 WASM rAF 回调共用；`run()` 文档注释为帧序契约）----
 
+    /// @brief 帧循环所属应用登记口（`loop_begin` / `loop_end` 配对调用）。
+    /// 定义在 application.cpp：内部头 `aurora/app/detail/file_picker.h` 的
+    /// `current_application_slot()` 写入口——公共头不依赖 src/ 内部路径。
+    /// @param app 本次帧循环所属的应用（nullptr = 摘除登记）。
+    static auto set_loop_application(Application *app) -> void;
+
     /// @brief 循环起手：严格模式、Scheduler 当前指针、主线程回投器、时间基准与帧计数复位。
     auto loop_begin() -> void {
         prev_strict_ = aurora::strict_mode();
@@ -608,6 +635,9 @@ class Application {
         loop_last_ = std::chrono::steady_clock::now();
         loop_frames_ = 0;
         Scheduler::set_current(&sched_);
+        // 帧循环所属应用登记：自绘选择器三入口据此判「有无 Application 上下文」
+        // （无上下文即等价非交互：WARN 回空，不挂起）。配对摘除见 loop_end。
+        set_loop_application(this);
         // 跨线程回投：后台线程的 then 回调入队 + 唤醒睡眠中的主循环，
         // 下一帧开头在主线程排水执行（兼具线程安全与不丢唤醒）。多窗口下须唤醒**全部**窗口的
         // 等待通道——任一窗口睡在自己的 Surface 上都可能延迟回投的执行。
@@ -683,6 +713,7 @@ class Application {
         drain_posted();
         Scheduler::set_current(nullptr);
         Animator::set_current(nullptr);
+        set_loop_application(nullptr);  // 摘除帧循环所属登记（与 loop_begin 配对）
         aurora::set_strict_mode(prev_strict_);
     }
 
@@ -714,6 +745,7 @@ class Application {
     StrictMode prev_strict_ = StrictMode::Off;  ///< 循环期保存的线程级严格模式（收尾还原）。
     std::chrono::steady_clock::time_point loop_last_;  ///< 上一帧起始时刻（帧 dt 基准；默认即 epoch 零点）。
     int loop_frames_ = 0;  ///< 本轮循环已推进帧数（`max_frames` 预算计数）。
+    int modal_depth_ = 0;  ///< 嵌套模态循环深度（`run_modal`：允许一枚叠一枚，第三层即 WARN 拒绝）。
 
     StrictMode strict_ = StrictMode::Off;  ///< 严格模式（run() 期间套用到线程级开关）
     int width_ = 0;  ///< 主窗口逻辑宽（无 Window 时取构造参数，供 render_to_png）。
