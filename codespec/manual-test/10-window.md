@@ -459,6 +459,23 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 
 **本例载体为真机探针（非 demo）**：既有 demo 不声明 `persist_id`、不挂几何存储，承载不了恢复腿；构建口径同 §1.2 的各后端探针段（后端开关 + `AURORA_BUILD_VERIFY_TOOLS`），每腿以「首趟落盘、次趟恢复」两趟运行。落盘只走正常关闭路径（`reap_closed` 收集步对 `should_close()==true` 的宿主执行并打一次性闩），故步骤里的关闭一律要求放行关闭，不用 `quit()` 代替。
 
+### 2.11 活动窗口查询（真机走查）
+
+#### TC-WINDOW-021 框架判定的活动窗与 OS 活动态一致性走查
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-021 |
+| 测试目的 | 验证 `Application::active_window()` 的读数与 OS 前台 / 聚焦态在真实窗口环境下的关系：正常激活档二者应一致，失焦 / 切后台档可分叉——该分叉是申报内语义（本 API 只答「最近派发落在哪一扇」，**不等价于 OS 前台窗**），须真机读数一次确认 |
+| 前置条件 | 仓库根目录；活动窗口真机探针已按被测后端口径构建（Win32 腿用本机默认 `build/` 追加 `AURORA_BUILD_VERIFY_TOOLS=ON` 重 configure，X11 / GLFW 腿按 §1.2 的独立构建目录）；活动桌面会话（锁屏时窗口收不到输入）；至少两扇可并排显示的窗口；真实指针与键盘输入通道 |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 启动活动窗口真机探针，确认主窗与辅助窗均已显示（纯执行，无预期结果）<br>2. 读取初始的 `active_window()` 读数<br>3. 用鼠标点击辅助窗客户区一次（纯执行，无预期结果）<br>4. 读取 `active_window()` 读数，并以窗口管理器高亮的标题栏为准记下 OS 前台窗<br>5. 用鼠标点击主窗客户区一次（纯执行，无预期结果）<br>6. 读取 `active_window()` 读数与 OS 前台窗<br>7. 两窗不动，仅在主窗内移动鼠标（不按键）若干次（纯执行，无预期结果）<br>8. 读取 `active_window()` 读数<br>9. 把辅助窗切到后台（点桌面或其他应用）再切回辅助窗（纯执行，无预期结果）<br>10. 读取 `active_window()` 读数与 OS 前台窗<br>11. 关闭辅助窗并等待回收（纯执行，无预期结果）<br>12. 读取 `active_window()` 读数与 `err.txt` 的新增行 |
+| 预期结果 | 2. 无记账记录 → 回落主窗 id（存活兜底），且非无效号<br>4. 读数为辅助窗 id，且与 OS 前台窗一致（该档二者应相同）<br>6. 读数为主窗 id，且与 OS 前台窗一致<br>8. 读数**不变**（仍为主窗 id）——指针 Move 不记账，悬停不得翻转活动窗<br>10. 切回辅助窗后读数为辅助窗 id；若 OS 因切后台暂未把该窗判为前台，二者可分叉，此分叉须如实记录且**不得记为缺陷**（本 API 不等价于 OS 前台态）<br>12. 读数为存活兜底（主窗 id），绝不为已回收的辅助窗 id；`err.txt` 恰新增 1 行 `INF`，消息形如 `[app] window host closed and reaped: id= <N>`（`<N>` 为该辅助窗 id） |
+
+**本例编号的取定**：现最高为 020（几何态恢复用例）；017 / 018 为早期预留后未落用的断档序号——按 §1.4「序号不复用、新用例取下一个可用序号」不作断档回填，本例取 021。
+
+**本例为何须真机**：无头底座读不到 OS 前台态，无法回答「框架判定与 OS 判定是否一致」。记账范围、兜底口径与回收清号本身由单测覆盖（`tests/unit/utest_application.cpp` 与 `tests/integration/itest_active_window.cpp`），本例只验二者在真实窗口环境下的关系——这是唯一一项无头面读不到、须真机读数一次的判据。
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -481,3 +498,4 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | TC-WINDOW-016 | 2026-10-12 | WorkBuddy | PASS | | 步骤 4：`Cycle title-bar theme` 按钮可见位置点击逐档循环，状态行依次为 `host title-bar theme → AdwaitaLight`、`→ WindowsDark`、`→ WindowsLight`，顶部自绘标题带整带配色随主题逐档重绘。步骤 6：状态行 `window frame shadow → off`。步骤 8：状态行 `title-bar icon → set`，标题带左端出现 24×24 双色图标。步骤 9–11：物理 840×640 缩矮后 `Close this preview` 带从像素扫描中消失，物理 840×940 拉长后于原相对位置重现（bitmap 纵带 y=[698,754]），按该可见位置（屏幕物理 (291,878)）真实点击后窗口立即消失，`err.txt` 新增 `INF` 行 `[app] window host closed and reaped: id=4`。步骤 13：Borderless 预览在绘制位置点击 `Info` 后新增 `INF` 行 `csdg: info clicked`；`−` / `□` / `×` 点击后窗口存活、无新增行。步骤 15：`Close this preview` 后窗口消失并新增回收行 `id=5`。步骤 17：Frameless 同口径复验，`csdg: info clicked` 再新增 1 行、`×` 无动作且窗口存活、`Close this preview` 后新增回收行 `id=6`。步骤 18：全文无 `ERR` / `FTL` | | 取证口径：真机点击经 `SetCursorPos` + `mouse_event` 注入屏幕物理坐标（非 `PostMessage` 直投），落点取 DPI 感知 `PrintWindow` 像素扫描出的按钮带中轴（窗口物理 rect (152,152) 840×780 @ DPI 144 即 150% 缩放）；运行二进制为含 修复的构建（可执行文件 mtime 晚于修复源文件、工作树对该源文件无未提交改动）。平台范围观察：控件级 TitleBar 的 `−` / `□` / `×` 为 Win32 无害空动作（`Surface` 四操作默认空实现、仅 Wayland 生效，见 `specification/07-environment-modifier.md`），命中链本身无恙（同条 `Info` 动作在绘制位置逐次触发日志）。观察性现象：每扇预览窗关闭时稳定新增 1 行 `WRN`（`layout parent detached while the child widget is still alive: Column`，应用根子树解挂序提示），不影响关闭与回收，不记缺陷 |
 | TC-WINDOW-019 | | | | | | | |
 | TC-WINDOW-020 | | | | | | | |
+| TC-WINDOW-021 | | | | | | | |

@@ -46,6 +46,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 - **单线程 UI**：所有 widget 树操作、状态变更、事件处理都在主线程。`State::set` 仅限主线程调用（赋值 + notify 无锁无原子）；跨线程计算结果须经 `au::async` / `Task::set_main_poster` 回投主线程后再写 `State`。
 - **多窗口（仍在同一线程内）**：一个 `Application` 持有一组 `WindowHost`（各自 `Window` + `Scene` + `FocusManager` + 指针/触控捕获表 + 帧统计），由**单一帧循环**统一驱动（`Application::run`，不再委托 `Window::run`）。**焦点与捕获不跨窗口**；`Animator` / `Scheduler` / 快捷键 / 命令注册表为应用级共享（`dt` 每帧只推进一次）。详见 `specification/06-app-platform.md` §2.4。
+- **活动窗口记账点在派发链上的位置**：`Application::active_window()` 的记账落在两处——① 宿主级键盘派发的键盘前置拦截器内，**早于** `ShortcutRegistry::handle`（故快捷键闭包内读到的是本次派发来源）；② 应用级六条程序化派发入口，按「用户输入意图类」事件范围过滤后记账。宿主级直调程序化入口不记账（`WindowHost` 无 `Application` 反指，刻意不加）。记账为 O(1) 指针赋值（成员 `mutable`，以适配 const 派发入口），帧循环零新增开销。它与 `FocusManager` 的**逐窗隔离**是两件互补的事：后者答「窗内哪个控件有焦点」，前者答「这条输入落在哪一扇窗」，二者互不替代，也都不等价于 OS 前台态。语义与范围见 `specification/06-app-platform.md` §2.4。
 - **同步事件**：`EventDispatcher` 在收到原生平台事件后同步派发，命中测试链自最深节点向根冒泡，写 `e.handled = true` 即止。
 - **响应式细粒度信号**：`State<T>` / `Signal` 订阅精确到具体订阅者；状态变更只刷新依赖它的 widget，避免整树重绘。
 

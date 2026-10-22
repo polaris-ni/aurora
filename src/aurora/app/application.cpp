@@ -116,6 +116,11 @@ auto Application::register_host(Scene scene, std::unique_ptr<Window> window, con
     // 键盘前置拦截：快捷键是应用级共享的，但命中与否取决于**当前宿主**是否已有焦点控件。
     raw->set_key_pre_handler([this, raw](Event &e) -> bool {
         const auto *k = dynamic_cast<KeyEvent *>(&e);
+        // 记账**早于**匹配：快捷键闭包内读 `active_window()` 拿到的是本次派发来源宿主。
+        // 宿主级键盘派发（WindowHost::dispatch(Event&)）经本闭包入账，故无需改 window_host。
+        if (k != nullptr && k->action == KeyAction::Down) {
+            record_dispatch(raw);
+        }
         return k != nullptr && shortcuts_.handle(*k, raw->focus().focused() != nullptr);
     });
     // 窗口级状态上报：沿用「主窗口状态 ≡ 应用窗口状态」的历史语义；非主窗口状态只落在自己的宿主上。
@@ -381,6 +386,9 @@ auto Application::reap_closed() -> void {
         if (it->get() == main_host_) {
             main_host_ = nullptr;
         }
+        if (it->get() == last_dispatch_) {
+            last_dispatch_ = nullptr;  // 回收清号：查询不可能再选中已消散的宿主
+        }
         (*it)->teardown();  // 先解绑后端回调（lambda 捕获 this），再释放宿主对象
         hosts_.erase(it);
         if (on_window_closed_ != nullptr) {
@@ -491,14 +499,25 @@ auto Application::request_wake_all() const -> void {
 // 程序化派发（作用于主窗口；多窗口请用 `window_host(id)->dispatch_*`）
 // =============================================================================
 
+auto Application::record_dispatch(WindowHost *host) const -> void {
+    if (host == nullptr || file_dialog::detail::modal_dispatch_suppressed()) {
+        return;  // 无目的宿主，或模态选择器（POSIX 自绘腿）运行期：其输入不翻活动窗
+    }
+    last_dispatch_ = host;
+}
+
 auto Application::dispatch_click(float x, float y) const -> void {
     if (main_host_ != nullptr) {
+        record_dispatch(main_host_);  // 恒为 Press，属记账范围
         main_host_->dispatch_pointer(x, y, MouseAction::Press);
     }
 }
 
 auto Application::dispatch_pointer(float x, float y, MouseAction action) const -> void {
     if (main_host_ != nullptr) {
+        if (action == MouseAction::Press) {
+            record_dispatch(main_host_);  // Move / Release 不记账：鼠标悬停不得翻转活动窗
+        }
         main_host_->dispatch_pointer(x, y, action);
     }
 }
@@ -513,6 +532,9 @@ auto Application::dispatch_key(const KeyEvent &e) const -> bool {
     if (main_host_ == nullptr) {
         return false;
     }
+    if (e.action == KeyAction::Down) {
+        record_dispatch(main_host_);  // 仅 Down 记账（抬起不翻活动窗）
+    }
     // 快捷键优先：命中即消费，不再向焦点控件派发（与后端事件路径语义一致）。
     if (shortcuts_.handle(e, main_host_->focus().focused() != nullptr)) {
         return true;
@@ -521,11 +543,18 @@ auto Application::dispatch_key(const KeyEvent &e) const -> bool {
 }
 
 auto Application::dispatch_text(TextInputEvent e) const -> bool {
-    return main_host_ != nullptr && main_host_->dispatch_text(std::move(e));
+    if (main_host_ == nullptr) {
+        return false;
+    }
+    record_dispatch(main_host_);  // TextInputEvent 属记账范围
+    return main_host_->dispatch_text(std::move(e));
 }
 
 auto Application::dispatch_touch(const TouchEvent &e) const -> void {
     if (main_host_ != nullptr) {
+        if (e.active_count() > 0) {
+            record_dispatch(main_host_);  // 有活跃触点 = 按下态；全抬起不记账
+        }
         main_host_->dispatch_touch(e);
     }
 }

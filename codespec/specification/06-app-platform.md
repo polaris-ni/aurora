@@ -76,10 +76,21 @@
 - **位置类事件的派发根与坐标口径**：鼠标/滚轮/触控/文件拖放/程序化指针以 `Window` 的整窗下沉壳（`Window::hit_root()`，`detail::ContentInsetRoot`）为命中与派发起点，事件坐标为**整幅表面逻辑坐标**（与 `content_inset()` 同域）；下沉平移与绘制共用壳的 `PaddingEdges` 修饰，命中/绘制零漂移（[`07-environment-modifier.md`](07-environment-modifier.md) §3.1）。无头宿主或首个 `present_root` 之前（壳未收养应用根，`hit_root_ready()` 为 false）回退场景根——后者与历史「先派发后渲染」语义等价。键盘/文本/IME 组合事件不经命中链，恒走场景根。
 - **兼容**：`window()` / `scene()` / `focus()` / `dispatch_*()` / `render_to_png` 作用于**主窗口**（首个登记的宿主），单窗口用法行为与历史完全一致。
 
+**活动窗口查询（`Application::active_window()`）**
+
+- **语义**：返回「最近一次用户输入派发的目的窗口」，**不等价于 OS 前台窗**——无头、失焦两档下二者可以不同。本 API 只答「最近派发落在哪一扇」，不承诺 OS 聚焦 / 前台态，也不预测「下一次事件会落到哪」。
+- **记账范围**（口径定死）：只记「用户输入意图类」事件一次来源——`KeyEvent`(Down)、`MouseEvent`(`MouseAction::Press`)、`TouchEvent`(有活跃触点)、`ScrollEvent`、`TextInputEvent`、`SystemDropEvent`；**不记**指针 Move / Release（否则鼠标悬停即翻转活动窗）与窗口生命周期回调（可见性 / 几何态 / DPI / 脏区）。
+- **记账入口**：① 宿主级键盘派发经 `Application` 在登记宿主时注入的键盘前置拦截器记账，位置**早于** `ShortcutRegistry::handle`——故快捷键闭包内读到的是本次派发来源；② 应用级六条程序化入口 `dispatch_click` / `dispatch_pointer` / `dispatch_key` / `dispatch_text` / `dispatch_touch` / `dispatch_system_drop` 按上条范围过滤后记账（恒记主宿主）。宿主级五条直调程序化入口（`WindowHost::dispatch_pointer` / `dispatch_key` / `dispatch_text` / `dispatch_touch` / `dispatch_system_drop`）**不记账**：宿主无 `Application` 反指，够不到记账点（本设计刻意不给 `WindowHost` 加反指，也不改该文件）。
+- **模态期不记账**：模态选择器（POSIX 自绘腿）运行期间的派发不记账，避免选择器自身的输入把活动窗翻到选择器宿主。os_hotkey 命中同样**不**产生记账。
+- **兜底口径**（无记账记录，或记账宿主已被回收时）：取**存活**宿主——`hosts_` 为空才返回 `AURORA_INVALID_WINDOW_ID`，否则 `main_host_` 优先、其次首个登记的宿主。帧末回收会清掉指向被回收宿主的记账，故返回值恒为存活号；「全关保留最后一个宿主」规则留下的主窗仍会被返回；窗口关闭回调（`set_on_window_closed`）窗口期内仍有存活宿主时不为无效号。
+- **单窗恒等**：只有一扇窗时 `active_window()` 与 `main_window()` 恒等；`main_window()` 的兜底语义不受本查询影响。
+- **复杂度**：记账 O(1)（一次指针赋值；成员声明 `mutable` 以适配 const 派发入口），查询 O(1)，帧循环零新增开销。
+
 **登记与查询**
 
 | 成员 | 说明 |
 |:---|:---|
+| `active_window() -> WindowId` | 最近一次用户输入派发的目的窗口（活动窗口查询；**不等价于 OS 前台窗**，详见上节） |
 | `open_window(unique_ptr<Window>, Scene, WindowOptions) -> WindowId` | 追加窗口宿主；`Window` 为 nullptr 时退化为无头宿主 |
 | `open_window(unique_ptr<Surface>, Scene, WindowOptions) -> Result<WindowId>` | 注入自定义 `Surface`，内部经 `create_window` 组装 |
 | `close_window(WindowId)` | 程序化请求关闭（下一次帧末回收） |
@@ -761,6 +772,8 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - 自绘路径**零改动**：`MenuBar` / `ContextMenuNode` / `SystemTray` 的既有字段、构造与绘制命中逻辑一行不动，`MenuModel` 投影是新增加的消费路径。自绘与原生「二显一存」——同一份模型，任一时刻只有一条渲染路径生效。
 
 **接线**：`Application::commands()` 返回注册表；`app.commands().bind_shortcuts(app.shortcuts())` 一行把默认快捷键接入。绑定为**显式**而非 `run()` 内自动执行——否则 `run()` 之后注册的命令会静默失效。`Application` 在 `dispatch*` 入口统一暴露「当前焦点管理器」（`current_focus_manager()`），快捷键动作与控件回调内同样可取到，模态弹层据此完成焦点陷阱。原「命令式逃生舱」`aurora::imperative::run_raw`（`imperative.h`）与命令系统无关。
+
+**派发来源与既有匹配语义的边界**：`ShortcutBinding::action` 保持无参闭包，命中判定（`ShortcutScope::Global` / `Focus` 作用域、`KeyCombo::matches` 修饰位口径、命中即消费的后果）**一律不变**——活动窗口查询只做「把派发链上已知的来源传到调用方」，不参与「算不算命中」的重算，也不给闭包加来源形参（那会牵动全部既有调用点改签名）。记账位置**早于** `ShortcutRegistry::handle`，故快捷键闭包内调 `Application::active_window()` 拿到的是本次派发的目的窗口；命令落点等消费侧据此把动作路由到来源窗，不必各自维护一份与 OS 活动态可能分叉的代偿状态。
 
 **快捷键可重绑（宿主覆盖表的启动重放）**：框架侧为此提供两个入口，二者组合才闭合——`KeyCombo::from(text)` 把覆盖表里的组合键文本反解成 `KeyCombo`，`CommandRegistry::set_binding(id, combo)` 把反解结果回灌到该命令的 `default_binding`（`id` 未注册返回 `false`）。前者与 `to_string()` **逐字节往返**：可解析的形态就是 `to_string()` 输出的那批串（不额外支持别的写法，否则组合键的显示串规范就有两份），修饰次序**不敏感**（`"Shift+Ctrl+P"` 与 `"Ctrl+Shift+P"` 同解，产出仍走 `to_string()` 的规范序），畸形输入**一律**回 `std::nullopt` 而**不**回落成「修饰位 + 空主键」的假有效值——回落会把「这一条没配上」伪装成「配上了某个键」，宿主按覆盖表重放时该条目会静默消失且不留痕迹。后者**只改绑定**：除 `default_binding` 外不动任何字段（`title` / `icon` / `action` / `category` / `scope` / `enabled` 谓词 / `when_label`），也不改变注册次序——改绑定此前只有 `add(Command)` 一条路，而它是**整条覆盖**语义，宿主重述一遍就得把 `enabled` 谓词这类「取得到、复制不了语义」的字段抄全，漏抄即静默的能力丢失。已 `bind_shortcuts` 过时 `set_binding` 连带把该条在快捷键表里的绑定换成新组合键（先撤后建），使命令表与快捷键表两个投影不各持一份真值；尚未投影过则是纯数据变更，由下一次 `bind_shortcuts`（幂等重建）生效。宿主侧的处置口径是「逐条解析、该条失败只留痕并跳过、其余照旧」——一条畸形覆盖不得挡住启动。
 

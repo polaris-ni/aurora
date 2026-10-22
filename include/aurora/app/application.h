@@ -206,6 +206,27 @@ class Application {
         return main_host_ != nullptr ? main_host_->id() : AURORA_INVALID_WINDOW_ID;
     }
 
+    /// @brief 最近一次用户输入派发的目的窗口 id（活动窗口查询）。
+    /// @detail 语义是「最近一次用户输入派发的目的窗口」，**不等价于 OS 前台窗**——无头、
+    ///         失焦两档下二者可以不同；本 API 只答「最近派发落在哪一扇」，不承诺 OS 聚焦
+    ///         或前台态，也不预测「下一次事件会落到哪」。
+    /// @return 最近记账的宿主 id；无记账记录时回落**存活**宿主（`main_host_` 优先，其次首个
+    ///         登记的宿主）；只有 `hosts_` 为空才返回 `AURORA_INVALID_WINDOW_ID`。
+    /// @note 记账范围为「用户输入意图类」事件：`KeyEvent`(Down)、`MouseEvent`(Press)、
+    ///       `TouchEvent`(有活跃触点)、`ScrollEvent`、`TextInputEvent`、`SystemDropEvent`；
+    ///       指针 Move / Release 与窗口生命周期回调不记账——否则鼠标悬停即翻转活动窗。
+    /// @note 单窗口下本值与 `main_window()` 恒等；被回收的宿主不会被返回（`reap_closed`
+    ///       清掉指向它的记账），窗口关闭回调窗口期内仍有存活宿主时不为无效 id。
+    [[nodiscard]] auto active_window() const -> WindowId {
+        if (last_dispatch_ != nullptr) {
+            return last_dispatch_->id();
+        }
+        if (hosts_.empty()) {
+            return AURORA_INVALID_WINDOW_ID;
+        }
+        return (main_host_ != nullptr ? main_host_ : hosts_.front().get())->id();
+    }
+
     /// @brief 注册窗口关闭回调：宿主被帧末回收**之后**触发一次，参数为被关闭窗口 id。
     /// 供上层释放与该窗口绑定的外部资源（不要在此回调内再关闭其他窗口）。
     /// 与 `set_on_close_requested` 的分工：本回调在回收**之后**，只能事后清理；可否决的
@@ -497,9 +518,21 @@ class Application {
     /// @brief 同步派发系统拖放事件到命中控件（四态统一程序化入口）。
     /// 经 `EventDispatcher` 路径触发 `on_system_drop`（specification/06-app-platform.md §8 平台 Shell）。
     /// @param e 待派发的系统拖放事件（阶段由调用方给定；坐标为整幅表面逻辑坐标）。
-    auto dispatch_system_drop(SystemDropEvent &e) const -> void { main_host_->dispatch_system_drop(e); }
+    auto dispatch_system_drop(SystemDropEvent &e) const -> void {
+        if (main_host_ == nullptr) {
+            return;
+        }
+        record_dispatch(main_host_);  // SystemDropEvent 属记账范围（见 `active_window()`）
+        main_host_->dispatch_system_drop(e);
+    }
 
   private:
+    /// @brief 记录一次派发的来源窗口（`active_window()` 的记账入口，O(1) 指针赋值）。
+    /// @detail 调用方负责先按记账范围（用户输入意图类事件）过滤；本函数只处理两件事：
+    ///         空宿主不记账、模态选择器运行期内的派发不记账（否则选择器自身的输入会把
+    ///         活动窗翻到选择器宿主）。
+    /// @param host 本次派发的目的宿主（空指针 = 无目的窗口，不记账）。
+    auto record_dispatch(WindowHost *host) const -> void;
     // ---- 宿主登记 ----
 
     /// @brief 以 `Window` 实值为准回填画布尺寸/标题（`Window` 为空则保持传入值）。
@@ -753,6 +786,11 @@ class Application {
     WindowOptions opts_;  ///< 保留用于 run() 的 max_frames / max_fps / power_saving 等。
     std::vector<std::unique_ptr<WindowHost>> hosts_;  ///< 全部窗口宿主（按登记顺序）。
     WindowHost *main_host_ = nullptr;  ///< 主窗口宿主：`scene()`/`focus()`/`window()` 的作用对象。
+    /// @brief 最近一次「用户输入意图类」派发的目的宿主（`active_window()` 的记账位）。
+    /// mutable：六个应用级派发入口与 `register_host` 注入的键盘前置拦截闭包全是 const
+    /// 语境，记账只是一次指针赋值，不改对象的逻辑常量性。`reap_closed` 回收宿主时若指向
+    /// 它则置空，故本指针恒指向存活宿主（或为空）。
+    mutable WindowHost *last_dispatch_ = nullptr;
     WindowId next_id_ = AURORA_INVALID_WINDOW_ID + 1U;  ///< 下一个待分配窗口 id（1 起；0 保留为无效 id）。
     WindowEventBus bus_;  ///< 跨窗口事件总线（类型化广播 / 点对点）。
     preferences::Preferences *geometry_store_ = nullptr;  ///< 几何持久化存储（可空 = 不持久化）。

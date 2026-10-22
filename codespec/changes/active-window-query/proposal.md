@@ -4,7 +4,7 @@
 | :--- | :--- |
 | 变更编号 | CHG-032 |
 | 提出日期 | 2026-10-22 |
-| 当前状态 | 已提议 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.APP.MULTI-WINDOW.001 |
 | 影响面 | `include/aurora/app/application.h`（新增 `active_window()` 与 `mutable WindowHost *last_dispatch_`）、`src/aurora/app/application.cpp`（应用级六个程序化入口按 #6 过滤后记账、`register_host` 的 key_pre 闭包内于匹配前记账、`reap_closed` 置空指向被回收宿主的指针）、`tests/unit/utest_application.cpp`（并入新增用例，不新建 utest 文件）、一枚新增 integration 用例文件（tests/integration 目录内，落地时定名）、`codespec/specification/06-app-platform.md`、`codespec/ARCHITECTURE.md`、`codespec/SPECIFICATIONS.md`、`codespec/manual-test/10-window.md`；**不动** `include/aurora/app/window_host.h` 与 `src/aurora/app/window_host.cpp`（与 CHG-034 的撞点随之消失）；aurora_api.json 无 classes/methods/functions 段，新增一枚 public 方法不入册 |
 

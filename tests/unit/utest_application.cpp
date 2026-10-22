@@ -6,6 +6,7 @@
 /// 帧循环对系统拖放异步结果的排空接线（终结回调 / 在途读取只在 step_frame 内兑现）
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -315,6 +316,259 @@ AURORA_TEST_CASE(application_wires_hover_cursor_to_surface) {
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
 #endif
+}
+
+// ---- 活动窗口查询 `Application::active_window()` ----
+// 语义：最近一次用户输入派发的目的窗口，**不等价于 OS 前台窗**（无头 / 失焦两档下可分叉）。
+
+/// @brief 产出一枚无头辅助窗口（多实例安全，与 utest_multi_window 同款底座）。
+auto make_aux_window(std::string title, int frames = -1) -> std::unique_ptr<Window> {
+    HeadlessOptions opts;
+    static_cast<WindowOptions &>(opts) = WindowOptions{};
+    opts.title = std::move(title);
+    opts.size = Size{.width = 200.0F, .height = 150.0F};
+    opts.max_frames = frames;
+    auto res = create_window(opts);
+    return res ? std::move(res.value()) : nullptr;
+}
+
+/// @brief 构造一枚按下态键盘事件（属记账范围的「用户输入意图类」事件）。
+auto make_key_down() -> KeyEvent {
+    KeyEvent e;
+    e.key = static_cast<int>(KeyCode::O);
+    e.action = KeyAction::Down;
+    return e;
+}
+
+AURORA_TEST_CASE(active_window_falls_back_to_main_without_records) {
+    // 判据 1：两窗构造后尚无记账 → 回落主窗，且不是无效号。
+    Application app{make_scene(), 320, 240};
+    auto wb = make_aux_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene());
+    AURORA_TEST_CHECK_EQ(app.window_count(), 2U);
+    AURORA_TEST_CHECK_EQ(app.active_window(), app.main_window());
+    AURORA_TEST_CHECK_NE(app.active_window(), AURORA_INVALID_WINDOW_ID);
+    AURORA_TEST_CHECK_NE(id_b, app.main_window());
+}
+
+AURORA_TEST_CASE(active_window_records_key_dispatch_source) {
+    // 判据 2：宿主级键盘派发经 key_pre 闭包记账（早于快捷键匹配）→ 回该窗；
+    //        再经应用级指针 Press → 回主窗。
+    Application app{make_scene(), 320, 240};
+    auto wb = make_aux_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene());
+    auto *host_b = app.window_host(id_b);
+    AURORA_TEST_REQUIRE_NOT_NULL(host_b);
+
+    KeyEvent down = make_key_down();
+    host_b->dispatch(down);
+    AURORA_TEST_CHECK_EQ(app.active_window(), id_b);
+
+    app.dispatch_pointer(10.0F, 10.0F, MouseAction::Press);
+    AURORA_TEST_CHECK_EQ(app.active_window(), app.main_window());
+}
+
+AURORA_TEST_CASE(active_window_programmatic_entry_matrix) {
+    // 判据 3：应用级 6 条入口一律回 main；宿主级 5 条直调不改变读数（无挂点）。
+    Application app{make_scene(), 320, 240};
+    auto wb = make_aux_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene());
+    auto *host_b = app.window_host(id_b);
+    AURORA_TEST_REQUIRE_NOT_NULL(host_b);
+    const WindowId id_main = app.main_window();
+
+    // 应用级六条：全部指向 main_host_，按记账范围过滤后一律把读数搬到 main。
+    const std::vector<std::function<void()>> app_entries = {
+        [&]() -> void { app.dispatch_click(5.0F, 5.0F); },
+        [&]() -> void { app.dispatch_pointer(5.0F, 5.0F, MouseAction::Press); },
+        [&]() -> void {
+            KeyEvent e = make_key_down();
+            (void)app.dispatch_key(e);
+        },
+        [&]() -> void {
+            TextInputEvent t;
+            t.text = "x";
+            (void)app.dispatch_text(t);
+        },
+        [&]() -> void {
+            TouchEvent t;
+            TouchPoint p;
+            p.is_active = true;
+            t.points.push_back(p);
+            app.dispatch_touch(t);
+        },
+        [&]() -> void {
+            SystemDropEvent d;
+            app.dispatch_system_drop(d);
+        },
+    };
+    // 宿主级五条：宿主无 Application 反指，够不到记账点 ⇒ 直调不改变读数。
+    const std::vector<std::function<void()>> host_entries = {
+        [&]() -> void { host_b->dispatch_pointer(5.0F, 5.0F, MouseAction::Press); },
+        [&]() -> void {
+            KeyEvent e = make_key_down();
+            (void)host_b->dispatch_key(e);
+        },
+        [&]() -> void {
+            TextInputEvent t;
+            t.text = "x";
+            (void)host_b->dispatch_text(t);
+        },
+        [&]() -> void {
+            TouchEvent t;
+            TouchPoint p;
+            p.is_active = true;
+            t.points.push_back(p);
+            host_b->dispatch_touch(t);
+        },
+        [&]() -> void {
+            SystemDropEvent d;
+            host_b->dispatch_system_drop(d);
+        },
+    };
+
+    // 逐条：先把读数钉在 B（宿主级键盘派发记账），再跑应用级入口 → 应搬回 main。
+    for (const auto &entry : app_entries) {
+        KeyEvent seed = make_key_down();
+        host_b->dispatch(seed);
+        AURORA_TEST_REQUIRE_EQ(app.active_window(), id_b);
+        entry();
+        AURORA_TEST_CHECK_EQ(app.active_window(), id_main);
+    }
+    // 逐条：先把读数钉在 main，再跑宿主级直调 → 读数不变。
+    for (const auto &entry : host_entries) {
+        app.dispatch_pointer(5.0F, 5.0F, MouseAction::Press);
+        AURORA_TEST_REQUIRE_EQ(app.active_window(), id_main);
+        entry();
+        AURORA_TEST_CHECK_EQ(app.active_window(), id_main);
+    }
+}
+
+AURORA_TEST_CASE(active_window_visible_inside_shortcut_action) {
+    // 判据 4：记账早于匹配 —— 快捷键闭包内读到的是本次派发来源，两次派发得两个不同号。
+    Application app{make_scene(), 320, 240};
+    auto wb = make_aux_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene());
+    auto *host_b = app.window_host(id_b);
+    AURORA_TEST_REQUIRE_NOT_NULL(host_b);
+
+    std::vector<WindowId> seen;
+    app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O},
+                        [&app, &seen]() -> void { seen.push_back(app.active_window()); });
+    KeyEvent e;
+    e.key = static_cast<int>(KeyCode::O);
+    e.action = KeyAction::Down;
+    e.modifiers = ModifierKey::Control;
+
+    (void)app.dispatch_key(e);  // 应用级 → 来源 main
+    host_b->dispatch(e);  // 宿主级 → 来源 B
+    AURORA_TEST_REQUIRE_EQ(seen.size(), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(seen[0], app.main_window());
+    AURORA_TEST_CHECK_EQ(seen[1], id_b);
+    AURORA_TEST_CHECK_NE(seen[0], seen[1]);
+}
+
+AURORA_TEST_CASE(active_window_ignores_pointer_move) {
+    // 判据 5：指针 Move 不记账（悬停不得翻转活动窗）；Press 记账；宿主级 MouseEvent 直调不翻转。
+    Application app{make_scene(), 320, 240};
+    auto wb = make_aux_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene());
+    auto *host_b = app.window_host(id_b);
+    AURORA_TEST_REQUIRE_NOT_NULL(host_b);
+    const WindowId id_main = app.main_window();
+
+    KeyEvent seed = make_key_down();
+    host_b->dispatch(seed);
+    AURORA_TEST_REQUIRE_EQ(app.active_window(), id_b);
+
+    app.dispatch_pointer(11.0F, 12.0F, MouseAction::Move);
+    AURORA_TEST_CHECK_EQ(app.active_window(), id_b);  // Move 不记账
+
+    app.dispatch_pointer(11.0F, 12.0F, MouseAction::Press);
+    AURORA_TEST_CHECK_EQ(app.active_window(), id_main);  // Press 记账
+
+    MouseEvent me;
+    me.action = MouseAction::Press;
+    host_b->dispatch(me);
+    AURORA_TEST_CHECK_EQ(app.active_window(), id_main);  // 宿主级无挂点，不翻转
+}
+
+AURORA_TEST_CASE(active_window_cleared_after_reap) {
+    // 判据 6（回收清号）与判据 8（回调窗口期仍有存活宿主 → 不为无效号）。
+    WindowOptions opts;
+    opts.max_frames = 2;
+    opts.power_saving = false;
+    auto wa = make_aux_window("main");
+    AURORA_TEST_REQUIRE_NOT_NULL(wa.get());
+    Application app{make_scene(), std::move(wa), opts};
+    auto wb = make_aux_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene());
+    auto *host_b = app.window_host(id_b);
+    AURORA_TEST_REQUIRE_NOT_NULL(host_b);
+    const WindowId id_main = app.main_window();
+
+    WindowId in_callback = AURORA_INVALID_WINDOW_ID;
+    app.set_on_window_closed([&](WindowId) -> void { in_callback = app.active_window(); });
+
+    KeyEvent seed = make_key_down();
+    host_b->dispatch(seed);
+    AURORA_TEST_REQUIRE_EQ(app.active_window(), id_b);
+
+    app.close_window(id_b);
+    app.run();  // 帧末 reap_closed 回收（step_frame 为私有，故走 run 的帧预算）
+
+    AURORA_TEST_CHECK_NE(app.active_window(), id_b);  // 被记账窗 reap 后不再回它
+    AURORA_TEST_CHECK_EQ(app.active_window(), id_main);
+    AURORA_TEST_CHECK_NE(in_callback, AURORA_INVALID_WINDOW_ID);
+}
+
+AURORA_TEST_CASE(active_window_keeps_last_surviving_host) {
+    // 判据 7：被记账窗正是「全关保留」规则留下的主宿主 → 仍回该号（有效存活号）。
+    WindowOptions opts;
+    opts.max_frames = 2;
+    opts.power_saving = false;
+    auto wa = make_aux_window("main");
+    AURORA_TEST_REQUIRE_NOT_NULL(wa.get());
+    Application app{make_scene(), std::move(wa), opts};
+    auto wb = make_aux_window("B");
+    AURORA_TEST_REQUIRE_NOT_NULL(wb.get());
+    const WindowId id_b = app.open_window(std::move(wb), make_scene());
+    const WindowId id_main = app.main_window();
+
+    app.dispatch_pointer(5.0F, 5.0F, MouseAction::Press);
+    AURORA_TEST_REQUIRE_EQ(app.active_window(), id_main);
+
+    // 两窗全关：「保留最后一个」规则留下主宿主 → 仍回该号。
+    std::vector<WindowId> all;
+    for (auto *h : app.windows()) {
+        all.push_back(h->id());
+    }
+    for (const WindowId id : all) {
+        app.close_window(id);
+    }
+    app.run();
+
+    AURORA_TEST_CHECK_EQ(app.active_window(), id_main);
+    AURORA_TEST_CHECK_NE(app.active_window(), id_b);
+}
+
+AURORA_TEST_CASE(active_window_equals_main_in_single_window) {
+    // 判据 9（回归保护）：单窗下任意派发后恒等于 main_window()。
+    Application app{make_scene(), 320, 240};
+    const WindowId id_main = app.main_window();
+    app.dispatch_pointer(5.0F, 5.0F, MouseAction::Press);
+    AURORA_TEST_CHECK_EQ(app.active_window(), id_main);
+    KeyEvent e = make_key_down();
+    (void)app.dispatch_key(e);
+    AURORA_TEST_CHECK_EQ(app.active_window(), id_main);
+    app.dispatch_pointer(6.0F, 6.0F, MouseAction::Move);
+    AURORA_TEST_CHECK_EQ(app.active_window(), id_main);
 }
 
 }  // namespace aurora::test_cases::utest_application
