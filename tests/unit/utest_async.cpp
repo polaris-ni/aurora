@@ -459,7 +459,7 @@ AURORA_TEST_CASE(cancel_observer_is_silent_on_completion_and_timeout) {
 }
 
 AURORA_TEST_CASE(with_timeout_delivers_error_after_interruptible_wait_change) {
-    // CHG-030 回归：非 deferred 下 with_timeout 改走 interruptible_wait_for，
+    // 回归用例：非 deferred 下 with_timeout 改走 interruptible_wait_for，
     // 超时仍正确改道为 async-timeout 错误（语义不变，仅等待可被进程退出中断）。
     AURORA_TEST_REQUIRE_THREADS();
     auto task = async([]() -> int {
