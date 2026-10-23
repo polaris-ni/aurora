@@ -3,14 +3,19 @@
 /// 测试说明: 系统拖放的**零平台头折算**——客户区像素→逻辑 dp（含 DPI 与非正缩放防御）、
 /// Win32 CLIPFORMAT ↔ MIME 双向映射与清单（保序去重、未登记丢弃）、MK_* → ModifierKey（Meta
 /// 恒不置位、未知位忽略）、DragAction ↔ DROPEFFECT 双向（多位按 Copy→Move→Link 取一）、
-/// 拖入侧 proposed 的来源（OS 报告值优先、修饰键覆盖、锁定态位不污染、OS 缺席按 Copy 兜底）、
-/// 同步载荷阈值常量锚定、make_drop_event 的字段装配。
+/// X11 选择目标名 ↔ MIME（UTF-8 三别名、latin1 的 STRING/TEXT 不登记）、`XdndAction*` ↔
+/// DragAction（Ask/Private → None）、拖入侧 proposed 的来源（OS 报告值优先、修饰键覆盖、锁定态
+/// 位不污染、OS 缺席按 Copy 兜底）、同步载荷阈值常量锚定、make_drop_event 的字段装配（含 X11
+/// 的 mimes 通道优先于 Win32 数值通道）。
 ///
 /// 变异自证（改坏实现应转红的三条）：
 ///  * 摘掉 `proposed_action_for` 的锁定态位掩码 → `..._ignores_lock_bits` 转红；
 ///  * 把「OS 缺席兜底」从 Copy 改成 None → `..._falls_back_to_copy_when_os_silent` 转红；
 ///  * 把阈值常量改成各平台桥自持的散数 → `sync_payload_limit_is_anchored` 转红（跨桥一致性
-///    另由「四桥均引用该常量」的静态判据钉住，不属本文件职责）。
+///    另由「四桥均引用该常量」的静态判据钉住，不属本文件职责）；
+///  * 把 latin1 的 `STRING` 登记进目标表 → `..._reverse_maps_aliases_but_not_latin1` 转红
+///    （登记它会让「读回字节按 UTF-8 解码」静默乱码）；
+///  * 让 `mimes` 与 `clip_formats` 双折算（而非二选一）→ `..._mimes_channel_takes_precedence` 转红。
 
 #include <cmath>
 #include <cstdint>
@@ -18,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "aurora/app/mime_types.h"
 #include "aurora/event/event.h"
 #include "aurora/window/detail/system_drag_translate.h"
 #include "framework/aurora_test.h"
@@ -30,7 +36,9 @@ using aurora::drag::DragInFrame;
 using aurora::drag::logical_from_client_px;
 using aurora::drag::make_drop_event;
 using aurora::drag::mime_from_win32_clip_format;
+using aurora::drag::mime_from_x11_target_name;
 using aurora::drag::mimes_from_win32_clip_formats;
+using aurora::drag::mimes_from_x11_target_names;
 using aurora::drag::modifiers_from_win32_mk_flags;
 using aurora::drag::result_from_win32_drag_out;
 using aurora::drag::win32_clip_format_from_mime;
@@ -39,6 +47,11 @@ using aurora::drag::Win32ClipFormat;
 using aurora::drag::Win32DragOutExit;
 using aurora::drag::Win32DropEffect;
 using aurora::drag::Win32MkFlag;
+using aurora::drag::x11_action_from_name;
+using aurora::drag::x11_action_name_from;
+using aurora::drag::x11_registered_action_names;
+using aurora::drag::x11_registered_target_names;
+using aurora::drag::x11_target_names_from_mime;
 using aurora::testing::require_value;
 
 namespace {
@@ -242,6 +255,123 @@ AURORA_TEST_CASE(translate_sync_payload_limit_is_anchored) {
     // 阈值是四个平台桥共用的单一真源：改常量本例即红，防止「某个桥另写一个数」的分叉。
     AURORA_TEST_CHECK_EQ(AURORA_DRAG_SYNC_PAYLOAD_LIMIT, std::size_t{65536});
     AURORA_TEST_CHECK_GT(AURORA_DRAG_SYNC_PAYLOAD_LIMIT, std::size_t{0});
+}
+
+// ---- X11 Xdnd 侧：选择目标名 ↔ MIME、动作 atom 名 ↔ DragAction ----
+
+AURORA_TEST_CASE(translate_x11_target_names_map_registered_mime_to_utf8_aliases) {
+    // text/plain 挂三个互操作别名，且**首选别名是带字符集的那一个**（advertise 与 request 都取
+    // 首个可用项）：GTK / Qt 源三者之一都会出现，缺一即与常见源失联。
+    const std::vector<std::string> text = x11_target_names_from_mime(AURORA_MIME_TEXT_PLAIN);
+    AURORA_TEST_REQUIRE_EQ(text.size(), std::size_t{3});
+    AURORA_TEST_CHECK_STREQ(text[0], "text/plain;charset=utf-8");
+    AURORA_TEST_CHECK_STREQ(text[1], "UTF8_STRING");
+    AURORA_TEST_CHECK_STREQ(text[2], "text/plain");
+
+    const std::vector<std::string> uris = x11_target_names_from_mime(AURORA_MIME_URI_LIST);
+    AURORA_TEST_REQUIRE_EQ(uris.size(), std::size_t{1});
+    AURORA_TEST_CHECK_STREQ(uris[0], "text/uri-list");
+
+    const std::vector<std::string> png = x11_target_names_from_mime(AURORA_MIME_IMAGE_PNG);
+    AURORA_TEST_REQUIRE_EQ(png.size(), std::size_t{1});
+    AURORA_TEST_CHECK_STREQ(png[0], "image/png");
+
+    // 未登记 MIME 不映射（与 Win32 数值表同纪律：不猜、不兜底成空串）。
+    AURORA_TEST_CHECK_TRUE(x11_target_names_from_mime("application/x-custom").empty());
+    AURORA_TEST_CHECK_TRUE(x11_target_names_from_mime("").empty());
+}
+
+AURORA_TEST_CASE(translate_x11_target_name_reverse_maps_aliases_but_not_latin1) {
+    for (const char *name : {"text/plain;charset=utf-8", "UTF8_STRING", "text/plain"}) {
+        const auto mime = mime_from_x11_target_name(name);
+        AURORA_TEST_REQUIRE_TRUE(mime.has_value());
+        AURORA_TEST_CHECK_STREQ(require_value(mime), AURORA_MIME_TEXT_PLAIN);
+    }
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_x11_target_name("text/uri-list")), AURORA_MIME_URI_LIST);
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_x11_target_name("image/png")), AURORA_MIME_IMAGE_PNG);
+
+    // 纯 latin1 的 `STRING` / `TEXT` **不登记**：本库文本契约是 UTF-8，登记 latin1 目标会让
+    // 「读回的字节按 UTF-8 解码」静默乱码。宁可不认该格式，也不产出错误的解码。
+    AURORA_TEST_CHECK_FALSE(mime_from_x11_target_name("STRING").has_value());
+    AURORA_TEST_CHECK_FALSE(mime_from_x11_target_name("TEXT").has_value());
+    AURORA_TEST_CHECK_FALSE(mime_from_x11_target_name("").has_value());
+}
+
+AURORA_TEST_CASE(translate_x11_mime_list_preserves_priority_and_dedups) {
+    // 顺序即优先级（源侧声明序），折算不得重排；未登记目标丢弃。
+    const std::vector<std::string> names{"image/png", "UTF8_STRING",   "text/plain",
+                                         "STRING",    "text/uri-list", "image/png"};
+    const std::vector<std::string> mimes = mimes_from_x11_target_names(names);
+    AURORA_TEST_REQUIRE_EQ(mimes.size(), std::size_t{3});
+    AURORA_TEST_CHECK_STREQ(mimes[0], AURORA_MIME_IMAGE_PNG);
+    AURORA_TEST_CHECK_STREQ(mimes[1], AURORA_MIME_TEXT_PLAIN);
+    AURORA_TEST_CHECK_STREQ(mimes[2], AURORA_MIME_URI_LIST);
+
+    AURORA_TEST_CHECK_TRUE(mimes_from_x11_target_names({}).empty());
+    AURORA_TEST_CHECK_TRUE(mimes_from_x11_target_names({"STRING", "TEXT"}).empty());
+}
+
+AURORA_TEST_CASE(translate_x11_action_names_map_both_ways) {
+    AURORA_TEST_CHECK_TRUE(x11_action_from_name("XdndActionCopy") == DragAction::Copy);
+    AURORA_TEST_CHECK_TRUE(x11_action_from_name("XdndActionMove") == DragAction::Move);
+    AURORA_TEST_CHECK_TRUE(x11_action_from_name("XdndActionLink") == DragAction::Link);
+    AURORA_TEST_CHECK_STREQ(x11_action_name_from(DragAction::Copy), "XdndActionCopy");
+    AURORA_TEST_CHECK_STREQ(x11_action_name_from(DragAction::Move), "XdndActionMove");
+    AURORA_TEST_CHECK_STREQ(x11_action_name_from(DragAction::Link), "XdndActionLink");
+
+    for (const DragAction action : {DragAction::Copy, DragAction::Move, DragAction::Link}) {
+        AURORA_TEST_CHECK_TRUE(x11_action_from_name(x11_action_name_from(action)) == action);
+    }
+}
+
+AURORA_TEST_CASE(translate_x11_action_names_reject_ask_private_and_unknown) {
+    // `Ask` / `Private` 与未知名一律 None：本库的 DragAction 没有「询问用户」与「应用私有」两态，
+    // 如实映射为「无动作」而非替用户猜一个——光标反馈与动作协商都据此收车。
+    AURORA_TEST_CHECK_TRUE(x11_action_from_name("XdndActionAsk") == DragAction::None);
+    AURORA_TEST_CHECK_TRUE(x11_action_from_name("XdndActionPrivate") == DragAction::None);
+    AURORA_TEST_CHECK_TRUE(x11_action_from_name("XdndActionNothing") == DragAction::None);  // 未知名
+    AURORA_TEST_CHECK_TRUE(x11_action_from_name("UTF8_STRING") == DragAction::None);  // 张冠不可李戴
+}
+
+AURORA_TEST_CASE(translate_x11_action_name_from_none_is_empty) {
+    // None → 空串：调用方据此直接用 atom `None`，不去 intern 一个空名（XInternAtom("") 无意义）。
+    AURORA_TEST_CHECK_STREQ(x11_action_name_from(DragAction::None), "");
+    AURORA_TEST_CHECK_TRUE(x11_action_from_name("") == DragAction::None);
+}
+
+AURORA_TEST_CASE(translate_x11_registered_lists_are_the_single_source) {
+    // 两张登记表由折算层给出、桥在 install 期按它 intern：这里钉住「登记表即映射表的展平」，
+    // 防止桥里另抄一份名字（抄错一个字母即与对端失联，且无头测不到）。
+    const std::vector<std::string> &names = x11_registered_target_names();
+    AURORA_TEST_REQUIRE_EQ(names.size(), std::size_t{5});
+    for (const std::string &name : names) {
+        AURORA_TEST_CHECK_TRUE(mime_from_x11_target_name(name).has_value());
+    }
+    const std::vector<std::string> &actions = x11_registered_action_names();
+    AURORA_TEST_REQUIRE_EQ(actions.size(), std::size_t{3});
+    for (const std::string &name : actions) {
+        AURORA_TEST_CHECK_FALSE(x11_action_from_name(name) == DragAction::None);
+    }
+}
+
+AURORA_TEST_CASE(translate_drop_in_mimes_channel_takes_precedence_over_clip_formats) {
+    // 二选一而非并存：X11 通道填 mimes（目标名已折算），再过一遍 Win32 数值表等于把 MIME 塞回
+    // 数值再折回来——无意义的往返会把未登记 MIME 悄悄吞掉。
+    DragInFrame frame = plain_frame();
+    frame.mimes = {std::string{AURORA_MIME_TEXT_PLAIN}, std::string{AURORA_MIME_IMAGE_PNG}};
+    frame.clip_formats = {AURORA_CF_HDROP};  // 干扰项：mimes 非空时必须被忽略
+
+    const SystemDropEvent event = make_drop_event(SystemDropPhase::Over, frame);
+    AURORA_TEST_REQUIRE_EQ(event.formats.size(), std::size_t{2});
+    AURORA_TEST_CHECK_STREQ(event.formats[0], AURORA_MIME_TEXT_PLAIN);
+    AURORA_TEST_CHECK_STREQ(event.formats[1], AURORA_MIME_IMAGE_PNG);
+
+    // mimes 为空（Win32 通道）时落回数值表。
+    DragInFrame win32 = plain_frame();
+    win32.clip_formats = {AURORA_CF_HDROP};
+    const SystemDropEvent fallback = make_drop_event(SystemDropPhase::Over, win32);
+    AURORA_TEST_REQUIRE_EQ(fallback.formats.size(), std::size_t{1});
+    AURORA_TEST_CHECK_STREQ(fallback.formats[0], AURORA_MIME_URI_LIST);
 }
 
 // ---- 拖出侧：`DoDragDrop` 退出码 + 效果位 → 会话终态 ----

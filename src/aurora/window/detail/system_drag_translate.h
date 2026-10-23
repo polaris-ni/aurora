@@ -114,6 +114,49 @@ enum class Win32DragOutExit : std::uint32_t {
 /// @return 译出的动作；无已知位时为 `DragAction::None`。
 [[nodiscard]] auto action_from_win32_drop_effect(std::uint32_t effect) -> DragAction;
 
+/// @brief X11 Xdnd 选择目标名（`XdndEnter` / `XdndTypeList` / `SelectionRequest` 的 target atom 名）。
+///
+/// 与 Win32 `CLIPFORMAT` 表同口径：只登记本库会消费的 MIME，未登记 MIME 不映射（不猜、不兜底）。
+/// `text/plain` 挂三个 UTF-8 别名（互操作惯例：GTK / Qt 源三者之一都会出现）；纯 latin1 的
+/// `STRING` / `TEXT` **不登记**——本库文本契约是 UTF-8，登记 latin1 目标会让「读回的字节按
+/// UTF-8 解码」静默乱码。顺序即优先级：源侧 advertise 与目标侧 request 都按该序取首个可用项。
+/// @param mime 待映射的 MIME（须为 `app/mime_types.h` 登记的规范形）。
+/// @return 目标名清单（已登记 MIME 至少一项；未登记时为空清单）。
+[[nodiscard]] auto x11_target_names_from_mime(std::string_view mime) -> std::vector<std::string>;
+
+/// @brief X11 选择目标名 → MIME（上一函数的逆）；未登记名返回 `std::nullopt`。
+/// @param name 平台侧目标 atom 名。
+/// @return 对应 MIME；未登记时为 `std::nullopt`。
+[[nodiscard]] auto mime_from_x11_target_name(std::string_view name) -> std::optional<std::string>;
+
+/// @brief X11 目标名清单 → MIME 清单（保持输入顺序、去重、丢弃未登记项）。
+///
+/// 与 `mimes_from_win32_clip_formats` 同纪律：顺序即优先级，折算不得重排。
+/// @param names 平台侧目标名清单（可含重复与未登记项）。
+/// @return 去重后的 MIME 清单（未登记项被丢弃，可为空）。
+[[nodiscard]] auto mimes_from_x11_target_names(const std::vector<std::string> &names) -> std::vector<std::string>;
+
+/// @brief X11 动作 atom 名（`XdndAction*`）→ `DragAction`。
+///
+/// `Ask` / `Private` 与未知名一律 `None`：本库的 `DragAction` 没有「询问用户」与「应用私有」
+/// 两态，如实映射为「无动作」而非替用户猜一个——光标反馈与动作协商都据此收车。
+/// @param name 平台侧动作 atom 名。
+/// @return 译出的动作；`Ask` / `Private` / 未知名时为 `DragAction::None`。
+[[nodiscard]] auto x11_action_from_name(std::string_view name) -> DragAction;
+
+/// @brief `DragAction` → X11 动作 atom 名（上一函数的逆）。
+/// @param action 待映射的动作。
+/// @return 动作 atom 名；`None` 时返回空串（调用方直接用 atom `None`，不 intern 空名）。
+[[nodiscard]] auto x11_action_name_from(DragAction action) -> std::string;
+
+/// @brief 本库登记的**全部** X11 选择目标名（桥 install 期一次性 intern 用；单一真源）。
+/// @return 去重的目标名清单（顺序同 `x11_target_names_from_mime` 各表项的拼接序）。
+[[nodiscard]] auto x11_registered_target_names() -> const std::vector<std::string> &;
+
+/// @brief 本库登记的**全部** X11 动作 atom 名（桥 install 期一次性 intern 用；单一真源）。
+/// @return 动作 atom 名清单（不含 `Ask` / `Private`：本库不消费它们）。
+[[nodiscard]] auto x11_registered_action_names() -> const std::vector<std::string> &;
+
 /// @brief 客户区**物理像素** → 窗口**逻辑 dp**（拖放坐标契约的唯一折算入口）。
 ///
 /// 与 `Win32Host::Impl::to_logical` 同款但可无头验证：`scale` 由调用方（宿主）给出，本函数不读
@@ -149,6 +192,13 @@ struct DragOutResult {
 struct DragInFrame {
     /// @brief 平台侧可用格式的数值清单（Win32 为 `CLIPFORMAT`；其余平台按同一位置填其原生值）。
     std::vector<std::uint16_t> clip_formats;
+    /// @brief 平台侧可用格式的 MIME 清单（X11 为目标名折算后的形态）。
+    ///
+    /// 与 `clip_formats` 是**二选一**关系而非并存：非空时 `make_drop_event` 直接采用本清单，
+    /// `clip_formats` 被忽略（X11 桥填之——Xdnd 的目标 atom 名经 `mimes_from_x11_target_names`
+    /// 折算后已是 MIME，再过一遍数值表反而要把 MIME 塞回数值，属无意义往返）。Win32 桥留空，
+    /// 走 `clip_formats` 通道。两个槽都空 ⇒ formats 为空清单（无可用格式）。
+    std::vector<std::string> mimes;
     ModifierKey modifiers = ModifierKey::None;  ///< 修饰键位集（由平台侧状态位折算而来）
     /// @brief OS 报告的源侧建议动作（拖入侧的 `default_action` 来源；`None` = OS 未报告）。
     ///
@@ -162,8 +212,10 @@ struct DragInFrame {
 
 /// @brief 由平台侧原始数据构造 `SystemDropEvent`（不填载荷）。
 ///
-/// 折算式完成三件事：坐标（客户区像素 → 逻辑 dp）、formats（格式数值 → MIME 清单）、
+/// 折算式完成三件事：坐标（客户区像素 → 逻辑 dp）、formats（格式数值 / 目标名 → MIME 清单）、
 /// `proposed`（修饰键 + OS 报告值 → 建议动作，走 `proposed_action_for` 唯一翻译点）。
+/// formats 二选一：`DragInFrame::mimes` 非空时直接采用（X11 通道），否则由 `clip_formats`
+/// 经 Win32 数值表折算（Win32 通道）——两条通道不叠加、不双折算。
 /// `allowed` 与 `payload` 不在本函数职责内：`allowed` 由**派发器**按 accept 查询与 `proposed`
 /// 求交后写定，载荷由调用方按阶段装配（`Enter` / `Over` / `Leave` 可无载荷，`Drop` 才有）。
 /// @param phase 本次回调的阶段。

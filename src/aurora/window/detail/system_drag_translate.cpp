@@ -139,11 +139,125 @@ auto logical_from_client_px(const int x, const int y, const float scale) -> Poin
     return Point{.x = static_cast<float>(x) / divisor, .y = static_cast<float>(y) / divisor};
 }
 
+namespace {
+
+/// @brief X11 目标名登记表（MIME → 目标 atom 名；顺序即优先级，理由见头文件同名函数注记）。
+struct X11TargetEntry {
+    std::string_view mime;
+    std::vector<std::string> names;
+};
+
+/// @brief 登记表单一真源（进程内只读静态；头文件两个 registered_* 查询函数即由它展平）。
+[[nodiscard]] const std::vector<X11TargetEntry> &x11_target_table() {
+    static const std::vector<X11TargetEntry> TABLE = {
+        {.mime = AURORA_MIME_TEXT_PLAIN, .names = {"text/plain;charset=utf-8", "UTF8_STRING", "text/plain"}},
+        {.mime = AURORA_MIME_URI_LIST, .names = {"text/uri-list"}},
+        {.mime = AURORA_MIME_IMAGE_PNG, .names = {"image/png"}},
+    };
+    return TABLE;
+}
+
+/// @brief 展平后的目标名清单（保持表内顺序；install 期 intern 的唯一来源）。
+[[nodiscard]] const std::vector<std::string> &x11_target_names_flat() {
+    static const std::vector<std::string> FLAT = [] {
+        std::vector<std::string> out;
+        for (const X11TargetEntry &entry : x11_target_table()) {
+            for (const std::string &name : entry.names) {
+                out.push_back(name);
+            }
+        }
+        return out;
+    }();
+    return FLAT;
+}
+
+/// @brief 动作 atom 名登记表（`DragAction` → atom 名；`Ask` / `Private` 不登记）。
+[[nodiscard]] const std::vector<std::pair<DragAction, std::string_view>> &x11_action_table() {
+    static const std::vector<std::pair<DragAction, std::string_view>> TABLE = {
+        {DragAction::Copy, "XdndActionCopy"},
+        {DragAction::Move, "XdndActionMove"},
+        {DragAction::Link, "XdndActionLink"},
+    };
+    return TABLE;
+}
+
+}  // namespace
+
+auto x11_target_names_from_mime(const std::string_view mime) -> std::vector<std::string> {
+    for (const X11TargetEntry &entry : x11_target_table()) {
+        if (entry.mime == mime) {
+            return entry.names;
+        }
+    }
+    return {};  // 未登记 MIME：不猜、不兜底（与 Win32 数值表同纪律）
+}
+
+auto mime_from_x11_target_name(const std::string_view name) -> std::optional<std::string> {
+    for (const X11TargetEntry &entry : x11_target_table()) {
+        for (const std::string &candidate : entry.names) {
+            if (candidate == name) {
+                return std::string{entry.mime};
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+auto mimes_from_x11_target_names(const std::vector<std::string> &names) -> std::vector<std::string> {
+    std::vector<std::string> out;
+    std::unordered_set<std::string> seen;
+    for (const std::string &name : names) {
+        const auto mime = mime_from_x11_target_name(name);
+        if (!mime.has_value()) {
+            continue;  // 未登记目标：丢弃（不猜、不兜底成空串）
+        }
+        if (seen.insert(*mime).second) {
+            out.push_back(*mime);
+        }
+    }
+    return out;
+}
+
+auto x11_action_from_name(const std::string_view name) -> DragAction {
+    for (const auto &[action, atom_name] : x11_action_table()) {
+        if (atom_name == name) {
+            return action;
+        }
+    }
+    // XdndActionAsk / XdndActionPrivate / 未知名：本库无对应态，如实为 None（见头文件注记）。
+    return DragAction::None;
+}
+
+auto x11_action_name_from(const DragAction action) -> std::string {
+    for (const auto &[mapped, atom_name] : x11_action_table()) {
+        if (mapped == action) {
+            return std::string{atom_name};
+        }
+    }
+    return {};  // None：调用方直接用 atom None，不 intern 空名
+}
+
+auto x11_registered_target_names() -> const std::vector<std::string> & { return x11_target_names_flat(); }
+
+auto x11_registered_action_names() -> const std::vector<std::string> & {
+    static const std::vector<std::string> FLAT = [] {
+        std::vector<std::string> out;
+        for (const auto &[action, atom_name] : x11_action_table()) {
+            (void)action;
+            out.emplace_back(atom_name);
+        }
+        return out;
+    }();
+    return FLAT;
+}
+
+
 auto make_drop_event(const SystemDropPhase phase, const DragInFrame &frame) -> SystemDropEvent {
     SystemDropEvent event;
     event.phase = phase;
     event.position = logical_from_client_px(frame.client_x, frame.client_y, frame.scale);
-    event.formats = mimes_from_win32_clip_formats(frame.clip_formats);
+    // 二选一（DragInFrame::mimes 注记）：X11 通道直接采用折算好的 MIME 清单，Win32 通道过数值表。
+    event.formats = frame.mimes.empty() ? mimes_from_win32_clip_formats(frame.clip_formats) : frame.mimes;
     event.modifiers = frame.modifiers;
     // 拖入侧的缺省动作即 OS 报告值（DragInFrame::os_suggested 注记）；OS 未报告（None）时
     // proposed_action_for 自身按 Copy 兜底——两路兜底只此一处，不另写。翻译点唯一：

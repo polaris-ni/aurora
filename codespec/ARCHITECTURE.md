@@ -343,13 +343,15 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 ### 8.7 系统拖放桥接（platform system-drag bridge）
 
-**分层与所有权。** 与无障碍桥、输入法桥同构：平台中立值类型（`event/event.h` 的 `SystemDropEvent` 四态与 `SystemDragOutcome`，已由既有切片冻结）→ 折算层（`src/aurora/window/detail/system_drag_translate.{h,cpp}`，**零平台头**：剪贴板格式 ↔ MIME、`MK_*` → `ModifierKey`、客户区像素 → 逻辑 dp、`DragAction` ↔ `DROPEFFECT`、同步载荷阈值）→ 平台桥（Win32 OLE = `src/aurora/window/detail/win32_drag.{h,cpp}` 独立桥类；X11 Xdnd 与 Wayland `wl_data_device` 入口点少，按 §8.6 的同一判据分别内联在各自 `surface.cpp` 的 `Impl` 内）。
+**分层与所有权。** 与无障碍桥、输入法桥同构：平台中立值类型（`event/event.h` 的 `SystemDropEvent` 四态与 `SystemDragOutcome`，已由既有切片冻结）→ 折算层（`src/aurora/window/detail/system_drag_translate.{h,cpp}`，**零平台头**：剪贴板格式 ↔ MIME、`MK_*` → `ModifierKey`、X11 state → `ModifierKey`、客户区像素 → 逻辑 dp、`DragAction` ↔ `DROPEFFECT` / ↔ `XdndAction*` atom 名、目标名 ↔ MIME、同步载荷阈值）→ 平台桥（Win32 OLE 与 X11 Xdnd 各自独立成桥类：`src/aurora/window/detail/win32_drag.{h,cpp}`、`src/aurora/window/detail/x11_drag.{h,cpp}`；Wayland `wl_data_device` 入口点尚少，按 §8.6 的同一判据内联在 `wayland_surface.cpp` 的 `Impl` 内）。Xdnd 之所以独立成桥（而不是像早期设想那样内联进 `x11_surface.cpp`）：它有完整的双向状态机（拖入四消息 + selection round-trip + ICCCM `INCR` 分块；拖出 `XdndSelection` 属主 + 指针 grab + 目标探测 + 光标更新），内联会让 `Impl` 同时承载窗口生命周期与会话状态机。
 
 **拖入入口（与前两桥不同的一点）**：拖出由本进程发起（`system_drag::begin`），拖入由**外部进程**发起，故多一层「宿主投事件的唯一入口」`src/aurora/event/detail/system_drag_ingress.h`（内部头，不进 `include/`）：平台桥把折算好的事件交给它、拿回派发器写定的 `allowed` 去回写 OS 光标；配套的 inert 拖入后端（`install_test_drag_in` 一族，双宏裁切）在接管期间**抑制真实派发**，使拖入链在无头环境可被完整接管。槽由调用方持有而非全局登记——多窗口下进程级单槽会让后登记者覆盖先登记者。
 
-**窗口归属与能力位**：桥由 `Win32Host::Impl` 唯一持有（`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 转发同一实例，与 §8.5、§8.6 同纪律）；Linux / macOS 随各自 `Impl`。拖出侧另经 `src/aurora/event/detail/system_drag_backend.h`（内部头）向事件层注册进程级单槽后端（发起 / 取消 / 在途要约索取），由各窗口宿主持有期注册、「先到者优先」去重。能力位 `system_drag_in` / `system_drag_out` **按方向独立翻位**（拖入与拖出分批次落地，成对翻位会让未落地的方向谎报支持），当前 `Win32` 与 `D3D11` 两个方向均为 true。
+**窗口归属与能力位**：桥由各自的 `Impl` 唯一持有——Win32 侧 `Win32Host::Impl`（`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 转发同一实例，与 §8.5、§8.6 同纪律）；X11 侧 `X11Surface::Impl`（析构时先于 X 资源销毁）。拖出侧另经 `src/aurora/event/detail/system_drag_backend.h`（内部头）向事件层注册进程级单槽后端（发起 / 取消 / 在途要约索取），由各窗口宿主持有期注册、「先到者优先」去重。能力位 `system_drag_in` / `system_drag_out` **按方向独立翻位**（拖入与拖出分批次落地，成对翻位会让未落地的方向谎报支持），当前 `Win32`、`D3D11` 与 `X11` 两个方向均为 true。
 
-**首批边界**：拖入四态 + 同步载荷；Win32 拖出（`IDropSource` + `DoDragDrop`，会话跑在库自管拖拽线程上、UI 线程帧循环照常推进）已由后续批次交付；大载荷异步通道、`CF_DIBV5` → PNG 转码、X11 / Wayland / macOS 三平台双向属后续批次。真机接缝由 `tools/verify/win32_drag_live_probe.cpp` 覆盖（拖入四态人工段 + 拖出自拖放全链路自动腿），无头可证明的部分全在 `utest_system_drag_translate` / `utest_system_drag_ingress` / `utest_drag_payload` 里——目标口径与 §8.6 一致：**无头 CI 证明不了的只剩平台接缝与跨进程真机联调**。
+**受理信号的两条来源（不改派发器）**：`EventDispatcher` 只对 `Enter` / `Over` 写 `event.allowed`（既有单测锁定该语义），而 Xdnd 目标侧要回写给源的 `XdndFinished` 需要「这一次落放到底有没有被消费」。故 `Drop` 态的受理信号取事件的 `is_handled`、执行动作取目标侧 `XdndStatus` 缓存的动作——派发器语义不动，桥在 sink 里读回即可。
+
+**已落地与剩余边界**：拖入四态 + 同步载荷；Win32 拖出（`IDropSource` + `DoDragDrop`，会话跑在库自管拖拽线程上、UI 线程帧循环照常推进）与 X11 双向（Xdnd v5，拖入含 selection round-trip 与 ICCCM `INCR` 分块，拖出含 `XdndSelection` 属主与指针 grab）已交付。剩余：Win32 侧大载荷异步通道、`CF_DIBV5` → PNG 转码、Wayland 与 macOS 两平台双向。真机接缝由 `tools/verify/win32_drag_live_probe.cpp` 与 `tools/verify/x11_drag_live_probe.cpp` 覆盖（拖入四态人工段 + 拖出自拖放全链路自动腿；X11 探针另设一条「探针以另一条 X 连接充当外部源」的拖入腿，不依赖窗口栈与真实指针，故在 Xwayland 下也能取证）。无头可证明的部分全在 `utest_system_drag_translate` / `utest_system_drag_ingress` / `utest_drag_payload` 里——目标口径与 §8.6 一致：**无头 CI 证明不了的只剩平台接缝与跨进程真机联调**。
 
 契约与四后端映射表见 `specification/05-event-navigation.md` §5.2，平台侧细节（OLE 初始化与降级、窄路径移除、拖入注入面）见 `specification/06-app-platform.md` §8.9。
 

@@ -61,6 +61,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_x11_cursor)
     endif ()
 
+    # ---- X11 Xdnd 拖入 / 拖出桥（真实 X 服务器）：`XdndAware` 广告 + 四态派发 + 动作协商 +
+    # selection round-trip 取数 + 拖出 grab/`XdndSelection` 所有权/消息序列。自动段以「本窗口
+    # 自拖放」完成全链路无人值守验收（要约 → 数据往返 → 终态 Succeeded/Copy），跨进程会话
+    # （从文件管理器拖文件）交 --interactive 人工段。
+    if (AURORA_BACKEND_X11)
+        aurora_add_verify_probe(aurora_verify_x11_drag "${_aurora_verify_dir}/x11_drag_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_x11_drag)
+    endif ()
+
     # ---- X11 XIM 输入法桥（风格协商 / PreeditCallbacks 回调 / IC 焦点宣告 / 候选窗锚点）----
     # 自动段验收协商与焦点接线（不要求本机装输入法；无 XIM 服务器按合法降级 SKIP）；
     # preedit/上屏内容段交 --interactive 人工（需真实 XIM 进程驱动组合）。
