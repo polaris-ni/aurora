@@ -64,6 +64,16 @@ enum class Win32DropEffect : std::uint8_t {
     Link = 4U,  ///< `DROPEFFECT_LINK`
 };
 
+/// @brief Win32 `DoDragDrop` 的退出码（HRESULT 语义；MSDN「DoDragDrop return values」原文数值）。
+///
+/// 本地声明而非取 SDK 宏：折算层不引 `<windows.h>`（详见文件头）。
+enum class Win32DragOutExit : std::uint32_t {
+    Dropped = 0x00040100U,  ///< `DRAGDROP_S_DROPPED`：落放发生（效果见 pdwEffect）
+    Cancelled = 0x00040101U,  ///< `DRAGDROP_S_CANCELED`：会话被取消
+    DefaultCursors = 0x00040102U,  ///< `DRAGDROP_S_USEDEFAULTCURSORS`：未发生落放（用户放弃）
+    Unexpected = 0x8000FFFFU,  ///< `E_UNEXPECTED`：异常终止的代表值（其余失败 HRESULT 同族）
+};
+
 /// @brief Win32 `grfKeyState`（`MK_*` 位集）→ `ModifierKey` 位集。
 ///
 /// 只置可按住的位：`MK_*` 本身不含锁定态（NumLock 一类不在其中），故无需摘掩码；折算出的位集
@@ -113,6 +123,24 @@ enum class Win32DropEffect : std::uint8_t {
 /// @param scale 当前 DPI 缩放（dp → 物理像素）；≤ 0 时按 1.0 处理（不产生 NaN / Inf）。
 /// @return 逻辑坐标点。
 [[nodiscard]] auto logical_from_client_px(int x, int y, float scale) -> Point;
+
+/// @brief Win32 拖出会话的终态折算结果（`DoDragDrop` 返回值 + 效果位 → 契约值）。
+struct DragOutResult {
+    SystemDragOutcome outcome = SystemDragOutcome::Failed;  ///< 会话结局
+    DragAction action = DragAction::None;  ///< 协商出的动作（`Succeeded` 时有效）
+};
+
+/// @brief `DoDragDrop` 退出码 + 效果位 → 会话终态（拖出侧的**唯一**折算点）。
+///
+/// 映射表（与 `SystemDragOutcome` 四结局逐一对齐）：
+/// - `Dropped` 且效果位非零 → `Succeeded` + 效果位经 `action_from_win32_drop_effect` 折算的动作；
+/// - `Dropped` 且效果位为零 → `Rejected`（落点目标不接受该拖放）；
+/// - `Cancelled` / `DefaultCursors` → `Cancelled`（用户取消 / 未发生落放，是意图不是故障）；
+/// - 其余失败码（`Unexpected` 一族）→ `Failed`（会话中途异常终止）。
+/// @param exit `DoDragDrop` 的返回值。
+/// @param effect `DoDragDrop` 写回的 `DROPEFFECT` 位值。
+/// @return 折算后的终态（结局 + 动作）。
+[[nodiscard]] auto result_from_win32_drag_out(Win32DragOutExit exit, std::uint32_t effect) -> DragOutResult;
 
 /// @brief 平台侧一次拖入回调的原始数据（**平台无关形态**，由平台桥填好后交折算层）。
 ///

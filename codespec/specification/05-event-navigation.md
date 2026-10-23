@@ -493,7 +493,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
   | 后端 | Enter | Over | Leave | Drop | 光标反馈回写 | 状态 |
   |:---|:---|:---|:---|:---|:---|:---|
-  | Win32 OLE | `IDropTarget::DragEnter` | `DragOver` | `DragLeave` | `Drop` | `DragOver` / `DragEnter` 的 `pdwEffect`（`DROPEFFECT_*`） | **拖入已接线** |
+  | Win32 OLE | `IDropTarget::DragEnter` | `DragOver` | `DragLeave` | `Drop` | `DragOver` / `DragEnter` 的 `pdwEffect`（`DROPEFFECT_*`） | **拖入 / 拖出均已接线**（拖出走库自管拖拽线程，见下） |
   | X11 Xdnd | `XdndEnter` | `XdndPosition` | `XdndLeave` | `XdndDrop` | `XdndStatus`（接受与否 + 动作 + 矩形） | 后续批次 |
   | Wayland | `wl_data_device.data_offer` 四态 | 同左 | 同左 | 同左 | `wl_data_offer.set_actions` | 后续批次 |
   | macOS | `draggingEntered` | `draggingUpdated` | `draggingExited` | `performDragOperation` | `draggingEntered` / `draggingUpdated` 返回的 `NSDragOperation` | 后续批次 |
@@ -503,7 +503,15 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
   - **proposed**：拖出侧取 `DragOffer::default_action`；**拖入侧源是外部进程、没有 `DragOffer`**，故取 OS 报告的源侧建议动作（Win32 `pdwEffect` / X11 `XdndEnter` 的 action 位 / Wayland `source_actions` / macOS `draggingSourceOperationMask`），OS 未报告时按 `Copy` 兜底。
   - **allowed**：命中目标的 `query_system_drag_accept` 与 `proposed` 求交后写定，宿主按上表逐后端回写——这是「询问 → 反馈」闭环的唯一出口。
   - **载荷**：小载荷走同步（`DragPayload::from_bytes`），大载荷 / 远程载荷走 `read_async` + `pump_reads()`（阈值 `AURORA_DRAG_SYNC_PAYLOAD_LIMIT` 是四后端共用的单一真源）。
-  - **能力位与方向**：`system_drag_in` / `system_drag_out` **按方向独立翻位**（不是成对翻位），当前 `Win32` 与 `D3D11` 的拖入为 true、其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定）；`Glfw` 与 `Headless` 恒 false。
+  - **拖出侧终态折算（逐平台来源）**：拖出会话跑在平台自管的执行体上（Win32 为库自管拖拽线程），终态经 `complete_drag_out_session` 登记、帧循环投递。取消与结局的判定按平台各有唯一来源，折算后统一落 §5.2 已冻结的四结局：
+
+    | 后端 | 发起入口 | 取消检测 | 成功依据 | 失败依据 |
+    |:---|:---|:---|:---|:---|
+    | Win32 OLE | `DoDragDrop`（库自管拖拽线程，自持 `OleInitialize`） | `IDropSource::QueryContinueDrag` 返回 `DRAGDROP_S_CANCEL`（Esc / 程序化取消标志 / 右键） | `DRAGDROP_S_DROPPED` + 效果位非零 | 异常 HRESULT、线程侧 `OleInitialize` 失败、要约提供失败或介质构造失败 |
+
+    Win32 侧退出码 → 终态折算（SDK 宏 → 本地枚举的唯一映射点，`exit_of_drag_out` + `result_from_win32_drag_out`，零平台头层可无头单测）：`DROPPED` + 效果位非零 → `Succeeded` + 动作（`action_from_win32_drop_effect` 按 Copy → Move → Link 取一）；`DROPPED` + `DROPEFFECT_NONE` → `Rejected` + `None`；`CANCELED` / `USEDEFAULTCURSORS` → `Cancelled` + `None`；异常 HRESULT → `Failed` + `None`。后续三平台的取消 / 成功 / 失败来源（X11 `XdndFinished` 缺失即未成功、Wayland `dnd_finished` / `cancelled`、macOS `draggingSession(_:endedAt:operation:)` 的 operation 为 none）随各自批次落地时按同一体例补入本表。
+  - **自拖放取数**：同进程跨窗口拖放（本库拖出源即本进程落点）时，拖入侧经在途要约直取（UI 线程直接调 `DragOffer::provide`，不经数据对象）。Win32 上同进程**跨单元**形态下数据对象指针被 COM 编组为代理，经数据对象取数会让 UI 线程与拖拽线程互等到墙钟超时；同单元到达的 `GetData` 由数据对象按同单元分支直答。判据「在途拖出会话存在 ⇒ 到达本窗口的落放即自拖放」由 OLE 拖放系统级互斥保证（一场拖拽循环运行时他源无法发起）。
+  - **能力位与方向**：`system_drag_in` / `system_drag_out` **按方向独立翻位**（不是成对翻位），当前 `Win32` 与 `D3D11` 两个方向均为 true、其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定）；`Glfw` 与 `Headless` 恒 false。
 
 ---
 

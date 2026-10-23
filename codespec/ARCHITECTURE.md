@@ -347,9 +347,9 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 **拖入入口（与前两桥不同的一点）**：拖出由本进程发起（`system_drag::begin`），拖入由**外部进程**发起，故多一层「宿主投事件的唯一入口」`src/aurora/event/detail/system_drag_ingress.h`（内部头，不进 `include/`）：平台桥把折算好的事件交给它、拿回派发器写定的 `allowed` 去回写 OS 光标；配套的 inert 拖入后端（`install_test_drag_in` 一族，双宏裁切）在接管期间**抑制真实派发**，使拖入链在无头环境可被完整接管。槽由调用方持有而非全局登记——多窗口下进程级单槽会让后登记者覆盖先登记者。
 
-**窗口归属与能力位**：桥由 `Win32Host::Impl` 唯一持有（`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 转发同一实例，与 §8.5、§8.6 同纪律）；Linux / macOS 随各自 `Impl`。能力位 `system_drag_in` / `system_drag_out` **按方向独立翻位**（拖入与拖出分批次落地，成对翻位会让未落地的方向谎报支持），当前仅 `Win32` 与 `D3D11` 的拖入为 true。
+**窗口归属与能力位**：桥由 `Win32Host::Impl` 唯一持有（`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 转发同一实例，与 §8.5、§8.6 同纪律）；Linux / macOS 随各自 `Impl`。拖出侧另经 `src/aurora/event/detail/system_drag_backend.h`（内部头）向事件层注册进程级单槽后端（发起 / 取消 / 在途要约索取），由各窗口宿主持有期注册、「先到者优先」去重。能力位 `system_drag_in` / `system_drag_out` **按方向独立翻位**（拖入与拖出分批次落地，成对翻位会让未落地的方向谎报支持），当前 `Win32` 与 `D3D11` 两个方向均为 true。
 
-**首批边界**：拖入四态 + 同步载荷；拖出（`IDropSource` + `DoDragDrop` 与 Win32 重入闸）、大载荷异步通道、`CF_DIBV5` → PNG 转码、其余三平台属后续批次。真机接缝由 `tools/verify/win32_drag_live_probe.cpp` 覆盖，无头可证明的部分全在 `utest_system_drag_translate` / `utest_system_drag_ingress` / `utest_drag_payload` 里——目标口径与 §8.6 一致：**无头 CI 证明不了的只剩平台接缝**。
+**首批边界**：拖入四态 + 同步载荷；Win32 拖出（`IDropSource` + `DoDragDrop`，会话跑在库自管拖拽线程上、UI 线程帧循环照常推进）已由后续批次交付；大载荷异步通道、`CF_DIBV5` → PNG 转码、X11 / Wayland / macOS 三平台双向属后续批次。真机接缝由 `tools/verify/win32_drag_live_probe.cpp` 覆盖（拖入四态人工段 + 拖出自拖放全链路自动腿），无头可证明的部分全在 `utest_system_drag_translate` / `utest_system_drag_ingress` / `utest_drag_payload` 里——目标口径与 §8.6 一致：**无头 CI 证明不了的只剩平台接缝与跨进程真机联调**。
 
 契约与四后端映射表见 `specification/05-event-navigation.md` §5.2，平台侧细节（OLE 初始化与降级、窄路径移除、拖入注入面）见 `specification/06-app-platform.md` §8.9。
 

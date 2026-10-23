@@ -32,11 +32,14 @@ using aurora::drag::make_drop_event;
 using aurora::drag::mime_from_win32_clip_format;
 using aurora::drag::mimes_from_win32_clip_formats;
 using aurora::drag::modifiers_from_win32_mk_flags;
+using aurora::drag::result_from_win32_drag_out;
 using aurora::drag::win32_clip_format_from_mime;
 using aurora::drag::win32_drop_effect_from_action;
 using aurora::drag::Win32ClipFormat;
+using aurora::drag::Win32DragOutExit;
 using aurora::drag::Win32DropEffect;
 using aurora::drag::Win32MkFlag;
+using aurora::testing::require_value;
 
 namespace {
 
@@ -49,6 +52,10 @@ constexpr std::uint32_t AURORA_MK_ALT = static_cast<std::uint32_t>(Win32MkFlag::
 constexpr std::uint32_t AURORA_EFFECT_COPY = static_cast<std::uint32_t>(Win32DropEffect::Copy);
 constexpr std::uint32_t AURORA_EFFECT_MOVE = static_cast<std::uint32_t>(Win32DropEffect::Move);
 constexpr std::uint32_t AURORA_EFFECT_LINK = static_cast<std::uint32_t>(Win32DropEffect::Link);
+constexpr auto AURORA_EXIT_DROPPED = Win32DragOutExit::Dropped;
+constexpr auto AURORA_EXIT_CANCELLED = Win32DragOutExit::Cancelled;
+constexpr auto AURORA_EXIT_DEFAULT_CURSORS = Win32DragOutExit::DefaultCursors;
+constexpr auto AURORA_EXIT_UNEXPECTED = Win32DragOutExit::Unexpected;
 
 /// @brief 取位集里的某一位是否置位（ModifierKey 是位掩码枚举，逐位比较须显式转换）。
 [[nodiscard]] auto has_mod(ModifierKey mods, ModifierKey bit) -> bool {
@@ -123,11 +130,9 @@ AURORA_TEST_CASE(translate_mime_list_preserves_priority_and_dedups) {
 
 AURORA_TEST_CASE(translate_mime_to_clip_format_round_trips) {
     for (const std::uint16_t format : {AURORA_CF_TEXT, AURORA_CF_HDROP, AURORA_CF_DIBV5}) {
-        const auto mime = mime_from_win32_clip_format(format);
-        AURORA_TEST_REQUIRE_TRUE(mime.has_value());
-        const auto back = win32_clip_format_from_mime(*mime);
-        AURORA_TEST_REQUIRE_TRUE(back.has_value());
-        AURORA_TEST_CHECK_EQ(static_cast<std::uint32_t>(*back), static_cast<std::uint32_t>(format));
+        const std::string mime = require_value(mime_from_win32_clip_format(format));
+        const auto back = win32_clip_format_from_mime(mime);
+        AURORA_TEST_CHECK_EQ(static_cast<std::uint32_t>(require_value(back)), static_cast<std::uint32_t>(format));
     }
 }
 
@@ -237,6 +242,51 @@ AURORA_TEST_CASE(translate_sync_payload_limit_is_anchored) {
     // 阈值是四个平台桥共用的单一真源：改常量本例即红，防止「某个桥另写一个数」的分叉。
     AURORA_TEST_CHECK_EQ(AURORA_DRAG_SYNC_PAYLOAD_LIMIT, std::size_t{65536});
     AURORA_TEST_CHECK_GT(AURORA_DRAG_SYNC_PAYLOAD_LIMIT, std::size_t{0});
+}
+
+// ---- 拖出侧：`DoDragDrop` 退出码 + 效果位 → 会话终态 ----
+
+AURORA_TEST_CASE(translate_drag_out_dropped_with_effect_succeeds) {
+    // 落放发生且效果位非零：Succeeded + 效果位折取的动作（Copy → Move → Link）。
+    const auto copy = result_from_win32_drag_out(AURORA_EXIT_DROPPED, AURORA_EFFECT_COPY);
+    AURORA_TEST_CHECK_TRUE(copy.outcome == SystemDragOutcome::Succeeded);
+    AURORA_TEST_CHECK_TRUE(copy.action == DragAction::Copy);
+
+    const auto move = result_from_win32_drag_out(AURORA_EXIT_DROPPED, AURORA_EFFECT_MOVE);
+    AURORA_TEST_CHECK_TRUE(move.outcome == SystemDragOutcome::Succeeded);
+    AURORA_TEST_CHECK_TRUE(move.action == DragAction::Move);
+
+    const auto link = result_from_win32_drag_out(AURORA_EXIT_DROPPED, AURORA_EFFECT_LINK);
+    AURORA_TEST_CHECK_TRUE(link.outcome == SystemDragOutcome::Succeeded);
+    AURORA_TEST_CHECK_TRUE(link.action == DragAction::Link);
+
+    // 多位并存时与拖入侧同序取一（Copy 优先），两条通道口径一致。
+    const auto multi = result_from_win32_drag_out(AURORA_EXIT_DROPPED, AURORA_EFFECT_MOVE | AURORA_EFFECT_COPY);
+    AURORA_TEST_CHECK_TRUE(multi.outcome == SystemDragOutcome::Succeeded);
+    AURORA_TEST_CHECK_TRUE(multi.action == DragAction::Copy);
+}
+
+AURORA_TEST_CASE(translate_drag_out_dropped_without_effect_is_rejected) {
+    // 落放发生但效果位为零：目标侧不接受该拖放（DoDragDrop 契约的 DROPEFFECT_NONE 语义）。
+    const auto rejected = result_from_win32_drag_out(AURORA_EXIT_DROPPED, 0U);
+    AURORA_TEST_CHECK_TRUE(rejected.outcome == SystemDragOutcome::Rejected);
+    AURORA_TEST_CHECK_TRUE(rejected.action == DragAction::None);
+}
+
+AURORA_TEST_CASE(translate_drag_out_cancel_paths_map_to_cancelled) {
+    // 取消与「未发生落放」都是用户意图路径，不是故障：一律 Cancelled（不冒充失败）。
+    for (const Win32DragOutExit exit : {AURORA_EXIT_CANCELLED, AURORA_EXIT_DEFAULT_CURSORS}) {
+        const auto result = result_from_win32_drag_out(exit, 0U);
+        AURORA_TEST_CHECK_TRUE(result.outcome == SystemDragOutcome::Cancelled);
+        AURORA_TEST_CHECK_TRUE(result.action == DragAction::None);
+    }
+}
+
+AURORA_TEST_CASE(translate_drag_out_unexpected_exit_is_failed) {
+    // 异常 HRESULT（E_UNEXPECTED 一族）→ Failed；效果位不参与（会话没有谈成任何动作）。
+    const auto failed = result_from_win32_drag_out(AURORA_EXIT_UNEXPECTED, AURORA_EFFECT_COPY);
+    AURORA_TEST_CHECK_TRUE(failed.outcome == SystemDragOutcome::Failed);
+    AURORA_TEST_CHECK_TRUE(failed.action == DragAction::None);
 }
 
 }  // namespace aurora::test_cases::utest_system_drag_translate

@@ -107,6 +107,32 @@ auto action_from_win32_drop_effect(const std::uint32_t effect) -> DragAction {
     return DragAction::None;
 }
 
+auto result_from_win32_drag_out(const Win32DragOutExit exit, const std::uint32_t effect) -> DragOutResult {
+    DragOutResult result;
+    switch (exit) {
+        case Win32DragOutExit::Dropped:
+            // 落放发生：效果位为零即目标侧「不接受」（DoDragDrop 契约：DROPEFFECT_NONE 表示
+            // 没有目标接受该拖放）；非零则按 Copy → Move → Link 折取出真实动作。
+            if (effect == 0U) {
+                result.outcome = SystemDragOutcome::Rejected;
+                result.action = DragAction::None;
+            } else {
+                result.outcome = SystemDragOutcome::Succeeded;
+                result.action = action_from_win32_drop_effect(effect);
+            }
+            break;
+        case Win32DragOutExit::Cancelled:
+        case Win32DragOutExit::DefaultCursors:
+            // 取消与「未发生落放」都是用户意图路径，不是故障：一律 Cancelled，不冒充失败。
+            result.outcome = SystemDragOutcome::Cancelled;
+            result.action = DragAction::None;
+            break;
+        case Win32DragOutExit::Unexpected:
+            break;  // 异常终止：保持默认 Failed
+    }
+    return result;
+}
+
 auto logical_from_client_px(const int x, const int y, const float scale) -> Point {
     // scale ≤ 0 按 1.0 处理：宿主侧异常值不得把坐标算成 NaN / Inf（那会污染命中测试与布局）。
     const float divisor = scale > 0.0F ? scale : 1.0F;

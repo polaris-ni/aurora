@@ -12,9 +12,16 @@
 // ③ 与「PNG 编解码关闭时该格式如实不可得、不假装支持」同条纪律——拖入亦不备语义更弱的备胎。
 // OLE 初始化失败时如实报「会话建立失败」，不谎报有通路。
 //
-// 首批范围：**拖入四态 + 同步载荷**。拖出（`IDropSource` + `DoDragDrop` 与重入闸）、大载荷异步
-// 通道（`read_async` + `pump_reads`）属后续批次；折算层已为两者备好映射与阈值常量
+// 首批范围：**拖入四态 + 同步载荷 + 拖出（`IDropSource` + `DoDragDrop`）**。大载荷异步通道
+// （`read_async` + `pump_reads`）属后续批次；折算层已为其备好阈值常量
 // （`system_drag_translate.h`），届时按同一接缝扩展，不改本桥的对外形态。
+//
+// 拖出的线程形态：规格明文「不引入嵌套消息泵」（`codespec/specification/06-app-platform.md` §8.9），
+// 而 Win32 `DoDragDrop` 一旦调用就在**调用线程**上跑 OS 固有的嵌套模态循环。故拖出会话搬到
+// **库自管的拖拽线程**上跑：`system_drag::begin`（UI 线程）发起即返回，UI 线程帧循环不被打断，
+// OS 嵌套循环随之离开 UI 线程。拖拽线程与事件层之间只经
+// `event/detail/system_drag_backend.h` 的两条通道交互（终态登记 + 跨线程要约索取），
+// 平台桥不自行决定投递时机——帧循环排空通则因此对四个平台一致。
 //
 // 门控与 `win32_ime.h` 同款（平台宏 ∧ 后端宏析取），并补 `AURORA_BACKEND_GPU_WGPU`：Win32 / D3D11 /
 // WgpuWin32 三类 Surface 共用同一 `Win32Host`，能力位三者同翻（见 `window/platform.h`）。
@@ -110,6 +117,24 @@ class Win32DragBridge {
     bool installed_ = false;  ///< `RegisterDragDrop` 是否已成功
     bool ole_owned_ = false;  ///< 本桥是否持有一次 `OleInitialize`（配对的 `OleUninitialize` 责任）
 };
+
+/// @brief 注册 Win32 拖出后端（进程级单槽；由 `Win32Host::Impl` 构造期调用，重复调用忽略）。
+///
+/// 拖出机制（OS 会话 + 库自管拖拽线程）与具体窗口句柄无关，故注册面进程级常驻、不随窗口销毁
+/// 注销（与事件层注册面同口径，见 `event/detail/system_drag_backend.h`）。多窗口场景下
+/// 后到窗口的注册由事件层的「先到者优先」自然作废。
+auto register_win32_drag_out_backend() -> void;
+
+/// @brief 登记进程级 DPI 缩放提示（宿主每次 `refresh_scale()` 后调用；任意窗口调用均生效）。
+///
+/// 存在的理由：拖拽影像热点在逻辑 dp 上声明、像素由源应用合成，折算需要「发起窗口的 DPI」；
+/// 而 `SystemDragOutBackend::begin` 只携带 `DragOffer`（无窗口上下文、无缩放），桥无从向
+/// 事件层反查发起窗口。若改为捕获首个窗口的缩放查询回调，首窗销毁后该回调即读已释放成员
+/// （悬空）。故退一步取**进程级提示槽**：宿主在自己的 DPI 刷新点（唯一写 `scale` 处）顺带
+/// 推送，引擎只读该槽、不持有任何窗口指针——多显示器异 DPI 场景取最后一次推送值，
+/// 是装饰性热点的次优解，不致语义受损（`DragOffer::icon` 契约）。
+/// @param scale 当前 DPI 缩放（dp → 物理像素；≤ 0 或非有限值按 1.0 处理）。
+auto win32_drag_out_note_scale(float scale) -> void;
 
 }  // namespace aurora::detail
 

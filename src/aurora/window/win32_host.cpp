@@ -468,6 +468,11 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
         if (!drag->install()) {
             AURORA_LOG_WARN("system-drag", "drag-in backend not registered on this window");
         }
+        // 拖出后端（进程级单槽）：与拖入桥解耦——拖入随窗口走（OS 按 HWND 回调），拖出与窗口
+        // 句柄无关（会话跑在库自管拖拽线程上），故每个窗口的构造期都调一次，由事件层
+        // 「先到者优先」去重。注册失败无回路可走：真实后端缺失时 `system_drag::begin` 落
+        // not-supported，不谎报有通路。
+        detail::register_win32_drag_out_backend();
     }
     size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // 逻辑 dp（布局用）
 }
@@ -1121,6 +1126,9 @@ auto Win32Host::Impl::register_class() const -> void {
 auto Win32Host::Impl::refresh_scale(const RECT *desired) -> float {
     const detail::DpiReading reading = detail::read_dpi(hwnd, desired, detail::resolve_dpi_api());
     scale = detail::dpi_to_scale(reading.dpi);
+    // 拖出影像热点折算的进程级缩放提示：本函数是宿主内唯一写 `scale` 的点，故在此顺带推送
+    // （`SystemDragOutBackend::begin` 拿不到发起窗口上下文，理由见 `win32_drag.h` 注记）。
+    detail::win32_drag_out_note_scale(scale);
     return scale;
 }
 

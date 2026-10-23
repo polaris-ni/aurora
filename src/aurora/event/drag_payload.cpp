@@ -13,6 +13,7 @@
 #include "aurora/app/uri_list.h"
 #include "aurora/core/error_codes.h"
 #include "aurora/core/result.h"
+#include "aurora/event/detail/system_drag_backend.h"
 #include "aurora/event/detail/system_drag_ingress.h"
 #include "aurora/event/event.h"
 #include "aurora/image/image_codec.h"
@@ -56,6 +57,24 @@ struct ReadRegistry {
 [[nodiscard]] auto read_registry() -> ReadRegistry & {
     static ReadRegistry registry;
     return registry;
+}
+
+/// @brief 跨线程要约索取登记表（进程级；拖拽线程登记、UI 线程在帧循环排空内应答）。
+struct ProvideRegistry {
+    std::mutex mutex;  ///< 保护以下成员
+    std::vector<detail::ProvideRequest> pending;  ///< 待应答索取（按登记序）
+};
+
+/// @brief 进程唯一索取登记表（函数内 static，规避静态初始化顺序问题）。
+[[nodiscard]] auto provide_registry() -> ProvideRegistry & {
+    static ProvideRegistry registry;
+    return registry;
+}
+
+/// @brief 真实拖出后端（进程级单槽；平台桥在窗口宿主持有期注册，重复注册以先到者为准）。
+[[nodiscard]] auto drag_out_backend_slot() -> detail::SystemDragOutBackend & {
+    static detail::SystemDragOutBackend backend;
+    return backend;
 }
 
 /// @brief 拖出会话状态（进程级；无后端时 `begin` 直接失败，故事态恒空）。
@@ -120,6 +139,37 @@ struct SystemDragTestBackend {
     return entry.payload->bytes(entry.mime);  // 同步读取：内存载荷即取即得
 }
 
+/// @brief 收口全部待应答索取：有会话即经 `provide` 应答（帧循环排空阶段），否则按读取
+/// 失败兑现（会话已结束 / 测试边界复位：拖拽线程不得悬挂等待）。
+///
+/// `answer_with_provide = false` 用于**排空阶段之外**的收口（`cancel` 与测试三件套）：那里调用
+/// 应用回调会把控件数据读取插进任意栈深，正是帧内排空通则要避免的重入面。
+auto settle_provide_requests(bool answer_with_provide) -> void {
+    auto &registry = provide_registry();
+    std::vector<detail::ProvideRequest> all;
+    {
+        const std::scoped_lock lock{registry.mutex};
+        all.swap(registry.pending);
+    }
+    for (auto &request : all) {
+        std::function<Result<std::vector<std::uint8_t>>(const std::string &)> provide;
+        if (answer_with_provide) {
+            auto &session = drag_session();
+            const std::scoped_lock lock{session.mutex};
+            if (session.active && session.offer.provide) {
+                provide = session.offer.provide;  // 锁外调用：应用代码可能再入本命名空间
+            }
+        }
+        Result<std::vector<std::uint8_t>> answer =
+            (provide != nullptr)
+                ? provide(request.mime)
+                : make_error(ErrorCode::SystemDragReadFailed,
+                             ErrorParams{{"mime", request.mime},
+                                         {"detail", "drag session ended before the payload was provided"}});
+        request.fulfill(std::move(answer));
+    }
+}
+
 /// @brief 就地收口全部在途读取（`cancel` 用：不等帧循环，有数据即兑现、否则失败兑现，不悬挂）。
 auto settle_all_reads() -> void {
     auto &registry = read_registry();
@@ -133,13 +183,19 @@ auto settle_all_reads() -> void {
         const bool ready = read_data_ready(entry);
         entry.callback(fulfill_read(entry, ready, now));
     }
+    // 待应答索取一并收口（失败兑现）：拖拽线程还阻塞在 `GetData` 上等这份字节，不兑现即悬挂。
+    settle_provide_requests(false);
 }
 
 /// @brief 登记会话终态（待帧循环投递）；无在途会话时 no-op。
+///
+/// **终态只认第一登记者**：取消一旦登记，OS 侧迟到的结局（取消与落放的竞态）不改写已排定的
+/// 终态——`system_drag::cancel()` 的契约是「终态 `Cancelled` 经帧循环投递」，后到者赢会让
+/// 调用方看到自己没请求过的结局。
 auto complete_session(SystemDragOutcome outcome, DragAction action) -> void {
     auto &session = drag_session();
     const std::scoped_lock lock{session.mutex};
-    if (!session.active) {
+    if (!session.active || session.end_queued) {
         return;
     }
     session.end_queued = true;
@@ -377,6 +433,47 @@ auto SystemDropEvent::bytes_async(const std::string &mime,
 
 // ---- 系统拖出会话（事件驱动：发起即返回，终态与读取结果经帧循环排空兑现）----
 
+// 真实拖出后端注册面（detail 层内部接缝，契约见 `event/detail/system_drag_backend.h`）：
+// 平台桥在窗口宿主持有期注册；拖出机制（Win32 `DoDragDrop` 一族）与具体 HWND 无关，故注册面
+// 是进程级单槽、先到者优先、不随窗口销毁注销（窗口无关性见 win32_drag.cpp 的拖出会话注记）。
+
+auto detail::post_provide_request(ProvideRequest request) -> void {
+    auto &registry = provide_registry();
+    const std::scoped_lock lock{registry.mutex};
+    registry.pending.push_back(std::move(request));
+}
+
+auto detail::take_provide_requests() -> std::vector<ProvideRequest> {
+    auto &registry = provide_registry();
+    std::vector<ProvideRequest> out;
+    const std::scoped_lock lock{registry.mutex};
+    out.swap(registry.pending);
+    return out;
+}
+
+auto detail::system_drag_read_timeout() -> std::chrono::milliseconds {
+    auto &registry = read_registry();
+    const std::scoped_lock lock{registry.mutex};
+    return registry.timeout;
+}
+
+auto detail::complete_drag_out_session(const SystemDragOutcome outcome, const DragAction action) -> void {
+    complete_session(outcome, action);  // 登记终态；经下一拍 pump_reads() 投递 on_end
+}
+
+auto detail::register_system_drag_out_backend(SystemDragOutBackend backend) -> void {
+    auto &slot = drag_out_backend_slot();
+    if (slot.begin != nullptr) {
+        return;  // 先到者优先：单槽不覆盖（机制进程级常驻，重复注册等价）
+    }
+    slot = std::move(backend);
+}
+
+auto detail::system_drag_out_backend() -> const SystemDragOutBackend * {
+    const auto &slot = drag_out_backend_slot();
+    return slot.begin != nullptr ? &slot : nullptr;
+}
+
 auto system_drag::begin(const DragOffer &offer, std::function<void(SystemDragOutcome, DragAction)> on_end)
     -> Result<void> {
     // 要约不合法是调用方参数问题，与「平台没有机制」是两类失败，分开报。
@@ -384,24 +481,29 @@ auto system_drag::begin(const DragOffer &offer, std::function<void(SystemDragOut
         return make_error(ErrorCode::GeneralInvalidArgument,
                           "system_drag::begin: empty formats or no provide callback");
     }
-    // 机制缺失：没有任何后端接线（真实平台后端或测试 inert 后端）时落回 SystemDragNotSupported。
-    // **拖出方向**当前尚无后端接线（拖入已由 Win32 OLE 桥落地，二者按方向独立翻位，见
-    // `tests/unit/utest_drag_payload.cpp` 的方向级分叉锚定用例），故此处恒报机制缺失；
-    // 拖出后端接线后会经同一入口放行，届时本分支不再触发。
+    // 判优序：inert 测试后端**优先**（安装期间真实后端不接管，二者互不叠加）
+    // → 真实后端（平台桥经 detail 注册面登记）→ 机制缺失（`system-drag-not-supported`，稳态）。
+    bool via_real_backend = false;
 #ifdef AURORA_SYSTEM_DRAG_TEST_BACKEND
     {
         auto &backend = system_drag_test_backend();
         const std::scoped_lock lock{backend.mutex};
-        if (!backend.active) {
+        if (backend.active) {
+            backend.last_offer = offer;  // inert 后端记录要约（测试断言影像 / 缺省动作等字段往返）
+        } else {
+            via_real_backend = true;  // inert 未安装：落真实后端分支
+        }
+    }
+#else
+    via_real_backend = true;
+#endif
+    if (via_real_backend) {
+        const auto *backend = detail::system_drag_out_backend();
+        if (backend == nullptr || backend->begin == nullptr) {
             return make_error(ErrorCode::SystemDragNotSupported,
                               "system_drag::begin: no system drag-and-drop backend is wired on this platform yet");
         }
-        backend.last_offer = offer;  // inert 后端记录要约（测试断言影像 / 缺省动作等字段往返）
     }
-#else
-    return make_error(ErrorCode::SystemDragNotSupported,
-                      "system_drag::begin: no system drag-and-drop backend is wired on this platform yet");
-#endif
     {
         auto &session = drag_session();
         const std::scoped_lock lock{session.mutex};
@@ -416,14 +518,36 @@ auto system_drag::begin(const DragOffer &offer, std::function<void(SystemDragOut
         session.end_queued = false;
         session.last_error.reset();
     }
+    if (via_real_backend) {
+        const auto *backend = detail::system_drag_out_backend();
+        // 锁外发起：真实后端（拖拽线程）可能在返回前就经终态通道补登，complete_session 取同一把锁。
+        if (!backend->begin(offer)) {
+            // 发起失败：回滚会话态（否则在途会话永悬挂、后续 begin 全被误拒），如实报建立失败。
+            auto &session = drag_session();
+            const std::scoped_lock lock{session.mutex};
+            session.active = false;
+            session.offer = DragOffer{};
+            session.on_end = nullptr;
+            session.end_queued = false;
+            session.last_error.reset();
+            return make_error(ErrorCode::SystemDragSessionFailed,
+                              "system_drag::begin: backend failed to start the drag session");
+        }
+    }
     return Result<void>{};
 }
 
 auto system_drag::cancel() -> void {
-    // ① 就地收口在途读取（不等帧循环）：有数据即兑现，否则按读取失败兑现，不悬挂。
+    // ① 就地收口在途读取与待应答索取（不等帧循环）：有数据即兑现、否则失败兑现，不悬挂。
+    //    索取按失败兑现而非调 provide：本路径不在排空阶段，调应用回调正是帧内排空要避免的重入面。
     settle_all_reads();
     // ② 完成在途会话（终态 Cancelled，经帧循环投递 on_end）；无在途会话则 no-op。
     complete_session(SystemDragOutcome::Cancelled, DragAction::None);
+    // ③ 真实后端同步收摊：OS 会话（拖拽线程） unwind 后补登的终态撞上已排定的 Cancelled，
+    //    由 complete_session 的「首登记者赢」规则自然作废——本地终态即调用方看到的终态。
+    if (const auto *backend = detail::system_drag_out_backend(); backend != nullptr && backend->cancel != nullptr) {
+        backend->cancel();
+    }
 }
 
 auto system_drag::pump_reads() -> void {
@@ -462,6 +586,9 @@ auto system_drag::pump_reads() -> void {
         const bool ready = read_data_ready(entry);
         entry.callback(fulfill_read(entry, ready, now));
     }
+    // 要约索取应答（拖拽线程 → UI 线程）：`provide` 是控件侧回调，与在途读取同一排空阶段调用
+    // （本函数已在 drain_depth > 0 的守卫内）：不排空 ⇒ 拖拽线程按墙钟超时失败兑现，不悬挂。
+    settle_provide_requests(true);
     deliver_session_end();
 }
 
@@ -490,6 +617,7 @@ auto system_drag::install_test_backend() -> bool {
         registry.pending.clear();
         registry.timeout = AURORA_SYSTEM_DRAG_READ_TIMEOUT;
     }
+    settle_provide_requests(false);  // 待应答索取按失败兑现（不悬挂等待中的拖拽线程）
     return true;
 #else
     return false;
@@ -521,6 +649,7 @@ auto system_drag::reset_test_backend() -> void {
         registry.pending.clear();  // 在途项直接摘除（不兑现）：测试边界复位用
         registry.timeout = AURORA_SYSTEM_DRAG_READ_TIMEOUT;
     }
+    settle_provide_requests(false);  // 待应答索取按失败兑现（不悬挂等待中的拖拽线程）
 }
 
 auto system_drag::remove_test_backend() -> bool {
@@ -550,6 +679,7 @@ auto system_drag::remove_test_backend() -> bool {
         registry.pending.clear();
         registry.timeout = AURORA_SYSTEM_DRAG_READ_TIMEOUT;
     }
+    settle_provide_requests(false);  // 待应答索取按失败兑现（不悬挂等待中的拖拽线程）
     return was_active;
 #else
     return false;

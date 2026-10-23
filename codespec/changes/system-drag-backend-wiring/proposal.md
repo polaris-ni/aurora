@@ -95,3 +95,7 @@
 - `codespec/manual-test/`（新增第 24 卷 systemdrag：`TC-SYSTEMDRAG-001` 起连续编号，格式受 `check_manual_test_format` 管辖，体例对标 `codespec/manual-test/23-net.md`）
 - 收尾：本提案状态随批次流转（已提议 → 实施中 → 已归档）。
 - 发布记录落 CHANGELOG.md（`Added`：系统拖放后端接线；`Fixed`：能力位翻位）——该文档不属 codespec 树，按 AGENTS.md 硬规则 5 不列为回写落点。
+
+## 批次移交注记
+
+本提案只覆盖**首批**（折算层 + 拖入测试接缝 + Win32 OLE 拖入四态与同步载荷，翻 `system_drag_in`）；其余批次（Win32 拖出与 X11 / Wayland / macOS 双向）由 `codespec/changes/system-drag-out-and-xplat-bidirectional/proposal.md`（CHG-036）承接，本提案保留首批交付范围与全部裁决记录、不重新裁决。其中 Win32 拖出批次已落地：重入闸按**拖拽线程形态**实现（`DoDragDrop` 跑在库自管拖拽线程、UI 线程帧循环照常推进，故无「闸内写操作 / 帧步进补拍」机制），验收判据第 4 条中「闸内执行一次会改动控件树的写操作」的措辞以此为准被替换——判据本体（不嵌套派发、树状态与操作意图一致）由「在途闸拒绝第二次 begin + 取消先登记的首登记者赢规则」承接。
