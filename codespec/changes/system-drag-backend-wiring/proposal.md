@@ -71,6 +71,8 @@
 
 批次次序（依赖关系：折算层与拖入测试接缝先行，其余批次复用同一接缝）：先落「折算层 + 后端接缝 + 拖入测试接缝 + Win32 OLE 拖入四态与同步载荷路径（翻 `system_drag_in`）」，再落「Win32 拖出 + reentry guard + 拖拽影像 + Move 回滚（翻 `system_drag_out`）」，随后「X11 Xdnd 双向」「Wayland 双向」，再后「macOS 双向」，可选「WASM DataTransfer」；末批全量门禁与真机记录归档。
 
+首批（折算层 + 拖入测试接缝 + Win32 OLE 拖入）已交付，本提案保留该范围与全部裁决记录；其余批次（Win32 拖出、X11 Xdnd 双向、Wayland 双向、macOS 双向）的落地由 `codespec/changes/system-drag-out-and-xplat-bidirectional/proposal.md` 承接，本提案状态随该提案完成后一并归档。
+
 ## 验收判据
 
 1. **契约不回归与注入优先**：既有 `utest_drag_payload` / `utest_drag_drop` / `utest_dispatcher` / `utest_application` 四态与 inert 用例全绿；引入真实后端后 `reset_test_backend` 复位、`remove_test_backend` 恢复「无后端 → `system-drag-not-supported`」语义不变；安装测试后端（含新增拖入接缝）期间真实后端不接管。
