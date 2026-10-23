@@ -431,10 +431,10 @@ struct DragOutSession {
 
 /// @brief `DoDragDrop` 返回值 → 折算层退出码枚举（SDK 宏 → 本地枚举的唯一映射点）。
 [[nodiscard]] auto exit_of_drag_out(HRESULT dragged) -> drag::Win32DragOutExit {
-    if (dragged == DRAGDROP_S_DROPPED) {
+    if (dragged == DRAGDROP_S_DROP) {
         return drag::Win32DragOutExit::Dropped;
     }
-    if (dragged == DRAGDROP_S_CANCELED) {
+    if (dragged == DRAGDROP_S_CANCEL) {
         return drag::Win32DragOutExit::Cancelled;
     }
     if (dragged == DRAGDROP_S_USEDEFAULTCURSORS) {

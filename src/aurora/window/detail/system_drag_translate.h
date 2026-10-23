@@ -68,8 +68,8 @@ enum class Win32DropEffect : std::uint8_t {
 ///
 /// 本地声明而非取 SDK 宏：折算层不引 `<windows.h>`（详见文件头）。
 enum class Win32DragOutExit : std::uint32_t {
-    Dropped = 0x00040100U,  ///< `DRAGDROP_S_DROPPED`：落放发生（效果见 pdwEffect）
-    Cancelled = 0x00040101U,  ///< `DRAGDROP_S_CANCELED`：会话被取消
+    Dropped = 0x00040100U,  ///< `DRAGDROP_S_DROP`：落放发生（效果见 pdwEffect）
+    Cancelled = 0x00040101U,  ///< `DRAGDROP_S_CANCEL`：会话被取消
     DefaultCursors = 0x00040102U,  ///< `DRAGDROP_S_USEDEFAULTCURSORS`：未发生落放（用户放弃）
     Unexpected = 0x8000FFFFU,  ///< `E_UNEXPECTED`：异常终止的代表值（其余失败 HRESULT 同族）
 };

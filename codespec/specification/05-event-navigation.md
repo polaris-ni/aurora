@@ -507,7 +507,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
     | 后端 | 发起入口 | 取消检测 | 成功依据 | 失败依据 |
     |:---|:---|:---|:---|:---|
-    | Win32 OLE | `DoDragDrop`（库自管拖拽线程，自持 `OleInitialize`） | `IDropSource::QueryContinueDrag` 返回 `DRAGDROP_S_CANCEL`（Esc / 程序化取消标志 / 右键） | `DRAGDROP_S_DROPPED` + 效果位非零 | 异常 HRESULT、线程侧 `OleInitialize` 失败、要约提供失败或介质构造失败 |
+    | Win32 OLE | `DoDragDrop`（库自管拖拽线程，自持 `OleInitialize`） | `IDropSource::QueryContinueDrag` 返回 `DRAGDROP_S_CANCEL`（Esc / 程序化取消标志 / 右键） | `DRAGDROP_S_DROP` + 效果位非零 | 异常 HRESULT、线程侧 `OleInitialize` 失败、要约提供失败或介质构造失败 |
 
     Win32 侧退出码 → 终态折算（SDK 宏 → 本地枚举的唯一映射点，`exit_of_drag_out` + `result_from_win32_drag_out`，零平台头层可无头单测）：`DROPPED` + 效果位非零 → `Succeeded` + 动作（`action_from_win32_drop_effect` 按 Copy → Move → Link 取一）；`DROPPED` + `DROPEFFECT_NONE` → `Rejected` + `None`；`CANCELED` / `USEDEFAULTCURSORS` → `Cancelled` + `None`；异常 HRESULT → `Failed` + `None`。后续三平台的取消 / 成功 / 失败来源（X11 `XdndFinished` 缺失即未成功、Wayland `dnd_finished` / `cancelled`、macOS `draggingSession(_:endedAt:operation:)` 的 operation 为 none）随各自批次落地时按同一体例补入本表。
   - **自拖放取数**：同进程跨窗口拖放（本库拖出源即本进程落点）时，拖入侧经在途要约直取（UI 线程直接调 `DragOffer::provide`，不经数据对象）。Win32 上同进程**跨单元**形态下数据对象指针被 COM 编组为代理，经数据对象取数会让 UI 线程与拖拽线程互等到墙钟超时；同单元到达的 `GetData` 由数据对象按同单元分支直答。判据「在途拖出会话存在 ⇒ 到达本窗口的落放即自拖放」由 OLE 拖放系统级互斥保证（一场拖拽循环运行时他源无法发起）。
