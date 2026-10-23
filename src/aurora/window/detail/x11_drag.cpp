@@ -20,6 +20,12 @@
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
 
 // aurora 头必须先于 Xlib（理由见头文件注记：Xlib 的 `None` / `CursorShape` 宏污染）。
+//
+// 整段包含用 `clang-format off` 圈住：格式化器按「系统头优先」重排包含时，会把
+// `<X11/...>` 提到 aurora 头之前，`None` 宏随即污染 `ModifierKey::None` / `DragAction::None`
+// 与折算层的 `Win32DropEffect::None`（症状是 `expected identifier before numeric constant`）。
+// 顺序是本文件的语义，不由排版器决定（同 `win32_host.cpp` 的既有处置）。
+// clang-format off
 #include "aurora/app/mime_types.h"
 #include "aurora/core/log.h"
 #include "aurora/core/result.h"
@@ -37,10 +43,13 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
+#include <iterator>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+// clang-format on
 
 namespace {
 // X11 的 None 宏与 aurora::ModifierKey::None 冲突：先取值再解除宏定义（既有纪律）。
@@ -50,8 +59,10 @@ constexpr int AURORA_X_PROP_DELETE = PropertyDelete;
 }  // namespace
 #undef None
 
-// NOLINTBEGIN(cppcoreguidelines-pro-type-union-access) XEvent 的 xclient.data.l / xselection 是 X 协议固有的 tagged union 字段
-// NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast) Xlib 属性读写以 unsigned char* 为字节口，无类型安全替代
+// NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
+// NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+// 豁免范围：XEvent 的 xclient.data.l / xselection 是 X 协议固有的 tagged union 字段；Xlib 属性
+// 读写以 unsigned char* 为字节口，两者都没有类型安全的替代写法。
 
 namespace aurora::detail {
 namespace {
@@ -70,7 +81,9 @@ constexpr std::size_t AURORA_XDND_CACHE_LIMIT = 64U;
 constexpr unsigned long AURORA_XDND_COORD_MASK = 0xFFFFUL;
 
 /// @brief X 错误处理器：吞掉全部异步错误（理由见文件头）。
-auto xdnd_error_handler(Display *, XErrorEvent *) -> int { return 0; }
+///
+/// 形参必须留名（读者据此知道吞掉的是什么），`[[maybe_unused]]` 说明「刻意不读」。
+auto xdnd_error_handler([[maybe_unused]] Display *display, [[maybe_unused]] XErrorEvent *event) -> int { return 0; }
 
 /// @brief 进程级发起槽（多窗口下由宿主在事件泵入口刷新）。
 auto initiator_slot() -> X11DragBridge *& {
@@ -120,7 +133,7 @@ struct X11DragBridge::Impl {
         int version = 0;  ///< 协商版本（`min(源广告, 本库广告)`）
         std::vector<std::string> mimes;  ///< 折算后的 MIME 清单（顺序即优先级）
         std::size_t index = 0;  ///< 下一个待读取的 MIME 下标
-        enum class ReadPhase { Idle, Awaiting, Incr } phase = ReadPhase::Idle;  ///< 读取阶段
+        enum class ReadPhase : std::uint8_t { Idle, Awaiting, Incr } phase = ReadPhase::Idle;  ///< 读取阶段
         unsigned long read_atom = 0;  ///< 当前请求的目标 atom（亦作结果属性名）
         std::string current_mime;  ///< 当前读取中的 MIME
         std::vector<std::uint8_t> buffer;  ///< `INCR` 累积缓冲
@@ -131,7 +144,7 @@ struct X11DragBridge::Impl {
         int client_x = 0;  ///< 最近一次落点（客户区物理像素）
         int client_y = 0;
         unsigned long drop_time = 0;  ///< `XdndDrop` 的时间戳（selection 请求沿用）
-        std::chrono::steady_clock::time_point started{};  ///< 数据读取起点（超时看守）
+        std::chrono::steady_clock::time_point started;  ///< 数据读取起点（超时看守）
     };
 
     /// @brief 拖出（本窗口是 source）会话态。
@@ -154,7 +167,7 @@ struct X11DragBridge::Impl {
         unsigned long incr_target = 0;  ///< `INCR` 目标 atom（作属性类型）
         std::vector<std::uint8_t> incr_data;  ///< `INCR` 待发字节
         std::size_t incr_offset = 0;  ///< `INCR` 已发偏移
-        std::chrono::steady_clock::time_point drop_at{};  ///< `XdndDrop` 发出时刻（超时看守）
+        std::chrono::steady_clock::time_point drop_at;  ///< `XdndDrop` 发出时刻（超时看守）
         std::unordered_map<unsigned long, unsigned long> target_cache;  ///< child 窗口 → Xdnd 目标窗口
     };
 
@@ -199,14 +212,16 @@ struct X11DragBridge::Impl {
             return {};
         }
         std::string name{raw};
-        XFree(const_cast<char *>(raw));  // NOLINT(cppcoreguidelines-pro-type-const-cast) Xlib 的 XGetAtomName 返回 char*
+        XFree(
+            const_cast<char *>(raw));  // NOLINT(cppcoreguidelines-pro-type-const-cast) Xlib 的 XGetAtomName 返回 char*
         atom_names.emplace(atom, name);
         return name;
     }
 
     // ---- 消息发送 ----
     /// @brief 向某窗口发一条 32 位格式的 ClientMessage（Xdnd 全族共用）。
-    auto send_client(unsigned long dest, unsigned long type, long l0, long l1, long l2, long l3, long l4) -> void {
+    auto send_client(unsigned long dest, unsigned long type, long l0, long l1, long l2, long l3, long l4) const
+        -> void {
         XEvent ev{};
         ev.type = ClientMessage;
         ev.xclient.display = dpy;
@@ -247,7 +262,7 @@ struct X11DragBridge::Impl {
         for (const std::string &name : drag::x11_registered_action_names()) {
             (void)intern(name);
         }
-        unsigned long version = static_cast<unsigned long>(AURORA_XDND_VERSION);
+        auto version = static_cast<unsigned long>(AURORA_XDND_VERSION);
         XChangeProperty(dpy, win, static_cast<Atom>(atoms.aware), XA_ATOM, 32, PropModeReplace,
                         reinterpret_cast<unsigned char *>(&version), 1);
         if (!error_handler_installed()) {
@@ -336,22 +351,24 @@ struct X11DragBridge::Impl {
             unsigned long nitems = 0;
             unsigned long after = 0;
             unsigned char *prop = nullptr;
-            if (XGetWindowProperty(dpy, static_cast<::Window>(source), static_cast<Atom>(atoms.type_list), 0,
-                                   0x10000UL, False, XA_ATOM, &actual_type, &actual_format, &nitems, &after,
-                                   &prop) == Success &&
+            if (XGetWindowProperty(dpy, static_cast<::Window>(source), static_cast<Atom>(atoms.type_list), 0, 0x10000UL,
+                                   False, XA_ATOM, &actual_type, &actual_format, &nitems, &after, &prop) == Success &&
                 prop != nullptr) {
-                if (actual_format == 32) {
-                    const auto *values = reinterpret_cast<const unsigned long *>(prop);
-                    for (unsigned long i = 0; i < nitems; ++i) {
-                        names.push_back(atom_name(values[i]));
+                if (actual_format == 32 && nitems > 0) {
+                    // Xlib 属性以 unsigned char* 为字节口：先按 unsigned long 整块拷出（Xlib 保证
+                    // 8 字节对齐），再逐项查名——比在原地做指针算术更直白，下标也受容器约束。
+                    std::vector<unsigned long> values(nitems, 0UL);
+                    std::memcpy(values.data(), prop, nitems * sizeof(unsigned long));
+                    for (const unsigned long value : values) {
+                        names.push_back(atom_name(value));
                     }
                 }
                 XFree(prop);
             }
         } else {
             for (std::size_t i = 2; i <= 4; ++i) {
-                if (data[i] != 0) {
-                    names.push_back(atom_name(static_cast<unsigned long>(data[i])));
+                if (data.at(i) != 0) {
+                    names.push_back(atom_name(static_cast<unsigned long>(data.at(i))));
                 }
             }
         }
@@ -444,7 +461,10 @@ struct X11DragBridge::Impl {
         if (!out.active || out.target == 0) {
             return;
         }
-        if (static_cast<unsigned long>(data[0]) != out.target) {
+        // 先落到一个具名变量再比：直接比 `static_cast` 结果时，检查会剥掉显式转换、
+        // 按 `long` 与 `unsigned long` 判成符号不一致（XID 双方都是 32 位非负值）。
+        const auto source = static_cast<unsigned long>(data.at(0));
+        if (source != out.target) {
             return;
         }
         const auto flags = static_cast<unsigned long>(data[1]);
@@ -457,7 +477,10 @@ struct X11DragBridge::Impl {
         if (!out.active || !out.drop_sent || out.target == 0) {
             return;
         }
-        if (static_cast<unsigned long>(data[0]) != out.target) {
+        // 先落到一个具名变量再比：直接比 `static_cast` 结果时，检查会剥掉显式转换、
+        // 按 `long` 与 `unsigned long` 判成符号不一致（XID 双方都是 32 位非负值）。
+        const auto source = static_cast<unsigned long>(data.at(0));
+        if (source != out.target) {
             return;
         }
         // v5 起 `l[1]` bit0 才是「已受理并执行」；协商版本更早时该位未定义，按置位处理
@@ -467,9 +490,9 @@ struct X11DragBridge::Impl {
         const bool accepted = !versioned || (flags & 0x1UL) != 0UL;
         DragAction action = DragAction::None;
         if (accepted) {
-            const DragAction reported = versioned ? drag::x11_action_from_name(atom_name(
-                                                        static_cast<unsigned long>(data[2])))
-                                                  : DragAction::None;
+            const DragAction reported = versioned
+                                            ? drag::x11_action_from_name(atom_name(static_cast<unsigned long>(data[2])))
+                                            : DragAction::None;
             action = reported != DragAction::None ? reported : out.sent_action;
         }
         teardown_drag_out(accepted ? SystemDragOutcome::Succeeded : SystemDragOutcome::Rejected, action);
@@ -496,21 +519,19 @@ struct X11DragBridge::Impl {
         });
     }
 
-    auto send_status(bool accept, DragAction action) -> void {
+    auto send_status(bool accept, DragAction action) const -> void {
         // `l[1]` bit0 = 受理；bit1 = 要 Position 消息。矩形发空（全零）⇒ 两读法下都等价于
         // 「指针每动一次就发」——不发 Position 就得靠 pointer motion 自己推，自动滚边会饿死。
         send_client(in.source, atoms.status, static_cast<long>(win), accept ? 3L : 2L, 0L, 0L,
                     static_cast<long>(action_atom(action)));
     }
 
-    auto send_finished(bool accepted, DragAction action) -> void {
+    auto send_finished(bool accepted, DragAction action) const -> void {
         send_client(in.source, atoms.finished, static_cast<long>(win), accepted ? 1L : 0L,
                     accepted ? static_cast<long>(action_atom(action)) : 0L, 0L, 0L);
     }
 
-    auto reset_drag_in() -> void {
-        in = DragIn{};
-    }
+    auto reset_drag_in() -> void { in = DragIn{}; }
 
     /// @brief 发起下一个 MIME 的 selection round-trip；全部读完则收口并派发 `Drop`。
     auto start_next_read() -> void {
@@ -522,7 +543,7 @@ struct X11DragBridge::Impl {
         const std::vector<std::string> names = drag::x11_target_names_from_mime(mime);
         std::string chosen;
         for (const std::string &name : names) {
-            if (known_atoms.find(name) != known_atoms.end()) {
+            if (known_atoms.contains(name)) {
                 chosen = name;
                 break;  // 顺序即优先级：取首个已登记名（与 Win32 数值表同纪律）
             }
@@ -538,8 +559,8 @@ struct X11DragBridge::Impl {
         in.buffer.clear();
         in.phase = DragIn::ReadPhase::Awaiting;
         // 结果属性名取目标 atom 名、置于**本窗口**（ICCCM 惯例，避免与外来属性撞名）。
-        XConvertSelection(dpy, static_cast<Atom>(atoms.selection), static_cast<Atom>(target),
-                          static_cast<Atom>(target), win, in.drop_time);
+        XConvertSelection(dpy, static_cast<Atom>(atoms.selection), static_cast<Atom>(target), static_cast<Atom>(target),
+                          win, in.drop_time);
         XFlush(dpy);
     }
 
@@ -587,8 +608,8 @@ struct X11DragBridge::Impl {
         unsigned long after = 0;
         unsigned char *prop = nullptr;
         // delete=True：读完即删（ICCCM 惯例），`INCR` 亦由此启动（删属性即握手的第一步）。
-        const int rc = XGetWindowProperty(dpy, win, static_cast<Atom>(property), 0, 0x0FFFFFFFUL, True,
-                                          AnyPropertyType, &actual_type, &actual_format, &nitems, &after, &prop);
+        const int rc = XGetWindowProperty(dpy, win, static_cast<Atom>(property), 0, 0x0FFFFFFFUL, True, AnyPropertyType,
+                                          &actual_type, &actual_format, &nitems, &after, &prop);
         if (rc != Success || prop == nullptr) {
             if (prop != nullptr) {
                 XFree(prop);
@@ -604,7 +625,7 @@ struct X11DragBridge::Impl {
             return;
         }
         if (actual_format == 8 && nitems > 0) {
-            in.buffer.insert(in.buffer.end(), prop, prop + nitems);
+            std::copy_n(prop, static_cast<std::ptrdiff_t>(nitems), std::back_inserter(in.buffer));
         }
         XFree(prop);
         advance_read();
@@ -623,8 +644,8 @@ struct X11DragBridge::Impl {
             unsigned long nitems = 0;
             unsigned long after = 0;
             unsigned char *prop = nullptr;
-            const int rc = XGetWindowProperty(dpy, win, static_cast<Atom>(atom), 0, 0x0FFFFFFFUL, True,
-                                              AnyPropertyType, &actual_type, &actual_format, &nitems, &after, &prop);
+            const int rc = XGetWindowProperty(dpy, win, static_cast<Atom>(atom), 0, 0x0FFFFFFFUL, True, AnyPropertyType,
+                                              &actual_type, &actual_format, &nitems, &after, &prop);
             if (rc == Success && prop != nullptr) {
                 if (nitems == 0) {
                     XFree(prop);
@@ -632,7 +653,7 @@ struct X11DragBridge::Impl {
                     return;
                 }
                 if (actual_format == 8) {
-                    in.buffer.insert(in.buffer.end(), prop, prop + nitems);
+                    std::copy_n(prop, static_cast<std::ptrdiff_t>(nitems), std::back_inserter(in.buffer));
                 }
                 XFree(prop);
             } else if (prop != nullptr) {
@@ -653,11 +674,13 @@ struct X11DragBridge::Impl {
         }
         const std::size_t remaining = out.incr_data.size() - out.incr_offset;
         const std::size_t n = std::min(AURORA_XDND_CHUNK, remaining);
-        const unsigned char *src = out.incr_data.empty() ? nullptr : out.incr_data.data() + out.incr_offset;
-        XChangeProperty(dpy, static_cast<::Window>(out.incr_requestor), static_cast<Atom>(out.incr_property),
-                        static_cast<Atom>(out.incr_target), 8, PropModeReplace,
-                        const_cast<unsigned char *>(src),  // NOLINT(cppcoreguidelines-pro-type-const-cast) Xlib 只读该缓冲
-                        static_cast<int>(n));
+        const unsigned char *src =
+            out.incr_offset < out.incr_data.size() ? &out.incr_data.at(out.incr_offset) : nullptr;
+        XChangeProperty(
+            dpy, static_cast<::Window>(out.incr_requestor), static_cast<Atom>(out.incr_property),
+            static_cast<Atom>(out.incr_target), 8, PropModeReplace,
+            const_cast<unsigned char *>(src),  // NOLINT(cppcoreguidelines-pro-type-const-cast) Xlib 只读该缓冲
+            static_cast<int>(n));
         XFlush(dpy);
         out.incr_offset += n;
         if (n == 0) {
@@ -700,7 +723,7 @@ struct X11DragBridge::Impl {
         const std::vector<std::uint8_t> &data = bytes.value();
         if (data.size() > AURORA_XDND_DIRECT_LIMIT) {
             // INCR：先回一个 `INCR` 类型的属性（内容是建议单片大小），握手由请求方删属性启动。
-            unsigned long chunk = static_cast<unsigned long>(AURORA_XDND_CHUNK);
+            auto chunk = static_cast<unsigned long>(AURORA_XDND_CHUNK);
             XChangeProperty(dpy, static_cast<::Window>(requestor), static_cast<Atom>(property),
                             static_cast<Atom>(atoms.incr), 32, PropModeReplace,
                             reinterpret_cast<unsigned char *>(&chunk), 1);
@@ -714,16 +737,17 @@ struct X11DragBridge::Impl {
             out.incr_offset = 0;
         } else {
             const unsigned char *src = data.empty() ? nullptr : data.data();
-            XChangeProperty(dpy, static_cast<::Window>(requestor), static_cast<Atom>(property),
-                            static_cast<Atom>(target), 8, PropModeReplace,
-                            const_cast<unsigned char *>(src),  // NOLINT(cppcoreguidelines-pro-type-const-cast) Xlib 只读该缓冲
-                            static_cast<int>(data.size()));
+            XChangeProperty(
+                dpy, static_cast<::Window>(requestor), static_cast<Atom>(property), static_cast<Atom>(target), 8,
+                PropModeReplace,
+                const_cast<unsigned char *>(src),  // NOLINT(cppcoreguidelines-pro-type-const-cast) Xlib 只读该缓冲
+                static_cast<int>(data.size()));
         }
         send_selection_notify(requestor, selection, target, property, time);
     }
 
     auto send_selection_notify(unsigned long requestor, unsigned long selection, unsigned long target,
-                               unsigned long property, unsigned long time) -> void {
+                               unsigned long property, unsigned long time) const -> void {
         XEvent ev{};
         ev.type = SelectionNotify;
         ev.xselection.display = dpy;
@@ -737,7 +761,7 @@ struct X11DragBridge::Impl {
     }
 
     auto refuse_selection(unsigned long requestor, unsigned long selection, unsigned long target,
-                          unsigned long time) -> void {
+                          unsigned long time) const -> void {
         send_selection_notify(requestor, selection, target, AURORA_X_NONE, time);  // property=None = 拒绝
     }
 
@@ -765,9 +789,8 @@ struct X11DragBridge::Impl {
             update_cursor(false);
             return;
         }
-        const DragAction want =
-            constrain_action(out.offer, system_drag::proposed_action_for(mods_from_x11_state(state),
-                                                                         out.offer.default_action));
+        const DragAction want = constrain_action(
+            out.offer, system_drag::proposed_action_for(mods_from_x11_state(state), out.offer.default_action));
         out.sent_action = want;
         send_position(out.target, rx, ry, time, want);
     }
@@ -807,20 +830,22 @@ struct X11DragBridge::Impl {
         return true;  // 会话期内一律吞噬：拖放是模态手势，按键不得漏给页面
     }
 
-    auto window_version(unsigned long window) -> int {
+    auto window_version(unsigned long window) const -> int {
         Atom actual_type = AURORA_X_NONE;
         int actual_format = 0;
         unsigned long nitems = 0;
         unsigned long after = 0;
         unsigned char *prop = nullptr;
-        if (XGetWindowProperty(dpy, static_cast<::Window>(window), static_cast<Atom>(atoms.aware), 0, 1, False,
-                               XA_ATOM, &actual_type, &actual_format, &nitems, &after, &prop) != Success) {
+        if (XGetWindowProperty(dpy, static_cast<::Window>(window), static_cast<Atom>(atoms.aware), 0, 1, False, XA_ATOM,
+                               &actual_type, &actual_format, &nitems, &after, &prop) != Success) {
             return 0;
         }
         int version = 0;
         if (prop != nullptr) {
             if (actual_type == XA_ATOM && actual_format == 32 && nitems >= 1) {
-                version = static_cast<int>(reinterpret_cast<unsigned long *>(prop)[0]);
+                unsigned long value = 0;
+                std::memcpy(&value, prop, sizeof(value));
+                version = static_cast<int>(value);
             }
             XFree(prop);
         }
@@ -850,7 +875,7 @@ struct X11DragBridge::Impl {
             return cached->second;
         }
         unsigned long found = 0;
-        unsigned long w = static_cast<unsigned long>(child);
+        auto w = static_cast<unsigned long>(child);
         for (int i = 0; i < AURORA_XDND_TREE_DEPTH && w != 0; ++i) {
             if (window_version(w) > 0) {
                 found = w;
@@ -892,7 +917,7 @@ struct X11DragBridge::Impl {
         long l3 = 0;
         long l4 = 0;
         if (!many) {
-            if (types.size() > 0) {
+            if (!types.empty()) {
                 l2 = static_cast<long>(types[0]);
             }
             if (types.size() > 1) {
@@ -911,7 +936,8 @@ struct X11DragBridge::Impl {
         }
     }
 
-    auto send_position(unsigned long target, int x_root, int y_root, unsigned long time, DragAction action) -> void {
+    auto send_position(unsigned long target, int x_root, int y_root, unsigned long time, DragAction action) const
+        -> void {
         const long packed = (static_cast<long>(x_root & 0xFFFF) << 16) | static_cast<long>(y_root & 0xFFFF);
         // `l[1]` 恒 0：修饰键的语义已由 `l[4]` 的动作 atom 承载（源侧完成翻译），保留位不再复用。
         send_client(target, atoms.position, static_cast<long>(win), 0L, packed, static_cast<long>(time),
@@ -975,9 +1001,8 @@ struct X11DragBridge::Impl {
         out.target_version = out.target != 0 ? window_version(out.target) : 0;
         if (out.target != 0) {
             send_enter(out.target);
-            out.sent_action = constrain_action(out.offer, out.offer.default_action == DragAction::None
-                                                              ? DragAction::Copy
-                                                              : out.offer.default_action);
+            out.sent_action = constrain_action(
+                out.offer, out.offer.default_action == DragAction::None ? DragAction::Copy : out.offer.default_action);
             send_position(out.target, rx, ry, CurrentTime, out.sent_action);
         }
         update_cursor(false);
@@ -1034,10 +1059,7 @@ struct X11DragBridge::Impl {
 // ---- 桥的公共面（全部转发给状态机） ----
 
 X11DragBridge::X11DragBridge(void *display, unsigned long window, Hooks hooks)
-    : impl_(std::make_unique<Impl>()),
-      display_(display),
-      window_(window),
-      hooks_(std::move(hooks)) {
+    : impl_(std::make_unique<Impl>()), display_(display), window_(window), hooks_(std::move(hooks)) {
     impl_->dpy = static_cast<Display *>(display);
     impl_->win = static_cast<::Window>(window);
     impl_->hooks = hooks_;
@@ -1095,18 +1117,16 @@ auto X11DragBridge::register_backend() -> void {
     }
     backend_registered() = true;
     register_system_drag_out_backend(SystemDragOutBackend{
-        .begin =
-            [](const DragOffer &offer) -> bool {
-                X11DragBridge *self = initiator();
-                return self != nullptr && self->begin_drag_out(offer);
-            },
-        .cancel =
-            []() -> void {
-                X11DragBridge *self = initiator();
-                if (self != nullptr) {
-                    self->cancel_drag_out();
-                }
-            },
+        .begin = [](const DragOffer &offer) -> bool {
+            X11DragBridge *self = initiator();
+            return self != nullptr && self->begin_drag_out(offer);
+        },
+        .cancel = []() -> void {
+            X11DragBridge *self = initiator();
+            if (self != nullptr) {
+                self->cancel_drag_out();
+            }
+        },
     });
 }
 

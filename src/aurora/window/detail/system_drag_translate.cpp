@@ -251,7 +251,6 @@ auto x11_registered_action_names() -> const std::vector<std::string> & {
     return FLAT;
 }
 
-
 auto make_drop_event(const SystemDropPhase phase, const DragInFrame &frame) -> SystemDropEvent {
     SystemDropEvent event;
     event.phase = phase;

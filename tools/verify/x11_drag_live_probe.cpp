@@ -64,9 +64,14 @@
 // `aurora::DragAction::None` / `ModifierKey::None` 被展开成 `::0L`（枚举定义整体损坏，
 // 症状是「DragAction 未声明」这类看似无关的报错）。取值后立即 #undef，纪律同
 // src/aurora/window/x11_surface.cpp。
+//
+// 整段包含用 `clang-format off` 圈住：格式化器按「系统头优先」重排包含时会把
+// `<X11/...>` 提到 aurora 头之前，上述污染随即发生。顺序是本文件的语义，不由排版器决定。
+// clang-format off
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -90,6 +95,12 @@
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
+// clang-format on
+
+// NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
+// NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
+// 豁免范围同 src/aurora/window/detail/x11_drag.cpp：XEvent 的 xclient.data.l / xselection 是 X
+// 协议固有的 tagged union 字段，Xlib 属性读写以 unsigned char* 为字节口。
 
 namespace {
 // Xlib 的 None 宏与 aurora 的 `*.None` 枚举器冲突：先取值再解除宏定义。
@@ -174,22 +185,22 @@ class DropPanel final : public aurora::LeafWidget {
 
 // 探针布局（固定窗口 480x300）：上 480x200 落放面板 + 下 480x100 拖源面板；自拖放泊点取
 // 落放面板中心（客户区 240,100），与两块面板 on_layout 的请求尺寸对应。
-constexpr int kProbeParkX = 240;
-constexpr int kProbeParkY = 100;
+constexpr int AURORA_PROBE_PARK_X = 240;
+constexpr int AURORA_PROBE_PARK_Y = 100;
 
 // 自拖放要约给出的文本：自动段断言「落放载荷与 provide 给出的文本一致」（要约 → selection
 // round-trip → 拖入侧载荷的往返）。
-constexpr const char kDragOutProbeText[] = "aurora x11 drag-out self-drop payload";
+constexpr const char AURORA_DRAG_OUT_PROBE_TEXT[] = "aurora x11 drag-out self-drop payload";
 
 // 自拖放终态的墙钟截止：正常路径在十数帧内完成（全链路都在本进程与 X 服务器之间往返）；
 // 20s 是给慢机 / 远程桌面的余量，超时即判 FAIL 并打印，不悬挂。
-constexpr auto kDragOutDeadline = std::chrono::seconds{20};
+constexpr auto AURORA_DRAG_OUT_DEADLINE = std::chrono::seconds{20};
 
 // 等窗口可见的墙钟上限（reparenting WM 完成映射通常在数百毫秒内；超时即判环境不可用）。
-constexpr auto kViewableDeadline = std::chrono::seconds{10};
+constexpr auto AURORA_VIEWABLE_DEADLINE = std::chrono::seconds{10};
 
 // 拖入腿（外部源注入）的墙钟截止：全链路都在本进程与 X 服务器之间往返，数帧内即完成。
-constexpr auto kDragInDeadline = std::chrono::seconds{15};
+constexpr auto AURORA_DRAG_IN_DEADLINE = std::chrono::seconds{15};
 
 /// @brief 终态结局 → 可读名（探针输出用；库侧无字符串化助手）。
 [[nodiscard]] auto outcome_name(aurora::SystemDragOutcome outcome) -> const char * {
@@ -253,7 +264,7 @@ class DragSourcePanel final : public aurora::LeafWidget {
                 return make_error(aurora::ErrorCode::SystemDragReadFailed,
                                   aurora::ErrorParams{{"mime", mime}, {"detail", "probe offers text/plain only"}});
             }
-            const std::string text = kDragOutProbeText;
+            const std::string text = AURORA_DRAG_OUT_PROBE_TEXT;
             return std::vector<std::uint8_t>(text.begin(), text.end());
         };
         return offer;
@@ -293,8 +304,10 @@ auto read_xdnd_aware(Display *dpy, ::Window win) -> int {
     int version = 0;
     if (prop != nullptr) {
         if (actual_type == XA_ATOM && actual_format == 32 && nitems >= 1) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) Xlib 属性以 unsigned char* 为字节口
-            version = static_cast<int>(reinterpret_cast<unsigned long *>(prop)[0]);
+            // Xlib 属性以 unsigned char* 为字节口：整块拷出再取值（对齐由 Xlib 保证）。
+            unsigned long value = 0;
+            std::memcpy(&value, prop, sizeof(value));
+            version = static_cast<int>(value);
         }
         XFree(prop);
     }
@@ -429,8 +442,7 @@ auto source_init(ExternalSource &src, Display *dpy) -> bool {
 }
 
 /// @brief 以外部源身份发一条 32 位 ClientMessage 给目标窗口。
-auto source_send(Display *dpy, ::Window dest, unsigned long type, long l0, long l1, long l2, long l3, long l4)
-    -> void {
+auto source_send(Display *dpy, ::Window dest, unsigned long type, long l0, long l1, long l2, long l3, long l4) -> void {
     XEvent ev{};
     ev.type = ClientMessage;
     ev.xclient.display = dpy;
@@ -449,8 +461,7 @@ auto source_send(Display *dpy, ::Window dest, unsigned long type, long l0, long 
 /// @brief 发 `XdndEnter`：协议版本 5、单一类型（不置 `XdndTypeList` 位）。
 auto source_send_enter(ExternalSource &src, Display *dpy, ::Window dest) -> void {
     const long flags = static_cast<long>(5) << 24;
-    source_send(dpy, dest, src.enter, static_cast<long>(src.window), flags, static_cast<long>(src.target), 0L,
-                0L);
+    source_send(dpy, dest, src.enter, static_cast<long>(src.window), flags, static_cast<long>(src.target), 0L, 0L);
 }
 
 /// @brief 发 `XdndPosition`：根坐标 + 时间戳 + 源建议动作（Copy）。
@@ -485,8 +496,7 @@ auto source_pump(ExternalSource &src, Display *dpy) -> void {
             src.status_accepts = (flags & 0x1UL) != 0UL;
             const auto action = static_cast<unsigned long>(ev.xclient.data.l[4]);
             src.status_action = action == src.action_copy ? aurora::DragAction::Copy : aurora::DragAction::None;
-        } else if (ev.type == ClientMessage &&
-                   static_cast<unsigned long>(ev.xclient.message_type) == src.finished) {
+        } else if (ev.type == ClientMessage && static_cast<unsigned long>(ev.xclient.message_type) == src.finished) {
             const auto flags = static_cast<unsigned long>(ev.xclient.data.l[1]);
             src.finished_seen = true;
             src.finished_accepted = (flags & 0x1UL) != 0UL;
@@ -496,12 +506,14 @@ auto source_pump(ExternalSource &src, Display *dpy) -> void {
             ++src.selection_requests;
             const auto target = static_cast<unsigned long>(ev.xselectionrequest.target);
             const auto property = static_cast<unsigned long>(ev.xselectionrequest.property);
-            const std::string text = kDragOutProbeText;
+            const std::string text = AURORA_DRAG_OUT_PROBE_TEXT;
             if (target == src.target) {
+                // XChangeProperty 的数据形参是 `const unsigned char*`：给一份字节副本即可，
+                // 无需 const_cast / reinterpret_cast。
+                const std::vector<unsigned char> bytes(text.begin(), text.end());
                 XChangeProperty(dpy, ev.xselectionrequest.requestor, static_cast<Atom>(property),
-                                static_cast<Atom>(target), 8, PropModeReplace,
-                                reinterpret_cast<unsigned char *>(const_cast<char *>(text.data())),
-                                static_cast<int>(text.size()));
+                                static_cast<Atom>(target), 8, PropModeReplace, bytes.data(),
+                                static_cast<int>(bytes.size()));
             }
             // 无论给不给数据都要回执（拒绝时 property 为 None，此处按已写入回执）。
             XEvent reply{};
@@ -532,15 +544,14 @@ auto settle_drag_in_leg(const ExternalSource &src, DropPanel &panel, const int a
     check(std::find(log.begin(), log.end(), "Enter") != log.end(), "Enter phase reached the widget", failures);
     check(std::find(log.begin(), log.end(), "Drop") != log.end(), "Drop phase reached the widget", failures);
     check(src.selection_requests == 1, "target requests exactly the one format it registered", failures);
-    check(panel.last_text == kDragOutProbeText,
+    check(panel.last_text == AURORA_DRAG_OUT_PROBE_TEXT,
           std::string{"drop payload round-trips the source text (got \""} + panel.last_text + "\")", failures);
     check(src.finished_seen, "target answers XdndFinished", failures);
     check(src.finished_accepted, "XdndFinished reports the drop was consumed (is_handled propagated back)", failures);
 }
 
 /// @brief 自动段判据（真机环境 + 已建窗口）。
-auto run_automated(Display *dpy, ::Window win, const aurora::Platform &plat, DropPanel &panel, int &failures)
-    -> void {
+auto run_automated(Display *dpy, ::Window win, const aurora::Platform &plat, DropPanel &panel, int &failures) -> void {
     // ① 能力位：X11 Surface 的两个方向同批接线（拖入 + 拖出）。
     check(plat.surface == aurora::SurfaceKind::X11, "surface kind is X11 (Xdnd backend family)", failures);
     check(plat.capabilities().system_drag_in, "capabilities().system_drag_in is true after wiring", failures);
@@ -549,13 +560,13 @@ auto run_automated(Display *dpy, ::Window win, const aurora::Platform &plat, Dro
     // ② 广告：窗口上必须有 `XdndAware`（桥 install 的直接后果）。属性不存在 = 桥未装，
     //    外部源永远看不到本窗口是拖放目标，③ 之后的全部判据都不成立。
     const int version = read_xdnd_aware(dpy, win);
-    check(version >= 1,
-          "window advertises XdndAware (version=" + std::to_string(version) + ")", failures);
+    check(version >= 1, "window advertises XdndAware (version=" + std::to_string(version) + ")", failures);
 
     // ③ 派发链：合成一条 Enter 事件经真派发器，accept 查询发生且 allowed 为求交结果。
     aurora::SystemDropEvent event;
     event.phase = aurora::SystemDropPhase::Enter;
-    event.position = aurora::Point{.x = static_cast<float>(kProbeParkX), .y = static_cast<float>(kProbeParkY)};
+    event.position =
+        aurora::Point{.x = static_cast<float>(AURORA_PROBE_PARK_X), .y = static_cast<float>(AURORA_PROBE_PARK_Y)};
     event.formats.emplace_back(aurora::AURORA_MIME_URI_LIST);
     event.proposed = aurora::DragAction::Move;
     panel.accept = aurora::DragAction::Move;
@@ -579,18 +590,16 @@ auto settle_drag_out_leg(DragSourcePanel &source, DropPanel &panel, const int ac
     check(panel.accept_queries > accept_queries_before, "accept query happened for the self-drop", failures);
     check(std::find(panel.phase_log.begin(), panel.phase_log.end(), "Drop") != panel.phase_log.end(),
           "self-drop reached this window's Xdnd target (Drop phase)", failures);
-    check(panel.last_text == kDragOutProbeText,
+    check(panel.last_text == AURORA_DRAG_OUT_PROBE_TEXT,
           std::string{"drop payload round-trips the offered text/plain (got \""} + panel.last_text + "\")", failures);
 }
 
 /// @brief 人工段：逐帧打印新增的四态与最近一次落放内容。
-auto report_interactive(DropPanel &panel, std::size_t &printed, int &last_files_count, int &last_text_count)
-    -> void {
+auto report_interactive(DropPanel &panel, std::size_t &printed, int &last_files_count, int &last_text_count) -> void {
     if (panel.phase_log.size() > printed) {
         for (std::size_t i = printed; i < panel.phase_log.size(); ++i) {
-            emit(std::string("[drag] phase=") + panel.phase_log[i] +
-                 " formats=" + std::to_string(panel.last_formats.size()) +
-                 " allowed=" + action_name(panel.last_allowed));
+            emit(std::string("[drag] phase=") + panel.phase_log[i] + " formats=" +
+                 std::to_string(panel.last_formats.size()) + " allowed=" + action_name(panel.last_allowed));
         }
         printed = panel.phase_log.size();
     }
@@ -649,10 +658,8 @@ auto main(int argc, char **argv) -> int {
     // 被桌面上的其它窗口盖住时 `XQueryPointer` 返回的 child 是遮挡者，会话会落到无关窗口上。
     aurora::WindowStyleOptions probe_style{};
     probe_style.always_on_top = true;
-    auto made = aurora::create_native_window(
-        aurora::WindowOptions{.size = aurora::Size{.width = 480.0F, .height = 300.0F},
-                              .title = "Aurora drag verify",
-                              .style = probe_style});
+    auto made = aurora::create_native_window(aurora::WindowOptions{
+        .size = aurora::Size{.width = 480.0F, .height = 300.0F}, .title = "Aurora drag verify", .style = probe_style});
     if (!made) {
         AURORA_LOG_ERROR("verify", "cannot create native window");
         return 2;
@@ -732,7 +739,7 @@ auto main(int argc, char **argv) -> int {
                 source_send_enter(ext_src, dpy, win);
                 int rx = 0;
                 int ry = 0;
-                window_to_root(dpy, win, kProbeParkX, kProbeParkY, &rx, &ry);
+                window_to_root(dpy, win, AURORA_PROBE_PARK_X, AURORA_PROBE_PARK_Y, &rx, &ry);
                 source_send_position(ext_src, dpy, win, rx, ry);
                 leg_in_armed = true;
                 leg_in_began = std::chrono::steady_clock::now();
@@ -747,7 +754,7 @@ auto main(int argc, char **argv) -> int {
             if (ext_src.finished_seen) {
                 settle_drag_in_leg(ext_src, *panel, accept_queries_before, failures);
                 leg_in_settled = true;
-            } else if (std::chrono::steady_clock::now() - leg_in_began > kDragInDeadline) {
+            } else if (std::chrono::steady_clock::now() - leg_in_began > AURORA_DRAG_IN_DEADLINE) {
                 check(false, "injected session settles within the deadline", failures);
                 emit("[info] drag-in leg timed out (XdndFinished never arrived?)");
                 leg_in_settled = true;
@@ -758,8 +765,8 @@ auto main(int argc, char **argv) -> int {
         if (!interactive && leg_in_settled && !drag_out_armed && !drag_out_settled) {
             if (!window_viewable(dpy, win) || !pointer_over_window(dpy, win)) {
                 XRaiseWindow(dpy, win);
-                park_pointer(dpy, win, kProbeParkX, kProbeParkY);
-                if (std::chrono::steady_clock::now() - armed_wait_from > kViewableDeadline) {
+                park_pointer(dpy, win, AURORA_PROBE_PARK_X, AURORA_PROBE_PARK_Y);
+                if (std::chrono::steady_clock::now() - armed_wait_from > AURORA_VIEWABLE_DEADLINE) {
                     // 记 PENDING 而非 PASS/FAIL：`XQueryPointer` 在 Wayland + Xwayland（rootless）
                     // 下拿不到真实窗口栈，指针泊不进本窗口是环境限制而非桥的缺陷。用别的窗口
                     // 冒充落点会让本条判据恒真，故如实挂起，交 --interactive 人工段。
@@ -773,7 +780,7 @@ auto main(int argc, char **argv) -> int {
             }
             emit("");
             emit("---- Automated drag-out leg: self drag-out onto this window ----");
-            park_pointer(dpy, win, kProbeParkX, kProbeParkY);
+            park_pointer(dpy, win, AURORA_PROBE_PARK_X, AURORA_PROBE_PARK_Y);
             const auto started = source->begin_system_drag();
             check(static_cast<bool>(started), "begin_system_drag() starts the session (Ok)", failures);
             drag_out_armed = true;
@@ -785,7 +792,7 @@ auto main(int argc, char **argv) -> int {
         // 走完，届时目标（本窗口）才处于「接受」态，释放才会落成一次真正的 drop。
         if (!interactive && drag_out_armed && !release_sent && frame >= armed_frame + 5) {
             release_sent = true;
-            send_button_release(dpy, win, kProbeParkX, kProbeParkY);
+            send_button_release(dpy, win, AURORA_PROBE_PARK_X, AURORA_PROBE_PARK_Y);
         }
         if (!interactive && drag_out_armed && !drag_out_settled) {
             const auto elapsed = std::chrono::steady_clock::now() - drag_out_began;
@@ -797,7 +804,7 @@ auto main(int argc, char **argv) -> int {
                      " ms");
                 drag_out_settled = true;
                 app.quit();
-            } else if (elapsed > kDragOutDeadline) {
+            } else if (elapsed > AURORA_DRAG_OUT_DEADLINE) {
                 check(false, "self drag-out terminal state delivered within the deadline", failures);
                 emit("[info] drag-out leg timed out with no terminal state (Xdnd session never settled?)");
                 drag_out_settled = true;
@@ -821,3 +828,6 @@ auto main(int argc, char **argv) -> int {
     // 无失败但有判据挂起：退出码 3（PENDING MANUAL），与既有探针的「人工未做」语义同款。
     return pending_manual ? 3 : 0;
 }
+
+// NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+// NOLINTEND(cppcoreguidelines-pro-type-union-access)
