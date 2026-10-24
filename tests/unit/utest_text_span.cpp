@@ -5,10 +5,12 @@
 
 #include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "aurora/environment/build_context.h"
 #include "aurora/environment/environment.h"
+#include "aurora/i18n/builtin_messages.gen.h"
 #include "aurora/theming/theme.h"
 #include "aurora/widget/text_span.h"
 #include "framework/aurora_test.h"
@@ -31,7 +33,7 @@ AURORA_TEST_CASE(default_span_invariants) {
     const TextSpan span;
     AURORA_TEST_CHECK_EQ(span.text.text, std::string{});
     AURORA_TEST_CHECK_FALSE(span.text.localize);
-    AURORA_TEST_CHECK_EQ(span.text.key, std::string{});
+    AURORA_TEST_CHECK(span.text.id == AURORA_INVALID_MESSAGE_ID);
     AURORA_TEST_CHECK_TRUE(span.font == Font{});
     AURORA_TEST_CHECK_NEAR(span.font.size_pt, 14.0F, 1e-4F);
     AURORA_TEST_CHECK_EQ(span.font.weight, 400);
@@ -112,11 +114,15 @@ AURORA_TEST_CASE(font_color_equality_supports_style_merging) {
 
 AURORA_TEST_CASE(localized_span_keeps_tr_metadata) {
     // LocalizedString::tr 的查表元数据在 span 内原样保留（文本字段回退值为空）。
-    const TextSpan span{.text = LocalizedString::tr("greeting"), .color = Color::blue()};
+    const TextSpan span{
+        .text = LocalizedString::tr(msg::AURORA_COMMAND_PALETTE_PLACEHOLDER, {{"count", std::int64_t{3}}}),
+        .color = Color::blue()};
     AURORA_TEST_CHECK_TRUE(span.text.text.empty());  // 回退文本为空
-    AURORA_TEST_CHECK_EQ(span.text.key, std::string{"greeting"});
+    AURORA_TEST_CHECK(span.text.id == msg::AURORA_COMMAND_PALETTE_PLACEHOLDER);
     AURORA_TEST_CHECK_TRUE(span.text.localize);
-    AURORA_TEST_CHECK_TRUE(span.text.args.empty());
+    AURORA_TEST_REQUIRE(span.text.args.size() == 1);
+    AURORA_TEST_CHECK_EQ(span.text.args[0].name, std::string{"count"});
+    AURORA_TEST_CHECK_EQ(std::get<std::int64_t>(span.text.args[0].value), std::int64_t{3});
     AURORA_TEST_CHECK_TRUE(span.color == Color::blue());
 }
 

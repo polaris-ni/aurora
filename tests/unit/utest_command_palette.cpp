@@ -3,7 +3,7 @@
 /// 测试说明: 覆盖命令面板的关闭惰性（不占位/不命中）、打开后的焦点作用域与搜索框聚焦、
 /// 查询过滤与选中移动、Esc/上下键经打开期临时快捷键接管、Enter 经搜索框提交执行、
 /// 空格只落字不执行、无快捷键表与无注册表时的降级、结果上限截断，以及点击结果行执行、点击遮罩关闭。
-/// 另覆盖两处上屏文案的 i18n：占位符与空态提示按词条 key 查 `default_string_table()`
+/// 另覆盖两处上屏文案的 i18n：占位符与空态提示按词条规范名查 `default_catalog()`
 /// （未登记回退英文字面量、随 `ctx` 注入的 locale 变化）、文本覆盖优先于查表、自定义 key 仍走 i18n、
 /// 空态提示确实进入绘制、以及属性序列化往返保留 i18n 语义。
 
@@ -20,7 +20,8 @@
 #include "aurora/event/focus.h"
 #include "aurora/event/keycode.h"
 #include "aurora/i18n/locale.h"
-#include "aurora/i18n/string_table.h"
+#include "aurora/i18n/message_catalog.h"
+#include "aurora/i18n/message_id.h"
 #include "aurora/render/display_list.h"
 #include "aurora/render/rhi/rhi_backend.h"
 #include "aurora/theming/theme.h"
@@ -46,21 +47,21 @@ class ProbePalette : public CommandPalette {
     return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 640.0F, .height = 480.0F}};
 }
 
-/// @brief 字符串表守卫：`default_string_table()` 是进程级单例且无删除接口，登记完必须整体还原
+/// @brief 目录守卫：`default_catalog()` 是进程级单例且无删除接口，登记完必须整体还原
 ///        （否则会污染同 TU 里依赖「未登记即回退英文字面量」的用例）。
-class ScopedStringTable {
+class ScopedCatalogGuard {
   public:
-    ScopedStringTable() : saved_(default_string_table()) {}
-    // 还原只是一张字符串表赋值，唯一抛出面是 bad_alloc；守卫析构期抛出会盖掉真正的用例失败，故不捕获。
+    ScopedCatalogGuard() : saved_(default_catalog()) {}
+    // 还原是一次目录深拷贝赋值；守卫析构期抛出会盖掉真正的用例失败，故不捕获。
     // NOLINTNEXTLINE(bugprone-exception-escape)
-    ~ScopedStringTable() { default_string_table() = saved_; }
-    ScopedStringTable(const ScopedStringTable &) = delete;
-    auto operator=(const ScopedStringTable &) -> ScopedStringTable & = delete;
-    ScopedStringTable(ScopedStringTable &&) = delete;
-    auto operator=(ScopedStringTable &&) -> ScopedStringTable & = delete;
+    ~ScopedCatalogGuard() { default_catalog() = saved_; }
+    ScopedCatalogGuard(const ScopedCatalogGuard &) = delete;
+    auto operator=(const ScopedCatalogGuard &) -> ScopedCatalogGuard & = delete;
+    ScopedCatalogGuard(ScopedCatalogGuard &&) = delete;
+    auto operator=(ScopedCatalogGuard &&) -> ScopedCatalogGuard & = delete;
 
   private:
-    StringTable saved_;
+    MessageCatalog saved_;
 };
 
 #ifdef AURORA_ENABLE_DISPLAY_LIST
@@ -408,19 +409,23 @@ AURORA_TEST_CASE(placeholder_defaults_to_lookup_result_or_fallback) {
 
     // 两条 key 以**字面量**钉死（不用常量对照）：宿主登记译文要靠这条串，它是外部契约的一部分。
     // 若写成 `AURORA_DEFAULT_PLACEHOLDER_KEY` 自比自，key 拼错时注册端与查表端一起错、两边抵消 → 恒绿。
-    AURORA_TEST_CHECK_EQ(palette.placeholder_key(), std::string{"command_palette.placeholder"});
-    AURORA_TEST_CHECK_EQ(palette.empty_message_key(), std::string{"command_palette.no_results"});
+    AURORA_TEST_CHECK_EQ(std::string{aurora::default_catalog().canonical_name(palette.placeholder_key())},
+                         std::string{"command_palette.placeholder"});
+    AURORA_TEST_CHECK_EQ(std::string{aurora::default_catalog().canonical_name(palette.empty_message_key())},
+                         std::string{"command_palette.no_results"});
 }
 
 AURORA_TEST_CASE(placeholder_and_empty_message_follow_context_locale) {
-    ScopedStringTable guard;
-    auto &table = default_string_table();
+    ScopedCatalogGuard guard;
+    auto &table = default_catalog();
     // 只登记 fr 档：缺省档（en）仍应回退兜底串，故两条译文必须是与兜底串不同的值。
     // key 写字面量而非常量：库侧 key 被改错一位时，登记端不变、查表端落空 → 本用例转红。
     const std::string ph_fr = "Rechercher une commande";
     const std::string em_fr = "Aucune commande correspondante";
-    table.add(Locale{.language = "fr"}, "command_palette.placeholder", ph_fr);
-    table.add(Locale{.language = "fr"}, "command_palette.no_results", em_fr);
+    AURORA_TEST_REQUIRE(table.add(Locale{.language = "fr"}, "command_palette.placeholder", ph_fr)
+                            .ok());  // 登记失败即用例失败（名字必须在词表内）
+    AURORA_TEST_REQUIRE(table.add(Locale{.language = "fr"}, "command_palette.no_results", em_fr)
+                            .ok());  // 登记失败即用例失败（名字必须在词表内）
 
     CommandPalette palette;  // 无注册表 → 结果为空，走空态分支
     const Environment env = Environment{}.with<Locale>(Locale{.language = "fr"});
@@ -441,11 +446,13 @@ AURORA_TEST_CASE(placeholder_and_empty_message_follow_context_locale) {
 }
 
 AURORA_TEST_CASE(custom_text_overrides_lookup) {
-    ScopedStringTable guard;
-    auto &table = default_string_table();
+    ScopedCatalogGuard guard;
+    auto &table = default_catalog();
     // 连缺省档都登记上（key 写字面量）：覆盖值若被查表结果盖掉，本用例立刻转红（不是恒真）。
-    table.add(Locale{}, "command_palette.placeholder", "Registered placeholder");
-    table.add(Locale{}, "command_palette.no_results", "Registered empty state");
+    AURORA_TEST_REQUIRE(table.add(Locale{}, "command_palette.placeholder", "Registered placeholder")
+                            .ok());  // 登记失败即用例失败（名字必须在词表内）
+    AURORA_TEST_REQUIRE(table.add(Locale{}, "command_palette.no_results", "Registered empty state")
+                            .ok());  // 登记失败即用例失败（名字必须在词表内）
 
     CommandPalette palette;
     palette.set_placeholder("Find anything");
@@ -461,12 +468,23 @@ AURORA_TEST_CASE(custom_text_overrides_lookup) {
 }
 
 AURORA_TEST_CASE(custom_key_still_localizes) {
-    ScopedStringTable guard;
-    auto &table = default_string_table();
-    const std::string ph_key = "utest_command_palette.custom_placeholder";
-    const std::string em_key = "utest_command_palette.custom_empty";
-    table.add(Locale{.language = "fr"}, ph_key, "Commande personnalisee");
-    table.add(Locale{.language = "fr"}, em_key, "Resultat personnalise");
+    ScopedCatalogGuard guard;
+    auto &table = default_catalog();
+    // 测试词表基址 902000（文件独立区间）；自定义键同样走「登记名字 → 按 Id 查表」契约。
+    static const bool VOCAB_ONCE = [] {
+        (void)aurora::default_catalog().register_vocabulary(
+            902000, {"utest_command_palette.custom_placeholder", "utest_command_palette.custom_empty"});
+        return true;
+    }();
+    (void)VOCAB_ONCE;
+    const auto ph_key = aurora::MessageId{902000};
+    const auto em_key = aurora::MessageId{902001};
+    const std::string ph_name = "utest_command_palette.custom_placeholder";
+    const std::string em_name = "utest_command_palette.custom_empty";
+    AURORA_TEST_REQUIRE(table.add(Locale{.language = "fr"}, ph_name, "Commande personnalisee")
+                            .ok());  // 登记失败即用例失败（名字必须在词表内）
+    AURORA_TEST_REQUIRE(table.add(Locale{.language = "fr"}, em_name, "Resultat personnalise")
+                            .ok());  // 登记失败即用例失败（名字必须在词表内）
 
     CommandPalette palette;
     palette.set_placeholder_key(ph_key);
@@ -498,10 +516,11 @@ AURORA_TEST_CASE(custom_key_still_localizes) {
 }
 
 AURORA_TEST_CASE(empty_state_text_is_drawn_from_lookup) {
-    ScopedStringTable guard;
-    auto &table = default_string_table();
+    ScopedCatalogGuard guard;
+    auto &table = default_catalog();
     const std::string drawn = "Nothing matched at all";
-    table.add(Locale{}, "command_palette.no_results", drawn);
+    AURORA_TEST_REQUIRE(
+        table.add(Locale{}, "command_palette.no_results", drawn).ok());  // 登记失败即用例失败（名字必须在词表内）
 
     CommandPalette palette;  // 无注册表 → 结果为空，绘制走空态分支
     constexpr BuildContext ctx;
@@ -533,9 +552,18 @@ AURORA_TEST_CASE(empty_state_text_is_drawn_from_lookup) {
 }
 
 AURORA_TEST_CASE(props_round_trip_preserves_i18n_semantics) {
+    // 宿主键须先登记测试词表（基址 902100，文件独立区间）：Id 是封闭词表的句柄。
+    static const bool HOST_VOCAB_ONCE = [] {
+        (void)aurora::default_catalog().register_vocabulary(
+            902100, {"host.command_palette.placeholder", "host.command_palette.empty"});
+        return true;
+    }();
+    (void)HOST_VOCAB_ONCE;
+    const auto host_ph = aurora::MessageId{902100};
+    const auto host_em = aurora::MessageId{902101};
     CommandPalette src;
-    src.set_placeholder_key("host.command_palette.placeholder");
-    src.set_empty_message_key("host.command_palette.empty");
+    src.set_placeholder_key(host_ph);
+    src.set_empty_message_key(host_em);
 
     Json props = Json::object();
     src.serialize_props(props);
@@ -548,12 +576,12 @@ AURORA_TEST_CASE(props_round_trip_preserves_i18n_semantics) {
 
     CommandPalette dst;
     dst.deserialize_props(props);
-    AURORA_TEST_CHECK_EQ(dst.placeholder_key(), std::string{"host.command_palette.placeholder"});
-    AURORA_TEST_CHECK_EQ(dst.empty_message_key(), std::string{"host.command_palette.empty"});
+    AURORA_TEST_CHECK_EQ(dst.placeholder_key(), host_ph);
+    AURORA_TEST_CHECK_EQ(dst.empty_message_key(), host_em);
 
     // 覆盖值参与往返，且读回后仍优先于查表。
     CommandPalette with_text;
-    with_text.set_placeholder_key("host.command_palette.placeholder");
+    with_text.set_placeholder_key(host_ph);
     with_text.set_placeholder("Literal placeholder");
     Json text_props = Json::object();
     with_text.serialize_props(text_props);
@@ -562,7 +590,7 @@ AURORA_TEST_CASE(props_round_trip_preserves_i18n_semantics) {
     CommandPalette dst2;
     dst2.deserialize_props(text_props);
     AURORA_TEST_CHECK_EQ(dst2.placeholder(), std::string{"Literal placeholder"});
-    AURORA_TEST_CHECK_EQ(dst2.placeholder_key(), std::string{"host.command_palette.placeholder"});
+    AURORA_TEST_CHECK_EQ(dst2.placeholder_key(), host_ph);
 }
 
 // ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
