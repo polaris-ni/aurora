@@ -77,10 +77,12 @@ aurora/event/event.h
 aurora/event/focus.h
 aurora/event/gesture.h
 aurora/event/keycode.h
+aurora/i18n/builtin_messages.h
 aurora/i18n/format.h
 aurora/i18n/localized_string.h
+aurora/i18n/message_catalog.h
+aurora/i18n/message_id.h
 aurora/i18n/plural.h
-aurora/i18n/string_table.h
 aurora/imperative.h
 aurora/layout/flex.h
 aurora/layout/flex_layouter.h
