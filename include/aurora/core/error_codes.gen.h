@@ -187,6 +187,14 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     SystemDragDecodeFailed = 143,  ///< system-drag-decode-failed
     SystemDragCancelled = 144,  ///< system-drag-cancelled: System drag session was cancelled: '{detail}'
     SystemDragMoveRollback = 145,  ///< system-drag-move-rollback
+    I18nBinMagicFailed = 146,  ///< i18n-bin-magic: Message catalog binary magic mismatch (expected AUM1)
+    I18nBinVersionUnsupported = 147,  ///< i18n-bin-version
+    I18nBinEndiannessInvalid = 148,  ///< i18n-bin-endianness
+    I18nBinTruncated = 149,  ///< i18n-bin-truncated
+    I18nIdOutOfRange = 150,  ///< i18n-id-out-of-range
+    I18nVocabularyOverlap = 151,  ///< i18n-vocabulary-overlap
+    I18nNameDuplicate = 152,  ///< i18n-name-duplicate
+    I18nUnknownName = 153,  ///< i18n-unknown-name: Unknown message name '{name}' (not in any registered vocabulary)
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -202,7 +210,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 146> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 154> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1820,6 +1828,92 @@ inline constexpr std::array<ErrorMeta, 146> AURORA_ERROR_TABLE = {
                 "The target received and stored the payload, but deleting the original failed (file locked, permission "
                 "revoked). The target's copy stays authoritative - retry the deletion later instead of re-copying, and "
                 "remember the contract: the source never deletes before the move confirmation arrives",
+        },
+        {
+            .code = ErrorCode::I18nBinMagicFailed,
+            .ident = "I18nBinMagicFailed",
+            .slug = "i18n-bin-magic",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message catalog binary magic mismatch (expected AUM1)",
+            .hint = "The file is not an AUM1 message catalog. Check that the path points to the .bin produced by "
+                    "gen_i18n, not a JSON source or a different asset",
+        },
+        {
+            .code = ErrorCode::I18nBinVersionUnsupported,
+            .ident = "I18nBinVersionUnsupported",
+            .slug = "i18n-bin-version",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message catalog binary version {version} is not supported (expected 1)",
+            .hint = "The catalog was produced by a newer gen_i18n. Regenerate the .bin with the tool version that "
+                    "matches the library",
+        },
+        {
+            .code = ErrorCode::I18nBinEndiannessInvalid,
+            .ident = "I18nBinEndiannessInvalid",
+            .slug = "i18n-bin-endianness",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message catalog binary is not little-endian (version field decoded as {version})",
+            .hint = "AUM1 catalogs are little-endian only. Regenerate the file instead of byte-swapping it",
+        },
+        {
+            .code = ErrorCode::I18nBinTruncated,
+            .ident = "I18nBinTruncated",
+            .slug = "i18n-bin-truncated",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message catalog binary truncated at offset {offset} (needed {needed} more bytes)",
+            .hint = "The file is shorter than its own header claims. Re-transfer or regenerate the .bin; do not "
+                    "attempt to salvage a partial file",
+        },
+        {
+            .code = ErrorCode::I18nIdOutOfRange,
+            .ident = "I18nIdOutOfRange",
+            .slug = "i18n-id-out-of-range",
+            .category = ErrorCategory::Validation,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message id range [{base}, {end}) collides with the invalid-id sentinel or overflows",
+            .hint = "The vocabulary id space must stay below AURORA_INVALID_MESSAGE_ID_VALUE and cannot wrap. Lower "
+                    "--id-base or split the vocabulary",
+        },
+        {
+            .code = ErrorCode::I18nVocabularyOverlap,
+            .ident = "I18nVocabularyOverlap",
+            .slug = "i18n-vocabulary-overlap",
+            .category = ErrorCategory::Validation,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Vocabulary range [{base}, {end}) overlaps an already registered range",
+            .hint = "Two catalogs claim the same id space. Regenerate with disjoint --id-base values (builtin reserved "
+                    "range starts at 0, applications default to 1024)",
+        },
+        {
+            .code = ErrorCode::I18nNameDuplicate,
+            .ident = "I18nNameDuplicate",
+            .slug = "i18n-name-duplicate",
+            .category = ErrorCategory::Validation,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message name '{name}' is already registered by another vocabulary",
+            .hint = "Canonical names are global. Rename one of the colliding keys in the JSON sources and regenerate",
+        },
+        {
+            .code = ErrorCode::I18nUnknownName,
+            .ident = "I18nUnknownName",
+            .slug = "i18n-unknown-name",
+            .category = ErrorCategory::Validation,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Unknown message name '{name}' (not in any registered vocabulary)",
+            .hint = "add() resolves names through registered vocabularies. Load the vocabulary that owns the name "
+                    "first, or use the generated MessageId constant directly",
         },
     },
 };
