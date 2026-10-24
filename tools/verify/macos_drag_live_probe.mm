@@ -2,7 +2,7 @@
 // ============================================================================
 // Seams under test:
 //   drag-in (this window is the target): the content view's `NSDraggingDestination` methods ->
-//   `detail::MacOSDragBridge` -> translate layer (`detail/system_drag_translate`) -> drag-in entry
+//   `aurora::detail::MacOSDragBridge` -> translate layer (`detail/system_drag_translate`) -> drag-in entry
 //   (`event/detail/system_drag_ingress`) -> the real dispatch chain (`EventDispatcher` + the
 //   probe's own drop widget). Payload reading is **synchronous** inside `performDragOperation`
 //   (AppKit's read API blocks until the data is ready) -- there is no per-frame read pump on this
@@ -89,7 +89,31 @@
 
 namespace {
 
-using namespace aurora;
+// AppKit 经 `MacTypes.h` 把 Carbon 遗留的 `Point` / `Size` / `Rect` 三个**全局**类型名带进
+// 全局作用域（CI 的 Xcode SDK 实测：`reference to 'Point' is ambiguous`——候选为
+// `MacTypes.h` 的 `Point` 与 `aurora::Point`）。`using namespace aurora;` 是 using 指令，
+// 让 `aurora::` 的名字也像声明在全局一样参与查找，二者同为全局成员即歧义。故本文件改用
+// **using 声明**：名字落进本匿名命名空间，非限定查找在此命中即止，不再与 Carbon 撞名。
+using aurora::AURORA_MIME_TEXT_PLAIN;
+using aurora::BuildContext;
+using aurora::Constraints;
+using aurora::DragAction;
+using aurora::DragOffer;
+using aurora::Event;
+using aurora::EventDispatcher;
+using aurora::LeafWidget;
+using aurora::ModifierKey;
+using aurora::Painter;
+using aurora::Platform;
+using aurora::PlatformCapabilities;
+using aurora::Point;
+using aurora::Rect;
+using aurora::Result;
+using aurora::Size;
+using aurora::SurfaceKind;
+using aurora::SystemDragOutcome;
+using aurora::SystemDropEvent;
+using aurora::SystemDropPhase;
 
 // ---------------------------------------------------------------------------
 // Verdict ledger and output
@@ -224,7 +248,7 @@ auto leg_registry(Ledger &ledger) -> void {
     check(caps.system_drag_in && caps.system_drag_out, "capability bits are true on the macOS backend", ledger,
           std::string{"in="} + (caps.system_drag_in ? "1" : "0") + " out=" + (caps.system_drag_out ? "1" : "0"));
 
-    const std::vector<std::string> &types = drag::macos_registered_pasteboard_types();
+    const std::vector<std::string> &types = aurora::drag::macos_registered_pasteboard_types();
     const bool has_text = std::find(types.begin(), types.end(), "public.utf8-plain-text") != types.end();
     const bool has_file_url = std::find(types.begin(), types.end(), "public.file-url") != types.end();
     const bool has_png = std::find(types.begin(), types.end(), "public.png") != types.end();
@@ -234,14 +258,14 @@ auto leg_registry(Ledger &ledger) -> void {
     check(std::find(types.begin(), types.end(), "NSFilenamesPboardType") == types.end(),
           "legacy NSFilenamesPboardType is not advertised (path-array payload is undecodable)", ledger);
 
-    const std::optional<std::string> back = drag::mime_from_macos_pasteboard_type("public.utf8-plain-text");
+    const std::optional<std::string> back = aurora::drag::mime_from_macos_pasteboard_type("public.utf8-plain-text");
     check(back.has_value() && back.value() == AURORA_MIME_TEXT_PLAIN,
           "reverse lookup maps the real UTI back to text/plain", ledger,
           back.has_value() ? back.value() : std::string{"nullopt"});
     // 位序与其他两平台都不同（Win32 Copy=1/Move=2、Wayland 走枚举值），此处锚定 macOS 自己的布局。
-    check(drag::macos_drag_operation_from(DragAction::Copy) == 1U &&
-              drag::macos_drag_operation_from(DragAction::Move) == 16U &&
-              drag::macos_drag_operation_from(DragAction::Link) == 2U,
+    check(aurora::drag::macos_drag_operation_from(DragAction::Copy) == 1U &&
+              aurora::drag::macos_drag_operation_from(DragAction::Move) == 16U &&
+              aurora::drag::macos_drag_operation_from(DragAction::Link) == 2U,
           "NSDragOperation bit layout is the documented one (Copy=1 Link=2 Move=16)", ledger);
 }
 
@@ -251,7 +275,7 @@ auto leg_registry(Ledger &ledger) -> void {
 
 /// @brief 建桥与内容视图（视图由桥自己产出 ⇒ 先建桥、再回装，见 `attach_view` 契约）。
 struct BridgeUnderTest {
-    std::unique_ptr<detail::MacOSDragBridge> bridge;
+    std::unique_ptr<aurora::detail::MacOSDragBridge> bridge;
     DropTarget *target = nullptr;
     NSView *view = nil;
 };
@@ -259,17 +283,18 @@ struct BridgeUnderTest {
 [[nodiscard]] auto make_bridge(DropTarget &target) -> BridgeUnderTest {
     BridgeUnderTest out;
     out.target = &target;
-    out.bridge = std::make_unique<detail::MacOSDragBridge>(
-        nullptr, detail::MacOSDragBridge::Hooks{.emit = [&target](Event &e) -> void {
-                                                    auto *drop = dynamic_cast<SystemDropEvent *>(&e);
-                                                    if (drop == nullptr) {
-                                                        return;
-                                                    }
-                                                    (void)EventDispatcher::dispatch(target, *drop);
-                                                },
-                                                .scale_factor = []() -> float { return 1.0F; },
-                                                .modifiers = []() -> ModifierKey { return ModifierKey::None; }});
-    void *raw_view = detail::MacOSDragBridge::make_drag_destination_view(out.bridge.get());
+    out.bridge = std::make_unique<aurora::detail::MacOSDragBridge>(
+        nullptr,
+        aurora::detail::MacOSDragBridge::Hooks{.emit = [&target](Event &e) -> void {
+                                                   auto *drop = dynamic_cast<SystemDropEvent *>(&e);
+                                                   if (drop == nullptr) {
+                                                       return;
+                                                   }
+                                                   (void)EventDispatcher::dispatch(target, *drop);
+                                               },
+                                               .scale_factor = []() -> float { return 1.0F; },
+                                               .modifiers = []() -> ModifierKey { return ModifierKey::None; }});
+    void *raw_view = aurora::detail::MacOSDragBridge::make_drag_destination_view(out.bridge.get());
     // `__bridge_transfer`：工厂返回的是 +1 所有权（MRC 口径「调用方持所有权」），ARC 侧必须
     // 用 transfer 接，否则局部变量再 retain 一次即多一个引用、视图永不释放。
     out.view = (__bridge_transfer NSView *)raw_view;
@@ -310,7 +335,7 @@ auto leg_view(BridgeUnderTest &uut, Ledger &ledger) -> void {
         return;
     }
     NSArray<NSPasteboardType> *recorded = (NSArray<NSPasteboardType> *)recorded_any;
-    const std::vector<std::string> &reg = drag::macos_registered_pasteboard_types();
+    const std::vector<std::string> &reg = aurora::drag::macos_registered_pasteboard_types();
     bool all = static_cast<std::size_t>(recorded.count) == reg.size();
     for (std::size_t i = 0; all && i < reg.size(); ++i) {
         NSString *want = [NSString stringWithUTF8String:reg[i].c_str()];
@@ -452,23 +477,23 @@ auto leg_reject(BridgeUnderTest &uut, NSPasteboard *board, Ledger &ledger) -> vo
 
 auto leg_drag_out(BridgeUnderTest &uut, Ledger &ledger) -> void {
     note("leg 5/5: drag-out refuses to start without a window and a press event");
-    detail::MacOSDragBridge::note_initiator(uut.bridge.get());
+    aurora::detail::MacOSDragBridge::note_initiator(uut.bridge.get());
     bool ended = false;
     DragOffer offer;
     offer.formats.emplace_back(AURORA_MIME_TEXT_PLAIN);
     offer.provide = [](const std::string & /*mime*/) -> Result<std::vector<std::uint8_t>> {
         return Result<std::vector<std::uint8_t>>{std::vector<std::uint8_t>{'x'}};
     };
-    const auto began = system_drag::begin(offer, [&](SystemDragOutcome outcome, DragAction action) {
+    const auto began = aurora::system_drag::begin(offer, [&](SystemDragOutcome outcome, DragAction action) {
         ended = true;
         note(std::string{"[drag-out] end:"} + outcome_name(outcome) + ":" + action_name(action));
     });
     check(!began.ok(), "system_drag::begin fails closed without a press event / window", ledger,
           began.ok() ? std::string{"Ok"} : began.error().message);
-    system_drag::pump_reads();
+    aurora::system_drag::pump_reads();
     check(!ended, "no terminal event is delivered for a session that never started", ledger);
     check(!uut.bridge->drag_out_active(), "bridge holds no drag-out session after the refusal", ledger);
-    detail::MacOSDragBridge::note_initiator(nullptr);
+    aurora::detail::MacOSDragBridge::note_initiator(nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -493,6 +518,7 @@ auto leg_drag_out(BridgeUnderTest &uut, Ledger &ledger) -> void {
             [probe_window close];
         }
     } @catch (NSException *exception) {
+        (void)exception;
         ok = NO;
     }
     return ok == YES;
