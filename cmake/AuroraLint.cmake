@@ -111,19 +111,28 @@ add_custom_target(lint-fix
         WORKING_DIRECTORY "${AURORA_SOURCE_DIR}"
         COMMENT "Clang-Tidy: applying fix-its in place (review the diff before committing)")
 
-# ⚠️ 构建期生成物是 lint 的先决：本目标不经编译链，直接对源文件跑 clang-tidy。凡是 `#include`
-#    生成头的翻译单元（i18n 词表生成头即一例），在「只配不编」的构建目录里那枚头尚不存在，tidy
-#    会先撞上一条 clang-diagnostic-error 而把真实检查全部吞掉——与 CI 里显式的 wayland-gen 步骤
-#    同一理由，区别只在依赖由 CMake 自动挂上：四条平台 lint 作业与本机开发同口径，不必各自记得
-#    先跑一步生成。清单由 cmake/AuroraI18n.cmake 在全局属性上登记。
+# ⚠️ 构建期生成物是 lint 的先决：lint 不经编译链，直接对源文件跑 clang-tidy。凡是 `#include`
+#    生成头的翻译单元（wayland 协议头、i18n 词表生成头即两例），在「只配不编」的构建目录里那枚
+#    头尚不存在，tidy 会先撞上一条 clang-diagnostic-error 而把真实检查全部吞掉。
+#    先决产物收敛成一枚聚合目标 `lint-prereq`：本机跑 `lint` / `lint-fix` 由依赖自动带上，CI 各
+#    lint 腿（含不经 `lint` 目标的增量腿，它直接调 run_clang_tidy.py）显式 `--target lint-prereq`
+#    一次即可——口径只在一处定义，新增生成物不必回头改工作流。清单来源：wayland 侧按目标存在性
+#    认领，i18n 侧由 cmake/AuroraI18n.cmake 在全局属性上登记。
 get_property(_lint_generated_prereqs GLOBAL PROPERTY AURORA_I18N_LINT_PREREQ_TARGETS)
+add_custom_target(lint-prereq
+        COMMENT "Building generated sources that lint reads directly")
 foreach(_lint_prereq IN LISTS _lint_generated_prereqs)
     if (TARGET "${_lint_prereq}")
-        add_dependencies(lint "${_lint_prereq}")
-        add_dependencies(lint-fix "${_lint_prereq}")
+        add_dependencies(lint-prereq "${_lint_prereq}")
         aurora_log("Clang-Tidy: '${_lint_prereq}' attached as a lint prerequisite (generated sources)")
     endif ()
 endforeach ()
+if (TARGET wayland-gen)
+    add_dependencies(lint-prereq wayland-gen)
+    aurora_log("Clang-Tidy: 'wayland-gen' attached as a lint prerequisite (generated sources)")
+endif ()
+add_dependencies(lint lint-prereq)
+add_dependencies(lint-fix lint-prereq)
 
 # 增量入口（CI 增量 lint 作业、本地手跑选定 TU）不经 `lint` 目标，上面的 add_dependencies
 # 帮不上忙：run_clang_tidy.py 直接吃 TU 清单，生成头没就位就先撞一条 clang-diagnostic-error

@@ -108,8 +108,9 @@
 #
 # 编译并行（cmake --build --parallel）：所有库/工具/demos/consumer/format-check 构建行统一
 #   带 `--parallel`（Ninja/MSBuild/Make 各自取满 runner 核数，实测核数由 nproc 口径同态）；
-#   `lint` 目标内部由 run_clang_tidy.py 按 --jobs 并行（缺省即全核），wayland-gen 为单一
-#   codegen 命令，二者不加 --parallel 亦无串行之虞。ctest 并行口径不变。
+#   `lint` 目标内部由 run_clang_tidy.py 按 --jobs 并行（缺省即全核），lint-prereq（生成物先决聚合
+#   目标，含 wayland-gen 与各词表生成目标）为秒级 codegen，二者不加 --parallel 亦无串行之虞。
+#   ctest 并行口径不变。
 #
 # 选项语义以 codespec/BUILD_OPTIONS.md 为唯一权威来源。
 # ---------------------------------------------------------------------------
@@ -1183,7 +1184,7 @@ jobs:
   lint:
     name: clang-tidy (${{ matrix.pass.label }}, shard ${{ matrix.shard }}/${{ matrix.total }})
     runs-on: ubuntu-26.04
-    # 240 → 40：每片 ~140 TU ≈ 24 分钟 tidy，加 apt 安装 / configure / wayland-gen ≈ 4 分钟；40 分钟是
+    # 240 → 40：每片 ~140 TU ≈ 24 分钟 tidy，加 apt 安装 / configure / lint-prereq ≈ 4 分钟；40 分钟是
     # 一倍半余量。余量必须留：本轮 TU 编译失败即整片红，慢起来没有上限。
     # 全量矩阵只跑 PR / master(+main) / 每周定时 / 手动触发；分支推送改由下方 lint-incremental
     # 单 job 增量覆盖（见作业 8i），避免每个功能分支 push 都发 12 个 native lint job。
@@ -1304,12 +1305,13 @@ jobs:
             ${{ env.LINT_CAPABILITY_FLAGS }} \
             ${{ matrix.pass.flags }}
 
-      # 生成物就位：lint 只 configure 不构建，而被分析的 TU 会 include 构建期生成的头
-      # （wayland-scanner 协议胶水、i18n 词表头）。缺头即先撞 clang-diagnostic-error、
-      # 把真实检查全部吞掉，门禁如实判红。秒级完成，全量与（生产不可达的）失效增量分支
-      # 都需要，故无条件跑。聚合目标清单见 cmake/AuroraLint.cmake。
-      - name: Materialize lint-generated sources
-        run: cmake --build build-lint --target lint-generated
+      # 生成物就位：lint 只 configure 不构建，而被分析的 TU 会 include 构建期产物——wayland-scanner
+      # 产出的协议头（<build>/wayland-gen/*-client-protocol.h）、词表生成头（<build>/<target>_i18n/
+      # messages_*.hpp）。缺头即撞一条 clang-diagnostic-error 并把真实检查全吞掉，门禁如实判红。
+      # 先决清单收敛在 `lint-prereq`（cmake/AuroraLint.cmake），秒级完成，全量与（生产不可达的）
+      # 失效增量分支都需要，故无条件跑。
+      - name: Build lint prerequisites
+        run: cmake --build build-lint --target lint-prereq
 
       # 选集必须在 configure 之后：它读的就是这份编译库。全量时跳过（那份清单只有增量用得上）。
       # ⚠️ 本分支在生产中不可达——本作业的 `if:` 已排除「非 master 分支 push」，故 steps.scope 恒为
@@ -1631,10 +1633,7 @@ jobs:
           set -euo pipefail
           cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF \
             ${{ env.LINT_CAPABILITY_FLAGS }}
-          # 物化全部 lint 先决生成物（Wayland 协议胶水 + i18n 词表头）：增量选集直接吃 TU
-          # 清单，不经 lint 目标，缺生成头的 TU 会先撞编译错误把真实检查吞掉（实测见
-          # AuroraLint.cmake 的 lint-generated 注释）。
-          cmake --build build-lint-off --target lint-generated
+          cmake --build build-lint-off --target lint-prereq
           python3 tools/check/select_lint_tus.py --build-dir build-lint-off --changed changed.txt --changed-only --out-dir build-lint-off/sel --shards 1
           list=build-lint-off/sel/tus_0.txt
           if [ ! -s "$list" ]; then
@@ -1655,7 +1654,7 @@ jobs:
           set -euo pipefail
           cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON \
             ${{ env.LINT_CAPABILITY_FLAGS }}
-          cmake --build build-lint-on --target lint-generated
+          cmake --build build-lint-on --target lint-prereq
           python3 tools/check/select_lint_tus.py --build-dir build-lint-on --changed changed.txt --changed-only --out-dir build-lint-on/sel --shards 1
           list=build-lint-on/sel/tus_0.txt
           if [ ! -s "$list" ]; then

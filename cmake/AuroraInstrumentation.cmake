@@ -113,6 +113,8 @@ if (AURORA_ENABLE_COVERAGE)
                     COMMENT "Running ctest then aggregating gcov line coverage via coverage_report.sh (terminal summary, no HTML)")
         endif ()
     endif ()
+    # gen_i18n 同属「静态校验所需的生成器」：`check_i18n_gen_golden` 直接调用真实构建产物，
+    # 本目标若不带它，coverage 作业里该门禁即以「gen_i18n not built」判红。
     add_dependencies(coverage aurora_test_runner aurora_api_json gen_error_codes gen_debug_api gen_i18n)
 endif ()
 

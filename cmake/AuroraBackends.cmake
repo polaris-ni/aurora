@@ -408,8 +408,10 @@ if (AURORA_BACKEND_WAYLAND)
     endforeach ()
     # 聚合目标：把生成的协议头/源拉成一个可单独构建的 target。lint 作业只 configure 不构建
     # （clang-tidy 只吃 compile_commands.json），但被分析的 TU 会 include 这些生成头——缺头即
-    # `broken_tus`，门禁把「缺文件」如实判红。故 lint 前先 `cmake --build <build> --target
-    # wayland-gen` 一次（秒级），让生成头就位。整套构建（`--target aurora`）本就会经 custom
+    # `broken_tus`，门禁把「缺文件」如实判红。故 lint 前先让生成头就位——本目标被收进
+    # `lint-prereq` 聚合目标（cmake/AuroraLint.cmake），本机 `--target lint` 自动带上，CI 的 lint 腿
+    # 显式 `cmake --build <build> --target lint-prereq` 一次（秒级）。
+    # 整套构建（`--target aurora`）本就会经 custom
     # command 连带生成，这里的聚合只多给一个显式入口，不改变既有依赖关系。
     add_custom_target(wayland-gen DEPENDS ${AURORA_WL_GEN_HDRS} ${AURORA_WL_GEN_SRCS})
     # 生成的 C 胶水非本项目代码：屏蔽 -Wall/-Wpedantic 告警（不改动其内容）。

@@ -99,7 +99,8 @@ function(aurora_i18n_generate)
     add_dependencies(${AURORA_I18N_TARGET} ${AURORA_I18N_TARGET}_i18n)
     # 全局登记本生成目标：`lint` / `lint-fix` 是聚合目标、不走编译链，clang-tidy 直接读源文件时
     # 这份生成头还不存在（与 wayland-gen 同类的先决产物）。AuroraLint.cmake 在全部模块 include
-    # 之后读本清单并把它挂成 lint 的依赖，CI 四条平台腿与本机 `--target lint` 因此同一口径。
+    # 之后读本清单，连同 wayland-gen 收敛成 `lint-prereq` 一枚聚合目标，本机 lint 与 CI 各腿据此
+    # 同一口径。
     set_property(GLOBAL APPEND PROPERTY AURORA_I18N_LINT_PREREQ_TARGETS "${AURORA_I18N_TARGET}_i18n")
     set_source_files_properties("${_out_hpp}" PROPERTIES GENERATED TRUE)
     target_sources(${AURORA_I18N_TARGET} PRIVATE "${_out_hpp}")
