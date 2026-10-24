@@ -22,6 +22,7 @@
 #include "aurora/debug/debug_paint.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/environment/media_query.h"
+#include "aurora/i18n/locale.h"
 #include "aurora/perf/profiler.h"
 #include "aurora/render/detail/paint_timing.h"
 #include "aurora/render/dirty_region.h"
@@ -572,6 +573,22 @@ class Window {
     /// @param s OS 档位（`Unspecified` 表示未表态，按明色回落）。
     auto set_os_color_scheme(ColorScheme s) -> void { os_scheme_ = s; }
 
+    /// @brief 显式设定本窗的窗口级 locale（帧级根注入）。
+    ///
+    /// 与 `set_theme` 同构：本 setter 只存值，`prepare_context` 于**下一帧**起每帧注入该值，
+    /// 故一帧之内所有词条按同一 locale 解析（设定当帧的离屏快照仍是旧档）。子树自建
+    /// `LocaleProvider` 仍按「最近祖先优先」覆盖此窗口级默认；从未设定时不注入，控件
+    /// 回落缺省档（`Locale{}`）的口径不变。
+    /// 换档自带一次整子树缓存失效：文本在布局期按环境解析，后代不失效即停在旧档（低频调用，代价可接受）。
+    /// @param loc 生效 locale（language / script / region 共同参与词条选择与数字日期格式化）。
+    auto set_locale(Locale loc) -> void {
+        locale_ = std::move(loc);
+        locale_pending_ = true;
+    }
+    /// @brief 当前显式设定的窗口级 locale（未设定为空）。
+    /// @return 最近一次 `set_locale` 的值；从未显式设定时为 `std::nullopt`。
+    [[nodiscard]] auto locale() const -> const std::optional<Locale> & { return locale_; }
+
     /// @brief pump 平台事件（→ 经 Surface::set_event_handler 上抛给 Application
     /// 集中派发，specification/06-app-platform.md §3.1）。
     auto pump_events() const -> void { surface_->poll_platform_events(); }
@@ -953,6 +970,10 @@ class Window {
     WindowState window_state_ = WindowState::Visible;  ///< 当前窗口可见性快照（由 Application 设置）。
     WindowMode window_mode_ = WindowMode::Normal;  ///< 当前窗口几何态快照（由 Application 设置）。
     std::optional<Theme> theme_;  ///< 应用显式设定的根主题；空表示交由默认解析链。
+    std::optional<Locale> locale_;  ///< 应用显式设定的窗口级 locale；空表示不注入（控件回落缺省档）。
+    /// @brief 换档挂起标志：`set_locale` 置位，`prepare_context` 注入该档的那一帧消费并清零
+    ///        （消费时顺带做一次整子树缓存失效，见 `Widget::invalidate_subtree_caches`）。
+    bool locale_pending_ = false;
     ColorScheme os_scheme_ = ColorScheme::Unspecified;  ///< OS 明暗偏好快照（由 Application 推入）。
     DirtyRegionTracker dirty_;  ///< 绘制脏追踪器（specification/06-app-platform.md §3.2）。
     bool dirty_tracking_ = true;  ///< 脏追踪开关（默认开启：idle 跳帧 + layout/paint 分离）。
@@ -1209,6 +1230,20 @@ class Window {
         // 注入窗口 chrome 服务（与状态快照同源，同一 Surface；此处 surface_ 已解引用必非空）：
         // 子树控件经 ctx.env->get<WindowChrome>() 驱动移动/缩放/最小化/最大化/全屏/关闭。
         root_env_.set<WindowChrome>(WindowChrome{&*surface_});
+        // 注入窗口级 locale（`set_locale` 一旦设定即自下一帧起每帧生效）：子树无 `LocaleProvider`
+        // 时控件经 `ctx.environment<Locale>()` 读到此值。未设定则**不注入**——`Environment` 没有
+        // 撤销接口，注入与否只取决于本 setter 是否被调用过，「未注入回落缺省档」口径因此保持稳定。
+        if (locale_.has_value()) {
+            root_env_.set<Locale>(*locale_);
+        }
+        // 换档那一帧：整子树布局 / Display List 缓存清零。脏标记只向上溯达祖先，后代若不被失效
+        // 就会沿用旧 locale 在布局期解析出的文本（见 `Widget::invalidate_subtree_caches`）。
+        // 判据取 setter 置位的挂起标志而非比对新旧值：`Locale` 无等价性要求，且本 setter 由应用
+        // 显式调用（低频），多清一次只等于一次重排，不影响稳态帧。
+        if (locale_pending_) {
+            locale_pending_ = false;
+            root.widget().invalidate_subtree_caches();
+        }
         BuildContext ctx;
         ctx.env = &root_env_;
         ctx.host_id = host_id_;  // 宿主身份：控件据此判「是否同一宿主」（见 BuildContext::host_id）

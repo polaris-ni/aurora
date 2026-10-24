@@ -497,6 +497,29 @@ class Widget : public std::enable_shared_from_this<Widget> {
         }
     }
 #endif
+    /// @brief 子树级缓存失效：清本控件**及其全部后代**的布局缓存与 Display List 缓存。
+    ///
+    /// 脏标记只有向上通道（`mark_needs_layout` / `invalidate_display_list_up` 沿布局父链上溯祖先），
+    /// 因此「本控件的输入变了、但没有任何后代自身变脏」时，后代缓存会沿用旧输入的结果。环境注入换值
+    /// 正属此类：文本在布局期按 `ctx.environment<Locale>()` 解析，子树缓存不清则整子树停在旧 locale。
+    /// 故由环境注入点（`Provider` 换值、`Window::set_locale`）显式发起一次向下清零。
+    ///
+    /// 代价是 O(子树) 且只在换值那一帧发生——一次切换 = 整子树重排重录，与首帧同量级；
+    /// 稳态帧不经过本函数，布局 / DL 缓存收益不受影响。
+    /// @note 遍历经 `for_each_child`（const 签名）后安全去 const：该遍历的既有非 const 用法见
+    ///       `form.h` 的 FormField 验证（同一约定，虚拟化容器只枚举已实体化子节点，未建者本无缓存可清）。
+    auto invalidate_subtree_caches() -> void {
+#ifdef AURORA_ENABLE_LAYOUT_CACHE
+        layout_cache_valid_ = false;
+#endif
+#ifdef AURORA_ENABLE_DISPLAY_LIST
+        dl_valid_ = false;
+#endif
+        for_each_child([this](const Widget &child) -> void {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast): 见上文说明，遍历接口只给 const 视图
+            const_cast<Widget &>(child).invalidate_subtree_caches();
+        });
+    }
     /// @brief 挂在**本控件自身**上的重绘请求回调；bool=true 表示含布局脏（需重排）。
     ///
     /// 供直接持有某控件、需单独观察其标脏的场景（单元测试、自定义驱动）使用，
@@ -1743,17 +1766,26 @@ class Widget : public std::enable_shared_from_this<Widget> {
 #endif
 
   protected:
-    /// @brief 注册一个响应式信号：变化 → markNeedsLayout/Paint。
+    /// @brief 注册一个响应式信号：变化 → `on_signal_dirty()`。
     /// @param sig 被跟踪的信号视图；Effect 首次 `run()` 时读取以登记依赖，此后其变化即标脏本控件。
     /// @param effects 接收新建 `Effect` 的容器；其生命周期决定订阅生命周期（传 `effects_` 即随本 Widget 析构而退订）。
     auto track(SignalViewBase &sig, std::vector<std::unique_ptr<Effect>> &effects) -> void {
         auto e = std::make_unique<Effect>([this, &sig]() -> void {
             sig.read();  // 在活跃 Effect 下登记依赖
-            mark_needs_layout();
-            mark_needs_paint();
+            on_signal_dirty();
         });
         e->run();
         effects.push_back(std::move(e));
+    }
+
+    /// @brief 被跟踪信号变化时的标脏口径：默认标脏本控件（布局 + 绘制，向上溯达祖先缓存）。
+    ///
+    /// 覆写点用于「本控件的脏其实来自一份**向下传播**的输入」的场景：环境注入器（`Provider`）换值时，
+    /// 子树后代自身没有变脏，默认口径只能失效到本控件及其祖先，后代仍按旧环境回放缓存。故其覆写为
+    /// 默认口径 + 子树缓存清零（见 `invalidate_subtree_caches`）。
+    virtual auto on_signal_dirty() -> void {
+        mark_needs_layout();
+        mark_needs_paint();
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)

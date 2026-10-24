@@ -7,6 +7,8 @@
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/result.h"
 #include "aurora/i18n/localized_string.h"
+#include "aurora/i18n/message_catalog.h"
+#include "aurora/i18n/message_id.h"
 #include "aurora/widget/props_io.h"
 
 /// @brief 控件自描述元数据：描述符结构（PropDescriptor / WidgetDescriptor）、JSON 序列化与属性约束验证。
@@ -234,14 +236,91 @@ inline auto validate_prop<bool>(const Json &j, const PropDescriptor &desc) -> Re
     return j.as_or<bool>(false);
 }
 
-// ---- LocalizedString 特化：字符串类型检查 ----
-/// @brief LocalizedString 属性验证：j 须为字符串，命中后包装为 LocalizedString（desc 仅用于错误消息）。
-/// @return 成功包装后的值，类型不符返回 WidgetInvalidProp 错误。
+// ---- LocalizedString ↔ props JSON（string 字面形态 / {"$msg": {...}} 完整形态）----
+/// @brief 序列化 LocalizedString：非本地化输出字符串；本地化输出 `{"$msg": {...}}` 完整形态
+/// （Id 经 `default_catalog()` 反查规范名；未登记 Id 降级输出 `id_value` 数值，可往返）。
+/// @param ls 待序列化的本地化字符串。
+/// @return 字符串或 `$msg` 对象形态的 JSON 值。
+[[nodiscard]] inline auto localizable_to_json(const LocalizedString &ls) -> Json {
+    if (!ls.localize || ls.id == AURORA_INVALID_MESSAGE_ID) {
+        return Json{ls.text};
+    }
+    const std::string name(default_catalog().canonical_name(ls.id));
+    Json args = Json::object();
+    for (const MessageArg &arg : ls.args) {
+        if (const auto *s = std::get_if<std::string>(&arg.value)) {
+            args.set(arg.name, Json{*s});
+        } else if (const auto *n = std::get_if<std::int64_t>(&arg.value)) {
+            args.set(arg.name, Json{*n});
+        } else if (const auto *d = std::get_if<double>(&arg.value)) {
+            args.set(arg.name, Json{*d});
+        }
+        // CivilDate 参数走文本降级（props 通道不携带日期语义），此处不出现在 JSON。
+    }
+    Json msg = Json::object();
+    if (!name.empty()) {
+        msg.set("id", Json{name});
+    } else {
+        msg.set("id_value", Json{static_cast<std::int64_t>(ls.id.value)});  // 未知词表 Id：数值往返
+    }
+    msg.set("args", std::move(args));
+    Json out = Json::object();
+    out.set("$msg", std::move(msg));
+    return out;
+}
+
+/// @brief 从 props JSON 解析 LocalizedString（宽容口径：字符串 → 字面值；`$msg` 对象 → 按规范名查 Id）。
+/// @param j JSON 值。
+/// @return 解析结果；形态不符 / `$msg` 结构非法 / 未知规范名 → 默认构造值（调用方按降级记诊断）。
+[[nodiscard]] inline auto localizable_from_json(const Json &j) -> LocalizedString {
+    if (j.is_string()) {
+        return LocalizedString{j.as_or<std::string>("")};
+    }
+    if (!j.is_object()) {
+        return LocalizedString{};
+    }
+    const Json *msg = j.at("$msg");
+    if (msg == nullptr || !msg->is_object()) {
+        return LocalizedString{};
+    }
+    MessageId id = AURORA_INVALID_MESSAGE_ID;
+    if (const Json *name = msg->at("id"); name != nullptr && name->is_string()) {
+        id = default_catalog().find_by_name(name->as_or<std::string>(""));
+    } else if (const Json *raw = msg->at("id_value"); raw != nullptr) {
+        id = MessageId{static_cast<std::uint32_t>(raw->as_or<std::int64_t>(-1))};
+    }
+    if (id == AURORA_INVALID_MESSAGE_ID) {
+        return LocalizedString{};
+    }
+    LocalizedString out = LocalizedString::tr(id);
+    if (const Json *args = msg->at("args"); args != nullptr && args->is_object()) {
+        for (const auto &entry : args->entries()) {
+            const Json &value = entry.value;
+            if (value.is_string()) {
+                out.args.emplace_back(std::string(entry.key), value.as_or<std::string>(""));
+            } else if (value.is_int()) {
+                out.args.emplace_back(std::string(entry.key), value.as_or<std::int64_t>(0));
+            } else if (value.is_double()) {
+                out.args.emplace_back(std::string(entry.key), value.as_or<double>(0.0));
+            }
+            // 其余形态（嵌套对象 / 数组）不支持：跳过（props 通道不承载嵌套本地化）。
+        }
+    }
+    return out;
+}
+
+// ---- LocalizedString 特化：字符串字面形态 + $msg 完整形态 ----
+/// @brief LocalizedString 属性验证：j 为字符串（字面值）或 `{"$msg": …}` 对象（完整形态），
+/// desc 仅用于错误消息。
+/// @return 成功解析的值；形态不符返回 WidgetInvalidProp 错误。
 template <>
 inline auto validate_prop<LocalizedString>(const Json &j, const PropDescriptor &desc) -> Result<LocalizedString> {
+    if (j.is_object() && j.contains("$msg")) {
+        return localizable_from_json(j);
+    }
     if (!j.is_string()) {
         return make_error(ErrorCode::WidgetInvalidProp,
-                          "Property '" + desc.name + "' expects string, got " + json_type_name(j));
+                          "Property '" + desc.name + "' expects string or $msg object, got " + json_type_name(j));
     }
     return LocalizedString{j.as_or<std::string>("")};
 }

@@ -12,7 +12,7 @@
 #include "aurora/core/font.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/i18n/localized_string.h"
-#include "aurora/i18n/string_table.h"
+#include "aurora/i18n/message_catalog.h"
 #include "aurora/state/reactive.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/widget.h"
@@ -236,7 +236,7 @@ class Text : public LeafWidget, public TextProps {
     /// @return 解析后的 UTF-8 文本；内容带 key 时查默认字符串表，否则为原文。
     [[nodiscard]] auto resolved_text(const BuildContext &ctx) const -> std::string {
         const auto *lp = ctx.environment<Locale>();
-        return content.get().resolve(&default_string_table(), (lp != nullptr) ? *lp : Locale{});
+        return content.get().resolve(&default_catalog(), (lp != nullptr) ? *lp : Locale{});
     }
 
     /// @brief 解析生效文字色：未显式设色时经 ctx 取主题 `on_surface`（ThemeScope 换肤即生效），
@@ -272,7 +272,7 @@ class Text : public LeafWidget, public TextProps {
         if (!display_text_.empty()) {
             return display_text_;
         }
-        return content.get().resolve(&default_string_table(), Locale{});
+        return content.get().resolve(&default_catalog(), Locale{});
     }
 
     /// @brief 运行时自描述：content/字体/排版/装饰等全部属性键与默认值。
