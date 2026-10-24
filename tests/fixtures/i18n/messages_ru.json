@@ -1,0 +1,10 @@
+{
+  "locale": "ru",
+  "messages": {
+    "demo.welcome": "Привет {name}, {count, plural, one {# файл} few {# файла} many {# файлов} other {# файла}}.",
+    "demo.rank": "Вы {pos, selectordinal, other {#-й}}.",
+    "demo.role": "{who, select, admin {Administrator} other {User}}",
+    "demo.plain": "Здесь нечего подставлять",
+    "aurora.reorder.position": "Позиция {position} из {total}."
+  }
+}

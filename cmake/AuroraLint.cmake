@@ -108,4 +108,18 @@ add_custom_target(lint-fix
         WORKING_DIRECTORY "${AURORA_SOURCE_DIR}"
         COMMENT "Clang-Tidy: applying fix-its in place (review the diff before committing)")
 
+# ⚠️ 构建期生成物是 lint 的先决：本目标不经编译链，直接对源文件跑 clang-tidy。凡是 `#include`
+#    生成头的翻译单元（i18n 词表生成头即一例），在「只配不编」的构建目录里那枚头尚不存在，tidy
+#    会先撞上一条 clang-diagnostic-error 而把真实检查全部吞掉——与 CI 里显式的 wayland-gen 步骤
+#    同一理由，区别只在依赖由 CMake 自动挂上：四条平台 lint 作业与本机开发同口径，不必各自记得
+#    先跑一步生成。清单由 cmake/AuroraI18n.cmake 在全局属性上登记。
+get_property(_lint_generated_prereqs GLOBAL PROPERTY AURORA_I18N_LINT_PREREQ_TARGETS)
+foreach(_lint_prereq IN LISTS _lint_generated_prereqs)
+    if (TARGET "${_lint_prereq}")
+        add_dependencies(lint "${_lint_prereq}")
+        add_dependencies(lint-fix "${_lint_prereq}")
+        aurora_log("Clang-Tidy: '${_lint_prereq}' attached as a lint prerequisite (generated sources)")
+    endif ()
+endforeach ()
+
 aurora_log("Clang-Tidy: 'lint' / 'lint-fix' targets available (${AURORA_CLANG_TIDY_EXE})")

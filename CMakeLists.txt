@@ -5,7 +5,8 @@
 #   cmake/AuroraThirdParty.cmake      — FreeType/HarfBuzz 源码构建
 #   cmake/AuroraBackends.cmake        — 后端剪裁开关（Headless/Win32/D3D11/GLFW/X11/Wayland/macOS/WASM）
 #   cmake/AuroraUnity.cmake           — Unity（jumbo）构建开关（aurora_apply_unity；全量/冷构建加速，缺省 OFF）
-#   cmake/AuroraTools.cmake           — 工具/基准可执行（gen_api_tools / gen_error_codes / gen_debug_api / MCP / CLI / LSP / bench_* 等）
+#   cmake/AuroraTools.cmake           — 工具/基准可执行（gen_api_tools / gen_error_codes / gen_debug_api / gen_i18n / MCP / CLI / LSP / bench_* 等）
+#   cmake/AuroraI18n.cmake            — i18n 词表生成下游助手（aurora_i18n_generate：JSON -> 生成头 + AUM1 bin）
 #   cmake/AuroraVerify.cmake          — 真机验收探针（tools/verify/ 下，默认 OFF + EXCLUDE_FROM_ALL）
 #   cmake/AuroraTests.cmake           — CTest 注册式 runner（GLOB tests/*.cpp + tests/unit + tests/integration 链入单一 aurora_test_runner，AURORA_TEST() 自注册）
 #   cmake/AuroraDemos.cmake           — 示例 demo 目标（examples/demos/ 下每组件一个可运行窗口；须在 AuroraTools 之后 include）
@@ -436,6 +437,8 @@ include(AuroraUtils)
 # ---- 工具/基准 + 测试 ----
 include(AuroraTools)
 include(AuroraTests)
+# ---- i18n 词表生成下游助手（须在 AuroraTools 之后：AURORA_GEN_I18N_EXE 由该模块按工具链落定）----
+include(AuroraI18n)
 
 # ---- 真机验收探针（tools/verify/，默认 OFF + EXCLUDE_FROM_ALL；须在后端开关之后 include）----
 include(AuroraVerify)

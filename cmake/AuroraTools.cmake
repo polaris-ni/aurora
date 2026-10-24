@@ -64,7 +64,8 @@ endif ()
 # 仓库真实文件（「cannot open input file」）。「node + .js」只解决执行、解决不了文件系统契约，
 # 故此处按工具链切换：Emscripten 时在父 configure 期完成原生子配置（清 CMAKE_TOOLCHAIN_FILE
 # 与 CC/CXX 环境以摆脱 emcc），构建期由 ALL 目标先行产出原生 exe 再触发生成命令。
-# gen_error_codes 无 aurora 链接依赖（json 实现源文件直接编入），子配置成本仅一次 configure。
+# gen_error_codes 无 aurora 链接依赖（json 实现源文件直接编入）；gen_i18n 链 aurora_json 静态库，
+# 子配置里多编一个 json TU 集合，仍不含 aurora 库本体——子配置成本一次 configure + 两份工具。
 if (EMSCRIPTEN)
     set(AURORA_NATIVE_TOOLS_DIR "${CMAKE_BINARY_DIR}/_native_tools")
     # 注意用 HOST 判定：Emscripten 交叉下 WIN32 恒假（系统名 Emscripten），
@@ -75,6 +76,7 @@ if (EMSCRIPTEN)
         set(_gen_tool_suffix "")
     endif ()
     set(_gen_error_codes_exe "${AURORA_NATIVE_TOOLS_DIR}/gen_error_codes${_gen_tool_suffix}")
+    set(_gen_i18n_exe "${AURORA_NATIVE_TOOLS_DIR}/gen_i18n${_gen_tool_suffix}")
     # Windows 宿主：内层自动探测会选中 PATH 上的 LLVM clang++（无 MSVC 环境时链接缺
     # winpthread.lib 直接挂），显式优先 MinGW gcc/g++——与仓库 ninja preset 同口径。
     set(_native_tools_compilers "")
@@ -109,11 +111,14 @@ if (EMSCRIPTEN)
         aurora_error("native generator subproject configure failed (required to run build-time tools under Emscripten): ${_native_tools_err}")
     endif ()
     add_custom_target(native_gen_tools ALL
-            COMMAND ${CMAKE_COMMAND} --build "${AURORA_NATIVE_TOOLS_DIR}" --target gen_error_codes
-            BYPRODUCTS "${_gen_error_codes_exe}"
-            COMMENT "Building native gen_error_codes (host tool under Emscripten)")
+            COMMAND ${CMAKE_COMMAND} --build "${AURORA_NATIVE_TOOLS_DIR}" --target gen_error_codes --target gen_i18n
+            BYPRODUCTS "${_gen_error_codes_exe}" "${_gen_i18n_exe}"
+            COMMENT "Building native gen_error_codes / gen_i18n (host tools under Emscripten)")
+    set(AURORA_GEN_I18N_EXE "${_gen_i18n_exe}")
 else ()
     set(_gen_error_codes_exe $<TARGET_FILE:gen_error_codes>)
+    # 下游助手 aurora_i18n_generate()（cmake/AuroraI18n.cmake）按本变量取生成器，两分支同出口。
+    set(AURORA_GEN_I18N_EXE $<TARGET_FILE:gen_i18n>)
 endif ()
 # ⚠️ aurora_api.json 不得列入 OUTPUT/DEPNDS：它是仓库内的已提交多段数据文件（widgets/enums/
 # debug/…），而本命令只能产出 error_codes 单段。一旦声明为输出，`ninja -t clean`（cmake
@@ -225,6 +230,30 @@ add_custom_target(gen_debug_api_json
         COMMENT "Regenerating aurora_api.json 'debug' section from debug_api.toml (gen_debug_api)"
         VERBATIM)
 add_dependencies(gen_debug_api_json gen_debug_api)
+
+# i18n 消息目录生成器：词表 JSON -> 薄生成头（强类型 Id + 每 key 一枚具名形参构造函数）+
+# AUM1 二进制词表（运行期由 MessageCatalog::load_binary 载入）。两种模式：
+#   gen_i18n <out.hpp> <out.bin> <cpp-namespace> [--id-base N] <base.json> [locale.json...]
+#   gen_i18n --emit-builtin <out.hpp> <builtin.json>
+# 与 gen_error_codes 同构：**不链接 aurora**（JSON 容器经 aurora_json 静态库取符号），i18n 引擎与
+# 复数判定表按**源文件**编入本目标——构建期校验调的就是运行期那个解析器，「构建期判不过的模板
+# 不可能在运行期判得过」由构造保证，不靠两处实现保持同步。
+# src/ 入搜索路径只为内部头 aurora/i18n/detail/message_engine.h（与无头单测同口径）。
+add_executable(gen_i18n
+        tools/gen/gen_i18n.cpp
+        src/aurora/i18n/message_engine.cpp
+        src/aurora/i18n/plural.cpp
+        src/aurora/i18n/plural_rules.gen.cpp)
+target_link_libraries(gen_i18n PRIVATE aurora_json)
+target_include_directories(gen_i18n PRIVATE "${AURORA_SOURCE_DIR}/src")
+set_target_properties(gen_i18n PROPERTIES CXX_STANDARD 20)
+# 静态链接 GCC runtime，与所有 aurora 工具一致（见 AuroraUtils.cmake）。
+# 仅 MinGW 生效：clang-cl / MSVC 模式无 winpthread.lib，命中即链接失败。
+if (MINGW)
+    target_link_options(gen_i18n PRIVATE
+            -static-libgcc -static-libstdc++
+            -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
+endif ()
 
 # MCP Server：stdio JSON-RPC 2.0，供 AI Agent 直接调用。
 aurora_add_tool(aurora_mcp tools/servers/aurora_mcp.cpp)

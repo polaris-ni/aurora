@@ -77,6 +77,24 @@ if (AURORA_BUILD_TESTS)
             add_test(NAME check_api_schema_sync
                     COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_schema_sync.py" "${CMAKE_BINARY_DIR}"
                     WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+            # i18n 消息管线的 golden 守护（直接调用真实构建产物 gen_i18n）：生成物确定性、
+            # 入库产物与词表 JSON 的逐字节一致、内置保留区同源锁、错误分类与 warn 分类不漂移。
+            # 同 check_gen_api_merge 前提：须先构建 gen_i18n，故 CI 必须排在 build 之后；
+            # 交叉构建下 wasm job 的 gen_i18n 是 .js，判据交给原生 job（本块整体不注册）。
+            # 生成头入库形态是「生成 + 排版」两步的产物（口径同 generate_error_codes），故把
+            # 排版门禁实际选中的 clang-format 一并传给它：PATH 上没有 clang-format 的构建里，
+            # header 比对腿不至于静默跳过。
+            aurora_find_clang_format(_i18n_gen_cf)
+            if (_i18n_gen_cf)
+                add_test(NAME check_i18n_gen_golden
+                        COMMAND ${PYTHON3_EXE} "${_check_dir}/check_i18n_gen_golden.py"
+                                "${CMAKE_BINARY_DIR}" --clang-format "${_i18n_gen_cf}"
+                        WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+            else ()
+                add_test(NAME check_i18n_gen_golden
+                        COMMAND ${PYTHON3_EXE} "${_check_dir}/check_i18n_gen_golden.py" "${CMAKE_BINARY_DIR}"
+                        WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+            endif ()
         endif ()
         # codespec 文档内部一致性守护（断链 / 失效锚点 / 章节号 / 反引号路径 / 特性表落点）。
         add_test(NAME check_codespec_xref
