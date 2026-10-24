@@ -126,7 +126,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 动画 | `animation/` | `timeline.h`（`Tween` / `Keyframes`） `animator.h` `easing.h`（`Curve`） `spring.h`（`SpringSimulation`） |
 | 主题 | `theming/` | `theme.h`（聚合） `color_roles.h` `type_scale.h` `csd_roles.h` `csd_style_bridge.h` `theme_scope.h` `theme_query.h` `theme_extension.h` `color_scheme.h` |
 | 环境注入 | `environment/` | `environment.h` `media_query.h` `build_context.h` |
-| 国际化 | `i18n/` | `locale.h` `localized_string.h` `string_table.h` |
+| 国际化 | `i18n/` | `message_id.h`（`MessageId`） `locale.h` `localized_string.h`（`LocalizedString` / `MessageArg`） `message_catalog.h`（`MessageCatalog` / `default_catalog`） `plural.h`（CLDR 表驱动判定） `format.h`（数字 / 货币 / 日期 + `CivilDate`） `builtin_messages.h`（内置词表薄封装，生成件 `builtin_messages.gen.h`） |
 | 事件 | `event/` | `event.h` `dispatcher.h` `gesture.h` `focus.h` `keycode.h` `drag_drop.h` |
 
 ### 4.6 应用驱动与持久化
@@ -602,6 +602,7 @@ CI 配置位于 `.github/workflows/`：
 | Win32 宿主的 DPI / dp↔物理换算 | `check_dpi_single_source`（换算只许在 `to_physical` / `to_logical`，DPI 只许在 `refresh_scale()` 读）；建窗尺寸那一项另跑真机探针 `aurora_verify_win32_dpi` | `specification/08-tooling.md` §8.2 |
 | GLFW / Wayland 的缩放变化上报 | 真机探针 `aurora_verify_glfw_dpi`（自动段注入 `WM_DPICHANGED`，人工段未做记 PENDING MANUAL） | `specification/08-tooling.md` §8.2「缩放变化上报的跨后端现状」 |
 | 字符串字面量 | `check_no_cjk_literals` | `CODING_STANDARDS.md` §14 |
+| i18n 词表数据（`codespec/i18n_builtin.json`、`gen_i18n` 及其 fixture、`AUM1` 布局） | `check_i18n_gen_golden`（先 `--target gen_i18n`；确定性 / 参数序无关 / golden 逐字节 / 内置同源锁 / 错误类不落盘 / warn-only / 非空转七条腿）+ `itest_i18n_pipeline` | `specification/08-tooling.md`（CLI 与校验）、`specification/07-environment-modifier.md` §6（值模型与 bin 布局） |
 | NOLINT 豁免排版 | `check_nolint_layout` | `CODING_STANDARDS.md` §5.2 |
 | 测试文件 | `registry_integrity`、`check_test_temp_hygiene`、`framework_selftest` | `CODING_STANDARDS.md` §3 |
 | `codespec/` 文档与交叉引用 | `check_codespec_xref`、`check_code_doc_sync` | 本文件 §14 / §15 |

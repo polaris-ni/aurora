@@ -533,6 +533,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `gen_error_codes` | `tools/gen/gen_error_codes.cpp` | 读 [`errors.toml`](../errors.toml) → 生成 `error_codes.gen.h`、[`ERROR_CATALOG.md`](../ERROR_CATALOG.md) 与 `aurora_api.json` 的 `error_codes` 段（**不链接 aurora**） |
 | `gen_api_tools` | `tools/gen/gen_api.cpp` | 反射公共 API 生成 `aurora_api.json`（schema / 类型 / 属性键 / 枚举），并保留既有 `error_codes` / `debug` 段 |
 | `gen_debug_api` | `tools/gen/gen_debug_api.cpp` | 读 [`debug_api.toml`](../debug_api.toml) → 合并 `aurora_api.json` 的 `debug` 段（**不链接 aurora**） |
+| `gen_i18n` | `tools/gen/gen_i18n.cpp` | 读 ARB 形态词表 JSON → 生成薄头（强类型 Id 常量 + 具名形参构造函数）与 `AUM1` 二进制词表；i18n 引擎与 CLDR 复数表**按源文件编入**，与运行期同源（详见 §7.4.2） |
 | `aurora_mcp` | `tools/servers/aurora_mcp.cpp` | MCP Server（stdio JSON-RPC 2.0），见 §7.1 |
 | `aurora_cli` | `tools/servers/aurora_cli.cpp` | CLI 工具链，见 §7.2 |
 | `aurora_lsp` | `tools/servers/aurora_lsp.cpp` | LSP 语言服务，见 §7.3 |
@@ -609,8 +610,48 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 > 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述。**尚未纳入 CI 门禁**：时间类门槛历史上只作本地趋势对照（见 `tools/check/perf_gates.json` 的 `source` 字段），若要新增门槛，需先固定载具、采样窗口与判定阈值。另：叠加层空闲场景的自动覆盖由 `tests/integration/itest_perf_overlay_refresh.cpp` 承担（原人工用例 TC-PERF-008 随载具退役移除）。
 
-### 7.5 真机验收探针（`tools/verify/`）
+### 7.4.2 构建期词表生成（`gen_i18n`）与 golden 门禁
 
+**要解决的问题**：译文若只能在运行期逐条登记，词条名就以字符串字面量散落在调用点，拼错只在运行时静默回退。本工具把「有哪些词条、各词条有哪些形参」提前到构建期确定，产出两件：
+
+| 产物 | 内容 | 消费方 |
+|:---|:---|:---|
+| 薄生成头（`.hpp`） | 每 key 一枚 `constexpr MessageId` 常量（`<ns>::id::AURORA_<点分拍平大写>`，值按 bin 内序）+ 一枚**具名形参** `inline` 构造函数（`<ns>::<首段>::<末段>(args…)`，形参名与类型取自 `@key.placeholders` 元数据，顺序按字母序） | 业务源码 `#include` 后写 `<ns>::<segment>::<fn>(args…)`，实参类型或个数误用在编译期即拦下 |
+| `AUM1` 二进制词表（`.bin`） | 全语言合一的紧凑词表（布局见 [`07-environment-modifier.md`](07-environment-modifier.md) §6.3） | 应用侧读成内存字节后 `MessageCatalog::load_binary`；**文件 IO 不在库内**，wasm 同样成立 |
+
+**CLI 契约**：
+
+```text
+gen_i18n <out.hpp> <out.bin> <cpp-namespace> [--id-base N] <base.json> [locale.json...]
+gen_i18n --emit-builtin <out.hpp> <builtin.json>
+```
+
+- `base.json` 是**基准语言**档（`locale` 必填，可带 `version` / `id_base`），译文档只含 `locale` + 词条，元数据只在基准侧。
+- 词条可直接置于顶层，也可包在 `messages` 里；`@<key>` 同级对象承载该词条元数据（`placeholders` 与 `description`）。
+- `--id-base` 缺省紧跟内置保留区，且**只能上调**：落进 `[0, 1024)` 直接拒绝（保留区归库内置词条，允许下调等于给未来的内置词条埋撞号风险）。
+- 退出码：有 error → 1 且**两件产物都不落盘**（不留半份词表）；只有 warn → 0 并照常产出、逐条打印。
+
+**校验清单（error，全部拦产出）**——模板走的是**运行期同一个解析器**（`src/aurora/i18n/detail/message_engine.h` 直接编入本工具），故「构建期过了」等价于「运行期不会退化成裸模板串」：
+
+| 类别 | 判据 |
+|:---|:---|
+| 输入形态 | JSON 可解析；`locale` tag 形态合法；key 形态合法（点分小写）；`@key` 必须有同名词条 |
+| 元数据 ↔ 模板 | 模板里的每个占位都要有 `@key.placeholders` 条目；形参类型限 `string` / `int64` / `double` / `date`；元数据声明却未使用的形参只 warn |
+| 选择器 | `plural` / `selectordinal` 操作数须 `int64` 或 `double`，`select` 操作数须 `string`；分支须是 CLDR 类别或 `=N` 精确值；`plural` 必须有 `other` 兜底 |
+| 格式化 | `number` / `currency` / `date` 之外的函数不支持；`{, date}` 必须写成 date 形态且 style 只取 short/medium/long；`{, currency}` 须数值型形参 + 三字母 ISO 码 |
+| 跨语言结构 | 译文与基准的结构树（分支集合、选择值集合）必须一致——译文**不得新增**基准没有的 `select` 值，也不得丢分支（丢分支即该语言查表出残缺串） |
+| 保留区 | 基准档不得重定义库内置词条名；点分拍平后的 Id 常量名不得互相冲突 |
+| 通用 | UTF-8 合法性、`#` 只在数值语境生效（非数值语境 warn）、嵌套深度 ≤ 8 |
+
+**确定性**：同一命令重复执行逐字节同输出；译文档在命令行上的**顺序无关**（产物按 locale tag 归档，不按 argv 次序）。这是 golden 可比的前提。
+
+**下游接入**：`cmake/AuroraI18n.cmake` 的 `aurora_i18n_generate(TARGET … NAMESPACE … BASE … LOCALES … OUT_DIR … [ID_BASE n])` 把上面那条命令行包成构建步骤——生成头进 target 源列表，bin `copy_if_different` 到 `$<TARGET_FILE_DIR>`，并给 target 注入 `AURORA_I18N_BIN_PATH` 编译定义（in-tree 唯一消费 leg 是 `demo_i18n`）。
+
+**门禁 `check_i18n_gen_golden`**（`tools/check/check_i18n_gen_golden.py`，需先 `cmake --build build --target gen_i18n`）跑**真实构建产物**而非脚本复刻，共七条腿：① 确定性（两次同字节）② argv 顺序无关 ③ golden 一致（生成后再过 clang-format，与 `generate_error_codes` 同口径；无可用 clang-format 时**只跳头相关腿**，bin 腿与 ①② 不跳）④ 内置词表同源锁（`codespec/i18n_builtin.json` 经 `--emit-builtin` 重出必须等于入库的 `builtin_messages.gen.h`，防手改）⑤ 错误类（每类畸形输入非零退出、诊断点名规则、两件产物均未写）⑥ warn-only 形态（可疑但合法的模板须**零退出 + 有告警**，防 error/warn 口径一边倒）⑦ 非空转（golden / 错误类 / Id 常量条数下限，防 fixture 被清空后全绿）。改词表后刷新 golden：`python tools/check/check_i18n_gen_golden.py build --update`。
+
+> 与 C++ 侧的分工：`tests/integration/itest_i18n_pipeline.cpp` 验「生成件能被 `MessageCatalog` 正确载入并解析」，本门禁验「生成件本身没漂移」。两条都要跑，缺一条就是半边失控。
+
+### 7.5 真机验收探针（`tools/verify/`）
 探针证明的是**无头 CI 无法证明**的平台接线：单元测试只能断言到「平台中立层」（快照 / diff / 偏移映射 / 动作路由），而「平台回调是否真的到达、平台侧对象是否真的可查」只能建真实窗口、在真实桌面会话里验收。全部由 `cmake/AuroraVerify.cmake` 定义、`AURORA_BUILD_VERIFY_TOOLS` 门控、**不进 CTest**（会创建真实窗口 / 读取屏幕状态，非确定且干扰用户桌面）。
 
 | 探针 | 验证目标 | 读回方式 |

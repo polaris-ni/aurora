@@ -477,8 +477,11 @@ cmake -S . -B build -DAURORA_LLD_DIR="<LLVM 安装根>/bin"                     
 | 结构化清单 | `lint` / `lint-fix` 始终把完整清单写到该构建目录的 `lint-findings.json`（`shard` / `tu_count` / `tu_total` / `unique_findings` / `broken_tus` / `by_check` / `by_file` / `findings`）：门禁 stdout 只印 top-N 文件表，尾数不在其中，判因与存量清点必须以这份 JSON 为准。`findings` 每条为 `[文件, 行, check, severity, 消息, 首发 TU]`——头文件告警按 `(file, line, check)` 去重后只剩一条，「谁把它拉进分析的」这个判因起点靠第 6 位留下（`clang-analyzer` 一类只在某条具体调用路径上才命中的检查尤其需要）；`ex.map` 按 sorted 清单顺序产出，故「首发」跨轮次确定可比 |
 | 分片 | `AURORA_LINT_SHARD=<i>/<n>`（默认空 = 一遍跑全量）：把已排序的 TU 清单切成 n 份、本目录只跑第 i 份，供 CI 矩阵并跑多个作业。只改排布、不减覆盖面，也**不改判据**（任一片红即整门红）。详见下「墙钟与分片」 |
 | 依赖 | `clang-tidy`（PATH）+ python（PATH）+ `CMAKE_EXPORT_COMPILE_COMMANDS`（未开启时本模块自动打开） |
+| 生成物先决 | `lint` / `lint-fix` 在 configure 期自动 `add_dependencies` 全部构建期词表生成目标（`cmake/AuroraI18n.cmake` 经全局属性 `AURORA_I18N_LINT_PREREQ_TARGETS` 登记，demos 关闭时清单为空） |
 
 为何不用 `CMAKE_CXX_CLANG_TIDY` 随构建执行：该变量必须在目标定义**之前**设置才生效，与本项目「模块在最后 include」的编排冲突；且会让每次编译额外跑一遍 clang-tidy，日常开发构建被拖慢一个数量级。
+
+生成物先决是同一层道理的下一环：`lint` 不经编译链，直接对源文件跑分析，故凡 `#include` 构建期生成头的翻译单元（i18n 词表生成头即一例）在「只配不编」的构建目录里会先撞上一条 `clang-diagnostic-error`，其余真实检查全被这条编译错误吞掉——门禁报出来的是一堆「文件找不到」而不是代码问题。依赖因此由 CMake 在 configure 期挂上（见上表「生成物先决」行），与 CI 里显式的 `wayland-gen` 步骤同一理由，区别只在本机与四条平台 lint 腿都无须记得先跑一步生成。
 
 ```powershell
 cmake --build build --target lint        # 全量 lint，有告警则失败；同时写出 build/lint-findings.json

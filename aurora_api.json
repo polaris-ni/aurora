@@ -6851,6 +6851,78 @@
       "retryable": true,
       "message": "Move drop landed but the source could not delete its data: '{detail}'",
       "hint": "The target received and stored the payload, but deleting the original failed (file locked, permission revoked). The target's copy stays authoritative - retry the deletion later instead of re-copying, and remember the contract: the source never deletes before the move confirmation arrives"
+    },
+    {
+      "enum": "I18nBinMagicFailed",
+      "slug": "i18n-bin-magic",
+      "category": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Message catalog binary magic mismatch (expected AUM1)",
+      "hint": "The file is not an AUM1 message catalog. Check that the path points to the .bin produced by gen_i18n, not a JSON source or a different asset"
+    },
+    {
+      "enum": "I18nBinVersionUnsupported",
+      "slug": "i18n-bin-version",
+      "category": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Message catalog binary version {version} is not supported (expected 1)",
+      "hint": "The catalog was produced by a newer gen_i18n. Regenerate the .bin with the tool version that matches the library"
+    },
+    {
+      "enum": "I18nBinEndiannessInvalid",
+      "slug": "i18n-bin-endianness",
+      "category": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Message catalog binary is not little-endian (version field decoded as {version})",
+      "hint": "AUM1 catalogs are little-endian only. Regenerate the file instead of byte-swapping it"
+    },
+    {
+      "enum": "I18nBinTruncated",
+      "slug": "i18n-bin-truncated",
+      "category": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Message catalog binary truncated at offset {offset} (needed {needed} more bytes)",
+      "hint": "The file is shorter than its own header claims. Re-transfer or regenerate the .bin; do not attempt to salvage a partial file"
+    },
+    {
+      "enum": "I18nIdOutOfRange",
+      "slug": "i18n-id-out-of-range",
+      "category": "validation",
+      "severity": "error",
+      "retryable": false,
+      "message": "Message id range [{base}, {end}) collides with the invalid-id sentinel or overflows",
+      "hint": "The vocabulary id space must stay below AURORA_INVALID_MESSAGE_ID_VALUE and cannot wrap. Lower --id-base or split the vocabulary"
+    },
+    {
+      "enum": "I18nVocabularyOverlap",
+      "slug": "i18n-vocabulary-overlap",
+      "category": "validation",
+      "severity": "error",
+      "retryable": false,
+      "message": "Vocabulary range [{base}, {end}) overlaps an already registered range",
+      "hint": "Two catalogs claim the same id space. Regenerate with disjoint --id-base values (builtin reserved range starts at 0, applications default to 1024)"
+    },
+    {
+      "enum": "I18nNameDuplicate",
+      "slug": "i18n-name-duplicate",
+      "category": "validation",
+      "severity": "error",
+      "retryable": false,
+      "message": "Message name '{name}' is already registered by another vocabulary",
+      "hint": "Canonical names are global. Rename one of the colliding keys in the JSON sources and regenerate"
+    },
+    {
+      "enum": "I18nUnknownName",
+      "slug": "i18n-unknown-name",
+      "category": "validation",
+      "severity": "error",
+      "retryable": false,
+      "message": "Unknown message name '{name}' (not in any registered vocabulary)",
+      "hint": "add() resolves names through registered vocabularies. Load the vocabulary that owns the name first, or use the generated MessageId constant directly"
     }
   ],
   "debug": [

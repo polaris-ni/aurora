@@ -1,6 +1,6 @@
 # 环境注入、主题与修饰符（environment / theming / i18n / modifier）
 
-> 覆盖 `include/aurora/environment/`（3 个头）、`theming/`（4 个头）、`i18n/`（5 个头）、`modifier/`（6 个头）。
+> 覆盖 `include/aurora/environment/`（3 个头）、`theming/`（4 个头）、`i18n/`（8 个头）、`modifier/`（6 个头）。
 > 本文件是环境依赖注入、媒体查询、主题与国际化、以及 `Modifier` 修饰系统的**唯一权威**。
 > 响应式属性见 [`02-state.md`](02-state.md) §2；控件的二层属性划分见 [`03-layout-render.md`](03-layout-render.md) §7.4。
 
@@ -13,7 +13,7 @@
 | 环境与构建上下文 | `environment/environment.h`、`environment/build_context.h` |
 | 媒体查询 | `environment/media_query.h` |
 | 主题 | `theming/theme.h`（聚合）、`theming/color_roles.h`、`theming/type_scale.h`、`theming/csd_roles.h`、`theming/csd_style_bridge.h`、`theming/theme_scope.h`、`theming/theme_query.h`、`theming/theme_extension.h`、`theming/color_scheme.h` |
-| 国际化 | `i18n/localized_string.h`、`i18n/string_table.h`、`i18n/locale.h` |
+| 国际化 | `i18n/message_id.h`、`i18n/locale.h`、`i18n/localized_string.h`、`i18n/message_catalog.h`、`i18n/plural.h`、`i18n/format.h`、`i18n/builtin_messages.h`（+ 生成件 `i18n/builtin_messages.gen.h`） |
 | 修饰符 | `modifier/modifier.h`、`modifier/modifier_base.h`、`modifier/modifier_layout.h`、`modifier/modifier_paint.h`、`modifier/modifier_input.h`、`modifier/modifier_transform.h` |
 
 ---
@@ -245,72 +245,198 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 ## 6 国际化
 
+译文与代码分离：**构建期** `gen_i18n` 把 ARB 形态的 JSON 词表编译成「薄生成头 + `AUM1` 二进制词表」，
+**运行期** `MessageCatalog` 载入二进制并按 `Locale` 解析模板。C++ 源码里既没有裸 Id 数字，也没有译文字面量
+（`examples/demos/demo_i18n.cpp` 与全部库内控件同此口径）。
+
 | 类型 | 说明 |
 |:---|:---|
-| `LocalizedString` | 可本地化的字符串。`LocalizedString::tr(key)` 按 key 查表，或 `LocalizedString{ "字面量" }` 原样显示；`resolve(const StringTable*, const Locale&)` 解析为最终文本 |
-| `StringTable` | 字符串表（key → 各语言文本）。`default_string_table()` 返回内置表；`StringTable::add(locale, key, tmpl)` 注册 |
-| `Locale` | 语言 / 地区标识（如 `"zh-CN"`），随 `LocaleProvider` 注入，文本解析时按当前 Locale 查表 |
-| `PluralCategory` | CLDR 复数类别（`Zero`/`One`/`Two`/`Few`/`Many`/`Other`），与 CLDR 定义一致；每个语言至少含 `Other` |
-| `plural_category` | `plural_category(double n, const Locale&)` —— 按 CLDR 基数规则表把计数值映射到类别，`loc.language` 选规则；未知语言回退英语规则。覆盖 ar(全六类)/ru(one·few·many·other)/fr(one·many·other)/en·de(one·other)/zh·ja(other) |
-| `Currency` | 货币代码（`USD`/`EUR`/`JPY`/`CNY`/`GBP`），符号与默认小数位取自轻量自研表 |
-| `format_number` / `format_currency` / `format_date` | 按 `Locale` 格式化：数字（千位分组 + 小数点）、货币（符号位 + 小数位）、日期（本地模式，如 de `dd.MM.yyyy`、zh/ja `yyyy年M月d日`） |
+| `MessageId` | 全库唯一的强类型词条 Id（`struct { std::uint32_t value; }`，**无隐式整型转换**）。Id 常量由生成头给出；`AURORA_INVALID_MESSAGE_ID`（`0xFFFFFFFF`）是无效哨兵，Id 区间不得触雷 |
+| `Locale` | language / script / region 三槽，`tag()` 拼成 BCP 47 形态（`zh-Hans-CN`）。三槽共同参与词条回退与数字 / 日期格式化 |
+| `LocalizedString` | 值对象：`text` / `id` / `args` / `localize`。`tr(MessageId, {MessageArg...})` 造本地化值，字面量经隐式构造即非本地化值；`resolve(const MessageCatalog*, const Locale&)` 得最终文本，查表失败回退 `text` |
+| `MessageArg` | 具名参数（名字 + `variant<std::string, std::int64_t, double, CivilDate>`）。占位按名匹配，译文自由调序不会错位（v2 起不再有位置占位与嵌套参数） |
+| `MessageCatalog` | 消息目录：`register_vocabulary` / `load_binary` / `add` / `set_default_locale` / `resolve` / `canonical_name` / `find_by_name` / `missing_translations`。`default_catalog()` 给出进程级实例，内置词表在其中预登记 |
+| `PluralCategory` / `plural_category` / `PluralOperands` | CLDR 表驱动的复数与序数判定（见 §6.1） |
+| `CivilDate` / `DateStyle` / `format_number` / `format_currency` / `format_date` | 本地化格式化（见 §6.1） |
 
-所有文本属性类型为 `Reactive<LocalizedString>`，因此 `.content = "Hi"` 与 `.content = au::LocalizedString::tr("greeting")` 等价。
+所有文本属性类型为 `Reactive<LocalizedString>`，因此 `.content = "Hi"` 与 `.content = au::LocalizedString::tr(id)` 等价。
 
 ```cpp
-au::Button(au::ButtonProps{ .label = au::LocalizedString::tr("save") });
-au::Text(au::LocalizedString::tr("greeting"));
+au::Text(au::TextProps{.content = demo::msg::demo::greeting(3, "Ada")});   // 生成头给出的具名形参构造函数
+au::Text(au::TextProps{.content = au::LocalizedString{"a plain literal"}}); // 不经词表
 ```
+
+**模板语法 = ICU MF1 子集**，运行期解析器与构建期校验器**同源**（`src/aurora/i18n/detail/message_engine.h`
+被直接编入 `gen_i18n`，构建期能过的模板运行期必能过）：
+
+| 形态 | 语义 |
+|:---|:---|
+| `{name}` | 具名占位，按参数类型直出文本 |
+| `{name, number}` / `{name, number, integer}` | 千位分组 + 小数点按 locale；`integer` 取整 |
+| `{name, currency, USD}` | 货币符号与默认小数位按 ISO 码 + locale |
+| `{name, date, short\|medium\|long}` | 按 locale 的日期格式（参数须是 `CivilDate`） |
+| `{name, plural, =0{…} one{…} other{…}}` | CLDR 基数类别；`=N` 精确匹配**优先于**类别 |
+| `{name, plural, offset:1, …}` | `offset` 从生效值里扣减，`#` 与类别判定都用扣减后的值 |
+| `{name, selectordinal, one{#st} two{#nd} few{#rd} other{#th}}` | CLDR 序数类别（en `1st/2nd/3rd/4th`） |
+| `{who, select, admin{…} other{…}}` | 字面量选择，`other` 兜底 |
+| `#` | 只在数字上下文（`plural` / `selectordinal` 分支体内）成立，替换为生效后的选择器值（含分组，如 en `1,234`）；其余位置按字面量 |
+| `''` `'{` `'}` `'#` | 引号转义：`'` 打头吃掉下一个结构字符 |
+
+嵌套深度上限 8；解析失败**回退模板原文**（运行期不设错误码——结构错误已在构建期被 `gen_i18n` 拦下）。
 
 ---
 
 ### 6.1 CLDR 复数与本地化格式
 
-`StringTable` 复数语法从 `one/other` 扩到 CLDR 六类（`zero`/`one`/`two`/`few`/`many`/`other`），分支由 `plural_category(n, loc)` 依 `loc.language` 的规则表选择；旧式仅 `one=`/`other=` 的模板在缺类别时回退 `other=`，与既有行为兼容。
+复数与序数判定**表驱动**：`tools/gen/gen_plural_rules.py` 把 CLDR 48（Unicode 16.0.0）的
+`cldr-core/supplemental/{plurals,ordinals}.json` 编译成 `src/aurora/i18n/plural_rules.gen.cpp`
+——224 语言的 cardinal / ordinal 规则与可达类别掩码，源数据不入库（见 `THIRD_PARTY_LICENSES.md` §10）。
+未知语言码回退英语规则。
+
+| 入口 | 说明 |
+|:---|:---|
+| `PluralOperands` | CLDR TR35 操作数（`n` / `i` / `v` / `w` / `f` / `t`）。三个构造口 `plural_operands_from_int` / `plural_operands_from_double` / `plural_operands_from_decimal`，最后者最精确（消息引擎缺省走它，`1.0` 与 `1` 的 `v` 不同即由此区分） |
+| `plural_category(ops, loc)` | cardinal 类别（`Zero`/`One`/`Two`/`Few`/`Many`/`Other`），每语言至少含 `Other` |
+| `plural_category_ordinal(ops, loc)` | ordinal 类别（en `1st`→`one`、`2nd`→`two`、`3rd`→`few`、`4th`→`other`） |
+| `plural_category(double n, loc)` | 便捷重载（旧口径不变） |
 
 ```cpp
-t.add(Locale{"ar"}, "files",
-      "{0, plural, zero={0} 个文件 one={0} 个文件 two={0} 个文件 few={0} 个文件 many={0} 个文件 other={0} 个文件}");
+au::plural_category(au::plural_operands_from_decimal("1.0"), au::Locale{"en"});  // Other（en 的 one 要求 v=0）
+au::plural_category_ordinal(au::plural_operands_from_int(2), au::Locale{"en"});  // Two
 ```
 
-覆盖语言：ar(全六类) / ru(one·few·many·other) / fr(one·many·other) / en·de(one·other) / zh·ja(other)，未知语言回退 en。
-
-数字 / 货币 / 日期按 `Locale` 格式化（守零依赖自研表）：
+数字 / 货币 / 日期按 `Locale` 格式化（零依赖自研表；`Currency` 取 `USD`/`EUR`/`JPY`/`CNY`/`GBP`，
+符号与默认小数位来自 `CurrencyInfo`，分组与小数点来自 `NumberSymbols`）：
 
 ```cpp
-au::format_number(1234567.0, Locale{"de"}, 0);                 // "1.234.567"
-au::format_currency(1234.56, au::Currency::EUR, Locale{"de"}); // "1.234,56 €"
-au::format_date(2025, 10, 25, Locale{"de"});                   // "25.10.2025"
+au::format_number(1234567.0, au::Locale{"de"}, 0);                    // "1.234.567"
+au::format_currency(1234.56, au::Currency::EUR, au::Locale{"de"});    // "1.234,56 €"
+au::format_date(2025, 10, 25, au::Locale{"de"});                      // medium（缺省）："25.10.2025"
+au::format_date(2025, 10, 25, au::Locale{"en"}, au::DateStyle::Long); // "October 25, 2025"
 ```
+
+`DateStyle` 三档（`Short` / `Medium` / `Long`）是 CLDR 语义的轻量自研子集：`Medium` 与旧版
+`format_date` 逐位一致（en `2025-10-25`、zh/ja `2025年10月25日`），`Short` / `Long` 的月名表只覆盖
+en / de / fr，其余语言按 en 兜底，zh / ja 三档同 medium。`CivilDate` 是把年 / 月 / 日收进一枚强类型的
+载体，供 `{name, date}` 占位与生成 API 的日期形参使用（`format_date` 本身仍取三个整型参数）；
+实现不校验日期范围，与旧口径一致。
 
 ---
 
-### 6.2 控件内置文案的词条 key
+### 6.2 控件内置文案：规范名 ↔ Id 契约
 
-除宿主传入的文本属性外，少数控件**自带**上屏文案（占位提示、空态提示之类）。这些不是字面量：
-一律按 key 查 `default_string_table()`，宿主登记译文即可本地化。**库不预置任何语言的词条**
-（`StringTable` 无删除接口，库侧写入会给宿主留下不可逆污染），未登记时回退控件内声明的英文字面量。
+除宿主传入的文本属性外，少数控件**自带**上屏文案（占位提示、空态提示、拖拽播报之类）。它们不是字面量：
+一律按内置 `MessageId` 查 `default_catalog()`，宿主按**规范名**登记译文即可本地化。
 
-| key | 控件 | 文案 | 兜底 |
-|:---|:---|:---|:---|
-| `command_palette.placeholder` | `CommandPalette` | 搜索框占位符 | `Type a command...` |
-| `command_palette.no_results` | `CommandPalette` | 无匹配结果时的空态提示 | `No matching commands` |
+**库不预置任何语言的译文**：`default_catalog()` 只预登记内置词表的规范名（Id ↔ 名字），模板槽留空；
+英文文案留在控件调用点，作为 `LocalizedString::text` 的查表失败兜底。理由不变——目录没有删除接口，
+库侧写入译文会给宿主留下不可逆污染。
 
-三档优先级：**文本覆盖（`set_placeholder` / `set_empty_message`）> 按 key 查表 > 兜底字面量**。
-文本覆盖生效后该串**不再查表**，宿主须自己备多语言；换 key 则**仍走 i18n**，故同一进程内多个面板
-可各挂不同词条且都能翻译。设 key 会清掉此前的文本覆盖。
+数据源是 `codespec/i18n_builtin.json`（唯一权威），经 `gen_i18n --emit-builtin` 生成
+`include/aurora/i18n/builtin_messages.gen.h`（`aurora::msg` 的 Id 常量 + `aurora::detail` 的名字表与英文模板表），
+代码侧统一经薄封装头 `i18n/builtin_messages.h` 引入（生成件不得被直接引用）。内置词表占 Id 保留区
+`[0, 1024)`，应用词表基址的硬下限即 1024（见 §6.3）。
+
+| Id | 规范名 | 控件 | 用途 | 英文兜底模板 |
+|:---|:---|:---|:---|:---|
+| 0 | `aurora.reorder.cancelled` | `ReorderableList` | 取消拖拽的读屏播报 | `Reorder cancelled. Item returned to position {position} of {total}.` |
+| 1 | `aurora.reorder.dropped` | `ReorderableList` | 换位成功的读屏播报 | `Item moved from position {from} to position {to} of {total}.` |
+| 2 | `aurora.reorder.dropped_in_place` | `ReorderableList` | 原地落定的读屏播报 | `Item dropped at position {position} of {total}.` |
+| 3 | `aurora.reorder.grabbed` | `ReorderableList` | 抓取成功的读屏播报 | `Position {position} of {total}. Item grabbed. …` |
+| 4 | `aurora.reorder.position` | `ReorderableList` | 键盘移动时的读屏播报 | `Position {position} of {total}.` |
+| 5 | `command_palette.no_results` | `CommandPalette` | 无匹配结果的空态提示 | `No matching commands` |
+| 6 | `command_palette.placeholder` | `CommandPalette` | 搜索框占位符 | `Type a command...` |
+
+`CommandPalette` 的三档优先级不变：**文本覆盖（`set_placeholder` / `set_empty_message`）> 按 Id 查表 >
+兜底字面量**。文本覆盖生效后该串不再查表，宿主须自己备多语言；`set_placeholder_key` /
+`set_empty_message_key` 收的是 `MessageId`，换词条仍走 i18n，且会清掉此前的文本覆盖。
 
 解析发生在布局与绘制期，locale 取 `ctx` 注入的 `Locale`（未注入回落缺省档），与 `Text` / `Button`
-的 `resolved_text()` / `resolved_label()` 同口径，故运行期切 locale 立即生效。
+的 `resolved_text()` / `resolved_label()` 同口径；换档的生效时机见 §6.5。
 
 ```cpp
-auto &t = au::default_string_table();
-t.add(Locale{"zh"}, "command_palette.placeholder", "输入命令…");
-t.add(Locale{"zh"}, "command_palette.no_results", "没有匹配的命令");
+auto &c = au::default_catalog();
+(void)c.add(au::Locale{.language = "zh"}, "command_palette.placeholder", "输入命令…");
+(void)c.add(au::Locale{.language = "zh"}, "command_palette.no_results", "没有匹配的命令");
 ```
 
-> 上表 key 是**外部契约**：宿主登记译文要靠这条串。单测以字面量钉死这两条 key（不用常量自比自），
-> 否则库侧 key 拼错时「注册端」与「查表端」一起错、两边抵消，用例会恒绿。
+> 上表是**外部契约**：宿主登记译文要靠规范名，读屏与序列化要靠 Id。单测因此**以字面量钉死「规范名 ↔ Id」
+> 映射**（`utest_message_catalog` / 控件侧用例），而不是拿生成常量自比自——否则库侧名字拼错时「登记端」与
+> 「查表端」一起错、两边抵消，用例会恒绿。`gen_i18n` 的 golden 门禁再把「`aurora::msg::Id` 与内嵌名字/模板表
+> 出自同一份 `codespec/i18n_builtin.json`」锁死（见 `specification/08-tooling.md`）。
+
+---
+
+### 6.3 构建期词表管线与 AUM1 布局
+
+`gen_i18n` 吃 ARB 形态的 JSON（基准语言 + 任意多份译文），产两件：
+
+- **薄生成头**（`messages_en.hpp`）：`<ns>::id::AURORA_*` 的 `constexpr MessageId` 常量，加每 key 一枚
+  具名形参的 `inline` 构造函数（形参**按占位名字母序**排，类型取自 `@key.placeholders` 元数据：
+  `string` / `int64` / `double` / `date`→`aurora::CivilDate`）。用错词条或漏参数在编译期即拦下。
+- **`AUM1` v1 二进制词表**（`messages_en.bin`）：全语言合一，运行期整读交 `load_binary`。
+
+CMake 侧经 `cmake/AuroraI18n.cmake` 的 `aurora_i18n_generate()` 接入（CLI 契约、校验清单与门禁见
+`specification/08-tooling.md`）。译文迭代只改 JSON、只重出 bin，不触碰 C++ 编译；bin 不属任何源表，
+故由该助手挂一个自定义目标兜住重生成，并随可执行文件落同目录。
+
+`AUM1` 布局（全小端；`0xFFFFFFFF` 是「该 locale 无此词条」的哨兵）：
+
+| 段 | 内容 |
+|:---|:---|
+| 头 20 字节 | `AUM1` magic(4) + version(4) + `id_base`(4) + `id_count`(4) + `locale_count`(4) |
+| 名字表 | `id_count` 项，各为 u16 长度 + UTF-8 规范名（空串 = 保留区空洞占位，不进名字索引） |
+| locale 槽表 | 每 locale：u8 tag 长度 + tag 字节 + `id_count` 项 `{u32 offset, u32 length}` |
+| 模板池 | 全部 UTF-8 模板串按 offset/length 寻址（同串复用） |
+
+区间 `[id_base, id_base + id_count)` 与既有登记重叠、名字映射到不同 Id、或触雷无效哨兵 → 结构化错误
+（`errors.toml` 的 i18n 组）；magic / version / 字节序 / 截断同样结构化，且**任何失败都不落库**（载入原子性）。
+
+---
+
+### 6.4 目录模型与回退链
+
+`MessageCatalog` 的存储是「Id → 模板」按 locale 分档的槽表；**各 locale 的查表视图在载入期沿回退链物化**，
+故 `resolve` 是 O(1) 数组取槽，locale 切换只换视图不重排数据。回退阶梯按「先丢 region 后丢 script」展开，
+缺子标签的档自动折叠去重，最多六档：
+
+1. 完整 tag（`zh-Hans-CN`）
+2. language-script（`zh-Hans`）
+3. language-region（`zh-CN`）
+4. language（`zh`）
+5. `set_default_locale` 的完整 tag
+6. 缺省档的 language
+
+六档穷尽 → 回退 `LocalizedString::text`（调用点字面量）。`missing_translations(loc)` 给出「loc 无自有模板、
+而缺省档或其他档有」的 Id 升序清单，是载入期聚合 WARN 的明细查询口。
+
+props 序列化（`$msg` 形态，见 `specification/08-tooling.md` 的 UI-to-code 面）写侧落
+`{"$msg": {"id": "<规范名>", "args": {...}}}`，读侧按规范名 `find_by_name` 反查 Id；旧的字面 string 形态
+读侧继续兼容。
+
+---
+
+### 6.5 locale 的帧级注入
+
+locale 沿 `Environment` 向下传播，两个注入点：
+
+| 入口 | 作用域 | 口径 |
+|:---|:---|:---|
+| `Window::set_locale(loc)` | 整窗根注入（与 `set_theme` 同构） | setter 只存值，`prepare_context` 自**下一帧**起每帧注入；从未设定则不注入，控件回落缺省档 |
+| `LocaleProvider{locale 或 State<Locale>, child}` | 子树覆写 | 「最近祖先优先」压过窗口级默认；持 `State` 时换值即触发子树刷新 |
+
+**帧内一致**：设定当帧的离屏快照仍是旧档，新档自下一帧整帧生效——一帧之内不会出现半中半英的混排。
+
+**换档必须向下失效缓存**：脏标记只有向上通道（`mark_needs_layout` / `invalidate_display_list_up` 沿布局父链
+溯祖先），而文本在**布局期**按环境 locale 解析并缓存解析结果。若只标脏注入点自身，子树后代仍按「约束未变 ⇒
+复用布局缓存 / 回放 Display List」短路，内容就会冻结在旧档。故：
+
+- `Widget::invalidate_subtree_caches()` —— 清本控件**及全部后代**的布局缓存与 DL 缓存；
+- `Provider<T>::on_signal_dirty()` 覆写默认标脏口径，换值那一帧对子树调用它（`Theme` / `MediaQuery` 同源受益）；
+- `Window::set_locale` 走挂起标志，在注入那一帧对呈现根调用它。
+
+代价是 O(子树) 且只在换帧发生一次，与首帧同量级；稳态帧不经过这条路径，缓存收益不受影响。
+环境值依赖自身布局的控件另有第二条口径：覆写 `can_cache_layout()` 返回 false（见 `04-widget.md`）。
 
 ---
 

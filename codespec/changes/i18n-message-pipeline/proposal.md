@@ -4,9 +4,9 @@
 | :--- | :--- |
 | 变更编号 | CHG-035 |
 | 提出日期 | 2026-10-22 |
-| 当前状态 | 已提议 |
+| 当前状态 | 已归档 |
 | 关联需求 | 无 |
-| 影响面 | `include/aurora/i18n/localized_string.h`、`string_table.h`、`locale.h`、`plural.h`、`format.h`（值模型与目录改型，**破坏性**，迁移表见变更内容第 2 条）、新增 include/aurora/i18n/ 下 message_id.h、message_catalog.h、plural_rules.gen.h（生成数据头）与 src/aurora/i18n/ 实现 TU；新增 tools/gen/gen_i18n.cpp、tools/gen/gen_plural_rules.py、tools/check/check_i18n_gen_golden.py；`cmake/AuroraTools.cmake`、`cmake/AuroraTests.cmake`、新增 cmake/AuroraI18n.cmake；新增数据源 codespec/i18n_builtin.json 与 third_party/cldr-plural-rules/；`tests/unit/` 相关 utest 扩展、新增 `examples/demos/demo_i18n.cpp`；`codespec/specification/07-environment-modifier.md`、`codespec/specification/08-tooling.md`、`codespec/ARCHITECTURE.md`、`codespec/GUIDELINE.md`、`codespec/manual-test/02-i18n.md`、`codespec/errors.toml`、`codespec/ERROR_CATALOG.md`；`aurora_api.json` 重建（公共 API 变更） |
+| 影响面 | `include/aurora/i18n/localized_string.h`、`string_table.h`、`locale.h`、`plural.h`、`format.h`（值模型与目录改型，**破坏性**，迁移表见变更内容第 2 条）、新增 include/aurora/i18n/ 下 message_id.h、message_catalog.h、builtin_messages.h（+ builtin_messages.gen.h）与 src/aurora/i18n/ 实现 TU（含库内 detail/message_engine.h、detail/plural_rules.h 与生成件 plural_rules.gen.cpp，均不进公共面）；新增 tools/gen/gen_i18n.cpp、tools/gen/gen_plural_rules.py、tools/check/check_i18n_gen_golden.py；`cmake/AuroraTools.cmake`、`cmake/AuroraTests.cmake`、新增 cmake/AuroraI18n.cmake；新增数据源 codespec/i18n_builtin.json（CLDR 规则源数据照 UCD 先例不入库，见变更内容第 12 条）；`tests/unit/` 相关 utest 扩展、新增 `examples/demos/demo_i18n.cpp`；`codespec/specification/07-environment-modifier.md`、`codespec/specification/08-tooling.md`、`codespec/ARCHITECTURE.md`、`codespec/GUIDELINE.md`、`codespec/manual-test/02-i18n.md`、`codespec/errors.toml`、`codespec/ERROR_CATALOG.md`；`aurora_api.json` 重建（公共 API 变更） |
 
 ## 动机
 
@@ -49,11 +49,11 @@
 5. **bin 格式（小端，magic `AUM1` version 1）**：header（id_base / id_count / locale_count）→ locale 目录（tag）→ 每 locale 的 id 直排偏移表（`0xFFFFFFFF` 缺译哨兵）→ UTF-8 字符串池。仅承诺小端并在载入时校验（非小端 → 结构化错误；现役目标 x64 / ARM64 / wasm 均小端）；`id_base` 承载词表区间 `[id_base, id_base+id_count)`，目录据此检测多 bin 区间重叠。
 6. **消息引擎**：自研三段式（解析→选择→格式化），`plural`/`selectordinal` 按 CLDR 类别求值（`=N` 精确优先、`offset:N` 参与判定），`select` 精确串匹配，分支内 `#` = selector 值按类型格式化后的展示串；占位格式化复用 `format_number` / `format_currency` / `format_date`，新增 `CivilDate{year, month, day}` 值类型承接日期形参；`format_date` 追加缺省 `style` 形参承接 short/medium/long（源兼容，现行签名零迁移）。引擎实现私有，公共面只有 `resolve`。
 7. **生成器 `gen_i18n`**：CLI 全显式（`<out.hpp> <out.bin> <cpp-namespace> [--id-base N] <base.json> [<locale.json>…]`）；基准文件 ARB 布局（词条 + `@key` 元数据），译文文件纯词条；校验分 error / warn 两级（元数据覆盖、函数与类型匹配、selector 类型约束、跨语言结构树比对、CLDR 分支覆盖对照、`#` 作用域、UTF-8、key 形态、嵌套深度上限）；输出确定性（同输入逐字节同输出）。工具链 `aurora_json`，Emscripten 交叉走宿主原生子配置。
-8. **CMake**：库内 `gen_i18n` target；下游助手 `aurora_i18n_generate(TARGET … NAMESPACE … BASE … LOCALES … OUT_DIR … [ID_BASE n])`（新 cmake/AuroraI18n.cmake，随本提案落地）：头入 target 源、bin `copy_if_different` 到可执行目录；golden check 注册进 `AuroraTests.cmake`。
+8. **CMake**：库内 `gen_i18n` target；下游助手 `aurora_i18n_generate(TARGET … NAMESPACE … BASE … LOCALES … OUT_DIR … [ID_BASE n])`（新 cmake/AuroraI18n.cmake，随本提案落地）：头入 target 源、bin `copy_if_different` 到可执行目录；golden check 注册进 `AuroraTests.cmake`。生成头经 `#include` 进入 demo 翻译单元，而 `lint` 目标不走编译链，故 `lint` / `lint-fix` 在 configure 期自动依赖词表生成目标（全局属性登记，demos 关闭时清单为空），避免「只配不编」的构建目录里生成头缺席、门禁只报出一条 file-not-found。
 9. **locale 帧级注入**：`Window::set_locale(loc)` 存值、下一帧 `prepare_context` 根注入 `set<Locale>`（与 Theme/WindowState 同构）→ 帧内语言一致；`LocaleProvider` 子树覆写保留（优先级高于窗口级）；未注入回落缺省档口径不变。
 10. **内置词表狗粮**：源数据 codespec/i18n_builtin.json（起步即 `command_palette.placeholder` / `command_palette.no_results` 两条 key，规范名拼写不变）→ 生成保留区词表常量与规范名表；gen_i18n 内嵌同一份词表并自动并入每个生成 catalog（应用译文直接覆盖内置 key，同一通道）；控件端按 Id 解析、miss 回控件内英文字面量，三档优先级保持；**「库不预置任何语言的词条」原则不动**。控件端迁移面不止 command_palette：`button.h`（label 与无障碍）、`command_palette.h`、`reorderable_list.h`（公告串 `announce_text` 位置形参随 `MessageArg` 改具名）、`rich_text.h` / `text_span.h`（片段文本与 props 反序列化）、`text.h`。
 11. **props JSON 保真**：`localize` 时输出 `{"$msg": {"id": "<规范名>", "args": {…}}}`，纯文本仍为 string，读侧双形态兼容；`PropDescriptor.json_type` 扩展；修复 `text.cpp:157` 与 Button 同口径的压扁缺口。
-12. **CLDR 全量复数表**：vendor 数据 `third_party/cldr-plural-rules/`（只读新增）+ 一次性转换脚本 tools/gen/gen_plural_rules.py → include/aurora/i18n/plural_rules.gen.h（首行 `AUTO-GENERATED`，lint 豁免、format 对齐，字体数据入库同款先例）；cardinal + ordinal 双表、全语言；复数操作数按十进制串推导；`plural_category()` 公共签名不变，实现换表驱动；生成器校验与运行时选择同表同源。
+12. **CLDR 全量复数表（照 UCD 先例：源数据不入库）**：转换脚本 tools/gen/gen_plural_rules.py 一次性消费 CLDR 48 的 plurals.json / ordinals.json（稀疏拉取 cldr-json，源文件**不 vendored**），导出 src/aurora/i18n/plural_rules.gen.cpp（首行 `AUTO-GENERATED`，头部注明 CLDR/Unicode 版本、来源文件与再生成命令；lint 豁免、format 对齐——UCD 区间表与字体数据同款先例）；cardinal + ordinal 双表、全语言；复数操作数按十进制串推导；`plural_category()` 公共签名不变，实现换表驱动；生成器校验与运行时选择同表同源；许可索引补 `THIRD_PARTY_LICENSES.md`（不属 codespec 树，按硬规则 5 只在此说明）。
 13. **无头可测性**：引擎、目录、生成器校验、回退物化、序列化全部无头可证（utest / golden）；`demo_i18n` 仅做真机走查，不引入 GUI 交互测试。
 14. **不做清单（独立申报）**：mmap / 零拷贝（wasm 无 mmap，量级收益趋零）；MF2（生态未起，bin 带版本号留演进）；OS locale 自动检测；网络热更（bin 是纯数据文件，应用自取）；feature 宏（i18n 头常编，生成器随常建工具走）；新增 IO / 三方运行期依赖；`:time` 函数 / `percent` 样式 / 复数范围（plural ranges，即「1–3 个文件」区间选型）。
 
@@ -66,7 +66,7 @@
 5. **props 往返**：`{"$msg"}` serialize → from_json 逐字段还原；旧 string 形态读侧兼容不回归。
 6. **demo 实测**：`demo_i18n` 运行期切 locale 文本即时切换、帧内无混排（manual-test 走查）。
 7. **门禁**：`check_api_schema_sync`（先 `--target aurora_api_json`）、`check_naming_conventions`、`check_doc_comments`、`check_api_budget`、`check_umbrella_header`（两个新公共头入清单）、`check_core_layer_boundary`、`check_arch_module_map`、`check_codespec_xref`、`check_code_doc_sync`、`check_manual_test_format`、`check_change_proposals`、`check_version_consistency`、`check_no_cjk_literals`（demo 词条全走外部数据）、`check_no_hardcoded_paths`、`check_gen_api_merge`、`lint`（`--print-tus` 确认新 TU 入集）、`format-check` 全绿；wasm 配置补跑；全量 ctest 绿。
-8. **变异自证**：删 `=N` 精确比对 → 判据 2 转红；回退物化改逐次查 → 六档用例与 O(1) 断言转红；回退阶梯丢 zh-Hans 档 → zh-Hans-CN 用例转红；删 `$msg` 写侧 → 判据 5 转红；内置词表双端各自维护 → 判据 3 转红；去掉确定性排序 → 判据 1 转红。
+8. **变异自证**：删 `=N` 精确比对 → 判据 2 转红；摘掉结构变更后的视图失效（`MessageCatalog::invalidate()` 不清物化快照）→ 判据 2 的「bin 后到覆盖稀疏值」读到旧值转红（`utest_message_catalog` 的 `binary_reload_overwrites_sparse_and_rejects_conflicts`；口径说明：物化本身是形状不变量，逐次查与物化在可观测行为上等价、无判据可钉，故自证落在失效一致性上）；回退阶梯丢 zh-Hans 档 → zh-Hans-CN 用例转红；删 `$msg` 写侧 → 判据 5 转红；内置词表双端各自维护 → 判据 3 转红；去掉确定性排序 → 判据 1 转红；**去掉换档时的向下缓存失效**（`Provider<T>::on_signal_dirty` 不再调 `invalidate_subtree_caches`，或 `Window::set_locale` 的待处理标记不消费）→ 判据 4 与判据 6 的换档用例转红（`itest_locale_injection` 第三条：`State<Locale>` 换档后文本仍是旧语言）。
 
 ## 回写落点
 
@@ -82,15 +82,25 @@
 ## 消费侧用法（最小示例）
 
 ```cpp
-// 启动：载入词条 bin（文件读取在应用侧），设缺省语言
-auto bin = read_whole_file("myapp_msg.bin");           // 应用侧 IO
-if (auto r = au::default_catalog().load_binary(bin); !r) { /* 结构化错误，含 id 越界/区间重叠 */ }
-au::default_catalog().set_default_locale(au::Locale{"en"});
+// 构建期（CMakeLists.txt）：aurora_i18n_generate(TARGET myapp NAMESPACE myapp::msg
+//         BASE messages_en.json LOCALES messages_zh-Hans-CN.json OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/i18n)
+// 产出两件：messages_en.hpp（Id 常量 + 具名形参构造函数）与 messages_en.bin（AUM1，全语言合一）。
 
-// 组树：生成 API（具名、强类型），或字面量直给
-au::Text(au::TextProps{.content = demo::tr::unread_emails(5)});
-au::Text(au::TextProps{.content = demo::tr::price_line(1234.56)});   // en+USD → "$1,234.56 due"
+// 启动：载入 bin（文件读取在应用侧，库不扩 IO 面），设缺省语言档
+const std::vector<std::byte> bin = read_whole_file("messages_en.bin");
+if (auto loaded = au::default_catalog().load_binary(std::span<const std::byte>{bin}); !loaded) {
+    /* 结构化错误：magic / version / 字节序 / 截断 / Id 越界 / 词表区间重叠 */
+}
+au::default_catalog().set_default_locale(au::Locale{.language = "en"});
 
-// 切语言：下一帧根注入生效，帧内一致
-window.set_locale(au::Locale{"zh", "Hans", "CN"});
+// 组树：生成 API 具名强类型（形参名与类型取自 @key.placeholders，误用编译期即拦下）
+au::Text{au::TextProps{.content = myapp::msg::demo::greeting(3, "Ada")}};
+// 等价的手写形态：Id 常量 + 具名参数
+au::Text{au::TextProps{.content = au::LocalizedString::tr(
+    myapp::msg::id::AURORA_DEMO_GREETING,
+    {{"count", std::int64_t{3}}, {"name", std::string{"Ada"}}})}};
+
+// 切语言：两条注入通道——子树 `LocaleProvider{State<Locale>}` 优先，窗口级 `set_locale` 作默认；
+// 两者换值时都向下清子树缓存，故自下一帧起整屏重解析、帧内不混排。
+window.set_locale(au::Locale{.language = "zh", .script = "Hans", .region = "CN"});
 ```

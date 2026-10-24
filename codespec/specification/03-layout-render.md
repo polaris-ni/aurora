@@ -277,6 +277,14 @@ for col in 0..cols:
 >
 > 断链属**编程错误**而非受支持形态：它与「忘记标脏」症状相同（都表现为改了状态屏幕不动），故必须靠上述 WARN 把两者区分开，否则无从排查。
 
+**缓存失效只有向上一个通道，环境注入换值须由注入点显式发起向下清零。** 上述不变量的直接推论是：脏标记与缓存失效都沿 `layout_parent_` 上溯，**不存在**从祖先向子树的失效传播。这对普通状态变更是对的——读环境值的控件在自身 `on_layout` 里取值，父链重排即逐节点重算；但环境**注入点**（`Environment` 的构建方，如 `LocaleProvider` / `Window` 的根注入）本身通常不渲染任何文本，它换值时若后代全部命中「约束未变且未脏」的短路，新值就永远进不了子树的解析。故口径为：
+
+- **注入方负责向下清零**：`Widget::invalidate_subtree_caches()` 递归清本控件及全部后代的布局缓存与 Display List 缓存，是这条通道的唯一公共入口。
+- **换值那一帧跑一次**：代价 `O(子树)`，只在值真变的那一帧发生（信号驱动，非每帧），下一帧起缓存按新值重新物化。
+- **消费方无需感知**：控件照旧在 `on_layout` / `on_paint` 就地读 `BuildContext::environment<T>()`，不要求关闭 `can_cache_layout()`——后者是「同一控件每帧重算」的另一种口径，代价常驻，不该用于换档这类低频事件。
+
+> i18n 的具体落地（locale 换档 → 文案重解析）见 `07-environment-modifier.md` §6.5；信号驱动的触发点见 `include/aurora/widget/provider.h` 的 `on_signal_dirty()` 覆写与 `include/aurora/window/window.h` 的 `set_locale` 待处理标记。
+
 ### 5.2 溢出策略
 
 | `OverflowStrategy` | 语义 |
