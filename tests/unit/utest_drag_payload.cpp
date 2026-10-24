@@ -266,7 +266,11 @@ AURORA_TEST_CASE(capability_bits_for_system_drag_track_wired_backends_per_direct
     // 无关），两个方向对 Win32 / D3D11 均翻位。
     // Glfw 恒 false：零 `#ifdef` 公共头无法按宿主 OS 分叉，且 GLFW 自持 drop 不承载四态协商。
     // X11 两个方向同批接线（Xdnd 单向消息协议：拖入走 `XdndAware` + selection round-trip，
-    // 拖出走指针 grab + `XdndSelection` 所有权，会话跑在 UI 线程上）；Wayland / MacOS 尚缺。
+    // 拖出走指针 grab + `XdndSelection` 所有权，会话跑在 UI 线程上）；
+    // Wayland 两个方向同批接线（`wl_data_device` / `wl_data_source` + `start_drag`）；
+    // MacOS 两个方向同批接线（`NSDraggingDestination` 五方法 / `NSDraggingSource` +
+    // `beginDraggingSessionWithItems:event:source:`，取数同步发生在 `performDragOperation` 内）。
+    // 三个平台的会话都跑在 UI 线程上（不阻塞事件泵），与 Win32 的嵌套模态循环不同。
     const Expectation table[] = {
         {.kind = SurfaceKind::Headless, .drag_in = false, .drag_out = false},
         {.kind = SurfaceKind::Win32, .drag_in = true, .drag_out = true},
@@ -274,7 +278,7 @@ AURORA_TEST_CASE(capability_bits_for_system_drag_track_wired_backends_per_direct
         {.kind = SurfaceKind::D3D11, .drag_in = true, .drag_out = true},
         {.kind = SurfaceKind::X11, .drag_in = true, .drag_out = true},
         {.kind = SurfaceKind::Wayland, .drag_in = true, .drag_out = true},
-        {.kind = SurfaceKind::MacOS, .drag_in = false, .drag_out = false},
+        {.kind = SurfaceKind::MacOS, .drag_in = true, .drag_out = true},
         {.kind = SurfaceKind::Wasm, .drag_in = false, .drag_out = false},
     };
     for (const Expectation &row : table) {

@@ -218,6 +218,75 @@ enum class WaylandDndAction : std::uint8_t {
 /// @return 去重的线上名清单（顺序同 `wayland_offer_names_from_mime` 各表项的拼接序）。
 [[nodiscard]] auto wayland_registered_offer_names() -> const std::vector<std::string> &;
 
+/// @brief macOS `NSDragOperation` 位（`NSDraggingInfo` 的 `draggingSourceOperationMask` 与
+/// `draggingSession(_:endedAt:operation:)` 的 operation；AppKit 原文数值）。
+///
+/// 本地声明而非取 AppKit 宏：折算层不引 `<AppKit/AppKit.h>`（详见文件头）。⚠️ 位序与 Win32
+/// `DROPEFFECT`、Wayland `dnd_action` **都不同**（Copy=1 相同纯属巧合，Link=2 而 Move=16）——
+/// 这正是「平台原始值 → 契约值」折算必须按平台各写一份的理由。
+enum class MacOSDragOperation : std::uint32_t {
+    None = 0U,  ///< `NSDragOperationNone`：不接受
+    Copy = 1U,  ///< `NSDragOperationCopy`
+    Link = 2U,  ///< `NSDragOperationLink`
+    Generic = 4U,  ///< `NSDragOperationGeneric`（由目标应用自定义语义）
+    Private = 8U,  ///< `NSDragOperationPrivate`（同一应用的私有拖放）
+    Move = 16U,  ///< `NSDragOperationMove`
+    Delete = 32U,  ///< `NSDragOperationDelete`（移到废纸篓）
+    Every = 0xFFFFFFFFU,  ///< `NSDragOperationEvery`（源侧「任意皆可」的掩码写法）
+};
+
+/// @brief 本库在 macOS 上声明支持的动作位集（`draggingSourceOperationMaskForDraggingContext:` 的
+/// 返回值；单一真源）。
+///
+/// 只声明 `Copy | Move`：`Generic` / `Private` 的语义由**目标应用**定义，本库无从翻译成
+/// `DragAction`（如实不支持，不猜）；`Delete` 是「移到废纸篓」的源侧特殊态，本库不作为
+/// 受援动作声明；`Link` 在拖放路径上极少被目标声明（同 Wayland 侧口径）。
+/// @return 动作位集（恒含 `Copy`）。
+[[nodiscard]] auto macos_supported_drag_operations() -> std::uint32_t;
+
+/// @brief `DragAction` → `NSDragOperation` 位（源侧掩码 / 终态折算用）。
+/// @param action 待映射的动作。
+/// @return 动作位；`None` 时为 0。
+[[nodiscard]] auto macos_drag_operation_from(DragAction action) -> std::uint32_t;
+
+/// @brief `NSDragOperation` 位 → `DragAction`（上一函数的逆，多位时按固定优先序取一）。
+///
+/// 优先序 **Copy → Move → Link**：与 Win32 / Wayland / X11 三侧同源（复制是最不易造成数据
+/// 损失的解读）。`Generic` / `Private` / `Delete` 与未知位一律 `None`——本库没有对应态，
+/// 如实为「无动作」而非替用户猜一个。`Every`（全位掩码）按优先序落 `Copy`：源侧声明
+/// 「任意皆可」时取最不易损的解读。
+/// @param bits 平台侧 `NSDragOperation` 原值（可为掩码）。
+/// @return 译出的动作；无可识别的复制/移动/链接位时为 `DragAction::None`。
+[[nodiscard]] auto action_from_macos_drag_operation(std::uint32_t bits) -> DragAction;
+
+/// @brief 规范 MIME → macOS 粘贴板类型（`NSPasteboard` 的 UTI 串；注册 / 比较用）。
+///
+/// 与另三平台同口径：只登记本库会消费的 MIME。`text/plain` 挂两枚——现代 UTI
+/// `public.utf8-plain-text` 与 legacy `NSStringPboardType`（部分旧应用仍写后者）；
+/// `text/uri-list` 只挂 `public.file-url`：legacy `NSFilenamesPboardType` 载荷是**路径串数组**
+/// 而非 URI 清单，解码形态不同，不登记即不声称能读（不猜、不兜底）；`image/png` 挂
+/// `public.png`（macOS 应用更常写 `public.tiff`，本库不解 TIFF，故不登记）。
+/// @param mime 待映射的 MIME（须为 `app/mime_types.h` 登记的规范形）。
+/// @return 粘贴板类型清单（顺序即优先级：注册 advertise 与读取比较都按该序取首个可用项）；
+///         未登记 MIME 返回空清单（不猜、不兜底）。
+[[nodiscard]] auto macos_pasteboard_types_from_mime(std::string_view mime) -> std::vector<std::string>;
+
+/// @brief macOS 粘贴板类型 → 规范 MIME（上一函数的逆）；未登记类型返回 `std::nullopt`。
+/// @param type 平台侧粘贴板类型串（UTI 或 legacy 常量名）。
+/// @return 对应规范 MIME；未登记时为 `std::nullopt`。
+[[nodiscard]] auto mime_from_macos_pasteboard_type(std::string_view type) -> std::optional<std::string>;
+
+/// @brief macOS 粘贴板类型清单 → 规范 MIME 清单（保持输入顺序、去重、丢弃未登记项）。
+///
+/// 与另三平台同纪律：顺序即优先级，折算不得重排。
+/// @param types 平台侧粘贴板类型清单（可含重复与未登记项）。
+/// @return 去重后的规范 MIME 清单（未登记项被丢弃，可为空）。
+[[nodiscard]] auto mimes_from_macos_pasteboard_types(const std::vector<std::string> &types) -> std::vector<std::string>;
+
+/// @brief 本库登记的**全部** macOS 粘贴板类型（桥 install 期 `registerForDraggedTypes:` 用；单一真源）。
+/// @return 去重的粘贴板类型清单（顺序同 `macos_pasteboard_types_from_mime` 各表项的拼接序）。
+[[nodiscard]] auto macos_registered_pasteboard_types() -> const std::vector<std::string> &;
+
 /// @brief 客户区**物理像素** → 窗口**逻辑 dp**（拖放坐标契约的唯一折算入口）。
 ///
 /// 与 `Win32Host::Impl::to_logical` 同款但可无头验证：`scale` 由调用方（宿主）给出，本函数不读

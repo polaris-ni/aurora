@@ -200,6 +200,24 @@ struct WaylandOfferEntry {
     return TABLE;
 }
 
+/// @brief macOS 粘贴板类型登记表（规范 MIME → 粘贴板类型；顺序即优先级，理由见头文件同名函数注记）。
+struct MacOSPasteboardEntry {
+    std::string_view mime;
+    std::vector<std::string> types;
+};
+
+/// @brief 登记表单一真源（头文件 `macos_registered_pasteboard_types` 即由它展平）。
+[[nodiscard]] const std::vector<MacOSPasteboardEntry> &macos_pasteboard_table() {
+    static const std::vector<MacOSPasteboardEntry> TABLE = {
+        // 现代 UTI 与 legacy 常量名两枚都登记：部分旧应用（含旧版 Office / Adobe 套件）仍写
+        // NSStringPboardType；两枚同归 text/plain（载荷同一份 UTF-8 字节，解码不分叉）。
+        {.mime = AURORA_MIME_TEXT_PLAIN, .types = {"public.utf8-plain-text", "NSStringPboardType"}},
+        {.mime = AURORA_MIME_URI_LIST, .types = {"public.file-url"}},
+        {.mime = AURORA_MIME_IMAGE_PNG, .types = {"public.png"}},
+    };
+    return TABLE;
+}
+
 }  // namespace
 
 auto x11_target_names_from_mime(const std::string_view mime) -> std::vector<std::string> {
@@ -349,6 +367,91 @@ auto wayland_registered_offer_names() -> const std::vector<std::string> & {
         for (const WaylandOfferEntry &entry : wayland_offer_table()) {
             for (const std::string &name : entry.names) {
                 out.push_back(name);
+            }
+        }
+        return out;
+    }();
+    return FLAT;
+}
+
+auto macos_supported_drag_operations() -> std::uint32_t {
+    // Copy | Move：Generic / Private 语义归目标应用、Delete 是源侧特殊态、Link 极少被声明
+    // （三条理由见头文件同名函数注记）。恒含 Copy——复制是拖放路径最不易造成数据损失的解读。
+    return static_cast<std::uint32_t>(MacOSDragOperation::Copy) | static_cast<std::uint32_t>(MacOSDragOperation::Move);
+}
+
+auto macos_drag_operation_from(const DragAction action) -> std::uint32_t {
+    switch (action) {
+        case DragAction::Copy:
+            return static_cast<std::uint32_t>(MacOSDragOperation::Copy);
+        case DragAction::Move:
+            return static_cast<std::uint32_t>(MacOSDragOperation::Move);
+        case DragAction::Link:
+            return static_cast<std::uint32_t>(MacOSDragOperation::Link);
+        case DragAction::None:
+            break;
+    }
+    return 0U;  // None：不接受（调用方据此判定「不支持任何动作」）
+}
+
+auto action_from_macos_drag_operation(const std::uint32_t bits) -> DragAction {
+    // 多位时按 Copy → Move → Link 取一：与 Win32 / Wayland / X11 三侧同源（复制最不易损）。
+    // ⚠️ 位序与另两平台不同（Link=2 而 Move=16），故不能复用 Win32 侧的同名函数。
+    if ((bits & static_cast<std::uint32_t>(MacOSDragOperation::Copy)) != 0U) {
+        return DragAction::Copy;
+    }
+    if ((bits & static_cast<std::uint32_t>(MacOSDragOperation::Move)) != 0U) {
+        return DragAction::Move;
+    }
+    if ((bits & static_cast<std::uint32_t>(MacOSDragOperation::Link)) != 0U) {
+        return DragAction::Link;
+    }
+    // Generic / Private / Delete 与未知位：本库无对应态，如实为 None（见头文件注记）。
+    // Every（全位掩码）含 Copy 位，按优先序在上方已落 Copy。
+    return DragAction::None;
+}
+
+auto macos_pasteboard_types_from_mime(const std::string_view mime) -> std::vector<std::string> {
+    for (const MacOSPasteboardEntry &entry : macos_pasteboard_table()) {
+        if (entry.mime == mime) {
+            return entry.types;
+        }
+    }
+    return {};  // 未登记 MIME：不猜、不兜底（与另三平台表同纪律）
+}
+
+auto mime_from_macos_pasteboard_type(const std::string_view type) -> std::optional<std::string> {
+    for (const MacOSPasteboardEntry &entry : macos_pasteboard_table()) {
+        for (const std::string &candidate : entry.types) {
+            if (candidate == type) {
+                return std::string{entry.mime};
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+auto mimes_from_macos_pasteboard_types(const std::vector<std::string> &types) -> std::vector<std::string> {
+    std::vector<std::string> out;
+    std::unordered_set<std::string> seen;
+    for (const std::string &type : types) {
+        const auto mime = mime_from_macos_pasteboard_type(type);
+        if (!mime.has_value()) {
+            continue;  // 未登记类型：丢弃（不猜、不兜底成空串）
+        }
+        if (seen.insert(*mime).second) {
+            out.push_back(*mime);
+        }
+    }
+    return out;
+}
+
+auto macos_registered_pasteboard_types() -> const std::vector<std::string> & {
+    static const std::vector<std::string> FLAT = [] {
+        std::vector<std::string> out;
+        for (const MacOSPasteboardEntry &entry : macos_pasteboard_table()) {
+            for (const std::string &type : entry.types) {
+                out.push_back(type);
             }
         }
         return out;

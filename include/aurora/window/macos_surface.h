@@ -59,6 +59,12 @@ class MacOSSurface : public Surface {
     ///       NO 之外同步清位，届时一并落地（本方法即其落点）。
     auto cancel_close() -> void override;
 
+    /// @brief 事件处理器：AppKit 事件（含系统拖放四态）翻译为 aurora `Event` 后上抛。
+    /// @param h 事件接收器；为空时事件仅更新内部状态、不上抛。
+    /// @note 拖放桥的 `emit` 钩子直投本回调（`allowed` 由派发器在调用内写定）。本后端事件泵
+    ///       尚未实写，回调当前只被拖放路径使用；未编译验证（同 `set_cursor`）。
+    auto set_event_handler(const EventHandler &h) -> void override;
+
     /// @brief 运行时更新悬停光标形状：`[[NSCursor …] set]`（AppKit 在 .cpp 内 `#import`）。
     /// 后端映射：Arrow→`arrowCursor`、IBeam→`IBeamCursor`、PointingHand→`pointingHandCursor`、
     /// ResizeNS→`resizeUpDownCursor`、ResizeEW→`resizeLeftRightCursor`、Move→`openHandCursor`、

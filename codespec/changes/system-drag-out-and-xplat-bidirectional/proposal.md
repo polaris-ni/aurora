@@ -6,7 +6,7 @@
 | 提出日期 | 2026-10-23 |
 | 当前状态 | 实施中 |
 | 关联需求 | SPEC.FEAT.APP.SYSTEM-DRAG-DROP.001 |
-| 影响面 | `include/aurora/window/platform.h`（`system_drag_out` 能力位与 `capabilities()` 聚合按批次翻位）、`src/aurora/window/detail/win32_drag.h` 与 `src/aurora/window/detail/win32_drag.cpp`（拖出侧 `IDropSource` / `DoDragDrop` / 取消检测 / 拖拽影像）、`src/aurora/window/detail/system_drag_translate.h` 与 `src/aurora/window/detail/system_drag_translate.cpp`（X11 `XdndAction*` / Wayland 动作协商 / macOS `NSDragOperation` ↔ `DragAction` 折算）、`src/aurora/window/x11_surface.cpp` / `src/aurora/window/wayland_surface.cpp` / `src/aurora/window/macos_surface.cpp`（各 `Impl` 持有桥实例并接线；X11 与 Wayland 的桥按「完整双向状态机」判据独立成 `detail/x11_drag.{h,cpp}` 与 `detail/wayland_drag.{h,cpp}`，不内联进 surface）、`src/aurora/window/win32_host.cpp`（拖出后端每窗构造期注册与影像缩放的进程级提示推送）、`src/aurora/event/detail/system_drag_backend.h`（拖出注册接缝，本批新增内部头）、`src/aurora/event/drag_payload.cpp`（拖出后端注册接缝的判优与进程级在途闸登记）、`tests/unit/utest_drag_payload.cpp`（能力位方向级分叉锚定表按批次更新）、`tools/verify/` 新增 x11 / wayland 两枚 drag_live_probe 并扩建 win32 探针的拖出腿（新件，不在此列名）；`cmake/AuroraVerify.cmake` 增 wayland 探针目标（pkg-config 探测 `wayland-server`，缺包则 configure 期跳过）、`codespec/manual-test/24-systemdrag.md` 新增拖出与三平台双向用例；无新增公共 API 符号 / 枚举 / 错误码 / feature 宏，`aurora_api.json` 预期零差异；另记 CHANGELOG.md（不属 codespec 树，不列为回写落点） |
+| 影响面 | `include/aurora/window/platform.h`（`system_drag_out` 能力位与 `capabilities()` 聚合按批次翻位）、`src/aurora/window/detail/win32_drag.h` 与 `src/aurora/window/detail/win32_drag.cpp`（拖出侧 `IDropSource` / `DoDragDrop` / 取消检测 / 拖拽影像）、`src/aurora/window/detail/system_drag_translate.h` 与 `src/aurora/window/detail/system_drag_translate.cpp`（X11 `XdndAction*` / Wayland 动作协商 / macOS `NSDragOperation` ↔ `DragAction` 折算）、`src/aurora/window/x11_surface.cpp` / `src/aurora/window/wayland_surface.cpp` / `src/aurora/window/macos_surface.cpp`（各 `Impl` 持有桥实例并接线；X11 / Wayland / macOS 的桥按「完整双向状态机」判据独立成 `detail/x11_drag.{h,cpp}`、`detail/wayland_drag.{h,cpp}` 与 `detail/macos_drag.{h,cpp}`，不内联进 surface；后两者为 ObjC++ TU，由 `cmake/AuroraBackends.cmake` 标 `LANGUAGE OBJCXX`）、`src/aurora/window/win32_host.cpp`（拖出后端每窗构造期注册与影像缩放的进程级提示推送）、`src/aurora/event/detail/system_drag_backend.h`（拖出注册接缝，本批新增内部头）、`src/aurora/event/drag_payload.cpp`（拖出后端注册接缝的判优与进程级在途闸登记）、`tests/unit/utest_drag_payload.cpp`（能力位方向级分叉锚定表按批次更新）、`tools/verify/` 新增 x11 / wayland / macos 三枚 drag_live_probe 并扩建 win32 探针的拖出腿（新件，不在此列名）；`cmake/AuroraVerify.cmake` 增 wayland 探针目标（pkg-config 探测 `wayland-server`）与 macos 探针目标（`enable_language(OBJCXX)` + `-fobjc-arc`）（pkg-config 探测 `wayland-server`，缺包则 configure 期跳过）、`codespec/manual-test/24-systemdrag.md` 新增拖出与三平台双向用例；无新增公共 API 符号 / 枚举 / 错误码 / feature 宏，`aurora_api.json` 预期零差异；另记 CHANGELOG.md（不属 codespec 树，不列为回写落点） |
 
 ## 动机
 
@@ -39,12 +39,12 @@
    - 修饰态：协议**不随指针事件送修饰态**，桥经 hooks 从 seat 的 xkb 缓存（`on_modifiers` 维护）取，与键盘 / 鼠标事件同一份缓存、同一折算入口。
    - 拖拽影像：start_drag 的 icon surface（`DragOffer::icon` 非空时建 buffer surface，空交 OS 默认）。
    - 能力位：`Wayland` 两个方向同翻；CI 的 `linux-x11-wayland-glfw` 作业**编译并 lint** Wayland 后端（含 `wayland-gen` 协议头生成），**不承载**真机拖放联调；真机取证由探针的进程内 mock 合成器腿（服务端自建 `wl_display` + 三段 global，客户端经 socketpair + registry 绑定拿到与桥同侧的真实代理）加可选冒烟腿（有 `WAYLAND_DISPLAY` 时建真实 `WaylandSurface` 泵帧）与人工段承担。
-5. **macOS dragging session 双向（内联 `macos_surface.cpp` 的 `Impl`）**：
-   - 拖入：`NSDraggingDestination` 的 `draggingEntered` / `draggingUpdated` / `draggingExited` 驱动四态与光标；**`prepareForDragOperation` 返回 Bool 是 accept 闸门**（`query_system_drag_accept` 落点，`performDragOperation` 仅在其返回 YES 后调用——落在后者会让「拒绝」路径无处实现）。
-   - 拖出：`NSDraggingSource` + `beginDraggingSession`；结局经 `draggingSession(_:endedAt:operation:)` 投递（operation 为 none → `Cancelled`），是 `Succeeded` / `Cancelled` 的来源。
-   - formats / provider 经 `NSPasteboard` 映射；Move 语义经 `NSDragOperation` 与 `on_move_confirmed` 对齐；拖拽影像经 dragging item 影像（`DragOffer::icon` 非空时用，空交 OS 默认）。
-   - 能力位：`MacOS` 两个方向同翻；CI macos 矩阵编译 + 测试该后端，真机拖放联调归探针与 manual-test 第 24 卷。
-6. **批次次序与依赖**：注册接缝 → Win32 拖出（reference 实现，含重入闸与 Move 回滚）→ X11 双向 → Wayland 双向 → macOS 双向 → 末批全量门禁与真机记录归档。每批次独立可合入、独立翻位；后续批次复用接缝与 inert 测试件，不重造。**进度**：前四批（接缝 + Win32 拖出 + X11 双向 + Wayland 双向）已交付并推送，能力位已按方向翻位；剩余 macOS 双向（骨架桩，按「未在本仓库无头构建内编译验证」惯例处理）与末批全量门禁。
+5. **macOS AppKit 双向（独立桥 `detail/macos_drag.{h,cpp}`，由 `MacOSSurface::Impl` 唯一持有）**：
+   - 拖入：内容视图 `registerForDraggedTypes:` 登记后实现 `NSDraggingDestination` 五方法——`draggingEntered` / `draggingUpdated` / `draggingExited` 驱动三态与光标；**`prepareForDragOperation` 的返回值是 accept 闸门**（`query_system_drag_accept` 的落点：AppKit 只在其返回 YES 后调 `performDragOperation`，把闸门放在后者会让「拒绝」路径无处实现——目标侧从未收到数据却也无法告诉 OS 不接受）。取数在 `performDragOperation` 内**同步**完成（AppKit 读取 API 自身阻塞到数据就绪），故本平台没有另两桥那种 tick 级读取泵。
+   - 拖出：`NSDraggingSource` + `beginDraggingSessionWithItems:event:source:`（event 取宿主指针按下路径经 `note_press_event` 暂存的 `NSEvent`，无窗口或无按下事件时**不发起**）；数据经 `NSPasteboardItem` 的 data provider 惰性送达；结局经 `draggingSession:endedAtPoint:operation:` 投递（operation 为 none → `Cancelled` + `None`，非零 → `Succeeded` + 折算动作），是 `Succeeded` / `Cancelled` 的来源。AppKit 没有公开的程序化中止 API，`system_drag::cancel()` 的取消意图由事件层就地登记（首登记者赢）。
+   - formats / provider 经 `NSPasteboard` 映射：`public.utf8-plain-text` / `public.file-url` / `public.png` 登记，旧式 `NSFilenamesPboardType`（载荷是路径数组，本库不解析）与 `public.tiff` 刻意不登记——不声称能读。`NSDragOperation` ↔ `DragAction` 折算落 `system_drag_translate`（零平台头层，无头单测覆盖），位序 Copy=1 / Link=2 / Move=16 与另两平台都不同。修饰态：`NSDraggingInfo` 不携带修饰位集，桥经 hooks 从宿主键盘缓存取（骨架期如实报 `None`）；源侧 `ignoreModifierKeysForDraggingSession:` 返回 YES 让渡回库内唯一的 `proposed_action_for` 翻译点。拖拽影像经 dragging item 影像（`DragOffer::icon` 非空时用，空交 OS 默认）。
+   - 能力位：`MacOS` 两个方向同翻（窗口壳仍为骨架 ⇒ 运行期 `install()` 因无内容视图必失败并记日志降级；能力位表机制归属，与 `multitouch` 等位的声明口径一致）。CI 的 `macos-appkit-glfw` 作业**编译**该后端与探针（`--target aurora_verify`），**不承载**真机拖放联调（无人值守 macOS 无窗口系统）；真机取证由探针自动段（协议对象层替身：真实 `NSPasteboard` + 库自带目标视图 + 一枚只回答桥真正读取的三个 `NSDraggingInfo` 选择子的对象驱动桥）与人工段承担，人工段待窗口壳实写后可执行。
+6. **批次次序与依赖**：注册接缝 → Win32 拖出（reference 实现，含重入闸与 Move 回滚）→ X11 双向 → Wayland 双向 → macOS 双向 → 末批全量门禁与真机记录归档。每批次独立可合入、独立翻位；后续批次复用接缝与 inert 测试件，不重造。**进度**：前五批（接缝 + Win32 拖出 + X11 双向 + Wayland 双向 + macOS 双向）已交付，五个后端的能力位已按方向翻位；剩余末批全量门禁与提案归档（ macOS 批在本仓库内只有编译证据，运行期判据须在真机 macOS 上照 manual-test 第 24 卷执行后登记）。
 7. **横切纪律（继承 CHG-027，不重新裁决）**：
    - 不新增公共 API 符号 / 枚举 / 错误码（机制缺失、会话失败、读取失败、解码失败、取消、Move 回滚六枚既有 slug 全数复用）；不新增 feature 宏（后端寄生平台 TU，编译期门控由平台自身完成，`check_platform_macros` 照过）；`codespec/BUILD_OPTIONS.md` 与 `debug_api.toml` 不动。
    - 载荷编解码依赖点名：uri-list ↔ 平台路径走仓内既有的 `src/aurora/app/uri_list.h`（内部头）；Win32 文本 `CF_UNICODETEXT` ↔ UTF-8；图像 `CF_DIBV5` ↔ PNG 受 `AURORA_ENABLE_IMAGE_PNG` 门控，关闭时该格式如实不可得、不假装支持。
@@ -54,15 +54,15 @@
 
 ## 验收判据
 
-1. **能力位方向级分叉表按批次更新**：Win32 / D3D11 / X11 / Wayland 两方向 true（前四批已翻）；macOS 两方向待该批次落地后翻；Glfw / Headless / Wasm 恒 false；「未接线先声称」的变异（为未落地方向翻位）使对应用例转红。
+1. **能力位方向级分叉表按批次更新**：Win32 / D3D11 / X11 / Wayland / MacOS 两方向 true（五批已翻）；Glfw / Headless / Wasm 恒 false；「未接线先声称」的变异（为未落地方向翻位）使对应用例转红。
 2. **Win32 拖出真机闭环**：应用拖文件到桌面 / 文件管理器，`on_system_drag_end(Succeeded, Copy)`；无修饰键按 `DragOffer::default_action`；Esc 取消 → `(Cancelled, None)` 且 `on_system_drag_cancel` 严格早于 `on_system_drag_end`；目标拒绝 → `(Rejected, None)`。
 3. **重入闸判据**：在途会话期内第二次 `begin` 被拒（`system-drag-session-failed`，`utest_drag_payload` 锚定）且首会话终态不受污染；取消路径就地收口在途读取（不等帧循环）后**先**登记 `Cancelled`，拖拽线程迟到的终态登记不改写已排定终态（「首登记者赢」）。
 4. **Move 回滚**：注入 `on_move_confirmed` 失败 → 终态 `Failed` + `Move` + `system-drag-move-rollback` 可观测（经 `test_last_session_error` 往返），目标侧数据不动；确认调用点早于 `on_end(Succeeded, Move)`。
 5. **三平台双向真机闭环（探针 + manual-test）**：拖入四态序列与载荷往返保真，`read_async` 读取超过共享阈值的载荷时帧序号推进 ≥ 1 且回调发生在排空阶段；拖出发起 → 落放成功终态；取消路径按各自平台来源（X11 未收到 `XdndFinished`、Wayland `wl_data_source.cancelled`、macOS operation 为 none）映射同一 `Cancelled`。
 6. **错误映射不新增 slug**：会话建立失败 / 读取失败 / 取消 / 解码失败 / Move 回滚仍落既有六枚；Wayland 接口版本协商不到 3 时如实降级、不报假动作。
-7. **无头回归全绿**：既有 `utest_drag_payload` / `utest_system_drag_translate` / `utest_system_drag_ingress` / `utest_dispatcher` / `utest_application` 全绿；新增平台折算用例（`XdndAction*` / Wayland 动作协商 / macOS `NSDragOperation` ↔ `DragAction`）进 `utest_system_drag_translate`；inert 三件套安装期间真实后端不接管、卸载恢复「无后端 → not-supported」。
+7. **无头回归全绿**：既有 `utest_drag_payload` / `utest_system_drag_translate` / `utest_system_drag_ingress` / `utest_dispatcher` / `utest_application` 全绿；新增平台折算用例（`XdndAction*` / Wayland 动作协商 / macOS `NSDragOperation` ↔ `DragAction` 与粘贴板类型 ↔ MIME）进 `utest_system_drag_translate`；inert 三件套安装期间真实后端不接管、卸载恢复「无后端 → not-supported」。
 8. **门禁与全量测试**：`check_platform_macros` / `check_no_cjk_literals` / `check_no_hardcoded_paths` / `check_core_layer_boundary` / `check_codespec_xref` / `check_code_doc_sync` / `check_change_proposals` / `check_manual_test_format` 全绿；`check_api_schema_sync` 预期零差异（若批次中新增公共符号则先 `--target aurora_api_json` 再跑）；`lint`（仅改动 TU，先 `--print-tus` 确认集合）与 `format-check` 全绿；全量 `ctest -j16` 绿。
-9. **探针与 manual-test**：三枚探针在目标平台可构建运行；`codespec/manual-test/24-systemdrag.md` 新增用例编号从 `TC-SYSTEMDRAG-006` 起连续无缺口，执行记录表行序与用例声明序一致。
+9. **探针与 manual-test**：四枚探针在目标平台可构建运行（Win32 / X11 / Wayland / macOS）；`codespec/manual-test/24-systemdrag.md` 新增用例编号从 `TC-SYSTEMDRAG-006` 起连续无缺口（现至 `TC-SYSTEMDRAG-028`），执行记录表行序与用例声明序一致；macOS 批的运行期判据（含人工段）须在真机 macOS 上执行后方可登记，开发期仅 CI 编译证据。
 
 ## 回写落点
 

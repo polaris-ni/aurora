@@ -432,11 +432,16 @@ if (AURORA_BACKEND_MACOS)
     # 目标定义前就绪，否则 Ninja generate 阶段取不到 CMAKE_OBJCXX_* 规则。此处仅平台守卫。
     aurora_define_feature(AURORA_BACKEND_MACOS EXPORT)
     target_link_libraries(aurora PUBLIC "-framework Cocoa" "-framework AppKit")
-    # macos_surface.cpp 为 Objective-C++（Cocoa），需显式指定语言；文件存在才设置，避免 glob 缺失告警。
-    set(_macos_src "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_surface.cpp")
-    if (EXISTS "${_macos_src}")
-        set_source_files_properties("${_macos_src}" PROPERTIES LANGUAGE OBJCXX)
-    endif ()
+    # macOS 后端的两个 ObjC++ TU 须显式指定语言；文件存在才设置，避免 glob 缺失告警。
+    # macos_surface.cpp 在 window/（表层），macos_drag.cpp 在 window/detail/（拖放桥，
+    # AppKit 会话状态机，契约见同名头文件）。两文件的门控都在自身 `#if` 内，非 Apple
+    # 平台编译为空 TU——与 x11_drag.cpp / wayland_drag.cpp 在别的平台上的处置同构。
+    foreach(_macos_objc_src "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_surface.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_drag.cpp")
+        if (EXISTS "${_macos_objc_src}")
+            set_source_files_properties("${_macos_objc_src}" PROPERTIES LANGUAGE OBJCXX)
+        endif ()
+    endforeach()
     aurora_log("macOS backend enabled (Cocoa/AppKit).")
 endif ()
 

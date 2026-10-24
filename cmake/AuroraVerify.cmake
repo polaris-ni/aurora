@@ -164,6 +164,19 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         # 故即便去掉本行亦可通过编译。
         target_compile_options(aurora_verify_macos_cursor PRIVATE -fobjc-arc)
         list(APPEND _aurora_verify_targets aurora_verify_macos_cursor)
+
+        # ---- macOS 系统拖放（NSDraggingDestination / NSDraggingSource 双向接线）----
+        # 自动段以「探针自带的 NSDraggingInfo」替身驱动桥（窗口服务器无法搬进进程，与 Wayland
+        # 把合成器搬进进程同思路、不同落点）：真实 NSPasteboard 往返、库自带目标视图的五方法转发、
+        # 折算层与真派发链全走 shipping 代码；AppKit 真实派发的会话与拖出终态留给人工段，
+        # 无窗口服务器时记 PENDING（退出码 3），不冒充已验收。
+        aurora_add_verify_probe(aurora_verify_macos_drag "${_aurora_verify_dir}/macos_drag_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        # 探针直连库内部头（`window/detail/macos_drag.h` 的桥面与 `system_drag_translate.h`
+        # 的折算层不在公共 API，验收的是内部接线本身；口径同 csd/WASAPI/ALSA/Wayland 拖放探针）。
+        target_include_directories(aurora_verify_macos_drag PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_compile_options(aurora_verify_macos_drag PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_drag)
     endif ()
 
     # ---- GLFW 光标（跨平台真实窗口）：GLFW 无光标查询 API → 自动能力核对 + 人工目视（--interactive）----

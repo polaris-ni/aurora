@@ -9,6 +9,8 @@
 // - 帧循环：CVDisplayLink 或 dispatch_source_t 定时器驱动；macOS 14+ 推荐 CADisplayLink。
 // - DPI：NSWindow backingScaleFactor（Retina 2x/3x）→ scale_factor()。
 // - 关闭语义：windowShouldClose: → should_close_ = true。
+// - 系统拖放：内容视图的 `NSDraggingDestination` 五方法与拖出的 `NSDraggingSource` 全部落在
+//   `detail::MacOSDragBridge`（会话态与时序在桥内）；表层只做「安装桥 + 暂存按下事件」。
 //
 // 本文件为骨架，全部方法在 macOS 环境实写后替换 stub。
 
@@ -16,6 +18,7 @@
 #if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
 
 #include "aurora/core/log.h"
+#include "aurora/window/detail/macos_drag.h"
 #include "aurora/window/macos_surface.h"
 
 // AppKit 头需在 .cpp 内引入，避免公共头污染消费者
@@ -36,6 +39,39 @@ struct MacOSSurface::Impl {
     bool should_close = false;
     float scale = 1.0F;
     Surface::EventHandler event_handler;
+    /// @brief 系统拖放桥（契约与会话状态机见 `detail::MacOSDragBridge`），本 Impl 唯一持有。
+    ///
+    /// 骨架期窗口壳未实写 ⇒ `view` 为空 ⇒ `install()` 必然失败并降级为空（见 `install_drag`）。
+    /// 事件泵落地后另有三处调用点必须补上，缺一则相应方向不通（与 Wayland 桥同款纪律）：
+    ///   ① 泵入口 `note_initiator(this)`：拖出由控件在事件派发期内发起，发起窗口即本窗口；
+    ///   ② 帧末 `drag->tick()`：macOS 侧为空转（取数同步发生在 perform 内），仅为同形调用点；
+    ///   ③ `mouseDown:` 派发期内 `drag->note_press_event(event)`：`beginDraggingSession` 的必需实参。
+    std::unique_ptr<detail::MacOSDragBridge> drag;
+
+    /// @brief 安装系统拖放桥（窗口壳建好之后调用：登记与发起都以内容视图为落点）。
+    ///
+    /// 失败即本窗口不参与系统拖放，如实记日志降级、不谎报已有通路（与 X11 / Wayland 同款处置）。
+    auto install_drag() -> void {
+        if (view == nullptr) {
+            // 骨架期无视图可登记（`create_window` 未实写）：不构造桥、不注册进程级后端。
+            AURORA_LOG_INFO("window", "MacOSSurface: no content view; system drag not installed.");
+            return;
+        }
+        drag = std::make_unique<detail::MacOSDragBridge>(
+            view, detail::MacOSDragBridge::Hooks{
+                      .emit = [this](Event &e) -> void {
+                          if (event_handler != nullptr) {
+                              event_handler(e);  // 派发器在调用内写定 `e.allowed`（Enter / Over 两态）
+                          }
+                      },
+                      .scale_factor = [this]() -> float { return scale; },
+                      // 骨架期无键盘路径缓存（键盘事件翻译未实写）⇒ 如实报「不知道」，不猜修饰态。
+                      .modifiers = []() -> ModifierKey { return ModifierKey::None; }});
+        if (!drag->install()) {
+            drag.reset();
+            AURORA_LOG_WARN("window", "MacOSSurface: drag bridge install failed; system drag unavailable.");
+        }
+    }
 
     /// @brief 创建 NSWindow + 自定义 NSView。
     bool create_window(int w, int h, const std::string &title) {
@@ -44,6 +80,8 @@ struct MacOSSurface::Impl {
         // 2. window = [[NSWindow alloc] initWithContentRect:frame styleMask:... backing:... defer:NO]
         // 3. [window setTitle:[NSString stringWithUTF8String:title.c_str()]]
         // 4. 创建自定义 NSView 子类（覆盖 drawRect:/acceptsFirstResponder/mouseDown: 等）
+        //    拖入五方法可直接复用 `MacOSDragBridge::make_drag_destination_view(this)` 产出的视图，
+        //    亦可让本类继承它后叠加绘制与鼠标派发（桥只占 `NSDraggingDestination` 五方法）。
         // 5. [window setContentView:view]
         // 6. [window makeKeyAndOrderFront:nil]
         // 7. scale = [window backingScaleFactor]
@@ -51,10 +89,15 @@ struct MacOSSurface::Impl {
         (void)h;
         (void)title;
         AURORA_LOG_INFO("macos_surface", "create_window stub (implement for macOS)");
+        // 拖放桥的安装点：视图就位之后（拖入登记与拖出发起都以它为落点）。
+        install_drag();
         return true;
     }
 
     void destroy_window() {
+        // 桥先收摊：它持会话对象并在 `uninstall` 内兑现「在途拖出按 Cancelled」，必须早于
+        // 视图 / 窗口释放（与 WaylandSurface 析构次序同款纪律）。
+        drag.reset();
         // TODO(macOS): [window close]; window = nil; view = nil;
     }
 };
@@ -103,6 +146,12 @@ auto MacOSSurface::cancel_close() -> void {
     // impl_ 为空时 should_close() 恒真（窗口已不存在）⇒ 不改写，由 fail-open 后置复验兜住。
     if (impl_ != nullptr) {
         impl_->should_close = false;
+    }
+}
+
+auto MacOSSurface::set_event_handler(const EventHandler &h) -> void {
+    if (impl_ != nullptr) {
+        impl_->event_handler = h;
     }
 }
 

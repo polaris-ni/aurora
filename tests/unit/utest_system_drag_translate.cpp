@@ -20,7 +20,13 @@
 ///  * 把 Wayland 的 `text/plain;charset=utf-8` 按字面量比较（不剥参数）→
 ///    `..._reverse_strips_parameters_for_text_plain` 转红（同一格式被对端判成两个）；
 ///  * 把 `aurora/widget` 登记进 Wayland 线上名表 → `..._offer_names_map_registered_mime` 转红
-///    （进程内词汇不该出现在跨进程协议上）。
+///    （进程内词汇不该出现在跨进程协议上）；
+///  * 把 legacy `NSStringPboardType` 从 macOS text/plain 表里删掉 → `..._reverse_maps_registered_types`
+///    转红（旧应用仍写它，删了即静默读不到）；
+///  * 把 `NSFilenamesPboardType` 登记进 macOS uri-list 表 → 同例转红（其载荷是路径串数组而非
+///    URI 清单，登记即声称能读一种解码不了的形态）；
+///  * 让 macOS 动作折算复用 Win32 的 `DROPEFFECT` 位序 → `..._drag_operation_bits_map_both_ways`
+///    转红（Link=2 而 Move=16，位序三平台两样）。
 
 #include <cmath>
 #include <cstdint>
@@ -35,15 +41,23 @@
 
 namespace aurora::test_cases::utest_system_drag_translate {
 
+using aurora::drag::action_from_macos_drag_operation;
 using aurora::drag::action_from_wayland_dnd_action;
 using aurora::drag::action_from_win32_drop_effect;
 using aurora::drag::AURORA_DRAG_SYNC_PAYLOAD_LIMIT;
 using aurora::drag::DragInFrame;
 using aurora::drag::logical_from_client_px;
+using aurora::drag::macos_drag_operation_from;
+using aurora::drag::macos_pasteboard_types_from_mime;
+using aurora::drag::macos_registered_pasteboard_types;
+using aurora::drag::macos_supported_drag_operations;
+using aurora::drag::MacOSDragOperation;
 using aurora::drag::make_drop_event;
+using aurora::drag::mime_from_macos_pasteboard_type;
 using aurora::drag::mime_from_wayland_offer_name;
 using aurora::drag::mime_from_win32_clip_format;
 using aurora::drag::mime_from_x11_target_name;
+using aurora::drag::mimes_from_macos_pasteboard_types;
 using aurora::drag::mimes_from_wayland_offer_names;
 using aurora::drag::mimes_from_win32_clip_formats;
 using aurora::drag::mimes_from_x11_target_names;
@@ -522,6 +536,111 @@ AURORA_TEST_CASE(translate_wayland_registered_lists_are_the_single_source) {
     }
     AURORA_TEST_CHECK_EQ(wayland_supported_dnd_actions(), static_cast<std::uint32_t>(WaylandDndAction::Copy) |
                                                               static_cast<std::uint32_t>(WaylandDndAction::Move));
+}
+
+AURORA_TEST_CASE(translate_macos_pasteboard_types_map_registered_mime) {
+    const std::vector<std::string> text = macos_pasteboard_types_from_mime(AURORA_MIME_TEXT_PLAIN);
+    AURORA_TEST_REQUIRE_EQ(text.size(), std::size_t{2});
+    // 现代 UTI 在前、legacy 常量名在后：顺序即优先级（读取比较按该序取首个可用项）。
+    AURORA_TEST_CHECK_STREQ(text[0], "public.utf8-plain-text");
+    AURORA_TEST_CHECK_STREQ(text[1], "NSStringPboardType");
+
+    const std::vector<std::string> uris = macos_pasteboard_types_from_mime(AURORA_MIME_URI_LIST);
+    AURORA_TEST_REQUIRE_EQ(uris.size(), std::size_t{1});
+    AURORA_TEST_CHECK_STREQ(uris[0], "public.file-url");
+
+    const std::vector<std::string> png = macos_pasteboard_types_from_mime(AURORA_MIME_IMAGE_PNG);
+    AURORA_TEST_REQUIRE_EQ(png.size(), std::size_t{1});
+    AURORA_TEST_CHECK_STREQ(png[0], "public.png");
+
+    // 未登记 MIME：不猜、不兜底（与另三平台表同纪律）。
+    AURORA_TEST_CHECK_TRUE(macos_pasteboard_types_from_mime(AURORA_MIME_TEXT_HTML).empty());
+    AURORA_TEST_CHECK_TRUE(macos_pasteboard_types_from_mime(AURORA_MIME_WIDGET).empty());
+    AURORA_TEST_CHECK_TRUE(macos_pasteboard_types_from_mime("application/x-custom").empty());
+    AURORA_TEST_CHECK_TRUE(macos_pasteboard_types_from_mime("").empty());
+}
+
+AURORA_TEST_CASE(translate_macos_pasteboard_type_reverse_maps_registered_types) {
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_macos_pasteboard_type("public.utf8-plain-text")),
+                            AURORA_MIME_TEXT_PLAIN);
+    // legacy 常量名同归 text/plain：载荷同一份 UTF-8 字节，解码不分叉。
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_macos_pasteboard_type("NSStringPboardType")),
+                            AURORA_MIME_TEXT_PLAIN);
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_macos_pasteboard_type("public.file-url")), AURORA_MIME_URI_LIST);
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_macos_pasteboard_type("public.png")), AURORA_MIME_IMAGE_PNG);
+
+    // legacy 文件清单类型不登记：其载荷是路径串数组而非 URI 清单，解码形态不同（不声称能读）。
+    AURORA_TEST_CHECK_FALSE(mime_from_macos_pasteboard_type("NSFilenamesPboardType").has_value());
+    // TIFF 不登记：本库不解 TIFF（macOS 应用更常写它，如实不可得）。
+    AURORA_TEST_CHECK_FALSE(mime_from_macos_pasteboard_type("public.tiff").has_value());
+    AURORA_TEST_CHECK_FALSE(mime_from_macos_pasteboard_type("").has_value());
+}
+
+AURORA_TEST_CASE(translate_macos_mime_list_preserves_priority_and_dedups) {
+    const std::vector<std::string> types{"public.png",      "public.utf8-plain-text", "NSStringPboardType",
+                                         "public.file-url", "NSFilenamesPboardType",  "public.png",
+                                         "aurora/widget"};
+    const std::vector<std::string> mimes = mimes_from_macos_pasteboard_types(types);
+    AURORA_TEST_REQUIRE_EQ(mimes.size(), std::size_t{3});
+    AURORA_TEST_CHECK_STREQ(mimes[0], AURORA_MIME_IMAGE_PNG);
+    AURORA_TEST_CHECK_STREQ(mimes[1], AURORA_MIME_TEXT_PLAIN);
+    AURORA_TEST_CHECK_STREQ(mimes[2], AURORA_MIME_URI_LIST);
+
+    AURORA_TEST_CHECK_TRUE(mimes_from_macos_pasteboard_types({}).empty());
+    AURORA_TEST_CHECK_TRUE(mimes_from_macos_pasteboard_types({"NSFilenamesPboardType", "aurora/widget"}).empty());
+}
+
+AURORA_TEST_CASE(translate_macos_drag_operation_bits_map_both_ways) {
+    // ⚠️ 位序与 Win32 DROPEFFECT / Wayland dnd_action 都不同：Link=2 而 Move=16。
+    // 把本函数写成复用 Win32 侧同名实现（按 DROPEFFECT 位序）即转红。
+    AURORA_TEST_CHECK_EQ(macos_drag_operation_from(DragAction::Copy),
+                         static_cast<std::uint32_t>(MacOSDragOperation::Copy));
+    AURORA_TEST_CHECK_EQ(macos_drag_operation_from(DragAction::Move),
+                         static_cast<std::uint32_t>(MacOSDragOperation::Move));
+    AURORA_TEST_CHECK_EQ(macos_drag_operation_from(DragAction::Link),
+                         static_cast<std::uint32_t>(MacOSDragOperation::Link));
+    AURORA_TEST_CHECK_EQ(macos_drag_operation_from(DragAction::None), std::uint32_t{0});
+
+    AURORA_TEST_CHECK_TRUE(action_from_macos_drag_operation(static_cast<std::uint32_t>(MacOSDragOperation::Copy)) ==
+                           DragAction::Copy);
+    AURORA_TEST_CHECK_TRUE(action_from_macos_drag_operation(static_cast<std::uint32_t>(MacOSDragOperation::Move)) ==
+                           DragAction::Move);
+    AURORA_TEST_CHECK_TRUE(action_from_macos_drag_operation(static_cast<std::uint32_t>(MacOSDragOperation::Link)) ==
+                           DragAction::Link);
+    // 多位按 Copy → Move → Link 优先序取一（与另三平台同源：复制最不易造成数据损失）。
+    AURORA_TEST_CHECK_TRUE(action_from_macos_drag_operation(static_cast<std::uint32_t>(MacOSDragOperation::Copy) |
+                                                            static_cast<std::uint32_t>(MacOSDragOperation::Move)) ==
+                           DragAction::Copy);
+    AURORA_TEST_CHECK_TRUE(action_from_macos_drag_operation(static_cast<std::uint32_t>(MacOSDragOperation::Move) |
+                                                            static_cast<std::uint32_t>(MacOSDragOperation::Link)) ==
+                           DragAction::Move);
+    // Generic / Private / Delete：语义归目标应用或源侧特殊态，本库无对应态，如实为 None。
+    AURORA_TEST_CHECK_TRUE(action_from_macos_drag_operation(static_cast<std::uint32_t>(MacOSDragOperation::Generic)) ==
+                           DragAction::None);
+    AURORA_TEST_CHECK_TRUE(action_from_macos_drag_operation(static_cast<std::uint32_t>(MacOSDragOperation::Private)) ==
+                           DragAction::None);
+    AURORA_TEST_CHECK_TRUE(action_from_macos_drag_operation(static_cast<std::uint32_t>(MacOSDragOperation::Delete)) ==
+                           DragAction::None);
+    // Every（全位掩码，源侧「任意皆可」）：按优先序落 Copy（最不易损的解读）。
+    AURORA_TEST_CHECK_TRUE(action_from_macos_drag_operation(static_cast<std::uint32_t>(MacOSDragOperation::Every)) ==
+                           DragAction::Copy);
+    AURORA_TEST_CHECK_TRUE(action_from_macos_drag_operation(std::uint32_t{0U}) == DragAction::None);
+}
+
+AURORA_TEST_CASE(translate_macos_registered_lists_are_the_single_source) {
+    const std::vector<std::string> &flat = macos_registered_pasteboard_types();
+    AURORA_TEST_REQUIRE_EQ(flat.size(), std::size_t{4});
+    AURORA_TEST_CHECK_STREQ(flat[0], "public.utf8-plain-text");
+    AURORA_TEST_CHECK_STREQ(flat[1], "NSStringPboardType");
+    AURORA_TEST_CHECK_STREQ(flat[2], "public.file-url");
+    AURORA_TEST_CHECK_STREQ(flat[3], "public.png");
+    // 展平表必须与逐项映射同源：改一处不改另一处即双真源（桥按展平表 registerForDraggedTypes:、
+    // 按逐项表取值）。
+    for (const std::string &type : flat) {
+        AURORA_TEST_REQUIRE_TRUE(mime_from_macos_pasteboard_type(type).has_value());
+    }
+    AURORA_TEST_CHECK_EQ(macos_supported_drag_operations(), static_cast<std::uint32_t>(MacOSDragOperation::Copy) |
+                                                                static_cast<std::uint32_t>(MacOSDragOperation::Move));
 }
 
 }  // namespace aurora::test_cases::utest_system_drag_translate
