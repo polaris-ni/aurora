@@ -30,6 +30,18 @@ if (AURORA_BUILD_DEMOS)
                 "${demo_dir}")
         add_dependencies(demos ${demo_name})
     endforeach ()
+
+    # demo_i18n 的外部词表走构建期生成（cmake/AuroraI18n.cmake 的唯一 in-tree 消费 leg，
+    # 亦为其用法示范）：强类型 Id / 具名形参构造函数出自 examples/demos/i18n/*.json，
+    # 译文不落源码（check_no_cjk_literals 口径：demo 词条全走外部数据）。
+    if (TARGET demo_i18n)
+        aurora_i18n_generate(TARGET demo_i18n
+                NAMESPACE demo_i18n::msg
+                BASE "${CMAKE_CURRENT_SOURCE_DIR}/examples/demos/i18n/messages_en.json"
+                LOCALES "${CMAKE_CURRENT_SOURCE_DIR}/examples/demos/i18n/messages_zh-Hans-CN.json"
+                OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/demo_i18n_i18n")
+    endif ()
+
     aurora_log("Aurora demos enabled (on-demand: --target <demo_name> | --target demos)")
 else ()
     aurora_log("Aurora demos disabled (set AURORA_BUILD_DEMOS=ON to define them)")

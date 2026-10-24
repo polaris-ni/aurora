@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "locale": "en",
+  "id_base": 1024,
+  "messages": {
+    "demo.greeting": "Hi {name}, {count, plural, =0 {you have no unread message} one {you have # unread message} other {you have # unread messages}}.",
+    "@demo.greeting": {
+      "placeholders": {
+        "name": {"type": "string"},
+        "count": {"type": "int64"}
+      },
+      "description": "Inbox greeting carrying the unread count"
+    },
+    "demo.invoice": "{when, date, long} — {total, currency, USD} due.",
+    "@demo.invoice": {
+      "placeholders": {
+        "when": {"type": "date"},
+        "total": {"type": "double"}
+      }
+    },
+    "demo.rank": "You are #{pos, selectordinal, one {#st} two {#nd} few {#rd} other {#th}} in the queue.",
+    "@demo.rank": {
+      "placeholders": {"pos": {"type": "int64"}}
+    },
+    "demo.role": "{who, select, admin {Administrator} guest {Guest} other {Signed-in user}}",
+    "@demo.role": {
+      "placeholders": {"who": {"type": "string"}}
+    },
+    "demo.attached": "{n, plural, offset:1 =0 {nothing attached} one {one file attached} other {# files attached}}",
+    "@demo.attached": {
+      "placeholders": {"n": {"type": "int64"}}
+    }
+  }
+}
