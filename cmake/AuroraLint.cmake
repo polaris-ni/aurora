@@ -1,10 +1,13 @@
 # ============================================================
 # AuroraLint.cmake — Clang-Tidy 门禁（按需聚合目标，不进默认构建）
 # ------------------------------------------------------------
-# 提供两个目标：
+# 提供三个目标：
 #   lint      — 对 compile_commands.json 中全部**非 third_party**翻译单元跑 clang-tidy；
 #               结果按 (file, line, check) 去重后统计，存在 warning 及以上即退出码 1。
 #   lint-fix  — 同上但附加 --fix，就地应用 fix-it，且**不因告警失败**（便于人工审阅 diff）。
+#   lint-generated — 只物化 lint 先决的构建期生成物（i18n 词表头 / Wayland 协议胶水），
+#               不跑分析。增量入口（不经 `lint` 目标）必须先建它，否则选集中的 TU 会因
+#               缺生成头先撞编译错误、把真实检查全部吞掉。
 #
 # 分片（AURORA_LINT_SHARD）：runner 侧 `--shard=i/n` 把已排序的 TU 清单切成 n 份、本目标只跑
 # 第 i 份。存在的唯一理由是**墙钟**：CI runner 只有 4 vCPU，一遍 498 TU 实测 5172s（86 分钟），
@@ -121,5 +124,21 @@ foreach(_lint_prereq IN LISTS _lint_generated_prereqs)
         aurora_log("Clang-Tidy: '${_lint_prereq}' attached as a lint prerequisite (generated sources)")
     endif ()
 endforeach ()
+
+# 增量入口（CI 增量 lint 作业、本地手跑选定 TU）不经 `lint` 目标，上面的 add_dependencies
+# 帮不上忙：run_clang_tidy.py 直接吃 TU 清单，生成头没就位就先撞一条 clang-diagnostic-error
+# 把真实检查全部吞掉（实测：i18n 批首次推送时 demo_i18n.cpp 在增量作业里正是这么红的）。
+# 把同一份生成物先决收成可单独构建的聚合目标，「先生成再分析」从此只有一个入口；新增一类
+# 构建期生成物时只需登记进 AURORA_I18N_LINT_PREREQ_TARGETS，本目标与 CI 步骤自动跟随。
+add_custom_target(lint-generated)
+foreach(_lint_prereq IN LISTS _lint_generated_prereqs)
+    if (TARGET "${_lint_prereq}")
+        add_dependencies(lint-generated "${_lint_prereq}")
+    endif ()
+endforeach ()
+if (TARGET wayland-gen)
+    add_dependencies(lint-generated wayland-gen)
+endif ()
+aurora_log("Clang-Tidy: 'lint-generated' aggregate target available (materialize before analysing a TU subset)")
 
 aurora_log("Clang-Tidy: 'lint' / 'lint-fix' targets available (${AURORA_CLANG_TIDY_EXE})")

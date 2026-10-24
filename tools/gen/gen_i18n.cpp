@@ -648,11 +648,9 @@ auto is_exact_key(std::string_view key) -> bool {
         return false;
     }
     const std::size_t start = key[1] == '-' ? 2 : 1;
-    if (start >= key.size()) {
-        return false;
-    }
-    return std::all_of(key.begin() + static_cast<std::ptrdiff_t>(start), key.end(),
-                       [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
+    const std::string_view digits = key.substr(start);
+    return !digits.empty() && std::all_of(digits.begin(), digits.end(),
+                                          [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
 }
 
 /// @brief 骨架校验：selector 类型约束、分支键形态、`other` 必备、`#` 作用域、函数 / 风格集合。

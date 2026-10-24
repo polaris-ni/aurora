@@ -113,7 +113,7 @@ if (AURORA_ENABLE_COVERAGE)
                     COMMENT "Running ctest then aggregating gcov line coverage via coverage_report.sh (terminal summary, no HTML)")
         endif ()
     endif ()
-    add_dependencies(coverage aurora_test_runner aurora_api_json gen_error_codes gen_debug_api)
+    add_dependencies(coverage aurora_test_runner aurora_api_json gen_error_codes gen_debug_api gen_i18n)
 endif ()
 
 # ---- 内存错误检测（AddressSanitizer + UndefinedBehaviorSanitizer） ----

@@ -1304,11 +1304,12 @@ jobs:
             ${{ env.LINT_CAPABILITY_FLAGS }} \
             ${{ matrix.pass.flags }}
 
-      # 生成物就位：lint 只 configure 不构建，而被分析的 TU 会 include wayland-scanner 产出的
-      # 协议头（<build>/wayland-gen/*-client-protocol.h）。缺头即 broken_tus，门禁如实判红。
-      # 秒级完成，全量与（生产不可达的）失效增量分支都需要，故无条件跑。
-      - name: Generate Wayland protocol glue
-        run: cmake --build build-lint --target wayland-gen
+      # 生成物就位：lint 只 configure 不构建，而被分析的 TU 会 include 构建期生成的头
+      # （wayland-scanner 协议胶水、i18n 词表头）。缺头即先撞 clang-diagnostic-error、
+      # 把真实检查全部吞掉，门禁如实判红。秒级完成，全量与（生产不可达的）失效增量分支
+      # 都需要，故无条件跑。聚合目标清单见 cmake/AuroraLint.cmake。
+      - name: Materialize lint-generated sources
+        run: cmake --build build-lint --target lint-generated
 
       # 选集必须在 configure 之后：它读的就是这份编译库。全量时跳过（那份清单只有增量用得上）。
       # ⚠️ 本分支在生产中不可达——本作业的 `if:` 已排除「非 master 分支 push」，故 steps.scope 恒为
@@ -1630,7 +1631,10 @@ jobs:
           set -euo pipefail
           cmake -S . -B build-lint-off -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF \
             ${{ env.LINT_CAPABILITY_FLAGS }}
-          cmake --build build-lint-off --target wayland-gen
+          # 物化全部 lint 先决生成物（Wayland 协议胶水 + i18n 词表头）：增量选集直接吃 TU
+          # 清单，不经 lint 目标，缺生成头的 TU 会先撞编译错误把真实检查吞掉（实测见
+          # AuroraLint.cmake 的 lint-generated 注释）。
+          cmake --build build-lint-off --target lint-generated
           python3 tools/check/select_lint_tus.py --build-dir build-lint-off --changed changed.txt --changed-only --out-dir build-lint-off/sel --shards 1
           list=build-lint-off/sel/tus_0.txt
           if [ ! -s "$list" ]; then
@@ -1651,7 +1655,7 @@ jobs:
           set -euo pipefail
           cmake -S . -B build-lint-on -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON \
             ${{ env.LINT_CAPABILITY_FLAGS }}
-          cmake --build build-lint-on --target wayland-gen
+          cmake --build build-lint-on --target lint-generated
           python3 tools/check/select_lint_tus.py --build-dir build-lint-on --changed changed.txt --changed-only --out-dir build-lint-on/sel --shards 1
           list=build-lint-on/sel/tus_0.txt
           if [ ! -s "$list" ]; then

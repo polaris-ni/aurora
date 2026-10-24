@@ -511,7 +511,13 @@ void ddm_get_data_device(wl_client *client, wl_resource *ddm, std::uint32_t id, 
 constexpr struct wl_data_device_manager_interface AURORA_MOCK_DDM_IMPL = {
     .create_data_source = ddm_create_data_source,
     .get_data_device = ddm_get_data_device,
+// release 请求随 wayland-client 1.25 进入协议头（manager 界面版本 4）。旧版头没有该成员，
+// 指定初始化写上去即编译错误（CI 的 ubuntu-26.04 镜像装的是 1.24，实测报错后补此守卫）。
+// 语义上无损失：本 mock 把 ddm 限在 v3（globals 广告版本 3，客户端 min(v,3) 绑定），
+// release 是 v4 请求、永不到达；新版头下留零值 handler 同样安全。
+#ifdef WL_DATA_DEVICE_MANAGER_RELEASE_SINCE_VERSION
     .release = surface_noop_0,
+#endif
 };
 
 // ---- globals 绑定（服务端侧：客户端 bind 时落服务端资源）----
