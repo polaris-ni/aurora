@@ -34,6 +34,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <sstream>
 #include <string>
@@ -648,9 +649,12 @@ auto is_exact_key(std::string_view key) -> bool {
         return false;
     }
     const std::size_t start = key[1] == '-' ? 2 : 1;
-    const std::string_view digits = key.substr(start);
-    return !digits.empty() && std::all_of(digits.begin(), digits.end(),
-                                          [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
+    if (start >= key.size()) {
+        return false;
+    }
+    // 视图裁剪而非迭代器相加：后者在本仓门禁下算指针算术（cppcoreguidelines-pro-bounds-pointer-arithmetic）。
+    return std::ranges::all_of(key | std::views::drop(start),
+                               [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; });
 }
 
 /// @brief 骨架校验：selector 类型约束、分支键形态、`other` 必备、`#` 作用域、函数 / 风格集合。
