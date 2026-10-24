@@ -16,20 +16,22 @@
 | `src/aurora/window/detail/system_drag_translate.h` | **零平台头折算层**：剪贴板格式 ↔ MIME、`MK_*` → `ModifierKey`、坐标折算、动作与 `DROPEFFECT` 双向映射、同步载荷阈值 |
 | `src/aurora/window/detail/win32_drag.h` | Win32 OLE 双向桥（拖入：`RegisterDragDrop` + `IDropTarget` 四态 + 同步载荷；拖出：`IDropSource` + 数据对象 + 库自管拖拽线程） |
 | `src/aurora/window/detail/x11_drag.h` | X11 Xdnd 双向桥（拖入：`XdndAware` 广告 + 四消息 → 折算层 → 拖入入口，`XdndStatus` 回写动作协商、载荷经 selection round-trip 取回、超限走 ICCCM `INCR`；拖出：`XdndSelection` 属主 + 指针 grab + 会话消息序列） |
+| `src/aurora/window/detail/wayland_drag.h` | Wayland `wl_data_device` 双向桥（拖入：registry 绑定数据设备管理器 + `wl_data_offer` 四事件 + `accept` / `set_actions` 协商 + 管道取数 + `finish`；拖出：`wl_data_source` offer + `set_actions` + `start_drag(serial)`，`send` 到达时调 `provide` 把字节写回管道，终态经 `dnd_finished` / `cancelled` 折算） |
 | `src/aurora/event/detail/system_drag_backend.h` | 拖出注册接缝：桥与事件层之间的两条通道（终态登记 + 跨线程要约索取） |
 | `src/aurora/event/detail/system_drag_ingress.h` | 拖入入口：宿主投事件的唯一入口与 inert 拖入后端 |
 
 本文档覆盖三类判据：**① 必须有真实 OS 会话参与的**——跨进程拖放的进入 / 悬停 / 离开 / 落下四态、OS 光标反馈、uri-list 载荷往返；**② 必须有真实窗口与 HWND 参与的**——宿主是否真的把 OLE 拖入目标注册到了窗口上；**③ 拖出方向**——无人值守自拖放全链路（`begin_system_drag` → 拖拽线程 `DoDragDrop` → 终态经帧循环投递 → 载荷往返，可由探针自动段证明）与跨进程拖出到外部目标（载荷交付与终态折算，须人工拖放动作）。第一类离线单测做不到：无头 CI 里没有窗口，OS 会话回调永不到达。第二类同样做不到，但可由探针的自动段以反向方式证明（重复注册返回 `DRAGDROP_E_ALREADYREGISTERED`。离线可跑的判据（折算层四类映射、拖入入口的抑制与恢复、拖出终态折算、能力位方向级分叉）全部在 `tests/unit/utest_system_drag_translate.cpp`、`tests/unit/utest_system_drag_ingress.cpp` 与 `tests/unit/utest_drag_payload.cpp` 里，**不在本文档重复**——重复记录会让「手工跑过」与「CI 跑过」两种证据在读者眼里混成一种。
 
-**已接线范围**：Win32 / D3D11 / X11 三类 Surface 的**双向**（拖入为既有切片，拖出为本批新增；Win32 二者共用同一 `Win32Host` 与同一桥实例，拖出走库自管拖拽线程，终态经事件层登记、帧循环投递；X11 二者共用 `x11_surface.cpp` 内的同一 `X11DragBridge`，拖出走 Xdnd 源侧消息序列）。Wayland、macOS 两平台的双向属后续批次，其用例待对应批次落地后按编号顺延追加，本卷不预留空号。
+**已接线范围**：Win32 / D3D11 / X11 / Wayland 四类 Surface 的**双向**（拖入为既有切片，拖出为本批新增；Win32 二者共用同一 `Win32Host` 与同一桥实例，拖出走库自管拖拽线程，终态经事件层登记、帧循环投递；X11 二者共用 `x11_surface.cpp` 内的同一 `X11DragBridge`，拖出走 Xdnd 源侧消息序列；Wayland 二者共用 `wayland_surface.cpp` 内的同一 `WaylandDragBridge`，拖出走 `wl_data_source` + `start_drag`，修饰态取自 seat 的 xkb 缓存——Wayland 协议不随指针事件送修饰态）。macOS 平台的双向属后续批次，其用例待该批次落地后按编号顺延追加，本卷不预留空号。
 
-**两批自动段的能力边界不同**：Win32 批的自动段能跑完无人值守自拖放全链路（拖拽循环在库自管线程里，不依赖窗口栈）；X11 批的自拖放腿要靠 `XQueryPointer` 探「指针下的最深窗口」，在 Wayland + Xwayland（rootless）下 X 服务器拿不到真实窗口栈，指针泊不进本窗口——此种环境里该腿如实记 `[PENDING]` 并以退出码 `3` 结束，交人工段（见 `TC-SYSTEMDRAG-011`）。为此 X11 批另设**拖入腿**：探针以另一条 X 连接（等价另一个客户端）取得 `XdndSelection` 所有权并向本窗口注入完整会话，不依赖窗口栈与真实指针，故拖入全链路在任何 X 服务器下都能自动取证。
+**三批自动段的能力边界不同**：Win32 批的自动段能跑完无人值守自拖放全链路（拖拽循环在库自管线程里，不依赖窗口栈）；X11 批的自拖放腿要靠 `XQueryPointer` 探「指针下的最深窗口」，在 Wayland + Xwayland（rootless）下 X 服务器拿不到真实窗口栈，指针泊不进本窗口——此种环境里该腿如实记 `[PENDING]` 并以退出码 `3` 结束，交人工段（见 `TC-SYSTEMDRAG-011`）。为此 X11 批另设**拖入腿**：探针以另一条 X 连接（等价另一个客户端）取得 `XdndSelection` 所有权并向本窗口注入完整会话，不依赖窗口栈与真实指针，故拖入全链路在任何 X 服务器下都能自动取证。Wayland 批则把**合成器搬进进程**：Wayland 没有客户端可用的指针传送 API，「把指针泊进本窗口」在无头与无人值守环境下都做不到，探针遂在服务端自建 `wl_display` 并实现 `wl_compositor` / `wl_seat` / `wl_data_device_manager` 三段，客户端经 socketpair 连上后经 registry 绑定拿到与桥同侧的真实代理——「外部源发起拖入」「目标索取数据」「源应答取数」全部可确定性驱动，且走的是真实 `wl_data_device` 协议报文（桥的状态机、折算层、管道读写与终态折算都被真实协议代码执行，只是对端从合成器换成本进程的 mock）。代价是 mock 不覆盖「真实合成器上装得上、不断链」，那由可选冒烟腿（有 `WAYLAND_DISPLAY` 时建真实 `WaylandSurface` 泵帧，见 `TC-SYSTEMDRAG-020`）与人工交互腿补。
 
 ### 1.2 执行载体
 
 | 载体 | 构建目标 | 用途 |
 |:---|:---|:---|
 | `tools/verify/win32_drag_live_probe.cpp` | `aurora_verify_win32_drag` | 真机验收：窗口含上面板（落放面板，拖入四态与自拖放落点）与下面板（拖出源，`on_provide_drag` 供 text/plain）；自动段跑五条判据（拖入三条：能力位 / OLE 注册 / 派发链；拖出两条：能力位 / 无人值守自拖放全链路），人工段常驻窗口打印拖入四态与拖出 begin / cancel / end 态 |
+| `tools/verify/wayland_drag_live_probe.cpp` | `aurora_verify_wayland_drag` | 真机验收：同样的上下两面板布局。自动段跑进程内 mock 合成器上的四条腿——拖入腿十五条判据（Enter 恰一次 / 格式折算保序 / Enter 位置 / accept 查询 / Over 的 proposed 与 allowed / accept 线上名 / Drop 载荷管道往返 / Drop 格式与位置 / 两个 MIME 都经管道取回 / `finish` / 会话收清）、拖出成功腿十一条（`start_drag` 带 press serial / 线上名广告 / `set_actions` / provide 的规范 MIME / 载荷字节管道往返 / 终态 Succeeded + Copy / 会话收清）、拖出取消腿四条（`cancel` → Cancelled + None）、真实合成器冒烟腿（可选：有 `WAYLAND_DISPLAY` 时核对能力位并泵 30 帧，无则整腿记 `[PENDING]`）。人工段常驻窗口逐帧打印拖入四态与 `drop files=` / `drop text=`、拖出 begin / cancel / end 态 |
 | `tools/verify/x11_drag_live_probe.cpp` | `aurora_verify_x11_drag` | 真机验收：同样的上下两面板布局。自动段跑三条基础判据（SurfaceKind / 两个能力位 / `XdndAware` 广告）与派发链三条；随后跑**拖入腿**——探针以自带的一条 X 连接取得 `XdndSelection` 所有权，向本窗口注入一场完整 Xdnd 会话并应答取数（十条判据：动作协商回程三条、控件侧两态与取数两条、载荷往返一条、`XdndFinished` 两条、accept 查询一条）；再跑**自拖放腿**（需指针能泊进本窗口，见 §1.1 的能力边界）。人工段常驻窗口打印拖入四态、`drop files=` / `drop text=` 与拖出三态 |
 
 探针的命令行口径（`aurora_verify::parse_interactive`）：
@@ -39,9 +41,9 @@
 | `--interactive` | 开关 | 关 | 自动段跑完后窗口常驻，打印拖入四态与拖出 begin / cancel / end 态供人工核对；不带此开关时跑完自动段（含拖入腿）与自拖放腿即退出 |
 | `--help` | 开关 | 关 | 打印用法（不进入探针主体） |
 
-**退出码即结论**：`0` 自动段全部通过、`2` 环境不可用（Win32 建窗或取 HWND 失败；X11 无 `DISPLAY` / 建窗失败 / 取不到 Window id）、`3` 自动段无失败但自拖放腿因环境限制未跑（仅 X11 探针：Wayland + Xwayland 下指针泊不进本窗口，见 §1.1）、`4` 有 `[FAIL]` 判据行、用法错误为 `64`。探针**不进 CTest**（`aurora_add_verify_probe` 的 `EXCLUDE_FROM_ALL` 与真机要求），产品输出经 `AURORA_LOG_RAW` 走 stdout，因此 `[PASS]` / `[FAIL]` / `[PENDING]` 行可直接重定向成文本比对。
+**退出码即结论**：`0` 自动段全部通过、`2` 环境不可用（Win32 建窗或取 HWND 失败；X11 无 `DISPLAY` / 建窗失败 / 取不到 Window id；Wayland mock 服务端起不来或 socketpair 失败，或 `--interactive` 时无 `WAYLAND_DISPLAY`）、`3` 自动段无失败但有腿因环境限制未跑（X11 探针：Wayland + Xwayland 下指针泊不进本窗口，自拖放腿挂起，见 §1.1；Wayland 探针：无 `WAYLAND_DISPLAY`，真实合成器冒烟腿整腿挂起，见 `TC-SYSTEMDRAG-020`）、`4` 有 `[FAIL]` 判据行、用法错误为 `64`。探针**不进 CTest**（`aurora_add_verify_probe` 的 `EXCLUDE_FROM_ALL` 与真机要求），产品输出经 `AURORA_LOG_RAW` 走 stdout，因此 `[PASS]` / `[FAIL]` / `[PENDING]` 行可直接重定向成文本比对。
 
-**自动段不是人工段的替代品**：自动段能证明「桥已注册、能力位已翻、派发链语义一致」，以及拖出方向的无人值守自拖放全链路（begin → 拖拽线程 `DoDragDrop` → 终态经帧循环投递 → 载荷往返，无鼠标按键参与）；但**不能**证明 OS 真的把跨进程会话事件投给了本窗口、也不能证明载荷交付到了外部目标——那必须有人工拖放动作。故本卷的人工段是判据主体，自动段是前置。
+**自动段不是人工段的替代品**：自动段能证明「桥已注册、能力位已翻、派发链语义一致」，以及拖出方向的无人值守自拖放全链路（begin → 拖拽线程 `DoDragDrop` → 终态经帧循环投递 → 载荷往返，无鼠标按键参与）；但**不能**证明 OS 真的把跨进程会话事件投给了本窗口、也不能证明载荷交付到了外部目标——那必须有人工拖放动作。故本卷的人工段是判据主体，自动段是前置。Wayland 批的自动段另受一层限制：mock 合成器证明的是「桥对真实协议报文的处理正确」，不证明真实合成器愿意把会话投给本窗口——那由冒烟腿（装得上、不断链）与人工段（跨进程投递）补。
 
 ### 1.3 执行环境
 
@@ -62,6 +64,16 @@ X11 批次的载体另需下列环境（与上表并列，按被测平台择一�
 | X 会话 | 基础判据与拖入腿在任意 X 服务器下可跑（含 Wayland 会话里的 Xwayland）；**自拖放腿另需真实窗口栈**——Xorg 会话或 `Xvfb`（Wayland + Xwayland rootless 下 `XQueryPointer` 拿不到窗口栈，该腿记 `[PENDING]` 并以退出码 `3` 结束） |
 | 对照（人工段） | 文件管理器作为拖入源与拖出对照；一个接受纯文本的编辑器作为拖出落点；一个能选中超过 64KB 文本的编辑器用于验证 `INCR` 分块 |
 | 样本 | 至少一个本地文件（含非 ASCII 路径者更佳）；另备一段超过 `AURORA_DRAG_SYNC_PAYLOAD_LIMIT`（64KB）的文本用于 `TC-SYSTEMDRAG-015` |
+
+Wayland 批次的载体另需下列环境（与上表并列，按被测平台择一满足）：
+
+| 项目 | 要求 |
+|:---|:---|
+| 平台 | 桌面 Linux 本机（GCC/Clang + Ninja，`AURORA_BACKEND_WAYLAND`） |
+| 构建 | 独立构建目录并开 `AURORA_BUILD_VERIFY_TOOLS=ON`，且系统装有 wayland-server 开发包（pkg-config 可发现 `wayland-server`；缺包时 configure 期跳过探针目标并记 `aurora_verify_wayland_drag skipped` 日志，不得记 PASS）；示例见 §2.8 的 `TC-SYSTEMDRAG-016` |
+| Wayland 会话 | mock 三腿（拖入 / 拖出成功 / 拖出取消）不依赖会话，任何环境下可跑；**冒烟腿与人工段另需真实合成器**（`WAYLAND_DISPLAY` 可连、`xdg_wm_base` 与 shm 可用） |
+| 对照（人工段） | 文件管理器作为拖入源与拖出对照；一个接受纯文本的编辑器作为拖出落点 |
+| 样本 | 至少一个本地文件（含非 ASCII 路径者更佳） |
 
 ### 1.4 用例编号规则
 
@@ -305,9 +317,103 @@ X11 批次的载体另需下列环境（与上表并列，按被测平台择一�
 | 操作步骤 | 1. 在编辑器中打开一段超过 64KB 的文本并全选，记下源侧字符数（可用编辑器的字数统计）（纯执行，无预期结果）<br>2. 以 `--interactive` 启动探针，窗口保持在前台（纯执行，无预期结果）<br>3. 把选中的大文本从编辑器拖入窗口并在窗口中部松手<br>4. 观察 `phase=` 行序列与 `drop text=` 行的字符数<br>5. 用一段不足 1KB 的短文本重复一次拖入<br>6. 比较两次 `drop text=` 的字符数 |
 | 预期结果 | 3. 出现 `phase=Enter` 与 `phase=Drop`，且无崩溃、无卡死（分块期间 `PropertyNotify` 逐块推进，会话在有限帧内收尾）<br>4. `drop text=` 的字符数与源侧字符数**完全相等**（`INCR` 各块按序拼接，不丢块、不重块、不截断到同步阈值）<br>5. 短文本同样出现 `phase=Drop`<br>6. 两次均等于各自源侧字符数——同步路径与 `INCR` 路径对上层呈现一致，阈值分叉对调用方不可见 |
 
+### 2.8 Wayland 后端接线与自动腿
+
+#### TC-SYSTEMDRAG-016 Wayland 拖入 / 拖出后端的构建、能力位与 mock 注册
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-SYSTEMDRAG-016 |
+| 测试目的 | 验证 Wayland 双向后端确已接线：独立构建产出探针、两个能力位均为 true、桥能 install 到数据设备管理器且 mock 服务端确已为桥创建 data device |
+| 前置条件 | 桌面 Linux 本机且装有 wayland-server 开发包（pkg-config 可发现 `wayland-server`）；工具链为 GCC/Clang + Ninja |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 以独立目录 configure 并构建探针：`cmake -S <仓> -B <新目录> -G Ninja -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BUILD_VERIFY_TOOLS=ON`，再 `cmake --build <新目录> --target aurora_verify_wayland_drag`（纯执行，无预期结果）<br>2. 不带参数运行探针一次（纯执行，无预期结果）<br>3. 核对退出码<br>4. 核对基础判据行前三条<br>5. 跑 `utest_drag_payload` 的方向级分叉锚定用例 |
+| 预期结果 | 3. 退出码为 `0`（有 `WAYLAND_DISPLAY`，冒烟腿同跑）或 `3`（无 `WAYLAND_DISPLAY`，冒烟腿整腿记 `[PENDING]`，见 `TC-SYSTEMDRAG-020`）<br>4. `[PASS] mock advertises wl_compositor / wl_seat / wl_data_device_manager and both sides are bound`；`[PASS] bridge installs against the mock data device manager`；`[PASS] mock compositor created the data device for the bridge`——第三条即「桥的 `get_data_device` 请求已被服务端处理、后续全部腿有真实协议对端」的反向证明<br>5. 全绿：Wayland 的 `system_drag_in` 与 `system_drag_out` 均为 true、其余 SurfaceKind 两个方向均为 false |
+
+#### TC-SYSTEMDRAG-017 Wayland 拖入自动腿：mock 源注入完整 `wl_data_device` 会话的四态、动作协商与管道载荷往返
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-SYSTEMDRAG-017 |
+| 测试目的 | 验证拖入全链路在真实协议报文上成立：mock 源广告两个 MIME → `enter`（表面本地坐标）→ `source_actions` → `action(Move)` → `motion` → `drop`；断言 Enter 恰一次、格式折算保序、accept 查询、位置折算、`action` 事件报的动作进入 `proposed` 并与目标接受动作求交出 `allowed`、`accept` 以首个已登记线上名调用、Drop 载荷文本经管道往返一致、两个 MIME 都经管道取回、`finish` 被调用、会话态收清 |
+| 前置条件 | `TC-SYSTEMDRAG-016` 的探针产物齐备（拖入腿随同一探针交付，无需另建）；不要求真实 Wayland 会话 |
+| 依赖用例 | TC-SYSTEMDRAG-016 |
+| 操作步骤 | 1. 不带参数运行探针一次（复用 `TC-SYSTEMDRAG-016` 的产物，不重新构建）（纯执行，无预期结果）<br>2. 核对拖入腿的小节标题行<br>3. 核对四态与折算的判据行<br>4. 核对动作协商回程的判据行<br>5. 核对落放与管道取数的判据行<br>6. 核对收口判据行 |
+| 预期结果 | 2. 输出含 `leg 1/4: drag-in via the in-process mock compositor (this window is the target)`<br>3. `[PASS] drag-in dispatches exactly one Enter  -- count=1`；`[PASS] Enter formats fold to canonical MIMEs in priority order  -- n=2`；`[PASS] Enter position is the surface-local point from the protocol  -- x=12.000000 y=24.000000`；`[PASS] drag-in dispatches Over on motion  -- count=1`——Enter 恰一次即「落放后不补派第二次 Enter、离开不漏派 Leave」的锚点（`on_enter` 置位 entered）<br>4. `[PASS] accept query happens on Enter (negotiation has a source)  -- queries=1`；`[PASS] Over proposed takes the compositor-reported action (not the Copy fallback)  -- proposed=Move`；`[PASS] Over allowed is the intersection of proposed and accept  -- allowed=Move`；`[PASS] target accepts the first advertised name  -- accepted=text/plain;charset=utf-8`<br>5. `[PASS] drag-in dispatches Drop with payload after pipe drain`；`[PASS] Drop payload text round-trips through the pipe  -- text=aurora-wayland-drag-probe`；`[PASS] Drop carries the same format list as Enter  -- n=2`；`[PASS] Drop position is the last motion in surface-local logical coords  -- x=17.000000 y=27.000000`；`[PASS] target requests every offered MIME through the pipe in priority order  -- n=2`<br>6. `[PASS] target calls wl_data_offer.finish after the transfer`；`[PASS] bridge clears the drag-in session after Drop` |
+
+#### TC-SYSTEMDRAG-018 Wayland 拖出自动腿：成功终态与载荷管道往返
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-SYSTEMDRAG-018 |
+| 测试目的 | 验证拖出方向在真实协议报文上全链路成立：`begin` 经登记的后端发起、源广告已登记的线上名并 `set_actions(Copy|Move)`、`start_drag` 带按下序 serial、mock 发 `target` / `action(Copy)` / `dnd_drop_performed` / `send` 后 provide 被以规范 MIME 调用且字节经管道原样到达、`dnd_finished` 后终态经帧循环投递为 Succeeded + Copy、会话态收清 |
+| 前置条件 | 同 `TC-SYSTEMDRAG-017` |
+| 依赖用例 | TC-SYSTEMDRAG-016 |
+| 操作步骤 | 1. 不带参数运行探针一次（纯执行，无预期结果）<br>2. 核对拖出成功腿的小节标题行与发起判据行<br>3. 核对源侧广告与协商的判据行<br>4. 核对取数应答与载荷往返的判据行<br>5. 核对终态与收口的判据行 |
+| 预期结果 | 2. 输出含 `leg 2/4: drag-out success terminal (this window is the source)`；`[PASS] system_drag::begin starts the session via the registered Wayland backend  -- Ok`；`[PASS] bridge calls wl_data_device.start_drag with the press serial  -- serial=4242`（serial 取自按下序，不是常量也不是 0）<br>3. `[PASS] source advertises every registered name for the two offered MIMEs (2 text/plain + 1 uri-list)  -- n=3`；`[PASS] source declares Copy|Move via set_actions (v3)  -- bits=3`<br>4. `[PASS] provide is called with the canonical MIME (parameters stripped)  -- mime=text/plain`；`[PASS] provide returns the probe payload  -- text=aurora-wayland-drag-probe`；`[PASS] bytes written back through the peer pipe match the offer  -- got=aurora-wayland-drag-probe`；`[PASS] on_system_drag_end is delivered through pump_reads`<br>5. `[PASS] terminal outcome is Succeeded  -- outcome=Succeeded`；`[PASS] terminal action is the negotiated Copy  -- action=Copy`；`[PASS] bridge clears the drag-out session after dnd_finished` |
+
+#### TC-SYSTEMDRAG-019 Wayland 拖出自动腿：程序化取消的终态折算
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-SYSTEMDRAG-019 |
+| 测试目的 | 验证拖出会话被程序化放弃时终态可辨且不冒充失败：`system_drag::cancel()` 落 `Cancelled` + `None`，会话态收清 |
+| 前置条件 | 同 `TC-SYSTEMDRAG-017` |
+| 依赖用例 | TC-SYSTEMDRAG-016 |
+| 操作步骤 | 1. 不带参数运行探针一次（纯执行，无预期结果）<br>2. 核对取消腿的小节标题行<br>3. 核对终态与动作的判据行<br>4. 核对收口判据行 |
+| 预期结果 | 2. 输出含 `leg 3/4: drag-out programmatic cancel`<br>3. `[PASS] second session starts  -- Ok`；`[PASS] cancel ends the session as Cancelled  -- ended=Cancelled`；`[PASS] cancel carries no action  -- action=None`（取消是用户意图路径，不按故障折算为 Failed，也不冒充 Succeeded）<br>4. `[PASS] bridge clears the drag-out session after cancel` |
+
+#### TC-SYSTEMDRAG-020 Wayland 真实合成器冒烟腿：桥在真实合成器上装得上、不断链
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-SYSTEMDRAG-020 |
+| 测试目的 | 验证 mock 三腿之外的真实合成器路径：能力位在真实 Wayland 后端上为 true，且带桥的真实 `WaylandSurface` 能连续泵帧不崩、不断链 |
+| 前置条件 | `TC-SYSTEMDRAG-016` 的探针产物齐备；**真实 Wayland 会话**（`WAYLAND_DISPLAY` 可连、`xdg_wm_base` 与 shm 可用；无会话时本条第 4 步照跑并如实记 SKIP） |
+| 依赖用例 | TC-SYSTEMDRAG-016 |
+| 操作步骤 | 1. 在真实 Wayland 会话下不带参数运行探针一次（纯执行，无预期结果）<br>2. 核对冒烟腿的小节标题行<br>3. 核对能力位与泵帧的判据行<br>4. 另在无 `WAYLAND_DISPLAY` 的环境下再跑一次，核对降级输出与退出码 |
+| 预期结果 | 2. 输出含以 `leg 4/4: real compositor smoke (WAYLAND_DISPLAY=` 开头的行<br>3. `[PASS] capability bits are true on the Wayland backend  -- in=1 out=1`；`[PASS] real Wayland surface pumps frames with the drag bridge attached  -- frames=30`（桥挂在真实表面上，帧循环持续泵协议事件，30 帧内不崩、不断链）<br>4. 退出码为 `3`，输出含 `leg 4/4 (optional): WAYLAND_DISPLAY unset -> real-compositor smoke leg PENDING` 与 `automated legs passed; real-compositor interactive legs NOT verified (no WAYLAND_DISPLAY)`，同批 mock 三腿判据仍全为 `[PASS]` 且不出现任何 `[FAIL]`——真实合成器缺席如实记为挂起（交人工段），mock 的通过不顶替真实协议证据 |
+
+### 2.9 Wayland 跨进程拖入
+
+#### TC-SYSTEMDRAG-021 从文件管理器拖文件入窗：四态序列、uri-list 往返与修饰键
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-SYSTEMDRAG-021 |
+| 测试目的 | 验证跨进程拖入的四态序列（Enter → Over → Leave / Drop）、uri-list 载荷往返与修饰键 → `proposed` 翻译在真实合成器会话下成立 |
+| 前置条件 | `TC-SYSTEMDRAG-016` 的探针产物齐备；有交互式 Wayland 会话；至少一个本地文件（含非 ASCII 路径者更佳）；探针以 `--interactive` 运行 |
+| 依赖用例 | TC-SYSTEMDRAG-016 |
+| 操作步骤 | 1. 以 `--interactive` 启动探针，窗口保持在前台（纯执行，无预期结果）<br>2. 从文件管理器拖一个文件进入窗口**上面板**，先不松手<br>3. 在窗口内移动指针若干次<br>4. 保持悬停，按下 Shift<br>5. 松开 Shift，把指针移出窗口边界<br>6. 重新拖入并在窗口中部松手落下<br>7. 观察探针打印的 `[drag] phase=` 行序列与 `[drag] drop files=` 行 |
+| 预期结果 | 2. 出现 `[drag] phase=Enter`（进入即一态，不因未松手而缺失）<br>3. 每次移动都追加 `[drag] phase=Over`（按指针采样频率到达，不合并、不丢失）<br>4. 出现 `proposed=Move` 的行（修饰键经 seat 的 xkb 缓存折算为源建议动作；`allowed` 为 `proposed` 与控件 accept 的求交结果，求交语义由离线单测锁定，本条只核 `proposed` 随按键变化）<br>5. 出现 `[drag] phase=Leave`（移出即收车）<br>6. 出现 `[drag] phase=Drop`<br>7. `[drag] drop files=` 后的路径与拖入的文件逐一相同；含非 ASCII 的路径以 UTF-8 正确呈现、无替换字符与截断（uri-list 解码往返无损） |
+
+### 2.10 Wayland 跨进程拖出
+
+#### TC-SYSTEMDRAG-022 跨进程拖出到外部目标：载荷交付与成功终态
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-SYSTEMDRAG-022 |
+| 测试目的 | 验证跨进程拖出：从探针下面板拖出要约的 text/plain 到外部接受文本的窗口，载荷被真实交付且终态折算为 Succeeded + Copy |
+| 前置条件 | 同 `TC-SYSTEMDRAG-021`；另备一个接受纯文本的窗口（编辑器，编辑区为空）；探针以 `--interactive` 运行 |
+| 依赖用例 | TC-SYSTEMDRAG-016 |
+| 操作步骤 | 1. 以 `--interactive` 启动探针，先打开外部文本目标的空窗口（纯执行，无预期结果）<br>2. 在探针**下面板**按下左键并拖出本窗口，悬停在外部文本目标的编辑区上<br>3. 观察光标形态<br>4. 在编辑区上松手落下<br>5. 观察探针打印的 `[drag-out]` 行序列与外部窗口内容 |
+| 预期结果 | 2. 出现 `[drag-out] begin`（发起即派发，不等终态）<br>3. 光标为「可复制」形态（要约缺省动作 Copy 经 `set_actions` 送出，目标回 `action` 受理）<br>4. 外部窗口编辑区出现载荷文本 `aurora-wayland-drag-probe`（跨进程交付，不是探针自己打印的）<br>5. 出现 `[drag-out] end:Succeeded:Copy`（终态经帧循环投递，结局与谈成动作可分辨） |
+
+#### TC-SYSTEMDRAG-023 拖出放弃：Esc 取消与目标拒绝
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-SYSTEMDRAG-023 |
+| 测试目的 | 验证拖出会话被放弃的两条路径终态可辨且不谎报成功：Esc 取消落 `Cancelled`、目标不接受落 `Rejected`，均不得出现 Succeeded |
+| 前置条件 | 同 `TC-SYSTEMDRAG-022`；外部目标另备一个不接受拖放的窗口（不接受 text/plain 者即可）；探针以 `--interactive` 运行 |
+| 依赖用例 | TC-SYSTEMDRAG-016 |
+| 操作步骤 | 1. 以 `--interactive` 启动探针（纯执行，无预期结果）<br>2. 从下面板拖出本窗口，在拖动途中按 Esc<br>3. 观察 `[drag-out]` 行序列<br>4. 再次从下面板拖出，悬停到不接受拖放的外部目标上，确认目标未回受理态后松手（纯执行，无预期结果）<br>5. 观察 `[drag-out]` 行序列与两次会话的终态 |
+| 预期结果 | 2. 出现 `[drag-out] begin`（发起即派发）<br>3. 出现 `[drag-out] cancel` 与 `[drag-out] end:Cancelled:None`（取消是用户意图路径，不按故障折算，且不出现 Succeeded）<br>5. 第二次会话出现 `[drag-out] end:Rejected:None`（目标未回受理态或商定动作为 None，按拒绝折算而非失败）；两次会话全程不出现 `end:Succeeded`，外部目标窗口未收到任何内容 |
+
 ## 3 执行记录表
 
-本卷十五条例中，`TC-SYSTEMDRAG-001` 至 `TC-SYSTEMDRAG-008`（Win32 批）**尚未执行**：
+本卷二十三条例中，`TC-SYSTEMDRAG-001` 至 `TC-SYSTEMDRAG-008`（Win32 批）**尚未执行**：
 结果列与其联动列（执行日期 / 执行人 / 失败步骤号 / 实际现象 / 缺陷编号）一并留空，备注亦留空
 （未执行不得填占位符）。人工段需交互式桌面与人工拖放动作，无头环境无法产生 OS 会话，故不留假记录。
 
@@ -316,6 +422,14 @@ X11 批同样**未执行**：`TC-SYSTEMDRAG-009` 至 `TC-SYSTEMDRAG-015` 全部�
 「执行记录 = 人工按用例跑过」的口径，仍需执行人在 §1.3 所列环境里照用例重跑一次再登记；
 `TC-SYSTEMDRAG-011` 的自拖放腿另需 Xorg / `Xvfb` 会话，开发机上不具备（该环境下探针记 `[PENDING]`
 并以退出码 `3` 结束），故连开发期取证也不成立，留待真 X11 会话执行。
+
+Wayland 批同样**未执行**：`TC-SYSTEMDRAG-016` 至 `TC-SYSTEMDRAG-023` 全部留空。其中
+`TC-SYSTEMDRAG-016` 至 `TC-SYSTEMDRAG-020` 的自动段已在开发机上跑通作为开发期取证——mock 三腿
+35 项判据全过、退出码 `0`（含冒烟腿：真实 `WaylandSurface` 泵 30 帧）；无 `WAYLAND_DISPLAY` 时
+33 项全过、冒烟腿整腿记 `[PENDING]`、退出码 `3`。按本卷「执行记录 = 人工按用例跑过」的口径，
+自动段证据只作开发期取证，仍需执行人在 §1.3 所列环境里照用例重跑一次再登记；
+`TC-SYSTEMDRAG-021` 至 `TC-SYSTEMDRAG-023` 的人工段需真实 Wayland 会话与人工拖放动作，
+开发期不具备，留待执行人照用例跑过。
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
@@ -334,3 +448,11 @@ X11 批同样**未执行**：`TC-SYSTEMDRAG-009` 至 `TC-SYSTEMDRAG-015` 全部�
 | TC-SYSTEMDRAG-013 | | | | | | | |
 | TC-SYSTEMDRAG-014 | | | | | | | |
 | TC-SYSTEMDRAG-015 | | | | | | | |
+| TC-SYSTEMDRAG-016 | | | | | | | |
+| TC-SYSTEMDRAG-017 | | | | | | | |
+| TC-SYSTEMDRAG-018 | | | | | | | |
+| TC-SYSTEMDRAG-019 | | | | | | | |
+| TC-SYSTEMDRAG-020 | | | | | | | |
+| TC-SYSTEMDRAG-021 | | | | | | | |
+| TC-SYSTEMDRAG-022 | | | | | | | |
+| TC-SYSTEMDRAG-023 | | | | | | | |

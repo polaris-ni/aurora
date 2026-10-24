@@ -4,9 +4,10 @@
 /// Win32 CLIPFORMAT ↔ MIME 双向映射与清单（保序去重、未登记丢弃）、MK_* → ModifierKey（Meta
 /// 恒不置位、未知位忽略）、DragAction ↔ DROPEFFECT 双向（多位按 Copy→Move→Link 取一）、
 /// X11 选择目标名 ↔ MIME（UTF-8 三别名、latin1 的 STRING/TEXT 不登记）、`XdndAction*` ↔
-/// DragAction（Ask/Private → None）、拖入侧 proposed 的来源（OS 报告值优先、修饰键覆盖、锁定态
-/// 位不污染、OS 缺席按 Copy 兜底）、同步载荷阈值常量锚定、make_drop_event 的字段装配（含 X11
-/// 的 mimes 通道优先于 Win32 数值通道）。
+/// DragAction（Ask/Private → None）、Wayland 线上 MIME 名 ↔ 规范 MIME（`text/plain` 参数剥离、
+/// 进程内 `aurora/widget` 不登记）与 `dnd_action` 位 ↔ DragAction（Copy→Move 优先序、Ask → None）、
+/// 拖入侧 proposed 的来源（OS 报告值优先、修饰键覆盖、锁定态位不污染、OS 缺席按 Copy 兜底）、
+/// 同步载荷阈值常量锚定、make_drop_event 的字段装配（含 X11 的 mimes 通道优先于 Win32 数值通道）。
 ///
 /// 变异自证（改坏实现应转红的三条）：
 ///  * 摘掉 `proposed_action_for` 的锁定态位掩码 → `..._ignores_lock_bits` 转红；
@@ -15,7 +16,11 @@
 ///    另由「四桥均引用该常量」的静态判据钉住，不属本文件职责）；
 ///  * 把 latin1 的 `STRING` 登记进目标表 → `..._reverse_maps_aliases_but_not_latin1` 转红
 ///    （登记它会让「读回字节按 UTF-8 解码」静默乱码）；
-///  * 让 `mimes` 与 `clip_formats` 双折算（而非二选一）→ `..._mimes_channel_takes_precedence` 转红。
+///  * 让 `mimes` 与 `clip_formats` 双折算（而非二选一）→ `..._mimes_channel_takes_precedence` 转红；
+///  * 把 Wayland 的 `text/plain;charset=utf-8` 按字面量比较（不剥参数）→
+///    `..._reverse_strips_parameters_for_text_plain` 转红（同一格式被对端判成两个）；
+///  * 把 `aurora/widget` 登记进 Wayland 线上名表 → `..._offer_names_map_registered_mime` 转红
+///    （进程内词汇不该出现在跨进程协议上）。
 
 #include <cmath>
 #include <cstdint>
@@ -30,17 +35,25 @@
 
 namespace aurora::test_cases::utest_system_drag_translate {
 
+using aurora::drag::action_from_wayland_dnd_action;
 using aurora::drag::action_from_win32_drop_effect;
 using aurora::drag::AURORA_DRAG_SYNC_PAYLOAD_LIMIT;
 using aurora::drag::DragInFrame;
 using aurora::drag::logical_from_client_px;
 using aurora::drag::make_drop_event;
+using aurora::drag::mime_from_wayland_offer_name;
 using aurora::drag::mime_from_win32_clip_format;
 using aurora::drag::mime_from_x11_target_name;
+using aurora::drag::mimes_from_wayland_offer_names;
 using aurora::drag::mimes_from_win32_clip_formats;
 using aurora::drag::mimes_from_x11_target_names;
 using aurora::drag::modifiers_from_win32_mk_flags;
 using aurora::drag::result_from_win32_drag_out;
+using aurora::drag::wayland_dnd_action_from;
+using aurora::drag::wayland_offer_names_from_mime;
+using aurora::drag::wayland_registered_offer_names;
+using aurora::drag::wayland_supported_dnd_actions;
+using aurora::drag::WaylandDndAction;
 using aurora::drag::win32_clip_format_from_mime;
 using aurora::drag::win32_drop_effect_from_action;
 using aurora::drag::Win32ClipFormat;
@@ -417,6 +430,98 @@ AURORA_TEST_CASE(translate_drag_out_unexpected_exit_is_failed) {
     const auto failed = result_from_win32_drag_out(AURORA_EXIT_UNEXPECTED, AURORA_EFFECT_COPY);
     AURORA_TEST_CHECK_TRUE(failed.outcome == SystemDragOutcome::Failed);
     AURORA_TEST_CHECK_TRUE(failed.action == DragAction::None);
+}
+
+AURORA_TEST_CASE(translate_wayland_offer_names_map_registered_mime) {
+    // text/plain 挂「带字符集 + 裸形」两枚（源侧同时广告：对端文件管理器两种都可能给）。
+    const std::vector<std::string> text = wayland_offer_names_from_mime(AURORA_MIME_TEXT_PLAIN);
+    AURORA_TEST_REQUIRE_EQ(text.size(), std::size_t{2});
+    AURORA_TEST_CHECK_STREQ(text[0], "text/plain;charset=utf-8");
+    AURORA_TEST_CHECK_STREQ(text[1], "text/plain");
+
+    const std::vector<std::string> uris = wayland_offer_names_from_mime(AURORA_MIME_URI_LIST);
+    AURORA_TEST_REQUIRE_EQ(uris.size(), std::size_t{1});
+    AURORA_TEST_CHECK_STREQ(uris[0], "text/uri-list");
+
+    const std::vector<std::string> png = wayland_offer_names_from_mime(AURORA_MIME_IMAGE_PNG);
+    AURORA_TEST_REQUIRE_EQ(png.size(), std::size_t{1});
+    AURORA_TEST_CHECK_STREQ(png[0], "image/png");
+
+    // 未登记 MIME（含进程内的 aurora/widget）不映射：不猜、不兜底成空串。
+    AURORA_TEST_CHECK_TRUE(wayland_offer_names_from_mime(AURORA_MIME_TEXT_HTML).empty());
+    AURORA_TEST_CHECK_TRUE(wayland_offer_names_from_mime(AURORA_MIME_WIDGET).empty());
+    AURORA_TEST_CHECK_TRUE(wayland_offer_names_from_mime("application/x-custom").empty());
+    AURORA_TEST_CHECK_TRUE(wayland_offer_names_from_mime("").empty());
+}
+
+AURORA_TEST_CASE(translate_wayland_offer_name_reverse_strips_parameters_for_text_plain) {
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_wayland_offer_name("text/plain;charset=utf-8")),
+                            AURORA_MIME_TEXT_PLAIN);
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_wayland_offer_name("text/plain")), AURORA_MIME_TEXT_PLAIN);
+    // 对端参数集合不可控：`encoding=` 之类也须归一到同一个规范形（按字面量比会把一个格式判成两个）。
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_wayland_offer_name("text/plain;charset=us-ascii")),
+                            AURORA_MIME_TEXT_PLAIN);
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_wayland_offer_name("text/plain;charset=utf-8;foo=bar")),
+                            AURORA_MIME_TEXT_PLAIN);
+
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_wayland_offer_name("text/uri-list")), AURORA_MIME_URI_LIST);
+    AURORA_TEST_CHECK_STREQ(require_value(mime_from_wayland_offer_name("image/png")), AURORA_MIME_IMAGE_PNG);
+
+    // 非 text/plain 的参数化形不放宽：没有互操作先例，放宽只会放大误判面。
+    AURORA_TEST_CHECK_FALSE(mime_from_wayland_offer_name("image/png;foo=bar").has_value());
+    AURORA_TEST_CHECK_FALSE(mime_from_wayland_offer_name("UTF8_STRING").has_value());
+    AURORA_TEST_CHECK_FALSE(mime_from_wayland_offer_name("").has_value());
+}
+
+AURORA_TEST_CASE(translate_wayland_mime_list_preserves_priority_and_dedups) {
+    const std::vector<std::string> names{
+        "image/png",    "text/plain;charset=utf-8", "text/plain", "text/uri-list", "UTF8_STRING", "image/png",
+        "aurora/widget"};
+    const std::vector<std::string> mimes = mimes_from_wayland_offer_names(names);
+    AURORA_TEST_REQUIRE_EQ(mimes.size(), std::size_t{3});
+    AURORA_TEST_CHECK_STREQ(mimes[0], AURORA_MIME_IMAGE_PNG);
+    AURORA_TEST_CHECK_STREQ(mimes[1], AURORA_MIME_TEXT_PLAIN);
+    AURORA_TEST_CHECK_STREQ(mimes[2], AURORA_MIME_URI_LIST);
+
+    AURORA_TEST_CHECK_TRUE(mimes_from_wayland_offer_names({}).empty());
+    AURORA_TEST_CHECK_TRUE(mimes_from_wayland_offer_names({"UTF8_STRING", "aurora/widget"}).empty());
+}
+
+AURORA_TEST_CASE(translate_wayland_dnd_action_bits_map_both_ways) {
+    AURORA_TEST_CHECK_EQ(wayland_dnd_action_from(DragAction::Copy), static_cast<std::uint32_t>(WaylandDndAction::Copy));
+    AURORA_TEST_CHECK_EQ(wayland_dnd_action_from(DragAction::Move), static_cast<std::uint32_t>(WaylandDndAction::Move));
+    // None / Link 桥不声明（Link 在核心拖放里几乎不被目标侧声明）。
+    AURORA_TEST_CHECK_EQ(wayland_dnd_action_from(DragAction::None), std::uint32_t{0});
+    AURORA_TEST_CHECK_EQ(wayland_dnd_action_from(DragAction::Link), std::uint32_t{0});
+
+    AURORA_TEST_CHECK_TRUE(action_from_wayland_dnd_action(static_cast<std::uint32_t>(WaylandDndAction::Copy)) ==
+                           DragAction::Copy);
+    AURORA_TEST_CHECK_TRUE(action_from_wayland_dnd_action(static_cast<std::uint32_t>(WaylandDndAction::Move)) ==
+                           DragAction::Move);
+    // 多位按 Copy → Move 优先序取一（与 DROPEFFECT 侧同源：复制最不易造成数据损失）。
+    AURORA_TEST_CHECK_TRUE(action_from_wayland_dnd_action(static_cast<std::uint32_t>(WaylandDndAction::Copy) |
+                                                          static_cast<std::uint32_t>(WaylandDndAction::Move)) ==
+                           DragAction::Copy);
+    // Ask 位与未知位：本库无「询问用户」态，如实为 None（不替用户猜一个）。
+    AURORA_TEST_CHECK_TRUE(action_from_wayland_dnd_action(static_cast<std::uint32_t>(WaylandDndAction::Ask)) ==
+                           DragAction::None);
+    AURORA_TEST_CHECK_TRUE(action_from_wayland_dnd_action(std::uint32_t{0xFFU}) == DragAction::Copy);
+    AURORA_TEST_CHECK_TRUE(action_from_wayland_dnd_action(std::uint32_t{0U}) == DragAction::None);
+}
+
+AURORA_TEST_CASE(translate_wayland_registered_lists_are_the_single_source) {
+    const std::vector<std::string> &flat = wayland_registered_offer_names();
+    AURORA_TEST_REQUIRE_EQ(flat.size(), std::size_t{4});
+    AURORA_TEST_CHECK_STREQ(flat[0], "text/plain;charset=utf-8");
+    AURORA_TEST_CHECK_STREQ(flat[1], "text/plain");
+    AURORA_TEST_CHECK_STREQ(flat[2], "text/uri-list");
+    AURORA_TEST_CHECK_STREQ(flat[3], "image/png");
+    // 展平表必须与逐项映射同源：改一处不改另一处即双真源（桥按展平表登记、按逐项表取值）。
+    for (const std::string &name : flat) {
+        AURORA_TEST_REQUIRE_TRUE(mime_from_wayland_offer_name(name).has_value());
+    }
+    AURORA_TEST_CHECK_EQ(wayland_supported_dnd_actions(), static_cast<std::uint32_t>(WaylandDndAction::Copy) |
+                                                              static_cast<std::uint32_t>(WaylandDndAction::Move));
 }
 
 }  // namespace aurora::test_cases::utest_system_drag_translate

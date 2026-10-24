@@ -20,9 +20,11 @@ struct PlatformCapabilities {
     /// @brief 支持接收系统拖入（跨进程拖放进应用）。
     ///
     /// 能力位只表「机制是否存在」：运行期不可用（会话建立失败、权限不足等）仍走 `Result` 错误，
-    /// 二者不互相替代。两个方向**按各自后端独立翻位**——拖入已由 Win32 OLE 桥接线（Win32 / D3D11
-    /// 两类 Surface 共用同一宿主窗口与同一桥实例），拖出同批接线（`IDropSource` + `DoDragDrop` +
-    /// 库自管拖拽线程，见 `system_drag_backend.h` 通道注记）；未接线的方向不预先声称支持。
+    /// 二者不互相替代。两个方向**按各自后端独立翻位**——拖入已由 Win32 OLE 桥 / X11 Xdnd 桥 /
+    /// Wayland `wl_data_device` 桥接线，拖出同批接线（Win32 `IDropSource` + `DoDragDrop` +
+    /// 库自管拖拽线程；X11 指针 grab + `XdndSelection` 所有权 + 消息序列；Wayland
+    /// `wl_data_source` + `start_drag`，见 `system_drag_backend.h` 通道注记）；
+    /// 未接线的方向不预先声称支持。
     bool system_drag_in = false;
     /// @brief 支持发起系统拖出（从应用拖到其它进程）。语义同上（机制存在性，非运行期保证）。
     bool system_drag_out = false;
@@ -56,8 +58,8 @@ struct Platform {
     /// @brief 由设备形态与 Surface 后端类别推导平台能力标志。
     /// @return 聚合结果：desktop/mobile 按 DeviceKind 判定；multitouch 与 high_frequency_pointer
     /// 在 Win32/Glfw/X11/Wayland/MacOS 五类真实显示 Surface 下为 true；`system_drag_in` / `system_drag_out`
-    /// 仅在已接线的后端下为 true（当前为 Win32 / D3D11，与拖入同批接线口径一致；未接线的平台
-    /// 保持默认值即「不声称支持」）。
+    /// 仅在已接线的后端下为 true（当前为 Win32 / D3D11 / X11 / Wayland，与拖入同批接线口径一致；
+    /// 未接线的平台保持默认值即「不声称支持」）。
     [[nodiscard]] auto capabilities() const -> PlatformCapabilities {
         // 待填充的能力标志聚合：默认值起步，先按设备形态、再按 SurfaceKind 逐项置位。
         PlatformCapabilities c;
@@ -70,23 +72,23 @@ struct Platform {
         c.high_frequency_pointer =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::Glfw || surface == SurfaceKind::X11 ||
              surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
-        // 系统拖入：Win32 OLE 桥与 X11 Xdnd 桥已接线。D3D11 与 Win32 共用同一个 `Win32Host`（与同一桥实例），
-        // 只是上屏形态不同，故同翻；wgpu 是**渲染后端偏好**而非独立的 `SurfaceKind`（其宿主仍是
-        // Win32 / X11 / Wayland 之一），不在此单列。Glfw 恒 false：
+        // 系统拖入：Win32 OLE 桥 / X11 Xdnd 桥 / Wayland `wl_data_device` 桥已接线。D3D11 与 Win32
+        // 共用同一个 `Win32Host`（与同一桥实例），只是上屏形态不同，故同翻；wgpu 是**渲染后端偏好**
+        // 而非独立的 `SurfaceKind`（其宿主仍是 Win32 / X11 / Wayland 之一），不在此单列。Glfw 恒 false：
         // 零 `#ifdef` 公共头无法按宿主 OS 分叉，且 GLFW 自持 drop 不承载四态协商。
         //
         // ⚠️ 能力位是**编译期后端**的静态声明，不看运行期桥是否 install 成功：X11 会话缺失
         // （无 DISPLAY）时 `X11Surface` 构造即失败、不会有该 `SurfaceKind` 被产出，故此处不必
         // 也无法回读运行期状态。
-        c.system_drag_in =
-            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::X11);
+        c.system_drag_in = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 ||
+                            surface == SurfaceKind::X11 || surface == SurfaceKind::Wayland);
         // 系统拖出：同批接线（Win32 走 `IDropSource` + `DoDragDrop` + 库自管拖拽线程；X11 走指针
-        // grab + `XdndSelection` 所有权 + 消息序列，会话跑在 UI 线程上）。翻位口径与拖入
-        // 完全相同：D3D11 与 Win32 共用同一 `Win32Host`（拖出机制与窗口句柄无关，注册面进程级
-        // 常驻）；wgpu 是渲染后端偏好而非独立 `SurfaceKind`；Glfw 恒 false（自持 drop 不承载
-        // 四态协商，同拖入）。
-        c.system_drag_out =
-            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::X11);
+        // grab + `XdndSelection` 所有权 + 消息序列；Wayland 走 `wl_data_source` + `start_drag`，
+        // 后两者的会话都跑在 UI 线程上）。翻位口径与拖入完全相同：D3D11 与 Win32 共用同一
+        // `Win32Host`（拖出机制与窗口句柄无关，注册面进程级常驻）；wgpu 是渲染后端偏好而非独立
+        // `SurfaceKind`；Glfw 恒 false（自持 drop 不承载四态协商，同拖入）。
+        c.system_drag_out = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 ||
+                             surface == SurfaceKind::X11 || surface == SurfaceKind::Wayland);
         return c;
     }
 };

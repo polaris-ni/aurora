@@ -235,6 +235,30 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_wayland_ime)
     endif ()
 
+    # ---- Wayland wl_data_device 系统拖放桥（拖入四态 + 拖出终态）----
+    # 自动段跑在**进程内 mock 合成器**上（服务端自建 wl_display + wl_compositor / wl_seat /
+    # wl_data_device_manager 三段，客户端经 socketpair 连上，走真实 wl_data_device 协议报文）。
+    # 为何 mock：Wayland 没有客户端指针传送 API，「把指针泊进本窗口」无人值守做不到（X11 侧
+    # 同一约束的表现见 x11_drag_live_probe）。冒烟腿（有 WAYLAND_DISPLAY 时建真实
+    # WaylandSurface 泵帧）与 --interactive 人工段补「真实合成器上装得上」的覆盖。
+    # 依赖 wayland-server 开发包（aurora 只链 wayland-client）：命中才定义目标。
+    if (AURORA_BACKEND_WAYLAND)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(AURORA_WAYLAND_SERVER QUIET wayland-server)
+        if (AURORA_WAYLAND_SERVER_FOUND)
+            aurora_add_verify_probe(aurora_verify_wayland_drag "${_aurora_verify_dir}/wayland_drag_live_probe.cpp")
+            # 探针直连库内部头（`window/detail/wayland_drag.h` 的桥面与 `system_drag_translate.h`
+            # 的折算层不在公共 API，验收的是内部接线本身；口径同 csd/WASAPI/ALSA 探针）。
+            target_include_directories(aurora_verify_wayland_drag PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+            target_include_directories(aurora_verify_wayland_drag PRIVATE
+                    ${AURORA_WAYLAND_SERVER_INCLUDE_DIRS})
+            target_link_libraries(aurora_verify_wayland_drag PRIVATE ${AURORA_WAYLAND_SERVER_LIBRARIES})
+            list(APPEND _aurora_verify_targets aurora_verify_wayland_drag)
+        else ()
+            aurora_log("aurora_verify_wayland_drag skipped: wayland-server not found (pkg-config)")
+        endif ()
+    endif ()
+
     # ---- Wayland wgpu GPU 栅格（Linux 真实窗口 + 离屏直驱，WSLg Weston 可验）：与 X11 探针同段
     # 结构，宿主动态类型为 WgpuWaylandSurface（WaylandOptions+GpuWgpu 直达）；Wayland 无抓屏
     # 原语故无截图项，装饰归属由 --interactive 人工目视核对。需 WGPU+WAYLAND 通道编译进库。

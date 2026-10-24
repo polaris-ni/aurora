@@ -273,7 +273,7 @@ AURORA_TEST_CASE(capability_bits_for_system_drag_track_wired_backends_per_direct
         {.kind = SurfaceKind::Glfw, .drag_in = false, .drag_out = false},
         {.kind = SurfaceKind::D3D11, .drag_in = true, .drag_out = true},
         {.kind = SurfaceKind::X11, .drag_in = true, .drag_out = true},
-        {.kind = SurfaceKind::Wayland, .drag_in = false, .drag_out = false},
+        {.kind = SurfaceKind::Wayland, .drag_in = true, .drag_out = true},
         {.kind = SurfaceKind::MacOS, .drag_in = false, .drag_out = false},
         {.kind = SurfaceKind::Wasm, .drag_in = false, .drag_out = false},
     };

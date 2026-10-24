@@ -34,6 +34,7 @@
 #include "aurora/window/detail/csd_shadow_compose.h"
 #include "aurora/window/detail/ime_composition.h"
 #include "aurora/window/detail/title_bar_painter.h"
+#include "aurora/window/detail/wayland_drag.h"
 #include "aurora/window/detail/wayland_output_scale.h"
 #include "aurora/window/keysym_map.h"
 #include "aurora/window/swizzle.h"
@@ -70,6 +71,10 @@ struct WaylandSurface::Impl {
     std::uint32_t compositor_version = 0;
     wl_shm *shm = nullptr;
     wl_seat *seat = nullptr;
+    // `wl_data_device_manager`（核心协议）：系统拖放桥的唯一依赖。合成器未发布则恒 nullptr，
+    // 桥 install 失败、该窗口不参与系统拖放（如实降级，不谎报已有通路）。
+    wl_data_device_manager *data_device_mgr = nullptr;
+    std::uint32_t data_device_mgr_version = 0;  ///< 绑定时采用的版本（≥3 才有 v3 动作协商）
     xdg_wm_base *wm_base = nullptr;
     zxdg_decoration_manager_v1 *deco_mgr = nullptr;
     // text-input 桥整体随代码生成宏进出：宏未置（协议 XML 缺失）时以下字段与桥方法都不存在。
@@ -150,6 +155,11 @@ struct WaylandSurface::Impl {
     // 申报偏差：xdg-shell 不暴露窗口屏幕原点 ⇒ SCREEN 系几何按窗口本地 px 如实申报。
     std::unique_ptr<detail::AtspiBridge> atspi;
     bool atspi_attempted = false;
+    // 系统拖放桥（`wl_data_device` 拖入四态 + `wl_data_source` 拖出）：install 失败即为 nullptr
+    // （合成器未发布 `wl_data_device_manager`，或连接异常）⇒ 该窗口不参与系统拖放，如实降级。
+    // 持有者只能是本 Impl：桥在析构里要销毁数据设备对象并收摊在途会话，故必须先于 seat /
+    // display 销毁（析构次序见 `~WaylandSurface`）。
+    std::unique_ptr<detail::WaylandDragBridge> drag;
     // 宿主注入的「附加事件源」（WebView 引擎的 GLib 主上下文）：wait_events 把其 fd 并入
     // poll 集、poll 返回后推进一次。语义与 atspi 并入同构；未安装时两通道均空。
     std::function<std::vector<Surface::ExtraWatch>()> extra_watches;
@@ -422,6 +432,12 @@ void ptr_leave(void *data, wl_pointer * /*p*/, std::uint32_t /*serial*/, wl_surf
 
 void ptr_motion(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, wl_fixed_t sx, wl_fixed_t sy) {
     Impl &d = *static_cast<Impl *>(data);
+    // 拖放是模态手势：拖入会话期内位置完全由 `wl_data_device.motion` 驱动（桥投递 Enter /
+    // Over），拖出会话期内指针已被合成器交给拖拽操作，两条路径都不叠加普通鼠标派发——
+    // 否则页面会在拖放中同时响应悬停，与 X11 桥同口径。
+    if (d.drag != nullptr && (d.drag->drag_in_active() || d.drag->drag_out_active())) {
+        return;
+    }
     // 表面坐标 → 内容坐标（与 ptr_enter 同映射；标题栏命中/全屏揭示在此坐标域判定）；
     // 对应用转发仍取表面坐标原值（见 ptr_enter 注释）。
     const int m = d.shadow_margin();
@@ -460,6 +476,11 @@ void ptr_motion(void *data, wl_pointer * /*p*/, std::uint32_t /*time*/, wl_fixed
 void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint32_t timestamp, std::uint32_t button,
                 std::uint32_t state_v) {
     Impl &d = *static_cast<Impl *>(data);
+    // 拖放会话期内：指针已归拖拽操作，按键一律归桥/合成器（拖放是模态手势，再派发普通鼠标
+    // 会让控件在拖放中收到幻觉点击）。与 X11 桥同口径。
+    if (d.drag != nullptr && (d.drag->drag_in_active() || d.drag->drag_out_active())) {
+        return;
+    }
 
     if (state_v == WL_POINTER_BUTTON_STATE_RELEASED) {
         if (d.csd_ui.grab) {
@@ -504,6 +525,12 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
     }
 
     d.last_press_serial = serial;  // 缓存本次按键 serial：xdg move/resize 协议要求
+    // 拖出发起用的也是同一个 serial：拖放由控件在**本次按键的派发期内**发起
+    // （`Widget::begin_system_drag`），Wayland 协议要求 `start_drag` 用本客户端某次按下的
+    // serial，故此刻刷新即唯一正确的值（多窗口场景下同理只可能是本窗口的按下）。
+    if (d.drag != nullptr) {
+        d.drag->note_press_serial(serial);
+    }
 
     // 内容坐标 → 表面坐标：xdg 协议请求（show_window_menu）取输入事件的表面本地坐标。
     const int margin = d.shadow_margin();
@@ -836,6 +863,12 @@ auto WaylandSurface::Impl::on_global(std::uint32_t name, const char *iface, std:
         seat = static_cast<wl_seat *>(
             wl_registry_bind(registry, name, &wl_seat_interface, std::min<std::uint32_t>(version, 5U)));
         wl_seat_add_listener(seat, &AURORA_SEAT_LISTENER, this);
+    } else if (std::strcmp(iface, wl_data_device_manager_interface.name) == 0 && data_device_mgr == nullptr) {
+        // 封顶 v3：`dnd_action` / `set_actions` / `dnd_finished` 一族动作协商是 v3 才有的，
+        // 绑更高版本只会让合成器按它不认识的版本回 protocol error；绑 v3 时老合成器自动降级。
+        data_device_mgr = static_cast<wl_data_device_manager *>(
+            wl_registry_bind(registry, name, &wl_data_device_manager_interface, std::min<std::uint32_t>(version, 3U)));
+        data_device_mgr_version = std::min<std::uint32_t>(version, 3U);
     } else if (std::strcmp(iface, xdg_wm_base_interface.name) == 0) {
         wm_base = static_cast<xdg_wm_base *>(
             wl_registry_bind(registry, name, &xdg_wm_base_interface, std::min<std::uint32_t>(version, 2U)));
@@ -1452,6 +1485,30 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
         // 等待首个 xdg_surface.configure（正常合成器亚毫秒级返回）
     }
     d.refresh_scale();
+    // 系统拖放桥（契约与协议状态机见 detail::WaylandDragBridge）。安装点在构造末尾：此刻
+    // registry 全局已绑完（两轮 roundtrip 已收 seat caps 与 data_device_manager）、wl_surface
+    // 已创建（拖出 `start_drag` 的 origin surface），而首次 configure 之前不允许有输入交互。
+    // install 失败 ⇒ 本窗口不参与系统拖放，如实降级、不谎报已有通路（与 X11 桥同款处置）。
+    if (d.data_device_mgr != nullptr && d.seat != nullptr) {
+        d.drag = std::make_unique<detail::WaylandDragBridge>(
+            d.dpy, d.data_device_mgr, d.data_device_mgr_version, d.seat, d.surface,
+            detail::WaylandDragBridge::Hooks{
+                .emit = [&d](Event &e) -> void {
+                    if (d.handler) {
+                        d.handler(e);  // 派发器在调用内写定 `e.allowed`（Enter / Over 两态）
+                    }
+                },
+                .scale_factor = [&d]() -> float { return static_cast<float>(d.scale); },
+                // Wayland 的 wl_data_device / wl_pointer 事件都不带修饰态，只能取键盘路径缓存
+                // （与 ptr_* 转发读的同一个 `d.mods`、同一份真值源）。
+                .modifiers = [&d]() -> ModifierKey { return d.mods; }});
+        if (!d.drag->install()) {
+            d.drag.reset();
+            AURORA_LOG_WARN("window", "WaylandSurface: wl_data_device install failed; system drag unavailable.");
+        }
+    } else {
+        AURORA_LOG_INFO("window", "WaylandSurface: compositor lacks wl_data_device_manager; system drag unavailable.");
+    }
 }
 
 WaylandSurface::~WaylandSurface() {
@@ -1461,6 +1518,10 @@ WaylandSurface::~WaylandSurface() {
     window_state_handler_ = nullptr;
     window_mode_handler_ = nullptr;
     present_request_ = nullptr;
+    // 拖放桥先收摊：它持有 `wl_data_device`（seat 的子对象）与在途会话，且 `uninstall` 里要
+    // 兑现「在途拖出按 Cancelled」——必须早于 seat / display 销毁，也早于上层回调解绑后的
+    // 任何一次事件泵。
+    d.drag.reset();
     if (d.dpy != nullptr) {
         for (Impl::Slot &s : d.slots) {
             aurora::WaylandSurface::Impl::release_slot(s);
@@ -1504,6 +1565,11 @@ WaylandSurface::~WaylandSurface() {
         }
         if (d.seat != nullptr) {
             wl_seat_destroy(d.seat);
+        }
+        if (d.data_device_mgr != nullptr) {
+            // manager 是 registry 子对象、不依赖 seat，放最后销毁（与 text_input_mgr 同口径）。
+            wl_data_device_manager_destroy(d.data_device_mgr);
+            d.data_device_mgr = nullptr;
         }
         for (Impl::OutputInfo &o : d.outputs) {
             if (o.out != nullptr) {
@@ -2073,6 +2139,11 @@ auto WaylandSurface::poll_platform_events() -> void {
     if (d.dpy == nullptr) {
         return;
     }
+    // 刷新「当前发起窗口」槽：拖出由控件在事件派发期内发起（`Widget::begin_system_drag`），
+    // 而事件派发只发生在**本窗口**的事件泵内，故此刻登记即唯一正确的发起桥（多窗口场景）。
+    if (d.drag != nullptr) {
+        detail::WaylandDragBridge::note_initiator(d.drag.get());
+    }
 #if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
     // IME 输入态声明的兜底驱动点：present() 是软件上屏路径，GPU 宿主（WgpuWaylandSurface）的
     // 帧不经过它——本函数两条路径每帧必经（wgpu 宿主原样转发），故 enable 判据与候选窗盒在此
@@ -2101,6 +2172,10 @@ auto WaylandSurface::poll_platform_events() -> void {
         // 重入护栏吞掉，故在此补一帧，避免窗口停在旧尺寸画面上直到下次脏帧自发重绘。
         d.present_stale = false;
         d.request_repaint();
+    }
+    // 帧内看守：管道读写的逐帧推进与「落放后迟迟不给数据」的墙钟超时在此兑现（不悬挂、不虚假成功）。
+    if (d.drag != nullptr) {
+        d.drag->tick();
     }
 }
 

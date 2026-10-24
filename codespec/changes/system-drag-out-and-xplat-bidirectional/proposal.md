@@ -6,7 +6,7 @@
 | 提出日期 | 2026-10-23 |
 | 当前状态 | 实施中 |
 | 关联需求 | SPEC.FEAT.APP.SYSTEM-DRAG-DROP.001 |
-| 影响面 | `include/aurora/window/platform.h`（`system_drag_out` 能力位与 `capabilities()` 聚合按批次翻位）、`src/aurora/window/detail/win32_drag.h` 与 `src/aurora/window/detail/win32_drag.cpp`（拖出侧 `IDropSource` / `DoDragDrop` / 取消检测 / 拖拽影像）、`src/aurora/window/detail/system_drag_translate.h` 与 `src/aurora/window/detail/system_drag_translate.cpp`（X11 `XdndAction*` / Wayland 动作协商 / macOS `NSDragOperation` ↔ `DragAction` 折算）、`src/aurora/window/x11_surface.cpp` / `src/aurora/window/wayland_surface.cpp` / `src/aurora/window/macos_surface.cpp`（Xdnd / `wl_data_device` / dragging session 内联于各 `Impl`）、`src/aurora/window/win32_host.cpp`（拖出后端每窗构造期注册与影像缩放的进程级提示推送）、`src/aurora/event/detail/system_drag_backend.h`（拖出注册接缝，本批新增内部头）、`src/aurora/event/drag_payload.cpp`（拖出后端注册接缝的判优与进程级在途闸登记）、`tests/unit/utest_drag_payload.cpp`（能力位方向级分叉锚定表按批次更新）、`tools/verify/` 新增 x11 / wayland 两枚 drag_live_probe 并扩建 win32 探针的拖出腿（新件，不在此列名）、`codespec/manual-test/24-systemdrag.md` 新增拖出与三平台双向用例；无新增公共 API 符号 / 枚举 / 错误码 / feature 宏，`aurora_api.json` 预期零差异；另记 CHANGELOG.md（不属 codespec 树，不列为回写落点） |
+| 影响面 | `include/aurora/window/platform.h`（`system_drag_out` 能力位与 `capabilities()` 聚合按批次翻位）、`src/aurora/window/detail/win32_drag.h` 与 `src/aurora/window/detail/win32_drag.cpp`（拖出侧 `IDropSource` / `DoDragDrop` / 取消检测 / 拖拽影像）、`src/aurora/window/detail/system_drag_translate.h` 与 `src/aurora/window/detail/system_drag_translate.cpp`（X11 `XdndAction*` / Wayland 动作协商 / macOS `NSDragOperation` ↔ `DragAction` 折算）、`src/aurora/window/x11_surface.cpp` / `src/aurora/window/wayland_surface.cpp` / `src/aurora/window/macos_surface.cpp`（各 `Impl` 持有桥实例并接线；X11 与 Wayland 的桥按「完整双向状态机」判据独立成 `detail/x11_drag.{h,cpp}` 与 `detail/wayland_drag.{h,cpp}`，不内联进 surface）、`src/aurora/window/win32_host.cpp`（拖出后端每窗构造期注册与影像缩放的进程级提示推送）、`src/aurora/event/detail/system_drag_backend.h`（拖出注册接缝，本批新增内部头）、`src/aurora/event/drag_payload.cpp`（拖出后端注册接缝的判优与进程级在途闸登记）、`tests/unit/utest_drag_payload.cpp`（能力位方向级分叉锚定表按批次更新）、`tools/verify/` 新增 x11 / wayland 两枚 drag_live_probe 并扩建 win32 探针的拖出腿（新件，不在此列名）；`cmake/AuroraVerify.cmake` 增 wayland 探针目标（pkg-config 探测 `wayland-server`，缺包则 configure 期跳过）、`codespec/manual-test/24-systemdrag.md` 新增拖出与三平台双向用例；无新增公共 API 符号 / 枚举 / 错误码 / feature 宏，`aurora_api.json` 预期零差异；另记 CHANGELOG.md（不属 codespec 树，不列为回写落点） |
 
 ## 动机
 
@@ -24,25 +24,27 @@
    - 拖拽影像：`IDragSourceHelper` 设置 `DragOffer::icon` 与 `icon_hotspot`（空图像交 OS 默认影像）；COM 单元由**拖拽线程自持一次 `OleInitialize`**（自有 STA）——`DoDragDrop` 要求调用线程有 COM 单元，与 UI 线程上拖入桥的 `OleInitialize` 互不相干，两个 STA 各管各的会话；线程侧初始化失败时拖出方向如实以 `Failed` + `None` 收尾，不谎报有通路。
    - 重入闸（继承 CHG-027 裁决）：`system_drag` 侧进程级闸——会话登记即置位、终态投递即清除；`DoDragDrop` 跑在库自管拖拽线程上，UI 线程帧循环在会话期间照常推进（模态循环不在 UI 线程上嵌套，故不需要「帧步进待办 / 返回后补拍」机制）；闸内在途时第二次 `begin` 被拒（事件层报 `system-drag-session-failed`，引擎侧在途标志为第二道闸，发起失败即回滚会话态、不悬挂后续 begin）；取消路径就地收口在途读取（不等帧循环）后**先**登记 `Cancelled`，拖拽线程迟到的终态登记被「首登记者赢」规则作废；自拖放取数经拖入侧在途要约直取（UI 线程直接调 `provide`，不经数据对象）——跨单元形态下数据对象指针被 COM 编组为代理，`GetData` 会让 UI 线程与拖拽线程互等到墙钟超时，直取从根上消解该互等。单线程 UI 下一次一会话的拒绝语义沿用 `begin` 既有的 in-flight 分支。
    - 能力位：`Win32` 与 `D3D11` 两类 `SurfaceKind` 翻 `system_drag_out`（共用 `Win32Host::Impl` 与同一桥实例，与拖入同口径）；`WgpuWin32` 不单列（渲染后端偏好，宿主仍是 Win32）；`Glfw` 恒 false。
-3. **X11 Xdnd 双向（内联 `x11_surface.cpp` 的 `Impl`）**：
+3. **X11 Xdnd 双向（独立桥 `detail/x11_drag.{h,cpp}`，由 `X11Surface::Impl` 唯一持有）**：
    - 拖入前置：窗口创建后广播 `XdndAware` 属性并带协议版本（`XdndEnter` 携带源侧版本，按 ≤ 5 协商）；不广播则源侧不会向窗口发任何 Xdnd 消息，拖入无从开始。
    - 四态：`XdndEnter` / `XdndPosition` / `XdndLeave` / `XdndDrop` → Enter / Over / Leave / Drop；`XdndPosition` 的 root 相对坐标换算回窗口逻辑坐标；目标侧以 `XdndStatus` 回报「是否接受 + 动作 + 矩形」（accept 查询的 X11 落点）。
    - 载荷：`XdndDrop` 后经 selection 请求获取——异步 round-trip，天然走 `read_async` + `pump_reads`，同步 / 异步分界走折算层共享常量（单一真源，不散落各桥）。
    - 拖出：`XdndSetSelectionOwner` + 向目标发 `XdndEnter`；`SelectionRequest` 是 `DragOffer::provide` 的触发点；**`XdndFinished` 是落放成功的唯一依据**，缺失即未成功（取消检测走该路径，不新增 slug）。
    - 动作：`XdndAction*` 位集 ↔ `DragAction` 折算落 `system_drag_translate`（零平台头层，无头单测覆盖）；拖拽影像在 Xdnd 无标准协议，`DragOffer::icon` 按契约静默忽略（不改变会话语义）。
    - 能力位：`X11` 两个方向同翻。
-4. **Wayland `wl_data_device` 双向（内联 `wayland_surface.cpp` 的 `Impl`）**：
-   - 拖入：data_offer 事件 → 四态；`wl_data_offer.receive` 为异步数据回调，写成 `read_async`。
-   - 拖出：`wl_data_device.start_drag(source, origin, icon, serial)` 是发起入口；`wl_data_source` 的 `target` / `send` / `cancelled` / `dnd_drop_performed` / `dnd_finished` 分别对应目标反馈、`provide` 触发、取消检测、落放确认与会话收口——后两枚是 outcome 映射的来源。
-   - 动作：`source_actions` / `dnd_action` 与目标侧 `set_actions` 协商——这些在**接口版本 3** 引入；版本协商不到 3 时会话如实降级（不假装支持动作协商），不引入第二套语义。
+4. **Wayland `wl_data_device` 双向（独立桥 `detail/wayland_drag.{h,cpp}`，由 `WaylandSurface::Impl` 唯一持有）**：
+   - 拖入：`data_offer` + `offer`（线上名清单经折算层换 MIME）→ `enter` / `motion` / `leave` / `drop` 四态；`wl_data_offer.receive` 给的是管道写端，载荷由本端非阻塞逐帧读入（`tick` 排空）后收口 `finish`——Wayland 没有 X11 selection 那样的 `INCR` 分块分叉，大小载荷同一条路径。
+   - 拖出：`wl_data_device.start_drag(source, origin, icon, serial)` 是发起入口，serial 取本次按下序（宿主指针按下路径经 `note_press_serial` 刷新，多窗口下只可能是本窗口的按下）；`wl_data_source` 的 `target` / `send` / `cancelled` / `dnd_drop_performed` / `dnd_finished` 分别对应目标反馈、`provide` 触发、取消检测、落放确认与会话收口——后两枚是 outcome 映射的来源。
+   - 动作：`source_actions` / `action` 与目标侧 `accept` + `set_actions` 协商——这些在**接口版本 3** 引入；版本协商不到 3 时会话如实降级（不假装支持动作协商），不引入第二套语义。v3 下 `cancelled` 一词一义 = 用户取消，但落放已发生却没等来 `dnd_finished` 时按 `Rejected` 折算（目标没有 `finish` 即拒绝）；v1/v2 下该事件一词二义（取消 / 会话结束），按「是否应答过 send」分叉。
+   - **协议事件序事实**：`source_actions` / `action` 在 `enter` **之后**到达，桥的 `on_enter` 先复位会话态再收状态，早到的会被清掉——探针按真实序驱动。
+   - 修饰态：协议**不随指针事件送修饰态**，桥经 hooks 从 seat 的 xkb 缓存（`on_modifiers` 维护）取，与键盘 / 鼠标事件同一份缓存、同一折算入口。
    - 拖拽影像：start_drag 的 icon surface（`DragOffer::icon` 非空时建 buffer surface，空交 OS 默认）。
-   - 能力位：`Wayland` 两个方向同翻；CI 的 `linux-x11-wayland-glfw` 作业**编译并 lint** Wayland 后端（含 `wayland-gen` 协议头生成），**不承载**真机拖放联调。
+   - 能力位：`Wayland` 两个方向同翻；CI 的 `linux-x11-wayland-glfw` 作业**编译并 lint** Wayland 后端（含 `wayland-gen` 协议头生成），**不承载**真机拖放联调；真机取证由探针的进程内 mock 合成器腿（服务端自建 `wl_display` + 三段 global，客户端经 socketpair + registry 绑定拿到与桥同侧的真实代理）加可选冒烟腿（有 `WAYLAND_DISPLAY` 时建真实 `WaylandSurface` 泵帧）与人工段承担。
 5. **macOS dragging session 双向（内联 `macos_surface.cpp` 的 `Impl`）**：
    - 拖入：`NSDraggingDestination` 的 `draggingEntered` / `draggingUpdated` / `draggingExited` 驱动四态与光标；**`prepareForDragOperation` 返回 Bool 是 accept 闸门**（`query_system_drag_accept` 落点，`performDragOperation` 仅在其返回 YES 后调用——落在后者会让「拒绝」路径无处实现）。
    - 拖出：`NSDraggingSource` + `beginDraggingSession`；结局经 `draggingSession(_:endedAt:operation:)` 投递（operation 为 none → `Cancelled`），是 `Succeeded` / `Cancelled` 的来源。
    - formats / provider 经 `NSPasteboard` 映射；Move 语义经 `NSDragOperation` 与 `on_move_confirmed` 对齐；拖拽影像经 dragging item 影像（`DragOffer::icon` 非空时用，空交 OS 默认）。
    - 能力位：`MacOS` 两个方向同翻；CI macos 矩阵编译 + 测试该后端，真机拖放联调归探针与 manual-test 第 24 卷。
-6. **批次次序与依赖**：注册接缝 → Win32 拖出（reference 实现，含重入闸与 Move 回滚）→ X11 双向 → Wayland 双向 → macOS 双向 → 末批全量门禁与真机记录归档。每批次独立可合入、独立翻位；后续批次复用接缝与 inert 测试件，不重造。
+6. **批次次序与依赖**：注册接缝 → Win32 拖出（reference 实现，含重入闸与 Move 回滚）→ X11 双向 → Wayland 双向 → macOS 双向 → 末批全量门禁与真机记录归档。每批次独立可合入、独立翻位；后续批次复用接缝与 inert 测试件，不重造。**进度**：前四批（接缝 + Win32 拖出 + X11 双向 + Wayland 双向）已交付并推送，能力位已按方向翻位；剩余 macOS 双向（骨架桩，按「未在本仓库无头构建内编译验证」惯例处理）与末批全量门禁。
 7. **横切纪律（继承 CHG-027，不重新裁决）**：
    - 不新增公共 API 符号 / 枚举 / 错误码（机制缺失、会话失败、读取失败、解码失败、取消、Move 回滚六枚既有 slug 全数复用）；不新增 feature 宏（后端寄生平台 TU，编译期门控由平台自身完成，`check_platform_macros` 照过）；`codespec/BUILD_OPTIONS.md` 与 `debug_api.toml` 不动。
    - 载荷编解码依赖点名：uri-list ↔ 平台路径走仓内既有的 `src/aurora/app/uri_list.h`（内部头）；Win32 文本 `CF_UNICODETEXT` ↔ UTF-8；图像 `CF_DIBV5` ↔ PNG 受 `AURORA_ENABLE_IMAGE_PNG` 门控，关闭时该格式如实不可得、不假装支持。
@@ -52,7 +54,7 @@
 
 ## 验收判据
 
-1. **能力位方向级分叉表按批次更新**：Win32 / D3D11 两方向 true；X11 / Wayland / macOS 两方向 true；Glfw / Headless / Wasm 恒 false；「未接线先声称」的变异（为未落地方向翻位）使对应用例转红。
+1. **能力位方向级分叉表按批次更新**：Win32 / D3D11 / X11 / Wayland 两方向 true（前四批已翻）；macOS 两方向待该批次落地后翻；Glfw / Headless / Wasm 恒 false；「未接线先声称」的变异（为未落地方向翻位）使对应用例转红。
 2. **Win32 拖出真机闭环**：应用拖文件到桌面 / 文件管理器，`on_system_drag_end(Succeeded, Copy)`；无修饰键按 `DragOffer::default_action`；Esc 取消 → `(Cancelled, None)` 且 `on_system_drag_cancel` 严格早于 `on_system_drag_end`；目标拒绝 → `(Rejected, None)`。
 3. **重入闸判据**：在途会话期内第二次 `begin` 被拒（`system-drag-session-failed`，`utest_drag_payload` 锚定）且首会话终态不受污染；取消路径就地收口在途读取（不等帧循环）后**先**登记 `Cancelled`，拖拽线程迟到的终态登记不改写已排定终态（「首登记者赢」）。
 4. **Move 回滚**：注入 `on_move_confirmed` 失败 → 终态 `Failed` + `Move` + `system-drag-move-rollback` 可观测（经 `test_last_session_error` 往返），目标侧数据不动；确认调用点早于 `on_end(Succeeded, Move)`。

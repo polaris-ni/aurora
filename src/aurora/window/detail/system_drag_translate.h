@@ -157,6 +157,67 @@ enum class Win32DragOutExit : std::uint32_t {
 /// @return 动作 atom 名清单（不含 `Ask` / `Private`：本库不消费它们）。
 [[nodiscard]] auto x11_registered_action_names() -> const std::vector<std::string> &;
 
+/// @brief Wayland `wl_data_device_manager` 的动作位（`dnd_action`；核心协议原文数值）。
+///
+/// 本地声明而非取协议头宏：折算层不引 `<wayland-client.h>`（详见文件头）。与 X11 的
+/// `XdndAction*` 是同一语义的两套编码：那边是 atom 名，这边是位掩码。
+enum class WaylandDndAction : std::uint8_t {
+    None = 0U,  ///< 无动作（不接受）
+    Copy = 1U,  ///< `WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY`
+    Move = 2U,  ///< `WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE`
+    Ask = 4U,  ///< `WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK`（询问用户）
+};
+
+/// @brief 本库在 Wayland 上声明支持的动作位集（`wl_data_source.set_actions` 的实参；单一真源）。
+///
+/// 只声明 `Copy | Move`：`Ask` 要求客户端自建询问交互（本库没有该控件形态），`Link` 在核心
+/// 拖放里几乎不被目标侧声明（声明它只会让协商结果集变大、不改变实际可达动作）。
+/// @return 动作位集（恒含 `Copy`）。
+[[nodiscard]] auto wayland_supported_dnd_actions() -> std::uint32_t;
+
+/// @brief `DragAction` → `dnd_action` 位（源侧声明 / 目标侧 `set_actions` 用）。
+/// @param action 待映射的动作。
+/// @return 动作位；`None` 时为 0（调用方据此判定「不接受」）。
+[[nodiscard]] auto wayland_dnd_action_from(DragAction action) -> std::uint32_t;
+
+/// @brief `dnd_action` 位 → `DragAction`（上一函数的逆，多位时按固定优先序取一）。
+///
+/// 优先序 **Copy → Move → Link**：与 `action_from_win32_drop_effect` 同源（复制是最不易造成
+/// 数据损失的解读）。`Ask` 与未知位一律 `None`——本库没有「询问用户」这一态，如实为无动作。
+/// @param bits 平台侧 `dnd_action` 原值（可含 `Ask`）。
+/// @return 译出的动作；无可识别的复制/移动位时为 `DragAction::None`。
+[[nodiscard]] auto action_from_wayland_dnd_action(std::uint32_t bits) -> DragAction;
+
+/// @brief 规范 MIME → Wayland 线上 MIME 名（`wl_data_source.offer` / 目标侧比较用）。
+///
+/// Wayland 与 X11 不同：协议直接以 MIME 字符串为格式标识，无需 atom 中转。但「线上名」与
+/// 「规范 MIME」仍不是同一集合——`text/plain` 在 Wayland 上的互操作惯例是带 charset 参数的
+/// `text/plain;charset=utf-8`，对端文件管理器三种都可能给，故源侧同时广告两个名。
+/// 与 X11 表同口径：只登记本库会消费的 MIME，`aurora/widget` 是进程内词汇（不出进程），**不登记**。
+/// @param mime 待映射的 MIME（须为 `app/mime_types.h` 登记的规范形）。
+/// @return 线上名清单（顺序即优先级：源侧 advertise 与目标侧比较都按该序取首个可用项）；
+///         未登记 MIME 返回空清单（不猜、不兜底）。
+[[nodiscard]] auto wayland_offer_names_from_mime(std::string_view mime) -> std::vector<std::string>;
+
+/// @brief Wayland 线上 MIME 名 → 规范 MIME（上一函数的逆）；未登记名返回 `std::nullopt`。
+///
+/// 反向时对 `text/plain` **剥掉全部参数**（`text/plain;charset=utf-8` 与裸 `text/plain` 同归一个
+/// 规范形）——对端给的参数集合不可控，按字面量比较会把同一格式判成两个。
+/// @param name 平台侧线上 MIME 名。
+/// @return 对应规范 MIME；未登记时为 `std::nullopt`。
+[[nodiscard]] auto mime_from_wayland_offer_name(std::string_view name) -> std::optional<std::string>;
+
+/// @brief Wayland 线上名清单 → 规范 MIME 清单（保持输入顺序、去重、丢弃未登记项）。
+///
+/// 与 `mimes_from_win32_clip_formats` / `mimes_from_x11_target_names` 同纪律：顺序即优先级。
+/// @param names 平台侧线上名清单（可含重复与未登记项）。
+/// @return 去重后的规范 MIME 清单（未登记项被丢弃，可为空）。
+[[nodiscard]] auto mimes_from_wayland_offer_names(const std::vector<std::string> &names) -> std::vector<std::string>;
+
+/// @brief 本库登记的**全部** Wayland 线上 MIME 名（桥 install 期一次性登记用；单一真源）。
+/// @return 去重的线上名清单（顺序同 `wayland_offer_names_from_mime` 各表项的拼接序）。
+[[nodiscard]] auto wayland_registered_offer_names() -> const std::vector<std::string> &;
+
 /// @brief 客户区**物理像素** → 窗口**逻辑 dp**（拖放坐标契约的唯一折算入口）。
 ///
 /// 与 `Win32Host::Impl::to_logical` 同款但可无头验证：`scale` 由调用方（宿主）给出，本函数不读
