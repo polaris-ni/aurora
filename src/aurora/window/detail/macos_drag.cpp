@@ -99,7 +99,13 @@ auto backend_registered() -> bool & {
         if (raw == nullptr) {
             continue;
         }
-        [out addObject:[NSString stringWithUTF8String:raw]];
+        NSString *const entry = [NSString stringWithUTF8String:raw];
+        // `addObject:` 的形参非空，而 `stringWithUTF8String:` 只在遇到非法 UTF-8 时返回 nil；
+        // 判空后再入列（登记表内的 UTI 恒为 ASCII，故该分支不可达）。
+        if (entry == nil) {
+            continue;
+        }
+        [out addObject:entry];
     }
     return out;
 }
@@ -194,7 +200,7 @@ struct MacOSDragBridge::Impl {
 // 注记为 `//` 而非 `///`：门禁的文档注释扫描不认 ObjC 的 `@interface` 为可文档声明，
 // 挂 `///` 会落 DOC-R3（「/// 块未紧邻可文档声明」）。
 @interface AuroraSystemDragView : NSView {
-    aurora::detail::MacOSDragBridge::Impl *impl_;
+    aurora::detail::MacOSDragBridge::Impl *bridge_impl;
 }
 - (instancetype)initWithBridge:(aurora::detail::MacOSDragBridge::Impl *)impl;
 @end
@@ -202,7 +208,7 @@ struct MacOSDragBridge::Impl {
 // 拖出源对象：`NSDraggingSource` 三方法（能力掩码 / 修饰键让渡 / 终态）+
 // `NSPasteboardItemDataProvider` 一方法（目标索要数据时经控件要约应答）。同上用 `//`。
 @interface AuroraMacDragSource : NSObject <NSDraggingSource, NSPasteboardItemDataProvider> {
-    aurora::detail::MacOSDragBridge::Impl *impl_;
+    aurora::detail::MacOSDragBridge::Impl *bridge_impl;
 }
 - (instancetype)initWithBridge:(aurora::detail::MacOSDragBridge::Impl *)impl;
 @end
@@ -212,34 +218,34 @@ struct MacOSDragBridge::Impl {
 - (instancetype)initWithBridge:(aurora::detail::MacOSDragBridge::Impl *)impl {
     self = [super initWithFrame:NSZeroRect];
     if (self != nil) {
-        impl_ = impl;
+        bridge_impl = impl;
     }
     return self;
 }
 
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
-    return static_cast<NSDragOperation>(impl_->on_dragging_entered(static_cast<void *>(sender)));
+    return static_cast<NSDragOperation>(bridge_impl->on_dragging_entered(static_cast<void *>(sender)));
 }
 
 - (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
-    return static_cast<NSDragOperation>(impl_->on_dragging_updated(static_cast<void *>(sender)));
+    return static_cast<NSDragOperation>(bridge_impl->on_dragging_updated(static_cast<void *>(sender)));
 }
 
 - (void)draggingExited:(id<NSDraggingInfo>)sender {
     (void)sender;
-    impl_->on_dragging_exited();
+    bridge_impl->on_dragging_exited();
 }
 
 // accept 闸门（头文件差异①）：AppKit 只在 YES 后调 `performDragOperation`。闸门读
 // Enter / Updated 派发后写定的 `allowed`——此刻再派发一次会让控件收到语义重复的 Over。
 - (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)sender {
-    return impl_->on_prepare_for_drag_operation(static_cast<void *>(sender)) ? YES : NO;
+    return bridge_impl->on_prepare_for_drag_operation(static_cast<void *>(sender)) ? YES : NO;
 }
 
 // 取数同步发生在桥内（头文件差异②）。返回值按 AppKit 惯例恒 YES：受理信号由 Drop 派发的
 // `is_handled` 承载（源侧没有「目标回传执行动作」的协议事件，同 Wayland）。
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
-    impl_->on_perform_drag_operation(static_cast<void *>(sender));
+    bridge_impl->on_perform_drag_operation(static_cast<void *>(sender));
     return YES;
 }
 
@@ -264,7 +270,7 @@ struct MacOSDragBridge::Impl {
 - (instancetype)initWithBridge:(aurora::detail::MacOSDragBridge::Impl *)impl {
     self = [super init];
     if (self != nil) {
-        impl_ = impl;
+        bridge_impl = impl;
     }
     return self;
 }
@@ -274,7 +280,7 @@ struct MacOSDragBridge::Impl {
     sourceOperationMaskForDraggingContext:(NSDraggingContext)context {
     (void)session;
     (void)context;
-    return static_cast<NSDragOperation>(impl_->out.mask);
+    return static_cast<NSDragOperation>(bridge_impl->out.mask);
 }
 
 // 修饰键让渡（头文件修饰态注记）：AppKit 不自行按修饰键改写 operation——修饰键 → 动作的
@@ -291,7 +297,7 @@ struct MacOSDragBridge::Impl {
               operation:(NSDragOperation)operation {
     (void)session;
     (void)screen_point;
-    impl_->on_session_ended(static_cast<std::uint32_t>(operation));
+    bridge_impl->on_session_ended(static_cast<std::uint32_t>(operation));
 }
 
 // NSPasteboardItemDataProvider：AppKit 在目标索要某类型数据时调用（主线程；会话期单线程
@@ -299,7 +305,7 @@ struct MacOSDragBridge::Impl {
 // `provide_failed`，会话终态按失败收口（不把失败伪装成格式不存在）。
 - (void)pasteboard:(NSPasteboard *)pasteboard item:(NSPasteboardItem *)item provideDataForType:(NSPasteboardType)type {
     (void)pasteboard;
-    impl_->provide_for_type(type, item);
+    bridge_impl->provide_for_type(type, item);
 }
 
 @end

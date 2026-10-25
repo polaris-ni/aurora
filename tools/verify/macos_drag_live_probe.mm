@@ -352,9 +352,9 @@ auto leg_view(BridgeUnderTest &uut, Ledger &ledger) -> void {
 // `draggingFormation` 等），逐个实现只会把探针的判据面摊大；而桥只读下列三个，消息发送按
 // 运行期派发，不依赖编译期遵循声明。
 @interface AuroraProbeDragInfo : NSObject {
-    NSPasteboard *pasteboard_;
-    NSDragOperation mask_;
-    NSPoint location_;
+    NSPasteboard *probe_pasteboard;
+    NSDragOperation op_mask;
+    NSPoint drop_point;
 }
 - (instancetype)initWithPasteboard:(NSPasteboard *)pasteboard mask:(NSDragOperation)mask location:(NSPoint)location;
 - (NSPasteboard *)draggingPasteboard;
@@ -367,23 +367,23 @@ auto leg_view(BridgeUnderTest &uut, Ledger &ledger) -> void {
 - (instancetype)initWithPasteboard:(NSPasteboard *)pasteboard mask:(NSDragOperation)mask location:(NSPoint)location {
     self = [super init];
     if (self != nil) {
-        pasteboard_ = pasteboard;
-        mask_ = mask;
-        location_ = location;
+        probe_pasteboard = pasteboard;
+        op_mask = mask;
+        drop_point = location;
     }
     return self;
 }
 
 - (NSPasteboard *)draggingPasteboard {
-    return pasteboard_;
+    return probe_pasteboard;
 }
 
 - (NSDragOperation)draggingSourceOperationMask {
-    return mask_;
+    return op_mask;
 }
 
 - (NSPoint)draggingLocation {
-    return location_;
+    return drop_point;
 }
 
 @end
