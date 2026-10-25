@@ -334,7 +334,7 @@ auto leg_view(BridgeUnderTest &uut, Ledger &ledger) -> void {
                 "NSView.registeredDraggedTypes returned nothing readable");
         return;
     }
-    NSArray<NSPasteboardType> *recorded = (NSArray<NSPasteboardType> *)recorded_any;
+    auto *recorded = (NSArray<NSPasteboardType> *)recorded_any;
     const std::vector<std::string> &reg = aurora::drag::macos_registered_pasteboard_types();
     bool all = static_cast<std::size_t>(recorded.count) == reg.size();
     for (std::size_t i = 0; all && i < reg.size(); ++i) {
@@ -352,9 +352,9 @@ auto leg_view(BridgeUnderTest &uut, Ledger &ledger) -> void {
 // `draggingFormation` 等），逐个实现只会把探针的判据面摊大；而桥只读下列三个，消息发送按
 // 运行期派发，不依赖编译期遵循声明。
 @interface AuroraProbeDragInfo : NSObject {
-    NSPasteboard *_pasteboard;
-    NSDragOperation _mask;
-    NSPoint _location;
+    NSPasteboard *pasteboard_;
+    NSDragOperation mask_;
+    NSPoint location_;
 }
 - (instancetype)initWithPasteboard:(NSPasteboard *)pasteboard mask:(NSDragOperation)mask location:(NSPoint)location;
 - (NSPasteboard *)draggingPasteboard;
@@ -367,23 +367,23 @@ auto leg_view(BridgeUnderTest &uut, Ledger &ledger) -> void {
 - (instancetype)initWithPasteboard:(NSPasteboard *)pasteboard mask:(NSDragOperation)mask location:(NSPoint)location {
     self = [super init];
     if (self != nil) {
-        _pasteboard = pasteboard;
-        _mask = mask;
-        _location = location;
+        pasteboard_ = pasteboard;
+        mask_ = mask;
+        location_ = location;
     }
     return self;
 }
 
 - (NSPasteboard *)draggingPasteboard {
-    return _pasteboard;
+    return pasteboard_;
 }
 
 - (NSDragOperation)draggingSourceOperationMask {
-    return _mask;
+    return mask_;
 }
 
 - (NSPoint)draggingLocation {
-    return _location;
+    return location_;
 }
 
 @end
@@ -544,8 +544,14 @@ auto main(int argc, char **argv) -> int {
         (void)[NSApplication sharedApplication];  // 初始化 AppKit 与窗口服务器连接
 
         NSPasteboard *board = [NSPasteboard pasteboardWithUniqueName];
-        const BOOL wrote = [board setString:[NSString stringWithUTF8String:AURORA_PROBE_TEXT]
-                                    forType:@"public.utf8-plain-text"];
+        NSString *const probe_text = [NSString stringWithUTF8String:AURORA_PROBE_TEXT];
+        // 该常量是 ASCII，转换恒成功；判空只是为了让 `setString:forType:` 的 nonnull 形参
+        // 拿到一枚已验证的指针（clang-analyzer 不推定 `stringWithUTF8String:` 的返回值非空）。
+        if (probe_text == nil) {
+            note("probe text is not representable as NSString");
+            return 2;
+        }
+        const BOOL wrote = [board setString:probe_text forType:@"public.utf8-plain-text"];
         if (!wrote) {
             note("pasteboard write failed (no pasteboard server in this session)");
             return 2;

@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -81,15 +82,24 @@ auto backend_registered() -> bool & {
         return {};
     }
     const auto *base = reinterpret_cast<const std::uint8_t *>(raw);  // NOLINT(*-pro-type-reinterpret-cast)
-    const std::size_t n = std::strlen(raw);
-    return std::vector<std::uint8_t>(base, base + n);
+    // 经 span 而非 `base + n`：后者是裸指针算术（pro-bounds-pointer-arithmetic），而字节长度
+    // 只在这里出现一次，用视图表达区间既不越界也不必逐点豁免。
+    const std::span<const std::uint8_t> bytes(base, std::strlen(raw));
+    return {bytes.begin(), bytes.end()};
 }
 
 /// @brief std::vector<std::string> → NSArray<NSString *>（登记 / 广告 / 读取共用）。
 [[nodiscard]] auto ns_string_array(const std::vector<std::string> &values) -> NSArray<NSString *> * {
     NSMutableArray<NSString *> *out = [NSMutableArray arrayWithCapacity:values.size()];
     for (const std::string &value : values) {
-        [out addObject:[NSString stringWithUTF8String:value.c_str()]];
+        // `c_str()` 由标准保证非空（含空串），故下述分支不可达；保留它是为了让
+        // clang-analyzer 看清 `stringWithUTF8String:` 的 nonnull 形参拿到了有效指针
+        // （该 API 只在遇到非法 UTF-8 时返回 nil，登记表内的 UTI 恒为 ASCII）。
+        const char *raw = value.c_str();
+        if (raw == nullptr) {
+            continue;
+        }
+        [out addObject:[NSString stringWithUTF8String:raw]];
     }
     return out;
 }
@@ -154,7 +164,7 @@ struct MacOSDragBridge::Impl {
     [[nodiscard]] auto on_dragging_entered(void *sender) -> std::uint32_t;
     [[nodiscard]] auto on_dragging_updated(void *sender) -> std::uint32_t;
     auto on_dragging_exited() -> void;
-    [[nodiscard]] auto on_prepare_for_drag_operation(void *sender) -> bool;
+    [[nodiscard]] auto on_prepare_for_drag_operation(void *sender) const -> bool;
     auto on_perform_drag_operation(void *sender) -> void;
     [[nodiscard]] auto dispatch_drag_in(SystemDropPhase phase, std::shared_ptr<const DragPayload> payload)
         -> DragAction;
@@ -184,7 +194,7 @@ struct MacOSDragBridge::Impl {
 // 注记为 `//` 而非 `///`：门禁的文档注释扫描不认 ObjC 的 `@interface` 为可文档声明，
 // 挂 `///` 会落 DOC-R3（「/// 块未紧邻可文档声明」）。
 @interface AuroraSystemDragView : NSView {
-    aurora::detail::MacOSDragBridge::Impl *_impl;
+    aurora::detail::MacOSDragBridge::Impl *impl_;
 }
 - (instancetype)initWithBridge:(aurora::detail::MacOSDragBridge::Impl *)impl;
 @end
@@ -192,7 +202,7 @@ struct MacOSDragBridge::Impl {
 // 拖出源对象：`NSDraggingSource` 三方法（能力掩码 / 修饰键让渡 / 终态）+
 // `NSPasteboardItemDataProvider` 一方法（目标索要数据时经控件要约应答）。同上用 `//`。
 @interface AuroraMacDragSource : NSObject <NSDraggingSource, NSPasteboardItemDataProvider> {
-    aurora::detail::MacOSDragBridge::Impl *_impl;
+    aurora::detail::MacOSDragBridge::Impl *impl_;
 }
 - (instancetype)initWithBridge:(aurora::detail::MacOSDragBridge::Impl *)impl;
 @end
@@ -202,34 +212,34 @@ struct MacOSDragBridge::Impl {
 - (instancetype)initWithBridge:(aurora::detail::MacOSDragBridge::Impl *)impl {
     self = [super initWithFrame:NSZeroRect];
     if (self != nil) {
-        _impl = impl;
+        impl_ = impl;
     }
     return self;
 }
 
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
-    return static_cast<NSDragOperation>(_impl->on_dragging_entered(static_cast<void *>(sender)));
+    return static_cast<NSDragOperation>(impl_->on_dragging_entered(static_cast<void *>(sender)));
 }
 
 - (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
-    return static_cast<NSDragOperation>(_impl->on_dragging_updated(static_cast<void *>(sender)));
+    return static_cast<NSDragOperation>(impl_->on_dragging_updated(static_cast<void *>(sender)));
 }
 
 - (void)draggingExited:(id<NSDraggingInfo>)sender {
     (void)sender;
-    _impl->on_dragging_exited();
+    impl_->on_dragging_exited();
 }
 
 // accept 闸门（头文件差异①）：AppKit 只在 YES 后调 `performDragOperation`。闸门读
 // Enter / Updated 派发后写定的 `allowed`——此刻再派发一次会让控件收到语义重复的 Over。
 - (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)sender {
-    return _impl->on_prepare_for_drag_operation(static_cast<void *>(sender)) ? YES : NO;
+    return impl_->on_prepare_for_drag_operation(static_cast<void *>(sender)) ? YES : NO;
 }
 
 // 取数同步发生在桥内（头文件差异②）。返回值按 AppKit 惯例恒 YES：受理信号由 Drop 派发的
 // `is_handled` 承载（源侧没有「目标回传执行动作」的协议事件，同 Wayland）。
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
-    _impl->on_perform_drag_operation(static_cast<void *>(sender));
+    impl_->on_perform_drag_operation(static_cast<void *>(sender));
     return YES;
 }
 
@@ -254,7 +264,7 @@ struct MacOSDragBridge::Impl {
 - (instancetype)initWithBridge:(aurora::detail::MacOSDragBridge::Impl *)impl {
     self = [super init];
     if (self != nil) {
-        _impl = impl;
+        impl_ = impl;
     }
     return self;
 }
@@ -264,7 +274,7 @@ struct MacOSDragBridge::Impl {
     sourceOperationMaskForDraggingContext:(NSDraggingContext)context {
     (void)session;
     (void)context;
-    return static_cast<NSDragOperation>(_impl->out.mask);
+    return static_cast<NSDragOperation>(impl_->out.mask);
 }
 
 // 修饰键让渡（头文件修饰态注记）：AppKit 不自行按修饰键改写 operation——修饰键 → 动作的
@@ -277,11 +287,11 @@ struct MacOSDragBridge::Impl {
 // 终态（头文件差异③）：operation 为 none ⇒ 取消；否则按位序折算（Move 的确认与回滚在
 // 事件层 `deliver_session_end` 内部完成，桥只登记终态，同 Wayland 的 `dnd_finished`）。
 - (void)draggingSession:(NSDraggingSession *)session
-           endedAtPoint:(NSPoint)screenPoint
+           endedAtPoint:(NSPoint)screen_point
               operation:(NSDragOperation)operation {
     (void)session;
-    (void)screenPoint;
-    _impl->on_session_ended(static_cast<std::uint32_t>(operation));
+    (void)screen_point;
+    impl_->on_session_ended(static_cast<std::uint32_t>(operation));
 }
 
 // NSPasteboardItemDataProvider：AppKit 在目标索要某类型数据时调用（主线程；会话期单线程
@@ -289,7 +299,7 @@ struct MacOSDragBridge::Impl {
 // `provide_failed`，会话终态按失败收口（不把失败伪装成格式不存在）。
 - (void)pasteboard:(NSPasteboard *)pasteboard item:(NSPasteboardItem *)item provideDataForType:(NSPasteboardType)type {
     (void)pasteboard;
-    _impl->provide_for_type(type, item);
+    impl_->provide_for_type(type, item);
 }
 
 @end
@@ -302,7 +312,7 @@ auto MacOSDragBridge::Impl::install() -> bool {
     if (installed || view == nullptr) {
         return false;  // 视图缺失（骨架期宿主未建视图）：如实失败，由宿主记日志降级
     }
-    const std::vector<std::string> types = drag::macos_registered_pasteboard_types();
+    const std::vector<std::string> &types = drag::macos_registered_pasteboard_types();
     if (types.empty()) {
         return false;  // 登记表为空即「无可消费格式」：不登记（不谎报已有通路）
     }
@@ -321,7 +331,7 @@ auto MacOSDragBridge::Impl::uninstall() -> void {
     }
     reset_drag_in();
     if (view != nullptr) {
-        NSView *ns_view = static_cast<NSView *>(view);
+        auto *ns_view = static_cast<NSView *>(view);
         // `unregisterDraggedTypes` 的可用性按运行期探测（保守侧：老系统没有该 selector 时
         // 不注销——视图随窗口销毁，登记自然失效，不谎报已注销）。
         if ([ns_view respondsToSelector:@selector(unregisterDraggedTypes)]) {
@@ -347,6 +357,9 @@ auto MacOSDragBridge::Impl::uninstall() -> void {
     NSArray<NSPasteboardType> *types = [[info draggingPasteboard] types];
     std::vector<std::string> names;
     names.reserve(types.count);
+    // Objective-C fast enumeration 的循环变量由运行期逐次写入，`init-variables` 只认 C++ 的
+    // 声明式初始化，故此处恒报「未初始化」——它是语言形态差异，不是漏初始化。
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     for (NSPasteboardType type in types) {
         names.push_back(std_string(type));
     }
@@ -376,7 +389,7 @@ auto MacOSDragBridge::Impl::uninstall() -> void {
     handled = false;
     in.allowed = dispatch_drag_in(SystemDropPhase::Enter, nullptr);
     in.entered = true;
-    return static_cast<std::uint32_t>(drag::macos_drag_operation_from(in.allowed));
+    return drag::macos_drag_operation_from(in.allowed);
 }
 
 [[nodiscard]] auto MacOSDragBridge::Impl::on_dragging_updated(void *sender) -> std::uint32_t {
@@ -392,7 +405,7 @@ auto MacOSDragBridge::Impl::uninstall() -> void {
     // 每个悬停采样都派发一次 Over（与 X11 / Wayland 同口径：契约即「按指针采样频率到达」，
     // 轻重由控件负责，桥不替它节流）。
     in.allowed = dispatch_drag_in(SystemDropPhase::Over, nullptr);
-    return static_cast<std::uint32_t>(drag::macos_drag_operation_from(in.allowed));
+    return drag::macos_drag_operation_from(in.allowed);
 }
 
 auto MacOSDragBridge::Impl::on_dragging_exited() -> void {
@@ -407,7 +420,7 @@ auto MacOSDragBridge::Impl::on_dragging_exited() -> void {
     reset_drag_in();
 }
 
-[[nodiscard]] auto MacOSDragBridge::Impl::on_prepare_for_drag_operation(void *sender) -> bool {
+[[nodiscard]] auto MacOSDragBridge::Impl::on_prepare_for_drag_operation(void *sender) const -> bool {
     (void)sender;  // 闸门读会话态，不用 sender 内容
     if (!in.active) {
         return false;
@@ -437,6 +450,11 @@ auto MacOSDragBridge::Impl::on_perform_drag_operation(void *sender) -> void {
             continue;  // 防御性：mime 由 types 折算而来，理论上不可达
         }
         NSString *ns_type = [NSString stringWithUTF8String:chosen->c_str()];
+        // 同上：`stringWithUTF8String:` 只在非法 UTF-8 时返回 nil，而 `chosen` 取自登记表
+        // （恒为 ASCII 的 UTI）；判空是为了让取数 API 的 nonnull 形参拿到已验证的指针。
+        if (ns_type == nil) {
+            continue;  // 该 MIME 本轮读不到：按「源未给」记空，不把失败伪装成格式不存在
+        }
         if (mime == AURORA_MIME_TEXT_PLAIN) {
             // 文本：`stringForType:` 同步返回（nil = 源未给该类型，按空口径收下）。
             entries.emplace(mime, utf8_bytes([pb stringForType:ns_type]));
@@ -448,6 +466,8 @@ auto MacOSDragBridge::Impl::on_perform_drag_operation(void *sender) -> void {
                     NSPasteboardURLReadingFileURLsOnlyKey : @YES
                 }];
             std::vector<std::string> paths;
+            // 同上：fast enumeration 的循环变量由运行期逐次写入，不是漏初始化。
+            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             for (NSURL *url in urls) {
                 const std::string path = std_string([url path]);
                 if (!path.empty()) {
@@ -461,7 +481,8 @@ auto MacOSDragBridge::Impl::on_perform_drag_operation(void *sender) -> void {
             NSData *data = [pb dataForType:ns_type];
             if (data != nil) {
                 const auto *base = static_cast<const std::uint8_t *>([data bytes]);
-                entries.emplace(mime, std::vector<std::uint8_t>(base, base + [data length]));
+                const std::span<const std::uint8_t> bytes(base, [data length]);
+                entries.emplace(mime, std::vector<std::uint8_t>(bytes.begin(), bytes.end()));
             } else {
                 entries.emplace(mime, std::vector<std::uint8_t>{});
             }
@@ -505,7 +526,7 @@ auto MacOSDragBridge::Impl::begin_drag_out(const DragOffer &offer) -> bool {
     if (out.active || view == nullptr) {
         return false;
     }
-    NSView *ns_view = static_cast<NSView *>(view);
+    auto *ns_view = static_cast<NSView *>(view);
     if ([ns_view window] == nil) {
         // AppKit 要求视图在窗口内才能起会话；骨架期宿主未建窗口 ⇒ 如实失败、不谎报。
         AURORA_LOG_WARN("system-drag", "macOS: content view has no window; drag not started.");
@@ -592,7 +613,7 @@ auto MacOSDragBridge::Impl::teardown_drag_out(SystemDragOutcome outcome, DragAct
     // 必须晚于 AppKit 本次事件派发收尾（理由见文件头）。两条路径不能并进三元表达式——
     // `autorelease` 返回 `instancetype` 而 `release` 返回 `void`，混用即类型不匹配（已实测）。
     if (out.press_event != nullptr) {
-        NSEvent *event = static_cast<NSEvent *>(out.press_event);
+        auto *event = static_cast<NSEvent *>(out.press_event);
         out.press_event = nullptr;
         if (from_session_callback) {
             [event autorelease];
@@ -601,7 +622,7 @@ auto MacOSDragBridge::Impl::teardown_drag_out(SystemDragOutcome outcome, DragAct
         }
     }
     if (out.drag_item != nullptr) {
-        NSDraggingItem *drag_item = static_cast<NSDraggingItem *>(out.drag_item);
+        auto *drag_item = static_cast<NSDraggingItem *>(out.drag_item);
         out.drag_item = nullptr;
         if (from_session_callback) {
             [drag_item autorelease];
@@ -610,7 +631,7 @@ auto MacOSDragBridge::Impl::teardown_drag_out(SystemDragOutcome outcome, DragAct
         }
     }
     if (out.item != nullptr) {
-        NSPasteboardItem *paste_item = static_cast<NSPasteboardItem *>(out.item);
+        auto *paste_item = static_cast<NSPasteboardItem *>(out.item);
         out.item = nullptr;
         if (from_session_callback) {
             [paste_item autorelease];
@@ -619,7 +640,7 @@ auto MacOSDragBridge::Impl::teardown_drag_out(SystemDragOutcome outcome, DragAct
         }
     }
     if (out.source != nullptr) {
-        AuroraMacDragSource *source = static_cast<AuroraMacDragSource *>(out.source);
+        auto *source = static_cast<AuroraMacDragSource *>(out.source);
         out.source = nullptr;
         if (from_session_callback) {
             [source autorelease];
