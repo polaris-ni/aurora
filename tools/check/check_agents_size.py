@@ -66,6 +66,18 @@ def section_sizes(lines):
     return out
 
 
+def ascii_label(text):
+    """Render a possibly non-ASCII section heading as pure ASCII.
+
+    Gate output must stay ASCII. AGENTS.md's section headings are Chinese, and printing
+    them on a Windows runner -- whose stdout defaults to cp1252 -- raises
+    UnicodeEncodeError, which turns a size check that is *within* budget into a red job
+    (observed: 8152 / 8192 bytes reported, then the process died on the first heading).
+    Escaping keeps every character recoverable instead of dropping it.
+    """
+    return text.encode("ascii", "backslashreplace").decode("ascii")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Guard the AGENTS.md injection budget.")
     ap.add_argument("--root", default=None, help="aurora repository root (default: auto-detect)")
@@ -98,9 +110,9 @@ def main():
     print(f"{DOC_REL}: {size} bytes / limit {args.limit_bytes} bytes "
           f"({size * 100 // args.limit_bytes}% of budget, {len(sections)} blocks)")
     for name, nbytes in sections:
-        label = name if name else "(preamble)"
+        label = ascii_label(name if name else "(preamble)")
         share = nbytes * 100 // size if size else 0
-        print(f"  {label[:48]:<48} {nbytes:>6} bytes  {share:>3}%")
+        print(f"  {label:<48.48} {nbytes:>6} bytes  {share:>3}%")
 
     if size > args.limit_bytes:
         over = size - args.limit_bytes
