@@ -543,11 +543,12 @@ struct DragOutSession {
     drop->pt = POINT{.x = 0, .y = 0};
     drop->fNC = FALSE;  // 非客户区坐标（本库无屏幕坐标概念，交给目标解释）
     drop->fWide = TRUE;  // 宽字符路径
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) 结构体尾部即宽串缓冲区
+    // 结构体尾部即宽串缓冲区，且缓冲区只能按指针步进（reinterpret_cast + 指针算术同源）。
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-pro-bounds-pointer-arithmetic)
     auto *cursor = reinterpret_cast<wchar_t *>(reinterpret_cast<std::uint8_t *>(drop) + sizeof(DROPFILES));
     for (const auto &wide : wide_paths) {
         std::wmemcpy(cursor, wide.c_str(), wide.size() + 1U);
-        cursor += wide.size() + 1U;
+        cursor += wide.size() + 1U;  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     }
     *cursor = L'\0';  // 双 NUL 收尾
     GlobalUnlock(handle);
@@ -588,19 +589,23 @@ struct DragOutSession {
     header->bV5GreenMask = 0x0000FF00U;
     header->bV5BlueMask = 0x000000FFU;
     header->bV5AlphaMask = 0xFF000000U;
+    // 像素区只能由「全局内存基址 + 头长」定位，逐行拷贝即按行距步进；下标访问在该检查面上
+    // 与指针算术同罪，故整段按契约点名豁免一次，不逐行标记。
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     auto *pixels = base + sizeof(BITMAPV5HEADER);
     const auto *source = icon.pixels.data();
     for (int y = 0; y < icon.height; ++y) {
         // 源为 RGBA8 自顶向下；DIB 自底向上：目标第 y 行对应源第 (height-1-y) 行。
-        const auto *source_row = source + static_cast<std::size_t>(icon.height - 1 - y) * row_bytes;
-        auto *dest_row = pixels + static_cast<std::size_t>(y) * row_bytes;
+        const auto *source_row = source + (static_cast<std::size_t>(icon.height - 1 - y) * row_bytes);
+        auto *dest_row = pixels + (static_cast<std::size_t>(y) * row_bytes);
         for (int x = 0; x < icon.width; ++x) {
-            dest_row[x * 4U + 0U] = source_row[x * 4U + 2U];  // B
-            dest_row[x * 4U + 1U] = source_row[x * 4U + 1U];  // G
-            dest_row[x * 4U + 2U] = source_row[x * 4U + 0U];  // R
-            dest_row[x * 4U + 3U] = source_row[x * 4U + 3U];  // A（非预乘，helper 自行乘 alpha）
+            dest_row[(x * 4U) + 0U] = source_row[(x * 4U) + 2U];  // B
+            dest_row[(x * 4U) + 1U] = source_row[(x * 4U) + 1U];  // G
+            dest_row[(x * 4U) + 2U] = source_row[(x * 4U) + 0U];  // R
+            dest_row[(x * 4U) + 3U] = source_row[(x * 4U) + 3U];  // A（非预乘，helper 自行乘 alpha）
         }
     }
+    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     GlobalUnlock(handle);
     return handle;
 }
@@ -665,7 +670,8 @@ class DragOutFormatEnum final : public IEnumFORMATETC {
         }
         ULONG done = 0U;
         while (done < count && index_ < formats_.size()) {
-            out[done] = formats_[index_];
+            // `out` 是 COM 契约的调用方数组，只能按索引写入。
+            out[done] = formats_[index_];  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
             ++index_;
             ++done;
         }
@@ -715,6 +721,13 @@ class DragOutFormatEnum final : public IEnumFORMATETC {
 class DragOutDataObject final : public IDataObject {
   public:
     explicit DragOutDataObject(DragOutSession *session) : session_(session) {}
+
+    // COM 对象的身份与引用计数绑定，拷贝 / 移动都无意义（且会让两处各自释放同一份介质）。
+    // 五个特殊成员一并声明，避免只写析构而被读成「遗漏的一半」。
+    DragOutDataObject(const DragOutDataObject &) = delete;
+    auto operator=(const DragOutDataObject &) -> DragOutDataObject & = delete;
+    DragOutDataObject(DragOutDataObject &&) = delete;
+    auto operator=(DragOutDataObject &&) -> DragOutDataObject & = delete;
 
     ~DragOutDataObject() {
         // 仅拖拽线程在 `DoDragDrop` 返回后触碰本对象（OLE 会话已收摊），析构释放接管介质。
@@ -820,8 +833,10 @@ auto DragOutDataObject::fetch_from_offer(const std::string &mime) -> Result<std:
     }
     auto promise = std::make_shared<std::promise<Result<std::vector<std::uint8_t>>>>();
     auto future = promise->get_future();
+    // 指定初始化：`ProvideRequest` 的两个字段顺序不参与契约，具名后插入字段不会错配。
     detail::post_provide_request(detail::ProvideRequest{
-        mime, [promise](Result<std::vector<std::uint8_t>> answer) { promise->set_value(std::move(answer)); }});
+        .mime = mime,
+        .fulfill = [promise](Result<std::vector<std::uint8_t>> answer) { promise->set_value(std::move(answer)); }});
     // UI 线程不排空（宿主不调 `pump_reads`）时按墙钟超时自行失败：拖拽线程不得永久悬挂。
     if (future.wait_for(detail::system_drag_read_timeout()) != std::future_status::ready) {
         return make_error(ErrorCode::SystemDragReadFailed,
@@ -878,11 +893,11 @@ auto STDMETHODCALLTYPE DragOutDataObject::SetData(FORMATETC *format, STGMEDIUM *
             if (existing.owned && existing.medium.hGlobal != nullptr) {
                 GlobalFree(existing.medium.hGlobal);
             }
-            existing = std::move(entry);
+            existing = entry;  // 平凡可拷贝类型：`std::move` 对它无效果，故直接赋值
             return S_OK;
         }
     }
-    stored_.push_back(std::move(entry));
+    stored_.push_back(entry);
     return S_OK;
 }
 
@@ -1045,14 +1060,17 @@ struct DragImageBitmap {
     }
     out.width = icon.width;
     out.height = icon.height;
+    // 同上：`CreateDIBSection` 交回的是裸像素缓冲区，逐像素写入即按步长步进。
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     const auto *source = icon.pixels.data();
     auto *dest = static_cast<std::uint8_t *>(pixels);
     for (int i = 0; i < icon.width * icon.height; ++i) {
-        dest[i * 4 + 0] = source[i * 4 + 2];  // B
-        dest[i * 4 + 1] = source[i * 4 + 1];  // G
-        dest[i * 4 + 2] = source[i * 4 + 0];  // R
-        dest[i * 4 + 3] = source[i * 4 + 3];  // A（非预乘：MSDN 明示 helper 计算 alpha 时自乘 RGB）
+        dest[(i * 4) + 0] = source[(i * 4) + 2];  // B
+        dest[(i * 4) + 1] = source[(i * 4) + 1];  // G
+        dest[(i * 4) + 2] = source[(i * 4) + 0];  // R
+        dest[(i * 4) + 3] = source[(i * 4) + 3];  // A（非预乘：MSDN 明示 helper 计算 alpha 时自乘 RGB）
     }
+    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return out;
 }
 
@@ -1115,7 +1133,7 @@ class DragOutEngine {
     auto note_scale(float scale) -> void;
 
   private:
-    auto run_session(std::shared_ptr<DragOutSession> session) -> void;
+    auto run_session(const std::shared_ptr<DragOutSession> &session) -> void;
 
     std::mutex mutex_;  ///< 保护以下成员
     bool in_flight_ = false;  ///< 是否有会话在途
@@ -1152,7 +1170,9 @@ auto DragOutEngine::begin(const DragOffer &offer) -> bool {
     current_ = session;  // 取消路径按指针置位（会话态在途期间有效）
     in_flight_ = true;
     try {
-        thread_ = std::thread([this, session]() { run_session(std::move(session)); });
+        // 闭包内的 `session` 是 const（按值捕获 + 非 mutable），`std::move` 对它无效果；
+        // 会话的存活由闭包自身持有到线程结束，传引用即可。
+        thread_ = std::thread([this, session]() { run_session(session); });
     } catch (const std::system_error &) {
         // 线程创建失败（资源耗尽一类）：会话无从发起，如实回绝（事件层落 session-failed）。
         current_ = nullptr;
@@ -1179,7 +1199,7 @@ auto DragOutEngine::cancel() -> void {
     }
 }
 
-auto DragOutEngine::run_session(std::shared_ptr<DragOutSession> session) -> void {
+auto DragOutEngine::run_session(const std::shared_ptr<DragOutSession> &session) -> void {
     // 拖拽线程自持一次 OLE 初始化：`DoDragDrop` 要求调用线程有 COM 单元，与 UI 线程的
     // `OleInitialize`（拖入桥）互不相干——两个 STA 各管各的会话。
     const HRESULT ole = OleInitialize(nullptr);
@@ -1217,8 +1237,8 @@ auto DragOutEngine::run_session(std::shared_ptr<DragOutSession> session) -> void
     // static 值对象，其析构会在进程退出期 join 拖拽线程——彼时跨 TU 的事件层登记表
     // （drag_payload.cpp 的函数内 static）可能已先行销毁，拖拽线程补登终态即成
     // use-after-destruction；且 `DoDragDrop` 模态循环不保证在退出期自行返回。
-    static auto *const engine = new DragOutEngine();
-    return *engine;
+    static auto *const ENGINE = new DragOutEngine();
+    return *ENGINE;
 }
 
 [[nodiscard]] auto drag_out_in_flight_offer() -> std::optional<DragOffer> {

@@ -178,16 +178,16 @@ class DropPanel final : public aurora::LeafWidget {
 
 // 探针布局（固定窗口 480x300）：上 480x200 落放面板 + 下 480x100 拖源面板；自拖放泊点取
 // 落放面板中心（客户区 240,100），与两块面板 on_layout 的请求尺寸对应。
-constexpr int kProbeParkX = 240;
-constexpr int kProbeParkY = 100;
+constexpr int AURORA_PROBE_PARK_X = 240;
+constexpr int AURORA_PROBE_PARK_Y = 100;
 
 // 自拖放要约给出的文本：自动段断言「落放载荷与 provide 给出的文本一致」（要约 → 数据对象
 // → 拖入侧载荷的往返）。
-constexpr const char kDragOutProbeText[] = "aurora win32 drag-out self-drop payload";
+constexpr const char AURORA_DRAG_OUT_PROBE_TEXT[] = "aurora win32 drag-out self-drop payload";
 
 // 自拖放终态的墙钟截止：正常路径远小于 1s（发起即返回、无按键时 QueryContinueDrag 立即
 // 落放）；20s 是给慢机 / 远程桌面的余量，超时即判 FAIL 并打印，不悬挂。
-constexpr auto kDragOutDeadline = std::chrono::seconds{20};
+constexpr auto AURORA_DRAG_OUT_DEADLINE = std::chrono::seconds{20};
 
 /// @brief 终态结局 → 可读名（探针输出用；库侧无字符串化助手）。
 [[nodiscard]] auto outcome_name(aurora::SystemDragOutcome outcome) -> const char * {
@@ -251,7 +251,7 @@ class DragSourcePanel final : public aurora::LeafWidget {
                 return make_error(aurora::ErrorCode::SystemDragReadFailed,
                                   aurora::ErrorParams{{"mime", mime}, {"detail", "probe offers text/plain only"}});
             }
-            const std::string text = kDragOutProbeText;
+            const std::string text = AURORA_DRAG_OUT_PROBE_TEXT;
             return std::vector<std::uint8_t>(text.begin(), text.end());
         };
         return offer;
@@ -303,7 +303,7 @@ auto settle_drag_out_leg(DragSourcePanel &source, DropPanel &panel, const int ac
     check(panel.accept_queries > accept_queries_before, "accept query happened for the self-drop", failures);
     check(std::find(panel.phase_log.begin(), panel.phase_log.end(), "Drop") != panel.phase_log.end(),
           "self-drop reached this window's drop target (Drop phase)", failures);
-    check(panel.last_text == kDragOutProbeText,
+    check(panel.last_text == AURORA_DRAG_OUT_PROBE_TEXT,
           std::string{"drop payload round-trips the offered text/plain (got \""} + panel.last_text + "\")", failures);
 }
 
@@ -475,7 +475,7 @@ auto main(int argc, char **argv) -> int {
             drag_out_armed = true;
             panel->accept = aurora::DragAction::Copy;  // 判据 ③ 借去过 Move，落放腿改回 Copy
             accept_queries_before = panel->accept_queries;
-            POINT park{.x = kProbeParkX, .y = kProbeParkY};
+            POINT park{.x = AURORA_PROBE_PARK_X, .y = AURORA_PROBE_PARK_Y};
             ClientToScreen(hwnd, &park);
             SetCursorPos(park.x, park.y);
             jiggle_run.store(true, std::memory_order_relaxed);
@@ -495,7 +495,7 @@ auto main(int argc, char **argv) -> int {
                 drag_out_settled = true;
                 jiggle_run.store(false, std::memory_order_relaxed);
                 app.quit();
-            } else if (elapsed > kDragOutDeadline) {
+            } else if (elapsed > AURORA_DRAG_OUT_DEADLINE) {
                 check(false, "self drag-out terminal state delivered within the deadline", failures);
                 emit("[info] drag-out leg timed out with no terminal state (OS drag loop never settled?)");
                 drag_out_settled = true;
