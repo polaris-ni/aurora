@@ -245,6 +245,9 @@ auto run_selfdrawn_case(const std::function<void(file_dialog::detail::FilePicker
         picker = &view;
     };
     app.run();
+    // 观察者槽是进程级静态，其 lambda 捕获了**栈上**的 `picker`；不复位即留下悬垂引用
+    // （下一次会话构造会向已销毁的栈对象回调）。此处就地切断，与 PickerSeamGuard 同口径。
+    file_dialog::detail::session_observer() = nullptr;
 
     out.construct_count = file_dialog::detail::picker_construct_count();
     out.root_restored = app.scene().root_node().operator->() == root_before;

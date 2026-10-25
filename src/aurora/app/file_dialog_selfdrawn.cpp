@@ -460,6 +460,10 @@ FilePickerSession::FilePickerSession(Application &app, PickerMode mode, const fi
     }
 }
 
+// 抛出面：`detach()` 内是场景根的 shared_ptr 赋值与浮层摘除，模态收尾期无分配需求，
+// 实际不可抛（同 `Application::SingletonRestore::~SingletonRestore` 的处置口径）；
+// 析构又隐式 noexcept，逐层 noexcept 化会把调用面的异常语义改掉，故点名豁免。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 FilePickerSession::~FilePickerSession() { detach(); }
 
 auto FilePickerSession::attach() -> void {
