@@ -2176,3 +2176,65 @@ if (!res) {
 - **无桌面 / 测试友好**：`last_notification()` 在**所有**平台上维护（含投递失败的调用），是无桌面环境的主动观测面；`install_recording_backend()` 可强制只记录、不触达系统通知服务，供开发机上的字段往返测试。
 
 可编译样例见 `examples/demos/demo_notification.cpp`；契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.7。
+
+---
+
+## 45 网络请求与三态渲染（Resource 三态绑定）
+
+把一次 HTTP 交换直接接成 widget 可读的三态信号：`Loading / Ready(T) / Failed(Error)`。读取即登记依赖，落定即定点刷新，对位业界 `FutureBuilder`。取消（`reload()` 或宿主卸载）会真掐掉在途连接，而不只是丢掉结果。
+
+```cpp
+#include "aurora/aurora.h"
+#include "aurora/net/http_client.h"
+#include "aurora/net/http_binding.h"
+#include "aurora/state/resource.h"
+namespace au = aurora;
+namespace net_http = aurora::net::http;
+
+struct Quote { std::string text; int seq; std::uint16_t status; };
+
+// 应答投影：把 Response 折成你要的值类型。非 2xx 在这里自己判——
+// bind_resource 只把传输 / 协议层失败走错误侧（见下方「要点」）。
+[[nodiscard]] auto project(const net_http::Response &response) -> au::Result<Quote> {
+    if (response.status() / 100 != 2) {
+        return au::Result<Quote>{au::make_error(
+            au::ErrorCode::HttpRequestInvalid, "unexpected status " + std::to_string(response.status()))};
+    }
+    // 真实场景在此解析 response.body()（如 aurora::json::parse）→ Quote；解析失败同样 return 错误。
+    return au::Result<Quote>{Quote{
+        .text = std::string{response.body().begin(), response.body().end()},
+        .seq = 0,
+        .status = response.status(),
+    }};
+}
+
+net_http::Client client;  // 配置（超时 / 代理 / TLS）一次设好，复用
+const std::string url = "https://api.example.com/quote";
+
+// 一行绑成三态资源：发出即 Loading，落定即定点刷新；reload() 会取消前序在途连接并重发。
+auto quote = net_http::bind_resource<Quote>(client, net_http::Request::get(url), project);
+
+// 三分支读取即订阅：资源每次落定（或重发回到 Loading）时本 Effect 被重新运行，只刷这块文本。
+auto line = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"加载中…"});
+auto render = std::make_shared<au::Effect>([quote, line]() -> void {
+    if (quote.phase() == au::ResourcePhase::Loading) { line->set(au::LocalizedString{"加载中…"}); return; }
+    if (const auto *value = quote.value())          { line->set(au::LocalizedString{value->text}); return; }
+    if (const auto failure = quote.error())         { line->set(au::LocalizedString{"失败：" + failure->message}); return; }
+});
+render->run();  // 首帧求值；此后由资源状态自己驱动
+
+aurora::Button reload{aurora::ButtonProps{.label = au::LocalizedString{"reload"}}};
+reload.on_click = [quote]() mutable -> void { quote.reload(); };  // 掐在途连接 + 重发
+
+// widget 经 State 读它：au::Text{au::TextProps{.content = au::Reactive{line}}}
+```
+
+要点：
+
+- **`bind_resource` 是 `Resource<T>::from(producer)` 的网络特化**：它把 `Client::send` 的协程出口折算成 `Task<T>`，交给既有的 `Resource` 三态机。`state/` 不认识网络，这条通道不被 HTTP 独占（文件读取、进程间调用同样能产出 `Resource`）。
+- **取消是真的取消**：`reload()` 与宿主卸载走 `Task::cancel()`，经 `Cancellation` 掐掉在途那条连接；对端看到的是一次中断，不是一条被读完的连接。没有本绑定件时，`Resource` 装 HTTP 只丢结果、连接照跑完。
+- **非 2xx 不是失败**：`bind_resource` 把 4xx / 5xx 作为成功的 `Response` 交出，状态码归调用方在投影里判（上方 `project` 内的 `response.status()`）。只有传输与协议层失败才走 `Result` 的错误侧。
+- **widget 不读 Resource 本身**：`au::Show` / `au::Text` 等消费的是 `State<X>`（见 §9）。上方把三态读进一枚 `State<LocalizedString>` `line`，widget 经 `au::Reactive{line}` 读它——这就是「异步结果写入响应式状态 → UI 是状态的纯函数」的标准接法。
+- **取图一行版**：图片走 `au::set_default_image_fetcher(au::net::http::image_fetcher())`（`image_fetcher()` 返回的形态与 `au::ImageFetcher` 别名同构），`ImageView` 的 URL 入口即被这条通道接住，无需手写 `bind_resource`。
+
+全部形态（流式 `deliver_stream`、事件流 `deliver_sse`、WebSocket `deliver_ws`、回调式 `deliver`）见 [`include/aurora/net/http_binding.h`](include/aurora/net/http_binding.h) 与 [`specification/02-state.md`](specification/02-state.md) §5.4；可编译样例见 `examples/demos/demo_net_http.cpp`。
