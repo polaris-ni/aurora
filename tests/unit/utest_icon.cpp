@@ -286,7 +286,7 @@ AURORA_TEST_CASE(icon_default_color_follows_theme_role) {
         Icon ic{"square"};
         ic.set_size(IconSize::S24);
         if (explicit_color.has_value()) {
-            ic.set_color(*explicit_color);
+            ic.set_color(explicit_color);
         }
         Node root{std::make_shared<ThemeScope>(theme, std::move(ic))};
         const Image img = render_to_image(root, 24, 24);
