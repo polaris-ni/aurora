@@ -120,6 +120,20 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_drag)
     endif ()
 
+    # ---- Win32 OS 级最近文档投影（`SHAddToRecentDocs` + Recent 目录撤销）----
+    # 自动段以**独立取证**（探针自带 Recent 目录枚举 + `IShellLinkW` 目标解析）证明「投影后 OS 里
+    # 真的出现条目、撤销后消失、重复投影不多投」，并核对桥的进程级投影记账与 store 不受投影影响；
+    # 探针不建窗口，顺带覆盖无宿主进程的通路自举。用户关掉「最近使用的项目」（`Start_TrackDocs=0`）
+    # 时 API 静默无操作，自动段如实以退出码 2 报环境不可用，不改判 PASS。
+    # 记账观测口 `win32_recent_documents_projected_count()` 是库内部契约（src/aurora/window/detail/），
+    # 故需 src 包含目录（口径同 csd/WASAPI 探针）；shell32 / ole32 已随 aurora PUBLIC 链接。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_recent_documents
+                "${_aurora_verify_dir}/win32_recent_documents_live_probe.cpp")
+        target_include_directories(aurora_verify_win32_recent_documents PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_recent_documents)
+    endif ()
+
     # ---- Win32 OS 级全局热键（真实窗口 + 隐藏消息窗口接 WM_HOTKEY；「应用无焦点也触发」+ 排空语义）----
     # 自动段验收注册表 API 面（enabled / add / 判重 / 无效主键 / remove / clear / drain / 注入降级）；
     # 「OS 真把按键投到本进程」靠 --interactive 人工段（把焦点切到别的进程再按）。
