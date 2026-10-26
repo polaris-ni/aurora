@@ -1,20 +1,24 @@
 #include "aurora/window/detail/recent_documents_translate.h"
 
 #include <algorithm>
-#include <optional>
 #include <utility>
 
 namespace aurora::recent_documents {
 
 namespace {
 
-/// @brief 进程级单槽的存取入口。
+/// @brief 进程级单槽的存取入口（**值持有**）。
 ///
-/// 用 `optional` 值持有而非裸指针，避免桥把栈上对象登记进来后析构造成悬垂；放在函数局部静态而非
-/// 命名空间级变量，与 `win32_recent_documents.cpp` 的 `state()` 同纪律（避免全局可变量）。
-/// 单线程 UI 契约下不加锁。
-auto slot() -> std::optional<ProjectionBackend> & {
-    static std::optional<ProjectionBackend> backend;  // 单线程 UI：无锁（与 RecentDocuments 单例同款纪律）
+/// 值持有而非裸指针：桥若把栈上对象登记进来，析构后槽里就是悬垂引用。放在函数局部静态而非命名空间级
+/// 变量，与 `drag_payload.cpp` 的 `drag_out_backend_slot()`、`win32_recent_documents.cpp` 的 `state()`
+/// 同纪律（免全局可变量、规避静态初始化顺序问题）。单线程 UI 契约下不加锁。
+///
+/// 「是否已登记」用 `project` 回调判空自证，不套 `optional`：槽每次经 `slot()` 取回的是引用表达式，
+/// `slot().has_value() ? &*slot() : nullptr` 里那次解引用会被 `bugprone-unchecked-optional-access` 判成
+/// unchecked access（分析器认不出它与同一行的 `has_value()` 是同一个对象），而值持有 + 哨兵字段既无
+/// 解引用、也不引入「槽有位又有值」的第二真源。
+auto slot() -> ProjectionBackend & {
+    static ProjectionBackend backend;  // 单线程 UI：无锁（与 RecentDocuments 单例同款纪律）
     return backend;
 }
 
@@ -40,10 +44,13 @@ auto build_projection_plan(const std::vector<std::string> &documents, std::size_
     return plan;
 }
 
-auto register_projection_backend(ProjectionBackend backend) -> void { slot().emplace(std::move(backend)); }
+auto register_projection_backend(ProjectionBackend backend) -> void { slot() = std::move(backend); }
 
-auto unregister_projection_backend() -> void { slot().reset(); }
+auto unregister_projection_backend() -> void { slot() = ProjectionBackend{}; }
 
-auto projection_backend() -> const ProjectionBackend * { return slot().has_value() ? &*slot() : nullptr; }
+auto projection_backend() -> const ProjectionBackend * {
+    const auto &backend = slot();
+    return backend.project != nullptr ? &backend : nullptr;
+}
 
 }  // namespace aurora::recent_documents

@@ -58,15 +58,16 @@ struct ProjectionBackend {
     std::function<Result<void>()> clear;
 };
 
-/// @brief 登记投影通路（覆盖式；进程级单槽）。
+/// @brief 登记投影通路（覆盖式；进程级单槽，通路整体**值持有**在槽内）。
 /// @param backend 待登记的通路（`max_entries` 与两个回调由桥填）。
 auto register_projection_backend(ProjectionBackend backend) -> void;
 
-/// @brief 注销投影通路（清空单槽；幂等，未登记时为空操作）。
+/// @brief 注销投影通路（把单槽整体复位为默认值，含 `max_entries`；幂等，未登记时为空操作）。
 auto unregister_projection_backend() -> void;
 
 /// @brief 当前登记的投影通路。
-/// @return 已登记时指向该后端（进程生命周期内稳定）；未登记时为 nullptr。
+/// @return 已登记时指向槽内后端（该指针只在下一次登记 / 注销前有效，槽本身进程级常驻）；
+///         未登记、或登记的通路缺 `project` 回调时为 nullptr。
 [[nodiscard]] auto projection_backend() -> const ProjectionBackend *;
 
 }  // namespace aurora::recent_documents
