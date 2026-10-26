@@ -631,10 +631,10 @@ CI 配置位于 `.github/workflows/`：
 | 落码 | 新增公共 API / widget / 核心逻辑必配单测；demo 与公共源一对一 | `CODING_STANDARDS.md` §3 | `utest_*` 存在并经 GLOB 接入 CTest |
 | 落码 | 新增或改动 widget / 类型 / 属性键 → 刷新 API schema | [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §3.6 | `check_api_schema_sync` 绿 |
 | 验证 | 跑全量测试与全部静态门禁、lint、format-check | `AGENTS.md` §3 | 全绿；多目标平台与真机探针口径见本文件 §14.5 |
-| 回写 | 按改动类型回写 `codespec/` 文档 | `AGENTS.md` §3.1 第三列 | `check_codespec_xref` / `check_code_doc_sync` 绿 |
+| 回写 | 按改动类型回写 `codespec/` 文档 | 本节 §14.6 第三列 | `check_codespec_xref` / `check_code_doc_sync` 绿 |
 | 回写 | 版本与变更记录更新；破坏性变更给出迁移路径 | `CHANGELOG.md` SemVer 规则、[`SPECIFICATIONS.md`](SPECIFICATIONS.md) §12 | `check_version_consistency` 绿 |
 | 回写 | 按 Conventional Commits 写提交信息 | `CODING_STANDARDS.md` §10 | `git log` 可归类、无任务编号词 |
-| 归档 | 提案状态转 `已归档`，并核对提案列出的回写落点确已落地 | `AGENTS.md` §3.1 第三列 | 状态 `已归档`；落点文档与代码现状一致 |
+| 归档 | 提案状态转 `已归档`，并核对提案列出的回写落点确已落地 | 本节 §14.6 第三列 | 状态 `已归档`；落点文档与代码现状一致 |
 
 ### 15.1 什么可以跳过
 
