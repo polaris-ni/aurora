@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-019 |
 | 提出日期 | 2026-10-15 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 |
 | 影响面 | 新增公共模块 `icon/`（命名空间 `aurora::icon`；公共头 `icon.h` 与 `icon_svg.h` + `src/aurora/icon/` 实现）；新增公共控件 `Icon` 与 `IconButton`（第 75、76 个 widget，`aurora_api.json` 与 `umbrella_manifest.txt` 同步收录）；新增应用侧语义名注册表 `IconRegistry`（库不预置任何条目）；`Widget` 既有 `accessibility_label()` 虚接口承载图标语义标注（`Icon` 覆写之）；`Chip` 头像槽增 `IconData` 入口（保留既有字符串入口）；`codespec/errors.toml` 新增 `icon-*` 错误组；手动走查新增图标卷。**不内置任何图标字体或 SVG 资产**：`third_party/` 不新增组件、`THIRD_PARTY_LICENSES.md` 不动、无子集化管线、无生成映射头、无编译开关。不改 `Painter` / `Surface` / 布局 / 事件既有语义，不改 CSD 标题栏逐位视觉契约 |
 
@@ -49,7 +49,7 @@
 
 1. 新增控件 `IconButton`（第 76 个 widget）与状态机：悬停取 `on_surface`、按下取 `primary`、禁用沿用既有禁用态透明度规则、焦点环复用 `ColorRoles::focus_ring`；取色两态语义在全部四态下均须成立。
 2. 尺寸档位与光学补偿：提供 16 / 20 / 24 / 32 px 基准档；跨两档以上跨度的字形绘制引入光学中心垂直补偿（按字体度量校正字形基线与视觉中心的偏差），补偿量参数化而非硬编码。
-3. 品牌扩展复用 `ThemeExtension<IconSet>`（`include/aurora/theming/theme_extension.h`）：应用可注入自有图标集覆盖默认映射，未注册时回退空集，零字符串键。
+3. 品牌扩展经 `IconRegistry` 承担：应用以自有资产注册语义名即完成品牌化，不为图标域另建一个 `ThemeExtension<IconSet>` 名字层。理由：`IconRegistry` 已在 `codespec/specification/04-widget.md`、`codespec/specification/08-tooling.md` 与 `codespec/CODING_STANDARDS.md` 中认定为唯一语义名层；并行引入第二个名字层会形成两套解析路径，且其「覆盖默认映射」诉求与 `IconRegistry` 的「应用自持全部映射、库不预置条目」语义重复。`ThemeExtension` 机制的通用性已由既有图表色板扩展验证，图标域无需再占用一个扩展类型。
 4. 无障碍接线：`Widget` **既有**虚接口 `accessibility_label()`（含 `set_accessibility_label()` 与显式声明回退链，`include/aurora/widget/widget.h`）作为语义标注载体，`Icon` 覆写返回 `semantic_label`。纯装饰图标须保持 `accessibility_is_semantic()` 返回 false，仅当设置了语义标注时才进无障碍树。
 5. 交付 `itest_icon_theme.cpp` 等集成测试，覆盖状态迁移、主题切换重绘与 DisplayList 命令复用。
 

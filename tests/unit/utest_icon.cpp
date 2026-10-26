@@ -5,14 +5,21 @@
 /// 布局尺寸、序列化往返、语义标注接线与点击目标语义（wants_click / activate）
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "aurora/core/error_codes.gen.h"
+#include "aurora/core/image.h"
 #include "aurora/core/json.h"
+#include "aurora/core/types.h"
+#include "aurora/event/event.h"
 #include "aurora/icon/icon.h"
 #include "aurora/icon/icon_svg.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/offscreen.h"
+#include "aurora/theming/theme.h"
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/icon_widget.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -33,6 +40,25 @@ auto simple_svg(int size) -> std::vector<std::uint8_t> {
                             R"(" height=")" + std::to_string(size) + R"("><rect x="0" y="0" width=")" +
                             std::to_string(size) + R"(" height=")" + std::to_string(size) +
                             R"(" fill="#FF0000"/></svg>)";
+    return {src.begin(), src.end()};
+}
+
+/// 读取图像中指定位置的像素（RGBA8 直色）。
+auto pixel_at(const Image &img, int x, int y) -> Color {
+    const std::size_t idx =
+        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(img.width)) + static_cast<std::size_t>(x)) * 4U;
+    return Color{img.pixels[idx], img.pixels[idx + 1], img.pixels[idx + 2], img.pixels[idx + 3]};
+}
+
+/// 三通道是否相等（忽略 alpha，供「取色正确」断言使用）。
+auto same_rgb(const Color &a, const Color &b) -> bool { return a.r == b.r && a.g == b.g && a.b == b.b; }
+
+/// 白色铺满整框的 SVG：tint 为乘法着色，白底使结果严格等于目标取色。
+auto full_white_svg(int size) -> std::vector<std::uint8_t> {
+    const std::string src = R"(<svg xmlns="http://www.w3.org/2000/svg" width=")" + std::to_string(size) +
+                            R"(" height=")" + std::to_string(size) + R"("><rect x="0" y="0" width=")" +
+                            std::to_string(size) + R"(" height=")" + std::to_string(size) +
+                            R"(" fill="#FFFFFF"/></svg>)";
     return {src.begin(), src.end()};
 }
 
@@ -247,6 +273,85 @@ AURORA_TEST_CASE(icon_button_serialize_roundtrip) {
     AURORA_TEST_CHECK_NEAR(require_field<float>(back, "padding"), 6.0F, 1e-4F);
     AURORA_TEST_CHECK_EQ(require_field<bool>(back, "enabled"), false);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(back, "semantic_label"), "Close");
+}
+
+// ---- 取色语义（默认跟随主题 / 显式覆盖 / 四态） ----
+
+AURORA_TEST_CASE(icon_default_color_follows_theme_role) {
+    icon::IconRegistry::clear();
+    icon::IconRegistry::register_icon("square", icon::IconData::svg(full_white_svg(32), "square"));
+
+    // 白底铺满 24×24 画布：中心像素即生效取色。
+    auto sample_icon = [](const Theme &theme, std::optional<Color> explicit_color) -> Color {
+        Icon ic{"square"};
+        ic.set_size(IconSize::S24);
+        if (explicit_color.has_value()) {
+            ic.set_color(*explicit_color);
+        }
+        Node root{std::make_shared<ThemeScope>(theme, std::move(ic))};
+        const Image img = render_to_image(root, 24, 24);
+        return pixel_at(img, 12, 12);
+    };
+
+    // 未显式设色：取本档主题 on_surface_variant，明 / 暗两档各自成立且互不相同。
+    const Color light_px = sample_icon(Theme::light(), std::nullopt);
+    const Color dark_px = sample_icon(Theme::dark(), std::nullopt);
+    AURORA_TEST_CHECK_TRUE(same_rgb(light_px, Theme::light().roles.on_surface_variant));
+    AURORA_TEST_CHECK_TRUE(same_rgb(dark_px, Theme::dark().roles.on_surface_variant));
+    AURORA_TEST_CHECK_MSG(!same_rgb(light_px, dark_px),
+                          "light/dark on_surface_variant differ => default color follows theme");
+
+    // 显式着色覆盖主题角色。
+    const Color explicit_px = sample_icon(Theme::light(), Color{12, 34, 56, 255});
+    AURORA_TEST_CHECK_EQ(explicit_px.r, 12);
+    AURORA_TEST_CHECK_EQ(explicit_px.g, 34);
+    AURORA_TEST_CHECK_EQ(explicit_px.b, 56);
+
+    icon::IconRegistry::clear();
+}
+
+AURORA_TEST_CASE(icon_button_state_colors) {
+    icon::IconRegistry::clear();
+    icon::IconRegistry::register_icon("square", icon::IconData::svg(full_white_svg(32), "square"));
+
+    // 40×40 画布 = 24 dp 图标 + 两侧 8 dp 内边距；中心像素落在图标中心。
+    auto pixel_for = [](bool hover, bool press, bool disabled) -> Color {
+        IconButton b{"square"};
+        b.set_size(IconSize::S24);
+        if (disabled) {
+            b.set_enabled(false);
+        }
+        if (hover) {
+            b.on_hover_change(true);
+        }
+        if (press) {
+            MouseEvent e;
+            e.action = MouseAction::Press;
+            e.position = Point{.x = 20.0F, .y = 20.0F};
+            b.on_pointer_event(e);
+        }
+        Node root{std::make_shared<ThemeScope>(Theme::light(), std::move(b))};
+        const Image img = render_to_image(root, 40, 40);
+        return pixel_at(img, 20, 20);
+    };
+
+    const auto roles = Theme::light().roles;
+    const Color normal = pixel_for(false, false, false);
+    const Color hover = pixel_for(true, false, false);
+    const Color press = pixel_for(false, true, false);
+    const Color disabled = pixel_for(false, false, true);
+
+    // 四态取色：常态 on_surface_variant、悬停 on_surface、按下 primary、禁用降透明度后压暗。
+    AURORA_TEST_CHECK_TRUE(same_rgb(normal, roles.on_surface_variant));
+    AURORA_TEST_CHECK_TRUE(same_rgb(hover, roles.on_surface));
+    AURORA_TEST_CHECK_TRUE(same_rgb(press, roles.primary));
+    // 禁用态经 0.38 透明度叠加后整体压暗：三通道不高于常态且确有变暗。
+    AURORA_TEST_CHECK_MSG(disabled.r <= normal.r && disabled.g <= normal.g && disabled.b <= normal.b,
+                          "disabled icon not brighter than normal");
+    AURORA_TEST_CHECK_MSG(disabled.r < normal.r || disabled.g < normal.g || disabled.b < normal.b,
+                          "disabled icon dimmed vs normal (alpha applied)");
+
+    icon::IconRegistry::clear();
 }
 
 }  // namespace aurora::test_cases::utest_icon
