@@ -142,6 +142,18 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_recent_documents)
     endif ()
 
+    # ---- Win32 原生菜单栏（真实隐藏窗口 + CreateMenu/SetMenu 建树 + WM_COMMAND 回投）----
+    # 自动段以**独立取证**（探针直接读 GetMenu/GetMenuItemCount/GetSubMenu 核对原生菜单层级，不读桥私有
+    # 记账）证明「install 真在窗口上建出 HMENU、层级条数对齐」；逐终端项调桥的 on_command（消息泵正是
+    # 转发到这里）验证「稳定 id 正确回到路由回调、空 id 不回投」；并覆盖重复 install 替换旧树、uninstall
+    # 摘下菜单。无头 CI 走 utest_menu_bar_translate.cpp 的假后端，本探针补真实 Win32 那条接缝。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_menu_bar
+                "${_aurora_verify_dir}/win32_menu_bar_live_probe.cpp")
+        target_include_directories(aurora_verify_win32_menu_bar PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_menu_bar)
+    endif ()
+
     # ---- Win32 OS 级全局热键（真实窗口 + 隐藏消息窗口接 WM_HOTKEY；「应用无焦点也触发」+ 排空语义）----
     # 自动段验收注册表 API 面（enabled / add / 判重 / 无效主键 / remove / clear / drain / 注入降级）；
     # 「OS 真把按键投到本进程」靠 --interactive 人工段（把焦点切到别的进程再按）。

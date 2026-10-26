@@ -19,6 +19,7 @@ aurora/app/generate_ui.h
 aurora/app/hot_reload.h
 aurora/app/menu.h
 aurora/app/mime_types.h
+aurora/app/native_menu_bar.h
 aurora/app/notification.h
 aurora/app/os_hotkey.h
 aurora/app/perf_overlay.h

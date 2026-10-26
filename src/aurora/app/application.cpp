@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "aurora/app/detail/file_picker.h"
+#include "aurora/app/native_menu_bar.h"  // 把应用级命令注册表接到原生菜单栏门面（点击路由出口）
 #include "aurora/app/window_geometry.h"
 #include "aurora/core/log.h"
 #include "aurora/media/audio.h"
@@ -88,6 +89,9 @@ auto apply_host_geometry(WindowHost &host, const WindowGeometry &g, const std::s
 // =============================================================================
 
 auto Application::register_host(Scene scene, std::unique_ptr<Window> window, const WindowOptions &opts) -> WindowId {
+    // 把应用级命令注册表接到原生菜单栏门面：菜单项点击经此后按 id 反查命令（原生与自绘路径共用出口）。
+    // 幂等：每登记一个宿主都重设同一指针（commands_ 是全应用唯一真源），开销仅一次赋值。
+    NativeMenuBar::instance().set_command_registry(&commands_);
     const WindowId id = next_id_++;
     // 帧统计归属：登记第二个窗口起，全部宿主切到自有实例（含已登记的），避免多窗数据互相污染；
     // 单窗口用法刻意保留写入全局单例的历史语义（既有 PerfOverlay / bench / 性能集成测试直读之）。

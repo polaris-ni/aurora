@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-037 |
 | 提出日期 | 2026-10-26 |
-| 当前状态 | 已提议 |
+| 当前状态 | 实施中 |
 | 关联需求 | SPEC.FEAT.APP.NATIVE-MENU-BAR.001 |
 | 影响面 | `include/aurora/window/platform.h`（`PlatformCapabilities` 增 `native_menu_bar` 位）；`include/aurora/app/` 新增原生菜单栏门面一枚；`src/aurora/window/detail/` 新增零平台头折算层与 Win32 / macOS 两枚平台桥；`codespec/errors.toml` 及生成物扩两枚码；`tests/unit/` 新增折算层与能力位用例；`tools/verify/` 新增两枚真机探针；`codespec/` 三处回写 |
 

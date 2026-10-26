@@ -394,7 +394,7 @@ au::Text("Welcome").font_size(24).bold();
 | `ProgressDialog` | 模态进度对话框（`widget/drawer.h`）；`message`、`progress`（0..1，-1 = 不确定态）、`open`、`cancellable`；回调 `on_cancel` |
 | `OverlayHost` | 浮层宿主（`widget/popup.h`）；`add_overlay(Node)` 追加浮层并返回**可移除序号**（`std::optional<std::size_t>`，宿主尚无基础内容时为 `std::nullopt`——此时新节点落在序号 0，而 0 恒被解释为**基础内容**、`remove_overlay` 拒收，返回它等于给调用方一个永远删不掉的下标），`remove_overlay(index)` 拒收 0 与越界序号；允许多子 |
 
-`MenuBar`（自绘，`widget/menu_bar.h`）的数据侧是**应用级单一真源**：菜单项结构 `MenuItem`（`app/menu.h`）与顶级菜单结构 `Menu`（`widget/menu_bar.h`）既被自绘 `MenuBar` 消费，也被 `Modifier` 层的上下文菜单与 `SystemTray` 共用；纯数据模型 `MenuModel` 与投影函数（`to_menu_model` / `to_menu_models` / `from_menu_model`）从**同一批结构**投影出「无行为、无渲染提示」的数据视图，供原生菜单桥消费（契约与投影方向见 [`06-app-platform.md`](06-app-platform.md) §8.4）。控件自身不参与投影：`MenuBar` 存的仍是 `std::vector<Menu>`，其构造、绘制与命中逻辑与投影无关；`Menu` / `MenuItem` 为原生桥而增的 `id` 字段不参与自绘任何分支。自绘与原生是同一份模型的**二显一存**，不另立平行菜单 API（命令行入口在 [`GUIDELINE.md`](GUIDELINE.md)）。
+`MenuBar`（自绘，`widget/menu_bar.h`）的数据侧是**应用级单一真源**：菜单项结构 `MenuItem`（`app/menu.h`）与顶级菜单结构 `Menu`（`widget/menu_bar.h`）既被自绘 `MenuBar` 消费，也被 `Modifier` 层的上下文菜单与 `SystemTray` 共用；纯数据模型 `MenuModel` 与投影函数（`to_menu_model` / `to_menu_models` / `from_menu_model`）从**同一批结构**投影出「无行为、无渲染提示」的数据视图，供原生菜单桥消费（契约与投影方向见 [`06-app-platform.md`](06-app-platform.md) §8.4）。控件自身不参与投影：`MenuBar` 存的仍是 `std::vector<Menu>`，其构造、绘制与命中逻辑与投影无关；`Menu` / `MenuItem` 为原生桥而增的 `id` 字段不参与自绘任何分支。自绘与原生是同一份模型的**二显一存**，不另立平行菜单 API（命令行入口在 [`GUIDELINE.md`](GUIDELINE.md)）。原生渲染路径的现状（契约见 [`06-app-platform.md`](06-app-platform.md) §8.4）：Win32（`HMENU` 桥，经 `app/native_menu_bar.h` 门面安装）已落地；macOS 待窗口壳实写、Linux 无 OS 级菜单栏机制，二者能力位如实为 `false` 并**回落本自绘路径**——此时本控件即唯一渲染路径，行为不变；安装入口在桥缺位平台明确报错（`native-menu-unsupported`）而非静默。
 
 ### 3.7 平台与调试
 

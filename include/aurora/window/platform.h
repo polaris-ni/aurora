@@ -40,6 +40,15 @@ struct PlatformCapabilities {
     /// 不是 OS 提供的机制，写它要自备跨进程合并与文件锁而收益只有一处选择器显示，代价不成立，
     /// 故如实缺位——应用内列表在全平台照常工作，不因此降级。
     bool recent_documents_os_projection = false;
+    /// @brief 存在 OS 原生菜单栏机制，且本库已把 `NativeMenuBar` 接到该机制（Win32 `HMENU` 桥）。
+    ///
+    /// 能力位只表「机制是否存在」：运行期不可用（菜单安装失败、无窗口宿主等）仍走 `Result` 错误，
+    /// 二者不互相替代（与 `system_drag_in` 同款口径）。**只在桥已落地的方向翻位**——
+    /// Win32 / D3D11 由 `HMENU` 桥接线（两者共用同一宿主，故同翻）；`MacOS` 本次**保持 false**：
+    /// `NSMenu` 桥未落地，按「未落地方向不预先声称支持」的纪律不预翻，桥落地时再翻（macOS 窗口壳
+    /// 实写是其前置）；`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：Linux 侧无 OS 级
+    /// 菜单栏机制（GNOME 取消全局菜单、GTK4 窗口内自绘即 GTK 同款形态），回落自绘 `MenuBar`，故如实缺位。
+    bool native_menu_bar = false;
 };
 
 /// @brief 平台与运行环境快照（显式查询，跳过 Surface 探测，specification/06-app-platform.md §5）。
@@ -112,6 +121,10 @@ struct Platform {
         // macOS 静默失败且调用方无从降级）。Linux 三形态与 Glfw / Wasm / Headless 恒 false：OS 侧
         // 无该机制（XDG `recently-used.xbel` 是 GTK 生态共读文件而非 OS 机制），应用内列表照常工作。
         c.recent_documents_os_projection = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
+        // 原生菜单栏：仅 Win32 / D3D11 落了桥（`HMENU`，两者共用同一宿主故同翻）。MacOS 本次保持
+        // false——桥未落地即不预翻（机制缺位若谎报为「在」，`NativeMenuBar::install` 会在 macOS
+        // 静默失败且调用方无从降级）。Linux 三形态与 Glfw / Wasm / Headless 恒 false：无 OS 级菜单栏机制。
+        c.native_menu_bar = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
         return c;
     }
 };

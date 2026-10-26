@@ -5836,6 +5836,24 @@
       "hint": "The platform offers no recent-documents mechanism (Linux/macOS) or its bridge is not wired; the in-app RecentDocuments list still works unchanged"
     },
     {
+      "enum": "NativeMenuUnsupported",
+      "slug": "native-menu-unsupported",
+      "category": "platform",
+      "severity": "error",
+      "retryable": false,
+      "message": "Native menu bar is not supported on this platform",
+      "hint": "The platform offers no OS-level menu bar mechanism (Linux/macOS/Wasm/Headless) or its bridge is not wired; fall back to the self-drawn MenuBar control"
+    },
+    {
+      "enum": "NativeMenuInstallFailed",
+      "slug": "native-menu-install-failed",
+      "category": "platform",
+      "severity": "error",
+      "retryable": false,
+      "message": "Native menu bar could not be installed: '{detail}'",
+      "hint": "The OS menu mechanism exists but the menu tree could not be attached to the window; check the window handle and menu model"
+    },
+    {
       "enum": "RuntimeCoroutineException",
       "slug": "runtime-coroutine-exception",
       "category": "runtime",

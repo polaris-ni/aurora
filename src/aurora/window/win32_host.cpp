@@ -1,11 +1,13 @@
 #include "aurora/window/win32_host.h"
 
 #include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/交互/绘制装配层
+#include "aurora/window/detail/menu_bar_translate.h"  // 折算层（进程级渲染通路单槽）
 #include "aurora/window/detail/win32_dpi.h"
 #include "aurora/window/detail/win32_drag.h"
 #include "aurora/window/detail/win32_dwm.h"  // DWM composition 探测 / 帧扩展
 #include "aurora/window/detail/win32_ime.h"
 #include "aurora/window/detail/win32_keymap.h"
+#include "aurora/window/detail/win32_menu_bar.h"  // Win32 原生菜单栏桥（宿主唯一持有）
 #include "aurora/window/detail/win32_modifiers.h"
 #include "aurora/window/detail/win32_recent_documents.h"  // OS 最近文档投影桥（宿主引用守卫）
 #include "aurora/window/detail/win32_ua.h"
@@ -218,6 +220,12 @@ struct Win32Host::Impl {
     /// （窗口在 ⇒ 通路在），不是「投影必须有窗口」；无宿主进程由 `RecentDocuments::project_to_os()`
     /// 自举同一条通路（见 `win32_recent_documents.h`）。
     std::unique_ptr<detail::Win32RecentDocumentsBridge> recent_docs;
+    /// @brief 原生菜单栏桥（与窗口同生命周期；由本 Impl **唯一持有**，Win32 / D3D11 / WgpuWin32
+    /// 三个 Surface 转发同一实例，避免多份 HWND → 窗口映射分裂；窗口销毁期先拆桥再放窗口）。
+    ///
+    /// 进程级渲染通路单槽由本桥在构造期登记（覆盖式）、析构期注销——与原生菜单栏「同一进程只认
+    /// 一份」的语义一致（见 `native_menu_bar.h`）。多窗口场景下第一个存活窗口持有该单槽。
+    std::unique_ptr<detail::Win32MenuBarBridge> menu_bar;
     /// @brief 修饰键跟踪器：随 `WM_KEY*` / `WM_SYSKEY*` 推进，失焦清空、重新激活播种。
     detail::ModifierKeyTracker mods;
     /// @brief 焦点控件的候选窗定位盒查询（由 `WindowHost` 注入；空 = 无定位，走系统默认）。
@@ -483,6 +491,18 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
         detail::register_win32_drag_out_backend();
         // OS 最近文档投影桥：本窗口持一份进程级引用（通路登记与 HWND 无关，计数纪律见成员注记）。
         recent_docs = std::make_unique<detail::Win32RecentDocumentsBridge>();
+        // 原生菜单栏桥：随窗口构造；进程级渲染通路单槽在构造期登记（覆盖式），析构期注销。
+        // 单槽只认一份菜单栏：多窗口时第一个存活窗口持有它（见成员注记）；菜单项的点击经
+        // wnd_proc 的 WM_COMMAND 转 `menu_bar->on_command`，再按模型 id 回投命令注册表。
+        menu_bar = std::make_unique<detail::Win32MenuBarBridge>(hwnd);
+        menu_bar_translate::register_menu_bar_backend(menu_bar_translate::MenuBarBackend{
+            .install = [this](const std::vector<menu_bar_translate::FlatMenuItem> &items,
+                              std::function<void(std::string)> on_click) -> Result<void> {
+                return menu_bar->install(items, std::move(on_click));
+            },
+            .uninstall = [this]() -> void { menu_bar->uninstall(); },
+            .is_installed = [this]() -> bool { return menu_bar->is_installed(); },
+        });
     }
     size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // 逻辑 dp（布局用）
 }
@@ -505,6 +525,9 @@ Win32Host::Impl::~Impl() {
     drag = nullptr;
     // 投影桥守卫同理先散（它不持 HWND，但通路登记随最后一个宿主窗口一起注销，与窗口销毁同批收口）。
     recent_docs = nullptr;
+    // 原生菜单栏桥：先注销进程级渲染通路单槽（否则槽里还指着即将销毁的桥），再散桥（析构会摘菜单）。
+    menu_bar_translate::unregister_menu_bar_backend();
+    menu_bar = nullptr;
     if (hwnd != nullptr) {
         DestroyWindow(hwnd);
         hwnd = nullptr;
@@ -1233,6 +1256,13 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case WM_GETOBJECT: {
             const std::optional<LRESULT> answered = self->handle_get_object(wp, lp);
             return answered.has_value() ? *answered : DefWindowProcA(hwnd, msg, wp, lp);
+        }
+        case WM_COMMAND: {
+            // 原生菜单项点击：转发给菜单栏桥；桥只认自己派发的命令 id 区间（其余消息交 DefWindowProc）。
+            if (self->menu_bar != nullptr && self->menu_bar->on_command(wp)) {
+                return 0;  // 已由原生菜单栏桥消费（菜单项点击的路由在桥内完成）
+            }
+            return DefWindowProcA(hwnd, msg, wp, lp);
         }
         default:
             return DefWindowProcA(hwnd, msg, wp, lp);

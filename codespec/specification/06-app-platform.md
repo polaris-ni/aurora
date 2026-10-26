@@ -758,7 +758,8 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 | 头文件 | 能力 |
 |:---|:---|
-| `app/menu.h` | 菜单（`MenuBar` 控件的数据层） |
+| `app/menu.h` | 菜单（`MenuBar` 控件的数据层；`MenuModel` 单一真源） |
+| `app/native_menu_bar.h` | **原生菜单栏门面**（进程级单槽，Win32 `HMENU` 桥，见下文） |
 | `app/shortcuts.h` | 快捷键注册 |
 | `commands.h` | 命令模型与注册表（快捷键 / 菜单 / 命令面板的统一真源） |
 | `widget/command_palette.h` | 命令面板（模态浮层，模糊检索并执行命令） |
@@ -774,6 +775,15 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - 投影函数（`app/menu.h` 声明）：`to_menu_model(const MenuItem &)`、`to_menu_model(const Menu &)`（`title` → `label`、`items` → `children` 递归）、`to_menu_models(const std::vector<Menu> &)`（菜单栏整体投影，顺序逐位保真）、`from_menu_model(const MenuModel &)`（回转，`on_click` / `icon` 为空——供原生桥按 `id` 反查命令后自行接线行为）。四者均为无副作用纯函数。
 - **`id` 是原生桥的前置条件**：自绘路径靠指针身份路由点击即可，原生路径跨菜单重建只能靠稳定标识，故 `MenuItem` 与 `Menu` 各增一个 `id` 字段（默认空串，自绘路径忽略、零参与）。
 - 自绘路径**零改动**：`MenuBar` / `ContextMenuNode` / `SystemTray` 的既有字段、构造与绘制命中逻辑一行不动，`MenuModel` 投影是新增加的消费路径。自绘与原生「二显一存」——同一份模型，任一时刻只有一条渲染路径生效。
+
+**原生菜单栏桥（`app/native_menu_bar.h`，Win32 已落地）**：`MenuModel` 的第二条渲染路径。`NativeMenuBar::instance()` 是进程级单槽门面（懒构造单例，禁复制 / 移动）：`install(const std::vector<MenuModel> &)` 返回 `Result<void>`——**重复调用替换旧树**（先卸旧再装新，不叠加）、**空表等同清空**（成功而非错误）、平台无机制时返回结构化错误；`uninstall()` 幂等（销毁原生菜单对象、断开窗口关联）；`is_installed()` 报最近一次净结果。点击路由**只认 `MenuModel::id`**：门面持一个 `CommandRegistry *`（由 `Application` 构造期自动登记，应用无需手动接线），原生点击按 `id` 反查 `CommandRegistry::invoke`，与自绘投影共用同一个出口。分层与各层纪律：
+
+- **能力位**：`PlatformCapabilities::native_menu_bar` 取机制存在性语义（与 `system_drag_in` / `system_drag_out` 同款，只答「机制在不在」）——`Win32` / `D3D11` 为 `true`（同一宿主），`MacOS` / `X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 一律 `false`：macOS 桥待窗口壳实写后落地，Linux 无 OS 级菜单栏机制（GNOME 已取消全局菜单、KDE DBusMenu 需本库没有的 DBus 客户端）不落桥。能力缺位的平台 `install()` 返回 `native-menu-unsupported`（机制在但装不上返回 `native-menu-install-failed`，均 `retryable = false`），应用回落自绘 `MenuBar`，不静默也不谎报。
+- **折算层（零平台头）**：`src/aurora/window/detail/menu_bar_translate.{h,cpp}` 把 `MenuModel` 树摊成平台无关扁平项表 `FlatMenuItem{ depth, parent_index, separator, checkable, checked, enabled, label, shortcut_text, id }`——`flatten_menu_models()` 是**前序遍历纯函数**（子项紧跟父项、字段逐值透传、空 `id` 照常建出），两座平台桥共用同一份换算，不存在两套次序。该层只引 `core/result.h` 不引任何平台头，故在含无头 Linux 的全部 CI 作业上编译并被 `utest_menu_bar_translate` 逐值单测。
+- **渲染通路单槽**：折算层持可注入的 `MenuBarBackend` 函数表（`install(items, on_click)` / `uninstall()` / `is_installed()`，进程级单槽）——真机上由平台桥登记，无头单测里由伪造后端登记，**两侧走同一条代码路径**：被测的是产品代码本身而非它的复刻，这是「无头 CI 证明不了的只剩平台接缝」纪律在菜单域的落点。
+- **Win32 桥**：`src/aurora/window/detail/win32_menu_bar.{h,cpp}`——`CreateMenu` / `AppendMenu`（`MF_POPUP` 挂子菜单、`MF_STRING` 挂终端项）/ `SetMenu` 建树，`WM_COMMAND` 由 `Win32Host` 现有消息泵收下后按命令基址 `AURORA_WIN32_MENU_COMMAND_BASE` 反查 `id` 回投；桥实例由 `Win32Host::Impl` 唯一持有（与无障碍桥、输入法桥、系统拖放桥同款纪律，防多份窗口映射分裂），窗口销毁期先摘菜单再放窗口。
+- **`id` 是硬前提**：原生路径跨菜单重建只能靠稳定标识路由点击。空 `id` 的项**照常建出、照常显示，但点击不回投**，只留一条 WARN 诊断——不静默丢弃（菜单看着建好却点不动最难排查），也不伪造 id（重建后会错位）。无登记注册表（无头 / 未接线）同口径：菜单照建，点击不路由留 WARN。
+- **真机接缝**：`tools/verify/win32_menu_bar_live_probe.cpp`（`AURORA_BUILD_VERIFY_TOOLS` 口径、不进 CTest）真机核验能力位、`HMENU` 建树与层级保真、点击回投、空 `id` 不回投、非本桥命令 id 不消费、重复 `install` 替换与 `uninstall` 摘除。
 
 **接线**：`Application::commands()` 返回注册表；`app.commands().bind_shortcuts(app.shortcuts())` 一行把默认快捷键接入。绑定为**显式**而非 `run()` 内自动执行——否则 `run()` 之后注册的命令会静默失效。`Application` 在 `dispatch*` 入口统一暴露「当前焦点管理器」（`current_focus_manager()`），快捷键动作与控件回调内同样可取到，模态弹层据此完成焦点陷阱。原「命令式逃生舱」`aurora::imperative::run_raw`（`imperative.h`）与命令系统无关。
 
