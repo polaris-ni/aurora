@@ -4,14 +4,16 @@
 #include <string_view>
 #include <vector>
 
+#include "aurora/core/result.h"
 #include "aurora/preferences/preferences.h"
 
 namespace aurora {
 
 /// @brief 最近文档列表：应用级「新 → 旧」有序集合（会话内），可选经 `Preferences` 持久化。
 ///
-/// 用途：应用把它接到「文件 → 最近打开」菜单——打开 / 保存文档后调 `add`，菜单刷新时取 `list`。
-/// OS 级投影（Windows JumpList / macOS 的 `NSDocumentController`）消费本类的 `list`，不在本类职责内。
+/// 用途：应用把它接到「文件 → 最近打开」菜单——打开 / 保存文档后调 `add`，菜单刷新时取 `list`；
+/// 要让用户在**系统入口**（任务栏跳转列表、资源管理器「最近使用」）也看到同一批文档，显式调
+/// `project_to_os()`。
 ///
 /// 设计要点：
 /// - **内存优先**：`add` / `clear` 只改内存列表；`Preferences` 侧仅在 `attach` 后由显式 `sync()`
@@ -24,17 +26,23 @@ namespace aurora {
 /// - **路径口径**：只做字符串级存取——不校验文件是否存在、不做路径规范化（`..` / 相对路径 /
 ///   大小写差异一律按原样字符串比较）。理由：本类在主线程且不触碰文件系统，读存在性会引入不可测
 ///   的 IO 副作用与竞态；「最近文档里留着已删文件要不要显示」是应用侧决策，不是 store 该替应用做的。
+///   OS 投影**沿用**这一口径：相对路径与不存在的路径照常进入投影计划，由应用在 `add` 前自行规范化。
 /// - **持久化信封**：分组下单键 JSON 数组 `{"documents":[...]}`。与 `ScrollStorage` 的「每键一条目」
 ///   是有意分歧：最近文档是**有序集合、顺序即语义**，用索引当键会把顺序编码进键名，墓碑与重排逻辑
 ///   都不必要地复杂。
 /// - **宽容降级**：读缺失或信封损坏（值非数组、元素非字符串）时得到空列表，不抛错、不清除用户数据。
 /// - **无内置变更通知**：本类只管存取，菜单刷新由调用方在 `add` / `clear` 后自行驱动（同
 ///   `ScrollStorage` 的口径，避免引入第二套通知机制）。
+/// - **OS 投影是显式动作**：`add` / `clear` **不**触碰 OS 侧，推送只由 `project_to_os()` 发起。
+///   理由：投影改的是 OS 状态（可能被系统审计或同步），而撤销一条已推给 OS 的记录比不推麻烦得多
+///   ——文档「打开成功」才该进最近列表，而打开失败也常常已经走过 `add` 的调用点。时机归应用。
 ///
-/// 定位分工：本类只管「有哪些最近文档」的存取与持久化，不负责何时记录、何时展示。
+/// 定位分工：本类管「有哪些最近文档」的存取、持久化与向 OS 的显式投影，不负责何时记录、何时展示。
+/// OS 级投影的能力归属见 `PlatformCapabilities::recent_documents_os_projection`（缺位平台返回
+/// `recent-documents-projection-unsupported`，应用内列表照常工作，不因此降级）。
 ///
 /// @note Thread: main-thread only（单线程 UI；与 `Preferences` 的内部加锁策略不同，本类不加锁）
-/// @note Side-effects: `attach`/`sync` 触碰 `Preferences`
+/// @note Side-effects: `attach`/`sync` 触碰 `Preferences`；`project_to_os`/`clear_os_projection` 触碰 OS 状态
 /// @note Rebuildable: no（进程级会话状态）
 class RecentDocuments {
   public:
@@ -87,6 +95,37 @@ class RecentDocuments {
     /// 未 `attach` 时为空操作（不丢内存列表、不清标记）。**不做文件落盘**——由 App 调
     /// `Preferences::flush()` 决定时机，与既有窗口几何持久化一致。
     auto sync() -> void;
+
+    // ---------- OS 级投影（显式） ----------
+
+    /// @brief 把当前 `list()` 投影给操作系统（任务栏跳转列表 / 资源管理器「最近使用」等系统入口）。
+    ///
+    /// 契约：
+    /// - **显式**：`add` / `clear` 不触发本方法，投影时机由应用决定（典型落点是「文档打开成功」之后）；
+    /// - **幂等**：同一列表重复投影不重复堆积（Win32 侧由壳按路径去重快捷方式）；
+    /// - **推送的是折算后的计划**：丢弃空串条目、去重保持首次出现序、按平台上限截断且**新 → 旧优先**
+    ///   （尾部最旧先丢）。列表为空时产出空计划并返回成功——空不是错误；
+    /// - **不做路径规范化、不校验存在性**：与 `add` 的字符串级口径同源，需要绝对路径请应用在
+    ///   `add` 前自行规范化；
+    /// - **失败不影响应用内列表**：返回错误只说明「没推出去」，`add` 已经成立的内存列表与
+    ///   `Preferences` 状态**不变**，`list()` / `size()` 照旧——重试与否由调用方决定。
+    ///
+    /// 平台归属：能力位见 `PlatformCapabilities::recent_documents_os_projection`（当前仅 Win32 /
+    /// D3D11 落了桥；macOS 桥未落地故位为 `false`；Linux 无 OS 级机制）。位为 `false` 的平台返回
+    /// `recent-documents-projection-unsupported`，平台侧真实故障走结构化错误（`platform-unavailable` /
+    /// `platform-com-init-failed`），两类不混淆。
+    /// @note 成功仅表「已投递给 OS」：Win32 的 `SHAddToRecentDocs` 无回执，OS 是否落记录另由
+    ///       系统侧策略决定（用户关掉「显示最近打开的项目」时返回 `platform-unavailable`）。
+    /// @return 成功（含空计划）或结构化错误。
+    [[nodiscard]] auto project_to_os() -> Result<void>;
+
+    /// @brief 撤销本应用贡献给 OS 的最近文档记录（不影响应用内列表与 `Preferences`）。
+    ///
+    /// 语义边界（各平台自述，见 `specification/06-app-platform.md` §8.10）：OS 侧最近文档是
+    /// **用户级全局集合**，别的应用贡献的条目不在本方法的射程内；Win32 侧撤销的是「本进程投影
+    /// 记录内的条目」对应的快捷方式——同一文件若也被别的应用打开过，那条是共享记录，删除对它同样生效。
+    /// @return 成功（含无记录可撤）或结构化错误（平台无此机制 / 平台侧故障）。
+    [[nodiscard]] auto clear_os_projection() -> Result<void>;
 
   private:
     RecentDocuments() = default;

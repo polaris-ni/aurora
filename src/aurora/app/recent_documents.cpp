@@ -4,6 +4,13 @@
 #include <utility>
 
 #include "aurora/core/json.h"
+#include "aurora/core/platform.h"
+#include "aurora/window/detail/recent_documents_translate.h"
+#include "aurora/window/platform.h"
+
+#ifdef AURORA_PLATFORM_WINDOWS
+#include "aurora/window/detail/win32_recent_documents.h"
+#endif
 
 namespace aurora {
 
@@ -11,6 +18,36 @@ namespace {
 
 /// 信封内承载路径数组的键名：分组下只此一键，顺序由数组本身承载（不用索引当键）。
 constexpr char AURORA_DOCUMENTS_KEY[] = "documents";
+
+/// @brief 取当前可用的投影通路（运行期判据收敛在一处，两个公共入口共用）。
+///
+/// 判据是**通路是否在**而非能力位：能力位是编译期后端申报（`PlatformCapabilities` 的既有口径——
+/// 与 `system_drag_in` 同款「位只表机制存在、运行期不可用另走 `Result` 错误」），而通路登记才是
+/// 运行期事实。两者分开还换来一条实际收益：折算层的投影通路可被无头单测注入，「显式推送 /
+/// 不隐式触发 / 失败隔离」在**任何平台**的 CI 腿上都能跑产品代码路径本身，而不是它的复刻。
+///
+/// 未登记时返回 nullptr，公共入口以 `recent-documents-projection-unsupported` 收尾——
+/// 「这平台没这机制」（Linux / 未落桥的 macOS）与「这机制在本进程还没接线」对调用方的处置动作
+/// 完全一致（不投影、应用内列表照旧），故不另立第二枚码；平台侧**真实故障**（COM / 目录 /
+/// 形态转换）走结构化错误（`platform-unavailable` / `platform-com-init-failed`），与这两位不混淆。
+[[nodiscard]] auto active_projection_backend() -> const recent_documents::ProjectionBackend * {
+    const auto *backend = recent_documents::projection_backend();
+    if (backend != nullptr) {
+        return backend;  // 已接线（宿主守卫或上一次自举登记）：不重复自举，避免覆盖既有通路
+    }
+#ifdef AURORA_PLATFORM_WINDOWS
+    if (platform().capabilities().recent_documents_os_projection) {
+        // 无窗口宿主时按需自举：`SHAddToRecentDocs` 与 HWND 无关，「先记文档、后建窗口」的应用
+        // 同样应当能投影（宿主守卫已在时上面那条分支就返回了，此处只会登记一次）。
+        (void)detail::win32_recent_documents_ensure_registered();
+        backend = recent_documents::projection_backend();
+    }
+#endif
+    if (backend == nullptr || !backend->project || !backend->clear) {
+        return nullptr;
+    }
+    return backend;
+}
 
 }  // namespace
 
@@ -86,6 +123,30 @@ auto RecentDocuments::sync() -> void {
     }
     dirty_ = false;
     removed_ = false;
+}
+
+auto RecentDocuments::project_to_os() -> Result<void> {
+    const auto *backend = active_projection_backend();
+    if (backend == nullptr) {
+        return make_error(ErrorCode::RecentDocumentsProjectionUnsupported);
+    }
+    // 先折算成计划再投递：次序、去重与截断由折算层唯一决定，平台桥不做第二套（见
+    // `window/detail/recent_documents_translate.h` 文件头）。
+    const auto plan = recent_documents::build_projection_plan(list(), backend->max_entries);
+    if (plan.empty()) {
+        return Result<void>{};  // 空列表产出空计划：合法结果，不打扰 OS、也不报错
+    }
+    // 投影失败不回滚应用内列表：`add` 的语义（内存 + `Preferences`）在本调用之前就已成立，
+    // 本调用只负责「推出去」这一步（契约见 `recent_documents.h::project_to_os`）。
+    return backend->project(plan);
+}
+
+auto RecentDocuments::clear_os_projection() -> Result<void> {
+    const auto *backend = active_projection_backend();
+    if (backend == nullptr) {
+        return make_error(ErrorCode::RecentDocumentsProjectionUnsupported);
+    }
+    return backend->clear();
 }
 
 auto RecentDocuments::ensure_loaded() -> void {

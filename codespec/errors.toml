@@ -310,6 +310,15 @@ message = "System notification could not be posted: '{detail}'"
 hint = "The desktop notification service may be unavailable, or the platform backend does not support notifications"
 
 [[error]]
+enum = "RecentDocumentsProjectionUnsupported"
+slug = "recent-documents-projection-unsupported"
+category = "platform"
+severity = "error"
+retryable = false
+message = "OS recent-documents projection is not supported on this platform"
+hint = "The platform offers no recent-documents mechanism (Linux/macOS) or its bridge is not wired; the in-app RecentDocuments list still works unchanged"
+
+[[error]]
 enum = "RuntimeCoroutineException"
 slug = "runtime-coroutine-exception"
 category = "runtime"

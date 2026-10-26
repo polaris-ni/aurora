@@ -29,6 +29,17 @@ struct PlatformCapabilities {
     bool system_drag_in = false;
     /// @brief 支持发起系统拖出（从应用拖到其它进程）。语义同上（机制存在性，非运行期保证）。
     bool system_drag_out = false;
+    /// @brief OS 侧存在「最近文档」机制，且本库已把 `RecentDocuments::project_to_os()` 接到该机制。
+    ///
+    /// 能力位只表「机制是否存在」：运行期不可用（投影通路建立失败等）仍走 `Result` 错误，
+    /// 二者不互相替代（与 `system_drag_in` 同款口径）。**只在桥已落地的方向翻位**——
+    /// Win32 / D3D11 由 `SHAddToRecentDocs` 桥接线（两者共用同一宿主，只是上屏形态不同，故同翻）；
+    /// `MacOS` 本次**保持 false**：`NSDocumentController` 桥未落地，按「未落地方向不预先声称支持」
+    /// 的纪律不预翻，桥落地时再翻（macOS 窗口壳实写是其前置）。`X11` / `Wayland` / `Glfw` / `Wasm` /
+    /// `Headless` 恒 false：Linux 侧唯一沾边的 XDG `recently-used.xbel` 是 GTK 生态共读的用户态文件、
+    /// 不是 OS 提供的机制，写它要自备跨进程合并与文件锁而收益只有一处选择器显示，代价不成立，
+    /// 故如实缺位——应用内列表在全平台照常工作，不因此降级。
+    bool recent_documents_os_projection = false;
 };
 
 /// @brief 平台与运行环境快照（显式查询，跳过 Surface 探测，specification/06-app-platform.md §5）。
@@ -60,7 +71,8 @@ struct Platform {
     /// @return 聚合结果：desktop/mobile 按 DeviceKind 判定；multitouch 与 high_frequency_pointer
     /// 在 Win32/Glfw/X11/Wayland/MacOS 五类真实显示 Surface 下为 true；`system_drag_in` / `system_drag_out`
     /// 仅在已接线的后端下为 true（当前为 Win32 / D3D11 / X11 / Wayland / MacOS，两方向同口径；
-    /// 未接线的方向不预先声称支持）。
+    /// 未接线的方向不预先声称支持）；`recent_documents_os_projection` 仅在已落 OS 投影桥的后端下为
+    /// true（当前仅 Win32 / D3D11；macOS 桥落地后再翻）。
     [[nodiscard]] auto capabilities() const -> PlatformCapabilities {
         // 待填充的能力标志聚合：默认值起步，先按设备形态、再按 SurfaceKind 逐项置位。
         PlatformCapabilities c;
@@ -95,6 +107,11 @@ struct Platform {
         c.system_drag_out =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::X11 ||
              surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
+        // OS 级最近文档投影：仅 Win32 / D3D11 落了桥（`SHAddToRecentDocs`，两者共用同一宿主故同翻）。
+        // MacOS 本次保持 false——桥未落地即不预翻（机制缺位若谎报为「在」，`project_to_os()` 会在
+        // macOS 静默失败且调用方无从降级）。Linux 三形态与 Glfw / Wasm / Headless 恒 false：OS 侧
+        // 无该机制（XDG `recently-used.xbel` 是 GTK 生态共读文件而非 OS 机制），应用内列表照常工作。
+        c.recent_documents_os_projection = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
         return c;
     }
 };

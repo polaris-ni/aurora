@@ -7,6 +7,7 @@
 #include "aurora/window/detail/win32_ime.h"
 #include "aurora/window/detail/win32_keymap.h"
 #include "aurora/window/detail/win32_modifiers.h"
+#include "aurora/window/detail/win32_recent_documents.h"  // OS 最近文档投影桥（宿主引用守卫）
 #include "aurora/window/detail/win32_ua.h"
 
 #ifdef AURORA_BACKEND_WIN32
@@ -210,6 +211,13 @@ struct Win32Host::Impl {
     /// 注册失败时对象仍在（`installed() == false`），供真机探针与自检观测器区分「未注册」与
     /// 「未构造」两种失败。
     std::unique_ptr<detail::Win32DragBridge> drag;
+    /// @brief OS 最近文档投影桥的**宿主引用守卫**（Win32 / D3D11 / WgpuWin32 各持一份，进程级
+    /// 引用计数归零才注销通路——先关的窗口不会把仍在世的窗口的通路一起拆掉）。
+    ///
+    /// 与拖放桥的差别：`SHAddToRecentDocs` 与 HWND 无关，故本守卫的意义是**生命周期接线**
+    /// （窗口在 ⇒ 通路在），不是「投影必须有窗口」；无宿主进程由 `RecentDocuments::project_to_os()`
+    /// 自举同一条通路（见 `win32_recent_documents.h`）。
+    std::unique_ptr<detail::Win32RecentDocumentsBridge> recent_docs;
     /// @brief 修饰键跟踪器：随 `WM_KEY*` / `WM_SYSKEY*` 推进，失焦清空、重新激活播种。
     detail::ModifierKeyTracker mods;
     /// @brief 焦点控件的候选窗定位盒查询（由 `WindowHost` 注入；空 = 无定位，走系统默认）。
@@ -473,6 +481,8 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
         // 「先到者优先」去重。注册失败无回路可走：真实后端缺失时 `system_drag::begin` 落
         // not-supported，不谎报有通路。
         detail::register_win32_drag_out_backend();
+        // OS 最近文档投影桥：本窗口持一份进程级引用（通路登记与 HWND 无关，计数纪律见成员注记）。
+        recent_docs = std::make_unique<detail::Win32RecentDocumentsBridge>();
     }
     size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // 逻辑 dp（布局用）
 }
@@ -493,6 +503,8 @@ Win32Host::Impl::~Impl() {
     // OLE 拖入桥同理：RevokeDragDrop 需要**有效 HWND**，故必须在 DestroyWindow 之前卸载
     // （放到析构末尾会在窗口已毁后调 Revoke，那条路径上句柄已失效）。
     drag = nullptr;
+    // 投影桥守卫同理先散（它不持 HWND，但通路登记随最后一个宿主窗口一起注销，与窗口销毁同批收口）。
+    recent_docs = nullptr;
     if (hwnd != nullptr) {
         DestroyWindow(hwnd);
         hwnd = nullptr;
