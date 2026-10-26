@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-038 |
 | 提出日期 | 2026-10-26 |
-| 当前状态 | 已提议 |
+| 当前状态 | 实施中 |
 | 关联需求 | SPEC.FEAT.APP.RECENT-DOCUMENTS.001 |
 | 影响面 | `include/aurora/window/platform.h`（`PlatformCapabilities` 增 `recent_documents_os_projection` 位）；`include/aurora/app/recent_documents.h` 同址扩充投影入口；`src/aurora/window/detail/` 新增零平台头折算层与 Win32 / macOS 两枚平台桥；`codespec/errors.toml` 及生成物扩一枚码；`tests/unit/` 新增折算层与能力位用例；`tools/verify/` 新增一枚真机探针；`codespec/` 两处回写 |
 
@@ -42,5 +42,15 @@
 
 ## 回写落点
 
-- `codespec/specification/06-app-platform.md`（§8.10 最近文档：OS 级投影的能力位、显式推送契约、折算层与计划语义、两枚平台桥、失败隔离口径、Linux 能力位申报）
-- `codespec/SPECIFICATIONS.md`（需求行补记：OS 级投影的落位与 Linux 缺位时的应用内一致口径）
+- `codespec/specification/06-app-platform.md`（§5 能力位表 + §8.10 最近文档：OS 级投影的能力位、显式推送契约、折算层与计划语义、Win32 桥与撤销形态、失败隔离口径、Linux / macOS 能力位申报）
+- `codespec/SPECIFICATIONS.md`（需求行补记：OS 级投影的落位与 Linux / macOS 缺位时的应用内一致口径）
+- `codespec/BUILD_OPTIONS.md` §2.4（新增真机探针的产物登记）
+
+## 实施记录与偏离（落码期回写）
+
+1. **macOS 桥本批未交付 ⇒ 能力位 `MacOS` 落为 `false`**（与「变更内容」第 1 条的 `true` 有意偏离，交付范围经用户拍板收在 Win32）。理由即本提案自己的口径：未接线的方向不预先声称，否则 `project_to_os()` 在 macOS 上静默失败且调用方无从降级。「变更内容」第 5 条（macOS 桥）与「验收判据」第 7 条（macOS 机制层）随之留待后续批次，本批不留占位文件。
+2. **「清空走同 API 的空参形态」实测不成立**：本机 MinGW SDK 的 `SHAddToRecentDocs` 只有 `SHARD_PIDL` / `SHARD_PATHA` / `SHARD_PATHW` 三个 flag、返回 `void`，既无清空标志也无逐条撤销 API。撤销的落地形态改为：桥维护**本进程投影记录**，清空时枚举 `%APPDATA%\Microsoft\Windows\Recent\*.lnk`、经 `IShellLinkW` 解析目标后只删命中记录的那些。两条边界如实写进桥头注与规格（共享记录、注册表 MRU 不碰）。
+3. **宿主持有形态由「唯一持有」调整为「引用计数守卫 + 无宿主按需自举」**（经用户拍板）：通路本身与 `HWND` 无关（进程级调用），每个宿主各持一份守卫、先关的窗口不拆仍在世窗口的通路；无窗口进程（纯命令行应用）也能投影，判据由真机探针（不建窗口）覆盖。
+4. **三条实测平台事实**（都写进桥头注与规格，不藏在代码里）：投递无回执（成功只表「已投给 OS」）；快捷方式的实际写出**晚于** API 返回（毫秒级迟到，故撤销只销「确认删掉了」的账，真机判据须有界轮询）；`Start_TrackDocs=0` 时 API 静默无操作，桥读该键作为可证旁证、返回 `platform-unavailable` 而非谎报成功。附带一条取证事实：壳把 `%TEMP%` 排除在最近文档之外，探针文件因此建在 `%LOCALAPPDATA%\aurora_verify`。
+5. **验收判据兑现情况**：第 1—6 条与第 8 条已兑现（无头单测 12 例 + 真机探针自动段全绿，第 6 条的「条目出现 / 幂等 / 撤销后消失」由探针自带的独立取证证明）；第 7 条随 macOS 桥一并留待后续批次。
+6. **变异自证已实跑两条**（判据第 6 项要求的正是这两条）：把折算层的截断方向改成「保留最旧」⇒ `plan_truncates_from_the_oldest_tail` 等 5 例转红；摘掉空串过滤 ⇒ `plan_drops_empty_entries` 转红。两次改坏后均已还原并复跑回绿（11 通过 / 1 如实 SKIP），用例不是空转。

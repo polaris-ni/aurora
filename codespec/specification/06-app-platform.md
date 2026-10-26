@@ -464,9 +464,11 @@ au::App().window(win ? std::move(win.value()) : nullptr)
 
 `au::platform()` 是显式运行时平台查询，跳过后端探测。返回 `Platform{ PlatformKind kind, DeviceKind device, SurfaceKind surface }`，含 `is_mobile()` / `is_desktop()` / `capabilities()`。
 
-`PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`、`system_drag_in`、`system_drag_out`。
+`PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`、`system_drag_in`、`system_drag_out`、`recent_documents_os_projection`。
 
-后两位表「**机制是否存在**」：支持接收系统拖入 / 支持发起系统拖出，**按方向独立翻位**（不是成对翻位）。当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（Win32 / D3D11 共用同一宿主与同一桥实例；X11 两个方向共用 `x11_drag.h` 的同一桥实例；Wayland 两个方向共用 `wayland_drag.h` 的同一桥实例；macOS 两个方向共用 `macos_drag.h` 的同一桥实例——其窗口壳仍为骨架，运行期 `install()` 因无内容视图必失败并记日志降级，能力位表机制归属、与 `multitouch` 等位的声明口径一致），其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定，「未接线先声称」的变异对应用例转红）。能力位与运行期失败**不互相替代**：机制存在但会话建立失败、源中断等仍走 `Result` 错误（`system-drag-*` 码，`retryable = false`，机制缺失是稳态）。
+拖放两位表「**机制是否存在**」：支持接收系统拖入 / 支持发起系统拖出，**按方向独立翻位**（不是成对翻位）。当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（Win32 / D3D11 共用同一宿主与同一桥实例；X11 两个方向共用 `x11_drag.h` 的同一桥实例；Wayland 两个方向共用 `wayland_drag.h` 的同一桥实例；macOS 两个方向共用 `macos_drag.h` 的同一桥实例——其窗口壳仍为骨架，运行期 `install()` 因无内容视图必失败并记日志降级，能力位表机制归属、与 `multitouch` 等位的声明口径一致），其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定，「未接线先声称」的变异对应用例转红）。能力位与运行期失败**不互相替代**：机制存在但会话建立失败、源中断等仍走 `Result` 错误（`system-drag-*` 码，`retryable = false`，机制缺失是稳态）。
+
+`recent_documents_os_projection` 表「OS 是否提供可写入的最近文档机制、且本库把桥接好了」（§8.10）。当前仅 `Win32` 与 `D3D11` 为 true（两者共用同一宿主与同一桥实例，故同翻）；`MacOS` 本次为 **false**——机制（`NSDocumentController`）确实存在，但桥未交付，**未接线的方向不预先声称**（声称了会让调用方在静默失败后无从降级）。`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：OS 侧无该机制（XDG `recently-used.xbel` 是 GTK 生态的共读文件，不是 OS 机制）。能力位为 false 时 `project_to_os()` / `clear_os_projection()` 返回 `recent-documents-projection-unsupported`，**应用内列表与持久化不受影响**（口径同上：能力位表机制归属，运行期失败另走 `Result`）。期望表由 `utest_recent_documents_translate` 锚定（逐 `SurfaceKind` 断言，含 macOS 为 false 这条——机制在而桥未落，按「未接线不预翻」如实申报）。
 
 ```cpp
 const au::Platform p = au::platform();
@@ -1650,13 +1652,19 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 
 - `instance()`（进程级单例，懒构造）、`AURORA_MAX_ENTRIES = 16`（容量上限，声明处可见；**无运行期 setter**，避免「设置与容量不一致」的第二真源）、`AURORA_GROUP_NAME = "recent_documents"`（持久化分组名）。
 - 会话内读写：`add(path)`（同路径去重并置顶、超容量淘汰最旧；空路径 no-op）、`list()`（新 → 旧序值拷贝）、`clear()`（清内存并打墓碑）、`size()`、`clear_all()`（测试与重置用）。
+- OS 投影读写：`project_to_os()`（把当前列表折成投影计划后整体投递给 OS；空计划是成功的 no-op，幂等由平台侧记录去重）、`clear_os_projection()`（撤销本进程投影记录内的条目）。两者都**只**动 OS 侧，不改内存列表、不写 `Preferences`。
 - **路径口径：只做字符串级存取**——不校验文件是否存在、不做路径规范化（`..` / 相对路径 / 大小写差异一律按原样字符串比较）。理由：本类在主线程且不触碰文件系统，读存在性会引入不可测的 IO 副作用与竞态；「最近文档里留着已删文件要不要显示」是应用侧决策。
 - **持久化信封**：分组下单键 JSON 数组 `{"documents":[...]}`。与 `ScrollStorage` 的「每键一条目」是**有意分歧**：最近文档是有序集合、顺序即语义，用索引当键会把顺序编码进键名，墓碑与重排逻辑都不必要地复杂。`sync()` 只写 `Preferences` 内存并通知订阅者，**落盘由 `App` 的 `flush()` 决定**（与 `ScrollStorage` 同口径）；读取懒回读，不做全量预热。
 - **宽容降级**：读缺失或信封损坏（值非数组、元素非字符串）得到空列表，不抛错、不清除用户数据。
 - **无内置变更通知**：本类只管存取，菜单刷新由调用方在 `add` / `clear` 后自行驱动（同 `ScrollStorage` 口径，避免引入第二套通知机制）。
-- **OS 级投影不在本批**：Windows JumpList / macOS `NSDocumentController` 消费 `list()`，Linux 无 OS 级机制（能力位申报同属后续批次）；落地前应用内列表已全平台一致。
+- **OS 投影是显式动作**：`add` / `clear` **不**触碰 OS 侧，推送只由 `project_to_os()` 发起、撤销只由 `clear_os_projection()` 发起（两者均返回 `Result<void>`）。理由：投影改的是 OS 状态（可能被系统审计或同步），而撤销一条已推给 OS 的记录比不推麻烦得多——文档「打开成功」才该进最近列表，而打开失败也常常已经走过 `add` 的调用点。时机归应用。
+- **投影计划（`src/aurora/window/detail/recent_documents_translate.h`，零平台头）**：`build_projection_plan(list, max_entries)` 把内存列表折成平台无关的投递清单——去空串、按 `max_entries` **从尾部（最旧）截断**（新→旧序下保住最近的那几条）、按首次出现去重、空列表得空计划；**不做路径规范化**（与上方路径口径同源：相对路径与不存在的路径原样进计划，由应用在 `add` 前自行决定）。折算层另持进程级**后端单槽**（`ProjectionBackend{max_entries, project, clear}` + `register` / `unregister` / `projection_backend()`），槽的登记与注销由平台桥负责，折算层不含任何 OS 调用，因此计划规则可无头单测。
+- **Win32 桥（`src/aurora/window/detail/win32_recent_documents.h`，内部头）**：`SHAddToRecentDocs(SHARD_PATHW, path)` 逐条投递，资源管理器「快速访问 → 最近使用」与任务栏跳转列表同源。三条如实申报的平台事实：① 该 API 返回 `void`、无回执（`GetLastError` 也不是它的约定失败通道），故「成功」的确切含义是**已投递给 OS**，不等于 OS 已落记录；② 快捷方式的实际写出**晚于**返回（实测毫秒级迟到），所以任何「调用后立即读 OS」的判据都要有界轮询，撤销侧也据此**只销「确认删掉了」的账**、其余留账待下次撤销认领；③ 用户在系统设置里关掉「在跳转列表中显示最近打开的项目」（`HKCU\...\Explorer\Advanced\Start_TrackDocs=0`）时该 API **静默无操作**，桥读这条注册表作为可证旁证、如实返回 `platform-unavailable`，不谎报成功。可证的失败只有三处：UTF-8→UTF-16 转换失败、用户 Recent 目录取不到 / 枚举失败、上述追踪开关关闭。
+- **撤销没有 OS API**：OS 侧最近文档是**用户级全局集合**，既无「清空」也无逐条撤销标志。落地形态是桥维护一份**本进程投影记录**，撤销时枚举 `%APPDATA%` 下的 `Microsoft\Windows\Recent\*.lnk`、经 `IShellLinkW` 解析每条的真实目标、只删目标命中记录的条目（按大小写不敏感比较，Windows 路径本不敏感），并 `SHChangeNotify` 通知壳刷新。两条边界：同一文件若也被别的应用打开过，那条快捷方式属**共享记录**，撤销对它同样生效；注册表侧按扩展名的 MRU（`HKCU\...\Explorer\RecentDocs`）是用户全局的二进制 MRU，改写需自备 `MRUListEx` 重排、写坏会污染别的应用的记录，**本库不碰**。
+- **失败隔离**：投影 / 撤销的失败**不回滚、不改动应用内列表**，也不触发 `Preferences` 写入——`list()` 在投影前后同源同值（判据见 `utest_recent_documents_translate` 与真机探针）。能力位缺位的平台返回 `recent-documents-projection-unsupported`（`retryable = false`），应用内一致列表照常可用；Linux 与 macOS 因此在桥落地前保持「应用内一致、OS 侧缺位」形态。
+- **宿主持有**：桥以引用计数守卫（`Win32RecentDocumentsBridge`）由 `Win32Host::Impl` 持有，销毁期先散守卫再放窗口（与输入法桥 / 拖放桥同款纪律）；通路本身与 `HWND` 无关，故无宿主进程（纯命令行 / 无窗应用）由 `project_to_os()` 侧的按需自举取得同一条通路——「先记文档、后建窗口」同样能投影。
 
-回归：`utest_recent_documents`（去重置顶 / 容量淘汰 / 顺序 / 持久化往返 / 空口径 / 损坏信封降级）。
+回归：`utest_recent_documents`（去重置顶 / 容量淘汰 / 顺序 / 持久化往返 / 空口径 / 损坏信封降级）+ `utest_recent_documents_translate`（投影计划四规则、能力位矩阵、显式性、后端失败隔离、无后端时报 `projection-unsupported`）。真机：`aurora_verify_win32_recent_documents`（独立取证「投影后 OS 出现条目 / 重复投影幂等 / 撤销后消失 / 撤销不碰 store」，见 [`../BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §2.4）。
 
 ---
 
