@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-021 |
 | 提出日期 | 2026-10-17 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 |
 | 影响面 | 数据源 `codespec/errors.toml`（136 条目各删 `auto_fixable` / `fix_category` 两行，头部声明清单与字段释义两处注释同步）；生成器 `tools/gen/gen_error_codes.cpp`（`ErrorEntry` 两字段、两条解析分支、`fix_category` 兜底校验、`ErrorMeta` 结构两行、结构化绑定两变量、表初始化两行、`is_auto_fixable()` 与 `fix_category_of()` 两枚生成函数、目录表头与单元格、`aurora_api.json` 两字段）；三件生成物 `include/aurora/core/error_codes.gen.h` / `codespec/ERROR_CATALOG.md` / `aurora_api.json`（error_codes 段对象键由 9 降为 7、目录表列由 10 降为 8，随生成器重建）；`include/aurora/core/result.h` 与 `src/aurora/core/result.cpp`（`Error` 删 `auto_fixable` / `fix_category` / `fix_params` 三字段，`make_error_from_table` 初始化同步，`to_json()` 恒输出字段由 7 降为 6）；`include/aurora/core/diagnostics.h` 与 `src/aurora/core/diagnostics.cpp`（删 `FixSuggestion::auto_fix` 回调、`has_auto_fix()`、`apply_fix()` 两重载、`register_fix()`、`auto_fix_all()`、匿名命名空间 `fix_registry()`；保留 `FixSuggestion{code, description}`、`Diagnostic::fix`、`report(..., fix)`、`collect_fixes()`）；测试 `tests/unit/utest_error_codes.cpp` / `tests/unit/utest_result.cpp` / `tests/unit/utest_diagnostics.cpp`；工具文案 `tools/servers/aurora_mcp.cpp` 一处；无新增文件，全部落点为既有文件原地改写。**不在本次范围**：`retryable` 列与其查表函数 `retryable()`——它在 `src/aurora/net/detail/http_retry.cpp` 的 `should_retry_error()` 中有真实消费端，与 `error_class_of()` 归因档取交集决定重放资格，删之属重试策略变更而非清理。 |
 

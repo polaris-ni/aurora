@@ -288,7 +288,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 | `WaylandSurface` | CPU swizzle 到 `WL_SHM_FORMAT_ARGB8888`（预乘 alpha）经 `wl_shm` 共享内存双缓冲槽，CSD 态缓冲含四周 10dp 阴影 margin（swizzle 后 `csd::compose_shadow_margins_bgra` 直写真 alpha，`set_window_geometry` 声明内容边界、opaque region 仅报内容矩形，见 `specification/03` §8.5 与 `specification/07` §4.1）；`wait_events` 经 `poll(2)`；`scale_factor` 取 `wl_output.scale`；光标走 `libwayland-cursor` 客户端主题（cursor 专用 `wl_surface` + `wl_pointer.set_cursor`，见 `specification/03` §8.3） | `AURORA_BACKEND_WAYLAND`（默认 OFF） |
 | `WgpuWaylandSurface` | 组合内嵌 `WaylandSurface` 宿主（窗口壳/事件/xkb/CSD 全走它，本类零 wayland-client），帧级 DisplayList 交 `WgpuRhi` 在 GPU 端光栅化并经 Wayland surface swapchain present 直渲同一 `wl_surface`；GPU 失败永久回退内嵌宿主的 `wl_shm` 上传路径；GPU 模式下 CSD 分两层合成进帧（begin_frame 阴影 underlay + end_frame 标题 overlay，见 `specification/03` §8.8） | `AURORA_BACKEND_GPU_WGPU` ∧ `AURORA_BACKEND_WAYLAND`（默认 OFF） |
 | `WasmSurface` | `<canvas>` 像素写回（`EM_ASM` `putImageData`） | `AURORA_BACKEND_WASM`（默认 OFF） |
-| `MacOSSurface` | AppKit / CoreGraphics | `AURORA_BACKEND_MACOS`（默认 OFF） |
+| `MacOSSurface` | AppKit / CoreGraphics（**未支持**：仅骨架代码，窗口创建/销毁/上屏与事件泵均未实装，运行期不可用） | `AURORA_BACKEND_MACOS`（默认 OFF） |
 
 `Win32Surface`、`D3D11Surface` 与 `WgpuWin32Surface` 共用 `Win32Host` 宿主（创建 / 消息泵 / 事件翻译 / DPI / 同步重渲染 / 运行期标题），仅 present 后端不同。宿主采用 pimpl 隔离，故 `hwnd()` / `background_brush()` 以 `void*` 返回（调用方 `static_cast`）。窗口过程按**消息族**分派到各 `handle_*` 函数，取代单体 switch。X11/Wayland 侧的 `WgpuX11Surface` / `WgpuWaylandSurface` 不走共享宿主路线而是**组合**内嵌 `X11Surface` / `WaylandSurface`（窗口创建 / 事件泵 / 光标全走它，本类只做 GPU 帧路径与软件回退分流，句柄以 void* 同源取得），避免把 Xlib / wayland-client 逻辑复制第二份。
 

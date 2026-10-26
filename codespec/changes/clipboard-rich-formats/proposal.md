@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-013 |
 | 提出日期 | 2026-10-13 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.APP.CLIPBOARD-RICH-FORMATS.001 |
 | 影响面 | `app/clipboard.h`（同址扩充富格式 API 与 memory 测试后端）、新增 include/aurora/app/mime_types.h（MIME 常量表单一真源）、`src/aurora/app/`（uri-list 编解码纯逻辑）、`codespec/errors.toml` 与生成物、`tests/unit/utest_clipboard.cpp`（扩充，既有用例不动） |
 

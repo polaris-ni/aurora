@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-022 |
 | 提出日期 | 2026-10-17 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.NET.TLS-BACKEND.001 |
 | 影响面 | 破坏性重组 TLS 后端装配面：四枚引擎宏 `AURORA_NET_TLS_{SCHANNEL,SECURE_TRANSPORT,OPENSSL,MBEDTLS}` 更名为 `AURORA_ENABLE_NET_TLS_*`（`BUILD_OPTIONS.md` §1 三层命名法归位）；缓存变量新增 `AURORA_ENABLE_NET_TLS_SYSTEM`（与 provider 解耦，系统栈不再被 provider 挤掉）与列表型 `AURORA_NET_TLS_PROVIDERS`（旧单值 `AURORA_NET_TLS_PROVIDER` 保留为别名，两者同设即 configure 期报错）；「恰好编译一个后端 TU」的不变量作废，改为多 TU 共存 + 运行期注册表分派，`tls_unavailable.cpp` 删除；新增公共头 `include/aurora/net/tls_backend.h`（`TlsBackend` 抽象基类、`TlsDataState`、`TlsBackendRegistration` 与注册 / 反查 / 候选链四组自由函数）并纳入伞头；`TlsContext` 新增 `backend` 字段、`TlsTransport` 新增 `backend()` 查询；`Engine::capabilities().tls` 真值源由「被编进来的那个 TU」改为「注册表非空」；四枚后端 TU 的入口符号改唯一名；`src/aurora/net/engine.cpp`、`tests/unit/utest_net_tls.cpp`、`tools/verify/tls_live_probe.cpp`、`.github/workflows/ci.yml`、`codespec/manual-test/23-net.md` 的引用随迁移；不新增错误码，仅改写 `net-tls-engine-unavailable` 的 hint；`aurora_api.json` 随 `--target aurora_api_json` 重建 |
 

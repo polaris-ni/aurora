@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-012 |
 | 提出日期 | 2026-10-13 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.APP.SYSTEM-DRAG-DROP.001 |
 | 影响面 | `event/event.h`（新增 `DragAction` / `SystemDropPhase` / `SystemDropEvent` / `DragPayload`，`FileDropEvent` 移除）、`widget/widget.h`（`on_file_drop` → `on_system_drop`、新增 `query_system_drag_accept`）、`event/dispatcher.h` 与其实现（派发入口换型）、`app/application.h` 与 `app/window_host.h` / `src/aurora/app/window_host.cpp`（`dispatch_file_drop` → `dispatch_system_drop`）、`window/platform.h`（`PlatformCapabilities` 增两位）、`src/aurora/window/win32_host.cpp` 的 `handle_dropfiles`（构造的事件类型换型，HDROP 解析与 `ScreenToClient` + `to_logical` 坐标换算逻辑不动）、`codespec/errors.toml` 与生成物、`tests/unit/utest_dispatcher.cpp` / `utest_event.cpp` / `utest_application.cpp` |
 

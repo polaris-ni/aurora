@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-014 |
 | 提出日期 | 2026-10-13 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.APP.NATIVE-MENU-BAR.001 |
 | 影响面 | `app/menu.h`（新增 `MenuModel` 与投影函数、`MenuItem` 增 `id` 字段）、`widget/menu_bar.h`（`Menu` 增 `id` 字段）与其实现、`modifier/modifier_input.h` 的 `ContextMenuNode` 消费侧核对（零改动预期）、`app/system_tray.h` 与其 Win32 实现消费侧核对（零改动预期）、`codespec` 菜单相关章节、`tests/unit/utest_menu.cpp` / `utest_menu_bar.cpp` / `utest_modifier_input.cpp` / `utest_system_tray.cpp` / `utest_commands.cpp`（零改动预期，回归守护） |
 

@@ -131,14 +131,14 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 | Linux | X11Surface / WaylandSurface / WgpuX11Surface（GPU 栅格，需 Rust 工具链构建） | ✅ 可用（CMake 开启） |
 | 跨平台 | GlfwSurface（OpenGL 3.x） | ✅ 可用（CMake 开启，默认 OFF） |
 | Headless（内存 PNG） | HeadlessSurface | ✅ 全平台，测试与 CI 基座 |
-| macOS | MacOSSurface | 🚧 骨架 |
+| macOS | MacOSSurface | ❌ 未支持（仅骨架代码，运行期不可用） |
 | Web | WasmSurface | 🚧 骨架 |
 
 ## 已知限制（alpha）
 
 - API 在 1.0 正式版前仍可能有破坏性变更（遵循 semver 并提供迁移路径）
 - `media/`、`perf/` 模块为 experimental 成熟度
-- Windows 为首要测试平台，Linux/macOS 覆盖有限
+- macOS 后端仅为骨架实现，未提供支持；Windows 为首要测试平台，Linux 覆盖有限
 - 存储层 SQLite 后端为可选编译（`AURORA_ENABLE_STORAGE_SQLITE`，默认 OFF），开启后提供真事务 + 内联 BLOB；未开启时为 Memory/Filesystem 两后端
 
 ## 文档

@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-015 |
 | 提出日期 | 2026-10-13 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.APP.RECENT-DOCUMENTS.001 |
 | 影响面 | 新增 include/aurora/app/recent_documents.h 与 src/aurora/app/recent_documents.cpp、`codespec` 平台 Shell 相关章节、`tests/unit/`（新增 utest_recent_documents，既有用例零改动） |
 

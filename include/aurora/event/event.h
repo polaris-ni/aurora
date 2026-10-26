@@ -450,8 +450,8 @@ struct SystemDropEvent : Event {
 /// 嵌套模态循环不取）。返回值语义收窄为**「会话是否发起成功」**，最终结局与动作改由 `on_end`
 /// 投递，经 `pump_reads()` 在帧循环上兑现（宿主不排空 ⇒ 回调不到，不谎报）。
 ///
-/// 立骨期各后端均未接线：无测试后端时一律返回 `system-drag-not-supported`（**机制缺失是稳态**，
-/// 错误码 `retryable = false`，调用方不该重试）。
+/// 系统拖出后端按平台接线（Win32 / D3D11 / X11 / Wayland 均已注册；Headless / Glfw 恒无后端）；
+/// 当无可用后端或能力位为 false 时返回 `system-drag-not-supported`（`retryable = false`，调用方不该重试）。
 namespace system_drag {
 /// @brief 发起一次系统拖出会话（发起即返回，不等待会话结束）。
 /// @param offer 控件提供的格式与取字节回调；`formats` 为空或 `provide` 为空回调视为要约不合法。
