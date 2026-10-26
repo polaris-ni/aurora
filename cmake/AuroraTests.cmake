@@ -77,6 +77,24 @@ if (AURORA_BUILD_TESTS)
             add_test(NAME check_api_schema_sync
                     COMMAND ${PYTHON3_EXE} "${_check_dir}/check_api_schema_sync.py" "${CMAKE_BINARY_DIR}"
                     WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+            # i18n 消息管线的 golden 守护（直接调用真实构建产物 gen_i18n）：生成物确定性、
+            # 入库产物与词表 JSON 的逐字节一致、内置保留区同源锁、错误分类与 warn 分类不漂移。
+            # 同 check_gen_api_merge 前提：须先构建 gen_i18n，故 CI 必须排在 build 之后；
+            # 交叉构建下 wasm job 的 gen_i18n 是 .js，判据交给原生 job（本块整体不注册）。
+            # 生成头入库形态是「生成 + 排版」两步的产物（口径同 generate_error_codes），故把
+            # 排版门禁实际选中的 clang-format 一并传给它：PATH 上没有 clang-format 的构建里，
+            # header 比对腿不至于静默跳过。
+            aurora_find_clang_format(_i18n_gen_cf)
+            if (_i18n_gen_cf)
+                add_test(NAME check_i18n_gen_golden
+                        COMMAND ${PYTHON3_EXE} "${_check_dir}/check_i18n_gen_golden.py"
+                                "${CMAKE_BINARY_DIR}" --clang-format "${_i18n_gen_cf}"
+                        WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+            else ()
+                add_test(NAME check_i18n_gen_golden
+                        COMMAND ${PYTHON3_EXE} "${_check_dir}/check_i18n_gen_golden.py" "${CMAKE_BINARY_DIR}"
+                        WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+            endif ()
         endif ()
         # codespec 文档内部一致性守护（断链 / 失效锚点 / 章节号 / 反引号路径 / 特性表落点）。
         add_test(NAME check_codespec_xref
@@ -185,6 +203,23 @@ if (AURORA_BUILD_TESTS)
         message(FATAL_ERROR "AURORA_TEST_SHARDS must be a positive integer (got '${AURORA_TEST_SHARDS}')")
     endif ()
 
+    # ---- 测试用例 TU 的优化级别（AURORA_TEST_OPT_LEVEL，非开关、缓存字符串）----
+    # 用例是正确性校验而非性能热点：热点全在 -O3 的 aurora 库与三方文本光栅内，
+    # 以构建类型默认档（Release = -O3）编译 400+ 个用例 TU，实测占全量构建 CPU
+    # 时间的一半以上，而库侧一行不变。降档只改用例 TU 自身的代码生成速度，不触碰
+    # 任何 ABI 相关标志（异常 / RTTI / NDEBUG / C++ 标准与库逐项一致），语义等价。
+    # 取值：auto（缺省）= 优化构建（非 Debug）按 -O1 编用例、Debug 维持 -O0
+    # （保住 hybrid debug「消费者目标可单步」口径；多配置生成器、MSVC 系旗标与
+    # 消费者 PCH 开启下不注入，理由见 _aurora_configure_runner 内应用处）；
+    # 0-3 = 显式档位（GCC/Clang: -O0..-O3；MSVC: /Od../O2，无 /O3；恒注入——
+    # MSVC Debug 配置下 /O1../O2 与默认 /RTC1 并存会 D8016，需要时先摘除 /RTC1；
+    # 消费者 PCH 门下不注入并发 WARNING，原因同 auto 条件④）；none = 永不覆盖。
+    set(AURORA_TEST_OPT_LEVEL "auto" CACHE STRING
+            "Optimization level for test-case TUs: 'auto' (default) = -O1 in optimized single-config non-MSVC builds without consumer PCH, build-type default otherwise; 0-3 = explicit (not applied under consumer PCH); 'none' = never override")
+    if (NOT AURORA_TEST_OPT_LEVEL MATCHES "^(auto|none|[0-3])$")
+        message(FATAL_ERROR "AURORA_TEST_OPT_LEVEL must be 'auto', 'none' or 0-3 (got '${AURORA_TEST_OPT_LEVEL}')")
+    endif ()
+
     # E2E 用例的看门狗超时（ms）。runner 默认 timeout_ms=0 即不设限，而真实窗口事件循环
     # 一旦挂起就没有兜底（不设 CTest TIMEOUT 属性先例），故由下方两条 add_test 注册循环
     # 按 stem 前缀 etest_ 显式注入 --timeout；到点 runner 先写报告再以退出码 3 结束。
@@ -192,7 +227,7 @@ if (AURORA_BUILD_TESTS)
             "Watchdog timeout (ms) injected via --timeout for etest_ (real backend) cases")
 
     # runner 目标统一配置（分片共享）：链接 aurora + C++20 + 消费者 PCH + 告警；
-    # tests/ 供框架头解析，examples/app/google_play 供 google_play_data/ui 数据层测试，
+    # tests/ 供框架头解析，
     # examples/demos 供 E2E 用例包含与 demo 同源的场景头（scenes/*.h）；
     # tools/include 复用 known_enums.h 等 SSOT，tests/support 为测试公共设施；
     # tools/servers 供 header-only 的工具侧客户端（inspector_client.h）被真代码单测——
@@ -202,7 +237,6 @@ if (AURORA_BUILD_TESTS)
     function(_aurora_configure_runner tgt)
         aurora_setup_consumer_target(${tgt}
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-                "${CMAKE_CURRENT_SOURCE_DIR}/examples/app/google_play"
                 "${CMAKE_CURRENT_SOURCE_DIR}/examples/demos")
         target_include_directories(${tgt} PRIVATE
                 "${AURORA_SOURCE_DIR}/tools/include"
@@ -234,6 +268,62 @@ if (AURORA_BUILD_TESTS)
         # 测试 TU 与库 TU 必须同口径，故按选项向 runner 同步注入（对齐上方 SIMD 的处理）。
         if (AURORA_ENABLE_COMPRESSION)
             target_compile_definitions(${tgt} PRIVATE AURORA_ENABLE_COMPRESSION)
+        endif ()
+        # 测试用例 TU 优化级别（AURORA_TEST_OPT_LEVEL，定义处有完整理由）：
+        # target_compile_options 追加在命令行末尾，覆盖构建类型默认 -O3——
+        # 与 Debug hybrid 给库覆写 -O3 同一机制。
+        # auto 的注入条件（三条同时满足，缺一不注入）：
+        #   ① configure 期构建类型非 Debug——Debug 维持 -O0，保住 hybrid debug
+        #      「消费者目标可单步」口径（与 CMakeLists.txt 的 Debug 优化块对偶：那块抬库、这块不碰消费者）；
+        #   ② 单配置生成器——多配置（VS）下 CMAKE_BUILD_TYPE 被强制成 Release、configure 期
+        #      判不出 Debug 配置，而 CMake Debug 默认含 /RTC1，与 /O* 并存是 MSVC D8016
+        #      硬错误（CMakeLists.txt MSVC Debug hybrid 前置同款坑；CI windows-msvc-debug
+        #      正是 VS 生成器 + --config Debug 的形态，注入即红灯）；
+        #   ③ 非 MSVC 系旗标（MSVC / clang-cl）——其优化构建默认档本就是 /O2 而非 -O3，
+        #      降到 /O1 是净降级，实测口径（-O3 → -O1 省 27% CPU）不成立；
+        #   ④ 消费者共享 PCH 关闭（NOT AURORA_PCH_ENABLED）——consumer PCH 按构建类型
+        #      默认档编译、且被 demo/工具/测试全部消费者共用，clang 要求 TU 与 PCH 的
+        #      优化档一致：emscripten 直接报 "OptimizationLevel differs in precompiled
+        #      file" 硬错（CI wasm 两个作业实测红灯），vanilla clang（macOS-clang）虽仅
+        #      -Winvalid-pch 警告回退文本包含，但全部 runner TU 静默失去 PCH——两种
+        #      形态都不取，故 PCH 门下整体不注入（PCH 仅对 clang 系默认开：GCC 与
+        #      插桩构建本就关闭，门控见 CMakeLists.txt AURORA_PCH_ENABLED 与
+        #      BUILD_OPTIONS.md §2.2）。
+        # 显式档位（0-3）同样受 ④ 约束：PCH 门下不注入并发 WARNING——请求无法兑现，
+        # 静默跳过即是假绿；auto/none 无请求意味，静默跳过。
+        set(_aurora_test_opt "")
+        if (AURORA_TEST_OPT_LEVEL STREQUAL "auto")
+            if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug"
+                    AND NOT CMAKE_CONFIGURATION_TYPES
+                    AND NOT (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"
+                    OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+                    AND NOT AURORA_PCH_ENABLED)
+                set(_aurora_test_opt "1")
+            endif ()
+        elseif (AURORA_TEST_OPT_LEVEL MATCHES "^[0-3]$")
+            if (AURORA_PCH_ENABLED)
+                message(WARNING "AURORA_TEST_OPT_LEVEL=${AURORA_TEST_OPT_LEVEL} not applied: "
+                        "the shared consumer PCH (AURORA_PCH_ENABLED) is built at the "
+                        "build-type default optimization level and reused by all consumer "
+                        "targets; clang requires TU and PCH optimization levels to match. "
+                        "Use AURORA_TEST_OPT_LEVEL=none to silence this warning.")
+            else ()
+                set(_aurora_test_opt "${AURORA_TEST_OPT_LEVEL}")
+            endif ()
+        endif ()
+        if (_aurora_test_opt)
+            if (MSVC)
+                if (_aurora_test_opt STREQUAL "0")
+                    set(_aurora_test_opt_flag "/Od")
+                elseif (_aurora_test_opt STREQUAL "3")
+                    set(_aurora_test_opt_flag "/O2")  # MSVC 无 /O3：/O2 即最大化速度
+                else ()
+                    set(_aurora_test_opt_flag "/O${_aurora_test_opt}")
+                endif ()
+            else ()
+                set(_aurora_test_opt_flag "-O${_aurora_test_opt}")
+            endif ()
+            target_compile_options(${tgt} PRIVATE ${_aurora_test_opt_flag})
         endif ()
         if (CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC" OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
             # /STACK：MSVC 系链接器（link.exe / lld-link）默认栈保留仅 1MB，而 JSON 解析器是

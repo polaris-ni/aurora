@@ -31,12 +31,14 @@ namespace aurora::net {
 
 namespace detail {
 
+namespace {
 /// @brief 分帧型别：决定一帧的边界到哪里。
 enum class FramerKind : std::uint8_t {
     Line,  ///< LF 或 CRLF 终止
     Delimiter,  ///< 任意非空分隔符终止
     LengthPrefixed,  ///< 定长长度字段声明帧体字节数
 };
+}  // namespace
 
 /// @brief 分帧器的全部可变状态（口径 + 缓冲 + 终态错误）。
 struct FramerState {
@@ -44,7 +46,7 @@ struct FramerState {
     /// @param type 分帧型别。
     /// @param config 已校验的分帧口径。
     /// @param separator 分隔符（仅 `Delimiter` 型读取）。
-    FramerState(FramerKind type, FrameOptions config, std::string separator)
+    FramerState(FramerKind type, const FrameOptions &config, std::string separator)
         : kind(type), options(config), delimiter(std::move(separator)) {}
 
     FramerKind kind;  ///< 分帧型别
@@ -278,7 +280,7 @@ auto Framer::operator=(Framer &&other) noexcept -> Framer & = default;
 
 Framer::~Framer() = default;
 
-auto Framer::feed(std::span<const char> bytes, const FrameSink &on_frame) -> Result<FeedReport> {
+auto Framer::feed(std::span<const char> bytes, const FrameSink &on_frame) const -> Result<FeedReport> {
     if (!state_) {
         return Result<FeedReport>{FeedReport{}};  // 移动后的落点：没有缓冲可切，成功空报告而不是错误
     }
@@ -303,7 +305,7 @@ auto Framer::feed(std::span<const char> bytes, const FrameSink &on_frame) -> Res
     return Result<FeedReport>{report};
 }
 
-auto Framer::finish(const FrameSink &on_frame) -> Result<FinishReport> {
+auto Framer::finish(const FrameSink &on_frame) const -> Result<FinishReport> {
     if (!state_) {
         return Result<FinishReport>{FinishReport{}};
     }
@@ -337,7 +339,7 @@ auto Framer::finish(const FrameSink &on_frame) -> Result<FinishReport> {
     return Result<FinishReport>{report};
 }
 
-auto Framer::reset() -> void {
+auto Framer::reset() const -> void {
     if (!state_) {
         return;
     }

@@ -56,7 +56,7 @@ struct Event {
 
 **跨后端产出不一致（平台事实，非疏漏）**：`KP_0`–`KP_9` 与运算键（`KP_Add` / `KP_Subtract` / `KP_Multiply` / `KP_Divide` / `KP_Decimal` / `KP_Separator`）三后端齐备；`KP_Insert` / `KP_Delete` / `KP_Begin` / `KP_End` / `KP_Home` / `KP_Prior` / `KP_Next` **只有 X11 / Wayland 后端产出**（X11 的 KP_* keysym 与主键各占独立码点，天然可分）。Win32 在导航区把两边**共用同一组虚拟键码**，实测六个键里只有 `Home` 真的可分（主键盘扫描码 `0x47` / 小键盘 `E0 4E`）——`End` / `PgUp` / `PgDn` 两边的 (VK, scan, extended) 完全相同或仅 extended 位不同（主键盘 PgUp / PgDn 本身就带 E0 前缀），把「带 E0」当成「来自小键盘」会**误判主键盘那两个键**，误判比不判更糟，故判据保守到只认 Home。GLFW 的键码表本身没有 `GLFW_KEY_KP_INSERT` / `_HOME` 之类的常量，同样无法区分。**故消费方在 Win32 与 GLFW 上不能假定这几项一定命中**，需要时应按平台兜底。判据本体在 `src/aurora/window/detail/win32_keymap.h` 的 `is_numpad_nav_scan`（含完整实测对照表）与 `src/aurora/window/keysym_map.h`，均有单测逐值锁定。GLFW 侧的键码表自 `glfw_surface.cpp` 的 `static` 函数抽到可单测内部头 `src/aurora/window/detail/glfw_keymap.h`（与 `win32_keymap.h` 对称）：此前「四后端键码一致」这条契约在 Win32 与 X11 / Wayland 两配置都有 CTest 断言，唯独 GLFW 配置没有，错位只能等真机才显形。
 
-**修饰键语义（`KeyEvent::modifiers`）= 队列相对，而非派发时刻的物理读数**：宿主按键盘消息流推进一份修饰位状态（Win32 侧为 `src/aurora/window/detail/win32_modifiers.h` 的 `ModifierKeyTracker`），`KeyEvent` 携带的是「该键在队列里被处理的那一刻」的修饰态。取此口径的理由：在派发时刻异步采样（`GetAsyncKeyState`）会让热键命中与否取决于「消息被泵到之前修饰键是否仍按着」，于是 UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时按键**静默**丢失（同载体同形态实测 0/10，见 `manual-test/21-debug.md` TC-DEBUG-004 备注）。三条配套边界：
+**修饰键语义（`KeyEvent::modifiers`）= 队列相对，而非派发时刻的物理读数**：宿主按键盘消息流推进一份修饰位状态（Win32 侧为 `src/aurora/window/detail/win32_modifiers.h` 的 `ModifierKeyTracker`），`KeyEvent` 携带的是「该键在队列里被处理的那一刻」的修饰态。取此口径的理由：在派发时刻异步采样（`GetAsyncKeyState`）会让热键命中与否取决于「消息被泵到之前修饰键是否仍按着」，于是 UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时按键**静默**丢失（同载体同形态实测 0/10；该观测出自已退役调试载体的人工用例 TC-DEBUG-004，实测结论保留为设计依据）。三条配套边界：
 
 - **左右归并**：`VK_LSHIFT` / `VK_RSHIFT` / `VK_SHIFT` 折到同一位，使不配对的变体（注入或布局按下给 L 变体、抬起给通用码）不残留幻影；代价是同位上任一变体抬起即清位。
 - **失焦清空、激活播种**：`WM_ACTIVATE` 转非激活与 `WM_KILLFOCUS` 整体清零（未送达的抬起消息不可追），重新取得激活时用一次异步读数播种基线（覆盖「Alt+Tab 切进来时 Alt 已按下」）。因此修饰键**只在持有键盘焦点的那个窗口内计数**——非前台窗口上的物理 Ctrl 不再被别的窗口借读，这恰是 Windows 自身的键盘语义。
@@ -107,7 +107,7 @@ struct Event {
 **两种被明确否决的做法**（不要实现，后果都是「看起来能跑、实则静默错」）：
 
 - ❌ **在派发器里用「最后一次 `KeyEvent` 的 `modifiers` 快照」兜底**。修饰键的按下事件可能根本不属于本窗口：`Alt+Tab` 切进来时按住的 Alt，其按下消息投给了别的窗口，本窗口的快照必然错。快照兜底在单窗口快速操作下看起来是对的，只在跨窗口切换时失效——正是最难复现的一类。
-- ❌ **在派发时刻现场轮询物理按键态**（Win32 的 `GetAsyncKeyState` 一类）。指针事件同属消息驱动，从消息进队列到派发可能已晚于一帧；UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时修饰键早已抬起，热键/手势**静默**丢失（同载体同形态实测 0/10，见 `manual-test/21-debug.md` TC-DEBUG-004 备注）。
+- ❌ **在派发时刻现场轮询物理按键态**（Win32 的 `GetAsyncKeyState` 一类）。指针事件同属消息驱动，从消息进队列到派发可能已晚于一帧；UI 卡顿或人手 chord 短于一帧（约 21–30 ms）时修饰键早已抬起，热键/手势**静默**丢失（同载体同形态实测 0/10；该观测出自已退役调试载体的人工用例 TC-DEBUG-004，实测结论保留为设计依据）。
 
 **逐后端真值源**（每条路径只允许一个来源；同一字段两个真值源会在两个来源分歧时静默错位）：
 
@@ -472,8 +472,55 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 - **accept 查询是单一真值源**：`Widget::query_system_drag_accept(formats) -> DragAction` 返回「本控件会执行什么动作」，基类默认 `DragAction::None`（不接受）。派发器在 `Enter` / `Over` 两态命中后调用它，与源建议动作 `proposed` 求交写入 `allowed`（两侧表态冲突即 `None`），宿主据此决定 OS 光标反馈。该查询在 `Over` 态按指针采样频率发生，**实现须常量级、禁止触发重布局**。
 - **载荷读取**：`DragPayload` 是 pimpl 的只读句柄（`std::shared_ptr<const DragPayload>`），按 MIME 取原始字节；`files()` / `text()` / `image()` / `bytes(mime)` 为便利读取，一律返回 `Result`，**格式不存在 = `Ok` 空值**（空内容不是失败，与 `Clipboard` 同口径）。`files()` 解码 `text/uri-list`，只返回可映射为本地路径的条目，非 `file` scheme 的行静默跳过。
 - **动作口径**：`DragAction{None, Copy, Move, Link}`，`None` 表示不接受 / 无动作（也是取消与失败的返回值，**不是成功**）。
-- **拖出**：控件经 `on_provide_drag()` 声明 `DragOffer`（格式清单 + 按 MIME 提供字节的回调），`begin_system_drag()` 发起会话；结束回调定名 `on_system_drag_end(DragAction)`，与应用内拖拽的 `on_drag_end` **刻意分名**（同一控件上两套拖拽语义不共名）。
-- **无障碍替代**：拖放不是唯一路径——粘贴、文件对话框等非拖拽入口在 UI 上须可达，放置反馈不得只靠光标形态表达（颜色 / 高亮 / 文案同时给）。
+- **拖出（事件驱动执行模型）**：控件经 `on_provide_drag()` 声明 `DragOffer`（格式清单 + 按 MIME 提供字节的回调，另含可选影像与热点偏移、源侧缺省动作、Move 确认回调四枚可选字段），`begin_system_drag()` 经 `system_drag::begin` 发起会话——**发起即返回**，不阻塞到会话结束（单线程 UI + 帧循环下，阻塞即要么饿死回调、要么引入嵌套消息泵的重入面；平台壳侧契约见 [`06-app-platform.md`](06-app-platform.md) §8.9）。`system_drag::cancel()` 调用时机不受限（会话外 no-op、会话内取消并就地收口在途读取）。终态经帧循环 `system_drag::pump_reads()` 投递。结束回调族与应用内拖拽的 `on_drag_end` **刻意分名**（同一控件上两套拖拽语义不共名）。
+- **源侧回调族四条序列**（`on_system_drag_begin` / `on_system_drag_cancel` / `on_system_drag_end(outcome, action)`，五种路径缺一即契约不全）：
+
+  | 路径 | 回调序列 |
+  |:---|:---|
+  | 成功落放 | `begin` → `end(Succeeded, 协商出的动作)` |
+  | 被取消（Esc / 系统取消） | `begin` → `cancel` → `end(Cancelled, None)` |
+  | 被拒绝（目标不接受） | `begin` → `end(Rejected, None)` |
+  | 会话中途异常终止 | `begin` → `end(Failed, None)` |
+  | 发起失败（无后端 / 能力位 false / 要约不合法） | `end(Failed, None)`（**无 `begin`**） |
+
+  `on_system_drag_cancel` **只**出现在被取消路径且严格早于 `end`；「被拒绝」与「中途异常」序列逐字相同，靠 `SystemDragOutcome` 区分——**正因如此 outcome 必须进签名**。「无要约控件」（`on_provide_drag()` 返回 `std::nullopt`）连 `end` 都不派发：从未发起过会话、无可收尾的拖出态。控件销毁即取消在途会话，终结回调不落到已回收对象上（双轨判活：shared_ptr 轨 `weak_from_this()`、栈 / 成员对象轨销毁令牌）。
+- **Move 确认与回滚**：目标接收成功后源删除回调（`DragOffer::on_move_confirmed`）被调用一次，且**严格早于** `on_system_drag_end(Succeeded, Move)` 投递（事件驱动下该顺序从外部可断言；源不得在收到确认前删除数据）。删除回调返回 `Error` ⇒ 会话终态改写为 `Failed` + `Move` 并上报 `system-drag-move-rollback`，目标侧数据保持不动。
+- **修饰键翻译归属（唯一翻译点）**：`proposed` 由宿主 / 后端在派发前经 `system_drag::proposed_action_for(modifiers, default_action)` 一次写定；控件只读 `proposed` 与 `allowed`、不做翻译（控件侧不存在第二处翻译）。Ctrl → Copy、Shift → Move、Ctrl+Shift → Link（Windows 惯例）；无有效修饰键 ⇒ 取源侧缺省动作（`DragOffer::default_action`，缺省 `Copy`）——`ModifierKey::None` 两义（没按 / 程序化合成），不可靠修饰键缺席推定。比对前按 `AURORA_MODIFIER_PRESSABLE_MASK` 摘除锁定态位（NumLock 常开的实现上 Win32 `GetKeyState` 一类返回含锁定态位，不摘会让 Ctrl 组合静默失配且本地难复现）。
+- **非阻塞读取契约**：`DragPayload::read_async` 与 `SystemDropEvent` 的 `*_async` 便利读取登记在途项，结果经帧循环排空兑现（宿主不排空 ⇒ 回调不到，不谎报）；同一 const 句柄可并发读取、各自独立兑现一次、不互相取消；墙钟超时兑现 `system-drag-read-failed`；会话收口就地兑现，不悬挂。同步 `bytes()` 一族保留供小载荷与同步后端；事件层便利读取与 `DragPayload` 直连两条路结果一致。
+- **自动滚边协议**：拖放悬停近边缘的滚动由 `DragAutoScroll` 内核驱动（`scroll_viewport.h`）——时间戳全部由调用方帧计时供给（内核不自读时钟，宿主可冻结 / 快进）；按侵入深度比例给速，带宽 clamp 到视口半高；共享常量 `AURORA_AUTO_SCROLL_THRESHOLD_DP = 48.0`（与 `ReorderableList` 同名缺省值相等——进程内拖拽与跨进程拖放两条路径手感一致的锚点）与 `AURORA_AUTO_SCROLL_MAX_SPEED = 600.0`；带外 / 视口未定尺 / 新鲜度超时（`AURORA_DRAG_AUTO_SCROLL_STALE_S = 1.0`，意图沉默即收车）就地收车。派发落点 `Widget::on_system_drag_auto_scroll(position)`：基类沿祖先链上溯至**最近可滚动祖先**（覆写并返回 true 者即可滚动），`Over` 态给落点、`Leave` / `Drop` 给 `nullopt`；本契约不新增滚动实现，只补「拖入时谁驱动滚动」。
+- **无障碍替代路径**：可接收拖放的控件（`accepts_system_drag()` 为 true）须同时提供 `system_drag_alternative_path()`（人类可读描述，如「上下文菜单的『移动到』项」）；缺省为空 = 该控件只有拖拽一条路，无障碍树构建时把节点标记为「仅拖拽可达」（`AccessibilityNode::is_drag_only_reachable()` = `drag_reachable && 替代路径为空`），桥与工具链据此告警。粘贴、文件对话框等非拖拽入口在 UI 上须可达；放置反馈不得只靠光标形态表达（颜色 / 高亮 / 文案同时给）。
+- **平台后端映射（四后端事件翻译）**：后端只做五件事——坐标、formats、proposed、allowed、载荷，其余全在本节已冻结的契约里。平台无关的那一层是**零平台头折算层** `src/aurora/window/detail/system_drag_translate.h`（可无头单测），平台桥只把 OS 原生值搬进 `DragInFrame`、再把写定的 `allowed` 搬回 OS 光标反馈：
+
+  | 后端 | Enter | Over | Leave | Drop | 光标反馈回写 | 状态 |
+  |:---|:---|:---|:---|:---|:---|:---|
+  | Win32 OLE | `IDropTarget::DragEnter` | `DragOver` | `DragLeave` | `Drop` | `DragOver` / `DragEnter` 的 `pdwEffect`（`DROPEFFECT_*`） | **拖入 / 拖出均已接线**（拖出走库自管拖拽线程，见下） |
+  | X11 Xdnd | `XdndEnter`（类型经折算层换 MIME，空则不建会话） | `XdndPosition` | `XdndLeave` | `XdndDrop` | `XdndStatus`（接受位 + 动作 + 空矩形） | **拖入 / 拖出均已接线**（二者共用 `x11_drag.h` 的同一桥实例，见下） |
+  | Wayland | `data_offer` + `offer`（线上名清单）先行，`enter` 建会话 | `motion` | `leave` | `drop`（之后 `receive` 经管道取数、`finish` 收口） | `wl_data_offer.accept(serial, mime)` + `set_actions(dest_actions, preferred)` | **拖入 / 拖出均已接线**（二者共用 `wayland_drag.h` 的同一桥实例，见下） |
+  | macOS | `draggingEntered` | `draggingUpdated` | `draggingExited` | `performDragOperation`（取数**同步**完成：AppKit 读取 API 自身阻塞到数据就绪） | `draggingEntered` / `draggingUpdated` 返回的 `NSDragOperation`（**accept 闸门是 `prepareForDragOperation` 的返回值**，闸门为 NO 时 AppKit 不调 perform） | **拖入 / 拖出均已接线**（二者共用 `macos_drag.h` 的同一桥实例，见下；窗口壳仍为骨架，运行期需真实窗口承载会话） |
+
+  - **坐标**：OS 会话坐标 → 客户区像素 → **整幅表面逻辑坐标**（§2.3）；除数取宿主的 `scale`（宿主内 DPI 的唯一真值源），折算层不另读 DPI。
+  - **formats**：OS 格式 → MIME 清单，取值一律出自 `app/mime_types.h`（单一真源），未登记格式丢弃；顺序即源侧优先级，折算不得重排。
+  - **proposed**：拖出侧取 `DragOffer::default_action`；**拖入侧源是外部进程、没有 `DragOffer`**，故取 OS 报告的源侧建议动作（Win32 `pdwEffect` / X11 `XdndEnter` 的 action 位 / Wayland `wl_data_device` 的 `action` 事件 / macOS `draggingSourceOperationMask`），OS 未报告时按 `Copy` 兜底。
+  - **allowed**：命中目标的 `query_system_drag_accept` 与 `proposed` 求交后写定，宿主按上表逐后端回写——这是「询问 → 反馈」闭环的唯一出口。
+  - **载荷**：小载荷走同步（`DragPayload::from_bytes`），大载荷 / 远程载荷走 `read_async` + `pump_reads()`（阈值 `AURORA_DRAG_SYNC_PAYLOAD_LIMIT` 是四后端共用的单一真源）。
+  - **拖出侧终态折算（逐平台来源）**：拖出会话跑在平台自管的执行体上（Win32 为库自管拖拽线程），终态经 `complete_drag_out_session` 登记、帧循环投递。取消与结局的判定按平台各有唯一来源，折算后统一落 §5.2 已冻结的四结局：
+
+    | 后端 | 发起入口 | 取消检测 | 成功依据 | 失败依据 |
+    |:---|:---|:---|:---|:---|
+    | Win32 OLE | `DoDragDrop`（库自管拖拽线程，自持 `OleInitialize`） | `IDropSource::QueryContinueDrag` 返回 `DRAGDROP_S_CANCEL`（Esc / 程序化取消标志 / 右键） | `DRAGDROP_S_DROP` + 效果位非零 | 异常 HRESULT、线程侧 `OleInitialize` 失败、要约提供失败或介质构造失败 |
+    | X11 Xdnd | `XSetSelectionOwner(XdndSelection)` + 指针 grab（全程在 UI 线程帧循环内） | 拖出会话中按 Esc（`on_key_press` 判取消） | 目标回 `XdndStatus` 受理 + 收到 `XdndFinished` 受理位 | grab 失败 / 取不到属主 / 要约 `provide` 失败 / 释放时无目标（按 `Cancelled`）或目标未受理（按 `Rejected`） |
+    | Wayland `wl_data_device` | `wl_data_device.start_drag(source, origin, null, serial)`（serial 取本次按下序，宿主指针按下路径经 `note_press_serial` 刷新；全程在 UI 线程帧循环内） | `system_drag::cancel()` 程序化取消（Esc 语义与之共用同一条路径） | `dnd_drop_performed` + `dnd_finished`，动作取 `action` 事件报值（未报则要约缺省动作） | 源侧收到 `cancelled` 且已 `dnd_drop_performed`（目标未回 `finish` = 拒绝）；要约 `provide` 失败或管道写失败（按 `Failed`） |
+    | macOS AppKit | `beginDraggingSessionWithItems:event:source:`（event 取宿主指针按下路径经 `note_press_event` 暂存的 `NSEvent`；全程在 UI 线程帧循环内） | `system_drag::cancel()` 就地登记（AppKit 无程序化中止 API，会话自然结束时不再改写终态） | `draggingSession:endedAtPoint:operation:` 的 operation 非零，动作按 `NSDragOperation` 折算 | operation 为 none 即 `Cancelled`；要约 `provide` 失败或粘贴板条目给不出数据（按 `Failed`）；无窗口 / 无按下事件时**不发起**（`begin` 如实失败，不谎报会话已建立） |
+
+    X11 侧按同一体例：源侧会话期间指针下的目标由 `XQueryPointer` + `XQueryTree` 上溯得到（带缓存）；落放时先发 `XdndDrop`，目标回 `XdndStatus` 未受理即 `Rejected`，受理则等 `XdndFinished` 落 `Succeeded` + 商定动作；`provide` 抛错或超时按 `system-drag-read-failed` 兑现后落 `Failed`。
+
+    Win32 侧退出码 → 终态折算（SDK 宏 → 本地枚举的唯一映射点，`exit_of_drag_out` + `result_from_win32_drag_out`，零平台头层可无头单测）：`DROPPED` + 效果位非零 → `Succeeded` + 动作（`action_from_win32_drop_effect` 按 Copy → Move → Link 取一）；`DROPPED` + `DROPEFFECT_NONE` → `Rejected` + `None`；`CANCELED` / `USEDEFAULTCURSORS` → `Cancelled` + `None`；异常 HRESULT → `Failed` + `None`。
+
+    Wayland 侧按同一体例：源侧会话期**不探「指针下的目标」**——Wayland 没有客户端可用的指针 / 窗口栈查询 API（这正是 Wayland 探针要把合成器搬进进程的原因），落点由合成器按指针下的表面决定，客户端只从 `enter` / `motion` / `drop` 得知本表面是否是落点；`drop` 到达后目标侧经 `receive` 向源侧索取数据（源侧 `send` 到达时桥把 `provide` 的字节写回管道）。v3 下 `dnd_finished` 落 `Succeeded` + 商定动作；`cancelled` 一词一义 = 用户取消，但**落放已发生却没等来 `dnd_finished` 时按 `Rejected` 折算**（目标没有 `finish` 即拒绝，不是取消）；v1/v2 下该事件一词二义（取消 / 会话结束），按「是否应答过 send」分叉——应答过按成功、未应答按拒绝。
+
+    macOS 侧按同一体例：源侧会话期**不探「指针下的目标」**——AppKit 的会话由窗口服务器派发，客户端只从五个 `NSDraggingDestination` 方法得知本视图是否是落点，也无从问出「指针下是哪个窗口」；终态只有一个来源：`draggingSession:endedAtPoint:operation:`（operation 为 none ⇒ `Cancelled` + `None`，非零 ⇒ `Succeeded` + 按 `NSDragOperation` 折算的动作；Move 的确认与回滚仍在事件层 `deliver_session_end` 内完成，桥只登记终态）。AppKit 没有公开的程序化中止 API，`system_drag::cancel()` 的取消意图由事件层**就地登记**（首登记者赢），会话自然结束时 `on_session_ended` 的补登撞上已排定终态即自然作废——不强收仍在用的会话对象。
+  - **自拖放取数**：同进程跨窗口拖放（本库拖出源即本进程落点）时，拖入侧经在途要约直取（UI 线程直接调 `DragOffer::provide`，不经数据对象）。Win32 上同进程**跨单元**形态下数据对象指针被 COM 编组为代理，经数据对象取数会让 UI 线程与拖拽线程互等到墙钟超时；同单元到达的 `GetData` 由数据对象按同单元分支直答。X11 上同进程形态不需要特殊分支：`XdndSelection` 的属主就是本进程，`SelectionRequest` 到达后桥在同一条事件泵里直接调 `DragOffer::provide` 应答，不经任何跨线程编组——故「自拖放」与「跨进程拖入」在 X11 侧走的是同一条 selection round-trip。Wayland 上同进程形态同样不需要特殊分支：`receive` 给的管道由内核承载，源侧 `send` 写入的字节经管道直达目标侧（哪怕两端在同一进程），不经任何跨线程编组——故「自拖放」与「跨进程拖入」在 Wayland 侧走的是同一条管道往返。 macOS 上同进程形态同样不需要特殊分支：`performDragOperation` 里的读取是同步的（AppKit 读取 API 自阻塞到数据就绪），桥在同一条派发栈里直接调 `DragOffer::provide` 应答，不经任何跨线程编组——故「自拖放」与「跨进程拖入」在 macOS 侧走的是同一次同步读取。
+  - **能力位与方向**：`system_drag_in` / `system_drag_out` **按方向独立翻位**（不是成对翻位），当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 两个方向均为 true、其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定）；`Glfw` 与 `Headless` 恒 false。
 
 ---
 

@@ -3,7 +3,12 @@
 /// 测试说明: 滚动视口内核——clamp_offset 符号与夹取、apply_scroll 状态机、remaining_offset 余量回传
 /// （端点被吃掉的部分、step<=0 全退）、ScrollSnap::page/enabled 生效条件、
 /// snap_target 三方位（Start/Center/End）与分页、末端不足一周期时夹到 max、吸附关闭时退化普通夹取、
-/// ScrollGlide 启动/重定向/tick 收敛与到点精确终止
+/// ScrollGlide 启动/重定向/tick 收敛与到点精确终止；
+/// 拖入自动滚边内核——驱动即激活、带内按侵入深度比例给速（顶带负 / 底带正、首帧 dt 兜底 1/60）、
+/// 带外或视口未定尺即就地收车、新鲜度超时收车（宿主停发意图的兜底）、收车后可重新驱动、
+/// 触发带在矮视口下半高夹取、落点与视口盒同为窗口逻辑坐标时按原点差换算、共享调参常量钉值
+
+#include <chrono>
 
 #include "aurora/widget/scroll_viewport.h"
 #include "framework/aurora_test.h"
@@ -149,6 +154,128 @@ AURORA_TEST_CASE(glide_redirect_keeps_progress_and_finishes) {
 
     AURORA_TEST_CHECK_NEAR(g.tick(2.0), 200.0F, 1e-4F);
     AURORA_TEST_CHECK_FALSE(g.active);
+}
+
+// ---- 拖入自动滚边（DragAutoScroll）----
+// 视口盒 100x200 ⇒ 触发带 band = min(48, 100) = 48：本地 y<48 顶带、y>152 底带。
+// 时刻全部由用例自造（假帧钟），内核不自行读钟。
+
+AURORA_TEST_CASE(drag_auto_scroll_drives_proportionally_within_bands) {
+    const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 200.0F}};
+    const auto t0 = std::chrono::steady_clock::now();
+
+    DragAutoScroll scroll;
+    AURORA_TEST_CHECK_FALSE(scroll.active);
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0), 0.0F, 1e-6F);  // 未驱动：零增量、不激活
+
+    // 顶带全深侵入（落点贴上沿）：最大速度向上（负 = offset 减小）；首帧 dt 兜底 1/60。
+    scroll.drive(Point{.x = 50.0F, .y = 0.0F});
+    AURORA_TEST_CHECK_TRUE(scroll.active);
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0), -AURORA_AUTO_SCROLL_MAX_SPEED / 60.0F, 1e-3F);
+
+    // 顶带半深（y = band/2）：速度减半；dt 取真实帧差 0.5s ⇒ 增量 = 速度 × 0.5。
+    scroll.drive(Point{.x = 50.0F, .y = 24.0F});
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0 + std::chrono::milliseconds{500}),
+                           -AURORA_AUTO_SCROLL_MAX_SPEED * 0.5 * 0.5, 1e-3F);
+
+    // 底带全深（y = 视口下沿）：最大速度向下（正 = offset 增大）。
+    scroll.drive(Point{.x = 50.0F, .y = 200.0F});
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0 + std::chrono::milliseconds{1000}),
+                           AURORA_AUTO_SCROLL_MAX_SPEED * 0.5, 1e-3F);
+
+    // 底带半深（y = 176 = 200 − band/2）：同比例衰减。
+    scroll.drive(Point{.x = 50.0F, .y = 176.0F});
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0 + std::chrono::milliseconds{1500}),
+                           AURORA_AUTO_SCROLL_MAX_SPEED * 0.5 * 0.5, 1e-3F);
+    AURORA_TEST_CHECK_TRUE(scroll.active);
+}
+
+AURORA_TEST_CASE(drag_auto_scroll_stops_outside_band_and_on_unknown_viewport) {
+    const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 200.0F}};
+    const auto t0 = std::chrono::steady_clock::now();
+
+    DragAutoScroll scroll;
+    // 落点在触发带外（视口中部）：零增量且就地收车（调用方据此摘除帧计时）。
+    scroll.drive(Point{.x = 50.0F, .y = 100.0F});
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0), 0.0F, 1e-6F);
+    AURORA_TEST_CHECK_FALSE(scroll.active);
+
+    // 视口未定尺（高 0）：band 退化为 0 ⇒ 收车（不除零、不无限加速）。drive 只登记、
+    // 不判定，故激活仍由 drive 置上、由 advance 摘落。
+    const Rect unsized{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 0.0F}};
+    scroll.drive(Point{.x = 50.0F, .y = 0.0F});
+    AURORA_TEST_CHECK_TRUE(scroll.active);
+    AURORA_TEST_CHECK_NEAR(scroll.advance(unsized, t0), 0.0F, 1e-6F);
+    AURORA_TEST_CHECK_FALSE(scroll.active);
+
+    // 收车后可重新驱动：状态全清（计时 / 新鲜度不残留），首帧 dt 仍走 1/60 兜底。
+    scroll.drive(Point{.x = 50.0F, .y = 0.0F});
+    AURORA_TEST_CHECK_TRUE(scroll.active);
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0), -AURORA_AUTO_SCROLL_MAX_SPEED / 60.0F, 1e-3F);
+
+    // 显式收车幂等：再 advance 恒 0 且保持非激活。
+    scroll.stop();
+    AURORA_TEST_CHECK_FALSE(scroll.active);
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0), 0.0F, 1e-6F);
+    scroll.stop();
+    AURORA_TEST_CHECK_FALSE(scroll.active);
+}
+
+AURORA_TEST_CASE(drag_auto_scroll_staleness_timeout_releases_when_intent_goes_silent) {
+    const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 200.0F}};
+    const auto t0 = std::chrono::steady_clock::now();
+
+    DragAutoScroll scroll;
+    scroll.drive(Point{.x = 50.0F, .y = 0.0F});
+    AURORA_TEST_CHECK(scroll.advance(box, t0) != 0.0F);  // 首帧：兑现意图、刷新新鲜度
+
+    // 宿主停发意图但未逾上限：继续按帧推进（帧差 0.5s）。
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0 + std::chrono::milliseconds{500}),
+                           -AURORA_AUTO_SCROLL_MAX_SPEED * 0.5, 1e-3F);
+    AURORA_TEST_CHECK_TRUE(scroll.active);
+
+    // 距上次意图逾 AURORA_DRAG_AUTO_SCROLL_STALE_S：收车——指针静默离开视口而显式
+    // 收车送不到的兜底（Leave 落点可能在窗口外、命中落空，见派发器用例）。
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0 + std::chrono::milliseconds{1501}), 0.0F, 1e-6F);
+    AURORA_TEST_CHECK_FALSE(scroll.active);
+
+    // 新意图到来即重新激活：超时收车不烧毁状态机（首帧 dt 重回 1/60 兜底）。
+    scroll.drive(Point{.x = 50.0F, .y = 0.0F});
+    AURORA_TEST_CHECK_TRUE(scroll.active);
+    AURORA_TEST_CHECK_NEAR(scroll.advance(box, t0 + std::chrono::milliseconds{2000}),
+                           -AURORA_AUTO_SCROLL_MAX_SPEED / 60.0F, 1e-3F);
+}
+
+AURORA_TEST_CASE(drag_auto_scroll_band_clamps_to_half_viewport_and_window_origin) {
+    const auto t0 = std::chrono::steady_clock::now();
+
+    // 视口矮于两倍阈值：触发带取半高（band = min(48, 40/2) = 20）。
+    const Rect short_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 100.0F, .height = 40.0F}};
+    DragAutoScroll scroll;
+    scroll.drive(Point{.x = 50.0F, .y = 21.0F});  // 底带内、距下沿 19dp（刚过带界 1dp）：速率为满速的 1/20
+    AURORA_TEST_CHECK_NEAR(scroll.advance(short_box, t0), AURORA_AUTO_SCROLL_MAX_SPEED * (1.0F / 20.0F) / 60.0F, 1e-3F);
+
+    // 恰在 band 上界（y = 20）：两带皆不命中 ⇒ 收车。
+    scroll.drive(Point{.x = 50.0F, .y = 20.0F});
+    AURORA_TEST_CHECK_NEAR(scroll.advance(short_box, t0), 0.0F, 1e-6F);
+    AURORA_TEST_CHECK_FALSE(scroll.active);
+
+    // 落点与视口盒同为窗口逻辑坐标：非零原点的视口按原点差换算本地坐标。
+    const Rect offset_box{.origin = Point{.x = 30.0F, .y = 40.0F}, .size = Size{.width = 100.0F, .height = 200.0F}};
+    scroll.drive(Point{.x = 30.0F, .y = 40.0F});  // 窗口坐标 = 视口左上 ⇒ 本地 (0,0) 顶带全深
+    AURORA_TEST_CHECK_TRUE(scroll.active);
+    AURORA_TEST_CHECK_NEAR(scroll.advance(offset_box, t0), -AURORA_AUTO_SCROLL_MAX_SPEED / 60.0F, 1e-3F);
+    scroll.drive(Point{.x = 30.0F, .y = 240.0F});  // 窗口坐标 = 视口左下 ⇒ 本地 (0,200) 底带全深
+    AURORA_TEST_CHECK_NEAR(scroll.advance(offset_box, t0 + std::chrono::milliseconds{1000}),
+                           AURORA_AUTO_SCROLL_MAX_SPEED, 1e-3F);
+}
+
+AURORA_TEST_CASE(auto_scroll_constants_are_shared_defaults) {
+    // 进程内拖拽（ReorderableList）与跨进程系统拖放共用同一组手感常量；数值钉住防无意
+    // 漂移（调参属契约变更，须走提案）。
+    AURORA_TEST_CHECK_NEAR(AURORA_AUTO_SCROLL_THRESHOLD_DP, 48.0F, 1e-6F);
+    AURORA_TEST_CHECK_NEAR(AURORA_AUTO_SCROLL_MAX_SPEED, 600.0F, 1e-6F);
+    AURORA_TEST_CHECK_NEAR(AURORA_DRAG_AUTO_SCROLL_STALE_S, 1.0, 1e-9);
 }
 
 }  // namespace aurora::test_cases::utest_scroll_viewport

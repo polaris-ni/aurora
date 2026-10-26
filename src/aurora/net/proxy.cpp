@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "aurora/core/platform.h"
+#include "aurora/core/platform.h"  // NOLINT
 #include "aurora/core/result.h"
 #include "aurora/core/url.h"
 #include "aurora/net/address.h"

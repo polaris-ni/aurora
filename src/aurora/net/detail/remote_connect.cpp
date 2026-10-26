@@ -92,7 +92,7 @@ auto finish_race(const RacePointer &race, Result<StreamTransport> outcome) -> vo
         return;
     }
     race->claimed = true;
-    auto done = std::move(race->on_done);
+    const auto done = std::move(race->on_done);
     if (done) {
         done(std::move(outcome));
     }
@@ -120,19 +120,20 @@ auto launch(const RacePointer &race, std::size_t index) -> void {
     if (index + 1 < race->candidates.size() && race->options.race_stagger.count() > 0) {
         const auto origin = race->origin;
         std::weak_ptr<Race> witness = race;
-        auto ignored = Engine::instance().post_after(race->options.race_stagger, [witness, index, origin]() {
-            const auto held = witness.lock();
-            if (!held) {
-                return;
-            }
-            run_on_origin(origin, [held, index]() {
-                // 快跟可能已把这条发出去了：序号不吻合即说明窗口已被抢占，本定时器无事可做。
-                if (held->claimed || held->started != index + 1) {
+        const auto ignored =
+            Engine::instance().post_after(race->options.race_stagger, [witness, index, origin]() -> void {
+                const auto held = witness.lock();
+                if (!held) {
                     return;
                 }
-                launch(held, held->started);
+                run_on_origin(origin, [held, index]() -> void {
+                    // 快跟可能已把这条发出去了：序号不吻合即说明窗口已被抢占，本定时器无事可做。
+                    if (held->claimed || held->started != index + 1) {
+                        return;
+                    }
+                    launch(held, held->started);
+                });
             });
-        });
         (void)ignored;
     }
     ++race->outstanding;
@@ -207,7 +208,7 @@ auto finish_tunnel(const TunnelPointer &tunnel, Result<StreamTransport> outcome)
     }
     tunnel->claimed = true;
     tunnel->stage = Tunnel::Stage::Done;
-    auto done = std::move(tunnel->on_done);
+    const auto done = std::move(tunnel->on_done);
     if (done) {
         done(std::move(outcome));
     }
@@ -503,7 +504,7 @@ auto connect_by_name(std::string_view host, std::uint16_t port, const StreamOpti
                     on_done(Result<StreamTransport>{resolved.error()});
                     return;
                 }
-                auto race = std::make_shared<Race>();
+                const auto race = std::make_shared<Race>();
                 race->candidates = race_preference(resolved.value());
                 race->options = options;
                 race->cancellation = cancellation;
@@ -555,14 +556,14 @@ auto connect_via_proxy(const ProxyConfig &proxy, std::string_view host, std::uin
         // 定时器回调与归队动作都经 `std::function` 派发，本检查对无抛异常规格的可调用对象一律判为
         // 「不应抛出」；可抛处只有错误文本拼接与调用方回调，派发边界不吞它（口径同 transport.cpp）。
         // NOLINTNEXTLINE(bugprone-exception-escape)
-        auto armed = Engine::instance().post_after(options.connect_timeout, [witness, target]() {
+        const auto armed = Engine::instance().post_after(options.connect_timeout, [witness, target]() -> void {
             const auto held = witness.lock();
             if (!held) {
                 return;
             }
             // 同上：这一段跑在发起线程的归队入口里，抛出只可能来自调用方回调。
             // NOLINTNEXTLINE(bugprone-exception-escape)
-            run_on_origin(held->origin, [held, target]() {
+            run_on_origin(held->origin, [held, target]() -> void {
                 if (held->claimed) {
                     return;
                 }

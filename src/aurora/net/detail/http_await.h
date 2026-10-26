@@ -44,6 +44,7 @@
 #include "aurora/net/tls.h"
 #include "aurora/net/transport.h"
 #include "aurora/state/async.h"  // aurora::detail::post_to_main
+#include "aurora/state/coroutine.h"  // aurora::CoroTask（订阅层要桥的那枚协程任务型）
 
 namespace aurora::net::detail {
 
@@ -113,6 +114,36 @@ class CallbackAwaiter {
     /// 在 `await_suspend` 内重入协程帧的那条路，完整机理见 `await_suspend` 的文档。
     bool armed_{false};
 };
+
+/// @brief 把一枚「交出 `Result<T>` 的协程任务」桥成可 `co_await` 的结局。
+///
+/// 为什么需要它：本库的 `CoroTask` **不是 awaitable**（promise 永不首挂也不终挂，帧只靠 `resume` 前进，
+/// 结果历来只有 `is_done()` 轮询这一条问法），于是「在一条协程里跑完另一条协程、再据其结局决定下一步」
+/// 没有现成写法。订阅层要的正是这条：一次事件流订阅是**若干次流式交换的序列**，每次交换的结局必须回到同一
+/// 帧里被判断（带续传标识重连，还是就地收摊）。桥接挂在 `CoroTask<T>::on_done()` 上——那枚为适配层专门补的
+/// 订阅口，既有「登记时已收尾即就地触发」的契约，也不必再自带一枚节拍去轮询。
+///
+/// 要剥掉的一层：`CoroTask<Result<T>>` 的共享状态是 `Result<Result<T>>`（promise 将协程 return 的 `T`
+/// 再裹一枚 `Result`，只有 `unhandled_exception()` 会把外层写成失败）。本桥接把外层剥掉，交回协程自己
+/// 说出的那枚 `Result<T>`；外层独立失败（协程抛了异常）时原样把那枚错误交出，不折成成功。
+/// @tparam T 交换的成功值类型（`open_stream` 那侧即 `StreamOutcome`）。
+/// @param task 已发起的协程任务（按值接管：共享状态随本等待体存活到回调落地）。
+/// @return 可 `co_await` 的等待体，求得那次交换的 `Result<T>`。
+/// @note Thread: single-threaded（随一条协程帧使用）
+template <typename T>
+[[nodiscard]] auto await_coro(CoroTask<Result<T>> task) -> CallbackAwaiter<T> {
+    // 形参写成明文的 `std::function<void(Result<T>)>`，与 `CallbackAwaiter::Sink` 是同一个类型：借嵌套别名
+    // 就得给这枚依赖名加 `typename`，而本仓的 tidy 判定把它报成冗余，明文写法省掉一枚无谓豁免。
+    return CallbackAwaiter<T>([task = std::move(task)](std::function<void(Result<T>)> on_done) mutable {
+        task.on_done([on_done = std::move(on_done)](const Result<Result<T>> &outer) -> void {
+            if (outer) {
+                on_done(outer.value());  // 剥外层：交回协程自己写下的那枚结局
+                return;
+            }
+            on_done(Result<T>{outer.error()});  // 协程抛异常收尾：那枚错误就是本次交换的失败事实
+        });
+    });
+}
 
 /// @brief 按代理决策建连：`Direct` 走直连入口，其余经代理建隧道，隧道不成即失败、绝不回退直连。
 ///
@@ -274,8 +305,9 @@ auto await_read_within(Stream &stream, std::size_t capacity, std::chrono::millis
 /// 等待」的语义）。故本等待体自带一枚「恰好完成一次」的闸，并同时挂到取消令牌上——否则退避中的协程会在
 /// 引擎停机后永远悬着。取消不改变结局形态：调用方按 `is_cancelled()` 判这一下等待是被谁结束的。
 /// @param delay 等待时长；非正值等价于立即放行（仍经完成回调走，不与挂起点抢栈）。
-/// @param cancellation 本次交换的取消令牌（跨尝试的墙到点即取消它；按值持有，随 awaiter 存活）。
-inline auto await_sleep(std::chrono::milliseconds delay, Cancellation cancellation) -> CallbackAwaiter<void> {
+/// @param cancellation 本次交换的取消令牌（跨尝试的墙到点即取消它；按引用传入，经发起器 lambda 按值捕获随 awaiter
+/// 存活）。
+inline auto await_sleep(std::chrono::milliseconds delay, const Cancellation &cancellation) -> CallbackAwaiter<void> {
     return CallbackAwaiter<void>(
         // 同 await_connect_via：发起器经 std::function 类型擦除转入触发的系统性假告警面；本发起器只做登记与
         // 一次原子写，不抛。

@@ -202,6 +202,12 @@ class WasmSurface : public Surface {
     /// @brief 平台是否已请求关闭（页面 beforeunload 置位，整页卸载即全部窗口关闭）。
     /// @return 收到关闭请求时 true。
     [[nodiscard]] auto should_close() const -> bool override { return close_requested_; }
+    /// @brief 撤销关闭请求（页面级）：把 beforeunload 置位的 static 标志写回 false。
+    ///
+    /// **降级申报**：该标志是**全部实例共享**的页面级单标志 ⇒ 否决任一窗口的关闭即否决全部；
+    /// 且浏览器可在 beforeunload 之后强制卸载，本后端不保证「不退到满载档」。
+    /// 留空实现反而更差（每次卸载刷一条 fail-open WARN 且窗必然被收），故给真实实现。
+    auto cancel_close() -> void override { close_requested_ = false; }
 
     /// @brief 把键盘事件路由指针切到本窗口并重播页面标题（页面级焦点无法用 JS 之外的方式
     ///        抢占，路由即 WASM 上「激活窗口」的忠实映射；鼠标按下同一效果）。

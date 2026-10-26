@@ -74,9 +74,9 @@ Cancellation::~Cancellation() = default;
 
 auto Cancellation::is_cancelled() const -> bool { return state_->is_cancelled(); }
 
-auto Cancellation::cancel() -> void { state_->cancel(); }
+auto Cancellation::cancel() const -> void { state_->cancel(); }
 
-auto Cancellation::on_cancel(std::function<void()> hook) -> void { state_->set_hook(std::move(hook)); }
+auto Cancellation::on_cancel(std::function<void()> hook) const -> void { state_->set_hook(std::move(hook)); }
 
 auto Cancellation::shares_state_with(const Cancellation &other) const -> bool { return state_ == other.state_; }
 

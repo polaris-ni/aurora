@@ -12,6 +12,7 @@
 // 那句在本头**之后**才执行；其余 aurora 头之所以无恙，只因它们早被首行的头链解析过
 // （头文件 guard 生效、宏尚未定义）。故本头必须与 atspi_bridge.h 同组前置。
 #include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/命中/绘制层
+#include "aurora/window/detail/x11_drag.h"  // Xdnd 双向桥（同属「先于 Xlib」组：内部用 ModifierKey::None）
 #include "aurora/window/detail/x11_modifiers.h"
 
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
@@ -148,6 +149,11 @@ struct X11Surface::Impl {
     auto ime_emit_preedit(const std::string &utf8, int caret, int sel_begin_byte, int sel_end_byte) -> void;
     /// @brief 把 provider 的插入点盒折算为客户窗口物理 px 写入 XNSpotLocation（变化才发）。
     auto ime_update_spot() -> void;
+    /// @brief 发一条 EWMH `_NET_WM_STATE` ClientMessage（**目标态语义**）。
+    /// @param action 0 = REMOVE、1 = ADD（2 = TOGGLE 仅历史路径保留，新代码一律 0/1）。
+    /// @param s1 第一状态原子（如 `_NET_WM_STATE_MAXIMIZED_VERT`）。
+    /// @param s2 第二状态原子（如 `_NET_WM_STATE_MAXIMIZED_HORZ`；无则传 0）。
+    auto send_net_wm_state(std::int32_t action, Atom s1, Atom s2) const -> void;
     XPoint ime_last_spot{};  ///< 上次下发的锚点（去重）
     bool ime_spot_valid = false;
     bool ime_focused = false;  ///< XSetICFocus 已发且未 XUnsetICFocus（观测面）
@@ -178,6 +184,8 @@ struct X11Surface::Impl {
     Size size{.width = 0.0F, .height = 0.0F};  ///< 逻辑 dp（布局用）。
     float scale = 1.0F;
     bool close_requested = false;
+    /// @brief 窗口已被 `DestroyNotify` 销毁：此后拒绝清位（见 `X11Surface::cancel_close`）。
+    bool window_gone = false;
     bool active = true;
     bool minimized = false;
     WindowVisibility visibility = WindowVisibility::Normal;  ///< 构造期定档的可见性策略。
@@ -193,6 +201,11 @@ struct X11Surface::Impl {
     csd::DecorationInteraction csd_ui{};  ///< 交互状态（悬停/按压/连击/全屏揭示）
     Atom net_wm_moveresize = 0;  ///< EWMH _NET_WM_MOVERESIZE（拖拽移动/八向缩放请求）
     EventHandler handler;
+    /// @brief Xdnd 双向桥（拖入四态 + 拖出）；install 失败即为 nullptr（该窗口不参与 Xdnd）。
+    ///
+    /// 持有者只能是本 Impl：桥在析构里要撤 `XdndAware` 并收摊在途会话，故必须先于 X 资源销毁
+    /// （析构次序见 `~X11Surface`）。
+    std::unique_ptr<detail::X11DragBridge> drag;
 
     auto apply_title(const std::string &title) -> void;
     auto ensure_image(int w, int h) -> bool;
@@ -201,6 +214,23 @@ struct X11Surface::Impl {
 };
 
 /// @brief 设置窗口标题：ICCCM `XStoreName`（latin1 兜底）+ EWMH `_NET_WM_NAME`（UTF-8，现代 WM 优先读）。
+auto X11Surface::Impl::send_net_wm_state(std::int32_t action, Atom s1, Atom s2) const -> void {
+    XClientMessageEvent m{};
+    m.type = ClientMessage;
+    m.window = win;
+    m.message_type = net_wm_state;
+    m.format = 32;
+    m.data.l[0] = static_cast<long>(action);  // NOLINT(*-pro-type-union-access)
+    m.data.l[1] = static_cast<long>(s1);  // NOLINT(*-pro-type-union-access)
+    m.data.l[2] = static_cast<long>(s2);  // NOLINT(*-pro-type-union-access)
+    m.data.l[3] = 1L;  // source indication: application  // NOLINT(*-pro-type-union-access)
+    const ::Window root = RootWindow(dpy, DefaultScreen(dpy));
+    // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
+    XSendEvent(dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask,
+               reinterpret_cast<XEvent *>(&m));  // NOLINT(*-pro-type-reinterpret-cast)
+    XFlush(dpy);
+}
+
 auto X11Surface::Impl::apply_title(const std::string &title_in) -> void {
     Impl &d = *this;
     d.title = title_in;  // 缓存给 AT-SPI 桥（FRAME Name；桥可能晚于 set_title 构造）
@@ -657,6 +687,20 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
     }
     XFlush(d.dpy);
     d.ime_setup();
+    // Xdnd 双向桥（拖入四态 + 拖出）：契约与协议状态机见 detail::X11DragBridge。install 失败即
+    // 本窗口不参与系统拖放——如实降级，不谎报已有通路（与 Win32 桥同款处置）。
+    d.drag = std::make_unique<detail::X11DragBridge>(
+        d.dpy, static_cast<unsigned long>(d.win),
+        detail::X11DragBridge::Hooks{.emit = [&d](Event &e) -> void {
+                                         if (d.handler) {
+                                             d.handler(e);  // 派发器在调用内写定 `e.allowed`（Enter / Over 两态）
+                                         }
+                                     },
+                                     .scale_factor = [&d]() -> float { return d.scale; }});
+    if (!d.drag->install()) {
+        d.drag.reset();
+        AURORA_LOG_WARN("window", "X11Surface: Xdnd bridge install failed; system drag unavailable.");
+    }
     d.size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // NOLINT(*-narrowing-conversions)
 }
 
@@ -668,6 +712,7 @@ X11Surface::~X11Surface() {
     window_mode_handler_ = nullptr;
     present_request_ = nullptr;
     d.composition_caret_provider = nullptr;  // 捕获宿主 this 的回调：销毁前解绑（同 Win32 桥纪律）
+    d.drag.reset();  // 先收摊 Xdnd（撤 XdndAware + 在途会话按 Cancelled 兑现），再销毁 X 资源
     if (d.ximage != nullptr) {
         d.ximage->data = nullptr;  // 缓冲由 vector 持有，不得让 XDestroyImage free
         XDestroyImage(d.ximage);
@@ -938,6 +983,36 @@ auto X11Surface::frame_count() const -> int { return impl_->presented; }
 auto X11Surface::scale_factor() const -> float { return impl_->scale; }
 
 auto X11Surface::should_close() const -> bool { return impl_->close_requested; }
+auto X11Surface::cancel_close() -> void {
+    // 已销毁路径拒绝清位：调用方经后置复验走 fail-open（记 WARN、当帧完成回收）。
+    if (!impl_->window_gone) {
+        impl_->close_requested = false;
+    }
+}
+
+auto X11Surface::set_window_mode(WindowMode m) -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr) {
+        return;
+    }
+    // 目标态直设（幂等）：几何恢复腿的驱动点。EWMH 属性通告（PropertyNotify）到达后经既有
+    // 路径更新 d.mode 并上报，与本方法解耦——本方法只负责把「要变成什么」说给 WM。
+    switch (m) {
+        case WindowMode::Normal:
+            d.send_net_wm_state(0, d.st_fullscreen, 0);
+            d.send_net_wm_state(0, d.st_max_v, d.st_max_h);
+            break;
+        case WindowMode::Maximized:
+            d.send_net_wm_state(1, d.st_max_v, d.st_max_h);
+            break;
+        case WindowMode::FullScreen:
+            d.send_net_wm_state(1, d.st_fullscreen, 0);
+            break;
+        case WindowMode::Minimized:
+            XIconifyWindow(d.dpy, d.win, DefaultScreen(d.dpy));
+            break;
+    }
+}
 
 auto X11Surface::set_present_dirty(const std::vector<Rect> &device_rects) -> void {
     impl_->present_dirty = device_rects;
@@ -1047,6 +1122,9 @@ auto X11Surface::poll_platform_events() -> void {
     if (d.dpy == nullptr) {
         return;
     }
+    // 刷新「当前发起窗口」槽：拖出由控件在事件派发期内发起（`Widget::begin_system_drag`），
+    // 而事件派发只发生在**本窗口**的事件泵内，故此刻登记即唯一正确的发起桥（多窗口场景）。
+    detail::X11DragBridge::note_initiator(d.drag.get());
     // 可见性状态推导（对齐 Win32 update_window_state）：仅实际变化时上报。
     auto update_state = [&]() -> void {
         const WindowState want = compute_window_state(d.minimized, d.active);
@@ -1099,22 +1177,10 @@ auto X11Surface::poll_platform_events() -> void {
                    reinterpret_cast<XEvent *>(&m));  // NOLINT(*-pro-type-reinterpret-cast)
         XFlush(d.dpy);
     };
-    const auto csd_toggle_maximize = [&]() -> void {
-        XClientMessageEvent m{};
-        m.type = ClientMessage;
-        m.window = d.win;
-        m.message_type = d.net_wm_state;
-        m.format = 32;
-        m.data.l[0] = 2L;  // _NET_WM_STATE_TOGGLE  // NOLINT(*-pro-type-union-access)
-        m.data.l[1] = static_cast<long>(d.st_max_v);  // NOLINT(*-pro-type-union-access)
-        m.data.l[2] = static_cast<long>(d.st_max_h);  // NOLINT(*-pro-type-union-access)
-        m.data.l[3] = 1L;  // source indication: application  // NOLINT(*-pro-type-union-access)
-        const ::Window root = RootWindow(d.dpy, DefaultScreen(d.dpy));
-        // NOLINTNEXTLINE(*-pro-type-reinterpret-cast)
-        XSendEvent(d.dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask,
-                   reinterpret_cast<XEvent *>(&m));  // NOLINT(*-pro-type-reinterpret-cast)
-        XFlush(d.dpy);
-    };
+    // EWMH 目标态请求（ADD/REMOVE）：一次性消掉 _NET_WM_STATE_TOGGLE 的切换语义——
+    // CSD 钮据此按本地 mode 快照算目标态；几何恢复腿（set_window_mode）更只能用目标态。
+    const auto csd_set_maximized = [&](bool on) -> void { d.send_net_wm_state(on ? 1 : 0, d.st_max_v, d.st_max_h); };
+    const auto csd_toggle_maximize = [&]() -> void { csd_set_maximized(d.mode != WindowMode::Maximized); };
     const auto csd_geometry_now = [&]() -> TitleBarGeometry {
         return title_bar_geometry(d.size.width, d.tb_style, d.mode == WindowMode::Maximized, d.resizable);
     };
@@ -1140,6 +1206,14 @@ auto X11Surface::poll_platform_events() -> void {
             case ButtonRelease: {
                 const bool press = (ev.type == ButtonPress);
                 const unsigned int btn = ev.xbutton.button;
+                // 拖出会话期内：指针已被 grab，按键全部归桥（会话在 Press 派发中建立、Release 即
+                // 落放触发点）。再派发普通鼠标会让控件在拖放中收到幻觉点击。
+                if (d.drag != nullptr && d.drag->drag_out_active()) {
+                    if (!press) {
+                        d.drag->on_button_release(ev.xbutton.time);
+                    }
+                    break;
+                }
                 if (btn >= 4U && btn <= 7U) {
                     // X 惯例：滚轮为按键 4/5（垂直）与 6/7（水平），仅 Press 有意义。
                     if (press && d.handler) {
@@ -1226,6 +1300,16 @@ auto X11Surface::poll_platform_events() -> void {
                         break;
                     }
                 }
+                // 拖出会话期内：指针移动交给桥推进 `XdndPosition`（含目标切换）；拖入会话期内则
+                // 位置完全由 `XdndPosition` 驱动（桥投递 Enter / Over），不叠加普通鼠标派发——
+                // 拖放是模态手势，页面不该同时响应悬停。
+                if (d.drag != nullptr && d.drag->drag_out_active()) {
+                    d.drag->on_motion(ev.xmotion.state, ev.xmotion.x_root, ev.xmotion.y_root, ev.xmotion.time);
+                    break;
+                }
+                if (d.drag != nullptr && d.drag->drag_in_active()) {
+                    break;
+                }
                 if (d.csd_title) {
                     const float lx = static_cast<float>(ev.xmotion.x) / d.scale;
                     const float ly = static_cast<float>(ev.xmotion.y) / d.scale;
@@ -1280,6 +1364,10 @@ auto X11Surface::poll_platform_events() -> void {
                 } else {
                     len = XLookupString(&ev.xkey, buf, static_cast<int>(sizeof(buf)) - 1, &ks, nullptr);
                     len = std::clamp(len, 0, static_cast<int>(sizeof(buf)) - 1);
+                }
+                if (d.drag != nullptr && d.drag->drag_out_active() &&
+                    d.drag->on_key_press(static_cast<int>(from_keysym(ks)))) {
+                    break;  // 拖出会话期内：Escape 取消、其余键一律吞噬（拖放是模态手势）
                 }
                 if (d.handler) {
                     KeyEvent e;
@@ -1395,19 +1483,49 @@ auto X11Surface::poll_platform_events() -> void {
                         update_state();
                     }
                 }
+                // Xdnd：拖入 `INCR` 收块（本窗口属性）与拖出 `INCR` 发块（外来请求方属性）同源。
+                if (d.drag != nullptr) {
+                    d.drag->on_property_notify(static_cast<unsigned long>(ev.xproperty.window), ev.xproperty.atom,
+                                               ev.xproperty.state);
+                }
+                break;
+            case SelectionNotify:
+                // Xdnd：selection round-trip 的到达面（拖入取数的唯一通路）。
+                if (d.drag != nullptr) {
+                    d.drag->on_selection_notify(ev.xselection.selection, ev.xselection.target, ev.xselection.property);
+                }
+                break;
+            case SelectionRequest:
+                // Xdnd：外来目标索取数据（拖出应答面）。
+                if (d.drag != nullptr) {
+                    d.drag->on_selection_request(ev.xselectionrequest.requestor, ev.xselectionrequest.selection,
+                                                 ev.xselectionrequest.target, ev.xselectionrequest.property,
+                                                 ev.xselectionrequest.time);
+                }
                 break;
             case ClientMessage:
                 if (std::cmp_equal(ev.xclient.data.l[0], d.wm_delete)) {
                     d.close_requested = true;
+                    break;
+                }
+                if (d.drag != nullptr) {
+                    d.drag->on_client_message(ev.xclient.message_type,
+                                              {ev.xclient.data.l[0], ev.xclient.data.l[1], ev.xclient.data.l[2],
+                                               ev.xclient.data.l[3], ev.xclient.data.l[4]});
                 }
                 break;
             case DestroyNotify:
                 d.close_requested = true;
+                d.window_gone = true;  // 窗口已不存在：此后 cancel_close 必须拒绝清位
                 break;
             default:
                 break;
         }
         // NOLINTEND(*-pro-type-union-access)
+    }
+    // 帧内看守：在途读取与「等 XdndFinished」的墙钟超时在此兑现（不悬挂、不虚假成功）。
+    if (d.drag != nullptr) {
+        d.drag->tick();
     }
 }
 

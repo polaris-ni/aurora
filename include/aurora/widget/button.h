@@ -9,7 +9,7 @@
 #include "aurora/core/types.h"
 #include "aurora/environment/build_context.h"  // resolved_label 需完整类型以调 ctx.environment<Locale>()
 #include "aurora/i18n/localized_string.h"
-#include "aurora/i18n/string_table.h"
+#include "aurora/i18n/message_catalog.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/state/reactive.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
@@ -52,7 +52,7 @@ struct ButtonProps {
 /// `resolve_background()` → `paint_background()` → `paint_border()` → `paint_label()`。
 ///
 /// 标签的 i18n 契约：`label` 是 `LocalizedString`，绘制与布局一律经 `resolved_label()` 查
-/// `StringTable`（`Environment` 注入 `Locale` 时按它解析，否则回落缺省档）——不直读
+/// `MessageCatalog`（`Environment` 注入 `Locale` 时按它解析，否则回落缺省档）——不直读
 /// `label.get().text`，否则 `tr()` 构造的键会画成空白。`accessibility_label()` 与绘制同源。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
@@ -209,7 +209,7 @@ class Button : public LeafWidget, public ButtonProps {
         if (!cached_display_text_.empty()) {
             return cached_display_text_;
         }
-        return label.get().resolve(&default_string_table(), Locale{});
+        return label.get().resolve(&default_catalog(), Locale{});
     }
 
     /// @brief 悬停默认手型光标：按钮悬停 PointingHand；修饰链显式 `cursor(...)` 声明优先。
@@ -229,7 +229,7 @@ class Button : public LeafWidget, public ButtonProps {
                      .default_value = "\"\"",
                      .required = true,
                      .note = "Button text",
-                     .json_type = "string"},
+                     .json_type = "string|$msg"},
                     {.name = "color",
                      .type = "Color",
                      .default_value = "\"theme.primary\"",
@@ -362,7 +362,7 @@ class Button : public LeafWidget, public ButtonProps {
     /// @param props 输出目标 JSON 对象，写入 label/color/on_color/font_size 等本类键
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入 width/height/show 等通用属性
-        props.set("label", label.get().text);
+        props.set("label", localizable_to_json(label.get()));
         // 背景色/文字色仅在显式设置时输出：保留「跟随主题」语义（与 Checkbox 同口径）
         if (const auto &c = color.get(); c.has_value()) {
             props.set("color", color_to_json(*c));
@@ -406,7 +406,7 @@ class Button : public LeafWidget, public ButtonProps {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("label")) {
-            label.set(LocalizedString{props.at("label")->as_or<std::string>("")});
+            label.set(localizable_from_json(*props.at("label")));
         }
         if (props.contains("color")) {
             color.set(json_to_color(*props.at("color")));
@@ -542,7 +542,7 @@ class Button : public LeafWidget, public ButtonProps {
     /// @brief 解析当前应显示的标签串（i18n 求值）：绘制与布局的**唯一显示串来源**。
     ///
     /// 与 `Text::resolved_text` 同口径：`Environment` 注入了 `Locale` 就按它解析，否则回落
-    /// `Locale{}` 走 `default_string_table()` 的缺省档。`on_layout` 与 `on_paint` 各自解析一次
+    /// `Locale{}` 走 `default_catalog()` 的缺省档。`on_layout` 与 `on_paint` 各自解析一次
     /// （布局与绘制是两个阶段，无法共享局部量），但**同一阶段内**只解析一次：
     /// `paint_label` 收到的是该串的引用，量宽与落笔必然同值。
     /// @param ctx 构建上下文：提供 `Environment` 注入的 `Locale`。
@@ -550,7 +550,7 @@ class Button : public LeafWidget, public ButtonProps {
     /// @note Side-effects: reads i18n table
     [[nodiscard]] auto resolved_label(const BuildContext &ctx) const -> std::string {
         const auto *lp = ctx.environment<Locale>();
-        return label.get().resolve(&default_string_table(), (lp != nullptr) ? *lp : Locale{});
+        return label.get().resolve(&default_catalog(), (lp != nullptr) ? *lp : Locale{});
     }
 
     /// @brief 绘制居中文字。

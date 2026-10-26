@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/i18n/locale.h
-/// 测试说明: Locale 默认值、language-region 标签实时合成与纯值语义拷贝
+/// 测试说明: Locale 默认值、language-script-region 标签实时合成与纯值语义拷贝
 
 #include <string>
 
@@ -10,9 +10,10 @@
 namespace aurora::test_cases::utest_locale {
 
 AURORA_TEST_CASE(default_locale_is_english_without_region) {
-    // 默认构造：language 为 "en"、region 为空。
+    // 默认构造：language 为 "en"、script/region 为空。
     const aurora::Locale loc;
     AURORA_TEST_CHECK_EQ(loc.language, std::string("en"));
+    AURORA_TEST_CHECK(loc.script.empty());
     AURORA_TEST_CHECK(loc.region.empty());
 }
 
@@ -30,6 +31,14 @@ AURORA_TEST_CASE(tag_omits_empty_region) {
     AURORA_TEST_CHECK_EQ(loc.tag(), std::string("fr"));
     const aurora::Locale explicit_empty{.language = "de", .region = ""};
     AURORA_TEST_CHECK_EQ(explicit_empty.tag(), std::string("de"));
+}
+
+AURORA_TEST_CASE(tag_joins_three_subtags) {
+    // 三子标签齐备：language-script-region（zh-Hans-CN 形态，繁简分治的载体）。
+    const aurora::Locale loc{.language = "zh", .script = "Hans", .region = "CN"};
+    AURORA_TEST_CHECK_EQ(loc.tag(), std::string("zh-Hans-CN"));
+    const aurora::Locale script_only{.language = "zh", .script = "Hant"};
+    AURORA_TEST_CHECK_EQ(script_only.tag(), std::string("zh-Hant"));
 }
 
 AURORA_TEST_CASE(region_change_retags_immediately) {

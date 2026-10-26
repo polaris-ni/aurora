@@ -181,11 +181,11 @@ auto close_datagram(detail::DatagramState &state, const Error &reason, Tasks &ta
     // NOLINTBEGIN(bugprone-exception-escape)
     for (auto &request : state.sends) {
         auto done = std::move(request.done);
-        tasks.emplace_back([done, reason]() { done(Result<std::size_t>{reason}); });
+        tasks.emplace_back([done, reason]() -> void { done(Result<std::size_t>{reason}); });
     }
     for (auto &slot : state.receives) {
         auto done = std::move(slot.done);
-        tasks.emplace_back([done, reason]() { done(Result<Datagram>{reason}); });
+        tasks.emplace_back([done, reason]() -> void { done(Result<Datagram>{reason}); });
     }
     // NOLINTEND(bugprone-exception-escape)
     state.sends.clear();
@@ -223,10 +223,10 @@ auto drive_send(detail::DatagramState &state, Tasks &tasks) -> void {
             const auto error = *attempt.failure;
             // 回调转入 Tasks（std::function）故被本检查判为「不应抛出」，口径同 close_datagram。
             // NOLINTNEXTLINE(bugprone-exception-escape)
-            tasks.emplace_back([done, error]() { done(Result<std::size_t>{error}); });
+            tasks.emplace_back([done, error]() -> void { done(Result<std::size_t>{error}); });
             continue;  // 只收尾这一条，后面的数据报照常推进
         }
-        tasks.emplace_back([done, total]() { done(Result<std::size_t>{total}); });
+        tasks.emplace_back([done, total]() -> void { done(Result<std::size_t>{total}); });
     }
 }
 
@@ -252,7 +252,7 @@ auto drive_receive(detail::DatagramState &state, Tasks &tasks) -> void {
             const auto error = *attempt.failure;
             // 回调转入 Tasks（std::function）故被本检查判为「不应抛出」，口径同 close_datagram。
             // NOLINTNEXTLINE(bugprone-exception-escape)
-            tasks.emplace_back([done, error]() { done(Result<Datagram>{error}); });
+            tasks.emplace_back([done, error]() -> void { done(Result<Datagram>{error}); });
             continue;  // 只收尾这一枚请求，后面的槽照常等下一条数据报
         }
         const std::size_t limit = std::min({buffer.size(), state.options.max_datagram_bytes, attempt.bytes});
@@ -261,7 +261,7 @@ auto drive_receive(detail::DatagramState &state, Tasks &tasks) -> void {
         message.bytes = buffer.first(limit);
         message.source = attempt.source.value_or(Endpoint{});
         message.truncated = attempt.bytes > limit;
-        tasks.emplace_back([done, message]() { done(Result<Datagram>{message}); });
+        tasks.emplace_back([done, message]() -> void { done(Result<Datagram>{message}); });
     }
 }
 
@@ -356,7 +356,7 @@ auto ensure_driver() -> Result<void> {
     if (app::EventSourceRegistry::instance().host_driven()) {
         return Result<void>{};
     }
-    return Engine::instance().post([]() {});
+    return Engine::instance().post([]() -> void {});
 }
 
 /// @brief 建立一枚已绑定、非阻塞、接收缓冲配足的数据报状态（两种工厂的公共腿）。
@@ -399,7 +399,8 @@ auto make_datagram_state(const Endpoint &local, const DatagramOptions &options) 
     // 取消钩子在状态就绪后立即登记：此后任何 `cancel()` 都走「先注销事件源、再关句柄、最后投递回调」，
     // 落实 §18-4 的「先释放 fd」硬约束。钩子借状态里那份令牌登记，且在锁外调用以免就地执行时自锁。
     std::weak_ptr<detail::DatagramState> witness = state;
-    state->cancellation.on_cancel([witness]() { close_and_deliver(witness, cancelled_reason("datagram socket")); });
+    state->cancellation.on_cancel(
+        [witness]() -> void { close_and_deliver(witness, cancelled_reason("datagram socket")); });
     return Result<DatagramPointer>{state};
 }
 
@@ -451,7 +452,7 @@ auto queue_send(const DatagramPointer &state, std::span<const char> data, const 
         // 抛出只可能来自调用方回调，本层不在派发边界吞它（口径同流式传输的 read / write）。
         // NOLINTBEGIN(bugprone-exception-escape)
         if (state->closed) {
-            fired.emplace_back([done = std::move(on_done), reason = cancelled_reason("queued datagram")]() {
+            fired.emplace_back([done = std::move(on_done), reason = cancelled_reason("queued datagram")]() -> void {
                 done(Result<std::size_t>{reason});
             });
         } else if (!connected && state->peer.is_valid()) {
@@ -460,25 +461,25 @@ auto queue_send(const DatagramPointer &state, std::span<const char> data, const 
                            ErrorParams{{"detail",
                                         "this datagram socket has a fixed peer, so send_to() is not available; "
                                         "call send() instead"}});
-            fired.emplace_back([done = std::move(on_done), reason]() { done(Result<std::size_t>{reason}); });
+            fired.emplace_back([done = std::move(on_done), reason]() -> void { done(Result<std::size_t>{reason}); });
         } else if (connected && !state->peer.is_valid()) {
             const auto reason =
                 make_error(ErrorCode::NetEndpointInvalid,
                            ErrorParams{{"detail",
                                         "this datagram socket has no fixed peer; call send_to() with a target "
                                         "endpoint"}});
-            fired.emplace_back([done = std::move(on_done), reason]() { done(Result<std::size_t>{reason}); });
+            fired.emplace_back([done = std::move(on_done), reason]() -> void { done(Result<std::size_t>{reason}); });
         } else if (const auto problem = target_problem(*state, target)) {
             const Error &reason = *problem;
-            fired.emplace_back([done = std::move(on_done), reason]() { done(Result<std::size_t>{reason}); });
+            fired.emplace_back([done = std::move(on_done), reason]() -> void { done(Result<std::size_t>{reason}); });
         } else if (data.size() > state->options.max_datagram_bytes) {
             const auto size = std::to_string(state->options.max_datagram_bytes);
-            fired.emplace_back([done = std::move(on_done), size, bytes = std::to_string(data.size())]() {
+            fired.emplace_back([done = std::move(on_done), size, bytes = std::to_string(data.size())]() -> void {
                 done(Result<std::size_t>{buffer_limit_reason("datagram of " + bytes + " bytes exceeds cap " + size)});
             });
         } else if (state->pending_send_bytes + data.size() > state->options.max_pending_bytes) {
             const auto size = std::to_string(state->options.max_pending_bytes);
-            fired.emplace_back([done = std::move(on_done), size]() {
+            fired.emplace_back([done = std::move(on_done), size]() -> void {
                 done(Result<std::size_t>{buffer_limit_reason("pending datagram cap " + size)});
             });
         } else {
@@ -562,7 +563,8 @@ auto DatagramTransport::peer() const -> Endpoint {
     return state_->peer;
 }
 
-auto DatagramTransport::send_to(std::span<const char> data, const Endpoint &target, DatagramSendDone on_done) -> void {
+auto DatagramTransport::send_to(std::span<const char> data, const Endpoint &target, DatagramSendDone on_done) const
+    -> void {
     if (!on_done) {
         return;  // 没有回调就没有承诺：不建副本、不留悬挂的发送
     }
@@ -573,7 +575,7 @@ auto DatagramTransport::send_to(std::span<const char> data, const Endpoint &targ
     queue_send(state_, data, target, std::move(on_done), false);
 }
 
-auto DatagramTransport::send(std::span<const char> data, DatagramSendDone on_done) -> void {
+auto DatagramTransport::send(std::span<const char> data, DatagramSendDone on_done) const -> void {
     if (!on_done) {
         return;
     }
@@ -591,7 +593,7 @@ auto DatagramTransport::send(std::span<const char> data, DatagramSendDone on_don
     queue_send(state_, data, fixed, std::move(on_done), true);
 }
 
-auto DatagramTransport::receive(std::span<char> buffer, DatagramDone on_done) -> void {
+auto DatagramTransport::receive(std::span<char> buffer, DatagramDone on_done) const -> void {
     if (!on_done) {
         return;
     }
@@ -610,9 +612,10 @@ auto DatagramTransport::receive(std::span<char> buffer, DatagramDone on_done) ->
         // 回调转入 Tasks 即被本检查判为「不应抛出」（口径同 send_to）。
         // NOLINTBEGIN(bugprone-exception-escape)
         if (state_->closed) {
-            fired.emplace_back([done = std::move(on_done), reason = cancelled_reason("queued datagram receive")]() {
-                done(Result<Datagram>{reason});
-            });
+            fired.emplace_back(
+                [done = std::move(on_done), reason = cancelled_reason("queued datagram receive")]() -> void {
+                    done(Result<Datagram>{reason});
+                });
         } else {
             detail::DatagramState::PendingReceive slot;
             slot.buffer = buffer;
@@ -625,7 +628,7 @@ auto DatagramTransport::receive(std::span<char> buffer, DatagramDone on_done) ->
     deliver(std::move(fired), state_->owner);
 }
 
-auto DatagramTransport::join_multicast_group(const Endpoint &group) -> Result<void> {
+auto DatagramTransport::join_multicast_group(const Endpoint &group) const -> Result<void> {
     if (!state_) {
         return Result<void>{no_socket_reason("multicast membership")};
     }
@@ -643,7 +646,7 @@ auto DatagramTransport::join_multicast_group(const Endpoint &group) -> Result<vo
     return joined;
 }
 
-auto DatagramTransport::leave_multicast_group(const Endpoint &group) -> Result<void> {
+auto DatagramTransport::leave_multicast_group(const Endpoint &group) const -> Result<void> {
     if (!state_) {
         return Result<void>{no_socket_reason("multicast membership")};
     }
@@ -654,7 +657,7 @@ auto DatagramTransport::leave_multicast_group(const Endpoint &group) -> Result<v
     if (const auto problem = multicast_problem(*state_)) {
         return Result<void>{*problem};
     }
-    const auto joined = std::find(state_->groups.begin(), state_->groups.end(), group);
+    const auto joined = std::ranges::find(state_->groups, group);
     if (joined == state_->groups.end()) {
         // 本套接字没加入过这个组：让内核去猜「别的套接字加过」只会报出一条与现场无关的原生码。
         return Result<void>{make_error(
@@ -668,7 +671,7 @@ auto DatagramTransport::leave_multicast_group(const Endpoint &group) -> Result<v
     return left;
 }
 
-auto DatagramTransport::set_multicast_loopback(bool enabled) -> Result<void> {
+auto DatagramTransport::set_multicast_loopback(bool enabled) const -> Result<void> {
     if (!state_) {
         return Result<void>{no_socket_reason("multicast loopback option")};
     }
@@ -691,7 +694,7 @@ auto DatagramTransport::multicast_loopback() const -> bool {
     return state_->multicast_loopback;
 }
 
-auto DatagramTransport::set_broadcast_allowed(bool enabled) -> Result<void> {
+auto DatagramTransport::set_broadcast_allowed(bool enabled) const -> Result<void> {
     if (!state_) {
         return Result<void>{no_socket_reason("broadcast option")};
     }
@@ -722,7 +725,7 @@ auto DatagramTransport::pending_send_bytes() const -> std::size_t {
     return state_->pending_send_bytes;
 }
 
-auto DatagramTransport::close() -> void {
+auto DatagramTransport::close() const -> void {
     if (!state_) {
         return;
     }

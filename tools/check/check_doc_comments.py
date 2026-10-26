@@ -697,6 +697,12 @@ def fold_span(masked_lines: list[str], idx: int) -> tuple[str, int]:
     单行成员定义（`void f() {}`、`auto g() -> int { return 1; }`）必须以 `}` 收尾即停：
     早先只认 `;` 与 `{`，这类行会继续往下并，把**下一个**成员甚至整个函数体并进同一条声明串，
     于是体内语句被当成公共数据成员报缺文档。`{` 收尾（类/命名空间/多行函数体的开句）照旧立即停。
+
+    **限定符收尾 + 下一行 `->` 是尾置返回类型的折行形态，不算收尾**：`auto f(...) const`
+    换行后写 `-> void;`（C++ 语法上尾置返回类型就在 cv 限定符之后，clang-format 对超长签名
+    也倾向在此折行）。早先在 `const` 处即停，折出的声明串不含 `-> void`，返回类型被判成非
+    void，向 `-> void` 函数误索 `@return`（DOC-R5 假阳性）。合法声明不会以 `->` 起行，故该
+    续折无多并风险。
     """
     parts: list[str] = []
     depth = 0
@@ -711,6 +717,9 @@ def fold_span(masked_lines: list[str], idx: int) -> tuple[str, int]:
         parts.append(seg.strip())
         joined = " ".join(parts).strip()
         if depth > 0:
+            continue
+        nxt = masked_lines[j + 1].strip() if j + 1 < min(idx + 12, len(masked_lines)) else ""
+        if nxt.startswith("->") and joined.endswith(("const", "noexcept", "override", "&", "&&")):
             continue
         if joined.endswith((";", "{", "const", "noexcept", "override", "const {")):
             return joined, j

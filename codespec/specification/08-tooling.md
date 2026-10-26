@@ -329,6 +329,8 @@ server.stop();        // 停止并 join 工作线程
 | POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit；`style` 存在但非整数返回 400，越界整数回退 Fluent |
 | POST | `/api/input/{click\|scroll\|drag\|text\|pointer}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll`/`drag` 另取数值 `dx`/`dy`（缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取字符串 `text`，`pointer` 另取字符串 `phase`（`press`\|`move`\|`release`，必填）与可选数值 `x`/`y`（控件本地 dp，缺省为该控件中心）——单步派发一个指针动作，供调用方自行合成跨子区域的连续拖拽。前四种为**目标式**（指针取控件中心），`pointer` 为**坐标式**。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
 | GET | `/api/find` | 按 key/type/text 定位控件：`?key=<Node::set_id 标识>&type=<type_name>&text=<文本>`，至少给一个参数（否则 400），多参数 AND。返回 `{matches:[{path, type, id}], count}`——`path` 为索引路径（根为空串），与 `/api/widget/{path}`、`/api/input/*` 同口径，可直接喂给寻址端点；`text` 比对文本类属性启发式（`content\|text\|label\|value\|hint\|placeholder`，与 `TestController::find_by_text` 同源）。遍历走 `child_nodes()` 原存储 const 引用（不构造 `Node` 副本，活树安全）；虚拟化容器（不覆写 `child_nodes()`）的子树不可见（与 `find_node_by_path` 同限：宁可少报、不可错报）。零命中回 200 + 空 `matches`（非错误，由调用方裁决）；方法非 GET 回 405。query 值一律先按 RFC 3986 百分号解码再比对（`%20` → 空格、UTF-8 字节序列 → 中文标签，`+` 保持字面量），故含空格/非 ASCII 的 `label` 可直接经 URL 编码定位；畸形百分号（`%zz`、尾部孤立 `%`）按字面量保留，不升级成错误响应 |
+| GET | `/api/network` | 进程级网络活动快照（`InspectorJson` 面呈现、最新在前）。查询参数：`limit`（0 = 全部，非负整数）、`host`（精确、ASCII 大小写不敏感、空串 400）、`status`（整数 0..65535）；**先过滤再取 `limit`**，`limit` 不影响 `dropped` / `truncated`。非法参数 400；返回 `{available, count, dropped, truncated, entries}`；Release 回 `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`（200） |
+| GET | `/api/network/request?id=<X-Request-Id>` | 同一逻辑请求的多跳展开：返回 `{available, request_id, entry, timelines}`——`entry` 为最新一条活动条目（含 path / host / status / 失败归因），`timelines` 按 `exchange_id` 升序、逐跳带 `StageMark`。缺 `id` 或空串 400；未知 id 404 且**不回显调用方 id**；Release 同上 unavailable。契约与阶段语义见 [`06-app-platform.md`](06-app-platform.md) §8.8.37、§8.8.39 |
 
 > `/api/input/*` 中 `click`/`scroll`/`drag`/`text` 为「目标式」语义：落点取目标控件中心，故目标须已布局（未布局时尺寸为零、中心退化为自身原点）。`pointer` 是唯一的「坐标式」通道：落点由请求体 `x`/`y` 给定（控件本地 dp），一次只派发一个指针动作，逐步调用即可合成跨子区域的连续拖拽——派发器在 Press 时缓存命中链为 `pointer_capture_`，故后续 `move` 仍会投给被按住的控件，与真实指针一致。失败（路径不存在 / 不可派发 / 参数不符）一律在派发前返回，**不改变任何控件状态**。滚动只派发事件，偏移量不在响应里（控件虽各自序列化 `offset` / `scroll_offset`，但响应体不回传），需要读回偏移请读控件属性或写 C++ 测试。
 
@@ -361,6 +363,9 @@ server.stop();        // 停止并 join 工作线程
 
 - `live_tree` / `live_widget_get` / `live_widget_set` / `live_patch` / `live_simulate`，分别映射到 §5.1 表的
   `GET /api/tree` / `GET /api/widget/{path}` / `PUT /api/widget/{path}/{prop}` / `POST /api/patch` / `POST /api/input/*`。
+- `list_network_activity` / `describe_network_request`，分别映射到 §5.1 表的 `GET /api/network` /
+  `GET /api/network/request?id=`；工具把 Inspector 的 JSON 原文交回（条目已按 `InspectorJson` 面脱敏），
+  会话发现同上。时间线与阶段语义见 [`06-app-platform.md`](06-app-platform.md) §8.8.37。
 - **会话发现按「方案 ③」（不落进程注册表文件）**：优先级为 ① 工具入参 `session`（`"6280"` 或 `"127.0.0.1:6280"`）
   ② 环境变量 `AURORA_INSPECTOR_PORT` ③ 默认 `6280`（与 `InspectorServer::start()` 默认值一致）。
   主机**恒被 pin 到回环**：客户端不做 DNS，只认 `127.0.0.1` / `localhost` / `::1`，且一律连到 `127.0.0.1`。
@@ -453,8 +458,19 @@ stdio JSON-RPC 2.0。传输格式：`Content-Length: <N>\r\n\r\n<JSON-RPC 2.0 bo
 | `validate_ui` | `{tree}` | 结构化诊断 | `validate_ui_tree_json()` |
 | `render_snapshot` | `{tree, width?, height?}` | 逻辑快照 JSON | `render_to_logical_snapshot()` |
 | `render_png` | `{tree, width?, height?, path?}` | PNG 文件路径 | `render_to_png()` |
+| `compare_snapshot` | `{tree, baseline_path, width?, height?, tolerance?}` | 逐像素统计 + 按控件归因的空间聚类差异区 + 文本摘要 | `Image::load()` + `render_to_image()` + `collect_widget_boxes()` + `build_snapshot_diff_report()`（`baseline_path` 限工作目录内相对路径、禁 `..`） |
 | `to_code` | `{tree, style?}` | C++ 代码 | `to_code()` |
 | `to_yaml` | `{tree}` | YAML 格式字符串 | `serialization::to_yaml(Json)` |
+| `generate_ui` | `{description}` | UI 树 JSON（`{"node": …}` 包装）；无 LLM、未命中回退 `Text` | `generate_ui()` |
+| `build_ui_prompt` | `{description}` | 给外部 LLM 的紧凑 schema 提示文本（库自身不发起任何网络请求） | `ui_prompt_for()` |
+| `repair_tree` | `{tree}`（接受 `{"node": …}` 包装） | `{tree, valid, errors}`：确定性修复未知类型、补 schema 缺省、`children_policy=none` 的类型丢弃子节点 | `repair_ui_tree()` + `validate_ui_tree()` |
+| `live_tree` | `{session?, window?}` | 运行中应用的真实 widget 树 JSON（`?window=` 取指定窗口） | `GET /api/tree`（经 `InspectorSession`） |
+| `live_widget_get` | `{session?, path}` | 单个控件的全部属性 JSON | `GET /api/widget/{path}` |
+| `live_widget_set` | `{session?, path, prop, value}` | 回写结果（失败带原因） | `PUT /api/widget/{path}/{prop}` |
+| `live_patch` | `{session?, ops}` | 批量属性补丁结果（只覆盖属性，不能增删结构） | `POST /api/patch` |
+| `live_simulate` | `{session?, path, action, dx?, dy?, text?}` | `{status, action, widget_path}`：经真实命中与派发路径 | `POST /api/input/*` |
+| `list_network_activity` | `{session?, limit?, host?, status?}` | Inspector network 快照 JSON `{available, count, dropped, truncated, entries}`（已脱敏） | `GET /api/network` |
+| `describe_network_request` | `{session?, request_id}` | `{available, request_id, entry, timelines}`：最新条目 + 逐跳阶段时间线 | `GET /api/network/request?id=` |
 | `get_schema` | 无 | 完整 API schema | `list_all_schemas()` + enums |
 | `simulate_interaction` | `{tree, path, action, dx?, dy?, text?, width?, height?}` | 目标控件属性 + 交互后逻辑快照 | `from_json()` + `render_to_logical_snapshot()`（派发前布局）+ `find_node()` + `simulate_click/scroll/text_input()` + `get_prop()` |
 | `list_commands` | `{commands, query?, limit?, include_disabled?}` | 过滤排序后的命令描述符 + 计数 | `command_fuzzy_score()`（与命令面板同一打分与排序） |
@@ -517,11 +533,12 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `gen_error_codes` | `tools/gen/gen_error_codes.cpp` | 读 [`errors.toml`](../errors.toml) → 生成 `error_codes.gen.h`、[`ERROR_CATALOG.md`](../ERROR_CATALOG.md) 与 `aurora_api.json` 的 `error_codes` 段（**不链接 aurora**） |
 | `gen_api_tools` | `tools/gen/gen_api.cpp` | 反射公共 API 生成 `aurora_api.json`（schema / 类型 / 属性键 / 枚举），并保留既有 `error_codes` / `debug` 段 |
 | `gen_debug_api` | `tools/gen/gen_debug_api.cpp` | 读 [`debug_api.toml`](../debug_api.toml) → 合并 `aurora_api.json` 的 `debug` 段（**不链接 aurora**） |
+| `gen_i18n` | `tools/gen/gen_i18n.cpp` | 读 ARB 形态词表 JSON → 生成薄头（强类型 Id 常量 + 具名形参构造函数）与 `AUM1` 二进制词表；i18n 引擎与 CLDR 复数表**按源文件编入**，与运行期同源（详见 §7.4.2） |
 | `aurora_mcp` | `tools/servers/aurora_mcp.cpp` | MCP Server（stdio JSON-RPC 2.0），见 §7.1 |
 | `aurora_cli` | `tools/servers/aurora_cli.cpp` | CLI 工具链，见 §7.2 |
 | `aurora_lsp` | `tools/servers/aurora_lsp.cpp` | LSP 语言服务，见 §7.3 |
 | `bench_render` | `tools/bench/bench_render.cpp` | 渲染基准（HeadlessSurface + Painter 计时，非 CTest 断言） |
-| `bench_scroll` | `tools/bench/bench_scroll.cpp` | 滚动基准（确定性滚动序列，依赖 google_play 头） |
+| `bench_scroll` | `tools/bench/bench_scroll.cpp` | 滚动基准（确定性滚动序列；`app` 场景为自包含应用形态负载，`synthetic` 为对照组，`lazy` / `grid` 为隔离场景） |
 | `bench_win32_present` | `tools/bench/bench_win32_present.cpp` | Win32 上屏诊断基准（无 Win32 后端时跳过） |
 | `bench_idle_cpu` | `tools/bench/bench_idle_cpu.cpp` | 空闲 CPU 基准（无 Win32 后端时跳过） |
 
@@ -544,7 +561,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 
 | 项 | 无叠加层 | 叠加层可见 |
 |:---|:---|:---|
-| 载具 | `bench_idle_cpu` | `examples/app/google_play/demo_google_play.cpp` |
+| 载具 | `bench_idle_cpu` | 已移除：原 `demo_google_play.cpp`（该 demo 退役时一并移除；叠加层刷新语义由 `tests/integration/itest_perf_overlay_refresh` 自动化覆盖） |
 | 后端 | Win32 软件渲染（`AURORA_BACKEND_WIN32`） | 同左 |
 | 构建 | `build/` | `build-inspector/`（调试开启 + Inspector 服务开启） |
 | 帧率上限 | 默认（60） | `opts.max_fps = 60` |
@@ -561,7 +578,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 - 门槛与判定由 `bench_idle_cpu` 自身给出（空闲 < 5%；旧实现忙轮询时该值会顶到约 100%）。活跃场景同次实测为 CPU 6.7%、帧率 35.8（被夹在 60 附近），PASS。
 - 该场景**未挂叠加层** ⇒ 不触发 HUD-only 帧（态 ②），因而空闲帧语义的改动对它无影响；改动后已实测复验通过。
 
-**叠加层可见：每 500 ms 一帧**（人工用例见 [`../manual-test/17-perf.md](../manual-test/17-perf.md) TC-PERF-008）：
+**叠加层可见：每 500 ms 一帧**（人工用例 TC-PERF-008 随其载具 `demo_google_play` 退役而移除；当前由集成用例 `tests/integration/itest_perf_overlay_refresh.cpp` 覆盖。以下为退役前实测，仅作口径参照）：
 
 | 观测 | 值 |
 |:---|:---|
@@ -583,18 +600,58 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 1. 构建基准：`cmake --build build --target bench_idle_cpu`。
 2. 直接运行该基准，读它打印的两行结果与 PASS / FAIL：空闲场景要求 CPU 占比 < 5%，活跃场景要求帧率被夹在 60 附近。
 
-叠加层可见（基准族未覆盖此场景，需自建观测）：
+叠加层可见（原需自建观测；载具 `demo_google_play` 已退役，本组数字为退役前实测，仅供口径参照，复验改走 `itest_perf_overlay_refresh`）：
 
-1. 构建调试开启 + Inspector 服务开启的构建目录，得到载具 `demo_google_play`。
+1. 退役前口径：构建调试开启 + Inspector 服务开启的构建目录，得到载具 `demo_google_play`。
 2. 以分离进程方式启动载具，并把标准输出重定向到文件（载具的帧率摘要行经 `AURORA_LOG_RAW` 输出，即标准输出；标准错误恒为空）。
 3. 间隔数秒两次采样该进程的 CPU 时间，跳过启动阶段，按上方口径计算占比。
 4. 结束进程后读回输出文件：统计 `idle` 计数的逐秒增量与 `(stale)` 出现的行数。
 5. 确认该载具进程已退出，避免占用目标导致下一次重编报占用错误。
 
-> 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述。**尚未纳入 CI 门禁**：时间类门槛历史上只作本地趋势对照（见 `tools/check/perf_gates.json` 的 `source` 字段），若要新增门槛，需先固定载具、采样窗口与判定阈值。另：叠加层空闲场景此前只有自动化用例覆盖，人工用例 TC-PERF-008 已补齐。
+> 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述。**尚未纳入 CI 门禁**：时间类门槛历史上只作本地趋势对照（见 `tools/check/perf_gates.json` 的 `source` 字段），若要新增门槛，需先固定载具、采样窗口与判定阈值。另：叠加层空闲场景的自动覆盖由 `tests/integration/itest_perf_overlay_refresh.cpp` 承担（原人工用例 TC-PERF-008 随载具退役移除）。
+
+### 7.4.2 构建期词表生成（`gen_i18n`）与 golden 门禁
+
+**要解决的问题**：译文若只能在运行期逐条登记，词条名就以字符串字面量散落在调用点，拼错只在运行时静默回退。本工具把「有哪些词条、各词条有哪些形参」提前到构建期确定，产出两件：
+
+| 产物 | 内容 | 消费方 |
+|:---|:---|:---|
+| 薄生成头（`.hpp`） | 每 key 一枚 `constexpr MessageId` 常量（`<ns>::id::AURORA_<点分拍平大写>`，值按 bin 内序）+ 一枚**具名形参** `inline` 构造函数（`<ns>::<首段>::<末段>(args…)`，形参名与类型取自 `@key.placeholders` 元数据，顺序按字母序） | 业务源码 `#include` 后写 `<ns>::<segment>::<fn>(args…)`，实参类型或个数误用在编译期即拦下 |
+| `AUM1` 二进制词表（`.bin`） | 全语言合一的紧凑词表（布局见 [`07-environment-modifier.md`](07-environment-modifier.md) §6.3） | 应用侧读成内存字节后 `MessageCatalog::load_binary`；**文件 IO 不在库内**，wasm 同样成立 |
+
+**CLI 契约**：
+
+```text
+gen_i18n <out.hpp> <out.bin> <cpp-namespace> [--id-base N] <base.json> [locale.json...]
+gen_i18n --emit-builtin <out.hpp> <builtin.json>
+```
+
+- `base.json` 是**基准语言**档（`locale` 必填，可带 `version` / `id_base`），译文档只含 `locale` + 词条，元数据只在基准侧。
+- 词条可直接置于顶层，也可包在 `messages` 里；`@<key>` 同级对象承载该词条元数据（`placeholders` 与 `description`）。
+- `--id-base` 缺省紧跟内置保留区，且**只能上调**：落进 `[0, 1024)` 直接拒绝（保留区归库内置词条，允许下调等于给未来的内置词条埋撞号风险）。
+- 退出码：有 error → 1 且**两件产物都不落盘**（不留半份词表）；只有 warn → 0 并照常产出、逐条打印。
+
+**校验清单（error，全部拦产出）**——模板走的是**运行期同一个解析器**（`src/aurora/i18n/detail/message_engine.h` 直接编入本工具），故「构建期过了」等价于「运行期不会退化成裸模板串」：
+
+| 类别 | 判据 |
+|:---|:---|
+| 输入形态 | JSON 可解析；`locale` tag 形态合法；key 形态合法（点分小写）；`@key` 必须有同名词条 |
+| 元数据 ↔ 模板 | 模板里的每个占位都要有 `@key.placeholders` 条目；形参类型限 `string` / `int64` / `double` / `date`；元数据声明却未使用的形参只 warn |
+| 选择器 | `plural` / `selectordinal` 操作数须 `int64` 或 `double`，`select` 操作数须 `string`；分支须是 CLDR 类别或 `=N` 精确值；`plural` 必须有 `other` 兜底 |
+| 格式化 | `number` / `currency` / `date` 之外的函数不支持；`{, date}` 必须写成 date 形态且 style 只取 short/medium/long；`{, currency}` 须数值型形参 + 三字母 ISO 码 |
+| 跨语言结构 | 译文与基准的结构树（分支集合、选择值集合）必须一致——译文**不得新增**基准没有的 `select` 值，也不得丢分支（丢分支即该语言查表出残缺串） |
+| 保留区 | 基准档不得重定义库内置词条名；点分拍平后的 Id 常量名不得互相冲突 |
+| 通用 | UTF-8 合法性、`#` 只在数值语境生效（非数值语境 warn）、嵌套深度 ≤ 8 |
+
+**确定性**：同一命令重复执行逐字节同输出；译文档在命令行上的**顺序无关**（产物按 locale tag 归档，不按 argv 次序）。这是 golden 可比的前提。
+
+**下游接入**：`cmake/AuroraI18n.cmake` 的 `aurora_i18n_generate(TARGET … NAMESPACE … BASE … LOCALES … OUT_DIR … [ID_BASE n])` 把上面那条命令行包成构建步骤——生成头进 target 源列表，bin `copy_if_different` 到 `$<TARGET_FILE_DIR>`，并给 target 注入 `AURORA_I18N_BIN_PATH` 编译定义（in-tree 唯一消费 leg 是 `demo_i18n`）。
+
+**门禁 `check_i18n_gen_golden`**（`tools/check/check_i18n_gen_golden.py`，需先 `cmake --build build --target gen_i18n`）跑**真实构建产物**而非脚本复刻，共七条腿：① 确定性（两次同字节）② argv 顺序无关 ③ golden 一致（生成后再过 clang-format，与 `generate_error_codes` 同口径；无可用 clang-format 时**只跳头相关腿**，bin 腿与 ①② 不跳）④ 内置词表同源锁（`codespec/i18n_builtin.json` 经 `--emit-builtin` 重出必须等于入库的 `builtin_messages.gen.h`，防手改）⑤ 错误类（每类畸形输入非零退出、诊断点名规则、两件产物均未写）⑥ warn-only 形态（可疑但合法的模板须**零退出 + 有告警**，防 error/warn 口径一边倒）⑦ 非空转（golden / 错误类 / Id 常量条数下限，防 fixture 被清空后全绿）。改词表后刷新 golden：`python tools/check/check_i18n_gen_golden.py build --update`。
+
+> 与 C++ 侧的分工：`tests/integration/itest_i18n_pipeline.cpp` 验「生成件能被 `MessageCatalog` 正确载入并解析」，本门禁验「生成件本身没漂移」。两条都要跑，缺一条就是半边失控。
 
 ### 7.5 真机验收探针（`tools/verify/`）
-
 探针证明的是**无头 CI 无法证明**的平台接线：单元测试只能断言到「平台中立层」（快照 / diff / 偏移映射 / 动作路由），而「平台回调是否真的到达、平台侧对象是否真的可查」只能建真实窗口、在真实桌面会话里验收。全部由 `cmake/AuroraVerify.cmake` 定义、`AURORA_BUILD_VERIFY_TOOLS` 门控、**不进 CTest**（会创建真实窗口 / 读取屏幕状态，非确定且干扰用户桌面）。
 
 | 探针 | 验证目标 | 读回方式 |
@@ -1042,8 +1099,10 @@ std::string dump = au::dump_tree_json(root).dump();
 - 不仅人类可用，AI Agent 也能通过 MCP 协议查询组件树、属性、状态快照。
 - 形成「代码 → 运行 → 检查 → 修复」的反馈闭环。
 - UI 树 dump 统一以 `widget/inspect.h` 内的自由函数提供，**不提供 `Widget::dump()` 成员方法**。
+- **网络可观测面同址暴露**：`GET /api/network`（活动快照，按 `limit` / `host` / `status` 过滤，先过滤再截断）与 `GET /api/network/request?id=<X-Request-Id>`（同一逻辑请求的多跳展开）；MCP 侧对应 `list_network_activity` / `describe_network_request`，工具把 Inspector 的 JSON 原文交回、不另开面。契约与阶段语义见 [`06-app-platform.md`](06-app-platform.md) §8.8.36–§8.8.39。Release 构建如实回 `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`，不静默回空表。
+- **导出必过脱敏闸**：`/api/tree`、`/api/debug/tree`、`/api/yaml`、`/api/widget/{path}` 的字符串属性与两枚 network 端点同批量经 `net::present_field` / `present_url`——`Secret` 恒折叠、宿主无权放大，`Sensitive` 默认折叠、按 `(ExportSurface + 键)` 放行，消息体恒不导出；未安装策略时树导出逐字节不变。`/api/to_code`（纯输入变换）、`/api/find` `/api/debug/pick`（只回路径 / 类型 / 边界）、`/api/patch`（只回状态）不在 walk 范围。键词汇、分级与折叠形态见 [`06-app-platform.md`](06-app-platform.md) §8.8.38。
 
-**验收标准：** 任一运行时 UI 树可经 `dump_tree_json*` 导出且能被 `from_json` 重建；`InspectorPanel` 可浏览与回写属性。
+**验收标准：** 任一运行时 UI 树可经 `dump_tree_json*` 导出且能被 `from_json` 重建；`InspectorPanel` 可浏览与回写属性；网络活动可按 `X-Request-Id` 展开逐跳阶段且四个导出面（`Timeline` / `InspectorJson` / `Log` / `ErrorDetail`）不泄漏凭据原值。
 
 ### 10.3 SPEC.FEAT.TOOLING.API-SCHEMA.001 机器可读 API Schema
 
@@ -1135,7 +1194,7 @@ int main() {
 
 三件套的 API 契约见 §7：
 
-- **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 13 个 MCP tools。
+- **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 24 个 MCP tools（清单见 §7.1；含 `live_*` 五枚、`list_network_activity` / `describe_network_request` 两枚网络工具）。
 - **CLI（`aurora_cli`）**：子命令 `components` / `describe` / `search` / `validate` / `snapshot` / `render` / `preview` / `to-code` / `to-yaml` / `schema`，以及全局选项 `--help`（`-h`）/ `--version`（`-V`）。
 - **LSP（`aurora_lsp`）**：stdio JSON-RPC 2.0 语言服务，对声明式写法提供 completion / hover / diagnostics / codeAction 四件套，消费库 live API（`describe_component` + `known_enums`），无需读取 `aurora_api.json` 文件，始终与代码同步。
 

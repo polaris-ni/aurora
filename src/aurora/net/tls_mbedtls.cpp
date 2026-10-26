@@ -66,7 +66,6 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <memory>
@@ -380,7 +379,7 @@ class MbedTlsBackend final : public TlsBackend {
     ///
     /// 主机名恒在文本里，是因为 mbedTLS 把「链不可信」与「名字不符」都收敛成同一枚
     /// `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`；现场需要的恰好是「它到底在拒哪一半」。
-    [[nodiscard]] auto certificate_rejected(std::uint32_t flags) -> Error;
+    [[nodiscard]] auto certificate_rejected(std::uint32_t flags) const -> Error;
 
     /// 释放库内结构：与构造反向，`ssl` 先于 `conf`（它持 conf 的指针），`conf` 先于客户端身份材料
     /// （`conf_own_cert` 登记的正是那两枚指针），身份材料先于根链（各自独立，按装配次序倒放）。
@@ -430,7 +429,7 @@ class MbedTlsBackend final : public TlsBackend {
     std::string host_;  ///< SNI 与主机名校验目标
 };
 
-auto MbedTlsBackend::certificate_rejected(std::uint32_t flags) -> Error {
+auto MbedTlsBackend::certificate_rejected(std::uint32_t flags) const -> Error {
     auto text = std::string{"certificate is not accepted for '"} + host_ + "'";
     const auto flags_text = verify_flags_text(flags);
     if (!flags_text.empty()) {

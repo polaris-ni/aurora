@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "locale": "en",
+  "id_base": 1024,
+  "messages": {
+    "demo.welcome": "Hi {name}, {count, plural, one {# file} other {# files}}.",
+    "@demo.welcome": {
+      "placeholders": {
+        "name": {"type": "string"},
+        "count": {"type": "int64"}
+      },
+      "description": "Greeting that carries the attachment count"
+    },
+    "demo.due": "Due {when, date, long} for {total, currency, EUR}.",
+    "@demo.due": {
+      "placeholders": {
+        "when": {"type": "date"},
+        "total": {"type": "double"}
+      }
+    },
+    "demo.rank": "You are {pos, selectordinal, one {#st} two {#nd} few {#rd} other {#th}}.",
+    "@demo.rank": {
+      "placeholders": {"pos": {"type": "int64"}}
+    },
+    "demo.role": "{who, select, admin {Administrator} guest {Guest} other {User}}",
+    "@demo.role": {
+      "placeholders": {"who": {"type": "string"}}
+    },
+    "demo.plain": "Nothing to substitute here",
+    "demo.offset": "{n, plural, offset:1 =0 {none} =1 {one more} one {# more} other {# more}}",
+    "@demo.offset": {
+      "placeholders": {"n": {"type": "int64"}}
+    },
+    "demo.quoted": "'{' brace, ''quoted'' and '#' hash stay literal",
+    "demo.nested": "{count, plural, one {{kind, select, file {# file} other {# item}}} other {{kind, select, file {# files} other {# items}}}}",
+    "@demo.nested": {
+      "placeholders": {
+        "count": {"type": "int64"},
+        "kind": {"type": "string"}
+      }
+    }
+  }
+}

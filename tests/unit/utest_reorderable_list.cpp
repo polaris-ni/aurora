@@ -4,7 +4,8 @@
 ///           可变行高 y 累计表、内建滚动的夹取与滚轮语义、restore_key 恢复与写回、
 ///           可见范围与命中索引换算、自绘滚动控件的缓存声明语义，以及键盘重排替代路径
 ///           （方向键光标 + 抓取/落位/取消 + 滚入视口 + 读屏播报 + i18n 键 + 开关让路）
-/// 覆盖说明: 拖拽识别 / 让位 / 落位动画 / auto-scroll 见 C2 / C3 用例（同文件续写）
+/// 覆盖说明: 拖拽识别 / 让位 / 落位动画 / 近边缘 auto-scroll（触发带缺省取共享常量
+///           AURORA_AUTO_SCROLL_THRESHOLD_DP，与跨进程系统拖放同一手感）见同文件后续用例
 
 #include <algorithm>
 #include <chrono>
@@ -18,7 +19,7 @@
 #include "aurora/event/event.h"
 #include "aurora/event/focus.h"
 #include "aurora/event/keycode.h"
-#include "aurora/i18n/string_table.h"
+#include "aurora/i18n/message_catalog.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/widget/reorderable_list.h"
@@ -197,22 +198,22 @@ auto focus_list(ReorderableList<int> &list, FocusManager &fm) -> void {
     fm.set_focus(&list);
 }
 
-/// 字符串表守卫：`default_string_table()` 是进程级单例且无删除接口，用例登记完必须整体还原
+/// 目录守卫：`default_catalog()` 是进程级单例且无删除接口，用例登记完必须整体还原
 /// （否则 `--shuffle` 下会污染同 TU 依赖英文字面量兜底的用例）。
-class ScopedStringTable {
+class ScopedCatalogGuard {
   public:
-    ScopedStringTable() : saved_(default_string_table()) {}
-    // 还原只是一张字符串表赋值，唯一抛出面是 bad_alloc；守卫析构期抛出会盖掉真正的用例失败，故不捕获。
+    ScopedCatalogGuard() : saved_(default_catalog()) {}
+    // 还原只是一张目录深拷贝赋值，唯一抛出面是 bad_alloc；守卫析构期抛出会盖掉真正的用例失败，故不捕获。
     // NOLINTNEXTLINE(bugprone-exception-escape)
-    ~ScopedStringTable() { default_string_table() = saved_; }
-    ScopedStringTable(const ScopedStringTable &) = delete;
-    auto operator=(const ScopedStringTable &) -> ScopedStringTable & = delete;
+    ~ScopedCatalogGuard() { default_catalog() = saved_; }
+    ScopedCatalogGuard(const ScopedCatalogGuard &) = delete;
+    auto operator=(const ScopedCatalogGuard &) -> ScopedCatalogGuard & = delete;
     // 守卫对象移动即「两份 saved_ 争着还原同一单例」，故移动一并禁用（Rule of Five 的另一半）。
-    ScopedStringTable(ScopedStringTable &&) = delete;
-    auto operator=(ScopedStringTable &&) -> ScopedStringTable & = delete;
+    ScopedCatalogGuard(ScopedCatalogGuard &&) = delete;
+    auto operator=(ScopedCatalogGuard &&) -> ScopedCatalogGuard & = delete;
 
   private:
-    StringTable saved_;
+    MessageCatalog saved_;
 };
 
 }  // namespace
@@ -733,6 +734,21 @@ AURORA_TEST_CASE(auto_scroll_follows_dragged_item_near_viewport_edge) {
     AURORA_TEST_CHECK_FALSE(list.is_dragging());
 }
 
+AURORA_TEST_CASE(auto_scroll_threshold_defaults_to_the_shared_constant) {
+    // 近边缘自动滚动的触发带缺省取共享常量：进程内拖拽（本控件）与跨进程系统拖放
+    // （`Widget::on_system_drag_auto_scroll` 链上滚动祖先）共用一套手感。显式设置仍可
+    // 各自调参，负值夹到 0（关闭）。
+    auto items = make_items({0, 1, 2});
+    const ReorderableList<int> list{items, make_builder({40.0F})};
+    AURORA_TEST_CHECK_NEAR(list.auto_scroll_threshold(), AURORA_AUTO_SCROLL_THRESHOLD_DP, 1e-4F);
+
+    ReorderableList<int> tuned{items, make_builder({40.0F})};
+    tuned.set_auto_scroll_threshold(12.0F);
+    AURORA_TEST_CHECK_NEAR(tuned.auto_scroll_threshold(), 12.0F, 1e-4F);
+    tuned.set_auto_scroll_threshold(-5.0F);
+    AURORA_TEST_CHECK_NEAR(tuned.auto_scroll_threshold(), 0.0F, 1e-4F);
+}
+
 AURORA_TEST_CASE(horizontal_drag_does_not_start_reorder) {
     // 本控件只做垂直重排：横向拖过 slop 不接管（轴锁定后不再改轴）。
     auto items = make_items({0, 1, 2});
@@ -901,15 +917,18 @@ AURORA_TEST_CASE(keyboard_path_yields_when_disabled_and_for_unclaimed_keys) {
 }
 
 AURORA_TEST_CASE(keyboard_announcements_are_localizable_and_switch_off_mid_grab_cancels) {
-    ScopedStringTable table_guard;
-    auto &table = default_string_table();
+    ScopedCatalogGuard table_guard;
+    auto &table = default_catalog();
     // 控件在按键路径无 BuildContext，按「默认区域」解析；Locale{} 即该区域未设置时的槽位。
     // CJK-LITERAL: cjk-fixture - Han locale templates registered by this case to prove announcements are localizable
-    table.add(Locale{}, "aurora.reorder.position", "第 {0} 项 / 共 {1} 项");
-    table.add(Locale{}, "aurora.reorder.grabbed", "已抓取第 {0} 项 / 共 {1} 项");
-    // CJK-LITERAL: cjk-fixture - Han locale templates with {N} placeholders, substituted by the announce path
-    table.add(Locale{}, "aurora.reorder.dropped", "自第 {0} 项移至第 {1} 项 / 共 {2} 项");
-    table.add(Locale{}, "aurora.reorder.cancelled", "已取消，回到第 {0} 项 / 共 {1} 项");
+    AURORA_TEST_REQUIRE(table.add(Locale{}, "aurora.reorder.position", "第 {position} 项 / 共 {total} 项").ok());
+    AURORA_TEST_REQUIRE(table.add(Locale{}, "aurora.reorder.grabbed", "已抓取第 {position} 项 / 共 {total} 项").ok());
+    // CJK-LITERAL: cjk-fixture - Han locale templates with named placeholders, substituted by the announce path
+    AURORA_TEST_REQUIRE(
+        table.add(Locale{}, "aurora.reorder.dropped", "自第 {from} 项移至第 {to} 项 / 共 {total} 项").ok());
+    // CJK-LITERAL: cjk-fixture - cancelled Han template with named placeholders, asserted through the announce path
+    AURORA_TEST_REQUIRE(
+        table.add(Locale{}, "aurora.reorder.cancelled", "已取消，回到第 {position} 项 / 共 {total} 项").ok());
 
     auto items = make_items({0, 1, 2});
     ReorderableList<int> list{items, make_builder({40.0F})};

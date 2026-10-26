@@ -1,13 +1,17 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/net/http_binding.h + src/aurora/net/http_binding.cpp
-/// 测试说明: 声明式交付面的离线回归（§12「声明式绑定」与「默认取图」）。以 `ScriptedPeer` 在回环上
-///           按脚本应答真实字节，验四件事各自的判据：`deliver` 把物化应答折成作业值且非 2xx 仍算成功落定、
-///           传输失败才走错误侧；`bind_resource` 的取消是真的取消——`reload()` 与宿主销毁都会掐掉前一次请求
-///           的那条连接（对端读到收摊、且串行监听口因此才腾出手接受第二条），迟到结果被代次守卫丢弃；
-///           交换的会话自持到帧收尾（调用方的 `Client` 临时对象在发起那一刻就销毁也不悬垂。本条是**悬垂防护**
-///           而非形态判据：把会话改成不自持属未定义行为，实测未必显形，所有权形态的判据住在 `utest_coroutine`
+/// 测试说明: 声明式交付面的离线回归（§12「声明式绑定」与「默认取图」）。以 `ScriptedPeer`（WebSocket 一族
+///           另借 `framework/ws_peer.h` 的帧脚本）在回环上按脚本应答真实字节，验七件事各自的判据：`deliver`
+///           把物化应答折成作业值且非 2xx 仍算成功落定、传输失败才走错误侧；`bind_resource` 的取消是真的取消——
+///           `reload()` 与宿主销毁都会掐掉前一次请求的那条连接（对端读到收摊、且串行监听口因此才腾出手接受
+///           第二条），迟到结果被代次守卫丢弃；交换的会话自持到帧收尾（调用方的 `Client` 临时对象在发起那一刻
+///           就销毁也不悬垂。本条是**悬垂防护**而非形态判据：把会话改成不自持属未定义行为，实测未必显形，
+///           所有权形态的判据住在 `utest_coroutine`
 ///           的 `on_done_releases_its_own_capture_once_it_has_fired`）；`deliver_stream`
-///           逐段提交、偏移连续、成功收尾恰一条 `last` 标记而失败改走 `fail()`；`image_fetcher` 只在 2xx 给
+///           逐段提交、偏移连续、成功收尾恰一条 `last` 标记而失败改走 `fail()`；`deliver_sse`
+///           一条事件一条记录、闸门在首条记录成形之前判死时一条都不出、中途取消保留已提交的事件；`deliver_ws`
+///           一条**成形消息**一条记录（分片不造条目边界、心跳不进条目流）、干净收尾恰出一条带三枚线上事实的
+///           `last` 标记，而握手被拒与非干净收摊只走 `fail()`；`image_fetcher` 只在 2xx 给
 ///           字节，其余状态落 `render-image-load-failed` 并点名状态码，其函数形态与 widget 侧的取图口结构一致
 ///           （`static_assert` 钉住，网络层不因此依赖 widget）。
 /// 全用例零真实远端、零 DNS（目标恒为数字字面量），故禁网 CI 无需豁免。
@@ -40,6 +44,7 @@
 #include "framework/aurora_test.h"
 #include "framework/net_wait.h"
 #include "framework/scripted_peer.h"
+#include "framework/ws_peer.h"
 
 namespace aurora::test_cases::utest_net_http_binding {
 namespace {
@@ -47,10 +52,15 @@ namespace {
 using aurora::ErrorCode;
 using aurora::net::Cancellation;
 using aurora::net::NetPolicy;
+using aurora::net::WebSocketOptions;
+using aurora::net::WsMessageKind;
 using aurora::net::http::Client;
 using aurora::net::http::Request;
 using aurora::net::http::Response;
+using aurora::net::http::SseOptions;
+using aurora::net::http::SseRecord;
 using aurora::net::http::StreamChunk;
+using aurora::net::http::WsRecord;
 using aurora::test::PeerScript;
 using aurora::test::PeerStop;
 using aurora::test::ScriptedPeer;
@@ -58,6 +68,18 @@ using aurora::test::scripts::per_connection;
 using aurora::test::scripts::reply_after_reading;
 using aurora::test::scripts::write_then_hold;
 using aurora::test::scripts::write_then_reset;
+using aurora::test::ws::AURORA_OP_BINARY;
+using aurora::test::ws::AURORA_OP_CLOSE;
+using aurora::test::ws::AURORA_OP_CONTINUATION;
+using aurora::test::ws::AURORA_OP_PING;
+using aurora::test::ws::AURORA_OP_TEXT;
+using aurora::test::ws::close_code_of;
+using aurora::test::ws::close_payload;
+using aurora::test::ws::loopback_ws_url;
+using aurora::test::ws::serve_ws;
+using aurora::test::ws::server_frame;
+using aurora::test::ws::WsLog;
+using aurora::test::ws::WsPlan;
 using Socket = aurora::net::blocking::StreamSocket;
 using aurora::testing::require_value;
 namespace m = aurora::testing::matchers;
@@ -100,6 +122,34 @@ namespace m = aurora::testing::matchers;
     return chunked_prefix(status, chunks) + "0\r\n\r\n";
 }
 
+/// @brief 拼一份声明了事件流的 chunked 应答（`deliver_sse` 那族判据的字节来源）。
+///
+/// 块长按 `RFC 9110` 的口径写成十六进制：本文件的 `chunked()` 走的是「块长十进制恰好也等于十六进制」的小
+/// 载荷，而事件正文一行就有 9~18 字节，越过 9 之后那两条写法开始分家（十位的十进制读成十六进制会多要字节）。
+/// @param chunks 依次交出的体片段（片段边界与事件边界错位才是这里的常态）。
+/// @param terminate 是否补上终止块（假 = 对端还在推，正是「中途取消」的现场）。
+/// @return 应答字节。
+[[nodiscard]] auto event_stream_response(const std::vector<std::string> &chunks, bool terminate = true) -> std::string {
+    static constexpr std::string_view HEX_DIGITS = "0123456789abcdef";
+    std::string payload{"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n"};
+    for (const auto &chunk : chunks) {
+        std::size_t remaining = chunk.size();
+        std::string size_text;
+        do {
+            size_text.insert(size_text.begin(), HEX_DIGITS[remaining % 16U]);
+            remaining /= 16U;
+        } while (remaining != 0);
+        payload += size_text;
+        payload += "\r\n";
+        payload += chunk;
+        payload += "\r\n";
+    }
+    if (terminate) {
+        payload += "0\r\n\r\n";
+    }
+    return payload;
+}
+
 /// @brief 为测试放行明文：缺省安全策略拒绝回环 `http://`，触网用例逐客户端点名。
 /// @param client 待配置的客户端。
 auto allow_test_cleartext(Client &client) -> void {
@@ -134,15 +184,42 @@ auto allow_test_cleartext(Client &client) -> void {
     };
 }
 
-/// @brief 泵宿主直到谓词成立（预算 2 s，比用例里任何一枚时限都短）。
+/// @brief 泵宿主直到谓词成立（缺省预算 2 s，比用例里任何一枚时限都短）。
 /// @tparam Pred 谓词。
 /// @param subject 等待主题。
 /// @param pred 目标条件。
+/// @param budget 预算；一次升级握手比一次物化交换多出「读环跑起来」这一程，故会话族用例显式放宽。
 /// @return 条件成立为真。
 template <typename Pred>
-[[nodiscard]] auto pump(std::string_view subject, const Pred &pred) -> bool {
-    return aurora::test::net::drive_until(subject, pred, std::chrono::milliseconds{2000}).satisfied;
+[[nodiscard]] auto pump(std::string_view subject, const Pred &pred,
+                        std::chrono::milliseconds budget = std::chrono::milliseconds{2000}) -> bool {
+    return aurora::test::net::drive_until(subject, pred, budget).satisfied;
 }
+
+/// @brief 会话族用例的等待预算：与 `utest_net_websocket` 同一条口径（回环上走到 3 s 就是没走到）。
+constexpr std::chrono::milliseconds AURORA_WS_WAIT{3000};
+
+/// @brief 会话族用例的收摊窗口：交回驱动方之前把在途那枚 close 的写环跑完。
+constexpr std::chrono::milliseconds AURORA_WS_DRAIN{30};
+
+/// @brief 宿主驱动 + 收尾收摊泵（与 `utest_net_websocket` 的 `DrivenHost` 同一形态、同一理由）。
+///
+/// 公共头把会话收摊定为「尽力投递 `close(1000)` 再掐、不阻塞、不等待」，而那枚 close 的写环要靠宿主 pump 才
+/// 走得完——不泵就走不完，协程帧连同会话与套接口一起留在堆上，本文件的 `ScriptedPeer` 还要在停机时 join 那
+/// 条持有连接的脚本线程。成员排在析构体之后拆除，顺序因此是对的。
+/// @note Thread: 与 `HostDriven` 同（用例线程安装与拆除）
+struct WsHost {
+    WsHost() = default;
+    // 一轮泵要恢复挂起的续体（`net_wait.h` 的 `tail()` 与 `registry.dispatch`），那条路径按接口可抛。
+    // 析构期没有可回报的通道，而本用例的判据在泵之前就已落定——让它越出去变成 terminate 只是把结果盖掉。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
+    ~WsHost() { aurora::test::net::pump_idle(AURORA_WS_DRAIN); }
+    WsHost(const WsHost &) = delete;
+    auto operator=(const WsHost &) -> WsHost & = delete;
+    WsHost(WsHost &&) = delete;
+    auto operator=(WsHost &&) -> WsHost & = delete;
+    aurora::test::net::HostDriven driven;  ///< 宿主驱动开关（随本对象安装与拆除）
+};
 
 /// @brief 取回作业落定的结果：等待一次 `then` 抵达，再交出那份 `Result`。
 /// @tparam T 作业值类型。
@@ -348,6 +425,335 @@ AURORA_TEST_CASE(a_cancelled_stream_fails_without_a_final_marker) {
     AURORA_TEST_REQUIRE(!resource.items().empty());
     AURORA_TEST_CHECK_FALSE(resource.items().back().last);  // 失败的流不产假收尾标记
     AURORA_TEST_CHECK_EQ(resource.items().size(), committed);  // 取消之后不再提交，已提交的都留着
+}
+
+AURORA_TEST_CASE(deliver_sse_commits_records_then_one_final_marker) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    // 段边界与事件边界错位：第一条一整条在一块里，第二条的 `id` / `event` / `data` 三行挤在下一块里。
+    ScriptedPeer peer(
+        reply_after_reading(1, event_stream_response({"data: a\n\n", "id: 7\nevent: tick\ndata: b\n\n"})));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    SseOptions options;
+    options.reconnect = false;  // 本条判据要的是「一条流交完就收尾」，重连会把收尾标记推到第二次交换之后
+    client.sse(options);
+
+    const aurora::StreamResource<SseRecord> resource =
+        aurora::net::http::deliver_sse(client, Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(pump("subscription closes", [&resource] {
+        const auto &items = resource.items();
+        return !items.empty() && items.back().last;
+    }));
+
+    const auto &items = resource.items();
+    AURORA_TEST_REQUIRE_EQ(items.size(), std::size_t{3});  // 两条事件 + 一枚收尾标记
+    AURORA_TEST_CHECK_EQ(items[0].index, std::uint64_t{0});
+    AURORA_TEST_CHECK_EQ(items[0].event, std::string{"message"});  // 服务端没命名时折出的缺省类型
+    AURORA_TEST_CHECK_EQ(items[0].data, std::string{"a"});
+    AURORA_TEST_CHECK_EQ(items[0].id, std::string{});
+    AURORA_TEST_CHECK_EQ(items[0].status, std::uint16_t{200});
+    AURORA_TEST_CHECK_EQ(items[1].index, std::uint64_t{1});
+    AURORA_TEST_CHECK_EQ(items[1].event, std::string{"tick"});
+    AURORA_TEST_CHECK_EQ(items[1].data, std::string{"b"});
+    AURORA_TEST_CHECK_EQ(items[1].id, std::string{"7"});  // 派发时刻的续传标识，不是「本条带没带」
+    AURORA_TEST_CHECK_FALSE(items[1].last);
+    AURORA_TEST_CHECK_TRUE(items[2].last);
+    AURORA_TEST_CHECK_EQ(items[2].index, std::uint64_t{2});  // 序号 = 事件总条数：下一条本该落在哪儿
+    AURORA_TEST_CHECK_EQ(items[2].id, std::string{"7"});  // 收尾标记带的是收摊时手上那枚续传标识
+    AURORA_TEST_CHECK(items[2].data.empty());
+    AURORA_TEST_CHECK_EQ(resource.phase(), aurora::ResourcePhase::Ready);
+}
+
+AURORA_TEST_CASE(a_cancelled_subscription_fails_but_keeps_committed_records) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    // 一块发完就不再说话（缺终止块）：订阅挂在读上，正是「宿主已收到过东西、又要中途停手」的现场。
+    ScriptedPeer peer(write_then_hold(event_stream_response({"data: a\n\n"}, false)));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    Cancellation token;
+    const auto resource = aurora::net::http::deliver_sse(client, Request::get(loopback_url(peer.port())), token);
+    AURORA_TEST_CHECK(pump("first record lands", [&resource] { return !resource.items().empty(); }));
+    AURORA_TEST_REQUIRE_MSG(!resource.items().empty(), "no record reached the stream before cancel");
+    const std::size_t committed = resource.items().size();
+
+    token.cancel();
+    AURORA_TEST_CHECK(
+        pump("subscription fails", [&resource] { return resource.phase() == aurora::ResourcePhase::Failed; }));
+    AURORA_TEST_CHECK_EQ(require_value(resource.error()).code_enum, ErrorCode::NetCancelled);
+    AURORA_TEST_REQUIRE(!resource.items().empty());
+    AURORA_TEST_CHECK_FALSE(resource.items().back().last);  // 失败的订阅不产假收尾标记
+    AURORA_TEST_CHECK_EQ(resource.items().size(), committed);  // 取消不回收已交出去的事件
+}
+
+AURORA_TEST_CASE(deliver_sse_reports_a_refused_stream_without_any_record) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const aurora::test::net::HostDriven host;
+    // 看着像事件流的纯文本：闸门在第一条记录成形之前就把这条流判死，宿主一条假记录都不该收到。
+    ScriptedPeer peer(reply_after_reading(1, framed("200 OK", "data: a\n\n", "Content-Type: text/plain\r\n")));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    SseOptions options;
+    options.reconnect = false;
+    client.sse(options);
+
+    const auto resource = aurora::net::http::deliver_sse(client, Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(
+        pump("subscription fails", [&resource] { return resource.phase() == aurora::ResourcePhase::Failed; }));
+    AURORA_TEST_CHECK_EQ(require_value(resource.error()).code_enum, ErrorCode::HttpProtocolError);
+    AURORA_TEST_CHECK(resource.items().empty());
+}
+
+AURORA_TEST_CASE(deliver_ws_commits_each_message_then_one_final_marker) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const WsHost host;
+    // 对端说完两条消息再说 close：这次收摊干净，收尾那条要把三枚线上事实（状态码 / 原因 / 由谁开启）交出去，
+    // 而它们只挂在标记上——消息条目里没有这两枚旋钮的位置。
+    WsLog log;
+    ScriptedPeer peer(
+        serve_ws(WsPlan{.frames = {server_frame(AURORA_OP_TEXT, "first"), server_frame(AURORA_OP_TEXT, "second"),
+                                   server_frame(AURORA_OP_CLOSE, close_payload(1001U, "all done"))}},
+                 log));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    const aurora::StreamResource<WsRecord> resource =
+        aurora::net::http::deliver_ws(client, Request::get(loopback_ws_url(peer.port())));
+    AURORA_TEST_CHECK(pump(
+        "subscription closes",
+        [&resource] {
+            const auto &items = resource.items();
+            return !items.empty() && items.back().last;
+        },
+        AURORA_WS_WAIT));
+
+    const auto &items = resource.items();
+    AURORA_TEST_REQUIRE_EQ(items.size(), std::size_t{3});  // 两条消息 + 一枚收尾标记
+    AURORA_TEST_CHECK_EQ(items[0].index, std::uint64_t{0});
+    AURORA_TEST_CHECK_EQ(items[0].kind, WsMessageKind::Text);
+    AURORA_TEST_CHECK_EQ(items[0].payload, std::string{"first"});
+    AURORA_TEST_CHECK_FALSE(items[0].last);
+    AURORA_TEST_CHECK_FALSE(items[0].close_code.has_value());  // 线上码只属于收尾那次交换
+    AURORA_TEST_CHECK_EQ(items[1].index, std::uint64_t{1});
+    AURORA_TEST_CHECK_EQ(items[1].payload, std::string{"second"});
+    AURORA_TEST_CHECK_TRUE(items[2].last);
+    AURORA_TEST_CHECK_EQ(items[2].index, std::uint64_t{2});  // 序号 = 消息总条数：下一条本该落在哪儿
+    AURORA_TEST_CHECK(items[2].payload.empty());
+    AURORA_TEST_REQUIRE(items[2].close_code.has_value());
+    // 前序 AURORA_TEST_REQUIRE 已断言持有值，断言宏的展开对 tidy 的路径分析不透明，属误报。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_EQ(items[2].close_code.value(), std::uint16_t{1001});
+    AURORA_TEST_CHECK_EQ(items[2].close_reason, std::string{"all done"});
+    AURORA_TEST_CHECK_TRUE(items[2].by_peer);  // 这次收摊由对端的 close 帧开启
+    AURORA_TEST_CHECK_EQ(resource.phase(), aurora::ResourcePhase::Ready);
+}
+
+AURORA_TEST_CASE(deliver_ws_keeps_the_wire_kind_and_merges_a_fragmented_message) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const WsHost host;
+    // 条目边界是**消息**而不是帧：三条分片合成一条记录，文本与二进制各留自己的类型，越界的字节不该冒出来。
+    WsLog log;
+    ScriptedPeer peer(serve_ws(WsPlan{.frames = {server_frame(AURORA_OP_TEXT, "readable"),
+                                                 server_frame(AURORA_OP_BINARY, std::string{"\xff\xfe"}),
+                                                 server_frame(AURORA_OP_TEXT, "fra", false),
+                                                 server_frame(AURORA_OP_CONTINUATION, "gmen", false),
+                                                 server_frame(AURORA_OP_CONTINUATION, "t!"),
+                                                 server_frame(AURORA_OP_CLOSE, close_payload(1000U))}},
+                               log));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    const aurora::StreamResource<WsRecord> resource =
+        aurora::net::http::deliver_ws(client, Request::get(loopback_ws_url(peer.port())));
+    AURORA_TEST_CHECK(pump(
+        "subscription closes",
+        [&resource] {
+            const auto &items = resource.items();
+            return !items.empty() && items.back().last;
+        },
+        AURORA_WS_WAIT));
+
+    const auto &items = resource.items();
+    AURORA_TEST_REQUIRE_EQ(items.size(), std::size_t{4});  // 三条消息 + 一枚收尾标记
+    AURORA_TEST_CHECK_EQ(items[0].kind, WsMessageKind::Text);
+    AURORA_TEST_CHECK_EQ(items[0].payload, std::string{"readable"});
+    AURORA_TEST_CHECK_EQ(items[1].kind, WsMessageKind::Binary);
+    AURORA_TEST_CHECK_EQ(items[1].payload, std::string{"\xff\xfe"});  // 二进制原样：不许按文本判一遍就丢掉
+    AURORA_TEST_CHECK_EQ(items[2].kind, WsMessageKind::Text);
+    AURORA_TEST_CHECK_EQ(items[2].payload, std::string{"fragment!"});  // 三片合成的那一条
+    AURORA_TEST_CHECK_EQ(items[3].index, std::uint64_t{3});
+    AURORA_TEST_CHECK_TRUE(items[3].last);
+}
+
+AURORA_TEST_CASE(deliver_ws_leaves_heartbeat_frames_out_of_the_record_stream) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const WsHost host;
+    // 心跳夹在两条消息之间：自动 pong 是协议义务、库里已做完，把它落成条目会让 `Replace` 策略下的读数变成
+    // 探活字节而不是内容。
+    WsLog log;
+    ScriptedPeer peer(serve_ws(
+        WsPlan{.frames = {server_frame(AURORA_OP_TEXT, "one"), server_frame(AURORA_OP_PING, "probe"),
+                          server_frame(AURORA_OP_TEXT, "two"), server_frame(AURORA_OP_CLOSE, close_payload(1000U))}},
+        log));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    const aurora::StreamResource<WsRecord> resource =
+        aurora::net::http::deliver_ws(client, Request::get(loopback_ws_url(peer.port())));
+    AURORA_TEST_CHECK(pump(
+        "subscription closes",
+        [&resource] {
+            const auto &items = resource.items();
+            return !items.empty() && items.back().last;
+        },
+        AURORA_WS_WAIT));
+
+    const auto &items = resource.items();
+    AURORA_TEST_REQUIRE_EQ(items.size(), std::size_t{3});  // 两条消息 + 一枚收尾标记：ping 不在其中
+    AURORA_TEST_CHECK_EQ(items[0].payload, std::string{"one"});
+    AURORA_TEST_CHECK_EQ(items[1].payload, std::string{"two"});
+    AURORA_TEST_CHECK_TRUE(items[2].last);
+    AURORA_TEST_CHECK_EQ(items[2].index, std::uint64_t{2});  // 序号里没有为 ping 留的空位
+}
+
+AURORA_TEST_CASE(deliver_ws_fails_without_records_when_the_peer_refuses_the_upgrade) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const WsHost host;
+    // 对端根本不肯升级：那次会话从未存在过，故一条记录都不出，失败只走 `fail()`。
+    WsLog log;
+    ScriptedPeer peer(serve_ws(WsPlan{.reply = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"}, log));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    const auto resource = aurora::net::http::deliver_ws(client, Request::get(loopback_ws_url(peer.port())));
+    AURORA_TEST_CHECK(pump(
+        "subscription fails", [&resource] { return resource.phase() == aurora::ResourcePhase::Failed; },
+        AURORA_WS_WAIT));
+    AURORA_TEST_CHECK_EQ(require_value(resource.error()).code_enum, ErrorCode::WsHandshakeRejected);
+    AURORA_TEST_CHECK(resource.items().empty());
+}
+
+AURORA_TEST_CASE(deliver_ws_refuses_a_non_get_request_without_touching_the_peer) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const WsHost host;
+    // 方法闸在建连之前（口径照 `Client::connect_websocket()`：只认 `GET`，既不静默改成 `GET` 也不照发）。
+    WsLog log;
+    ScriptedPeer peer(serve_ws({}, log));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    const auto resource = aurora::net::http::deliver_ws(client, Request::post(loopback_ws_url(peer.port())));
+    AURORA_TEST_CHECK(pump(
+        "subscription fails", [&resource] { return resource.phase() == aurora::ResourcePhase::Failed; },
+        AURORA_WS_WAIT));
+    AURORA_TEST_CHECK_EQ(require_value(resource.error()).code_enum, ErrorCode::HttpRequestInvalid);
+    AURORA_TEST_CHECK(resource.items().empty());
+    AURORA_TEST_CHECK_EQ(peer.accepts(), 0);  // 一条连接都没发起
+}
+
+AURORA_TEST_CASE(a_cancelled_session_closes_from_our_side_and_lands_the_marker) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const WsHost host;
+    // 宿主停手 = 这条订阅结束，而「结束」在 WebSocket 上是一次真的 close 交换：本端发 close(1000)、对端回声、
+    // 干净收尾出一条标记。本条同时是那枚取消钩子与壳的自持链的形态判据——钩子没接上或壳没人认领时，这里既
+    // 看不见线上的 close，也等不到标记。
+    WsLog log;
+    ScriptedPeer peer(serve_ws(
+        WsPlan{.frames = {server_frame(AURORA_OP_TEXT, "first")}, .watch_client_frames = true, .answer_close = true},
+        log));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    Cancellation token;
+    const auto resource =
+        aurora::net::http::deliver_ws(client, Request::get(loopback_ws_url(peer.port())), WebSocketOptions{}, token);
+    AURORA_TEST_CHECK(pump("first message lands", [&resource] { return !resource.items().empty(); }, AURORA_WS_WAIT));
+    AURORA_TEST_REQUIRE(!resource.items().empty());
+    const std::size_t committed = resource.items().size();
+
+    token.cancel();
+    AURORA_TEST_CHECK(pump(
+        "subscription closes",
+        [&resource] {
+            const auto &items = resource.items();
+            return !items.empty() && items.back().last;
+        },
+        AURORA_WS_WAIT));
+
+    AURORA_TEST_CHECK_EQ(log.count(AURORA_OP_CLOSE), std::size_t{1});  // 本端恰发出一枚 close
+    const auto sent = log.frame(0U);
+    AURORA_TEST_REQUIRE(sent.has_value());
+    // 前序 AURORA_TEST_REQUIRE 已断言持有值，断言宏的展开对 tidy 的路径分析不透明，属误报。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_EQ(close_code_of(std::string_view{sent->payload}), 1000);
+
+    const auto &items = resource.items();
+    AURORA_TEST_REQUIRE_EQ(items.size(), committed + 1);  // 已提交的消息留着，只多出收尾那一条
+    AURORA_TEST_CHECK_TRUE(items.back().last);
+    AURORA_TEST_CHECK_FALSE(items.back().by_peer);  // 这次收摊由本端的取消开启
+    AURORA_TEST_REQUIRE(items.back().close_code.has_value());
+    // 前序 AURORA_TEST_REQUIRE 已断言持有值，断言宏的展开对 tidy 的路径分析不透明，属误报。
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    AURORA_TEST_CHECK_EQ(items.back().close_code.value(), std::uint16_t{1000});  // 对端回声里那枚码
+    AURORA_TEST_CHECK(items.back().close_reason.empty());  // 回声镜像状态码、不镜像原因
+    AURORA_TEST_CHECK_EQ(resource.phase(), aurora::ResourcePhase::Ready);
+}
+
+AURORA_TEST_CASE(deliver_ws_fails_on_an_eof_without_a_close_and_keeps_records) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const WsHost host;
+    // 对端把写向停了却没说 close：协议眼里这是异常断连，本面据此落 `fail()` 而**不造**一枚收尾标记，
+    // 已提交的消息照留（与 `deliver_stream` / `deliver_sse` 同一条纪律）。
+    WsLog log;
+    ScriptedPeer peer(serve_ws(
+        WsPlan{.frames = {server_frame(AURORA_OP_TEXT, "the last thing it said")}, .stop_writing_after_frames = true},
+        log));
+    AURORA_TEST_REQUIRE(peer.valid());
+
+    Client client;
+    allow_test_cleartext(client);
+    const auto resource = aurora::net::http::deliver_ws(client, Request::get(loopback_ws_url(peer.port())));
+    AURORA_TEST_CHECK(pump(
+        "subscription fails", [&resource] { return resource.phase() == aurora::ResourcePhase::Failed; },
+        AURORA_WS_WAIT));
+    AURORA_TEST_CHECK_EQ(require_value(resource.error()).code_enum, ErrorCode::WsClosed);
+    const auto &items = resource.items();
+    AURORA_TEST_REQUIRE_EQ(items.size(), std::size_t{1});
+    AURORA_TEST_CHECK_EQ(items[0].payload, std::string{"the last thing it said"});
+    AURORA_TEST_CHECK_FALSE(items.back().last);  // 非干净收摊不产假标记
 }
 
 AURORA_TEST_CASE(image_fetcher_returns_the_body_on_a_success_status) {

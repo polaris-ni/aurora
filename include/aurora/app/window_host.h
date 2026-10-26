@@ -152,7 +152,14 @@ class WindowHost {
     /// @return 程序化请求或后端已关为 true。
     [[nodiscard]] auto should_close() const -> bool;
     /// @brief 程序化请求关闭（经 `Window::close()`；无头宿主为空操作）。
-    auto request_close() -> void;
+    /// @param source 关闭来源（见 `CloseRequestSource`）；缺省 `Programmatic`，
+    ///               `Application` 的策略连带传 `PolicyCascade`。
+    auto request_close(CloseRequestSource source = CloseRequestSource::Programmatic) -> void;
+    /// @brief 撤销本次关闭请求：清记账位（`close_requested_` / `close_source_` / `close_asked_`）
+    ///        并转发 `Surface::cancel_close()` 清后端旗标。幂等。
+    /// @note 后端不支持清位（或窗口已被 OS 销毁）时 `should_close()` 仍为真，由 `Application`
+    ///       的询问步复验后走 fail-open：记 WARN 并按放行处理。
+    auto cancel_close() -> void;
 
     /// @brief 解绑后端回调并清理焦点/拦截器（**不**释放成员，释放在析构）。
     /// 必须在销毁宿主**之前**调用：Surface 的回调 lambda 捕获了 `this`，若宿主析构后
@@ -207,6 +214,10 @@ class WindowHost {
     auto dispatch_system_drop(SystemDropEvent &e) -> void;
 
   private:
+    // 关闭闸门的询问步需读写 `close_asked_` / `close_source_`（不设公共读口：无观测需求，
+    // 测试经询问计数断言），故授予 `Application` 友元而非放宽可见性。
+    friend class Application;
+
     /// @brief 窗口可见性状态上报：更新 Window 快照后转交 sink（`Application` 聚合）。
     auto on_window_state(WindowState s) -> void;
     /// @brief 窗口几何态上报（语义同 `on_window_state`）。
@@ -254,6 +265,9 @@ class WindowHost {
     std::function<void(WindowState)> state_sink_;  ///< 可见性状态上报表。
     std::function<void(WindowMode)> mode_sink_;  ///< 几何态上报表。
     bool close_requested_ = false;  ///< 程序化关闭请求（见 `request_close`；后端无关的兜底通道）。
+    CloseRequestSource close_source_ =
+        CloseRequestSource::Programmatic;  ///< 最近一次记账的关闭来源（见 `request_close`）。
+    bool close_asked_ = false;  ///< 边沿闩：本条关闭抬沿是否已询问过闸门（见 `Application` 询问步）。
     bool geometry_saved_ = false;  ///< 几何是否已持久化（见 `geometry_saved()`）。
     bool torn_down_ = false;  ///< teardown 幂等守卫。
 };

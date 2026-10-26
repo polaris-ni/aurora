@@ -111,7 +111,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.FEAT.TOOLING.UI-TO-CODE.001 | 可逆性：UI → 代码的参考还原 | AI 可分析现有界面并重构 | [`08-tooling.md`](specification/08-tooling.md) §10.7（工具链侧）、[`04-widget.md`](specification/04-widget.md) §6.2（控件侧） |
 | SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.001 | 部分代码容错（半成品可编译可运行） | AI 可增量开发 | [`01-core.md`](specification/01-core.md) §8.4 |
 | SPEC.PERF.API.TOKEN-EFFICIENCY.001 | Token 效率 + 编译速度约束 | AI 迭代循环效率 | 本文 §4.3 |
-| SPEC.FEAT.APP.MULTI-WINDOW.001 | 多窗口（一个进程多个顶层窗口） | AI 生成的复合应用可多窗协同，且不退化单窗调用模型 | [`06-app-platform.md`](specification/06-app-platform.md) §2.4 |
+| SPEC.FEAT.APP.MULTI-WINDOW.001 | 多窗口（一个进程多个顶层窗口） | AI 生成的复合应用可多窗协同，且不退化单窗调用模型；逐窗几何记忆（尺寸 / 位置 / 几何态三项落盘，重启后几何态经幂等原语追回那一档，`Minimized` 按政策恢复为 `Normal`）；窗口关闭请求可经闸门在销毁前可否决（来源三档 + 边沿闩一次一问 + fail-open 后置条件）；活动窗口寻址（`Application::active_window()` 答「最近一次用户输入派发的目的窗口」，**不等价于 OS 前台窗**，记账 O(1)、回收即清号） | [`06-app-platform.md`](specification/06-app-platform.md) §2.4（活动窗口查询 / 关闭请求闸门） |
 | SPEC.FEAT.WIDGET.LAYOUT.BASELINE-ALIGN.001 | 交叉轴基线对齐（`CrossAxisAlignment::Baseline`） | 同一行内文本与控件的首行基线共线（含 Modifier 内边距与退化路径） | [`03-layout-render.md`](specification/03-layout-render.md) §3.8、[`04-widget.md`](specification/04-widget.md) §3.3 |
 | SPEC.FEAT.WIDGET.LAYOUT.SCROLL-RESTORE.001 | 滚动位置保存/恢复（`app::ScrollStorage`） | 重建 / 重启后滚动位置可还原，且多窗口与同键争用不串味 | [`06-app-platform.md`](specification/06-app-platform.md) §9.3、[`04-widget.md`](specification/04-widget.md) §3.3 |
 | SPEC.FEAT.WIDGET.DATA.LIST-REORDER.001 | 列表拖拽重排（`ReorderableList`） | 用户可拖动条目换位：跟手 / 让位 / 近边缘自动滚动 / 落位动画，数据由控件改写 | [`04-widget.md`](specification/04-widget.md) §3.4、[`GUIDELINE.md`](GUIDELINE.md) §36 |
@@ -125,10 +125,10 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.PLATFORM.NET.EVENT-SOURCE.001 | 事件循环网络完成事件与通用事件源注册口 | 网络结果恒回主线程投递，UI 线程不阻塞在 I/O 等待上 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.FEAT.NET.TRANSPORT-SUITE.001 | 异步 TCP / UDP / 本地 IPC（UDS / NamedPipe）传输族，含 DNS 双栈与竞速、代理族（`CONNECT` / SOCKS5 / 系统与环境变量）、分帧工具与读写背压 | 可连任意主机、可监听服务、可取消，为第三方非阻塞会话（如 SSH）提供字节流底座，且慢消费者不导致无界缓冲 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.PLATFORM.NET.TLS-BACKEND.001 | TLS 通道（可插拔后端注册表：系统栈引擎与使用方 provider **共存装配** + 每次握手指定后端 + 默认证书校验与自定义信任根） | 加密通道与明文流同构，上层协议无需感知，校验失败即断连；后端可注入 / 可注销 / 可查询，缺省走有序候选链、回落只发生在握手开始前，显式指定后端则绝不换腿 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8.18 |
-| SPEC.FEAT.NET.HTTP-CLIENT.001 | HTTP/1.1 客户端（`Url` 值类型 / 基础请求集 / 流式与帧对齐进度 / gzip 透明解压 / 条件请求与内存缓存 / Cookie / 认证 / SSE） | AI 可直接拉取数据与资源，手拼 URL 与静默字符集替换这类高频错误在类型层消失，大文件不占满内存，跨平台协议语义逐值一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
+| SPEC.FEAT.NET.HTTP-CLIENT.001 | HTTP/1.1 客户端（`Url` 值类型 / 基础请求集 / 流式与帧对齐进度 / gzip 透明解压 / 条件请求与内存缓存 / Cookie / 认证 / SSE / 交换钩子（客户端级登记链：只读请求视图 + 头改写通道 / `send` 上短路交付）） | AI 可直接拉取数据与资源，手拼 URL 与静默字符集替换这类高频错误在类型层消失，大文件不占满内存，跨平台协议语义逐值一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.FEAT.NET.WEBSOCKET.001 | WebSocket 客户端（RFC 6455 握手 / 分帧 / ping-pong / close code） | 长连接双向增量数据可订阅，帧上限与关闭语义明确 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.FEAT.NET.DECLARATIVE-BINDING.001 | 异步结果三态响应式绑定（`state` 模块的 `Resource` / `StreamResource`） | 请求即状态源，`loading / ready / failed` 定点刷新，重发自动取消前序且宿主失效不回调 | [`02-state.md`](specification/02-state.md) §7.3 |
-| SPEC.FEAT.NET.OBSERVABILITY.001 | 网络活动可观测（请求时间线 + 活动表 + Inspector / MCP 暴露 + 凭据强制脱敏） | AI 能从一次界面异常反查到一次请求的耗时与失败阶段，且排障信息不会泄漏凭据 | [`08-tooling.md`](specification/08-tooling.md) §10.2、[`ARCHITECTURE.md`](ARCHITECTURE.md) §14 |
+| SPEC.FEAT.NET.OBSERVABILITY.001 | 网络活动可观测（进程级事件总线与活动存储、请求时间线 + 活动表、Inspector / MCP 暴露、凭据分级强制脱敏） | AI 能从一次界面异常按 `X-Request-Id` 反查到每一跳的耗时、失败阶段与归因，且四个导出面（`Timeline` / `InspectorJson` / `Log` / `ErrorDetail`）在宿主策略下均不泄漏凭据原值；Release 构建如实回 unavailable 而非静默假成功 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8.36–§8.8.39、[`08-tooling.md`](specification/08-tooling.md) §10.2、[`ARCHITECTURE.md`](ARCHITECTURE.md) §14 |
 | SPEC.TEST.NET.OFFLINE-FIXTURE.001 | 可注入假引擎与离线网络夹具（`FakeEngine` + 条件等待辅助） | 超时、取消、半关闭、TLS 失败等故障可在禁网 CI 内逐值断言，网络行为可验证性不退化 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8、[`ARCHITECTURE.md`](ARCHITECTURE.md) §14 |
 
 ---

@@ -2,6 +2,7 @@
 
 #include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/交互/绘制装配层
 #include "aurora/window/detail/win32_dpi.h"
+#include "aurora/window/detail/win32_drag.h"
 #include "aurora/window/detail/win32_dwm.h"  // DWM composition 探测 / 帧扩展
 #include "aurora/window/detail/win32_ime.h"
 #include "aurora/window/detail/win32_keymap.h"
@@ -178,6 +179,8 @@ struct Win32Host::Impl {
     float scale = 1.0F;
     WindowStyleOptions style{};  ///< 高级样式（置顶/无边框/尺寸限制）。
     bool should_close = false;
+    /// @brief 窗口已被 `WM_DESTROY` 销毁：此后拒绝清位（见 `Win32Host::cancel_close`）。
+    bool window_gone = false;
     EventHandler handler;
     int present_count = 0;  ///< 已触发同步重渲染次数（WM_SIZE/WM_PAINT 计数）。
     bool minimized = false;  ///< 是否最小化（WM_SIZE SIZE_MINIMIZED）。
@@ -201,6 +204,12 @@ struct Win32Host::Impl {
 
     /// @brief IMM32 组合输入桥（与窗口同生命周期；无输入法激活时零消息、零成本）。
     std::unique_ptr<detail::Win32ImeBridge> ime;
+    /// @brief OLE 拖入桥（与窗口同生命周期；由本 Impl **唯一持有**，Win32 / D3D11 / WgpuWin32
+    /// 三个 Surface 转发同一实例，避免多份 HWND → 窗口映射分裂）。
+    ///
+    /// 注册失败时对象仍在（`installed() == false`），供真机探针与自检观测器区分「未注册」与
+    /// 「未构造」两种失败。
+    std::unique_ptr<detail::Win32DragBridge> drag;
     /// @brief 修饰键跟踪器：随 `WM_KEY*` / `WM_SYSKEY*` 推进，失焦清空、重新激活播种。
     detail::ModifierKeyTracker mods;
     /// @brief 焦点控件的候选窗定位盒查询（由 `WindowHost` 注入；空 = 无定位，走系统默认）。
@@ -276,7 +285,6 @@ struct Win32Host::Impl {
     /// @brief `WM_IME_*` 分族：交 IMM32 桥翻译组合；桥不认领（含 `WM_KILLFOCUS` 的取消侧路径）
     ///        时回落 `DefWindowProc`。
     [[nodiscard]] auto handle_ime(UINT msg, WPARAM wp, LPARAM lp) const -> LRESULT;
-    auto handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT;
 
     // ---- 自绘装饰（CSD）消息分族与状态装配 ----
     /// @brief `WM_NCCALCSIZE`：吞掉非客户区使客户区 = 整窗（最大化时拉回可见工作区）。
@@ -434,7 +442,6 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
                 break;
         }
         UpdateWindow(hwnd);
-        DragAcceptFiles(hwnd, TRUE);  // 启用操作系统文件拖放（WM_DROPFILES）
         // IMM32 组合桥：桥自身只吃 WM_IME_*，无输入法时一条也不来，故随窗口直接构造。
         ime = std::make_unique<detail::Win32ImeBridge>(
             hwnd, detail::Win32ImeBridge::Hooks{.emit = [this](Event &e) -> void {
@@ -447,6 +454,25 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
                                                                                       : Rect{};
                                                 },
                                                 .scale_factor = [this]() -> float { return scale; }});
+        // OLE 拖入桥：注册后 OS **直接回调本桥**、不经过 wnd_proc，故它取代了原「落放 + 路径清单」
+        // 窄通路（后者无四态 / 格式清单 / 动作协商，是 OLE 的真子集）。
+        // 注册失败（OLE 初始化失败或该 HWND 已被注册）时如实不接管：该窗口即没有系统拖入能力，
+        // 不保留一条语义更弱的备胎（与「PNG 不可用即如实不可得」同条纪律）。
+        drag = std::make_unique<detail::Win32DragBridge>(
+            hwnd, detail::Win32DragBridge::Hooks{.emit = [this](Event &e) -> void {
+                                                     if (handler) {
+                                                         handler(e);
+                                                     }
+                                                 },
+                                                 .scale_factor = [this]() -> float { return scale; }});
+        if (!drag->install()) {
+            AURORA_LOG_WARN("system-drag", "drag-in backend not registered on this window");
+        }
+        // 拖出后端（进程级单槽）：与拖入桥解耦——拖入随窗口走（OS 按 HWND 回调），拖出与窗口
+        // 句柄无关（会话跑在库自管拖拽线程上），故每个窗口的构造期都调一次，由事件层
+        // 「先到者优先」去重。注册失败无回路可走：真实后端缺失时 `system_drag::begin` 落
+        // not-supported，不谎报有通路。
+        detail::register_win32_drag_out_backend();
     }
     size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // 逻辑 dp（布局用）
 }
@@ -464,6 +490,9 @@ Win32Host::Impl::~Impl() {
     scale_handler = nullptr;  // 兜底：不经 teardown 的析构路径，WM_DPICHANGED 仍可同步到达
     composition_caret_provider = nullptr;
     ime = nullptr;  // 桥的 hooks 捕获本 Impl，须在 DestroyWindow 前先散
+    // OLE 拖入桥同理：RevokeDragDrop 需要**有效 HWND**，故必须在 DestroyWindow 之前卸载
+    // （放到析构末尾会在窗口已毁后调 Revoke，那条路径上句柄已失效）。
+    drag = nullptr;
     if (hwnd != nullptr) {
         DestroyWindow(hwnd);
         hwnd = nullptr;
@@ -788,6 +817,7 @@ auto Win32Host::Impl::handle_close() -> LRESULT {
 
 auto Win32Host::Impl::handle_destroy() -> LRESULT {
     should_close = true;
+    window_gone = true;  // 窗口已销毁：此后 cancel_close 必须拒绝清位
     // 窗口销毁：先全量断连 UIA provider 再置空 hwnd —— 否则 UIA 侧缓存的 provider 会
     // 在窗口已销毁后回调进来（Chromium / Qt 已知崩溃源，R1）。
     if (a11y != nullptr) {
@@ -861,45 +891,11 @@ auto Win32Host::set_composition_caret_provider(std::function<Rect()> provider) c
 
 auto Win32Host::ime_composing() const -> bool { return pimpl_->ime != nullptr && pimpl_->ime->is_composing(); }
 
-// ---- 文件拖放分族（WM_DROPFILES）----
-auto Win32Host::Impl::handle_dropfiles(HWND hwnd_in, LPARAM lp) const -> LRESULT {
-    // 操作系统文件拖放：解析 HDROP 为 UTF-8 路径列表，落点换算为窗口逻辑坐标。
-    auto *const hdrop = reinterpret_cast<HDROP>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
-    const UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
-    std::vector<std::string> paths;
-    paths.reserve(count);
-    for (UINT i = 0; i < count; ++i) {
-        const UINT len = DragQueryFileW(hdrop, i, nullptr, 0);
-        std::wstring ws(static_cast<std::size_t>(len) + 1U, L'\0');
-        DragQueryFileW(hdrop, i, ws.data(), len + 1);
-        const int n = WideCharToMultiByte(CP_UTF8, 0, ws.data(), -1, nullptr, 0, nullptr, nullptr);
-        if (n > 0) {
-            std::string s(static_cast<std::size_t>(n) - 1U, '\0');
-            WideCharToMultiByte(CP_UTF8, 0, ws.data(), -1, s.data(), n, nullptr, nullptr);
-            paths.push_back(std::move(s));
-        }
-    }
-    POINT pt{};
-    DragQueryPoint(hdrop, &pt);
-    ScreenToClient(hwnd_in, &pt);  // 屏幕坐标 → 客户区坐标
-    DragFinish(hdrop);
-
-    // 立骨期只走「文件清单」这一条既有通路：把它装进四态事件的 drop 态 + uri-list 载荷，
-    // 坐标换算（屏幕 → 客户区 → 逻辑）与 HDROP 解析一字不动。
-    SystemDropEvent sde;
-    sde.phase = SystemDropPhase::Drop;
-    sde.position = to_logical(pt.x, pt.y);
-    sde.formats.emplace_back(AURORA_MIME_URI_LIST);
-    sde.proposed = DragAction::Copy;  // 资源管理器拖入的既有语义是复制（不移动源文件）
-    const std::string uri_text = uri_list::encode(paths);
-    std::unordered_map<std::string, std::vector<std::uint8_t>> entries;
-    entries.emplace(std::string(AURORA_MIME_URI_LIST), std::vector<std::uint8_t>(uri_text.begin(), uri_text.end()));
-    sde.payload = DragPayload::from_bytes(std::move(entries));
-    if (handler) {
-        handler(sde);
-    }
-    return 0;
-}
+// ---- 系统拖放（OLE）：不走 wnd_proc，由 Win32DragBridge 的四态回调直接承接 ----
+//
+// 原「落放后一次性给路径清单」的窄通路（窗口级注册开启、在 `wnd_proc` 里收一条落放消息并解析
+// 路径清单）已在 OLE 桥落地后移除：它无四态 / 格式清单 / 动作协商，是 OLE 的真子集；保留即双
+// 真源（同一 HWND 两套拖入语义、两份坐标换算与格式解析），故不留 fallback——git 历史即归档。
 
 // ---- 自绘装饰分族（WM_NCCALCSIZE / WM_NCHITTEST / 指针拦截）----
 
@@ -1130,6 +1126,9 @@ auto Win32Host::Impl::register_class() const -> void {
 auto Win32Host::Impl::refresh_scale(const RECT *desired) -> float {
     const detail::DpiReading reading = detail::read_dpi(hwnd, desired, detail::resolve_dpi_api());
     scale = detail::dpi_to_scale(reading.dpi);
+    // 拖出影像热点折算的进程级缩放提示：本函数是宿主内唯一写 `scale` 的点，故在此顺带推送
+    // （`SystemDragOutBackend::begin` 拿不到发起窗口上下文，理由见 `win32_drag.h` 注记）。
+    detail::win32_drag_out_note_scale(scale);
     return scale;
 }
 
@@ -1219,8 +1218,6 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return self->handle_close();
         case WM_DESTROY:
             return self->handle_destroy();
-        case WM_DROPFILES:
-            return self->handle_dropfiles(hwnd, lp);
         case WM_GETOBJECT: {
             const std::optional<LRESULT> answered = self->handle_get_object(wp, lp);
             return answered.has_value() ? *answered : DefWindowProcA(hwnd, msg, wp, lp);
@@ -1320,6 +1317,35 @@ auto Win32Host::record_client_decoration(DisplayList &dl) const -> bool {
 [[nodiscard]] auto Win32Host::size() const -> Size { return pimpl_->size; }
 [[nodiscard]] auto Win32Host::scale_factor() const -> float { return pimpl_->scale; }
 [[nodiscard]] auto Win32Host::should_close() const -> bool { return pimpl_->should_close; }
+auto Win32Host::cancel_close() -> void {
+    // 已销毁路径拒绝清位：调用方经后置复验走 fail-open（记 WARN、当帧完成回收）。
+    if (!pimpl_->window_gone) {
+        pimpl_->should_close = false;
+    }
+}
+
+auto Win32Host::set_window_mode(WindowMode m) -> void {
+    if (pimpl_ == nullptr || pimpl_->hwnd == nullptr) {
+        return;
+    }
+    // SC_* 是请求语义：结果由 WM_SIZE → handle_size 定档（IsZoomed / SIZE_MINIMIZED）并上报，
+    // 与用户操作系统菜单同路径。
+    switch (m) {
+        case WindowMode::Normal:
+            PostMessageA(pimpl_->hwnd, WM_SYSCOMMAND, SC_RESTORE, 0);
+            break;
+        case WindowMode::Maximized:
+            PostMessageA(pimpl_->hwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+            break;
+        case WindowMode::Minimized:
+            PostMessageA(pimpl_->hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+            break;
+        case WindowMode::FullScreen:
+            // 本后端无 monitor 切换通道（FullScreen 只作为 CSD 布局判据存在）：留痕，不装懂。
+            AURORA_LOG_WARN("window", "Win32Host::set_window_mode: FullScreen is not implemented on this backend");
+            break;
+    }
+}
 [[nodiscard]] auto Win32Host::present_count() const -> int { return pimpl_->present_count; }
 [[nodiscard]] auto Win32Host::background_brush() -> void * { return static_cast<void *>(Impl::bg_brush); }
 

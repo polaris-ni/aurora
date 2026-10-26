@@ -375,7 +375,8 @@ class Task {
             return *this;
         }
         ThreadPool::default_pool().execute([expire = std::move(expire), d]() -> void {
-            std::this_thread::sleep_for(d);
+            // 可中断等待：进程退出时线程池析构 notify_all 立即唤醒，避免 join 卡满超时窗口。
+            ThreadPool::default_pool().interruptible_wait_for(d);
             expire();
         });
         return *this;

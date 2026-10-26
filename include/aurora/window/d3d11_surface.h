@@ -69,6 +69,8 @@ class D3D11Surface : public Surface {
     /// @brief 是否已收到关闭窗口请求（转发共享宿主；WM_CLOSE/WM_DESTROY 置位）。
     /// @return 收到关闭请求为 true，主循环据此退出。
     [[nodiscard]] auto should_close() const -> bool override { return win_->should_close(); }
+    /// @brief 撤销关闭请求：转发到共享宿主（与 `should_close()` 同源，不在此另设判定）。
+    auto cancel_close() -> void override { win_->cancel_close(); }
 
     /// @brief 运行时更新悬停光标形状：与 `Win32Surface` 共用 `Win32Host` 宿主模型，
     /// 故复用同一份 `detail::set_win32_cursor`（`src/aurora/window/win32_cursor.h`）下发系统预置光标。

@@ -408,8 +408,10 @@ if (AURORA_BACKEND_WAYLAND)
     endforeach ()
     # 聚合目标：把生成的协议头/源拉成一个可单独构建的 target。lint 作业只 configure 不构建
     # （clang-tidy 只吃 compile_commands.json），但被分析的 TU 会 include 这些生成头——缺头即
-    # `broken_tus`，门禁把「缺文件」如实判红。故 lint 前先 `cmake --build <build> --target
-    # wayland-gen` 一次（秒级），让生成头就位。整套构建（`--target aurora`）本就会经 custom
+    # `broken_tus`，门禁把「缺文件」如实判红。故 lint 前先让生成头就位——本目标被收进
+    # `lint-prereq` 聚合目标（cmake/AuroraLint.cmake），本机 `--target lint` 自动带上，CI 的 lint 腿
+    # 显式 `cmake --build <build> --target lint-prereq` 一次（秒级）。
+    # 整套构建（`--target aurora`）本就会经 custom
     # command 连带生成，这里的聚合只多给一个显式入口，不改变既有依赖关系。
     add_custom_target(wayland-gen DEPENDS ${AURORA_WL_GEN_HDRS} ${AURORA_WL_GEN_SRCS})
     # 生成的 C 胶水非本项目代码：屏蔽 -Wall/-Wpedantic 告警（不改动其内容）。
@@ -432,11 +434,16 @@ if (AURORA_BACKEND_MACOS)
     # 目标定义前就绪，否则 Ninja generate 阶段取不到 CMAKE_OBJCXX_* 规则。此处仅平台守卫。
     aurora_define_feature(AURORA_BACKEND_MACOS EXPORT)
     target_link_libraries(aurora PUBLIC "-framework Cocoa" "-framework AppKit")
-    # macos_surface.cpp 为 Objective-C++（Cocoa），需显式指定语言；文件存在才设置，避免 glob 缺失告警。
-    set(_macos_src "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_surface.cpp")
-    if (EXISTS "${_macos_src}")
-        set_source_files_properties("${_macos_src}" PROPERTIES LANGUAGE OBJCXX)
-    endif ()
+    # macOS 后端的两个 ObjC++ TU 须显式指定语言；文件存在才设置，避免 glob 缺失告警。
+    # macos_surface.cpp 在 window/（表层），macos_drag.cpp 在 window/detail/（拖放桥，
+    # AppKit 会话状态机，契约见同名头文件）。两文件的门控都在自身 `#if` 内，非 Apple
+    # 平台编译为空 TU——与 x11_drag.cpp / wayland_drag.cpp 在别的平台上的处置同构。
+    foreach(_macos_objc_src "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_surface.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_drag.cpp")
+        if (EXISTS "${_macos_objc_src}")
+            set_source_files_properties("${_macos_objc_src}" PROPERTIES LANGUAGE OBJCXX)
+        endif ()
+    endforeach()
     aurora_log("macOS backend enabled (Cocoa/AppKit).")
 endif ()
 

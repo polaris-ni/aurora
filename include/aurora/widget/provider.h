@@ -117,6 +117,20 @@ class Provider : public SingleChild {  // NOLINT(bugprone-exception-escape)
     auto set_value(T v) -> void { value_ = std::move(v); }
 
   protected:
+    /// @brief 换值标脏口径：在默认「标脏本控件及其祖先缓存」之外，追加**子树**缓存清零。
+    ///
+    /// 本控件的脏来自一份向下传播的输入（注入值 `value_`）：子树后代自身并未变脏，默认口径失效不到
+    /// 它们，于是文本一类「布局期按环境解析」的后代会沿用旧值那帧的解析结果（换区域/换肤内容冻结）。
+    /// 故换值那一帧把整子树的布局与 Display List 缓存清零，令其按新环境重排重录。
+    /// @note 只在信号真变化时执行一次；稳态帧不经过此处，缓存收益不受影响。
+    auto on_signal_dirty() -> void override {
+        mark_needs_layout();
+        mark_needs_paint();
+        if (child_) {
+            child_.widget().invalidate_subtree_caches();
+        }
+    }
+
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         BuildContext child_ctx = ctx;
         child_ctx.env = &child_env_;  // 把注入环境沿布局阶段向下传播

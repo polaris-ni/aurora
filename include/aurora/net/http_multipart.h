@@ -18,10 +18,13 @@
 ///   部件名里的 CR/LF、非法边界、边界与内存部件正文相撞、文件打不开或读到一半失败，都在
 ///   `next_chunk()` 的返回值上如实交出。要发起前就判一次，用 `validate()`——它同是那条纪律的唯一执行处，
 ///   不是另建一套校验。
-/// - **边界由库生成，且可覆写**：缺省取一取自库内非密码学序列（`detail::noncrypto_u64()`，与重试抖动、
-///   `X-Request-Id` 同源）的定长令牌，逐次构造互不相同；`boundary(std::string)` 供测试逐值断言线上字节、
-///   也供对接固定格式的第三方。覆写值当场校验（`RFC 2046 §5.1` 的字符集与 70 字符上限），不合格者在
-///   `validate()` 上如实失败，不会被写成一句对端无从解析的 `Content-Type`。
+/// - **边界由库生成，且可覆写**：缺省取一取自进程级系统熵源（`aurora::net::default_random_source()`，与
+///   WebSocket 掩码密钥、`X-Request-Id`、重试抖动同源）的定长令牌，逐次构造互不相同且不可预测——边界可猜
+///   等于给 multipart 内容注入开了口子，故这一处不走任何伪随机序列；`boundary(std::string)` 供测试逐值断言
+///   线上字节、也供对接固定格式的第三方。覆写值当场校验（`RFC 2046 §5.1` 的字符集与 70 字符上限），不合格者在
+///   `validate()` 上如实失败，不会被写成一句对端无从解析的 `Content-Type`。本腿取不到系统熵时构造不报错、
+///   但缺省边界为空，同样在 `validate()` 上如实落 `net-platform-unavailable`（宁可这条上传不发，也不发一枚
+///   可猜的边界）。
 /// - **`total_size()` 交出的是完整线上长度**：含每段的边界行、部件头与收尾 CRLF，故它恒等于
 ///   `next_chunk()` 逐段交出之字节数之和；任一文件部件的长度取不到就返回 `nullopt`，本次改走
 ///   `Transfer-Encoding: chunked`——宁可少一句声明，也不报一个与实际写出对不上的长度。
@@ -107,12 +110,14 @@ class MultipartWriter final : public BodySource {
     ///
     /// 只在确有外部契约要求时使用：固定边界让测试可以逐字节断言线上形态，某些遗留服务端也要求边界
     /// 落在其白名单里。合法性（字符集与长度）当场记入待校验状态，`validate()` 与 `next_chunk()` 都据此拒。
+    /// 覆写同时了结「本腿取不到系统熵」那笔账——覆写值不靠熵生成，故那条失败不再适用。
     /// @param value 边界字符串；须落在 `RFC 2046 §5.1` 允许的字符集内、不超过 70 字符且不含 CR / LF。
     /// @return 自身引用，便于链式调用。
     auto boundary(std::string value) -> MultipartWriter &;
 
     /// @brief 查看边界字符串。
-    /// @return 当前生效的边界（覆写过即覆写值，否则是构造时生成的那枚）。
+    /// @return 当前生效的边界（覆写过即覆写值，否则是构造时生成的那枚；本腿取不到系统熵且未覆写时为空串，
+    ///         此时 `validate()` 必拒）。
     [[nodiscard]] auto boundary() const -> const std::string & { return boundary_; }
 
     /// @brief 本次体应挂的 `Content-Type` 值。
@@ -125,11 +130,13 @@ class MultipartWriter final : public BodySource {
 
     /// @brief 校验整张表单能否成为一条合法体流：`next_chunk()` 失败处的同一份判据。
     ///
-    /// 拒的条件：没有部件（一条空体不是合法的 `multipart`）、字段名为空或含 CR / LF、边界字符集或长度
+    /// 拒的条件：本腿取不到系统熵因而缺省边界没生成（这条先判，它让后面关于字符集的话无从谈起）、
+    /// 没有部件（一条空体不是合法的 `multipart`）、字段名为空或含 CR / LF、边界字符集或长度
     /// 越界、边界出现在任一部件头文本或内存部件正文里（那会让对端提前看见终止边界，把体读成另一份）。
     /// 文件的可读性不在这里判——它属取字节时才知道的事实。本函数每次调用都从头算（含对内存部件正文的
     /// 相撞扫描），是发起前的检查口；`next_chunk()` 用同一份判据但记住上次结果，不逐段重扫。
-    /// @return 成功态表示整张表单可写成合法体流；失败持有点名原因的 `http-request-invalid`。
+    /// @return 成功态表示整张表单可写成合法体流；失败持有点名原因的 `net-platform-unavailable`（熵不可得）
+    ///         或 `http-request-invalid`（其余各处）。
     [[nodiscard]] auto validate() const -> Result<void>;
 
     /// @brief 把本表单挂上一请求：置 `Content-Type` 并以自身为流式体源。
@@ -190,6 +197,7 @@ class MultipartWriter final : public BodySource {
 
     std::vector<Part> parts_;  ///< 按追加次序登记的部件
     std::string boundary_;  ///< 生效的边界字符串
+    std::optional<Error> entropy_failure_;  ///< 构造时取系统熵生成缺省边界不过的失败（空 = 边界已生成或已被覆写）
     Stage stage_{Stage::PartHead};  ///< 游标所在段
     std::size_t part_index_{0};  ///< 当前部件下标
     std::uint64_t body_offset_{0};  ///< 当前部件正文已交出的字节数

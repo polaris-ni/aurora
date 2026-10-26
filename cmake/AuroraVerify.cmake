@@ -61,6 +61,15 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_x11_cursor)
     endif ()
 
+    # ---- X11 Xdnd 拖入 / 拖出桥（真实 X 服务器）：`XdndAware` 广告 + 四态派发 + 动作协商 +
+    # selection round-trip 取数 + 拖出 grab/`XdndSelection` 所有权/消息序列。自动段以「本窗口
+    # 自拖放」完成全链路无人值守验收（要约 → 数据往返 → 终态 Succeeded/Copy），跨进程会话
+    # （从文件管理器拖文件）交 --interactive 人工段。
+    if (AURORA_BACKEND_X11)
+        aurora_add_verify_probe(aurora_verify_x11_drag "${_aurora_verify_dir}/x11_drag_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_x11_drag)
+    endif ()
+
     # ---- X11 XIM 输入法桥（风格协商 / PreeditCallbacks 回调 / IC 焦点宣告 / 候选窗锚点）----
     # 自动段验收协商与焦点接线（不要求本机装输入法；无 XIM 服务器按合法降级 SKIP）；
     # preedit/上屏内容段交 --interactive 人工（需真实 XIM 进程驱动组合）。
@@ -99,6 +108,16 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
         aurora_add_verify_probe(aurora_verify_win32_ime "${_aurora_verify_dir}/win32_ime_live_probe.cpp")
         list(APPEND _aurora_verify_targets aurora_verify_win32_ime)
+    endif ()
+
+    # ---- Win32 OLE 拖入桥（RegisterDragDrop + IDropTarget 四态 / accept 回写 / 拖入入口）----
+    # 自动段验收「宿主确实注册了 OLE 拖入目标」（重复注册返回 DRAGDROP_E_ALREADYREGISTERED）、
+    # 能力位已翻、以及合成事件经真派发器得到 allowed 求交；跨进程会话本身（从资源管理器拖文件）
+    # 只能由 --interactive 人工段核对，无头与无人工操作均无法产生 OS 会话。ole32 已随 aurora
+    # PUBLIC 链接，探针无需额外链接。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_drag "${_aurora_verify_dir}/win32_drag_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_drag)
     endif ()
 
     # ---- Win32 OS 级全局热键（真实窗口 + 隐藏消息窗口接 WM_HOTKEY；「应用无焦点也触发」+ 排空语义）----
@@ -145,6 +164,19 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         # 故即便去掉本行亦可通过编译。
         target_compile_options(aurora_verify_macos_cursor PRIVATE -fobjc-arc)
         list(APPEND _aurora_verify_targets aurora_verify_macos_cursor)
+
+        # ---- macOS 系统拖放（NSDraggingDestination / NSDraggingSource 双向接线）----
+        # 自动段以「探针自带的 NSDraggingInfo」替身驱动桥（窗口服务器无法搬进进程，与 Wayland
+        # 把合成器搬进进程同思路、不同落点）：真实 NSPasteboard 往返、库自带目标视图的五方法转发、
+        # 折算层与真派发链全走 shipping 代码；AppKit 真实派发的会话与拖出终态留给人工段，
+        # 无窗口服务器时记 PENDING（退出码 3），不冒充已验收。
+        aurora_add_verify_probe(aurora_verify_macos_drag "${_aurora_verify_dir}/macos_drag_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        # 探针直连库内部头（`window/detail/macos_drag.h` 的桥面与 `system_drag_translate.h`
+        # 的折算层不在公共 API，验收的是内部接线本身；口径同 csd/WASAPI/ALSA/Wayland 拖放探针）。
+        target_include_directories(aurora_verify_macos_drag PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_compile_options(aurora_verify_macos_drag PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_drag)
     endif ()
 
     # ---- GLFW 光标（跨平台真实窗口）：GLFW 无光标查询 API → 自动能力核对 + 人工目视（--interactive）----
@@ -214,6 +246,30 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     if (AURORA_BACKEND_WAYLAND)
         aurora_add_verify_probe(aurora_verify_wayland_ime "${_aurora_verify_dir}/wayland_ime_live_probe.cpp")
         list(APPEND _aurora_verify_targets aurora_verify_wayland_ime)
+    endif ()
+
+    # ---- Wayland wl_data_device 系统拖放桥（拖入四态 + 拖出终态）----
+    # 自动段跑在**进程内 mock 合成器**上（服务端自建 wl_display + wl_compositor / wl_seat /
+    # wl_data_device_manager 三段，客户端经 socketpair 连上，走真实 wl_data_device 协议报文）。
+    # 为何 mock：Wayland 没有客户端指针传送 API，「把指针泊进本窗口」无人值守做不到（X11 侧
+    # 同一约束的表现见 x11_drag_live_probe）。冒烟腿（有 WAYLAND_DISPLAY 时建真实
+    # WaylandSurface 泵帧）与 --interactive 人工段补「真实合成器上装得上」的覆盖。
+    # 依赖 wayland-server 开发包（aurora 只链 wayland-client）：命中才定义目标。
+    if (AURORA_BACKEND_WAYLAND)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(AURORA_WAYLAND_SERVER QUIET wayland-server)
+        if (AURORA_WAYLAND_SERVER_FOUND)
+            aurora_add_verify_probe(aurora_verify_wayland_drag "${_aurora_verify_dir}/wayland_drag_live_probe.cpp")
+            # 探针直连库内部头（`window/detail/wayland_drag.h` 的桥面与 `system_drag_translate.h`
+            # 的折算层不在公共 API，验收的是内部接线本身；口径同 csd/WASAPI/ALSA 探针）。
+            target_include_directories(aurora_verify_wayland_drag PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+            target_include_directories(aurora_verify_wayland_drag PRIVATE
+                    ${AURORA_WAYLAND_SERVER_INCLUDE_DIRS})
+            target_link_libraries(aurora_verify_wayland_drag PRIVATE ${AURORA_WAYLAND_SERVER_LIBRARIES})
+            list(APPEND _aurora_verify_targets aurora_verify_wayland_drag)
+        else ()
+            aurora_log("aurora_verify_wayland_drag skipped: wayland-server not found (pkg-config)")
+        endif ()
     endif ()
 
     # ---- Wayland wgpu GPU 栅格（Linux 真实窗口 + 离屏直驱，WSLg Weston 可验）：与 X11 探针同段

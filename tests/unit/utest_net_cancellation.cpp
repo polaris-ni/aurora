@@ -66,8 +66,11 @@ AURORA_TEST_CASE(empty_hook_clears_registration) {
 // 拷贝是「同一状态的另一个句柄」：一侧取消全侧可见，独立构造的两枚互不影响。
 AURORA_TEST_CASE(copies_share_one_state) {
     aurora::net::Cancellation origin;
-    // 拷贝句柄同样可触发取消（共享状态），故两侧都必须是非 const 视角。
-    aurora::net::Cancellation copy = origin;
+    // 拷贝必须是真实的值拷贝：本用例验证「拷贝 = 指向同一状态的另一枚独立句柄」这一契约，
+    // 引用别名会退化成同一对象、失去对 copy-ctor 与共享状态的覆盖。该检查把 const 视角下的
+    // 拷贝误判为「可避免」，此处实际不可替换，故豁免。
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+    const aurora::net::Cancellation copy = origin;
     aurora::net::Cancellation other;
 
     AURORA_TEST_CHECK_TRUE(origin.shares_state_with(copy));

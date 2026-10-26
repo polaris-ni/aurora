@@ -167,12 +167,12 @@ class DatagramTransport {
     /// @param data 一条数据报的载荷；空载荷是一条**合法的零长数据报**（不是「无事可做」）。
     /// @param target 目标端点；族须与本套接字一致且端口非 0。向广播地址发送须先 `set_broadcast_allowed(true)`。
     /// @param on_done 完成回调；携已发出的字节数。
-    auto send_to(std::span<const char> data, const Endpoint &target, DatagramSendDone on_done) -> void;
+    auto send_to(std::span<const char> data, const Endpoint &target, DatagramSendDone on_done) const -> void;
 
     /// @brief 发送一条完整数据报给固定对端（未 `connect` 时以 `net-endpoint-invalid` 收尾）。
     /// @param data 一条数据报的载荷（可为空 span = 一条空数据报）。
     /// @param on_done 完成回调；形态同 `send_to()`。
-    auto send(std::span<const char> data, DatagramSendDone on_done) -> void;
+    auto send(std::span<const char> data, DatagramSendDone on_done) const -> void;
 
     /// @brief 登记一枚接收槽（缓冲必须存活到本次回调抵达；每枚槽只被满足一次）。
     ///
@@ -181,7 +181,7 @@ class DatagramTransport {
     /// 交付的是**下一条**数据报。
     /// @param buffer 目标缓冲；空 span 是用法错误，回调以 `net-buffer-limit` 形态抵达。
     /// @param on_done 完成回调；携恰一条数据报。
-    auto receive(std::span<char> buffer, DatagramDone on_done) -> void;
+    auto receive(std::span<char> buffer, DatagramDone on_done) const -> void;
 
     /// @brief 加入一个组播组（`IP_ADD_MEMBERSHIP` / `IPV6_JOIN_GROUP`；接收网卡由内核按路由选择）。
     ///
@@ -189,17 +189,17 @@ class DatagramTransport {
     /// 静默接受会造出一个永远收不到包的配置）。
     /// @param group 组播组地址；须为 `Endpoint::is_multicast()` 为真的地址且族与本套接字一致。
     /// @return 成功为 OK；失败为 `net-option-conflict` / `net-endpoint-invalid` / `net-option-failed`。
-    [[nodiscard]] auto join_multicast_group(const Endpoint &group) -> Result<void>;
+    [[nodiscard]] auto join_multicast_group(const Endpoint &group) const -> Result<void>;
 
     /// @brief 离开一个组播组（与 `join_multicast_group()` 同一组互斥与校验判据）。
     /// @param group 组播组地址。
     /// @return 成功为 OK；未加入过或系统调用失败为 `net-option-failed`，互斥与校验分支同上。
-    [[nodiscard]] auto leave_multicast_group(const Endpoint &group) -> Result<void>;
+    [[nodiscard]] auto leave_multicast_group(const Endpoint &group) const -> Result<void>;
 
     /// @brief 组播回环开关：本端发出的组播报是否回投给本端（`IP_MULTICAST_LOOP`）。
     /// @param enabled 为真时回投（内核缺省），为假时不回投。
     /// @return 成功为 OK；失败为 `net-option-failed`（本层记录的口径不随之改变）。
-    [[nodiscard]] auto set_multicast_loopback(bool enabled) -> Result<void>;
+    [[nodiscard]] auto set_multicast_loopback(bool enabled) const -> Result<void>;
 
     /// @brief 本层记录的组播回环口径。
     /// @return 最近一次成功 `set_multicast_loopback()` 的值；未设置过时为 true（内核缺省）。
@@ -208,7 +208,7 @@ class DatagramTransport {
     /// @brief 广播允许位（`SO_BROADCAST`）：未置位时向广播地址发送由内核拒绝。
     /// @param enabled 为真时允许广播发送。
     /// @return 成功为 OK；失败为 `net-option-failed`（本层记录的口径不随之改变）。
-    [[nodiscard]] auto set_broadcast_allowed(bool enabled) -> Result<void>;
+    [[nodiscard]] auto set_broadcast_allowed(bool enabled) const -> Result<void>;
 
     /// @brief 本层记录的广播允许口径。
     /// @return 最近一次成功 `set_broadcast_allowed()` 的值；未设置过时为 false（内核缺省）。
@@ -221,7 +221,7 @@ class DatagramTransport {
     /// @brief 关闭套接字：注销事件源、丢弃未完成的收发（各以 `net-cancelled` 收尾一次）并归还句柄。
     ///
     /// 顺序是「先注销、后关句柄」——反过来的话常驻引擎手里那份快照会撞上系统已复用的句柄号。幂等。
-    auto close() -> void;
+    auto close() const -> void;
 
     /// @brief 本套接字的取消令牌（`cancel()` 会中止所有未完成的收发并关闭套接字）。
     /// @return 与本对象共享状态的令牌；空态返回一枚独立令牌（取消它不产生任何效果）。

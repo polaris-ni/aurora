@@ -171,6 +171,38 @@ struct PoolOptions {
     std::chrono::milliseconds max_age{std::chrono::milliseconds{300000}};  ///< 连接最长寿命；非正值 = 不淘汰
 };
 
+/// @brief 事件流订阅的重连口径；**缺省开启自动重连**。
+///
+/// 缺省开与 `PoolOptions` / `CacheOptions` 的「缺省关」相反，这是刻意的：那两件改变的是**已存在**的交换何时
+/// 不再发生（不触网、复用连接），调用方不知道也能拿到正确的结果；而事件流是一条**没有结束**的流——关掉
+/// 重连等于把「对端重启、网络抖一下」这一类最常见的现实变成宿主必须自己接的活，而续传标识（`Last-Event-ID`）
+/// 恰恰只有库知道该在什么时刻带上。
+///
+/// **窗口只有一个来源**：服务端写的 `retry:` 字段原样采用，不封顶、不指数退避、不加抖动。理由是把
+/// 「这条流多久之后该重连」这件事交给服务端裁决——它是唯一知道自己为什么断了的一方；而「本库最多替宿主
+/// 试几次」是本地决定，由 `max_reconnects` 收敛，不用时间旋钮拐弯表达。服务端从未写 `retry:` 时取
+/// `retry_default` 作初值。
+///
+/// `Timeouts` 的三档在这里管的是**单条流**而不是整个订阅（每（重）建一条流各拿一份），会话的收口靠
+/// `Cancellation` 与 `max_reconnects`：一个永不结束的订阅需要一个能被取消的句柄，而不是一个迟早会误伤长连接的
+/// 总时长墙。
+/// @note Thread: thread-safe（值类型）
+/// @note Side-effects: none
+struct SseOptions {
+    bool reconnect{true};  ///< 开关；假 = 一条流收摊即结束本次订阅（成功结局，不重连）
+    /// @brief 重连次数上限，**不含首次**；缺省 8，`0` = 不设上限（靠取消令牌收摊）。
+    ///
+    /// 额度用尽时交出的是**最后一次交换的真实失败**（detail 点名额度已尽），而不是另立一枚「额度码」：
+    /// 「对端 502」与「对端 502 且本库不再尝试」的修复动作完全相同，拆开只会多一枚无人读的码。最后一次交换
+    /// 本身是干净收摊的那种（服务端每次都把流写完然后关掉）算成功结局，由 `SseOutcome::reconnect_exhausted`
+    /// 表达「我停了，不是因为服务端说完了」。
+    std::uint32_t max_reconnects{8};
+    /// @brief 服务端从未写 `retry:` 时的重连窗口初值；非正值 = 不等待，立刻再打。
+    ///
+    /// 一旦某条流写过 `retry:`，此后各条流都用那个值（与 DOM 的 `EventSource` 同口径），本字段不再参与。
+    std::chrono::milliseconds retry_default{std::chrono::milliseconds{3000}};
+};
+
 /// @brief 进度所属方向；一次交换里两侧各报一段，回调需据此分流。
 ///
 /// 上传在请求体被传输层接受时推进，下载在应答体到达时推进。二者共用一枚回调是刻意的：调用方通常只关心
@@ -442,7 +474,7 @@ class Request {
     /// @brief 设定三档超时（连接 / 读空闲 / 总耗时）。
     /// @param value 超时集合。
     /// @return 自身引用，便于链式调用。
-    auto timeouts(Timeouts value) -> Request &;
+    auto timeouts(const Timeouts &value) -> Request &;
 
     /// @brief 查看三档超时。
     /// @return 超时集合的只读引用。
@@ -472,6 +504,18 @@ class Request {
     /// @brief 查看本次交换是否绕过缓存。
     /// @return 绕过为 true；缺省假（跟随客户端的缓存开关）。
     [[nodiscard]] auto no_cache() const -> bool { return no_cache_; }
+
+    /// @brief 设定本请求的事件流重连口径（覆盖 `Client::sse()` 的缺省）。
+    ///
+    /// 只在 `Client::open_sse()` 这一条路上被读取：`send` 与 `open_stream` 不关心重连窗口，物化路径也没有
+    /// 「一条流」的概念。典型用法是某一端点已知会瞬断、想多试几次，而别处保持缺省。
+    /// @param value 重连口径。
+    /// @return 自身引用，便于链式调用。
+    auto sse(SseOptions value) -> Request &;
+
+    /// @brief 查看本请求的事件流重连口径覆盖。
+    /// @return 已设定则返回之；`nullopt` = 跟随 `Client::sse()`。
+    [[nodiscard]] auto sse() const -> const std::optional<SseOptions> & { return sse_; }
 
     /// @brief 设定重定向跟随上限（`0` 表示不跟随）。缺省 10。
     /// @param value 上限次数。
@@ -537,6 +581,7 @@ class Request {
     Timeouts timeouts_;  ///< 三档超时（connect / read_idle / total），缺省全不设
     std::optional<RetryPolicy> retry_policy_;  ///< 本请求的重试策略覆盖；nullopt = 跟随 Client 的缺省
     bool no_cache_{false};  ///< 本次交换是否绕过缓存（既不读也不写）
+    std::optional<SseOptions> sse_;  ///< 本请求的事件流重连口径覆盖；nullopt = 跟随 Client 的缺省
     int max_redirects_{10};  ///< 重定向跟随上限
     ProgressHandler on_progress_;  ///< 进度回调（空 = 不报）；发起侧负责合流后再调用
 };

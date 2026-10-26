@@ -21,10 +21,9 @@
 
 | 载体 | 构建目标 | 用途 |
 |:---|:---|:---|
-| `examples/demos/demo_inspector_server.cpp`（**新增**） | `demo_inspector_server` | 根树为扁平表单、索引路径稳定，供逐端点核对 `/api/*` 的读写闭环 |
-| `examples/app/google_play/demo_google_play.cpp` | `demo_google_play` | 既有应用级演示，仅用于确认服务器亦能挂到 Navigator 驱动的真实应用上；其树随路由变化，不做端点级断言 |
+| `examples/demos/demo_inspector_server.cpp` | `demo_inspector_server` | 根树为扁平表单、索引路径稳定，供逐端点核对 `/api/*` 的读写闭环 |
 
-**为何新增载体**：`demo_google_play` 的根是 `NavigatorHost`，其 `child_nodes()` 为空，故 HTTP 查到的树只有 1 个节点、索引路径随路由漂移，无法稳定断言「某个索引对应哪个控件」。新增载体的根树刻意为扁平表单，五个子节点索引 `"0"`–`"4"` 恒定，各端点的读写目标可预期。
+**载体形态的由来**：早先的候选载体 `demo_google_play` 根为 `NavigatorHost`，其 `child_nodes()` 为空，HTTP 查到的树只有 1 个节点、索引路径随路由漂移，无法稳定断言「某个索引对应哪个控件」（该 demo 已退役）。故本模块载体（新增时）的根树刻意做成扁平表单，五个子节点索引 `"0"`–`"4"` 恒定，各端点的读写目标可预期。
 
 新载体窗口标题 `Inspector server · Aurora Demo`，客户区 620×420，根为 `Column`，五个子节点如下：
 
@@ -38,7 +37,7 @@
 
 索引 3 → 4 构成可远程观测的因果：`POST /api/input/click {"path":"3"}` 应使索引 4 的文本递增。
 
-在 `cmake/AuroraDemos.cmake` 中，`demo_inspector_server` 与 `demo_google_play` 一起被条件链接到 `aurora_inspector_server`（仅当构建开关开启时），使消费者经链接自动获得该开关对应的编译宏。
+在 `cmake/AuroraDemos.cmake` 中，`demo_inspector_server` 被条件链接到 `aurora_inspector_server`（仅当构建开关开启时，且开关对全部 demo 统一生效），使消费者经链接自动获得该开关对应的编译宏。
 
 **模块级约定**：本模块载体的构建（开关开启与非开启两条路径）统一置于 `TC-INSPECTOR-001` 的步骤中；其余用例不重复构建，通过依赖用例字段间接依赖其产物。
 
@@ -158,7 +157,7 @@
 | 测试目的 | 确认载体在构建开关开启与非开启两条路径下均可构建，且开启路径按预期端口启动、非开启路径安全跳过 |
 | 前置条件 | 位于仓库根目录；本机工具链（Ninja + MinGW/GCC）可用；端口 6280 空闲；默认构建目录 `build/` 已完成配置 |
 | 依赖用例 | 无 |
-| 操作步骤 | 1. 配置启用构建目录：`cmake -S . -B build-inspector -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_TESTS=OFF -DAURORA_BUILD_DEMOS=ON`（纯执行，无预期结果）<br>2. 构建载体：`cmake --build build-inspector --target demo_inspector_server demo_google_play`（纯执行，无预期结果）<br>3. 启动并分离重定向：`./build-inspector/demo_inspector_server.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>4. 查看窗口标题与客户区尺寸<br>5. 查看 `err.txt` 的内容、行数与日志级别<br>6. 在默认构建目录 `build/` 构建非启用路径的同一载体：`cmake --build build --target demo_inspector_server && ./build/demo_inspector_server.exe 1> out_b.txt 2> err_b.txt`（纯执行，无预期结果）<br>7. 查看 `err_b.txt` 的内容与该次运行的退出码 |
+| 操作步骤 | 1. 配置启用构建目录：`cmake -S . -B build-inspector -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_TESTS=OFF -DAURORA_BUILD_DEMOS=ON`（纯执行，无预期结果）<br>2. 构建载体：`cmake --build build-inspector --target demo_inspector_server`（纯执行，无预期结果）<br>3. 启动并分离重定向：`./build-inspector/demo_inspector_server.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>4. 查看窗口标题与客户区尺寸<br>5. 查看 `err.txt` 的内容、行数与日志级别<br>6. 在默认构建目录 `build/` 构建非启用路径的同一载体：`cmake --build build --target demo_inspector_server && ./build/demo_inspector_server.exe 1> out_b.txt 2> err_b.txt`（纯执行，无预期结果）<br>7. 查看 `err_b.txt` 的内容与该次运行的退出码 |
 | 预期结果 | 4. 标题为 `Inspector server · Aurora Demo`，客户区约 620×420<br>5. 恰 3 行、全部为 `INF` 级：2 行来自 `InspectorServer` 自身（`InspectorServer accept loop started on port 6280`、`InspectorServer started on http://127.0.0.1:6280`），另 1 行来自载体（`[inspector] listening on http://127.0.0.1:6280`）；无 `ERR` / `FTL` 级日志<br>7. 非启用构建下输出恰 1 行 `INF` 级 `[inspector] AURORA_BUILD_INSPECTOR_SERVER 未开启，跳过`，退出码为 0 |
 
 ### 2.2 树的只读查询

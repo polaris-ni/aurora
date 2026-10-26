@@ -11,7 +11,7 @@
     ninja -t deps 只认**已经构建过**的目标，而 demos 是 EXCLUDE_FROM_ALL ——
     它们不在构建图里，却实实在在在编译库里、也实实在在会因为改一个公共头而产生新告警。
     本机实测：`include/aurora/event/keycode.h` 的一条 `readability-string-compare`
-    正是从 `examples/app/google_play/demo_google_play.cpp` 这个 TU 报出来的，
+    正是从一个 EXCLUDE_FROM_ALL 的 demo TU（已退役的应用级 demo）报出来的，
     按构建图选集会正好漏掉它。故依赖只能来自编译库里那条编译命令本身（`-MM`）。
 
 两级选集（见 `--changed-only`）：

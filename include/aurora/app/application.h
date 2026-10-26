@@ -206,10 +206,50 @@ class Application {
         return main_host_ != nullptr ? main_host_->id() : AURORA_INVALID_WINDOW_ID;
     }
 
+    /// @brief 最近一次用户输入派发的目的窗口 id（活动窗口查询）。
+    /// @detail 语义是「最近一次用户输入派发的目的窗口」，**不等价于 OS 前台窗**——无头、
+    ///         失焦两档下二者可以不同；本 API 只答「最近派发落在哪一扇」，不承诺 OS 聚焦
+    ///         或前台态，也不预测「下一次事件会落到哪」。
+    /// @return 最近记账的宿主 id；无记账记录时回落**存活**宿主（`main_host_` 优先，其次首个
+    ///         登记的宿主）；只有 `hosts_` 为空才返回 `AURORA_INVALID_WINDOW_ID`。
+    /// @note 记账范围为「用户输入意图类」事件：`KeyEvent`(Down)、`MouseEvent`(Press)、
+    ///       `TouchEvent`(有活跃触点)、`ScrollEvent`、`TextInputEvent`、`SystemDropEvent`；
+    ///       指针 Move / Release 与窗口生命周期回调不记账——否则鼠标悬停即翻转活动窗。
+    /// @note 单窗口下本值与 `main_window()` 恒等；被回收的宿主不会被返回（`reap_closed`
+    ///       清掉指向它的记账），窗口关闭回调窗口期内仍有存活宿主时不为无效 id。
+    [[nodiscard]] auto active_window() const -> WindowId {
+        if (last_dispatch_ != nullptr) {
+            return last_dispatch_->id();
+        }
+        if (hosts_.empty()) {
+            return AURORA_INVALID_WINDOW_ID;
+        }
+        return (main_host_ != nullptr ? main_host_ : hosts_.front().get())->id();
+    }
+
     /// @brief 注册窗口关闭回调：宿主被帧末回收**之后**触发一次，参数为被关闭窗口 id。
     /// 供上层释放与该窗口绑定的外部资源（不要在此回调内再关闭其他窗口）。
+    /// 与 `set_on_close_requested` 的分工：本回调在回收**之后**，只能事后清理；可否决的
+    /// 拦截点在 `set_on_close_requested`。
     /// @param cb 关闭回调（参数为被关闭窗口 id）；置空可注销。
     auto set_on_window_closed(std::function<void(WindowId)> cb) -> void { on_window_closed_ = std::move(cb); }
+
+    /// @brief 注册窗口关闭闸门（可否决）：每扇窗口每次关闭请求的**抬沿**询问一次。
+    ///
+    /// 调用点：`step_frame` 内 `on_frame_()` 之后、`tick_all()` 之前（晚于 `pump_all_once`
+    /// 保证本帧后端置位已可见；早于 `render_all` 保证应用在回调里开的确认浮层当帧上屏；
+    /// 早于 `reap_closed` 保证被否宿主不进回收步、不写几何快照）。
+    /// 返回 `false` 即撤销本次关闭：清记账位与后端旗标，窗口当帧继续渲染。
+    ///
+    /// 闸门是**同步布尔判定**，不是「弹框等用户」的地方——回调只许快、不许阻塞、不许抛
+    /// （CODING_STANDARDS §4.1）。正确模式：回调返回 `false` 撤销 → 应用自挂确认浮层 →
+    /// 用户确认后调 `close_window()`（`Programmatic` 源直接放行）。
+    /// 回调抛异常按**放行**处理并记 ERROR（fail-open，绝不穿出 `step_frame`）。
+    /// @param cb 闸门回调：`true` = 放行（当帧帧末回收），`false` = 撤销本次关闭；置空注销。
+    /// @note Thread: main-thread only
+    auto set_on_close_requested(std::function<bool(WindowId, CloseRequestSource)> cb) -> void {
+        on_close_requested_ = std::move(cb);
+    }
 
     // ---- 跨窗通信与几何持久化（specification/06-app-platform.md §2.4）----
 
@@ -359,7 +399,8 @@ class Application {
     /// 多窗口下的每帧顺序（specification/06-app-platform.md §2.4）：
     ///   1. `drain_posted()` —— 先执行后台回投的主线程工作（可能标脏，当帧即可刷新）；
     ///   2. `pump_all_once()` —— 抽干平台事件（共享队列后端只 pump 一次，见 `Surface::pumps_thread_queue`）；
-    ///   3. `on_frame_()` 回调 + 各宿主手势 `tick()`；
+    ///   3. `on_frame_()` 回调 + 关闭闸门询问步（`poll_close_requests()`，可否决）
+    ///      + 各宿主手势 `tick()`；
     ///   4. `anim_.tick(dt)` / `sched_.tick(dt)` —— **应用级共享**，每帧只推进一次；
     ///   5. 逐宿主 `render_frame(dt)` —— 各窗口独立脏区决策与上屏；
     ///   6. `reap_closed()` —— 帧末统一回收已关闭窗口（不在迭代中销毁宿主）；
@@ -409,6 +450,27 @@ class Application {
         loop_end();
     }
 
+    /// @brief 嵌套模态帧循环（自绘文件 / 目录选择器的执行模型，specification/06-app-platform.md
+    ///        §8 文件 / 目录选择器）：入口保存进程级单例（`Scheduler::current` /
+    ///        `Animator::current` / `Task<bool>` 主回投器 / `current_focus_manager` / 线程级严格模式
+    ///        / 帧循环所属应用登记）并安装本应用的上下文，出口原样还原——模态期新建的定时器 /
+    ///        动画 / 回投归本应用，退出后外层（另一个 Application、TestController 或无）看到的口径
+    ///        与入口逐项相等，不会把外层 FrameStats / Scheduler 置空成「半身不遂」。
+    ///
+    /// 循环每帧推进 `step_frame()`（完整帧序：pump → on_frame_ → 关闭闸门 → tick → render →
+    /// reap → deferred → 等待），直到 `done()` 为真、宿主全部请求关闭或帧预算耗尽。模态期间
+    /// 宿主自己的关闭请求照常进入关闭闸门；派发不记账（`detail::modal_dispatch_suppressed()`
+    /// 为真，供活动窗口记账点跳过嵌套循环里的点击）。
+    ///
+    /// 执行模型：同步阻塞到用户作答（Qt `QFileDialog::exec()` 同口径）；**允许一枚选择器叠在
+    /// 另一枚的内层打开**（选择器 A 的确认回调内再开 B，结果各走实例局部变量、不经全局钩子），
+    /// 第三层即 WARN 拒绝并回空——不死锁、不半身不遂。
+    /// @param done 每帧末轮询的完成判据：返回 true 即退出模态（由选择器的确认 / Cancel 置位）。
+    /// @note Thread: main-thread only
+    /// @note Side-effects: drives frames (nested loop), installs process-level singletons
+    /// @note Rebuildable: no
+    auto run_modal(const std::function<bool()> &done) -> void;
+
     /// @brief 渲染当前场景到 PNG。运行期同样套用严格模式（specification/01-core.md §4.3 / CI 门禁），
     ///        使无窗口后端（HeadlessSurface）的离屏渲染也能触发严格失败。
     /// @param path 输出 PNG 文件路径（C 字符串）。
@@ -456,9 +518,21 @@ class Application {
     /// @brief 同步派发系统拖放事件到命中控件（四态统一程序化入口）。
     /// 经 `EventDispatcher` 路径触发 `on_system_drop`（specification/06-app-platform.md §8 平台 Shell）。
     /// @param e 待派发的系统拖放事件（阶段由调用方给定；坐标为整幅表面逻辑坐标）。
-    auto dispatch_system_drop(SystemDropEvent &e) const -> void { main_host_->dispatch_system_drop(e); }
+    auto dispatch_system_drop(SystemDropEvent &e) const -> void {
+        if (main_host_ == nullptr) {
+            return;
+        }
+        record_dispatch(main_host_);  // SystemDropEvent 属记账范围（见 `active_window()`）
+        main_host_->dispatch_system_drop(e);
+    }
 
   private:
+    /// @brief 记录一次派发的来源窗口（`active_window()` 的记账入口，O(1) 指针赋值）。
+    /// @detail 调用方负责先按记账范围（用户输入意图类事件）过滤；本函数只处理两件事：
+    ///         空宿主不记账、模态选择器运行期内的派发不记账（否则选择器自身的输入会把
+    ///         活动窗翻到选择器宿主）。
+    /// @param host 本次派发的目的宿主（空指针 = 无目的窗口，不记账）。
+    auto record_dispatch(WindowHost *host) const -> void;
     // ---- 宿主登记 ----
 
     /// @brief 以 `Window` 实值为准回填画布尺寸/标题（`Window` 为空则保持传入值）。
@@ -507,6 +581,16 @@ class Application {
     /// @brief 帧末回收已关闭窗口：**保留最后一个宿主**，使 `scene()`/`window()` 访问器始终有效。
     /// 回收必须在帧末而非事件派发栈内：宿主析构会连带销毁 UI 树，而此时回调栈上可能仍持有控件引用。
     auto reap_closed() -> void;
+
+    /// @brief 帧内关闭闸门询问步（见 `set_on_close_requested`）：先做策略连带置位，
+    ///        再对本帧新抬起的关闭请求逐宿询问闸门（边沿闩，一次一问），被否则撤销。
+    ///
+    /// 无闸门回调时本步的净效果与历史行为逐位等价：连带置位不受回调判据控制，仅「询问」受控。
+    auto poll_close_requests() -> void;
+    /// @brief 询问闸门并处理异常（fail-open：抛异常按放行处理，绝不穿出 `step_frame`）。
+    /// @param h 目标宿主（提供窗口 id 与关闭来源）。
+    /// @return true = 放行；false = 撤销本次关闭。
+    [[nodiscard]] auto ask_close_gate(const WindowHost &h) const -> bool;
 
     /// @brief 帧末统一阻塞等待一次（取各宿主等待时长的最小值）。
     /// @param frame_start 本帧起始时刻（`step_frame` 返回值），用于帧预算扣除。
@@ -571,6 +655,12 @@ class Application {
 
     // ---- 帧循环驱动原语（同步 while 与 WASM rAF 回调共用；`run()` 文档注释为帧序契约）----
 
+    /// @brief 帧循环所属应用登记口（`loop_begin` / `loop_end` 配对调用）。
+    /// 定义在 application.cpp：内部头 `aurora/app/detail/file_picker.h` 的
+    /// `current_application_slot()` 写入口——公共头不依赖 src/ 内部路径。
+    /// @param app 本次帧循环所属的应用（nullptr = 摘除登记）。
+    static auto set_loop_application(Application *app) -> void;
+
     /// @brief 循环起手：严格模式、Scheduler 当前指针、主线程回投器、时间基准与帧计数复位。
     auto loop_begin() -> void {
         prev_strict_ = aurora::strict_mode();
@@ -578,6 +668,9 @@ class Application {
         loop_last_ = std::chrono::steady_clock::now();
         loop_frames_ = 0;
         Scheduler::set_current(&sched_);
+        // 帧循环所属应用登记：自绘选择器三入口据此判「有无 Application 上下文」
+        // （无上下文即等价非交互：WARN 回空，不挂起）。配对摘除见 loop_end。
+        set_loop_application(this);
         // 跨线程回投：后台线程的 then 回调入队 + 唤醒睡眠中的主循环，
         // 下一帧开头在主线程排水执行（兼具线程安全与不丢唤醒）。多窗口下须唤醒**全部**窗口的
         // 等待通道——任一窗口睡在自己的 Surface 上都可能延迟回投的执行。
@@ -606,9 +699,15 @@ class Application {
         // 保证本帧命中的热键当帧就生效（与 on_frame_ 同一时点语义）。
         static_cast<void>(os_hotkeys_.drain_pending());
         NotificationCenter::pump_events();
+        // 系统拖放的异步结果（终结回调 / 在途读取）同在此排空：不在平台消息泵内同步回调，
+        // 宿主不排空 ⇒ 回调不到（不谎报）。与通知激活、热键命中同一时点语义。
+        system_drag::pump_reads();
         if (on_frame_) {
             on_frame_();
         }
+        // 关闭闸门询问步：**必须**排在 on_frame_ 之后——应用最典型的写法是在 on_frame_ 里
+        // 调 close_window()，排在之前会让该关闭当帧直接进 reap_closed、永远不过闸。
+        poll_close_requests();
         tick_all();
         anim_.tick(dt);
         sched_.tick(dt);  // 定时任务随帧推进（在 present 前触发，当帧 UI 即可刷新）
@@ -647,6 +746,7 @@ class Application {
         drain_posted();
         Scheduler::set_current(nullptr);
         Animator::set_current(nullptr);
+        set_loop_application(nullptr);  // 摘除帧循环所属登记（与 loop_begin 配对）
         aurora::set_strict_mode(prev_strict_);
     }
 
@@ -678,6 +778,7 @@ class Application {
     StrictMode prev_strict_ = StrictMode::Off;  ///< 循环期保存的线程级严格模式（收尾还原）。
     std::chrono::steady_clock::time_point loop_last_;  ///< 上一帧起始时刻（帧 dt 基准；默认即 epoch 零点）。
     int loop_frames_ = 0;  ///< 本轮循环已推进帧数（`max_frames` 预算计数）。
+    int modal_depth_ = 0;  ///< 嵌套模态循环深度（`run_modal`：允许一枚叠一枚，第三层即 WARN 拒绝）。
 
     StrictMode strict_ = StrictMode::Off;  ///< 严格模式（run() 期间套用到线程级开关）
     int width_ = 0;  ///< 主窗口逻辑宽（无 Window 时取构造参数，供 render_to_png）。
@@ -685,12 +786,19 @@ class Application {
     WindowOptions opts_;  ///< 保留用于 run() 的 max_frames / max_fps / power_saving 等。
     std::vector<std::unique_ptr<WindowHost>> hosts_;  ///< 全部窗口宿主（按登记顺序）。
     WindowHost *main_host_ = nullptr;  ///< 主窗口宿主：`scene()`/`focus()`/`window()` 的作用对象。
+    /// @brief 最近一次「用户输入意图类」派发的目的宿主（`active_window()` 的记账位）。
+    /// mutable：六个应用级派发入口与 `register_host` 注入的键盘前置拦截闭包全是 const
+    /// 语境，记账只是一次指针赋值，不改对象的逻辑常量性。`reap_closed` 回收宿主时若指向
+    /// 它则置空，故本指针恒指向存活宿主（或为空）。
+    mutable WindowHost *last_dispatch_ = nullptr;
     WindowId next_id_ = AURORA_INVALID_WINDOW_ID + 1U;  ///< 下一个待分配窗口 id（1 起；0 保留为无效 id）。
     WindowEventBus bus_;  ///< 跨窗口事件总线（类型化广播 / 点对点）。
     preferences::Preferences *geometry_store_ = nullptr;  ///< 几何持久化存储（可空 = 不持久化）。
     ExitPolicy exit_policy_ = ExitPolicy::LastWindowClosed;  ///< 退出策略（见 `set_exit_policy`）。
     bool quit_requested_ = false;  ///< `quit()` 请求：任何策略下都使 `run()` 退出。
     std::function<void(WindowId)> on_window_closed_;  ///< 窗口关闭回调（宿主回收后触发）。
+    std::function<bool(WindowId, CloseRequestSource)>
+        on_close_requested_;  ///< 关闭闸门（可否决；见 `set_on_close_requested`）。
     /// @brief 多窗口下「无线程级等待通道」后端（X11/Wayland/Wasm）的等待上限（毫秒）。
     /// 这些后端的 `wait_events` 只覆盖**自身**连接 fd 或事件目标，帧循环每帧只能等其中一个
     /// Surface；若按单窗口语义无限等待，其余窗口的输入会被饿到才有事件。封顶为轮询式短等，

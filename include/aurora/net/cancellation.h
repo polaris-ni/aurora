@@ -66,14 +66,14 @@ class Cancellation {
     /// @brief 请求取消：置位并至多触发一次已登记的钩子。
     ///
     /// 幂等：重复调用不产生额外效果。钩子在**本调用的线程**上同步执行，钩子内不应阻塞。
-    auto cancel() -> void;
+    auto cancel() const -> void;
 
     /// @brief 登记取消钩子（引擎放行挂起点的入口）。
     ///
     /// 竞态处理：登记时若已取消，则在**当前线程立即**调用 `hook`，不留「登记即失效」的窗口。
     /// 只保留最后登记的一枚钩子（传空 `std::function` 表示撤销登记）。
     /// @param hook 取消时要执行的可调用体；空值表示撤销已登记的钩子。
-    auto on_cancel(std::function<void()> hook) -> void;
+    auto on_cancel(std::function<void()> hook) const -> void;
 
     /// @brief 是否与另一句柄共享同一取消状态。
     /// @param other 被比较的令牌。

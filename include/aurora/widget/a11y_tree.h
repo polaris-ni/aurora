@@ -354,6 +354,10 @@ inline auto apply_labelled_by_relations(AccessibilityNode &root) -> void {
     node.bounds = accessibility_box(w, layout_box);
     node.range = w.accessibility_range();
     node.level = w.accessibility_level();
+    // 拖放可达性：控件静态声明是否接受系统拖入、以及非拖拽替代路径（空 = 仅拖拽可达，
+    // 桥据此告警）。与角色动作体系分工：只补「替代路径」这一项，不重复表达控件语义。
+    node.drag_reachable = w.accepts_system_drag();
+    node.drag_alternative_path = w.system_drag_alternative_path();
 
     // 滚动语义：容器声明了可滚动量即补滚动动作位（三桥共用同一来源）。
     if (const auto scroll = w.accessibility_scroll(); scroll.has_value() && scroll->max > scroll->min) {

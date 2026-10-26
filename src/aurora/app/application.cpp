@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <functional>
 #include <utility>
 
+#include "aurora/app/detail/file_picker.h"
 #include "aurora/app/window_geometry.h"
 #include "aurora/core/log.h"
 #include "aurora/media/audio.h"
@@ -30,15 +32,53 @@ auto capture_host_geometry(const WindowHost &host) -> WindowGeometry {
     return g;
 }
 
+/// @brief 目标显示器是否仍在（几何态降级判定用）。
+/// @param display_id 快照记录的显示器 id；负值 = 未声明（非 Win32 后端恒 -1），不参与判定。
+/// @return 当前显示器列表里存在该 id 时 true。
+auto display_still_present(int display_id) -> bool {
+    if (display_id < 0) {
+        return true;  // 未声明显示器：无可核验，按仍在处理
+    }
+    const auto &displays = app::list_displays();
+    return std::ranges::any_of(displays, [display_id](const Display &d) { return d.id == display_id; });
+}
+
 /// @brief 把几何快照应用到宿主（物理像素 → 当前 DPI 的逻辑 dp 后下发）。
-auto apply_host_geometry(WindowHost &host, const WindowGeometry &g) -> void {
+///
+/// **写读对称**：除位置与尺寸外，落盘的几何态 `mode` 也在此消费——经幂等原语
+/// `Surface::set_window_mode` 追回桌面（保存腿与序列化腿自引入起就写 `mode`，
+/// 缺的只是这一条消费点）。三条口径：
+/// - `Minimized` 恢复为 `Normal`（写死的政策）：启动即看不见；且 `Minimized` 与
+///   `WindowState::Hidden` 耦合，而恢复腿没有设置 `WindowState` 的通道，硬恢复会制造
+///   「快照说最小化、可见性说可见」的分裂。留一条 INFO（用户最小化是合法操作，不是异常）；
+/// - 显示器不在 ⇒ 几何态归 `Normal` + WARN（尺寸位置照常恢复：物理坐标相交就摆得回）。
+///   `is_window_geometry_usable` 不看 `display_id`（宽松口径），故此处补判；
+/// - `Maximized` / `FullScreen` **只追几何态，位置与尺寸都不下发**：那两档的位置由
+///   OS / compositor 摆放，下发既无意义也可能触发多余的 `SetWindowPos` / configure。
+///
+/// @param host 目标宿主。
+/// @param g 几何快照（已过 `is_window_geometry_usable` 判定）。
+/// @param key 持久化键（日志归因用）。
+auto apply_host_geometry(WindowHost &host, const WindowGeometry &g, const std::string &key) -> void {
     if (!host.has_window()) {
         return;
     }
     Surface &sf = host.window()->surface();
-    const float scale = sf.scale_factor() > 0.0F ? sf.scale_factor() : 1.0F;
-    sf.set_size(Size{.width = g.size.width / scale, .height = g.size.height / scale});
-    sf.set_position(g.origin);
+    WindowMode mode = g.mode;
+    if (mode == WindowMode::Minimized) {
+        AURORA_LOG_INFO("app", "stored window mode is Minimized; restoring as Normal (key=" + key + ")");
+        mode = WindowMode::Normal;
+    }
+    if (mode != WindowMode::Normal && !display_still_present(g.display_id)) {
+        AURORA_LOG_WARN("app", "stored window display is gone; restoring as Normal (key=" + key + ")");
+        mode = WindowMode::Normal;
+    }
+    sf.set_window_mode(mode);
+    if (mode == WindowMode::Normal) {
+        const float scale = sf.scale_factor() > 0.0F ? sf.scale_factor() : 1.0F;
+        sf.set_size(Size{.width = g.size.width / scale, .height = g.size.height / scale});
+        sf.set_position(g.origin);
+    }
 }
 
 }  // namespace
@@ -76,6 +116,11 @@ auto Application::register_host(Scene scene, std::unique_ptr<Window> window, con
     // 键盘前置拦截：快捷键是应用级共享的，但命中与否取决于**当前宿主**是否已有焦点控件。
     raw->set_key_pre_handler([this, raw](Event &e) -> bool {
         const auto *k = dynamic_cast<KeyEvent *>(&e);
+        // 记账**早于**匹配：快捷键闭包内读 `active_window()` 拿到的是本次派发来源宿主。
+        // 宿主级键盘派发（WindowHost::dispatch(Event&)）经本闭包入账，故无需改 window_host。
+        if (k != nullptr && k->action == KeyAction::Down) {
+            record_dispatch(raw);
+        }
         return k != nullptr && shortcuts_.handle(*k, raw->focus().focused() != nullptr);
     });
     // 窗口级状态上报：沿用「主窗口状态 ≡ 应用窗口状态」的历史语义；非主窗口状态只落在自己的宿主上。
@@ -115,7 +160,7 @@ auto Application::restore_geometry_for(WindowHost &host, const std::string &pers
         return;
     }
     if (const auto g = load_window_geometry(*geometry_store_, persist_id)) {
-        apply_host_geometry(host, *g);
+        apply_host_geometry(host, *g, persist_id);
     }
 }
 
@@ -139,7 +184,7 @@ auto Application::windows() const -> std::vector<WindowHost *> {
 
 auto Application::close_window(WindowId id) const -> void {
     if (auto *h = window_host(id)) {
-        h->request_close();  // 下一次帧末由 reap_closed 回收
+        h->request_close(CloseRequestSource::Programmatic);  // 下一次帧末由 reap_closed 回收
     }
 }
 
@@ -231,14 +276,71 @@ auto Application::render_all(double dt) const -> void {
     }
 }
 
-auto Application::reap_closed() -> void {
-    // ① 策略连带：`MainWindowClosed` 下主窗关闭即关闭全部窗口（真正回收在下一帧，
-    //    本帧仅置位，避免在同一轮里一边遍历一边销毁）。
+auto Application::poll_close_requests() -> void {
+    // ① 策略连带：`MainWindowClosed` 下主窗已请求关闭 ⇒ 对每个**非主**宿主置连带位。
+    //    置于闸门判据之前：无回调时净效果与历史 `reap_closed` ① 逐位等价（现有用例的地基）。
+    //    排除主窗自身：它此刻必然已 should_close()，连带到它只会把其来源覆写成 PolicyCascade。
     if (exit_policy_ == ExitPolicy::MainWindowClosed && main_host_ != nullptr && main_host_->should_close()) {
-        for (const auto &h : hosts_) {
-            h->request_close();
+        for (std::size_t i = 0; i < hosts_.size(); ++i) {  // NOLINT(*-loop-convert)
+            if (hosts_[i].get() != main_host_) {
+                hosts_[i]->request_close(CloseRequestSource::PolicyCascade);
+            }
         }
     }
+    if (on_close_requested_ == nullptr) {
+        return;  // 无闸门回调：零行为（仅保留上面的连带置位）
+    }
+    // ② 边沿询问。索引遍历 + 每轮重取 size()：回调内可重入 open/close 窗口（同 pump_all_once 纪律）。
+    for (std::size_t i = 0; i < hosts_.size(); ++i) {  // NOLINT(*-loop-convert)
+        WindowHost *const h = hosts_[i].get();
+        if (!h->should_close()) {
+            h->close_asked_ = false;  // 旗标回落 ⇒ 边沿记忆随之复位（下一个抬起即新的一次询问）
+            continue;
+        }
+        if (h->close_asked_) {
+            continue;  // 本条抬沿已问过：一次关闭请求只问一次
+        }
+        h->close_asked_ = true;
+        if (ask_close_gate(*h)) {
+            continue;  // 放行：留给本帧 reap_closed 回收
+        }
+        h->cancel_close();
+        if (h->should_close()) {
+            // fail-open 后置条件：后端不可否决（或窗口已被 OS 销毁）⇒ 宁可完成用户请求的关闭，
+            // 也不留一扇永远关不掉的窗。
+            AURORA_LOG_WARN("app",
+                            "close request veto unsupported by backend; allowing close: id=" + std::to_string(h->id()));
+            continue;
+        }
+        // 被否存活的从属窗：若其 owner 已被回收，解绑悬垂 owner 指针（Transient 连带与模态
+        // 输入恢复都以 owner 为载体，owner 已死则两者都失去落点）。
+        const WindowOptions &o = h->options();
+        if (o.owner != AURORA_INVALID_WINDOW_ID && window_host(o.owner) == nullptr && h->window() != nullptr) {
+            h->window()->surface().set_owner(nullptr);
+        }
+    }
+}
+
+auto Application::ask_close_gate(const WindowHost &h) const -> bool {
+    // 来源判定式：`close_requested_` 只由 request_close(source) 写，故「未记账而旗标为真」必为 OS 路。
+    // 反之不可用（各后端的程序化 Surface::close() 是否写后端旗标并不一致）。
+    const CloseRequestSource src = h.close_requested_ ? h.close_source_ : CloseRequestSource::OperatingSystem;
+    try {
+        return on_close_requested_(h.id(), src);
+    } catch (const std::exception &e) {
+        // fail-open：异常绝不穿出 step_frame，且按放行处理（若按否决 + 复位闩，确定性抛异常的
+        // 回调会导致每帧一问、每帧一条 ERROR、窗口永久关不掉）。
+        AURORA_LOG_ERROR("app", std::string("on_close_requested threw; allowing close (fail-open): ") + e.what());
+        return true;
+    } catch (...) {
+        AURORA_LOG_ERROR("app", "on_close_requested threw non-std exception; allowing close (fail-open)");
+        return true;
+    }
+}
+
+auto Application::reap_closed() -> void {
+    // ① 策略连带已上移至本帧更早的 `poll_close_requests()`（step_frame 内 on_frame_ 之后）：
+    //    连带置位必须在「询问闸门」之前发生，否则被否的主窗也会连带收掉其余窗口。此处不再置位。
 
     // ② 收集本轮待回收的宿主（先只收集 id，容器推迟到 ④ 才修改，避免迭代器/悬垂）。
     //    同时做几何持久化：必须在此刻（Surface 仍有效、宿主未被销毁），且对**所有**已请求关闭的
@@ -284,6 +386,9 @@ auto Application::reap_closed() -> void {
         if (it->get() == main_host_) {
             main_host_ = nullptr;
         }
+        if (it->get() == last_dispatch_) {
+            last_dispatch_ = nullptr;  // 回收清号：查询不可能再选中已消散的宿主
+        }
         (*it)->teardown();  // 先解绑后端回调（lambda 捕获 this），再释放宿主对象
         hosts_.erase(it);
         if (on_window_closed_ != nullptr) {
@@ -293,7 +398,7 @@ auto Application::reap_closed() -> void {
         // 保持「每轮只销毁 ② 收集到的宿主」的不变式，杜绝迭代中销毁。
         for (const auto &h : hosts_) {
             if (h->options().owner == id) {
-                h->request_close();
+                h->request_close(CloseRequestSource::PolicyCascade);
             }
         }
     }
@@ -394,14 +499,25 @@ auto Application::request_wake_all() const -> void {
 // 程序化派发（作用于主窗口；多窗口请用 `window_host(id)->dispatch_*`）
 // =============================================================================
 
+auto Application::record_dispatch(WindowHost *host) const -> void {
+    if (host == nullptr || file_dialog::detail::modal_dispatch_suppressed()) {
+        return;  // 无目的宿主，或模态选择器（POSIX 自绘腿）运行期：其输入不翻活动窗
+    }
+    last_dispatch_ = host;
+}
+
 auto Application::dispatch_click(float x, float y) const -> void {
     if (main_host_ != nullptr) {
+        record_dispatch(main_host_);  // 恒为 Press，属记账范围
         main_host_->dispatch_pointer(x, y, MouseAction::Press);
     }
 }
 
 auto Application::dispatch_pointer(float x, float y, MouseAction action) const -> void {
     if (main_host_ != nullptr) {
+        if (action == MouseAction::Press) {
+            record_dispatch(main_host_);  // Move / Release 不记账：鼠标悬停不得翻转活动窗
+        }
         main_host_->dispatch_pointer(x, y, action);
     }
 }
@@ -416,6 +532,9 @@ auto Application::dispatch_key(const KeyEvent &e) const -> bool {
     if (main_host_ == nullptr) {
         return false;
     }
+    if (e.action == KeyAction::Down) {
+        record_dispatch(main_host_);  // 仅 Down 记账（抬起不翻活动窗）
+    }
     // 快捷键优先：命中即消费，不再向焦点控件派发（与后端事件路径语义一致）。
     if (shortcuts_.handle(e, main_host_->focus().focused() != nullptr)) {
         return true;
@@ -424,13 +543,100 @@ auto Application::dispatch_key(const KeyEvent &e) const -> bool {
 }
 
 auto Application::dispatch_text(TextInputEvent e) const -> bool {
-    return main_host_ != nullptr && main_host_->dispatch_text(std::move(e));
+    if (main_host_ == nullptr) {
+        return false;
+    }
+    record_dispatch(main_host_);  // TextInputEvent 属记账范围
+    return main_host_->dispatch_text(std::move(e));
 }
 
 auto Application::dispatch_touch(const TouchEvent &e) const -> void {
     if (main_host_ != nullptr) {
+        if (e.active_count() > 0) {
+            record_dispatch(main_host_);  // 有活跃触点 = 按下态；全抬起不记账
+        }
         main_host_->dispatch_touch(e);
     }
+}
+
+auto Application::set_loop_application(Application *app) -> void {
+    // 帧循环所属登记（自绘选择器三入口的「有无上下文」判据；见 run_modal 与
+    // specification/06-app-platform.md §8 文件 / 目录选择器）。槽位定义在内部头，
+    // 公共头不依赖 src/ 路径。
+    file_dialog::detail::current_application_slot() = app;
+}
+
+auto Application::run_modal(const std::function<bool()> &done) -> void {
+    if (modal_depth_ >= 2) {
+        // 恰好一枚选择器叠在另一枚内层（A 的确认回调内再开 B）：第三层即拒绝并回空
+        // （调用方按取消语义处理），不死锁、不半身不遂。
+        AURORA_LOG_WARN("app", "run_modal: modal loop nesting limit reached; refusing deeper nesting");
+        return;
+    }
+    // 进程级单例入口快照：模态期安装本应用的上下文，退出原样归还——外层可能是另一个
+    // Application、TestController 或「无」，置空式收尾会把外层打成半身不遂。
+    Scheduler *const prev_sched = Scheduler::current();
+    Animator *const prev_anim = Animator::current();
+    std::function<void(std::function<void()>)> prev_poster;
+    {
+        std::scoped_lock lk(detail::main_poster_mutex());
+        prev_poster = detail::main_poster();
+    }
+    FocusManager *const prev_focus = current_focus_manager();
+    const StrictMode prev_strict = aurora::strict_mode();
+    Application *const prev_app = file_dialog::detail::current_application_slot();
+    // RAII 还原：即使 step_frame 抛出（各步均有 fail-open 契约，理论不可达）也归还单例。
+    struct SingletonRestore {  // NOLINT(cppcoreguidelines-special-member-functions): 局部 RAII
+                               // 还原器，按引用捕获现场、不复制
+        Scheduler *sched;
+        Animator *anim;
+        std::function<void(std::function<void()>)> poster;
+        FocusManager *focus;
+        StrictMode strict;
+        Application *app;
+        // 抛出面：set_main_poster 体内是 std::function 移动赋值（条件 noexcept）+ 加锁，
+        // 其余四项为平凡指针 / 枚举赋值；模态收尾期无分配需求，实际不可抛
+        // （同 ScrollStorage::Scope::~Scope 的处置口径）。
+        // NOLINTNEXTLINE(bugprone-exception-escape)
+        ~SingletonRestore() {
+            Task<bool>::set_main_poster(std::move(poster));  // 空 poster = 卸载（与 loop_end 同口径）
+            Scheduler::set_current(sched);
+            Animator::set_current(anim);
+            set_current_focus_manager(focus);
+            aurora::set_strict_mode(strict);
+            file_dialog::detail::current_application_slot() = app;
+            file_dialog::detail::modal_dispatch_suppressed() = false;
+        }
+    } restore{.sched = prev_sched,
+              .anim = prev_anim,
+              .poster = std::move(prev_poster),
+              .focus = prev_focus,
+              .strict = prev_strict,
+              .app = prev_app};
+
+    Scheduler::set_current(&sched_);
+    Animator::set_current(&anim_);
+    Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
+        {
+            std::scoped_lock lk(posted_mutex_);
+            posted_.push_back(std::move(fn));
+        }
+        request_wake_all();
+    });
+    file_dialog::detail::current_application_slot() = this;
+    file_dialog::detail::modal_dispatch_suppressed() = true;
+    ++modal_depth_;
+
+    while (!done() && !should_exit() && frame_budget_left()) {
+        const auto frame_start = step_frame();
+        if (!frame_budget_left()) {
+            break;
+        }
+        wait_once(frame_start);
+    }
+
+    --modal_depth_;
+    // 单例还原由 restore 析构完成（模态期安装的四个写口 + 入口快照逐项归还）。
 }
 
 }  // namespace aurora

@@ -45,13 +45,16 @@ namespace {
            static_cast<int>(aurora::net::AddressFamily::LocalPath) +
            static_cast<int>(aurora::net::LengthByteOrder::Little) + static_cast<int>(aurora::net::ProxyKind::Socks5) +
            static_cast<int>(aurora::net::ShutdownMode::Both) + static_cast<int>(aurora::net::TlsVersion::Tls13) +
-           static_cast<int>(aurora::net::http::Method::Delete) +
+           static_cast<int>(aurora::net::WsMessageKind::Binary) + static_cast<int>(aurora::net::http::Method::Delete) +
            static_cast<int>(aurora::net::http::ProgressPhase::Download) +
            static_cast<int>(aurora::net::http::SinkFlow::Stop) +
+           static_cast<int>(aurora::net::http::ExchangeLeg::WebSocket) +
            static_cast<int>(aurora::net::http::HttpErrorClass::Cancelled) +
            static_cast<int>(aurora::net::http::AuthScheme::Unsupported) +
-           static_cast<int>(aurora::ResourcePhase::Failed) + static_cast<int>(aurora::StreamPolicy::Replace) +
-           static_cast<int>(au::webview::WebViewMode::Snapshot);
+           static_cast<int>(aurora::net::ExportSurface::InspectorJson) +
+           static_cast<int>(aurora::net::FieldClass::Secret) +
+           static_cast<int>(aurora::net::http::HttpStage::BodyDone) + static_cast<int>(aurora::ResourcePhase::Failed) +
+           static_cast<int>(aurora::StreamPolicy::Replace) + static_cast<int>(au::webview::WebViewMode::Snapshot);
 }
 
 /// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。

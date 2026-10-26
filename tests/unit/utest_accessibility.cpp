@@ -4,7 +4,9 @@
 ///           绘制优先）、name/value 自填与 hook 覆写优先级、Name 回退链各级（显式声明 /
 ///           兄弟标签 / 唯一文本子节点）与显式名的 props 往返、NameChanged 上报（最小控件桩 +
 ///           真实控件驱动）、引用式标签关联（set_stable_key / set_labelled_by：前后向引用、
-///           链式与环、未命中与空目标名回落、优先级、跨重建稳定、props 往返与 NameChanged）
+///           链式与环、未命中与空目标名回落、优先级、跨重建稳定、props 往返与 NameChanged），
+///           以及拖放可达性投影（accepts_system_drag / system_drag_alternative_path 的缺省与
+///           覆写经语义树检出，「仅拖拽可达」判定）
 
 #include <cstdint>
 #include <functional>
@@ -148,6 +150,30 @@ class ProbeAnnotatedLeaf final : public aurora::LeafWidget {
         -> void override {}
 };
 
+/// @brief 声明系统拖入可达性的探测叶控件：可配置是否接受拖入、以及是否提供非拖拽替代路径。
+class ProbeDragTarget final : public aurora::LeafWidget {
+  public:
+    ProbeDragTarget(bool accepts, std::string alternative) : accepts_{accepts}, alternative_{std::move(alternative)} {}
+
+    [[nodiscard]] auto type_name() const -> const char * override { return "Button"; }
+
+    [[nodiscard]] auto accepts_system_drag() const -> bool override { return accepts_; }
+
+    [[nodiscard]] auto system_drag_alternative_path() const -> std::string override { return alternative_; }
+
+  protected:
+    auto on_layout(const aurora::Constraints & /*c*/, const aurora::BuildContext & /*ctx*/) -> aurora::Size override {
+        return {};
+    }
+
+    auto on_paint(aurora::Painter & /*p*/, const aurora::Rect & /*bounds*/, const aurora::BuildContext & /*ctx*/)
+        -> void override {}
+
+  private:
+    bool accepts_;
+    std::string alternative_;
+};
+
 /// @brief 进程级无障碍设置的 RAII 复原守卫：同一进程串跑多个用例，改动必须还原。
 class ScopedSettings final {
   public:
@@ -275,6 +301,63 @@ AURORA_TEST_CASE(node_defaults_and_has_action_bitmask) {
     AURORA_TEST_CHECK(combined.has_action(AccessibilityAction::Focus));
     AURORA_TEST_CHECK(combined.has_action(AccessibilityAction::Click));
     AURORA_TEST_CHECK_FALSE(combined.has_action(AccessibilityAction::Value));
+}
+
+AURORA_TEST_CASE(accessibility_node_drag_fields_default_to_unreachable) {
+    using aurora::AccessibilityNode;
+
+    // 缺省 = 不接受系统拖入、无替代路径描述 ⇒ 不是「仅拖拽可达」（无可达性缺口可告警）。
+    const AccessibilityNode node;
+    AURORA_TEST_CHECK_FALSE(node.drag_reachable);
+    AURORA_TEST_CHECK(node.drag_alternative_path.empty());
+    AURORA_TEST_CHECK_FALSE(node.is_drag_only_reachable());
+
+    // 仅拖拽可达 = 接受拖入但替代路径为空（桥据此告警：这条操作只有拖拽一条路）。
+    AccessibilityNode drag_only;
+    drag_only.drag_reachable = true;
+    AURORA_TEST_CHECK(drag_only.is_drag_only_reachable());
+
+    // 有替代路径 ⇒ 可达性完整，不告警。
+    AccessibilityNode with_path;
+    with_path.drag_reachable = true;
+    with_path.drag_alternative_path = "context menu Move-to entry";
+    AURORA_TEST_CHECK_FALSE(with_path.is_drag_only_reachable());
+
+    // 不接受拖入却填了替代路径：不自相矛盾地告警（判据看「接受」这一前提）。
+    AccessibilityNode path_only;
+    path_only.drag_alternative_path = "context menu Move-to entry";
+    AURORA_TEST_CHECK_FALSE(path_only.is_drag_only_reachable());
+}
+
+AURORA_TEST_CASE(build_tree_projects_drag_reachability_and_alternative_path) {
+    // 可达性投影：控件的静态声明（accepts_system_drag / system_drag_alternative_path）
+    // 经语义树检出，工具与桥据此标记「仅拖拽可达」并告警。三种形状一次覆盖：
+    // 不接受（缺省）、接受且有替代路径、接受但无替代路径。
+    ProbeContainer root;
+    root.add(aurora::Node{ProbeLeaf{"Text"}});
+    root.add(aurora::Node{ProbeDragTarget{true, "context menu Move-to entry"}});
+    root.add(aurora::Node{ProbeDragTarget{true, ""}});
+
+    const auto tree = aurora::build_accessibility_tree(root);
+    AURORA_TEST_REQUIRE_EQ(tree.children.size(), 3U);
+
+    // ① 不接受的控件：drag_reachable 缺省 false，无告警。
+    const auto &plain = tree.children[0];
+    AURORA_TEST_CHECK_FALSE(plain.drag_reachable);
+    AURORA_TEST_CHECK(plain.drag_alternative_path.empty());
+    AURORA_TEST_CHECK_FALSE(plain.is_drag_only_reachable());
+
+    // ② 接受且有替代路径：描述原样投影，可达性完整。
+    const auto &reachable = tree.children[1];
+    AURORA_TEST_CHECK_TRUE(reachable.drag_reachable);
+    AURORA_TEST_CHECK_EQ(reachable.drag_alternative_path, std::string{"context menu Move-to entry"});
+    AURORA_TEST_CHECK_FALSE(reachable.is_drag_only_reachable());
+
+    // ③ 接受但无替代路径：「仅拖拽可达」，桥的告警对象。
+    const auto &drag_only = tree.children[2];
+    AURORA_TEST_CHECK_TRUE(drag_only.drag_reachable);
+    AURORA_TEST_CHECK(drag_only.drag_alternative_path.empty());
+    AURORA_TEST_CHECK(drag_only.is_drag_only_reachable());
 }
 
 AURORA_TEST_CASE(build_tree_maps_roles_and_default_actions) {

@@ -279,10 +279,20 @@ auto WindowHost::should_close() const -> bool {
     return close_requested_ || (window_ != nullptr && window_->should_close());
 }
 
-auto WindowHost::request_close() -> void {
+auto WindowHost::request_close(CloseRequestSource source) -> void {
     close_requested_ = true;
+    close_source_ = source;  // 记账：OS 路不经过本函数，见 Application 询问步的来源判定式
     if (window_ != nullptr) {
         window_->close();  // 通知真实后端（有 OS 关闭语义时生效）
+    }
+}
+
+auto WindowHost::cancel_close() -> void {
+    close_requested_ = false;
+    close_source_ = CloseRequestSource::Programmatic;
+    close_asked_ = false;
+    if (window_ != nullptr) {
+        window_->surface().cancel_close();  // 转发：后端旗标的清位入口（默认空实现 ⇒ fail-open）
     }
 }
 

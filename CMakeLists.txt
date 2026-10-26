@@ -4,7 +4,9 @@
 # 本文件只做「工程声明 + 核心库目标 + 模块编排」；具体逻辑按职责拆分在 cmake/ 下：
 #   cmake/AuroraThirdParty.cmake      — FreeType/HarfBuzz 源码构建
 #   cmake/AuroraBackends.cmake        — 后端剪裁开关（Headless/Win32/D3D11/GLFW/X11/Wayland/macOS/WASM）
-#   cmake/AuroraTools.cmake           — 工具/基准可执行（gen_api_tools / gen_error_codes / gen_debug_api / MCP / CLI / LSP / bench_* 等）
+#   cmake/AuroraUnity.cmake           — Unity（jumbo）构建开关（aurora_apply_unity；全量/冷构建加速，缺省 OFF）
+#   cmake/AuroraTools.cmake           — 工具/基准可执行（gen_api_tools / gen_error_codes / gen_debug_api / gen_i18n / MCP / CLI / LSP / bench_* 等）
+#   cmake/AuroraI18n.cmake            — i18n 词表生成下游助手（aurora_i18n_generate：JSON -> 生成头 + AUM1 bin）
 #   cmake/AuroraVerify.cmake          — 真机验收探针（tools/verify/ 下，默认 OFF + EXCLUDE_FROM_ALL）
 #   cmake/AuroraTests.cmake           — CTest 注册式 runner（GLOB tests/*.cpp + tests/unit + tests/integration 链入单一 aurora_test_runner，AURORA_TEST() 自注册）
 #   cmake/AuroraDemos.cmake           — 示例 demo 目标（examples/demos/ 下每组件一个可运行窗口；须在 AuroraTools 之后 include）
@@ -27,7 +29,7 @@ project(aurora
 # 由 include/aurora/core/version.h 经 AURORA_VERSION_STRING 暴露给程序。
 # 带 FORCE：版本号以仓库声明为单一事实来源，既有 build 目录重新 configure 即同步升级；
 # 如需临时覆盖可改仓库源（发布 stable 时置空串）。
-set(AURORA_VERSION_SUFFIX "alpha.9" CACHE STRING
+set(AURORA_VERSION_SUFFIX "alpha.10" CACHE STRING
         "Pre-release suffix appended after PROJECT_VERSION (empty for stable releases)" FORCE)
 
 # 本仓源码树根（子项目安全版 CMAKE_SOURCE_DIR）：下游经 add_subdirectory 消费本仓时，
@@ -183,6 +185,11 @@ endif ()
 # ---- ccache 编译缓存（加速重复编译）----
 include(AuroraCcache)
 
+# ---- Unity（jumbo）构建开关（定义 aurora_apply_unity；缺省 OFF）----
+# 须在首个目标定义与 aurora_setup_consumer_target 调用之前：函数体在调用期
+# 求值，但插桩 / clang-tidy 门控读 -D cache 项，早 include 早生效。
+include(AuroraUnity)
+
 # ---- 三方字体依赖（FreeType + HarfBuzz 源码构建）----
 include(AuroraThirdParty)
 
@@ -233,6 +240,34 @@ file(GLOB_RECURSE AURORA_SOURCES CONFIGURE_DEPENDS
 list(FILTER AURORA_SOURCES EXCLUDE REGEX "inspector_server\.cpp$")
 
 add_library(aurora STATIC ${AURORA_SOURCES})
+# Unity 合并（AURORA_UNITY_BUILD=ON 时）：库 TU 数量仅次于测试 runner，
+# 是冷构建 CPU 时间的第二大头；插桩 / lint 构建下自动退化为不合并。
+aurora_apply_unity(aurora)
+# ODR 冲突源排除（仅 unity 开启时生效）：net 模块多文件在匿名命名空间重名
+# （protocol_error / trim_ows / decimal / to_lower_ascii / ascii_lower 等），
+# 且 detail 命名空间按文件重组；perf/profiler.cpp 与 perf_session.cpp 重名
+# same_zone_name。这些文件独立编译（与关闭 unity 时逐字节相同），其余库 TU
+# 照常合并。判定方法：全库单 TU 探针编译（test_temp/unity_probe_lib*.cpp）。
+if (AURORA_UNITY_BUILD)
+    aurora_unity_exclude("${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/net/*.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/perf/profiler.cpp"
+            # 成对实现文件在各自匿名命名空间定义同名符号，合并进同一 unity TU
+            # 即 ODR 冲突（重名来源见下，独立编译与关闭 unity 时逐字节相同）：
+            #  - app：os_hotkey.cpp / clipboard.cpp 的 test_backend() + TestBackend*
+            #  - gpu RHI：gpu_gl_rhi.cpp / wgpu_rhi.cpp 的 Vertex / VSOut /
+            #    sample_gradient_lut / hex_u32 / AURORA_MSAA_* 等（两个 RHI 各自实现）
+            #  - d3d11：d3d11_surface.cpp 的 VSOut 与 wgpu_rhi.cpp 冲突
+            #  - webview：engine_webkitgtk.cpp / engine_webview2.cpp 的 PendingEval /
+            #    PendingCapture；engine_null.cpp 的 NullEngine 与 net/engine.cpp 冲突
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/os_hotkey.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/clipboard.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/render/gpu/gpu_gl_rhi.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/render/gpu/wgpu_rhi.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/d3d11_surface.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/webview/engine_webkitgtk.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/webview/engine_webview2.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/webview/engine_null.cpp")
+endif ()
 # 版本常量注入：project(VERSION) + AURORA_VERSION_SUFFIX → version.h 的
 # AURORA_VERSION_* / AURORA_VERSION_STRING（PUBLIC：消费者与测试同源取值）。
 set(AURORA_VERSION_HAS_SUFFIX 0)
@@ -269,8 +304,11 @@ target_link_libraries(aurora PUBLIC freetype harfbuzz)
 # src/aurora/window/win32_platform.cpp）——公共头内联函数在任何 Windows 构建里都可能
 # 引用该符号，故挂在顶层而非后端块内（后端块只在 AURORA_BACKEND_WIN32=ON 时生效）。
 # winhttp：系统代理采集腿（src/aurora/net/system_proxy.cpp 的 Win32 分支）读用户级 IE 代理设置。
+# bcrypt：系统熵源（src/aurora/net/random.cpp 的 Windows 腿，`BCryptGenRandom`）。它与 TLS 无关，
+# 故挂在顶层而非 cmake/AuroraNetTls.cmake 的 provider 块内——那一条只在 Schannel 开着时才链，
+# 而随机面是 WebSocket 掩码、multipart 边界与链路标识的共同底座，不能跟着一条可选的 TLS 配置走。
 if (WIN32)
-    target_link_libraries(aurora PUBLIC ws2_32 advapi32 winhttp)
+    target_link_libraries(aurora PUBLIC ws2_32 advapi32 bcrypt winhttp)
 endif ()
 # SystemConfiguration / CoreFoundation：同一采集腿的 macOS 分支读动态存储里的系统代理，
 # 与后端无关（AURORA_BACKEND_MACOS 关闭时该腿照样编译），故挂在顶层。
@@ -330,7 +368,8 @@ endif ()
 # 比 Release(-O3) 慢数倍，导致 demo/测试在 Debug 下卡顿且难以排查真实性能问题。
 # 仅给 aurora 库加 -O3 只能把 Debug 从 ~15 抬到 ~30（paint 仍被 -O0 的 freetype 拖死），
 # 故对 aurora 库 + freetype/harfbuzz 等第三方库一并施加 -O3（保留 -g 调试信息）：
-# 实测把 demo_google_play 的 Debug 帧率从 ~15 抬到接近 Release 的 ~50 FPS（与 build/ 对齐）。
+# 实测把重 UI demo（原应用级 demo_google_play，已退役）的 Debug 帧率从 ~15 抬到接近 Release 的
+# ~50 FPS（与 build/ 对齐）。
 # 折中方案（hybrid debug）：aurora 库与第三方库 -O3，demo/测试等消费者目标仍按 -O0 编译，
 # 保证你能在自己的 demo 代码里正常单步/断点，而库内光栅热点与第三方文本光栅得到优化。
 # 注：freetype 在 Debug 下的逻辑 target 仍为 `freetype`（输出名 libfreetyped.a，带 debug postfix），
@@ -398,6 +437,8 @@ include(AuroraUtils)
 # ---- 工具/基准 + 测试 ----
 include(AuroraTools)
 include(AuroraTests)
+# ---- i18n 词表生成下游助手（须在 AuroraTools 之后：AURORA_GEN_I18N_EXE 由该模块按工具链落定）----
+include(AuroraI18n)
 
 # ---- 真机验收探针（tools/verify/，默认 OFF + EXCLUDE_FROM_ALL；须在后端开关之后 include）----
 include(AuroraVerify)

@@ -18,7 +18,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
-#include <cstdint>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -31,7 +30,6 @@
 #include <vector>
 
 #include "aurora/app/event_source_registry.h"
-#include "aurora/core/platform.h"
 #include "aurora/core/result.h"
 #include "aurora/net/blocking.h"
 #include "aurora/net/detail/async_io.h"
@@ -143,7 +141,7 @@ class PollEngine final : public Engine {
         if (!task) {
             return Result<void>{};  // 空任务：无事可做，不报错也不占队列
         }
-        auto started = ensure_started();
+        const auto started = ensure_started();
         if (!started) {
             return started.error();
         }
@@ -160,7 +158,7 @@ class PollEngine final : public Engine {
         if (!task) {
             return Result<void>{};
         }
-        auto started = ensure_started();
+        const auto started = ensure_started();
         if (!started) {
             return started.error();
         }
@@ -264,13 +262,13 @@ class PollEngine final : public Engine {
     /// 唤醒失败不改写已受理的事实：任务仍在队列里，最迟在一个空闲窗口后被执行；但通道已坏，
     /// 调用方应当知情，故原样把错误上抛而非吞掉。
     /// @return 写入成功为 OK；否则为 `net-send-failed`。
-    [[nodiscard]] auto wake_locked() -> Result<void> {
-        const char nudge = AURORA_NET_ENGINE_WAKE_BYTE;
+    [[nodiscard]] auto wake_locked() const -> Result<void> {
+        constexpr char nudge = AURORA_NET_ENGINE_WAKE_BYTE;
         return wake_write_.write_all(std::span<const char>(&nudge, 1));
     }
 
     /// @brief 排空唤醒通道上已可读的字节（单轮一块；残余字节由下一轮等待立刻回报）。
-    auto drain_wake() -> void {
+    auto drain_wake() const -> void {
         std::array<char, AURORA_NET_ENGINE_WAKE_CHUNK> buffer{};
         (void)wake_read_.read_some(std::span(buffer));  // 字节内容无意义；失败（含竞态空读）一并忽略
     }
@@ -313,7 +311,7 @@ class PollEngine final : public Engine {
 
     /// @brief 一轮等待：唤醒通道排在快照首位，其余按注册口令牌一一关联，就绪项交回注册口投递。
     /// @param window 本轮等待上限。
-    auto poll_once(std::chrono::milliseconds window) -> void {
+    auto poll_once(std::chrono::milliseconds window) const -> void {
         auto &registry = app::EventSourceRegistry::instance();
         // 宿主自带等待集在驱动时本引擎让位（§8.8.4 投递纪律 ③：一条事件源只由一个驱动方等待），
         // 否则同一次就绪会被两边各投一次。此处只等唤醒通道，任务与定时器照常按窗口推进。
@@ -426,7 +424,7 @@ namespace detail {
 /// @note 用 `nullptr` 表示「未装」，故读取一次即得到当时的完整事实，不需要与别处对齐。
 ///       函数局部静态与 `detail::main_poster_mutex()` 同形态：`std::atomic<Engine *>` 平凡可析构，
 ///       既无退出期顺序问题，也不留文件级可变全局。
-auto engine_override_slot() -> std::atomic<Engine *> & {
+static auto engine_override_slot() -> std::atomic<Engine *> & {
     static std::atomic<Engine *> slot{nullptr};
     return slot;
 }

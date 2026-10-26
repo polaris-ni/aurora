@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "aurora/i18n/locale.h"
@@ -163,23 +165,95 @@ struct CurrencyInfo {
     return num + " " + std::string(info.symbol);
 }
 
-/// @brief 按 Locale 格式化日期。
+/// @brief 日期风格（CLDR 语义的轻量自研子集；medium 为各语言现行输出）。
+///
+/// @note Thread: thread-safe (pure value type)
+/// @note Side-effects: none
+/// @note Rebuildable: no
+/// @note 豁免 performance-enum-size：与同文件 `Currency` 同口径——公共 API 枚举、只作 `format_date`
+/// 的按值形参，不落任何结构体/容器字段；底层类型属公共 API 形态，本库按语义选型而非体积取向。
+/// NOLINTNEXTLINE(performance-enum-size)
+enum class DateStyle {
+    Short,  ///< 短格式：en `10/25/25`、de `25.10.25`、fr `25/10/2025`、zh/ja `2025/10/25`
+    Medium,  ///< 中格式：各语言现行 `format_date` 输出（缺省档）
+    Long,  ///< 长格式：en `October 25, 2025`、de `25. Oktober 2025`、fr `25 octobre 2025`、zh/ja 同 medium
+};
+
+/// @brief 公历日期值（把 `format_date` 的年/月/日三参数包成强类型，供消息引擎日期占位使用）。
+///
+/// @note Thread: thread-safe (pure value type)
+/// @note Side-effects: none
+/// @note Rebuildable: no
+struct CivilDate {
+    int year;  ///< 公历年
+    int month;  ///< 公历月（1-12；实现不校验范围，与 format_date 同口径）
+    int day;  ///< 公历日（1-31；实现不校验范围）
+
+    /// @brief 相等性比较：三个分量逐项相等（默认实现，形参无名）。
+    /// @return year/month/day 全部相等时为 true。
+    friend constexpr auto operator==(CivilDate, CivilDate) -> bool = default;
+};
+
+/// @brief 按 Locale 与风格格式化日期。
+///
+/// medium 为缺省档，输出与旧版 `format_date` 逐位一致；short/long 的映射为轻量自研表
+/// （月名表仅覆盖 en/de/fr，其余语言按 en 兜底；zh/ja 三档同 medium）。
 ///
 /// @param year  公历年（不补零，原样输出）。
 /// @param month 公历月（de/fr 补零到 2 位；zh/ja 不补零；实现不校验范围）。
 /// @param day   公历日（de/fr 补零到 2 位；zh/ja 不补零；实现不校验范围）。
 /// @param loc            区域设置（决定日期模式）。
-/// @return 本地化日期串：en `2025-10-25`(ISO)、de `25.10.2025`、zh/ja `2025年10月25日`、fr `25/10/2025`。
+/// @param style          风格档；缺省 Medium。
+/// @return 本地化日期串：en medium `2025-10-25`、de medium `25.10.2025`、zh/ja medium `2025年10月25日`。
 ///
 /// @note Thread: thread-safe (pure function)
 /// @note Side-effects: none
 /// @note Rebuildable: no
-[[nodiscard]] inline auto format_date(int year, int month, int day, const Locale &loc) -> std::string {
+[[nodiscard]] inline auto format_date(int year, int month, int day, const Locale &loc,
+                                      DateStyle style = DateStyle::Medium) -> std::string {
     const std::string &lang = loc.language;
     auto p2 = [](int v) -> std::string {
         std::string s = std::to_string(v);
         return s.size() == 1 ? "0" + s : s;
     };
+    // 各语言 medium（现行口径）以外的档位；zh/ja 三档同 medium，直接落到末尾的现行分支。
+    if (style == DateStyle::Short) {
+        if (lang == "de") {
+            return p2(day) + "." + p2(month) + "." + p2(year % 100);
+        }
+        if (lang == "fr") {
+            return p2(day) + "/" + p2(month) + "/" + std::to_string(year);
+        }
+        if (lang == "zh" || lang == "ja") {
+            // CJK-LITERAL: locale-output - zh/ja date units are the feature of this branch
+            return std::to_string(year) + "/" + p2(month) + "/" + p2(day);
+        }
+        return p2(month) + "/" + p2(day) + "/" + p2(year % 100);
+    }
+    if (style == DateStyle::Long) {
+        // 月名表按 `std::array<std::string_view, 12>` 存放并以 `.at()` 取值：裸 C 数组的下标在
+        // clang-tidy 眼里是「非常量表达式索引」，而这里的下标由调用方传入的 month 归一而来。
+        static constexpr std::array<std::string_view, 12> DE_MONTHS = {"Januar",    "Februar", "März",     "April",
+                                                                       "Mai",       "Juni",    "Juli",     "August",
+                                                                       "September", "Oktober", "November", "Dezember"};
+        static constexpr std::array<std::string_view, 12> FR_MONTHS = {"janvier",   "février", "mars",     "avril",
+                                                                       "mai",       "juin",    "juillet",  "août",
+                                                                       "septembre", "octobre", "novembre", "décembre"};
+        static constexpr std::array<std::string_view, 12> EN_MONTHS = {"January",   "February", "March",    "April",
+                                                                       "May",       "June",     "July",     "August",
+                                                                       "September", "October",  "November", "December"};
+        const auto index = static_cast<std::size_t>((month - 1 + 12) % 12);
+        if (lang == "de") {
+            return std::to_string(day) + ". " + std::string(DE_MONTHS.at(index)) + " " + std::to_string(year);
+        }
+        if (lang == "fr") {
+            return std::to_string(day) + " " + std::string(FR_MONTHS.at(index)) + " " + std::to_string(year);
+        }
+        if (lang == "en") {
+            return std::string(EN_MONTHS.at(index)) + " " + std::to_string(day) + ", " + std::to_string(year);
+        }
+        // 其余语言三档同 medium，落到下方现行分支。
+    }
     if (lang == "de") {
         return p2(day) + "." + p2(month) + "." + std::to_string(year);
     }

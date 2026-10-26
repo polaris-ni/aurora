@@ -1,0 +1,10 @@
+{
+  "locale": "zh-Hans-CN",
+  "messages": {
+    "demo.greeting": "{name} 你好，{count, plural, =0 {你没有未读消息} other {你有 # 条未读消息}}。",
+    "demo.invoice": "{when, date, long} 到期，应付 {total, currency, USD}。",
+    "demo.rank": "你在队列里排第 {pos, selectordinal, other {#}} 位。",
+    "demo.role": "{who, select, admin {管理员} guest {访客} other {已登录用户}}",
+    "demo.attached": "{n, plural, offset:1 =0 {未附加文件} other {附加 # 个文件}}"
+  }
+}

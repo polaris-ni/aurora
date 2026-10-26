@@ -1257,3 +1257,168 @@ severity = "error"
 retryable = false
 message = "HTTP request body cannot be sent a second time: '{detail}'"
 hint = "A 307 or 308 redirect must replay the message body, and the streaming body said it cannot return to its starting point, so resending it would ship a half-consumed payload. Either hand the payload over as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note that a body which cannot restart also opts this request out of the retry policy on purpose"
+[[error]]
+enum = "WsClosed"
+slug = "ws-closed"
+category = "io"
+severity = "info"
+retryable = true
+message = "WebSocket connection is closed: '{detail}'"
+hint = "The peer ran the close handshake, a pong deadline expired, or this side shut the handle down, so no further frame will be delivered. Reconnecting is a fresh connection with a fresh handshake, not a resume: application-level state the protocol carried (subprotocol, session identity, anything the server keyed on the old connection) has to be re-established by the caller"
+
+[[error]]
+enum = "WsHandshakeRejected"
+slug = "ws-handshake-rejected"
+category = "io"
+severity = "error"
+retryable = false
+message = "WebSocket upgrade was refused: '{detail}'"
+hint = "The peer did not answer the upgrade with 101 Switching Protocols, Sec-WebSocket-Accept did not match the key this side sent, or a required subprotocol went unchosen. This is a stable answer about the endpoint and the configuration, so retrying the same request reaches the same verdict: fix the URL, the subprotocol list, or the Origin the server expects"
+
+[[error]]
+enum = "WsProtocolError"
+slug = "ws-protocol-error"
+category = "io"
+severity = "error"
+retryable = false
+message = "WebSocket peer violated the frame grammar: '{detail}'"
+hint = "A frame was malformed, exceeded a configured frame or reassembled-message limit, carried a control frame that is not a complete message or whose payload is longer than 125 bytes, or held text that is not valid UTF-8. The byte stream is now misaligned, so the connection is dropped rather than continued: no later frame on it can be trusted"
+
+[[error]]
+enum = "WsSendQueueFull"
+slug = "ws-send-queue-full"
+category = "io"
+severity = "warning"
+retryable = true
+message = "WebSocket send queue is full: '{detail}'"
+hint = "The producer outran the wire: pending outgoing payload reached its byte cap or the queue its entry cap. This refuses only the message that hit the limit and leaves the connection open, on purpose - whether to keep buffering, drop, or close is the caller's decision. Slow the producer down or raise the matching WebSocketOptions field"
+
+# ---- 剪贴板惰性要约与系统拖放（app/clipboard.h 与 event 层拖放的失败面）----
+# 剪贴板侧两枚服务惰性提供与变更监听注册；拖放侧四枚服务跨进程会话的读取、解码、
+# 取消与 Move 回滚。与 clipboard-* / system-drag-* 既有五枚同表，只增不改。
+
+[[error]]
+enum = "ClipboardProviderFailed"
+slug = "clipboard-provider-failed"
+category = "platform"
+severity = "error"
+retryable = false
+message = "Lazy clipboard provider failed for '{mime}': '{detail}'"
+hint = "The provide callback registered through the lazy offer returned an error, or was empty while the format was actually requested. The bytes could not be rendered on demand - fix the provider or supply the format eagerly; re-reading the same clipboard reproduces the same failure, so this is not a transient one"
+
+[[error]]
+enum = "ClipboardListenUnsupported"
+slug = "clipboard-listen-unsupported"
+category = "platform"
+severity = "error"
+retryable = false
+message = "This platform cannot listen for clipboard changes: '{detail}'"
+hint = "No clipboard-change listener mechanism exists here (the platform anchors are AddClipboardFormatListener on Win32, QClipboard::dataChanged, GdkClipboard::changed, and NSPasteboard changeCount). The absence is stable, so retrying cannot create it - sample available_formats() at the moments that matter instead of registering a listener that would never fire"
+
+[[error]]
+enum = "SystemDragReadFailed"
+slug = "system-drag-read-failed"
+category = "platform"
+severity = "error"
+retryable = true
+message = "System drag payload read failed for '{mime}': '{detail}'"
+hint = "The source session went away, cancelled mid-transfer, or the bytes never arrived within the read deadline. Unlike a missing mechanism this is transient - the same format may well succeed on a second attempt - so surface the failure with a non-cursor fallback and let the control decide about retrying"
+
+[[error]]
+enum = "SystemDragDecodeFailed"
+slug = "system-drag-decode-failed"
+category = "platform"
+severity = "error"
+retryable = false
+message = "System drag payload could not be decoded as '{mime}': '{detail}'"
+hint = "The bytes arrived but do not form a valid payload for the declared MIME (for example image/png that no decoder accepts). The same bytes fail again - this is a data defect at the source, not a transient one; drop the payload and report it rather than retrying"
+
+[[error]]
+enum = "SystemDragCancelled"
+slug = "system-drag-cancelled"
+category = "platform"
+severity = "info"
+retryable = false
+message = "System drag session was cancelled: '{detail}'"
+hint = "The user pressed Esc, moved the pointer away, or the system ended the session. This is user intent, not a fault - do not route it into an error branch; the source data stays untouched and the control simply returns to its idle state"
+
+[[error]]
+enum = "SystemDragMoveRollback"
+slug = "system-drag-move-rollback"
+category = "platform"
+severity = "error"
+retryable = true
+message = "Move drop landed but the source could not delete its data: '{detail}'"
+hint = "The target received and stored the payload, but deleting the original failed (file locked, permission revoked). The target's copy stays authoritative - retry the deletion later instead of re-copying, and remember the contract: the source never deletes before the move confirmation arrives"
+
+[[error]]
+enum = "I18nBinMagicFailed"
+slug = "i18n-bin-magic"
+category = "io"
+severity = "error"
+retryable = false
+message = "Message catalog binary magic mismatch (expected AUM1)"
+hint = "The file is not an AUM1 message catalog. Check that the path points to the .bin produced by gen_i18n, not a JSON source or a different asset"
+
+[[error]]
+enum = "I18nBinVersionUnsupported"
+slug = "i18n-bin-version"
+category = "io"
+severity = "error"
+retryable = false
+message = "Message catalog binary version {version} is not supported (expected 1)"
+hint = "The catalog was produced by a newer gen_i18n. Regenerate the .bin with the tool version that matches the library"
+
+[[error]]
+enum = "I18nBinEndiannessInvalid"
+slug = "i18n-bin-endianness"
+category = "io"
+severity = "error"
+retryable = false
+message = "Message catalog binary is not little-endian (version field decoded as {version})"
+hint = "AUM1 catalogs are little-endian only. Regenerate the file instead of byte-swapping it"
+
+[[error]]
+enum = "I18nBinTruncated"
+slug = "i18n-bin-truncated"
+category = "io"
+severity = "error"
+retryable = false
+message = "Message catalog binary truncated at offset {offset} (needed {needed} more bytes)"
+hint = "The file is shorter than its own header claims. Re-transfer or regenerate the .bin; do not attempt to salvage a partial file"
+
+[[error]]
+enum = "I18nIdOutOfRange"
+slug = "i18n-id-out-of-range"
+category = "validation"
+severity = "error"
+retryable = false
+message = "Message id range [{base}, {end}) collides with the invalid-id sentinel or overflows"
+hint = "The vocabulary id space must stay below AURORA_INVALID_MESSAGE_ID_VALUE and cannot wrap. Lower --id-base or split the vocabulary"
+
+[[error]]
+enum = "I18nVocabularyOverlap"
+slug = "i18n-vocabulary-overlap"
+category = "validation"
+severity = "error"
+retryable = false
+message = "Vocabulary range [{base}, {end}) overlaps an already registered range"
+hint = "Two catalogs claim the same id space. Regenerate with disjoint --id-base values (builtin reserved range starts at 0, applications default to 1024)"
+
+[[error]]
+enum = "I18nNameDuplicate"
+slug = "i18n-name-duplicate"
+category = "validation"
+severity = "error"
+retryable = false
+message = "Message name '{name}' is already registered by another vocabulary"
+hint = "Canonical names are global. Rename one of the colliding keys in the JSON sources and regenerate"
+
+[[error]]
+enum = "I18nUnknownName"
+slug = "i18n-unknown-name"
+category = "validation"
+severity = "error"
+retryable = false
+message = "Unknown message name '{name}' (not in any registered vocabulary)"
+hint = "add() resolves names through registered vocabularies. Load the vocabulary that owns the name first, or use the generated MessageId constant directly"

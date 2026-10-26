@@ -30,7 +30,7 @@ namespace {
 /// @brief ASCII 小写化（字段名与指令名一律按此归一，不做 Unicode 折叠）。
 [[nodiscard]] auto to_lower_ascii(std::string_view text) -> std::string {
     std::string out{text};
-    std::transform(out.begin(), out.end(), out.begin(), [](char c) {
+    std::ranges::transform(out, out.begin(), [](char c) {
         const auto raw = static_cast<unsigned char>(c);
         return (raw >= 'A' && raw <= 'Z') ? static_cast<char>(raw + 32) : c;
     });
@@ -170,7 +170,7 @@ auto parse_cache_control(std::string_view value) -> CacheDirectives {
 
 auto is_cacheable_status(std::uint16_t status) -> bool {
     static constexpr std::uint16_t CACHEABLE[] = {200, 203, 300, 301, 404, 405, 410, 414, 501};
-    return std::find(std::begin(CACHEABLE), std::end(CACHEABLE), status) != std::end(CACHEABLE);
+    return std::ranges::find(CACHEABLE, status) != std::end(CACHEABLE);
 }
 
 auto is_cacheable_method(aurora::net::http::Method method) -> bool {
@@ -190,7 +190,7 @@ auto parse_vary(std::string_view value) -> std::optional<std::vector<std::string
             continue;
         }
         const std::string lowered = to_lower_ascii(item);
-        if (std::find(names.begin(), names.end(), lowered) == names.end()) {
+        if (std::ranges::find(names, lowered) == names.end()) {
             names.push_back(lowered);
         }
     }
@@ -258,7 +258,7 @@ auto merge_revalidated_headers(const aurora::Headers &stored, const aurora::Head
         if (is_payload_describing(lowered)) {
             continue;
         }
-        if (std::find(handled.begin(), handled.end(), lowered) != handled.end()) {
+        if (std::ranges::find(handled, lowered) != handled.end()) {
             continue;
         }
         handled.push_back(lowered);
@@ -285,10 +285,11 @@ auto HttpResponseCache::set_options(aurora::net::http::CacheOptions options) -> 
 }
 
 auto HttpResponseCache::lookup(aurora::net::http::Method method, const std::string &url,
-                               const aurora::Headers &request_headers, CacheTime now) -> CacheLookup {
+                               const aurora::Headers &request_headers, CacheTime now,
+                               const std::vector<std::string> &extra_vary) -> CacheLookup {
     CacheLookup out;
     const std::scoped_lock guard{mutex_};
-    const auto index = find_index(method, url, request_headers);
+    const auto index = find_index(method, url, request_headers, extra_vary);
     if (!index.has_value()) {
         return out;
     }
@@ -306,7 +307,7 @@ auto HttpResponseCache::lookup(aurora::net::http::Method method, const std::stri
 
 auto HttpResponseCache::store(aurora::net::http::Method method, const std::string &url,
                               const aurora::Headers &request_headers, const aurora::net::http::Response &response,
-                              CacheTime now) -> bool {
+                              CacheTime now, const std::vector<std::string> &extra_vary) -> bool {
     if (!is_cacheable_method(method) || !is_cacheable_status(response.status())) {
         return false;
     }
@@ -345,9 +346,20 @@ auto HttpResponseCache::store(aurora::net::http::Method method, const std::strin
         entry.vary.emplace_back(name, request_headers.get(name).value_or(std::string{}));
     }
     for (const auto &name : AURORA_CREDENTIAL_VARY_FIELDS) {
-        if (std::any_of(vary_names->begin(), vary_names->end(),
-                        [&name](const std::string &given) { return ascii_name_equal(given, name); })) {
+        if (std::ranges::any_of(*vary_names,
+                                [&name](const std::string &given) { return ascii_name_equal(given, name); })) {
             continue;  // 对端已经点名它：上面那条循环按同一枚值收过了，收两遍只会让条目多一处同值比较
+        }
+        entry.vary.emplace_back(name, request_headers.get(name).value_or(std::string{}));
+    }
+    // 发起侧追加的变体名（钩子触点集）同样进键、同样取当时的值。三处去重：对端点过的、凭据收过的、
+    // 本组里重名的——触点集本身已按名去重，这里只防它与上面两份相撞。
+    for (const auto &name : extra_vary) {
+        const auto already_stored = [&name](const std::pair<std::string, std::string> &stored) {
+            return ascii_name_equal(stored.first, name);
+        };
+        if (std::ranges::any_of(entry.vary, already_stored)) {
+            continue;
         }
         entry.vary.emplace_back(name, request_headers.get(name).value_or(std::string{}));
     }
@@ -361,7 +373,7 @@ auto HttpResponseCache::store(aurora::net::http::Method method, const std::strin
 
     const std::scoped_lock guard{mutex_};
     entry.used = ++clock_;
-    if (const auto index = find_index(method, url, request_headers); index.has_value()) {
+    if (const auto index = find_index(method, url, request_headers, extra_vary); index.has_value()) {
         entries_[index.value()] = std::move(entry);  // 同键的旧变体被这次的结果取代
     } else {
         entries_.push_back(std::move(entry));
@@ -372,10 +384,11 @@ auto HttpResponseCache::store(aurora::net::http::Method method, const std::strin
 
 auto HttpResponseCache::revalidated(aurora::net::http::Method method, const std::string &url,
                                     const aurora::Headers &request_headers,
-                                    const aurora::net::http::Response &not_modified, CacheTime now)
+                                    const aurora::net::http::Response &not_modified, CacheTime now,
+                                    const std::vector<std::string> &extra_vary)
     -> std::optional<aurora::net::http::Response> {
     const std::scoped_lock guard{mutex_};
-    const auto index = find_index(method, url, request_headers);
+    const auto index = find_index(method, url, request_headers, extra_vary);
     if (!index.has_value()) {
         return std::nullopt;
     }
@@ -406,10 +419,21 @@ auto HttpResponseCache::clear() -> void {
 }
 
 auto HttpResponseCache::find_index(aurora::net::http::Method method, const std::string &url,
-                                   const aurora::Headers &request_headers) const -> std::optional<std::size_t> {
+                                   const aurora::Headers &request_headers,
+                                   const std::vector<std::string> &extra_vary) const -> std::optional<std::size_t> {
     for (std::size_t i = 0; i < entries_.size(); ++i) {
         const auto &entry = entries_[i];
         if (entry.method != method || entry.url != url) {
+            continue;
+        }
+        // 覆盖判定先于取值比较：条目缺当前任何一枚追加变体名即不匹配。存入时追加名连同取值已进 `vary`，
+        // 故取值由下面那条既有循环负责——这里只补「这条目压根没算过这枚头」那一种不能命中的形态。
+        const bool covered = std::ranges::all_of(extra_vary, [&entry](const std::string &name) {
+            return std::ranges::any_of(entry.vary, [&name](const std::pair<std::string, std::string> &stored) {
+                return ascii_name_equal(stored.first, name);
+            });
+        });
+        if (!covered) {
             continue;
         }
         bool matches = true;
@@ -430,9 +454,8 @@ auto HttpResponseCache::evict_over_capacity() -> void {
     // 表只在持锁路径上被调用，故本函数不再自行加锁。
     const auto limit = static_cast<std::size_t>(options_.max_entries);
     while (entries_.size() > limit) {
-        const auto oldest =
-            std::min_element(entries_.begin(), entries_.end(),
-                             [](const CacheEntry &left, const CacheEntry &right) { return left.used < right.used; });
+        const auto oldest = std::ranges::min_element(
+            entries_, [](const CacheEntry &left, const CacheEntry &right) { return left.used < right.used; });
         entries_.erase(oldest);
     }
 }

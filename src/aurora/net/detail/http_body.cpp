@@ -121,7 +121,7 @@ auto plan_request_body(const aurora::net::http::Request &request) -> Result<Requ
     if (!plan.has_body) {
         return Result<RequestBodyPlan>{plan};  // None：两枚字段都不补
     }
-    if (auto *source = request.body_source(); source != nullptr) {
+    if (const auto *source = request.body_source(); source != nullptr) {
         if (const auto total = source->total_size(); total.has_value()) {
             plan.framing = RequestBodyFraming::Length;
             plan.length = total;

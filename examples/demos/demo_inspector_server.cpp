@@ -1,8 +1,9 @@
 // InspectorServer 远程检视载体：经 localhost HTTP 暴露运行时 UI 树，供外部工具 / AI Agent 读写。
 //
-// 与 demo_google_play 的分工：后者是应用级演示（根为 NavigatorHost，树随路由变化）；
 // 本载体的根树刻意做成**扁平表单**，索引路径（"0".."4"）稳定可预期，
 // 便于逐端点核对 /api/tree、/api/widget、/api/input、/api/patch 的读写闭环。
+// （曾经的候选载体是 Navigator 驱动的应用级演示，其根 child_nodes() 为空、索引随路由漂移，
+//   无法稳定断言「某个索引对应哪个控件」；该演示退役后本载体即为唯一载体。）
 //
 // 构建：需 -DAURORA_BUILD_INSPECTOR_SERVER=ON（见 codespec/BUILD_OPTIONS.md §2.3）；
 // 未开启时该选项的宏未定义，本文件的分支整体编译剔除，程序仅提示后退出。

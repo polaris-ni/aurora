@@ -169,6 +169,10 @@ namespace aurora::tools {
 
     // ---- network (aurora::net public enums; not widget property types, but AI-enumerable API surface) ----
     enums["AddressFamily"] = {"IPv4", "IPv6", "LocalPath"};
+    enums["ExportSurface"] = {"Log", "Timeline", "InspectorJson", "ErrorDetail"};
+    enums["ExchangeLeg"] = {"Send", "Stream", "ServerSentEvents", "WebSocket"};
+    enums["FieldClass"] = {"Public", "Sensitive", "Secret"};
+    enums["HttpStage"] = {"Connect", "TlsHandshake", "ConnectionAcquired", "RequestSent", "FirstByte", "BodyDone"};
     enums["AuthScheme"] = {"Basic", "Bearer", "Unsupported"};
     enums["HttpErrorClass"] = {"Invalid", "Dns",      "Unreachable", "Proxy",    "Tls",
                                "Timeout", "Protocol", "Status",      "Cancelled"};
@@ -179,6 +183,7 @@ namespace aurora::tools {
     enums["SinkFlow"] = {"Continue", "Stop"};
     enums["ShutdownMode"] = {"Read", "Write", "Both"};
     enums["TlsVersion"] = {"Tls10", "Tls11", "Tls12", "Tls13"};
+    enums["WsMessageKind"] = {"Text", "Binary"};
 
     // ---- declarative binding (aurora::Resource / aurora::StreamResource, state/resource.h) ----
     enums["ResourcePhase"] = {"Loading", "Ready", "Failed"};

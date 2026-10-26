@@ -6,11 +6,14 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include "aurora/app/application.h"
 #include "aurora/app/display.h"
 #include "aurora/app/window_geometry.h"
+#include "aurora/core/log.h"
 #include "aurora/widget/text.h"
 #include "aurora/window/surface.h"
 #include "framework/aurora_test.h"
@@ -32,6 +35,60 @@ auto usable_geometry() -> WindowGeometry {
         .mode = WindowMode::Maximized,
         .display_id = d.id,
     };
+}
+
+/// @brief RAII：接管 Logger sink 捕获日志行；析构恢复级别与默认 stderr，
+/// 不把 Logger 全局状态泄漏给其他用例（与 utest_log 的 CapturedLogger 同构，本 TU 独立一份）。
+class CapturedLog {
+  public:
+    CapturedLog() : level_{aurora::Logger::instance().level()} {
+        aurora::Logger::instance().set_sink([this](std::string_view line) -> void { lines.emplace_back(line); });
+    }
+    ~CapturedLog() {
+        auto &logger = aurora::Logger::instance();
+        logger.set_level(level_);
+        logger.set_sink(nullptr);  // 恢复默认 stderr
+    }
+    CapturedLog(const CapturedLog &) = delete;
+    auto operator=(const CapturedLog &) & = delete;
+    CapturedLog(CapturedLog &&) = delete;
+    auto operator=(CapturedLog &&) & = delete;
+
+    /// @brief 已捕获行里是否有一条同时含全部给定片段（级别标签 + 文案）。
+    [[nodiscard]] auto has_line_with(std::initializer_list<const char *> fragments) const -> bool {
+        for (const std::string &line : lines) {
+            bool all = true;
+            for (const char *f : fragments) {
+                if (line.find(f) == std::string::npos) {
+                    all = false;
+                    break;
+                }
+            }
+            if (all) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::vector<std::string> lines;  // NOLINT(*-non-private-member-variables-in-classes) 捕获到的日志行
+
+  private:
+    aurora::LogLevel level_;
+};
+
+/// @brief 造一枚带 persist_id 的无头窗口（几何恢复用例底座）。
+auto make_persisted_window(const std::string &persist_id, float w, float h) -> std::unique_ptr<Window> {
+    WindowOptions o;
+    o.size = Size{.width = w, .height = h};
+    o.persist_id = persist_id;
+    HeadlessOptions ho;
+    static_cast<WindowOptions &>(ho) = o;
+    auto win = create_window(ho);
+    if (!win.ok()) {
+        return nullptr;
+    }
+    return std::move(win.value());
 }
 
 }  // namespace
@@ -172,6 +229,171 @@ AURORA_TEST_CASE(application_restores_and_saves_geometry_across_runs) {
     const WindowGeometry saved = require_value(load_window_geometry(prefs, "main"));
     AURORA_TEST_CHECK_NEAR(saved.origin.x, stored.origin.x, 0.001);
     AURORA_TEST_CHECK_NEAR(saved.size.height, stored.size.height, 0.001);
+}
+
+AURORA_TEST_CASE(geometry_json_round_trip_covers_fullscreen_and_minimized) {
+    // 回归保护（不占验收名额）：六键稳定，FullScreen / Minimized 两档与既有 Maximized 同权往返。
+    for (const WindowMode m : {WindowMode::FullScreen, WindowMode::Minimized}) {
+        WindowGeometry g = usable_geometry();
+        g.mode = m;
+        const WindowGeometry parsed = require_value(window_geometry_from_json(window_geometry_to_json(g)));
+        AURORA_TEST_CHECK_EQ(static_cast<int>(parsed.mode), static_cast<int>(m));
+    }
+}
+
+AURORA_TEST_CASE(application_restores_window_mode_from_storage) {
+    const Display d = app::primary_display();
+
+    // 同一底座参数化三档：Maximized / FullScreen（只追几何态）与 Normal（位置尺寸照常）。
+    // expect_size_restored = 落盘的位置与尺寸是否应下发到 surface。
+    const auto run_for = [d](WindowMode stored_mode, bool expect_size_restored) -> void {
+        preferences::Preferences prefs;  // 仅内存模式
+        WindowGeometry stored = usable_geometry();
+        stored.mode = stored_mode;
+        save_window_geometry(prefs, "main", stored);
+        save_window_geometry(prefs, "aux", stored);
+
+        auto win = make_persisted_window("main", 320.0F, 240.0F);
+        AURORA_TEST_REQUIRE_NOT_NULL(win.get());
+        auto *const surface = dynamic_cast<HeadlessSurface *>(&win->surface());
+        AURORA_TEST_REQUIRE_NOT_NULL(surface);
+
+        WindowOptions o;
+        o.size = Size{.width = 320.0F, .height = 240.0F};
+        o.persist_id = "main";
+        o.max_frames = 2;
+        o.power_saving = false;
+        Application app{Scene{Node{std::make_shared<Text>("main")}}, std::move(win), o};
+
+        auto win2 = make_persisted_window("aux", 320.0F, 240.0F);
+        AURORA_TEST_REQUIRE_NOT_NULL(win2.get());
+        auto *const surface2 = dynamic_cast<HeadlessSurface *>(&win2->surface());
+        AURORA_TEST_REQUIRE_NOT_NULL(surface2);
+        WindowOptions o2 = o;
+        o2.persist_id = "aux";
+        const WindowId id_aux = app.open_window(std::move(win2), Scene{Node{std::make_shared<Text>("aux")}}, o2);
+        // 存储晚于两窗登记：均经 set_window_geometry_store 补做恢复。
+        app.set_window_geometry_store(&prefs);
+
+        // 主窗断言双层：应用级 window_mode State（mode sink 只聚合主窗）+ 宿主快照。
+        AURORA_TEST_CHECK_EQ(app.window_mode().get(), stored_mode);
+        WindowHost *const main_host = app.window_host(app.main_window());
+        AURORA_TEST_REQUIRE_NOT_NULL(main_host);
+        AURORA_TEST_CHECK_EQ(main_host->window()->window_mode(), stored_mode);
+        // 第二窗只断言宿主快照：register_host 的 mode sink 仅在 raw == main_host_ 时转发，
+        // 非主窗的几何态永不进应用级 State（既有口径，对两层同时断言必红）。
+        WindowHost *const aux_host = app.window_host(id_aux);
+        AURORA_TEST_REQUIRE_NOT_NULL(aux_host);
+        AURORA_TEST_CHECK_EQ(aux_host->window()->window_mode(), stored_mode);
+
+        if (expect_size_restored) {
+            // Normal：位置与尺寸照常恢复（headless 下 scale = 1，逻辑尺寸 == 物理尺寸）。
+            AURORA_TEST_CHECK_NEAR(surface->size().width, stored.size.width, 0.001);
+            AURORA_TEST_CHECK_NEAR(surface->position().x, stored.origin.x, 0.001);
+            AURORA_TEST_CHECK_NEAR(surface2->position().x, stored.origin.x, 0.001);
+        } else {
+            // Maximized / FullScreen：位置与尺寸都不下发，两窗 surface 均保持创建默认值。
+            AURORA_TEST_CHECK_NEAR(surface->size().width, 320.0F, 0.001);
+            AURORA_TEST_CHECK_NEAR(surface->size().height, 240.0F, 0.001);
+            AURORA_TEST_CHECK_NEAR(surface->position().x, 0.0F, 0.001);
+            AURORA_TEST_CHECK_NEAR(surface->position().y, 0.0F, 0.001);
+            AURORA_TEST_CHECK_NEAR(surface2->size().width, 320.0F, 0.001);
+            AURORA_TEST_CHECK_NEAR(surface2->position().x, 0.0F, 0.001);
+        }
+        (void)d;
+    };
+    run_for(WindowMode::Maximized, false);
+    run_for(WindowMode::FullScreen, false);
+    run_for(WindowMode::Normal, true);
+}
+
+AURORA_TEST_CASE(minimized_mode_restores_as_normal_with_info_log) {
+    CapturedLog log;  // 须先于恢复动作构造，否则捕不到 INFO
+    preferences::Preferences prefs;
+    WindowGeometry stored = usable_geometry();
+    stored.mode = WindowMode::Minimized;  // 落盘最小化
+    save_window_geometry(prefs, "main", stored);
+
+    auto win = make_persisted_window("main", 320.0F, 240.0F);
+    AURORA_TEST_REQUIRE_NOT_NULL(win.get());
+    WindowOptions o;
+    o.size = Size{.width = 320.0F, .height = 240.0F};
+    o.persist_id = "main";
+    o.max_frames = 2;
+    o.power_saving = false;
+    Application app{Scene{Node{std::make_shared<Text>("main")}}, std::move(win), o};
+    app.set_window_geometry_store(&prefs);
+
+    // 政策钉死：Minimized 恢复为 Normal（启动即看不见 + 与 WindowState::Hidden 耦合），
+    // 且走 Normal 分支——位置与尺寸照常恢复（用户可见地「打开」）。
+    AURORA_TEST_CHECK_EQ(app.window_mode().get(), WindowMode::Normal);
+    WindowHost *const host = app.window_host(app.main_window());
+    AURORA_TEST_REQUIRE_NOT_NULL(host);
+    auto *const surface = dynamic_cast<HeadlessSurface *>(&host->window()->surface());
+    AURORA_TEST_REQUIRE_NOT_NULL(surface);
+    AURORA_TEST_CHECK_NEAR(surface->size().width, stored.size.width, 0.001);
+    AURORA_TEST_CHECK_NEAR(surface->position().x, stored.origin.x, 0.001);
+
+    // 一条 INFO（tag "app"）可归因：用户最小化是合法操作，记 WARN 会让每次启动刷噪声。
+    AURORA_TEST_CHECK_TRUE(log.has_line_with({"INF", "app", "stored window mode is Minimized; restoring as Normal"}));
+}
+
+AURORA_TEST_CASE(offscreen_geometry_load_returns_nullopt_with_warn) {
+    CapturedLog log;
+    preferences::Preferences prefs;
+    // 屏外几何：is_window_geometry_usable 宽松判定（尺寸为正 + 与任一 work_area 相交）拒绝 →
+    // load 回 nullopt，apply 不执行，mode 天然保持默认 Normal。
+    WindowGeometry broken = usable_geometry();
+    broken.origin = Point{.x = -50000.0F, .y = -50000.0F};
+    save_window_geometry(prefs, "main", broken);
+    AURORA_TEST_CHECK_FALSE(load_window_geometry(prefs, "main").has_value());
+    AURORA_TEST_CHECK_TRUE(log.has_line_with({"WRN", "app", "stored window geometry is off-screen"}));
+}
+
+AURORA_TEST_CASE(missing_display_degrades_mode_to_normal_with_warn) {
+    CapturedLog log;
+    preferences::Preferences prefs;
+    // display_id 指向的显示器已不在：is_window_geometry_usable 完全不看 display_id（宽松口径），
+    // load 照常成功；降级判定在恢复腿（apply）——不拒绝恢复，但几何态归 Normal + WARN。
+    WindowGeometry stored = usable_geometry();
+    stored.mode = WindowMode::Maximized;
+    stored.display_id = 9999;  // 任何当前显示器之外的 id
+    save_window_geometry(prefs, "main", stored);
+
+    auto win = make_persisted_window("main", 320.0F, 240.0F);
+    AURORA_TEST_REQUIRE_NOT_NULL(win.get());
+    WindowOptions o;
+    o.size = Size{.width = 320.0F, .height = 240.0F};
+    o.persist_id = "main";
+    o.max_frames = 2;
+    o.power_saving = false;
+    Application app{Scene{Node{std::make_shared<Text>("main")}}, std::move(win), o};
+    app.set_window_geometry_store(&prefs);
+
+    AURORA_TEST_CHECK_EQ(app.window_mode().get(), WindowMode::Normal);
+    WindowHost *const host = app.window_host(app.main_window());
+    AURORA_TEST_REQUIRE_NOT_NULL(host);
+    auto *const surface = dynamic_cast<HeadlessSurface *>(&host->window()->surface());
+    AURORA_TEST_REQUIRE_NOT_NULL(surface);
+    // 归 Normal 后位置与尺寸照常恢复（物理坐标相交就摆得回）。
+    AURORA_TEST_CHECK_NEAR(surface->size().width, stored.size.width, 0.001);
+    AURORA_TEST_CHECK_NEAR(surface->position().x, stored.origin.x, 0.001);
+    AURORA_TEST_CHECK_TRUE(log.has_line_with({"WRN", "app", "stored window display is gone; restoring as Normal"}));
+}
+
+AURORA_TEST_CASE(out_of_range_mode_via_store_is_rejected) {
+    preferences::Preferences prefs;
+    // 经 store 的端到端越界：直接往存储写一条 mode=99 的 JSON（模拟损坏/手改文件），
+    // load 必须拒（格式错误），恢复腿不执行。
+    prefs.set<json::Value>("main", json_obj({
+                                       {"origin_x", 10.0},
+                                       {"origin_y", 10.0},
+                                       {"width", 640.0},
+                                       {"height", 480.0},
+                                       {"mode", 99},
+                                       {"display_id", -1},
+                                   }));
+    AURORA_TEST_CHECK_FALSE(load_window_geometry(prefs, "main").has_value());
 }
 
 }  // namespace aurora::test_cases::utest_window_geometry

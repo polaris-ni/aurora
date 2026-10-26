@@ -256,8 +256,23 @@ Full text: https://www.unicode.org/license.txt
 
 ---
 
+## 10. CLDR Plural Rules — 复数规则判定数据
+
+- **版本**：CLDR 48（Unicode 16.0.0；`cldr-json` 仓库 `cldr-json/cldr-core/supplemental/plurals.json` 与
+  `ordinals.json`）
+- **来源**：unicode-org 公开的 CLDR JSON 数据（**未 vendored 源文件**）；由 `tools/gen/gen_plural_rules.py`
+  把规则表达式编译为 `src/aurora/i18n/plural_rules.gen.cpp` 内的语言键表与判定链（cardinal + ordinal 全语言，
+  CLDR 48 口径），随静态库交付；测试样例 `tests/unit/plural_rules_samples.gen.inc` 取自规则自带的
+  `@integer` / `@decimal` 样例
+- **用途**：`aurora::plural_category()` 与 `plural_category_ordinal()`（`include/aurora/i18n/plural.h`）把计数
+  值映射到 CLDR 复数类别，见 `codespec/specification/07-environment-modifier.md` §6
+- **许可**：Unicode License v3（全文同第 9 节；再生成判定表时须带上所依据的数据文件与 CLDR 版本，以便追溯
+  数据口径）
+
+---
+
 ## 合规说明
 
-- 上述组件均以源码形式 vendored 于仓库内，版本锁定、可审计；除 wgpu-native 的 Rust 依赖树（首次构建需 cargo 在线拉取，见第 8 节）外均可无网络构建。第 9 节 Unicode UCD 是**唯一例外**：其源数据文件不入库，入库的是按其许可导出的区间表，版本与导出来源就写在该节内，可审计口径不变。
-- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）、Unicode UCD（Unicode License v3，导出区间表随库交付）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
+- 上述组件均以源码形式 vendored 于仓库内，版本锁定、可审计；除 wgpu-native 的 Rust 依赖树（首次构建需 cargo 在线拉取，见第 8 节）外均可无网络构建。第 9 节 Unicode UCD 与第 10 节 CLDR Plural Rules 是**同类例外**：源数据文件不入库，入库的是按其许可导出的判定表，版本与导出来源就写在各节内，可审计口径不变。
+- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）、Unicode UCD（Unicode License v3，导出区间表随库交付）、CLDR Plural Rules（Unicode License v3，导出判定表随库交付）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
 - 许可全文以各组件目录内原始 `LICENSE.TXT` / `COPYING` / 头注释为权威来源；本文件仅作索引与归档。

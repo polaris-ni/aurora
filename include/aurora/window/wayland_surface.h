@@ -110,6 +110,9 @@ class WaylandSurface final : public Surface {
     /// @brief 用户是否请求关闭窗口（xdg_toplevel close 事件置位）。
     /// @return close 事件或 close() 调用后 true。
     [[nodiscard]] auto should_close() const -> bool override;
+    /// @brief 撤销本后端的关闭请求（关闭闸门否决时调用）：toplevel close 与 CSD 关闭钮置的位
+    ///        可清（xdg 语义下客户端本就可以不销毁表面）；连接错误置的位**拒绝清**（连接已死）。
+    auto cancel_close() -> void override;
     /// @brief 处理 Wayland 事件队列（wl_display_dispatch_pending），翻译为 aurora `Event` 派发；
     /// 兼作 IME 输入态声明的兜底驱动点（GPU 宿主帧必经此函数）。
     auto poll_platform_events() -> void override;
@@ -252,6 +255,10 @@ class WaylandSurface final : public Surface {
     /// @brief 程序化全屏：xdg_toplevel_set/unset_fullscreen。
     /// @param on true 进入全屏，false 退出全屏。
     auto set_fullscreen(bool on) -> void override;
+    /// @brief 程序化设定几何态（幂等）：set/unset_maximized 与 set/unset_fullscreen 按目标态
+    /// 组合，立即经 notify_window_mode 上报；稍后到达的 configure 以相同值幂等收敛。
+    /// @param m 目标几何态。
+    auto set_window_mode(WindowMode m) -> void override;
     /// @brief 原生窗口句柄：`wl_surface*`。
     [[nodiscard]] auto native_handle() const -> void * override;
 

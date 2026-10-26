@@ -135,8 +135,8 @@ struct ClassExpectation {
     HttpErrorClass expected;  ///< 期望归入的档
 };
 
-/// @brief `net-*` 与 `http-*` 两族全部 43 枚的期望归因档（按档分组，便于逐条读判定依据）。
-constexpr std::array<ClassExpectation, 43> AURORA_HTTP_ERROR_CLASS_TABLE{{
+/// @brief `net-*` / `http-*` / `ws-*` 三族全部 47 枚的期望归因档（按档分组，便于逐条读判定依据）。
+constexpr std::array<ClassExpectation, 47> AURORA_HTTP_ERROR_CLASS_TABLE{{
     // 名字解析不了：还没走到链路。
     {.code = aurora::ErrorCode::NetDnsFailed, .expected = HttpErrorClass::Dns},
     // 链路断了且没有更具体的档可归：含服务端面三枚（发起侧不产出，但同样给出档而非「未知」）。
@@ -149,6 +149,8 @@ constexpr std::array<ClassExpectation, 43> AURORA_HTTP_ERROR_CLASS_TABLE{{
     {.code = aurora::ErrorCode::NetBindFailed, .expected = HttpErrorClass::Unreachable},
     {.code = aurora::ErrorCode::NetListenFailed, .expected = HttpErrorClass::Unreachable},
     {.code = aurora::ErrorCode::NetAcceptFailed, .expected = HttpErrorClass::Unreachable},
+    // 升级之后的会话收摊：对端说了 close、pong 到点、或本侧掐了句柄，三种都只说「这条连接不在了」。
+    {.code = aurora::ErrorCode::WsClosed, .expected = HttpErrorClass::Unreachable},
     // 代理这一跳给的答案：注意「配置读不到」归此档而「配置写错了」归兜底档——前者的动作在环境，后者在调用点。
     {.code = aurora::ErrorCode::NetProxyUnreachable, .expected = HttpErrorClass::Proxy},
     {.code = aurora::ErrorCode::NetProxyAuthRequired, .expected = HttpErrorClass::Proxy},
@@ -163,10 +165,12 @@ constexpr std::array<ClassExpectation, 43> AURORA_HTTP_ERROR_CLASS_TABLE{{
     {.code = aurora::ErrorCode::HttpTimeout, .expected = HttpErrorClass::Timeout},
     {.code = aurora::ErrorCode::NetConnectTimeout, .expected = HttpErrorClass::Timeout},
     {.code = aurora::ErrorCode::NetRecvTimeout, .expected = HttpErrorClass::Timeout},
-    // 对端把报文写坏了：含「把重定向写成了环」。
+    // 对端把报文写坏了：含「把重定向写成了环」，也含升级那一跳的对端裁决与帧流违例。
     {.code = aurora::ErrorCode::HttpProtocolError, .expected = HttpErrorClass::Protocol},
     {.code = aurora::ErrorCode::HttpBodyCorrupt, .expected = HttpErrorClass::Protocol},
     {.code = aurora::ErrorCode::HttpRedirectLimit, .expected = HttpErrorClass::Protocol},
+    {.code = aurora::ErrorCode::WsHandshakeRejected, .expected = HttpErrorClass::Protocol},
+    {.code = aurora::ErrorCode::WsProtocolError, .expected = HttpErrorClass::Protocol},
     // 调用方主动收摊优先于一切链路事实。
     {.code = aurora::ErrorCode::NetCancelled, .expected = HttpErrorClass::Cancelled},
     // 兜底档：调用点写错 / 本构建缺能力 / 本库旋钮设限——动作在代码与配置里，不在网络上。
@@ -189,6 +193,8 @@ constexpr std::array<ClassExpectation, 43> AURORA_HTTP_ERROR_CLASS_TABLE{{
     {.code = aurora::ErrorCode::HttpBodyTooLarge, .expected = HttpErrorClass::Invalid},
     {.code = aurora::ErrorCode::HttpCharsetUnsupported, .expected = HttpErrorClass::Invalid},
     {.code = aurora::ErrorCode::HttpContentEncodingUnsupported, .expected = HttpErrorClass::Invalid},
+    // 队满只拒当次发送、连接照旧在场：动作是放慢生产者或抬高额度，两处都在代码与配置里。
+    {.code = aurora::ErrorCode::WsSendQueueFull, .expected = HttpErrorClass::Invalid},
 }};
 
 /// @brief 查期望表里某枚码的归档；不在表里回 `nullptr`。
@@ -203,11 +209,11 @@ constexpr std::array<ClassExpectation, 43> AURORA_HTTP_ERROR_CLASS_TABLE{{
     return nullptr;
 }
 
-/// @brief 判断 slug 属于网络两族（`net-*` / `http-*`）。
+/// @brief 判断 slug 属于网络栈三族（`net-*` / `http-*` / `ws-*`）。
 /// @param slug 生成表里的冻结 slug。
-/// @return 属于两族为真。
+/// @return 属于三族为真。
 [[nodiscard]] auto is_network_slug(std::string_view slug) -> bool {
-    return slug.starts_with("net-") || slug.starts_with("http-");
+    return slug.starts_with("net-") || slug.starts_with("http-") || slug.starts_with("ws-");
 }
 
 }  // namespace
@@ -614,13 +620,13 @@ AURORA_TEST_CASE(request_retry_policy_slot_follows_or_overrides_the_client) {
     AURORA_TEST_CHECK_TRUE(!current.budget.has_value());
 }
 
-AURORA_TEST_CASE(error_class_maps_every_net_and_http_code) {
+AURORA_TEST_CASE(error_class_maps_every_network_stack_code) {
     // 正向：期望表里逐码比对实现给出的档。
     for (const auto &entry : AURORA_HTTP_ERROR_CLASS_TABLE) {
         AURORA_TEST_CHECK_EQ(error_class_of(entry.code), entry.expected);
     }
 
-    // 完整性：生成表里每一枚 `net-*` / `http-*` 都必须在期望表里被点名。新增一枚网络码若忘了归档，
+    // 完整性：生成表里每一枚 `net-*` / `http-*` / `ws-*` 都必须在期望表里被点名。新增一枚网络码若忘了归档，
     // 它会静默落进兜底档、让「该不该给重试按钮」的判定悄悄变形——这条断言把那种漂移挡在测试里。
     std::size_t seen = 0;
     for (const auto &meta : AURORA_ERROR_TABLE) {
@@ -634,7 +640,7 @@ AURORA_TEST_CASE(error_class_maps_every_net_and_http_code) {
                               std::string{"class drift for: "} + std::string{meta.slug});
     }
     AURORA_TEST_CHECK_EQ(seen, AURORA_HTTP_ERROR_CLASS_TABLE.size());
-    AURORA_TEST_CHECK_EQ(seen, std::size_t{43});
+    AURORA_TEST_CHECK_EQ(seen, std::size_t{47});
 
     // `Status` 档没有码可映射（非 2xx 是成功 Result，状态码是数据不是错误），它的唯一产出点是下面那枚
     // 按状态码折算的函数——本断言把「码表里不该出现 Status」钉成一条事实，免得日后误加。

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "id_base": 0,
+  "messages": {
+    "aurora.reorder.cancelled": "Reorder cancelled. Item returned to position {position} of {total}.",
+    "aurora.reorder.dropped": "Item moved from position {from} to position {to} of {total}.",
+    "aurora.reorder.dropped_in_place": "Item dropped at position {position} of {total}.",
+    "aurora.reorder.grabbed": "Position {position} of {total}. Item grabbed. Use arrow keys to move, space to drop, escape to cancel.",
+    "aurora.reorder.position": "Position {position} of {total}.",
+    "command_palette.no_results": "No matching commands",
+    "command_palette.placeholder": "Type a command..."
+  }
+}

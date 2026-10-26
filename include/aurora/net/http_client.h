@@ -87,6 +87,17 @@
 /// - **逐跳重问**：每一跳（含重定向带来的新主机、新方案）都按本跳的代理决策重新判定，上一跳放行不代表这一跳。
 /// - **拒在发出之前**：违规一律落 `net-policy-violated`，一条连接都不发起、一个字节都不写出。
 ///
+/// 交换钩子（`Client::use()` → `net/http_hook.h`）在发起侧问两问，三条口径与上面的形态裁决同级：
+/// - **双闸夹一问**：策略闸先在钩子**之前**判——被拒的目标一次都不会问到钩子；钩子链跑完后再按最终请求重问
+///   一次并做保留头终检。后一问是结构不变量而不是第二个可观测事件（逐钩子检查已经使「链末才发现违规」不可
+///   独立构造），故被钩子改坏的目标不会漏到线上。链路标识与 Cookie 附着排在第一道闸之前，钩子因此看得见
+///   它们，也正因如此那两枚字段里有保留头。
+/// - **一问一答的配对**：一次交换至多问一次 `before_request`（`open_sse` 每次重连是一条新交换、各问一次），
+///   至多问一次 `after_response`；只有**成功交出应答**的那次才问收摊问——失败、取消、策略拒绝与三条流式腿
+///   （它们的收摊值不是 `Response`）一概不问。
+/// - **短路只在 `send`**：其余三条腿交出短路值即整次落 `http-request-invalid`，因为「宿主以为 mock 掉了、
+///   实际打到了真网」比一次明确的失败更难排查。
+///
 /// 流式接收（`open_stream()` + `net/http_stream.h` 的 `DataSink`）与物化路径共用上述全部协议语义，四条形态
 /// 差别单列在那里：线上字节不设限（`max_body_bytes()` 管的是物化路径的内存）、`deflate` 两型按包装头判定、
 /// 重定向跳的消息体不读、本腿无流式能力时直接失败而不悄悄物化。
@@ -99,7 +110,6 @@
 /// @note Thread: thread-safe（值语义客户端；`send` 的续体恒回主线程）
 /// @note Side-effects: `send` / `open_stream` 发起网络 I/O；构造与配置无副作用
 
-#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -110,16 +120,20 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_auth.h"
+#include "aurora/net/http_hook.h"
+#include "aurora/net/http_sse.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/net/policy.h"
 #include "aurora/net/proxy.h"
 #include "aurora/net/tls.h"
+#include "aurora/net/websocket.h"
 #include "aurora/state/coroutine.h"
 
 namespace aurora::net::detail {
 class HttpResponseCache;  ///< 实现侧缓存表：字段全部留在 `net/detail/http_cache.h`，公共头不暴露
 class HttpConnectionPool;  ///< 实现侧连接池：字段全部留在 `net/detail/http_pool.h`，公共头不暴露
 class HttpCookieJar;  ///< 实现侧 Cookie Jar：字段全部留在 `net/detail/http_cookie_jar.h`，公共头不暴露
+class ExchangeHookChain;  ///< 实现侧钩子链：字段全部留在 `net/detail/http_hook_chain.h`，公共头不暴露
 }  // namespace aurora::net::detail
 
 namespace aurora::net::http {
@@ -211,7 +225,7 @@ class Client {
     /// 判据与两枚时间旋钮的分工见 `RetryPolicy` 的头注释。
     /// @param value 重试策略。
     /// @return 自身引用，便于链式调用。
-    auto retry_policy(RetryPolicy value) -> Client & {
+    auto retry_policy(const RetryPolicy &value) -> Client & {
         retry_ = value;
         return *this;
     }
@@ -327,11 +341,42 @@ class Client {
     /// 一枚配置代次，池条目对不上代次即不复用——改了信任根不该悄悄坐旧连接。关掉开关即清空现有空闲连接。
     /// @param value 池口径。
     /// @return 自身引用，便于链式调用。
-    auto pool(PoolOptions value) -> Client &;
+    auto pool(const PoolOptions &value) -> Client &;
 
     /// @brief 查看连接池口径。
     /// @return 口径的只读引用（`enabled` 缺省假 = 一次交换一条连接、用完即关）。
     [[nodiscard]] auto pool() const -> const PoolOptions & { return pool_options_; }
+
+    /// @brief 装本客户端的事件流重连口径（`open_sse` 专用；缺省开重连、额度 8 次、窗口初值 3 秒）。
+    ///
+    /// 与 `pool()` / `cache()` 相反，这里的缺省是**开**：事件流是一条没有结束的流，关掉重连等于把「对端重启、
+    /// 网络抖一下」这一类最常见的现实变成宿主自己接的活，而续传标识恰恰只有库知道该在什么时刻带上。
+    /// 逐请求由 `Request::sse()` 覆盖。
+    /// @param value 重连口径。
+    /// @return 自身引用，便于链式调用。
+    auto sse(SseOptions value) -> Client &;
+
+    /// @brief 查看事件流重连口径。
+    /// @return 口径的只读引用（`reconnect` 缺省真 = 一条流断了就再接一条，直到额度用尽或宿主收摊）。
+    [[nodiscard]] auto sse() const -> const SseOptions & { return sse_options_; }
+
+    /// @brief 登记一枚交换钩子，返回**必须在登记期间存活**的句柄。
+    ///
+    /// 钩子在每次交换起手时被问一次 `before_request`（策略闸之后、缓存查表与重试环之前），在成功交出应答时
+    /// 被问一次 `after_response`；判据、并发口径与三条硬约束见 `net/http_hook.h`。链上按登记次序跑，同一枚
+    /// 实例登记两次就跑两次（本入口不去重——「同一份逻辑挂两处」是宿主自己的决定）。
+    ///
+    /// 链是**共享状态**：`Client` 的拷贝共用同一条链（与缓存表、连接池同一格局）。返回的句柄 move-only，析构
+    /// 即摘除本次登记；忽略返回值等于登记后立刻摘除。句柄不延长链的生命期：所有 `Client` 都没了，链即销毁，
+    /// 句柄析构为空操作。
+    ///
+    /// 在途交换看的是起手那一刻的快照：回调期间注销链上任何一枚都不会影响本次交换，也不会把它的实现对象在
+    /// 本次交换中途析构。
+    /// @param hook 钩子（由链持有）；空指针即一次空登记，链上无条目。
+    /// @return 登记句柄；空指针登记返回空句柄。
+    /// @note 钩子不得持有本 `Client`（链 → 钩子 → `Client` → 链是引用环）；要在回调里发起交换，用另一枚不挂
+    ///       同一组钩子的客户端。
+    [[nodiscard]] auto use(std::shared_ptr<ExchangeHook> hook) const -> ExchangeHookRegistration;
 
     /// @brief 发送一次请求并物化应答：连接 → 写出 → 逐段装配 → 透明解压 → 按 `Location` 跟随重定向。
     ///
@@ -394,7 +439,100 @@ class Client {
     [[nodiscard]] auto open_stream(Request request, DataSink &sink, Cancellation cancellation = {}) const
         -> CoroTask<Result<StreamOutcome>>;
 
+    /// @brief 订阅一次 `text/event-stream`：逐条事件交付，一条流断了就带着续传标识再接一条。
+    ///
+    /// 本入口住在 `open_stream()` **之上**而不是旁边：分帧、透明解压、重定向、三档超时、连接池、Cookie 与
+    /// 策略闸全都由那条腿原样兑现，这里只加两件事——行与字段的语义（判据见 `net/http_sse.h` 与库内
+    /// `net/detail/http_sse.h`）与「重连之后还是同一次订阅」这层会话状态。七条形态差别另有：
+    /// - **一次调用 = 一个订阅，不是一条交换**：`SseOutcome::exchanges` 随重连增长，`SseSink::on_open` 每条流
+    ///   各叫一次（那是宿主唯一能知道「流断过」的出口）。
+    /// - **重连窗口只有一个来源**：服务端写的 `retry:` 原样采用，**不封顶、不指数退避、不加抖动**——「这条流
+    ///   多久之后该重连」是服务端的事，它是唯一知道自己为什么断了的一方；「本库最多替宿主试几次」是本地
+    ///   决定，由 `SseOptions::max_reconnects` 收敛。服务端从未写 `retry:` 才用 `retry_default` 作初值。
+    /// - **只有「这条流断了」才重连**：非 2xx 应答、`Content-Type` 不是 `text/event-stream`（允许带参数）、
+    ///   单行或单条事件越限三族都是**终止失败**——重连一万次拿到的也是同一个答案，落
+    ///   `http-protocol-error` / `net-framer-overflow` / `net-buffer-limit` 且不重连。取消同理（落
+    ///   `net-cancelled`，已交付给宿主的事件不回滚）。传输类失败与对端干净收摊算「断了」。
+    ///   这条判定**不看 `Error::retryable`**：那枚旗位说的是「同一条请求原样重发有没有意义」（`net-recv-failed`
+    ///   因此标假——读了一半的字节流不能续），而订阅问的是另一件事；按旗位筛会把对端砸断连接这种最常见的断流
+    ///   形态判成「别再试了」，于是自动重连在最该生效的地方不生效。
+    /// - **额度用尽不新造码**：交出的是最后一次交换的真实失败并在 detail 点名额度已尽；最后一次交换本身干净
+    ///   时仍是成功结局，由 `SseOutcome::reconnect_exhausted` 表达「我停了，不是因为服务端说完了」。
+    /// - **方法只认 GET**：事件流的语义就是一条 GET 出来的长应答，其余方法起手即落 `http-request-invalid`——
+    ///   既不静默改成 GET（那会让调用方以为发出去了体），也不照发（那会打出一个本库不认识的协议）。
+    /// - **`Last-Event-ID` 只在非空时带**：从未有过 `id:` 字段就没必要发一枚内容为空的头；服务端用空值 id
+    ///   表达「清空续传标识」，其线上形态同样是不带。
+    /// - **不查也不写缓存表**：`open_stream` 那侧「只读不写」的理由在这里更进一步——一次订阅要的是**此刻之后**
+    ///   的事件，一份新鲜的历史副本对它没有任何意义，照着交付反而会让宿主以为收到了新事件。
+    ///
+    /// `Timeouts` 的三档管的是**单条流**（每（重）建一条流各拿一份），不是整个订阅；会话的收口靠
+    /// `cancellation` 与额度。本腿无流式能力（`Engine::capabilities().streaming` 为假，如 wasm）时直接落
+    /// `net-platform-unavailable`，绝不退化成「物化一份应答再慢慢切行」——那等于把一条不会结束的流等成一次
+    /// 也不会结束的挂死。协程出口，续体恒回主线程。
+    /// @param request 待订阅的请求（只认 GET；按值接管以随协程帧存活，调用后可立即销毁源对象）。
+    /// @param sink 订阅侧宿主；**按引用**交付，其生命周期必须覆盖到协程收尾（`is_done()` 之后）。
+    /// @param cancellation 本次订阅的取消令牌（共享状态句柄，缺省 = 独立令牌、无人可取消）。
+    /// @return 可 `co_await` 的协程任务：成功携 `SseOutcome`，失败携对应 `http-*` / `net-*` 错误码。
+    /// @note Thread: `sink` 的四个入口恒在主线程同步调用，由本协程串行驱动
+    /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
+    [[nodiscard]] auto open_sse(Request request, SseSink &sink, Cancellation cancellation = {}) const
+        -> CoroTask<Result<SseOutcome>>;
+
+    /// @brief 发起一次 `ws://` / `wss://` 升级握手，成功交出一条自持读环的会话句柄。
+    ///
+    /// 本入口是 `Client` 三条发起腿里的第三条（`send` 物化、`open_stream` / `open_sse` 交付、本件升级），它
+    /// 复用前两条腿的地基而不复用它们的骨架：解析与双栈竞速、代理隧道或转发、TLS 信任根、策略闸、链路标识、
+    /// Cookie 附着与收取、`Timeouts` 全部照旧兑现；而应答侧的装配器、重定向环、重试环、缓存表与分帧解码**一律
+    /// 不进来**——101 之后这条连接不再是「一次交换」，把 `ResponseAssembler` 套上去它会把 101 当场判成协议违例
+    /// （那是 HTTP 侧正确的判断，只是不适用于升级）。握手字节层与判定在 `net/detail/ws_handshake.h`，会话状态
+    /// 在 `net/detail/ws_session.h`，形态约束的完整口径见 `net/websocket.h` 的文件头。
+    ///
+    /// 六条与另两腿不同的落点（规范性）：
+    /// - **方法只认 `GET`**：其余方法起手即落 `http-request-invalid`，既不静默改成 `GET`（那会让调用方以为
+    ///     发出去了体），也不照发（那会打出一个本库不认识的协议）。
+    /// - **不重试、不跟随重定向**：一条已经升级的连接没法「换个地址再升一次」，而 `RetryPolicy` 的「原样重发」
+    ///     在这里意味着再打一枚 `Sec-WebSocket-Key` 去问同一件事——服务端把它当成两次独立握手是常态。3xx 与非
+    ///     2xx 同样由 `validate_ws_handshake()` 点名状态码后落 `ws-handshake-rejected`。
+    /// - **不进连接池**：句柄是这条连接的唯一持有者，池既拿不到它也收不回它；`PoolOptions` 在本腿上无事可管，
+    ///     握手一律起新连接。复用与「同一条长连接」在两处说的是相反的事。
+    /// - **不查也不写缓存表**：一次升级要的是此刻之后的帧，一份历史副本对它没有意义。
+    /// - **超时与取消管到握手结算为止**：`Timeouts::connect` 照旧管建连（含 TLS 握手），`Timeouts::total` 管
+    ///     整段握手（写出请求到读出 `101`）；`Timeouts::read_idle` 在本腿上无事可管——升级后的读环属于会话而不
+    ///     属于这次交换，它的时限由 `WebSocketOptions` 的两枚心跳旋钮表达。令牌到点或被取消只影响握手，不会
+    ///     掐一条宿主正在使用的会话（口径同 `net/websocket.h`）。
+    /// - **`101` 之后读多的字节属于帧流**：一次读不会刚好停在头部块的边界上，那一段原样交给会话先喂分帧器，
+    ///     既不丢半条消息，也不把它当成「上一条消息的余货」判成畸形。
+    ///
+    /// 本腿无裸流式能力（`Engine::capabilities().streaming` 为假，如 wasm）时起手即落 `net-platform-unavailable`
+    /// （裁决见提案 §16 第 3 项：浏览器 `fetch` 那侧连可读的 socket 都不给，要接原生 `WebSocket` 是另一件事）。
+    /// 协程出口，续体恒回主线程。
+    /// @param request 待升级的请求（只认 `GET`；按值接管以随协程帧存活，调用后可立即销毁源对象）。
+    /// @param sink 会话侧宿主；**按引用**交付，其生命周期必须覆盖到会话收尾——即句柄析构或 `on_closed` 之后。
+    ///             握手未成时本入口**不调用它的任何一口**（含 `on_closed`）：那次会话从未存在过，失败事实全部
+    ///             由返回的 `Result` 表达，两条通知路若各报一次，宿主就会在同一次调用里收到两个终态。
+    /// @param options 三枚上限、子协议与心跳两档（读定一次，此后改旋钮不影响已交出的会话）。
+    /// @param cancellation 握手段的取消令牌（缺省 = 独立令牌、无人可取消；结算后不再驱动会话）。
+    /// @return 可 `co_await` 的协程任务：成功携 `WebSocket` 句柄，失败携对应 `ws-*` / `http-*` / `net-*` 错误码。
+    /// @note Thread: `sink` 的四个入口恒在主线程同步调用，由会话的读环串行驱动
+    /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
+    [[nodiscard]] auto connect_websocket(Request request, WebSocketSink &sink, WebSocketOptions options = {},
+                                         Cancellation cancellation = {}) const -> CoroTask<Result<WebSocket>>;
+
   private:
+    /// @brief 流式腿的实现体：`open_stream()` 与 `open_sse()` 共用同一条编排，只有钩子看到的腿不同。
+    ///
+    /// 公共面为什么不留这枚参数：`ExchangeLeg` 是钩子面的事实，调用方没有理由（也没有资格）指定自己那条交换
+    /// 「算哪条腿」——它由入口决定。订阅层经由本入口把 `ServerSentEvents` 传下去，其余调用一律经
+    /// `open_stream()` 拿到 `Stream`。
+    /// @param request 待发送的请求（按值接管以随协程帧存活）。
+    /// @param sink 接收侧宿主；**按引用**交付，生命周期须覆盖到协程收尾。
+    /// @param cancellation 本次交换的取消令牌。
+    /// @param leg 交给钩子的腿。
+    /// @return 可 `co_await` 的协程任务：成功携 `StreamOutcome`，失败携对应 `http-*` / `net-*` 错误码。
+    /// NOLINTNEXTLINE(cppcoreguidelines-avoid-reference-coroutine-parameters): Sink 由调用方持有，帧只借用
+    [[nodiscard]] auto open_stream_impl(Request request, DataSink &sink, Cancellation cancellation,
+                                        ExchangeLeg leg) const -> CoroTask<Result<StreamOutcome>>;
+
     std::optional<std::uint64_t> max_body_bytes_;  ///< 物化体上限（nullopt = 不限）
     std::optional<std::uint64_t> max_decompressed_bytes_;  ///< 解压产物上限（nullopt = 跟随上一行）
     TlsContext tls_;  ///< https 握手口径
@@ -408,9 +546,12 @@ class Client {
     CacheOptions cache_options_;  ///< 缓存口径（缺省关）；逐请求由 `Request::no_cache()` 越
     std::shared_ptr<detail::HttpResponseCache> cache_;  ///< 共享的缓存表；拷贝的 Client 共用同一张
     PoolOptions pool_options_;  ///< 连接池口径（缺省关）
+    SseOptions sse_options_;  ///< 事件流重连口径（缺省开）；逐请求由 `Request::sse()` 覆盖
     std::shared_ptr<detail::HttpConnectionPool> pool_;  ///< 共享的连接池；拷贝的 Client 共用同一张
     std::shared_ptr<std::uint64_t> tls_generation_;  ///< TLS 配置代次（拷贝共享计数；`tls_context()` 每次改写自增）
     std::shared_ptr<detail::HttpCookieJar> cookie_jar_;  ///< Cookie Jar（空 = 裸 Client 不收不发；只有 Session 会装）
+    std::shared_ptr<detail::ExchangeHookChain>
+        hook_chain_;  ///< 共享的交换钩子链；拷贝的 Client 共用同一条（空 = 链不存在，快路径直接跳过）
 
     // 会话面是唯一给本客户端装 Cookie Jar 的地方（`Session` 持有 Jar，`client()` 交出的引用挂它）。
     friend class Session;

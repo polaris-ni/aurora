@@ -6,7 +6,8 @@
 #include <cstdint>
 #include <string>
 
-#include "aurora/net/detail/noncrypto_random.h"
+#include "aurora/core/result.h"
+#include "aurora/net/detail/random_draw.h"
 
 namespace aurora::net::detail {
 namespace {
@@ -37,13 +38,19 @@ auto append_hex(std::string &out, std::uint64_t value, std::size_t width) -> voi
 
 }  // namespace
 
-auto make_request_id() -> std::string {
-    const std::uint64_t head = noncrypto_u64();  // 前 64 位：time_low + time_mid + time_hi_and_version
-    const std::uint64_t tail = noncrypto_u64();  // 后 64 位：clock_seq + node
+auto make_request_id() -> Result<std::string> {
+    const auto head = random_u64();  // 前 64 位：time_low + time_mid + time_hi_and_version
+    if (!head) {
+        return head.error();
+    }
+    const auto tail = random_u64();  // 后 64 位：clock_seq + node
+    if (!tail) {
+        return tail.error();
+    }
     // 版本位压在第三段的首 nibble、变体位压在第四段的首 nibble（`RFC 9562 §4.4`）：先清再置，
     // 于是随机位只填其余 122 位，交出的文本恒是合法 UUIDv4。
-    const std::uint64_t version = (head & ~(UINT64_C(0xF) << 12)) | (UINT64_C(4) << 12);
-    const std::uint64_t variant = (tail & ~(UINT64_C(0x3) << 62)) | (UINT64_C(0x2) << 62);
+    const std::uint64_t version = (head.value() & ~(UINT64_C(0xF) << 12)) | (UINT64_C(4) << 12);
+    const std::uint64_t variant = (tail.value() & ~(UINT64_C(0x3) << 62)) | (UINT64_C(0x2) << 62);
     std::string out;
     out.reserve(36);
     append_hex(out, version >> 32, 8);

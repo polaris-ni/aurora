@@ -11,7 +11,8 @@
 
 #include "aurora/environment/environment.h"
 #include "aurora/i18n/locale.h"
-#include "aurora/i18n/string_table.h"
+#include "aurora/i18n/message_catalog.h"
+#include "aurora/i18n/message_id.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/display_list.h"
 #include "aurora/render/rhi/rhi_backend.h"
@@ -20,6 +21,25 @@
 #include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_button {
+
+// 测试词表：基址 901000（每文件独立区间，避免同进程测试桶内区间撞车）；
+// 名字与基址在此一次性登记，default_catalog 为进程级单例。
+inline constexpr aurora::MessageId AURORA_UTEST_TR_LABEL{901000};
+inline constexpr aurora::MessageId AURORA_UTEST_A11Y{901001};
+inline constexpr aurora::MessageId AURORA_UTEST_WIDTH{901002};
+inline constexpr aurora::MessageId AURORA_UTEST_NON_ASCII{901003};
+inline constexpr aurora::MessageId AURORA_UTEST_CACHE{901004};
+inline constexpr aurora::MessageId AURORA_UTEST_LITERAL{901005};
+
+auto ensure_button_vocab() -> void {
+    static const bool ONCE = [] {
+        (void)aurora::default_catalog().register_vocabulary(
+            901000, {"utest_button.tr_label", "utest_button.a11y", "utest_button.width", "utest_button.non_ascii",
+                     "utest_button.cache", "utest_button.literal"});
+        return true;
+    }();
+    (void)ONCE;
+}
 
 using aurora::testing::require_field;
 
@@ -265,11 +285,13 @@ AURORA_TEST_CASE(button_serialize_deserialize_roundtrip) {
 
 // ---- 标签 i18n：绘制 / 无障碍 / 自然宽同源，字面档输出不变 ----
 
-AURORA_TEST_CASE(button_tr_label_draws_string_table_text) {
-    auto &table = default_string_table();
-    const std::string key = "utest_button.tr_label";
+AURORA_TEST_CASE(button_tr_label_draws_catalog_text) {
+    ensure_button_vocab();
+    auto &table = aurora::default_catalog();
+    const auto key = AURORA_UTEST_TR_LABEL;
+    const std::string key_name = "utest_button.tr_label";
     const std::string translated = "Persist changes";
-    table.add(Locale{}, key, translated);
+    table.add(Locale{}, key_name, translated);
 
     // tr() 构造时 text 恒空、只带 key：修法前 paint_label 直读 label.get().text，画出来是空白。
     Button b;
@@ -277,7 +299,7 @@ AURORA_TEST_CASE(button_tr_label_draws_string_table_text) {
     AURORA_TEST_CHECK_TRUE(b.label.get().text.empty());
 
     LayoutEngine::layout(b, bounded(300.0F, 80.0F));
-    const BuildContext ctx;  // 无 Provider<Locale> 注入 → 回落 default_string_table() 的缺省档
+    const BuildContext ctx;  // 无 Provider<Locale> 注入 → 回落 default_catalog() 的缺省档
 
 #ifdef AURORA_ENABLE_DISPLAY_LIST
     const Rect box{.origin = Point{}, .size = b.size()};
@@ -299,9 +321,11 @@ AURORA_TEST_CASE(button_tr_label_draws_string_table_text) {
 }
 
 AURORA_TEST_CASE(button_accessibility_label_equals_drawn_text) {
-    auto &table = default_string_table();
-    const std::string key = "utest_button.a11y";
-    table.add(Locale{}, key, "Apply changes");
+    ensure_button_vocab();
+    auto &table = aurora::default_catalog();
+    const auto key = AURORA_UTEST_A11Y;
+    const std::string key_name = "utest_button.a11y";
+    table.add(Locale{}, key_name, "Apply changes");
 
     Button b;
     b.label = LocalizedString::tr(key);
@@ -321,10 +345,12 @@ AURORA_TEST_CASE(button_accessibility_label_equals_drawn_text) {
 }
 
 AURORA_TEST_CASE(button_natural_width_equals_resolved_label_width_plus_padding) {
-    auto &table = default_string_table();
-    const std::string key = "utest_button.width";
-    table.add(Locale{}, key, "Short");
-    table.add(Locale{.language = "zz"}, key, "Considerably longer caption");
+    ensure_button_vocab();
+    auto &table = aurora::default_catalog();
+    const auto key = AURORA_UTEST_WIDTH;
+    const std::string key_name = "utest_button.width";
+    table.add(Locale{}, key_name, "Short");
+    table.add(Locale{.language = "zz"}, key_name, "Considerably longer caption");
 
     Button b;
     b.label = LocalizedString::tr(key);
@@ -349,8 +375,10 @@ AURORA_TEST_CASE(button_natural_width_equals_resolved_label_width_plus_padding) 
 }
 
 AURORA_TEST_CASE(button_natural_width_covers_non_ascii_translation) {
-    auto &table = default_string_table();
-    const std::string key = "utest_button.non_ascii";
+    ensure_button_vocab();
+    auto &table = aurora::default_catalog();
+    const auto key = AURORA_UTEST_NON_ASCII;
+    const std::string key_name = "utest_button.non_ascii";
 
     Button b;
     b.label = LocalizedString::tr(key);
@@ -361,7 +389,7 @@ AURORA_TEST_CASE(button_natural_width_covers_non_ascii_translation) {
     if (translated.empty()) {
         AURORA_TEST_SKIP("no non-ASCII candidate has real glyph coverage in this platform's font face");
     }
-    table.add(Locale{}, key, translated);
+    table.add(Locale{}, key_name, translated);
     LayoutEngine::layout(b, bounded(400.0F, 80.0F));
     const float expected = render::FontEngine::measure_width(translated, f) + b.padding.left + b.padding.right;
     AURORA_TEST_CHECK_NEAR(b.size().width, expected, 1e-3F);
@@ -369,15 +397,17 @@ AURORA_TEST_CASE(button_natural_width_covers_non_ascii_translation) {
 }
 
 AURORA_TEST_CASE(button_paint_remeasures_when_display_text_changes_without_relayout) {
-    auto &table = default_string_table();
-    const std::string key = "utest_button.cache";
-    table.add(Locale{}, key, "Old");
+    ensure_button_vocab();
+    auto &table = aurora::default_catalog();
+    const auto key = AURORA_UTEST_CACHE;
+    const std::string key_name = "utest_button.cache";
+    table.add(Locale{}, key_name, "Old");
 
     Button b;
     b.label = LocalizedString::tr(key);
     LayoutEngine::layout(b, bounded(300.0F, 80.0F));  // 缓存落 "Old" 的量宽
 
-    table.add(Locale{}, key, "Substantially longer");  // 显示串变了，但刻意不重排
+    table.add(Locale{}, key_name, "Substantially longer");  // 显示串变了，但刻意不重排
     const BuildContext ctx;
 #ifdef AURORA_ENABLE_DISPLAY_LIST
     const Rect box{.origin = Point{}, .size = b.size()};
@@ -396,9 +426,11 @@ AURORA_TEST_CASE(button_paint_remeasures_when_display_text_changes_without_relay
 }
 
 AURORA_TEST_CASE(button_literal_label_output_is_unchanged) {
-    auto &table = default_string_table();
-    const std::string key = "utest_button.literal";
-    table.add(Locale{}, key, "Save");  // 表值恰好等于字面串
+    ensure_button_vocab();
+    auto &table = aurora::default_catalog();
+    const auto key = AURORA_UTEST_LITERAL;
+    const std::string key_name = "utest_button.literal";
+    table.add(Locale{}, key_name, "Save");  // 表值恰好等于字面串
 
     Button literal("Save");
     Button via_table;

@@ -1061,18 +1061,66 @@ auto Widget::request_focus() -> void {
     }
 }
 
-auto Widget::begin_system_drag() -> Result<DragAction> {
+Widget::~Widget() {
+    // 析构即取消在途系统拖出会话：事件驱动会话跨越多个帧，控件可能在会话期间被移除；
+    // 不取消则 OS 侧仍会回调 DragOffer::provide，访问已销毁的控件状态。终态回调的派活另按
+    // 双轨判活处理（shared_ptr 持有轨回收后 lock 失败即跳过；栈 / 成员对象轨的终态经帧循环
+    // 投递时控件可能已析构，故先把存活令牌置 false，回调据此跳过——cancel 只登记终态，
+    // 投递发生在之后的 pump_reads()，光靠「析构即取消」挡不住那次投递）。
+    if (drag_session_active_) {
+        drag_session_active_ = false;
+        if (drag_session_alive_) {
+            *drag_session_alive_ = false;
+        }
+        system_drag::cancel();
+    }
+}
+
+auto Widget::begin_system_drag() -> Result<void> {
     // 要约由控件自己声明（on_provide_drag），会话本身交给 system_drag 入口——控件层不认识
     // 平台后端，也不持有宿主句柄，这层只做「有数据才发起」的判据。
     const std::optional<DragOffer> offer = on_provide_drag();
     if (!offer.has_value()) {
+        // 控件自称无要约：从未发起过会话，故不派发终态（无可收尾的拖出态）。
         return make_error(ErrorCode::SystemDragNotSupported,
                           "begin_system_drag: the widget provides no drag offer (on_provide_drag returned nullopt)");
     }
-    const Result<DragAction> action = system_drag::begin(*offer);
-    // 无论成功与否都回报控件：会话结束是控件清理拖出态的唯一时机，失败同样要收尾。
-    on_system_drag_end(action ? action.value() : DragAction::None);
-    return action;
+    // 双轨判活（与 HitNode 同款）：由 shared_ptr 持有的控件以 weak_from_this() 守卫，
+    // 回收后跳过派发；栈 / 成员对象的控件其生命周期由持有者保证，靠「析构即取消」+
+    // 存活令牌兜底（终态经帧循环投递，光靠析构取消挡不住投递时的那一次解引用）。
+    const std::weak_ptr<Widget> self = weak_from_this();
+    const bool guarded = self.lock() != nullptr;
+    Widget *const raw = this;
+    const auto alive = std::make_shared<bool>(true);
+    drag_session_alive_ = alive;
+    Result<void> started =
+        system_drag::begin(*offer, [self, alive, guarded, raw](SystemDragOutcome outcome, DragAction action) {
+            std::shared_ptr<Widget> keepalive;
+            Widget *w = raw;
+            if (guarded) {
+                keepalive = self.lock();
+                w = keepalive.get();
+                if (w == nullptr) {
+                    return;  // 控件已回收：跳过派发
+                }
+            } else if (alive && !*alive) {
+                return;  // 控件已析构（析构即取消时置 false）：跳过派发
+            }
+            w->drag_session_active_ = false;  // 会话已终结：清在途标记
+            if (outcome == SystemDragOutcome::Cancelled) {
+                w->on_system_drag_cancel();  // 取消路径：cancel 严格早于 end 投递
+            }
+            w->on_system_drag_end(outcome, action);
+        });
+    if (!started) {
+        // 会话未建立（无后端 / 能力位 false / 要约不合法）：直接终态收尾，无 begin 回调。
+        on_system_drag_end(SystemDragOutcome::Failed, DragAction::None);
+        return started;
+    }
+    // 发起成功：会话已建立、进入拖动。
+    drag_session_active_ = true;
+    on_system_drag_begin();
+    return {};
 }
 
 auto Widget::collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void {}

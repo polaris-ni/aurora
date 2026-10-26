@@ -26,6 +26,7 @@
 #include "aurora/core/error_codes.h"
 #include "aurora/core/result.h"
 #include "aurora/net/blocking.h"
+#include "aurora/net/cancellation.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
 #include "aurora/net/http_stream.h"
@@ -42,6 +43,7 @@ namespace {
 using aurora::CoroTask;
 using aurora::ErrorCode;
 using aurora::Result;
+using aurora::net::Cancellation;
 using aurora::net::TlsContext;
 using aurora::net::http::Client;
 using aurora::net::http::DataSink;
@@ -452,14 +454,22 @@ AURORA_TEST_CASE(per_host_limit_queues_and_times_out_naming_the_queue) {
     Client client;
     allow_test_cleartext(client);
     client.pool(PoolOptions{.enabled = true, .max_connections_per_host = 1});
-    Timeouts limits;
-    limits.connect = std::chrono::milliseconds{80};
-    limits.total = std::chrono::milliseconds{400};
+    // 两条交换的时限刻意分档。这里曾共用一份 `connect=80ms / total=400ms`：占位方也在 400ms 到点，负载机
+    // 上它先收摊、把唯一名额归还，排队方随即领到一条真连接去建连——结局仍是一枚 `http-timeout`，但它报在
+    // total 档，detail 里不再有「排队」，判据就红在非库的那一半上。现让占位方何时收摊由本例自己决定：它拿
+    // 一份远超排队窗口的 total，本例收摊时才主动取消，于是「名额在整个窗口内被握着」是一件可断言的事实。
+    Timeouts queue_limits;
+    queue_limits.connect = std::chrono::milliseconds{80};
+    queue_limits.total = std::chrono::milliseconds{400};
+    Timeouts holder_limits;
+    holder_limits.connect = std::chrono::milliseconds{80};
+    holder_limits.total = std::chrono::seconds{30};
+    Cancellation release;
     Request holder = Request::get(loopback_url(peer.port()));
-    holder.timeouts(limits);
+    holder.timeouts(holder_limits);
     Request queuing = Request::get(loopback_url(peer.port(), "/queued"));
-    queuing.timeouts(limits);
-    auto held_task = client.send(std::move(holder));  // 占住唯一名额（在途，不是空闲）
+    queuing.timeouts(queue_limits);
+    auto held_task = client.send(std::move(holder), Cancellation{release});  // 占住唯一名额（在途，不是空闲）
     auto queued_task = client.send(std::move(queuing));
     AURORA_TEST_CHECK(aurora::test::net::drive_until("queued exchange settled", [&queued_task] {
                           return queued_task.is_done();
@@ -472,6 +482,9 @@ AURORA_TEST_CASE(per_host_limit_queues_and_times_out_naming_the_queue) {
     const auto &queued_error = queued_answer.error();
     AURORA_TEST_CHECK(queued_error.code_enum == ErrorCode::HttpTimeout);
     AURORA_TEST_CHECK(queued_error.message.find("queued") != std::string::npos);  // detail 点名「排队等不到」
+    // 排队那条收摊时占位方仍 in flight：这条把「排队」钉成唯一可能的成因——它若已收摊，排队方就没等过什么。
+    AURORA_TEST_CHECK(!held_task.is_done());
+    release.cancel();
     AURORA_TEST_CHECK(aurora::test::net::drive_until("holding exchange settled", [&held_task] {
                           return held_task.is_done();
                       }).satisfied);
@@ -479,7 +492,9 @@ AURORA_TEST_CASE(per_host_limit_queues_and_times_out_naming_the_queue) {
     AURORA_TEST_REQUIRE_MSG(bool(held_outer), held_outer ? std::string{} : held_outer.error().message);
     const auto &held_answer = held_outer.value();
     AURORA_TEST_CHECK(!bool(held_answer));
-    AURORA_TEST_CHECK(held_answer.error().code_enum == ErrorCode::HttpTimeout);  // 占位那条按 total 档收摊
+    // 占位那条由本例主动收摊，故落 `net-cancelled`；它原先那句「按 total 档收摊」在本文件不再承担——
+    // total 档的口径由 `utest_net_http_client` 的 `send_times_out_whole_request` 那条专例管。
+    AURORA_TEST_CHECK(held_answer.error().code_enum == ErrorCode::NetCancelled);
 }
 
 AURORA_TEST_CASE(streaming_path_reuses_the_pooled_connection_too) {

@@ -282,9 +282,9 @@ au::Text("Welcome").font_size(24).bold();
 | `FormField` | 单子字段包装；`error_text`（空 = 通过）；回调 `on_validate`；`validate()` / `clear_error()` |
 
 **`Button` 标签的 i18n 契约（绘制 / 无障碍 / 自然宽同源）**：`ButtonProps::label` 是 `LocalizedString`，经
-`tr(key)` 构造时 `text` 恒空、只带 `key`。故三处消费标签的路径一律经 `Button::resolved_label(ctx)` 查
-`StringTable`（`Environment` 注入了 `Locale` 就按它解析，否则回落 `Locale{}` 走 `default_string_table()`
-的缺省档）——**不得直读 `label.get().text`**，否则 `tr()` 出的键会被画成空白：
+`tr(MessageId)` 构造时 `text` 恒空、只带词条 Id（Id 来自构建期生成头的 `constexpr` 常量）。故三处消费标签的路径一律经 `Button::resolved_label(ctx)` 查
+`MessageCatalog`（`Environment` 注入了 `Locale` 就按它解析，否则回落 `Locale{}` 走 `default_catalog()`
+的缺省档）——**不得直读 `label.get().text`**，否则 `tr()` 出的词条会被画成空白：
 
 - `on_layout`：以解析后的显示串量宽，自然宽 = 量宽 + 左右内边距（`min_width` 不足时）；
 - `on_paint`：本帧只解析一次，`paint_label` 收到的是该串的**同一份副本**（按 const 引用传入），量宽与
@@ -359,7 +359,7 @@ au::Text("Welcome").font_size(24).bold();
 - **落位动画**：松手后 spring 收敛到目标槽位（初速度按帧间差分估计），静止才提交数据；`reduce_motion` 下直接落位（同 `Dismissible` / `AnimationController` 的短路语义）。自驱动 `tick_gestures`，不使用 `Animator`。
 - **近边缘自动滚动**：被拖项进入视口上下 48dp（`auto_scroll_threshold`）带内时按侵入深度比例滚动；滚动量吃进跟手位移（被拖项**屏幕位置守恒**）。拖拽期间滚轮被吞（同轴冲突）。虚拟化列表的重排**不做**（`LazyList` 保持只读滚动）。
 - **键盘替代路径**（`keyboard_reorder`，默认开）：指针拖拽不是唯一取径，键盘操作者可经「移动光标 → 抓取 → 落位」完成同一次重排。获焦落在**首个可见项**（不是第 0 项，也不触发滚动——恢复滚动位置的控件获焦后位置不变），`↑` / `↓` 移光标、`Home` / `End` 跳首尾（越界自动 `scroll_to_item` 拉回可视），`Space` / `Enter` 抓取与落位（落位即走与拖拽同一条 `reorder(from, to)` 提交通道），`Esc` 取消。抓取项以「抬起态」重绘，光标环仅在该列表**持有焦点**时绘制（`inherit_theme(ctx).primary`，抓取时加粗）。鼠标拖拽进行中键盘路径整体让位（`drag_state_ != Idle`），两条通道不会互相踩。
-- **键盘路径的可访问性与可定制性**：光标移动 / 抓取 / 落位 / 取消四类节点各播报一次（`Widget::announce` → `AccessibilityEventKind::Announcement`，文案键 `aurora.reorder.position` / `.grabbed` / `.dropped` / `.dropped_in_place` / `.cancelled`，经 `default_string_table()` 解析、缺失时回落内置英文串，故宿主可整表替换）；落位项与原位相同时播报「未移动」而非静默。方向键之所以能到达列表，依赖 `Widget::wants_navigation_keys()`（默认 `false`）这一控件级 opt-in：见 `05-event-navigation.md` §4.2。`set_keyboard_reorder(false)` 关闭该路径（进行中的抓取同时清除），光标状态可经 `keyboard_index()` / `is_keyboard_grabbed()` / `keyboard_grab_index()` 观测，也可用 `set_keyboard_index(i)` 程序化设定。
+- **键盘路径的可访问性与可定制性**：光标移动 / 抓取 / 落位 / 取消四类节点各播报一次（`Widget::announce` → `AccessibilityEventKind::Announcement`，词条 Id `msg::AURORA_REORDER_POSITION` / `.GRABBED` / `.DROPPED` / `.DROPPED_IN_PLACE` / `.CANCELLED`，对应规范名 `aurora.reorder.position` 等五条，经 `default_catalog()` 按 Id 解析、缺失时回落控件内声明的英文串，故宿主可整表登记译文）；落位项与原位相同时播报「未移动」而非静默。方向键之所以能到达列表，依赖 `Widget::wants_navigation_keys()`（默认 `false`）这一控件级 opt-in：见 `05-event-navigation.md` §4.2。`set_keyboard_reorder(false)` 关闭该路径（进行中的抓取同时清除），光标状态可经 `keyboard_index()` / `is_keyboard_grabbed()` / `keyboard_grab_index()` 观测，也可用 `set_keyboard_index(i)` 程序化设定。
 
 ### 3.5 结构与生命周期
 
@@ -372,7 +372,7 @@ au::Text("Welcome").font_size(24).bold();
 | `Hero` | 共享元素转场包装（`navigation/hero.h`）；`tag`（跨页配对键），单子节点 |
 | `Canvas` | 自定义绘制回调，用于高频绘制场景 |
 | `Dismissible` | 滑动消除包装（`widget/dismissible.h`）：单子节点沿 `axis`（默认 Horizontal）拖拽至阈值后消除，对标 Flutter `Dismissible`；手势由每帧 `tick` 驱动 |
-| `CommandPalette` | 模态命令面板（`widget/command_palette.h`）：居中浮层，按关键字模糊检索并执行命令，依赖 `CommandRegistry`（未绑定时为空列表）；`open` / `close` 切换。搜索框占位符与空态提示是**控件内置**上屏文案，按 `command_palette.placeholder` / `command_palette.no_results` 查表（见 [`07-environment-modifier.md`](07-environment-modifier.md) §6.2），可经 `set_placeholder` / `set_empty_message` 覆盖文本，或经 `set_placeholder_key` / `set_empty_message_key` 换 key |
+| `CommandPalette` | 模态命令面板（`widget/command_palette.h`）：居中浮层，按关键字模糊检索并执行命令，依赖 `CommandRegistry`（未绑定时为空列表）；`open` / `close` 切换。搜索框占位符与空态提示是**控件内置**上屏文案，按词条 Id `msg::AURORA_COMMAND_PALETTE_PLACEHOLDER` / `.NO_RESULTS`（规范名 `command_palette.placeholder` / `.no_results`，见 [`07-environment-modifier.md`](07-environment-modifier.md) §6.2）查表，可经 `set_placeholder` / `set_empty_message` 覆盖为字面文本（覆盖后不再走 i18n），或经 `set_placeholder_key` / `set_empty_message_key` 换词条 Id（换 Id 会清掉此前的文本覆盖） |
 
 ### 3.6 图像、绘制与占位
 

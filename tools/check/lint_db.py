@@ -259,7 +259,7 @@ def preprocess_deps(args: list[str], directory: str,
     为什么用编译器的 `-MM` 而不是 ninja 的 `ninja -t deps`：后者只认**已经构建过**
     的目标，而 `demos` 是 EXCLUDE_FROM_ALL——它们不在构建图里，却实实在在在编译库里、
     也实实在在会因为改一个公共头而产生新告警（本机实测：keycode.h 的
-    `readability-string-compare` 正是从 `demo_google_play.cpp` 这个 TU 报出来的）。
+    `readability-string-compare` 正是从一个已退役的应用级 demo TU 报出来的）。
     用构建图选集会正好漏掉这一类 TU，故依赖只能来自编译库自身。
 
     失败一律返 None（超时 / 非 MSVC 编译器 / 编译器缺失），由调用方决定保守口径：

@@ -5,6 +5,8 @@
 /// 无子项退化、初始化列表取首项、step 序列化往返、滚轮余量回传（嵌套滚动协调）、
 /// snap/paging 收位短滑动（含 Center 对齐与半页回弹）、reduce-motion 直落端点、
 /// scroll_to 的即时/动画/夹取语义、offset_signal 随各通道发布、snap 三属性自描述与序列化往返，
+/// 拖入自动滚边的控件级接线（Over 落点在边缘带内按帧推进 offset、方向跟落点所在带、带外 /
+/// nullopt / 已到边缘即收车、帧钟为假想钟），
 /// 以及 scroll_regression 段（计数类门槛 G-5 至 G-8，阈值取自 tools/check/perf_gates.json，
 /// 仅在 AURORA_ENABLE_PROFILING=ON 时生效，否则注册为 skip）
 
@@ -1130,6 +1132,60 @@ AURORA_TEST_CASE(hit_node_origin_agrees_with_window_bounds) {
     AURORA_TEST_REQUIRE(it != chain.end());
     const Rect wb = require_value(f.rows[idx]->window_bounds());
     AURORA_TEST_CHECK(it->origin.y == wb.origin.y);  // 容差 0：逐位相等
+}
+
+// ---- 拖入自动滚边的控件级接线（系统拖放 Over 态驱动、帧计时推进、收车）----
+
+AURORA_TEST_CASE(drag_auto_scroll_advances_scroll_on_frame_ticks_and_releases) {
+    // 控件级契约：Over 落点在边缘带内 ⇒ Scroll 在自己的帧计时里逐帧推进 offset
+    // （复用既有 offset_y_，不新增滚动实现）；方向跟落点所在带（上带负 / 底带正）；
+    // 落点移出带外即就地收车、nullopt（Leave / Drop）即收车、已到可滚边缘亦收车。
+    // 帧钟为假想钟（pump 每帧 16ms）；内核首帧 dt 兜底 1/60。
+    ScrollFixture f = make_scrollable(400.0F);
+    Scroll &s = *f.scroll;
+    const float max_offset = AURORA_CONTENT_H - AURORA_VIEW_H;  // 800 − 200 = 600
+    AURORA_TEST_CHECK_NEAR(s.offset_y(), 400.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(max_offset, 600.0F, 1e-4F);
+
+    // 接管返回值恒 true（本控件即可滚动祖先，意图到此不再上溯）。
+    AURORA_TEST_CHECK_TRUE(s.on_system_drag_auto_scroll(Point{.x = 150.0F, .y = 0.0F}));  // 顶带全深
+
+    // 首帧 −600 × (1/60) = −10；次帧起 dt = 16ms ⇒ −9.6。
+    pump(s, 1);
+    AURORA_TEST_CHECK_NEAR(s.offset_y(), 390.0F, 1e-3F);
+    pump(s, 1);
+    AURORA_TEST_CHECK_NEAR(s.offset_y(), 380.4F, 1e-3F);
+
+    // 落点改到底带：方向随即翻转（正 = offset 增大），会话仍在推进。
+    AURORA_TEST_CHECK_TRUE(s.on_system_drag_auto_scroll(Point{.x = 150.0F, .y = 200.0F}));  // 底带全深
+    pump(s, 1);
+    AURORA_TEST_CHECK_NEAR(s.offset_y(), 390.0F, 1e-3F);
+
+    // 落点移出触发带（视口中部）：本帧零增量且就地收车，之后帧计时不再推进。
+    AURORA_TEST_CHECK_TRUE(s.on_system_drag_auto_scroll(Point{.x = 150.0F, .y = 100.0F}));
+    pump(s, 1);
+    AURORA_TEST_CHECK_NEAR(s.offset_y(), 390.0F, 1e-3F);
+    pump(s, 3);
+    AURORA_TEST_CHECK_NEAR(s.offset_y(), 390.0F, 1e-3F);
+
+    // 重新落回底带继续推进（收车不烧毁状态；重驱动后首帧 dt 重回 1/60 兜底）。
+    AURORA_TEST_CHECK_TRUE(s.on_system_drag_auto_scroll(Point{.x = 150.0F, .y = 200.0F}));
+    pump(s, 1);
+    AURORA_TEST_CHECK_NEAR(s.offset_y(), 400.0F, 1e-3F);
+
+    // Leave / Drop 收车（nullopt）：帧计时摘除（tick 早退），offset 冻结。
+    AURORA_TEST_CHECK_TRUE(s.on_system_drag_auto_scroll(std::nullopt));
+    const float frozen = s.offset_y();
+    pump(s, 5);
+    AURORA_TEST_CHECK_NEAR(s.offset_y(), frozen, 1e-3F);
+
+    // 已到可滚边缘：推进被夹住即收车（单次拖放不会再有反方向意图），不再反复顶墙。
+    ScrollFixture tail = make_scrollable(590.0F);
+    AURORA_TEST_CHECK_TRUE(tail.scroll->on_system_drag_auto_scroll(Point{.x = 150.0F, .y = 200.0F}));
+    pump(*tail.scroll, 1);
+    AURORA_TEST_CHECK_NEAR(tail.scroll->offset_y(), max_offset, 1e-3F);  // 夹到末端
+    pump(*tail.scroll, 3);
+    AURORA_TEST_CHECK_NEAR(tail.scroll->offset_y(), max_offset, 1e-3F);  // 收车后不再推进
 }
 
 }  // namespace aurora::test_cases::utest_scroll

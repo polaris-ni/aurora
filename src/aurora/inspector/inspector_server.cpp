@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -16,6 +17,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -27,11 +29,243 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/net/blocking.h"
+#include "aurora/net/http_observability.h"
+#include "aurora/net/observability.h"
 #include "aurora/state/async.h"
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/yaml.h"
+#include "route_match.h"
 
 namespace aurora {
+
+namespace {
+
+/// @brief 按已取的策略快照呈现一枚树属性文本：键为 `tree.<属性键>`，分级恒为 Sensitive。
+///
+/// 不转调公共 `present_field()`：那枚 helper 每次调用都重读进程级策略槽，一棵树逐叶重读会让
+/// 中途安装 / 卸载策略把同一份导出切成两种口径。此处由调用方先取一份快照，整份文档一致。
+/// @param policy 本次导出持有的策略快照（非空）。
+/// @param key 键词汇（`tree.<属性键>`）。
+/// @param value 原始文本。
+/// @return 经两段式裁决后的最终文本；策略抛出时回退到折叠形态。
+auto present_tree_text(const net::ExportPolicy &policy, std::string_view key, std::string_view value) -> std::string {
+    constexpr std::string_view folded = "***";
+    bool allowed = false;
+    try {
+        allowed = policy.allows(net::ExportSurface::InspectorJson, key, net::FieldClass::Sensitive);
+    } catch (...) {
+        allowed = false;  // 策略实现抛出按「不放行」处理，与 present_field 的兜底同口径
+    }
+    const std::string base = allowed ? std::string{value} : std::string{folded};
+    try {
+        return policy.present(net::ExportSurface::InspectorJson, key, net::FieldClass::Sensitive, base);
+    } catch (...) {
+        return std::string{folded};
+    }
+}
+
+/// @brief 折叠一枚属性值的全部字符串叶子；容器结构与数字 / 布尔 / null 原样保留。
+///
+/// 键在整棵属性值内沿用顶层属性名：策略词汇只认 `tree.<属性键>`，嵌套成员名不另立键，
+/// 否则同一属性会因内层字段名不同而被拆成多条互不知情的策略项。
+/// @param policy 本次导出持有的策略快照。
+/// @param key 顶层属性键（`tree.<属性键>`）。
+/// @param value 属性值。
+/// @return 折叠后的属性值。
+auto redact_prop_value(const net::ExportPolicy &policy, std::string_view key, const Json &value) -> Json {
+    if (const auto text = value.as_string(); text.has_value()) {
+        return Json{present_tree_text(policy, key, text.value())};
+    }
+    if (value.is_object()) {
+        Json out = Json::object();
+        for (const auto &entry : value.entries()) {
+            out.set(entry.key, redact_prop_value(policy, key, entry.value));
+        }
+        return out;
+    }
+    if (value.is_array()) {
+        Json out = Json::array();
+        for (const Json &item : value) {
+            out.push_back(redact_prop_value(policy, key, item));
+        }
+        return out;
+    }
+    return value;
+}
+
+/// @brief 折叠 `props` / `values` 对象：属性名与容器结构保留，只有字符串叶子换形态。
+/// @param policy 本次导出持有的策略快照。
+/// @param props 属性对象。
+/// @return 折叠后的属性对象。
+auto redact_prop_object(const net::ExportPolicy &policy, const Json &props) -> Json {
+    Json out = Json::object();
+    for (const auto &entry : props.entries()) {
+        const std::string key = "tree." + std::string{entry.key};
+        out.set(entry.key, redact_prop_value(policy, key, entry.value));
+    }
+    return out;
+}
+
+/// @brief 折叠一棵树文档：逐节点的 `props` 走属性折叠，`type` / `focused` / 节点次序原样。
+/// @param policy 本次导出持有的策略快照。
+/// @param node 树节点（`{type, props, children}`）。
+/// @return 折叠后的节点；非对象原样返回。
+auto redact_tree_node(const net::ExportPolicy &policy, const Json &node) -> Json {
+    if (!node.is_object()) {
+        return node;
+    }
+    Json out = Json::object();
+    for (const auto &entry : node.entries()) {
+        if (entry.key == "props" && entry.value.is_object()) {
+            out.set(entry.key, redact_prop_object(policy, entry.value));
+        } else if (entry.key == "children" && entry.value.is_array()) {
+            Json children = Json::array();
+            for (const Json &child : entry.value) {
+                children.push_back(redact_tree_node(policy, child));
+            }
+            out.set(entry.key, std::move(children));
+        } else {
+            out.set(entry.key, entry.value);
+        }
+    }
+    return out;
+}
+
+/// @brief 折叠单控件记录的 `values`；`descriptor`（含 name 与 property_names）原样。
+/// @param policy 本次导出持有的策略快照。
+/// @param record `{descriptor, values}` 记录。
+/// @return 折叠后的记录；非对象原样返回。
+auto redact_widget_record(const net::ExportPolicy &policy, const Json &record) -> Json {
+    if (!record.is_object()) {
+        return record;
+    }
+    Json out = Json::object();
+    for (const auto &entry : record.entries()) {
+        if (entry.key == "values" && entry.value.is_object()) {
+            out.set(entry.key, redact_prop_object(policy, entry.value));
+        } else {
+            out.set(entry.key, entry.value);
+        }
+    }
+    return out;
+}
+
+/// @brief Release 构建下 network 端点的确定形态：与既有调试门面的 unavailable 形状一致。
+/// @return `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`。
+auto network_unavailable_json() -> Json {
+    Json out = Json::object();
+    out.set("available", Json{false});
+    out.set("reason", "AURORA_ENABLE_DEBUG not enabled");
+    return out;
+}
+
+/// @brief 活动条目的 JSON 形态；可选失败归因缺席时写 null，字段集合不随结局变化。
+/// @param entry 已按 `InspectorJson` 面呈现的条目。
+/// @return 条目 JSON。
+auto activity_entry_json(const net::http::HttpActivityEntry &entry) -> Json {
+    Json out = Json::object();
+    out.set("exchange_id", entry.exchange_id);
+    out.set("request_id", entry.request_id);
+    out.set("method", entry.method);
+    out.set("path", entry.path);
+    out.set("host", entry.host);
+    out.set("hop", entry.hop);
+    out.set("pass", entry.pass);
+    out.set("status", entry.status);
+    out.set("error_code", entry.error_code);
+    out.set("error_class",
+            entry.error_class ? Json{std::string{net::http::error_class_text(*entry.error_class)}} : Json{});
+    out.set("failed_stage",
+            entry.failed_stage ? Json{std::string{net::http::http_stage_text(*entry.failed_stage)}} : Json{});
+    out.set("elapsed_us", entry.elapsed.count());
+    out.set("sent", entry.sent);
+    out.set("received", entry.received);
+    out.set("in_flight", Json{entry.in_flight});
+    out.set("abandoned", Json{entry.abandoned});
+    out.set("reused_connection", Json{entry.reused_connection});
+    out.set("from_cache", Json{entry.from_cache});
+    out.set("truncated", Json{entry.truncated});
+    return out;
+}
+
+/// @brief 一跳时间线的 JSON 形态；阶段名走稳定令牌，偏移与总耗时一律微秒。
+/// @param timeline 时间线。
+/// @return 时间线 JSON。
+auto request_timeline_json(const net::http::HttpRequestTimeline &timeline) -> Json {
+    Json marks = Json::array();
+    for (const auto &mark : timeline.marks) {
+        Json item = Json::object();
+        item.set("stage", std::string{net::http::http_stage_text(mark.stage)});
+        item.set("offset_us", mark.offset.count());
+        marks.push_back(std::move(item));
+    }
+    Json out = Json::object();
+    out.set("exchange_id", timeline.exchange_id);
+    out.set("request_id", timeline.request_id);
+    out.set("hop", timeline.hop);
+    out.set("pass", timeline.pass);
+    out.set("total_us", timeline.total.count());
+    out.set("in_flight", Json{timeline.in_flight});
+    out.set("reused_connection", Json{timeline.reused_connection});
+    out.set("marks", std::move(marks));
+    return out;
+}
+
+/// @brief ASCII 小写化：host 过滤的大小写不敏感只按协议字母表比对，不引入 locale。
+/// @param text 原始文本。
+/// @return 仅大写字母被折成小写后的副本。
+auto ascii_lower(std::string_view text) -> std::string {
+    std::string out{text};
+    for (char &character : out) {
+        if (character >= 'A' && character <= 'Z') {
+            character = static_cast<char>(character - 'A' + 'a');
+        }
+    }
+    return out;
+}
+
+/// @brief 查询串里是否存在同名参数（用于区分「缺省」与「给了空值」）。
+/// @param path 含查询串的请求目标。
+/// @param key 参数名。
+/// @return 同名参数出现即 true。
+auto query_has_param(const std::string &path, std::string_view key) -> bool {
+    const auto q = path.find('?');
+    if (q == std::string::npos) {
+        return false;
+    }
+    std::string_view query = std::string_view{path}.substr(q + 1);
+    while (true) {
+        const auto amp = query.find('&');
+        const std::string_view pair = query.substr(0, amp);
+        const auto eq = pair.find('=');
+        if (pair.substr(0, eq) == key) {
+            return true;
+        }
+        if (amp == std::string_view::npos) {
+            return false;
+        }
+        query.remove_prefix(amp + 1);
+    }
+}
+
+/// @brief 解析非负整数查询参数；空串、负号、非数字与溢出都算非法。
+/// @tparam T 无符号目标类型。
+/// @param text 参数原值。
+/// @param out 解析结果（仅在返回 true 时有效）。
+/// @return 完整消费整段文本且无错为 true。
+template <typename T>
+auto parse_uint_param(std::string_view text, T &out) -> bool {
+    if (text.empty()) {
+        return false;
+    }
+    const auto *first = text.data();
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): from_chars 要 [first, last) 两端
+    const auto *last = text.data() + text.size();
+    const auto result = std::from_chars(first, last, out);
+    return result.ec == std::errc{} && result.ptr == last;
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Impl — 传输层句柄全部为 aurora::net 类型（平台 socket 词汇零出现）
@@ -63,8 +297,56 @@ struct InspectorServer::Impl {
     /// 根为空时统一回 500，`fn` 只在根有效时被调用。
     auto on_tree(const std::function<std::string(Node &)> &fn) -> std::string;
 
+    // 借用而非持有：四枚值在 route_request 栈上活到 handler 返回，复制一份字符串只会多付一次分配。
+    // NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
+    /// @brief 一次已命中路由的调用事实；四枚字段在派发期间借用 `route_request` 的实参。
+    struct RouteCall {
+        const std::string &method;  ///< 请求动词（已通过条目的位掩码闸门）
+        const std::string &path;  ///< 含查询串的原样请求目标
+        const std::string &route;  ///< 已剥离查询串的路径
+        const std::string &body;  ///< 请求体（无体时为空串）
+    };
+    // NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
+
+    /// @brief 路由处理函数：只在路由命中且动词通过派发处闸门后被调用。
+    using RouteHandler = std::string (Impl::*)(const RouteCall &);
+
+    /// @brief 路由表条目：匹配形态、允许的动词位掩码、405 文案标签与处理函数。
+    struct RouteEntry {
+        std::string_view pattern;  ///< 精确项为整条路径，前缀项自带尾斜杠
+        inspector::detail::RouteKind kind;  ///< 匹配形态
+        std::uint8_t methods;  ///< 接受的动词位掩码
+        std::string_view label;  ///< 405 文案里的端点名（前缀族不带尾斜杠）
+        RouteHandler handler;  ///< 命中后的处理函数
+    };
+
+    /// @brief 生产路由表：精确项与前缀族各成一段，匹配次序由 `match_route` 决定。
+    static auto routes() -> std::span<const RouteEntry>;
+
     // HTTP 路由：返回完整 HTTP 响应字符串
     auto route_request(const std::string &method, const std::string &path, const std::string &body) -> std::string;
+
+    // 各端点处理函数（动词闸门已在 route_request 统一裁决，函数体内不再重复判定）
+    auto handle_debug_state(const RouteCall &call) -> std::string;
+    auto handle_debug_snapshot(const RouteCall &call) -> std::string;
+    auto handle_debug_perf(const RouteCall &call) -> std::string;
+    auto handle_debug_timeline(const RouteCall &call) -> std::string;
+    auto handle_debug_diagnostics(const RouteCall &call) -> std::string;
+    auto handle_debug_why(const RouteCall &call) -> std::string;
+    auto handle_windows(const RouteCall &call) -> std::string;
+    auto handle_network(const RouteCall &call) -> std::string;
+    auto handle_network_request(const RouteCall &call) -> std::string;
+    auto handle_debug_tree(const RouteCall &call) -> std::string;
+    auto handle_debug_pick(const RouteCall &call) -> std::string;
+    auto handle_debug_flags(const RouteCall &call) -> std::string;
+    auto handle_tree(const RouteCall &call) -> std::string;
+    auto handle_widget(const RouteCall &call) -> std::string;
+    auto handle_input(const RouteCall &call) -> std::string;
+    auto handle_find(const RouteCall &call) -> std::string;
+    auto handle_patch(const RouteCall &call) -> std::string;
+    auto handle_components(const RouteCall &call) -> std::string;
+    auto handle_yaml(const RouteCall &call) -> std::string;
+    auto handle_to_code(const RouteCall &call) -> std::string;
 
     // HTTP 响应构造辅助
     static auto make_response(int status_code, const std::string &status_text, const std::string &content_type,
@@ -251,10 +533,29 @@ static auto strip_query(const std::string &path) -> std::string {
     return (q == std::string::npos) ? path : path.substr(0, q);
 }
 
+// 路由表允许的动词位掩码：GET / POST / PUT 是本服务的全部动词面。未知动词不占任何位，
+// 命中路由后一律 405 —— 路径存在、动词不被支持，比 404 更准确地描述了这个交集。
+constexpr std::uint8_t AURORA_HTTP_METHOD_GET = 1U << 0U;
+constexpr std::uint8_t AURORA_HTTP_METHOD_POST = 1U << 1U;
+constexpr std::uint8_t AURORA_HTTP_METHOD_PUT = 1U << 2U;
+
+static auto method_mask(std::string_view method) -> std::uint8_t {
+    if (method == "GET") {
+        return AURORA_HTTP_METHOD_GET;
+    }
+    if (method == "POST") {
+        return AURORA_HTTP_METHOD_POST;
+    }
+    if (method == "PUT") {
+        return AURORA_HTTP_METHOD_PUT;
+    }
+    return 0U;
+}
+
 // 百分号解码（RFC 3986 的 query 值形态）：`%XX` 还原为对应字节，十六进制大小写均可；`%` 后
 // 不足两位十六进制时按字面量保留（宽松解析，畸形请求不该升级成 500）。`+` 保持字面量——
 // 「+ 表空格」是 application/x-www-form-urlencoded 的另一套约定，本服务不做该假设。
-static auto percent_decode(std::string_view s) -> std::string {
+static auto decode_query_value(std::string_view s) -> std::string {
     auto hex = [](char c) -> int {
         if (c >= '0' && c <= '9') {
             return c - '0';
@@ -304,7 +605,7 @@ static auto query_param(const std::string &path, std::string_view key) -> std::s
         const std::string pair = query.substr(start, end - start);
         const auto eq = pair.find('=');
         if (eq != std::string::npos && pair.substr(0, eq) == k) {
-            return percent_decode(pair.substr(eq + 1));
+            return decode_query_value(pair.substr(eq + 1));
         }
         start = end + 1;
     }
@@ -324,732 +625,914 @@ static auto send_all(const net::blocking::StreamSocket &client, const std::strin
 // ---------------------------------------------------------------------------
 // HTTP 路由
 // ---------------------------------------------------------------------------
+// 分派三步：匹配路由（精确项整体优先、前缀族按登记次序兜后）→ 动词位掩码闸门 → 处理函数。
+// 方法闸收在派发处，故「动词本就该端点不支持」这一事实不必由每个 handler 各自重述；handler
+// 内的 400 只再说路径形状（如 `/api/widget/` 的空余段），不再承担 405。
 auto InspectorServer::Impl::route_request(const std::string &method, const std::string &path, const std::string &body)
     -> std::string {
     const std::string route = strip_query(path);
-
-    // ---- 调试端点（封装 aurora::debug 被动门面，不重复实现逻辑）----
-    // 所有 Surface / 树 / 全局状态读取经主线程 marshal（marshal_get），与 Surface 的
-    // main-thread-only 约束一致；无事件循环时回退为直接执行（测试 / 无头）。
-
-    // GET /api/debug/state — Surface 运行时状态
-    if (route == "/api/debug/state") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/debug/state");
-        }
-        if (!surface_getter) {
-            return error_response(400, "Surface getter not configured");
-        }
-        Surface *s = surface_getter();
-        if (s == nullptr) {
-            return error_response(500, "Surface is null");
-        }
-        try {
-            auto j = marshal_get<Json>([&]() -> Json { return aurora::debug::surface_state(*s); });
-            return json_response(200, "OK", j);
-        } catch (const std::exception &e) {
-            return error_response(500, std::string("surface_state failed: ") + e.what());
-        }
+    const RouteCall call{.method = method, .path = path, .route = route, .body = body};
+    const RouteEntry *entry = inspector::detail::match_route(routes(), route);
+    if (entry == nullptr) {
+        return error_response(404, "Unknown endpoint: " + path);
     }
+    if ((entry->methods & method_mask(method)) == 0U) {
+        return error_response(405, "Method not allowed for " + std::string{entry->label});
+    }
+    return (this->*(entry->handler))(call);
+}
 
-    // GET /api/debug/snapshot?source=fb|win — 截图 PNG（image/png）
-    if (route == "/api/debug/snapshot") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/debug/snapshot");
-        }
-        if (!surface_getter) {
-            return error_response(400, "Surface getter not configured");
-        }
-        Surface *s = surface_getter();
-        if (s == nullptr) {
-            return error_response(500, "Surface is null");
-        }
-        const std::string src = query_param(path, "source");
-        const auto capture_src =
-            src == "win" ? aurora::debug::CaptureSource::OnScreenWindow : aurora::debug::CaptureSource::Framebuffer;
-        try {
-            auto png = marshal_get<std::vector<std::uint8_t>>([&]() -> std::vector<std::uint8_t> {
-                // 临时文件名须不可预测（固定名可被本地进程抢先创建/替换——符号链接攻击面），
-                // 且每次请求唯一（避免并发/连续请求相互覆盖）。steady_clock 计数 + 进程内自增序号。
-                static std::atomic<unsigned> seq{0};
-                const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
-                const std::string name =
-                    "aurora_insp_snap_" + std::to_string(ticks) + "_" + std::to_string(seq.fetch_add(1)) + ".png";
-                const std::string tmp = (std::filesystem::temp_directory_path() / name).string();
-                const auto r = aurora::debug::capture(*s, tmp, capture_src);
-                if (!r) {
-                    throw std::runtime_error(r.error().message);
-                }
-                std::ifstream f(tmp, std::ios::binary);
-                if (!f) {
-                    std::error_code rm_ec;
-                    std::filesystem::remove(tmp, rm_ec);  // 打开失败也清理，不留垃圾文件
-                    throw std::runtime_error("cannot open captured PNG");
-                }
-                // 读取段兜异常：POSIX 下 basic_filebuf::underflow 遇 I/O 失败（EISDIR/EIO/EACCES）
-                // 会无条件抛 ios_base::failure，届时若不清理会漏掉刚生成的 PNG 临时文件。
-                std::vector<std::uint8_t> bytes;
-                try {
-                    bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>{});
-                } catch (const std::ios_base::failure &e) {
-                    std::error_code rm_ec;
-                    std::filesystem::remove(tmp, rm_ec);  // 读取失败也清理，不留垃圾文件
-                    throw std::runtime_error(std::string("cannot read captured PNG: ") + e.what());
-                }
-                std::error_code ec;
-                std::filesystem::remove(tmp, ec);
-                return bytes;
-            });
-            if (png.empty()) {
-                return error_response(500, "snapshot produced empty PNG");
+auto InspectorServer::Impl::routes() -> std::span<const RouteEntry> {
+    static constexpr RouteEntry K_TABLE[] = {
+        {.pattern = "/api/debug/state",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/debug/state",
+         .handler = &Impl::handle_debug_state},
+        {.pattern = "/api/debug/snapshot",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/debug/snapshot",
+         .handler = &Impl::handle_debug_snapshot},
+        {.pattern = "/api/debug/perf",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/debug/perf",
+         .handler = &Impl::handle_debug_perf},
+        {.pattern = "/api/debug/timeline",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/debug/timeline",
+         .handler = &Impl::handle_debug_timeline},
+        {.pattern = "/api/debug/diagnostics",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/debug/diagnostics",
+         .handler = &Impl::handle_debug_diagnostics},
+        {.pattern = "/api/debug/why",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/debug/why",
+         .handler = &Impl::handle_debug_why},
+        {.pattern = "/api/windows",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/windows",
+         .handler = &Impl::handle_windows},
+        {.pattern = "/api/network",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/network",
+         .handler = &Impl::handle_network},
+        {.pattern = "/api/network/request",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/network/request",
+         .handler = &Impl::handle_network_request},
+        {.pattern = "/api/debug/tree",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/debug/tree",
+         .handler = &Impl::handle_debug_tree},
+        {.pattern = "/api/debug/pick",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/debug/pick",
+         .handler = &Impl::handle_debug_pick},
+        {.pattern = "/api/debug/flags",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_POST,
+         .label = "/api/debug/flags",
+         .handler = &Impl::handle_debug_flags},
+        {.pattern = "/api/tree",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/tree",
+         .handler = &Impl::handle_tree},
+        {.pattern = "/api/widget/",
+         .kind = inspector::detail::RouteKind::Prefix,
+         .methods = AURORA_HTTP_METHOD_GET | AURORA_HTTP_METHOD_PUT,
+         .label = "/api/widget",
+         .handler = &Impl::handle_widget},
+        {.pattern = "/api/input/",
+         .kind = inspector::detail::RouteKind::Prefix,
+         .methods = AURORA_HTTP_METHOD_POST,
+         .label = "/api/input",
+         .handler = &Impl::handle_input},
+        {.pattern = "/api/find",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/find",
+         .handler = &Impl::handle_find},
+        {.pattern = "/api/patch",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_POST,
+         .label = "/api/patch",
+         .handler = &Impl::handle_patch},
+        {.pattern = "/api/components",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/components",
+         .handler = &Impl::handle_components},
+        {.pattern = "/api/yaml",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_GET,
+         .label = "/api/yaml",
+         .handler = &Impl::handle_yaml},
+        {.pattern = "/api/to_code",
+         .kind = inspector::detail::RouteKind::Exact,
+         .methods = AURORA_HTTP_METHOD_POST,
+         .label = "/api/to_code",
+         .handler = &Impl::handle_to_code},
+    };
+    return K_TABLE;
+}
+
+// ---- 调试端点（封装 aurora::debug 被动门面，不重复实现逻辑）----
+// 所有 Surface / 树 / 全局状态读取经主线程 marshal（marshal_get），与 Surface 的
+// main-thread-only 约束一致；无事件循环时回退为直接执行（测试 / 无头）。
+
+// GET /api/debug/state — Surface 运行时状态
+// 路由表共用非 const 成员指针类型（同表还容纳会改状态的端点），不逐端点分型。
+// NOLINTNEXTLINE(readability-make-member-function-const)
+auto InspectorServer::Impl::handle_debug_state(const RouteCall & /*call*/) -> std::string {
+    if (!surface_getter) {
+        return error_response(400, "Surface getter not configured");
+    }
+    Surface *s = surface_getter();
+    if (s == nullptr) {
+        return error_response(500, "Surface is null");
+    }
+    try {
+        auto j = marshal_get<Json>([&]() -> Json { return aurora::debug::surface_state(*s); });
+        return json_response(200, "OK", j);
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("surface_state failed: ") + e.what());
+    }
+}
+
+// GET /api/debug/snapshot?source=fb|win — 截图 PNG（image/png）
+// NOLINTNEXTLINE(readability-make-member-function-const)
+auto InspectorServer::Impl::handle_debug_snapshot(const RouteCall &call) -> std::string {
+    if (!surface_getter) {
+        return error_response(400, "Surface getter not configured");
+    }
+    Surface *s = surface_getter();
+    if (s == nullptr) {
+        return error_response(500, "Surface is null");
+    }
+    const std::string src = query_param(call.path, "source");
+    const auto capture_src =
+        src == "win" ? aurora::debug::CaptureSource::OnScreenWindow : aurora::debug::CaptureSource::Framebuffer;
+    try {
+        auto png = marshal_get<std::vector<std::uint8_t>>([&]() -> std::vector<std::uint8_t> {
+            // 临时文件名须不可预测（固定名可被本地进程抢先创建/替换——符号链接攻击面），
+            // 且每次请求唯一（避免并发/连续请求相互覆盖）。steady_clock 计数 + 进程内自增序号。
+            static std::atomic<unsigned> seq{0};
+            const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+            const std::string name =
+                "aurora_insp_snap_" + std::to_string(ticks) + "_" + std::to_string(seq.fetch_add(1)) + ".png";
+            const std::string tmp = (std::filesystem::temp_directory_path() / name).string();
+            const auto r = aurora::debug::capture(*s, tmp, capture_src);
+            if (!r) {
+                throw std::runtime_error(r.error().message);
             }
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-            std::string body_bytes(reinterpret_cast<const char *>(png.data()), png.size());
-            return make_response(200, "OK", "image/png", body_bytes);
-        } catch (const std::exception &e) {
-            return error_response(500, std::string("snapshot failed: ") + e.what());
-        }
-    }
-
-    // GET /api/debug/perf — 性能快照（聚合 FrameStats + PerfLog）
-    if (route == "/api/debug/perf") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/debug/perf");
-        }
-        try {
-            auto j = marshal_get<Json>([]() -> Json { return aurora::debug::perf_snapshot(); });
-            return json_response(200, "OK", j);
-        } catch (const std::exception &e) {
-            return error_response(500, std::string("perf_snapshot failed: ") + e.what());
-        }
-    }
-
-    // GET /api/debug/timeline — 帧相位时间线
-    if (route == "/api/debug/timeline") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/debug/timeline");
-        }
-        try {
-            auto j = marshal_get<Json>([]() -> Json { return aurora::debug::frame_phase_timeline(); });
-            return json_response(200, "OK", j);
-        } catch (const std::exception &e) {
-            return error_response(500, std::string("frame_phase_timeline failed: ") + e.what());
-        }
-    }
-
-    // GET /api/debug/diagnostics — 诊断只读快照
-    if (route == "/api/debug/diagnostics") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/debug/diagnostics");
-        }
-        try {
-            auto j = marshal_get<Json>([]() -> Json { return aurora::debug::diagnostics(); });
-            return json_response(200, "OK", j);
-        } catch (const std::exception &e) {
-            return error_response(500, std::string("diagnostics failed: ") + e.what());
-        }
-    }
-
-    // GET /api/debug/why — why_trace（重排 / 重绘因果链）
-    if (route == "/api/debug/why") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/debug/why");
-        }
-        try {
-            auto j = marshal_get<Json>([]() -> Json { return aurora::debug::why_trace(); });
-            return json_response(200, "OK", j);
-        } catch (const std::exception &e) {
-            return error_response(500, std::string("why_trace failed: ") + e.what());
-        }
-    }
-
-    // GET /api/windows — 枚举全部窗口 id（多窗口调试）
-    if (route == "/api/windows") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/windows");
-        }
-        Json ids = Json::array();
-        if (window_ids_getter) {
-            for (const std::uint32_t id : window_ids_getter()) {
-                ids.push_back(id);
+            std::ifstream f(tmp, std::ios::binary);
+            if (!f) {
+                std::error_code rm_ec;
+                std::filesystem::remove(tmp, rm_ec);  // 打开失败也清理，不留垃圾文件
+                throw std::runtime_error("cannot open captured PNG");
             }
+            // 读取段兜异常：POSIX 下 basic_filebuf::underflow 遇 I/O 失败（EISDIR/EIO/EACCES）
+            // 会无条件抛 ios_base::failure，届时若不清理会漏掉刚生成的 PNG 临时文件。
+            std::vector<std::uint8_t> bytes;
+            try {
+                bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>{});
+            } catch (const std::ios_base::failure &e) {
+                std::error_code rm_ec;
+                std::filesystem::remove(tmp, rm_ec);  // 读取失败也清理，不留垃圾文件
+                throw std::runtime_error(std::string("cannot read captured PNG: ") + e.what());
+            }
+            std::error_code ec;
+            std::filesystem::remove(tmp, ec);
+            return bytes;
+        });
+        if (png.empty()) {
+            return error_response(500, "snapshot produced empty PNG");
         }
-        // 未注册枚举回调时返回空数组而非错误：单窗口应用不必为此配置任何东西。
-        Json out = Json::object();
-        out.set("count", ids.size());
-        out.set("windows", std::move(ids));
-        return json_response(200, "OK", out);
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        std::string body_bytes(reinterpret_cast<const char *>(png.data()), png.size());
+        return make_response(200, "OK", "image/png", body_bytes);
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("snapshot failed: ") + e.what());
+    }
+}
+
+// GET /api/debug/perf — 性能快照（聚合 FrameStats + PerfLog）
+auto InspectorServer::Impl::handle_debug_perf(const RouteCall & /*call*/) -> std::string {
+    try {
+        auto j = marshal_get<Json>([]() -> Json { return aurora::debug::perf_snapshot(); });
+        return json_response(200, "OK", j);
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("perf_snapshot failed: ") + e.what());
+    }
+}
+
+// GET /api/debug/timeline — 帧相位时间线
+auto InspectorServer::Impl::handle_debug_timeline(const RouteCall & /*call*/) -> std::string {
+    try {
+        auto j = marshal_get<Json>([]() -> Json { return aurora::debug::frame_phase_timeline(); });
+        return json_response(200, "OK", j);
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("frame_phase_timeline failed: ") + e.what());
+    }
+}
+
+// GET /api/debug/diagnostics — 诊断只读快照
+auto InspectorServer::Impl::handle_debug_diagnostics(const RouteCall & /*call*/) -> std::string {
+    try {
+        auto j = marshal_get<Json>([]() -> Json { return aurora::debug::diagnostics(); });
+        return json_response(200, "OK", j);
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("diagnostics failed: ") + e.what());
+    }
+}
+
+// GET /api/debug/why — why_trace（重排 / 重绘因果链）
+auto InspectorServer::Impl::handle_debug_why(const RouteCall & /*call*/) -> std::string {
+    try {
+        auto j = marshal_get<Json>([]() -> Json { return aurora::debug::why_trace(); });
+        return json_response(200, "OK", j);
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("why_trace failed: ") + e.what());
+    }
+}
+
+// GET /api/windows — 枚举全部窗口 id（多窗口调试）
+// NOLINTNEXTLINE(readability-make-member-function-const)
+auto InspectorServer::Impl::handle_windows(const RouteCall & /*call*/) -> std::string {
+    Json ids = Json::array();
+    if (window_ids_getter) {
+        for (const std::uint32_t id : window_ids_getter()) {
+            ids.push_back(id);
+        }
+    }
+    // 未注册枚举回调时返回空数组而非错误：单窗口应用不必为此配置任何东西。
+    Json out = Json::object();
+    out.set("count", ids.size());
+    out.set("windows", std::move(ids));
+    return json_response(200, "OK", out);
+}
+
+// GET /api/debug/tree — Widget 树 JSON
+auto InspectorServer::Impl::handle_debug_tree(const RouteCall & /*call*/) -> std::string {
+    // 策略快照在进入主线程闭包前取一次：整份导出共用同一个口径（中途装卸不切开一份文档）。
+    const auto policy = net::export_policy();
+    try {
+        return on_tree([policy](const Node &root) -> std::string {
+            Json tree = aurora::debug::widget_tree(root);
+            if (policy) {
+                tree = redact_tree_node(*policy, tree);
+            }
+            return json_response(200, "OK", tree);
+        });
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("widget_tree failed: ") + e.what());
+    }
+}
+
+// GET /api/debug/pick?x=&y= — 控件拾取
+auto InspectorServer::Impl::handle_debug_pick(const RouteCall &call) -> std::string {
+    float x = 0.0F;
+    float y = 0.0F;
+    try {
+        x = std::stof(query_param(call.path, "x"));
+        y = std::stof(query_param(call.path, "y"));
+    } catch (...) {
+        return error_response(400, "pick requires numeric x and y query params");
+    }
+    try {
+        return on_tree([&](Node &root) -> std::string {
+            // root_bounds：优先用 Surface 尺寸，否则用根控件尺寸
+            aurora::Rect root_bounds{.origin = aurora::Point{.x = 0.0F, .y = 0.0F},
+                                     .size = aurora::Size{.width = root->size().width, .height = root->size().height}};
+            if (surface_getter) {
+                if (const Surface *s = surface_getter()) {
+                    const auto sz = s->size();
+                    root_bounds = aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F}, .size = sz};
+                }
+            }
+            constexpr aurora::BuildContext ctx;
+            const auto res =
+                aurora::debug::widget_picker(root.widget(), root_bounds, ctx, aurora::Point{.x = x, .y = y});
+            Json j = Json::object();
+            j.set("hit", Json{res.hit});
+            Json chain = Json::array();
+            for (const auto &n : res.chain) {
+                Json node = Json::object();
+                node.set("type_name", n.type_name);
+                Json bounds = Json::object();
+                bounds.set("x", n.bounds.origin.x);
+                bounds.set("y", n.bounds.origin.y);
+                bounds.set("w", n.bounds.size.width);
+                bounds.set("h", n.bounds.size.height);
+                node.set("bounds", std::move(bounds));
+                chain.push_back(std::move(node));
+            }
+            j.set("chain", std::move(chain));
+            return json_response(200, "OK", j);
+        });
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("pick failed: ") + e.what());
+    }
+}
+
+// POST /api/debug/flags — 运行时设置 DebugPaintFlags（实时开关叠层）
+auto InspectorServer::Impl::handle_debug_flags(const RouteCall &call) -> std::string {
+    Json input;
+    if (auto parsed = json::parse(call.body); parsed) {
+        input = std::move(parsed).value();
+    } else {
+        return error_response(400, std::string("Invalid JSON body: ") + parsed.error().message);
+    }
+    // 请求体来自网络（不可信输入）。此前 get<bool>() 在字段类型不符时抛
+    // 类型错误异常，未捕获即 worker 线程 std::terminate 整个应用——
+    // 本地任意进程发 {"layout_guides":"x"} 即可崩溃宿主。改为显式校验回 400。
+    if (!input.is_object()) {
+        return error_response(400, "flags body must be a JSON object");
+    }
+    auto read_flag = [&input](const char *key, bool &dst) -> bool {
+        const Json *p = input.find(key);
+        if (p == nullptr) {
+            return true;  // 字段缺省保持默认值
+        }
+        if (!p->is_bool()) {
+            return false;
+        }
+        dst = p->as_or<bool>(false);
+        return true;
+    };
+    aurora::debug::DebugPaintFlags f;
+    if (!read_flag("layout_guides", f.layout_guides) || !read_flag("relayout_boundaries", f.relayout_boundaries) ||
+        !read_flag("layer_borders", f.layer_borders) || !read_flag("repaint_highlight", f.repaint_highlight) ||
+        !read_flag("overdraw", f.overdraw)) {
+        return error_response(400, "flag fields must be booleans");
+    }
+    aurora::debug::set_flags(f);  // 全局写入；下一次 present_root 即绘制叠层
+    Json ok = Json::object();
+    ok.set("status", "ok");
+    Json flags_json = Json::object();
+    flags_json.set("layout_guides", Json{f.layout_guides});
+    flags_json.set("relayout_boundaries", Json{f.relayout_boundaries});
+    flags_json.set("layer_borders", Json{f.layer_borders});
+    flags_json.set("repaint_highlight", Json{f.repaint_highlight});
+    flags_json.set("overdraw", Json{f.overdraw});
+    ok.set("flags", std::move(flags_json));
+    return json_response(200, "OK", ok);
+}
+
+// GET /api/network — 请求活动快照（按 InspectorJson 面呈现）
+auto InspectorServer::Impl::handle_network(const RouteCall &call) -> std::string {
+    // 全量取快照后再过滤、再截断：limit 是调用方视野的上限，不是过滤前的窗口取舍。
+    const auto snapshot = net::http::activity_snapshot(net::ExportSurface::InspectorJson, 0);
+    if (!snapshot.available) {
+        return json_response(200, "OK", network_unavailable_json());
     }
 
-    // GET /api/debug/tree — Widget 树 JSON
-    if (route == "/api/debug/tree") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/debug/tree");
+    std::uint32_t limit = 0;
+    if (query_has_param(call.path, "limit") && !parse_uint_param(query_param(call.path, "limit"), limit)) {
+        return error_response(400, "limit param must be a non-negative integer");
+    }
+    bool has_status = false;
+    std::uint16_t status = 0;
+    if (query_has_param(call.path, "status")) {
+        if (!parse_uint_param(query_param(call.path, "status"), status)) {
+            return error_response(400, "status param must be an integer in 0..65535");
         }
-        try {
-            return on_tree([](const Node &root) -> std::string {
-                return json_response(200, "OK", aurora::debug::widget_tree(root));
-            });
-        } catch (const std::exception &e) {
-            return error_response(500, std::string("widget_tree failed: ") + e.what());
+        has_status = true;
+    }
+    std::string host_filter;
+    if (query_has_param(call.path, "host")) {
+        host_filter = ascii_lower(query_param(call.path, "host"));
+        if (host_filter.empty()) {
+            return error_response(400, "host param must not be empty");
         }
     }
 
-    // GET /api/debug/pick?x=&y= — 控件拾取
-    if (route == "/api/debug/pick") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/debug/pick");
+    Json entries = Json::array();
+    std::size_t matched = 0;
+    for (const auto &entry : snapshot.entries) {
+        if (!host_filter.empty() && ascii_lower(entry.host) != host_filter) {
+            continue;
         }
-        float x = 0.0F;
-        float y = 0.0F;
+        if (has_status && entry.status != status) {
+            continue;
+        }
+        if (limit > 0 && matched >= limit) {
+            break;
+        }
+        entries.push_back(activity_entry_json(entry));
+        ++matched;
+    }
+
+    Json out = Json::object();
+    out.set("available", Json{true});
+    out.set("count", matched);
+    out.set("dropped", snapshot.dropped);
+    out.set("truncated", snapshot.truncated);
+    out.set("entries", std::move(entries));
+    return json_response(200, "OK", out);
+}
+
+// GET /api/network/request?id=<X-Request-Id> — 同一逻辑交换的多跳展开
+auto InspectorServer::Impl::handle_network_request(const RouteCall &call) -> std::string {
+    const auto snapshot = net::http::activity_snapshot(net::ExportSurface::InspectorJson, 0);
+    if (!snapshot.available) {
+        return json_response(200, "OK", network_unavailable_json());
+    }
+    const std::string request_id = query_param(call.path, "id");
+    if (request_id.empty()) {
+        return error_response(400, "Missing required query parameter: id");
+    }
+    // entries 最新在前：首个同 id 条目即该链最新一跳。
+    const net::http::HttpActivityEntry *entry = nullptr;
+    for (const auto &candidate : snapshot.entries) {
+        if (candidate.request_id == request_id) {
+            entry = &candidate;
+            break;
+        }
+    }
+    const auto timelines = net::http::timelines_of(request_id);
+    if (entry == nullptr || timelines.empty()) {
+        // 不回显调用方给的 id：任意输入都不进响应体。
+        return error_response(404, "No network activity for the requested id");
+    }
+
+    Json hops = Json::array();
+    for (const auto &timeline : timelines) {
+        hops.push_back(request_timeline_json(timeline));
+    }
+    Json out = Json::object();
+    out.set("available", Json{true});
+    out.set("request_id", request_id);
+    out.set("entry", activity_entry_json(*entry));
+    out.set("timelines", std::move(hops));
+    return json_response(200, "OK", out);
+}
+
+// GET /api/tree — 完整 widget 树 JSON（route 已剥离 query，/api/tree?x=1 不再误 404）
+auto InspectorServer::Impl::handle_tree(const RouteCall &call) -> std::string {
+    // 策略快照在进入主线程闭包前取一次：整份导出共用同一个口径（中途装卸不切开一份文档）。
+    const auto policy = net::export_policy();
+    // 多窗口：?window=<id> 取指定窗口的树（需注册 window_tree_getter）。
+    const std::string win_param = query_param(call.path, "window");
+    if (!win_param.empty()) {
+        if (!window_tree_getter) {
+            return error_response(400, "Window tree getter not configured");
+        }
+        std::uint32_t wid = 0;
         try {
-            x = std::stof(query_param(path, "x"));
-            y = std::stof(query_param(path, "y"));
+            wid = static_cast<std::uint32_t>(std::stoul(win_param));
         } catch (...) {
-            return error_response(400, "pick requires numeric x and y query params");
+            return error_response(400, "window param must be a numeric id");
         }
+        bool found = false;
         try {
-            return on_tree([&](Node &root) -> std::string {
-                // root_bounds：优先用 Surface 尺寸，否则用根控件尺寸
-                aurora::Rect root_bounds{
-                    .origin = aurora::Point{.x = 0.0F, .y = 0.0F},
-                    .size = aurora::Size{.width = root->size().width, .height = root->size().height}};
-                if (surface_getter) {
-                    if (const Surface *s = surface_getter()) {
-                        const auto sz = s->size();
-                        root_bounds = aurora::Rect{.origin = aurora::Point{.x = 0.0F, .y = 0.0F}, .size = sz};
-                    }
+            auto tree = marshal_get<Json>([&]() -> Json {
+                std::scoped_lock lock(tree_mutex);
+                Node root = window_tree_getter(wid);
+                if (!root) {
+                    return Json{};  // 标记窗口不存在
                 }
-                constexpr aurora::BuildContext ctx;
-                const auto res =
-                    aurora::debug::widget_picker(root.widget(), root_bounds, ctx, aurora::Point{.x = x, .y = y});
-                Json j = Json::object();
-                j.set("hit", Json{res.hit});
-                Json chain = Json::array();
-                for (const auto &n : res.chain) {
-                    Json node = Json::object();
-                    node.set("type_name", n.type_name);
-                    Json bounds = Json::object();
-                    bounds.set("x", n.bounds.origin.x);
-                    bounds.set("y", n.bounds.origin.y);
-                    bounds.set("w", n.bounds.size.width);
-                    bounds.set("h", n.bounds.size.height);
-                    node.set("bounds", std::move(bounds));
-                    chain.push_back(std::move(node));
+                found = true;
+                Json document = Inspector::tree_json_full(root);
+                if (policy) {
+                    document = redact_tree_node(*policy, document);
                 }
-                j.set("chain", std::move(chain));
-                return json_response(200, "OK", j);
+                return document;
             });
+            if (!found) {
+                return error_response(404, "Window " + win_param + " not found");
+            }
+            return json_response(200, "OK", tree);
         } catch (const std::exception &e) {
-            return error_response(500, std::string("pick failed: ") + e.what());
+            return error_response(500, std::string("window tree failed: ") + e.what());
         }
     }
-
-    // POST /api/debug/flags — 运行时设置 DebugPaintFlags（实时开关叠层）
-    if (route == "/api/debug/flags") {
-        if (method != "POST") {
-            return error_response(405, "Method not allowed for /api/debug/flags");
+    // 回退：主窗口（构造时注入的 root_getter），向后兼容既有 /api/tree。
+    return on_tree([policy](const Node &root) -> std::string {
+        Json document = Inspector::tree_json_full(root);
+        if (policy) {
+            document = redact_tree_node(*policy, document);
         }
-        Json input;
-        if (auto parsed = json::parse(body); parsed) {
-            input = std::move(parsed).value();
+        return json_response(200, "OK", document);
+    });
+}
+
+// GET /api/widget/{path} — 单 widget 属性
+// PUT /api/widget/{path}/{prop} — 回写属性
+// 路径段取自剥离 query 后的 route，避免查询串混入树路径。
+auto InspectorServer::Impl::handle_widget(const RouteCall &call) -> std::string {
+    const std::string remainder = call.route.substr(std::string("/api/widget/").size());
+    auto segments = split_path(remainder);
+    if (segments.empty()) {
+        return error_response(400, "Widget path is empty");
+    }
+
+    // GET：整个 remainder 作为树路径；PUT：最后一段是属性名，前面是树路径。
+    const bool is_put = call.method == "PUT";
+    if (is_put && segments.size() < 2) {
+        return error_response(400, "PUT requires /api/widget/{tree_path}/{prop_name}");
+    }
+    const std::string prop_name = is_put ? segments.back() : std::string{};
+    std::string tree_path = remainder;
+    if (is_put) {
+        tree_path.clear();
+        for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
+            if (i > 0) {
+                tree_path += '/';
+            }
+            tree_path += segments[i];
+        }
+    }
+    // body 解析与树无关，先做掉：类型错误回 400，不必把成因带进主线程闭包。
+    Json value;
+    if (is_put) {
+        if (auto parsed = json::parse(call.body); parsed) {
+            value = std::move(parsed).value();
         } else {
             return error_response(400, std::string("Invalid JSON body: ") + parsed.error().message);
         }
-        // 请求体来自网络（不可信输入）。此前 get<bool>() 在字段类型不符时抛
-        // 类型错误异常，未捕获即 worker 线程 std::terminate 整个应用——
-        // 本地任意进程发 {"layout_guides":"x"} 即可崩溃宿主。改为显式校验回 400。
-        if (!input.is_object()) {
-            return error_response(400, "flags body must be a JSON object");
+    }
+
+    // 只有 GET 导出属性值：PUT 回的是状态，不参与折叠；快照仍在此取一次，整份响应共用。
+    const auto policy = net::export_policy();
+
+    return on_tree([&](Node &root) -> std::string {
+        // 寻址必须走 `find_widget`（统一遍历：`child_nodes()`，空则回退 `for_each_child`），
+        // 与 `/api/tree` 的枚举口径同源；否则虚拟化容器（NavigatorHost / LazyList 等）的
+        // 子树在树快照里看得见、按路径却取不到（两者取了不同遍历源）。
+        Widget *target = Inspector::find_widget(root.widget(), tree_path);
+        if (target == nullptr) {
+            return error_response(404, "Widget not found at path: " + tree_path);
         }
-        auto read_flag = [&input](const char *key, bool &dst) -> bool {
-            const Json *p = input.find(key);
-            if (p == nullptr) {
-                return true;  // 字段缺省保持默认值
+        if (!is_put) {
+            Json props = Inspector::get_prop(*target);
+            if (policy) {
+                props = redact_widget_record(*policy, props);
             }
-            if (!p->is_bool()) {
-                return false;
-            }
-            dst = p->as_or<bool>(false);
-            return true;
-        };
-        aurora::debug::DebugPaintFlags f;
-        if (!read_flag("layout_guides", f.layout_guides) || !read_flag("relayout_boundaries", f.relayout_boundaries) ||
-            !read_flag("layer_borders", f.layer_borders) || !read_flag("repaint_highlight", f.repaint_highlight) ||
-            !read_flag("overdraw", f.overdraw)) {
-            return error_response(400, "flag fields must be booleans");
+            return json_response(200, "OK", props);
         }
-        aurora::debug::set_flags(f);  // 全局写入；下一次 present_root 即绘制叠层
+        auto result = Inspector::set_prop(*target, prop_name, value);
+        if (!result) {
+            return error_response(400, "Failed to set property: " + result.error().message);
+        }
         Json ok = Json::object();
         ok.set("status", "ok");
-        Json flags_json = Json::object();
-        flags_json.set("layout_guides", Json{f.layout_guides});
-        flags_json.set("relayout_boundaries", Json{f.relayout_boundaries});
-        flags_json.set("layer_borders", Json{f.layer_borders});
-        flags_json.set("repaint_highlight", Json{f.repaint_highlight});
-        flags_json.set("overdraw", Json{f.overdraw});
-        ok.set("flags", std::move(flags_json));
+        ok.set("widget_path", tree_path);
+        ok.set("property", prop_name);
         return json_response(200, "OK", ok);
+    });
+}
+
+// POST /api/input/{click|scroll|drag|text|pointer} — 交互模拟（合成事件经 EventDispatcher 真实派发）
+//
+// 请求体为 JSON 对象：`path`（索引路径，如 "0/1"）必填；`scroll`/`drag` 另取 `dx`/`dy`
+// （数值，缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取 `text`（字符串），
+// `pointer` 另取 `phase`（`press`/`move`/`release`）与可选的 `x`/`y`（数值，目标局部坐标，
+// 缺省即控件中心）——单步、按坐标的指针动作，用于按下点不在控件中心的目标（分隔条、滑块）
+// 以及调用方自行合成的连续拖拽。
+//
+// 派发必须落在主线程：`Inspector::simulate_*` 为 main-thread only，且会写控件状态与
+// 派发期的焦点槽。故与调试端点同走 `marshal_get`（无事件循环时直接执行，测试 / 无头
+// 下仍可同步验证）。
+//
+// 语义为「目标式」：以 `path` 命中的控件为派发根与坐标原点、指针取该控件中心，因此
+// 不依赖其在树中的绝对位置。目标不可命中时回 400（与失败属性回写同一约定），且失败的
+// 模拟不改变任何状态。
+auto InspectorServer::Impl::handle_input(const RouteCall &call) -> std::string {
+    const std::string action = call.route.substr(std::string("/api/input/").size());
+    if (action != "click" && action != "scroll" && action != "drag" && action != "text" && action != "pointer") {
+        return error_response(404, "Unknown input action: " + action);
+    }
+    Json payload;
+    if (auto parsed = json::parse(call.body); parsed) {
+        payload = std::move(parsed).value();
+    } else {
+        return error_response(400, std::string("Invalid JSON body: ") + parsed.error().message);
+    }
+    if (!payload.is_object()) {
+        return error_response(400, "Request body must be a JSON object");
+    }
+    // 字段类型一律前置显式校验：取值遇类型不符会抛 type_error，
+    // 任其逃逸只会变成 500，调用方拿不到「哪个字段错了」。
+    // `path` 必须存在且为字符串；空串表示树根本身（与 `Inspector::find_widget` 的空路径语义一致）。
+    const Json *path_it = payload.find("path");
+    if (path_it == nullptr || !path_it->is_string()) {
+        return error_response(
+            400, "Missing or invalid 'path' (tree index path string, e.g. \"0/1\"; empty string targets the root)");
+    }
+    const auto widget_path = path_it->as_or<std::string>("");
+    float dx = 0.0F;
+    float dy = 0.0F;
+    std::string text;
+    // `/api/input/pointer` 的额外字段：`phase`（press|move|release）与按坐标 `x`/`y`
+    // （相对目标控件顶点；缺省即控件中心）。
+    std::string phase;
+    std::optional<float> px;
+    std::optional<float> py;
+    if (action == "pointer") {
+        const Json *phase_it = payload.find("phase");
+        if (phase_it == nullptr || !phase_it->is_string()) {
+            return error_response(400, "Missing or invalid 'phase' (press | move | release)");
+        }
+        phase = phase_it->as_or<std::string>("");
+        if (phase != "press" && phase != "move" && phase != "release") {
+            return error_response(400, "Unknown pointer phase: " + phase);
+        }
+        for (const char *key : {"x", "y"}) {
+            if (payload.contains(key) && !payload.at(key)->is_number()) {
+                return error_response(400, std::string("'") + key + "' must be a number");
+            }
+        }
+        if (payload.contains("x")) {
+            px = payload.at("x")->as_or<float>(0.0F);
+        }
+        if (payload.contains("y")) {
+            py = payload.at("y")->as_or<float>(0.0F);
+        }
+    }
+    if (action == "scroll" || action == "drag") {
+        for (const char *key : {"dx", "dy"}) {
+            if (payload.contains(key) && !payload.at(key)->is_number()) {
+                return error_response(400, std::string("'") + key + "' must be a number");
+            }
+        }
+        dx = payload.as_or<float>("dx", 0.0F);
+        dy = payload.as_or<float>("dy", 0.0F);
+    } else if (action == "text") {
+        if (const Json *text_it = payload.find("text"); text_it != nullptr) {
+            if (!text_it->is_string()) {
+                return error_response(400, "'text' must be a string");
+            }
+            text = text_it->as_or<std::string>("");
+        }
     }
 
-    // GET /api/tree — 完整 widget 树 JSON（route 已剥离 query，/api/tree?x=1 不再误 404）
-    if (route == "/api/tree") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/tree");
-        }
-        // 多窗口：?window=<id> 取指定窗口的树（需注册 window_tree_getter）。
-        const std::string win_param = query_param(path, "window");
-        if (!win_param.empty()) {
-            if (!window_tree_getter) {
-                return error_response(400, "Window tree getter not configured");
-            }
-            std::uint32_t wid = 0;
-            try {
-                wid = static_cast<std::uint32_t>(std::stoul(win_param));
-            } catch (...) {
-                return error_response(400, "window param must be a numeric id");
-            }
-            bool found = false;
-            try {
-                auto tree = marshal_get<Json>([&]() -> Json {
-                    std::scoped_lock lock(tree_mutex);
-                    Node root = window_tree_getter(wid);
-                    if (!root) {
-                        return Json{};  // 标记窗口不存在
-                    }
-                    found = true;
-                    return Inspector::tree_json_full(root);
-                });
-                if (!found) {
-                    return error_response(404, "Window " + win_param + " not found");
-                }
-                return json_response(200, "OK", tree);
-            } catch (const std::exception &e) {
-                return error_response(500, std::string("window tree failed: ") + e.what());
-            }
-        }
-        // 回退：主窗口（构造时注入的 root_getter），向后兼容既有 /api/tree。
-        return on_tree(
-            [](const Node &root) -> std::string { return json_response(200, "OK", Inspector::tree_json_full(root)); });
-    }
-
-    // GET /api/widget/{path} — 单 widget 属性
-    // PUT /api/widget/{path}/{prop} — 回写属性
-    // 路径段取自剥离 query 后的 route，避免查询串混入树路径。
-    if (route.starts_with("/api/widget/")) {
-        const std::string remainder = route.substr(std::string("/api/widget/").size());
-        auto segments = split_path(remainder);
-        if (segments.empty()) {
-            return error_response(400, "Widget path is empty");
-        }
-
-        if (method != "GET" && method != "PUT") {
-            return error_response(405, "Method not allowed for /api/widget");
-        }
-        // GET：整个 remainder 作为树路径；PUT：最后一段是属性名，前面是树路径。
-        const bool is_put = method == "PUT";
-        if (is_put && segments.size() < 2) {
-            return error_response(400, "PUT requires /api/widget/{tree_path}/{prop_name}");
-        }
-        const std::string prop_name = is_put ? segments.back() : std::string{};
-        std::string tree_path = remainder;
-        if (is_put) {
-            tree_path.clear();
-            for (std::size_t i = 0; i + 1 < segments.size(); ++i) {
-                if (i > 0) {
-                    tree_path += '/';
-                }
-                tree_path += segments[i];
-            }
-        }
-        // body 解析与树无关，先做掉：类型错误回 400，不必把成因带进主线程闭包。
-        Json value;
-        if (is_put) {
-            if (auto parsed = json::parse(body); parsed) {
-                value = std::move(parsed).value();
-            } else {
-                return error_response(400, std::string("Invalid JSON body: ") + parsed.error().message);
-            }
-        }
-
-        return on_tree([&](Node &root) -> std::string {
-            // 寻址必须走 `find_widget`（统一遍历：`child_nodes()`，空则回退 `for_each_child`），
-            // 与 `/api/tree` 的枚举口径同源；否则虚拟化容器（NavigatorHost / LazyList 等）的
-            // 子树在树快照里看得见、按路径却取不到（两者取了不同遍历源）。
-            Widget *target = Inspector::find_widget(root.widget(), tree_path);
-            if (target == nullptr) {
-                return error_response(404, "Widget not found at path: " + tree_path);
-            }
-            if (!is_put) {
-                Json props = Inspector::get_prop(*target);
-                return json_response(200, "OK", props);
-            }
-            auto result = Inspector::set_prop(*target, prop_name, value);
-            if (!result) {
-                return error_response(400, "Failed to set property: " + result.error().message);
-            }
-            Json ok = Json::object();
-            ok.set("status", "ok");
-            ok.set("widget_path", tree_path);
-            ok.set("property", prop_name);
-            return json_response(200, "OK", ok);
-        });
-    }
-
-    // POST /api/input/{click|scroll|drag|text|pointer} — 交互模拟（合成事件经 EventDispatcher 真实派发）
-    //
-    // 请求体为 JSON 对象：`path`（索引路径，如 "0/1"）必填；`scroll`/`drag` 另取 `dx`/`dy`
-    // （数值，缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取 `text`（字符串），
-    // `pointer` 另取 `phase`（`press`/`move`/`release`）与可选的 `x`/`y`（数值，目标局部坐标，
-    // 缺省即控件中心）——单步、按坐标的指针动作，用于按下点不在控件中心的目标（分隔条、滑块）
-    // 以及调用方自行合成的连续拖拽。
-    //
-    // 派发必须落在主线程：`Inspector::simulate_*` 为 main-thread only，且会写控件状态与
-    // 派发期的焦点槽。故与调试端点同走 `marshal_get`（无事件循环时直接执行，测试 / 无头
-    // 下仍可同步验证）。
-    //
-    // 语义为「目标式」：以 `path` 命中的控件为派发根与坐标原点、指针取该控件中心，因此
-    // 不依赖其在树中的绝对位置。目标不可命中时回 400（与失败属性回写同一约定），且失败的
-    // 模拟不改变任何状态。
-    if (route.starts_with("/api/input/")) {
-        if (method != "POST") {
-            return error_response(405, "Method not allowed for /api/input");
-        }
-        const std::string action = route.substr(std::string("/api/input/").size());
-        if (action != "click" && action != "scroll" && action != "drag" && action != "text" && action != "pointer") {
-            return error_response(404, "Unknown input action: " + action);
-        }
-        Json payload;
-        if (auto parsed = json::parse(body); parsed) {
-            payload = std::move(parsed).value();
-        } else {
-            return error_response(400, std::string("Invalid JSON body: ") + parsed.error().message);
-        }
-        if (!payload.is_object()) {
-            return error_response(400, "Request body must be a JSON object");
-        }
-        // 字段类型一律前置显式校验：取值遇类型不符会抛 type_error，
-        // 任其逃逸只会变成 500，调用方拿不到「哪个字段错了」。
-        // `path` 必须存在且为字符串；空串表示树根本身（与 `Inspector::find_widget` 的空路径语义一致）。
-        const Json *path_it = payload.find("path");
-        if (path_it == nullptr || !path_it->is_string()) {
-            return error_response(
-                400, "Missing or invalid 'path' (tree index path string, e.g. \"0/1\"; empty string targets the root)");
-        }
-        const auto widget_path = path_it->as_or<std::string>("");
-        float dx = 0.0F;
-        float dy = 0.0F;
-        std::string text;
-        // `/api/input/pointer` 的额外字段：`phase`（press|move|release）与按坐标 `x`/`y`
-        // （相对目标控件顶点；缺省即控件中心）。
-        std::string phase;
-        std::optional<float> px;
-        std::optional<float> py;
-        if (action == "pointer") {
-            const Json *phase_it = payload.find("phase");
-            if (phase_it == nullptr || !phase_it->is_string()) {
-                return error_response(400, "Missing or invalid 'phase' (press | move | release)");
-            }
-            phase = phase_it->as_or<std::string>("");
-            if (phase != "press" && phase != "move" && phase != "release") {
-                return error_response(400, "Unknown pointer phase: " + phase);
-            }
-            for (const char *key : {"x", "y"}) {
-                if (payload.contains(key) && !payload.at(key)->is_number()) {
-                    return error_response(400, std::string("'") + key + "' must be a number");
-                }
-            }
-            if (payload.contains("x")) {
-                px = payload.at("x")->as_or<float>(0.0F);
-            }
-            if (payload.contains("y")) {
-                py = payload.at("y")->as_or<float>(0.0F);
-            }
-        }
-        if (action == "scroll" || action == "drag") {
-            for (const char *key : {"dx", "dy"}) {
-                if (payload.contains(key) && !payload.at(key)->is_number()) {
-                    return error_response(400, std::string("'") + key + "' must be a number");
-                }
-            }
-            dx = payload.as_or<float>("dx", 0.0F);
-            dy = payload.as_or<float>("dy", 0.0F);
-        } else if (action == "text") {
-            if (const Json *text_it = payload.find("text"); text_it != nullptr) {
-                if (!text_it->is_string()) {
-                    return error_response(400, "'text' must be a string");
-                }
-                text = text_it->as_or<std::string>("");
-            }
-        }
-
-        try {
-            const Json outcome = marshal_get<Json>([&]() -> Json {
-                std::scoped_lock lock(tree_mutex);
-                Node root = root_getter();
-                if (!root) {
-                    Json o = Json::object();
-                    o.set("ok", Json{false});
-                    o.set("status", 500);
-                    o.set("error", "Widget tree root is null");
-                    return o;
-                }
-                // 寻址与 `/api/tree` 的枚举同源（`find_widget` 走统一遍历），否则虚拟化容器
-                // 下「树里能看到」与「能点到」会不一致。
-                Widget *target = Inspector::find_widget(root.widget(), widget_path);
-                if (target == nullptr) {
-                    Json o = Json::object();
-                    o.set("ok", Json{false});
-                    o.set("status", 404);
-                    o.set("error", "Widget not found at path: " + widget_path);
-                    return o;
-                }
-                std::string failure;
-                if (action == "click") {
-                    const Result<void> r = Inspector::simulate_click(*target);
-                    failure = r ? std::string{} : r.error().message;
-                } else if (action == "scroll") {
-                    const Result<void> r = Inspector::simulate_scroll(*target, dx, dy);
-                    failure = r ? std::string{} : r.error().message;
-                } else if (action == "drag") {
-                    const Result<void> r = Inspector::simulate_drag(*target, dx, dy);
-                    failure = r ? std::string{} : r.error().message;
-                } else if (action == "pointer") {
-                    const Size sz = target->size();
-                    const MouseAction m_action = phase == "press"  ? MouseAction::Press
-                                                 : phase == "move" ? MouseAction::Move
-                                                                   : MouseAction::Release;
-                    const Point pos{.x = px.value_or(sz.width * 0.5F), .y = py.value_or(sz.height * 0.5F)};
-                    const Result<void> r = Inspector::simulate_pointer(*target, pos, m_action);
-                    failure = r ? std::string{} : r.error().message;
-                } else {
-                    const Result<void> r = Inspector::simulate_text_input(*target, text);
-                    failure = r ? std::string{} : r.error().message;
-                }
-                if (!failure.empty()) {
-                    Json o = Json::object();
-                    o.set("ok", Json{false});
-                    o.set("status", 400);
-                    o.set("error", std::move(failure));
-                    return o;
-                }
+    try {
+        const Json outcome = marshal_get<Json>([&]() -> Json {
+            std::scoped_lock lock(tree_mutex);
+            Node root = root_getter();
+            if (!root) {
                 Json o = Json::object();
-                o.set("ok", Json{true});
-                o.set("status", 200);
-                o.set("error", "");
+                o.set("ok", Json{false});
+                o.set("status", 500);
+                o.set("error", "Widget tree root is null");
                 return o;
-            });
-            if (!outcome.as_or<bool>("ok", false)) {
-                return error_response(outcome.as_or<int>("status", 500),
-                                      outcome.as_or<std::string>("error", "simulate failed"));
+            }
+            // 寻址与 `/api/tree` 的枚举同源（`find_widget` 走统一遍历），否则虚拟化容器
+            // 下「树里能看到」与「能点到」会不一致。
+            Widget *target = Inspector::find_widget(root.widget(), widget_path);
+            if (target == nullptr) {
+                Json o = Json::object();
+                o.set("ok", Json{false});
+                o.set("status", 404);
+                o.set("error", "Widget not found at path: " + widget_path);
+                return o;
+            }
+            std::string failure;
+            if (action == "click") {
+                const Result<void> r = Inspector::simulate_click(*target);
+                failure = r ? std::string{} : r.error().message;
+            } else if (action == "scroll") {
+                const Result<void> r = Inspector::simulate_scroll(*target, dx, dy);
+                failure = r ? std::string{} : r.error().message;
+            } else if (action == "drag") {
+                const Result<void> r = Inspector::simulate_drag(*target, dx, dy);
+                failure = r ? std::string{} : r.error().message;
+            } else if (action == "pointer") {
+                const Size sz = target->size();
+                const MouseAction m_action = phase == "press"  ? MouseAction::Press
+                                             : phase == "move" ? MouseAction::Move
+                                                               : MouseAction::Release;
+                const Point pos{.x = px.value_or(sz.width * 0.5F), .y = py.value_or(sz.height * 0.5F)};
+                const Result<void> r = Inspector::simulate_pointer(*target, pos, m_action);
+                failure = r ? std::string{} : r.error().message;
+            } else {
+                const Result<void> r = Inspector::simulate_text_input(*target, text);
+                failure = r ? std::string{} : r.error().message;
+            }
+            if (!failure.empty()) {
+                Json o = Json::object();
+                o.set("ok", Json{false});
+                o.set("status", 400);
+                o.set("error", std::move(failure));
+                return o;
+            }
+            Json o = Json::object();
+            o.set("ok", Json{true});
+            o.set("status", 200);
+            o.set("error", "");
+            return o;
+        });
+        if (!outcome.as_or<bool>("ok", false)) {
+            return error_response(outcome.as_or<int>("status", 500),
+                                  outcome.as_or<std::string>("error", "simulate failed"));
+        }
+        Json ok = Json::object();
+        ok.set("status", "ok");
+        ok.set("action", action);
+        ok.set("widget_path", widget_path);
+        return json_response(200, "OK", ok);
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("simulate failed: ") + e.what());
+    }
+}
+
+// GET /api/find?key=&type=&text= — 按 key / type / text 定位控件（返回索引路径）
+//
+// 返回的 `path` 与 `/api/widget/{path}`、`/api/input/*` 同一寻址口径（`find_widget_by_path`
+// 的索引路径，根为空串），可直接喂给寻址端点。至少给一个参数；多参数为 AND 语义。
+//
+// 遍历走 `Widget::child_nodes()` 的**原存储 const 引用**（迭代式前序，不构造任何 `Node`
+// 副本——临时 `Node` 析构会把子控件的 `layout_parent_` 置空，活树上不可接受）；标准容器
+// 的 `for_each_child` 与 `child_nodes()` 同序，路径索引天然兼容。虚拟化容器（不覆写
+// `child_nodes()`）的子树不可见——与 `find_node_by_path` 同限：宁可少报、不可错报。
+//
+// 三类匹配语义与进程内查询面同源：key 比对 `Node::set_id` 标识（find_by_key）、type
+// 比对 `Widget::type_name()`（find_by_type）、text 比对文本类属性启发式（find_by_text，
+// 键表见 AURORA_TEXT_PROP_KEYS）。零命中不是错误：200 + 空 matches，由调用方裁决。
+auto InspectorServer::Impl::handle_find(const RouteCall &call) -> std::string {
+    const std::string want_key = query_param(call.path, "key");
+    const std::string want_type = query_param(call.path, "type");
+    const std::string want_text = query_param(call.path, "text");
+    if (want_key.empty() && want_type.empty() && want_text.empty()) {
+        return error_response(400, "At least one of 'key', 'type', 'text' is required");
+    }
+    try {
+        const Json outcome = marshal_get<Json>([&]() -> Json {
+            std::scoped_lock lock(tree_mutex);
+            Node root = root_getter();
+            if (!root) {
+                Json o = Json::object();
+                o.set("error", "Widget tree root is null");
+                return o;
+            }
+            // 文本启发式：serialize_props 一次，逐键比对字符串值（与 find_by_text 同源）。
+            const auto text_matches = [&](const Widget &w) -> bool {
+                Json props = Json::object();
+                w.serialize_props(props);
+                for (const std::string_view key : AURORA_TEXT_PROP_KEYS) {
+                    const Json *p = props.find(key);
+                    if (p != nullptr && p->is_string() && p->as_or<std::string>("") == want_text) {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            Json matches = Json::array();
+            struct Frame {
+                const Node *node;
+                std::string path;
+            };
+            std::vector<Frame> stack;
+            stack.push_back(Frame{.node = &root, .path = std::string{}});
+            while (!stack.empty()) {
+                const Frame frame = stack.back();
+                stack.pop_back();
+                const Widget &w = frame.node->widget();
+                bool hit = true;  // 多参数 AND：全部命中才算
+                if (!want_key.empty() && frame.node->id() != want_key) {
+                    hit = false;
+                }
+                if (hit && !want_type.empty() && std::string_view{w.type_name()} != want_type) {
+                    hit = false;
+                }
+                if (hit && !want_text.empty() && !text_matches(w)) {
+                    hit = false;
+                }
+                if (hit) {
+                    Json m = Json::object();
+                    m.set("path", frame.path);
+                    m.set("type", w.type_name());
+                    m.set("id", std::string{frame.node->id()});
+                    matches.push_back(std::move(m));
+                }
+                // 子节点按索引逆序入栈，弹出顺序即先序；路径索引与 child_nodes() 下标一致
+                const std::vector<Node> &kids = w.child_nodes();
+                for (std::size_t i = kids.size(); i-- > 0;) {
+                    std::string child_path =
+                        frame.path.empty() ? std::to_string(i) : frame.path + "/" + std::to_string(i);
+                    stack.push_back(Frame{.node = &kids[i], .path = std::move(child_path)});
+                }
+            }
+            return matches;
+        });
+        if (!outcome.is_array()) {
+            return error_response(500, outcome.as_or<std::string>("error", "find failed"));
+        }
+        Json ok = Json::object();
+        ok.set("matches", outcome);
+        ok.set("count", outcome.size());
+        return json_response(200, "OK", ok);
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("find failed: ") + e.what());
+    }
+}
+
+// POST /api/patch — 批量属性回写（AI 实时编辑的「最小补丁」通道）
+//
+// 请求体是 JSON **数组**，每项 {path, value}；path 形如 "/1/content" —— 最后一段是属性名，
+// 其余是索引路径（根为空），与 `Inspector::apply_patch` / `PUT /api/widget/{path}/{prop}` 同源。
+//
+// 与「整棵树替换」相对：AI 微调 UI 通常只动一两个属性，走 patch 既少传数据，
+// 也避免一次全树重建把运行期状态（滚动位置、焦点等）冲掉。
+//
+// ⚠️ 只覆盖**属性**差异：结构性增删无法用属性回写表达，调用方须自行整树替换
+// （`trees_differ_structurally` 可据此判断）。
+auto InspectorServer::Impl::handle_patch(const RouteCall &call) -> std::string {
+    Json payload;
+    if (auto parsed = json::parse(call.body); parsed) {
+        payload = std::move(parsed).value();
+    } else {
+        return error_response(400, std::string("Invalid JSON body: ") + parsed.error().message);
+    }
+    if (!payload.is_array()) {
+        return error_response(400, "Request body must be a JSON array of {path, value}");
+    }
+    try {
+        return on_tree([&](Node &root) -> std::string {
+            const auto result = Inspector::apply_patch(root, payload);
+            if (!result) {
+                return error_response(400, std::string("patch rejected: ") + result.error().message);
             }
             Json ok = Json::object();
             ok.set("status", "ok");
-            ok.set("action", action);
-            ok.set("widget_path", widget_path);
+            ok.set("ops", payload.size());
             return json_response(200, "OK", ok);
-        } catch (const std::exception &e) {
-            return error_response(500, std::string("simulate failed: ") + e.what());
-        }
-    }
-
-    // GET /api/find?key=&type=&text= — 按 key / type / text 定位控件（返回索引路径）
-    //
-    // 返回的 `path` 与 `/api/widget/{path}`、`/api/input/*` 同一寻址口径（`find_widget_by_path`
-    // 的索引路径，根为空串），可直接喂给寻址端点。至少给一个参数；多参数为 AND 语义。
-    //
-    // 遍历走 `Widget::child_nodes()` 的**原存储 const 引用**（迭代式前序，不构造任何 `Node`
-    // 副本——临时 `Node` 析构会把子控件的 `layout_parent_` 置空，活树上不可接受）；标准容器
-    // 的 `for_each_child` 与 `child_nodes()` 同序，路径索引天然兼容。虚拟化容器（不覆写
-    // `child_nodes()`）的子树不可见——与 `find_node_by_path` 同限：宁可少报、不可错报。
-    //
-    // 三类匹配语义与进程内查询面同源：key 比对 `Node::set_id` 标识（find_by_key）、type
-    // 比对 `Widget::type_name()`（find_by_type）、text 比对文本类属性启发式（find_by_text，
-    // 键表见 AURORA_TEXT_PROP_KEYS）。零命中不是错误：200 + 空 matches，由调用方裁决。
-    if (route == "/api/find") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/find");
-        }
-        const std::string want_key = query_param(path, "key");
-        const std::string want_type = query_param(path, "type");
-        const std::string want_text = query_param(path, "text");
-        if (want_key.empty() && want_type.empty() && want_text.empty()) {
-            return error_response(400, "At least one of 'key', 'type', 'text' is required");
-        }
-        try {
-            const Json outcome = marshal_get<Json>([&]() -> Json {
-                std::scoped_lock lock(tree_mutex);
-                Node root = root_getter();
-                if (!root) {
-                    Json o = Json::object();
-                    o.set("error", "Widget tree root is null");
-                    return o;
-                }
-                // 文本启发式：serialize_props 一次，逐键比对字符串值（与 find_by_text 同源）。
-                const auto text_matches = [&](const Widget &w) -> bool {
-                    Json props = Json::object();
-                    w.serialize_props(props);
-                    for (const std::string_view key : AURORA_TEXT_PROP_KEYS) {
-                        const Json *p = props.find(key);
-                        if (p != nullptr && p->is_string() && p->as_or<std::string>("") == want_text) {
-                            return true;
-                        }
-                    }
-                    return false;
-                };
-                Json matches = Json::array();
-                struct Frame {
-                    const Node *node;
-                    std::string path;
-                };
-                std::vector<Frame> stack;
-                stack.push_back(Frame{.node = &root, .path = std::string{}});
-                while (!stack.empty()) {
-                    const Frame frame = stack.back();
-                    stack.pop_back();
-                    const Widget &w = frame.node->widget();
-                    bool hit = true;  // 多参数 AND：全部命中才算
-                    if (!want_key.empty() && frame.node->id() != want_key) {
-                        hit = false;
-                    }
-                    if (hit && !want_type.empty() && std::string_view{w.type_name()} != want_type) {
-                        hit = false;
-                    }
-                    if (hit && !want_text.empty() && !text_matches(w)) {
-                        hit = false;
-                    }
-                    if (hit) {
-                        Json m = Json::object();
-                        m.set("path", frame.path);
-                        m.set("type", w.type_name());
-                        m.set("id", std::string{frame.node->id()});
-                        matches.push_back(std::move(m));
-                    }
-                    // 子节点按索引逆序入栈，弹出顺序即先序；路径索引与 child_nodes() 下标一致
-                    const std::vector<Node> &kids = w.child_nodes();
-                    for (std::size_t i = kids.size(); i-- > 0;) {
-                        std::string child_path =
-                            frame.path.empty() ? std::to_string(i) : frame.path + "/" + std::to_string(i);
-                        stack.push_back(Frame{.node = &kids[i], .path = std::move(child_path)});
-                    }
-                }
-                return matches;
-            });
-            if (!outcome.is_array()) {
-                return error_response(500, outcome.as_or<std::string>("error", "find failed"));
-            }
-            Json ok = Json::object();
-            ok.set("matches", outcome);
-            ok.set("count", outcome.size());
-            return json_response(200, "OK", ok);
-        } catch (const std::exception &e) {
-            return error_response(500, std::string("find failed: ") + e.what());
-        }
-    }
-
-    // POST /api/patch — 批量属性回写（AI 实时编辑的「最小补丁」通道）
-    //
-    // 请求体是 JSON **数组**，每项 {path, value}；path 形如 "/1/content" —— 最后一段是属性名，
-    // 其余是索引路径（根为空），与 `Inspector::apply_patch` / `PUT /api/widget/{path}/{prop}` 同源。
-    //
-    // 与「整棵树替换」相对：AI 微调 UI 通常只动一两个属性，走 patch 既少传数据，
-    // 也避免一次全树重建把运行期状态（滚动位置、焦点等）冲掉。
-    //
-    // ⚠️ 只覆盖**属性**差异：结构性增删无法用属性回写表达，调用方须自行整树替换
-    // （`trees_differ_structurally` 可据此判断）。
-    if (route == "/api/patch") {
-        if (method != "POST") {
-            return error_response(405, "Method not allowed for /api/patch");
-        }
-        Json payload;
-        if (auto parsed = json::parse(body); parsed) {
-            payload = std::move(parsed).value();
-        } else {
-            return error_response(400, std::string("Invalid JSON body: ") + parsed.error().message);
-        }
-        if (!payload.is_array()) {
-            return error_response(400, "Request body must be a JSON array of {path, value}");
-        }
-        try {
-            return on_tree([&](Node &root) -> std::string {
-                const auto result = Inspector::apply_patch(root, payload);
-                if (!result) {
-                    return error_response(400, std::string("patch rejected: ") + result.error().message);
-                }
-                Json ok = Json::object();
-                ok.set("status", "ok");
-                ok.set("ops", payload.size());
-                return json_response(200, "OK", ok);
-            });
-        } catch (const std::exception &e) {
-            return error_response(500, std::string("patch failed: ") + e.what());
-        }
-    }
-
-    // GET /api/components — 组件 schema 列表
-    if (route == "/api/components") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/components");
-        }
-        std::vector<Json> schemas = Inspector::components();
-        Json arr = Json::array();
-        for (auto &s : schemas) {
-            arr.push_back(std::move(s));
-        }
-        return json_response(200, "OK", arr);
-    }
-
-    // GET /api/yaml — 当前树的 YAML 格式
-    if (route == "/api/yaml") {
-        if (method != "GET") {
-            return error_response(405, "Method not allowed for /api/yaml");
-        }
-        return on_tree([](const Node &root) -> std::string {
-            const Json tree = Inspector::tree_json_full(root);
-            const std::string yaml = aurora::serialization::to_yaml(tree);
-            return make_response(200, "OK", "text/yaml", yaml);
         });
+    } catch (const std::exception &e) {
+        return error_response(500, std::string("patch failed: ") + e.what());
     }
+}
 
-    // POST /api/to_code — UI 树 → C++ 代码
-    // 注意：路由匹配用 strip_query 后的 route，与其它端点一致（/api/to_code?x=1 不再误 404）。
-    if (route == "/api/to_code") {
-        if (method != "POST") {
-            return error_response(405, "Method not allowed for /api/to_code");
+// GET /api/components — 组件 schema 列表
+auto InspectorServer::Impl::handle_components(const RouteCall & /*call*/) -> std::string {
+    std::vector<Json> schemas = Inspector::components();
+    Json arr = Json::array();
+    for (auto &s : schemas) {
+        arr.push_back(std::move(s));
+    }
+    return json_response(200, "OK", arr);
+}
+
+// GET /api/yaml — 当前树的 YAML 格式
+auto InspectorServer::Impl::handle_yaml(const RouteCall & /*call*/) -> std::string {
+    // 与 JSON 树同一份折叠后再转文本：两条导出面不各留一套口径。
+    const auto policy = net::export_policy();
+    return on_tree([policy](const Node &root) -> std::string {
+        Json tree = Inspector::tree_json_full(root);
+        if (policy) {
+            tree = redact_tree_node(*policy, tree);
         }
-        Json input;
-        if (auto parsed = json::parse(body); parsed) {
-            input = std::move(parsed).value();
-        } else {
-            return error_response(400, std::string("Invalid JSON body: ") + parsed.error().message);
-        }
-        // 输入可以是完整树或仅节点
-        const Json &node = input.is_object() && input.contains("node") ? *input.at("node") : input;
-        // 契约：请求体可含 style（0=Fluent/1=StepByStep/2=DesignatedInit），默认 Fluent。
-        // 非法数值回退 Fluent（向后兼容）；字段存在但非整数时此前经 value("style", 0)
-        // 抛 type_error 未捕获而 terminate，现显式校验回 400。
-        int style_int = 0;
-        if (input.is_object()) {
-            const Json *it = input.find("style");
-            if (it != nullptr) {
-                if (!it->is_int()) {
-                    return error_response(400, "style must be an integer (0=Fluent, 1=StepByStep, 2=DesignatedInit)");
-                }
-                style_int = it->as_or<int>(0);
-                if (style_int < 0 || style_int > static_cast<int>(serialization::CodeStyle::DesignatedInit)) {
-                    style_int = 0;  // 越界回退 Fluent
-                }
+        const std::string yaml = aurora::serialization::to_yaml(tree);
+        return make_response(200, "OK", "text/yaml", yaml);
+    });
+}
+
+// POST /api/to_code — UI 树 → C++ 代码
+// 注意：路由匹配用 strip_query 后的 route，与其它端点一致（/api/to_code?x=1 不再误 404）。
+auto InspectorServer::Impl::handle_to_code(const RouteCall &call) -> std::string {
+    Json input;
+    if (auto parsed = json::parse(call.body); parsed) {
+        input = std::move(parsed).value();
+    } else {
+        return error_response(400, std::string("Invalid JSON body: ") + parsed.error().message);
+    }
+    // 输入可以是完整树或仅节点
+    const Json &node = input.is_object() && input.contains("node") ? *input.at("node") : input;
+    // 契约：请求体可含 style（0=Fluent/1=StepByStep/2=DesignatedInit），默认 Fluent。
+    // 非法数值回退 Fluent（向后兼容）；字段存在但非整数时此前经 value("style", 0)
+    // 抛 type_error 未捕获而 terminate，现显式校验回 400。
+    int style_int = 0;
+    if (input.is_object()) {
+        const Json *it = input.find("style");
+        if (it != nullptr) {
+            if (!it->is_int()) {
+                return error_response(400, "style must be an integer (0=Fluent, 1=StepByStep, 2=DesignatedInit)");
+            }
+            style_int = it->as_or<int>(0);
+            if (style_int < 0 || style_int > static_cast<int>(serialization::CodeStyle::DesignatedInit)) {
+                style_int = 0;  // 越界回退 Fluent
             }
         }
-        const auto style = static_cast<serialization::CodeStyle>(style_int);
-        // 使用 codegen.h 的 to_code（需要 Json 输入；按 style 生成多风格代码）
-        const std::string code = serialization::to_code(node, style);
-        Json result = Json::object();
-        result.set("code", code);
-        return json_response(200, "OK", result);
     }
-
-    return error_response(404, "Unknown endpoint: " + path);
+    const auto style = static_cast<serialization::CodeStyle>(style_int);
+    // 使用 codegen.h 的 to_code（需要 Json 输入；按 style 生成多风格代码）
+    const std::string code = serialization::to_code(node, style);
+    Json result = Json::object();
+    result.set("code", code);
+    return json_response(200, "OK", result);
 }
 
 // ---------------------------------------------------------------------------

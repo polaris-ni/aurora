@@ -10,7 +10,9 @@
 // 六条口径（规范性，落码与文档回写以此为准）：
 // - **表按 (方法, 目标 URL, `Vary` 点名的请求头值) 建键**：`Vary` 存的是应答侧点名的头名与**当时请求里那些
 //   头的取值**，后续请求只有在同名同值时才命中。`Vary: *` 意为「这份应答随任何请求特征而变」，既不进表也
-//   永不命中（`RFC 9111 §4.4`）。
+//   永不命中（`RFC 9111 §4.4`）。发起侧还能追加变体名（钩子触点集走的就是这一条）：三处入口各收一组名字，
+//   与应答 `Vary` 和凭据名去重后一并存入；**条目缺当前任何一枚追加名的即不命中**——一枚钩子这次多带了
+//   `X-Tenant`，上一次存下的副本没把它算进键，照常命中就等于让新租户读到旧租户的内容。
 // - **从不交付陈旧副本**：过期条目必须先向对端验证，验证失败就把那次失败原样交出，绝不拿旧数据兜场。故
 //   `must-revalidate` 在本库不需要额外分支——它的禁令正是本库缺省；`no-cache` 响应指令折算为「即刻过期」。
 // - **不做启发式新鲜度**（`RFC 9111 §4.2.2`）：那套算法拿 `Last-Modified` 与 `Date` 的比例猜寿命，同一个
@@ -174,9 +176,11 @@ class HttpResponseCache final {
     /// @param url 目标 URL 文本（发起侧已解析，取其规范化渲染）。
     /// @param request_headers 本次请求的字段表（`Vary` 匹配要看它）。
     /// @param now 判定时刻。
+    /// @param extra_vary 发起侧追加的变体名（钩子触点集）：条目没把它算进键即**不命中**。
     /// @return 两者至多其一非空；都没匹配上时两者皆空。
     [[nodiscard]] auto lookup(aurora::net::http::Method method, const std::string &url,
-                              const aurora::Headers &request_headers, CacheTime now) -> CacheLookup;
+                              const aurora::Headers &request_headers, CacheTime now,
+                              const std::vector<std::string> &extra_vary = {}) -> CacheLookup;
 
     /// @brief 把一次应答按规则存进表（规则全在本函数判，调用方无须预筛）。
     /// @param method 产出该应答的请求方法。
@@ -184,11 +188,12 @@ class HttpResponseCache final {
     /// @param request_headers 当时的请求字段（`Vary` 取值从这里取）。
     /// @param response 已物化的应答（体已解压）。
     /// @param now 抵达时刻。
+    /// @param extra_vary 发起侧追加的变体名（钩子触点集），与应答 `Vary` 及凭据名去重后一并存入。
     /// @return 进了表为 true；不可存（`no-store` / `Vary: *` / 方法或状态码不可缓存 / 无有效期又无校验子）
     ///         为 false，表保持原样。
     [[nodiscard]] auto store(aurora::net::http::Method method, const std::string &url,
                              const aurora::Headers &request_headers, const aurora::net::http::Response &response,
-                             CacheTime now) -> bool;
+                             CacheTime now, const std::vector<std::string> &extra_vary = {}) -> bool;
 
     /// @brief 重验证成功（拿到 304）：并头部、重新折算新鲜度、换回一份可直接交付的应答。
     /// @param method 请求方法。
@@ -196,10 +201,12 @@ class HttpResponseCache final {
     /// @param request_headers 本次请求字段（`Vary` 匹配要看它）。
     /// @param not_modified 对端交回的 304（只用它的头部块）。
     /// @param now 304 的抵达时刻。
+    /// @param extra_vary 发起侧追加的变体名（钩子触点集），匹配口径与 `lookup` 同一条。
     /// @return 命中并合并成功为可交付的应答（`from_cache()` 为真）；表里没有对应条目为空。
     [[nodiscard]] auto revalidated(aurora::net::http::Method method, const std::string &url,
                                    const aurora::Headers &request_headers,
-                                   const aurora::net::http::Response &not_modified, CacheTime now)
+                                   const aurora::net::http::Response &not_modified, CacheTime now,
+                                   const std::vector<std::string> &extra_vary = {})
         -> std::optional<aurora::net::http::Response>;
 
     /// @brief 当前条目数（判据与观测用）。
@@ -211,12 +218,17 @@ class HttpResponseCache final {
 
   private:
     /// @brief 找匹配条目：键同且 `Vary` 点名的头取值全等。
+    ///
+    /// 两道判定有先后：先查「条目是否把当前每一枚追加变体名算进了键」——缺名即不匹配，另一租户的副本
+    /// 绝不能被当成答案；再做既有的逐值比较（追加名存入时连同取值进了 `vary`，故这里不需要第二条比较）。
     /// @param method 请求方法。
     /// @param url 目标 URL。
     /// @param request_headers 本次请求字段。
+    /// @param extra_vary 发起侧追加的变体名。
     /// @return 下标；无匹配为空。
     [[nodiscard]] auto find_index(aurora::net::http::Method method, const std::string &url,
-                                  const aurora::Headers &request_headers) const -> std::optional<std::size_t>;
+                                  const aurora::Headers &request_headers,
+                                  const std::vector<std::string> &extra_vary) const -> std::optional<std::size_t>;
 
     /// @brief 越上限时逐出最久未使用的条目，直到表内条数不超过 `options_.max_entries`。
     auto evict_over_capacity() -> void;

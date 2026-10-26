@@ -36,6 +36,7 @@
 namespace aurora::net {
 namespace detail {
 
+namespace {
 /// 会话阶段：握手进行中 / 可收发 / 已终止。
 enum class TlsPhase : std::uint8_t {
     Handshaking,  ///< 握手未完成：底层流只归本状态机驱动
@@ -48,6 +49,7 @@ struct TlsPendingRead {
     std::span<char> buffer;  ///< 调用方缓冲
     ReadDone on_done;  ///< 完成回调
 };
+}  // namespace
 
 /// 一次 TLS 会话的全部状态。
 ///
@@ -130,7 +132,7 @@ auto satisfy_reads_locked(detail::TlsState &state, Tasks &tasks) -> void {
         std::copy_n(state.plain.begin(), static_cast<std::ptrdiff_t>(delivered), front.buffer.data());
         state.plain.erase(state.plain.begin(), state.plain.begin() + static_cast<std::ptrdiff_t>(delivered));
         auto done = std::move(front.on_done);
-        tasks.emplace_back([done, delivered]() { done(Result<std::size_t>{delivered}); });
+        tasks.emplace_back([done, delivered]() -> void { done(Result<std::size_t>{delivered}); });
         state.reads.pop_front();
     }
 }
@@ -157,24 +159,25 @@ auto terminate_locked(const StatePtr &state, Tasks &tasks, const Error &reason, 
     auto reads = std::move(state->reads);
     state->plain.clear();
     for (auto &request : reads) {
-        tasks.emplace_back([done = std::move(request.on_done), copy = reason]() { done(Result<std::size_t>{copy}); });
+        tasks.emplace_back(
+            [done = std::move(request.on_done), copy = reason]() -> void { done(Result<std::size_t>{copy}); });
     }
     if (!state->handshake_delivered) {
         state->handshake_delivered = true;
         auto done = std::move(state->on_handshake);
         state->on_handshake = nullptr;  // 摘出即清空：小缓冲下 move 是克隆，不清源则回调会留在状态里
-        tasks.emplace_back([done, copy = reason]() { done(Result<TlsTransport>{copy}); });
+        tasks.emplace_back([done, copy = reason]() -> void { done(Result<TlsTransport>{copy}); });
     }
     if (notify) {
         auto cipher = std::make_shared<std::vector<char>>(std::move(*notify));
-        tasks.emplace_back([state, cipher]() {
+        tasks.emplace_back([state, cipher]() -> void {
             state->stream.write(std::span<const char>{*cipher}, [state](const Result<std::size_t> &sent) -> void {
                 (void)sent;  // close_notify 的发出不可能有结论（对端已不再读），忽略即本体的设计
                 state->stream.close();
             });
         });
     } else {
-        tasks.emplace_back([state]() { state->stream.close(); });
+        tasks.emplace_back([state]() -> void { state->stream.close(); });
     }
 }
 
@@ -184,7 +187,7 @@ auto arm_read_locked(const StatePtr &state, Tasks &tasks) -> void {
         return;
     }
     state->reading = true;
-    tasks.emplace_back([state]() {
+    tasks.emplace_back([state]() -> void {
         state->stream.read(std::span<char>{state->chunk.data(), state->chunk.size()},
                            [state](Result<std::size_t> got) -> void { on_incoming(state, std::move(got)); });
     });
@@ -198,7 +201,7 @@ auto complete_handshake_locked(const StatePtr &state, Tasks &tasks) -> void {
         return;
     }
     const auto &pinned = state->context.pinned_public_keys;
-    if (!pinned.empty() && std::find(pinned.begin(), pinned.end(), cert.value().public_key_sha256) == pinned.end()) {
+    if (!pinned.empty() && std::ranges::find(pinned, cert.value().public_key_sha256) == pinned.end()) {
         terminate_locked(
             state, tasks,
             make_detail(ErrorCode::NetTlsPinMismatch,
@@ -231,7 +234,7 @@ auto step_locked(const StatePtr &state, Tasks &tasks) -> void {
             }
             if (!outgoing.empty()) {
                 auto cipher = std::make_shared<std::vector<char>>(std::move(outgoing));
-                tasks.emplace_back([state, cipher]() {
+                tasks.emplace_back([state, cipher]() -> void {
                     state->stream.write(std::span<const char>{*cipher},
                                         [state](const Result<std::size_t> &sent) -> void {
                                             Tasks more;
@@ -284,7 +287,7 @@ auto step_locked(const StatePtr &state, Tasks &tasks) -> void {
         if (!outgoing.empty()) {
             // 后端在数据阶段产出了握手字节（系统要求完成一轮重协商）：先外发，回来再继续推进。
             auto cipher = std::make_shared<std::vector<char>>(std::move(outgoing));
-            tasks.emplace_back([state, cipher]() {
+            tasks.emplace_back([state, cipher]() -> void {
                 state->stream.write(std::span<const char>{*cipher}, [state](const Result<std::size_t> &sent) -> void {
                     Tasks more;
                     {
@@ -343,7 +346,7 @@ auto on_incoming(const StatePtr &state, Result<std::size_t> got) -> void {
 
 // 取消令牌的落点：以 `net-cancelled` 终止会话。
 auto on_cancelled(const std::weak_ptr<detail::TlsState> &weaker) -> void {
-    auto state = weaker.lock();
+    const auto state = weaker.lock();
     if (!state) {
         return;
     }
@@ -426,8 +429,8 @@ auto TlsTransport::handshake(StreamTransport &&stream, std::string_view server_n
     // 取消链条：外部令牌触发会话令牌，会话令牌的钩子负责收尾（钩子在调用线程同步执行）。
     // 登记时若已取消则就地执行钩子——那正是「先取消后发起」这条竞态窗口的唯一收口。
     const std::weak_ptr<detail::TlsState> weaker{state};
-    state->token.on_cancel([weaker]() { on_cancelled(weaker); });
-    auto source = cancellation;  // 令牌是可共享的状态句柄，拷贝即加入同一状态（入参是 const 引用）
+    state->token.on_cancel([weaker]() -> void { on_cancelled(weaker); });
+    const Cancellation &source = cancellation;  // 令牌是可共享的状态句柄，引用即加入同一状态（入参是 const 引用）
     source.on_cancel([token = state->token]() mutable { token.cancel(); });
 
     {
@@ -465,7 +468,7 @@ auto TlsTransport::backend() const -> Result<std::string> {
     return state_->backend_id;
 }
 
-auto TlsTransport::read(std::span<char> buffer, ReadDone on_done) -> void {
+auto TlsTransport::read(std::span<char> buffer, ReadDone on_done) const -> void {
     if (!on_done) {
         return;
     }
@@ -478,10 +481,10 @@ auto TlsTransport::read(std::span<char> buffer, ReadDone on_done) -> void {
         std::scoped_lock lock{state_->mutex};
         if (state_->phase == detail::TlsPhase::Closed) {
             auto copy = make_detail(ErrorCode::NetSocketFailed, "tls channel is closed");
-            tasks.emplace_back([done = std::move(on_done), copy]() { done(Result<std::size_t>{copy}); });
+            tasks.emplace_back([done = std::move(on_done), copy]() -> void { done(Result<std::size_t>{copy}); });
         } else if (buffer.empty()) {
             auto copy = make_detail(ErrorCode::NetBufferLimit, "read buffer is empty");
-            tasks.emplace_back([done = std::move(on_done), copy]() { done(Result<std::size_t>{copy}); });
+            tasks.emplace_back([done = std::move(on_done), copy]() -> void { done(Result<std::size_t>{copy}); });
         } else {
             state_->reads.push_back(detail::TlsPendingRead{.buffer = buffer, .on_done = std::move(on_done)});
             step_locked(state_, tasks);
@@ -508,15 +511,15 @@ auto TlsTransport::write(std::span<const char> data, WriteDone on_done) -> void 
         std::scoped_lock lock{state_->mutex};
         if (state_->phase != detail::TlsPhase::Open) {
             auto copy = make_detail(ErrorCode::NetSocketFailed, "tls channel is not open");
-            tasks.emplace_back([done = std::move(on_done), copy]() { done(Result<std::size_t>{copy}); });
+            tasks.emplace_back([done = std::move(on_done), copy]() -> void { done(Result<std::size_t>{copy}); });
         } else {
             std::vector<char> cipher;
             if (auto wrapped = state_->backend->protect(data, cipher); !wrapped) {
                 tasks.emplace_back(
-                    [done = std::move(on_done), copy = wrapped.error()]() { done(Result<std::size_t>{copy}); });
+                    [done = std::move(on_done), copy = wrapped.error()]() -> void { done(Result<std::size_t>{copy}); });
             } else {
                 auto batch = std::make_shared<std::vector<char>>(std::move(cipher));
-                tasks.emplace_back([state = state_, batch, plaintext, done = std::move(on_done)]() {
+                tasks.emplace_back([state = state_, batch, plaintext, done = std::move(on_done)]() -> void {
                     state->stream.write(
                         std::span<const char>{*batch}, [done, plaintext](const Result<std::size_t> &sent) -> void {
                             if (sent) {
@@ -532,7 +535,7 @@ auto TlsTransport::write(std::span<const char> data, WriteDone on_done) -> void 
     fire(tasks);
 }
 
-auto TlsTransport::close() -> void {
+auto TlsTransport::close() const -> void {
     if (!state_) {
         return;
     }
@@ -544,13 +547,13 @@ auto TlsTransport::close() -> void {
     fire(tasks);
 }
 
-auto TlsTransport::pause_read() -> void {
+auto TlsTransport::pause_read() const -> void {
     if (state_) {
         state_->stream.pause_read();
     }
 }
 
-auto TlsTransport::resume_read() -> void {
+auto TlsTransport::resume_read() const -> void {
     if (!state_) {
         return;
     }

@@ -304,7 +304,17 @@ au::Node reveal = au::Timer(2s,
 - `set_timeout(d, cb)` 一次性；`set_interval(period, cb)` 周期；返回值 `TimerHandle` 可 `cancel()`、`active()` 查询。
 - `Timer` 挂载时向 `Scheduler::current()` 注册，析构自动取消；无运行中 App 时降级（记 `Diagnostics::warn`）不崩溃。
 
-> **`au::LocalizedString`**：`au::LocalizedString{ "revealed!" }` 由 `const char*` 构造，持有字面文本，未启用本地化时直接显示（查表失败也回退为 `text`）。需按 `Locale` 查 `StringTable` 解析时用 `au::LocalizedString::tr("key")`；控件层（如 `Button::label`）统一吃 `LocalizedString`，故 `.content = "Hi"` 可隐式转换。
+> **`au::LocalizedString`**：`au::LocalizedString{ "revealed!" }` 由 `const char*` 构造，持有字面文本，未启用本地化时直接显示（查表失败也回退为 `text`）。需按 `Locale` 查 `MessageCatalog` 解析时用 `au::LocalizedString::tr(id)`——`id` 是构建期 `gen_i18n` 生成头里的 `constexpr au::MessageId` 常量（用法见 `codespec/specification/07-environment-modifier.md` §6.3），控件层（如 `Button::label`）统一吃 `LocalizedString`，故 `.content = "Hi"` 可隐式转换。最小配方三行：
+>
+> ```cpp
+> // 构建期：aurora_i18n_generate(TARGET myapp NAMESPACE myapp::msg BASE messages_en.json
+> //         LOCALES messages_zh-Hans-CN.json OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/i18n)
+> (void)au::default_catalog().load_binary(std::span<const std::byte>{read_whole_file("messages_en.bin")});
+> au::default_catalog().set_default_locale(au::Locale{.language = "en"});
+> au::Text{au::TextProps{.content = myapp::msg::demo::greeting(3, "Ada")}};   // 具名强类型生成 API
+> ```
+>
+> 切语言有两条通道：子树 `au::LocaleProvider{std::make_shared<au::State<au::Locale>>(loc), child}`（响应式，换值即整子树重解析），或窗口级默认 `window.set_locale(loc)`（自下一帧起根注入）。两者换值都会向下清子树缓存，整屏文案同帧重解析；子树 Provider 优先于窗口级。
 
 ---
 
@@ -393,12 +403,12 @@ cmake --build build --target bench_render
 ```bash
 cmake --build build --target bench_scroll
 # 时间口径（Release + PROFILING=OFF）：独立进程多次取最小，抵消离屏缓冲堆碎片噪声
-for i in 1 2 3; do ./build/bench_scroll.exe --scene google_play --format csv; done
+for i in 1 2 3; do ./build/bench_scroll.exe --scene app --format csv; done
 
 # 计数口径（Release + PROFILING=ON）：确定性，可直接锁基线
 cmake -S . -B build-prof -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_PROFILING=ON
 cmake --build build-prof --target bench_scroll
-./build-prof/bench_scroll.exe --scene google_play --format csv
+./build-prof/bench_scroll.exe --scene app --format csv
 ```
 
 **在代码里直接用 `ScrollBenchHarness` 做自证采样**（先查 `trustworthy()` 再读性能指标）：
@@ -1350,7 +1360,7 @@ auto main() -> int {
 - **落位与让位**：让位是**绘制期偏移**（`Node::bounds` 不动，命中链同步补偿），松手 spring 落位后才提交数据；`reduce_motion` 下直接落位。换位判定带 ±2dp 滞回。
 - **近边缘自动滚动**：被拖项进入视口上下 `auto_scroll_threshold`（默认 48dp）带内按比例滚动，且滚动量吃进跟手位移（被拖项屏幕位置守恒）；拖拽期间滚轮被吞。
 - **虚拟化列表不重排**：长列表请用 `LazyList`（只读滚动）；重排是全量实例化（适合 <500 项）。
-- **键盘也能排**（默认开启，无需接线）：Tab 焦点进列表（光标落在**首个可见项**，不改滚动位置），`↑`/`↓` 移光标、`Home`/`End` 跳首尾、`Space`/`Enter` 抓取与落位、`Esc` 取消；落位走同一条 `reorder` 通道，故 `on_reorder` 与数据改写和拖拽完全一致。四个节点（位置/抓取/落位/取消）各播报一次给读屏，文案可经 `default_string_table()` 的 `aurora.reorder.*` 键本地化。禁用或改开关用 `set_keyboard_reorder(false)`，观测点 `keyboard_index()` / `is_keyboard_grabbed()`。
+- **键盘也能排**（默认开启，无需接线）：Tab 焦点进列表（光标落在**首个可见项**，不改滚动位置），`↑`/`↓` 移光标、`Home`/`End` 跳首尾、`Space`/`Enter` 抓取与落位、`Esc` 取消；落位走同一条 `reorder` 通道，故 `on_reorder` 与数据改写和拖拽完全一致。四个节点（位置/抓取/落位/取消）各播报一次给读屏，文案按 `aurora.reorder.*` 五条规范名登记到 `default_catalog()` 即可本地化（未登记回落控件内英文串）。禁用或改开关用 `set_keyboard_reorder(false)`，观测点 `keyboard_index()` / `is_keyboard_grabbed()`。
 - **可编译样例**：`examples/demos/demo_reorderable_list.cpp`。
 
 ---

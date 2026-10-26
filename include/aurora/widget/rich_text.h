@@ -9,7 +9,7 @@
 #include "aurora/core/types.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/i18n/localized_string.h"
-#include "aurora/i18n/string_table.h"
+#include "aurora/i18n/message_catalog.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/reactive.h"
@@ -68,7 +68,7 @@ inline auto split_words(const std::string &s) -> std::vector<std::string> {
 /// 两阶段布局）。
 /// @param spans     文本片段序列；每片自带文本/字体/颜色
 /// @param max_width 换行约束宽度（dp），行宽（含空格间隙）超出即另起一行
-/// @param loc       i18n locale，片段文本经 `default_string_table()` 解析时用
+/// @param loc       i18n locale，片段文本经 `default_catalog()` 解析时用
 /// @return 布局完成的行集合：每行含单词序列（带实测宽度）与 y/height；空输入至少返回一行
 inline auto layout_rich_text(const std::vector<TextSpan> &spans, float max_width, const Locale &loc)
     -> std::vector<detail::RichLine> {
@@ -81,7 +81,7 @@ inline auto layout_rich_text(const std::vector<TextSpan> &spans, float max_width
     };  // 该字号下空格宽度
 
     for (const auto &span : spans) {
-        const std::string s = span.text.resolve(&default_string_table(), loc);
+        const std::string s = span.text.resolve(&default_catalog(), loc);
         const std::vector<std::string> words = detail::split_words(s);
         for (const auto &word : words) {
             const float w = render::FontEngine::measure_width(word, span.font);
@@ -143,7 +143,7 @@ inline auto measure_rich_text(const std::vector<TextSpan> &spans, float max_widt
 
 /// @brief 富文本控件（叶控件）：按 `TextSpan` 序列渲染带样式的文本。
 ///
-/// 文本经 `default_string_table()` + 当前 `Locale` 解析（支持 i18n）。布局采用确定性贪心换行，
+/// 文本经 `default_catalog()` + 当前 `Locale` 解析（支持 i18n）。布局采用确定性贪心换行，
 /// 整串宽度/高度由 `measureRichText` 决定；值来源支持 `Reactive<std::vector<TextSpan>>`。
 ///
 /// 颜色语义（迁移批）：片段 `TextSpan::color` 未显式设置时，跟随本控件 `text_color`
@@ -192,7 +192,7 @@ class RichText : public LeafWidget {
     [[nodiscard]] auto accessibility_label() const -> std::string override {
         std::string out;  // 拼接结果缓冲
         for (const auto &s : spans_.get()) {
-            out += s.text.resolve(&default_string_table(), Locale{});
+            out += s.text.resolve(&default_catalog(), Locale{});
         }
         return out;
     }
@@ -264,7 +264,7 @@ class RichText : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("text")) {
-            spans_ = Reactive{std::vector{TextSpan{.text = LocalizedString{props.at("text")->as_or<std::string>("")}}}};
+            spans_ = Reactive{std::vector{TextSpan{.text = localizable_from_json(*props.at("text"))}}};
         }
         if (props.contains("text_color")) {
             text_color_ = json_to_color(*props.at("text_color"));

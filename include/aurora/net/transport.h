@@ -252,7 +252,7 @@ class StreamTransport {
     /// 次序满足，排在队首的请求决定本轮最多读多少字节。
     /// @param buffer 目标缓冲；空 span 是用法错误，回调以 `net-buffer-limit` 形态抵达（0 字节只留给 EOF）。
     /// @param on_done 完成回调；携实际读取字节数。
-    auto read(std::span<char> buffer, ReadDone on_done) -> void;
+    auto read(std::span<char> buffer, ReadDone on_done) const -> void;
 
     /// @brief 登记一次写请求（全部字节都进入内核或明确失败才算完成）。
     ///
@@ -260,18 +260,18 @@ class StreamTransport {
     /// 表达点，调用方据此减速而不是把数据堆进本层。
     /// @param data 待发送字节；空 span 直接以 OK 完成（不产生任何系统调用）。
     /// @param on_done 完成回调；携**已接受**的字节数（失败时携已接受的那一部分的意义由 message 说明）。
-    auto write(std::span<const char> data, WriteDone on_done) -> void;
+    auto write(std::span<const char> data, WriteDone on_done) const -> void;
 
     /// @brief 调整写高水位（低水位按其四分之一回落，最小 1 字节）。
     /// @param bytes 新的待发字节上限；0 视为「不设缓冲」（每次写入都必须能立即进内核）。
-    auto set_high_water_mark(std::size_t bytes) -> void;
+    auto set_high_water_mark(std::size_t bytes) const -> void;
 
     /// @brief 暂停读投递：不再从内核取字节，数据留在对端 / 内核缓冲里。
     /// @note 与 `shutdown(ShutdownMode::Read)` 的区别：暂停随时可恢复且不影响连接状态，停读是单向关闭。
-    auto pause_read() -> void;
+    auto pause_read() const -> void;
 
     /// @brief 恢复读投递（未暂停时为空操作）。
-    auto resume_read() -> void;
+    auto resume_read() const -> void;
 
     /// @brief 当前是否处于暂停读状态。
     /// @return `pause_read()` 生效且未 `resume_read()` 时为 true。
@@ -284,12 +284,12 @@ class StreamTransport {
     /// @brief 单向或双向关停（不归还句柄，也不丢弃已排队的读请求）。
     /// @param mode 关停方向。
     /// @return 成功为 OK；空态为 `net-socket-failed`，系统调用失败为 `net-option-failed`。
-    [[nodiscard]] auto shutdown(ShutdownMode mode) -> Result<void>;
+    [[nodiscard]] auto shutdown(ShutdownMode mode) const -> Result<void>;
 
     /// @brief 关闭连接：注销事件源、丢弃未完成的读写请求（各以 `net-cancelled` 收尾一次）并归还句柄。
     ///
     /// 顺序是「先注销、后关句柄」——反过来会让常驻引擎手里那份快照撞上系统已复用的句柄号。幂等。
-    auto close() -> void;
+    auto close() const -> void;
 
     /// @brief 本连接的取消令牌（`cancel()` 会中止所有未完成的读写并关闭连接）。
     /// @return 与本对象共享状态的令牌；空态返回一枚独立令牌（ cancel 它不产生任何效果）。
@@ -348,7 +348,7 @@ class StreamListener {
     /// 「没有回调就不等」是有意的：连接在此期间的归宿是内核 backlog（由 `backlog` 限定深度），
     /// 而不是本层队列——后者没有上限，等于把慢宿主变成无界缓冲。
     /// @param on_ready 新连接回调；携已建立的对端流。
-    auto accept(AcceptDone on_ready) -> void;
+    auto accept(AcceptDone on_ready) const -> void;
 
     /// @brief 实际绑定端口。
     /// @return 成功绑定时的端口（入参 0 时为系统分配值）；空态为 0。
@@ -363,7 +363,7 @@ class StreamListener {
     [[nodiscard]] auto is_valid() const -> bool;
 
     /// @brief 关闭监听：注销事件源并归还句柄（已交付的连接不受影响）。幂等。
-    auto close() -> void;
+    auto close() const -> void;
 
   private:
     friend class detail::TransportFactory;

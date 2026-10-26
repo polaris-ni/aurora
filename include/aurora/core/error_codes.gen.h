@@ -177,6 +177,24 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     IconGlyphUnavailable = 133,  ///< icon-glyph-unavailable: Icon glyph unavailable: {detail}
     IconSvgUnsupported = 134,  ///< icon-svg-unsupported: Icon SVG source uses unsupported features: {detail}
     HttpBodyNotReplayable = 135,  ///< http-body-not-replayable
+    WsClosed = 136,  ///< ws-closed: WebSocket connection is closed: '{detail}'
+    WsHandshakeRejected = 137,  ///< ws-handshake-rejected: WebSocket upgrade was refused: '{detail}'
+    WsProtocolError = 138,  ///< ws-protocol-error: WebSocket peer violated the frame grammar: '{detail}'
+    WsSendQueueFull = 139,  ///< ws-send-queue-full: WebSocket send queue is full: '{detail}'
+    ClipboardProviderFailed = 140,  ///< clipboard-provider-failed
+    ClipboardListenUnsupported = 141,  ///< clipboard-listen-unsupported
+    SystemDragReadFailed = 142,  ///< system-drag-read-failed
+    SystemDragDecodeFailed = 143,  ///< system-drag-decode-failed
+    SystemDragCancelled = 144,  ///< system-drag-cancelled: System drag session was cancelled: '{detail}'
+    SystemDragMoveRollback = 145,  ///< system-drag-move-rollback
+    I18nBinMagicFailed = 146,  ///< i18n-bin-magic: Message catalog binary magic mismatch (expected AUM1)
+    I18nBinVersionUnsupported = 147,  ///< i18n-bin-version
+    I18nBinEndiannessInvalid = 148,  ///< i18n-bin-endianness
+    I18nBinTruncated = 149,  ///< i18n-bin-truncated
+    I18nIdOutOfRange = 150,  ///< i18n-id-out-of-range
+    I18nVocabularyOverlap = 151,  ///< i18n-vocabulary-overlap
+    I18nNameDuplicate = 152,  ///< i18n-name-duplicate
+    I18nUnknownName = 153,  ///< i18n-unknown-name: Unknown message name '{name}' (not in any registered vocabulary)
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -192,7 +210,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 136> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 154> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1681,6 +1699,221 @@ inline constexpr std::array<ErrorMeta, 136> AURORA_ERROR_TABLE = {
                 "its starting point, so resending it would ship a half-consumed payload. Either hand the payload over "
                 "as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note "
                 "that a body which cannot restart also opts this request out of the retry policy on purpose",
+        },
+        {
+            .code = ErrorCode::WsClosed,
+            .ident = "WsClosed",
+            .slug = "ws-closed",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Info,
+            .retryable = true,
+            .message_tpl = "WebSocket connection is closed: '{detail}'",
+            .hint = "The peer ran the close handshake, a pong deadline expired, or this side shut the handle down, so "
+                    "no further frame will be delivered. Reconnecting is a fresh connection with a fresh handshake, "
+                    "not a resume: application-level state the protocol carried (subprotocol, session identity, "
+                    "anything the server keyed on the old connection) has to be re-established by the caller",
+        },
+        {
+            .code = ErrorCode::WsHandshakeRejected,
+            .ident = "WsHandshakeRejected",
+            .slug = "ws-handshake-rejected",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "WebSocket upgrade was refused: '{detail}'",
+            .hint = "The peer did not answer the upgrade with 101 Switching Protocols, Sec-WebSocket-Accept did not "
+                    "match the key this side sent, or a required subprotocol went unchosen. This is a stable answer "
+                    "about the endpoint and the configuration, so retrying the same request reaches the same verdict: "
+                    "fix the URL, the subprotocol list, or the Origin the server expects",
+        },
+        {
+            .code = ErrorCode::WsProtocolError,
+            .ident = "WsProtocolError",
+            .slug = "ws-protocol-error",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "WebSocket peer violated the frame grammar: '{detail}'",
+            .hint = "A frame was malformed, exceeded a configured frame or reassembled-message limit, carried a "
+                    "control frame that is not a complete message or whose payload is longer than 125 bytes, or held "
+                    "text that is not valid UTF-8. The byte stream is now misaligned, so the connection is dropped "
+                    "rather than continued: no later frame on it can be trusted",
+        },
+        {
+            .code = ErrorCode::WsSendQueueFull,
+            .ident = "WsSendQueueFull",
+            .slug = "ws-send-queue-full",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Warning,
+            .retryable = true,
+            .message_tpl = "WebSocket send queue is full: '{detail}'",
+            .hint = "The producer outran the wire: pending outgoing payload reached its byte cap or the queue its "
+                    "entry cap. This refuses only the message that hit the limit and leaves the connection open, on "
+                    "purpose - whether to keep buffering, drop, or close is the caller's decision. Slow the producer "
+                    "down or raise the matching WebSocketOptions field",
+        },
+        {
+            .code = ErrorCode::ClipboardProviderFailed,
+            .ident = "ClipboardProviderFailed",
+            .slug = "clipboard-provider-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Lazy clipboard provider failed for '{mime}': '{detail}'",
+            .hint = "The provide callback registered through the lazy offer returned an error, or was empty while the "
+                    "format was actually requested. The bytes could not be rendered on demand - fix the provider or "
+                    "supply the format eagerly; re-reading the same clipboard reproduces the same failure, so this is "
+                    "not a transient one",
+        },
+        {
+            .code = ErrorCode::ClipboardListenUnsupported,
+            .ident = "ClipboardListenUnsupported",
+            .slug = "clipboard-listen-unsupported",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "This platform cannot listen for clipboard changes: '{detail}'",
+            .hint =
+                "No clipboard-change listener mechanism exists here (the platform anchors are "
+                "AddClipboardFormatListener on Win32, QClipboard::dataChanged, GdkClipboard::changed, and NSPasteboard "
+                "changeCount). The absence is stable, so retrying cannot create it - sample available_formats() at the "
+                "moments that matter instead of registering a listener that would never fire",
+        },
+        {
+            .code = ErrorCode::SystemDragReadFailed,
+            .ident = "SystemDragReadFailed",
+            .slug = "system-drag-read-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "System drag payload read failed for '{mime}': '{detail}'",
+            .hint =
+                "The source session went away, cancelled mid-transfer, or the bytes never arrived within the read "
+                "deadline. Unlike a missing mechanism this is transient - the same format may well succeed on a second "
+                "attempt - so surface the failure with a non-cursor fallback and let the control decide about retrying",
+        },
+        {
+            .code = ErrorCode::SystemDragDecodeFailed,
+            .ident = "SystemDragDecodeFailed",
+            .slug = "system-drag-decode-failed",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "System drag payload could not be decoded as '{mime}': '{detail}'",
+            .hint = "The bytes arrived but do not form a valid payload for the declared MIME (for example image/png "
+                    "that no decoder accepts). The same bytes fail again - this is a data defect at the source, not a "
+                    "transient one; drop the payload and report it rather than retrying",
+        },
+        {
+            .code = ErrorCode::SystemDragCancelled,
+            .ident = "SystemDragCancelled",
+            .slug = "system-drag-cancelled",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Info,
+            .retryable = false,
+            .message_tpl = "System drag session was cancelled: '{detail}'",
+            .hint = "The user pressed Esc, moved the pointer away, or the system ended the session. This is user "
+                    "intent, not a fault - do not route it into an error branch; the source data stays untouched and "
+                    "the control simply returns to its idle state",
+        },
+        {
+            .code = ErrorCode::SystemDragMoveRollback,
+            .ident = "SystemDragMoveRollback",
+            .slug = "system-drag-move-rollback",
+            .category = ErrorCategory::Platform,
+            .severity = ErrorSeverity::Error,
+            .retryable = true,
+            .message_tpl = "Move drop landed but the source could not delete its data: '{detail}'",
+            .hint =
+                "The target received and stored the payload, but deleting the original failed (file locked, permission "
+                "revoked). The target's copy stays authoritative - retry the deletion later instead of re-copying, and "
+                "remember the contract: the source never deletes before the move confirmation arrives",
+        },
+        {
+            .code = ErrorCode::I18nBinMagicFailed,
+            .ident = "I18nBinMagicFailed",
+            .slug = "i18n-bin-magic",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message catalog binary magic mismatch (expected AUM1)",
+            .hint = "The file is not an AUM1 message catalog. Check that the path points to the .bin produced by "
+                    "gen_i18n, not a JSON source or a different asset",
+        },
+        {
+            .code = ErrorCode::I18nBinVersionUnsupported,
+            .ident = "I18nBinVersionUnsupported",
+            .slug = "i18n-bin-version",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message catalog binary version {version} is not supported (expected 1)",
+            .hint = "The catalog was produced by a newer gen_i18n. Regenerate the .bin with the tool version that "
+                    "matches the library",
+        },
+        {
+            .code = ErrorCode::I18nBinEndiannessInvalid,
+            .ident = "I18nBinEndiannessInvalid",
+            .slug = "i18n-bin-endianness",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message catalog binary is not little-endian (version field decoded as {version})",
+            .hint = "AUM1 catalogs are little-endian only. Regenerate the file instead of byte-swapping it",
+        },
+        {
+            .code = ErrorCode::I18nBinTruncated,
+            .ident = "I18nBinTruncated",
+            .slug = "i18n-bin-truncated",
+            .category = ErrorCategory::Io,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message catalog binary truncated at offset {offset} (needed {needed} more bytes)",
+            .hint = "The file is shorter than its own header claims. Re-transfer or regenerate the .bin; do not "
+                    "attempt to salvage a partial file",
+        },
+        {
+            .code = ErrorCode::I18nIdOutOfRange,
+            .ident = "I18nIdOutOfRange",
+            .slug = "i18n-id-out-of-range",
+            .category = ErrorCategory::Validation,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message id range [{base}, {end}) collides with the invalid-id sentinel or overflows",
+            .hint = "The vocabulary id space must stay below AURORA_INVALID_MESSAGE_ID_VALUE and cannot wrap. Lower "
+                    "--id-base or split the vocabulary",
+        },
+        {
+            .code = ErrorCode::I18nVocabularyOverlap,
+            .ident = "I18nVocabularyOverlap",
+            .slug = "i18n-vocabulary-overlap",
+            .category = ErrorCategory::Validation,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Vocabulary range [{base}, {end}) overlaps an already registered range",
+            .hint = "Two catalogs claim the same id space. Regenerate with disjoint --id-base values (builtin reserved "
+                    "range starts at 0, applications default to 1024)",
+        },
+        {
+            .code = ErrorCode::I18nNameDuplicate,
+            .ident = "I18nNameDuplicate",
+            .slug = "i18n-name-duplicate",
+            .category = ErrorCategory::Validation,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Message name '{name}' is already registered by another vocabulary",
+            .hint = "Canonical names are global. Rename one of the colliding keys in the JSON sources and regenerate",
+        },
+        {
+            .code = ErrorCode::I18nUnknownName,
+            .ident = "I18nUnknownName",
+            .slug = "i18n-unknown-name",
+            .category = ErrorCategory::Validation,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Unknown message name '{name}' (not in any registered vocabulary)",
+            .hint = "add() resolves names through registered vocabularies. Load the vocabulary that owns the name "
+                    "first, or use the generated MessageId constant directly",
         },
     },
 };

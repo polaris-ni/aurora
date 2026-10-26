@@ -1,0 +1,13 @@
+{
+  "locale": "zh-Hans-CN",
+  "messages": {
+    "demo.welcome": "你好 {name}，{count, plural, other {# 个文件}}。",
+    "demo.due": "{when, date, long} 到期，共 {total, currency, EUR}。",
+    "demo.rank": "你排在第 {pos, selectordinal, other {#}} 位。",
+    "demo.role": "{who, select, admin {管理员} guest {访客} other {用户}}",
+    "demo.plain": "这里没有要替换的东西",
+    "demo.offset": "{n, plural, offset:1 other {# 个}}",
+    "demo.quoted": "'{' 花括号、''引号'' 与 '#' 井号保持字面",
+    "demo.nested": "{count, plural, other {{kind, select, file {# 个文件} other {# 项}}}}"
+  }
+}

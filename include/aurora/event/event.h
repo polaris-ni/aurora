@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -229,6 +230,19 @@ enum class DragAction : std::uint8_t {
     Link,  ///< 建立链接 / 快捷方式
 };
 
+/// @brief 系统拖出会话的**结局**：会话「怎么完的」，与 `DragAction`「谈成了什么」分工。
+///
+/// 事件驱动模型（`system_drag::begin` 发起即返回、终态经 `on_end` 回调投递）下，四种结局必须
+/// 可分辨：把「被取消」「被拒绝」「建立失败」折叠成同一个 `DragAction::None` 时，控件层三条路径
+/// 的回调序列逐字相同（都是 begin → end(None)），等于没补——本枚举与 `on_system_drag_end` 的
+/// 签名一起换来「五种路径全部可辨」。
+enum class SystemDragOutcome : std::uint8_t {
+    Succeeded,  ///< 落放成功（`DragAction` 有效）
+    Cancelled,  ///< 被 Esc 或系统取消（用户意图，不是故障）
+    Rejected,  ///< 目标不接受该拖放
+    Failed,  ///< 会话中途异常终止，或 Move 落放后源侧删除失败（回滚）
+};
+
 /// @brief 系统拖放的四个阶段（specification/05-event-navigation.md §5.2）。
 ///
 /// 四态共用同一个事件结构（与 `MouseEvent` / `MouseAction` 同款惯例，不造四个事件类型）：
@@ -250,9 +264,15 @@ enum class SystemDropPhase : std::uint8_t {
 ///
 /// **空口径（与 `Clipboard` 同款）**：格式不存在 = `Ok` 空值，**空内容不是失败**；只有「读取这个
 /// 动作本身失败」（会话已失效、字节不可得）才是 `Error`。
+///
+/// **同步 / 非阻塞双通道**：`bytes()` 一族同步读取，用于小载荷、无头测试与同步后端；
+/// `read_async()` 是非阻塞并列通道——跨进程会话上的一次读取可能触发跨进程 IO，同步读完一个大
+/// 载荷即是一帧的整段停顿（本库是单线程 UI + 帧循环）。非阻塞入口登记在途项，结果经
+/// `system_drag::pump_reads()` 在帧内排空兑现（宿主不排空 ⇒ 回调不到，不谎报），回调只被调用
+/// 一次；会话收口（`system_drag::cancel()`）时就地兑现未决读取，不悬挂。
 /// @note Thread: main-thread only（载荷随会话，会话在派发线程上）
 /// @note Side-effects: 读取可能触发平台会话 IO（`from_bytes` 构造的内存载荷除外）
-class DragPayload {
+class DragPayload : public std::enable_shared_from_this<DragPayload> {
   public:
     /// @brief 由内存字节表构造载荷：平台后端把会话数据一次性读入时的唯一工厂，也是无头测试的注入口。
     /// @param data MIME → 原始字节的映射（键为 MIME 字符串，空键被丢弃）。
@@ -265,10 +285,21 @@ class DragPayload {
     /// @return 该格式存在时 true；否则 false（含载荷句柄为空时）。
     [[nodiscard]] auto has(const std::string &mime) const -> bool;
 
-    /// @brief 按 MIME 读取原始字节（通用入口）。
+    /// @brief 按 MIME 读取原始字节（通用入口，同步）。
     /// @param mime 待读取的 MIME。
     /// @return `Ok(字节)`——格式不存在时为 `Ok(空)`（空内容不是失败）；会话失效等读取失败为结构化 `Error`。
     [[nodiscard]] auto bytes(const std::string &mime) const -> Result<std::vector<std::uint8_t>>;
+
+    /// @brief 按 MIME 非阻塞读取原始字节：登记在途项后立即返回，读取期间不阻塞帧循环。
+    ///
+    /// 结果经 `system_drag::pump_reads()` 在帧内排空兑现：**宿主不排空 ⇒ 回调不到**（不谎报，
+    /// 与 `NotificationCenter` 同款口径）。同一 const 句柄可被并发读取——每次调用各自独立登记、
+    /// 各自兑现一次，不共享结果、不互相取消。源侧迟迟不给数据时按墙钟超时兑现
+    /// `system-drag-read-failed`；会话收口（`system_drag::cancel()`）时就地兑现，不悬挂。
+    /// @param mime 待读取的 MIME。
+    /// @param callback 兑现回调（`Ok(字节)` 或结构化 `Error`；只被调用一次）。
+    auto read_async(const std::string &mime, std::function<void(Result<std::vector<std::uint8_t>>)> callback) const
+        -> void;
 
     /// @brief 便利读取：文件清单（解码 `text/uri-list`，只返回可映射为本地路径的条目）。
     /// @return `Ok(路径清单)`；无该格式时为 `Ok(空清单)`。非 `file` scheme 的行静默跳过
@@ -310,10 +341,36 @@ class DragPayload {
 ///
 /// 与拖入侧的 `DragPayload` 对称：那边是**读**（会话推送后按需取），这边是**提供**（会话期内由源
 /// 按需回调）。`provide` 为空回调而 `formats` 非空 = 声明了格式却给不出数据，会话按失败处理。
+///
+/// 字段形态与剪贴板侧 `ClipboardOffer`（`app/clipboard.h`）同构：两条通道共享同一套 MIME 词汇
+/// （`app/mime_types.h` 是单一真源），同一个 `provide` 回调可同时交给两条通道；两侧不合并——
+/// `event/` 不依赖 `app/` 的分层约束使统一数据对象无从落地。
 struct DragOffer {
     std::vector<std::string> formats;  ///< 可提供的 MIME 清单（顺序即优先级）
     /// @brief 按 MIME 提供字节的回调；返回 `Error` 视为该次提供失败（会话按失败结束）。
     std::function<Result<std::vector<std::uint8_t>>(const std::string &mime)> provide;
+    /// @brief 可选拖拽影像（RGBA8；空图像 = 交给 OS 用默认影像）。
+    ///
+    /// 跨进程拖拽时跟随光标的影像由**源应用提供给 OS**、OS 合成显示，本库不绘制跟随层：该字段
+    /// 只经 `Widget::begin_system_drag()` 交给 OS。不支持影像的后端静默忽略该字段、不改变会话语义
+    /// （装饰性提示缺失不致语义受损，故不设能力位、不报错）。
+    Image icon;
+    /// @brief 影像热点相对指针的偏移（逻辑 dp；仅 `icon` 非空时有意义）。
+    Point icon_hotspot{.x = 0.0F, .y = 0.0F};
+    /// @brief 源侧缺省动作：无有效修饰键时 `SystemDropEvent::proposed` 取该值（对标
+    /// `QDrag::setDefaultAction`）；缺省 `Copy`（未设置与显式 `Copy` 行为一致）。
+    ///
+    /// 存在的理由：`ModifierKey::None` 是**两义**的（既可能是没按修饰键，也可能是程序化合成事件
+    /// 不由真实指针产生），故不能靠修饰键缺席推定默认动作。控件也借此表达「我不支持 Move」——
+    /// 写进本字段即可，无需另开门面。
+    DragAction default_action = DragAction::Copy;
+    /// @brief Move 完成确认：目标侧成功接收并落盘后由宿主调用，源在此回调内删除原数据。
+    ///
+    /// 返回 `Error` 即源删除失败：宿主据此把会话终态改写为 Move 失败（`on_end` 收到
+    /// `Failed` + `Move`）并上报 `system-drag-move-rollback`，目标侧数据保持不动。契约：
+    /// **源不得在收到确认前删除任何数据**；**目标侧接收失败时不会调用本回调**；调用点严格早于
+    /// `on_end(Succeeded, Move)` 的投递（事件驱动下该顺序从外部可断言）。
+    std::function<Result<void>()> on_move_confirmed;
 };
 
 /// @brief 系统拖放事件：跨进程拖放的四个阶段共用一个结构（specification/05-event-navigation.md §5.2）。
@@ -326,13 +383,19 @@ struct DragOffer {
 ///
 /// **派发规则**：四态一律不冒泡、只交给命中目标（既有文件拖放派发规则原样延续）；消费时置
 /// `e.is_handled`。`allowed` 由派发器在 `Enter` / `Over` 态按命中目标的 accept 查询与 `proposed`
-/// 求交后写定，宿主据此决定 OS 光标反馈。
+/// 求交后写定，宿主据此决定 OS 光标反馈。`modifiers` 由**宿主 / 后端**在构造事件时从 OS 会话写入
+/// （与 `MouseEvent::modifiers` 同一 `ModifierKey` 位掩码、同一份真值源）；修饰键 → `proposed`
+/// 的翻译**由宿主在派发前完成**，控件只读 `proposed` 与 `allowed`、不做翻译（翻译前按
+/// `AURORA_MODIFIER_PRESSABLE_MASK` 摘除锁定态位；无有效修饰键时 `proposed` 取源侧缺省动作，
+/// 见 `DragOffer::default_action`）。
 struct SystemDropEvent : Event {
     SystemDropPhase phase = SystemDropPhase::Drop;  ///< 阶段（默认 `Drop`，便于程序化构造落放事件）
     Point position;  ///< 落点（整幅表面逻辑坐标，契约见 收口后的位置类事件口径）
     std::vector<std::string> formats;  ///< 本次拖放可用格式的 MIME 清单
     DragAction proposed = DragAction::None;  ///< 源建议的动作
     DragAction allowed = DragAction::None;  ///< 目标允许的动作（派发器按 accept 查询与 proposed 求交后写定）
+    /// @brief 事件产生时的修饰键位掩码（宿主从 OS 会话写入；`None` 两义，见结构体说明）。
+    ModifierKey modifiers = ModifierKey::None;
     /// @brief 载荷句柄；`Enter` / `Over` / `Leave` 可为空（数据延迟到 drop 才读取）。
     std::shared_ptr<const DragPayload> payload;
 
@@ -352,32 +415,139 @@ struct SystemDropEvent : Event {
     /// @param mime 待读取的 MIME。
     /// @return `Ok(字节)`；无载荷或无该格式时为 `Ok(空)`。
     [[nodiscard]] auto bytes(const std::string &mime) const -> Result<std::vector<std::uint8_t>>;
+
+    /// @brief 便利读取（非阻塞）：文件清单（委托 `DragPayload::read_async` 后解码）。
+    ///
+    /// 与同步 `files()` 并列而非替换：大载荷走本入口，读取期间帧循环不停顿。无载荷时**同步**按
+    /// 空口径兑现（没有会话可排空）；有载荷时经 `system_drag::pump_reads()` 在帧内排空兑现，
+    /// 宿主不排空 ⇒ 回调不到。回调只被调用一次。
+    /// @param callback 兑现回调（`Ok(路径清单)` 或结构化 `Error`）。
+    auto files_async(std::function<void(Result<std::vector<std::string>>)> callback) const -> void;
+
+    /// @brief 便利读取（非阻塞）：纯文本（委托 `DragPayload::read_async`）。
+    /// @param callback 兑现回调（`Ok(文本)` 或结构化 `Error`）。
+    auto text_async(std::function<void(Result<std::string>)> callback) const -> void;
+
+    /// @brief 便利读取（非阻塞）：图像（委托 `DragPayload::read_async` 后解码）。
+    ///
+    /// 字节已取到但按 MIME 解码失败 ⇒ `system-drag-decode-failed`（同一份字节重试无意义）。
+    /// @param callback 兑现回调（`Ok(图像)` 或结构化 `Error`）。
+    auto image_async(std::function<void(Result<Image>)> callback) const -> void;
+
+    /// @brief 便利读取（非阻塞）：按 MIME 取原始字节（委托 `DragPayload::read_async`）。
+    /// @param mime 待读取的 MIME。
+    /// @param callback 兑现回调（`Ok(字节)` 或结构化 `Error`）。
+    auto bytes_async(const std::string &mime, std::function<void(Result<std::vector<std::uint8_t>>)> callback) const
+        -> void;
 };
 
-/// @brief 系统**拖出**会话入口：把控件给出的 `DragOffer` 交给 OS 拖放会话，返回协商结果动作。
+/// @brief 系统**拖出**会话入口：把控件给出的 `DragOffer` 交给 OS 拖放会话（事件驱动模型）。
+///
+/// **执行模型（形态二，GTK4 口径）**：`begin` **发起即返回**，不阻塞到会话结束——本库是单线程
+/// UI + 帧循环，阻塞期间不泵帧循环则会话回调无从派发、泵则引入嵌套循环的重入面；既有规格
+/// （`codespec/specification/06-app-platform.md` §8.9）已明文「不引入嵌套消息泵」，故事业级后端
+/// 接线后必然是「发起即返回 + 终态经回调投递」的形态（Win32 `DoDragDrop`、Qt `QDrag::exec()` 的
+/// 嵌套模态循环不取）。返回值语义收窄为**「会话是否发起成功」**，最终结局与动作改由 `on_end`
+/// 投递，经 `pump_reads()` 在帧循环上兑现（宿主不排空 ⇒ 回调不到，不谎报）。
 ///
 /// 立骨期各后端均未接线：无测试后端时一律返回 `system-drag-not-supported`（**机制缺失是稳态**，
-/// 错误码 `retryable = false`，调用方不该重试）。`begin` 不引入任何嵌套消息泵——Win32 `DoDragDrop`
-/// 的嵌套泵与重入 guard 属接线程设计项。
-///
-/// **动作口径**：会话成功回 `Copy` / `Move` / `Link`；被取消、被拒绝或建立失败回 `None`
-/// （`None` 不是成功）。
+/// 错误码 `retryable = false`，调用方不该重试）。
 namespace system_drag {
-/// @brief 发起一次系统拖出会话。
-/// @param offer 控件提供的格式与取字节回调；`formats` 为空或 `provide` 为空回调视为不可拖出。
-/// @return `Ok(协商出的动作)`；无后端 / 能力位为 false / 要约不合法时为结构化 `Error`。
-[[nodiscard]] auto begin(const DragOffer &offer) -> Result<DragAction>;
+/// @brief 发起一次系统拖出会话（发起即返回，不等待会话结束）。
+/// @param offer 控件提供的格式与取字节回调；`formats` 为空或 `provide` 为空回调视为要约不合法。
+/// @param on_end 终结回调：会话终结时投递 `(SystemDragOutcome, DragAction)`。四种结局
+/// （`Succeeded` / `Cancelled` / `Rejected` / `Failed`）可分辨；传空回调表示不关心终态（会话照常）。
+/// @return `Ok` = 会话已发起；无后端 / 能力位为 false / 要约不合法时为结构化 `Error`
+/// （`Ok` **不等于**落放成功——终态看 `on_end`）。
+[[nodiscard]] auto begin(const DragOffer &offer, std::function<void(SystemDragOutcome, DragAction)> on_end)
+    -> Result<void>;
 
-/// @brief 安装进程内 inert 后端：此后 `begin` 不触碰平台、直接回 `DragAction::Copy`（成功动作）。
+/// @brief 修饰键 → 源建议动作的翻译（宿主 / 后端在派发前调用的**唯一翻译点**）。
+///
+/// 控件只读 `SystemDropEvent::proposed` 与 `allowed`、不做翻译——「谁翻译」的唯一答案
+/// 就是本函数，控件侧不存在第二处翻译逻辑。两条既有约定必须沿用，否则会踩坑：
+/// 比对前按 `AURORA_MODIFIER_PRESSABLE_MASK` 摘除锁定态位（NumLock 常开的实现上，
+/// Win32 `GetKeyState` 一类返回含锁定态位的位集，不摘会让 Ctrl 组合静默失配）；
+/// `ModifierKey::None` 是**两义**的（用户确实没按 / 事件由程序化合成产生），故**不能靠
+/// 修饰键缺席推定默认动作**，无有效修饰键时取 `default_action` 参数。
+/// @param modifiers 事件修饰键位域（与 `MouseEvent::modifiers` 同一枚举、同一份真值源）。
+/// @param default_action 源侧缺省动作（`DragOffer::default_action`；无有效修饰键时取它）。
+/// @return Ctrl → `Copy`、Shift → `Move`、Ctrl+Shift → `Link`（Windows 惯例）；
+///         无有效修饰键 → `default_action`（其为 `None` 时按 `Copy` 兜底）。
+[[nodiscard]] inline auto proposed_action_for(ModifierKey modifiers, DragAction default_action) -> DragAction {
+    const auto pressable = static_cast<std::uint8_t>(modifiers) & AURORA_MODIFIER_PRESSABLE_MASK;
+    const bool ctrl = (pressable & static_cast<std::uint8_t>(ModifierKey::Control)) != 0U;
+    const bool shift = (pressable & static_cast<std::uint8_t>(ModifierKey::Shift)) != 0U;
+    if (ctrl && shift) {
+        return DragAction::Link;  // Ctrl+Shift → Link（Windows 惯例）
+    }
+    if (shift) {
+        return DragAction::Move;
+    }
+    if (ctrl) {
+        return DragAction::Copy;
+    }
+    // 无有效修饰键：取源侧缺省动作；缺省自身未表态（None）时按 Copy 兜底。
+    return default_action == DragAction::None ? DragAction::Copy : default_action;
+}
+
+/// @brief 取消在途拖出会话（程序化取消：无头测试与 Esc 语义共用同一条路径）。
+///
+/// 调用时机不受限——事件驱动下可在任意时刻调用：有在途会话则取消（终态 `Cancelled` 经帧循环
+/// 投递 `on_end`），无则 no-op。同时**就地收口全部在途读取**（`DragPayload::read_async` 登记的
+/// 未决项）：有数据即兑现数据，否则按 `system-drag-read-failed` 兑现，不悬挂。
+auto cancel() -> void;
+
+/// @brief 排空：投递终结回调与在途读取结果（宿主每帧调用一次；无在途项时近零开销）。
+///
+/// 与 `NotificationCenter::pump_events()` 同款：异步结果在帧内排空、**不在平台消息泵内同步回调**
+/// （回调可能重建页面 / 触发重排，在消息泵内重入会把布局与绘制切到半途的状态）。
+/// **宿主不排空 ⇒ 回调不到**（不虚假成功）。
+auto pump_reads() -> void;
+
+/// @brief 安装进程内 inert 后端：此后 `begin` 不触碰平台、登记在途会话（终态经测试接缝驱动）。
 /// @return 注入是否生效（双宏 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 未齐备时为 false）。
 [[nodiscard]] auto install_test_backend() -> bool;
 
-/// @brief 复位 inert 后端（清记录；未安装时为 no-op）。
+/// @brief 复位 inert 后端（清会话、在途读取与扣留记录；未安装时为 no-op）。
 auto reset_test_backend() -> void;
 
 /// @brief 卸载 inert 后端，恢复「无后端」语义。
 /// @return 是否确有后端被卸载（双宏未齐备时为 false）。
 [[nodiscard]] auto remove_test_backend() -> bool;
+
+/// @brief 模拟「OS 侧会话终结事件」（平台后端 / 测试接缝，**应用代码不应调用**）。
+///
+/// inert 后端下由测试驱动：登记在途会话的终态，经下一拍 `pump_reads()` 投递 `on_end`（动作为
+/// `Move` 时先调 `DragOffer::on_move_confirmed` 确认，失败则终态改写为 `Failed`）。无在途会话时
+/// 为 no-op。
+/// @param outcome 会话结局。
+/// @param action 协商出的动作（`Succeeded` 时有效；其余结局传 `DragAction::None`）。
+auto emit_session_end(SystemDragOutcome outcome, DragAction action) -> void;
+
+/// @brief 扣留指定 MIME 的载荷读取（测试专用）：被扣留格式的在途读取保持未决，直到墙钟超时。
+///
+/// 用于覆盖「源侧迟迟不给数据 ⇒ 超时兑现 `system-drag-read-failed`」判据；随 inert 后端复位清除。
+/// @param mime 待扣留的 MIME。
+auto test_withhold_format(const std::string &mime) -> void;
+
+/// @brief 设置在途读取的墙钟超时（测试专用；默认 5s，生产路径不可调）。
+/// @param timeout 超时时长（≤ 0 复位为默认值）。
+auto test_set_read_timeout(std::chrono::milliseconds timeout) -> void;
+
+/// @brief 当前是否处于 `pump_reads()` 排空阶段（测试专用）：断言「回调在帧内排空兑现、而非在
+/// 平台消息泵内同步回调」时在回调里读它。
+/// @return 排空进行中为 true；否则 false。
+[[nodiscard]] auto test_in_drain_phase() -> bool;
+
+/// @brief 最近一次会话终结的结构化错误（测试专用）：Move 确认失败时宿主上报的
+/// `system-drag-move-rollback`；无则为 `std::nullopt`。
+/// @return 最近一次会话错误（随 inert 后端复位清除）。
+[[nodiscard]] auto test_last_session_error() -> std::optional<Error>;
+
+/// @brief 最近一次 `begin` 登记的要约（测试专用）：断言拖拽影像 / 热点偏移 / 缺省动作等字段往返。
+/// @return 最近一次登记的要约（随 inert 后端复位清除；无则为 `std::nullopt`）。
+[[nodiscard]] auto test_last_offer() -> std::optional<DragOffer>;
 }  // namespace system_drag
 
 /// @brief 单个触点（多点触控）。

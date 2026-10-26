@@ -189,6 +189,7 @@ struct GlfwSurface::Impl {
     Impl(Impl &&) = delete;
     auto operator=(Impl &&) -> Impl & = delete;
 
+    auto set_window_mode(WindowMode m) const -> void;
     auto begin_frame(int width, int height) -> Result<bool>;
     auto painter() -> Painter & { return painter_impl; }
     auto present() -> Result<bool>;
@@ -201,6 +202,13 @@ struct GlfwSurface::Impl {
     }
     [[nodiscard]] auto scale_factor() const -> float { return scale; }
     [[nodiscard]] auto should_close() const -> bool { return glfwWindowShouldClose(window) == GLFW_TRUE; }
+    /// @brief 撤销关闭请求：GLFW 侧旗标由 `glfwSetWindowShouldClose` 双向可控，清位后
+    ///        `should_close()` 立即回到 false（后置条件成立，不走 fail-open）。
+    auto cancel_close() const -> void {
+        if (window != nullptr) {
+            glfwSetWindowShouldClose(window, GLFW_FALSE);
+        }
+    }
     static auto poll_platform_events() -> void { glfwPollEvents(); }
     auto wait_events(double timeout_ms) const -> void;
     static auto request_wake() -> void { glfwPostEmptyEvent(); }
@@ -475,6 +483,30 @@ auto GlfwSurface::set_cursor(CursorShape shape) -> void {
         handle = pimpl_->cursor_for(CursorShape::Arrow);  // 无标准形状 → 回退默认箭头。
     }
     glfwSetCursor(pimpl_->window, handle);
+}
+
+auto GlfwSurface::Impl::set_window_mode(WindowMode m) const -> void {
+    if (window == nullptr) {
+        return;
+    }
+    // glfw*Window 系列是请求语义：iconify/maximize/restore 回调回来后再定档上报
+    // （compute_window_mode → notify_window_mode），与 Wayland configure 同构。
+    switch (m) {
+        case WindowMode::Normal:
+            glfwRestoreWindow(window);
+            break;
+        case WindowMode::Maximized:
+            glfwMaximizeWindow(window);
+            break;
+        case WindowMode::Minimized:
+            glfwIconifyWindow(window);
+            break;
+        case WindowMode::FullScreen:
+            // 本后端无 monitor 切换通道（glfwSetWindowMonitor 会改视频模式，超出本批范围）：
+            // 留痕，不装懂。
+            AURORA_LOG_WARN("window", "GlfwSurface::set_window_mode: FullScreen is not implemented on this backend");
+            break;
+    }
 }
 
 auto GlfwSurface::Impl::begin_frame(int width, int height) -> Result<bool> {
@@ -753,6 +785,12 @@ auto GlfwSurface::set_window_state_handler(WindowStateHandler h) -> void {
     pimpl_->window_state_handler = std::move(h);
 }
 auto GlfwSurface::set_window_mode_handler(WindowModeHandler h) -> void { pimpl_->window_mode_handler = std::move(h); }
+
+auto GlfwSurface::set_window_mode(WindowMode m) -> void {
+    if (pimpl_ != nullptr) {
+        pimpl_->set_window_mode(m);
+    }
+}
 auto GlfwSurface::set_scale_change_handler(ScaleChangeHandler h) -> void {
     pimpl_->scale_change_handler = std::move(h);
 }
@@ -812,6 +850,11 @@ auto GlfwSurface::set_size(Size s) -> void {
 [[nodiscard]] auto GlfwSurface::size() const -> Size { return pimpl_->size(); }
 [[nodiscard]] auto GlfwSurface::scale_factor() const -> float { return pimpl_->scale_factor(); }
 [[nodiscard]] auto GlfwSurface::should_close() const -> bool { return pimpl_->should_close(); }
+auto GlfwSurface::cancel_close() -> void {
+    if (pimpl_ != nullptr) {
+        pimpl_->cancel_close();
+    }
+}
 auto GlfwSurface::poll_platform_events() -> void { Impl::poll_platform_events(); }
 auto GlfwSurface::wait_events(double timeout_ms) -> void { pimpl_->wait_events(timeout_ms); }
 auto GlfwSurface::request_wake() -> void { Impl::request_wake(); }

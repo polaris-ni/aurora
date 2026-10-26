@@ -129,6 +129,14 @@ class Win32Host {
     /// @brief 用户是否请求关闭窗口（WM_CLOSE 后置位）。
     /// @return 收到关闭请求时 true。
     [[nodiscard]] auto should_close() const -> bool;
+    /// @brief 撤销本窗口的关闭请求（关闭闸门否决时调用）：清 `should_close` 标志。
+    ///        `WM_DESTROY`（窗口已销毁，含随 owner 自动销毁的 owned 子窗）置的位**拒绝清**。
+    auto cancel_close() -> void;
+    /// @brief 程序化设定几何态（幂等）：Normal / Maximized / Minimized 经 SC_RESTORE /
+    ///        SC_MAXIMIZE / SC_MINIMIZE 落到窗口过程，WM_SIZE 回来时定档并上报（与用户走
+    ///        系统菜单同一路径，不在此另设判定）。FullScreen 本后端无实现，调用时留一条 WARN。
+    /// @param m 目标几何态。
+    auto set_window_mode(WindowMode m) -> void;
     /// @brief 已呈现次数（测试/自检用）：验证 WM_SIZE/WM_PAINT 触发了同步重渲染。
     /// @return present_request 生效以来的呈现计数。
     [[nodiscard]] auto present_count() const -> int;
@@ -202,10 +210,9 @@ class Win32Host {
     /// @brief 覆盖 `WM_GETOBJECT` 处理（宿主可抢先接管；默认空 → 走内置 UIA 桥）。
     ///
     /// 以指针宽度整数传递 `WPARAM`/`LPARAM`、返回 `LRESULT`，避免在公共头引入 `<windows.h>`；
-    /// 宿主侧（`.cpp`）在调用前 `static_cast` 回原生类型。
+    /// 宿主侧（`.cpp`）在调用前 `static_cast` 回原生类型。hook 注册即生效，本设置器无返回值。
     /// @param h WM_GETOBJECT 覆盖钩子：入参为指针宽度整数的 `WPARAM`/`LPARAM`，返回 optional `LRESULT`；
     /// 返回 `std::nullopt` 表示「未处理，交内置桥 / DefWindowProc」。
-    /// @return 本设置器无返回值（hook 注册即生效）。
     auto set_accessibility_hook(std::function<std::optional<std::intptr_t>(std::uintptr_t, std::intptr_t)> h) const
         -> void;
 

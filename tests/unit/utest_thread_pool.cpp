@@ -238,4 +238,55 @@ AURORA_TEST_CASE(frame_loop_drains_deferred_default_pool) {
 #endif
 }
 
+AURORA_TEST_CASE(interruptible_wait_for_waits_full_duration_while_running) {
+    AURORA_TEST_REQUIRE_THREADS();
+    // 非 deferred 池：interruptible_wait_for 在 stop_ 为 false 时语义等同 sleep_for，
+    // 等待时长 ≈ 给定窗口。不早醒（20ms 内未置位）是核心语义；完成等待用带截止的轮询
+    // 容忍 CI 加载机的 worker 线程启动调度抖动（避免固定窗口误判）。
+    aurora::ThreadPool pool{2};
+    AURORA_TEST_CHECK_FALSE(pool.is_deferred());
+    std::atomic<bool> done{false};
+    const auto armed = std::chrono::steady_clock::now();  // 早于入队：worker 起点必不早于此刻
+    pool.execute([&pool, &done]() -> void {
+        pool.interruptible_wait_for(std::chrono::milliseconds{80});
+        done.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    // sleep_for 只保下限：加载机上 20ms 可能睡超 80ms 等待窗口，worker 此时已合法完成
+    // ⇒ 按实测墙钟决定「不早醒」判据是否适用（睡超窗口时判据失效，交由下方完成轮询兜底）。
+    const auto probed = std::chrono::steady_clock::now();
+    if (probed - armed < std::chrono::milliseconds{80}) {
+        AURORA_TEST_CHECK_FALSE(done.load(std::memory_order_acquire));  // 不早醒（< 80ms 窗口）
+    }
+    bool completed = false;
+    for (int i = 0; i < 200; ++i) {  // 200 × 10ms = 2s 充裕截止
+        if (done.load(std::memory_order_acquire)) {
+            completed = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    AURORA_TEST_CHECK_TRUE(completed);
+}
+
+AURORA_TEST_CASE(interruptible_wait_for_wakes_early_when_pool_destroyed) {
+    AURORA_TEST_REQUIRE_THREADS();
+    // 关键回归：进程退出时 default_pool 析构置 stop_ + notify_all；
+    // 等待中的 interruptible_wait_for 应被立即唤醒，而非睡满整个超时窗口。
+    // 用局部非 deferred 池复现同一析构路径（进程级单例不可在用例内析构）。
+    auto pool = std::make_shared<aurora::ThreadPool>(2);
+    AURORA_TEST_CHECK_FALSE(pool->is_deferred());
+    std::atomic<bool> woke{false};
+    pool->execute([&pool, &woke]() -> void {
+        pool->interruptible_wait_for(std::chrono::seconds{30});  // 若不被唤醒会睡 30s
+        woke.store(true, std::memory_order_release);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});  // 让 worker 进入等待
+    const auto start = std::chrono::steady_clock::now();
+    pool.reset();  // 析构：stop_=true + notify_all → 唤醒等待中的任务 → join 不卡
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    AURORA_TEST_CHECK_TRUE(woke.load(std::memory_order_acquire));
+    AURORA_TEST_CHECK_LE(elapsed, std::chrono::seconds{2});  // 远小于 30s
+}
+
 }  // namespace aurora::test_cases::utest_thread_pool

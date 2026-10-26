@@ -1,8 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <optional>
+
+#include "aurora/core/types.h"
 
 namespace aurora {
 
@@ -184,6 +188,103 @@ struct ScrollViewport {
         // 越界条目（内容末尾不足一个周期）夹到 max_off——末端可达性优先于严格对齐。
         return std::clamp(candidate, 0.0F, max_off);
     }
+};
+
+/// @brief 近边缘自动滚边触发带宽度（dp）：拖入落点距视口边缘不足此宽度即触发自动滚边。
+///
+/// 进程内拖拽（`ReorderableList` 的近边缘 auto-scroll）与跨进程系统拖放
+/// （`Widget::on_system_drag_auto_scroll` 链上最近可滚动祖先的滚边）共用同一缺省，
+/// 两条路径手感一致。0 = 关闭（控件侧以本常量作默认值，仍可各自调参）。
+inline constexpr float AURORA_AUTO_SCROLL_THRESHOLD_DP = 48.0F;
+
+/// @brief 自动滚边最大速度（dp/s）：落点侵入触发带全深时的滚动速度（按侵入深度比例衰减）。
+inline constexpr float AURORA_AUTO_SCROLL_MAX_SPEED = 600.0F;
+
+/// @brief 拖入自动滚边的新鲜度上限（秒）：宿主停发 `Over` 意图超过此时长即收车。
+///
+/// 兜底「指针静默离开视口但显式收车送不到本链」的情形——`Leave` 事件的落点可能在窗口外，
+/// 命中测试落空时收车意图无从送达滚动祖先，此时由本超时兜底（与在途读取的墙钟超时同款
+/// 「不悬挂」口径）。取值须远大于指针采样周期，避免误收车。
+inline constexpr double AURORA_DRAG_AUTO_SCROLL_STALE_S = 1.0;
+
+/// @brief 拖入自动滚边状态（跨进程系统拖放路径「谁驱动滚动」的内核）。
+///
+/// 宿主在 `SystemDropPhase::Over` 态经 `Widget::on_system_drag_auto_scroll` 把落点交给
+/// 链上最近可滚动祖先，由后者在自己的帧计时里调 `advance` 取本帧增量、夹取后写入自身
+/// offset——**不新增滚动实现**，只补滚边契约。与 `ReorderableList` 的进程内 auto-scroll
+/// 共用同一组调参常量（`AURORA_AUTO_SCROLL_THRESHOLD_DP` / `AURORA_AUTO_SCROLL_MAX_SPEED`）。
+///
+/// 时间基准全部取自调用方帧计时的 `now`（单调时钟；测试可注入假帧钟），本结构不自行读钟——
+/// 驱动意图只记「待兑现」标志，由下一帧 `advance` 兑现新鲜度，避免事件时刻与帧时刻两套钟混用。
+struct DragAutoScroll {
+    /// @brief 记录一次驱动意图（`Over` 落点，窗口逻辑 dp）；首次记录即激活。
+    /// @param window_position 落点（窗口逻辑 dp）。
+    auto drive(const Point &window_position) -> void {
+        position_ = window_position;
+        intent_pending_ = true;  // 新鲜度由下一帧 advance 兑现（见结构体说明）
+        if (!active) {
+            active = true;
+            last_tick_.reset();  // 首帧 dt 由调用方兜底（1/60 秒）
+        }
+    }
+
+    /// @brief 收车：清空全部状态（`Leave` / `Drop` / 内容不可滚 / 落点在带外 / 新鲜度超时）。
+    auto stop() -> void {
+        active = false;
+        position_.reset();
+        last_tick_.reset();
+        intent_pending_ = false;
+    }
+
+    /// @brief 本帧滚动增量（dp，正 = 向下滚 = offset 增大）。
+    ///
+    /// 未激活 / 新鲜度超时 / 落点在触发带外 / 视口盒不可用时返回 0 并**就地收车**
+    /// （`active` 转 false，调用方据此摘除帧计时）。带内按侵入深度比例给速：落点抵满
+    /// 视口边缘 = `AURORA_AUTO_SCROLL_MAX_SPEED`，退至触发带界趋近 0。
+    /// @param viewport_window_box 视口的窗口逻辑盒（原点即视口左上，落点据此换算本地坐标）。
+    /// @param now 本帧时刻（单调时钟）；刷新新鲜度并与上一推进时刻求差得本帧 dt。
+    /// @return 本帧增量（dp）；收车时为 0。
+    [[nodiscard]] auto advance(const Rect &viewport_window_box, std::chrono::steady_clock::time_point now) -> float {
+        if (!active || !position_.has_value()) {
+            return 0.0F;
+        }
+        if (intent_pending_) {
+            last_intent_ = now;  // 本帧有新驱动意图：刷新新鲜度
+            intent_pending_ = false;
+        } else if (std::chrono::duration<double>(now - last_intent_).count() > AURORA_DRAG_AUTO_SCROLL_STALE_S) {
+            stop();  // 宿主停发意图超时：收车（指针已静默离开本视口）
+            return 0.0F;
+        }
+        const float local_y = position_->y - viewport_window_box.origin.y;
+        const float viewport_h = viewport_window_box.size.height;
+        const float band = std::min(AURORA_AUTO_SCROLL_THRESHOLD_DP, viewport_h / 2.0F);
+        if (band <= 0.0F) {
+            stop();  // 阈值关闭或视口未定尺：收车
+            return 0.0F;
+        }
+        float speed = 0.0F;  // dp/s，正 = 向下滚
+        if (local_y < band) {
+            speed = -AURORA_AUTO_SCROLL_MAX_SPEED * (1.0F - (std::max(0.0F, local_y) / band));
+        } else if (local_y > viewport_h - band) {
+            speed = AURORA_AUTO_SCROLL_MAX_SPEED * (1.0F - (std::max(0.0F, viewport_h - local_y) / band));
+        }
+        if (speed == 0.0F) {
+            stop();  // 落点在触发带外：收车
+            return 0.0F;
+        }
+        const double dt =
+            last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : (1.0 / 60.0);
+        last_tick_ = now;
+        return static_cast<float>(speed * dt);
+    }
+
+    bool active = false;  ///< 是否正在滚边（调用方据此决定是否继续占帧计时）
+
+  private:
+    std::optional<Point> position_;  ///< 最近一次 `Over` 落点（窗口逻辑 dp）
+    std::chrono::steady_clock::time_point last_intent_;  ///< 最近一次意图兑现时刻（新鲜度判据）
+    std::optional<std::chrono::steady_clock::time_point> last_tick_;  ///< 最近一次推进时刻（dt 判据）
+    bool intent_pending_ = false;  ///< 上次 `drive` 尚未被任一帧 `advance` 兑现
 };
 
 }  // namespace aurora

@@ -15,8 +15,9 @@
 #include "aurora/core/diagnostics.h"
 #include "aurora/event/gesture.h"
 #include "aurora/event/keycode.h"
+#include "aurora/i18n/builtin_messages.gen.h"
 #include "aurora/i18n/localized_string.h"
-#include "aurora/i18n/string_table.h"
+#include "aurora/i18n/message_catalog.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
 #include "aurora/theming/theme_scope.h"
@@ -52,9 +53,9 @@ namespace aurora {
 /// 焦点导航，覆写该钩子后本控件先观察按键、未认领的按键仍回落焦点导航。整体开关是
 /// `set_keyboard_reorder(false)`（关闭后方向键 / 空格完全交回默认语义）。
 ///
-/// 播报文案走 i18n：键为 `aurora.reorder.position` / `.grabbed` / `.dropped` /
-/// `.dropped_in_place` / `.cancelled`（宿主可经 `default_string_table()` 登记译文模板，占位符
-/// 为 `{0}` 起的位置数字）；未登记时回退英文字面量，不会播报空串。
+/// 播报文案走 i18n：词条为内置 Id `aurora.reorder.position` / `.grabbed` / `.dropped` /
+/// `.dropped_in_place` / `.cancelled`（宿主可经 `default_catalog()` 按规范名登记译文模板，占位符
+/// 为具名 `{position}` / `{from}` / `{to}` / `{total}`）；未登记时回退英文字面量，不会播报空串。
 ///
 /// @tparam T 列表项类型（须可拷贝）。
 /// @note Thread: main-thread only
@@ -542,12 +543,13 @@ class ReorderableList : public Container {
         keyboard_grabbed_ = true;
         keyboard_grab_from_ = keyboard_index_;
         mark_needs_paint();
-        announce(announce_text(
-            "aurora.reorder.grabbed",
-            {LocalizedString{std::to_string(keyboard_index_ + 1)}, LocalizedString{std::to_string(item_count())}},
-            "Position " + std::to_string(keyboard_index_ + 1) + " of " + std::to_string(item_count()) +
-                ". Item grabbed. Use arrow keys to move,"
-                " space to drop, escape to cancel."));
+        announce(announce_text(msg::AURORA_REORDER_GRABBED,
+                               {{"position", static_cast<std::int64_t>(keyboard_index_ + 1)},
+                                {"total", static_cast<std::int64_t>(item_count())}},
+                               "Position " + std::to_string(keyboard_index_ + 1) + " of " +
+                                   std::to_string(item_count()) +
+                                   ". Item grabbed. Use arrow keys to move,"
+                                   " space to drop, escape to cancel."));
         return true;
     }
 
@@ -564,15 +566,16 @@ class ReorderableList : public Container {
         mark_needs_paint();
         const bool moved = reorder(from, to);
         if (moved) {
-            announce(announce_text("aurora.reorder.dropped",
-                                   {LocalizedString{std::to_string(from + 1)}, LocalizedString{std::to_string(to + 1)},
-                                    LocalizedString{std::to_string(item_count())}},
+            announce(announce_text(msg::AURORA_REORDER_DROPPED,
+                                   {{"from", static_cast<std::int64_t>(from + 1)},
+                                    {"to", static_cast<std::int64_t>(to + 1)},
+                                    {"total", static_cast<std::int64_t>(item_count())}},
                                    "Item moved from position " + std::to_string(from + 1) + " to position " +
                                        std::to_string(to + 1) + " of " + std::to_string(item_count()) + "."));
         } else {
             announce(announce_text(
-                "aurora.reorder.dropped_in_place",
-                {LocalizedString{std::to_string(to + 1)}, LocalizedString{std::to_string(item_count())}},
+                msg::AURORA_REORDER_DROPPED_IN_PLACE,
+                {{"position", static_cast<std::int64_t>(to + 1)}, {"total", static_cast<std::int64_t>(item_count())}},
                 "Item dropped at position " + std::to_string(to + 1) + " of " + std::to_string(item_count()) + "."));
         }
         return moved;
@@ -590,11 +593,11 @@ class ReorderableList : public Container {
         keyboard_index_ = home;
         ensure_index_visible(home);
         mark_needs_paint();
-        announce(
-            announce_text("aurora.reorder.cancelled",
-                          {LocalizedString{std::to_string(home + 1)}, LocalizedString{std::to_string(item_count())}},
-                          "Reorder cancelled. Item returned to position " + std::to_string(home + 1) + " of " +
-                              std::to_string(item_count()) + "."));
+        announce(announce_text(
+            msg::AURORA_REORDER_CANCELLED,
+            {{"position", static_cast<std::int64_t>(home + 1)}, {"total", static_cast<std::int64_t>(item_count())}},
+            "Reorder cancelled. Item returned to position " + std::to_string(home + 1) + " of " +
+                std::to_string(item_count()) + "."));
         return true;
     }
 
@@ -1086,25 +1089,23 @@ class ReorderableList : public Container {
             return;
         }
         announce(announce_text(
-            "aurora.reorder.position",
-            {LocalizedString{std::to_string(keyboard_index_ + 1)}, LocalizedString{std::to_string(item_count())}},
+            msg::AURORA_REORDER_POSITION,
+            {{"position", static_cast<std::int64_t>(keyboard_index_ + 1)},
+             {"total", static_cast<std::int64_t>(item_count())}},
             "Position " + std::to_string(keyboard_index_ + 1) + " of " + std::to_string(item_count()) + "."));
     }
 
-    /// @brief 播报文案解析：按 key 查 `default_string_table()`（宿主可登记译文模板），
+    /// @brief 播报文案解析：按 Id 查 `default_catalog()`（宿主可登记译文模板），
     ///        未登记时回退 `fallback` 英文字面量——绝不播报空串。
-    /// @param key i18n 键（aurora.reorder.*）。
-    /// @param args 占位符实参（{0} 起的位置数字等）。
+    /// @param id i18n 词条 Id（aurora_reorder_* 内置词表）。
+    /// @param args 具名占位实参（position / from / to / total）。
     /// @param fallback 查表失败时的英文字面量兜底。
     /// @return 解析后的最终播报文本。
-    [[nodiscard]] static auto announce_text(const std::string &key, std::vector<LocalizedString> args,
-                                            const std::string &fallback) -> std::string {
-        LocalizedString s;  // 待解析的本地化串（键 + 实参 + 兜底文本）
-        s.key = key;
-        s.args = std::move(args);
-        s.localize = true;
-        s.text = fallback;  // StringTable::resolve 查表失败即用 text 兜底
-        return s.resolve(&default_string_table(), Locale{});
+    [[nodiscard]] static auto announce_text(MessageId id, std::vector<MessageArg> args, const std::string &fallback)
+        -> std::string {
+        LocalizedString s = LocalizedString::tr(id, std::move(args));
+        s.text = fallback;  // 查表失败即用 text 兜底
+        return s.resolve(&default_catalog(), Locale{});
     }
 
     /// @brief 数据长度变化后把光标夹回有效范围（保留「未定位」的 -1，不虚设光标）。
@@ -1349,7 +1350,8 @@ class ReorderableList : public Container {
     std::string restore_key_;  ///< 滚动位置保存键（空 = 不参与恢复）
     bool scroll_restored_ = false;  ///< 是否已执行过恢复 / 已被程序化设置就位
     bool drag_handle_ = false;  ///< 是否限定右侧手柄区域起拖
-    float auto_scroll_threshold_ = 48.0F;  ///< 近边缘自动滚动触发带高（dp，0 = 关闭）
+    float auto_scroll_threshold_ =
+        AURORA_AUTO_SCROLL_THRESHOLD_DP;  ///< 近边缘自动滚动触发带高（dp，0 = 关闭；与跨进程拖放共用同一缺省）
 
     /// @brief 拖拽 / 落位态字段。
     DragState drag_state_ = DragState::Idle;
@@ -1374,7 +1376,6 @@ class ReorderableList : public Container {
 
     static constexpr float AURORA_HYSTERESIS = 2.0F;  ///< 换位滞回（dp，跨中点 ±2dp 内不切换）
     static constexpr float AURORA_HANDLE_BAND = 48.0F;  ///< 手柄区域宽度（dp，`drag_handle` 模式）
-    static constexpr float AURORA_AUTO_SCROLL_MAX_SPEED = 600.0F;  ///< auto-scroll 最大速度（dp/s）
     static constexpr float AURORA_SETTLE_EPSILON = 0.5F;  ///< 位移小于该值直接落位（不做动画）
     static constexpr float AURORA_ASSUMED_FPS = 60.0F;  ///< 帧间速度估计的采样率假设（Hz）
     static constexpr float AURORA_MAX_RELEASE_VELOCITY = 3000.0F;  ///< 松手初速度上界（dp/s）

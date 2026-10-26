@@ -261,6 +261,28 @@ class LazyList : public Widget {
     /// @return 滑动进行中为 true。
     [[nodiscard]] auto is_gliding() const -> bool { return glide_.active; }
 
+    /// @brief 拖入自动滚边（系统拖放 `Over` 态由派发器调用，见
+    ///        `Widget::on_system_drag_auto_scroll`）：记录落点，帧计时里按侵入深度推进。
+    ///
+    /// 垂直虚拟列表：只对上下边缘带内的落点给速（方向与边缘一致）；落点在带外或传入
+    /// `std::nullopt`（`Leave` / `Drop` 收车）即收车。复用 `offset_` 既有滚动状态
+    /// （经 `apply_offset` 走与滑动帧同一路径），不新增滚动实现。
+    /// @param position 落点（窗口逻辑 dp）；`std::nullopt` = 收车。
+    /// @return 恒 true：本控件即可滚动祖先，意图到此不再上溯。
+    auto on_system_drag_auto_scroll(const std::optional<Point> &position) -> bool override {
+        if (!position.has_value()) {
+            drag_auto_scroll_.stop();
+            if (!glide_.active) {
+                needs_gesture_tick_ = false;  // 无收位滑动在途：摘除帧计时，回到空闲节流
+            }
+            return true;
+        }
+        drag_auto_scroll_.drive(*position);
+        needs_gesture_tick_ = true;
+        request_frame(false);
+        return true;
+    }
+
     /// @brief 滚动偏移只读信号（滚动驱动动画原语）：宿主以纯函数派生视差/进度/淡入淡出。
     ///        懒创建；偏移每次变化（滚轮/滑动帧/程序化）写入。
     /// @note Side-effects: reads state (registers reactive dependency in Effect scope)
@@ -612,7 +634,10 @@ class LazyList : public Widget {
         for (auto &kv : live_ | std::views::values) {
             kv.widget().tick(now);
         }
-        if (!glide_.active) {
+        if (drag_auto_scroll_.active) {
+            tick_drag_auto_scroll(now);  // 拖入自动滚边：Over 态驱动、按帧推进
+        }
+        if (!glide_.active && !drag_auto_scroll_.active) {
             needs_gesture_tick_ = false;  // 静止后摘除每帧计时，回到空闲节流
             return;
         }
@@ -633,6 +658,28 @@ class LazyList : public Widget {
     }
 
   private:
+    /// @brief 拖入自动滚边逐帧推进（系统拖放 `Over` 态驱动，见 `on_system_drag_auto_scroll`）。
+    ///        经 `apply_offset` 走与滑动帧同一路径（偏移参与子布局，须标布局脏由虚拟化窗口重建）。
+    /// @param now 本次 tick 的墙钟时刻（单调时钟），与上一推进时刻求差得本帧 dt。
+    auto tick_drag_auto_scroll(std::chrono::steady_clock::time_point now) -> void {
+        const std::optional<Rect> box = window_bounds();
+        if (!box.has_value()) {
+            drag_auto_scroll_.stop();  // 从未布局：无从换算落点，收车
+            return;
+        }
+        const float delta = drag_auto_scroll_.advance(*box, now);
+        if (!drag_auto_scroll_.active || delta == 0.0F) {
+            return;  // 带外 / 新鲜度超时（advance 已就地收车）或零增量：本帧不推进
+        }
+        const float target = std::clamp(offset_ + delta, 0.0F, max_scroll_offset());
+        if (target == offset_) {
+            drag_auto_scroll_.stop();  // 已到可滚边缘：收车（单次拖放不会再有反方向意图）
+            return;
+        }
+        apply_offset(target, /*cancel_glide=*/false);
+        request_frame(false);  // 活跃帧信号：滚边期逐帧标脏，decide_wait 不误判空闲深睡
+    }
+
     /// @brief 启动向 snap 对齐点的收位滑动；reduce-motion 下直落端点
     ///        （对齐 `AnimationController::tick` 短路语义：状态与走完一致，只是无中间帧）。
     auto begin_snap_glide() -> void {
@@ -738,6 +785,7 @@ class LazyList : public Widget {
     std::map<int, Node> live_;  ///< 存活实例：index -> Node（按序遍历便于绘制）
     ScrollSnap snap_;  ///< snap/paging 吸附配置（默认关闭）
     ScrollGlide glide_;  ///< snap 收位 / scroll_to 的短滑动时序
+    DragAutoScroll drag_auto_scroll_;  ///< 拖入自动滚边状态（系统拖放 Over 态驱动，与收位滑动互不抢占）
     std::optional<std::chrono::steady_clock::time_point> glide_last_;  ///< 上一滑动帧时刻（墙钟差 = dt）
     std::shared_ptr<State<float>> offset_state_;  ///< 懒创建的偏移信号（滚动驱动动画原语，经 offset_signal 暴露）
     float published_offset_ = 0.0F;  ///< 最近一次发布的偏移值（镜像，避免回读 get() 误订阅）

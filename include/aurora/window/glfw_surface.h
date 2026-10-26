@@ -138,6 +138,9 @@ class GlfwSurface : public Surface {
     /// @brief 用户是否请求关闭窗口（`glfwWindowShouldClose`）。
     /// @return 窗口收到关闭请求时 true。
     [[nodiscard]] auto should_close() const -> bool override;
+    /// @brief 撤销本后端的关闭请求（关闭闸门否决时调用）：GLFW 的关闭旗标双向可控，
+    ///        经 `glfwSetWindowShouldClose(window, GLFW_FALSE)` 清回 false。
+    auto cancel_close() -> void override;
 
     /// @brief 非阻塞处理 GLFW 事件队列（`glfwPollEvents`），回调翻译为 aurora `Event` 派发。
     auto poll_platform_events() -> void override;
@@ -190,6 +193,11 @@ class GlfwSurface : public Surface {
     /// @param path 输出 PNG 文件路径。
     /// @return 写盘成功 true；窗口失效/平台不支持时 false 及错误信息。
     [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;
+    /// @brief 程序化设定几何态（幂等）：Normal / Maximized / Minimized 经 glfwRestoreWindow /
+    ///        glfwMaximizeWindow / glfwIconifyWindow 落地（回调回来定档上报，与 Wayland 同构）；
+    ///        FullScreen 无实现（monitor 切换通道未建），调用时留一条 WARN。
+    /// @param m 目标几何态。
+    auto set_window_mode(WindowMode m) -> void override;
 
   private:
     struct Impl;

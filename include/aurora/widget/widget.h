@@ -150,7 +150,12 @@ struct HitNode {
 class Widget : public std::enable_shared_from_this<Widget> {
   public:
     /// @brief 虚析构：控件一律以基类指针（`shared_ptr<Widget>`）销毁，故析构函数必须为虚。
-    virtual ~Widget() = default;
+    ///
+    /// 析构即取消本控件持有的在途系统拖出会话（见 `begin_system_drag()`）：事件驱动会话跨越
+    /// 多个帧，控件可能在会话期间被移除；不取消则 OS 侧仍会回调 `DragOffer::provide`，访问
+    /// 已销毁的控件状态。终结回调的派活另按双轨判活处理（`shared_ptr` 持有轨以
+    /// `weak_from_this()` 守卫，栈 / 成员对象轨靠本析构兜底）。
+    virtual ~Widget();
 
     /// @brief 默认构造：分配进程级唯一运行时身份（见 `runtime_id()`），脏标记与布局盒取初始值。
     Widget() : runtime_id_(next_runtime_id()) {}
@@ -492,6 +497,29 @@ class Widget : public std::enable_shared_from_this<Widget> {
         }
     }
 #endif
+    /// @brief 子树级缓存失效：清本控件**及其全部后代**的布局缓存与 Display List 缓存。
+    ///
+    /// 脏标记只有向上通道（`mark_needs_layout` / `invalidate_display_list_up` 沿布局父链上溯祖先），
+    /// 因此「本控件的输入变了、但没有任何后代自身变脏」时，后代缓存会沿用旧输入的结果。环境注入换值
+    /// 正属此类：文本在布局期按 `ctx.environment<Locale>()` 解析，子树缓存不清则整子树停在旧 locale。
+    /// 故由环境注入点（`Provider` 换值、`Window::set_locale`）显式发起一次向下清零。
+    ///
+    /// 代价是 O(子树) 且只在换值那一帧发生——一次切换 = 整子树重排重录，与首帧同量级；
+    /// 稳态帧不经过本函数，布局 / DL 缓存收益不受影响。
+    /// @note 遍历经 `for_each_child`（const 签名）后安全去 const：该遍历的既有非 const 用法见
+    ///       `form.h` 的 FormField 验证（同一约定，虚拟化容器只枚举已实体化子节点，未建者本无缓存可清）。
+    auto invalidate_subtree_caches() -> void {
+#ifdef AURORA_ENABLE_LAYOUT_CACHE
+        layout_cache_valid_ = false;
+#endif
+#ifdef AURORA_ENABLE_DISPLAY_LIST
+        dl_valid_ = false;
+#endif
+        for_each_child([this](const Widget &child) -> void {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast): 见上文说明，遍历接口只给 const 视图
+            const_cast<Widget &>(child).invalidate_subtree_caches();
+        });
+    }
     /// @brief 挂在**本控件自身**上的重绘请求回调；bool=true 表示含布局脏（需重排）。
     ///
     /// 供直接持有某控件、需单独观察其标脏的场景（单元测试、自定义驱动）使用，
@@ -746,21 +774,78 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @return 拖出要约（格式清单 + 按 MIME 取字节的回调）；基类默认 `std::nullopt`。
     [[nodiscard]] virtual auto on_provide_drag() -> std::optional<DragOffer> { return std::nullopt; }
 
-    /// @brief 以 `on_provide_drag()` 的要约发起一次系统拖出会话。
+    /// @brief 以 `on_provide_drag()` 的要约发起一次系统拖出会话（**发起即返回**，事件驱动）。
     ///
-    /// **动作口径**：会话成功回 `Copy` / `Move` / `Link`；被取消、被拒绝或建立失败回 `None`——
-    /// `None` **不是成功**，调用方不得把它当作「拖出完成」。当前各平台后端尚未接线，无测试后端时
-    /// 返回 `system-drag-not-supported`（机制缺失是稳态，错误码 `retryable = false`，不该重试）。
-    /// @return 协商出的动作；无要约或无后端时为结构化 `Error`。
-    [[nodiscard]] auto begin_system_drag() -> Result<DragAction>;
+    /// **动作口径**：返回值只表「会话是否发起成功」——无后端 / 能力位为 false / 要约不合法时
+    /// 返回结构化 `Error`，**不再承载最终动作**；最终结局与动作经 `on_system_drag_end` 投递，
+    /// 由宿主每帧 `system_drag::pump_reads()` 排空兑现（宿主不排空 ⇒ 收不到终态，与
+    /// `NotificationCenter::pump_events()` 同款「不谎报」口径）。发起失败（`begin` 返回
+    /// `Error`）时直接派发 `on_system_drag_end(Failed, None)` 收尾——「失败同样要收尾」的
+    /// 口径不变：会话结束是控件清理拖出态的唯一时机；`on_provide_drag()` 返回 `std::nullopt`
+    /// （控件自称无要约）时不派发终态，因为从未发起过会话、无可收尾的拖出态。
+    /// @return 发起成功为 `Ok`；无要约 / 无后端 / 要约不合法时为结构化 `Error`。
+    [[nodiscard]] auto begin_system_drag() -> Result<void>;
 
-    /// @brief 系统拖出会话结束回调：告知本控件最终动作（成功动作为 `Copy` / `Move` / `Link`，
-    ///        取消 / 被拒 / 失败为 `None`）。
+    /// @brief 系统拖出会话已建立（进入拖动）：`begin_system_drag()` 发起成功后**立即**派发。
+    ///
+    /// 事件驱动模型无嵌套消息泵，故本回调内可安全执行改动控件树的写操作（不触发嵌套派发）。
+    /// 基类默认空实现。
+    virtual auto on_system_drag_begin() -> void {}
+
+    /// @brief 系统拖出会话被取消（Esc 或系统取消）：严格早于同次的
+    ///        `on_system_drag_end(Cancelled, None)` 投递；只出现在被取消路径。
+    /// 基类默认空实现。
+    virtual auto on_system_drag_cancel() -> void {}
+
+    /// @brief 系统拖出会话结束回调：会话已终结，结局与动作一并交给控件。
     ///
     /// 与进程内拖拽的 `on_drag_end` **刻意分名**：同一控件上两套拖拽语义不共名，避免覆写时
     /// 误接另一条路径。基类默认为空实现（不消费、不重绘）。
-    /// @param action 会话结束时的动作。
-    virtual auto on_system_drag_end(DragAction action) -> void { (void)action; }
+    ///
+    /// **派发序列**：`begin_system_drag()` 发起成功即派发 `on_system_drag_begin()`；此后终态
+    /// 经帧循环排空兑现——`Cancelled` 先派发 `on_system_drag_cancel()` 再派发本回调，
+    /// `Succeeded` / `Rejected` / `Failed` 直接派发。把 outcome 写进签名是为让「被拒绝」与
+    /// 「会话中途异常」两条回调序列（逐字相同，都是 begin → end(None)）在控件层可分辨。
+    /// @param outcome 会话结局（四种终结态见 `SystemDragOutcome`）。
+    /// @param action 终态动作：`Succeeded` 时为协商出的动作；Move 回滚路径（落放已成、源侧
+    ///        删除失败，库自产 `system-drag-move-rollback`）为 `Move`；其余结局为 `DragAction::None`。
+    virtual auto on_system_drag_end(SystemDragOutcome outcome, DragAction action) -> void {
+        (void)outcome;
+        (void)action;
+    }
+
+    /// @brief 拖入近边缘滚动意图（自动滚边协议的派发落点；系统拖放 `Over` 态由派发器调用）。
+    ///
+    /// 基类沿 `layout_parent()` 链上溯，把落点交给**最近可滚动祖先**（覆写本钩子并返回 true
+    /// 者即「可滚动」）；滚动推进由该祖先在自己的帧计时里完成，复用既有滚动状态——本契约
+    /// **不新增滚动实现**，只补「拖入时谁驱动滚动」。触发带宽度取共享缺省常量
+    /// `AURORA_AUTO_SCROLL_THRESHOLD_DP`（进程内拖拽与跨进程拖放两条路径共用一套手感）。
+    /// @param position 落点（窗口逻辑 dp）；`std::nullopt` = 收车（`Leave` / `Drop` 态，
+    ///        或宿主无从取得落点时由滚动祖先的新鲜度超时兜底收车）。
+    /// @return true = 意图被本控件或链上某个可滚动祖先接管；false = 链上无可滚动者。
+    virtual auto on_system_drag_auto_scroll(const std::optional<Point> &position) -> bool {
+        if (Widget *parent = layout_parent()) {
+            return parent->on_system_drag_auto_scroll(position);
+        }
+        return false;  // 链上无可滚动者
+    }
+
+    /// @brief 本控件是否接受系统拖入（**静态能力声明**，无障碍树构建期求值）。
+    ///
+    /// 与 `query_system_drag_accept` 的分工：后者按拖放会话的格式清单**动态**判定 accept
+    /// （运行时唯一真值源），本查询是类级静态声明——无障碍树构建期拿不到会话格式，无法调用
+    /// 前者，故单列此口。可接收拖放的控件须同时提供 `system_drag_alternative_path()`。
+    /// @return 声明接受系统拖入为 true；基类默认 false。
+    [[nodiscard]] virtual auto accepts_system_drag() const -> bool { return false; }
+
+    /// @brief 非拖拽替代路径描述（可达性契约）：可接收拖放的控件须同时提供一条不经拖拽的
+    ///        等价入口，本查询返回其人类可读描述（如「上下文菜单的『移动到』项」）。
+    ///
+    /// 缺省为空 = 本控件只有拖拽一条路，工具与无障碍桥据此把节点标记为「仅拖拽可达」并告警
+    /// （`AccessibilityNode::is_drag_only_reachable`）。该查询与既有 `AccessibilityNode`
+    /// 角色动作体系分工，只补「替代路径」这一项，不重复表达控件语义。
+    /// @return 替代路径描述；缺省为空串。
+    [[nodiscard]] virtual auto system_drag_alternative_path() const -> std::string { return {}; }
 
     /// @brief 焦点变更通知（获焦 focus=true / 失焦 focus=false）。
     /// 基类默认维护 `is_focused_` 以便 `is_focused()` 正确；子类可覆写以更新聚焦态绘制。
@@ -1526,6 +1611,19 @@ class Widget : public std::enable_shared_from_this<Widget> {
     Constraints cached_constraints_{};  ///< 上一次成功布局时的输入约束（缓存键）
     Size cached_size_{};  ///< 上一次成功布局得到的尺寸
     Widget *layout_parent_ = nullptr;  ///< 布局父节点（容器在布局入口设置）
+    /// @brief 本控件是否持有在途系统拖出会话（`begin_system_drag()` 发起成功即置位）。
+    ///
+    /// 析构即取消（见 `~Widget`）：异步会话跨越多个帧，控件可能在会话期间被移除，不取消则
+    /// OS 侧仍会回调 `DragOffer::provide` 访问已销毁的控件状态。终态回调投递时清零，避免
+    /// 控件销毁后误取消其它控件发起的新会话。
+    bool drag_session_active_ = false;
+    /// @brief 在途拖出会话的存活令牌（`begin_system_drag()` 创建，终态回调捕获）。
+    ///
+    /// 栈 / 成员对象轨的第二道判活：终结回调经帧循环排空投递，而 `system_drag::cancel()`
+    /// 只**登记**终态、投递发生在之后的 `pump_reads()`——控件若在两次之间析构，回调里捕获的
+    /// 裸指针即成悬垂指针。析构先把令牌置 false，回调据此跳过派发（`shared_ptr` 持有轨另由
+    /// `weak_from_this()` 守卫，见 `begin_system_drag()` 的双轨判活）。
+    std::shared_ptr<bool> drag_session_alive_;
     bool is_relayout_boundary_ = false;  ///< 显式重排边界声明（见 is_relayout_boundary）
     bool mounted_ = false;  ///< 是否已挂载（`mount` 幂等的第一道判；换宿主重挂由 `mount_ctx_` 的宿主身份区分）
     /// @brief 挂载期记录的上下文：既是 `unmount()` 回传给 `on_unmount` 的那一份，也承载宿主身份。
@@ -1668,17 +1766,26 @@ class Widget : public std::enable_shared_from_this<Widget> {
 #endif
 
   protected:
-    /// @brief 注册一个响应式信号：变化 → markNeedsLayout/Paint。
+    /// @brief 注册一个响应式信号：变化 → `on_signal_dirty()`。
     /// @param sig 被跟踪的信号视图；Effect 首次 `run()` 时读取以登记依赖，此后其变化即标脏本控件。
     /// @param effects 接收新建 `Effect` 的容器；其生命周期决定订阅生命周期（传 `effects_` 即随本 Widget 析构而退订）。
     auto track(SignalViewBase &sig, std::vector<std::unique_ptr<Effect>> &effects) -> void {
         auto e = std::make_unique<Effect>([this, &sig]() -> void {
             sig.read();  // 在活跃 Effect 下登记依赖
-            mark_needs_layout();
-            mark_needs_paint();
+            on_signal_dirty();
         });
         e->run();
         effects.push_back(std::move(e));
+    }
+
+    /// @brief 被跟踪信号变化时的标脏口径：默认标脏本控件（布局 + 绘制，向上溯达祖先缓存）。
+    ///
+    /// 覆写点用于「本控件的脏其实来自一份**向下传播**的输入」的场景：环境注入器（`Provider`）换值时，
+    /// 子树后代自身没有变脏，默认口径只能失效到本控件及其祖先，后代仍按旧环境回放缓存。故其覆写为
+    /// 默认口径 + 子树缓存清零（见 `invalidate_subtree_caches`）。
+    virtual auto on_signal_dirty() -> void {
+        mark_needs_layout();
+        mark_needs_paint();
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)

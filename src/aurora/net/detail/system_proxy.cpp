@@ -224,7 +224,7 @@ auto system_proxy_from_snapshot(const SystemProxySnapshot &snapshot) -> Result<P
                                " is a SOCKS4-era 'socks' entry; only SOCKS5 is implemented, use an "
                                "explicit 'socks5=' entry when the server speaks SOCKS5");
         }
-        Slot slot = Slot::All;
+        auto slot = Slot::All;
         if (!scheme.empty() && !slot_of(scheme, slot)) {
             std::string rejected = context + " carries unrecognized scheme token '";
             rejected += scheme;

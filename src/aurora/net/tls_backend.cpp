@@ -236,7 +236,7 @@ auto detail::snapshot_tls_backend_registry() -> void {
 auto detail::restore_tls_backend_registry() -> void {
     auto &state = registry();
     std::scoped_lock lock{state.mutex};
-    auto &slot = snapshot_slot();
+    const auto &slot = snapshot_slot();
     if (!slot.taken) {
         return;
     }

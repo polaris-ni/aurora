@@ -162,7 +162,7 @@ class HttpPoolLease {
     /// @param pool 池本体（须比本卫活得久：池挂在 `Client` 上，交换期间恒在）。
     /// @param key 池键。
     /// @param options 本客户端的池口径（归还时用）。
-    HttpPoolLease(HttpConnectionPool &pool, HttpPoolKey key, http::PoolOptions options)
+    HttpPoolLease(HttpConnectionPool &pool, HttpPoolKey key, const http::PoolOptions &options)
         : pool_{&pool}, key_{std::move(key)}, options_{options} {}
 
     /// @brief 只可移动：卫代表「恰好一次归还」这件事，拷贝会制造第二次归还。

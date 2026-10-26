@@ -2,7 +2,6 @@
 #include "aurora/net/http_auth.h"
 
 #include <algorithm>
-#include <cstddef>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -10,7 +9,6 @@
 #include "aurora/core/headers.h"
 #include "aurora/core/result.h"
 #include "aurora/net/detail/http_auth_wire.h"
-#include "aurora/net/http.h"
 #include "aurora/state/coroutine.h"
 
 namespace aurora::net::http {
@@ -53,13 +51,13 @@ constexpr auto to_lower_ascii(char unit) -> char {
 
 auto AuthMechanism::parameter(std::string_view key) const -> std::optional<std::string> {
     auto lowered = std::string{key};
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(), to_lower_ascii);
+    std::ranges::transform(lowered, lowered.begin(), to_lower_ascii);
     for (const auto &[name, value] : parameters) {
         // 两侧都折叠：文法层交回的键已是小写，但公共面的承诺是「大小写不敏感」，而自定义实现方可能手工
         // 装配一枚机制（合成一份挑战、或把自研方案的参数表原样搬进来）。只折叠查询侧会让那种形态静默取不到
         // 值，现场表现为「参数明明在列表里，`parameter()` 却说没有」。
         auto folded = std::string{name};
-        std::transform(folded.begin(), folded.end(), folded.begin(), to_lower_ascii);
+        std::ranges::transform(folded, folded.begin(), to_lower_ascii);
         if (folded == lowered) {
             return value;
         }
@@ -68,8 +66,8 @@ auto AuthMechanism::parameter(std::string_view key) const -> std::optional<std::
 }
 
 auto AuthChallenge::mechanism(AuthScheme scheme) const -> const AuthMechanism * {
-    const auto found = std::find_if(mechanisms.begin(), mechanisms.end(),
-                                    [scheme](const AuthMechanism &entry) { return entry.scheme == scheme; });
+    const auto found =
+        std::ranges::find_if(mechanisms, [scheme](const AuthMechanism &entry) { return entry.scheme == scheme; });
     return found == mechanisms.end() ? nullptr : &*found;
 }
 
