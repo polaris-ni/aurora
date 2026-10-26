@@ -89,6 +89,17 @@ class X11Surface final : public Surface {
     /// @brief 窗口当前逻辑尺寸（转发 Impl 缓存的窗口几何）。
     /// @return 窗口尺寸（设备无关像素）。
     [[nodiscard]] auto size() const -> Size override;
+    /// @brief 窗口客户区左上角的屏幕位置（`XTranslateCoordinates` → 根窗口，物理像素）。
+    /// @return 屏幕坐标（物理像素）；未连接或窗口已销毁时返回 (0,0)。
+    [[nodiscard]] auto position() const -> Point override;
+    /// @brief 程序化移动窗口到屏幕坐标（`XMoveWindow`，物理像素，与 GLFW / Win32 同口径）。
+    /// @param p 目标客户区左上角坐标（物理像素，几何快照直接下发，不做 scale 换算）。
+    auto set_position(Point p) -> void override;
+    /// @brief 程序化设置窗口客户区尺寸（`XResizeWindow`，逻辑 dp → 物理像素经本后端唯一 scale 真值点换算）。
+    /// 服务端装饰（SSD）下即客户区尺寸，WM 另行加框；客户端装饰（CSD）下窗口矩形即内容矩形。
+    /// 与 GLFW 同口径接收逻辑 dp（几何恢复按当前 `scale_factor` 折回后下发）。
+    /// @param s 目标客户区尺寸（设备无关像素）。
+    auto set_size(Size s) -> void override;
     /// @brief 已呈现帧数：每次 `present()` 真正 `XPutImage` 上屏自增（与 Win32 同口径）。
     /// @return 迄今真正上屏的帧数。
     [[nodiscard]] auto frame_count() const -> int override;
@@ -96,6 +107,8 @@ class X11Surface final : public Surface {
     /// @return 底色 RGBA（245,245,247,255，与通用默认一致）。
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
     /// @brief 像素密度：解析 X 资源 `Xft.dpi`（dpi/96），无声明时 1.0。
+    /// 运行期根窗口 `RESOURCE_MANAGER`（`PropertyNotify`）变化后重读并上报
+    /// `set_scale_change_handler` 注册的回调，使跨屏 / 系统缩放切换后 UI 自动跟随。
     /// @return DPI 缩放因子，1.0 表示无缩放。
     [[nodiscard]] auto scale_factor() const -> float override;
     /// @brief 是否已收到关闭窗口请求：`ClientMessage(WM_DELETE_WINDOW)` 置位。

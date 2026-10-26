@@ -129,6 +129,17 @@ struct WaylandSurface::Impl {
     /// @brief 内容（window geometry）逻辑 dp 尺寸——configure 口径，不含阴影边距。
     /// 整幅表面 = full_size() = size + 2×shadow_margin()；Wayland 表面坐标即逻辑坐标。
     Size size{.width = 0.0F, .height = 0.0F};
+    /// @brief 样式限定的内容尺寸约束（构造期由 `WindowStyleOptions` 解析；0 = 该轴无约束）。
+    /// 运行期 `set_size` 的「提议」临时把 min/max 收窄到目标值，configure 到达后必须还原
+    /// 这四项——否则窗口被永久锁成固定尺寸，用户再也拖不动边框。
+    std::int32_t style_min_w = 0;
+    std::int32_t style_min_h = 0;
+    std::int32_t style_max_w = 0;
+    std::int32_t style_max_h = 0;
+    /// @brief 在途的尺寸提议（内容 window geometry 口径，逻辑 dp；0 = 无）。
+    /// xdg-shell 只允许 client 提约束，configure 是合成器对该提议的回答（接受或拒绝）。
+    std::int32_t request_w = 0;
+    std::int32_t request_h = 0;
     int scale = 1;
     bool configured = false;  ///< 收到首个 xdg_surface.configure 前不得 attach buffer。
     // xdg_toplevel.configure 暂存（ack 于 xdg_surface.configure 时统一应用）。
@@ -344,6 +355,9 @@ struct WaylandSurface::Impl {
     auto on_global(std::uint32_t name, const char *iface, std::uint32_t version) -> void;
     auto on_xdg_surface_configure(std::uint32_t serial) -> void;
     auto on_toplevel_configure(std::int32_t w, std::int32_t h, wl_array *states) -> void;
+    /// @brief 按 `style_min_*` / `style_max_*` 重新下发 xdg_toplevel 尺寸约束（双缓冲）。
+    /// 调用方负责随后 `wl_surface.commit`，使约束在合成器侧生效。
+    auto apply_style_size_limits() const -> void;
     auto on_seat_capabilities(std::uint32_t caps) -> void;
     auto on_key(std::uint32_t key, std::uint32_t state_v) const -> void;
     auto on_keymap(std::int32_t fd, std::uint32_t sz) -> void;
@@ -890,13 +904,29 @@ auto WaylandSurface::Impl::on_global(std::uint32_t name, const char *iface, std:
     }
 }
 
+auto WaylandSurface::Impl::apply_style_size_limits() const -> void {
+    if (toplevel == nullptr) {
+        return;
+    }
+    // 0 在 xdg-shell 里就是「该轴无约束」，故与原构造路径的「有值才下发」等价，
+    // 但还原点只有这一处，不会出现两套口径。
+    xdg_toplevel_set_min_size(toplevel, style_min_w, style_min_h);
+    xdg_toplevel_set_max_size(toplevel, style_max_w, style_max_h);
+}
+
 auto WaylandSurface::Impl::on_xdg_surface_configure(std::uint32_t serial) -> void {
     xdg_surface_ack_configure(xsurface, serial);
     configured = true;
-    // 应用 xdg_toplevel.configure 暂存：尺寸（0=客户端自定，保持现值）与几何态。
+    // 应用 xdg_toplevel.configure 暂存：尺寸与几何态。
+    // 尺寸来源优先级：合成器给出的正尺寸 > set_size 的提议。configure 宽/高为 0 表示合成器
+    // 把尺寸决定权交回 client（xdg-shell 语义；Weston 对 min/max 约束变化的回答即 0×0），
+    // 此时按提议的内容尺寸更新本地值，下一次 present 以该尺寸 attach buffer 并
+    // set_window_geometry，合成器据此把窗口设为该尺寸。
+    const std::int32_t want_w = (pending_w > 0) ? pending_w : request_w;
+    const std::int32_t want_h = (pending_h > 0) ? pending_h : request_h;
     bool resized = false;
-    if (pending_w > 0 && pending_h > 0) {
-        const Size want{.width = static_cast<float>(pending_w), .height = static_cast<float>(pending_h)};
+    if (want_w > 0 && want_h > 0) {
+        const Size want{.width = static_cast<float>(want_w), .height = static_cast<float>(want_h)};
         if (want.width != size.width || want.height != size.height) {
             size = want;
             resized = true;
@@ -919,6 +949,16 @@ auto WaylandSurface::Impl::on_xdg_surface_configure(std::uint32_t serial) -> voi
     if (active != pending_act) {
         active = pending_act;
         update_state();
+    }
+    // set_size 的尺寸提议：toplevel configure 就是合成器对该提议的回答（接受或拒绝）。
+    // 无论结果如何都立即还原样式 min/max 并 commit——不还原会把窗口永久锁成固定尺寸；
+    // 若合成器拒绝了提议，继续保留约束也只会阻止用户手动缩放，不会让请求生效。
+    if (request_w > 0 && request_h > 0) {
+        request_w = 0;
+        request_h = 0;
+        apply_style_size_limits();
+        wl_surface_commit(surface);
+        wl_display_flush(dpy);
     }
     if ((resized || margin_state_changed) && self->present_request_) {
         // 几何/边距变化当下同步重渲染（对齐 Win32 WM_SIZE / X11 ConfigureNotify）：
@@ -1425,19 +1465,20 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
     xdg_toplevel_set_title(d.toplevel, title.c_str());
     xdg_toplevel_set_app_id(d.toplevel, "aurora");
     // 样式映射：尺寸限制经 xdg_toplevel（逻辑坐标）；always_on_top 无核心协议对应（忽略并告警）。
+    // 约束值同时记入 Impl：运行期 set_size 的临时提议用过后要还原到这一组值
+    // （见 apply_style_size_limits），否则会把窗口锁成固定尺寸。
     if (!style.resizable) {
-        xdg_toplevel_set_min_size(d.toplevel, w, h);
-        xdg_toplevel_set_max_size(d.toplevel, w, h);
+        d.style_min_w = std::max(1, w);
+        d.style_min_h = std::max(1, h);
+        d.style_max_w = std::max(1, w);
+        d.style_max_h = std::max(1, h);
     } else {
-        if (style.min_size.width > 0.0F || style.min_size.height > 0.0F) {
-            xdg_toplevel_set_min_size(d.toplevel, static_cast<std::int32_t>(style.min_size.width),
-                                      static_cast<std::int32_t>(style.min_size.height));
-        }
-        if (style.max_size.width > 0.0F || style.max_size.height > 0.0F) {
-            xdg_toplevel_set_max_size(d.toplevel, static_cast<std::int32_t>(style.max_size.width),
-                                      static_cast<std::int32_t>(style.max_size.height));
-        }
+        d.style_min_w = static_cast<std::int32_t>(style.min_size.width);
+        d.style_min_h = static_cast<std::int32_t>(style.min_size.height);
+        d.style_max_w = static_cast<std::int32_t>(style.max_size.width);
+        d.style_max_h = static_cast<std::int32_t>(style.max_size.height);
     }
+    d.apply_style_size_limits();
     if (style.always_on_top) {
         AURORA_LOG_WARN("window", "WaylandSurface: always_on_top has no core Wayland protocol; ignored.");
     }
@@ -1854,6 +1895,52 @@ auto WaylandSurface::size() const -> Size {
     // 根约束；应用内容口径由 content_inset() 经 ContentInsetRoot 壳折算回内容尺寸（零感知）。
     // 塌缩态（最大化/全屏/平铺/非 CSD）margin=0，与内容尺寸相同。
     return impl_->full_size();
+}
+
+auto WaylandSurface::set_position(Point /*p*/) -> void {
+    // xdg-shell 没有客户端可用的定位请求：窗口位置由合成器（含平铺/吸附策略）决定，
+    // 客户端既不能查询也不能设置（`position()` 亦为基类默认 (0,0)）。
+    // 保留显式覆写而非依赖基类空实现，使「本后端不支持」在代码与文档里可见：
+    // 几何持久化的位置腿在本后端如实降级，尺寸腿仍按 set_size 的提议语义工作。
+}
+
+auto WaylandSurface::set_size(Size s) -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr || d.toplevel == nullptr || d.window_gone) {
+        return;
+    }
+    // 入参是**整窗外框**逻辑尺寸（与 size() / 几何快照同口径）：xdg_toplevel 的 min/max
+    // 约束作用在 window geometry（内容）上，故先减去当前态 CSD 阴影边距（塌缩态为 0）。
+    const int margin = d.shadow_margin();
+    std::int32_t w = std::max(1, static_cast<std::int32_t>(std::lround(s.width)) - (2 * margin));
+    std::int32_t h = std::max(1, static_cast<std::int32_t>(std::lround(s.height)) - (2 * margin));
+    // 样式约束是内容口径：把提议夹回用户声明的 min/max 内，避免越界后被合成器直接拒绝。
+    if (d.style_min_w > 0) {
+        w = std::max(w, d.style_min_w);
+    }
+    if (d.style_min_h > 0) {
+        h = std::max(h, d.style_min_h);
+    }
+    if (d.style_max_w > 0) {
+        w = std::min(w, d.style_max_w);
+    }
+    if (d.style_max_h > 0) {
+        h = std::min(h, d.style_max_h);
+    }
+    if (w == static_cast<std::int32_t>(std::lround(d.size.width)) &&
+        h == static_cast<std::int32_t>(std::lround(d.size.height))) {
+        return;  // 已是目标尺寸：不下发约束，避免多余的 configure 往返
+    }
+    // xdg-shell 没有「程序化设置窗口尺寸」请求：client 只能给约束，最终尺寸由合成器经
+    // xdg_toplevel.configure 决定。把 min 与 max 同时收窄到目标值，即「提议此尺寸」的
+    // 标准做法（合成器须回一个满足约束的 configure）；不能长期保留该约束，否则窗口被
+    // 锁成 fixed-size。还原点在 on_xdg_surface_configure——configure 就是合成器的回答。
+    d.request_w = w;
+    d.request_h = h;
+    xdg_toplevel_set_min_size(d.toplevel, w, h);
+    xdg_toplevel_set_max_size(d.toplevel, w, h);
+    wl_surface_commit(d.surface);
+    wl_display_flush(d.dpy);
 }
 
 auto WaylandSurface::frame_count() const -> int { return impl_->presented; }

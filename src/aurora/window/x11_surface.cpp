@@ -81,14 +81,36 @@ auto mask_shift(unsigned long mask, int fallback) -> int {
     return static_cast<int>(s);
 }
 
+/// @brief 读取根窗口 `RESOURCE_MANAGER` 属性原文（Xft.dpi 所在）；缺失/非 STRING 返回空串。
+///
+/// 刻意不用 `XResourceManagerString`：该函数把首次读到的值缓存在 `Display` 上，实测在
+/// `PropertyNotify` 已处理、属性已被改写之后仍返回旧串（本机 libX11 1.8 实测），
+/// 无法支撑运行时缩放上报。`XGetWindowProperty` 每次直达服务器，故是唯一可靠读法。
+auto read_resource_manager(Display *dpy) -> std::string {
+    Atom actual_type = 0;
+    int actual_format = 0;
+    unsigned long nitems = 0;
+    unsigned long bytes_after = 0;
+    unsigned char *prop = nullptr;
+    // RESOURCE_MANAGER 是根窗口属性；只接受 STRING（XA_STRING）类型，其余视为无声明。
+    const Status ok = XGetWindowProperty(dpy, DefaultRootWindow(dpy), XA_RESOURCE_MANAGER, 0L, 100000L, False,
+                                         XA_STRING, &actual_type, &actual_format, &nitems, &bytes_after, &prop);
+    std::string text;
+    if (ok == Success && actual_type == XA_STRING && actual_format == 8 && prop != nullptr) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        text.assign(reinterpret_cast<const char *>(prop), nitems);
+    }
+    if (prop != nullptr) {
+        XFree(prop);
+    }
+    return text;
+}
+
 /// @brief 解析 X 资源 `Xft.dpi` 得像素密度（dpi/96）；无声明/异常值回退 1.0。
 /// Wayland 会话下 XWayland 会按桌面缩放同步该资源（GNOME/KDE 均如此）。
 auto detect_scale(Display *dpy) -> float {
-    const char *rm = XResourceManagerString(dpy);
-    if (rm == nullptr) {
-        return 1.0F;
-    }
-    const char *p = std::strstr(rm, "Xft.dpi:");
+    const std::string rm = read_resource_manager(dpy);
+    const char *p = std::strstr(rm.c_str(), "Xft.dpi:");
     if (p == nullptr) {
         return 1.0F;
     }
@@ -597,6 +619,10 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
                  ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
                      PointerMotionMask | StructureNotifyMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask |
                      PropertyChangeMask);
+    // DPI 变化探测：X11 没有标准「DPI 改变」事件，唯一可靠信号是根窗口 RESOURCE_MANAGER
+    // （Xft.dpi 所在）属性的 PropertyNotify。事件掩码按客户端连接独立计，故对根窗口再选一次
+    // PropertyChangeMask 不影响其他 X 客户端（多窗口共享同一连接时也幂等）。
+    XSelectInput(d.dpy, RootWindow(d.dpy, screen), PropertyChangeMask);
     // 关闭协议（点「×」经 ClientMessage 通知而非直接断链）。
     d.wm_delete = XInternAtom(d.dpy, "WM_DELETE_WINDOW", 0);
     XSetWMProtocols(d.dpy, d.win, &d.wm_delete, 1);
@@ -977,6 +1003,48 @@ auto X11Surface::present() -> Result<bool> {
 }
 
 auto X11Surface::size() const -> Size { return impl_->size; }
+
+auto X11Surface::position() const -> Point {
+    const Impl &d = *impl_;
+    if (d.dpy == nullptr || d.win == 0) {
+        return Point{};
+    }
+    // 客户区左上角在根窗口坐标系的位置：对 reparenting WM，x/y 相对父窗口（WM 框架）的歧义
+    // 由 XTranslateCoordinates 消解，与 ConfigureNotify 里刷新 origin_x/origin_y 同一口径。
+    ::Window child = 0;
+    int rx = 0;
+    int ry = 0;
+    if (XTranslateCoordinates(d.dpy, d.win, DefaultRootWindow(d.dpy), 0, 0, &rx, &ry, &child) == False) {
+        return Point{};
+    }
+    return Point{.x = static_cast<float>(rx), .y = static_cast<float>(ry)};
+}
+
+auto X11Surface::set_position(Point p) -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr || d.win == 0 || d.window_gone) {
+        return;
+    }
+    // 位置是**屏幕物理像素**（与 GLFW / Win32 同口径，几何快照直接下发，不做 scale 换算）。
+    XMoveWindow(d.dpy, d.win, static_cast<int>(std::lround(p.x)), static_cast<int>(std::lround(p.y)));
+    XFlush(d.dpy);
+}
+
+auto X11Surface::set_size(Size s) -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr || d.win == 0 || d.window_gone) {
+        return;
+    }
+    // 入参是**逻辑 dp**（与 GLFW 同口径）：必须复用本后端唯一 scale 真值点换算为物理像素，
+    // 否则 ≠100% DPI 下窗口会比请求的 dp 小一个 scale 倍（与建窗路径 XCreateSimpleWindow 同源）。
+    const int pw = std::max(1, static_cast<int>(std::lround(s.width * d.scale)));
+    const int ph = std::max(1, static_cast<int>(std::lround(s.height * d.scale)));
+    XResizeWindow(d.dpy, d.win, static_cast<unsigned int>(pw), static_cast<unsigned int>(ph));
+    XFlush(d.dpy);
+    // 同步逻辑尺寸缓存：几何恢复在首帧之前下发，若等 ConfigureNotify 才更新，首帧会按旧尺寸
+    // 布局（差一帧错位）。ConfigureNotify 稍后到达时按「物理 / scale」重算，二者同口径。
+    d.size = Size{.width = static_cast<float>(pw) / d.scale, .height = static_cast<float>(ph) / d.scale};
+}
 
 auto X11Surface::frame_count() const -> int { return impl_->presented; }
 
@@ -1473,6 +1541,36 @@ auto X11Surface::poll_platform_events() -> void {
                 update_state();
                 break;
             case PropertyNotify:
+                // 根窗口 RESOURCE_MANAGER（Xft.dpi 所在）变化 = 系统 DPI / 缩放变更的唯一可靠
+                // 信号（X11 没有标准 DPI 事件）。只在该属性变化时重读，避免每帧解析资源串。
+                if (ev.xproperty.atom == XA_RESOURCE_MANAGER) {
+                    const float next = detect_scale(d.dpy);
+                    if (next != d.scale) {
+                        d.scale = next;
+                        // 物理窗口尺寸不变，逻辑尺寸按新 scale 重算（与 ConfigureNotify 同口径）：
+                        // 不更新会让下一帧用新 scale 渲染却按旧逻辑尺寸布局。
+                        ::Window root_ret = 0;
+                        int xr = 0;
+                        int yr = 0;
+                        unsigned int cw = 0;
+                        unsigned int ch = 0;
+                        unsigned int bw = 0;
+                        unsigned int depth = 0;
+                        if (XGetGeometry(d.dpy, d.win, &root_ret, &xr, &yr, &cw, &ch, &bw, &depth) != 0 && cw > 0 &&
+                            ch > 0) {
+                            // NOLINTBEGIN(*-narrowing-conversions)
+                            d.size = Size{.width = static_cast<float>(cw) / d.scale,
+                                          .height = static_cast<float>(ch) / d.scale};
+                            // NOLINTEND(*-narrowing-conversions)
+                        }
+                        // 先换算再上报（与 Wayland / GLFW 同序）：`on_scale_changed` 会立刻
+                        // force_full_redraw()，上报滞后一帧会让该帧继续按旧 scale 渲染。
+                        notify_scale_change(d.scale);
+                        if (present_request_) {
+                            present_request_();
+                        }
+                    }
+                }
                 // EWMH 几何态变化（最小化/最大化/全屏由 WM 改 _NET_WM_STATE 属性通告）。
                 if (ev.xproperty.atom == d.net_wm_state) {
                     const WindowMode want = d.query_mode();

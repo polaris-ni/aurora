@@ -61,6 +61,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_x11_cursor)
     endif ()
 
+    # ---- X11 缩放上报 + 窗口几何（真实 X server）：运行期改根窗口 Xft.dpi → scale_factor
+    # 跟随、on_scale_changed 触发重绘；set_size / set_position → 独立 Xlib 观测窗口真实改变。
+    # 自动段全自动（无需人工段），故不进 CTest：建真实窗口且会改动会话级 RESOURCE_MANAGER。
+    if (AURORA_BACKEND_X11)
+        aurora_add_verify_probe(aurora_verify_x11_geometry "${_aurora_verify_dir}/x11_geometry_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_x11_geometry)
+    endif ()
+
     # ---- X11 Xdnd 拖入 / 拖出桥（真实 X 服务器）：`XdndAware` 广告 + 四态派发 + 动作协商 +
     # selection round-trip 取数 + 拖出 grab/`XdndSelection` 所有权/消息序列。自动段以「本窗口
     # 自拖放」完成全链路无人值守验收（要约 → 数据往返 → 终态 Succeeded/Copy），跨进程会话
@@ -251,6 +259,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     if (AURORA_BACKEND_WAYLAND)
         aurora_add_verify_probe(aurora_verify_wayland_cursor "${_aurora_verify_dir}/wayland_cursor_live_probe.cpp")
         list(APPEND _aurora_verify_targets aurora_verify_wayland_cursor)
+    endif ()
+
+    # ---- Wayland 窗口尺寸提议（真实合成器）：set_size 经 xdg_toplevel min/max 提议，
+    # configure 落地后 size() 才变；set_position 如实 no-op。自动段全自动，故不进 CTest
+    # （建真实窗口，且尺寸提议会改变用户桌面上的窗口几何）。
+    if (AURORA_BACKEND_WAYLAND)
+        aurora_add_verify_probe(aurora_verify_wayland_geometry "${_aurora_verify_dir}/wayland_geometry_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_wayland_geometry)
     endif ()
 
     # ---- Wayland text-input-unstable-v3 输入法桥（manager 绑定 / enter-enable 判据 / 组合事件）----

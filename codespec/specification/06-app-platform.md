@@ -236,7 +236,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 |:---|:---|
 | `WindowOptions::persist_id` | 几何持久化键（空 = 不持久化），多个窗口用不同键区分 |
 | `Application::set_window_geometry_store(prefs)` | 指定 `Preferences` 存储；会对**已登记**窗口补做恢复（主窗口在构造期即已登记） |
-| `WindowGeometry{origin, size, mode, display_id}` | 坐标与尺寸为**屏幕物理像素**（与 `app::Display` 同源）——只有物理坐标跨 DPI 稳定；恢复时按当前 `scale_factor` 折回逻辑 dp。**该 `scale_factor` 与宿主内 dp ↔ 物理换算同源**（Win32 侧已收敛为 `Impl::scale` 单点真值，`scale_factor()` 读之；见 `03-layout-render.md` DPI 感知条）。**Linux 三后端（X11 / Wayland / GLFW）的缩放变化上报仍未实现**，故其 `scale_factor` 在改系统缩放或跨屏后不会自动更新，持久化恢复暂按旧值折算 |
+| `WindowGeometry{origin, size, mode, display_id}` | 坐标与尺寸为**屏幕物理像素**（与 `app::Display` 同源）——只有物理坐标跨 DPI 稳定；恢复时按当前 `scale_factor` 折回逻辑 dp。**该 `scale_factor` 与宿主内 dp ↔ 物理换算同源**（Win32 侧已收敛为 `Impl::scale` 单点真值，`scale_factor()` 读之；见 `03-layout-render.md` DPI 感知条）。**Linux 三后端的缩放变化上报均已接线**：GLFW 走 `glfwSetWindowContentScaleCallback`（`glfw_surface.cpp` 的 `on_content_scale`）、Wayland 在 `wl_surface.enter/leave` 后遍历 `entered` outputs 重算并上报（`wayland_surface.cpp` 的 `refresh_scale`）、X11 在根窗口 `RESOURCE_MANAGER`（`Xft.dpi` 所在）的 `PropertyNotify` 上重读并上报（`x11_surface.cpp`）。故改系统缩放后 `scale_factor` 会自动更新、持久化恢复按新值折算；跨屏切换能否自动跟随取决于桌面是否同步改写该资源（X11）或更新 output scale（Wayland） |
 | `save_window_geometry` / `load_window_geometry` | 读写；另有 `Preferences::Group` 重载用于**窗口组**：`prefs.group("windows")` + 各窗口键 |
 | `is_window_geometry_usable(g, displays)` | 判据：尺寸为正，且与某显示器工作区**有交集**（部分越界算可用，多屏拼接/任务栏遮挡下不应拒绝恢复） |
 
@@ -258,7 +258,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 
 | 落盘 `mode` | 恢复行为 |
 |:---|:---|
-| `Normal` | `set_size` + `set_position`（现行为逐位保留；物理像素按当前 `scale_factor` 折回逻辑 dp） |
+| `Normal` | `set_size` + `set_position`（现行为逐位保留；物理像素按当前 `scale_factor` 折回逻辑 dp）。X11 已真实下发（`XResizeWindow` / `XMoveWindow`）；Wayland 的尺寸经 xdg_toplevel 的 min/max 约束提议、由 configure 决定是否采纳，位置在协议层不可设；Win32 / GLFW 早已实现 |
 | `Maximized` / `FullScreen` | **只追几何态，位置与尺寸都不下发**——那两档的位置由 OS / compositor 摆放，下发既无意义也可能触发多余的 `SetWindowPos` / configure |
 | `Minimized` | **恢复为 `Normal`** 并留一条 INFO。理由有二：启动即看不见（应用看起来没启动）；且 `WindowMode::Minimized` 与 `WindowState::Hidden` 耦合，而恢复腿没有设置 `WindowState` 的通道（`Window::set_window_state` 同样只是快照），硬恢复会制造「快照说最小化、可见性说可见」的分裂。用 INFO 而非 WARN：用户最小化是合法操作，不是异常 |
 
@@ -285,11 +285,13 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 
 **与关闭闸门的交互**：几何保存点在 `reap_closed` 收集步、只对 `should_close()==true` 的宿主执行并打 `geometry_saved_` 一次性闩 ⇒ 关闭被否决的宿主不进收集步、不写快照、不打闩，下次真关时以最新几何落盘——「否决不写、下次真关写最新」由现有结构天然满足，闩语义无需放宽。
 
-**恢复时刻的可信性**：恢复发生在 `register_host` 尾部（首帧之前），该时刻 `scale_factor` 在各后端已可信（Win32 建窗期定稿、X11 构造期读 Xft.dpi、Wayland 两次 roundtrip 后 `wl_output` scale 已到、GLFW 即时查询、Headless 恒 1.0）。与「Linux 三后端缩放变化上报未实现」（改系统缩放或跨屏后不自动更新）是**两个独立偏差**，真机读数不得混为一个。
+**恢复时刻的可信性**：恢复发生在 `register_host` 尾部（首帧之前），该时刻 `scale_factor` 在各后端已可信（Win32 建窗期定稿、X11 构造期读 Xft.dpi、Wayland 两次 roundtrip 后 `wl_output` scale 已到、GLFW 即时查询、Headless 恒 1.0）。缩放上报本身也已全部接线（GLFW `on_content_scale` / Wayland `refresh_scale` / X11 根窗口 `RESOURCE_MANAGER` 的 `PropertyNotify`），故运行期改缩放后 `scale_factor` 会跟随更新。但「缩放上报」与「几何恢复」仍是**两个独立偏差**：前者证明 DPI 变化被感知，后者证明位置/尺寸真的下发到窗口，真机读数不得混为一个。
+
+**Linux 几何 setter 现状**：X11 的 `set_size` / `set_position` / `position()` 已实现（尺寸按本后端 `scale` 真值点换算、位置为屏幕物理像素；真机验收见 `tools/verify/x11_geometry_live_probe.cpp`）。Wayland 的 `set_size` 已实现为**约束提议**（把 xdg_toplevel 的 min/max 同时收窄到目标内容尺寸，configure 到达后立即还原样式约束；入参为整窗尺寸，内部扣除 CSD 阴影边距；真机验收见 `tools/verify/wayland_geometry_live_probe.cpp`），最终尺寸由合成器决定；`set_position` 在协议层由 compositor 控制、client 不可设（显式 no-op，`position()` 保持 `(0,0)`）。几何恢复与 mode 恢复是两个独立偏差，真机读数须分开记。
 
 **已知缺口（均不在本批，不得暗示已修）**：
 
-- X11 与 Wayland 的 `set_size` / `set_position` 本就未实现——位置与尺寸恢复在 Linux 上是 no-op，与 mode 恢复是两个独立偏差，真机读数须分开记；
+- Wayland 的 `set_position` 在协议层不可设（见上条「Linux 几何 setter 现状」）——Wayland 上位置恢复仍是 no-op；尺寸恢复是**提议**语义（合成器可拒绝），真机读数须区分「提议已送达」与「确实按目标尺寸落地」；
 - Win32 与 GLFW 的 `FullScreen` 无实现（monitor 切换通道未建），调用时留一条 WRN（tag `"window"`）；
 - `WgpuX11Surface` / `WgpuWin32Surface` / `D3D11Surface` 三个同源面**不转发任何几何原语**（`minimize` / `toggle_maximize` / `set_fullscreen` 历来不转发，本批只补了转发的 `WgpuWaylandSurface`）——统一既有缺口，不在本批；
 - 应用级 `window_mode()` State 只聚合主窗（`register_host` 的 mode sink 仅在宿主即主窗时转发）：既有口径、非本批引入，仅在 §6.2 补记，行为不改。

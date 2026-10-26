@@ -98,6 +98,20 @@ class WaylandSurface final : public Surface {
     /// 最大化/全屏/平铺/非 CSD 态边距塌缩为 0，与内容尺寸相等。
     /// @return wl_surface buffer 对应的逻辑 Size（configure 内容尺寸经边距放大）。
     [[nodiscard]] auto size() const -> Size override;
+    /// @brief 程序化移动窗口：xdg-shell 没有客户端可用的定位请求，显式 no-op。
+    ///
+    /// Wayland 的窗口位置由合成器（含其平铺/吸附策略）决定，client 既不能查询也不能设置；
+    /// `position()` 亦为基类默认 `(0,0)`。几何持久化在本后端的恢复腿按「位置不可设」如实降级。
+    /// @param p 目标屏幕坐标（物理像素；本后端忽略）。
+    auto set_position(Point p) -> void override;
+    /// @brief 程序化设置窗口**外框**尺寸（逻辑 dp）：经 xdg_toplevel 的 min/max 约束「提议」。
+    ///
+    /// xdg-shell 没有「直接设尺寸」请求：client 只能给出约束，最终尺寸由合成器经
+    /// `xdg_toplevel.configure` 决定。实现把 min 与 max 同时收窄到目标内容尺寸（外框减去
+    /// CSD 阴影边距），等 configure 到达后立即还原样式约束——否则窗口会被永久锁成固定尺寸。
+    /// 与 X11 / GLFW 同口径：入参是整窗逻辑尺寸（几何快照按当前 `scale_factor` 折回后下发）。
+    /// @param s 目标外框尺寸（设备无关像素）。
+    auto set_size(Size s) -> void override;
     /// @brief 已呈现帧数：每次 `present()` 真正 attach+commit 上屏自增（Hidden 档不 commit 故不计）。
     /// @return 成功 commit 的帧计数。
     [[nodiscard]] auto frame_count() const -> int override;
