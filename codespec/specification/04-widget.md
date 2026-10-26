@@ -253,7 +253,7 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `Text` | `content`、`font_size`、`color`、`bold()`、`family()`（注：斜体未实现——仅经 `font_style` 设置且当前降级为 `Normal`，见 `text.h`）。支持指针拖选、键盘扩选与复制 |
+| `Text` | `content`、`font_size`、`color`、`bold()`、`family()`（注：斜体经 `font_style=Italic` 设置，由 FontEngine 施加合成斜体实现，见 `text.h`）。支持指针拖选、键盘扩选与复制 |
 | `RichText` / `TextSpan` | 富文本片段组合。`RichText` 接收 `Reactive<std::vector<TextSpan>>` |
 | `RichTextEdit` | 富文本编辑器（`widget/rich_text_edit.h`）；序列化键 `text`（纯文本内容），回调 `on_text_input` |
 | `TextInput` | 仅 `value`（**`std::string`**，非 `Reactive`）、`placeholder`、`font_size` 进 `TextInputProps`（`text_input.h`）；`text_color` / `placeholder_color` / `background` / `focused_background` / `border_color` / `focused_border_color` / `border_width` / `selection_color` 等颜色类为**私有字段 + `set_*` 链式**（非 Props，见 `text_input.h` 附近）。回调 `on_changed`（每次编辑）/`on_submit`（Enter） |

@@ -355,22 +355,32 @@ auto RichTextEdit::handle_move_key(KeyEvent &e, bool shift, std::size_t n) -> bo
         return true;
     }
     if (e.key == static_cast<int>(KeyCode::Home)) {
-        caret_ = 0;
+        // 行内 Home：跳到当前行首；Ctrl+Home：跳到文档头。
+        const bool ctrl = (e.modifiers & ModifierKey::Control) != 0U;  // NOLINT(*-redundant-parentheses)
+        const auto [line_begin, line_end] = line_bounds_for(caret_);
+        (void)line_end;  // 行内 Home 仅需行首
+        const std::size_t target = ctrl ? 0U : line_begin;
+        caret_ = target;
         if (!shift) {
-            sel_start_ = sel_end_ = 0;
+            sel_start_ = sel_end_ = target;
         } else {
-            sel_end_ = 0;
+            sel_end_ = target;
         }
         mark_needs_paint();
         e.is_handled = true;
         return true;
     }
     if (e.key == static_cast<int>(KeyCode::End)) {
-        caret_ = n;
+        // 行内 End：跳到当前行尾；Ctrl+End：跳到文档尾。
+        const bool ctrl = (e.modifiers & ModifierKey::Control) != 0U;  // NOLINT(*-redundant-parentheses)
+        const auto [line_begin, line_end] = line_bounds_for(caret_);
+        (void)line_begin;  // 行内 End 仅需行尾
+        const std::size_t target = ctrl ? n : line_end;
+        caret_ = target;
         if (!shift) {
-            sel_start_ = sel_end_ = n;
+            sel_start_ = sel_end_ = target;
         } else {
-            sel_end_ = n;
+            sel_end_ = target;
         }
         mark_needs_paint();
         e.is_handled = true;
@@ -772,6 +782,20 @@ auto RichTextEdit::cancel_composition() -> void {
     preedit_cursor_ = 0;
     preedit_sel_start_ = 0;
     preedit_sel_end_ = AURORA_NO_PREEDIT_SELECTION;
+}
+
+auto RichTextEdit::line_bounds_for(std::size_t caret) const -> std::pair<std::size_t, std::size_t> {
+    std::size_t doc_idx = 0;
+    for (const auto &line : lines_) {
+        const std::size_t line_begin = doc_idx;
+        const std::size_t line_end = doc_idx + line.chars.size();
+        if (caret >= line_begin && caret <= line_end) {
+            return {line_begin, line_end};
+        }
+        doc_idx = line_end + 1;  // 跳过行尾换行符
+    }
+    // 越界或空文档：回退为整文档区间。
+    return {0U, doc_.size()};
 }
 
 auto RichTextEdit::caret_box_at(const Rect &bounds) const -> std::optional<Rect> {

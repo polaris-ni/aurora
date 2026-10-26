@@ -14,6 +14,7 @@
 
 #include "aurora/environment/build_context.h"
 #include "aurora/environment/environment.h"
+#include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
@@ -798,6 +799,59 @@ AURORA_TEST_CASE(rich_text_edit_explicit_color_overrides_theme) {
     RichTextEdit edit;
     edit.set_current_color(Color{0xE0, 0x1B, 0x24});
     AURORA_TEST_CHECK(edit.resolve_text_color(dark) == Color{0xE0, 0x1B, 0x24});
+}
+
+AURORA_TEST_CASE(inline_home_end_move_within_current_line) {
+    // 多行文档：L0 "abc"[0,3) | L1 "def"[4,7) | L2 "ghij"[8,12)。
+    // 行内 Home/End 跳到当前行首/行尾；Ctrl+Home/Ctrl+End 跳到文档头/尾。
+    RichTextEdit edit;
+    edit.load_spans({TextSpan{.text = LocalizedString{"abc\ndef\nghij"}}});
+    edit.layout(bounded(200.0F, 100.0F), BuildContext{});  // 触发 on_layout 以填充 lines_
+    AURORA_TEST_CHECK_EQ(edit.caret(), 0U);
+
+    auto press = [&](KeyCode k, bool ctrl = false, bool shift = false) {
+        KeyEvent e;
+        e.action = KeyAction::Down;
+        e.key = static_cast<int>(k);
+        unsigned m = 0U;
+        if (ctrl) {
+            m |= static_cast<unsigned>(ModifierKey::Control);
+        }
+        if (shift) {
+            m |= static_cast<unsigned>(ModifierKey::Shift);
+        }
+        e.modifiers = static_cast<ModifierKey>(m);
+        edit.on_key_event(e);
+    };
+
+    // 移到 L1 的 'e' 之后（doc 下标 5）：5 次右移。
+    for (int i = 0; i < 5; ++i) {
+        press(KeyCode::ArrowRight);
+    }
+    AURORA_TEST_CHECK_EQ(edit.caret(), 5U);
+
+    // 行内 Home（无修饰）：跳到当前行首 doc 下标 4。
+    press(KeyCode::Home);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 4U);
+
+    // 行内 End（无修饰）：跳回当前行尾 doc 下标 7。
+    press(KeyCode::End);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 7U);
+
+    // Ctrl+Home：跳到文档头（下标 0）。
+    press(KeyCode::Home, /*ctrl=*/true);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 0U);
+
+    // Ctrl+End：跳到文档尾（下标 12 = 文档长度）。
+    press(KeyCode::End, /*ctrl=*/true);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 12U);
+
+    // 选区：Shift+End 从当前行首扩到当前行尾（行内语义，非整篇）。
+    press(KeyCode::Home);  // 回到 L2 行首（下标 8）
+    AURORA_TEST_CHECK_EQ(edit.caret(), 8U);
+    press(KeyCode::End, false, true);  // Shift+End：选区 8..12
+    AURORA_TEST_CHECK_TRUE(edit.has_selection());
+    AURORA_TEST_CHECK_EQ(edit.selected_text(), std::string{"ghij"});
 }
 
 }  // namespace aurora::test_cases::utest_rich_text_edit

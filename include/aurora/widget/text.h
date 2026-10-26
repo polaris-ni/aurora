@@ -37,7 +37,7 @@ struct TextProps {
     float line_height = 1.0F;  ///< 行高倍数（相对字高）
     float letter_spacing = 0.0F;  ///< 字形间距（FontEngine 暂不支持 → 优雅降级）
     float word_spacing = 0.0F;  ///< 词间距（FontEngine 暂不支持 → 优雅降级）
-    FontStyle font_style = FontStyle::Normal;  ///< 字形风格（Italic 暂降级为 Normal）
+    FontStyle font_style = FontStyle::Normal;  ///< 字形风格（Italic 经 FontEngine 施加合成斜体，见 font_engine.h）
     TextDecoration decoration = TextDecoration::None;  ///< 装饰线（可按位组合）
     std::optional<Color> decoration_color;  ///< 装饰线颜色；空 = 同文字色（解析后）
     Color background_color = Color{0, 0, 0, 0};  ///< 文本底色（alpha=0 表示无）
@@ -200,7 +200,7 @@ class Text : public LeafWidget, public TextProps {
     }
 
     /// @brief 设置字形风格（链式）。
-    /// @param s 风格枚举；`Italic` 当前降级为 `Normal`。
+    /// @param s 风格枚举；`Italic` 经 FontEngine 施加合成斜体（仿斜，xy 剪切），度量/命中不受影响。
     /// @return 自身引用，便于链式调用。
     auto set_font_style(FontStyle s) -> Text & {
         font_style = s;

@@ -545,6 +545,10 @@ class RichTextEdit : public LeafWidget {
     ///        `paint_cursor` 与 IME 候选窗定位（`composition_caret_bounds`）共用同一算式。
     /// @param bounds 行扫描参照盒（绘制区 / focus_bounds）。
     /// @return 宽 1dp、高一行高的光标盒；无法定位时为 nullopt。
+    /// @brief 返回包含 `caret` 的行的 [begin, end) 文档下标区间（end 不含行尾换行符）。
+    ///        用于行内 Home/End 跳转；越界或空文档时回退为整文档区间 [0, doc.size())。
+    [[nodiscard]] auto line_bounds_for(std::size_t caret) const -> std::pair<std::size_t, std::size_t>;
+
     [[nodiscard]] auto caret_box_at(const Rect &bounds) const -> std::optional<Rect>;
 
     /// @brief 组合态绘制：preedit 内选区高亮 + preedit 文本 + 下划线 + 候选插入点光标。
