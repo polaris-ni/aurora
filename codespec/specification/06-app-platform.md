@@ -426,6 +426,26 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 参数在**建窗时**下发而非「先可见后隐藏」，避免一帧闪烁；`NoActivate` 在 X11 / Wayland 无对应请求
 （聚焦由 WM / 合成器策略决定，Aurora 从不主动 `XSetInputFocus`），与 `Normal` 同路。
 
+**建窗档只是初值，运行期另有开关。** `Surface::set_visible(bool)` / `is_visible()` 与
+`Surface::set_always_on_top(bool)` / `is_always_on_top()` 是四枚追加在虚函数段表尾的槽（既有槽位序号
+不变，ABI 面仅新增槽、需全量重编；默认实现为「空 setter + `is_visible()` 回 true /
+`is_always_on_top()` 回 false」，自定义派生零改即编译）。`Window` 侧同名四枚 `const` 透传，无
+`surface_` 时为 no-op。口径：
+
+- **显示档不抢焦点**：Win32 落 `ShowWindow(SW_SHOWNA)`——与 `NoActivate` 档同一语义；下拉式终端「热键一按
+  就打断用户当前输入」是错的，呼出后要焦点是应用侧另调 `focus_window()`。隐藏档落 `SW_HIDE`。
+- **置顶切换零几何扰动**：`SetWindowPos(..., HWND_TOPMOST / HWND_NOTOPMOST, 0, 0, 0, 0,
+  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)`；构造期的那一次置顶同样补了 `SWP_NOACTIVATE`（建窗档不因置顶
+  而激活）。
+- **幂等**：两枚 setter 都以 OS 当前值先行判等，同值重复调用不重发 OS 调用（避免多余的 `WM_WINDOWPOSCHANGED`
+  与 `Present`）。
+- **读回答 OS 实值，不答应用意图**：`is_visible()` 走 `IsWindowVisible`、`is_always_on_top()` 走
+  `GWL_EXSTYLE & WS_EX_TOPMOST`。最小化或被别的应用覆盖时「意图」与「实际」可以不同，框架不把二者混为
+  一谈；读 OS 也免了新增第二份真值源。
+- **不接线不等于静默**：本批只接 Win32 / D3D11（共用同一宿主故同翻），GLFW / X11 / Wayland / macOS /
+  WASM 保持默认实现，可经 `platform().capabilities().runtime_visibility` / `runtime_always_on_top`
+  **先查询**（§5）；Wayland 的置顶在协议层根本没有核心协议对应，属「可查询的不支持」。
+
 ---
 
 ## 4 App 流式构建器
@@ -468,11 +488,13 @@ au::App().window(win ? std::move(win.value()) : nullptr)
 
 `au::platform()` 是显式运行时平台查询，跳过后端探测。返回 `Platform{ PlatformKind kind, DeviceKind device, SurfaceKind surface }`，含 `is_mobile()` / `is_desktop()` / `capabilities()`。
 
-`PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`、`system_drag_in`、`system_drag_out`、`recent_documents_os_projection`。
+`PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`、`system_drag_in`、`system_drag_out`、`recent_documents_os_projection`、`native_menu_bar`、`runtime_visibility`、`runtime_always_on_top`。
 
 拖放两位表「**机制是否存在**」：支持接收系统拖入 / 支持发起系统拖出，**按方向独立翻位**（不是成对翻位）。当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（Win32 / D3D11 共用同一宿主与同一桥实例；X11 两个方向共用 `x11_drag.h` 的同一桥实例；Wayland 两个方向共用 `wayland_drag.h` 的同一桥实例；macOS 两个方向共用 `macos_drag.h` 的同一桥实例——其窗口壳仍为骨架，运行期 `install()` 因无内容视图必失败并记日志降级，能力位表机制归属、与 `multitouch` 等位的声明口径一致），其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定，「未接线先声称」的变异对应用例转红）。能力位与运行期失败**不互相替代**：机制存在但会话建立失败、源中断等仍走 `Result` 错误（`system-drag-*` 码，`retryable = false`，机制缺失是稳态）。
 
 `recent_documents_os_projection` 表「OS 是否提供可写入的最近文档机制、且本库把桥接好了」（§8.10）。当前仅 `Win32` 与 `D3D11` 为 true（两者共用同一宿主与同一桥实例，故同翻）；`MacOS` 本次为 **false**——机制（`NSDocumentController`）确实存在，但桥未交付，**未接线的方向不预先声称**（声称了会让调用方在静默失败后无从降级）。`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：OS 侧无该机制（XDG `recently-used.xbel` 是 GTK 生态的共读文件，不是 OS 机制）。能力位为 false 时 `project_to_os()` / `clear_os_projection()` 返回 `recent-documents-projection-unsupported`，**应用内列表与持久化不受影响**（口径同上：能力位表机制归属，运行期失败另走 `Result`）。期望表由 `utest_recent_documents_translate` 锚定（逐 `SurfaceKind` 断言，含 macOS 为 false 这条——机制在而桥未落，按「未接线不预翻」如实申报）。
+
+`runtime_visibility` 与 `runtime_always_on_top` 表「OS 提供运行期窗口显隐 / 置顶机制，且本库已把 §3.6 的四枚开关接到该机制」。当前仅 `Win32` 与 `D3D11` 为 true（同一宿主：`ShowWindow(SW_SHOWNA / SW_HIDE)` 与 `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，故同翻；wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）。其余恒 false 且各有一句实情：`X11` 的 `XMapWindow` / `XUnmapWindow` 与 `Glfw` 的 `glfwShowWindow` / `glfwHideWindow` **机制在但本库未落桥**，`MacOS` 无窗口壳，`Wayland` 既没有「隐藏顶层窗口」也没有「置顶」的核心协议（只有 minimize），`Headless` 是记录值 seam 而非 OS 机制——**未接线的方向不预先声称**。缺位时 `set_visible` / `set_always_on_top` 是**可观测的 no-op**（`is_visible()` 恒为基类默认 true、`is_always_on_top()` 恒为 false），应用据此先查询再降级，而不是「按了热键窗口没反应还以为是热键坏了」。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定（「未接线先翻位」的变异对应用例转红）。
 
 ```cpp
 const au::Platform p = au::platform();
@@ -520,11 +542,13 @@ au::Lifecycle(
 | `Occluded` | 可见但失焦（近似为「被其它窗口遮挡」） |
 | `Hidden` | 最小化 / 不可见 |
 
-由后端 `(minimized, active)` 经纯函数 `compute_window_state` 映射。精确像素级遮挡检测昂贵且普遍不被框架支持，故以「失焦 = 被遮挡」近似。
+由后端 `(minimized, active, on_screen)` 经纯函数 `compute_window_state` 映射；第三形参默认 `true`，故不接线「屏上可见性」概念的后端（X11 / GLFW 的两形参调用点）行为逐位不变。精确像素级遮挡检测昂贵且普遍不被框架支持，故以「失焦 = 被遮挡」近似。
+
+`on_screen` 是**推导输入而不是事后补丁**：`Hidden` 的定义本就含「不可见」，而运行期显隐开关（§3.6 的 `Surface::set_visible(false)`）在 Win32 落 `SW_HIDE` 时**还会同步带进一条失焦激活消息**——只按 `minimized` / `active` 推导会把「隐藏」报成「被遮挡」，比不报更糟。把在屏与否并入同一函数，两条通道天然归一。
 
 `WindowMode`（`window/window_state.h`）：`Normal` / `Maximized` / `Minimized` / `FullScreen`，与 `WindowState` **正交**——最大化只改变几何态，`WindowState` 仍为 `Visible`；最小化同时满足二者。纯函数 `compute_window_mode(minimized, maximized, fullscreen)` 提供映射。
 
-**后端上报**：`Win32Surface` 处理 `WM_SIZE`（MINIMIZED / MAXIMIZED / RESTORED → 几何态；最小化同时置 `WindowState::Hidden`）与 `WM_ACTIVATE`（非 `WA_INACTIVE` → `Visible`，否则 `Occluded`）；`GlfwSurface` 注册 `glfwSetWindowIconifyCallback` / `glfwSetWindowFocusCallback` / `glfwSetWindowMaximizeCallback`；`HeadlessSurface` 提供 `simulate_window_state` / `simulate_window_mode` 测试 seam。后端各自仅「**状态变化时**」经 `Surface::WindowStateHandler` / `WindowModeHandler` 上报。
+**后端上报**：`Win32Surface` 处理 `WM_SIZE`（MINIMIZED / MAXIMIZED / RESTORED → 几何态；最小化同时置 `WindowState::Hidden`）与 `WM_ACTIVATE`（非 `WA_INACTIVE` → `Visible`，否则 `Occluded`），两者的状态聚合点 `update_window_state()` 把 `IsWindowVisible(hwnd)` 作为 `on_screen` 传入 `compute_window_state`，故运行期 `set_visible(false)` 报 `Hidden`、`set_visible(true)` 按当时的 `minimized` / `active` 重算；`Win32Host` 构造尾部还会按建窗可见性档**播种**内部快照（`Hidden` 档 ⇒ `Hidden`、`NoActivate` ⇒ `Occluded`、`Normal` ⇒ `Visible`）——只写成员值不触发任何 handler（该时刻 handler 尚未安装），故上报序列与既往逐位相同，而「新建 `Hidden` 档窗口」与「运行期 `set_visible(false)`」读回同一个值（不播种则宿主以 `Visible` 起步、第一次真实变化被「与上次相同」的去重吞掉）。`GlfwSurface` 注册 `glfwSetWindowIconifyCallback` / `glfwSetWindowFocusCallback` / `glfwSetWindowMaximizeCallback`；`HeadlessSurface` 提供 `simulate_window_state` / `simulate_window_mode` 测试 seam，其 `set_visible` 记录显隐值并**同时经 `notify_window_state` 上报**（`false ⇒ Hidden`、`true ⇒ Visible`，同值重复调用不产生第二次上报），使「显隐 → `WindowState` → 应用级投影」这条链在无头 CI 可断言，不依赖真机会话。后端各自仅「**状态变化时**」经 `Surface::WindowStateHandler` / `WindowModeHandler` 上报。
 
 **上层聚合**：`Application` 暴露响应式 `State<WindowState>& window_state()` / `State<WindowMode>& window_mode()` 与命令式回调 `set_on_window_state` / `set_on_window_mode`；每帧经 `Window::present_root` 将当前快照注入根 `Environment`，子树可 `ctx.environment<WindowState>()` / `ctx.environment<WindowMode>()` 读取。
 
