@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-044 |
 | 提出日期 | 2026-10-27 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.APP.FILE-DIALOG.001 |
 | 影响面 | `include/aurora/app/file_dialog.h`（`Options` 两枚新格 + 一枚 headless 记录用全局 + 三分支注释段）、新增折算层 `src/aurora/app/detail/file_dialog_plan.{h,cpp}` 与同目录的 Win32 内部接缝头 file_dialog_win32_apply.h、`src/aurora/app/file_dialog_win32.cpp`（三枚 OS  setter 接线 + SDK 版本旋钮）、`src/aurora/app/file_dialog_selfdrawn.cpp`（状态机播种 / 输入框初值 / 确认时补扩展名）、两枚测试 TU 与一枚真机探针；`codespec/` 四处回写 |
 
@@ -45,3 +45,15 @@
 - `codespec/BUILD_OPTIONS.md` §2.4（真机探针登记）
 - 仓库根的版本记录进 Unreleased 的 Added 节（两枚字段与观察面）与 Fixed 节（`initial_dir` 的「注释与实现相反」那条分叉）
 - API schema 生成物由生成器重建后按门禁复核；`codespec/errors.toml` 零变化（不新增错误码）
+
+## 实施记录与偏离（落码期回写）
+
+1. **判据 7 的「扩展名读回」在 OS 侧没有面 ⇒ 换成三条独立证据**（有意偏离，不是降级）：本机 MinGW SDK 的 `shobjidl.h` 里 `IFileDialog` / `IFileSaveDialog` / `IFileOpenDialog` / `FileDialog2` 四个接口一律只有 `SetDefaultExtension`、**没有 `GetDefaultExtension`**，探针那句读回根本编不过。改证的三条：折算层单测逐值证投出去的是不含前导点的 `txt`；探针自动段证 OS 没拒（`SetDefaultExtension` 返回成功、日志里无 `SetDefaultExtension rejected` 那条 WARN）；人工段把 `suggested_name = "aurora-verify-name"`（无点）+ `default_extension = ".txt"` 投进真对话框、按保存后机判 `GetResult` 的路径末段**恰为** `aurora-verify-name.txt`——一个判据同时抓住「扩展名没生效」与「前导点没削掉」两种缺陷。探针自动段对此如实打 `[NOTE ]` 而不伪证 PASS。
+2. **一条被推翻的口径：`IFileDialog` 不写文件**。原以为人工段的落盘文件是机器取证面，实测确认后 `GetFileAttributesW` 回 `INVALID_FILE_ATTRIBUTES`（错误码 `ERROR_FILE_NOT_FOUND`）、暂存目录为空——对话框只**返回选定的路径**，落盘由应用自己完成。取证面因此改为 `GetResult` + `SIGDN_FILESYSPATH`，代码注释、探针头注、`BUILD_OPTIONS.md` §2.4 与 CHANGELOG 里所有「落盘的文件名」表述一并纠口径。
+3. **折算层被抓到两处真缺陷**（新增用例的直接产出）：⑴ `normalize_extension` 的前导点与外层空白必须**同一循环**削——分两轮处理时 `" . . txt "` 一类会留下中间点；⑵ `with_default_extension` 判「已带扩展名」只看**末段**有没有点，`"C:\\a.b\\report"` 的目录段有点而末段没点，仍要补成 `"C:\\a.b\\report.txt"`。
+4. **SDK 版本旋钮与路径归一是实测结论**：`SHCreateItemFromParsingName` 的声明门禁是 `_WIN32_IE >= _WIN32_IE_IE70`，该 TU 原取 `0x0600` 故不可见——抬到 `0x0700` 后声明可见、链接命中随库 PUBLIC 链接的 `shell32`，旧注释那句「当前 MinGW 工具链未提供」据此作废。正斜杠写法 `C:/Windows/system32` 直传回 `E_INVALIDARG`，先经 `GetFullPathNameW` 归一再解析即命中（探针判据 4 逐值证）。
+5. **观察面的记录点确实排在钩子判据之前**：钩子置值走钩子分支时 `headless_last_options` 同样读到本次传入的原文（判据 1 的第二段），且记录的是**原文不是折算结果**——带目录的建议名原样回读，截断发生在各腿投递前。
+6. **变异自证实跑三处**（用例与桥都不是空转的证据）：⑴ 桥里改成投原始 `suggested_name`（不截末段）⇒ 探针「名字栏收到末段」转红；⑵ 摘掉路径归一 ⇒ 探针「`SetFolder` 解析正斜杠初始目录」转红；⑶ 把观察面用例的期望值改成 `"OpenX"` ⇒ `headless_last_options_records_every_entry` 在该行转红并报出 `"Open" vs "OpenX"`。三次改坏均还原并复跑回绿。第⑶条同时是测试侧改用 `aurora::testing::require_value` 取 optional（仓内既有约定，消掉 `bugprone-unchecked-optional-access` 的 18 条误报）后仍有效的断言面证据。
+7. **判据 6 由 Linux 腿真跑，不是靠 SKIP 蒙过**：WSL（GNU 15.2）下 `utest_file_dialog` 31 例**全 PASS**（Windows 腿 16 PASS / 15 如实 SKIP），自绘腿的状态机播种、输入框初值与端到端会话名回传均在 Linux 上验证。
+8. **判据 8 兑现**：全量 `ctest --preset ninja-test` 450/450 无新增红灯；改动相关 TU 的 clang-tidy 0 findings；`format-check` 全仓 1228 文件 0 non-conforming；`check_api_schema_sync` 绿（schema 生成物零漂移）；`errors.toml` 零新增错误码。
+9. **交付范围与提案一致**：`suggested_name` / `default_extension` 只由 `save_file` 消费，`open_file` / `open_folder` 如实不消费并写进头注与 §8.1.3 真值表；三枚入口签名、钩子优先级、取消归因、自绘腿四层结构与 `run_modal` 执行模型逐位不变。

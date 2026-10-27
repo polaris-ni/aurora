@@ -680,11 +680,12 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 ### 8.1 文件对话框
 
-`app/file_dialog.h` 提供 `file_dialog::open_file` / `save_file` / `open_folder` 三个入口，签名两腿共用：`Options{title, initial_dir, filters}` + `interactive` 开关。`Options` 三键的语义在每条腿上都必须被真实消费（见下方「`Options` 消费口径」），不得像旧版非 Windows 分支那样 `(void)opts` 丢弃全部字段。
+`app/file_dialog.h` 提供 `file_dialog::open_file` / `save_file` / `open_folder` 三个入口，签名两腿共用：`Options{title, initial_dir, suggested_name, default_extension, filters}` + `interactive` 开关。`Options` 各键的语义在每条腿上都必须被真实消费，或把头注释与本节如实写成「不消费」（见下方「`Options` 消费口径」），不得像旧版非 Windows 分支那样 `(void)opts` 丢弃全部字段。
 
 #### 8.1.1 两个真实实现腿
 
-- **Win32 腿**（`src/aurora/app/file_dialog_win32.cpp`，`AURORA_PLATFORM_WINDOWS`）：经 COM 实现——`IFileOpenDialog` 多选 / `IFileSaveDialog` / `FOS_PICKFOLDERS` 文件夹选择器。钩子优先、`interactive == false` 回空、否则弹真框等用户。
+- **Win32 腿**（`src/aurora/app/file_dialog_win32.cpp`，`AURORA_PLATFORM_WINDOWS`）：经 COM 实现——`IFileOpenDialog` 多选 / `IFileSaveDialog` / `FOS_PICKFOLDERS` 文件夹选择器。钩子优先、`interactive == false` 回空、否则弹真框等用户。意图投递集中在 `file_dialog::detail::apply_initial_dir` / `apply_save_name`（声明见 `src/aurora/app/detail/file_dialog_win32_apply.h`，内部头以 `void *` 做类型擦除、不外泄 `<windows.h>`）：`SetFolder` 接初始目录、`SetFileName` 接建议名、`SetDefaultExtension` 接缺省扩展名。`initial_dir` 先 `utf8_to_wstr`（`CP_UTF8`）再 `GetFullPathNameW` 归一，然后交 `SHCreateItemFromParsingName`——该 API 拒正斜杠写法，且其声明由 `_WIN32_IE >= 0x0700` 门控；任一步失败一律 `AURORA_LOG_WARN`（tag `file_dialog`）降级停在 OS 默认位置，不返回 `Error`（解析不了目录是位置问题，不是选择失败）。
+- **折算层（跨腿共用、零平台依赖）**（`src/aurora/app/detail/file_dialog_plan.{h,cpp}`，namespace `aurora::file_dialog_plan`）：末段折算、前导点 / 首尾空白削法、确认名的补全规则只有这一份，每条 CI 腿都编译它并有逐值无头单测（`tests/unit/utest_file_dialog_plan.cpp`）；OS 桥只做投递与失败归因，不再各自写一遍规则。
 - **桌面自绘腿**（Linux / macOS，`src/aurora/app/file_dialog_selfdrawn.cpp`，`AURORA_PLATFORM_LINUX || AURORA_PLATFORM_MACOS`）：框架自绘选择器，零第三方依赖（不引入 GTK / Qt 链接期桌面库、不引入 DBus 客户端、不把「装了外部二进制」变成运行期前提）。架构为四层：
   - L0 数据源 `DirectorySource` 概念（`list_dir` / `is_dir` / `to_absolute` / `root`），默认 `std::filesystem` 实现，测试可注入 mock 无头证；
   - L1 状态机 `FilePickerModel`：当前目录、条目、过滤匹配、选择、确认 / 取消，纯逻辑、完全无头；
@@ -698,11 +699,23 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 2. `interactive == false` → 回空（等价取消），不弹 UI；
 3. 否则进入真实 / 自绘路径。
 
+观测面：三入口在**钩子判定之前**把收到的 `Options` 原样记进 `file_dialog::headless_last_options`（`std::optional<Options>`，NOLINT 进程级静态槽，测试用后须复位）。记的是原始入参（未折算），因此钩子命中、非交互、真弹三条路径都留下可断言的入参记账；折算结果另由 `file_dialog_plan` 单测逐值断。
+
 #### 8.1.3 `Options` 消费口径
 
-- `title`：作浮层标题（`open_file` / `save_file` / `open_folder` 各腿均消费；Win32 走 `SetTitle`、自绘腿作 `Dialog` 标题；空 = 形态默认标题）。
-- `initial_dir`：作初始位置（自绘腿消费；不存在 / 不可读 → 降级到数据源根并留一条可归因 `AURORA_LOG_WARN`，不挂起、不抛）。
-- `filters`：过滤文件条目（自绘腿仅影响列表展示；目录选择器形态下被忽略——目录无类型语义）；三腿统一在头注释写明「忽略」，自绘腿不消费时留 DEBUG 日志。
+逐腿真值表（「消费」= 落到该腿的真实机制；「不消费」= 头注释如实申报，不做「尽力而为」）：
+
+| 字段 | Win32 腿 | 桌面自绘腿 | 其余平台内联回退 |
+|:---|:---|:---|:---|
+| `title` | `SetTitle`；空 = 形态默认标题 | `Dialog` 标题；空 = 形态默认标题 | 不消费（无 UI） |
+| `initial_dir` | `SetFolder`（三入口共用同一条投递）；解析不了 ⇒ WARN + 停在 OS 默认位置 | 初始目录；不存在 / 不可读 ⇒ 降级数据源根 + 一条可归因 WARN | 不消费 |
+| `suggested_name` | **仅 `save_file`**：`SetFileName`（带目录分隔取末段并 WARN） | **仅 `save_file`**：种进模型 `save_name_` 与名字输入框初值 | 不消费 |
+| `default_extension` | **仅 `save_file`**：`SetDefaultExtension`（削掉前导点后交 OS 补全） | **仅 `save_file`**：确认时按 `with_default_extension` 补在返回名末尾 | 不消费 |
+| `filters` | `SetFileTypes`（`open_file` / `save_file`）；`open_folder` 不投 | 过滤列表展示；`open_folder` 形态忽略——目录无类型语义 | 不消费 |
+
+- `suggested_name` 与 `default_extension` 是**保存形态专属**意图：`open_file` / `open_folder` 不消费，头注释与本表同口径。
+- 建议名的折算：空 = 不表达意图（不投、不留痕）；末段为空（尾随分隔符）= 指到目录而非文件名 ⇒ WARN 后按「不表达意图」处理；带目录分隔 ⇒ WARN 后取末段。
+- 扩展名的折算：前导点与首尾空白一起反复削（`.txt` 与 `txt` 同解，Win32 侧必须是**不含点**那一份，否则 OS 补出 `name..txt`）；自绘腿 `with_default_extension` 只在名字末段**没有点**时补全，用户自己打过的扩展名不改写。
 
 #### 8.1.4 取消与降级的错误语义
 
