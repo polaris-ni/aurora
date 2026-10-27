@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -13,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/app/detail/clipboard_backend.h"
 #include "aurora/app/mime_types.h"
 #include "aurora/app/uri_list.h"
 #include "aurora/core/image.h"
@@ -126,15 +128,16 @@ auto cache_rendered(TestBackend &backend, const std::string &mime, const std::ve
 /// @brief memory 后端按 MIME 读字节（富格式便利封装的公共路径）：惰性要约优先，其次立即写载荷。
 ///
 /// 三段式持锁：持锁判定通道（已渲染缓存 → 要约 → 载荷）→ **锁外**调 `provide`（应用回调可能
-/// 再次进入 Clipboard 入口，持锁调用会自死锁）→ 持锁回填缓存。后端未安装时按平台口径如实报
-/// `ClipboardFormatUnsupported`——与未装后端时走平台路径的失败完全一致。
+/// 再次进入 Clipboard 入口，持锁调用会自死锁）→ 持锁回填缓存。
+/// @return 后端**已安装**时为消费结果；未安装时为 `std::nullopt`，调用方据此回落到平台后端路径
+/// （未安装后端 = 走平台实现，不是「平台也没有机制」，两者不可混为一谈）。
 [[nodiscard]] auto backend_read_payload(TestBackend &backend, const std::string &mime)
-    -> Result<std::vector<std::uint8_t>> {
+    -> std::optional<Result<std::vector<std::uint8_t>>> {
     std::function<Result<std::vector<std::uint8_t>>(const std::string &)> provide;
     {
         const std::scoped_lock lock{backend.mutex};
         if (!backend.active) {
-            return format_unsupported(mime);
+            return std::nullopt;
         }
         if (const auto it = backend.rendered.find(mime); it != backend.rendered.end()) {
             return it->second;
@@ -178,6 +181,68 @@ struct ClipboardListeners {
     return listeners;
 }
 }  // namespace
+
+namespace clipboard::detail {
+namespace {
+/// @brief 进程唯一的平台后端槽（函数内 static，规避静态初始化顺序问题）。
+///
+/// 与 `ClipboardListeners` 分开成体的理由相同：后端是**能力声明**而不是内容，`clear()` 与测试后端
+/// 装卸都不该顺手把它拆掉——它由平台桥自己的引用计数守卫（`Win32Host` 持有）决定存亡。
+struct BackendSlot {
+    std::mutex mutex;  ///< 保护以下成员（桥的登记 / 注销在宿主构造与销毁线程上发生）
+    PlatformBackend backend;  ///< 当前生效的后端（字段可缺席；整表空 = 未登记）
+};
+
+[[nodiscard]] auto backend_slot() -> BackendSlot & {
+    static BackendSlot slot;
+    return slot;
+}
+}  // namespace
+
+auto install_backend(PlatformBackend backend) -> void {
+    auto &slot = backend_slot();
+    const std::scoped_lock lock{slot.mutex};
+    slot.backend = std::move(backend);
+}
+
+auto remove_backend() -> void {
+    auto &slot = backend_slot();
+    const std::scoped_lock lock{slot.mutex};
+    slot.backend = PlatformBackend{};  // 归零即回到「本进程无富格式机制」的立骨期口径
+}
+
+auto active_backend() -> const PlatformBackend * {
+    auto &slot = backend_slot();
+    const std::scoped_lock lock{slot.mutex};
+    return &slot.backend;
+}
+
+auto backend_has_listener() -> bool { return active_backend()->set_change_listener != nullptr; }
+
+auto fire_ownership_lost() -> void {
+    std::function<void()> callback;
+    {
+        auto &listeners = clipboard_listeners();
+        const std::scoped_lock lock{listeners.mutex};
+        callback = listeners.on_ownership_lost;
+    }
+    if (callback) {
+        callback();  // 锁外触发：应用回调可能再次进入 Clipboard 入口，持锁调用会自死锁
+    }
+}
+
+auto fire_change() -> void {
+    std::function<void()> callback;
+    {
+        auto &listeners = clipboard_listeners();
+        const std::scoped_lock lock{listeners.mutex};
+        callback = listeners.on_change;
+    }
+    if (callback) {
+        callback();
+    }
+}
+}  // namespace clipboard::detail
 
 #ifdef AURORA_PLATFORM_WINDOWS
 namespace {
@@ -674,7 +739,12 @@ auto Clipboard::available_formats() -> Result<std::vector<std::string>> {
         }
     }
 #endif
-    // 平台路径**如实**列出既有机制覆盖的格式：新 API 已声明不等于格式已可用，故富格式一律不入列。
+    // 平台后端登记时由其**如实**枚举当前剪贴板持有的格式（含它自己接的富格式与惰性要约声明的
+    // 格式）；未登记时退回立骨期口径：只列既有机制覆盖的两档，新 API 已声明不等于格式已可用。
+    if (const auto *platform = clipboard::detail::active_backend();
+        platform != nullptr && platform->available_formats) {
+        return platform->available_formats();
+    }
 #ifdef AURORA_PLATFORM_WINDOWS
     return std::vector<std::string>{std::string{AURORA_MIME_TEXT_PLAIN}, std::string{AURORA_MIME_IMAGE_PNG}};
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
@@ -687,8 +757,7 @@ auto Clipboard::available_formats() -> Result<std::vector<std::string>> {
 #endif
 }
 
-auto Clipboard::set_payload(const std::string &mime, [[maybe_unused]] const std::vector<std::uint8_t> &bytes)
-    -> Result<bool> {
+auto Clipboard::set_payload(const std::string &mime, const std::vector<std::uint8_t> &bytes) -> Result<bool> {
     if (mime.empty()) {
         return make_error(ErrorCode::GeneralInvalidArgument, "set_payload: mime must not be empty");
     }
@@ -706,18 +775,26 @@ auto Clipboard::set_payload(const std::string &mime, [[maybe_unused]] const std:
         }
     }
 #endif
+    // 平台后端登记时走平台实现；未登记（或该子能力缺席）沿用立骨期的「如实报无机制」。
+    if (const auto *platform = clipboard::detail::active_backend(); platform != nullptr && platform->set_payload) {
+        return platform->set_payload(mime, bytes);
+    }
     return format_unsupported(mime);
 }
 
 auto Clipboard::get_payload(const std::string &mime) -> Result<std::vector<std::uint8_t>> {
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
-    return backend_read_payload(test_backend(), mime);  // 未安装后端时与平台路径同口径
-#else
-    return format_unsupported(mime);
+    if (const auto consumed = backend_read_payload(test_backend(), mime)) {
+        return *consumed;  // 后端已安装：本入口已消费，不再落平台路径
+    }
 #endif
+    if (const auto *platform = clipboard::detail::active_backend(); platform != nullptr && platform->get_payload) {
+        return platform->get_payload(mime);
+    }
+    return format_unsupported(mime);
 }
 
-auto Clipboard::set_files([[maybe_unused]] const std::vector<std::string> &paths) -> Result<bool> {
+auto Clipboard::set_files(const std::vector<std::string> &paths) -> Result<bool> {
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
     {
         auto &backend = test_backend();
@@ -733,26 +810,32 @@ auto Clipboard::set_files([[maybe_unused]] const std::vector<std::string> &paths
         }
     }
 #endif
+    if (const auto *platform = clipboard::detail::active_backend(); platform != nullptr && platform->set_files) {
+        return platform->set_files(paths);
+    }
     return format_unsupported(AURORA_MIME_URI_LIST);
 }
 
 auto Clipboard::get_files() -> Result<std::vector<std::string>> {
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
-    const auto raw = backend_read_payload(test_backend(), std::string{AURORA_MIME_URI_LIST});
-    if (!raw) {
-        return raw.error();
+    if (const auto consumed = backend_read_payload(test_backend(), std::string{AURORA_MIME_URI_LIST})) {
+        if (!*consumed) {
+            return consumed->error();
+        }
+        if (consumed->value().empty()) {
+            return std::vector<std::string>{};  // 无该格式 = Ok(空清单)
+        }
+        // 解码只留可映射为本地路径的条目：非 file scheme 的行静默跳过，全被跳过即空清单。
+        return uri_list::decode(to_text(consumed->value()));
     }
-    if (raw.value().empty()) {
-        return std::vector<std::string>{};  // 无该格式 = Ok(空清单)
-    }
-    // 解码只留可映射为本地路径的条目：非 file scheme 的行静默跳过，全被跳过即空清单。
-    return uri_list::decode(to_text(raw.value()));
-#else
-    return format_unsupported(AURORA_MIME_URI_LIST);
 #endif
+    if (const auto *platform = clipboard::detail::active_backend(); platform != nullptr && platform->get_files) {
+        return platform->get_files();
+    }
+    return format_unsupported(AURORA_MIME_URI_LIST);
 }
 
-auto Clipboard::set_html([[maybe_unused]] const std::string &html) -> Result<bool> {
+auto Clipboard::set_html(const std::string &html) -> Result<bool> {
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
     {
         auto &backend = test_backend();
@@ -767,19 +850,25 @@ auto Clipboard::set_html([[maybe_unused]] const std::string &html) -> Result<boo
         }
     }
 #endif
+    if (const auto *platform = clipboard::detail::active_backend(); platform != nullptr && platform->set_html) {
+        return platform->set_html(html);
+    }
     return format_unsupported(AURORA_MIME_TEXT_HTML);
 }
 
 auto Clipboard::get_html() -> Result<std::string> {
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
-    const auto raw = backend_read_payload(test_backend(), std::string{AURORA_MIME_TEXT_HTML});
-    if (!raw) {
-        return raw.error();
+    if (const auto consumed = backend_read_payload(test_backend(), std::string{AURORA_MIME_TEXT_HTML})) {
+        if (!*consumed) {
+            return consumed->error();
+        }
+        return to_text(consumed->value());  // 无该格式 = Ok("")：空内容不是失败
     }
-    return to_text(raw.value());  // 无该格式 = Ok("")：空内容不是失败
-#else
-    return format_unsupported(AURORA_MIME_TEXT_HTML);
 #endif
+    if (const auto *platform = clipboard::detail::active_backend(); platform != nullptr && platform->get_html) {
+        return platform->get_html();
+    }
+    return format_unsupported(AURORA_MIME_TEXT_HTML);
 }
 
 auto Clipboard::set_offer(const ClipboardOffer &offer) -> Result<void> {
@@ -809,7 +898,11 @@ auto Clipboard::set_offer(const ClipboardOffer &offer) -> Result<void> {
         }
     }
 #endif
-    // 平台路径：惰性提供机制本轮未接，如实报错——不因「新 API 已声明」就谎报可用。
+    // 平台路径：惰性提供的承载是剪贴板 owner 窗口（Win32 `WM_RENDERFORMAT` 只发给 owner），
+    // 无平台后端登记即无 owner 窗口，此时如实报错——不因「新 API 已声明」就谎报可用。
+    if (const auto *platform = clipboard::detail::active_backend(); platform != nullptr && platform->set_offer) {
+        return platform->set_offer(offer);
+    }
     return make_error(
         ErrorCode::ClipboardFormatUnsupported,
         ErrorParams{{"mime", offer.formats.front()}, {"detail", "lazy provide is not wired on this platform yet"}});
@@ -828,8 +921,9 @@ auto Clipboard::on_change(std::function<void()> callback) -> Result<void> {
         listeners.on_change = nullptr;  // 注销不需要监听机制
         return Result<void>{};
     }
-    if (!listeners.listen_supported) {
-        // 不谎报：注册了却收不到通知会让调用方逻辑静默失效，宁可注册即失败。
+    // 监听机制的来源有二：memory 测试后端（模拟有 / 无）与平台后端（真实机制）。二者任一提供即
+    // 注册成功；都未提供时**注册即失败**——不谎报：注册了却收不到通知会让调用方逻辑静默失效。
+    if (!listeners.listen_supported && !clipboard::detail::backend_has_listener()) {
         return make_error(ErrorCode::ClipboardListenUnsupported,
                           ErrorParams{{"detail", "this platform has no clipboard change listener mechanism"}});
     }
@@ -960,31 +1054,16 @@ auto Clipboard::emit_ownership_lost() -> void {
         backend.offer.reset();  // 要约随所有权一并失效（新所有者的内容取代本方）
         backend.rendered.clear();
     }
-    // 锁外触发回调：应用回调可能再次进入 Clipboard 入口，持锁调用会自死锁。
-    std::function<void()> callback;
-    {
-        auto &listeners = clipboard_listeners();
-        const std::scoped_lock lock{listeners.mutex};
-        callback = listeners.on_ownership_lost;
-    }
-    if (callback) {
-        callback();
-    }
+    // 与平台桥共用同一条触发路径（`WM_DESTROYCLIPBOARD` 到达时走的就是这一条），两条来源的
+    // 派发语义因此不可能分岔。
+    clipboard::detail::fire_ownership_lost();
 #endif
 }
 
 auto Clipboard::emit_change() -> void {
 #ifdef AURORA_CLIPBOARD_TEST_BACKEND
-    // 锁外触发回调（理由同 emit_ownership_lost）；不改变内容本身。
-    std::function<void()> callback;
-    {
-        auto &listeners = clipboard_listeners();
-        const std::scoped_lock lock{listeners.mutex};
-        callback = listeners.on_change;
-    }
-    if (callback) {
-        callback();
-    }
+    // 同上：与平台桥的 `WM_CLIPBOARDUPDATE` 共用同一条触发路径；不改变内容本身。
+    clipboard::detail::fire_change();
 #endif
 }
 

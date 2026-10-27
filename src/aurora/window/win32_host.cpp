@@ -1,7 +1,9 @@
 #include "aurora/window/win32_host.h"
 
+#include "aurora/window/detail/clipboard_win32_translate.h"
 #include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/交互/绘制装配层
 #include "aurora/window/detail/menu_bar_translate.h"  // 折算层（进程级渲染通路单槽）
+#include "aurora/window/detail/win32_clipboard.h"  // 剪贴板惰性提供 / 监听的 owner 窗口承载
 #include "aurora/window/detail/win32_dpi.h"
 #include "aurora/window/detail/win32_drag.h"
 #include "aurora/window/detail/win32_dwm.h"  // DWM composition 探测 / 帧扩展
@@ -226,6 +228,14 @@ struct Win32Host::Impl {
     /// 进程级渲染通路单槽由本桥在构造期登记（覆盖式）、析构期注销——与原生菜单栏「同一进程只认
     /// 一份」的语义一致（见 `native_menu_bar.h`）。多窗口场景下第一个存活窗口持有该单槽。
     std::unique_ptr<detail::Win32MenuBarBridge> menu_bar;
+
+    /// @brief 剪贴板桥的**宿主引用守卫**（同款引用计数：进程级桥状态只有一份，先关的窗口不拆
+    /// 仍在世的窗口的能力）。
+    ///
+    /// 与最近文档桥的差别恰好相反：剪贴板的惰性提供（`WM_RENDERFORMAT`）、所有权丢失与变更监听
+    /// **都以 owner 窗口为投递目标**，故本守卫的意义是「窗口在 ⇒ owner 在」——窗口销毁即触发一次
+    /// 所有权丢失并让三件如实不可用，不是「能力常在」。
+    std::unique_ptr<detail::Win32ClipboardBridge> clipboard;
     /// @brief 修饰键跟踪器：随 `WM_KEY*` / `WM_SYSKEY*` 推进，失焦清空、重新激活播种。
     detail::ModifierKeyTracker mods;
     /// @brief 焦点控件的候选窗定位盒查询（由 `WindowHost` 注入；空 = 无定位，走系统默认）。
@@ -503,6 +513,11 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
             .uninstall = [this]() -> void { menu_bar->uninstall(); },
             .is_installed = [this]() -> bool { return menu_bar->is_installed(); },
         });
+        // 剪贴板桥：本窗口登记为剪贴板 owner（覆盖式，最近登记者生效）。与最近文档桥相反，
+        // 它的三件能力（延迟渲染 / 所有权通知 / 变更监听）**必须**有 owner 窗口才能兑现，
+        // 故此处登记的 HWND 就是它们唯一的投递目标。
+        clipboard = std::make_unique<detail::Win32ClipboardBridge>();
+        clipboard->attach(hwnd);
     }
     size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // 逻辑 dp（布局用）
 }
@@ -528,6 +543,9 @@ Win32Host::Impl::~Impl() {
     // 原生菜单栏桥：先注销进程级渲染通路单槽（否则槽里还指着即将销毁的桥），再散桥（析构会摘菜单）。
     menu_bar_translate::unregister_menu_bar_backend();
     menu_bar = nullptr;
+    // 剪贴板桥必须更早散：owner 窗口一旦销毁，延迟渲染的 `WM_RENDERFORMAT` 就再无投递目标，
+    // 故在 DestroyWindow 之前先让本窗口退位（refs 归零则连进程级后端一并注销）。
+    clipboard = nullptr;
     if (hwnd != nullptr) {
         DestroyWindow(hwnd);
         hwnd = nullptr;
@@ -1249,6 +1267,18 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return self->handle_setting_change(wp, lp);
         case WM_GETMINMAXINFO:
             return self->handle_getminmaxinfo(lp);
+        case WM_RENDERFORMAT:
+            // 延迟渲染索取：剪贴板此刻由请求方持有，本方不再 OpenClipboard，只提交数据。
+            if (self->clipboard != nullptr && detail::win32_clipboard_render_format(hwnd, static_cast<unsigned>(wp))) {
+                return 0;
+            }
+            break;
+        case WM_DESTROYCLIPBOARD:
+            detail::win32_clipboard_destroy_clipboard();
+            return 0;
+        case WM_CLIPBOARDUPDATE:
+            detail::win32_clipboard_clipboard_update();
+            return 0;
         case WM_CLOSE:
             return self->handle_close();
         case WM_DESTROY:

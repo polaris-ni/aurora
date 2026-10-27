@@ -154,6 +154,17 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_menu_bar)
     endif ()
 
+    # ---- Win32 剪贴板富格式与惰性提供（CF_HDROP / CF_HTML / 自定义 MIME / WM_RENDERFORMAT）----
+    # 自动段以**独立取证**（原生 OpenClipboard / GetClipboardData / DragQueryFileW /
+    # EnumClipboardFormats）证明「库写的块系统真收得下」，并覆盖三件以 owner 窗口为投递目标的
+    # 能力：惰性提供（注册后 provide 零次、原生请求触发一次）、变更监听（泵不到记 SKIP 而非 FAIL）、
+    # 程序化清空。探针**自建窗口**——无 owner 窗口时这三件在平台层就不成立，建窗失败即环境不可用。
+    # shell32（DragQueryFileW）已随 aurora PUBLIC 链接。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_clipboard "${_aurora_verify_dir}/win32_clipboard_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_clipboard)
+    endif ()
+
     # ---- Win32 OS 级全局热键（真实窗口 + 隐藏消息窗口接 WM_HOTKEY；「应用无焦点也触发」+ 排空语义）----
     # 自动段验收注册表 API 面（enabled / add / 判重 / 无效主键 / remove / clear / drain / 注入降级）；
     # 「OS 真把按键投到本进程」靠 --interactive 人工段（把焦点切到别的进程再按）。
