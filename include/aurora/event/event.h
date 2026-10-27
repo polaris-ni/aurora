@@ -280,6 +280,28 @@ class DragPayload : public std::enable_shared_from_this<DragPayload> {
     [[nodiscard]] static auto from_bytes(std::unordered_map<std::string, std::vector<std::uint8_t>> data)
         -> std::shared_ptr<const DragPayload>;
 
+    /// @brief 由**延迟取数器**构造载荷：只声明「有哪些格式」，字节在真正被读取时才经回调产出。
+    ///
+    /// 与 `from_bytes` 的分工：`from_bytes` 是「数据已在内存里」（无头测试、以及本进程自拖放的
+    /// 直取路径——那份数据本来就在本进程），`from_lazy` 是「数据仍挂在 OS 会话上」（跨进程拖入）。
+    /// 后者若在 `Drop` 回调里同步取数，一次跨进程 IO 就是**一帧的整段停顿**；改由本工厂构造后，
+    /// 取数发生在 `system_drag::pump_reads()` 的排空阶段（帧循环跨帧推进），`Drop` 回调只登记句柄。
+    ///
+    /// **同步入口的语义不变**：`bytes()` 仍是「立即取数」——保留它是为了让小载荷与无头测试有直
+    /// 通路径（提案第 2 条边界二），代价（阻塞）由选用同步入口的调用方自担。非阻塞入口
+    /// `read_async()` 才走排空兑现。
+    ///
+    /// **不缓存取数结果**：同一 MIME 的两次读取各自触发一次 `fetch`——「渲染一次即定型」是剪贴板
+    /// 延迟渲染的平台语义（`WM_RENDERFORMAT` 后由系统托管），拖放侧没有对应的托管方，凭空加一层
+    /// 缓存就是引入一条提案未定义的语义。
+    /// @param formats 可提供的 MIME 清单（顺序即优先级；空串条目被丢弃、重复项去重）。
+    /// @param fetch 按 MIME 取字节的回调；返回 `Error` 时读取侧得到结构化错误（跨进程取数失败
+    ///        归 `SystemDragReadFailed`，由回调自行产出该码）。
+    /// @return 只读载荷句柄；`formats` 为空时同样返回非空句柄（读取任何格式都得 `Ok` 空值）。
+    [[nodiscard]] static auto from_lazy(std::vector<std::string> formats,
+                                        std::function<Result<std::vector<std::uint8_t>>(const std::string &)> fetch)
+        -> std::shared_ptr<const DragPayload>;
+
     /// @brief 是否持有指定 MIME 的载荷。
     /// @param mime 待查询的 MIME（如 "text/plain"）。
     /// @return 该格式存在时 true；否则 false（含载荷句柄为空时）。

@@ -169,18 +169,107 @@ auto release_locked_medium(STGMEDIUM &medium) -> void {
     return out;
 }
 
-/// @brief 同步取全部可兑现格式的字节（首批：小载荷同步路径）。
+// @brief 构造落放载荷：**跨进程一律走延迟取数**，本进程自拖放仍走内存直取。
+//
+// **为什么跨进程不分叉阈值**：折算层那枚 `drag::AURORA_DRAG_SYNC_PAYLOAD_LIMIT`（64 KiB）的语义是
+// 「≤ 阈值走同步、> 阈值走异步」，而 Win32 上**无法在取数前预判载荷大小**——`QueryGetData` 只答
+// 「给不给得出」，`GlobalSize` 只能在 `GetData` 之后问（那时阻塞已经发生）。故本桥把跨进程路径
+// 整体上移到延迟通道：`Drop` 回调只登记「有哪些格式」，字节在 `system_drag::pump_reads()` 的
+// 排空阶段才经 `fetch` 产出，帧循环因此跨帧推进而不是在事件派发里停一整拍。
+//
+// 阈值在该形态下**不参与本桥分叉**（它仍是可预判大小的路径——如自拖放直取——的单一真源），
+// 本函数不另设第二个数：与其留一个永不生效的分支，不如让「一律延迟」成为唯一形态。
+//
+// **自拖放直取**：本进程窗口即落点（在途拖出会话的要约就是待传递的数据本身）时不经数据
+// 对象，直接在 UI 线程上调 `provide` 取数。跨单元形态下经数据对象的 `GetData` 会让 UI
+// 线程阻塞等拖拽线程应答、而拖拽线程的要约索取又等帧循环排空——帧循环恰恰被本落放回调
+// 占住，互等到墙钟超时（见拖出段线程模型注记）。两条路径的取数判据逐条对齐：未广告格式
+// 跳过、广告了却给不出按会话失败结束，不把失败伪装成格式不存在。
+// @param data 数据对象（自拖放时忽略：直取路径不问数据对象）。
+// @return 载荷句柄（无任何可取格式时返回空表构造的句柄，读取一律 `Ok` 空值，不谎报有数据）。
+
+// @brief 数据对象的 RAII 引用：落放载荷跨帧存活，而 OLE 在 `Drop` 返回后即释放数据对象。
+//
+// `AddRef` 的必要性：延迟取数把字节的产出点从 `Drop` 回调推到之后的帧内排空，那一时刻 OLE 早已
+// 收回它给出的指针——不持引用就在排空里解引用已释放对象（ASan 下必现 use-after-free）。
+class DataObjectRef {
+  public:
+    explicit DataObjectRef(IDataObject *data) : data_(data) {
+        if (data_ != nullptr) {
+            data_->AddRef();
+        }
+    }
+    ~DataObjectRef() {
+        if (data_ != nullptr) {
+            data_->Release();
+        }
+    }
+    DataObjectRef(const DataObjectRef &) = delete;
+    auto operator=(const DataObjectRef &) -> DataObjectRef & = delete;
+    DataObjectRef(DataObjectRef &&) = delete;
+    auto operator=(DataObjectRef &&) -> DataObjectRef & = delete;
+
+    /// @brief 取被持有的数据对象（可能为空）。
+    [[nodiscard]] auto get() const -> IDataObject * { return data_; }
+
+  private:
+    IDataObject *data_;  ///< 被引用的数据对象（引用由本类 AddRef / Release 成对管理，非所有权）
+};
+
+/// @brief 按剪贴板格式号取原始字节（延迟取数路径的通用档）。
 ///
-/// 大载荷异步通道（`read_async` + `pump_reads`）属后续批次；阈值常量已在折算层锚定
-/// （`drag::AURORA_DRAG_SYNC_PAYLOAD_LIMIT`），届时按它分叉——本函数不另设第二个数。
+/// 与 `read_uri_list` / `read_unicode_text` 的分工：那两档要做语义转换（`CF_HDROP` → uri-list 文本、
+/// `CF_UNICODETEXT` → UTF-8），本函数只做「字节原样搬回」。
+[[nodiscard]] auto read_clip_bytes(IDataObject *data, CLIPFORMAT format) -> std::vector<std::uint8_t> {
+    if (data == nullptr) {
+        return {};
+    }
+    FORMATETC requested{};
+    requested.cfFormat = format;
+    requested.ptd = nullptr;
+    requested.dwAspect = DVASPECT_CONTENT;
+    requested.lindex = -1;
+    requested.tymed = TYMED_HGLOBAL;
+    STGMEDIUM medium{};
+    if (FAILED(data->GetData(&requested, &medium)) || medium.hGlobal == nullptr) {
+        release_locked_medium(medium);
+        return {};
+    }
+    const auto *source = static_cast<const std::uint8_t *>(GlobalLock(medium.hGlobal));
+    if (source == nullptr) {
+        release_locked_medium(medium);
+        return {};
+    }
+    const SIZE_T size = GlobalSize(medium.hGlobal);
+    std::vector<std::uint8_t> out(size, 0U);
+    if (size > 0) {
+        std::memcpy(out.data(), source, size);
+    }
+    GlobalUnlock(medium.hGlobal);
+    release_locked_medium(medium);
+    return out;
+}
+
+/// @brief 延迟取数器：按 MIME 从数据对象取字节（排空阶段被调用，不在 `Drop` 回调内）。
 ///
-/// **自拖放直取**：本进程窗口即落点（在途拖出会话的要约就是待传递的数据本身）时不经数据
-/// 对象，直接在 UI 线程上调 `provide` 取数。跨单元形态下经数据对象的 `GetData` 会让 UI
-/// 线程阻塞等拖拽线程应答、而拖拽线程的要约索取又等帧循环排空——帧循环恰恰被本落放回调
-/// 占住，互等到墙钟超时（见拖出段线程模型注记）。两条路径的取数判据逐条对齐：未广告格式
-/// 跳过、广告了却给不出按会话失败结束，不把失败伪装成格式不存在。
-/// @param data 数据对象（自拖放时忽略：直取路径不问数据对象）。
-/// @return 载荷句柄（无任何可取格式时返回空表构造的句柄，读取一律 `Ok` 空值，不谎报有数据）。
+/// 取不到一律按**空口径**交出（与同步路径既有的「跳过该格式」同口径）：把「广告了却取不出」升级为
+/// `system-drag-read-failed` 是判据变更，会改写既有用例的期望，不在本批——本批只改变取数发生的时刻。
+[[nodiscard]] auto fetch_bytes(IDataObject *data, const std::string &mime) -> Result<std::vector<std::uint8_t>> {
+    if (mime == AURORA_MIME_URI_LIST) {
+        const auto text = read_uri_list(data);
+        return text.has_value() ? std::vector<std::uint8_t>(text->begin(), text->end()) : std::vector<std::uint8_t>{};
+    }
+    if (mime == AURORA_MIME_TEXT_PLAIN) {
+        const auto text = read_unicode_text(data);
+        return text.has_value() ? std::vector<std::uint8_t>(text->begin(), text->end()) : std::vector<std::uint8_t>{};
+    }
+    const auto format = drag::win32_clip_format_from_mime(mime);
+    if (!format.has_value()) {
+        return std::vector<std::uint8_t>{};
+    }
+    return read_clip_bytes(data, static_cast<CLIPFORMAT>(*format));
+}
+
 [[nodiscard]] auto payload_from(IDataObject *data) -> std::shared_ptr<const DragPayload> {
     if (const auto self_offer = drag_out_in_flight_offer(); self_offer.has_value()) {
         std::unordered_map<std::string, std::vector<std::uint8_t>> entries;
@@ -203,17 +292,24 @@ auto release_locked_medium(STGMEDIUM &medium) -> void {
         take(std::string{AURORA_MIME_TEXT_PLAIN});
         return DragPayload::from_bytes(std::move(entries));
     }
-    std::unordered_map<std::string, std::vector<std::uint8_t>> entries;
-    if (data != nullptr) {
-        if (const auto uri_text = read_uri_list(data); uri_text.has_value()) {
-            entries.emplace(std::string{AURORA_MIME_URI_LIST},
-                            std::vector<std::uint8_t>(uri_text->begin(), uri_text->end()));
-        }
-        if (const auto text = read_unicode_text(data); text.has_value()) {
-            entries.emplace(std::string{AURORA_MIME_TEXT_PLAIN}, std::vector<std::uint8_t>(text->begin(), text->end()));
+    if (data == nullptr) {
+        return DragPayload::from_bytes({});
+    }
+    // 跨进程路径：只声明「有哪些格式」，取数延后到排空阶段。
+    const auto formats = supported_formats_of(data);
+    std::vector<std::string> mimes;
+    for (const auto *mime : {&AURORA_MIME_URI_LIST, &AURORA_MIME_TEXT_PLAIN, &AURORA_MIME_IMAGE_PNG}) {
+        const auto cf = drag::win32_clip_format_from_mime(*mime);
+        if (cf.has_value() && std::find(formats.begin(), formats.end(), *cf) != formats.end()) {
+            mimes.emplace_back(*mime);
         }
     }
-    return DragPayload::from_bytes(std::move(entries));
+    // 数据对象由 OLE 在 `Drop` 返回后释放：本句柄跨帧存活，故自持一份引用（RAII Release）。
+    auto holder = std::make_shared<DataObjectRef>(data);
+    return DragPayload::from_lazy(std::move(mimes),
+                                  [holder](const std::string &mime) -> Result<std::vector<std::uint8_t>> {
+                                      return fetch_bytes(holder->get(), mime);
+                                  });
 }
 
 }  // namespace
