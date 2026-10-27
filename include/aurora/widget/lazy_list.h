@@ -641,13 +641,20 @@ class LazyList : public Widget {
             needs_gesture_tick_ = false;  // 静止后摘除每帧计时，回到空闲节流
             return;
         }
+        if (!glide_.active) {
+            // 仅自动滚边在途：收位滑动段整段跳过。未激活的 `glide_.tick` 交回的是**陈旧终点**
+            // （从未滑动过时为初始 `to == 0`），无条件写回会把滚边本帧刚推进的 offset 盖回那个
+            // 旧值——两条驱动共用一次 tick，写段只归激活的那条。判据与 `Scroll::tick_gestures`
+            // 同形（本控件此前漏了这一段，故拖文件到列表边缘时列表反而跳回开头）。
+            return;
+        }
         const double dt =
             glide_last_.has_value() ? std::chrono::duration<double>(now - *glide_last_).count() : (1.0 / 60.0);
         glide_last_ = now;
         float v = glide_.tick(dt);
         // 布局可能在滑动中改变内容/视口尺寸：目标随动夹取，防滑出可滚范围。
         v = std::clamp(v, 0.0F, max_scroll_offset());
-        if (!glide_.active) {  // 本帧抵达终点
+        if (!glide_.active && !drag_auto_scroll_.active) {  // 本帧抵达终点且无滚边在途：摘除帧计时
             glide_last_.reset();
             needs_gesture_tick_ = false;
         }
