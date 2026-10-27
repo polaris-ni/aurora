@@ -385,6 +385,33 @@ class Application {
     /// @param cb 几何态变化回调（仅在状态实际转移时触发）。
     auto set_on_window_mode(std::function<void(WindowMode)> cb) -> void { on_window_mode_ = std::move(cb); }
 
+    /// @brief OS 明暗偏好的应用级当前档（响应式：在 `Effect` 内读取可自动订阅刷新）。
+    ///
+    /// 与 `window_state()` / `window_mode()` 的**关键差别是聚合范围**：那两枚只投影主窗口，
+    /// 本 State 聚合**全部宿主**上报的同一次系统切换（进程级事实只有一个真值源），同值不重复通知。
+    /// 取值为 OS **原值**（含 `Unspecified`）——框架不替应用回落明/暗，「系统不表态回哪一档」是应用策略。
+    ///
+    /// 未调用 `refresh_os_color_scheme()` 且系统尚未上报过变化时读 `Unspecified`：构造期不隐式读
+    /// 注册表（与 `platform()` 的「显式查询、跳过探测」同口径）。运行期跟随无需轮询——Win32 后端
+    /// 在 `WM_SETTINGCHANGE` 里重读偏好并逐宿主上报，应用级在此去重成一次通知。
+    /// @return 响应式状态引用（读取当前 OS 档；Effect 内读自动订阅）。
+    [[nodiscard]] auto os_color_scheme_state() -> State<ColorScheme> & { return os_scheme_state_; }
+
+    /// @brief 注册 OS 明暗偏好变化的命令式回调（与 `os_color_scheme_state()` 响应式订阅并存）。
+    /// 只在**值实际变化**时触发（跨宿主、同值重复上报均去重），参数为 OS 原值。
+    /// @param cb OS 档变化回调；置空注销。
+    /// @note Thread: 回调在主线程（平台消息泵线程）被调，不在后端工作线程上触发。
+    auto set_on_os_color_scheme(std::function<void(ColorScheme)> cb) -> void { on_os_color_scheme_ = std::move(cb); }
+
+    /// @brief 显式 seed：现读一次系统明暗偏好并写入应用级 State。
+    ///
+    /// 幂等——与当前值相等时不产生通知；仅在值变化时更新 State 并触发 `set_on_os_color_scheme`
+    /// 的回调。供启动期解算当前档（消费者不必等第一扇窗上报），运行期跟随仍由后端上报驱动。
+    /// @note Side-effects: 读注册表 / 配置文件（与自由函数 `aurora::os_color_scheme()` 同款副作用）。
+    /// @note Thread: main-thread only
+    /// @note 平台无探测能力或探测失败时返回 `Unspecified`（不回落明/暗，与 State 口径一致）。
+    auto refresh_os_color_scheme() -> void;
+
     /// @brief 设置运行时严格模式（specification/01-core.md §4.3 / CI 门禁）。
     /// `run()` 期间套用到线程级开关；默认 Off。
     /// @param m 严格模式值（run() / render_to_png() 期间生效）。
@@ -639,6 +666,23 @@ class Application {
         }
     }
 
+    /// @brief OS 明暗偏好变化时聚合为应用级响应式 State 并触发命令式回调。
+    ///
+    /// 与 `on_window_state_changed` 同款的**先比后设**：`State::set` 对相等值照样发信号，去重只能
+    /// 在转发处做。本函数由**每个宿主**的上报表调用（非只主窗），故 N 扇窗各收一次同值切换时，
+    /// 第一次数值不等 ⇒ 更新 + 通知，其余次数值已相等 ⇒ 静默——跨宿主聚合的去重由此而来，
+    /// 无需额外记账。
+    /// @param s 后端上报的 OS 档位原值（含 `Unspecified`，不回落）。
+    auto on_os_color_scheme_changed(ColorScheme s) -> void {
+        if (s == os_scheme_state_.get()) {
+            return;
+        }
+        os_scheme_state_.set(s);
+        if (on_os_color_scheme_) {
+            on_os_color_scheme_(s);
+        }
+    }
+
     /// @brief 排水跨线程回投队列（主线程，每帧开头/退出前调用）。
     auto drain_posted() -> void {
         std::vector<std::function<void()>> q;
@@ -814,8 +858,12 @@ class Application {
     OsHotkeyRegistry os_hotkeys_;  ///< OS 级全局热键注册表（无焦点时也触发；平台无后端时 enabled()==false）。
     State<WindowState> window_state_{WindowState::Visible};  ///< 窗口可见性状态（响应式）。
     State<WindowMode> window_mode_{WindowMode::Normal};  ///< 窗口几何态（响应式）。
+    /// @brief OS 明暗偏好的应用级档位（响应式，跨宿主聚合去重；初值 `Unspecified`，见
+    ///        `os_color_scheme_state()`）。声明在 `window_mode_` 之后：同属「窗口级状态聚合」组。
+    State<ColorScheme> os_scheme_state_{ColorScheme::Unspecified};
     std::function<void(WindowState)> on_window_state_;  ///< 可见性状态命令式回调。
     std::function<void(WindowMode)> on_window_mode_;  ///< 几何态命令式回调。
+    std::function<void(ColorScheme)> on_os_color_scheme_;  ///< OS 明暗偏好命令式回调（同值不触发）。
     std::mutex posted_mutex_;  ///< 跨线程回投队列锁。
     std::vector<std::function<void()>> posted_;  ///< 待主线程执行的回投工作。
 };

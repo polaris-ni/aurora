@@ -121,6 +121,15 @@ class WindowHost {
     /// @brief 注册窗口几何态上报表（语义同 `set_state_sink`）。
     /// @param cb 几何态事件上报回调。
     auto set_mode_sink(std::function<void(WindowMode)> cb) -> void { mode_sink_ = std::move(cb); }
+    /// @brief 注册 OS 明暗偏好上报表（由 `Application` 聚合为应用级响应式 State / 命令式回调）。
+    ///
+    /// 与 `set_state_sink` / `set_mode_sink` 同构，但**聚合范围不同**：那两枚只投影主窗口，本表
+    /// 由 `Application` 对**全部宿主**安装并经值比较去重——OS 偏好是进程级事实，N 扇窗各自收到
+    /// 同一次系统切换只算一次应用级通知。安装点与 `Surface::set_os_color_scheme_handler` 的
+    /// 独占单槽无关：本表在 `WindowHost::on_os_color_scheme` 内转发，框架自身的根主题解析链
+    /// （`Window::set_os_color_scheme` + 整帧重绘）先于转发完成，应用侧旁听不顶掉任何既有行为。
+    /// @param cb OS 档位上报回调（收到后端上报的原值，含 `Unspecified`；不做应用侧回落）。
+    auto set_os_scheme_sink(std::function<void(ColorScheme)> cb) -> void { os_scheme_sink_ = std::move(cb); }
 
     // ---- 每帧步骤（由 Application 统一驱动）----
 
@@ -228,9 +237,10 @@ class WindowHost {
     /// `Window::render_hud` 按 scale 变化自动重建，此处只需标脏整帧。
     auto on_scale_changed() -> void;
 
-    /// @brief OS 明暗偏好变化：推入 Window 快照后强制全量重排重绘。
+    /// @brief OS 明暗偏好变化：推入 Window 快照后强制全量重排重绘，再向应用级上报表转发原值。
     /// 系统深浅色切换（Win32 `WM_SETTINGCHANGE`）经 Surface 句柄到达；应用未显式
     /// `Window::set_theme` 时，默认根主题随之翻转，控件取色下一帧生效。
+    /// 转发排在框架自身那一半之后（先保证根主题解析与重绘行为不变），且原样透传（不替应用回落档）。
     /// @param s 新的 OS 档位。
     auto on_os_color_scheme(ColorScheme s) -> void;
 
@@ -264,6 +274,7 @@ class WindowHost {
     std::function<bool(Event &)> key_pre_;  ///< 键盘前置拦截（应用级快捷键）。
     std::function<void(WindowState)> state_sink_;  ///< 可见性状态上报表。
     std::function<void(WindowMode)> mode_sink_;  ///< 几何态上报表。
+    std::function<void(ColorScheme)> os_scheme_sink_;  ///< OS 明暗偏好上报表（应用级聚合，见 `set_os_scheme_sink`）。
     bool close_requested_ = false;  ///< 程序化关闭请求（见 `request_close`；后端无关的兜底通道）。
     CloseRequestSource close_source_ =
         CloseRequestSource::Programmatic;  ///< 最近一次记账的关闭来源（见 `request_close`）。

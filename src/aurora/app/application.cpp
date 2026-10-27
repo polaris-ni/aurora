@@ -10,6 +10,7 @@
 #include "aurora/app/window_geometry.h"
 #include "aurora/core/log.h"
 #include "aurora/media/audio.h"
+#include "aurora/window/platform.h"  // os_color_scheme()：refresh_os_color_scheme 的显式查询腿
 
 namespace aurora {
 
@@ -138,6 +139,10 @@ auto Application::register_host(Scene scene, std::unique_ptr<Window> window, con
             on_window_mode_changed(m);
         }
     });
+    // OS 明暗偏好上报：**逐宿主全装**（与上面两枚只装主窗不同）。OS 档位是进程级事实，
+    // N 扇窗各收一次同值切换应在应用级只算一次通知，去重由 `on_os_color_scheme_changed`
+    // 的先比后设完成；主窗投影的旧口径在此不适用——非主窗收到切换同样要刷新应用级读点。
+    raw->set_os_scheme_sink([this](ColorScheme s) -> void { on_os_color_scheme_changed(s); });
     if (main_host_ == nullptr) {
         main_host_ = raw;  // 首个登记的宿主即主窗口
     }
@@ -196,6 +201,13 @@ auto Application::set_main_window(WindowId id) -> void {
     if (auto *h = window_host(id)) {
         main_host_ = h;  // 未知 id 为 no-op，保持当前主窗口
     }
+}
+
+auto Application::refresh_os_color_scheme() -> void {
+    // 显式 seed：现读一次系统偏好，经与后端上报**同一条**聚合出口写入应用级 State。
+    // 走同一条出口是为了两条口径自动成立——同值不通知（先比后设）与命令式回调同步触发；
+    // 本函数因此幂等，重复调用只在档位真的变了时才发信号。
+    on_os_color_scheme_changed(aurora::os_color_scheme());
 }
 
 // =============================================================================

@@ -65,6 +65,7 @@ auto WindowHost::teardown() -> void {
     key_pre_ = nullptr;
     state_sink_ = nullptr;
     mode_sink_ = nullptr;
+    os_scheme_sink_ = nullptr;
     mouse_.set_cursor_handler({});
     // 焦点控件持有的 shared_ptr 不释放前，本宿主已关但树仍未销毁，此时 Tab/键入仍可命中旧树。
     focus_.clear();
@@ -148,6 +149,11 @@ auto WindowHost::on_os_color_scheme(ColorScheme s) -> void {
         // 整帧标脏重排重绘。应用显式 set_theme 后本推送不参与解析，重绘一次无副作用。
         window_->set_os_color_scheme(s);
         window_->force_full_redraw();
+    }
+    // 框架那一半完成后才转发应用级上报表：顺序保证「应用看到变化时，本窗根主题已同值」。
+    // 原样透传 OS 原值（含 Unspecified）——「系统不表态回哪一档」是应用策略，不在本层回落。
+    if (os_scheme_sink_ != nullptr) {
+        os_scheme_sink_(s);
     }
 }
 
