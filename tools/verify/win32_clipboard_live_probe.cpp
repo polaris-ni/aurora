@@ -47,8 +47,8 @@
 #define NOMINMAX
 #endif
 // NOLINTEND(readability-identifier-naming)
-#include <shellapi.h>
 #include <windows.h>
+#include <shellapi.h>  // `HDROP` / `DragQueryFileW`（须在 `windows.h` 之后，MSVC 下先行即炸）
 
 #include "aurora/aurora.h"
 #include "aurora/core/log.h"
