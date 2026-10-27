@@ -89,9 +89,6 @@ class CapturedLog {
     aurora::LogLevel level_;
 };
 
-/// @brief 转义写死的 UTF-8 中文名（「中文报告」）——判据 5 的字节串，不经 argv、不经码页。
-constexpr const char *kUtf8Name = "\xe4\xb8\xad\xe6\x96\x87\xe6\x8a\xa5\xe5\x91\x8a";
-
 }  // namespace
 
 AURORA_TEST_CASE(last_path_segment_takes_the_tail_after_either_separator) {
@@ -195,7 +192,8 @@ AURORA_TEST_CASE(non_ascii_names_pass_through_byte_for_byte) {
     using aurora::file_dialog_plan::suggested_file_name;
     using aurora::file_dialog_plan::with_default_extension;
 
-    const std::string name{kUtf8Name};  // 「中文报告」
+    // 转义写死的 UTF-8 中文名（「中文报告」）——判据 5 的字节串，不经 argv、不经码页。
+    const std::string name = "\xe4\xb8\xad\xe6\x96\x87\xe6\x8a\xa5\xe5\x91\x8a";
     const std::string with_ext = name + ".txt";
     const std::string path = std::string("\xe7\x9b\xae\xe5\xbd\x95/") + name + ".txt";  // 「目录/中文报告.txt」
 
@@ -208,7 +206,7 @@ AURORA_TEST_CASE(non_ascii_names_pass_through_byte_for_byte) {
     AURORA_TEST_CHECK_STREQ(with_default_extension(name, "txt"), with_ext);
     AURORA_TEST_CHECK_STREQ(with_default_extension(with_ext, "txt"), with_ext);
     // 多字节「扩展名」本身也不被拆断：前导点被削掉，其余字节原样。
-    const std::string dotted_ext = std::string(".").append(kUtf8Name);
+    const std::string dotted_ext = std::string(".").append(name);
     AURORA_TEST_CHECK_STREQ(aurora::file_dialog_plan::normalize_extension(dotted_ext), name);
     AURORA_TEST_CHECK_STREQ(with_default_extension("report", dotted_ext), "report." + name);
 }

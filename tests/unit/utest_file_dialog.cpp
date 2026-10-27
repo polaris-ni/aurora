@@ -2,17 +2,21 @@
 /// 目标单元: include/aurora/app/file_dialog.h, include/aurora/app/application.h,
 ///           src/aurora/app/detail/file_picker.h, src/aurora/app/file_dialog_selfdrawn.cpp
 /// 测试说明: 覆盖 Filter/Options 配置结构体默认值与聚合构造、headless 注入钩子
-/// （open/save/folder 预设返回）与 interactive=false 取消语义、钩子优先级；
+/// （open/save/folder 预设返回）与 interactive=false 取消语义、钩子优先级、`headless_last_options`
+/// 观察面（三入口逐一记录、排在钩子判据之前、非 ASCII 逐字节回读）；
 /// 桌面自绘腿（Linux / macOS，其余平台记 skip）：L1 状态机无头全覆盖（初始目录三级
-/// 定位与降级 WARN、进出目录失败驻留、筛选与排序、选择语义、确认绝对路径、取消为空）、
-/// L2 视图的确认 / 取消 / 上一级与 Options 传导、L3 路由三态（钩子优先不构造选择器、
+/// 定位与降级 WARN、进出目录失败驻留、筛选与排序、选择语义、确认绝对路径、取消为空、
+/// SaveFile 形态按 `suggested_name` 末段播种与 `default_extension` 确认时补）、
+/// L2 视图的确认 / 取消 / 上一级与 Options 传导（含输入框初值与状态机同源）、L3 路由三态（钩子优先不构造选择器、
 /// 非交互回空、无上下文 WARN 回空不挂起）、Application::run_modal 的单例安装与逐项
 /// 还原 / 有限帧驱动 / 帧预算退出 / 一枚叠一枚与第三层拒绝，以及脚本化确认 / 取消 /
-/// 保存文件名 / 目录选择的端到端会话（含两枚选择器叠一层）。
-/// 真实系统对话框路径不测（原生 API），全部走钩子 / 非交互 / 自绘腿无头路径。
+/// 保存文件名 / 目录选择的端到端会话（含两枚选择器叠一层、名字改写以改写后为准）。
+/// 真实系统对话框路径不测（原生 API），全部走钩子 / 非交互 / 自绘腿无头路径；
+/// Win32 腿的 COM 投递由真机探针 `aurora_verify_win32_file_dialog` 取证（见同目录探针头注）。
 
 #include <cstddef>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
@@ -26,11 +30,14 @@
 #include "aurora/app/file_dialog.h"
 #include "aurora/core/log.h"
 #include "aurora/widget/text.h"
+#include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_file_dialog {
 
 namespace {
+
+using aurora::testing::require_value;
 
 /// RAII 恢复 headless 钩子与交互开关，避免污染同进程内后续用例。
 struct HookGuard {
@@ -43,6 +50,7 @@ struct HookGuard {
         aurora::file_dialog::headless_open_result.clear();
         aurora::file_dialog::headless_save_result.clear();
         aurora::file_dialog::headless_folder_result.clear();
+        aurora::file_dialog::headless_last_options = std::nullopt;
         aurora::file_dialog::interactive = true;
     }
 };
@@ -268,18 +276,113 @@ AURORA_TEST_CASE(filter_and_options_struct_defaults) {
     AURORA_TEST_CHECK_STREQ(f.extensions[0], "*.png");
     AURORA_TEST_CHECK_STREQ(f.extensions[1], "*.jpg");
 
-    // Options：全空默认值。
+    // Options：全空默认值（四枚字符串格 + 过滤器表；空串一律 = 不表达意图）。
     const aurora::file_dialog::Options def;
     AURORA_TEST_CHECK_TRUE(def.title.empty());
     AURORA_TEST_CHECK_TRUE(def.initial_dir.empty());
+    AURORA_TEST_CHECK_TRUE(def.suggested_name.empty());
+    AURORA_TEST_CHECK_TRUE(def.default_extension.empty());
     AURORA_TEST_CHECK_TRUE(def.filters.empty());
 
     // Options 聚合构造携带过滤器。
     const aurora::file_dialog::Options opts{.title = "Open file", .initial_dir = "C:/", .filters = {f}};
     AURORA_TEST_CHECK_STREQ(opts.title, "Open file");
     AURORA_TEST_CHECK_STREQ(opts.initial_dir, "C:/");
+    AURORA_TEST_CHECK_TRUE(opts.suggested_name.empty());  // 跳过式指定初始化：未点名的格仍取默认
     AURORA_TEST_REQUIRE_EQ(opts.filters.size(), 1U);
     AURORA_TEST_CHECK_STREQ(opts.filters[0].name, "Images");
+
+    // 保存形态的两格各自独立可指定（次序在 initial_dir 之后、filters 之前）。
+    const aurora::file_dialog::Options save{
+        .title = "Save file", .suggested_name = "notes.txt", .default_extension = "txt", .filters = {f}};
+    AURORA_TEST_CHECK_STREQ(save.suggested_name, "notes.txt");
+    AURORA_TEST_CHECK_STREQ(save.default_extension, "txt");
+    AURORA_TEST_CHECK_TRUE(save.initial_dir.empty());
+}
+
+AURORA_TEST_CASE(headless_last_options_records_every_entry) {
+    HookGuard guard;
+    aurora::file_dialog::interactive = false;
+    aurora::file_dialog::headless_last_options = std::nullopt;
+
+    // 首次调用前是 nullopt（与「调过但没表达意图」的空 Options 不是同一件事）。
+    AURORA_TEST_CHECK_FALSE(aurora::file_dialog::headless_last_options.has_value());
+
+    const aurora::file_dialog::Options open_opts{
+        .title = "Open", .initial_dir = "/preset-dir", .filters = {{.name = "Images", .extensions = {"*.png"}}}};
+    const aurora::file_dialog::Options save_opts{
+        .title = "Save", .initial_dir = "/preset-dir", .suggested_name = "report.txt", .default_extension = "txt"};
+    const aurora::file_dialog::Options folder_opts{.title = "Pick folder", .initial_dir = "/preset-dir"};
+
+    (void)aurora::file_dialog::open_file(open_opts);
+    const auto opened_rec = require_value(aurora::file_dialog::headless_last_options);
+    AURORA_TEST_CHECK_STREQ(opened_rec.title, "Open");
+    AURORA_TEST_CHECK_STREQ(opened_rec.initial_dir, "/preset-dir");
+    AURORA_TEST_CHECK_TRUE(opened_rec.suggested_name.empty());
+    AURORA_TEST_REQUIRE_EQ(opened_rec.filters.size(), 1U);
+    AURORA_TEST_CHECK_STREQ(opened_rec.filters[0].extensions[0], "*.png");
+
+    (void)aurora::file_dialog::save_file(save_opts);
+    const auto saved_rec = require_value(aurora::file_dialog::headless_last_options);
+    AURORA_TEST_CHECK_STREQ(saved_rec.suggested_name, "report.txt");
+    AURORA_TEST_CHECK_STREQ(saved_rec.default_extension, "txt");
+
+    (void)aurora::file_dialog::open_folder(folder_opts);
+    const auto folder_rec = require_value(aurora::file_dialog::headless_last_options);
+    AURORA_TEST_CHECK_STREQ(folder_rec.title, "Pick folder");
+
+    // 全空那一次也被记录（空 Options 记成「调过但没表达意图」，不是回到 nullopt）。
+    (void)aurora::file_dialog::open_file();
+    const auto empty_rec = require_value(aurora::file_dialog::headless_last_options);
+    AURORA_TEST_CHECK_TRUE(empty_rec.title.empty());
+    AURORA_TEST_CHECK_TRUE(empty_rec.filters.empty());
+}
+
+AURORA_TEST_CASE(headless_last_options_records_before_hook_check) {
+    HookGuard guard;
+    // 钩子置值：入口走钩子分支，但记录排在判据之前，故仍读得到本次传入的原文。
+    aurora::file_dialog::headless_open_result = {"preset.png"};
+    aurora::file_dialog::headless_save_result = "preset.txt";
+    aurora::file_dialog::headless_folder_result = "/preset";
+    aurora::file_dialog::headless_last_options = std::nullopt;
+
+    const aurora::file_dialog::Options opts{
+        .title = "Hooked", .initial_dir = "/preset-dir", .suggested_name = "hooked.txt", .default_extension = "log"};
+    const auto opened = aurora::file_dialog::open_file(opts);
+    AURORA_TEST_REQUIRE_TRUE(opened.ok());
+    AURORA_TEST_REQUIRE_EQ(opened.value().size(), 1U);  // 走的是钩子，不是投递
+    AURORA_TEST_CHECK_STREQ(require_value(aurora::file_dialog::headless_last_options).suggested_name, "hooked.txt");
+
+    (void)aurora::file_dialog::save_file(opts);
+    AURORA_TEST_CHECK_STREQ(require_value(aurora::file_dialog::headless_last_options).title, "Hooked");
+    (void)aurora::file_dialog::open_folder(opts);
+    AURORA_TEST_CHECK_STREQ(require_value(aurora::file_dialog::headless_last_options).default_extension, "log");
+
+    // 记录的是原文，不是折算结果：带目录的建议名照原样回读（截断发生在投递前，由各腿做）。
+    const aurora::file_dialog::Options raw{.suggested_name = "dir/sub/report.txt"};
+    (void)aurora::file_dialog::save_file(raw);
+    AURORA_TEST_CHECK_STREQ(require_value(aurora::file_dialog::headless_last_options).suggested_name,
+                            "dir/sub/report.txt");
+}
+
+AURORA_TEST_CASE(headless_last_options_keeps_non_ascii_bytes) {
+    HookGuard guard;
+    aurora::file_dialog::interactive = false;
+    aurora::file_dialog::headless_last_options = std::nullopt;
+
+    // 转义写死的 UTF-8 字节（「中文报告」+「报告」），不经 argv、不经活动码页。
+    const std::string utf8_name = "\xe4\xb8\xad\xe6\x96\x87\xe6\x8a\xa5\xe5\x91\x8a.txt";
+    const std::string utf8_dir = "\xe7\x9b\xae\xe5\xbd\x95/sub";
+    const aurora::file_dialog::Options opts{
+        .title = "\xe6\xa0\x87\xe9\xa2\x98", .initial_dir = utf8_dir, .suggested_name = utf8_name};
+    (void)aurora::file_dialog::save_file(opts);
+
+    // 判据 5：逐字节相等，不是「看起来能用」——本机活动码页 936 下 ANSI 解法会把 E4 B8 AD 折成花码。
+    const auto rec = require_value(aurora::file_dialog::headless_last_options);
+    AURORA_TEST_CHECK_TRUE(rec.suggested_name == utf8_name);
+    AURORA_TEST_CHECK_EQ(rec.suggested_name.size(), utf8_name.size());
+    AURORA_TEST_CHECK_TRUE(rec.initial_dir == utf8_dir);
+    AURORA_TEST_CHECK_TRUE(rec.title == opts.title);
 }
 
 AURORA_TEST_CASE(open_file_returns_headless_preset) {
@@ -646,6 +749,129 @@ AURORA_TEST_CASE(model_confirm_absolute_paths) {
 #endif
 }
 
+AURORA_TEST_CASE(model_seeds_save_name_and_applies_extension) {
+#if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_MACOS)
+    MockSource source("/s");
+    source.tree["/s"] = {PickEntry{.name = "docs", .is_dir = true}, PickEntry{.name = "a.txt", .is_dir = false}};
+
+    // 判据 6（状态机这一处）：SaveFile 形态构造后 `save_name()` 即等于建议名的末段。
+    {
+        CapturedLog log;
+        const aurora::file_dialog::Options opts{.initial_dir = "/s", .suggested_name = "dir/sub/report.txt"};
+        file_dialog::detail::FilePickerModel save(file_dialog::detail::PickerMode::SaveFile, opts, source);
+        AURORA_TEST_CHECK_STREQ(save.save_name(), "report.txt");
+        // 截断是改写用户输入，必须留痕（折算层在两条腿之前，故这里也读得到同一条 WARN）。
+        AURORA_TEST_CHECK_TRUE(log.has_line_with({"WRN", "file_dialog", "suggested_name carries a path"}));
+    }
+    // 未带分隔符的名字不留痕；空串与不传该字段同形（保存名保持空 = 空名即取消）。
+    {
+        CapturedLog log;
+        file_dialog::detail::FilePickerModel save(
+            file_dialog::detail::PickerMode::SaveFile,
+            aurora::file_dialog::Options{.initial_dir = "/s", .suggested_name = "report.txt"}, source);
+        AURORA_TEST_CHECK_STREQ(save.save_name(), "report.txt");
+        AURORA_TEST_CHECK_FALSE(log.has_line_with({"WRN", "file_dialog"}));
+    }
+    {
+        file_dialog::detail::FilePickerModel save(file_dialog::detail::PickerMode::SaveFile,
+                                                  aurora::file_dialog::Options{.initial_dir = "/s"}, source);
+        AURORA_TEST_CHECK_TRUE(save.save_name().empty());
+        AURORA_TEST_CHECK_TRUE(save.confirm().empty());  // 空名 = 取消语义不变
+    }
+    // 另外两枚入口如实不消费该格（打开态预选名字与「选一个已存在的文件」冲突，目录形态没有名字概念）。
+    {
+        const aurora::file_dialog::Options opts{.initial_dir = "/s", .suggested_name = "report.txt"};
+        file_dialog::detail::FilePickerModel open(file_dialog::detail::PickerMode::OpenFile, opts, source);
+        AURORA_TEST_CHECK_TRUE(open.save_name().empty());
+        file_dialog::detail::FilePickerModel folder(file_dialog::detail::PickerMode::OpenFolder, opts, source);
+        AURORA_TEST_CHECK_TRUE(folder.save_name().empty());
+    }
+    // 判据 4 在本腿的形态：扩展名在**确认时**补，名字里没打点才补。
+    {
+        const aurora::file_dialog::Options opts{
+            .initial_dir = "/s", .suggested_name = "report", .default_extension = "txt"};
+        file_dialog::detail::FilePickerModel save(file_dialog::detail::PickerMode::SaveFile, opts, source);
+        AURORA_TEST_CHECK_STREQ(save.save_name(), "report");  // 初值不被补全改写
+        const auto picked = save.confirm();
+        AURORA_TEST_REQUIRE_EQ(picked.size(), 1U);
+        AURORA_TEST_CHECK_STREQ(picked[0], "/s/report.txt");
+    }
+    {  // 已打过扩展名 ⇒ 原样（含前导点写法同解）
+        const aurora::file_dialog::Options a{
+            .initial_dir = "/s", .suggested_name = "report.md", .default_extension = "txt"};
+        const aurora::file_dialog::Options b{
+            .initial_dir = "/s", .suggested_name = "report", .default_extension = ".txt"};
+        file_dialog::detail::FilePickerModel save_a(file_dialog::detail::PickerMode::SaveFile, a, source);
+        file_dialog::detail::FilePickerModel save_b(file_dialog::detail::PickerMode::SaveFile, b, source);
+        AURORA_TEST_REQUIRE_EQ(save_a.confirm().size(), 1U);
+        AURORA_TEST_CHECK_STREQ(save_a.confirm()[0], "/s/report.md");
+        AURORA_TEST_REQUIRE_EQ(save_b.confirm().size(), 1U);
+        AURORA_TEST_CHECK_STREQ(save_b.confirm()[0], "/s/report.txt");
+    }
+    {  // default_extension 为空 ⇒ 逐字节原样
+        const aurora::file_dialog::Options opts{.initial_dir = "/s", .suggested_name = "report"};
+        file_dialog::detail::FilePickerModel save(file_dialog::detail::PickerMode::SaveFile, opts, source);
+        AURORA_TEST_REQUIRE_EQ(save.confirm().size(), 1U);
+        AURORA_TEST_CHECK_STREQ(save.confirm()[0], "/s/report");
+    }
+    // 用户改写后仍以改写后的值为准（建议值是预选而不是答案），改写串同样吃补全规则。
+    {
+        const aurora::file_dialog::Options opts{
+            .initial_dir = "/s", .suggested_name = "report", .default_extension = "txt"};
+        file_dialog::detail::FilePickerModel save(file_dialog::detail::PickerMode::SaveFile, opts, source);
+        save.set_save_name("handwritten");
+        AURORA_TEST_CHECK_STREQ(save.save_name(), "handwritten");
+        AURORA_TEST_REQUIRE_EQ(save.confirm().size(), 1U);
+        AURORA_TEST_CHECK_STREQ(save.confirm()[0], "/s/handwritten.txt");
+        save.set_save_name("");
+        AURORA_TEST_CHECK_TRUE(save.confirm().empty());
+    }
+    // 非 ASCII 建议名在本腿落到同一份字节（判据 5 的自绘腿一侧）。
+    {
+        const std::string utf8_name = "\xe4\xb8\xad\xe6\x96\x87\xe6\x8a\xa5\xe5\x91\x8a";
+        const aurora::file_dialog::Options opts{.initial_dir = "/s",
+                                                .suggested_name = std::string("/\xe7\x9b\xae\xe5\xbd\x95/") + utf8_name,
+                                                .default_extension = "txt"};
+        file_dialog::detail::FilePickerModel save(file_dialog::detail::PickerMode::SaveFile, opts, source);
+        AURORA_TEST_CHECK_TRUE(save.save_name() == utf8_name);
+        AURORA_TEST_REQUIRE_EQ(save.confirm().size(), 1U);
+        AURORA_TEST_CHECK_STREQ(save.confirm()[0], "/s/" + utf8_name + ".txt");
+    }
+#else
+    AURORA_TEST_SKIP("FilePickerModel is the Linux/macOS self-drawn leg");
+#endif
+}
+
+AURORA_TEST_CASE(view_seeds_name_input_from_suggested_name) {
+#if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_MACOS)
+    MockSource source("/w");
+    source.tree["/w"] = {PickEntry{.name = "docs", .is_dir = true}, PickEntry{.name = "a.txt", .is_dir = false}};
+    const aurora::file_dialog::Options opts{.initial_dir = "/w", .suggested_name = "dir/sub/report.txt"};
+
+    // 判据 6 的另一处：输入框初值与状态机同源——只喂其一不算闭合（状态机管确认结果、输入框管
+    // 用户看得见的字，两处不同源就会出现「显示的名字和存下来的名字不是一回事」）。
+    file_dialog::detail::FilePickerView save_view(file_dialog::detail::PickerMode::SaveFile, opts, source);
+    AURORA_TEST_REQUIRE_TRUE(save_view.name_input() != nullptr);
+    AURORA_TEST_CHECK_STREQ(save_view.name_input()->value(), "report.txt");
+    AURORA_TEST_CHECK_STREQ(save_view.model().save_name(), save_view.name_input()->value());
+
+    // 另两形态根本没有名字输入框（目录形态无名字概念、打开态预选名字与多选列表冲突）。
+    file_dialog::detail::FilePickerView open_view(file_dialog::detail::PickerMode::OpenFile, opts, source);
+    AURORA_TEST_CHECK_TRUE(open_view.name_input() == nullptr);
+    AURORA_TEST_CHECK_TRUE(open_view.model().save_name().empty());
+    file_dialog::detail::FilePickerView folder_view(file_dialog::detail::PickerMode::OpenFolder, opts, source);
+    AURORA_TEST_CHECK_TRUE(folder_view.name_input() == nullptr);
+
+    // 未给建议名 ⇒ 输入框保持空（与今日同形，不凭空造一个名字）。
+    file_dialog::detail::FilePickerView plain(file_dialog::detail::PickerMode::SaveFile,
+                                              aurora::file_dialog::Options{.initial_dir = "/w"}, source);
+    AURORA_TEST_REQUIRE_TRUE(plain.name_input() != nullptr);
+    AURORA_TEST_CHECK_TRUE(plain.name_input()->value().empty());
+#else
+    AURORA_TEST_SKIP("FilePickerView is the Linux/macOS self-drawn leg");
+#endif
+}
+
 AURORA_TEST_CASE(view_confirm_cancel_and_go_up) {
 #if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_MACOS)
     PickerSeamGuard seams;
@@ -937,6 +1163,56 @@ AURORA_TEST_CASE(session_save_file_uses_name_input) {
     AURORA_TEST_CHECK_TRUE(run.root_restored);
 }
 
+AURORA_TEST_CASE(session_save_file_suggested_name_reaches_result) {
+    HookGuard hooks;
+    PickerSeamGuard seams;
+    // 端到端：建议名（带目录分隔）经会话落在最终路径里，缺省扩展名在确认时补。
+    const aurora::file_dialog::Options opts{.title = "utest save seeded",
+                                            .initial_dir = ".",
+                                            .suggested_name = "dir/sub/utest-seeded",
+                                            .default_extension = "txt"};
+    const SelfdrawnRun run = run_selfdrawn_case(
+        [](file_dialog::detail::FilePickerView &view) -> void {
+            AURORA_TEST_REQUIRE_TRUE(view.name_input() != nullptr);
+            AURORA_TEST_CHECK_STREQ(view.name_input()->value(), "utest-seeded");  // 输入框看得见同一个名字
+            view.confirm();  // 不作答改写：预选值原样确认
+        },
+        [&opts]() -> Result<std::vector<std::string>> {
+            const auto r = aurora::file_dialog::save_file(opts);
+            if (!r.ok()) {
+                return Result<std::vector<std::string>>{r.error()};
+            }
+            return std::vector<std::string>{r.value()};
+        });
+
+    AURORA_TEST_REQUIRE_TRUE(run.ok);
+    AURORA_TEST_REQUIRE_EQ(run.paths.size(), 1U);
+    AURORA_TEST_CHECK_TRUE(run.paths[0].ends_with("utest-seeded.txt"));
+    AURORA_TEST_CHECK_EQ(run.construct_count, 1U);
+    AURORA_TEST_CHECK_TRUE(run.root_restored);
+
+    // 用户改写仍以改写后的值为准，且已带扩展名时不再补。
+    const aurora::file_dialog::Options override_opts{.title = "utest save override",
+                                                     .initial_dir = ".",
+                                                     .suggested_name = "utest-seeded",
+                                                     .default_extension = "txt"};
+    const SelfdrawnRun overridden = run_selfdrawn_case(
+        [](file_dialog::detail::FilePickerView &view) -> void {
+            view.model().set_save_name("utest-handwritten.md");  // 输入框的同一写口
+            view.confirm();
+        },
+        [&override_opts]() -> Result<std::vector<std::string>> {
+            const auto r = aurora::file_dialog::save_file(override_opts);
+            if (!r.ok()) {
+                return Result<std::vector<std::string>>{r.error()};
+            }
+            return std::vector<std::string>{r.value()};
+        });
+    AURORA_TEST_REQUIRE_TRUE(overridden.ok);
+    AURORA_TEST_REQUIRE_EQ(overridden.paths.size(), 1U);
+    AURORA_TEST_CHECK_TRUE(overridden.paths[0].ends_with("utest-handwritten.md"));
+}
+
 AURORA_TEST_CASE(session_open_folder_selects_directory) {
     HookGuard hooks;
     PickerSeamGuard seams;
@@ -1046,6 +1322,9 @@ AURORA_TEST_CASE(session_cancel_returns_empty_and_keeps_globals) {
     AURORA_TEST_SKIP("self-drawn session e2e needs Linux/macOS + the Headless backend");
 }
 AURORA_TEST_CASE(session_save_file_uses_name_input) {
+    AURORA_TEST_SKIP("self-drawn session e2e needs Linux/macOS + the Headless backend");
+}
+AURORA_TEST_CASE(session_save_file_suggested_name_reaches_result) {
     AURORA_TEST_SKIP("self-drawn session e2e needs Linux/macOS + the Headless backend");
 }
 AURORA_TEST_CASE(session_open_folder_selects_directory) {
