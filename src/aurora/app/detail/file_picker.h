@@ -153,7 +153,8 @@ class FilePickerModel {
     /// @brief 构造并解析初始目录（空 → 数据源根；不存在 / 不可读 → 降级根 + WARN）。
     ///        目录形态（OpenFolder）不收窄文件条目——目录无类型语义，`filters` 被忽略。
     /// @param mode 选择器形态。
-    /// @param opts 公共选项（消费 `initial_dir` 与 `filters`；`title` 归 UI）。
+    /// @param opts 公共选项（消费 `initial_dir` 与 `filters`；保存形态另消费 `suggested_name` 播种
+    ///        保存名、`default_extension` 在确认时补；`title` 归 UI）。
     /// @param source 目录数据源（生命周期须长于本模型）。
     FilePickerModel(PickerMode mode, file_dialog::Options opts, const DirectorySource &source);
 
@@ -177,12 +178,15 @@ class FilePickerModel {
     auto enter(int row) -> bool;
     /// @brief 回父目录（已在根或父目录列不出时返回 false）。
     auto go_up() -> bool;
-    /// @brief 写入保存文件名（仅 SaveFile 形态的确认消费）。
+    /// @brief 写入保存文件名（仅 SaveFile 形态的确认消费；初值取自 `Options::suggested_name` 末段）。
     /// @param name 文件名（可为空）。
     auto set_save_name(std::string name) -> void { save_name_ = std::move(name); }
     /// @brief 当前保存文件名。
     [[nodiscard]] auto save_name() const -> const std::string & { return save_name_; }
     /// @brief 确认：返回选中的绝对路径列表（无有效选择时为空——取消语义）。
+    ///
+    /// 保存形态在确认这一刻按 `default_extension` 补全（名字里没打点才补），故中途改写过的名字
+    /// 也吃同一条规则；补全规则本身在折算层，两腿共用一份。
     [[nodiscard]] auto confirm() const -> std::vector<std::string>;
 
   private:
@@ -215,7 +219,7 @@ class FilePickerView : public Dialog {
   public:
     /// @brief 构造并装配面板（初始为关闭态，须 `show_modal` 才渲染）。
     /// @param mode 选择器形态。
-    /// @param opts 公共选项（标题 / 初始目录 / 筛选器）。
+    /// @param opts 公共选项（标题 / 初始目录 / 筛选器；保存形态另取建议名作输入框初值）。
     /// @param source 目录数据源（生命周期须长于本视图）。
     FilePickerView(PickerMode mode, const file_dialog::Options &opts, const DirectorySource &source);
     /// @brief 析构定义在自绘 TU：成员持 Dialog/ListView 等不完整类型的 shared_ptr。
@@ -255,6 +259,11 @@ class FilePickerView : public Dialog {
     [[nodiscard]] auto result() const -> const std::vector<std::string> & { return result_; }
     /// @brief 内部状态机（测试观测当前目录 / 条目 / 选中行）。
     [[nodiscard]] auto model() -> FilePickerModel & { return model_; }
+    /// @brief 文件名输入框（仅保存形态存在，其余形态为空指针）。
+    ///
+    /// 存在的理由：`Options::suggested_name` 要同时喂状态机的保存名（决定确认结果）与输入框初值
+    /// （决定用户看得见的字），只喂其一都算不得消费——本访问口让两处各自可观测。
+    [[nodiscard]] auto name_input() const -> const std::shared_ptr<TextInput> & { return name_input_; }
 
   private:
     auto refresh_ui() -> void;

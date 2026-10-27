@@ -4,6 +4,10 @@
 // 注意：_WIN32_WINNT / _WIN32_IE 必须在任何 aurora 头文件之前定义，否则 log.h 等会先行引入
 // windows.h 并锁死 NTDDI_VERSION，导致 IFileOpenDialog / SHCreateItemFromParsingName 等
 // Vista+ 声明不可见。
+//
+// _WIN32_IE 取 0x0700 是 `SHCreateItemFromParsingName`（`initial_dir` 的预选通路）声明所需：
+// 该原型在 SDK 里由 `_WIN32_IE >= _WIN32_IE_IE70` 门控，取 0x0600 时声明不可见。实链接的
+// `shell32` 已随库 PUBLIC 链接（见 cmake/AuroraBackends.cmake），故抬旋钮只是让声明可见。
 #include "aurora/core/platform.h"
 #ifdef AURORA_PLATFORM_WINDOWS
 #ifndef _WIN32_WINNT
@@ -14,7 +18,7 @@
 #ifndef _WIN32_IE
 // Windows SDK 版本旋钮，不可改名
 // NOLINTNEXTLINE(*-macro-usage, *-reserved-identifier, *-identifier-naming)
-#define _WIN32_IE 0x0600
+#define _WIN32_IE 0x0700
 #endif
 #define WIN32_LEAN_AND_MEAN  // NOLINT(*-identifier-naming): Windows SDK 宏，不可改名
 #ifndef NOMINMAX
@@ -25,7 +29,10 @@
 #include <windows.h>
 
 #include <string>
+#include <vector>
 
+#include "aurora/app/detail/file_dialog_plan.h"
+#include "aurora/app/detail/file_dialog_win32_apply.h"
 #include "aurora/app/file_dialog.h"
 #include "aurora/core/log.h"
 #include "aurora/core/utf8.h"
@@ -95,7 +102,103 @@ auto show_dialog(Dlg *dlg, Collect collect) -> std::vector<std::string> {
 }
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// 投递（内部接缝，声明见 detail/file_dialog_win32_apply.h）
+// ---------------------------------------------------------------------------
+
+namespace detail {
+namespace {
+
+/// @brief `GetFullPathNameW` 归一一串宽字符路径（正斜杠转反斜杠、相对转绝对、收掉 `.` / `..`
+///        与尾分隔符）；解析名 API 不接受正斜杠形式，故投递前必经这一步。
+/// @param path 待归一的宽字符路径。
+/// @return 归一结果；调用失败或长度异常时为空串（调用方据此留痕降级）。
+[[nodiscard]] auto normalize_wide_path(const std::wstring &path) -> std::wstring {
+    std::wstring buffer(path.size() + 4U, L'\0');
+    // 首调用返回写入字符数（不含终止符）；缓冲区不足时返回「所需字符数（含终止符）」，据此重试一次。
+    DWORD need = GetFullPathNameW(path.c_str(), static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
+    if (need == 0U) {
+        return {};
+    }
+    if (need >= buffer.size()) {
+        buffer.resize(need);
+        need = GetFullPathNameW(path.c_str(), static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
+        if (need == 0U || need >= buffer.size()) {
+            return {};
+        }
+    }
+    buffer.resize(need);
+    return buffer;
+}
+
+}  // namespace
+
+void apply_initial_dir(void *dialog, const Options &opts) {
+    if (dialog == nullptr || opts.initial_dir.empty()) {
+        return;  // 平台不符 / 未创建成功 / 不表达意图：停在 OS 默认位置，不留痕
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): 头侧类型擦除的还原点
+    auto *const dlg = reinterpret_cast<IFileDialog *>(dialog);
+    const std::wstring wide = aurora::internal::utf8_to_wstr(opts.initial_dir);
+    if (wide.empty()) {
+        AURORA_LOG_WARN("file_dialog",
+                        "initial_dir is not valid UTF-8, keeping the OS default location: ", opts.initial_dir);
+        return;
+    }
+    const std::wstring full = normalize_wide_path(wide);
+    if (full.empty()) {
+        AURORA_LOG_WARN("file_dialog",
+                        "initial_dir cannot be made absolute, keeping the OS default location: ", opts.initial_dir);
+        return;
+    }
+    IShellItem *item = nullptr;
+    HRESULT hr = SHCreateItemFromParsingName(
+        full.c_str(), nullptr, IID_IShellItem,
+        reinterpret_cast<void **>(&item));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (FAILED(hr) || (item == nullptr)) {
+        AURORA_LOG_WARN("file_dialog",
+                        "initial_dir cannot be resolved, keeping the OS default location: ", opts.initial_dir,
+                        ", hr=", hr);
+        return;
+    }
+    hr = dlg->SetFolder(item);
+    item->Release();
+    if (FAILED(hr)) {
+        AURORA_LOG_WARN("file_dialog",
+                        "SetFolder rejected initial_dir, keeping the OS default location: ", opts.initial_dir,
+                        ", hr=", hr);
+    }
+}
+
+void apply_save_name(void *dialog, const Options &opts) {
+    if (dialog == nullptr) {
+        return;
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): 头侧类型擦除的还原点
+    auto *const dlg = reinterpret_cast<IFileDialog *>(dialog);
+    // 名字先过折算层：带目录分隔的串 OS 会直接拒掉，末段才是「名字栏」该放的东西。
+    const std::string name = aurora::file_dialog_plan::suggested_file_name(opts.suggested_name);
+    if (!name.empty()) {
+        const HRESULT hr = dlg->SetFileName(aurora::internal::utf8_to_wstr(name).c_str());
+        if (FAILED(hr)) {
+            AURORA_LOG_WARN("file_dialog", "SetFileName rejected the suggested name: ", name, ", hr=", hr);
+        }
+    }
+    // 缺省扩展名交 OS 补全（故传不含点的那一份，`with_default_extension` 是自绘腿的形态）。
+    const std::string ext = aurora::file_dialog_plan::normalize_extension(opts.default_extension);
+    if (!ext.empty()) {
+        const HRESULT hr = dlg->SetDefaultExtension(aurora::internal::utf8_to_wstr(ext).c_str());
+        if (FAILED(hr)) {
+            AURORA_LOG_WARN("file_dialog", "SetDefaultExtension rejected the default extension: ", ext, ", hr=", hr);
+        }
+    }
+}
+
+}  // namespace detail
+
 auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
+    headless_last_options = opts;
     if (!headless_open_result.empty()) {
         return headless_open_result;
     }
@@ -122,8 +225,8 @@ auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
     if (!opts.title.empty()) {
         (void)pfd->SetTitle(aurora::internal::utf8_to_wstr(opts.title).c_str());
     }
-    // 注：initial_dir 预选目录需要 Vista+ 的 SHCreateItemFromParsingName，当前 MinGW 工具链未提供，
-    // 故暂不接线（Options 字段保留，向后兼容）；后续可改用 IShellFolder 桌面目录解析。
+    // initial_dir 经归一 + 解析 + SetFolder 落进对话框；不可解析时留 WARN 并停在 OS 默认位置。
+    detail::apply_initial_dir(pfd, opts);
     apply_filters(pfd, opts.filters);
     auto out = show_dialog(pfd, [](IFileOpenDialog *d) -> std::vector<std::string> {
         IShellItemArray *items = nullptr;
@@ -153,6 +256,7 @@ auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
 }
 
 auto save_file(const Options &opts) -> Result<std::string> {
+    headless_last_options = opts;
     if (!headless_save_result.empty()) {
         return headless_save_result;
     }
@@ -179,6 +283,10 @@ auto save_file(const Options &opts) -> Result<std::string> {
     if (!opts.title.empty()) {
         (void)pfs->SetTitle(aurora::internal::utf8_to_wstr(opts.title).c_str());
     }
+    detail::apply_initial_dir(pfs, opts);
+    // 本入口是 suggested_name / default_extension 的唯一消费点（打开态预选名字与「选一个已存在的
+    // 文件」相互冲突，见 app/file_dialog.h 的消费口径注释）。
+    detail::apply_save_name(pfs, opts);
     apply_filters(pfs, opts.filters);
     auto out = show_dialog(pfs, [](IFileDialog *d) -> std::vector<std::string> {
         IShellItem *result = nullptr;
@@ -198,6 +306,7 @@ auto save_file(const Options &opts) -> Result<std::string> {
 }
 
 auto open_folder(const Options &opts) -> Result<std::string> {
+    headless_last_options = opts;
     if (!headless_folder_result.empty()) {
         return headless_folder_result;
     }
@@ -224,6 +333,7 @@ auto open_folder(const Options &opts) -> Result<std::string> {
     if (!opts.title.empty()) {
         (void)pfd->SetTitle(aurora::internal::utf8_to_wstr(opts.title).c_str());
     }
+    detail::apply_initial_dir(pfd, opts);
     auto out = show_dialog(pfd, [](IFileDialog *d) -> std::vector<std::string> {
         IShellItem *result = nullptr;
         std::string path;

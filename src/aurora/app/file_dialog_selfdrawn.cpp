@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "aurora/app/application.h"
+#include "aurora/app/detail/file_dialog_plan.h"
 #include "aurora/app/detail/file_picker.h"
 #include "aurora/app/file_dialog.h"
 #include "aurora/core/log.h"
@@ -151,6 +152,11 @@ namespace detail {
 
 FilePickerModel::FilePickerModel(PickerMode mode, file_dialog::Options opts, const DirectorySource &source)
     : mode_(mode), opts_(std::move(opts)), source_(&source) {
+    // 保存形态的名字栏初值：`suggested_name` 过折算层取末段后播种（Win32 腿投给 OS 的名字栏，本腿
+    // 投给状态机——同一份换算，两腿才落出同一个名字）。非保存形态一概不消费该格。
+    if (mode_ == PickerMode::SaveFile) {
+        save_name_ = aurora::file_dialog_plan::suggested_file_name(opts_.suggested_name);
+    }
     // 初始目录三级口径：未指定 → 数据源根（文档化默认，不算降级）；指定不可用 → 降级根并留痕；
     // 显式指定的目录列不出 → 同样降级根并留痕；连根都列不出 → 空条目启动（仍留痕）。
     const bool specified = !opts_.initial_dir.empty();
@@ -289,7 +295,10 @@ auto FilePickerModel::confirm() const -> std::vector<std::string> {
             break;
         case PickerMode::SaveFile:
             if (!save_name_.empty()) {
-                out.push_back(join_path(current_dir_, save_name_));
+                // 扩展名在确认时补（用户没打点才补），故改写过的名字同样吃这条规则；
+                // Win32 腿由 OS 在名字栏里补，两腿结果同一句：选定路径以该扩展名结尾。
+                out.push_back(join_path(current_dir_, aurora::file_dialog_plan::with_default_extension(
+                                                          save_name_, opts_.default_extension)));
             }
             break;
         case PickerMode::OpenFolder:
@@ -341,6 +350,8 @@ FilePickerView::FilePickerView(PickerMode mode, const file_dialog::Options &opts
     if (mode == PickerMode::SaveFile) {
         name_input_ = std::make_shared<TextInput>();
         name_input_->set_placeholder("File name");
+        // 输入框初值与状态机同源（只喂其一不算闭合：状态机管确认结果、输入框管用户看得见的字）。
+        name_input_->set_value(model_.save_name());
         name_input_->set_on_changed([this](const std::string &value) -> void { model_.set_save_name(value); });
         path_row.emplace_back(name_input_);
     }
@@ -531,6 +542,7 @@ auto run_selfdrawn(detail::PickerMode mode, const Options &opts, const detail::D
 }  // namespace
 
 auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
+    headless_last_options = opts;
     if (!headless_open_result.empty()) {
         return headless_open_result;  // 钩子优先：未构造选择器（计数器可证）
     }
@@ -542,6 +554,7 @@ auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
 }
 
 auto save_file(const Options &opts) -> Result<std::string> {
+    headless_last_options = opts;
     if (!headless_save_result.empty()) {
         return headless_save_result;
     }
@@ -554,6 +567,7 @@ auto save_file(const Options &opts) -> Result<std::string> {
 }
 
 auto open_folder(const Options &opts) -> Result<std::string> {
+    headless_last_options = opts;
     if (!headless_folder_result.empty()) {
         return headless_folder_result;
     }
