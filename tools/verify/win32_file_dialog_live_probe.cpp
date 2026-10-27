@@ -173,8 +173,7 @@ class ComInit {
 class CapturedLog {
   public:
     CapturedLog() : level_(aurora::Logger::instance().level()) {
-        aurora::Logger::instance().set_sink(
-            [this](std::string_view line) -> void { lines.emplace_back(line); });
+        aurora::Logger::instance().set_sink([this](std::string_view line) -> void { lines.emplace_back(line); });
     }
     ~CapturedLog() {
         auto &logger = aurora::Logger::instance();
@@ -326,8 +325,7 @@ auto run_auto_stage() -> int {
             return 2;
         }
         CapturedLog log;
-        const aurora::file_dialog::Options opts{
-            .suggested_name = "dir/sub/report.txt", .default_extension = ".txt"};
+        const aurora::file_dialog::Options opts{.suggested_name = "dir/sub/report.txt", .default_extension = ".txt"};
         aurora::file_dialog::detail::apply_save_name(dlg, opts);
         check(read_file_name(dlg) == "report.txt", "SetFileName received the last path segment");
         // 缺省扩展名这一腿 OS **只有 setter、没有 getter**（`GetDefaultExtension` 不存在，见文件头取证
@@ -374,15 +372,13 @@ auto run_auto_stage() -> int {
             return 2;
         }
         const std::string utf8_name = "\xe4\xb8\xad\xe6\x96\x87\xe6\x8a\xa5\xe5\x91\x8a.txt";
-        const aurora::file_dialog::Options opts{
-            .title = "\xe5\x8f\xa6\xe5\xad\x98\xe4\xb8\xba",
-            .suggested_name = "/\xe7\x9b\xae\xe5\xbd\x95/" + utf8_name};
+        const aurora::file_dialog::Options opts{.title = "\xe5\x8f\xa6\xe5\xad\x98\xe4\xb8\xba",
+                                                .suggested_name = "/\xe7\x9b\xae\xe5\xbd\x95/" + utf8_name};
         aurora::file_dialog::detail::apply_save_name(dlg, opts);
         const std::string back = read_file_name(dlg);
         check(back == utf8_name, "SetFileName round-trips the UTF-8 name byte for byte");
         if (back != utf8_name) {
-            emit("  expected size=" + std::to_string(utf8_name.size()) + " actual size=" +
-                 std::to_string(back.size()));
+            emit("  expected size=" + std::to_string(utf8_name.size()) + " actual size=" + std::to_string(back.size()));
         }
         dlg->Release();
     }
@@ -448,11 +444,10 @@ auto run_interactive_stage() -> int {
         return 7;
     }
     const std::string scratch_utf8 = aurora::internal::wstr_to_utf8(scratch.c_str());
-    const aurora::file_dialog::Options opts{
-        .title = "Aurora verify: save as",
-        .initial_dir = scratch_utf8,
-        .suggested_name = "aurora-verify-name",
-        .default_extension = ".txt"};
+    const aurora::file_dialog::Options opts{.title = "Aurora verify: save as",
+                                            .initial_dir = scratch_utf8,
+                                            .suggested_name = "aurora-verify-name",
+                                            .default_extension = ".txt"};
     (void)dlg->SetTitle(aurora::internal::utf8_to_wstr(opts.title).c_str());
     aurora::file_dialog::detail::apply_initial_dir(dlg, opts);
     aurora::file_dialog::detail::apply_save_name(dlg, opts);
@@ -477,8 +472,8 @@ auto run_interactive_stage() -> int {
               "the OS appended the dot-free default extension to the confirmed path");
         // 只回收探针自己建的那一处：人改了位置或改了名字时一律不动。
         const std::wstring parent = saved.substr(0, saved.find_last_of(L"\\/"));
-        const bool in_scratch = ascii_lower(aurora::internal::wstr_to_utf8(parent.c_str())) ==
-                                ascii_lower(scratch_utf8);
+        const bool in_scratch =
+            ascii_lower(aurora::internal::wstr_to_utf8(parent.c_str())) == ascii_lower(scratch_utf8);
         const std::string saved_name = aurora::internal::wstr_to_utf8(name.c_str());
         const bool ours = in_scratch && (saved_name.rfind("aurora-verify-name", 0) == 0);
         if (!ours) {
@@ -487,15 +482,14 @@ auto run_interactive_stage() -> int {
             // `IFileDialog` **不写文件**：确认后只返回选定的路径，落盘由应用自己完成（实测本段返回
             // 路径后目录里始终没有该文件，`GetFileAttributesW` 报 error=2）。故这里没有文件要回收，
             // 只摘掉探针自建的那枚空暂存目录；目录非空（人往里放了东西）就留着不动。
-            emit(RemoveDirectoryW(scratch.c_str())
-                     ? "cleanup: scratch dir removed"
-                     : "cleanup: scratch dir kept (not empty; nothing was deleted)");
+            emit(RemoveDirectoryW(scratch.c_str()) ? "cleanup: scratch dir removed"
+                                                   : "cleanup: scratch dir kept (not empty; nothing was deleted)");
         }
     }
 
-    for (const char *question : {"Did the title read as printed above? (y/n)",
-                                 "Did it open inside the scratch dir printed above? (y/n)",
-                                 "Was the name field prefilled with aurora-verify-name? (y/n)"}) {
+    for (const char *question :
+         {"Did the title read as printed above? (y/n)", "Did it open inside the scratch dir printed above? (y/n)",
+          "Was the name field prefilled with aurora-verify-name? (y/n)"}) {
         emit(std::string(question));
         std::string answer;
         // 只有明确答 y 才算确认：EOF / 空答 / 其它字符一律计入未确认项（退出码 7）。

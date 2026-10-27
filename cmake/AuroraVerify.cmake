@@ -165,6 +165,22 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_clipboard)
     endif ()
 
+    # ---- Win32 文件对话框投递（真实 COM 对话框对象上的 `SetFileName` / `SetDefaultExtension` /
+    # `SetFolder`）：自动段以**独立取证**（探针直接读 OS 自己的 `GetFileName` / 日志与 `GetFolder`
+    # 回读值，不读库内折算结果自证）证明「`Options` 的建议名、缺省扩展名与初始目录确实被 shell
+    # 记下」——含正斜杠归一（解析名 API 不接受 `C:/...`）、前导点削除（OS 侧无扩展名 getter，故该格
+    # 由确认后的 `GetResult` 路径末段机判，否则落成 `name..txt` 就是没削点）、非 ASCII 名逐字节往返、
+    # 不可解析目录走降级并留一条可归因 WARN。自动段不调 `Show()`（不弹框、不等用户），故不进 CTest；
+    # `屏幕上看得见预填的那一行` 交 --interactive 人工段。
+    # 投递函数是库内部接缝（src/aurora/app/detail/，口径同 csd/WASAPI/最近文档探针），故需 src 包含目录；
+    # shell32 / ole32 已随 aurora PUBLIC 链接。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_file_dialog
+                "${_aurora_verify_dir}/win32_file_dialog_live_probe.cpp")
+        target_include_directories(aurora_verify_win32_file_dialog PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_file_dialog)
+    endif ()
+
     # ---- Win32 OS 级全局热键（真实窗口 + 隐藏消息窗口接 WM_HOTKEY；「应用无焦点也触发」+ 排空语义）----
     # 自动段验收注册表 API 面（enabled / add / 判重 / 无效主键 / remove / clear / drain / 注入降级）；
     # 「OS 真把按键投到本进程」靠 --interactive 人工段（把焦点切到别的进程再按）。
