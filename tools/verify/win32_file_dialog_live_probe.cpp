@@ -89,11 +89,16 @@
 #define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming)
 #endif
 
+// shell 头显式排在 `windows.h` 之后：本机 `cl.exe`（VS 18 开发者环境）与 `clang
+// --target=...-msvc` 两种顺序实测都编得过——那两条头自己透传包含 `windows.h`，故这不是「颠倒即炸」
+// 的修复，而是不把可编译性押在 SDK 头的传递包含面上（同目录 `win32_clipboard_live_probe.cpp` 在
+// `shellapi.h` 先行时真炸过一轮 C4430/C2146）。`SortIncludes` 会按字母序把 `windows.h` 排到最后，
+// 故此处关掉重排；`clang-format off` 行保持纯净（该行带尾注会被忽略而令豁免失效）。
 // clang-format off
+#include <windows.h>   // CreateDirectoryW / RemoveDirectoryW
 #include <objbase.h>   // CoInitializeEx / CoCreateInstance
 #include <shlobj.h>    // SHGetFolderPathW / CSIDL_LOCAL_APPDATA
 #include <shobjidl.h>  // IFileDialog / IFileOpenDialog / IFileSaveDialog
-#include <windows.h>   // CreateDirectoryW / RemoveDirectoryW
 // clang-format on
 
 #include <cstddef>
