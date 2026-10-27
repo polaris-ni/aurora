@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -261,6 +262,33 @@ class LazyList : public Widget {
     /// @return 滑动进行中为 true。
     [[nodiscard]] auto is_gliding() const -> bool { return glide_.active; }
 
+    /// @brief 滚动到内容末尾（跟尾：日志 / 终端 / 监视卡这类「行只增不减」的落位）。
+    ///
+    /// **布局前调用表达的是意图**，不是无效调用：末尾偏移取决于 `max_scroll_offset()`，而它含
+    /// 视口高，首次布局前 `viewport_height_` 为 0、算出来的是整个内容高而非末尾（差一个视口）。
+    /// 故未布局时本方法把「末尾」记进既有的显式待定偏移单槽（`pending_offset_`，与
+    /// `deserialize_props` 的 `scroll_offset` 同一枚槽、同一条应用路径、同一优先级——显式意图
+    /// 优先于 `restore_key`），由**首次可滚动布局**按当时的真实范围夹取落地。走同一条路径的
+    /// 好处是「与 `restore_key` 同时存在时谁赢」这条口径不需要重新定义。
+    /// 布局后调用等价于 `scroll_to(max_scroll_offset(), animate)`，夹取与 reduce-motion 分支全部
+    /// 沿用 `scroll_to` 既有实现，不另造一条滑动时序。
+    ///
+    /// 与「持续贴底」不同：本方法是一次性意图（跟尾 / 冻结的判定属显示状态机，不归控件），
+    /// 用户随后手动滚动即自然取消。空表（或零行高 / 零视口）夹取结果为 0，不产生伪变化。
+    /// @param animate 已布局时的过渡方式：true 经收位滑动（reduce-motion 下自动直落），
+    ///        false 立即就位。布局前调用时该形参无意义（意图由首次布局直落，不做滑动）。
+    /// @note Side-effects: marks layout/paint dirty when the offset changes; may arm a pending intent
+    auto scroll_to_end(bool animate = false) -> void {
+        if (viewport_height_ <= 0.0F) {
+            // 未布局：记成不可达的大偏移，由首次可滚动布局夹到那一时刻的真实末尾。
+            pending_offset_ = AURORA_END_OFFSET_SENTINEL;
+            scroll_restored_ = false;  // 与 deserialize_props 的显式偏移同处置
+            mark_needs_layout();
+            return;
+        }
+        scroll_to(max_scroll_offset(), animate);
+    }
+
     /// @brief 拖入自动滚边（系统拖放 `Over` 态由派发器调用，见
     ///        `Widget::on_system_drag_auto_scroll`）：记录落点，帧计时里按侵入深度推进。
     ///
@@ -293,6 +321,29 @@ class LazyList : public Widget {
             published_offset_ = offset_;
         }
         return *offset_state_;
+    }
+
+    /// @brief 偏移变更回调（命令式旁听口；与 `offset_signal()` 并存、同一次落位各驱动一次）。
+    ///
+    /// 存在的理由是**不进出 `Effect` 作用域就没有订阅面**：`SignalViewBase` 只有 `subscribe(Effect&)`
+    /// 一条订阅路，而本控件的 `collect_signals` 返回空表（不向控件树暴露该信号），于是宿主想知道
+    /// 「用户滚到底了没有」只能逐帧轮询 `scroll_offset()` 与 `max_scroll_offset()` 自己比。本回调
+    /// 把那条比较的输入直接送过来：偏移**实际落位**时调用一次，参数为新偏移。
+    ///
+    /// 口径：
+    /// - 来源不限——滚轮、滑动帧（每帧一次）、`set_scroll_offset`、无障碍滚动、拖入自动滚边、
+    ///   待定偏移与 `restore_key` 落地都经同两条落位路径，故都通知；
+    /// - **同值不通知**：两条落位路径都以「夹取后与当前值相同即直接返回」开头，故到底后再请求
+    ///   更大的偏移、或重复 set 同一值都不产生回调；
+    /// - 主线程、随控件销毁自然失效（回调是本控件成员，无需注销句柄）；传空 `std::function`
+    ///   即注销；
+    /// - 回调在偏移与新脏标记都已落定之后调用，因此回调内读 `scroll_offset()` 得到的就是刚送出的
+    ///   那个值；回调内再次改偏移属正常重入，与外部直接调用入口同一条路径。
+    /// @param cb 变更回调（移动接管；空 = 注销）。
+    /// @return *this（链式）。
+    auto set_on_scroll_changed(std::function<void(float)> cb) -> LazyList & {
+        on_scroll_changed_ = std::move(cb);
+        return *this;
     }
 
     /// @brief 最大滚动偏移（内容高 - 视口高，不小于 0）。
@@ -341,6 +392,28 @@ class LazyList : public Widget {
         builder_ = std::move(builder);
         mark_needs_layout();
         return *this;
+    }
+
+    /// @brief 刷新条目内容：回收全部存活实例，下一帧按**当前构建器**重建可见窗口。
+    ///
+    /// 与 `set_item_builder`（只换构建器并标布局脏）和 `set_count`（只改总数）的分工是
+    /// **动内容 vs 动总数 vs 动来源**：换 builder 或改数据后，已在 `live_` 里的下标会被
+    /// `on_layout` 直接复用、不重跑 builder，故「数据变了但行还是旧文本」需要这一枚显式失效。
+    /// `set_count` 刻意不承担刷新——它的价值正是「范围内存活条目不重建、内部状态原样保留」。
+    ///
+    /// 时机口径：本方法**只置位**，回收排在下一帧布局（与刷新语义相关的一切建树动作同在那一帧
+    /// 发生）。调用栈内不销毁任何控件：数据回调常常与事件派发同栈，当场回收正在被派发的条目
+    /// 是 use-after-free 的形状，故一律推迟。
+    ///
+    /// 不动的东西：`count` / 滚动偏移 / `restore_key` / snap 配置全部原样（刷新的是内容不是位置）；
+    /// 焦点若落在被回收条目上则随之失效，与 `set_count` 的回收**同口径**（`FocusManager` 持弱引用），
+    /// 宿主若需保留焦点应先把焦点移到别的条目上。
+    /// @note Side-effects: marks layout dirty; live items are recycled on the next layout pass
+    /// @note Thread: main-thread only
+    auto invalidate_items() -> void {
+        invalidate_pending_ = true;
+        mark_needs_layout();
+        mark_needs_paint();
     }
 
     /// @brief 滚轮滚动。
@@ -466,6 +539,13 @@ class LazyList : public Widget {
         viewport_height_ = self.height;
         // 滚动位置恢复（首次可滚动布局时生效）——须在计算可见窗口之前，使恢复在本帧即生效。
         maybe_restore_scroll();
+
+        // 条目刷新的落地处：整表回收存活实例，随后按当前窗口与当前 builder 重建。
+        // 回收排在这里而不是 `invalidate_items()` 的调用栈内——数据回调常与事件派发同栈。
+        if (invalidate_pending_) {
+            invalidate_pending_ = false;
+            live_.clear();
+        }
 
         // 计算可见窗口并同步存活实例：新进入的构建、滚出的回收
         const auto [first, last] = visible_range();
@@ -722,6 +802,7 @@ class LazyList : public Widget {
         publish_offset();
         mark_needs_layout();
         mark_needs_paint();
+        fire_scroll_changed();
     }
 
     /// @brief 偏移信号写入（仅当宿主索取过 offset_signal() 且值确实变化）。
@@ -744,6 +825,15 @@ class LazyList : public Widget {
         publish_offset();
         mark_needs_layout();
         mark_needs_paint();
+        fire_scroll_changed();
+    }
+
+    /// @brief 偏移变更回调派发（空回调直接返回；参数与 `scroll_offset()` 同源）。
+    ///        两条落位路径（`apply_offset` / `apply_restored_offset`）共用这一处，通知口径只有一份。
+    auto fire_scroll_changed() const -> void {
+        if (on_scroll_changed_) {
+            on_scroll_changed_(offset_);
+        }
     }
 
     /// @brief 首次可滚动布局时按 `restore_key` 恢复滚动位置；内容尚不可滚动则等待下一帧布局。
@@ -780,6 +870,11 @@ class LazyList : public Widget {
 
     static constexpr float AURORA_SCROLL_STEP = 40.0F;  ///< 每单位滚轮增量对应的 dp
 
+    /// @brief 「末尾」在待定偏移单槽里的表达形态：一枚不可达的大偏移，由首次可滚动布局
+    ///        夹到那一时刻的真实 `max_scroll_offset()`。命名而不用裸字面量，是为了让
+    ///        `scroll_to_end()` 与 `deserialize_props` 共用同一条路径时读得出意图。
+    static constexpr float AURORA_END_OFFSET_SENTINEL = std::numeric_limits<float>::max();
+
     int count_ = 0;
     ItemBuilder builder_;
     float item_extent_ = 48.0F;
@@ -789,6 +884,8 @@ class LazyList : public Widget {
     std::string restore_key_;  ///< 滚动位置保存键（空 = 不参与恢复）
     std::optional<float> pending_offset_;  ///< 显式反序列化的偏移（优先于 restore_key 恢复）
     bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）
+    bool invalidate_pending_ = false;  ///< 条目刷新待落地（invalidate_items 置位，on_layout 消费）
+    std::function<void(float)> on_scroll_changed_;  ///< 偏移变更回调（set_on_scroll_changed 安装）
     std::map<int, Node> live_;  ///< 存活实例：index -> Node（按序遍历便于绘制）
     ScrollSnap snap_;  ///< snap/paging 吸附配置（默认关闭）
     ScrollGlide glide_;  ///< snap 收位 / scroll_to 的短滑动时序
