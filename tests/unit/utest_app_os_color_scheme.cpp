@@ -230,13 +230,13 @@ AURORA_TEST_CASE(framework_leg_unchanged_and_teardown_unbinds_sink) {
 
     surface->emit_os_color_scheme_change(ColorScheme::Dark);
     AURORA_TEST_CHECK_TRUE(host->window()->has_pending_dirty());  // 框架那一半照常置脏
-    AURORA_TEST_CHECK_EQ(seen.size(), 1U);                         // 应用级同时收到一次
+    AURORA_TEST_CHECK_EQ(seen.size(), 1U);  // 应用级同时收到一次
     (void)host->render_frame(0.016);
 
     host->teardown();
     surface->emit_os_color_scheme_change(ColorScheme::Light);
     AURORA_TEST_CHECK_FALSE(host->window()->has_pending_dirty());  // 框架腿已解绑
-    AURORA_TEST_CHECK_EQ(seen.size(), 1U);                         // 应用级上报表同步解绑
+    AURORA_TEST_CHECK_EQ(seen.size(), 1U);  // 应用级上报表同步解绑
 }
 
 AURORA_TEST_CASE(headless_host_without_window_still_aggregates_nothing) {
