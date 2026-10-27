@@ -46,6 +46,8 @@
 | `dispatch_*` / `tick` / `render_to_png(path)` | 程序化派发与离屏渲染 |
 | `window_state()` / `window_mode()` | 响应式 `State<WindowState>&` / `State<WindowMode>&`（在 `Effect` 内读取自动订阅刷新） |
 | `set_on_window_state(cb)` / `set_on_window_mode(cb)` | 命令式回调 |
+| `os_color_scheme_state()` | 响应式 `State<ColorScheme>&`：OS 明暗偏好的应用级当前档，**跨全部宿主聚合去重**（口径见 §6.2） |
+| `set_on_os_color_scheme(cb)` / `refresh_os_color_scheme()` | OS 明暗偏好的命令式回调（同值不触发）/ 显式 seed（现读一次系统偏好写入 State，幂等） |
 | `scheduler()` | 取应用级 `Scheduler` |
 | `animator()` | 取应用级 `Animator &`，由 `run()` 每帧按 `dt` 驱动，供注册动画控制器 |
 | `audio()` / `audio_shared()` | 应用级默认音频上下文（**惰性创建**，`media/audio.h` 图，[`03-layout-render.md`](03-layout-render.md) §9.4）：首次调用构造 `AudioContext` 并启动内置设备后端，未编译/启动失败自动静默模式；典型接线 `player.set_audio_context(app.audio_shared())` |
@@ -479,6 +481,8 @@ if (p.is_mobile() && p.capabilities().multitouch) { /* 启用多指手势 */ }
 
 **OS 明暗偏好查询**：`Platform::color_scheme`（`ColorScheme{Unspecified, Light, Dark}`）承载 OS 档位快照，**须由调用方经 `os_color_scheme()`（`window/platform.h`）显式填充**——读偏好有文件 / 注册表访问副作用，`platform()` 不代做。各平台实现与局限见 `os_color_scheme()` 函数头：Linux 为 GTK 配置文件启发式；Win32（`AppsUseLightTheme`）与 macOS（`NSAppearance`）为**契约注记，未在本仓库无头构建内编译验证**。档位用于明暗三级优先链的最低层（见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。
 
+本自由函数是**无缓存的现读**（每次一记注册表 / 文件访问），供启动期解算与显式探测；运行期跟随不要以轮询它实现——`Application` 聚合后端上报（Win32 = `WM_SETTINGCHANGE`）成应用级读点 `os_color_scheme_state()` / `set_on_os_color_scheme()`，口径与聚合范围见 §6.2。
+
 ---
 
 ## 6 生命周期
@@ -526,11 +530,20 @@ au::Lifecycle(
 
 **聚合范围（既有口径）**：上述两枚 State 与两枚回调**只聚合主窗口**——`register_host` 安装的 state / mode sink 仅在宿主即主窗口时转发；非主窗口的可见性 / 几何态变化只落在自己的宿主快照（`Window::window_state()` / `Window::window_mode()`）上。与 §2.4 的逐窗几何持久化不冲突：几何快照逐窗独立读写（非主窗重启后同样回到自己的几何态），应用级 State 只是主窗的投影。
 
+**OS 明暗偏好是第三枚 State，聚合范围与上面两枚相反。** `State<ColorScheme>& os_color_scheme_state()`（命令式回调 `set_on_os_color_scheme`，显式 seed `refresh_os_color_scheme()`）走同一套「宿主上报表 → 应用级聚合」形态，但 `register_host` 对**每个**宿主都装 sink：OS 档位是**进程级事实**，N 扇窗各自收到同一次系统切换（Win32 逐窗各收一次 `WM_SETTINGCHANGE`）应当在应用级只算一次通知，而「谁是主窗」与系统深浅色无关。去重不靠跨窗记账位，靠聚合出口 `on_os_color_scheme_changed` 的**先比后设**——`State::set` 对相等值照样发信号，故比较必须在转发处（与 `on_window_state_changed` 同款）。第二扇窗收到同值时数值已相等 ⇒ 静默。
+
+三条口径：其一，**初值恒为 `Unspecified`**，构造与宿主登记不为应用级 State 隐式读注册表（与 §5 `platform()` 的「显式查询，跳过探测」同口径；宿主登记时框架自己那一读只推 `Window` 快照，不进应用级 State），启动期解算由应用显式调 `refresh_os_color_scheme()`。其二，**原样透传 OS 原值**（含 `Unspecified`），框架不替应用回落明 / 暗——「系统不表态回哪一档」是应用策略。其三，**转发排在框架那一半之后**（`WindowHost::on_os_color_scheme` 先推 `Window::set_os_color_scheme` + `force_full_redraw`，再报 sink），保证应用看到变化时本窗根主题已同值；`Surface::set_os_color_scheme_handler` 的独占单槽语义不变，应用侧旁听走 sink，不去抢那一枚槽（抢了会顶掉框架的根主题跟随）。`WindowHost::teardown()` 同步置空本表，与另两枚同款。
+
 ```cpp
 app.set_on_window_state([](au::WindowState s) {
     if (s != au::WindowState::Visible) pause_animation();
     else resume_animation();
 });
+
+// OS 深浅色跟随：seed 一次拿启动档，运行期由后端上报驱动（无需轮询注册表）。
+app.refresh_os_color_scheme();
+const au::ColorScheme active = app.os_color_scheme_state().get();  // Unspecified 时应用自行回落
+app.set_on_os_color_scheme([](au::ColorScheme s) { apply_chrome_scheme(s); });
 ```
 
 ### 6.3 无障碍桥的激活与销毁

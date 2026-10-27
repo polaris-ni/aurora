@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-041 |
 | 提出日期 | 2026-10-27 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.APP.MULTI-WINDOW.001 |
 | 影响面 | `include/aurora/app/window_host.h`（新增 OS 明暗上报表 `set_os_scheme_sink`）；`src/aurora/app/window_host.cpp`（`on_os_color_scheme` 转发 + `teardown` 解绑）；`include/aurora/app/application.h`（`os_color_scheme_state()` / `set_on_os_color_scheme()` 公共读点与聚合成员）；`src/aurora/app/application.cpp`（`refresh_os_color_scheme()` 定义 + 逐宿主装表）；`aurora_api.json` 重建；`tests/unit/` 新增一枚测试 TU；`codespec/` 三处回写 |
 
