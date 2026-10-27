@@ -36,13 +36,13 @@ constexpr const char *AURORA_WIN32_HTML_FORMAT_NAME = "HTML Format";
 
 /// @brief 进程唯一的桥状态：剪贴板是**进程级**资源，多窗口共享同一份 owner 与要约。
 struct BridgeState {
-    HWND owner = nullptr;                                  ///< 当前剪贴板 owner 窗口（最近登记者）
-    bool has_offer = false;                                ///< 是否持有惰性提供要约（即是否持有所有权）
-    ClipboardOffer offer;                                  ///< 惰性要约（formats + provide）
+    HWND owner = nullptr;  ///< 当前剪贴板 owner 窗口（最近登记者）
+    bool has_offer = false;  ///< 是否持有惰性提供要约（即是否持有所有权）
+    ClipboardOffer offer;  ///< 惰性要约（formats + provide）
     std::unordered_map<std::string, UINT> mime_to_format;  ///< MIME → 剪贴板格式号（含自注册者）
     std::unordered_map<UINT, std::string> format_to_mime;  ///< 剪贴板格式号 → MIME（反查，供枚举用）
-    bool listening = false;                                ///< 是否已 `AddClipboardFormatListener`
-    int refs = 0;                                          ///< 存活守卫数（归零即注销进程级后端）
+    bool listening = false;  ///< 是否已 `AddClipboardFormatListener`
+    int refs = 0;  ///< 存活守卫数（归零即注销进程级后端）
 };
 
 [[nodiscard]] auto bridge_state() -> BridgeState & {
@@ -86,14 +86,13 @@ struct BridgeState {
 }
 
 [[nodiscard]] auto utf16_to_utf8(const std::u16string &text) -> std::string {
-    const int bytes = WideCharToMultiByte(CP_UTF8, 0, wide_ptr(text), static_cast<int>(text.size()), nullptr, 0,
-                                          nullptr, nullptr);
+    const int bytes =
+        WideCharToMultiByte(CP_UTF8, 0, wide_ptr(text), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
     if (bytes <= 0) {
         return {};
     }
     std::string out(static_cast<std::size_t>(bytes), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wide_ptr(text), static_cast<int>(text.size()), out.data(), bytes, nullptr,
-                        nullptr);
+    WideCharToMultiByte(CP_UTF8, 0, wide_ptr(text), static_cast<int>(text.size()), out.data(), bytes, nullptr, nullptr);
     return out;
 }
 
@@ -218,8 +217,7 @@ auto platform_set_files(const std::vector<std::string> &paths) -> Result<bool> {
     for (const auto &path : paths) {
         const auto converted = utf8_to_utf16(path);
         if (!converted) {
-            return make_error(ErrorCode::ClipboardWriteFailed,
-                              ErrorParams{{"detail", "path is not valid UTF-8"}});
+            return make_error(ErrorCode::ClipboardWriteFailed, ErrorParams{{"detail", "path is not valid UTF-8"}});
         }
         wide.push_back(*converted);
     }
@@ -254,8 +252,7 @@ auto platform_get_files() -> Result<std::vector<std::string>> {
         const auto decoded = clipboard::detail::decode_hdrop(take_bytes(CF_HDROP));
         CloseClipboard();
         if (!decoded) {
-            return make_error(ErrorCode::ClipboardAccessFailed,
-                              ErrorParams{{"detail", "CF_HDROP block is malformed"}});
+            return make_error(ErrorCode::ClipboardAccessFailed, ErrorParams{{"detail", "CF_HDROP block is malformed"}});
         }
         std::vector<std::string> paths;
         paths.reserve(decoded->size());
@@ -310,8 +307,7 @@ auto platform_get_html() -> Result<std::string> {
     const auto parsed = clipboard::detail::parse_html_frame(text);
     if (!parsed) {
         // 跨进程载荷非法：与 clipboard.h 表里「跨进程载荷非法 → ClipboardAccessFailed」同档。
-        return make_error(ErrorCode::ClipboardAccessFailed,
-                          ErrorParams{{"detail", "CF_HTML block is malformed"}});
+        return make_error(ErrorCode::ClipboardAccessFailed, ErrorParams{{"detail", "CF_HTML block is malformed"}});
     }
     return *parsed;
 }
@@ -320,9 +316,9 @@ auto platform_set_offer(const ClipboardOffer &offer) -> Result<void> {
     auto &state = bridge_state();
     if (state.owner == nullptr) {
         // 无 owner 窗口即无 `WM_RENDERFORMAT` 的投递目标：延迟渲染在平台层不成立，如实报错。
-        return make_error(ErrorCode::ClipboardFormatUnsupported,
-                          ErrorParams{{"mime", offer.formats.front()},
-                                      {"detail", "lazy provide needs a clipboard owner window"}});
+        return make_error(
+            ErrorCode::ClipboardFormatUnsupported,
+            ErrorParams{{"mime", offer.formats.front()}, {"detail", "lazy provide needs a clipboard owner window"}});
     }
     if (OpenClipboard(state.owner) == 0) {
         return access_failed("OpenClipboard (set_offer)");
@@ -341,9 +337,9 @@ auto platform_set_offer(const ClipboardOffer &offer) -> Result<void> {
     }
     CloseClipboard();
     if (!declared) {
-        return make_error(ErrorCode::ClipboardFormatUnsupported,
-                          ErrorParams{{"mime", offer.formats.front()},
-                                      {"detail", "none of the offered formats could be declared"}});
+        return make_error(
+            ErrorCode::ClipboardFormatUnsupported,
+            ErrorParams{{"mime", offer.formats.front()}, {"detail", "none of the offered formats could be declared"}});
     }
     state.offer = offer;
     state.has_offer = true;

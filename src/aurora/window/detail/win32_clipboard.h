@@ -55,7 +55,7 @@ class Win32ClipboardBridge {
 
   private:
     bool installed_ = false;  ///< 本实例是否持有一份进程级引用
-    void *hwnd_ = nullptr;    ///< 本实例登记的 owner 窗口（detach 时据此判定是否仍由它持有 owner）
+    void *hwnd_ = nullptr;  ///< 本实例登记的 owner 窗口（detach 时据此判定是否仍由它持有 owner）
 };
 
 /// @brief `WM_RENDERFORMAT`：按格式号找到要约声明的 MIME，调 `provide` 取字节并提交给剪贴板。

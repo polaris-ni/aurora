@@ -47,8 +47,8 @@
 #define NOMINMAX
 #endif
 // NOLINTEND(readability-identifier-naming)
-#include <windows.h>
 #include <shellapi.h>
+#include <windows.h>
 
 #include "aurora/aurora.h"
 #include "aurora/core/log.h"
@@ -106,8 +106,8 @@ auto native_read_files() -> std::vector<std::string> {
             if (copied == 0) {
                 continue;
             }
-            const int bytes = WideCharToMultiByte(CP_UTF8, 0, buffer.data(), static_cast<int>(copied), nullptr, 0,
-                                                  nullptr, nullptr);
+            const int bytes =
+                WideCharToMultiByte(CP_UTF8, 0, buffer.data(), static_cast<int>(copied), nullptr, 0, nullptr, nullptr);
             std::string utf8(static_cast<std::size_t>(bytes), '\0');
             WideCharToMultiByte(CP_UTF8, 0, buffer.data(), static_cast<int>(copied), utf8.data(), bytes, nullptr,
                                 nullptr);
@@ -164,7 +164,7 @@ auto run_auto_stage() -> int {
     emit("[PASS] window created (clipboard owner registered)");
 
     // 2. 文件清单往返（原生 `CF_HDROP` + `DragQueryFileW` 解析）。
-    const std::vector<std::string> paths{R"(C:\Windows\System32\notepad.exe)", R"(D:\docs\report.txt)"};
+    const std::vector<std::string> paths{R"(C:\Windows\System32\notepad.exe)", R"(C:\docs\report.txt)"};
     const auto wrote_files = au::Clipboard::set_files(paths);
     check(wrote_files && wrote_files.value(), "set_files returns Ok(true)");
     const auto native_files = native_read_files();
@@ -275,8 +275,8 @@ auto run_auto_stage() -> int {
 // 豁免异常逃逸：主体已 try/catch 覆盖；`main` 抛异常等价于 terminate，显式标注不改变可观测行为。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
-    const auto cli = aurora_verify::parse_interactive("Win32 clipboard rich-format and lazy-provide live probe", argc,
-                                                      argv);
+    const auto cli =
+        aurora_verify::parse_interactive("Win32 clipboard rich-format and lazy-provide live probe", argc, argv);
     if (!cli.arguments) {
         return cli.exit_code;
     }

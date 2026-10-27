@@ -45,8 +45,7 @@ auto append_utf16_unit(std::vector<std::uint8_t> &out, char16_t unit) -> void {
 }
 
 /// @brief 读取一个小端 `std::uint32_t`；越界即返回 `std::nullopt`（跨进程字节不可信）。
-[[nodiscard]] auto read_u32_at(const std::vector<std::uint8_t> &bytes, std::size_t at)
-    -> std::optional<std::uint32_t> {
+[[nodiscard]] auto read_u32_at(const std::vector<std::uint8_t> &bytes, std::size_t at) -> std::optional<std::uint32_t> {
     if (at > bytes.size() || bytes.size() - at < sizeof(std::uint32_t)) {
         return std::nullopt;
     }
@@ -99,10 +98,10 @@ auto encode_hdrop(const std::vector<std::u16string> &paths) -> std::vector<std::
     std::vector<std::uint8_t> out;
     // `DROPFILES`：`pFiles`(4) + `pt`(8) + `fNC`(4) + `fWide`(4)，四字段皆 4 字节对齐、无填充。
     append_u32(out, static_cast<std::uint32_t>(AURORA_WIN32_DROPFILES_HEADER_BYTES));  // 清单起点
-    append_u32(out, 0U);                                                                 // pt.x
-    append_u32(out, 0U);                                                                  // pt.y
-    append_u32(out, 0U);                                                                  // fNC
-    append_u32(out, 1U);                                                                  // fWide
+    append_u32(out, 0U);  // pt.x
+    append_u32(out, 0U);  // pt.y
+    append_u32(out, 0U);  // fNC
+    append_u32(out, 1U);  // fWide
     for (const auto &path : paths) {
         for (const char16_t unit : path) {
             append_utf16_unit(out, unit);
@@ -148,9 +147,9 @@ auto decode_hdrop(const std::vector<std::uint8_t> &bytes) -> std::optional<std::
             std::u16string entry;
             for (std::size_t k = start; k < i; ++k) {
                 const auto inner = unit_at(bytes, *p_files + (k * 2U));
-            if (inner) {
-                entry.push_back(*inner);
-            }
+                if (inner) {
+                    entry.push_back(*inner);
+                }
             }
             if (!entry.empty()) {
                 paths.emplace_back(std::move(entry));
