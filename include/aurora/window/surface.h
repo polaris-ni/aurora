@@ -74,7 +74,8 @@ enum class WindowVisibility : std::uint8_t {
 /// WM_GETMINMAXINFO；GLFW 映射到对应 window hint（后续接入）。
 /// 对标 Qt WindowStaysOnTopHint/FramelessWindowHint、WPF Topmost/ResizeMode。
 struct WindowStyleOptions {
-    bool always_on_top = false;  ///< 置顶（始终浮在普通窗口之上）
+    bool always_on_top =
+        false;  ///< 置顶（始终浮在普通窗口之上）。仅为初值，运行期改经 `Surface::set_always_on_top()`。
     bool frameless = false;  ///< 无边框（无标题栏/边框；自行实现拖拽/关闭）。等价于 DecorationPolicy::Frameless。
     DecorationPolicy decoration = DecorationPolicy::Auto;  ///< 装饰策略（见 DecorationPolicy）。
     bool transparent = false;  ///< 透明窗口（Win32: WS_EX_LAYERED）
@@ -252,7 +253,13 @@ class Surface {
     /// @brief 程序化移动窗口到屏幕坐标（物理像素）。默认空实现。
     /// 与 `display_id()` / `position()` 配合实现窗口几何的保存与恢复。
     virtual auto set_position(Point /*p*/) -> void {}
-    /// @brief 程序化设置窗口**外框**尺寸（物理像素）。默认空实现。
+    /// @brief 程序化设置窗口尺寸（**逻辑 dp**，语义为**请求的客户区尺寸**）。默认空实现。
+    ///
+    /// 与紧邻的 `set_position`（物理像素直传）**单位不同**，这是刻意分工而非笔误：客户区口径才与
+    /// 「内容要占多大」的产品意图一致，而**外框尺寸由后端按装饰 / 菜单 / CSD 投影自行补偿得出**，
+    /// 调用方无需自己加标题栏或边框的量（Win32 腿的换算链为 逻辑 dp → 物理客户区 → 物理外框，
+    /// 把逻辑值当外框直传会让客户区被 chrome 挤占，标题栏随 DPI 放大时尤甚）。
+    /// 默认空实现的后端只记录该逻辑尺寸（无头），不产生 OS 窗口变化。
     virtual auto set_size(Size /*s*/) -> void {}
 
     /// @brief 注册 DPI 缩放变化回调：窗口被拖到不同缩放比的显示器、或系统缩放变更时触发。
@@ -503,6 +510,47 @@ class Surface {
     /// @note 本槽追加在虚函数段表尾：既有槽位序号不变（ABI 面仅新增一槽，需全量重编）。
     virtual auto set_window_mode(WindowMode /*m*/) -> void {}
 
+    /// @brief 运行期显隐开关：让窗口进入 / 退出用户视野（渲染与像素读回照常工作）。
+    ///
+    /// 与建窗期 `WindowOptions::visibility` 是同一份状态的两侧：那一档就是本开关的初值，
+    /// 运行期改它经本方法。与 `minimize()` 的分工是**语义而非实现细节**：最小化在任务栏留痕、
+    /// 带还原动画、还原腿依赖 OS；隐藏不留痕——下拉式（quake 型）面板要的正是后者。
+    /// `raise()` / `focus_window()` 对已隐藏窗口都不产生「窗口出现」，呼出后需要焦点请另调
+    /// `focus_window()`（显示档刻意**不抢焦点**，与 `WindowVisibility::NoActivate` 同口径：
+    /// 全局热键一按就打断用户当前输入是不可接受的）。
+    /// 可见性变化会进入 `WindowState` 推导（不在屏上 ⇒ `Hidden`，见 `compute_window_state`）。
+    /// @note 默认空实现 = 该后端未接线（源码兼容：自定义 Surface 派生类零改即可编译）。
+    ///       是否接线可**先查询**：`platform().capabilities().runtime_visibility`——
+    ///       不做成「按了没反应还无从知道」的静默 no-op。
+    /// @note 本槽追加在虚函数段表尾：既有槽位序号不变（ABI 面仅新增槽，需全量重编）。
+    /// @note 入参 `on`：true 显示窗口，false 隐藏窗口（同值重复调用应幂等，不重发 OS 调用）。
+    ///       默认实现刻意不命名该形参（空实现不用它），故以上一条 `@note` 而非 `@param` 申报。
+    virtual auto set_visible(bool /*on*/) -> void {}
+
+    /// @brief 当前是否在用户视野内（`set_visible` 的读回）。
+    ///
+    /// 答的是 **OS 实际态**而非应用意图：接线后端按 OS 查询回读（Win32 `IsWindowVisible`），
+    /// 因此「刚调过 `set_visible(true)` 但被会话策略挡下」也如实报当前值。
+    /// @note 基类默认 true 与默认空 setter 配对——未接线后端「没有隐藏过」是诚实答案。
+    /// @return 在屏上为 true；默认 true。
+    [[nodiscard]] virtual auto is_visible() const -> bool { return true; }
+
+    /// @brief 运行期置顶开关：窗口是否恒浮于普通窗口之上。
+    ///
+    /// 与建窗期 `WindowStyleOptions::always_on_top` 同源（那一档就是本开关的初值）。
+    /// 切换不得产生窗口移动、尺寸变化或激活（Win32 落 `SetWindowPos(HWND_TOPMOST /
+    /// HWND_NOTOPMOST, ..., SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)`）。
+    /// Wayland 无核心协议对应，属「可查询的不支持」（`capabilities().runtime_always_on_top` 为 false）。
+    /// @note 默认空实现 = 该后端未接线；本槽追加在虚函数段表尾（ABI 面仅新增槽）。
+    /// @note 入参 `on`：true 置顶，false 取消置顶（同值重复调用应幂等）。默认实现不用该形参，
+    ///       故以 `@note` 申报而不写 `@param`。
+    virtual auto set_always_on_top(bool /*on*/) -> void {}
+
+    /// @brief 当前是否置顶（`set_always_on_top` 的读回，接线后端按 OS 扩展样式回读）。
+    /// @note 基类默认 false（未接线后端从未置顶）。
+    /// @return 置顶为 true；默认 false。
+    [[nodiscard]] virtual auto is_always_on_top() const -> bool { return false; }
+
   protected:
     /// @brief 上报当前窗口可见性状态（由真实后端在状态变化时调用）。
     /// @param s 新的可见性状态。
@@ -711,6 +759,31 @@ class HeadlessSurface : public Surface {
     /// @param s 窗口尺寸。
     auto set_size(Size s) -> void override { size_ = s; }
 
+    /// @brief 记录显隐态并**上报对应窗口状态**（运行期显隐的无头观测点）。
+    ///
+    /// 与真实后端的差别只在「谁在改」：这里没有 OS 会话，故 `is_visible()` 直接答记录值，
+    /// 状态上报按 `compute_window_state` 的「不在屏 ⇒ Hidden」同口径给出，使
+    /// 「显隐 → `WindowState` → 应用级投影」这条链在无头 CI 可断言，不依赖真机会话。
+    /// 同值重复调用不产生第二次上报——与 Win32 腿的幂等（同值不重发 `ShowWindow`）保持同一口径。
+    /// @param on true 显示、false 隐藏（经 `notify_window_state` 上报 Visible / Hidden）。
+    auto set_visible(bool on) -> void override {
+        if (visible_ == on) {
+            return;
+        }
+        visible_ = on;
+        notify_window_state(on ? WindowState::Visible : WindowState::Hidden);
+    }
+    /// @brief 读回记录的显隐态。
+    /// @return 最近一次 set_visible 的值；初值 true（建窗期未声明隐藏）。
+    [[nodiscard]] auto is_visible() const -> bool override { return visible_; }
+
+    /// @brief 记录置顶意图（运行期置顶的无头观测点；无 OS z 序副作用）。
+    /// @param on 是否置顶。
+    auto set_always_on_top(bool on) -> void override { always_on_top_ = on; }
+    /// @brief 读回记录的置顶态。
+    /// @return 最近一次 set_always_on_top 的值；初值 false。
+    [[nodiscard]] auto is_always_on_top() const -> bool override { return always_on_top_; }
+
     /// @brief 测试 seams：模拟 DPI 缩放变化（窗口被拖到不同缩放比的显示器）。
     /// @param scale 模拟的新缩放因子（经 notify_scale_change 触发回调）。
     auto emit_scale_change(float scale) const -> void { notify_scale_change(scale); }
@@ -741,6 +814,8 @@ class HeadlessSurface : public Surface {
     int display_id_ = -1;  ///< 设定值（模拟所在显示器）。
     Point origin_{};  ///< 模拟的屏幕位置（几何持久化测试观测点）。
     WindowMode window_mode_ = WindowMode::Normal;  ///< set_window_mode 记录的目标态（无头观测点）。
+    bool visible_ = true;  ///< 显隐记录值（`set_visible` seam；初值 true = 未隐藏）。
+    bool always_on_top_ = false;  ///< 置顶记录值（`set_always_on_top` seam；初值 false = 未置顶）。
     std::vector<CursorShape> cursor_log_;  ///< 悬停光标下发序列（无头验收入口；见 set_cursor）。
 };
 #endif  // AURORA_BACKEND_HEADLESS

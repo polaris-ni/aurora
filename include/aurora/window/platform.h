@@ -49,6 +49,24 @@ struct PlatformCapabilities {
     /// 实写是其前置）；`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：Linux 侧无 OS 级
     /// 菜单栏机制（GNOME 取消全局菜单、GTK4 窗口内自绘即 GTK 同款形态），回落自绘 `MenuBar`，故如实缺位。
     bool native_menu_bar = false;
+    /// @brief 存在 OS 运行期显隐机制，且本库已把 `Surface::set_visible()` / `is_visible()` 接到该机制。
+    ///
+    /// 能力位只表「机制是否存在且已接线」：与运行期失败不互相替代（同 `system_drag_in` 口径）。
+    /// **只在桥已落地的方向翻位**——Win32 / D3D11 共用同一 `Win32Host`
+    /// （`ShowWindow(SW_SHOWNA / SW_HIDE)`），故同翻；wgpu 是**渲染后端偏好**而非独立
+    /// `SurfaceKind`（其宿主仍是 Win32），不在此单列。其余恒 false：`X11` 的 `XMapWindow` /
+    /// `XUnmapWindow` 与 `Glfw` 的 `glfwHideWindow` / `glfwShowWindow` 机制在但本库未接线，
+    /// `Wayland` 没有「隐藏顶层窗口」的核心协议（只有 minimize），`MacOS` 无窗口壳，`Wasm` 的
+    /// canvas 没有窗口可见性概念，`Headless` 是记录值 seam 而非 OS 机制。缺位平台上
+    /// `set_visible()` 是可观测的 no-op（`is_visible()` 保持基类默认 `true`），不静默。
+    bool runtime_visibility = false;
+    /// @brief 存在 OS 运行期置顶机制，且本库已把 `Surface::set_always_on_top()` 接到该机制。
+    ///
+    /// 翻位口径同 `runtime_visibility`：仅 Win32 / D3D11（同一宿主的 `SetWindowPos(HWND_TOPMOST /
+    /// HWND_NOTOPMOST)`，wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）；`Wayland` 无核心协议对应
+    /// （其置顶属 `xdg_window` 的扩展或 compositor 策略，本库不引），`X11` 需 `_NET_WM_STATE_ABOVE`
+    /// 客户机消息、`Glfw` 需 `glfwSetWindowAttrib(GLFW_FLOATING)`，两者机制在但未接线，故如实缺位。
+    bool runtime_always_on_top = false;
 };
 
 /// @brief 平台与运行环境快照（显式查询，跳过 Surface 探测，specification/06-app-platform.md §5）。
@@ -81,7 +99,9 @@ struct Platform {
     /// 在 Win32/Glfw/X11/Wayland/MacOS 五类真实显示 Surface 下为 true；`system_drag_in` / `system_drag_out`
     /// 仅在已接线的后端下为 true（当前为 Win32 / D3D11 / X11 / Wayland / MacOS，两方向同口径；
     /// 未接线的方向不预先声称支持）；`recent_documents_os_projection` 仅在已落 OS 投影桥的后端下为
-    /// true（当前仅 Win32 / D3D11；macOS 桥落地后再翻）。
+    /// true（当前仅 Win32 / D3D11；macOS 桥落地后再翻）；`runtime_visibility` 与
+    /// `runtime_always_on_top` 同样仅在已接运行期窗口开关的后端下为 true（当前仅 Win32 / D3D11，
+    /// 其余后端为「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）。
     [[nodiscard]] auto capabilities() const -> PlatformCapabilities {
         // 待填充的能力标志聚合：默认值起步，先按设备形态、再按 SurfaceKind 逐项置位。
         PlatformCapabilities c;
@@ -125,6 +145,14 @@ struct Platform {
         // false——桥未落地即不预翻（机制缺位若谎报为「在」，`NativeMenuBar::install` 会在 macOS
         // 静默失败且调用方无从降级）。Linux 三形态与 Glfw / Wasm / Headless 恒 false：无 OS 级菜单栏机制。
         c.native_menu_bar = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
+        // 运行期显隐 / 置顶：仅 Win32 / D3D11 接线（同一 `Win32Host` 的 `ShowWindow` 与
+        // `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，两者共用宿主故同翻）。其余后端本批不接线：
+        // X11 / Glfw 机制在而未落桥，Wayland 无「隐藏顶层窗口」与「置顶」的核心协议，macOS 无窗口壳，
+        // Wasm 的 canvas 无窗口可见性概念，Headless 是记录值 seam 而非 OS 机制——缺位时
+        // `set_visible` / `set_always_on_top` 为可观测的 no-op（`is_visible()` 恒为基类默认 true），
+        // 应用据此降级或申报不支持，而不是「按了没反应还无从知道」。
+        c.runtime_visibility = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
+        c.runtime_always_on_top = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
         return c;
     }
 };

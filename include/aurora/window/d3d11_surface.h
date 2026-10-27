@@ -139,9 +139,21 @@ class D3D11Surface : public Surface {
     /// @brief 与 Win32Surface 同源：程序化移动窗口。
     /// @param p 目标左上角屏幕坐标（物理像素）。
     auto set_position(Point p) -> void override { win_->set_position(p); }
-    /// @brief 与 Win32Surface 同源：程序化设置外框尺寸。
-    /// @param s 目标外框尺寸（物理像素）。
+    /// @brief 与 Win32Surface 同源：程序化设置窗口尺寸（逻辑 dp，客户区口径）。
+    /// @param s 目标客户区尺寸（逻辑 dp）。
     auto set_size(Size s) -> void override { win_->set_size(s); }
+    /// @brief 与 Win32Surface 同源：运行期显隐（共用同一 `Win32Host`，故行为与读回一致）。
+    /// @param on true 显示（不抢焦点）、false 隐藏。
+    auto set_visible(bool on) -> void override { win_->set_visible(on); }
+    /// @brief 与 Win32Surface 同源：当前是否在屏上。
+    /// @return 在屏上为 true。
+    [[nodiscard]] auto is_visible() const -> bool override { return win_->is_visible(); }
+    /// @brief 与 Win32Surface 同源：运行期置顶。
+    /// @param on true 置顶、false 取消置顶。
+    auto set_always_on_top(bool on) -> void override { win_->set_always_on_top(on); }
+    /// @brief 与 Win32Surface 同源：当前是否置顶。
+    /// @return 置顶为 true。
+    [[nodiscard]] auto is_always_on_top() const -> bool override { return win_->is_always_on_top(); }
     /// @brief 与 Win32Surface 同源：DPI 缩放变化回调。
     /// @param h 缩放变化回调，参数为变化后的缩放因子。
     auto set_scale_change_handler(ScaleChangeHandler h) -> void override {

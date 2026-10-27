@@ -183,9 +183,27 @@ class Win32Host {
     /// @brief 程序化移动窗口（`SetWindowPos`，物理像素）。
     /// @param p 目标左上角位置（物理像素）。
     auto set_position(Point p) const -> void;
-    /// @brief 程序化设置窗口**外框**尺寸（`SetWindowPos`，物理像素）。
-    /// @param s 目标外框尺寸（物理像素）。
+    /// @brief 程序化设置窗口尺寸（**逻辑 dp**，语义为请求的**客户区**尺寸；`Surface::set_size` 同口径）。
+    /// @param s 目标客户区尺寸（逻辑 dp；外框由本类按装饰 / 菜单 / CSD 补偿自行算出）。
     auto set_size(Size s) const -> void;
+    /// @brief 运行期显隐：`ShowWindow(hwnd, on ? SW_SHOWNA : SW_HIDE)`。
+    ///
+    /// 显示档取 `SW_SHOWNA`（显示但不激活），与建窗期 `WindowVisibility::NoActivate` 同口径——
+    /// 全局热键呼出不应打断用户当前输入，要焦点由调用方另调 `focus_window()`。
+    /// 同值重复调用幂等（不发第二次 OS 调用）；状态上报经 `update_window_state` 走
+    /// 「不在屏 ⇒ Hidden」的推导，故隐藏期间即使 OS 送来失焦消息也不会报成 `Occluded`。
+    /// @param on true 显示、false 隐藏。
+    auto set_visible(bool on) const -> void;
+    /// @brief 当前是否在用户视野内（`IsWindowVisible` 实值回读，非应用意图缓存）。
+    /// @return 在屏上为 true；句柄失效时按不可见处理返回 false。
+    [[nodiscard]] auto is_visible() const -> bool;
+    /// @brief 运行期置顶：`SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST, ..., SWP_NOMOVE |
+    /// SWP_NOSIZE | SWP_NOACTIVATE)`——切换不产生移动、尺寸变化或激活。同值幂等。
+    /// @param on true 置顶、false 取消置顶。
+    auto set_always_on_top(bool on) const -> void;
+    /// @brief 当前是否置顶（`GWL_EXSTYLE & WS_EX_TOPMOST` 实值回读）。
+    /// @return 置顶为 true。
+    [[nodiscard]] auto is_always_on_top() const -> bool;
     /// @brief 注册 DPI 缩放变化回调：`WM_DPICHANGED` 处理后上报新的 `scale_factor`。
     /// @param h 缩放变化处理器，参数为新的缩放因子。
     auto set_scale_change_handler(std::function<void(float)> h) const -> void;

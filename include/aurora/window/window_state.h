@@ -68,12 +68,18 @@ enum class WindowMode : std::uint8_t {
     return "Normal";
 }
 
-/// @brief 由「是否最小化」与「是否前台激活」推导窗口可见性状态（统一 Win32/GLFW 映射，可单测）。
+/// @brief 由「是否最小化」「是否前台激活」「是否在屏上」推导窗口可见性状态（统一各后端映射，可单测）。
+///
+/// 第三形参 `on_screen` 是后加的：`WindowState::Hidden` 的定义本就含「不可见」，而运行期显隐开关
+/// （`Surface::set_visible(false)`）在 Win32 落 `SW_HIDE` 时**还会同步带进一条失焦激活消息**——
+/// 只按 `minimized` / `active` 推导会把「隐藏」报成「被遮挡」，比不报更糟。把它做成推导输入而非
+/// 事后补丁，同一函数即可把两条通道归一。
 /// @param minimized 窗口是否最小化（WM_SIZE SIZE_MINIMIZED / GLFW iconify）。
 /// @param active    窗口是否前台激活（WM_ACTIVATE 非 WA_INACTIVE / GLFW focus）。
-/// @return 最小化时为 Hidden；否则激活为 Visible、失焦为 Occluded。
-[[nodiscard]] inline auto compute_window_state(bool minimized, bool active) -> WindowState {
-    if (minimized) {
+/// @param on_screen 窗口当前是否在用户视野内（默认 true：不接线该概念的后端按旧两形参口径逐位不变）。
+/// @return 不在屏上或最小化时为 Hidden；否则激活为 Visible、失焦为 Occluded。
+[[nodiscard]] inline auto compute_window_state(bool minimized, bool active, bool on_screen = true) -> WindowState {
+    if (!on_screen || minimized) {
         return WindowState::Hidden;
     }
     return active ? WindowState::Visible : WindowState::Occluded;

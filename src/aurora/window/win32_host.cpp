@@ -452,7 +452,8 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
                          static_cast<int>(std::lround(fix_size.height)), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
         if (style.always_on_top) {
-            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            // `SWP_NOACTIVATE`：置顶是 z 序属性，不该顺带激活窗口（与运行期 `set_always_on_top` 同口径）。
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
         // 可见性策略：构造期一次定档，避免「先可见后隐藏」造成的一帧闪烁。
         // 窗口本就以无 WS_VISIBLE 的 WS_OVERLAPPEDWINDOW 创建，Hidden 档显式隐藏以固化语义。
@@ -467,6 +468,12 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
                 ShowWindow(hwnd, SW_SHOW);
                 break;
         }
+        // 状态基线按**真实可见性**播种（不是上报——此刻 handler 尚未安装，播种不产生任何通知，
+        // 故既有上报序列逐位不变）。以 `Visible` 起步而窗口其实 `SW_HIDE`，则第一次真实变化会被
+        // 「与上次相同」的去重吞掉；`NoActivate` 档同理：显示但未激活，初值应为 `Occluded`。
+        // 运行期 `set_visible(false)` 与建窗 `Hidden` 档因此读回同一个值。
+        active = visibility == WindowVisibility::Normal;
+        state = compute_window_state(false, active, visibility != WindowVisibility::Hidden);
         UpdateWindow(hwnd);
         // IMM32 组合桥：桥自身只吃 WM_IME_*，无输入法时一条也不来，故随窗口直接构造。
         ime = std::make_unique<detail::Win32ImeBridge>(
@@ -619,7 +626,13 @@ auto Win32Host::Impl::on_char(std::uint32_t ch) const -> void {
 }
 
 auto Win32Host::Impl::update_window_state() -> void {
-    const WindowState want = compute_window_state(minimized, active);
+    // 「是否在屏上」是第三枚输入：`SW_HIDE`（运行期 `set_visible(false)`）与最小化一样属
+    // `WindowState::Hidden` 的定义域。更关键的是 Win32 在 `SW_HIDE` 时会同步派发
+    // `WM_ACTIVATE(WA_INACTIVE)`，只按 minimized/active 推导会把「隐藏」改写成「被遮挡」。
+    // 读 `IsWindowVisible` 而非自维护一份意图位：本函数与 setter 改的是同一个 OS 状态，
+    // 读它就等于读自己刚写下的值，不需要第二份真值源（最小化窗口仍返回 TRUE，旧口径不受影响）。
+    const bool on_screen = hwnd != nullptr && IsWindowVisible(hwnd) != FALSE;
+    const WindowState want = compute_window_state(minimized, active, on_screen);
     if (want != state) {
         state = want;
         if (window_state_handler) {
@@ -1547,6 +1560,42 @@ auto Win32Host::set_size(Size s) const -> void {
                                                    pimpl_->csd_title || pimpl_->csd_border);
     SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, static_cast<int>(std::lround(win_size.width)),
                  static_cast<int>(std::lround(win_size.height)), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+auto Win32Host::set_visible(bool on) const -> void {
+    if (pimpl_->hwnd == nullptr) {
+        return;
+    }
+    // 幂等：先读 OS 实值，同值不再发第二次 `ShowWindow`——重复 `SW_HIDE` / `SW_SHOWNA` 会各自
+    // 带一条 `WM_WINDOWPOSCHANGED`（进而一条多余的同步重渲染），而语义上没有任何东西要变。
+    if ((IsWindowVisible(pimpl_->hwnd) != FALSE) == on) {
+        return;
+    }
+    // 显示档取 `SW_SHOWNA`（显示但不激活）：热键呼出面板不该打断用户当前输入，
+    // 需要焦点由调用方另调 `focus_window()`（与建窗期 NoActivate 档同口径）。
+    ShowWindow(pimpl_->hwnd, on ? SW_SHOWNA : SW_HIDE);
+    // 状态经同一条推导上报：隐藏 ⇒ Hidden，显示 ⇒ 按当时 minimized/active 重算。
+    pimpl_->update_window_state();
+}
+
+auto Win32Host::is_visible() const -> bool { return pimpl_->hwnd != nullptr && IsWindowVisible(pimpl_->hwnd) != FALSE; }
+
+auto Win32Host::set_always_on_top(bool on) const -> void {
+    if (pimpl_->hwnd == nullptr) {
+        return;
+    }
+    const bool now = (GetWindowLongPtrA(pimpl_->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+    if (now == on) {
+        return;  // 同值幂等，理由见 `set_visible`
+    }
+    // `SWP_NOACTIVATE`：置顶属 z 序属性，不该顺带激活窗口；`SWP_NOMOVE | SWP_NOSIZE` 保证
+    // 切换不改几何（否则「置顶一下」会把窗口拽回原位或改尺寸）。
+    SetWindowPos(pimpl_->hwnd, on ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+auto Win32Host::is_always_on_top() const -> bool {
+    return pimpl_->hwnd != nullptr && (GetWindowLongPtrA(pimpl_->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 }
 
 }  // namespace aurora

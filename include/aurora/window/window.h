@@ -162,6 +162,10 @@ struct WindowOptions {
     RendererPreference renderer = RendererPreference::Auto;  ///< 上屏后端偏好。
 
     /// @brief 窗口可见性策略（默认 `Normal` = 行为不变）。
+    ///
+    /// 本档只是**初值**：它定的是「窗口第一次上屏时怎样」，运行期的显隐走
+    /// `Window::set_visible()` / `Surface::set_visible()`（读回 `is_visible()`），
+    /// 二者是同一份 OS 状态的两侧，不存在「建窗档改不了」的限制。
     WindowVisibility visibility = WindowVisibility::Normal;
 
     /// @brief 窗口角色（多窗口生命周期语义，见 `WindowRole`；默认 `Main` 保证单窗口用法行为不变）。
@@ -530,6 +534,31 @@ class Window {
             surface_->set_fullscreen(on);
         }
     }
+    /// @brief 运行期显隐：让窗口进入 / 退出用户视野（透传 `Surface::set_visible`）。
+    ///
+    /// 与 `minimize()` 的分工见 `Surface::set_visible`：隐藏不留任务栏痕迹。
+    /// `WindowOptions::visibility` 是本开关的**初值**，运行期改它走这里。
+    /// 后端是否接线该机制可先查询：`platform().capabilities().runtime_visibility`。
+    /// @param on true 显示（接线后端不抢焦点）、false 隐藏。
+    auto set_visible(bool on) const -> void {
+        if (surface_) {
+            surface_->set_visible(on);
+        }
+    }
+    /// @brief 当前是否在用户视野内（透传 `Surface::is_visible`；无 Surface 时按可见处理）。
+    /// @return 在屏上为 true。
+    [[nodiscard]] auto is_visible() const -> bool { return !surface_ || surface_->is_visible(); }
+    /// @brief 运行期置顶开关（透传 `Surface::set_always_on_top`）。
+    /// `WindowStyleOptions::always_on_top` 是本开关的**初值**；切换不产生移动、尺寸变化或激活。
+    /// @param on true 置顶、false 取消置顶。
+    auto set_always_on_top(bool on) const -> void {
+        if (surface_) {
+            surface_->set_always_on_top(on);
+        }
+    }
+    /// @brief 当前是否置顶（透传 `Surface::is_always_on_top`；无 Surface 时为 false）。
+    /// @return 置顶为 true。
+    [[nodiscard]] auto is_always_on_top() const -> bool { return surface_ && surface_->is_always_on_top(); }
     /// @brief 控件发起窗口拖拽移动（如自绘标题栏空白区按下）。
     auto begin_window_move() const -> void {
         if (surface_) {
