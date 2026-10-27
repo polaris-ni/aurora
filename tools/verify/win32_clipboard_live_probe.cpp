@@ -47,8 +47,12 @@
 #define NOMINMAX
 #endif
 // NOLINTEND(readability-identifier-naming)
+// `shellapi.h` 的 `HDROP` / `DragQueryFileW` 依赖 `windows.h` 先行（MSVC 下顺序颠倒会在 SDK 头
+// 上炸出大量 C4430/C2146 连锁），而 SortIncludes 会按字母序把它排到前面，故此处关掉重排。
+// clang-format off
 #include <windows.h>
-#include <shellapi.h>  // `HDROP` / `DragQueryFileW`（须在 `windows.h` 之后，MSVC 下先行即炸）
+#include <shellapi.h>
+// clang-format on
 
 #include "aurora/aurora.h"
 #include "aurora/core/log.h"
