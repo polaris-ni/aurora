@@ -3,6 +3,7 @@
 // 折算规则与字段保真见 `menu_bar_translate.h` 文件头；本文件只做落地，不另立口径。
 #include "aurora/window/detail/menu_bar_translate.h"
 
+#include <optional>
 #include <utility>
 
 namespace aurora::menu_bar_translate {
