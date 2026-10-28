@@ -4,7 +4,7 @@
 | :--- | :--- |
 | 变更编号 | CHG-027 |
 | 提出日期 | 2026-10-20 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.APP.SYSTEM-DRAG-DROP.001 |
 | 影响面 | `include/aurora/window/platform.h`（`system_drag_in` / `system_drag_out` 能力位按方向翻位与 `capabilities()` 聚合）、`src/aurora/window/detail/` 新增折算层 system_drag_translate 与 Win32 桥 win32_drag 各一对 h/cpp、X11 / Wayland 桥内联于 `src/aurora/window/x11_surface.cpp` / `wayland_surface.cpp` 的 `Impl`、`src/aurora/window/win32_host.cpp`（窄路径移除与桥持有）、`src/aurora/window/macos_surface.cpp`、`tools/verify/` 新增三枚真机探针（win32 / x11 / wayland 各一枚 drag_live_probe）、`tests/unit/` 新增 utest_system_drag_translate 与既有四份（`tests/unit/utest_drag_payload.cpp`、`tests/unit/utest_drag_drop.cpp`、`tests/unit/utest_dispatcher.cpp`、`tests/unit/utest_application.cpp`）、`codespec/ARCHITECTURE.md`、`codespec/specification/05-event-navigation.md`、`codespec/specification/06-app-platform.md`、`codespec/SPECIFICATIONS.md`、`codespec/manual-test/` 新增第 24 卷 systemdrag；无新增公共 API 符号 / 枚举 / 错误码（六枚 slug 已在 `codespec/errors.toml`），`aurora_api.json` 预期零差异；另记 CHANGELOG.md（不属 codespec 树，不列为回写落点） |
 
