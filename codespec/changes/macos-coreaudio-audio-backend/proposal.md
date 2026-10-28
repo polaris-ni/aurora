@@ -1,8 +1,8 @@
-# CHG-041 macOS 音频设备后端：CoreAudio 补上第四足
+# CHG-045 macOS 音频设备后端：CoreAudio 补上第四足
 
 | 字段 | 值 |
 | :--- | :--- |
-| 变更编号 | CHG-041 |
+| 变更编号 | CHG-045 |
 | 提出日期 | 2026-10-27 |
 | 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 |
