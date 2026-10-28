@@ -12,12 +12,14 @@
 #                    WGL 通用驱动无法建 GPU 上下文
 #   ubuntu-latest  : X11 ✓（35ms）、GLFW ✓（1245ms，llvmpipe 软件 GL；GLFW 源码构建
 #                    需补 wayland-scanner 等 Wayland 依赖）
-#   macos-latest   : GLFW ✗——无人值守会话无窗口系统
+#   macos-latest   : GLFW ✗——无人值守会话无窗口系统；AppKit 后端从未在该 runner 上
+#                    跑过一次，本轮起本 job 把 AppKit 编进来一并探（结论待本次实测）
 #
 # 平台 × 后端矩阵（沿用实测口径）：
 #   windows-latest : Win32（GDI）+ D3D11 + GLFW，Hidden 档
 #   ubuntu-latest  : X11 + GLFW（xvfb-run 虚拟显示）
-#   macos-latest   : GLFW（macOS runner 无人值守会话，验证结果供回归对照）
+#   macos-latest   : AppKit + GLFW（macOS runner 无人值守会话，验证结果供回归对照；
+#                    期望集仍为空，AppKit 是否可用以本 job 日志为准再决定是否进取望集）
 #
 # 构建配置显式 -DAURORA_ENABLE_DEBUG=ON：Surface::data() 读回在 Win32 家族 / X11 /
 # Wayland / wgpu 回退帧 / GLFW-GPU 上受该宏门控（Release AUTO 不注入即不可读回，
