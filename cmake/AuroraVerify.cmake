@@ -55,6 +55,12 @@ if (AURORA_BUILD_VERIFY_TOOLS)
 
     set(_aurora_verify_targets "")
 
+    # ---- 链路态（ConnectivityMonitor）：真实路由 / 接口表上的三档读数 ----
+    # 与后端无关：Windows 走 `IpHelper`、Linux 走 `LinkFiles`、其余构建如实回 `None`（退出码 2）。
+    # 三段式（拔线 / 恢复）由 `--expect auto|offline|online` 分段驱动，自动段不需要人工动作。
+    aurora_add_verify_probe(aurora_verify_net_connectivity "${_aurora_verify_dir}/net_connectivity_live_probe.cpp")
+    list(APPEND _aurora_verify_targets aurora_verify_net_connectivity)
+
     # ---- X11 光标（Linux/BSD 桌面）：XFIXES 读回屏幕上真实显示的光标 ----
     if (AURORA_BACKEND_X11)
         aurora_add_verify_probe(aurora_verify_x11_cursor "${_aurora_verify_dir}/x11_cursor_live_probe.cpp")

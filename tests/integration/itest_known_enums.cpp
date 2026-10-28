@@ -43,6 +43,9 @@ namespace {
            static_cast<int>(au::Orientation::Vertical) + static_cast<int>(au::SplitterOrientation::Horizontal) +
            static_cast<int>(au::ToastPosition::Top) + static_cast<int>(au::LegendPosition::Right) +
            static_cast<int>(aurora::net::AddressFamily::LocalPath) +
+           static_cast<int>(aurora::net::ConnectivityChangeCause::StalenessMarked) +
+           static_cast<int>(aurora::net::ConnectivitySource::LinkFiles) +
+           static_cast<int>(aurora::net::NetworkState::Offline) +
            static_cast<int>(aurora::net::LengthByteOrder::Little) + static_cast<int>(aurora::net::ProxyKind::Socks5) +
            static_cast<int>(aurora::net::ShutdownMode::Both) + static_cast<int>(aurora::net::TlsVersion::Tls13) +
            static_cast<int>(aurora::net::WsMessageKind::Binary) + static_cast<int>(aurora::net::http::Method::Delete) +
