@@ -115,6 +115,7 @@
 #include "aurora/net/blocking.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/capabilities.h"
+#include "aurora/net/connectivity.h"
 #include "aurora/net/datagram.h"
 #include "aurora/net/engine.h"
 #include "aurora/net/framer.h"

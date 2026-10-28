@@ -307,8 +307,10 @@ target_link_libraries(aurora PUBLIC freetype harfbuzz)
 # bcrypt：系统熵源（src/aurora/net/random.cpp 的 Windows 腿，`BCryptGenRandom`）。它与 TLS 无关，
 # 故挂在顶层而非 cmake/AuroraNetTls.cmake 的 provider 块内——那一条只在 Schannel 开着时才链，
 # 而随机面是 WebSocket 掩码、multipart 边界与链路标识的共同底座，不能跟着一条可选的 TLS 配置走。
+# iphlpapi：链路态 Windows 采集腿（src/aurora/net/socket.cpp 的 `probe_default_route_win32` 查
+# 路由表 / 接口表 `GetIpForwardTable2` / `GetIfTable2` / `FreeMibTable`），与后端无关、恒编译。
 if (WIN32)
-    target_link_libraries(aurora PUBLIC ws2_32 advapi32 bcrypt winhttp)
+    target_link_libraries(aurora PUBLIC ws2_32 advapi32 bcrypt winhttp iphlpapi)
 endif ()
 # SystemConfiguration / CoreFoundation：同一采集腿的 macOS 分支读动态存储里的系统代理，
 # 与后端无关（AURORA_BACKEND_MACOS 关闭时该腿照样编译），故挂在顶层。

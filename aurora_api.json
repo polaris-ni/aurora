@@ -5011,6 +5011,26 @@
       ]
     },
     {
+      "name": "ConnectivityChangeCause",
+      "values": [
+        "SubscriptionStart",
+        "PeriodicSample",
+        "FailureEvidence",
+        "SuccessfulConnect",
+        "HostRefresh",
+        "StalenessMarked"
+      ]
+    },
+    {
+      "name": "ConnectivitySource",
+      "values": [
+        "None",
+        "IpHelper",
+        "DynamicStore",
+        "LinkFiles"
+      ]
+    },
+    {
       "name": "CrossAxisAlignment",
       "values": [
         "Start",
@@ -5291,6 +5311,14 @@
         "Put",
         "Patch",
         "Delete"
+      ]
+    },
+    {
+      "name": "NetworkState",
+      "values": [
+        "Unknown",
+        "Online",
+        "Offline"
       ]
     },
     {

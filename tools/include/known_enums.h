@@ -169,6 +169,10 @@ namespace aurora::tools {
 
     // ---- network (aurora::net public enums; not widget property types, but AI-enumerable API surface) ----
     enums["AddressFamily"] = {"IPv4", "IPv6", "LocalPath"};
+    enums["ConnectivityChangeCause"] = {"SubscriptionStart", "PeriodicSample", "FailureEvidence",
+                                        "SuccessfulConnect", "HostRefresh",    "StalenessMarked"};
+    enums["ConnectivitySource"] = {"None", "IpHelper", "DynamicStore", "LinkFiles"};
+    enums["NetworkState"] = {"Unknown", "Online", "Offline"};
     enums["ExportSurface"] = {"Log", "Timeline", "InspectorJson", "ErrorDetail"};
     enums["ExchangeLeg"] = {"Send", "Stream", "ServerSentEvents", "WebSocket"};
     enums["FieldClass"] = {"Public", "Sensitive", "Secret"};

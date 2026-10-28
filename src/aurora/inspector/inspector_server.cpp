@@ -29,6 +29,7 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/net/blocking.h"
+#include "aurora/net/connectivity.h"
 #include "aurora/net/http_observability.h"
 #include "aurora/net/observability.h"
 #include "aurora/state/async.h"
@@ -150,12 +151,36 @@ auto redact_widget_record(const net::ExportPolicy &policy, const Json &record) -
     return out;
 }
 
+/// @brief 链路态的 JSON 形态：三态与采集腿令牌，外加代际、陈旧位、持续时长与上次失败。
+///
+/// **正常形状与 Release 早退形状由同一构造器产出**：否则 `AURORA_ENABLE_DEBUG=OFF` 下 AI
+/// 排障的第一问（「这九条红是不是一场链路故障」）恰好读不到，而链路态的公共面按
+/// `BUILD_OPTIONS.md` §1.2 恰恰不随 DEBUG 裁切。
+/// @return `connectivity` 对象；字段集合固定，缺失项写 null。
+auto connectivity_json() -> Json {
+    const auto fact = net::ConnectivityMonitor::instance().snapshot();
+    Json out = Json::object();
+    out.set("state", Json{std::string{net::network_state_text(fact.state)}});
+    out.set("source", Json{std::string{net::connectivity_source_text(fact.source)}});
+    out.set("generation", Json{static_cast<std::int64_t>(fact.generation)});
+    out.set("stale", Json{fact.stale});
+    const auto elapsed = std::chrono::steady_clock::now() - fact.since;
+    out.set("since_ms",
+            Json{static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count())});
+    // `last_failure` 是冻结错误码 slug，**不含主机名与 URL**；缺席写 null 而非空串。
+    out.set("last_failure", fact.last_failure.has_value() ? Json{*fact.last_failure} : Json{});
+    return out;
+}
+
 /// @brief Release 构建下 network 端点的确定形态：与既有调试门面的 unavailable 形状一致。
-/// @return `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`。
+///
+/// 保留 `available:false` 与 `reason`，同时带上 `connectivity`（与正常形状同一构造器产出）。
+/// @return `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled", connectivity:{...}}`。
 auto network_unavailable_json() -> Json {
     Json out = Json::object();
     out.set("available", Json{false});
     out.set("reason", "AURORA_ENABLE_DEBUG not enabled");
+    out.set("connectivity", connectivity_json());
     return out;
 }
 
@@ -1041,6 +1066,7 @@ auto InspectorServer::Impl::handle_network(const RouteCall &call) -> std::string
     out.set("dropped", snapshot.dropped);
     out.set("truncated", snapshot.truncated);
     out.set("entries", std::move(entries));
+    out.set("connectivity", connectivity_json());
     return json_response(200, "OK", out);
 }
 

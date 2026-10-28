@@ -48,6 +48,12 @@
 
 namespace aurora::net::detail {
 
+// 链路态旁证入口的前向声明：避免在本头拉入 `connectivity_state.h` 的重依赖
+// （http.h / state/async.h / log.h）。定义在 `src/aurora/net/detail/connectivity_state.cpp`，
+// 四条建连腿（直连明文 / 代理隧道 / TLS 直连 / TLS 隧道）都经 `await_connect_via` 的结局回调
+// 汇聚到此一处，HTTP 侧不再各插一遍（见 net-connectivity-monitor 提案动机 11）。
+auto note_connection_outcome(bool connected, bool loopback_peer, std::optional<ErrorCode> code) -> void;
+
 /// @brief 通用回调→协程等待体：持一枚「接受完成回调的发起器」，挂起协程直到该回调携 `Result<T>` 抵达。
 /// @tparam T 传输操作的成功值类型（`StreamTransport` / `TlsTransport` / `std::size_t`）。
 /// @note Thread: single-threaded（随一条协程帧使用）
@@ -169,7 +175,20 @@ inline auto await_connect_via(ProxyConfig proxy, std::string host, std::uint16_t
         // NOLINTNEXTLINE(bugprone-exception-escape)
         [proxy = std::move(proxy), host = std::move(host), port, options, cancellation,
          negotiation](CallbackAwaiter<StreamTransport>::Sink on_done) mutable {
-            connect_via_proxy(proxy, host, port, options, cancellation, std::move(on_done), negotiation);
+            // 链路态旁证：建连结局经此处一处汇聚（动机 11：不走事件总线，由库内单点入口收集）。
+            // 成功分支取对端是否回环；失败分支取错误枚举；两者都不阻塞、不发起连接、不改交换结局。
+            connect_via_proxy(
+                proxy, host, port, options, cancellation,
+                [on_done = std::move(on_done)](Result<StreamTransport> outcome) mutable {
+                    if (outcome) {
+                        const bool loopback = outcome.value().is_loopback_peer();
+                        note_connection_outcome(true, loopback, std::nullopt);
+                    } else {
+                        note_connection_outcome(false, false, outcome.error().code_enum);
+                    }
+                    on_done(std::move(outcome));
+                },
+                negotiation);
         });
 }
 

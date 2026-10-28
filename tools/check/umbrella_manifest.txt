@@ -105,6 +105,7 @@ aurora/net/address.h
 aurora/net/blocking.h
 aurora/net/cancellation.h
 aurora/net/capabilities.h
+aurora/net/connectivity.h
 aurora/net/datagram.h
 aurora/net/engine.h
 aurora/net/framer.h
