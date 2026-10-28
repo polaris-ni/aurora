@@ -755,8 +755,9 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 E2E 的 CI 期望集（`AURORA_E2E_EXPECT`）须按平台声明：`windows-latest` 上 Win32 与 D3D11 可用，
 GLFW 不可用（VM 无 OpenGL 3.3，WGL 通用驱动无法建 GPU 上下文）；`ubuntu-latest` + `xvfb-run` 上
 X11 与 GLFW 可用（llvmpipe 软件 GL 可建 3.3 上下文；GLFW 源码构建需 `wayland-scanner` 等
-Wayland 依赖）；`macos-latest` 无人值守会话无窗口系统，全部后端不可用（期望集留空 = 全部
-skipped by policy，编译与注册面仍被覆盖）。Wayland（CI 无 compositor）与 wgpu（默认不编译）不进
+Wayland 依赖）；`macos-latest` 无人值守会话无窗口系统，GLFW 腿不可用；AppKit 腿在该
+runner 上尚未实测过真实建窗，按「不声明未实测后端」同样留空（期望集留空 = 全部 skipped by policy，
+编译与注册面仍被覆盖）。Wayland（CI 无 compositor）与 wgpu（默认不编译）不进
 CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI 的 E2E 步骤必须以
 `AURORA_ENABLE_DEBUG=ON` 或 Debug 配置构建（部分后端读回受该宏门控，宏未注入时读回一律按
 「能力不可用」记账）；期望集内环境不可用即 FAIL_FATAL 红灯，因此期望集声明的是「该环境必须
@@ -770,7 +771,7 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
 |:---|:---|:---|:---|
 | core 的 linux ×3 与 windows Release ×2（`windows-msvc` / `windows-mingw`） | 纯 Headless（X11/GLFW/D3D11 等默认 OFF） | 空 | 无真实后端编译进来，E2E 全部 skipped by policy（编译与注册面由内核自测覆盖）；空集是声明的事实而非疏漏 |
 | core 的 windows Debug ×2（`windows-msvc-debug` / `windows-llvm`） | Win32 默认编译，Debug 下 DEBUG 宏生效 | `win32` | Win32 读回受 `AURORA_ENABLE_DEBUG` 门控——Release 型作业（DEBUG=AUTO→OFF）若声明期望必误红，win32 的 E2E 运行覆盖由 Debug 型作业承担 |
-| core / backends 的 macos | MacOS/GLFW 编译 | 空 | 无人值守会话无窗口系统（探针实测），全部 skipped by policy |
+| core / backends 的 macos | MacOS/GLFW 编译，且 Apple 侧能力开关全开（音频 / 三枚图片解码 / SQLite / 压缩 / WebView 门面 / Tracing，backends 腿另带 DEBUG 与 VERIFY_TOOLS） | 空 | GLFW 在无人值守会话无窗口系统（探针实测）；AppKit 腿在该 runner 上**从未实测**，按「宁可留空也不声明未实测的后端」不进取望集——全部 skipped by policy，编译与注册面仍被覆盖 |
 | backends `linux-x11-wayland-glfw` | X11+GLFW+Wayland + 显式 `-DAURORA_ENABLE_DEBUG=ON` | `x11,glfw` | Release 作业须显式 DEBUG=ON 使 X11 读回可用；xvfb + llvmpipe 实测可建 GLX 3.3 上下文（GLFW 可跑）；Wayland 无 compositor 不期望 |
 | backends `windows-d3d11-glfw` | D3D11+GLFW + 显式 DEBUG=ON（Win32 随平台默认编译） | `win32,d3d11` | DEBUG=ON 使 Win32 读回可用；D3D11 读回无条件可用；GLFW 在该 runner 无 GL 环境实测不可建窗，不期望 |
 | asan / coverage | 纯 Headless 默认面 | —（ctest 带 `-LE e2e` 排除） | 无真实后端可跑、全 skip 无信息量，排除以省 ctest 时间；coverage 聚合目标内置的 ctest 同口径排除 |

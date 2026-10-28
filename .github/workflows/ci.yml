@@ -296,7 +296,17 @@ jobs:
           - name: macos-clang
             os: macos-latest
             build-type: Release
-            cmake-flags: -G Ninja
+            # Apple 侧的「能力开关全开」腿：音频（`AURORA_ENABLE_AUDIO=ON` 后 CoreAudio 在 Apple 自动随开）、
+            # 三枚图片解码、SQLite、压缩、Tracing（强制连带 Profiling）、WebView 门面一并打开，使这些能力的
+            # TU 在 Apple 上至少被编译并跑一遍全量 ctest——此前本腿只按默认值构建，它们在 macOS 上从未进过
+            # CI 编译面，能力开关在 Apple 的装配错误（漏链接框架、门控只读平台宏等）只能等本机暴露。
+            # WEBVIEW 在 macOS 没有原生引擎（WEBVIEW2 仅 Windows、WebKitGTK 仅 Linux，跨平台开启即 configure
+            # 期 FATAL），故本腿走的正是「有门面、无引擎即占位降级」那条真实代码路径。
+            # 仍不开：Win32 / D3D11 / X11 / Wayland / WASM 后端与其对位音频腿（跨平台即 FATAL）、
+            # wgpu 与 GLFW（后端矩阵的 macos-appkit-glfw 腿负责）、ASan / Coverage（诊断模式改变判据形态）。
+            cmake-flags: -G Ninja -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_COMPRESSION=ON -DAURORA_ENABLE_TRACING=ON -DAURORA_ENABLE_WEBVIEW=ON
+            # demos 按公开 API 写，Apple 上持续可编译此前无人验证；聚合目标 EXCLUDE_FROM_ALL，单步拉起
+            build-demos: true
             # 无人值守会话无窗口系统（探针实测，见 08-tooling §8.2），E2E 全部 skipped by policy
             e2e-expect: ""
 
@@ -443,7 +453,15 @@ jobs:
             e2e-expect: "win32,d3d11"
           - name: macos-appkit-glfw
             os: macos-latest
-            cmake-flags: -G Ninja -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_BUILD_VERIFY_TOOLS=ON -DAURORA_BACKEND_GPU_WGPU=ON
+            # 后端矩阵里 Apple 这条腿同样把能力开关开满，并补齐与 linux / windows 两腿同口径的
+            # `AURORA_ENABLE_DEBUG=ON`：`Surface::data()` 读回随它生效，macOS 的 etest 期望集仍为空
+            # （无人值守会话无窗口系统），但读回链路与 AppKit 后端的 DEBUG 分支进入编译面。
+            # GLFW_GPU_GL 随 GLFW 打开（GPU 特性探针的 TU 只在双门控下存在）；音频 / 三枚图片解码 /
+            # SQLite / 压缩 / WebView / Tracing 与 macos-clang 同串，两腿一根看默认装配、一根看
+            # 「真实后端 + 能力全开」的装配。VERIFY_TOOLS 打开后由下方「Build verify probes」步骤
+            # 只编不跑，Apple 的九枚 ObjC++ 探针（窗口壳、拖放、菜单栏、最近文档、剪贴板、通知、
+            # 托盘、热键、光标）随之进入 CI 编译面——探针里的 AppKit 调用写错过去只有本机能发现。
+            cmake-flags: -G Ninja -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_COMPRESSION=ON -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_ENABLE_TRACING=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
             # 无人值守会话无窗口系统（探针实测，见 08-tooling §8.2），E2E 全部 skipped by policy
             e2e-expect: ""
 
@@ -1797,7 +1815,8 @@ jobs:
   lint-macos:
     name: clang-tidy (macos, platform TUs)
     runs-on: macos-latest
-    timeout-minutes: 60
+    # 两遍（DEBUG=OFF / DEBUG=ON）各配一次目录 + 各跑一次选集内的 TU；60 分钟是单遍余量，翻倍。
+    timeout-minutes: 90
     needs: gate
     if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
     steps:
@@ -1819,12 +1838,27 @@ jobs:
           echo "$bin" >> "$GITHUB_PATH"
           "$bin/clang-tidy" --version
 
+      # 与作业 8 / 8i 同口径：wgpu 后端的 configure 期硬探测 cargo / rustc；镜像预装则跳过。
+      # 本作业只 configure 不 build，故 Rust 侧只付探测与 CMake 配置，不编 wgpu-native。
+      - name: Ensure Rust toolchain (wgpu backend configure probe)
+        run: |
+          if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          cargo --version || true
+          rustc -vV || true
+
       - name: Configure (export compile_commands.json)
         # 本作业**只 configure 不 build**，故 PCH 产物不存在；而 clang 侧 AURORA_PCH_ENABLED 默认 ON，
         # clang-tidy 会因 `PCH file ... cmake_pch.hxx.pch not found` 把每个 TU 判为 broken。此处为
         # 「仅 lint」的 configure 关掉 PCH，使 compile_commands.json 不带 -include-pch
         #（基于 GCC 的 lint 作业本就是 PCH-off，不受影响）。
-        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF -DAURORA_BACKEND_MACOS=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+        # 能力开关串对齐顶层 env 的 `LINT_CAPABILITY_FLAGS`（native 遍），补齐 Apple 侧此前缺的腿：
+        # GLFW 与其 GPU 特性、wgpu 宿主、Profiling + Tracing、内置 mbedTLS（与系统栈 SecureTransport
+        # 并存装配）。这些门下的 TU 过去在 macOS 分析面上根本不存在，AppKit 代码里的开关组合错误
+        #（漏 `#ifdef`、跨宏引用、只在另一极性下才编译的分支）无人核对。
+        run: cmake -S . -B build-lint -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=OFF -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON -DAURORA_ENABLE_NET_TLS_MBEDTLS=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 
       - name: Select macOS platform TUs
         shell: bash
@@ -1846,12 +1880,38 @@ jobs:
           fi
           python3 tools/check/run_clang_tidy.py --build-dir build-lint --tu-list "$list" --json-out build-lint/findings.json --jobs "$(sysctl -n hw.ncpu)"
 
+      # 第二遍只换 `AURORA_ENABLE_DEBUG=ON`：真实后端的调试能力（截图 / 控件树 / 性能快照 / 可视化叠层）
+      # 全在宏门后，macOS 腿的 `Surface::data()` 读回与调试叠层实现过去从未被 clang-tidy 看过一眼。
+      # 选集复用上一遍生成的平台标记清单，构建目录另起以免覆盖 compile_commands.json。
+      - name: Configure (DEBUG=ON pass)
+        run: cmake -S . -B build-lint-dbg -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_ENABLE_WEBVIEW=ON -DAURORA_ENABLE_PROFILING=ON -DAURORA_ENABLE_TRACING=ON -DAURORA_ENABLE_NET_TLS_MBEDTLS=ON -DAURORA_BUILD_INSPECTOR_SERVER=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+
+      - name: Select macOS platform TUs (DEBUG=ON pass)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/check/select_lint_tus.py --build-dir build-lint-dbg --changed mac-tus.txt --changed-only --out-dir build-lint-dbg/sel --shards 1
+          cat build-lint-dbg/sel/selection.json
+
+      - name: Lint macOS platform TUs (DEBUG=ON pass)
+        shell: bash
+        run: |
+          set -euo pipefail
+          list=build-lint-dbg/sel/tus_0.txt
+          if [ ! -s "$list" ]; then
+            echo "::error::macOS DEBUG=ON lint selection is empty - the platform token list matched no translation unit"
+            exit 1
+          fi
+          python3 tools/check/run_clang_tidy.py --build-dir build-lint-dbg --tu-list "$list" --json-out build-lint-dbg/findings.json --jobs "$(sysctl -n hw.ncpu)"
+
       - name: Upload tidy findings
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: tidy-findings-macos
-          path: build-lint/findings.json
+          path: |
+            build-lint/findings.json
+            build-lint-dbg/findings.json
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------

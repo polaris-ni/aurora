@@ -96,19 +96,33 @@ jobs:
         run: xvfb-run -a ./build/aurora_test_runner --run=etest_smoke_render --verbose
 
   probe-macos:
-    name: probe-macos (glfw)
+    name: probe-macos (appkit + glfw)
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
 
+      # `AURORA_BACKEND_MACOS=ON` 与本仓的 Apple 默认值同形（CHG 后端开关批次后 Apple 缺省即 ON），
+      # 显式写出来是为了让「AppKit 真实后端参与本次 e2e 装配」在作业面上可读、不被默认值漂移带走。
+      # AppKit 后端一旦编入，`auto_detect_surface()` 在 Apple 上就会选它，故 etest 的建窗路径从
+      # 「只剩 GLFW 一条腿」变成「先试 AppKit、GLFW 作对照」——这正是本 job 想要的覆盖面。
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DAURORA_ENABLE_DEBUG=ON -DAURORA_BACKEND_GLFW=ON
+        run: cmake -S . -B build -G Ninja -DAURORA_ENABLE_DEBUG=ON -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_COMPRESSION=ON
 
       - name: Build runner
         run: cmake --build build --target aurora_test_runner
 
-      # macOS runner 自带 GUI 会话，但 GLFW 无人值守建窗实测不可用（无窗口系统会话）——
-      # 期望集置空（不声明 AURORA_E2E_EXPECT）：全部用例走 skip 分支，本 job 只作回归对照。
+      # macOS runner 的 GLFW 无人值守建窗实测不可用（无窗口系统会话），AppKit 侧此前从未在该 runner 上
+      # 试过一次。期望集仍置空（不声明 AURORA_E2E_EXPECT）：后端兑现不了就走 skip 分支、本 job 只作
+      # 回归对照；一旦日志显示 AppKit 真实建窗 + 读回成功，再把 `macos` 写进期望集，让「兑现不了」
+      # 从静默跳过变成失败——判据必须来自实测，不来自猜测。
       - name: Probe real-window render + readback (Hidden)
         run: ./build/aurora_test_runner --run=etest_smoke_render --verbose
+
+      # 同口径把另外两枚真实后端用例拉起来跑一遍（多窗与系统输入面在 macOS 腿上的接线此前只在
+      # 本机探针验证过，CI 侧从未执行；期望集为空使它们在无窗口会话时如实 skip 而非假失败）。
+      - name: Probe multi-window and OS input (Hidden)
+        continue-on-error: true
+        run: |
+          ./build/aurora_test_runner --run=etest_multi_window --verbose
+          ./build/aurora_test_runner --run=etest_os_input --verbose
