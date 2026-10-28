@@ -38,9 +38,7 @@ struct TrayState {
     bool visible = false;  ///< 库内可见性（与 `NSStatusItem.visible` 同步）
 };
 
-auto ns_string(const std::string &text) -> NSString * {
-    return [NSString stringWithUTF8String:text.c_str()];
-}
+auto ns_string(const std::string &text) -> NSString * { return [NSString stringWithUTF8String:text.c_str()]; }
 
 auto to_std(NSString *text) -> std::string {
     const char *utf8 = text != nil ? [text UTF8String] : nullptr;
@@ -228,16 +226,15 @@ void MacOSTrayBridge::set_menu(const std::vector<MenuItem> &items) {
         // 关闭自动启用：NSMenu 默认按 responder 链重算 enabled，会覆盖声明式 `MenuItem::enabled`。
         menu.autoenablesItems = NO;
         std::function<void(const std::vector<MenuItem> &, NSMenu *)> build = [&](const std::vector<MenuItem> &list,
-                                                                                NSMenu *target_menu) {
+                                                                                 NSMenu *target_menu) {
             for (const auto &entry : list) {
                 if (entry.separator) {
                     [target_menu addItem:[NSMenuItem separatorItem]];
                     ++state->menu_items;
                     continue;
                 }
-                NSMenuItem *menu_item = [[NSMenuItem alloc] initWithTitle:ns_string(entry.label)
-                                                                  action:nil
-                                                           keyEquivalent:@""];
+                NSMenuItem *menu_item =
+                    [[NSMenuItem alloc] initWithTitle:ns_string(entry.label) action:nil keyEquivalent:@""];
                 menu_item.enabled = entry.enabled ? YES : NO;
                 if (entry.checkable) {
                     menu_item.state = entry.checked ? NSControlStateValueOn : NSControlStateValueOff;

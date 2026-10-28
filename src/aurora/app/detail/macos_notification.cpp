@@ -34,9 +34,7 @@ NSString *const kAuroraNotificationDefaultIdentifier = @"x-aurora-default-action
 /// @brief `std::string`（UTF-8）→ `NSString`；空串得到空串而不是 nil。
 /// @param text UTF-8 文本。
 /// @return 自动释放的 `NSString`。
-auto ns_string(const std::string &text) -> NSString * {
-    return [NSString stringWithUTF8String:text.c_str()];
-}
+auto ns_string(const std::string &text) -> NSString * { return [NSString stringWithUTF8String:text.c_str()]; }
 
 }  // namespace
 
@@ -51,7 +49,7 @@ auto ns_string(const std::string &text) -> NSString * {
 // 应用在前台时也展示通知（与 Windows / Linux 后端「调用即展示」同口径）。
 // center / notification 未使用；恒返回 YES。
 - (BOOL)userNotificationCenter:(NSUserNotificationCenter *)center
-        shouldPresentNotification:(NSUserNotification *)notification {
+     shouldPresentNotification:(NSUserNotification *)notification {
     (void)center;
     (void)notification;
     return YES;
@@ -63,7 +61,7 @@ auto ns_string(const std::string &text) -> NSString * {
 // `NotificationCenter::emit_activated` 自身静默返回。delegate 消息由主运行循环递送，
 // 与框架的单线程 UI 模型一致。center 未使用，notification 为被激活的通知。
 - (void)userNotificationCenter:(NSUserNotificationCenter *)center
-         didActivateNotification:(NSUserNotification *)notification {
+       didActivateNotification:(NSUserNotification *)notification {
     (void)center;
     NSString *tag = nil;
     id recorded = notification.userInfo[kAuroraNotificationTagKey];
@@ -144,7 +142,7 @@ auto macos_post_notification(const Notification &notification) -> Result<void> {
         if (!recorded) {
             // 少数环境下投递落到主运行循环的下一轮：给一次短排空再判定，仍查不到才算失败。
             [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
-                                    beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
+                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
             recorded = is_delivered(center, identifier);
         }
         if (!recorded) {

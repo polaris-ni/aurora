@@ -73,8 +73,7 @@ auto project_backend(const std::vector<std::string> &plan) -> Result<void> {
         }
         NSDocumentController *controller = [NSDocumentController sharedDocumentController];
         if (controller == nil) {
-            return make_error(ErrorCode::PlatformUnavailable,
-                              "recent-documents: NSDocumentController is unavailable");
+            return make_error(ErrorCode::PlatformUnavailable, "recent-documents: NSDocumentController is unavailable");
         }
         // 先把整份计划转换成 URL：任一条形态非法则一条都不投，避免半截计划落进 OS。
         std::vector<NSURL *> urls;
@@ -82,8 +81,7 @@ auto project_backend(const std::vector<std::string> &plan) -> Result<void> {
         for (const auto &path : plan) {
             NSURL *url = make_url(path);
             if (url == nil) {
-                return make_error(ErrorCode::PlatformUnavailable,
-                                  "recent-documents: path is not convertible to NSURL");
+                return make_error(ErrorCode::PlatformUnavailable, "recent-documents: path is not convertible to NSURL");
             }
             urls.push_back(url);
         }
@@ -93,8 +91,9 @@ auto project_backend(const std::vector<std::string> &plan) -> Result<void> {
         }
         for (NSURL *url : urls) {
             if (!is_listed(controller, url)) {
-                return make_error(ErrorCode::PlatformUnavailable,
-                                  "recent-documents: the OS did not record the entry (requires a code-signed app bundle)");
+                return make_error(
+                    ErrorCode::PlatformUnavailable,
+                    "recent-documents: the OS did not record the entry (requires a code-signed app bundle)");
             }
         }
         auto &record = state().projected;
@@ -118,8 +117,7 @@ auto clear_backend() -> Result<void> {
     @autoreleasepool {
         NSDocumentController *controller = [NSDocumentController sharedDocumentController];
         if (controller == nil) {
-            return make_error(ErrorCode::PlatformUnavailable,
-                              "recent-documents: NSDocumentController is unavailable");
+            return make_error(ErrorCode::PlatformUnavailable, "recent-documents: NSDocumentController is unavailable");
         }
         [controller clearRecentDocuments:nil];
         if ([[controller recentDocumentURLs] count] != 0) {

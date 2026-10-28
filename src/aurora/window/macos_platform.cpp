@@ -27,9 +27,8 @@ auto macos_os_color_scheme() -> ColorScheme {
         if (appearance == nil) {
             return ColorScheme::Unspecified;  // AppKit 未初始化：不是「明色」，是「不知道」
         }
-        NSAppearanceName best = [appearance bestMatchFromAppearancesWithNames:@[
-            NSAppearanceNameAqua, NSAppearanceNameDarkAqua
-        ]];
+        NSAppearanceName best =
+            [appearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]];
         if (best == nil) {
             return ColorScheme::Unspecified;
         }

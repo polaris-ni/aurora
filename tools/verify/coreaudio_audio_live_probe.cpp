@@ -113,7 +113,9 @@ auto main(int argc, char **argv) -> int {
     const bool interactive = cli.arguments->flag("interactive");
 
     emit("== Aurora CoreAudio audio live probe ==");
-    emit("auto segment: no-device verdict / activation / format / clock / buffer source / stream / suspend-resume / reroute");
+    emit(
+        "auto segment: no-device verdict / activation / format / clock / buffer source / stream / suspend-resume / "
+        "reroute");
     if (interactive) {
         emit("interactive segment: sweep / dual-source mix / default-device hot switch (audible)");
     }
@@ -161,7 +163,8 @@ auto main(int argc, char **argv) -> int {
     //    只有其后的出声段才需要真设备。
     const auto ctx = std::make_shared<aurora::AudioContext>();
     if (ctx->silent()) {
-        check(ctx->device_state() == aurora::AudioDeviceState::Silent, "silent degradation: device_state()==Silent (no crash, no fake-active)");
+        check(ctx->device_state() == aurora::AudioDeviceState::Silent,
+              "silent degradation: device_state()==Silent (no crash, no fake-active)");
         emit("[INFO] no CoreAudio output device on this machine: audible segments below skipped");
         emit("result: ENV-UNAVAILABLE (exit 2)");
         return 2;
@@ -176,7 +179,8 @@ auto main(int argc, char **argv) -> int {
     const double t0 = ctx->current_time();
     sleep_ms(300);
     const double t1 = ctx->current_time();
-    check(t1 - t0 >= 0.2, "render clock advances via queue thread (" + std::to_string(t1 - t0).substr(0, 5) + "s in 300ms)");
+    check(t1 - t0 >= 0.2,
+          "render clock advances via queue thread (" + std::to_string(t1 - t0).substr(0, 5) + "s in 300ms)");
 
     // 4. 缓冲源出声通路（440Hz × 2s → Gain 0.25 → destination）
     {

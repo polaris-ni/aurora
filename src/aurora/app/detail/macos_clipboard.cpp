@@ -137,9 +137,7 @@ auto discard_offer() -> void {
 
 @implementation AuroraMacPasteboardProvider
 
-- (void)pasteboard:(NSPasteboard *)pasteboard
-               item:(NSPasteboardItem *)item
-    provideDataForType:(NSPasteboardType)type {
+- (void)pasteboard:(NSPasteboard *)pasteboard item:(NSPasteboardItem *)item provideDataForType:(NSPasteboardType)type {
     auto *state = static_cast<aurora::detail::ClipboardBridgeState *>(owner);
     if (state == nullptr || !state->has_offer || generation != state->generation) {
         return;  // 要约已被替换 / 撤销：迟到的请求不兑现
@@ -177,7 +175,7 @@ auto discard_offer() -> void {
         aurora::clipboard::detail::fire_ownership_lost();
     } else {
         dispatch_async(dispatch_get_main_queue(), ^{
-            aurora::clipboard::detail::fire_ownership_lost();
+          aurora::clipboard::detail::fire_ownership_lost();
         });
     }
 }
@@ -235,8 +233,7 @@ auto platform_set_files(const std::vector<std::string> &paths) -> Result<bool> {
             NSString *text = ns_string(path);
             if (text == nil || [text length] == 0) {
                 [urls release];
-                return make_error(ErrorCode::ClipboardWriteFailed,
-                                  ErrorParams{{"detail", "path is not valid UTF-8"}});
+                return make_error(ErrorCode::ClipboardWriteFailed, ErrorParams{{"detail", "path is not valid UTF-8"}});
             }
             [urls addObject:[NSURL fileURLWithPath:text]];
         }
@@ -266,7 +263,9 @@ auto platform_get_files() -> Result<std::vector<std::string>> {
     @autoreleasepool {
         NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
         NSArray<NSURL *> *urls = [pasteboard readObjectsForClasses:@[ [NSURL class] ]
-                                                           options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+                                                           options:@{
+                                                               NSPasteboardURLReadingFileURLsOnlyKey : @YES
+                                                           }];
         std::vector<std::string> paths;
         for (NSURL *url in urls) {
             if ([url isFileURL] == NO) {
@@ -293,8 +292,7 @@ auto platform_set_html(const std::string &html) -> Result<bool> {
     @autoreleasepool {
         NSString *text = ns_string(html);
         if (text == nil) {
-            return make_error(ErrorCode::ClipboardWriteFailed,
-                              ErrorParams{{"detail", "html is not valid UTF-8"}});
+            return make_error(ErrorCode::ClipboardWriteFailed, ErrorParams{{"detail", "html is not valid UTF-8"}});
         }
         discard_offer();
         NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];

@@ -171,8 +171,8 @@ struct CoreAudioDeviceBackend::Impl {
         AudioQueueRef created = nullptr;
         // 入参 runloop 传 nullptr ⇒ AudioQueue 自持一条内部线程（本后端即以此满足
         // 「设备线程周期性回调 render_block」契约，无需自起渲染线程）。
-        OSStatus status = AudioQueueNewOutput(&fmt, &Impl::on_buffer, this, nullptr, kCFRunLoopCommonModes, 0U,
-                                              &created);
+        OSStatus status =
+            AudioQueueNewOutput(&fmt, &Impl::on_buffer, this, nullptr, kCFRunLoopCommonModes, 0U, &created);
         if (status != noErr || created == nullptr) {
             return false;
         }
@@ -286,8 +286,7 @@ struct CoreAudioDeviceBackend::Impl {
     /// @param 属性地址数组未使用。
     /// @param client Impl 地址（CoreAudio 的 clientData 在**形参末位**，与 AudioQueue 回调相反）。
     /// @return noErr（本回调不消费属性，无需返回具体状态）。
-    static auto on_device_changed(AudioObjectID, UInt32, const AudioObjectPropertyAddress[], void *client)
-        -> OSStatus {
+    static auto on_device_changed(AudioObjectID, UInt32, const AudioObjectPropertyAddress[], void *client) -> OSStatus {
         auto *impl = static_cast<Impl *>(client);
         if (impl != nullptr) {
             impl->reroute.store(true, std::memory_order_release);
@@ -383,8 +382,7 @@ struct CoreAudioCaptureBackend::Impl {
         Float64 nominal = 0.0;
         UInt32 size = sizeof(nominal);
         const auto rate_addr = global_address(kAudioDevicePropertyNominalSampleRate);
-        if (AudioObjectGetPropertyData(device, &rate_addr, 0U, nullptr, &size, &nominal) != noErr ||
-            nominal <= 0.0) {
+        if (AudioObjectGetPropertyData(device, &rate_addr, 0U, nullptr, &size, &nominal) != noErr || nominal <= 0.0) {
             return false;
         }
         AudioObjectPropertyAddress config{};
@@ -572,8 +570,8 @@ auto CoreAudioCaptureBackend::start(CaptureFn on_pcm) -> bool {
     }
     impl_->running.store(true, std::memory_order_release);
     const auto addr = global_address(kAudioHardwarePropertyDefaultInputDevice);
-    if (AudioObjectAddPropertyListener(kAudioObjectSystemObject, &addr, &Impl::on_input_device_changed,
-                                       impl_.get()) == noErr) {
+    if (AudioObjectAddPropertyListener(kAudioObjectSystemObject, &addr, &Impl::on_input_device_changed, impl_.get()) ==
+        noErr) {
         impl_->listener_attached = true;
     }
     impl_->control = std::thread([impl = impl_.get()]() { impl->run(); });
@@ -593,15 +591,12 @@ auto CoreAudioCaptureBackend::stop() -> void {
     }
     if (impl_->listener_attached) {
         const auto addr = global_address(kAudioHardwarePropertyDefaultInputDevice);
-        AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &addr, &Impl::on_input_device_changed,
-                                          impl_.get());
+        AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &addr, &Impl::on_input_device_changed, impl_.get());
         impl_->listener_attached = false;
     }
 }
 
-auto CoreAudioCaptureBackend::failed() const -> bool {
-    return impl_->device_failed.load(std::memory_order_acquire);
-}
+auto CoreAudioCaptureBackend::failed() const -> bool { return impl_->device_failed.load(std::memory_order_acquire); }
 
 }  // namespace aurora
 

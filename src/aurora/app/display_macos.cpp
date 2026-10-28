@@ -13,7 +13,6 @@
 // 枚举本身也无消费方；`display_win32.cpp` 的通用回退在该组合下不参与编译）。
 
 #include "aurora/app/display.h"
-
 #include "aurora/core/platform.h"  // NOLINT
 #if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
 
@@ -58,11 +57,10 @@ auto to_display(NSScreen *screen, bool primary, CGFloat primary_height) -> Displ
     }
     // 折算闭包：Cocoa rect（y 向上）→ 物理像素 rect（y 向下）。
     const auto convert = [primary_height, scale](NSRect r) -> Rect {
-        return Rect{
-            .origin = Point{.x = static_cast<float>(r.origin.x * scale),
-                            .y = static_cast<float>((primary_height - r.origin.y - r.size.height) * scale)},
-            .size = Size{.width = static_cast<float>(r.size.width * scale),
-                         .height = static_cast<float>(r.size.height * scale)}};
+        return Rect{.origin = Point{.x = static_cast<float>(r.origin.x * scale),
+                                    .y = static_cast<float>((primary_height - r.origin.y - r.size.height) * scale)},
+                    .size = Size{.width = static_cast<float>(r.size.width * scale),
+                                 .height = static_cast<float>(r.size.height * scale)}};
     };
     d.bounds = convert(screen.frame);
     d.work_area = convert(screen.visibleFrame);
