@@ -424,7 +424,7 @@ jobs:
         include:
           - name: linux-x11-wayland-glfw
             os: ubuntu-26.04
-            apt-deps: libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev libclang1-22
+            apt-deps: libx11-dev libxfixes-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev libclang1-22
             # Release 作业默认 DEBUG=AUTO→OFF，X11 读回被门控——显式 ON 使 etest_x11 真实运行
             # （期望集口径见 08-tooling §8.2「CI 作业口径」；Wayland 无人值守无合成器，不期望）。
             # GLFW 期望 xvfb + mesa(llvmpipe) 提供 GLX 3.3 兼容上下文。
@@ -1230,7 +1230,7 @@ jobs:
           # mbedTLS 现由仓库内置源码构建（AURORA_ENABLE_NET_TLS_MBEDTLS，源码随 checkout 就位），无需
           # libmbedtls-dev、也不再搭 /opt provider 根；libssl-dev 供 optimizations-off pass 的 OpenSSL 腿。
           sudo apt-get install -y clang-tidy-22 clang-format-22 libclang1-22 \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libx11-dev libxfixes-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
             libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev \
             libssl-dev
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
@@ -1593,7 +1593,7 @@ jobs:
           # mbedTLS 现由仓库内置源码构建（AURORA_ENABLE_NET_TLS_MBEDTLS，源码随 checkout 就位）：无需
           # libmbedtls-dev，也不再搭 /opt provider 根。
           sudo apt-get install -y clang-tidy-22 clang-format-22 libclang1-22 \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libx11-dev libxfixes-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
             libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format

@@ -11,7 +11,9 @@
 // `expected unqualified-id before numeric constant`。文件末尾的 `#undef None` 救不了它——
 // 那句在本头**之后**才执行；其余 aurora 头之所以无恙，只因它们早被首行的头链解析过
 // （头文件 guard 生效、宏尚未定义）。故本头必须与 atspi_bridge.h 同组前置。
+#include "aurora/app/detail/clipboard_backend.h"  // 富格式剪贴板后端单槽（变更回调经 fire_change 派发）
 #include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/命中/绘制层
+#include "aurora/window/detail/x11_clipboard.h"  // CLIPBOARD Selection 桥（同属「先于 Xlib」组：本头不引 Xlib）
 #include "aurora/window/detail/x11_drag.h"  // Xdnd 双向桥（同属「先于 Xlib」组：内部用 ModifierKey::None）
 #include "aurora/window/detail/x11_modifiers.h"
 
@@ -228,6 +230,11 @@ struct X11Surface::Impl {
     /// 持有者只能是本 Impl：桥在析构里要撤 `XdndAware` 并收摊在途会话，故必须先于 X 资源销毁
     /// （析构次序见 `~X11Surface`）。
     std::unique_ptr<detail::X11DragBridge> drag;
+    /// @brief CLIPBOARD 剪贴板桥（富格式 / 惰性要约 / 变更监听）；install 失败即为 nullptr。
+    ///
+    /// 与 Xdnd 并列、共用同一 X 连接与客户窗口：协议状态机见 `detail::X11ClipboardBridge`。
+    /// 只承载富格式与 `text/plain` 的 `set_payload` 入口；`set_text` / `get_text` 等仍走 xsel。
+    std::unique_ptr<detail::X11ClipboardBridge> clipboard;
 
     auto apply_title(const std::string &title) -> void;
     auto ensure_image(int w, int h) -> bool;
@@ -727,6 +734,14 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
         d.drag.reset();
         AURORA_LOG_WARN("window", "X11Surface: Xdnd bridge install failed; system drag unavailable.");
     }
+    // CLIPBOARD 剪贴板桥：install 失败即本窗口不参与富格式剪贴板（不谎报已有通路）。
+    d.clipboard = std::make_unique<detail::X11ClipboardBridge>(
+        d.dpy, static_cast<unsigned long>(d.win),
+        detail::X11ClipboardBridge::Hooks{.on_change = []() -> void { clipboard::detail::fire_change(); }});
+    if (!d.clipboard->install()) {
+        d.clipboard.reset();
+        AURORA_LOG_WARN("window", "X11Surface: clipboard bridge install failed; rich clipboard unavailable.");
+    }
     d.size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // NOLINT(*-narrowing-conversions)
 }
 
@@ -738,7 +753,8 @@ X11Surface::~X11Surface() {
     window_mode_handler_ = nullptr;
     present_request_ = nullptr;
     d.composition_caret_provider = nullptr;  // 捕获宿主 this 的回调：销毁前解绑（同 Win32 桥纪律）
-    d.drag.reset();  // 先收摊 Xdnd（撤 XdndAware + 在途会话按 Cancelled 兑现），再销毁 X 资源
+    d.clipboard.reset();  // 先撤剪贴板桥（放弃 CLIPBOARD 选择权 + 撤进程级后端表），再收摊 Xdnd
+    d.drag.reset();  // 收摊 Xdnd（撤 XdndAware + 在途会话按 Cancelled 兑现），再销毁 X 资源
     if (d.ximage != nullptr) {
         d.ximage->data = nullptr;  // 缓冲由 vector 持有，不得让 XDestroyImage free
         XDestroyImage(d.ximage);
@@ -1268,6 +1284,10 @@ auto X11Surface::poll_platform_events() -> void {
         if (XFilterEvent(&ev, AURORA_X_NONE) != 0) {
             continue;  // 输入法预编辑消费（如拼音候选期间的按键）
         }
+        // XFIXES 的 selection owner 通知走独立事件基址：由剪贴板桥统一识别，表层不碰其细节。
+        if (d.clipboard != nullptr && d.clipboard->on_x_event(&ev)) {
+            continue;
+        }
         // NOLINTBEGIN(*-pro-type-union-access)
         switch (ev.type) {
             case ButtonPress:
@@ -1586,11 +1606,21 @@ auto X11Surface::poll_platform_events() -> void {
                     d.drag->on_property_notify(static_cast<unsigned long>(ev.xproperty.window), ev.xproperty.atom,
                                                ev.xproperty.state);
                 }
+                // 剪贴板：INCR 收块（读入）与发块（写出）同样按窗口 + 属性过滤，
+                // 两桥各认自己的 atom / 请求方映射，共用一条转发不冲突。
+                if (d.clipboard != nullptr) {
+                    d.clipboard->on_property_notify(static_cast<unsigned long>(ev.xproperty.window), ev.xproperty.atom,
+                                                    ev.xproperty.state);
+                }
                 break;
             case SelectionNotify:
                 // Xdnd：selection round-trip 的到达面（拖入取数的唯一通路）。
                 if (d.drag != nullptr) {
                     d.drag->on_selection_notify(ev.xselection.selection, ev.xselection.target, ev.xselection.property);
+                }
+                if (d.clipboard != nullptr) {
+                    d.clipboard->on_selection_notify(ev.xselection.selection, ev.xselection.target,
+                                                     ev.xselection.property);
                 }
                 break;
             case SelectionRequest:
@@ -1599,6 +1629,17 @@ auto X11Surface::poll_platform_events() -> void {
                     d.drag->on_selection_request(ev.xselectionrequest.requestor, ev.xselectionrequest.selection,
                                                  ev.xselectionrequest.target, ev.xselectionrequest.property,
                                                  ev.xselectionrequest.time);
+                }
+                if (d.clipboard != nullptr) {
+                    d.clipboard->on_selection_request(ev.xselectionrequest.requestor, ev.xselectionrequest.selection,
+                                                      ev.xselectionrequest.target, ev.xselectionrequest.property,
+                                                      ev.xselectionrequest.time);
+                }
+                break;
+            case SelectionClear:
+                // 剪贴板：本进程的 CLIPBOARD 所有权被夺 → 清本地数据并触发所有权丢失。
+                if (d.clipboard != nullptr) {
+                    d.clipboard->on_selection_clear(ev.xselectionclear.selection, ev.xselectionclear.time);
                 }
                 break;
             case ClientMessage:

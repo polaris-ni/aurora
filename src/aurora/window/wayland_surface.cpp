@@ -23,6 +23,7 @@
 #include <string_view>
 #include <vector>
 
+#include "aurora/app/detail/clipboard_backend.h"  // 富格式剪贴板后端单槽（变更回调经 fire_change 派发）
 #include "aurora/core/log.h"
 #include "aurora/core/version.h"
 #include "aurora/event/event.h"
@@ -34,6 +35,7 @@
 #include "aurora/window/detail/csd_shadow_compose.h"
 #include "aurora/window/detail/ime_composition.h"
 #include "aurora/window/detail/title_bar_painter.h"
+#include "aurora/window/detail/wayland_clipboard.h"
 #include "aurora/window/detail/wayland_drag.h"
 #include "aurora/window/detail/wayland_output_scale.h"
 #include "aurora/window/keysym_map.h"
@@ -171,6 +173,10 @@ struct WaylandSurface::Impl {
     // 持有者只能是本 Impl：桥在析构里要销毁数据设备对象并收摊在途会话，故必须先于 seat /
     // display 销毁（析构次序见 `~WaylandSurface`）。
     std::unique_ptr<detail::WaylandDragBridge> drag;
+    // CLIPBOARD 剪贴板桥（富格式 / 惰性要约 / 变更监听）：复用拖放桥创建的那枚 `wl_data_device`
+    // （每 seat 唯一，不可复刻），selection 变更经拖放桥的转发器到达。析构须**先于**拖放桥
+    // （转发器闭包捕获本桥；销毁顺序见 `~WaylandSurface`）。
+    std::unique_ptr<detail::WaylandClipboardBridge> clipboard;
     // 宿主注入的「附加事件源」（WebView 引擎的 GLib 主上下文）：wait_events 把其 fd 并入
     // poll 集、poll 返回后推进一次。语义与 atspi 并入同构；未安装时两通道均空。
     std::function<std::vector<Surface::ExtraWatch>()> extra_watches;
@@ -210,6 +216,8 @@ struct WaylandSurface::Impl {
     int geometry_gw = -1;
     int geometry_gh = -1;
     std::uint32_t last_press_serial = 0;  ///< 最近按键 serial：控件经 begin_window_move/resize 同步调用时有效
+    /// 最近一次输入事件的 serial（指针按键 / 键盘按键）：`wl_data_device.set_selection` 的协议必需实参。
+    std::uint32_t last_input_serial = 0;
     // ---- 光标形状（客户端主题光标：libwayland-cursor 取位图 → cursor wl_surface → set_cursor）----
     CursorShape pending_cursor_shape = CursorShape::Arrow;  ///< 期望的语义形状（set_cursor 落盘）。
     std::uint32_t pointer_enter_serial = 0;  ///< 最近 wl_pointer.enter 的 serial（wl_pointer_set_cursor 必需）。
@@ -539,6 +547,9 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
     }
 
     d.last_press_serial = serial;  // 缓存本次按键 serial：xdg move/resize 协议要求
+    // 剪贴板 `set_selection` 也要求真实输入 serial：指针按键同样是一枚合格来源，
+    // 与键盘按键共用同一槽（后到者覆盖——合成器只校验「最近一次发给本客户端的输入 serial」）。
+    d.last_input_serial = serial;
     // 拖出发起用的也是同一个 serial：拖放由控件在**本次按键的派发期内**发起
     // （`Widget::begin_system_drag`），Wayland 协议要求 `start_drag` 用本客户端某次按下的
     // serial，故此刻刷新即唯一正确的值（多窗口场景下同理只可能是本窗口的按下）。
@@ -737,8 +748,10 @@ void kb_leave(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, wl_surf
 #endif
 }
 
-void kb_key(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, std::uint32_t /*time*/, std::uint32_t key,
+void kb_key(void *data, wl_keyboard * /*k*/, std::uint32_t serial, std::uint32_t /*time*/, std::uint32_t key,
             std::uint32_t state_v) {
+    // 键盘按键也是 `set_selection` 认可的输入 serial 来源：Ctrl+C 一类快捷复制由它支撑。
+    static_cast<Impl *>(data)->last_input_serial = serial;
     static_cast<Impl *>(data)->on_key(key, state_v);
 }
 
@@ -1550,6 +1563,19 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
     } else {
         AURORA_LOG_INFO("window", "WaylandSurface: compositor lacks wl_data_device_manager; system drag unavailable.");
     }
+    // 剪贴板桥：必须晚于拖放桥（复用其 `wl_data_device`），install 失败即本窗口不参与富格式
+    // 剪贴板——如实降级，不谎报已有通路（与 X11 / Win32 桥同款处置）。
+    if (d.drag != nullptr) {
+        d.clipboard = std::make_unique<detail::WaylandClipboardBridge>(
+            d.dpy, d.data_device_mgr, d.data_device_mgr_version, d.drag->data_device(), d.seat,
+            detail::WaylandClipboardBridge::Hooks{
+                .on_change = []() -> void { clipboard::detail::fire_change(); },
+                .input_serial = [impl = impl_.get()]() -> std::uint32_t { return impl->last_input_serial; }});
+        if (!d.clipboard->install()) {
+            d.clipboard.reset();
+            AURORA_LOG_WARN("window", "WaylandSurface: clipboard bridge install failed; rich clipboard unavailable.");
+        }
+    }
 }
 
 WaylandSurface::~WaylandSurface() {
@@ -1559,7 +1585,10 @@ WaylandSurface::~WaylandSurface() {
     window_state_handler_ = nullptr;
     window_mode_handler_ = nullptr;
     present_request_ = nullptr;
-    // 拖放桥先收摊：它持有 `wl_data_device`（seat 的子对象）与在途会话，且 `uninstall` 里要
+    // 剪贴板桥先于拖放桥销毁：它的 selection 转发器登记在拖放桥上（闭包捕获本桥），且读侧
+    // offer / 写侧 source 都依附拖放桥创建的 `wl_data_device`。
+    d.clipboard.reset();
+    // 拖放桥次之：它持有 `wl_data_device`（seat 的子对象）与在途会话，且 `uninstall` 里要
     // 兑现「在途拖出按 Cancelled」——必须早于 seat / display 销毁，也早于上层回调解绑后的
     // 任何一次事件泵。
     d.drag.reset();
@@ -2263,6 +2292,10 @@ auto WaylandSurface::poll_platform_events() -> void {
     // 帧内看守：管道读写的逐帧推进与「落放后迟迟不给数据」的墙钟超时在此兑现（不悬挂、不虚假成功）。
     if (d.drag != nullptr) {
         d.drag->tick();
+    }
+    // 剪贴板写侧（`wl_data_source.send`）的管道写出同理：对端节奏不可控，逐帧推进。
+    if (d.clipboard != nullptr) {
+        d.clipboard->tick();
     }
 }
 

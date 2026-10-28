@@ -70,6 +70,12 @@ auto backend_registered() -> bool & {
     return registered;
 }
 
+/// @brief 剪贴板 selection 转发器槽（进程级一次性；由 `WaylandClipboardBridge` 登记）。
+auto clipboard_forwarder_slot() -> std::function<void(wl_data_offer *, const std::vector<std::string> &)> & {
+    static std::function<void(wl_data_offer *, const std::vector<std::string> &)> forwarder;
+    return forwarder;
+}
+
 /// @brief 把 fd 设为非阻塞（读端用；失败不影响正确性，只影响「会不会阻塞一帧」）。
 auto set_nonblocking(int fd) -> void {
     const int flags = ::fcntl(fd, F_GETFL, 0);
@@ -156,6 +162,12 @@ struct WaylandDragBridge::Impl {
     wl_data_offer *pending_offer = nullptr;
     std::vector<std::string> pending_names;
 
+    /// @brief 最近一次经转发器交给剪贴板桥的 selection offer（**不拥有**：归剪贴板桥销毁）。
+    ///
+    /// 只用于两件事：① `on_new_offer` / `uninstall` 不误销毁它；② 该 offer 的迟到 `offer`
+    /// 事件按增量补发给剪贴板桥（见 `offer_offer`）。
+    wl_data_offer *clipboard_offer = nullptr;
+
     DragIn in;
     DragOut out;
     bool handled = false;  ///< 派发器写定的 `is_handled`（Drop 态的受理信号）
@@ -198,11 +210,19 @@ struct WaylandDragBridge::Impl {
 namespace {
 
 // ---- wl_data_offer 监听器（target 侧的格式清单 / 能力位 / 动作）----
-void offer_offer(void *data, wl_data_offer * /*offer*/, const char *mime_type) {
+void offer_offer(void *data, wl_data_offer *offer, const char *mime_type) {
     auto *self = static_cast<WaylandDragBridge::Impl *>(data);
-    if (mime_type != nullptr) {
-        self->pending_names.emplace_back(mime_type);
+    if (mime_type == nullptr) {
+        return;
     }
+    // 已被剪贴板桥采用的 offer 的迟到名称：按增量补发（协议规定名称先于 selection 到达，
+    // 此分支只兜不合规合成器；不补发就会静默丢格式）。
+    auto &forwarder = clipboard_forwarder_slot();
+    if (forwarder != nullptr && offer == self->clipboard_offer) {
+        forwarder(offer, {std::string{mime_type}});
+        return;
+    }
+    self->pending_names.emplace_back(mime_type);
 }
 
 void offer_source_actions(void *data, wl_data_offer * /*offer*/, std::uint32_t source_actions) {
@@ -302,11 +322,13 @@ auto WaylandDragBridge::Impl::uninstall() -> void {
         teardown_drag_out(SystemDragOutcome::Cancelled, DragAction::None);
     }
     reset_drag_in();
-    if (pending_offer != nullptr) {
+    if (pending_offer != nullptr && pending_offer != clipboard_offer) {
         wl_data_offer_destroy(pending_offer);
         pending_offer = nullptr;
         pending_names.clear();
     }
+    // `clipboard_offer` 归剪贴板桥销毁（宿主保证先销毁剪贴板桥再销毁本桥）。
+    clipboard_offer = nullptr;
     if (device != nullptr) {
         wl_data_device_destroy(device);
         device = nullptr;
@@ -324,7 +346,7 @@ auto WaylandDragBridge::Impl::on_new_offer(wl_data_offer *offer) -> void {
     }
     // 上一个未被采用的 offer（剪贴板 selection 的）即刻销毁：协议要求客户端销毁自己不用的
     // data offer，不销毁即每换一次剪贴板漏一个服务端对象。
-    if (pending_offer != nullptr && pending_offer != offer) {
+    if (pending_offer != nullptr && pending_offer != offer && pending_offer != clipboard_offer) {
         wl_data_offer_destroy(pending_offer);
     }
     pending_offer = offer;
@@ -333,8 +355,30 @@ auto WaylandDragBridge::Impl::on_new_offer(wl_data_offer *offer) -> void {
 }
 
 auto WaylandDragBridge::Impl::on_selection(wl_data_offer *offer) -> void {
-    // selection 事件携带的 offer 永远不是拖放 offer（拖放走 enter）；只要它是 pending 的那个
-    // 就销毁。防御性地连「非 pending 的」一并处理：不用的对象不留。
+    // selection 事件永远不是拖放 offer（拖放走 enter）；它是剪贴板 selection。本桥与剪贴板桥共用
+    // 同一枚 `wl_data_device`（每 seat 唯一），剪贴板桥无法再加自己的监听器，故把 offer 与已收集
+    // 的名称交给剪贴板桥持有 / 销毁，本桥不再管理（避免重复销毁协议对象）。无剪贴板桥时沿用原行为
+    // 丢弃非拖放 offer。
+    //
+    // 名称与 selection 的先后：协议规定 `data_offer` 之后**立即**逐个发 `offer`，`selection`
+    // 在其后到达，故 `pending_names` 此刻就是该 offer 的完整清单；若 offer 未经本桥的
+    // `data_offer`（pending 对不上），只交 offer 本身，迟到名称由 `offer_offer` 补发。
+    auto &forwarder = clipboard_forwarder_slot();
+    if (forwarder != nullptr) {
+        if (offer == nullptr && pending_offer != nullptr) {
+            // 清空事件不携带 offer：未被采用的待定 offer 自此无人认领，就地销毁。
+            wl_data_offer_destroy(pending_offer);
+        }
+        if (offer != nullptr && offer != pending_offer) {
+            forwarder(offer, {});
+        } else {
+            forwarder(offer, pending_names);
+        }
+        clipboard_offer = offer;
+        pending_offer = nullptr;
+        pending_names.clear();
+        return;
+    }
     if (offer != nullptr && offer != in.offer && pending_offer == offer) {
         wl_data_offer_destroy(offer);
         pending_offer = nullptr;
@@ -830,7 +874,14 @@ auto WaylandDragBridge::drag_out_active() const -> bool { return impl_->out.acti
 
 auto WaylandDragBridge::drag_in_active() const -> bool { return impl_->in.active; }
 
+auto WaylandDragBridge::data_device() const -> void * { return impl_->device; }
+
 auto WaylandDragBridge::note_initiator(WaylandDragBridge *bridge) -> void { initiator_slot() = bridge; }
+
+auto WaylandDragBridge::set_clipboard_forwarder(
+    std::function<void(wl_data_offer *, const std::vector<std::string> &)> forwarder) -> void {
+    clipboard_forwarder_slot() = std::move(forwarder);
+}
 
 auto WaylandDragBridge::initiator() -> WaylandDragBridge * { return initiator_slot(); }
 

@@ -345,10 +345,17 @@ if (AURORA_BACKEND_X11)
                 " cannot enable on the current platform. Disable with -DAURORA_BACKEND_X11=OFF.")
     endif ()
     find_package(X11 REQUIRED)
+    # 剪贴板桥（`detail/x11_clipboard.cpp`）用 XFIXES 监听选择区归属变更；`X11_LIBRARIES`
+    # 不含它，须单独链接。头文件是无条件包含的，故这里同步要求找到——装 X11 后端的镜像
+    # 须带 libXfixes 开发包（§3.2 依赖表）。
+    if (NOT X11_Xfixes_FOUND)
+        aurora_error("AURORA_BACKEND_X11 requires XFIXES (libXfixes-dev / libXfixes-devel);"
+                " FindX11 could not locate it.")
+    endif ()
     aurora_define_feature(AURORA_BACKEND_X11 EXPORT)
     target_include_directories(aurora PUBLIC ${X11_INCLUDE_DIR})
-    target_link_libraries(aurora PUBLIC ${X11_LIBRARIES})
-    aurora_log("X11 backend enabled: X11_LIBRARIES=${X11_LIBRARIES}")
+    target_link_libraries(aurora PUBLIC ${X11_LIBRARIES} ${X11_Xfixes_LIB})
+    aurora_log("X11 backend enabled: X11_LIBRARIES=${X11_LIBRARIES} X11_Xfixes_LIB=${X11_Xfixes_LIB}")
 endif ()
 
 if (AURORA_BACKEND_WAYLAND)
