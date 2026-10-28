@@ -23,7 +23,7 @@
 
 本文档覆盖三类判据：**① 必须有真实 OS 会话参与的**——跨进程拖放的进入 / 悬停 / 离开 / 落下四态、OS 光标反馈、uri-list 载荷往返；**② 必须有真实窗口与 HWND 参与的**——宿主是否真的把 OLE 拖入目标注册到了窗口上；**③ 拖出方向**——无人值守自拖放全链路（`begin_system_drag` → 拖拽线程 `DoDragDrop` → 终态经帧循环投递 → 载荷往返，可由探针自动段证明）与跨进程拖出到外部目标（载荷交付与终态折算，须人工拖放动作）。第一类离线单测做不到：无头 CI 里没有窗口，OS 会话回调永不到达。第二类同样做不到，但可由探针的自动段以反向方式证明（重复注册返回 `DRAGDROP_E_ALREADYREGISTERED`。离线可跑的判据（折算层四类映射、拖入入口的抑制与恢复、拖出终态折算、能力位方向级分叉）全部在 `tests/unit/utest_system_drag_translate.cpp`、`tests/unit/utest_system_drag_ingress.cpp` 与 `tests/unit/utest_drag_payload.cpp` 里，**不在本文档重复**——重复记录会让「手工跑过」与「CI 跑过」两种证据在读者眼里混成一种。
 
-**已接线范围**：Win32 / D3D11 / X11 / Wayland 四类 Surface 的**双向**（拖入为既有切片，拖出为本批新增；Win32 二者共用同一 `Win32Host` 与同一桥实例，拖出走库自管拖拽线程，终态经事件层登记、帧循环投递；X11 二者共用 `x11_surface.cpp` 内的同一 `X11DragBridge`，拖出走 Xdnd 源侧消息序列；Wayland 二者共用 `wayland_surface.cpp` 内的同一 `WaylandDragBridge`，拖出走 `wl_data_source` + `start_drag`，修饰态取自 seat 的 xkb 缓存——Wayland 协议不随指针事件送修饰态）。macOS 平台双向同批接线：`macos_surface.cpp` 的 `Impl` 唯一持桥，内容视图的五个拖入方法由库自带的目标视图类（桥的 `make_drag_destination_view`）转发，拖出终态经 `NSDraggingSource` 委托折算；该后端的**窗口壳仍为骨架**（`create_window` / `present` 未实写），故运行期桥装在孤立视图上、无真实窗口可承载会话，能力边界见 §1.3 的 macOS 环境表与 `TC-SYSTEMDRAG-024`。
+**已接线范围**：Win32 / D3D11 / X11 / Wayland 四类 Surface 的**双向**（拖入为既有切片，拖出为本批新增；Win32 二者共用同一 `Win32Host` 与同一桥实例，拖出走库自管拖拽线程，终态经事件层登记、帧循环投递；X11 二者共用 `x11_surface.cpp` 内的同一 `X11DragBridge`，拖出走 Xdnd 源侧消息序列；Wayland 二者共用 `wayland_surface.cpp` 内的同一 `WaylandDragBridge`，拖出走 `wl_data_source` + `start_drag`，修饰态取自 seat 的 xkb 缓存——Wayland 协议不随指针事件送修饰态）。macOS 平台双向同批接线：`macos_surface.cpp` 的 `Impl` 唯一持桥，窗口壳已实写（`create_window` 建 `NSWindow` + 自定义内容视图、`present` 零拷贝上屏），桥在 `create_window` 末尾装到内容视图上，内容视图的五个拖入方法由库自带的目标视图类（桥的 `make_drag_destination_view`）转发，拖出终态经 `NSDraggingSource` 委托折算、按下 `NSEvent` 由指针路径暂存供起手；自动段仍在孤立视图上以协议对象替身驱动（见下段），人工段在真实窗口内进行，能力边界见 §1.3 的 macOS 环境表与 `TC-SYSTEMDRAG-024`。
 
 **三批自动段的能力边界不同**：Win32 批的自动段能跑完无人值守自拖放全链路（拖拽循环在库自管线程里，不依赖窗口栈）；X11 批的自拖放腿要靠 `XQueryPointer` 探「指针下的最深窗口」，在 Wayland + Xwayland（rootless）下 X 服务器拿不到真实窗口栈，指针泊不进本窗口——此种环境里该腿如实记 `[PENDING]` 并以退出码 `3` 结束，交人工段（见 `TC-SYSTEMDRAG-011`）。为此 X11 批另设**拖入腿**：探针以另一条 X 连接（等价另一个客户端）取得 `XdndSelection` 所有权并向本窗口注入完整会话，不依赖窗口栈与真实指针，故拖入全链路在任何 X 服务器下都能自动取证。Wayland 批则把**合成器搬进进程**：Wayland 没有客户端可用的指针传送 API，「把指针泊进本窗口」在无头与无人值守环境下都做不到，探针遂在服务端自建 `wl_display` 并实现 `wl_compositor` / `wl_seat` / `wl_data_device_manager` 三段，客户端经 socketpair 连上后经 registry 绑定拿到与桥同侧的真实代理——「外部源发起拖入」「目标索取数据」「源应答取数」全部可确定性驱动，且走的是真实 `wl_data_device` 协议报文（桥的状态机、折算层、管道读写与终态折算都被真实协议代码执行，只是对端从合成器换成本进程的 mock）。代价是 mock 不覆盖「真实合成器上装得上、不断链」，那由可选冒烟腿（有 `WAYLAND_DISPLAY` 时建真实 `WaylandSurface` 泵帧，见 `TC-SYSTEMDRAG-020`）与人工交互腿补。
 
@@ -35,7 +35,7 @@
 |:---|:---|:---|
 | `tools/verify/win32_drag_live_probe.cpp` | `aurora_verify_win32_drag` | 真机验收：窗口含上面板（落放面板，拖入四态与自拖放落点）与下面板（拖出源，`on_provide_drag` 供 text/plain）；自动段跑五条判据（拖入三条：能力位 / OLE 注册 / 派发链；拖出两条：能力位 / 无人值守自拖放全链路），人工段常驻窗口打印拖入四态与拖出 begin / cancel / end 态 |
 | `tools/verify/wayland_drag_live_probe.cpp` | `aurora_verify_wayland_drag` | 真机验收：同样的上下两面板布局。自动段跑进程内 mock 合成器上的四条腿——拖入腿十五条判据（Enter 恰一次 / 格式折算保序 / Enter 位置 / accept 查询 / Over 的 proposed 与 allowed / accept 线上名 / Drop 载荷管道往返 / Drop 格式与位置 / 两个 MIME 都经管道取回 / `finish` / 会话收清）、拖出成功腿十一条（`start_drag` 带 press serial / 线上名广告 / `set_actions` / provide 的规范 MIME / 载荷字节管道往返 / 终态 Succeeded + Copy / 会话收清）、拖出取消腿四条（`cancel` → Cancelled + None）、真实合成器冒烟腿（可选：有 `WAYLAND_DISPLAY` 时核对能力位并泵 30 帧，无则整腿记 `[PENDING]`）。人工段常驻窗口逐帧打印拖入四态与 `drop files=` / `drop text=`、拖出 begin / cancel / end 态 |
-| `tools/verify/macos_drag_live_probe.mm` | `aurora_verify_macos_drag` | 真机验收（ObjC++，ARC）：自动段跑五条腿——登记表与能力位（UTI 三条 / `NSFilenamesPboardType` 不在表内 / UTI 反查 / `NSDragOperation` 位序 Copy=1 Link=2 Move=16 / 两个能力位）、目标视图与桥 install（`isFlipped` 为 YES、五个 `NSDraggingDestination` 方法在位、install 成功、AppKit 记录的登记类型与登记表一致）、mock 拖入（真实 `NSPasteboard` 往返：Enter 恰一次且位置折算正确、格式折算为单个规范 MIME、`proposed` 取自源掩码且 `allowed` 为求交结果、Over 跟随新位置、`prepareForDragOperation` 闸门、Drop 载荷文本往返、会话收清、Exited 补派 Leave）、拒收路径（Enter 回 `NSDragOperationNone`、闸门返回 NO、不派 Drop）、拖出失败收口（无窗口 / 无按下事件 ⇒ `system_drag::begin` 如实失败且不派终态）。人工段当前不可用（`MacOSSurface` 窗口壳未实写，`--interactive` 直接退 `2`），拖入四态与拖出终态待窗口壳落地后由人照 `TC-SYSTEMDRAG-027` / `-028` 跑 |
+| `tools/verify/macos_drag_live_probe.mm` | `aurora_verify_macos_drag` | 真机验收（ObjC++，ARC）：自动段跑五条腿——登记表与能力位（UTI 三条 / `NSFilenamesPboardType` 不在表内 / UTI 反查 / `NSDragOperation` 位序 Copy=1 Link=2 Move=16 / 两个能力位）、目标视图与桥 install（`isFlipped` 为 YES、五个 `NSDraggingDestination` 方法在位、install 成功、AppKit 记录的登记类型与登记表一致）、mock 拖入（真实 `NSPasteboard` 往返：Enter 恰一次且位置折算正确、格式折算为单个规范 MIME、`proposed` 取自源掩码且 `allowed` 为求交结果、Over 跟随新位置、`prepareForDragOperation` 闸门、Drop 载荷文本往返、会话收清、Exited 补派 Leave）、拒收路径（Enter 回 `NSDragOperationNone`、闸门返回 NO、不派 Drop）、拖出失败收口（无窗口 / 无按下事件 ⇒ `system_drag::begin` 如实失败且不派终态）。人工段可用：`--interactive` 建 720×480 真实窗口（上半落放区、下半拖出源，按下左键发起 text/plain 拖出），拖入四态与拖出终态由人照 `TC-SYSTEMDRAG-027` / `-028` 核对 |
 | `tools/verify/x11_drag_live_probe.cpp` | `aurora_verify_x11_drag` | 真机验收：同样的上下两面板布局。自动段跑三条基础判据（SurfaceKind / 两个能力位 / `XdndAware` 广告）与派发链三条；随后跑**拖入腿**——探针以自带的一条 X 连接取得 `XdndSelection` 所有权，向本窗口注入一场完整 Xdnd 会话并应答取数（十条判据：动作协商回程三条、控件侧两态与取数两条、载荷往返一条、`XdndFinished` 两条、accept 查询一条）；再跑**自拖放腿**（需指针能泊进本窗口，见 §1.1 的能力边界）。人工段常驻窗口打印拖入四态、`drop files=` / `drop text=` 与拖出三态 |
 
 探针的命令行口径（`aurora_verify::parse_interactive`）：
@@ -45,7 +45,7 @@
 | `--interactive` | 开关 | 关 | 自动段跑完后窗口常驻，打印拖入四态与拖出 begin / cancel / end 态供人工核对；不带此开关时跑完自动段（含拖入腿）与自拖放腿即退出 |
 | `--help` | 开关 | 关 | 打印用法（不进入探针主体） |
 
-**退出码即结论**：`0` 自动段全部通过（macOS 探针另需窗口服务器在场：桥装在真实 `NSWindow` 内的视图上）、`2` 环境不可用（Win32 建窗或取 HWND 失败；X11 无 `DISPLAY` / 建窗失败 / 取不到 Window id；Wayland mock 服务端起不来或 socketpair 失败，或 `--interactive` 时无 `WAYLAND_DISPLAY`；macOS 建不出目标视图 / 粘贴板写入失败 / `--interactive` 时窗口壳未实写）、`3` 自动段无失败但有腿因环境限制未跑（X11 探针：Wayland + Xwayland 下指针泊不进本窗口，自拖放腿挂起，见 §1.1；Wayland 探针：无 `WAYLAND_DISPLAY`，真实合成器冒烟腿整腿挂起，见 `TC-SYSTEMDRAG-020`；macOS 探针：无窗口服务器，AppKit 真实派发的会话腿整段挂起，见 `TC-SYSTEMDRAG-024`）、`4` 有 `[FAIL]` 判据行、用法错误为 `64`。探针**不进 CTest**（`aurora_add_verify_probe` 的 `EXCLUDE_FROM_ALL` 与真机要求），产品输出经 `AURORA_LOG_RAW` 走 stdout，因此 `[PASS]` / `[FAIL]` / `[PENDING]` 行可直接重定向成文本比对。
+**退出码即结论**：`0` 自动段全部通过（macOS 探针另需窗口服务器在场：桥装在真实 `NSWindow` 内的视图上）、`2` 环境不可用（Win32 建窗或取 HWND 失败；X11 无 `DISPLAY` / 建窗失败 / 取不到 Window id；Wayland mock 服务端起不来或 socketpair 失败，或 `--interactive` 时无 `WAYLAND_DISPLAY`；macOS 建不出目标视图 / 粘贴板写入失败 / `--interactive` 建窗或上屏失败）、`3` 自动段无失败但有腿因环境限制未跑（X11 探针：Wayland + Xwayland 下指针泊不进本窗口，自拖放腿挂起，见 §1.1；Wayland 探针：无 `WAYLAND_DISPLAY`，真实合成器冒烟腿整腿挂起，见 `TC-SYSTEMDRAG-020`；macOS 探针：无窗口服务器，AppKit 真实派发的会话腿整段挂起，见 `TC-SYSTEMDRAG-024`）、`4` 有 `[FAIL]` 判据行、用法错误为 `64`。探针**不进 CTest**（`aurora_add_verify_probe` 的 `EXCLUDE_FROM_ALL` 与真机要求），产品输出经 `AURORA_LOG_RAW` 走 stdout，因此 `[PASS]` / `[FAIL]` / `[PENDING]` 行可直接重定向成文本比对。
 
 **自动段不是人工段的替代品**：自动段能证明「桥已注册、能力位已翻、派发链语义一致」，以及拖出方向的无人值守自拖放全链路（begin → 拖拽线程 `DoDragDrop` → 终态经帧循环投递 → 载荷往返，无鼠标按键参与）；但**不能**证明 OS 真的把跨进程会话事件投给了本窗口、也不能证明载荷交付到了外部目标——那必须有人工拖放动作。故本卷的人工段是判据主体，自动段是前置。Wayland 批的自动段另受一层限制：mock 合成器证明的是「桥对真实协议报文的处理正确」，不证明真实合成器愿意把会话投给本窗口——那由冒烟腿（装得上、不断链）与人工段（跨进程投递）补。
 
@@ -86,7 +86,7 @@ macOS 批次的载体另需下列环境（与上表并列，按被测平台择�
 | 平台 | macOS 本机（Apple Clang + Ninja，`AURORA_BACKEND_MACOS`；ObjC++ 语言由 `AuroraVerify.cmake` 条件启用） |
 | 构建 | 独立构建目录并开 `AURORA_BUILD_VERIFY_TOOLS=ON`；示例见 §2.11 的 `TC-SYSTEMDRAG-024` |
 | 桌面会话 | 自动段五腿只依赖 AppKit 初始化与粘贴板服务（无人值守亦可跑）；**AppKit 真实派发的会话腿与人工段另需交互式桌面 + 窗口服务器**（无窗口服务器时探针记 `[PENDING]` 并以退出码 `3` 结束） |
-| 窗口壳 | `MacOSSurface::create_window` / `present` 仍为骨架（见 `src/aurora/window/macos_surface.cpp`），故 `--interactive` 当前退 `2`；`TC-SYSTEMDRAG-027` / `-028` 待窗口壳实写后可执行 |
+| 窗口壳 | 已实写（见 `src/aurora/window/macos_surface.cpp`）：`--interactive` 建真实 `NSWindow` 并逐帧上屏，`TC-SYSTEMDRAG-027` / `-028` 可执行 |
 | 样本 | 至少一个本地文件（含非 ASCII 路径者更佳，用于人工段核对 uri-list 往返） |
 
 ### 1.4 用例编号规则
@@ -466,7 +466,7 @@ macOS 批次的载体另需下列环境（与上表并列，按被测平台择�
 |:---|:---|
 | 用例编号 | TC-SYSTEMDRAG-027 |
 | 测试目的 | 验证 AppKit 真实派发的跨进程拖入：四态序列（Enter → Over → Leave / Drop）与 uri-list 载荷往返在真实窗口会话下成立 |
-| 前置条件 | `TC-SYSTEMDRAG-024` 的探针产物齐备；**交互式 macOS 桌面**（窗口服务器在场）；`MacOSSurface` 窗口壳已实写、`--interactive` 可用（窗口壳落地前本条判 BLOCKED，见 §1.3 的窗口壳行）；至少一个本地文件（含非 ASCII 路径者更佳） |
+| 前置条件 | `TC-SYSTEMDRAG-024` 的探针产物齐备；**交互式 macOS 桌面**（窗口服务器在场）；`--interactive` 可建窗上屏（见 §1.3 的窗口壳行）；至少一个本地文件（含非 ASCII 路径者更佳） |
 | 依赖用例 | TC-SYSTEMDRAG-024, TC-SYSTEMDRAG-026 |
 | 操作步骤 | 1. 以 `--interactive` 启动探针，窗口保持在前台（纯执行，无预期结果）<br>2. 从 Finder 拖一个文件进入窗口落放区，先不松手<br>3. 在窗口内移动指针若干次<br>4. 把指针移出窗口边界<br>5. 重新拖入并在窗口中部松手落下<br>6. 观察探针打印的 `[drag] phase=` 行序列与 `[drag] drop files=` 行 |
 | 预期结果 | 2. 出现 `[drag] phase=Enter`（进入即一态，不因未松手而缺失）<br>3. 每次移动都追加 `[drag] phase=Over`（按指针采样频率到达，不合并、不丢失）<br>4. 出现 `[drag] phase=Leave`（移出即收车）<br>5. 出现 `[drag] phase=Drop`<br>6. `[drag] drop files=` 后的路径与拖入的文件逐一相同；含非 ASCII 的路径以 UTF-8 正确呈现、无替换字符与截断（`public.file-url` 只登记 file URL 形态，旧式 `NSFilenamesPboardType` 的路径数组按设计不声称可读，见 `TC-SYSTEMDRAG-024` 第 4 步） |
@@ -502,11 +502,12 @@ Wayland 批同样**未执行**：`TC-SYSTEMDRAG-016` 至 `TC-SYSTEMDRAG-023` 全
 `TC-SYSTEMDRAG-021` 至 `TC-SYSTEMDRAG-023` 的人工段需真实 Wayland 会话与人工拖放动作，
 开发期不具备，留待执行人照用例跑过。
 
-macOS 批同样**未执行**：`TC-SYSTEMDRAG-024` 至 `TC-SYSTEMDRAG-028` 全部留空。本仓库的无头
-Linux 构建不含 Cocoa 后端，故 macOS 批**只有 CI 的 `macos-appkit-glfw` 作业给出的编译证据**
-（`--target aurora_verify` 编出 `aurora_verify_macos_drag`），运行期判据一条都没有在本仓库
-内跑过；`TC-SYSTEMDRAG-027` / `-028` 另需 `MacOSSurface` 窗口壳实写（当前 `create_window`
-为骨架，`--interactive` 直接退 `2`），窗口壳落地前按 BLOCKED 处理。
+macOS 批同样**未执行**：`TC-SYSTEMDRAG-024` 至 `TC-SYSTEMDRAG-028` 全部留空。其中
+`TC-SYSTEMDRAG-024` 至 `TC-SYSTEMDRAG-026` 的自动段已在 macOS 开发机上跑通作为开发期取证——
+30 项判据全过、退出码 `0`（窗口服务器在场，桥装在真实 `NSWindow` 内的视图上）；同一探针的
+`--interactive` 段已能建 720×480 真实窗口并逐帧上屏，但人工拖放动作尚无人执行，故
+`TC-SYSTEMDRAG-027` / `-028` 仍待执行人照用例跑过。按本卷「执行记录 = 人工按用例跑过」的口径，
+自动段证据只作开发期取证，不填执行记录表。
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|

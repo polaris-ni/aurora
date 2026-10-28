@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-038 |
 | 提出日期 | 2026-10-26 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.APP.RECENT-DOCUMENTS.001 |
 | 影响面 | `include/aurora/window/platform.h`（`PlatformCapabilities` 增 `recent_documents_os_projection` 位）；`include/aurora/app/recent_documents.h` 同址扩充投影入口；`src/aurora/window/detail/` 新增零平台头折算层与 Win32 / macOS 两枚平台桥；`codespec/errors.toml` 及生成物扩一枚码；`tests/unit/` 新增折算层与能力位用例；`tools/verify/` 新增一枚真机探针；`codespec/` 两处回写 |
 
@@ -54,3 +54,4 @@
 4. **三条实测平台事实**（都写进桥头注与规格，不藏在代码里）：投递无回执（成功只表「已投给 OS」）；快捷方式的实际写出**晚于** API 返回（毫秒级迟到，故撤销只销「确认删掉了」的账，真机判据须有界轮询）；`Start_TrackDocs=0` 时 API 静默无操作，桥读该键作为可证旁证、返回 `platform-unavailable` 而非谎报成功。附带一条取证事实：壳把 `%TEMP%` 排除在最近文档之外，探针文件因此建在 `%LOCALAPPDATA%\aurora_verify`。
 5. **验收判据兑现情况**：第 1—6 条与第 8 条已兑现（无头单测 12 例 + 真机探针自动段全绿，第 6 条的「条目出现 / 幂等 / 撤销后消失」由探针自带的独立取证证明）；第 7 条随 macOS 桥一并留待后续批次。
 6. **变异自证已实跑两条**（判据第 6 项要求的正是这两条）：把折算层的截断方向改成「保留最旧」⇒ `plan_truncates_from_the_oldest_tail` 等 5 例转红；摘掉空串过滤 ⇒ `plan_drops_empty_entries` 转红。两次改坏后均已还原并复跑回绿（11 通过 / 1 如实 SKIP），用例不是空转。
+7. **后续批次已补上 macOS 桥并归档（覆盖第 1 条的 macOS 部分）**：`src/aurora/window/detail/macos_recent_documents.{h,cpp}` 把折算后的计划逐条交给 `NSDocumentController noteNewRecentDocumentURL:`，撤销走 `clearRecentDocuments:`；`PlatformCapabilities::recent_documents_os_projection` 的 `MacOS` 由 `false` 翻为 `true`（机制在且桥已接）。三条实测口径写进规格与桥头注：**① 只在 `.app` 包内生效**——裸可执行文件调该 API 不落记录，桥逐条回读 `recentDocumentURLs` 核对，未记录即报 `platform-unavailable` 并点名需要 app bundle，不谎报成功；**② 投递无回执**，成功的确切含义是「已交给 `NSDocumentController` 且回读可见」；**③ 撤销的作用域是整个应用**（AppKit 无逐条移除 API），与 Win32 桥只删本进程记录的 `.lnk` 的窄语义不同。判据第 7 条（macOS 机制层）由 `aurora_verify_macos_recent_documents` 在本机经临时 `.app` 包跑通兑现：17/17 项断言全过（投影后 OS 列表出现、重复投影幂等、撤销后清空、store 不被触碰）。

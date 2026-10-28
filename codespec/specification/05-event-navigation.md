@@ -118,7 +118,7 @@ struct Event {
 | Wayland | `on_modifiers` 经 xkbcommon 维护的 `mods` 缓存 | `send_mouse` 与 `ptr_axis`（滚轮）均填该缓存，与键盘路径（`on_key`）读的同一个字段。**Wayland 协议不随指针事件送修饰态**（`wl_pointer` 的 enter/motion/button 回调都没有 mods 参数），故该缓存是本后端指针路径唯一可得来源，不新增机制 |
 | GLFW | ① `on_mouse_button` 的**回调形参 `mods`**（GLFW 在按钮回调上确实发掩码）；② `on_cursor_pos` / `on_scroll` 读 `glfwGetKey` 的**缓存事件态** | 两条入口都收敛到 `src/aurora/window/detail/glfw_modifiers.h`，避免同一后端内两种 Shift 语义。入口 ② 的合法性依据：GLFW 只给 button / key / char 回调发掩码，这两个回调的签名不给；`glfwGetKey` 读的是 GLFW 自己随 key 事件推进的缓存、**不是对系统的物理轮询**（`third_party/glfw/docs/input.md`：「This function only returns cached key event state. It does not poll the system for the current state of the key.」）。左右两侧任一按下即置位，与 Win32 侧同归并口径。**仓库固定 GLFW 3.5.1，没有「读当前修饰态」的窗口属性**（`GLFW_MODIFIERS` 在 3.6 开发分支与 master 上均尚未存在，3.6 也未发布），故不升级依赖 |
 | WASM | `EmscriptenMouseEvent` 的 `ctrlKey` / `shiftKey` / `altKey` / `metaKey` 四个 `bool`（字段名以本机 emsdk 的 `html5.h` 实测为准，与键盘路径读的 `EmscriptenKeyboardEvent` 同名同型） | `wasm_surface.h` 的 `on_mouse` 内折算；DOM 事件自带该快照，读取即「那一刻」的状态。**本后端不注册滚轮回调**（不产 `ScrollEvent`），不属漏实现而是另一条独立能力 |
-| macOS | — | 指针通道整条未实装（骨架文件零 `MouseEvent` / `ScrollEvent` 构造），不伪造实现 |
+| macOS | `NSEvent.modifierFlags`（AppKit 在每个鼠标 / 滚轮事件上携带完整修饰快照） | 折算走 `src/aurora/window/detail/macos_keymap.h` 的 `macos_modifiers_from_flags`（**零 AppKit 头的纯函数**：Shift `1<<17`、Control `1<<18`、Option→Alt `1<<19`、Command→Meta `1<<20`），与键盘 / 拖放路径同一实现。`mouseDown` / `mouseUp` / `mouseDragged` / 右键与中键族、`scrollWheel` 均从事件自带 flags 取值并回填 `Impl::modifiers` 缓存；缓存另供系统拖放桥读取（拖放回调不带修饰位）。失焦时缓存清 `None`——此后修饰键事件不再送达，留着旧值就是谎报 |
 
 **合成事件一律 `None`**：由触控合成的 `MouseEvent`、以及 `Widget::scroll_by` / `Scroll::scroll_by` 这类程序化滚动合成的 `ScrollEvent` 恒为 `ModifierKey::None`——它们不对应任何物理修饰态，凭空补一个「当前修饰态」会让消费方把程序化滚动误判成用户手势。**本仓当前的合成点清单**（逐条对应单测）：
 
@@ -178,7 +178,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | `X11Surface` | ✅ **XIM 桥已接**（`src/aurora/window/x11_surface.cpp` 内联）：`XIMPreeditCallbacks` 风格协商 + draw/caret 回调回推，PreeditNothing 逐级降级 |
 | `WaylandSurface` | ✅ **text-input-unstable-v3 桥已接**（`src/aurora/window/wayland_surface.cpp` 内联，门 `AURORA_HAVE_WL_TEXT_INPUT`）：enable 判据 = 焦点 ∧ provider 非零盒；组合内容/上屏/回删全部折算成契约事件 |
 | `HeadlessSurface` | 无输入法概念；组合事件由测试直接构造并派发（`tests/unit/utest_ime_composition.cpp`） |
-| GLFW / Wasm / macOS | ⬜ **契约级**：事件与控件侧行为已完备，缺平台桥（macOS `NSTextInputClient`、Wasm DOM `composition*`）。须有真实桌面/浏览器输入法环境后补，无头 CI 无法完成 |
+| `MacOSSurface` | ✅ **`NSTextInputClient` 桥已接**（`src/aurora/window/macos_surface.cpp` 内联）：内容视图实现该协议，`insertText:replacementRange:` / `setMarkedText:selectedRange:replacementRange:` / `unmarkText` / `doCommandBySelector:` 折算成契约事件，`firstRectForCharacterRange:` 以 provider 的 caret 盒回推候选窗位置（屏幕坐标由 `convertRectToScreen:` 换算）；marked text 以 UTF-16 长度记 `markedRange`，上屏即清 `marked` 标志。真机输入法联调待有桌面会话的 macOS 环境 |
+| GLFW / Wasm | ⬜ **契约级**：事件与控件侧行为已完备，缺平台桥（Wasm DOM `composition*`）。须有真实浏览器输入法环境后补，无头 CI 无法完成 |
 
 各平台的取舍与实现细节（IMM32 而非 TSF、`WM_IME_CHAR` 吞字纪律、XIM 风格协商与溢出取字、v3 enable 判据与去重）见 [`06-app-platform.md`](06-app-platform.md) §8.5；真机验收见 `tools/verify/win32_ime_live_probe.cpp` / `x11_ime_live_probe.cpp` / `wayland_ime_live_probe.cpp`。
 
@@ -496,7 +497,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
   | Win32 OLE | `IDropTarget::DragEnter` | `DragOver` | `DragLeave` | `Drop` | `DragOver` / `DragEnter` 的 `pdwEffect`（`DROPEFFECT_*`） | **拖入 / 拖出均已接线**（拖出走库自管拖拽线程，见下） |
   | X11 Xdnd | `XdndEnter`（类型经折算层换 MIME，空则不建会话） | `XdndPosition` | `XdndLeave` | `XdndDrop` | `XdndStatus`（接受位 + 动作 + 空矩形） | **拖入 / 拖出均已接线**（二者共用 `x11_drag.h` 的同一桥实例，见下） |
   | Wayland | `data_offer` + `offer`（线上名清单）先行，`enter` 建会话 | `motion` | `leave` | `drop`（之后 `receive` 经管道取数、`finish` 收口） | `wl_data_offer.accept(serial, mime)` + `set_actions(dest_actions, preferred)` | **拖入 / 拖出均已接线**（二者共用 `wayland_drag.h` 的同一桥实例，见下） |
-  | macOS | `draggingEntered` | `draggingUpdated` | `draggingExited` | `performDragOperation`（取数**同步**完成：AppKit 读取 API 自身阻塞到数据就绪） | `draggingEntered` / `draggingUpdated` 返回的 `NSDragOperation`（**accept 闸门是 `prepareForDragOperation` 的返回值**，闸门为 NO 时 AppKit 不调 perform） | **拖入 / 拖出均已接线**（二者共用 `macos_drag.h` 的同一桥实例，见下；窗口壳仍为骨架，运行期需真实窗口承载会话） |
+  | macOS | `draggingEntered` | `draggingUpdated` | `draggingExited` | `performDragOperation`（取数**同步**完成：AppKit 读取 API 自身阻塞到数据就绪） | `draggingEntered` / `draggingUpdated` 返回的 `NSDragOperation`（**accept 闸门是 `prepareForDragOperation` 的返回值**，闸门为 NO 时 AppKit 不调 perform） | **拖入 / 拖出均已接线**（二者共用 `macos_drag.h` 的同一桥实例，见下；桥在 `create_window` 末尾装到真实 `NSWindow` 的内容视图上） |
 
   - **坐标**：OS 会话坐标 → 客户区像素 → **整幅表面逻辑坐标**（§2.3）；除数取宿主的 `scale`（宿主内 DPI 的唯一真值源），折算层不另读 DPI。
   - **formats**：OS 格式 → MIME 清单，取值一律出自 `app/mime_types.h`（单一真源），未登记格式丢弃；顺序即源侧优先级，折算不得重排。

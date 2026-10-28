@@ -545,8 +545,8 @@ inline constexpr std::array<ErrorMeta, 157> AURORA_ERROR_TABLE = {
             .severity = ErrorSeverity::Error,
             .retryable = false,
             .message_tpl = "OS recent-documents projection is not supported on this platform",
-            .hint = "The platform offers no recent-documents mechanism (Linux/macOS) or its bridge is not wired; the "
-                    "in-app RecentDocuments list still works unchanged",
+            .hint = "The platform offers no recent-documents mechanism (Linux) or its bridge is not wired; the in-app "
+                    "RecentDocuments list still works unchanged",
         },
         {
             .code = ErrorCode::NativeMenuUnsupported,
@@ -1809,11 +1809,11 @@ inline constexpr std::array<ErrorMeta, 157> AURORA_ERROR_TABLE = {
             .severity = ErrorSeverity::Error,
             .retryable = false,
             .message_tpl = "This platform cannot listen for clipboard changes: '{detail}'",
-            .hint =
-                "No clipboard-change listener mechanism exists here (the platform anchors are "
-                "AddClipboardFormatListener on Win32, QClipboard::dataChanged, GdkClipboard::changed, and NSPasteboard "
-                "changeCount). The absence is stable, so retrying cannot create it - sample available_formats() at the "
-                "moments that matter instead of registering a listener that would never fire",
+            .hint = "No clipboard-change listener mechanism exists here (the platform anchors are "
+                    "AddClipboardFormatListener on Win32, QClipboard::dataChanged, and GdkClipboard::changed; AppKit "
+                    "only exposes changeCount polling, which this library deliberately does not turn into a listener). "
+                    "The absence is stable, so retrying cannot create it - sample available_formats() at the moments "
+                    "that matter instead of registering a listener that would never fire",
         },
         {
             .code = ErrorCode::SystemDragReadFailed,

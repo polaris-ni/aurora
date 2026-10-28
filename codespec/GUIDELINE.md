@@ -1717,7 +1717,7 @@ X11 自动段已覆盖焦点宣告往返与 XTEST 假键落字；Wayland 自动�
 - **下标是码点**：`cursor_index` / `sel_*` 按码点折算，代理对不会被切半。
 - **组合事件只到焦点控件**：不经命中链、不冒泡，故容器不会误吞。
 - **只有 `Application` 驱动才有 IME**：裸 `Window` + `present_root` 没有任何事件处理器（连 Tab 焦点都不通），详见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.5。
-- **平台桥覆盖**：Win32（IMM32）、X11（XIM）、Wayland（text-input-v3，门 `AURORA_HAVE_WL_TEXT_INPUT`）已接；GLFW / macOS / Wasm 仍只有契约——写了钩子也收不到事件，接线状态见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §2.4。
+- **平台桥覆盖**：Win32（IMM32）、X11（XIM）、Wayland（text-input-v3，门 `AURORA_HAVE_WL_TEXT_INPUT`）与 macOS（`NSTextInputClient`）已接；GLFW / Wasm 仍只有契约——写了钩子也收不到事件，接线状态见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §2.4。
 
 ---
 
@@ -2171,7 +2171,7 @@ if (!res) {
 - **`tag` 双重身份**：既是去重 / 替换标识（同一 tag 的后续通知在支持去重的服务器上替换前一条），也是激活回调回传的键；空 tag 由实现层换成稳定占位键，回调里收到空串。
 - **激活回调依赖宿主排空**：Win32 依附宿主消息泵（`PeekMessage` 天然覆盖，`pump_events()` 在那里是 no-op）；Linux 必须靠 `NotificationCenter::pump_events()` 驱动 GLib 主循环迭代 / libdbus 套接字读取，建议每帧一次——用 `Application::run()` 时框架已在帧循环里做了，自己写主循环要显式调。**不排空 ⇒ 通知照常显示、回调不到**（不会虚假成功）。
 - **失败口径**：一切失败统一为 `ErrorCode::NotificationPostFailed`（`detail` 指出缺失哪个库 / 哪个系统调用失败），永久失败、不可重试；不抛异常、不静默 no-op。Linux 走 `libnotify` → `libdbus` → `notify-send` 三层运行时降级链（全部 `dlopen` / `popen`，无构建期依赖），**全部**缺失才返回该错误，第三层没有激活回调。
-- **平台矩阵**：Windows（`Shell_NotifyIconW` 气球）支持激活回调；Linux 前两层支持；Headless 只记录 `last_notification()` 且返回成功；macOS / 其它本轮不支持，`notify()` 返回错误。
+- **平台矩阵**：Windows（`Shell_NotifyIconW` 气球）支持激活回调；Linux 前两层支持；macOS 经 `NSUserNotificationCenter`（legacy API）支持（`tag` → `identifier` 原位替换、点击经 delegate 回传；只对 `.app` 包可得，裸可执行文件返回 `NotificationPostFailed`；`timeout_ms` 与 `urgency` 样式不受支持，后者折算为提示音）；Headless 只记录 `last_notification()` 且返回成功；其余平台本轮不支持，`notify()` 返回错误。
 - **Win32 的可见副作用**：应用本身没有托盘图标时，发通知会在通知区域**短暂出现一个图标**（气球必须依附图标），气球消失后实现会 `NIM_DELETE` 撤掉，不长期占位；已有 `SystemTray` 时复用其图标。
 - **无桌面 / 测试友好**：`last_notification()` 在**所有**平台上维护（含投递失败的调用），是无桌面环境的主动观测面；`install_recording_backend()` 可强制只记录、不触达系统通知服务，供开发机上的字段往返测试。
 

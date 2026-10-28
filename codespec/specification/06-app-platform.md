@@ -165,7 +165,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 
 | 层次 | 落点 |
 |:---|:---|
-| `Surface::cancel_close()` | GLFW 用 `glfwSetWindowShouldClose(w, GLFW_FALSE)`；Win32 清 `should_close`（`handle_close` 只置位、不 `DestroyWindow`）；X11 / Wayland 清 `close_requested`；无头 `set_should_close(false)`；macOS 为骨架（清 `Impl` 标志，真实 AppKit 侧待该后端实写时一并落地）；同源面 `d3d11` / `wgpu_win32` / `wgpu_x11` / `wgpu_wayland` 逐面转发 |
+| `Surface::cancel_close()` | GLFW 用 `glfwSetWindowShouldClose(w, GLFW_FALSE)`；Win32 清 `should_close`（`handle_close` 只置位、不 `DestroyWindow`）；X11 / Wayland 清 `close_requested`；无头 `set_should_close(false)`；macOS 清 `Impl::should_close`（`windowShouldClose:` 委托只置位、不销毁窗口；窗口壳已不存在时拒绝清位）；同源面 `d3d11` / `wgpu_win32` / `wgpu_x11` / `wgpu_wayland` 逐面转发 |
 | `WindowHost::cancel_close()` | 清三枚记账位 + 转发到 `Surface` |
 | 后置复验 | 复验 `should_close()` 仍为真 ⇒ 记一次 `AURORA_LOG_WARN("app", …)` 并按**放行**处理 |
 
@@ -280,7 +280,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 | Win32 | `SC_RESTORE` / `SC_MAXIMIZE` / `SC_MINIMIZE` 经窗口过程（与用户走系统菜单同路径），`WM_SIZE` 回来定档上报 | 真实现 |
 | GLFW | `glfwRestoreWindow` / `glfwMaximizeWindow` / `glfwIconifyWindow`，回调回来定档上报 | 真实现 |
 | Headless | 记录目标态 + `notify_window_mode` 同步上报：无 OS 语义、零副作用、可断言（无头几何恢复用例的观测面） | 真实现（测试 seam） |
-| macOS | 骨架后端，保持默认空实现 | 骨架申报（未实装） |
+| macOS | `toggleFullScreen:` / `miniaturize:` / `deminiaturize:` / `zoom:` 按目标态组合（先读 `styleMask` 全屏位、`isMiniaturized`、`isZoomed` 再补差额）；立即按目标档 `notify_window_mode`，AppKit 的异步过渡完成后由窗口委托按真实态校正 | 真实现 |
 
 - **转发装饰器**：`WgpuWaylandSurface` 逐方法转发 `host_`，本原语已补转发（不补则该后端静默失效）。
 - **无头 seam 行为**：`mode != Normal` 时同样安全 no-op、不报错，也不会让宿主被判为几何不可用（否则既有无头几何用例会因几何「不可用」转红）。
@@ -490,9 +490,9 @@ au::App().window(win ? std::move(win.value()) : nullptr)
 
 `PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`、`system_drag_in`、`system_drag_out`、`recent_documents_os_projection`、`native_menu_bar`、`runtime_visibility`、`runtime_always_on_top`。
 
-拖放两位表「**机制是否存在**」：支持接收系统拖入 / 支持发起系统拖出，**按方向独立翻位**（不是成对翻位）。当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（Win32 / D3D11 共用同一宿主与同一桥实例；X11 两个方向共用 `x11_drag.h` 的同一桥实例；Wayland 两个方向共用 `wayland_drag.h` 的同一桥实例；macOS 两个方向共用 `macos_drag.h` 的同一桥实例——其窗口壳仍为骨架，运行期 `install()` 因无内容视图必失败并记日志降级，能力位表机制归属、与 `multitouch` 等位的声明口径一致），其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定，「未接线先声称」的变异对应用例转红）。能力位与运行期失败**不互相替代**：机制存在但会话建立失败、源中断等仍走 `Result` 错误（`system-drag-*` 码，`retryable = false`，机制缺失是稳态）。
+拖放两位表「**机制是否存在**」：支持接收系统拖入 / 支持发起系统拖出，**按方向独立翻位**（不是成对翻位）。当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（Win32 / D3D11 共用同一宿主与同一桥实例；X11 两个方向共用 `x11_drag.h` 的同一桥实例；Wayland 两个方向共用 `wayland_drag.h` 的同一桥实例；macOS 两个方向共用 `macos_drag.h` 的同一桥实例——内容视图登记 `NSDraggingDestination`，桥由 `MacOSSurface::Impl` 在窗口壳建好后 `install()`，运行期 install 失败如实记日志降级；能力位表机制归属，与 `multitouch` 等位的声明口径一致），其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定，「未接线先声称」的变异对应用例转红）。能力位与运行期失败**不互相替代**：机制存在但会话建立失败、源中断等仍走 `Result` 错误（`system-drag-*` 码，`retryable = false`，机制缺失是稳态）。
 
-`recent_documents_os_projection` 表「OS 是否提供可写入的最近文档机制、且本库把桥接好了」（§8.10）。当前仅 `Win32` 与 `D3D11` 为 true（两者共用同一宿主与同一桥实例，故同翻）；`MacOS` 本次为 **false**——机制（`NSDocumentController`）确实存在，但桥未交付，**未接线的方向不预先声称**（声称了会让调用方在静默失败后无从降级）。`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：OS 侧无该机制（XDG `recently-used.xbel` 是 GTK 生态的共读文件，不是 OS 机制）。能力位为 false 时 `project_to_os()` / `clear_os_projection()` 返回 `recent-documents-projection-unsupported`，**应用内列表与持久化不受影响**（口径同上：能力位表机制归属，运行期失败另走 `Result`）。期望表由 `utest_recent_documents_translate` 锚定（逐 `SurfaceKind` 断言，含 macOS 为 false 这条——机制在而桥未落，按「未接线不预翻」如实申报）。
+`recent_documents_os_projection` 表「OS 是否提供可写入的最近文档机制、且本库把桥接好了」（§8.10）。当前 `Win32`、`D3D11` 与 `MacOS` 为 true（Win32 / D3D11 共用同一宿主与同一桥实例，故同翻；macOS 走 `NSDocumentController` 的 `noteNewRecentDocumentURL:`，属应用级集合）。`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：OS 侧无该机制（XDG `recently-used.xbel` 是 GTK 生态的共读文件，不是 OS 机制）。能力位为 false 时 `project_to_os()` / `clear_os_projection()` 返回 `recent-documents-projection-unsupported`，**应用内列表与持久化不受影响**（口径同上：能力位表机制归属，运行期失败另走 `Result`）。期望表由 `utest_recent_documents_translate` 锚定（逐 `SurfaceKind` 断言，含 macOS 为 true 这条）。
 
 `runtime_visibility` 与 `runtime_always_on_top` 表「OS 提供运行期窗口显隐 / 置顶机制，且本库已把 §3.6 的四枚开关接到该机制」。当前仅 `Win32` 与 `D3D11` 为 true（同一宿主：`ShowWindow(SW_SHOWNA / SW_HIDE)` 与 `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，故同翻；wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）。其余恒 false 且各有一句实情：`X11` 的 `XMapWindow` / `XUnmapWindow` 与 `Glfw` 的 `glfwShowWindow` / `glfwHideWindow` **机制在但本库未落桥**，`MacOS` 无窗口壳，`Wayland` 既没有「隐藏顶层窗口」也没有「置顶」的核心协议（只有 minimize），`Headless` 是记录值 seam 而非 OS 机制——**未接线的方向不预先声称**。缺位时 `set_visible` / `set_always_on_top` 是**可观测的 no-op**（`is_visible()` 恒为基类默认 true、`is_always_on_top()` 恒为 false），应用据此先查询再降级，而不是「按了热键窗口没反应还以为是热键坏了」。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定（「未接线先翻位」的变异对应用例转红）。
 
@@ -501,7 +501,7 @@ const au::Platform p = au::platform();
 if (p.is_mobile() && p.capabilities().multitouch) { /* 启用多指手势 */ }
 ```
 
-**OS 明暗偏好查询**：`Platform::color_scheme`（`ColorScheme{Unspecified, Light, Dark}`）承载 OS 档位快照，**须由调用方经 `os_color_scheme()`（`window/platform.h`）显式填充**——读偏好有文件 / 注册表访问副作用，`platform()` 不代做。各平台实现与局限见 `os_color_scheme()` 函数头：Linux 为 GTK 配置文件启发式；Win32（`AppsUseLightTheme`）与 macOS（`NSAppearance`）为**契约注记，未在本仓库无头构建内编译验证**。档位用于明暗三级优先链的最低层（见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。
+**OS 明暗偏好查询**：`Platform::color_scheme`（`ColorScheme{Unspecified, Light, Dark}`）承载 OS 档位快照，**须由调用方经 `os_color_scheme()`（`window/platform.h`）显式填充**——读偏好有文件 / 注册表访问副作用，`platform()` 不代做。各平台实现与局限见 `os_color_scheme()` 函数头：Linux 为 GTK 配置文件启发式；Win32（`AppsUseLightTheme`）为契约注记（未在本仓库真机验证）；macOS（`NSAppearance`）已在本仓库真机 AppKit 构建内编译验证——`os_color_scheme()` 对 Aqua / DarkAqua 双向跟随由 `aurora_verify_macos_surface` 探针实测，运行期切换经 `viewDidChangeEffectiveAppearance` 上报 `notify_os_color_scheme_change`。档位用于明暗三级优先链的最低层（见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。
 
 本自由函数是**无缓存的现读**（每次一记注册表 / 文件访问），供启动期解算与显式探测；运行期跟随不要以轮询它实现——`Application` 聚合后端上报（Win32 = `WM_SETTINGCHANGE`）成应用级读点 `os_color_scheme_state()` / `set_on_os_color_scheme()`，口径与聚合范围见 §6.2。
 
@@ -767,10 +767,10 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 **富格式族（files / uri-list / HTML / 自定义 MIME）**：`available_formats()`、`set_payload(mime, bytes)` / `get_payload(mime)`、`set_files(paths)` / `get_files()`、`set_html(html)` / `get_html()`。要点：
 
 - **MIME 词汇表单一真源**是 `app/mime_types.h` 的常量表（`AURORA_MIME_*`，命名空间作用域 `constexpr std::string_view`）：`text/plain`、`text/uri-list`、`image/png`、`text/html`、`aurora/widget`（应用内拖拽既有词汇），另附 `is_known_mime()`。剪贴板侧与**系统拖放**侧同引此表（拖放事件结构本身用裸 `std::string`，因为 `event/` 不依赖 `app/`；两侧取值一致由常量表保证），各处禁止就地硬编码 MIME 串。
-- **`available_formats()` 如实反映此刻能读到什么**：平台路径上是各平台既有机制覆盖的格式（文本三平台恒在列、`image/png` 仅 Windows 在列），富格式待平台机制落地后才入列；memory 测试后端下反映实际写入的格式。**不因「API 已声明」就谎报可用**。
+- **`available_formats()` 如实反映此刻能读到什么**：平台路径上由已登记的后端按平台机制枚举（Win32 `EnumClipboardFormats`、macOS `NSPasteboard.types`，只列本库认识且确实持有的格式）；后端未登记时退回既有机制覆盖的档（`text/plain` 三平台、`image/png` 仅 Windows）；memory 测试后端下反映实际写入的格式。**不因「API 已声明」就谎报可用**。
 - **`text/uri-list` 编解码是纯逻辑**（`src/aurora/app/uri_list.h`，无平台依赖）：编码逐条路径产出 `file://` URI（空 authority 的第三个斜杠按需补出，空格等保留字符 `%XX` 大写十六进制），行以 CRLF 结尾；解码容错 CRLF / LF / CR 三种分隔符、忽略空行、`file://` 行百分号解码为本地路径并还原盘符形态（`file:///C:/x` → `C:/x`；POSIX 绝对路径的前导 `/` 保留）。**非 `file` scheme 的行（`http://` 等）不映射为路径、静默跳过**——`get_files()` 只返回可映射为本地路径的条目，完整原始行经 `get_payload(AURORA_MIME_URI_LIST)` 取得；全部条目被跳过时是 `Ok(空清单)`。`set_files` **只接受本地路径**（URL 类内容走 `set_payload`），与解码侧口径对称。
 - **空口径沿旧约**：格式不存在 = `Ok` 空值（空内容不是失败）；空串 / 空清单 / 空字节写入 = no-op，**保留既有内容**；`mime` 为空串是调用方参数错（`GeneralInvalidArgument`）。
-- **平台实现不在本批**：Win32 既有 text / image 两族零改动；富格式的平台后端（`CF_HDROP` / "HTML Format" / `RegisterClipboardFormat`、X11 / Wayland selection 目标协商、macOS `NSPasteboard`）随后续批次落地，落地前非测试路径按 `ClipboardFormatUnsupported` 报错。memory 测试后端已覆盖富格式往返。
+- **平台实现现状**：Win32 与 macOS 两腿的富格式、惰性提供与所有权通知已接线（见下两条）；X11 / Wayland 的富格式仍按 `ClipboardFormatUnsupported` 报错，接线另行安排——selection 与 `wl_data_device` 的语义与 Win32 不同源（所有者协商走 `TARGETS`、惰性提供由 selection owner 应答），不共用同一座桥。memory 测试后端已覆盖富格式往返。
 
 **惰性提供、监听与清空（`ClipboardOffer` 同址扩充，不新开门面类）**：
 
@@ -778,14 +778,17 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - **渲染结果只生成一次并缓存**（对标平台 `WM_RENDERFORMAT` 后由系统托管）；`provide` 返回 `Error` **不缓存**，每次读取各自重试提供。重复注册以新要约**整体替换**旧要约（含其已渲染缓存）。
 - **与立即写混用合法且互不覆盖**：同一份内容上一格式走 `set_payload` 立即写、另一格式走要约惰性声明，两者都能被读到且结果各自正确；立即写的格式不触发惰性回调。同一 MIME 被随后的**非空**立即写通道写入时，该格式自要约改由立即写接管（与平台「后写者接管该格式」同款）。
 - **提供失败口径**：`provide` 返回 `Error`（或为空而该格式被真正请求）时读取侧拿到 `clipboard-provider-failed`（`retryable = false`——同一笔数据是否重试由应用决定，库不代做重试），而非既有三枚之一。
-- **`on_ownership_lost(callback)`**：所有权被夺（别的进程清空 / 覆写剪贴板；Win32 `WM_DESTROYCLIPBOARD`、X11 selection owner 被夺的平台锚）时回调一次，与 `set_offer` 成对，用于释放惰性提供所依赖的缓存与临时资源；未注册惰性要约时不触发（没有可失去的所有权的要约）。所有权丢失是**正常态不是故障**，走回调而不产出错误码。传空回调即注销；注册新回调**替换**旧回调（不叠加，避免多注册点各自持资源）。
+- **`on_ownership_lost(callback)`**：所有权被夺（别的进程清空 / 覆写剪贴板；Win32 `WM_DESTROYCLIPBOARD` 与 owner 窗口销毁、macOS `pasteboardFinishedWithDataProvider:` 配合 `changeCount` 区分「数据已供完」与「所有权易主」；X11 / Wayland 尚未接线）时回调一次，与 `set_offer` 成对，用于释放惰性提供所依赖的缓存与临时资源；未注册惰性要约时不触发（没有可失去的所有权的要约）。所有权丢失是**正常态不是故障**，走回调而不产出错误码。传空回调即注销；注册新回调**替换**旧回调（不叠加，避免多注册点各自持资源）。
 - **`on_change(callback)`**：内容变化监听。平台无监听机制时**注册即失败**，返回 `clipboard-listen-unsupported`（`retryable = false`，机制缺失是稳态）——宁可如实报错，也不让调用方逻辑静默失效，与 `available_formats()` 「不因 API 已声明就谎报可用」同款定调。注册新回调同样替换旧的；传空回调即注销（注销不需要监听机制）。回调在派发线程上串行调用，实现须轻量、不得触发重布局或再次读写剪贴板。
 - **`clear()` 与空写入语义相反**：`clear()` 是**主动清空**（清空后 `available_formats()` 返回 `Ok(空清单)`；错误口径 `ClipboardAccessFailed` / `ClipboardWriteFailed` / `GeneralNotSupported`）；而空文本 / 空图像 / 空字节 / 空清单的 `set_*` 是契约内 no-op、**保留既有内容**。二者并列写明以防误用。监听注册不是内容：`clear()` 清内容（要约即所有权声明，随内容一并清空），监听注册留存。
 - **两条通道要约同构**：`ClipboardOffer` 与拖出侧 `DragOffer`（§8.9）字段形态一致（格式清单 + 同签名 `provide`），MIME 取值同出 `app/mime_types.h`——同一个 `provide` 回调可同时交给两条通道；两侧不合并（`event/` 不依赖 `app/` 的分层约束），取值一致由常量表保证。
 - **平台接线现状（Win32）**：富格式（文件清单 / HTML / 自定义 MIME / uri-list）与惰性提供、所有权通知、变更监听、`clear()` 已接至 `src/aurora/window/detail/win32_clipboard.cpp`，经**进程级后端单槽**（`src/aurora/app/detail/clipboard_backend.h`）注入门面——单槽未登记即「本进程无富格式机制」，沿用 `ClipboardFormatUnsupported` / `ClipboardListenUnsupported`，不谎报。文件清单走 `CF_HDROP`（另在同一打开态内并存 `uri-list` 注册格式，两者是同一份语义的两种线上形态），HTML 按 `CF_HTML` 组帧，自定义 MIME 经 `RegisterClipboardFormat` 注册后按名读写；`CF_HDROP` 与 `CF_HTML` 的字节布局由零平台头折算层（`src/aurora/window/detail/clipboard_win32_translate.h`）承载，可在无头 CI 上逐字节断言。
+- **平台接线现状（macOS）**：`src/aurora/app/detail/macos_clipboard.cpp` 把同一张函数表接到 `NSPasteboard` 的 general pasteboard——`text/plain` → `public.utf8-plain-text`、`image/png` → `public.png`、`text/html` → `public.html`、其余 MIME 以字面量作自定义 type；文件清单以 `NSURL` 数组写入（`public.file-url`）并在同一次写入中并存 `text/uri-list` 文本档，读取优先原生清单、缺失时回退文本档；惰性提供经 `NSPasteboardItem` + `NSPasteboardItemDataProvider`（`provide` 按请求的 MIME 逐条兑现），所有权丢失经 `pasteboardFinishedWithDataProvider:` 用写入后记录的 `changeCount` 区分「数据已全部提供」与「所有权易主」，只有后者触发 `on_ownership_lost`。后端与窗口宿主无关（pasteboard 是应用级资源），门面首次查询后端时自举登记；**`NSPasteboard` 没有变更通知机制**，故 `set_change_listener` 不填、`on_change` 在 macOS 上如实返回 `clipboard-listen-unsupported`（轮询 `changeCount` 不是通知机制）。
+- **清空语义**：`clear()` 三腿均已接线（Win32 `EmptyClipboard`、Linux `xsel --clear`、macOS `pbcopy` 空输入重写 pasteboard）；macOS 上重写 pasteboard 会使既有惰性要约失效，provider 的 finished 回调按上述 `changeCount` 判定触发一次所有权丢失。
 - **三件以 owner 窗口为投递目标**：`WM_RENDERFORMAT`（惰性提供）、`WM_DESTROYCLIPBOARD`（所有权丢失）、`AddClipboardFormatListener` / `WM_CLIPBOARDUPDATE`（变更监听）**都以剪贴板 owner 窗口为投递目标**——`OpenClipboard(nullptr)` 不建立 owner，延迟渲染因此没有投递目标。故它们随 `Win32Host` 存活而成立：owner 取**最近登记的存活窗口**（覆盖式登记），该窗口销毁即退位并触发一次 `on_ownership_lost`；**无窗口时 `set_offer` 与 `on_change` 如实报不支持**，这是平台事实而非降级。`WM_RENDERFORMAT` 处理期间剪贴板由请求方持有，本方不再 `OpenClipboard`，只提交数据。
 - **接线后 `clipboard-format-unsupported` 的适用边界收窄**：只在「该平台确实没有对应格式」时成立；「本平台有但本库没实现」与「本平台没有」是两件事，混在一起就是谎报——与 `on_change`「无机制即如实报错」同款定调。
-- **未接线的方向（如实申报，不并列成已支持）**：macOS 腿的富格式与惰性提供在 memory 测试后端之外仍报 `ClipboardFormatUnsupported`（macOS 桥归另一批次）。X11 / Wayland 已接线：两桥落 `src/aurora/window/detail/x11_clipboard.{h,cpp}` 与 `wayland_clipboard.{h,cpp}`，与 Win32 共用同一个进程级后端单槽与同一套门面语义，但各自按 selection 语义实现——X11 走 `TARGETS` 协商 + `SelectionRequest` 应答 + ICCCM `INCR` 双向分片，读入侧带墙钟超时（对端挂死不会永久阻塞帧循环）；变更监听靠 XFIXES 扩展，构建期要求 `libXfixes`（缺项 configure 期 FATAL），运行期扩展缺失则 `on_change` 如实报 `ClipboardListenUnsupported`（XFIXES 事件在 `XEvent` 联合里没有成员，桥按结构体前导布局 `memcpy` 取一份，避免 union 类型双关）。Wayland 走 `wl_data_source` 写侧（非阻塞、逐帧 `tick()` 推进）与 selection 事件读侧；`wl_data_device` 每 seat 唯一，剪贴板桥复用拖放桥创建的那一枚，selection offer 的所有权转交剪贴板桥、MIME 名由拖放桥的转发器按增量送达；变更监听由 selection 事件恒支持。**Wayland 声明所有权需要真实输入事件 serial**（`set_selection` 的协议实参，libwayland 公开 API 不提供「当前 serial」查询）：表面在指针按键与键盘按键路径记录 `last_input_serial`，桥经 hooks 取用；无 serial 时 `set_payload` / `set_offer` 如实报 `ClipboardWriteFailed` 且不声明所有权——不伪造 serial 去赌协议合法性。文本 / 图像 / `clear()` 在 Linux 仍沿既有 `xsel` 路径（下段口径不变），富格式与它们落到同一 CLIPBOARD 选择、后写者接管。
+- **桌面四腿均已接线（Win32 / macOS / X11 / Wayland）**：X11 / Wayland 两桥落 `src/aurora/window/detail/x11_clipboard.{h,cpp}` 与 `wayland_clipboard.{h,cpp}`，与 Win32 / macOS 共用同一个进程级后端单槽与同一套门面语义，但各自按 selection 语义实现——两桥落 `src/aurora/window/detail/x11_clipboard.{h,cpp}` 与 `wayland_clipboard.{h,cpp}`，与 Win32 共用同一个进程级后端单槽与同一套门面语义，但各自按 selection 语义实现——X11 走 `TARGETS` 协商 + `SelectionRequest` 应答 + ICCCM `INCR` 双向分片，读入侧带墙钟超时（对端挂死不会永久阻塞帧循环）；变更监听靠 XFIXES 扩展，构建期要求 `libXfixes`（缺项 configure 期 FATAL），运行期扩展缺失则 `on_change` 如实报 `ClipboardListenUnsupported`（XFIXES 事件在 `XEvent` 联合里没有成员，桥按结构体前导布局 `memcpy` 取一份，避免 union 类型双关）。Wayland 走 `wl_data_source` 写侧（非阻塞、逐帧 `tick()` 推进）与 selection 事件读侧；`wl_data_device` 每 seat 唯一，剪贴板桥复用拖放桥创建的那一枚，selection offer 的所有权转交剪贴板桥、MIME 名由拖放桥的转发器按增量送达；变更监听由 selection 事件恒支持。**Wayland 声明所有权需要真实输入事件 serial**（`set_selection` 的协议实参，libwayland 公开 API 不提供「当前 serial」查询）：表面在指针按键与键盘按键路径记录 `last_input_serial`，桥经 hooks 取用；无 serial 时 `set_payload` / `set_offer` 如实报 `ClipboardWriteFailed` 且不声明所有权——不伪造 serial 去赌协议合法性。文本 / 图像 / `clear()` 在 Linux 仍沿既有 `xsel` 路径（口径见上「清空语义」条），富格式与它们落到同一 CLIPBOARD 选择、后写者接管。
+**仍缺位的方向**：wasm 与 Headless 无 OS 剪贴板机制，`Clipboard` 只走库内 memory 后端，富格式在其上如实报 `ClipboardFormatUnsupported`——「本平台有但本库没实现」与「本平台没有」仍不混谈。
 
 **控件层（`TextInput` / `Text` / `RichTextEdit` 的 Ctrl+C/X/V）**：这些快捷键路径无 `Result` 出口（`on_key_event` 返回 `void`），故失败经 `Diagnostics::warn(msg, where, code)` 上报——桥接 Logger 且进 `Diagnostics::report()` 收集，机器可读，与 `widget.cpp` / `timer.h` 既有口径一致。同时快捷键语义随失败收紧：
 
@@ -803,7 +806,13 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 ### 8.3 系统托盘
 
-`SystemTray`（`app/system_tray.h`）在 Win32 经 `Shell_NotifyIcon` + 隐藏消息窗口实现，支持图标、气泡与激活回调 `on_activate`；非 Win32 为 no-op（仅记录 `last_balloon_message`）。
+`SystemTray`（`app/system_tray.h`）的公共方法与状态（`last_balloon_message` / `context_menu_items`）全平台同一份（`src/aurora/app/system_tray.cpp`），平台壳按后端分派：
+
+- **Win32**：经 `Shell_NotifyIcon` + 隐藏消息窗口实现，支持图标、气泡、激活回调 `on_activate` 与右键菜单。
+- **macOS**：`NSStatusBar` 的 `NSStatusItem`（AppKit 细节在 `src/aurora/app/detail/macos_tray.cpp`）——`set_title` 映射状态按钮 tooltip；`set_icon` 映射状态栏图像（空路径回退应用图标、按 18×18 点归一）；`show` / `hide` 切换状态项可见性；`set_context_menu` 重建 `NSMenu`（子菜单、勾选、禁用、分隔符逐项映射，叶子点击按扁平索引路由回 `MenuItem::on_click`）；无菜单时状态按钮的 target-action 触发 `on_activate`。`NSMenu` 根与子菜单一律 `autoenablesItems = NO`，否则 AppKit 会按 responder chain 改写声明式的 `enabled`。
+- **其余平台**：no-op（仅记录 `last_balloon_message`）。
+
+**气泡语义的平台折算**：macOS 没有「托盘气泡」概念，`show_balloon` 复用本库系统通知（标识 `aurora-tray-balloon`，见 §8.7）；该通路要求 `.app` 包，裸可执行文件下按结构化失败记 WARN，不谎报成功。
 
 **回调 `lParam` 有两种编码，按注册版本解读**：图标以 `NIM_SETVERSION` 升到 `NOTIFYICON_VERSION_4` 后，回调消息的 `lParam` 是打包值——低 16 位才是事件（鼠标消息或 `NIN_*`），高 16 位是图标的 `uID`；未升级时 `lParam` 是整值事件。故 `on_activate` 与上下文菜单的触发判定必须先取版本再取位段（`src/aurora/app/detail/tray_events.h` 的 `classify_tray_callback`），按整值比较鼠标消息会让两条路径在真实 shell 下静默失效。一次真实左键对应 4 条回调（`NIN_POPUPOPEN`、`WM_LBUTTONDOWN`、`WM_LBUTTONUP`、`NIN_SELECT`），故版本 4 分支只认 `NIN_*` 三个事件、且须排除 `uID` 不匹配的回调，否则一次单击会重复触发。
 
@@ -812,7 +821,7 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 | 头文件 | 能力 |
 |:---|:---|
 | `app/menu.h` | 菜单（`MenuBar` 控件的数据层；`MenuModel` 单一真源） |
-| `app/native_menu_bar.h` | **原生菜单栏门面**（进程级单槽，Win32 `HMENU` 桥，见下文） |
+| `app/native_menu_bar.h` | **原生菜单栏门面**（进程级单槽，Win32 `HMENU` / macOS `NSMenu` 桥，见下文） |
 | `app/shortcuts.h` | 快捷键注册 |
 | `commands.h` | 命令模型与注册表（快捷键 / 菜单 / 命令面板的统一真源） |
 | `widget/command_palette.h` | 命令面板（模态浮层，模糊检索并执行命令） |
@@ -829,14 +838,15 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - **`id` 是原生桥的前置条件**：自绘路径靠指针身份路由点击即可，原生路径跨菜单重建只能靠稳定标识，故 `MenuItem` 与 `Menu` 各增一个 `id` 字段（默认空串，自绘路径忽略、零参与）。
 - 自绘路径**零改动**：`MenuBar` / `ContextMenuNode` / `SystemTray` 的既有字段、构造与绘制命中逻辑一行不动，`MenuModel` 投影是新增加的消费路径。自绘与原生「二显一存」——同一份模型，任一时刻只有一条渲染路径生效。
 
-**原生菜单栏桥（`app/native_menu_bar.h`，Win32 已落地）**：`MenuModel` 的第二条渲染路径。`NativeMenuBar::instance()` 是进程级单槽门面（懒构造单例，禁复制 / 移动）：`install(const std::vector<MenuModel> &)` 返回 `Result<void>`——**重复调用替换旧树**（先卸旧再装新，不叠加）、**空表等同清空**（成功而非错误）、平台无机制时返回结构化错误；`uninstall()` 幂等（销毁原生菜单对象、断开窗口关联）；`is_installed()` 报最近一次净结果。点击路由**只认 `MenuModel::id`**：门面持一个 `CommandRegistry *`（由 `Application` 构造期自动登记，应用无需手动接线），原生点击按 `id` 反查 `CommandRegistry::invoke`，与自绘投影共用同一个出口。分层与各层纪律：
+**原生菜单栏桥（`app/native_menu_bar.h`，Win32 / macOS 已落地）**：`MenuModel` 的第二条渲染路径。`NativeMenuBar::instance()` 是进程级单槽门面（懒构造单例，禁复制 / 移动）：`install(const std::vector<MenuModel> &)` 返回 `Result<void>`——**重复调用替换旧树**（先卸旧再装新，不叠加）、**空表等同清空**（成功而非错误）、平台无机制时返回结构化错误；`uninstall()` 幂等（销毁原生菜单对象、断开窗口关联）；`is_installed()` 报最近一次净结果。点击路由**只认 `MenuModel::id`**：门面持一个 `CommandRegistry *`（由 `Application` 构造期自动登记，应用无需手动接线），原生点击按 `id` 反查 `CommandRegistry::invoke`，与自绘投影共用同一个出口。分层与各层纪律：
 
-- **能力位**：`PlatformCapabilities::native_menu_bar` 取机制存在性语义（与 `system_drag_in` / `system_drag_out` 同款，只答「机制在不在」）——`Win32` / `D3D11` 为 `true`（同一宿主），`MacOS` / `X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 一律 `false`：macOS 桥待窗口壳实写后落地，Linux 无 OS 级菜单栏机制（GNOME 已取消全局菜单、KDE DBusMenu 需本库没有的 DBus 客户端）不落桥。能力缺位的平台 `install()` 返回 `native-menu-unsupported`（机制在但装不上返回 `native-menu-install-failed`，均 `retryable = false`），应用回落自绘 `MenuBar`，不静默也不谎报。
+- **能力位**：`PlatformCapabilities::native_menu_bar` 取机制存在性语义（与 `system_drag_in` / `system_drag_out` 同款，只答「机制在不在」）——`Win32` / `D3D11` 为 `true`（同一 `HMENU` 宿主），`MacOS` 为 `true`（应用级 `NSMenu` 桥已接线），`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 一律 `false`：Linux 无 OS 级菜单栏机制（GNOME 已取消全局菜单、KDE DBusMenu 需本库没有的 DBus 客户端）不落桥。能力缺位的平台 `install()` 返回 `native-menu-unsupported`（机制在但装不上返回 `native-menu-install-failed`，均 `retryable = false`），应用回落自绘 `MenuBar`，不静默也不谎报。
 - **折算层（零平台头）**：`src/aurora/window/detail/menu_bar_translate.{h,cpp}` 把 `MenuModel` 树摊成平台无关扁平项表 `FlatMenuItem{ depth, parent_index, separator, checkable, checked, enabled, label, shortcut_text, id }`——`flatten_menu_models()` 是**前序遍历纯函数**（子项紧跟父项、字段逐值透传、空 `id` 照常建出），两座平台桥共用同一份换算，不存在两套次序。该层只引 `core/result.h` 不引任何平台头，故在含无头 Linux 的全部 CI 作业上编译并被 `utest_menu_bar_translate` 逐值单测。
 - **渲染通路单槽**：折算层持可注入的 `MenuBarBackend` 函数表（`install(items, on_click)` / `uninstall()` / `is_installed()`，进程级单槽）——真机上由平台桥登记，无头单测里由伪造后端登记，**两侧走同一条代码路径**：被测的是产品代码本身而非它的复刻，这是「无头 CI 证明不了的只剩平台接缝」纪律在菜单域的落点。
 - **Win32 桥**：`src/aurora/window/detail/win32_menu_bar.{h,cpp}`——`CreateMenu` / `AppendMenu`（`MF_POPUP` 挂子菜单、`MF_STRING` 挂终端项）/ `SetMenu` 建树，`WM_COMMAND` 由 `Win32Host` 现有消息泵收下后按命令基址 `AURORA_WIN32_MENU_COMMAND_BASE` 反查 `id` 回投；桥实例由 `Win32Host::Impl` 唯一持有（与无障碍桥、输入法桥、系统拖放桥同款纪律，防多份窗口映射分裂），窗口销毁期先摘菜单再放窗口。
-- **`id` 是硬前提**：原生路径跨菜单重建只能靠稳定标识路由点击。空 `id` 的项**照常建出、照常显示，但点击不回投**，只留一条 WARN 诊断——不静默丢弃（菜单看着建好却点不动最难排查），也不伪造 id（重建后会错位）。无登记注册表（无头 / 未接线）同口径：菜单照建，点击不路由留 WARN。
-- **真机接缝**：`tools/verify/win32_menu_bar_live_probe.cpp`（`AURORA_BUILD_VERIFY_TOOLS` 口径、不进 CTest）真机核验能力位、`HMENU` 建树与层级保真、点击回投、空 `id` 不回投、非本桥命令 id 不消费、重复 `install` 替换与 `uninstall` 摘除。
+- **macOS 桥**：`src/aurora/window/detail/macos_menu_bar.{h,cpp}`——装到**应用级** `NSApp.mainMenu`（macOS 的菜单栏归应用而不归窗口，故无宿主引用计数、无窗口绑定，进程内单份即为平台事实）；终端项挂 `target/action`，`MenuModel::id` 经 `representedObject` 携带、点击时取回回投；`setAutoenablesItems:NO` 让 `enabled` / `checked` 严格跟随模型（AppKit 的自动启用会按 responder 链改写状态，与「模型单一真源」冲突）；`separator` 走 `+separatorItem`，`checkable + checked` 映射 `NSControlStateValueOn` 并在点击时就地把状态与模型一起翻转；`shortcut_text` 以 `"\t"` 拼在标题后仅供显示，**不合成 `keyEquivalent`**（快捷键的真源是 `ShortcutRegistry`，菜单键位若另建一套会立刻出现两个真源）。后端在首个窗口建出时静态登记一次（`MacOSSurface::Impl::create_window`），无窗口时 `install()` 因能力位与后端双闸返回 `native-menu-unsupported`。
+- **`id` 是硬前提**：原生路径跨菜单重建只能靠稳定标识路由点击。空 `id` 的项**照常建出、照常显示，但点击不回投**，只留一条 WARN 诊断——不静默丢弃（菜单看着建好却点不动最难排查），也不伪造 id（重建后会错位）。无登记注册表（无头 / 未接线）同口径：菜单照建，点击不路由留 WARN。两座桥的 WARN 文案逐字一致（`menu item clicked but its id is empty; click ignored`）。
+- **真机接缝**：`tools/verify/win32_menu_bar_live_probe.cpp`（`AURORA_BUILD_VERIFY_TOOLS` 口径、不进 CTest）真机核验能力位、`HMENU` 建树与层级保真、点击回投、空 `id` 不回投、非本桥命令 id 不消费、重复 `install` 替换与 `uninstall` 摘除；`tools/verify/macos_menu_bar_live_probe.mm` 在 macOS 真机核验同一组语义（`NSMenu` 建树与层级、`representedObject` 回投、勾选态翻转、空 `id` 不回投、重复 `install` 替换、`uninstall` 摘除，共 23 项断言）。
 
 **接线**：`Application::commands()` 返回注册表；`app.commands().bind_shortcuts(app.shortcuts())` 一行把默认快捷键接入。绑定为**显式**而非 `run()` 内自动执行——否则 `run()` 之后注册的命令会静默失效。`Application` 在 `dispatch*` 入口统一暴露「当前焦点管理器」（`current_focus_manager()`），快捷键动作与控件回调内同样可取到，模态弹层据此完成焦点陷阱。原「命令式逃生舱」`aurora::imperative::run_raw`（`imperative.h`）与命令系统无关。
 
@@ -875,17 +885,17 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 `ShortcutScope::Global` 的语义**不变**：它仍是「应用内跨焦点作用域」的标记，不因本节新增而改写为 OS 级。
 
-**触发时机 —— 排队到帧循环排空，不在消息泵内同步回调**：`WM_HOTKEY` 到达时只把命中的 ID 推进内部队列，由 `Application::step_frame()` 每帧调 `os_hotkeys().drain_pending()` 在主线程排空并调用动作。理由：动作可能重建页面 / 触发重排，在窗口过程帧内重入会把布局与绘制切到半途的状态。代价是最坏延迟一帧（约 16ms），对热键这类低频触发无感。
+**触发时机 —— 排队到帧循环排空，不在消息泵内同步回调**：`WM_HOTKEY`（macOS 为 Carbon `kEventHotKeyPressed`）到达时只把命中的 ID 推进内部队列，由 `Application::step_frame()` 每帧调 `os_hotkeys().drain_pending()` 在主线程排空并调用动作。理由：动作可能重建页面 / 触发重排，在窗口过程帧内重入会把布局与绘制切到半途的状态。代价是最坏延迟一帧（约 16ms），对热键这类低频触发无感。
 
 **平台矩阵**：
 
 | 平台 | 实现 | 状态 |
 |:---|:---|:---|
 | Windows | `RegisterHotKey` + `WM_HOTKEY`，经共享的内部隐藏消息窗口 `src/aurora/app/detail/platform_shell_win32.{h,cpp}` 收消息 | 支持 |
-| X11 | `xcb_grab_key` | 支持 |
+| macOS | Carbon `RegisterEventHotKey` + 应用事件目标上的 `kEventHotKeyPressed` 处理器（签名 `'AURA'` + 进程内 ID 路由回注册表队列）；无需辅助功能授权 | 支持 |
+| X11 | 无已落地实现（本矩阵此前误记 `xcb_grab_key`，代码中无该后端） | 运行时降级：`enabled()==false`，`add()` 返回错误 |
 | Wayland | 无全局热键协议 | 运行时降级：`enabled()==false`，`add()` 返回错误 |
 | GLFW | 无对应能力 | 不支持 |
-| macOS | — | 本轮不实现 |
 
 **失败口径一律机器可见，不做静默 no-op**：主键无法映射到原生虚拟键、组合未指定主键、注册表内重复注册、OS 侧被抢占，统一为 `ErrorCode::OsHotkeyRegisterFailed`，`detail` 给出具体成因。`remove()` 对无效 / 非本表的句柄返回 `false`（不抛、不报错）。
 
@@ -911,10 +921,13 @@ app.set_on_notification_activated([](std::string tag) { focus_pane(tag); });
 |:---|:---|:---|
 | Windows | `Shell_NotifyIconW` 按需添加隐藏托盘图标 + `NIF_INFO` 气球；超时 / 关闭 / 点击后 `NIM_DELETE` 撤掉图标 | 支持（`NIN_BALLOONUSERCLICK`） |
 | Linux | 三层运行时降级链，见下 | 前两层支持（需宿主排空 `pump_events()`） |
+| macOS | `NSUserNotificationCenter`（legacy API，弃用但可用；`tag` → `identifier` 原位替换） | 支持（delegate `didActivateNotification:` 回传 tag） |
 | Headless | 仅记录 `last_notification()`，`notify()` 返回成功 | 不支持 |
-| macOS / 其它 | 本轮不支持 | 不支持 |
+| 其它 | 本轮不支持 | 不支持 |
 
 **Win32 的托盘副作用**：应用本身没有托盘图标时，发通知会在任务栏**短暂出现一个图标**（`Shell_NotifyIcon` 气球必须依附图标）。气球消失后实现会 `NIM_DELETE` 撤掉，不长期占位。这是「零接线即可发通知」换来的可见副作用；调用方若已有 `SystemTray`，实现复用其图标、不额外增删。
+
+**macOS 的实现与边界**（`src/aurora/app/detail/macos_notification.cpp`）：经 `NSUserNotificationCenter` 投递。本机实测 `UNUserNotificationCenter` 对 ad-hoc 签名 / 无签名身份拒绝授权，而 legacy API 无需用户授权即可在 bundle 内工作；`tag` 写入 `userInfo` 并映射为 `identifier`（同 tag 原位替换）。点击由进程级 delegate 的 `userNotificationCenter:didActivateNotification:` 回传 tag。三条如实申报的限制：① 只对 **`.app` 包**可得，裸可执行文件下通知中心取不到，返回 `NotificationPostFailed` 而非静默成功；② `timeout_ms` 不受支持（系统决定驻留时长）；③ `urgency` 折算为提示音（Low 静音，Normal / Critical 默认提示音），不做横幅样式区分。delegate 消息由主运行循环递送，`Application::step_frame()` 的 `poll_platform_events()` 已覆盖，宿主无须额外排空。
 
 **Linux 三层降级链**（全部 `dlopen` / `popen`，**无构建期依赖**，也不新增 `AURORA_ENABLE_*` 开关）：
 
@@ -931,7 +944,7 @@ app.set_on_notification_activated([](std::string tag) { focus_pane(tag); });
 
 **`last_notification()` 在所有平台上维护**（含投递失败的调用），让无桌面环境也能断言「请求了什么」——这是 Headless 与自动化测试的主观测面。`install_recording_backend()` 可强制只记录、不触达系统通知服务，供开发机上的字段往返测试。
 
-**宿主排空义务**：Windows 下依附宿主消息泵（`PeekMessage` 天然覆盖）；Linux 下必须靠 `pump_events()` 驱动 GLib 主循环迭代 / libdbus 套接字读取，`Application::step_frame()` 已每帧调用一次。**宿主不排空 ⇒ 通知照常显示、回调不到**（不会虚假成功）。
+**宿主排空义务**：Windows 下依附宿主消息泵（`PeekMessage` 天然覆盖）；Linux 下必须靠 `pump_events()` 驱动 GLib 主循环迭代 / libdbus 套接字读取，`Application::step_frame()` 已每帧调用一次；macOS 的 delegate 消息由主运行循环递送，同样已覆盖。**宿主不排空 ⇒ 通知照常显示、回调不到**（不会虚假成功）。
 
 ### 8.5 输入法桥（Win32 IMM32 / X11 XIM / Wayland text-input-v3）
 
@@ -1721,7 +1734,7 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
   - **旧窄路径已移除**：原 `WM_DROPFILES`（`DragAcceptFiles` + HDROP 解析）是 OLE 的真子集（无四态 / 无格式清单 / 无动作协商），OLE 桥落地后一并移除、不留 fallback（git 历史即归档）。
   - **载荷（跨进程一律延迟取数）**：跨进程拖入（资源管理器 / 其它进程拖来）走**延迟取数通道**——`Drop` 回调只登记「有哪些格式」（`supported_formats_of` 的 `QueryGetData` 结果），字节在 `system_drag::pump_reads()` 的排空阶段才经 `fetch` 从 `IDataObject` 产出；载荷句柄经 `DragPayload::from_lazy(formats, fetch)` 构造。数据对象由桥自持一份 COM 引用（RAII）：延迟取数跨帧，而 OLE 在 `Drop` 返回后即收回它给出的指针，不持引用就是排空期的 use-after-free。**为什么不分叉阈值**：折算层那枚 `AURORA_DRAG_SYNC_PAYLOAD_LIMIT`（64 KiB）的语义是「≤ 阈值走同步、> 阈值走异步」，而 Win32 上**无法在取数前预判载荷大小**——`QueryGetData` 只答「给不给得出」，`GlobalSize` 只能在 `GetData` 之后问（那时阻塞已经发生），故阈值在跨进程路径上不参与分叉，与其留一个永不生效的分支，不如让「一律延迟」成为唯一形态。本进程自拖放（落点即源、在途要约就是数据本身）仍走内存直取（`DragPayload::from_bytes`）——那份数据本来就在本进程，且经 `IDataObject::GetData` 取它会与拖拽线程互等。首批可兑现 `CF_HDROP`（uri-list）与 `CF_UNICODETEXT`（文本）两档——`formats` 声明即能兑现，`CF_DIBV5` → PNG 待转码落地后再列入。取不到一律按空口径交出（与同步路径既有的「跳过该格式」同口径）；把「广告了却取不出」升级为 `system-drag-read-failed` 是判据变更，另行安排。
   - **X11 侧的大载荷与格式名**：超过阈值（同一枚 `AURORA_DRAG_SYNC_PAYLOAD_LIMIT`，四平台共用单一真源）的载荷走 ICCCM `INCR`——拖入侧由请求方删属性启动、属主逐块替换、零长收尾，桥在 `PropertyNotify` 里逐块收齐后一次性兑现；拖出侧对称地在 `SelectionRequest` 里逐块发（块大小 16KB）。**阈值分叉对上层不可见**：两条路径收齐后都是同一个 `DragPayload`。目标名 ↔ MIME 的映射由折算层登记（`text/plain;charset=utf-8` / `UTF8_STRING` / `text/plain` → `text/plain`，`text/uri-list`，`image/png`；`STRING` / `TEXT` 不登记——它们是 latin1 的历史名，收进来无法无损解释）；拖入时只索取自己登记的那一个目标名，不对源侧清单逐项试取。
-  - **Wayland 侧的载荷与修饰态**：Wayland 没有 X11 selection 那样的「超限走 `INCR` 分块」分叉——`receive` 给的是管道写端，桥在本端以非阻塞读 + 逐帧 tick 收齐，大小载荷走同一条路径，`AURORA_DRAG_SYNC_PAYLOAD_LIMIT` 在 Wayland 侧只作同步便利读取的判据，不产生第二种传输形态。修饰态的真值源与另两平台都不同：协议**不随指针事件送修饰态**，故桥经 hooks 从 seat 的 xkb 缓存（`on_modifiers` 维护的 depressed / latched / locked / group → `ModifierKey`）取，与键盘 / 鼠标事件同一份缓存、同一折算入口——控件侧仍只读 `proposed`（`system_drag::proposed_action_for` 是唯一翻译点）。macOS 同款：`NSDraggingInfo` 不携带修饰态，桥经 hooks 从宿主键盘路径缓存取（骨架期无该缓存，hooks 如实报 `ModifierKey::None`）；`NSDraggingSource` 侧另以 `ignoreModifierKeysForDraggingSession:` 返回 YES 把修饰键让渡回库内唯一的翻译点，AppKit 不自行改写 operation。
+  - **Wayland 侧的载荷与修饰态**：Wayland 没有 X11 selection 那样的「超限走 `INCR` 分块」分叉——`receive` 给的是管道写端，桥在本端以非阻塞读 + 逐帧 tick 收齐，大小载荷走同一条路径，`AURORA_DRAG_SYNC_PAYLOAD_LIMIT` 在 Wayland 侧只作同步便利读取的判据，不产生第二种传输形态。修饰态的真值源与另两平台都不同：协议**不随指针事件送修饰态**，故桥经 hooks 从 seat 的 xkb 缓存（`on_modifiers` 维护的 depressed / latched / locked / group → `ModifierKey`）取，与键盘 / 鼠标事件同一份缓存、同一折算入口——控件侧仍只读 `proposed`（`system_drag::proposed_action_for` 是唯一翻译点）。macOS 同款：`NSDraggingInfo` 不携带修饰态，桥经 hooks 从宿主键盘路径缓存取（`MacOSSurface::Impl` 已把键盘事件的修饰位缓存经 hooks 传入）；`NSDraggingSource` 侧另以 `ignoreModifierKeysForDraggingSession:` 返回 YES 把修饰键让渡回库内唯一的翻译点，AppKit 不自行改写 operation。
 - **拖出（事件驱动执行模型）**：`system_drag::begin(DragOffer, on_end)` 是会话入口——**发起即返回**，不阻塞到会话结束。理由：本库是单线程 UI + 帧循环，阻塞期间不泵帧循环则终结回调无从派发、泵则引入嵌套循环的重入面；**UI 线程上的嵌套模态循环不取**（原「接线期设计项」就此收敛为「不引入」）——Win32 的 `DoDragDrop` 模态循环改跑在**库自管拖拽线程**（自持 `OleInitialize` 的自有 STA，与 UI 线程拖入桥的单元互不相干）上，UI 线程帧循环在会话期间照常泵平台消息，终态由拖拽线程经注册接缝登记、帧循环投递。返回值语义收窄为「会话是否发起成功」（`Ok` **不等于**落放成功）；最终结局与动作经 `on_end(SystemDragOutcome, DragAction)` 投递，由帧循环 `system_drag::pump_reads()` 兑现（插入位置与排空通则见 §3.1；宿主不排空 ⇒ 回调不到，不谎报）。`SystemDragOutcome{Succeeded, Cancelled, Rejected, Failed}` 与 `DragAction`「谈成了什么」分工：把三种非成功结局折叠成同一个 `DragAction::None` 时，控件层三条路径的回调序列逐字相同（都是 begin → end(None)），等于没补。控件侧入口 `Widget::begin_system_drag()`（取 `on_provide_drag()` 的要约）；`on_provide_drag()` 返回 `std::nullopt`（控件自称无要约）时不发起、也不派发终态；发起失败（无后端 / 能力位 false / 要约不合法 / 在途会话未结束）则直接派发 `on_system_drag_end(Failed, None)` 或在途拒绝报 `system-drag-session-failed`——「失败同样要收尾」：会话结束是控件清理拖出态的唯一时机。源侧回调族与四条结局序列的完整契约见 [`05-event-navigation.md`](05-event-navigation.md) §5.2。
 - **拖出后端判优与在途闸**：`begin` 的判优序为「inert 测试后端（安装期间）→ 真实后端 → `system-drag-not-supported`」——inert 安装期间由 inert 接管（只记录要约、不触达真实后端），未安装才落真实后端分支。进程级在途闸：会话登记即置位、终态投递即清除；闸内在途时第二次 `begin` 被拒（`system-drag-session-failed`，引擎侧在途标志为第二道闸，发起失败即回滚会话态、不悬挂后续 begin）。取消路径就地收口在途读取后**先**登记 `Cancelled`，拖拽线程迟到的终态登记被「首登记者赢」规则作废。
 - **会话取消**：`system_drag::cancel()` 调用时机不受限——事件驱动下任意时刻可调：会话外为 no-op、不影响后续会话；会话内取消，终态 `Cancelled` 仍经帧循环投递。同时**就地收口全部在途读取**（有数据即兑现数据，否则按 `system-drag-read-failed` 兑现），不悬挂。程序化取消与 Esc 语义共用同一条路径。
@@ -1750,10 +1763,11 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 - **投影计划（`src/aurora/window/detail/recent_documents_translate.h`，零平台头）**：`build_projection_plan(list, max_entries)` 把内存列表折成平台无关的投递清单——去空串、按 `max_entries` **从尾部（最旧）截断**（新→旧序下保住最近的那几条）、按首次出现去重、空列表得空计划；**不做路径规范化**（与上方路径口径同源：相对路径与不存在的路径原样进计划，由应用在 `add` 前自行决定）。折算层另持进程级**后端单槽**（`ProjectionBackend{max_entries, project, clear}` + `register` / `unregister` / `projection_backend()`），槽的登记与注销由平台桥负责，折算层不含任何 OS 调用，因此计划规则可无头单测。
 - **Win32 桥（`src/aurora/window/detail/win32_recent_documents.h`，内部头）**：`SHAddToRecentDocs(SHARD_PATHW, path)` 逐条投递，资源管理器「快速访问 → 最近使用」与任务栏跳转列表同源。三条如实申报的平台事实：① 该 API 返回 `void`、无回执（`GetLastError` 也不是它的约定失败通道），故「成功」的确切含义是**已投递给 OS**，不等于 OS 已落记录；② 快捷方式的实际写出**晚于**返回（实测毫秒级迟到），所以任何「调用后立即读 OS」的判据都要有界轮询，撤销侧也据此**只销「确认删掉了」的账**、其余留账待下次撤销认领；③ 用户在系统设置里关掉「在跳转列表中显示最近打开的项目」（`HKCU\...\Explorer\Advanced\Start_TrackDocs=0`）时该 API **静默无操作**，桥读这条注册表作为可证旁证、如实返回 `platform-unavailable`，不谎报成功。可证的失败只有三处：UTF-8→UTF-16 转换失败、用户 Recent 目录取不到 / 枚举失败、上述追踪开关关闭。
 - **撤销没有 OS API**：OS 侧最近文档是**用户级全局集合**，既无「清空」也无逐条撤销标志。落地形态是桥维护一份**本进程投影记录**，撤销时枚举 `%APPDATA%` 下的 `Microsoft\Windows\Recent\*.lnk`、经 `IShellLinkW` 解析每条的真实目标、只删目标命中记录的条目（按大小写不敏感比较，Windows 路径本不敏感），并 `SHChangeNotify` 通知壳刷新。两条边界：同一文件若也被别的应用打开过，那条快捷方式属**共享记录**，撤销对它同样生效；注册表侧按扩展名的 MRU（`HKCU\...\Explorer\RecentDocs`）是用户全局的二进制 MRU，改写需自备 `MRUListEx` 重排、写坏会污染别的应用的记录，**本库不碰**。
-- **失败隔离**：投影 / 撤销的失败**不回滚、不改动应用内列表**，也不触发 `Preferences` 写入——`list()` 在投影前后同源同值（判据见 `utest_recent_documents_translate` 与真机探针）。能力位缺位的平台返回 `recent-documents-projection-unsupported`（`retryable = false`），应用内一致列表照常可用；Linux 与 macOS 因此在桥落地前保持「应用内一致、OS 侧缺位」形态。
-- **宿主持有**：桥以引用计数守卫（`Win32RecentDocumentsBridge`）由 `Win32Host::Impl` 持有，销毁期先散守卫再放窗口（与输入法桥 / 拖放桥同款纪律）；通路本身与 `HWND` 无关，故无宿主进程（纯命令行 / 无窗应用）由 `project_to_os()` 侧的按需自举取得同一条通路——「先记文档、后建窗口」同样能投影。
+- **macOS 桥（`src/aurora/window/detail/macos_recent_documents.h`，内部头）**：`NSDocumentController` 的 `noteNewRecentDocumentURL:` 逐条投递——macOS 上「最近打开」的一等入口，Dock 的「最近使用的文稿」与应用内系统菜单同源。四条如实申报的平台事实：① 投递**没有回执**（返回 void），成功的含义是「已交给 NSDocumentController」，不是「OS 已落盘」；② `clearRecentDocuments:` 清的是**整个应用**的最近文档集合（AppKit 无逐条移除 API），作用域比 Win32 桥「只删本进程记账的 .lnk」更宽；③ 条目上限取 `NSRecentDocumentsLimit` 的系统默认 10，小于本库 store 的 16，由折算层按新 → 旧截断；④ `NSDocumentController` 只对**已签名的 `.app` 包**真正记录，裸可执行文件调用成功但集合恒空——真机探针因此封装为 ad-hoc 签名的 `.app`，裸形态按环境不可用申报。可证的失败只有 UTF-8 → `NSString`/`NSURL` 形态转换失败与 controller 不可用。
+- **失败隔离**：投影 / 撤销的失败**不回滚、不改动应用内列表**，也不触发 `Preferences` 写入——`list()` 在投影前后同源同值（判据见 `utest_recent_documents_translate` 与真机探针）。能力位缺位的平台返回 `recent-documents-projection-unsupported`（`retryable = false`），应用内一致列表照常可用；Linux 三形态因此保持「应用内一致、OS 侧缺位」形态（macOS 桥已落地，不在此列）。
+- **宿主持有**：桥以引用计数守卫（`Win32RecentDocumentsBridge`）由 `Win32Host::Impl` 持有，销毁期先散守卫再放窗口（与输入法桥 / 拖放桥同款纪律）；通路本身与 `HWND` 无关，故无宿主进程（纯命令行 / 无窗应用）由 `project_to_os()` 侧的按需自举取得同一条通路——「先记文档、后建窗口」同样能投影。macOS 同款：`MacOSRecentDocumentsBridge` 由 `MacOSSurface::Impl` 持有，无窗口宿主由 `macos_recent_documents_ensure_registered()` 自举。
 
-回归：`utest_recent_documents`（去重置顶 / 容量淘汰 / 顺序 / 持久化往返 / 空口径 / 损坏信封降级）+ `utest_recent_documents_translate`（投影计划四规则、能力位矩阵、显式性、后端失败隔离、无后端时报 `projection-unsupported`）。真机：`aurora_verify_win32_recent_documents`（独立取证「投影后 OS 出现条目 / 重复投影幂等 / 撤销后消失 / 撤销不碰 store」，见 [`../BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §2.4）。
+回归：`utest_recent_documents`（去重置顶 / 容量淘汰 / 顺序 / 持久化往返 / 空口径 / 损坏信封降级）+ `utest_recent_documents_translate`（投影计划四规则、能力位矩阵（含 macOS 为 true）、显式性、后端失败隔离、无后端时报 `projection-unsupported`）。真机：`aurora_verify_win32_recent_documents`（独立取证「投影后 OS 出现条目 / 重复投影幂等 / 撤销后消失 / 撤销不碰 store」，见 [`../BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §2.4）与 `aurora_verify_macos_recent_documents`（同一组判据的 macOS 形态，封装为 ad-hoc 签名 `.app`，经 `recentDocumentURLs` 独立取证）。
 
 ---
 
@@ -1875,7 +1889,7 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 | `capture(Surface&, path, src = Framebuffer) -> Result<bool>` | 自动建父目录后转发 `Surface::save_snapshot` 或 `Surface::capture_window` |
 | `set_output_directory(dir)` / `output_directory()` / `resolve_output_path(path)` | 输出目录 API（无调试内部依赖，始终可用）；默认 `current_path()/aurora_debug` |
 | `feature_flags() -> FeatureFlags` / `feature_flags_json() -> Json` | 编译期 feature 宏开关运行时查询（始终可用，编译期常量快照）。强类型结构体字段 + JSON 导出（键 = 完整宏名）。C++ 侧宏镜像单点收口于 `src/aurora/debug/feature_flags.cpp`，应用代码零 `#ifdef`（需求 SPEC.PLATFORM.ZERO-IFDEF.001） |
-| `surface_state(const Surface&) -> Json` | `width` / `height` / `scale_factor` / `frame_count` / `clear_color` / `should_close` / `has_native_window`。`frame_count` = 该 Surface 的已上屏帧数，各后端在自身 `present()` 内自增：Headless / Win32 / Glfw / D3D11 / X11 / Wayland / WASM 与三个 wgpu 型有值，仅 macOS 未覆写故恒报 0（基类默认），跨后端比对读数前须先确认该后端是否计数 |
+| `surface_state(const Surface&) -> Json` | `width` / `height` / `scale_factor` / `frame_count` / `clear_color` / `should_close` / `has_native_window`。`frame_count` = 该 Surface 的已上屏帧数，各后端在自身 `present()` 内自增：Headless / Win32 / Glfw / D3D11 / X11 / Wayland / macOS / WASM 与三个 wgpu 型均有值，跨后端比对读数前须先确认该后端是否计数 |
 
 **门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Host` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`（GLFW：Windows 经原生 HWND 走 PrintWindow 含非客户区；X11/Wayland/Mac 走 GL 帧缓冲读回——软件路径先重放上一帧再 `glReadPixels`，GPU 路径经 `GpuGlRhi::read_pixels`，得客户区 framebuffer 尺寸画面，须在某次 present 之后调用）；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
 

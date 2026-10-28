@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-037 |
 | 提出日期 | 2026-10-26 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.APP.NATIVE-MENU-BAR.001 |
 | 影响面 | `include/aurora/window/platform.h`（`PlatformCapabilities` 增 `native_menu_bar` 位）；`include/aurora/app/` 新增原生菜单栏门面一枚；`src/aurora/window/detail/` 新增零平台头折算层与 Win32 / macOS 两枚平台桥；`codespec/errors.toml` 及生成物扩两枚码；`tests/unit/` 新增折算层与能力位用例；`tools/verify/` 新增两枚真机探针；`codespec/` 三处回写 |
 
@@ -44,3 +44,11 @@
 - `codespec/specification/06-app-platform.md`（§8.4 菜单、快捷键、命令与显示：原生菜单栏桥的能力位、门面契约、折算层、两枚平台桥、`id` 硬前提与空 `id` 口径、Linux 回落自绘的申报）
 - `codespec/specification/04-widget.md`（MenuBar 控件节：自绘与原生二显一存的落点、Linux 侧回落说明）
 - `codespec/SPECIFICATIONS.md`（需求行文字修订：不再并列三端，改为「Win32 / macOS 原生渲染桥 + Linux 能力位申报并回落自绘」）
+
+## 实施记录与偏离（落码期回写）
+
+1. **macOS 桥已交付并归档**：`src/aurora/window/detail/macos_menu_bar.{h,cpp}` 建 `NSApp.mainMenu` 单树，终端项以 `representedObject` 携稳定 `id` 走 target/action 回投；`setAutoenablesItems:NO` 让模型成为 enabled 的唯一真源；分隔符 `+separatorItem`、勾选态映射 `NSControlStateValueOn` 并原地翻转；`shortcut_text` 仅以 `"\t"` 后缀作显示、不合成 `keyEquivalent`（快捷键执行仍归 `CommandRegistry`，避免同一命令两处触发）；空 `id` 项照常建出但不回投并留 WARN。桥在 `MacOSSurface::Impl::create_window` 末尾静态登记，无 `NSApplication` 时 `install()` 如实失败。
+2. **「窗口壳未实写」的前置阻塞已消除**：`MacOSSurface::create_window` / `present` 已实写（`NSWindow` + 自定义内容视图、零拷贝 `CGImage` 上屏、事件泵与 `NSTextInputClient` 接线），本提案第 4 条动机里的阻塞说明只反映提案期状态，不再是现状。
+3. **能力位**：`PlatformCapabilities::native_menu_bar` 的 `MacOS` 已翻为 `true`（机制在且桥已接），与第 1 条变更内容的定案一致。
+4. **验收兑现**：判据 1—4 由 `utest_menu_bar_translate` 与能力位矩阵用例覆盖（无头全绿）；判据 5 的 Win32 探针 `aurora_verify_win32_menu_bar` 随 Windows 批次交付，本机（macOS 虚机）未重跑；判据 6 由 `aurora_verify_macos_menu_bar` 在本机跑通——23 项断言全过（层级保真、`representedObject` 回投、勾选翻转、空 `id` 不回投、重装替换、卸载摘除）；判据 7 的生成器与门禁随批次跑过。
+5. **如实留白**：macOS 菜单的「AppKit 真实点击派发」由探针直接触发 target/action 验证，未经人手点击菜单栏；人工核对仍按模块手工用例执行，未把机制层证据写成人工证据。

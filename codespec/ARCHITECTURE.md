@@ -104,7 +104,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 |:---|:---|:---|
 | 平台抽象 | `window/` | `surface.h`（`Surface` / `HeadlessSurface`） `window.h` `native_surfaces.h` `win32_host.h` `win32_surface.h` `glfw_surface.h` `x11_surface.h` `wayland_surface.h` `wasm_surface.h` `macos_surface.h` `d3d11_surface.h` `frame_pacing.h` `title_bar_geometry.h` `title_bar_style.h` `window_chrome.h` `window_state.h` `platform.h`（`au::platform()` / `Platform` / `PlatformCapabilities`） |
 
-`Surface` 为可扩展边界：自定义 Surface 经 `Application(Scene, unique_ptr<Surface>)` 注入，不随内置 Surface 增长；各后端由 feature 宏 `AURORA_BACKEND_*` 控制代码剪裁（该宏组覆盖内置 `Surface` 图形后端；音频设备后端开关归 `AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_WEBAUDIO`，见 `BUILD_OPTIONS.md` §1/§3/§4）。
+`Surface` 为可扩展边界：自定义 Surface 经 `Application(Scene, unique_ptr<Surface>)` 注入，不随内置 Surface 增长；各后端由 feature 宏 `AURORA_BACKEND_*` 控制代码剪裁（该宏组覆盖内置 `Surface` 图形后端；音频设备后端开关归 `AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_COREAUDIO` / `AURORA_ENABLE_AUDIO_WEBAUDIO`，见 `BUILD_OPTIONS.md` §1/§3/§4）。
 
 `win32_host.h` 与 `glfw_surface.h` 均 **pimpl 隔离**，公共头零 `<windows.h>` / GLFW / OpenGL 依赖。全部真实后端（`Win32Host` / `GlfwSurface` / `X11Surface` / `WaylandSurface`）的公共头均已收敛为 pimpl 句柄，即便后端开启，消费者编译单元也不会被拉入重型平台头，连带避免 `min` / `max`、`None` / `Bool` / `Status` 等宏污染。
 
@@ -288,7 +288,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 | `WaylandSurface` | CPU swizzle 到 `WL_SHM_FORMAT_ARGB8888`（预乘 alpha）经 `wl_shm` 共享内存双缓冲槽，CSD 态缓冲含四周 10dp 阴影 margin（swizzle 后 `csd::compose_shadow_margins_bgra` 直写真 alpha，`set_window_geometry` 声明内容边界、opaque region 仅报内容矩形，见 `specification/03` §8.5 与 `specification/07` §4.1）；`wait_events` 经 `poll(2)`；`scale_factor` 取 `wl_output.scale`；光标走 `libwayland-cursor` 客户端主题（cursor 专用 `wl_surface` + `wl_pointer.set_cursor`，见 `specification/03` §8.3） | `AURORA_BACKEND_WAYLAND`（默认 OFF） |
 | `WgpuWaylandSurface` | 组合内嵌 `WaylandSurface` 宿主（窗口壳/事件/xkb/CSD 全走它，本类零 wayland-client），帧级 DisplayList 交 `WgpuRhi` 在 GPU 端光栅化并经 Wayland surface swapchain present 直渲同一 `wl_surface`；GPU 失败永久回退内嵌宿主的 `wl_shm` 上传路径；GPU 模式下 CSD 分两层合成进帧（begin_frame 阴影 underlay + end_frame 标题 overlay，见 `specification/03` §8.8） | `AURORA_BACKEND_GPU_WGPU` ∧ `AURORA_BACKEND_WAYLAND`（默认 OFF） |
 | `WasmSurface` | `<canvas>` 像素写回（`EM_ASM` `putImageData`） | `AURORA_BACKEND_WASM`（默认 OFF） |
-| `MacOSSurface` | AppKit / CoreGraphics（**未支持**：仅骨架代码，窗口创建/销毁/上屏与事件泵均未实装，运行期不可用） | `AURORA_BACKEND_MACOS`（默认 OFF） |
+| `MacOSSurface` | AppKit / CoreGraphics（`NSWindow` + 自定义 `NSView`；`present` 把 Painter 缓冲零拷贝包装成 `CGImage` 交视图重绘；事件泵 `nextEventMatchingMask` + `sendEvent`；鼠标 / 滚轮 / 键盘 / `NSTextInputClient` 文本输入与 IME / 系统拖放 / 最近文档 / 明暗跟随已接，见 `specification/03` §8 与 `specification/05` / `06`） | `AURORA_BACKEND_MACOS`（Apple 默认 ON，其余平台默认 OFF 且开启 FATAL；Apple 上关闭亦 FATAL，见 §8.4 末段） |
 
 `Win32Surface`、`D3D11Surface` 与 `WgpuWin32Surface` 共用 `Win32Host` 宿主（创建 / 消息泵 / 事件翻译 / DPI / 同步重渲染 / 运行期标题），仅 present 后端不同。宿主采用 pimpl 隔离，故 `hwnd()` / `background_brush()` 以 `void*` 返回（调用方 `static_cast`）。窗口过程按**消息族**分派到各 `handle_*` 函数，取代单体 switch。X11/Wayland 侧的 `WgpuX11Surface` / `WgpuWaylandSurface` 不走共享宿主路线而是**组合**内嵌 `X11Surface` / `WaylandSurface`（窗口创建 / 事件泵 / 光标全走它，本类只做 GPU 帧路径与软件回退分流，句柄以 void* 同源取得），避免把 Xlib / wayland-client 逻辑复制第二份。
 
@@ -296,7 +296,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 **自定义后端**：任意 `Surface` 子类经 `Application(Scene, unique_ptr<Surface>)` / `App().surface(...)` 注入，无需为每种后端在 `Application` 上加构造重载；`Surface` 之外的扩展点收口在 `create_window` 工厂。
 
-**编译 / 链接期代码剪裁**：关闭某 `AURORA_BACKEND_*` 后，对应 `Surface` 实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端；关闭 `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_WEBAUDIO` 同样剔除对应音频设备后端实现。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）不受影响，故「只用自定义 backend」可不编译任何内置后端。
+**编译 / 链接期代码剪裁**：关闭某 `AURORA_BACKEND_*` 后，对应 `Surface` 实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端；关闭 `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_COREAUDIO` / `AURORA_ENABLE_AUDIO_WEBAUDIO` 同样剔除对应音频设备后端实现。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）不受影响，故「只用自定义 backend」可不编译任何内置后端。**一处例外**：`AURORA_BACKEND_MACOS` 在 Apple 上默认 ON 且不允许关闭（配置期 FATAL，口径见 `BUILD_OPTIONS.md` §3）。例外不是设计偏好而是当前事实——`Surface` 之外的 macOS 应用域实现（通知中心、系统托盘、最近文档投影、原生菜单栏桥，见 `specification/06-app-platform.md` §8）按**平台宏**而非**后端宏**门控，因为它们对接的是 OS 级服务而非上屏路径，关掉后端只会让这些文件被编成不含 AppKit 的纯 C++（实测报 `unknown type name 'NSString'` 与未声明的桥符号），得到一台构建不过的机器。把门控改成后端宏被试过并否决：那只是把洞从「链接期」搬到「运行期静默失效」，且让 Apple 平台出现一条从未被任何 CI 作业构建过的组合。口径与 `AURORA_BACKEND_WIN32`（Windows 默认 ON）及四枚 `AURORA_ENABLE_AUDIO_*`（各自平台默认 ON）一致：**自己平台的原生后端默认开**。Linux / Windows 上按本段剪裁后端不受影响。
 
 ### 8.5 无障碍桥接（platform accessibility bridge）
 
@@ -347,7 +347,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 **拖入入口（与前两桥不同的一点）**：拖出由本进程发起（`system_drag::begin`），拖入由**外部进程**发起，故多一层「宿主投事件的唯一入口」`src/aurora/event/detail/system_drag_ingress.h`（内部头，不进 `include/`）：平台桥把折算好的事件交给它、拿回派发器写定的 `allowed` 去回写 OS 光标；配套的 inert 拖入后端（`install_test_drag_in` 一族，双宏裁切）在接管期间**抑制真实派发**，使拖入链在无头环境可被完整接管。槽由调用方持有而非全局登记——多窗口下进程级单槽会让后登记者覆盖先登记者。
 
-**窗口归属与能力位**：桥由各自的 `Impl` 唯一持有——Win32 侧 `Win32Host::Impl`（`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 转发同一实例，与 §8.5、§8.6 同纪律）；X11 侧 `X11Surface::Impl`（析构时先于 X 资源销毁）；Wayland 侧 `WaylandSurface::Impl`（构造末尾 install、随窗口销毁期卸载，按下序 serial 由指针按下路径经 `note_press_serial` 刷新）。 macOS 侧 `MacOSSurface::Impl`（构造末尾 install、`destroy_window` 内先收桥再放视图；按下 `NSEvent` 由指针按下路径经 `note_press_event` 暂存，`attach_view` 供「视图由桥自己产出」的宿主与探针回装）。拖出侧另经 `src/aurora/event/detail/system_drag_backend.h`（内部头）向事件层注册进程级单槽后端（发起 / 取消 / 在途要约索取），由各窗口宿主持有期注册、「先到者优先」去重。能力位 `system_drag_in` / `system_drag_out` **按方向独立翻位**（拖入与拖出分批次落地，成对翻位会让未落地的方向谎报支持），当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（macOS 的窗口壳仍为骨架，无内容视图可登记 ⇒ 运行期 `install()` 必失败并记日志降级；能力位表机制归属，与 `multitouch` 等位的声明口径一致）。
+**窗口归属与能力位**：桥由各自的 `Impl` 唯一持有——Win32 侧 `Win32Host::Impl`（`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 转发同一实例，与 §8.5、§8.6 同纪律）；X11 侧 `X11Surface::Impl`（析构时先于 X 资源销毁）；Wayland 侧 `WaylandSurface::Impl`（构造末尾 install、随窗口销毁期卸载，按下序 serial 由指针按下路径经 `note_press_serial` 刷新）。 macOS 侧 `MacOSSurface::Impl`（构造末尾 install、`destroy_window` 内先收桥再放视图；按下 `NSEvent` 由指针按下路径经 `note_press_event` 暂存，`attach_view` 供「视图由桥自己产出」的宿主与探针回装）。拖出侧另经 `src/aurora/event/detail/system_drag_backend.h`（内部头）向事件层注册进程级单槽后端（发起 / 取消 / 在途要约索取），由各窗口宿主持有期注册、「先到者优先」去重。能力位 `system_drag_in` / `system_drag_out` **按方向独立翻位**（拖入与拖出分批次落地，成对翻位会让未落地的方向谎报支持），当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（macOS 的窗口壳已实写：内容视图在 `create_window` 内建出后即 `install()`，运行期 install 失败如实记日志降级；能力位表机制归属，与 `multitouch` 等位的声明口径一致）。
 
 **受理信号的两条来源（不改派发器）**：`EventDispatcher` 只对 `Enter` / `Over` 写 `event.allowed`（既有单测锁定该语义），而目标侧要回写给源的终态事件（Xdnd 的 `XdndFinished`、Wayland 的 `wl_data_offer.finish`）需要「这一次落放到底有没有被消费」。故 `Drop` 态的受理信号取事件的 `is_handled`——派发器语义不动，桥在 sink 里读回即可（Xdnd 侧另需执行动作，取目标侧 `XdndStatus` 缓存；Wayland 的 `finish` 不带动作，受理位即全部信息）。 macOS 侧没有回写给源的终态事件（AppKit 目标侧不回报执行动作），受理只影响 `prepareForDragOperation` 闸门的返回值——闸门为 NO 时 AppKit 根本不会调 `performDragOperation`。
 

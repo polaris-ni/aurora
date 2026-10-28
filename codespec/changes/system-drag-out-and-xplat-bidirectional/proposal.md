@@ -74,3 +74,9 @@
 - `codespec/changes/system-drag-backend-wiring/proposal.md`（批次移交注记：其余批次由本提案承接，CHG-027 保留首批交付范围与全部裁决记录）
 - 收尾：本提案状态随批次流转（已提议 → 实施中 → 已归档）。
 - 发布记录落 CHANGELOG.md（`Added`：系统拖放拖出与三平台双向接线）——该文档不属 codespec 树，按 AGENTS.md 硬规则 5 不列为回写落点。
+
+## 实施记录与偏离（落码期回写）
+
+1. **macOS 窗口壳已实写，人工段的「窗口壳前置」不再是阻塞**：`MacOSSurface` 建真实 `NSWindow` + 内容视图并逐帧上屏，拖放桥在 `create_window` 末尾装到该视图上（`NSDraggingDestination` / `NSDraggingSource` 同一桥实例）；上方变更内容第 45–47 条里「窗口壳仍为骨架、人工段待窗口壳实写后可执行」只反映提案期状态。`TC-SYSTEMDRAG-027` / `-028` 仍需真人在交互式桌面上执行，开发期只登记自动段证据。
+2. **自动段真机结果（macOS 开发机）**：`tools/verify/macos_drag_live_probe.mm` 五腿 30 项断言全绿（1 项 `[PENDING]`，退出码 0）——能力位、粘贴板登记表、目标视图五方法、四态派发与载荷文本/文件往返、拒收不派 Drop、会话收清均按判据成立。
+3. **落码期修复（macOS 拖入载荷）**：`performDragOperation:` 取类型时 `chosen` 曾指向 `macos_pasteboard_types_from_mime()` 返回的临时 vector，循环结束即悬垂，越界读令 `stringWithUTF8String:` 返回 nil、整段载荷分支被静默跳过；改为指向 Enter 时记录的 `in.types` 内条目。同批修正探针的拒收基线（按会话增量核对）与收摊顺序（先放桥、再放视图），并给 `--interactive` 建真实窗口（上绿下蓝的可拖/可放区域）。
