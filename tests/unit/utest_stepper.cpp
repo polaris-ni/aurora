@@ -208,9 +208,9 @@ AURORA_TEST_CASE(paint_covers_indicator_content_and_button_labels) {
     s.set_current(0);
     s.paint(painter, bounds, BuildContext{});
 
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     s.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 0U);  // Stepper 无外露信号
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 0U);  // Stepper 无外露信号
 }
 
 // ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----

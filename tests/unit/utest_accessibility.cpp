@@ -473,16 +473,16 @@ AURORA_TEST_CASE(build_tree_self_fills_name_and_value_from_widgets) {
         std::string{"订单总额"}};  // CJK-LITERAL: cjk-fixture - Han text widget label under a11y assertion
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(text).name, std::string{"订单总额"});
 
-    aurora::Checkbox checked{aurora::Reactive<bool>{true}};
+    aurora::Checkbox checked{true};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(checked).value, std::string{"true"});
 
-    aurora::Switch off{aurora::Reactive<bool>{false}};
+    aurora::Switch off{false};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(off).value, std::string{"false"});
 
-    aurora::Slider slider{aurora::Reactive<double>{0.5}};
+    aurora::Slider slider{0.5};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(slider).value, std::to_string(0.5));
 
-    aurora::ProgressIndicator progress{aurora::Reactive<double>{0.25}};
+    aurora::ProgressIndicator progress{0.25};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(progress).value, std::to_string(0.25));
 
     // 编辑框：name 取占位提示、value 取当前内容，两者互不相干。
@@ -514,7 +514,7 @@ AURORA_TEST_CASE(build_tree_skips_invisible_children) {
     ProbeColumn column;
     column.add(aurora::Node{ProbeLeaf{"Button"}});
     column.add(aurora::Node{ProbeLeaf{"Text"}});
-    column.child(1).widget().show.set(false);
+    column.child(1).widget().set_show(false);
 
     // 与绘制 / 命中同口径：show == false 的子树不进语义树，避免朗读视觉上不存在的控件。
     const auto tree = aurora::build_accessibility_tree(column);
@@ -632,7 +632,7 @@ AURORA_TEST_CASE(focus_value_and_structure_changes_raise_events) {
     std::vector<aurora::AccessibilityEvent> events;
     const ScopedEventHandler listen{&events};
 
-    aurora::Checkbox box{aurora::Reactive<bool>{false}};
+    aurora::Checkbox box{false};
     box.set_value(true);
 
     ProbeColumn column;

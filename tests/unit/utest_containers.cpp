@@ -61,7 +61,7 @@ auto text_column(bool cache_layer) -> std::shared_ptr<Column> {
     txt->font_size(20.0F);
     auto col = std::make_shared<Column>(ColumnProps{.children = {Node{std::shared_ptr<Widget>(txt)}}});
     if (cache_layer) {
-        col->modifier.set(Modifier().cache_layer());
+        col->set_modifier(Modifier().cache_layer());
     }
     LayoutEngine::layout(*col, bounded(static_cast<float>(AURORA_CACHE_W), static_cast<float>(AURORA_CACHE_H)));
     return col;
@@ -267,7 +267,7 @@ AURORA_TEST_CASE(row_baseline_accounts_for_modifier_padding) {
     plain->font_size(16.0F);
     auto padded = std::make_shared<Text>("Ag");
     padded->font_size(16.0F);
-    padded->modifier.set(Modifier().padding(10.0F));
+    padded->set_modifier(Modifier().padding(10.0F));
 
     Row row;
     row.add(Node{std::shared_ptr<Widget>(plain)});

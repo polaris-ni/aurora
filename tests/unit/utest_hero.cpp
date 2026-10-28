@@ -109,9 +109,9 @@ AURORA_TEST_CASE(hero_cache_policy_and_signals) {
     AURORA_TEST_CHECK_STREQ(hero.type_name(), "Hero");
     AURORA_TEST_CHECK_FALSE(hero.can_cache_display_list());  // 绘制有副作用（几何注册）
 
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     hero.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 0U);
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 0U);
 }
 
 AURORA_TEST_CASE(hero_paint_without_registry_paints_child) {

@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/media/video_player.h
 /// 测试说明: 覆盖 VideoPlayer 默认不变量、源挂接、VideoController 接口语义（toggle/seek_fraction/
-/// volume/muted 及四个 Reactive 信号）、播放时钟推进与播完自停、控件叠层管理、
+/// volume/muted 及四个只读读数句柄）、播放时钟推进与播完自停、控件叠层管理、
 /// 属性序列化往返、自描述、tap/double-tap 扩展点、公开 tick 入口对播放时钟的驱动
 
 #include <chrono>
@@ -109,13 +109,12 @@ AURORA_TEST_CASE(toggle_play_drives_playing_signal_and_source) {
     p.toggle_play();
     AURORA_TEST_CHECK_TRUE(p.is_playing());
     AURORA_TEST_CHECK_TRUE(src->is_playing());
-    AURORA_TEST_REQUIRE_NOT_NULL(p.playing_signal());
-    AURORA_TEST_CHECK_TRUE(p.playing_signal()->get());
+    AURORA_TEST_CHECK_TRUE(p.playing_signal().get());
 
     p.toggle_play();
     AURORA_TEST_CHECK_FALSE(p.is_playing());
     AURORA_TEST_CHECK_FALSE(src->is_playing());
-    AURORA_TEST_CHECK_FALSE(p.playing_signal()->get());
+    AURORA_TEST_CHECK_FALSE(p.playing_signal().get());
     // 幂等：连续 toggle 两次回到原状态。
     p.play();
     p.play();  // 已播放中，no-op
@@ -130,7 +129,7 @@ AURORA_TEST_CASE(seek_clamps_and_updates_progress) {
     p.seek(us(500'000));
     AURORA_TEST_CHECK_EQ(p.position().count(), 200'000);
     AURORA_TEST_CHECK_NEAR(p.position_fraction(), 1.0, 1e-9);
-    AURORA_TEST_CHECK_NEAR(p.progress_signal()->get(), 1.0, 1e-9);
+    AURORA_TEST_CHECK_NEAR(p.progress_signal().get(), 1.0, 1e-9);
     p.seek(us(-10));
     AURORA_TEST_CHECK_EQ(p.position().count(), 0);
     AURORA_TEST_CHECK_NEAR(p.position_fraction(), 0.0, 1e-9);
@@ -161,17 +160,14 @@ AURORA_TEST_CASE(volume_mute_clamp_and_signal_reflection) {
     p.set_volume(-0.2);
     AURORA_TEST_CHECK_NEAR(p.volume(), 0.0, 1e-9);
     p.set_volume(0.4);
-    AURORA_TEST_CHECK_NEAR(p.volume_signal()->get(), 0.4, 1e-9);
+    AURORA_TEST_CHECK_NEAR(p.volume_signal().get(), 0.4, 1e-9);
     p.set_muted(true);
     AURORA_TEST_CHECK_TRUE(p.muted());
-    AURORA_TEST_CHECK_TRUE(p.muted_signal()->get());
+    AURORA_TEST_CHECK_TRUE(p.muted_signal().get());
     // 播放器把音量同步给源。
     p.set_volume(0.8);
     p.set_muted(false);
     // 四个信号指针稳定可用。
-    AURORA_TEST_REQUIRE_NOT_NULL(p.progress_signal());
-    AURORA_TEST_REQUIRE_NOT_NULL(p.volume_signal());
-    AURORA_TEST_REQUIRE_NOT_NULL(p.muted_signal());
 }
 
 AURORA_TEST_CASE(playback_tick_advances_progress_and_pauses_at_end) {
@@ -190,7 +186,7 @@ AURORA_TEST_CASE(playback_tick_advances_progress_and_pauses_at_end) {
     p.on_playback_tick(t_ms(2'000));
     AURORA_TEST_CHECK_FALSE(p.is_playing());
     AURORA_TEST_CHECK_NEAR(p.position_fraction(), 1.0, 1e-9);
-    AURORA_TEST_CHECK_FALSE(p.playing_signal()->get());
+    AURORA_TEST_CHECK_FALSE(p.playing_signal().get());
     AURORA_TEST_CHECK_EQ(p.ticks, 2);
     // 结尾帧已缓存到 current_frame_（on_frame 钩子：最后一帧填充值 2）。
     AURORA_TEST_CHECK_EQ(p.frame().pixels[0], 2);
@@ -225,9 +221,9 @@ AURORA_TEST_CASE(show_controls_toggles_and_custom_controls) {
     AURORA_TEST_REQUIRE_EQ(p.child_nodes().size(), 1U);
     AURORA_TEST_CHECK_EQ(&p.child_nodes()[0].widget(), custom_ptr);
     // show=false 时叠层同步隐藏。
-    AURORA_TEST_CHECK_FALSE(custom_ptr->show.get());
+    AURORA_TEST_CHECK_FALSE(custom_ptr->show());
     p.set_show_controls(true);
-    AURORA_TEST_CHECK_TRUE(custom_ptr->show.get());
+    AURORA_TEST_CHECK_TRUE(custom_ptr->show());
 
     // nullptr → 清空叠层。
     p.set_controls(nullptr);
@@ -302,10 +298,10 @@ AURORA_TEST_CASE(tap_and_double_tap_extension_points) {
 
 AURORA_TEST_CASE(collect_signals_reports_player_states) {
     VideoPlayer p(make_source());
-    std::vector<aurora::SignalViewBase *> out;
+    StateSink out;
     p.collect_signals(out);
     // 无子控件时恰为 4 个播放器状态信号。
-    AURORA_TEST_CHECK_EQ(out.size(), 4U);
+    AURORA_TEST_CHECK_EQ(out.sources().size(), 4U);
 }
 
 }  // namespace aurora::test_cases::utest_video_player

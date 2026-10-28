@@ -88,9 +88,9 @@ AURORA_TEST_CASE(layer_metadata_and_signals) {
     AURORA_TEST_CHECK_STREQ(layer.type_name(), "TransitionLayer");
     AURORA_TEST_CHECK_FALSE(layer.can_cache_display_list());  // 内容每帧变化，禁 DL 缓存
 
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     layer.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 0U);  // progress 由宿主统一订阅
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 0U);  // progress 由宿主统一订阅
 
     const auto desc = layer.describe();
     AURORA_TEST_CHECK_EQ(desc.name, std::string{"TransitionLayer"});
@@ -207,8 +207,8 @@ AURORA_TEST_CASE(layer_hero_morph_pairs_and_marks) {
     // Hero::on_paint 不执行则几何捕获不发生。
     auto hero_shared = std::make_shared<Hero>("shared", Node{SolidBox{Color{255, 0, 0}, &red_paints}});
     auto hero_old_only = std::make_shared<Hero>("old_only", Node{SolidBox{Color{0, 160, 0}, &green_paints}});
-    hero_shared->modifier.set(Modifier{}.expand(1.0F));
-    hero_old_only->modifier.set(Modifier{}.expand(1.0F));
+    hero_shared->set_modifier(Modifier{}.expand(1.0F));
+    hero_old_only->set_modifier(Modifier{}.expand(1.0F));
     auto old_page = Node{Column{
         Node{hero_shared},
         Node{hero_old_only},

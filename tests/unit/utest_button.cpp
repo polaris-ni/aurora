@@ -163,9 +163,9 @@ AURORA_TEST_CASE(button_defaults_and_type_name) {
 AURORA_TEST_CASE(button_label_and_activate_fires_on_click) {
     int clicks = 0;
     Button b("OK");
-    AURORA_TEST_CHECK_EQ(b.label.get().text, "OK");
+    AURORA_TEST_CHECK_EQ(b.label().get().text, "OK");
     b.set_label("Confirm");
-    AURORA_TEST_CHECK_EQ(b.label.get().text, "Confirm");
+    AURORA_TEST_CHECK_EQ(b.label().get().text, "Confirm");
 
     b.set_on_click([&clicks]() -> void { ++clicks; });
     AURORA_TEST_CHECK_TRUE(b.wants_click());
@@ -276,7 +276,7 @@ AURORA_TEST_CASE(button_serialize_deserialize_roundtrip) {
     Button dst;
     dst.deserialize_props(props);
     // CJK-LITERAL: cjk-fixture - Han label restored unchanged after deserialization
-    AURORA_TEST_CHECK_EQ(dst.label.get().text, "确认");
+    AURORA_TEST_CHECK_EQ(dst.label().get().text, "确认");
     AURORA_TEST_CHECK_FALSE(dst.enabled);
     AURORA_TEST_CHECK_NEAR(dst.corner_radius, 10.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(dst.min_width, 80.0F, 1e-4F);
@@ -295,8 +295,8 @@ AURORA_TEST_CASE(button_tr_label_draws_catalog_text) {
 
     // tr() 构造时 text 恒空、只带 key：修法前 paint_label 直读 label.get().text，画出来是空白。
     Button b;
-    b.label = LocalizedString::tr(key);
-    AURORA_TEST_CHECK_TRUE(b.label.get().text.empty());
+    b.set_label(LocalizedString::tr(key));
+    AURORA_TEST_CHECK_TRUE(b.label().get().text.empty());
 
     LayoutEngine::layout(b, bounded(300.0F, 80.0F));
     const BuildContext ctx;  // 无 Provider<Locale> 注入 → 回落 default_catalog() 的缺省档
@@ -312,7 +312,7 @@ AURORA_TEST_CASE(button_tr_label_draws_catalog_text) {
 
     // 有墨：圆角置 0 后盒内除文字外全是背景色，非背景像素数 > 0 即文字真的落了笔。
     Button inked;
-    inked.label = LocalizedString::tr(key);
+    inked.set_label(LocalizedString::tr(key));
     inked.set_corner_radius(0.0F);
     inked.background(Color::blue());  // 显式设色：不依赖主题回退，背景参数与之一致
     LayoutEngine::layout(inked, bounded(300.0F, 80.0F));
@@ -328,7 +328,7 @@ AURORA_TEST_CASE(button_accessibility_label_equals_drawn_text) {
     table.add(Locale{}, key_name, "Apply changes");
 
     Button b;
-    b.label = LocalizedString::tr(key);
+    b.set_label(LocalizedString::tr(key));
     LayoutEngine::layout(b, bounded(300.0F, 80.0F));
     const BuildContext ctx;
 
@@ -353,7 +353,7 @@ AURORA_TEST_CASE(button_natural_width_equals_resolved_label_width_plus_padding) 
     table.add(Locale{.language = "zz"}, key_name, "Considerably longer caption");
 
     Button b;
-    b.label = LocalizedString::tr(key);
+    b.set_label(LocalizedString::tr(key));
     b.set_min_size(0.0F, 0.0F);
     const Font f = effective_font(b);
 
@@ -381,7 +381,7 @@ AURORA_TEST_CASE(button_natural_width_covers_non_ascii_translation) {
     const std::string key_name = "utest_button.non_ascii";
 
     Button b;
-    b.label = LocalizedString::tr(key);
+    b.set_label(LocalizedString::tr(key));
     b.set_min_size(0.0F, 0.0F);
     const Font f = effective_font(b);
 
@@ -404,7 +404,7 @@ AURORA_TEST_CASE(button_paint_remeasures_when_display_text_changes_without_relay
     table.add(Locale{}, key_name, "Old");
 
     Button b;
-    b.label = LocalizedString::tr(key);
+    b.set_label(LocalizedString::tr(key));
     LayoutEngine::layout(b, bounded(300.0F, 80.0F));  // 缓存落 "Old" 的量宽
 
     table.add(Locale{}, key_name, "Substantially longer");  // 显示串变了，但刻意不重排
@@ -434,7 +434,7 @@ AURORA_TEST_CASE(button_literal_label_output_is_unchanged) {
 
     Button literal("Save");
     Button via_table;
-    via_table.label = LocalizedString::tr(key);
+    via_table.set_label(LocalizedString::tr(key));
 
     LayoutEngine::layout(literal, bounded(300.0F, 80.0F));
     LayoutEngine::layout(via_table, bounded(300.0F, 80.0F));

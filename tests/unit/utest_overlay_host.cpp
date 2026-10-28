@@ -68,8 +68,8 @@ class MountProbe final : public Widget {
     [[nodiscard]] auto type_name() const -> const char * override { return "MountProbe"; }
     /// @brief 额外登记一个自有信号，使订阅条数 = 自有 1 + `modifier` + `show` = 3（固定值可硬断言）。
     /// @param out 信号视图累加表（本控件追加自身信号）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&tick_state_); }
-    [[nodiscard]] auto effect_count() const -> std::size_t { return effects_.size(); }
+    auto collect_signals(StateSink &out) -> void override { out.push(tick_state_); }
+    [[nodiscard]] auto effect_count() const -> std::size_t { return signal_subscriptions_.size(); }
 
   protected:
     /// @brief 本控件的布局读环境（记主题主色），故**刻意不可缓存**——否则约束不变时 `on_layout`
@@ -97,7 +97,7 @@ class MountProbe final : public Widget {
     }
 
   private:
-    Reactive<int> tick_state_;
+    State<int> tick_state_;
 };
 
 }  // namespace
@@ -143,10 +143,11 @@ AURORA_TEST_CASE(runtime_added_overlay_is_mounted_on_next_layout) {
     // `set_local`，其 `map_.emplace` 对已存在的键不覆盖——那是独立于本任务的既有缺陷，不在此顺带修。
     Environment root_env;
     auto host = std::make_shared<OverlayHost>(base_content());
-    Provider<Theme> provider{theme_a, Node{host}};
+    State<Theme> theme_state{theme_a};
+    Provider<Theme> provider{theme_state, Node{host}};
     BuildContext ctx;
     ctx.env = &root_env;
-    // 先挂载：`Provider` 靠 mount 订阅自己持有的 `value_`，不挂载则 `set_value` 不会标脏、
+    // 先挂载：`Provider` 靠 mount 订阅自己持有的来源，不挂载则来源变化不会标脏、
     // 布局缓存不会失效——那正是「换肤不跟」的另一条独立故障路径，与本次判据无关。
     provider.mount(ctx);
     LayoutEngine::layout(provider, bounded(240.0F, 200.0F), ctx);
@@ -168,7 +169,7 @@ AURORA_TEST_CASE(runtime_added_overlay_is_mounted_on_next_layout) {
     // 换肤后仍读到新值：挂载补齐不是「挂上就冻结」。
     // 第二遍**换一组约束**：`State` 变更只向上失效，缓存命中的祖先会整段跳过子树
     // （既有布局缓存语义，不在本次范围），换约束才能让一次完整布局真的走到 probe。
-    provider.set_value(theme_b);
+    theme_state.set(theme_b);
     LayoutEngine::layout(provider, bounded(260.0F, 220.0F), ctx);
     AURORA_TEST_CHECK_TRUE(probe->primary_at_layout == theme_b.roles.primary);
     AURORA_TEST_CHECK_EQ(probe->mounts, 1);  // 同宿主不重复挂载
@@ -254,7 +255,7 @@ class AnchorBox final : public Widget {
 class DispatchProbe final : public Widget {
   public:
     DispatchProbe(float w, float h) : w_(w), h_(h) {
-        modifier.set(Modifier{}.clickable([]() -> void {}));
+        set_modifier(Modifier{}.clickable([]() -> void {}));
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "DispatchProbe"; }
@@ -577,7 +578,7 @@ class InkProbe final : public Widget {
     InkProbe(float w, float h) : w_(w), h_(h) {
         // 必须挂 Clickable：`wants_click()` 缺省只看修饰链，不挂则基类不认它为命中目标、
         // 命中链在自身处判假（本类无子节点）⇒ 盒内探点拿不到非空链。绘制不受此影响。
-        modifier.set(Modifier{}.clickable([]() -> void {}));
+        set_modifier(Modifier{}.clickable([]() -> void {}));
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "InkProbe"; }

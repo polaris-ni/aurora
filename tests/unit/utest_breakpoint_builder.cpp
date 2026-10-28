@@ -25,7 +25,7 @@ class LeafProbe final : public Widget {
     int mounts = 0;
     int unmounts = 0;
     [[nodiscard]] auto type_name() const -> const char * override { return "LeafProbe"; }
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { (void)out; }
+    auto collect_signals(StateSink &out) -> void override { (void)out; }
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = 20.0F, .height = 20.0F});
     }
@@ -59,9 +59,9 @@ AURORA_TEST_CASE(default_ctor_api_surface) {
     AURORA_TEST_CHECK_EQ(d.name, "BreakpointBuilder");
     auto d2 = def.describe();
     AURORA_TEST_CHECK_EQ(d2.name, "BreakpointBuilder");
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     def.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 1U);
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 1U);
 }
 
 AURORA_TEST_CASE(mount_layout_rebuild_unmount_covers_all_breakpoints) {

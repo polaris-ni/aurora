@@ -138,7 +138,7 @@ AURORA_TEST_CASE(modifier_gradient_radial_builds_radial_node) {
 AURORA_TEST_CASE(gradient_modifier_widget_offscreen_snapshot) {
     // 构建一个带渐变背景的 Text 控件并离屏渲染（逻辑快照）
     auto txt = std::make_shared<Text>("Hello");
-    txt->modifier.set(Modifier{}.gradient_linear(Color(255, 0, 0, 255), Color(0, 0, 255, 255)));
+    txt->set_modifier(Modifier{}.gradient_linear(Color(255, 0, 0, 255), Color(0, 0, 255, 255)));
 
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 200, 50);

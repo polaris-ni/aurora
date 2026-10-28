@@ -55,12 +55,12 @@ auto make_builder() -> ReorderableList<int>::ItemBuilder {
     return [](const int & /*value*/, int /*index*/) -> Node { return Node{std::make_shared<ReorderItem>(40.0F)}; };
 }
 
-auto make_items(std::size_t n) -> std::shared_ptr<State<std::vector<int>>> {
+auto make_items(std::size_t n) -> State<std::vector<int>> {
     std::vector<int> values(n);
     for (std::size_t i = 0; i < n; ++i) {
         values[i] = static_cast<int>(i);
     }
-    return std::make_shared<State<std::vector<int>>>(std::move(values));
+    return State<std::vector<int>>{std::move(values)};
 }
 
 /// 以 16ms 步进推进落位动画（`tc.pump` 未必逐帧驱动手势 tick——测试里显式驱动，确定性可复现）。
@@ -119,7 +119,7 @@ AURORA_TEST_CASE(drag_reorders_items_through_real_dispatch) {
     AURORA_TEST_REQUIRE(tc.pump().ok());  // 提交只标布局脏：一帧后落到新位置
 
     AURORA_TEST_CHECK_EQ(reorder_calls, 1);
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 2, 1});  // 第 1 项落到末位
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 2, 1});  // 第 1 项落到末位
     AURORA_TEST_CHECK_GT(events.count, 0);  // 结构变化已上报（读屏可感知）
     StructureEventCounter::uninstall();
 }
@@ -152,7 +152,7 @@ AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
     AURORA_TEST_REQUIRE(tc.pump().ok());
 
     // 第 5 项与第 6 项互换（滚动坐标下的命中与换位几何联动正确）。
-    AURORA_TEST_CHECK_EQ(items->get(),
+    AURORA_TEST_CHECK_EQ(items.get(),
                          std::vector<int>{0, 1, 2, 3, 4, 6, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19});
     // 滚动位置不受重排影响，且仍在注册表里（App 退出时 sync 落盘）。
     AURORA_TEST_CHECK_NEAR(list->scroll_offset(), 80.0F, 1e-4F);

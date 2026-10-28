@@ -84,10 +84,10 @@ namespace {
 /// 返回容器最终布局尺寸（显式 Modifier 尺寸应无条件覆写为 100x50）。
 auto paint_overflow_scenario(OverflowStrategy strategy) -> Size {
     auto txt = std::make_shared<Text>("XXXXXXXXXXXXXXXXXXXX");
-    txt->modifier.set(Modifier{}.size(200.0F, 100.0F).background(Color{255, 0, 0, 255}));
+    txt->set_modifier(Modifier{}.size(200.0F, 100.0F).background(Color{255, 0, 0, 255}));
 
     Column col{Node{std::move(txt)}};
-    col.modifier.set(Modifier{}.size(100.0F, 50.0F).background(Color{0, 255, 0, 255}));
+    col.set_modifier(Modifier{}.size(100.0F, 50.0F).background(Color{0, 255, 0, 255}));
     col.overflow_strategy(strategy);
 
     constexpr BuildContext ctx;
@@ -128,10 +128,10 @@ namespace {
 /// 构造「100x50 绿底 Scroll 容器 + 100x100 红底溢出子 Text」并走完 mount→layout。
 auto make_scroll_column() -> Column {
     auto txt = std::make_shared<Text>("XXXXXXXXXXXXXXXXXXXX");
-    txt->modifier.set(Modifier{}.size(100.0F, 100.0F).background(Color{255, 0, 0, 255}));
+    txt->set_modifier(Modifier{}.size(100.0F, 100.0F).background(Color{255, 0, 0, 255}));
 
     Column col{Node{std::move(txt)}};
-    col.modifier.set(Modifier{}.size(100.0F, 50.0F).background(Color{0, 255, 0, 255}));
+    col.set_modifier(Modifier{}.size(100.0F, 50.0F).background(Color{0, 255, 0, 255}));
     col.overflow_strategy(OverflowStrategy::Scroll);
 
     constexpr BuildContext ctx;
@@ -182,12 +182,12 @@ AURORA_TEST_CASE(overflow_scroll_paint_translates_content) {
     // 滚动后内容上移平移：红(0..100)+绿(100..200)两段内容，视口 50 高。
     // 未滚动：视口内全红；滚 128px（clamp 150）后绿段平移到 -28..72 → 视口内变绿。
     auto red_txt = std::make_shared<Text>("red");
-    red_txt->modifier.set(Modifier{}.size(100.0F, 100.0F).background(Color{255, 0, 0, 255}));
+    red_txt->set_modifier(Modifier{}.size(100.0F, 100.0F).background(Color{255, 0, 0, 255}));
     auto green_txt = std::make_shared<Text>("green");
-    green_txt->modifier.set(Modifier{}.size(100.0F, 100.0F).background(Color{0, 255, 0, 255}));
+    green_txt->set_modifier(Modifier{}.size(100.0F, 100.0F).background(Color{0, 255, 0, 255}));
 
     Column col{Node{std::move(red_txt)}, Node{std::move(green_txt)}};
-    col.modifier.set(Modifier{}.size(100.0F, 50.0F).background(Color{0, 0, 255, 255}));
+    col.set_modifier(Modifier{}.size(100.0F, 50.0F).background(Color{0, 0, 255, 255}));
     col.overflow_strategy(OverflowStrategy::Scroll);
 
     constexpr BuildContext ctx;
@@ -215,18 +215,18 @@ AURORA_TEST_CASE(scroll_dispatch_nearest_scrollable_ancestor_wins) {
     //       ├─ 可点击 Text(100x40)（y∈[100,140]，非滚动目标，不拦截滚轮）
     //       └─ 撑高用 Text(100x30)（y∈[140,170]，超出视口供外层滚动）
     auto inner_txt = std::make_shared<Text>("inner");
-    inner_txt->modifier.set(Modifier{}.size(100.0F, 300.0F));
+    inner_txt->set_modifier(Modifier{}.size(100.0F, 300.0F));
     auto inner = std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(inner_txt)}});
-    inner->modifier.set(Modifier{}.size(100.0F, 100.0F));
+    inner->set_modifier(Modifier{}.size(100.0F, 100.0F));
 
     auto btn_txt = std::make_shared<Text>("btn");
-    btn_txt->modifier.set(Modifier{}.size(100.0F, 40.0F).clickable([] {}));
+    btn_txt->set_modifier(Modifier{}.size(100.0F, 40.0F).clickable([] {}));
 
     auto pad_txt = std::make_shared<Text>("pad");
-    pad_txt->modifier.set(Modifier{}.size(100.0F, 30.0F));
+    pad_txt->set_modifier(Modifier{}.size(100.0F, 30.0F));
 
     Column outer{Node{std::move(inner)}, Node{std::move(btn_txt)}, Node{std::move(pad_txt)}};
-    outer.modifier.set(Modifier{}.size(100.0F, 120.0F));
+    outer.set_modifier(Modifier{}.size(100.0F, 120.0F));
     outer.overflow_strategy(OverflowStrategy::Scroll);
 
     constexpr BuildContext ctx;

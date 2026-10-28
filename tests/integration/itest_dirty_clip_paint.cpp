@@ -379,7 +379,7 @@ AURORA_TEST_CASE(focus_ring_band_inside_scroll_repainted) {
     au::Node content{au::Column{au::Node{au::Text("first row")}, au::Node{btn}, au::Node{au::Text("row 3")},
                                 au::Node{au::Text("row 4")}, au::Node{au::Text("row 5")}, au::Node{au::Text("row 6")}}};
     const auto scroller = std::make_shared<au::Scroll>(au::ScrollProps{.child = std::move(content)});
-    scroller->modifier.set(au::Modifier{}.size(static_cast<float>(w), 100.0F));  // 视口高 100 < 内容高
+    scroller->set_modifier(au::Modifier{}.size(static_cast<float>(w), 100.0F));  // 视口高 100 < 内容高
     au::Node root{au::Column{au::Node{au::Text("header")}, au::Node{scroller}}};
 
     au::Window win = make_window(w, h);

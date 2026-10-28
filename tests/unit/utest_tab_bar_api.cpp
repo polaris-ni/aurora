@@ -30,7 +30,7 @@ class LeafProbe final : public Widget {
     int mounts = 0;
     int unmounts = 0;
     [[nodiscard]] auto type_name() const -> const char * override { return "LeafProbe"; }
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { (void)out; }
+    auto collect_signals(StateSink &out) -> void override { (void)out; }
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = 10.0F, .height = 10.0F});
     }

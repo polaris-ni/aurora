@@ -102,12 +102,12 @@ AURORA_TEST_CASE(host_animated_push_transition_lifecycle) {
 
     // 一帧推进跨过时长：进度到 1，动画器转闲置。
     anim.tick(0.4);
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     host.collect_signals(sigs);
-    AURORA_TEST_REQUIRE_EQ(sigs.size(), 1U);
-    const auto *progress = dynamic_cast<const State<double> *>(sigs[0]);
+    AURORA_TEST_REQUIRE_EQ(sigs.sources().size(), 1U);
+    const auto *progress = dynamic_cast<const detail::SourceOf<double> *>(sigs.sources()[0].get());
     AURORA_TEST_REQUIRE_NOT_NULL(progress);
-    AURORA_TEST_CHECK_NEAR(progress->get(), 1.0, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(progress->value(), 1.0, 1e-4F);
     AURORA_TEST_CHECK_FALSE(anim.has_active());
 
     // 完成后绘制一帧：on_paint 丢弃旧页，展示层回到 Provider 包裹的新页。
@@ -246,10 +246,10 @@ AURORA_TEST_CASE(host_self_description_and_signals) {
     AURORA_TEST_CHECK_EQ(desc.name, std::string{"NavigatorHost"});
     AURORA_TEST_CHECK_EQ(desc.children_policy, std::string{"single"});
 
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     host.collect_signals(sigs);
-    AURORA_TEST_REQUIRE_EQ(sigs.size(), 1U);
-    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const State<double> *>(sigs[0]));  // progress 信号
+    AURORA_TEST_REQUIRE_EQ(sigs.sources().size(), 1U);
+    AURORA_TEST_CHECK_NOT_NULL(dynamic_cast<const detail::SourceOf<double> *>(sigs.sources()[0].get()));  // progress
 
     // Hero 注册表内部持有且实例稳定。
     AURORA_TEST_CHECK_NOT_NULL(host.hero_registry().get());

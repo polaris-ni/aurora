@@ -201,9 +201,9 @@ AURORA_TEST_CASE(describe_metadata_signals_and_resolved_text) {
 
     // 自有信号：仅 content 一个。
     Text t("hi");
-    std::vector<aurora::SignalViewBase *> signals;
+    StateSink signals;
     t.collect_signals(signals);
-    AURORA_TEST_CHECK_EQ(signals.size(), 1U);
+    AURORA_TEST_CHECK_EQ(signals.sources().size(), 1U);
 
     // resolved_text 在默认字符串表下原样返回。
     const BuildContext ctx;

@@ -89,11 +89,11 @@ AURORA_TEST_CASE(pickers_type_contract) {
     AURORA_TEST_CHECK_TRUE(tp.wants_click());
     AURORA_TEST_CHECK_TRUE(cp.wants_click());
 
-    std::vector<SignalViewBase *> out;
+    StateSink out;
     dp.collect_signals(out);
     tp.collect_signals(out);
     cp.collect_signals(out);
-    AURORA_TEST_CHECK_EQ(out.size(), 3U);
+    AURORA_TEST_CHECK_EQ(out.sources().size(), 3U);
 }
 
 AURORA_TEST_CASE(date_picker_constructor_and_select) {

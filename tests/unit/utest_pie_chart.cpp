@@ -62,7 +62,7 @@ auto layout_only(Widget &w) -> void {
 
 [[nodiscard]] auto render_chart(const PieChartProps &props) -> std::filesystem::path {
     auto chart = std::make_shared<PieChart>(props);
-    chart->modifier.set(Modifier{}.width(static_cast<float>(AURORA_WIDTH)).height(static_cast<float>(AURORA_HEIGHT)));
+    chart->set_modifier(Modifier{}.width(static_cast<float>(AURORA_WIDTH)).height(static_cast<float>(AURORA_HEIGHT)));
     Node root{Column{Node{chart}}};
     const std::filesystem::path tmp = std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_pie.png";
     AURORA_TEST_REQUIRE_TRUE(render_to_png(root, AURORA_WIDTH, AURORA_HEIGHT, tmp.string().c_str()).ok());

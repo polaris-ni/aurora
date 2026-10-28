@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/progress.h
-/// 测试说明: 覆盖 ProgressIndicator——进度值 [0,1] 钳制、Reactive/Binding 双值来源与绑定回写、
-/// collect_signals 随绑定扩展、厚度 setter 与布局高度、颜色 setter 与序列化往返、describe 元数据
+/// 测试说明: 覆盖 ProgressIndicator——进度值 [0,1] 钳制、自有/外部只读来源与挂载换源重订阅、
+/// collect_signals 随有效来源切换、厚度 setter 与布局高度、颜色 setter 与序列化往返、describe 元数据
 
 #include <string>
 #include <vector>
@@ -9,8 +9,6 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/binding.h"
-#include "aurora/state/reactive.h"
 #include "aurora/state/state.h"
 #include "aurora/widget/progress.h"
 #include "framework/aurora_test.h"
@@ -53,38 +51,79 @@ AURORA_TEST_CASE(set_value_clamps_to_unit_range) {
     AURORA_TEST_CHECK_NEAR(p.value(), 0.0, 1e-4);
 }
 
-AURORA_TEST_CASE(reactive_ctor_tracks_internal_value) {
-    ProgressIndicator p{Reactive<double>{0.3}};
+AURORA_TEST_CASE(literal_ctor_tracks_own_value) {
+    ProgressIndicator p{0.3};
     AURORA_TEST_CHECK_NEAR(p.value(), 0.3, 1e-4);
     p.set_value(0.6);
     AURORA_TEST_CHECK_NEAR(p.value(), 0.6, 1e-4);
 }
 
-AURORA_TEST_CASE(binding_ctor_writes_back_to_upstream) {
+AURORA_TEST_CASE(external_source_tracks_upstream_without_writing_back) {
+    // 纯展示件：外部只读来源随上游变化；set_value 换回自有来源，不代写上游。
     State<double> upstream{0.25};
-    Binding<double> binding{upstream};
-    ProgressIndicator p{binding};
+    ProgressIndicator p{upstream};
     AURORA_TEST_CHECK_NEAR(p.value(), 0.25, 1e-4);  // 初值来自上游
 
-    p.set_value(0.5);
-    AURORA_TEST_CHECK_NEAR(upstream.get(), 0.5, 1e-4);  // 双向写回
-    p.set_value(7.0);  // 钳制后再写入
-    AURORA_TEST_CHECK_NEAR(upstream.get(), 1.0, 1e-4);
+    upstream.set(0.5);
+    AURORA_TEST_CHECK_NEAR(p.value(), 0.5, 1e-4);  // 上游 → 控件（读取穿透）
+
+    p.set_value(1.5);  // 展示件换源到自有：钳制到 1.0
     AURORA_TEST_CHECK_NEAR(p.value(), 1.0, 1e-4);
+    AURORA_TEST_CHECK_NEAR(upstream.get(), 0.5, 1e-4);  // 上游不被代写
 }
 
-AURORA_TEST_CASE(collect_signals_reflects_binding) {
+AURORA_TEST_CASE(collect_signals_reflects_active_source) {
+    // 采集出口只登记当前有效来源：外部只读或自有，二者不会同时出现。
     ProgressIndicator solo;
-    std::vector<aurora::SignalViewBase *> solo_signals;
+    StateSink solo_signals;
     solo.collect_signals(solo_signals);
-    AURORA_TEST_CHECK_EQ(solo_signals.size(), 1U);  // 仅内部 value
+    AURORA_TEST_CHECK_EQ(solo_signals.sources().size(), std::size_t{1});  // 仅内部来源
 
     State<double> upstream{0.0};
-    Binding<double> binding{upstream};
-    ProgressIndicator bound{binding};
-    std::vector<aurora::SignalViewBase *> bound_signals;
+    ProgressIndicator bound{upstream};
+    StateSink bound_signals;
     bound.collect_signals(bound_signals);
-    AURORA_TEST_CHECK_EQ(bound_signals.size(), 2U);  // value + 上游 State
+    AURORA_TEST_CHECK_EQ(bound_signals.sources().size(), std::size_t{1});  // 仅外部来源
+}
+
+AURORA_TEST_CASE(mounted_swap_source_resubscribes_old_and_new) {
+    // 挂载后换源必须「退旧 + 订新」：A、B 初值相等，换源不能靠值比较判得失。
+    State<double> a{0.5};
+    State<double> b{0.5};
+    ProgressIndicator p{a};
+    BuildContext ctx;
+    p.mount(ctx);
+
+    int dirty = 0;
+    p.on_dirty = [&dirty](bool /*layout*/) -> void { ++dirty; };
+
+    a.set(0.7);  // 挂载订阅的是 A
+    AURORA_TEST_CHECK_TRUE(dirty > 0);
+    AURORA_TEST_CHECK_NEAR(p.value(), 0.7, 1e-4);
+
+    p.set_value_source(b);  // 等值 A→B 换源（本调用自身标脏一次）
+    AURORA_TEST_CHECK_NEAR(p.value(), 0.5, 1e-4);
+
+    dirty = 0;
+    a.set(0.9);  // 旧源必须已退订
+    AURORA_TEST_CHECK_EQ(dirty, 0);
+    AURORA_TEST_CHECK_NEAR(p.value(), 0.5, 1e-4);  // 旧源写入不影响读值
+
+    b.set(0.2);  // 新源必须已订阅
+    AURORA_TEST_CHECK_TRUE(dirty > 0);
+    AURORA_TEST_CHECK_NEAR(p.value(), 0.2, 1e-4);
+
+    p.unmount();
+    dirty = 0;
+    b.set(0.3);  // 卸载即退订
+    AURORA_TEST_CHECK_EQ(dirty, 0);
+
+    p.mount(ctx);  // 重挂按当前有效来源（B）重建订阅
+    dirty = 0;
+    b.set(0.4);
+    AURORA_TEST_CHECK_TRUE(dirty > 0);
+    AURORA_TEST_CHECK_NEAR(p.value(), 0.4, 1e-4);
+    p.unmount();
 }
 
 AURORA_TEST_CASE(thickness_setter_and_layout_height) {

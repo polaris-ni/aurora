@@ -68,26 +68,23 @@ auto click_center(Widget &w) -> void {
 }  // namespace
 
 AURORA_TEST_CASE(base_widgets_compose_and_render) {
-    Column col{Node{Divider{}},
-               Node{Divider{DividerProps{.orientation = Orientation::Vertical}}},
-               Node{Checkbox{Reactive{false}}},
-               Node{Switch{Reactive{true}}},
-               Node{Slider{Reactive{0.5}}},
-               Node{ProgressIndicator{Reactive{0.3}}}};
+    Column col{Node{Divider{}},       Node{Divider{DividerProps{.orientation = Orientation::Vertical}}},
+               Node{Checkbox{false}}, Node{Switch{true}},
+               Node{Slider{0.5}},     Node{ProgressIndicator{0.3}}};
     render_tree(col, 320.0F, 480.0F);
     // 渲染走通无崩溃即通过（像素精确值依赖字体渲染，不做像素断言）。
     AURORA_TEST_CHECK_TRUE(col.size().height > 0.0F && col.size().height <= 480.0F);
 }
 
 AURORA_TEST_CASE(checkbox_toggles_on_full_click) {
-    Checkbox cb{Reactive{false}};
+    Checkbox cb{false};
     render_tree(cb, 40.0F, 40.0F);
     click_center(cb);
     AURORA_TEST_CHECK_TRUE(cb.value());
 }
 
 AURORA_TEST_CASE(slider_drag_sets_low_value) {
-    Slider sl{Reactive{0.5}};
+    Slider sl{0.5};
     render_tree(sl, 200.0F, 24.0F);
 
     const Rect bb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = sl.size()};
@@ -108,9 +105,9 @@ AURORA_TEST_CASE(slider_drag_sets_low_value) {
 
 AURORA_TEST_CASE(stack_align_offset_rounded_clip_render) {
     Text aligned{"Aligned"};
-    aligned.modifier.set(Modifier{}.align(Alignment::BottomRight).background(Color::blue(), 8.0F).clip_rounded(8.0F));
+    aligned.set_modifier(Modifier{}.align(Alignment::BottomRight).background(Color::blue(), 8.0F).clip_rounded(8.0F));
     Text offset{"Offset"};
-    offset.modifier.set(Modifier{}.offset(20.0F, 10.0F).background(Color::green()));
+    offset.set_modifier(Modifier{}.offset(20.0F, 10.0F).background(Color::green()));
 
     Stack stacked{Node{std::move(aligned)}, Node{std::move(offset)}};
     render_tree(stacked, 200.0F, 200.0F);
@@ -123,9 +120,9 @@ AURORA_TEST_CASE(align_in_column_centers_cross_axis_without_stealing_main_space)
     // Column 的交叉轴（宽）是既定槽位 → 展开成整行并把 120×40 内容盒居中；
     // 主轴（高）只是「剩余空间」→ 不展开，否则同列后续兄弟会被挤出可视区。
     Text centered{"Centered"};
-    centered.modifier.set(Modifier{}.align(Alignment::Center).size(120.0F, 40.0F).background(Color(9, 9, 9, 255)));
+    centered.set_modifier(Modifier{}.align(Alignment::Center).size(120.0F, 40.0F).background(Color(9, 9, 9, 255)));
     Text below{"Below"};
-    below.modifier.set(Modifier{}.size(100.0F, 20.0F));
+    below.set_modifier(Modifier{}.size(100.0F, 20.0F));
     Column col{Node{std::move(centered)}, Node{std::move(below)}};
     render_tree(col, 400.0F, 300.0F);
 
@@ -148,7 +145,7 @@ AURORA_TEST_CASE(align_hit_box_shrinks_for_clickable_widget) {
     // 同一收缩规则对「自身可点击」分支同样成立：可点击块挂在展开行里时，
     // 展开出的空白段不得抢走点击（否则回调会在什么都没画的地方触发）。
     Text tappable{"Tap"};
-    tappable.modifier.set(Modifier{}.align(Alignment::Center).size(120.0F, 40.0F).clickable([]() -> void {}));
+    tappable.set_modifier(Modifier{}.align(Alignment::Center).size(120.0F, 40.0F).clickable([]() -> void {}));
     Column col{Node{std::move(tappable)}};
     render_tree(col, 400.0F, 60.0F);
 
@@ -162,7 +159,7 @@ AURORA_TEST_CASE(drag_gesture_reports_delta) {
     bool dragged = false;
     Point last_delta{.x = 0.0F, .y = 0.0F};
     Text drag{"Drag me"};
-    drag.modifier.set(Modifier{}.draggable([&dragged, &last_delta](Point d, Point) -> void {
+    drag.set_modifier(Modifier{}.draggable([&dragged, &last_delta](Point d, Point) -> void {
         dragged = true;
         last_delta = d;
     }));
@@ -187,7 +184,7 @@ AURORA_TEST_CASE(drag_gesture_reports_delta) {
 AURORA_TEST_CASE(long_press_fires_after_threshold) {
     bool fired = false;
     Text lp{"Long press"};
-    lp.modifier.set(Modifier{}.long_press([&fired]() -> void { fired = true; }, 50.0F));
+    lp.set_modifier(Modifier{}.long_press([&fired]() -> void { fired = true; }, 50.0F));
     render_tree(lp, 120.0F, 40.0F);
 
     const Rect bb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = lp.size()};
@@ -205,7 +202,7 @@ AURORA_TEST_CASE(logical_snapshot_and_pixels_are_deterministic) {
     auto make_tree = []() -> Node {
         auto col = std::make_shared<Column>(ColumnProps{
             .children = {Node{Row{RowProps{.children = {Node{Text{"A"}}, Node{Text{"B"}}}}}}, Node{Text{"C"}}}});
-        col->modifier = Modifier{}.fill_max_size();
+        col->set_modifier(Modifier{}.fill_max_size());
         return Node{std::move(col)};
     };
 

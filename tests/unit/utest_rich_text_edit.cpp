@@ -57,9 +57,9 @@ AURORA_TEST_CASE(fresh_edit_initial_invariants) {
     AURORA_TEST_CHECK_EQ(edit.undo_stack(), nullptr);
 
     // 无自有响应式信号。
-    std::vector<SignalViewBase *> out;
+    StateSink out;
     edit.collect_signals(out);
-    AURORA_TEST_CHECK_EQ(out.size(), 0U);
+    AURORA_TEST_CHECK_EQ(out.sources().size(), 0U);
 }
 
 AURORA_TEST_CASE(load_spans_roundtrips_via_to_spans) {

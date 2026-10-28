@@ -134,7 +134,7 @@ AURORA_TEST_CASE(provider_state_switch_reresolves_message_text) {
     const MessageId id = catalog.find_by_name("itest.items");
     AURORA_TEST_REQUIRE_MSG(id != AURORA_INVALID_MESSAGE_ID, "registered name resolves to a vocabulary Id");
 
-    auto locale_state = std::make_shared<State<Locale>>(Locale{.language = "en"});
+    State<Locale> locale_state{Locale{.language = "en"}};
     Node text_node{Text{TextProps{.content = LocalizedString::tr(id, {MessageArg{"n", std::int64_t{3}}})}}};
     Node node{LocaleProvider{locale_state, text_node}};
     (void)win->present_root(node);
@@ -144,12 +144,12 @@ AURORA_TEST_CASE(provider_state_switch_reresolves_message_text) {
     AURORA_TEST_CHECK_EQ(rendered->accessibility_label(), std::string("count 3"));
 
     // 换档 = 只改外部 State：子树无任何自身脏标记，靠 Provider 的向下缓存失效整片重排重录。
-    locale_state->set(Locale{.language = "de"});
+    locale_state.set(Locale{.language = "de"});
     (void)win->present_root(node);
     AURORA_TEST_CHECK_EQ(rendered->accessibility_label(), std::string("anzahl 3"));
 
     // 再换回来：失效不是一次性的（否则第二次切换会停在上一档）。
-    locale_state->set(Locale{.language = "en"});
+    locale_state.set(Locale{.language = "en"});
     (void)win->present_root(node);
     AURORA_TEST_CHECK_EQ(rendered->accessibility_label(), std::string("count 3"));
 }

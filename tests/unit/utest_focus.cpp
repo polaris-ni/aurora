@@ -176,7 +176,7 @@ AURORA_TEST_CASE(move_focus_cycles_forward_and_backward_by_tab_index) {
 
 AURORA_TEST_CASE(move_focus_skips_hidden_and_unfocusable_widgets) {
     auto [row, probes] = make_row(3);
-    probes[1]->show.set(false);  // 隐藏控件不参与焦点序
+    probes[1]->set_show(false);  // 隐藏控件不参与焦点序
     probes[2]->set_focusable(false);  // 不可聚焦控件不参与
 
     FocusManager fm;
@@ -344,7 +344,7 @@ AURORA_TEST_CASE(input_semantics_on_a_container_put_it_back_in_the_order) {
     AURORA_TEST_CHECK_FALSE(col.wants_focus());  // 裸容器不是停点
 
     // 挂上点击即回到焦点序：谓词动态求值，不按类型一刀切。
-    col.modifier.set(Modifier{}.clickable([]() -> void {}));
+    col.set_modifier(Modifier{}.clickable([]() -> void {}));
     AURORA_TEST_CHECK_TRUE(col.wants_focus());
 
     // 宿主否决位一票否决，优先于输入语义。

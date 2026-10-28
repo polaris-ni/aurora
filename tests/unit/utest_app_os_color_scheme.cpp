@@ -3,7 +3,7 @@
 /// 测试说明: OS 明暗偏好的应用级聚合读点：未 seed 时读 `Unspecified`（构造期不隐式读注册表）、
 ///           跨宿主同值切换只通知一次、同窗重复同值不通知、不同值按序通知、
 ///           `refresh_os_color_scheme()` 幂等且只在变化时通知、回调恒在主线程、
-///           响应式订阅（`Effect` 内读 State）随切换重跑、`teardown()` 后应用级上报表同步解绑、
+///           响应式订阅（`effect` 回调内读 State）随切换重跑、`teardown()` 后应用级上报表同步解绑、
 ///           框架既有那一半（`Window` 快照 + 整帧置脏）行为不动。
 ///           全部走 `HeadlessSurface::emit_os_color_scheme_change` seam，不依赖真机档位。
 
@@ -190,18 +190,17 @@ AURORA_TEST_CASE(observer_is_called_on_calling_thread) {
 }
 
 AURORA_TEST_CASE(state_subscription_reruns_on_switch) {
-    // 响应式通路：`Effect` 内读 State 即自动订阅，切换后重跑一次；同值重复上报不重跑。
+    // 响应式通路：`effect` 回调内读 State 即自动订阅，切换后重跑一次；同值重复上报不重跑。
     Application app{make_scene(), make_headless_window("os_effect")};
     HeadlessSurface *const surface = surface_of(app.windows().front());
     AURORA_TEST_REQUIRE_NOT_NULL(surface);
 
     int runs = 0;
     ColorScheme last = ColorScheme::Unspecified;
-    Effect e{[&]() -> void {
+    const auto watcher = effect([&]() -> void {
         ++runs;
         last = app.os_color_scheme_state().get();
-    }};
-    e.run();  // 首跑建立依赖
+    });
     AURORA_TEST_CHECK_EQ(runs, 1);
 
     surface->emit_os_color_scheme_change(ColorScheme::Dark);

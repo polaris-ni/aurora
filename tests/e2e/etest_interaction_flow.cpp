@@ -109,7 +109,7 @@ auto expect_pixel(const e2e::Frame &frame, const e2e::WindowSpec &spec, float lo
 /// @brief 纯色块（滚动内容的最小单元）。
 [[nodiscard]] auto color_block(float width, float height, au::Color color) -> au::Node {
     const auto block = std::make_shared<au::Row>();
-    block->modifier.set(au::Modifier{}.size(width, height).background(color));
+    block->set_modifier(au::Modifier{}.size(width, height).background(color));
     return au::Node{block};
 }
 
@@ -135,17 +135,17 @@ struct FlowScene {
     auto btn = std::make_shared<au::Button>("tap");
     auto sw = std::make_shared<au::Switch>();
     // 显式钉住 44×24：行交叉轴默认拉伸会把开关撑高（滑块直径随之变大，盖住采样点）。
-    sw->modifier.set(au::Modifier{}.size(44.0F, 24.0F));
+    sw->set_modifier(au::Modifier{}.size(44.0F, 24.0F));
     sw->set_inactive_color(AURORA_SWITCH_OFF).set_active_color(AURORA_SWITCH_ON).set_thumb_color(AURORA_KNOB);
     auto input = std::make_shared<au::TextInput>();
     input->set_focused_background(AURORA_INPUT_FOCUSED);
-    input->modifier.set(au::Modifier{}.size(120.0F, 32.0F));
+    input->set_modifier(au::Modifier{}.size(120.0F, 32.0F));
     auto slider = std::make_shared<au::Slider>();
     slider->set_range(0.0, 100.0)
         .set_active_color(AURORA_SLIDER_ON)
         .set_inactive_color(AURORA_SLIDER_OFF)
         .set_thumb_color(AURORA_KNOB);
-    slider->modifier.set(au::Modifier{}.size(240.0F, 24.0F));
+    slider->set_modifier(au::Modifier{}.size(240.0F, 24.0F));
     auto scroller = std::make_shared<au::Scroll>(au::ScrollProps{.child = build_scroll_content()});
 
     auto clicks = std::make_shared<int>(0);
@@ -155,11 +155,11 @@ struct FlowScene {
     };
 
     au::Node row_a{au::Row{au::Node{btn}, au::Node{sw}, au::Node{input}}};
-    row_a.widget().modifier.set(au::Modifier{}.size(320.0F, 36.0F).background(AURORA_SCENE_BG));
+    row_a.widget().set_modifier(au::Modifier{}.size(320.0F, 36.0F).background(AURORA_SCENE_BG));
     au::Node row_b{au::Row{au::Node{slider}}};
-    row_b.widget().modifier.set(au::Modifier{}.size(320.0F, 28.0F).background(AURORA_SCENE_BG));
+    row_b.widget().set_modifier(au::Modifier{}.size(320.0F, 28.0F).background(AURORA_SCENE_BG));
     au::Node row_c{au::Row{au::Node{scroller}}};
-    row_c.widget().modifier.set(au::Modifier{}.size(320.0F, 136.0F).background(AURORA_SCENE_BG));
+    row_c.widget().set_modifier(au::Modifier{}.size(320.0F, 136.0F).background(AURORA_SCENE_BG));
     au::Node root{au::Column{row_a, row_b, row_c}};
 
     return FlowScene{.root = std::move(root),
@@ -181,9 +181,9 @@ struct FocusScene {
 [[nodiscard]] auto build_focus_scene() -> FocusScene {
     const auto input = std::make_shared<au::TextInput>();
     input->set_value("ab").set_focused_background(AURORA_INPUT_FOCUSED);
-    input->modifier.set(au::Modifier{}.size(160.0F, 32.0F));
+    input->set_modifier(au::Modifier{}.size(160.0F, 32.0F));
     au::Node row{au::Row{au::Node{input}}};
-    row.widget().modifier.set(au::Modifier{}.size(320.0F, 36.0F).background(AURORA_SCENE_BG));
+    row.widget().set_modifier(au::Modifier{}.size(320.0F, 36.0F).background(AURORA_SCENE_BG));
     au::Node root{au::Column{row}};
     return FocusScene{.root = std::move(root), .input = input.get()};
 }
@@ -203,9 +203,9 @@ struct GlideScene {
         (void)scroller->scroll_to(10000.0F, true);  // 目标越界：内部夹取到内容底部
     };
     au::Node row_a{au::Row{au::Node{btn}}};
-    row_a.widget().modifier.set(au::Modifier{}.size(320.0F, 36.0F).background(AURORA_SCENE_BG));
+    row_a.widget().set_modifier(au::Modifier{}.size(320.0F, 36.0F).background(AURORA_SCENE_BG));
     au::Node row_c{au::Row{au::Node{scroller}}};
-    row_c.widget().modifier.set(au::Modifier{}.size(320.0F, 140.0F).background(AURORA_SCENE_BG));
+    row_c.widget().set_modifier(au::Modifier{}.size(320.0F, 140.0F).background(AURORA_SCENE_BG));
     au::Node root{au::Column{row_a, row_c}};
     return GlideScene{.root = std::move(root), .jump = btn.get(), .scroller = scroller.get()};
 }

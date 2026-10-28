@@ -1,9 +1,10 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/checkbox.h
 /// 测试说明: 覆盖 Checkbox——默认态、set_value 触发 on_changed、Press/Release 合成点击切换、
-/// 禁用态忽略点击、Binding 双向写穿与信号收集、方框尺寸布局、自描述、序列化往返
+/// 禁用态忽略点击、共享来源双向写穿（含用户输入）与信号收集、方框尺寸布局、自描述、序列化往返
 
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "aurora/event/event.h"
@@ -98,9 +99,13 @@ AURORA_TEST_CASE(checkbox_disabled_ignores_clicks) {
     AURORA_TEST_CHECK_EQ(calls, 0);
 }
 
-AURORA_TEST_CASE(checkbox_binding_writes_through_to_upstream) {
+AURORA_TEST_CASE(checkbox_shared_source_writes_through_to_upstream) {
+    // 双向值属性：构造只接受可写句柄；只读句柄在构造期即拒绝（写回无从兑现）。
+    static_assert(!std::is_constructible_v<Checkbox, ReadOnlyState<bool>>,
+                  "editable value property must not accept a read-only handle");
+
     State<bool> up{false};
-    Checkbox c{Binding<bool>(up)};
+    Checkbox c{up};  // 共享同一来源：控件与上游是同一个值
     AURORA_TEST_CHECK_FALSE(c.value());
 
     c.set_value(true);
@@ -109,16 +114,25 @@ AURORA_TEST_CASE(checkbox_binding_writes_through_to_upstream) {
     up.set(false);
     AURORA_TEST_CHECK_FALSE(c.value());  // 上游 → 控件（读取穿透）
 
-    // 信号收集：内部 value_ + 绑定目标。
-    std::vector<SignalViewBase *> out;
-    c.collect_signals(out);
-    AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
+    // 用户输入同理写穿：指针点击切换落回同一来源。
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    c.on_pointer_event(press);
+    MouseEvent release;
+    release.action = MouseAction::Release;
+    c.on_pointer_event(release);
+    AURORA_TEST_CHECK_TRUE(up.get());  // 点击 → 上游
 
-    // 非绑定构造只收集内部信号。
+    // 信号收集：共享来源只采集一次。
+    StateSink out;
+    c.collect_signals(out);
+    AURORA_TEST_CHECK_EQ(out.sources().size(), std::size_t{1});
+
+    // 自有来源构造同样只收集一份。
     Checkbox plain;
-    std::vector<SignalViewBase *> single;
+    StateSink single;
     plain.collect_signals(single);
-    AURORA_TEST_CHECK_EQ(single.size(), 1U);
+    AURORA_TEST_CHECK_EQ(single.sources().size(), std::size_t{1});
 }
 
 AURORA_TEST_CASE(checkbox_layout_uses_box_size) {

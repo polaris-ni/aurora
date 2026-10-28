@@ -118,11 +118,11 @@ AURORA_TEST_CASE(spacer_describe_and_serialize_roundtrip) {
     LayoutEngine::layout(restored, bounded(100.0F, 50.0F));
     AURORA_TEST_CHECK_NEAR(restored.size().width, 0.0F, 1e-4F);
     // 权重挂在修饰链上（不进 props 序列化），故 expand 变更必须同步撤除/挂上。
-    AURORA_TEST_CHECK_NEAR(restored.modifier.get().flex_weight(), 0.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(restored.modifier().flex_weight(), 0.0F, 0.0F);
     Spacer re_on;
     const Json expand_on = testing::json_obj({{"expand", Json{true}}});
     re_on.deserialize_props(expand_on);
-    AURORA_TEST_CHECK_TRUE(re_on.modifier.get().flex_weight() > 0.0F);
+    AURORA_TEST_CHECK_TRUE(re_on.modifier().flex_weight() > 0.0F);
 }
 
 }  // namespace aurora::test_cases::utest_spacer

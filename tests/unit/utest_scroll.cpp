@@ -504,7 +504,7 @@ AURORA_TEST_CASE(offset_signal_publishes_every_scroll_channel) {
     Scroll s{ScrollProps{.child = box(300.0F, 800.0F), .step = 1.0F}};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
 
-    SignalView<float> &offset = s.offset_signal();  // 懒创建：初值取当前偏移
+    const ReadOnlyState<float> offset = s.offset_signal();  // 懒创建：初值取当前偏移
     AURORA_TEST_CHECK_NEAR(offset.get(), 0.0F, 1e-4F);
 
     s.set_offset(80.0F);
@@ -714,7 +714,7 @@ auto make_local_probe_scrollable(float offset) -> LocalProbeFixture {
         auto r = std::make_shared<LocalProbeRow>(i);
         // 必须挂 Clickable 修饰：`wants_click()` 缺省只看修饰链，不挂则基类不认它为命中目标，
         // `on_pointer_event` 永不触发（探针自身接线错误的经典陷阱，与 make_scrollable 同因）。
-        r->modifier.set(Modifier{}.clickable([]() -> void {}));
+        r->set_modifier(Modifier{}.clickable([]() -> void {}));
         f.rows.push_back(r);
         f.content->add(Node{r});
     }
@@ -746,7 +746,7 @@ auto make_scrollable(float offset) -> ScrollFixture {
         auto row = std::make_shared<HitRow>(i, *f.ledgers.back());
         // 挂 Clickable 修饰：`wants_click()` 默认只看修饰链，缺它则基类不识别点击、
         // activate() 永不触发（探针自身接线错误的经典陷阱）。
-        row->modifier.set(Modifier{}.clickable([]() -> void {}));
+        row->set_modifier(Modifier{}.clickable([]() -> void {}));
         f.rows.push_back(row);
         f.content->add(Node{std::move(row)});
     }
@@ -880,7 +880,7 @@ AURORA_TEST_CASE(positive_control_column_root_also_clickable) {
     auto ledger = std::make_unique<HitLedger>();
     auto col = std::make_shared<Column>();
     auto row = std::make_shared<HitRow>(3, *ledger);
-    row->modifier.set(Modifier{}.clickable([]() -> void {}));
+    row->set_modifier(Modifier{}.clickable([]() -> void {}));
     col->add(Node{std::move(row)});
     LayoutEngine::layout(*col, bounded(AURORA_VIEW_W, 400.0F));
 
@@ -1002,7 +1002,7 @@ AURORA_TEST_CASE(window_bounds_matches_recomputed_origin_without_scrolling) {
     std::vector<std::shared_ptr<HitRow>> rows;
     for (int i = 0; i < 4; ++i) {
         auto r = std::make_shared<HitRow>(i, *std::make_unique<HitLedger>());
-        r->modifier.set(Modifier{}.clickable([]() -> void {}));
+        r->set_modifier(Modifier{}.clickable([]() -> void {}));
         rows.push_back(r);
         col->add(Node{r});
     }
@@ -1027,9 +1027,9 @@ AURORA_TEST_CASE(window_bounds_accounts_for_modifier_translation) {
     // 同源性回归：中间层Column 带 padding(10) 时，窗口盒须含该内容盒平移，
     // 否则「origin 与绘制仿射同源」这条不变量在事后查询侧就断了（退化成朴素布局原点）。
     auto col = std::make_shared<Column>();
-    col->modifier.set(Modifier{}.padding(10.0F));
+    col->set_modifier(Modifier{}.padding(10.0F));
     auto target = std::make_shared<HitRow>(0, *std::make_unique<HitLedger>());
-    target->modifier.set(Modifier{}.clickable([]() -> void {}));
+    target->set_modifier(Modifier{}.clickable([]() -> void {}));
     col->add(Node{target});
 
     auto root = std::make_shared<Column>();
@@ -1051,7 +1051,7 @@ AURORA_TEST_CASE(window_bounds_is_empty_for_hidden_and_unlaid_out_widget) {
 
     ScrollFixture f = make_scrollable(200.0F);
     AURORA_TEST_REQUIRE(f.rows.size() > 3U);
-    f.rows[3]->show.set(false);
+    f.rows[3]->set_show(false);
     AURORA_TEST_CHECK_FALSE(f.rows[3]->window_bounds().has_value());
     // 同一条树里的兄弟未受影响：判据不得因一个隐藏节点而整树失效。
     AURORA_TEST_CHECK(f.rows[4]->window_bounds().has_value());

@@ -304,7 +304,7 @@ AURORA_TEST_CASE(application_wires_hover_cursor_to_surface) {
     AURORA_TEST_CHECK_EQ(probe->cursor_log().size(), std::size_t{1});
 
     // 3) 悬停链声明改为 Crosshair → 形状变化 → 再次下发（证明修饰链经 Application 生效）。
-    root->modifier = Modifier{}.cursor(CursorShape::Crosshair);
+    root->set_modifier(Modifier{}.cursor(CursorShape::Crosshair));
     move_to(120.0F, 40.0F);
     AURORA_TEST_REQUIRE_EQ(probe->cursor_log().size(), std::size_t{2});
     AURORA_TEST_CHECK_EQ(require_value(probe->last_cursor()), CursorShape::Crosshair);

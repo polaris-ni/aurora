@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/ui/factories.h
 /// 测试说明: 覆盖 ui 工厂函数——label/button/input/checkbox/slider 的主文案覆盖与回调接线、
-/// 双模重载（Reactive 与裸值）、vbox/hbox/stack/grid/scroll 容器糖、
+/// 双模重载（State 句柄与裸值）、vbox/hbox/stack/grid/scroll 容器糖、
 /// lazy_row/lazy_list/bottom_nav_bar 的构造转发与父子所有权
 
 #include "aurora/ui/factories.h"
@@ -16,10 +16,10 @@ AURORA_TEST_CASE(label_adds_text_and_overrides_content) {
     aurora::Text *t = ui::label(root, "hello");
     AURORA_TEST_REQUIRE_NOT_NULL(t);
     AURORA_TEST_CHECK_EQ(root.child_nodes().size(), 1U);
-    AURORA_TEST_CHECK_EQ(t->content.get().text, "hello");
+    AURORA_TEST_CHECK_EQ(t->content().get().text, "hello");
     // props.content 被主文案覆盖。
     aurora::Text *t2 = ui::label(root, "world", aurora::TextProps{.content = aurora::LocalizedString{"ignored"}});
-    AURORA_TEST_CHECK_EQ(t2->content.get().text, "world");
+    AURORA_TEST_CHECK_EQ(t2->content().get().text, "world");
     AURORA_TEST_CHECK_EQ(root.child_nodes().size(), 2U);
 }
 
@@ -28,7 +28,7 @@ AURORA_TEST_CASE(button_adds_with_label_and_click) {
     int clicks = 0;
     aurora::Button *b = ui::button(root, "OK", aurora::ButtonProps{}, [&clicks]() -> void { ++clicks; });
     AURORA_TEST_REQUIRE_NOT_NULL(b);
-    AURORA_TEST_CHECK_EQ(b->label.get().text, "OK");
+    AURORA_TEST_CHECK_EQ(b->label().get().text, "OK");
     AURORA_TEST_REQUIRE_NOT_NULL(b->on_click);
     b->on_click();
     AURORA_TEST_CHECK_EQ(clicks, 1);
@@ -47,20 +47,20 @@ AURORA_TEST_CASE(input_adds_text_input_with_initial_value) {
     AURORA_TEST_CHECK_EQ(empty->value(), "");
 }
 
-AURORA_TEST_CASE(checkbox_reactive_and_bool_overloads) {
+AURORA_TEST_CASE(checkbox_state_and_literal_overloads) {
     aurora::Column root;
-    aurora::Reactive<bool> state{false};
+    State<bool> state{false};
     aurora::Checkbox *a = ui::checkbox(root, state);
     AURORA_TEST_REQUIRE_NOT_NULL(a);
-    // 裸值重载 → 内部转 Reactive。
+    // 裸值重载 → 建自有 State。
     aurora::Checkbox *b = ui::checkbox(root, true);
     AURORA_TEST_REQUIRE_NOT_NULL(b);
     AURORA_TEST_CHECK_EQ(root.child_nodes().size(), 2U);
 }
 
-AURORA_TEST_CASE(slider_reactive_and_scalar_overloads) {
+AURORA_TEST_CASE(slider_state_and_scalar_overloads) {
     aurora::Column root;
-    aurora::Reactive<double> value{0.25};
+    State<double> value{0.25};
     aurora::Slider *a = ui::slider(root, value);
     AURORA_TEST_REQUIRE_NOT_NULL(a);
     aurora::Slider *b = ui::slider(root, 0.75);

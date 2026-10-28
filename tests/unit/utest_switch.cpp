@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/switch.h
 /// 测试说明: 覆盖 Switch——默认态、set_value 触发 on_changed、Press/Release 合成点击翻转、
-/// 禁用态忽略点击、Binding 双向写穿、轨道尺寸布局（含非法值回退默认）、自描述、序列化往返
+/// 禁用态忽略点击、共享 State 双向写穿、轨道尺寸布局（含非法值回退默认）、自描述、序列化往返
 
 #include <string>
 #include <vector>
@@ -107,9 +107,9 @@ AURORA_TEST_CASE(switch_disabled_ignores_clicks) {
     AURORA_TEST_CHECK_EQ(calls, 0);
 }
 
-AURORA_TEST_CASE(switch_binding_writes_through_to_upstream) {
+AURORA_TEST_CASE(switch_shared_source_writes_through_to_upstream) {
     State<bool> up{true};
-    Switch s{Binding<bool>(up)};
+    Switch s{up};  // 共享同一来源：控件与上游是同一个值
     AURORA_TEST_CHECK_TRUE(s.value());
 
     s.set_value(false);
@@ -118,10 +118,10 @@ AURORA_TEST_CASE(switch_binding_writes_through_to_upstream) {
     up.set(true);
     AURORA_TEST_CHECK_TRUE(s.value());  // 上游 → 控件（读取穿透）
 
-    // 信号收集：内部 value_ + 绑定目标。
-    std::vector<SignalViewBase *> out;
+    // 信号收集：共享来源只采集一次。
+    StateSink out;
     s.collect_signals(out);
-    AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
+    AURORA_TEST_CHECK_EQ(out.sources().size(), std::size_t{1});
 }
 
 AURORA_TEST_CASE(switch_layout_uses_track_size) {

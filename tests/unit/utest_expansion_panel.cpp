@@ -24,7 +24,7 @@ namespace {
 class LeafProbe final : public Widget {
   public:
     [[nodiscard]] auto type_name() const -> const char * override { return "LeafProbe"; }
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { (void)out; }
+    auto collect_signals(StateSink &out) -> void override { (void)out; }
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = 10.0F, .height = 10.0F});
     }
@@ -45,9 +45,9 @@ AURORA_TEST_CASE(api_surface_and_toggle) {
     AURORA_TEST_CHECK_EQ(d.name, "ExpansionPanel");
     auto d2 = ep.describe();
     AURORA_TEST_CHECK_EQ(d2.name, "ExpansionPanel");
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     ep.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 1U);
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 1U);
 
     int toggled = -1;
     ep.set_on_toggle([&toggled](bool v) { toggled = v ? 1 : 0; });

@@ -32,7 +32,7 @@ constexpr int AURORA_HEIGHT = 40;
 
 [[nodiscard]] auto render_chart(const SparklineProps &props) -> std::filesystem::path {
     auto chart = std::make_shared<Sparkline>(props);
-    chart->modifier.set(Modifier{}.width(static_cast<float>(AURORA_WIDTH)).height(static_cast<float>(AURORA_HEIGHT)));
+    chart->set_modifier(Modifier{}.width(static_cast<float>(AURORA_WIDTH)).height(static_cast<float>(AURORA_HEIGHT)));
     Node root{Column{Node{chart}}};
     const std::filesystem::path tmp =
         std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_sparkline.png";

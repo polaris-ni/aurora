@@ -1,9 +1,9 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/resource.h
 /// 测试说明: 三态资源绑定的四组契约——`Resource::from` 的 Loading/Ready/Failed 迁移与「一次落定
-/// 只通知一次」、`reload` 取消前序请求且前序迟到结果不覆盖新状态、宿主卸载后回调被丢弃（弱引用
-/// 不复活内核）、去抖窗口的多次调用合并、`StreamResource` 的追加/替换两策略与帧内合并批次字节，
-/// 以及选项默认值在声明处可见
+/// 只通知一次」、投影只读句柄保活未落定作业、`reload` 取消前序请求且前序迟到结果不覆盖新状态、
+/// 宿主卸载后回调被丢弃（弱引用不复活内核）、去抖窗口的多次调用合并、`StreamResource` 的追加/替换
+/// 两策略与帧内合并批次字节，以及选项默认值在声明处可见
 /// 覆盖说明: 用例统一给短超时——worker 池下的超时看守是一个睡满窗口的池任务，默认 30 s 会占住
 /// worker 线程并把同进程后续用例拖进排队；全部状态写入经用例自装的主线程投递器回到用例线程
 
@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -27,6 +28,27 @@
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_state_resource {
+
+namespace {
+
+/// 能力负向探针：资源类型不得暴露通用写入入口（写入只经 `from`/`reload`/`push` 的领域语义）。
+template <typename R>
+concept HasSet = requires(R r) { r.set(int{}); };
+template <typename R>
+concept HasNotify = requires(R r) { r.notify(); };
+
+static_assert(!HasSet<Resource<int>>);
+static_assert(!HasNotify<Resource<int>>);
+static_assert(!HasSet<StreamResource<int>>);
+static_assert(!HasNotify<StreamResource<int>>);
+// 组合而非继承：资源不是只读句柄的派生，公共面不存在可写基类子对象。
+static_assert(!std::is_base_of_v<ReadOnlyState<ResourceSnapshot<int>>, Resource<int>>);
+static_assert(!std::is_base_of_v<ReadOnlyState<StreamSnapshot<int>>, StreamResource<int>>);
+// 只读视图经隐式转换给出（别名句柄保活控制核）。
+static_assert(std::is_convertible_v<Resource<int>, ReadOnlyState<ResourceSnapshot<int>>>);
+static_assert(std::is_convertible_v<StreamResource<int>, ReadOnlyState<StreamSnapshot<int>>>);
+
+}  // namespace
 
 namespace {
 
@@ -155,11 +177,10 @@ AURORA_TEST_CASE(from_job_reaches_ready_with_single_notification) {
                                    short_timeout_options());
 
     int runs = 0;
-    Effect watch([&runs, &res]() -> void {
+    const auto watch = effect([&runs, &res]() -> void {
         ++runs;
         (void)res.phase();  // 读取即登记依赖
     });
-    watch.run();
     AURORA_TEST_CHECK_EQ(runs, 1);  // 首跑只算一次登记
 
     AURORA_TEST_CHECK(res.phase() == ResourcePhase::Loading);
@@ -175,6 +196,32 @@ AURORA_TEST_CASE(from_job_reaches_ready_with_single_notification) {
     AURORA_TEST_CHECK_FALSE(res.error().has_value());
     // 一次落定 = 一次通知：阶段/值/错误在同一份快照里，不拆成三个信号各刷一轮。
     AURORA_TEST_CHECK_EQ(runs, 2);
+}
+
+AURORA_TEST_CASE(read_only_projection_keeps_job_alive_until_landing) {
+    AURORA_TEST_REQUIRE_THREADS();
+    PosterQueue pq;
+    std::atomic<bool> started{false};
+    std::promise<void> gate;
+    auto gate_future = gate.get_future().share();
+
+    // 临时资源句柄在本行末即析构；只剩投影出的只读句柄，作业仍须存活并落定。
+    ReadOnlyState<ResourceSnapshot<int>> handle =
+        Resource<int>::from(async([&started, gate_future]() -> int {
+                                started.store(true, std::memory_order_release);
+                                gate_future.wait();
+                                return 7;
+                            }),
+                            short_timeout_options());
+
+    AURORA_TEST_CHECK(handle.get().phase == ResourcePhase::Loading);
+    AURORA_TEST_CHECK_FALSE(handle.get().value.has_value());
+    AURORA_TEST_REQUIRE(wait_until([&started]() -> bool { return started.load(std::memory_order_acquire); }));
+    gate.set_value();
+    AURORA_TEST_REQUIRE(pq.pump_until([&handle]() -> bool { return handle.get().phase == ResourcePhase::Ready; }));
+    AURORA_TEST_REQUIRE(handle.get().value.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 上一行 REQUIRE 已断言持有值，其宏展开对路径分析不透明
+    AURORA_TEST_CHECK_EQ(*handle.get().value, 7);
 }
 
 AURORA_TEST_CASE(from_error_job_reaches_failed_and_clears_value) {
@@ -382,11 +429,10 @@ AURORA_TEST_CASE(stream_append_policy_merges_pushes_into_one_commit) {
     PosterQueue pq;
     auto stream = StreamResource<std::string>::open();
     int runs = 0;
-    Effect watch([&runs, &stream]() -> void {
+    const auto watch = effect([&runs, &stream]() -> void {
         ++runs;
         (void)stream.items();  // 读取即登记依赖
     });
-    watch.run();
     AURORA_TEST_CHECK_EQ(runs, 1);
     AURORA_TEST_CHECK(stream.phase() == ResourcePhase::Loading);
     AURORA_TEST_CHECK_EQ(stream.items().size(), std::size_t{0});

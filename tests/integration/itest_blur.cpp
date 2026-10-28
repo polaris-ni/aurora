@@ -107,8 +107,8 @@ AURORA_TEST_CASE(blur_region_ignores_invalid_params) {
 
 AURORA_TEST_CASE(widget_with_blur_modifier_paints) {
     auto t = std::make_shared<Text>();
-    t->content = LocalizedString{"blurred text"};
-    t->modifier.set(Modifier{}.background(Color(255, 0, 0, 255)).blur(2.0F));
+    t->set_content(LocalizedString{"blurred text"});
+    t->set_modifier(Modifier{}.background(Color(255, 0, 0, 255)).blur(2.0F));
 
     BuildContext ctx;
     t->mount(ctx);
@@ -125,8 +125,8 @@ AURORA_TEST_CASE(widget_with_blur_modifier_paints) {
 
 AURORA_TEST_CASE(widget_with_backdrop_filter_paints) {
     auto t = std::make_shared<Text>();
-    t->content = LocalizedString{"frosted"};
-    t->modifier.set(Modifier{}.backdrop_filter(4.0F).background(Color(255, 255, 255, 120)));
+    t->set_content(LocalizedString{"frosted"});
+    t->set_modifier(Modifier{}.backdrop_filter(4.0F).background(Color(255, 255, 255, 120)));
 
     BuildContext ctx;
     t->mount(ctx);

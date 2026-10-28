@@ -421,7 +421,7 @@ AURORA_TEST_CASE(offset_signal_follows_programmatic_and_glide_frames) {
     GridView grid{30, 3, {}, 96.0F};
     LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
 
-    SignalView<float> &offset = grid.offset_signal();  // 懒创建：初值取当前偏移
+    const ReadOnlyState<float> offset = grid.offset_signal();  // 懒创建：初值取当前偏移
     AURORA_TEST_CHECK_NEAR(offset.get(), 0.0F, 1e-4F);
 
     grid.set_scroll_offset(100.0F);

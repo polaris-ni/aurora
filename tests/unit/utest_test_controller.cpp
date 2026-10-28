@@ -217,7 +217,7 @@ AURORA_TEST_CASE(expect_visible_passes_after_frame_and_fails_when_hidden) {
     AURORA_TEST_REQUIRE_TRUE(tc.expect_visible(msg.at(0)).ok());
 
     // show=false 的节点不入绘制：可见性断言失败。
-    fx.msg->show.set(false);
+    fx.msg->set_show(false);
     AURORA_TEST_CHECK_FALSE(tc.expect_visible(msg.at(0)).ok());
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");

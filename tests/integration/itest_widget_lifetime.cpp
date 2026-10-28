@@ -53,7 +53,7 @@ class FocusLeaf final : public LeafWidget {
             ++*activate_sink;
         }
     }
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "FocusLeaf"; }
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
         return WidgetDescriptor{.name = "FocusLeaf", .children_policy = "none"};
@@ -75,7 +75,7 @@ class SolidPage final : public Widget {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override {
         return WidgetDescriptor{.name = "SolidPage", .children_policy = "none"};
     }
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(c.max); }
@@ -126,8 +126,8 @@ class MountProbe final : public Widget {
     [[nodiscard]] auto type_name() const -> const char * override { return "MountProbe"; }
     /// @brief 额外登记一个自有信号，使订阅条数 = 自有 1 + `modifier` + `show` = 3（固定值可硬断言）。
     /// @param out 信号视图累加表（本控件追加自身信号）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&tick_state_); }
-    [[nodiscard]] auto effect_count() const -> std::size_t { return effects_.size(); }
+    auto collect_signals(StateSink &out) -> void override { out.push(tick_state_); }
+    [[nodiscard]] auto effect_count() const -> std::size_t { return signal_subscriptions_.size(); }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
@@ -144,7 +144,7 @@ class MountProbe final : public Widget {
     }
 
   private:
-    Reactive<int> tick_state_;
+    State<int> tick_state_;
 };
 
 /// @brief 铺满给定的布局约束（内容自然尺寸小于它，故不做夹取计算）。

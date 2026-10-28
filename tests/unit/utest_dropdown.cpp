@@ -379,7 +379,7 @@ AURORA_TEST_CASE(grandchild_extra_hit_box_propagates_three_levels) {
     // 上下内边距各 8 ⇒ 行高 56 时 Dropdown 的紧约束盒高 40，与真实场景一致。
     auto make_row = [](const std::shared_ptr<Dropdown> &target) -> Node {
         const auto row = std::make_shared<Row>(RowProps{.children = {Node{target}}});
-        row->modifier.set(Modifier{}.padding(8.0F));
+        row->set_modifier(Modifier{}.padding(8.0F));
         return Node{row};
     };
     const std::shared_ptr<Node> row0 = std::make_shared<Node>(make_row(dd));
@@ -421,7 +421,7 @@ AURORA_TEST_CASE(clipped_list_item_extra_hit_box_stays_unreachable) {
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
     const std::shared_ptr<Row> row = std::make_shared<Row>(RowProps{.children = {Node{dd}}});
-    row->modifier.set(Modifier{}.padding(8.0F));
+    row->set_modifier(Modifier{}.padding(8.0F));
     // 20 行，Dropdown 在最后一行（index 19）。
     auto make_row = [row](int index) -> Node { return index == 19 ? Node{row} : Node{}; };
     auto list = std::make_shared<LazyList>(20, make_row, 56.0F);
@@ -466,7 +466,7 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
     {
         const std::shared_ptr<Dropdown> dd = make_dropdown(log);
         const std::shared_ptr<Row> row = std::make_shared<Row>(RowProps{.children = {Node{dd}}});
-        row->modifier.set(Modifier{}.padding(8.0F));
+        row->set_modifier(Modifier{}.padding(8.0F));
         auto list =
             std::make_shared<LazyList>(20, [row](int i) -> Node { return i == 19 ? Node{row} : Node{}; }, 56.0F);
         LayoutEngine::layout(*list, host_constraints());

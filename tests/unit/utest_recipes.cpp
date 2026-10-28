@@ -71,7 +71,7 @@ AURORA_TEST_CASE(form_layout_rows_and_fixed_label_width) {
     AURORA_TEST_CHECK_EQ(label0.width_spec().kind, LengthKind::Fixed);
     AURORA_TEST_CHECK_NEAR(label0.width_spec().value, 120.0F, 1e-3F);
     // 行带内边距修饰（Modifier{}.padding(4)）
-    AURORA_TEST_CHECK_EQ(row0.modifier.get().nodes().size(), 1U);
+    AURORA_TEST_CHECK_EQ(row0.modifier().nodes().size(), 1U);
 
     // 自定义 label_width 逐行传递
     auto form2 = form_layout({FormRow{.label = "Name", .field = Node{Text{"Ada"}}}}, 90.0F);
@@ -91,7 +91,7 @@ AURORA_TEST_CASE(toolbar_fills_width_sidebar_fixed_width) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
     auto &bar_row = static_cast<Row &>(bar.widget());
     // 工具栏修饰链：fill_max_width + background + padding
-    AURORA_TEST_CHECK_EQ(bar_row.modifier.get().nodes().size(), 3U);
+    AURORA_TEST_CHECK_EQ(bar_row.modifier().nodes().size(), 3U);
     LayoutEngine::layout(bar.widget(), bounded(480.0F, 600.0F));
     AURORA_TEST_CHECK_NEAR(bar.widget().size().width, 480.0F, 1e-3F);  // 填满可用宽度
 
@@ -149,8 +149,8 @@ AURORA_TEST_CASE(tab_view_switches_page_on_tab_activate) {
     // 同上，第二枚标签按钮。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
     auto &btn_b = static_cast<Button &>(btn_row.child(1).widget());
-    AURORA_TEST_CHECK_EQ(btn_a.label.get().text, std::string{"A"});
-    AURORA_TEST_CHECK_EQ(btn_b.label.get().text, std::string{"B"});
+    AURORA_TEST_CHECK_EQ(btn_a.label().get().text, std::string{"A"});
+    AURORA_TEST_CHECK_EQ(btn_b.label().get().text, std::string{"B"});
 
     const BuildContext ctx;
     col.mount(ctx);  // 挂载后 TabBody 订阅内部 selected 状态（变化即标脏）

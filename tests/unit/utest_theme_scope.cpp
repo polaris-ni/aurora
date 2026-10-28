@@ -40,11 +40,11 @@ AURORA_TEST_CASE(theme_scope_is_a_theme_provider) {
 
 AURORA_TEST_CASE(theme_scope_from_shared_state_tracks_updates) {
     // 运行时换肤：共享 State 变化后，value() 须立即反映新主题。
-    auto state = std::make_shared<State<Theme>>(Theme::light());
+    State<Theme> state{Theme::light()};
     const ThemeScope scope{state, Placeholder{}};
 
     AURORA_TEST_CHECK_EQ(scope.value().roles.surface, Theme::light().roles.surface);
-    state->set(Theme::dark());
+    state.set(Theme::dark());
     AURORA_TEST_CHECK_EQ(scope.value().roles.surface, Theme::dark().roles.surface);
 }
 

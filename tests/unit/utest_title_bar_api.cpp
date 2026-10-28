@@ -84,9 +84,9 @@ AURORA_TEST_CASE(api_surface_setters_and_getters) {
     AURORA_TEST_CHECK_TRUE(bar->wants_click());
 
     // 无信号：collect_signals 空实现。
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     bar->collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 0U);
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 0U);
 }
 
 AURORA_TEST_CASE(serialize_and_deserialize_roundtrip) {

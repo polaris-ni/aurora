@@ -156,7 +156,7 @@ auto expect_frame_ratio(const e2e::Session &session, const std::string &what) ->
 /// @brief 单色块（场景最小单元）。
 [[nodiscard]] auto color_block(float width, float height, au::Color color) -> au::Node {
     auto block = std::make_shared<au::Row>();
-    block->modifier.set(au::Modifier{}.size(width, height).background(color));
+    block->set_modifier(au::Modifier{}.size(width, height).background(color));
     return au::Node{block};
 }
 
@@ -177,7 +177,7 @@ struct TwinScene {
 
     static auto build(float width, float height, au::Color color) -> TwinScene {
         TwinScene scene;
-        scene.input->modifier.set(au::Modifier{}.size(120.0F, 32.0F));
+        scene.input->set_modifier(au::Modifier{}.size(120.0F, 32.0F));
         scene.input->set_focused_background(AURORA_INPUT_FOCUSED);
         scene.root = au::Node{au::Column{color_block(width, height - 40.0F, color), au::Node{scene.input}}};
         return scene;
@@ -227,7 +227,7 @@ class PaintProbe final : public au::LeafWidget {
   public:
     au::Color fill = AURORA_PROBE_STALE;
 
-    void collect_signals(std::vector<au::SignalViewBase *> & /*out*/) override {}
+    void collect_signals(au::StateSink & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "PaintProbe"; }
     [[nodiscard]] auto describe() const -> au::WidgetDescriptor override {
         return au::WidgetDescriptor{.name = "PaintProbe", .children_policy = "none"};

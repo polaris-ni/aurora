@@ -267,7 +267,7 @@ AURORA_TEST_CASE(codegen_base_props_only_reach_step_style) {
     AURORA_TEST_CHECK_MSG(expr.find(".label = \"OK\"") != std::string::npos, "base prop filter keeps real props");
 
     const std::string step = to_code(make_node("Button", props), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(step.find("__w0.show = false;") != std::string::npos, "step assigns public show member");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_show(false);") != std::string::npos, "step calls set_show");
     AURORA_TEST_CHECK_MSG(step.find("__w0.width(au::px(120.0f));") != std::string::npos, "step calls width() setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.height(au::fill());") != std::string::npos, "step calls height() setter");
     // CJK-LITERAL: cjk-fixture - same Han label expected back from the generator verbatim
@@ -345,19 +345,15 @@ AURORA_TEST_CASE(codegen_skips_props_without_write_path) {
     AURORA_TEST_CHECK_MSG(step.find("__w0.step = 24.0f;") != std::string::npos, "codegen: sibling prop still emitted");
 }
 
-AURORA_TEST_CASE(codegen_step_show_member_shadowed_by_method_uses_qualified_name) {
-    // Dialog/Drawer/ToastHost/ProgressDialog 自带成员函数 `show()`，遮蔽了基类成员 `Widget::show`；
-    // 裸写 `w.show = true;` 取到的是成员函数，编译失败，故走限定名。
-    for (const std::string type : {"Dialog", "Drawer", "ToastHost", "ProgressDialog"}) {
+AURORA_TEST_CASE(codegen_step_show_uses_setter_for_shadowed_and_plain_types) {
+    // 展示属性统一走换源入口：Dialog/Drawer/ToastHost/ProgressDialog 自带的成员函数 `show()`
+    // 不再可能被属性赋值遮蔽，与普通控件一样生成 `set_show(...)`。
+    for (const std::string type : {"Dialog", "Drawer", "ToastHost", "ProgressDialog", "Button"}) {
         const std::string step =
             to_code(make_node(type, testing::json_obj({{"show", au::Json{false}}})), CodeStyle::StepByStep);
-        AURORA_TEST_CHECK_MSG(step.find("__w0.Widget::show = false;") != std::string::npos,
-                              "codegen: shadowed show uses Widget:: qualification for " + type);
+        AURORA_TEST_CHECK_MSG(step.find("__w0.set_show(false);") != std::string::npos,
+                              "codegen: show prop emits set_show for " + type);
     }
-    const std::string plain =
-        to_code(make_node("Button", testing::json_obj({{"show", au::Json{false}}})), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(plain.find("__w0.show = false;") != std::string::npos,
-                          "codegen: unshadowed show stays plain member assignment");
 }
 
 AURORA_TEST_CASE(codegen_step_statements_are_complete_and_children_declared_first) {
@@ -429,7 +425,7 @@ AURORA_TEST_CASE(codegen_multi_prop_mixed_emission) {
 
     const std::string step = to_code(make_text(props), CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(step.find("__w0.content = \"Hello\";") != std::string::npos, "mixed step: content");
-    AURORA_TEST_CHECK_MSG(step.find("__w0.show = true;") != std::string::npos, "mixed step: show");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_show(true);") != std::string::npos, "mixed step: show setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.font.weight = 700;") != std::string::npos, "mixed step: font weight");
     AURORA_TEST_CHECK_MSG(step.find("__w0.width(au::px(200.0f));") != std::string::npos, "mixed step: width setter");
 }

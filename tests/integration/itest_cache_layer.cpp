@@ -85,7 +85,7 @@ auto render_in_root(std::shared_ptr<Widget> w, const int ww, const int hh) -> Re
 AURORA_TEST_CASE(cache_layer_first_paint_renders_subtree) {
     CountingBox::m_paint_count = 0;
     const auto cb = std::make_shared<CountingBox>();
-    cb->modifier.set(Modifier{}.cache_layer());
+    cb->set_modifier(Modifier{}.cache_layer());
 
     // 首次绘制：渲染子树（计数+1），像素可见
     const auto r1 = render_in_root(cb, 200, 200);
@@ -96,7 +96,7 @@ AURORA_TEST_CASE(cache_layer_first_paint_renders_subtree) {
 AURORA_TEST_CASE(cache_layer_second_paint_hits_cache) {
     CountingBox::m_paint_count = 0;
     const auto cb = std::make_shared<CountingBox>();
-    cb->modifier.set(Modifier{}.cache_layer());
+    cb->set_modifier(Modifier{}.cache_layer());
 
     (void)render_in_root(cb, 200, 200);
     // 第二次绘制（同尺寸、未失效）：命中缓存，跳过子树（计数不变）
@@ -108,7 +108,7 @@ AURORA_TEST_CASE(cache_layer_second_paint_hits_cache) {
 AURORA_TEST_CASE(cache_layer_invalidate_forces_rerender) {
     CountingBox::m_paint_count = 0;
     const auto cb = std::make_shared<CountingBox>();
-    cb->modifier.set(Modifier{}.cache_layer());
+    cb->set_modifier(Modifier{}.cache_layer());
 
     (void)render_in_root(cb, 200, 200);
     // 失效后重绘：计数+1
@@ -121,7 +121,7 @@ AURORA_TEST_CASE(cache_layer_invalidate_forces_rerender) {
 AURORA_TEST_CASE(cache_layer_size_change_invalidates_cache) {
     CountingBox::m_paint_count = 0;
     const auto cb = std::make_shared<CountingBox>();
-    cb->modifier.set(Modifier{}.cache_layer());
+    cb->set_modifier(Modifier{}.cache_layer());
 
     (void)render_in_root(cb, 200, 200);
     // 尺寸变化使缓存失效：须先 mark_needs_layout（布局缓存契约——改变影响布局的属性须标脏）。

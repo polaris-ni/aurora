@@ -69,7 +69,7 @@ struct BuildRecorder {
         return [this](int index) -> Node {
             built_order.push_back(index);
             auto box = std::make_shared<FixedBox>(300.0F, 48.0F);
-            box->modifier.set(Modifier{}.clickable([]() -> void {}));
+            box->set_modifier(Modifier{}.clickable([]() -> void {}));
             items.emplace(index, std::move(box));
             return Node{items.at(index)};
         };
@@ -479,7 +479,7 @@ AURORA_TEST_CASE(offset_signal_follows_wheel_glide_and_programmatic) {
     LazyList list{100, {}, 48.0F};
     LayoutEngine::layout(list, bounded(300.0F, 400.0F));
 
-    SignalView<float> &offset = list.offset_signal();  // 懒创建：初值取当前偏移
+    const ReadOnlyState<float> offset = list.offset_signal();  // 懒创建：初值取当前偏移
     AURORA_TEST_CHECK_NEAR(offset.get(), 0.0F, 1e-4F);
 
     list.set_scroll_offset(100.0F);

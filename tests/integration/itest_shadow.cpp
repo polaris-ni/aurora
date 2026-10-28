@@ -106,7 +106,7 @@ AURORA_TEST_CASE(modifier_shadow_default_parameters) {
 
 AURORA_TEST_CASE(shadow_modifier_widget_offscreen_snapshot) {
     auto txt = std::make_shared<Text>("Shadow");
-    txt->modifier.set(Modifier{}.shadow(0, 3, 5).background(Color(255, 255, 255, 255)));
+    txt->set_modifier(Modifier{}.shadow(0, 3, 5).background(Color(255, 255, 255, 255)));
 
     Node root(std::move(txt));
     Json snap = render_to_logical_snapshot(root, 200, 80);

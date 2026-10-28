@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/slider.h
 /// 测试说明: 覆盖 Slider——默认值域、set_value 钳制与 step 吸附、on_changed 回调、
-/// Press/Move 合成拖拽按局部 x 映射值、禁用态忽略指针、Binding 写穿、自描述不变量、序列化往返
+/// Press/Move 合成拖拽按局部 x 映射值、禁用态忽略指针、外部 State 写穿、自描述不变量、序列化往返
 
 #include <string>
 #include <vector>
@@ -118,19 +118,19 @@ AURORA_TEST_CASE(slider_disabled_ignores_pointer_events) {
     AURORA_TEST_CHECK_EQ(calls, 0);
 }
 
-AURORA_TEST_CASE(slider_binding_writes_through_to_upstream) {
+AURORA_TEST_CASE(slider_shared_source_writes_through_to_upstream) {
     State<double> up{0.0};
-    Slider s{Binding<double>(up)};
+    Slider s{up};  // 共享同一来源：控件与上游是同一个值
     s.set_value(0.7);
     AURORA_TEST_CHECK_NEAR(up.get(), 0.7, 1e-4);  // 控件 → 上游
 
     up.set(0.2);
     AURORA_TEST_CHECK_NEAR(s.value(), 0.2, 1e-4);  // 上游 → 控件（读取穿透）
 
-    // 信号收集：内部 value_ + 绑定目标。
-    std::vector<SignalViewBase *> out;
+    // 信号收集：共享来源只采集一次。
+    StateSink out;
     s.collect_signals(out);
-    AURORA_TEST_REQUIRE_EQ(out.size(), 2U);
+    AURORA_TEST_CHECK_EQ(out.sources().size(), std::size_t{1});
 }
 
 AURORA_TEST_CASE(slider_describe_reports_invariants) {

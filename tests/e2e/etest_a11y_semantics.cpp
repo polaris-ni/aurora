@@ -43,10 +43,10 @@ constexpr std::string_view AURORA_A11Y_FRAME_TITLE = "aurora_e2e_a11y";
 ///        TextInput / Text——覆盖 Invoke、Toggle、Value 三类动作面与两条名称回退链
 ///        （兄弟标签、取值）。
 [[nodiscard]] auto build_a11y_column() -> au::Node {
-    const auto checked = std::make_shared<au::State<bool>>(true);
-    const auto volume = std::make_shared<au::State<double>>(25.0);
+    const auto checked = au::State<bool>{true};
+    const auto volume = au::State<double>{25.0};
 
-    au::Node slider_node{au::Slider{au::Reactive{volume}}};
+    au::Node slider_node{au::Slider{volume}};
     // 值域未在构造参数声明，显式收敛到 0..100 便于两端断言 range 投影。
     static_cast<au::Slider &>(slider_node.widget())  // NOLINT(*-pro-type-static-cast-downcast)
         .set_range(0.0, 100.0)
@@ -58,7 +58,7 @@ constexpr std::string_view AURORA_A11Y_FRAME_TITLE = "aurora_e2e_a11y";
     return au::Node{au::Column{
         au::Button{au::ButtonProps{.label = au::LocalizedString{AURORA_A11Y_BUTTON_NAME}}},
         au::Row{au::Text{au::TextProps{.content = au::LocalizedString{AURORA_A11Y_CHECKBOX_LABEL}}},
-                au::Checkbox{au::Reactive{checked}}},
+                au::Checkbox{checked}},
         au::Row{au::Text{au::TextProps{.content = au::LocalizedString{AURORA_A11Y_SLIDER_LABEL}}},
                 std::move(slider_node)},
         std::move(input_node),

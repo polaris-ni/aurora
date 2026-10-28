@@ -79,7 +79,7 @@ auto render_in_root(std::shared_ptr<Widget> w, const int ww, const int hh) -> Re
 
 AURORA_TEST_CASE(linear_fade_top_bright_bottom_faded) {
     const auto sb = std::make_shared<SolidBox>();
-    sb->modifier.set(Modifier{}.shader_mask(ShaderMaskKind::LinearFade, 1.0F));
+    sb->set_modifier(Modifier{}.shader_mask(ShaderMaskKind::LinearFade, 1.0F));
     const auto r = render_in_root(sb, 200, 200);
     const std::uint8_t top_red = r.at(30, 0, 0);
     const std::uint8_t bottom_red = r.at(30, 59, 0);
@@ -90,7 +90,7 @@ AURORA_TEST_CASE(linear_fade_top_bright_bottom_faded) {
 
 AURORA_TEST_CASE(linear_rise_top_faded_bottom_bright) {
     const auto sb = std::make_shared<SolidBox>();
-    sb->modifier.set(Modifier{}.shader_mask(ShaderMaskKind::LinearRise, 1.0F));
+    sb->set_modifier(Modifier{}.shader_mask(ShaderMaskKind::LinearRise, 1.0F));
     const auto r = render_in_root(sb, 200, 200);
     const std::uint8_t top_red = r.at(30, 0, 0);
     const std::uint8_t bottom_red = r.at(30, 59, 0);
@@ -101,7 +101,7 @@ AURORA_TEST_CASE(linear_rise_top_faded_bottom_bright) {
 
 AURORA_TEST_CASE(radial_fade_center_bright_corner_faded) {
     const auto sb = std::make_shared<SolidBox>();
-    sb->modifier.set(Modifier{}.shader_mask(ShaderMaskKind::RadialFade, 1.0F));
+    sb->set_modifier(Modifier{}.shader_mask(ShaderMaskKind::RadialFade, 1.0F));
     const auto r = render_in_root(sb, 200, 200);
     const std::uint8_t center_red = r.at(30, 30, 0);
     const std::uint8_t corner_red = r.at(0, 0, 0);
@@ -111,7 +111,7 @@ AURORA_TEST_CASE(radial_fade_center_bright_corner_faded) {
 
 AURORA_TEST_CASE(shader_mask_strength_zero_leaves_pixels_unchanged) {
     const auto sb = std::make_shared<SolidBox>();
-    sb->modifier.set(Modifier{}.shader_mask(ShaderMaskKind::LinearFade, 0.0F));
+    sb->set_modifier(Modifier{}.shader_mask(ShaderMaskKind::LinearFade, 0.0F));
     const auto r = render_in_root(sb, 200, 200);
     AURORA_TEST_CHECK_MSG(r.at(30, 59, 0) == 255, "strength 0 leaves bottom row unchanged");
 }

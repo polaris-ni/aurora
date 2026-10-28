@@ -247,7 +247,7 @@ AURORA_TEST_CASE(golden_bar_chart_matches_baseline) {
     p.categories = {"Mon", "Tue", "Wed", "Thu", "Fri"};
     p.axis_y = ChartAxisSpec{.label = "sales", .tick_count = 5};
     auto chart = std::make_shared<BarChart>(p);
-    chart->modifier.set(Modifier{}.width(320.0F).height(200.0F));
+    chart->set_modifier(Modifier{}.width(320.0F).height(200.0F));
 
     Node root{Column{Node{chart}}};
     const std::filesystem::path current_path =

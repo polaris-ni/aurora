@@ -1,129 +1,157 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/effect.h
-/// 测试说明: Effect 构造不执行、current 作用域嵌套与恢复、依赖重跑与观察边叠加语义、dispose
-/// 停跑、非拷贝/移动与锚点、析构后源可继续写
+/// 测试说明: 副作用首跑与依赖追踪、作用域外读取不登记、条件依赖替换、凭证取消与丢弃即停、
+/// 回调内写入排到后续轮、自写反馈环有界停止
 
-#include <functional>
-#include <type_traits>
+#include <string>
+#include <utility>
 
 #include "aurora/state/effect.h"
 #include "aurora/state/state.h"
+#include "aurora/state/subscription.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_effect {
 
-AURORA_TEST_CASE(effect_constructor_defers_first_run) {
-    // 构造函数不执行 fn（区别于 Computed）；须显式 run() 首跑。
-    int runs = 0;
-    Effect e{[&]() -> void { ++runs; }};
-    AURORA_TEST_CHECK_EQ(runs, 0);
-    e.run();
-    AURORA_TEST_CHECK_EQ(runs, 1);
-
-    // 空 std::function 的 Effect：run() 为安全空操作。
-    Effect empty{std::function<void()>{}};
-    AURORA_TEST_CHECK_NO_THROW(empty.run());
-}
-
-AURORA_TEST_CASE(effect_current_tracks_active_scope_with_nested_restore) {
-    // current()：作用域外为空；run 期间指向该 Effect；嵌套 run 内层替换、结束恢复外层、最外层结束恢复空。
-    AURORA_TEST_CHECK(Effect::current() == nullptr);
-    Effect *seen_outer = nullptr;
-    Effect *seen_inner = nullptr;
-    Effect outer{[&]() -> void {
-        seen_outer = Effect::current();
-        Effect inner{[&]() -> void { seen_inner = Effect::current(); }};
-        inner.run();
-    }};
-    outer.run();
-    AURORA_TEST_CHECK(seen_outer == &outer);
-    AURORA_TEST_CHECK(seen_inner != nullptr);
-    AURORA_TEST_CHECK(seen_inner != &outer);  // 内层作用域替换了外层
-    AURORA_TEST_CHECK(Effect::current() == nullptr);
-}
-
-AURORA_TEST_CASE(effect_reruns_only_for_signals_read_in_scope) {
-    // 只有 run 期间读取过的信号在 set 时触发重跑；从未读取的信号不影响本 Effect。
-    State<bool> flag{false};
-    State<int> x{10};
-    int runs = 0;
-    Effect e{[&]() -> void {
-        ++runs;
-        (void)(flag.get() ? x.get() : 0);
-    }};
-    e.run();  // 首跑：读 flag（x 未读）
-    AURORA_TEST_CHECK_EQ(runs, 1);
-    x.set(11);  // x 从未被读取 → 不重跑
-    AURORA_TEST_CHECK_EQ(runs, 1);
-    flag.set(true);  // 依赖变化 → 重跑，本轮起读取 x
-    AURORA_TEST_CHECK_EQ(runs, 2);
-    AURORA_TEST_CHECK_EQ(x.get(), 11);
-}
-
-AURORA_TEST_CASE(effect_previous_reads_keep_triggering_reruns) {
-    // 观察边是叠加的：历史轮读取过的信号在其后 set 时仍触发重跑（State 侧不做边剪枝）。
-    State<int> a{0};
-    State<int> b{0};
-    int runs = 0;
-    Effect e{[&]() -> void {
-        ++runs;
-        (void)(a.get() + (runs > 1 ? b.get() : 0));
-    }};
-    e.run();  // 首跑只读 a
-    AURORA_TEST_CHECK_EQ(runs, 1);
-    b.set(1);  // b 未被任何轮读取 → 不重跑
-    AURORA_TEST_CHECK_EQ(runs, 1);
-    a.set(2);  // a 的观察边触发重跑；本轮起读取 b
-    AURORA_TEST_CHECK_EQ(runs, 2);
-    b.set(3);  // b 已在上一轮读取 → 观察边仍在，仍触发重跑
-    AURORA_TEST_CHECK_EQ(runs, 3);
-}
-
-AURORA_TEST_CASE(effect_dispose_stops_execution) {
-    // dispose() 后：is_disposed 置位、State set 不再触发重跑、run() 为空操作。
+AURORA_TEST_CASE(effect_runs_immediately_and_tracks_dependencies) {
+    // 调用即首跑；依赖变化后重跑。
     State<int> s{0};
     int runs = 0;
-    Effect e{[&]() -> void {
+    int last = -1;
+    auto sub = effect([&]() -> void {
+        ++runs;
+        last = s.get();
+    });
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    AURORA_TEST_CHECK_EQ(last, 0);
+    AURORA_TEST_CHECK(sub.active());
+
+    s.set(5);
+    AURORA_TEST_CHECK_EQ(runs, 2);
+    AURORA_TEST_CHECK_EQ(last, 5);
+
+    s.set(5);  // 等值写入不通知
+    AURORA_TEST_CHECK_EQ(runs, 2);
+}
+
+AURORA_TEST_CASE(effect_ignores_sources_read_outside_callback) {
+    // 回调体不读取的来源不登记：写入不触发重跑。
+    State<int> watched{0};
+    State<int> bystander{0};
+    int runs = 0;
+    auto sub = effect([&]() -> void {
+        ++runs;
+        (void)watched.get();
+    });
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    bystander.set(1);
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    watched.set(1);
+    AURORA_TEST_CHECK_EQ(runs, 2);
+}
+
+AURORA_TEST_CASE(effect_conditional_dependencies_are_replaced_each_run) {
+    // 每轮按实际读取替换依赖：旧分支写入不再触发。
+    State<int> mode{0};
+    State<int> x{1};
+    State<int> y{2};
+    int runs = 0;
+    int seen = 0;
+    auto sub = effect([&]() -> void {
+        ++runs;
+        seen = mode.get() != 0 ? x.get() : y.get();
+    });
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    AURORA_TEST_CHECK_EQ(seen, 2);
+
+    x.set(10);  // 当前未读取 x
+    AURORA_TEST_CHECK_EQ(runs, 1);
+
+    mode.set(1);  // 切换分支
+    AURORA_TEST_CHECK_EQ(runs, 2);
+    AURORA_TEST_CHECK_EQ(seen, 10);
+
+    y.set(99);  // y 已退出依赖集
+    AURORA_TEST_CHECK_EQ(runs, 2);
+
+    x.set(20);
+    AURORA_TEST_CHECK_EQ(runs, 3);
+    AURORA_TEST_CHECK_EQ(seen, 20);
+}
+
+AURORA_TEST_CASE(effect_cancelled_by_reset_and_by_destruction) {
+    // reset 与析构都取消：此后写入不再回调。
+    State<int> s{0};
+    int runs = 0;
+    auto sub = effect([&]() -> void {
         ++runs;
         (void)s.get();
-    }};
-    e.run();
-    AURORA_TEST_CHECK_FALSE(e.is_disposed());
+    });
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    sub.reset();
+    AURORA_TEST_CHECK(!sub.active());
     s.set(1);
-    AURORA_TEST_CHECK_EQ(runs, 2);
-    e.dispose();
-    AURORA_TEST_CHECK_TRUE(e.is_disposed());
+    AURORA_TEST_CHECK_EQ(runs, 1);
+
+    {
+        auto transient = effect([&]() -> void {
+            ++runs;
+            (void)s.get();
+        });
+        AURORA_TEST_CHECK_EQ(runs, 2);
+    }  // transient 析构 → 退订
     s.set(2);
     AURORA_TEST_CHECK_EQ(runs, 2);
-    e.run();
+}
+
+AURORA_TEST_CASE(effect_result_discarded_runs_once_without_living_subscription) {
+    // 丢弃返回值：首跑照常发生，之后不留后台订阅。
+    State<int> s{0};
+    int runs = 0;
+    (void)effect([&]() -> void {  // 刻意丢弃：断言的就是「无凭证存活时退订」这条路径
+        ++runs;
+        (void)s.get();
+    });
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    s.set(1);
+    AURORA_TEST_CHECK_EQ(runs, 1);
+}
+
+AURORA_TEST_CASE(effect_writes_within_callback_settle_after_current_round) {
+    // 回调内写入排到后续轮：同轮读取仍是旧值，入口返回后新值落定。
+    State<int> source{1};
+    State<int> mirror{0};
+    std::string order;
+    auto sub = effect([&]() -> void {
+        const int v = source.get();
+        const int before = mirror.get();
+        order += 'e';
+        mirror.set(v * 10);
+        AURORA_TEST_CHECK_EQ(mirror.get(), before);  // 尚在写队列：读数不变
+    });
+    auto mirror_sub = mirror.subscribe([&](const int &) { order += 'm'; });
+    order.clear();
+    source.set(2);
+    AURORA_TEST_CHECK_EQ(mirror.get(), 20);
+    AURORA_TEST_CHECK_EQ(order, std::string{"em"});
+}
+
+AURORA_TEST_CASE(effect_self_write_feedback_loop_stops_bounded) {
+    // 自写反馈环：同一轮内因果链重复出现即停止，绝不无限循环。
+    // 停止时引擎按设计记录一条 "reactive feedback loop cut" 错误日志，属预期输出。
+    State<int> s{0};
+    int runs = 0;
+    auto sub = effect([&]() -> void {
+        ++runs;
+        s.set(s.get() + 1);  // 每轮自增：第二次重跑会被因果链截断
+    });
     AURORA_TEST_CHECK_EQ(runs, 2);
     AURORA_TEST_CHECK_EQ(s.get(), 2);
-}
 
-AURORA_TEST_CASE(effect_non_copyable_non_movable_with_per_instance_anchor) {
-    // Effect 不可拷贝、不可移动；每实例持有独立非空锚点。
-    static_assert(!std::is_copy_constructible_v<Effect>);
-    static_assert(!std::is_copy_assignable_v<Effect>);
-    static_assert(!std::is_move_constructible_v<Effect>);
-    static_assert(!std::is_move_assignable_v<Effect>);
-    Effect e{[]() -> void {}};
-    Effect f{[]() -> void {}};
-    AURORA_TEST_CHECK(e.anchor() != nullptr);
-    AURORA_TEST_CHECK(f.anchor() != nullptr);
-    AURORA_TEST_CHECK(e.anchor() != f.anchor());
-}
-
-AURORA_TEST_CASE(effect_destroyed_observer_keeps_state_settable) {
-    // Effect 析构后（锚点释放），State 继续 set 安全：失效边由 notify 惰性摘除，绝不悬垂。
-    State<int> s{0};
-    {
-        Effect e{[&]() -> void { (void)s.get(); }};
-        e.run();
-    }
-    AURORA_TEST_CHECK_NO_THROW(s.set(1));
-    AURORA_TEST_CHECK_EQ(s.get(), 1);
-    AURORA_TEST_CHECK_NO_THROW(s.set(2));  // 摘除后再次 set 仍安全
-    AURORA_TEST_CHECK_EQ(s.get(), 2);
+    // 外部写入重新开启链条，仍保持有界。
+    s.set(10);
+    AURORA_TEST_CHECK_EQ(runs, 3);
+    AURORA_TEST_CHECK_EQ(s.get(), 11);
 }
 
 }  // namespace aurora::test_cases::utest_effect

@@ -119,9 +119,9 @@ AURORA_TEST_CASE(describe_reports_metadata) {
 
     // 无自有信号。
     Placeholder p;
-    std::vector<aurora::SignalViewBase *> out;
+    StateSink out;
     p.collect_signals(out);
-    AURORA_TEST_CHECK_EQ(out.size(), 0U);
+    AURORA_TEST_CHECK_EQ(out.sources().size(), 0U);
 }
 
 // ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----

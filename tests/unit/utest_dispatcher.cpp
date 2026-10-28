@@ -613,7 +613,7 @@ AURORA_TEST_CASE(hover_cursor_resolves_and_emits_on_change) {
     AURORA_TEST_CHECK_EQ(emitted.size(), 1);
 
     // 2) 修饰链 CursorNode 声明生效（悬停驱动的重解析：再次 Move 触发）
-    tree.box1->modifier = Modifier{}.cursor(CursorShape::IBeam);
+    tree.box1->set_modifier(Modifier{}.cursor(CursorShape::IBeam));
     move_to(25.0F, 25.0F);
     AURORA_TEST_CHECK_EQ(emitted.size(), 2);
     AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::IBeam);
@@ -623,23 +623,23 @@ AURORA_TEST_CASE(hover_cursor_resolves_and_emits_on_change) {
     move_to(60.0F, 20.0F);  // box2 内
     AURORA_TEST_CHECK_EQ(emitted.size(), 3);
     AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::Crosshair);
-    tree.box2->modifier = Modifier{}.cursor(CursorShape::Wait);
+    tree.box2->set_modifier(Modifier{}.cursor(CursorShape::Wait));
     move_to(65.0F, 25.0F);
     AURORA_TEST_CHECK_EQ(emitted.size(), 4);
     AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::Wait);
 
     // 4) 含 Clickable 修饰且无声明/钩子 → 缺省 PointingHand
-    tree.box2->modifier = Modifier{};
+    tree.box2->set_modifier(Modifier{});
     tree.box2->cursor_hook.reset();
-    tree.box2->modifier = Modifier{}.clickable([] {});
+    tree.box2->set_modifier(Modifier{}.clickable([] {}));
     move_to(60.0F, 20.0F);
     AURORA_TEST_CHECK_EQ(emitted.size(), 5);
     AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::PointingHand);
 
     // 5) 内层覆盖外层：根声明 Move，box2 无声明 → 沿命中链回溯取根的 Move；
     //    移到空白（链空）→ 回落 Arrow
-    tree.box2->modifier = Modifier{};
-    tree.row->modifier = Modifier{}.cursor(CursorShape::Move);
+    tree.box2->set_modifier(Modifier{});
+    tree.row->set_modifier(Modifier{}.cursor(CursorShape::Move));
     move_to(60.0F, 20.0F);
     AURORA_TEST_CHECK_EQ(emitted.size(), 6);
     AURORA_TEST_CHECK_EQ(emitted.back(), CursorShape::Move);

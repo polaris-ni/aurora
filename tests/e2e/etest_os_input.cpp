@@ -49,7 +49,7 @@ constexpr std::string_view AURORA_OS_FRAME_TITLE = "aurora_e2e_os_input";
 /// @brief 注入目标 UI：TextInput（键盘目标，上）+ Checkbox（指针目标，下）。
 ///        Checkbox 走共享 `State<bool>` 观察翻转；TextInput 经 `on_changed` 捕获上屏文本。
 struct OsInputUi {
-    std::shared_ptr<au::State<bool>> checked = std::make_shared<au::State<bool>>(false);
+    au::State<bool> checked{false};  // 按值句柄：控件共用同一来源，翻转向全部句柄可见
     std::shared_ptr<std::string> typed = std::make_shared<std::string>();
     au::Node root;
 };
@@ -60,7 +60,7 @@ struct OsInputUi {
     au::Node input{au::TextInput{au::TextInputProps{.value = ""}}};
     static_cast<au::TextInput &>(input.widget())  // NOLINT(*-pro-type-static-cast-downcast)
         .set_on_changed([captured = ui.typed](const std::string &v) { *captured = v; });
-    ui.root = au::Node{au::Column{std::move(input), au::Checkbox{au::Reactive{ui.checked}}}};
+    ui.root = au::Node{au::Column{std::move(input), au::Checkbox{ui.checked}}};
     return ui;
 }
 

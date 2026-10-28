@@ -146,8 +146,8 @@ auto make_builder(const std::vector<float> &heights, bool clickable = false) -> 
     };
 }
 
-auto make_items(std::vector<int> values) -> std::shared_ptr<State<std::vector<int>>> {
-    return std::make_shared<State<std::vector<int>>>(std::move(values));
+auto make_items(std::vector<int> values) -> State<std::vector<int>> {
+    return State<std::vector<int>>{std::move(values)};
 }
 
 /// 用例隔离：注册表是进程级单例。
@@ -226,20 +226,20 @@ AURORA_TEST_CASE(reorder_moves_item_with_rotate_semantics) {
 
     // 后移：把 0 移到末位（to = 最终下标 3）。
     AURORA_TEST_CHECK_TRUE(list.reorder(0, 3));
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{1, 2, 3, 0});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 2, 3, 0});
     AURORA_TEST_REQUIRE_EQ(calls.size(), 1U);
     AURORA_TEST_CHECK_EQ(calls[0].first, 0);
     AURORA_TEST_CHECK_EQ(calls[0].second, 3);  // 报告落位后的下标
 
     // 前移：把末位的 0 移回开头。
     AURORA_TEST_CHECK_TRUE(list.reorder(3, 0));
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2, 3});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 1, 2, 3});
     AURORA_TEST_REQUIRE_EQ(calls.size(), 2U);
     AURORA_TEST_CHECK_EQ(calls[1].second, 0);
 
     // 相邻交换：把 1 移到下标 2（等价与 2 互换）。
     AURORA_TEST_CHECK_TRUE(list.reorder(1, 2));
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 2, 1, 3});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 2, 1, 3});
 
     // 无变化语义：to == from 不改写数据、不回调。
     AURORA_TEST_CHECK_FALSE(list.reorder(2, 2));
@@ -249,7 +249,7 @@ AURORA_TEST_CASE(reorder_moves_item_with_rotate_semantics) {
     AURORA_TEST_CHECK_FALSE(list.reorder(-1, 0));
     AURORA_TEST_CHECK_FALSE(list.reorder(9, 0));
     AURORA_TEST_CHECK_TRUE(list.reorder(0, 99));  // 目标下标夹取到 count-1
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{2, 1, 3, 0});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{2, 1, 3, 0});
 
     auto one = make_items({7});
     ReorderableList<int> single{one, make_builder({20.0F})};
@@ -292,7 +292,7 @@ AURORA_TEST_CASE(layout_builds_y_table_for_variable_heights) {
     AURORA_TEST_CHECK_EQ(list.index_at_content_y(1.0e6F), 2);  // 越界取末项
 
     // 数据长度变化触发重建（Repeater 先例）。
-    items->set({10, 20, 30, 40});
+    items.set({10, 20, 30, 40});
     LayoutEngine::layout(list, bounded(120.0F, 100.0F));
     AURORA_TEST_CHECK_EQ(list.item_count(), 4U);
     AURORA_TEST_CHECK_NEAR(list.item_top(3), 180.0F, 1e-4F);  // 40+10+60+10+50+10
@@ -497,21 +497,21 @@ AURORA_TEST_CASE(drag_reorders_item_and_shields_child_pointer_events) {
     AURORA_TEST_CHECK_FALSE(chain_hits(dragged_chain, &list.child_nodes()[0].widget()));
 
     // 松手前数据未被改动（只改 UI 表现）。
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 1, 2});
 
     // 松手：进入 spring 落位动画（此时数据仍未提交），动画静止后一次性改写数据。
     MouseEvent release = mouse(MouseAction::Release, 180.0F, 110.0F);
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(list, release, nullptr));
     AURORA_TEST_CHECK_FALSE(list.is_dragging());
     AURORA_TEST_CHECK_TRUE(list.is_settling());
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 1, 2});
 
     (void)drive_until_settled(list, std::chrono::steady_clock::now());
     AURORA_TEST_CHECK_FALSE(list.is_settling());
     AURORA_TEST_CHECK_EQ(list.drag_index(), -1);
     AURORA_TEST_CHECK_EQ(reorder_calls.size(), std::size_t{1});
     AURORA_TEST_CHECK_MSG(reorder_calls.empty() || reorder_calls[0].second == 2, "reported new index = 2 (last slot)");
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{1, 2, 0});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 2, 0});
 }
 
 AURORA_TEST_CASE(wheel_is_swallowed_while_dragging) {
@@ -564,7 +564,7 @@ AURORA_TEST_CASE(plain_items_support_whole_item_drag) {
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(list, release, nullptr));
     AURORA_TEST_CHECK_TRUE(list.is_settling());
     (void)drive_until_settled(list, std::chrono::steady_clock::now());
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{1, 2, 0});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 2, 0});
     AURORA_TEST_CHECK_FALSE(list.is_settling());
 }
 
@@ -587,7 +587,7 @@ AURORA_TEST_CASE(clickable_item_body_does_not_start_drag_but_handle_band_does) {
     AURORA_TEST_CHECK_FALSE(list.is_dragging());
     MouseEvent release_body = mouse(MouseAction::Release, 60.0F, 60.0F);
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(list, release_body, nullptr));
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 1, 2});
 
     // 手柄带：列表自己收到 Press/Move → 起拖并落位（下拖 40dp 越过相邻中点 → 下标 1）。
     MouseEvent press_handle = mouse(MouseAction::Press, 180.0F, 10.0F);
@@ -601,7 +601,7 @@ AURORA_TEST_CASE(clickable_item_body_does_not_start_drag_but_handle_band_does) {
     MouseEvent release_handle = mouse(MouseAction::Release, 180.0F, 50.0F);
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(list, release_handle, nullptr));
     (void)drive_until_settled(list, std::chrono::steady_clock::now());
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{1, 0, 2});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 0, 2});
     AURORA_TEST_CHECK_FALSE(list.is_dragging());
 }
 
@@ -640,12 +640,12 @@ AURORA_TEST_CASE(settle_animation_approaches_slot_without_jump) {
     }
     AURORA_TEST_CHECK_FALSE(list.is_settling());
     AURORA_TEST_CHECK_GT(frames, 0);
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{1, 2, 0});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 2, 0});
     AURORA_TEST_CHECK_NEAR(list.drag_follow(), 0.0F, 1e-4F);
     // 提交只标布局脏（与真实帧循环一致：tick 在 layout 之前，同帧即落定）。
     LayoutEngine::layout(list, bounded(200.0F, 200.0F));
     // 被拖项（数据值 0）现在落在末位，其顶端 = 动画终点 ⇒ 无缝衔接（无跳变）。
-    AURORA_TEST_CHECK_EQ(items->get()[2], 0);
+    AURORA_TEST_CHECK_EQ(items.get()[2], 0);
     AURORA_TEST_CHECK_NEAR(list.item_top(2), 80.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(prev, list.item_top(2), 0.5F);
 }
@@ -666,7 +666,7 @@ AURORA_TEST_CASE(reduce_motion_commits_without_frame_animation) {
 
     AURORA_TEST_CHECK_TRUE(send(list, MouseAction::Release, 180.0F, 60.0F));
     AURORA_TEST_CHECK_FALSE(list.is_settling());  // 无动画阶段
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{1, 2, 0});  // 已提交
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 2, 0});  // 已提交
     AURORA_TEST_CHECK_NEAR(list.drag_follow(), 0.0F, 1e-4F);
 
     // 落位动画中途开启 reduce_motion：下一帧直接落定（不等 spring 收敛）。
@@ -684,7 +684,7 @@ AURORA_TEST_CASE(reduce_motion_commits_without_frame_animation) {
     }
     list2.tick(std::chrono::steady_clock::now() + std::chrono::milliseconds(16));
     AURORA_TEST_CHECK_FALSE(list2.is_settling());
-    AURORA_TEST_CHECK_EQ(items2->get(), std::vector<int>{1, 2, 0});
+    AURORA_TEST_CHECK_EQ(items2.get(), std::vector<int>{1, 2, 0});
 }
 
 AURORA_TEST_CASE(auto_scroll_follows_dragged_item_near_viewport_edge) {
@@ -765,7 +765,7 @@ AURORA_TEST_CASE(horizontal_drag_does_not_start_reorder) {
 
     MouseEvent release = mouse(MouseAction::Release, 180.0F, 12.0F);
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(list, release, nullptr));
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 1, 2});
 }
 
 AURORA_TEST_CASE(keyboard_cursor_moves_and_rolls_items_into_view) {
@@ -798,7 +798,7 @@ AURORA_TEST_CASE(keyboard_cursor_moves_and_rolls_items_into_view) {
     AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 0.0F, 1e-4F);
 
     // 纯浏览光标不改数据；滚动经 restore_key 写回的语义与滚轮一致（此处未设 key，只验偏移）。
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2, 3, 4});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 1, 2, 3, 4});
     AURORA_TEST_CHECK_TRUE(list.is_focused());
 }
 
@@ -820,7 +820,7 @@ AURORA_TEST_CASE(keyboard_grab_move_drop_commits_the_reorder) {
     AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Space));
     AURORA_TEST_CHECK_TRUE(list.is_keyboard_grabbed());
     AURORA_TEST_CHECK_EQ(list.keyboard_grab_index(), 2);
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2, 3, 4});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 1, 2, 3, 4});
     AURORA_TEST_CHECK_TRUE(ann.contains("Item grabbed"));
 
     // 挪到目标位后落位：与拖拽同一 `reorder` 插入位语义。
@@ -828,7 +828,7 @@ AURORA_TEST_CASE(keyboard_grab_move_drop_commits_the_reorder) {
     AURORA_TEST_CHECK_EQ(list.keyboard_index(), 1);
     AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Enter));
     AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 2, 1, 3, 4});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 2, 1, 3, 4});
     AURORA_TEST_REQUIRE_EQ(calls.size(), 1U);
     AURORA_TEST_CHECK_EQ(calls[0].first, 2);
     AURORA_TEST_CHECK_EQ(calls[0].second, 1);
@@ -839,7 +839,7 @@ AURORA_TEST_CASE(keyboard_grab_move_drop_commits_the_reorder) {
     AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Enter));
     AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
     AURORA_TEST_CHECK_EQ(calls.size(), 1U);
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 2, 1, 3, 4});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 2, 1, 3, 4});
     AURORA_TEST_CHECK_TRUE(ann.contains("dropped at position 2"));
 }
 
@@ -860,7 +860,7 @@ AURORA_TEST_CASE(keyboard_escape_and_focus_loss_cancel_the_grab) {
     AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Escape));  // 取消：回原位，数据不变
     AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
     AURORA_TEST_CHECK_EQ(list.keyboard_index(), 1);
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 1, 2});
     AURORA_TEST_CHECK_TRUE(ann.contains("cancelled"));
 
     // 未抓取时的 Esc 不认领（留给页面级返回）。
@@ -872,7 +872,7 @@ AURORA_TEST_CASE(keyboard_escape_and_focus_loss_cancel_the_grab) {
     fm.clear();
     AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
     AURORA_TEST_CHECK_EQ(list.keyboard_index(), 1);
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 1, 2});
     AURORA_TEST_CHECK_FALSE(list.is_focused());
 }
 
@@ -889,7 +889,7 @@ AURORA_TEST_CASE(keyboard_path_yields_when_disabled_and_for_unclaimed_keys) {
     AURORA_TEST_CHECK_EQ(list.keyboard_index(), -1);
     AURORA_TEST_CHECK_FALSE(send_key(list, fm, KeyCode::ArrowDown));
     AURORA_TEST_CHECK_EQ(list.keyboard_index(), -1);
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 1, 2});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 1, 2});
 
     // 重新开启：按键释放（KeyAction::Up）与本控件不认领的方向均不改状态。
     list.set_keyboard_reorder(true);
@@ -946,7 +946,7 @@ AURORA_TEST_CASE(keyboard_announcements_are_localizable_and_switch_off_mid_grab_
     AURORA_TEST_CHECK_TRUE(ann.contains("已抓取第 2 项 / 共 3 项"));
     AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::ArrowUp));
     AURORA_TEST_CHECK_TRUE(send_key(list, fm, KeyCode::Enter));
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{1, 0, 2});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 0, 2});
     // CJK-LITERAL: cjk-fixture - dropped announcement carries the substituted Han template
     AURORA_TEST_CHECK_TRUE(ann.contains("自第 2 项移至第 1 项 / 共 3 项"));
 
@@ -957,9 +957,9 @@ AURORA_TEST_CASE(keyboard_announcements_are_localizable_and_switch_off_mid_grab_
     list.set_keyboard_reorder(false);
     AURORA_TEST_CHECK_FALSE(list.is_keyboard_grabbed());
     AURORA_TEST_CHECK_EQ(list.keyboard_index(), -1);
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{1, 0, 2});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 0, 2});
     AURORA_TEST_CHECK_TRUE(list.reorder(0, 2));  // 数据仍可程序化重排：仅键盘路径被关闭
-    AURORA_TEST_CHECK_EQ(items->get(), std::vector<int>{0, 2, 1});
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 2, 1});
 }
 
 }  // namespace aurora::test_cases::utest_reorderable_list

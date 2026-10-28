@@ -27,7 +27,7 @@ class LeafProbe final : public Widget {
     int mounts = 0;
     int unmounts = 0;
     [[nodiscard]] auto type_name() const -> const char * override { return "LeafProbe"; }
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { (void)out; }
+    auto collect_signals(StateSink &out) -> void override { (void)out; }
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = 20.0F, .height = 20.0F});
     }
@@ -52,9 +52,9 @@ AURORA_TEST_CASE(api_surface) {
     AURORA_TEST_CHECK_EQ(d.name, "Timer");
     auto d2 = t.describe();
     AURORA_TEST_CHECK_EQ(d2.name, "Timer");
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     t.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 1U);
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 1U);
 }
 
 AURORA_TEST_CASE(mount_with_running_scheduler_registers_interval) {
@@ -64,7 +64,7 @@ AURORA_TEST_CASE(mount_with_running_scheduler_registers_interval) {
     int fired = 0;
     auto child = std::make_shared<LeafProbe>();
     Timer t2(
-        std::chrono::seconds(1), [&](const SignalView<int> &) -> Node { return Node{child}; },
+        std::chrono::seconds(1), [&](const ReadOnlyState<int> &) -> Node { return Node{child}; },
         [&](int n) { fired = n; });
     BuildContext ctx;
     t2.mount(ctx);  // 有 Scheduler：set_interval 注册周期任务
@@ -89,7 +89,7 @@ AURORA_TEST_CASE(mount_with_running_scheduler_registers_interval) {
 
 AURORA_TEST_CASE(mount_without_scheduler_degrades_gracefully) {
     auto child2 = std::make_shared<LeafProbe>();
-    Timer t3(std::chrono::seconds(1), [&](const SignalView<int> &) -> Node { return Node{child2}; });
+    Timer t3(std::chrono::seconds(1), [&](const ReadOnlyState<int> &) -> Node { return Node{child2}; });
     BuildContext ctx;
     t3.mount(ctx);  // 无 Scheduler：降级告警 + 仍以 tick=0 挂载子 UI
     AURORA_TEST_CHECK_EQ(child2->mounts, 1);

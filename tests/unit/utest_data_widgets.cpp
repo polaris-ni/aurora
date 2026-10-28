@@ -201,9 +201,9 @@ AURORA_TEST_CASE(data_table_layout_size_matches_content) {
 
 AURORA_TEST_CASE(data_table_signal_view_write_through) {
     DataTable dt = make_table();
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     dt.collect_signals(sigs);
-    AURORA_TEST_REQUIRE_EQ(sigs.size(), 1U);  // selected_row 信号入收集集
+    AURORA_TEST_REQUIRE_EQ(sigs.sources().size(), 1U);  // selected_row 信号入收集集
 
     dt.selected_row().set(2);  // 信号直写 → 索引随之变化
     AURORA_TEST_CHECK_EQ(dt.selected_row_index(), 2);
@@ -456,9 +456,9 @@ AURORA_TEST_CASE(list_view_describe_and_signals) {
     AURORA_TEST_CHECK_TRUE(d.properties[0].required);
 
     ListView lv;
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     lv.collect_signals(sigs);
-    AURORA_TEST_CHECK_THAT(sigs, aurora::testing::matchers::is_empty());  // 无内部信号
+    AURORA_TEST_CHECK_TRUE(sigs.sources().empty());  // 无内部信号
 }
 
 AURORA_TEST_CASE(data_widgets_offscreen_paint_smoke) {

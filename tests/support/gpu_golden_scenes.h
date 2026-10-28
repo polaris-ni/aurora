@@ -81,7 +81,7 @@ inline auto draw_sector(au::Painter &p) -> void {
     props.categories = {"Mon", "Tue", "Wed", "Thu", "Fri"};
     props.axis_y = au::ChartAxisSpec{.label = "sales", .tick_count = 5};
     auto chart = std::make_shared<au::BarChart>(props);
-    chart->modifier.set(au::Modifier{}.width(320.0F).height(200.0F));
+    chart->set_modifier(au::Modifier{}.width(320.0F).height(200.0F));
     return au::Node{au::Column{au::Node{chart}}};
 }
 

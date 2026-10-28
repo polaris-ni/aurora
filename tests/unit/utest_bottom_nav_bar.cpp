@@ -51,9 +51,9 @@ AURORA_TEST_CASE(api_surface_and_select) {
     AURORA_TEST_CHECK_EQ(d.name, "BottomNavBar");
     auto d2 = bar.describe();
     AURORA_TEST_CHECK_EQ(d2.name, "BottomNavBar");
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     bar.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 0U);
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 0U);
 
     bar.set_selected_index(1);
     bar.set_bar_height(50.0F);

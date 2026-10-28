@@ -55,9 +55,9 @@ AURORA_TEST_CASE(default_rich_text_metadata_and_signal) {
     AURORA_TEST_CHECK_TRUE(has_text);
 
     // spans_ 是本控件唯一响应式信号。
-    std::vector<SignalViewBase *> out;
+    StateSink out;
     rt.collect_signals(out);
-    AURORA_TEST_CHECK_EQ(out.size(), 1U);
+    AURORA_TEST_CHECK_EQ(out.sources().size(), 1U);
 }
 
 AURORA_TEST_CASE(empty_spans_measure_and_layout_to_zero) {
@@ -75,7 +75,7 @@ AURORA_TEST_CASE(widget_layout_matches_measure_rich_text) {
     // 控件 on_layout 的尺寸必须与自由函数 measure_rich_text 一致（同约束同输入）。
     const std::vector<TextSpan> spans{
         TextSpan{.text = LocalizedString{"Hello rich text"}, .font = Font{.size_pt = 18.0F}}};
-    RichText rt{Reactive<std::vector<TextSpan>>{spans}};
+    RichText rt{spans};
     LayoutEngine::layout(rt, bounded(400.0F, 400.0F));
 
     const Size m = measure_rich_text(spans, 400.0F);
@@ -90,9 +90,9 @@ AURORA_TEST_CASE(narrow_width_wraps_deterministically) {
     const std::vector<TextSpan> spans{
         TextSpan{.text = LocalizedString{"one two three four five"}, .font = Font{.size_pt = 16.0F}}};
 
-    RichText one_line{Reactive<std::vector<TextSpan>>{spans}};
+    RichText one_line{spans};
     LayoutEngine::layout(one_line, bounded(400.0F, 400.0F));
-    RichText wrapped{Reactive<std::vector<TextSpan>>{spans}};
+    RichText wrapped{spans};
     LayoutEngine::layout(wrapped, bounded(1.0F, 10000.0F));
 
     AURORA_TEST_CHECK_NEAR(wrapped.size().height, 5.0F * one_line.size().height, 1e-4F);
@@ -129,10 +129,10 @@ AURORA_TEST_CASE(layout_carries_per_span_style) {
 
 AURORA_TEST_CASE(serialize_concatenates_and_deserialize_reloads) {
     // 序列化把全部 span 的字面文本拼接为 "text"；反序列化重建为单 span。
-    RichText src{Reactive<std::vector<TextSpan>>{std::vector<TextSpan>{
+    RichText src{std::vector<TextSpan>{
         TextSpan{.text = LocalizedString{"Hel"}, .color = Color::red()},
         TextSpan{.text = LocalizedString{"lo"}, .color = Color::blue()},
-    }}};
+    }};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "text"), "Hello");

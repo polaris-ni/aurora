@@ -66,7 +66,7 @@ auto layout_only(Widget &w) -> void {
 
 [[nodiscard]] auto render_chart(const ScatterChartProps &props) -> std::filesystem::path {
     auto chart = std::make_shared<ScatterChart>(props);
-    chart->modifier.set(Modifier{}.width(static_cast<float>(AURORA_WIDTH)).height(static_cast<float>(AURORA_HEIGHT)));
+    chart->set_modifier(Modifier{}.width(static_cast<float>(AURORA_WIDTH)).height(static_cast<float>(AURORA_HEIGHT)));
     Node root{Column{Node{chart}}};
     const std::filesystem::path tmp =
         std::filesystem::path(testing::isolation::temp_dir()) / "current_chart_scatter.png";

@@ -99,9 +99,9 @@ AURORA_TEST_CASE(describe_reports_metadata) {
 
     // 无响应式信号。
     Canvas c;
-    std::vector<SignalViewBase *> out;
+    StateSink out;
     c.collect_signals(out);
-    AURORA_TEST_CHECK_EQ(out.size(), 0U);
+    AURORA_TEST_CHECK_EQ(out.sources().size(), 0U);
 }
 
 AURORA_TEST_CASE(serialize_notes_callback_and_roundtrips_lengths) {

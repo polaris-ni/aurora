@@ -147,9 +147,9 @@ AURORA_TEST_CASE(formfield_serialize_writes_error_text) {
     f->serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "error_text"), std::string{"This field is required"});
 
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     f->collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 1U);  // 仅内部 error_ 信号
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 1U);  // 仅内部 error_ 信号
 }
 
 AURORA_TEST_CASE(formfield_layout_grows_with_error_and_paints) {
@@ -230,9 +230,9 @@ AURORA_TEST_CASE(form_set_gap_and_layout_stacks) {
     AURORA_TEST_CHECK_GT(form.size().height, 0.0F);
     AURORA_TEST_CHECK_LE(form.size().width, 320.0F);
 
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     form.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 0U);  // Form 自身无信号
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 0U);  // Form 自身无信号
 }
 
 AURORA_TEST_CASE(form_describe_metadata) {

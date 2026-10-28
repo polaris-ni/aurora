@@ -52,32 +52,38 @@ AURORA_TEST_CASE(show_hidden_collapses_to_zero) {
 }
 
 AURORA_TEST_CASE(show_state_driven_visibility) {
-    auto state = std::make_shared<State<bool>>(false);
+    State<bool> state{false};
     Show s(state, box(80.0F, 30.0F));
     AURORA_TEST_CHECK_FALSE(s.is_visible());
     LayoutEngine::layout(s, bounded(200.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(s.size().width, 0.0F, 1e-4F);
 
     // 状态翻转 → 可见（重新布局后尺寸透传）。
-    state->set(true);
+    state.set(true);
     AURORA_TEST_CHECK_TRUE(s.is_visible());
     LayoutEngine::layout(s, bounded(200.F, 100.0F));
     AURORA_TEST_CHECK_NEAR(s.size().width, 80.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(show_collects_state_signal) {
-    auto state = std::make_shared<State<bool>>(true);
+    State<bool> state{true};
     Show s(state, box(1.0F, 1.0F));
-    std::vector<aurora::SignalViewBase *> out;
+    StateSink out;
     s.collect_signals(out);
-    AURORA_TEST_REQUIRE_EQ(out.size(), 1U);
-    AURORA_TEST_CHECK_EQ(out[0], state.get());
+    AURORA_TEST_REQUIRE_EQ(out.sources().size(), 1U);
+    const auto *source = dynamic_cast<const detail::SourceOf<bool> *>(out.sources()[0].get());
+    AURORA_TEST_REQUIRE_NOT_NULL(source);
+    AURORA_TEST_CHECK_TRUE(source->value());
 
-    // bool 构造无信号。
+    // bool 构造同样装一份自有常量来源（与 Progress/Checkbox 的字面量构造同口径）：
+    // 采集收录当前安装来源，值为构造字面量、不可写。
     Show plain(true, box(1.0F, 1.0F));
-    std::vector<aurora::SignalViewBase *> empty;
-    plain.collect_signals(empty);
-    AURORA_TEST_CHECK_EQ(empty.size(), 0U);
+    StateSink own;
+    plain.collect_signals(own);
+    AURORA_TEST_REQUIRE_EQ(own.sources().size(), 1U);
+    const auto *own_source = dynamic_cast<const detail::SourceOf<bool> *>(own.sources()[0].get());
+    AURORA_TEST_REQUIRE_NOT_NULL(own_source);
+    AURORA_TEST_CHECK_TRUE(own_source->value());
 }
 
 AURORA_TEST_CASE(show_serializes_visibility) {

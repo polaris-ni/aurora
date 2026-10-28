@@ -76,7 +76,7 @@ auto ring_sample(const Painter &p, const Rect &box) -> Color {
 /// 挂载 + 布局成 160×40 的盒，供用例自行驱动焦点管理器后再绘制。
 template <typename W>
 auto prep(W &w, BuildContext &ctx) -> void {
-    w.modifier.set(Modifier{}.size(160.0F, 40.0F));
+    w.set_modifier(Modifier{}.size(160.0F, 40.0F));
     w.mount(ctx);
     const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
                          .max = Size{.width = AURORA_CANVAS_W, .height = AURORA_CANVAS_H}};

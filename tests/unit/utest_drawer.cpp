@@ -43,7 +43,7 @@ class LeafProbe final : public Widget {
     int mounts = 0;
     int unmounts = 0;
     [[nodiscard]] auto type_name() const -> const char * override { return "LeafProbe"; }
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { (void)out; }
+    auto collect_signals(StateSink &out) -> void override { (void)out; }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
@@ -178,9 +178,9 @@ AURORA_TEST_CASE(progress_dialog_api_surface) {
     AURORA_TEST_CHECK_EQ(def.is_open(), false);
     AURORA_TEST_CHECK_EQ(def.progress(), -1.0F);
     AURORA_TEST_CHECK_EQ(def.message(), "");
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     def.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 1U);  // 仅 progress_
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 1U);  // 仅 progress_
     (void)def.describe();
 
     // 聚合构造 + 取值 setter + 进度归一。
@@ -289,9 +289,9 @@ AURORA_TEST_CASE(page_view_api_surface) {
     AURORA_TEST_CHECK_EQ(pv.page_count(), 3U);
     AURORA_TEST_CHECK_EQ(pv.current_page(), 2);  // 夹到 size-1
     AURORA_TEST_CHECK_EQ(pv.wants_click(), true);
-    std::vector<SignalViewBase *> psigs;
+    StateSink psigs;
     pv.collect_signals(psigs);
-    AURORA_TEST_CHECK_EQ(psigs.size(), 1U);  // 仅 current_
+    AURORA_TEST_CHECK_EQ(psigs.sources().size(), 1U);  // 仅 current_
     (void)pv.describe();
 
     PageView under{std::vector<Node>{Node{a}, Node{b}, Node{c}}, -5};

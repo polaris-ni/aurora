@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/preferences/preferences.h
 /// 测试说明: Preferences 内存/文件双模式、显式
-/// flush/reload、点号路径助手、墓碑删除与清空纪元、分组作用域、watch/binding 响应式、单例与并发冒烟
+/// flush/reload、点号路径助手、墓碑删除与清空纪元、分组作用域、watch 只读响应式、单例与并发冒烟
 
 #include <chrono>
 #include <filesystem>
@@ -20,6 +20,13 @@ namespace aurora::test_cases::utest_preferences {
 
 namespace prefs = aurora::preferences;
 namespace m = aurora::testing::matchers;  // 匹配器工厂别名
+
+namespace {
+/// @brief watch 句柄的编译期判据：只读句柄不得暴露 `set` 写入入口。
+/// @tparam S 被检查的句柄类型。
+template <typename S>
+concept has_set_entry = requires(S handle) { handle.set(std::string{}); };
+}  // namespace
 
 /// @brief 本用例的临时目录：框架每用例接管 TMP/TEMP/TMPDIR，temp_directory_path() 已是
 /// 用例唯一目录，再挂固定子目录并先行清场，保证幂等与跨用例/跨进程并行安全。
@@ -204,37 +211,39 @@ AURORA_TEST_CASE(group_scope_nested_and_isolation) {
 }
 
 AURORA_TEST_CASE(watch_state_receives_updates) {
-    // watch：惰性创建 State<T>，set 推送订阅者；初始值取既有存储；同键同类型复用同一 State。
+    // watch：惰性创建只读句柄；set 推送订阅的持有者；初始值取既有存储；同键同类型复用同一来源。
     prefs::Preferences p;
     auto state = p.watch<int>("counter", 0);
-    AURORA_TEST_REQUIRE(state != nullptr);
-    AURORA_TEST_CHECK_EQ(state->get(), 0);  // 初始为 fallback
-    p.set("counter", 5);  // 写入推送已订阅的 State
-    AURORA_TEST_CHECK_EQ(state->get(), 5);
+    AURORA_TEST_CHECK_EQ(state.get(), 0);  // 初始为 fallback
+    p.set("counter", 5);  // 写入推送已订阅的来源
+    AURORA_TEST_CHECK_EQ(state.get(), 5);
 
     p.set("volume", 7);
     auto existing = p.watch<int>("volume", 0);
-    AURORA_TEST_CHECK_EQ(existing->get(), 7);  // 初始值来自存储而非 fallback
+    AURORA_TEST_CHECK_EQ(existing.get(), 7);  // 初始值来自存储而非 fallback
 
-    AURORA_TEST_CHECK(p.watch<int>("counter", 0) == state);  // 缓存复用
+    // 缓存复用：再次 watch 同键拿到同一来源，一次写入两枚句柄同时可见。
+    auto again = p.watch<int>("counter", 0);
+    p.set("counter", 9);
+    AURORA_TEST_CHECK_EQ(state.get(), 9);
+    AURORA_TEST_CHECK_EQ(again.get(), 9);
 }
 
-AURORA_TEST_CASE(binding_remove_deletes_key) {
-    // binding 实际语义（以运行时行为为准）：Binding 是 watch State 的单向下游视图——
-    // binding.set 只更新 State（控件侧可见），不写回存储；存储写回仍走 p.set。
-    // remove() 触发注入的删除回调（墓碑语义），删除存储键。
+AURORA_TEST_CASE(watch_is_readonly_and_remove_deletes_key) {
+    // watch 的只读所有权：修改配置只走 p.set / p.remove；watch 句柄不提供写入口。
+    static_assert(!has_set_entry<ReadOnlyState<std::string>>, "watch handle must not expose a write entry");
     prefs::Preferences p;
-    auto binding = p.binding<std::string>("session", std::string(""));
-    AURORA_TEST_CHECK(binding.bound());
-    AURORA_TEST_CHECK(binding.removable());  // 已注入删除回调
-    binding.set(std::string("token"));
-    AURORA_TEST_CHECK_EQ(binding.get(), std::string("token"));  // State 侧可见
-    AURORA_TEST_CHECK(!p.contains("session"));  // 不写回存储
-    p.set("session", std::string("token"));  // 存储写回走 set_impl
+    const auto watched = p.watch<std::string>("session", std::string(""));
+    AURORA_TEST_CHECK_EQ(watched.get(), std::string(""));
+    p.set("session", std::string("token"));
+    AURORA_TEST_CHECK_EQ(watched.get(), std::string("token"));
     AURORA_TEST_CHECK_EQ(p.get<std::string>("session", ""), std::string("token"));
-    binding.remove();
+
+    p.remove("session");
     AURORA_TEST_CHECK(!p.contains("session"));
-    // 契约：remove 后 Binding 失效（上游 State 随注册表清除），不再 get/set。
+    AURORA_TEST_CHECK_EQ(watched.get(), std::string("token"));  // 既有句柄保留最后值（自有来源）
+    auto rebuilt = p.watch<std::string>("session", std::string(""));
+    AURORA_TEST_CHECK_EQ(rebuilt.get(), std::string(""));  // 删除后重建 watch 回到 fallback
 }
 
 AURORA_TEST_CASE(singleton_same_name_returns_same_instance) {

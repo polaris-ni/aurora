@@ -139,7 +139,7 @@ auto scenarios() -> std::vector<Scenario> {
         {.name = "padding_inset",
          .build = []() -> Node {
              auto col = std::make_shared<Column>();
-             col->modifier.set(Modifier{}.padding(20.0F));
+             col->set_modifier(Modifier{}.padding(20.0F));
              col->add(box(100.0F, 50.0F));
              return Node{col};
          }},

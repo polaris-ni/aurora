@@ -127,7 +127,7 @@ AURORA_TEST_CASE(modifier_context_menu_open_close) {
 
 AURORA_TEST_CASE(widget_right_click_opens_context_menu) {
     const auto t = std::make_shared<Text>("Target");
-    t->modifier.set(Modifier{}.context_menu(std::vector{MenuItem{"Cut"}}));
+    t->set_modifier(Modifier{}.context_menu(std::vector{MenuItem{"Cut"}}));
 
     constexpr BuildContext ctx;
     t->mount(ctx);
@@ -140,37 +140,37 @@ AURORA_TEST_CASE(widget_right_click_opens_context_menu) {
     t->on_pointer_event(e);
     AURORA_TEST_CHECK_TRUE(e.is_handled);
 
-    const auto items = t->modifier.get().active_context_menu_items();
+    const auto items = t->modifier().active_context_menu_items();
     AURORA_TEST_CHECK_EQ(items.size(), 1U);
     AURORA_TEST_CHECK_STREQ(items.at(0).label, "Cut");
 
     // 左键按下不应触发上下文菜单。
-    t->modifier.get().close_context_menu();
+    t->modifier().close_context_menu();
     MouseEvent e2;
     e2.button = MouseButton::Left;
     e2.action = MouseAction::Press;
     e2.position = Point{.x = 10.0F, .y = 10.0F};
     t->on_pointer_event(e2);
-    AURORA_TEST_CHECK_TRUE(t->modifier.get().active_context_menu_items().empty());
+    AURORA_TEST_CHECK_TRUE(t->modifier().active_context_menu_items().empty());
 }
 
 AURORA_TEST_CASE(widget_tick_drives_tooltip_delay) {
     const auto t = std::make_shared<Text>("Hover me");
-    t->modifier.set(Modifier{}.tooltip("Widget Tip", 80.0F));
+    t->set_modifier(Modifier{}.tooltip("Widget Tip", 80.0F));
 
     constexpr BuildContext ctx;
     t->mount(ctx);
 
     const auto now = std::chrono::steady_clock::now();
-    t->modifier.get().tooltip_hover_start(now);
+    t->modifier().tooltip_hover_start(now);
 
     // 未达阈值。
     t->tick(now + std::chrono::milliseconds(40));
-    AURORA_TEST_CHECK_TRUE(t->modifier.get().active_tooltip().empty());
+    AURORA_TEST_CHECK_TRUE(t->modifier().active_tooltip().empty());
 
     // 达到阈值。
     t->tick(now + std::chrono::milliseconds(100));
-    AURORA_TEST_CHECK_STREQ(t->modifier.get().active_tooltip(), "Widget Tip");
+    AURORA_TEST_CHECK_STREQ(t->modifier().active_tooltip(), "Widget Tip");
 }
 
 AURORA_TEST_CASE(context_menu_submenu_items_preserved) {
