@@ -130,6 +130,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.FEAT.NET.WEBSOCKET.001 | WebSocket 客户端（RFC 6455 握手 / 分帧 / ping-pong / close code） | 长连接双向增量数据可订阅，帧上限与关闭语义明确 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.FEAT.NET.DECLARATIVE-BINDING.001 | 异步结果三态响应式绑定（`state` 模块的 `Resource` / `StreamResource`） | 请求即状态源，`loading / ready / failed` 定点刷新，重发自动取消前序且宿主失效不回调 | [`02-state.md`](specification/02-state.md) §7.3 |
 | SPEC.FEAT.NET.OBSERVABILITY.001 | 网络活动可观测（进程级事件总线与活动存储、请求时间线 + 活动表、Inspector / MCP 暴露、凭据分级强制脱敏） | AI 能从一次界面异常按 `X-Request-Id` 反查到每一跳的耗时、失败阶段与归因，且四个导出面（`Timeline` / `InspectorJson` / `Log` / `ErrorDetail`）在宿主策略下均不泄漏凭据原值；Release 构建如实回 unavailable 而非静默假成功 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8.36–§8.8.39、[`08-tooling.md`](specification/08-tooling.md) §10.2、[`ARCHITECTURE.md`](ARCHITECTURE.md) §14 |
+| SPEC.FEAT.NET.CONNECTIVITY.001 | 网络链路态监听（同步采集腿读 OS 事实：Windows 路由 / 接口表、Linux 路由伪文件 + sysfs `operstate`，Apple 腿未落地故如实回 `None`；不对称三态状态机、变更订阅与建连旁证插队） | AI 能把一批失败归因到同一场链路故障（`/api/network` 的 `connectivity` 字段与 `snapshot()` 同源），且库**不因此拒发任何请求**——链路态只是读者可查询的事实与退避提示，闸仍只在 `NetPolicy` 与能力闸；无源与读不到一律如实回 `Unknown`，不折算成离线也不折算成在线 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8.41 |
 | SPEC.TEST.NET.OFFLINE-FIXTURE.001 | 可注入假引擎与离线网络夹具（`FakeEngine` + 条件等待辅助） | 超时、取消、半关闭、TLS 失败等故障可在禁网 CI 内逐值断言，网络行为可验证性不退化 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8、[`ARCHITECTURE.md`](ARCHITECTURE.md) §14 |
 
 ---

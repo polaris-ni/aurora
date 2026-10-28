@@ -433,9 +433,9 @@ CHG-006 的十枚 `net-*` slug 是冻结对外契约，只增不改。新增组�
 
 ### 15 非目标（明确不做）
 
-不做 HTTP 服务端框架（Inspector 自用面除外）；不做 HTTP/2、HTTP/3、QUIC；不做磁盘持久缓存与离线策略；不做代理自动发现（PAC）与代理认证交互 UI；不做网络状态监听与自动重连编排（`RetryPolicy` 只覆盖单请求重试，链路级重连留给使用方与 `Scheduler` 组合）；不做跨进程网络服务（与 `SPECIFICATIONS.md` §4.1「不包含：跨进程」一致）；首批不做 WinHTTP / NSURLSession 平台 HTTP 引擎、不做 wasm WebSocket 桥接（见 §16 裁决记录）；不做 `br` / `zstd` 解压、请求体压缩、`permessage-deflate`（皆需 vendored 新依赖）；不做 GBK / Big5 等 legacy charset 解码；不做 Digest / NTLM / Negotiate 认证栈；不做凭据安全存储；不做全量 socket 选项封装与拦截器全链语义；不 vendored 任何 TLS 源码；不引入 GPU / 线程池语义变更。
+不做 HTTP 服务端框架（Inspector 自用面除外）；不做 HTTP/2、HTTP/3、QUIC；不做磁盘持久缓存与离线策略；不做代理自动发现（PAC）与代理认证交互 UI；不做网络状态监听与自动重连编排（`RetryPolicy` 只覆盖单请求重试，链路级重连留给使用方与 `Scheduler` 组合）——本句**前半句由 §16 第 48 项改判、后半句原样有效**；不做跨进程网络服务（与 `SPECIFICATIONS.md` §4.1「不包含：跨进程」一致）；首批不做 WinHTTP / NSURLSession 平台 HTTP 引擎、不做 wasm WebSocket 桥接（见 §16 裁决记录）；不做 `br` / `zstd` 解压、请求体压缩、`permessage-deflate`（皆需 vendored 新依赖）；不做 GBK / Big5 等 legacy charset 解码；不做 Digest / NTLM / Negotiate 认证栈；不做凭据安全存储；不做全量 socket 选项封装与拦截器全链语义；不 vendored 任何 TLS 源码；不引入 GPU / 线程池语义变更。
 
-### 16 裁决记录（四十七项，全部定案）
+### 16 裁决记录（四十八项，全部定案）
 
 评审应答的逐条定案见 §18（其中第 8 项改判了本节第 10 条关于证书 pinning 的取舍），预算与迁移时间表见 §19、§20。
 
@@ -581,6 +581,16 @@ CHG-006 的十枚 `net-*` slug 是冻结对外契约，只增不改。新增组�
     - **⑦ 两问各带一枚递归闸**：线程局部栈记住「本线程正在回调的那枚钩子」，同一枚钩子在回调里再发起一次经过同一条链的交换时被跳过并记一行 WARN（起手侧与收摊侧同一条形态）。这与「钩子不得持有 `Client`」是同一件事的两半：前者防递归跑两遍，后者防引用环。摘掉闸的变异以 `STATUS_STACK_OVERFLOW` 中止而非静默通过，正是这条判据要的形态。
 
     无新增错误码（`http-request-invalid` / `net-cancelled` / `net-policy-violated` 一族够用），无新增构建宏，本件不随 `AURORA_ENABLE_DEBUG` 裁切。
+
+48. **链路态监听：§15 前半句改判、后半句保留**（契约见 [`specification/06-app-platform.md`](../../specification/06-app-platform.md) §8.8.41）。§15 原句把「网络状态监听」与「自动重连编排」捆在一起否掉，本件只把前半句拆出来改判，后半句逐字保留。六处定案：
+    - **① 采集形态 = 同步读事实 + 失败插队，不用逐平台原生事件**。三条实测阻塞换来这个形态：Win32 的连通性通知给的是 waitable `HANDLE`，内核对象进不了 `WSAPoll` 的句柄数组（`socket.cpp` 是唯一落点，且 §16 第 12 项记过同一类冲突——`WSAEventSelect` 会把套接字置入事件态、与同步收发面互斥）；Linux 的 `rtnetlink` 虽是可等 fd，但要求平台 socket 头出现在 `socket.cpp` 之外，正面破那条不变量；Windows 上真正给出「有无外网」的 `INetworkListManager` 是 COM 接口，要引一套 apartment 生命周期与消息泵依赖。三者合计代价是「至少一条自有线程或一套 COM」。同步采集把它压成一枚无句柄、无回调、可在引擎线程上调用的查询，故**零新线程、跨平台同形、可在库内注入替身做逐值单测**；感知延迟由「失败插队」补回——一次真失败的往返就是一次最诚实的探测。
+    - **② 三平台原语统一为一句话**：是否存在一条**经非回环、operational 接口的缺省路由**。Linux 读 `/proc/net/route`（IPv4 缺省：Destination 全零、Flags 含 RTF_UP 且不含 RTF_REJECT）与 `/proc/net/ipv6_route`（IPv6 缺省：目的前缀长 0、Flags 含 RTF_UP），再按接口名读 `/sys/class/net/<if>/operstate` 与 `flags`（IFF_UP）；`operstate` 聚合规则写死——`up` 与 `unknown` 视为 operational，`down` / `dormant` / `lowerlayerdown` / `notpresent` / `testing` / 读不到均不视为，`lo` 一律排除。
+    - **③ 阈值不对称，且只有探测腿能判离线**。判通慢、判断快：转入 `Offline` 需 `offline_evidence` 枚合格的**探测**读数（缺省 1）；转入 `Online` 需 `online_evidence` 枚一致正证（缺省 2）。代价论证：误判离线只是界面多一枚不准的提示，宿主请求照样发、失败照样按九档归因，事实不丢；误判在线会让宿主**停止退避并立刻重试**，在真断链窗口里把一次故障放大成一片刷屏失败——两侧代价不等，故阈值不等。**连接失败一律不作负证**：`Dns` 同时覆盖 NXDOMAIN 与解析器故障，`Unreachable` 同时覆盖 ECONNREFUSED 与 ENETUNREACH，`Proxy` 覆盖 407、协议错误与配置读不到，任一类当负证都会造出假离线。
+    - **④ 链路态不是发起闸**。探测口径与真实路径不等价（服务可只在链路本地可达、VPN 路由表在探测面外、容器里读不到拓扑），拿它当闸等于把可交付请求变成**库侧自己发起的失败**——对端不留痕、时间线看不出根因。闸仍只在 `NetPolicy` 与能力闸两处，本件产物只是读者可查询的事实 + 变更通知。
+    - **⑤ 旁证不走事件总线**。总线在 `AURORA_ENABLE_DEBUG=OFF` 下整类裁为空壳，而 §1.2 定的是 net 面事件口恒在；共用一条通道会让 Release 下的链路态**变钝**。故另开库内单点入口 `detail::note_connection_outcome(...)`，由全库唯一建连出口 `detail::await_connect_via` 的结局处调用一处。
+    - **⑥ 三档而非四档，`Online` 不等于互联网可达**。「有链路、无外网」这一档三平台语义各不同（macOS 动态存储键只说明缺省服务、Windows 的连通性提示与 wininet 连接态分处两枚 API、Linux 只能旁证推断），开档等于承诺一份只有个别平台说得清的语义。细节由附带事实承担：`source` / `cause` / `generation` / `since` / `stale` / `last_failure`（冻结错误码 slug，**不含主机名与 URL**）。
+
+    无新增错误码（不可得一律复用既有的 `net-platform-unavailable`），无新增构建宏。
 
 ### 17 落地切片（按依赖顺序，可独立评审与验收）
 

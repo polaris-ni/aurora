@@ -45,7 +45,7 @@
 
 ### 1.2 TLS 后端引擎宏与 `AURORA_ENABLE_NET_TLS_SYSTEM` / `AURORA_NET_TLS_PROVIDERS`
 
-`aurora::net` 的事件引擎、事件源注册口与传输族**没有开关**：公共 API 恒在（提案 §8 的第一句裁决），裁剪面只落在「哪个 TLS 引擎被编进来」这一处，因此 `AURORA_ENABLE_NET` / `AURORA_NET_ENGINE_POLL` / `AURORA_NET_EVENT_SOURCE` / `AURORA_NET_HTTP_FETCH` 四枚原规划宏**不属首批落地面**（提案 §8 的宏表按本条读取，「平台 HTTP 引擎」是 §16 的非目标）。**wasm 腿的浏览器 `fetch` HTTP 路径随平台直接启用、无独立开关**（提案 §16 第 37 项：`Client::send` 在 `AURORA_PLATFORM_WASM` 下自动改道 fetch 桥，node 真跑探针 `aurora_verify_wasm_fetch` 随默认 wasm 构建交付）。
+`aurora::net` 的事件引擎、事件源注册口、传输族与链路态监听**没有开关**：公共 API 恒在（提案 §8 的第一句裁决），裁剪面只落在「哪个 TLS 引擎被编进来」这一处，因此 `AURORA_ENABLE_NET` / `AURORA_NET_ENGINE_POLL` / `AURORA_NET_EVENT_SOURCE` / `AURORA_NET_HTTP_FETCH` 四枚原规划宏**不属首批落地面**（提案 §8 的宏表按本条读取，「平台 HTTP 引擎」是 §16 的非目标）。链路态监听（[`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.41）还多一条：它**不随 `AURORA_ENABLE_DEBUG` 裁切**——正因如此，建连旁证走库内单点入口而不是事件总线（总线在 Debug 关时整类退化为空壳），`/api/network` 的 `connectivity` 字段在 Release 构建下也照常产出。**wasm 腿的浏览器 `fetch` HTTP 路径随平台直接启用、无独立开关**（提案 §16 第 37 项：`Client::send` 在 `AURORA_PLATFORM_WASM` 下自动改道 fetch 桥，node 真跑探针 `aurora_verify_wasm_fetch` 随默认 wasm 构建交付）。
 
 | 宏 | 默认 | 语义 |
 |:---|:---|:---|
@@ -168,7 +168,7 @@ cmake --build build-verify --target aurora_verify_x11_cursor
 | `AURORA_BACKEND_D3D11` | `OFF` | D3D11 GPU 增量上屏后端（`D3D11Surface`） | `AURORA_BACKEND_D3D11` | `d3d11` `dxgi` `d3dcompiler`（仅 `_WIN32`） |
 | `AURORA_BACKEND_GPU_WGPU` | `OFF` | wgpu GPU 栅格后端（`WgpuRhi`；真窗口帧路径 `WgpuWin32Surface` / `WgpuX11Surface` / `WgpuWaylandSurface` 另与宿主 `AURORA_BACKEND_WIN32` ∨ `AURORA_BACKEND_X11` ∨ `AURORA_BACKEND_WAYLAND` 合取），源码经 cargo 构建，需 Rust 工具链 + libclang，配置期缺项 FATAL，见 §3.8 | `AURORA_BACKEND_GPU_WGPU` | `wgpu_native` 静态库 + `ws2_32` `userenv` `bcrypt` `advapi32` `oleaut32` `ntdll`(Windows)/`dl` `pthread` `m`(Linux) |
 | `AURORA_BACKEND_GLFW` | `OFF` | GLFW + OpenGL（上下文 3.3 兼容剖面，绘制 1.1 立即模式） | `AURORA_BACKEND_GLFW` | `glfw` 目标（源码静态库）+ `opengl32`(Windows)/`OpenGL::GL`(其他平台) |
-| `AURORA_BACKEND_X11` | `OFF` | X11 / Linux 桌面后端（`X11Surface`，pimpl 完整实现） | `AURORA_BACKEND_X11` | `${X11_LIBRARIES}`（`find_package(X11)`） |
+| `AURORA_BACKEND_X11` | `OFF` | X11 / Linux 桌面后端（`X11Surface`，pimpl 完整实现） | `AURORA_BACKEND_X11` | `${X11_LIBRARIES} ${X11_Xfixes_LIB}`（`find_package(X11)`；XFIXES 供剪贴板选择区归属监听，缺项配置期 FATAL） |
 | `AURORA_BACKEND_WAYLAND` | `OFF` | 原生 Wayland / Linux 桌面后端（`WaylandSurface`，pimpl 完整实现） | `AURORA_BACKEND_WAYLAND` | `${WAYLAND_CLIENT_LIBRARIES}` `${WAYLAND_CURSOR_LIBRARIES}` `${XKBCOMMON_LIBRARIES}`（`pkg-config`） |
 | `AURORA_BACKEND_MACOS` | `OFF` | macOS 后端（`MacOSSurface`，顶层 `enable_language(OBJCXX)` 先于目标定义，非 Apple 开启 FATAL） | `AURORA_BACKEND_MACOS` | `Cocoa` `AppKit`（框架） |
 | `AURORA_BACKEND_WASM` | `OFF` | WebAssembly 后端（`WasmSurface`，需 Emscripten 工具链：`cmake --preset wasm`（经 `$EMSDK` 注入 toolchain，等价 `emcmake cmake`）；非 Emscripten 开启 FATAL。构建期生成器改经 `_native_tools` 原生子项目产出，见 `AuroraTools.cmake`） | `AURORA_BACKEND_WASM` | Emscripten 工具链 |
@@ -193,7 +193,7 @@ cmake -S . -B build -DAURORA_BACKEND_GLFW=ON
 
 | 后端 | Fedora / RHEL | Debian / Ubuntu |
 |:---|:---|:---|
-| X11 | `dnf install libX11-devel` | `apt install libx11-dev` |
+| X11 | `dnf install libX11-devel libXfixes-devel` | `apt install libx11-dev libxfixes-dev` |
 | Wayland | `dnf install wayland-devel wayland-protocols-devel libxkbcommon-devel` | `apt install libwayland-dev wayland-protocols libxkbcommon-dev` |
 | GLFW（X11 扩展） | `dnf install libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel libXext-devel` | `apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev` |
 | GLFW（OpenGL 链接） | `dnf install mesa-libGL-devel` | `apt install libgl1-mesa-dev` |

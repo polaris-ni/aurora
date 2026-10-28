@@ -320,4 +320,4 @@ au::Column(au::ColumnProps{
 
 **验收标准：** ① 一次落定只通知一次；② `reload()` 取消前序作业，且其迟到结果不覆盖新状态；③ 宿主析构后抵达的回调被丢弃，无悬垂访问；④ `StreamResource` 的 `Append` / `Replace` 两策略与帧内合并批次（`batch_bytes()` 为累计量）；⑤ 默认超时 30 s、`reload()` 不去抖，默认值在声明处可见。单测见 `tests/unit/utest_state_resource.cpp`。
 
-**约束：** 状态写入限主线程（须先装主线程投递器）；取消只改结果的投递去向，不中断作业体（作业体之外那一半见 §5.1 的口径补充：来源登记了 `on_cancel` 时，取消同时掐停来源的在途作业——HTTP 交付面即如此，判据在 `tests/unit/utest_net_http_binding.cpp`）；去抖与超时复用 `Task<T>` 的既有通道，精度口径随其构建模式（见 §5.1）。
+**约束：** 状态写入限主线程（须先装主线程投递器）；取消只改结果的投递去向，不中断作业体（作业体之外那一半见 §5.1 的口径补充：来源登记了 `on_cancel` 时，取消同时掐停来源的在途作业——HTTP 交付面即如此，判据在 `tests/unit/utest_net_http_binding.cpp`）；去抖与超时复用 `Task<T>` 的既有通道，精度口径随其构建模式（见 §5.1）。**持续态事实不进这三态容器**：`Resource` / `StreamResource` 折算的是「一次作业的落定」，而链路态（[`06-app-platform.md`](06-app-platform.md) §8.8.41）没有落定时刻、也不由本容器驱动——宿主在 `ConnectivityMonitor::subscribe()` 的回调里写自己的 store（回调已回投主线程），故 `state/` 仍不认识网络。

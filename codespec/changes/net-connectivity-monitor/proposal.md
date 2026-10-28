@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-028 |
 | 提出日期 | 2026-10-21 |
-| 当前状态 | 已提议 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 |
 | 影响面 | 一枚新公共头 include/aurora/net/connectivity.h（三枚举 `NetworkState` / `ConnectivitySource` / `ConnectivityChangeCause`、三结构体 `ConnectivityFact` / `ConnectivityChange` / `ConnectivityOptions`、两类 `ConnectivityMonitor` / `ConnectivityRegistration`、三枚令牌换算自由函数，合计八个类型）。**零新增错误码**（不可得一律复用既有 `net-platform-unavailable`）、**零新增 feature 宏**（`BUILD_OPTIONS.md` §1.2 的「net 面无开关」口径不变）、`Client` / `Response` / `Engine` / `Capabilities` / `ExchangeHook` **零改动**、**零新线程**、**零出站 I/O**；`/api/network` 的**正常形状与 Release 早退形状**顶层同时追加同一枚 `connectivity` 对象（既有字段逐值不变），MCP 工具数 24 不变；Windows 采集腿所需的 `<winsock2.h>` 只出现在 `socket.cpp` 内，平台 socket 头唯一落点不变量不放宽；伞形提案 §15 那句「不做网络状态监听与自动重连编排」由 §16 追加裁决**改判前半句、保留后半句**，旧编号与旧文字一律在位（防伪死链） |
 
