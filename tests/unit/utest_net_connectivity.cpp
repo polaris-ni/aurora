@@ -3,7 +3,8 @@
 /// 测试说明: 链路态公共面——快照首态、订阅交付、插队合并（50 次失败只采 1 次）、登记失败清待采样位、
 ///           注册句柄三条契约、停机后快照可读。定时器经 `FakeEngine` 脚本化推进（零实时睡眠），
 ///           读数经库内探针钩子注入（零出站 I/O）；钩子与进程级运行时在每个用例内成对拆装，
-///           避免用例间相互污染。
+///           避免用例间相互污染。wasm 无采集腿且无证据通路，订阅类用例按 §8.8.41 契约降级为
+///           skip，另有一条专测 `subscribe()` / `refresh()` 如实回 `net-platform-unavailable`。
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -57,6 +58,9 @@ AURORA_TEST_CASE(connectivity_facade_snapshot_never_sampled_is_unknown) {
 }
 
 AURORA_TEST_CASE(connectivity_facade_subscribe_delivers_online_after_sample) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("wasm has neither a collection source nor a connect-evidence path; subscribe is rejected");
+#else
     reset_connectivity_for_test();
     set_connectivity_probe_hook({});
     aurora::test::FakeEngine engine;
@@ -79,10 +83,14 @@ AURORA_TEST_CASE(connectivity_facade_subscribe_delivers_online_after_sample) {
     AURORA_TEST_CHECK_EQ(static_cast<int>(seen.back().current.state), static_cast<int>(NetworkState::Online));
     AURORA_TEST_CHECK_EQ(probe.calls, 1);  // 仅一次真实探测
     set_connectivity_probe_hook({});
+#endif
 }
 
 AURORA_TEST_CASE(connectivity_facade_fifty_failures_merge_to_one_probe) {
     // 验收 7：连投 50 次失败旁证，有效探测调用恰为 1 次、订阅者不因 50 次失败刷 50 条通知。
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("wasm has neither a collection source nor a connect-evidence path; subscribe is rejected");
+#else
     reset_connectivity_for_test();
     set_connectivity_probe_hook({});
     aurora::test::FakeEngine engine;
@@ -105,11 +113,15 @@ AURORA_TEST_CASE(connectivity_facade_fifty_failures_merge_to_one_probe) {
     AURORA_TEST_CHECK_EQ(probe.calls, 1);  // 订阅采样 + 50 失败合并为同一枚待采样轮次 ⇒ 只采 1 次
     AURORA_TEST_CHECK_EQ(seen.size(), 0U);  // 读不到不转换 ⇒ 无通知
     set_connectivity_probe_hook({});
+#endif
 }
 
 AURORA_TEST_CASE(connectivity_facade_failed_registration_clears_pending) {
     // 验收 10：登记一拍失败时待采样位必须清零；否则此后每一拍都合并进一枚不存在的定时器，
     // 链路永久停在首态且再没有第二次尝试的机会。
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("wasm has neither a collection source nor a connect-evidence path; subscribe is rejected");
+#else
     reset_connectivity_for_test();
     set_connectivity_probe_hook({});
     aurora::test::FakeEngine engine;
@@ -140,9 +152,13 @@ AURORA_TEST_CASE(connectivity_facade_failed_registration_clears_pending) {
     AURORA_TEST_CHECK_EQ(seen.size(), 1U);
     AURORA_TEST_CHECK_EQ(static_cast<int>(seen.back().current.state), static_cast<int>(NetworkState::Online));
     set_connectivity_probe_hook({});
+#endif
 }
 
 AURORA_TEST_CASE(connectivity_facade_registration_handle_contracts) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("wasm has neither a collection source nor a connect-evidence path; subscribe is rejected");
+#else
     reset_connectivity_for_test();
     set_connectivity_probe_hook({});
     aurora::test::FakeEngine engine;
@@ -168,6 +184,33 @@ AURORA_TEST_CASE(connectivity_facade_registration_handle_contracts) {
     moved = ConnectivityRegistration{};
     AURORA_TEST_CHECK_FALSE(moved.is_registered());
     set_connectivity_probe_hook({});
+#endif
+}
+
+AURORA_TEST_CASE(connectivity_facade_without_source_rejects_actions) {
+    // 验收 2 的降级判据：wasm 无采集腿且无证据通路 ⇒ 要求动作的口如实拒绝，快照恒可读。
+#ifndef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("this build has a collection source; the no-source contract is unreachable here");
+#else
+    reset_connectivity_for_test();
+    set_connectivity_probe_hook({});
+    AURORA_TEST_CHECK_EQ(static_cast<int>(compiled_source()), static_cast<int>(ConnectivitySource::None));
+    AURORA_TEST_CHECK_FALSE(aurora::net::detail::has_evidence_path());
+
+    const auto registration = ConnectivityMonitor::instance().subscribe([](const ConnectivityChange &) {});
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(registration));
+    AURORA_TEST_CHECK_EQ(registration.error().code_enum, aurora::ErrorCode::NetPlatformUnavailable);
+
+    const auto refreshed = ConnectivityMonitor::instance().refresh();
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(refreshed));
+    AURORA_TEST_CHECK_EQ(refreshed.error().code_enum, aurora::ErrorCode::NetPlatformUnavailable);
+
+    // 动作被拒不影响快照：首态可读、腿令牌如实为 `None`。
+    const auto fact = ConnectivityMonitor::instance().snapshot();
+    AURORA_TEST_CHECK_EQ(static_cast<int>(fact.state), static_cast<int>(NetworkState::Unknown));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(fact.source), static_cast<int>(ConnectivitySource::None));
+    set_connectivity_probe_hook({});
+#endif
 }
 
 AURORA_TEST_CASE(connectivity_facade_shutdown_keeps_snapshot_readable) {
