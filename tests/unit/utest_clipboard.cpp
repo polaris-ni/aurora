@@ -201,7 +201,7 @@ auto has_format(const std::vector<std::string> &formats, std::string_view mime) 
     return std::find(formats.begin(), formats.end(), mime) != formats.end();
 }
 
-#if !defined(AURORA_PLATFORM_MACOS)
+#ifndef AURORA_PLATFORM_MACOS
 /// @brief 无平台后端时富格式在平台路径上的统一失败（memory 后端已卸载时走此路）。
 auto expect_format_unsupported(const Error &err, std::string_view mime) -> void {
     AURORA_TEST_CHECK_EQ(err.code_enum, ErrorCode::ClipboardFormatUnsupported);
