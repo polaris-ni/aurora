@@ -84,7 +84,11 @@ auto IconRegistry::lookup(std::string_view name) -> Result<IconData> {
     auto &table = registry_table();
     const auto it = table.find(std::string{name});
     if (it != table.end()) {
-        return it->second;
+        // 中转一次再返回：直接 `return it->second` 时 GCC 在 `std::variant` 拷贝的内联链上
+        // 误报 -Wmaybe-uninitialized（指向 `std::string` 的 SSO 联合体，实测 GCC 15/16）；
+        // 具名局部量切断该内联路径，语义不变。
+        const IconData found = it->second;
+        return found;
     }
     return make_error(ErrorCode::IconNameNotRegistered,
                       ErrorParams{{"name", std::string{name}}, {"detail", candidate_detail(name)}});
