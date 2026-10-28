@@ -115,7 +115,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.FEAT.WIDGET.LAYOUT.BASELINE-ALIGN.001 | 交叉轴基线对齐（`CrossAxisAlignment::Baseline`） | 同一行内文本与控件的首行基线共线（含 Modifier 内边距与退化路径） | [`03-layout-render.md`](specification/03-layout-render.md) §3.8、[`04-widget.md`](specification/04-widget.md) §3.3 |
 | SPEC.FEAT.WIDGET.LAYOUT.SCROLL-RESTORE.001 | 滚动位置保存/恢复（`app::ScrollStorage`） | 重建 / 重启后滚动位置可还原，且多窗口与同键争用不串味 | [`06-app-platform.md`](specification/06-app-platform.md) §9.3、[`04-widget.md`](specification/04-widget.md) §3.3 |
 | SPEC.FEAT.WIDGET.DATA.LIST-REORDER.001 | 列表拖拽重排（`ReorderableList`） | 用户可拖动条目换位：跟手 / 让位 / 近边缘自动滚动 / 落位动画，数据由控件改写 | [`04-widget.md`](specification/04-widget.md) §3.4、[`GUIDELINE.md`](GUIDELINE.md) §36 |
-| SPEC.FEAT.WIDGET.SCROLL-INTERACTION.001 | 滚动交互增强（`ScrollSnap` / `PullToRefresh` / `StickyHeader` / `offset_signal`） | 轮播整页对齐、分组头部钉顶、到顶下拉即刷新、嵌套滚动余量移交，且全程尊重 reduce-motion；虚拟列表另有三条运行期入口——条目内容刷新 `invalidate_items`（只置位、下一帧回收重建）、布局前即可表达的末尾锚定 `scroll_to_end`（走显式待定偏移，优先于 `restore_key`）、偏移变更回调 `set_on_scroll_changed`（不进 `Effect` 作用域也有旁听口，落位才通知） | [`04-widget.md`](specification/04-widget.md) §3.3、§3.4、[`05-event-navigation.md`](specification/05-event-navigation.md) §3.3、§5.2、[`GUIDELINE.md`](GUIDELINE.md) §38 |
+| SPEC.FEAT.WIDGET.SCROLL-INTERACTION.001 | 滚动交互增强（`ScrollSnap` / `PullToRefresh` / `StickyHeader` / `offset_signal`） | 轮播整页对齐、分组头部钉顶、到顶下拉即刷新、嵌套滚动余量移交，且全程尊重 reduce-motion；虚拟列表另有三条运行期入口——条目内容刷新 `invalidate_items`（只置位、下一帧回收重建）、布局前即可表达的末尾锚定 `scroll_to_end`（走显式待定偏移，优先于 `restore_key`）、偏移变更回调 `set_on_scroll_changed`（不进依赖收集作用域也有旁听口，落位才通知） | [`04-widget.md`](specification/04-widget.md) §3.3、§3.4、[`05-event-navigation.md`](specification/05-event-navigation.md) §3.3、§5.2、[`GUIDELINE.md`](GUIDELINE.md) §38 |
 | SPEC.FEAT.CORE.JSON.001 | 自研 JSON 值容器与编解码器（`au::json`） | AI 可在无第三方 JSON 依赖下解析（DOM / SAX 双出口）/ 构造 / 序列化，按 RFC 6901 路径寻址读写删，读缺失键不隐式变更文档，并通过外部语料的 RFC 8259 合规验收 | [`01-core.md`](specification/01-core.md) §9、[`GUIDELINE.md`](GUIDELINE.md) §42 |
 | SPEC.FEAT.APP.SYSTEM-DRAG-DROP.001 | 系统级拖放（OS↔应用跨进程互操作：enter / over / leave / drop 四态事件族、MIME 载荷、Copy / Move / Link 动作协商、拖入反馈与拖出发起） | AI 可让应用与资源管理器 / 其他应用互拖文件与文本，拖入反馈与动作协商跨后端一致 | [`05-event-navigation.md`](specification/05-event-navigation.md) §5.2、[`06-app-platform.md`](specification/06-app-platform.md) §5、§8 |
 | SPEC.FEAT.APP.CLIPBOARD-RICH-FORMATS.001 | 剪贴板富格式（files / uri-list / HTML / 自定义 MIME） | AI 可实现文件清单与富文本的剪贴板交互；MIME 词汇与空口径同系统拖放一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8.2 |
@@ -170,7 +170,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 │   序列化(to_json/diff) · i18n(LocalizedString) · 焦点管理     │
 ├──────────────────────────────────────────────────────────────┤
 │                  Aurora State + Event Layer                   │
-│   信号 State/Reactive/Computed/Effect · 可选 Store<S>         │
+│   句柄 State / ReadOnlyState · 派生 computed · 副作用 effect  │
 │   细粒度定点刷新 · Canvas 高频 opt-in                         │
 ├──────────────────────────────────────────────────────────────┤
 │                  Aurora Async Layer                           │
@@ -201,7 +201,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | 文档 | 覆盖 |
 |:---|:---|
 | [`01-core.md`](specification/01-core.md) | 基础层 `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池、JSON 值容器、`au::TODO`；需求 SPEC.QUALITY.CORE.MEMORY-SAFETY.001 / SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 / SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 / SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.001 / SPEC.FEAT.CORE.JSON.001 |
-| [`02-state.md`](specification/02-state.md) | 响应式 `state/`：信号原语、订阅生命周期、`Store`、异步与协程、依赖图与撤销；需求 SPEC.FEAT.STATE.SIGNAL-STATE.001 / SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 |
+| [`02-state.md`](specification/02-state.md) | 响应式 `state/`：状态句柄、派生与副作用、订阅生命周期、异步、资源快照、依赖图与撤销；需求 SPEC.FEAT.STATE.SIGNAL-STATE.001 / SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 / SPEC.FEAT.NET.DECLARATIVE-BINDING.001 |
 | [`03-layout-render.md`](specification/03-layout-render.md) | `layout/` + `render/` + `image/` + `media/`：布局协议、Flex / Grid 算法、Painter、字体引擎、Surface 与后端、音频图（Web Audio 语义节点图 + WASAPI / ALSA / CoreAudio / Web Audio 四端设备层）；需求 SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001 / SPEC.QUALITY.LAYOUT.ALGEBRA.001 |
 | [`04-widget.md`](specification/04-widget.md) | `widget/` + `ui/`：控件基类契约、自描述、控件清单、可定制性契约；需求 SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 / SPEC.FEAT.TOOLING.UI-TO-CODE.001 |
 | [`05-event-navigation.md`](specification/05-event-navigation.md) | `event/` + `animation/` + `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈；需求 SPEC.API.EXPLICIT-FIRST.001 |

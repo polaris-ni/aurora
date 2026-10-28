@@ -371,7 +371,7 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 **需求陈述：**
 
 - UI 树通过 `std::shared_ptr<Widget>` 管理所有权，父子关系即「树内拥有」：拷贝即共享、移动即转移，整棵树随根 `Node` 析构而析构。AI 不需要手动 `delete`，也不必担心 use-after-free。
-- 禁止**拥有语义**的裸指针进入公开 API；非拥有的观察指针 / 句柄（如 `Binding<T>::target()` 返回的 `State<T>*`）除外。事件回调需要引用「触发者」时，用稳定标识 `Node::id()` 加查询，而非引用或指针。
+- 禁止**拥有语义**的裸指针进入公开 API；非拥有的观察指针（如 `BuildContext::env` 指向祖先 `Environment`）与按值传递的状态句柄（`State<T>` / `ReadOnlyState<T>`）不在此列。事件回调需要引用「触发者」时，用稳定标识 `Node::id()` 加查询，而非引用或指针。
 - **例外**：Inspector / 调试内部句柄（如 `selected_widget()`、`set_surface_getter`）可返回裸 `Widget*` / `Surface*`，但必须配弱引用守卫（生命周期由树 `shared_ptr` 持有），且不得进入业务公开 API。
 
 ```cpp

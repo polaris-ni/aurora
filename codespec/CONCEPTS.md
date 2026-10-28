@@ -15,9 +15,9 @@
 | 2 | **Container（多子布局）** | `Column` `Row` `Stack` `Grid` `GridView` `Scroll` `PullToRefresh` `StickyHeader` `Spacer` `Repeater` `LazyList` `LazyRow` | `widget/containers.h` `widget/stack.h` `widget/grid.h` `widget/grid_view.h` `widget/scroll.h` `widget/pull_to_refresh.h` `widget/sticky_header.h` `widget/spacer.h` `widget/repeater.h` `widget/lazy_list.h` `widget/lazy_row.h` |
 | 3 | **Modifier（声明式装饰）** | `Padding` `PaddingEdges` `FlexWeight` `SizeModifier` `Background` `GradientBackground` `ShadowNode` `BlendNode` `ShaderMaskNode` `CacheLayerNode` `Border` `Clip` `ClipRounded` `OpacityNode` `BlurNode` `AlignNode` `OffsetNode` `TransformNode` `CursorNode` `Clickable` `Draggable` `LongPress` `TouchListener` `TooltipNode` `ContextMenuNode` | `modifier/modifier_base.h` `modifier/modifier_layout.h` `modifier/modifier_paint.h` `modifier/modifier_transform.h` `modifier/modifier_input.h` |
 | 4 | **Control Flow（组合 / 条件）** | `Show` `Repeater` `Provider` `Lifecycle` `Timer` | `widget/show.h` `widget/repeater.h` `widget/provider.h` `widget/lifecycle.h` `environment/*.h` `widget/timer.h` |
-| 5 | **State（响应式状态）** | `State<T>` `Binding<T>` `Store<T>` `Reactive<T>` | `state/state.h` `state/binding.h` `state/store.h` `state/reactive.h` |
-| 6 | **Derived（派生值）** | `Computed<T>` `Effect` | `state/computed.h` `state/effect.h` |
-| 7 | **Signal（细粒度订阅）** | `SignalView` / `Subscription`（`SignalViewBase`） | `state/signal_view.h` `state/subscription.h` |
+| 5 | **State（响应式状态）** | `State<T>` `ReadOnlyState<T>` | `state/state.h` `state/read_only_state.h` |
+| 6 | **Derived（派生与订阅）** | `computed(fn)` `effect(fn)` `Subscription` | `state/computed.h` `state/effect.h` `state/subscription.h` |
+| 7 | **Async Resource（异步三态）** | `Resource<T>` `StreamResource<T>` `ResourceSnapshot<T>` `StreamSnapshot<T>` `ResourcePhase` | `state/resource.h` |
 | 8 | **Theme（主题）** | `Theme` `ThemeProvider` `colors` | `theming/theme.h` `widget/provider.h` |
 | 9 | **Environment（跨树注入）** | `Environment` `Provider<T>` `LocaleProvider` `MediaQueryProvider` `MediaQuery` | `environment/*.h` |
 | 10 | **Navigation（路由）** | `Navigator` `Route` `RouteRegistry` `TransitionLayer` `RouteTransition` `Hero`（共享元素转场） `open_uri`（深层链接） | `navigation/navigator.h` `navigation/route.h` `navigation/hero.h` `navigation/transition_layer.h` |
@@ -48,7 +48,7 @@
 当同一视觉能力同时存在于「固有属性」与「Modifier」时：
 
 - 控件**自身身份语义**的能力（如 `Button` 的 `background_color`、`corner_radius`、`padding`）→ 用**固有属性**优先：随控件序列化、可被 Inspector 枚举、参与 diff。
-- 给**任意控件临时套一层**通用装饰（如给 `Image` 加 `Padding`、给 `Text` 加 `Background`）→ 用 **Modifier**：正交、可叠加、可 `Reactive` 变化，且不污染控件身份。
+- 给**任意控件临时套一层**通用装饰（如给 `Image` 加 `Padding`、给 `Text` 加 `Background`）→ 用 **Modifier**：正交、可叠加、可随句柄变化，且不污染控件身份。
 - 若控件固有属性已提供该能力，则 **Modifier 同类项不再重复写**，仅作为「跨控件通用兜底」。
 
 | 重叠能力 | 固有属性（控件内） | Modifier（正交链） | 判定边界 |
@@ -61,43 +61,45 @@
 
 ## 2 状态作用域决策树
 
-面向 AI 编码助手的快速决策规则：在有限上下文内正确选择 `State` / `Store` / `Binding` / `Computed`。
+面向 AI 编码助手的快速决策规则：先问「消费方是否应获得直接写入能力」，再问值的来源。日常面只有 `State<T>` / `ReadOnlyState<T>` / `computed(fn)` / `effect(fn)` 四个词；`Resource` 与 `Subscription` 在引入异步或显式取消时出现（分档见 [`specification/02-state.md`](specification/02-state.md) §2）。
 
 ```text
-问：该值的使用范围？
+问：消费方需要直接改这个值吗？
 │
-├─ 仅本控件内部使用 ─────────────────► State<T>（组件内状态）
+├─ 需要（本控件或同一来源的多个编辑者） ──► State<T>（可写句柄）
 │
-├─ 父子 / 兄弟共享 ──────────────────► 提升到最近公共祖先的 State<T> + 经 Binding<T> 下发给子组件
+├─ 不需要，但值会变 ─────────────────────► ReadOnlyState<T>
+│    ├─ 由其他状态算出 ──────────────────► computed(fn)，结果即 ReadOnlyState<T>
+│    ├─ 来自异步作业 ────────────────────► Resource<T> → ReadOnlyState<ResourceSnapshot<T>>
+│    └─ 父级下发 / 属性常量 ────────────► 参数或属性直传 ReadOnlyState<T>
 │
-├─ 跨不相关子树（全局 / 跨页面） ────► Store<S> + Environment 注入
-│
-└─ 纯派生值（可由其他状态计算） ─────► Computed<T>（不存储，纯函数计算）
+└─ 值变时要执行副作用（命令 / 日志 / 外部源）► effect(fn)，返回 Subscription
 ```
+
+跨不相关子树共享时，把 `State<T>` 按值交给 `Provider` 注入（`Provider<State<T>>` 显式授予写权限；`Provider<T>` 只注入只读值）；应用级长生命周期对象用 `shared_ptr<State<T>>` 自持所有权，再向子树下发句柄副本。
 
 ### 2.1 生命周期规则
 
 | 类型 | 所有权 | 生命周期 | 清理时机 |
 |:---|:---|:---|:---|
-| `State<T>` | 通常 `shared_ptr` 或栈上 | 随创建者管理 | 栈上随作用域；`shared_ptr` 随引用计数归零 |
-| `Store<S>` | 通常 `shared_ptr` 全局单例 | 进程级（或应用级） | 进程退出 / `shared_ptr` 释放 |
-| `Binding<T>` | **非拥有**（裸指针指向上游 `State`） | 上游 `State` 须更长存活 | 无自身清理；上游析构后不可再访问 |
-| `Computed<T>` | 自管理（内部持有 `Effect`） | 依赖源全部存活即可 | 依赖源析构后 Effect 自动惰性摘除 |
+| `State<T>` / `ReadOnlyState<T>` | 句柄与来源共享所有权（复制句柄不新增来源） | 句柄按值存活；来源活到最后持有者释放 | 栈上随作用域；来源随最后一个句柄 / 订阅 / 派生闭包释放 |
+| `Subscription` | 拥有订阅或运行记录，并保活其依赖来源 | 凭证存活期 | 析构或 `reset()` 即取消 |
+| `computed` 返回的 `ReadOnlyState<T>` | 派生节点自持计算体与依赖来源 | 依赖源全部存活即可 | 派生节点随读句柄释放；上游析构自动解边 |
+| `Resource<T>` / `StreamResource<T>` | 共享控制核；读句柄是保活控制核的别名投影 | 最后一个控制句柄、订阅或派生闭包释放 | 最后一个持有者释放时取消未完成作业 |
 
-**关键约束**：`Binding` 不拥有上游——传递给子组件时，父组件须保证 `State` 的存活期 ≥ 子组件。
+**关键约束**：`get()` 返回的是借用，不得跨写入、来源重绑或最后持有者释放保存；跨异步边界先复制数据或持有句柄本身。`shared_ptr<State<T>>` 是应用级所有权选择，不再是属性接线的必要条件。
 
-### 2.2 反例：Binding 跨子树独立存活
+### 2.2 反例：保存 `get()` 的借用跨子树存活
 
-当子组件可能独立于父组件销毁（如经 `Navigator` push 的页面、或异步加载的面板），裸 `Binding<T>` 借用的上游 `State` 会悬空。此场景应改用 `shared_ptr<State<T>>` 共享所有权：
+句柄按值传递时自带来源所有权，子页面独立销毁不会悬空；真正会悬空的是从 `get()` 取出的引用或对局部句柄的 `[&]` 捕获。跨子树场景应复制句柄（或先复制数据）：
 
 ```cpp
-// 错误：子页面关闭后 flag 随父析构，Binding 悬空
-// au::Binding<bool>{ *parent_flag }   // parent_flag 为栈上 / 短生命周期 State
+// 错误：只保存借用；父级 set() 后该引用失效，子页面读到悬垂内存
+// const bool &stale = flag.get();
 
-// 正确：以 shared_ptr 共享所有权，引用计数保活
-auto flag = std::make_shared<au::State<bool>>(true);
-// 经 Environment 注入或参数下发 shared_ptr；子组件用 Reactive 包装
-push_route(au::Checkbox{ au::Reactive<bool>{ flag } });   // flag 存活期 = 最长引用者
+// 正确：按值持有句柄——复制共享来源，引用计数保活
+auto flag = au::State<bool>{true};
+push_route(au::Checkbox{ flag });   // 子页面的句柄与 flag 共享来源，任一存活即来源存活
 ```
 
 ---
@@ -111,15 +113,17 @@ push_route(au::Checkbox{ au::Reactive<bool>{ flag } });   // flag 存活期 = �
 | Aurora | React | Flutter | Qt (QML/C++) |
 |:---|:---|:---|:---|
 | Widget / Node | 函数组件返回值 / JSX element | `Widget`（Stateless / Stateful） | `Item` / `QWidget` |
-| `State<T>` / Signal | `useState` / `useSignal` | `ChangeNotifier` + `setState` | `Q_PROPERTY` + 信号槽 |
-| `Store<T>` | `useContext` / Redux store | `InheritedWidget` / `Provider` | 单例 / 上下文对象 |
+| `State<T>` | `useState` / `useSignal`（可写状态） | `ChangeNotifier` + `setState` | `Q_PROPERTY` + 信号槽 |
+| `ReadOnlyState<T>` / `computed(fn)` | `useMemo` / 派生 selector（消费方无写入口） | `ValueListenable` / 派生 Provider（riverpod / provider） | 只读 `Q_PROPERTY` / 绑定表达式 |
+| `Subscription` / `effect(fn)` | `useEffect` + cleanup 返回 | `addListener` + `removeListener` | 信号槽连接 / `QMetaObject::Connection` |
+| `Provider<T>` / `Provider<State<T>>`（注入只读值或显式写权限） | `Context.Provider`（值 + setter） | `InheritedWidget` / `Provider` | 单例 / 上下文属性 |
 | `Modifier` | 组合（无直接等价，靠 props） | `Container` / `DecoratedBox` | 属性 / `Item` 嵌套 |
 | `BuildContext` / `Environment` | `Context` / `Provider` | `BuildContext` + `InheritedWidget` | 上下文属性注入 |
 | `Painter` | `<canvas>` 2D | `CustomPainter` | `QPainter` |
 | 滚动吸附 / 分页（`ScrollSnap` + `ScrollViewport::snap_target`，`Scroll` / `LazyList` / `GridView` 三宿主） | CSS Scroll Snap（`scroll-snap-type` / `scroll-snap-align` 的 `start` / `center` / `end` 三档同名对应） | `PageView`（整页）+ `ScrollController.animateTo` + `SnapAlignment`（`ListView` 无内建条目吸附） | `ListView::snapMode`（`NoSnap` / `SnapToItem`，**无居中/居末档**，也非周期概念） |
 | `PullToRefresh` | 无内置（`react-pull-to-refresh` 等三方） | `RefreshIndicator` / `CupertinoSliverRefreshControl` | `SwipeView` 无此语义；Android 侧对照 `PullToRefreshLinearLayout` / Material `SwipeRefreshLayout` |
 | `StickyHeader` | `position: sticky`（同语义：占位随内容滚、顶到边界钉驻并被下一头项顶出） | `SliverPersistentHeader(pinned: true)` | `ListView` + `Section` 代理（QML 无内建吸顶，需自写 `Stack` + `mapFromItem`）；Android 对照 `RecyclerView` sticky headers |
-| 滚动驱动动画（`Widget::offset_signal() -> SignalView<float>`） | `scroll` 事件 + `scrollTop` / CSS Scroll-driven Animations（`animation-timeline: scroll()`） | `NotificationListener<ScrollNotification>` / `ScrollController.offset`（须自建 `AnimatedBuilder` 联动） | `Flickable::contentY`（可绑定，但非细粒度信号） |
+| 滚动驱动动画（`Widget::offset_signal() -> ReadOnlyState<float>`） | `scroll` 事件 + `scrollTop` / CSS Scroll-driven Animations（`animation-timeline: scroll()`） | `NotificationListener<ScrollNotification>` / `ScrollController.offset`（须自建 `AnimatedBuilder` 联动） | `Flickable::contentY`（可绑定，但非细粒度信号） |
 | 嵌套滚动协调（`ScrollEvent::remaining_y` 余量上冒，见 `specification/05-event-navigation.md` §3.3） | 浏览器原生链式滚动（chain）+ `overscroll-behavior` | `ScrollBehavior` + `ScrollEndNotification` 手动转发 | `Flickable` 无内建余量移交，需自写 `contentY` 边界判定接线 |
 | `Surface` / `Window` | DOM / `react-dom` | `Window` / `Surface` | `QWindow` / `QQuickWindow` |
 | 视频播放 / 媒体 | `<video>` / `react-player` | `video_player` / `ExoPlayer` | `QMediaPlayer` + `QVideoWidget` |
@@ -179,8 +183,8 @@ Aurora 的「真值来源」仍是声明式 `Node` 树 + `XxxProps` 聚合属性
 ## 4 迁移要点
 
 - **声明式 + 不可变树**：Aurora 组件树与 React / Flutter 一致，状态变更触发局部重渲染；不要用命令式方式事后改树，应通过 `State<T>` 驱动。
-- **响应式以 `State<T>` / `Signal` 为中心**：替代 React 的 `useState` 与 Flutter 的 `setState` / `ChangeNotifier`，粒度更细（细粒度信号避免整树重绘）。
-- **订阅清理用 `aurora::Subscription`（RAII）**：把信号 / `Store` 订阅包成对象，作用域结束自动取消，等价于 React `useEffect(…, [])` 的 cleanup 返回；`connect(src, fn)`（原 `bind`，1.0.0-alpha.1 改名以避开 `std::bind` 的 ADL 劫持）直接返回该句柄，避免手动保存 / 调用取消句柄导致监听器泄漏。
+- **响应式以 `State<T>` / `ReadOnlyState<T>` 为中心**：替代 React 的 `useState` 与 Flutter 的 `setState` / `ChangeNotifier`，粒度更细（细粒度信号避免整树重绘）。写权限靠类型表达：只读消费方拿 `ReadOnlyState<T>`，而不是 `const State&`。
+- **订阅清理用 `aurora::Subscription`（RAII）**：`source.subscribe(fn)` 固定调用时来源并立即交付首值，`effect(fn)` 自动追踪读取并调用即首跑；两者都返回 `Subscription`，作用域结束自动取消，等价于 React `useEffect(…, [])` 的 cleanup 返回。旧 `connect` / `bind` 自由函数已删除（历史：`bind` 曾因 `std::enable_shared_from_this` 把 `std` 带进 ADL 关联集而被 `std::bind` 劫持，故一度改名 `connect`；改为成员入口后歧义消失）。
 - **环境注入走 `Environment`**：主题 / locale / 媒体查询通过 `ctx.environment<T>()` 读取，等价于 React Context 与 Flutter `InheritedWidget`。设备度量（`MediaQuery`）由 `Window::present_root` **自动注入根 `BuildContext`**（每帧按 `from_surface` 重建），故无需手动包裹 `MediaQueryProvider` 即可经 `media_query_of(ctx)` / `MediaQuery::of(ctx)` 读取；如需覆盖特定子树，仍可在该子树根显式包 `MediaQueryProvider`（最近祖先优先）。结合 `LayoutBuilder(builder)` 按布局约束动态构建子树，等价于 Flutter 的 `MediaQuery` + `LayoutBuilder` 响应式写法。
 - **平台无关渲染**：`Painter` 是纯软件栅格，无 GPU 依赖；`HeadlessSurface` 可直接出 PNG，便于测试与无头渲染。
 - **降级而非中止**：非法输入 / 部分代码缺失产出 `Diagnostics` 并降级到安全默认，而非抛异常崩溃（与 React Error Boundary 哲学一致）。
@@ -192,66 +196,88 @@ Aurora 的「真值来源」仍是声明式 `Node` 树 + `XxxProps` 聚合属性
 ### 5.1 组件内 State：Checkbox 的 checked 状态
 
 ```cpp
-auto checked = std::make_shared<au::State<bool>>(false);
-au::Checkbox cb{ au::Reactive<bool>{ checked } };
-// checked 随父组件析构自动释放
+au::State<bool> checked{false};
+au::Checkbox cb{checked};   // 句柄复制共享来源；用户点击写回同一来源
+// checked 随父组件作用域释放，来源活到最后一个句柄消亡
 ```
 
 ```json
 { "type": "Checkbox", "props": { "checked": false } }
 ```
 
-### 5.2 状态提升 + Binding：父组件持有 State，两个子组件共享
+### 5.2 状态提升：父组件持有 State，两个子组件共享
 
 ```cpp
-auto shared_flag = std::make_shared<au::State<bool>>(true);
-au::Checkbox cb_a{ au::Binding<bool>{ *shared_flag } };
-au::Checkbox cb_b{ au::Binding<bool>{ *shared_flag } };
-shared_flag->set(false);   // cb_a 与 cb_b 同时刷新
+au::State<bool> shared_flag{true};
+au::Checkbox cb_a{shared_flag};   // 两个句柄复制共享同一来源
+au::Checkbox cb_b{shared_flag};
+shared_flag.set(false);           // cb_a 与 cb_b 同时刷新
 ```
 
-### 5.3 Store 集中管理：购物车状态
+跨子树独立存活时，把句柄按值交给子页面即可；只在需要应用级生命周期管理时用 `std::shared_ptr<au::State<T>>` 自持所有权。
+
+### 5.3 应用模型与领域命令：购物车状态
+
+`Store` 已下线；校验、审计与撤销责任由应用领域命令承担（撤销显式用 `UndoStack`）。注入后代的模型只暴露只读句柄与命令，不授予任意写入口：
 
 ```cpp
 struct Cart { std::vector<std::string> items; };
-auto cart = au::make_store<Cart>(
-    Cart{},
-    [](const Cart &s, const au::Action &a) -> Cart {
-        Cart next = s;
-        if (a.type == "add") {
-            if (auto *name = a.payload_as<std::string>()) next.items.push_back(*name);
-        } else if (a.type == "clear") {
-            next.items.clear();
-        }
-        return next;
+
+struct CartModel {
+    au::State<Cart> state{};
+    auto add(std::string name) -> void {        // 领域命令：校验在此，不在控件里
+        Cart next = state.get();
+        next.items.push_back(std::move(name));
+        state.set(std::move(next));
     }
-);
-cart->dispatch(au::Action{ "add", std::string("Aurora Book") });
-// 任意子树经 cart->as_signal() 订阅变化
+    auto clear() -> void { state.set(Cart{}); }
+};
+// 经 Provider<CartModel> 注入子树：后代拿 cm.state 降级出的只读句柄展示，
+// 经 cm.add(...) / cm.clear() 修改；需要撤销时把命令同时包进 UndoStack。
 ```
 
 ### 5.4 Environment 注入：主题色
 
 ```cpp
-auto theme = au::Theme::light();
-theme.primary = au::colors::AURORA_BLUE;
-au::Node root = au::ThemeProvider{ theme, au::Button(au::ButtonProps{ .label = "主题按钮" }) };
+auto theme = au::State<au::Theme>{au::Theme::light()};
+theme.update([](const au::Theme &t) {
+    au::Theme next = t;
+    next.primary = au::colors::AURORA_BLUE;
+    return next;
+});
+au::Node root = au::ThemeProvider{theme, au::Button(au::ButtonProps{ .label = "主题按钮" })};
 // 子组件内部：const Theme* t = ctx.environment<Theme>();   // 最近祖先优先
+// theme.set(...) 换肤时子树自动重渲染
 ```
 
-### 5.5 Computed 派生：过滤后的列表
+### 5.5 computed 派生：过滤后的列表
 
 ```cpp
-auto source  = std::make_shared<au::State<std::vector<std::string>>>(
-    std::vector<std::string>{"Apple", "Banana", "Avocado", "Cherry"});
-auto keyword = std::make_shared<au::State<std::string>>(std::string("A"));
+au::State<std::vector<std::string>> source{
+    std::vector<std::string>{"Apple", "Banana", "Avocado", "Cherry"}};
+au::State<std::string> keyword{"A"};
 auto filtered = au::computed([source, keyword]() -> std::vector<std::string> {
     std::vector<std::string> result;
-    for (const auto &s : source->get()) {
-        if (s.find(keyword->get()) != std::string::npos) result.push_back(s);
+    for (const auto &s : source.get()) {
+        if (s.find(keyword.get()) != std::string::npos) result.push_back(s);
     }
     return result;
 });
-// filtered.get() == {"Apple", "Avocado"}
-// keyword->set("Ch");  → filtered 自动重算 → {"Cherry"}
+// filtered.get() == {"Apple", "Avocado"}；filtered 是 ReadOnlyState，可直接接展示属性
+keyword.set(std::string{"Ch"});   // → filtered 自动重算 → {"Cherry"}
+```
+
+### 5.6 异步三态：Resource 直通展示
+
+```cpp
+auto request = au::Resource<std::string>::from(producer);   // producer 返回 Task<std::string>
+au::ReadOnlyState<au::ResourceSnapshot<std::string>> snapshot = request;
+auto label = au::computed([snapshot]() -> au::LocalizedString {
+    const auto &current = snapshot.get();
+    if (current.phase == au::ResourcePhase::Failed) return au::LocalizedString{"Failed"};
+    if (current.value) return au::LocalizedString{*current.value};
+    return au::LocalizedString{"Loading"};
+});
+au::Text status{au::TextProps{.content = label}};
+request.reload();   // 前序请求自动取消；迟到结果不覆盖新状态
 ```

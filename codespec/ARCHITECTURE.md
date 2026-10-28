@@ -21,7 +21,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 ├───────────────────────────────────────────┤
 │  Widgets / Controls (include/aurora/widget/)│  组件层：声明式 UI 原语
 ├───────────────────────────────────────────┤
-│  Reactive Core (include/aurora/state/)    │  响应式核心：State / Signal / Effect
+│  Reactive Core (include/aurora/state/)    │  响应式核心：State / ReadOnlyState / computed / effect
 ├───────────────────────────────────────────┤
 │  Layout Engine (include/aurora/layout/)   │  布局引擎：Constraints / flex / grid 求解
 ├───────────────────────────────────────────┤
@@ -36,7 +36,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 - **依赖方向以向下为主，`core/` 为硬边界**：`core/`（基础层）的**公共头不依赖任何其他 aurora 模块**（只依赖自身与标准库）；其余层间以「上层依赖下层」为常态，确有必要时下层可反向引用上层（例：`render/offscreen.h` 的 `render_to_logical_snapshot` 需读取 widget 类型名与属性以产出逻辑快照；`window/` 的 `Surface` 家族需渲染类型）。该边界由门禁 `tools/check/check_core_layer_boundary.py` 守护（扫描 `include/aurora/core/**` 的 `#include`，任何指向上层的包含即失败）。`src/aurora/core/` 的实现**不在门禁范围**——其 2 处既知上层引用属叶子级、非传递性的元数据查阅：`diagnostics.cpp` 读 `widget/props_io.h` 以格式化属性值、`image.cpp` 委派 `image/image_codec.h` 解码。
 - **内核 / 适配分离**：平台差异收敛到 `Surface` 实现。**第二类平台扩展点** `NativeViewHost`（`include/aurora/webview/`）另行收敛「宿主管理的原生子视图」——嵌入的系统原生视图（首例 `WebView`）由窗口系统叠加显示，其像素**不经** `Painter` / `RhiBackend` 帧流；控件与宿主保持零 `#ifdef`，平台差异仅在引擎实现源文件内、经运行期绑定（缺引擎只降级）。
 - **命令流与执行分离**：`DisplayList` 是绘制命令的**唯一来源**，`rhi::RhiBackend` 是它的**回放目标抽象**（command sink）；软件 `Painter`（经 `rhi::SoftwareRhi`）与 GPU 后端是它的**平级消费者**。新增后端只实现 `RhiBackend`，不改动录制侧与 `DisplayList`。
-- **响应式与渲染解耦**：状态变更经 `State` / `Signal` 精确投递到受影响的 widget 子树，不经「整树 diff + 重建」；渲染核心只负责把 widget 树绘制到 `Surface`。
+- **响应式与渲染解耦**：状态变更经 `State` / `ReadOnlyState` 订阅精确投递到受影响的 widget 子树，不经「整树 diff + 重建」；渲染核心只负责把 widget 树绘制到 `Surface`。
 
 ---
 
@@ -48,7 +48,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 - **多窗口（仍在同一线程内）**：一个 `Application` 持有一组 `WindowHost`（各自 `Window` + `Scene` + `FocusManager` + 指针/触控捕获表 + 帧统计），由**单一帧循环**统一驱动（`Application::run`，不再委托 `Window::run`）。**焦点与捕获不跨窗口**；`Animator` / `Scheduler` / 快捷键 / 命令注册表为应用级共享（`dt` 每帧只推进一次）。详见 `specification/06-app-platform.md` §2.4。
 - **活动窗口记账点在派发链上的位置**：`Application::active_window()` 的记账落在两处——① 宿主级键盘派发的键盘前置拦截器内，**早于** `ShortcutRegistry::handle`（故快捷键闭包内读到的是本次派发来源）；② 应用级六条程序化派发入口，按「用户输入意图类」事件范围过滤后记账。宿主级直调程序化入口不记账（`WindowHost` 无 `Application` 反指，刻意不加）。记账为 O(1) 指针赋值（成员 `mutable`，以适配 const 派发入口），帧循环零新增开销。它与 `FocusManager` 的**逐窗隔离**是两件互补的事：后者答「窗内哪个控件有焦点」，前者答「这条输入落在哪一扇窗」，二者互不替代，也都不等价于 OS 前台态。语义与范围见 `specification/06-app-platform.md` §2.4。
 - **同步事件**：`EventDispatcher` 在收到原生平台事件后同步派发，命中测试链自最深节点向根冒泡，写 `e.handled = true` 即止。
-- **响应式细粒度信号**：`State<T>` / `Signal` 订阅精确到具体订阅者；状态变更只刷新依赖它的 widget，避免整树重绘。
+- **响应式细粒度信号**：`State<T>` / `computed` 订阅精确到具体订阅者；状态变更只刷新依赖它的 widget，避免整树重绘。
 
 ### 3.2 几何权威
 
@@ -67,7 +67,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 **同步回调期间必须持住强引用**：事件派发是同步的，用户回调可以在回调内销毁触发它的控件；而回调返回后框架仍要继续访问该控件（`Widget::on_pointer_event` 写 `pressed_` 等）。因此凡要解引用跨帧缓存的控件引用，都须在**整个调用期间**持有强引用（`HitNode::lock(keepalive)`），而非仅做一次「取指针 + 判空」。
 
-**观察者图生命周期安全**：信号源与 `Effect` 经 `Connection`（`weak_ptr` 锚点）连接，`notify()` 惰性摘除失效边，任一侧先析构均不解引用悬垂对象。
+**观察者图生命周期安全**：来源节点持裸指针观察者表，派生与终端按共享句柄保活其依赖；取消、析构与失败回滚都成对解边，内核不构造强引用环。终端交付前逐依赖保鲜，失效派生节点在传播排空前重算，故任一侧先析构都不会被解引用。
 
 **非拥有登记必须成对注销**：`Animator::drive` / `bind` 以裸指针登记控制器与目标 `State`。若被登记对象的生命周期短于 `Animator`（典型：widget 成员控制器注册进应用级 `Animator`），**必须**在其析构函数中调用 `Animator::remove(c)`，否则下一帧 `tick` 即写入已释放内存。凡新增「把自身成员注册进更长寿命管理器」的代码，都要同时写好注销路径。
 
@@ -87,7 +87,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 模块 | 路径 | 主要头文件 |
 |:---|:---|:---|
 | 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `strict_mode.h` `event_stream.h` `accessibility.h` `a11y_types.h` `a11y_provider.h` `a11y_text.h` `json.h`（JSON 值容器，见 `specification/01-core.md` §9） `headers.h`（大小写不敏感 HTTP 头集合，见 `specification/01-core.md` §10） `url.h`（URL 值类型与查询参数，见 `specification/01-core.md` §11） `compression.h`（压缩解压编解码器与注册表：字符串格式 ID + 可替换实现，见 `specification/01-core.md` §12） |
-| 响应式核心 | `state/` | `state.h` `computed.h` `effect.h` `binding.h` `immutable.h`（`Immutable<T>` / `Mutable<T>` 作用域权限包装） `store.h` `reactive.h` `signal_view.h` `async.h` `coroutine.h` `state_graph.h` `state_registry.h` `resource.h`（三态异步绑定 `Resource<T>` / `StreamResource<T>`，见 `specification/02-state.md` §5.4） |
+| 响应式核心 | `state/` | `state.h` `read_only_state.h`（`State<T>` / `ReadOnlyState<T>` / `StateSink`） `computed.h` `effect.h` `subscription.h` `async.h` `coroutine.h` `state_graph.h` `undo_stack.h` `resource.h`（三态异步绑定与公开快照 `Resource<T>` / `StreamResource<T>` / `ResourceSnapshot<T>` / `StreamSnapshot<T>`，见 `specification/02-state.md` §5.4）；内核节点与传播引擎在 `state/detail/` |
 
 ### 4.2 布局与渲染
 
@@ -171,7 +171,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 ## 5 核心数据流
 
 ```text
-[State / Signal 变更]
+[State 变更]
       │
       ▼
 [Reactive Core 计算依赖图] ──精确──► [受影响的 Widget 子树]
@@ -440,7 +440,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 任何改动都不得破坏以下不变量（违反会导致挂起、闪烁或行为不确定）。
 
-1. **细粒度订阅去重**：`State::subscribe` 必须对同一 `Effect` 去重，否则约 25 帧后挂死。
+1. **观察边与来源成对**：每个终端运行记录与派生节点按本轮读取集合替换依赖边；取消、析构、构造失败都须成对解边。重复读取同源只保留一条边，否则图与通知关系不一致并随轮次累积。
 2. **根挂载唯一**：`Window::present_root` 对同一根只 mount 一次。
 3. **命中测试用局部坐标**：`Rect{Point{0,0}, bounds.size}.contains(local)`（非 `bounds.contains`）。
 4. **事件冒泡协议**：`Widget::on_pointer_event` 写 `e.handled = true` 即停止冒泡；纯展示控件不拦截以放行父级点击。
@@ -515,14 +515,14 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 2. **概念可枚举性**：全部 UI 原语可枚举、可命名、可映射。
 3. **概念映射透明性**：Aurora 概念与 React / Flutter / Qt 一一对应。
 4. **声明式优于命令式**：组件以不可变声明式树表达，状态变更驱动局部刷新；禁止命令式事后改树。
-5. **最小正交 API**：布局用 `Column` / `Row` / `Stack` / `Grid` / `Scroll`，装饰用 `Modifier`，状态用 `State` / `Signal` / `Store`，互不重叠；避免「多种方式做同一件事」带来的选择困惑。
+5. **最小正交 API**：布局用 `Column` / `Row` / `Stack` / `Grid` / `Scroll`，装饰用 `Modifier`，状态用 `State` / `ReadOnlyState`（派生 `computed`、副作用 `effect`），互不重叠；避免「多种方式做同一件事」带来的选择困惑。
 6. **线程模型**：单线程 UI；`State::set` 仅限主线程（跨线程结果须经 `au::async` / `Task::set_main_poster` 回投后再写）。在文档与示例中明确标注，避免 AI 误用多线程改树。
-7. **显式数据流**：状态经 `State` / `Signal` / `Store` 显式流动，依赖图可静态推导，便于 AI 推断「改 X 会影响哪些 widget」。
-8. **单向 / 纯函数**：状态变更单向；`Computed` 为纯函数派生值，无副作用，可安全重算。
+7. **显式数据流**：状态经 `State` / `ReadOnlyState` 显式流动，依赖图可静态推导（`StateGraph` 带 `schema: 1`），便于 AI 推断「改 X 会影响哪些 widget」。
+8. **单向 / 纯函数**：状态变更单向；`computed` 为纯函数派生值，无副作用，可安全重算。
 9. **扁平组合**：以 `Modifier` 包裹 + 容器组合替代深层继承嵌套。
 10. **布局代数**：布局以可组合的 `Constraints` + 对齐参数表达，避免魔法数字。
 11. **事件模型**：统一事件类型（`MouseEvent` / `KeyEvent` / `ScrollEvent` / `TextInputEvent` / `TextCompositionEvent` / `TouchEvent` / `SystemDropEvent`）+ 冒泡协议；事件坐标在 `e.position` 而非 `e.x` / `e.y`。
-12. **状态作用域**：状态作用域显式——局部 `State` 由组件持有，全局 `Store` 由应用持有并通过 `Environment` 注入；`Binding<T>` 为非拥有引用，上游生命周期须更长。
+12. **状态作用域**：状态作用域显式——局部 `State` 由组件持有，应用级状态由应用持有并通过 `Environment` 注入；只读消费方拿 `ReadOnlyState`，写权限靠类型表达。`shared_ptr<State<T>>` 只是应用级所有权选择，不再是属性接线前提。
 
 ---
 

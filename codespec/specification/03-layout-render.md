@@ -391,7 +391,7 @@ au::Column{}
 控件可配置性由两层构成：
 
 - **固有属性**（`XxxProps` 字段）描述控件自身身份，随控件序列化、可被 Inspector 枚举。
-- **`Modifier`** 承载跨切面、可叠加、可 `Reactive` 变化的通用装饰（padding / background / border / align / opacity / rotate / scale / transform / clickable）。
+- **`Modifier`** 承载跨切面、可叠加、可响应式换源的通用装饰（padding / background / border / align / opacity / rotate / scale / transform / clickable）；链本身是只读句柄 `ReadOnlyState<Modifier>`，换源走 `Widget::set_modifier_source(...)`。
 
 两者重叠的能力（如 `padding` / `corner_radius` / `background_color`）以**控件固有属性优先**；`Modifier` 同类项保留用于「给任意控件套一层」的跨切面场景。绘制时 `Modifier` 在外、固有属性在内。
 
@@ -883,7 +883,7 @@ class RhiBackend {
 | `on_tap()` / `on_double_tap()` | `virtual`，手势回调 |
 | `on_pointer_event(MouseEvent&)` / `wants_click()` | 输入处理（public override） |
 
-**信号**：`playing_signal()` / `progress_signal()` / `volume_signal()` / `muted_signal()` 返回对应 `Reactive<...>*`。
+**信号**：`playing_signal()` / `progress_signal()` / `volume_signal()` / `muted_signal()` 返回对应只读句柄 `ReadOnlyState<bool>` / `ReadOnlyState<double>`；可经 `computed` 派生展示文本或直接交给只读属性（见 [`02-state.md`](02-state.md) §2）。
 
 **播放时钟接线（两处必备门，缺一即画面恒停）**：
 

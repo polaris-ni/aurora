@@ -37,7 +37,7 @@
 |:---|:---|:---|
 | `type_name()` | `[[nodiscard]] virtual auto type_name() const -> const char *` —— 纯虚 | `widget.h` |
 | `describe()` | `[[nodiscard]] virtual auto describe() const -> WidgetDescriptor` | `widget.h` |
-| `collect_signals(out)` | `virtual auto collect_signals(std::vector<SignalViewBase*>&) -> void` | `widget.h` |
+| `collect_signals(out)` | `virtual auto collect_signals(StateSink&) -> void` | `widget.h` |
 | `child_nodes()` | `[[nodiscard]] virtual auto child_nodes() const -> const std::vector<Node>&` | `widget.h` |
 
 各具体控件另提供**静态** `describe_static()`（例如 `au::Button::describe_static()`，见 `button.h`），便于无需实例即可查询元数据。`describe_static()` 不是 `Widget` 的虚成员。
@@ -138,7 +138,7 @@ auto info = au::Button::describe_static();
 
 ### 2.3.1 挂载与卸载的对称契约
 
-`Widget::mount(ctx)` 负责注册响应式依赖（经 `track` 把 `collect_signals` 收来的信号连同 `modifier` / `show` 挂进 `effects_`）并递归下发子树，`Widget::unmount()` 是它的镜像：置 `mounted_ = false`、清空 `effects_`（真正退订）、复位手势 tick 位，并派发 `on_unmount(ctx)`。
+`Widget::mount(ctx)` 负责注册响应式依赖（经 `wire_signals` 把 `collect_signals` 收来的来源连同基类自身仍持有的 `modifier` / `show` 来源经 `StateSink::watch` 挂进 `signal_subscriptions_`，任一来源提交即按 `on_signal_dirty()` 标脏）并递归下发子树，`Widget::unmount()` 是它的镜像：置 `mounted_ = false`、清空订阅（真正退订）、复位手势 tick 位，并派发 `on_unmount(ctx)`。挂载后换源的入口（`set_xxx_source`）调 `resubscribe_signals()` 重建订阅；未挂载时为空操作，下次 `mount` 重新采集。
 
 **同一性判据是宿主身份，不是「是否已挂载」这一个布尔。** `BuildContext::host_id`（`std::uint64_t`，`build_context.h`）由 `Window` 构造期取进程内唯一值（`detail::next_host_id`）、在 `prepare_context` 每帧写入，并沿 `Provider` 子环境、转场层、容器逐层透传**不变**。判别式：
 
@@ -197,6 +197,22 @@ au::Text("Welcome").font_size(24).bold();
 
 **二层属性划分**：固有属性（`XxxProps` 字段）描述控件身份并随控件序列化；`Modifier` 承载跨切面装饰。重叠能力以**固有属性优先**；绘制时 `Modifier` 在外、固有属性在内（详见 [`03-layout-render.md`](03-layout-render.md) §7.4）。
 
+### 2.5.1 响应式属性与句柄权限
+
+属性分两类句柄，类型即权限（详见 [`02-state.md`](02-state.md) §2）：
+
+| 属性角色 | 句柄类型 | 例子 |
+|:---|:---|:---|
+| 展示属性（控件只读、不代写上游） | `ReadOnlyState<T>` | `TextProps::content`、`Show` 的条件、`ProgressIndicator` 的进度 |
+| 可编辑模型（控件按交互写回） | `State<T>` | `Checkbox` / `Switch` / `Slider` 的值、`Repeater` / `ReorderableList` 的数据源 |
+
+两类句柄都**按值交接**：复制共享同一来源，控件与宿主持有同一份值；`State<T>` 单向隐式降级为 `ReadOnlyState<T>`，反向不成立。
+
+- **值 / 来源两种 setter**：`set_xxx(T)`（或 `set_xxx(State<T>)`）安装/写入值；`set_xxx_source(ReadOnlyState<T>)` 换源。换源一律**退订旧源、订阅新源**——即使新旧值相等也必须重订阅（旧订阅固定旧源，不重建就会「换源后不跟随」），随后标脏布局 / 绘制（如 `Widget::set_modifier_source` / `set_show_source`、`ProgressIndicator::set_value_source`）。
+- **展示件不代写上游**：`ProgressIndicator` 绑定外部只读来源时，`set_value(v)` 不写上游，而是**换源到自有常量来源**再写值；要改进度请直接写原 `State<double>`。
+- **采集协议**：控件经 `collect_signals(StateSink&)` 把自身句柄 `out.push(member_)` 登记给框架。`StateSink` 按来源身份去重、只登记来源不附带属性名、不触发用户回调；`sources()` 给出已登记来源，`watch(fn)` 为每个来源各建一条固定来源订阅（回调内只登记该来源），并在建立后首跑一次。`Widget::mount` 用 `watch` 把采集结果挂进自身 `effects_`，`unmount` 整体退订——自定义控件**只需覆写 `collect_signals`**，不要自行 `subscribe`。
+- **序列化只还原值**：JSON 往返写回标量属性（经 `set_xxx` / `set_value`），句柄来源、回调与条目工厂不在序列化范围内，宿主须在 `from_json` 后重新接线（见 [`08-tooling.md`](08-tooling.md)）。
+
 ### 2.6 无障碍虚钩子
 
 控件通过一组**虚钩子**自述无障碍语义；语义树构建（`a11y_tree.h`，见 §1）与平台桥只读这些钩子，不探控件内部。全部为虚函数且**基类默认值即合法**——自定义控件零改动仍可被推断（`infer_accessibility_role(type_name())` 兜底）。
@@ -254,9 +270,9 @@ au::Text("Welcome").font_size(24).bold();
 | 控件 | 关键属性 |
 |:---|:---|
 | `Text` | `content`、`font_size`、`color`、`bold()`、`family()`（注：斜体经 `font_style=Italic` 设置，由 FontEngine 施加合成斜体实现，见 `text.h`）。支持指针拖选、键盘扩选与复制 |
-| `RichText` / `TextSpan` | 富文本片段组合。`RichText` 接收 `Reactive<std::vector<TextSpan>>` |
+| `RichText` / `TextSpan` | 富文本片段组合。片段来源是只读句柄 `ReadOnlyState<std::vector<TextSpan>>`（可由 `State<std::vector<TextSpan>>` 隐式降级或字面量自有来源承载） |
 | `RichTextEdit` | 富文本编辑器（`widget/rich_text_edit.h`）；序列化键 `text`（纯文本内容），回调 `on_text_input` |
-| `TextInput` | 仅 `value`（**`std::string`**，非 `Reactive`）、`placeholder`、`font_size` 进 `TextInputProps`（`text_input.h`）；`text_color` / `placeholder_color` / `background` / `focused_background` / `border_color` / `focused_border_color` / `border_width` / `selection_color` 等颜色类为**私有字段 + `set_*` 链式**（非 Props，见 `text_input.h` 附近）。回调 `on_changed`（每次编辑）/`on_submit`（Enter） |
+| `TextInput` | 仅 `value`（**`std::string`**，非响应式句柄）、`placeholder`、`font_size` 进 `TextInputProps`（`text_input.h`）；`text_color` / `placeholder_color` / `background` / `focused_background` / `border_color` / `focused_border_color` / `border_width` / `selection_color` 等颜色类为**私有字段 + `set_*` 链式**（非 Props，见 `text_input.h` 附近）。回调 `on_changed`（每次编辑）/`on_submit`（Enter） |
 
 `TextInput` 点击经 `FocusManager` 获焦；读当前文本用 `value()`（`text_input.h`），程序化改值用 `set_value()`；无 `.text()` 方法。
 
@@ -341,8 +357,8 @@ au::Text("Welcome").font_size(24).bold();
 - **`reduce_motion` 短路**：`current_accessibility_settings().reduce_motion` 为真时，snap 收位与 `scroll_to(…, true)` 一律直落端点、不产生中间帧（状态与「走完」一致），对齐 `AnimationController::tick` / `Dismissible` / `ReorderableList` 的既有短路语义。
 - **`PullToRefresh` 的双输入通道**：仅当滚动子树**已在顶部**才积累下拉距离——顶部判定取最近可滚动后代的 `accessibility_scroll()` 区间（`position <= min + 0.5`；无可滚动后代视为在顶部，静态内容可整体下拉）。① `DragRecognizer` 判定主轴为垂直（`|dy| ≥ |dx|`）且正在向下拖时劫持手势，位移经**双曲橡皮筋**映射 `raw·max_pull/(raw+max_pull)`：起段近 1:1 跟手、渐近 `max_pull` 且恒不越界（拖满 `max_pull` 恰达半上限，与缺省 `threshold = max_pull/2` 对齐保证可触发）；② 嵌套滚动协调下，子级到顶后未消费的滚轮余量经 `ScrollEvent::remaining_y` 上冒给本容器（本容器在命中链上位于子滚动控件的更浅层，路由见 `05-event-navigation.md` §3.3），余量按 16dp / 增量单位折算后同样走橡皮筋（与 `ScrollProps::step` 缺省同值）；门控不通过（刷新中 / 子树不在顶部 / 增量方向相反）时**原样回传 `remaining_y`** 交还更浅层，而非静默吞掉。三态 `Idle` / `Pulling` / `Refreshing`：松手时 `pull >= threshold` 且已注册 `on_refresh` 才触发一次回调并回弹到驻留高度（约 `threshold/2`，spinner 持续旋转），否则直接回弹归零；数据加载完成后由宿主调 `finish_refresh()` 收拢——不回调解散回调则 spinner 常驻。指示器是**覆盖层**（顶部半透明带 + 弧线 spinner）——不动布局盒、不推挤内容（`05-event-navigation.md` §6.5「动画不改布局」），回弹走同一 `ScrollGlide`，`progress()`（`pull/threshold`，可 >1）供宿主联动。
 - **`StickyHeader` 是纯绘制层语义**：控件正常参与布局（占据自身高度、随内容滚动被录入内容缓冲），宿主在内容 blit 合成之后把「已滚过头顶」的头部按 pin 位重绘于视口顶部——内容缓冲不因此逐帧重录（否则滑窗模型破产）。宿主识别钩子是 `Widget::is_sticky_header()`（默认 `false`）。**顶出规则**同 CSS `position: sticky` / `RecyclerView`：下一条头部的视口顶部逼近时把本条向上顶出，最后一条钉到底。`Scroll` 经 `child_nodes()` 递归累加 y 收集多个头部（多段堆叠），`LazyList` 的 `child_nodes()` 为空、粘性项作为普通行实例化，故各条目自管其 sticky。
-- **偏移信号驱动滚动动画**：`offset_signal()` 懒创建 `State<float>` 并返回 `SignalView<float>` 引用，任何滚动通道（滚轮、拖拽、收位滑动帧、程序化跳转）落位即发布；镜像值比较而非 `State::get()` 回读（后者在 `Effect` 作用域会自订阅本控件而闭环）。宿主由此把偏移映射为视差、透明度、进度条——无需轮询，也无需子类化。
-- **偏移变更回调是命令式旁听口**（`LazyList::set_on_scroll_changed`）：信号那半只对响应式树有效——`SignalViewBase` 只有 `subscribe(Effect&)` 一条订阅路，而 `LazyList::collect_signals` 返回空表（不向控件树暴露该信号），故不进 `Effect` 作用域的宿主想知道「用户滚到底了没有」只能逐帧轮询 `scroll_offset()` 与 `max_scroll_offset()` 自比。回调挂在**仅有的两条落位路径**（`apply_offset` / `apply_restored_offset`）末端，因此来源不限（滚轮、收位滑动每帧、`set_scroll_offset`、无障碍滚动、拖入滚边、待定偏移与按键恢复落地）都通知，去重则免费来自两条路径开头的「夹取后同值即返回」：同值重复设置、已到底再请求更大偏移都不产生回调。参数与回调内的 `scroll_offset()` 同源（通知排在偏移与脏标记都落定之后）；传空 `std::function` 即注销，回调是本控件成员故随控件销毁自然失效、无需注销句柄。与 `offset_signal()` 并存、同一次落位各驱动一次。
+- **偏移信号驱动滚动动画**：`offset_signal()` 懒创建 `State<float>` 并返回其只读句柄 `ReadOnlyState<float>`，任何滚动通道（滚轮、拖拽、收位滑动帧、程序化跳转）落位即发布；发布侧用镜像值比较而非 `State::get()` 回读（后者在 `effect` / `computed` 作用域会自订阅本控件而闭环）。宿主由此把偏移映射为视差、透明度、进度条——无需轮询，也无需子类化。
+- **偏移变更回调是命令式旁听口**（`LazyList::set_on_scroll_changed`）：偏移信号那半只对响应式树有效——`LazyList::collect_signals` 不向控件树暴露该来源，故不在 `effect` 作用域内的宿主想知道「用户滚到底了没有」只能逐帧轮询 `scroll_offset()` 与 `max_scroll_offset()` 自比。回调挂在**仅有的两条落位路径**（`apply_offset` / `apply_restored_offset`）末端，因此来源不限（滚轮、收位滑动每帧、`set_scroll_offset`、无障碍滚动、拖入滚边、待定偏移与按键恢复落地）都通知，去重则免费来自两条路径开头的「夹取后同值即返回」：同值重复设置、已到底再请求更大偏移都不产生回调。参数与回调内的 `scroll_offset()` 同源（通知排在偏移与脏标记都落定之后）；传空 `std::function` 即注销，回调是本控件成员故随控件销毁自然失效、无需注销句柄。与 `offset_signal()` 并存、同一次落位各驱动一次。
 
 ### 3.4 列表与虚拟化
 
@@ -442,7 +458,7 @@ au::Text("Welcome").font_size(24).bold();
 
 ### 4.1 主题回退
 
-强调色（`active_color` / `accent_color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx)` 解析对应角色（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。`Button` 遵同一契约（迁移批起）：`ButtonProps::color` 为 `Reactive<std::optional<Color>>`（保留响应式能力，空 = 跟随 `roles.primary`）、`on_color` 为 `std::optional<Color>`（空 = 跟随 `roles.on_primary`），解析点是接收 `BuildContext` 的 `resolve_background(ctx)` / `resolve_text_color(ctx)`；`describe_static` 的 `default_value` 元数据为 `"theme.primary"` / `"theme.on_primary"`（AI/codegen 面文档值，不参与运行时）。
+强调色（`active_color` / `accent_color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx)` 解析对应角色（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。`Button` 遵同一契约（迁移批起）：`ButtonProps::color` 为只读来源 `ReadOnlyState<std::optional<Color>>`（保留响应式能力，空 = 跟随 `roles.primary`）、`on_color` 为 `std::optional<Color>`（空 = 跟随 `roles.on_primary`），解析点是接收 `BuildContext` 的 `resolve_background(ctx)` / `resolve_text_color(ctx)`；`describe_static` 的 `default_value` 元数据为 `"theme.primary"` / `"theme.on_primary"`（AI/codegen 面文档值，不参与运行时）。
 
 ### 4.2 状态反馈与禁用态
 
@@ -494,8 +510,8 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 | `ui::label(parent, text, TextProps = {})` | `Text`（`text` 覆盖 `props.content`） |
 | `ui::button(parent, text, ButtonProps = {}, on_click = {})` | `Button`（`text` 覆盖 `props.label`，`on_click` 可选） |
 | `ui::input(parent, value = "", TextInputProps = {})` | `TextInput`（`value` 为初始文本） |
-| `ui::checkbox(parent, checked, on_changed = {})` | `Checkbox`（双模：`Reactive<bool>` 或 `bool` 初值） |
-| `ui::slider(parent, value, on_changed = {})` | `Slider`（双模：`Reactive<double>` 或 `double` 初值） |
+| `ui::checkbox(parent, checked, on_changed = {})` | `Checkbox`（双模：`State<bool>` 模型或 `bool` 初值） |
+| `ui::slider(parent, value, on_changed = {})` | `Slider`（双模：`State<double>` 模型或 `double` 初值） |
 | `ui::vbox(parent, ColumnProps = {})` | `Column` |
 | `ui::hbox(parent, RowProps = {})` | `Row` |
 | `ui::stack(parent, align = Alignment::TopLeft)` | `Stack` |

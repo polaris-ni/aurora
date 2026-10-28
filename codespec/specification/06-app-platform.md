@@ -44,9 +44,9 @@
 | `set_on_frame(cb)` | 注入每帧自定义逻辑，在 `present_root` 之前调用 |
 | `set_overlay(shared_ptr<Widget>)` | 注入独立于控件树的 HUD 叠加层（典型 `PerfOverlay`），由 `Window::present_root` 在 tree paint 之后、present 之前合成。叠加层渲染到独立离屏缓冲、按 `Window::AURORA_HUD_REFRESH_MS`（500ms）重绘自身，不触发整树重绘；**且叠加层可见时帧循环在空闲期也按时唤醒**（仅刷 HUD、不重排不重绘树），读数不会停在上一次活跃时的值上 |
 | `dispatch_*` / `tick` / `render_to_png(path)` | 程序化派发与离屏渲染 |
-| `window_state()` / `window_mode()` | 响应式 `State<WindowState>&` / `State<WindowMode>&`（在 `Effect` 内读取自动订阅刷新） |
+| `window_state()` / `window_mode()` | 只读句柄 `ReadOnlyState<WindowState>` / `ReadOnlyState<WindowMode>`（在 `effect` / `computed` 内读取自动订阅刷新） |
 | `set_on_window_state(cb)` / `set_on_window_mode(cb)` | 命令式回调 |
-| `os_color_scheme_state()` | 响应式 `State<ColorScheme>&`：OS 明暗偏好的应用级当前档，**跨全部宿主聚合去重**（口径见 §6.2） |
+| `os_color_scheme_state()` | 只读句柄 `ReadOnlyState<ColorScheme>`：OS 明暗偏好的应用级当前档，**跨全部宿主聚合去重**（口径见 §6.2） |
 | `set_on_os_color_scheme(cb)` / `refresh_os_color_scheme()` | OS 明暗偏好的命令式回调（同值不触发）/ 显式 seed（现读一次系统偏好写入 State，幂等） |
 | `scheduler()` | 取应用级 `Scheduler` |
 | `animator()` | 取应用级 `Animator &`，由 `run()` 每帧按 `dt` 驱动，供注册动画控制器 |
@@ -228,7 +228,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 
 **跨窗通信**
 
-- **共享状态** → 直接用既有 `Store<S>`：多个窗口共享同一实例，各自 `au::connect(store, ...)` 订阅并在 `asSignal()` 上绑定控件，**无需新 API**。
+- **共享状态** → 多窗口共用同一份 `State<S>` 句柄即可：句柄按值抄给各窗口的控件（展示属性经只读降级）或 `effect`，同一来源向所有订阅者逐处刷新，**无需新 API**。
 - **一次性通知 / 命令** → `Application::bus()`（`WindowEventBus`）：`post<T>(payload, from)` 类型化发布，`on<T>(cb, filter_from)` 订阅（返回 RAII `Subscription`，析构自动取消；`filter_from` 用于点对点来源过滤）。
 - 语义：主线程**同步扇出**（与 `Application` 的同步事件派发一致）；遍历前拷贝订阅列表，订阅者可在回调内安全新增 / 取消订阅；订阅句柄内部持有共享状态，**总线先析构、句柄后析构**也安全。
 
@@ -550,11 +550,11 @@ au::Lifecycle(
 
 **后端上报**：`Win32Surface` 处理 `WM_SIZE`（MINIMIZED / MAXIMIZED / RESTORED → 几何态；最小化同时置 `WindowState::Hidden`）与 `WM_ACTIVATE`（非 `WA_INACTIVE` → `Visible`，否则 `Occluded`），两者的状态聚合点 `update_window_state()` 把 `IsWindowVisible(hwnd)` 作为 `on_screen` 传入 `compute_window_state`，故运行期 `set_visible(false)` 报 `Hidden`、`set_visible(true)` 按当时的 `minimized` / `active` 重算；`Win32Host` 构造尾部还会按建窗可见性档**播种**内部快照（`Hidden` 档 ⇒ `Hidden`、`NoActivate` ⇒ `Occluded`、`Normal` ⇒ `Visible`）——只写成员值不触发任何 handler（该时刻 handler 尚未安装），故上报序列与既往逐位相同，而「新建 `Hidden` 档窗口」与「运行期 `set_visible(false)`」读回同一个值（不播种则宿主以 `Visible` 起步、第一次真实变化被「与上次相同」的去重吞掉）。`GlfwSurface` 注册 `glfwSetWindowIconifyCallback` / `glfwSetWindowFocusCallback` / `glfwSetWindowMaximizeCallback`；`HeadlessSurface` 提供 `simulate_window_state` / `simulate_window_mode` 测试 seam，其 `set_visible` 记录显隐值并**同时经 `notify_window_state` 上报**（`false ⇒ Hidden`、`true ⇒ Visible`，同值重复调用不产生第二次上报），使「显隐 → `WindowState` → 应用级投影」这条链在无头 CI 可断言，不依赖真机会话。后端各自仅「**状态变化时**」经 `Surface::WindowStateHandler` / `WindowModeHandler` 上报。
 
-**上层聚合**：`Application` 暴露响应式 `State<WindowState>& window_state()` / `State<WindowMode>& window_mode()` 与命令式回调 `set_on_window_state` / `set_on_window_mode`；每帧经 `Window::present_root` 将当前快照注入根 `Environment`，子树可 `ctx.environment<WindowState>()` / `ctx.environment<WindowMode>()` 读取。
+**上层聚合**：`Application` 暴露只读句柄 `ReadOnlyState<WindowState> window_state()` / `ReadOnlyState<WindowMode> window_mode()` 与命令式回调 `set_on_window_state` / `set_on_window_mode`；每帧经 `Window::present_root` 将当前快照注入根 `Environment`，子树可 `ctx.environment<WindowState>()` / `ctx.environment<WindowMode>()` 读取。句柄只开放读取——应用不能把窗口状态写回去，快照的唯一写入者是后端上报。
 
 **聚合范围（既有口径）**：上述两枚 State 与两枚回调**只聚合主窗口**——`register_host` 安装的 state / mode sink 仅在宿主即主窗口时转发；非主窗口的可见性 / 几何态变化只落在自己的宿主快照（`Window::window_state()` / `Window::window_mode()`）上。与 §2.4 的逐窗几何持久化不冲突：几何快照逐窗独立读写（非主窗重启后同样回到自己的几何态），应用级 State 只是主窗的投影。
 
-**OS 明暗偏好是第三枚 State，聚合范围与上面两枚相反。** `State<ColorScheme>& os_color_scheme_state()`（命令式回调 `set_on_os_color_scheme`，显式 seed `refresh_os_color_scheme()`）走同一套「宿主上报表 → 应用级聚合」形态，但 `register_host` 对**每个**宿主都装 sink：OS 档位是**进程级事实**，N 扇窗各自收到同一次系统切换（Win32 逐窗各收一次 `WM_SETTINGCHANGE`）应当在应用级只算一次通知，而「谁是主窗」与系统深浅色无关。去重不靠跨窗记账位，靠聚合出口 `on_os_color_scheme_changed` 的**先比后设**——`State::set` 对相等值照样发信号，故比较必须在转发处（与 `on_window_state_changed` 同款）。第二扇窗收到同值时数值已相等 ⇒ 静默。
+**OS 明暗偏好是第三枚状态，聚合范围与上面两枚相反。** `ReadOnlyState<ColorScheme> os_color_scheme_state()`（命令式回调 `set_on_os_color_scheme`，显式 seed `refresh_os_color_scheme()`）走同一套「宿主上报表 → 应用级聚合」形态，但 `register_host` 对**每个**宿主都装 sink：OS 档位是**进程级事实**，N 扇窗各自收到同一次系统切换（Win32 逐窗各收一次 `WM_SETTINGCHANGE`）应当在应用级只算一次通知，而「谁是主窗」与系统深浅色无关。去重不靠跨窗记账位，靠聚合出口 `on_os_color_scheme_changed` 的**先比后设**——`State::set` 对相等值照样发信号，故比较必须在转发处（与 `on_window_state_changed` 同款）。第二扇窗收到同值时数值已相等 ⇒ 静默。
 
 三条口径：其一，**初值恒为 `Unspecified`**，构造与宿主登记不为应用级 State 隐式读注册表（与 §5 `platform()` 的「显式查询，跳过探测」同口径；宿主登记时框架自己那一读只推 `Window` 快照，不进应用级 State），启动期解算由应用显式调 `refresh_os_color_scheme()`。其二，**原样透传 OS 原值**（含 `Unspecified`），框架不替应用回落明 / 暗——「系统不表态回哪一档」是应用策略。其三，**转发排在框架那一半之后**（`WindowHost::on_os_color_scheme` 先推 `Window::set_os_color_scheme` + `force_full_redraw`，再报 sink），保证应用看到变化时本窗根主题已同值；`Surface::set_os_color_scheme_handler` 的独占单槽语义不变，应用侧旁听走 sink，不去抢那一枚槽（抢了会顶掉框架的根主题跟随）。`WindowHost::teardown()` 同步置空本表，与另两枚同款。
 
@@ -653,10 +653,10 @@ app.set_on_os_color_scheme([](au::ColorScheme s) { apply_chrome_scheme(s); });
 
 `Timer`（`widget/timer.h`）是声明式、响应式为主的控件。
 
-构造 `Timer(period, TickBuilder, on_tick = {})`，其中 `TickBuilder = std::function<Node(const SignalView<int>&)>`，在构造时调用**一次**构建子树，内部经响应式绑定刷新（非每次 tick 重建）。
+构造 `Timer(period, TickBuilder, on_tick = {})`，其中 `TickBuilder = std::function<Node(ReadOnlyState<int>)>`，在构造时调用**一次**构建子树，内部经响应式派生刷新（非每次 tick 重建）。
 
 - 挂载（`on_mount`）向 `Scheduler::current()` 注册周期任务。
-- 每次 tick 自增内部 `State<int>`（经 `ticks()` 暴露为 `SignalView<int>`，计数从 1 起）驱动子 UI 自动重绘，并可选调用 `on_tick(int)`。
+- 每次 tick 自增内部 `State<int>`（经 `ticks()` 暴露为 `ReadOnlyState<int>`，计数从 1 起）驱动子 UI 自动重绘，并可选调用 `on_tick(int)`。
 - 卸载 / 析构自动 `cancel()` 句柄。
 - 降级：无运行中 App（`Scheduler::current() == nullptr`，如纯 `render_to_png`）时记 `Diagnostics::warn` 并以 `ticks() == 0` 渲染子 UI，不崩溃。
 
@@ -667,10 +667,11 @@ au::TimerHandle h = sched.set_interval(1s, [&] { poll(); });
 sched.set_timeout(5s, [&] { h.cancel(); });
 
 // 组件级声明式：子 UI 经 ticks() 响应式刷新
-au::Timer(1s, [](const au::SignalView<int> &tick) {
-    return au::Text(au::computed([&] {
+au::Timer(1s, [](au::ReadOnlyState<int> tick) {
+    auto label = au::computed([tick]() -> au::LocalizedString {
         return au::LocalizedString{ "tick: " + std::to_string(tick.get()) };
-    }));
+    });
+    return au::Text{ au::TextProps{ .content = label } };
 });
 ```
 
@@ -1710,10 +1711,10 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 - **旁证四行证据表，不走事件总线**：库内单点入口 `detail::note_connection_outcome(connected, loopback_peer, code)` 由全库唯一建连出口 `detail::await_connect_via` 的结局处调用一处（四条腿都从这一个函数经过）。四行是：成功且非回环计一枚正证；成功但回环**不计正证也不采样**（本机自连不证明外链）；任何非 `Cancelled` / `Invalid` 失败**只触发合并采样并写 `last_failure`**，不计负证；`Cancelled` / `Invalid` 无动作。分类复用 `error_class_of`（只用来筛触发与排除取消），不新造第二套归因。失败不作负证的理由：`Dns` 同时覆盖 NXDOMAIN 与解析器故障、`Unreachable` 的 `NetConnectFailed` 同时覆盖 ECONNREFUSED 与 ENETUNREACH、`Proxy` 覆盖 407 / 协议错误 / 配置读不到，任一类当负证都会造出假离线。**旁证不走事件总线**是因为总线在 `AURORA_ENABLE_DEBUG=OFF` 下整类裁为空壳，而本件公共面按 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §1.2 恒在——共用一条通道会让 Release 下的链路态变钝，且判据要写两遍。
 - **定时复用引擎自己的 `post_after`，无撤销口下用 epoch + pending 合并**：`post_after` 不支持取消，故每登记一拍 `epoch` +1，旧闭包到期时见 epoch 不符或共享 live 标志已假即整拍 no-op；单一 `sample_pending` 标记让插队合并、**首因保留**——断链瞬间几十次失败只采一次、最多两枚存活登记（一枚作废的周期拍加一枚证据拍），采样结束后只登记下一枚周期拍。周期拍**只在至少一枚订阅存在时**登记；末枚订阅注销后不再有周期拍；证据拍可在无订阅者时跑一次（那正是「有交换」的场合）。**登记失败必须清 pending**：`post_after` 回 `net-platform-unavailable` 时按 epoch 守卫把标记清零，否则此后每一拍都合并进一枚不存在的定时器，链路永久停在首态。`set_options()` 与 `refresh()` 同样只「请求一次采样」，返回值只表请求已受理，结果经 `snapshot()` 或订阅回调抵达。
 - **探测 I/O 在运行时互斥量之外**：采样体先在锁内校验 epoch / live，**锁外**读 OS 表与伪文件，再回锁内复核一遍后落状态机；`snapshot()` 的加锁拷贝因此不会排在一次 I/O 后面。发布变更与调用订阅者一律在锁外。本件只有一把互斥量，**持锁期间不调 `post_to_main`、不调探针、不调用户回调**。
-- **线程与投递纪律**：采样体只在引擎线程执行；订阅回调经 `aurora::detail::post_to_main` 回投（装有主线程投递器时在主线程，无投递器时就地调用），**不新增第三种排队**；抛出型订阅者被摘除并记恰好一条 WARN，不中断采样循环、不改变任何在途交换；`subscribe()` **返回前绝不回调**（live 标志在返回前一瞬才置真，故并发发布抢不了跑）。响应式一侧到此为止：不提供 `Resource` / `Signal` 形态（持续态没有「一次落定」可折算，且引擎线程直接写响应式状态会撞「引擎线程绝不触碰 widget / `State`」那条不变量）。
+- **线程与投递纪律**：采样体只在引擎线程执行；订阅回调经 `aurora::detail::post_to_main` 回投（装有主线程投递器时在主线程，无投递器时就地调用），**不新增第三种排队**；抛出型订阅者被摘除并记恰好一条 WARN，不中断采样循环、不改变任何在途交换；`subscribe()` **返回前绝不回调**（live 标志在返回前一瞬才置真，故并发发布抢不了跑）。响应式一侧到此为止：不提供 `Resource` / 流式信号形态（持续态没有「一次落定」可折算，且引擎线程直接写响应式状态会撞「引擎线程绝不触碰 widget / `State`」那条不变量）。
 - **`stale` 是派生读数、`generation` 只标已发布序列**：`stale` = 距上次成功采样或合格正证超过 3× `sample_interval`（阈值写死、**不设旋钮**，否则两枚旋钮能配出自相矛盾的组合），`snapshot()` 按同一公式重算，读取不触发 I/O、不发布通知；`StalenessMarked` 只在采样循环观察到 false→true 时发布一次。`generation` 只在对外发布的变更上 +1（状态转换或 `stale` 翻转）；`last_failure` 是冻结错误码 slug（**不含主机名与 URL**），静默更新、不推进代际、不单独通知，转入 `Online` 时清空。`since` 只在 `state` 变化时更新，初值取 monitor 建立时刻、**不是** epoch 零点。
 - **句柄三条契约逐字沿用 `EventSourceRegistration`**：析构即注销且幂等（双析构不双重摘除）、移动后源句柄转为空态（`is_registered()` 假且 `token()` 归 0，故 `= default` 的移动不够用）、已入队的一次尾批仍抵达且 `cancel_pending()` 与析构互不隐含。首条变更的 `previous` 等于订阅时刻的 `snapshot()`；合并待投递变更时以最后一次为准、`previous` 仍锚在**该订阅者**已见值上。
-- **明确不做**：不做发起侧闸门（闸仍在 `NetPolicy` 与能力闸两处，本件只交事实与通知——拿探测当闸等于把可交付请求变成库侧自己发起的失败，那类失败对端不留痕、时间线看不出根因）、不做链路级重连编排、不做第四档、不给 `Resource` / `Signal` 形态、不加 `Capabilities` 字段、**不新增错误码**（不可得与无源一律复用 `net-platform-unavailable`）、**不新增 feature 宏且不随 `AURORA_ENABLE_DEBUG` 裁切**、不引 netlink / COM / 任何 vendored 依赖、不起新线程、探测**不主动打一个包**（零出站是本件的硬判据）、不把任何连接失败当链路负证、不导出任何拓扑事实（接口名 / 网关 / SSID / 链路本地地址连内部快照都不留，`ProbeReading` 只含 `optional<bool>`）。
+- **明确不做**：不做发起侧闸门（闸仍在 `NetPolicy` 与能力闸两处，本件只交事实与通知——拿探测当闸等于把可交付请求变成库侧自己发起的失败，那类失败对端不留痕、时间线看不出根因）、不做链路级重连编排、不做第四档、不给 `Resource` / 流式信号形态、不加 `Capabilities` 字段、**不新增错误码**（不可得与无源一律复用 `net-platform-unavailable`）、**不新增 feature 宏且不随 `AURORA_ENABLE_DEBUG` 裁切**、不引 netlink / COM / 任何 vendored 依赖、不起新线程、探测**不主动打一个包**（零出站是本件的硬判据）、不把任何连接失败当链路负证、不导出任何拓扑事实（接口名 / 网关 / SSID / 链路本地地址连内部快照都不留，`ProbeReading` 只含 `optional<bool>`）。
 
 判据：新增 `utest_net_connectivity_state`（17 例，纯内存逐值钉判据层：首态 `Unknown` + `stale`、一枚合格离线读数即转 `Offline`、`Unknown→Online` 一枚正证、`Offline→Online` 的三种组合各一例、回环成功不计正证也不采样、已在线时正证不再采样、读失败不计数不转换、反向证据清零对方计数、`Timeout` 只触发采样并写 `last_failure`、`Cancelled` 无动作、连接失败永不产生离线、`stale` 越过 3× 周期只翻转一次且清零两侧、选项两端钳位、`set_options()` 不重置在途计数也不立即转换）与 `utest_net_connectivity`（7 例，公共面与投递：首快照形态、订阅后一个周期交付 `Online` 且只探测一次、50 次失败合并为 1 次探测 0 条通知、登记失败清 pending 后可重新登记、句柄三条契约含空态令牌归 0、停机后快照仍可读、旋钮往返）。`utest_inspector_server` 补两种形状的 `connectivity` 断言（正常形状与 Release 早退形状同源、字段集合固定、令牌经三枚换算函数）。真机探针 `tools/verify/net_connectivity_live_probe.cpp`（`--expect auto|offline|online`、`--timeout` 1..300 s）登记于 `cmake/AuroraVerify.cmake`，人工用例见 [`manual-test/23-net.md`](../manual-test/23-net.md) 的 TC-NET-009。2026-10-28 实测：Windows 腿 `--expect auto` 21 条判据全 `[PASS]`（`source=ip_helper`、首条变更 `cause=subscription_start state=online`、`generation=1`、`stale` 转假，`since_ms` 约 5.0 s）。WSL Ubuntu 腿首轮 `--expect auto` 在读得到缺省路由时误报 `offline`，暴露并同批修复两处缺陷：`sysfs` 的 `flags` 带 `0x` 前缀而解析器只认纯十六进制字符（接口被误判「读不到」）、以及「接口状态读不到」先于「两族文件可读 ⇒ 离线」返回（把「读不到」折算成了离线，违反本节「绝不把读不到当成 down」的约定）。修复后四跑全 `PASS`：`--expect auto`（`source=link_files`、`state=online`）、`--expect online`、删掉 v4+v6 缺省路由后的 `--expect offline`（`landed ... state=offline ... generation=1`，无任何出站交换）、按原值加回路由后的 `--expect online`；真实接口为 `eth3`。macOS 腿按上文如实记 `None`。
 
@@ -1775,7 +1776,7 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 
 ### 9.1 Preferences
 
-`Preferences`（`preferences/preferences.h`）是键值持久化门面，类型化读写并带响应式绑定。
+`Preferences`（`preferences/preferences.h`）是键值持久化门面：类型化读写，`watch<T>` 返回只读句柄 `ReadOnlyState<T>`。
 
 | 成员 | 说明 |
 |:---|:---|
@@ -1788,9 +1789,16 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 | `group(name) -> Group` | 命名空间分组（`:181`） |
 | `flush()` / `reload()` | 写盘 / 重载，返回 `Result<void>`（`:210` / `:213`） |
 | `keys()` / `contains(key)` / `remove(key)` / `clear()` | 键集合操作（`:218`–`:227`） |
-| `get<T>(key, fallback)` / `watch<T>(...)` / `binding<T>(...)` | 类型化读取；`watch` 返回订阅，`binding` 返回 `Binding<T>` |
+| `get<T>(key, fallback)` / `set(key, value)` | 类型化读写；`get` 在键缺失或类型不符时回退 `fallback`，`set` 只更新内存并推送订阅者 |
+| `watch<T>(key, fallback)` | 惰性创建并缓存该键的只读句柄 `ReadOnlyState<T>`；初始值为当前存储值或 `fallback`，此后 `set` / `reload` 自动推送 |
 
 未绑定文件时为**内存模式**，写盘返回 `prefs-not-persistent` 错误（slug 见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）。
+
+**`watch` 是只读通道，不是双向绑定。** 同键同类型重复调用返回**同一来源**（多处 watch 共享推送）；同键换类型（`watch<int>` → `watch<std::string>`）则重建来源，旧句柄停在旧类型、不再收到推送。推送方向只有一个：`set` / `remove` / `clear` / `reload` 改存储后写回句柄，句柄本身没有写入口——修改配置只走这些命令，落盘仍须 `flush()`。表单草稿由应用自己的 `State` 保存，提交时显式 `set(key, value)` 再 `flush()`；本类不提供读写双向绑定。
+
+两条交付口径：① 推送在**写入调用方线程**上、`Preferences` 互斥锁**外**同步发生——订阅回调里可以安全地再调 `get` / `set`，不会自锁；② 推送值按该句柄注册时的 `T` 宽容读——存储侧换成不兼容类型或键被删除时，句柄收到的是注册时的 `fallback`（不抛错、不清存储），故「删除 + 旧句柄」表现为回退默认值而非句柄失效。
+
+`flush()` 把内存快照写盘（写临时文件 + 原子 `rename`，期间持 `<file>.lock` 跨进程文件锁）；`reload()` 从文件重读、按「版本化 LWW + 墓碑 + 全局清空纪元」合并后推送到全部已订阅句柄。两者都返回 `Result<void>`，内存模式下返回错误；`set` 从不隐式写穿文件。
 
 ### 9.2 Storage
 

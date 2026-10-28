@@ -88,7 +88,7 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 
 ### 3.3 LayoutBuilder
 
-`LayoutBuilder`（`widget/layout_builder.h`）是响应式构建原语。`builder` 类型为 `Reactive<std::function<Node(const BuildContext&, const Constraints&)>>`，布局阶段按 `constraints` 动态构建子节点。
+`LayoutBuilder`（`widget/layout_builder.h`）是响应式构建原语。`BuilderFn = std::function<Node(const BuildContext&, const Constraints&)>` 以只读句柄 `ReadOnlyState<BuilderFn>` 安装（`set_builder(fn)` 便捷装箱 / `set_builder_source` 换源），布局阶段按 `constraints` 动态构建子节点。
 
 **仅在「约束显著变化」或「builder 闭包被替换」时重建并重新 mount 子节点**，约束不变则复用缓存子树，避免每帧抖动。闭包内部读取的 `media_query_of` 不自动订阅——响应式驱动来自约束变化（如窗口缩放）。
 
@@ -221,7 +221,7 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **OS 偏好的推入路径**：`platform.h` 反向依赖 `window.h`，故 `Window` 不直读 `os_color_scheme()`；由 `WindowHost`（app 层）在 `attach_surface` 创建窗口时推入 `set_os_color_scheme(os_color_scheme())`，与 `set_window_state` / `set_window_mode` 的同位推送同构。读取口径：注册表 / 配置文件访问有副作用，**不在每帧直读**——创建时读一次。运行期变更：Win32 后端在 `WndProc` 捕获 `WM_SETTINGCHANGE`（明暗外观切换以 `ImmersiveColorSet` 标识；宿主构造期播种一次档位基线，只上报相对基线的变化，避免把已推入档位当新变化重报），经 `Surface::set_os_color_scheme_handler`（与 `set_scale_change_handler` 同构的基类 seam）上抛 `WindowHost`，转发为 `Window::set_os_color_scheme` + 强制整帧重排重绘——「跟随系统深浅色」下一帧生效，无轮询。macOS 走同一条 seam：内容视图的 `viewDidChangeEffectiveAppearance` 在用户切换系统明暗（或应用外观跟随变化）时被 AppKit 送达，`MacOSSurface::Impl::sync_color_scheme` 读 `macos_os_color_scheme()` 并在与基线不同时经 `notify_os_color_scheme_change` 上抛，同样落到 `Window::set_os_color_scheme` + 重绘；`Unspecified` 既不参与去重也不上报（不知道不猜）。`WindowHost::teardown` 同步解绑该句柄（消息泵在宿主回收后仍可收到 `WM_SETTINGCHANGE`，捕获 `this` 未解绑即 use-after-free）。Linux 无对等系统信号，策略文档化为「创建时读 + 应用可随时 `set_theme` 显式接管」，不假装实时。
 
-**框架那一半之外另有一条应用级转发**：`WindowHost::on_os_color_scheme` 在完成「推 `Window` + 整帧置脏」之后，再向 `WindowHost::set_os_scheme_sink`（`Application` 在 `register_host` 对**每个**宿主安装）报一次原值，由 `Application::os_color_scheme_state()`（`State<ColorScheme>`）与命令式回调 `set_on_os_color_scheme()` 消费——三级优先链、`force_full_redraw`、Win32 的逐宿主基线去重与 `Surface::set_os_color_scheme_handler` 的独占单槽语义**全部不变**，本层只加「应用级会看到」这一层；应用侧旁听走 sink，不去抢那一枚槽（抢了会顶掉框架的根主题跟随）。四条口径：跨宿主去重（N 扇窗各收一次同值切换在应用级只算一次，比较在转发处做而非指望 `State::set`——它对相等值照样发信号）、回调恒在主线程（消息泵线程同步转发，不引入后端或探测线程）、初值 `Unspecified` 不隐式 seed（启动期解算走显式的 `refresh_os_color_scheme()`，宿主登记时框架自己那一读只推 `Window` 快照）、**原值透传不回落**（「系统不表态回哪一档」是应用策略，框架回落会让应用永久失去区分「系统说亮」与「系统没说」的能力）。聚合范围与 `window_state()` / `window_mode()` 的「只投影主窗」相反，完整契约见 [`06-app-platform.md`](06-app-platform.md) §6.2。
+**框架那一半之外另有一条应用级转发**：`WindowHost::on_os_color_scheme` 在完成「推 `Window` + 整帧置脏」之后，再向 `WindowHost::set_os_scheme_sink`（`Application` 在 `register_host` 对**每个**宿主安装）报一次原值，由 `Application::os_color_scheme_state()`（`ReadOnlyState<ColorScheme>`）与命令式回调 `set_on_os_color_scheme()` 消费——三级优先链、`force_full_redraw`、Win32 的逐宿主基线去重与 `Surface::set_os_color_scheme_handler` 的独占单槽语义**全部不变**，本层只加「应用级会看到」这一层；应用侧旁听走 sink，不去抢那一枚槽（抢了会顶掉框架的根主题跟随）。四条口径：跨宿主去重（N 扇窗各收一次同值切换在应用级只算一次，比较在转发处做而非指望 `State::set`——它对相等值照样发信号）、回调恒在主线程（消息泵线程同步转发，不引入后端或探测线程）、初值 `Unspecified` 不隐式 seed（启动期解算走显式的 `refresh_os_color_scheme()`，宿主登记时框架自己那一读只推 `Window` 快照）、**原值透传不回落**（「系统不表态回哪一档」是应用策略，框架回落会让应用永久失去区分「系统说亮」与「系统没说」的能力）。聚合范围与 `window_state()` / `window_mode()` 的「只投影主窗」相反，完整契约见 [`06-app-platform.md`](06-app-platform.md) §6.2。
 
 `os_color_scheme()`（`window/platform.h`）的探测细节：Linux 读 GTK 配置文件启发式（不引 DBus 依赖），Win32 读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` 的 `AppsUseLightTheme`（REG_DWORD，0 = Dark；键在值缺 = Light；键打不开 = Unspecified，实现位于独立 TU 避免公共头引入 `<windows.h>`），macOS 问 `NSApp.effectiveAppearance` 的 `bestMatchFromAppearancesWithNames:`（`NSAppearanceNameDarkAqua` 命中即 Dark、`Aqua` 即 Light；`NSApp == nil`（CLI / 无头）或 bestMatch 为空回 `Unspecified`；`NSAppearance` 的最小明暗对也能正确归类，实现位于独立 TU 避免公共头引入 `<AppKit/AppKit.h>`，并已在 macOS 构建内编译验证）。`Platform::color_scheme` 字段须由调用方经 `os_color_scheme()` 显式填充（`platform()` 不代做——读偏好有文件 / 注册表访问副作用）。
 
@@ -261,7 +261,7 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 | `PluralCategory` / `plural_category` / `PluralOperands` | CLDR 表驱动的复数与序数判定（见 §6.1） |
 | `CivilDate` / `DateStyle` / `format_number` / `format_currency` / `format_date` | 本地化格式化（见 §6.1） |
 
-所有文本属性类型为 `Reactive<LocalizedString>`，因此 `.content = "Hi"` 与 `.content = au::LocalizedString::tr(id)` 等价。
+所有文本属性类型为 `ReadOnlyState<LocalizedString>`，因此 `.content = "Hi"`（`LocalizedString` 与只读句柄均隐式转换）与 `.content = au::LocalizedString::tr(id)` 等价。
 
 ```cpp
 au::Text(au::TextProps{.content = demo::msg::demo::greeting(3, "Ada")});   // 生成头给出的具名形参构造函数
@@ -425,7 +425,7 @@ locale 沿 `Environment` 向下传播，两个注入点：
 | 入口 | 作用域 | 口径 |
 |:---|:---|:---|
 | `Window::set_locale(loc)` | 整窗根注入（与 `set_theme` 同构） | setter 只存值，`prepare_context` 自**下一帧**起每帧注入；从未设定则不注入，控件回落缺省档 |
-| `LocaleProvider{locale 或 State<Locale>, child}` | 子树覆写 | 「最近祖先优先」压过窗口级默认；持 `State` 时换值即触发子树刷新 |
+| `LocaleProvider{locale 或 State<Locale>, child}` | 子树覆写 | 「最近祖先优先」压过窗口级默认；接 `ReadOnlyState<Locale>`（`State<Locale>` 单向降级），换值即触发子树刷新 |
 
 **帧内一致**：设定当帧的离屏快照仍是旧档，新档自下一帧整帧生效——一帧之内不会出现半中半英的混排。
 

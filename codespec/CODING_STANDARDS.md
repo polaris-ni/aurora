@@ -23,7 +23,7 @@
 - **默认参数友好**：高频构造提供默认参数 / 便捷工厂（如 `au::colors::AURORA_BLUE`、`dp(16)`），降低记忆负担。
 - **顺序容错**：多参数构造优先用 `XxxProps{...}` 具名聚合（如 `ColumnProps{ .children = ... }`），避免位置参数顺序错误。
 - **强类型几何**：`Length` / `Color` / `Size` / `Point` 为强类型；禁止 `Length(int)` 隐式转换（裸整数编译失败）。已采纳用户字面量 `au::literals`（`100_dp`、`16_ms`、`0xRRGGBB_rgb`），`px(100)` 与 `100_dp` 互补；**禁止头文件全局 `using`**，字面量只在 TU 内按需引入（示例代码用 `using namespace au::literals;`，测试代码按 §3.1 用 using 声明 / 命名空间别名引入，不得用 using-directive）。
-- **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`；`Binding<T>` 为非拥有引用（上游生命周期须更长）。
+- **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`。状态句柄（`State<T>` / `ReadOnlyState<T>`）按值传递与捕获——复制即共享同一来源，`get()` 返回借用，不得跨写入、来源重绑或最后持有者释放保存。
 - **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按下一条「常量命名」走 `AURORA_` 前缀 + `UPPER_CASE`（如 `AURORA_NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。
 - **常量命名**：命名空间 / 文件级与类内 `static constexpr` 常量统一 `AURORA_` 前缀 + `UPPER_CASE` 全大写下划线（如 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`）；禁止 `k` 前缀 CamelCase。**豁免**：镜像外部标准 API 枚举值的常量按官方名原样保留（`AURORA_` 前缀会破坏与外部文档 / 官方头的逐名对照），前提是收敛在专属命名空间内隔离作用域——现有两例：`colors` 命名空间的色板常量（`core/color.h`）与 `rhi::gl` 命名空间的 GL 枚举镜像（`src/aurora/render/gpu/gl_core.h`，如 `TEXTURE_2D` / `RGBA8`，值逐一取自 GL 官方规范）。`FALSE_` / `TRUE_` 的尾部下划线为规避平台宏碰撞的例外，不作为成员命名惯例。
 - **生命周期回调强类型**：`au::Lifecycle` 的 `on_mount` / `on_unmount`、窗口级 `WindowState` / `WindowMode` 的 `set_on_*` 回调均为具名 `std::function` 强类型（`MountCb = std::function<void(const BuildContext&)>`、`UnmountCb = std::function<void()>`，`WindowStateHandler` / `WindowModeHandler` 同理）；枚举取值穷尽且按「可见性 / 几何态」正交划分（`WindowState` 不并入 `Maximized`），AI 无需猜测「是否还有隐藏状态」。回调均可空（无副作用时不传），且不走异常捕获（与主线程事件回调一致）。
@@ -241,7 +241,7 @@
 
 ### 5.1 特殊成员函数豁免
 
-多态基类定义了虚析构后，原则上应删除（或 `= default` 定义）全部拷贝 / 移动特殊成员函数。仅当现有 API **刻意依赖**隐式拷贝 / 移动时（如 `Reactive<T>` 依赖隐式拷贝赋值支持 `content = "Hi";` 写法、`FormField` 按值持有 `State<T>` 并依赖移动语义），才允许用 `// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)` 抑制，且必须用紧邻注释写明依赖原因。
+多态基类定义了虚析构后，原则上应删除（或 `= default` 定义）全部拷贝 / 移动特殊成员函数。仅当现有 API **刻意依赖**隐式拷贝 / 移动时（如 `State<T>` / `ReadOnlyState<T>` 依赖隐式拷贝共享来源、控件按值持有句柄并依赖移动语义、`Provider<T>` 依赖隐式移动传递注入值），才允许用 `// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)` 抑制，且必须用紧邻注释写明依赖原因。
 
 不得默默无视告警，也不得为消除告警而删除仍被使用的拷贝 / 移动（先全量构建验证再决定）。
 
@@ -272,6 +272,17 @@
 
 抑制属于显式契约决策，随代码评审、随文档同步。
 
+### 5.3 状态句柄与响应式属性
+
+状态模型（`State<T>` / `ReadOnlyState<T>` / `computed` / `effect`）的日常契约见 [`specification/02-state.md`](specification/02-state.md) §2–§3；编码层遵守以下约定：
+
+- **按值传、按值捕获**：参数与属性类型直接写 `State<T>` / `ReadOnlyState<T>`，复制即共享来源。不要写 `const State<T>&` 充当只读边界（const 只限制重绑，不撤销写权限），也不要保存 `get()` 的引用或 `[&]` 捕获局部句柄跨作用域使用。
+- **值 setter 与来源 setter 分工**：可编辑模型用 `set_value(T)` 写当前格，确需换线时用独立的 `set_value_source(State<T>)`；展示属性用 `set_xxx(ReadOnlyState<T>)` 换源。不要重载 `set_value(State<T>)` 表达两义，也不给展示属性保留隐式写回。
+- **换源必须成对退订 / 订阅**：换源入口先退旧来源、保存新句柄、已挂载时订阅新来源并失效布局/绘制缓存；即使新旧读数相等也必须执行。未挂载只保存来源，挂载时订阅，卸载清空，重挂只订当前来源。
+- **响应式成员统一采集**：每个 `State` / `ReadOnlyState` 成员都在 `collect_signals(StateSink &out)` 中 `out.push(...)` 登记，新增响应式属性不得漏采；临时构造的常量属性由采集结果保活。内部成员不可从外部绕过 getter / setter 赋值。
+- **构造即有效**：来源在构造期就绪；注册、首跑或派生初次求值失败时按已构造成员 RAII 清理，不留下半登记状态（内核侧不变量见 `02-state.md` 附录 A）。
+- **测试判据**：属性换源测试须覆盖「新旧来源初值相等」的情形（只测值变化会漏掉换线）；上游变化测试除像素外，还要用绘制 / 重算计数断言未读取该来源的同级不产生工作。
+
 ---
 
 ## 6 AI 友好性
@@ -295,7 +306,7 @@
 
 ### 6.3 元编程边界
 
-模板 / 宏等元编程仅用于「无法用普通函数表达」之处（如 `State` / `Signal` / `Modifier` 的声明式组合）；禁止为「炫技」引入深层模板，避免 AI 难以展开实例化错误。
+模板 / 宏等元编程仅用于「无法用普通函数表达」之处（如 `State` / `ReadOnlyState` / `Modifier` 的声明式组合）；禁止为「炫技」引入深层模板，避免 AI 难以展开实例化错误。
 
 **控件样板减负同样遵循此原则**：基类以**非模板虚函数默认实现**消除重复——`Widget::describe()` 默认返回 `{ .name = type_name() }`、`Container::collect_signals()` 默认遍历 `children_` 收集子节点信号，新增控件只需实现 `type_name()`（+ `describe_static()`）。**禁止为减负引入 CRTP / 模板基类**：那会把实现搬进头文件，破坏声明 / 实现分离，并增大 AI 理解单函数所需加载的上下文。
 
@@ -308,7 +319,7 @@
 ### 6.4 二层属性划分（固有属性 + 正交 Modifier）
 
 - **固有属性层**：描述控件**自身**视觉 / 行为身份（如 `Text::text_align`、`Button::corner_radius`、`Slider::active_color`），以 `XxxProps` 的 snake_case 字段暴露，随控件序列化，是 Inspector / `aurora_api.json` 可枚举的一等属性。
-- **正交修饰层**：跨切面、可叠加、可 `Reactive` 变化的通用装饰，挂在每个 `Widget::modifier`，作用于**任意**控件。
+- **正交修饰层**：跨切面、可叠加、可随状态句柄变化的通用装饰，挂在每个 `Widget::modifier`，作用于**任意**控件。
 - **重叠规则**：优先控件固有属性；`Modifier` 同类项保留用于「给任意控件套一层」的跨切面场景，绘制时 `Modifier` 在外、固有属性在内，可叠加。
 
 **为何保留 `Modifier`（AI 友好）**：装饰能力收敛于**单个 `Modifier` 类型**（约 44 个链式工厂 / 访问器、48 个重载，另有 `Kind` 枚举可枚举），远少于纯包裹控件模型所需的十余个独立 widget 类型（`Padding` / `Container` / `DecoratedBox` / `GestureDetector` / `Align` / `Opacity` / `Transform` / `ClipRRect` / `SizedBox` / `Expanded`…）；扁平 `.modifier` 链比深层 `Container(GestureDetector(Opacity(...)))` 嵌套更不易生成错位；且与现有**扁平** `aurora_api.json` / `diff` / `apply_patch` 序列化模型天然契合。
@@ -319,7 +330,7 @@
 
 - **仅影响外观、不影响几何**的变更（文本选区高亮、颜色 / 主题切换、光标位置、滚动偏移等）**必须**调用 `mark_needs_paint()`（仅置「绘制脏」），让拖选 / 主题切换等帧跳过整树 `layout`。
 - **影响布局几何**的变更（尺寸 / 约束 / 子节点增删、结构性 `Modifier` 如 `rotate` / `scale` 重算包围盒）调用 `mark_needs_layout()`（置「布局脏 + 绘制脏」），下一帧 `layout + paint`。
-- `Widget::on_dirty` 为 `std::function<void(bool)>`（`true` = 含布局脏），经 `Window::wire_dirty` 递归接线整棵树；子控件的 `State` / `Modifier` 变更通过响应式 `Effect` 自动落到上述两个原语，无需手工标脏。
+- `Widget::on_dirty` 为 `std::function<void(bool)>`（`true` = 含布局脏），经 `Window::wire_dirty` 递归接线整棵树；子控件的句柄属性（`State` / `ReadOnlyState`）与 `Modifier` 变更经控件采集的订阅自动落到上述两个原语，无需手工标脏。
 - **反模式**：外观变更误调 `mark_needs_layout()` 会迫使每帧重排，抵消脏追踪的性能收益。
 
 ### 6.6 控件可定制性契约

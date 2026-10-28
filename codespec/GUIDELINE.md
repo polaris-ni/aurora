@@ -134,9 +134,9 @@ au::Node chart = au::Canvas(160, 90, [](au::Painter &p, au::Rect b) {
 ## 7 条件显示（Show）
 
 ```cpp
-auto visible = std::make_shared<au::State<bool>>(true);
-au::Node n = au::Show(visible, au::Text("仅条件为真时可见"));
-visible->set(false);   // 触发刷新，widget 消失
+au::State<bool> visible{true};
+au::Node n = au::Show(visible, au::Text("仅条件为真时可见"));   // 句柄按值传入，共享同一来源
+visible.set(false);   // 触发刷新，widget 消失
 ```
 
 ---
@@ -144,11 +144,11 @@ visible->set(false);   // 触发刷新，widget 消失
 ## 8 动态列表（Repeater）
 
 ```cpp
-auto items = std::make_shared<au::State<std::vector<std::string>>>(std::vector<std::string>{"A","B","C"});
+au::State<std::vector<std::string>> items{std::vector<std::string>{"A", "B", "C"}};
 au::Node list = au::Repeater<std::string>{ items, [](const std::string &s, int i) {
     return au::Text(s);
 }};
-items->set(std::vector<std::string>{"X","Y"});   // 列表自动重建
+items.set(std::vector<std::string>{"X", "Y"});   // 列表自动重建
 ```
 
 ---
@@ -156,32 +156,25 @@ items->set(std::vector<std::string>{"X","Y"});   // 列表自动重建
 ## 9 响应式状态（细粒度信号）
 
 ```cpp
-// 方式 1：使用内置响应式 widget（Show / Repeater 等接受 State<T>）
-auto visible = std::make_shared<au::State<bool>>(true);
-au::Node n = au::Show(visible, au::Text("条件显示"));
-visible->set(false);  // 触发定点刷新，widget 消失
+// 值本身：State<T> 可写；交给只读消费方时隐式降级为 ReadOnlyState<T>
+au::State<int> count{0};
 
-// 方式 2：使用 Effect 手动建立依赖（底层机制）
-au::State<int> count{ 0 };
+// 跟随变化：effect 调用即首跑，读取的来源自动成为依赖；返回值持有即生效
 int observed = 0;
-au::Effect e([&]() -> void { observed = count.get(); });  // 读取信号即登记依赖
-e.run();           // 首次运行：observed = 0
-count.set(42);     // 触发 Effect 重跑：observed = 42（定点刷新，无全树 diff）
-```
+auto watch = au::effect([&]() -> void { observed = count.get(); });  // 首跑 observed = 0
+count.set(42);                                                       // 重跑 observed = 42
+// watch 析构（或 watch.reset()）即取消；无全树 diff，只重跑读取过该来源的回调
 
-> **注意**：仅在构造时读取 `state->get()` **不会**建立响应式依赖。必须通过 `Effect` 或使用接受 `State<T>` 的 widget（Show / Repeater）才能实现定点刷新。
-
-```cpp
-// 方式 3：用 connect + Subscription 订阅任意信号（析构自动取消，无监听器泄漏）
-au::State<int> count{ 0 };
+// 需要逐值回调而不做派生计算：直接向来源订阅（立即交付当前值一次，此后逐次送达）
 int seen = 0;
-{
-    au::Subscription sub = au::connect(count, [&](int v){ seen = v; });  // 立即 seen = 0
-    count.set(7);                                                        // → seen = 7
-}                                                                        // sub 离开作用域 → 自动取消订阅
+au::Subscription sub = count.subscribe([&](int v) { seen = v; });  // 立即 seen = 42
+count.set(7);                                                       // → seen = 7
+// sub 离开作用域即取消；回调内读取其他句柄不会扩充本订阅
 ```
 
-**为何不是 `bind`**：`State` 基类链上的 `std::enable_shared_from_this` 使 `std` 进入实参的 ADL 关联命名空间集，无限定 `bind(state, fn)` 会被变参转发的 `std::bind` 吸走——编译通过但回调永不执行。故本 API 定名 `connect`（原 `bind` 已于 1.0.0-alpha.1 改名），与 `std` 名字无重叠。
+> **注意**：仅在构造时读取 `count.get()` **不会**建立响应式依赖——`.get()` 只取值。要跟随变化，要么在 `effect` 内读取，要么把句柄交给接受 `ReadOnlyState<T>` 的控件（`Show` / `TextProps::content` 等）。
+
+> **从 `connect` / `bind` 迁移**：旧版 `connect(state, fn)`（首值立即回调）已并入 `subscribe`（同为立即首值）。`bind` 改名 `connect` 的历史（`std::enable_shared_from_this` 使 `std` 进入 ADL 关联命名空间，`std::bind` 会劫持无限定调用）随该入口一并归档。
 
 ---
 
@@ -220,7 +213,7 @@ if (const auto *brand = theme.extensions.get<BrandAccent>()) {  // 未注册返�
 默认即现代样式（圆角方框 + 抗锯齿勾号 + hover / 按下反馈，勾选色跟随主题 `primary`），链式可定制：
 
 ```cpp
-au::Checkbox cb{ au::Reactive<bool>{ true } };
+au::Checkbox cb{ true };   // 字面量即建自有来源；也可传外部 au::State<bool> 共享
 cb.set_active_color(au::Color{ 46, 160, 67, 255 })   // 勾选填充色（不设则跟随主题 primary）
   .set_check_color(au::colors::AURORA_WHITE)                // 勾号颜色
   .set_border_color(au::Color{ 140, 140, 146, 255 }) // 未勾选描边色
@@ -239,12 +232,13 @@ cb.set_active_color(au::Color{ 46, 160, 67, 255 })   // 勾选填充色（不设
 回调式（`au::async` 底层经有界 `aurora::ThreadPool::default_pool()` 执行）：
 
 ```cpp
+au::State<int> out{0};             // 由 UI 侧持有，句柄可按值抄给回调
 au::async([]() -> int {            // 后台线程执行
     int s = 0; for (int i = 1; i <= 100; ++i) s += i;
     return s;                       // 或返回 Result<int>
 }).with_timeout(std::chrono::seconds(5))   // opt-in 超时
- .then([](const au::Result<int> &r) {      // 结果回主线程
-    if (r) out->set(r.value());     // 回写 State 触发刷新
+ .then([out](const au::Result<int> &r) {   // 装好主线程投递器后回 UI 线程
+    if (r) out.set(r.value());      // 回写 State 触发刷新
     else   au::Diagnostics::report(r.error().message, {}, r.error().code);
 });
 ```
@@ -252,13 +246,13 @@ au::async([]() -> int {            // 后台线程执行
 协程式（`co_await` 在后台执行，续体回主线程）：
 
 ```cpp
-au::CoroTask<void> load() {
+auto load = [out]() -> au::CoroTask<void> {   // 捕获句柄：与上方回调同一枚 State
     au::Result<int> r = co_await au::co_async([]() -> int {
         int s = 0; for (int i = 1; i <= 100; ++i) s += i;
         return s;
     });
-    if (r) out->set(r.value());
-}
+    if (r) out.set(r.value());
+};
 au::launch(load());                // 启动顶层协程
 ```
 
@@ -287,18 +281,20 @@ app.run();
 组件级声明式（响应式为主 + 可选回调）：
 
 ```cpp
-// 时钟：子 UI 经 ticks() 绑定自动刷新
-au::Node clock = au::Timer(1s, [](const au::SignalView<int> &tick) {
-    return au::Text(au::computed([&] {
-        return au::LocalizedString{ "tick: " + std::to_string(tick.get()) }; }));
+// 时钟：子 UI 经 ticks() 只读句柄派生刷新
+au::Node clock = au::Timer(1s, [](au::ReadOnlyState<int> tick) {
+    auto label = au::computed([tick]() -> au::LocalizedString {
+        return au::LocalizedString{ "tick: " + std::to_string(tick.get()) };
+    });
+    return au::Text{ au::TextProps{ .content = label } };
 });
 
 // 自动显现：2s 后 on_tick 置位 shown
-auto shown = std::make_shared<au::State<bool>>(false);
+au::State<bool> shown{ false };
 au::Node reveal = au::Timer(2s,
-    [shown](const au::SignalView<int> &) {
+    [shown](au::ReadOnlyState<int>) {
         return au::Show(shown, au::Text(au::LocalizedString{ "revealed!" })); },
-    [shown](int) { shown->set(true); });
+    [shown](int) { shown.set(true); });
 ```
 
 - `set_timeout(d, cb)` 一次性；`set_interval(period, cb)` 周期；返回值 `TimerHandle` 可 `cancel()`、`active()` 查询。
@@ -314,7 +310,7 @@ au::Node reveal = au::Timer(2s,
 > au::Text{au::TextProps{.content = myapp::msg::demo::greeting(3, "Ada")}};   // 具名强类型生成 API
 > ```
 >
-> 切语言有两条通道：子树 `au::LocaleProvider{std::make_shared<au::State<au::Locale>>(loc), child}`（响应式，换值即整子树重解析），或窗口级默认 `window.set_locale(loc)`（自下一帧起根注入）。两者换值都会向下清子树缓存，整屏文案同帧重解析；子树 Provider 优先于窗口级。
+> 切语言有两条通道：子树 `au::LocaleProvider{locale, child}`（`locale` 为宿主持有的 `au::State<au::Locale>` 句柄；响应式，换值即整子树重解析），或窗口级默认 `window.set_locale(loc)`（自下一帧起根注入）。两者换值都会向下清子树缓存，整屏文案同帧重解析；子树 Provider 优先于窗口级。
 
 ---
 
@@ -502,7 +498,7 @@ cmake --build build --target aurora_api_json   # 推荐：内部跑 gen_api_tool
 
 ## 19 持久化配置（Preferences）
 
-轻量键值配置，以单个 JSON 文件为后端（对标 `SharedPreferences` / `UserDefaults`）。初始化时**显式指定文件位置**；未指定则仅存内存。`set` 只写内存与响应式 `State`，落盘由 `flush()` 主动触发。
+轻量键值配置，以单个 JSON 文件为后端（对标 `SharedPreferences` / `UserDefaults`）。初始化时**显式指定文件位置**；未指定则仅存内存。`set` 只写内存与只读句柄，落盘由 `flush()` 主动触发。
 
 ```cpp
 #include "aurora/aurora.h"
@@ -514,21 +510,27 @@ Preferences &prefs = Preferences::instance("app", Preferences::default_config_di
 //    或显式绝对路径：Preferences &prefs = Preferences::instance_at("app", "C:/data/settings.json");
 //    （普通构造器仍可用：内存模式 Preferences mem; 文件模式 Preferences p{ "C:/data/settings.json" };）
 
-// 2) 响应式绑定到已有控件（Switch 等）
-au::Switch sw{ prefs.binding<bool>("dark_mode", false),
+// 2) 可编辑控件：本地 State 供控件读写，提交时经 prefs 命令落内存、flush 落盘
+au::State<bool> dark_mode{ prefs.get("dark_mode", false) };
+au::Switch sw{ dark_mode,
     [&prefs](bool v) { prefs.set("dark_mode", v); prefs.flush(); } };
 
-// 3) 读取：类型不匹配或缺失回退默认值
+// 3) 只读展示：watch 返回 ReadOnlyState<T>，存储写入自动推送；控件不能经它写回
+au::Text hint{ au::TextProps{ .content = au::computed([persisted = prefs.watch<bool>("dark_mode", false)]() {
+    return au::LocalizedString{ "persisted = " + std::string{ persisted.get() ? "true" : "false" } };
+}) } };
+
+// 4) 读取：类型不匹配或缺失回退默认值
 int volume = prefs.get("volume", 5);
 
-// 4) 主动刷新到文件（进程锁 + 原子写）；重新启动后构造即加载，reload 可从文件恢复
+// 5) 主动刷新到文件（进程锁 + 原子写）；重新启动后构造即加载，reload 可从文件恢复
 if (auto r = prefs.flush(); !r.ok()) { /* r.error() */ }
 ```
 
 - **单例粒度**：`instance(name)` 按名注册表，每个 `name` 唯一；首次调用按参数创建，后续忽略路径参数。
 - **并发安全**：实例内部 `std::mutex` 保护（独占锁；不用 `std::shared_mutex`，因 MinGW-w64 winpthreads 的 rwlock 在并发写锁竞争下会触发 `__shared_mutex_pthread::lock()` 断言）。`flush` / `reload` 经跨平台文件锁（`<file>.lock`）+ 原子 `rename` 保证多进程安全。可多线程并发 `set` / `get` / `flush`。
 - 支持值类型：`bool` / 整数 / 浮点 / `std::string` / `std::vector` / JSON 对象。
-- `watch<T>` 返回 `std::shared_ptr<State<T>>`，可手动订阅；`binding<T>` 返回 `Binding<T>`（非拥有，须保持 `Preferences` 存活）。
+- `watch<T>` 返回 `ReadOnlyState<T>`：可订阅、可交给只读控件（如 `TextProps::content`）；**没有写入口**，修改配置只走 `set` / `remove` / `clear`，落盘仍须 `flush`。表单草稿由应用自己的 `State` 保存（见上方第 2 步），本类不做读写双向绑定。
 
 ### 19.1 分组（group）
 
@@ -540,9 +542,9 @@ auto ui = prefs.group("ui");
 ui.set("theme", std::string("dark"));
 ui.set("font_size", 14);
 
-// 控件直接绑定分组内的键（删除走分组墓碑路径）
-au::Switch sw{ ui.binding<bool>("dark_mode", false),
-    [&prefs](bool v) { prefs.group("ui").set("dark_mode", v); prefs.flush(); } };
+// 控件绑定分组内的键：草稿 State 驱动绘制，提交回分组（删除走分组墓碑路径）
+au::State<bool> grouped{ ui.get("dark_mode", false) };
+au::Switch sw{ grouped, [&prefs](bool v) { prefs.group("ui").set("dark_mode", v); prefs.flush(); } };
 
 // 链式嵌套分组
 prefs.group("ui").group("editor").set("font", std::string("Mono"));
@@ -558,7 +560,7 @@ ui.clear();
 
 ## 20 视频播放器（VideoPlayer）
 
-`media/` 子系统以抽象 `VideoSource` 为解码扩展点，内置零依赖 `ImageSequenceSource`（图片序列 / 动画）作为自包含样例。播放由 `Application::tick` 自动驱动，控件与 UI 可绑定 `Reactive` 播放状态。
+`media/` 子系统以抽象 `VideoSource` 为解码扩展点，内置零依赖 `ImageSequenceSource`（图片序列 / 动画）作为自包含样例。播放由 `Application::tick` 自动驱动；控件与 UI 经只读播放信号（`playing_signal()` / `progress_signal()` / `volume_signal()` / `muted_signal()`，均为 `ReadOnlyState<T>`）跟随状态，播放控制仍走命令（`toggle_play()` / `seek_fraction()` / `set_volume()`）。
 
 ```cpp
 #include "aurora/aurora.h"
@@ -740,8 +742,8 @@ au::Column root;
 auto *title = label(root, "标题");                         // Text*，自动加为 root 子节点
 auto *ok    = button(root, "确定", {}, []{ /* 回调 */ });   // Button*；第四参 on_click 可选
 auto *name  = input(root, "默认值");                        // TextInput*
-auto *flag  = checkbox(root, au::reactive(true));           // Checkbox*
-auto *vol   = slider(root, au::reactive(0.5));              // Slider*
+auto *flag  = checkbox(root, true);                          // Checkbox*；字面量即建自有 State
+auto *vol   = slider(root, 0.5);                             // Slider*；也可传外部 au::State<bool> / au::State<double> 共享
 auto *box   = vbox(root);   // Column*；hbox → Row*，stack → Stack*，grid → Grid*，scroll → Scroll*
 ```
 
@@ -866,7 +868,7 @@ class GradientButton : public au::Button {
 - **强类型尺寸**：`width(au::px(100))` 合法；`width(100)` 编译失败（无 `Length(int)` 隐式转换）。
 - **子类新增与基类同名方法会静默 override 基类虚函数**：新增方法前须确认基类中不存在同名虚函数。
 
-> 状态选择指南（State vs Store vs Binding vs Computed）与生命周期速查见 [`CONCEPTS.md`](CONCEPTS.md) §2。
+> 状态选择指南（`State` / `ReadOnlyState` / `computed` / `effect`）与生命周期速查见 [`CONCEPTS.md`](CONCEPTS.md) §2。
 
 ---
 
@@ -1113,10 +1115,13 @@ using namespace au;
 auto main() -> int {
     enable_dpi_awareness();  // 必须在建窗前
 
-    auto pings = std::make_shared<State<int>>(0);  // 共享状态：多窗口共用一个 State 即可
+    auto pings = State<int>{0};  // 共享状态：多窗口共用一个来源即可
+    auto ping_label = computed([pings]() -> LocalizedString {
+        return LocalizedString{"pings = " + std::to_string(pings.get())};
+    });
     auto root = Column{ColumnProps{.children = {
         Text{"Main window"},
-        Text{TextProps{.content = Reactive{pings}}},
+        Text{TextProps{.content = ping_label}},
         Button{ButtonProps{.label = "Broadcast"}},
     }}};
 
@@ -1130,7 +1135,7 @@ auto main() -> int {
 
     Application app{Scene{std::move(root)}, std::move(win.value()), opts};
 
-    // 跨窗通信：`bus()` 承载**一次性通知/命令**；共享**状态**直接用共享 State/Store。
+    // 跨窗通信：`bus()` 承载**一次性通知/命令**；共享**状态**直接传同一枚 State 句柄。
     auto sub = app.bus().on<std::string>([](const std::string &msg, WindowId from) -> void {
         AURORA_LOG_INFO("demo", "msg from window ", from, ": ", msg);
     });
@@ -1144,7 +1149,7 @@ auto main() -> int {
     if (auto aux = create_native_window(aux_opts)) {
         Node aux_root = Column{ColumnProps{.children = {
             Text{"Auxiliary window"},
-            Text{TextProps{.content = Reactive{pings}}},
+            Text{TextProps{.content = ping_label}},
         }}};
         (void)app.open_window(std::move(aux.value()), Scene{std::move(aux_root)}, aux_opts);
     }
@@ -1325,8 +1330,8 @@ auto main() -> int {
 using namespace au;
 
 auto main() -> int {
-    auto items = std::make_shared<State<std::vector<std::string>>>(
-        std::vector<std::string>{"需求评审", "接口联调", "写回归用例"});
+    auto items = State<std::vector<std::string>>{
+        std::vector<std::string>{"需求评审", "接口联调", "写回归用例"}};
 
     auto list = std::make_shared<ReorderableList<std::string>>(
         items,
@@ -1341,7 +1346,7 @@ auto main() -> int {
 
     // 数据已由控件改写，这里只做持久化 / 派生状态刷新。
     list->set_on_reorder([items](int from, int to) -> void {
-        save_order(items->get());   // from → to（下标均为改写后的语义）
+        save_order(items.get());   // from → to（下标均为改写后的语义）
     });
 
     auto viewport = std::make_shared<Column>();                 // 给明确高度 ⇒ 列表按父约束取视口
@@ -1355,7 +1360,7 @@ auto main() -> int {
 
 要点：
 
-- **控件改写数据**：松手落位后控件把 `State<std::vector<T>>` 旋转到新顺序再触发 `on_reorder(from, new_index)`；宿主要复用顺序请读 `items->get()`，别在回调里再改一次（会重复换位）。程序化重排用 `list->reorder(from, to)`，`to` 是**落位后的最终下标**。
+- **控件改写数据**：松手落位后控件把 `State<std::vector<T>>` 旋转到新顺序再触发 `on_reorder(from, new_index)`；宿主要复用顺序请读 `items.get()`，别在回调里再改一次（会重复换位）。程序化重排用 `list->reorder(from, to)`，`to` 是**落位后的最终下标**。
 - **手柄带 vs 整项拖**：条目若自带 `Clickable` / `Button`，其 Press 会被子项消费（冒泡 stop-on-handled），列表收不到按下 ⇒ 只能 `set_drag_handle(true)`（右侧 48dp 手柄带由列表自留）；条目是纯展示（`Row`/`Text`，无点击）时整项可拖（默认）。
 - **落位与让位**：让位是**绘制期偏移**（`Node::bounds` 不动，命中链同步补偿），松手 spring 落位后才提交数据；`reduce_motion` 下直接落位。换位判定带 ±2dp 滞回。
 - **近边缘自动滚动**：被拖项进入视口上下 `auto_scroll_threshold`（默认 48dp）带内按比例滚动，且滚动量吃进跟手位移（被拖项屏幕位置守恒）；拖拽期间滚轮被吞。
@@ -1372,13 +1377,16 @@ Aurora 的无障碍**默认在跑**——你不需要为「让 NVDA 读出界面
 ### 37.1 开箱即得的默认行为
 
 ```cpp
+au::State<double> volume{0.6};   // 可编辑模型：控件写回这里
+au::State<bool> agreed{false};
+
 au::Scene build_ui() {
     return au::Column{
         au::Text{au::TextProps{ .content = "订单总额" }},
         au::Button{au::ButtonProps{ .label = "提交" }},
         au::TextInput{au::TextInputProps{ .value = "abc", .placeholder = "请输入" }},
-        au::Slider{au::Reactive{volume}},
-        au::Checkbox{au::Reactive{agreed}},
+        au::Slider{volume},
+        au::Checkbox{agreed},
     };
 }
 
@@ -1452,7 +1460,8 @@ class IconButton : public au::LeafWidget {
 auto caption = std::make_shared<au::Text>(au::TextProps{.content = au::LocalizedString{"季度汇总"}});
 caption->set_stable_key("sum-caption");            // 对标 HTML `id`：宿主命名、跨重建不变
 
-auto agree = std::make_shared<au::Checkbox>(au::Reactive{checked});
+au::State<bool> checked{false};
+auto agree = std::make_shared<au::Checkbox>(checked);
 agree->set_labelled_by("sum-caption");             // 对标 `aria-labelledby`：名字是引用，非拷贝
                                                    // ⇒ caption 文案变了，agree 的读屏名跟着变
 ```
@@ -1607,11 +1616,11 @@ au::Scroll grouped{au::ScrollProps{.child = au::Node{au::Column{au::ColumnProps{
 auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{build_hero()}});
 
 // 偏移信号：任何滚动通道（滚轮 / 拖拽 / 收位滑动帧 / 程序化）落位即发布
-auto fade = std::make_shared<State<float>>(1.0F);
-au::Effect drive([&]() -> void {
-    const float offset = scroll->offset_signal().get();   // Effect 作用域内读取即订阅
-    fade->set(std::clamp(1.0F - offset / 200.0F, 0.0F, 1.0F));
-});
+au::State<float> fade{1.0F};
+auto drive = au::effect([&]() -> void {
+    const float offset = scroll->offset_signal().get();   // effect 回调内读取即登记依赖
+    fade.set(std::clamp(1.0F - offset / 200.0F, 0.0F, 1.0F));
+});   // drive 持有即生效；离开作用域自动取消
 ```
 
 嵌套滚动无需接线：滚轮判给**最近可滚动祖先**，内层滚到端点后未消费的量经 `ScrollEvent::remaining_y` 上冒给外层（故 `PullToRefresh{Scroll{...}}` 到顶即下拉、外层 `Scroll` 内嵌 `LazyList` 内层先滚）。路由细节见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §3.3。
@@ -2214,19 +2223,22 @@ const std::string url = "https://api.example.com/quote";
 // 一行绑成三态资源：发出即 Loading，落定即定点刷新；reload() 会取消前序在途连接并重发。
 auto quote = net_http::bind_resource<Quote>(client, net_http::Request::get(url), project);
 
-// 三分支读取即订阅：资源每次落定（或重发回到 Loading）时本 Effect 被重新运行，只刷这块文本。
-auto line = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"加载中…"});
-auto render = std::make_shared<au::Effect>([quote, line]() -> void {
-    if (quote.phase() == au::ResourcePhase::Loading) { line->set(au::LocalizedString{"加载中…"}); return; }
-    if (const auto *value = quote.value())          { line->set(au::LocalizedString{value->text}); return; }
-    if (const auto failure = quote.error())         { line->set(au::LocalizedString{"失败：" + failure->message}); return; }
+// 三分支读取即订阅：资源每次落定（或重发回到 Loading）时重算，只刷这块文本。
+// phase() / value() / error() 都读同一份快照来源，故一次落定只触发一次重算。
+auto line = au::computed([quote]() -> au::LocalizedString {
+    if (quote.phase() == au::ResourcePhase::Loading) {
+        return au::LocalizedString{"加载中…"};
+    }
+    if (const auto *value = quote.value()) {
+        return au::LocalizedString{value->text};
+    }
+    return au::LocalizedString{"失败：" + quote.error().value_or(au::Error{}).message};
 });
-render->run();  // 首帧求值；此后由资源状态自己驱动
 
 aurora::Button reload{aurora::ButtonProps{.label = au::LocalizedString{"reload"}}};
 reload.on_click = [quote]() mutable -> void { quote.reload(); };  // 掐在途连接 + 重发
 
-// widget 经 State 读它：au::Text{au::TextProps{.content = au::Reactive{line}}}
+// widget 直接读派生值：au::Text{au::TextProps{.content = line}}
 ```
 
 要点：
@@ -2234,7 +2246,7 @@ reload.on_click = [quote]() mutable -> void { quote.reload(); };  // 掐在途�
 - **`bind_resource` 是 `Resource<T>::from(producer)` 的网络特化**：它把 `Client::send` 的协程出口折算成 `Task<T>`，交给既有的 `Resource` 三态机。`state/` 不认识网络，这条通道不被 HTTP 独占（文件读取、进程间调用同样能产出 `Resource`）。
 - **取消是真的取消**：`reload()` 与宿主卸载走 `Task::cancel()`，经 `Cancellation` 掐掉在途那条连接；对端看到的是一次中断，不是一条被读完的连接。没有本绑定件时，`Resource` 装 HTTP 只丢结果、连接照跑完。
 - **非 2xx 不是失败**：`bind_resource` 把 4xx / 5xx 作为成功的 `Response` 交出，状态码归调用方在投影里判（上方 `project` 内的 `response.status()`）。只有传输与协议层失败才走 `Result` 的错误侧。
-- **widget 不读 Resource 本身**：`au::Show` / `au::Text` 等消费的是 `State<X>`（见 §9）。上方把三态读进一枚 `State<LocalizedString>` `line`，widget 经 `au::Reactive{line}` 读它——这就是「异步结果写入响应式状态 → UI 是状态的纯函数」的标准接法。
+- **widget 不读 Resource 本身**：`au::Show` / `au::Text` 等消费的是 `ReadOnlyState<X>`（见 §9）。上方把三态经 `computed` 折成一枚 `ReadOnlyState<LocalizedString>` `line`，widget 直接读它——这就是「异步结果 → 派生显示文本 → UI 是状态的纯函数」的标准接法。
 - **取图一行版**：图片走 `au::set_default_image_fetcher(au::net::http::image_fetcher())`（`image_fetcher()` 返回的形态与 `au::ImageFetcher` 别名同构），`ImageView` 的 URL 入口即被这条通道接住，无需手写 `bind_resource`。
 
 全部形态（流式 `deliver_stream`、事件流 `deliver_sse`、WebSocket `deliver_ws`、回调式 `deliver`）见 [`include/aurora/net/http_binding.h`](include/aurora/net/http_binding.h) 与 [`specification/02-state.md`](specification/02-state.md) §5.4；可编译样例见 `examples/demos/demo_net_http.cpp`。
