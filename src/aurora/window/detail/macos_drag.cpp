@@ -445,10 +445,13 @@ auto MacOSDragBridge::Impl::on_perform_drag_operation(void *sender) -> void {
     std::unordered_map<std::string, std::vector<std::uint8_t>> entries;
     for (const std::string &mime : in.mimes) {
         // 只读源**真的广告过**的类型（按登记序取首个命中；`in.types` 即 Enter 时记录的全集）。
+        // `chosen` 指向 `in.types` 内的条目而非候选清单：候选来自 `macos_pasteboard_types_from_mime`
+        // 的返回值（临时 vector），指向它会在循环结束后悬垂（已实测：越界读令取数整段静默跳过）。
         const std::string *chosen = nullptr;
         for (const std::string &type : drag::macos_pasteboard_types_from_mime(mime)) {
-            if (std::find(in.types.begin(), in.types.end(), type) != in.types.end()) {
-                chosen = &type;
+            const auto it = std::find(in.types.begin(), in.types.end(), type);
+            if (it != in.types.end()) {
+                chosen = &*it;
                 break;
             }
         }

@@ -37,9 +37,9 @@
 //   leg 5/5  drag-out fail-closed: with no window / no press event `system_drag::begin` refuses and
 //            no terminal event is delivered (it must not claim a session it never started).
 //
-// Manual stage (`--interactive`): requires a real window shell, which `MacOSSurface::create_window`
-// does not implement yet (see src/aurora/window/macos_surface.cpp), so the flag currently reports
-// that the stage is unavailable (exit 2) instead of pretending to run it. The four drag-in states
+// Manual stage (`--interactive`): a real 720x480 `MacOSSurface` window (upper half = drop target,
+// lower half = drag-out source). Drag files/text in from Finder or an editor to print `[drag]` lines;
+// press-and-drag in the lower half to start a drag-out offering text/plain. The four drag-in states
 // and the two drag-out terminals are judged by a human on a real desktop; see the manual-test page.
 //
 // Build:
@@ -48,8 +48,10 @@
 //   ./build-verify/aurora_verify_macos_drag
 //
 // Exit codes:
-//   0  every automated check passed AND the bridge was installed on a view inside a real NSWindow
-//   2  environment unusable (AppKit / pasteboard / destination view unavailable)
+//   0  every automated check passed (a window server present means the bridge was installed on a
+//      view inside a real NSWindow; the human legs remain PENDING either way)
+//   2  environment unusable (AppKit / pasteboard / destination view unavailable; `--interactive`
+//      could not create or present the window)
 //   3  automated checks passed but no window server => the AppKit-delivered session legs are
 //      PENDING (a human must drag on a real desktop)
 //   4  at least one check failed -- see the per-line PASS/FAIL column
@@ -103,6 +105,9 @@ using aurora::Event;
 using aurora::EventDispatcher;
 using aurora::LeafWidget;
 using aurora::ModifierKey;
+using aurora::MouseAction;
+using aurora::MouseButton;
+using aurora::MouseEvent;
 using aurora::Painter;
 using aurora::Platform;
 using aurora::PlatformCapabilities;
@@ -456,6 +461,8 @@ auto leg_drag_in(BridgeUnderTest &uut, NSPasteboard *board, Ledger &ledger) -> v
 auto leg_reject(BridgeUnderTest &uut, NSPasteboard *board, Ledger &ledger) -> void {
     note("leg 4/5: rejection path");
     DropTarget &target = *uut.target;
+    // 前一条腿（拖入）已派发过一次 Drop：拒收判据按**本次会话的增量**核对，不拿历史总量当基线。
+    const int drop_before = count_phase(target, SystemDropPhase::Drop);
     target.accept = DragAction::None;
     AuroraProbeDragInfo *info =
         [[AuroraProbeDragInfo alloc] initWithPasteboard:board
@@ -466,7 +473,8 @@ auto leg_reject(BridgeUnderTest &uut, NSPasteboard *board, Ledger &ledger) -> vo
           "op=" + std::to_string(static_cast<unsigned long>(entered)));
     const BOOL gate = [(id<NSDraggingDestination>)uut.view prepareForDragOperation:(id)info];
     check(gate == NO, "prepareForDragOperation returns NO (AppKit must not call perform)", ledger);
-    check(count_phase(target, SystemDropPhase::Drop) == 0, "no Drop is dispatched on the rejected session", ledger);
+    check(count_phase(target, SystemDropPhase::Drop) == drop_before,
+          "no Drop is dispatched on the rejected session", ledger);
     [(id<NSDraggingDestination>)uut.view draggingExited:(id)info];
     target.accept = DragAction::Copy;
 }
@@ -524,6 +532,110 @@ auto leg_drag_out(BridgeUnderTest &uut, Ledger &ledger) -> void {
     return ok == YES;
 }
 
+// ---------------------------------------------------------------------------
+// Manual stage: a real MacOSSurface window hosts the two sessions
+// ---------------------------------------------------------------------------
+
+/// @brief 把拖放事件打成一行（与另两平台探针的 `[drag]` 行同形，便于人工逐行核对）。
+auto print_drop(const SystemDropEvent &drop) -> void {
+    std::string formats;
+    for (const std::string &mime : drop.formats) {
+        formats += (formats.empty() ? "" : ",") + mime;
+    }
+    note(std::string{"[drag] phase="} + phase_name(drop.phase) + " x=" +
+         std::to_string(static_cast<int>(drop.position.x)) + " y=" + std::to_string(static_cast<int>(drop.position.y)) +
+         " proposed=" + action_name(drop.proposed) + " allowed=" + action_name(drop.allowed) + " formats=" + formats);
+    if (drop.phase == SystemDropPhase::Drop) {
+        const auto files = drop.files();
+        if (files && !files.value().empty()) {
+            std::string line = "[drag] drop files=";
+            for (const std::string &path : files.value()) {
+                line += (line.back() == '=' ? "" : ",") + path;
+            }
+            note(line);
+        }
+        const auto text = drop.text();
+        if (text && !text.value().empty()) {
+            note("[drag] drop text=" + text.value());
+        }
+    }
+}
+
+/// @brief 交互段：真实窗口承担 AppKit 派发的拖入 / 拖出会话（人工拖放）。
+///
+/// 用法：把文件 / 文本从 Finder 或编辑器拖进窗口（上半区为落放区），观察 `[drag]` 行；
+/// 在窗口**下半区**按下左键即发起一场拖出（载荷为固定 ASCII 文本），拖到外部目标后观察
+/// `[drag-out] end:` 行。关闭窗口即退出（退出码 0）。
+auto run_interactive() -> int {
+    aurora::WindowOptions base;
+    base.size = aurora::Size{.width = 720.0F, .height = 480.0F};
+    base.title = "Aurora macOS drag probe: drag files/text into this window";
+    auto win_result = aurora::create_window(aurora::MacOSOptions{base});
+    if (!win_result) {
+        note("ENV-UNAVAILABLE: create_window failed: " + win_result.error().message);
+        return 2;
+    }
+    auto win = std::move(win_result.value());
+    aurora::Surface &surface = win->surface();
+
+    DragOffer offer;
+    offer.formats.emplace_back(AURORA_MIME_TEXT_PLAIN);
+    offer.default_action = DragAction::Copy;
+    offer.provide = [](const std::string & /*mime*/) -> Result<std::vector<std::uint8_t>> {
+        const std::string payload = "aurora macos drag-out interactive payload";
+        return Result<std::vector<std::uint8_t>>{std::vector<std::uint8_t>(payload.begin(), payload.end())};
+    };
+
+    surface.set_event_handler([&](Event &e) -> void {
+        if (auto *drop = dynamic_cast<SystemDropEvent *>(&e); drop != nullptr) {
+            print_drop(*drop);
+            if (drop->phase == SystemDropPhase::Drop) {
+                drop->is_handled = true;
+            }
+            return;
+        }
+        auto *mouse = dynamic_cast<MouseEvent *>(&e);
+        if (mouse == nullptr || mouse->button != MouseButton::Left || mouse->action != MouseAction::Press) {
+            return;
+        }
+        if (mouse->position.y <= surface.size().height * 0.5F) {
+            note("[drag-out] press in the lower half to start a drag-out session");
+            return;
+        }
+        const auto began = aurora::system_drag::begin(offer, [](SystemDragOutcome outcome, DragAction action) {
+            note(std::string{"[drag-out] end:"} + outcome_name(outcome) + ":" + action_name(action));
+        });
+        note(std::string{"[drag-out] begin "} + (began.ok() ? "Ok" : began.error().message));
+    });
+
+    while (!surface.should_close()) {
+        const int w = static_cast<int>(surface.size().width);
+        const int h = static_cast<int>(surface.size().height);
+        const auto begin = surface.begin_frame(w, h);
+        if (!begin || !begin.value()) {
+            note("ENV-UNAVAILABLE: begin_frame failed");
+            return 2;
+        }
+        aurora::Painter &painter = surface.painter();
+        const float half = static_cast<float>(h) * 0.5F;
+        painter.fill_rect(
+            Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = static_cast<float>(w), .height = half}},
+            aurora::Color{30, 90, 60, 255});
+        painter.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = half},
+                               .size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h) - half}},
+                          aurora::Color{30, 60, 110, 255});
+        const auto presented = surface.present();
+        if (!presented || !presented.value()) {
+            note("ENV-UNAVAILABLE: present failed");
+            return 2;
+        }
+        surface.wait_events(16.0);
+        surface.poll_platform_events();
+        aurora::system_drag::pump_reads();
+    }
+    return 0;
+}
+
 }  // namespace
 
 // 入口不吞异常：探针的失败以未捕获异常 → 非零退出码呈现（捕获反而把它压成 0），与既有探针同口径。
@@ -534,9 +646,7 @@ auto main(int argc, char **argv) -> int {
         return cli.exit_code;
     }
     if (cli.arguments->flag("interactive")) {
-        note("--interactive needs a real window shell; MacOSSurface::create_window is still a skeleton,");
-        note("so this probe cannot host an on-screen drag session yet.");
-        return 2;
+        return run_interactive();
     }
 
     int rc = 0;
@@ -571,7 +681,10 @@ auto main(int argc, char **argv) -> int {
         leg_reject(uut, board, ledger);
         leg_drag_out(uut, ledger);
 
-        uut.bridge->uninstall();
+        // 收摊顺序（ARC 侧）：桥的析构仍会调 `uninstall()` 并读 `view`，故必须先放桥、再放视图；
+        // 顺序反了即析构读已释放的 ObjC 指针（局部变量按声明逆序析构：`view` 先于 `bridge`，已实测崩溃）。
+        uut.bridge.reset();
+        uut.view = nil;
 
         if (ledger.failures > 0) {
             rc = 4;
