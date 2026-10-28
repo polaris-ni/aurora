@@ -31,13 +31,13 @@ namespace aurora::demo_scenes {
     au::Column start{
         au::ColumnProps{.children = {au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
                         .flex = au::Flex{.main_axis = au::MainAxisAlignment::Start}}};
-    start.modifier.set(
+    start.set_modifier(
         au::Modifier{}.size(240.0F, 160.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
 
     au::Column center{au::ColumnProps{
         .children = {au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
         .flex = au::Flex{.main_axis = au::MainAxisAlignment::Center, .cross_axis = au::CrossAxisAlignment::Center}}};
-    center.modifier.set(
+    center.set_modifier(
         au::Modifier{}.size(240.0F, 160.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
 
     au::Node root = au::Column{

@@ -223,14 +223,14 @@ auto main() -> int {
     // 绑成资源即起手发送；此后每次 `reload()` 重新发一次，并掐掉前一次那条在途连接。
     auto resource = net_http::bind_resource<Quote>(client, net_http::Request::get(url), project);
 
-    auto line = std::make_shared<aurora::State<aurora::LocalizedString>>(aurora::LocalizedString{"loading…"});
+    auto line = aurora::State<aurora::LocalizedString>{aurora::LocalizedString{"loading…"}};
     // 同一份文本既上屏又进日志：手工验证不必守着窗口，stderr 里就是现场记录。
     const auto show = [line](const std::string &text) -> void {
-        line->set(aurora::LocalizedString{text});
+        line.set(aurora::LocalizedString{text});
         AURORA_LOG_INFO("net_demo", text);
     };
-    // 三分支读取即订阅：资源落定（或重发回到 Loading）时本 Effect 被重新运行，只刷这块文本。
-    auto render = std::make_shared<aurora::Effect>([resource, show]() -> void {
+    // 三分支读取即订阅：资源落定（或重发回到 Loading）时本副作用被重新运行，只刷这块文本。
+    const auto render = aurora::effect([resource, show]() -> void {
         if (resource.phase() == aurora::ResourcePhase::Loading) {
             show("loading… (reload again within this pause to cut the exchange mid-flight)");
             return;
@@ -247,7 +247,7 @@ auto main() -> int {
         }
         show("no outcome in this snapshot");  // 兜底：三态之外的读取顺序不该出现
     });
-    render->run();  // 首帧求值：此后由资源状态自己驱动
+    (void)render;  // 凭证存活到 main 结束：首跑已在 effect 内完成，此后由资源状态自己驱动
 
     aurora::Button reload{aurora::ButtonProps{.label = aurora::LocalizedString{"reload"}}};
     reload.on_click = [resource]() mutable -> void { resource.reload(); };
@@ -263,7 +263,7 @@ auto main() -> int {
         gap(8.0F),
         aurora::Text{aurora::LocalizedString{"Loopback JSON stub · Resource reads three branches · reload cuts the "
                                              "in-flight exchange"}},
-        aurora::Text{aurora::TextProps{.content = aurora::Reactive{line}}},
+        aurora::Text{aurora::TextProps{.content = line}},
         aurora::Row{std::move(reload), std::move(toggle)},
     };
     return run_demo(std::move(root), "Net HTTP · Aurora Demo", 620.0F, 320.0F);

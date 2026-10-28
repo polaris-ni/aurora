@@ -185,7 +185,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     kids.emplace_back(gap(10));
     kids.emplace_back(au::Text{std::string(policy_description(policy))});
     kids.emplace_back(gap(10));
-    kids.emplace_back(au::Text{au::TextProps{.content = au::Reactive{preview_info}}});
+    kids.emplace_back(au::Text{au::TextProps{.content = *preview_info}});
     kids.emplace_back(gap(10));
 
     if (policy == au::DecorationPolicy::ClientSide) {
@@ -228,7 +228,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         };
         kids.emplace_back(std::move(icon_btn));
         kids.emplace_back(gap(10));
-        kids.emplace_back(au::Text{au::TextProps{.content = au::Reactive{note}}});
+        kids.emplace_back(au::Text{au::TextProps{.content = *note}});
     } else if (policy == au::DecorationPolicy::Borderless || policy == au::DecorationPolicy::Frameless) {
         // 控件级 TitleBar widget：应用自绘标题栏，经 WindowChrome 驱动窗口状态
         // （headless 下 chrome 缺失，交互安全 no-op）。
@@ -286,7 +286,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     add_policy(au::DecorationPolicy::Borderless, kids);
     add_policy(au::DecorationPolicy::Frameless, kids);
     kids.emplace_back(gap(8));
-    kids.emplace_back(au::Text{au::TextProps{.content = au::Reactive{preview_info}}});
+    kids.emplace_back(au::Text{au::TextProps{.content = *preview_info}});
     kids.emplace_back(gap(8));
 
     au::Button quit_btn{au::ButtonProps{.label = "Quit"}};

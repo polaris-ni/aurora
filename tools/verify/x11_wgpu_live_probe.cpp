@@ -424,7 +424,7 @@ auto main(int argc, char **argv) -> int {
     bool present_ok = true;
     constexpr int auto_frames = 8;
     for (int i = 0; i < auto_frames; ++i) {
-        root_widget->modifier.set(aurora::Modifier{}.cache_layer().rotate(static_cast<float>(i) * 4.0F));
+        root_widget->set_modifier(aurora::Modifier{}.cache_layer().rotate(static_cast<float>(i) * 4.0F));
         video->advance_version();
         win.force_full_redraw();  // 绕过 idle 跳帧，逐帧走完整 GPU 路径
         if (!win.present_root(root_node)) {
@@ -454,7 +454,7 @@ auto main(int argc, char **argv) -> int {
         float angle = 0.0F;
         while (!win.should_close()) {
             angle += 1.5F;
-            root_widget->modifier.set(aurora::Modifier{}.cache_layer().rotate(angle));
+            root_widget->set_modifier(aurora::Modifier{}.cache_layer().rotate(angle));
             video->advance_version();
             (void)win.present_root(root_node);
             win.surface().poll_platform_events();

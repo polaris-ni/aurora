@@ -17,12 +17,12 @@ auto main() -> int {
     auto header = [](const std::string &title) -> au::Node {
         au::Text label{au::LocalizedString{title}};
         label.bold().color(pal::AURORA_TEXT);
-        label.modifier.set(au::Modifier{}.padding(8.0F).background(pal::AURORA_PRIMARY_SOFT));
+        label.set_modifier(au::Modifier{}.padding(8.0F).background(pal::AURORA_PRIMARY_SOFT));
         return au::StickyHeader{au::Node{std::move(label)}};
     };
     auto row = [](const std::string &text) -> au::Node {
         au::Text item{au::LocalizedString{text}};
-        item.modifier.set(
+        item.set_modifier(
             au::Modifier{}.padding(6.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
         return item;
     };
@@ -36,7 +36,7 @@ auto main() -> int {
     }
 
     au::Scroll scroll{au::ScrollProps{.child = au::Node{au::Column{au::ColumnProps{.children = std::move(kids)}}}}};
-    scroll.modifier.set(au::Modifier{}.size(340.0F, 260.0F).border(1.0F, pal::AURORA_BORDER));
+    scroll.set_modifier(au::Modifier{}.size(340.0F, 260.0F).border(1.0F, pal::AURORA_BORDER));
 
     au::Node root = au::Column{
         GradientTitle{"StickyHeader"},

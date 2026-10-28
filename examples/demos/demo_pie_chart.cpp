@@ -20,7 +20,7 @@ auto main() -> int {
         .show_percentage_labels = true,
         .legend = au::ChartLegendSpec{.visible = true, .position = au::LegendPosition::Right},
     }};
-    donut.modifier.set(au::Modifier{}.height(260.0F));
+    donut.set_modifier(au::Modifier{}.height(260.0F));
     donut.on_section_tapped = [last_tap](int section_idx) -> void {
         last_tap->set(au::LocalizedString{"tapped section " + std::to_string(section_idx)});
     };
@@ -34,14 +34,14 @@ auto main() -> int {
                 au::PieSection{.name = "C", .value = 1.0},
             },
     }};
-    pie.modifier.set(au::Modifier{}.height(220.0F));
+    pie.set_modifier(au::Modifier{}.height(220.0F));
 
     au::Node root = au::Column{
         GradientTitle{"PieChart widget"},
         gap(12),
         std::move(donut),
         gap(8),
-        au::Text{au::TextProps{.content = au::Reactive{last_tap}}},
+        au::Text{au::TextProps{.content = *last_tap}},
         gap(16),
         std::move(pie),
     };

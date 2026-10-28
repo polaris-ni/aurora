@@ -10,16 +10,16 @@
 auto main() -> int {
     // 两个可拖拽方块：每根手指独立路由到各自命中的控件，互不干扰。
     au::Button a;
-    a.label.set(au::LocalizedString{"Drag me A"});
-    a.modifier.set(au::Modifier{}
+    a.set_label(au::LocalizedString{"Drag me A"});
+    a.set_modifier(au::Modifier{}
                        .size(160.0F, 120.0F)
                        .background(pal::AURORA_PRIMARY)
                        .draggable([](au::Point, au::Point) -> void { AURORA_LOG_INFO("demo", "[drag] A"); },
                                   []() -> void {}, []() -> void {}));
 
     au::Button b;
-    b.label.set(au::LocalizedString{"Drag me B"});
-    b.modifier.set(au::Modifier{}
+    b.set_label(au::LocalizedString{"Drag me B"});
+    b.set_modifier(au::Modifier{}
                        .size(160.0F, 120.0F)
                        .background(pal::AURORA_ACCENT)
                        .draggable([](au::Point, au::Point) -> void { AURORA_LOG_INFO("demo", "[drag] B"); },
@@ -27,8 +27,8 @@ auto main() -> int {
 
     // 原始多点流监听区：每次触摸派发打印触点数量（原始流）。
     au::Button t;
-    t.label.set(au::LocalizedString{"Raw stream listener (multi-touch; watch console)"});
-    t.modifier.set(
+    t.set_label(au::LocalizedString{"Raw stream listener (multi-touch; watch console)"});
+    t.set_modifier(
         au::Modifier{}.size(320.0F, 80.0F).background(pal::AURORA_SURFACE).touch([](const au::TouchEvent &e) -> void {
             AURORA_LOG_INFO("demo", "[multitouch] points=", e.points.size(), " active=", e.active_count());
         }));

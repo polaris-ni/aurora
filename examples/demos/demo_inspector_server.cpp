@@ -44,7 +44,7 @@ auto build_form(const std::shared_ptr<au::State<int>> &count,
             au::Node{au::TextInput{au::TextInputProps{.value = "", .placeholder = "Enter name"}}},
             au::Node{au::TextInput{au::TextInputProps{.value = "alice@example.com", .placeholder = "Enter email"}}},
             au::Node{std::move(submit)},
-            au::Node{au::Text{au::TextProps{.content = au::Reactive{label}}}},
+            au::Node{au::Text{au::TextProps{.content = *label}}},
         }}}};
 }
 

@@ -12,12 +12,12 @@ auto main() -> int {
     auto make_overflow_box = [](au::OverflowStrategy strategy, const char *label) -> au::Node {
         // 子内容：一个比容器大的红色背景 Text
         const auto txt = std::make_shared<au::Text>();
-        txt->content = au::LocalizedString{std::string{label}};
-        txt->modifier.set(au::Modifier{}.size(260.0F, 120.0F).background(au::Color{220, 50, 50, 255}));
+        txt->set_content(au::LocalizedString{std::string{label}});
+        txt->set_modifier(au::Modifier{}.size(260.0F, 120.0F).background(au::Color{220, 50, 50, 255}));
 
         // 容器：固定 150x60，绿色背景
         au::Column col{au::ColumnProps{.children = {au::Node{txt}}}};
-        col.modifier.set(au::Modifier{}
+        col.set_modifier(au::Modifier{}
                              .size(150.0F, 60.0F)
                              .background(au::Color{50, 180, 80, 255})
                              .border(1.0F, pal::AURORA_BORDER));

@@ -6,7 +6,7 @@
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::Text box{au::LocalizedString{"clickable area (click triggers MouseEvent)"}};
-    box.modifier.set(au::Modifier{}
+    box.set_modifier(au::Modifier{}
                          .padding(16.0F)
                          .size(280.0F, 64.0F)
                          .background(pal::AURORA_PRIMARY_SOFT)

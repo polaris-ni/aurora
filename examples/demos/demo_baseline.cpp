@@ -8,7 +8,7 @@ namespace {
 /// 无基线子项（示意图标）：自身不提供 baseline_distance，容器按合成基线（其底边）参与对齐。
 auto icon_box(float size) -> au::Node {
     au::Column box;
-    box.modifier.set(au::Modifier{}.size(size, size).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
+    box.set_modifier(au::Modifier{}.size(size, size).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
     return au::Node{std::move(box)};
 }
 
@@ -16,7 +16,7 @@ auto icon_box(float size) -> au::Node {
 auto framed(const au::Node &child) -> au::Node {
     au::Row row;
     row.add(child);
-    row.modifier.set(au::Modifier{}.background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
+    row.set_modifier(au::Modifier{}.background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
     return au::Node{std::move(row)};
 }
 
@@ -54,7 +54,7 @@ auto main() -> int {
     au::Row with_button;
     auto padded = au::Text{au::LocalizedString{"padded text"}};
     padded.font_size(16.0F).color(pal::AURORA_TEXT);
-    padded.modifier.set(au::Modifier{}.padding(10.0F));
+    padded.set_modifier(au::Modifier{}.padding(10.0F));
     with_button.add(au::Node{std::move(padded)});
     with_button.add(au::Node{au::Button{"Button"}});
     with_button.set_cross_axis_alignment(au::CrossAxisAlignment::Baseline);

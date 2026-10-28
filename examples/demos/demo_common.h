@@ -59,7 +59,7 @@ constexpr float AURORA_GUTTER = 16.0F;
 // 固定高度间距（Spacer 只吸收剩余空间，这里用空 Text 加 height 修饰实现）
 [[maybe_unused]] static auto gap(float h) -> au::Node {
     au::Text t{" "};
-    t.modifier.set(au::Modifier{}.height(h));
+    t.set_modifier(au::Modifier{}.height(h));
     return t;
 }
 
@@ -81,7 +81,7 @@ class Card : public au::Column {
 
   private:
     void decorate(au::Color fill) {
-        this->modifier.set(au::Modifier{}.padding(14.0F).background(fill).border(1.0F, pal::AURORA_BORDER));
+        this->set_modifier(au::Modifier{}.padding(14.0F).background(fill).border(1.0F, pal::AURORA_BORDER));
     }
 };
 
@@ -92,7 +92,7 @@ class BrandBadge : public au::LeafWidget {
   public:
     BrandBadge(std::string label, au::Color color) : label_(std::move(label)), color_(color) {}
 
-    void collect_signals(std::vector<au::SignalViewBase *> & /*out*/) override {}
+    void collect_signals(au::StateSink & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "BrandBadge"; }
     [[nodiscard]] auto describe() const -> au::WidgetDescriptor override {
         return au::WidgetDescriptor{.name = "BrandBadge", .children_policy = "none"};
@@ -129,7 +129,7 @@ class GradientTitle : public au::LeafWidget {
         set_focusable(false);
     }
 
-    void collect_signals(std::vector<au::SignalViewBase *> & /*out*/) override {}
+    void collect_signals(au::StateSink & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "GradientTitle"; }
     [[nodiscard]] auto describe() const -> au::WidgetDescriptor override {
         return au::WidgetDescriptor{.name = "GradientTitle", .children_policy = "none"};

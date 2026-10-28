@@ -9,31 +9,31 @@ auto main() -> int {
     auto checked = std::make_shared<au::State<bool>>(false);
     auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"Unchecked"});
 
-    au::Checkbox cb{au::Reactive{checked}, [checked, label](bool v) -> void {
+    au::Checkbox cb{*checked, [checked, label](bool v) -> void {
                         checked->set(v);
                         label->set(au::LocalizedString{v ? "Checked" : "Unchecked"});
                     }};
 
-    au::Checkbox cb2{au::Reactive{std::make_shared<au::State<bool>>(true)}};
+    au::Checkbox cb2{true};
     cb2.set_active_color(pal::AURORA_OK);
 
     // 自定义勾号色 + 大尺寸 + 大圆角
-    au::Checkbox cb3{au::Reactive{std::make_shared<au::State<bool>>(true)}};
+    au::Checkbox cb3{true};
     cb3.set_active_color(au::Color{255, 122, 0, 255})
         .set_check_color(au::Color{40, 26, 0, 255})
         .set_size(28.0F)
         .set_corner_radius(9.0F);
 
     // 禁用态（勾选 / 未勾选各一）
-    au::Checkbox cb4{au::Reactive{std::make_shared<au::State<bool>>(true)}};
+    au::Checkbox cb4{true};
     cb4.set_enabled(false);
-    au::Checkbox cb5{au::Reactive{std::make_shared<au::State<bool>>(false)}};
+    au::Checkbox cb5{false};
     cb5.set_enabled(false);
 
     au::Node root = au::Column{
         GradientTitle{"Checkbox widget"},
         gap(12),
-        au::Row{std::move(cb), au::Text{au::TextProps{.content = au::Reactive{label}}}},
+        au::Row{std::move(cb), au::Text{au::TextProps{.content = *label}}},
         gap(12),
         au::Row{std::move(cb2), au::Text{au::LocalizedString{"Pre-checked + custom active color"}}},
         gap(12),

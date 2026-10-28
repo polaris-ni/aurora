@@ -29,10 +29,10 @@ namespace aurora::demo_scenes {
 /// 契约：根节点尺寸 320×200，左半区 `Color{220, 40, 40, 255}`、右半区 `Color{40, 40, 220, 255}`。
 [[nodiscard]] inline auto build_solid_rect() -> Node {
     const auto left = std::make_shared<Row>();
-    left->modifier.set(Modifier{}.size(160.0F, 200.0F).background(Color{220, 40, 40, 255}));
+    left->set_modifier(Modifier{}.size(160.0F, 200.0F).background(Color{220, 40, 40, 255}));
 
     const auto right = std::make_shared<Row>();
-    right->modifier.set(Modifier{}.size(160.0F, 200.0F).background(Color{40, 40, 220, 255}));
+    right->set_modifier(Modifier{}.size(160.0F, 200.0F).background(Color{40, 40, 220, 255}));
 
     return Node{Row{Node{left}, Node{right}}};
 }

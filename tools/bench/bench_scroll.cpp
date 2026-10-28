@@ -210,7 +210,7 @@ class AppBannerCarousel : public au::LeafWidget {
     std::vector<BenchBanner> items;
     // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
-    auto collect_signals(std::vector<au::SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(au::StateSink & /*out*/) -> void override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "AppBannerCarousel"; }
     // 横幅每帧整体平移 + 入场淡入：Display List 缓存会冻结平移与 alpha 首帧，故禁 DL 缓存，
     // 改为卡片一次性渲染进离屏层、每帧仅 composite。
@@ -393,7 +393,7 @@ class AppCellLeaf : public au::LeafWidget {
     au::Color tile_b{94, 53, 211};
     // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
-    auto collect_signals(std::vector<au::SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(au::StateSink & /*out*/) -> void override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "AppCellLeaf"; }
 
   protected:
@@ -475,7 +475,8 @@ class AppCellLeaf : public au::LeafWidget {
         4.0F, 18.0F, [th](au::Painter &p, const au::Rect &b) -> void { p.fill_rounded_rect(b, 2.0F, th.accent); });
     auto text = std::make_shared<au::Text>(
         au::TextProps{.content = title, .font = au::Font{.size_pt = 15.0F, .weight = 700}, .text_color = th.text});
-    text->modifier = au::Modifier{}.padding(au::EdgeInsets{.left = 10.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F});
+    text->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 10.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F}));
     auto row = std::make_shared<Row>();
     row->add(Node{bar});
     row->add(Node{text});
@@ -508,8 +509,8 @@ class AppCellLeaf : public au::LeafWidget {
     });
     auto bar_title = std::make_shared<au::Text>(au::TextProps{
         .content = "Aurora Store", .font = au::Font{.size_pt = 20.0F, .weight = 700}, .text_color = th.primary});
-    bar_title->modifier =
-        au::Modifier{}.padding(au::EdgeInsets{.left = 12.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F});
+    bar_title->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 12.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F}));
     auto avatar = std::make_shared<au::Canvas>(28.0F, 28.0F, [th](au::Painter &p, const au::Rect &b) -> void {
         p.fill_rounded_rect(b, 14.0F, th.primary);
         p.draw_text(b, "A", au::Font{.size_pt = 14.0F, .weight = 700}, th.on_primary);
@@ -517,8 +518,8 @@ class AppCellLeaf : public au::LeafWidget {
     bar->add(Node{menu});
     bar->add(Node{bar_title});
     bar->add(Node{avatar});
-    bar->modifier =
-        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 10.0F, .right = 16.0F, .bottom = 10.0F});
+    bar->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 10.0F, .right = 16.0F, .bottom = 10.0F}));
 
     // ---- 搜索行（放大镜图标 + 输入框）----
     auto search_row = std::make_shared<Row>();
@@ -532,8 +533,8 @@ class AppCellLeaf : public au::LeafWidget {
     auto search_input = std::make_shared<au::TextInput>(au::TextInputProps{.placeholder = "Search apps and books"});
     search_row->add(Node{search_icon});
     search_row->add(Node{search_input});
-    search_row->modifier =
-        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 8.0F});
+    search_row->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 8.0F}));
 
     // ---- 纵向滚动主体 ----
     std::vector<Node> body;
@@ -545,8 +546,8 @@ class AppCellLeaf : public au::LeafWidget {
 
     body.push_back(section_header("Categories"));
     auto chips = std::make_shared<Row>();
-    chips->modifier =
-        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 8.0F});
+    chips->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 8.0F}));
     static const std::string CATEGORIES[] = {"Games", "Apps", "Movies", "Books", "Kids"};
     for (const auto &cat : CATEGORIES) {
         auto chip = std::make_shared<Chip>();
@@ -577,8 +578,8 @@ class AppCellLeaf : public au::LeafWidget {
             cell->tile_a = data.tile_a;
             cell->tile_b = data.tile_b;
             // 行内等分宽度（flex 权重），单元格自身按 max.width 布局。
-            cell->modifier = au::Modifier{}.expand().padding(
-                au::EdgeInsets{.left = 4.0F, .top = 4.0F, .right = 4.0F, .bottom = 4.0F});
+            cell->set_modifier(au::Modifier{}.expand().padding(
+                au::EdgeInsets{.left = 4.0F, .top = 4.0F, .right = 4.0F, .bottom = 4.0F}));
             row_cells.emplace_back(cell);
         }
         grid_rows.emplace_back(std::make_shared<Row>(RowProps{.children = std::move(row_cells)}));
@@ -589,8 +590,8 @@ class AppCellLeaf : public au::LeafWidget {
     // 静态推荐行：缩略图 + 两行文本。同理不用 LazyRow（横向可滚动控件同样会抢滚轮）。
     auto recos = std::make_shared<std::vector<BenchReco>>(app_recos());
     auto reco_row = std::make_shared<Row>();
-    reco_row->modifier =
-        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 0.0F});
+    reco_row->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 0.0F}));
     for (int i = 0; i < AURORA_APP_RECO_VISIBLE; ++i) {
         const BenchReco &data = (*recos)[static_cast<std::size_t>(i)];  // NOLINT(*-redundant-parentheses)
         // 绘制回调经 Canvas 转入 std::function 后，分析器无法证明其不抛；wasm 口径
@@ -612,7 +613,7 @@ class AppCellLeaf : public au::LeafWidget {
         auto item = std::make_shared<Row>();
         item->add(Node{thumb});
         item->add(Node{col});
-        item->modifier = au::Modifier{}.expand();
+        item->set_modifier(au::Modifier{}.expand());
         reco_row->add(Node{item});
     }
     body.emplace_back(reco_row);
@@ -650,19 +651,20 @@ class AppCellLeaf : public au::LeafWidget {
                                                                   .soft_wrap = true});
         auto card = std::make_shared<Column>(
             ColumnProps{.children = std::vector<Node>{Node{head}, Node{body_text}}, .gap = 6.0F});
-        card->modifier =
-            au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 8.0F, .right = 16.0F, .bottom = 8.0F});
+        card->set_modifier(
+            au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 8.0F, .right = 16.0F, .bottom = 8.0F}));
         body.emplace_back(card);
     }
 
     auto body_col = std::make_shared<Column>(ColumnProps{.children = std::move(body)});
     auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(body_col)}});
-    scroll->modifier = au::Modifier{}.expand();
+    scroll->set_modifier(au::Modifier{}.expand());
 
     // ---- 底部导航 ----
     static const std::string NAV_LABELS[] = {"Home", "Top", "New", "Subs"};
     auto nav = std::make_shared<Row>();
-    nav->modifier = au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 8.0F, .right = 16.0F, .bottom = 8.0F});
+    nav->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 8.0F, .right = 16.0F, .bottom = 8.0F}));
     for (int i = 0; i < 4; ++i) {
         auto icon = std::make_shared<au::Canvas>(22.0F, 22.0F, [i, th](au::Painter &p, const au::Rect &b) -> void {
             const au::Color c = (i == 0) ? th.primary : th.text_secondary;

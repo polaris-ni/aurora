@@ -21,7 +21,7 @@ static auto demo_coro() -> au::CoroTask<void> {
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    // 共享状态：Text 经 Reactive 订阅，后台回调写回时自动触发刷新（否则只拍静态快照）。
+    // 共享状态句柄：Text 经只读句柄订阅，后台回调写回时自动触发刷新（否则只拍静态快照）。
     auto status = std::make_shared<au::State<au::LocalizedString>>("running…");
 
     // 回调式：后台任务经 au::async().then() 回调，失败/超时均经 Result 传递。
@@ -47,7 +47,7 @@ auto main() -> int {
         gap(12),
         au::Text{au::LocalizedString{"Background task via au::async().with_timeout().then() callback"}},
         au::Text{au::LocalizedString{"Coroutine: co_await au::co_async(...) continuation on main thread"}},
-        au::Text{au::TextProps{.content = au::Reactive{status}}},
+        au::Text{au::TextProps{.content = *status}},
     };
     return run_demo(Card{std::move(root)}, "Async · Aurora Demo", 520.0F, 360.0F);
 }

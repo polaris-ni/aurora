@@ -11,8 +11,8 @@ auto main() -> int {
     const aurora::Platform p = aurora::platform();
     aurora::Text line1{"au::App() demo"};
     aurora::Text line2{"surface: " + std::to_string(static_cast<int>(p.surface))};
-    line1.modifier.set(aurora::Modifier{}.size(240.0F, 28.0F));
-    line2.modifier.set(aurora::Modifier{}.size(240.0F, 28.0F));
+    line1.set_modifier(aurora::Modifier{}.size(240.0F, 28.0F));
+    line2.set_modifier(aurora::Modifier{}.size(240.0F, 28.0F));
 
     auto root = aurora::Column{aurora::ColumnProps{.children = {
                                                        std::move(line1),

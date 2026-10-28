@@ -17,7 +17,7 @@ auto main() -> int {
         .categories = {"Mon", "Tue", "Wed", "Thu", "Fri"},
     }};
     grouped.set_axis_y(au::ChartAxisSpec{.label = "sales"});
-    grouped.modifier.set(au::Modifier{}.height(200.0F));
+    grouped.set_modifier(au::Modifier{}.height(200.0F));
     grouped.on_point_tapped = [last_tap](int series_idx, int point_idx) -> void {
         last_tap->set(au::LocalizedString{"tapped series " + std::to_string(series_idx) + " / category " +
                                           std::to_string(point_idx)});
@@ -34,14 +34,14 @@ auto main() -> int {
         .stacked = true,
         .legend = au::ChartLegendSpec{.visible = true, .position = au::LegendPosition::Bottom},
     }};
-    stacked.modifier.set(au::Modifier{}.height(200.0F));
+    stacked.set_modifier(au::Modifier{}.height(200.0F));
 
     au::Node root = au::Column{
         GradientTitle{"BarChart widget"},
         gap(12),
         std::move(grouped),
         gap(8),
-        au::Text{au::TextProps{.content = au::Reactive{last_tap}}},
+        au::Text{au::TextProps{.content = *last_tap}},
         gap(16),
         std::move(stacked),
     };

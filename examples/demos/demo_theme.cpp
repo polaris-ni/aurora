@@ -6,7 +6,7 @@ class ThemedBox : public au::LeafWidget {
   public:
     explicit ThemedBox(std::string label) : label_(std::move(label)) {}
 
-    void collect_signals(std::vector<au::SignalViewBase *> & /*out*/) override {}
+    void collect_signals(au::StateSink & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "ThemedBox"; }
     [[nodiscard]] auto describe() const -> au::WidgetDescriptor override {
         return au::WidgetDescriptor{.name = "ThemedBox", .children_policy = "none"};

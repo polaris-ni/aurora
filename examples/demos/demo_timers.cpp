@@ -1,7 +1,6 @@
 // demo_timers.cpp — 定时任务模块演示：时钟 / 倒计时 / 自动显现。
 #include <chrono>
 #include <ctime>
-#include <memory>
 #include <string>
 
 #include "aurora/aurora.h"
@@ -27,36 +26,35 @@ static auto now_string() -> std::string {
 
 /// @brief 时钟：每秒经 on_tick 写入响应式字符串，Text 自动刷新。
 static auto build_clock() -> au::Node {
-    auto clock_str = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"clock: --:--:--"});
+    au::State<au::LocalizedString> clock_str{au::LocalizedString{"clock: --:--:--"}};
     return au::Timer(
         1s,
-        [clock_str](const au::SignalView<int> &) -> au::Text {
-            return au::Text{au::TextProps{.content = au::Reactive{clock_str}}};
+        [clock_str](const au::ReadOnlyState<int> &) -> au::Text {
+            return au::Text{au::TextProps{.content = clock_str}};
         },
-        [clock_str](int) -> void { clock_str->set(au::LocalizedString{"clock: " + now_string()}); });
+        [clock_str](int) -> void { clock_str.set(au::LocalizedString{"clock: " + now_string()}); });
 }
 
 /// @brief 倒计时：每秒递减，归零显示 done。
 static auto build_countdown() -> au::Node {
-    auto cd = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"countdown: 10"});
+    au::State<au::LocalizedString> cd{au::LocalizedString{"countdown: 10"}};
     return au::Timer(
-        1s,
-        [cd](const au::SignalView<int> &) -> au::Text { return au::Text{au::TextProps{.content = au::Reactive{cd}}}; },
+        1s, [cd](const au::ReadOnlyState<int> &) -> au::Text { return au::Text{au::TextProps{.content = cd}}; },
         [cd](int n) -> void {
             const int left = 10 - n;
-            cd->set(au::LocalizedString{left > 0 ? "countdown: " + std::to_string(left) : "countdown: done"});
+            cd.set(au::LocalizedString{left > 0 ? "countdown: " + std::to_string(left) : "countdown: done"});
         });
 }
 
 /// @brief 自动显现：2 秒后由 on_tick 置位 shown，Show 响应式显示提示。
 static auto build_auto_reveal() -> au::Node {
-    auto shown = std::make_shared<au::State<bool>>(false);
+    au::State<bool> shown{false};
     return au::Timer(
         2s,
-        [shown](const au::SignalView<int> &) -> au::Show {
+        [shown](const au::ReadOnlyState<int> &) -> au::Show {
             return au::Show(shown, au::Text{au::LocalizedString{"auto-revealed after 2s!"}});
         },
-        [shown](int) -> void { shown->set(true); });
+        [shown](int) -> void { shown.set(true); });
 }
 
 static auto build_root() -> au::Node {

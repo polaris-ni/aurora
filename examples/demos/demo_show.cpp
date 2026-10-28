@@ -5,10 +5,10 @@
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    auto visible = std::make_shared<au::State<bool>>(true);
+    auto visible = au::State<bool>{true};
 
     au::Button toggle{au::ButtonProps{.label = au::LocalizedString{"toggle banner"}}};
-    toggle.on_click = [visible]() -> void { visible->set(!visible->get()); };
+    toggle.on_click = [visible]() -> void { visible.set(!visible.get()); };
 
     au::Node root = au::Column{
         GradientTitle{"Show widget"},

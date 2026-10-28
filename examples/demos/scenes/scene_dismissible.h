@@ -33,7 +33,7 @@ namespace aurora::demo_scenes {
 [[nodiscard]] inline auto build_dismissible() -> Node {
     auto make_card = [](const std::string &label, au::Color tint, bool custom_cb) -> au::Node {
         au::Text title{label};
-        title.modifier.set(au::Modifier{}.background(tint).size(280.0F, 56.0F));
+        title.set_modifier(au::Modifier{}.background(tint).size(280.0F, 56.0F));
         const auto dis = std::make_shared<au::Dismissible>(au::Node{std::move(title)});
         if (custom_cb) {
             // 自定义回调接管默认摘除：这里只记录（真实场景多为删除数据后重建子树）。

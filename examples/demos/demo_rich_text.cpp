@@ -1,5 +1,5 @@
 // RichText 控件 demo：多片段带样式文本 + 自动换行（确定性贪心换行）。
-#include <memory>
+#include <utility>
 #include <vector>
 
 #include "aurora/widget/rich_text.h"
@@ -24,8 +24,8 @@ auto main() -> int {
                  .font = au::Font{.size_pt = 14.0F},
                  .color = pal::AURORA_MUTED},
     };
-    const auto state = std::make_shared<au::State<std::vector<TextSpan>>>(std::move(spans));
-    au::RichText rt{au::Reactive{state}};
+    au::State<std::vector<TextSpan>> state{std::move(spans)};
+    au::RichText rt{state};
 
     au::Node root = au::Column{
         GradientTitle{"RichText widget"},

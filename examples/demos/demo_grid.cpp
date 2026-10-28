@@ -8,7 +8,7 @@ auto main() -> int {
     std::vector<au::Node> cells;
     for (int i = 0; i < 9; ++i) {
         au::Text c{au::LocalizedString{"cell " + std::to_string(i)}};
-        c.modifier.set(au::Modifier{}.padding(14.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
+        c.set_modifier(au::Modifier{}.padding(14.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
         cells.emplace_back(std::move(c));
     }
 

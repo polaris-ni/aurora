@@ -6,19 +6,19 @@
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     au::Text blend{au::LocalizedString{"blend_mode: Multiply + blue tint"}};
-    blend.modifier.set(au::Modifier{}
+    blend.set_modifier(au::Modifier{}
                            .padding(12.0F)
                            .background(au::Color{255, 255, 255})
                            .blend_mode(au::BlendMode::Multiply, au::Color::blue()));
 
     au::Text fade{au::LocalizedString{"shader_mask: LinearFade top bright -> bottom fade"}};
-    fade.modifier.set(au::Modifier{}
+    fade.set_modifier(au::Modifier{}
                           .size(300.0F, 56.0F)
                           .background(pal::AURORA_ACCENT)
                           .shader_mask(au::ShaderMaskKind::LinearFade, 1.0F));
 
     au::Text cached{au::LocalizedString{"cache_layer: subtree offscreen cache (reused while size unchanged)"}};
-    cached.modifier.set(au::Modifier{}
+    cached.set_modifier(au::Modifier{}
                             .padding(12.0F)
                             .background(pal::AURORA_PRIMARY_SOFT)
                             .border(1.0F, pal::AURORA_BORDER)

@@ -8,7 +8,7 @@ auto main() -> int {
     auto on = std::make_shared<au::State<bool>>(false);
     auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"Off"});
 
-    au::Switch sw{au::Reactive{on}, [on, label](bool v) -> void {
+    au::Switch sw{*on, [on, label](bool v) -> void {
                       on->set(v);
                       label->set(au::LocalizedString{v ? "On" : "Off"});
                   }};
@@ -16,7 +16,7 @@ auto main() -> int {
     au::Node root = au::Column{
         GradientTitle{"Switch widget"},
         gap(12),
-        au::Row{std::move(sw), au::Text{au::TextProps{.content = au::Reactive{label}}}},
+        au::Row{std::move(sw), au::Text{au::TextProps{.content = *label}}},
     };
     return run_demo(Card{std::move(root)}, "Switch · Aurora Demo", 480.0F, 320.0F);
 }

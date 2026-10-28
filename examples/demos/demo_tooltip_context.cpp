@@ -7,11 +7,11 @@
 auto main() -> int {
     // Tooltip：悬停 500ms 显示提示
     au::Text hover_me{"Hover me 500ms for tooltip"};
-    hover_me.modifier.set(au::Modifier{}.tooltip("This is a Tooltip bubble"));
+    hover_me.set_modifier(au::Modifier{}.tooltip("This is a Tooltip bubble"));
 
     // ContextMenu：右键弹出菜单
     au::Text right_click_me{"Right-click me for context menu"};
-    right_click_me.modifier.set(au::Modifier{}.context_menu({
+    right_click_me.set_modifier(au::Modifier{}.context_menu({
         au::MenuItem{"Copy", []() -> void { AURORA_LOG_INFO("demo", "Copy"); }},
         au::MenuItem{"Paste", []() -> void { AURORA_LOG_INFO("demo", "Paste"); }},
         au::MenuItem::separator_item(),
@@ -20,7 +20,7 @@ auto main() -> int {
 
     // blur：内容模糊
     au::Text blurred{"This text is blurred"};
-    blurred.modifier.set(au::Modifier{}.background(au::Color(255, 235, 190, 255)).blur(2.0F));
+    blurred.set_modifier(au::Modifier{}.background(au::Color(255, 235, 190, 255)).blur(2.0F));
 
     au::Node root = au::Column{
         GradientTitle{"Tooltip / ContextMenu / Blur"},

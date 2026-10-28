@@ -28,7 +28,7 @@ auto main() -> int {
         std::move(b_minus),
         std::move(b_plus),
         std::move(b_reset),
-        au::Text{au::TextProps{.content = au::Reactive{count_text}}},
+        au::Text{au::TextProps{.content = *count_text}},
     };
     btn_row.set_gap(12);  // 相邻按钮间的水平间距（主轴为水平，真正的 gap）
 

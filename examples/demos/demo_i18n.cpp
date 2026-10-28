@@ -68,10 +68,10 @@ auto main() -> int {
     // 基准语言档：Locale{} 缺省槽查不到时按它取模板（见 specification/07 §6 回退链）。
     au::default_catalog().set_default_locale(AURORA_LOCALE_EN);
 
-    auto locale = std::make_shared<au::State<au::Locale>>(AURORA_LOCALE_EN);
+    auto locale = au::State<au::Locale>{AURORA_LOCALE_EN};
     au::Button toggle{au::ButtonProps{.label = au::LocalizedString{"Switch locale (en / zh-Hans-CN)"}}};
     toggle.on_click = [locale]() -> void {
-        locale->set(locale->get().language == AURORA_LOCALE_EN.language ? AURORA_LOCALE_ZH : AURORA_LOCALE_EN);
+        locale.set(locale.get().language == AURORA_LOCALE_EN.language ? AURORA_LOCALE_ZH : AURORA_LOCALE_EN);
     };
 
     au::Node content = au::Column{

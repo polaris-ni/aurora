@@ -94,9 +94,9 @@ auto main() -> int {
 
     au::Node root = au::Column{
         au::Text{au::LocalizedString{"Aurora WASM rAF live probe"}},
-        au::Text{au::TextProps{.content = au::Reactive{frames}}},
-        au::Row{std::move(b_plus), au::Text{au::TextProps{.content = au::Reactive{clicks}}}},
-        au::Text{au::TextProps{.content = au::Reactive{async_status}}},
+        au::Text{au::TextProps{.content = *frames}},
+        au::Row{std::move(b_plus), au::Text{au::TextProps{.content = *clicks}}},
+        au::Text{au::TextProps{.content = *async_status}},
     };
 
     // WASM 下 run() 注册 rAF 即返回（实例由 App::launch 页面生命周期堆持）；main 返回后

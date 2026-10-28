@@ -262,7 +262,7 @@ auto bench_layer(bool cache_layer) -> LayerResult {
     // 一帧完整路径：修饰链更新（旋转角递进）→ 重录 DL → GPU 回放。
     const Modifier base_modifier = cache_layer ? Modifier{}.cache_layer() : Modifier{};
     auto run_frame = [&](int frame) {
-        root->modifier.set(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
+        root->set_modifier(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
         DisplayList dl;
         Painter p;
         p.begin(AURORA_SCENE_W, AURORA_SCENE_H);
@@ -402,7 +402,7 @@ auto bench_layer_wgpu(bool cache_layer) -> WgpuFrameCost {
     const Modifier base_modifier = cache_layer ? Modifier{}.cache_layer() : Modifier{};
     return time_batch(*gpu, AURORA_SCENE_W, AURORA_SCENE_H, AURORA_SCENE_WARMUP, AURORA_SCENE_FRAMES,
                       [&](int frame, DisplayList &dl) {
-                          root->modifier.set(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
+                          root->set_modifier(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
                           Painter p;
                           p.begin(AURORA_SCENE_W, AURORA_SCENE_H);
                           p.record(dl);

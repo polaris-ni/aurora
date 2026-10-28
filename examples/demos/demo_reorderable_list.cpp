@@ -20,7 +20,7 @@ namespace {
 /// 条目：带序号的卡片 + 右侧手柄提示（≡ 示意）。
 auto task_row(const std::string &label, int index, au::Color accent) -> au::Node {
     auto row = std::make_unique<au::Row>();
-    row->modifier.set(au::Modifier{}
+    row->set_modifier(au::Modifier{}
                           .background(pal::AURORA_SURFACE, 6.0F)
                           .border(1.0F, accent)
                           .padding(au::EdgeInsets{.left = 12.0F, .top = 10.0F, .right = 12.0F, .bottom = 10.0F}));
@@ -28,7 +28,7 @@ auto task_row(const std::string &label, int index, au::Color accent) -> au::Node
     row->set_gap(8.0F);
 
     auto handle = std::make_shared<au::Text>(au::LocalizedString{"≡"});
-    handle->modifier.set(
+    handle->set_modifier(
         au::Modifier{}.padding(au::EdgeInsets{.left = 8.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F}));
     row->add(au::Node{std::move(handle)});
 
@@ -43,10 +43,10 @@ auto main() -> int {
     // CJK-LITERAL: on-screen-demo - painted window text, not console output
     const std::vector<std::string> labels{"需求评审", "接口联调",     "写回归用例", "性能采样",
                                           "文档回写", "发布 alpha.5", "收集反馈",   "排下轮计划"};
-    auto items = std::make_shared<au::State<std::vector<std::string>>>(labels);
+    auto items = au::State<std::vector<std::string>>{labels};
 
     // 顺序镜像：重排回调里刷新显示（数据已由控件改写；此处只做展示）。
-    auto order = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"(no reorder yet)"});
+    auto order = au::State<au::LocalizedString>{au::LocalizedString{"(no reorder yet)"}};
 
     const auto list = std::make_shared<au::ReorderableList<std::string>>(
         items,
@@ -58,18 +58,18 @@ auto main() -> int {
     list->set_drag_handle(true);  // 条目可点击 ⇒ 拖拽落在右侧手柄带
     list->set_auto_scroll_threshold(56.0F);
     list->set_on_reorder([items, order](int from, int to) -> void {
-        const std::vector<std::string> &data = items->get();
+        const std::vector<std::string> &data = items.get();
         std::string text = "moved #" + std::to_string(from) + " → #" + std::to_string(to) + ": ";
         for (std::size_t i = 0; i < data.size(); ++i) {
             text += (i == 0 ? "" : " / ");
             text += data[i];
         }
-        order->set(au::LocalizedString{text});
+        order.set(au::LocalizedString{text});
     });
 
     // 视口：把列表放进固定高度的容器（列表按父约束取视口尺寸，故须给明确高度）。
     auto viewport = std::make_unique<au::Column>();
-    viewport->modifier.set(au::Modifier{}.size(360.0F, 420.0F));
+    viewport->set_modifier(au::Modifier{}.size(360.0F, 420.0F));
     viewport->add(au::Node{std::shared_ptr<au::Widget>(list)});
     std::shared_ptr<au::Widget> viewport_ptr = std::move(viewport);
 
@@ -80,7 +80,7 @@ auto main() -> int {
         gap(8),
         au::Node{std::move(viewport_ptr)},
         gap(8),
-        au::Text{au::TextProps{.content = au::Reactive{order}}},
+        au::Text{au::TextProps{.content = order}},
     };
     return run_demo(Card{std::move(root)}, "Reorderable list · Aurora Demo", 560.0F, 620.0F);
 }

@@ -30,7 +30,7 @@ auto run() -> int {
     // 给节点打 key：find_by_key 走 Node::set_id（须在装入容器前设置）。
     auto btn_node = au::Node{btn};
     btn_node.set_id("tap");
-    auto label_node = au::Node{au::Text{au::TextProps{.content = au::Reactive{count_text}}}};
+    auto label_node = au::Node{au::Text{au::TextProps{.content = *count_text}}};
     label_node.set_id("counter");
     auto input_node = au::Node{input};
     input_node.set_id("name");

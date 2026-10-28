@@ -9,7 +9,7 @@ auto main() -> int {
         10000,
         [](int i) -> au::Node {
             au::Text item{"Row " + std::to_string(i) + " · virtualized list"};
-            item.modifier.set(au::Modifier{}.padding(8.0F).clickable(
+            item.set_modifier(au::Modifier{}.padding(8.0F).clickable(
                 [i]() -> void { AURORA_LOG_INFO("demo", "[lazy_list] clicked row " + std::to_string(i) + ""); }));
             return au::Node{std::move(item)};
         },

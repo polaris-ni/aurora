@@ -18,11 +18,7 @@ auto main() -> int {
     });
 
     au::Node root = au::Column{
-        GradientTitle{"Dropdown selector"},
-        gap(12),
-        std::move(dd),
-        gap(12),
-        au::Text{au::TextProps{.content = au::Reactive{label}}},
+        GradientTitle{"Dropdown selector"}, gap(12), std::move(dd), gap(12), au::Text{au::TextProps{.content = *label}},
     };
     return run_demo(Card{std::move(root)}, "Dropdown · Aurora Demo", 440.0F, 360.0F);
 }

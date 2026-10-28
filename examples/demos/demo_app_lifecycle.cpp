@@ -1,7 +1,6 @@
 // App Lifecycle demo：窗口级生命周期 WindowState / WindowMode。
 // 订阅 Application::window_state()：在 Hidden/Occluded（最小化/被遮挡）时暂停动画，
 // Visible（前台激活）时恢复；并通过 Environment 读取当前窗口状态/几何态（ctx.environment<T>()）。
-#include <memory>
 #include <string>
 
 #include "aurora/app/application.h"
@@ -10,7 +9,7 @@ namespace {
 /// @brief 从根 Environment 读取当前窗口状态/几何态的叶控件。
 class LifecycleReadout : public au::LeafWidget {
   public:
-    void collect_signals(std::vector<au::SignalViewBase *> & /*out*/) override {}
+    void collect_signals(au::StateSink & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "LifecycleReadout"; }
     [[nodiscard]] auto describe() const -> au::WidgetDescriptor override {
         return au::WidgetDescriptor{.name = "LifecycleReadout", .children_policy = "none"};
@@ -58,21 +57,21 @@ using namespace std::chrono_literals;
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    auto paused = std::make_shared<au::State<bool>>(false);
-    auto ticks = std::make_shared<au::State<int>>(0);
-    auto ticks_label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"ticks = 0"});
+    au::State<bool> paused{false};
+    au::State<int> ticks{0};
+    au::State<au::LocalizedString> ticks_label{au::LocalizedString{"ticks = 0"}};
 
     // 动画子树：每 200ms 递增计数（仅在可见时）。被遮挡/最小化时由 window_state 回调暂停。
     au::Node anim = au::Timer(
         200ms,
-        [ticks_label](const au::SignalView<int> &) -> au::Text {
-            return au::Text{au::TextProps{.content = au::Reactive{ticks_label}}};
+        [ticks_label](const au::ReadOnlyState<int> &) -> au::Text {
+            return au::Text{au::TextProps{.content = ticks_label}};
         },
         [paused, ticks, ticks_label](int) -> void {
-            if (!paused->get()) {
-                const int n = ticks->get() + 1;
-                ticks->set(n);
-                ticks_label->set(au::LocalizedString{"ticks = " + std::to_string(n)});
+            if (!paused.get()) {
+                const int n = ticks.get() + 1;
+                ticks.set(n);
+                ticks_label.set(au::LocalizedString{"ticks = " + std::to_string(n)});
             }
         });
 
@@ -112,7 +111,7 @@ auto main() -> int {
 #endif
 
     // 窗口级生命周期：隐藏/被遮挡时暂停动画，可见时恢复。
-    app.set_on_window_state([paused](au::WindowState s) -> void { paused->set(s != au::WindowState::Visible); });
+    app.set_on_window_state([paused](au::WindowState s) -> void { paused.set(s != au::WindowState::Visible); });
     app.set_on_window_mode(
         [](au::WindowMode m) -> void { AURORA_LOG_INFO("demo", "[AppLifecycle] WindowMode -> ", au::to_string(m)); });
 

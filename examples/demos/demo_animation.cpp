@@ -65,7 +65,7 @@ auto main() -> int {
     // 舞台：固定尺寸 + .clip()，把缩放方块的绘制严格裁在其边界内（治本：
     // 用框架自带裁剪原语保证不越界，而非依赖巧合的空间余量）。
     au::Stack stage{std::vector{au::Node{scale_inner}}, au::Alignment::Center};
-    stage.modifier.set(au::Modifier{}.size(stage_size, stage_size).clip());
+    stage.set_modifier(au::Modifier{}.size(stage_size, stage_size).clip());
 
     au::Node root = au::Column{
         GradientTitle{"Animation"},
@@ -99,13 +99,13 @@ auto main() -> int {
             last = now;
             animator.tick(dt);
             // 每帧把当前动画值写回修饰（present_root 会重绘）。
-            box->modifier.set(au::Modifier{}
+            box->set_modifier(au::Modifier{}
                                   .padding(16.0F)
                                   .size(180.0F, 60.0F)
                                   .background(tinted.get())
                                   .align(au::Alignment::Center));
             // 缩放作用在内层方块上；舞台的 .clip() 保证任何超出只裁在舞台内。
-            scale_inner->modifier.set(au::Modifier{}
+            scale_inner->set_modifier(au::Modifier{}
                                           .size(base_box, base_box)
                                           .background(au::Color{34, 197, 94})
                                           .align(au::Alignment::Center)

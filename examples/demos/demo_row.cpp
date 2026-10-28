@@ -8,7 +8,7 @@ auto main() -> int {
     au::Row start{au::RowProps{
         .children = {au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
         .flex = au::Flex{.main_axis = au::MainAxisAlignment::Start, .cross_axis = au::CrossAxisAlignment::Center}}};
-    start.modifier.set(
+    start.set_modifier(
         au::Modifier{}.size(280.0F, 80.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
 
     au::Row space_between{au::RowProps{
@@ -16,7 +16,7 @@ auto main() -> int {
                      au::Text{au::LocalizedString{"Right"}}},
         .flex =
             au::Flex{.main_axis = au::MainAxisAlignment::SpaceBetween, .cross_axis = au::CrossAxisAlignment::Center}}};
-    space_between.modifier.set(
+    space_between.set_modifier(
         au::Modifier{}.size(280.0F, 80.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
 
     au::Node root = au::Column{

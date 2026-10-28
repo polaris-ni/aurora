@@ -8,7 +8,7 @@ auto main() -> int {
     auto val = std::make_shared<au::State<double>>(0.5);
     auto label = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"Value 0.50"});
 
-    au::Slider sl{au::Reactive{val}, [val, label](double v) -> void {
+    au::Slider sl{*val, [val, label](double v) -> void {
                       val->set(v);
                       label->set(au::LocalizedString{"Value " + std::to_string(v)});
                   }};
@@ -18,7 +18,7 @@ auto main() -> int {
         GradientTitle{"Slider widget"},
         gap(12),
         std::move(sl),
-        au::Text{au::TextProps{.content = au::Reactive{label}}},
+        au::Text{au::TextProps{.content = *label}},
     };
     return run_demo(Card{std::move(root)}, "Slider · Aurora Demo", 480.0F, 360.0F);
 }

@@ -7,16 +7,16 @@
 auto main() -> int {
     au::Sparkline up{au::SparklineProps{.values = {4.0, 6.0, 3.0, 8.0, 5.0, 9.0, 7.0, 11.0}, .line_width = 2.0F}};
     up.set_color(pal::AURORA_OK);
-    up.modifier.set(au::Modifier{}.width(220.0F).height(40.0F));
+    up.set_modifier(au::Modifier{}.width(220.0F).height(40.0F));
 
     au::Sparkline down{au::SparklineProps{.values = {9.0, 8.0, 7.5, 5.0, 6.0, 3.0, 4.0, 1.5}}};
     down.set_color(pal::AURORA_DANGER);
     down.set_show_end_dot(false);
-    down.modifier.set(au::Modifier{}.width(220.0F).height(40.0F));
+    down.set_modifier(au::Modifier{}.width(220.0F).height(40.0F));
 
     au::Sparkline flat{au::SparklineProps{.values = {5.0, 5.0, 5.0, 5.0}}};
     flat.set_color(pal::AURORA_MUTED);
-    flat.modifier.set(au::Modifier{}.width(220.0F).height(40.0F));
+    flat.set_modifier(au::Modifier{}.width(220.0F).height(40.0F));
 
     au::Node root = au::Column{
         GradientTitle{"Sparkline widget"},

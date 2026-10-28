@@ -331,7 +331,7 @@ struct ProbeWidgets {
     aurora::Node root;
     aurora::TextInput *entry = nullptr;  ///< set_value → property-change:accessible-value
     aurora::ReorderableList<std::string> *list = nullptr;  ///< 收缩/增长 → children-changed
-    std::shared_ptr<aurora::State<std::vector<std::string>>> items;
+    aurora::State<std::vector<std::string>> items;
 };
 
 /// @brief 一列带无障碍语义的控件（与 Win32 UIA 探针同族的三件套 + ReorderableList）。
@@ -340,8 +340,7 @@ struct ProbeWidgets {
     auto button = aurora::Button{aurora::ButtonProps{.label = aurora::LocalizedString{"确定"}}};
     button.set_on_click([] { press_executed() = true; });
     // CJK-LITERAL: cjk-fixture - Han item labels pushed through the AT-SPI cache and children-changed events
-    auto items = std::make_shared<aurora::State<std::vector<std::string>>>(
-        std::vector<std::string>{"订单一", "订单二", "订单三"});
+    auto items = aurora::State<std::vector<std::string>>{std::vector<std::string>{"订单一", "订单二", "订单三"}};
     // Node 以 shared_ptr 持有 widget：先建节点取裸指针，再拷进 Column（同一实例）。
     // 下行目标类型由紧邻上方构造的控件锁定（TextInput / ReorderableList 各建一个 Node），
     // dynamic_cast 徒增 RTTI 依赖，且把「构造即已知」的确定性换成运行期查找
@@ -586,7 +585,7 @@ auto main(int argc, char **argv) -> int {
     if (listening && !child_exited && !timed_out) {
         auto list_state = [&](const char *tag) {
             std::string s;
-            for (const auto &it : probe.items->get()) {
+            for (const auto &it : probe.items.get()) {
                 s += it + ',';
             }
             emit(std::string("dbg ") + tag + ": data=[" + s + "] rendered=" + std::to_string(probe.list->item_count()));
@@ -596,9 +595,9 @@ auto main(int argc, char **argv) -> int {
         pump_ms(500);
         probe.entry->set_value("abcd");  // entry property-change:accessible-value
         pump_ms(500);
-        auto shrink = probe.items->get();
+        auto shrink = probe.items.get();
         shrink.pop_back();
-        probe.items->set(shrink);
+        probe.items.set(shrink);
         probe.list->invalidate();
         // 探针无响应式驱动：仅 invalidate 排不上新一轮布局 ⇒ 重注根强制新帧，
         // rebuild_if_needed 在 on_layout 落位（结构移除……）
@@ -607,10 +606,10 @@ auto main(int argc, char **argv) -> int {
         list_state("after-shrink");
         probe.entry->set_value("abcde");  // ……再由这次 dirty 携带 remove diff 出帧
         pump_ms(500);
-        auto grow = probe.items->get();
+        auto grow = probe.items.get();
         // CJK-LITERAL: cjk-fixture - regrows the Han item list to push children-changed:add with a Han name
         grow.emplace_back("订单三");
-        probe.items->set(grow);
+        probe.items.set(grow);
         probe.list->invalidate();
         (void)window->present_root(root);  // 结构新增：AddAccessible 行先于 children-changed:add
         pump_ms(500);

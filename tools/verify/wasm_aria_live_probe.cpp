@@ -95,9 +95,9 @@ auto main() -> int {
     auto *ann = static_cast<au::Button *>(&ann_node.widget());
     au::Node entry_node{au::TextInput{au::TextInputProps{.value = "abc"}}};
     auto *entry = static_cast<au::TextInput *>(&entry_node.widget());
-    au::Node cb_node{au::Checkbox{au::Reactive<bool>{false}}};
+    au::Node cb_node{au::Checkbox{false}};
     auto *cb = static_cast<au::Checkbox *>(&cb_node.widget());
-    au::Node slider_node{au::Slider{au::Reactive<double>{25.0}}};
+    au::Node slider_node{au::Slider{25.0}};
     auto *slider = static_cast<au::Slider *>(&slider_node.widget());
     // NOLINTEND(cppcoreguidelines-pro-type-static-cast-downcast)
 

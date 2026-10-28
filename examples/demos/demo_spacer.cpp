@@ -10,7 +10,7 @@ auto main() -> int {
         au::Spacer{},
         au::Text{au::LocalizedString{"Bottom (Spacer absorbs middle space)"}},
     };
-    top.modifier.set(
+    top.set_modifier(
         au::Modifier{}.size(320.0F, 200.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
 
     au::Row row{
@@ -18,7 +18,7 @@ auto main() -> int {
         au::Spacer{},
         au::Text{au::LocalizedString{"Right"}},
     };
-    row.modifier.set(
+    row.set_modifier(
         au::Modifier{}.size(320.0F, 48.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
 
     au::Node root = au::Column{

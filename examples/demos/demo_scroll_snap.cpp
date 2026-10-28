@@ -10,9 +10,9 @@ auto main() -> int {
     std::vector<au::Node> pages;
     for (int i = 0; i < 5; ++i) {
         au::Text label{"Page " + std::to_string(i + 1) + " · snap paging"};
-        label.modifier.set(au::Modifier{}.padding(12.0F));
+        label.set_modifier(au::Modifier{}.padding(12.0F));
         au::Column page{au::ColumnProps{.children = {std::move(label)}}};
-        page.modifier.set(au::Modifier{}
+        page.set_modifier(au::Modifier{}
                               .size(360.0F, aurora_page_height)
                               .background(i % 2 == 0 ? pal::AURORA_SURFACE : pal::AURORA_BORDER)
                               .border(1.0F, pal::AURORA_BORDER));
@@ -23,19 +23,19 @@ auto main() -> int {
         .child = au::Node{au::Column{au::ColumnProps{.children = std::move(pages)}}},
         .snap = au::ScrollSnap::page(),
     }};
-    pager.modifier.set(au::Modifier{}.size(360.0F, aurora_page_height).border(1.0F, pal::AURORA_BORDER));
+    pager.set_modifier(au::Modifier{}.size(360.0F, aurora_page_height).border(1.0F, pal::AURORA_BORDER));
 
     // ② 条目吸附：周期 = 行高，居中对齐（末段不足一格时夹到内容末端，不停在半行）。
     const auto list = std::make_shared<au::LazyList>(
         200,
         [](int i) -> au::Node {
             au::Text item{"Row " + std::to_string(i) + " · snap to center"};
-            item.modifier.set(au::Modifier{}.padding(8.0F));
+            item.set_modifier(au::Modifier{}.padding(8.0F));
             return au::Node{std::move(item)};
         },
         32.0F);
     list->set_snap(au::ScrollSnap{.extent = 32.0F, .alignment = au::ScrollSnapAlignment::Center});
-    list->modifier.set(au::Modifier{}.size(360.0F, 128.0F).border(1.0F, pal::AURORA_BORDER));
+    list->set_modifier(au::Modifier{}.size(360.0F, 128.0F).border(1.0F, pal::AURORA_BORDER));
 
     au::Node root = au::Column{
         GradientTitle{"Scroll snapping & paging"},

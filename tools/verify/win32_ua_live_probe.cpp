@@ -207,10 +207,10 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
 
 /// @brief 组装一列带无障碍语义的控件（每类一个，便于逐类验 pattern）。
 ///
-/// 存活要求：State 必须由 shared_ptr 持有且被 Node 树间接引用，否则控件在探针运行期即析构。
+/// 存活要求：句柄按值传给控件，来源随控件存活；拷给多个控件时共享同一来源。
 [[nodiscard]] auto build_probe_column() -> aurora::Node {
-    static const auto CHECKED = std::make_shared<aurora::State<bool>>(true);
-    static const auto SLIDER_VALUE = std::make_shared<aurora::State<double>>(0.5);
+    static const aurora::State<bool> CHECKED{true};
+    static const aurora::State<double> SLIDER_VALUE{0.5};
 
     // 引用式标签关联（#21 验收）：目标带 `stable_key`，引用者 `set_labelled_by` 指过去。
     // 二者放进**纵向**列：`sibling_label_name` 的行内相邻判据在纵向下刻意不命中，
@@ -218,7 +218,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     // CJK-LITERAL: cjk-fixture - caption referenced by set_labelled_by; its Han Name is asserted via UIA (#21)
     auto caption = std::make_shared<aurora::Text>(aurora::TextProps{.content = aurora::LocalizedString{"季度汇总"}});
     caption->set_stable_key("probe-caption");
-    auto referrer = std::make_shared<aurora::Checkbox>(aurora::Reactive{CHECKED});
+    auto referrer = std::make_shared<aurora::Checkbox>(CHECKED);
     referrer->set_labelled_by("probe-caption");
 
     // Checkbox / Slider 用 `Row { 文本兄弟, 控件 }` 包裹，使其具备「兄弟标签」，
@@ -228,10 +228,10 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
         aurora::Button{aurora::ButtonProps{.label = aurora::LocalizedString{"确定"}}},
         // CJK-LITERAL: cjk-fixture - Han sibling label resolved into the Checkbox UIA Name
         aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"启用自动更新"}}},
-                    aurora::Checkbox{aurora::Reactive{CHECKED}}},
+                    aurora::Checkbox{CHECKED}},
         // CJK-LITERAL: cjk-fixture - Han sibling label resolved into the Slider UIA Name
         aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"音量"}}},
-                    aurora::Slider{aurora::Reactive{SLIDER_VALUE}}},
+                    aurora::Slider{SLIDER_VALUE}},
         // CJK-LITERAL: cjk-fixture - Han placeholder is the Edit control's Name source (require_name)
         aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}},
         // CJK-LITERAL: cjk-fixture - Han text node asserted through the UIA Name property
