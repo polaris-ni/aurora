@@ -233,8 +233,8 @@ class Chip : public LeafWidget {
     /// @return 与 `describe_static()` 相同的静态描述表
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 信号采集：Chip 的可订阅面（on_delete 回调）以数据成员形态直挂，无独立 SignalView 节点可收集。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    /// @brief 信号采集：Chip 的可订阅面（on_delete 回调）以数据成员形态直挂，无独立可订阅来源可收集。
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 指针事件：左键 Press 落在右 30% 区域（删除热区）时触发 `on_delete_` 并标记事件已处理。
     /// @param e 鼠标事件；命中删除热区时置 `is_handled`，其余情形不消费
@@ -507,7 +507,7 @@ class Badge : public SingleChild {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 信号采集：Badge 纯展示、无可订阅事件，空实现。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 序列化 Badge 自有属性（计数与两色）。
     /// @param props 输出目标 JSON 对象

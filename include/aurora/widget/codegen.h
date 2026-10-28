@@ -167,7 +167,7 @@ struct PropTarget {
 /// @brief 基类属性键：由 `Widget::serialize_props` **无条件**写出，值存放在 `Widget` 侧。
 ///
 /// 任何 `*Props` 聚合都没有这些同名成员（宽度/高度是 `width()`/`height()` 链式 setter +
-/// protected 字段，可见性是公有 `Reactive<bool> show`，a11y 三键是 `set_*()`），所以它们只能
+/// protected 字段，可见性是公有 `State<bool> show`，a11y 三键是 `set_*()`），所以它们只能
 /// 在构造后写入。`overflow` 是双关键：Text 用同名键承载自己的 `TextOverflow` 聚合成员
 /// （`Text::serialize_props` 覆盖了基类写入），其余类型才是基类 `OverflowStrategy`。
 /// 同理 `Skeleton` 的 `width`/`height` 是自己的占位尺寸（float，经 `set_size` 一次给出）、
@@ -191,18 +191,15 @@ struct PropTarget {
 }
 
 /// @brief 基类属性的构造后写法（键 → setter 名 / 直接成员）。
-/// @note `show` 在 `Dialog`/`Drawer`/`ToastHost`/`ProgressDialog` 上被同名成员函数遮蔽（弹层自己的
-///       `show()`），裸写 `w.show = true;` 是「取成员函数地址后赋值」，编译失败；用限定名
-///       `w.Widget::show` 指名基类成员才成立。
+/// @note `show` 自状态模型收口起是只读展示属性：基类只暴露 `show()` 读取与
+///       `set_show(...)` 换源入口，生成代码统一走 setter，不再有可直接赋值的同名成员。
 /// @param key 基类属性键名。
 /// @param type 序列化 type 名（遮蔽消歧用）。
 /// @return 该键在该类型上的发射落点（链式 setter 名或公开成员路径）。
 [[nodiscard]] inline auto base_target(const std::string &key, const std::string &type) -> PropTarget {
     if (key == "show") {
-        // 公有 `Reactive<bool> show`，`w.show = false;` 靠隐式转换成立；遮蔽类型改走限定名。
-        constexpr std::array<std::string_view, 4> k_show_shadowed = {"Dialog", "Drawer", "ProgressDialog", "ToastHost"};
-        const bool shadowed = std::ranges::find(k_show_shadowed, std::string_view{type}) != k_show_shadowed.end();
-        return {.lhs = shadowed ? "Widget::show" : "show", .via_setter = false};
+        // 展示属性只读：统一经换源入口写入，弹层同名 show() 不再造成赋值歧义。
+        return {.lhs = "set_show", .via_setter = true};
     }
     if (key == "width") {
         return {.lhs = "width", .via_setter = true};

@@ -99,7 +99,7 @@ class TitleBar : public Widget {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 本控件无绑定的响应式信号，空实现（不参与信号订阅收集）。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 设置应用图标（左上角槽位；空指针不占位）。
     /// @param icon 图标位图（共享所有权；nullptr = 不渲染图标槽）

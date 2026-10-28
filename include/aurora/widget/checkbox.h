@@ -9,9 +9,7 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/binding.h"
-#include "aurora/state/reactive.h"
-#include "aurora/state/signal_view.h"
+#include "aurora/state/state.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
@@ -20,10 +18,8 @@ namespace aurora {
 
 /// @brief 复选框（叶控件）：勾选状态 `bool`，点击切换。
 ///
-/// 支持两种值来源（与 TextInput 一致的响应式模式）：
-/// - `Reactive<bool>`：内部持有状态，变化触发重绘；
-/// - `Binding<bool>`：双向绑定到上游 `State<bool>`，写回上游并随其变化刷新。
-/// 变化通过 `onChanged` 回调上报。
+/// 值来源是可写句柄 `State<bool>`：传字面量即自有来源，传外部 `State<bool>` 即共享
+/// 同一来源（点击就写回调用方那份状态）。变化通过 `onChanged` 回调上报。
 ///
 /// 视觉（对标 Material 3 Checkbox / Fluent CheckBox）：
 /// - 未勾选：圆角方框描边（`border_color`），悬停时描边转激活色并铺淡色底；
@@ -37,16 +33,11 @@ class Checkbox : public LeafWidget {
   public:
     /// @brief 默认构造：未勾选、外观取各成员默认值（勾选色跟随主题 `Theme::primary`）。
     Checkbox() = default;
-    /// @brief 以内部响应式状态构造：勾选态存于 `checked`，变化自动触发重绘。
-    /// @param checked 初始勾选态的 `Reactive<bool>`（内部持有语义）。
+    /// @brief 以值句柄构造：传字面量创建自有来源，传外部 `State<bool>` 则共享同一来源。
+    /// @param checked 勾选态句柄。
     /// @param on_changed 勾选态变化回调，可空；每次切换（点击/`set_value`/读屏 Toggle）后调用。
-    explicit Checkbox(Reactive<bool> checked, std::function<void(bool)> on_changed = {})
+    explicit Checkbox(State<bool> checked, std::function<void(bool)> on_changed = {})
         : value_(std::move(checked)), on_changed_(std::move(on_changed)) {}
-    /// @brief 以上游信号双向绑定构造：勾选态写入回上游，并随上游变化刷新。
-    /// @param binding 绑定到上游 `State<bool>` 的 `Binding<bool>`；非空时优先于内部 `value_`。
-    /// @param on_changed 勾选态变化回调，可空；语义同另一构造重载。
-    explicit Checkbox(Binding<bool> binding, std::function<void(bool)> on_changed = {})
-        : binding_(std::move(binding)), value_(binding_.get()), on_changed_(std::move(on_changed)) {}
 
     /// @brief 设置勾选态变化回调（链式）。
     /// @param cb 新回调；可为空（清空）。每次切换后以最新勾选态调用。
@@ -116,16 +107,14 @@ class Checkbox : public LeafWidget {
     /// @return 启用标志；false 表示禁用态（灰化并忽略点击）。
     [[nodiscard]] auto enabled() const -> bool { return enabled_; }
 
-    /// @brief 当前勾选态：有绑定时读上游信号，否则读内部 `Reactive<bool>`。
-    /// @return 勾选状态；绑定态下等于 `binding_.get()`（实时读取，不缓存）。
-    [[nodiscard]] auto value() const -> bool { return binding_.bound() ? binding_.get() : value_.get(); }
+    /// @brief 当前勾选态（实时读取来源，不缓存）。
+    /// @return 勾选状态。
+    [[nodiscard]] auto value() const -> bool { return value_.get(); }
 
-    /// @brief 写入勾选态：回写绑定（若有）、触发 `on_changed`、标脏重绘并发无障碍 ValueChanged。
+    /// @brief 写入勾选态：提交到来源（外部共享时即写回调用方）、触发 `on_changed`、
+    ///        标脏重绘并发无障碍 ValueChanged。
     /// @param v 目标勾选态。
     auto set_value(bool v) -> void {
-        if (binding_.bound()) {
-            binding_.set(v);
-        }
         value_ = v;
         if (on_changed_) {
             on_changed_(v);
@@ -134,14 +123,9 @@ class Checkbox : public LeafWidget {
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
 
-    /// @brief 收集本控件的响应式信号：内部 `value_`，绑定态下追加绑定目标信号。
-    /// @param out 输出向量：挂载时由基类登记依赖，信号变化即触发本控件刷新。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        out.push_back(&value_);
-        if (binding_.bound()) {
-            out.push_back(binding_.target());
-        }
-    }
+    /// @brief 收集本控件的响应式信号：唯一的值句柄 `value_`。
+    /// @param out 采集出口：挂载时由基类登记依赖，来源变化即触发本控件刷新。
+    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
 
     /// @brief widget 类型名（结构快照 JSON 用）。
     /// @return 字面量 `"Checkbox"`。
@@ -442,9 +426,7 @@ class Checkbox : public LeafWidget {
     }
 
   private:
-    Binding<bool> binding_;  // 声明须在 value_ 之前：Binding 构造器用 binding_.get() 初始化 value_，
-                             // 成员按声明顺序初始化，故 binding_ 须先就位，否则 binding_.get() 空指针解引用。
-    Reactive<bool> value_;
+    State<bool> value_;  ///< 勾选态来源（自有或与调用方共享）
     std::function<void(bool)> on_changed_;
     std::optional<Color> active_color_;  ///< 勾选态填充色；空 = 跟随主题 primary
     Color border_color_ = Color{140, 140, 146, 255};  ///< 未勾选边框色

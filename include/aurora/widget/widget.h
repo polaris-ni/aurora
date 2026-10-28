@@ -25,9 +25,9 @@
 #include "aurora/modifier/modifier.h"
 #include "aurora/render/display_list.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/effect.h"
-#include "aurora/state/reactive.h"
-#include "aurora/state/signal_view.h"
+#include "aurora/state/read_only_state.h"
+#include "aurora/state/state.h"
+#include "aurora/state/subscription.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/node.h"
 #include "aurora/widget/props_io.h"
@@ -342,19 +342,64 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 收集本 widget 的响应式信号（供基类注册依赖）；子类覆写 push 自身信号。
     /// 默认实现为空：无信号叶控件无需再写空 override（子节点在自身 mount 时自行订阅）。
-    /// @param out 输出向量：本控件自身信号的 `SignalViewBase *` 依次 push 至尾部（裸指针，非拥有）。
-    virtual auto collect_signals(std::vector<SignalViewBase *> &out) -> void;
+    /// @param out 采集出口：本控件自身句柄经 `out.push(member_)` 依次登记（只登记来源身份，不附带属性标签）。
+    virtual auto collect_signals(StateSink &out) -> void;
 
     // ---- 通用属性 ----
 
-    // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    /// @brief 修饰链：本控件的 `Modifier` 节点序列（背景 / 边框 / 裁剪 / 变换 / 手势等）。
+    /// @brief 修饰链当前值（背景 / 边框 / 裁剪 / 变换 / 手势等节点序列）。
     ///
     /// 链上节点在 `layout` / `paint` / `hit_test` 入口按序包裹生效，控件自身无需重复处理；
-    /// 作为响应式信号被 `mount` 订阅，链变化即标脏布局与绘制。
-    Reactive<Modifier> modifier;  ///< 修饰链
-    Reactive<bool> show{true};  ///< 可见性（非结构性隐藏）
-    // NOLINTEND(*-non-private-member-variables-in-classes)
+    /// 已安装来源被 `mount` 订阅，链变化即标脏布局与绘制。展示属性换源走
+    /// `set_modifier(...)` / `set_modifier_source(...)`。
+    /// @return 当前修饰链的只读引用。
+    [[nodiscard]] auto modifier() const -> const Modifier & { return modifier_source_.get(); }
+
+    /// @brief 修饰链来源句柄（只读）。
+    /// @return 已安装的修饰链来源。
+    [[nodiscard]] auto modifier_source() const -> ReadOnlyState<Modifier> { return modifier_source_; }
+
+    /// @brief 换入常量修饰链（自有常量来源）：未挂载时只保存，挂载后调用会退订旧源并订阅新链。
+    /// @param chain 新的修饰链（移动进自有来源）。
+    /// @return 自身引用，便于链式配置。
+    auto set_modifier(Modifier chain) -> Widget & {
+        return set_modifier_source(ReadOnlyState<Modifier>{std::move(chain)});
+    }
+
+    /// @brief 替换修饰链来源（展示属性换源）。
+    /// @param source 新的修饰链来源；挂载后调用会重建订阅、标脏布局与绘制。
+    /// @return 自身引用，便于链式配置。
+    auto set_modifier_source(ReadOnlyState<Modifier> source) -> Widget & {
+        modifier_source_ = std::move(source);
+        mark_needs_layout();
+        mark_needs_paint();
+        resubscribe_signals();
+        return *this;
+    }
+
+    /// @brief 当前可见性（非结构性隐藏：隐藏时布局零盒、不绘制、不参与命中与焦点）。
+    /// @return true = 可见。
+    [[nodiscard]] auto show() const -> bool { return show_source_.get(); }
+
+    /// @brief 可见性来源句柄（只读）。
+    /// @return 已安装的可见性来源。
+    [[nodiscard]] auto show_source() const -> ReadOnlyState<bool> { return show_source_; }
+
+    /// @brief 换入常量可见性（自有常量来源）。
+    /// @param visible true = 可见。
+    /// @return 自身引用，便于链式配置。
+    auto set_show(bool visible) -> Widget & { return set_show_source(ReadOnlyState<bool>{visible}); }
+
+    /// @brief 替换可见性来源（展示属性换源）。
+    /// @param source 新的可见性来源；挂载后调用会重建订阅、标脏布局与绘制。
+    /// @return 自身引用，便于链式配置。
+    auto set_show_source(ReadOnlyState<bool> source) -> Widget & {
+        show_source_ = std::move(source);
+        mark_needs_layout();
+        mark_needs_paint();
+        resubscribe_signals();
+        return *this;
+    }
 
     /// @brief 显式宽度意图（specification/01-core.md §2.2 / 需求 SPEC.QUALITY.LAYOUT.ALGEBRA.001）：默认
     /// `auto`（按内容）。 用 `au::px(120)` / `au::fill()` / `au::percent(0.5f)` 等强类型设置；
@@ -567,8 +612,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 本控件是否作为点击目标消费指针事件（用于点击/长按互斥与冒泡停止）。
     /// 默认：修饰链含 Clickable 修饰即为点击目标；Button 等自带 on_click 的叶控件覆写返回 true。
-    /// @return 是否为点击目标：基类按 `modifier.get().has_clickable()` 判定。
-    [[nodiscard]] virtual auto wants_click() const -> bool { return modifier.get().has_clickable(); }
+    /// @return 是否为点击目标：基类按 `modifier().has_clickable()` 判定。
+    [[nodiscard]] virtual auto wants_click() const -> bool { return modifier().has_clickable(); }
 
     /// @brief 指针事件入口（specification/05-event-navigation.md §3）：在命中目标上调用。
     /// 仅在「先按下、再抬起」且未达长按阈值、未拖拽构成一次完整点击时触发 activate / Clickable 回调；
@@ -577,7 +622,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 否则保持 false 交由派发器沿命中链向上冒泡给父级。
     /// @param e 鼠标事件（就地派发：实现读写其 `action` / `button` / `position` / `pointer_id` / `is_handled` 字段）。
     virtual auto on_pointer_event(MouseEvent &e) -> void {
-        const Modifier &mod = modifier.get();
+        const Modifier &mod = modifier();
         const bool consumes = wants_click() || mod.has_gesture() || mod.has_context_menu();
         switch (e.action) {
             case MouseAction::Press:
@@ -635,7 +680,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        不驱动 `Draggable`/`LongPress`/`Clickable`（这些手势由派发器按每个触点合成的 `MouseEvent` 驱动）。
     ///        子类可覆盖以处理多点原始流；务必调用修饰链以免 `touch()` 修饰器失效。
     /// @param e 原始多点触摸事件（就地传递，修饰链可回写其消费状态）。
-    virtual auto on_pointer_event(TouchEvent &e) -> void { modifier.get().on_pointer_event(e); }
+    virtual auto on_pointer_event(TouchEvent &e) -> void { modifier().on_pointer_event(e); }
 
     /// @brief 由 `Application::tick` 周期性调用的公开入口：驱动手势计时（长按阈值检测）。
     /// 内部委派给受保护虚函数 `tick_gestures`；本 widget 与子树经此统一入口递归计时。
@@ -1189,7 +1234,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     virtual auto serialize_props(Json &props) const -> void {
         props.set("width", length_to_json(width_));
         props.set("height", length_to_json(height_));
-        props.set("show", Json{show.get()});
+        props.set("show", Json{show()});
         props.set("overflow", overflow_strategy_to_json(overflow_));
         // 未声明不输出：空串即「回落 Name 回退链」，写出空值会让结构快照误读为「名字已清空」。
         if (!explicit_label_.empty()) {
@@ -1216,7 +1261,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
             height_ = json_to_length(*v);
         }
         if (const auto *v = props.at("show"); v != nullptr) {
-            show.set(v->as_or<bool>(false));
+            set_show(v->as_or<bool>(false));
         }
         if (const auto *v = props.at("overflow"); v != nullptr) {
             overflow_strategy(json_to_overflow_strategy(*v));
@@ -1529,8 +1574,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 容器类覆写以递归子树。由公开入口 `tick` 委派调用。
     /// @param now 本帧的单调时钟时刻，用于长按阈值与 Tooltip 延迟的计时基准。
     virtual auto tick_gestures(std::chrono::steady_clock::time_point now) -> void {
-        modifier.get().tick_long_press(now);  // 长按阈值计时：修饰链自持按下时刻，到点即触发长按回调
-        modifier.get().tick_tooltip(now);  // Tooltip 计时：悬停持续到延迟到点才出提示
+        modifier().tick_long_press(now);  // 长按阈值计时：修饰链自持按下时刻，到点即触发长按回调
+        modifier().tick_tooltip(now);  // Tooltip 计时：悬停持续到延迟到点才出提示
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
@@ -1642,6 +1687,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     Length width_;  ///< 显式宽度意图（默认 WrapContent）
     Length height_;  ///< 显式高度意图（默认 WrapContent）
+    ReadOnlyState<Modifier> modifier_source_;  ///< 已安装的修饰链来源（构建期配置装入后唯一生效）
+    ReadOnlyState<bool> show_source_{true};  ///< 已安装的可见性来源（默认可见）
     OverflowStrategy overflow_ = OverflowStrategy::Visible;  ///< 溢出策略（默认 Visible）
     /// @brief 滚动视口内核：OverflowStrategy::Scroll 的 offset/step 状态与夹取数学，
     ///        与 Scroll 组件共享同一约定（见 scroll_viewport.h）。
@@ -1766,16 +1813,17 @@ class Widget : public std::enable_shared_from_this<Widget> {
 #endif
 
   protected:
-    /// @brief 注册一个响应式信号：变化 → `on_signal_dirty()`。
-    /// @param sig 被跟踪的信号视图；Effect 首次 `run()` 时读取以登记依赖，此后其变化即标脏本控件。
-    /// @param effects 接收新建 `Effect` 的容器；其生命周期决定订阅生命周期（传 `effects_` 即随本 Widget 析构而退订）。
-    auto track(SignalViewBase &sig, std::vector<std::unique_ptr<Effect>> &effects) -> void {
-        auto e = std::make_unique<Effect>([this, &sig]() -> void {
-            sig.read();  // 在活跃 Effect 下登记依赖
-            on_signal_dirty();
-        });
-        e->run();
-        effects.push_back(std::move(e));
+    /// @brief 重新采集并重建本控件的响应式订阅。
+    ///
+    /// 供「挂载后换源」的入口调用：控件把某个展示属性的句柄换成另一来源后，
+    /// 旧订阅仍固定旧来源，必须重建一次才对新来源生效。未挂载时为空操作
+    /// （下次 `mount` 会重新采集）。
+    auto resubscribe_signals() -> void {
+        if (!mounted_) {
+            return;
+        }
+        signal_subscriptions_.clear();
+        wire_signals();
     }
 
     /// @brief 被跟踪信号变化时的标脏口径：默认标脏本控件（布局 + 绘制，向上溯达祖先缓存）。
@@ -1789,7 +1837,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    std::vector<std::unique_ptr<Effect>> effects_;
+    std::vector<Subscription> signal_subscriptions_;  ///< 自身与子控件信号的订阅凭证（随控件析构/卸载退订）
     bool focusable_ = true;  ///< 宿主侧焦点否决位（默认未否决）；实际入 Tab 序还需 wants_focus()
     int tab_index_ = 0;  ///< Tab 序权重（越小越靠前）
     bool is_focused_ = false;  ///< 当前是否持有焦点
@@ -1805,6 +1853,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
   private:
+    /// @brief 采集本控件的全部信号并建立订阅（`mount` 与换源重建共用）。
+    auto wire_signals() -> void;
+
     /// @brief 分配下一个运行时身份（进程级原子自增，自 1 起；0 保留为无效）。
     [[nodiscard]] static auto next_runtime_id() -> std::uint64_t {
         static std::atomic<std::uint64_t> counter{0};  // NOLINT
@@ -1825,7 +1876,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 上下文菜单、滚动视口、或认领方向键 / 激活键 / Tab 键。
     /// @return 上述任一输入语义命中时为 true；全部未命中为 false。
     [[nodiscard]] auto has_input_semantics() const -> bool {
-        const Modifier &mod = modifier.get();
+        const Modifier &mod = modifier();
         return wants_click() || mod.has_gesture() || mod.has_context_menu() || wants_scroll() ||
                wants_navigation_keys() || wants_activation_keys() || wants_tab_keys();
     }
@@ -2111,8 +2162,8 @@ class Container : public Widget {
 
     /// @brief 默认收集子节点信号（遍历 `children_`）。
     /// 容器子类若有自身信号，覆写时先 push 自身信号再调用 `Container::collect_signals(out)`。
-    /// @param out 输出向量：按 `children_` 顺序递归追加容器子树各控件自身信号的 `SignalViewBase *`（裸指针，非拥有）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override;
+    /// @param out 采集出口：按 `children_` 顺序递归登记容器子树各控件自身的句柄。
+    auto collect_signals(StateSink &out) -> void override;
 
     /// @brief 便捷辅助：从扁平初始化列表接管子节点（供 Column/Row 等便捷构造复用，避免重复代码）。
     /// @param kids 子节点初始化列表：整体赋值覆盖既有 `children_`（非追加）。

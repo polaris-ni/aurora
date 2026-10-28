@@ -60,7 +60,7 @@ namespace aurora {
 
 /// @brief 三态资源的阶段；`Resource<T>` 与 `StreamResource<T>` 共用一枚枚举。
 enum class ResourcePhase : std::uint8_t {
-    Loading,  ///< 作业进行中：值与错误都不可读（流式：尚未提交过任何数据）
+    Loading,  ///< 作业进行中：等待新结果；一次性资源重发期间可保留最近一次成功值，错误位为空
     Ready,  ///< 作业成功：值可读（流式：至少提交过一条，数据可读）
     Failed,  ///< 作业失败：错误可读；一次性资源此时值必为空
 };
@@ -91,15 +91,19 @@ struct StreamOptions {
     StreamPolicy policy = StreamPolicy::Append;
 };
 
-namespace detail {
-
-/// @brief 一次性资源的三态快照：写进单个 `State` 的全部可读信息。
+/// @brief 一次性资源的三态快照：一个资源一次落定的全部可读信息。
+///
+/// 由 `Resource<T>` 经 `get()` / `subscribe(fn)` / 隐式转换到 `ReadOnlyState<ResourceSnapshot<T>>`
+/// 暴露；字段一次提交，不会拆成多个独立来源。
 /// @tparam T 作业值类型。
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
 template <typename T>
 struct ResourceSnapshot {
     /// @brief 当前阶段。
     ResourcePhase phase = ResourcePhase::Loading;
-    /// @brief 成功值；仅 Ready 时有值。
+    /// @brief 最近一次成功值；Ready 必有值，重发进入 Loading 时可保留旧值，Failed 时为空。
     std::optional<T> value;
     /// @brief 失败详情；仅 Failed 时有值。
     std::optional<Error> error;
@@ -107,6 +111,9 @@ struct ResourceSnapshot {
 
 /// @brief 流式资源的快照：已提交数据 + 最近批次字节累计 + 阶段 / 错误。
 /// @tparam T 单条数据类型。
+/// @note Thread: main-thread only
+/// @note Side-effects: none
+/// @note Rebuildable: no
 template <typename T>
 struct StreamSnapshot {
     /// @brief 当前阶段。
@@ -118,6 +125,8 @@ struct StreamSnapshot {
     /// @brief 最近一次提交批次的线上字节累计（同批多次交付的字节在此相加，不丢弃）。
     std::size_t batch_bytes = 0;
 };
+
+namespace detail {
 
 /// @brief 延时 `d` 后执行 `action`（`reload()` 的去抖通道），与 `Task<T>::with_timeout` 共用
 /// 同两条分流：worker 线程池下是一个睡 `d` 的池任务；deferred（无 pthreads）下无线程可睡，
@@ -193,7 +202,7 @@ class ResourceCore : public std::enable_shared_from_this<ResourceCore<T>> {
 
     /// @brief 三态快照的信号源：读取即登记依赖，写入即定点刷新。
     /// @return 内部 `State` 的可变引用（写入只在锁外由本内核进行）。
-    [[nodiscard]] auto signal() -> State<ResourceSnapshot<T>> & { return *signal_; }
+    [[nodiscard]] auto signal() -> State<ResourceSnapshot<T>> & { return signal_; }
 
     /// @brief 发送一次作业：按选项决定即时发送还是去抖后再发。
     ///
@@ -250,7 +259,7 @@ class ResourceCore : public std::enable_shared_from_this<ResourceCore<T>> {
             armed = job_;  // 复制句柄（共享同一 AsyncState），出锁后挂接
         }
         // 先落 Loading 再挂回调：未装投递器时回调可能同步直投，顺序反过来会把结果压回 Loading。
-        signal_->set(std::move(next));
+        signal_.set(std::move(next));
         if (armed) {
             armed->then(completion(gen));
         }
@@ -273,7 +282,7 @@ class ResourceCore : public std::enable_shared_from_this<ResourceCore<T>> {
             }
             snapshot_ = next;
         }
-        signal_->set(std::move(next));  // 锁外通知：观察者可能重入本资源
+        signal_.set(std::move(next));  // 锁外通知：观察者可能重入本资源
     }
 
   private:
@@ -298,7 +307,8 @@ class ResourceCore : public std::enable_shared_from_this<ResourceCore<T>> {
     std::uint64_t generation_ = 0;  ///< 发送代次：迟到结果的裁决依据
     std::uint64_t debounce_token_ = 0;  ///< 去抖代数：窗口内后来者作废先前的登记
     ResourceSnapshot<T> snapshot_;  ///< 当前可读信息（含跨请求的残留值）
-    std::shared_ptr<State<ResourceSnapshot<T>>> signal_{std::make_shared<State<ResourceSnapshot<T>>>()};
+    /// @brief 三态快照来源；显式关闭等值去重，保留每次有效落定的通知语义。
+    State<ResourceSnapshot<T>> signal_{ResourceSnapshot<T>{}, always_publish};
 };
 
 /// @brief `StreamResource<T>` 的共享内核：待提交批次 + 已提交数据 + 帧内合并闸门。
@@ -352,12 +362,12 @@ class StreamCore : public std::enable_shared_from_this<StreamCore<T>> {
             snapshot_.error = err;
             next = snapshot_;
         }
-        signal_->set(std::move(next));  // 锁外通知
+        signal_.set(std::move(next));  // 锁外通知
     }
 
     /// @brief 流式快照的信号源：读取即登记依赖，提交即定点刷新。
     /// @return 内部 `State` 的可变引用。
-    [[nodiscard]] auto signal() -> State<StreamSnapshot<T>> & { return *signal_; }
+    [[nodiscard]] auto signal() -> State<StreamSnapshot<T>> & { return signal_; }
 
   private:
     /// @brief 提交在途批次：一次 `set()` 落一批，这就是「每帧至多一次」的那一次。
@@ -386,7 +396,7 @@ class StreamCore : public std::enable_shared_from_this<StreamCore<T>> {
             snapshot_.batch_bytes = bytes;
             next = snapshot_;
         }
-        signal_->set(std::move(next));  // 锁外通知：渲染回调可能重入 push()
+        signal_.set(std::move(next));  // 锁外通知：渲染回调可能重入 push()
     }
 
     std::mutex mutex_;  ///< 保护下方全部字段
@@ -396,7 +406,8 @@ class StreamCore : public std::enable_shared_from_this<StreamCore<T>> {
     bool flush_scheduled_ = false;  ///< 是否已有提交投递在途（合并闸门的开关）
     bool terminal_ = false;  ///< 是否已 `fail()` 进入终态
     StreamSnapshot<T> snapshot_;  ///< 已提交的可读信息
-    std::shared_ptr<State<StreamSnapshot<T>>> signal_{std::make_shared<State<StreamSnapshot<T>>>()};
+    /// @brief 流式快照来源；显式关闭等值去重，保留每批提交的通知语义。
+    State<StreamSnapshot<T>> signal_{StreamSnapshot<T>{}, always_publish};
 };
 
 }  // namespace detail
@@ -443,11 +454,14 @@ class Resource {
     /// 是否合并调用由选项里的去抖窗口决定。
     auto reload() -> void { core_->start(); }
 
-    /// @brief 读取当前阶段；在活跃 `Effect` 作用域内读取即登记依赖。
+    /// @brief 读取当前阶段；在活跃 `computed`/`effect` 作用域内读取即登记依赖。
     /// @return 三态之一。
     [[nodiscard]] auto phase() const -> ResourcePhase { return core_->signal().get().phase; }
 
-    /// @brief 读取成功值；未就绪（Loading / Failed）为 `nullptr`。
+    /// @brief 读取成功值；从未落定成功或最近一次失败时为 `nullptr`。
+    ///
+    /// 重发期间阶段为 Loading 但可保留最近一次成功值（stale-while-revalidate），
+    /// 故「Loading 必空」不成立；失败后快照不保留 value。
     /// @return 指向内部存储的只读值指针；下一次状态写入后该指针失效。
     [[nodiscard]] auto value() const -> const T * {
         const auto &snap = core_->signal().get();
@@ -457,6 +471,34 @@ class Resource {
     /// @brief 读取失败详情；非 Failed 为空。
     /// @return 错误副本（`Error` 含字符串字段，按值给出以免绑定内部存储）。
     [[nodiscard]] auto error() const -> std::optional<Error> { return core_->signal().get().error; }
+
+    /// @brief 读取整份三态快照；在活跃 `computed`/`effect` 作用域内读取即登记依赖。
+    /// @return 快照常引用；下一次落定写入后失效。
+    [[nodiscard]] auto get() const -> const ResourceSnapshot<T> & { return core_->signal().get(); }
+
+    /// @brief 订阅本资源的落定事件，返回可取消凭证（建立后立即交付当前快照一次）。
+    ///
+    /// 订阅回调保活控制核：作业不会因资源句柄被释放而静默停摆。
+    /// @tparam F 可调用体，形参可接受 `const ResourceSnapshot<T> &`。
+    /// @param fn 回调。
+    /// @return 订阅凭证；析构或 `reset()` 即取消。
+    template <typename F>
+        requires std::invocable<std::decay_t<F>, const ResourceSnapshot<T> &>
+    [[nodiscard]] auto subscribe(F &&fn) const -> Subscription {
+        auto core = core_;  // 保活控制核：订阅存活期间作业继续运行并可落定
+        return core_->signal().subscribe([core, callback = std::forward<F>(fn)](
+                                             const ResourceSnapshot<T> &snap) mutable { std::invoke(callback, snap); });
+    }
+
+    /// @brief 降级为只读快照句柄：与控制核共享所有权并指向同一来源。
+    ///
+    /// 这是**别名**句柄而非快照格拷贝：作业随读句柄保活并继续落定。
+    /// @return 持有同一快照来源的只读句柄。
+    operator ReadOnlyState<ResourceSnapshot<T>>() const {  // NOLINT(google-explicit-constructor)
+        auto source = detail::HandleAccess::source_of(core_->signal());
+        return detail::HandleAccess::read_only<ResourceSnapshot<T>>(
+            std::shared_ptr<detail::SourceOf<ResourceSnapshot<T>>>(core_, source.get()));
+    }
 
   private:
     /// @brief 由工厂接管内核的私有构造；接管即发送第一条作业。
@@ -504,11 +546,11 @@ class StreamResource {
     /// @param err 失败详情。
     auto fail(const Error &err) -> void { core_->fail(err); }
 
-    /// @brief 读取当前阶段；在活跃 `Effect` 作用域内读取即登记依赖。
+    /// @brief 读取当前阶段；在活跃 `computed`/`effect` 作用域内读取即登记依赖。
     /// @return 三态之一。
     [[nodiscard]] auto phase() const -> ResourcePhase { return core_->signal().get().phase; }
 
-    /// @brief 读取已提交的数据；在活跃 `Effect` 作用域内读取即登记依赖。
+    /// @brief 读取已提交的数据；在活跃 `computed`/`effect` 作用域内读取即登记依赖。
     /// @return 已提交列表的只读引用；Loading 时为空列表。引用在下一次提交后失效。
     [[nodiscard]] auto items() const -> const std::vector<T> & { return core_->signal().get().items; }
 
@@ -516,9 +558,36 @@ class StreamResource {
     /// @return 错误副本。
     [[nodiscard]] auto error() const -> std::optional<Error> { return core_->signal().get().error; }
 
-    /// @brief 读取最近一次提交批次的累计字节数；在活跃 `Effect` 作用域内读取即登记依赖。
+    /// @brief 读取最近一次提交批次的累计字节数；在活跃 `computed`/`effect` 作用域内读取即登记依赖。
     /// @return 该批全部交付的线上字节之和（供进度展示取累计量，不是末条的大小）。
     [[nodiscard]] auto batch_bytes() const -> std::size_t { return core_->signal().get().batch_bytes; }
+
+    /// @brief 读取整份流式快照；在活跃 `computed`/`effect` 作用域内读取即登记依赖。
+    /// @return 快照常引用；下一次提交写入后失效。
+    [[nodiscard]] auto get() const -> const StreamSnapshot<T> & { return core_->signal().get(); }
+
+    /// @brief 订阅本流的批次提交事件，返回可取消凭证（建立后立即交付当前快照一次）。
+    ///
+    /// 订阅回调保活控制核：流不会因资源句柄被释放而静默停摆。
+    /// @tparam F 可调用体，形参可接受 `const StreamSnapshot<T> &`。
+    /// @param fn 回调。
+    /// @return 订阅凭证；析构或 `reset()` 即取消。
+    template <typename F>
+        requires std::invocable<std::decay_t<F>, const StreamSnapshot<T> &>
+    [[nodiscard]] auto subscribe(F &&fn) const -> Subscription {
+        auto core = core_;  // 保活控制核：订阅存活期间提交仍会被交付
+        return core_->signal().subscribe([core, callback = std::forward<F>(fn)](const StreamSnapshot<T> &snap) mutable {
+            std::invoke(callback, snap);
+        });
+    }
+
+    /// @brief 降级为只读快照句柄：与控制核共享所有权并指向同一来源。
+    /// @return 持有同一快照来源的只读句柄。
+    operator ReadOnlyState<StreamSnapshot<T>>() const {  // NOLINT(google-explicit-constructor)
+        auto source = detail::HandleAccess::source_of(core_->signal());
+        return detail::HandleAccess::read_only<StreamSnapshot<T>>(
+            std::shared_ptr<detail::SourceOf<StreamSnapshot<T>>>(core_, source.get()));
+    }
 
   private:
     /// @brief 由工厂接管内核的私有构造。

@@ -297,7 +297,7 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
         flush_pending_mounts(ctx);
     }
 
-    if (!show.get()) {
+    if (!show()) {
         size_ = Size{.width = 0.0F, .height = 0.0F};
         return size_;
     }
@@ -347,7 +347,7 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
 
     std::function measure = [this, &ctx](const Constraints &inner) -> Size { return this->on_layout(inner, ctx); };
 
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     for (const auto &it : std::views::reverse(mod.nodes())) {
         const ModifierNode *node = it.get();
         auto inner = std::move(measure);
@@ -395,7 +395,7 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
 
 auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &content_box, const BuildContext &ctx)
     -> void {
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     // Paint 类修饰的作用盒按链上位置分段（见 Modifier::paint_boxes）：外侧 Align 展开出的
     // 空间不属于本控件自身，其内侧的 Paint 节点只取对齐后的子盒；Padding 不参与分段（规格 §7.4）。
     // 例 `.align(Center).size(120,40).background(c)` → 背景画在居中的 120×40 而非展开后的整行。
@@ -624,7 +624,7 @@ auto Widget::render_into(Painter &dst, const Rect &local, const BuildContext &ct
     // 供 repaint_highlight 判定「本帧是否重绘」。与 present_root 的调试帧计数器比较。
     debug_paint_frame_ = debug::current_debug_frame();
 #endif
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     const Modifier::TransformInfo tf = mod.transform(local.size);
 
     const double saved_alpha = dst.global_alpha();
@@ -663,7 +663,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     debug::PaintPurityGuard aurora_paint_purity_guard;
     debug::check_render_purity();
 #endif
-    if (!show.get()) {
+    if (!show()) {
         return;
     }
     AURORA_PROFILE_COUNT(paint_nodes, 1);  // 本帧真正参与 paint 遍历的节点数（DL 命中的子树不计）
@@ -671,7 +671,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     paint_bounds_ = bounds;  // 记录绝对（窗口逻辑 dp）盒，供脏区裁剪绘制精确标记几何
     focus_bounds_ = bounds;  // 同源同值：方向键焦点导航的几何基准（见 focus_bounds_）
 
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     const bool cache = std::ranges::any_of(mod.nodes(), [](const std::shared_ptr<ModifierNode> &n) -> bool {
         return n->paint_kind() == ModifierNode::PaintKind::CacheLayer;
     });
@@ -776,11 +776,11 @@ auto Widget::invalidate_paint_cache() const -> void {
 }
 
 auto Widget::hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * {
-    if (!show.get()) {
+    if (!show()) {
         return nullptr;
     }
 
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     // Transform 切片：命中区随内容盒平移/仿射变换（与绘制一致）。
     const Modifier::TransformInfo tf = mod.transform(bounds.size);
     const Point local_adj = adjust_for_transform(tf, local);
@@ -810,11 +810,11 @@ auto Widget::hit_test(const Point &local, const Rect &bounds, const BuildContext
 }
 
 auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx) -> std::vector<HitNode> {
-    if (!show.get()) {
+    if (!show()) {
         return {};
     }
 
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     // Transform 切片：命中区随内容盒平移/仿射变换（与 hit_test / paint 一致）。
     const Modifier::TransformInfo tf = mod.transform(bounds.size);
     const Point local_adj = adjust_for_transform(tf, local);
@@ -896,7 +896,7 @@ auto Widget::extra_hit_box(const BuildContext &ctx, const Point &ancestor_offset
 auto Widget::window_bounds() const -> std::optional<Rect> {
     // 与 `paint_bounds()` 的根本区别：那个是**绘制期写入**、坐标系随祖先的缓冲录制方式而变；本入口
     // 查询时现算、恒为窗口逻辑 dp。故不读任何绘制期缓存成员（它们有 DL 缓存缺口，见 paint_bounds）。
-    if (!show.get()) {
+    if (!show()) {
         return std::nullopt;  // show==false ⇒ 布局期尺寸被夹成零盒，无有效几何
     }
     if (!has_measured_) {
@@ -959,7 +959,7 @@ auto Widget::window_bounds() const -> std::optional<Rect> {
         parent->scroll_content_offset(cb.origin, scroll_delta);
         // 父 Modifier 的平移按**该父实际用于绘制的盒尺寸**重算：绘制侧 `render_into` 收到的是
         // 「父下传的子盒尺寸」，故这里用 cb.size 而非父的 size_——相等时无差别，不等时与绘制同源。
-        const Modifier::TransformInfo tf = parent->modifier.get().transform(cb.size);
+        const Modifier::TransformInfo tf = parent->modifier().transform(cb.size);
         origin = origin + cb.origin + scroll_delta + tf.translation;
         const Widget *grand = parent->layout_parent();
         if (grand == nullptr) {
@@ -1024,18 +1024,11 @@ auto Widget::mount(const BuildContext &ctx) -> void {
     }
     mounted_ = true;
     mount_ctx_ = ctx;
-    std::vector<SignalViewBase *> sigs;
-    collect_signals(sigs);
-    sigs.push_back(&modifier);
-    sigs.push_back(&show);
-
-    for (SignalViewBase *s : sigs) {
-        track(*s, effects_);
-    }
+    wire_signals();
 
     // 含需每帧计时的手势（LongPress/Draggable）或 Tooltip 延迟检测时，开启 tick 驱动，
     // 使 Widget::tick 不提前返回，从而正确推进 Tooltip 延迟计时。
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     if (mod.has_gesture() || mod.has_tooltip()) {
         needs_gesture_tick_ = true;
     }
@@ -1043,14 +1036,22 @@ auto Widget::mount(const BuildContext &ctx) -> void {
     on_mount(ctx);
 }
 
+auto Widget::wire_signals() -> void {
+    StateSink sink;
+    collect_signals(sink);
+    sink.push(modifier_source_);
+    sink.push(show_source_);
+    signal_subscriptions_ = sink.watch([this]() { on_signal_dirty(); });
+}
+
 auto Widget::unmount() -> void {
     if (!mounted_) {
         return;  // 幂等：未挂载即调用是空操作，不留半个退订状态
     }
     mounted_ = false;
-    // 先派发再清订阅：子类在 on_unmount 里仍可安全读自己的状态；effects_ 的销毁（退订）发生在其后。
+    // 先派发再清订阅：子类在 on_unmount 里仍可安全读自己的状态；订阅凭证的销毁（退订）发生在其后。
     on_unmount(mount_ctx_);
-    effects_.clear();
+    signal_subscriptions_.clear();
     needs_gesture_tick_ = false;
     mount_ctx_ = BuildContext{};
 }
@@ -1123,11 +1124,11 @@ auto Widget::begin_system_drag() -> Result<void> {
     return {};
 }
 
-auto Widget::collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void {}
+auto Widget::collect_signals(StateSink & /*out*/) -> void {}
 
 auto Widget::describe() const -> WidgetDescriptor { return WidgetDescriptor{.name = type_name()}; }
 
-auto Container::collect_signals(std::vector<SignalViewBase *> &out) -> void {
+auto Container::collect_signals(StateSink &out) -> void {
     for (Node &child : children_) {
         child.widget().collect_signals(out);
     }

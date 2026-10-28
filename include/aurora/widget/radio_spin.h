@@ -145,7 +145,7 @@ class RadioGroup : public Widget {
 
     /// @brief 收集可观察信号：登记选中值 `selected_`。
     /// @param out 收集输出容器，追加选中值信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_); }
 
     /// @brief 选项个数。
     /// @return 选项列表长度。
@@ -611,7 +611,7 @@ class SpinBox : public Widget {
 
     /// @brief 收集可观察信号：登记当前值 `value_`。
     /// @param out 收集输出容器，追加数值信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&value_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
 
     /// @brief 响应式当前值（可订阅观察）。
     /// @return 值状态引用。

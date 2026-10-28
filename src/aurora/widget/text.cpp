@@ -154,7 +154,7 @@ auto Text::describe_static() -> WidgetDescriptor {
 
 auto Text::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    props.set("content", localizable_to_json(content.get()));
+    props.set("content", localizable_to_json(content_.get()));
     props.set("font_size", font.size_pt);
     // 文字色 / 装饰线色仅在显式设置时输出：保留「跟随主题」语义（与 Button 同口径）
     if (text_color.has_value()) {
@@ -184,7 +184,7 @@ auto Text::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
     if (props.contains("content")) {
         static const PropDescriptor D_CONTENT{.name = "content", .json_type = "string|$msg"};
-        content.set(validate_or_default<LocalizedString>(*props.at("content"), D_CONTENT, LocalizedString{}));
+        set_content(validate_or_default<LocalizedString>(*props.at("content"), D_CONTENT, LocalizedString{}));
     }
     if (props.contains("font_size")) {
         static const PropDescriptor D_FONT_SIZE{.name = "font_size", .json_type = "number", .min_value = "0"};

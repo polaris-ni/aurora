@@ -74,7 +74,7 @@ class ToastHost : public SingleChild {
 
     /// @brief 无信号依赖：通知队列为运行时内部状态。
     /// @param out 信号输出向量；本控件不向其写入任何信号。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 入队一条通知（duration_ms 显示时长，默认 3 秒）。
     /// @param text 通知正文文本。

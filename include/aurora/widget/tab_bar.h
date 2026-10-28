@@ -144,7 +144,7 @@ class TabBar : public Widget {
 
     /// @brief 登记需订阅的信号视图：响应式选中序号 `selected_`。
     /// @param out 末尾追加 `&selected_`（换肤/状态变更后驱动重绘）
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_); }
 
     /// @brief 当前选中序号（响应式状态）。
     /// @return `selected_` 状态对象的可引用，可直接订阅/读写

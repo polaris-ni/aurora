@@ -13,7 +13,7 @@
 
 #include "aurora/core/json.h"
 #include "aurora/core/result.h"
-#include "aurora/state/binding.h"
+#include "aurora/state/read_only_state.h"
 #include "aurora/state/state.h"
 
 namespace aurora::preferences {
@@ -27,10 +27,9 @@ namespace aurora::preferences {
 /// - 指定了文件位置 → 构造时加载该文件到内存；`set` 只更新内存与响应式 `State`，
 ///   **不**自动写穿文件；落盘由 `flush()` **主动刷新**完成（业界主流的显式提交模型，
 ///   对标 `SharedPreferences.edit().commit()` / `Settings.Save()`）。
-/// - 内部复用现有响应式原语 `State<T>` / `Binding<T>`：`watch`/`binding` 是**存储 → State
-///   的单向投递视图**——存储写入（`set`）自动推送到已订阅的 `State`/`Binding`，控件可经
-///   `binding.get()` 读取；但 `binding.set()` 只更新下游 `State`（控件侧可见），**不写回
-///   存储**，写回须调用 `set`。`binding.remove()` 触发注入的删除回调（墓碑语义）。
+/// - `watch<T>` 返回**只读**句柄 `ReadOnlyState<T>`：存储写入（`set`/`reload`）自动推送到该句柄，
+///   控件只能读、不能经它写回——修改配置只走 `set`/`remove`/`clear`，落盘仍须 `flush`。
+///   表单草稿由应用自己的 `State` 保存，提交时显式调用本类命令，本类不提供读写双向绑定。
 ///   **不新增任何 UI widget 类型**。
 ///
 /// 并发安全：
@@ -50,7 +49,7 @@ namespace aurora::preferences {
 /// 支持的值类型：`bool` / 整数 / 浮点 / `std::string`，以及整值 `json::Value`（含嵌套对象与数组，
 /// 直存直取不做转换）。
 ///
-/// 分组：通过 `group(name)` 获取作用域子视图（`Group`），其内 `get/set/watch/binding/
+/// 分组：通过 `group(name)` 获取作用域子视图（`Group`），其内 `get/set/watch/
 /// contains/keys/remove/clear` 自动限定在该命名分组下，并以嵌套 JSON 对象持久化
 /// （如 `{"ui":{"theme":"dark"}}`）；分组的 `remove`/`clear` 同样走墓碑可靠删除。详见 `Group`。
 ///
@@ -83,7 +82,7 @@ auto resolve_erase(json::Value &root, const std::string &composite) -> void;
 auto flatten(const json::Value &root) -> std::unordered_map<std::string, json::Value>;
 
 /// @brief 轻量持久化配置入口：以单个 JSON 文件为载体的点号复合键内存存储，
-///        并经 `watch`/`binding` 与响应式 `State`/`Binding` 桥接。
+///        并经 `watch` 与只读句柄 `ReadOnlyState<T>` 桥接。
 /// @note 写入只更新内存，落盘由 `flush()` 显式提交；删除走「版本化 LWW + 墓碑 + 全局清空
 ///        纪元」跨进程可靠语义，设计要点与并发契约详见本头文件顶部的文件级注释。
 class Preferences {
@@ -217,24 +216,14 @@ class Preferences {
             owner_->set_impl(path_, key, std::move(value));
         }
 
-        /// @brief 惰性创建分组内键的 `State<T>`，供控件订阅。
+        /// @brief 惰性创建分组内键的只读句柄，供控件订阅。
         /// @tparam T 状态值类型。
         /// @param key 分组内键名（不含分组前缀）。
         /// @param fallback 键缺失时的初始值，亦是后续推送类型不符时的兜底值。
-        /// @return 共享 `State<T>`；同键同类型重复调用返回同一实例。
+        /// @return 只读句柄；同键同类型重复调用返回同一来源。
         template <typename T>
-        [[nodiscard]] auto watch(const std::string &key, T fallback) -> std::shared_ptr<State<T>> {
+        [[nodiscard]] auto watch(const std::string &key, T fallback) -> ReadOnlyState<T> {
             return owner_->watch_impl(path_, key, std::move(fallback));
-        }
-
-        /// @brief 分组内键的非拥有 `Binding<T>`（注入删除回调）。
-        /// @tparam T 绑定值类型。
-        /// @param key 分组内键名（不含分组前缀）。
-        /// @param fallback 状态缺失时的兜底值。
-        /// @return 绑定分组内复合键的 Binding；`remove()` 将按墓碑语义删除该键。
-        template <typename T>
-        [[nodiscard]] auto binding(const std::string &key, T fallback) -> Binding<T> {
-            return owner_->binding_impl(path_, key, std::move(fallback));
         }
 
         /// @brief 分组内是否含键（且非 null）。
@@ -294,25 +283,16 @@ class Preferences {
         set_impl("", key, std::move(value));
     }
 
-    /// @brief 惰性创建并缓存该键的 `State<T>`，供控件订阅；初始值为当前存储值或 `fallback`。
+    /// @brief 惰性创建并缓存该键的只读句柄，供控件订阅；初始值为当前存储值或 `fallback`。
+    ///
+    /// 句柄**不可写**：修改配置只走 `set`/`remove`/`clear`，落盘仍须 `flush`。
     /// @tparam T 状态值类型。
     /// @param key 顶层键名。
     /// @param fallback 键缺失时的初始值，亦是后续推送类型不符时的兜底值。
-    /// @return 共享 `State<T>`；同键同类型重复调用返回同一缓存实例，类型不符则重建。
+    /// @return 只读句柄；同键同类型重复调用返回同一来源，类型不符则重建。
     template <typename T>
-    [[nodiscard]] auto watch(const std::string &key, T fallback) -> std::shared_ptr<State<T>> {
+    [[nodiscard]] auto watch(const std::string &key, T fallback) -> ReadOnlyState<T> {
         return watch_impl("", key, std::move(fallback));
-    }
-
-    /// @brief 基于 `watch` 的 `State` 返回非拥有 `Binding<T>`：控件卸载时可调用 `binding.remove()`
-    ///        删除对应持久化键（走墓碑可靠删除）；调用 `remove()` 后该 Binding 即失效。
-    /// @tparam T 绑定值类型。
-    /// @param key 顶层键名。
-    /// @param fallback 状态缺失时的兜底值。
-    /// @return 绑定该键 State 的 Binding，附带写回存储的删除回调。
-    template <typename T>
-    [[nodiscard]] auto binding(const std::string &key, T fallback) -> Binding<T> {
-        return binding_impl("", key, std::move(fallback));
     }
 
     // ---------- 持久化（独占锁 + 进程文件锁） ----------
@@ -355,27 +335,27 @@ class Preferences {
         virtual void push(const json::Value &j) = 0;
     };
 
-    /// @brief 具体 `State<T>` 的类型擦除实现：保存状态指针与兜底值，供 `push` 做类型安全回写。
+    /// @brief 具体 `State<T>` 的类型擦除实现：保存状态句柄与兜底值，供 `push` 做类型安全回写。
     /// @tparam T 所持 `State<T>` 的值类型。
     template <typename T>
     struct StateHolder : IStateHolder {
-        std::shared_ptr<State<T>> state;  ///< 所持的响应式状态，push 经它回写。
+        State<T> state;  ///< 所持的响应式来源，push 经它回写。
         T fallback;  ///< push 收到 null 或类型转换失败时写入的兜底值。
-        /// @brief 构造持有者：接管 `State<T>` 共享指针并保存兜底值。
+        /// @brief 构造持有者：接管状态句柄并保存兜底值。
         /// @param s 被持有的 `State<T>`（按值移入）。
         /// @param fb 兜底值（按值移入）。
-        StateHolder(std::shared_ptr<State<T>> s, T fb) : state(std::move(s)), fallback(std::move(fb)) {}
+        StateHolder(State<T> s, T fb) : state(std::move(s)), fallback(std::move(fb)) {}
         void push(const json::Value &j) override {
             if (j.is_null()) {
-                state->set(fallback);
+                state.set(fallback);
                 return;
             }
             // T 为整值时原样投递；否则走宽容读：类型不符/域外一律回落 fallback（新容器不抛异常，
             // 原「try + catch(...) 回落」的语义由 as_or 内建）。
             if constexpr (std::is_same_v<T, json::Value>) {
-                state->set(j);
+                state.set(j);
             } else {
-                state->set(j.as_or<T>(fallback));
+                state.set(j.as_or<T>(fallback));
             }
         }
     };
@@ -407,16 +387,7 @@ class Preferences {
     auto set_impl(const std::string &scope, const std::string &key, T value)
         -> void;  // NOLINT(performance-unnecessary-value-param)
     template <typename T>
-    [[nodiscard]] auto watch_impl(const std::string &scope, const std::string &key, T fallback)
-        -> std::shared_ptr<State<T>>;
-    /// @brief 在 `watch_impl` 的 State 上构造 `Binding<T>`，注入按作用域删除复合键的墓碑回调。
-    /// @tparam T 绑定值类型。
-    /// @param scope 分组复合前缀，空串表示根作用域。
-    /// @param key 作用域内键名。
-    /// @param fallback State 的兜底值。
-    /// @return 非拥有 Binding；其 `remove()` 触发 `remove_impl(scope, key)`。
-    template <typename T>
-    [[nodiscard]] auto binding_impl(const std::string &scope, const std::string &key, T fallback) -> Binding<T>;
+    [[nodiscard]] auto watch_impl(const std::string &scope, const std::string &key, T fallback) -> ReadOnlyState<T>;
     /// @brief 复合键在作用域内是否存在且非 null。
     /// @param scope 分组复合前缀，空串表示根作用域。
     /// @param key 作用域内键名。
@@ -517,8 +488,7 @@ auto Preferences::set_impl(const std::string &scope, const std::string &key, T v
 }
 
 template <typename T>
-auto Preferences::watch_impl(const std::string &scope, const std::string &key, T fallback)
-    -> std::shared_ptr<State<T>> {
+auto Preferences::watch_impl(const std::string &scope, const std::string &key, T fallback) -> ReadOnlyState<T> {
     const std::string composite = scope.empty() ? key : scope + "." + key;
     std::unique_lock lock(mutex_);
     if (const auto it = states_.find(composite); it != states_.end()) {
@@ -537,20 +507,9 @@ auto Preferences::watch_impl(const std::string &scope, const std::string &key, T
             initial = j.as_or<T>(fallback);
         }
     }
-    auto state = std::make_shared<State<T>>(initial);
+    State<T> state{initial};
     states_[composite] = std::make_shared<StateHolder<T>>(state, std::move(fallback));
     return state;
-}
-
-template <typename T>
-auto Preferences::binding_impl(const std::string &scope, const std::string &key, T fallback) -> Binding<T> {
-    auto *self = this;
-    std::string s_scope = scope;
-    std::string s_key = key;
-    return Binding<T>(*watch_impl<T>(scope, key, std::move(fallback)),
-                      [self, s_scope = std::move(s_scope), s_key = std::move(s_key)]() mutable -> auto {
-                          self->remove_impl(s_scope, s_key);
-                      });
 }
 
 }  // namespace aurora::preferences

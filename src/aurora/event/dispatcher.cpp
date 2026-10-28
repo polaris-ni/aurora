@@ -108,7 +108,7 @@ auto EventDispatcher::resolve_cursor(const std::vector<HitNode> &chain) -> Curso
         if (sp == nullptr) {
             continue;  // 弱引用已回收，安全跳过
         }
-        const Modifier &mod = sp->modifier.get();
+        const Modifier &mod = sp->modifier();
         if (const auto declared = mod.cursor_shape()) {
             return *declared;
         }

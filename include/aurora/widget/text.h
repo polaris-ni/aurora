@@ -13,7 +13,7 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/i18n/localized_string.h"
 #include "aurora/i18n/message_catalog.h"
-#include "aurora/state/reactive.h"
+#include "aurora/state/read_only_state.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/widget.h"
 
@@ -21,7 +21,7 @@ namespace aurora {
 
 /// @brief Text 属性（聚合，AI 用指定初始化器填写）。
 struct TextProps {
-    Reactive<LocalizedString> content;  ///< 文本内容（可由字符串隐式构造）
+    ReadOnlyState<LocalizedString> content;  ///< 文本内容来源（只读；可由字符串或 `State` 隐式构造）
     Font font = Font{};  ///< 字体（默认 14pt）
     std::optional<Color> text_color;  ///< 文字色；空 = 跟随主题 on_surface（ThemeScope 换肤即生效）
 
@@ -62,24 +62,44 @@ class Text : public LeafWidget, public TextProps {
     [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
     /// @brief 默认构造：空内容、默认字体（14pt）、黑色文字、不限行、自动换行。
     Text() = default;
-    /// @brief 配置块构造：整体接管 `TextProps` 各字段。
+    /// @brief 配置块构造：整体接管 `TextProps` 各字段，并把内容来源装到私有存储。
     /// @param props 属性聚合（指定初始化器填写），移入本对象基类子对象。
-    explicit Text(TextProps props) : TextProps(std::move(props)) {}
-    /// @brief 以本地化字符串构造（内容存为响应式值，随其变化刷新）。
+    explicit Text(TextProps props) : TextProps(std::move(props)), content_(static_cast<TextProps &>(*this).content) {}
+    /// @brief 以本地化字符串构造（内容为自有常量来源，随换源可控）。
     /// @param s 待显示的 `LocalizedString`（key + fallback 文本）。
-    explicit Text(LocalizedString s) { content = std::move(s); }
+    explicit Text(LocalizedString s) { install_content(ReadOnlyState<LocalizedString>{std::move(s)}); }
     /// @brief 以 UTF-8 文本构造。
     /// @param s 待显示的字面文本（包成非本地化内容）。
-    explicit Text(const std::string &s) { content = s; }
+    explicit Text(const std::string &s) { install_content(ReadOnlyState<LocalizedString>{s}); }
     /// @brief 以 C 字符串构造。
     /// @param s 待显示的字面文本（nullptr 语义由 `LocalizedString` 转换处理）。
-    explicit Text(const char *s) { content = s; }
+    explicit Text(const char *s) { install_content(ReadOnlyState<LocalizedString>{LocalizedString{s}}); }
 
-    /// @brief 替换文本内容（链式）。
-    /// @param s 新的 UTF-8 文本，写入响应式 `content`。
+    /// @brief 当前文本内容来源（只读句柄按值返回，读取即订阅）。
+    /// @return 已安装的内容来源。
+    [[nodiscard]] auto content() const -> ReadOnlyState<LocalizedString> { return content_; }
+
+    /// @brief 替换文本内容来源（展示属性换源）：常量由隐式 `ReadOnlyState` 构造接入。
+    /// @param next 新的内容来源；挂载后调用会退订旧源、订阅新源并标脏。
+    /// @return 自身引用，便于链式调用。
+    auto set_content(ReadOnlyState<LocalizedString> next) -> Text & {
+        install_content(std::move(next));
+        return *this;
+    }
+
+    /// @brief 替换文本内容（链式常量写法）。
+    /// @param s 新的 UTF-8 文本（换入自有常量来源，不反写任何上游）。
     /// @return 自身引用，便于链式调用。
     auto set_content(const std::string &s) -> Text & {
-        content = s;
+        install_content(ReadOnlyState<LocalizedString>{s});
+        return *this;
+    }
+
+    /// @brief 替换文本内容（C 字符串常量写法；消除 `const char*` 在两个常量重载间的歧义）。
+    /// @param s 新的 UTF-8 文本；nullptr 语义由 `LocalizedString` 转换处理。
+    /// @return 自身引用，便于链式调用。
+    auto set_content(const char *s) -> Text & {
+        install_content(ReadOnlyState<LocalizedString>{LocalizedString{s}});
         return *this;
     }
 
@@ -236,7 +256,7 @@ class Text : public LeafWidget, public TextProps {
     /// @return 解析后的 UTF-8 文本；内容带 key 时查默认字符串表，否则为原文。
     [[nodiscard]] auto resolved_text(const BuildContext &ctx) const -> std::string {
         const auto *lp = ctx.environment<Locale>();
-        return content.get().resolve(&default_catalog(), (lp != nullptr) ? *lp : Locale{});
+        return content_.get().resolve(&default_catalog(), (lp != nullptr) ? *lp : Locale{});
     }
 
     /// @brief 解析生效文字色：未显式设色时经 ctx 取主题 `on_surface`（ThemeScope 换肤即生效），
@@ -249,7 +269,7 @@ class Text : public LeafWidget, public TextProps {
 
     /// @brief 收集响应式信号：仅文本内容 `content`。
     /// @param out 输出向量：挂载时由基类登记依赖。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&content); }
+    auto collect_signals(StateSink &out) -> void override { out.push(content_); }
 
     /// @brief widget 类型名（结构快照 JSON 用）。
     /// @return 字面量 `"Text"`。
@@ -272,7 +292,7 @@ class Text : public LeafWidget, public TextProps {
         if (!display_text_.empty()) {
             return display_text_;
         }
-        return content.get().resolve(&default_catalog(), Locale{});
+        return content_.get().resolve(&default_catalog(), Locale{});
     }
 
     /// @brief 运行时自描述：content/字体/排版/装饰等全部属性键与默认值。
@@ -349,6 +369,17 @@ class Text : public LeafWidget, public TextProps {
     /// @brief 无选区哨兵：sel_end_ 取此值时表示当前没有选区。
     /// （命名带 `AURORA_` 前缀：类内 `static constexpr` 走全局常量口径，见 `.clang-tidy`。）
     static constexpr size_t AURORA_NO_SEL = static_cast<size_t>(-1);
+
+    /// @brief 安装内容来源：保存句柄；已挂载时重建订阅并标脏（展示属性换源语义）。
+    /// @param next 新的内容来源。
+    auto install_content(ReadOnlyState<LocalizedString> next) -> void {
+        content_ = std::move(next);
+        mark_needs_layout();
+        mark_needs_paint();
+        resubscribe_signals();  // 未挂载时为空操作；挂载后旧订阅仍固定旧源，必须重建
+    }
+
+    ReadOnlyState<LocalizedString> content_;  ///< 已安装的内容来源（构建数据装入后唯一生效）
 
     size_t sel_start_ = 0;  ///< 选区起点（含入的码点下标：该字符被选中）
     size_t sel_end_ = AURORA_NO_SEL;  ///< 选区终点（含入的码点下标；= AURORA_NO_SEL 表示无选区）

@@ -82,7 +82,7 @@ class Popup : public SingleChild {
 
     /// @brief 收集信号视图；Popup 无外露信号。
     /// @param out 信号视图累加表（恒不写入）。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 在指定全局坐标打开弹出层（链式）：压入焦点作用域，Tab 焦点关在本层内。
     /// @param anchor 弹出锚点（全局坐标）。
@@ -368,7 +368,7 @@ class OverlayHost : public Container {
 
     /// @brief 收集信号视图；OverlayHost 无外露信号。
     /// @param out 信号视图累加表（恒不写入）。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 追加一个浮层（返回可移除的浮层序号）。
     ///

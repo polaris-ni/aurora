@@ -98,8 +98,8 @@ class Canvas : public Widget {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 收集本控件的可订阅信号视图。
-    /// @param out 输出参数，收集 SignalViewBase 指针；Canvas 无信号，恒不写入。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @param out 输出参数，收集响应式来源；Canvas 无信号，恒不写入。
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 序列化画布属性：基类通用属性之外附加一条不可序列化说明。
     /// @param props 目标 JSON 对象，写入 width/height/show 及 note 提示。

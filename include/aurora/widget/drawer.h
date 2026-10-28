@@ -59,7 +59,7 @@ class Drawer : public Widget {
 
     /// @brief 收集响应式信号：仅开合状态 `open_`（面板显隐与布局均由它驱动）。
     /// @param out 输出向量：挂载时由基类登记依赖。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&open_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(open_); }
 
     /// @brief 当前是否打开（永久模式恒返回构造/序列化所得值，不参与开合）。
     /// @return `open_` 信号的当前值。
@@ -280,7 +280,7 @@ class ProgressDialog : public Widget {
 
     /// @brief 收集响应式信号：仅进度值 `progress_`。
     /// @param out 输出向量：挂载时由基类登记依赖。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&progress_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(progress_); }
 
     /// @brief 打开对话框：置显示态并标脏重绘（布局届时才算出盒体与按钮矩形）。
     auto show() -> void {
@@ -441,7 +441,7 @@ class PageView : public Container {
 
     /// @brief 收集响应式信号：仅当前页码 `current_`。
     /// @param out 输出向量：挂载时由基类登记依赖。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&current_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(current_); }
 
     /// @brief 页数。
     /// @return 子节点数量（即页数，0 表示空容器）。

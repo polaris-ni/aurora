@@ -14,7 +14,7 @@
 #include "aurora/event/keycode.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/reactive.h"
+#include "aurora/state/state.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
@@ -31,7 +31,7 @@ struct TextInputProps {
 ///
 /// - 点击经 `FocusManager::request_focus` 获焦（触发 `on_focus_change` 重绘聚焦态）。
 /// - 聚焦后接收 `onTextInput` 追加字符、`onKeyEvent` 退格（Delete/Backspace）。
-/// - 值为 `Reactive<std::string>`，变化触发重绘；headless 下静态渲染当前文本/占位。
+/// - 值为 `State<std::string>`，变化触发重绘；headless 下静态渲染当前文本/占位。
 /// - 焦点全局协调由 `FocusManager` 负责（Tab 序、焦点派发），见 `aurora/event/focus.h`。
 ///
 /// 可定制性（对标 Qt QLineEdit / Flutter TextField）：
@@ -52,9 +52,8 @@ class TextInput : public LeafWidget {
     /// @brief 以属性聚合构造：仅设占位提示、字号与初始文本，其余属性保持默认。
     /// @param props 属性聚合：`placeholder` 空值占位提示，`font_size` 字号（点），
     ///        `value` 写入 reactive 值 `value_`。
-    explicit TextInput(const TextInputProps &props) : placeholder_(props.placeholder), font_size_(props.font_size) {
-        value_ = props.value;
-    }
+    explicit TextInput(const TextInputProps &props)
+        : value_(props.value), placeholder_(props.placeholder), font_size_(props.font_size) {}
 
     /// @brief 设置初始值（链式）。
     /// @param v 新文本（UTF-8），整体替换 `value_` 并发出 `ValueChanged` 无障碍事件。
@@ -217,7 +216,7 @@ class TextInput : public LeafWidget {
 
     /// @brief 登记响应式信号：文本值 `value_` 变化经信号驱动重绘。
     /// @param out 输出参数：追加本控件依赖的信号视图指针。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&value_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
     /// @brief 类型名（注册 / 诊断 / Inspector 通道）。
     /// @return "TextInput"。
     [[nodiscard]] auto type_name() const -> const char * override { return "TextInput"; }
@@ -1245,7 +1244,7 @@ class TextInput : public LeafWidget {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    Reactive<std::string> value_;
+    State<std::string> value_;
     std::string placeholder_;
     float font_size_ = 14.0F;
     float corner_radius_ = 0.0F;  ///< 圆角半径（dp），>0 时背景与圆角裁剪

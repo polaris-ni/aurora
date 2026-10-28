@@ -260,7 +260,7 @@ class Stepper : public LeafWidget {
     }
 
     /// @brief 无信号依赖：步骤与当前索引为运行时内部状态。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
   protected:
     /// @brief 固定宽 400dp；高度 = 步骤指示区（40dp/步）+ 内容占位 120dp + 按钮区 44dp，按约束夹取。

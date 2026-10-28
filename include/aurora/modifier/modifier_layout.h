@@ -117,7 +117,7 @@ class FlexWeight : public ModifierNode {
 };
 
 /// @brief 固定/填充尺寸修饰（Layout 切片）：把命中轴约束夹成目标尺寸，强制子节点按该尺寸测量。
-/// 与 `Widget::width/height` 强类型意图正交：本修饰可组合、可随状态变化（Reactive<Modifier>）。
+/// 与 `Widget::width/height` 强类型意图正交：本修饰可组合、可随状态变化（State<Modifier>）。
 /// 语义对齐 Compose `Modifier.size/fillMaxWidth` 与 Flutter `SizedBox`。
 class SizeModifier : public ModifierNode {
   public:

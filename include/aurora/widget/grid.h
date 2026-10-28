@@ -63,8 +63,8 @@ class Grid : public Container, public GridProps {
     }
 
     /// @brief 收集本控件的可订阅信号视图。
-    /// @param out 输出参数，收集 SignalViewBase 指针；Grid 无信号，恒不写入。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @param out 输出参数，收集响应式来源；Grid 无信号，恒不写入。
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
     /// @brief 类型名，供序列化与运行时自描述使用。
     /// @return C 字符串 "Grid"。
     [[nodiscard]] auto type_name() const -> const char * override { return "Grid"; }

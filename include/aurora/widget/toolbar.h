@@ -75,7 +75,7 @@ class ToolBar : public Container {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 本控件无对外可订阅信号，不登记任何项。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 设置栏高（链式）。
     /// @param h 栏高(dp)；非正值回退默认 40.0。
@@ -206,7 +206,7 @@ class StatusBar : public Container {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 本控件无对外可订阅信号，不登记任何项。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 设置栏高（链式）。
     /// @param h 栏高(dp)；非正值回退默认 24.0。

@@ -72,8 +72,8 @@ class Spacer : public Widget {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 收集本控件的可订阅信号视图。
-    /// @param out 输出参数，收集 SignalViewBase 指针；Spacer 无信号，恒不写入。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @param out 输出参数，收集响应式来源；Spacer 无信号，恒不写入。
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 序列化扩展属性：在基类通用属性之外写入 expand。
     /// @param props 目标 JSON 对象。
@@ -106,7 +106,7 @@ class Spacer : public Widget {
   private:
     /// @brief 把 expand 落到自身修饰链：FlexLayouter 按子项 `Modifier::flex_weight` 在阶段二分配剩余空间，
     /// 从而先扣除 Spacer 之后兄弟的基准尺寸；权重不进 props 序列化，故须随 expand 同步维护。
-    auto apply_expand() -> void { modifier.set(expand_ ? Modifier().expand(1.0F) : Modifier()); }
+    auto apply_expand() -> void { set_modifier(expand_ ? Modifier().expand(1.0F) : Modifier()); }
 
     bool expand_ = false;
 };

@@ -9,7 +9,8 @@
 #include "aurora/core/native_surface.h"
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
-#include "aurora/state/reactive.h"
+#include "aurora/state/read_only_state.h"
+#include "aurora/state/state.h"
 
 /// @brief Aurora 公共命名空间：本头在其中声明视频源抽象（VideoSource/AudioSink/VideoController）。
 namespace aurora {
@@ -138,7 +139,7 @@ class AudioSink {  // NOLINT(cppcoreguidelines-special-member-functions)
 // NOLINT 理由：接口基类仅声明虚析构，拷贝/移动语义无意为禁用而非默认。
 /// @brief 播放器能力接口（**扩展点②的解耦基石**）。
 /// `VideoControls` 等 UI 通过该接口操纵播放器，而不直接耦合 `VideoPlayer`，便于整体替换控件。
-/// 同时暴露 `Reactive` 信号指针，使进度条 / 按钮等可直接绑定（共享底层 `State`，更新即刷新 UI）。
+/// 同时暴露只读值句柄，使进度条 / 按钮等可直接接线（共享底层 `State` 来源，更新即刷新 UI）。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: none
@@ -176,18 +177,18 @@ class VideoController {  // NOLINT(cppcoreguidelines-special-member-functions)
     /// @return 是否静音。
     [[nodiscard]] virtual auto muted() const -> bool = 0;
 
-    /// @brief 播放状态信号（指针便于 UI 绑定；生命周期由播放器管理）。
-    /// @return 绑定中的 Reactive<bool> 信号地址，恒非空。
-    [[nodiscard]] virtual auto playing_signal() -> Reactive<bool> * = 0;
-    /// @brief 进度信号（[0,1] 分数，随播放时钟更新）。
-    /// @return 绑定中的 Reactive<double> 信号地址，恒非空。
-    [[nodiscard]] virtual auto progress_signal() -> Reactive<double> * = 0;
-    /// @brief 音量信号（[0,1]）。
-    /// @return 绑定中的 Reactive<double> 信号地址，恒非空。
-    [[nodiscard]] virtual auto volume_signal() -> Reactive<double> * = 0;
-    /// @brief 静音信号。
-    /// @return 绑定中的 Reactive<bool> 信号地址，恒非空。
-    [[nodiscard]] virtual auto muted_signal() -> Reactive<bool> * = 0;
+    /// @brief 播放状态读数（只读值句柄；读句柄保活来源，不承诺保活播放器后端）。
+    /// @return 播放状态来源的只读句柄。
+    [[nodiscard]] virtual auto playing_signal() -> ReadOnlyState<bool> = 0;
+    /// @brief 进度读数（[0,1] 分数，随播放时钟更新）。
+    /// @return 进度来源的只读句柄。
+    [[nodiscard]] virtual auto progress_signal() -> ReadOnlyState<double> = 0;
+    /// @brief 音量读数（[0,1]）。
+    /// @return 音量来源的只读句柄。
+    [[nodiscard]] virtual auto volume_signal() -> ReadOnlyState<double> = 0;
+    /// @brief 静音读数。
+    /// @return 静音来源的只读句柄。
+    [[nodiscard]] virtual auto muted_signal() -> ReadOnlyState<bool> = 0;
 };
 
 }  // namespace aurora

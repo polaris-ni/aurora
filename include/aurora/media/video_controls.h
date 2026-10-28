@@ -3,6 +3,7 @@
 #include <string>
 
 #include "aurora/media/video_source.h"
+#include "aurora/state/state.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/widget.h"
@@ -37,8 +38,8 @@ class VideoControls : public Container {
     /// @return WidgetDescriptor。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
     /// @brief 收集可绑定的响应式信号（供 Inspector 观测）。
-    /// @param out 追加收集到的 SignalViewBase 指针（非拥有）的输出向量。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override;
+    /// @param out 追加收集到的来源句柄（共享持有）的输出向量。
+    auto collect_signals(StateSink &out) -> void override;
     /// @brief 序列化本控件属性到 props JSON。
     /// @param props 写入目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override;
@@ -68,6 +69,13 @@ class VideoControls : public Container {
 
   private:
     static auto format_time(long long ms) -> std::string;
+
+    // 本地展示/编辑状态：事实回填写这些来源，真实输入发领域命令，二者不互相冒充。
+    State<LocalizedString> play_label_{LocalizedString{"Play"}};  ///< 播放按钮标签来源
+    State<LocalizedString> mute_label_{LocalizedString{"Mute"}};  ///< 静音按钮标签来源
+    State<LocalizedString> time_label_{LocalizedString{"0:00 / 0:00"}};  ///< 时间读数来源
+    State<double> seek_value_{0.0};  ///< 进度滑块本地值（控件输入发 seek 命令）
+    State<double> volume_value_{1.0};  ///< 音量滑块本地值（控件输入发 set_volume 命令）
 };
 
 }  // namespace aurora

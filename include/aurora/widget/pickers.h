@@ -174,7 +174,7 @@ class DatePicker : public Widget {
 
     /// @brief 收集本控件的响应式信号到构建面。
     /// @param out 输出收集向量（追加 selected_ 的基类指针）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_); }
 
     /// @brief 选中日期信号（可订阅）。
     /// @return selected_ 的引用。
@@ -553,7 +553,7 @@ class TimePicker : public Widget {
 
     /// @brief 收集本控件的响应式信号到构建面。
     /// @param out 输出收集向量（追加 selected_ 的基类指针）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_); }
 
     /// @brief 选中时刻信号（可订阅）。
     /// @return selected_ 的引用。
@@ -792,7 +792,7 @@ class ColorPicker : public Widget {
 
     /// @brief 收集本控件的响应式信号到构建面。
     /// @param out 输出收集向量（追加 selected_ 的基类指针）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_); }
 
     /// @brief 选中颜色信号（可订阅）。
     /// @return selected_ 的引用。

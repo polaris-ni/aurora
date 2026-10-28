@@ -101,9 +101,9 @@ class Scroll : public Container, public ScrollProps {
         }
     }
 
-    /// @brief 无响应式信号可收集：滚动偏移等运行状态为普通字段，不经 Effect 订阅刷新。
-    /// @param out 输出向量（未使用）；本控件不向依赖图登记任何 `SignalViewBase`。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @brief 无响应式信号可收集：滚动偏移等运行状态为普通字段，不经 effect 订阅刷新。
+    /// @param out 输出向量（未使用）；本控件不向 `StateSink` 登记任何来源。
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
     /// @brief 类型名（序列化 / 诊断 / 语义树寻址用）。
     /// @return 固定 `"Scroll"`。
     [[nodiscard]] auto type_name() const -> const char * override { return "Scroll"; }
@@ -413,11 +413,11 @@ class Scroll : public Container, public ScrollProps {
 
     /// @brief 滚动偏移只读信号（滚动驱动动画原语）：宿主以纯函数派生视差/进度/淡入淡出。
     ///        懒创建；偏移每次变化（滚轮/拖拽/滑动帧/程序化）写入。
-    /// @note Side-effects: reads state (registers reactive dependency in Effect scope)
-    /// @return 该偏移信号的只读视图引用（首次调用时按当前 `offset_y_` 懒建 `State<float>`）。
-    [[nodiscard]] auto offset_signal() -> SignalView<float> & {
+    /// @note Side-effects: reads state (registers reactive dependency in computed/effect scope)
+    /// @return 该偏移信号的只读句柄（首次调用时按当前 `offset_y_` 懒建来源）。
+    [[nodiscard]] auto offset_signal() -> ReadOnlyState<float> {
         if (!offset_state_) {
-            offset_state_ = std::make_shared<State<float>>(offset_y_);
+            offset_state_ = State<float>(offset_y_);
             published_offset_ = offset_y_;
         }
         return *offset_state_;
@@ -856,7 +856,7 @@ class Scroll : public Container, public ScrollProps {
     }
 
     /// @brief 偏移信号写入（仅当宿主索取过 offset_signal() 且值确实变化）。
-    ///        用镜像值比较而非 `State::get()`——后者在 Effect 作用域会自订阅本控件。
+    ///        用镜像值比较而非 `State::get()`——后者在 effect 作用域会自订阅本控件。
     auto publish_offset() -> void {
         if (!offset_state_ || published_offset_ == offset_y_) {
             return;
@@ -868,7 +868,7 @@ class Scroll : public Container, public ScrollProps {
     ScrollGlide glide_;  ///< snap 收位 / scroll_to 的短滑动时序
     DragAutoScroll drag_auto_scroll_;  ///< 拖入自动滚边状态（系统拖放 Over 态驱动，与收位滑动互不抢占）
     std::optional<std::chrono::steady_clock::time_point> glide_last_;  ///< 上一滑动帧时刻（墙钟差 = dt）
-    std::shared_ptr<State<float>> offset_state_;  ///< 懒创建的偏移信号（滚动驱动动画原语，经 offset_signal 暴露）
+    std::optional<State<float>> offset_state_;  ///< 懒创建的偏移来源（滚动驱动动画原语，经 offset_signal 暴露）
     float published_offset_ = 0.0F;  ///< 最近一次发布的偏移值（镜像，避免回读 get() 误订阅）
 
     /// @brief 内容子树中 `StickyHeader` 节点的发现缓存（on_layout 重建树时刷新；空 = 覆盖层零开销）。

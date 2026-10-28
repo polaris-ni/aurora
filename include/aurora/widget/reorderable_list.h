@@ -67,14 +67,14 @@ class ReorderableList : public Container {
     /// @brief 条目构造器签名：由数据项与其下标产出子控件节点。
     using ItemBuilder = std::function<Node(const T &, int)>;
 
-    /// @brief 默认构造：无数据源与构造器，接入 items/builder 前渲染为空列表。
+    /// @brief 默认构造：数据源为空列表、无构造器，接入 builder 前渲染为空列表。
     ReorderableList() = default;
 
     /// @brief 注入数据源与条目构造器并立即实例化首批子项。
-    /// @param items 列表项数据源（共享 State，控件落位后直接改写其 vector）。
+    /// @param items 列表项数据源（按值接管的句柄，与调用方共享同一来源；控件落位后直接改写其 vector）。
     /// @param builder 条目构造器，逐项产出子控件节点。
     /// @param gap 项间距（dp，负值降级为 0 并记录 degraded 诊断）。
-    ReorderableList(std::shared_ptr<State<std::vector<T>>> items, ItemBuilder builder, float gap = 0.0F)
+    ReorderableList(State<std::vector<T>> items, ItemBuilder builder, float gap = 0.0F)
         : items_(std::move(items)), builder_(std::move(builder)),
           gap_(gap < 0.0F ? (Diagnostics::degraded("layout", "ReorderableList gap is negative, degraded to 0"), 0.0F)
                           : gap) {
@@ -158,13 +158,9 @@ class ReorderableList : public Container {
     /// @return 本控件的属性/事件/不变量描述表。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 登记数据源信号：仅 `items_` 存在时暴露其值信号。
-    /// @param out 信号视图累加容器。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        if (items_) {
-            out.push_back(static_cast<SignalViewBase *>(items_.get()));
-        }
-    }
+    /// @brief 登记数据源信号：暴露数据源来源。
+    /// @param out 信号采集出口。
+    auto collect_signals(StateSink &out) -> void override { out.push(items_); }
 
     /// @brief 运行时态不可序列化：与 `Repeater` 同一处理（数据源是 `State`，条目由宿主回填）。
     /// @param props 待写入的 JSON 属性对象（在基类结果上追加几何与开关字段）。
@@ -186,17 +182,17 @@ class ReorderableList : public Container {
     [[nodiscard]] auto item_count() const -> std::size_t { return children_.size(); }
 
     /// @brief 数据快照副本（观测 / 测试用；热路径请走 `item_count()`）。
-    /// @return 数据源当前 vector 的副本；无数据源时为空。
-    [[nodiscard]] auto data() const -> std::vector<T> { return items_ ? items_->get() : std::vector<T>{}; }
+    /// @return 数据源当前 vector 的副本。
+    [[nodiscard]] auto data() const -> std::vector<T> { return items_.get(); }
 
-    /// @brief 当前数据源（可为空）。
-    /// @return 指向 `State<std::vector<T>>` 的共享指针引用。
-    [[nodiscard]] auto items() const -> const std::shared_ptr<State<std::vector<T>>> & { return items_; }
+    /// @brief 当前数据源句柄（拷贝共享同一来源）。
+    /// @return 本控件持有的数据源句柄引用。
+    [[nodiscard]] auto items() const -> const State<std::vector<T>> & { return items_; }
 
     /// @brief 换数据源（标脏重建）。
-    /// @param items 新的列表项数据源。
+    /// @param items 新的列表项数据源（按值接管，共享同一来源）。
     /// @return 自身引用（链式）。
-    auto set_items(std::shared_ptr<State<std::vector<T>>> items) -> ReorderableList & {
+    auto set_items(State<std::vector<T>> items) -> ReorderableList & {
         items_ = std::move(items);
         invalidate();  // 数据源更换后强制下次布局全量重建
         return *this;
@@ -246,15 +242,7 @@ class ReorderableList : public Container {
     /// @param to 落位后的最终下标（0..count-1，越界钳制）。
     /// @return 数据是否实际变化。
     auto reorder(int from, int to) -> bool {
-        if (!items_) {
-            return false;
-        }
-        // 本检查把 `items_->get()` 读成「智能指针上多余的 get()」：此处的 `get()` 属于 `State`（值
-        // 读取口，返回 `const std::vector<T> &`），不是 `shared_ptr::get()`——按建议删掉就成
-        // `items_.size()`，编译不过。仅浏览器口径命中——native 遍同一份代码不报
-        // （CODING_STANDARDS.md §5.2 的口径差异）。
-        // NOLINTNEXTLINE(readability-redundant-smartptr-get)
-        const int n = static_cast<int>(items_->get().size());
+        const int n = static_cast<int>(items_.get().size());
         if (from < 0 || from >= n) {
             return false;
         }
@@ -262,7 +250,7 @@ class ReorderableList : public Container {
         if (slot == from) {
             return false;
         }
-        std::vector<T> v = items_->get();
+        std::vector<T> v = items_.get();
         if (slot > from) {
             // 后移：受影响区间 [from, slot] 整体旋转（末端须含 slot —— 少一即变成「插到 slot 前」）。
             std::rotate(v.begin() + from, v.begin() + from + 1, v.begin() + slot + 1);
@@ -270,7 +258,7 @@ class ReorderableList : public Container {
             // 前移：受影响区间 [slot, from]。
             std::rotate(v.begin() + slot, v.begin() + from, v.begin() + from + 1);
         }
-        items_->set(std::move(v));  // 数据为准：先改数据，再重建 UI
+        items_.set(std::move(v));  // 数据为准：先改数据，再重建 UI
         invalidate();
         notify_accessibility_structure_changed(this);
         if (on_reorder_) {
@@ -281,10 +269,10 @@ class ReorderableList : public Container {
 
     /// @brief 数据长度变化时重建子项（`Repeater` 先例；顺序变化请走 `reorder` / `invalidate`）。
     auto rebuild_if_needed() -> void {
-        if (!items_ || !builder_) {
+        if (!builder_) {
             return;
         }
-        const std::vector<T> &data = items_->get();
+        const std::vector<T> &data = items_.get();
         if (built_ && data.size() == built_count_) {
             return;
         }
@@ -1333,7 +1321,7 @@ class ReorderableList : public Container {
     /// @brief 拖拽 / 落位状态机相位。
     enum class DragState : std::uint8_t { Idle, Dragging, Settling };
 
-    std::shared_ptr<State<std::vector<T>>> items_;  ///< 列表项数据源（共享 State，可空）
+    State<std::vector<T>> items_;  ///< 列表项数据源句柄（拷贝共享同一来源）
     ItemBuilder builder_;  ///< 条目构造器（可空）
     std::function<void(int, int)> on_reorder_;  ///< 落位后的换位回调（旧, 新下标）
     float gap_ = 0.0F;  ///< 项间距（dp，非负）

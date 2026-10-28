@@ -273,7 +273,7 @@ auto register_core_widgets() -> void {
     reg_no_props<Provider<MediaQuery>>("MediaQueryProvider", MediaQuery{}, Node{});
     // Timer 持运行时回调（TickBuilder），与 Repeater/Canvas 同理不可从静态 JSON 重建；
     // 但注册为已知类型以便 API 描述（gen_api_tools）收录其自描述元数据。
-    reg_no_props<Timer>("Timer", std::chrono::seconds(1), [](const SignalView<int> &) -> Node { return Node{}; });
+    reg_no_props<Timer>("Timer", std::chrono::seconds(1), [](const ReadOnlyState<int> &) -> Node { return Node{}; });
     // BreakpointBuilder持运行时 builder 回调，注册供 API 描述收录。
     reg_no_props<BreakpointBuilder>("BreakpointBuilder");
     // Dismissible 持运行时手势 State 与消除回调，注册供 API 描述收录
@@ -428,7 +428,7 @@ auto is_container_type(const std::string &t) -> bool {
 /// @brief 布局公共属性的语义类型：仅补录 `serialize_props` 写出而 `describe()` 未收录的键。
 ///
 /// 十个已知键取控件侧**真实成员类型**——`Widget::width_` / `height_` 是 `Length`、`show` 是
-/// `Reactive<bool>`、基类 `overflow_` 序列化为字符串、滚动 `offset` 是 float、清单字段是
+/// `State<bool>`、基类 `overflow_` 序列化为字符串、滚动 `offset` 是 float、清单字段是
 /// `std::vector<std::string>`——与 `PropDescriptor::type` 同一词汇表，消费者无需再学一套表示。
 /// 未知键（未来新增的序列化键）按取值 JSON 类型派生、容器类归 `"Json"`，保证新键不会
 /// **静默掉出** schema（宁可给个保守类型，也不要让属性对 AI 隐身）。

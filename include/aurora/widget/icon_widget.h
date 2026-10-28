@@ -148,7 +148,7 @@ class Icon : public LeafWidget {
 
     /// @brief 收集本控件的可订阅信号视图。
     /// @param out 输出参数；`Icon` 无信号，恒不写入。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { (void)out; }
+    auto collect_signals(StateSink &out) -> void override { (void)out; }
 
     /// @brief 序列化 Icon 自有属性：语义名（未设不输出）、盒尺寸、显式着色（未设不输出）与语义标注。
     /// @param props 目标 JSON 对象。
@@ -367,7 +367,7 @@ class IconButton : public LeafWidget {
 
     /// @brief 收集本控件的可订阅信号视图。
     /// @param out 输出参数；`IconButton` 无信号，恒不写入。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { (void)out; }
+    auto collect_signals(StateSink &out) -> void override { (void)out; }
 
     /// @brief 序列化 IconButton 自有属性：语义名、图标盒尺寸、内边距、显式着色与语义标注、启用位。
     /// @param props 目标 JSON 对象。

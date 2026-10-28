@@ -52,7 +52,7 @@ inline auto container_baseline(void *ctx, Size measured) -> std::optional<float>
     if (!baseline.has_value()) {
         return std::nullopt;
     }
-    return *baseline + child.modifier.get().transform(measured).translation.y;
+    return *baseline + child.modifier().transform(measured).translation.y;
 }
 
 /// @brief Column 属性（聚合）。
@@ -248,7 +248,7 @@ class Column : public Container, public ColumnProps {
         items.reserve(children_.size());  // 预置与子项数等量容量，避免逐项扩容
         for (size_t i = 0; i < children_.size(); ++i) {
             ctxs[i] = ContainerLayoutCtx{{}, children_.data(), i, &ctx};
-            const float w = children_[i].widget().modifier.get().flex_weight();
+            const float w = children_[i].widget().modifier().flex_weight();
             // 基线通道一并挂上：布局器仅在 `cross_axis == Baseline` 时调用（其余配置零调用开销）。
             items.push_back(
                 FlexItem::make<ContainerLayoutCtx>(w, &ctxs[i], container_measure, container_baseline, &ctxs[i]));
@@ -447,7 +447,7 @@ class Row : public Container, public RowProps {
         items.reserve(children_.size());  // 预置与子项数等量容量，避免逐项扩容
         for (size_t i = 0; i < children_.size(); ++i) {
             ctxs[i] = ContainerLayoutCtx{{}, children_.data(), i, &ctx};
-            const float w = children_[i].widget().modifier.get().flex_weight();
+            const float w = children_[i].widget().modifier().flex_weight();
             // 基线通道一并挂上：布局器仅在 `cross_axis == Baseline` 时调用（其余配置零调用开销）。
             items.push_back(
                 FlexItem::make<ContainerLayoutCtx>(w, &ctxs[i], container_measure, container_baseline, &ctxs[i]));

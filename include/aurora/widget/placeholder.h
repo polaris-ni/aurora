@@ -152,8 +152,8 @@ class Placeholder : public Widget {
     }
 
     /// @brief 收集本控件的可订阅信号视图。
-    /// @param out 输出参数，收集 SignalViewBase 指针；Placeholder 无信号，恒不写入。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @param out 输出参数，收集响应式来源；Placeholder 无信号，恒不写入。
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 序列化占位属性：文字与背景/边框/文字色（颜色经 color_to_json）。
     /// @param props 目标 JSON 对象。

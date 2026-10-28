@@ -60,7 +60,7 @@ class DataTable : public Widget {
 
     /// @brief 收集本控件的响应式信号到构建面。
     /// @param out 输出收集向量（追加 selected_row_ 的基类指针）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_row_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_row_); }
 
     /// @brief 列数。
     /// @return columns_ 的大小。
@@ -231,7 +231,7 @@ class TreeView : public Widget {
 
     /// @brief 收集本控件的响应式信号到构建面。
     /// @param out 输出收集向量（追加 selected_ 的基类指针）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_); }
 
     /// @brief 根节点列表（可就地修改后重排）。
     /// @return roots_ 的引用。
@@ -443,7 +443,7 @@ class ListView : public Widget {
 
     /// @brief 收集响应式信号：ListView 选中态为普通 vector，无信号可收集（空实现）。
     /// @param out 输出收集向量（未使用）。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 条目数。
     /// @return items_ 的大小。

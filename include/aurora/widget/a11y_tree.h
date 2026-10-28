@@ -88,7 +88,7 @@ namespace detail {
     std::string found;
     int text_children = 0;
     w.for_each_child([&found, &text_children](const Widget &child) -> void {
-        if (!child.show.get()) {
+        if (!child.show()) {
             return;
         }
         const char *tn = child.type_name();
@@ -377,7 +377,7 @@ inline auto apply_labelled_by_relations(AccessibilityNode &root) -> void {
         for (const Node &child : nodes) {
             // 不可见子节点（`show == false`）与绘制/命中同口径：不入语义树，避免屏幕阅读器
             // 读到视觉上不存在的控件。
-            if (!child.widget().show.get()) {
+            if (!child.widget().show()) {
                 continue;
             }
             // 累加仍走**布局**原点（而非绘制盒原点）：绘制偏移 Modifier（transform 等）会改变
@@ -396,7 +396,7 @@ inline auto apply_labelled_by_relations(AccessibilityNode &root) -> void {
         // 展开，几何缺失 ⇒ 后代继承本节点盒。（不可把 Node 拷出容器补几何：`Node` 析构会清子节点
         // 的 `layout_parent_`，脏标记传播会断链。）
         w.for_each_child([&node](const Widget &child) -> void {
-            if (!child.show.get()) {
+            if (!child.show()) {
                 return;
             }
             node.children.push_back(build_accessibility_node(child, node.bounds, node.bounds));

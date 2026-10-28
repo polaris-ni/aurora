@@ -68,7 +68,7 @@ class Dialog : public Container {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 登记需订阅的信号视图：`open` 是普通 bool 字段，无响应式属性可登记。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 显示对话框：压入焦点作用域——Tab 焦点关在本层内、焦点自动移入首个可聚焦控件。
     /// 派发回调（点击处理器等）内调用时可取到当前 FocusManager；无焦点管理器时降级为仅置位。

@@ -331,7 +331,7 @@ class RichTextEdit : public LeafWidget {
 
     /// @brief 信号登记：文档模型为普通成员（非 reactive），无信号需登记，空实现。
     /// @param out 输出参数（本控件不使用）。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     // ---- 事件处理 ----
 

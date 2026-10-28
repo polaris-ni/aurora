@@ -430,7 +430,7 @@ class PerfOverlay : public SingleChild {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 无响应式信号可声明：统计文本每帧由 `on_paint` 直读 FrameStats。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 显示/隐藏统计面板（内容子节点不受影响）。
     /// @param v false = 仅绘制内容，不叠加统计。

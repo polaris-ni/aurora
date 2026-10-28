@@ -13,9 +13,11 @@ namespace aurora {
 /// @brief 动态列表：把 `State<std::vector<T>>` 的每一项
 /// 经 `itemBuilder` 展开为一个子 widget。容器尺寸随数据项变化，依赖变化时触发定点刷新。
 ///
+/// 数据源按值传入：`State` 句柄拷贝共享同一来源，调用方持有原句柄继续写入即可。
+///
 /// @code
-/// auto items = std::make_shared<State<std::vector<std::string>>>(std::vector<std::string>{"A","B","C"});
-/// Repeater<std::string>{items, [](const std::string& s, int i){
+/// au::State<std::vector<std::string>> items{std::vector<std::string>{"A","B","C"}};
+/// au::Repeater<std::string>{items, [](const std::string& s, int i){
 /// return Node{ au::Text(s) };
 /// }};
 /// @endcode
@@ -29,10 +31,10 @@ class Repeater : public Container {
     /// @param T 回调入参类型：条目值（const T &）。
     using ItemBuilder = std::function<Node(const T &, int)>;
 
-    /// @brief 构造动态列表：接管数据源信号与条目构建回调，并立即首轮展开。
-    /// @param items 列表数据源信号（State<std::vector<T>>），共享持有。
+    /// @brief 构造动态列表：接管数据源句柄与条目构建回调，并立即首轮展开。
+    /// @param items 列表数据源（`State<std::vector<T>>` 值句柄，拷贝共享来源）。
     /// @param builder 条目构建回调，移动存入 builder_。
-    Repeater(std::shared_ptr<State<std::vector<T>>> items, ItemBuilder builder)
+    Repeater(State<std::vector<T>> items, ItemBuilder builder)
         : items_(std::move(items)), builder_(std::move(builder)) {
         rebuild_if_needed();  // 首轮展开子树（built_ 此时必为 false）。
     }
@@ -69,13 +71,9 @@ class Repeater : public Container {
     /// @param d 新的最大深度。
     auto set_max_depth(std::size_t d) -> void { max_depth_ = d; }
 
-    /// @brief 收集本控件的可订阅信号视图：items_ 存在时收录数据源信号。
-    /// @param out 输出参数，收录本控件持有的 SignalViewBase 指针。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        if (items_) {
-            out.push_back(static_cast<SignalViewBase *>(items_.get()));
-        }
-    }
+    /// @brief 收集本控件的可订阅信号视图：数据源句柄登记到采集出口。
+    /// @param out 输出参数，收集本控件持有的来源。
+    auto collect_signals(StateSink &out) -> void override { out.push(items_); }
     /// @brief 序列化属性：数据源为运行时态不可序列化，仅附加说明 note。
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
@@ -114,19 +112,14 @@ class Repeater : public Container {
   private:
     // 仅在数据源 size 变化（或尚未构建）时重建子节点，避免每次布局都重新构造全部 widget。
     auto rebuild_if_needed() -> void {
-        if (!items_ || !builder_) {
+        if (!builder_) {
             return;
         }
-        // 本检查把 `items_->get()` 读成「智能指针上多余的 get()」：此处的 `get()` 属于 `State`（值
-        // 读取口，返回 `const std::vector<T> &`），不是 `shared_ptr::get()`——按建议删掉就成
-        // `items_.size()`，编译不过。仅浏览器口径命中——native 遍同一份代码不报
-        // （CODING_STANDARDS.md §5.2 的口径差异）。
-        // NOLINTNEXTLINE(readability-redundant-smartptr-get)
-        const std::size_t n = items_->get().size();
+        const std::size_t n = items_.get().size();
         if (built_ && n == child_count_) {
             return;
         }
-        const std::vector<T> &data = items_->get();
+        const std::vector<T> &data = items_.get();
         std::vector<Node> kids;
         kids.reserve(data.size());
         for (std::size_t i = 0; i < data.size(); ++i) {
@@ -146,7 +139,7 @@ class Repeater : public Container {
         }
     }
 
-    std::shared_ptr<State<std::vector<T>>> items_;
+    State<std::vector<T>> items_;  ///< 列表数据源句柄（拷贝共享来源）
     ItemBuilder builder_;
     std::size_t child_count_ = 0;
     bool built_ = false;

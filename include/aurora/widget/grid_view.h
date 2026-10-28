@@ -157,7 +157,7 @@ class GridView : public Widget {
 
     /// @brief 无信号依赖：滚动偏移与存活实例均为运行时内部状态（信号经 `offset_signal` 单独索取）。
     /// @param out 信号输出向量；本控件不向其写入任何信号。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 总项数。
     /// @return 构造/反序列化设定的条目总数。
@@ -251,11 +251,11 @@ class GridView : public Widget {
 
     /// @brief 滚动偏移只读信号（滚动驱动动画原语）：宿主以纯函数派生视差/进度/淡入淡出。
     ///        懒创建；偏移每次变化（滚轮/滑动帧/程序化）写入。
-    /// @note Side-effects: reads state (registers reactive dependency in Effect scope)
-    /// @return 偏移信号视图引用（进程内共享的 `State<float>`）。
-    [[nodiscard]] auto offset_signal() -> SignalView<float> & {
+    /// @note Side-effects: reads state (registers reactive dependency in computed/effect scope)
+    /// @return 偏移信号的只读句柄（进程内共享同一来源）。
+    [[nodiscard]] auto offset_signal() -> ReadOnlyState<float> {
         if (!offset_state_) {
-            offset_state_ = std::make_shared<State<float>>(offset_);
+            offset_state_ = State<float>(offset_);
             published_offset_ = offset_;
         }
         return *offset_state_;
@@ -647,7 +647,7 @@ class GridView : public Widget {
     }
 
     /// @brief 偏移信号写入（仅当宿主索取过 offset_signal() 且值确实变化）。
-    ///        用镜像值比较而非 `State::get()`——后者在 Effect 作用域会自订阅本控件。
+    ///        用镜像值比较而非 `State::get()`——后者在 effect 作用域会自订阅本控件。
     auto publish_offset() -> void {
         if (!offset_state_ || published_offset_ == offset_) {
             return;
@@ -717,7 +717,7 @@ class GridView : public Widget {
     ScrollGlide glide_;  ///< snap 收位 / scroll_to 的短滑动时序
     DragAutoScroll drag_auto_scroll_;  ///< 拖入自动滚边状态（系统拖放 Over 态驱动，与收位滑动互不抢占）
     std::optional<std::chrono::steady_clock::time_point> glide_last_;  ///< 上一滑动帧时刻（墙钟差 = dt）
-    std::shared_ptr<State<float>> offset_state_;  ///< 懒创建的偏移信号（滚动驱动动画原语，经 offset_signal 暴露）
+    std::optional<State<float>> offset_state_;  ///< 懒创建的偏移来源（滚动驱动动画原语，经 offset_signal 暴露）
     float published_offset_ = 0.0F;  ///< 最近一次发布的偏移值（镜像，避免回读 get() 误订阅）
 };
 

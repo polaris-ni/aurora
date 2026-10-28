@@ -272,7 +272,7 @@ auto FocusManager::collect_focusable(const Widget &root) -> std::vector<Widget *
 }
 
 auto FocusManager::collect_focusable_impl(const Widget &w, std::vector<Widget *> &out) -> void {
-    if (!w.show.get()) {
+    if (!w.show()) {
         return;  // 不可见控件不参与焦点序
     }
     if (w.focusable() && w.wants_focus()) {

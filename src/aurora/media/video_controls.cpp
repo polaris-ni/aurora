@@ -30,40 +30,37 @@ VideoControls::VideoControls(VideoController *controller) : controller_(controll
 }
 
 auto VideoControls::build_children() -> void {
-    auto play = std::make_unique<Button>("Play");
+    auto play = std::make_unique<Button>(ButtonProps{.label = play_label_});
     play->set_on_click([this]() -> void {
         if (controller_) {
             controller_->toggle_play();
         }
     });
 
-    // 控制器为空（独立反序列化场景）时使用本地占位信号，避免空指针。
-    Reactive fallback_progress{0.0};
-    Reactive fallback_volume{1.0};
-    auto seek = std::make_unique<Slider>((controller_ != nullptr) ? *controller_->progress_signal() : fallback_progress,
-                                         [this](double f) -> void {
-                                             if (controller_) {
-                                                 controller_->seek_fraction(f);
-                                             }
-                                         });
-    seek->modifier.set(Modifier{}.expand());  // 在 Row 中撑满剩余空间
+    // 展示与输入分离：滑块的读数来自本地编辑 State，真实拖动才发领域命令；
+    // 控制器事实回填（tick_gestures）只更新本地 State，不触发用户事件。
+    auto seek = std::make_unique<Slider>(seek_value_, [this](double f) -> void {
+        if (controller_) {
+            controller_->seek_fraction(f);
+        }
+    });
+    seek->set_modifier(Modifier{}.expand());  // 在 Row 中撑满剩余空间
 
-    auto time = std::make_unique<Text>("0:00 / 0:00");
+    auto time = std::make_unique<Text>(TextProps{.content = time_label_});
     time->color(Color::white());
 
-    auto mute = std::make_unique<Button>("Mute");
+    auto mute = std::make_unique<Button>(ButtonProps{.label = mute_label_});
     mute->set_on_click([this]() -> void {
         if (controller_) {
             controller_->set_muted(!controller_->muted());
         }
     });
 
-    auto vol = std::make_unique<Slider>((controller_ != nullptr) ? *controller_->volume_signal() : fallback_volume,
-                                        [this](double v) -> void {
-                                            if (controller_) {
-                                                controller_->set_volume(v);
-                                            }
-                                        });
+    auto vol = std::make_unique<Slider>(volume_value_, [this](double v) -> void {
+        if (controller_) {
+            controller_->set_volume(v);
+        }
+    });
     vol->width(px(80.0F));
 
     Row row{Node(std::move(play)), Node(std::move(seek)), Node(std::move(time)), Node(std::move(mute)),
@@ -103,20 +100,17 @@ auto VideoControls::tick_gestures(std::chrono::steady_clock::time_point now) -> 
         const auto dur = controller_->duration();
         const long long total_ms = dur.count() / 1000;
         const long long cur_ms = static_cast<long long>(frac * static_cast<double>(dur.count())) / 1000;
-        if (time_text_ != nullptr) {
-            time_text_->set_content(format_time(cur_ms) + " / " + format_time(total_ms));
-        }
-        if (play_btn_ != nullptr) {
-            play_btn_->label.set(LocalizedString{controller_->is_playing() ? "Pause" : "Play"});
-        }
-        if (mute_btn_ != nullptr) {
-            mute_btn_->label.set(LocalizedString{controller_->muted() ? "Unmute" : "Mute"});
-        }
+        // 事实回填只更新本地展示来源：同值写入被来源去重，不触发控件换源或用户命令。
+        time_label_.set(format_time(cur_ms) + " / " + format_time(total_ms));
+        play_label_.set(LocalizedString{controller_->is_playing() ? "Pause" : "Play"});
+        mute_label_.set(LocalizedString{controller_->muted() ? "Unmute" : "Mute"});
+        seek_value_.set(frac);
+        volume_value_.set(controller_->volume());
     }
     Container::tick_gestures(now);
 }
 
-auto VideoControls::collect_signals(std::vector<SignalViewBase *> &out) -> void {
+auto VideoControls::collect_signals(StateSink &out) -> void {
     for (Node &child : children_) {
         child.widget().collect_signals(out);
     }

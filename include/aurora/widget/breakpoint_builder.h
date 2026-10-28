@@ -4,8 +4,8 @@
 #include <memory>
 
 #include "aurora/environment/media_query.h"
-#include "aurora/state/effect.h"
-#include "aurora/state/reactive.h"
+#include "aurora/state/read_only_state.h"
+#include "aurora/state/subscription.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -53,21 +53,37 @@ class BreakpointBuilder : public Widget {
     /// @param Breakpoint 回调入参类型：当前断点档位值。
     using BuilderFn = std::function<Node(Breakpoint)>;
 
-    /// @brief 构建回调的响应式信号：档位变化或闭包替换时重建子树。
-    /// NOLINTNEXTLINE(*-non-private-member-variables-classes) 公开响应式字段：宿主需直读直改闭包。
-    Reactive<BuilderFn> builder;  ///< 档位变化 / 闭包替换时重建子节点。
-
     /// @brief Compact 上界（width < 该值 → Compact）。
     float medium_max_width = 600.0F;
     /// @brief Expanded 下界（width >= 该值 → Expanded；其间为 Medium）。
     float expanded_min_width = 840.0F;
 
-    /// @brief 默认构造：builder 为空闭包，首轮布局构建空子节点，外部替换闭包后重建。
+    /// @brief 默认构造：构建闭包为空，首轮布局构建空子节点，外部换源后重建。
     BreakpointBuilder() = default;
 
-    /// @brief 便捷构造：直接传入构建闭包。
-    /// @param fn 构建闭包，移动存入 builder。
-    explicit BreakpointBuilder(BuilderFn fn) : builder(std::move(fn)) {}
+    /// @brief 便捷构造：直接传入构建闭包（包成自有常量来源安装）。
+    /// @param fn 构建闭包，移入安装来源。
+    explicit BreakpointBuilder(BuilderFn fn) { install_builder(ReadOnlyState<BuilderFn>{std::move(fn)}); }
+
+    /// @brief 构建闭包来源（只读句柄）：供宿主接走或另行订阅。
+    /// @return 当前安装的构建闭包读句柄。
+    [[nodiscard]] auto builder_source() const -> ReadOnlyState<BuilderFn> { return builder_; }
+
+    /// @brief 替换构建闭包来源（展示属性换源）：置脏并请求整棵子树重建。
+    /// @param next 新的构建闭包读句柄（可由 `BuilderFn` 字面量隐式转换）。
+    /// @return 自身引用，便于链式调用。
+    auto set_builder_source(ReadOnlyState<BuilderFn> next) -> BreakpointBuilder & {
+        install_builder(std::move(next));
+        return *this;
+    }
+
+    /// @brief 以字面量替换构建闭包（换到一份自有常量来源）。
+    /// @param fn 新的构建闭包。
+    /// @return 自身引用，便于链式调用。
+    auto set_builder(BuilderFn fn) -> BreakpointBuilder & {
+        install_builder(ReadOnlyState<BuilderFn>{std::move(fn)});
+        return *this;
+    }
 
     /// @brief 类型名，供序列化与运行时自描述使用。
     /// @return C 字符串 "BreakpointBuilder"。
@@ -104,9 +120,9 @@ class BreakpointBuilder : public Widget {
     /// @return 本控件的静态描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 收集本控件的可订阅信号视图：收录 builder 响应式信号。
-    /// @param out 输出参数，收录本控件持有的 SignalViewBase 指针。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&builder); }
+    /// @brief 收集本控件的可订阅信号视图：收录构建闭包来源。
+    /// @param out 输出参数，收录本控件持有的构建闭包读句柄。
+    auto collect_signals(StateSink &out) -> void override { out.push(builder_); }
 
     /// @brief 当前生效档位（布局后有效；供测试与外部读取）。
     /// @return 最近一次 on_layout 解析出的断点档位。
@@ -138,13 +154,12 @@ class BreakpointBuilder : public Widget {
   protected:
     auto on_mount(const BuildContext &ctx) -> void override {
         Widget::on_mount(ctx);
-        // builder 闭包替换 → 标记脏并请求重建（清除旧子节点引用）。
-        builder_effect_ = std::make_shared<Effect>([this] {  // NOLINT(*-use-trailing-return-type)
+        // 构建闭包来源变化 → 标记脏并请求重建（下一帧 on_layout 重建子树）。
+        builder_subscription_ = builder_.subscribe([this](const BuilderFn &) {
             dirty_ = true;
             mark_needs_layout();
             mark_needs_paint();
         });
-        builder.subscribe(*builder_effect_);
     }
 
     /// @brief 释放挂载期建的 builder 订阅并卸载当前子节点（与 `on_mount` 对称）。
@@ -153,7 +168,7 @@ class BreakpointBuilder : public Widget {
     /// @param ctx 本控件挂载时记录的那份上下文。
     auto on_unmount(const BuildContext &ctx) -> void override {
         (void)ctx;
-        builder_effect_.reset();  // Effect 析构即退订
+        builder_subscription_.reset();  // 退订：之后替换闭包不再驱动重建
         if (child_) {
             child_.widget().unmount();
         }
@@ -166,7 +181,7 @@ class BreakpointBuilder : public Widget {
             mq != nullptr ? mq->size.width : (c.max.width != Size::infinity().width ? c.max.width : 0.0F);
         const Breakpoint bp = resolve_breakpoint(width, medium_max_width, expanded_min_width);
 
-        const BuilderFn &fn = builder.get();
+        const BuilderFn &fn = builder_.get();
         if (!child_ || dirty_ || bp != last_bp_) {
             if (fn) {
                 child_ = fn(bp);
@@ -217,12 +232,32 @@ class BreakpointBuilder : public Widget {
     }
 
   private:
+    /// @brief 安装构建闭包来源：置脏、标记重排重绘，并重建挂载期订阅（旧订阅固定旧源）。
+    /// @param next 新的构建闭包读句柄。
+    auto install_builder(ReadOnlyState<BuilderFn> next) -> void {
+        const bool subscribed = builder_subscription_.active();
+        builder_subscription_.reset();  // 旧来源的局部订阅先解除，避免固定到换下的来源
+        builder_ = std::move(next);
+        dirty_ = true;  // 下一帧 on_layout 无条件重建子树
+        mark_needs_layout();
+        mark_needs_paint();
+        if (subscribed) {
+            builder_subscription_ = builder_.subscribe([this](const BuilderFn &) {
+                dirty_ = true;
+                mark_needs_layout();
+                mark_needs_paint();
+            });
+        }
+        resubscribe_signals();  // 未挂载时为空操作；挂载后重建采集订阅
+    }
+
     Node child_;
     /// @brief child_nodes() 视图缓存（const 方法返回引用需持久存储）。
     mutable std::vector<Node> child_view_;
     Breakpoint last_bp_ = Breakpoint::Compact;  ///< 最近一次解析的档位（重建判定依据）。
-    bool dirty_ = true;  ///< 首次构建 / 闭包替换后置位。
-    std::shared_ptr<Effect> builder_effect_;
+    bool dirty_ = true;  ///< 首次构建 / 闭包换源后置位。
+    ReadOnlyState<BuilderFn> builder_;  ///< 安装的构建闭包来源（只读句柄）
+    Subscription builder_subscription_;  ///< 挂载期建立的构建闭包订阅（卸载即取消）
 };
 
 }  // namespace aurora

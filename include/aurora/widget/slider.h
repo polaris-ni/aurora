@@ -9,9 +9,7 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/binding.h"
-#include "aurora/state/reactive.h"
-#include "aurora/state/signal_view.h"
+#include "aurora/state/state.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
@@ -19,7 +17,7 @@ namespace aurora {
 
 /// @brief 滑块（叶控件）：连续值 `double`（默认 [0,1]），拖拽设置。
 ///
-/// 值来源与 `Checkbox` 一致（`Reactive<double>` / `Binding<double>` + `onChanged`）。
+/// 值来源与 `Checkbox` 一致：可写句柄 `State<double>`（自有或与调用方共享）+ `onChanged`。
 /// 指针按下并拖动时，按局部 x 位置映射到 [min,max]；松手结束。绘制为圆角轨道 + 圆形滑块。
 ///
 /// 视觉（对标 Material 3 Slider / Qt QSlider）：
@@ -35,16 +33,11 @@ namespace aurora {
 class Slider : public LeafWidget {
   public:
     Slider() = default;
-    /// @brief 以响应式值源构造滑块。
-    /// @param value 当前值的响应式信号（驱动绘制与回读）。
+    /// @brief 以值句柄构造滑块：传字面量创建自有来源，传外部 `State<double>` 则共享同一来源。
+    /// @param value 当前值句柄（驱动绘制与回读）。
     /// @param on_changed 值变化回调（设值后经 clamp/步进吸附以终值触发）；空 = 不回调。
-    explicit Slider(Reactive<double> value, std::function<void(double)> on_changed = {})
+    explicit Slider(State<double> value, std::function<void(double)> on_changed = {})
         : value_(std::move(value)), on_changed_(std::move(on_changed)) {}
-    /// @brief 以双向绑定构造滑块（初值取 binding.get()）。
-    /// @param binding 当前值的双向绑定（设值时同步写回绑定目标）。
-    /// @param on_changed 值变化回调（设值后经 clamp/步进吸附以终值触发）；空 = 不回调。
-    explicit Slider(Binding<double> binding, std::function<void(double)> on_changed = {})
-        : binding_(std::move(binding)), value_(binding_.get()), on_changed_(std::move(on_changed)) {}
 
     /// @brief 设置取值区间（链式）。
     /// @param min 取值下界。
@@ -128,9 +121,9 @@ class Slider : public LeafWidget {
     /// @return true = 可交互。
     [[nodiscard]] auto enabled() const -> bool { return enabled_; }
 
-    /// @brief 读取当前值。
-    /// @return 绑定态取 Binding::get()，否则取内部响应式信号；恒在 [min,max] 内且已按 step 吸附。
-    [[nodiscard]] auto value() const -> double { return binding_.bound() ? binding_.get() : value_.get(); }
+    /// @brief 读取当前值（实时读取来源，不缓存）。
+    /// @return 恒在 [min,max] 内且已按 step 吸附。
+    [[nodiscard]] auto value() const -> double { return value_.get(); }
 
     /// @brief 设置当前值：clamp 到 [min,max]，step > 0 时吸附到 min + k×step 网格。
     /// @param v 目标值（clamp/吸附前的原始值）。
@@ -140,9 +133,6 @@ class Slider : public LeafWidget {
             // 步进吸附：round 到最近网格点后再钳制（避免浮点越界）
             c = std::clamp(min_ + (std::round((c - min_) / step_) * step_), min_, max_);
         }
-        if (binding_.bound()) {
-            binding_.set(c);
-        }
         value_ = c;
         if (on_changed_) {
             on_changed_(c);
@@ -151,14 +141,9 @@ class Slider : public LeafWidget {
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
 
-    /// @brief 收集本控件订阅的信号：内部值信号；绑定态再追加 Binding 的目标信号。
-    /// @param out 出参：信号视图追加到该向量尾部。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        out.push_back(&value_);
-        if (binding_.bound()) {
-            out.push_back(binding_.target());
-        }
-    }
+    /// @brief 收集本控件订阅的信号：唯一的值句柄 `value_`。
+    /// @param out 采集出口
+    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
 
     /// @brief 控件类型名。
     /// @return 静态字符串 "Slider"。
@@ -468,8 +453,7 @@ class Slider : public LeafWidget {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    Binding<double> binding_;  // 声明须在 value_ 之前（同 checkbox.h 的初始化顺序修复）
-    Reactive<double> value_;
+    State<double> value_;  ///< 当前值来源（自有或与调用方共享）
     std::function<void(double)> on_changed_;
     double min_ = 0.0;
     double max_ = 1.0;

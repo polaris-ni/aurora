@@ -64,7 +64,7 @@ class Dropdown : public Widget {
 
     /// @brief 收集本控件的可订阅信号。
     /// @param out 输出收集器；追加选中序号信号 selected_ 的视图指针。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_); }
 
     /// @brief 选项数量。
     /// @return options_ 的大小。

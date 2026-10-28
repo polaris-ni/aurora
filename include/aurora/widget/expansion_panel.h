@@ -85,7 +85,7 @@ class ExpansionPanel : public SingleChild {
 
     /// @brief 收集本控件的响应式信号供宿主订阅。
     /// @param out 输出参数，追加 expanded 状态信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&expanded_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(expanded_); }
 
     /// @brief 取得展开状态的响应式引用，可订阅其变化。
     /// @return 内部 State<bool> 的非 const 引用。

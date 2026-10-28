@@ -143,8 +143,8 @@ class Divider : public LeafWidget, public DividerProps {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 收集本控件的可订阅信号视图。
-    /// @param out 输出参数，收集 SignalViewBase 指针；Divider 无信号，恒不写入。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @param out 输出参数，收集响应式来源；Divider 无信号，恒不写入。
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 序列化分隔线属性：方向以 "vertical"/"horizontal" 字符串写入，另含线粗、颜色与两端缩进。
     /// @param props 目标 JSON 对象。

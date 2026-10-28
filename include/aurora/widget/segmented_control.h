@@ -214,7 +214,7 @@ class SegmentedControl : public LeafWidget {
 
     /// @brief 收集信号视图；本控件无外露信号（on_change 为回调）。
     /// @param out 输出容器（未使用）。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 左键按下时按各段实测宽度定位命中段：切换选中并触发 on_change；禁用态吞掉事件不切换。
     /// @param e 鼠标事件（读取局部坐标与动作，回写 is_handled）。

@@ -86,7 +86,7 @@ class MenuBar : public Widget {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 菜单栏不持有细粒度信号：菜单表与展开序号经命令式接口改动并直接标记重绘/重排。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 顶级菜单数量。
     /// @return 已注册菜单表的长度。

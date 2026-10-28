@@ -119,7 +119,7 @@ class PieChart : public LeafWidget, public PieChartProps {
 
     /// @brief 收集本控件的响应式信号到构建面。
     /// @param out 输出收集向量（追加 grow_ 动画进度信号的基类指针）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&grow_.signal()); }
+    auto collect_signals(StateSink &out) -> void override { out.push(grow_.signal()); }
 
     /// @brief 动画期间不缓存 Display List（内容每帧变化）。
     /// @return grow_ 动画进行中为 false，可缓存时为 true。

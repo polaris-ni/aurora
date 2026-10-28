@@ -69,7 +69,7 @@ class LazyRow : public Widget, public LazyRowProps {
 
     /// @brief 无信号依赖：滚动偏移与子项窗口均为运行时内部状态，不接响应式信号。
     /// @param out 信号输出向量；本控件不向其写入任何信号。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
     /// @brief 类型名字符串 "LazyRow"。
     /// @return 静态字符串常量，指向类型名。
     [[nodiscard]] auto type_name() const -> const char * override { return "LazyRow"; }

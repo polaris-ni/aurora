@@ -205,7 +205,7 @@ class ConnectivityRegistration {
 /// - **无撤销口**：`post_after` 不支持取消，故用 epoch + 共享 live 标志让旧闭包到期时
 ///   no-op（与 `http_client.cpp` 的 `StageTimer` 同法）。
 /// - **响应式一侧到此为止**：回调恒经 `aurora::detail::post_to_main` 回投主线程，
-///   不提供 `Resource` / `Signal` 形态（分层与线程不变量共同堵死）。
+///   不提供 `Resource` / 流式信号形态（分层与线程不变量共同堵死）。
 /// - **本类无成员状态**：事实、订阅表与定时登记都在库内运行时
 ///   （`src/aurora/net/detail/connectivity_state.h` 的 `ConnectivityRuntime`）里，故建连
 ///   旁证入口 `detail::note_connection_outcome` 无需特权即可触及状态机。

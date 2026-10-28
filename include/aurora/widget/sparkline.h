@@ -99,7 +99,7 @@ class Sparkline : public LeafWidget, public SparklineProps {
 
     /// @brief 收集 grow-in 动画的进行中信号，驱动逐帧重绘。
     /// @param out 信号输出向量；追加动画进行信号的裸指针。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&grow_.signal()); }
+    auto collect_signals(StateSink &out) -> void override { out.push(grow_.signal()); }
 
     /// @brief 动画期间不缓存 Display List（内容每帧变化）。
     /// @return grow-in 入场动画未进行中时为 true（本帧绘制结果可缓存复用），动画播放期间为 false。

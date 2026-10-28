@@ -9,7 +9,6 @@
 #include "aurora/core/color.h"
 #include "aurora/core/dimension.h"
 #include "aurora/core/types.h"
-#include "aurora/state/signal_view.h"
 #include "aurora/state/state.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
@@ -44,7 +43,7 @@ inline auto form_layout(std::vector<FormRow> rows, float label_width = 120.0F) -
         row_children.emplace_back(std::move(label));
         row_children.push_back(std::move(r.field));
         Row row{RowProps{.children = std::move(row_children)}};
-        row.modifier = Modifier{}.padding(4.0F);
+        row.set_modifier(Modifier{}.padding(4.0F));
         kids.emplace_back(std::move(row));
     }
     Column col{ColumnProps{.children = std::move(kids)}};
@@ -56,7 +55,7 @@ inline auto form_layout(std::vector<FormRow> rows, float label_width = 120.0F) -
 /// @return 组合完成的工具栏节点。
 inline auto toolbar(std::vector<Node> actions) -> Node {
     Row row{RowProps{.children = std::move(actions)}};
-    row.modifier = Modifier{}.fill_max_width().background(Color{245, 245, 247, 255}).padding(4.0F);
+    row.set_modifier(Modifier{}.fill_max_width().background(Color{245, 245, 247, 255}).padding(4.0F));
     return row;
 }
 
@@ -66,7 +65,7 @@ inline auto toolbar(std::vector<Node> actions) -> Node {
 /// @return 组合完成的侧边栏节点。
 inline auto sidebar(std::vector<Node> items, float width = 200.0F) -> Node {
     Column col{ColumnProps{.children = std::move(items)}};
-    col.modifier = Modifier{}.width(width).background(Color{245, 245, 247, 255}).padding(4.0F);
+    col.set_modifier(Modifier{}.width(width).background(Color{245, 245, 247, 255}).padding(4.0F));
     return col;
 }
 
@@ -75,7 +74,7 @@ inline auto sidebar(std::vector<Node> items, float width = 200.0F) -> Node {
 /// @return 组合完成的菜单栏节点。
 inline auto menu_bar(std::vector<Node> items) -> Node {
     Row row{RowProps{.children = std::move(items)}};
-    row.modifier = Modifier{}.fill_max_width().background(Color{235, 235, 240, 255}).padding(2.0F);
+    row.set_modifier(Modifier{}.fill_max_width().background(Color{235, 235, 240, 255}).padding(2.0F));
     return row;
 }
 
@@ -95,18 +94,13 @@ namespace detail {
 class TabBody : public Widget {
   public:
     /// @brief 绑定选中态与页面内容列表。
-    /// @param selected 共享的选中索引状态（变化时经信号触发重绘）。
+    /// @param selected 选中索引状态句柄（按值接管，与调用方共享同一来源）。
     /// @param pages 各页面内容节点，按索引与标签一一对应。
-    TabBody(std::shared_ptr<State<int>> selected, std::vector<Node> pages)
-        : selected_(std::move(selected)), pages_(std::move(pages)) {}
+    TabBody(State<int> selected, std::vector<Node> pages) : selected_(std::move(selected)), pages_(std::move(pages)) {}
 
     /// @brief 收集对选中态信号的依赖，使内容体随 tab_view 的选中索引刷新。
-    /// @param out 输出向量；selected_ 非空时追加其裸指针。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        if (selected_) {
-            out.push_back(selected_.get());
-        }
-    }
+    /// @param out 输出向量；追加选中态来源。
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_); }
 
     /// @brief 类型名字符串 "TabBody"。
     /// @return 静态字符串常量，指向类型名。
@@ -145,19 +139,19 @@ class TabBody : public Widget {
 
   private:
     /// @brief 读取并夹取当前选中索引。
-    /// @return 合法页索引；selected_ 缺失、无页或状态越界时为 0。
+    /// @return 合法页索引；无页或状态越界时为 0。
     [[nodiscard]] auto current() const -> int {
-        if (!selected_ || pages_.empty()) {
+        if (pages_.empty()) {
             return 0;
         }
-        const int s = selected_->get();
+        const int s = selected_.get();
         if (s < 0 || std::cmp_greater_equal(s, pages_.size())) {
             return 0;
         }
         return s;
     }
 
-    std::shared_ptr<State<int>> selected_;
+    State<int> selected_;
     std::vector<Node> pages_;
 };
 
@@ -174,13 +168,13 @@ struct TabPage {
 /// @param pages 标签页列表（标题 + 内容），按序各生成一个标签按钮。
 /// @return 组合完成的选项卡节点（Row 标签行在上、内容体在下）。
 inline auto tab_view(std::vector<TabPage> pages) -> Node {
-    auto selected = std::make_shared<State<int>>(0);
+    State<int> selected{0};
     std::vector<Node> tab_buttons;
     tab_buttons.reserve(pages.size());
     for (std::size_t i = 0; i < pages.size(); ++i) {
         const int idx = static_cast<int>(i);
         Button btn{pages[i].title};
-        btn.on_click = [selected, idx]() -> void { selected->set(idx); };
+        btn.on_click = [selected, idx]() -> void { selected.set(idx); };
         tab_buttons.emplace_back(std::move(btn));
     }
     std::vector<Node> bodies;

@@ -90,7 +90,7 @@ class Splitter : public Widget {
 
     /// @brief 把可订阅信号登记到 out（Inspector/序列化遍历用）。
     /// @param out 输出容器，追加本控件暴露的信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&ratio_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(ratio_); }
 
     /// @brief 当前比例（响应式）。
     /// @return 比例信号的可订阅视图引用。

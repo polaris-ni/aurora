@@ -167,7 +167,7 @@ class BarChart : public LeafWidget, public BarChartProps {
 
     /// @brief 收集可观察信号视图：本控件无信号旁挂，空实现。
     /// @param out 收集输出容器（不写入）。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 写出序列化面属性（数据系列 / 类目 / 轴 / 图例 / 留白等）：先走基类
     ///        （width/height/show），再补图表十个字段。

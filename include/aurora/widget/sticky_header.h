@@ -48,8 +48,8 @@ class StickyHeader : public SingleChild {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 收集本控件的可订阅信号视图。
-    /// @param out 输出参数，收集 SignalViewBase 指针；StickyHeader 无信号，恒不写入。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @param out 输出参数，收集响应式来源；StickyHeader 无信号，恒不写入。
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 宿主识别钩子：滚动控件据此在覆盖层按 pin 位重绘本控件。
     /// @return 恒为 true（本控件即吸顶头）。

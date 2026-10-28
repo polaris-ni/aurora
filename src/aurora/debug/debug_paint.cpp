@@ -23,7 +23,7 @@ std::uint64_t g_debug_frame = 0;  ///< 调试帧计数（repaint_highlight 时�
 
 /// @brief 控件修饰链是否含离屏缓存层（对应 `Modifier::cache_layer()`）。
 [[nodiscard]] [[maybe_unused]] auto has_cache_layer(const Widget &w) -> bool {
-    return std::ranges::any_of(w.modifier.get().nodes(), [](const auto &n) -> bool {
+    return std::ranges::any_of(w.modifier().nodes(), [](const auto &n) -> bool {
         return n && n->paint_kind() == ModifierNode::PaintKind::CacheLayer;
     });
 }

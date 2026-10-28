@@ -152,7 +152,7 @@ class LineChart : public LeafWidget, public LineChartProps {
 
     /// @brief 收集可观察信号：登记 grow-in 入场动画信号（动画期间值逐帧变化）。
     /// @param out 收集输出容器，追加动画信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&grow_.signal()); }
+    auto collect_signals(StateSink &out) -> void override { out.push(grow_.signal()); }
 
     /// @brief 动画期间不缓存 Display List（内容每帧变化）。
     /// @return 未在动画中时为 true（可缓存）。

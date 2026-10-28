@@ -23,13 +23,13 @@ auto VideoPlayer::set_show_controls(bool show) -> void {
     show_controls_ = show;
     if (!children_.empty()) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        children_[0].widget().show.set(show);
+        children_[0].widget().set_show(show);
     }
 }
 
 auto VideoPlayer::set_controls(std::unique_ptr<Widget> controls) -> void {
     if (controls) {
-        controls->show.set(show_controls_);
+        controls->set_show(show_controls_);
         children_ = {Node(std::move(controls))};
     } else {
         children_.clear();
@@ -287,7 +287,7 @@ auto VideoPlayer::on_layout(const Constraints &c, const BuildContext &ctx) -> Si
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         Node &ctl = children_[0];
-        ctl.widget().show.set(show_controls_);
+        ctl.widget().set_show(show_controls_);
         if (show_controls_) {
             const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F}, .max = s};
             ctl.widget().layout(cc, ctx);
@@ -368,14 +368,14 @@ auto VideoPlayer::on_pointer_event(MouseEvent &e) -> void {
 
 // ---- 自描述 / 序列化 ----
 
-auto VideoPlayer::collect_signals(std::vector<SignalViewBase *> &out) -> void {
+auto VideoPlayer::collect_signals(StateSink &out) -> void {
     for (Node &child : children_) {
         child.widget().collect_signals(out);
     }
-    out.push_back(&playing_state_);
-    out.push_back(&progress_);
-    out.push_back(&volume_);
-    out.push_back(&muted_);
+    out.push(playing_state_);
+    out.push(progress_);
+    out.push(volume_);
+    out.push(muted_);
 }
 
 auto VideoPlayer::on_mount(const BuildContext &ctx) -> void {
@@ -403,7 +403,7 @@ auto VideoPlayer::deserialize_props(const Json &props) -> void {
         if (!children_.empty()) {
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            children_[0].widget().show.set(show_controls_);
+            children_[0].widget().set_show(show_controls_);
         }
     }
 }

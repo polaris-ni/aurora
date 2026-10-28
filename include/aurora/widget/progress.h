@@ -7,9 +7,8 @@
 #include "aurora/core/a11y_types.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/binding.h"
-#include "aurora/state/reactive.h"
-#include "aurora/state/signal_view.h"
+#include "aurora/state/read_only_state.h"
+#include "aurora/state/state.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
@@ -17,9 +16,8 @@ namespace aurora {
 
 /// @brief 进度指示器（叶控件）：线性进度条，值范围 [0,1]。
 ///
-/// 支持两种值来源（与 Checkbox 一致的响应式模式）：
-/// - `Reactive<double>`：内部持有状态，变化触发重绘；
-/// - `Binding<double>`：双向绑定到上游 `State<double>`，随其变化刷新。
+/// 值来源是**只读**句柄 `ReadOnlyState<double>`：展示件不代写上游，要改上游请直接写原
+/// `State`。传字面量则内部自有来源承载，`set_value` 也只改这份自有来源。
 ///
 /// 视觉（对标 Material LinearProgressIndicator / Qt QProgressBar）：
 /// - 圆角胶囊轨道 + 填充（`corner_radius < 0` 自动 = 厚度一半；0 = 直角）；
@@ -37,16 +35,13 @@ class ProgressIndicator : public LeafWidget {
     /// @return 挂载了输入语义时为 true，纯展示时为 false。
     [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
     ProgressIndicator() = default;
-    /// @brief 以响应式进度值构造。
-    /// @param value 进度值（[0,1]），与持有方共享同一底层状态。
-    explicit ProgressIndicator(Reactive<double> value) : value_(std::move(value)) {}
-    /// @brief 以上游绑定构造：每次读取走绑定的 `State<double>`。
-    /// @param binding 进度状态绑定，内部初值取其当前读数。
-    explicit ProgressIndicator(Binding<double> binding) : binding_(std::move(binding)), value_(binding_.get()) {}
+    /// @brief 以只读进度句柄构造。
+    /// @param value 外部只读进度来源（[0,1]）；本控件不改写它。
+    explicit ProgressIndicator(ReadOnlyState<double> value) : external_(std::move(value)), bound_(true) {}
 
-    /// @brief 当前进度值：绑定态读取上游 `State<double>`，未绑定读取内部 `Reactive<double>`。
+    /// @brief 当前进度值：绑定外部来源时读外部，否则读自有来源。
     /// @return 进度值（[0,1]）。
-    [[nodiscard]] auto value() const -> double { return binding_.bound() ? binding_.get() : value_.get(); }
+    [[nodiscard]] auto value() const -> double { return bound_ ? external_.get() : own_.get(); }
 
     /// @brief 设置填充色（链式）。不调用则跟随主题 `Theme::primary`。
     /// @param c [in] 填充色。
@@ -82,24 +77,41 @@ class ProgressIndicator : public LeafWidget {
         return *this;
     }
 
-    /// @brief 设置进度值：夹取到 [0,1]；绑定态同步写入上游 `State`，并标记重绘。
+    /// @brief 替换进度来源（展示属性换源）：改用给定只读句柄并重建挂载期订阅。
+    /// @param next [in] 新的进度读句柄（可由 `State<double>` 隐式降级）。
+    /// @return 引用自身，便于链式调用。
+    auto set_value_source(ReadOnlyState<double> next) -> ProgressIndicator & {
+        bound_ = true;
+        external_ = std::move(next);
+        resubscribe_signals();  // 未挂载时为空操作；挂载后旧订阅仍固定旧源，必须重建
+        mark_needs_paint();
+        return *this;
+    }
+
+    /// @brief 设置进度值：夹取到 [0,1]，写入自有来源并标记重绘。
+    ///
+    /// 绑定外部只读来源时，本调用**不代写上游**而是换源到自有来源（展示属性换源），
+    /// 需要改上游请直接写原 `State`。
     /// @param v [in] 新进度值。
     auto set_value(double v) -> void {
         v = std::max(v, 0.0);
         v = std::min(v, 1.0);
-        if (binding_.bound()) {
-            binding_.set(v);
+        const bool was_bound = bound_;
+        bound_ = false;
+        own_ = v;
+        if (was_bound) {
+            resubscribe_signals();  // 有效来源由外部切回自有：重建订阅
         }
-        value_ = v;
         mark_needs_paint();
     }
 
-    /// @brief 收集重建依赖的信号：内部 `value_` 与绑定态的上游 `State` 目标。
-    /// @param out [out] 追加收集到的信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        out.push_back(&value_);
-        if (binding_.bound()) {
-            out.push_back(binding_.target());
+    /// @brief 收集重建依赖的信号：当前有效来源（外部只读或自有）。
+    /// @param out [out] 采集出口。
+    auto collect_signals(StateSink &out) -> void override {
+        if (bound_) {
+            out.push(external_);
+        } else {
+            out.push(own_);
         }
     }
 
@@ -271,8 +283,9 @@ class ProgressIndicator : public LeafWidget {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    Binding<double> binding_;  // 声明须在 value_ 之前（同 checkbox.h 的初始化顺序修复）
-    Reactive<double> value_;
+    State<double> own_{0.0};  ///< 自有来源（未绑定外部时生效；换源后也落到这里）
+    ReadOnlyState<double> external_;  ///< 外部只读来源（绑定构造时持有）
+    bool bound_ = false;  ///< 是否使用外部只读来源
     std::optional<Color> color_;  ///< 填充色；空 = 跟随主题 primary
     Color track_color_ = Color{220, 220, 220, 255};  ///< 轨道底色
     float thickness_ = 6.0F;  ///< 厚度 dp（自然高度）

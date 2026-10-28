@@ -185,8 +185,8 @@ class FormField : public SingleChild {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 信号采集：把字段错误态 `error_` 挂进视图层，供订阅刷新红框/错误文本。
-    /// @param out 收集目标：追加本字段可订阅的 SignalView 节点指针
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&error_); }
+    /// @param out 收集目标：追加本字段可订阅的来源句柄
+    auto collect_signals(StateSink &out) -> void override { out.push(error_); }
 
     /// @brief 执行验证：返回是否通过；错误消息写入响应式状态（驱动 UI 刷新）。
     /// @return true=验证通过（错误态已清除）；false=失败，消息见 `error_text()`
@@ -316,7 +316,7 @@ class Form : public Container {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 信号采集：Form 自身无响应式状态，字段信号经各 `FormField` 上报，此处不收集。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 验证全部字段（递归查找子树中的 FormField）：返回是否全部通过。
     /// @return true=所有字段验证通过；各失败字段的错误消息已写入自身状态

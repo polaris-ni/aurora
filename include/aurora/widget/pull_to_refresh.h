@@ -119,7 +119,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
 
     /// @brief 无信号依赖：下拉距离与状态机均为运行时内部状态。
     /// @param out 信号输出向量；本控件不向其写入任何信号。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 注册刷新回调（松手越过阈值时触发一次；回调内异步取数，完成后调 `finish_refresh`）。
     /// @param cb 无参刷新回调；覆盖既有值。

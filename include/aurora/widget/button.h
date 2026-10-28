@@ -11,7 +11,7 @@
 #include "aurora/i18n/localized_string.h"
 #include "aurora/i18n/message_catalog.h"
 #include "aurora/render/font_engine.h"
-#include "aurora/state/reactive.h"
+#include "aurora/state/read_only_state.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/widget.h"
 
@@ -21,8 +21,8 @@ namespace aurora {
 /// 由背景色调暗得到，禁用态用统一灰化）；背景色 / 文字色未显式设置时跟随主题
 /// （`roles.primary` / `roles.on_primary`），与 Checkbox 「缺省跟随主题」语义一致。
 struct ButtonProps {
-    Reactive<LocalizedString> label;  ///< 按钮文字
-    Reactive<std::optional<Color>> color;  ///< 背景色；空 = 跟随主题 primary（ThemeScope 换肤即生效）
+    ReadOnlyState<LocalizedString> label;  ///< 按钮文字来源（只读；常量或 `State` 隐式接入）
+    ReadOnlyState<std::optional<Color>> color;  ///< 背景色来源；空 = 跟随主题 primary（ThemeScope 换肤即生效）
     std::optional<Color> on_color;  ///< 文字色；空 = 跟随主题 on_primary
     Font font = Font{};  ///< 字体
     float corner_radius = 6.0F;  ///< 圆角半径（dp），>0 时背景与圆角裁剪
@@ -63,13 +63,15 @@ class Button : public LeafWidget, public ButtonProps {
     Button() = default;
     /// @brief 以一份完整属性聚合构造按钮（属性整体接管，避免逐字段赋值）。
     /// @param props 按钮属性快照，移动进本实例的 `ButtonProps` 基类子对象
-    explicit Button(ButtonProps props) : ButtonProps(std::move(props)) {}
+    explicit Button(ButtonProps props)
+        : ButtonProps(std::move(props)), label_(static_cast<ButtonProps &>(*this).label),
+          color_(static_cast<ButtonProps &>(*this).color) {}
     /// @brief 以文字构造按钮，其余属性取默认值。
     /// @param label 按钮文字（存入 `label` 属性）
-    explicit Button(const std::string &label) { this->label = label; }
+    explicit Button(const std::string &label) { set_label(label); }
     /// @brief 以字符串字面量构造按钮，其余属性取默认值。
     /// @param label 按钮文字（隐式转为 `std::string` 后存入 `label`）
-    explicit Button(const char *label) { this->label = label; }
+    explicit Button(const char *label) { set_label(label); }
 
     /// @brief 点击回调槽位：装配链/用户可替换，`activate()` 触发时同步调用。
     /// NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
@@ -80,11 +82,42 @@ class Button : public LeafWidget, public ButtonProps {
     /// @return 一份缺省构造的 `ButtonProps`，与 `ButtonProps{}` 完全一致
     [[nodiscard]] static auto defaults() -> ButtonProps { return ButtonProps{}; }
 
-    /// @brief 设置文字（链式）。
-    /// @param s 新按钮文本，覆盖 `label` 属性
+    /// @brief 当前标签来源（只读句柄按值返回）。
+    /// @return 已安装的标签来源。
+    [[nodiscard]] auto label() const -> ReadOnlyState<LocalizedString> { return label_; }
+
+    /// @brief 替换标签来源（展示属性换源）：常量由隐式 `ReadOnlyState` 构造接入。
+    /// @param next 新标签来源；挂载后调用会退订旧源、订阅新源并标脏。
     /// @return 引用 `*this`，便于链式续写
-    auto set_label(const std::string &s) -> Button & {
-        label = s;
+    auto set_label(ReadOnlyState<LocalizedString> next) -> Button & {
+        label_ = std::move(next);
+        mark_needs_layout();
+        mark_needs_paint();
+        resubscribe_signals();
+        return *this;
+    }
+
+    /// @brief 替换文字为常量文本（链式常量写法，换入自有常量来源）。
+    /// @param s 新按钮文本
+    /// @return 引用 `*this`，便于链式续写
+    auto set_label(const std::string &s) -> Button & { return set_label(ReadOnlyState<LocalizedString>{s}); }
+
+    /// @brief 替换文字为 C 字符串常量（消除 `const char*` 在两个常量重载间的歧义）。
+    /// @param s 新按钮文本；nullptr 语义由 `LocalizedString` 转换处理。
+    /// @return 引用 `*this`，便于链式续写
+    auto set_label(const char *s) -> Button & { return set_label(ReadOnlyState<LocalizedString>{LocalizedString{s}}); }
+
+    /// @brief 当前背景色来源（只读句柄按值返回）。
+    /// @return 已安装的背景色来源。
+    [[nodiscard]] auto background_source() const -> ReadOnlyState<std::optional<Color>> { return color_; }
+
+    /// @brief 替换背景色来源（展示属性换源）。
+    /// @param next 新的背景色来源；空 = 跟随主题 primary。
+    /// @return 引用 `*this`，便于链式续写
+    auto set_background_source(ReadOnlyState<std::optional<Color>> next) -> Button & {
+        color_ = std::move(next);
+        mark_needs_paint();
+        resubscribe_signals();
         return *this;
     }
 
@@ -96,12 +129,11 @@ class Button : public LeafWidget, public ButtonProps {
         return *this;
     }
 
-    /// @brief 设置背景色（链式）。
-    /// @param c 背景色，写入响应式属性 `color`
+    /// @brief 设置背景色（链式常量写法，换入自有常量来源）。
+    /// @param c 背景色
     /// @return 引用 `*this` 以继续链式配置
     auto background(Color c) -> Button & {
-        color = c;
-        return *this;
+        return set_background_source(ReadOnlyState<std::optional<Color>>{std::optional<Color>{c}});
     }
 
     /// @brief 设置文字色（链式）。
@@ -183,11 +215,11 @@ class Button : public LeafWidget, public ButtonProps {
         return *this;
     }
 
-    /// @brief 登记需订阅的信号视图：影响外观的两个响应式属性 `label` 与 `color`。
-    /// @param out 末尾追加 `&label`、`&color`（框架据此订阅变更并触发重建）
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        out.push_back(&label);
-        out.push_back(&color);
+    /// @brief 登记需订阅的信号视图：影响外观的两个展示来源。
+    /// @param out 末尾追加已安装的标签与背景色来源（框架据此订阅变更并触发重建）
+    auto collect_signals(StateSink &out) -> void override {
+        out.push(label_);
+        out.push(color_);
     }
 
     /// @brief 类型名：供注册表/日志/序列化按名分派。
@@ -209,7 +241,7 @@ class Button : public LeafWidget, public ButtonProps {
         if (!cached_display_text_.empty()) {
             return cached_display_text_;
         }
-        return label.get().resolve(&default_catalog(), Locale{});
+        return label_.get().resolve(&default_catalog(), Locale{});
     }
 
     /// @brief 悬停默认手型光标：按钮悬停 PointingHand；修饰链显式 `cursor(...)` 声明优先。
@@ -362,9 +394,9 @@ class Button : public LeafWidget, public ButtonProps {
     /// @param props 输出目标 JSON 对象，写入 label/color/on_color/font_size 等本类键
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入 width/height/show 等通用属性
-        props.set("label", localizable_to_json(label.get()));
+        props.set("label", localizable_to_json(label_.get()));
         // 背景色/文字色仅在显式设置时输出：保留「跟随主题」语义（与 Checkbox 同口径）
-        if (const auto &c = color.get(); c.has_value()) {
+        if (const auto &c = color_.get(); c.has_value()) {
             props.set("color", color_to_json(*c));
         }
         if (on_color.has_value()) {
@@ -406,10 +438,10 @@ class Button : public LeafWidget, public ButtonProps {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("label")) {
-            label.set(localizable_from_json(*props.at("label")));
+            set_label(localizable_from_json(*props.at("label")));
         }
         if (props.contains("color")) {
-            color.set(json_to_color(*props.at("color")));
+            set_background_source(json_to_color(*props.at("color")));
         }
         if (props.contains("on_color")) {
             on_color = json_to_color(*props.at("on_color"));
@@ -512,7 +544,7 @@ class Button : public LeafWidget, public ButtonProps {
         if (!enabled) {
             return disabled_color.value_or(Color{200, 200, 200, 255});
         }
-        const Color bg = color.get().value_or(inherit_theme(ctx).roles.primary);
+        const Color bg = color_.get().value_or(inherit_theme(ctx).roles.primary);
         if (pressed_) {
             return pressed_color.value_or(bg.shaded(0.80F));
         }
@@ -550,7 +582,7 @@ class Button : public LeafWidget, public ButtonProps {
     /// @note Side-effects: reads i18n table
     [[nodiscard]] auto resolved_label(const BuildContext &ctx) const -> std::string {
         const auto *lp = ctx.environment<Locale>();
-        return label.get().resolve(&default_catalog(), (lp != nullptr) ? *lp : Locale{});
+        return label_.get().resolve(&default_catalog(), (lp != nullptr) ? *lp : Locale{});
     }
 
     /// @brief 绘制居中文字。
@@ -569,6 +601,10 @@ class Button : public LeafWidget, public ButtonProps {
     float cached_text_height_ = 0.0F;  ///< 缓存的显示串高度（dp）
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::string cached_display_text_;  ///< 上次测量所用的显示串：与缓存宽度配套，串变即重测
+
+  private:
+    ReadOnlyState<LocalizedString> label_;  ///< 已安装的标签来源（构建数据装入后唯一生效）
+    ReadOnlyState<std::optional<Color>> color_;  ///< 已安装的背景色来源（构建数据装入后唯一生效）
 };
 
 }  // namespace aurora

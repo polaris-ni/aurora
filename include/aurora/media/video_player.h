@@ -9,7 +9,7 @@
 #include "aurora/core/image.h"
 #include "aurora/core/types.h"
 #include "aurora/media/video_source.h"
-#include "aurora/state/reactive.h"
+#include "aurora/state/state.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -24,8 +24,9 @@ class AudioSinkGraphBridge;
 ///  3. **可定制控件 UI**：`set_controls(...)` 整体替换叠层；默认 `VideoControls`。
 ///  4. **可插拔事件/手势**：覆写 `on_tap` / `on_double_tap` 或设置 `set_on_tap` / `set_on_double_tap` 回调。
 ///
-/// 播放时钟由 `Application::tick` 经 `tick_gestures` 驱动；`Reactive` 状态（`playing` / `progress` /
-/// `volume` / `muted`）可供控件与 UI 绑定。
+/// 播放时钟由 `Application::tick` 经 `tick_gestures` 驱动；播放事实（`playing` / `progress` /
+/// `volume` / `muted`）经只读句柄暴露，用户意图走 `toggle_play` / `seek_fraction` / `set_volume` /
+/// `set_muted` 命令，事实回填不当作输入事件。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: paints
@@ -124,18 +125,18 @@ class VideoPlayer : public Container, public VideoController {
     /// @param fn 无参回调；未设时双击走默认适配模式切换。
     auto set_on_double_tap(std::function<void()> fn) -> void { on_double_tap_ = std::move(fn); }
 
-    /// @brief 播放状态信号（VideoController 实现：供控件解耦绑定）。
-    /// @return 底层 Reactive<bool> 的地址，恒非空。
-    [[nodiscard]] auto playing_signal() -> Reactive<bool> * override { return &playing_state_; }
-    /// @brief 进度信号（0..1，VideoController 实现）。
-    /// @return 底层 Reactive<double> 的地址，恒非空。
-    [[nodiscard]] auto progress_signal() -> Reactive<double> * override { return &progress_; }
-    /// @brief 音量信号（[0,1]，VideoController 实现）。
-    /// @return 底层 Reactive<double> 的地址，恒非空。
-    [[nodiscard]] auto volume_signal() -> Reactive<double> * override { return &volume_; }
-    /// @brief 静音信号（VideoController 实现）。
-    /// @return 底层 Reactive<bool> 的地址，恒非空。
-    [[nodiscard]] auto muted_signal() -> Reactive<bool> * override { return &muted_; }
+    /// @brief 播放状态读数（VideoController 实现：供控件解耦绑定）。
+    /// @return 播放状态来源的只读值句柄（保活读数来源，不保活播放器本身）。
+    [[nodiscard]] auto playing_signal() -> ReadOnlyState<bool> override { return playing_state_; }
+    /// @brief 进度读数（0..1，VideoController 实现）。
+    /// @return 进度来源的只读值句柄。
+    [[nodiscard]] auto progress_signal() -> ReadOnlyState<double> override { return progress_; }
+    /// @brief 音量读数（[0,1]，VideoController 实现）。
+    /// @return 音量来源的只读值句柄。
+    [[nodiscard]] auto volume_signal() -> ReadOnlyState<double> override { return volume_; }
+    /// @brief 静音读数（VideoController 实现）。
+    /// @return 静音来源的只读值句柄。
+    [[nodiscard]] auto muted_signal() -> ReadOnlyState<bool> override { return muted_; }
 
     /// @brief 控件类型名（诊断 / 序列化路由）。
     /// @return "VideoPlayer"。
@@ -148,7 +149,7 @@ class VideoPlayer : public Container, public VideoController {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
     /// @brief 汇集可绑定信号：先收集子控件信号，再追加播放/进度/音量/静音四路状态。
     /// @param out 追加目标信号视图列表。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override;
+    auto collect_signals(StateSink &out) -> void override;
     /// @brief 序列化专有属性（fit / show_controls）。
     /// @param props 写入目标 JSON 对象（先由基类写入公共属性）。
     auto serialize_props(Json &props) const -> void override;
@@ -221,10 +222,10 @@ class VideoPlayer : public Container, public VideoController {
     std::chrono::microseconds video_pos_{0};
     std::optional<std::chrono::steady_clock::time_point> play_start_wall_;
 
-    Reactive<bool> playing_state_{false};
-    Reactive<double> progress_{0.0};
-    Reactive<double> volume_{1.0};
-    Reactive<bool> muted_{false};
+    State<bool> playing_state_{false};
+    State<double> progress_{0.0};
+    State<double> volume_{1.0};
+    State<bool> muted_{false};
 
     bool pressed_ = false;
     std::chrono::steady_clock::time_point last_tap_;

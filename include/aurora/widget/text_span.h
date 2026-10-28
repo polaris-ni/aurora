@@ -27,6 +27,14 @@ struct TextSpan {
     [[nodiscard]] auto resolve_color(const BuildContext &ctx) const -> Color {
         return color.value_or(inherit_theme(ctx).roles.on_surface);
     }
+
+    /// @brief 逐成员相等比较：文本 / 字体 / 显式色三态（空 = 跟随主题）全部一致时为 true。
+    ///
+    /// 供 `State<std::vector<TextSpan>>` 的等值去重与序列化往返测试使用：没有这条比较时，
+    /// 相同片段序列的再次提交仍会整体重绘。
+    /// @param o 另一片段。
+    /// @return 三成员均相等时为 true。
+    [[nodiscard]] auto operator==(const TextSpan &o) const -> bool = default;
 };
 
 }  // namespace aurora

@@ -2787,7 +2787,7 @@
       "events": [],
       "children_policy": "none",
       "examples": [
-        "au::RichText(au::Reactive<std::vector<au::TextSpan>>{ ... })"
+        "au::RichText(au::State<std::vector<au::TextSpan>>{ ... })"
       ]
     },
     {
@@ -4596,7 +4596,7 @@
       "events": [],
       "children_policy": "",
       "examples": [
-        "au::Timer(1s, [](const au::SignalView<int>& t){ return au::Text(au::Computed<std::string>{ [&]{ return std::to_string(t.get()); } }); });",
+        "au::Timer(1s, [](au::ReadOnlyState<int> t){ return au::Text(au::computed([t]{ return std::to_string(t.get()); })); });",
         "au::Timer(1s, au::Timer::child([]{ return au::Text(\"tick\"); }), [](int n){ poll(n); });"
       ]
     },

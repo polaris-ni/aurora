@@ -10,9 +10,7 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/binding.h"
-#include "aurora/state/reactive.h"
-#include "aurora/state/signal_view.h"
+#include "aurora/state/state.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
@@ -20,7 +18,7 @@ namespace aurora {
 
 /// @brief 开关（叶控件）：布尔状态 `bool`，点击切换；绘制为圆角轨道 + 圆形滑块。
 ///
-/// 值来源与 `Checkbox` 一致（`Reactive<bool>` / `Binding<bool>` + `onChanged`）。
+/// 值来源与 `Checkbox` 一致：可写句柄 `State<bool>`（自有或与调用方共享）+ `onChanged`。
 ///
 /// 视觉（对标 Material 3 Switch / Fluent ToggleSwitch）：
 /// - 开启：激活色轨道（`active_color` 未显式设置时跟随主题 `Theme::primary`）；
@@ -36,17 +34,11 @@ class Switch : public LeafWidget {
   public:
     Switch() = default;
 
-    /// @brief 以响应式布尔值构造开关；on_changed 非空时在每次值变化后回调。
-    /// @param value 初始状态与响应式数据源
+    /// @brief 以值句柄构造开关：传字面量创建自有来源，传外部 `State<bool>` 则共享同一来源。
+    /// @param value 开关态句柄
     /// @param on_changed 值变化回调（可空）
-    explicit Switch(Reactive<bool> value, std::function<void(bool)> on_changed = {})
+    explicit Switch(State<bool> value, std::function<void(bool)> on_changed = {})
         : value_(std::move(value)), on_changed_(std::move(on_changed)) {}
-
-    /// @brief 以绑定 `Binding<bool>` 构造开关，初值取自 `binding.get()`，读写均经由该绑定。
-    /// @param binding 布尔状态绑定源
-    /// @param on_changed 值变化回调（可空）
-    explicit Switch(Binding<bool> binding, std::function<void(bool)> on_changed = {})
-        : binding_(std::move(binding)), value_(binding_.get()), on_changed_(std::move(on_changed)) {}
 
     /// @brief 替换值变化回调（链式）。
     /// @param cb 新回调（可空，空则切换时不回调）
@@ -124,16 +116,14 @@ class Switch : public LeafWidget {
     /// @return 当前是否启用
     [[nodiscard]] auto enabled() const -> bool { return enabled_; }
 
-    /// @brief 读取当前开关态：已绑定时读绑定值，否则读内部响应值。
+    /// @brief 读取当前开关态（实时读取来源，不缓存）。
     /// @return 当前布尔状态
-    [[nodiscard]] auto value() const -> bool { return binding_.bound() ? binding_.get() : value_.get(); }
+    [[nodiscard]] auto value() const -> bool { return value_.get(); }
 
-    /// @brief 设置开关态：写入绑定/响应值，触发 on_changed，请求重绘并派发无障碍 ValueChanged 事件。
+    /// @brief 设置开关态：提交到来源（外部共享时即写回调用方）、触发 on_changed、
+    ///        请求重绘并派发无障碍 ValueChanged 事件。
     /// @param v 新状态
     auto set_value(bool v) -> void {
-        if (binding_.bound()) {
-            binding_.set(v);
-        }
         value_ = v;
         if (on_changed_) {
             on_changed_(v);
@@ -142,14 +132,9 @@ class Switch : public LeafWidget {
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
 
-    /// @brief 收集本控件订阅的信号：内部 `value_`；已绑定时追加绑定目标。
-    /// @param out 输出数组，信号视图指针追加到尾部
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        out.push_back(&value_);
-        if (binding_.bound()) {
-            out.push_back(binding_.target());
-        }
-    }
+    /// @brief 收集本控件订阅的信号：唯一的值句柄 `value_`。
+    /// @param out 采集出口
+    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
 
     /// @brief 控件类型名（自描述）。
     /// @return 字面量 "Switch"
@@ -434,8 +419,7 @@ class Switch : public LeafWidget {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    Binding<bool> binding_;  // 声明须在 value_ 之前（同 checkbox.h 的初始化顺序修复）
-    Reactive<bool> value_;
+    State<bool> value_;  ///< 开关态来源（自有或与调用方共享）
     std::function<void(bool)> on_changed_;
     std::optional<Color> active_color_;  ///< 开启态轨道色；空 = 跟随主题 primary
     Color inactive_color_ = Color{180, 180, 180, 255};  ///< 关闭态轨道色

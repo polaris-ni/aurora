@@ -147,9 +147,9 @@ class LazyList : public Widget {
     /// @return 本控件的 WidgetDescriptor。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 信号收集：本控件无内建 SignalView，保持输出为空。
+    /// @brief 信号收集：本控件无内建响应式来源，保持输出为空。
     /// @param out 信号视图累加表。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 总项数。
     /// @return 条目总数（构造/反序列化/`set_count` 后恒 ≥0）。
@@ -313,11 +313,11 @@ class LazyList : public Widget {
 
     /// @brief 滚动偏移只读信号（滚动驱动动画原语）：宿主以纯函数派生视差/进度/淡入淡出。
     ///        懒创建；偏移每次变化（滚轮/滑动帧/程序化）写入。
-    /// @note Side-effects: reads state (registers reactive dependency in Effect scope)
-    /// @return 偏移信号视图引用（懒创建后恒有效）。
-    [[nodiscard]] auto offset_signal() -> SignalView<float> & {
+    /// @note Side-effects: reads state (registers reactive dependency in computed/effect scope)
+    /// @return 偏移信号的只读句柄（懒创建后恒有效）。
+    [[nodiscard]] auto offset_signal() -> ReadOnlyState<float> {
         if (!offset_state_) {
-            offset_state_ = std::make_shared<State<float>>(offset_);
+            offset_state_ = State<float>(offset_);
             published_offset_ = offset_;
         }
         return *offset_state_;
@@ -325,10 +325,9 @@ class LazyList : public Widget {
 
     /// @brief 偏移变更回调（命令式旁听口；与 `offset_signal()` 并存、同一次落位各驱动一次）。
     ///
-    /// 存在的理由是**不进出 `Effect` 作用域就没有订阅面**：`SignalViewBase` 只有 `subscribe(Effect&)`
-    /// 一条订阅路，而本控件的 `collect_signals` 返回空表（不向控件树暴露该信号），于是宿主想知道
-    /// 「用户滚到底了没有」只能逐帧轮询 `scroll_offset()` 与 `max_scroll_offset()` 自己比。本回调
-    /// 把那条比较的输入直接送过来：偏移**实际落位**时调用一次，参数为新偏移。
+    /// 存在的理由是**不必进响应式作用域也能收通知**：只读句柄的 `subscribe` 是固定来源订阅，
+    /// 而本控件的 `collect_signals` 返回空表（不向控件树暴露该信号），宿主若不想建立响应式派生，
+    /// 用这个回调即可把「滚到底了没有」的判断输入直接拿到：偏移**实际落位**时调用一次，参数为新偏移。
     ///
     /// 口径：
     /// - 来源不限——滚轮、滑动帧（每帧一次）、`set_scroll_offset`、无障碍滚动、拖入自动滚边、
@@ -806,7 +805,7 @@ class LazyList : public Widget {
     }
 
     /// @brief 偏移信号写入（仅当宿主索取过 offset_signal() 且值确实变化）。
-    ///        用镜像值比较而非 `State::get()`——后者在 Effect 作用域会自订阅本控件。
+    ///        用镜像值比较而非 `State::get()`——后者在 effect 作用域会自订阅本控件。
     auto publish_offset() -> void {
         if (!offset_state_ || published_offset_ == offset_) {
             return;
@@ -891,7 +890,7 @@ class LazyList : public Widget {
     ScrollGlide glide_;  ///< snap 收位 / scroll_to 的短滑动时序
     DragAutoScroll drag_auto_scroll_;  ///< 拖入自动滚边状态（系统拖放 Over 态驱动，与收位滑动互不抢占）
     std::optional<std::chrono::steady_clock::time_point> glide_last_;  ///< 上一滑动帧时刻（墙钟差 = dt）
-    std::shared_ptr<State<float>> offset_state_;  ///< 懒创建的偏移信号（滚动驱动动画原语，经 offset_signal 暴露）
+    std::optional<State<float>> offset_state_;  ///< 懒创建的偏移来源（滚动驱动动画原语，经 offset_signal 暴露）
     float published_offset_ = 0.0F;  ///< 最近一次发布的偏移值（镜像，避免回读 get() 误订阅）
 };
 

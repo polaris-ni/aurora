@@ -192,7 +192,7 @@ class ImageView : public Widget, public ImageViewProps {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 登记需订阅的信号视图：`ImageViewProps` 皆为普通值字段，无响应式属性可登记。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 序列化自有属性到 `props`（先由基类写通用属性）。
     /// @param props 输出目标 JSON 对象：写入 `source`（仅当有值）与取自 `bitmap` 的

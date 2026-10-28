@@ -684,10 +684,10 @@ class Window {
             applied_inset_.right != inset.right || applied_inset_.bottom != inset.bottom) {
             applied_inset_ = inset;
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast): inset_root_ 构造即 ContentInsetRoot
-            static_cast<detail::ContentInsetRoot &>(inset_root_.widget()).modifier =
-                (inset.left == 0.0F && inset.top == 0.0F && inset.right == 0.0F && inset.bottom == 0.0F)
-                    ? Modifier{}
-                    : Modifier{}.padding(inset);
+            static_cast<detail::ContentInsetRoot &>(inset_root_.widget())
+                .set_modifier((inset.left == 0.0F && inset.top == 0.0F && inset.right == 0.0F && inset.bottom == 0.0F)
+                                  ? Modifier{}
+                                  : Modifier{}.padding(inset));
             force_full_redraw();  // 内缩量变化 ⇒ 子树约束与绘制位置同时变化：整帧重排重绘
         }
         Node &presented = inset_root_;  // 后续帧管线统一以壳为根

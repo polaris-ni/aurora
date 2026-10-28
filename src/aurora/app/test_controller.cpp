@@ -361,7 +361,7 @@ auto TestController::expect_prop(const Widget &w, std::string_view key, const Js
                                        "expect_prop: " + std::string{key} + " expected " + json_dump(expected) +
                                            " but got " + json_dump(actual) +
                                            " (property names come from the widget self-description; "
-                                           "Reactive/Localized properties read the current resolved value)")};
+                                           "state-backed/localized properties read the current resolved value)")};
     }
     return Result<void>{};
 }

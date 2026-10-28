@@ -83,9 +83,9 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
         bar_height = props.bar_height;
     }
 
-    /// @brief 信号收集：本控件无内建 SignalView，保持输出为空。
+    /// @brief 信号收集：本控件无内建响应式来源，保持输出为空。
     /// @param out 信号视图累加表。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
     /// @brief 类型名 "BottomNavBar"。
     /// @return 类型名常量串。
     [[nodiscard]] auto type_name() const -> const char * override { return "BottomNavBar"; }

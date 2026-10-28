@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include "aurora/state/reactive.h"
+#include "aurora/state/state.h"
 #include "aurora/widget/bottom_nav_bar.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
@@ -77,41 +77,40 @@ inline auto input(Container &parent, std::string_view value = "", TextInputProps
     return detail::make_add<TextInput>(parent, std::move(props));
 }
 
-/// @brief 复选框（双模：`Reactive<bool>` 或简单 `bool` 初值）。
+/// @brief 复选框（双模：`State<bool>` 或简单 `bool` 初值）。
 /// @param parent 目标父容器
 /// @param checked 响应式勾选状态
 /// @param on_changed 勾选变化回调（可空）
 /// @return 指向新建 `Checkbox` 的裸指针，生命周期由 parent 子树持有
-inline auto checkbox(Container &parent, Reactive<bool> checked, std::function<void(bool)> on_changed = {})
-    -> Checkbox * {
+inline auto checkbox(Container &parent, State<bool> checked, std::function<void(bool)> on_changed = {}) -> Checkbox * {
     return detail::make_add<Checkbox>(parent, std::move(checked), std::move(on_changed));
 }
 
-/// @brief 复选框（简单初值重载）：包装为 `Reactive<bool>` 后转调响应式重载。
+/// @brief 复选框（简单初值重载）：包装为 `State<bool>` 后转调响应式重载。
 /// @param parent 目标父容器
 /// @param initial 初始勾选状态
 /// @param on_changed 勾选变化回调（可空）
 /// @return 指向新建 `Checkbox` 的裸指针，生命周期由 parent 子树持有
 inline auto checkbox(Container &parent, bool initial, std::function<void(bool)> on_changed = {}) -> Checkbox * {
-    return checkbox(parent, Reactive<bool>{initial}, std::move(on_changed));
+    return checkbox(parent, State<bool>{initial}, std::move(on_changed));
 }
 
-/// @brief 滑块（双模：`Reactive<double>` 或简单 `double` 初值）。
+/// @brief 滑块（双模：`State<double>` 或简单 `double` 初值）。
 /// @param parent 目标父容器
 /// @param value 响应式滑块值
 /// @param on_changed 值变化回调（可空）
 /// @return 指向新建 `Slider` 的裸指针，生命周期由 parent 子树持有
-inline auto slider(Container &parent, Reactive<double> value, std::function<void(double)> on_changed = {}) -> Slider * {
+inline auto slider(Container &parent, State<double> value, std::function<void(double)> on_changed = {}) -> Slider * {
     return detail::make_add<Slider>(parent, std::move(value), std::move(on_changed));
 }
 
-/// @brief 滑块（简单初值重载）：包装为 `Reactive<double>` 后转调响应式重载。
+/// @brief 滑块（简单初值重载）：包装为 `State<double>` 后转调响应式重载。
 /// @param parent 目标父容器
 /// @param initial 初始滑块值
 /// @param on_changed 值变化回调（可空）
 /// @return 指向新建 `Slider` 的裸指针，生命周期由 parent 子树持有
 inline auto slider(Container &parent, double initial, std::function<void(double)> on_changed = {}) -> Slider * {
-    return slider(parent, Reactive<double>{initial}, std::move(on_changed));
+    return slider(parent, State<double>{initial}, std::move(on_changed));
 }
 
 /// @brief 纵向盒子容器（`Column` 的语法糖）。

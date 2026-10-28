@@ -29,22 +29,11 @@ namespace aurora {
 ///       NOLINTNEXTLINE(bugprone-exception-escape)
 class ThemeScope : public Provider<Theme> {
   public:
-    using Provider::Provider;  ///< 复用 Provider<Theme>(Theme, Node/Widget) 构造
-
-    /// @brief 运行时换肤：用共享 `State<Theme>` 注入，主题变化自动重渲染子树。
-    /// @param theme 共享主题状态（值变化时子树自动重渲染）。
-    /// @param child 挂载的子节点（移交所有权）。
-    explicit ThemeScope(std::shared_ptr<State<Theme>> theme, Node child)
-        : Provider(std::move(theme), std::move(child)) {}
-
-    /// @brief 运行时换肤（任意 Widget 子节点版）：与 Node 版等价，子节点经完美转发收为 Node。
-    /// @tparam W 子节点控件类型（须派生自 Widget）。
-    /// @param theme 共享主题状态（值变化时子树自动重渲染）。
-    /// @param child 挂载的子节点（右值引用，转发给基类构造）。
-    template <typename W>
-        requires std::derived_from<W, Widget>
-    explicit ThemeScope(std::shared_ptr<State<Theme>> theme, W &&child)
-        : Provider(std::move(theme), std::forward<W>(child)) {}
+    /// @brief 继承 `Provider<Theme>(ReadOnlyState<Theme>, Node/Widget)` 的构造重载。
+    ///
+    /// 主题值、`State<Theme>` 与 `ReadOnlyState<Theme>` 都经单向转换进来；`State<Theme>` 变化时
+    /// 子树自动重渲染。
+    using Provider::Provider;
 
     /// @brief 控件类型名。
     /// @return 恒为 "ThemeScope"。

@@ -12,8 +12,7 @@
 #include "aurora/i18n/message_catalog.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/reactive.h"
-#include "aurora/state/signal_view.h"
+#include "aurora/state/read_only_state.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/text_span.h"
 #include "aurora/widget/widget.h"
@@ -144,7 +143,8 @@ inline auto measure_rich_text(const std::vector<TextSpan> &spans, float max_widt
 /// @brief 富文本控件（叶控件）：按 `TextSpan` 序列渲染带样式的文本。
 ///
 /// 文本经 `default_catalog()` + 当前 `Locale` 解析（支持 i18n）。布局采用确定性贪心换行，
-/// 整串宽度/高度由 `measureRichText` 决定；值来源支持 `Reactive<std::vector<TextSpan>>`。
+/// 整串宽度/高度由 `measureRichText` 决定；片段来源是只读句柄 `ReadOnlyState<std::vector<TextSpan>>`，
+/// 由 `State<std::vector<TextSpan>>` 隐式降级或经字面量自有来源承载。
 ///
 /// 颜色语义（迁移批）：片段 `TextSpan::color` 未显式设置时，跟随本控件 `text_color`
 /// （缺省再回落主题 `on_surface`）——ThemeScope 换肤即生效；片段显式赋色优先。
@@ -158,9 +158,30 @@ class RichText : public LeafWidget {
     [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
     /// @brief 默认构造：空片段序列，渲染空白行。
     RichText() = default;
-    /// @brief 构造富文本：接管响应式片段序列。
-    /// @param spans 片段序列的响应式值（文本/字体/颜色），移入 `spans_`
-    explicit RichText(Reactive<std::vector<TextSpan>> spans) : spans_(std::move(spans)) {}
+    /// @brief 构造富文本：接管片段来源读句柄。
+    /// @param spans 片段序列读句柄（文本/字体/颜色；可由 `State` 或字面量 vector 隐式转换），
+    ///              移入安装槽位。
+    explicit RichText(ReadOnlyState<std::vector<TextSpan>> spans) : spans_(std::move(spans)) {}
+
+    /// @brief 片段来源（只读句柄）：供宿主接走或另行订阅。
+    /// @return 当前安装的片段读句柄。
+    [[nodiscard]] auto spans_source() const -> ReadOnlyState<std::vector<TextSpan>> { return spans_; }
+
+    /// @brief 替换片段来源（展示属性换源）：标记重排重绘并重建挂载期订阅。
+    /// @param next 新的片段读句柄。
+    /// @return 自身引用，便于链式调用。
+    auto set_spans(ReadOnlyState<std::vector<TextSpan>> next) -> RichText & {
+        install_spans(std::move(next));
+        return *this;
+    }
+
+    /// @brief 以字面量替换片段来源（换到一份自有常量来源）。
+    /// @param spans 新的片段序列。
+    /// @return 自身引用，便于链式调用。
+    auto set_spans(std::vector<TextSpan> spans) -> RichText & {
+        install_spans(ReadOnlyState<std::vector<TextSpan>>{std::move(spans)});
+        return *this;
+    }
 
     /// @brief 设置默认文本色（链式）；影响未显式设色的片段（回落主题 on_surface）。
     /// @param c 文字前景色。
@@ -180,7 +201,7 @@ class RichText : public LeafWidget {
 
     /// @brief 登记需订阅的信号视图：片段序列 `spans_`。
     /// @param out 末尾追加 `&spans_`（内容变更驱动重排重绘）
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&spans_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(spans_); }
 
     /// @brief 类型名：供注册表/日志/序列化按名分派。
     /// @return 静态字符串 `"RichText"`
@@ -237,7 +258,7 @@ class RichText : public LeafWidget {
                 },
             .events = {},
             .children_policy = "none",
-            .examples = {"au::RichText(au::Reactive<std::vector<au::TextSpan>>{ ... })"},
+            .examples = {"au::RichText(au::State<std::vector<au::TextSpan>>{ ... })"},
         };
     }
     /// @brief 实例级自描述：无实例差异描述，直接转发 `describe_static()`。
@@ -264,7 +285,8 @@ class RichText : public LeafWidget {
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
         if (props.contains("text")) {
-            spans_ = Reactive{std::vector{TextSpan{.text = localizable_from_json(*props.at("text"))}}};
+            install_spans(ReadOnlyState<std::vector<TextSpan>>{
+                std::vector{TextSpan{.text = localizable_from_json(*props.at("text"))}}});
         }
         if (props.contains("text_color")) {
             text_color_ = json_to_color(*props.at("text_color"));
@@ -314,7 +336,17 @@ class RichText : public LeafWidget {
     }
 
   private:
-    Reactive<std::vector<TextSpan>> spans_;
+    /// @brief 安装片段来源：换源后标记重排重绘，并由基类重建挂载期订阅（旧订阅固定旧源）。
+    /// @param next 新的片段读句柄。
+    auto install_spans(ReadOnlyState<std::vector<TextSpan>> next) -> void {
+        spans_ = std::move(next);
+        lines_.clear();  // 行布局缓存随来源作废，待下一次布局按新来源重算
+        mark_needs_layout();
+        mark_needs_paint();
+        resubscribe_signals();  // 未挂载时为空操作；挂载后旧订阅仍固定旧源，必须重建
+    }
+
+    ReadOnlyState<std::vector<TextSpan>> spans_;  ///< 安装的片段来源（只读句柄）
     std::optional<Color> text_color_;  ///< 默认文字色；空 = 跟随主题 on_surface
     std::vector<detail::RichLine> lines_;
 };

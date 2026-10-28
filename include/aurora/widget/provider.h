@@ -4,7 +4,6 @@
 #include "aurora/environment/environment.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/i18n/locale.h"
-#include "aurora/state/reactive.h"
 #include "aurora/state/state.h"
 #include "aurora/theming/theme.h"
 #include "aurora/widget/widget.h"
@@ -43,7 +42,7 @@ inline auto provider_type_name<MediaQuery>() -> const char * {
 /// 把值 `T` 注入环境，子树经 `BuildContext::environment<T>()` 取到最近祖先的 Provider。
 /// 注意：实作放在 widget 模块以避免 environment→widget 的循环依赖；环境机制
 /// （Environment/BuildContext）本身在 environment 模块。
-/// 本行隐式生成的拷贝/移动构造复制响应式持有 Reactive<T>（其拷贝即分配值存储与订阅），被异常逃逸检查判
+/// 本行隐式生成的拷贝/移动构造复制响应式持有 State<T>（其拷贝即分配值存储与订阅），被异常逃逸检查判
 /// 「不应抛出」；该隐式特成员按 [except.spec] 本就是 potentially-throwing，抛出（bad_alloc）沿栈交给
 /// 构造方。本类刻意依赖隐式拷贝/移动（CODING_STANDARDS.md §5.1），故不补 = delete 而逐点豁免。
 /// 豁免取**行尾**形态而非「下一行」形态：本类是模板，告警报在**实例化点**所属的声明行
@@ -52,37 +51,25 @@ inline auto provider_type_name<MediaQuery>() -> const char * {
 template <typename T>
 class Provider : public SingleChild {  // NOLINT(bugprone-exception-escape)
   public:
-    /// @brief 用静态值注入（按值构造响应式持有）。
-    /// @param value 注入的值。
+    /// @brief 注入只读值句柄：常量值、`State<T>` 与 `ReadOnlyState<T>` 都经单向转换进来。
+    ///
+    /// 本控件只读注入值、不提供写入口：需要后代修改时显式用 `Provider<State<T>>`
+    /// （注入的是句柄本身，后代拿到后可写原来源），或注入带领域命令的应用模型。
+    /// @param value 注入值句柄；可指向调用方持有的来源。
     /// @param child 子节点。
-    Provider(T value, Node child) : SingleChild(std::move(child)), value_(std::move(value)) {}
+    Provider(ReadOnlyState<T> value, Node child) : SingleChild(std::move(child)), value_(std::move(value)) {}
 
-    /// @brief 用静态值注入并接受具体 widget 引用（隐式转 Node 挂接）。
+    /// @brief 注入只读值句柄并接受具体 widget 引用（隐式转 Node 挂接）。
     /// @tparam W 子 widget 的具体类型。
-    /// @param value 注入的值。
+    /// @param value 注入值句柄。
     /// @param child 转发给 SingleChild 的子 widget 引用。
     template <typename W>
         requires std::derived_from<W, Widget>
-    Provider(T value, W &&child) : SingleChild(Node{std::forward<W>(child)}), value_(std::move(value)) {}
-
-    /// @brief 用共享 `State<T>` 注入：外部 State 变化时子树自动重渲染（运行时换肤/换区域）。
-    /// @param state 共享状态指针。
-    /// @param child 子节点。
-    explicit Provider(std::shared_ptr<State<T>> state, Node child)
-        : SingleChild(std::move(child)), value_(std::move(state)) {}
-
-    /// @brief 用共享 `State<T>` 注入并接受具体 widget 引用（运行时换肤/换区域）。
-    /// @tparam W 子 widget 的具体类型。
-    /// @param state 共享状态指针。
-    /// @param child 转发给 SingleChild 的子 widget 引用。
-    template <typename W>
-        requires std::derived_from<W, Widget>
-    explicit Provider(std::shared_ptr<State<T>> state, W &&child)
-        : SingleChild(Node{std::forward<W>(child)}), value_(std::move(state)) {}
+    Provider(ReadOnlyState<T> value, W &&child) : SingleChild(Node{std::forward<W>(child)}), value_(std::move(value)) {}
 
     /// @brief 收集本控件的可订阅信号。
     /// @param out 输出容器；追加响应式持有 value_ 的视图指针。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&value_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
 
     /// @brief 控件类型名：按注入值类型 `T` 映射（见 provider_type_name）。
     /// @return "ThemeProvider"/"LocaleProvider"/"MediaQueryProvider"，其余类型返回通用 "Provider"。
@@ -108,13 +95,9 @@ class Provider : public SingleChild {  // NOLINT(bugprone-exception-escape)
     /// @return 与 describe_static() 相同的 WidgetDescriptor。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 当前注入值（读取响应式持有，自动登记依赖）。
+    /// @brief 当前注入值（读取只读句柄，自动登记依赖）。
     /// @return 注入值 `T` 的当前值引用。
     [[nodiscard]] auto value() const -> const T & { return value_.get(); }
-
-    /// @brief 运行时改写注入值（触发子树刷新）。
-    /// @param v 新的注入值。
-    auto set_value(T v) -> void { value_ = std::move(v); }
 
   protected:
     /// @brief 换值标脏口径：在默认「标脏本控件及其祖先缓存」之外，追加**子树**缓存清零。
@@ -175,7 +158,7 @@ class Provider : public SingleChild {  // NOLINT(bugprone-exception-escape)
         }
     }
 
-    Reactive<T> value_;  ///< 响应式持有（支持按值或共享 State<T> 注入）
+    ReadOnlyState<T> value_;  ///< 注入值的只读句柄（常量、外部 State 或外部只读句柄同源）
     Environment child_env_;
 };
 

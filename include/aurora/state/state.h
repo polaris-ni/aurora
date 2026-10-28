@@ -1,144 +1,163 @@
 #pragma once
 
+#include <concepts>
+#include <functional>
 #include <memory>
+#include <type_traits>
 #include <utility>
-#include <vector>
 
-#include "aurora/state/effect.h"
-#include "aurora/state/signal_view.h"
-#include "aurora/state/state_registry.h"
+#include "aurora/state/detail/reactor.h"
+#include "aurora/state/detail/registry.h"
+#include "aurora/state/read_only_state.h"
+#include "aurora/state/subscription.h"
 
+/// @brief Aurora 根命名空间：库的公共 API 均声明在其下。
 namespace aurora {
 
-class StateGraph;  // 前向声明（state_graph.h 提供状态依赖图，specification/02-state.md §6）
-
-/// @brief 可观察状态容器基类：持有观察者列表并负责通知。
-/// @note Thread: main-thread only
-/// @note Side-effects: none
-/// @note Rebuildable: no
-class StateBase {  // NOLINT(cppcoreguidelines-special-member-functions)
-  public:
-    /// @brief 虚析构（default）：保证经基类指针正确销毁派生状态源，本身不持有额外资源。
-    /// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
-    virtual ~StateBase() = default;
-
-  protected:
-    StateBase() { detail::register_state(*this, anchor_); }
-
-    /// @brief 生命周期锚点：供观察边 Connection 以 weak_ptr 引用，使 State 先于
-    ///        Effect 析构时也不会留下悬垂观察者。
-    /// @return 本状态的锚点 shared_ptr（构造时经 make_anchor 生成，生命周期内不变）。
-    [[nodiscard]] virtual auto anchor() const -> AnchorPtr { return anchor_; }
-
-    auto notify() -> void {
-        // 遍历并惰性摘除失效/已释放的观察者：Connection 以 weak_ptr 引用 Effect
-        // 锚点，任一侧析构后 lock() 失败即为失效，绝不解引用悬垂对象。
-        // 注：effect.lock() 仅用于「存活探测」；实际运行/状态查询走 effect_raw（Effect*），
-        // 因锚点存活 ⇔ Effect 存活，故 effect_raw 在 lock 成功时必然有效。
-        for (auto it = observers_.begin(); it != observers_.end();) {
-            // NOLINTNEXTLINE
-            if (!(*it)->effect.lock()) {
-                it = observers_.erase(it);  // 锚点失效（Effect 已析构）→ 摘除
-                continue;
-            }
-            // NOLINTNEXTLINE
-            Effect *eff = (*it)->effect_raw;
-            if (eff->is_disposed()) {
-                it = observers_.erase(it);  // 已释放但未析构 → 摘除
-                continue;
-            }
-            eff->run();
-            ++it;
-        }
-    }
-
-    // protected 是刻意的：派生类（如 State<T>::subscribe）需直接访问观察者表与锚点。
-    // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
-    std::vector<ConnectionPtr> observers_;
-    // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
-    AnchorPtr anchor_{make_anchor()};
-
-    friend class Effect;
-    friend class StateGraph;
-};
-
-/// @brief 细粒度信号状态源（参考 SolidJS signals / Compose mutableStateOf）。
+/// @brief 可写状态句柄：拥有来源的读写视图，写权限由类型表达。
 ///
-/// - get()：返回值；若在 Effect 作用域内调用，自动把本 State 登记为依赖。
-/// - set()：写值并通知所有依赖的 Effect 重跑（定点刷新）。
+/// - `get()`：读取当前值；在 effect 或派生计算体内读取会自动登记依赖。
+/// - `set(v)`：提交新值并通知依赖；与当前值可观察等价时不替换、不通知。
+/// - `update(fn)`：以当前值计算新值再提交；更新回调内隔离外层依赖追踪。
+/// - `notify()`：不替换值，强制来源发出一次变更（原地突变的可见化入口）。
+/// - `subscribe(fn)`：固定到调用时的来源，立即交付首值一次，返回可取消凭证。
 ///
-/// 豁免 bugprone-exception-escape：State 嵌于控件/Effect 回调网（std::function 转发链）中，触发
-/// .clang-tidy 已记录的系统性假告警面——「任何转入 std::function 的可调用对象一律判『不应抛出』」
-/// （operator() 无 noexcept 规格），据此对隐式特殊成员误报。抛出仅可能为 bad_alloc，由顶层兜底。
-/// @tparam T 值的类型。
+/// 复制与右值交接共享同一来源；赋值只重绑本句柄，不影响既有订阅固定的原来源。
+/// 可隐式降级为 `ReadOnlyState<T>`，反向不成立。
+///
+/// `T` 须可拷贝：`set/update` 把候选值放进可拷贝的写队列闭包；持有移动-only 载荷的
+/// 类型只能读取，不能经本句柄提交（终止于编译期约束，不会运行期丢写）。
+///
+/// @tparam T 值的类型（须可拷贝）。
 /// @note Thread: main-thread only
-/// @note Side-effects: none
+/// @note Side-effects: none（`set/update/notify` 变更来源并通知依赖）
 /// @note Rebuildable: no
 template <typename T>
-class State : public SignalView<T>,  // NOLINT(bugprone-exception-escape)
-              public StateBase,
-              public std::enable_shared_from_this<State<T>> {
+class State {
   public:
-    /// @brief 以初值构造状态源；不传参时按 `T{}` 值初始化。
-    /// @param v 初始值（移入）。
-    explicit State(T v = T{}) : value_(std::move(v)) {}
+    /// @brief 默认构造：创建含 `T{}` 的自有来源；仅当 `T` 可默认构造时可用。
+    State()
+        requires std::default_initializable<T>
+        : source_(detail::make_source<T>(T{})) {}
 
-    /// @brief 读取当前值；若处于 Effect 作用域内则顺带登记本 State 为依赖。
-    /// @return 当前值的只读引用。
-    [[nodiscard]] auto get() const -> const T & override {
-        if (Effect::current() != nullptr) {
-            // 接口约束：get() 为 const 而 subscribe() 为非 const（SignalViewBase），
-            // 订阅需修改观察者表，此处去 const 是安全且有意的。
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-            const_cast<State *>(this)->subscribe(*Effect::current());
-        }
-        return value_;
+    /// @brief 由初值构造，采用默认等价策略（载荷可相等比较时按 `==` 去重）。
+    ///
+    /// 刻意不加 explicit：属性字段靠这条隐式转换支持 `Text{ .content = "Hi" }` 与
+    /// `Checkbox{ true }` 这类写法；加 explicit 会让全部控件的属性直写与默认值初始化失败。
+    /// @param initial 初始值（移入来源）。
+    State(T initial)  // NOLINT(google-explicit-constructor)
+        : source_(detail::make_source<T>(std::move(initial))) {}
+
+    /// @brief 由可转换为 `T` 的值构造：单步隐式转换支撑 `"OK"` → `State<LocalizedString>`。
+    ///
+    /// 与 `State(T initial)` 并存不产生歧义：实参已是 `T` 时非模板重载更优。
+    /// @tparam U 可转换为 `T` 的源值类型。
+    /// @param initial 源值，转发构造为来源初值。
+    template <typename U>
+    State(U &&initial)
+        requires std::convertible_to<U, T> &&  // NOLINT(google-explicit-constructor)
+                 (!std::same_as<std::remove_cvref_t<U>, State>) && (!std::same_as<std::remove_cvref_t<U>, T>)
+        : source_(detail::make_source<T>(T(std::forward<U>(initial)))) {}
+
+    /// @brief 由初值构造并关闭去重：每次提交都通知。
+    /// @param initial 初始值（移入来源）。
+    /// @param marker `always_publish` 标记，表示不做等值去重。
+    State(T initial, AlwaysPublish marker) : source_(detail::make_source<T>(std::move(initial), marker)) {}
+
+    /// @brief 由初值构造并注入自定义等价策略。
+    /// @tparam Eq 可调用体，签名等价于 `bool(const T &, const T &)`，返回 true 表示可观察等价。
+    /// @param initial 初始值（移入来源）。
+    /// @param eq 等价判定；之后同一来源的全部句柄共享该策略。
+    template <typename Eq>
+    State(T initial, Eq eq)
+        requires(!std::same_as<std::remove_cvref_t<Eq>, AlwaysPublish>) && std::predicate<Eq &, const T &, const T &>
+        : source_(detail::make_source<T>(std::move(initial), std::move(eq))) {}
+
+    /// @brief 读取当前值；在活跃依赖收集作用域内读取会自动登记依赖。
+    /// @return 当前值的常引用（由来源持有）。
+    [[nodiscard]] auto get() const -> const T & { return source_->read(); }
+
+    /// @brief 提交新值：可观察等价时不替换、不通知；否则排队写入并通知依赖。
+    /// @param next 候选值（送入可拷贝的写队列闭包，故 `T` 须可拷贝）。
+    auto set(T next) const -> void { source_->assign(std::move(next)); }
+
+    /// @brief 以当前值计算新值再提交；计算失败时不改变旧值、不发布通知。
+    ///
+    /// 更新回调内读取其他状态不登记依赖（外层若为 effect 执行体也不受污染）。
+    /// @tparam F 可调用体，签名等价于 `T(const T &)`；须为纯计算，不得重入状态写入。
+    /// @param fn 更新函数。
+    template <typename F>
+        requires std::invocable<F &, const T &> && std::convertible_to<std::invoke_result_t<F &, const T &>, T>
+    auto update(F &&fn) const -> void {
+        detail::SuspendCollection suspended;
+        T candidate = std::invoke(std::forward<F>(fn), source_->value());
+        source_->assign(std::move(candidate));
     }
 
-    /// @brief 写入新值并通知所有依赖本 State 的 Effect 重跑（定点刷新）。
-    /// @param v 新值（移入）；随后经 `notify()` 遍历观察者表。
-    auto set(T v) -> void {
-        value_ = std::move(v);
-        notify();
+    /// @brief 不替换当前值，强制来源发出一次变更。
+    ///
+    /// 用于 `T` 内部共享可变对象被原地修改后让该修改对订阅者可见；不是关闭去重的
+    /// 第二种写法（创建来源时用 `always_publish`），也不穿透派生结果的等值停止。
+    auto notify() const -> void { source_->force_publish(); }
+
+    /// @brief 订阅本句柄固定到的来源，返回可取消凭证。
+    ///
+    /// 建立后立即以当前值调用一次；此后仅该来源的有效提交（含 `notify()`）触发回调。
+    /// 回调内读取其他句柄不会扩充本订阅的来源。
+    /// @tparam F 可调用体，形参可接受 `const T &`。
+    /// @param fn 回调；首值与后续变化都以来源当前值调用。
+    /// @return 订阅凭证；析构或 `reset()` 即取消。
+    template <typename F>
+        requires std::invocable<std::decay_t<F>, const T &>
+    [[nodiscard]] auto subscribe(F &&fn) const -> Subscription {
+        auto source = source_;
+        auto record = detail::make_record([source, callback = std::forward<F>(fn)]() mutable {
+            const T &value = source->read();  // 固定来源：登记且只登记本来源
+            detail::SuspendCollection suspended;  // 回调读取其他句柄不扩充本订阅
+            std::invoke(callback, value);
+        });
+        source->add_observer(*record);
+        Subscription subscription([record, source]() { record->cancel(); });
+        record->run_first();
+        return subscription;
     }
 
-    /// @brief 暴露生命周期锚点（转发基类 `StateBase::anchor()`）。
-    /// @return 指向本 State 的 weak_ptr 锚点，供观察边 Connection 做存活探测。
-    [[nodiscard]] auto anchor() const -> AnchorPtr override { return StateBase::anchor(); }
-
-    /// @brief 订阅 Effect：去重登记观察边，并惰性摘除已析构 Effect 的失效连接。
-    /// @param e 待登记的 Effect；`Effect::run()` 每帧重跑会重复调用，靠去重防累加。
-    auto subscribe(Effect &e) -> void override {
-        // 去重 + 惰性摘除失效边：Effect::run() 每帧重跑会重新登记依赖，若不过滤
-        // 同一 Effect 会在 observers_ 中无限累加（动画场景必现）。同时清理已析构
-        // Effect 残留的失效连接。
-        for (auto it = observers_.begin(); it != observers_.end();) {
-            if (!(*it)->effect.lock()) {
-                it = observers_.erase(it);  // 失效边，摘除
-                continue;
-            }
-            if ((*it)->effect_raw == &e) {
-                return;  // 已订阅
-            }
-            ++it;
-        }
-        const auto conn = make_connection();
-        conn->effect = e.anchor();
-        conn->effect_raw = &e;
-        conn->state = this->anchor();
-        observers_.push_back(conn);
-        e.add_dep(*this);
+    /// @brief 降级为只读句柄：共享同一来源，既有订阅与写入相互可见。
+    /// @return 持有同一来源的只读句柄。
+    operator ReadOnlyState<T>() const {  // NOLINT(google-explicit-constructor)
+        return detail::HandleAccess::read_only<T>(source_);
     }
 
-    /// @brief 返回自身的 shared_ptr 包装（便于传递给子组件做状态提升）。
-    /// @return 持有本 State 的 `std::shared_ptr`（来自 enable_shared_from_this）。
-    /// @note 调用者须确保 State 由 shared_ptr 管理（否则行为未定义）。
-    /// @note Thread: main-thread only
-    /// @note Side-effects: none
-    [[nodiscard]] auto shared() -> std::shared_ptr<State> { return this->shared_from_this(); }
+    /// @brief 值赋值：等价于 `set(v)`，**不**更换来源。
+    ///
+    /// 与拷贝赋值分工明确：`s = value` 提交值（订阅者照常收到通知），`s = other_state`
+    /// 重绑句柄（后续写入落到 other_state 的来源）。控件展示属性不靠本赋值直写——
+    /// 可见性等展示项经 `set_show(...)` 之类的换源入口修改。
+    /// @tparam U 可赋值给 `T` 的源值类型。
+    /// @param value 待提交的值。
+    /// @return 引用 `*this`。
+    template <typename U>
+    auto operator=(U &&value) -> State &
+        requires(!std::same_as<std::remove_cvref_t<U>, State>) && std::is_assignable_v<T &, U>
+    {
+        set(T(std::forward<U>(value)));
+        return *this;
+    }
 
   private:
-    T value_;
+    std::shared_ptr<detail::Source<T>> source_;  ///< 来源节点（共享所有权，复制句柄不新增节点）
+
+    friend class StateSink;
+    friend struct detail::HandleAccess;
 };
+
+namespace detail {
+
+template <typename T>
+auto HandleAccess::source_of(const State<T> &state) -> std::shared_ptr<SourceOf<T>> {
+    return state.source_;
+}
+
+}  // namespace detail
 
 }  // namespace aurora

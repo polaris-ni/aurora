@@ -254,7 +254,7 @@ class Application {
     // ---- 跨窗通信与几何持久化（specification/06-app-platform.md §2.4）----
 
     /// @brief 跨窗口事件总线：类型化广播 / 点对点通知，主线程同步扇出。
-    /// 共享状态请用既有 `Store<S>`（多窗口共享同一实例）；本总线只承载「一次性通知 / 命令」。
+    /// 共享状态可把同一 `State<S>` 句柄按值传给多个窗口；本总线只承载「一次性通知 / 命令」。
     /// @return 总线引用（生命周期同 Application）。
     [[nodiscard]] auto bus() -> WindowEventBus & { return bus_; }
 
@@ -349,7 +349,7 @@ class Application {
     }
 
     /// @brief 设置每帧回调（在 present_root 之前调用），用于注入自定义每帧逻辑
-    ///        （如把共享状态写入 Reactive 标签）。默认为空。
+    ///        （如把共享状态写入状态驱动的标签）。默认为空。
     /// @param cb 每帧回调；置空恢复默认（每帧不执行回调）。
     auto set_on_frame(std::function<void()> cb) -> void { on_frame_ = std::move(cb); }
 
@@ -369,14 +369,14 @@ class Application {
         main_host_->window()->set_overlay(std::move(overlay));
     }
 
-    /// @brief 当前窗口可见性状态（响应式：在 `Effect` 内读取可自动订阅刷新）。
+    /// @brief 当前窗口可见性状态（响应式：在 `effect` 回调内读取可自动订阅刷新）。
     /// 取值见 `WindowState`：Visible（前台激活）/ Occluded（失焦被遮挡）/ Hidden（最小化）。
-    /// @return 响应式状态引用（读取当前可见性；Effect 内读自动订阅）。
-    [[nodiscard]] auto window_state() -> State<WindowState> & { return window_state_; }
-    /// @brief 当前窗口几何态（响应式：在 `Effect` 内读取可自动订阅刷新）。
+    /// @return 只读值句柄（读取当前可见性；effect 内读自动订阅）。
+    [[nodiscard]] auto window_state() const -> ReadOnlyState<WindowState> { return window_state_; }
+    /// @brief 当前窗口几何态（响应式：在 `effect` 回调内读取可自动订阅刷新）。
     /// 取值见 `WindowMode`：Normal / Maximized / Minimized / FullScreen。
-    /// @return 响应式状态引用（读取当前几何态）。
-    [[nodiscard]] auto window_mode() -> State<WindowMode> & { return window_mode_; }
+    /// @return 只读值句柄（读取当前几何态）。
+    [[nodiscard]] auto window_mode() const -> ReadOnlyState<WindowMode> { return window_mode_; }
 
     /// @brief 注册窗口可见性状态命令式回调（与 `window_state()` 响应式订阅并存）。
     /// @param cb 可见性变化回调（仅在状态实际转移时触发）。
@@ -385,7 +385,7 @@ class Application {
     /// @param cb 几何态变化回调（仅在状态实际转移时触发）。
     auto set_on_window_mode(std::function<void(WindowMode)> cb) -> void { on_window_mode_ = std::move(cb); }
 
-    /// @brief OS 明暗偏好的应用级当前档（响应式：在 `Effect` 内读取可自动订阅刷新）。
+    /// @brief OS 明暗偏好的应用级当前档（响应式：在 `effect` 回调内读取可自动订阅刷新）。
     ///
     /// 与 `window_state()` / `window_mode()` 的**关键差别是聚合范围**：那两枚只投影主窗口，
     /// 本 State 聚合**全部宿主**上报的同一次系统切换（进程级事实只有一个真值源），同值不重复通知。
@@ -394,8 +394,8 @@ class Application {
     /// 未调用 `refresh_os_color_scheme()` 且系统尚未上报过变化时读 `Unspecified`：构造期不隐式读
     /// 注册表（与 `platform()` 的「显式查询、跳过探测」同口径）。运行期跟随无需轮询——Win32 后端
     /// 在 `WM_SETTINGCHANGE` 里重读偏好并逐宿主上报，应用级在此去重成一次通知。
-    /// @return 响应式状态引用（读取当前 OS 档；Effect 内读自动订阅）。
-    [[nodiscard]] auto os_color_scheme_state() -> State<ColorScheme> & { return os_scheme_state_; }
+    /// @return 只读值句柄（读取当前 OS 档；effect 内读自动订阅）。
+    [[nodiscard]] auto os_color_scheme_state() const -> ReadOnlyState<ColorScheme> { return os_scheme_state_; }
 
     /// @brief 注册 OS 明暗偏好变化的命令式回调（与 `os_color_scheme_state()` 响应式订阅并存）。
     /// 只在**值实际变化**时触发（跨宿主、同值重复上报均去重），参数为 OS 原值。

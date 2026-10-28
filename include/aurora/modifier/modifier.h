@@ -382,7 +382,7 @@ class Modifier {
     }
 
     /// @brief 声明本 widget 在父级 Row/Column 中的 flex 权重（瓜分主轴剩余空间）。
-    /// 例：`Text{...}.modifier.set(Modifier{}.expand(2.0F))` 占 2 份。
+    /// 例：`Text{...}.set_modifier(Modifier{}.expand(2.0F))` 占 2 份。
     /// @param weight [in] flex 权重（>0 按份数瓜分主轴剩余空间），默认 1。
     /// @return 追加 FlexWeight 节点后的新链副本。
     [[nodiscard]] auto expand(float weight = 1.0F) const -> Modifier {
