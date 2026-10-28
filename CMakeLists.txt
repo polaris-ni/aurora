@@ -174,6 +174,16 @@ endif ()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# macOS 后端开关：默认值须在此声明，不能等到 cmake/AuroraBackends.cmake——本文件在
+# `add_library(aurora)` 之前 include 的模块只有这几个，后端模块在其后；开关的取值同时决定
+# 下方 OBJCXX 语言是否要前置，故两者同处。口径与 AURORA_BACKEND_WIN32 及四枚
+# AURORA_ENABLE_AUDIO_* 一致：自己平台的原生后端默认开，其余平台默认关。
+if (APPLE)
+    option(AURORA_BACKEND_MACOS "Enable macOS (Cocoa/AppKit) backend (Apple only)" ON)
+else ()
+    option(AURORA_BACKEND_MACOS "Enable macOS (Cocoa/AppKit) backend (Apple only)" OFF)
+endif ()
+
 # macOS 后端语言前置：macos_surface.cpp 被标记为 OBJCXX（见 cmake/AuroraBackends.cmake），
 # OBJCXX 语言规则必须在 aurora 目标定义（下方 add_library）之前启用；否则 Ninja 生成器
 # 在 generate 阶段取不到 CMAKE_OBJCXX_COMPILE_OBJECT / ARCHIVE_* 规则（macOS CI 实测报错）。

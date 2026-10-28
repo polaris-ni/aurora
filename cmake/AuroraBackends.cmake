@@ -4,7 +4,8 @@
 # 每个内置 Surface 图形后端可经 AURORA_BACKEND_* 开关整体剔除：关闭后
 # 对应 Surface 子类、工厂重载与重型平台头（<windows.h> / GLFW / OpenGL）被预处理器
 # 剔除，链接产物不再含该后端。音频设备后端开关（AURORA_ENABLE_AUDIO / AURORA_ENABLE_AUDIO_WASAPI /
-# AURORA_ENABLE_AUDIO_ALSA，ENABLE 组）亦定义于本文件末段。自定义注入路径（自定义 Surface 经
+# AURORA_ENABLE_AUDIO_ALSA / AURORA_ENABLE_AUDIO_COREAUDIO / AURORA_ENABLE_AUDIO_WEBAUDIO，
+# ENABLE 组）亦定义于本文件末段。自定义注入路径（自定义 Surface 经
 # Application(Scene,unique_ptr<Surface>)、自定义 AudioDeviceBackend 经 AudioContext 构造注入）
 # 始终可用，故「只用自定义 backend」可不编译任何内置后端。feature 宏由 aurora 目标以
 # PUBLIC 编译定义传播给所有消费者。
@@ -334,9 +335,15 @@ endif ()
 # ---- X11 / Wayland / macOS / WASM ----
 # X11/Wayland 用于 Linux 桌面、macOS 用于 Apple、WASM 用于 Emscripten 工具链；
 # 默认构建（含本机 Windows/MinGW）不受影响，仍仅 Headless 必开。
+# macOS 例外按「自己平台的原生后端默认开」取（与上方 AURORA_BACKEND_WIN32 同构、与四枚
+# AURORA_ENABLE_AUDIO_* 同族）：Apple 上关掉它会落进一台构建不过的机器，理由与拒绝口径见
+# 下方 macOS 块前的注释。其开关默认值不在这里声明——见下方 `AURORA_BACKEND_WASM` 上方的说明。
 option(AURORA_BACKEND_X11 "Enable X11 (Xlib) backend for Linux desktop (requires libX11)" OFF)
 option(AURORA_BACKEND_WAYLAND "Enable native Wayland backend for Linux desktop (requires wayland-client + wayland-cursor + xkbcommon)" OFF)
-option(AURORA_BACKEND_MACOS "Enable macOS (Cocoa/AppKit) backend (Apple only)" OFF)
+# `AURORA_BACKEND_MACOS` 的开关声明与 `enable_language(OBJCXX)` 的判定同处、且早于本模块
+# （见顶层 CMakeLists.txt）：本模块在 `add_library(aurora)` 之后才被 include，在这里才给
+# 默认值会让不带 `-D` 的裸 configure 取不到 OBJCXX 语言规则，generate 阶段报
+# 「The language OBJCXX was requested for compilation but was not enabled」（本机实测）。
 option(AURORA_BACKEND_WASM "Enable WebAssembly (Emscripten) backend (Emscripten toolchain only)" OFF)
 
 if (AURORA_BACKEND_X11)
@@ -432,6 +439,25 @@ if (AURORA_BACKEND_WAYLAND)
     aurora_log("Wayland backend enabled: protocols=${AURORA_WL_PROTO_DIR} scanner=${AURORA_WL_SCANNER}")
 endif ()
 
+# Apple 上「关掉 macOS 后端」不是一台可构建的机器，且缺的不是一处守卫而是一整批剪裁：
+# ① `src/aurora/app/detail/macos_notification.cpp` 与 `macos_tray.cpp` 的门控只读**平台宏**
+# `AURORA_PLATFORM_MACOS`（由 include/aurora/core/platform.h 按 `__APPLE__` 定义，与本开关无关），
+# 开关关闭时它们照样进编译，而 ObjC++ 语言标记只随本开关下发，于是按 C++ 模式解析
+# `#import <Foundation/Foundation.h>` 直接炸在一串 `unknown type name 'NSString'`（AppleClang
+# 本机实测）；② 把语言拆到 APPLE 作用域后，下一处红灯变成 `src/aurora/app/recent_documents.cpp`
+# 引用只在「平台 && 后端」双门控下声明的桥符号；③ 再下一处是 AppKit / Carbon 符号无框架可链
+# （Cocoa / AppKit / Carbon 只随本开关链接）。与其留一条「configure 得过、编译不过、错误信息
+# 在编译器里」的假开关，不如在此把话说清：**要在 Apple 上换图形通路请改开 GLFW / X11 /
+# Headless**（三者在 Apple 均可用），而不是关掉本后端。把「AppKit 平台腿与 Surface 后端解耦」
+# 做成真正可剔除属后端矩阵的语义决定，须另立批次统一九枚 TU 的门控口径 + 三腿缺位时的显式降级。
+if (APPLE AND NOT AURORA_BACKEND_MACOS)
+    aurora_error("AURORA_BACKEND_MACOS=OFF on Apple is not a buildable configuration yet"
+            " (the AppKit platform legs in src/aurora/app/detail/macos_*.cpp are still gated on"
+            " the platform macro, so they get compiled as plain C++ without the frameworks they"
+            " need); keep it ON, or pick another surface backend on this machine"
+            " (AURORA_BACKEND_GLFW / AURORA_BACKEND_X11 / headless).")
+endif ()
+
 if (AURORA_BACKEND_MACOS)
     if (NOT APPLE)
         aurora_error("AURORA_BACKEND_MACOS is only supported on Apple platforms;"
@@ -440,13 +466,27 @@ if (AURORA_BACKEND_MACOS)
     # OBJCXX 语言已在顶层 CMakeLists（add_library(aurora) 之前）统一启用：语言规则须在
     # 目标定义前就绪，否则 Ninja generate 阶段取不到 CMAKE_OBJCXX_* 规则。此处仅平台守卫。
     aurora_define_feature(AURORA_BACKEND_MACOS EXPORT)
-    target_link_libraries(aurora PUBLIC "-framework Cocoa" "-framework AppKit")
-    # macOS 后端的两个 ObjC++ TU 须显式指定语言；文件存在才设置，避免 glob 缺失告警。
+    target_link_libraries(aurora PUBLIC "-framework Cocoa" "-framework AppKit" "-framework Carbon")
+    # macOS 后端的 ObjC++ TU 须显式指定语言；文件存在才设置，避免 glob 缺失告警。
     # macos_surface.cpp 在 window/（表层），macos_drag.cpp 在 window/detail/（拖放桥，
-    # AppKit 会话状态机，契约见同名头文件）。两文件的门控都在自身 `#if` 内，非 Apple
-    # 平台编译为空 TU——与 x11_drag.cpp / wayland_drag.cpp 在别的平台上的处置同构。
+    # AppKit 会话状态机，契约见同名头文件）；macos_platform.cpp 是 os_color_scheme 的
+    # NSAppearance 读取腿，display_macos.cpp 是 NSScreen 显示器枚举腿；
+    # macos_recent_documents.cpp 是 NSDocumentController 最近文档投影腿，
+    # macos_menu_bar.cpp 是 NSApp.mainMenu 原生菜单栏腿，
+    # app/detail/macos_notification.cpp 是 NSUserNotificationCenter 通知腿，
+    # app/detail/macos_tray.cpp 是 NSStatusItem 状态栏托盘腿，
+    # app/detail/macos_clipboard.cpp 是 NSPasteboard 富格式/惰性提供腿（ObjC++，语言按本表标记）。
+    # 全部文件的门控都在自身 `#if` 内，非 Apple 平台编译为空 TU——与 x11_drag.cpp /
+    # wayland_drag.cpp 在别的平台上的处置同构。
     foreach(_macos_objc_src "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_surface.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_drag.cpp")
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_drag.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_platform.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_recent_documents.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_menu_bar.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/display_macos.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_notification.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_tray.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_clipboard.cpp")
         if (EXISTS "${_macos_objc_src}")
             set_source_files_properties("${_macos_objc_src}" PROPERTIES LANGUAGE OBJCXX)
         endif ()
@@ -508,7 +548,31 @@ if (AURORA_ENABLE_AUDIO)
         target_link_libraries(aurora PUBLIC ${CMAKE_DL_LIBS})
         aurora_log("ALSA audio backend enabled (runtime-bound libasound, zero build dependency)")
     endif ()
-    # 浏览器对位后端：Web Audio（第三足——Windows WASAPI / Linux ALSA / 浏览器 Web Audio）。
+    # Apple 对位后端：CoreAudio / AudioQueue（第四足——Windows WASAPI / Linux ALSA /
+    # macOS CoreAudio / 浏览器 Web Audio）。渲染端恒 48000/2 float32 交错客户端格式，
+    # 设备侧差异由队列内建格式转换吸收；采集端直取默认输入设备原生率/声道。与 ALSA 的
+    # dlopen 逃逸不同因：ALSA 是为让无 dev 包的 Linux 构建机编译，AudioToolbox /
+    # CoreAudio 属系统 SDK，恒在且无版本漂移问题，故直接 -framework 链接。
+    if (APPLE)
+        option(AURORA_ENABLE_AUDIO_COREAUDIO
+                "Build CoreAudio audio backend (Apple, AudioQueue output + input capture)" ON)
+    else ()
+        option(AURORA_ENABLE_AUDIO_COREAUDIO
+                "Build CoreAudio audio backend (Apple, AudioQueue output + input capture)" OFF)
+    endif ()
+    if (AURORA_ENABLE_AUDIO_COREAUDIO)
+        if (NOT APPLE)
+            aurora_error("AURORA_ENABLE_AUDIO_COREAUDIO is only supported on Apple platforms;"
+                    " disable it or turn off AURORA_ENABLE_AUDIO on other platforms.")
+        endif ()
+        aurora_define_feature(AURORA_ENABLE_AUDIO_COREAUDIO EXPORT)
+        # AudioToolbox：AudioQueue 渲染/采集腿；CoreAudio：默认设备选择项与属性监听
+        # （重路由通知源）。两枚均属系统框架，无第三方分发。
+        target_link_libraries(aurora PUBLIC "-framework AudioToolbox" "-framework CoreAudio")
+        aurora_log("CoreAudio audio backend enabled (AudioQueue, default-device follow with reroute)")
+    endif ()
+    # 浏览器对位后端：Web Audio（与上三足同构——Windows WASAPI / Linux ALSA /
+    # macOS CoreAudio / 浏览器 Web Audio）。
     # 零链接标志、零导出符号：C++ 主线程定间隔把图渲染成帧推入线性内存环，JS 经
     # HEAPF32/HEAP32 视图按地址消费（详见 src/aurora/media/audio_webaudio.h）。
     # 无 -pthread 时 AudioContext 不存在（裸 Node），故 wasm 侧测试仍走静默降级。
