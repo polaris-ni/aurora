@@ -11,6 +11,9 @@
 #ifdef AURORA_PLATFORM_WINDOWS
 #include "aurora/window/detail/win32_recent_documents.h"
 #endif
+#ifdef AURORA_PLATFORM_MACOS
+#include "aurora/window/detail/macos_recent_documents.h"
+#endif
 
 namespace aurora {
 
@@ -27,7 +30,7 @@ constexpr char AURORA_DOCUMENTS_KEY[] = "documents";
 /// 不隐式触发 / 失败隔离」在**任何平台**的 CI 腿上都能跑产品代码路径本身，而不是它的复刻。
 ///
 /// 未登记时返回 nullptr，公共入口以 `recent-documents-projection-unsupported` 收尾——
-/// 「这平台没这机制」（Linux / 未落桥的 macOS）与「这机制在本进程还没接线」对调用方的处置动作
+/// 「这平台没这机制」（Linux）与「这机制在本进程还没接线」对调用方的处置动作
 /// 完全一致（不投影、应用内列表照旧），故不另立第二枚码；平台侧**真实故障**（COM / 目录 /
 /// 形态转换）走结构化错误（`platform-unavailable` / `platform-com-init-failed`），与这两位不混淆。
 [[nodiscard]] auto active_projection_backend() -> const recent_documents::ProjectionBackend * {
@@ -40,6 +43,13 @@ constexpr char AURORA_DOCUMENTS_KEY[] = "documents";
         // 无窗口宿主时按需自举：`SHAddToRecentDocs` 与 HWND 无关，「先记文档、后建窗口」的应用
         // 同样应当能投影（宿主守卫已在时上面那条分支就返回了，此处只会登记一次）。
         (void)detail::win32_recent_documents_ensure_registered();
+        backend = recent_documents::projection_backend();
+    }
+#endif
+#ifdef AURORA_PLATFORM_MACOS
+    if (platform().capabilities().recent_documents_os_projection) {
+        // 同口径自举：`NSDocumentController` 是应用级对象，不要求先有窗口。
+        (void)detail::macos_recent_documents_ensure_registered();
         backend = recent_documents::projection_backend();
     }
 #endif

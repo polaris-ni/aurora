@@ -8,17 +8,22 @@
 
 namespace aurora {
 
-/// @brief 系统托盘图标（Windows 通知区域）。RAII：构造即尝试添加图标，析构移除。
-/// 真实平台（AURORA_PLATFORM_WINDOWS）实现见 `src/aurora/app/system_tray_win32.cpp`
-/// （`Shell_NotifyIcon` + 隐藏消息窗口 + 图标/气泡/激活回调 + 右键菜单），由 `AURORA_BACKEND_WIN32` 裁剪；
-/// 非 Win32 / Headless 下所有方法为 no-op（仅记录 `last_balloon_message` 供测试）。
+/// @brief 系统托盘图标（Windows 通知区域 / macOS 菜单栏状态项）。RAII：构造即尝试挂上图标，析构移除。
+/// 真实平台实现：
+/// - **Windows**：`src/aurora/app/system_tray.cpp`（`Shell_NotifyIcon` + 隐藏消息窗口 + 图标/气泡/
+///   激活回调 + 右键菜单），由 `AURORA_BACKEND_WIN32` 裁剪；
+/// - **macOS**：同一文件的公共方法转发到 `src/aurora/app/detail/macos_tray.cpp` 的
+///   `NSStatusItem` 桥（tooltip / 状态栏图像 / `NSMenu` / 系统通知等价气泡），由
+///   `AURORA_BACKEND_MACOS` 裁剪；
+/// - 其余平台 / Headless：所有方法为 no-op（仅记录 `last_balloon_message` 供测试）。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: none (interacts with OS tray)
 /// @note Rebuildable: no
 class SystemTray {
   public:
-    /// @brief 构造：记录悬浮提示并（Windows 下）创建隐藏消息窗口、加载图标并尝试添加到托盘；非 Win32 为 no-op。
+    /// @brief 构造：记录悬浮提示并创建平台托盘（Windows 隐藏消息窗口 + 图标；macOS 状态栏项）；
+    /// 其余平台为 no-op。
     /// @param title 悬浮提示文字。
     /// @param icon_path 图标文件路径（空串 = 默认应用图标）。
     explicit SystemTray(std::string title, const std::string &icon_path = "");
@@ -34,10 +39,10 @@ class SystemTray {
     /// @param other 移动源。
     /// @return 移动赋值后的自身引用。
     auto operator=(SystemTray &&other) noexcept -> SystemTray &;
-    /// @brief 析构：移除托盘图标、销毁隐藏消息窗口并释放图标句柄（非 Win32 下为空操作）。
+    /// @brief 析构：移除托盘图标并释放平台资源（Windows 销毁隐藏窗口、macOS 移除状态栏项；其余平台为空操作）。
     ~SystemTray();
 
-    /// @brief 更新悬浮提示文字（同时刷新托盘图标 tip）。
+    /// @brief 更新悬浮提示文字（同时刷新托盘图标 tip / 状态栏按钮 tooltip）。
     /// @param t 新的悬浮提示文字。
     void set_title(std::string t);
     /// @brief 设置托盘图标（从文件加载；空路径用默认应用图标）。
@@ -45,7 +50,7 @@ class SystemTray {
     void set_icon(const std::string &path) const;
     /// @brief 显示气泡通知（title 为标题，msg 为正文）。
     /// @param title 气泡标题。
-    /// @param msg 气泡正文（记入 `last_balloon_message`，非 Win32 下仅记录不外发）。
+    /// @param msg 气泡正文（Windows 走托盘气泡；macOS 以系统通知等价表达；其余平台仅记录）
     void show_balloon(const std::string &title, const std::string &msg);
     /// @brief 添加 / 显示托盘图标。
     void show() const;
@@ -55,7 +60,8 @@ class SystemTray {
     /// @param cb 激活回调（可空；空则清除既有回调）。
     void on_activate(std::function<void()> cb);
 
-    /// @brief 设置右键上下文菜单（Win32 经 TrackPopupMenu 弹出；非 Win32 存储但不渲染）。
+    /// @brief 设置点击 / 右键上下文菜单（Windows 经 TrackPopupMenu 弹出；macOS 挂 `NSMenu`；
+    /// 其余平台存储但不渲染）。
     /// 菜单项模型与 MenuBar / ContextMenuNode 共用 MenuItem 声明式数据结构。
     /// @param items 菜单项列表（整体替换既有菜单）。
     void set_context_menu(std::vector<MenuItem> items);
@@ -69,7 +75,7 @@ class SystemTray {
 
   private:
     struct Impl;
-    std::unique_ptr<Impl> impl_;  ///< Windows 下的托盘实现体（隐藏消息窗口 + 图标句柄）；非 Win32 恒为空
+    std::unique_ptr<Impl> impl_;  ///< 平台托盘实现体（Windows 隐藏窗口/图标句柄；macOS 状态栏项桥）；无后端时恒为空
     std::string tray_title_;  ///< 悬浮提示文字（`set_title` 更新）
     std::string tray_balloon_msg_;  ///< 最近一次 `show_balloon` 的正文
     std::function<void()> on_activate_cb_;  ///< 激活回调（左键单击 / 气泡点击 / 键盘激活时触发）

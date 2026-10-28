@@ -130,7 +130,10 @@ auto display_containing(Point p) -> Display {
 }  // namespace aurora::app
    // namespace aurora::app
 
-#else
+#elif !(defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS))
+
+// macOS 带窗口后端的构建由 `display_macos.cpp`（NSScreen）提供同一组符号；
+// 该组合下本文件的通用回退不参与编译，避免重复定义。
 
 namespace aurora::app {
 

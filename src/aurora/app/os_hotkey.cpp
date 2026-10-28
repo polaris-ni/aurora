@@ -1,8 +1,10 @@
 // os_hotkey.cpp — OS 级全局热键注册表。
 // - AURORA_PLATFORM_WINDOWS：`RegisterHotKey` / `UnregisterHotKey` + 隐藏消息窗口接 `WM_HOTKEY`。
-// - 其它平台（Wayland / GLFW / macOS / WASM 等）：`enabled()` 恒 false，`add()` 恒返回
+// - AURORA_PLATFORM_MACOS：Carbon `RegisterEventHotKey` + 应用事件目标上的
+//   `kEventHotKeyPressed` 处理器（签名 + 进程内 ID 路由回注册表队列）。
+// - 其它平台（Wayland / GLFW / WASM 等）：`enabled()` 恒 false，`add()` 恒返回
 //   `OsHotkeyRegisterFailed`，`remove()` 恒 false——降级是显式失败，不是静默 no-op。
-// 与 `system_tray_win32.cpp` 同口径：公共方法在所有目标上都定义，Win32 专有代码用内部
+// 与 `system_tray.cpp` 同口径：公共方法在所有目标上都定义，Win32 专有代码用内部
 // #ifdef（只用 `AURORA_PLATFORM_WINDOWS`，不写原生平台宏，见 core/platform.h）隔离。
 //
 // 命中不就地回调：`WM_HOTKEY` 到达时只把 ID 推入队列，等帧循环调 `drain_pending()` 再执行动作。
@@ -18,6 +20,9 @@
 #include <vector>
 
 #include "aurora/app/detail/platform_shell_win32.h"
+#ifdef AURORA_PLATFORM_MACOS
+#include "aurora/app/detail/macos_hotkey.h"
+#endif
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
@@ -29,6 +34,16 @@
 #endif
 // clang-format off
 #include <windows.h>
+// clang-format on
+#endif
+
+#ifdef AURORA_PLATFORM_MACOS
+// Carbon 热键 API 自 10.8 起标记 deprecated，但仍是唯一无需辅助功能授权、可注册系统级
+// 热键的公开入口（`NSEvent` 全局监听需要用户授予辅助功能权限）。本 TU 内局部豁免。
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+// clang-format off
+#include <Carbon/Carbon.h>
 // clang-format on
 #endif
 
@@ -58,7 +73,7 @@ struct TestBackendState {
     if (test_backend().active) {
         return test_backend().supported;
     }
-#ifdef AURORA_PLATFORM_WINDOWS
+#if defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_MACOS)
     return true;
 #else
     return false;
@@ -174,6 +189,264 @@ struct TestBackendState {
 }
 #endif
 
+#ifdef AURORA_PLATFORM_MACOS
+/// @brief 无法映射到 Carbon 虚拟键码时的哨兵值（Carbon 键码是 UInt16 空间）。
+constexpr std::uint32_t kInvalidMacVirtualKey = 0xFFFFFFFFU;
+
+/// @brief `KeyCode` → Carbon 虚拟键码（`kVK_*`）的反向映射。
+///
+/// 与 `window/detail/macos_keymap.h` 的正向表逐键互逆（同一批物理键位；该头是 Surface 事件
+/// 翻译用的，不能在这里反向遍历）。未收录的主键（媒体键、F13+ 等）返回哨兵值。
+/// @param key 逻辑键码。
+/// @return Carbon 虚拟键码；无法映射（含 `Unknown` 与修饰键）时为 `kInvalidMacVirtualKey`。
+[[nodiscard]] auto to_macos_virtual_key(KeyCode key) -> std::uint32_t {
+    if ((key >= KeyCode::A) && (key <= KeyCode::Z)) {
+        switch (key) {
+            case KeyCode::A:
+                return kVK_ANSI_A;
+            case KeyCode::B:
+                return kVK_ANSI_B;
+            case KeyCode::C:
+                return kVK_ANSI_C;
+            case KeyCode::D:
+                return kVK_ANSI_D;
+            case KeyCode::E:
+                return kVK_ANSI_E;
+            case KeyCode::F:
+                return kVK_ANSI_F;
+            case KeyCode::G:
+                return kVK_ANSI_G;
+            case KeyCode::H:
+                return kVK_ANSI_H;
+            case KeyCode::I:
+                return kVK_ANSI_I;
+            case KeyCode::J:
+                return kVK_ANSI_J;
+            case KeyCode::K:
+                return kVK_ANSI_K;
+            case KeyCode::L:
+                return kVK_ANSI_L;
+            case KeyCode::M:
+                return kVK_ANSI_M;
+            case KeyCode::N:
+                return kVK_ANSI_N;
+            case KeyCode::O:
+                return kVK_ANSI_O;
+            case KeyCode::P:
+                return kVK_ANSI_P;
+            case KeyCode::Q:
+                return kVK_ANSI_Q;
+            case KeyCode::R:
+                return kVK_ANSI_R;
+            case KeyCode::S:
+                return kVK_ANSI_S;
+            case KeyCode::T:
+                return kVK_ANSI_T;
+            case KeyCode::U:
+                return kVK_ANSI_U;
+            case KeyCode::V:
+                return kVK_ANSI_V;
+            case KeyCode::W:
+                return kVK_ANSI_W;
+            case KeyCode::X:
+                return kVK_ANSI_X;
+            case KeyCode::Y:
+                return kVK_ANSI_Y;
+            case KeyCode::Z:
+                return kVK_ANSI_Z;
+            default:
+                break;
+        }
+    }
+    if ((key >= KeyCode::D0) && (key <= KeyCode::D9)) {
+        switch (key) {
+            case KeyCode::D0:
+                return kVK_ANSI_0;
+            case KeyCode::D1:
+                return kVK_ANSI_1;
+            case KeyCode::D2:
+                return kVK_ANSI_2;
+            case KeyCode::D3:
+                return kVK_ANSI_3;
+            case KeyCode::D4:
+                return kVK_ANSI_4;
+            case KeyCode::D5:
+                return kVK_ANSI_5;
+            case KeyCode::D6:
+                return kVK_ANSI_6;
+            case KeyCode::D7:
+                return kVK_ANSI_7;
+            case KeyCode::D8:
+                return kVK_ANSI_8;
+            case KeyCode::D9:
+                return kVK_ANSI_9;
+            default:
+                break;
+        }
+    }
+    if ((key >= KeyCode::F1) && (key <= KeyCode::F12)) {
+        return kVK_F1 + (static_cast<std::uint32_t>(key) - static_cast<std::uint32_t>(KeyCode::F1));
+    }
+    switch (key) {
+        case KeyCode::Enter:
+            return kVK_Return;
+        case KeyCode::Escape:
+            return kVK_Escape;
+        case KeyCode::Tab:
+            return kVK_Tab;
+        case KeyCode::Backspace:
+            return kVK_Delete;
+        case KeyCode::Delete:
+            return kVK_ForwardDelete;
+        case KeyCode::Space:
+            return kVK_Space;
+        case KeyCode::ArrowLeft:
+            return kVK_LeftArrow;
+        case KeyCode::ArrowRight:
+            return kVK_RightArrow;
+        case KeyCode::ArrowUp:
+            return kVK_UpArrow;
+        case KeyCode::ArrowDown:
+            return kVK_DownArrow;
+        case KeyCode::Home:
+            return kVK_Home;
+        case KeyCode::End:
+            return kVK_End;
+        case KeyCode::PageUp:
+            return kVK_PageUp;
+        case KeyCode::PageDown:
+            return kVK_PageDown;
+        case KeyCode::Minus:
+            return kVK_ANSI_Minus;
+        case KeyCode::Equal:
+            return kVK_ANSI_Equal;
+        case KeyCode::Semicolon:
+            return kVK_ANSI_Semicolon;
+        case KeyCode::Quote:
+            return kVK_ANSI_Quote;
+        case KeyCode::Comma:
+            return kVK_ANSI_Comma;
+        case KeyCode::Period:
+            return kVK_ANSI_Period;
+        case KeyCode::Slash:
+            return kVK_ANSI_Slash;
+        case KeyCode::Backquote:
+            return kVK_ANSI_Grave;
+        case KeyCode::LeftBracket:
+            return kVK_ANSI_LeftBracket;
+        case KeyCode::RightBracket:
+            return kVK_ANSI_RightBracket;
+        case KeyCode::Backslash:
+            return kVK_ANSI_Backslash;
+        case KeyCode::KP_0:
+            return kVK_ANSI_Keypad0;
+        case KeyCode::KP_1:
+            return kVK_ANSI_Keypad1;
+        case KeyCode::KP_2:
+            return kVK_ANSI_Keypad2;
+        case KeyCode::KP_3:
+            return kVK_ANSI_Keypad3;
+        case KeyCode::KP_4:
+            return kVK_ANSI_Keypad4;
+        case KeyCode::KP_5:
+            return kVK_ANSI_Keypad5;
+        case KeyCode::KP_6:
+            return kVK_ANSI_Keypad6;
+        case KeyCode::KP_7:
+            return kVK_ANSI_Keypad7;
+        case KeyCode::KP_8:
+            return kVK_ANSI_Keypad8;
+        case KeyCode::KP_9:
+            return kVK_ANSI_Keypad9;
+        case KeyCode::KP_Decimal:
+            return kVK_ANSI_KeypadDecimal;
+        case KeyCode::KP_Multiply:
+            return kVK_ANSI_KeypadMultiply;
+        case KeyCode::KP_Add:
+            return kVK_ANSI_KeypadPlus;
+        case KeyCode::KP_Divide:
+            return kVK_ANSI_KeypadDivide;
+        case KeyCode::KP_Subtract:
+            return kVK_ANSI_KeypadMinus;
+        default:
+            // 修饰键（Shift/Control/Alt/Meta）不能作热键主键；未知键不猜近义键。
+            return kInvalidMacVirtualKey;
+    }
+}
+
+/// @brief 修饰键位掩码 → Carbon 的 `RegisterEventHotKey` 修饰位。
+/// @param mods 修饰键位掩码。
+/// @return `cmdKey` / `shiftKey` / `optionKey` / `controlKey` 的并集（无修饰键时为 0）。
+[[nodiscard]] auto to_macos_modifiers(ModifierKey mods) -> std::uint32_t {
+    std::uint32_t out = 0;
+    if ((mods & ModifierKey::Control) != 0) {  // NOLINT(*-redundant-parentheses)
+        out |= controlKey;
+    }
+    if ((mods & ModifierKey::Shift) != 0) {  // NOLINT(*-redundant-parentheses)
+        out |= shiftKey;
+    }
+    if ((mods & ModifierKey::Alt) != 0) {  // NOLINT(*-redundant-parentheses)
+        out |= optionKey;
+    }
+    if ((mods & ModifierKey::Meta) != 0) {  // NOLINT(*-redundant-parentheses)
+        out |= cmdKey;
+    }
+    return out;
+}
+
+/// @brief 一条进程级 Carbon 热键绑定：系统热键引用 + 命中时回送注册表的中继。
+struct MacHotkeyBinding {
+    std::uint32_t id = 0;  ///< 进程内热键 ID（与 EventHotKeyID.id 同值）
+    EventHotKeyRef ref = nullptr;  ///< `RegisterEventHotKey` 返回的引用
+    std::function<bool(std::uint32_t)> sink;  ///< 命中时把 ID 交回所属注册表（只入队）
+};
+
+/// @brief 进程级绑定表（Carbon 事件处理器是进程级回调，只能经此路由回各个注册表）。
+[[nodiscard]] auto mac_hotkey_bindings() -> std::vector<MacHotkeyBinding> & {
+    static std::vector<MacHotkeyBinding> bindings;
+    return bindings;
+}
+
+/// @brief Carbon `kEventHotKeyPressed` 处理器：按签名 + ID 找到绑定并入队。
+/// @param event 事件引用。
+/// @return 命中本库绑定时 `noErr`；否则 `eventNotHandledErr` 交回系统。
+auto mac_hotkey_event_handler(EventHandlerCallRef /*call_ref*/, EventRef event, void * /*user_data*/) -> OSStatus {
+    EventHotKeyID hotkey{};
+    if (GetEventParameter(event, kEventParamDirectObject, typeEventHotKeyID, nullptr, sizeof(hotkey), nullptr,
+                          &hotkey) != noErr) {
+        return eventNotHandledErr;
+    }
+    if (hotkey.signature != static_cast<OSType>(detail::AURORA_MACOS_HOTKEY_SIGNATURE)) {
+        return eventNotHandledErr;
+    }
+    for (const auto &binding : mac_hotkey_bindings()) {
+        if (binding.id == hotkey.id) {
+            (void)binding.sink(hotkey.id);
+            return noErr;
+        }
+    }
+    return eventNotHandledErr;
+}
+
+/// @brief 首次注册热键时把处理器装到应用事件目标（进程级只装一次）。
+auto ensure_mac_hotkey_handler() -> void {
+    static bool installed = false;
+    if (installed) {
+        return;
+    }
+    static EventHandlerUPP handler_upp = nullptr;
+    handler_upp = NewEventHandlerUPP(&mac_hotkey_event_handler);
+    const EventTypeSpec type{kEventClassKeyboard, kEventHotKeyPressed};
+    EventHandlerRef handler_ref = nullptr;
+    const OSStatus status = InstallApplicationEventHandler(handler_upp, 1, &type, nullptr, &handler_ref);
+    if (status != noErr) {
+        AURORA_LOG_WARN("hotkey", "InstallApplicationEventHandler(kEventHotKeyPressed) failed, status=", status);
+        return;
+    }
+    installed = true;
+}
+#endif
+
 }  // namespace
 
 struct OsHotkeyRegistry::Impl {
@@ -189,13 +462,13 @@ struct OsHotkeyRegistry::Impl {
     std::uint32_t hook_id = 0;  ///< 挂在隐藏消息窗口上的钩子 ID（0 = 未挂上）
 
     /// @brief 把热键注册到 OS（inert 后端激活时调用方不走到这里）。
-    /// @param id 待注册的热键 ID（同时是 `WM_HOTKEY` 的 wParam）。
+    /// @param id 待注册的热键 ID（同时是 `WM_HOTKEY` 的 wParam / Carbon `EventHotKeyID.id`）。
     /// @param combo 键组合。
     /// @return 注册成功为真。
-    static auto register_native(std::uint32_t id, const KeyCombo &combo) -> bool;
+    auto register_native(std::uint32_t id, const KeyCombo &combo) -> bool;
     /// @brief 从 OS 注销热键（与 `register_native` 成对）。
     /// @param id 热键 ID。
-    static auto unregister_native(std::uint32_t id) -> void;
+    auto unregister_native(std::uint32_t id) -> void;
 
     /// @brief 收到一条 `WM_HOTKEY`：只做「确认归属 + 入队」，不执行动作。
     /// @param id 命中 ID（`wParam`）。
@@ -237,7 +510,27 @@ auto OsHotkeyRegistry::Impl::on_hotkey(std::uint32_t id) -> bool {
 }
 
 auto OsHotkeyRegistry::Impl::register_native(std::uint32_t id, const KeyCombo &combo) -> bool {
-#ifdef AURORA_PLATFORM_WINDOWS
+#ifdef AURORA_PLATFORM_MACOS
+    const std::uint32_t virtual_key = to_macos_virtual_key(combo.key);
+    if (virtual_key == kInvalidMacVirtualKey) {
+        return false;
+    }
+    ensure_mac_hotkey_handler();
+    EventHotKeyID hotkey{};
+    hotkey.signature = static_cast<OSType>(detail::AURORA_MACOS_HOTKEY_SIGNATURE);
+    hotkey.id = id;
+    EventHotKeyRef ref = nullptr;
+    const OSStatus status = RegisterEventHotKey(virtual_key, to_macos_modifiers(combo.modifiers), hotkey,
+                                                GetApplicationEventTarget(), 0, &ref);
+    if (status != noErr) {
+        AURORA_LOG_WARN("hotkey", "RegisterEventHotKey failed, id=", id, ", status=", status);
+        return false;
+    }
+    // sink 只入队（不执行动作）：碳事件处理器在主运行循环里，重入用户回调会撞上半途布局。
+    mac_hotkey_bindings().push_back(
+        MacHotkeyBinding{.id = id, .ref = ref, .sink = [this](std::uint32_t hit) -> bool { return on_hotkey(hit); }});
+    return true;
+#elif defined(AURORA_PLATFORM_WINDOWS)
     auto *hwnd = static_cast<HWND>(internal::ensure_message_window());
     if (hwnd == nullptr) {
         return false;
@@ -265,6 +558,15 @@ void OsHotkeyRegistry::Impl::unregister_native(std::uint32_t id) {
         return;
     }
     UnregisterHotKey(hwnd, static_cast<int>(id));
+#elif defined(AURORA_PLATFORM_MACOS)
+    auto &bindings = mac_hotkey_bindings();
+    for (auto it = bindings.begin(); it != bindings.end(); ++it) {
+        if (it->id == id) {
+            UnregisterEventHotKey(it->ref);
+            bindings.erase(it);
+            return;
+        }
+    }
 #else
     (void)id;
 #endif
@@ -308,7 +610,7 @@ auto OsHotkeyRegistry::add(const KeyCombo &combo, std::function<void()> action) 
         return register_error("combination already registered: " + combo.to_string());
     }
     const std::uint32_t id = next_hotkey_id();
-    if (!test_backend().active && !Impl::register_native(id, combo)) {
+    if (!test_backend().active && !impl_->register_native(id, combo)) {
         return register_error("OS rejected the combination: " + combo.to_string());
     }
     impl_->entries.push_back(Impl::Entry{.id = id, .combo = combo, .action = std::move(action)});
@@ -324,7 +626,7 @@ auto OsHotkeyRegistry::remove(OsHotkeyHandle h) const -> bool {
             continue;
         }
         if (!test_backend().active) {
-            Impl::unregister_native(it->id);
+            impl_->unregister_native(it->id);
         }
         impl_->entries.erase(it);
         // 已命中但尚未排空的同 ID 一并丢弃：热键已不存在，再排空等于执行已撤销的动作。
@@ -348,7 +650,7 @@ auto OsHotkeyRegistry::clear() const -> void {
     const bool inert = test_backend().active;
     for (const auto &e : impl_->entries) {
         if (!inert) {
-            Impl::unregister_native(e.id);
+            impl_->unregister_native(e.id);
         }
     }
     impl_->entries.clear();
@@ -408,3 +710,7 @@ auto OsHotkeyRegistry::remove_test_backend() -> bool {
 }
 
 }  // namespace aurora
+
+#ifdef AURORA_PLATFORM_MACOS
+#pragma clang diagnostic pop
+#endif

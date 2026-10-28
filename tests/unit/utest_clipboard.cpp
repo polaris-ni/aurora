@@ -5,7 +5,7 @@
 /// （非法 UTF-8 载荷 → ClipboardWriteFailed 且不动既有内容；图像参数非法 → GeneralInvalidArgument），
 /// 其余路径全程不写系统剪贴板（后端不可用时 SKIP）；
 /// 富格式段覆盖自定义 MIME 载荷、files / html 便利封装、available_formats 如实反映已写格式、
-/// 空值与空写口径、以及立骨期平台路径的 clipboard-format-unsupported；
+/// 空值与空写口径、以及无平台后端时的 clipboard-format-unsupported（macOS 已接线，此判据跳过）；
 /// 惰性要约与监听段覆盖按需兑现（注册零调用、逐格式各自一次、渲染一次即缓存）、
 /// 立即写与惰性混用互不覆盖、所有权丢失与变更监听的触发 / 替换 / 无机制如实报错、
 /// 提供失败的 provider-failed 口径、clear 与空写 no-op 的相反语义、
@@ -201,7 +201,8 @@ auto has_format(const std::vector<std::string> &formats, std::string_view mime) 
     return std::find(formats.begin(), formats.end(), mime) != formats.end();
 }
 
-/// @brief 立骨期富格式在平台路径上的统一失败（memory 后端已卸载时走此路）。
+#if !defined(AURORA_PLATFORM_MACOS)
+/// @brief 无平台后端时富格式在平台路径上的统一失败（memory 后端已卸载时走此路）。
 auto expect_format_unsupported(const Error &err, std::string_view mime) -> void {
     AURORA_TEST_CHECK_EQ(err.code_enum, ErrorCode::ClipboardFormatUnsupported);
     AURORA_TEST_CHECK_EQ(err.code, std::string{"clipboard-format-unsupported"});
@@ -209,6 +210,7 @@ auto expect_format_unsupported(const Error &err, std::string_view mime) -> void 
     AURORA_TEST_CHECK_FALSE(err.message.empty());
     AURORA_TEST_CHECK_TRUE(err.message.find(std::string{mime}) != std::string::npos);  // 失败点名是哪个 MIME
 }
+#endif
 
 }  // namespace
 
@@ -353,11 +355,15 @@ AURORA_TEST_CASE(empty_values_and_empty_writes_follow_the_documented_contract) {
     AURORA_TEST_CHECK_EQ(Clipboard::get_payload("application/x-probe").value(), bytes);
 }
 
-// 立骨期：富格式 API 在平台路径上（测试后端已卸载）一律报「本平台无该格式机制」，
-// 且该错误码的 retryable 为 false——机制缺失是稳态，调用方该改走别的通道而不是重试。
-// 变异自证：把平台路径的返回改成 `Ok(空值)`（谎称成功）或沿用 `GeneralNotSupported`，
-// 本用例的 code_enum 断言即转红。
-AURORA_TEST_CASE(rich_formats_report_unsupported_on_platform_path) {
+// 无平台后端时：富格式 API 一律报「本平台无该格式机制」，且该错误码的 retryable 为 false——
+// 机制缺失是稳态，调用方该改走别的通道而不是重试。判据只在**确实没有富格式后端**的平台路径上
+// 成立：macOS 的 NSPasteboard 后端在首次查询即自举登记（真读写会触碰系统剪贴板，不入单测）；
+// Linux 无富格式后端；Win32 依赖 owner 窗口登记，单测进程无窗口。变异自证：把平台路径的返回
+// 改成 `Ok(空值)`（谎称成功）或沿用 `GeneralNotSupported`，本用例的 code_enum 断言即转红。
+AURORA_TEST_CASE(rich_formats_report_unsupported_without_a_platform_backend) {
+#ifdef AURORA_PLATFORM_MACOS
+    AURORA_TEST_SKIP("macOS wires NSPasteboard rich formats; no unsupported platform path remains there");
+#else
     (void)Clipboard::remove_test_backend();  // 走平台路径
 
     const auto set_payload = Clipboard::set_payload("application/x-probe", to_bytes("x"));
@@ -386,6 +392,7 @@ AURORA_TEST_CASE(rich_formats_report_unsupported_on_platform_path) {
 
     // 末尾恢复测试后端：本用例卸载了它，不能把「已卸载」这一状态泄漏给同进程的后继用例。
     (void)Clipboard::install_test_backend();
+#endif
 }
 
 // MIME 为空不是「空内容」，而是调用方参数错：空串无法作为存储键，静默接受等于留下一个读不回来的格式。

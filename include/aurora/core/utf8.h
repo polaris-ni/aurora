@@ -8,7 +8,7 @@
 #include "aurora/core/platform.h"
 
 // Win32 平台专属：UTF-8 ↔ wchar_t 编解码原语。
-// 收口自 src/aurora/app/system_tray_win32.cpp 与 file_dialog_win32.cpp 中逐行相同的实现，
+// 收口自 src/aurora/app/system_tray.cpp 与 file_dialog_win32.cpp 中逐行相同的实现，
 // 消除跨文件重复。非 Win32 平台不编译（与 AURORA_BACKEND_WIN32 裁剪一致）。
 #ifdef AURORA_PLATFORM_WINDOWS
 namespace aurora::internal {

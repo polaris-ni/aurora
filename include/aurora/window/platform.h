@@ -34,20 +34,20 @@ struct PlatformCapabilities {
     /// 能力位只表「机制是否存在」：运行期不可用（投影通路建立失败等）仍走 `Result` 错误，
     /// 二者不互相替代（与 `system_drag_in` 同款口径）。**只在桥已落地的方向翻位**——
     /// Win32 / D3D11 由 `SHAddToRecentDocs` 桥接线（两者共用同一宿主，只是上屏形态不同，故同翻）；
-    /// `MacOS` 本次**保持 false**：`NSDocumentController` 桥未落地，按「未落地方向不预先声称支持」
-    /// 的纪律不预翻，桥落地时再翻（macOS 窗口壳实写是其前置）。`X11` / `Wayland` / `Glfw` / `Wasm` /
-    /// `Headless` 恒 false：Linux 侧唯一沾边的 XDG `recently-used.xbel` 是 GTK 生态共读的用户态文件、
-    /// 不是 OS 提供的机制，写它要自备跨进程合并与文件锁而收益只有一处选择器显示，代价不成立，
-    /// 故如实缺位——应用内列表在全平台照常工作，不因此降级。
+    /// `MacOS` 由 `NSDocumentController` 的 `noteNewRecentDocumentURL:` 桥接线（应用级集合，清空
+    /// 走 `clearRecentDocuments:`）。`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：
+    /// Linux 侧唯一沾边的 XDG `recently-used.xbel` 是 GTK 生态共读的用户态文件、不是 OS 提供的
+    /// 机制，写它要自备跨进程合并与文件锁而收益只有一处选择器显示，代价不成立，故如实缺位——
+    /// 应用内列表在全平台照常工作，不因此降级。
     bool recent_documents_os_projection = false;
-    /// @brief 存在 OS 原生菜单栏机制，且本库已把 `NativeMenuBar` 接到该机制（Win32 `HMENU` 桥）。
+    /// @brief 存在 OS 原生菜单栏机制，且本库已把 `NativeMenuBar` 接到该机制（Win32 `HMENU` / macOS `NSMenu` 桥）。
     ///
     /// 能力位只表「机制是否存在」：运行期不可用（菜单安装失败、无窗口宿主等）仍走 `Result` 错误，
     /// 二者不互相替代（与 `system_drag_in` 同款口径）。**只在桥已落地的方向翻位**——
-    /// Win32 / D3D11 由 `HMENU` 桥接线（两者共用同一宿主，故同翻）；`MacOS` 本次**保持 false**：
-    /// `NSMenu` 桥未落地，按「未落地方向不预先声称支持」的纪律不预翻，桥落地时再翻（macOS 窗口壳
-    /// 实写是其前置）；`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：Linux 侧无 OS 级
-    /// 菜单栏机制（GNOME 取消全局菜单、GTK4 窗口内自绘即 GTK 同款形态），回落自绘 `MenuBar`，故如实缺位。
+    /// Win32 / D3D11 由 `HMENU` 桥接线（两者共用同一宿主，故同翻）；`MacOS` 由 `NSMenu` 桥接线
+    /// （应用级 `NSApp.mainMenu`，不随窗口销毁而消失）；`X11` / `Wayland` / `Glfw` / `Wasm` /
+    /// `Headless` 恒 false：Linux 侧无 OS 级菜单栏机制（GNOME 取消全局菜单、GTK4 窗口内自绘即
+    /// GTK 同款形态），回落自绘 `MenuBar`，故如实缺位。
     bool native_menu_bar = false;
     /// @brief 存在 OS 运行期显隐机制，且本库已把 `Surface::set_visible()` / `is_visible()` 接到该机制。
     ///
@@ -56,7 +56,8 @@ struct PlatformCapabilities {
     /// （`ShowWindow(SW_SHOWNA / SW_HIDE)`），故同翻；wgpu 是**渲染后端偏好**而非独立
     /// `SurfaceKind`（其宿主仍是 Win32），不在此单列。其余恒 false：`X11` 的 `XMapWindow` /
     /// `XUnmapWindow` 与 `Glfw` 的 `glfwHideWindow` / `glfwShowWindow` 机制在但本库未接线，
-    /// `Wayland` 没有「隐藏顶层窗口」的核心协议（只有 minimize），`MacOS` 无窗口壳，`Wasm` 的
+    /// `Wayland` 没有「隐藏顶层窗口」的核心协议（只有 minimize），`MacOS` 有窗口壳但 `orderOut:` /
+    /// `setLevel:` 桥未接线（与 `X11` 同属「机制在、桥未落」），`Wasm` 的
     /// canvas 没有窗口可见性概念，`Headless` 是记录值 seam 而非 OS 机制。缺位平台上
     /// `set_visible()` 是可观测的 no-op（`is_visible()` 保持基类默认 `true`），不静默。
     bool runtime_visibility = false;
@@ -99,9 +100,9 @@ struct Platform {
     /// 在 Win32/Glfw/X11/Wayland/MacOS 五类真实显示 Surface 下为 true；`system_drag_in` / `system_drag_out`
     /// 仅在已接线的后端下为 true（当前为 Win32 / D3D11 / X11 / Wayland / MacOS，两方向同口径；
     /// 未接线的方向不预先声称支持）；`recent_documents_os_projection` 仅在已落 OS 投影桥的后端下为
-    /// true（当前仅 Win32 / D3D11；macOS 桥落地后再翻）；`runtime_visibility` 与
-    /// `runtime_always_on_top` 同样仅在已接运行期窗口开关的后端下为 true（当前仅 Win32 / D3D11，
-    /// 其余后端为「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）。
+    /// true；`native_menu_bar` 与之同口径（当前均为 Win32 / D3D11 / MacOS，macOS 两条桥同批落地）；
+    /// `runtime_visibility` 与 `runtime_always_on_top` 同样仅在已接运行期窗口开关的后端下为 true
+    /// （当前仅 Win32 / D3D11，其余后端为「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）。
     [[nodiscard]] auto capabilities() const -> PlatformCapabilities {
         // 待填充的能力标志聚合：默认值起步，先按设备形态、再按 SurfaceKind 逐项置位。
         PlatformCapabilities c;
@@ -122,8 +123,8 @@ struct Platform {
         //
         // ⚠️ 能力位是**编译期后端**的静态声明，不看运行期桥是否 install 成功：X11 会话缺失
         // （无 DISPLAY）时 `X11Surface` 构造即失败、不会有该 `SurfaceKind` 被产出，故此处不必
-        // 也无法回读运行期状态。MacOS 同口径（与 `multitouch` 等位一致，只表机制归属）：其窗口壳
-        // 尚为骨架、无内容视图可登记拖放类型，运行期 `install()` 必失败并由宿主记日志降级。
+        // 也无法回读运行期状态。MacOS 同口径（与 `multitouch` 等位一致，只表机制归属）：窗口壳
+        // 的真实 AppKit 视图负责登记拖放类型，运行期 install 失败仍由宿主记日志降级。
         c.system_drag_in =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::X11 ||
              surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
@@ -136,21 +137,22 @@ struct Platform {
         c.system_drag_out =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::X11 ||
              surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
-        // OS 级最近文档投影：仅 Win32 / D3D11 落了桥（`SHAddToRecentDocs`，两者共用同一宿主故同翻）。
-        // MacOS 本次保持 false——桥未落地即不预翻（机制缺位若谎报为「在」，`project_to_os()` 会在
-        // macOS 静默失败且调用方无从降级）。Linux 三形态与 Glfw / Wasm / Headless 恒 false：OS 侧
-        // 无该机制（XDG `recently-used.xbel` 是 GTK 生态共读文件而非 OS 机制），应用内列表照常工作。
-        c.recent_documents_os_projection = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
-        // 原生菜单栏：仅 Win32 / D3D11 落了桥（`HMENU`，两者共用同一宿主故同翻）。MacOS 本次保持
-        // false——桥未落地即不预翻（机制缺位若谎报为「在」，`NativeMenuBar::install` 会在 macOS
-        // 静默失败且调用方无从降级）。Linux 三形态与 Glfw / Wasm / Headless 恒 false：无 OS 级菜单栏机制。
-        c.native_menu_bar = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
+        // OS 级最近文档投影：Win32 / D3D11 走 `SHAddToRecentDocs`（共用同一宿主故同翻）；
+        // MacOS 走 `NSDocumentController`（应用级集合，随窗口宿主接线、无窗口也可自举）。
+        // Linux 三形态与 Glfw / Wasm / Headless 恒 false：OS 侧无该机制
+        // （XDG `recently-used.xbel` 是 GTK 生态共读文件而非 OS 机制），应用内列表照常工作。
+        c.recent_documents_os_projection =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
+        // 原生菜单栏：Win32 / D3D11 由 `HMENU` 桥接线（同一宿主故同翻），MacOS 由应用级
+        // `NSMenu`（`NSApp.mainMenu`）桥接线，不随窗口销毁而消失；其余方向无 OS 级机制，回落自绘 MenuBar。
+        c.native_menu_bar =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
         // 运行期显隐 / 置顶：仅 Win32 / D3D11 接线（同一 `Win32Host` 的 `ShowWindow` 与
         // `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，两者共用宿主故同翻）。其余后端本批不接线：
-        // X11 / Glfw 机制在而未落桥，Wayland 无「隐藏顶层窗口」与「置顶」的核心协议，macOS 无窗口壳，
-        // Wasm 的 canvas 无窗口可见性概念，Headless 是记录值 seam 而非 OS 机制——缺位时
-        // `set_visible` / `set_always_on_top` 为可观测的 no-op（`is_visible()` 恒为基类默认 true），
-        // 应用据此降级或申报不支持，而不是「按了没反应还无从知道」。
+        // X11 / Glfw 机制在而未落桥，Wayland 无「隐藏顶层窗口」与「置顶」的核心协议，macOS 有窗口壳而
+        // `orderOut:` / `setLevel:` 桥未落，Wasm 的 canvas 无窗口可见性概念，Headless 是记录值 seam
+        // 而非 OS 机制——缺位时 `set_visible` / `set_always_on_top` 为可观测的 no-op
+        // （`is_visible()` 恒为基类默认 true），应用据此降级或申报不支持，而不是「按了没反应还无从知道」。
         c.runtime_visibility = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
         c.runtime_always_on_top = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
         return c;
@@ -187,6 +189,13 @@ namespace detail {
 /// @return Dark/Light；打不开注册表键时 `Unspecified`。
 [[nodiscard]] auto win32_os_color_scheme() -> ColorScheme;
 }  // namespace detail
+#elif defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
+namespace detail {
+/// @brief macOS `NSAppearance` 读取 OS 明暗偏好（`os_color_scheme` 的 macOS 分支实现）。
+/// 定义见 `src/aurora/window/macos_platform.cpp`——公共头不引入 `<AppKit/AppKit.h>`。
+/// @return Dark/Light；AppKit 尚未初始化（`NSApp == nil`）时 `Unspecified`。
+[[nodiscard]] auto macos_os_color_scheme() -> ColorScheme;
+}  // namespace detail
 #endif
 
 /// @brief 显式查询 OS 明暗偏好（明暗三级优先链的最低层）。
@@ -199,8 +208,10 @@ namespace detail {
 /// - **Windows**：读注册表 `HKCU\...\Themes\Personalize\AppsUseLightTheme`（REG_DWORD，
 ///   0=Dark、1=Light）。键不存在（Win10 1803 之前）按 Light；打不开键返回 `Unspecified`。
 ///   无缓存轮询（每次直读，OS 偏好可能被用户随时更改）。
-/// - **macOS**：契约 = `NSAppearance` bestMatch（Dark→Dark）。
-///   **未在本仓库无头构建内编译验证。**
+/// - **macOS**：`NSApp.effectiveAppearance` 的 bestMatch（`NSAppearanceNameDarkAqua`
+///   → Dark，Aqua → Light）。AppKit 未初始化时返回 `Unspecified`。运行期明暗切换经
+///   `MacOSSurface` 内容视图的 `viewDidChangeEffectiveAppearance` 上报
+///   `notify_os_color_scheme_change`（已在本仓库真机 AppKit 构建内验证）。
 /// - 其余平台：`Unspecified`。
 /// @return OS 档位；无证据时不猜，返回 `Unspecified` 交由调用方回落。
 [[nodiscard]] inline auto os_color_scheme() -> ColorScheme {
@@ -237,8 +248,10 @@ namespace detail {
         }
     }
     return ColorScheme::Unspecified;
+#elif defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
+    return detail::macos_os_color_scheme();
 #elif defined(AURORA_PLATFORM_MACOS)
-    // 见函数头契约注记：NSAppearance 查询未在本仓库无头构建内编译验证。
+    // 无 macOS 窗口后端：不初始化 AppKit（init 有进程级副作用），如实无证据。
     return ColorScheme::Unspecified;
 #else
     return ColorScheme::Unspecified;

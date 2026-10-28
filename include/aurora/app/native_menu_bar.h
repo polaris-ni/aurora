@@ -18,9 +18,10 @@ class CommandRegistry;  // 前向声明：本头不引 commands.h，避免把命
 ///   与自绘路径共用同一个出口（提案「不建平行菜单 API」硬约束）；
 /// - **同一进程只认一份菜单栏**：重复 `install` 替换旧树、不叠加、不泄漏。
 ///
-/// 能力归属：是否真有 OS 原生菜单栏机制看 `PlatformCapabilities::native_menu_bar`（当前仅 Win32 /
-/// D3D11 落了桥；macOS / Linux / Wasm / Headless 为 `false`，回落自绘 `MenuBar`）。位为 `false` 的
-/// 平台 `install` 返回 `native-menu-unsupported`，应用内菜单照常工作，不因此降级。
+/// 能力归属：是否真有 OS 原生菜单栏机制看 `PlatformCapabilities::native_menu_bar`（当前 Win32 /
+/// D3D11 由 `HMENU` 桥接线、macOS 由应用级 `NSMenu` 桥接线；Linux / Wasm / Headless 为 `false`，
+/// 回落自绘 `MenuBar`）。位为 `false` 的平台 `install` 返回 `native-menu-unsupported`，应用内菜单
+/// 照常工作，不因此降级。
 ///
 /// 点击路由：本门面不直接调命令——它持有一个由 `set_command_registry` 登记的 `CommandRegistry*`
 /// （`Application` 构造期自动登记），菜单项被点击时按 `id` 反查并 `invoke`。空 `id` 的项照常建出、

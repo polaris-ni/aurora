@@ -110,8 +110,8 @@ class RecentDocuments {
     /// - **失败不影响应用内列表**：返回错误只说明「没推出去」，`add` 已经成立的内存列表与
     ///   `Preferences` 状态**不变**，`list()` / `size()` 照旧——重试与否由调用方决定。
     ///
-    /// 平台归属：能力位见 `PlatformCapabilities::recent_documents_os_projection`（当前仅 Win32 /
-    /// D3D11 落了桥；macOS 桥未落地故位为 `false`；Linux 无 OS 级机制）。位为 `false` 的平台返回
+    /// 平台归属：能力位见 `PlatformCapabilities::recent_documents_os_projection`（当前 Win32 /
+    /// D3D11 / MacOS 落了桥；Linux 无 OS 级机制）。位为 `false` 的平台返回
     /// `recent-documents-projection-unsupported`，平台侧真实故障走结构化错误（`platform-unavailable` /
     /// `platform-com-init-failed`），两类不混淆。
     /// @note 成功仅表「已投递给 OS」：Win32 的 `SHAddToRecentDocs` 无回执，OS 是否落记录另由

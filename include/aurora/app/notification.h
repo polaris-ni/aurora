@@ -11,7 +11,7 @@ namespace aurora {
 
 /// @brief 通知的紧急度（同时影响是否需要打扰用户）。
 /// 平台映射：Windows 走「是否静音」/「是否遵守专注时段」两级；Linux 走 freedesktop
-/// `urgency` 提示（Low=0 / Normal=1 / Critical=2）。
+/// `urgency` 提示（Low=0 / Normal=1 / Critical=2）；macOS 走提示音（Low 静音，Normal/Critical 带默认提示音）。
 /// @note Thread: n/a（纯值类型）
 /// @note Side-effects: none
 /// @note Rebuildable: no
@@ -39,7 +39,7 @@ struct Notification {
     std::uint32_t timeout_ms = 0;
 };
 
-/// @brief 跨平台系统通知入口（win32 气球 / XDG 桌面通知）。
+/// @brief 跨平台系统通知入口（win32 气球 / XDG 桌面通知 / macOS 通知中心）。
 ///
 /// 各平台后端（全部为**运行时**探测，无构建期依赖，也不新增 `AURORA_ENABLE_*` 开关）：
 ///
@@ -48,12 +48,15 @@ struct Notification {
 /// - **Linux**：三层降级，依次尝试 ① `dlopen("libnotify.so.4")` ② `dlopen("libdbus-1.so.3")`
 ///   手写 `org.freedesktop.Notifications.Notify` ③ `popen("notify-send")` 兜底。①② 支持激活回调
 ///   （需宿主排空，见 `pump_events`），③ 不支持。
+/// - **macOS**：`NSUserNotificationCenter`（legacy API，弃用但可用）。`tag` 映射为系统标识，
+///   同 tag 由系统原位替换；点击经 delegate 回传激活；`timeout_ms` 不受支持（系统决定驻留时长）。
+///   该 API 只对 **bundle 应用**可得（裸可执行文件取到 nil），此情形返回结构化错误而非静默成功。
 /// - **Headless 回退**：仅记录 `last_notification()`，`notify()` 返回成功；不支持激活回调。
-/// - **macOS / 其它**：本轮不支持，`notify()` 返回结构化错误。
+/// - **其余平台**：`notify()` 返回结构化错误。
 ///
 /// **失败口径**：一切失败统一为 `NotificationPostFailed`（`ErrorParams{{"detail", ...}}`，
 /// 永久失败、不可重试语义），调用方可据此退化为自己 UI 内的提示条；不抛异常、不静默 no-op。
-/// Linux 三层降级链**全部**缺失时才返回该错误。
+/// Linux 三层降级链**全部**缺失时、或 macOS 取不到通知中心时返回该错误。
 ///
 /// @note Thread: main-thread only（`notify` / `set_on_notification_activated` / `emit_activated` /
 /// `pump_events` 均在调用线程直行；内部记录区有互斥保护，仅供跨线程读取 `last_notification`）

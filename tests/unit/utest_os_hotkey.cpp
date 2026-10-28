@@ -37,7 +37,7 @@ auto require_unsupported_platform() -> void {
     if (OsHotkeyRegistry::install_test_backend(false)) {
         return;
     }
-#ifdef AURORA_PLATFORM_WINDOWS
+#if defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_MACOS)
     AURORA_TEST_SKIP("cannot simulate an unsupported platform without the inert test backend");
 #endif
 }

@@ -19,6 +19,9 @@
 #include "aurora/app/uri_list.h"
 #include "aurora/core/image.h"
 #include "aurora/core/platform.h"
+#if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
+#include "aurora/app/detail/macos_clipboard.h"  // NSPasteboard 富格式后端（自举登记；平台宏须先就绪）
+#endif
 #include "aurora/core/result.h"
 #include "aurora/image/image_codec.h"
 
@@ -212,6 +215,11 @@ auto remove_backend() -> void {
 }
 
 auto active_backend() -> const PlatformBackend * {
+#if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
+    // NSPasteboard 是应用级资源、不依赖窗口宿主：首次问后端即自举登记，无窗口场景同样可用。
+    // 其余平台由宿主守卫登记（Win32 需要 owner 窗口承载延迟渲染与监听）。
+    static_cast<void>(aurora::detail::macos_clipboard_ensure_registered());
+#endif
     auto &slot = backend_slot();
     const std::scoped_lock lock{slot.mutex};
     return &slot.backend;
@@ -967,7 +975,13 @@ auto Clipboard::clear() -> Result<void> {
     }
     return make_error(ErrorCode::ClipboardAccessFailed, ErrorParams{{"detail", cleared.error().message}});
 #elif defined(AURORA_PLATFORM_MACOS)
-    return make_error(ErrorCode::GeneralNotSupported, "clear: this platform has no clipboard clear implementation");
+    // pbcopy 以空输入重写 pasteboard：旧内容（含非文本格式）整体被替换，读回为空串，
+    // 与 Win32 `EmptyClipboard` / Linux `xsel --clear` 同语义。工具缺失按 access-failed 如实报。
+    const auto cleared = pipe_to_command("pbcopy", std::string{});
+    if (cleared) {
+        return Result<void>{};
+    }
+    return make_error(ErrorCode::ClipboardAccessFailed, ErrorParams{{"detail", cleared.error().message}});
 #else
     return make_error(ErrorCode::GeneralNotSupported, "clear: this platform has no clipboard implementation");
 #endif

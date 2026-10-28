@@ -1,6 +1,6 @@
 // notification.cpp — 跨平台系统通知的实现。
 //
-// 平台作风与 `system_tray_win32.cpp` / `file_dialog_win32.cpp` 一致：本文件在**全部**目标上编译，
+// 平台作风与 `system_tray.cpp` / `file_dialog_win32.cpp` 一致：本文件在**全部**目标上编译，
 // 平台专有代码用 `AURORA_PLATFORM_*`（取自 `core/platform.h`，不是原生 `_WIN32` / `__linux__`）
 // 在文件内部分支，公共 API 的定义无条件可见，非目标平台走「记录 + 失败/降级」路径。
 //
@@ -46,6 +46,10 @@
 #include "aurora/app/detail/platform_shell_win32.h"
 #include "aurora/app/notification.h"
 #include "aurora/core/log.h"
+
+#ifdef AURORA_PLATFORM_MACOS
+#include "aurora/app/detail/macos_notification.h"
+#endif
 
 #ifdef AURORA_PLATFORM_WINDOWS
 #include <cstddef>
@@ -969,6 +973,10 @@ auto pump_dbus() -> void {
 [[nodiscard]] auto post_notification(const Notification &notification) -> Result<void> {
 #ifdef AURORA_PLATFORM_WINDOWS
     return win_post(notification);
+#elif defined(AURORA_PLATFORM_MACOS)
+    // legacy `NSUserNotificationCenter`：同标识通知由系统原位替换；激活回调由主运行循环派发，
+    // 宿主调用 `pump_events()` 即可排空（无 bundle 时后端返回结构化失败，不静默成功）。
+    return detail::macos_post_notification(notification);
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
     std::string detail;
     Result<void> attempt = post_via_libnotify(notification);
@@ -1038,6 +1046,9 @@ auto NotificationCenter::pump_events() -> void {
 #ifdef AURORA_PLATFORM_WINDOWS
     // Windows 的气球事件由隐藏窗口的消息 pump 同步送达（宿主的 PeekMessage 即覆盖，
     // 这里若再抽一次会把宿主的窗口消息抢走），故这条就是 no-op。
+#elif defined(AURORA_PLATFORM_MACOS)
+    // 通知中心的 delegate 消息挂在主运行循环：非阻塞跑一轮默认模式即可排空。
+    detail::macos_pump_notifications();
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
     (void)linux_state();  // 保证状态先于下面两级访问而构造
     load_glib();

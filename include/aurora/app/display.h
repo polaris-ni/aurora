@@ -32,8 +32,8 @@ namespace app {
 [[nodiscard]] auto primary_display() -> Display;
 
 /// @brief 将窗口迁移到指定 id 的显示器。
-/// Win32 下以 SetWindowPos 将窗口居中到该显示器工作区；无头/非 Win32 为 no-op。
-/// 找不到 id 时回退到主显示器。
+/// Win32 下以 SetWindowPos、macOS 下以 `NSWindow.setFrame:` 将窗口居中到该显示器工作区；
+/// 无头 / 未接线后端为 no-op。找不到 id 时回退到主显示器。
 /// @param win 待迁移的窗口。
 /// @param display_id 目标显示器 id（与 `Display::id` 同源）。
 auto move_window_to_display(Window &win, int display_id) -> void;

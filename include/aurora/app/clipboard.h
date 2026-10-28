@@ -30,11 +30,15 @@ struct ClipboardOffer {
 /// - 文本：`set_text`/`get_text`，各平台实现：
 /// - Windows：`SetClipboardData(CF_UNICODETEXT)` / `GetClipboardData(CF_UNICODETEXT)`
 /// - Linux：`xclip -selection clipboard` / `xsel --clipboard`（需安装 xclip 或 xsel）
-/// - macOS：`pbcopy` / `pbpaste`
+/// - macOS：`pbcopy` / `pbpaste`（文本沿用外壳工具；富格式另走 `NSPasteboard`，见下）
 /// - 图像：`set_image`/`get_image`，仅 Windows 经 `SetClipboardData(CF_DIB)` 实现，
-/// 其它平台报 `GeneralNotSupported`。
+/// 其它平台报 `GeneralNotSupported`（macOS 的 `image/png` 经 `set_payload` 走 `NSPasteboard`，
+/// 不在图像通道）。
 /// - 富格式（自定义 MIME / 文件清单 / HTML）：`set_payload` / `get_payload` 及其便利封装。
-/// 格式名一律取自 `app/mime_types.h` 的常量表。
+/// 格式名一律取自 `app/mime_types.h` 的常量表。Windows 由剪贴板 owner 窗口承载（`CF_HDROP` /
+/// HTML Format / 自定义注册格式，惰性提供走 `WM_RENDERFORMAT`），macOS 由 `NSPasteboard`
+/// 承载（文件 URL / HTML / 自定义 type，惰性提供走 `NSPasteboardItemDataProvider`）；Linux
+/// 富格式机制尚未接线，读写如实报 `ClipboardFormatUnsupported`。
 ///
 /// **失败口径**（一律机器可见，不再以空串 / 静默 no-op 冒充成功）：
 ///
@@ -69,14 +73,17 @@ struct ClipboardOffer {
 /// `clear()` 是**主动清空**，与空写入 no-op 的「保留既有内容」语义相反，二者并列写明以防误用。
 /// 监听注册不是内容：`clear()` 清内容（要约即所有权声明，随内容一并清空），监听注册留存。
 ///
-/// **立骨期边界**：富格式 API 只在 memory 测试后端下承载数据；非测试路径上各平台一律返回
-/// `ClipboardFormatUnsupported`（平台机制由后续落地，本轮不触碰 Win32 既有 text / image 实现）。
-/// 故 `available_formats` 在平台路径上如实只列 `text/plain`（`image/png` 仅 Win32 有图像机制），
-/// 富格式在机制落地前不入列——不因「新 API 已声明」就谎报可用格式。`text/plain` 的读写在平台
-/// 路径上仍走 `set_text` / `get_text`。惰性要约同此边界：平台路径如实报
-/// `ClipboardFormatUnsupported`；`on_change` 平台路径如实报 `ClipboardListenUnsupported`；
-/// `clear()` 按平台到位程度分部接线（Win32 `EmptyClipboard`、Linux `xsel --clear`，macOS 未接
-/// 则如实报 `GeneralNotSupported`）。
+/// **平台接线现状**：富格式由平台后端函数表承载——Win32 后端随剪贴板 owner 窗口登记（无窗口
+/// 时未登记，如实报 `ClipboardFormatUnsupported`），macOS 后端在首次问到后端时自举登记
+/// （`NSPasteboard` 是应用级资源，无窗口同样可用），Linux 尚无富格式后端。后端登记时
+/// `available_formats` 由其如实枚举此刻剪贴板实际持有的格式（含惰性要约声明的格式）；未登记时
+/// 退回立骨期口径，只列既有机制覆盖的档位（`text/plain`，Win32 另加 `image/png`）。`text/plain`
+/// 的读写在平台路径上仍走 `set_text` / `get_text`。惰性提供与变更监听按机制有无分部接线：
+/// `set_offer` 在 Win32 / macOS 可用、Linux 报 `ClipboardFormatUnsupported`；`on_change` 在
+/// Win32 可用、macOS 因 `NSPasteboard` 无系统变更通知（库也不轮询）报
+/// `ClipboardListenUnsupported`。`clear()` 按平台到位程度分部接线（Win32 `EmptyClipboard`、
+/// Linux `xsel --clear`、macOS `pbcopy` 空输入重写 pasteboard；其余平台如实报
+/// `GeneralNotSupported`）。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: none (accesses system clipboard)
@@ -107,9 +114,10 @@ class Clipboard {
 
     /// @brief 列出当前剪贴板持有的 MIME 清单。
     ///
-    /// 如实反映「此刻能读到什么」：平台路径上是各平台既有机制所覆盖的格式（文本三平台恒在列、
-    /// 图像仅 Windows 在列），富格式待平台机制落地后才入列；memory 测试后端下则反映实际写入的
-    /// 格式。调用方据此决定走哪条读取通道，而不是凭「API 已声明」假设格式可用。
+    /// 如实反映「此刻能读到什么」：平台后端登记时枚举该后端实际持有的格式（Win32 剪贴板格式、
+    /// macOS pasteboard 类型，含惰性要约声明的格式）；未登记时退回既有机制覆盖的档位
+    /// （`text/plain`，Win32 另加 `image/png`）；memory 测试后端下则反映实际写入的格式。调用方
+    /// 据此决定走哪条读取通道，而不是凭「API 已声明」假设格式可用。
     /// @return `Ok(MIME 清单)`——一个格式都没有时为 `Ok(空清单)`（空内容不是失败）；
     /// 本平台无剪贴板实现时为 `GeneralNotSupported`。
     [[nodiscard]] static auto available_formats() -> Result<std::vector<std::string>>;
@@ -164,12 +172,13 @@ class Clipboard {
     /// 不缓存（每次读取各自重试提供）。
     /// @param offer 惰性提供要约（格式清单 + 按 MIME 取字节的回调）；`formats` 为空或 `provide`
     /// 为空回调均为参数错。
-    /// @return 成功为 `Ok`；要约不合法为 `GeneralInvalidArgument`；本平台无惰性提供机制（立骨期
-    /// 平台路径）为 `ClipboardFormatUnsupported`。
+    /// @return 成功为 `Ok`；要约不合法为 `GeneralInvalidArgument`；本平台无惰性提供机制为
+    /// `ClipboardFormatUnsupported`（Win32 / macOS 已接线；Linux 尚未接线）。
     static auto set_offer(const ClipboardOffer &offer) -> Result<void>;
 
-    /// @brief 注册「剪贴板所有权被其它进程夺走」的回调（Win32 `WM_DESTROYCLIPBOARD`、X11
-    /// selection owner 被夺、Wayland selection 事件、macOS 所有权变更的平台锚）。
+    /// @brief 注册「剪贴板所有权被其它进程夺走」的回调（Win32 `WM_DESTROYCLIPBOARD` 与 owner
+    /// 窗口销毁、macOS `pasteboardFinishedWithDataProvider:` 配合 changeCount 区分「数据已供完」
+    /// 与「所有权易主」；Linux selection owner 变更尚未接线）。
     ///
     /// 与 `set_offer` **成对**：惰性提供所依赖的缓存与临时资源在本回调里释放；未注册惰性要约时
     /// 本回调不触发（没有可失去的所有权的要约）。所有权丢失是**正常态不是故障**，故走回调而不
@@ -178,7 +187,7 @@ class Clipboard {
     static auto on_ownership_lost(std::function<void()> callback) -> void;
 
     /// @brief 注册「系统剪贴板内容变化」的回调（Win32 `AddClipboardFormatListener`、Qt
-    /// `dataChanged`、GTK `changed`、macOS changeCount 轮询的平台锚）。
+    /// `dataChanged`、GTK `changed` 的平台锚；macOS 无系统变更通知，库也不轮询，注册如实失败）。
     ///
     /// **不谎报**：平台无监听机制时**注册即失败**、返回 `ClipboardListenUnsupported`——注册了却
     /// 收不到通知会让调用方逻辑静默失效，故宁可如实报错（与 `available_formats()` 的如实反映同款
@@ -188,7 +197,8 @@ class Clipboard {
     /// @return 成功为 `Ok`；本平台无变更监听机制为 `ClipboardListenUnsupported`。
     static auto on_change(std::function<void()> callback) -> Result<void>;
 
-    /// @brief 程序化清空：清空系统剪贴板全部格式（Win32 `EmptyClipboard`、`xsel --clear` 的平台锚）。
+    /// @brief 程序化清空：清空系统剪贴板全部格式（Win32 `EmptyClipboard`、Linux `xsel --clear`、
+    /// macOS `pbcopy` 空输入重写 pasteboard 的平台锚）。
     ///
     /// 与空写入**语义相反**：空文本 / 空图像 / 空字节 / 空清单的 `set_*` 是契约内 no-op、**保留
     /// 既有内容**；本入口是**主动清空**。清空后 `available_formats()` 返回 `Ok(空清单)`；惰性要约

@@ -196,9 +196,9 @@ AURORA_TEST_CASE(empty_tree_yields_empty_flat_without_error) {
 
 // ---------- 能力位矩阵 ----------
 
-AURORA_TEST_CASE(capability_bit_is_true_only_for_win32_and_d3d11) {
+AURORA_TEST_CASE(capability_bit_is_true_only_where_bridge_landed) {
     // 逐 SurfaceKind 申报「OS 侧有该机制且本库已落桥」。翻位纪律：桥未落地的方向不预先声称支持——
-    // `MacOS` 本次为 false（NSMenu 桥未落地），Linux 三形态 / Glfw / Wasm / Headless 恒 false
+    // `MacOS` 由应用级 `NSMenu` 桥接线故为 true，Linux 三形态 / Glfw / Wasm / Headless 恒 false
     // （OS 无该机制或桥未落地），回落自绘 MenuBar。
     struct Expectation {
         SurfaceKind kind;
@@ -208,7 +208,7 @@ AURORA_TEST_CASE(capability_bit_is_true_only_for_win32_and_d3d11) {
         {.kind = SurfaceKind::Headless, .expected = false}, {.kind = SurfaceKind::Win32, .expected = true},
         {.kind = SurfaceKind::D3D11, .expected = true},     {.kind = SurfaceKind::Glfw, .expected = false},
         {.kind = SurfaceKind::X11, .expected = false},      {.kind = SurfaceKind::Wayland, .expected = false},
-        {.kind = SurfaceKind::MacOS, .expected = false},    {.kind = SurfaceKind::Wasm, .expected = false},
+        {.kind = SurfaceKind::MacOS, .expected = true},     {.kind = SurfaceKind::Wasm, .expected = false},
     };
     for (const Expectation &row : table) {
         Platform p;
