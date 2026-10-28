@@ -28,7 +28,7 @@ struct FeatureFlags {
     bool backend_glfw = false;  ///< AURORA_BACKEND_GLFW：GLFW + OpenGL 3.x 兼容 profile 表面后端。
     bool backend_x11 = false;  ///< AURORA_BACKEND_X11：X11/Xlib 桌面表面后端（仅 Linux）。
     bool backend_wayland = false;  ///< AURORA_BACKEND_WAYLAND：原生 Wayland 表面后端（wl_shm + xdg-shell）。
-    bool backend_macos = false;  ///< AURORA_BACKEND_MACOS：AppKit/CoreGraphics 表面后端（骨架）。
+    bool backend_macos = false;  ///< AURORA_BACKEND_MACOS：AppKit/CoreGraphics 表面后端。
     bool backend_wasm = false;  ///< AURORA_BACKEND_WASM：Emscripten/Canvas 2D 浏览器表面后端。
     bool layout_cache = false;  ///< AURORA_ENABLE_LAYOUT_CACHE：布局约束缓存，约束不变且非脏时跳过子树递归。
     bool occlusion_culling = false;  ///< AURORA_ENABLE_OCCLUSION_CULLING：遮挡剔除，跳过不与裁剪区相交的子控件绘制。
@@ -40,6 +40,7 @@ struct FeatureFlags {
     bool audio = false;  ///< AURORA_ENABLE_AUDIO：内置音频设备后端（AudioContext 图 API 恒编译，关=静默模式）。
     bool enable_audio_wasapi = false;  ///< AURORA_ENABLE_AUDIO_WASAPI：WASAPI 设备后端（Windows，依赖 audio）。
     bool enable_audio_alsa = false;  ///< AURORA_ENABLE_AUDIO_ALSA：ALSA 设备后端（Linux，dlopen 运行期绑定）。
+    bool enable_audio_coreaudio = false;  ///< AURORA_ENABLE_AUDIO_COREAUDIO：CoreAudio 设备后端（macOS，AudioQueue）。
     bool enable_audio_webaudio = false;  ///< AURORA_ENABLE_AUDIO_WEBAUDIO：WebAudio 设备后端（浏览器）。
     bool image_jpeg = false;  ///< AURORA_ENABLE_IMAGE_JPEG：JPEG 解码能力。
     bool image_webp = false;  ///< AURORA_ENABLE_IMAGE_WEBP：WebP 解码能力。

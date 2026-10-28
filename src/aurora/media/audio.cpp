@@ -22,6 +22,7 @@
 #include <utility>
 
 #include "audio_alsa.h"
+#include "audio_coreaudio.h"
 #include "audio_wasapi.h"
 #include "audio_webaudio.h"
 #include "aurora/core/log.h"
@@ -835,13 +836,16 @@ auto AudioRecordingDestinationNode::save_wav(const std::string &path) const -> R
 
 namespace {
 
-// 默认设备后端工厂：浏览器走 Web Audio（AudioContext + 主线程推样），Linux 开启
-// AURORA_ENABLE_AUDIO_ALSA 时构造 AlsaDeviceBackend，其余平台构造 WasapiDeviceBackend
-// ——三者宏关闭时 .cpp 体均为 disabled 桩（start 恒 false），AudioContext 随即静默
-// 降级；真实实现见 audio_webaudio.cpp / audio_alsa.cpp / audio_wasapi.cpp。
+// 默认设备后端工厂：浏览器走 Web Audio（AudioContext + 主线程推样），macOS 走
+// CoreAudio（AudioQueue 默认输出设备），Linux 开启 AURORA_ENABLE_AUDIO_ALSA 时构造
+// AlsaDeviceBackend，其余平台构造 WasapiDeviceBackend——四者宏关闭时 .cpp 体均为
+// disabled 桩（start 恒 false），AudioContext 随即静默降级；真实实现见
+// audio_webaudio.cpp / audio_coreaudio.cpp / audio_alsa.cpp / audio_wasapi.cpp。
 auto create_default_device_backend() -> std::unique_ptr<AudioDeviceBackend> {
 #ifdef AURORA_PLATFORM_WASM
     return std::make_unique<WebAudioDeviceBackend>();
+#elif defined(AURORA_ENABLE_AUDIO_COREAUDIO)
+    return std::make_unique<CoreAudioDeviceBackend>();
 #elif defined(AURORA_ENABLE_AUDIO_ALSA)
     return std::make_unique<AlsaDeviceBackend>();
 #else
@@ -849,11 +853,13 @@ auto create_default_device_backend() -> std::unique_ptr<AudioDeviceBackend> {
 #endif
 }
 
-// 默认采集后端工厂：与设备后端同口径（WebAudio/ALSA/WASAPI 按平台择路）——disabled 桩
-// start 恒 false → create_microphone_source 显式报错，录制不静默降级。
+// 默认采集后端工厂：与设备后端同口径（WebAudio/CoreAudio/ALSA/WASAPI 按平台择路）——
+// disabled 桩 start 恒 false → create_microphone_source 显式报错，录制不静默降级。
 [[maybe_unused]] auto create_default_capture_backend() -> std::unique_ptr<AudioCaptureBackend> {
 #ifdef AURORA_PLATFORM_WASM
     return std::make_unique<WebAudioCaptureBackend>();  // 采集未接线（见 audio_webaudio.h 申报）
+#elif defined(AURORA_ENABLE_AUDIO_COREAUDIO)
+    return std::make_unique<CoreAudioCaptureBackend>();  // 需宿主声明 NSMicrophoneUsageDescription（见同名头）
 #elif defined(AURORA_ENABLE_AUDIO_ALSA)
     return std::make_unique<AlsaCaptureBackend>();
 #else

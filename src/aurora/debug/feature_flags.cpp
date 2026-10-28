@@ -71,6 +71,9 @@ auto feature_flags() -> FeatureFlags {
 #ifdef AURORA_ENABLE_AUDIO_ALSA
     f.enable_audio_alsa = true;
 #endif
+#ifdef AURORA_ENABLE_AUDIO_COREAUDIO
+    f.enable_audio_coreaudio = true;
+#endif
 #ifdef AURORA_ENABLE_AUDIO_WEBAUDIO
     f.enable_audio_webaudio = true;
 #endif
@@ -120,6 +123,7 @@ auto FeatureFlags::to_json() const -> Json {
     j.set("AURORA_ENABLE_AUDIO", Json{audio});
     j.set("AURORA_ENABLE_AUDIO_WASAPI", Json{enable_audio_wasapi});
     j.set("AURORA_ENABLE_AUDIO_ALSA", Json{enable_audio_alsa});
+    j.set("AURORA_ENABLE_AUDIO_COREAUDIO", Json{enable_audio_coreaudio});
     j.set("AURORA_ENABLE_AUDIO_WEBAUDIO", Json{enable_audio_webaudio});
     j.set("AURORA_ENABLE_IMAGE_JPEG", Json{image_jpeg});
     j.set("AURORA_ENABLE_IMAGE_WEBP", Json{image_webp});
