@@ -104,15 +104,24 @@ $benchScroll = Get-Exe $BuildDir "bench_scroll"
 $benchRender = Get-Exe $BuildDir "bench_render"
 
 # ---- G-1~G-4：bench_scroll best-of ----
+# 列位按 CSV 表头名取（表头定义见 src/aurora/perf/perf_session.cpp 的 summary_line），
+# 不再按硬编码下标猜：早期版本写死 $c[4]，而该列实为 p95_ms，把 p99 门槛放松了一个百分位。
 $p99Best = [double]::PositiveInfinity
 $bestWorst = $null; $bestJitter = $null; $bestLong = $null
 for ($i = 1; $i -le $Repeat; $i++) {
     $csv = & $benchScroll --scene $Scene --format csv --frames 300 2>$null
-    $row = ($csv | Where-Object { $_ -match ',' } | Select-Object -Last 1)
-    if ($null -eq $row) { continue }
-    $c = $row -split ','
-    if ($c.Count -le 10) { continue }
-    $p = [double]$c[4]; $w = [double]$c[7]; $j = [double]$c[8]; $l = [double]$c[10]
+    $lines = @($csv | Where-Object { $_ -match ',' })
+    if ($lines.Count -lt 2) { continue }
+    $cols = @($lines[0] -split ',')
+    $cells = @($lines[-1] -split ',')
+    if ($cells.Count -ne $cols.Count) { continue }
+    $ix = @{}
+    for ($k = 0; $k -lt $cols.Count; $k++) { $ix[$cols[$k].Trim()] = $k }
+    $need = @('p99_ms', 'worst_ms', 'jitter_ms', 'long_task_count')
+    $missing = @($need | Where-Object { -not $ix.ContainsKey($_) })
+    if ($missing.Count -gt 0) { continue }
+    $p = [double]$cells[$ix['p99_ms']]; $w = [double]$cells[$ix['worst_ms']]
+    $j = [double]$cells[$ix['jitter_ms']]; $l = [double]$cells[$ix['long_task_count']]
     if ($p -lt $p99Best) { $p99Best = $p; $bestWorst = $w; $bestJitter = $j; $bestLong = $l }
 }
 
@@ -164,9 +173,13 @@ if ($ProfilingBuild -ne "") {
 $gates = @()
 function Add-Gate {
     param([string]$id, [string]$metric, [object]$val, [double]$thr, [bool]$count = $true)
+    # 无读数（null / ∞ / 非数字）一律记为未达标：否则基准程序改名、参数变化或输出形态一改，
+    # 整张表就会「空表全绿」——这正是本脚本早期长期返回 exit 0 的机理（函数体内 `$gates +=`
+    # 在 PowerShell 里创建的是局部变量，外层数组始终为空，判定 `(-not Pass).Count -eq 0` 恒真）。
+    $shown = 'n/a'
     $ok = $false
-    if ($null -ne $val -and $val -match '^[\d.]+$') { $ok = ([double]$val) -le $thr }
-    $gates += [PSCustomObject]@{ Gate = $id; Metric = $metric; Measured = $val; Threshold = $thr; Pass = $ok; Counted = $count }
+    if ($null -ne $val -and "$val" -match '^[\d.]+$') { $shown = "$val"; $ok = ([double]$val) -le $thr }
+    $script:gates += [PSCustomObject]@{ Gate = $id; Metric = $metric; Measured = $shown; Threshold = $thr; Pass = $ok; Counted = $count }
 }
 Add-Gate 'G-1'  'scroll p99 (ms, best-of)' $p99Best    (Get-Thr 'G-1' 'scroll p99 (ms, best-of)')
 Add-Gate 'G-2'  'scroll worst (ms)'         $bestWorst  (Get-Thr 'G-2' 'scroll worst (ms)')
@@ -186,11 +199,19 @@ Write-Host "=============================================================="
 Write-Host ("{0,-6} {1,-28} {2,12} {3,12} {4,7}" -f 'Gate', 'Metric', 'Measured', 'Threshold', 'Result')
 Write-Host "--------------------------------------------------------------"
 foreach ($g in $gates) {
-    $res = if ($g.Pass) { 'PASS' } elseif ($null -eq $g.Measured) { 'n/a' } else { 'FAIL' }
+    # 计入项无读数 = 失败（写 FAIL(no data) 逼人来查为什么没测到）；信息项无读数按脚本自述记 n/a。
+    if ($g.Pass) {
+        $res = 'PASS'
+    } elseif ($g.Measured -eq 'n/a') {
+        $res = if ($g.Counted) { 'FAIL(no data)' } else { 'n/a' }
+    } else {
+        $res = 'FAIL'
+    }
     Write-Host ("{0,-6} {1,-28} {2,12} {3,12} {4,7}" -f $g.Gate, $g.Metric, $g.Measured, $g.Threshold, $res)
 }
-$counted = $gates | Where-Object { $_.Counted }
-$allPass = ($counted | Where-Object { -not $_.Pass }).Count -eq 0
+$counted = @($gates | Where-Object { $_.Counted })
+# 表里一条计入项都没有也判失败：空表不等于通过。
+$allPass = ($counted.Count -gt 0) -and (@($counted | Where-Object { -not $_.Pass }).Count -eq 0)
 Write-Host "--------------------------------------------------------------"
 Write-Host "G-9~G-11 are info-only (depend on PROFILING=ON and a known paint baseline over the 10ms budget); excluded from the pass decision."
 if ($allPass) {

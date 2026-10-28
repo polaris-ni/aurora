@@ -549,7 +549,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `generate_error_codes` | 触发 `gen_error_codes` 重跑（errors.toml 变更时）。产物先落 `<build>/_gen_error_codes_stage/`，经 clang-format（配置以 `file:<仓库根绝对路径>` 钉死，口径见 `BUILD_OPTIONS.md` §4.7）折行后 `copy_if_different` 回源码树；生成器四个路径参数一律必需，缺省即拒绝执行，以免绕过折行步骤直写版控文件 |
 | `aurora_api_json` | 运行 `gen_api_tools` 直写 `aurora_api.json`，随后 `gen_debug_api` 再合并 `debug` 段（单跑即得完整文件） |
 | `gen_debug_api_json` | 仅刷新 `aurora_api.json` 的 `debug` 段 |
-| `perf_gates` | 本机时间类门槛校验（`tools/check/check_perf_gates.ps1`，仅 Windows，不进 CI） |
+| `perf_gates` | 本机时间类门槛校验（`tools/check/check_perf_gates.ps1`，仅 Windows，不进 CI）。判定口径：计入项**取不到读数即失败**（显示 `FAIL(no data)`、退出码 1），只作信息项的 G-9~G-11 未给 PROFILING 构建时记 `n/a` 且不计入；`bench_scroll` 的读数按 CSV **表头列名**定位（历史上写死下标取到的是 p95，门槛被放松一个百分位）。空表一律不判通过 |
 
 > AI 兼容性批量验证**不是** cmake 目标，而是 CTest 集成用例 `itest_ai_compat`（`tests/integration/itest_ai_compat.cpp`）：遍历 `tests/fixtures/ai_compat/` 下的 JSON fixture，无 LLM 调用；`valid_*` 期望通过、`error_*` 期望报错、`interact_*` 为「静态树 → TestController 交互 → 状态断言」回归脚本（`itest_ai_compat.cpp` 中段消费）。运行：`ctest -R itest_ai_compat`。
 
