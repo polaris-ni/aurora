@@ -26,7 +26,7 @@ auto main() -> int {
     au::Button add{au::ButtonProps{.label = au::LocalizedString{"List append"}}};
     add.on_click = [todos]() -> void {
         todos.update([](std::vector<std::string> next) -> std::vector<std::string> {
-            next.push_back("gamma");
+            next.emplace_back("gamma");
             return next;
         });
     };

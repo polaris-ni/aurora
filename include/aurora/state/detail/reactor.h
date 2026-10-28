@@ -263,7 +263,10 @@ class Engine {
     /// @brief 按登记顺序交付本轮终端。
     auto deliver() -> void;
     /// @brief 在给定因果链下执行一个写入闭包。
-    auto run_job(std::function<void()> fn, std::vector<std::uint64_t> chain) -> void;
+    ///
+    /// 闭包按常引用收：它只被 `operator()` 调用、不被转移也不被改写，按值收会为每轮
+    /// 投递多付一次 `std::function` 的堆搬运。因果链仍按值收，直接换入 `active_chain_`。
+    auto run_job(const std::function<void()> &fn, std::vector<std::uint64_t> chain) -> void;
 
     std::deque<Job> jobs_;
     std::vector<std::shared_ptr<RunRecord>> pending_;

@@ -14,32 +14,48 @@
 namespace aurora::detail {
 namespace {
 
-/// @brief 当前线程的依赖收集器；作用域外为空。
-thread_local DepsCollector *tls_collector = nullptr;
+/// @brief 当前线程的依赖收集器（作用域外为空）。
+///
+/// 以「函数内 `thread_local` + 访问器」提供，而非命名空间级可变全局变量——与
+/// `src/aurora/event/focus.cpp` 的派发槽同形态：本状态是**求值上下文**（进入收集时
+/// 设置、退出时复原），只由本文件的配对 RAII 对象读写，不该暴露成可寻址的全局设施。
+[[nodiscard]] auto collector_slot() noexcept -> DepsCollector *& {
+    thread_local DepsCollector *slot = nullptr;
+    return slot;
+}
 
 /// @brief 来源节点的稳定身份分配器。
-std::atomic<std::uint64_t> next_source_id{1};
+///
+/// 函数内静态：初值是编译期常量，无静态初始化顺序问题；跨 TU 不可见，身份唯一性由
+/// 「本文件是来源节点唯一定义处」保证，而不是靠一枚全局变量。
+[[nodiscard]] auto next_source_id() -> std::atomic<std::uint64_t> & {
+    static std::atomic<std::uint64_t> value{1};
+    return value;
+}
 
-/// @brief 观察者的全局登记序号分配器。
-std::atomic<std::uint64_t> next_observer_seq{1};
+/// @brief 观察者的全局登记序号分配器（同上，函数内静态而非全局）。
+[[nodiscard]] auto next_observer_seq() -> std::atomic<std::uint64_t> & {
+    static std::atomic<std::uint64_t> value{1};
+    return value;
+}
 
 }  // namespace
 
-auto current_collector() -> DepsCollector * { return tls_collector; }
+auto current_collector() -> DepsCollector * { return collector_slot(); }
 
-CollectorScope::CollectorScope(DepsCollector &collector) noexcept : previous_(tls_collector) {
-    tls_collector = &collector;
+CollectorScope::CollectorScope(DepsCollector &collector) noexcept : previous_(collector_slot()) {
+    collector_slot() = &collector;
 }
 
-CollectorScope::~CollectorScope() { tls_collector = previous_; }
+CollectorScope::~CollectorScope() { collector_slot() = previous_; }
 
-SuspendCollection::SuspendCollection() noexcept : previous_(tls_collector) { tls_collector = nullptr; }
+SuspendCollection::SuspendCollection() noexcept : previous_(collector_slot()) { collector_slot() = nullptr; }
 
-SuspendCollection::~SuspendCollection() { tls_collector = previous_; }
+SuspendCollection::~SuspendCollection() { collector_slot() = previous_; }
 
-Observer::Observer() : seq_(next_observer_seq.fetch_add(1)) {}
+Observer::Observer() : seq_(next_observer_seq().fetch_add(1)) {}
 
-SourceNode::SourceNode() : id_(next_source_id.fetch_add(1)) {}
+SourceNode::SourceNode() : id_(next_source_id().fetch_add(1)) {}
 
 SourceNode::~SourceNode() = default;
 
@@ -72,7 +88,7 @@ auto RunRecord::add(SourceNode &src, std::uint64_t version) -> void {
             return;
         }
     }
-    next_.push_back({src.shared_from_this(), version});
+    next_.push_back(Dep{.node = src.shared_from_this(), .seen = version});
 }
 
 auto RunRecord::as_terminal() -> std::shared_ptr<RunRecord> { return shared_from_this(); }
@@ -175,11 +191,11 @@ auto Engine::submit_job(std::function<void()> job) -> void {
     }
     ++depth_;
     try {
-        run_job(std::move(job), {});
+        run_job(job, {});
         while (!jobs_.empty()) {
             Job next = std::move(jobs_.front());
             jobs_.pop_front();
-            run_job(std::move(next.fn), std::move(next.chain));
+            run_job(next.fn, std::move(next.chain));
         }
     } catch (...) {
         jobs_.clear();
@@ -191,7 +207,7 @@ auto Engine::submit_job(std::function<void()> job) -> void {
     --depth_;
 }
 
-auto Engine::run_job(std::function<void()> fn, std::vector<std::uint64_t> chain) -> void {
+auto Engine::run_job(const std::function<void()> &fn, std::vector<std::uint64_t> chain) -> void {
     std::vector<std::uint64_t> saved = std::move(active_chain_);
     active_chain_ = std::move(chain);
     try {
