@@ -244,6 +244,132 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         target_include_directories(aurora_verify_macos_drag PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         target_compile_options(aurora_verify_macos_drag PRIVATE -fobjc-arc)
         list(APPEND _aurora_verify_targets aurora_verify_macos_drag)
+
+        # ---- macOS Surface 窗口/上屏/几何/显示/明暗偏好（真实 AppKit 窗口）----
+        # 自动段以公共 API 建真实窗口，逐项核对：帧缓冲尺寸 = 逻辑 x backingScaleFactor、
+        # Painter 像素落点与清屏底色、frame_count、set_size / set_position 往返、display_id
+        # 与 app::list_displays 的同一 id 空间、os_color_scheme 对 NSApp 外观切换的实时跟随、
+        # close / cancel_close 语义。不依赖截图（背景图形会话下 screencapture 不可用）。
+        aurora_add_verify_probe(aurora_verify_macos_surface "${_aurora_verify_dir}/macos_surface_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_compile_options(aurora_verify_macos_surface PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_surface)
+
+        # ---- macOS 最近文档 OS 投影（NSDocumentController + 独立取证）----
+        # 探针不建窗口（顺带覆盖无宿主进程的自举通路），用 `recentDocumentURLs` 独立核对
+        # 投影条目出现 / 重复投影去重 / 撤销后清空，并核对能力位与应用内 store 不受投影影响。
+        # 记账观测口 `macos_recent_documents_projected_count()` 是库内部契约（src/aurora/window/detail/），
+        # 故需 src 包含目录（口径同 Win32 最近文档 / csd / WASAPI 探针）。
+        aurora_add_verify_probe(aurora_verify_macos_recent_documents
+                "${_aurora_verify_dir}/macos_recent_documents_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_include_directories(aurora_verify_macos_recent_documents PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_compile_options(aurora_verify_macos_recent_documents PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_recent_documents)
+        # NSDocumentController 只对已签名的 .app 包记录最近文档（裸可执行文件调用成功但集合恒空，
+        # 本机实测 macOS 26）。故构建后封装成 .app 并 ad-hoc 签名；探针须经包内可执行文件运行。
+        find_program(AURORA_CODESIGN_EXECUTABLE codesign)
+        if (AURORA_CODESIGN_EXECUTABLE)
+            set(_aurora_recent_probe_app "${CMAKE_CURRENT_BINARY_DIR}/AuroraMacOSRecentProbe.app")
+            add_custom_command(TARGET aurora_verify_macos_recent_documents POST_BUILD
+                    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_aurora_recent_probe_app}/Contents/MacOS"
+                    COMMAND "${CMAKE_COMMAND}" -E copy
+                            "$<TARGET_FILE:aurora_verify_macos_recent_documents>"
+                            "${_aurora_recent_probe_app}/Contents/MacOS/aurora_verify_macos_recent_documents"
+                    COMMAND "${CMAKE_COMMAND}" -E copy
+                            "${_aurora_verify_dir}/macos_recent_documents_probe_info.plist"
+                            "${_aurora_recent_probe_app}/Contents/Info.plist"
+                    COMMAND "${AURORA_CODESIGN_EXECUTABLE}" --force --deep --sign - "${_aurora_recent_probe_app}"
+                    VERBATIM)
+            aurora_log("macOS recent-documents probe bundle: ${_aurora_recent_probe_app}")
+        else ()
+            aurora_log("codesign not found: macOS recent-documents probe will not run from a bundle")
+        endif ()
+
+        # ---- macOS 通知中心（NSUserNotificationCenter + 系统条目独立取证）----
+        # 逐项核对投递条目、同 tag 原位替换、紧急度声音映射、空 tag 占位标识、delegate 激活接线
+        # 与 pump 安全；真实鼠标点击留给人工段（打印 PENDING 提示，不冒充已验收）。
+        # 通知中心同样只对 bundle 应用可得（裸二进制单例为 nil），故同样封装 + ad-hoc 签名；
+        # 裸跑时探针会核对「结构化失败而非谎报成功」并以退出码 3 报 PENDING。
+        aurora_add_verify_probe(aurora_verify_macos_notification
+                "${_aurora_verify_dir}/macos_notification_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_compile_options(aurora_verify_macos_notification PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_notification)
+        if (AURORA_CODESIGN_EXECUTABLE)
+            set(_aurora_notification_probe_app "${CMAKE_CURRENT_BINARY_DIR}/AuroraMacOSNotificationProbe.app")
+            add_custom_command(TARGET aurora_verify_macos_notification POST_BUILD
+                    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_aurora_notification_probe_app}/Contents/MacOS"
+                    COMMAND "${CMAKE_COMMAND}" -E copy
+                            "$<TARGET_FILE:aurora_verify_macos_notification>"
+                            "${_aurora_notification_probe_app}/Contents/MacOS/aurora_verify_macos_notification"
+                    COMMAND "${CMAKE_COMMAND}" -E copy
+                            "${_aurora_verify_dir}/macos_notification_probe_info.plist"
+                            "${_aurora_notification_probe_app}/Contents/Info.plist"
+                    COMMAND "${AURORA_CODESIGN_EXECUTABLE}" --force --deep --sign - "${_aurora_notification_probe_app}"
+                    VERBATIM)
+            aurora_log("macOS notification probe bundle: ${_aurora_notification_probe_app}")
+        else ()
+            aurora_log("codesign not found: macOS notification probe will not run from a bundle")
+        endif ()
+
+        # ---- macOS 全局热键（Carbon RegisterEventHotKey + 合成事件）----
+        # 自动段真实注册 Ctrl+Alt+K 等组合，再向应用事件目标合成 kEventHotKeyPressed，
+        # 逐项核对「系统注册 -> 处理器 -> 队列 -> drain 执行」接线；真实键盘按键留给人工段。
+        # 探针直连库内部签名常量（src/aurora/app/detail/macos_hotkey.h），故需 src 包含目录。
+        aurora_add_verify_probe(aurora_verify_macos_hotkey "${_aurora_verify_dir}/macos_hotkey_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_include_directories(aurora_verify_macos_hotkey PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_compile_options(aurora_verify_macos_hotkey PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_hotkey)
+
+        # ---- macOS 原生菜单栏（NSMenu 建树 + target-action 回投）----
+        # 自动段以公共门面安装真实 NSApp.mainMenu，逐项核对标题 / 分隔符 / 勾选 / 禁用 / 子菜单，
+        # 并以 `performActionForItemAtIndex:` 驱动真实 target-action 链验证 id 路由；真实鼠标点击
+        # 留给人工段。探针直连内部观测口 `macos_menu_bar_is_installed()`（src 包含目录）。
+        aurora_add_verify_probe(aurora_verify_macos_menu_bar
+                "${_aurora_verify_dir}/macos_menu_bar_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_include_directories(aurora_verify_macos_menu_bar PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_compile_options(aurora_verify_macos_menu_bar PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_menu_bar)
+
+        # ---- macOS 剪贴板富格式（NSPasteboard + 惰性 data provider）----
+        # 自动段走公共门面：原始载荷 / HTML / 文件清单往返、pbcopy 互操作、惰性提供触发与
+        # 所有权丢失回调；跨应用读取留给人工段。探针直连内部观测口 `macos_clipboard_has_offer()`。
+        aurora_add_verify_probe(aurora_verify_macos_clipboard
+                "${_aurora_verify_dir}/macos_clipboard_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_include_directories(aurora_verify_macos_clipboard PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_compile_options(aurora_verify_macos_clipboard PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_clipboard)
+
+        # ---- macOS 状态栏托盘（NSStatusItem + NSMenu 模型映射）----
+        # 自动段核对状态项挂载 / 可见性 / tooltip / 图标 / 菜单映射与叶子项路由（合成
+        # target-action）、移动构造与析构收尾；真实鼠标点击菜单栏留给人工段。
+        # 观测面 `live_tray_bridges()` 与桥类在 src/aurora/app/detail/macos_tray.h，故需 src 包含目录。
+        # 气泡走通知中心，同样只对 bundle 应用可得：封装 .app 并 ad-hoc 签名，裸跑报 PENDING（退出码 3）。
+        aurora_add_verify_probe(aurora_verify_macos_tray "${_aurora_verify_dir}/macos_tray_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_include_directories(aurora_verify_macos_tray PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        target_compile_options(aurora_verify_macos_tray PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_tray)
+        if (AURORA_CODESIGN_EXECUTABLE)
+            set(_aurora_tray_probe_app "${CMAKE_CURRENT_BINARY_DIR}/AuroraMacOSTrayProbe.app")
+            add_custom_command(TARGET aurora_verify_macos_tray POST_BUILD
+                    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_aurora_tray_probe_app}/Contents/MacOS"
+                    COMMAND "${CMAKE_COMMAND}" -E copy
+                            "$<TARGET_FILE:aurora_verify_macos_tray>"
+                            "${_aurora_tray_probe_app}/Contents/MacOS/aurora_verify_macos_tray"
+                    COMMAND "${CMAKE_COMMAND}" -E copy
+                            "${_aurora_verify_dir}/macos_tray_probe_info.plist"
+                            "${_aurora_tray_probe_app}/Contents/Info.plist"
+                    COMMAND "${AURORA_CODESIGN_EXECUTABLE}" --force --deep --sign - "${_aurora_tray_probe_app}"
+                    VERBATIM)
+            aurora_log("macOS tray probe bundle: ${_aurora_tray_probe_app}")
+        else ()
+            aurora_log("codesign not found: macOS tray probe will not run from a bundle")
+        endif ()
     endif ()
 
     # ---- GLFW 光标（跨平台真实窗口）：GLFW 无光标查询 API → 自动能力核对 + 人工目视（--interactive）----
@@ -406,6 +532,21 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         # 公共 API 不暴露，仅本探针直连验收其生命周期行为（同 WASAPI 探针口径）。
         target_include_directories(aurora_verify_alsa_audio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         list(APPEND _aurora_verify_targets aurora_verify_alsa_audio)
+    endif ()
+
+    # ---- CoreAudio 音频（macOS）：AudioQueue 建队列 / 真实队列线程 / 格式契约 / 图时钟 /
+    # 出声路径真机核对。段结构与 WASAPI / ALSA 探针对齐（激活/格式契约/时钟/缓冲源与推流/
+    # suspend-resume/重路由收尾/采集观察口 + --interactive 出声与设备热切换人工段）。
+    # 采集段落「无 bundle → 未声明 NSMicrophoneUsageDescription → 拒启」这一腿（裸可执行
+    # 文件据此永不被 TCC 终止），真采集须在声明该键的 .app 壳内跑。无任何输出设备的机器
+    # （如本仓开发用的 VMware Fusion 虚拟机，CoreAudio device_count==0）自动段以退出码 2
+    # 报 ENV-UNAVAILABLE，属合法降级——与 ALSA 探针在无 ALSA 栈的 WSL 上同形态。
+    if (APPLE AND AURORA_ENABLE_AUDIO_COREAUDIO)
+        aurora_add_verify_probe(aurora_verify_coreaudio_audio "${_aurora_verify_dir}/coreaudio_audio_live_probe.cpp")
+        # 采集后端 `failed()` 与设备后端的重路由收尾都是库内部契约
+        # （src/aurora/media/audio_coreaudio.h），公共 API 不暴露，仅本探针直连验收。
+        target_include_directories(aurora_verify_coreaudio_audio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+        list(APPEND _aurora_verify_targets aurora_verify_coreaudio_audio)
     endif ()
     # ---- TLS 通道（任意有出站通路的路）：真实公网证书链 / SNI / ALPN 回选 / 记录级收发 / SPKI pin ----
     # 自动段核对能力位、缺省口径握手、证书摘要形态、ALPN 两态回报、GET 往返与 pin 反向判据；
