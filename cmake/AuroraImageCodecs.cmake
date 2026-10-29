@@ -130,12 +130,12 @@ if (AURORA_ENABLE_IMAGE_WEBP)
     # libwebp's enc layer references the SharpYUV RGB->YUV helpers unconditionally
     # (SharpYuvInit / SharpYuvConvert / SharpYuvGetConversionMatrix). Those live in
     # the top-level sharpyuv/ directory, which is NOT under src/, so the GLOB above
-    # misses them and the link fails with undefined SharpYuv*.  Add the base
-    # sharpyuv sources plus the x86 SSE2 dispatcher (WEBP_HAVE_SSE2 is defined in
-    # this build, so InitSharpYuvSSE2 is referenced by sharpyuv_dsp.c) and exclude
-    # the ARM NEON file on non-NEON targets.
+    # misses them and the link fails with undefined SharpYuv*. Keep both SIMD
+    # dispatchers: their WEBP_USE_* guards select optimized code or no-op stubs
+    # for each compiler target, including both slices of a universal build.
+    # Dropping sharpyuv_neon.c leaves InitSharpYuvNEON undefined on ARM64, where
+    # cpu.h enables NEON and the dispatcher omits the C fallback by default.
     file(GLOB _WEBP_SHARPYUV ${_WEBP_SRC}/sharpyuv/*.c)
-    list(FILTER _WEBP_SHARPYUV EXCLUDE REGEX "sharpyuv_neon\\.c$")
     list(APPEND _WEBP_C ${_WEBP_SHARPYUV})
     add_library(aurora_webp OBJECT ${_WEBP_C})
     target_include_directories(aurora_webp PRIVATE
