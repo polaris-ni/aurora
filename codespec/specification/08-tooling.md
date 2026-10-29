@@ -1068,7 +1068,7 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
 **验收标准：**
 
 - 运行时错误以**值语义**返回 `au::Result<T>`（内含 `au::Error`），**不抛异常**；错误对象自带定位与建议，使 AI 能在一次迭代内读到「哪里错了 + 怎么改」。
-- `Error` 字段：`code`（冻结对外 slug）/ `message` / `suggestion` / `docs` / `where`（`file:line`）/ `hint`，外加表驱动元数据 `code_enum` / `severity` / `category` / `retryable`。
+- `Error` 字段：`code`（冻结对外 slug）/ `message` / `suggestion` / `docs` / `where`（`file:line`）/ `hint`，外加表驱动元数据 `code_enum` / `severity` / `domain`（`ErrorDomain`，子系统归属）/ `kind`（`ErrorKind`，故障性质）/ `retryable`。
 - **机器可解析形态由 `Error::to_json()` 提供**：`{ "code", "message", "suggestion"?, "docs"?, "where"?, "hint"? }`，可选字段仅非空时输出。本库只产出修复**建议**，不自动修改用户代码。
 - 渲染前的整树静态检查走 `au::validate(const Node& root, int max_depth = 64) -> Result<bool>`；UI 树 JSON 校验走 `au::validate_ui_tree_json()`（MCP `validate_ui` 工具）。
 - **两条输出流分工**：诊断日志走 `AURORA_LOG_*`；CLI 的 JSON 诊断结果 / usage、LSP 线协议帧等「程序产品」输出走 `AURORA_LOG_RAW`，两者互不污染，保证下游管道可直接解析。

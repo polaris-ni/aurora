@@ -101,7 +101,9 @@ struct Constraints {
 
 `Error`（`core/result.h`）是结构化错误值，字段如下：
 
-`code`（冻结 slug）、`message`、`suggestion`、`docs`、`where`、`hint`、`code_enum`、`severity`、`category`、`retryable`。
+`code`（冻结 slug）、`message`、`suggestion`、`docs`、`where`、`hint`、`code_enum`、`severity`、`domain`、`kind`、`retryable`。
+
+`domain`（`ErrorDomain`）答「去哪个子系统排查」、`kind`（`ErrorKind`）答「坏了什么、因此下一步做什么」，两轴正交且互不派生；维度定义与取值清单见 [`ARCHITECTURE.md`](../ARCHITECTURE.md) §12.3。
 
 其中 `retryable` 是**声明性**标记，只回答「同一输入重跑一次是否可能换到不同结果」，**不**回答「这次该不该重试」。后者由调用方结合幂等性、退避预算与 `error_class_of()` 的归因档共同决定（网络侧的判据与算式见 [`06-app-platform.md`](06-app-platform.md) §8.8.x）；库内唯一按此合成的判定是 `net::detail::should_retry_error()`。
 
@@ -149,16 +151,18 @@ auto widget = restored.value();
 | 字段 | 说明 |
 |:---|:---|
 | `severity` | 与 `Error::severity` 对齐的 `ErrorSeverity`（默认 `Warning`） |
-| `category` | `ErrorCategory`（默认 `General`） |
+| `domain` | 与 `Error::domain` 对齐的 `ErrorDomain`（默认 `General`） |
+| `kind` | 与 `Error::kind` 对齐的 `ErrorKind`（默认 `Internal`） |
 | `message` | 人类可读描述 |
 | `where` | 位置（`file:line` 或控件类型） |
 | `code` | 机器可读 slug（可为空） |
 | `code_enum` | 与 `code` 对应的 `ErrorCode`（无码时 `GeneralUnknown`） |
-| `fix` | 可选结构化修复建议 `FixSuggestion` |
 
-`FixSuggestion`（`diagnostics.h`）含机器可读 `code` 与人类可读 `description`，只作展示——库产出修复建议，不代调用方改写代码。
+默认值恒等于零值哨兵 `ErrorCode::GeneralUnknown` 那一行的表元数据，故默认构造的 `Diagnostic` 不引入第三种 `(domain, kind)` 组合。
 
-`Diagnostic::to_json_line()` 输出 JSON 行，供工具链消费。`severity_str()` / `category_str()` 供遗留代码按字符串比较，新代码应直接用枚举比较（两个 `using` 别名已标记 `[[deprecated]]`）。
+修复指引只有一个来源：[`errors.toml`](../errors.toml) 的 `hint`，经 `explain_diagnostic()` 出码。诊断记录**不携带**独立的修复载荷——库只上报错误信息与机器码，代调用方决定怎么修会把「库知道你的代码」这一不存在的前提写进契约。
+
+`Diagnostic::to_json_line()` 输出 JSON 行，供工具链消费（键：`severity` / `domain` / `kind` / `message`，`where` / `code` 非空才输出）。`severity_str()` / `domain_str()` / `kind_str()` 供遗留代码与测试按字符串比较，新代码应直接用枚举比较（`DiagnosticSeverity` 别名仍标 `[[deprecated]]`）。
 
 ### 4.2 Diagnostics 收集器
 
@@ -166,14 +170,13 @@ auto widget = restored.value();
 
 | 方法 | 说明 |
 |:---|:---|
-| `report(message, where, code, is_degraded, fix)` | 上报一条诊断。元数据由 `code` 对应的错误码表驱动注入；`code` 为空时退化为 `Warning` / `General`，并由 `is_degraded` 决定日志级别（`degraded` → `Error`，否则 `Warn`） |
+| `report(message, where, code, is_degraded)` | 上报一条诊断。元数据由 `code` 对应的错误码表驱动注入；`code` 为空时退化为 `Warning` / `General` / `Internal`，并由 `is_degraded` 决定日志级别（`degraded` → `Error`，否则 `Warn`） |
 | `warn(message, where, code)` | 便捷：普通警告 |
 | `degraded(message, where, code)` | 便捷：降级渲染。严格模式下升级为硬失败 |
 | `take()` | 取出并清空累计诊断（测试 / 工具用） |
 | `count()` | 当前累计诊断数 |
 | `get_last_diagnostics()` | 最近诊断环形缓冲（上限 `AURORA_RECENT_CAP` = 64） |
-| `explain_diagnostic(code)` | slug → 人类可读解释，两个重载（字符串 / `ErrorCode`） |
-| `collect_fixes()` | 收集最近诊断中携带的修复建议（仅 `code` 非空者，不消费，同一 `code` 可能多次出现） |
+| `explain_diagnostic(code)` | slug → 人类可读解释，两个重载（字符串 / `ErrorCode`）；这是修复指引的唯一出口 |
 
 ### 4.3 严格模式
 
@@ -582,7 +585,8 @@ auto dump_into(const Value &v, std::string &out, DumpOptions opts = {}) -> Resul
 ### 9.8 错误码
 
 复用既有 `JsonParseError` / `json-parse-error` 作为解析失败与 DOM 访问失败的统一码位；新增三条
-（`category` 一律 `io`，元数据见 [`errors.toml`](../errors.toml)，全量清单见
+（`domain` 一律 `json`，`kind` 逐条分开：深度触顶是 `exhausted`、类型不符与不可序列化是 `invalid`，
+被解析的字节不合形状才是 `corrupt`；元数据见 [`errors.toml`](../errors.toml)，全量清单见
 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）：
 
 | enum | slug | 触发 |

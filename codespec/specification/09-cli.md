@@ -246,7 +246,9 @@ enum class EarlyView : std::uint8_t { None = 0, Help, Version, Schema };  // 封
 
 ### 6.1 目录
 
-12 条，全部 `category = validation`，声明源 `codespec/errors.toml`，全量清单见生成的
+12 条，`domain` 一律 `cli`；`kind` 按判型优先级分档——`cli-unknown-option` / `cli-unknown-subcommand` 是
+`not-found`（写法合法，只是声明表里没有这一项），`cli-conflict-violated` 是 `conflict`（两个各自合法的声明互斥），
+其余 9 条是 `invalid`（入参本身不合语法或越界）。声明源 [`errors.toml`](../errors.toml)，全量清单见生成的
 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)。
 
 | slug | 触发 | 关键参数 | 严重度 |

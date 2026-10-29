@@ -465,13 +465,13 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 每个错误同时服务于两类受众：
 
 - **进程外**（JSON / 日志 / IDE 工具 / AI 编码助手）：只认冻结 `slug`（如 `"nav-depth-exceeded"`，改名标识符也不变）与 `code_enum`。
-- **进程内**：用 `code_enum` 做类型安全分支，用 `severity` / `category` / `retryable` 等元数据做策略判断。
+- **进程内**：用 `code_enum` 做类型安全分支，用 `severity` / `domain` / `kind` / `retryable` 等元数据做策略判断。
 
 失败路径统一：可恢复失败经 `Result<T>` 沿调用链返回，不靠异常横跨业务边界。
 
 ### 12.2 类型模型
 
-`Error`（`core/result.h`）字段分两类受众：`code` / `code_enum` 供机器解析；`severity` / `category` / `retryable` 供进程内策略判断；另有 `message` / `suggestion` / `docs` / `where` / `hint` 供人与 AI 阅读。所有表驱动元数据由 [`errors.toml`](errors.toml) 经生成器产出，经 `make_error` 自动填充，无需手填。
+`Error`（`core/result.h`）字段分两类受众：`code` / `code_enum` 供机器解析；`severity` / `domain` / `kind` / `retryable` 供进程内策略判断；另有 `message` / `suggestion` / `docs` / `where` / `hint` 供人与 AI 阅读。所有表驱动元数据由 [`errors.toml`](errors.toml) 经生成器产出，经 `make_error` 自动填充，无需手填。
 
 `Result<T>` 成功持 `T`、失败持结构化 `Error`；`Result<void>` 特化用于只关心「是否出错」的接口（如 `flush` / `reload`），以 `bool` 标记成功态。
 
@@ -479,16 +479,21 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ### 12.3 分类维度
 
+「去哪找」与「坏了什么」是两件事，压进一枚枚举会让调用方靠猜分工，故拆成两枚正交维度各自成表：
+
 | 维度 | 取值 | 用途 |
 |:---|:---|:---|
-| `ErrorCategory` | `General` / `Layout` / `Widget` / `Render` / `Io` / `Validation` / `Navigation` / `Platform` / `Runtime` / `Generation` / `Diagnostic`（共 11 域） | 错误域归类，过滤与聚合 |
+| `ErrorDomain` | 29 枚：`general` / `layout` / `widget` / `render` / `navigation` / `validation` / `generation` / `runtime` / `io` / `json` / `compression` / `storage` / `i18n` / `prefs` / `icon` / `platform` / `window` / `dialog` / `clipboard` / `drag` / `menu` / `notification` / `recent-documents` / `webview` / `audio` / `cli` / `net` / `http` / `ws`（逐码声明于 [`errors.toml`](errors.toml)，全量见 [`ERROR_CATALOG.md`](ERROR_CATALOG.md)） | 子系统归属：该去哪一层排查，过滤与聚合 |
+| `ErrorKind` | 12 枚按判型优先级声明（先命中者得）：`invalid` / `not-found` / `unsupported` / `unavailable` / `denied` / `conflict` / `exhausted` / `timeout` / `cancelled` / `corrupt` / `io` / `internal` | 故障性质：坏了什么，因此下一步该做什么动作；`internal` 是兜底档 |
 | `ErrorSeverity` | `Info` / `Warning` / `Error` / `Fatal` | 严重度分级，决定上报与中断策略 |
 | `retryable` | `bool` | 声明性标记：同一输入重跑一次是否可能换到不同结果（如异步超时）。**不**回答「这次该不该重试」——后者由调用方结合幂等性、退避预算与 `error_class_of()` 归因档决定 |
+
+两轴互不派生：`domain` **不由 slug 前缀推导**（`not-restorable`、`recent-documents`、`system-drag-*` 都推不出正确归属），`kind` 也不由 `domain` 映射——同一域铺开在多种性质上，同一性质横跨多个域。两轴各占一个 JSON 键，故 `io` 这枚拼写在两处都出现（`domain = io` 指泛文件系统，`kind = io` 指底层原语调用失败）却不混淆：判读靠枚举类型与键名，不靠字符串。`ErrorKind` 的声明序同时是判型优先级，故新增条目按「先具体后兜底」落第一枚命中的性质，不靠后补者的临场判断。
 
 ### 12.4 生成管线
 
 ```text
-codespec/errors.toml          (源：slug / severity / category / 元数据 / message 模板)
+codespec/errors.toml          (源：slug / domain / kind / severity / retryable / 元数据 / message 模板)
         │  tools/gen/gen_error_codes.cpp
         ▼
   include/aurora/core/error_codes.gen.h   (ErrorCode 枚举 + 表)
@@ -497,6 +502,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 ```
 
 - **`slug` 冻结对外契约**：跨语言 / JSON / 日志只认 `slug`；`enum` 为 C++ 标识符可自由改名。
+- **条目按 `domain` 分组排列**：`ErrorCode` 的数值就是表行下标，故排序固定了进程内取值（对外契约仍是 `slug`，不受影响）。首行恒为 `general-unknown`——`ErrorCode{}` 是 `Error` / `Diagnostic` 的默认哨兵，生成器按位置硬校验而不信任排序约定。`domain` / `kind` 缺列或取值越界同样判红且不写产物。
 - **只增不删**：新增错误码追加，不重用 / 删除已发布 `slug`。
 - 三处生成物读现有文件、只写各自段，可任意顺序运行。
 

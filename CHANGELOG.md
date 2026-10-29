@@ -34,6 +34,7 @@ freeze: minor-versions-are-additive
   - 容器：`Store<S>` / `Action` / `Reducer` / `make_store` / 状态模块自由 `connect` 删除；校验、审计与撤销交给应用领域命令与既有 `UndoStack`，作用域交 `Provider`。
   - 序列化：`deserialize_props` 对可编辑模型写入其来源值、对展示属性换源为常量快照，均不产生用户输入事件。
 - **同批迁移的判据面**：删除 `utest_reactive` / `utest_signal_view` / `utest_binding` / `utest_immutable` / `utest_store` / `utest_state_registry` 六套旧用例，新增内核套件 `utest_reactor`（稳定轮次、等值去重、重复读取只留单边、菱形成熟、反馈截断），扩充 `utest_state` / `utest_computed` / `utest_effect` / `utest_subscription` / `utest_state_graph` / `utest_state_resource` 及各控件、集成、端到端用例；全部 demo、Inspector 消费面与 `aurora_api.json` 自描述示例同批改到新契约。手工用例 [`codespec/manual-test/07-state.md`](codespec/manual-test/07-state.md) 七例在真实窗口上重跑通过（值构造的静态快照与共享句柄 / 派生的刷新差异、状态写回只改受影响文本的局部重绘等）。
+- **错误分类拆成「域 + 性质」两轴，诊断不再携带修复载荷**（维度定义与取值清单见 [`codespec/ARCHITECTURE.md`](codespec/ARCHITECTURE.md) §12.3，单一声明源 [`codespec/errors.toml`](codespec/errors.toml)）。原来的单枚 `ErrorCategory` 同时声称回答「去哪一层找」和「坏了什么、该做什么」，两件事的取值集合并不重合：`validation` 一类既收「参数写错」也收「声明互斥」，而 `platform` 一类既收「机制不存在」也收「机制在但此刻不可用」——调用方拿到一枚类别只能靠猜分工，于是每个子系统各自又长出一枚私有归因枚举（网络侧的 `HttpErrorClass` 即为一例）。拆法：**① `ErrorDomain`（29 枚）**答归属，值取 `general` / `layout` / `widget` / `render` / `navigation` / `validation` / `generation` / `runtime` / `io` / `json` / `compression` / `storage` / `i18n` / `prefs` / `icon` / `platform` / `window` / `dialog` / `clipboard` / `drag` / `menu` / `notification` / `recent-documents` / `webview` / `audio` / `cli` / `net` / `http` / `ws`，**逐码显式声明、不由 slug 前缀推导**（`not-restorable` / `recent-documents` / `system-drag-*` 都 defeat 字符级规则）；**② `ErrorKind`（12 枚）**答性质，`invalid` / `not-found` / `unsupported` / `unavailable` / `denied` / `conflict` / `exhausted` / `timeout` / `cancelled` / `corrupt` / `io` / `internal`，其**声明序同时是判型优先级**（先命中者得，`internal` 兜底），边缘条目因此落在固定规则上而不是落在「谁最后加这行谁判断」；**③ 两轴互不派生**，`io` 这枚拼写在两轴都出现（域=泛文件系统，性质=底层原语调用失败）但各占一个 JSON 键，判读靠枚举类型而非字符串；**④ 修复指引收成一处**——删除 `FixSuggestion` 结构、`Diagnostic::fix` 字段、`Diagnostics::collect_fixes()` 与 `Diagnostics::report` 的第 5 枚 `fix` 形参，人类可读的「怎么改」只剩 [`errors.toml`](codespec/errors.toml) 的 `hint`（经 `Diagnostics::explain_diagnostic()` 表驱动出码），库不再代调用方决定怎么修；调用点自带的 `Error::suggestion` 保留（与 `hint` 分工明确：前者是本处的具体动作，后者是该码的通用处置）。公共面：`Error::category` → `domain` + `kind`，`Diagnostic::category` → `domain` + `kind`，自由函数 `category(ErrorCode)` → `domain(ErrorCode)` + `kind(ErrorCode)`，`to_string` 两枚同形新增，`Diagnostic::category_str()` → `domain_str()` + `kind_str()`，已废弃别名 `DiagnosticCategory` 删除；形态面：`Error::to_json()` 的 `"category"` 一键换成 `"domain"` + `"kind"` 两键，`Diagnostic::to_json_line()` 同批且不再输出 `fix_code` / `fix_desc`，Inspector 的 `/api/diagnostics` 快照逐条同步。`codespec/errors.toml` 157 条全部补齐两列并按 `domain` 重排（`ErrorCode` 的数值即表行下标，随重排变化——它只是进程内细节，冻结对外契约仍是 `slug`），首行恒 `general-unknown`（`ErrorCode{}` 是 `Error` / `Diagnostic` 的默认哨兵，生成器按位置硬校验而不信任排序约定）；生成器 `tools/gen/gen_error_codes.cpp` 三条硬校验（缺列、取值越界、首行错位）任一命中即退出码 1 且不写任何产物。三枚生成物（`include/aurora/core/error_codes.gen.h`、[`codespec/ERROR_CATALOG.md`](codespec/ERROR_CATALOG.md)、`aurora_api.json` 的 `error_codes` 段）随生成器重建，错误码总数 157 不变。判据：`utest_error_codes`（29 域与 12 性质逐枚 `to_string`、越界回 `unknown`、两轴各自至少一枚条目被使用、`static_assert(ErrorCode::GeneralUnknown == ErrorCode{})`）、`utest_result`（两轴取值与 JSON 键形状，含「`category` 键不出现」的反向断言）、`utest_diagnostics`（表驱动注入、无码退化、`fix` 键不出现、解释文本恒等于表内 `hint`）与 `utest_cli` / `utest_cli_format`（原按 `validation` 类别断言，改按 `domain = cli` + 逐码 `kind` 断言）；[`codespec/manual-test/01-core.md`](codespec/manual-test/01-core.md) `TC-CORE-006` 重跑通过。
 
 ### Added
 
@@ -97,6 +98,19 @@ freeze: minor-versions-are-additive
 | `VideoController` 读数指针 | 改只读值句柄；用户操作调用控制命令，事实通知不当作输入事件 |
 | 回调中写入后立即读取 | 后续轮才提交；当前轮读数不变，需要新值的逻辑放到对应订阅或外部命令完成点 |
 | 相同值 `set` / 复制句柄 / 右值交接 | 分别是去重提交、共享身份、保源复制；依赖旧重复通知的地方按语义选 `notify()`（原地可变载荷）或 `always_publish`（创建来源时关闭去重） |
+
+- **错误两轴的逐项映射**（只读消费方按 `slug` 对接的、以及不读类别的调用点，均无需改动）：
+
+| 旧入口或行为 | 迁移 |
+| :--- | :--- |
+| `ErrorCategory` / `Error::category` | 拆成 `ErrorDomain`（归属）+ `ErrorKind`（性质）；只问「去哪层看」的分支读 `domain`，只问「坏了什么、下一步做什么」的读 `kind`，两者都要就各自读，不再有单一枚可代理 |
+| `aurora::category(ErrorCode)` / `to_string(ErrorCategory)` | `aurora::domain(ErrorCode)` + `aurora::kind(ErrorCode)`，`to_string` 两枚同形各一 |
+| `Diagnostic::category` / `category_str()` | `domain` + `kind` / `domain_str()` + `kind_str()`；`DiagnosticCategory` 别名直接删除，不留转发 |
+| JSON / 日志消费方读 `"category"` 键 | 读 `"domain"` 与 `"kind"` 两键（`Error::to_json()`、`Diagnostic::to_json_line()`、Inspector `/api/diagnostics` 三处同批） |
+| `Diagnostics::report(msg, where, code, is_degraded, fix)` | 第 5 枚形参删除；处置文案改由 `Diagnostics::explain_diagnostic(code)` 或 `Error::hint` 取，调用点若确有「这一处具体该做什么」，仍写进 `Error::suggestion` |
+| `Diagnostic::fix` / `Diagnostics::collect_fixes()` / `fix_code` / `fix_desc` | 全链删除，无等价替代入口；需要「按码给处置」的地方查 `explain_diagnostic()`（表内 `hint`），需要成批展示的地方自行把码表渲染出去 |
+| 依赖 `ErrorCode` 数值的断言或落库值 | 数值是表行下标，随按域重排而变；改按 `slug` 或枚举名断言（对外冻结契约本就是 `slug`） |
+| 按 `category = validation` 聚合的 CLI 诊断 | 该族已归到 `domain = cli`，性质逐码分档（`cli-unknown-option` / `cli-unknown-subcommand` 为 `not-found`，`cli-conflict-violated` 为 `conflict`，其余 `invalid`） |
 
 ## [1.0.0-alpha.10] - 2026-10-25
 
